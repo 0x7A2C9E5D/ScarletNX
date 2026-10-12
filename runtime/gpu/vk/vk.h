@@ -7,6 +7,7 @@
    cmd.c       frames in flight: the command buffer being recorded, a staging ring, deferred destruction
    format.c    guest render target and texture formats -> Vulkan formats
    surface.c   render targets by guest address (a table textures share), loads from and write-backs to guest memory
+   writeback.c landing compute and graphics storage results in guest memory
    texture.c   textures from the guest's texture headers (TIC), views and samplers (TSC)
    buffer.c    vertex, index, constant and storage buffers from guest memory
    pipeline.c  translated shaders, the pipeline layout and pipelines by state
@@ -151,8 +152,12 @@ typedef struct Surf {
     VkPipelineStageFlags2 stage;
     VkAccessFlags2 access;
     u64 last_used;
-    u32 wgen;              /* render targets: bumped when drawn to */
-    u32 drawn_at;          /* render targets: g_vk_present when last drawn to */
+    u32 wgen;       /* render targets: bumped when drawn to */
+    u32 drawn_at;   /* render targets: g_vk_present when last drawn to */
+    u64 draw_gw;    /* guest-memory generation at the first draw this present or since a full replacement */
+    u64 draw_hash;  /* fallback guest-memory hash at that baseline */
+    u32 draw_wseen; /* CPU write-tracking clock at that baseline, zero after a reload */
+    int draw_has_hash;
     struct Surf* copy_dst; /* render targets: the texture last copied from it (gpu/vk/texture.c) */
     u32 copy_wgen;         /* and its wgen then */
     u32 copy_tgen;         /* and the texture's upload generation then */
@@ -164,7 +169,7 @@ typedef struct Surf {
     u64 size, hash, shash;
     u32 checked, next_check, stable, tfull;
     u32 wseen; /* write-tracking clock when it last matched memory */
-    /* copies of regions of this render target for smaller texture headers, one per size, linked through next
+    /* copies of regions of this render target for texture headers or feedback draws, one per size, linked through next
        (gpu/vk/texture.c rt_crop) */
     struct Surf* crop;
     u32 crop_gen;
@@ -190,7 +195,9 @@ void vk_surf_use(VkCommandBuffer cb, Surf* s, VkImageLayout layout, VkPipelineSt
     (VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |                                 \
      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)
 void vk_rt_flush(u64 gva);
-void vk_rt_drawn(Surf* s);                               /* a render target was drawn to (gpu/vk/render.c) */
+void vk_rt_drawn(Surf* s);      /* a render target was drawn to (gpu/vk/render.c) */
+void vk_rt_drawn_full(Surf* s); /* a full clear or blit replaced every pixel */
+int vk_rt_drawn_fresh(Surf* s); /* no guest-memory write has replaced the target since its last draw */
 int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max); /* count drawn in [lo, hi), write up to max */
 void vk_rt_reload(u64 gva);
 /* textures share the surface table */

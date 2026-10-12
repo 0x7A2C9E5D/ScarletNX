@@ -271,7 +271,7 @@ static Surf* tex_create(u64 gva, u32 w, u32 h, u32 layers, u32 d3, u32 levels, V
     return t;
 }
 
-/* a render target read through a smaller header: a copy of that region, refreshed when the target is drawn to. One
+/* a render target read through a smaller header or a feedback draw: a copy refreshed when the target is drawn to. One
    copy per size, in a list through next: one draw can hold copies of a target at two sizes (two headers, or two
    stages), so a copy isn't replaced while a draw may hold it. Copies not read for a second go; their views and image
    when the frame being recorded is done, as descriptors may still name them */
@@ -762,6 +762,7 @@ static void tex_take_drawn(Surf* t) {
         for (u32 l = 0; l < t->levels && layer < t->layers; l++) {
             u32 lw = t->w >> l ? t->w >> l : 1, lh = t->h >> l ? t->h >> l : 1;
             if (rem == lo && s->w == lw && s->h == lh) {
+                if (!vk_rt_drawn_fresh(s)) break; /* newer guest memory at this address takes precedence */
                 vk_render_end();
                 VkCommandBuffer cb = vk_cmd();
                 vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
