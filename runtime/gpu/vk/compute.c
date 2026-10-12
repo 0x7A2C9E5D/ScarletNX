@@ -283,7 +283,7 @@ static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm) {
     p->si.shared_size = (int)shm;
     const char* corpus = getenv("SNX_SHADER_CORPUS");
     if (corpus) shader_corpus_save(corpus, code, blen, 0x10000 + 80, ST_CS, &p->si, key);
-    char* src = vk_translate(code, 0x10000 + 80, ST_CS, &p->si, cs_cb_read, &p->cbr);
+    char* src = vk_glsl_post(vk_translate(code, 0x10000 + 80, ST_CS, &p->si, cs_cb_read, &p->cbr), ST_CS);
     if (!src || p->si.unsupported) {
         p->failed = 1;
         LOG("vulkan: compute %016llx not translated (%d instructions, first %s)\n", (unsigned long long)key,

@@ -377,8 +377,43 @@ Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h) {
     return best;
 }
 
+/* render targets drawn this frame or the last, for a texture made of them (gpu/vk/texture.c) */
+static Surf** g_drawn;
+static int g_ndrawn, g_capdrawn;
+void vk_rt_drawn(Surf* s) {
+    s->drawn_at = g_vk_present;
+    for (int i = 0; i < g_ndrawn; i++)
+        if (g_drawn[i] == s) return;
+    if (g_ndrawn == g_capdrawn) {
+        int cap = g_capdrawn ? g_capdrawn * 2 : 64;
+        Surf** n = realloc(g_drawn, (size_t)cap * sizeof *n);
+        if (!n) return;
+        g_drawn = n;
+        g_capdrawn = cap;
+    }
+    g_drawn[g_ndrawn++] = s;
+}
+int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max) {
+    int n = 0;
+    for (int i = 0; i < g_ndrawn;) {
+        Surf* s = g_drawn[i];
+        if (g_vk_present - s->drawn_at > 1) { /* drawn again, it comes back */
+            g_drawn[i] = g_drawn[--g_ndrawn];
+            continue;
+        }
+        if (s->gva >= lo && s->gva < hi && n < max) out[n++] = s; /* a parked target's address is out of every range */
+        i++;
+    }
+    return n;
+}
+
 /* a surface's image and views go when the frame being recorded is done (descriptors in it may name them) */
 static void surf_free(Surf* s) {
+    for (int i = 0; i < g_ndrawn; i++)
+        if (g_drawn[i] == s) {
+            g_drawn[i] = g_drawn[--g_ndrawn];
+            break;
+        }
     for (int i = 0; i < s->nsv; i++) vk_defer_image(VK_NULL_HANDLE, VK_NULL_HANDLE, s->sv[i].v, VK_NULL_HANDLE);
     vk_defer_image(s->img, s->mem, s->att, VK_NULL_HANDLE);
     free(s);

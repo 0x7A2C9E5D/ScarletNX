@@ -9,6 +9,9 @@
 /* the translator's GLSL patched for the renderer: the alpha test and the depth range through push constants. Takes
    and returns malloc'd text (NULL stays NULL) */
 char* vk_glsl_post(char* src, int stage);
+/* the shaders declare that infinities, NaNs and signed zeros are kept (SPV_KHR_float_controls), where the device
+   can: 0 when it can't (gpu/vk/device.c). On by default, for snx-shaderc */
+extern int g_vk_preserve_infnan;
 /* malloc'd SPIR-V words, or NULL with the compiler's log in err, through an on-disk cache: cache_dir/<hash>.spv, the
    hash of the GLSL text, the stage, glslang's version and the compile target, so a new compiler compiles again.
    cache_dir NULL compiles without one */
