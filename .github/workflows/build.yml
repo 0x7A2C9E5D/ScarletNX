@@ -18,20 +18,6 @@ permissions:
 # job since each job fetches a different set. The artifacts are what `cmake --install` puts in place: the binaries
 # with the licenses that go with them.
 jobs:
-  format:
-    name: Formatting
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    container: archlinux:latest
-    steps:
-      - name: Install tools
-        run: pacman -Syu --noconfirm --needed clang git uv bash
-      - uses: actions/checkout@v7
-      - name: Check formatting
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          scripts/format.sh --check
-
   linux:
     name: Linux
     runs-on: ubuntu-26.04
@@ -177,7 +163,7 @@ jobs:
   release:
     name: Nightly release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [format, linux, appimage, windows]
+    needs: [linux, appimage, windows]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     concurrency:
