@@ -287,6 +287,7 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     }
     if (!e->own && !(e->stable >= 2 && make_own(e, src))) {
         /* changing (or new) data: this frame's staging ring */
+        e->buf = VK_NULL_HANDLE; /* a failed allocation must not leave the old snapshot reusable */
         u8* p = vk_stage(len, vk_stage_align(), &e->buf, &e->off);
         if (!p) return 0;
         memcpy(p, src, len);
