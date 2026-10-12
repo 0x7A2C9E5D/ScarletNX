@@ -577,7 +577,10 @@ VkSampler vk_tex_bind_sampler(const u32* tsc, const ShTex* st, int num) {
 /* a constant buffer's bytes for this draw, reused while the guest can't have changed them */
 static int cb_get(int stage, int i, u32 sz, VkBuffer* buf, u64* off) {
     static int cache = -1;
-    if (cache < 0) cache = getenv("SNX_VK_CB_CACHE") != NULL;
+    if (cache < 0) {
+        const char* opt = getenv("SNX_VK_CB_CACHE");
+        cache = !opt || strcmp(opt, "0") != 0; /* 0 restores the original staging-copy path */
+    }
     static struct {
         u64 a, gw, frame;
         u32 sz, epoch;
