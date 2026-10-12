@@ -1,119 +1,76 @@
 # Architecture
 
-ScarletNX has two halves. The recompiler, a Python package, translates a game's ARM64 code to C once, ahead of
-time, and builds it into `<Game>_code.so`. The runtime, a C program, loads that module and stands in for everything
-the game expects from the console: the kernel, the system services and the GPU. This page describes the parts, what
-each one owns, and how a frame gets from the game to the screen. `CLAUDE.md` lists the files in each folder.
+ScarletNX AOT-compiles Switch ARM64 -> C -> `<Game>_code.so` (Windows: `.dll`). Runtime: HOS kernel/services,
+GPU exec + videodec. File map: `CLAUDE.md`.
 
-## The recompiler
+## Recompiler + module ABI
 
-`scarletnx/` reads the extracted game (`work/<Game>/exefs` and `romfs`) and writes `games/<Game>`:
+`scarletnx/` consumes `work/<Game>/{exefs,romfs}` and produces `games/<Game>`:
 
-- `nxloader.py` loads the NSO executables (main, sdk, subsdks) and the RTLD, applies their relocations, and reads
-  their symbols.
-- `codegen.py` and `a64.py` find the functions and translate each ARM64 instruction to C. Every guest function becomes
-  a C function that takes the CPU state, and the code is written in chunks the compiler can handle.
-- `module.py` writes the module's tables: the module list, and each function's guest address and C function. The
-  runtime builds the dispatch table from them at startup.
-- `toolchain.py` compiles the chunks into `<Game>_code.so` (with an object cache, so a rerun only compiles what
-  changed), and `data.py` copies the romfs and writes a default `<Game>.ini`.
+- `nxloader.py`: loads main + emulates runtime loader.
+- `codegen.py`, `a64.py`: function discovery + chunked ARM64 -> C. Guest functions take `CPU` state.
+- `module.py`: module metadata + guest addr -> C function mappings for runtime dispatch.
+- `toolchain.py`: shared-module build + object cache. `data.py`: romfs copy + default `<Game>.ini`.
 
-`scripts/recomp.py` runs all of it, builds the runtime with CMake, and translates the game's shaders ahead of time.
+`snx-recomp` (`scripts/recomp.c`): CMake runtime build -> Python recompiler -> shader prebuild.
 
-## The contract between the module and the runtime
+`runtime/abi/cpu.h`: `CPU`, indirect-branch lookup (`snx_lookup`), `RtAPI` callbacks (SVC, undefined instruction,
+BRK, system counter, FPCR, WFE). Modules receive `RtAPI` at load; no named runtime imports.
+`cpu_helpers.c` + `helpers/`: non-inline SIMD, crypto + FP conversions.
 
-`runtime/abi/` is compiled into both sides. `cpu.h` defines the guest CPU state (`CPU`: registers, flags, vector
-registers, the thread pointer registers), the dispatch lookup for indirect branches (`snx_lookup`), and `RtAPI`, the
-table of runtime functions the module calls: supervisor calls, undefined instructions, BRK, the system counter,
-FPCR changes and wait-for-event. `cpu_helpers.c`, with the topic files it includes from `helpers/`, holds the
-instructions too large to generate inline (SIMD, crypto, float conversions). `SNX_ABI` in `cpu.h` is the version of
-this contract: the runtime refuses a module built against another one, and changing any of these files means
-recompiling every game.
+`SNX_ABI` mismatch rejects the module. Changes under `runtime/abi/` require rebuilding every game.
 
-The module imports nothing from the runtime by name. Everything goes through `RtAPI`, which the runtime passes to the
-module when it loads it.
+## Runtime ownership
 
-## The runtime
+Paths below are relative to `runtime/`.
 
-Each folder below is a CMake object library (`gpu/` is several: `gpu`, `shader`, `spirv`, `vk` and `null`), and
-each has headers that declare what other folders use from it. `abi/` is not one of them: it is compiled into the game
-module.
-
-| Folder | Owns |
+| Directory | Responsibility |
 | --- | --- |
-| `core/` | Startup (`main.c`): loading the module, the settings in `<Game>.ini` (`options.c`), the guest clock (`clock.c`), the `RtAPI` functions (`rtapi.c`), crash reports (`crash.c`) |
-| `kernel/` | The Horizon kernel, emulated at a high level: handles and kernel objects, threads, synchronization and address arbitration, the SVC dispatch, the guest address space (`mem.c`) and IPC (`ipc.c`) |
-| `hle/` | The system services the game talks to over IPC, one file per family (am, set, time, acc, audio, hid, fs, vi...), and nvdrv, the GPU driver's device files |
-| `gpu/` | The GPU front end (GPFIFO, the 3D, compute, 2D, DMA and inline-to-memory engines), the shader translator (`shader/`), the renderer interface and the renderers (`vk/`, and `null/` for the headless build) |
-| `video/` | host1x: the video decoder (NVDEC, with FFmpeg's libavcodec) and the video image compositor (VIC). Each nvdrv file descriptor of `/dev/nvhost-nvdec` or `/dev/nvhost-vic` gets a channel of its own (`host1x_open`), with its registers and syncpoints, and an NVDEC channel its own decoder. NVDEC writes each picture into the surface its job names, and VIC composes from those surfaces in guest memory into the game's output surface |
-| `platform/` | The operating system layer (`plat_posix.c`, `plat_win32.c`), the window backend (`backend/sdl3.c`, or `headless.c` for tests), and the unattended-run options both backends share (`unattended.c`: scripted input, timed exit, screenshots) |
+| `core/` | Module loading, `<Game>.ini`, guest clock, `RtAPI`, crash reporting |
+| `kernel/` | HOS objects, handles, threads, sync, SVC, guest memory + IPC |
+| `hle/` | IPC service families and nvdrv device files |
+| `gpu/` | GPFIFO, Maxwell engines, shader translation, renderer interface, Vk + null |
+| `video/` | host1x: NVDEC/FFmpeg videodec + VIC compositing |
+| `platform/` | POSIX/Windows host APIs, SDL3/headless backends, scripted input, timed exit and screenshots |
 
-### Threads and memory
+### Guest exec
 
-Every guest thread is a host thread. The kernel creates it with `plat_thread`, sets up its CPU state and TLS, and calls
-the module's function for the thread's entry point. Synchronization (mutexes, condition variables, events, address
-arbitration) is implemented in the kernel with host locks and condition variables.
+Guest thread = host thread + CPU state + TLS. `core_enter` (`kernel/thread.c`) serializes exec on four guest cores,
+preserving games' unlocked per-core state. Core release: kernel blocking, sleep/yield, IPC, WFE. Waiters are
+priority-ordered; owners yield at the next SVC when a higher-priority thread waits.
 
-A console core runs one thread at a time, and games keep per-core state without locks. So a guest thread holds one of
-the four guest cores while it runs (`core_enter` in `kernel/thread.c`) and lets go of it where a console thread leaves
-the CPU: when it blocks in the kernel, sleeps or yields, makes an IPC call, or waits in WFE. A free core goes to its
-waiting thread of highest priority, and a thread holding a core gives it up at its next SVC when one of higher
-priority waits for it.
+`g_mem` (`kernel/mem.c`): single guest address-space reservation. `GP(addr)` maps guest offsets into it;
+generated code accesses guest memory directly.
 
-The guest's whole address space is one host reservation (`g_mem`, `kernel/mem.c`), so a guest address is an offset
-into it (`GP(addr)`). The generated code reads and writes guest memory directly. The kernel tracks which ranges are
-mapped, with what state and permissions, the way the console's memory manager does.
+SVC: `RtAPI.svc` -> `kernel/svc.c`. IPC: `svcSendSyncRequest` -> `kernel/ipc.c` -> session's service object in `hle/`.
 
-### System calls and services
+### GPU submit/present
 
-A `svc` instruction calls `RtAPI.svc`, which lands in `kernel/svc.c` and is dispatched by number. IPC requests
-(`svcSendSyncRequest`) go to `kernel/ipc.c`, which parses the message, finds the session's service object and calls
-its dispatch function in `hle/`. The service reads the request's arguments and buffers, and writes the reply the way
-the console would, since the game's SDK code checks the replies and asserts when one is impossible.
+1. Guest NVN builds Maxwell command buffers in guest memory. GPFIFO submit: `/dev/nvhost-gpu` ioctl ->
+   `hle/nvdrv.c` -> `gpu_submit` (`gpu/gpu.c`).
+2. `gpu_submit` copies entries to the GPU queue, preserving cross-channel submit order. Fence waits stay on the
+   GPU thread only for GPU-channel fences satisfiable by queued submissions; otherwise they block the submitter
+   (including host1x/CPU fences).
+3. The GPU thread dispatches methods to 3D (`engines.c`, `maxwell3d.c`), macros (`mme.c`), compute (`compute.c`),
+   2D (`fermi2d.c`), DMA (`dma.c`) and inline-to-memory engines. Draws reach `g_renderer` through `gpu/renderer.h`.
+   Shader translation is Maxwell SASS -> GLSL -> SPIR-V, using `gpu/shader/` and glslang.
+4. `stream_incr` publishes GPU results to guest memory before advancing syncpoints.
+5. vi (`hle/vi.c`) waits for frame fences not promised by queued submissions, then queues present. After preceding
+   submissions, the GPU thread checks remaining fences and calls `present_buffer`: vi crop from the matching RT,
+   or guest-memory conversion if no RT holds the buffer.
 
-## How a frame gets to the screen
+### Renderer coherence + lifetime
 
-1. The game's own graphics driver, NVN, is part of the recompiled module. It builds Maxwell command buffers in guest
-   memory, exactly as on the console.
-2. It submits them through nvdrv: an ioctl on `/dev/nvhost-gpu` reaches `hle/nvdrv.c`, which hands the GPFIFO entries
-   to `gpu_submit` (`gpu/gpu.c`).
-3. `gpu_submit` copies the entries and queues them for the GPU thread, which runs every channel's submissions in the
-   order they were made, and returns. A fence the submission waits for is waited for there when it belongs to a GPU
-   channel and submissions already queued will reach it, and on the submitting thread otherwise (a host1x engine's
-   fence, or one the CPU increments). The GPU thread reads the command stream and sends each method to
-   its engine: the 3D engine (`engines.c`, `maxwell3d.c`), the macro engine (`mme.c`), compute (`compute.c`), the 2D
-   blitter (`fermi2d.c`), DMA copies (`dma.c`).
-4. When the 3D engine sees a draw, it calls the active renderer through `g_renderer` (`gpu/renderer.h`). The renderer
-   reads the GPU's state registers, finds or translates the shaders (`gpu/shader/`, Maxwell SASS to GLSL, then
-   SPIR-V with glslang), finds or uploads the textures and buffers from guest memory, and draws.
-5. Syncpoint increments in the stream tell the game the GPU got past a point. They go through the renderer
-   (`stream_incr`), so that results the game can observe, like compute output, are in guest memory first.
-6. The game presents by queuing a buffer to vi (`hle/vi.c`). vi waits for any fence of the frame that no queued
-   submission promised (a host1x engine's, or one the CPU increments), queues the present for the GPU thread and
-   returns. After the submissions before it, the GPU thread checks the frame's remaining fences and calls
-   the renderer's `present_buffer`, which shows the part of the buffer vi's crop names: from the render target that
-   holds it, or converted from guest memory when no render target does.
+- **Vk** (`gpu/vk/`): requires 1.3; guest buffer mirrors + separate compute queue.
+- **null** (`gpu/null/`): headless; command exec, syncpoints + semaphores remain active.
 
-### The renderers
+Texture/buffer invalidation: host write tracking + `mem_unmap` -> `gpu_mem_changed` (`gpu/gpu.h`). The latter covers
+zeroed unmap/heap-return pages without host writes; Vk marks those ranges written at the next cache check.
 
-`Renderer` in `gpu/renderer.h` is the table of operations the front end calls: draws, clears, blits, compute
-dispatches, render target flushes and reloads, syncpoints, presenting. Each renderer fills in all of them, with a
-no-op where it has nothing to do, except `save`: it writes what should outlive the process (Vulkan's pipeline
-cache), and is NULL when the renderer keeps nothing. The frontend loop calls it every 5 seconds, so a cache that grew is
-written off the GPU thread. The runtime never shuts the renderer down. Each normal exit (the
-window closing, the game calling `svcExitProcess`, the end of an unattended run) calls `save` and then ends the
-process with the guest threads still running.
+`Renderer.save`: optional, Vk pipeline cache. Called by the frontend every 5s (off GPU thread) and on normal exit.
+Exit leaves guest threads running; no renderer teardown.
 
-The caches over guest memory (textures, buffers) learn of the game's writes from the host's write tracking. Memory
-that changes without a write, like pages the game unmaps or gives back from its heap, which read as zero afterwards,
-is reported by `kernel/mem.c` (`mem_unmap`) through `gpu_mem_changed` (`gpu/gpu.h`). The renderer sets the hook
-behind it when it starts, and Vulkan treats those ranges as written the next time a cache checks them.
+### Videodec/VIC channels
 
-- **Vulkan** (`gpu/vk/`): dynamic rendering, pipelines keyed by state, guest memory mirrored in buffers with write
-  tracking, and compute on its own queue, with results landing in guest memory before anything the game can observe.
-  It needs Vulkan 1.3, and the runtime stops with a message when the GPU or driver doesn't have it.
-- **null** (`gpu/null/`), for the headless build: draws nothing. The GPU thread still reads every command stream, so
-  syncpoints and semaphores advance as the game expects.
-
-The release's OpenGL renderer was removed on 2026-10-11, with what only it had: LSFG frame generation, the F7
-recorder, the F5 frame trace, F8 full-resolution screenshots and dynamic resolution.
+Per nvdrv fd (`/dev/nvhost-nvdec`, `/dev/nvhost-vic`): `host1x_open` channel, registers + syncpoints; NVDEC also
+owns a decoder per channel. NVDEC writes job-specified guest surfaces; VIC composites them into the game's output.
