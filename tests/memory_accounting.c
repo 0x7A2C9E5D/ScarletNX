@@ -13,6 +13,7 @@
 #define MIB (1ull << 20)
 static unsigned checks;
 static int fail_commit_after, commit_calls, decommit_calls;
+static int mapping_depth, mapping_begins, mapping_ends;
 PMutex g_klock = PMUTEX_INIT;
 u64 g_title_id, g_sysres_size;
 int g_verbose;
@@ -35,11 +36,13 @@ u8* plat_vm_reserve(u64 size) {
     return p == MAP_FAILED ? NULL : p;
 }
 int plat_vm_commit(u8* p, u64 size) {
+    if (mapping_begins) CHECK(mapping_depth == 1);
     commit_calls++;
     if (fail_commit_after && !--fail_commit_after) return -1;
     return mprotect(p, size, PROT_READ | PROT_WRITE);
 }
 void plat_vm_decommit(u8* p, u64 size) {
+    if (mapping_begins) CHECK(mapping_depth == 1);
     decommit_calls++;
     if (madvise(p, size, MADV_DONTNEED) || mprotect(p, size, PROT_NONE)) abort();
 }
@@ -47,6 +50,22 @@ void gpu_mem_changed(u64 a, u64 size) {
     (void)a;
     (void)size;
 }
+static void mapping_begin(u64 a, u64 size, int full) {
+    CHECK(a == 0 && size == 0 && full == 1);
+    CHECK(mapping_depth == 0);
+    mapping_depth++;
+    mapping_begins++;
+    /* The renderer lock must come before mem.c's lock: Vulkan may query guest mappings while landing. */
+    MemBlock b;
+    mem_query(HEAP_BASE, &b);
+}
+static void mapping_end(void) {
+    CHECK(mapping_depth == 1);
+    mapping_depth--;
+    mapping_ends++;
+}
+void (*g_gpu_mapping_begin)(u64, u64, int);
+void (*g_gpu_mapping_end)(void);
 void logf_(int level, const char* fmt, ...) {
     (void)level;
     (void)fmt;
@@ -230,6 +249,19 @@ static void test_shared_budget(void) {
         CHECK(g_heap_size == 0 && g_phys_mapped == 0);
     }
 }
+static void test_mapping_boundary(void) {
+    base_process();
+    g_gpu_mapping_begin = mapping_begin;
+    g_gpu_mapping_end = mapping_end;
+    CHECK(mem_map(ALIAS_BASE, 0x1000, MS_SHARED, PERM_RW) == 0);
+    CHECK(mem_unmap(ALIAS_BASE, 0x1000) == 0);
+    CHECK(mem_heap_set(0x2000, mem_total()) == 0);
+    CHECK(mem_heap_set(0x2000, mem_total()) == 0);
+    CHECK(mem_heap_set(0, mem_total()) == 0);
+    CHECK(mapping_begins == 4 && mapping_ends == 4 && mapping_depth == 0);
+    g_gpu_mapping_begin = NULL;
+    g_gpu_mapping_end = NULL;
+}
 int main(void) {
     mem_init();
     test_heap();
@@ -237,6 +269,7 @@ int main(void) {
     test_rollback();
     test_locked_shrink();
     test_shared_budget();
+    test_mapping_boundary();
     CHECK(munmap(g_mem, AS_SIZE) == 0);
     printf("memory accounting: %u checks passed\n", checks);
     return 0;

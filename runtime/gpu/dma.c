@@ -112,7 +112,7 @@ void dma_method(GpuChannel* ch, u32 m, u32 v) {
         free(tmp);
     } else if (src_linear && !dst_linear &&
                (dpp = bl_span_ptr(dst, dw * (remap ? bpp : 1), dh, dbh, dz, dbd, &dspan))) {
-        /* contiguous dst: copy directly, one write record at the end. Compute results over it land first */
+        /* contiguous dst: copy directly, one write record at the end. Pending shader results over it land first */
         u32 wb = dw * (remap ? bpp : 1);
         u8* buf = dma_buf(line_len);
         if (g_gpu_before_write) g_gpu_before_write(dst, dspan);
@@ -164,7 +164,7 @@ void dma_method(GpuChannel* ch, u32 m, u32 v) {
                (dpp = bl_span_ptr(dst, dw * (remap ? bpp : 1), dh, dbh, dz, dbd, &dspan)) &&
                (spp = bl_span_ptr(src, sw * (remap ? bpp : 1), sh, sbh, sz_, sbd, &sspan))) {
         u32 swb = sw * (remap ? bpp : 1), dwb = dw * (remap ? bpp : 1);
-        if (g_gpu_before_write) g_gpu_before_write(dst, dspan); /* compute results over dst land first */
+        if (g_gpu_before_write) g_gpu_before_write(dst, dspan); /* pending shader results over dst land first */
         for (u32 y = 0; y < lines; y++)
             for (u32 x = 0; x < line_len;) {
                 u32 xs = sx * (remap ? bpp : 1) + x, xd = dx * (remap ? bpp : 1) + x, n = 16 - (xs & 15),

@@ -8,3 +8,4 @@
 int g_renderer_up;
 u64 g_draws;
 volatile int g_cs_any;
+volatile int g_gfx_any;

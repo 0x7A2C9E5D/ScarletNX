@@ -200,7 +200,7 @@ static u64 mem_hash(u64 gva, u64 size) {
 }
 /* the texture's memory hashed again, and loaded again when that changed: 1 if it did */
 static int tex_rehash(Surf* t) {
-    t->gw = g_gw_gen;
+    t->gw = gpu_mem_generation();
     u64 hh = mem_hash(t->gva, t->size);
     if (hh == t->hash) return 0;
     t->hash = hh;
@@ -453,7 +453,7 @@ static Surf* tex_from_tic(const u32* tic) {
             fresh = 1;
             if (tex_rehash(t)) t->stable = 0;
         } else
-            t->gw = g_gw_gen;
+            t->gw = gpu_mem_generation();
         /* with write tracking, checked once a frame only when its memory was written */
         if (t->checked != g_vk_present) {
             u32 wnow = vk_ww_now();
@@ -505,7 +505,7 @@ static Surf* tex_from_tic(const u32* tic) {
     t->wseen = vk_ww_now();
     vk_written_since(gmem_ptr(gva, t->size), t->size, 0); /* starts tracking it */
     t->wseen = vk_ww_now();
-    t->gw = g_gw_gen;
+    t->gw = gpu_mem_generation();
     t->hash = mem_hash(gva, t->size);
     t->checked = g_vk_present;
     t->next_check = g_vk_present + 4;

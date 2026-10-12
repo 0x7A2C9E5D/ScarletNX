@@ -19,6 +19,7 @@ typedef struct {
     VkCommandPool pool;
     VkCommandBuffer cb;
     VkFence done;
+    u64 number;             /* submit number of the work guarded by done */
     int recording, pending; /* pending: submitted, fence not waited yet */
     /* staging ring */
     VkBuffer stage;
@@ -127,6 +128,7 @@ static void frame_wait(Frame* f) {
     VK_OK(vkWaitForFences(g_vk.dev, 1, &f->done, VK_TRUE, UINT64_MAX));
     VK_OK(vkResetFences(g_vk.dev, 1, &f->done));
     f->pending = 0;
+    vk_buf_frame_done(f->number);
     dead_free(f);
 }
 
@@ -159,14 +161,18 @@ VkCommandBuffer vk_cmd(void) {
     return f->cb;
 }
 
-u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off) {
+u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem) {
     vk_cmd(); /* the ring is only reused once this frame's previous work is done */
     Frame* f = &g_fr[g_cur];
     if (align < 16) align = 16;
     u64 at = (f->stage_used + align - 1) & ~(align - 1);
     if (!f->stage || at + size > f->stage_cap) {
         /* a bigger buffer; the old one stays alive until this frame's work is done */
-        if (f->stage) dead_push(f, (Dead){.buf = f->stage, .mem = f->stage_mem});
+        if (f->stage) {
+            /* The old allocation remains in use by recorded commands but is no longer flushed at submit. */
+            vmaFlushAllocation(g_vk.vma, f->stage_mem, 0, VK_WHOLE_SIZE);
+            dead_push(f, (Dead){.buf = f->stage, .mem = f->stage_mem});
+        }
         u64 cap = f->stage_cap ? f->stage_cap * 2 : STAGE_MIN;
         while (cap < size) cap *= 2;
         VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -192,13 +198,16 @@ u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off) {
     f->stage_used = at + size;
     *buf = f->stage;
     *off = at;
+    if (mem) *mem = f->stage_mem;
     return f->stage_ptr + at;
 }
+u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off) { return vk_stage_output(size, align, buf, off, NULL); }
 
 void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal) {
     vk_render_end();
     Frame* f = &g_fr[g_cur];
     vk_cmd(); /* a submit with nothing recorded still has to wait and signal */
+    vk_buf_host_barrier(f->cb, g_frame_no);
     /* staging memory may not be host coherent: the host writes are made visible to the GPU here */
     if (f->stage_mem) vmaFlushAllocation(g_vk.vma, f->stage_mem, 0, VK_WHOLE_SIZE);
     VK_OK(vkEndCommandBuffer(f->cb));
@@ -228,13 +237,14 @@ void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore s
     VK_OK(r);
     f->recording = 0;
     f->pending = r == VK_SUCCESS; /* a failed submit never signals the fence: nothing to wait for */
+    f->number = g_frame_no;
     g_cur = (g_cur + 1) % VK_FRAMES;
     g_frame_no++;
 }
 
 void vk_finish(void) {
     vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
-    for (int i = 0; i < VK_FRAMES; i++) frame_wait(&g_fr[i]);
+    for (int i = 0; i < VK_FRAMES; i++) frame_wait(&g_fr[(g_cur + i) % VK_FRAMES]);
 }
 
 u64 vk_frame_number(void) { return g_frame_no; }

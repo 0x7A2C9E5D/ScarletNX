@@ -129,15 +129,19 @@ static u64* gmmu_l2(u32 i) {
     return t;
 }
 static void gmmu_map(u64 gva, u64 cpu, u64 size) {
+    if (size && g_gpu_mapping_begin) g_gpu_mapping_begin(gva, size, 0);
     for (u64 o = 0; o < size; o += 0x1000) {
         u64 p = (gva + o) >> GPAGE_BITS;
         u32 i = (u32)(p >> 12) & (GL1 - 1), j = (u32)p & 0xFFF;
         __atomic_store_n(&gmmu_l2(i)[j], (cpu + o) | 1, __ATOMIC_RELAXED);
     }
+    if (size) gpu_mem_written(gva, size); /* an existing buffer cache may describe the old mapping */
+    if (size && g_gpu_mapping_end) g_gpu_mapping_end();
 }
 /* clears the pages of [gva, gva+size). With own set, only the pages still pointing where a mapping of cpu put them:
    unmapping a buffer leaves alone what was mapped over it since */
 static void gmmu_unmap(u64 gva, u64 size, int own, u64 cpu) {
+    if (size && g_gpu_mapping_begin) g_gpu_mapping_begin(gva, size, 0);
     for (u64 o = 0; o < size; o += 0x1000) {
         u64 p = (gva + o) >> GPAGE_BITS;
         u32 i = (u32)(p >> 12) & (GL1 - 1), j = (u32)p & 0xFFF;
@@ -146,6 +150,8 @@ static void gmmu_unmap(u64 gva, u64 size, int own, u64 cpu) {
         if (!own || __atomic_load_n(&t[j], __ATOMIC_RELAXED) == ((cpu + o) | 1))
             __atomic_store_n(&t[j], 0, __ATOMIC_RELAXED);
     }
+    if (size) gpu_mem_written(gva, size);
+    if (size && g_gpu_mapping_end) g_gpu_mapping_end();
 }
 static GMap* gmap_add(void) {
     if (nv.ngmaps == nv.capgmaps) {

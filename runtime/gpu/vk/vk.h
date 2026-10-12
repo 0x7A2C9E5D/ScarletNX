@@ -75,6 +75,8 @@ VkCommandBuffer vk_cmd(void); /* the current frame's command buffer, begun on fi
 /* size bytes of the current frame's staging memory (host visible, flushed when the frame is submitted), valid until
    that frame's work is done */
 u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off);
+/* As vk_stage, with the allocation for GPU-written data that must be invalidated after its frame fence. */
+u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem);
 /* ends and submits the current frame's commands, waiting for wait (at wait_stage) and signaling signal, then starts
    the next frame. Either semaphore may be VK_NULL_HANDLE */
 void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal);
@@ -154,7 +156,7 @@ typedef struct Surf {
     struct Surf* copy_dst; /* render targets: the texture last copied from it (gpu/vk/texture.c) */
     u32 copy_wgen;         /* and its wgen then */
     u32 mem_wgen;          /* render targets: wgen when guest memory last held the same (written back or loaded) */
-    u64 gw; /* g_gw_gen when it last matched guest memory (textures) or was bound to draw (render targets) */
+    u64 gw; /* gpu_mem_generation() when it last matched guest memory (textures) or was bound to draw (render targets) */
     /* textures: views by type and swizzle, and the change check (gpu/vk/texture.c) */
     SurfView sv[6];
     int nsv;
@@ -212,7 +214,35 @@ int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off);
 int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off); /* no delayed content checks */
 /* a copy of len bytes made now (data that changes within a frame), or of zeros when gva is 0 */
 int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off);
+int vk_buf_copy_writable(u64 gva, u32 len, VkBuffer* buf, u64* off);
+typedef struct {
+    u64 addr;
+    u32 size;
+    int writable, aliased;
+    VkBuffer buf;
+    u64 off, range;
+} VkDrawGbuf;
+typedef struct {
+    VkDrawGbuf b[2][16];
+    int n[2];
+    VkBuffer map_buf[2];
+    u64 map_off[2], map_size[2];
+} VkDrawStorage;
+int vk_buf_draw_has_alias(const VkDrawStorage* draw);
+int vk_buf_draw_prepare(VkDrawStorage* draw);
+void vk_buf_writable_abort(void);
+void vk_buf_writable_commit(void);
+void vk_buf_mem_need(u64 gva, u64 len);
+void vk_buf_mem_need_map(u64 gva, u64 len);
+void vk_buf_before_write(u64 gva, u64 len);
+void vk_buf_land(void);
+void vk_buf_land_syncwait(void);
+void vk_buf_land_map(void);
+void vk_buf_frame_done(u64 frame);
+void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame);
 void vk_buf_frame(void);
+/* Land GPU-written bytes only where guest memory still matches the shader's input snapshot. */
+void vk_write_changed(u64 addr, const u8* res, const u8* org, u32 size);
 /* 1 if [host, host+len) was written since the write-tracking clock read `since`, 0 if not, -1 when write tracking
    can't tell (no host pointer, or not available): then check the contents */
 int vk_written_since(const u8* host, u64 len, u32 since);

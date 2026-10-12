@@ -591,8 +591,9 @@ static int cb_get(int stage, int i, u32 sz, VkBuffer* buf, u64* off) {
         u64 off;
     } c[5][18];
     u64 a = g_vk_cb[stage][i];
-    /* pending compute results there land first: the checks below only see memory */
+    /* Pending shader results there land first: the checks below only see guest memory. */
     if (g_cs_any && a) vk_compute_mem_need(a, sz);
+    if (g_gfx_any && a) vk_buf_mem_need(a, sz);
     if (a && c[stage][i].a == a && c[stage][i].epoch == g_vk_epoch && c[stage][i].frame == vk_frame_number() &&
         c[stage][i].sz >= sz && !gpu_mem_dirty_since(c[stage][i].gw, a, sz)) {
         *buf = c[stage][i].buf;
@@ -601,7 +602,7 @@ static int cb_get(int stage, int i, u32 sz, VkBuffer* buf, u64* off) {
     }
     if (!(cache && a ? vk_buf_get_strict(a, sz, buf, off) : vk_buf_copy(a, sz, buf, off))) return 0;
     c[stage][i].a = a;
-    c[stage][i].gw = g_gw_gen;
+    c[stage][i].gw = gpu_mem_generation();
     c[stage][i].frame = vk_frame_number();
     c[stage][i].sz = sz;
     c[stage][i].epoch = g_vk_epoch;
@@ -631,9 +632,9 @@ static int frame_consts(VkBuffer* buf, u64* off) {
 }
 
 typedef struct {
-    VkWriteDescriptorSet w[SNX_VKB_FMT + 1];
-    VkDescriptorBufferInfo bi[SNX_VKB_FMT + 1];
-    VkDescriptorImageInfo ii[SNX_VKB_FMT + 1];
+    VkWriteDescriptorSet w[SNX_VKB_SMAP + 1];
+    VkDescriptorBufferInfo bi[SNX_VKB_SMAP + 1];
+    VkDescriptorImageInfo ii[SNX_VKB_SMAP + 1];
     u32 n;
 } DescWrites;
 static void dw_buffer(DescWrites* d, VkDescriptorSet set, u32 binding, VkDescriptorType type, VkBuffer b, u64 off,
@@ -653,11 +654,36 @@ static int is_target(Surf* s, Surf** rt, Surf* zt, u32 n) {
         if (rt[i] == s) return 1;
     return 0;
 }
+static void draw_storage_read(VkDrawStorage* draw, VkSh* vs, VkSh* fs) {
+    VkSh* sh[2] = {vs, fs};
+    memset(draw, 0, sizeof *draw);
+    for (int s = 0; s < 2; s++) {
+        if (!sh[s]) continue;
+        int stage = s ? 4 : 0;
+        u64 cb0 = g_vk_cb[stage][0];
+        draw->n[s] = sh[s]->si.ngbuf < 16 ? sh[s]->si.ngbuf : 16;
+        if (cb0 && draw->n[s]) vk_buf_mem_need(cb0, 0x610);
+        for (int i = 0; i < draw->n[s]; i++) {
+            VkDrawGbuf* b = &draw->b[s][i];
+            b->size = 16;
+            if (cb0) {
+                u32 v[3];
+                gmem_read(cb0 + sh[s]->si.gbuf_cbuf_off[i], v, 12);
+                b->addr = ((u64)v[1] << 32) | v[0];
+                b->size = v[2];
+            }
+            if (!b->size) b->size = 16;
+            if (b->size > (16u << 20)) b->size = 16u << 20;
+            b->size = (b->size + 3) & ~3u;
+            b->writable = (sh[s]->si.gbuf_wmask >> i) & 1;
+        }
+    }
+}
 
 /* a stage's descriptor set: constant buffers, storage buffers, textures. *zt_ro is set when it samples the depth
    target, which the pass then binds read-only. res: textures fs_get_keyed resolved for this stage, or NULL */
 static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro,
-                                 TexRes* res) {
+                                 TexRes* res, const VkDrawStorage* draw) {
     u32* r = ch->r3d;
     VkDescriptorSet set = vk_desc_alloc(g_vk_dslayout[shader_vk_set(stage)]);
     if (!set) return VK_NULL_HANDLE;
@@ -675,30 +701,22 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         if (!cb_get(stage, i, sz, &b, &o)) return VK_NULL_HANDLE;
         dw_buffer(&d, set, SNX_VKB_CB + i, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, b, o, sz);
     }
-    if (s->si.gbuf_wmask) {
-        LOG_LIMIT(1, "vulkan: a draw's shader writes global memory, which stays on the GPU (not done yet)\n");
-    }
-    u64 cb0 = g_vk_cb[stage][0];
     for (int i = 0; i < s->si.ngbuf && i < 16; i++) {
-        u64 addr = 0;
-        u32 size = 16;
-        if (cb0) {
-            u32 v[3];
-            gmem_read(cb0 + s->si.gbuf_cbuf_off[i], v, 12);
-            addr = ((u64)v[1] << 32) | v[0];
-            size = v[2];
-        }
-        if (!size) size = 16;
-        if (size > (16u << 20)) size = 16u << 20;
-        size = (size + 3) & ~3u;
+        const VkDrawGbuf* gb = &draw->b[stage ? 1 : 0][i];
+        u64 addr = gb->addr;
+        u32 size = gb->size;
         VkBuffer b;
         u64 o;
-        /* written ones get a copy of their own (the writes stay on the GPU) */
-        int ok =
-            addr && !((s->si.gbuf_wmask >> i) & 1) ? vk_buf_get(addr, size, &b, &o) : vk_buf_copy(addr, size, &b, &o);
+        int ok = gb->aliased            ? (b = gb->buf, o = gb->off, 1)
+                 : addr && gb->writable ? vk_buf_copy_writable(addr, size, &b, &o)
+                 : addr                 ? vk_buf_get(addr, size, &b, &o)
+                                        : vk_buf_copy(0, size, &b, &o);
         if (!ok) return VK_NULL_HANDLE;
-        dw_buffer(&d, set, SNX_VKB_SSBO + i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, b, o, size);
+        dw_buffer(&d, set, SNX_VKB_SSBO + i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, b, o, gb->aliased ? gb->range : size);
     }
+    if (s->si.ngbuf)
+        dw_buffer(&d, set, SNX_VKB_SMAP, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, draw->map_buf[stage ? 1 : 0],
+                  draw->map_off[stage ? 1 : 0], draw->map_size[stage ? 1 : 0]);
     VkBuffer cb;
     u64 co;
     if (stage == 4 && frame_consts(&cb, &co))
@@ -758,6 +776,13 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
                     u32 instances) {
     u32* r = ch->r3d;
     if (!count || !instances) return;
+    u32 initial_first = first, initial_count = count;
+    int retries = 0;
+retry:
+    vk_buf_writable_abort();
+    first = initial_first;
+    count = initial_count;
+    u64 setup_frame = vk_frame_number();
     /* shaders: VertexB always runs (after VertexA when that is on), the fragment stage when enabled */
     u64 code = ((u64)r[0x582] << 32) | r[0x583];
     u32 attr_int = 0, attr_sint = 0;
@@ -982,9 +1007,26 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
     }
 
     /* descriptor sets (may record uploads and barriers, so before the pass opens) */
+    VkDrawStorage storage;
+    draw_storage_read(&storage, vs, fs);
+    int alias = storage.n[0] || storage.n[1] ? vk_buf_draw_has_alias(&storage) : 0;
+    if (alias < 0) {
+        g_vk_skipped++;
+        return;
+    }
+    if (alias) {
+        if (g_cs_any) vk_compute_land();
+        vk_buf_land(); /* a page atlas starts from the completed output of earlier draws */
+        if (setup_frame != vk_frame_number() && ++retries < 4) goto retry;
+        draw_storage_read(&storage, vs, fs); /* landing may have changed storage descriptors in c0 */
+    }
+    if ((storage.n[0] || storage.n[1]) && !vk_buf_draw_prepare(&storage)) {
+        g_vk_skipped++;
+        return;
+    }
     int zt_ro = 0;
-    VkDescriptorSet vset = stage_set(ch, 0, vs, rt, zt, n, &zt_ro, NULL);
-    VkDescriptorSet fset = fs ? stage_set(ch, 4, fs, rt, zt, n, &zt_ro, fres) : VK_NULL_HANDLE;
+    VkDescriptorSet vset = stage_set(ch, 0, vs, rt, zt, n, &zt_ro, NULL, &storage);
+    VkDescriptorSet fset = fs ? stage_set(ch, 4, fs, rt, zt, n, &zt_ro, fres, &storage) : VK_NULL_HANDLE;
     if (!vset || (fs && !fset)) {
         g_vk_skipped++;
         return;
@@ -1071,6 +1113,13 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
 
     VkPipeline pipe = vk_pipeline_get(&k);
     if (!pipe) {
+        g_vk_skipped++;
+        return;
+    }
+    /* A guest read while preparing descriptors can land an older graphics output and submit this frame. Rebuild
+       descriptors and staged inputs in the new frame before recording the draw. */
+    if (setup_frame != vk_frame_number()) {
+        if (++retries < 4) goto retry;
         g_vk_skipped++;
         return;
     }
@@ -1203,6 +1252,7 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
                          base_instance);
     } else
         vkCmdDraw(cb, count, instances, first, base_instance);
+    vk_buf_writable_commit();
     targets_written();
     g_vk_drawn++;
 }
