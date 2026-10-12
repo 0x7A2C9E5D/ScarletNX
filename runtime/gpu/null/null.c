@@ -87,6 +87,7 @@ const Renderer null_renderer = {
     .rt_reload = null_gva,
     .dispatch = null_dispatch,
     .cs_mem_need = null_cs_mem_need,
+    .gfx_mem_need = null_cs_mem_need,
     .before_syncwait = null_void,
     .stream_incr = syncpt_incr,
     .present_buffer = null_present_buffer,

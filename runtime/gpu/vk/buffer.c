@@ -30,10 +30,178 @@ typedef struct Vb {
 static Vb* g_vbh[VBH];
 /* Optional copy telemetry. Counters are updated under vk_lock. */
 static u64 g_copy_stage, g_copy_owned, g_copy_uncached, g_copy_zero, g_copy_calls, g_copy_peak, g_read_bound;
+static u64 g_wb_outputs, g_wb_bytes, g_wb_waits, g_wb_wait_ns, g_wb_reuses;
 static int g_copy_stats = -1;
 static int copy_stats_on(void) {
     if (g_copy_stats < 0) g_copy_stats = getenv("SNX_VK_BUFFER_STATS") != NULL;
     return g_copy_stats;
+}
+static void copy_note(u64 gva, u64 len) {
+    if (!copy_stats_on()) return;
+    g_copy_uncached += len;
+    g_copy_calls++;
+    if (len > g_copy_peak) g_copy_peak = len;
+    if (!gva) g_copy_zero += len;
+}
+
+typedef struct GfxOut {
+    u64 addr, frame;
+    u32 size;
+    VkBuffer buf;
+    u64 off;
+    VmaAllocation mem;
+    u8* ptr;
+    u8* org;
+    struct GfxOut* next;
+} GfxOut;
+static GfxOut *g_prep, *g_prep_tail, *g_out, *g_out_tail;
+/* Suppress recursive lookups by the landing thread. Other readers still take vk_lock and wait for landing. */
+static _Thread_local int g_out_landing;
+
+void vk_buf_writable_abort(void) {
+    while (g_prep) {
+        GfxOut* o = g_prep;
+        g_prep = o->next;
+        free(o->org);
+        free(o);
+    }
+    g_prep_tail = NULL;
+}
+void vk_buf_writable_commit(void) {
+    if (!g_prep) return;
+    if (g_out_tail)
+        g_out_tail->next = g_prep;
+    else
+        g_out = g_prep;
+    g_out_tail = g_prep_tail;
+    g_prep = g_prep_tail = NULL;
+    g_gfx_any = 1;
+}
+/* The frame fence has signaled. Its stage allocations still exist here; cmd.c frees them only after this call. */
+void vk_buf_frame_done(u64 frame) {
+    GfxOut *done = NULL, *done_tail = NULL;
+    for (GfxOut** pp = &g_out; *pp;) {
+        GfxOut* o = *pp;
+        if (o->frame != frame) {
+            pp = &o->next;
+            continue;
+        }
+        *pp = o->next;
+        o->next = NULL;
+        if (done_tail)
+            done_tail->next = o;
+        else
+            done = o;
+        done_tail = o;
+    }
+    g_out_tail = NULL;
+    for (GfxOut* o = g_out; o; o = o->next) g_out_tail = o;
+    g_gfx_any = g_out != NULL || done != NULL;
+    VmaAllocation invalidated = VK_NULL_HANDLE;
+    g_out_landing++;
+    while (done) {
+        GfxOut* o = done;
+        done = o->next;
+        if (o->mem != invalidated) {
+            if (!VK_OK(vmaInvalidateAllocation(g_vk.vma, o->mem, 0, VK_WHOLE_SIZE)))
+                fatal("Could not invalidate a graphics storage buffer after its frame completed");
+            invalidated = o->mem;
+        }
+        vk_write_changed(o->addr, o->ptr, o->org, o->size);
+        if (copy_stats_on()) {
+            g_wb_outputs++;
+            g_wb_bytes += o->size;
+        }
+        free(o->org);
+        free(o);
+    }
+    g_out_landing--;
+    g_gfx_any = g_out != NULL;
+}
+void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame) {
+    for (GfxOut* o = g_out; o; o = o->next)
+        if (o->frame == frame) {
+            VkMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                  .srcStageMask =
+                                      VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                                  .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                                  .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+                                  .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT};
+            VkDependencyInfo d = {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &b};
+            vkCmdPipelineBarrier2(cb, &d);
+            return;
+        }
+}
+void vk_buf_land(void) {
+    if (!g_gfx_any || g_out_landing) return;
+    vk_lock();
+    if (g_gfx_any && !g_out_landing) {
+        u64 t = copy_stats_on() ? plat_ns() : 0;
+        vk_finish();
+        if (t) {
+            g_wb_waits++;
+            g_wb_wait_ns += plat_ns() - t;
+        }
+    }
+    vk_unlock();
+}
+void vk_buf_mem_need(u64 gva, u64 len) {
+    if (!g_gfx_any || g_out_landing || !len) return;
+    vk_lock();
+    for (GfxOut* o = g_out; o; o = o->next)
+        if (gva < o->addr + o->size && o->addr < gva + len) {
+            u64 t = copy_stats_on() ? plat_ns() : 0;
+            vk_finish();
+            if (t) {
+                g_wb_waits++;
+                g_wb_wait_ns += plat_ns() - t;
+            }
+            break;
+        }
+    vk_unlock();
+}
+void vk_buf_before_write(u64 gva, u64 len) {
+    if (len)
+        vk_buf_mem_need(gva, len);
+    else
+        vk_buf_land();
+}
+/* A draw can consume an earlier draw's storage result without making a round trip through guest RAM. The guest
+   input must still match the first draw's snapshot, and the frame must own the output buffer until this draw ends. */
+static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off) {
+    if (!g_gfx_any || g_out_landing || !gva || !len) return 0;
+    if (g_cs_any) vk_compute_mem_need(gva, len);
+    for (GfxOut* o = g_out; o; o = o->next) {
+        if (gva >= o->addr + o->size || o->addr >= gva + len) continue;
+        u64 delta = gva - o->addr;
+        u8* host = gva >= o->addr && len <= o->size - delta ? gmem_ptr_untracked(gva, len) : NULL;
+        if (o->frame == vk_frame_number() && host && !memcmp(host, o->org + delta, len) &&
+            !((o->off + delta) & (vk_stage_align() - 1))) {
+            static u64 barrier_frame = ~0ull, barrier_draw = ~0ull;
+            if (barrier_frame != vk_frame_number() || barrier_draw != g_vk_drawn) {
+                vk_render_end();
+                VkMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                      .srcStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                                                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                                      .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                                      .dstStageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+                                      .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
+                VkDependencyInfo d = {
+                    .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &b};
+                vkCmdPipelineBarrier2(vk_cmd(), &d);
+                barrier_frame = vk_frame_number();
+                barrier_draw = g_vk_drawn;
+            }
+            *buf = o->buf;
+            *off = o->off + delta;
+            if (copy_stats_on()) g_wb_reuses++;
+            return 1;
+        }
+        vk_buf_land();
+        return 0;
+    }
+    return 0;
 }
 
 /* written-page tracking (plat_ww_scan): a generation per 4K page of guest memory, bumped when a scan finds it
@@ -160,6 +328,7 @@ static const u8* guest_bytes(u64 gva, u64 len) {
 }
 
 int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off) {
+    if (gva && gfx_gpu_src(gva, len, buf, off)) return 1;
     u8* p = vk_stage(len ? len : 16, vk_stage_align(), buf, off);
     if (!p) return 0;
     if (!gva)
@@ -169,12 +338,49 @@ int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off) {
         if (!src) return 0;
         memcpy(p, src, len);
     }
-    if (copy_stats_on()) {
-        g_copy_uncached += len;
-        g_copy_calls++;
-        if (len > g_copy_peak) g_copy_peak = len;
-        if (!gva) g_copy_zero += len;
+    copy_note(gva, len);
+    return 1;
+}
+
+/* Each writable binding keeps its original bytes until its draw's frame completes. The guest can keep writing RAM:
+   vk_write_changed resolves those writes against the GPU result at the fence. */
+int vk_buf_copy_writable(u64 gva, u32 len, VkBuffer* buf, u64* off) {
+    if (!gva) return vk_buf_copy(0, len, buf, off);
+    if (gfx_gpu_src(gva, len, buf, off)) return 1;
+    GfxOut* o = calloc(1, sizeof *o);
+    if (!o) return 0;
+    o->org = malloc(len);
+    if (!o->org) {
+        free(o);
+        return 0;
     }
+    const u8* src = guest_bytes(gva, len);
+    if (!src) {
+        free(o->org);
+        free(o);
+        return 0;
+    }
+    memcpy(o->org, src, len);
+    u64 align = vk_stage_align();
+    if (align < g_vk.props.limits.nonCoherentAtomSize) align = g_vk.props.limits.nonCoherentAtomSize;
+    o->ptr = vk_stage_output(len, align, buf, off, &o->mem);
+    if (!o->ptr) {
+        free(o->org);
+        free(o);
+        return 0;
+    }
+    memcpy(o->ptr, o->org, len);
+    o->addr = gva;
+    o->size = len;
+    o->buf = *buf;
+    o->off = *off;
+    o->frame = vk_frame_number();
+    if (g_prep_tail)
+        g_prep_tail->next = o;
+    else
+        g_prep = o;
+    g_prep_tail = o;
+    copy_note(gva, len);
     return 1;
 }
 
@@ -216,6 +422,7 @@ static int make_own(Vb* e, const u8* src) {
 
 static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     if (!len) return 0;
+    if (gfx_gpu_src(gva, len, buf, off)) return 1;
     if (vk_compute_gpu_src(gva, len, buf, off)) return 1; /* a compute result that hasn't landed yet */
     /* one that covers the range only in part lands first (its write shows in gpu_mem_dirty_since below): the cached
        copy would otherwise be used without it */
@@ -311,11 +518,14 @@ int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_ge
 void vk_buf_frame(void) {
     if (g_vk_present % 60 || g_vk_present < 600) return;
     if (copy_stats_on() && g_vk_present % 600 == 0) {
-        LOG("vulkan: buffer bytes over 600 presents: uncached=%llu zero=%llu calls=%llu peak=%llu staged=%llu owned=%llu bound=%llu\n",
+        LOG("vulkan: buffer bytes over 600 presents: uncached=%llu zero=%llu calls=%llu peak=%llu staged=%llu owned=%llu bound=%llu writeback=%llu/%llu waits=%llu/%llums reused=%llu\n",
             (unsigned long long)g_copy_uncached, (unsigned long long)g_copy_zero, (unsigned long long)g_copy_calls,
             (unsigned long long)g_copy_peak, (unsigned long long)g_copy_stage, (unsigned long long)g_copy_owned,
-            (unsigned long long)g_read_bound);
+            (unsigned long long)g_read_bound, (unsigned long long)g_wb_outputs, (unsigned long long)g_wb_bytes,
+            (unsigned long long)g_wb_waits, (unsigned long long)(g_wb_wait_ns / 1000000),
+            (unsigned long long)g_wb_reuses);
         g_copy_uncached = g_copy_stage = g_copy_owned = g_copy_zero = g_copy_calls = g_copy_peak = g_read_bound = 0;
+        g_wb_outputs = g_wb_bytes = g_wb_waits = g_wb_wait_ns = g_wb_reuses = 0;
     }
     for (int k = 0; k < VBH; k++)
         for (Vb** pp = &g_vbh[k]; *pp;) {

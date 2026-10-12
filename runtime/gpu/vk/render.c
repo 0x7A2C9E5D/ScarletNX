@@ -672,9 +672,6 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         if (!cb_get(stage, i, sz, &b, &o)) return VK_NULL_HANDLE;
         dw_buffer(&d, set, SNX_VKB_CB + i, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, b, o, sz);
     }
-    if (s->si.gbuf_wmask) {
-        LOG_LIMIT(1, "vulkan: a draw's shader writes global memory, which stays on the GPU (not done yet)\n");
-    }
     u64 cb0 = g_vk_cb[stage][0];
     for (int i = 0; i < s->si.ngbuf && i < 16; i++) {
         u64 addr = 0;
@@ -690,9 +687,10 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         size = (size + 3) & ~3u;
         VkBuffer b;
         u64 o;
-        /* written ones get a copy of their own (the writes stay on the GPU) */
-        int ok =
-            addr && !((s->si.gbuf_wmask >> i) & 1) ? vk_buf_get(addr, size, &b, &o) : vk_buf_copy(addr, size, &b, &o);
+        int writable = (s->si.gbuf_wmask >> i) & 1;
+        int ok = addr && writable    ? vk_buf_copy_writable(addr, size, &b, &o)
+                 : addr && !writable ? vk_buf_get(addr, size, &b, &o)
+                                     : vk_buf_copy(0, size, &b, &o);
         if (!ok) return VK_NULL_HANDLE;
         dw_buffer(&d, set, SNX_VKB_SSBO + i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, b, o, size);
     }
@@ -755,6 +753,13 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
                     u32 instances) {
     u32* r = ch->r3d;
     if (!count || !instances) return;
+    u32 initial_first = first, initial_count = count;
+    int retries = 0;
+retry:
+    vk_buf_writable_abort();
+    first = initial_first;
+    count = initial_count;
+    u64 setup_frame = vk_frame_number();
     /* shaders: VertexB always runs (after VertexA when that is on), the fragment stage when enabled */
     u64 code = ((u64)r[0x582] << 32) | r[0x583];
     u32 attr_int = 0, attr_sint = 0;
@@ -1071,6 +1076,13 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
         g_vk_skipped++;
         return;
     }
+    /* A guest read while preparing descriptors can land an older graphics output and submit this frame. Rebuild
+       descriptors and staged inputs in the new frame before recording the draw. */
+    if (setup_frame != vk_frame_number()) {
+        if (++retries < 4) goto retry;
+        g_vk_skipped++;
+        return;
+    }
     if (!render_begin(rt, zt, n, zt_ro)) return;
     VkCommandBuffer cb = vk_cmd();
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
@@ -1200,6 +1212,7 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
                          base_instance);
     } else
         vkCmdDraw(cb, count, instances, first, base_instance);
+    vk_buf_writable_commit();
     targets_written();
     g_vk_drawn++;
 }

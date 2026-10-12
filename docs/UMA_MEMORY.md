@@ -21,13 +21,17 @@ Importing `g_mem` directly would let the GPU see later CPU writes, and a shader 
 guest's synchronization point. A direct import must therefore own and pin the imported pages, intercept writes to
 them or use copy-on-write, and wait for GPU completion before remapping or releasing them.
 
-Graphics storage writes need a coherent path even without import. A graphics output must retain its input bytes,
-record its destination range and GPU buffer, and make shader writes available to host reads. On an overlapping guest
-read, guest write, mapping change, or stream synchronization point, it must wait for the output, invalidate noncoherent
-memory, and land only bytes the shader changed where the guest still holds the input value. Overlapping GPU draws must
-reuse the GPU result with a storage barrier or land it before taking a new guest snapshot. Frame-ring reuse must not
-destroy pending output buffers. The compute path already uses this changed-byte rule; `vk_write_changed` is shared with
-the graphics implementation.
+Graphics storage writes now retain each draw's input bytes, destination range, and GPU buffer. A completed frame
+invalidates noncoherent output memory and lands only bytes the shader changed where the guest still holds the input
+value. Overlapping guest reads and writes, and stream synchronization points, wait for pending outputs. Draws can reuse
+an earlier result in the same frame with a storage barrier when the binding is contained and aligned and its guest input
+is unchanged; other overlaps land before taking another snapshot. Frame-ring reuse processes output before freeing its
+staging allocation. The compute and graphics paths share `vk_write_changed`.
+
+The 110-second TotK cave run with graphics writeback and same-frame reuse completed 1,757 frames, compared with 1,754
+for the earlier staging run on this machine. A 600-present interval reused 7,429 GPU buffers but still forced 1,985
+lands, totaling 14.7 seconds of waits. The scenes and shader caches vary, so this is a correctness smoke test, not a
+controlled performance comparison. The resulting cave image still has known cyan rendering artifacts.
 
 ## Import eligibility
 

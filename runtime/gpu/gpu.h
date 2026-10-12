@@ -49,6 +49,8 @@ int gmem_read(u64 gva, void* dst, u64 size);
 void gmem_read_code(u64 gva, void* dst, u64 size); /* a shader program: stops where guest memory does */
 int gmem_write(u64 gva, const void* src, u64 size);
 u8* gmem_ptr(u64 gva, u64 size);
+/* Only for comparing a pending GPU result's original guest bytes: does not land pending GPU writes. */
+u8* gmem_ptr_untracked(u64 gva, u64 size);
 u32 gmem_r32(u64 gva);
 void gmem_w32(u64 gva, u32 v);
 u64 bl_offset(u32 x_bytes, u32 y, u32 z, u32 width_bytes, u32 height, u32 bh_log2, u32 bd_log2);
