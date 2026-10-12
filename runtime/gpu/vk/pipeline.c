@@ -216,13 +216,13 @@ VkSh* vk_shader_get(u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask, 
         if (same && ca->epoch != g_vk_epoch) {
             ca->epoch = g_vk_epoch;
             ca->wseen = vk_ww_now();
-            ca->gw = g_gw_gen;
+            ca->gw = gpu_mem_generation();
         }
         if (same && vk_cb_reads_hold(&s->cbr, sh_cb_read)) return s;
     } else /* the way used longest ago */
         ca = !set[0].s || (set[1].s && (i32)(set[0].epoch - set[1].epoch) <= 0) ? &set[0] : &set[1];
     u32 wseen = vk_ww_now();
-    u64 gw = g_gw_gen;
+    u64 gw = gpu_mem_generation();
     u8* code = malloc(0x10000);
     gmem_read_code(gva, code, 0x10000);
     u32 len, len_a = 0;

@@ -355,6 +355,8 @@ u64 kmem_alloc(u64 size, u32 state, u32 perm) {
    concurrent physical map cannot spend the same last pages as a heap extension. */
 int mem_heap_set(u64 size, u64 budget) {
     if (size > HEAP_SIZE) return MEM_NOMEM;
+    /* A repeated size has no backing change to protect. The atomic load is this no-op's linearization point. */
+    if (size == __atomic_load_n(&g_heap_size, __ATOMIC_SEQ_CST)) return 0;
     if (g_gpu_mapping_begin) g_gpu_mapping_begin(0, 0, 1);
     memlock();
     u64 cur = g_heap_size;

@@ -64,7 +64,8 @@ void kepler_i2m_method(GpuChannel* ch, u32 m, u32 v);
 void fermi2d_method(GpuChannel* ch, u32 m, u32 v);
 void dma_method(GpuChannel* ch, u32 m, u32 v);
 void gpu_mem_written(u64 gva, u64 size);
-void gpu_signal_point(void);   /* the GPU is about to do something the game can observe */
+void gpu_mem_written_shader(u64 gva, u64 size); /* shader writeback tracks both GPU VA and guest backing */
+void gpu_signal_point(void);                    /* the GPU is about to do something the game can observe */
 u32 gpu_color_bpp(u32 format); /* bytes per pixel of a color format (render targets and 2D surfaces share them) */
 
 /* gpu.c: GPFIFO submission */
@@ -81,7 +82,7 @@ extern volatile u64 g_gpu_submits;
    which now read as zero (kernel/mem.c). Caches over that memory check it again. Any thread */
 void gpu_mem_changed(u64 cpu_addr, u64 len);
 extern void (*g_gpu_mem_changed)(u64 cpu_addr, u64 len); /* the renderer's side of it, set when it starts */
-/* the renderer lands work it is holding (compute results) before the stream goes on past it: before a write of
+/* the renderer lands pending shader results before the stream goes on past them: before a write of
    memory those results overlap (size > 0), and before anything the game can observe (gpu_signal_point, size 0) */
 extern void (*g_gpu_before_write)(u64 gva, u64 size);
 /* Hold the renderer's memory lock across a backing change. full is for CPU guest pages, whose GPU aliases are
@@ -103,6 +104,6 @@ void r3d_const_upload(GpuChannel* ch, u32 v, int last);
 void r3d_const_flush(GpuChannel* ch); /* writes the constant buffer data r3d_const_upload is holding */
 int r3d_blit(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
              double sdy);
-extern u64 g_gw_gen; /* the GPU-side write log: entries so far, a generation to compare against */
+u64 gpu_mem_generation(void); /* the last fully published GPU-side write-log generation */
 int gpu_mem_dirty_since(u64 since, u64 a, u64 sz);
 #endif

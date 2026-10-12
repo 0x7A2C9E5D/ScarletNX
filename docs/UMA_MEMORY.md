@@ -8,7 +8,7 @@ would not remove this copy: ScarletNX already presents its Vulkan image without 
 
 With the constant-buffer cache enabled, a 600-present Tears of the Kingdom cave interval staged 3,688,879,936
 uncached bytes in 63,098 calls. The largest call was 58,848 bytes and none were zero-filled. The only nonzero-address
-`vk_buf_copy` call site with that cache enabled is the writable graphics storage-buffer branch in `stage_set`. A
+staging-copy path with that cache enabled is `vk_buf_copy_writable` for writable graphics storage buffers in `stage_set`. A
 per-draw wait or allocation is therefore not a viable replacement for the staging ring. The test machine has a
 discrete RTX 2080; it cannot establish a unified-memory speedup.
 
@@ -32,6 +32,11 @@ value. Overlapping guest reads and writes, and stream synchronization points, wa
 an earlier result in the same frame with a storage barrier when the binding is contained and aligned and its guest input
 is unchanged; other overlaps land before taking another snapshot. Frame-ring reuse processes output before freeing its
 staging allocation. The compute and graphics paths share `vk_write_changed`.
+
+The byte-value reconciliation cannot distinguish a later CPU write that restores the original value from no write.
+Games must synchronize CPU and GPU writes to the same bytes for deterministic ordering. Exact duplicate writable
+bindings in one draw share storage, but partially overlapping bindings and distinct GPU virtual aliases within one draw
+still use separate descriptor buffers and can produce incorrect results.
 
 The 110-second TotK cave run with graphics writeback and same-frame reuse completed 1,757 frames, compared with 1,754
 for the earlier staging run on this machine. A 600-present interval reused 7,429 GPU buffers but still forced 1,985

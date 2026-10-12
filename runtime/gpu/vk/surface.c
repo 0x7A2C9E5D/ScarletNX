@@ -190,7 +190,7 @@ void vk_rt_reload(u64 gva) {
            access stay for the next barrier to wait on */
         vk_render_end();
         s->layout = VK_IMAGE_LAYOUT_UNDEFINED;
-        s->gw = g_gw_gen;
+        s->gw = gpu_mem_generation();
         return;
     }
     u64 sz = rt_bytes(s), row = (u64)s->w * s->f.bpp;
@@ -233,7 +233,7 @@ void vk_rt_reload(u64 gva) {
             vk_defer_image(t, tm, VK_NULL_HANDLE, VK_NULL_HANDLE);
         }
         s->mem_wgen = s->wgen; /* memory and image hold the same now: nothing to write back */
-        s->gw = g_gw_gen;
+        s->gw = gpu_mem_generation();
     }
     free(tmp);
 }
@@ -299,7 +299,7 @@ void vk_rt_flush(u64 gva) {
     } else
         for (u32 y = 0; y < s->h; y++) gmem_write(gva + (u64)y * s->pitch, p + y * row, row);
     s->mem_wgen = s->wgen;
-    s->gw = g_gw_gen;
+    s->gw = gpu_mem_generation();
 }
 
 Surf* vk_rt(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch) {
@@ -315,7 +315,7 @@ Surf* vk_rt(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch) {
         if (s->gva == gva && s->is_rt && s->w == w && s->h == h && s->fkey == fkey && s->bl == bl && s->bh == bh &&
             s->pitch == pitch) {
             s->last_used = g_vk_present;
-            s->gw = g_gw_gen;
+            s->gw = gpu_mem_generation();
             return s;
         }
     /* another size, format or layout at this address: park the current one, reuse a parked one that fits */
@@ -329,14 +329,14 @@ Surf* vk_rt(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch) {
     if (parked) {
         parked->gva = gva;
         parked->last_used = g_vk_present;
-        parked->gw = g_gw_gen;
+        parked->gw = gpu_mem_generation();
         return parked;
     }
     VkFmt f = depth ? vk_zt_format(fmt) : vk_rt_format(fmt);
     Surf* s = surf_create(gva, w, h, f, fkey, bl, bh, pitch, 1);
     if (!s) return NULL;
     s->last_used = g_vk_present;
-    s->gw = g_gw_gen;
+    s->gw = gpu_mem_generation();
     /* the CPU may have written the memory already (a cleared or decoded frame): start from it */
     if (!depth) vk_rt_reload(gva);
     return s;
@@ -347,9 +347,9 @@ void vk_rt_note_read(Surf* s) {
     /* writes the 3D engine's draws don't see: I2M uploads, constant updates and compute results landing there go
        to memory, which DMA and 2D copies would load (vk_rt_reload) but these don't */
     static int said;
-    if (said || s->gw == g_gw_gen) return;
+    if (said || s->gw == gpu_mem_generation()) return;
     if (!gpu_mem_dirty_since(s->gw, s->gva, rt_bytes(s))) {
-        s->gw = g_gw_gen; /* still unwritten as of now: the next check walks less of the write log */
+        s->gw = gpu_mem_generation(); /* still unwritten as of now: the next check walks less of the write log */
         return;
     }
     said = 1;

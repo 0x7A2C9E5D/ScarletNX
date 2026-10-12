@@ -256,6 +256,7 @@ static void test_mapping_boundary(void) {
     CHECK(mem_map(ALIAS_BASE, 0x1000, MS_SHARED, PERM_RW) == 0);
     CHECK(mem_unmap(ALIAS_BASE, 0x1000) == 0);
     CHECK(mem_heap_set(0x2000, mem_total()) == 0);
+    CHECK(mem_heap_set(0x2000, mem_total()) == 0);
     CHECK(mem_heap_set(0, mem_total()) == 0);
     CHECK(mapping_begins == 4 && mapping_ends == 4 && mapping_depth == 0);
     g_gpu_mapping_begin = NULL;

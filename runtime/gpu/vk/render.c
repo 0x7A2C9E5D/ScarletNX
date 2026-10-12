@@ -588,8 +588,9 @@ static int cb_get(int stage, int i, u32 sz, VkBuffer* buf, u64* off) {
         u64 off;
     } c[5][18];
     u64 a = g_vk_cb[stage][i];
-    /* pending compute results there land first: the checks below only see memory */
+    /* Pending shader results there land first: the checks below only see guest memory. */
     if (g_cs_any && a) vk_compute_mem_need(a, sz);
+    if (g_gfx_any && a) vk_buf_mem_need(a, sz);
     if (a && c[stage][i].a == a && c[stage][i].epoch == g_vk_epoch && c[stage][i].frame == vk_frame_number() &&
         c[stage][i].sz >= sz && !gpu_mem_dirty_since(c[stage][i].gw, a, sz)) {
         *buf = c[stage][i].buf;
@@ -598,7 +599,7 @@ static int cb_get(int stage, int i, u32 sz, VkBuffer* buf, u64* off) {
     }
     if (!(cache && a ? vk_buf_get_strict(a, sz, buf, off) : vk_buf_copy(a, sz, buf, off))) return 0;
     c[stage][i].a = a;
-    c[stage][i].gw = g_gw_gen;
+    c[stage][i].gw = gpu_mem_generation();
     c[stage][i].frame = vk_frame_number();
     c[stage][i].sz = sz;
     c[stage][i].epoch = g_vk_epoch;

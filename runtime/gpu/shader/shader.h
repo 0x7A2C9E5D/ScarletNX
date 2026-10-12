@@ -36,7 +36,7 @@ typedef struct {
     char first_unsupported[64];
     u32 cs_local[3];
     int shared_size;
-    u32 gbuf_wmask; /* gbufs written (compute) */
+    u32 gbuf_wmask; /* global buffers written by compute or graphics shaders */
     struct {
         u32 cbuf_off;
         u8 type, bindless, bl_cbuf, pad;

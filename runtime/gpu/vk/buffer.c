@@ -9,6 +9,7 @@
 #include <string.h>
 #include "gpu/gpu.h"
 #include "gpu/renderer.h"
+#include "hle/nvdrv.h"
 #include "kernel/mem.h"
 #include "platform/log.h"
 #include "platform/plat.h"
@@ -54,6 +55,8 @@ typedef struct GfxOut {
     VmaAllocation mem;
     u8* ptr;
     u8* org;
+    u64* pages; /* sorted guest CPU pages behind this GPU virtual range */
+    u32 npages;
     struct GfxOut* next;
 } GfxOut;
 static GfxOut *g_prep, *g_prep_tail, *g_out, *g_out_tail;
@@ -65,6 +68,7 @@ void vk_buf_writable_abort(void) {
         GfxOut* o = g_prep;
         g_prep = o->next;
         free(o->org);
+        free(o->pages);
         free(o);
     }
     g_prep_tail = NULL;
@@ -115,6 +119,7 @@ void vk_buf_frame_done(u64 frame) {
             g_wb_bytes += o->size;
         }
         free(o->org);
+        free(o->pages);
         free(o);
     }
     g_out_landing--;
@@ -155,11 +160,26 @@ static void land_reason(int reason) {
 void vk_buf_land(void) { land_reason(WB_SIGNAL); }
 void vk_buf_land_syncwait(void) { land_reason(WB_SYNCWAIT); }
 void vk_buf_land_map(void) { land_reason(WB_MAP); }
+/* Two GPU virtual ranges can name the same guest pages. Mapping changes land pending output while holding vk_lock,
+   so the translations remain stable until this check and any following landing have completed. */
+static int page_cmp(const void* a, const void* b) {
+    u64 x = *(const u64*)a, y = *(const u64*)b;
+    return (x > y) - (x < y);
+}
+static int backing_overlap(u64 a, u64 an, const GfxOut* o) {
+    for (u64 ap = a >> 12, ae = (a + an - 1) >> 12; ap <= ae; ap++) {
+        u64 ac = gmmu_translate(ap << 12);
+        if (!ac) continue;
+        u64 page = ac >> 12;
+        if (bsearch(&page, o->pages, o->npages, sizeof page, page_cmp)) return 1;
+    }
+    return 0;
+}
 static void mem_need_reason(u64 gva, u64 len, int reason) {
     if (!g_gfx_any || g_out_landing || !len) return;
     vk_lock();
     for (GfxOut* o = g_out; o; o = o->next)
-        if (gva < o->addr + o->size && o->addr < gva + len) {
+        if ((gva < o->addr + o->size && o->addr < gva + len) || backing_overlap(gva, len, o)) {
             wait_finish(reason);
             break;
         }
@@ -178,37 +198,53 @@ void vk_buf_before_write(u64 gva, u64 len) {
 static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off) {
     if (!g_gfx_any || g_out_landing || !gva || !len) return 0;
     if (g_cs_any) vk_compute_mem_need(gva, len);
+    GfxOut* match = NULL;
+    int virtual_match = 0;
     for (GfxOut* o = g_out; o; o = o->next) {
-        if (gva >= o->addr + o->size || o->addr >= gva + len) continue;
-        u64 delta = gva - o->addr;
-        u8* host = gva >= o->addr && len <= o->size - delta ? gmem_ptr_untracked(gva, len) : NULL;
-        if (o->frame == vk_frame_number() && host && !memcmp(host, o->org + delta, len) &&
-            !((o->off + delta) & (vk_stage_align() - 1))) {
-            static u64 barrier_frame = ~0ull, barrier_draw = ~0ull;
-            if (barrier_frame != vk_frame_number() || barrier_draw != g_vk_drawn) {
-                vk_render_end();
-                VkMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-                                      .srcStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-                                                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                                      .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                                      .dstStageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
-                                      .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
-                VkDependencyInfo d = {
-                    .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &b};
-                vkCmdPipelineBarrier2(vk_cmd(), &d);
-                barrier_frame = vk_frame_number();
-                barrier_draw = g_vk_drawn;
+        int virtual_overlap = gva < o->addr + o->size && o->addr < gva + len;
+        if (virtual_overlap || backing_overlap(gva, len, o)) {
+            if (match) {
+                /* Separate earlier draws can own different bytes of this range. No single buffer is complete. */
+                land_reason(WB_DRAW);
+                return 0;
             }
-            *buf = o->buf;
-            *off = o->off + delta;
-            if (copy_stats_on()) g_wb_reuses++;
-            return 1;
+            match = o;
+            virtual_match = virtual_overlap;
         }
-        if (copy_stats_on())
-            g_wb_draw_miss[o->frame != vk_frame_number() ? 0 : !host ? 1 : memcmp(host, o->org + delta, len) ? 2 : 3]++;
+    }
+    if (!match) return 0;
+    if (!virtual_match) {
         land_reason(WB_DRAW);
         return 0;
     }
+    GfxOut* o = match;
+    u64 delta = gva - o->addr;
+    u8* host = gva >= o->addr && len <= o->size - delta ? gmem_ptr_untracked(gva, len) : NULL;
+    if (o->frame == vk_frame_number() && host && !memcmp(host, o->org + delta, len) &&
+        !((o->off + delta) & (vk_stage_align() - 1))) {
+        static u64 barrier_frame = ~0ull, barrier_draw = ~0ull;
+        if (barrier_frame != vk_frame_number() || barrier_draw != g_vk_drawn) {
+            vk_render_end();
+            VkMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                                  .srcStageMask =
+                                      VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                                  .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                                  .dstStageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+                                  .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT};
+            VkDependencyInfo d = {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &b};
+            vkCmdPipelineBarrier2(vk_cmd(), &d);
+            barrier_frame = vk_frame_number();
+            barrier_draw = g_vk_drawn;
+        }
+        *buf = o->buf;
+        *off = o->off + delta;
+        if (copy_stats_on()) g_wb_reuses++;
+        return 1;
+    }
+    if (copy_stats_on())
+        g_wb_draw_miss[o->frame != vk_frame_number() ? 0 : !host ? 1 : memcmp(host, o->org + delta, len) ? 2 : 3]++;
+    land_reason(WB_DRAW);
     return 0;
 }
 
@@ -354,6 +390,13 @@ int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off) {
    vk_write_changed resolves those writes against the GPU result at the fence. */
 int vk_buf_copy_writable(u64 gva, u32 len, VkBuffer* buf, u64* off) {
     if (!gva) return vk_buf_copy(0, len, buf, off);
+    /* Repeated bindings of one writable range in the same draw must name the same storage. */
+    for (GfxOut* p = g_prep; p; p = p->next)
+        if (p->addr == gva && p->size == len) {
+            *buf = p->buf;
+            *off = p->off;
+            return 1;
+        }
     if (gfx_gpu_src(gva, len, buf, off)) return 1;
     GfxOut* o = calloc(1, sizeof *o);
     if (!o) return 0;
@@ -369,11 +412,24 @@ int vk_buf_copy_writable(u64 gva, u32 len, VkBuffer* buf, u64* off) {
         return 0;
     }
     memcpy(o->org, src, len);
+    o->npages = (u32)(((gva & 0xFFF) + len + 0xFFF) >> 12);
+    o->pages = calloc(o->npages, sizeof *o->pages);
+    if (!o->pages) {
+        free(o->org);
+        free(o);
+        return 0;
+    }
+    for (u32 i = 0; i < o->npages; i++) {
+        u64 cpu = gmmu_translate((gva & ~0xFFFull) + (u64)i * 0x1000);
+        o->pages[i] = cpu ? cpu >> 12 : ~0ull;
+    }
+    qsort(o->pages, o->npages, sizeof *o->pages, page_cmp);
     u64 align = vk_stage_align();
     if (align < g_vk.props.limits.nonCoherentAtomSize) align = g_vk.props.limits.nonCoherentAtomSize;
     o->ptr = vk_stage_output(len, align, buf, off, &o->mem);
     if (!o->ptr) {
         free(o->org);
+        free(o->pages);
         free(o);
         return 0;
     }
@@ -499,7 +555,7 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     }
     e->epoch = e->chk_epoch = g_vk_epoch;
     if (strict) e->strict_epoch = g_vk_epoch;
-    e->gw = g_gw_gen;
+    e->gw = gpu_mem_generation();
     e->wseen = wnow;
     if (e->stable >= 63 && len >= 4096) {
         e->shash = vk_sample_hash(gva, len);

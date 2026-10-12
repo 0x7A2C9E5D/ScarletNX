@@ -153,7 +153,7 @@ typedef struct Surf {
     u64 last_used;
     u32 wgen;     /* render targets: bumped when drawn to */
     u32 mem_wgen; /* render targets: wgen when guest memory last held the same (written back or loaded) */
-    u64 gw;       /* g_gw_gen when it last matched guest memory (textures) or was bound to draw (render targets) */
+    u64 gw; /* gpu_mem_generation() when it last matched guest memory (textures) or was bound to draw (render targets) */
     /* textures: views by type and swizzle, and the change check (gpu/vk/texture.c) */
     SurfView sv[6];
     int nsv;

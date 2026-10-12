@@ -5,7 +5,7 @@
    Render targets, clears, draws (gpu/vk/render.c), compute (gpu/vk/compute.c), write-backs to and reloads from
    guest memory, and presenting the game's framebuffer from its render target (or from memory, converted on the CPU,
    when no render target holds it). Everything that records runs under vk_lock(), which is reentrant: submissions and
-   presents on the GPU thread (gpu/gpu.c), screenshots on the thread asking, and compute results landing on whichever
+   presents on the GPU thread (gpu/gpu.c), screenshots on the thread asking, and shader results landing on whichever
    thread reads their memory first. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -117,7 +117,7 @@ static void vkr_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     vk_dispatch(ch, q, code);
     vk_unlock();
 }
-/* compute results land before the stream signals or waits (gpu/vk/compute.c) */
+/* Pending shader results land before the stream signals or waits. */
 static void vkr_before_syncwait(void) {
     vk_buf_land_syncwait();
     vk_compute_land();

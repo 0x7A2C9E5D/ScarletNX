@@ -12,6 +12,7 @@ void vk_write_changed(u64 addr, const u8* res, const u8* org, u32 size) {
     u8* dst = gmem_ptr(addr, size);
     u8* tmp = NULL;
     const u8* cur = dst;
+    int changed = 0;
     if (!cur) {
         tmp = malloc(size);
         if (!tmp) fatal("Out of memory landing a shader storage buffer");
@@ -33,7 +34,8 @@ void vk_write_changed(u64 addr, const u8* res, const u8* org, u32 size) {
             memcpy(dst + s, res + s, i - s);
         else
             gmem_write(addr + s, res + s, i - s);
+        changed = 1;
     }
     free(tmp);
-    gpu_mem_written(addr, size); /* caches built from this memory check it again */
+    if (changed) gpu_mem_written_shader(addr, size); /* other GPU virtual addresses can alias these guest pages */
 }

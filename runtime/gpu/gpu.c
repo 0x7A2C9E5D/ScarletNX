@@ -63,7 +63,7 @@ void gmem_read_code(u64 gva, void* dst, u64 size) {
     gmem_read(gva, dst, n);
     memset((u8*)dst + n, 0, size - n);
 }
-/* the renderer lands work it is holding (compute results) before the stream goes on past it: before a write of
+/* the renderer lands pending shader results before the stream goes on past them: before a write of
    memory those results overlap (size > 0), and before anything the game can observe, like a semaphore release or a
    syncpoint (gpu_signal_point, size 0) */
 void (*g_gpu_before_write)(u64 gva, u64 size);
