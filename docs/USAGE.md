@@ -7,14 +7,14 @@ Setup: [BUILD](BUILD.md). Checkout CWD; own dumps/keys.
 ## Extract → AOT → run
 
 ```sh
-python3 scripts/extract.py "Game.xci" --name Game
-python3 scripts/recomp.py work/Game Game
+./build/scarletnx --extract "Game.xci" --name Game
+./build/scarletnx --recompile work/Game Game
 games/Game --fullscreen=0
 ```
 
 ```powershell
-python scripts/extract.py "Game.xci" --name Game
-python scripts/recomp.py work/Game Game
+.\build\scarletnx.exe --extract "Game.xci" --name Game
+.\build\scarletnx.exe --recompile work/Game Game
 .\games\Game.exe --fullscreen=0
 ```
 
@@ -22,21 +22,22 @@ Remaining examples: POSIX.
 
 ```sh
 # NSP + same-title update
-python3 scripts/extract.py Game.nsp --update update.nsp --name Game \
+./build/scarletnx --extract Game.nsp --update update.nsp --name Game \
   --keys /path/prod.keys --title-keys /path/title.keys
 
-# Recompiler options go after --
-python3 scripts/recomp.py work/Game Game -- --native --jobs 8
-python3 -m scarletnx app.nro -o App --outdir games
-python3 -m scarletnx --help
+./build/scarletnx --recompile work/Game Game --native --jobs 8
+./build/scarletnx --recompile app.nro -o App --outdir games
+./build/scarletnx --recompile --help
 ```
 
 - **Keys:** flags → checkout → `~/.switch` (`%USERPROFILE%\.switch` on Windows). Common NSP tickets supplement title keys.
 - **Extraction:** defaults to `work/<dump stem>`; `--name`/`--out DIR` override. Refuses existing `exefs`;
-  builds missing hactool. [Temp cleanup/key filtering](../scripts/extract.py).
-- **Recompile:** preset `default` build → AOT/NVN prebuild. Cached objects;
+  builds missing hactool. [Temp cleanup/key filtering](../scarletnx/extract.c).
+- **Recompile:** AOT → module compile/link → runtime/data deployment → NVN prebuild. Cached objects;
   NVN prebuild failures defer compilation to runtime. `--native` = `-march=native`;
   `--cc CLANG` / `-O 0..3` also accepted.
+- **Codegen:** `--no-build` emits C/data/INI; `--interp-only` omits AOT functions.
+  `--chunk N` sets instructions per TU. Generated C stays in the build cache.
 - **Data updates:** ExeFS refreshes; `Game_data/romfs` is reused.
   Replace cached RomFS after asset changes; preserve `Game_data/save/`.
 

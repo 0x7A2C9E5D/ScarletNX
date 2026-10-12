@@ -7,11 +7,16 @@ Source map: [CLAUDE.md](../CLAUDE.md).
 
 `scarletnx/`: `work/<Game>/{exefs,romfs}` -> `games/<Game>[.exe]`, `<Game>_code.{so,dll}`, `<Game>_data/`:
 
-- `nxloader.py`: guest loader emulation. `codegen.py`, `a64.py`: discovery + chunked C generation.
-- `module.py`: `SnxModule`, PC -> `GuestFn` mappings, interpreter entry.
-- `toolchain.py`: module build/cache. `data.py`: ExeFS/RomFS + INI staging.
+- `driver.c`: CLI dispatch only; `extract.c` and `recompile.c` own their workflows.
+- `loader.c`: NSO/NRO, LZ4, SHA-256, NPDM, MOD0, symbols/relocs/FDEs.
+- `a64.c` + `a64_templates.inc`: shared instruction semantics for AOT and interpreter.
+- `codegen.c`: function/CFG discovery; `module.c`: chunks, dispatch tables, `SnxModule`.
+- `toolchain.c`: parallel Clang jobs, ABI/source-keyed object cache, linking, shader prebuild.
+- `common.c`: host files/processes; argv-based subprocesses, isolated extraction key environment.
 
-`scripts/recomp.py`: CMake runtime build -> Python recompiler -> shader prebuild.
+Host tooling uses C90 syntax with SDK fixed-width types, formatting and OS APIs.
+The runtime and generated guest code retain their existing Clang/ABI requirements.
+Normal builds link the driver into the runtime; `SNX_TOOLS_ONLY` builds the same CLI independently.
 
 ABI (`runtime/abi/`): guest functions take `CPU*`; `snx_lookup` dispatches indirect branches, with interpreter fallback.
 `CPU.rt` supplies `RtAPI` callbacks: SVC, UNDEF, BRK, hints, CNTVCT, FPCR, SEV/WFE; no named runtime imports.

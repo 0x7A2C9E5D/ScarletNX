@@ -11,7 +11,6 @@
 #   llvm-mingw 20261006   Clang, lld and the MinGW-w64 headers and libraries
 #   CMake 4.4.4, Ninja 1.13.2
 #   NASM 3.02             FFmpeg's assembly
-#   Python 3.15.0         scarletnx and the scripts (the embeddable distribution)
 #   w64devkit 2.10.0      only its sh (busybox) and GNU make, which FFmpeg's configure and Makefiles need
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'  # Invoke-WebRequest is many times slower with its progress bar
@@ -36,9 +35,6 @@ $packages = @(
     @{ Name = 'NASM'; Dir = 'nasm-3.02'; Bin = ''; Kind = 'zip'
        Url = 'https://www.nasm.us/pub/nasm/releasebuilds/3.02/win64/nasm-3.02-win64.zip'
        Sha256 = '161d0bfaff53c2f9e9f3e69fd0672323ebabafd1268976a5cec11be92a19aee7' },
-    @{ Name = 'Python'; Dir = 'python'; Bin = ''; Kind = 'zip-flat'
-       Url = 'https://www.python.org/ftp/python/3.15.0/python-3.15.0-embed-amd64.zip'
-       Sha256 = 'a6999bcbcbe56f937159ef79c2630260eca99f65f7860bc5cd20430324079a44' },
     @{ Name = 'w64devkit'; Dir = 'w64devkit'; Bin = 'bin'; Kind = 'sfx'
        Url = 'https://github.com/skeeto/w64devkit/releases/download/v2.10.0/w64devkit-x64-2.10.0.7z.exe'
        Sha256 = '18d0a4c71a166f8401ab6305781bec5882b40b5e06ba9807c61cb5f3b3c6325e' }
@@ -82,13 +78,6 @@ foreach ($p in $packages) {
     if (-not (Test-Path $dest)) { throw "$($p.Name) did not unpack into $dest" }
     Set-Content -Path $marker -Value $p.Sha256
 }
-
-# The embeddable Python searches only the folders its ._pth file lists, not the current one, so `python -m
-# scarletnx` (scripts\recomp.py runs it) needs the repository root listed, relative to deps\tools\python
-$pth = Get-ChildItem -Path (Join-Path $tools 'python') -Filter 'python*._pth' | Select-Object -First 1
-if (-not $pth) { throw 'The embeddable Python has no ._pth file' }
-$root = '..\..\..'
-if (@(Get-Content $pth.FullName) -notcontains $root) { Add-Content -Path $pth.FullName -Value $root }
 
 # The folders env.ps1 puts on PATH, in order, relative to deps\tools
 $packages | ForEach-Object { if ($_.Bin) { "$($_.Dir)\$($_.Bin)" } else { $_.Dir } } |

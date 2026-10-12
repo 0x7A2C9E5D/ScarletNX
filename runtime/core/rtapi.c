@@ -100,7 +100,7 @@ static void rt_brk(CPU* c, u64 pc, u32 imm) {
 }
 static u64 rt_ticks(void) { return guest_ticks(); }
 /* what the host can't do the guest's way: said once each. The generated code is compiled for round-to-nearest, so a
-   directed rounding mode only reaches the operations the compiler didn't fold (scarletnx/toolchain.py) */
+   directed rounding mode only reaches the operations the compiler didn't fold (scarletnx/toolchain.c) */
 static void fpcr_warn(u32 fpcr) {
     if ((fpcr >> 22) & 3)
         WARN_LIMIT(

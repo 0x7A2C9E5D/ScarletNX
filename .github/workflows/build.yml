@@ -57,14 +57,11 @@ jobs:
       # The game modules compile runtime/abi/cpu_helpers.c, which no CMake target does
       - name: Check the ABI helpers compile
         run: clang -fsyntax-only -Wall -fno-strict-aliasing -fwrapv -I runtime/abi runtime/abi/cpu_helpers.c
-      - name: Test indexed filesystems
-        run: python tests/run_filesystem_tree.py --cc clang --sanitize
-      - name: Check the Python scripts
+      - name: Test native tooling and indexed filesystems
+        run: ctest --test-dir build/default --output-on-failure
+      - name: Check optional Python diagnostics
         run: |
-          python -m compileall -q scarletnx scripts tools
-          python -m scarletnx --help > /dev/null
-          python scripts/extract.py --help > /dev/null
-          python scripts/recomp.py --help > /dev/null
+          python -m compileall -q tools
           python tools/run_game.py --help > /dev/null
       - uses: actions/upload-artifact@v7
         with:
@@ -106,7 +103,7 @@ jobs:
           EOF
       - name: Install the build tools and the debloated Mesa
         run: |
-          pacman -Syu --noconfirm --needed cmake ninja make nasm python clang sdl3 libx11 mesa vulkan-icd-loader
+          pacman -Syu --noconfirm --needed cmake ninja make nasm clang sdl3 libx11 mesa vulkan-icd-loader
           get-debloated-pkgs --add-common --prefer-nano
       - name: Build and install into /usr
         run: |
@@ -156,19 +153,19 @@ jobs:
           if ($LASTEXITCODE) { exit 1 }
           cmake --install build/default --prefix stage
           if ($LASTEXITCODE) { exit 1 }
-      - name: Check the Python scripts
+      - name: Check the native driver
         run: |
           . .\scripts\env.ps1 -Isolated
-          python -m scarletnx --help > $null
+          build\default\scarletnx.exe --help > $null
           if ($LASTEXITCODE) { exit 1 }
-          python scripts\extract.py --help > $null
+          build\default\scarletnx.exe --extract --help > $null
           if ($LASTEXITCODE) { exit 1 }
-          python scripts\recomp.py --help > $null
+          build\default\scarletnx.exe --recompile --help > $null
           if ($LASTEXITCODE) { exit 1 }
-      - name: Test indexed filesystems
+      - name: Test native tooling and indexed filesystems
         run: |
           . .\scripts\env.ps1 -Isolated
-          python tests\run_filesystem_tree.py --cc clang
+          ctest --test-dir build/default --output-on-failure
           if ($LASTEXITCODE) { exit 1 }
       - uses: actions/upload-artifact@v7
         with:

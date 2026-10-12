@@ -4,4 +4,8 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* executable entry point */
 #include "core/main.h"
-int main(int argc, char** argv) { return snx_main(argc, argv); }
+#include "driver.h"
+int main(int argc, char** argv) {
+    int result = snx_driver(argc, argv);
+    return result >= 0 ? result : snx_main(argc, argv);
+}

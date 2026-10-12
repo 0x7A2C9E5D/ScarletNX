@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 # Builds the ScarletNX runtime for Linux or FreeBSD, or for Windows with llvm-mingw (natively, or cross-built). The
-# game module (<Game>_code.so or .dll) comes from the recompiler (python3 -m scarletnx), see scripts/recomp.py. The
+# game module (<Game>_code.so or .dll) comes from `scarletnx --recompile`. The
 # third-party libraries are fetched and built with the runtime, see cmake/dependencies.cmake.
 #
 #   cmake --preset default && cmake --build --preset default        (or windows-cross; see CMakePresets.json)
@@ -62,6 +62,26 @@ set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+option(SNX_TOOLS_ONLY "Build the C90 extraction/recompilation driver without the runtime" OFF)
+option(SNX_HACTOOL_ONLY "Build only the native container extractor" OFF)
+if(SNX_HACTOOL_ONLY)
+    set(SNX_H264 OFF)
+    set(SNX_VULKAN OFF)
+    set(SNX_BACKEND headless)
+    include(cmake/dependencies.cmake)
+    return()
+endif()
+add_subdirectory(scarletnx host-tools)
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+if(SNX_TOOLS_ONLY)
+    include(GNUInstallDirs)
+    install(TARGETS scarletnx RUNTIME DESTINATION bin)
+    install(FILES LICENSE LICENSE.apache NOTICE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/scarletnx)
+    return()
+endif()
 include(cmake/dependencies.cmake)
 
 add_subdirectory(runtime)
