@@ -80,7 +80,8 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     CHECK(!snx_write_file(partial, "partial", 7));
     free(partial);
     rc = event('E');
-    if (!strcmp(getenv("SNX_WORKFLOW_MODE"), "missing") && !strcmp(getenv("SNX_WORKFLOW_FAIL"), "E"))
+    if (!strcmp(getenv("SNX_WORKFLOW_MODE"), "missing") && getenv("SNX_WORKFLOW_FAIL") &&
+        !strcmp(getenv("SNX_WORKFLOW_FAIL"), "E"))
         CHECK(!snx_remove_tree(argv[1]));
     return rc;
 }
@@ -94,7 +95,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     CHECK(!snx_write_file(partial, "partial", 7));
     free(partial);
     rc = event('R');
-    if (rc || (!strcmp(getenv("SNX_WORKFLOW_MODE"), "missing") && !strcmp(getenv("SNX_WORKFLOW_FAIL"), "R"))) return rc;
+    if (rc || (!strcmp(getenv("SNX_WORKFLOW_MODE"), "missing") && getenv("SNX_WORKFLOW_FAIL") &&
+               !strcmp(getenv("SNX_WORKFLOW_FAIL"), "R"))) return rc;
 #ifdef _WIN32
     game = snx_format("%s/%s.exe", argv[1], argv[4]);
 #else
