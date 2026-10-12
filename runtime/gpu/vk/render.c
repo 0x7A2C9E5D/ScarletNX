@@ -9,6 +9,7 @@
    transform as is (y down, like the hardware), so no shader flips y; facing follows from that (see the raster
    state below). */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "core/options.h"
 #include "gpu/gpu.h"
@@ -575,6 +576,8 @@ VkSampler vk_tex_bind_sampler(const u32* tsc, const ShTex* st, int num) {
 
 /* a constant buffer's bytes for this draw, reused while the guest can't have changed them */
 static int cb_get(int stage, int i, u32 sz, VkBuffer* buf, u64* off) {
+    static int cache = -1;
+    if (cache < 0) cache = getenv("SNX_VK_CB_CACHE") != NULL;
     static struct {
         u64 a, gw, frame;
         u32 sz, epoch;
@@ -590,7 +593,7 @@ static int cb_get(int stage, int i, u32 sz, VkBuffer* buf, u64* off) {
         *off = c[stage][i].off;
         return 1;
     }
-    if (!vk_buf_copy(a, sz, buf, off)) return 0;
+    if (!(cache && a ? vk_buf_get_strict(a, sz, buf, off) : vk_buf_copy(a, sz, buf, off))) return 0;
     c[stage][i].a = a;
     c[stage][i].gw = g_gw_gen;
     c[stage][i].frame = vk_frame_number();
