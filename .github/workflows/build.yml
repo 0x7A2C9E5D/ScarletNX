@@ -123,28 +123,6 @@ jobs:
             dist/*.AppImage*
             dist/appinfo
 
-  freebsd:
-    name: FreeBSD
-    runs-on: ubuntu-26.04
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/cache@v5
-        with:
-          path: .cache/cpm
-          key: cpm-${{ github.job }}-${{ hashFiles('cmake/dependencies.cmake') }}
-      - name: Build the runtime
-        uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1.5.9
-        with:
-          release: '15.1'
-          usesh: true
-          # A mirror caught mid-sync answers Not Found for some packages: refresh the catalogue and try once more
-          prepare: |
-            pkg install -y cmake ninja gmake nasm python3 sdl3 || { sleep 30; pkg update -f && pkg install -y cmake ninja gmake nasm python3 sdl3; }
-          run: |
-            cmake --preset default
-            cmake --build --preset default
-
   windows-cross:
     name: Windows, cross-built on Linux
     runs-on: ubuntu-26.04
