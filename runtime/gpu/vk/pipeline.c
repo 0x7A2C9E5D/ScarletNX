@@ -84,6 +84,7 @@ int vk_cb_reads_hold(const VkCbReads* reads, VkCbReader read) {
 
 /* descriptors of each type in one set: the binding ranges in shader.h */
 static VkDescriptorType binding_type(u32 i) {
+    if (i == SNX_VKB_SMAP) return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     return i < SNX_VKB_SSBO  ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
            : i < SNX_VKB_TEX ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
            : i < SNX_VKB_IMG ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
@@ -95,7 +96,7 @@ void vk_pool_sizes(VkDescriptorPoolSize* sz, u32 sets) {
                                            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE};
     for (int k = 0; k < 4; k++) {
         u32 n = 0;
-        for (u32 i = 0; i <= SNX_VKB_FMT; i++) n += binding_type(i) == ty[k];
+        for (u32 i = 0; i <= SNX_VKB_SMAP; i++) n += binding_type(i) == ty[k];
         sz[k] = (VkDescriptorPoolSize){ty[k], n * sets};
     }
 }
@@ -108,12 +109,12 @@ void vk_pipeline_init(void) {
         VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT |
             VK_SHADER_STAGE_GEOMETRY_BIT};
     for (int s = 0; s < 3; s++) {
-        VkDescriptorSetLayoutBinding b[SNX_VKB_FMT + 1];
-        for (u32 i = 0; i <= SNX_VKB_FMT; i++)
+        VkDescriptorSetLayoutBinding b[SNX_VKB_SMAP + 1];
+        for (u32 i = 0; i <= SNX_VKB_SMAP; i++)
             b[i] = (VkDescriptorSetLayoutBinding){
                 .binding = i, .descriptorType = binding_type(i), .descriptorCount = 1, .stageFlags = vis[s]};
         VkDescriptorSetLayoutCreateInfo dl = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                                              .bindingCount = SNX_VKB_FMT + 1,
+                                              .bindingCount = SNX_VKB_SMAP + 1,
                                               .pBindings = b};
         VK_OK(vkCreateDescriptorSetLayout(g_vk.dev, &dl, NULL, &g_vk_dslayout[s]));
     }

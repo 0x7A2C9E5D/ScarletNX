@@ -32,6 +32,7 @@ static Vb* g_vbh[VBH];
 /* Optional copy telemetry. Counters are updated under vk_lock. */
 static u64 g_copy_stage, g_copy_owned, g_copy_uncached, g_copy_zero, g_copy_calls, g_copy_peak, g_read_bound;
 static u64 g_wb_outputs, g_wb_bytes, g_wb_waits, g_wb_wait_ns, g_wb_reuses;
+static u64 g_alias_draws, g_alias_pages;
 enum { WB_DRAW, WB_READ, WB_WRITE, WB_SIGNAL, WB_SYNCWAIT, WB_MAP, WB_REASON_N };
 static u64 g_wb_reason[WB_REASON_N], g_wb_reason_ns[WB_REASON_N], g_wb_draw_miss[4];
 static int g_copy_stats = -1;
@@ -448,6 +449,198 @@ int vk_buf_copy_writable(u64 gva, u32 len, VkBuffer* buf, u64* off) {
     return 1;
 }
 
+typedef struct {
+    u64 key, gva;
+    int writable, bind;
+} DrawPage;
+static int draw_page_cmp(const void* a, const void* b) {
+    u64 x = ((const DrawPage*)a)->key, y = ((const DrawPage*)b)->key;
+    return (x > y) - (x < y);
+}
+static u64 draw_page_key(u64 gva) {
+    u64 cpu = gmmu_translate(gva);
+    /* Unmapped virtual pages are distinct and have no guest destination for writeback. */
+    return cpu ? cpu >> 12 : (1ull << 63) | (gva >> 12);
+}
+static DrawPage* draw_pages(const VkDrawStorage* draw, size_t* count) {
+    size_t n = 0;
+    for (int s = 0; s < 2; s++)
+        for (int i = 0; i < draw->n[s]; i++) {
+            const VkDrawGbuf* b = &draw->b[s][i];
+            if (b->addr) n += ((b->addr & 4095) + b->size + 4095) >> 12;
+        }
+    DrawPage* p = malloc((n ? n : 1) * sizeof *p);
+    if (!p) return NULL;
+    size_t k = 0;
+    for (int s = 0; s < 2; s++)
+        for (int i = 0; i < draw->n[s]; i++) {
+            const VkDrawGbuf* b = &draw->b[s][i];
+            if (!b->addr) continue;
+            for (u64 g = b->addr & ~4095ull, e = b->addr + b->size; g < e; g += 4096)
+                p[k++] = (DrawPage){draw_page_key(g), g, b->writable, s * 16 + i};
+        }
+    qsort(p, k, sizeof *p, draw_page_cmp);
+    *count = k;
+    return p;
+}
+static int draw_alias_bindings(const DrawPage* p, size_t n, u8 active[32]) {
+    memset(active, 0, 32);
+    int alias = 0;
+    for (size_t i = 0; i < n;) {
+        size_t j = i + 1;
+        int writable = p[i].writable;
+        while (j < n && p[j].key == p[i].key) writable |= p[j++].writable;
+        if (j - i > 1 && writable) {
+            for (size_t k = i; k < j; k++) active[p[k].bind] = 1;
+            alias = 1;
+        }
+        i = j;
+    }
+    return alias;
+}
+static int draw_has_writable(const VkDrawStorage* draw) {
+    for (int s = 0; s < 2; s++)
+        for (int i = 0; i < draw->n[s]; i++)
+            if (draw->b[s][i].addr && draw->b[s][i].writable) return 1;
+    return 0;
+}
+int vk_buf_draw_has_alias(const VkDrawStorage* draw) {
+    if (!draw_has_writable(draw)) return 0;
+    size_t n;
+    DrawPage* p = draw_pages(draw, &n);
+    if (!p) return -1;
+    u8 active[32];
+    int alias = draw_alias_bindings(p, n, active);
+    free(p);
+    return alias;
+}
+static u32 draw_page_index(const DrawPage* p, size_t n, u64 key) {
+    size_t lo = 0, hi = n;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (p[mid].key < key)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return (u32)lo;
+}
+static int draw_output_page(const DrawPage* p, u8* ptr, VkBuffer buf, u64 off, VmaAllocation mem) {
+    if (p->key & (1ull << 63)) return 1;
+    GfxOut* o = calloc(1, sizeof *o);
+    if (!o) return 0;
+    o->org = malloc(4096);
+    o->pages = malloc(sizeof *o->pages);
+    if (!o->org || !o->pages) {
+        free(o->org);
+        free(o->pages);
+        free(o);
+        return 0;
+    }
+    memcpy(o->org, ptr, 4096);
+    o->pages[0] = p->key;
+    o->npages = 1;
+    o->addr = p->gva;
+    o->size = 4096;
+    o->frame = vk_frame_number();
+    o->buf = buf;
+    o->off = off;
+    o->mem = mem;
+    o->ptr = ptr;
+    if (g_prep_tail)
+        g_prep_tail->next = o;
+    else
+        g_prep = o;
+    g_prep_tail = o;
+    return 1;
+}
+/* All bindings of an aliasing draw index one page atlas. This also covers fragmented GPU mappings: the shader's
+   word index is translated through its binding's page list, so a write through either VA reaches the same word. */
+int vk_buf_draw_prepare(VkDrawStorage* draw) {
+    size_t n = 0;
+    int writable = draw_has_writable(draw);
+    DrawPage* p = writable ? draw_pages(draw, &n) : NULL;
+    if (writable && !p) return 0;
+    u8 active[32] = {0};
+    int alias = p ? draw_alias_bindings(p, n, active) : 0;
+    size_t unique = 0;
+    if (alias)
+        for (size_t i = 0; i < n; i++)
+            if (active[p[i].bind] && (!unique || p[i].key != p[unique - 1].key)) p[unique++] = p[i];
+    VkBuffer atlas = VK_NULL_HANDLE;
+    u64 atlas_off = 0, atlas_size = unique * 4096ull;
+    VmaAllocation mem = VK_NULL_HANDLE;
+    u8* ptr = NULL;
+    if (alias) {
+        if (atlas_size > g_vk.props.limits.maxStorageBufferRange) {
+            WARN_LIMIT(1, "vulkan: aliased draw needs %llu storage bytes, beyond the device's descriptor range\n",
+                       (unsigned long long)atlas_size);
+            free(p);
+            return 0;
+        }
+        u64 align = vk_stage_align();
+        if (align < g_vk.props.limits.nonCoherentAtomSize) align = g_vk.props.limits.nonCoherentAtomSize;
+        ptr = vk_stage_output(atlas_size, align, &atlas, &atlas_off, &mem);
+        if (!ptr) {
+            free(p);
+            return 0;
+        }
+        for (size_t i = 0; i < unique; i++) {
+            if (p[i].key & (1ull << 63))
+                memset(ptr + i * 4096, 0, 4096);
+            else
+                gmem_read(p[i].gva, ptr + i * 4096, 4096);
+        }
+        copy_note(1, atlas_size);
+    }
+    for (int s = 0; s < 2; s++) {
+        if (!draw->n[s]) continue;
+        size_t words = 48;
+        if (alias)
+            for (int i = 0; i < draw->n[s]; i++) {
+                VkDrawGbuf* b = &draw->b[s][i];
+                if (b->addr && active[s * 16 + i]) words += ((b->addr & 4095) + b->size + 4095) >> 12;
+            }
+        u32* map = (u32*)vk_stage(words * 4, vk_stage_align(), &draw->map_buf[s], &draw->map_off[s]);
+        if (!map) {
+            free(p);
+            return 0;
+        }
+        draw->map_size[s] = words * 4;
+        for (int i = 0; i < 16; i++) map[i] = ~0u;
+        for (int i = 16; i < 32; i++) map[i] = 0;
+        for (int i = 32; i < 48; i++) map[i] = 0;
+        size_t at = 48;
+        if (alias)
+            for (int i = 0; i < draw->n[s]; i++) {
+                VkDrawGbuf* b = &draw->b[s][i];
+                if (!b->addr || !active[s * 16 + i]) continue;
+                map[i] = (u32)at;
+                map[16 + i] = (u32)((b->addr & 4095) >> 2);
+                map[32 + i] = b->size >> 2;
+                for (u64 g = b->addr & ~4095ull, e = b->addr + b->size; g < e; g += 4096)
+                    map[at++] = draw_page_index(p, unique, draw_page_key(g));
+                b->aliased = 1;
+                b->buf = atlas;
+                b->off = atlas_off;
+                b->range = atlas_size;
+            }
+    }
+    if (alias)
+        for (size_t i = 0; i < unique; i++)
+            if (!draw_output_page(&p[i], ptr + i * 4096, atlas, atlas_off + i * 4096, mem)) {
+                vk_buf_writable_abort();
+                free(p);
+                return 0;
+            }
+    if (alias && copy_stats_on()) {
+        g_alias_draws++;
+        g_alias_pages += unique;
+    }
+    free(p);
+    return 1;
+}
+
 /* the entry's data where draws read it */
 static void use(Vb* e, VkBuffer* buf, u64* off) {
     e->used = g_vk_present;
@@ -597,8 +790,11 @@ void vk_buf_frame(void) {
             (unsigned long long)g_wb_reason[WB_MAP], (unsigned long long)(g_wb_reason_ns[WB_MAP] / 1000000),
             (unsigned long long)g_wb_draw_miss[0], (unsigned long long)g_wb_draw_miss[1],
             (unsigned long long)g_wb_draw_miss[2], (unsigned long long)g_wb_draw_miss[3]);
+        LOG("vulkan: aliased storage draws=%llu pages=%llu\n", (unsigned long long)g_alias_draws,
+            (unsigned long long)g_alias_pages);
         g_copy_uncached = g_copy_stage = g_copy_owned = g_copy_zero = g_copy_calls = g_copy_peak = g_read_bound = 0;
         g_wb_outputs = g_wb_bytes = g_wb_waits = g_wb_wait_ns = g_wb_reuses = 0;
+        g_alias_draws = g_alias_pages = 0;
         memset(g_wb_reason, 0, sizeof g_wb_reason);
         memset(g_wb_reason_ns, 0, sizeof g_wb_reason_ns);
         memset(g_wb_draw_miss, 0, sizeof g_wb_draw_miss);

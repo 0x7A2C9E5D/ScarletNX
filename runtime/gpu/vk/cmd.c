@@ -168,7 +168,11 @@ u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation*
     u64 at = (f->stage_used + align - 1) & ~(align - 1);
     if (!f->stage || at + size > f->stage_cap) {
         /* a bigger buffer; the old one stays alive until this frame's work is done */
-        if (f->stage) dead_push(f, (Dead){.buf = f->stage, .mem = f->stage_mem});
+        if (f->stage) {
+            /* The old allocation remains in use by recorded commands but is no longer flushed at submit. */
+            vmaFlushAllocation(g_vk.vma, f->stage_mem, 0, VK_WHOLE_SIZE);
+            dead_push(f, (Dead){.buf = f->stage, .mem = f->stage_mem});
+        }
         u64 cap = f->stage_cap ? f->stage_cap * 2 : STAGE_MIN;
         while (cap < size) cap *= 2;
         VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,

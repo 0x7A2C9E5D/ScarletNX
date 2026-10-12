@@ -357,9 +357,9 @@ static void global_atomic(Ctx* c, u64 w, const char* name, u32 ra, u32 rv, i32 o
     static const char* direct[9] = {"atomicAdd",     NULL, NULL, NULL, NULL, "atomicAnd", "atomicOr", "atomicXor",
                                     "atomicExchange"};
     if (sz != 3 ? direct[op] != NULL : op == 8)
-        emitl(c, "old_ = %s(g%d.d[o_], v_);", direct[op], gi);
+        emitl(c, "old_ = %s(g%d.d[snx_sb_idx(%d, o_)], v_);", direct[op], gi, gi);
     else if (sz == 0 && (op == 1 || op == 2))
-        emitl(c, "old_ = %s(g%d.d[o_], v_);", op == 1 ? "atomicMin" : "atomicMax", gi);
+        emitl(c, "old_ = %s(g%d.d[snx_sb_idx(%d, o_)], v_);", op == 1 ? "atomicMin" : "atomicMax", gi, gi);
     else {
         /* signed min/max, inc, dec and f32 add: a compare-and-swap loop */
         const char* nv = sz == 3   ? "floatBitsToUint(uintBitsToFloat(old_) + uintBitsToFloat(v_))"
@@ -367,9 +367,11 @@ static void global_atomic(Ctx* c, u64 w, const char* name, u32 ra, u32 rv, i32 o
                          : op == 2 ? "uint(max(int(old_), int(v_)))"
                          : op == 3 ? "(old_ >= v_ ? 0u : old_ + 1u)"
                                    : "((old_ == 0u || old_ > v_) ? v_ : old_ - 1u)";
-        emitl(c, "old_ = g%d.d[o_];", gi);
-        emitl(c, "for (;;) { uint p_ = atomicCompSwap(g%d.d[o_], old_, %s); if (p_ == old_) break; old_ = p_; }", gi,
-              nv);
+        emitl(c, "old_ = g%d.d[snx_sb_idx(%d, o_)];", gi, gi);
+        emitl(c,
+              "for (;;) { uint p_ = atomicCompSwap(g%d.d[snx_sb_idx(%d, o_)], old_, %s); "
+              "if (p_ == old_) break; old_ = p_; }",
+              gi, gi, nv);
     }
     if (dst != 255) {
         emitl(c, "r%u = old_;", dst);
@@ -1644,7 +1646,8 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
                 emitl(c, "{ uint o_ = %s + %uu - %s;", R(c, a), (u32)imm, CB(c, 0, goff));
                 c->indent++;
                 if (sz <= 3) {
-                    const char* v = T("((g%d.d[o_>>2u] >> ((o_&3u)*8u)) & %s)", gi, sz <= 1 ? "0xFFu" : "0xFFFFu");
+                    const char* v = T("((g%d.d[snx_sb_idx(%d, o_>>2u)] >> ((o_&3u)*8u)) & %s)", gi, gi,
+                                      sz <= 1 ? "0xFFu" : "0xFFFFu");
                     if (sz == 1)
                         v = T("uint(int(%s<<24u)>>24)", v);
                     else if (sz == 3)
@@ -1652,7 +1655,7 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
                     setr(c, d, v);
                 } else {
                     u32 n = sz == 5 ? 2 : sz >= 6 ? 4 : 1;
-                    for (u32 k = 0; k < n; k++) setr(c, d + k, T("g%d.d[(o_>>2u)+%uu]", gi, k));
+                    for (u32 k = 0; k < n; k++) setr(c, d + k, T("g%d.d[snx_sb_idx(%d, (o_>>2u)+%uu)]", gi, gi, k));
                 }
                 c->indent--;
                 emitl(c, "}");
@@ -1671,13 +1674,14 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
                 c->indent++;
                 if (sz <= 3) {
                     const char* m = sz <= 1 ? "0xFFu" : "0xFFFFu";
-                    emitl(
-                        c,
-                        "uint s_=(o_&3u)*8u; atomicAnd(g%d.d[o_>>2u], ~(%s<<s_)); atomicOr(g%d.d[o_>>2u], (%s & %s)<<s_);",
-                        gi, m, gi, R(c, d), m);
+                    emitl(c,
+                          "uint s_=(o_&3u)*8u; atomicAnd(g%d.d[snx_sb_idx(%d, o_>>2u)], ~(%s<<s_)); "
+                          "atomicOr(g%d.d[snx_sb_idx(%d, o_>>2u)], (%s & %s)<<s_);",
+                          gi, gi, m, gi, gi, R(c, d), m);
                 } else {
                     u32 n = sz == 5 ? 2 : sz >= 6 ? 4 : 1;
-                    for (u32 k = 0; k < n; k++) emitl(c, "g%d.d[(o_>>2u)+%uu] = %s;", gi, k, R(c, d + k));
+                    for (u32 k = 0; k < n; k++)
+                        emitl(c, "g%d.d[snx_sb_idx(%d, (o_>>2u)+%uu)] = %s;", gi, gi, k, R(c, d + k));
                 }
                 c->indent--;
                 emitl(c, "}");

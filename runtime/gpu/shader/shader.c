@@ -795,6 +795,19 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si) {
         sb_put(D, "#extension GL_ARB_shader_viewport_layer_array : require\n#define SNX_SET_LAYER(v) gl_Layer=(v)\n");
     if (stage == ST_FS && si->uses_position_in)
         sb_f(D, "layout(std140, %s) uniform SNX_RS { vec4 snx_rs; };\n", bind_at(stage, SNX_VKB_RS)); /* 1/res scale */
+    if (si->ngbuf) {
+        if (stage == ST_CS)
+            sb_put(D, "uint snx_sb_idx(uint b, uint word) { return word; }\n");
+        else {
+            /* The map starts with 16 list offsets, 16 binding word offsets and 16 word counts; page IDs follow. */
+            sb_f(D, "layout(std430, %s) readonly buffer SNX_SMAP { uint d[]; } snx_smap;\n",
+                 bind_at(stage, SNX_VKB_SMAP));
+            sb_put(D, "uint snx_sb_idx(uint b, uint word) { uint h=snx_smap.d[b]; "
+                      "if(h==0xffffffffu) return word; if(word>=snx_smap.d[32u+b]) return 0xffffffffu; "
+                      "uint w=word+snx_smap.d[16u+b]; "
+                      "return (snx_smap.d[h+(w>>10u)]<<10u)|(w&1023u); }\n");
+        }
+    }
     for (int i = 0; i < si->ngbuf; i++)
         sb_f(D, "layout(std430, %s) %sbuffer S%d_G%d { uint d[]; } g%d;\n", bind_at(stage, SNX_VKB_SSBO + i),
              ((si->gbuf_wmask >> i) & 1) ? "" : "readonly ", stage, i, i);

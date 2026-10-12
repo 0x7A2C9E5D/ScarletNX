@@ -215,6 +215,21 @@ int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off); /* no delayed 
 /* a copy of len bytes made now (data that changes within a frame), or of zeros when gva is 0 */
 int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off);
 int vk_buf_copy_writable(u64 gva, u32 len, VkBuffer* buf, u64* off);
+typedef struct {
+    u64 addr;
+    u32 size;
+    int writable, aliased;
+    VkBuffer buf;
+    u64 off, range;
+} VkDrawGbuf;
+typedef struct {
+    VkDrawGbuf b[2][16];
+    int n[2];
+    VkBuffer map_buf[2];
+    u64 map_off[2], map_size[2];
+} VkDrawStorage;
+int vk_buf_draw_has_alias(const VkDrawStorage* draw);
+int vk_buf_draw_prepare(VkDrawStorage* draw);
 void vk_buf_writable_abort(void);
 void vk_buf_writable_commit(void);
 void vk_buf_mem_need(u64 gva, u64 len);

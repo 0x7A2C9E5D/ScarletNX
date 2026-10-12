@@ -34,9 +34,12 @@ is unchanged; other overlaps land before taking another snapshot. Frame-ring reu
 staging allocation. The compute and graphics paths share `vk_write_changed`.
 
 The byte-value reconciliation cannot distinguish a later CPU write that restores the original value from no write.
-Games must synchronize CPU and GPU writes to the same bytes for deterministic ordering. Exact duplicate writable
-bindings in one draw share storage, but partially overlapping bindings and distinct GPU virtual aliases within one draw
-still use separate descriptor buffers and can produce incorrect results.
+Games must synchronize CPU and GPU writes to the same bytes for deterministic ordering. When writable bindings in one
+draw share guest backing, the bindings involved in that overlap use a shared page atlas. Each such binding maps its
+logical word indices to atlas pages, so partially overlapping ranges, fragmented mappings and different GPU virtual
+aliases see the same bytes. The atlas starts after earlier graphics and compute output has landed. A draw whose atlas
+would exceed the device's maximum storage-buffer descriptor range is skipped with a warning, rather than rendered with
+independent snapshots.
 
 The 110-second TotK cave run with graphics writeback and same-frame reuse completed 1,757 frames, compared with 1,754
 for the earlier staging run on this machine. A 600-present interval reused 7,429 GPU buffers but still forced 1,985
