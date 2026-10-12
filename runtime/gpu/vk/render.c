@@ -780,6 +780,19 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
     Surf* zt;
     u32 n;
     read_targets(ch, rt, &zt, &n);
+    /* a color target the fragment shader samples but doesn't write (no output for it, or a write mask of 0) is drawn
+       without: Tears of the Kingdom's lighting passes keep the whole G-buffer bound while they read some of it, which
+       Maxwell allows, and Vulkan can't sample an attachment of the pass */
+    if (fs)
+        for (u32 j = 0; j < n; j++) {
+            u32 cm = r[0x3E4] ? r[0x680] : r[0x680 + j];
+            if (!rt[j] || (((fs->si.sph[18] >> (j * 4)) & 15) && (cm & 0xFFFF))) continue;
+            for (int i = 0; i < SH_MAXTEX; i++)
+                if (fres[i].have && fres[i].t == rt[j]) {
+                    rt[j] = NULL;
+                    break;
+                }
+        }
     if (!n && !zt) {
         g_vk_skipped++;
         return;
@@ -882,14 +895,15 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
             continue;
         }
         u32 stride = va[0] & 0xFFF, asz = attr_bytes(size);
-        if (stride > lim->maxVertexInputBindingStride || (stride && asz > stride)) {
-            LOG_LIMIT(1,
-                      "vulkan: a vertex stream with stride %u (attribute of %u bytes) can't be read (draw skipped)\n",
-                      stride, asz);
+        /* an attribute may be wider than its stream's stride (Tears of the Kingdom reads 8-byte attributes from
+           6-byte strides, its world geometry): Maxwell reads the rest from the next vertex, and so does Vulkan,
+           which allows it outside the portability subset (vertexAttributeAccessBeyondStride) */
+        if (stride > lim->maxVertexInputBindingStride) {
+            LOG_LIMIT(1, "vulkan: a vertex stream with stride %u can't be read (draw skipped)\n", stride);
             g_vk_skipped++;
             return;
         }
-        /* Vulkan wants every attribute of a binding within its stride */
+        /* an attribute past the stride, or past the offsets the GPU allows, gets a binding of its own starting at it */
         u32 base = off > maxoff || (stride && off + asz > stride) ? off : 0;
         u32 key = sbuf | base << 5, b = 0;
         while (b < k.nbind && vkey[b] != key) b++;
@@ -898,7 +912,9 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
                 over = 1;
                 continue;
             }
-            if (!vk_buf_get(start, len, &vbuf[b], &voff[b])) {
+            /* the stream's limit covers its last vertex's stride: an attribute reaching past the stride reads past it */
+            u32 pad = stride && base + asz > stride ? base + asz - stride : 0;
+            if (!vk_buf_get(start, len + pad, &vbuf[b], &voff[b])) {
                 g_vk_skipped++;
                 return;
             }

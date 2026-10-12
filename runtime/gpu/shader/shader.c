@@ -895,6 +895,14 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si) {
         if (f2) sb_put(D, "float ffmz(float a, float b, float c){ return (a==0.0 || b==0.0) ? c : fma(a,b,c); }\n");
     }
     sb_put(D, "void main(){\n");
+    /* an output component the program doesn't write reads as that of (0, 0, 0, 1), as Ryujinx's translator (MIT)
+       initializes them: Tears of the Kingdom's full-screen passes write the position's x, y and z only, and a w left
+       undefined clipped them away */
+    if (c->stage == ST_VS) {
+        sb_put(D, "  gl_Position = vec4(0.0, 0.0, 0.0, 1.0);\n");
+        for (int i = 0; i < 32; i++)
+            if (c->out_used[i]) sb_f(D, "  out_attr%d = vec4(0.0, 0.0, 0.0, 1.0);\n", i);
+    }
     if (c->stage == ST_VS && !c->si->writes_point_size) sb_put(D, "  gl_PointSize = 1.0;\n");
     /* a clip distance below the last written one that the program leaves alone doesn't clip */
     for (int i = 0; c->stage == ST_VS && i < 8 && c->si->uses_clip_mask >> i; i++)
