@@ -16,7 +16,7 @@
 
 typedef struct Vb {
     u64 start, len, hash, shash;
-    u32 epoch, chk_epoch, schk, stable, used;
+    u32 epoch, strict_epoch, chk_epoch, schk, stable, used;
     u64 gw;    /* GPU-side write log position at the last check */
     u64 frame; /* the staging frame buf/off point into, when not own */
     int own;   /* buf is this entry's own buffer */
@@ -28,6 +28,13 @@ typedef struct Vb {
 } Vb;
 #define VBH 4096
 static Vb* g_vbh[VBH];
+/* Optional copy telemetry. Counters are updated under vk_lock. */
+static u64 g_copy_stage, g_copy_owned, g_copy_uncached, g_read_bound;
+static int g_copy_stats = -1;
+static int copy_stats_on(void) {
+    if (g_copy_stats < 0) g_copy_stats = getenv("SNX_VK_BUFFER_STATS") != NULL;
+    return g_copy_stats;
+}
 
 /* written-page tracking (plat_ww_scan): a generation per 4K page of guest memory, bumped when a scan finds it
    written. A cache entry remembers the clock when it last matched memory, and is stale only if a page in its range
@@ -162,12 +169,14 @@ int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off) {
         if (!src) return 0;
         memcpy(p, src, len);
     }
+    if (copy_stats_on()) g_copy_uncached += len;
     return 1;
 }
 
 /* the entry's data where draws read it */
 static void use(Vb* e, VkBuffer* buf, u64* off) {
     e->used = g_vk_present;
+    if (copy_stats_on()) g_read_bound += e->len;
     *buf = e->buf;
     *off = e->off;
 }
@@ -190,6 +199,7 @@ static int make_own(Vb* e, const u8* src) {
     VmaAllocation m;
     if (vmaCreateBuffer(g_vk.vma, &bci, &aci, &b, &m, &info) != VK_SUCCESS) return 0;
     memcpy(info.pMappedData, src, e->len);
+    if (copy_stats_on()) g_copy_owned += e->len;
     vmaFlushAllocation(g_vk.vma, m, 0, VK_WHOLE_SIZE);
     drop_own(e);
     e->own = 1;
@@ -199,7 +209,7 @@ static int make_own(Vb* e, const u8* src) {
     return 1;
 }
 
-int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off) {
+static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     if (!len) return 0;
     if (vk_compute_gpu_src(gva, len, buf, off)) return 1; /* a compute result that hasn't landed yet */
     /* one that covers the range only in part lands first (its write shows in gpu_mem_dirty_since below): the cached
@@ -212,7 +222,7 @@ int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off) {
     /* valid: the data is where draws can read it this frame */
     int valid = e && e->buf && (e->own || e->frame == vk_frame_number());
     if (valid && !gpu_mem_dirty_since(e->gw, gva, len)) {
-        if (e->epoch == g_vk_epoch) {
+        if (e->epoch == g_vk_epoch && (!strict || e->strict_epoch == g_vk_epoch)) {
             use(e, buf, off);
             return 1;
         }
@@ -220,23 +230,24 @@ int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off) {
         int w = e->own ? vk_written_since(gmem_ptr(gva, len), len, e->wseen) : -1;
         if (w == 0) {
             e->epoch = g_vk_epoch;
+            if (strict) e->strict_epoch = g_vk_epoch;
             use(e, buf, off);
             return 1;
         }
         /* without it: own buffers that stayed the same for long are checked every few submits, big ones sampled in
            between. A CPU write in between shows that many submits late; writes of the GPU front end always show at
            once (gpu_mem_dirty_since above) */
-        if (w < 0 && e->own && e->stable >= 16 && len >= (64u << 10) && g_vk_epoch - e->chk_epoch < 8) {
+        if (!strict && w < 0 && e->own && e->stable >= 16 && len >= (64u << 10) && g_vk_epoch - e->chk_epoch < 8) {
             e->epoch = g_vk_epoch;
             use(e, buf, off);
             return 1;
         }
-        if (w < 0 && e->own && e->stable >= 32 && len < (64u << 10) && g_vk_epoch - e->chk_epoch < 4) {
+        if (!strict && w < 0 && e->own && e->stable >= 32 && len < (64u << 10) && g_vk_epoch - e->chk_epoch < 4) {
             e->epoch = g_vk_epoch;
             use(e, buf, off);
             return 1;
         }
-        if (w < 0 && e->own && e->stable >= 64 && len >= 4096 &&
+        if (!strict && w < 0 && e->own && e->stable >= 64 && len >= 4096 &&
             g_vk_epoch - e->chk_epoch < (e->stable >= 256 ? 240u : 64u)) {
             if (g_vk_epoch - e->schk < 4 || vk_sample_hash(gva, len) == e->shash) {
                 if (g_vk_epoch - e->schk >= 4) e->schk = g_vk_epoch;
@@ -267,6 +278,7 @@ int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off) {
         drop_own(e);
     }
     e->epoch = e->chk_epoch = g_vk_epoch;
+    if (strict) e->strict_epoch = g_vk_epoch;
     e->gw = g_gw_gen;
     e->wseen = wnow;
     if (e->stable >= 63 && len >= 4096) {
@@ -275,18 +287,30 @@ int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off) {
     }
     if (!e->own && !(e->stable >= 2 && make_own(e, src))) {
         /* changing (or new) data: this frame's staging ring */
+        e->buf = VK_NULL_HANDLE; /* a failed allocation must not leave the old snapshot reusable */
         u8* p = vk_stage(len, vk_stage_align(), &e->buf, &e->off);
         if (!p) return 0;
         memcpy(p, src, len);
+        if (copy_stats_on()) g_copy_stage += len;
         e->frame = vk_frame_number();
     }
     use(e, buf, off);
     return 1;
 }
 
+int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_get(gva, len, buf, off, 0); }
+/* Constant buffers cannot accept the delayed checks used for stable vertex data: a changed word affects this draw. */
+int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_get(gva, len, buf, off, 1); }
+
 /* buffers not read for ten seconds go */
 void vk_buf_frame(void) {
     if (g_vk_present % 60 || g_vk_present < 600) return;
+    if (copy_stats_on() && g_vk_present % 600 == 0) {
+        LOG("vulkan: buffer bytes over 600 presents: uncached=%llu staged=%llu owned=%llu bound=%llu\n",
+            (unsigned long long)g_copy_uncached, (unsigned long long)g_copy_stage, (unsigned long long)g_copy_owned,
+            (unsigned long long)g_read_bound);
+        g_copy_uncached = g_copy_stage = g_copy_owned = g_read_bound = 0;
+    }
     for (int k = 0; k < VBH; k++)
         for (Vb** pp = &g_vbh[k]; *pp;) {
             Vb* e = *pp;
