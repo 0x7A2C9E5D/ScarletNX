@@ -26,6 +26,11 @@
 #include <unistd.h>
 #endif
 
+#ifdef __FreeBSD__
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#endif
+
 void* snx_alloc(size_t size) {
     void* p = malloc(size ? size : 1);
     if (!p) {
@@ -655,9 +660,16 @@ unsigned snx_cpu_count(void) {
     SYSTEM_INFO info;
     GetSystemInfo(&info);
     return info.dwNumberOfProcessors ? info.dwNumberOfProcessors : 1;
-#else
+#elif defined(__linux__)
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     return n > 0 ? (unsigned)n : 1;
+#elif defined(__FreeBSD__)
+    int ncpu = 0;
+    size_t len = sizeof(ncpu);
+    int mib[2] = { CTL_HW, HW_NCPU };
+    if (sysctl(mib, 2, &ncpu, &len, NULL, 0) == -1)
+        return 1;
+    return ncpu;
 #endif
 }
 void snx_tool_console(void) {
