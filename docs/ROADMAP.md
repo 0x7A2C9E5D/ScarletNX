@@ -5,14 +5,13 @@
 Recorded game-validation status from 2026-10-11: Catherine: Full Body USA
 (`0100BF00112C0000`, v2.0) reached the New Game cutscene at 60 FPS using Vulkan, without sound.
 Earlier crash addresses refer to the Asian release (`0100BC4010896000`).
-These game results were not rerun for the 2026-10-12 [audit](AUDIT.md).
+These are historical measurements, not a current compatibility guarantee.
 
 The Clang/CMake build, cross-platform CI, SDL3 backend, Vulkan renderer, shader caches and
 component layout are in place. Git history records completed fixes and measurements.
 
 ## Next work
 
-- Address the high-priority correctness findings in [AUDIT.md](AUDIT.md).
 - Add instruction, IPC, memory and GPU-cache regression tests. Extend smoke runs with
   reference-image checks and display-free execution.
 - Enable broader compiler warnings. Check vector operands near register 255 before indexing arrays.

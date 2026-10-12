@@ -9,6 +9,7 @@ Commands below assume POSIX. Use the equivalent Python/path spelling on Windows.
 | Task | Command |
 | --- | --- |
 | Format / check formatting | `scripts/format.sh` / `scripts/format.sh --check` |
+| Test indexed filesystems | `python3 tests/run_filesystem_tree.py --cc clang --sanitize` |
 | Name guest addresses | `python3 tools/symbols.py work/Game cf34380` |
 | Disassemble a function | `python3 tools/disasm.py work/Game NvRmStreamFlushSync` |
 | Scripted run and screenshot | `./games/Game --seconds=60 --script=15000:400,16000:1 --shot=out` |
@@ -24,8 +25,8 @@ and can be changed with `--press_len`.
 
 ## Verification
 
-CI checks formatting, builds on Linux, FreeBSD and Windows, syntax-checks ABI helpers, and runs
-Python syntax/help checks. It does not test guest instruction semantics or run a game.
+CI checks formatting, builds on Linux and Windows, syntax-checks ABI helpers, and runs
+filesystem regression tests and Python syntax/help checks. It does not run a game.
 
 Verify runtime fixes through the affected scene. Repeat intermittent-crash tests, compare
 screenshots when relevant, and record what was tested. Do not rebuild during timing-sensitive

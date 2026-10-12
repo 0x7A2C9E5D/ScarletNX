@@ -44,6 +44,9 @@ generated code accesses guest memory directly.
 
 SVC: `RtAPI.svc` -> `kernel/svc.c`. IPC: `svcSendSyncRequest` -> `kernel/ipc.c` -> session's service object in `hle/`.
 
+The [filesystem](FILESYSTEM.md) indexes game data once and resolves subsequent reads,
+directory listings and mutations through an in-memory tree.
+
 ### GPU submit/present
 
 1. Guest NVN builds Maxwell command buffers in guest memory. GPFIFO submit: `/dev/nvhost-gpu` ioctl ->

@@ -5,6 +5,7 @@
 /* NSO/NRO loading. The code segment has to match what we recompiled byte for byte. */
 #include "core/loader.h"
 #include "core/main.h"
+#include "hle/fs.h"
 #include "kernel/mem.h"
 #include "platform/log.h"
 #include "platform/plat.h"
@@ -62,11 +63,11 @@ static int load_one(const SnxModInfo* mi) {
     int found = 0;
     const char* dirs[] = {"exefs/", ""};
     for (int k = 0; k < 2 && !found; k++) {
-        snprintf(p, sizeof p, "%s%s%s", g_datadir, dirs[k], mi->name);
-        found = !plat_file_map(&fm, p);
+        snprintf(p, sizeof p, "%s%s", dirs[k], mi->name);
+        found = !fs_map_file(p, &fm);
         if (!found && mi->is_nro) {
-            snprintf(p, sizeof p, "%s%s%s.nro", g_datadir, dirs[k], mi->name);
-            found = !plat_file_map(&fm, p);
+            snprintf(p, sizeof p, "%s%s.nro", dirs[k], mi->name);
+            found = !fs_map_file(p, &fm);
         }
     }
     if (!found) {

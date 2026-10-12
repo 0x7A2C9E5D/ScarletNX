@@ -6,7 +6,14 @@
 #ifndef SNX_FS_H
 #define SNX_FS_H
 #include "abi/cpu.h"
+#include "platform/plat.h"
 
+/* Index the game data directory once, before loading guest files. */
+void fs_init(void);
+FILE* fs_open_read(const char* path, u64* size);
+int fs_map_file(const char* path, PFileMap* map);
+u8* fs_read_file(const char* path, u64* size);
+int fs_add_virtual_file(const char* path, const void* data, u64 size);
 void romfs_init(void);
 
 #endif

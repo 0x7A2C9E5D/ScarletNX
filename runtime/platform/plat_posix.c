@@ -275,28 +275,41 @@ i64 plat_pread(FILE* f, void* buf, u64 size, u64 off) {
     }
     return (i64)got;
 }
-int plat_file_map(PFileMap* m, const char* path) {
+static int file_map(PFileMap* m, const char* path, const u64* indexed_size) {
     m->data = NULL;
     m->size = 0;
+    if (indexed_size && (*indexed_size > SIZE_MAX || *indexed_size > INT64_MAX)) return -1;
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return -1;
-    struct stat s;
-    if (fstat(fd, &s) || !S_ISREG(s.st_mode)) {
+    u64 size;
+    if (indexed_size) {
+        size = *indexed_size;
+    } else {
+        struct stat s;
+        if (fstat(fd, &s) || !S_ISREG(s.st_mode) || s.st_size < 0) {
+            close(fd);
+            return -1;
+        }
+        size = (u64)s.st_size;
+    }
+    if (size > SIZE_MAX) {
         close(fd);
         return -1;
     }
-    if (s.st_size > 0) { /* mmap of length 0 fails */
-        void* p = mmap(NULL, (size_t)s.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (size) { /* mmap of length 0 fails */
+        void* p = mmap(NULL, (size_t)size, PROT_READ, MAP_PRIVATE, fd, 0);
         if (p == MAP_FAILED) {
             close(fd);
             return -1;
         }
         m->data = p;
-        m->size = (u64)s.st_size;
+        m->size = size;
     }
     close(fd); /* the mapping keeps the file */
     return 0;
 }
+int plat_file_map(PFileMap* m, const char* path) { return file_map(m, path, NULL); }
+int plat_file_map_sized(PFileMap* m, const char* path, u64 size) { return file_map(m, path, &size); }
 void plat_file_unmap(PFileMap* m) {
     if (m->data) munmap((void*)m->data, (size_t)m->size);
     m->data = NULL;

@@ -82,6 +82,8 @@ typedef struct {
     u64 size;
 } PFileMap;
 int plat_file_map(PFileMap* m, const char* path); /* 0, or -1 when the file can't be opened or mapped */
+/* An indexed regular file: use the recorded length without querying host metadata. */
+int plat_file_map_sized(PFileMap* m, const char* path, u64 size);
 void plat_file_unmap(PFileMap* m);
 /* replaces dst with tmp in one step (rename), so a reader never sees dst missing or half written. On failure dst is
    kept and tmp removed */
