@@ -104,6 +104,6 @@ endif()
 if(SNX_TEST_SANITIZERS AND WIN32)
     execute_process(COMMAND "${CMAKE_C_COMPILER}" -print-resource-dir
         OUTPUT_VARIABLE snx_clang_resource OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-    set_tests_properties(startup_windowed startup_headless driver_workflow extraction_native loader_native native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw
+    set_tests_properties(startup_windowed startup_headless driver_workflow extraction_native loader_native native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw astc_decode
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${snx_clang_resource}/lib/windows")
 endif()

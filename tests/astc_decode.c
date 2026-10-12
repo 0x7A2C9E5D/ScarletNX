@@ -24,10 +24,16 @@ int main(void) {
     }
     block[1] &= ~(1u << 2); /* reserved bit 10 must be one */
     if (!check(block, invalid)) {
-        fputs("ASTC void extent with a reserved bit clear was accepted\n", stderr);
+        fputs("ASTC void extent with reserved bit 10 clear was accepted\n", stderr);
         return 1;
     }
     block[1] |= 1u << 2;
+    block[1] &= ~(1u << 3); /* reserved bit 11 must be one */
+    if (!check(block, invalid)) {
+        fputs("ASTC void extent with reserved bit 11 clear was accepted\n", stderr);
+        return 1;
+    }
+    block[1] |= 1u << 3;
     block[1] |= 1u << 1; /* bit 9 selects unsupported HDR endpoints */
     if (!check(block, invalid)) {
         fputs("ASTC HDR void extent was accepted as LDR\n", stderr);
