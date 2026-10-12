@@ -2,7 +2,7 @@
    Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* Part of cpu_helpers.c, which includes it: bitmask immediates, CRC32, compare-and-swap, fences, and the system registers (MRS, MSR). Not compiled on its own. */
+/* Part of cpu_helpers.c, which includes it: bitmask immediates, CRC32, the 16-byte compare-and-swap, and the system registers (MRS, MSR). Not compiled on its own. */
 /* ================================================================ integer */
 u64 snx_decode_bitmask(u32 N, u32 imms, u32 immr, u32 ds) {
     u32 v = (N << 6) | (~imms & 0x3F);
@@ -32,85 +32,24 @@ u32 snx_crc32(u32 acc, u64 val, int bytes, int castagnoli) {
     return acc;
 }
 
-#if defined(__TINYC__)
-/* tcc has no __atomic but does have inline asm. Exclusives need a real lock cmpxchg here since the
-   kernel side touches the same words (mutex/condvar) with real atomics; a spinlock-emulated CAS isn't
-   atomic against that. */
-u32 snx_cas64(u64* p, u64 o, u64 n) {
-    u64 prev = o;
-    __asm__ __volatile__("lock; cmpxchgq %2,%1" : "+a"(prev), "+m"(*p) : "r"(n) : "memory", "cc");
-    return prev == o;
-}
-u32 snx_cas32(u32* p, u32 o, u32 n) {
-    u32 prev = o;
-    __asm__ __volatile__("lock; cmpxchgl %2,%1" : "+a"(prev), "+m"(*p) : "r"(n) : "memory", "cc");
-    return prev == o;
-}
-u32 snx_cas16(u16* p, u16 o, u16 n) {
-    u16 prev = o;
-    __asm__ __volatile__("lock; cmpxchgw %2,%1" : "+a"(prev), "+m"(*p) : "r"(n) : "memory", "cc");
-    return prev == o;
-}
-u32 snx_cas8(u8* p, u8 o, u8 n) {
-    u8 prev = o;
-    __asm__ __volatile__("lock; cmpxchgb %2,%1" : "+a"(prev), "+m"(*p) : "q"(n) : "memory", "cc");
-    return prev == o;
-}
-/* cmpxchg16b clobbers rbx (and we use rdi); tcc won't save them so the asm does */
-u32 snx_cas128(u64* p, u64 o0, u64 o1, u64 n0, u64 n1) {
-    u64 a[5];
-    u64 r;
-    a[0] = (u64)p;
-    a[1] = o0;
-    a[2] = o1;
-    a[3] = n0;
-    a[4] = n1;
-    if (((u64)p) & 15) {
-        u32 ok = snx_cas64(p, o0, n0);
-        if (ok && !snx_cas64(p + 1, o1, n1)) {
-            snx_cas64(p, n0, o0);
-            ok = 0;
-        }
-        return ok;
-    } /* unaligned, shouldn't happen */
-    __asm__ __volatile__("push %%rbx\n\t"
-                         "push %%rdi\n\t"
-                         "movq 8(%%rsi),%%rax\n\t"
-                         "movq 16(%%rsi),%%rdx\n\t"
-                         "movq 24(%%rsi),%%rbx\n\t"
-                         "movq 32(%%rsi),%%rcx\n\t"
-                         "movq (%%rsi),%%rdi\n\t"
-                         "lock; cmpxchg16b (%%rdi)\n\t"
-                         "sete %%al\n\t"
-                         "movzbq %%al,%%rax\n\t"
-                         "pop %%rdi\n\t"
-                         "pop %%rbx"
-                         : "=a"(r)
-                         : "S"(a)
-                         : "rcx", "rdx", "memory", "cc");
-    return (u32)r;
-}
-#if defined(_WIN32)
-#include <windows.h>
-static volatile LONG g_fz;
-void snx_fence(void) { InterlockedExchange(&g_fz, 0); } /* xchg is a full barrier on x86 (no __faststorefence in tcc) */
-#else
-void snx_fence(void) { __asm__ __volatile__("mfence" : : : "memory"); }
+/* the 16-byte builtin compiles to lock cmpxchg16b only where cx16 is enabled, and the game module isn't built with
+   -mcx16, so STXP of a 64-bit pair used to take a fallback that swapped the two halves separately. That isn't atomic:
+   Tears of the Kingdom's lock-free lists (102 such pairs, a pointer and a counter) got a pointer from one thread and a
+   counter from another. Every x86-64 CPU that runs the game has cmpxchg16b, so this function enables it for itself.
+   Clang still warns that 16 bytes is past its lock-free size, though it emits the one instruction */
+#ifndef __clang__
+#error "game modules are built with Clang: GCC makes the 16-byte compare-and-swap a call into libatomic"
 #endif
-#else
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Watomic-alignment"
+#if defined(__x86_64__)
+__attribute__((target("cx16")))
+#endif
 u32 snx_cas128(u64* p, u64 o0, u64 o1, u64 n0, u64 n1) {
-#if defined(__x86_64__) && defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16)
     unsigned __int128 o = ((unsigned __int128)o1 << 64) | o0, n = ((unsigned __int128)n1 << 64) | n0;
-    return __sync_bool_compare_and_swap((unsigned __int128*)p, o, n);
-#else
-    /* no cmpxchg16b: CAS the low half, compare the high half */
-    if (__atomic_load_n(&p[1], __ATOMIC_SEQ_CST) != o1) return 0;
-    if (!snx_cas64(&p[0], o0, n0)) return 0;
-    __atomic_store_n(&p[1], n1, __ATOMIC_SEQ_CST);
-    return 1;
-#endif
+    return __atomic_compare_exchange_n((unsigned __int128*)p, &o, n, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 }
-#endif
+#pragma clang diagnostic pop
 
 /* ================================================================ system */
 #define SYSREG(op0, op1, crn, crm, op2) ((((op0) & 1) << 14) | ((op1) << 11) | ((crn) << 7) | ((crm) << 3) | (op2))

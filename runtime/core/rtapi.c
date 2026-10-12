@@ -132,8 +132,11 @@ void snx_fpcr_apply(CPU* c) {
 }
 static void rt_fpcr(CPU* c) { snx_fpcr_apply(c); }
 static void rt_sev(void) {}
-static void rt_wfe(CPU* c) {
+static void rt_wfe(CPU* c) { /* a spin wait: let another thread on this core run meanwhile */
     (void)c;
+    KThread* t = kthread_cur();
+    core_leave(t);
     plat_yield();
+    if (t) core_enter(t);
 }
 const RtAPI g_rtapi = {snx_svc, rt_undef, rt_note_hint, rt_ticks, rt_brk, rt_fpcr, rt_sev, rt_wfe};

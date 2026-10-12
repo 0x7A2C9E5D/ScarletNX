@@ -396,7 +396,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         fe->shm != shm || !vk_cb_reads_hold(&p->cbr, cs_cb_read)) {
         static u8 code_buf[0x10000 + 80]; /* compute programs have no header: 80 zero bytes stand in for one */
         memset(code_buf, 0, 80);
-        gmem_read(pa, code_buf + 80, 0x10000);
+        gmem_read_code(pa, code_buf + 80, 0x10000);
         p = cs_pipe(code_buf, lx, ly, lz, shm);
         *fe = (typeof(fc[0])){pa, g_vk_epoch, lx, ly, lz, shm, p};
     }

@@ -27,6 +27,7 @@ static void park_nl(KThread* t, int at) {
     t->pause_at = at;
     for (int i = 0; i < t->o.nwait; i++) /* the threads waiting for it to stop (wait_stopped_nl) */
         if (t->o.waiters[i]->wait_kind == 5) wake(t->o.waiters[i], 0);
+    core_leave(t); /* snx_svc takes the core back on the way out */
     while (t->suspended) pc_wait(&t->cv, &g_klock, -1);
     t->pause_at = 0;
 }
@@ -38,8 +39,12 @@ static void svc_enter(KThread* t) {
         pm_unlock(&g_klock);
     }
 }
+/* on the way out the thread takes its core back (if the SVC let go of it) while still inside the SVC, where
+   svcSetThreadActivity doesn't wait for it: a thread pausing it from the same core would otherwise wait for it to run */
 static void svc_leave(KThread* t) {
     for (;;) {
+        core_enter(t);
+        core_preempt(t);
         __atomic_store_n(&t->in_svc, 0, __ATOMIC_SEQ_CST);
         if (LIKELY(!__atomic_load_n(&t->suspended, __ATOMIC_SEQ_CST))) return;
         pm_lock(&g_klock);
@@ -140,7 +145,7 @@ static void snx_svc_(CPU* c, u32 imm) {
         case 0x07: process_exit(0); return;
         case 0x08: {
             int prio = (int)(u32)x[4], core = (int)(i32)(u32)x[5];
-            if (core == -2) core = 0;
+            if (core == -2) core = g_default_core;
             /* the console's checks: a core and a priority the npdm gives the process */
             if (core < 0 || core >= 64 || !((g_core_mask >> core) & 1)) {
                 x[0] = R_BADCORE;
@@ -174,10 +179,19 @@ static void snx_svc_(CPU* c, u32 imm) {
             t->sleep_lr = x[30];
             t->sleep_n++;
             memcpy(t->sleep_x, x, sizeof t->sleep_x);
-            if (ns <= 0)
-                plat_yield();
-            else
+            if (ns <= 0) {
+                /* a yield (0, -1, -2). On the console it returns at once when nothing else waits for the core, and
+                   Tears of the Kingdom's frame tasks yield between every work item. sched_yield can give up the
+                   rest of a time slice to any thread sharing the host CPU, about 2 ms each here, which made its
+                   loading take minutes. A yield here hands the guest core to a waiting thread, if one waits, and
+                   returns once it has the core back. Every 64th yield of a thread is still a host one, so a spin loop
+                   can't starve a thread on its host CPU */
+                core_yield(t); /* threads waiting for this core go first */
+                if (!(++t->yields & 63)) plat_yield();
+            } else {
+                core_leave(t);
                 plat_sleep_ns(ns);
+            }
             return;
         }
         case 0x0C: {
@@ -202,7 +216,7 @@ static void snx_svc_(CPU* c, u32 imm) {
                 return;
             }
             pm_lock(&g_klock); /* the waiter lists pick by priority under it */
-            n->prio = (int)prio;
+            core_set_prio(n, (int)prio);
             pm_unlock(&g_klock);
             x[0] = 0;
             return;
@@ -214,23 +228,57 @@ static void snx_svc_(CPU* c, u32 imm) {
                 return;
             }
             x[0] = 0;
-            x[1] = (u32)n->core;
+            x[1] = (u32)n->ideal_core;
             x[2] = n->affinity;
             return;
         }
-        case 0x0F: {
+        case 0x0F: { /* SetThreadCoreMask: core -1 = don't care, -2 = the process's default, -3 = keep the ideal core */
             KThread* n = (KThread*)h_get_type((u32)x[0], KO_THREAD);
             if (!n) {
                 x[0] = R_BADHANDLE;
                 return;
             }
             i32 core = (i32)(u32)x[1];
-            if (core >= 0) n->core = core;
-            if (x[2]) n->affinity = x[2];
+            u64 mask = x[2];
+            /* the console's checks: a mask within the process's cores, and a core in it */
+            if (core == -2) {
+                core = g_default_core;
+                mask = 1ull << core;
+            } else if ((mask | g_core_mask) != g_core_mask) {
+                x[0] = R_BADCORE;
+                return;
+            } else if (!mask) {
+                x[0] = R_BADCOMBO;
+                return;
+            } else if (core >= NCORES || core < -3) {
+                x[0] = R_BADCORE;
+                return;
+            }
+            pm_lock(&g_klock); /* n may be another thread, changing its own mask */
+            if (core == -3) core = n->ideal_core;
+            if (core >= 0 && !((mask >> core) & 1)) {
+                pm_unlock(&g_klock);
+                x[0] = R_BADCOMBO;
+                return;
+            }
+            n->ideal_core = core;
+            n->affinity = mask;
+            /* the thread moves to its ideal core, or with no ideal core and a mask that leaves its core out, to the
+               highest core the mask allows. Tears of the Kingdom moves its render workers with (-1, mask 4) and keeps
+               per-core command memory, indexed by svcGetCurrentProcessorNumber: a worker still reporting core 0 there
+               records over the commands of the thread on core 0 */
+            if (core >= 0)
+                n->core = core;
+            else if (!((mask >> n->core) & 1))
+                n->core = 63 - __builtin_clzll(mask);
+            pm_unlock(&g_klock);
+            if (n == t && t->on_core >= 0 && t->on_core != n->core) core_leave(t); /* moves on the way out */
             x[0] = 0;
             return;
         }
-        case 0x10: x[0] = (u32)(t ? t->core : 0); return;
+        case 0x10: /* the core it holds: after a new core mask it moves there only when it next lets go */
+            x[0] = (u32)(t ? (t->on_core >= 0 ? t->on_core : t->core) : 0);
+            return;
         case 0x11: { /* SignalEvent: the writable end only */
             KWEvent* w = (KWEvent*)h_get_ref((u32)x[0], KO_WEVENT);
             if (!w) {
@@ -323,8 +371,14 @@ static void snx_svc_(CPU* c, u32 imm) {
             x[0] = R_NOTFOUND;
             return;
         }
-        case 0x21: ipc_handle(t, (u32)x[0], t->tls); return;
-        case 0x22: ipc_handle(t, (u32)x[2], x[0]); return;
+        case 0x21: /* the caller waits for the reply off its core */
+            core_leave(t);
+            ipc_handle(t, (u32)x[0], t->tls);
+            return;
+        case 0x22:
+            core_leave(t);
+            ipc_handle(t, (u32)x[2], x[0]);
+            return;
         case 0x24:
             x[0] = 0;
             x[1] = 0x51;

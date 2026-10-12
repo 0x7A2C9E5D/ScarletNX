@@ -17,63 +17,44 @@ from concurrent.futures import ThreadPoolExecutor
 from . import ABI_DIR, REPO
 
 
+def cc_candidates(target_win=False):
+    if target_win and sys.platform.startswith('win'):
+        return ['x86_64-w64-mingw32-clang', 'clang']
+    if target_win:
+        # cross: only llvm-mingw makes a Windows DLL here, the host's clang would make an ELF named .dll
+        return ['x86_64-w64-mingw32-clang']
+    return ['clang']
+
+
 def find_cc(pref=None, target_win=False):
-    if pref:
-        cands = [pref]  # the compiler asked for or none: never a different one in its place
-    elif target_win and sys.platform.startswith('win'):
-        # windows: prefer the bundled tcc\, builds in seconds
-        cands = ['tcc', 'x86_64-w64-mingw32-clang', 'clang']
-    elif target_win:
-        # cross: only llvm-mingw makes a Windows DLL here, the host's clang or tcc would make an ELF named .dll
-        cands = ['x86_64-w64-mingw32-clang']
-    else:
-        cands = ['clang', 'tcc']
+    # the compiler asked for or none: never a different one in its place
+    cands = [pref] if pref else cc_candidates(target_win)
     for c in cands:
         p = shutil.which(c) or (c if os.path.isfile(c) else None)
-        if not p:
-            # portable tcc/python next to us
-            for d in (os.path.join(REPO, 'tcc'),):
-                q = os.path.join(d, c + ('.exe' if sys.platform.startswith('win') else ''))
-                if os.path.isfile(q):
-                    p = q
-                    break
         if p:
             return p
     return None
 
 
-def is_tcc(cc):
-    return 'tcc' in os.path.basename(cc).lower()
-
-
-def tcc_b(cc):
-    # bundled tcc keeps include\ and lib\ next to the exe
-    d = os.path.dirname(os.path.abspath(cc))
-    return ['-B', d] if os.path.isdir(os.path.join(d, 'include')) else []
-
-
 def compile_all(files, cc, opt, target_win, jobs, say, extra_flags=()):
     objs = []
     base = [cc]
-    if is_tcc(cc):
-        flags = ['-w', '-I', ABI_DIR] + tcc_b(cc)
-    else:
-        flags = [
-            '-O' + opt,
-            '-fno-strict-aliasing',
-            '-fwrapv',
-            '-w',
-            '-I',
-            ABI_DIR,
-            '-foptimize-sibling-calls',
-            '-fno-semantic-interposition',
-        ]
-        if not target_win:
-            flags += ['-fPIC', '-fvisibility=hidden']
-        # no -frounding-math: the code is compiled for round to nearest, the only FPCR mode games were seen to use.
-        # Under a directed mode Clang's folding can differ from the ARM result (FNMUL as (-a)*b, a conversion of 0 giving
-        # -0), so other modes are not supported and the runtime warns when a game selects one (snx_fpcr_apply)
-        flags += list(extra_flags)
+    flags = [
+        '-O' + opt,
+        '-fno-strict-aliasing',
+        '-fwrapv',
+        '-w',
+        '-I',
+        ABI_DIR,
+        '-foptimize-sibling-calls',
+        '-fno-semantic-interposition',
+    ]
+    if not target_win:
+        flags += ['-fPIC', '-fvisibility=hidden']
+    # no -frounding-math: the code is compiled for round to nearest, the only FPCR mode games were seen to use.
+    # Under a directed mode Clang's folding can differ from the ARM result (FNMUL as (-a)*b, a conversion of 0 giving
+    # -0), so other modes are not supported and the runtime warns when a game selects one (snx_fpcr_apply)
+    flags += list(extra_flags)
     t0 = time.time()
     done = [0]
 
@@ -120,7 +101,7 @@ def compile_all(files, cc, opt, target_win, jobs, say, extra_flags=()):
 
 def link_module(objs, cc, out, target_win):
     # big games have hundreds of objects and windows caps command lines at ~32K, so use an @rsp file
-    # (clang and tcc both take it) with short relative names
+    # with short relative names
     bdir = os.path.dirname(os.path.abspath(objs[0])) if objs else '.'
     names = [os.path.relpath(os.path.abspath(o), bdir).replace('\\', '/') for o in objs]
     rsp = os.path.join(bdir, 'objects.rsp')
@@ -129,14 +110,11 @@ def link_module(objs, cc, out, target_win):
     out = os.path.abspath(out)
     if os.path.isfile(cc):
         cc = os.path.abspath(cc)
-    if is_tcc(cc):
-        cmd = [cc, '-shared', '-o', out] + tcc_b(cc) + ['@objects.rsp']
+    cmd = [cc, '-shared', '-o', out, '@objects.rsp']
+    if not target_win:
+        cmd += ['-lm']
     else:
-        cmd = [cc, '-shared', '-o', out, '@objects.rsp']
-        if not target_win:
-            cmd += ['-lm']
-        else:
-            cmd += ['-static-libgcc']  # llvm-mingw: the unwinder linked in, so the module needs no extra DLL
+        cmd += ['-static-libgcc']  # llvm-mingw: the unwinder linked in, so the module needs no extra DLL
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=bdir)
     if r.returncode:
         raise SystemExit('Linking failed:\n' + r.stderr[-4000:])

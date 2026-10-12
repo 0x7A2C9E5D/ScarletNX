@@ -219,40 +219,7 @@ f64 fp_minnm64(f64 a, f64 b) {
     return fp_min64(a, b);
 }
 
-/* sqrt: the compiler's (sqrtsd). tcc has no builtin: Newton steps from an exponent-halving guess, then the last ulp
-   picked by search */
-#if defined(__TINYC__)
-f64 fp_sqrt64(f64 x) {
-    if (isnan64(x) || x == 0) return x;
-    if (x < 0) {
-        u64 n = 0x7FF8000000000000ull;
-        f64 r;
-        memcpy(&r, &n, 8);
-        return r;
-    }
-    if (x > 1.7e308) return x; /* inf */
-    u64 b;
-    memcpy(&b, &x, 8);
-    b = (b >> 1) + 0x1FF8000000000000ull;
-    f64 r;
-    memcpy(&r, &b, 8);
-    for (int i = 0; i < 6; i++) r = 0.5 * (r + x / r);
-    /* fix up the last ulp */
-    {
-        f64 lo = r;
-        u64 t;
-        memcpy(&t, &lo, 8);
-        for (int k = -2; k <= 2; k++) {
-            u64 u = t + k;
-            f64 y;
-            memcpy(&y, &u, 8);
-            f64 e1 = y * y - x, e0 = r * r - x;
-            if (fabs_(e1) < fabs_(e0)) r = y;
-        }
-    }
-    return r;
-}
-#else
+/* sqrt: the compiler's (sqrtsd) */
 f64 fp_sqrt64(f64 x) {
     if (x < 0) {
         u64 n = 0x7FF8000000000000ull;
@@ -261,7 +228,6 @@ f64 fp_sqrt64(f64 x) {
     }
     return __builtin_sqrt(x);
 }
-#endif
 f32 fp_sqrt32(f32 x) {
     if (x < 0) {
         u32 n = 0x7FC00000u;

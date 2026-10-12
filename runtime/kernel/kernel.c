@@ -107,6 +107,7 @@ void kobj_signal_nl(KObj* o) {
 }
 /* call with the lock held. 1 = woken, 0 = timeout */
 int sleep_nl(KThread* t, i64 timeout) {
+    core_leave(t); /* snx_svc takes the core back on the way out */
     if (timeout < 0) {
         while (!t->woken) pc_wait(&t->cv, &g_klock, -1);
         return 1;

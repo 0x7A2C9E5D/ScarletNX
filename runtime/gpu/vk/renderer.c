@@ -4,8 +4,8 @@
 
    Render targets, clears, draws (gpu/vk/render.c), compute (gpu/vk/compute.c), write-backs to and reloads from
    guest memory, and presenting the game's framebuffer from its render target (or from memory, converted on the CPU,
-   when no render target holds it). Everything that records runs under vk_lock(), which is reentrant: submits on the
-   GPU channel thread that makes them, presents and screenshots on theirs, and compute results landing on whichever
+   when no render target holds it). Everything that records runs under vk_lock(), which is reentrant: submissions and
+   presents on the GPU thread (gpu/gpu.c), screenshots on the thread asking, and compute results landing on whichever
    thread reads their memory first. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +22,7 @@ static VkSemaphore g_acquired[VK_FRAMES];
 /* the CPU fallback's image, and the last presented frame for screenshots */
 static Surf* g_cpu_img;
 static Surf* g_last;
-static u32 g_last_w, g_last_h;
+static u32 g_last_x, g_last_y, g_last_w, g_last_h;
 
 /* 0 when Vulkan can't run here */
 static int vkr_start(void) {
@@ -46,7 +46,7 @@ static int vkr_async_submit(u64* e, u32 n, u32 syncpt, u32 incs) {
     (void)syncpt;
     (void)incs;
     __atomic_add_fetch(&g_vk_epoch, 1, __ATOMIC_RELAXED); /* memory may have changed since the last submit */
-    return 0;                                             /* processed now, on the submitting thread */
+    return 0;                                             /* gpu_submit queues it for the GPU thread */
 }
 static void vkr_clear(GpuChannel* ch, u32 v) {
     vk_lock();
@@ -158,7 +158,7 @@ static int is_srgb(VkFormat f) {
 
 /* the game queued a buffer for display: show it, letterboxed to the window. A frame that can't be shown (minimized,
    no image to draw to) is still submitted, with the per-present bookkeeping, so frames don't pile up */
-static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt) {
+static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, const i32 crop[4]) {
     static int sc_srgb; /* what the swapchain was asked for (the surface may not have it) */
     vk_lock();
     vk_render_end();
@@ -167,10 +167,30 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
         src = vk_rt_for_cpu(cpu_addr, w, h);
         if (!src || src->f.is_int) src = cpu_frame(cpu_addr, w, h, pitch, layout, bhl, fmt);
     }
-    if (src) {
+    /* the part of the buffer shown: vi's crop, or all of it */
+    u32 x0 = 0, y0 = 0, x1 = w, y1 = h;
+    if (crop[2] > crop[0] && crop[3] > crop[1] && crop[0] >= 0 && crop[1] >= 0) {
+        x0 = (u32)crop[0] < w ? (u32)crop[0] : 0;
+        y0 = (u32)crop[1] < h ? (u32)crop[1] : 0;
+        x1 = (u32)crop[2] < w ? (u32)crop[2] : w;
+        y1 = (u32)crop[3] < h ? (u32)crop[3] : h;
+    }
+    if (src) { /* the render target found for the buffer can be smaller than it: a crop outside it shows all of it */
+        if (x1 > src->w) x1 = src->w;
+        if (y1 > src->h) y1 = src->h;
+        if (x1 <= x0 || y1 <= y0) {
+            x0 = y0 = 0;
+            x1 = w < src->w ? w : src->w;
+            y1 = h < src->h ? h : src->h;
+        }
+    }
+    u32 fw = x1 - x0, fh = y1 - y0;
+    if (src) { /* in its pixels: targets are scaled */
         g_last = src;
-        g_last_w = (u32)((u64)src->sw * (w < src->w ? w : src->w) / src->w); /* in its pixels: targets are scaled */
-        g_last_h = (u32)((u64)src->sh * (h < src->h ? h : src->h) / src->h);
+        g_last_x = (u32)((u64)src->sw * x0 / src->w);
+        g_last_y = (u32)((u64)src->sh * y0 / src->h);
+        g_last_w = (u32)((u64)src->sw * x1 / src->w) - g_last_x;
+        g_last_h = (u32)((u64)src->sh * y1 / src->h) - g_last_y;
     }
     /* the size the swapchain was made for, not the extent the surface clamped it to: that can stay different */
     int ww, wh, srgb = src ? is_srgb(src->f.vk) : sc_srgb;
@@ -206,14 +226,15 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
                        VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
             /* letterbox: the largest rectangle of the frame's aspect that fits the window, centered */
-            u32 sw = g_vk.sc_extent.width, sh = g_vk.sc_extent.height, dw = sw, dh = (u32)((u64)sw * h / w);
+            u32 sw = g_vk.sc_extent.width, sh = g_vk.sc_extent.height, dw = sw, dh = (u32)((u64)sw * fh / fw);
             if (dh > sh) {
                 dh = sh;
-                dw = (u32)((u64)sh * w / h);
+                dw = (u32)((u64)sh * fw / fh);
             }
             i32 dx = (i32)(sw - dw) / 2, dy = (i32)(sh - dh) / 2;
             VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                                .srcOffsets = {{0, 0, 0}, {(i32)g_last_w, (i32)g_last_h, 1}},
+                                .srcOffsets = {{(i32)g_last_x, (i32)g_last_y, 0},
+                                               {(i32)(g_last_x + g_last_w), (i32)(g_last_y + g_last_h), 1}},
                                 .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                                 .dstOffsets = {{dx, dy, 0}, {dx + (i32)dw, dy + (i32)dh, 1}}};
             vkCmdBlitImage(cb, src->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sc, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -228,7 +249,6 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
     if (g_last) g_last->last_used = g_vk_present; /* what screenshots read stays */
     vk_tex_frame();
     vk_buf_frame();
-    int save = g_vk_present % 300 == 0;
     if (g_vk_present % 600 == 0) {
         LOG("vulkan: %llu draws, %llu skipped; %llu dispatches in %llu batches (%llu ms waiting), %llu skipped\n",
             (unsigned long long)g_vk_drawn, (unsigned long long)g_vk_skipped, (unsigned long long)g_vk_dispatches,
@@ -254,16 +274,11 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
         vk_swapchain_create(srgb);
     }
     vk_unlock();
-    if (save) vk_pipeline_save(); /* writes a file: not while holding up the GPU threads */
 }
 
-/* the last presented frame as PPM (path.ppm), and a hash of its pixels */
-static u64 vkr_screenshot(const char* path) {
-    vk_lock();
+/* a part of a surface, blitted to RGBA8 and read back: its hash, and a .ppm at path if given */
+static u64 surf_save(Surf* s, u32 x, u32 y, u32 w, u32 h, const char* path) {
     u64 hash = 1469598103934665603ull;
-    Surf* s = g_last;
-    if (!s) goto out;
-    u32 w = g_last_w, h = g_last_h;
     /* blit to an RGBA8 image, whatever the target's format, then read that back. sRGB to sRGB, so the bytes stay
        encoded as the display shows them */
     VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -279,12 +294,12 @@ static u64 vkr_screenshot(const char* path) {
     VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
     VkImage tmp;
     VmaAllocation tmem;
-    if (!VK_OK(vmaCreateImage(g_vk.vma, &ii, &aci, &tmp, &tmem, NULL))) goto out;
+    if (!VK_OK(vmaCreateImage(g_vk.vma, &ii, &aci, &tmp, &tmem, NULL))) return hash;
     VkBuffer buf;
     u8* p = vk_readback_buffer((u64)w * h * 4, &buf);
     if (!p) {
         vmaDestroyImage(g_vk.vma, tmp, tmem);
-        goto out;
+        return hash;
     }
     VkCommandBuffer cb = vk_cmd();
     vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
@@ -292,7 +307,7 @@ static u64 vkr_screenshot(const char* path) {
     vk_barrier(cb, tmp, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED,
                VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                        .srcOffsets = {{0, 0, 0}, {(i32)w, (i32)h, 1}},
+                        .srcOffsets = {{(i32)x, (i32)y, 0}, {(i32)(x + w), (i32)(y + h), 1}},
                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                         .dstOffsets = {{0, 0, 0}, {(i32)w, (i32)h, 1}}};
     vkCmdBlitImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, tmp, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
@@ -329,7 +344,12 @@ static u64 vkr_screenshot(const char* path) {
         }
         if (!ok) WARN_LIMIT(1, "vulkan: the screenshot %s couldn't be written\n", fn);
     }
-out:
+    return hash;
+}
+/* the last presented frame as PPM (path.ppm), and a hash of its pixels */
+static u64 vkr_screenshot(const char* path) {
+    vk_lock();
+    u64 hash = g_last ? surf_save(g_last, g_last_x, g_last_y, g_last_w, g_last_h, path) : 1469598103934665603ull;
     vk_unlock();
     return hash;
 }

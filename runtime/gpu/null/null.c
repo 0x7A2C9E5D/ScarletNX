@@ -2,7 +2,8 @@
    Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the renderer of the headless build (tests without a GPU): draws nothing, and finishes each submission at once */
+/* the renderer of the headless build (tests without a GPU): draws nothing. The GPU thread still runs every command
+   stream, so syncpoints and semaphores advance */
 #include "gpu/renderer.h"
 #include "hle/nvdrv.h"
 #include "gpu/gpu.h"
@@ -59,7 +60,8 @@ static void null_cs_mem_need(u64 a, u64 n) {
     (void)n;
 }
 static void null_void(void) {}
-static void null_present_buffer(u64 a, u32 w, u32 h, u32 p, u32 l, u32 b, u32 f) {
+static void null_present_buffer(u64 a, u32 w, u32 h, u32 p, u32 l, u32 b, u32 f, const i32 crop[4]) {
+    (void)crop;
     (void)a;
     (void)w;
     (void)h;

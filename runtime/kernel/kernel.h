@@ -9,6 +9,8 @@
 #include "abi/cpu.h"
 #include "platform/plat.h"
 
+#define NCORES 4 /* the console's CPU cores */
+
 enum {
     KO_NONE,
     KO_EVENT,
@@ -43,7 +45,13 @@ struct KThread {
     KObj o;
     CPU cpu;
     u64 id;
-    int prio, core;
+    int prio;
+    int core;           /* the core it is scheduled on (0 to NCORES - 1), where it runs when it next takes a core */
+    int ideal_core;     /* as svcSetThreadCoreMask set it: -1 when the game doesn't care */
+    u32 yields;         /* svcSleepThread yields, every 64th of which is a host one */
+    int on_core;        /* the core it holds while it runs (core_enter), -2 while it waits for it, -1 otherwise */
+    KThread* core_next; /* core_enter's waiting list, under its lock */
+    u64 core_ticket;    /* arrival order there */
     u64 affinity;
     u64 tls;
     u64 entry, arg, stack_top;
@@ -88,6 +96,8 @@ KEvent* kevent_new(const char* name);
 void kevent_signal(KEvent* e);
 void kevent_clear(KEvent* e);
 KThread* kthread_cur(void);
+void core_enter(KThread* t); /* waits for its core to be free, then holds it */
+void core_leave(KThread* t); /* lets another thread on its core run */
 void kernel_run_main(u64 entry, u64 stack_size, int prio, int core);
 void snx_svc(CPU* c, u32 imm);
 extern PMutex g_klock;

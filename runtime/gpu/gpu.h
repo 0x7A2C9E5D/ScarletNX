@@ -46,6 +46,7 @@ typedef struct {
     u64 addr;
 } Surf2D;
 int gmem_read(u64 gva, void* dst, u64 size);
+void gmem_read_code(u64 gva, void* dst, u64 size); /* a shader program: stops where guest memory does */
 int gmem_write(u64 gva, const void* src, u64 size);
 u8* gmem_ptr(u64 gva, u64 size);
 u32 gmem_r32(u64 gva);
@@ -66,8 +67,12 @@ u32 gpu_color_bpp(u32 format); /* bytes per pixel of a color format (render targ
 
 /* gpu.c: GPFIFO submission */
 void gpu_init(void);
-/* runs the entries on channel (the channel's syncpoint id), then increments the syncpoint incs times */
-void gpu_submit(u64* entries, u32 n, u32 channel, u32 incs);
+/* queues GPFIFO entries for the GPU thread, which waits for the fence (wait_id ~0: none), runs them on channel (the
+   channel's syncpoint id), then increments the syncpoint incs times, after which it should be at expect (the fence
+   nvdrv promised) */
+void gpu_submit(u64* entries, u32 n, u32 channel, u32 incs, u32 wait_id, u32 wait_val, u32 expect);
+/* calls fn(arg) on the GPU thread once everything submitted before it has run */
+void gpu_call(void (*fn)(void*), void* arg);
 void gpu_channel_close(u32 channel); /* nvdrv closed the channel: a new one with the same id starts from reset */
 extern volatile u64 g_gpu_submits;
 /* guest memory [cpu_addr, cpu_addr + len) changed without a write the host's write tracking sees: decommitted pages,

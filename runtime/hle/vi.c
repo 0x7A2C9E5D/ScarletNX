@@ -2,10 +2,12 @@
    Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* vi + the nvnflinger buffer queue. QueueBuffer presents immediately, there's no compositor. */
+/* vi + the nvnflinger buffer queue. There's no compositor: QueueBuffer has the GPU thread show the frame once the work
+   queued before it is done. */
 #include "hle/vi.h"
 #include "core/main.h"
 #include "core/options.h"
+#include "gpu/gpu.h"
 #include "hle/nvdrv.h"
 #include "hle/services.h"
 #include "kernel/ipc.h"
@@ -24,7 +26,9 @@ typedef struct {
     u64 size;
     u8 raw[0x16C];
     u32 rawsize;
-    int queued;
+    int queued;  /* held: dequeued by the game, or queued and not shown yet */
+    u32 gen;     /* counts dequeues, so a late present doesn't free the slot again after a forced release */
+    i32 crop[4]; /* the part of the buffer shown (left, top, right, bottom); all 0 for the whole buffer */
 } Slot;
 static struct {
     Slot slots[64]; /* lock */
@@ -101,12 +105,32 @@ static void pw_out(PW* w, u64 addr, u64 size) {
 }
 
 /* ============================================================ present */
-static void present_slot(int i) {
+/* a slot is free again: after its frame is shown, or cancelled. gen is the dequeue the frame came from */
+static void slot_release(i32 slot, u32 gen) {
     pm_lock(&vi.lock);
-    Slot s = vi.slots[i];
+    if (slot >= 0 && slot < 64 && vi.slots[slot].gen == gen) vi.slots[slot].queued = 0;
+    pc_broadcast(&vi.free_cv);
     pm_unlock(&vi.lock);
-    if (!s.used) return;
-    vi_show_buffer(s.nvmap_id, s.offset, s.w, s.h, s.pitch, s.layout, s.bhl, s.afmt);
+    kevent_signal(vi.bufavail_ev);
+}
+/* a queued frame, shown on the GPU thread after the work before it, with the slot as it was queued */
+typedef struct {
+    i32 slot;
+    Slot s;
+    u32 nf, id[4], val[4];
+} QueuedFrame;
+static void present_queued(void* p) {
+    QueuedFrame* q = p;
+    /* nv_gpu_call_after left only fences the submissions before this reach: a wait here means one fell short */
+    for (u32 i = 0; i < q->nf; i++)
+        if (q->id[i] != 0xFFFFFFFFu && !syncpt_wait(q->id[i], q->val[i], 1000000000))
+            WARN_LIMIT(8,
+                       "binder: QUEUE_BUFFER slot %d: fence syncpoint %u did not reach %u in 1 s, presenting anyway\n",
+                       q->slot, q->id[i], q->val[i]);
+    Slot* s = &q->s;
+    if (s->used) vi_show_buffer(s->nvmap_id, s->offset, s->w, s->h, s->pitch, s->layout, s->bhl, s->afmt, s->crop);
+    slot_release(q->slot, s->gen);
+    free(q);
 }
 
 static int binder_transact(u32 id, u32 code, PR* in, PW* out) {
@@ -168,6 +192,7 @@ static int binder_transact(u32 id, u32 code, PR* in, PW* out) {
                         s->layout, s->bhl, s->fmt, s->nvmap_id);
                 }
                 pm_lock(&vi.lock);
+                ns.gen = vi.slots[slot].gen; /* a present still queued from the old buffer mustn't free a new dequeue */
                 vi.slots[slot] = ns;
                 pm_unlock(&vi.lock);
             }
@@ -188,9 +213,9 @@ static int binder_transact(u32 id, u32 code, PR* in, PW* out) {
             return 0;
         }
         case 3: { /* DEQUEUE_BUFFER */
-            /* a slot is held from DEQUEUE until QUEUE or CANCEL. With every buffer held this waits for one; when the
-               wait times out the holds are dropped, which hands out a buffer the game still holds. The log says when
-               that happens, with the slots held */
+            /* a slot is held from DEQUEUE until its frame is shown or cancelled. With every buffer held this waits
+               for one; when the wait times out the holds are dropped, which hands out a buffer the game may still draw
+               into or the GPU thread may still show. The log says when that happens, with the slots held */
             pm_lock(&vi.lock);
             int k = -1, nused = 0;
             for (int i = 0; i < 64; i++) nused += vi.slots[i].used;
@@ -209,17 +234,21 @@ static int binder_transact(u32 id, u32 code, PR* in, PW* out) {
                         break;
                     }
                 if (k >= 0) break;
-                if (pc_wait(&vi.free_cv, &vi.lock, 16000000)) { /* we release on present */
+                /* a slot comes free when the GPU thread shows its frame. If none does for a second, the GPU thread
+                   is far behind (long waits in a stream, pipeline compiles) or stuck: free them all rather than hang
+                   the game. Its late presents don't free the slots again (gen) */
+                if (pc_wait(&vi.free_cv, &vi.lock, 1000000000)) {
                     u64 held = 0;
                     for (int i = 0; i < 64; i++)
                         if (vi.slots[i].used && vi.slots[i].queued) held |= 1ull << i;
                     WARN_LIMIT(
-                        8, "binder: DEQUEUE_BUFFER found all %d buffers held (slots %llx) for 16 ms: releasing them\n",
+                        8, "binder: DEQUEUE_BUFFER found all %d buffers held (slots %llx) for 1 s: releasing them\n",
                         nused, (unsigned long long)held);
                     for (int i = 0; i < 64; i++) vi.slots[i].queued = 0;
                 }
             }
             vi.slots[k].queued = 1;
+            vi.slots[k].gen++;
             pm_unlock(&vi.lock);
             pw_u32(out, (u32)k);
             pw_u32(out, 1);
@@ -233,50 +262,47 @@ static int binder_transact(u32 id, u32 code, PR* in, PW* out) {
         }
         case 7: { /* QUEUE_BUFFER */
             i32 slot = (i32)pr_u32(in);
-            /* wait on the frame's fence if the GPU isn't done with it yet: presenting here is the compositor's
-               acquire, which waits on the fence the same way */
             u32 len = pr_u32(in);
             pr_u32(in);
             const u8* qi = pr_ptr(in, len);
             if (!qi) len = 0;
-            if (len >= 0x54) {
-                u32 nf;
-                memcpy(&nf, qi + 0x30, 4);
-                if (nf > 4) nf = 4;
-                for (u32 i = 0; i < nf; i++) {
-                    u32 id, val;
-                    memcpy(&id, qi + 0x34 + i * 8, 4);
-                    memcpy(&val, qi + 0x38 + i * 8, 4);
-                    if (id != 0xFFFFFFFFu && !syncpt_wait(id, val, 100000000)) {
-                        WARN_LIMIT(8,
-                                   "binder: QUEUE_BUFFER slot %d: fence syncpoint %u did not reach %u in 100 ms, "
-                                   "presenting anyway\n",
-                                   slot, id, val);
-                    }
+            QueuedFrame* q = calloc(1, sizeof *q);
+            if (!q) fatal("Out of memory queueing a frame");
+            q->slot = slot;
+            if (len >= 0x54) { /* the frame's fences */
+                memcpy(&q->nf, qi + 0x30, 4);
+                if (q->nf > 4) q->nf = 4;
+                for (u32 i = 0; i < q->nf; i++) {
+                    memcpy(&q->id[i], qi + 0x34 + i * 8, 4);
+                    memcpy(&q->val[i], qi + 0x38 + i * 8, 4);
                 }
             }
+            /* the buffer's crop, which the renderer shows of it (Tears of the Kingdom renders 1280x720 into the
+               corner of a 1920x1080 buffer in handheld mode), and its transform, which it ignores */
+            i32 cr[4] = {0, 0, 0, 0};
+            u32 tr = 0;
             if (len >= 0x28) {
-                /* the buffer's crop and transform. The renderer presents the whole buffer and ignores them */
-                i32 cr[4];
-                u32 tr;
                 memcpy(cr, qi + 0x0C, 16);
                 memcpy(&tr, qi + 0x20, 4);
-                {
-                    pm_lock(&vi.lock);
-                    int changed = vi.crop_transform != tr || memcmp(vi.crop, cr, 16);
-                    vi.crop_transform = tr;
-                    memcpy(vi.crop, cr, 16);
-                    pm_unlock(&vi.lock);
-                    if (changed)
-                        LOG("vi: crop (%d,%d)-(%d,%d) transform %x (not applied)\n", cr[0], cr[1], cr[2], cr[3], tr);
-                }
             }
-            if (slot >= 0 && slot < 64) present_slot(slot);
             pm_lock(&vi.lock);
-            if (slot >= 0 && slot < 64) vi.slots[slot].queued = 0;
-            pc_broadcast(&vi.free_cv);
+            if (slot >= 0 && slot < 64) {
+                q->s = vi.slots[slot];
+                memcpy(q->s.crop, cr, 16);
+            }
+            int changed = len >= 0x28 && (vi.crop_transform != tr || memcmp(vi.crop, cr, 16));
+            if (changed) {
+                vi.crop_transform = tr;
+                memcpy(vi.crop, cr, 16);
+            }
             pm_unlock(&vi.lock);
-            kevent_signal(vi.bufavail_ev);
+            if (changed)
+                LOG("vi: crop (%d,%d)-(%d,%d), transform %x%s\n", cr[0], cr[1], cr[2], cr[3], tr,
+                    tr ? " (not applied)" : "");
+            /* the compositor shows the frame once the GPU has drawn it (its acquire waits on the frame's fence), and
+               QueueBuffer returns at once: shown here, it held the game's queue lock while the GPU thread caught up,
+               so its CPU and GPU work never overlapped. A fence no submission promised is waited for here instead */
+            nv_gpu_call_after(q->nf, q->id, q->val, present_queued, q);
             u32 qo[4] = {(u32)vi.width, (u32)vi.height, 0, 0};
             pw_bytes(out, qo, 16);
             pw_u32(out, 0);
@@ -285,10 +311,9 @@ static int binder_transact(u32 id, u32 code, PR* in, PW* out) {
         case 8: { /* CANCEL_BUFFER: the slot is free again, as after a present */
             i32 slot = (i32)pr_u32(in);
             pm_lock(&vi.lock);
-            if (slot >= 0 && slot < 64) vi.slots[slot].queued = 0;
-            pc_broadcast(&vi.free_cv);
+            u32 gen = slot >= 0 && slot < 64 ? vi.slots[slot].gen : 0;
             pm_unlock(&vi.lock);
-            kevent_signal(vi.bufavail_ev);
+            slot_release(slot, gen);
             pw_u32(out, 0);
             return 0;
         }

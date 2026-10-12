@@ -39,7 +39,6 @@ __attribute__((weak)) const SnxModule* snx_module_static(void);
 #else
 const SnxModule* snx_module_static(void) __attribute__((weak));
 #endif
-int g_code_tcc;
 static int load_code(void) {
     if (snx_module_static) {
         g_mod = snx_module_static();
@@ -70,20 +69,6 @@ static int load_code(void) {
         WARN("%s is not a ScarletNX module\n", p);
         return -1;
     }
-#if defined(_WIN32)
-    { /* tell clang from tcc builds by the PE linker version (lld 14.0 vs tcc 6.0). tcc code is a lot slower */
-        const u8* b = (const u8*)h;
-        u32 lf;
-        memcpy(&lf, b + 0x3C, 4);
-        u8 mj = b[lf + 24 + 2], mn = b[lf + 24 + 3];
-        g_code_tcc = mj == 6 && mn == 0;
-        if (g_code_tcc)
-            LOG("code: %s_code.dll was compiled with TCC. It runs several times slower than with Clang: recompile it with Clang for much better performance\n",
-                g_exename);
-        else
-            LOG("code: %s_code.dll compiled with Clang (linker %u.%u)\n", g_exename, mj, mn);
-    }
-#endif
     g_mod = f();
     return g_mod ? 0 : -1;
 }
@@ -165,7 +150,7 @@ static void read_npdm(void) {
             if ((cap & 0xF) != 0x7) continue; /* ThreadInfo: the lowest and highest priority and core */
             u32 lo_prio = (cap >> 4) & 63, hi_prio = (cap >> 10) & 63, min_core = (cap >> 16) & 255,
                 max_core = (cap >> 24) & 255;
-            if (hi_prio > lo_prio || min_core > max_core || max_core > 63) break;
+            if (hi_prio > lo_prio || min_core > max_core || max_core >= NCORES) break;
             g_core_mask = (~0ull >> (63 - max_core)) & (~0ull << min_core);
             g_prio_mask = (~0ull >> (63 - lo_prio)) & (~0ull << hi_prio);
             break;
@@ -270,7 +255,11 @@ int snx_main(int argc, char** argv) {
         vi_vsync_tick();
         if (tick % 60 == 0) ini_poll();
         frontend_frame();
-        if (++tick % 300 == 0) save_hints();
+        if (++tick % 300 == 0) {
+            save_hints();
+            /* the pipeline cache, when it grew: here, as a file write on the GPU thread would hold up every channel */
+            if (g_renderer && g_renderer->save) g_renderer->save();
+        }
         /* dump thread states to threads.txt every 15s, useful when something hangs */
         if (tick % 900 == 0) {
             char p[1200];
