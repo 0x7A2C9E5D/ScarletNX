@@ -241,7 +241,7 @@ static void prune_objects(const CompileQueue* q) {
 }
 int snx_compile_sources(char** sources, size_t count, const char* output, const SnxPaths* paths,
                         const SnxCompileOptions* o) {
-    char *cc, *abi, *opt, *version = NULL, *rsp, *rsp_arg, *tmp, **extra;
+    char *cc, *abi, *opt, *version = NULL, *dir, *rsp, *rsp_arg, *tmp, **extra;
     const char **flags, *args[9];
     CompileQueue q;
     size_t i, nf = 0, ne, len;
@@ -286,6 +286,9 @@ int snx_compile_sources(char** sources, size_t count, const char* output, const 
     flags = (const char**)snx_alloc((ne + 20) * sizeof(*flags));
     flags[nf++] = cc;
     flags[nf++] = opt;
+    flags[nf++] = "-pipe";
+    flags[nf++] = "-march=native";
+    flags[nf++] = "-mtune=native";
     flags[nf++] = "-fno-strict-aliasing";
     flags[nf++] = "-fwrapv";
     flags[nf++] = "-w";
@@ -299,7 +302,6 @@ int snx_compile_sources(char** sources, size_t count, const char* output, const 
         flags[nf++] = "-fPIC";
         flags[nf++] = "-fvisibility=hidden";
     }
-    if (o->native) flags[nf++] = "-march=native";
     for (i = 0; i < ne; ++i) flags[nf++] = extra[i];
     for (i = 0; i < nf; ++i) signature = hash_bytes(signature, flags[i], strlen(flags[i]) + 1);
     if (hash_abi(&signature, abi)) {
@@ -325,7 +327,9 @@ int snx_compile_sources(char** sources, size_t count, const char* output, const 
     }
     run_queue(&q, o->jobs);
     if (q.failed) goto done;
-    rsp = snx_format("%s.objects.rsp", output);
+    dir = snx_dirname(sources[0]);
+    rsp = snx_path_join(dir, "objects.rsp");
+    free(dir);
     f = snx_fopen(rsp, "wb");
     if (!f) {
         snx_error("cannot write %s", rsp);
