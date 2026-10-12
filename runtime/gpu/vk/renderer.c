@@ -27,6 +27,17 @@ static void vkr_before_write(u64 gva, u64 size) {
     vk_buf_before_write(gva, size);
     vk_compute_before_write(gva, size);
 }
+static void vkr_mapping_begin(u64 gva, u64 size, int full) {
+    vk_lock();
+    if (full) {
+        vk_buf_land();
+        vk_compute_land();
+    } else {
+        vk_buf_mem_need(gva, size);
+        vk_compute_mem_need(gva, size);
+    }
+}
+static void vkr_mapping_end(void) { vk_unlock(); }
 
 /* 0 when Vulkan can't run here */
 static int vkr_start(void) {
@@ -36,6 +47,8 @@ static int vkr_start(void) {
     vk_cmd_init();
     vk_pipeline_init();
     g_gpu_before_write = vkr_before_write;
+    g_gpu_mapping_begin = vkr_mapping_begin;
+    g_gpu_mapping_end = vkr_mapping_end;
     g_gpu_mem_changed = vk_mem_changed;
     VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     if (!g_opt_headless)

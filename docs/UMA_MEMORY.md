@@ -21,6 +21,11 @@ Importing `g_mem` directly would let the GPU see later CPU writes, and a shader 
 guest's synchronization point. A direct import must therefore own and pin the imported pages, intercept writes to
 them or use copy-on-write, and wait for GPU completion before remapping or releasing them.
 
+Mapping changes now acquire the renderer's memory lock before the guest memory manager's lock. CPU backing changes land
+all pending storage output because a CPU page may have several GPU aliases. GPU-VA changes land overlapping output
+before changing the page table and mark the virtual range dirty for buffer caches. This closes the backing-lifetime
+gap for staged outputs; it does not pin guest pages or make direct host-pointer import safe.
+
 Graphics storage writes now retain each draw's input bytes, destination range, and GPU buffer. A completed frame
 invalidates noncoherent output memory and lands only bytes the shader changed where the guest still holds the input
 value. Overlapping guest reads and writes, and stream synchronization points, wait for pending outputs. Draws can reuse

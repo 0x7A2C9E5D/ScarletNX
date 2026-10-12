@@ -84,6 +84,10 @@ extern void (*g_gpu_mem_changed)(u64 cpu_addr, u64 len); /* the renderer's side 
 /* the renderer lands work it is holding (compute results) before the stream goes on past it: before a write of
    memory those results overlap (size > 0), and before anything the game can observe (gpu_signal_point, size 0) */
 extern void (*g_gpu_before_write)(u64 gva, u64 size);
+/* Hold the renderer's memory lock across a backing change. full is for CPU guest pages, whose GPU aliases are
+   unknown; GPU-VA changes supply the affected range. Begin precedes the memory manager's own lock. */
+extern void (*g_gpu_mapping_begin)(u64 gva, u64 size, int full);
+extern void (*g_gpu_mapping_end)(void);
 
 /* engines.c: the 3D engine's methods and its report semaphores */
 u64 gpu_ticks(void);

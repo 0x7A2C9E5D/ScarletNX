@@ -114,9 +114,11 @@ int mem_map(u64 a, u64 s, u32 state, u32 perm) {
     if (!s) return 0;
     a &= ~0xFFFull;
     s = (s + 0xFFF) & ~0xFFFull;
+    if (g_gpu_mapping_begin) g_gpu_mapping_begin(0, 0, 1);
     memlock();
     int r = map_nl(a, s, state, perm);
     memunlock();
+    if (g_gpu_mapping_end) g_gpu_mapping_end();
     return r;
 }
 
@@ -127,12 +129,14 @@ static int budget_fits(u64 heap, u64 physical, u64 budget) { return heap <= budg
    only this call's new pages without touching pre-existing mappings, including adjacent ones. */
 int mem_map_physical(u64 a, u64 s, u64 budget) {
     if (!in_as(a, s)) return MEM_BADSTATE;
+    if (g_gpu_mapping_begin) g_gpu_mapping_begin(0, 0, 1);
     memlock();
     u64 end = a + s, p = a, added = 0;
     int count = 0;
     MemBlock* holes = calloc((size_t)nblk + 1, sizeof *holes);
     if (!holes) {
         memunlock();
+        if (g_gpu_mapping_end) g_gpu_mapping_end();
         return MEM_NOMEM;
     }
     for (int i = 0; i < nblk && p < end; i++) {
@@ -173,6 +177,7 @@ int mem_map_physical(u64 a, u64 s, u64 budget) {
     }
     free(holes);
     memunlock();
+    if (g_gpu_mapping_end) g_gpu_mapping_end();
     return r;
 }
 
@@ -195,14 +200,17 @@ int mem_unmap(u64 a, u64 s) {
     a &= ~0xFFFull;
     s = (s + 0xFFF) & ~0xFFFull;
     if (!in_as(a, s)) return MEM_BADSTATE;
+    if (g_gpu_mapping_begin) g_gpu_mapping_begin(0, 0, 1);
     memlock();
     unmap_nl(a, s);
     memunlock();
+    if (g_gpu_mapping_end) g_gpu_mapping_end();
     return 0;
 }
 
 int mem_unmap_physical(u64 a, u64 s) {
     if (!in_as(a, s)) return MEM_BADSTATE;
+    if (g_gpu_mapping_begin) g_gpu_mapping_begin(0, 0, 1);
     memlock();
     u64 n = 0;
     int r = 0;
@@ -224,6 +232,7 @@ int mem_unmap_physical(u64 a, u64 s) {
         __atomic_sub_fetch(&g_phys_mapped, n, __ATOMIC_SEQ_CST);
     }
     memunlock();
+    if (g_gpu_mapping_end) g_gpu_mapping_end();
     return r;
 }
 
@@ -332,10 +341,12 @@ u64 mem_find_free(u64 lo, u64 hi, u64 size, u64 align) {
    has a page more on each side, left free as guard pages */
 u64 kmem_alloc(u64 size, u32 state, u32 perm) {
     size = (size + 0xFFF) & ~0xFFFull;
+    if (g_gpu_mapping_begin) g_gpu_mapping_begin(0, 0, 1);
     memlock();
     u64 a = find_free_nl(KERN_BASE, KERN_END, size + 0x2000, 0x1000);
     int r = a ? map_nl(a + 0x1000, size, state, perm) : -1;
     memunlock();
+    if (g_gpu_mapping_end) g_gpu_mapping_end();
     if (r) fatal("kmem_alloc: out of memory (%llx)", (unsigned long long)size);
     return a + 0x1000;
 }
@@ -344,6 +355,7 @@ u64 kmem_alloc(u64 size, u32 state, u32 perm) {
    concurrent physical map cannot spend the same last pages as a heap extension. */
 int mem_heap_set(u64 size, u64 budget) {
     if (size > HEAP_SIZE) return MEM_NOMEM;
+    if (g_gpu_mapping_begin) g_gpu_mapping_begin(0, 0, 1);
     memlock();
     u64 cur = g_heap_size;
     int r = 0;
@@ -372,5 +384,6 @@ int mem_heap_set(u64 size, u64 budget) {
     }
     if (!r) __atomic_store_n(&g_heap_size, size, __ATOMIC_SEQ_CST);
     memunlock();
+    if (g_gpu_mapping_end) g_gpu_mapping_end();
     return r;
 }

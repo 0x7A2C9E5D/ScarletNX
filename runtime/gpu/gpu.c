@@ -67,6 +67,8 @@ void gmem_read_code(u64 gva, void* dst, u64 size) {
    memory those results overlap (size > 0), and before anything the game can observe, like a semaphore release or a
    syncpoint (gpu_signal_point, size 0) */
 void (*g_gpu_before_write)(u64 gva, u64 size);
+void (*g_gpu_mapping_begin)(u64 gva, u64 size, int full);
+void (*g_gpu_mapping_end)(void);
 void gpu_signal_point(void) {
     if (g_gpu_before_write) g_gpu_before_write(0, 0);
 }
