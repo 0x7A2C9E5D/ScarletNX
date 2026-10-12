@@ -2,45 +2,64 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # Development
 
-See [architecture](ARCHITECTURE.md) for component ownership and [build options](BUILD.md)
-for rebuilding. `CLAUDE.md` contains repository rules for coding agents.
-Commands below assume POSIX. Use the equivalent Python/path spelling on Windows.
+[Architecture](ARCHITECTURE.md) · [build/toolchains](BUILD.md) · [usage](USAGE.md) · [agent rules](../CLAUDE.md).
+Run from checkout. POSIX examples: Windows uses `python`, `.exe`, PowerShell env syntax.
 
-| Task | Command |
-| --- | --- |
-| Format / check formatting | `scripts/format.sh` / `scripts/format.sh --check` |
-| Test indexed filesystems | `python3 tests/run_filesystem_tree.py --cc clang --sanitize` |
-| Name guest addresses | `python3 tools/symbols.py work/Game cf34380` |
-| Disassemble a function | `python3 tools/disasm.py work/Game NvRmStreamFlushSync` |
-| Scripted run and screenshot | `./games/Game --seconds=60 --script=15000:400,16000:1 --shot=out` |
-| Repeat runs and summarize | `python3 tools/run_game.py Game --runs 5 --dump work/Game` |
-| Record translated shaders | `SNX_SHADER_CORPUS=dir ./games/Game` |
-| Validate a shader corpus | `build/default/snx-shaderc dir --validate` |
-| Precompile NVN shader files | `build/default/snx-shaderc --nvn DIR --cache games/shader_cache/spirv` |
+## Rebuild / checks
 
-Formatting requires clang-format 23 and `uv` for the pinned Ruff formatter.
-Shader validation requires `spirv-val`. Recompilation already precompiles supported NVN shaders.
-Script entries are milliseconds plus a hexadecimal button mask. Presses last 300 ms by default
-and can be changed with `--press_len`.
+```sh
+cmake --build --preset default
+python3 scripts/recomp.py work/Game Game -- --native --jobs 8
+scripts/format.sh --check
+python3 tests/run_filesystem_tree.py --cc clang --sanitize
+clang -fsyntax-only -Wall -fno-strict-aliasing -fwrapv -I runtime/abi runtime/abi/cpu_helpers.c
+```
 
-## Verification
+Runtime relink deploys to `games/` by default. Recompiler/`runtime/abi/` edits require `recomp.py`.
+Avoid builds during timing runs. Formatting: clang-format 23 + `uv`/pinned Ruff; omit `--check` to write.
+FS tests use production tree/HLE + synthetic temp data; `--only tree|service` selects a suite.
 
-CI checks formatting, builds on Linux and Windows, syntax-checks ABI helpers, and runs
-filesystem regression tests and Python syntax/help checks. It does not run a game.
+CI: formatting, Linux/Windows builds, ABI syntax, FS regressions, Python syntax/help.
+Verify affected scenes manually, repeat intermittent failures, record evidence/scope.
+Test guest semantics + malformed IPC with synthetic cases.
 
-Verify runtime fixes through the affected scene. Repeat intermittent-crash tests, compare
-screenshots when relevant, and record what was tested. Do not rebuild during timing-sensitive
-runs because builds deploy runtimes. Add synthetic regression tests for semantics and malformed inputs.
+## Run / diagnose
 
-## Upstream imports
+```sh
+(cd games && ./Game --seconds=60 --script=15000:400,16000:1 --press_len=300 --shot=out)
+python3 tools/run_game.py Game --runs 5 --seconds 60 --dump work/Game --script ""
+python3 tools/symbols.py work/Game cf34380
+python3 tools/disasm.py work/Game NvRmStreamFlushSync
+python3 tools/disasm.py work/Game cf34240 cf343c0
+```
 
-```bash
+- Runtime: `--seconds=N` / `--frames=N`; `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
+  `--script=ms:hexbuttons,...`, `--press_len=ms` (default 300).
+  Masks: A/B/X/Y `1/2/4/8`, L/R `40/80`, ZL/ZR `100/200`, Plus/Minus `400/800`,
+  left/up/right/down `1000/2000/4000/8000`.
+- `run_game.py`: Catherine New Game sequence by default; **`--script ""` disables it**.
+  `--out DIR` → `runN.log` + PNG (PPM without Pillow); default fresh temp dir.
+  Summary: exit, PC/symbol (`--dump`), frames/FPS. Unknown args pass through, e.g. `--fps_limit=0`.
+- Guest VAs: hex; disasm function queries: substrings. Disasm requires `llvm-objcopy` + `llvm-objdump`.
+  `--log=2`: verbose; Windows `--profile=1`: `profile.txt` every 10 s.
+
+## Shaders
+
+```sh
+SNX_SHADER_CORPUS=corpus games/Game
+build/default/snx-shaderc corpus --validate --out translated
+build/default/snx-shaderc --nvn DIR --cache games/shader_cache/spirv --verbose
+```
+
+`--validate`: needs `spirv-val`; `--out`: GLSL/SPIR-V for build comparisons.
+`--nvn`: prebuild shipped shaders (automatic in `recomp.py`). PowerShell: `$env:SNX_SHADER_CORPUS='corpus'`.
+
+## Upstream / provenance
+
+```sh
 scripts/import-upstream.sh SwitchRecomp_v143.zip v143
 ```
 
-The `upstream` branch stores each MZ Labs release and its formatted copy. Tags `upstream-vN`
-point to original imports. Port changes into `main` by hand because the layouts differ.
-The fork started from `upstream-v142`.
-
-Keep game files, keys, generated modules and third-party build trees out of Git.
-Preserve provenance in file headers and [credits](CREDITS.md).
+`upstream`: MZ Labs releases + formatted copies; `upstream-vN`: original imports; fork base: `upstream-v142`.
+Port to `main` manually (different layouts). Exclude dumps/keys/generated modules/dependency builds from Git.
+Preserve headers + [credits/install notices](CREDITS.md).

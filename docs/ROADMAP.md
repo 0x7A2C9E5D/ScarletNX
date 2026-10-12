@@ -1,34 +1,29 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <!-- Copyright 2026 the ScarletNX contributors -->
-# Status and planned work
+# Status + roadmap
 
-Recorded game-validation status from 2026-10-11: Catherine: Full Body USA
-(`0100BF00112C0000`, v2.0) reached the New Game cutscene at 60 FPS using Vulkan, without sound.
-Earlier crash addresses refer to the Asian release (`0100BC4010896000`).
-These are historical measurements, not a current compatibility guarantee.
+Recorded run, 2026-10-11: Catherine: Full Body USA (`0100BF00112C0000`, v2.0),
+New Game cutscene, Vulkan, 60 FPS, no audio. Older traces use the Asian TID (`0100BC4010896000`).
 
-The Clang/CMake build, cross-platform CI, SDL3 backend, Vulkan renderer, shader caches and
-component layout are in place. Git history records completed fixes and measurements.
+Implemented: Clang/CMake, Linux/Windows CI, SDL3/Vulkan, shader caches, component libs.
 
 ## Next work
 
-- Add instruction, IPC, memory and GPU-cache regression tests. Extend smoke runs with
-  reference-image checks and display-free execution.
-- Enable broader compiler warnings. Check vector operands near register 255 before indexing arrays.
-- Implement audio output, PCM playback for `audout`, and mixing/routing/effects for `audren`.
-  Validate hwopus with audible output.
-- Schedule GPU channels separately so a blocked channel cannot stall work that satisfies its wait.
-- Keep vsync progressing during Windows window dragging. Test native Windows and real gamepads.
-- Support framebuffer transforms, attachment feedback and BCn fallback where required.
-- Match ARM NaN selection/default-NaN behavior and directed rounding in generated FP operations.
-- Honor thread suspension at WFE boundaries.
-- Measure Vulkan performance, profile runtime/game code, and test other titles.
-- Bring the thread-dump reader and Maxwell instruction scanner into the repository.
+- **Regression:** ARM ISA, IPC, VM, GPU-cache tests. Headless smoke runs + reference images.
+- **Diagnostics:** stricter warnings, shader vector-boundary tests at R254/RZ. Import thread-dump
+  reader and Maxwell instruction scanner.
+- **Audio:** host output, `audout` PCM, `audren` mixing/routing/FX. Validate hwopus playback.
+- **GPU:** per-channel scheduling so a blocked channel cannot stall its fence producer.
+  FB transforms, attachment feedback, BCn fallback.
+- **CPU:** ARM NaN propagation/default-NaN and directed FP rounding. Thread suspension at WFE.
+- **Host:** vsync during Win32 window drags, native Windows/gamepad coverage.
+- **Performance:** runtime/guest profiling, Vulkan measurements, broader title coverage.
 
-## Design decisions
+Commands: [development](DEVELOPMENT.md).
 
-Upstream releases are ported by hand, allowing component layouts to change independently.
+## Design
 
-NVN-level replacement was investigated for Catherine: its loader requests 468 functions
-and the game uses about 178. It would replace much of command decoding while retaining
-shader translation and host1x support. It remains a possible later rewrite.
+Port upstream releases manually to retain independent component layouts.
+
+NVN HLE remains exploratory: Catherine requests 468 exports and uses ~178. It could replace
+command decoding while retaining shader translation and host1x.
