@@ -208,6 +208,8 @@ int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off); /* no delayed 
 /* a copy of len bytes made now (data that changes within a frame), or of zeros when gva is 0 */
 int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off);
 void vk_buf_frame(void);
+/* Land GPU-written bytes only where guest memory still matches the shader's input snapshot. */
+void vk_write_changed(u64 addr, const u8* res, const u8* org, u32 size);
 /* 1 if [host, host+len) was written since the write-tracking clock read `since`, 0 if not, -1 when write tracking
    can't tell (no host pointer, or not available): then check the contents */
 int vk_written_since(const u8* host, u64 len, u32 since);
