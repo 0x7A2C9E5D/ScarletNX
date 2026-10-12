@@ -226,9 +226,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
             positional = 1;
             continue;
         }
-        if (!strcmp(arg, "--native"))
-            compile.native = 1;
-        else if (!strcmp(arg, "--no-build"))
+        if (!strcmp(arg, "--no-build"))
             no_build = 1;
         else if (!strcmp(arg, "--interp-only"))
             gen.interp_only = 1;

@@ -286,6 +286,9 @@ int snx_compile_sources(char** sources, size_t count, const char* output, const 
     flags = (const char**)snx_alloc((ne + 20) * sizeof(*flags));
     flags[nf++] = cc;
     flags[nf++] = opt;
+    flags[nf++] = "-pipe";
+    flags[nf++] = "-march=native";
+    flags[nf++] = "-mtune=native";
     flags[nf++] = "-fno-strict-aliasing";
     flags[nf++] = "-fwrapv";
     flags[nf++] = "-w";
@@ -299,7 +302,6 @@ int snx_compile_sources(char** sources, size_t count, const char* output, const 
         flags[nf++] = "-fPIC";
         flags[nf++] = "-fvisibility=hidden";
     }
-    if (o->native) flags[nf++] = "-march=native";
     for (i = 0; i < ne; ++i) flags[nf++] = extra[i];
     for (i = 0; i < nf; ++i) signature = hash_bytes(signature, flags[i], strlen(flags[i]) + 1);
     if (hash_abi(&signature, abi)) {
