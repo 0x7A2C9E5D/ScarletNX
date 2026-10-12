@@ -241,7 +241,7 @@ static void prune_objects(const CompileQueue* q) {
 }
 int snx_compile_sources(char** sources, size_t count, const char* output, const SnxPaths* paths,
                         const SnxCompileOptions* o) {
-    char *cc, *abi, *opt, *version = NULL, *rsp, *rsp_arg, *tmp, **extra;
+    char *cc, *abi, *opt, *version = NULL, *dir, *rsp, *rsp_arg, *tmp, **extra;
     const char **flags, *args[9];
     CompileQueue q;
     size_t i, nf = 0, ne, len;
@@ -327,7 +327,9 @@ int snx_compile_sources(char** sources, size_t count, const char* output, const 
     }
     run_queue(&q, o->jobs);
     if (q.failed) goto done;
-    rsp = snx_format("%s.objects.rsp", output);
+    dir = snx_dirname(sources[0]);
+    rsp = snx_path_join(dir, "objects.rsp");
+    free(dir);
     f = snx_fopen(rsp, "wb");
     if (!f) {
         snx_error("cannot write %s", rsp);

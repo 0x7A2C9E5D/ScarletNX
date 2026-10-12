@@ -19,6 +19,29 @@ static void check(int ok, const char* what) {
         ++failures;
     }
 }
+static void environment(const char* name, const char* value) {
+#ifdef _WIN32
+    check(!_putenv_s(name, value ? value : ""), "set test environment");
+#else
+    check(!(value ? setenv(name, value, 1) : unsetenv(name)), "set test environment");
+#endif
+}
+static void check_empty(const char* dir) {
+    char** names = NULL;
+    size_t count = 0;
+    check(!snx_list_dir(dir, &names, &count) && !count, "temporary build directory cleaned up");
+    snx_free_strings(names, count);
+}
+static void check_sources(const char* dir) {
+    char** names = NULL;
+    size_t count = 0, i, len;
+    check(!snx_list_dir(dir, &names, &count) && count, "generated C retained on request");
+    for (i = 0; i < count; ++i) {
+        len = strlen(names[i]);
+        check(len > 2 && !strcmp(names[i] + len - 2, ".c"), "only C sources retained");
+    }
+    snx_free_strings(names, count);
+}
 static void put32(unsigned char* p, size_t off, unsigned long n) {
     unsigned i;
     for (i = 0; i < 4; ++i) p[off + i] = (unsigned char)(n >> (8 * i));
@@ -86,7 +109,7 @@ int main(int argc, char** argv) {
     unsigned char image[0x200];
     const char* args[24];
     char *root, *input, *out, *self, *module, *text = NULL, *data_file;
-    char *cached, *source, *nested;
+    char *cached, *source, *nested, *temp, *build, *old_flags;
     size_t cached_size;
     int rc, pass, k;
     if (argc != 4) return 2;
@@ -96,6 +119,17 @@ int main(int argc, char** argv) {
     input = snx_path_join(root, "program with spaces.nro");
     out = snx_path_join(root, "output with spaces");
     self = snx_executable(argv[0]);
+    temp = snx_path_join(root, "temporary files with spaces");
+    build = snx_path_join(out, "Native Fixture_build");
+    check(!snx_mkdirs(temp), "temporary build parent");
+#ifdef _WIN32
+    environment("TMP", temp);
+    environment("TEMP", temp);
+#else
+    environment("TMPDIR", temp);
+#endif
+    old_flags = getenv("SNX_CFLAGS") ? snx_strdup(getenv("SNX_CFLAGS")) : NULL;
+    environment("SNX_CFLAGS", NULL);
     memset(image, 0, sizeof(image));
     put32(image, 0, 0x14000020); /* B +0x80 */
     memcpy(image + 0x10, "NRO0", 4);
@@ -110,7 +144,7 @@ int main(int argc, char** argv) {
     put32(image, 0x84, 0x91000c00); /* ADD X0,X0,#3 */
     put32(image, 0x88, 0xd65f03c0); /* RET */
     check(!snx_write_file(input, image, sizeof(image)), "write NRO");
-    for (pass = 0; pass < 3; ++pass) {
+    for (pass = 0; pass < 6; ++pass) {
         k = 0;
         args[k++] = argv[1];
         args[k++] = "--repo";
@@ -129,10 +163,21 @@ int main(int argc, char** argv) {
         args[k++] = "--chunk";
         args[k++] = "2";
         if (pass == 2) args[k++] = "--interp-only";
+        if (pass == 5) args[k++] = "--keep-c";
         args[k] = NULL;
+        if (pass == 3) environment("SNX_CFLAGS", "-fsnx-invalid-test-option");
         rc = snx_run(args, root, NULL, &text);
-        if (rc) fprintf(stderr, "%s\n", text);
-        check(!rc, pass == 2 ? "interpreter CLI build" : "AOT CLI build/cache reuse");
+        if (rc && pass != 3 && pass != 4) fprintf(stderr, "%s\n", text);
+        if (pass == 3 || pass == 4)
+            check(rc != 0, pass == 3 ? "compiler failure" : "link output replacement failure");
+        else
+            check(!rc, pass == 2 ? "interpreter CLI build" : "AOT CLI build");
+        environment("SNX_CFLAGS", NULL);
+        check_empty(temp);
+        if (pass == 5)
+            check_sources(build);
+        else
+            check(!snx_is_dir(build), "no persistent build directory by default");
         free(text);
         text = NULL;
 #ifdef _WIN32
@@ -141,8 +186,17 @@ int main(int argc, char** argv) {
         module = snx_path_join(out, "Native Fixture_code.so");
 #endif
         if (!rc) execute_module(module, image, pass == 2);
+        /* Force a link publish failure without relying on compiler-specific flags. */
+        if (pass == 3) {
+            check(!snx_remove_tree(module), "remove previous module");
+            check(!snx_mkdirs(module), "block link output with a directory");
+        } else if (pass == 4)
+            check(!snx_remove_tree(module), "remove link output blocker");
         free(module);
     }
+    check(!snx_remove_tree(build), "remove kept sources before no-build test");
+    environment("SNX_CFLAGS", old_flags);
+    free(old_flags);
     data_file = snx_path_join(out, "Native Fixture_data/exefs/main.nro");
     cached = (char*)snx_read_file(data_file, &cached_size);
     check(cached && cached_size == sizeof(image) && !memcmp(cached, image, sizeof(image)), "NRO staging");
@@ -164,11 +218,15 @@ int main(int argc, char** argv) {
     args[k++] = "-O2";
     args[k] = NULL;
     check(snx_run(args, root, NULL, &text) != 0, "reject mixed NSO/NRO cache");
+    check_empty(temp);
     free(text);
     text = NULL;
     check(!snx_remove_tree(data_file), "remove conflict fixture");
     free(data_file);
+    check(!snx_remove_tree(build), "remove sources from failed no-build");
     check(!snx_run(args, root, NULL, &text), "legacy aliases and attached optimization level");
+    check_sources(build);
+    check_empty(temp);
     free(text);
     text = NULL;
     k = 0;
@@ -191,6 +249,8 @@ int main(int argc, char** argv) {
     free(input);
     free(out);
     free(self);
+    free(temp);
+    free(build);
     check(!snx_remove_tree(root), "fixture cleanup");
     free(root);
     printf("Native recompiler: %s\n", failures ? "FAILED" : "passed");

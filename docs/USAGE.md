@@ -33,11 +33,13 @@ Remaining examples: POSIX.
 - **Keys:** flags → checkout → `~/.switch` (`%USERPROFILE%\.switch` on Windows). Common NSP tickets supplement title keys.
 - **Extraction:** defaults to `work/<dump stem>`; `--name`/`--out DIR` override. Refuses existing `exefs`;
   builds missing hactool. [Temp cleanup/key filtering](../scarletnx/extract.c).
-- **Recompile:** AOT → module compile/link → runtime/data deployment → NVN prebuild. Cached objects;
+- **Recompile:** AOT → module compile/link → runtime/data deployment → NVN prebuild.
   NVN prebuild failures defer compilation to runtime. `--native` = `-march=native`;
   `--cc CLANG` / `-O 0..3` also accepted.
 - **Codegen:** `--no-build` emits C/data/INI; `--interp-only` omits AOT functions.
-  `--chunk N` sets instructions per TU. Generated C stays in the build cache.
+  `--chunk N` sets instructions per TU. Generated C, objects and linker response files use a private system
+  temporary directory (`TMPDIR` on Unix), removed on success or failure. Objects are not cached between runs.
+  `--keep-c` or `--no-build` saves C sources in `<outdir>/<NAME>_build/`.
 - **Data updates:** ExeFS refreshes; `Game_data/romfs` is reused.
   Replace cached RomFS after asset changes; preserve `Game_data/save/`.
 
@@ -46,7 +48,7 @@ Remaining examples: POSIX.
 | `work/Game/{exefs,romfs}` | Extracted input |
 | `games/Game[.exe]`, `Game_code.so/.dll` | Runtime + AOT module |
 | `games/Game_data/`, `Game.ini` | Data/saves + settings |
-| `games/Game_build/` | Generated C + object cache |
+| `games/Game_build/` | C sources only with `--keep-c` or `--no-build` |
 | `games/shader_cache/spirv/` | SPIR-V cache |
 
 ## AppImage / display

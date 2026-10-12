@@ -29,7 +29,7 @@ static void usage(void) {
          "  --no-build             Generate C/data/INI only\n"
          "  --interp-only          Generate fallback interpreter only\n"
          "  --runtime FILE         Deploy this runtime instead of building one\n"
-         "  --keep-c               Accepted; C/cache are always retained\n"
+         "  --keep-c               Save generated C in <outdir>/<NAME>_build\n"
          "  -q, --quiet            Suppress progress");
     puts("Hints: <outdir>/<NAME>.hints (hex PCs, one per line).\n"
          "SNX_CFLAGS adds whitespace-separated compiler arguments.");
@@ -184,6 +184,27 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet) {
     free(ex);
     return rc;
 }
+static int save_sources(const SnxSources* sources, const char* base) {
+    char *dir = snx_format("%s_build", base), *dst;
+    const char *name, *p;
+    size_t i;
+    int rc = 1;
+    if (snx_is_link(dir) || snx_mkdirs(dir)) goto done;
+    for (i = 0; i < sources->count; ++i) {
+        name = sources->paths[i];
+        for (p = name; *p; ++p)
+            if (*p == '/' || *p == '\\') name = p + 1;
+        dst = snx_path_join(dir, name);
+        rc = snx_is_link(dst) || snx_copy_file(sources->paths[i], dst);
+        free(dst);
+        if (rc) goto done;
+    }
+    rc = 0;
+done:
+    if (rc) snx_error("cannot save generated C in %s", dir);
+    free(dir);
+    return rc;
+}
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *arg, *value;
     SnxCompileOptions compile;
@@ -195,7 +216,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     char error[1024], option[64];
     const char* equal;
     size_t option_size;
-    int i, rc = 1, no_build = 0, host_win = 0, positional = 0;
+    int i, rc = 1, no_build = 0, keep_c = 0, host_win = 0, positional = 0;
     memset(&compile, 0, sizeof(compile));
     memset(&gen, 0, sizeof(gen));
     memset(&program, 0, sizeof(program));
@@ -230,8 +251,9 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
             no_build = 1;
         else if (!strcmp(arg, "--interp-only"))
             gen.interp_only = 1;
-        else if (!strcmp(arg, "--keep-c")) { /* Cache sources are always retained. */
-        } else if (!strcmp(arg, "--quiet") || !strcmp(arg, "-q"))
+        else if (!strcmp(arg, "--keep-c"))
+            keep_c = 1;
+        else if (!strcmp(arg, "--quiet") || !strcmp(arg, "-q"))
             compile.quiet = gen.quiet = 1;
         else if (arg[0] == '-') {
             value = NULL;
@@ -317,10 +339,15 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         goto done;
     }
     base = snx_path_join(out, title);
-    build = snx_format("%s_build", base);
     data = snx_format("%s_data", base);
-    if (snx_is_link(build) || snx_is_link(data) || snx_mkdirs(build)) {
+    if (snx_is_link(data)) {
         snx_error("invalid output directory");
+        goto done;
+    }
+    /* Clang needs named files, all owned by this invocation's private temp directory. */
+    build = snx_temp_dir(NULL);
+    if (!build) {
+        snx_error("cannot create temporary build directory");
         goto done;
     }
     gen.outdir = build;
@@ -328,6 +355,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     gen.hints = read_hints(base, &gen.hint_count);
     if (!compile.quiet) printf("Recompiling %s (%lu modules)\n", title, (unsigned long)program.module_count);
     if (snx_generate_module(&program, &gen, &sources)) goto done;
+    if ((keep_c || no_build) && save_sources(&sources, base)) goto done;
     if (copy_data(&program, data, compile.quiet)) {
         snx_error("cannot stage game data in %s", data);
         goto done;
@@ -370,6 +398,10 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     if (!compile.quiet) printf("Built %s\n", exe);
     rc = 0;
 done:
+    if (build && snx_remove_tree(build)) {
+        snx_error("cannot remove temporary build directory: %s", build);
+        rc = 1;
+    }
     snx_sources_free(&sources);
     snx_free_program(&program);
     free((void*)gen.hints);
