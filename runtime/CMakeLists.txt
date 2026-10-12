@@ -101,7 +101,7 @@ else()
     target_link_libraries(scarletnx PRIVATE Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
 
-# SDL3 is the system's, or on Windows built with the runtime (cmake/dependencies.cmake)
+# SDL3 is either the system package or the pinned static source build (cmake/dependencies.cmake)
 if(SNX_BACKEND STREQUAL "sdl3")
     target_link_libraries(snx_platform PRIVATE SDL3::SDL3)
     target_link_libraries(scarletnx PRIVATE SDL3::SDL3)

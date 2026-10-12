@@ -74,10 +74,19 @@ if(SNX_VULKAN)
     snx_quiet(glslang glslang-default-resource-limits)
 endif()
 
+set(SNX_SDL3_FROM_SOURCE OFF)
 if(SNX_BACKEND STREQUAL "sdl3")
-    if(WIN32)
-        # Static on Windows, so the runtime needs no DLL next to it
-        CPMAddPackage(NAME SDL3 VERSION 3.4.18
+    if(NOT WIN32 AND NOT SNX_BUNDLED_SDL3)
+        find_package(SDL3 QUIET CONFIG)
+    endif()
+    if(WIN32 OR SNX_BUNDLED_SDL3 OR NOT TARGET SDL3::SDL3)
+        if(NOT WIN32 AND NOT SNX_BUNDLED_SDL3)
+            message(STATUS "SDL3 development package not found. Building the pinned SDL3 from source. "
+                           "See docs/BUILD.md for X11/Wayland build dependencies.")
+        endif()
+        # Static: the fallback needs no separately installed SDL3 library at run time.
+        set(SNX_SDL3_FROM_SOURCE ON)
+        CPMAddPackage(NAME SDL3 VERSION 3.4.18 FORCE YES
                       URL https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.18.tar.gz
                       URL_HASH SHA256=c4b08b950bd29d83caae0ab8d884298d27046a9d30700fb42841c50992665c90
                       EXCLUDE_FROM_ALL YES SYSTEM YES
@@ -85,8 +94,7 @@ if(SNX_BACKEND STREQUAL "sdl3")
                               "SDL_EXAMPLES OFF" "SDL_INSTALL OFF")
         snx_quiet(SDL3-static)
     else()
-        # The system's SDL3 comes with the Wayland, X11 and input libraries it loads
-        find_package(SDL3 REQUIRED CONFIG)
+        message(STATUS "Using the system SDL3 development package")
     endif()
 endif()
 
