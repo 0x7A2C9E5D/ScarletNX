@@ -641,7 +641,7 @@ static void decode_block(const u8* blk, int bw, int bh, u8* out, int srgb) {
     if ((bm & 0x1FF) == 0x1FC) { /* void extent = solid color */
         /* bit 9 makes it HDR (FP16 colours), which an LDR decoder can't give, and bits 10-11 are reserved as 1s:
            otherwise the block is an error */
-        if (((bm >> 9) & 1) || ((bm >> 10) & 3) != 3) {
+        if (((bm >> 9) & 1) || getbits(blk, 10, 2) != 3) {
             error_block(out, bw, bh);
             return;
         }
