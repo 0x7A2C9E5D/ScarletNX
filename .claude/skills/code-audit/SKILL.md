@@ -132,7 +132,7 @@ The audit uses two complementary search tools. **Prefer ast-grep for code; use p
 
 `ast-grep` matches the parse tree, so it ignores hits inside strings, comments, and tokens that happen to spell the pattern. Use it whenever the pattern is a code shape (function call, declaration, control-flow construct). `grep` works on text — use it for comments, docstrings, error messages, and exact string literals.
 
-Common audit-time patterns in this repo (C runtime, C90 recompiler):
+Common audit-time patterns in this repo (C runtime, Python recompiler):
 
 | Goal | Command |
 |---|---|
@@ -301,7 +301,7 @@ tools/run_game.py Catherine --runs 3 --dump work/Catherine
 - The runtime builds with Clang's default warnings only, and a warning doesn't fail the build, so a clean-looking build says little. Build a changed file once with more warnings on (its line from `build/default/compile_commands.json`, with `-Wall -Wextra -fsyntax-only`) and check none come from the change.
 - A fix for a crash or a race is run until the evidence is statistical: the crash rate before and after, with the run counts, goes in the commit message.
 - Memory-safety fixes also get an AddressSanitizer build and a run. The runtime links as C++ (VMA), so the flag goes on the C, C++ and link lines, and the build stays out of `games/`: `cmake --preset default -B build/asan -DSNX_DEPLOY=OFF -DCMAKE_C_FLAGS=-fsanitize=address -DCMAKE_CXX_FLAGS=-fsanitize=address -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address && cmake --build build/asan`, then from `games/`: `../build/asan/scarletnx --game=Catherine --seconds=60`.
-- The game module only needs recompiling (`build/default/scarletnx --recompile`) when `scarletnx/codegen.c`, `a64.c`, `loader.c`, `module.c`, the module's flags in `toolchain.c`, or anything in `runtime/abi/` changed.
+- The game module only needs recompiling (`scripts/recomp.py`) when `scarletnx/codegen.py`, `a64.py`, `nxloader.py`, `module.py`, the module's flags in `toolchain.py`, or anything in `runtime/abi/` changed.
 
 ### 7. Diff Review Before Commit
 
