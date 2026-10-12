@@ -12,7 +12,7 @@
 set -euo pipefail
 
 ARCH=$(uname -m)
-REPOSITORY=${GITHUB_REPOSITORY:-fuddlesworth/SwitchRecomp}
+REPOSITORY=${GITHUB_REPOSITORY:-scarletnx/ScarletNX}
 VERSION=${VERSION:-$(git -C "$(dirname "$0")/.." describe --always --dirty 2>/dev/null || echo unknown)}
 export ARCH VERSION
 export OUTPATH=./dist

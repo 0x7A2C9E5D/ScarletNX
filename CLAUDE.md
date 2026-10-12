@@ -106,7 +106,7 @@ Agents in `.claude/agents/`, to keep disassembly and logs out of the main contex
 
 ## Git
 
-- `origin` is `git@github.com:fuddlesworth/SwitchRecomp.git` (public). Push only when asked. Never force-push a
+- `origin` is `git@github.com:scarletnx/ScarletNX.git` (public). Push only when asked. Never force-push a
   pushed branch.
 - Commit subjects are a plain imperative sentence (no prefixes). The body says why, and how it was verified. Check
   every claim in the message against the staged diff.
