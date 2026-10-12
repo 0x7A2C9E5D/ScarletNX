@@ -737,11 +737,11 @@ void vk_tex_frame(void) {
    or the last: an older one may share memory the game has reused since (Catherine draws a target where its copyright
    text later goes) */
 static void tex_take_drawn(Surf* t) {
-    if (!t || t->is_rt || t->f.conv || t->f.depth || t->type == VK_IMAGE_VIEW_TYPE_3D) return;
+    if (!t || t->is_rt || t->f.conv || t->f.depth) return;
     Surf* small[32];
     Surf** d = small;
     u64 stride = t->layer_size;
-    u64 hi = t->gva + (stride ? stride * t->layers : 1);
+    u64 hi = t->gva + t->size;
     int n = vk_rt_drawn_in(t->gva, hi, d, 32);
     if (n > 32) {
         d = malloc((size_t)n * sizeof *d);
@@ -757,6 +757,40 @@ static void tex_take_drawn(Surf* t) {
         if (s->f.depth || s->f.bpp != t->f.bpp || s->sw != s->w || s->sh != s->h) continue;
         if (s->copy_dst == t && s->copy_wgen == s->wgen && s->copy_tgen == t->wgen) continue;
         u64 off = s->gva - t->gva;
+        if (t->type == VK_IMAGE_VIEW_TYPE_3D) {
+            /* A 3D block-linear texture can be built a Z slice at a time through 2D targets. The target may be
+               wider than the texture: its rows include the 64-byte GOB padding of a narrow slice. */
+            if (!t->bl || s->f.vk != t->f.vk) continue;
+            u64 lo = 0;
+            for (u32 l = 0; l < t->levels; l++) {
+                u32 lw = t->w >> l ? t->w >> l : 1, lh = t->h >> l ? t->h >> l : 1;
+                u32 ld = t->depth3d >> l ? t->depth3d >> l : 1, lbd;
+                u64 size = bl_level_size(t->w, t->h, t->depth3d, &t->f, t->bh, t->bd, l, NULL, &lbd);
+                u32 padded = (ld + (1u << lbd) - 1) & ~((1u << lbd) - 1);
+                u64 slice = size / padded;
+                if (off >= lo && off - lo < slice * ld && (off - lo) % slice == 0 && s->w >= lw && s->h == lh &&
+                    vk_rt_drawn_fresh(s)) {
+                    vk_render_end();
+                    VkCommandBuffer cb = vk_cmd();
+                    vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                                VK_ACCESS_2_TRANSFER_READ_BIT);
+                    vk_surf_use(cb, t, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                                VK_ACCESS_2_TRANSFER_WRITE_BIT);
+                    VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, 1},
+                                     .dstOffset = {0, 0, (i32)((off - lo) / slice)},
+                                     .extent = {lw, lh, 1}};
+                    vkCmdCopyImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->img,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+                    s->copy_dst = t;
+                    s->copy_wgen = s->wgen;
+                    s->copy_tgen = t->wgen;
+                    break;
+                }
+                lo += size;
+            }
+            continue;
+        }
         u32 layer = stride ? (u32)(off / stride) : 0;
         u64 rem = off - (u64)layer * stride, lo = 0;
         for (u32 l = 0; l < t->levels && layer < t->layers; l++) {
