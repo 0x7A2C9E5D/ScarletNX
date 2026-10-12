@@ -401,7 +401,10 @@ int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max) {
             g_drawn[i] = g_drawn[--g_ndrawn];
             continue;
         }
-        if (s->gva >= lo && s->gva < hi && n < max) out[n++] = s; /* a parked target's address is out of every range */
+        if (s->gva >= lo && s->gva < hi) {
+            if (n < max) out[n] = s; /* a parked target's address is out of every range */
+            n++;
+        }
         i++;
     }
     return n;

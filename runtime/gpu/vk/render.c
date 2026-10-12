@@ -742,7 +742,14 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         int sten_w = zt && zt->f.stencil && r[0x4E0] && ((r[0x4E7] & 0xFF) || (r[0x565] && (r[0x3D6] & 0xFF)));
         int depth_ro = t && t == zt && !r[0x4BA] && !sten_w;
         if (t && is_target(t, rt, zt, n) && !depth_ro) {
-            LOG_LIMIT(1, "vulkan: a draw samples a color target it renders to (read as empty)\n");
+            /* The guest reads the target's previous contents during a draw that writes it. Vulkan can't bind one
+               image for both uses here, so copy it before the draw starts and sample that copy. */
+            Surf* snap = vk_rt_snapshot(t);
+            if (snap != t) {
+                t = snap;
+                view = vk_tex_bind_view(t, want, x->tic, num);
+            } else
+                LOG_LIMIT(1, "vulkan: a draw samples a target it renders to (read as empty)\n");
         } else
             view = vk_tex_bind_view(t, want, x->tic, num);
         if (view && depth_ro) {
