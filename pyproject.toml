@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-# Settings for ruff, which scripts/format.sh runs through uvx. scarletnx runs from the checkout
-# (python3 -m scarletnx) and is never installed, so this file holds nothing else.
+# Ruff settings for optional diagnostics and developer hooks; no Python production dependency.
 [tool.ruff]
 line-length = 120
-# The oldest Python the README asks for
+# Optional diagnostic scripts support Python 3.12 and newer.
 target-version = "py312"
 
 [tool.ruff.format]

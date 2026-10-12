@@ -33,6 +33,7 @@ endfunction()
 
 snx_component(core core/main.c core/entry.c core/loader.c core/rtapi.c core/clock.c core/crash.c core/options.c
               core/present.c)
+target_link_libraries(snx_core PRIVATE snx_driver)
 snx_component(kernel kernel/kernel.c kernel/thread.c kernel/sync.c kernel/svc.c kernel/svc_mem.c kernel/debug.c
               kernel/mem.c kernel/ipc.c)
 snx_component(hle hle/services.c hle/audren.c hle/pl.c hle/sm.c hle/am.c hle/set.c hle/time.c hle/acc.c hle/audio.c
@@ -74,9 +75,9 @@ endif()
 
 add_executable(scarletnx)
 list(TRANSFORM components PREPEND snx_)
-target_link_libraries(scarletnx PRIVATE ${components})
+target_link_libraries(scarletnx PRIVATE ${components} snx_driver)
 # glslang is C++: link with the C++ driver. It goes in the build folder itself, where
-# scripts/recomp.py and CI look for it
+# the native driver and CI look for it
 set_target_properties(scarletnx PROPERTIES LINKER_LANGUAGE CXX RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 if(WIN32)
     # Static, so the runtime runs without the MinGW DLLs next to it. user32 has the backends' message boxes:

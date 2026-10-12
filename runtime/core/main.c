@@ -194,7 +194,7 @@ int snx_main(int argc, char** argv) {
     split_path(game && !dump ? game : in_appimage ? appimage : argv[0]);
     if (dump)
         fatal("%s is a game dump. ScarletNX does not run dumps: it runs a game recompiled from one. Extract and "
-              "recompile it first with a clone of the repository (scripts/extract.py, then scripts/recomp.py, as "
+              "recompile it first with a clone of the repository (scarletnx --extract, then --recompile, as "
               "the README describes), then point --game at the result, for example --game=games/Game.",
               dump);
     /* loaded before the .ini is opened, which writes one: a mistyped --game leaves no stray settings file */

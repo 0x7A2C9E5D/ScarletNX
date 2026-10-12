@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-# hactool (target hactool), which scripts/extract.py uses to unpack game dumps, with the mbedtls copy it bundles. Its
+# hactool (target hactool), used by scarletnx --extract, with the mbedtls copy it bundles. Its
 # Makefile builds mbedtls with mbedtls's own Makefile, whose CMake script is too old for CMake 4, so both are built
 # from their sources here. hactool only uses mbedtls's crypto, and the linker leaves the rest of the library out.
 set(hactool_src "${hactool_SOURCE_DIR}")

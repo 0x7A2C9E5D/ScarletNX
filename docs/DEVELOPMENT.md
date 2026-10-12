@@ -8,18 +8,19 @@ Run from checkout. POSIX examples: Windows uses `python`, `.exe`, PowerShell env
 ## Rebuild / checks
 
 ```sh
-cmake --build --preset default
-python3 scripts/recomp.py work/Game Game -- --native --jobs 8
+cmake --build build
+./build/scarletnx --recompile work/Game Game --native --jobs 8
+ctest --test-dir build --output-on-failure
 scripts/format.sh --check
 python3 tests/run_filesystem_tree.py --cc clang --sanitize
 clang -fsyntax-only -Wall -fno-strict-aliasing -fwrapv -I runtime/abi runtime/abi/cpu_helpers.c
 ```
 
-Runtime relink deploys to `games/` by default. Recompiler/`runtime/abi/` edits require `recomp.py`.
+Runtime relink deploys to `games/` by default. Recompiler/`runtime/abi/` edits require `--recompile`.
 Avoid builds during timing runs. Formatting: clang-format 23 + `uv`/pinned Ruff; omit `--check` to write.
 FS tests use production tree/HLE + synthetic temp data; `--only tree|service` selects a suite.
 
-CI: formatting, Linux/Windows builds, ABI syntax, FS regressions, Python syntax/help.
+CI: formatting, Linux/Windows builds, ABI syntax, native tool/FS regressions, optional Python diagnostics.
 Verify affected scenes manually, repeat intermittent failures, record evidence/scope.
 Test guest semantics + malformed IPC with synthetic cases.
 
@@ -47,12 +48,12 @@ python3 tools/disasm.py work/Game cf34240 cf343c0
 
 ```sh
 SNX_SHADER_CORPUS=corpus games/Game
-build/default/snx-shaderc corpus --validate --out translated
-build/default/snx-shaderc --nvn DIR --cache games/shader_cache/spirv --verbose
+build/snx-shaderc corpus --validate --out translated
+build/snx-shaderc --nvn DIR --cache games/shader_cache/spirv --verbose
 ```
 
 `--validate`: needs `spirv-val`; `--out`: GLSL/SPIR-V for build comparisons.
-`--nvn`: prebuild shipped shaders (automatic in `recomp.py`). PowerShell: `$env:SNX_SHADER_CORPUS='corpus'`.
+`--nvn`: prebuild shipped shaders (automatic in `--recompile`). PowerShell: `$env:SNX_SHADER_CORPUS='corpus'`.
 
 ## Upstream / provenance
 

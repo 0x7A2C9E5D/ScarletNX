@@ -81,7 +81,7 @@ typedef struct CPU {
     void* thread; /* owning HLE thread */
 } CPU;
 
-/* the module descriptor: what snx_module() in the game module's module.c (written by scarletnx/module.py) hands
+/* the module descriptor: what snx_module() in the game module's module.c (written by scarletnx/module.c) hands
    the runtime's loader. abi stays the first field so a module from another version is recognized before anything
    else is read */
 typedef struct SnxModInfo {
@@ -394,7 +394,7 @@ SNX_INLINE void dc_zva(u8* M, u64 a) { memset(MP(a & ~63ull), 0, 64); }
    Memory ordering relies on the host being x86-64 (TSO). Exclusive and acquire loads and release stores are seq_cst
    atomics (LDACQ, STREL below), so later accesses stay after an acquire load and earlier ones before a release store, as
    on ARM (and an STLR stays before a later LDAR); DMB/DSB LD and ST and ISB
-   are compiler barriers, and the full barriers are seq_cst fences (a64.py BARRIER, SNX_FENCE), which Clang emits as a
+   are compiler barriers, and the full barriers are seq_cst fences (a64_templates.inc BARRIER, SNX_FENCE), which Clang emits as a
    locked or. Plain guest loads and stores are plain host ones, so a host that reorders them (AArch64) would get weaker
    ordering than the game's barriers ask for */
 SNX_INLINE u32 snx_cas64(u64* p, u64 o, u64 n) {

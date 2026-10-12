@@ -52,8 +52,8 @@ file holds the rules sessions get wrong and points to the skills that carry the 
 | --- | --- |
 | Build the runtime, hactool and the third-party libraries (deploys to every game in `games/`) | `cmake --preset default && cmake --build --preset default` (Windows: `scripts\bootstrap.ps1` once, `Set-ExecutionPolicy -Scope Process Bypass` and `. scripts\env.ps1` per window) |
 | Cross-build for Windows (llvm-mingw on PATH) | `cmake --preset windows-cross && cmake --build --preset windows-cross` |
-| Extract a dump | `scripts/extract.py "Game.xci" --name Game [--update u.nsp]` |
-| Recompile a game | `scripts/recomp.py work/Game Game` |
+| Extract a dump | `build/default/scarletnx --extract "Game.xci" --name Game [--update u.nsp]` |
+| Recompile a game | `build/default/scarletnx --recompile work/Game Game` |
 | Run with scripted input and a screenshot | `cd games && ./Catherine --seconds=60 --shot=/path/out --script=ms:hexbuttons,...` |
 | Name addresses / disassemble game code | `tools/symbols.py work/Catherine ADDR...` / `tools/disasm.py work/Catherine FUNC` |
 | Format / check | `scripts/format.sh` / `scripts/format.sh --check` |
@@ -63,8 +63,8 @@ third-party libraries are CPM packages pinned in `cmake/dependencies.cmake`, dow
 built in the same tree as the runtime.
 
 The runtime finds its game module by its own file name, so each game has a copy of the runtime named after it, made
-by the build's deploy step. Game code (`_code.so`) only needs recompiling when `scarletnx/codegen.py`, `a64.py`,
-`nxloader.py`, `module.py`, the module's compile flags in `toolchain.py` or anything in `runtime/abi/` changes (the
+by the build's deploy step. Game code (`_code.so`) only needs recompiling when `scarletnx/codegen.c`, `a64.c`,
+`loader.c`, `module.c`, the module's compile flags in `toolchain.c` or anything in `runtime/abi/` changes (the
 ABI between generated code and runtime). A change there that keeps `SNX_ABI` (`cpu.h`) loads and runs the old code
 silently. Bumping `SNX_ABI` makes the runtime refuse every module built before it, so every game needs recompiling.
 
@@ -72,7 +72,7 @@ silently. Bumping `SNX_ABI` makes the runtime refuse every module built before i
 
 | Area | Files |
 | --- | --- |
-| Recompiler (`scarletnx/`, run as `python3 -m scarletnx`) | `cli.py` (command line), `nxloader.py` (NSO/NRO, symbols), `codegen.py` + `a64.py` (ARM64 to C), `module.py` (the module's C files), `toolchain.py` (compiling the module, the runtime through CMake), `data.py` |
+| C90 host driver (`scarletnx/`) | `driver.c` (dispatch), `extract.c` (XCI/NSP), `recompile.c` (AOT workflow/data), `loader.c` (NSO/NRO, metadata), `codegen.c` + `a64.c` + `a64_templates.inc` (ARM64 to C), `module.c` (module TUs), `toolchain.c` (Clang/cache/runtime), `common.c` (host APIs) |
 | Generated-code ABI | `runtime/abi/`: `cpu.h` (with `SNX_ABI`), `cpu_helpers.c` (compiled into each game module, with the topic files it includes from `helpers/`: `fp.c`, `integer.c`, `simd.c`, `crypto.c`, `simd_mem.c`) |
 | Startup | `runtime/core/`: `main.c` (startup, loading the game module), `options.c` (the .ini), `clock.c` (guest time), `rtapi.c` (what the game module calls), `crash.c`, `present.c` (vi's CPU-side present), `loader.c`, `entry.c` |
 | Kernel and memory | `runtime/kernel/`: `kernel.c` (handles, waits, events), `thread.c` (threads, the per-core lock), `sync.c` (mutexes, condition variables, address arbitration, WaitSynchronization), `svc.c` (the SVC dispatch), `svc_mem.c` (memory SVCs, GetInfo), `debug.c` (backtraces, dumps), `mem.c`, `ipc.c` (helpers `in32`, `out32`, `buf_in`, `buf_out`, `out_obj`...) |

@@ -90,7 +90,7 @@ if(SNX_BACKEND STREQUAL "sdl3")
     endif()
 endif()
 
-# hactool runs on the machine doing the extraction (scripts/extract.py), so a cross build leaves it out
+# hactool runs on the machine doing the extraction (--extract), so a cross build leaves it out
 if(NOT CMAKE_CROSSCOMPILING)
     CPMAddPackage(NAME hactool VERSION 1.4.0.13
                   URL https://github.com/SciresM/hactool/archive/1d64a83450e025622f3468c28fc4164dad2c5ef6.tar.gz

@@ -12,14 +12,14 @@ To build simply:
 ```bash
 git clone --depth=1 https://github.com/scarletnx/ScarletNX
 cd ScarletNX
-cmake --preset default && cmake --build --preset default
+cmake --preset default -B build && cmake --build build
 ```
 
 Afterwards, put `prod.keys` (and `title.keys`, for NSPs) in `~/.switch`, or pass them with `--keys` and
 `--title-keys`.
 ```bash
-python3 scripts/extract.py "Game.xci" --name Game   # -> work/Game/{exefs,romfs}
-python3 scripts/recomp.py work/Game Game            # -> games/Game
+./build/scarletnx --extract "Game.xci" --name Game  # -> work/Game/{exefs,romfs}
+./build/scarletnx --recompile work/Game Game        # -> games/Game
 cd games && ./Game
 ```
 
