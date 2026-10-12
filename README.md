@@ -8,7 +8,18 @@ Discord: https://discord.gg/tRTRXXbyjp (my god why don't we just use IRC like go
 
 A GPLv3 static ARM64 to x86 recompiler with a Nintendo Switch translation layer for Linux, Windows and FreeBSD. Forked from MZLab's SwitchRecomp.
 
-To build simply:
+Install the build tools first. On Debian/Ubuntu:
+```bash
+sudo apt update
+sudo apt install build-essential git cmake ninja-build clang nasm pkg-config \
+  libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev
+```
+If your distribution provides `libsdl3-dev`, install it too. Otherwise CMake builds a pinned SDL3
+using the X11 development packages above. SDL2 is not a substitute for SDL3. You also need a Vulkan 1.3
+driver to run games. See [Build prerequisites](./docs/BUILD.md#prerequisites) for Wayland, other systems,
+and the SDL3 troubleshooting steps.
+
+Then build:
 ```bash
 git clone --depth=1 https://github.com/scarletnx/ScarletNX
 cd ScarletNX

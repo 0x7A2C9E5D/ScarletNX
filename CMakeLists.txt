@@ -34,7 +34,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 
-# SDL3 is the system's on Linux and FreeBSD (Wayland and X11), and built with the runtime on Windows
+# Prefer the system SDL3 on Unix. Fall back to a pinned source build if its development package is missing.
+option(SNX_BUNDLED_SDL3 "Build the pinned SDL3 even when a system development package is available" OFF)
 set(SNX_BACKEND sdl3 CACHE STRING "Window and input backend: sdl3 or headless")
 set_property(CACHE SNX_BACKEND PROPERTY STRINGS sdl3 headless)
 if(NOT SNX_BACKEND MATCHES "^(sdl3|headless)$")
@@ -121,7 +122,7 @@ if(SNX_VULKAN)
     install(FILES "${glslang_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/glslang)
     install(DIRECTORY "${glslang_SOURCE_DIR}/LICENSES" DESTINATION ${licenses}/glslang)
 endif()
-if(WIN32 AND SNX_BACKEND STREQUAL "sdl3")
+if(SNX_SDL3_FROM_SOURCE)
     install(FILES "${SDL3_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/SDL3)
 endif()
 if(TARGET hactool)
