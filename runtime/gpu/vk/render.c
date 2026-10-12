@@ -121,7 +121,10 @@ static int render_begin(Surf** rt, Surf* zt, u32 n, int zt_ro) {
 }
 static void targets_written(void) {
     for (u32 i = 0; i < g_rp.n; i++)
-        if (g_rp.rt[i]) g_rp.rt[i]->wgen++;
+        if (g_rp.rt[i]) {
+            g_rp.rt[i]->wgen++;
+            vk_rt_drawn(g_rp.rt[i]);
+        }
     if (g_rp.zt) g_rp.zt->wgen++;
 }
 

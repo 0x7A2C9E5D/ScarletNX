@@ -131,6 +131,12 @@ comments and developer docs under `.claude/` are out of scope.
   screen with every draw call succeeding.
 - The recompiler's old runtime build dropped the H.264 decoder (then OpenH264) silently when the library was missing,
   and movies stayed black. The runtime is only built by CMake now, which fetches FFmpeg with the other libraries.
+- SPIR-V lets the driver assume a shader has no infinities or NaNs unless it declares SignedZeroInfNanPreserve, and
+  Maxwell shaders rely on them (NVIDIA's compiler makes -inf with `MUFU.LG2` of zero). Without it, Tears of the
+  Kingdom's lighting came out as NaN blocks. `vk_glsl_post` (gpu/vk/spirv.c) declares it on every shader.
+- Nothing in a draw's setup may submit or wait for the GPU (`vk_finish`, a readback like `vk_rt_flush`): the frame's
+  descriptor pools and staging reset after it, and the draw's sets already allocated turn to garbage. Copy on the GPU
+  instead.
 - Submodule pins went wrong for a week of commits (a `git submodule add` records the default branch's tip, not the
   tag checked out afterwards). The libraries are CPM packages now (`cmake/dependencies.cmake`), each a release URL with
   its SHA-256: a bump changes both, and the hash is checked against the download. CPM's `OPTIONS` become cache

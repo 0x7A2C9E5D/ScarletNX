@@ -357,7 +357,7 @@ static VkImageViewType tic_view_type(u32 type, u32 d) {
 
 static u32 g_bud_frame;
 static i64 g_bud;
-Surf* vk_tex_from_tic(const u32* tic) {
+static Surf* tex_from_tic(const u32* tic) {
     u64 gva = ((u64)(tic[2] & 0xFFFF) << 32) | tic[1];
     u32 hv = (tic[2] >> 21) & 7;
     int bl = hv == 3 || hv == 4;
@@ -411,8 +411,10 @@ Surf* vk_tex_from_tic(const u32* tic) {
     /* a render target at that address: read it on the GPU, unless its contents are undefined (never drawn, or memory
        it can't load was written over it): then memory has them */
     Surf* rt = vk_rt_find(gva);
+    /* a texture of several levels isn't the target (its other levels are other targets' memory, a mip chain drawn level
+       by level): loaded from memory */
     if (rt && rt->layout != VK_IMAGE_LAYOUT_UNDEFINED && f.bw == 1 && !f.conv && type != 2 && rt->w >= w &&
-        rt->h >= h && (d == 1 || type == 1 || type == 7)) {
+        rt->h >= h && (d == 1 || type == 1 || type == 7) && levels == 1) {
         /* a header of another texel size covers other memory than the target's pixels (depth is read through its
            own aspect, whatever the host format's size) */
         if (f.bpp == rt->f.bpp || f.depth || rt->f.depth) {
@@ -424,6 +426,7 @@ Surf* vk_tex_from_tic(const u32* tic) {
                   "is loaded from memory\n",
                   f.bpp, (unsigned long long)gva, rt->f.bpp);
     }
+    /* loaded from memory: what render targets drew there is written back first */
     /* what the device can make */
     const VkPhysicalDeviceLimits* lim = &g_vk.props.limits;
     int cube = vt != VK_IMAGE_VIEW_TYPE_3D && layers >= 6 && w == h; /* created cube compatible */
@@ -716,4 +719,50 @@ void vk_tex_frame(void) {
     /* textures and render targets not used for ten seconds go; textures come back from memory if they are needed
        again */
     if (g_vk_present % 60 == 0 && g_vk_present > 600) vk_surf_evict(g_vk_present - 600);
+}
+
+/* a texture whose layers or levels were drawn as render targets of their own (Tears of the Kingdom draws its
+   environment cube maps face by face and its glow chain level by level) is copied from those targets on the GPU: they
+   are never written back to its memory. Only a target that is exactly one of its layers and levels, drawn this frame
+   or the last: an older one may share memory the game has reused since (Catherine draws a target where its copyright
+   text later goes) */
+static void tex_take_drawn(Surf* t) {
+    if (!t || t->is_rt || t->f.conv || t->f.depth || t->type == VK_IMAGE_VIEW_TYPE_3D) return;
+    Surf* d[16];
+    u64 stride = t->layer_size;
+    int n = vk_rt_drawn_in(t->gva, t->gva + (stride ? stride * t->layers : 1), d, 16);
+    for (int i = 0; i < n; i++) {
+        Surf* s = d[i];
+        if (s->f.depth || s->f.bpp != t->f.bpp || s->sw != s->w || s->sh != s->h) continue;
+        if (s->copy_dst == t && s->copy_wgen == s->wgen) continue; /* copied since it was last drawn */
+        u64 off = s->gva - t->gva;
+        u32 layer = stride ? (u32)(off / stride) : 0;
+        u64 rem = off - (u64)layer * stride, lo = 0;
+        for (u32 l = 0; l < t->levels && layer < t->layers; l++) {
+            u32 lw = t->w >> l ? t->w >> l : 1, lh = t->h >> l ? t->h >> l : 1;
+            if (rem == lo && s->w == lw && s->h == lh) {
+                vk_render_end();
+                VkCommandBuffer cb = vk_cmd();
+                vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                            VK_ACCESS_2_TRANSFER_READ_BIT);
+                vk_surf_use(cb, t, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                            VK_ACCESS_2_TRANSFER_WRITE_BIT);
+                VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                 .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, layer, 1},
+                                 .extent = {lw, lh, 1}};
+                vkCmdCopyImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->img,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+                s->copy_dst = t;
+                s->copy_wgen = s->wgen;
+                break;
+            }
+            if (!t->bl) break;
+            lo += bl_level_size(t->w, t->h, 1, &t->f, t->bh, t->bd, l, NULL, NULL);
+        }
+    }
+}
+Surf* vk_tex_from_tic(const u32* tic) {
+    Surf* t = tex_from_tic(tic);
+    tex_take_drawn(t);
+    return t;
 }

@@ -149,9 +149,12 @@ typedef struct Surf {
     VkPipelineStageFlags2 stage;
     VkAccessFlags2 access;
     u64 last_used;
-    u32 wgen;     /* render targets: bumped when drawn to */
-    u32 mem_wgen; /* render targets: wgen when guest memory last held the same (written back or loaded) */
-    u64 gw;       /* g_gw_gen when it last matched guest memory (textures) or was bound to draw (render targets) */
+    u32 wgen;              /* render targets: bumped when drawn to */
+    u32 drawn_at;          /* render targets: g_vk_present when last drawn to */
+    struct Surf* copy_dst; /* render targets: the texture last copied from it (gpu/vk/texture.c) */
+    u32 copy_wgen;         /* and its wgen then */
+    u32 mem_wgen;          /* render targets: wgen when guest memory last held the same (written back or loaded) */
+    u64 gw; /* g_gw_gen when it last matched guest memory (textures) or was bound to draw (render targets) */
     /* textures: views by type and swizzle, and the change check (gpu/vk/texture.c) */
     SurfView sv[6];
     int nsv;
@@ -183,6 +186,8 @@ void vk_surf_use(VkCommandBuffer cb, Surf* s, VkImageLayout layout, VkPipelineSt
     (VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |                                 \
      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)
 void vk_rt_flush(u64 gva);
+void vk_rt_drawn(Surf* s);                               /* a render target was drawn to (gpu/vk/render.c) */
+int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max); /* drawn this frame or the last, in [lo, hi) */
 void vk_rt_reload(u64 gva);
 /* textures share the surface table */
 Surf* vk_surf_first(u64 gva);
