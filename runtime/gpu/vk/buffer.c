@@ -29,7 +29,7 @@ typedef struct Vb {
 #define VBH 4096
 static Vb* g_vbh[VBH];
 /* Optional copy telemetry. Counters are updated under vk_lock. */
-static u64 g_copy_stage, g_copy_owned, g_copy_uncached, g_copy_zero, g_read_bound;
+static u64 g_copy_stage, g_copy_owned, g_copy_uncached, g_copy_zero, g_copy_calls, g_copy_peak, g_read_bound;
 static int g_copy_stats = -1;
 static int copy_stats_on(void) {
     if (g_copy_stats < 0) g_copy_stats = getenv("SNX_VK_BUFFER_STATS") != NULL;
@@ -171,6 +171,8 @@ int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off) {
     }
     if (copy_stats_on()) {
         g_copy_uncached += len;
+        g_copy_calls++;
+        if (len > g_copy_peak) g_copy_peak = len;
         if (!gva) g_copy_zero += len;
     }
     return 1;
@@ -309,10 +311,11 @@ int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_ge
 void vk_buf_frame(void) {
     if (g_vk_present % 60 || g_vk_present < 600) return;
     if (copy_stats_on() && g_vk_present % 600 == 0) {
-        LOG("vulkan: buffer bytes over 600 presents: uncached=%llu zero=%llu staged=%llu owned=%llu bound=%llu\n",
-            (unsigned long long)g_copy_uncached, (unsigned long long)g_copy_zero, (unsigned long long)g_copy_stage,
-            (unsigned long long)g_copy_owned, (unsigned long long)g_read_bound);
-        g_copy_uncached = g_copy_stage = g_copy_owned = g_copy_zero = g_read_bound = 0;
+        LOG("vulkan: buffer bytes over 600 presents: uncached=%llu zero=%llu calls=%llu peak=%llu staged=%llu owned=%llu bound=%llu\n",
+            (unsigned long long)g_copy_uncached, (unsigned long long)g_copy_zero, (unsigned long long)g_copy_calls,
+            (unsigned long long)g_copy_peak, (unsigned long long)g_copy_stage, (unsigned long long)g_copy_owned,
+            (unsigned long long)g_read_bound);
+        g_copy_uncached = g_copy_stage = g_copy_owned = g_copy_zero = g_copy_calls = g_copy_peak = g_read_bound = 0;
     }
     for (int k = 0; k < VBH; k++)
         for (Vb** pp = &g_vbh[k]; *pp;) {
