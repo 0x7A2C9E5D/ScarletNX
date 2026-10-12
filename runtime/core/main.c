@@ -124,9 +124,7 @@ static void split_path(const char* argv0) {
 /* main.npdm: the SystemResourceSize (newer SDKs only init their VM allocator when > 0), and the cores and
    priorities the kernel capabilities of its ACI0 give the process */
 static void read_npdm(void) {
-    char q[1200];
-    snprintf(q, sizeof q, "%sexefs/main.npdm", g_datadir);
-    FILE* f = fopen(q, "rb");
+    FILE* f = fs_open_read("exefs/main.npdm", NULL);
     u8 h[0x4000];
     size_t n = 0;
     if (f) {
@@ -225,6 +223,7 @@ int snx_main(int argc, char** argv) {
     clock_start();
     LOG("ScarletNX - %s\n", g_exename);
     g_title_id = g_mod->title_id;
+    fs_init();
     mem_init();
     kernel_init();
     build_dispatch();

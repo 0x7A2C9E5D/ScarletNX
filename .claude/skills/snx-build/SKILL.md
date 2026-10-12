@@ -105,7 +105,7 @@ the next configure. Prefer `DOWNLOAD_ONLY` plus our own targets for projects wit
 with a CMake too old for CMake 4, `EXCLUDE_FROM_ALL YES` for the rest (not `SYSTEM`: a system copy of the headers
 found through an `-I` in CFLAGS would win over `-isystem` ones; SDL3 on Windows is the one exception, since there is
 no system copy to collide with), and `snx_quiet(target...)` on what it
-builds. `OPTIONS` are cache variables of the whole build, not just that package. Then the license in README.md's
+builds. `OPTIONS` are cache variables of the whole build, not just that package. Then the license in docs/CREDITS.md's
 table and in the install (below), and the version in the commit message. CI caches `.cache/cpm` on the file's hash.
 
 ## The AppImage

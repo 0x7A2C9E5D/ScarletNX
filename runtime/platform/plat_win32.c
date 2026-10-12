@@ -247,9 +247,10 @@ static wchar_t* wpath(const char* s) {
     }
     return w;
 }
-int plat_file_map(PFileMap* m, const char* path) {
+static int file_map(PFileMap* m, const char* path, const u64* indexed_size) {
     m->data = NULL;
     m->size = 0;
+    if (indexed_size && (*indexed_size > SIZE_MAX || *indexed_size > INT64_MAX)) return -1;
     wchar_t* w = wpath(path);
     if (!w) return -1;
     /* a directory doesn't open without FILE_FLAG_BACKUP_SEMANTICS, so this is a regular file */
@@ -257,25 +258,37 @@ int plat_file_map(PFileMap* m, const char* path) {
                            FILE_ATTRIBUTE_NORMAL, NULL);
     free(w);
     if (f == INVALID_HANDLE_VALUE) return -1;
-    LARGE_INTEGER sz;
-    if (!GetFileSizeEx(f, &sz)) {
+    u64 size;
+    if (indexed_size) {
+        size = *indexed_size;
+    } else {
+        LARGE_INTEGER sz;
+        if (!GetFileSizeEx(f, &sz) || sz.QuadPart < 0) {
+            CloseHandle(f);
+            return -1;
+        }
+        size = (u64)sz.QuadPart;
+    }
+    if (size > SIZE_MAX) {
         CloseHandle(f);
         return -1;
     }
-    if (sz.QuadPart > 0) { /* a mapping of an empty file fails */
-        HANDLE mp = CreateFileMappingW(f, NULL, PAGE_READONLY, 0, 0, NULL);
-        void* p = mp ? MapViewOfFile(mp, FILE_MAP_READ, 0, 0, 0) : NULL;
+    if (size) { /* a mapping of an empty file fails */
+        HANDLE mp = CreateFileMappingW(f, NULL, PAGE_READONLY, (DWORD)(size >> 32), (DWORD)size, NULL);
+        void* p = mp ? MapViewOfFile(mp, FILE_MAP_READ, 0, 0, (SIZE_T)size) : NULL;
         if (mp) CloseHandle(mp); /* the view keeps the mapping and the file */
         if (!p) {
             CloseHandle(f);
             return -1;
         }
         m->data = p;
-        m->size = (u64)sz.QuadPart;
+        m->size = size;
     }
     CloseHandle(f);
     return 0;
 }
+int plat_file_map(PFileMap* m, const char* path) { return file_map(m, path, NULL); }
+int plat_file_map_sized(PFileMap* m, const char* path, u64 size) { return file_map(m, path, &size); }
 void plat_file_unmap(PFileMap* m) {
     if (m->data) UnmapViewOfFile(m->data);
     m->data = NULL;

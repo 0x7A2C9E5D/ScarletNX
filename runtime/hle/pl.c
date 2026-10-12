@@ -4,6 +4,7 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* pl: the shared fonts */
 #include "core/main.h"
+#include "hle/fs.h"
 #include "hle/services.h"
 #include "kernel/ipc.h"
 #include "kernel/kernel.h"
@@ -24,7 +25,16 @@ static struct {
     KShmem* font_shm;
     PMutex font_lock; /* the first request fills the shared memory, the others wait for it */
 } pl;
-static u8* read_file_all(const char* path, u64* size) {
+static u8* read_indexed_font(const char* path, u64* size) {
+    u8* d = fs_read_file(path, size);
+    if (d && !*size) {
+        free(d);
+        return NULL;
+    }
+    return d;
+}
+/* OS fonts are support assets imported once when the indexed game fonts are missing. */
+static u8* read_host_font(const char* path, u64* size) {
     FILE* f = fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
@@ -46,6 +56,9 @@ static u8* read_file_all(const char* path, u64* size) {
 }
 static u32 bswap32_(u32 v) { return (v >> 24) | ((v >> 8) & 0xFF00) | ((v << 8) & 0xFF0000) | (v << 24); }
 static u8* font_fallback(u64* size) {
+    const char* path = "fonts/SystemFallback.ttf";
+    u8* indexed = read_indexed_font(path, size);
+    if (indexed) return indexed;
     const char* cands[8];
     int n = 0;
     char w1[512], w2[512], w3[512];
@@ -67,8 +80,14 @@ static u8* font_fallback(u64* size) {
     cands[n++] = "/usr/share/fonts/truetype/freefont/FreeSans.ttf";
 #endif
     for (int i = 0; i < n; i++) {
-        u8* d = read_file_all(cands[i], size);
+        u8* d = read_host_font(cands[i], size);
         if (d) {
+            /* One indexed copy backs all six shared-font slots. */
+            if (fs_add_virtual_file(path, d, *size)) {
+                WARN("pl: could not index the system fallback font\n");
+                free(d);
+                return NULL;
+            }
             LOG("pl: system font -> %s\n", cands[i]);
             return d;
         }
@@ -87,12 +106,12 @@ static void fonts_fill(u8* shm, u64 cap) {
         u64 sz = 0;
         u8* d = NULL;
         int is_bfttf = 0;
-        snprintf(p, sizeof p, "%sfonts/%s.bfttf", g_datadir, g_font_names[i]);
-        d = read_file_all(p, &sz);
+        snprintf(p, sizeof p, "fonts/%s.bfttf", g_font_names[i]);
+        d = read_indexed_font(p, &sz);
         if (d) is_bfttf = 1;
         if (!d) {
-            snprintf(p, sizeof p, "%sfonts/%s.ttf", g_datadir, g_font_names[i]);
-            d = read_file_all(p, &sz);
+            snprintf(p, sizeof p, "fonts/%s.ttf", g_font_names[i]);
+            d = read_indexed_font(p, &sz);
         }
         if (!d) { /* one fallback font for every slot */
             if (fb_size) {
