@@ -31,6 +31,8 @@ static Vb* g_vbh[VBH];
 /* Optional copy telemetry. Counters are updated under vk_lock. */
 static u64 g_copy_stage, g_copy_owned, g_copy_uncached, g_copy_zero, g_copy_calls, g_copy_peak, g_read_bound;
 static u64 g_wb_outputs, g_wb_bytes, g_wb_waits, g_wb_wait_ns, g_wb_reuses;
+enum { WB_DRAW, WB_READ, WB_WRITE, WB_SIGNAL, WB_SYNCWAIT, WB_MAP, WB_REASON_N };
+static u64 g_wb_reason[WB_REASON_N], g_wb_reason_ns[WB_REASON_N], g_wb_draw_miss[4];
 static int g_copy_stats = -1;
 static int copy_stats_on(void) {
     if (g_copy_stats < 0) g_copy_stats = getenv("SNX_VK_BUFFER_STATS") != NULL;
@@ -133,39 +135,43 @@ void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame) {
             return;
         }
 }
-void vk_buf_land(void) {
+static void wait_finish(int reason) {
+    u64 t = copy_stats_on() ? plat_ns() : 0;
+    vk_finish();
+    if (t) {
+        u64 ns = plat_ns() - t;
+        g_wb_waits++;
+        g_wb_wait_ns += ns;
+        g_wb_reason[reason]++;
+        g_wb_reason_ns[reason] += ns;
+    }
+}
+static void land_reason(int reason) {
     if (!g_gfx_any || g_out_landing) return;
     vk_lock();
-    if (g_gfx_any && !g_out_landing) {
-        u64 t = copy_stats_on() ? plat_ns() : 0;
-        vk_finish();
-        if (t) {
-            g_wb_waits++;
-            g_wb_wait_ns += plat_ns() - t;
-        }
-    }
+    if (g_gfx_any && !g_out_landing) wait_finish(reason);
     vk_unlock();
 }
-void vk_buf_mem_need(u64 gva, u64 len) {
+void vk_buf_land(void) { land_reason(WB_SIGNAL); }
+void vk_buf_land_syncwait(void) { land_reason(WB_SYNCWAIT); }
+void vk_buf_land_map(void) { land_reason(WB_MAP); }
+static void mem_need_reason(u64 gva, u64 len, int reason) {
     if (!g_gfx_any || g_out_landing || !len) return;
     vk_lock();
     for (GfxOut* o = g_out; o; o = o->next)
         if (gva < o->addr + o->size && o->addr < gva + len) {
-            u64 t = copy_stats_on() ? plat_ns() : 0;
-            vk_finish();
-            if (t) {
-                g_wb_waits++;
-                g_wb_wait_ns += plat_ns() - t;
-            }
+            wait_finish(reason);
             break;
         }
     vk_unlock();
 }
+void vk_buf_mem_need(u64 gva, u64 len) { mem_need_reason(gva, len, WB_READ); }
+void vk_buf_mem_need_map(u64 gva, u64 len) { mem_need_reason(gva, len, WB_MAP); }
 void vk_buf_before_write(u64 gva, u64 len) {
     if (len)
-        vk_buf_mem_need(gva, len);
+        mem_need_reason(gva, len, WB_WRITE);
     else
-        vk_buf_land();
+        land_reason(WB_SIGNAL);
 }
 /* A draw can consume an earlier draw's storage result without making a round trip through guest RAM. The guest
    input must still match the first draw's snapshot, and the frame must own the output buffer until this draw ends. */
@@ -198,7 +204,9 @@ static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off) {
             if (copy_stats_on()) g_wb_reuses++;
             return 1;
         }
-        vk_buf_land();
+        if (copy_stats_on())
+            g_wb_draw_miss[o->frame != vk_frame_number() ? 0 : !host ? 1 : memcmp(host, o->org + delta, len) ? 2 : 3]++;
+        land_reason(WB_DRAW);
         return 0;
     }
     return 0;
@@ -524,8 +532,20 @@ void vk_buf_frame(void) {
             (unsigned long long)g_read_bound, (unsigned long long)g_wb_outputs, (unsigned long long)g_wb_bytes,
             (unsigned long long)g_wb_waits, (unsigned long long)(g_wb_wait_ns / 1000000),
             (unsigned long long)g_wb_reuses);
+        LOG("vulkan: buffer waits: draw=%llu/%llums read=%llu/%llums write=%llu/%llums signal=%llu/%llums syncwait=%llu/%llums map=%llu/%llums draw_miss=frame:%llu range:%llu changed:%llu align:%llu\n",
+            (unsigned long long)g_wb_reason[WB_DRAW], (unsigned long long)(g_wb_reason_ns[WB_DRAW] / 1000000),
+            (unsigned long long)g_wb_reason[WB_READ], (unsigned long long)(g_wb_reason_ns[WB_READ] / 1000000),
+            (unsigned long long)g_wb_reason[WB_WRITE], (unsigned long long)(g_wb_reason_ns[WB_WRITE] / 1000000),
+            (unsigned long long)g_wb_reason[WB_SIGNAL], (unsigned long long)(g_wb_reason_ns[WB_SIGNAL] / 1000000),
+            (unsigned long long)g_wb_reason[WB_SYNCWAIT], (unsigned long long)(g_wb_reason_ns[WB_SYNCWAIT] / 1000000),
+            (unsigned long long)g_wb_reason[WB_MAP], (unsigned long long)(g_wb_reason_ns[WB_MAP] / 1000000),
+            (unsigned long long)g_wb_draw_miss[0], (unsigned long long)g_wb_draw_miss[1],
+            (unsigned long long)g_wb_draw_miss[2], (unsigned long long)g_wb_draw_miss[3]);
         g_copy_uncached = g_copy_stage = g_copy_owned = g_copy_zero = g_copy_calls = g_copy_peak = g_read_bound = 0;
         g_wb_outputs = g_wb_bytes = g_wb_waits = g_wb_wait_ns = g_wb_reuses = 0;
+        memset(g_wb_reason, 0, sizeof g_wb_reason);
+        memset(g_wb_reason_ns, 0, sizeof g_wb_reason_ns);
+        memset(g_wb_draw_miss, 0, sizeof g_wb_draw_miss);
     }
     for (int k = 0; k < VBH; k++)
         for (Vb** pp = &g_vbh[k]; *pp;) {

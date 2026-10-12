@@ -30,10 +30,10 @@ static void vkr_before_write(u64 gva, u64 size) {
 static void vkr_mapping_begin(u64 gva, u64 size, int full) {
     vk_lock();
     if (full) {
-        vk_buf_land();
+        vk_buf_land_map();
         vk_compute_land();
     } else {
-        vk_buf_mem_need(gva, size);
+        vk_buf_mem_need_map(gva, size);
         vk_compute_mem_need(gva, size);
     }
 }
@@ -119,7 +119,7 @@ static void vkr_dispatch(GpuChannel* ch, const u32* q, u64 code) {
 }
 /* compute results land before the stream signals or waits (gpu/vk/compute.c) */
 static void vkr_before_syncwait(void) {
-    vk_buf_land();
+    vk_buf_land_syncwait();
     vk_compute_land();
 }
 static void vkr_stream_incr(u32 id) {
