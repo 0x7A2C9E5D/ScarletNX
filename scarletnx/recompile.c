@@ -170,8 +170,13 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet) {
         if (!rc && p->romfs_path) {
             dst = snx_path_join(dir, "romfs");
             if (!snx_is_dir(dst)) {
+                /* A stopped copy must not look like a complete cache on the next run. */
+                char* pending = snx_format("%s.copying", dst);
                 if (!quiet) puts("Copying RomFS...");
-                rc = snx_copy_tree(p->romfs_path, dst);
+                rc = ((snx_is_dir(pending) || snx_is_file(pending) || snx_is_link(pending)) &&
+                      snx_remove_tree(pending)) ||
+                     snx_copy_tree(p->romfs_path, pending) || snx_replace(pending, dst);
+                free(pending);
             }
             free(dst);
         }
@@ -386,6 +391,9 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("runtime unavailable; specify --runtime FILE");
         goto done;
     }
+    /* Deploy the executable last: automatic play uses it as the completion checkpoint. */
+    romfs = snx_path_join(data, "romfs");
+    snx_prebuild_shaders(paths, romfs, out, compile.quiet);
     exe = snx_format("%s%s", base, compile.target_win ? ".exe" : "");
     tmp = snx_format("%s.tmp", exe);
     if (snx_copy_file(run, tmp) || snx_make_executable(tmp) || snx_replace(tmp, exe)) {
@@ -393,8 +401,6 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         if (snx_is_file(tmp)) snx_remove_tree(tmp);
         goto done;
     }
-    romfs = snx_path_join(data, "romfs");
-    snx_prebuild_shaders(paths, romfs, out, compile.quiet);
     if (!compile.quiet) printf("Built %s\n", exe);
     rc = 0;
 done:

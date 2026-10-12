@@ -49,6 +49,9 @@ char* snx_find_tool(const char* name);
 /* argv is NULL terminated. No shell. Captured output is heap-owned by caller.
    home isolates HOME/USERPROFILE and removes XDG_CONFIG_HOME in the child. */
 int snx_run(const char* const* argv, const char* cwd, const char* home, char** output);
+/* Foreground workflow stage with inherited stdio, interruption forwarding and diagnostics.
+   A stopped POSIX child is aborted so a rerun can restart that stage. Not thread safe. */
+int snx_run_stage(const char* const* argv, const char* cwd, const char* stage);
 FILE* snx_fopen(const char* path, const char* mode);
 
 #endif

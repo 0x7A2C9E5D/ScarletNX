@@ -44,12 +44,19 @@ static void wsize_set(int w, int h) {
     if (w > 0 && h > 0) g_wsize = (u64)(u32)w | (u64)(u32)h << 32;
 }
 void backend_window_size(int* w, int* h) {
-    u64 s = g_wsize;
+    u64 s = g_opt_headless ? 0 : g_wsize;
     *w = (int)(u32)s;
     *h = (int)(u32)(s >> 32);
 }
 
 void video_init(const char* title) {
+    if (g_opt_headless) {
+        /* No SDL video subsystem: this also works without DISPLAY, WAYLAND_DISPLAY or a seat. */
+        unattended_start();
+        if (!g_renderer->start()) fatal("Headless Vulkan could not start (see the log). Vulkan 1.3 is required.");
+        LOG("renderer: Vulkan headless (no window, surface or swapchain)\n");
+        return;
+    }
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) fatal("SDL could not start its video: %s", SDL_GetError());
     LOG("video: SDL %d.%d.%d on %s\n", SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
         SDL_VERSIONNUM_MICRO(SDL_GetVersion()), SDL_GetCurrentVideoDriver());
@@ -143,7 +150,7 @@ static void set_fullscreen(int on) {
    thread, Windows' own box (it takes any thread), and none on Linux: the error is in the log and on stderr. None
    either for an unattended run, where nobody would close it */
 void win_fatal_box(const char* msg) {
-    if (unattended_active()) return;
+    if (g_opt_headless || unattended_active()) return;
     if (SDL_IsMainThread()) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", msg, g_win);
         return;
@@ -226,7 +233,7 @@ static i32 up(i32 v) { return v == -32768 ? 32767 : -v; }
 
 void video_poll(void) {
     SDL_Event e;
-    while (SDL_PollEvent(&e)) {
+    while (!g_opt_headless && SDL_PollEvent(&e)) {
         switch (e.type) {
             case SDL_EVENT_QUIT: g_quit = 1; break;
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:

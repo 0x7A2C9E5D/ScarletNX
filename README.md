@@ -18,6 +18,11 @@ cmake --preset default -B build && cmake --build build
 Afterwards, put `prod.keys` (and `title.keys`, for NSPs) in `~/.switch`, or pass them with `--keys` and
 `--title-keys`.
 ```bash
+./build/scarletnx "Game.xci"  # extract, recompile, then play (also accepts NSP)
+```
+Run the same command again after an interruption. Completed extraction and recompilation are skipped,
+but the game always starts anew. To run the steps separately:
+```bash
 ./build/scarletnx --extract "Game.xci" --name Game  # -> work/Game/{exefs,romfs}
 ./build/scarletnx --recompile work/Game Game        # -> games/Game
 cd games && ./Game

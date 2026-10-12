@@ -77,13 +77,35 @@ cmake --preset default -B build -DSNX_FFMPEG_ASM=OFF && cmake --build build
 - `-DCPM_SOURCE_CACHE=/path`: override source-download cache.
 
 ```sh
-cmake --preset default -B build/headless -DSNX_BACKEND=headless -DSNX_DEPLOY=OFF &&
+# Vulkan without SDL3, a display server, a surface or a swapchain:
+cmake --preset default -B build/headless-vk -DSNX_BACKEND=headless -DSNX_VULKAN=ON -DSNX_DEPLOY=OFF &&
+cmake --build build/headless-vk
+# -> build/headless-vk/scarletnx, Vulkan renderer, always headless
+
+# Lightweight null renderer (does not render the game's 3D graphics):
+cmake --preset default -B build/headless -DSNX_BACKEND=headless -DSNX_VULKAN=OFF -DSNX_DEPLOY=OFF &&
 cmake --build build/headless
 # -> build/headless/scarletnx, no SDL3/Vulkan or game deployment
 
 cmake --preset windows-cross && cmake --build --preset windows-cross
 # -> build/windows-cross/scarletnx.exe; requires llvm-mingw on PATH
 ```
+
+The normal SDL3 build also supports `--headless` at runtime, with `--headless=0` returning to windowed startup.
+The no-SDL3 builds cannot switch to a window. [Software Vulkan / lavapipe setup](USAGE.md#headless-vulkan--lavapipe).
+
+Offscreen integration test, with an installed Vulkan 1.3 ICD (lavapipe works):
+
+```sh
+cmake --preset default -B build/headless-vk -DSNX_BACKEND=headless -DSNX_VULKAN=ON \
+  -DSNX_DEPLOY=OFF -DSNX_TEST_VULKAN=ON && cmake --build build/headless-vk
+# Set VK_DRIVER_FILES to your lavapipe manifest to force CPU rendering.
+SNX_VK_VALIDATION=1 ctest --test-dir build/headless-vk -R vulkan_headless --output-on-failure
+```
+
+The test uses synthetic pixels, not a game. It checks offscreen submissions, frame recycling, cropping,
+readback hashes and PPM contents without WSI. Validation requires the Khronos validation layer to be installed.
+`SNX_TEST_VULKAN` is off by default so ordinary unit tests do not require an ICD.
 
 Cross-builds omit host hactool. Use a native driver for `--extract`; `--recompile --target win64`
 uses llvm-mingw and builds the cross runtime in `build/win64-recomp`.

@@ -41,11 +41,15 @@ if(NOT SNX_BACKEND MATCHES "^(sdl3|headless)$")
     message(FATAL_ERROR "SNX_BACKEND=${SNX_BACKEND}: the x11, x11es and win32 backends were removed, sdl3 covers them. "
                         "Configure a new build folder, or pass -DSNX_BACKEND=sdl3.")
 endif()
-# The renderer is Vulkan (1.3), which the sdl3 backend draws with. The headless backend has none.
+# SDL3 needs Vulkan. The no-window backend can use Vulkan too, or retain the lightweight null renderer.
 if(SNX_BACKEND STREQUAL "sdl3")
-    set(SNX_VULKAN ON)
+    set(snx_vulkan_default ON)
 else()
-    set(SNX_VULKAN OFF)
+    set(snx_vulkan_default OFF)
+endif()
+option(SNX_VULKAN "Build the Vulkan renderer (also supports --headless)" ${snx_vulkan_default})
+if(SNX_BACKEND STREQUAL "sdl3" AND NOT SNX_VULKAN)
+    message(FATAL_ERROR "The SDL3 backend requires SNX_VULKAN=ON. Use SNX_BACKEND=headless for the null renderer.")
 endif()
 option(SNX_H264 "Decode NVDEC video (H.264) and hwopus audio (Opus) with FFmpeg" ON)
 option(SNX_DEPLOY "Copy the runtime next to every recompiled game in SNX_GAMES_DIR after building" ON)
