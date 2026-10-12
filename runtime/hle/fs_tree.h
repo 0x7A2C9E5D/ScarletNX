@@ -16,7 +16,9 @@ typedef enum {
     FS_TREE_TOOLONG,
     FS_TREE_IO,
     FS_TREE_NOMEM,
-    FS_TREE_READONLY
+    FS_TREE_READONLY,
+    FS_TREE_NOTDELETABLE,
+    FS_TREE_NOTRENAMABLE
 } FsTreeResult;
 
 typedef struct FsNode {

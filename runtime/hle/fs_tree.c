@@ -389,7 +389,14 @@ FsTreeResult fs_tree_create(FsTree* tree, FsNode* scope, const char* path, int i
 #endif
     FsNode* parent;
     char name[FS_TREE_PATH_MAX], host[FS_TREE_PATH_MAX];
-    FsTreeResult rc = resolve_parent(tree, scope, path, &parent, name);
+    FsTreeResult rc;
+    if (is_dir) {
+        /* The normalized mount root already exists, including a virtual root not yet materialized. */
+        rc = parse_path(tree, scope, path, &parent, name);
+        if (rc) return rc;
+        if (!name[0]) return FS_TREE_EXISTS;
+    }
+    rc = resolve_parent(tree, scope, path, &parent, name);
     if (rc) return rc;
     if (child_find(parent, name)) return FS_TREE_EXISTS;
     if (parent->readonly) return FS_TREE_READONLY;
@@ -478,7 +485,7 @@ FsTreeResult fs_tree_remove(FsTree* tree, FsNode* scope, const char* path, int i
     if (n->is_dir != !!is_dir) return FS_TREE_NOTFOUND;
     if (keep && !is_dir) return FS_TREE_INVALID;
     if (!keep && (n == tree->root || n == scope || (n->parent == tree->root && !strcmp(n->name, "root"))))
-        return FS_TREE_INVALID;
+        return FS_TREE_NOTDELETABLE;
     char host[FS_TREE_PATH_MAX];
     return remove_node(tree, n, recursive, keep, host);
 }
@@ -507,14 +514,31 @@ static FsTreeResult subtree_bounds(const FsNode* node, size_t path_len, unsigned
     return FS_TREE_OK;
 }
 
+/* Strict ancestry on mount-relative normalized paths. Equal paths and component-prefix siblings are not
+   ancestors. Atmosphere's fs::IsSubPath checks both directions, before looking up either directory. */
+static int path_ancestor(const char* parent, const char* child) {
+    size_t length = strlen(parent);
+    if (!length) return *child != 0;
+    return !strncmp(parent, child, length) && child[length] == '/';
+}
+
 FsTreeResult fs_tree_rename(FsTree* tree, FsNode* scope, const char* src, const char* dst, int is_dir) {
     FsNode *n, *parent;
-    FsTreeResult rc = fs_tree_lookup(tree, scope, src, &n);
+    char name[FS_TREE_PATH_MAX], from[FS_TREE_PATH_MAX], to[FS_TREE_PATH_MAX];
+    FsTreeResult rc;
+    if (is_dir) {
+        FsNode *from_root, *to_root;
+        rc = parse_path(tree, scope, src, &from_root, from);
+        if (rc) return rc;
+        rc = parse_path(tree, scope, dst, &to_root, to);
+        if (rc) return rc;
+        if (from_root == to_root && (path_ancestor(from, to) || path_ancestor(to, from))) return FS_TREE_NOTRENAMABLE;
+    }
+    rc = fs_tree_lookup(tree, scope, src, &n);
     if (rc) return rc;
     if (n->is_dir != !!is_dir) return FS_TREE_NOTFOUND;
     if (n->readonly) return FS_TREE_READONLY;
     if (n == tree->root || n == scope || (n->parent == tree->root && !strcmp(n->name, "root"))) return FS_TREE_INVALID;
-    char name[FS_TREE_PATH_MAX], from[FS_TREE_PATH_MAX], to[FS_TREE_PATH_MAX];
     rc = resolve_parent(tree, scope, dst, &parent, name);
     if (rc) return rc;
     if (child_find(parent, name)) return FS_TREE_EXISTS;
