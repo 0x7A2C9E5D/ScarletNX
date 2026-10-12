@@ -36,7 +36,7 @@ typedef struct {
     char first_unsupported[64];
     u32 cs_local[3];
     int shared_size;
-    u32 gbuf_wmask; /* gbufs written (compute) */
+    u32 gbuf_wmask; /* global buffers written by compute or graphics shaders */
     struct {
         u32 cbuf_off;
         u8 type, bindless, bl_cbuf, pad;
@@ -51,6 +51,7 @@ typedef struct {
 #define SNX_VKB_IMG  66 /* 8 storage images (compute) */
 #define SNX_VKB_RS   74 /* fragment: 1/resolution scale (SNX_RS) */
 #define SNX_VKB_FMT  75 /* compute: image format classes (SNX_FMT) */
+#define SNX_VKB_SMAP 76 /* graphics: storage-buffer page indices for aliased bindings */
 int shader_vk_set(int stage);
 /* malloc'd GLSL, or NULL */
 char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si);

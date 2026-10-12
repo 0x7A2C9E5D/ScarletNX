@@ -7,4 +7,5 @@
 
 int g_renderer_up;
 u64 g_draws;
-volatile int g_cs_any;
+_Atomic int g_cs_any;
+_Atomic int g_gfx_any;

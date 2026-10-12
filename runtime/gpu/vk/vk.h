@@ -7,6 +7,7 @@
    cmd.c       frames in flight: the command buffer being recorded, a staging ring, deferred destruction
    format.c    guest render target and texture formats -> Vulkan formats
    surface.c   render targets by guest address (a table textures share), loads from and write-backs to guest memory
+   writeback.c landing compute and graphics storage results in guest memory
    texture.c   textures from the guest's texture headers (TIC), views and samplers (TSC)
    buffer.c    vertex, index, constant and storage buffers from guest memory
    pipeline.c  translated shaders, the pipeline layout and pipelines by state
@@ -75,6 +76,8 @@ VkCommandBuffer vk_cmd(void); /* the current frame's command buffer, begun on fi
 /* size bytes of the current frame's staging memory (host visible, flushed when the frame is submitted), valid until
    that frame's work is done */
 u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off);
+/* As vk_stage, with the allocation for GPU-written data that must be invalidated after its frame fence. */
+u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem);
 /* ends and submits the current frame's commands, waiting for wait (at wait_stage) and signaling signal, then starts
    the next frame. Either semaphore may be VK_NULL_HANDLE */
 void vk_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal);
@@ -149,16 +152,24 @@ typedef struct Surf {
     VkPipelineStageFlags2 stage;
     VkAccessFlags2 access;
     u64 last_used;
-    u32 wgen;     /* render targets: bumped when drawn to */
-    u32 mem_wgen; /* render targets: wgen when guest memory last held the same (written back or loaded) */
-    u64 gw;       /* g_gw_gen when it last matched guest memory (textures) or was bound to draw (render targets) */
+    u32 wgen;       /* render targets: bumped when drawn to */
+    u32 drawn_at;   /* render targets: g_vk_present when last drawn to */
+    u64 draw_gw;    /* guest-memory generation at the first draw this present or since a full replacement */
+    u64 draw_hash;  /* fallback guest-memory hash at that baseline */
+    u32 draw_wseen; /* CPU write-tracking clock at that baseline, zero after a reload */
+    int draw_has_hash;
+    struct Surf* copy_dst; /* render targets: the texture last copied from it (gpu/vk/texture.c) */
+    u32 copy_wgen;         /* and its wgen then */
+    u32 copy_tgen;         /* and the texture's upload generation then */
+    u32 mem_wgen;          /* render targets: wgen when guest memory last held the same (written back or loaded) */
+    u64 gw; /* gpu_mem_generation() when it last matched guest memory (textures) or was bound to draw (render targets) */
     /* textures: views by type and swizzle, and the change check (gpu/vk/texture.c) */
     SurfView sv[6];
     int nsv;
     u64 size, hash, shash;
     u32 checked, next_check, stable, tfull;
     u32 wseen; /* write-tracking clock when it last matched memory */
-    /* copies of regions of this render target for smaller texture headers, one per size, linked through next
+    /* copies of regions of this render target for texture headers or feedback draws, one per size, linked through next
        (gpu/vk/texture.c rt_crop) */
     struct Surf* crop;
     u32 crop_gen;
@@ -171,6 +182,7 @@ float vk_scf(float v); /* the same for viewport values */
 /* w in pixels; pitch: bytes per row of a pitch-linear target (the register holds it in place of the width) */
 Surf* vk_rt(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch);
 Surf* vk_rt_find(u64 gva);
+Surf* vk_rt_snapshot(Surf* rt);                  /* copy a target so a draw can sample its contents while writing it */
 Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h); /* the render target the guest presents from that memory */
 /* a render target read where its guest memory is (a texture, a present): keeps it from being evicted, and says
    once when the GPU front end wrote that memory after the target was last drawn */
@@ -183,6 +195,10 @@ void vk_surf_use(VkCommandBuffer cb, Surf* s, VkImageLayout layout, VkPipelineSt
     (VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |                                 \
      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)
 void vk_rt_flush(u64 gva);
+void vk_rt_drawn(Surf* s);      /* a render target was drawn to (gpu/vk/render.c) */
+void vk_rt_drawn_full(Surf* s); /* a full clear or blit replaced every pixel */
+int vk_rt_drawn_fresh(Surf* s); /* no guest-memory write has replaced the target since its last draw */
+int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max); /* count drawn in [lo, hi), write up to max */
 void vk_rt_reload(u64 gva);
 /* textures share the surface table */
 Surf* vk_surf_first(u64 gva);
@@ -204,9 +220,38 @@ void vk_tex_frame(void); /* a frame was presented: evicts what wasn't used for a
 
 /* gpu/vk/buffer.c: guest memory [gva, gva + len) as a buffer the GPU reads, valid until the next submit */
 int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off);
+int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off); /* no delayed content checks */
 /* a copy of len bytes made now (data that changes within a frame), or of zeros when gva is 0 */
 int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off);
+int vk_buf_copy_writable(u64 gva, u32 len, VkBuffer* buf, u64* off);
+typedef struct {
+    u64 addr;
+    u32 size;
+    int writable, aliased;
+    VkBuffer buf;
+    u64 off, range;
+} VkDrawGbuf;
+typedef struct {
+    VkDrawGbuf b[2][16];
+    int n[2];
+    VkBuffer map_buf[2];
+    u64 map_off[2], map_size[2];
+} VkDrawStorage;
+int vk_buf_draw_has_alias(const VkDrawStorage* draw);
+int vk_buf_draw_prepare(VkDrawStorage* draw);
+void vk_buf_writable_abort(void);
+void vk_buf_writable_commit(void);
+void vk_buf_mem_need(u64 gva, u64 len);
+void vk_buf_mem_need_map(u64 gva, u64 len);
+void vk_buf_before_write(u64 gva, u64 len);
+void vk_buf_land(void);
+void vk_buf_land_syncwait(void);
+void vk_buf_land_map(void);
+void vk_buf_frame_done(u64 frame);
+void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame);
 void vk_buf_frame(void);
+/* Land GPU-written bytes only where guest memory still matches the shader's input snapshot. */
+void vk_write_changed(u64 addr, const u8* res, const u8* org, u32 size);
 /* 1 if [host, host+len) was written since the write-tracking clock read `since`, 0 if not, -1 when write tracking
    can't tell (no host pointer, or not available): then check the contents */
 int vk_written_since(const u8* host, u64 len, u32 since);

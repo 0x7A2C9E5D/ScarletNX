@@ -795,6 +795,19 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si) {
         sb_put(D, "#extension GL_ARB_shader_viewport_layer_array : require\n#define SNX_SET_LAYER(v) gl_Layer=(v)\n");
     if (stage == ST_FS && si->uses_position_in)
         sb_f(D, "layout(std140, %s) uniform SNX_RS { vec4 snx_rs; };\n", bind_at(stage, SNX_VKB_RS)); /* 1/res scale */
+    if (si->ngbuf) {
+        if (stage == ST_CS)
+            sb_put(D, "uint snx_sb_idx(uint b, uint word) { return word; }\n");
+        else {
+            /* The map starts with 16 list offsets, 16 binding word offsets and 16 word counts; page IDs follow. */
+            sb_f(D, "layout(std430, %s) readonly buffer SNX_SMAP { uint d[]; } snx_smap;\n",
+                 bind_at(stage, SNX_VKB_SMAP));
+            sb_put(D, "uint snx_sb_idx(uint b, uint word) { uint h=snx_smap.d[b]; "
+                      "if(h==0xffffffffu) return word; if(word>=snx_smap.d[32u+b]) return 0xffffffffu; "
+                      "uint w=word+snx_smap.d[16u+b]; "
+                      "return (snx_smap.d[h+(w>>10u)]<<10u)|(w&1023u); }\n");
+        }
+    }
     for (int i = 0; i < si->ngbuf; i++)
         sb_f(D, "layout(std430, %s) %sbuffer S%d_G%d { uint d[]; } g%d;\n", bind_at(stage, SNX_VKB_SSBO + i),
              ((si->gbuf_wmask >> i) & 1) ? "" : "readonly ", stage, i, i);
@@ -895,6 +908,14 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si) {
         if (f2) sb_put(D, "float ffmz(float a, float b, float c){ return (a==0.0 || b==0.0) ? c : fma(a,b,c); }\n");
     }
     sb_put(D, "void main(){\n");
+    /* an output component the program doesn't write reads as that of (0, 0, 0, 1), as Ryujinx's translator (MIT)
+       initializes them: Tears of the Kingdom's full-screen passes write the position's x, y and z only, and a w left
+       undefined clipped them away */
+    if (c->stage == ST_VS) {
+        sb_put(D, "  gl_Position = vec4(0.0, 0.0, 0.0, 1.0);\n");
+        for (int i = 0; i < 32; i++)
+            if (c->out_used[i]) sb_f(D, "  out_attr%d = vec4(0.0, 0.0, 0.0, 1.0);\n", i);
+    }
     if (c->stage == ST_VS && !c->si->writes_point_size) sb_put(D, "  gl_PointSize = 1.0;\n");
     /* a clip distance below the last written one that the program leaves alone doesn't clip */
     for (int i = 0; c->stage == ST_VS && i < 8 && c->si->uses_clip_mask >> i; i++)

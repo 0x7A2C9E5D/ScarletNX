@@ -9,6 +9,7 @@
 #include "platform/log.h"
 #include "platform/plat.h"
 #include "gpu/vk/vk.h"
+#include "gpu/vk/spirv.h"
 
 VkState g_vk;
 /* reentrant on the thread that holds it: landing compute results writes guest memory, which can come back here */
@@ -174,6 +175,12 @@ static int create_device(void) {
         return 0;
     }
     vkGetPhysicalDeviceProperties(g_vk.phys, &g_vk.props);
+    VkPhysicalDeviceVulkan12Properties p12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
+    VkPhysicalDeviceProperties2 pp2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &p12};
+    vkGetPhysicalDeviceProperties2(g_vk.phys, &pp2);
+    g_vk_preserve_infnan = p12.shaderSignedZeroInfNanPreserveFloat32 != 0;
+    if (!g_vk_preserve_infnan)
+        WARN("vulkan: this GPU can't keep infinities and NaNs in shaders, which some games' lighting needs\n");
 
     /* compute gets a queue of its own: of a compute-only family, or else a second one of the graphics family */
     int second = g_vk.compute_family == g_vk.gfx_family && gfx_queues >= 2;

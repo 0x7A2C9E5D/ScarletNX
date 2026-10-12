@@ -165,36 +165,6 @@ static u64 arena_alloc(u64 size) {
     return at;
 }
 
-/* a byte of the result lands when the shader changed it and guest memory still holds what the shader read */
-static void write_changed(u64 addr, const u8* res, const u8* org, u32 size) {
-    u8* dst = gmem_ptr(addr, size);
-    u8* tmp = NULL;
-    const u8* cur = dst;
-    if (!cur) {
-        tmp = malloc(size);
-        gmem_read(addr, tmp, size);
-        cur = tmp;
-    }
-    for (u32 i = 0; i < size;) {
-        if (i + 8 <= size && !memcmp(res + i, org + i, 8)) {
-            i += 8;
-            continue;
-        }
-        if (res[i] == org[i] || cur[i] != org[i]) {
-            i++;
-            continue;
-        }
-        u32 s = i;
-        while (i < size && res[i] != org[i] && cur[i] == org[i]) i++;
-        if (dst)
-            memcpy(dst + s, res + s, i - s);
-        else
-            gmem_write(addr + s, res + s, i - s);
-    }
-    free(tmp);
-    gpu_mem_written(addr, size); /* caches built from this memory check it again */
-}
-
 /* submits the batch without waiting; it signals g_vk_csem with the next value */
 static void cs_submit(void) {
     if (!g_recording) return;
@@ -230,7 +200,7 @@ static void cs_land(void) {
     vmaInvalidateAllocation(g_vk.vma, g_ar_mem, 0, VK_WHOLE_SIZE);
     g_inflight = 0;
     for (int i = 0; i < g_nout; i++)
-        write_changed(g_out[i].addr, g_ar_ptr + g_out[i].off, g_org + g_out[i].off, g_out[i].size);
+        vk_write_changed(g_out[i].addr, g_ar_ptr + g_out[i].off, g_org + g_out[i].off, g_out[i].size);
     /* only now: until the results are in memory, readers on other threads wait for this landing in
        vk_compute_mem_need */
     g_cs_any = 0;
@@ -313,7 +283,7 @@ static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm) {
     p->si.shared_size = (int)shm;
     const char* corpus = getenv("SNX_SHADER_CORPUS");
     if (corpus) shader_corpus_save(corpus, code, blen, 0x10000 + 80, ST_CS, &p->si, key);
-    char* src = vk_translate(code, 0x10000 + 80, ST_CS, &p->si, cs_cb_read, &p->cbr);
+    char* src = vk_glsl_post(vk_translate(code, 0x10000 + 80, ST_CS, &p->si, cs_cb_read, &p->cbr), ST_CS);
     if (!src || p->si.unsupported) {
         p->failed = 1;
         LOG("vulkan: compute %016llx not translated (%d instructions, first %s)\n", (unsigned long long)key,
@@ -617,7 +587,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         vmaInvalidateAllocation(g_vk.vma, g_ar_mem, 0, VK_WHOLE_SIZE);
         g_landing = 1;
         for (int i = 0; i < g_nout; i++)
-            write_changed(g_out[i].addr, g_ar_ptr + g_out[i].off, g_org + g_out[i].off, g_out[i].size);
+            vk_write_changed(g_out[i].addr, g_ar_ptr + g_out[i].off, g_org + g_out[i].off, g_out[i].size);
         g_nout = 0;
         g_out_lo = ~0ull;
         g_out_hi = 0;

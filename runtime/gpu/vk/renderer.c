@@ -5,7 +5,7 @@
    Render targets, clears, draws (gpu/vk/render.c), compute (gpu/vk/compute.c), write-backs to and reloads from
    guest memory, and presenting the game's framebuffer from its render target (or from memory, converted on the CPU,
    when no render target holds it). Everything that records runs under vk_lock(), which is reentrant: submissions and
-   presents on the GPU thread (gpu/gpu.c), screenshots on the thread asking, and compute results landing on whichever
+   presents on the GPU thread (gpu/gpu.c), screenshots on the thread asking, and shader results landing on whichever
    thread reads their memory first. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +23,21 @@ static VkSemaphore g_acquired[VK_FRAMES];
 static Surf* g_cpu_img;
 static Surf* g_last;
 static u32 g_last_x, g_last_y, g_last_w, g_last_h;
+static void vkr_before_write(u64 gva, u64 size) {
+    vk_buf_before_write(gva, size);
+    vk_compute_before_write(gva, size);
+}
+static void vkr_mapping_begin(u64 gva, u64 size, int full) {
+    vk_lock();
+    if (full) {
+        vk_buf_land_map();
+        vk_compute_land();
+    } else {
+        vk_buf_mem_need_map(gva, size);
+        vk_compute_mem_need(gva, size);
+    }
+}
+static void vkr_mapping_end(void) { vk_unlock(); }
 
 /* 0 when Vulkan can't run here */
 static int vkr_start(void) {
@@ -31,7 +46,9 @@ static int vkr_start(void) {
     if (g_vk_scale != 1.0f) LOG("vulkan: render targets at %.2fx\n", g_vk_scale);
     vk_cmd_init();
     vk_pipeline_init();
-    g_gpu_before_write = vk_compute_before_write;
+    g_gpu_before_write = vkr_before_write;
+    g_gpu_mapping_begin = vkr_mapping_begin;
+    g_gpu_mapping_end = vkr_mapping_end;
     g_gpu_mem_changed = vk_mem_changed;
     VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     if (!g_opt_headless)
@@ -100,9 +117,13 @@ static void vkr_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     vk_dispatch(ch, q, code);
     vk_unlock();
 }
-/* compute results land before the stream signals or waits (gpu/vk/compute.c) */
-static void vkr_before_syncwait(void) { vk_compute_land(); }
+/* Pending shader results land before the stream signals or waits. */
+static void vkr_before_syncwait(void) {
+    vk_buf_land_syncwait();
+    vk_compute_land();
+}
 static void vkr_stream_incr(u32 id) {
+    vk_buf_land();
     vk_compute_land();
     syncpt_incr(id);
 }
@@ -162,6 +183,7 @@ static int is_srgb(VkFormat f) {
 static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, const i32 crop[4]) {
     static int sc_srgb; /* what the swapchain was asked for (the surface may not have it) */
     vk_lock();
+    vk_buf_writable_abort(); /* a draw abandoned during setup has no shader writes to land */
     vk_render_end();
     Surf* src = NULL;
     if (w && h && w <= g_vk.props.limits.maxImageDimension2D && h <= g_vk.props.limits.maxImageDimension2D) {
@@ -368,6 +390,7 @@ const Renderer vk_renderer = {
     .rt_reload = vkr_rt_reload,
     .dispatch = vkr_dispatch,
     .cs_mem_need = vk_compute_mem_need,
+    .gfx_mem_need = vk_buf_mem_need,
     .before_syncwait = vkr_before_syncwait,
     .stream_incr = vkr_stream_incr,
     .present_buffer = vkr_present_buffer,

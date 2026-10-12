@@ -10,6 +10,7 @@
 #include "hle/nvdrv.h"
 #include "kernel/mem.h"
 #include "platform/log.h"
+#include "platform/plat.h"
 #include "gpu/gpu.h"
 void r3d_clear(GpuChannel* ch, u32 v) {
     if (g_renderer_up) {
@@ -103,52 +104,85 @@ int r3d_blit(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, d
     return 0;
 }
 
-/* write log for GPU-side writes (cb_data, I2M, DMA, 2D, reports) so we can tell a range changed
+/* write log for GPU-side writes (cb_data, I2M, DMA, 2D, reports and shader writeback) so we can tell a range changed
    without rehashing it. Back-to-back writes (cb_data goes word by word) get merged. */
 #define GW_N 1024
-u64 g_gw_gen; /* entries in the log */
+static u64 g_gw_gen;      /* published after each complete write-log update */
+static u64 g_gw_phys_gen; /* latest shader writeback to a guest CPU page */
+static PMutex g_gwlock = PMUTEX_INIT;
 static u64 gw_a[GW_N], gw_e[GW_N], gw_g0[GW_N], gw_g1[GW_N];
 static u64 gw_n;
 /* last write gen per 4K block (hashed) so dirty_since doesn't have to walk the log.
    cb checks run thousands of times per frame, the walk showed up high in profiles */
 #define GWB_N 65536
 static u64 gw_blk[GWB_N];
-void gpu_mem_written(u64 gva, u64 size) {
+static u64 gw_phys_blk[GWB_N];
+static void mem_written(u64 gva, u64 size, int shader) {
     if (!size) return;
-    g_gw_gen++;
+    pm_lock(&g_gwlock);
+    u64 gen = g_gw_gen + 1;
     {
         u64 b0 = gva >> 12, b1 = (gva + size - 1) >> 12;
         if (b1 - b0 >= GWB_N) b1 = b0 + GWB_N - 1;
-        for (u64 b = b0; b <= b1; b++) gw_blk[b & (GWB_N - 1)] = g_gw_gen;
+        for (u64 b = b0; b <= b1; b++) gw_blk[b & (GWB_N - 1)] = gen;
+    }
+    if (shader) {
+        /* The shader landing caller holds vk_lock, so guest backing cannot be remapped between its copy and here. */
+        for (u64 b = gva >> 12, e = (gva + size - 1) >> 12; b <= e; b++) {
+            u64 cpu = gmmu_translate(b << 12);
+            if (cpu) gw_phys_blk[(cpu >> 12) & (GWB_N - 1)] = gen;
+        }
+        g_gw_phys_gen = gen;
     }
     if (gw_n) {
         u32 k = (u32)((gw_n - 1) % GW_N);
         if (gw_e[k] == gva || (gva >= gw_a[k] && gva + size <= gw_e[k])) {
             if (gva + size > gw_e[k]) gw_e[k] = gva + size;
-            gw_g1[k] = g_gw_gen;
+            gw_g1[k] = gen;
+            __atomic_store_n(&g_gw_gen, gen, __ATOMIC_RELEASE);
+            pm_unlock(&g_gwlock);
             return;
         }
     }
     u32 k = (u32)(gw_n % GW_N);
     gw_a[k] = gva;
     gw_e[k] = gva + size;
-    gw_g0[k] = gw_g1[k] = g_gw_gen;
+    gw_g0[k] = gw_g1[k] = gen;
     gw_n++;
+    __atomic_store_n(&g_gw_gen, gen, __ATOMIC_RELEASE);
+    pm_unlock(&g_gwlock);
+}
+void gpu_mem_written(u64 gva, u64 size) { mem_written(gva, size, 0); }
+void gpu_mem_written_shader(u64 gva, u64 size) { mem_written(gva, size, 1); }
+u64 gpu_mem_generation(void) { return __atomic_load_n(&g_gw_gen, __ATOMIC_ACQUIRE); }
+static int phys_dirty_since(u64 since, u64 a, u64 sz) {
+    if (!sz || since >= g_gw_phys_gen) return 0;
+    for (u64 b = a >> 12, e = (a + sz - 1) >> 12; b <= e; b++) {
+        u64 cpu = gmmu_translate(b << 12);
+        if (cpu && gw_phys_blk[(cpu >> 12) & (GWB_N - 1)] > since) return 1;
+    }
+    return 0;
 }
 /* nonzero if [a,a+sz) may have been written after gen 'since' */
-int gpu_mem_dirty_since(u64 since, u64 a, u64 sz) {
+static int dirty_since_locked(u64 since, u64 a, u64 sz) {
     if (since >= g_gw_gen) return 0;
     if (sz && sz <= (1u << 20)) {
         for (u64 b = a >> 12, e = (a + sz - 1) >> 12; b <= e; b++)
             if (gw_blk[b & (GWB_N - 1)] > since) return 1;
-        return 0;
+        return phys_dirty_since(since, a, sz);
     }
     u64 lim = gw_n > GW_N ? gw_n - GW_N : 0;
     for (u64 n = gw_n; n > lim; n--) {
         u32 k = (u32)((n - 1) % GW_N);
-        if (gw_g1[k] <= since) return 0;
+        if (gw_g1[k] <= since) return phys_dirty_since(since, a, sz);
         if (gw_a[k] < a + sz && a < gw_e[k]) return 1;
-        if (gw_g0[k] <= since) return 0;
+        if (gw_g0[k] <= since) return phys_dirty_since(since, a, sz);
     }
     return 1;
 } /* older than the log, assume dirty */
+int gpu_mem_dirty_since(u64 since, u64 a, u64 sz) {
+    pm_lock(&g_gwlock);
+    int dirty = dirty_since_locked(since, a, sz);
+    pm_unlock(&g_gwlock);
+    return dirty;
+}
