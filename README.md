@@ -4,6 +4,8 @@
   <b>Wimsy, the ScarletNX mascot</b>
 </p>
 
+Discord: https://discord.gg/tRTRXXbyjp (my god why don't we just use IRC like good people?)
+
 A GPLv3 static ARM64 to x86 recompiler with a Nintendo Switch translation layer for Linux, Windows and FreeBSD. Forked from MZLab's SwitchRecomp.
 
 To build simply:
