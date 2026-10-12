@@ -8,14 +8,10 @@ cd ScarletNX
 cmake --preset default && cmake --build --preset default
 # -> build/default/{scarletnx,hactool,snx-shaderc}
 
-cmake -S scripts -B build/host-tools -G Ninja -DCMAKE_C_COMPILER=clang
-cmake --build build/host-tools
-# -> build/host-tools/{snx-extract,snx-recomp}
-
 # Game.xci + prod.keys in checkout root
-build/host-tools/snx-extract "Game.xci" --name Game
+python3 scripts/extract.py "Game.xci" --name Game
 # -> work/Game/{exefs,romfs}
-build/host-tools/snx-recomp work/Game Game
+python3 scripts/recomp.py work/Game Game
 # -> games/{Game,Game_code.so,Game_data/,Game.ini}
 (cd games && ./Game)
 ```
@@ -33,14 +29,10 @@ cmake --preset default
 cmake --build --preset default
 # -> build\default\{scarletnx.exe,hactool.exe,snx-shaderc.exe}
 
-cmake -S scripts -B build/host-tools -G Ninja -DCMAKE_C_COMPILER=clang
-cmake --build build/host-tools
-# -> build\host-tools\{snx-extract.exe,snx-recomp.exe}
-
 # Game.xci + prod.keys in checkout root
-.\build\host-tools\snx-extract.exe "Game.xci" --name Game
+python scripts\extract.py "Game.xci" --name Game
 # -> work\Game\{exefs,romfs}
-.\build\host-tools\snx-recomp.exe work\Game Game
+python scripts\recomp.py work\Game Game
 # -> games\{Game.exe,Game_code.dll,Game_data\,Game.ini}
 Push-Location games
 .\Game.exe
@@ -56,8 +48,7 @@ Pop-Location
 - **Paths:** avoid spaces in checkout/cache paths when building FFmpeg.
 - **Runtime deps:** CPM fetches pinned, SHA-256-checked sources into `.cache/cpm` (`CPM_SOURCE_CACHE` overrides).
   SDL3 is system-provided on Unix, built on Windows. Pins: [`cmake/dependencies.cmake`](../cmake/dependencies.cmake).
-- **Host tools:** separate C90 build under `scripts/`; not part of the root build. They need the checkout.
-  The helpers are C90; the recompiler remains Python.
+- **Extraction + recompilation:** Python scripts under `scripts/`; run them from the checkout.
 
 New Windows shell:
 
@@ -72,12 +63,12 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 Use dumps + keys from your own console; none are included.
 
-- `snx-extract`: XCI/NSP → ExeFS + RomFS via `build/default/hactool`; builds hactool if missing.
+- `scripts/extract.py`: XCI/NSP → ExeFS + RomFS via `build/default/hactool`; builds hactool if missing.
 - Keys: explicit `--keys` / `--title-keys`, else checkout root → `~/.switch` (Windows: `%USERPROFILE%\.switch`).
   Common NSP tickets supplement title keys; malformed prod-key lengths are filtered from the temporary copy.
 - Extraction refuses an existing `exefs`. Temp storage: system temp if free space ≥1.5× inputs, else output parent.
   Failure removes temp files and newly created output, not a pre-existing output directory.
-- `snx-recomp`: default-preset runtime build → ARM64-to-C AOT → native module → NVN shader prebuild.
+- `scripts/recomp.py`: default-preset runtime build → ARM64-to-C AOT → native module → NVN shader prebuild.
   Object caching avoids unchanged chunks. Shader-prebuild failures are nonfatal; missing shaders compile during play.
 - `games/Game[.exe]`: runtime; `Game_code.so/.dll`: game module; `Game_data/`: game data + saves;
   `Game.ini`: settings; `Game_build/`: generated code + object cache; `shader_cache/spirv/`: shader cache.
@@ -89,20 +80,20 @@ cmake --build --preset default
 # -> refreshes runtime copies in games/
 ```
 
-Recompiler or `runtime/abi/` edits require rerunning `snx-recomp`.
+Recompiler or `runtime/abi/` edits require rerunning `scripts/recomp.py`.
 
 ## Extra options
 
-Examples below use Unix paths; Windows host tools are under `build\host-tools\` with `.exe`.
+Examples below use Unix paths; on Windows, use `python` in place of `python3`.
 
 ### Extraction + recompile
 
 ```sh
-build/host-tools/snx-extract Game.nsp --update update.nsp --name Game \
+python3 scripts/extract.py Game.nsp --update update.nsp --name Game \
   --keys /path/prod.keys --title-keys /path/title.keys
 # -> work/Game/{exefs,romfs}, update applied
 
-build/host-tools/snx-recomp work/Game Game -- --native --jobs 8
+python3 scripts/recomp.py work/Game Game -- --native --jobs 8
 # -> game module optimized for this CPU, up to 8 compile jobs
 
 python3 -m scarletnx --help
@@ -112,18 +103,23 @@ python3 -m scarletnx --help
 - `--update`: same title as the base; apply during extraction, not at runtime.
 - `--name`: defaults to dump stem. `--out DIR`: overrides `work/NAME`.
 - Recompiler flags follow `--`: `--native` adds `-march=native`; `--cc` overrides Clang; `-O` selects optimization.
-- `SNX_PYTHON`: Python executable; defaults to `python3` on Unix, `python` on Windows.
-  `SNX_REPO`: checkout override for either host tool.
 
 ### Build variants
 
+Pass options when configuring, then build the same folder:
+
 ```sh
 cmake --preset default -DSNX_FFMPEG_ASM=OFF
-# -> no NASM requirement; slower videodec
+cmake --build --preset default
+```
 
-cmake --preset default -DSNX_H264=OFF
-# -> no FFmpeg; black video + no Opus decode
+- `SNX_FFMPEG_ASM=OFF`: Build FFmpeg without NASM. Video decoding is slower.
+- `SNX_H264=OFF`: Disable FFmpeg, including NVDEC video and hwopus Opus decoding.
+- `SNX_DEPLOY=OFF`: Disable copying runtimes to the games folder after builds.
+- `SNX_GAMES_DIR=/path`: Set the deployment folder.
+- `CPM_SOURCE_CACHE=/path`: Set the shared download cache.
 
+```sh
 cmake --preset default -B build/headless -DSNX_BACKEND=headless -DSNX_DEPLOY=OFF
 cmake --build build/headless
 # -> headless runtime; no SDL3/Vk; normal game runtime copies untouched
@@ -134,10 +130,8 @@ cmake --build --preset windows-cross
 ```
 
 Configure flags persist in their build directory. Build changed `default` settings with
-`cmake --build --preset default`. Cross-build excludes host hactool; `snx-recomp` uses the native `default` preset,
+`cmake --build --preset default`. Cross-build excludes host hactool; `scripts/recomp.py` uses the native `default` preset,
 not `windows-cross`.
-
-`SNX_DEPLOY=OFF` disables runtime copy-out; `SNX_GAMES_DIR` changes its destination.
 
 ### Linux AppImage + display
 
@@ -150,8 +144,7 @@ SDL_VIDEO_DRIVER=x11 games/Game
 # -> X11 instead of Wayland
 ```
 
-[Nightly AppImage](https://github.com/fuddlesworth/SwitchRecomp/releases/tag/nightly): bundled runtime, not an
-extractor/recompiler. `--game` takes a recompiled game path, not XCI/NSP.
+[Nightly AppImage](https://github.com/fuddlesworth/SwitchRecomp/releases/tag/nightly): bundled runtime and libraries.
 Alternatively, name it `games/Game.AppImage` to select the adjacent module. Packaging:
 [`scripts/make-appimage.sh`](../scripts/make-appimage.sh), using pkgforge/quick-sharun after install into `/usr`.
 
@@ -197,7 +190,7 @@ build/default/snx-shaderc corpus --validate
 # -> recorded shader validation; requires spirv-val
 
 build/default/snx-shaderc --nvn DIR --cache games/shader_cache/spirv
-# -> prebuilt SPIR-V cache; snx-recomp normally handles this
+# -> prebuilt SPIR-V cache; scripts/recomp.py normally handles this
 ```
 
 `--script` entries are `milliseconds:hexbuttons`. `run_game.py` defaults to its game-specific New Game sequence;

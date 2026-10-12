@@ -12,7 +12,7 @@ GPU exec + videodec. File map: `CLAUDE.md`.
 - `module.py`: module metadata + guest addr -> C function mappings for runtime dispatch.
 - `toolchain.py`: shared-module build + object cache. `data.py`: romfs copy + default `<Game>.ini`.
 
-`snx-recomp` (`scripts/recomp.c`): CMake runtime build -> Python recompiler -> shader prebuild.
+`scripts/recomp.py`: CMake runtime build -> Python recompiler -> shader prebuild.
 
 `runtime/abi/cpu.h`: `CPU`, indirect-branch lookup (`snx_lookup`), `RtAPI` callbacks (SVC, undefined instruction,
 BRK, system counter, FPCR, WFE). Modules receive `RtAPI` at load; no named runtime imports.

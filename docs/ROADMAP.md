@@ -28,8 +28,6 @@ component layout are in place. Git history records completed fixes and measureme
 ## Design decisions
 
 Upstream releases are ported by hand, allowing component layouts to change independently.
-Vulkan replaces OpenGL. Features removed with OpenGL include LSFG, dynamic resolution,
-the F7 recorder and F8 full-resolution screenshots.
 
 NVN-level replacement was investigated for Catherine: its loader requests 468 functions
 and the game uses about 178. It would replace much of command decoding while retaining
