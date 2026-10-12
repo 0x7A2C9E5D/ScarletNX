@@ -22,6 +22,9 @@ if(SNX_VULKAN)
     target_include_directories(snx_common BEFORE INTERFACE "${volk_SOURCE_DIR}"
                                                     "${VulkanMemoryAllocator_SOURCE_DIR}/include")
 endif()
+if(SNX_BACKEND STREQUAL "headless")
+    target_compile_definitions(snx_common INTERFACE SNX_HEADLESS_ONLY)
+endif()
 if(NOT SNX_H264)
     target_compile_definitions(snx_common INTERFACE SNX_NO_H264)
 endif()
@@ -31,7 +34,7 @@ function(snx_component name)
     target_link_libraries(snx_${name} PUBLIC snx_common)
 endfunction()
 
-snx_component(core core/main.c core/entry.c core/loader.c core/rtapi.c core/clock.c core/crash.c core/options.c
+snx_component(core core/main.c core/loader.c core/rtapi.c core/clock.c core/crash.c core/options.c core/startup.c
               core/present.c)
 target_link_libraries(snx_core PRIVATE snx_driver)
 snx_component(kernel kernel/kernel.c kernel/thread.c kernel/sync.c kernel/svc.c kernel/svc_mem.c kernel/debug.c
@@ -55,7 +58,7 @@ endif()
 snx_component(platform ${platform})
 
 set(components core kernel hle video gpu platform)
-if(SNX_BACKEND STREQUAL "headless")
+if(NOT SNX_VULKAN)
     snx_component(null gpu/null/null.c)
     list(APPEND components null)
 endif()
@@ -64,7 +67,7 @@ if(SNX_VULKAN)
                   gpu/texture/astc.c)
     snx_component(spirv gpu/vk/spirv.c)
     target_link_libraries(snx_spirv PUBLIC glslang::glslang glslang::glslang-default-resource-limits)
-    # volk loads Vulkan through the window backend's loader, so nothing links against libvulkan
+    # volk uses SDL's loader for windows and loads Vulkan directly for headless runs
     snx_component(vk gpu/vk/renderer.c gpu/vk/device.c gpu/vk/cmd.c gpu/vk/format.c gpu/vk/surface.c gpu/vk/texture.c
                   gpu/vk/buffer.c gpu/vk/pipeline.c gpu/vk/render.c gpu/vk/compute.c gpu/vk/vma.cpp
                   "${volk_SOURCE_DIR}/volk.c")
@@ -73,9 +76,9 @@ if(SNX_VULKAN)
     set_source_files_properties("${volk_SOURCE_DIR}/volk.c" gpu/vk/vma.cpp PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
-add_executable(scarletnx)
+add_executable(scarletnx core/entry.c)
 list(TRANSFORM components PREPEND snx_)
-target_link_libraries(scarletnx PRIVATE ${components} snx_driver)
+target_link_libraries(scarletnx PRIVATE snx_common ${components} snx_driver)
 # glslang is C++: link with the C++ driver. It goes in the build folder itself, where
 # the native driver and CI look for it
 set_target_properties(scarletnx PROPERTIES LINKER_LANGUAGE CXX RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -102,6 +105,24 @@ endif()
 if(SNX_BACKEND STREQUAL "sdl3")
     target_link_libraries(snx_platform PRIVATE SDL3::SDL3)
     target_link_libraries(scarletnx PRIVATE SDL3::SDL3)
+endif()
+
+# Opt-in because normal unit-test runs need neither an ICD nor a GPU. All rendering uses the real runtime.
+if(BUILD_TESTING AND SNX_TEST_VULKAN AND SNX_VULKAN)
+    add_executable(snx-test-vulkan "${PROJECT_SOURCE_DIR}/tests/vulkan_headless.c")
+    target_link_libraries(snx-test-vulkan PRIVATE snx_common ${components} snx_driver Threads::Threads ${CMAKE_DL_LIBS})
+    set_target_properties(snx-test-vulkan PROPERTIES LINKER_LANGUAGE CXX)
+    if(WIN32)
+        target_link_libraries(snx-test-vulkan PRIVATE user32)
+    else()
+        target_link_libraries(snx-test-vulkan PRIVATE m)
+    endif()
+    if(SNX_BACKEND STREQUAL "sdl3")
+        target_link_libraries(snx-test-vulkan PRIVATE SDL3::SDL3)
+    endif()
+    add_test(NAME vulkan_headless COMMAND snx-test-vulkan --headless)
+    set_tests_properties(vulkan_headless PROPERTIES TIMEOUT 60
+        FAIL_REGULAR_EXPRESSION "vulkan validation:;failed: VK_ERROR")
 endif()
 
 if(SNX_DEPLOY)

@@ -173,6 +173,8 @@ static int is_dump(const char* path) {
 }
 
 int snx_main(int argc, char** argv) {
+    int startup = snx_startup_options(argc, argv);
+    if (startup) return startup;
     /* In an AppImage argv[0] points into its mount (APPDIR). APPIMAGE is the file that was run, so a copy named after
        the game (games/Catherine or games/Catherine.AppImage) finds games/Catherine_code.so like the bare runtime does.
        Both variables are inherited, so they only count when this runtime is the one inside the mount */
@@ -206,6 +208,8 @@ int snx_main(int argc, char** argv) {
         const char* e = strchr(argv[i], '=');
         if (!strcmp(argv[i], "-v"))
             ini_override("log", "2");
+        else if (!strncmp(argv[i], "--headless=", 11))
+            continue; /* startup-only, not a persisted or hot-reloaded INI option */
         else if (!strncmp(argv[i], "--", 2) && e && e - argv[i] - 2 < 64) {
             char k[64];
             memcpy(k, argv[i] + 2, (size_t)(e - argv[i] - 2));

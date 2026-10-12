@@ -4,6 +4,7 @@
    synchronization2 and dynamic rendering (1.3) are what the renderer is built on. */
 #include <stdlib.h>
 #include <string.h>
+#include "core/options.h"
 #include "platform/backend.h"
 #include "platform/log.h"
 #include "platform/plat.h"
@@ -70,7 +71,7 @@ static int has_layer(const char* name) {
 
 static int create_instance(void) {
     u32 nbe = 0;
-    const char* const* be = backend_vk_extensions(&nbe);
+    const char* const* be = g_opt_headless ? NULL : backend_vk_extensions(&nbe);
     const char* ext[16];
     u32 next = 0;
     for (u32 i = 0; i < nbe && next < 15; i++) ext[next++] = be[i];
@@ -112,7 +113,7 @@ static int create_instance(void) {
     return 1;
 }
 
-/* a device that has Vulkan 1.3, the swapchain extension and a queue that can draw and present to our surface.
+/* Vulkan 1.3 and a graphics queue. Only windowed runs need WSI and presentation support.
    *gfx_queues: how many queues the graphics family has */
 static int device_score(VkPhysicalDevice pd, u32* gfx, u32* compute, u32* gfx_queues) {
     VkPhysicalDeviceProperties p;
@@ -125,15 +126,15 @@ static int device_score(VkPhysicalDevice pd, u32* gfx, u32* compute, u32* gfx_qu
     int swapchain = 0;
     for (u32 i = 0; i < n; i++) swapchain |= !strcmp(e[i].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     free(e);
-    if (!swapchain) return -1;
+    if (!g_opt_headless && !swapchain) return -1;
     u32 nq = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(pd, &nq, NULL);
     VkQueueFamilyProperties* q = calloc(nq ? nq : 1, sizeof *q);
     vkGetPhysicalDeviceQueueFamilyProperties(pd, &nq, q);
     *gfx = *compute = ~0u;
     for (u32 i = 0; i < nq; i++) {
-        VkBool32 present = VK_FALSE;
-        vkGetPhysicalDeviceSurfaceSupportKHR(pd, i, g_vk.surface, &present);
+        VkBool32 present = VK_TRUE;
+        if (!g_opt_headless) vkGetPhysicalDeviceSurfaceSupportKHR(pd, i, g_vk.surface, &present);
         if ((q[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) && present && *gfx == ~0u) *gfx = i;
     }
     /* a compute family without graphics runs alongside the graphics queue */
@@ -169,7 +170,7 @@ static int create_device(void) {
     }
     free(pds);
     if (best < 0) {
-        WARN("vulkan: no device with Vulkan 1.3 that can show our window\n");
+        WARN("vulkan: no Vulkan 1.3 device with a suitable %s queue\n", g_opt_headless ? "graphics" : "presentation");
         return 0;
     }
     vkGetPhysicalDeviceProperties(g_vk.phys, &g_vk.props);
@@ -219,8 +220,9 @@ static int create_device(void) {
     WANT(geometryShader);
     WANT(tessellationShader);
 #undef WANT
-    const char* ext[4] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-    u32 next = 1;
+    const char* ext[4];
+    u32 next = 0;
+    if (!g_opt_headless) ext[next++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
     {
         u32 n = 0;
         vkEnumerateDeviceExtensionProperties(g_vk.phys, NULL, &n, NULL);
@@ -314,6 +316,7 @@ static int create_device(void) {
 }
 
 int vk_swapchain_create(int srgb) {
+    if (g_opt_headless) return 0; /* no WSI calls, even on a resize/recreate path */
     VkSurfaceCapabilitiesKHR caps;
     if (!VK_OK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g_vk.phys, g_vk.surface, &caps))) return 0;
     if (!(caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
@@ -428,17 +431,22 @@ int vk_swapchain_create(int srgb) {
 
 int vk_init(void) {
     pm_init(&g_vklock);
-    PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)backend_vk_loader();
-    if (!gipa) {
-        WARN("vulkan: no Vulkan loader (is a Vulkan driver installed?)\n");
-        return 0;
+    if (g_opt_headless) {
+        /* Load libvulkan/vulkan-1 directly. No SDL video driver or headless-surface extension is needed. */
+        if (!VK_OK(volkInitialize())) return 0;
+    } else {
+        PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)backend_vk_loader();
+        if (!gipa) {
+            WARN("vulkan: no Vulkan loader (is a Vulkan driver installed?)\n");
+            return 0;
+        }
+        volkInitializeCustom(gipa);
     }
-    volkInitializeCustom(gipa);
     if (!create_instance()) return 0;
-    if (!backend_vk_surface(g_vk.instance, &g_vk.surface)) {
+    if (!g_opt_headless && !backend_vk_surface(g_vk.instance, &g_vk.surface)) {
         WARN("vulkan: the window backend could not create a surface\n");
         return 0;
     }
     if (!create_device()) return 0;
-    return vk_swapchain_create(0);
+    return g_opt_headless ? 1 : vk_swapchain_create(0);
 }

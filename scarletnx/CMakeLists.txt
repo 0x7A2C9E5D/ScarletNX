@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-add_library(snx_driver STATIC common.c driver.c extract.c recompile.c loader.c a64.c codegen.c module.c toolchain.c)
+add_library(snx_driver STATIC common.c process.c driver.c extract.c recompile.c loader.c a64.c codegen.c module.c toolchain.c)
 set_target_properties(snx_driver PROPERTIES C_STANDARD 90 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_include_directories(snx_driver PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(snx_driver PRIVATE

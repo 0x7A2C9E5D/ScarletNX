@@ -34,7 +34,8 @@ static int vkr_start(void) {
     g_gpu_before_write = vk_compute_before_write;
     g_gpu_mem_changed = vk_mem_changed;
     VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-    for (int i = 0; i < VK_FRAMES; i++) VK_OK(vkCreateSemaphore(g_vk.dev, &sci, NULL, &g_acquired[i]));
+    if (!g_opt_headless)
+        for (int i = 0; i < VK_FRAMES; i++) VK_OK(vkCreateSemaphore(g_vk.dev, &sci, NULL, &g_acquired[i]));
     g_renderer_up = 1; /* a renderer is active */
     return 1;
 }
@@ -195,7 +196,7 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
     /* the size the swapchain was made for, not the extent the surface clamped it to: that can stay different */
     int ww, wh, srgb = src ? is_srgb(src->f.vk) : sc_srgb;
     backend_window_size(&ww, &wh);
-    if (ww > 0 && wh > 0 && (ww != g_vk.sc_win_w || wh != g_vk.sc_win_h || srgb != sc_srgb)) {
+    if (!g_opt_headless && ww > 0 && wh > 0 && (ww != g_vk.sc_win_w || wh != g_vk.sc_win_h || srgb != sc_srgb)) {
         vk_finish();
         sc_srgb = srgb;
         vk_swapchain_create(srgb);
@@ -203,7 +204,7 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
     VkSemaphore wait = VK_NULL_HANDLE, signal = VK_NULL_HANDLE;
     u32 idx = 0;
     int recreate = 0;
-    if (src && (g_vk.swapchain || vk_swapchain_create(srgb))) {
+    if (!g_opt_headless && src && (g_vk.swapchain || vk_swapchain_create(srgb))) {
         VkCommandBuffer cb = vk_cmd(); /* waits for this frame slot, so its acquire semaphore is free */
         VkSemaphore acq = g_acquired[vk_frame_number() % VK_FRAMES];
         VkResult r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, 1000000000ull, acq, VK_NULL_HANDLE, &idx);
@@ -255,6 +256,7 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
             (unsigned long long)g_vk_cs_batches, (unsigned long long)(g_vk_cs_wait_ns / 1000000),
             (unsigned long long)g_vk_cs_skipped);
     }
+    /* Offscreen frames still submit and advance the frame ring. g_last remains available for readback. */
     vk_submit(wait, VK_PIPELINE_STAGE_2_CLEAR_BIT, signal);
     if (signal) {
         VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,

@@ -6,6 +6,34 @@ Setup: [BUILD](BUILD.md). Checkout CWD; own dumps/keys.
 
 ## Extract → AOT → run
 
+Pass a single XCI or NSP to extract, recompile and play:
+
+```sh
+./build/scarletnx "Game.xci"
+```
+
+The driver runs each step as a child process and starts the game with `games/` as its working directory.
+The name comes from the dump stem, retaining letters, digits, UTF-8, spaces, hyphens and underscores.
+`--repo DIR` and `--build-dir DIR` may precede the dump. Keys use the usual discovery paths below.
+`--headless` (or `--headless=0` to disable it) can precede or follow the dump and is passed to the game only.
+Use the separate commands for updates, custom keys or compiler options.
+
+Run the same command again to retry after a failure or interruption:
+
+- `work/Game/` skips extraction. Automatic extraction publishes this directory only after success,
+  using `work/Game.extracting/` while running. An incomplete staging directory is discarded on retry.
+- `games/Game` (`Game.exe` on Windows) skips recompilation. It is published last. Otherwise the
+  recompilation step starts again from the beginning, with existing compiler caches still available.
+- Changing directory and running the game happen on every launch. A game failure never invalidates the build.
+
+Failures stop the workflow and print the failed stage and exit status or signal. On POSIX, stopping a
+child also aborts that stage so it can be retried. Uncatchable termination of the driver itself, such as
+`SIGKILL`, cannot print a diagnostic. Do not run concurrent workflows for the same output name.
+Existing manually extracted directories are assumed complete. Remove stale checkpoints or use the
+explicit commands when changing a dump or rebuilding game code.
+
+To run the steps separately:
+
 ```sh
 ./build/scarletnx --extract "Game.xci" --name Game
 ./build/scarletnx --recompile work/Game Game
@@ -33,7 +61,7 @@ Remaining examples: POSIX.
 - **Keys:** flags → checkout → `~/.switch` (`%USERPROFILE%\.switch` on Windows). Common NSP tickets supplement title keys.
 - **Extraction:** defaults to `work/<dump stem>`; `--name`/`--out DIR` override. Refuses existing `exefs`;
   builds missing hactool. [Temp cleanup/key filtering](../scarletnx/extract.c).
-- **Recompile:** AOT → module compile/link → runtime/data deployment → NVN prebuild.
+- **Recompile:** AOT → module compile/link → NVN prebuild → final runtime deployment. Cached objects;
   NVN prebuild failures defer compilation to runtime. `--native` = `-march=native`;
   `--cc CLANG` / `-O 0..3` also accepted.
 - **Codegen:** `--no-build` emits C/data/INI; `--interp-only` omits AOT functions.
@@ -50,6 +78,41 @@ Remaining examples: POSIX.
 | `games/Game_data/`, `Game.ini` | Data/saves + settings |
 | `games/Game_build/` | C sources only with `--keep-c` or `--no-build` |
 | `games/shader_cache/spirv/` | SPIR-V cache |
+
+## Headless Vulkan / lavapipe
+
+The normal SDL3 build can run without initializing SDL video or opening a window:
+
+```sh
+./build/scarletnx --game=games/Game --headless --seconds=30 --shot=/tmp/frame
+# Or extract, recompile and launch a dump without a window:
+./build/scarletnx "Game.xci" --headless
+```
+
+`--headless` and `--headless=1` enable it. Omit the flag or use `--headless=0` for the normal window.
+This is a startup option, not a live toggle or an INI setting. A build with only the headless backend
+starts headless by default and rejects `--headless=0` because it has no window backend.
+
+Rendering still uses Vulkan 1.3, including uploads, draws, compute and screenshot readback. Headless runs
+create no window, `VkSurfaceKHR` or swapchain and request no WSI extensions, including `VK_EXT_headless_surface`.
+Frames still submit and recycle their resources. `--seconds`, `--frames`, `--script` and `--shot` work as before.
+
+To use software rendering, select Mesa's **lavapipe Vulkan ICD**, rather than the hardware driver. Mesa may
+report this device as `llvmpipe` in the Vulkan log. Selecting a CPU ICD is independent of `--headless`:
+
+```sh
+# Linux example. Substitute the actual lvp ICD manifest installed on your machine.
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
+  ./build/scarletnx --game=games/Game --headless --seconds=30 --shot=/tmp/frame
+```
+
+Manifest names vary (for example `lvp_icd.json`). FreeBSD packages normally install manifests under
+`/usr/local/share/vulkan/icd.d/`. Older Vulkan loaders use `VK_ICD_FILENAMES` instead of `VK_DRIVER_FILES`.
+`LIBGL_ALWAYS_SOFTWARE` is an OpenGL setting and is not how this Vulkan renderer selects lavapipe.
+No display server is required. Check the `vulkan:` device line in the log to confirm the chosen ICD.
+
+For a build without an SDL3 dependency, see [headless build options](BUILD.md#build-variants).
+This does not impose a staging-memory cap or fix the allocation/flush issues identified separately.
 
 ## AppImage / display
 

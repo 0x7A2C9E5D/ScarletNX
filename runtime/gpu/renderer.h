@@ -41,7 +41,7 @@ typedef struct Renderer {
 } Renderer;
 
 extern const Renderer vk_renderer, null_renderer;
-/* the active renderer: Vulkan, or null in the headless build (defined next to each) */
+/* the active renderer: Vulkan (windowed or headless), or null when Vulkan is disabled */
 extern const Renderer* g_renderer;
 
 /* shared state (gpu/renderer.c) */

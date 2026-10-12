@@ -6,6 +6,9 @@
 #ifndef SNX_OPTIONS_H
 #define SNX_OPTIONS_H
 
+int snx_startup_options(int argc, char** argv); /* --headless[=0|1], before any window/error dialog */
+extern int g_opt_headless;                      /* startup only, never changed by an INI reload */
+
 void ini_override(const char* k, const char* v); /* a --key=value from the command line, before ini_open. Keeps v */
 void ini_set(const char* k, const char* v);
 void ini_open(const char* path); /* watch the file: ini_poll reloads it when it changes, and writes back what changed */

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 option(SNX_TEST_SANITIZERS "Run native regression tests with ASan and UBSan" OFF)
+option(SNX_TEST_VULKAN "Run offscreen Vulkan integration tests (requires a Vulkan 1.3 ICD, e.g. lavapipe)" OFF)
 if(SNX_TEST_SANITIZERS)
     target_compile_options(snx_driver PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(snx_driver INTERFACE -fsanitize=address,undefined)
@@ -27,11 +28,27 @@ function(snx_test_target target standard)
     endif()
 endfunction()
 
+foreach(backend windowed headless)
+    add_executable(snx-test-startup-${backend} startup_options.c "${PROJECT_SOURCE_DIR}/runtime/core/startup.c")
+    snx_test_target(snx-test-startup-${backend} 90)
+    if(backend STREQUAL "headless")
+        target_compile_definitions(snx-test-startup-${backend} PRIVATE SNX_HEADLESS_ONLY)
+    endif()
+    add_test(NAME startup_${backend} COMMAND snx-test-startup-${backend})
+endforeach()
+
 add_library(snx_test_common STATIC "${PROJECT_SOURCE_DIR}/scarletnx/common.c")
 snx_test_target(snx_test_common 90)
 if(WIN32)
     target_link_libraries(snx_test_common PUBLIC advapi32)
 endif()
+
+add_executable(snx-test-driver driver_workflow.c
+    "${PROJECT_SOURCE_DIR}/scarletnx/driver.c" "${PROJECT_SOURCE_DIR}/scarletnx/process.c")
+snx_test_target(snx-test-driver 90)
+target_link_libraries(snx-test-driver PRIVATE snx_test_common)
+add_test(NAME driver_workflow COMMAND snx-test-driver)
+set_tests_properties(driver_workflow PROPERTIES TIMEOUT 60)
 
 add_executable(snx-test-extract extract.c "${PROJECT_SOURCE_DIR}/scarletnx/extract.c")
 snx_test_target(snx-test-extract 90)
@@ -75,6 +92,6 @@ add_test(NAME filesystem_raw
 if(SNX_TEST_SANITIZERS AND WIN32)
     execute_process(COMMAND "${CMAKE_C_COMPILER}" -print-resource-dir
         OUTPUT_VARIABLE snx_clang_resource OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-    set_tests_properties(extraction_native loader_native native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw
+    set_tests_properties(startup_windowed startup_headless driver_workflow extraction_native loader_native native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${snx_clang_resource}/lib/windows")
 endif()

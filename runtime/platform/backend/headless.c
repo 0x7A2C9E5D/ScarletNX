@@ -2,9 +2,10 @@
    Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* headless backend for the test runner, writes screenshots as PPM. Takes the unattended-run options
-   (platform/unattended.c) */
+/* No-window backend: Vulkan offscreen rendering when enabled, otherwise the null renderer.
+   Both use the unattended-run options (platform/unattended.c). */
 #include "core/main.h"
+#include "gpu/renderer.h"
 #include "hle/hid.h"
 #include "platform/backend.h"
 #include "platform/log.h"
@@ -13,15 +14,43 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef SNX_VULKAN
 static u32* g_last;
 static int g_lw, g_lh;
 static PMutex g_hl;
+#endif
 void backend_ini(const char* k, const char* v) { unattended_ini(k, v); }
 void video_init(const char* t) {
     (void)t;
+#ifndef SNX_VULKAN
     pm_init(&g_hl);
+#endif
     unattended_start();
+#ifdef SNX_VULKAN
+    if (!g_renderer->start()) fatal("Headless Vulkan could not start (see the log). Vulkan 1.3 is required.");
+    LOG("renderer: Vulkan headless (no window, surface or swapchain)\n");
+#endif
 }
+void backend_window_size(int* w, int* h) { *w = *h = 0; }
+void* backend_vk_loader(void) { return NULL; } /* volk loads Vulkan directly */
+const char* const* backend_vk_extensions(u32* n) {
+    *n = 0;
+    return NULL;
+}
+int backend_vk_surface(VkInstance instance, VkSurfaceKHR* surface) {
+    (void)instance;
+    (void)surface;
+    return 0;
+}
+#ifdef SNX_VULKAN
+void video_present_rgba(const u32* px, int w, int h, int stride) {
+    /* Vulkan's present_buffer retains the offscreen image for screenshots. */
+    (void)px;
+    (void)w;
+    (void)h;
+    (void)stride;
+}
+#else
 static void save_ppm(const char* path) {
     if (!g_last) return;
     FILE* f = fopen(path, "wb");
@@ -55,6 +84,7 @@ void video_present_rgba(const u32* px, int w, int h, int stride) {
     }
     pm_unlock(&g_hl);
 }
+#endif
 void video_poll(void) {
     /* the scripted presses, stick keys (40..47) as axes like the SDL3 backend's keyboard */
     u64 s = unattended_buttons();
@@ -69,6 +99,11 @@ void video_poll(void) {
     g_pad.ry = st[3];
 }
 void frontend_frame(void) {
+#ifdef SNX_VULKAN
+    char path[1200];
+    if (unattended_periodic_shot(path, sizeof path)) g_renderer->screenshot(path);
+    if (unattended_done()) unattended_exit(g_renderer->screenshot(unattended_shot()), 0, 0);
+#else
     if (unattended_done()) {
         pm_lock(&g_hl);
         const char* shot = unattended_shot();
@@ -87,12 +122,7 @@ void frontend_frame(void) {
         pm_unlock(&g_hl);
         unattended_exit(h, w, hh);
     }
-}
-/* plat.c's fatal error box: Windows only, and not in an unattended run, where nobody would close it */
-void win_fatal_box(const char* msg) {
-#if defined(_WIN32)
-    if (!unattended_active()) MessageBoxA(NULL, msg, "ScarletNX", MB_OK | MB_ICONERROR);
-#else
-    (void)msg;
 #endif
 }
+/* No dialogs in a backend that deliberately has no window. */
+void win_fatal_box(const char* msg) { (void)msg; }
