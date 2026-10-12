@@ -22,6 +22,6 @@ description: "Bring a new MZ Labs SwitchRecomp release into this fork: import th
 5. **Rebuild and verify.** Build (`cmake --preset default && cmake --build --preset default`), and run the game
    (`snx-run`, a few runs). If the port changed the recompiler, anything in `runtime/abi/` or `SNX_ABI`, recompile the
    game first.
-6. **Open the PR** once verified, and update ROADMAP.md if the release changed what is done or planned.
+6. **Open the PR** once verified, and update docs/ROADMAP.md if the release changed what is done or planned.
 
 The release is the source of truth for its own code: never edit the `upstream` branch by hand.

@@ -4,8 +4,8 @@ A Linux-first fork of SwitchRecomp by MZ Labs, a static recompiler for Switch ga
 and compiled into `<Game>_code.so`, and the runtime in `runtime/` emulates the OS (kernel, IPC, services) and the GPU
 (Maxwell command buffers and shaders, drawn with Vulkan). Catherine: Full Body (USA release, 0100BF00112C0000, with
 its v2.0 update) is the game every change is checked against. Until 2026-10-11 it was the Asian release
-(0100BC4010896000), and the game addresses quoted in ROADMAP.md before that date are in its code. `README.md` has
-setup and commands, `ROADMAP.md` the plan and current state, `docs/ARCHITECTURE.md` how the parts fit together. This
+(0100BC4010896000), so earlier game addresses in Git history refer to that release. `README.md` has
+setup and commands, `docs/ROADMAP.md` the plan and current state, `docs/ARCHITECTURE.md` how the parts fit together. This
 file holds the rules sessions get wrong and points to the skills that carry the procedures.
 
 ## Rules
@@ -16,7 +16,7 @@ file holds the rules sessions get wrong and points to the skills that carry the 
   obvious ways.
 - **A build is not a test.** A runtime change is verified by running the game (`snx-run` skill) through the scene
   it affects, and the commit says what was run. A change meant to fix a crash is run enough times to show the crash
-  is gone: the title-screen crash in ROADMAP.md Phase 2 is intermittent.
+  is gone. A single passing run is insufficient for an intermittent crash.
 - **Find the mechanism.** A fix explains why the game does what it does: what the game or SDK code expects
   (`tools/disasm.py`), and what the runtime gave it instead. No timing tweaks, retries or special cases for a
   title ID. Syncpoints above 127 "worked" for a whole session while overwriting the game's heap.
