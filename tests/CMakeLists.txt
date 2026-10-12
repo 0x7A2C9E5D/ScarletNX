@@ -72,6 +72,10 @@ snx_test_target(snx_codegen_test 90)
 target_link_libraries(snx_codegen_test PRIVATE snx_driver)
 add_test(NAME native_codegen COMMAND snx_codegen_test "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}")
 
+add_executable(snx-test-astc astc_decode.c "${PROJECT_SOURCE_DIR}/runtime/gpu/texture/astc.c")
+snx_test_target(snx-test-astc 23)
+add_test(NAME astc_decode COMMAND snx-test-astc)
+
 add_executable(snx-test-fs-fixture filesystem_fixture.c)
 snx_test_target(snx-test-fs-fixture 90)
 target_link_libraries(snx-test-fs-fixture PRIVATE snx_test_common)
@@ -100,6 +104,6 @@ endif()
 if(SNX_TEST_SANITIZERS AND WIN32)
     execute_process(COMMAND "${CMAKE_C_COMPILER}" -print-resource-dir
         OUTPUT_VARIABLE snx_clang_resource OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-    set_tests_properties(startup_windowed startup_headless driver_workflow extraction_native loader_native native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw
+    set_tests_properties(startup_windowed startup_headless driver_workflow extraction_native loader_native native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw astc_decode
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${snx_clang_resource}/lib/windows")
 endif()
