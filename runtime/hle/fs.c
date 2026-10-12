@@ -31,6 +31,9 @@
 #define FS_OUT_OF_RANGE        RC(2, 3005)
 #define FS_PATH_TOO_LONG       RC(2, 6003)
 #define FS_DIR_UNOBTAINABLE    RC(2, 6006) /* a ".." above the root */
+#define FS_INVALID_OFFSET      RC(2, 6061)
+#define FS_INVALID_SIZE        RC(2, 6062)
+#define FS_INVALID_OPEN_MODE   RC(2, 6072)
 #define FS_NO_APPEND           RC(2, 6201) /* FileExtensionWithoutOpenModeAllowAppend */
 #define FS_READ_NOT_PERMITTED  RC(2, 6202)
 #define FS_WRITE_NOT_PERMITTED RC(2, 6203)
@@ -83,6 +86,8 @@ static u32 tree_result(FsTreeResult r) {
         case FS_TREE_NOTFOUND: return FS_NOTFOUND;
         case FS_TREE_EXISTS: return FS_EXISTS;
         case FS_TREE_NOTEMPTY: return FS_DIR_NOT_EMPTY;
+        case FS_TREE_NOTDELETABLE: return RC(2, 6031);
+        case FS_TREE_NOTRENAMABLE: return RC(2, 6032);
         case FS_TREE_INVALID: return FS_DIR_UNOBTAINABLE;
         case FS_TREE_TOOLONG: return FS_PATH_TOO_LONG;
         case FS_TREE_READONLY: return FS_WRITE_NOT_PERMITTED;
@@ -437,23 +442,41 @@ static int query_range(IpcCtx* c) {
     return 0;
 }
 
+/* ReadOnlyStorageAdapter still receives the StorageInterfaceAdapter's argument checks.
+   Flush succeeds for these immutable images; their read-only backend rejects Write and SetSize. */
+static int readonly_storage_command(IpcCtx* c) {
+    if (c->cmd == 1) {
+        u64 off = in64(c, 0), sz = in64(c, 8), a = 0, bs = 0;
+        if ((i64)off < 0) return FS_INVALID_OFFSET;
+        if ((i64)sz < 0) return FS_INVALID_SIZE;
+        buf_in(c, 0, &a, &bs);
+        if ((i64)bs < 0 || sz > bs) return FS_INVALID_SIZE;
+    } else if (c->cmd == 2)
+        return 0;
+    else if (c->cmd == 3 && (i64)in64(c, 0) < 0)
+        return FS_INVALID_SIZE;
+    return RC(2, 6300);
+}
+
 /* ============================================================ IStorage (RomFS) */
 static int romstorage(SvcObj* o, IpcCtx* c) {
     switch (c->cmd) {
         case 0: {
             u64 off = in64(c, 0), sz = in64(c, 8), a = 0, bs = 0;
-            if ((i64)off < 0 || (i64)sz < 0) return FS_OUT_OF_RANGE;
+            /* Atmosphere StorageInterfaceAdapter validates the signed arguments before the backend. */
+            if ((i64)off < 0) return FS_INVALID_OFFSET;
+            if ((i64)sz < 0) return FS_INVALID_SIZE;
             buf_out(c, 0, &a, &bs);
-            if (sz > bs) sz = bs;
-            if (off > fsp.rtotal) return RC(2, 6001);
-            if (sz > fsp.rtotal - off) sz = fsp.rtotal - off;
+            if ((i64)bs < 0 || sz > bs) return FS_INVALID_SIZE;
+            if (!sz) return 0;
+            if (sz > (u64)INT64_MAX - off || off > fsp.rtotal || sz > fsp.rtotal - off) return FS_OUT_OF_RANGE;
             if (a > AS_SIZE || sz > AS_SIZE - a) return FS_OUT_OF_RANGE;
             return romfs_read(off, GP(a), sz) ? FS_OUT_OF_RANGE : 0;
         }
         case 4: out64(c, fsp.rtotal); return 0;
         case 1:
         case 2:
-        case 3: return RC(2, 6300);
+        case 3: return readonly_storage_command(c);
         case 5: return query_range(c);
     }
     return stub_ok(o, c);
@@ -523,10 +546,18 @@ static int file_dispatch_locked(SvcObj* o, IpcCtx* c) {
     switch (c->cmd) {
         case 0: {
             u64 off = in64(c, 8), sz = in64(c, 16), a = 0, bs = 0;
-            if (!(f->mode & 1)) return FS_READ_NOT_PERMITTED;
-            if ((i64)off < 0 || (i64)sz < 0 || off > f->node->size) return FS_OUT_OF_RANGE;
+            /* Atmosphere FileInterfaceAdapter -> IFile::Read -> DryRead: order is observable on errors. */
+            if ((i64)off < 0) return FS_INVALID_OFFSET;
+            if ((i64)sz < 0) return FS_INVALID_SIZE;
             buf_out(c, 0, &a, &bs);
-            if (sz > bs) sz = bs;
+            if ((i64)bs < 0 || sz > bs) return FS_INVALID_SIZE;
+            if (!sz) {
+                out64(c, 0);
+                return 0;
+            }
+            if (sz > (u64)INT64_MAX - off) return FS_OUT_OF_RANGE;
+            if (!(f->mode & 1)) return FS_READ_NOT_PERMITTED;
+            if (off > f->node->size) return FS_OUT_OF_RANGE;
             if (sz > f->node->size - off) sz = f->node->size - off;
             if (!buffer_valid(a, sz)) return FS_OUT_OF_RANGE;
             u64 n = sz;
@@ -543,10 +574,14 @@ static int file_dispatch_locked(SvcObj* o, IpcCtx* c) {
         }
         case 1: {
             u64 off = in64(c, 8), sz = in64(c, 16), a = 0, bs = 0;
-            if (!(f->mode & 2) || f->node->readonly) return FS_WRITE_NOT_PERMITTED;
-            if ((i64)off < 0 || (i64)sz < 0 || sz > (u64)INT64_MAX - off) return FS_OUT_OF_RANGE;
+            if ((i64)off < 0) return FS_INVALID_OFFSET;
+            if ((i64)sz < 0) return FS_INVALID_SIZE;
             buf_in(c, 0, &a, &bs);
-            if (sz > bs) sz = bs;
+            if ((i64)bs < 0 || sz > bs) return FS_INVALID_SIZE;
+            /* IFile::Write succeeds without checking mode/EOF for an empty write, but honors Flush. */
+            if (!sz) return (in32(c, 0) & 1) && f->f && fflush(f->f) ? FS_NO_SPACE : 0;
+            if (sz > (u64)INT64_MAX - off) return FS_OUT_OF_RANGE;
+            if (!(f->mode & 2) || f->node->readonly) return FS_WRITE_NOT_PERMITTED;
             if (!buffer_valid(a, sz)) return FS_OUT_OF_RANGE;
             if (off + sz > f->node->size && !(f->mode & 4)) return FS_NO_APPEND;
             if (file_seek(f->f, off)) return FS_OUT_OF_RANGE;
@@ -558,8 +593,8 @@ static int file_dispatch_locked(SvcObj* o, IpcCtx* c) {
         case 2: return f->f && fflush(f->f) ? FS_NO_SPACE : 0;
         case 3: {
             u64 n = in64(c, 0);
+            if ((i64)n < 0) return FS_INVALID_SIZE;
             if (!(f->mode & 2) || f->node->readonly) return FS_WRITE_NOT_PERMITTED;
-            if ((i64)n < 0) return FS_OUT_OF_RANGE;
             if (file_truncate(f->f, n, &f->node->size)) return FS_NO_SPACE;
             return 0;
         }
@@ -587,7 +622,7 @@ static SvcObj* file_new(FsNode* node, u32 mode, u32* rc) {
         return NULL;
     }
     if (!(mode & 3) || (mode & ~7u)) {
-        *rc = FS_OUT_OF_RANGE;
+        *rc = FS_INVALID_OPEN_MODE;
         return NULL;
     }
     if ((mode & 2) && node->readonly) {
@@ -668,9 +703,9 @@ static int fs_dispatch_locked(SvcObj* o, IpcCtx* c) {
     if (!fs->root->attached) return FS_NOTFOUND;
     switch (c->cmd) {
         case 0: {
-            if ((rc = read_path(c, 0, p))) return (int)rc;
             u64 size = in64(c, 8);
-            if ((i64)size < 0) return FS_OUT_OF_RANGE;
+            if ((i64)size < 0) return FS_INVALID_SIZE;
+            if ((rc = read_path(c, 0, p))) return (int)rc;
             return tree_result(fs_tree_create(&fsp.tree, fs->root, p, 0, size, NULL));
         }
         case 1:
@@ -696,20 +731,30 @@ static int fs_dispatch_locked(SvcObj* o, IpcCtx* c) {
             return 0;
         case 8: {
             if ((rc = read_path(c, 0, p))) return (int)rc;
-            if ((rc = tree_result(fs_tree_lookup(&fsp.tree, fs->root, p, &node)))) return (int)rc;
-            SvcObj* file = file_new(node, in32(c, 0), &rc);
+            rc = tree_result(fs_tree_lookup(&fsp.tree, fs->root, p, &node));
+            /* Lookup also normalizes the path. Normalization errors precede mode validation,
+               but IFileSystem checks mode before its backend reports a missing file. */
+            if (rc && rc != FS_NOTFOUND) return (int)rc;
+            u32 mode = in32(c, 0);
+            if (!(mode & 3) || (mode & ~7u)) return FS_INVALID_OPEN_MODE;
+            if (rc) return (int)rc;
+            SvcObj* file = file_new(node, mode, &rc);
             if (file) out_obj(c, file);
             return (int)rc;
         }
         case 9: {
             if ((rc = read_path(c, 0, p))) return (int)rc;
-            if ((rc = tree_result(fs_tree_lookup(&fsp.tree, fs->root, p, &node)))) return (int)rc;
+            rc = tree_result(fs_tree_lookup(&fsp.tree, fs->root, p, &node));
+            if (rc && rc != FS_NOTFOUND) return (int)rc;
+            u32 mode = in32(c, 0);
+            /* OpenDirectoryMode_NotRequireFileSize is bit 31, not another entry-type filter. */
+            if (!(mode & 3) || (mode & ~0x80000003u)) return FS_INVALID_OPEN_MODE;
+            if (rc) return (int)rc;
             if (!node->is_dir) return FS_NOTFOUND;
             SvcObj* dir = svcobj_new("IDirectory", dir_disp, sizeof(DirData));
             DirData* data = dir->data;
             data->node = node;
-            data->filter = in32(c, 0);
-            if (!data->filter) data->filter = 3;
+            data->filter = mode;
             fs_tree_retain(node);
             dir->destroy = dir_destroy;
             out_obj(c, dir);
@@ -774,12 +819,14 @@ static int systemstorage(SvcObj* o, IpcCtx* c) {
     FileData* data = o->data;
     if (c->cmd == 4) return file_disp(o, c);
     if (c->cmd == 5) return query_range(c);
-    if (c->cmd != 0) return RC(2, 6300);
+    if (c->cmd != 0) return readonly_storage_command(c);
     u64 off = in64(c, 0), sz = in64(c, 8), a = 0, bs = 0;
-    if ((i64)off < 0 || (i64)sz < 0) return FS_OUT_OF_RANGE;
+    if ((i64)off < 0) return FS_INVALID_OFFSET;
+    if ((i64)sz < 0) return FS_INVALID_SIZE;
     buf_out(c, 0, &a, &bs);
-    if (sz > bs) sz = bs;
-    if (!buffer_valid(a, sz)) return FS_OUT_OF_RANGE;
+    if ((i64)bs < 0 || sz > bs) return FS_INVALID_SIZE;
+    if (!sz) return 0;
+    if (sz > (u64)INT64_MAX - off || !buffer_valid(a, sz)) return FS_OUT_OF_RANGE;
     pm_lock(&fsp.tree.lock);
     int rc = 0;
     if (off > data->node->size || sz > data->node->size - off)

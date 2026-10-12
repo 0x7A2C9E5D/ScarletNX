@@ -355,6 +355,115 @@ static void test_file_services(SvcObj* fs) {
     puts("PASS HLE create/open/write/read/truncate/rename/delete and shared cached size");
 }
 
+/* Expected results are taken from Atmosphere's interface adapters and fs/fsa contracts,
+   not the production FS_* aliases. All requests have well-formed IPC descriptors. */
+static void test_file_contracts(SvcObj* fs) {
+    const u64 negative = UINT64_MAX;
+    fs_command(fs, 0, "/contract.bin", 4, 0);
+    SvcObj* rw = open_object(fs, 8, "/contract.bin", 3);
+    SvcObj* ro = open_object(fs, 8, "/contract.bin", 1);
+    SvcObj* wo = open_object(fs, 8, "/contract.bin", 2);
+    static const struct {
+        u64 off, size, capacity;
+        u32 result;
+    } cases[] = {
+        {UINT64_MAX, UINT64_MAX, 4, RC(2, 6061)}, /* offset wins over invalid size */
+        {UINT64_MAX, 0, 0, RC(2, 6061)},
+        {0, UINT64_MAX, 4, RC(2, 6062)},
+        {0, 5, 4, RC(2, 6062)},   /* never silently shorten an IPC transfer */
+        {100, 5, 4, RC(2, 6062)}, /* buffer check wins over EOF and permission */
+        {0, 1, 0, RC(2, 6062)},
+        {INT64_MAX, 1, 4, RC(2, 3005)}, /* overflow wins over permission */
+        {INT64_MAX - 1, 2, 4, RC(2, 3005)},
+        {INT64_MAX, 0, 0, 0}, /* empty transfers skip EOF and mode checks */
+        {0, 0, 0, 0},
+    };
+    for (u32 cmd = 0; cmd < 2; ++cmd) {
+        for (unsigned permitted = 0; permitted < 2; ++permitted) {
+            SvcObj* target = permitted ? rw : cmd ? ro : wo;
+            for (size_t i = 0; i < sizeof cases / sizeof *cases; ++i) {
+                Request r;
+                request(&r, cmd);
+                argument32(&r, 0, cmd); /* empty writes request Flush */
+                argument64(&r, 8, cases[i].off);
+                argument64(&r, 16, cases[i].size);
+                output_buffer(&r, 16);
+                if (cmd) {
+                    r.c.a[0] = (IpcBuf){0x3000, cases[i].capacity, 0};
+                    r.c.na = 1;
+                } else
+                    r.c.b[0].size = cases[i].capacity;
+                dispatch(target, &r, cases[i].result);
+                CHECK(r.c.nout_objs == 0 && r.c.nout_copy == 0 && r.c.nout_move == 0);
+                if (!cases[i].result && !cmd)
+                    CHECK(r.c.out_size == 8 && output64(&r) == 0);
+                else
+                    CHECK(r.c.out_size == 0);
+                for (unsigned j = 0; j < 16; ++j) CHECK(GP(0x5000)[j] == 0xcc);
+                CHECK(get_size(rw) == 4);
+            }
+        }
+    }
+    read_data(wo, 0, 1, RC(2, 6202));
+    write_data(ro, 0, "x", 1, RC(2, 6203));
+    write_data(rw, 4, "x", 1, RC(2, 6201));
+    set_size(ro, negative, RC(2, 6062)); /* adapter rejects size before backend permissions */
+    set_size(rw, negative, RC(2, 6062));
+    CHECK(get_size(rw) == 4);
+    CHECK(read_data(ro, 0, 4, 0) == 4);
+    for (unsigned j = 0; j < 4; ++j) CHECK(GP(0x5000)[j] == 0);
+    fs_command(fs, 0, "/new.bin", negative, RC(2, 6062));
+    fs_command(fs, 7, "/new.bin", 0, RC(2, 1));
+    fs_command(fs, 0, "/../bad", negative, RC(2, 6062)); /* before path normalization */
+    static const u32 modes[] = {0, 4, 8, 0x80000000u};
+    static const char* paths[] = {"/contract.bin", "/missing", "/"};
+    for (u32 cmd = 8; cmd <= 9; ++cmd)
+        for (size_t i = 0; i < sizeof modes / sizeof *modes; ++i)
+            for (size_t j = 0; j < sizeof paths / sizeof *paths; ++j) {
+                Request r;
+                request(&r, cmd);
+                argument32(&r, 0, modes[i]);
+                argument_path(&r, 0, paths[j]);
+                dispatch(fs, &r, RC(2, 6072));
+                CHECK(r.c.nout_objs == 0 && r.c.out_size == 0);
+            }
+    SvcObj* dir = open_object(fs, 9, "/", 0x80000003u);
+    svcobj_unref(dir);
+    svcobj_unref(wo);
+    svcobj_unref(ro);
+    svcobj_unref(rw);
+    fs_command(fs, 1, "/contract.bin", 0, 0);
+    puts("PASS Atmosphere IFile/IFileSystem signed arguments, error priority, empty transfers and open modes");
+}
+
+/* Atmosphere FileSystemInterfaceAdapter checks normalized roots/ancestry before backend mutation. */
+static void test_directory_path_contracts(SvcObj* fs) {
+    fs_command(fs, 2, "/", 0, RC(2, 2));
+    fs_command(fs, 2, "/./", 0, RC(2, 2));
+    fs_command(fs, 2, "/absent/..", 0, RC(2, 2));
+    fs_command(fs, 3, "/", 0, RC(2, 6031));
+    fs_command(fs, 4, "/./", 0, RC(2, 6031));
+    /* Neither path needs to exist for the strict-ancestry check to win. Both directions count. */
+    rename_object(fs, 6, "/absent", "/absent/child", RC(2, 6032));
+    rename_object(fs, 6, "/absent/child", "/absent", RC(2, 6032));
+    rename_object(fs, 6, "/", "/absent", RC(2, 6032));
+    rename_object(fs, 6, "/absent", "/", RC(2, 6032));
+    /* Negative controls retain this backend's PathNotFound. IsSubPath itself excludes equality/siblings. */
+    rename_object(fs, 6, "/absent", "/absent", RC(2, 1));
+    rename_object(fs, 6, "/absent", "/absent-sibling", RC(2, 1));
+    fs_command(fs, 2, "/ancestry", 0, 0);
+    fs_command(fs, 2, "/ancestry/child", 0, 0);
+    rename_object(fs, 6, "/ancestry", "/ancestry/child", RC(2, 6032)); /* before AlreadyExists */
+    rename_object(fs, 6, "/ancestry/child", "/ancestry", RC(2, 6032));
+    rename_object(fs, 6, "/ancestry", "/ancestry-sibling", 0);
+    fs_command(fs, 7, "/ancestry-sibling/child", 0, 0);
+    fs_command(fs, 4, "/ancestry-sibling", 0, 0);
+    /* Eden's temporary recursive CreateDirectory behavior must not replace this contract. */
+    fs_command(fs, 2, "/absent/child", 0, RC(2, 1));
+    fs_command(fs, 7, "/absent", 0, RC(2, 1));
+    puts("PASS Atmosphere normalized directory roots and bidirectional strict ancestry");
+}
+
 static void test_directory_services(SvcObj* fs) {
     fs_command(fs, 2, "/list", 0, 0);
     fs_command(fs, 0, "/list/a", 1, 0);
@@ -440,6 +549,50 @@ static void test_index_and_paths(SvcObj* fs) {
     puts("PASS HLE index-only visibility, confined paths, bounded IPC paths and loader helpers");
 }
 
+static void test_storage_contracts(SvcObj* storage, u64 size) {
+    const struct {
+        u64 off, size, capacity;
+        u32 read_result, write_result;
+    } cases[] = {
+        {UINT64_MAX, UINT64_MAX, 4, RC(2, 6061), RC(2, 6061)},
+        {UINT64_MAX, 0, 0, RC(2, 6061), RC(2, 6061)},
+        {0, UINT64_MAX, 4, RC(2, 6062), RC(2, 6062)},
+        {0, 5, 4, RC(2, 6062), RC(2, 6062)},
+        {size + 1, 5, 4, RC(2, 6062), RC(2, 6062)},
+        {INT64_MAX, 1, 4, RC(2, 3005), RC(2, 6300)},
+        {size, 1, 4, RC(2, 3005), RC(2, 6300)},
+        {size - 1, 2, 4, RC(2, 3005), RC(2, 6300)}, /* no short IStorage reads */
+        {size + 1, 1, 4, RC(2, 3005), RC(2, 6300)},
+        {size, 0, 0, 0, RC(2, 6300)},
+        {INT64_MAX, 0, 0, 0, RC(2, 6300)},
+    };
+    CHECK(size > 0);
+    for (u32 cmd = 0; cmd < 2; ++cmd)
+        for (size_t i = 0; i < sizeof cases / sizeof *cases; ++i) {
+            Request r;
+            request(&r, cmd);
+            argument64(&r, 0, cases[i].off);
+            argument64(&r, 8, cases[i].size);
+            output_buffer(&r, 16);
+            if (cmd) {
+                r.c.a[0] = (IpcBuf){0x3000, cases[i].capacity, 0};
+                r.c.na = 1;
+            } else
+                r.c.b[0].size = cases[i].capacity;
+            dispatch(storage, &r, cmd ? cases[i].write_result : cases[i].read_result);
+            CHECK(r.c.out_size == 0 && r.c.nout_objs == 0);
+            for (unsigned j = 0; j < 16; ++j) CHECK(GP(0x5000)[j] == 0xcc);
+            CHECK(get_size(storage) == size);
+        }
+    Request r;
+    request(&r, 2);
+    dispatch(storage, &r, 0); /* read-only image Flush is not an unsupported write */
+    CHECK(r.c.out_size == 0);
+    set_size(storage, UINT64_MAX, RC(2, 6062));
+    set_size(storage, 0, RC(2, 6300));
+    CHECK(get_size(storage) == size);
+}
+
 static void test_virtual_services(SvcObj* fs, SvcObj* proxy) {
     u8 bytes[] = {1, 0, 3, 0xff, 5};
     CHECK(!fs_add_virtual_file("sdmc/virtual.bin", bytes, sizeof bytes));
@@ -462,6 +615,7 @@ static void test_virtual_services(SvcObj* fs, SvcObj* proxy) {
     CHECK(r.c.nout_objs == 1);
     SvcObj* archive = r.c.out_objs[0];
     CHECK(get_size(archive) == 0x200);
+    test_storage_contracts(archive, 0x200);
     request(&r, 0);
     argument64(&r, 0, 0);
     argument64(&r, 8, 0x200);
@@ -484,6 +638,7 @@ static void test_extracted_romfs(SvcObj* proxy) {
     SvcObj* storage = r.c.out_objs[0];
     u64 image_size = get_size(storage);
     CHECK(image_size < 0x8000 && image_size > 0x200);
+    test_storage_contracts(storage, image_size);
     request(&r, 0);
     argument64(&r, 8, image_size);
     output_buffer(&r, image_size);
@@ -536,9 +691,10 @@ static void test_raw_romfs(SvcObj* proxy) {
     CHECK(r.c.nout_objs == 1);
     SvcObj* storage = r.c.out_objs[0];
     CHECK(get_size(storage) == sizeof expected);
+    test_storage_contracts(storage, sizeof expected);
     request(&r, 0);
     argument64(&r, 0, 2);
-    argument64(&r, 8, sizeof expected);
+    argument64(&r, 8, sizeof expected - 2);
     output_buffer(&r, sizeof expected);
     dispatch(storage, &r, 0);
     CHECK(!memcmp(GP(0x5000), expected + 2, sizeof expected - 2));
@@ -600,6 +756,8 @@ int main(int argc, char** argv) {
     CHECK(r.c.nout_objs == 1);
     SvcObj* fs = r.c.out_objs[0];
     test_file_services(fs);
+    test_file_contracts(fs);
+    test_directory_path_contracts(fs);
     test_directory_services(fs);
     test_index_and_paths(fs);
     test_virtual_services(fs, proxy);

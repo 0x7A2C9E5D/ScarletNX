@@ -12,7 +12,8 @@
 #define HO_HidSharedMemory_keyboard                                 0x3800
 #define HO_HidSharedMemory_mouse                                    0x3400
 #define HS_HidNpadSharedMemoryEntry                                 0x5000
-#define HS_HidNpadInternalState                                     0x43f0
+/* Includes the six one-byte sensor properties after the four controller-type fields (Eden's current layout). */
+#define HS_HidNpadInternalState                                     0x43f8
 #define HO_HidNpadInternalState_style_set                           0x0
 #define HO_HidNpadInternalState_joy_assignment_mode                 0x4
 #define HO_HidNpadInternalState_full_key_color                      0x8
