@@ -37,6 +37,11 @@ snx_test_target(snx-test-a64-fp 11)
 if(NOT WIN32)
     target_link_libraries(snx-test-a64-fp PRIVATE m)
 endif()
+# cpu_helpers.c's 16-byte CAS needs cmpxchg16b inline, not a libatomic call (the runtime's toolchain.c has the
+# same flag for the same reason; the function-level target("cx16") is not enough on this Clang)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    target_compile_options(snx-test-a64-fp PRIVATE -mcx16)
+endif()
 add_test(NAME a64_fp_witnesses COMMAND snx-test-a64-fp)
 
 option(SNX_TEST_A64_FP_DIFF "Run the Linux AArch64 FP differential harness (requires Python unicorn 2.1.4)" OFF)
