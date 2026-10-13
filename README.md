@@ -41,10 +41,10 @@ cd ScarletNX
 cmake --preset default -B build && cmake --build build
 ```
 
-Afterwards, put `prod.keys` (and `title.keys`, for NSPs) in `~/.switch`, or pass them with `--keys` and
-`--title-keys`.
+For encrypted dumps, put `prod.keys` (and `title.keys`, for NSPs) in `~/.switch`, or pass them with
+`--keys` and `--title-keys`. Decrypted DNSP/DXCI content needs no keys.
 ```bash
-./build/scarletnx "Game.xci"  # extract, recompile, then play (also accepts NSP)
+./build/scarletnx "Game.xci"  # extract, recompile, then play (also accepts NSP, DNSP and DXCI)
 ```
 Run the same command again after an interruption. Completed extraction and recompilation are skipped,
 but the game always starts anew. To run the steps separately:

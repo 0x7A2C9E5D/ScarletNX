@@ -17,8 +17,8 @@
 
 static void usage(void) {
     puts("Usage: scarletnx [OPTIONS] INPUT [-- GAME_ARGUMENTS...]\n"
-         "  INPUT                  Extract, recompile if needed, then play XCI/NSP/NRO\n"
-         "  -x, --extract          Extract XCI/NSP\n"
+         "  INPUT                  Extract, recompile if needed, then play XCI/NSP/DXCI/DNSP/NRO\n"
+         "  -x, --extract          Extract XCI/NSP/DXCI/DNSP\n"
          "  -r, --recomp           Recompile ExeFS/NRO or prepare a dump without playing\n"
          "  -H, --headless         Run without a window or swapchain");
     puts("  --fullscreen[=0|1]     Override the game's fullscreen setting\n"
@@ -184,11 +184,12 @@ static int takes_value(const char* arg) {
 }
 static int container_path(const char* path) {
     const char* ext = strrchr(path, '.');
-    char lower[5];
-    int i;
-    if (!ext || strlen(ext) != 4) return 0;
-    for (i = 0; i < 5; ++i) lower[i] = (char)tolower((unsigned char)ext[i]);
-    return !strcmp(lower, ".xci") || !strcmp(lower, ".nsp");
+    char lower[6];
+    size_t i, size;
+    size = ext ? strlen(ext) : 0;
+    if (size != 4 && size != 5) return 0;
+    for (i = 0; i <= size; ++i) lower[i] = (char)tolower((unsigned char)ext[i]);
+    return !strcmp(lower, ".xci") || !strcmp(lower, ".nsp") || !strcmp(lower, ".dxci") || !strcmp(lower, ".dnsp");
 }
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
@@ -253,7 +254,7 @@ int snx_driver(int argc, char** argv) {
         goto done;
     }
     if (!automatic && (flags & SNX_EXTRACT) && (flags & SNX_RECOMP)) {
-        result = snx_error("-rx requires an XCI or NSP dump");
+        result = snx_error("-rx requires an XCI, NSP, DXCI or DNSP dump");
         goto done;
     }
     if (automatic && (flags & SNX_RECOMP) && separator < argc) {

@@ -12,14 +12,22 @@ target_include_directories(hactool_mbedtls BEFORE PUBLIC "${hactool_src}/mbedtls
 target_compile_options(hactool_mbedtls PRIVATE -w)
 set_target_properties(hactool_mbedtls PROPERTIES C_STANDARD 99 C_EXTENSIONS ON)
 
+include("${CMAKE_CURRENT_LIST_DIR}/hactool-decrypted.cmake")
 set(hactool_sources save sha aes extkeys rsa npdm bktr kip packages pki pfs0 hfs0 nca0_romfs romfs utils nax0 nso lz4
-                    nca xci main filepath ConvertUTF cJSON)
+                    filepath ConvertUTF cJSON)
 list(TRANSFORM hactool_sources PREPEND "${hactool_src}/")
 list(TRANSFORM hactool_sources APPEND .c)
-add_executable(hactool ${hactool_sources})
-target_link_libraries(hactool PRIVATE hactool_mbedtls)
-target_compile_definitions(hactool PRIVATE _BSD_SOURCE _POSIX_SOURCE _POSIX_C_SOURCE=200112L _DEFAULT_SOURCE
-                                           __USE_MINGW_ANSI_STDIO=1 _FILE_OFFSET_BITS=64)
+list(APPEND hactool_sources "${hactool_patched_dir}/nca.c" "${hactool_patched_dir}/xci.c")
+add_library(hactool_lib STATIC ${hactool_sources})
+target_include_directories(hactool_lib PUBLIC "${hactool_src}")
+target_link_libraries(hactool_lib PUBLIC hactool_mbedtls)
+target_compile_definitions(hactool_lib PUBLIC _BSD_SOURCE _POSIX_SOURCE _POSIX_C_SOURCE=200112L _DEFAULT_SOURCE
+                                               __USE_MINGW_ANSI_STDIO=1 _FILE_OFFSET_BITS=64)
+target_compile_options(hactool_lib PRIVATE -w)
+set_target_properties(hactool_lib PROPERTIES C_STANDARD 11 C_EXTENSIONS ON)
+
+add_executable(hactool "${hactool_src}/main.c")
+target_link_libraries(hactool PRIVATE hactool_lib)
 target_compile_options(hactool PRIVATE -w)
 set_target_properties(hactool PROPERTIES C_STANDARD 11 C_EXTENSIONS ON RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 if(WIN32)

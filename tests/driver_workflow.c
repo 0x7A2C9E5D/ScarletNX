@@ -353,6 +353,31 @@ int main(int argc, char** argv) {
         }
         set_env("SNX_WORKFLOW_HEADLESS", "");
     }
+    /* Decrypted containers share the extract/recompile checkpoints, including quoted dump paths. */
+    {
+        const char* names[] = {"My Switch DXCI's/Test [game];.dnsp", "My Switch DXCI's/Test [game];.dNsP",
+                               "My Switch DXCI's/Test [game];.dxci", "My Switch DXCI's/Test [game];.dXcI"};
+        unsigned j;
+        for (j = 0; j < sizeof names / sizeof names[0]; ++j) {
+            char *decrypted = snx_path_join(repo, names[j]), *directory = snx_path_join(repo, "My Switch DXCI's");
+            CHECK(!snx_remove_tree(repo) && !snx_mkdirs(directory));
+            CHECK(!snx_write_file(decrypted, "synthetic", 9));
+            set_env("SNX_WORKFLOW_MODE", "exit");
+            set_env("SNX_WORKFLOW_FAIL", "");
+            run(exe, repo, decrypted, log, 0, "ERG", NULL);
+            CHECK(snx_is_dir(extracted) && snx_is_file(game));
+            run(exe, repo, decrypted, log, 0, "G", NULL);
+            CHECK(!snx_remove_tree(game));
+            run(exe, repo, decrypted, log, 0, "RG", NULL);
+            /* -r prepares a decrypted dump too, by its extension */
+            CHECK(!snx_remove_tree(extracted) && !snx_remove_tree(game));
+            set_env("SNX_WORKFLOW_FLAGS", "-r");
+            run(exe, repo, decrypted, log, 0, "ER", NULL);
+            set_env("SNX_WORKFLOW_FLAGS", "");
+            free(decrypted);
+            free(directory);
+        }
+    }
     /* NROs bypass extraction even with a stale same-stem work directory or game executable. */
     {
         const char* names[] = {"Test [game];.nro", "Test [game];.NRO"};
