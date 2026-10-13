@@ -156,6 +156,7 @@ static int am_csg(SvcObj* o, IpcCtx* c) { /* ICommonStateGetter */
 }
 static int am_self(SvcObj* o, IpcCtx* c) { /* ISelfController */
     switch (c->cmd) {
+        case 0: g_quit = 1; return 0; /* Exit: the main loop saves what it keeps and ends the process */
         case 9: out_copy_h(c, ev_handle(am.launch_ev)); return 0; /* GetLibraryAppletLaunchableEvent */
         case 40: {
             out64(c, __atomic_fetch_add(&am.layer, 1, __ATOMIC_RELAXED));
