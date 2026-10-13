@@ -69,7 +69,7 @@ bump `SNX_ABI` for ABI changes. Version mismatches reject loading.
 | `runtime/` | Module loading, INI, clock, `RtAPI`, crashes |
 | `hle/kernel/`, `hle/svc/`, `memory/` | Objects, threads, sync, SVC, Switch memory, IPC |
 | `hle/services/`, `hle/filesystem/` | Services, nvdrv, guest filesystem services |
-| `gpu/` and `gpu/maxwell/` | GPFIFO, Maxwell engine implementation, shaders, Vk/null renderers |
+| `gpu/` and `gpu/maxwell/` | GPFIFO, Maxwell engine implementation, shaders, Vulkan renderer |
 | `gpu/video/` | host1x, NVDEC/FFmpeg, VIC |
 | `runtime/platform/` | Host APIs, SDL3/headless, input, screenshots, timed exit |
 
