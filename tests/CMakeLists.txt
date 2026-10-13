@@ -113,3 +113,4 @@ if(SNX_TEST_SANITIZERS AND WIN32)
 endif()
 
 endif() # SNX_BUILD_NX
+include(architecture.cmake)
