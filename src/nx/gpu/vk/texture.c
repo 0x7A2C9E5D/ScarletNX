@@ -104,10 +104,13 @@ static void tex_upload(Surf* t) {
     VkCommandBuffer cb = vk_cmd();
     vk_surf_use(cb, t, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
-    if (f->depth) {
+    /* Z32F and Z16 are the bytes D32_SFLOAT and D16_UNORM hold: they load through the depth aspect like a color
+       texture through its color one. The packed kinds (Z24S8 and friends) would need converting */
+    int depth_raw = f->depth && (f->vk == VK_FORMAT_D32_SFLOAT || f->vk == VK_FORMAT_D16_UNORM);
+    if (f->depth && !depth_raw) {
         LOG_LIMIT(1,
-                  "vulkan: depth textures from memory aren't loaded yet, they read as 1.0 (only depth render targets "
-                  "are sampled)\n");
+                  "vulkan: packed depth textures from memory aren't loaded yet, they read as 1.0 (only depth render "
+                  "targets are sampled)\n");
         /* defined contents rather than whatever the image's memory held: far, so shadow tests pass */
         VkClearDepthStencilValue far = {1.0f, 0};
         VkImageSubresourceRange all = {vk_aspect(f), 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
@@ -177,7 +180,9 @@ static void tex_upload(Surf* t) {
                 regbuf = buf;
                 level_convert(f, lin, lw, lh, ld, rowb, p);
                 reg[nreg++] = (VkBufferImageCopy){.bufferOffset = off,
-                                                  .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, layer, 1},
+                                                  .imageSubresource = {depth_raw ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                                                                 : VK_IMAGE_ASPECT_COLOR_BIT,
+                                                                       l, layer, 1},
                                                   .imageExtent = {lw, lh, ld}};
             }
             free(lin);
