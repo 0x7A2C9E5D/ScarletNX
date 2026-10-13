@@ -133,6 +133,13 @@ snx_test_target(snx-test-audio-out 11)
 target_compile_definitions(snx-test-audio-out PRIVATE SNX_NO_H264)
 add_test(NAME audio_out COMMAND snx-test-audio-out)
 
+add_executable(snx-test-audren audren_render.c)
+snx_test_target(snx-test-audren 11)
+if(NOT WIN32)
+    target_link_libraries(snx-test-audren PRIVATE m)
+endif()
+add_test(NAME audren_render COMMAND snx-test-audren)
+
 add_executable(snx-test-render-enable render_enable.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c"
     "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c")
 snx_test_target(snx-test-render-enable 23)
@@ -184,7 +191,7 @@ endif()
 if(SNX_TEST_SANITIZERS AND WIN32)
     execute_process(COMMAND "${CMAKE_C_COMPILER}" -print-resource-dir
         OUTPUT_VARIABLE snx_clang_resource OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-    set_tests_properties(a64_fp_witnesses a64_fp_arithmetic_witnesses startup_windowed startup_headless driver_workflow extraction_native loader_native runtime_nro native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw astc_decode audio_out render_enable clear_flags instance_array draw_texture etc2_decode
+    set_tests_properties(a64_fp_witnesses a64_fp_arithmetic_witnesses startup_windowed startup_headless driver_workflow extraction_native loader_native runtime_nro native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw astc_decode audio_out render_enable clear_flags instance_array draw_texture etc2_decode audren_render
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${snx_clang_resource}/lib/windows")
 endif()
 
