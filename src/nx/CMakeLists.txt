@@ -60,7 +60,8 @@ snx_component(platform ${platform})
 
 set(components core kernel hle video gpu platform)
 if(SNX_VULKAN)
-    snx_component(shader gpu/shader/shader.c gpu/shader/decode.c gpu/shader/translate.c gpu/shader/corpus.c)
+    snx_component(shader gpu/shader/shader.c gpu/shader/decode.c gpu/shader/translate.c gpu/shader/corpus.c
+                 gpu/shader/spirv_emit.c)
     snx_component(spirv gpu/vk/spirv.c)
     target_link_libraries(snx_spirv PUBLIC glslang::glslang glslang::glslang-default-resource-limits)
     # volk uses SDL's loader for windows and loads Vulkan directly for headless runs
@@ -151,7 +152,8 @@ endif()
 
 # Opt-in because normal unit-test runs need neither an ICD nor a GPU. All rendering uses the real runtime.
 if(BUILD_TESTING AND SNX_TEST_VULKAN AND SNX_VULKAN)
-    add_executable(snx-test-vulkan "${PROJECT_SOURCE_DIR}/tests/vulkan_headless.c")
+    add_executable(snx-test-vulkan "${PROJECT_SOURCE_DIR}/tests/vulkan_headless.c"
+        "${PROJECT_SOURCE_DIR}/tests/spirv_emitter_fixture.c")
     target_link_libraries(snx-test-vulkan PRIVATE snx_nx_flags ${components} snx_driver Threads::Threads ${CMAKE_DL_LIBS})
     set_target_properties(snx-test-vulkan PROPERTIES LINKER_LANGUAGE CXX)
     if(WIN32)
