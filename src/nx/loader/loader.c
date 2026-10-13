@@ -887,6 +887,11 @@ int snx_load_nro(const char* path, SnxModuleImage* m, char* error, size_t error_
         fail(&p, "NRO: missing or truncated NRO0 header");
         goto bad;
     }
+    /* Atmosphere's ro::NroHeader flag 2 denotes a compressed image, not raw segment bytes. */
+    if (get32(file + 0x1c) & 2) {
+        fail(&p, "NRO: compressed images are not supported");
+        goto bad;
+    }
     m->image_size = get32(file + 0x18);
     if (m->image_size < 0x80 || m->image_size > file_size) {
         fail(&p, "NRO: declared image exceeds file");
@@ -899,6 +904,13 @@ int snx_load_nro(const char* path, SnxModuleImage* m, char* error, size_t error_
     m->data_off = get32(file + 0x30);
     m->data_size = get32(file + 0x34);
     m->bss = get32(file + 0x38);
+    /* Atmosphere ro::ValidateNro: raw segments start at zero and are contiguous through Size.
+       Keep accepting byte-packed fixtures here; guest permissions are rounded to pages at runtime. */
+    if (m->text_off || m->text_size < 0x80 || (SnxU64)m->text_size != m->ro_off ||
+        (SnxU64)m->ro_off + m->ro_size != m->data_off || (SnxU64)m->data_off + m->data_size != m->image_size) {
+        fail(&p, "NRO: segments must be contiguous and cover the declared image");
+        goto bad;
+    }
     memcpy(m->build_id, file + 0x40, 32);
     m->is_nro = 1;
     m->nro_asset = file + m->image_size;

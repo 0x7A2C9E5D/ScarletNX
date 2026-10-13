@@ -55,6 +55,39 @@ static int lz4_dec(const u8* src, u32 slen, u8* dst, u32 dlen) {
     return (int)o;
 }
 
+static u32 nro_u32(const u8* p) { return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; }
+
+static int load_nro(const SnxModInfo* mi, const u8* f, u64 fsz, u8* dst) {
+    /* Layout and compression flag: Atmosphere ro::NroHeader and ro::ValidateNro.
+       Assets after Size are not mapped, and BSS is separate zero-filled memory. */
+    if (fsz < 0x80 || memcmp(f + 0x10, "NRO0", 4)) {
+        WARN("%s: missing or truncated NRO0 header\n", mi->name);
+        return -1;
+    }
+    u64 isz = nro_u32(f + 0x18);
+    u32 flags = nro_u32(f + 0x1c), bss = nro_u32(f + 0x38);
+    u32 seg[3][2];
+    for (int i = 0; i < 3; i++) {
+        seg[i][0] = nro_u32(f + 0x20 + i * 8);
+        seg[i][1] = nro_u32(f + 0x24 + i * 8);
+    }
+    if ((flags & 2) || isz < 0x80 || isz > fsz || isz > mi->size || bss > mi->size - isz || seg[0][0] ||
+        seg[0][1] < 0x80 || (u64)seg[0][1] != seg[1][0] || (u64)seg[1][0] + seg[1][1] != seg[2][0] ||
+        (u64)seg[2][0] + seg[2][1] != isz) {
+        WARN("%s: invalid or unsupported NRO layout\n", mi->name);
+        return -1;
+    }
+    if (memcmp(f + 0x40, mi->build_id, 32) || seg[0][0] != mi->text_off || seg[0][1] != mi->text_size ||
+        seg[1][0] != mi->ro_off || seg[1][1] != mi->ro_size || seg[2][0] != mi->data_off ||
+        seg[2][1] != mi->data_size || bss != mi->bss_size) {
+        WARN("WARNING: module %s is not the NRO that was recompiled (different build id or layout).\n", mi->name);
+        return -2;
+    }
+    memcpy(dst, f, (size_t)isz);
+    memset(dst + isz, 0, (size_t)(mi->size - isz));
+    return 0;
+}
+
 static int load_one(const SnxModInfo* mi) {
     char p[1200];
     /* mapped, not read: the NSOs are tens of MB and only copied out once. The mapping ends at the file's end, so every
@@ -63,12 +96,8 @@ static int load_one(const SnxModInfo* mi) {
     int found = 0;
     const char* dirs[] = {"exefs/", ""};
     for (int k = 0; k < 2 && !found; k++) {
-        snprintf(p, sizeof p, "%s%s", dirs[k], mi->name);
+        snprintf(p, sizeof p, "%s%s%s", dirs[k], mi->name, mi->is_nro ? ".nro" : "");
         found = !fs_map_file(p, &fm);
-        if (!found && mi->is_nro) {
-            snprintf(p, sizeof p, "%s%s.nro", dirs[k], mi->name);
-            found = !fs_map_file(p, &fm);
-        }
     }
     if (!found) {
         WARN("Cannot find module %s in %sexefs/\n", mi->name, g_datadir);
@@ -83,7 +112,13 @@ static int load_one(const SnxModInfo* mi) {
         return -1;
     }
     u8* dst = GP(mi->base);
-    if (fsz >= 0x100 && !memcmp(f, "NSO0", 4)) {
+    if (mi->is_nro) {
+        int result = load_nro(mi, f, fsz, dst);
+        if (result) {
+            plat_file_unmap(&fm);
+            return result;
+        }
+    } else if (fsz >= 0x100 && !memcmp(f, "NSO0", 4)) {
         u32 flags;
         memcpy(&flags, f + 0xC, 4);
         u32 seg[3][3];
@@ -111,11 +146,6 @@ static int load_one(const SnxModInfo* mi) {
             } else
                 memcpy(dst + seg[i][1], f + seg[i][0], seg[i][2]);
         }
-    } else if (fsz > 0x20 && !memcmp(f + 0x10, "NRO0", 4)) {
-        u32 isz;
-        memcpy(&isz, f + 0x18, 4);
-        u64 n = isz < fsz ? isz : fsz;
-        memcpy(dst, f, n < size ? n : size);
     } else {
         WARN("%s: unknown format\n", p);
         plat_file_unmap(&fm);

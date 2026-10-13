@@ -114,13 +114,13 @@ void setp(Ctx* c, u32 p, const char* e) {
     c->used_pred[p] = 1;
     emitl(c, "p%u = %s;", p, e);
 }
-/* write the predicate pair for FSETP/ISETP/PSETP/CSETP, skip the temp if only one is used */
+/* Both results consume the old combining predicate, even when pa aliases it. */
 void setp2(Ctx* c, u32 pa, u32 pb, u32 bo, const char* t, const char* pc) {
     if (pa != 7 && pb != 7) {
-        emitl(c, "{ bool t_ = %s;", t);
+        emitl(c, "{ bool t_ = %s, pred_ = %s;", t, pc);
         c->indent++;
-        setp(c, pa, bop(bo, "t_", pc));
-        setp(c, pb, bop(bo, "(!t_)", pc));
+        setp(c, pa, bop(bo, "t_", "pred_"));
+        setp(c, pb, bop(bo, "(!t_)", "pred_"));
         c->indent--;
         emitl(c, "}");
     } else if (pa != 7)
@@ -313,8 +313,8 @@ int shader_merge_dual(const u8* a, const u8* b, u8* out, u32 max_bytes) {
         if (!IDX_OK(i)) continue;
         const Op* op = decode(w[i]);
         if (!op || op->id != O_EXIT) continue;
-        i32 off = ((i32)(bstart + 1) - (i32)(i + 1)) * 8; /* BRA keeps the EXIT's predicate */
-        w[i] = 0xE240000000000000ull | ((u64)((u32)off & 0xFFFFFF) << 20) | (w[i] & (0xFull << 16)) | 0xF;
+        i32 off = ((i32)(bstart + 1) - (i32)(i + 1)) * 8; /* BRA keeps the EXIT's predicate and flow test */
+        w[i] = 0xE240000000000000ull | ((u64)((u32)off & 0xFFFFFF) << 20) | (w[i] & (0xFull << 16)) | (w[i] & 31);
     }
     return 1;
 }

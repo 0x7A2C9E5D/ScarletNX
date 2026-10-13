@@ -32,6 +32,21 @@ child also aborts that stage so it can be retried. Uncatchable termination of th
 Existing manually extracted directories are assumed complete. Remove stale checkpoints or use the
 explicit commands when changing a dump or rebuilding game code.
 
+### NRO applications
+
+Pass an uncompressed NRO directly to recompile and play, without keys or extraction:
+
+```sh
+./build/scarletnx "app.nro" --headless
+```
+
+The `.nro` extension is case-insensitive. NRO launches always recompile and restage the input,
+so a same-named cached executable or extraction directory cannot silently select an older program.
+Embedded RomFS assets are staged by the recompiler. Compressed NROs are not supported.
+This uses ScarletNX's existing guest runtime, not a complete homebrew-loader environment.
+Compatibility still depends on the application's runtime and service requirements.
+See [NRO implementation notes](NRO.md) for the reference and validation policy.
+
 To run the steps separately:
 
 ```sh
