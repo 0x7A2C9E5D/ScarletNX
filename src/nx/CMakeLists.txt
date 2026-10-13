@@ -61,6 +61,7 @@ snx_component(platform ${platform})
 set(components core kernel hle video gpu platform)
 if(SNX_VULKAN)
     snx_component(shader gpu/shader/shader.c gpu/shader/decode.c gpu/shader/translate.c gpu/shader/corpus.c
+                 gpu/shader/spirv_translate.c
                  gpu/shader/spirv_emit.c)
     snx_component(spirv gpu/vk/spirv.c)
     target_link_libraries(snx_spirv PUBLIC glslang::glslang glslang::glslang-default-resource-limits)
@@ -138,6 +139,22 @@ if(BUILD_TESTING AND SNX_VULKAN)
     endif()
     set_target_properties(snx-test-shader-precise PROPERTIES LINKER_LANGUAGE CXX)
     add_test(NAME shader_precise COMMAND snx-test-shader-precise)
+endif()
+
+if(BUILD_TESTING AND SNX_VULKAN)
+    find_program(SNX_SHADER_SPIRV_VAL spirv-val)
+    find_program(SNX_SHADER_SPIRV_DIS spirv-dis)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(SNX_SHADER_SPIRV_VAL AND SNX_SHADER_SPIRV_DIS AND Python3_Interpreter_FOUND)
+        add_executable(snx-test-shader-direct "${PROJECT_SOURCE_DIR}/tests/shader_direct.c")
+        target_link_libraries(snx-test-shader-direct PRIVATE snx_shader)
+        if(NOT WIN32)
+            target_link_libraries(snx-test-shader-direct PRIVATE Threads::Threads m)
+        endif()
+        add_test(NAME shader_direct COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/shader_direct_test.py"
+            --generator $<TARGET_FILE:snx-test-shader-direct> --validator "${SNX_SHADER_SPIRV_VAL}"
+            --disassembler "${SNX_SHADER_SPIRV_DIS}")
+    endif()
 endif()
 
 # The shader translator offline: which c0 words become storage buffers

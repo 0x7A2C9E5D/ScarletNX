@@ -359,6 +359,8 @@ const Op* decode(u64 w);
 /* translate.c */
 const char* samp_type(int type, int array, int shadow);
 u32 bra_target(u64 w, u32 idx);
+/* Resolve Maxwell's control stack to a target for each SYNC/BRK/CONT, without generating source text. */
+int shader_resolve_crs(const u64* words, u32 count, u32* pop_targets);
 int flow_always(u64 w);
 const char* flow_cond(Ctx* c, u64 w);
 u32 lmem_words(Ctx* c);

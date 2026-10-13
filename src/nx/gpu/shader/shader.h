@@ -59,6 +59,8 @@ static inline int shader_flushes_denorms(const ShaderInfo* si) { return si->fp32
 int shader_vk_set(int stage);
 /* malloc'd GLSL, or NULL */
 char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si);
+/* Direct SPIR-V translator. Returns NULL when the current opcode set cannot represent the program. */
+u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count);
 extern int (*g_shader_cb_read)(u32 idx, u32 off, u32* out);
 u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len);
 /* shader corpus (SNX_SHADER_CORPUS=dir): each translated shader's code and its ShaderInfo inputs, so

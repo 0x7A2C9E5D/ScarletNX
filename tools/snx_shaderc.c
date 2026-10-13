@@ -3,7 +3,7 @@
 /* Translates a shader corpus (SNX_SHADER_CORPUS=dir in a game run) offline and checks the result: every shader is
    compiled to SPIR-V with glslang and, with --validate, checked with spirv-val.
 
-     snx-shaderc CORPUS_DIR [--out DIR] [--validate] [--cache DIR] [--verbose]
+     snx-shaderc CORPUS_DIR [--out DIR] [--validate] [--cache DIR] [--verbose] [--direct]
      snx-shaderc --nvn DIR --cache DIR
 
    --out writes each shader's GLSL and .spv to DIR, to compare the translator's output between two builds. --cache goes
@@ -28,7 +28,7 @@
 #endif
 
 #define USAGE                                                                                                          \
-    "usage: %s CORPUS_DIR [--out DIR] [--validate] [--cache DIR] [--verbose]\n"                                        \
+    "usage: %s CORPUS_DIR [--out DIR] [--validate] [--cache DIR] [--verbose] [--direct]\n"                             \
     "       %s --nvn DIR --cache DIR [--verbose]\n"
 
 static int write_file(const char* path, const void* p, size_t n) {
@@ -149,7 +149,7 @@ static int nvn_dir(const char* dir, const char* cache, int verbose) {
 
 int main(int argc, char** argv) {
     const char *dir = NULL, *out = NULL, *cache = NULL, *nvn = NULL;
-    int validate = 0, verbose = 0;
+    int validate = 0, verbose = 0, direct = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--nvn") && i + 1 < argc)
             nvn = argv[++i];
@@ -161,6 +161,8 @@ int main(int argc, char** argv) {
             validate = 1;
         else if (!strcmp(argv[i], "--verbose"))
             verbose = 1;
+        else if (!strcmp(argv[i], "--direct"))
+            direct = 1;
         else if (argv[i][0] != '-' && !dir)
             dir = argv[i];
         else {
@@ -211,24 +213,31 @@ int main(int argc, char** argv) {
             if (verbose) printf("%s: not a corpus file for this build\n", base);
             continue;
         }
-        char* glsl = shader_to_glsl(code, max_bytes, stage, &si);
-        glsl = vk_glsl_post(glsl, stage, shader_flushes_denorms(&si)); /* the GLSL the renderer compiles */
+        size_t nwords = 0;
+        u32* spv = direct ? shader_to_spirv(code, max_bytes, stage, &si, &nwords) : NULL;
+        char* glsl = direct ? NULL : shader_to_glsl(code, max_bytes, stage, &si);
+        if (!direct) glsl = vk_glsl_post(glsl, stage, shader_flushes_denorms(&si));
         free(code);
-        if (!glsl || si.unsupported) {
+        if ((direct && !spv) || (!direct && (!glsl || si.unsupported))) {
             untranslated++;
-            if (verbose)
-                printf("%s: not translated (%d unsupported, first %s)\n", base, si.unsupported, si.first_unsupported);
+            if (verbose) {
+                if (direct)
+                    printf("%s: direct translation unavailable (%s)\n", base,
+                           si.first_unsupported[0] ? si.first_unsupported : "unsupported shader stage or feature");
+                else
+                    printf("%s: not translated (%d unsupported, first %s)\n", base, si.unsupported,
+                           si.first_unsupported);
+            }
             free(glsl);
             continue;
         }
-        if (out) {
+        if (out && !direct) {
             char p[2200];
             snprintf(p, sizeof p, "%s/%s.glsl", out, base);
             unwritten += !write_file(p, glsl, strlen(glsl));
         }
         char err[4096];
-        size_t nwords = 0;
-        u32* spv = vk_spirv_cached(glsl, stage, cache, &nwords, err, sizeof err);
+        if (!direct) spv = vk_spirv_cached(glsl, stage, cache, &nwords, err, sizeof err);
         free(glsl);
         if (!spv) {
             compile_fail++;

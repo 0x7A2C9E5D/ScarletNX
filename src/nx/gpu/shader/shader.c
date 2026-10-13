@@ -477,6 +477,31 @@ static int stk_resolve(Ctx* c, u32 n, int fwd, const u32* brx_all, int brx_n) {
     return ok;
 }
 
+int shader_resolve_crs(const u64* words, u32 count, u32* pop_targets) {
+    if (!words || !pop_targets || count < 12 || count > 65536) return 0;
+    Ctx* c = calloc(1, sizeof *c);
+    if (!c) return 0;
+    c->w = words;
+    mark(c, 11);
+    for (u32 i = 11; i < count; i++) {
+        if (!IDX_OK(i)) continue;
+        const Op* op = decode(words[i]);
+        if (!op) continue;
+        int id = op->id;
+        if (id == O_BRA || id == O_SSY || id == O_PBK || id == O_PCNT) mark_tgt(c, bra_target(words[i], i));
+        if (is_term(id)) {
+            u32 next = i + 1;
+            while (next < count && !IDX_OK(next)) next++;
+            mark(c, next);
+        }
+    }
+    int ok = stk_resolve(c, count, 0, NULL, 0);
+    if (ok) memcpy(pop_targets, c->pop_tgt, (size_t)count * sizeof *pop_targets);
+    free(c->pop_tgt);
+    free(c);
+    return ok;
+}
+
 /* ---- structured emission for forward-only shaders (nested if/else, no pc var) ----
    forward branch i->t (BRA, or SYNC/BRK once resolved) opens 'if(!cond){' and closes at t. needs properly
    nested ranges; an unconditional branch right before a close turns into 'else'. otherwise use the pc guards. */
