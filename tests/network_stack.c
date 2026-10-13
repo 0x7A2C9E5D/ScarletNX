@@ -108,7 +108,10 @@ static void tcp(void) {
     CHECK(r == -SNX_EINPROGRESS || r == -SNX_ECONNREFUSED);
     if (r == -SNX_EINPROGRESS) {
         SnxPollEntry w = {c, -1, SNX_POLLOUT, 0};
-        snx_net_poll(&w, 1, 2000);
+        /* Windows retries a refused TCP handshake before reporting failure, which can exceed two seconds.
+           SO_ERROR may still be zero while connecting: require completion, not just an expired poll. */
+        CHECK(snx_net_poll(&w, 1, 10000) == 1);
+        CHECK(w.revents & (SNX_POLLOUT | SNX_POLLERR | SNX_POLLHUP));
         len = sizeof v;
         CHECK(!snx_socket_getsockopt(c, SNX_SOL_SOCKET, SNX_SO_ERROR, &v, &len) && v == SNX_ECONNREFUSED);
     }
