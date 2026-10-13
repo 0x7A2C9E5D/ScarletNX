@@ -143,6 +143,16 @@ if(BUILD_TESTING AND SNX_VULKAN)
     add_test(NAME shader_precise COMMAND snx-test-shader-precise)
 endif()
 
+# The shader translator offline: which c0 words become storage buffers
+if(BUILD_TESTING AND SNX_VULKAN)
+    add_executable(snx-test-shader-gbuf "${PROJECT_SOURCE_DIR}/tests/shader_gbuf.c")
+    target_link_libraries(snx-test-shader-gbuf PRIVATE snx_shader)
+    if(NOT WIN32)
+        target_link_libraries(snx-test-shader-gbuf PRIVATE Threads::Threads m)
+    endif()
+    add_test(NAME shader_gbuf COMMAND snx-test-shader-gbuf)
+endif()
+
 # Opt-in because normal unit-test runs need neither an ICD nor a GPU. All rendering uses the real runtime.
 if(BUILD_TESTING AND SNX_TEST_VULKAN AND SNX_VULKAN)
     add_executable(snx-test-vulkan "${PROJECT_SOURCE_DIR}/tests/vulkan_headless.c")

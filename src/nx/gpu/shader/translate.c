@@ -344,12 +344,13 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op);
    3 f32), returning the old value to dst unless it is RZ. Operations: add min max inc dec and or xor, exch, safeadd */
 static void global_atomic(Ctx* c, u64 w, const char* name, u32 ra, u32 rv, i32 off, u32 sz, u32 op, u32 dst) {
     if (op == 10) op = 0; /* SAFEADD */
-    if (!c->gtag[ra] || (sz != 0 && sz != 1 && sz != 3) || op > 8 || (sz == 3 && op != 0 && op != 8)) {
+    int known = !((sz != 0 && sz != 1 && sz != 3) || op > 8 || (sz == 3 && op != 0 && op != 8));
+    int gi = known ? gbuf_use(c, c->gtag[ra]) : -1;
+    if (gi < 0) {
         unsupported(c, name, w);
         if (dst != 255) setr(c, dst, "0u");
         return;
     }
-    int gi = c->gtag[ra] - 1;
     c->si->gbuf_wmask |= 1u << gi;
     emitl(c, "{ uint o_ = (%s + %uu - %s) >> 2u; uint v_ = %s; uint old_;", R(c, ra), (u32)off,
           CB(c, 0, c->si->gbuf_cbuf_off[gi]), R(c, rv));
@@ -948,7 +949,7 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
         case O_IADD_I: {
             if (d != 255) { /* a pointer plus an offset, not negated (AvgMode 1 negates B, 2 negates A) */
                 u32 avg = B(w, 48, 2);
-                u8 tg = 0;
+                u16 tg = 0;
                 if (id == O_IADD_C && avg != 1) tg = gbuf_tag(c, w);
                 if (!tg && avg != 2) tg = c->gtag[a];
                 if (!tg && id == O_IADD_R && avg != 1) tg = c->gtag[B(w, 20, 8)];
@@ -1643,6 +1644,10 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
                 setr(c, d, word);
             c->indent--;
             emitl(c, "}");
+            /* a 32 or 64 bit word of c0 at a constant address can be a storage buffer's address (deko3d loads it
+               with LDC.64 rather than MOV) */
+            if (d != 255) c->gtag[d] = ar == 255 && (sz == 4 || sz == 5) ? gbuf_tag_off(c, idx, (u32)off) : 0;
+            if (d < 254 && sz == 5) c->gtag[d + 1] = 0;
             break;
         }
         case O_LDS:
@@ -1693,9 +1698,9 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
             break;
         }
         case O_LDG:
-            if (c->gtag[a]) {
+            if (gbuf_use(c, c->gtag[a]) >= 0) {
                 /* ssbo load, addr = c0[off] + offset */
-                int gi = c->gtag[a] - 1;
+                int gi = gbuf_use(c, c->gtag[a]);
                 u32 goff = c->si->gbuf_cbuf_off[gi];
                 i32 imm = (i32)(B(w, 20, 24) << 8) >> 8;
                 u32 sz = B(w, 48, 3);
@@ -1719,9 +1724,9 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
             }
             /* unknown base -> unsupported */
         case O_STG:
-            if (id == O_STG && c->gtag[a]) {
+            if (id == O_STG && gbuf_use(c, c->gtag[a]) >= 0) {
                 /* ssbo store: 32/64/128 direct, 8/16 via atomics so neighbours survive */
-                int gi = c->gtag[a] - 1;
+                int gi = gbuf_use(c, c->gtag[a]);
                 u32 goff = c->si->gbuf_cbuf_off[gi];
                 i32 imm = (i32)(B(w, 20, 24) << 8) >> 8;
                 u32 sz = B(w, 48, 3);
