@@ -237,7 +237,7 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
     if (g_rp.zt && g_rp.zt->layers < layers) layers = g_rp.zt->layers;
     if (layer >= layers) return;
     VkClearRect rect = {{{0, 0}, g_rp.ext}, layer, 1};
-    if ((r[0x43E] & 0x10) && (r[0x380] & 1)) { /* scissored clear */
+    if (r3d_clear_scissored(r)) {
         u32 xs = r[0x381], ys = r[0x382];
         i32 x0 = (i32)vk_scf(xs & 0xFFFF), x1 = (i32)vk_scf(xs >> 16), y0 = (i32)vk_scf(ys & 0xFFFF),
             y1 = (i32)vk_scf(ys >> 16);
@@ -1282,4 +1282,59 @@ retry:
             if (g_rp.rt[i] && (k.blend[i].mask & ((fs->si.sph[18] >> (i * 4)) & 15))) target_written(g_rp.rt[i]);
     if (zt && !zt_ro && (r[0x4BA] || (r[0x4E0] && ((r[0x4E7] & 0xFF) || (r[0x565] && (r[0x3D6] & 0xFF)))))) zt->wgen++;
     g_vk_drawn++;
+}
+
+/* DRAW_TEXTURE (3D 0x420-0x42B, drawn when 0x42B is written): a texture's rectangle blitted onto color target 0, as
+   Eden's DrawManager::DrawTexture reads the registers: the destination in 20.12 fixed point, the source's start the
+   same and its steps per destination pixel in 32.32, and y from the bottom in a lower-left window (0x4EB bit 0, the
+   height from the surface clip, 0x3FE). The sampler's magnification filter filters it */
+static int format_has(VkFormat f, VkFormatFeatureFlags need) {
+    VkFormatProperties p;
+    vkGetPhysicalDeviceFormatProperties(g_vk.phys, f, &p);
+    return (p.optimalTilingFeatures & need) == need;
+}
+void vk_render_draw_texture(GpuChannel* ch) {
+    u32* r = ch->r3d;
+    float x0 = (float)(i32)r[0x420] / 4096.f, y0 = (float)(i32)r[0x421] / 4096.f;
+    float w = (float)(i32)r[0x422] / 4096.f, h = (float)(i32)r[0x423] / 4096.f;
+    double du = (double)(i64)((u64)r[0x425] << 32 | r[0x424]) / 4294967296.0;
+    double dv = (double)(i64)((u64)r[0x427] << 32 | r[0x426]) / 4294967296.0;
+    float sx0 = (float)(i32)r[0x42A] / 4096.f, sy0 = (float)(i32)r[0x42B] / 4096.f;
+    if (r[0x4EB] & 1) y0 = (float)(r[0x3FE] >> 16) - y0;
+    float sx1 = sx0 + (float)(du * w), sy1 = sy0 + (float)(dv * h);
+    TexRes x;
+    tex_resolve(ch, (r[0x428] & 0xFFF) << 20 | (r[0x429] & 0xFFFFF), &x);
+    Surf *rt[8], *zt, *t = x.t;
+    u32 n;
+    read_targets(ch, rt, &zt, &n);
+    if (!t || !n || !rt[0]) {
+        LOG_LIMIT(1, "vulkan: a draw texture without its texture or a color target (not drawn)\n");
+        return;
+    }
+    Surf* d = rt[0];
+    if (t->f.depth || d->f.depth || t->f.is_int != d->f.is_int || !format_has(t->f.vk, VK_FORMAT_FEATURE_BLIT_SRC_BIT) ||
+        !format_has(d->f.vk, VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
+        LOG_LIMIT(1, "vulkan: a draw texture between formats %d and %d can't be blitted (not drawn)\n", (int)t->f.vk,
+                  (int)d->f.vk);
+        return;
+    }
+    /* in the images' pixels: a target is scaled, and a texture made from one is too */
+    float tsx = (float)t->sw / (float)t->w, tsy = (float)t->sh / (float)t->h;
+    VkImageBlit b = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .srcOffsets = {{(i32)(sx0 * tsx), (i32)(sy0 * tsy), 0}, {(i32)(sx1 * tsx), (i32)(sy1 * tsy), 1}},
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .dstOffsets = {{(i32)vk_scf(x0), (i32)vk_scf(y0), 0}, {(i32)vk_scf(x0 + w), (i32)vk_scf(y0 + h), 1}}};
+    int linear = (x.tsc[1] & 3) == 2 && !t->f.is_int &&
+                 format_has(t->f.vk, VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
+    vk_render_end(); /* blits happen outside rendering passes */
+    vk_rt_note_read(t);
+    VkCommandBuffer cb = vk_cmd();
+    vk_surf_use(cb, t, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    vk_surf_use(cb, d, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    vkCmdBlitImage(cb, t->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, d->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b,
+                   linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
+    d->wgen++;
+    vk_rt_drawn(d);
+    d->last_used = g_vk_present;
 }
