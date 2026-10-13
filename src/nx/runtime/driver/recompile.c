@@ -310,7 +310,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     if (compile.target_win != host_win) return snx_error("--target: modules are built for this host only");
 #ifndef SNX_WITH_LLVM
     if (backend == SNX_BACKEND_LLVM && !no_build)
-        return snx_error("this recompiler was built without LLVM (a cross build): recompile on the game's host");
+        return snx_error("this recompiler was built without LLVM (a cross build, or Windows without an LLVM for "
+                         "MinGW): it can't build game modules");
 #endif
     gen.abi = snx_read_abi(paths);
     if (!gen.abi) return snx_error("cannot read src/common/cpu/aarch64/cpu.h; set --repo to the checkout");

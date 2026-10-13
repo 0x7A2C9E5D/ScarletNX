@@ -3,6 +3,8 @@
 # The recompiler's LLVM backend (--backend=llvm, the default) links LLVM's C API, a required dependency: llvm-config
 # finds it, SNX_LLVM_CONFIG names one (llvm-config, llvm-config-19, llvm-config19 on FreeBSD...). A cross build (the
 # windows-cross preset) builds the runtime without it: its recompiler can't build modules, the game's host does.
+# Windows too, for now: llvm-mingw (scripts/bootstrap.ps1) has no LLVM libraries, and no LLVM for MinGW is staged yet,
+# so a native Windows build without llvm-config gets a recompiler that only stages data (scarletnx -r says why).
 set(SNX_LLVM_FOUND OFF)
 if(TRUE)
     if(CMAKE_CROSSCOMPILING)
@@ -32,7 +34,10 @@ if(TRUE)
                 message(STATUS "LLVM backend: LLVM ${SNX_LLVM_VERSION} (${SNX_LLVM_CONFIG})")
             endif()
         endif()
-        if(NOT SNX_LLVM_FOUND)
+        if(NOT SNX_LLVM_FOUND AND WIN32)
+            message(WARNING "LLVM not found (no llvm-config): scarletnx -r can't build game modules on this Windows "
+                            "build; point SNX_LLVM_CONFIG at an LLVM for MinGW to build them")
+        elseif(NOT SNX_LLVM_FOUND)
             message(FATAL_ERROR "LLVM's development files are required (the recompiler's code generator): install them "
                                 "or point SNX_LLVM_CONFIG at an llvm-config")
         endif()
