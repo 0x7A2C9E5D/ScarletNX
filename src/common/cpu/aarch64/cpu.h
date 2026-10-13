@@ -28,7 +28,8 @@ typedef double f64;
 
 /* the version of the contract between a game module and the runtime (this header, cpu_helpers.c, RtAPI and the
    module descriptor). The recompiler stamps it into each module, the runtime refuses a module with another one */
-#define SNX_ABI 3
+/* ABI 4: rounding, min/max and comparisons now observe FPCR/FPSR. */
+#define SNX_ABI 4
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)
@@ -310,6 +311,9 @@ i64 fcvt_s64(f64 x, int rm);
 u64 fcvt_u64(f64 x, int rm);
 i32 fcvt_s32(f64 x, int rm);
 u32 fcvt_u32(f64 x, int rm);
+u32 snx_fp_compare(CPU* c, u64 a, u64 b, int width, int signal);
+u64 snx_fp_minmax(CPU* c, u64 a, u64 b, int width, int minimum, int numeric);
+u64 snx_fp_round(CPU* c, u64 bits, int width, int rm, int exact);
 f64 fp_round(f64 x, int rm);
 f32 fp_round32(f32 x, int rm);
 u16 f32_to_f16(f32 x);
