@@ -180,6 +180,15 @@ add_executable(snx-test-etc2 etc2_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/tex
 snx_test_target(snx-test-etc2 23)
 add_test(NAME etc2_decode COMMAND snx-test-etc2)
 
+if(UNIX)
+    add_executable(snx-test-kernel-mutex kernel_mutex.c)
+    snx_test_target(snx-test-kernel-mutex 11)
+    add_test(NAME kernel_mutex COMMAND snx-test-kernel-mutex)
+    add_executable(snx-test-kernel-cores kernel_cores.c)
+    snx_test_target(snx-test-kernel-cores 11)
+    add_test(NAME kernel_cores COMMAND snx-test-kernel-cores)
+endif()
+
 add_executable(snx-test-fs-fixture filesystem_fixture.c)
 snx_test_target(snx-test-fs-fixture 90)
 target_link_libraries(snx-test-fs-fixture PRIVATE snx_test_common)
