@@ -34,6 +34,8 @@ typedef struct GpuChannel {
     u64 cb_addr;
     u32 cb_n;
     u32 cb_words[256];
+    /* SetRenderEnable (3D 0x554-0x556) or its override (0x651) turned drawing off: draws and clears are skipped */
+    int render_off;
 } GpuChannel;
 typedef struct {
     GpuChannel* chan[128]; /* one per syncpoint, and nvdrv hands out fewer than 128 */
