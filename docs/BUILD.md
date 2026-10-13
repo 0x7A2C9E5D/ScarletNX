@@ -43,8 +43,11 @@ Installing `libsdl2-dev` does not satisfy the SDL3 dependency.
 For native Wayland support in the source fallback, also install:
 
 ```sh
-sudo apt install libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev
+sudo apt install libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev libegl-dev
 ```
+
+Without `libegl-dev` SDL3 quietly leaves Wayland out and builds X11 only. The `SDL_WAYLAND` line of
+its configure summary reads `(Wanted: ON): ON` when Wayland is in.
 
 CMake needs version 3.25 or newer, and Clang must support C23/C++23. Upgrade these tools if your
 release ships older versions. Install your GPU's Vulkan driver separately. For Intel/AMD or lavapipe
