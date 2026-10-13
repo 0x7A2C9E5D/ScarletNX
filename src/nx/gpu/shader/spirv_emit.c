@@ -100,15 +100,27 @@ void spv_emit_shader_capability(SpvEmitter* e) {
     put(&e->capabilities, 1); /* Shader */
 }
 
-void spv_emit_compute_entry_str(SpvEmitter* e, uint32_t function, const char* name, const uint32_t* interfaces,
-                                size_t interface_count) {
+void spv_emit_entry_str(SpvEmitter* e, SpvShaderStage stage, uint32_t function, const char* name,
+                        const uint32_t* interfaces, size_t interface_count) {
+    assert(stage == SPV_STAGE_VERTEX || stage == SPV_STAGE_FRAGMENT || stage == SPV_STAGE_COMPUTE);
     size_t n = string_words(name);
     assert(n <= UINT16_MAX - 3 && interface_count <= UINT16_MAX - 3 - n);
     instruction(&e->entry_points, OP_ENTRY_POINT, (uint32_t)(3 + n + interface_count));
-    put(&e->entry_points, 5); /* GLCompute */
+    put(&e->entry_points, (uint32_t)stage);
     put(&e->entry_points, function);
     put_str(&e->entry_points, name);
     for (size_t i = 0; i < interface_count; i++) put(&e->entry_points, interfaces[i]);
+}
+
+void spv_emit_compute_entry_str(SpvEmitter* e, uint32_t function, const char* name, const uint32_t* interfaces,
+                                size_t interface_count) {
+    spv_emit_entry_str(e, SPV_STAGE_COMPUTE, function, name, interfaces, interface_count);
+}
+
+void spv_emit_fragment_origin_upper_left(SpvEmitter* e, uint32_t function) {
+    instruction(&e->execution_modes, OP_EXECUTION_MODE, 3);
+    put(&e->execution_modes, function);
+    put(&e->execution_modes, 7); /* OriginUpperLeft */
 }
 
 void spv_emit_local_size(SpvEmitter* e, uint32_t function, uint32_t x, uint32_t y, uint32_t z) {
@@ -256,6 +268,32 @@ uint32_t spv_emit_storage_buffer(SpvEmitter* e, uint32_t struct_type, uint32_t s
     return id;
 }
 
+static uint32_t output_vec4(SpvEmitter* e, uint32_t vec4_type, uint32_t decoration, uint32_t value) {
+    uint32_t pointer_type = spv_emit_id(e);
+    instruction(&e->types, OP_TYPE_POINTER, 4);
+    put(&e->types, pointer_type);
+    put(&e->types, 3); /* Output */
+    put(&e->types, vec4_type);
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->decorations, OP_DECORATE, 4);
+    put(&e->decorations, id);
+    put(&e->decorations, decoration);
+    put(&e->decorations, value);
+    instruction(&e->types, OP_VARIABLE, 4);
+    put(&e->types, pointer_type);
+    put(&e->types, id);
+    put(&e->types, 3); /* Output */
+    return id;
+}
+
+uint32_t spv_emit_output_vec4(SpvEmitter* e, uint32_t vec4_type, uint32_t location) {
+    return output_vec4(e, vec4_type, 30, location); /* Location */
+}
+
+uint32_t spv_emit_position_output(SpvEmitter* e, uint32_t vec4_type) {
+    return output_vec4(e, vec4_type, 11, 0); /* BuiltIn Position */
+}
+
 void spv_emit_function_void(SpvEmitter* e, uint32_t void_type, uint32_t function, uint32_t function_type) {
     instruction(&e->functions, OP_FUNCTION, 5);
     put(&e->functions, void_type);
@@ -291,11 +329,13 @@ uint32_t spv_emit_iadd_u32(SpvEmitter* e, uint32_t u32_type, uint32_t left, uint
     return id;
 }
 
-void spv_emit_store_u32(SpvEmitter* e, uint32_t pointer, uint32_t value) {
+void spv_emit_store(SpvEmitter* e, uint32_t pointer, uint32_t value) {
     instruction(&e->functions, OP_STORE, 3);
     put(&e->functions, pointer);
     put(&e->functions, value);
 }
+
+void spv_emit_store_u32(SpvEmitter* e, uint32_t pointer, uint32_t value) { spv_emit_store(e, pointer, value); }
 
 void spv_emit_return(SpvEmitter* e) { instruction(&e->functions, OP_RETURN, 1); }
 void spv_emit_function_end(SpvEmitter* e) { instruction(&e->functions, OP_FUNCTION_END, 1); }
