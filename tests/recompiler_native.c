@@ -3,6 +3,7 @@
 /* Synthetic NRO -> CLI -> C -> DSO -> AOT/interpreter execution. No game data. */
 #include "common.h"
 #include "cpu.h"
+#include "loader/module_abi.h"
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32

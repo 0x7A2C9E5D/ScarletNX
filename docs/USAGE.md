@@ -60,7 +60,7 @@ Remaining examples: POSIX.
 
 - **Keys:** flags → checkout → `~/.switch` (`%USERPROFILE%\.switch` on Windows). Common NSP tickets supplement title keys.
 - **Extraction:** defaults to `work/<dump stem>`; `--name`/`--out DIR` override. Refuses existing `exefs`;
-  builds missing hactool. [Temp cleanup/key filtering](../scarletnx/extract.c).
+  builds missing hactool. [Temp cleanup/key filtering](../src/nx/runtime/driver/extract.c).
 - **Recompile:** AOT → module compile/link → NVN prebuild → final runtime deployment. Cached objects;
   NVN prebuild failures defer compilation to runtime. `--native` = `-march=native`;
   `--cc CLANG` / `-O 0..3` also accepted.
