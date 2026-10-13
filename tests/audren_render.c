@@ -528,6 +528,161 @@ static void rv_ref(const i16* x, i16* y, int frames_n, const u8* state, const i3
     }
 }
 
+/* an I3DL2 reverb on effect 0 at 48 kHz: channels, then the floats from 0x18 */
+static void i3dl2_set(u8* p, u16 ch, const float* v) {
+    w32(p, 0xC, (u32)ch << 16 | ch);
+    w32(p, 0x14, SNX_ART_RATE);
+    memcpy(p + 0x18, v, 12 * 4);
+}
+
+/* Eden's I3DL2 tables (renderer/command/effect/i3dl2_reverb.cpp) */
+static const float i3_min_t[4] = {5.0f, 6.0f, 13.0f, 14.0f},
+                   i3_max_t[4] = {45.7042007446f, 82.7817001343f, 149.938293457f, 271.575805664f},
+                   i3_d0_t[4] = {17.0f, 13.0f, 9.0f, 7.0f}, i3_d1_t[4] = {19.0f, 11.0f, 10.0f, 6.0f};
+static const float i3_tap_t[20] = {0.0171360000968f,
+                                   0.0591540001333f,
+                                   0.161733001471f,
+                                   0.390186011791f,
+                                   0.425262004137f,
+                                   0.455410987139f,
+                                   0.689737021923f,
+                                   0.74590998888f,
+                                   0.833844006062f,
+                                   0.859502017498f,
+                                   0.0f,
+                                   0.0750240013003f,
+                                   0.168788000941f,
+                                   0.299901008606f,
+                                   0.337442994118f,
+                                   0.371903002262f,
+                                   0.599011003971f,
+                                   0.716741025448f,
+                                   0.817858994007f,
+                                   0.85166400671f};
+static const float i3_tap_g[20] = {0.67096f, 0.61027f, 1.0f,     0.3568f,  0.68361f, 0.65978f, 0.51939f,
+                                   0.24712f, 0.45945f, 0.45021f, 0.64196f, 0.54879f, 0.92925f, 0.3827f,
+                                   0.72867f, 0.69794f, 0.5464f,  0.24563f, 0.45214f, 0.44042f};
+
+/* the twenty early tap lengths at 48 kHz, at most the early line's 400 ms */
+static void i3_taps(const float* v, i32* t) {
+    float time = (v[9] * 0.9998f + 0.02f) * 1000.0f;
+    for (int k = 0; k < 20; k++) {
+        t[k] = tint(tmul(tq(v[8] * 1000.0f + time * i3_tap_t[k]), tq(48.0f)));
+        if (t[k] >= 19200) t[k] = 19200;
+    }
+}
+
+/* Eden's I3DL2 reverb for one channel at 48 kHz, its lines as arrays */
+typedef struct {
+    i64* b;
+    int max, in, out, delay;
+    float wet;
+} I3Line;
+static void i3l_delay(I3Line* l, int d) {
+    if (l->max < d) return;
+    l->delay = d;
+    l->in = (l->out + d) % (l->max + 1);
+}
+static void i3l_make(I3Line* l, int len) {
+    l->b = calloc((size_t)len + 1, sizeof *l->b);
+    l->max = len;
+    l->out = 0;
+    i3l_delay(l, len);
+    l->wet = 0;
+}
+static i64 i3l_tick(I3Line* l, i64 v) {
+    l->b[l->in] = v;
+    if (++l->in >= l->max) l->in = 0;
+    i64 r = l->b[l->out];
+    if (++l->out >= l->max) l->out = 0;
+    return r;
+}
+static i64 i3l_tap(const I3Line* l, int idx) {
+    int at = l->in - (idx + 1);
+    return l->b[at < 0 ? at + l->max + 1 : at];
+}
+typedef struct {
+    float lp0, lp1, lp2, eg, lg, dry, coef[4][3], shelf[4];
+    I3Line early, fdn[4], d0[4], d1[4];
+    int t[20], etl;
+} I3Ref;
+static float i3_pow10(float x) { return x >= 0.0f ? 1.0f : x <= -5.3f ? 0.0f : powf(10.0f, x); }
+static float i3_cos(float d) { return cosf(d * 3.14159265358979f / 180.0f); }
+/* UpdateI3dl2ReverbEffectParameter, v as i3dl2_set takes it, all in range */
+static void i3_update(I3Ref* r, const float* v) {
+    i64 delay = tq(48.0f);
+    r->dry = v[11];
+    r->eg = i3_pow10((float)tq(fminf(v[4] + v[5], 5000.0f) / 2000.0f) / 16384.0f);
+    r->lg = i3_pow10((float)tq(fminf(v[4] + v[6], 5000.0f) / 2000.0f) / 16384.0f);
+    i64 hf = tq(i3_pow10(v[0] / 2000.0f));
+    if (hf >= 16384)
+        r->lp1 = 0.0f, r->lp2 = 1.0f;
+    else {
+        i64 a = tq(1.0f - (float)hf / 16384.0f), b = 32768 + tmul(tq(-i3_cos(v[1] * 256.0f / 48000.0f)), hf * 2);
+        float bf = (float)b / 16384.0f, af = (float)a / 16384.0f;
+        i64 c = tq(sqrtf(powf(bf, 2.0f) + powf(af, 2.0f) * -4.0f));
+        r->lp1 = fminf((float)tdiv(b - c, a * 2) / 16384.0f, 0.99723f);
+        r->lp2 = 1.0f - r->lp1;
+    }
+    r->etl = tint(tmul(tq((v[8] + v[9]) * 1000.0f), delay));
+    float echo = v[7] * 0.6f * 0.01f;
+    for (int i = 0; i < 4; i++) {
+        i3l_delay(&r->fdn[i], tint(tmul(tq(i3_min_t[i] + v[10] / 100.0f * (i3_max_t[i] - i3_min_t[i])), delay)));
+        float a = (float)(r->fdn[i].delay + r->d0[i].delay + r->d1[i].delay) * -60.0f / (v[2] * 48000.0f), b = a / v[3],
+              w = v[1] * 0.5f * 128.0f / 48000.0f, c = i3_cos(w) / sinf(w * 3.14159265358979f / 180.0f),
+              d = i3_pow10((b - a) / 40.0f), e = i3_pow10((b + a) / 40.0f) * 0.7071f;
+        r->coef[i][0] = (c * d + 1.0f) * e / (c + d);
+        r->coef[i][1] = (1.0f - c * d) * e / (c + d);
+        r->coef[i][2] = (c - d) / (c + d);
+        r->d0[i].wet = echo;
+        r->d1[i].wet = echo * -0.9f;
+    }
+    i3_taps(v, r->t);
+}
+/* InitializeI3dl2ReverbEffect, then ApplyI3dl2ReverbEffect<1> over x into y, state[f] for frame f */
+static void i3_ref(const i16* x, i16* y, int frames_n, const u8* state, const float* v) {
+    static I3Ref r;
+    for (int f = 0; f < frames_n; f++) {
+        if (state[f] == SNX_AUDREN_PARAM_INITIALIZED) {
+            free(r.early.b);
+            for (int i = 0; i < 4; i++) free(r.fdn[i].b), free(r.d0[i].b), free(r.d1[i].b);
+            memset(&r, 0, sizeof r);
+            for (int i = 0; i < 4; i++) {
+                i3l_make(&r.fdn[i], (int)(tmul(tq(i3_max_t[i]), tq(48.0f)) >> 14));
+                i3l_make(&r.d0[i], (int)(tmul(tq(i3_d0_t[i]), tq(48.0f)) >> 14));
+                i3l_make(&r.d1[i], (int)(tmul(tq(i3_d1_t[i]), tq(48.0f)) >> 14));
+            }
+            i3l_make(&r.early, 19200);
+            i3_update(&r, v);
+        } else if (state[f] == SNX_AUDREN_PARAM_UPDATING)
+            i3_update(&r, v);
+        for (int i = f * SNX_ART_FRAME; i < (f + 1) * SNX_ART_FRAME; i++) {
+            i64 etl = i3l_tap(&r.early, r.etl), o = 0, fl[4], ap = 0;
+            for (int k = 0; k < 20; k++) o += tmul(i3l_tap(&r.early, r.t[k]), tq(i3_tap_g[k]));
+            r.lp0 = (float)(tmul((i64)x[i] * 16384, tq(r.lp2)) + tq(r.lp0 * r.lp1)) / 16384.0f;
+            i3l_tick(&r.early, tq(r.lp0));
+            o = tmul(o, tq(r.eg));
+            for (int k = 0; k < 4; k++) {
+                i64 rd = r.fdn[k].b[r.fdn[k].out];
+                fl[k] = tmul(rd, tq(r.coef[k][0])) + tq(r.shelf[k]);
+                r.shelf[k] = (float)(tmul(fl[k], tq(r.coef[k][2])) + tmul(rd, tq(r.coef[k][1]))) / 16384.0f;
+            }
+            i64 late = tmul(etl, tq(r.lg));
+            i64 mix[4] = {fl[1] + fl[2] + late, -fl[0] - fl[3] + late, fl[0] - fl[3] + late, fl[1] - fl[2] + late};
+            for (int k = 0; k < 4; k++) {
+                i64 m = mix[k] - tmul(r.d0[k].b[r.d0[k].out], tq(r.d0[k].wet));
+                i64 a = i3l_tick(&r.d0[k], m) + tmul(m, tq(r.d0[k].wet));
+                m = a - tmul(r.d1[k].b[r.d1[k].out], tq(r.d1[k].wet));
+                a = i3l_tick(&r.d1[k], m) + tmul(m, tq(r.d1[k].wet));
+                i3l_tick(&r.fdn[k], a);
+                if (k == 0) ap = a;
+            }
+            float out = (float)(o + ap + tq(r.dry * (float)x[i])) / 16384.0f;
+            y[i] = tsat((i32)out);
+        }
+    }
+}
+
 /* the first sample where a and b differ, -1 if none */
 static int first_diff(const i16* a, const i16* b, int n) {
     for (int i = 0; i < n; i++)
@@ -1038,6 +1193,94 @@ int main(void) {
         }
         CHECK(bad < 0, "six-channel reverb rev %u: sample %d is %d and %d", art_rev, bad, bad < 0 ? 0 : b3[bad],
               bad < 0 ? 0 : b5[bad]);
+    }
+    art_rev = 4;
+
+    /* the I3DL2 reverb's dry path alone (gains of -10000 are 0 in Eden's pow_10) */
+    {
+        static i16 x[5 * SNX_ART_FRAME], y[5 * SNX_ART_FRAME];
+        static const float v[12] = {0, 5000, 1.5f, 0.5f, -10000, -10000, -10000, 100, 0.005f, 0.01f, 100, 0.5f};
+        reset();
+        u8* p = fx_voice(SNX_AUDREN_EFFECT_I3DL2);
+        w8(eff(0), 2, 1);
+        p[0] = 0, p[6] = 1;
+        i3dl2_set(p, 1, v);
+        for (int f = 0; f < 5; f++) {
+            frames(1);
+            w8(p, 0x48, SNX_AUDREN_PARAM_UPDATED);
+        }
+        sink_copy(x, 0, 5, 0);
+        sink_copy(y, 0, 5, 1);
+        int bad = -1;
+        for (int i = 0; i < 5 * SNX_ART_FRAME && bad < 0; i++)
+            if (y[i] != (i32)(x[i] * 0.5f)) bad = i;
+        CHECK(bad < 0, "I3DL2 dry: sample %d is %d for %d", bad, bad < 0 ? 0 : y[bad], bad < 0 ? 0 : x[bad]);
+    }
+
+    /* a mono I3DL2 reverb with every parameter, a hundred frames, against Eden's run here */
+    {
+        static i16 x[100 * SNX_ART_FRAME], y[100 * SNX_ART_FRAME], want[100 * SNX_ART_FRAME];
+        static const float v[12] = {-1000, 5000, 1.5f, 0.5f, -1000, -500, -300, 80, 0.01f, 0.02f, 90, 0.6f};
+        u8 state[100];
+        reset();
+        u8* p = fx_voice(SNX_AUDREN_EFFECT_I3DL2);
+        tone(0, 1000, 0.2, 0, 0, 1.0f);
+        w8(eff(0), 2, 1);
+        p[0] = 0, p[6] = 1;
+        i3dl2_set(p, 1, v);
+        for (int f = 0; f < 100; f++) {
+            state[f] = f == 0 ? 0 : f == 2 || f == 3 ? 1 : 2;
+            w8(p, 0x48, state[f]);
+            frames(1);
+            if (f % SNX_ART_RING_FRAMES == SNX_ART_RING_FRAMES - 1 || f == 99) {
+                int from = f - f % SNX_ART_RING_FRAMES;
+                sink_copy(x + from * SNX_ART_FRAME, from, f + 1, 0);
+                sink_copy(y + from * SNX_ART_FRAME, from, f + 1, 1);
+            }
+        }
+        i3_ref(x, want, 100, state, v);
+        int at = first_diff(y, want, 100 * SNX_ART_FRAME);
+        CHECK(at < 0, "mono I3DL2: sample %d is %d, want %d", at, at < 0 ? 0 : y[at], at < 0 ? 0 : want[at]);
+    }
+
+    /* six channels, early reflections only: centre and LFE are buffers 2 and 3 from revision 11, 4 and 5 before */
+    for (art_rev = 4; art_rev <= 11; art_rev += 7) {
+        static i16 x[5 * SNX_ART_FRAME], ctr[5 * SNX_ART_FRAME], lfe[5 * SNX_ART_FRAME];
+        static const float v[12] = {0, 5000, 1.5f, 0.5f, 0, 0, -10000, 100, 0.005f, 0.01f, 100, 0};
+        int cb = art_rev >= 11 ? 2 : 4, lb = art_rev >= 11 ? 3 : 5;
+        for (int run = 0; run < 2; run++) {
+            reset();
+            u8* p = fx_voice(SNX_AUDREN_EFFECT_I3DL2);
+            w32(mix(SNX_ART_SUBMIX), 8, 6);
+            if (run) route(0, 0, 0.0f), route(1, 1, 0.0f), route(cb, 1, 1.0f), route(lb, 0, 1.0f);
+            w8(eff(0), 2, (u8)run);
+            for (int c = 0; c < 6; c++) p[c] = p[6 + c] = (u8)c;
+            i3dl2_set(p, 6, v);
+            for (int f = 0; f < 5; f++) {
+                frames(1);
+                w8(p, 0x48, SNX_AUDREN_PARAM_UPDATED);
+            }
+            if (run) {
+                sink_copy(lfe, 0, 5, 0);
+                sink_copy(ctr, 0, 5, 1);
+            } else
+                sink_copy(x, 0, 5, 0);
+        }
+        i32 t[20];
+        i3_taps(v, t);
+        int bad = -1;
+        for (int i = 0; i < 5 * SNX_ART_FRAME && bad < 0; i++) {
+            i64 all = 0, first = 0;
+            for (int k = 0; k < 20; k++) {
+                int at = i - 1 - t[k];
+                i64 tap = at < 0 ? 0 : tmul((i64)x[at] * 16384, tq(i3_tap_g[k]));
+                all += tap;
+                if (k == 0) first = tap;
+            }
+            if (lfe[i] != tsat((i32)((float)all / 16384.0f)) || ctr[i] != tsat((i32)((float)first / 16384.0f))) bad = i;
+        }
+        CHECK(bad < 0, "six-channel I3DL2 rev %u: sample %d is %d (LFE) and %d (centre)", art_rev, bad,
+              bad < 0 ? 0 : lfe[bad], bad < 0 ? 0 : ctr[bad]);
     }
     art_rev = 4;
 

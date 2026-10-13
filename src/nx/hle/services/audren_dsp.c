@@ -310,7 +310,10 @@ static int channels_valid(u32 c) { return c == 1 || c == 2 || c == 4 || c == 6; 
 
 /* where an effect type keeps its parameter state, for the ones that take it as Eden's DelayInfo::Update does */
 static u32 stateful_at(u8 type) {
-    return type == SNX_AUDREN_EFFECT_DELAY ? 0x34 : type == SNX_AUDREN_EFFECT_REVERB ? 0x40 : 0;
+    return type == SNX_AUDREN_EFFECT_DELAY    ? 0x34
+           : type == SNX_AUDREN_EFFECT_REVERB ? 0x40
+           : type == SNX_AUDREN_EFFECT_I3DL2  ? 0x48
+                                              : 0;
 }
 
 /* a delay or reverb with an invalid channel count takes its maximum (Eden's DelayInfo::Update) */
@@ -1263,6 +1266,217 @@ static void effect_reverb(ARState* s, ARMix* m, AREffect* e) {
     }
 }
 
+/* Eden's I3dl2DelayLine: a ring of max + 1 samples, written then read on a tick */
+typedef struct {
+    i64* buf;
+    i32 max, in, out, delay;
+    float wet;
+} ARI3Line;
+
+static void i3_set_delay(ARI3Line* l, i32 d) {
+    if (l->max < d) return;
+    l->delay = d;
+    i64 at = ((i64)l->out + d) % (l->max + 1);
+    l->in = (i32)(at < 0 ? at + l->max + 1 : at);
+}
+static void i3_init(ARI3Line* l, i64* mem, i32 t) {
+    l->buf = mem;
+    l->max = t;
+    l->out = 0;
+    i3_set_delay(l, t);
+    l->wet = 0.0f;
+}
+static i64 i3_tick(ARI3Line* l, i64 v) {
+    l->buf[l->in] = v;
+    if (++l->in >= l->max) l->in = 0;
+    i64 r = l->buf[l->out];
+    if (++l->out >= l->max) l->out = 0;
+    return r;
+}
+static i64 i3_tap(const ARI3Line* l, i32 index) {
+    i64 at = ((i64)l->in - index - 1) % (l->max + 1);
+    return l->buf[at < 0 ? at + l->max + 1 : at];
+}
+
+/* the I3DL2 reverb (Eden's I3dl2ReverbInfo and I3dl2ReverbCommand) */
+typedef struct {
+    float lowpass_0, lowpass_1, lowpass_2, early_gain, late_gain, last_echo, dry;
+    ARI3Line early, center, fdn[4], decay0[4], decay1[4];
+    i32 taps[20], early_to_late;
+    float coef[4][3], shelf[4];
+} ARI3dl2;
+
+static const float snx_i3dl2_min[4] = {5.0f, 6.0f, 13.0f, 14.0f},
+                   snx_i3dl2_max[4] = {45.7042007446f, 82.7817001343f, 149.938293457f, 271.575805664f},
+                   snx_i3dl2_decay0[4] = {17.0f, 13.0f, 9.0f, 7.0f}, snx_i3dl2_decay1[4] = {19.0f, 11.0f, 10.0f, 6.0f};
+static const float snx_i3dl2_tap_times[20] = {0.0171360000968f,
+                                              0.0591540001333f,
+                                              0.161733001471f,
+                                              0.390186011791f,
+                                              0.425262004137f,
+                                              0.455410987139f,
+                                              0.689737021923f,
+                                              0.74590998888f,
+                                              0.833844006062f,
+                                              0.859502017498f,
+                                              0.0f,
+                                              0.0750240013003f,
+                                              0.168788000941f,
+                                              0.299901008606f,
+                                              0.337442994118f,
+                                              0.371903002262f,
+                                              0.599011003971f,
+                                              0.716741025448f,
+                                              0.817858994007f,
+                                              0.85166400671f};
+static const float snx_i3dl2_tap_gains[20] = {0.67096f, 0.61027f, 1.0f,     0.3568f,  0.68361f, 0.65978f, 0.51939f,
+                                              0.24712f, 0.45945f, 0.45021f, 0.64196f, 0.54879f, 0.92925f, 0.3827f,
+                                              0.72867f, 0.69794f, 0.5464f,  0.24563f, 0.45214f, 0.44042f};
+
+static float min5000(float x) { return 5000.0f < x ? 5000.0f : x; }
+static float sin_degrees(float d) { return sinf(d * 3.14159265358979f / 180.0f); }
+
+/* Eden's UpdateI3dl2ReverbEffectParameter; a fresh state needs no reset, it is made zeroed */
+static void i3dl2_params(ARI3dl2* r, const u8* p) {
+    u32 rate = rd32(p + 0x14);
+    float ref_hf = rdf(p + 0x1C), decay_time = rdf(p + 0x20), hf_ratio = rdf(p + 0x24), room = rdf(p + 0x28),
+          density = rdf(p + 0x40), reverb_delay = rdf(p + 0x3C), reflection_delay = rdf(p + 0x38);
+    i64 delay = fq((float)rate / 1000.0f);
+    r->dry = rdf(p + 0x44);
+    r->early_gain = pow10_clamped(qf(fq(min5000(room + rdf(p + 0x2C)) / 2000.0f)));
+    r->late_gain = pow10_clamped(qf(fq(min5000(room + rdf(p + 0x30)) / 2000.0f)));
+    i64 hf = fq(pow10_clamped(rdf(p + 0x18) / 2000.0f));
+    if (hf >= 16384) {
+        r->lowpass_1 = 0.0f;
+        r->lowpass_2 = 1.0f;
+    } else {
+        i64 a = fq(1.0f - qf(hf)), b = 2 * 16384 + q14mul64(fq(-cos_degrees(ref_hf * 256.0f / (float)rate)), hf * 2);
+        i64 c = fq(sqrtf(powf(qf(b), 2.0f) + powf(qf(a), 2.0f) * -4.0f));
+        float lp = qf(q_div(b - c, q14mul64(a, 2 * 16384)));
+        r->lowpass_1 = 0.99723f < lp ? 0.99723f : lp;
+        r->lowpass_2 = 1.0f - r->lowpass_1;
+    }
+    r->early_to_late = q_int(q14mul64(fq((reflection_delay + reverb_delay) * 1000.0f), delay));
+    r->last_echo = rdf(p + 0x34) * 0.6f * 0.01f;
+    for (int i = 0; i < 4; i++) {
+        float span = snx_i3dl2_max[i] - snx_i3dl2_min[i];
+        i3_set_delay(&r->fdn[i], q_int(q14mul64(fq(snx_i3dl2_min[i] + density / 100.0f * span), delay)));
+        float a = (float)(r->fdn[i].delay + r->decay0[i].delay + r->decay1[i].delay) * -60.0f /
+                  (decay_time * (float)rate),
+              b = a / hf_ratio, w = ref_hf * 0.5f * 128.0f / (float)rate, c = cos_degrees(w) / sin_degrees(w),
+              d = pow10_clamped((b - a) / 40.0f), e = pow10_clamped((b + a) / 40.0f) * 0.7071f;
+        r->coef[i][0] = (c * d + 1.0f) * e / (c + d);
+        r->coef[i][1] = (1.0f - c * d) * e / (c + d);
+        r->coef[i][2] = (c - d) / (c + d);
+        r->decay0[i].wet = r->last_echo;
+        r->decay1[i].wet = r->last_echo * -0.9f;
+    }
+    float reflection_time = (reverb_delay * 0.9998f + 0.02f) * 1000.0f;
+    for (int i = 0; i < 20; i++) {
+        i32 len = q_int(q14mul64(fq(reflection_delay * 1000.0f + reflection_time * snx_i3dl2_tap_times[i]), delay));
+        r->taps[i] = len >= r->early.max ? r->early.max : len;
+    }
+}
+
+/* Eden's InitializeI3dl2ReverbEffect: the lines' lengths at the rate, 0 when one would pass a million samples */
+static int i3dl2_init(AREffect* e, const u8* p) {
+    fx_free(e);
+    i64 delay = fq((float)rd32(p + 0x14) / 1000.0f), len[14];
+    for (int i = 0; i < 4; i++) {
+        len[i] = (u32)(q14mul64(fq(snx_i3dl2_max[i]), delay) >> 14);
+        len[4 + i] = (u32)(q14mul64(fq(snx_i3dl2_decay0[i]), delay) >> 14);
+        len[8 + i] = (u32)(q14mul64(fq(snx_i3dl2_decay1[i]), delay) >> 14);
+    }
+    len[12] = (u32)(q14mul64(5 * 16384, delay) >> 14);
+    len[13] = (u32)(q14mul64(400 * 16384, delay) >> 14);
+    size_t total = 0;
+    for (int i = 0; i < 14; i++) {
+        if (len[i] > (1 << 20)) return 0;
+        total += (size_t)len[i] + 1;
+    }
+    ARI3dl2* r = calloc(1, sizeof *r);
+    i64* mem = calloc(total, sizeof *mem);
+    if (!r || !mem) {
+        free(r);
+        free(mem);
+        return 0;
+    }
+    i64* at = mem;
+    ARI3Line* lines[14] = {&r->fdn[0],    &r->fdn[1],    &r->fdn[2],    &r->fdn[3],    &r->decay0[0],
+                           &r->decay0[1], &r->decay0[2], &r->decay0[3], &r->decay1[0], &r->decay1[1],
+                           &r->decay1[2], &r->decay1[3], &r->center,    &r->early};
+    for (int i = 0; i < 14; i++) {
+        i3_init(lines[i], at, (i32)len[i]);
+        at += len[i] + 1;
+    }
+    e->fx = r;
+    e->line = mem;
+    i3dl2_params(r, p);
+    return 1;
+}
+
+static void effect_i3dl2(ARState* s, ARMix* m, AREffect* e) {
+    static const u8 taps[7][20] = {[2] = {0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1},
+                                   [4] = {0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 0, 0, 0, 0, 3, 3, 3},
+                                   [6] = {2, 0, 0, 1, 1, 1, 1, 4, 4, 4, 1, 1, 1, 0, 0, 0, 0, 5, 5, 5}};
+    const u8* p = e->p;
+    u32 count = rd16(p + 0xE), n = s->frame;
+    float *in[SNX_AUDREN_CHANNELS], *out[SNX_AUDREN_CHANNELS];
+    if (!channels_valid(count) || !fx_buffers(s, m, p, count, in, out)) return;
+    if (e->enabled) {
+        if (!e->fx || p[0x48] == SNX_AUDREN_PARAM_INITIALIZED) {
+            if (!i3dl2_init(e, p))
+                warn_once(s, SNX_AUDREN_WARN_RANGE, "a reverb's delay lines would be too long: it passes its input");
+        } else if (p[0x48] == SNX_AUDREN_PARAM_UPDATING)
+            i3dl2_params(e->fx, p);
+    }
+    if (!e->enabled || !e->fx) {
+        for (u32 c = 0; c < count; c++)
+            if (in[c] != out[c]) memcpy(out[c], in[c], n * sizeof *out[c]);
+        return;
+    }
+    ARI3dl2* r = e->fx;
+    for (u32 i = 0; i < n; i++) {
+        i64 o[SNX_AUDREN_CHANNELS] = {0}, x[SNX_AUDREN_CHANNELS], sum = 0, f[4], ap[SNX_AUDREN_CHANNELS];
+        i64 late = q14mul64(i3_tap(&r->early, r->early_to_late), fq(r->late_gain));
+        for (int t = 0; t < 20; t++) {
+            i64 v = q14mul64(i3_tap(&r->early, r->taps[t]), fq(snx_i3dl2_tap_gains[t]));
+            o[taps[count][t]] += v;
+            if (count == 6) o[3] += v; /* the LFE takes them all */
+        }
+        for (u32 c = 0; c < count; c++) {
+            x[c] = sat32(in[c][i]);
+            sum += x[c] * 16384;
+        }
+        r->lowpass_0 = qf(q14mul64(sum, fq(r->lowpass_2)) + fq(r->lowpass_0 * r->lowpass_1));
+        i3_tick(&r->early, fq(r->lowpass_0));
+        for (u32 c = 0; c < count; c++) o[c] = q14mul64(o[c], fq(r->early_gain));
+        for (int k = 0; k < 4; k++) {
+            i64 rd = r->fdn[k].buf[r->fdn[k].out];
+            f[k] = q14mul64(rd, fq(r->coef[k][0])) + fq(r->shelf[k]);
+            r->shelf[k] = qf(q14mul64(f[k], fq(r->coef[k][2])) + q14mul64(rd, fq(r->coef[k][1])));
+        }
+        i64 mix[4] = {f[1] + f[2] + late, -f[0] - f[3] + late, f[0] - f[3] + late, f[1] - f[2] + late};
+        for (int k = 0; k < 4; k++) { /* Eden's Axfx2AllPassTick, two all-passes */
+            ARI3Line *d0 = &r->decay0[k], *d1 = &r->decay1[k];
+            i64 mixed = mix[k] - q14mul64(d0->buf[d0->out], fq(d0->wet));
+            i64 a = i3_tick(d0, mixed) + q14mul64(mixed, fq(d0->wet));
+            mixed = a - q14mul64(d1->buf[d1->out], fq(d1->wet));
+            ap[k] = i3_tick(d1, mixed) + q14mul64(mixed, fq(d1->wet));
+            i3_tick(&r->fdn[k], ap[k]);
+        }
+        if (count == 6) { /* as the reverb's: centre through its line at half, backs from the third and fourth */
+            ap[5] = ap[3];
+            ap[4] = ap[2];
+            ap[2] = i3_tick(&r->center, q14mul64(ap[2] - ap[3], 8192));
+        }
+        for (u32 c = 0; c < count; c++) {
+            float v = qf(o[c] + ap[c] + fq(r->dry * (float)x[c]));
+            out[c][i] = (float)(i32)(v < -8388600.0f ? -8388600.0f : v > 8388600.0f ? 8388600.0f : v);
+        }
+    }
+}
+
 /* a mix's effects, by their process order */
 static void mix_effects(ARState* s, u32 id) {
     ARMix* m = &s->mix[id];
@@ -1289,6 +1503,10 @@ static void mix_effects(ARState* s, u32 id) {
                 break;
             case SNX_AUDREN_EFFECT_REVERB:
                 effect_reverb(s, m, next);
+                next->p[stateful_at(next->type)] = SNX_AUDREN_PARAM_UPDATED;
+                break;
+            case SNX_AUDREN_EFFECT_I3DL2:
+                effect_i3dl2(s, m, next);
                 next->p[stateful_at(next->type)] = SNX_AUDREN_PARAM_UPDATED;
                 break;
             default:
