@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gpu/gpu.h"
+#include "gpu/texture/etc2.h"
 #include "runtime/platform/log.h"
 #include "gpu/vk/vk.h"
 
@@ -50,6 +51,13 @@ static u64 bl_layer_size(u32 w, u32 h, u32 d, const VkFmt* f, u32 bh, u32 bd, u3
 /* one level of one layer, from guest bytes to tightly packed rows, converted when the format needs it */
 static void level_convert(const VkFmt* f, const u8* lin, u32 lw, u32 lh, u32 ld, u32 rowb, u8* out) {
     u32 th = (lh + f->bh - 1) / f->bh;
+    if (f->conv >= VKC_ETC2) { /* each slice's blocks, decoded */
+        int kind = f->conv - VKC_ETC2;
+        for (u32 z = 0; z < ld; z++)
+            etc2_decode_image(lin + (u64)z * rowb * th, lw, lh, kind,
+                              out + (u64)z * lw * lh * etc2_pixel_bytes(kind));
+        return;
+    }
     switch (f->conv) {
         case VKC_RGBA4:
         case VKC_RGB5A1:
@@ -87,6 +95,7 @@ static void level_convert(const VkFmt* f, const u8* lin, u32 lw, u32 lh, u32 ld,
 }
 static u64 level_out_size(const VkFmt* f, u32 lw, u32 lh, u32 ld, u32 rowb) {
     u32 th = (lh + f->bh - 1) / f->bh;
+    if (f->conv >= VKC_ETC2) return (u64)lw * lh * ld * etc2_pixel_bytes(f->conv - VKC_ETC2);
     switch (f->conv) {
         case VKC_RGBA4:
         case VKC_RGB5A1:
