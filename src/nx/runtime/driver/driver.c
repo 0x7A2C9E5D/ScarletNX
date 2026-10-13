@@ -20,7 +20,8 @@ static void usage(void) {
          "  INPUT                  Extract, recompile if needed, then play XCI/NSP/NRO\n"
          "  -x, --extract          Extract XCI/NSP\n"
          "  -r, --recomp           Recompile ExeFS/NRO or prepare a dump without playing\n"
-         "  -H, --headless         Run without a window or swapchain\n"
+         "  -H, --headless         Run without a window or swapchain");
+    puts("  --fullscreen[=0|1]     Override the game's fullscreen setting\n"
          "  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game\n"
          "  --repo / --build-dir   Override this build's checkout / build directory");
@@ -144,6 +145,10 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, i
     n = 0;
     command[n++] = game;
     if (flags & SNX_HEADLESS) command[n++] = "-H";
+    if (flags & SNX_FULLSCREEN)
+        command[n++] = "--fullscreen";
+    else if (flags & SNX_WINDOWED)
+        command[n++] = "--fullscreen=0";
     if (flags & SNX_STOP)
         command[n++] = "-s";
     else if (flags & SNX_GDB)
@@ -213,7 +218,7 @@ int snx_driver(int argc, char** argv) {
         }
         parsed = snx_cli_flag(argv[i], &flags);
         if (parsed < 0 || !strcmp(argv[i], "--recompile")) {
-            result = snx_error("unknown option: %s (use -H or -r)", argv[i]);
+            result = snx_error("unknown option: %s", argv[i]);
             goto done;
         }
 #ifdef _WIN32
@@ -239,8 +244,8 @@ int snx_driver(int argc, char** argv) {
         result = snx_error("automatic preparation accepts one dump file. Pass game arguments after --");
         goto done;
     }
-    if ((flags & (SNX_EXTRACT | SNX_RECOMP)) && (flags & (SNX_HEADLESS | SNX_GDB))) {
-        result = snx_error("-H, -S and -s apply to game execution, not preparation");
+    if ((flags & (SNX_EXTRACT | SNX_RECOMP)) && (flags & (SNX_HEADLESS | SNX_GDB | SNX_FULLSCREEN | SNX_WINDOWED))) {
+        result = snx_error("window and debugger options apply to game execution, not preparation");
         goto done;
     }
     if (!automatic && !(flags & (SNX_EXTRACT | SNX_RECOMP))) {

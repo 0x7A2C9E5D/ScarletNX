@@ -55,6 +55,11 @@ but the game always starts anew. To run the steps separately:
 cd games && ./Game
 ```
 
+For a keyboard-driven SDL3 menu, run `./build/scarletnx-gui`. Select a driver with
+arrow keys and Enter, then choose drag-and-drop or the paginated `games/` browser.
+The GUI shows live driver/game
+output and combined CPU/RAM usage. See [Keyboard launcher](docs/GUI.md).
+
 For more detailed information please see: [Build + run](./docs/BUILD.md).
 
 # Special thanks

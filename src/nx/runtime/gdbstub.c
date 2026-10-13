@@ -162,7 +162,11 @@ int snx_gdb_start(int stop) {
     setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
+#ifdef __linux__
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+#else
+    address.sin_addr.s_addr = htonl(0x7f000001);
+#endif
     address.sin_port = htons(SNX_GDB_PORT);
     if (bind(listener, (struct sockaddr*)&address, sizeof(address)) || listen(listener, 1) || pipe(life) || pipe(gate))
         goto failed;
