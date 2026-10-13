@@ -208,6 +208,10 @@ void vk_surf_evict(u32 before); /* textures and render targets last used before 
 int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
               double sdy);
 
+/* astc.c: decode tightly packed ASTC blocks and copy to a level/layer of t.
+   Caller ends rendering and transitions t to TRANSFER_DST_OPTIMAL first. */
+void vk_astc_upload(VkCommandBuffer cb, Surf* t, const u8* blocks, u32 w, u32 h, u32 depth, u32 level, u32 layer);
+
 /* texture.c */
 Surf* vk_tex_from_tic(const u32* tic);
 /* a view of s as the shader declares it, sRGB or linear (color formats that have both), with a component mapping;
