@@ -198,6 +198,10 @@ static u64 rt_bytes(const Surf* s) {
     }
     return s->layer_size * (s->layers - 1) + rt_layer_bytes(s);
 }
+u64 vk_surf_guest_size(const Surf* s) { return s ? rt_bytes(s) : 0; }
+int vk_surf_can_writeback(const Surf* s) {
+    return s && s->f.raw && !s->f.depth && moves_scaled(s);
+}
 
 void vk_rt_reload(u64 gva) {
     Surf* s = vk_rt_find(gva);
@@ -281,7 +285,7 @@ void vk_rt_reload(u64 gva) {
 static int depth_copies_raw(const Surf* s) {
     return (s->f.vk == VK_FORMAT_D32_SFLOAT || s->f.vk == VK_FORMAT_D16_UNORM) && s->sw == s->w && s->sh == s->h;
 }
-void vk_surf_flush(Surf* s) {
+void vk_surf_flush(Surf* s, const u8* original) {
     if (!s || (s->f.depth ? !depth_copies_raw(s) : !s->f.raw) || s->layout == VK_IMAGE_LAYOUT_UNDEFINED) return;
     u64 gva = s->gva;
     /* not drawn to since it was last written back or loaded: memory has it already (and a CPU write since then is
@@ -330,12 +334,15 @@ void vk_surf_flush(Surf* s) {
     vk_finish();
     vk_readback_ready();
     u64 sz = rt_bytes(s);
-    u8* dst = gmem_ptr(gva, sz);
+    u8* dst = original ? NULL : gmem_ptr(gva, sz);
     u8* tmp = NULL;
     if (!dst) {
         tmp = malloc(sz);
         if (!tmp) return;
-        gmem_read(gva, tmp, sz);
+        if (original)
+            memcpy(tmp, original, sz);
+        else
+            gmem_read(gva, tmp, sz);
         dst = tmp;
     }
     for (u32 layer = 0; layer < s->layers; layer++) {
@@ -353,7 +360,21 @@ void vk_surf_flush(Surf* s) {
         else
             for (u32 y = 0; y < s->h; y++) memcpy(layer_dst + (u64)y * s->pitch, layer_src + y * row, row);
     }
-    if (tmp) {
+    int guest_changed = 0;
+    if (original) {
+        const u8* current = gmem_ptr(gva, sz);
+        u8* current_copy = NULL;
+        if (!current) {
+            current_copy = malloc(sz);
+            if (!current_copy) fatal("Out of memory comparing storage image writeback");
+            gmem_read(gva, current_copy, sz);
+            current = current_copy;
+        }
+        guest_changed = memcmp(current, original, sz) != 0;
+        free(current_copy);
+        vk_write_changed(gva, dst, original, (u32)sz);
+        free(tmp);
+    } else if (tmp) {
         gmem_write(gva, tmp, sz);
         free(tmp);
     } else
@@ -361,8 +382,14 @@ void vk_surf_flush(Surf* s) {
     s->mem_wgen = s->wgen;
     s->gw = gpu_mem_generation();
     if (!s->is_rt) vk_tex_note_writeback(s);
+    if (guest_changed) {
+        /* The image still holds the shader result where the CPU won the merge. Force the next bind to upload
+           the merged guest bytes, even though note_writeback just hashed those same bytes. */
+        s->hash ^= 1;
+        s->gw = 0;
+    }
 }
-void vk_rt_flush(u64 gva) { vk_surf_flush(vk_rt_find(gva)); }
+void vk_rt_flush(u64 gva) { vk_surf_flush(vk_rt_find(gva), NULL); }
 
 static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch, u32 layers, u64 layer_size,
                        int volume) {
@@ -537,6 +564,8 @@ static void surf_free(Surf* s) {
     free(s);
 }
 void vk_surf_evict(u32 before) {
+    /* A storage image keeps a Surf pointer until its result reaches guest memory. */
+    vk_gfx_image_land();
     /* render targets too, parked or not: one not drawn, sampled or presented for as long goes with its contents
        (guest memory has them as of its last write-back) */
     for (int k = 0; k < SURFH; k++)

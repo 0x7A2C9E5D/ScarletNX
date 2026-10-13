@@ -19,6 +19,7 @@ typedef struct {
     u8 bl_cbuf;
     u8 bl2;
     u8 bl2_cbuf; /* bl2: handle = read1 | read2 (separate tex/sampler handles) */
+    u8 flags; /* 1: raw integer surface load, 2: multisample texel fetch */
     u32 bl2_off; /* word offset of read2 */
 } ShTex;
 typedef struct {
@@ -43,9 +44,9 @@ typedef struct {
     u32 gbuf_wmask; /* global buffers written by compute or graphics shaders */
     struct {
         u32 cbuf_off;
-        u8 type, bindless, bl_cbuf, pad;
+        u8 type, bindless, bl_cbuf, kind; /* 0 float store, 1 unsigned atomic, 2 unsigned store */
     } img[8];
-    int nimg;                                                   /* SUST targets (compute) */
+    int nimg;                                                   /* storage image stores and atomics */
     u32 tex_int_mask, tex_sint_mask, rt_int_mask, rt_sint_mask; /* FS key: integer textures / outputs */
 } ShaderInfo;
 /* the shader flushes FP32 denormals everywhere: every FADD, FMUL and FFMA it has asks for it, as the console's

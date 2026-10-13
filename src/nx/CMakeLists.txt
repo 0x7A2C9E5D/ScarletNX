@@ -127,7 +127,8 @@ if(BUILD_TESTING AND SNX_VULKAN)
     if(SNX_SHADER_SPIRV_VAL AND SNX_SHADER_SPIRV_DIS AND Python3_Interpreter_FOUND)
         add_test(NAME shader_direct COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/shader_direct_test.py"
             --generator $<TARGET_FILE:snx-test-shader-direct> --validator "${SNX_SHADER_SPIRV_VAL}"
-            --disassembler "${SNX_SHADER_SPIRV_DIS}")
+            --disassembler "${SNX_SHADER_SPIRV_DIS}"
+            --regressions $<TARGET_FILE:snx-test-shader-direct-regressions>)
     endif()
 endif()
 

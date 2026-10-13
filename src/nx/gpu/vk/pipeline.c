@@ -123,13 +123,24 @@ void vk_pipeline_init(void) {
             VK_SHADER_STAGE_GEOMETRY_BIT};
     for (int s = 0; s < 3; s++) {
         VkDescriptorSetLayoutBinding b[SNX_VKB_SMAP + 1];
-        for (u32 i = 0; i <= SNX_VKB_SMAP; i++)
-            b[i] = (VkDescriptorSetLayoutBinding){
-                .binding = i, .descriptorType = binding_type(i), .descriptorCount = 1, .stageFlags = vis[s]};
-        VkDescriptorSetLayoutCreateInfo dl = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                                              .bindingCount = SNX_VKB_SMAP + 1,
-                                              .pBindings = b};
-        VK_OK(vkCreateDescriptorSetLayout(g_vk.dev, &dl, NULL, &g_vk_dslayout[s]));
+        u32 count = 0;
+        u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;
+        if (image_slots > SNX_VKB_RS - SNX_VKB_IMG) image_slots = SNX_VKB_RS - SNX_VKB_IMG;
+        if (image_slots > g_vk.props.limits.maxDescriptorSetStorageImages)
+            image_slots = g_vk.props.limits.maxDescriptorSetStorageImages;
+        for (u32 i = 0; i <= SNX_VKB_SMAP; i++) {
+            int image = i >= SNX_VKB_IMG && i < SNX_VKB_RS;
+            if (image && (s == 2 || i - SNX_VKB_IMG >= image_slots)) continue;
+            b[count++] = (VkDescriptorSetLayoutBinding){
+                .binding = i,
+                .descriptorType = binding_type(i),
+                .descriptorCount = 1,
+                .stageFlags = image ? (s == 0 ? VK_SHADER_STAGE_COMPUTE_BIT : VK_SHADER_STAGE_FRAGMENT_BIT) : vis[s]};
+        }
+        VkDescriptorSetLayoutCreateInfo dl = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = count, .pBindings = b};
+        if (!VK_OK(vkCreateDescriptorSetLayout(g_vk.dev, &dl, NULL, &g_vk_dslayout[s])))
+            fatal("vulkan: cannot create shader descriptor layout");
     }
     {
         VkDescriptorPoolSize n[4];
@@ -156,7 +167,8 @@ void vk_pipeline_init(void) {
                                      .pSetLayouts = sets,
                                      .pushConstantRangeCount = 1,
                                      .pPushConstantRanges = &pc};
-    VK_OK(vkCreatePipelineLayout(g_vk.dev, &pl, NULL, &g_vk_playout));
+    if (!VK_OK(vkCreatePipelineLayout(g_vk.dev, &pl, NULL, &g_vk_playout)))
+        fatal("vulkan: cannot create shader pipeline layout");
     snprintf(g_cache_dir, sizeof g_cache_dir, "%sshader_cache", g_exedir);
     plat_mkdir(g_cache_dir);
     snprintf(g_pcache_path, sizeof g_pcache_path, "%s/vk_pipelines.bin", g_cache_dir);
@@ -295,6 +307,34 @@ VkSh* vk_shader_get(u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask, 
         }
         size_t nw = 0;
         u32* spv = vk_translate_spirv(code, 0x10000, stage, &s->si, &nw, sh_cb_read, &s->cbr);
+        if (spv && !g_vk.feat.shaderFloat64) {
+            for (size_t at = 5; at < nw;) {
+                u32 width = spv[at] >> 16;
+                if (!width || at + width > nw || (spv[at] & 0xffffu) != 17) break;
+                if (width == 2 && spv[at + 1] == 10) {
+                    free(spv);
+                    spv = NULL;
+                    snprintf(s->si.first_unsupported, sizeof s->si.first_unsupported,
+                             "shaderFloat64 is unavailable");
+                    break;
+                }
+                at += width;
+            }
+        }
+        if (spv && s->si.nimg) {
+            u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;
+            if (image_slots > g_vk.props.limits.maxDescriptorSetStorageImages)
+                image_slots = g_vk.props.limits.maxDescriptorSetStorageImages;
+            int needs_unformatted = 0;
+            for (int i = 0; i < s->si.nimg; i++) needs_unformatted |= s->si.img[i].kind == 0;
+            if (stage != ST_FS || s->si.nimg > (int)image_slots ||
+                (needs_unformatted && !g_vk.feat.shaderStorageImageWriteWithoutFormat)) {
+                free(spv);
+                spv = NULL;
+                snprintf(s->si.first_unsupported, sizeof s->si.first_unsupported,
+                         "fragment storage image feature or descriptor limit");
+            }
+        }
         if (spv) {
             VkShaderModuleCreateInfo mi = {
                 .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = nw * 4, .pCode = spv};

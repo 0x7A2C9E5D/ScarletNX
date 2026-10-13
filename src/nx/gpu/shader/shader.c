@@ -32,15 +32,16 @@ u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
     u32 i = 11, last = 11;
     /* linear scan until an unconditional EXIT past every branch target */
     u32 maxt = 0;
-    int unresolved_brx = 0;
+    int unresolved_brx = 0, has_cal = 0;
     for (; i < n; i++) {
         if (!IDX_OK(i)) continue;
         const Op* op = decode(w[i]);
         last = i;
         if (!op) continue;
-        if (op->id == O_BRA || op->id == O_SSY || op->id == O_PBK || op->id == O_PCNT) {
+        if (op->id == O_BRA || op->id == O_CAL || op->id == O_SSY || op->id == O_PBK || op->id == O_PCNT) {
             u32 t = bra_target(w[i], i);
             if (t > maxt) maxt = t;
+            if (op->id == O_CAL) has_cal = 1;
         }
         if (op->id == O_BRX) { /* its jump table's targets count too */
             u32 tg[64];
@@ -50,6 +51,7 @@ u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
                 if (tg[q] > maxt) maxt = tg[q];
         }
         if (!unresolved_brx && op->id == O_EXIT && flow_always(w[i]) && i >= maxt) break;
+        if (!unresolved_brx && has_cal && op->id == O_RET && flow_always(w[i]) && i >= maxt) break;
         if (!unresolved_brx && op->id == O_BRA && flow_always(w[i]) && i >= maxt && bra_target(w[i], i) <= i) break;
         if (i > 16384) break;
     }

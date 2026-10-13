@@ -213,7 +213,11 @@ void vk_surf_use(VkCommandBuffer cb, Surf* s, VkImageLayout layout, VkPipelineSt
     (VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |                                 \
      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)
 void vk_rt_flush(u64 gva);
-void vk_surf_flush(Surf* s); /* write a storage image's pixels back to guest memory */
+void vk_gfx_image_mem_need(u64 gva, u64 size);
+void vk_gfx_image_land(void);
+u64 vk_surf_guest_size(const Surf* s);
+int vk_surf_can_writeback(const Surf* s);
+void vk_surf_flush(Surf* s, const u8* original); /* original preserves newer guest writes for storage images */
 void vk_tex_note_writeback(Surf* s);
 void vk_rt_drawn(Surf* s);      /* a render target was drawn to (gpu/vk/render.c) */
 void vk_rt_drawn_full(Surf* s); /* a full clear or blit replaced every pixel */
@@ -234,6 +238,7 @@ void vk_astc_upload(VkCommandBuffer cb, Surf* t, const u8* blocks, u32 w, u32 h,
 
 /* texture.c */
 Surf* vk_tex_from_tic(const u32* tic);
+Surf* vk_tex_from_tic_raw(const u32* tic); /* UINT view of raw RGBA8 texel bytes */
 /* a view of s as the shader declares it, sRGB or linear (color formats that have both), with a component mapping;
    VK_NULL_HANDLE when the image can't be viewed that way */
 VkImageView vk_tex_view(Surf* s, VkImageViewType type, int srgb, const VkComponentMapping* map);

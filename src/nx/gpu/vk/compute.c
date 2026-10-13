@@ -217,7 +217,8 @@ static void cs_land(void) {
 }
 
 /* A descriptor can fail after its inputs were copied into the arena. No command references those inputs yet. */
-static void cs_abandon_binding(void) {
+static void cs_abandon_binding(u8* originals[8]) {
+    for (int i = 0; i < 8; i++) free(originals[i]);
     if (g_recording || g_inflight) return;
     g_ar_used = 0;
     vkResetDescriptorPool(g_vk.dev, g_dpool, 0);
@@ -291,10 +292,33 @@ static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm) {
     if (corpus) shader_corpus_save(corpus, code, blen, 0x10000 + 80, ST_CS, &p->si, key);
     size_t nw = 0;
     u32* spv = vk_translate_spirv(code, 0x10000 + 80, ST_CS, &p->si, &nw, cs_cb_read, &p->cbr);
+    if (spv && !g_vk.feat.shaderFloat64) {
+        for (size_t at = 5; at < nw;) {
+            u32 width = spv[at] >> 16;
+            if (!width || at + width > nw || (spv[at] & 0xffffu) != 17) break;
+            if (width == 2 && spv[at + 1] == 10) {
+                free(spv);
+                spv = NULL;
+                snprintf(p->si.first_unsupported, sizeof p->si.first_unsupported,
+                         "shaderFloat64 is unavailable");
+                break;
+            }
+            at += width;
+        }
+    }
     if (!spv || p->si.unsupported) {
         p->failed = 1;
         LOG("vulkan: compute %016llx not translated (%d instructions, first %s)\n", (unsigned long long)key,
             p->si.unsupported, p->si.first_unsupported);
+        return p;
+    }
+    u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;
+    if (image_slots > g_vk.props.limits.maxDescriptorSetStorageImages)
+        image_slots = g_vk.props.limits.maxDescriptorSetStorageImages;
+    if (p->si.nimg > (int)image_slots) {
+        LOG_LIMIT(4, "vulkan: compute image count exceeds this GPU's descriptor limit (skipped)\n");
+        free(spv);
+        p->failed = 1;
         return p;
     }
     VkShaderModuleCreateInfo mi = {
@@ -371,7 +395,9 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         g_vk_cs_skipped++;
         return;
     }
-    if (p->si.nimg && !g_vk.feat.shaderStorageImageWriteWithoutFormat) {
+    int needs_unformatted_image = 0;
+    for (int i = 0; i < p->si.nimg; i++) needs_unformatted_image |= p->si.img[i].kind == 0;
+    if (needs_unformatted_image && !g_vk.feat.shaderStorageImageWriteWithoutFormat) {
         LOG_LIMIT(1, "vulkan: storage image writes need shaderStorageImageWriteWithoutFormat (skipped)\n");
         g_vk_cs_skipped++;
         return;
@@ -433,6 +459,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     VkDescriptorBufferInfo bi[80];
     VkDescriptorImageInfo ii[40];
     Surf* images[8] = {0};
+    u8* originals[8] = {0};
     u32 nw = 0;
     for (int i = 0; i < 8; i++)
         if (p->si.cbuf_mask & (1u << i)) {
@@ -494,18 +521,31 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
             gmem_read(tic_base + (h & 0xFFFFF) * 32ull, tic, 32);
             gmem_read(tsc_base + ((h >> 20) & 0xFFF) * 32ull, tsc, 32);
             VkImageViewType want = vk_tex_view_type(st);
-            Surf* t = vk_tex_from_tic(tic);
-            VkImageView v = t && !t->f.depth ? vk_tex_bind_view(t, want, tic, 0) : VK_NULL_HANDLE;
+            if (st->flags & 2) {
+                LOG_LIMIT(4, "vulkan: multisample texture upload is unavailable (skipped)\n");
+                g_vk_cs_skipped++;
+                cs_abandon_binding(originals);
+                return;
+            }
+            Surf* t = st->flags & 1 ? vk_tex_from_tic_raw(tic) : vk_tex_from_tic(tic);
+            if ((st->flags & 1) && !t) {
+                LOG_LIMIT(4, "vulkan: raw surface load requires an RGBA8 texture (skipped)\n");
+                g_vk_cs_skipped++;
+                cs_abandon_binding(originals);
+                return;
+            }
+            VkImageView v = t && !t->f.depth ? vk_tex_bind_view(t, want, tic, st->flags & 1 ? 1 : 0)
+                                               : VK_NULL_HANDLE;
             VkImageLayout sampled_layout =
                 p->si.nimg ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             if (v)
                 vk_surf_use(vk_cmd(), t, sampled_layout, VK_SAMPLED_STAGES, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
             else
                 v = vk_null_view(want, 0);
-            VkSampler smp = vk_tex_bind_sampler(tsc, st, 0);
+            VkSampler smp = vk_tex_bind_sampler(tsc, st, st->flags & 1 ? 1 : 0);
             if (!v || !smp) { /* before any output is recorded: nothing of this dispatch lands */
                 g_vk_cs_skipped++;
-                cs_abandon_binding();
+                cs_abandon_binding(originals);
                 return;
             }
             ii[i] = (VkDescriptorImageInfo){smp, v, sampled_layout};
@@ -529,22 +569,40 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
             u32 h = 0, tic[8];
             if (!cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : tcb, off * 4, &h)) {
                 g_vk_cs_skipped++;
-                cs_abandon_binding();
+                cs_abandon_binding(originals);
                 return;
             }
             gmem_read(tic_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
             Surf* t = vk_tex_from_tic(tic);
+            u64 image_bytes = vk_surf_guest_size(t);
             VkComponentMapping identity = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
                                            VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
-            VkImageView view = t && t->storage_capable && t->f.raw && !t->f.depth && !t->f.is_int && t->levels == 1 &&
-                                       t->depth3d == 1 && p->si.img[i].type == 3
+            VkImageView view = t && vk_surf_can_writeback(t) && t->storage_capable && t->f.raw && !t->f.depth &&
+                                       (p->si.img[i].kind ? t->f.vk == VK_FORMAT_R32_UINT : !t->f.is_int) &&
+                                       t->levels == 1 && t->depth3d == 1 && p->si.img[i].type == 3 && image_bytes &&
+                                       image_bytes <= UINT32_MAX
                                    ? vk_tex_view(t, VK_IMAGE_VIEW_TYPE_2D, 0, &identity)
                                    : VK_NULL_HANDLE;
             if (!view) {
                 LOG_LIMIT(4, "vulkan: unsupported compute storage image (skipped)\n");
                 g_vk_cs_skipped++;
-                cs_abandon_binding();
+                cs_abandon_binding(originals);
                 return;
+            }
+            int seen = 0;
+            for (int k = 0; k < i; k++)
+                if (images[k] == t) {
+                    seen = 1;
+                    break;
+                }
+            if (!seen) {
+                originals[i] = malloc(image_bytes);
+                if (!originals[i]) {
+                    g_vk_cs_skipped++;
+                    cs_abandon_binding(originals);
+                    return;
+                }
+                gmem_read(t->gva, originals[i], image_bytes);
             }
             vk_surf_use(vk_cmd(), t, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                         VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
@@ -630,8 +688,9 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
                 }
             if (seen) continue;
             images[i]->wgen++;
-            vk_surf_flush(images[i]);
+            vk_surf_flush(images[i], originals[i]);
         }
+        for (int i = 0; i < p->si.nimg; i++) free(originals[i]);
         g_nout = 0;
         g_out_lo = ~0ull;
         g_out_hi = 0;

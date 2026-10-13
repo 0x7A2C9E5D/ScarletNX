@@ -21,7 +21,7 @@ typedef struct {
     uint32_t next_id;
     SpvPointerType* pointer_types;
     size_t pointer_count, pointer_capacity;
-    uint32_t sampled_image_types[48], image_types[48], sampled_image_pointee[3];
+    uint32_t sampled_image_types[96], image_types[96], sampled_image_pointee[3];
 } SpvEmitter;
 
 typedef enum { SPV_STAGE_VERTEX = 0, SPV_STAGE_FRAGMENT = 4, SPV_STAGE_COMPUTE = 5 } SpvShaderStage;
@@ -50,6 +50,7 @@ void spv_emit_destroy(SpvEmitter* e);
 uint32_t spv_emit_id(SpvEmitter* e);
 uint32_t spv_emit_glsl450_import(SpvEmitter* e);
 void spv_emit_shader_capability(SpvEmitter* e);
+void spv_emit_float64_capability(SpvEmitter* e);
 void spv_emit_draw_parameters_capability(SpvEmitter* e);
 void spv_emit_layer_capability(SpvEmitter* e);
 uint32_t spv_emit_layer_output(SpvEmitter* e, uint32_t i32_type);
@@ -74,6 +75,7 @@ uint32_t spv_emit_convert_f_to_u(SpvEmitter* e, uint32_t u32_type, uint32_t valu
 uint32_t spv_emit_convert_s_to_f(SpvEmitter* e, uint32_t f32_type, uint32_t value);
 uint32_t spv_emit_convert_u_to_f(SpvEmitter* e, uint32_t f32_type, uint32_t value);
 uint32_t spv_emit_type_f32(SpvEmitter* e);
+uint32_t spv_emit_type_f64(SpvEmitter* e);
 uint32_t spv_emit_type_vec4(SpvEmitter* e, uint32_t component_type);
 uint32_t spv_emit_type_vec2(SpvEmitter* e, uint32_t component_type);
 uint32_t spv_emit_type_vec3(SpvEmitter* e, uint32_t component_type);
@@ -114,11 +116,13 @@ uint32_t spv_emit_builtin_input_u32(SpvEmitter* e, uint32_t u32_type, uint32_t b
 uint32_t spv_emit_sampler2d(SpvEmitter* e, uint32_t f32_type, uint32_t set, uint32_t binding, int shadow,
                             uint32_t* sampled_type);
 uint32_t spv_emit_sampler_image(SpvEmitter* e, uint32_t f32_type, uint32_t set, uint32_t binding, uint32_t type,
-                                int array, int shadow, uint32_t* sampled_type);
+                                int array, int shadow, int multisample, uint32_t* sampled_type);
 uint32_t spv_emit_storage_image(SpvEmitter* e, uint32_t scalar_type, uint32_t set, uint32_t binding, uint32_t type,
-                                int array, uint32_t* image_type);
+                                int array, uint32_t format, uint32_t* image_type);
 void spv_emit_image_write(SpvEmitter* e, uint32_t image_type, uint32_t image_variable, uint32_t coordinates,
                           uint32_t texel);
+uint32_t spv_emit_image_texel_pointer(SpvEmitter* e, uint32_t scalar_type, uint32_t image_variable,
+                                      uint32_t coordinates, uint32_t sample);
 uint32_t spv_emit_vec3_construct(SpvEmitter* e, uint32_t vec3_type, uint32_t x, uint32_t y, uint32_t z);
 void spv_emit_function_void(SpvEmitter* e, uint32_t void_type, uint32_t function, uint32_t function_type);
 void spv_emit_label(SpvEmitter* e, uint32_t label);
@@ -144,6 +148,12 @@ uint32_t spv_emit_not_u32(SpvEmitter* e, uint32_t u32_type, uint32_t value);
 uint32_t spv_emit_bitfield_uextract(SpvEmitter* e, uint32_t u32_type, uint32_t value, uint32_t offset, uint32_t count);
 uint32_t spv_emit_bit_reverse_u32(SpvEmitter* e, uint32_t u32_type, uint32_t value);
 uint32_t spv_emit_atomic_u32(SpvEmitter* e, uint32_t u32_type, uint32_t opcode, uint32_t pointer, uint32_t value);
+uint32_t spv_emit_atomic_shared_u32(SpvEmitter* e, uint32_t u32_type, uint32_t opcode, uint32_t pointer,
+                                    uint32_t value);
+uint32_t spv_emit_atomic_load_u32(SpvEmitter* e, uint32_t u32_type, uint32_t pointer);
+uint32_t spv_emit_atomic_load_shared_u32(SpvEmitter* e, uint32_t u32_type, uint32_t pointer);
+uint32_t spv_emit_atomic_compare_exchange_shared_u32(SpvEmitter* e, uint32_t u32_type, uint32_t pointer,
+                                                      uint32_t desired, uint32_t expected);
 uint32_t spv_emit_atomic_compare_exchange_u32(SpvEmitter* e, uint32_t u32_type, uint32_t pointer, uint32_t desired,
                                               uint32_t expected);
 void spv_emit_control_barrier(SpvEmitter* e, uint32_t u32_type);
@@ -184,6 +194,8 @@ uint32_t spv_emit_image_query_lod(SpvEmitter* e, uint32_t result_type, uint32_t 
 uint32_t spv_emit_image_query_levels(SpvEmitter* e, uint32_t u32_type, uint32_t sampled_type, uint32_t sampler);
 uint32_t spv_emit_image_fetch(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
                               uint32_t coordinates, uint32_t lod);
+uint32_t spv_emit_image_fetch_sample(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
+                                     uint32_t coordinates, uint32_t sample);
 uint32_t spv_emit_image_gather(SpvEmitter* e, uint32_t vec4_type, uint32_t sampled_type, uint32_t sampler,
                                uint32_t coordinates, uint32_t component);
 uint32_t spv_emit_image_gather_ex(SpvEmitter* e, uint32_t vec4_type, uint32_t sampled_type, uint32_t sampler,
