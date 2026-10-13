@@ -131,9 +131,9 @@ u32 svc_arbitrate_unlock(u64 addr) {
 u32 svc_wait_cv(KThread* t, u64 maddr, u64 key, u32 tag, i64 timeout) {
     if (maddr & 3) return R_BADADDR;
     pm_lock(&g_klock);
-    unlock_nl(maddr);
-    /* the console marks the condition variable as having waiters before it looks at the timeout */
+    /* marked before the mutex is released, or its next owner skips the signal; and before the timeout check */
     __atomic_store_n(U32(key), 1, __ATOMIC_SEQ_CST);
+    unlock_nl(maddr);
     if (timeout == 0) {
         pm_unlock(&g_klock);
         return R_TIMEOUT;

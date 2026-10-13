@@ -33,9 +33,13 @@ int sleep_nl(KThread* t, i64 timeout) {
     (void)timeout;
     return 1;
 }
+/* the word at g_watch when a thread is woken */
+static u64 g_watch;
+static u32 g_watched = ~0u;
 void wake(KThread* t, int result) {
     t->woken = 1;
     t->wait_result = result;
+    if (g_watch) memcpy(&g_watched, g_mem + g_watch, 4);
 }
 void core_set_prio(KThread* t, int prio) { t->prio = prio; }
 
@@ -136,6 +140,16 @@ int main(void) {
     svc_signal_cv(SNX_KMT_CV, 1);
     CHECK(b->wait_kind == 2 && b->lock_owner == a && a->prio == 44, "signalled into a held mutex: owner at %d",
           a->prio);
+
+    /* the condition variable is marked before its mutex changes hands */
+    t = reset((const int[]){46, 44, 45, 40, 50, 30});
+    a = &t[0], b = &t[1];
+    lock(b, a, SNX_KMT_M);
+    g_watch = SNX_KMT_CV;
+    CHECK(svc_wait_cv(a, SNX_KMT_M, SNX_KMT_CV, handle(a), -1) == 0, "wait on the condition variable");
+    CHECK(b->woken && word(SNX_KMT_M) == handle(b) && g_watched == 1,
+          "the mutex went to its waiter (word %x) with the condition variable at %u", word(SNX_KMT_M), g_watched);
+    g_watch = 0;
 
     printf("%u checks, %u failed\n", checks, failures);
     free(g_mem);
