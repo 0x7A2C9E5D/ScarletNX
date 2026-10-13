@@ -189,6 +189,7 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
         case 0x674: r3d_clear(ch, v); break; /* ClearBuffers */
         case 0x556: /* SetRenderEnableC: the mode */
         case 0x651: ch->render_off = !render_enabled(ch); break; /* the override */
+        case 0x42B: r3d_draw_texture(ch); break; /* DRAW_TEXTURE: its last word starts it */
         case 0x6C3: query_get(ch, ch->r3d, 0x6C0, v); break;
         case 0x585: { /* END: flush */
             u32 topo = R3(0x586) & 0xFFFF;

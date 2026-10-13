@@ -342,6 +342,7 @@ void vk_render_end(void); /* ends the dynamic rendering pass, if one is open */
 void vk_render_clear(GpuChannel* ch, u32 v);
 VkViewport vk_render_viewport(const u32* r);
 VkFrontFace vk_render_front_face(const u32* r);
+void vk_render_draw_texture(GpuChannel* ch);
 void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex, u32 base_instance,
                     u32 instances);
 /* a texture binding, for draws and compute: the view type a declaration takes, the view of t with the header's
