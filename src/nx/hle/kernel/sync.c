@@ -317,6 +317,7 @@ static u32 wait_sync_nl(KThread* t, KObj** objs, u32 n, i64 timeout, u32* out_id
         t->woken = 0;
         t->wait_kind = 1;
         t->wait_name = n ? objs[0]->name : "no handles";
+        t->wait_tid = n && objs[0]->type == KO_THREAD ? ((KThread*)objs[0])->id : 0;
         t->wait_timeout = timeout; /* n==0 is legal: sleep until timeout/cancel */
         for (u32 i = 0; i < n; i++) waiter_add(objs[i], t);
         sleep_nl(t, rem);

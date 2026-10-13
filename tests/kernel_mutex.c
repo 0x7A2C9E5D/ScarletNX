@@ -28,9 +28,12 @@ void waiter_del(KObj* o, KThread* t) {
     (void)o;
     (void)t;
 }
+static unsigned g_slept;
+static u64 g_joining;
 int sleep_nl(KThread* t, i64 timeout) {
-    (void)t;
     (void)timeout;
+    g_slept++;
+    g_joining = t->wait_tid;
     return 1;
 }
 /* the word at g_watch when a thread is woken */
@@ -50,6 +53,11 @@ KObj* h_get_nl(u32 h) {
     return i < SNX_KMT_THREADS ? &snx_kmt_thread[i].o : NULL;
 }
 static u32 handle(KThread* t) { return SNX_KMT_HANDLE + (u32)(t - snx_kmt_thread); }
+/* ends once the waiter sleeps, like a joined thread */
+static int ended_after_a_sleep(KObj* o) {
+    (void)o;
+    return g_slept > 0;
+}
 
 static unsigned checks, failures;
 #define CHECK(expr, ...)                                                                                               \
@@ -150,6 +158,18 @@ int main(void) {
     CHECK(b->woken && word(SNX_KMT_M) == handle(b) && g_watched == 1,
           "the mutex went to its waiter (word %x) with the condition variable at %u", word(SNX_KMT_M), g_watched);
     g_watch = 0;
+
+    /* a join: the thread dump names the thread waited for */
+    t = reset((const int[]){46, 44, 45, 40, 50, 30});
+    a = &t[0], b = &t[1];
+    b->id = 82;
+    b->o.is_signaled = ended_after_a_sleep;
+    u32 joined = handle(b), at = 9;
+    memcpy(g_mem + 0x400, &joined, 4);
+    g_slept = 0;
+    CHECK(svc_wait_sync(a, 0x400, 1, -1, &at) == 0 && at == 0 && g_slept == 1, "join: index %u after %u sleeps", at,
+          g_slept);
+    CHECK(g_joining == 82, "the joining thread names thread %llu, not 82", (unsigned long long)g_joining);
 
     printf("%u checks, %u failed\n", checks, failures);
     free(g_mem);
