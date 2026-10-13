@@ -151,8 +151,8 @@ The normal SDL3 build can run without initializing SDL video or opening a window
 
 `-H` enables it. Omit the flag for the normal window. `--headless` is the long spelling
 and accepts no value (`--headless=0` and `--headless=1` are errors).
-This is a startup option, not a live toggle or an INI setting. A build with only the headless backend
-always starts headless because it has no window backend.
+This is a startup option, not a live toggle or an INI setting. SDL3 is required by every NX runtime
+build, but headless runs do not initialize its video subsystem or require a display server.
 
 Rendering still uses Vulkan 1.3, including uploads, draws, compute and screenshot readback. Headless runs
 create no window, `VkSurfaceKHR` or swapchain and request no WSI extensions, including `VK_EXT_headless_surface`.

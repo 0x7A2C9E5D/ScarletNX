@@ -18,8 +18,8 @@ cmake --build build/gnuabi
 ctest --test-dir build/gnuabi --output-on-failure
 ```
 
-Both runtimes are enabled by default. Existing NX options (`SNX_BACKEND`,
-`SNX_VULKAN`, `SNX_H264`) apply to the NX build. Windows uses the existing
+Both runtimes are enabled by default. SDL3 and Vulkan are required by the NX runtime;
+`SNX_H264` controls its optional media decoding. Windows uses the existing
 llvm-mingw toolchain and bootstrap environment described in [BUILD.md](BUILD.md).
 The GNU runtime needs host Clang when executing a new ELF; use `--cc=PATH` to
 select it explicitly.

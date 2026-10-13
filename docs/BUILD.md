@@ -119,8 +119,9 @@ installation is needed. It still needs your platform's window-system development
 - No sound, and the log says `audio: SDL could not start its audio: No available audio device`: the
   SDL3 fallback was configured without audio development libraries (its configure warns `Unable to find
   the alsa development library`). Install the audio packages above and configure again.
-- A no-window Vulkan build needs no SDL3. Use `-DSNX_BACKEND=headless` as shown below.
-  The runtime flag `-H` alone does not remove the SDL3 build dependency from a window-capable binary.
+- SDL3 is mandatory for the NX runtime, including headless runs. Use `-H` at runtime to skip
+  SDL video initialization and run without a display server. The separate headless backend was removed.
+  For an old build directory, remove the cached backend selection with `-USNX_BACKEND`.
 
 After installing dependencies, rerun:
 
@@ -189,22 +190,23 @@ cmake --preset default -B build -DSNX_FFMPEG_ASM=OFF && cmake --build build
 - `-DCPM_SOURCE_CACHE=/path`: override source-download cache.
 
 ```sh
-# Vulkan without SDL3, a display server, a surface or a swapchain:
-cmake --preset default -B build/headless-vk -DSNX_BACKEND=headless -DSNX_DEPLOY=OFF &&
+# Build without the GUI launcher; SDL3 remains required by the runtime:
+cmake --preset default -B build/headless-vk -DSNX_BUILD_GUI=OFF -DSNX_DEPLOY=OFF &&
 cmake --build build/headless-vk
-# -> build/headless-vk/scarletnx, Vulkan renderer, always headless
+# Run Vulkan without a display server, a surface or a swapchain:
+./build/headless-vk/scarletnx "Game.xci" -H
 
 cmake --preset windows-cross && cmake --build --preset windows-cross
 # -> build/windows-cross/scarletnx.exe; requires llvm-mingw on PATH
 ```
 
-The normal SDL3 build also supports `-H` at runtime. Omit the flag for windowed startup.
-The no-SDL3 builds cannot switch to a window. [Software Vulkan / lavapipe setup](USAGE.md#headless-vulkan--lavapipe).
+All NX builds use SDL3 and support `-H` at runtime. Omit the flag for windowed startup.
+[Software Vulkan / lavapipe setup](USAGE.md#headless-vulkan--lavapipe).
 
 Offscreen integration test, with an installed Vulkan 1.3 ICD (lavapipe works):
 
 ```sh
-cmake --preset default -B build/headless-vk -DSNX_BACKEND=headless \
+cmake --preset default -B build/headless-vk -DSNX_BUILD_GUI=OFF \
   -DSNX_DEPLOY=OFF -DSNX_TEST_VULKAN=ON && cmake --build build/headless-vk
 # Set VK_DRIVER_FILES to your lavapipe manifest to force CPU rendering.
 SNX_VK_VALIDATION=1 ctest --test-dir build/headless-vk -R vulkan_headless --output-on-failure

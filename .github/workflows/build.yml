@@ -45,9 +45,9 @@ jobs:
           cmake --preset default -B build/sdl-fallback -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON \
             -DSNX_DEPLOY=OFF -DSNX_H264=OFF -DBUILD_TESTING=OFF -DSDL_WAYLAND=OFF
           cmake --build build/sdl-fallback --target scarletnx
-      - name: Build the headless backend too
+      - name: Build SDL3 with headless Vulkan tests
         run: |
-          cmake --preset default -B build/headless -DSNX_BACKEND=headless -DSNX_DEPLOY=OFF -DSNX_TEST_VULKAN=ON
+          cmake --preset default -B build/headless -DSNX_BUILD_GUI=OFF -DSNX_DEPLOY=OFF -DSNX_TEST_VULKAN=ON
           cmake --build build/headless
       - name: Test headless Vulkan and NX runtime
         run: ctest --test-dir build/headless -R '^(vulkan_headless|nx_runtime_homebrew)$' --output-on-failure
