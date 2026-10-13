@@ -83,6 +83,7 @@ typedef struct {
     u64 frames; /* frames rendered */
     u32 rev;    /* the revision of the last update */
     u32 warned; /* features met once and not rendered, as AR_WARN_* bits */
+    float lut4[3][512], lut8[3][1024]; /* the resampler's tables, made with the state */
 } ARState;
 
 enum { AR_STARTED = 0, AR_STOPPED = 1, AR_PAUSED = 2, AR_STOPPING = 3 };

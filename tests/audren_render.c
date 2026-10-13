@@ -27,29 +27,29 @@ static unsigned checks, failures;
     } while (0)
 
 enum {
-    RATE = 48000,
-    FRAME = 240,
-    VOICES = 4,
-    EFFECTS = 2,
-    SINKS = 3,
-    MIXES = 2,
-    FINAL = 0,
-    SUBMIX = 1,
-    RING_FRAMES = 40,
-    AUX_COUNT = RING_FRAMES * 2 * FRAME,
+    AT_RATE = 48000,
+    AT_FRAME = 240,
+    AT_VOICES = 4,
+    AT_EFFECTS = 2,
+    AT_SINKS = 3,
+    AT_MIXES = 2,
+    AT_FINAL = 0,
+    AT_SUBMIX = 1,
+    AT_RING_FRAMES = 40,
+    AT_AUX_COUNT = AT_RING_FRAMES * 2 * AT_FRAME,
     /* guest addresses: offsets into the arena g_mem points at */
-    G_ARENA = 8 << 20,
-    G_PCM = 0x10000,    /* one second of a tone per voice, VOICES of them */
-    G_ADPCM = 0x200000, /* an ADPCM buffer and its coefficients */
-    G_AUX_SEND = 0x300000,
-    G_AUX_RETURN = 0x340000,
-    G_RING = 0x380000, /* the circular buffer sinks' rings, 0x20000 apiece */
-    G_RING_BYTES = RING_FRAMES * 2 * FRAME * 2,
+    AT_G_ARENA = 8 << 20,
+    AT_G_PCM = 0x10000,    /* one second of a tone per voice, AT_VOICES of them */
+    AT_G_ADPCM = 0x200000, /* an ADPCM buffer and its coefficients */
+    AT_G_AUX_SEND = 0x300000,
+    AT_G_AUX_RETURN = 0x340000,
+    AT_G_RING = 0x380000, /* the circular buffer sinks' rings, 0x20000 apiece */
+    AT_G_RING_BYTES = AT_RING_FRAMES * 2 * AT_FRAME * 2,
 };
 
 /* the update, laid out as edenprobe's source/audio.c lays it out */
-static u8
-    in[0x40 + 0x10 + 0x20 + 0x70 * VOICES + 0x170 * VOICES + 0xC0 * EFFECTS + 0x930 * MIXES + 0x140 * SINKS + 0x10];
+static u8 in[0x40 + 0x10 + 0x20 + 0x70 * AT_VOICES + 0x170 * AT_VOICES + 0xC0 * AT_EFFECTS + 0x930 * AT_MIXES +
+             0x140 * AT_SINKS + 0x10];
 static u8 out[0x1000];
 static u8 *u_pool, *u_res, *u_voice, *u_eff, *u_mix, *u_sink;
 static ARState* st;
@@ -67,7 +67,9 @@ static u8* sink(int i) { return u_sink + i * 0x140; }
 static void layout(void) {
     memset(in, 0, sizeof in);
     u32 rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + 4) << 24);
-    u32 h[16] = {rev, 0x10, 0x20, 0x170 * VOICES, 0x70 * VOICES, 0xC0 * EFFECTS, 0x930 * MIXES, 0x140 * SINKS, 0x10};
+    u32 h[16] = {
+        rev, 0x10, 0x20, 0x170 * AT_VOICES, 0x70 * AT_VOICES, 0xC0 * AT_EFFECTS, 0x930 * AT_MIXES, 0x140 * AT_SINKS,
+        0x10};
     h[15] = sizeof in;
     memcpy(in, h, sizeof h);
     w32(in, 0x40, rev);
@@ -75,39 +77,39 @@ static void layout(void) {
     u_pool = p;
     p += 0x20;
     u_res = p;
-    p += 0x70 * VOICES;
+    p += 0x70 * AT_VOICES;
     u_voice = p;
-    p += 0x170 * VOICES;
+    p += 0x170 * AT_VOICES;
     u_eff = p;
-    p += 0xC0 * EFFECTS;
+    p += 0xC0 * AT_EFFECTS;
     u_mix = p;
-    p += 0x930 * MIXES;
+    p += 0x930 * AT_MIXES;
     u_sink = p;
     w64(u_pool, 0, 0);
-    w64(u_pool, 8, G_ARENA);
+    w64(u_pool, 8, AT_G_ARENA);
     w32(u_pool, 0x10, 4); /* asked to attach */
-    for (int i = 0; i < VOICES; i++) {
+    for (int i = 0; i < AT_VOICES; i++) {
         w32(res(i), 0, (u32)i);
         w32(voice(i), 0, (u32)i);
     }
-    for (int m = 0; m < MIXES; m++) {
+    for (int m = 0; m < AT_MIXES; m++) {
         wf(mix(m), 0, 1.0f);
-        w32(mix(m), 4, RATE);
-        w32(mix(m), 8, m == FINAL ? 2u : 4u);
+        w32(mix(m), 4, AT_RATE);
+        w32(mix(m), 8, m == AT_FINAL ? 2u : 4u);
         w8(mix(m), 0xC, 1);
         w32(mix(m), 0x10, (u32)m);
-        w32(mix(m), 0x924, m == FINAL ? 0x7FFFFFFFu : FINAL);
+        w32(mix(m), 0x924, m == AT_FINAL ? 0x7FFFFFFFu : AT_FINAL);
         w32(mix(m), 0x928, 0xFFFFFFFFu);
     }
     /* the limiter, off until a case turns it on, then the aux, both on the submix */
     w8(eff(0), 0, AR_EFFECT_LIMITER);
     w8(eff(0), 1, 1);
-    w32(eff(0), 4, SUBMIX);
+    w32(eff(0), 4, AT_SUBMIX);
     w32(eff(0), 0x18, 0);
     u8* l = eff(0) + 0x20;
     l[0] = 0, l[1] = 1, l[6] = 0, l[7] = 1;
     l[0xC] = 2, l[0xE] = 2;
-    w32(l, 0x10, RATE);
+    w32(l, 0x10, AT_RATE);
     w32(l, 0x38, 48);
     w32(l, 0x3C, 48);
     wf(l, 0x30, 1.0f);
@@ -118,33 +120,33 @@ static void layout(void) {
     w8(l, 0x40, 2);
     w8(eff(1), 0, AR_EFFECT_AUX);
     w8(eff(1), 1, 1);
-    w32(eff(1), 4, SUBMIX);
+    w32(eff(1), 4, AT_SUBMIX);
     w32(eff(1), 0x18, 1);
     u8* a = eff(1) + 0x20;
     a[0] = 0, a[1] = 1, a[0x18] = 2, a[0x19] = 3;
     w32(a, 0x30, 2);
-    w32(a, 0x34, RATE);
-    w32(a, 0x38, AUX_COUNT);
+    w32(a, 0x34, AT_RATE);
+    w32(a, 0x38, AT_AUX_COUNT);
     w32(a, 0x3C, 2);
-    w64(a, 0x40, G_AUX_SEND);
-    w64(a, 0x48, G_AUX_SEND + 0x80);
-    w64(a, 0x50, G_AUX_RETURN);
-    w64(a, 0x58, G_AUX_RETURN + 0x80);
+    w64(a, 0x40, AT_G_AUX_SEND);
+    w64(a, 0x48, AT_G_AUX_SEND + 0x80);
+    w64(a, 0x50, AT_G_AUX_RETURN);
+    w64(a, 0x58, AT_G_AUX_RETURN + 0x80);
     w32(a, 0x60, 4);
-    w32(a, 0x64, FRAME);
-    w32(a, 0x68, FRAME);
+    w32(a, 0x64, AT_FRAME);
+    w32(a, 0x68, AT_FRAME);
     /* the device sink on the final mix's two buffers, then two circular buffer sinks off until a case needs one */
     w8(sink(0), 0, AR_SINK_DEVICE);
     w8(sink(0), 1, 1);
     w32(sink(0), 0x20 + 0x100, 2);
     sink(0)[0x20 + 0x104] = 0, sink(0)[0x20 + 0x105] = 1;
-    for (int k = 1; k < SINKS; k++) {
+    for (int k = 1; k < AT_SINKS; k++) {
         u8* c = sink(k) + 0x20;
         w8(sink(k), 0, AR_SINK_CIRCULAR);
-        w64(c, 0, G_RING + (u64)(k - 1) * 0x20000);
-        w32(c, 8, G_RING_BYTES);
+        w64(c, 0, AT_G_RING + (u64)(k - 1) * 0x20000);
+        w32(c, 8, AT_G_RING_BYTES);
         w32(c, 0xC, 2);
-        w32(c, 0x10, FRAME);
+        w32(c, 0x10, AT_FRAME);
         w8(c, 0x18, 2);
         c[0x1C] = 0, c[0x1D] = 1;
     }
@@ -153,14 +155,14 @@ static void layout(void) {
 static void update(void) {
     int rc = audren_state_update(st, in, sizeof in, out, sizeof out);
     CHECK(rc == 0, "update returned %d", rc);
-    for (int i = 0; i < VOICES; i++) {
+    for (int i = 0; i < AT_VOICES; i++) {
         w8(voice(i), 8, 0);                                                  /* is_new once */
         for (int w = 0; w < 4; w++) w8(voice(i), 0x60 + w * 0x38 + 0x1A, 1); /* sent */
     }
-    for (int i = 0; i < EFFECTS; i++) w8(eff(i), 1, 0);
+    for (int i = 0; i < AT_EFFECTS; i++) w8(eff(i), 1, 0);
 }
 static void frames(int n) {
-    i16 stereo[FRAME * 2];
+    i16 stereo[AT_FRAME * 2];
     for (int i = 0; i < n; i++) {
         update();
         audren_frame(st, stereo);
@@ -169,25 +171,25 @@ static void frames(int n) {
 
 /* a tone of whole periods in each frame, looping over one second of PCM16 at 48 kHz */
 static void tone(int v, double hz, double amp, u8 quality, int channel, float gain) {
-    i16* pcm = (i16*)(void*)(g_mem + G_PCM + (u64)v * RATE * 2);
-    for (int i = 0; i < RATE; i++) pcm[i] = (i16)lrint(amp * 32767.0 * sin(2.0 * M_PI * hz * i / RATE));
+    i16* pcm = (i16*)(void*)(g_mem + AT_G_PCM + (u64)v * AT_RATE * 2);
+    for (int i = 0; i < AT_RATE; i++) pcm[i] = (i16)lrint(amp * 32767.0 * sin(2.0 * M_PI * hz * i / AT_RATE));
     u8* vi = voice(v);
     memset(vi + 8, 0, 0x170 - 8);
     w8(vi, 8, 1);
     w8(vi, 9, 1);
     w8(vi, 0xA, 0); /* started */
     w8(vi, 0xB, AR_PCM16);
-    w32(vi, 0xC, RATE);
+    w32(vi, 0xC, AT_RATE);
     w32(vi, 0x18, 1);
     wf(vi, 0x1C, 1.0f);
     wf(vi, 0x20, 1.0f);
     w32(vi, 0x3C, 1);
-    w32(vi, 0x58, SUBMIX);
+    w32(vi, 0x58, AT_SUBMIX);
     w32(vi, 0x5C, 0xFFFFFFFFu);
-    w64(vi, 0x60, G_PCM + (u64)v * RATE * 2);
-    w64(vi, 0x68, RATE * 2);
+    w64(vi, 0x60, AT_G_PCM + (u64)v * AT_RATE * 2);
+    w64(vi, 0x68, AT_RATE * 2);
     w32(vi, 0x70, 0);
-    w32(vi, 0x74, RATE);
+    w32(vi, 0x74, AT_RATE);
     w8(vi, 0x78, 1);            /* loop */
     w32(vi, 0x7C, 0xFFFFFFFFu); /* forever */
     w32(vi, 0x140, (u32)v);
@@ -204,38 +206,38 @@ static void silence(int v) { w8(voice(v), 0xA, 1); /* stopped */ }
 static double level_i32(const i32* x, int n, double hz) {
     double re = 0, im = 0;
     for (int i = 0; i < n; i++) {
-        re += x[i] * cos(2.0 * M_PI * hz * i / RATE);
-        im -= x[i] * sin(2.0 * M_PI * hz * i / RATE);
+        re += x[i] * cos(2.0 * M_PI * hz * i / AT_RATE);
+        im -= x[i] * sin(2.0 * M_PI * hz * i / AT_RATE);
     }
     return 2.0 * sqrt(re * re + im * im) / n / 32768.0;
 }
 static double level_i16(const i16* x, int n, double hz) {
-    i32 tmp[FRAME];
+    i32 tmp[AT_FRAME];
     for (int i = 0; i < n; i++) tmp[i] = x[i];
     return level_i32(tmp, n, hz);
 }
 /* the aux ring's channel ch in its most recent full frame */
 static double captured(int ch, double hz) {
     u32 woff;
-    memcpy(&woff, g_mem + G_AUX_SEND + 0x40 + 4, 4);
-    u32 frame_at = (woff + AUX_COUNT - 2 * FRAME) % AUX_COUNT;
-    const i32* ring = (const i32*)(const void*)(g_mem + G_AUX_SEND + 0x80);
-    return level_i32(ring + frame_at + ch * FRAME, FRAME, hz);
+    memcpy(&woff, g_mem + AT_G_AUX_SEND + 0x40 + 4, 4);
+    u32 frame_at = (woff + AT_AUX_COUNT - 2 * AT_FRAME) % AT_AUX_COUNT;
+    const i32* ring = (const i32*)(const void*)(g_mem + AT_G_AUX_SEND + 0x80);
+    return level_i32(ring + frame_at + ch * AT_FRAME, AT_FRAME, hz);
 }
 
 static void reset(void) {
     audren_state_free(st);
     u8 params[0x34] = {0};
-    u32 p[13] = {RATE, FRAME, 6, MIXES - 1, VOICES, SINKS, EFFECTS};
+    u32 p[13] = {AT_RATE, AT_FRAME, 6, AT_MIXES - 1, AT_VOICES, AT_SINKS, AT_EFFECTS};
     memcpy(params, p, sizeof p);
     st = audren_state_new(params);
     CHECK(st != NULL, "no state");
-    memset(g_mem, 0, G_ARENA);
+    memset(g_mem, 0, AT_G_ARENA);
     layout();
 }
 
 int main(void) {
-    g_mem = calloc(1, G_ARENA);
+    g_mem = calloc(1, AT_G_ARENA);
     if (!g_mem) return 1;
 
     /* the resampler at a ratio of one: an 11 kHz voice keeps its level at default quality as at high */
@@ -253,19 +255,19 @@ int main(void) {
     reset();
     tone(0, 1000, 0.25, 0, 0, 1.0f);
     tone(1, 1600, 0.25, 0, 1, 1.0f);
-    wf(mix(SUBMIX), 0x24, 1.0f);                /* submix 0 -> final 0 */
-    wf(mix(SUBMIX), 0x24 + (24 + 1) * 4, 1.0f); /* submix 1 -> final 1 */
+    wf(mix(AT_SUBMIX), 0x24, 1.0f);                /* submix 0 -> final 0 */
+    wf(mix(AT_SUBMIX), 0x24 + (24 + 1) * 4, 1.0f); /* submix 1 -> final 1 */
     w8(sink(1), 1, 1);
     frames(50);
-    const i16* ring = (const i16*)(const void*)(g_mem + G_RING);
-    double l1k = level_i16(ring, FRAME, 1000), l16 = level_i16(ring, FRAME, 1600);
-    double r1k = level_i16(ring + FRAME, FRAME, 1000), r16 = level_i16(ring + FRAME, FRAME, 1600);
+    const i16* ring = (const i16*)(const void*)(g_mem + AT_G_RING);
+    double l1k = level_i16(ring, AT_FRAME, 1000), l16 = level_i16(ring, AT_FRAME, 1600);
+    double r1k = level_i16(ring + AT_FRAME, AT_FRAME, 1000), r16 = level_i16(ring + AT_FRAME, AT_FRAME, 1600);
     CHECK(fabs(l1k - 0.25) < 0.005 && l16 < 0.005, "left channel: 1 kHz %.4f, 1.6 kHz %.4f", l1k, l16);
     CHECK(fabs(r16 - 0.25) < 0.005 && r1k < 0.005, "right channel: 1.6 kHz %.4f, 1 kHz %.4f", r16, r1k);
     u32 woff;
     update();
-    memcpy(&woff, out + 0x40 + 0x10 + VOICES * 0x10 + EFFECTS * 0x10 + 0x20, 4);
-    CHECK(woff != 0 && woff % (2 * FRAME * 2) == 0, "write offset %u", woff);
+    memcpy(&woff, out + 0x40 + 0x10 + AT_VOICES * 0x10 + AT_EFFECTS * 0x10 + 0x20, 4);
+    CHECK(woff != 0 && woff % (2 * AT_FRAME * 2) == 0, "write offset %u", woff);
 
     /* the limiter switched off keeps a tone's level; in mode 1 the tone comes out at threshold over the detector:
        1 kHz at 0.25, threshold 0.1, rates 0.01, gives 0.25 * 0.1 / (0.25 * 2 / pi) */
@@ -310,6 +312,18 @@ int main(void) {
     memcpy(&consumed, out + 0x40 + 0x10 + 0x10 + 8, 4);
     CHECK(played == 0 && consumed == 1, "after a stop: played %llu, consumed %u", (unsigned long long)played, consumed);
 
+    /* the resampler tables made from their windowed sincs, against the console's: phase 0 of default quality's
+       pass-through table and of high quality's, and one phase in the middle */
+    reset();
+    static const int lut4_1[4] = {-68, 32639, 69, -5}, lut8_2[8] = {-12, 47, -134, 32767, 81, -16, 2, 0},
+                     lut4_0_64[4] = {1221, 15064, 15185, 1266};
+    for (int i = 0; i < 4; i++) {
+        CHECK(fabs(st->lut4[1][i] * 32768.0 - lut4_1[i]) <= 1.0, "lut4[1] tap %d: %.1f", i, st->lut4[1][i] * 32768.0);
+        CHECK(fabs(st->lut4[0][64 * 4 + i] * 32768.0 - lut4_0_64[i]) <= 1.0, "lut4[0] phase 64 tap %d", i);
+    }
+    for (int i = 0; i < 8; i++)
+        CHECK(fabs(st->lut8[2][i] * 32768.0 - lut8_2[i]) <= 1.0, "lut8[2] tap %d: %.1f", i, st->lut8[2][i] * 32768.0);
+
     /* DSP-ADPCM: the high nibble first, each code times 2^scale plus the prediction from the last two samples */
     reset();
     ARVoice v = {0};
@@ -317,16 +331,16 @@ int main(void) {
     ARWave w = {0};
     i16 coef[16] = {0};
     coef[2] = 2048; /* pair 1: the last sample, times 1.0 */
-    memcpy(g_mem + G_ADPCM + 0x100, coef, sizeof coef);
+    memcpy(g_mem + AT_G_ADPCM + 0x100, coef, sizeof coef);
     u8 frame0[8] = {0x02, 0x12, 0x34, 0x56, 0x7F, 0xED, 0xCB, 0xA9}; /* pair 0, scale 2 */
     u8 frame1[8] = {0x10, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11}; /* pair 1, scale 0: +1 each sample */
-    memcpy(g_mem + G_ADPCM, frame0, 8);
-    memcpy(g_mem + G_ADPCM + 8, frame1, 8);
+    memcpy(g_mem + AT_G_ADPCM, frame0, 8);
+    memcpy(g_mem + AT_G_ADPCM + 8, frame1, 8);
     v.format = AR_ADPCM;
     v.channels = 1;
-    v.data = G_ADPCM + 0x100;
+    v.data = AT_G_ADPCM + 0x100;
     v.data_size = 32;
-    w.addr = G_ADPCM;
+    w.addr = AT_G_ADPCM;
     w.size = 16;
     w.end = 28;
     i16 got[28];

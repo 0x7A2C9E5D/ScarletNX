@@ -7,7 +7,6 @@
    mix through its effects and its volume; then the device sinks, then the circular buffer sinks. The mix buffers
    hold samples on the 16-bit scale, as floats */
 #include "hle/services/audren_dsp.h"
-#include "hle/services/audren_luts.h"
 #include "runtime/platform/log.h"
 #include <math.h>
 #include <stdlib.h>
@@ -48,6 +47,42 @@ static void warn_once(ARState* s, u32 bit, const char* what) {
     LOG("audren: %s\n", what);
 }
 
+/* the resampler's polyphase tables: 128 phases of 4 taps (default quality) or 8 (high quality). Row p, tap k is
+   sample n = 128 k + 127 - p of a windowed sinc of 128 * taps points, so the phase's fraction is (p + 0.5) / 128.
+   Each table is a cutoff, a gain and a window: Hamming (0.54) or Kaiser (beta). These are fitted to the console's
+   tables as Eden carries them (renderer/command/resample/resample.cpp) and give them to 1 LSB in Q15, 2 for the
+   default 0.75 one; the high quality cutoffs come out as 0.5, 0.75 and 1 times 1024 / 1023 */
+#define AR_PI 3.14159265358979323846
+static double bessel_i0(double x) {
+    double sum = 1.0, term = 1.0;
+    for (int k = 1; k < 64 && term > 1e-17 * sum; k++) {
+        term *= (x / 2) * (x / 2) / ((double)k * k);
+        sum += term;
+    }
+    return sum;
+}
+static void make_lut(float* out, int taps, double cutoff, double gain, double hamming, double beta) {
+    int n_all = 128 * taps;
+    for (int p = 0; p < 128; p++)
+        for (int k = 0; k < taps; k++) {
+            int n = 128 * k + 127 - p;
+            double t = (n - (n_all - 1) / 2.0) / 128.0, x = AR_PI * cutoff * t, u = 2.0 * n / (n_all - 1) - 1.0, w;
+            if (hamming > 0)
+                w = hamming - (1 - hamming) * cos(2 * AR_PI * n / (n_all - 1));
+            else
+                w = bessel_i0(beta * sqrt(fmax(0.0, 1 - u * u))) / bessel_i0(beta);
+            out[p * taps + k] = (float)(rint(gain * cutoff * (x == 0 ? 1.0 : sin(x) / x) * w) / 32768.0);
+        }
+}
+static void make_luts(ARState* s) {
+    make_lut(s->lut4[0], 4, 0.499991, 38852.97, 0.54, 0); /* ratios over 1.3 */
+    make_lut(s->lut4[1], 4, 0.999998, 32640.38, 0.54, 0); /* up to 1: the pass-through one */
+    make_lut(s->lut4[2], 4, 0.752909, 34914.86, 0, 7.02743);
+    make_lut(s->lut8[0], 8, 0.5 * 1024 / 1023, 32740.59, 0, 5.9);
+    make_lut(s->lut8[1], 8, 0.75 * 1024 / 1023, 32787.99, 0, 5.9);
+    make_lut(s->lut8[2], 8, 1024.0 / 1023, 32735.86, 0, 5.9); /* up to 1 */
+}
+
 ARState* audren_state_new(const u8* params) {
     u32 rate = rd32(params), frame = rd32(params + 4), buffers = rd32(params + 8), submixes = rd32(params + 0xC);
     u32 voices = rd32(params + 0x10), sinks = rd32(params + 0x14), effects = rd32(params + 0x18);
@@ -75,6 +110,7 @@ ARState* audren_state_new(const u8* params) {
         audren_state_free(s);
         return NULL;
     }
+    make_luts(s);
     return s;
 }
 
@@ -390,7 +426,7 @@ static void end_wave(ARChannel* c, const ARWave* w) {
 /* polyphase resampling over 4 taps (default quality), 8 (high) or the nearest sample (low), the ratio and fraction
    in Q15 (renderer/command/resample/resample.cpp). Default quality uses lut1, the pass-through table, up to a
    ratio of 1 (rEden 21c3595309); high quality's pass-through table is lut2 */
-static void resample(float* out, const i16* in, i64 ratio, i64* frac, u32 n, u8 quality) {
+static void resample(const ARState* s, float* out, const i16* in, i64 ratio, i64* frac, u32 n, u8 quality) {
     u32 ri = 0;
     i64 f = *frac;
     if (quality == 2) {
@@ -401,7 +437,7 @@ static void resample(float* out, const i16* in, i64 ratio, i64* frac, u32 n, u8 
             f &= 0x7FFF;
         }
     } else if (quality == 1) {
-        const float* t = ratio <= 0x8000 ? ar_lut8[2] : ratio < (i64)(1.3 * 0x8000) ? ar_lut8[1] : ar_lut8[0];
+        const float* t = ratio <= 0x8000 ? s->lut8[2] : ratio < (i64)(1.3 * 0x8000) ? s->lut8[1] : s->lut8[0];
         for (u32 i = 0; i < n; i++) {
             const float* k = t + ((((u32)f >> 8) << 3) & 1023);
             float acc = 0;
@@ -412,7 +448,7 @@ static void resample(float* out, const i16* in, i64 ratio, i64* frac, u32 n, u8 
             f &= 0x7FFF;
         }
     } else {
-        const float* t = ratio <= 0x8000 ? ar_lut4[1] : ratio < (i64)(1.3 * 0x8000) ? ar_lut4[2] : ar_lut4[0];
+        const float* t = ratio <= 0x8000 ? s->lut4[1] : ratio < (i64)(1.3 * 0x8000) ? s->lut4[2] : s->lut4[0];
         for (u32 i = 0; i < n; i++) {
             const float* k = t + ((((u32)f >> 8) << 2) & 511);
             out[i] = floorf(in[ri] * k[0] + in[ri + 1] * k[1] + in[ri + 2] * k[2] + in[ri + 3] * k[3]);
@@ -480,7 +516,7 @@ static void voice_channel(ARState* s, ARVoice* v, int ch, float* out) {
             end_wave(c, w);
     }
     memset(t + pos, 0, (taps + (u32)need - pos) * sizeof *t);
-    resample(out, t, ratio, &c->fraction, n, v->quality);
+    resample(s, out, t, ratio, &c->fraction, n, v->quality);
     memcpy(c->history, t + need, taps * sizeof *t);
 }
 
