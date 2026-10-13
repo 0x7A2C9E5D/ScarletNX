@@ -14,6 +14,12 @@
 #include <time.h>
 #include <process.h>
 #include <io.h> /* _get_osfhandle */
+int plat_text_input(char* out, size_t cap, const char* initial) {
+    (void)out;
+    (void)cap;
+    (void)initial;
+    return -1;
+}
 void pm_init(PMutex* m) { InitializeSRWLock(&m->l); }
 void pm_lock(PMutex* m) { AcquireSRWLockExclusive(&m->l); }
 void pm_unlock(PMutex* m) { ReleaseSRWLockExclusive(&m->l); }

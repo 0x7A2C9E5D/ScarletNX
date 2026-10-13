@@ -47,7 +47,11 @@ static void read_targets(GpuChannel* ch, Surf** rt, Surf** zt, u32* n) {
         if (a && t[2] && t[3] && t[4]) {
             /* a pitch-linear target (bit 12 of the memory layout) holds its row pitch in bytes where the width is */
             u32 bpp = vk_rt_format(t[4]).bpp, linear = (t[5] >> 12) & 1, w = linear ? t[2] / bpp : t[2];
-            if (w) rt[i] = vk_rt(a, w, t[3], t[4], t[5], 0, linear ? t[2] : w * bpp);
+            /* COLOR_TARGET_THIRD_DIMENSION names the number of renderable array slices. Vertex shaders may
+               select one with their layer output (the color LUT passes render all slices in one draw). */
+            u32 layers = t[6] & 0xffff;
+            if (!layers || layers > g_vk.props.limits.maxImageArrayLayers) layers = 1;
+            if (w) rt[i] = vk_rt_array(a, w, t[3], t[4], t[5], linear ? t[2] : w * bpp, layers);
             if (rt[i]) *n = i + 1;
         }
     }
@@ -103,9 +107,14 @@ static int render_begin(Surf** rt, Surf* zt, u32 n, int zt_ro) {
         if (zt->sw < ext.width) ext.width = zt->sw;
         if (zt->sh < ext.height) ext.height = zt->sh;
     }
+    u32 layers = ~0u;
+    for (u32 i = 0; i < n; i++)
+        if (rt[i] && rt[i]->layers < layers) layers = rt[i]->layers;
+    if (zt && zt->layers < layers) layers = zt->layers;
+    if (layers == ~0u) layers = 1;
     VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
                           .renderArea = {{0, 0}, ext},
-                          .layerCount = 1,
+                          .layerCount = layers,
                           .colorAttachmentCount = n,
                           .pColorAttachments = ca,
                           .pDepthAttachment = zt ? &za : NULL,

@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
 #if defined(__linux__)
@@ -28,6 +29,47 @@
 #include <ucontext.h>
 #include <sched.h>
 #include <errno.h>
+/* Run a host text dialog without a shell: the initial text is game data, not a command. */
+int plat_text_input(char* out, size_t cap, const char* initial) {
+    if (!cap) return -1;
+    int fd[2];
+    if (pipe(fd)) return -1;
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(fd[0]);
+        close(fd[1]);
+        return -1;
+    }
+    if (!pid) {
+        close(fd[0]);
+        if (dup2(fd[1], STDOUT_FILENO) < 0) _exit(127);
+        close(fd[1]);
+        const char* desktop = getenv("XDG_CURRENT_DESKTOP");
+        if (desktop && (strstr(desktop, "KDE") || strstr(desktop, "Plasma")))
+            execlp("kdialog", "kdialog", "--title", "ScarletNX", "--inputbox", "Enter text", initial ? initial : "",
+                   (char*)NULL);
+        execlp("zenity", "zenity", "--entry", "--title=ScarletNX", "--text=Enter text", "--entry-text",
+               initial ? initial : "", (char*)NULL);
+        execlp("kdialog", "kdialog", "--title", "ScarletNX", "--inputbox", "Enter text", initial ? initial : "",
+               (char*)NULL);
+        _exit(127);
+    }
+    close(fd[1]);
+    size_t n = 0;
+    char c;
+    while (read(fd[0], &c, 1) == 1) {
+        if (c == '\n') break;
+        if (n + 1 < cap) out[n++] = c;
+    }
+    close(fd[0]);
+    out[n] = 0;
+    int status;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) return -1;
+    }
+    if (!WIFEXITED(status)) return -1;
+    return WEXITSTATUS(status) == 0 ? 0 : WEXITSTATUS(status) == 1 ? 1 : -1;
+}
 /* FreeBSD has no MAP_NORESERVE: it never reserves swap for a mapping up front, so there is nothing to opt out of */
 #ifndef MAP_NORESERVE
 #define MAP_NORESERVE 0

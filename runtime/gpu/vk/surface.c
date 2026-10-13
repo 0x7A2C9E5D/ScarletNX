@@ -69,7 +69,7 @@ u32 vk_sc(u32 v) {
 }
 float vk_scf(float v) { return v * g_vk_scale; }
 
-static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 bh, u32 pitch, int is_rt) {
+static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 bh, u32 pitch, int is_rt, u32 layers) {
     Surf* s = calloc(1, sizeof *s);
     if (!s) return NULL;
     s->gva = gva;
@@ -77,7 +77,7 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
     s->h = h;
     s->sw = is_rt ? vk_sc(w) : w;
     s->sh = is_rt ? vk_sc(h) : h;
-    s->layers = 1;
+    s->layers = layers;
     s->levels = 1;
     s->fkey = fkey;
     s->f = f;
@@ -89,13 +89,13 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
     VkImageUsageFlags usage =
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (is_rt) usage |= f.depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    s->type = VK_IMAGE_VIEW_TYPE_2D;
+    s->type = layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
     VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
                             .imageType = VK_IMAGE_TYPE_2D,
                             .format = f.vk,
                             .extent = {s->sw, s->sh, 1},
                             .mipLevels = 1,
-                            .arrayLayers = 1,
+                            .arrayLayers = layers,
                             .samples = VK_SAMPLE_COUNT_1_BIT,
                             .tiling = VK_IMAGE_TILING_OPTIMAL,
                             .usage = usage,
@@ -110,9 +110,9 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
     }
     VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                                 .image = s->img,
-                                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                                .viewType = s->type,
                                 .format = f.vk,
-                                .subresourceRange = {vk_aspect(&f), 0, 1, 0, 1}};
+                                .subresourceRange = {vk_aspect(&f), 0, 1, 0, layers}};
     VK_OK(vkCreateImageView(g_vk.dev, &vi, NULL, &s->att));
     u32 k = hkey(gva);
     s->next = g_surfh[k];
@@ -305,7 +305,7 @@ void vk_rt_flush(u64 gva) {
     s->gw = gpu_mem_generation();
 }
 
-Surf* vk_rt(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch) {
+static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch, u32 layers) {
     if (!w || !h) return NULL;
     u32 fkey = fmt | (depth ? 0x10000 : 0);
     /* the layout is part of what a target is: block linear with its block height, or pitch linear with its pitch */
@@ -316,7 +316,7 @@ Surf* vk_rt(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch) {
         pitch = w * (depth ? vk_zt_format(fmt) : vk_rt_format(fmt)).bpp;
     for (Surf* s = g_surfh[hkey(gva)]; s; s = s->next)
         if (s->gva == gva && s->is_rt && s->w == w && s->h == h && s->fkey == fkey && s->bl == bl && s->bh == bh &&
-            s->pitch == pitch) {
+            s->pitch == pitch && s->layers == layers) {
             s->last_used = g_vk_present;
             s->gw = gpu_mem_generation();
             return s;
@@ -325,7 +325,7 @@ Surf* vk_rt(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch) {
     Surf* parked = NULL;
     for (Surf* s = g_surfh[hkey(gva)]; s; s = s->next)
         if (s->gva == (gva | 1ull << 63) && s->is_rt && s->w == w && s->h == h && s->fkey == fkey && s->bl == bl &&
-            s->bh == bh && s->pitch == pitch && !parked)
+            s->bh == bh && s->pitch == pitch && s->layers == layers && !parked)
             parked = s;
     for (Surf* s = g_surfh[hkey(gva)]; s; s = s->next)
         if (s->gva == gva && s->is_rt) s->gva = gva | 1ull << 63;
@@ -336,13 +336,21 @@ Surf* vk_rt(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch) {
         return parked;
     }
     VkFmt f = depth ? vk_zt_format(fmt) : vk_rt_format(fmt);
-    Surf* s = surf_create(gva, w, h, f, fkey, bl, bh, pitch, 1);
+    Surf* s = surf_create(gva, w, h, f, fkey, bl, bh, pitch, 1, layers);
     if (!s) return NULL;
     s->last_used = g_vk_present;
     s->gw = gpu_mem_generation();
     /* the CPU may have written the memory already (a cleared or decoded frame): start from it */
-    if (!depth) vk_rt_reload(gva);
+    if (!depth && layers == 1) vk_rt_reload(gva);
     return s;
+}
+
+Surf* vk_rt(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch) {
+    return rt_create(gva, w, h, fmt, tile, depth, pitch, 1);
+}
+
+Surf* vk_rt_array(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, u32 pitch, u32 layers) {
+    return rt_create(gva, w, h, fmt, tile, 0, pitch, layers);
 }
 
 void vk_rt_note_read(Surf* s) {

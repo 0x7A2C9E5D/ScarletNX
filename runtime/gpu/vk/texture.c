@@ -757,6 +757,48 @@ static void tex_take_drawn(Surf* t) {
         if (s->copy_dst == t && s->copy_wgen == s->wgen && s->copy_tgen == t->wgen) continue;
         u64 off = s->gva - t->gva;
         if (t->type == VK_IMAGE_VIEW_TYPE_3D) {
+            /* A layered color target can be sampled as a 3D texture at the same address. Its slices only exist in
+               the host image: guest memory is not updated by draws. Copy each array layer to the matching Z slice. */
+            if (s->layers > 1 && off == 0 && s->w == t->w && s->h == t->h && s->layers >= t->depth3d &&
+                s->f.vk == t->f.vk && vk_rt_drawn_fresh(s)) {
+                int scaled = s->sw != s->w || s->sh != s->h;
+                VkFormatProperties p = {0};
+                if (scaled) {
+                    vkGetPhysicalDeviceFormatProperties(g_vk.phys, t->f.vk, &p);
+                    VkFormatFeatureFlags need = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
+                    if ((p.optimalTilingFeatures & need) != need) continue;
+                }
+                vk_render_end();
+                VkCommandBuffer cb = vk_cmd();
+                vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                            VK_ACCESS_2_TRANSFER_READ_BIT);
+                vk_surf_use(cb, t, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                            VK_ACCESS_2_TRANSFER_WRITE_BIT);
+                for (u32 z = 0; z < t->depth3d; z++) {
+                    if (!scaled) {
+                        VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, z, 1},
+                                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                         .dstOffset = {0, 0, (i32)z},
+                                         .extent = {t->w, t->h, 1}};
+                        vkCmdCopyImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->img,
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+                    } else {
+                        VkImageBlit b = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, z, 1},
+                                         .srcOffsets = {{0, 0, 0}, {(i32)s->sw, (i32)s->sh, 1}},
+                                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                         .dstOffsets = {{0, 0, (i32)z}, {(i32)t->w, (i32)t->h, (i32)z + 1}}};
+                        VkFilter filter = p.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT
+                                              ? VK_FILTER_LINEAR
+                                              : VK_FILTER_NEAREST;
+                        vkCmdBlitImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->img,
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b, filter);
+                    }
+                }
+                s->copy_dst = t;
+                s->copy_wgen = s->wgen;
+                s->copy_tgen = t->wgen;
+                continue;
+            }
             /* A 3D block-linear texture can be built a Z slice at a time through 2D targets. The target may be
                wider than the texture: its rows include the 64-byte GOB padding of a narrow slice. */
             if (!t->bl || !s->bl || t->f.bw != 1 || s->f.vk != t->f.vk) continue;
