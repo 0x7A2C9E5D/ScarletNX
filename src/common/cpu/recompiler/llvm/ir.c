@@ -443,7 +443,7 @@ static LLVMValueRef intrinsic(SnxIr* ir, const char* name, LLVMTypeRef type, LLV
 
 /* ---- cpu.h's inline helpers ----
    Each mirrors its C body. They are internal and always inlined, as SNX_INLINE asks, so a constant argument
-   (a condition, a shift type, an access size) folds away as it does in the C the portable backend compiles. */
+   (a condition, a shift type, an access size) folds away as it does in the templates' C compiled with a constant word. */
 
 typedef struct {
     LLVMBasicBlockRef block;

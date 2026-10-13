@@ -135,10 +135,18 @@ if(TARGET snx_llvm)
     snx_test_target(snx-test-llvm-module 11)
     target_include_directories(snx-test-llvm-module PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
     target_link_libraries(snx-test-llvm-module PRIVATE snx_driver ${CMAKE_DL_LIBS})
+    if(TARGET snx_jit)
+        set(snx_extra_backends gcc)
+        target_link_libraries(snx-test-llvm-differential PRIVATE snx_jit)
+        target_compile_definitions(snx-test-llvm-differential PRIVATE SNX_TEST_GCCJIT)
+        add_test(NAME gccjit_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
+            --gccjit --quiet --per-case 2 --simd 100 --states 4)
+        set_tests_properties(gccjit_differential PROPERTIES TIMEOUT 900)
+        add_test(NAME native_recompiler_gcc COMMAND snx_recompiler_test
+            $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}" gcc)
+    endif()
     add_test(NAME llvm_module COMMAND snx-test-llvm-module $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}"
-        "${CMAKE_C_COMPILER}")
-    add_test(NAME native_recompiler_llvm COMMAND snx_recompiler_test
-        $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}" llvm)
+        "${CMAKE_C_COMPILER}" ${snx_extra_backends})
 endif()
 
 add_executable(snx_codegen_test codegen_test.c)

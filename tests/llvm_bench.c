@@ -3,7 +3,8 @@
 /* Speed of the generated code. Each kernel is AArch64 assembly (assembled with CLANG's aarch64 target), recompiled by
    the CLI with each backend, and run AOT with x19 iterations; the final registers of all backends must agree.
      llvm_bench SCARLETNX REPO CLANG [--iterations N] [--backend NAME]... [--kernel NAME]
-   Default backends: portable and llvm. Prints one line per kernel and backend: seconds and ns per iteration. */
+   Default backend: llvm (add gcc with --backend). Prints one line per kernel and backend: seconds and ns per
+   iteration. */
 #include "common.h"
 #include "cpu.h"
 #include "loader/module_abi.h"
@@ -153,10 +154,7 @@ int main(int argc, char** argv) {
         else
             return snx_error("unknown argument %s", argv[a]);
     }
-    if (!nbackends) {
-        backends[nbackends++] = "portable";
-        backends[nbackends++] = "llvm";
-    }
+    if (!nbackends) backends[nbackends++] = "llvm";
     root = snx_temp_dir(NULL);
     for (k = 0; k < sizeof(kernels) / sizeof(kernels[0]); ++k) {
         char *source, *object, *assembly, *input;
@@ -218,10 +216,6 @@ int main(int argc, char** argv) {
             rargs[n++] = argv[1];
             rargs[n++] = "--backend";
             rargs[n++] = backends[b];
-            if (!strcmp(backends[b], "portable")) {
-                rargs[n++] = "--cc";
-                rargs[n++] = argv[3];
-            }
             rargs[n++] = "-q";
             rargs[n] = NULL;
             if (snx_run(rargs, root, NULL, &text) || run(module, image, sizeof(image), iterations, &result, &seconds)) {

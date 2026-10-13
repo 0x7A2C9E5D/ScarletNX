@@ -212,8 +212,7 @@ The test uses synthetic pixels, not a game. It checks offscreen submissions, fra
 readback hashes and PPM contents without WSI. Validation requires the Khronos validation layer to be installed.
 `SNX_TEST_VULKAN` is off by default so ordinary unit tests do not require an ICD.
 
-Cross-builds omit host hactool. Use a native driver for `-x`; `-r --target win64`
-uses llvm-mingw and builds the cross runtime in `build/win64-recomp`.
+Cross-builds omit host hactool and the recompiler's code generator. Use a native driver for `-x` and `-r`.
 
 Host tools only, without SDL/Vulkan/FFmpeg or Python:
 
@@ -223,10 +222,14 @@ build/tools/scarletnx -r -h
 ctest --test-dir build/tools --output-on-failure
 ```
 
-The recompiler generates game code with LLVM by default (`--backend=llvm`): it is built when `llvm-config` is found
-(`-DSNX_LLVM_CONFIG=/path/to/llvm-config` picks one) and writes the module without a C compiler. `--backend=portable`
-prints C and compiles it with Clang, and is what `--cc`, a cross `--target`, `--no-build` or a build without LLVM
-use. Both batch whole functions into units of 90000 instructions (`--chunk`) and print a line per compiled unit.
+The recompiler generates game code with LLVM (`--backend=llvm`, the default and the recommended backend). LLVM's
+development files are required: `llvm-config` finds them (`-DSNX_LLVM_CONFIG=/path/to/llvm-config` picks one), and
+the configure stops without them (a cross build such as `windows-cross` skips them: its recompiler can't build modules,
+recompile on the game's host). Modules are built for the machine that builds them, with its instruction set
+extensions (build == host == target); nothing is detected at run time. Whole functions are batched into units of 90000
+instructions (`--chunk`), with a progress line per compiled unit.
+`--backend=gcc` (libgccjit) is optional, built when libgccjit is found (`-DSNX_GCCJIT_ROOT=` points at another GCC's
+prefix). It is meant for DEC Alpha EV67 hosts, which LLVM has no backend for; everywhere else use LLVM.
 
 Extraction builds missing hactool separately. Recompilation deploys the running full runtime;
 the tools-only build creates one in `build/native-recomp`, or accepts `--runtime FILE`.
