@@ -610,9 +610,36 @@ void exit_epilogue(Ctx* c) {
     emitl(c, "return;");
 }
 
+/* the FTZ/FMZ field of the FP32 arithmetic (Eden's FADD, FMUL and FFMA layouts): set, denormal operands and
+   results flush to zero; clear, they are kept */
+static void note_denorms(Ctx* c, int id, u64 w) {
+    u32 f;
+    switch (id) {
+        case O_FADD_R:
+        case O_FADD_C:
+        case O_FADD_I: f = B(w, 44, 1); break;
+        case O_FADD32I: f = B(w, 55, 1); break;
+        case O_FMUL_R:
+        case O_FMUL_C:
+        case O_FMUL_I: f = B(w, 44, 2); break;
+        case O_FMUL32I:
+        case O_FFMA_R:
+        case O_FFMA_RC:
+        case O_FFMA_CR:
+        case O_FFMA_I:
+        case O_FFMA32I: f = B(w, 53, 2); break;
+        default: return;
+    }
+    if (f)
+        c->si->fp32_flush = 1;
+    else
+        c->si->fp32_preserve = 1;
+}
+
 static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
     u32 d = B(w, 0, 8), a = B(w, 8, 8);
     int id = op->id;
+    note_denorms(c, id, w);
     switch (id) {
         /* ---------------- float */
         case O_FADD_R:

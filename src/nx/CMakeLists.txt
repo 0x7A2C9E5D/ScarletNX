@@ -121,6 +121,17 @@ if(BUILD_TESTING AND SNX_VULKAN)
     add_test(NAME shader_f2i COMMAND snx-test-shader-f2i)
 endif()
 
+# The shader translator and its SPIR-V step offline (no ICD or GPU): the FP32 denormal mode a shader declares
+if(BUILD_TESTING AND SNX_VULKAN)
+    add_executable(snx-test-shader-denorm "${PROJECT_SOURCE_DIR}/tests/shader_denorm.c")
+    target_link_libraries(snx-test-shader-denorm PRIVATE snx_shader snx_spirv)
+    if(NOT WIN32)
+        target_link_libraries(snx-test-shader-denorm PRIVATE Threads::Threads m)
+    endif()
+    set_target_properties(snx-test-shader-denorm PROPERTIES LINKER_LANGUAGE CXX)
+    add_test(NAME shader_denorm COMMAND snx-test-shader-denorm)
+endif()
+
 # Opt-in because normal unit-test runs need neither an ICD nor a GPU. All rendering uses the real runtime.
 if(BUILD_TESTING AND SNX_TEST_VULKAN AND SNX_VULKAN)
     add_executable(snx-test-vulkan "${PROJECT_SOURCE_DIR}/tests/vulkan_headless.c")
