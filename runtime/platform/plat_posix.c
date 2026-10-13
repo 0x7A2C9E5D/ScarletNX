@@ -17,6 +17,7 @@
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
+#include <spawn.h>
 #include <fcntl.h>
 #include <unistd.h>
 #if defined(__linux__)
@@ -29,37 +30,41 @@
 #include <ucontext.h>
 #include <sched.h>
 #include <errno.h>
+extern char** environ;
 /* Run a host text dialog without a shell: the initial text is game data, not a command. */
-int plat_text_input(char* out, size_t cap, const char* initial) {
-    if (!cap) return -1;
+static int text_dialog_run(char* out, size_t cap, char* const argv[]) {
     int fd[2];
     if (pipe(fd)) return -1;
-    pid_t pid = fork();
-    if (pid < 0) {
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions)) {
         close(fd[0]);
         close(fd[1]);
         return -1;
     }
-    if (!pid) {
-        close(fd[0]);
-        if (dup2(fd[1], STDOUT_FILENO) < 0) _exit(127);
-        close(fd[1]);
-        const char* desktop = getenv("XDG_CURRENT_DESKTOP");
-        if (desktop && (strstr(desktop, "KDE") || strstr(desktop, "Plasma")))
-            execlp("kdialog", "kdialog", "--title", "ScarletNX", "--inputbox", "Enter text", initial ? initial : "",
-                   (char*)NULL);
-        execlp("zenity", "zenity", "--entry", "--title=ScarletNX", "--text=Enter text", "--entry-text",
-               initial ? initial : "", (char*)NULL);
-        execlp("kdialog", "kdialog", "--title", "ScarletNX", "--inputbox", "Enter text", initial ? initial : "",
-               (char*)NULL);
-        _exit(127);
-    }
+    int err = posix_spawn_file_actions_addclose(&actions, fd[0]);
+    if (!err) err = posix_spawn_file_actions_adddup2(&actions, fd[1], STDOUT_FILENO);
+    if (!err) err = posix_spawn_file_actions_addclose(&actions, fd[1]);
+    pid_t pid = 0;
+    if (!err) err = posix_spawnp(&pid, argv[0], &actions, NULL, argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
     close(fd[1]);
+    if (err) {
+        close(fd[0]);
+        return err == ENOENT ? -2 : -1;
+    }
     size_t n = 0;
     char c;
-    while (read(fd[0], &c, 1) == 1) {
+    int read_error = 0;
+    for (;;) {
+        ssize_t got = read(fd[0], &c, 1);
+        if (got < 0 && errno == EINTR) continue;
+        if (got < 0) read_error = 1;
+        if (got != 1) break;
         if (c == '\n') break;
-        if (n + 1 < cap) out[n++] = c;
+        if (n + 1 < cap)
+            out[n++] = c;
+        else
+            read_error = 1;
     }
     close(fd[0]);
     out[n] = 0;
@@ -68,7 +73,20 @@ int plat_text_input(char* out, size_t cap, const char* initial) {
         if (errno != EINTR) return -1;
     }
     if (!WIFEXITED(status)) return -1;
-    return WEXITSTATUS(status) == 0 ? 0 : WEXITSTATUS(status) == 1 ? 1 : -1;
+    if (WEXITSTATUS(status) == 127) return -2;
+    return read_error ? -1 : WEXITSTATUS(status) == 0 ? 0 : WEXITSTATUS(status) == 1 ? 1 : -1;
+}
+int plat_text_input(char* out, size_t cap, const char* initial) {
+    if (!cap) return -1;
+    if (!initial) initial = "";
+    char* zenity[] = {"zenity",       "--entry", "--title=ScarletNX", "--text=Enter text", "--entry-text",
+                      (char*)initial, NULL};
+    char* kdialog[] = {"kdialog", "--title", "ScarletNX", "--inputbox", "Enter text", (char*)initial, NULL};
+    const char* desktop = getenv("XDG_CURRENT_DESKTOP");
+    int kde = desktop && (strstr(desktop, "KDE") || strstr(desktop, "Plasma"));
+    int result = text_dialog_run(out, cap, kde ? kdialog : zenity);
+    if (result == -2) result = text_dialog_run(out, cap, kde ? zenity : kdialog);
+    return result == -2 ? -1 : result;
 }
 /* FreeBSD has no MAP_NORESERVE: it never reserves swap for a mapping up front, so there is nothing to opt out of */
 #ifndef MAP_NORESERVE

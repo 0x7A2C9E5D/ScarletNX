@@ -142,8 +142,9 @@ typedef struct Surf {
     u32 fkey;    /* guest format | 0x10000 for depth */
     VkFmt f;
     u32 bl, bh, bd, pitch; /* guest layout: block linear with block height 2^bh GOBs, or pitch linear */
-    u64 layer_size;        /* textures: bytes from one layer to the next in guest memory */
+    u64 layer_size;        /* bytes from one layer to the next in guest memory */
     int is_rt;
+    int volume;           /* render target layers use 3D block-linear memory rather than array strides */
     VkImageViewType type; /* what it was created as */
     VkImage img;
     VmaAllocation mem;
@@ -181,7 +182,7 @@ u32 vk_sc(u32 v);      /* a size or coordinate scaled, at least 1 */
 float vk_scf(float v); /* the same for viewport values */
 /* w in pixels; pitch: bytes per row of a pitch-linear target (the register holds it in place of the width) */
 Surf* vk_rt(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch);
-Surf* vk_rt_array(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, u32 pitch, u32 layers);
+Surf* vk_rt_array(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, u32 pitch, u32 layers, u64 layer_size, int volume);
 Surf* vk_rt_find(u64 gva);
 Surf* vk_rt_snapshot(Surf* rt);                  /* copy a target so a draw can sample its contents while writing it */
 Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h); /* the render target the guest presents from that memory */

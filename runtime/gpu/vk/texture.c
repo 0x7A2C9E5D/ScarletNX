@@ -298,10 +298,11 @@ static Surf* rt_crop(Surf* rt, u32 w, u32 h) {
         c->h = h;
         c->sw = vk_sc(w) < rt->sw ? vk_sc(w) : rt->sw; /* the same region of the scaled target */
         c->sh = vk_sc(h) < rt->sh ? vk_sc(h) : rt->sh;
-        c->layers = c->levels = c->depth3d = 1;
+        c->layers = rt->layers;
+        c->levels = c->depth3d = 1;
         c->f = rt->f;
         c->fkey = rt->fkey;
-        c->type = VK_IMAGE_VIEW_TYPE_2D;
+        c->type = rt->type;
         c->is_rt = 1; /* sampled like one; not in the table, so never found as one */
         c->layout = VK_IMAGE_LAYOUT_UNDEFINED;
         VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -309,7 +310,7 @@ static Surf* rt_crop(Surf* rt, u32 w, u32 h) {
                                 .format = rt->f.vk,
                                 .extent = {c->sw, c->sh, 1},
                                 .mipLevels = 1,
-                                .arrayLayers = 1,
+                                .arrayLayers = rt->layers,
                                 .samples = VK_SAMPLE_COUNT_1_BIT,
                                 .tiling = VK_IMAGE_TILING_OPTIMAL,
                                 .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
@@ -338,7 +339,9 @@ static Surf* rt_crop(Surf* rt, u32 w, u32 h) {
         /* A depth/stencil texture view samples depth. Copy only that aspect: VkImageCopy requires one aspect per
            region, and the snapshot's stencil is never read. */
         VkImageAspectFlags a = rt->f.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-        VkImageCopy r = {.srcSubresource = {a, 0, 0, 1}, .dstSubresource = {a, 0, 0, 1}, .extent = {c->sw, c->sh, 1}};
+        VkImageCopy r = {.srcSubresource = {a, 0, 0, rt->layers},
+                         .dstSubresource = {a, 0, 0, rt->layers},
+                         .extent = {c->sw, c->sh, 1}};
         vkCmdCopyImage(cb, rt->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, c->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                        1, &r);
         c->crop_gen = rt->wgen;
@@ -787,11 +790,9 @@ static void tex_take_drawn(Surf* t) {
                                          .srcOffsets = {{0, 0, 0}, {(i32)s->sw, (i32)s->sh, 1}},
                                          .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                                          .dstOffsets = {{0, 0, (i32)z}, {(i32)t->w, (i32)t->h, (i32)z + 1}}};
-                        VkFilter filter = p.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT
-                                              ? VK_FILTER_LINEAR
-                                              : VK_FILTER_NEAREST;
+                        /* Sampling applies the texture's filter later; keep the LUT texels unchanged here. */
                         vkCmdBlitImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->img,
-                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b, filter);
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b, VK_FILTER_NEAREST);
                     }
                 }
                 s->copy_dst = t;
@@ -846,11 +847,8 @@ static void tex_take_drawn(Surf* t) {
                                          .srcOffsets = {{0, 0, 0}, {(i32)vk_sc(lw), (i32)vk_sc(lh), 1}},
                                          .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, 1},
                                          .dstOffsets = {{0, 0, (i32)z}, {(i32)lw, (i32)lh, (i32)z + 1}}};
-                        VkFilter filter = p.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT
-                                              ? VK_FILTER_LINEAR
-                                              : VK_FILTER_NEAREST;
                         vkCmdBlitImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->img,
-                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b, filter);
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b, VK_FILTER_NEAREST);
                     }
                     s->copy_dst = t;
                     s->copy_wgen = s->wgen;
