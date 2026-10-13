@@ -93,8 +93,7 @@ built separately and installed beside it or made available on PATH.
 To build it alongside the NX runtime (which supports `-H` for no-window runs):
 
 ```sh
-cmake -S . -B build/gui \
-  -DSNX_H264=OFF -DSNX_DEPLOY=OFF -DSNX_BUILD_GUI=ON
+cmake -S . -B build/gui -DSNX_DEPLOY=OFF -DSNX_BUILD_GUI=ON
 cmake --build build/gui
 ctest --test-dir build/gui -R '^gui_' --output-on-failure
 ```

@@ -12,7 +12,7 @@ description: "Build the ScarletNX runtime and recompile games correctly, avoidin
    network once. They build in the same tree as the runtime: hactool from our own CMake script (`cmake/hactool.cmake`, since
    its own is a Makefile), FFmpeg with its own configure and make run by `cmake/ffmpeg.cmake` (logs in
    `build/default/ffmpeg_build-prefix/src/ffmpeg_build-stamp/`), the others through their CMake.
-   Clang only: any other compiler stops the configure. With `SNX_H264` on (the default) the configure also stops when
+   Clang only: any other compiler stops the configure. FFmpeg is required by the NX runtime. Configure also stops when
    the FFmpeg source path (the checkout, or `CPM_SOURCE_CACHE`) has a space in it, since FFmpeg's configure can't
    build from one, and on x86-64 when NASM is missing (below). On Windows, `scripts\bootstrap.ps1` downloads the
    toolchain (llvm-mingw, CMake, Ninja, NASM, Python, and w64devkit for the sh and GNU make FFmpeg needs) into
@@ -26,7 +26,7 @@ description: "Build the ScarletNX runtime and recompile games correctly, avoidin
 
 | What happens | Why | What to do |
 | --- | --- | --- |
-| Movies stay black, the log says no H.264 decoder | A runtime built some other way than CMake (upstream's recompiler had its own build) drops the H.264 decoder without a word | Build the runtime with CMake (`scripts/recomp.py` does), which always builds FFmpeg in unless `-DSNX_H264=OFF`. |
+| Movies stay black, the log says no H.264 decoder | A runtime built some other way than CMake (upstream's recompiler had its own build) drops the H.264 decoder without a word | Build the runtime with CMake (`scripts/recomp.py` does), which always builds FFmpeg into the NX runtime. |
 | The configure stops with "NASM was not found" | FFmpeg's x86-64 assembly needs NASM, and a build without it decodes movies several times slower, so it is never dropped silently | Install `nasm`. `-DSNX_FFMPEG_ASM=OFF` builds FFmpeg without its assembly on purpose (slower movies). |
 | A fix has no effect | The game ran an old runtime: the build didn't deploy (no `_code.so` in `games/` yet), or the game was already running | Check the deploy lines. On Linux a running game keeps its old copy (the deploy renames over it). On Windows a running `.exe` can't be replaced, so stop the game before building. |
 | Two build folders disagree on what is deployed | Every build folder with `SNX_DEPLOY` on deploys to the same `games/` | The last build wins. Configure extra folders with `-DSNX_DEPLOY=OFF`. The recompiler builds its runtime in `build/<preset>-recomp` with `SNX_DEPLOY=OFF` (`scarletnx/toolchain.py`), so the preset's own folder keeps deploying. |
@@ -38,9 +38,9 @@ description: "Build the ScarletNX runtime and recompile games correctly, avoidin
 
 The renderer is Vulkan, and the sdl3 backend is the only window backend on Linux and Windows (the OpenGL renderer
 and the x11, x11es, win32 and android backends were removed on 2026-10-11). A GPU or driver without Vulkan 1.3 stops
-the runtime at startup with a message. The headless backend has the null renderer. The interface is the `Renderer`
-table in `gpu/renderer.h`, which `vk_renderer` and `null_renderer` fill in completely: everything else calls
-`g_renderer->draw(...)` and so on.
+the runtime at startup with a message. SDL3 is always linked. `-H` skips SDL video initialization and uses Vulkan
+offscreen, with no separate headless backend. The interface is the `Renderer` table in `gpu/renderer.h`:
+everything else calls `g_renderer->draw(...)` and so on.
 
 The build also makes `snx-shaderc`. `snx-shaderc --nvn DIR --cache games/shader_cache/spirv` pre-translates a game's
 NVN shader files into the SPIR-V cache (`scripts/recomp.py` runs it on any romfs folder holding them); to measure what

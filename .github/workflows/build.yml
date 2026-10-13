@@ -43,7 +43,7 @@ jobs:
       - name: Build the SDL3 fallback without a system package
         run: |
           cmake --preset default -B build/sdl-fallback -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON \
-            -DSNX_DEPLOY=OFF -DSNX_H264=OFF -DBUILD_TESTING=OFF -DSDL_WAYLAND=OFF
+            -DSNX_DEPLOY=OFF -DBUILD_TESTING=OFF -DSDL_WAYLAND=OFF
           cmake --build build/sdl-fallback --target scarletnx
       - name: Build SDL3 with headless Vulkan tests
         run: |

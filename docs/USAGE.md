@@ -157,8 +157,7 @@ build, but headless runs do not initialize its video subsystem or require a disp
 Rendering still uses Vulkan 1.3, including uploads, draws, compute and screenshot readback. Headless runs
 create no window, `VkSurfaceKHR` or swapchain and request no WSI extensions, including `VK_EXT_headless_surface`.
 Frames still submit and recycle their resources. `--seconds`, `--frames`, `--script` and `--shot` work as before.
-Keep `SNX_H264=ON` (the build default) for games that play H.264 video. With decoding disabled, those scenes can
-present black frames even though Vulkan is drawing and frame counts advance.
+FFmpeg decoding is always included in the NX runtime, including headless builds, for video and hwopus audio.
 
 To use software rendering, select Mesa's **lavapipe Vulkan ICD**, rather than the hardware driver. Mesa may
 report this device as `llvmpipe` in the Vulkan log. Selecting a CPU ICD is independent of `-H`:

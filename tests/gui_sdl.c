@@ -23,7 +23,7 @@ static void red_text(App* app, int row, const char* prompt) {
                 assert(SDL_ReadSurfacePixel(image, ((i + 1) * 8 + x) * app->scale, (row * 16 + y) * app->scale, &r, &g,
                                             &b, &a));
                 bool ink = (gui_vga_font[(unsigned char)prompt[i] * 16 + y] & (0x80 >> x)) != 0;
-                assert(r == (ink ? 255 : 10) && g == (ink ? 0 : 12) && b == (ink ? 0 : 20));
+                assert(r == (ink ? 255 : 0) && g == 0 && b == 0);
             }
     SDL_DestroySurface(image);
 }

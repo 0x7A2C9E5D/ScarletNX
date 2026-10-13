@@ -14,8 +14,10 @@ Run from checkout root. [Extract/AOT/run](USAGE.md) · [Tests/diagnostics](DEVEL
 - **Windows:** Win10/11 x64 + Git. Bootstrap stages SHA-256-checked llvm-mingw/Clang, CMake, Ninja,
   NASM and w64devkit in `deps/tools`. llvm-mingw has no LLVM libraries. Install LLVM development files
   compatible with MinGW and set `-DSNX_LLVM_CONFIG=/path/to/llvm-config`. CMake fails without them.
-- **Display:** a Vulkan 1.3 driver. Headless builds omit SDL3 and use Vulkan offscreen.
-- **FFmpeg:** avoid spaces in checkout/cache paths.
+- **Display:** a Vulkan 1.3 driver. Headless runs use Vulkan offscreen and skip SDL video initialization.
+  SDL3 remains a required build dependency.
+- **FFmpeg:** required by every NX runtime build. CMake builds the pinned source release.
+  Avoid spaces in checkout/cache paths.
 
 ## Linux / FreeBSD
 
@@ -105,15 +107,17 @@ cmake --preset default -B build && cmake --build build
 
 ### SDL3 troubleshooting
 
-On Linux and FreeBSD, CMake first looks for `SDL3Config.cmake`. If it is missing, CMake downloads and
-builds the same SHA-256-pinned SDL3 used on Windows. The fallback is static, so no separate SDL3 runtime
+On all platforms, CPM first looks for a compatible SDL3 development package (3.4.18 or newer) through
+`SDL3Config.cmake`. If none is found, CPM downloads and builds the SHA-256-pinned SDL3. The fallback is static, so no separate SDL3 runtime
 installation is needed. It still needs your platform's window-system development libraries.
 
 - An old checkout showing `Could not find a package configuration file provided by SDL3` needs either
   the SDL3 **development** package or this updated fallback. Pull the latest checkout and configure again.
 - For SDL3 installed in a custom prefix, pass `-DCMAKE_PREFIX_PATH=/path/to/prefix`, or
   `-DSDL3_DIR=/path/to/prefix/lib/cmake/SDL3` (the directory containing `SDL3Config.cmake`).
-- To force the source build, pass `-DSNX_BUNDLED_SDL3=ON`.
+- To force the source build, pass `-DCPM_DOWNLOAD_SDL3=ON`. This is CPM 0.43.2's per-package override.
+  That version does not support `CPM_FORCE_BUNDLED_SDL3`. No bundled override is forced by ScarletNX.
+  The source build is recommended on Windows to match the MinGW toolchain and keep SDL3 statically linked.
 - If SDL3's configure reports missing X11/Wayland development libraries, install the packages above.
   Do not work around that by disabling both display backends for a windowed build.
 - No sound, and the log says `audio: SDL could not start its audio: No available audio device`: the
@@ -171,10 +175,13 @@ Default: Ninja + Clang, `RelWithDebInfo` (`-O2 -g`). Runtime relinks deploy `gam
 matching `Game_code.so/.dll`; no-op builds skip deployment. Recompiler/ABI edits require [module rebuilds](DEVELOPMENT.md).
 
 CPM: [SHA-256-pinned sources](../cmake/dependencies.cmake), shared `.cache/cpm` cache, offline configure when populated.
-Override via CMake/env `CPM_SOURCE_CACHE`. SDL3: prefer the system development package on Unix,
-otherwise build the pinned static version. Windows always uses the pinned static build.
+Override via CMake/env `CPM_SOURCE_CACHE`. SDL3 uses CPM's system-package discovery with a pinned static
+source fallback. Use `-DCPM_DOWNLOAD_SDL3=ON` to request the bundled source build.
 
 ## Build variants
+
+SDL3, Vulkan and FFmpeg are mandatory for the NX runtime, including when running with `-H`.
+There are no renderer or media-decoding disable options. Tools-only, hactool-only and GNUABI-only builds do not need them.
 
 Persistent per-build-dir options (POSIX examples):
 
@@ -183,8 +190,7 @@ cmake --preset default -B build -DSNX_FFMPEG_ASM=OFF && cmake --build build
 ```
 
 - `-DSNX_FFMPEG_ASM=OFF`: omit x86-64 NASM assembly; slower FFmpeg decoding.
-- `-DSNX_H264=OFF`: disable FFmpeg, including NVDEC video and hwopus Opus decoding.
-- `-DSNX_BUNDLED_SDL3=ON`: build the pinned SDL3 instead of using a system SDL3 development package.
+- `-DCPM_DOWNLOAD_SDL3=ON`: build the pinned SDL3 instead of using a system SDL3 development package.
 - `-DSNX_DEPLOY=OFF`: disable runtime deployment.
 - `-DSNX_GAMES_DIR=/path`: override deployment dir (default: `games/`).
 - `-DCPM_SOURCE_CACHE=/path`: override source-download cache.

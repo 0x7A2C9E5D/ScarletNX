@@ -178,6 +178,8 @@ add_test(NAME astc_decode COMMAND snx-test-astc)
 
 add_executable(snx-test-audio-out audio_out.c)
 snx_test_target(snx-test-audio-out 11)
+# Isolate audout in this fixture without FFmpeg, also when testing a tools-only build.
+# Production NX targets always link FFmpeg and never define SNX_NO_H264.
 target_compile_definitions(snx-test-audio-out PRIVATE SNX_NO_H264)
 add_test(NAME audio_out COMMAND snx-test-audio-out)
 
