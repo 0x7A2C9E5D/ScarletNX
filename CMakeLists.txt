@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 # Builds the ScarletNX runtime for Linux or FreeBSD, or for Windows with llvm-mingw (natively, or cross-built). The
-# game module (<Game>_code.so or .dll) comes from `scarletnx --recompile`. The
+# game module (<Game>_code.so or .dll) comes from `scarletnx -r`. The
 # third-party libraries are fetched and built with the runtime, see cmake/dependencies.cmake.
 #
 #   cmake --preset default && cmake --build --preset default        (or windows-cross; see CMakePresets.json)
@@ -50,7 +50,7 @@ if(SNX_BACKEND STREQUAL "sdl3")
 else()
     set(snx_vulkan_default OFF)
 endif()
-option(SNX_VULKAN "Build the Vulkan renderer (also supports --headless)" ${snx_vulkan_default})
+option(SNX_VULKAN "Build the Vulkan renderer (also supports -H)" ${snx_vulkan_default})
 if(SNX_BUILD_NX AND SNX_BACKEND STREQUAL "sdl3" AND NOT SNX_VULKAN)
     message(FATAL_ERROR "The SDL3 backend requires SNX_VULKAN=ON. Use SNX_BACKEND=headless for the null renderer.")
 endif()
