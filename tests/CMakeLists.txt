@@ -84,6 +84,10 @@ add_test(NAME bsd_service COMMAND snx-test-bsd-service)
 set_tests_properties(bsd_service PROPERTIES TIMEOUT 60)
 
 if(SNX_BUILD_NX)
+add_test(NAME llvm_dependency COMMAND "${CMAKE_COMMAND}"
+    "-DSNX_SOURCE_DIR=${PROJECT_SOURCE_DIR}" "-DSNX_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/llvm-dependency"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/llvm_dependency.cmake")
+
 add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
 snx_test_target(snx-test-startup 90)
 add_test(NAME startup_options COMMAND snx-test-startup)
@@ -132,38 +136,36 @@ snx_test_target(snx_recompiler_test 23)
 target_include_directories(snx_recompiler_test PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
 target_link_libraries(snx_recompiler_test PRIVATE snx_driver ${CMAKE_DL_LIBS})
 
-# what builds game modules: LLVM, which a Windows build may lack for now (cmake/llvm.cmake)
-if(TARGET snx_llvm)
-    add_test(NAME native_recompiler COMMAND snx_recompiler_test
-        $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}")
-    add_executable(snx-test-llvm-differential llvm_differential.c)
-    snx_test_target(snx-test-llvm-differential 11)
-    target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
-    add_test(NAME llvm_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
-        --quiet)
-    set_tests_properties(llvm_differential PROPERTIES TIMEOUT 900)
-    # not a test: timings of the generated code (llvm_bench SCARLETNX REPO CLANG)
-    add_executable(snx-llvm-bench llvm_bench.c)
-    snx_test_target(snx-llvm-bench 11)
-    target_include_directories(snx-llvm-bench PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
-    target_link_libraries(snx-llvm-bench PRIVATE snx_driver ${CMAKE_DL_LIBS})
-    add_executable(snx-test-llvm-module llvm_module.c)
-    snx_test_target(snx-test-llvm-module 11)
-    target_include_directories(snx-test-llvm-module PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
-    target_link_libraries(snx-test-llvm-module PRIVATE snx_driver ${CMAKE_DL_LIBS})
-    if(TARGET snx_jit)
-        set(snx_extra_backends gcc)
-        target_link_libraries(snx-test-llvm-differential PRIVATE snx_jit)
-        target_compile_definitions(snx-test-llvm-differential PRIVATE SNX_TEST_GCCJIT)
-        add_test(NAME gccjit_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
-            --gccjit --quiet --per-case 2 --simd 100 --states 4)
-        set_tests_properties(gccjit_differential PROPERTIES TIMEOUT 900)
-        add_test(NAME native_recompiler_gcc COMMAND snx_recompiler_test
-            $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}" gcc)
-    endif()
-    add_test(NAME llvm_module COMMAND snx-test-llvm-module $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}"
-        "${CMAKE_C_COMPILER}" ${snx_extra_backends})
+# LLVM is always available to the recompiler.
+add_test(NAME native_recompiler COMMAND snx_recompiler_test
+    $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}")
+add_executable(snx-test-llvm-differential llvm_differential.c)
+snx_test_target(snx-test-llvm-differential 11)
+target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
+add_test(NAME llvm_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
+    --quiet)
+set_tests_properties(llvm_differential PROPERTIES TIMEOUT 900)
+# not a test: timings of the generated code (llvm_bench SCARLETNX REPO CLANG)
+add_executable(snx-llvm-bench llvm_bench.c)
+snx_test_target(snx-llvm-bench 11)
+target_include_directories(snx-llvm-bench PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
+target_link_libraries(snx-llvm-bench PRIVATE snx_driver ${CMAKE_DL_LIBS})
+add_executable(snx-test-llvm-module llvm_module.c)
+snx_test_target(snx-test-llvm-module 11)
+target_include_directories(snx-test-llvm-module PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
+target_link_libraries(snx-test-llvm-module PRIVATE snx_driver ${CMAKE_DL_LIBS})
+if(TARGET snx_jit)
+    set(snx_extra_backends gcc)
+    target_link_libraries(snx-test-llvm-differential PRIVATE snx_jit)
+    target_compile_definitions(snx-test-llvm-differential PRIVATE SNX_TEST_GCCJIT)
+    add_test(NAME gccjit_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
+        --gccjit --quiet --per-case 2 --simd 100 --states 4)
+    set_tests_properties(gccjit_differential PROPERTIES TIMEOUT 900)
+    add_test(NAME native_recompiler_gcc COMMAND snx_recompiler_test
+        $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}" gcc)
 endif()
+add_test(NAME llvm_module COMMAND snx-test-llvm-module $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}"
+    "${CMAKE_C_COMPILER}" ${snx_extra_backends})
 
 add_executable(snx_codegen_test codegen_test.c)
 snx_test_target(snx_codegen_test 90)

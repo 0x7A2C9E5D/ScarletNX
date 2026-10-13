@@ -12,8 +12,8 @@ Run from checkout root. [Extract/AOT/run](USAGE.md) · [Tests/diagnostics](DEVEL
   Use a system SDL3 development package, or X11/Wayland and audio development libraries for the bundled
   SDL3 build.
 - **Windows:** Win10/11 x64 + Git. Bootstrap stages SHA-256-checked llvm-mingw/Clang, CMake, Ninja,
-  NASM and w64devkit in `deps/tools`. llvm-mingw has no LLVM libraries: without an LLVM for MinGW
-  (`-DSNX_LLVM_CONFIG=`), `scarletnx -r` stages data but builds no game module.
+  NASM and w64devkit in `deps/tools`. llvm-mingw has no LLVM libraries. Install LLVM development files
+  compatible with MinGW and set `-DSNX_LLVM_CONFIG=/path/to/llvm-config`. CMake fails without them.
 - **Display:** a Vulkan 1.3 driver. Headless builds omit SDL3 and use Vulkan offscreen.
 - **FFmpeg:** avoid spaces in checkout/cache paths.
 
@@ -216,7 +216,10 @@ The test uses synthetic pixels, not a game. It checks offscreen submissions, fra
 readback hashes and PPM contents without WSI. Validation requires the Khronos validation layer to be installed.
 `SNX_TEST_VULKAN` is off by default so ordinary unit tests do not require an ICD.
 
-Cross-builds omit host hactool and the recompiler's code generator. Use a native driver for `-x` and `-r`.
+Cross-builds omit host hactool. Use a native driver for `-x`. The recompiler still requires LLVM development
+files for the target. `SNX_LLVM_CONFIG` must run on the build machine and describe that target installation,
+not the build machine's LLVM libraries. Running the `snx-rtlib-gen` build helper also requires a suitable
+`CMAKE_CROSSCOMPILING_EMULATOR`.
 
 Host tools only, without SDL/Vulkan/FFmpeg or Python:
 
@@ -228,8 +231,8 @@ ctest --test-dir build/tools --output-on-failure
 
 The recompiler generates game code with LLVM (`--backend=llvm`, the default and the recommended backend). LLVM's
 development files are required: `llvm-config` finds them (`-DSNX_LLVM_CONFIG=/path/to/llvm-config` picks one), and
-the configure stops without them (a cross build such as `windows-cross` skips them, and a native Windows build without
-an LLVM for MinGW warns instead: their recompiler can't build modules). Modules are built for the machine that builds them, with its instruction set
+the configure stops without them on every platform, including Windows and cross-builds. There is no recompiler
+build without LLVM. Modules are built for the machine that builds them, with its instruction set
 extensions (build == host == target); nothing is detected at run time. Whole functions are batched into units of 90000
 instructions (`--chunk`), with a progress line per compiled unit.
 `--backend=gcc` (libgccjit) is optional, built when libgccjit is found (`libgccjit` on Arch, `libgccjit-14-dev` on
