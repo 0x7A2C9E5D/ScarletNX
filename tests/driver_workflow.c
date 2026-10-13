@@ -96,7 +96,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     free(partial);
     rc = event('R');
     if (rc || (!strcmp(getenv("SNX_WORKFLOW_MODE"), "missing") && getenv("SNX_WORKFLOW_FAIL") &&
-               !strcmp(getenv("SNX_WORKFLOW_FAIL"), "R"))) return rc;
+               !strcmp(getenv("SNX_WORKFLOW_FAIL"), "R")))
+        return rc;
 #ifdef _WIN32
     game = snx_format("%s/%s.exe", argv[1], argv[4]);
 #else
