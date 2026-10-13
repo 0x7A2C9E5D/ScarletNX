@@ -76,8 +76,8 @@ bump `SNX_ABI` for ABI changes. Version mismatches reject loading.
 ### Guest exec
 
 Guest thread = host thread + `CPU` + TLS. `hle/kernel/thread.c`: one owner/core, four cores; release on kernel block,
-sleep/yield, IPC, WFE. Waiters: priority then FIFO; higher-priority preemption at the next SVC.
-SVC/WFE-free spins retain their core.
+sleep/yield, IPC, WFE. Waiters: priority then FIFO; a waiter of higher priority takes the core at the holder's next
+SVC or backward branch (`CPU.poll`, `RtAPI.poll`).
 
 `memory/mem.c`: one guest VA reservation; `GP(addr) = g_mem + addr`, accessed directly by generated code.
 

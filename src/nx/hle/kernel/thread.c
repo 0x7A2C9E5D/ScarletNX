@@ -69,8 +69,8 @@ KThread* kthread_create(u64 entry, u64 arg, u64 stack_top, int prio, int core) {
    runs and lets go only where a console thread is off the CPU too: when it blocks in the kernel, sleeps or yields,
    makes an IPC call, or waits in WFE. A thread letting go hands the core to its waiting thread of highest priority, the
    earliest among equals. The console also preempts a running thread as soon as one of higher priority becomes ready:
-   here the holder can only be stopped at its next SVC (core_preempt), so a thread spinning without SVCs or WFE keeps its
-   core until it blocks. A yield hands the core to any waiting thread, even one of lower priority: the console would run
+   here the holder is stopped at its next SVC or at its next backward branch (CPU.poll, core_poll), so a thread spinning
+   in a loop lets go of its core within one round of it. A yield hands the core to any waiting thread, even one of lower priority: the console would run
    that one on an idle core, and threads don't move between cores here */
 static PMutex g_core_lk;
 static PCond g_core_cv[NCORES];
@@ -80,11 +80,19 @@ static int
     g_core_best[NCORES]; /* the best (lowest) priority waiting, 64 when none: core_preempt and core_yield read it
                                    unlocked */
 static u64 g_core_ticket;
+/* the holder of core k is asked to let go (CPU.poll, which generated code checks on every backward branch) while a
+   thread of higher priority waits for the core: the console would have preempted it already */
+static void core_flag_nl(int k) {
+    KThread* o = g_core_owner[k];
+    if (o)
+        __atomic_store_n(&o->cpu.poll, __atomic_load_n(&g_core_best[k], __ATOMIC_RELAXED) < o->prio, __ATOMIC_RELAXED);
+}
 static KThread* core_first_nl(int k) {
     KThread* b = NULL;
     for (KThread* w = g_core_wait[k]; w; w = w->core_next)
         if (!b || w->prio < b->prio || (w->prio == b->prio && w->core_ticket < b->core_ticket)) b = w;
     __atomic_store_n(&g_core_best[k], b ? b->prio : 64, __ATOMIC_RELAXED);
+    core_flag_nl(k);
     return b;
 }
 /* core k to w, a thread waiting for it */
@@ -95,12 +103,14 @@ static void core_grant_nl(KThread* w, int k) {
     core_first_nl(k);
     g_core_owner[k] = w;
     w->on_core = k;
+    core_flag_nl(k);
     pc_broadcast(&g_core_cv[k]);
 }
 static void core_release_nl(KThread* t) {
     int k = t->on_core;
     g_core_owner[k] = NULL;
     t->on_core = -1;
+    __atomic_store_n(&t->cpu.poll, 0, __ATOMIC_RELAXED);
     KThread* w = core_first_nl(k);
     if (w) core_grant_nl(w, k);
 }
@@ -133,6 +143,9 @@ void core_preempt(KThread* t) {
     core_release_nl(t);
     core_wait_nl(t);
     pm_unlock(&g_core_lk);
+}
+void core_poll(KThread* t) {
+    if (t) core_preempt(t);
 }
 void core_yield(KThread* t) {
     int k = t->on_core;

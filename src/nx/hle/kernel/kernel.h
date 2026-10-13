@@ -98,6 +98,7 @@ void kevent_clear(KEvent* e);
 KThread* kthread_cur(void);
 void core_enter(KThread* t); /* waits for its core to be free, then holds it */
 void core_leave(KThread* t); /* lets another thread on its core run */
+void core_poll(KThread* t);  /* RtAPI.poll: a loop met CPU.poll, the runtime may take its core */
 void kernel_run_main(u64 entry, u64 stack_size, int prio, int core);
 void snx_svc(CPU* c, u32 imm);
 extern PMutex g_klock;

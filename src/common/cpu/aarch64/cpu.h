@@ -28,8 +28,8 @@ typedef double f64;
 
 /* the version of the contract between a game module and the runtime (this header, cpu_helpers.c, RtAPI and the
    module descriptor). The recompiler stamps it into each module, the runtime refuses a module with another one */
-/* Stateful FP arithmetic changes generated semantics: rebuild runtime and modules. */
-#define SNX_ABI 6
+/* 7: CPU.poll and RtAPI.poll, checked on the backward branches of generated code. */
+#define SNX_ABI 7
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)
@@ -68,6 +68,9 @@ typedef struct CPU {
     u64 code_lo, code_hi;
     const RtAPI* rt;
     void* thread; /* owning runtime thread or process */
+    /* set by another host thread when the runtime wants this one back (a thread of higher priority waits for its
+       core): generated code reads it on every backward branch and then calls rt->poll */
+    u32 poll;
 } CPU;
 
 /* ---- memory: base + addr, no page tables ---- */
