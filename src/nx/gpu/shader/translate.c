@@ -794,8 +794,9 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
         case O_F2I_I: {
             char* src = opBf(c, w, id - O_F2I_R);
             if (B(w, 10, 2) == 1) src = T("unpackHalf2x16(%s).%c", opB(c, w, id - O_F2I_R), B(w, 41, 1) ? 'y' : 'x');
-            /* Pinned Eden F2I encoding: ABS at 45, NEG at 49. */
-            src = fneg_abs(src, B(w, 49, 1), B(w, 45, 1));
+            /* NEG at 45 and ABS at 49, as Ryujinx and rEden read them. Upstream Eden swaps the two (from yuzu), and
+               the console's signed % needs bit 45 to negate: F2I.TRUNC of -(a / b), then IMAD q * b + a */
+            src = fneg_abs(src, B(w, 45, 1), B(w, 49, 1));
             static const char* fn[4] = {"roundEven", "floor", "ceil", "trunc"};
             src = T("%s(%s)", fn[B(w, 39, 2)], src);
             /* saturating, NaN to 0, and a 16-bit destination (IDstFmt bits 8-9 = 1) clamped to its range */
