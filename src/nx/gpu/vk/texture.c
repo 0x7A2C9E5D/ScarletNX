@@ -281,11 +281,14 @@ static Surf* tex_create(u64 gva, u32 w, u32 h, u32 layers, u32 d3, u32 levels, V
    copy per size, in a list through next: one draw can hold copies of a target at two sizes (two headers, or two
    stages), so a copy isn't replaced while a draw may hold it. Copies not read for a second go; their views and image
    when the frame being recorded is done, as descriptors may still name them */
-static Surf* rt_crop(Surf* rt, u32 w, u32 h) {
+/* the target's top-left w x h copied out, in the target's format, or in as: another color format of the same texel
+   size, the target's bytes read as that format (a bit copy, which vkCmdCopyImage makes between such formats) */
+static Surf* rt_crop(Surf* rt, u32 w, u32 h, const VkFmt* as) {
     Surf* c = NULL;
+    VkFmt f = as ? *as : rt->f;
     for (Surf** pp = &rt->crop; *pp;) {
         Surf* x = *pp;
-        if (x->w == w && x->h == h)
+        if (x->w == w && x->h == h && x->f.vk == f.vk)
             c = x;
         else if ((i32)(g_vk_present - (u32)x->last_used) > 60) {
             *pp = x->next;
@@ -306,14 +309,14 @@ static Surf* rt_crop(Surf* rt, u32 w, u32 h) {
         c->sh = vk_sc(h) < rt->sh ? vk_sc(h) : rt->sh;
         c->layers = rt->layers;
         c->levels = c->depth3d = 1;
-        c->f = rt->f;
+        c->f = f;
         c->fkey = rt->fkey;
         c->type = rt->type;
         c->is_rt = 1; /* sampled like one; not in the table, so never found as one */
         c->layout = VK_IMAGE_LAYOUT_UNDEFINED;
         VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
                                 .imageType = VK_IMAGE_TYPE_2D,
-                                .format = rt->f.vk,
+                                .format = f.vk,
                                 .extent = {c->sw, c->sh, 1},
                                 .mipLevels = 1,
                                 .arrayLayers = rt->layers,
@@ -357,7 +360,7 @@ static Surf* rt_crop(Surf* rt, u32 w, u32 h) {
 
 Surf* vk_rt_snapshot(Surf* rt) {
     if (!rt || rt->layout == VK_IMAGE_LAYOUT_UNDEFINED) return rt;
-    return rt_crop(rt, rt->w, rt->h);
+    return rt_crop(rt, rt->w, rt->h, NULL);
 }
 
 /* texture header type -> what the image is created as */
@@ -438,7 +441,12 @@ static Surf* tex_from_tic(const u32* tic) {
            own aspect, whatever the host format's size) */
         if (f.bpp == rt->f.bpp || f.depth || rt->f.depth) {
             vk_rt_note_read(rt);
-            return rt->w == w && rt->h == h ? rt : rt_crop(rt, w, h);
+            /* the same bytes in another color format (an RGBA8 target read as R32_Uint): sampling the target itself
+               would convert its texels, so a copy in the texture's format holds them as they are. sRGB and linear
+               twins are views of one image and need no copy */
+            if (!f.depth && !rt->f.depth && vk_srgb_as(f.vk, 0) != vk_srgb_as(rt->f.vk, 0))
+                return rt_crop(rt, w, h, &f);
+            return rt->w == w && rt->h == h ? rt : rt_crop(rt, w, h, NULL);
         }
         LOG_LIMIT(1,
                   "vulkan: a texture with %u-byte texels reads the render target at %llx, which has %u-byte pixels: it "
