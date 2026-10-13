@@ -444,15 +444,20 @@ static void setr_cc(Ctx* c, u32 d, const char* e, int cc, int fp) {
         return;
     }
     c->uses_cc = 1;
-    emitl(c, "{ uint v_ = %s;", e);
+    emitl(c, "{ uint cc_value_ = %s;", e);
     c->indent++;
-    setr(c, d, "v_");
-    emitl(c, fp ? "cc_z = uintBitsToFloat(v_) == 0.0; cc_s = uintBitsToFloat(v_) < 0.0;"
-                : "cc_z = v_ == 0u; cc_s = int(v_) < 0;");
+    setr(c, d, "cc_value_");
+    emitl(c, fp ? "cc_z = uintBitsToFloat(cc_value_) == 0.0; cc_s = uintBitsToFloat(cc_value_) < 0.0;"
+                : "cc_z = cc_value_ == 0u; cc_s = int(cc_value_) < 0;");
     c->indent--;
     emitl(c, "}");
 }
 static void setrf_cc(Ctx* c, u32 d, const char* e, int cc) { setr_cc(c, d, T("floatBitsToUint(%s)", e), cc, 1); }
+/* Logical/conversion/SET flags reset C/O. Arithmetic has different flag rules. */
+static void setr_logic_cc(Ctx* c, u32 d, const char* e, int cc, int fp) {
+    setr_cc(c, d, e, cc, fp);
+    if (cc) emitl(c, "cc_c = false; cc_o = false;");
+}
 
 /* IADD/IADD32I: AvgMode (Ryujinx AvgMode) 1 negates B, 2 negates A, 3 adds one. .X adds the carry in, .CC sets the
    flags (Ryujinx SetIaddFlags: C the carry out, V the signed overflow, and after .X Z only stays set if the earlier
@@ -714,8 +719,8 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
             char* A = fneg_abs(RF(c, a), B(w, 43, 1), B(w, 54, 1));
             char* Bv = fneg_abs(opBf(c, w, id - O_FSET_R), B(w, 53, 1), B(w, 44, 1));
             const char* t = bop(B(w, 45, 2), fcmp_expr(B(w, 48, 4), A, Bv), PN(c, B(w, 39, 3), B(w, 42, 1)));
-            setr_cc(c, d, T("(%s ? %s : 0u)", t, B(w, 52, 1) ? "floatBitsToUint(1.0)" : "0xFFFFFFFFu"), B(w, 47, 1),
-                    B(w, 52, 1));
+            setr_logic_cc(c, d, T("(%s ? %s : 0u)", t, B(w, 52, 1) ? "floatBitsToUint(1.0)" : "0xFFFFFFFFu"),
+                          B(w, 47, 1), B(w, 52, 1));
             break;
         }
         case O_FCMP_R:
@@ -789,7 +794,8 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
         case O_F2I_I: {
             char* src = opBf(c, w, id - O_F2I_R);
             if (B(w, 10, 2) == 1) src = T("unpackHalf2x16(%s).%c", opB(c, w, id - O_F2I_R), B(w, 41, 1) ? 'y' : 'x');
-            src = fneg_abs(src, B(w, 45, 1), B(w, 49, 1)); /* Ryujinx InstF2iR: NegB 45, AbsB 49 */
+            /* Pinned Eden F2I encoding: ABS at 45, NEG at 49. */
+            src = fneg_abs(src, B(w, 49, 1), B(w, 45, 1));
             static const char* fn[4] = {"roundEven", "floor", "ceil", "trunc"};
             src = T("%s(%s)", fn[B(w, 39, 2)], src);
             /* saturating, NaN to 0, and a 16-bit destination (IDstFmt bits 8-9 = 1) clamped to its range */
@@ -830,37 +836,50 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
         case O_I2I_C:
         case O_I2I_I: {
             char* s = opB(c, w, id - O_I2I_R);
-            u32 sf = B(w, 10, 2), df = B(w, 8, 2), sel = B(w, 41, 2);
+            u32 sf = B(w, 10, 2), df = B(w, 8, 2), sel = B(w, 41, 3);
             int ss = B(w, 13, 1), ds = B(w, 12, 1);
-            const char* v = sf == 0   ? (ss ? T("bitfieldExtract(int(%s),%u,8)", s, sel * 8)
-                                            : T("int(bitfieldExtract(%s,%u,8))", s, sel * 8))
-                            : sf == 1 ? (ss ? T("bitfieldExtract(int(%s),%u,16)", s, (sel & 2) * 8)
-                                            : T("int(bitfieldExtract(%s,%u,16))", s, (sel & 2) * 8))
-                                      : T("int(%s)", s);
-            if (B(w, 49, 1)) v = T("abs(%s)", v);
-            if (B(w, 45, 1)) v = T("(-%s)", v);
-            if (B(w, 50, 1)) {
-                if (df == 0)
-                    v = ds ? T("clamp(%s,-128,127)", v) : T("clamp(%s,0,255)", v);
-                else if (df == 1)
-                    v = ds ? T("clamp(%s,-32768,32767)", v) : T("clamp(%s,0,65535)", v);
-            } else {
-                if (df == 0)
-                    v = ds ? T("bitfieldExtract(%s,0,8)", v) : T("(%s & 255)", v);
-                else if (df == 1)
-                    v = ds ? T("bitfieldExtract(%s,0,16)", v) : T("(%s & 65535)", v);
+            if (sf > 2 || df > 2 || sel > 3 || (sf == 1 && (sel & 1)) || (sf == 2 && sel)) {
+                unsupported(c, "I2I size/selector", w);
+                break;
             }
-            setr_cc(c, d, T("uint(%s)", v), B(w, 47, 1), 0);
+            u32 width = 8u << df;
+            const char* v = sf == 2 ? s
+                            : ss    ? T("uint(bitfieldExtract(int(%s),%u,%u))", s, sel * 8, 8u << sf)
+                                    : T("bitfieldExtract(%s,%u,%u)", s, sel * 8, 8u << sf);
+            emitl(c, "{ uint cv_ = %s;", v);
+            c->indent++;
+            /* ABS/NEG operate in 32 bits, before destination narrowing. */
+            if (B(w, 49, 1)) emitl(c, "if (int(cv_) < 0) cv_ = 0u - cv_;");
+            if (B(w, 45, 1)) emitl(c, "cv_ = 0u - cv_;");
+            if (B(w, 50, 1)) {
+                u32 hi = (ds ? 0x7FFFFFFFu : 0xFFFFFFFFu) >> (32 - width);
+                if (ss && ds)
+                    emitl(c, "cv_ = uint(clamp(int(cv_), int(0x%08Xu), int(0x%08Xu)));", ~hi, hi);
+                else {
+                    if (ss) emitl(c, "cv_ = uint(max(int(cv_), 0));");
+                    emitl(c, "cv_ = min(cv_, 0x%08Xu);", hi);
+                }
+            } else {
+                /* Eden zero-extends the truncated result even for signed destinations. */
+                emitl(c, "cv_ &= 0x%08Xu;", 0xFFFFFFFFu >> (32 - width));
+            }
+            setr_logic_cc(c, d, "cv_", B(w, 47, 1), 0);
+            c->indent--;
+            emitl(c, "}");
             break;
         }
         /* ---------------- moves */
         case O_MOV_R:
         case O_MOV_C:
         case O_MOV_I:
+            if (B(w, 39, 4) != 1 && B(w, 39, 4) != 15) break; /* Eden's partial-mask stub keeps Rd. */
             if (d != 255) c->gtag[d] = id == O_MOV_C ? gbuf_tag(c, w) : id == O_MOV_R ? c->gtag[B(w, 20, 8)] : 0;
             setr(c, d, opB(c, w, id - O_MOV_R));
             break;
-        case O_MOV32I: setr(c, d, imm32(w)); break;
+        case O_MOV32I:
+            /* MOV32I has its own mask field, bits 12..15. */
+            if (B(w, 12, 4) == 1 || B(w, 12, 4) == 15) setr(c, d, imm32(w));
+            break;
         case O_S2R: {
             u32 sr = B(w, 20, 8);
             const char* v = "0u";
@@ -1010,8 +1029,8 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
         case O_ISET_I: {
             const char* t =
                 bop(B(w, 45, 2), icmp_xe(c, w, R(c, a), opB(c, w, id - O_ISET_R)), PN(c, B(w, 39, 3), B(w, 42, 1)));
-            setr_cc(c, d, T("(%s ? %s : 0u)", t, B(w, 44, 1) ? "floatBitsToUint(1.0)" : "0xFFFFFFFFu"), B(w, 47, 1),
-                    B(w, 44, 1));
+            setr_logic_cc(c, d, T("(%s ? %s : 0u)", t, B(w, 44, 1) ? "floatBitsToUint(1.0)" : "0xFFFFFFFFu"),
+                          B(w, 47, 1), B(w, 44, 1));
             break;
         }
         case O_ICMP_R:
@@ -1050,20 +1069,15 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
                             : opn == 1 ? T("(%s | %s)", A, Bv)
                             : opn == 2 ? T("(%s ^ %s)", A, Bv)
                                        : Bv;
+            emitl(c, "{ uint t_ = %s;", e);
+            c->indent++;
+            setr_logic_cc(c, d, "t_", id == O_LOP32I ? B(w, 52, 1) : B(w, 47, 1), 0);
             if (id != O_LOP32I && B(w, 48, 3) != 7) {
                 u32 po = B(w, 44, 2);
-                emitl(c, "{ uint t_ = %s;", e);
-                c->indent++;
-                setr(c, d, "t_");
                 setp(c, B(w, 48, 3), po == 0 ? "false" : po == 1 ? "true" : po == 2 ? "(t_ == 0u)" : "(t_ != 0u)");
-                c->indent--;
-                emitl(c, "}");
-            } else
-                setr(c, d, e);
-            if ((id == O_LOP32I ? B(w, 52, 1) : B(w, 47, 1))) {
-                c->uses_cc = 1;
-                emitl(c, "cc_z = (%s) == 0u; cc_s = int(%s) < 0;", R(c, d), R(c, d));
             }
+            c->indent--;
+            emitl(c, "}");
             break;
         }
         case O_LOP3_R:
@@ -1121,26 +1135,26 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
         case O_SHF_RR:
         case O_SHF_RI: {
             char* lo = R(c, a);
-            char* sh = (id == O_SHF_LR || id == O_SHF_RR) ? R(c, B(w, 20, 8)) : T("%uu", B(w, 20, 6));
+            char* sh = (id == O_SHF_LR || id == O_SHF_RR) ? R(c, B(w, 20, 8)) : imm20i(w);
             char* hi = R(c, B(w, 39, 8));
             int left = id == O_SHF_LR || id == O_SHF_LI;
-            /* Ryujinx InstShf* and EmitShf: MaxShift 37-38 (2 U64, 3 S64) makes it a 64-bit shift of hi:lo, M (bit
-               50) wraps the amount to the shift's width, without M an amount past it gives 0. (XModeShf 48-49 has
-               no reference semantics, Ryujinx leaves it too) */
             u32 maxs = B(w, 37, 2);
+            if (maxs == 1 || B(w, 47, 1) || B(w, 48, 2)) {
+                unsupported(c, "SHF size/CC/X", w);
+                break;
+            }
             int lng = maxs >= 2, s64 = maxs == 3;
-            emitl(c, "{ uint s_ = %s%s, lo_ = %s, hi_ = %s;", sh, B(w, 50, 1) ? (lng ? " & 63u" : " & 31u") : "", lo,
-                  hi);
+            /* Literal Eden contract: clamp at 32/63; wrap uses (max - 1), i.e. 31/62. */
+            const char* safe = B(w, 50, 1) ? T("(%s & %uu)", sh, lng ? 62 : 31) : T("min(%s,%uu)", sh, lng ? 63 : 32);
+            emitl(c, "{ uint s_ = %s, lo_ = %s, hi_ = %s;", safe, lo, hi);
             c->indent++;
             const char* e;
             if (left)
-                e = T(
-                    "(s_ >= %uu ? 0u : s_ >= 32u ? (lo_ << (s_-32u)) : s_ == 0u ? hi_ : ((hi_ << s_) | (lo_ >> (32u-s_))))",
-                    lng ? 64 : 32);
+                e = "(s_ >= 32u ? (lo_ << (s_-32u)) : s_ == 0u ? hi_ : ((hi_ << s_) | (lo_ >> (32u-s_))))";
             else
-                e = T("(s_ >= %uu ? 0u : s_ >= 32u ? %s : s_ == 0u ? lo_ : ((lo_ >> s_) | (hi_ << (32u-s_))))",
-                      lng ? 64 : 32, s64 ? "uint(int(hi_) >> int(s_-32u))" : "(hi_ >> (s_-32u))");
-            setr_cc(c, d, e, B(w, 47, 1), 0); /* WriteCC 47: Z and N of the result */
+                e = T("(s_ >= 32u ? %s : s_ == 0u ? lo_ : ((lo_ >> s_) | (hi_ << (32u-s_))))",
+                      s64 ? "uint(int(hi_) >> int(s_-32u))" : "(hi_ >> (s_-32u))");
+            setr(c, d, e);
             c->indent--;
             emitl(c, "}");
             break;
@@ -1181,7 +1195,10 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
                 Cv = R(c, B(w, 39, 8));
             }
             const char *off = T("int(%s & 255u)", Bv), *cnt = T("int((%s >> 8) & 255u)", Bv);
-            setr(c, d, T("bitfieldInsert(%s, %s, min(%s,31), min(%s,32-min(%s,31)))", Cv, R(c, a), off, cnt, off));
+            setr_logic_cc(c, d,
+                          T("((%s) >= 32 ? %s : bitfieldInsert(%s, %s, %s, min(%s,32-(%s))))", off, Cv, Cv, R(c, a),
+                            off, cnt, off),
+                          B(w, 47, 1), 0);
             break;
         }
         case O_SEL_R:
@@ -1414,23 +1431,34 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
         }
         /* ---------------- predicates */
         case O_PSETP: {
-            const char* ab = bop(B(w, 24, 2), PN(c, B(w, 12, 3), B(w, 15, 1)), PN(c, B(w, 29, 3), B(w, 32, 1)));
-            const char* cc = PN(c, B(w, 39, 3), B(w, 42, 1));
-            setp2(c, B(w, 3, 3), B(w, 0, 3), B(w, 45, 2), ab, cc);
+            const char* pa = PN(c, B(w, 12, 3), B(w, 15, 1));
+            const char* pb = PN(c, B(w, 29, 3), B(w, 32, 1));
+            const char* pc = PN(c, B(w, 39, 3), B(w, 42, 1));
+            const char* ab = bop(B(w, 24, 2), pa, pb);
+            /* The second output negates input A, not the entire first operation. */
+            const char* nb = bop(B(w, 24, 2), T("(!%s)", pa), pb);
+            emitl(c, "{ bool pa_ = %s, pb_ = %s;", bop(B(w, 45, 2), ab, pc), bop(B(w, 45, 2), nb, pc));
+            c->indent++;
+            setp(c, B(w, 3, 3), "pa_");
+            setp(c, B(w, 0, 3), "pb_");
+            c->indent--;
+            emitl(c, "}");
             break;
         }
         case O_PSET: {
             const char* ab = bop(B(w, 24, 2), PN(c, B(w, 12, 3), B(w, 15, 1)), PN(c, B(w, 29, 3), B(w, 32, 1)));
             const char* t = bop(B(w, 45, 2), ab, PN(c, B(w, 39, 3), B(w, 42, 1)));
-            setr(c, d, T("(%s ? %s : 0u)", t, B(w, 44, 1) ? "floatBitsToUint(1.0)" : "0xFFFFFFFFu"));
+            setr_logic_cc(c, d, T("(%s ? %s : 0u)", t, B(w, 44, 1) ? "floatBitsToUint(1.0)" : "0xFFFFFFFFu"),
+                          B(w, 47, 1), B(w, 44, 1));
             break;
         }
         case O_P2R_R:
         case O_P2R_C:
         case O_P2R_I: {
-            /* ByteSel 41-42; Ccpr (bit 40) moves the flags Z N C V instead of P0-P6 (Ryujinx InstP2r*, EmitP2r, which
-               also keeps the mask to a byte) */
-            char* M = T("(%s & 0xFFu)", opB(c, w, id - O_P2R_R));
+            /* Eden's immediate mask can clear bits beyond the selected predicate byte.
+               Reg/cbuf forms remain legacy extensions: Eden rejects them. */
+            char* M = opB(c, w, id - O_P2R_R);
+            if (id != O_P2R_I) M = T("(%s & 0xFFu)", M);
             u32 sh = B(w, 41, 2) * 8;
             int ccpr = B(w, 40, 1);
             static const char* fl[4] = {"cc_z", "cc_s", "cc_c", "cc_o"};
@@ -1469,13 +1497,13 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
             }
             const char* pc = PN(c, B(w, 39, 3), B(w, 42, 1));
             if (id == O_CSET) {
-                setr(
+                setr_logic_cc(
                     c, d,
-                    T("(%s ? %s : 0u)", bop(B(w, 45, 2), t, pc), B(w, 44, 1) ? "floatBitsToUint(1.0)" : "0xFFFFFFFFu"));
+                    T("(%s ? %s : 0u)", bop(B(w, 45, 2), t, pc), B(w, 44, 1) ? "floatBitsToUint(1.0)" : "0xFFFFFFFFu"),
+                    B(w, 47, 1), B(w, 44, 1));
                 break;
             }
-            setp(c, B(w, 3, 3), bop(B(w, 45, 2), t, pc));
-            setp(c, B(w, 0, 3), bop(B(w, 45, 2), T("(!%s)", t), pc));
+            setp2(c, B(w, 3, 3), B(w, 0, 3), B(w, 45, 2), t, pc);
             break;
         }
         /* ---------------- attribs + memory */
@@ -2563,11 +2591,15 @@ static void inst(Ctx* c, u32 idx, u64 w, const Op* op) {
             if (negb) emitl(c, "hb=-hb;");
             const char* cx = fcmp_expr(cmp, "ha.x", "hb.x");
             const char* cy = fcmp_expr(cmp, "ha.y", "hb.y");
-            if (hand)
-                setp2(c, pa, pb, bo, T("(%s && %s)", cx, cy), pc);
-            else {
-                setp(c, pa, bop(bo, cx, pc));
-                setp(c, pb, bop(bo, cy, pc));
+            /* Snapshot both combined lane results before either predicate write. */
+            emitl(c, "bool hx_ = %s, hy_ = %s;", bop(bo, cx, pc), bop(bo, cy, pc));
+            if (hand) {
+                emitl(c, "bool h_ = hx_ && hy_;");
+                setp(c, pa, "h_");
+                setp(c, pb, "(!h_)");
+            } else {
+                setp(c, pa, "hx_");
+                setp(c, pb, "hy_");
             }
             emitl(c, "}");
             break;

@@ -146,9 +146,13 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet) {
         dst = snx_path_join(ex, "main.nro");
         rc = snx_copy_file(p->entry_path, dst);
         free(dst);
-        if (!rc && p->romfs_data) {
+        if (!rc) {
             dst = snx_path_join(dir, "romfs.bin");
-            rc = snx_write_file(dst, p->romfs_data, p->romfs_size);
+            if (p->romfs_data)
+                rc = snx_write_file(dst, p->romfs_data, p->romfs_size);
+            else if (snx_is_file(dst))
+                /* An updated NRO without embedded RomFS must not inherit the old image's assets. */
+                rc = snx_remove_tree(dst);
             free(dst);
         }
     } else {

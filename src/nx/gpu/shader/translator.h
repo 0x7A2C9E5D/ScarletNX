@@ -173,6 +173,7 @@ enum {
     O_STL,
     O_LD,
     O_ST,
+    O_STP,
     O_ATOM,
     O_ATOMS,
     O_RED,

@@ -64,6 +64,10 @@ snx_test_target(snx-test-loader 90)
 target_link_libraries(snx-test-loader PRIVATE snx_test_common)
 add_test(NAME loader_native COMMAND snx-test-loader)
 
+add_executable(snx-test-runtime-nro runtime_nro.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/loader.c")
+snx_test_target(snx-test-runtime-nro 11)
+add_test(NAME runtime_nro COMMAND snx-test-runtime-nro)
+
 add_executable(snx_recompiler_test recompiler_native.c)
 snx_test_target(snx_recompiler_test 23)
 target_include_directories(snx_recompiler_test PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
@@ -108,7 +112,7 @@ endif()
 if(SNX_TEST_SANITIZERS AND WIN32)
     execute_process(COMMAND "${CMAKE_C_COMPILER}" -print-resource-dir
         OUTPUT_VARIABLE snx_clang_resource OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-    set_tests_properties(startup_windowed startup_headless driver_workflow extraction_native loader_native native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw astc_decode
+    set_tests_properties(startup_windowed startup_headless driver_workflow extraction_native loader_native runtime_nro native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw astc_decode
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${snx_clang_resource}/lib/windows")
 endif()
 

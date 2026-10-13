@@ -16,7 +16,7 @@
 
 static void usage(void) {
     puts("Usage: scarletnx [--repo DIR] [--build-dir DIR] COMMAND [OPTIONS]\n"
-         "  DUMP                                      Extract, recompile and play XCI/NSP\n"
+         "  INPUT                                     Play XCI/NSP or recompile and play NRO\n"
          "  --extract DUMP [--update DUMP] [--name NAME]  Extract XCI/NSP\n"
          "  --recompile INPUT [NAME] [OPTIONS]          Recompile ExeFS/NRO\n"
          "  --extract --help                           Extraction options\n"
@@ -46,13 +46,18 @@ static char* game_name(const char* input) {
     }
     return name;
 }
+static int is_nro_path(const char* path) {
+    const char* ext = strrchr(path, '.');
+    return ext && strlen(ext) == 4 && tolower((unsigned char)ext[1]) == 'n' && tolower((unsigned char)ext[2]) == 'r' &&
+           tolower((unsigned char)ext[3]) == 'o';
+}
 static int play_dump(const char* input, const SnxPaths* paths, const char* headless) {
     char *name = game_name(input), *dump = snx_absolute(input);
     char *work = snx_path_join(paths->repo, "work"), *games = snx_path_join(paths->repo, "games");
     char *extracted = snx_path_join(work, name), *pending = snx_format("%s.extracting", extracted);
     char* game;
     const char* command[12];
-    int rc = 1;
+    int rc = 1, nro = is_nro_path(input);
 #ifdef _WIN32
     game = snx_format("%s/%s.exe", games, name);
 #else
@@ -67,7 +72,8 @@ static int play_dump(const char* input, const SnxPaths* paths, const char* headl
     command[2] = paths->repo;
     command[3] = "--build-dir";
     command[4] = paths->build;
-    if (!snx_is_dir(extracted)) {
+    /* NROs are already executable images. No keys, hactool or extraction checkpoint is needed. */
+    if (!nro && !snx_is_dir(extracted)) {
         /* Publish only a finished extraction. A killed extractor may leave its staging directory. */
         if (snx_mkdirs(work) ||
             ((snx_is_dir(pending) || snx_is_file(pending) || snx_is_link(pending)) && snx_remove_tree(pending))) {
@@ -92,12 +98,13 @@ static int play_dump(const char* input, const SnxPaths* paths, const char* headl
             goto done;
         }
     }
-    if (!snx_is_file(game)) {
+    /* Always restage an NRO: a same-named cached game may belong to another input or an older build. */
+    if (nro || !snx_is_file(game)) {
         command[5] = "--recompile";
         command[6] = "--outdir";
         command[7] = games;
         command[8] = "--";
-        command[9] = extracted;
+        command[9] = nro ? dump : extracted;
         command[10] = name;
         command[11] = NULL;
         rc = snx_run_stage(command, NULL, "Recompilation");
@@ -163,12 +170,12 @@ int snx_driver(int argc, char** argv) {
             if (!strcmp(argv[j], "--headless") || !strcmp(argv[j], "--headless=0") || !strcmp(argv[j], "--headless=1"))
                 headless = argv[j];
             else
-                return snx_error("automatic play accepts one dump file and --headless[=0|1]");
+                return snx_error("automatic play accepts one XCI/NSP/NRO file and --headless[=0|1]");
         }
         mode = 3;
     }
     if (!mode) {
-        if (tool_paths) return snx_error("expected a dump file, --extract or --recompile");
+        if (tool_paths) return snx_error("expected an XCI/NSP/NRO file, --extract or --recompile");
         return -1;
     }
     snx_tool_console();
