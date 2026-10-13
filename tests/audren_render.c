@@ -176,6 +176,11 @@ static void update(void) {
     }
     for (int i = 0; i < SNX_ART_EFFECTS; i++) w8(eff(i), 1, 0);
 }
+/* a frame with no update before it */
+static void frame_only(void) {
+    i16 stereo[SNX_ART_FRAME * 2];
+    audren_frame(st, stereo);
+}
 static void frames(int n) {
     i16 stereo[SNX_ART_FRAME * 2];
     for (int i = 0; i < n; i++) {
@@ -310,6 +315,30 @@ static void ref_biquad(const i16* in, i16* out, int n, const i16* b, const i16* 
             s1 = b[2] * x + a[1] * y;
         }
     }
+}
+
+/* a 1 kHz voice on the submix, its buffers 0 and 1 to the final mix, effect 0 on the submix */
+static u8* fx_voice(u8 type) {
+    tone(0, 1000, 0.3, 0, 0, 1.0f);
+    wf(mix(SNX_ART_SUBMIX), 0x24, 1.0f);
+    wf(mix(SNX_ART_SUBMIX), 0x24 + (24 + 1) * 4, 1.0f);
+    w8(sink(1), 1, 1);
+    u8* e = eff(0);
+    memset(e, 0, 0xC0);
+    w8(e, 0, type);
+    w8(e, 1, 1);
+    w32(e, 4, SNX_ART_SUBMIX);
+    return e + 0x20;
+}
+/* frames from..to - 1 of the sink's left (ch 0) or right channel into x, from x[0] */
+static void sink_copy(i16* x, int from, int to, int ch) {
+    for (int f = from; f < to; f++) memcpy(x + (f - from) * SNX_ART_FRAME, sink_frame_at(f, ch), SNX_ART_FRAME * 2);
+}
+/* the first sample where a and b differ, -1 if none */
+static int first_diff(const i16* a, const i16* b, int n) {
+    for (int i = 0; i < n; i++)
+        if (a[i] != b[i]) return i;
+    return -1;
 }
 
 /* the aux ring's channel ch in its most recent full frame */
@@ -571,6 +600,50 @@ int main(void) {
                 if (got[i] != want[i]) bad++, first = first < 0 ? i : first;
             CHECK(bad == 0, "biquad rev %u mode %d: %d samples off, first %d: %d, want %d", art_rev, mode, bad, first,
                   first < 0 ? 0 : got[first], first < 0 ? 0 : want[first]);
+        }
+    }
+    art_rev = 4;
+
+    /* the biquad filter effect against Eden's recursion, at revisions 4 and 9, through updates and off */
+    for (art_rev = 4; art_rev <= 9; art_rev += 5) {
+        static i16 left[5 * SNX_ART_FRAME], right[5 * SNX_ART_FRAME], want[5 * SNX_ART_FRAME];
+        i16 qb[3] = {4096, 8192, 4096}, qa[2] = {8192, -4096};
+        if (art_rev >= 9) qb[1] = 6553, qa[1] = -4915;
+        for (int mode = 0; mode < 3; mode++) {
+            reset();
+            u8* p = fx_voice(SNX_AUDREN_EFFECT_BIQUAD);
+            w8(eff(0), 2, mode != 2);
+            p[0] = 0, p[6] = 1;
+            if (art_rev >= 9) {
+                const float fb[3] = {0.25f, 0.4f, 0.25f}, fa[2] = {0.5f, -0.3f};
+                memcpy(p + 0x10, fb, sizeof fb);
+                memcpy(p + 0x1C, fa, sizeof fa);
+                w8(p, 0x24, 1);
+            } else {
+                memcpy(p + 0xC, qb, sizeof qb);
+                memcpy(p + 0x12, qa, sizeof qa);
+                w8(p, 0x16, 1);
+            }
+            u32 st_at = art_rev >= 9 ? 0x25 : 0x17;
+            for (int f = 0; f < 5; f++) {
+                w8(p, st_at, f == 0 ? 0 : f == 2 && mode == 1 ? 1 : 2);
+                if (f == 1 && mode == 0)
+                    frame_only();
+                else
+                    frames(1);
+            }
+            sink_copy(left, 0, 5, 0);
+            sink_copy(right, 0, 5, 1);
+            int restart = mode == 1 && art_rev < 6 ? 2 * SNX_ART_FRAME : 5 * SNX_ART_FRAME;
+            if (mode == 2)
+                memcpy(want, left, sizeof want);
+            else {
+                ref_biquad(left, want, restart, qb, qa, art_rev >= 7);
+                ref_biquad(left + restart, want + restart, 5 * SNX_ART_FRAME - restart, qb, qa, art_rev >= 7);
+            }
+            int at = first_diff(right, want, 5 * SNX_ART_FRAME);
+            CHECK(at < 0, "biquad effect rev %u mode %d: sample %d is %d, want %d", art_rev, mode, at,
+                  at < 0 ? 0 : right[at], at < 0 ? 0 : want[at]);
         }
     }
     art_rev = 4;

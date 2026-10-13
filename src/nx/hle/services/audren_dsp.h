@@ -84,6 +84,7 @@ typedef struct {
     float avg[SNX_AUDREN_CHANNELS], gain[SNX_AUDREN_CHANNELS];
     float* look;
     u32 look_len, look_pos[SNX_AUDREN_CHANNELS];
+    ARBiquad bq[SNX_AUDREN_CHANNELS]; /* the biquad filter's, a channel apiece */
 } AREffect;
 
 typedef struct {
@@ -116,7 +117,14 @@ typedef struct {
 
 enum { SNX_AUDREN_STARTED = 0, SNX_AUDREN_STOPPED = 1, SNX_AUDREN_PAUSED = 2, SNX_AUDREN_STOPPING = 3 };
 enum { SNX_AUDREN_PCM16 = 2, SNX_AUDREN_PCMF32 = 5, SNX_AUDREN_ADPCM = 6 };
-enum { SNX_AUDREN_EFFECT_MIX = 1, SNX_AUDREN_EFFECT_AUX = 2, SNX_AUDREN_EFFECT_LIMITER = 7 };
+enum {
+    SNX_AUDREN_EFFECT_MIX = 1,
+    SNX_AUDREN_EFFECT_AUX = 2,
+    SNX_AUDREN_EFFECT_BIQUAD = 6,
+    SNX_AUDREN_EFFECT_LIMITER = 7
+};
+/* an effect's parameter state: the game sets it, a rendered frame moves it to updated */
+enum { SNX_AUDREN_PARAM_INITIALIZED = 0, SNX_AUDREN_PARAM_UPDATING = 1, SNX_AUDREN_PARAM_UPDATED = 2 };
 enum { SNX_AUDREN_SINK_DEVICE = 1, SNX_AUDREN_SINK_CIRCULAR = 2 };
 #define SNX_AUDREN_FINAL_MIX  0
 #define SNX_AUDREN_UNUSED_MIX 0x7FFFFFFF

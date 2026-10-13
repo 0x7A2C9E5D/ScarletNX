@@ -826,6 +826,41 @@ static void biquad(float* x, u32 n, const i16* b, const i16* a, ARBiquad* st, in
     }
 }
 
+/* a float coefficient in Q14, clamped and truncated (Eden's ToQ14Clamped) */
+static i16 q14(float v) {
+    float x = v * 16384.0f;
+    return (i16)(x >= 32767.0f ? 32767.0f : x <= -32768.0f ? -32768.0f : x);
+}
+
+/* Eden's BiquadFilterInfo: Q14 before revision 9, floats from it; updating clears the state before revision 6 */
+static u32 biquad_state_at(const ARState* s) { return rev_number(s->rev) >= 9 ? 0x25 : 0x17; }
+static void effect_biquad(ARState* s, ARMix* m, AREffect* e) {
+    const u8* p = e->p;
+    int revn = rev_number(s->rev), v2 = revn >= 9;
+    i8 channels = (i8)p[v2 ? 0x24 : 0x16];
+    u8 state = p[biquad_state_at(s)];
+    u32 n = s->frame;
+    i16 b[3], a[2];
+    if (v2) {
+        for (int k = 0; k < 3; k++) b[k] = q14(rdf(p + 0x10 + k * 4));
+        for (int k = 0; k < 2; k++) a[k] = q14(rdf(p + 0x1C + k * 4));
+    } else {
+        memcpy(b, p + 0xC, sizeof b);
+        memcpy(a, p + 0x12, sizeof a);
+    }
+    if (channels <= 0 || state > SNX_AUDREN_PARAM_UPDATED) return;
+    if (channels > SNX_AUDREN_CHANNELS) channels = SNX_AUDREN_CHANNELS;
+    int clear = state == SNX_AUDREN_PARAM_INITIALIZED || (state == SNX_AUDREN_PARAM_UPDATING && revn < 6);
+    for (int ch = 0; ch < channels; ch++) {
+        float *in = mixbuf(s, m, (i8)p[ch]), *out = mixbuf(s, m, (i8)p[6 + ch]);
+        if (!in || !out) continue;
+        if (in != out) memcpy(out, in, n * sizeof *out);
+        if (!e->enabled) continue;
+        if (clear) memset(&e->bq[ch], 0, sizeof e->bq[ch]);
+        biquad(out, n, b, a, &e->bq[ch], revn >= 7);
+    }
+}
+
 /* a mix's effects, by their process order */
 static void mix_effects(ARState* s, u32 id) {
     ARMix* m = &s->mix[id];
@@ -842,6 +877,10 @@ static void mix_effects(ARState* s, u32 id) {
             case SNX_AUDREN_EFFECT_AUX: effect_aux(s, m, next); break;
             case SNX_AUDREN_EFFECT_LIMITER: effect_limiter(s, m, next); break;
             case SNX_AUDREN_EFFECT_MIX: effect_mix(s, m, next); break;
+            case SNX_AUDREN_EFFECT_BIQUAD:
+                effect_biquad(s, m, next);
+                next->p[biquad_state_at(s)] = SNX_AUDREN_PARAM_UPDATED;
+                break;
             default:
                 warn_once(s, SNX_AUDREN_WARN_EFFECT, "an effect type (delay, reverb, biquad, ...) is not rendered");
         }
