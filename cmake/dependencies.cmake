@@ -30,7 +30,7 @@ if(NOT cpm_have STREQUAL CPM_HASH)
 endif()
 include("${cpm_file}")
 
-# Packages whose headers a system may also have (Vulkan, glslang) are added without SYSTEM. The compiler searches every
+# Packages whose headers a system may also have (Vulkan) are added without SYSTEM. The compiler searches every
 # -I folder before any -isystem one, so as -isystem they lost to an -I/usr/local/include in CFLAGS, usual on FreeBSD,
 # and the build mixed in the system's copies. Third-party code builds with its own flags and stays out of the warning
 # output
@@ -63,15 +63,6 @@ if(SNX_BUILD_NX AND SNX_VULKAN)
                   URL https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/refs/tags/v3.4.0.tar.gz
                   URL_HASH SHA256=822aa850c6ce77346ae96a8a1d351d52e77e85929f35363849a0a4e638e0a2a1
                   DOWNLOAD_ONLY YES)
-    # The GLSL front end and SPIR-V back end, without the optimizer (SPIRV-Tools) or HLSL
-    CPMAddPackage(NAME glslang VERSION 16.6.0
-                  URL https://github.com/KhronosGroup/glslang/archive/refs/tags/16.6.0.tar.gz
-                  URL_HASH SHA256=9c09b901149c729df745057dafa815278aaa101b84d2b6e14f16a42de52f97f2
-                  EXCLUDE_FROM_ALL YES
-                  OPTIONS "BUILD_SHARED_LIBS OFF" "ENABLE_OPT OFF" "ENABLE_HLSL OFF" "ENABLE_GLSLANG_BINARIES OFF"
-                          "GLSLANG_TESTS OFF" "BUILD_EXTERNAL OFF" "ENABLE_PCH OFF" "GLSLANG_ENABLE_INSTALL OFF"
-                          "ENABLE_SPVREMAPPER OFF")
-    snx_quiet(glslang glslang-default-resource-limits)
 endif()
 
 set(SNX_SDL3_FROM_SOURCE OFF)

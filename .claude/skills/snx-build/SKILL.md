@@ -32,22 +32,19 @@ description: "Build the ScarletNX runtime and recompile games correctly, avoidin
 | Two build folders disagree on what is deployed | Every build folder with `SNX_DEPLOY` on deploys to the same `games/` | The last build wins. Configure extra folders with `-DSNX_DEPLOY=OFF`. The recompiler builds its runtime in `build/<preset>-recomp` with `SNX_DEPLOY=OFF` (`scarletnx/toolchain.py`), so the preset's own folder keeps deploying. |
 | A test binary next to the game was overwritten | The deploy targets every `*_code.so` in `games/`, symlinks included | Keep A/B copies outside `games/`, or don't build while they exist. |
 | A new warning goes unnoticed | The runtime builds with Clang's default warnings only (the third-party packages and the generated game module build with `-w`), and a warning doesn't stop the build | Check a changed file with more warnings on: take the file's line from `build/default/compile_commands.json` and run it with `-Wall -Wextra -fsyntax-only`. Fix what comes from the change. |
-| Game crashes at startup with "recompiled code is from another ScarletNX version" | The game module was built against another `SNX_ABI` (`runtime/abi/cpu.h`) | Recompile the game. |
+| Game crashes at startup with "recompiled code is from another ScarletNX version" | The game module was built against another `SNX_ABI` (`src/common/cpu/aarch64/cpu.h`) | Recompile the game. |
 
 ## The Vulkan renderer
 
 The renderer is Vulkan, and the sdl3 backend is the only window backend on Linux and Windows (the OpenGL renderer
 and the x11, x11es, win32 and android backends were removed on 2026-10-11). A GPU or driver without Vulkan 1.3 stops
-the runtime at startup with a message. The headless backend has the null renderer. The interface is the `Renderer`
-table in `gpu/renderer.h`, which `vk_renderer` and `null_renderer` fill in completely: everything else calls
+the runtime at startup with a message. The headless backend also uses Vulkan. The interface is the `Renderer`
+table in `gpu/renderer.h`, which `vk_renderer` fills in: everything else calls
 `g_renderer->draw(...)` and so on.
 
-The build also makes `snx-shaderc`. `snx-shaderc --nvn DIR --cache games/shader_cache/spirv` pre-translates a game's
-NVN shader files into the SPIR-V cache (`scripts/recomp.py` runs it on any romfs folder holding them); to measure what
-it covers, record a corpus of a run and replay it with `--cache` against a copy of the pre-filled folder, counting the
-files it adds. A translator change is checked on a shader corpus before any rendering: record one
-with `SNX_SHADER_CORPUS=dir`, then `build/default/snx-shaderc dir --validate` (`spirv-val` on PATH), and `--out` from
-two builds, diffed, to show what the change did to the GLSL and SPIR-V. A corpus is the game's own shaders: keep it
+The build also makes `snx-shaderc`. A translator change is checked on a shader corpus before rendering: record one
+with `SNX_SHADER_CORPUS=dir`, then run `build/default/snx-shaderc dir --validate` (`spirv-val` on PATH). Use `--out`
+to save direct SPIR-V modules for disassembly or comparison between builds. A corpus is the game's own shaders: keep it
 under `games/` or in the scratchpad, never in a tracked folder of the repo. `SNX_VK_VALIDATION=1`
 turns on the Khronos validation layer when it is installed (Arch: `vulkan-validation-layers`, which the user
 installs). A screenshot (`--shot`, or run_game.py's) reads back the frame Vulkan presented, and its hash is in the

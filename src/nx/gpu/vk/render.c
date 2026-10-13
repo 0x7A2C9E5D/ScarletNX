@@ -16,6 +16,7 @@
 #include "gpu/shader/shader.h"
 #include "runtime/platform/log.h"
 #include "gpu/vk/vk.h"
+#include "gpu/vk/internal_spv.h"
 
 static struct {
     Surf* rt[8];
@@ -168,20 +169,13 @@ static int clear_masked(u32 slot, u32 mask, const float* cc, VkRect2D rect, u32 
     static VkShaderModule vs, fs[8][3];
     const VkFmt* f = &g_rp.rt[slot]->f;
     int num = f->is_int ? (f->sint ? 2 : 1) : 0;
-    if (!vs)
-        vs = vk_module("#version 450\n#extension GL_ARB_shader_viewport_layer_array : require\n"
-                       "layout(push_constant) uniform PC { int layer; };\n"
-                       "void main(){ vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);\n"
-                       "  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); gl_Layer = layer; }\n",
-                       ST_VS);
+    if (!vs) vs = vk_module_spv(snx_clear_vs_spv, sizeof snx_clear_vs_spv / sizeof *snx_clear_vs_spv);
     if (!fs[slot][num]) {
-        static const char* ty[3] = {"vec4", "uvec4", "ivec4"};
-        char src[256];
-        snprintf(src, sizeof src,
-                 "#version 450\nlayout(push_constant) uniform PC { layout(offset=16) %s c; };\n"
-                 "layout(location=%u) out %s o;\nvoid main(){ o = c; }\n",
-                 ty[num], slot, ty[num]);
-        fs[slot][num] = vk_module(src, ST_FS);
+        static const u32* words[3] = {snx_clear_fs_float_spv, snx_clear_fs_uint_spv, snx_clear_fs_sint_spv};
+        static const size_t count[3] = {sizeof snx_clear_fs_float_spv / sizeof *snx_clear_fs_float_spv,
+                                        sizeof snx_clear_fs_uint_spv / sizeof *snx_clear_fs_uint_spv,
+                                        sizeof snx_clear_fs_sint_spv / sizeof *snx_clear_fs_sint_spv};
+        fs[slot][num] = vk_module_spv_location(words[num], count[num], slot);
     }
     if (!vs || !fs[slot][num]) return 0;
     PipeKey k;
@@ -1312,28 +1306,30 @@ void vk_render_draw_texture(GpuChannel* ch) {
         return;
     }
     Surf* d = rt[0];
-    if (t->f.depth || d->f.depth || t->f.is_int != d->f.is_int || !format_has(t->f.vk, VK_FORMAT_FEATURE_BLIT_SRC_BIT) ||
-        !format_has(d->f.vk, VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
+    if (t->f.depth || d->f.depth || t->f.is_int != d->f.is_int ||
+        !format_has(t->f.vk, VK_FORMAT_FEATURE_BLIT_SRC_BIT) || !format_has(d->f.vk, VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
         LOG_LIMIT(1, "vulkan: a draw texture between formats %d and %d can't be blitted (not drawn)\n", (int)t->f.vk,
                   (int)d->f.vk);
         return;
     }
     /* in the images' pixels: a target is scaled, and a texture made from one is too */
     float tsx = (float)t->sw / (float)t->w, tsy = (float)t->sh / (float)t->h;
-    VkImageBlit b = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                     .srcOffsets = {{(i32)(sx0 * tsx), (i32)(sy0 * tsy), 0}, {(i32)(sx1 * tsx), (i32)(sy1 * tsy), 1}},
-                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                     .dstOffsets = {{(i32)vk_scf(x0), (i32)vk_scf(y0), 0}, {(i32)vk_scf(x0 + w), (i32)vk_scf(y0 + h), 1}}};
-    int linear = (x.tsc[1] & 3) == 2 && !t->f.is_int &&
-                 format_has(t->f.vk, VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
+    VkImageBlit b = {
+        .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+        .srcOffsets = {{(i32)(sx0 * tsx), (i32)(sy0 * tsy), 0}, {(i32)(sx1 * tsx), (i32)(sy1 * tsy), 1}},
+        .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+        .dstOffsets = {{(i32)vk_scf(x0), (i32)vk_scf(y0), 0}, {(i32)vk_scf(x0 + w), (i32)vk_scf(y0 + h), 1}}};
+    int linear =
+        (x.tsc[1] & 3) == 2 && !t->f.is_int && format_has(t->f.vk, VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
     vk_render_end(); /* blits happen outside rendering passes */
     vk_rt_note_read(t);
     VkCommandBuffer cb = vk_cmd();
-    vk_surf_use(cb, t, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    vk_surf_use(cb, t, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT);
     vk_surf_use(cb, d, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
-    vkCmdBlitImage(cb, t->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, d->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b,
-                   linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
+    vkCmdBlitImage(cb, t->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, d->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                   &b, linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
     d->wgen++;
     vk_rt_drawn(d);
     d->last_used = g_vk_present;

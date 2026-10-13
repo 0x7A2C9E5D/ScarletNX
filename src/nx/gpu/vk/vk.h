@@ -14,7 +14,6 @@
    pipeline.c  translated shaders, the pipeline layout and pipelines by state
    render.c    the render target set (dynamic rendering), clears and draws
    compute.c   compute dispatches (on a queue of their own when there is one), landing their results in guest memory
-   spirv.c     GLSL to SPIR-V
    renderer.c  the renderer interface the GPU front end calls (gpu/renderer.h) and presenting
    vma.cpp     VulkanMemoryAllocator's implementation
 
@@ -116,9 +115,22 @@ typedef struct {
     u8 conv; /* textures: converted on upload (VKC_*), the Vulkan format is what it converts to */
     u8 bgra; /* stored B, G, R, A in memory: a texture header's swizzle swaps R and B */
 } VkFmt;
-enum { VKC_NONE, VKC_ASTC, VKC_RGBA4, VKC_RGB5A1, VKC_RGB32F, VKC_A5B5G5R1,
-       /* ETC2 and EAC, decoded on the CPU (gpu/texture/etc2.c): in the order of its kinds */
-       VKC_ETC2, VKC_ETC2_PTA, VKC_ETC2_RGBA, VKC_EAC_R, VKC_EAC_R_SNORM, VKC_EAC_RG, VKC_EAC_RG_SNORM };
+enum {
+    VKC_NONE,
+    VKC_ASTC,
+    VKC_RGBA4,
+    VKC_RGB5A1,
+    VKC_RGB32F,
+    VKC_A5B5G5R1,
+    /* ETC2 and EAC, decoded on the CPU (gpu/texture/etc2.c): in the order of its kinds */
+    VKC_ETC2,
+    VKC_ETC2_PTA,
+    VKC_ETC2_RGBA,
+    VKC_EAC_R,
+    VKC_EAC_R_SNORM,
+    VKC_EAC_RG,
+    VKC_EAC_RG_SNORM
+};
 VkFmt vk_rt_format(u32 fmt);
 VkFmt vk_zt_format(u32 fmt);
 VkFmt vk_tic_format(u32 w0, int srgb); /* bpp 0: not supported */
@@ -147,6 +159,7 @@ typedef struct Surf {
     u32 bl, bh, bd, pitch; /* guest layout: block linear with block height 2^bh GOBs, or pitch linear */
     u64 layer_size;        /* bytes from one layer to the next in guest memory */
     int is_rt;
+    int storage_capable;  /* image was created with VK_IMAGE_USAGE_STORAGE_BIT */
     int volume;           /* render target layers use 3D block-linear memory rather than array strides */
     VkImageViewType type; /* what it was created as */
     VkImage img;
@@ -200,6 +213,8 @@ void vk_surf_use(VkCommandBuffer cb, Surf* s, VkImageLayout layout, VkPipelineSt
     (VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |                                 \
      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)
 void vk_rt_flush(u64 gva);
+void vk_surf_flush(Surf* s); /* write a storage image's pixels back to guest memory */
+void vk_tex_note_writeback(Surf* s);
 void vk_rt_drawn(Surf* s);      /* a render target was drawn to (gpu/vk/render.c) */
 void vk_rt_drawn_full(Surf* s); /* a full clear or blit replaced every pixel */
 int vk_rt_drawn_fresh(Surf* s); /* no guest-memory write has replaced the target since its last draw */
@@ -278,8 +293,8 @@ typedef struct {
     u32 n;
 } VkCbReads;
 typedef int (*VkCbReader)(u32 idx, u32 off, u32* out);
-/* shader_to_glsl, reading constant buffers through read and recording what it read into reads */
-char* vk_translate(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, VkCbReader read, VkCbReads* reads);
+u32* vk_translate_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* words, VkCbReader read,
+                        VkCbReads* reads);
 u64 vk_shader_hash(const u8* code, u32 max_bytes, u32* out_len, VkCbReader read); /* BRX tables through read */
 int vk_cb_reads_hold(const VkCbReads* reads, VkCbReader read);
 typedef struct VkSh {
@@ -295,9 +310,11 @@ typedef struct VkSh {
     struct VkSh* next;
 } VkSh;
 extern VkPipelineLayout g_vk_playout;
+extern int g_vk_preserve_infnan;
+extern int g_vk_flush_denorm;
+extern VkShaderStageFlags g_vk_subgroup_stages;
 extern VkDescriptorSetLayout g_vk_dslayout[3]; /* by set: shader_vk_set(stage) */
 void vk_pipeline_init(void);
-extern char g_vk_spirv_dir[1100]; /* shader_cache/spirv next to the games, set by vk_pipeline_init */
 /* the shader at gva (after a VertexA program at gva_a, or 0). The masks key integer inputs: attributes for the
    vertex stage, textures and render target outputs for the fragment stage. clip: the clip distances the 3D engine
    enables (vertex stage) */
@@ -326,7 +343,8 @@ typedef struct {
 VkPipeline vk_pipeline_get(const PipeKey* k);
 VkPipelineCache vk_pipeline_cache(void); /* for pipelines made elsewhere (compute) */
 void vk_pipeline_save(void);
-VkShaderModule vk_module(const char* glsl, int stage); /* a module from GLSL of our own, kept for good */
+VkShaderModule vk_module_spv(const u32* words, size_t count);
+VkShaderModule vk_module_spv_location(const u32* words, size_t count, u32 location);
 
 /* compute.c */
 void vk_dispatch(GpuChannel* ch, const u32* q, u64 code);

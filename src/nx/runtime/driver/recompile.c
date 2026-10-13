@@ -25,7 +25,6 @@ static void usage(void) {
          "  --jobs N               Parallel compiles (default: CPU count)");
     puts("  --chunk N              Instructions per C chunk (default: 30000)\n"
          "  --target auto|linux|win64\n"
-         "  --native               Compile for this host CPU\n"
          "  --no-build             Generate C/data/INI only\n"
          "  --interp-only          Generate fallback interpreter only\n"
          "  --runtime FILE         Deploy this runtime instead of building one\n"
@@ -221,7 +220,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     SnxProgram program;
     SnxSources sources;
     char *title = NULL, *out = NULL, *base = NULL, *build = NULL, *data = NULL, *code = NULL;
-    char *ini = NULL, *ini_text = NULL, *run = NULL, *exe = NULL, *tmp = NULL, *romfs = NULL;
+    char *ini = NULL, *ini_text = NULL, *run = NULL, *exe = NULL, *tmp = NULL;
     char error[1024], option[64];
     const char* equal;
     size_t option_size;
@@ -404,8 +403,6 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         goto done;
     }
     /* Deploy the executable last: automatic play uses it as the completion checkpoint. */
-    romfs = snx_path_join(data, "romfs");
-    snx_prebuild_shaders(paths, romfs, out, compile.quiet);
     exe = snx_format("%s%s", base, compile.target_win ? ".exe" : "");
     tmp = snx_format("%s.tmp", exe);
     if (snx_copy_file(run, tmp) || snx_make_executable(tmp) || snx_replace(tmp, exe)) {
@@ -445,6 +442,5 @@ done:
     free(run);
     free(exe);
     free(tmp);
-    free(romfs);
     return rc;
 }

@@ -19,7 +19,6 @@
 #include "runtime/platform/log.h"
 #include "runtime/platform/plat.h"
 #include "gpu/vk/vk.h"
-#include "gpu/vk/spirv.h"
 #include "gpu/renderer.h"
 
 typedef struct CsPipe {
@@ -118,7 +117,7 @@ static void arena_retire(void) {
     g_ar = VK_NULL_HANDLE;
 }
 static int arena_fit(u64 need) {
-    if (g_ar && need <= g_ar_cap && g_ar_cap >= g_ar_want) return 1;
+    if (g_ar && g_ar_used <= g_ar_cap && need <= g_ar_cap - g_ar_used && g_ar_cap >= g_ar_want) return 1;
     vk_cmd(); /* frames older than VK_FRAMES are done once the current one has started */
     for (int i = 0; i < g_nretired; i++)
         if (g_retired[i].frame + VK_FRAMES <= vk_frame_number() && g_retired[i].cap >= need &&
@@ -216,6 +215,13 @@ static void cs_land(void) {
     g_vk_cs_batches++;
     g_landing = 0;
 }
+
+/* A descriptor can fail after its inputs were copied into the arena. No command references those inputs yet. */
+static void cs_abandon_binding(void) {
+    if (g_recording || g_inflight) return;
+    g_ar_used = 0;
+    vkResetDescriptorPool(g_vk.dev, g_dpool, 0);
+}
 /* a draw reads [gva, gva + len), which one pending result covers: it reads it from the arena, after the batch. Any
    other overlap lands the results now, so the caller's caches see them in memory */
 int vk_compute_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off) {
@@ -283,22 +289,12 @@ static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm) {
     p->si.shared_size = (int)shm;
     const char* corpus = getenv("SNX_SHADER_CORPUS");
     if (corpus) shader_corpus_save(corpus, code, blen, 0x10000 + 80, ST_CS, &p->si, key);
-    char* src = vk_translate(code, 0x10000 + 80, ST_CS, &p->si, cs_cb_read, &p->cbr);
-    src = vk_glsl_post(src, ST_CS, shader_flushes_denorms(&p->si));
-    if (!src || p->si.unsupported) {
+    size_t nw = 0;
+    u32* spv = vk_translate_spirv(code, 0x10000 + 80, ST_CS, &p->si, &nw, cs_cb_read, &p->cbr);
+    if (!spv || p->si.unsupported) {
         p->failed = 1;
         LOG("vulkan: compute %016llx not translated (%d instructions, first %s)\n", (unsigned long long)key,
             p->si.unsupported, p->si.first_unsupported);
-        free(src);
-        return p;
-    }
-    size_t nw = 0;
-    char err[2048] = "";
-    u32* spv = vk_spirv_cached(src, ST_CS, g_vk_spirv_dir, &nw, err, sizeof err);
-    free(src);
-    if (!spv) {
-        p->failed = 1;
-        WARN("vulkan: compute %016llx didn't compile: %s\n", (unsigned long long)key, err);
         return p;
     }
     VkShaderModuleCreateInfo mi = {
@@ -375,8 +371,8 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         g_vk_cs_skipped++;
         return;
     }
-    if (p->si.nimg) {
-        LOG_LIMIT(1, "vulkan: compute that writes images isn't done yet (skipped)\n");
+    if (p->si.nimg && !g_vk.feat.shaderStorageImageWriteWithoutFormat) {
+        LOG_LIMIT(1, "vulkan: storage image writes need shaderStorageImageWriteWithoutFormat (skipped)\n");
         g_vk_cs_skipped++;
         return;
     }
@@ -394,14 +390,14 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         ss[i] = v[2] ? v[2] : 16;
         if (ss[i] > (16u << 20)) ss[i] = 16u << 20;
         ss[i] = (ss[i] + 3) & ~3u;
-        need += ss[i] + 256;
+        need += ss[i] + vk_stage_align();
     }
     for (int i = 0; i < 8; i++)
-        if (p->si.cbuf_mask & (1u << i)) need += g_cbn[i] + 256;
-    need += 2048;
+        if (p->si.cbuf_mask & (1u << i)) need += g_cbn[i] + vk_stage_align();
+    need += sizeof(i32) * 320 + vk_stage_align(); /* optional format data */
     /* dispatches that read textures run on the graphics queue, after what was recorded before them. Inputs that
        pending results overlap land those first, before anything is put in the arena */
-    int gfx = p->si.ntex > 0, overlap = 0;
+    int gfx = p->si.ntex > 0 || p->si.nimg > 0, overlap = 0;
     /* a read-only input inside a pending result of this batch is read from the arena on the GPU, after a barrier
        (multi-pass skinning reads what the pass before wrote); any other overlap lands the results first */
     i64 chain[16];
@@ -433,9 +429,10 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         cs_land();
         if (!VK_OK(vkAllocateDescriptorSets(g_vk.dev, &dai, &set))) return;
     }
-    VkWriteDescriptorSet w[64];
-    VkDescriptorBufferInfo bi[64];
-    VkDescriptorImageInfo ii[32];
+    VkWriteDescriptorSet w[80];
+    VkDescriptorBufferInfo bi[80];
+    VkDescriptorImageInfo ii[40];
+    Surf* images[8] = {0};
     u32 nw = 0;
     for (int i = 0; i < 8; i++)
         if (p->si.cbuf_mask & (1u << i)) {
@@ -499,17 +496,19 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
             VkImageViewType want = vk_tex_view_type(st);
             Surf* t = vk_tex_from_tic(tic);
             VkImageView v = t && !t->f.depth ? vk_tex_bind_view(t, want, tic, 0) : VK_NULL_HANDLE;
+            VkImageLayout sampled_layout =
+                p->si.nimg ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             if (v)
-                vk_surf_use(vk_cmd(), t, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_SAMPLED_STAGES,
-                            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+                vk_surf_use(vk_cmd(), t, sampled_layout, VK_SAMPLED_STAGES, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
             else
                 v = vk_null_view(want, 0);
             VkSampler smp = vk_tex_bind_sampler(tsc, st, 0);
             if (!v || !smp) { /* before any output is recorded: nothing of this dispatch lands */
                 g_vk_cs_skipped++;
+                cs_abandon_binding();
                 return;
             }
-            ii[i] = (VkDescriptorImageInfo){smp, v, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+            ii[i] = (VkDescriptorImageInfo){smp, v, sampled_layout};
             w[nw++] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                              .dstSet = set,
                                              .dstBinding = SNX_VKB_TEX + i,
@@ -524,6 +523,39 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
                                  : 0;
             fmt[(48 + i) * 4] = t && t->f.bpp ? t->f.bpp : 4;
             fmt_used = 1;
+        }
+        for (int i = 0; i < p->si.nimg; i++) {
+            const u32 off = p->si.img[i].cbuf_off;
+            u32 h = 0, tic[8];
+            if (!cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : tcb, off * 4, &h)) {
+                g_vk_cs_skipped++;
+                cs_abandon_binding();
+                return;
+            }
+            gmem_read(tic_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
+            Surf* t = vk_tex_from_tic(tic);
+            VkComponentMapping identity = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                           VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+            VkImageView view = t && t->storage_capable && t->f.raw && !t->f.depth && !t->f.is_int && t->levels == 1 &&
+                                       t->depth3d == 1 && p->si.img[i].type == 3
+                                   ? vk_tex_view(t, VK_IMAGE_VIEW_TYPE_2D, 0, &identity)
+                                   : VK_NULL_HANDLE;
+            if (!view) {
+                LOG_LIMIT(4, "vulkan: unsupported compute storage image (skipped)\n");
+                g_vk_cs_skipped++;
+                cs_abandon_binding();
+                return;
+            }
+            vk_surf_use(vk_cmd(), t, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                        VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+            images[i] = t;
+            ii[p->si.ntex + i] = (VkDescriptorImageInfo){VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL};
+            w[nw++] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                             .dstSet = set,
+                                             .dstBinding = SNX_VKB_IMG + i,
+                                             .descriptorCount = 1,
+                                             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                             .pImageInfo = &ii[p->si.ntex + i]};
         }
         if (fmt_used) {
             u64 o = arena_alloc(sizeof fmt);
@@ -589,6 +621,17 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         g_landing = 1;
         for (int i = 0; i < g_nout; i++)
             vk_write_changed(g_out[i].addr, g_ar_ptr + g_out[i].off, g_org + g_out[i].off, g_out[i].size);
+        for (int i = 0; i < p->si.nimg; i++) {
+            int seen = 0;
+            for (int k = 0; k < i; k++)
+                if (images[k] == images[i]) {
+                    seen = 1;
+                    break;
+                }
+            if (seen) continue;
+            images[i]->wgen++;
+            vk_surf_flush(images[i]);
+        }
         g_nout = 0;
         g_out_lo = ~0ull;
         g_out_hi = 0;

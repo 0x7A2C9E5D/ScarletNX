@@ -96,9 +96,8 @@ Remaining examples: POSIX.
 - **Keys:** flags → checkout → `~/.switch` (`%USERPROFILE%\.switch` on Windows). Common NSP tickets supplement title keys.
 - **Extraction:** defaults to `work/<dump stem>`; `--name`/`--out DIR` override. Refuses existing `exefs`;
   builds missing hactool. [Temp cleanup/key filtering](../src/nx/runtime/driver/extract.c).
-- **Recompile:** AOT → module compile/link → NVN prebuild → final runtime deployment. Cached objects;
-  NVN prebuild failures defer compilation to runtime. `--native` = `-march=native`;
-  `--cc CLANG` / `-O 0..3` also accepted.
+- **Recompile:** AOT → module compile/link → final runtime deployment. Host builds use `-march=native`;
+  `--cc CLANG` / `-O 0..3` are accepted.
 - **Codegen:** `--no-build` emits C/data/INI; `--interp-only` omits AOT functions.
   `--chunk N` sets instructions per TU. Generated C, objects and linker response files use a private system
   temporary directory (`TMPDIR` on Unix), removed on success or failure. Objects are not cached between runs.
@@ -112,7 +111,6 @@ Remaining examples: POSIX.
 | `games/Game[.exe]`, `Game_code.so/.dll` | Runtime + AOT module |
 | `games/Game_data/`, `Game.ini` | Data/saves + settings |
 | `games/Game_build/` | C sources only with `--keep-c` or `--no-build` |
-| `games/shader_cache/spirv/` | SPIR-V cache |
 
 ## GDB (UNIX only)
 

@@ -17,9 +17,17 @@ def main():
     with tempfile.TemporaryDirectory(prefix='snx-direct-shader-') as directory:
         path = Path(directory) / 'fragment.spv'
         vertex = Path(directory) / 'vertex.spv'
-        subprocess.run([args.generator, str(path), str(vertex)], check=True)
+        abs_fragment = Path(directory) / 'abs_fragment.spv'
+        stack_fragment = Path(directory) / 'stack_fragment.spv'
+        subgroup = Path(directory) / 'subgroup.spv'
+        subprocess.run(
+            [args.generator, str(path), str(vertex), str(abs_fragment), str(stack_fragment), str(subgroup)], check=True
+        )
         subprocess.run([args.validator, '--target-env', 'vulkan1.3', str(path)], check=True)
         subprocess.run([args.validator, '--target-env', 'vulkan1.3', str(vertex)], check=True)
+        subprocess.run([args.validator, '--target-env', 'vulkan1.3', str(abs_fragment)], check=True)
+        subprocess.run([args.validator, '--target-env', 'vulkan1.3', str(stack_fragment)], check=True)
+        subprocess.run([args.validator, '--target-env', 'vulkan1.3', str(subgroup)], check=True)
         result = subprocess.run([args.disassembler, str(path)], check=True, capture_output=True, text=True)
         for expected in (
             'OpEntryPoint Fragment',
@@ -52,6 +60,23 @@ def main():
         ):
             if expected not in vs:
                 raise AssertionError(f'missing {expected} in direct vertex shader')
+        abs_code = subprocess.run(
+            [args.disassembler, str(abs_fragment)], check=True, capture_output=True, text=True
+        ).stdout
+        if 'FAbs' not in abs_code:
+            raise AssertionError('missing right-operand absolute value in FADD32I shader')
+        subgroup_code = subprocess.run(
+            [args.disassembler, str(subgroup)], check=True, capture_output=True, text=True
+        ).stdout
+        for expected in (
+            'GroupNonUniformBallot',
+            'GroupNonUniformShuffle',
+            'BuiltIn SubgroupLocalInvocationId',
+            'OpGroupNonUniformBallot',
+            'OpGroupNonUniformShuffle',
+        ):
+            if expected not in subgroup_code:
+                raise AssertionError(f'missing {expected} in subgroup shader')
 
 
 if __name__ == '__main__':

@@ -41,7 +41,7 @@ NX tooling under `src/nx/runtime/driver/` and `src/nx/loader/`:
 - `src/common/cpu/aarch64/a64.c` + `a64_templates.inc`: shared instruction semantics for AOT and interpreter.
 - `src/common/cpu/recompiler/codegen.c`: function/CFG discovery over platform-neutral image views.
   `src/nx/loader/codegen_view.c` adapts NX images; `module.c` owns NX chunks, dispatch tables, `SnxModule`.
-- `toolchain.c`: parallel Clang jobs, ABI/source-keyed object cache, linking, shader prebuild.
+- `toolchain.c`: parallel Clang jobs, ABI/source-keyed object cache, linking.
 - `src/common/utilities/common.c` and `process.c`: host files/processes; argv-based subprocesses.
   NX extraction retains its isolated key environment.
 
@@ -91,7 +91,7 @@ SVC -> `hle/svc/svc.c`; `svcSendSyncRequest` -> `hle/kernel/ipc.c` -> session's 
 2. Copy entries to GPU queue; `nv.submit_lk` orders fence promises and cross-channel submits.
    Promised GPU-channel fences wait on the GPU thread; host1x/CPU/unpromised fences wait on the submitter.
 3. GPU-thread dispatch: 3D, MME, compute, 2D, DMA, inline-to-memory. Draws -> `g_renderer` (`gpu/renderer.h`).
-   Shaders: Maxwell SASS -> GLSL -> SPIR-V (`gpu/shader/`, glslang).
+   Shaders: Maxwell SASS -> SPIR-V (`gpu/shader/`).
 4. Vk `stream_incr` lands compute writes in guest memory before incrementing the syncpoint.
 5. vi waits on unpromised fences, then queues present after preceding submits. GPU thread checks remaining fences;
    `present_buffer` uses matching RT + vi crop, or converts guest memory.

@@ -38,9 +38,11 @@ VkImageAspectFlags vk_aspect(const VkFmt* f) {
 void vk_surf_use(VkCommandBuffer cb, Surf* s, VkImageLayout layout, VkPipelineStageFlags2 stage,
                  VkAccessFlags2 access) {
     int writes = (access & (VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
-                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT)) != 0;
+                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT |
+                            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT)) != 0;
     int wrote = (s->access & (VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
-                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT)) != 0;
+                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT |
+                              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT)) != 0;
     if (s->layout == layout && !writes && !wrote) {
         /* read after read in the same layout needs no barrier, unless the reader is in a stage the barrier that made
            the last write visible didn't name (a copy after a blit read it): a barrier from the earlier readers
@@ -90,6 +92,12 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
     VkImageUsageFlags usage =
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (is_rt) usage |= f.depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    VkFormatProperties format_props;
+    vkGetPhysicalDeviceFormatProperties(g_vk.phys, f.vk, &format_props);
+    if (format_props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) {
+        usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+        s->storage_capable = 1;
+    }
     s->type = layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
     VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
                             .imageType = VK_IMAGE_TYPE_2D,
@@ -273,9 +281,9 @@ void vk_rt_reload(u64 gva) {
 static int depth_copies_raw(const Surf* s) {
     return (s->f.vk == VK_FORMAT_D32_SFLOAT || s->f.vk == VK_FORMAT_D16_UNORM) && s->sw == s->w && s->sh == s->h;
 }
-void vk_rt_flush(u64 gva) {
-    Surf* s = vk_rt_find(gva);
+void vk_surf_flush(Surf* s) {
     if (!s || (s->f.depth ? !depth_copies_raw(s) : !s->f.raw) || s->layout == VK_IMAGE_LAYOUT_UNDEFINED) return;
+    u64 gva = s->gva;
     /* not drawn to since it was last written back or loaded: memory has it already (and a CPU write since then is
        newer than the target) */
     if (s->mem_wgen == s->wgen) return;
@@ -290,10 +298,10 @@ void vk_rt_flush(u64 gva) {
     vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
     for (u32 layer = 0; layer < s->layers; layer++) {
-        VkBufferImageCopy c = {.bufferOffset = (u64)layer * slice,
-                               .imageSubresource = {s->f.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, 0,
-                                                    layer, 1},
-                               .imageExtent = {s->w, s->h, 1}};
+        VkBufferImageCopy c = {
+            .bufferOffset = (u64)layer * slice,
+            .imageSubresource = {s->f.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1},
+            .imageExtent = {s->w, s->h, 1}};
         VmaAllocation tm;
         VkImage t = s->sw == s->w && s->sh == s->h ? VK_NULL_HANDLE : unscaled_image(s, &tm);
         if (!t)
@@ -352,7 +360,9 @@ void vk_rt_flush(u64 gva) {
         gpu_mem_written(gva, sz); /* caches built from this memory check it again */
     s->mem_wgen = s->wgen;
     s->gw = gpu_mem_generation();
+    if (!s->is_rt) vk_tex_note_writeback(s);
 }
+void vk_rt_flush(u64 gva) { vk_surf_flush(vk_rt_find(gva)); }
 
 static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch, u32 layers, u64 layer_size,
                        int volume) {

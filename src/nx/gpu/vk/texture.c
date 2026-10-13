@@ -54,8 +54,7 @@ static void level_convert(const VkFmt* f, const u8* lin, u32 lw, u32 lh, u32 ld,
     if (f->conv >= VKC_ETC2) { /* each slice's blocks, decoded */
         int kind = f->conv - VKC_ETC2;
         for (u32 z = 0; z < ld; z++)
-            etc2_decode_image(lin + (u64)z * rowb * th, lw, lh, kind,
-                              out + (u64)z * lw * lh * etc2_pixel_bytes(kind));
+            etc2_decode_image(lin + (u64)z * rowb * th, lw, lh, kind, out + (u64)z * lw * lh * etc2_pixel_bytes(kind));
         return;
     }
     switch (f->conv) {
@@ -117,9 +116,8 @@ static void tex_upload(Surf* t) {
        texture through its color one. The packed kinds (Z24S8 and friends) would need converting */
     int depth_raw = f->depth && (f->vk == VK_FORMAT_D32_SFLOAT || f->vk == VK_FORMAT_D16_UNORM);
     if (f->depth && !depth_raw) {
-        LOG_LIMIT(1,
-                  "vulkan: packed depth textures from memory aren't loaded yet, they read as 1.0 (only depth render "
-                  "targets are sampled)\n");
+        LOG_LIMIT(1, "vulkan: packed depth textures from memory aren't loaded yet, they read as 1.0 (only depth render "
+                     "targets are sampled)\n");
         /* defined contents rather than whatever the image's memory held: far, so shadow tests pass */
         VkClearDepthStencilValue far = {1.0f, 0};
         VkImageSubresourceRange all = {vk_aspect(f), 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
@@ -188,11 +186,11 @@ static void tex_upload(Surf* t) {
                 }
                 regbuf = buf;
                 level_convert(f, lin, lw, lh, ld, rowb, p);
-                reg[nreg++] = (VkBufferImageCopy){.bufferOffset = off,
-                                                  .imageSubresource = {depth_raw ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                                                 : VK_IMAGE_ASPECT_COLOR_BIT,
-                                                                       l, layer, 1},
-                                                  .imageExtent = {lw, lh, ld}};
+                reg[nreg++] = (VkBufferImageCopy){
+                    .bufferOffset = off,
+                    .imageSubresource = {depth_raw ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, l, layer,
+                                         1},
+                    .imageExtent = {lw, lh, ld}};
             }
             free(lin);
             at += lsz;
@@ -223,6 +221,14 @@ static int tex_rehash(Surf* t) {
     t->hash = hh;
     tex_upload(t);
     return 1;
+}
+
+void vk_tex_note_writeback(Surf* t) {
+    t->hash = mem_hash(t->gva, t->size);
+    t->gw = gpu_mem_generation();
+    t->wseen = vk_ww_now() + 1;
+    t->checked = g_vk_present;
+    t->stable = 0;
 }
 
 static int format_samples(VkFormat f) {
@@ -273,6 +279,12 @@ static Surf* tex_create(u64 gva, u32 w, u32 h, u32 layers, u32 d3, u32 levels, V
                             .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                             .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+    VkFormatProperties format_props;
+    vkGetPhysicalDeviceFormatProperties(g_vk.phys, f.vk, &format_props);
+    if (format_props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) {
+        ii.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+        t->storage_capable = 1;
+    }
     if (type != VK_IMAGE_VIEW_TYPE_3D && layers >= 6 && w == h) ii.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     VkViewFormats vf;
     vk_view_formats(&ii, &vf);

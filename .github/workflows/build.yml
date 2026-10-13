@@ -124,6 +124,9 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
       - uses: actions/cache@v5
         with:
           path: .cache/cpm
@@ -137,10 +140,30 @@ jobs:
           key: tools-${{ hashFiles('scripts/bootstrap.ps1') }}
       - name: Install the toolchain
         run: .\scripts\bootstrap.ps1
+      - name: Build SPIR-V validation tools
+        run: |
+          . .\scripts\env.ps1 -Isolated
+          $env:PATH = "$env:pythonLocation;$env:PATH"
+          New-Item -ItemType Directory -Force build | Out-Null
+          git clone --depth 1 --branch v2026.4 https://github.com/KhronosGroup/SPIRV-Tools.git build/spirv-tools-src
+          if ($LASTEXITCODE) { exit 1 }
+          if ((git -C build/spirv-tools-src rev-parse HEAD) -ne 'ef96ed763b43b59b33b31b362f09a02b729fa1c9') { throw 'Unexpected SPIRV-Tools revision' }
+          git clone --depth 1 --branch vulkan-sdk-1.4.363.0 https://github.com/KhronosGroup/SPIRV-Headers.git build/spirv-tools-src/external/spirv-headers
+          if ($LASTEXITCODE) { exit 1 }
+          if ((git -C build/spirv-tools-src/external/spirv-headers rev-parse HEAD) -ne '496543121ce6419f23d6fa5d7194ba66c36212d2') { throw 'Unexpected SPIRV-Headers revision' }
+          cmake -S build/spirv-tools-src -B build/spirv-tools -G Ninja -DCMAKE_BUILD_TYPE=Release -DSPIRV_SKIP_TESTS=ON -DSPIRV_TOOLS_USE_MIMALLOC=OFF "-DPython3_EXECUTABLE=$env:pythonLocation/python.exe"
+          if ($LASTEXITCODE) { exit 1 }
+          cmake --build build/spirv-tools --target spirv-val spirv-dis -j 4
+          if ($LASTEXITCODE) { exit 1 }
+          $val = Get-ChildItem build/spirv-tools -Recurse -Filter spirv-val.exe | Select-Object -First 1
+          $dis = Get-ChildItem build/spirv-tools -Recurse -Filter spirv-dis.exe | Select-Object -First 1
+          if (-not $val -or -not $dis) { throw 'SPIR-V validator or disassembler is missing' }
+          "SNX_SPIRV_VAL=$($val.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SNX_SPIRV_DIS=$($dis.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Build the runtime
         run: |
           . .\scripts\env.ps1 -Isolated
-          cmake --preset default
+          cmake --preset default "-DSNX_SPIRV_VAL=$env:SNX_SPIRV_VAL" "-DSNX_SPIRV_DIS=$env:SNX_SPIRV_DIS" "-DSNX_SHADER_SPIRV_VAL=$env:SNX_SPIRV_VAL" "-DSNX_SHADER_SPIRV_DIS=$env:SNX_SPIRV_DIS" "-DPython3_EXECUTABLE=$env:pythonLocation/python.exe"
           if ($LASTEXITCODE) { exit 1 }
           cmake --build --preset default
           if ($LASTEXITCODE) { exit 1 }
