@@ -136,8 +136,11 @@ static void global_buffers(void) {
 }
 
 static void float_controls(void) {
-    const u64 cases[][2] = {{FMUL_FTZ, FMUL_FTZ}, {FMUL_FTZ, FADD_KEEP}, {FMUL_KEEP, FMUL_KEEP},
-                            {FFMA_FMZ, FFMA_FMZ}, {FFMA_FMZ, FFMA_KEEP}};
+    const u64 cases[][2] = {{FMUL_FTZ, FMUL_FTZ},
+                            {FMUL_FTZ, FADD_KEEP},
+                            {FMUL_KEEP, FMUL_KEEP},
+                            {FFMA_FMZ, FFMA_FMZ},
+                            {FFMA_FMZ, FFMA_KEEP}};
     for (int i = 0; i < 5; i++) {
         for (int available = 0; available < 2; available++) {
             ShaderInfo info;
@@ -218,14 +221,68 @@ static void fragment_storage_images(void) {
 
 static u64 mov32i(u32 reg, u32 value) { return 0x0100000000000000ull | ((u64)value << 20) | 0x71000ull | reg; }
 
+static int brx_table(u32 bank, u32 offset, u32* value) {
+    if (bank || offset > 8) return 0;
+    *value = offset == 0 ? 16 : 1024; /* second word belongs to another constant, not this jump table */
+    return 1;
+}
+
+static int clamped_brx_table(u32 bank, u32 offset, u32* value) {
+    if (bank || offset > 8) return 0;
+    *value = offset < 8 ? 24 : 1024;
+    return 1;
+}
+
+static void brx_length(void) {
+    u64 code[64] = {0};
+    code[10] = 0x001F8000FC0007E0ull;
+    code[11] = 0xef90000000070001ull; /* LDC R1, c[0][0] */
+    code[12] = 0xe25000000007010full; /* BRX R1 */
+    code[13] = 0xe30000000007000full;
+    code[14] = code[10];
+    code[15] = code[13];
+    u32 targets[64], len = 0;
+    int (*old)(u32, u32, u32*) = g_shader_cb_read;
+    g_shader_cb_read = brx_table;
+    shader_hash((const u8*)code, sizeof code, &len);
+    int count = shader_brx_targets(code, 12, 64, targets, 64);
+    check(count == 1 && targets[0] == 15, "BRX table stops at out-of-range trailing constant");
+    check(len == 16 * 8, "BRX program length ends after its last reachable exit");
+    memset(code, 0, sizeof code);
+    code[10] = 0x001F8000FC0007E0ull;
+    code[11] = 0x3820000000170b0bull; /* IMNMX R11, R11, 1: two entries */
+    code[12] = 0x3848000000270b0dull; /* SHL R13, R11, 2 */
+    code[13] = 0xef94000000070d0dull; /* LDC R13, c[0][R13] */
+    code[14] = code[10];
+    code[15] = 0xe250000000070d0full; /* BRX R13 */
+    code[16] = 0xe30000000007000full;
+    code[18] = code[10];
+    code[19] = code[16];
+    g_shader_cb_read = clamped_brx_table;
+    shader_hash((const u8*)code, sizeof code, &len);
+    count = shader_brx_targets(code, 15, 64, targets, 64);
+    check(count == 2 && targets[0] == 19 && targets[1] == 19,
+          "BRX reads only the entries permitted by its IMNMX clamp");
+    check(len == 20 * 8, "clamped BRX bounds program length before padding");
+    memset(code, 0, sizeof code);
+    code[10] = 0x001F8000FC0007E0ull;
+    code[11] = 0xe250000000070d0full; /* dynamic BRX with no readable jump table */
+    code[12] = 0xe30000000007000full;
+    g_shader_cb_read = NULL;
+    shader_hash((const u8*)code, sizeof code, &len);
+    check(len == 13 * 8, "unresolved BRX stops at the exit before an all-zero tail");
+    code[15] = code[12];
+    shader_hash((const u8*)code, sizeof code, &len);
+    check(len == 16 * 8, "unresolved BRX keeps nonzero instructions beyond an earlier exit");
+    g_shader_cb_read = old;
+}
+
 static void nro_shader_modes(void) {
     const u64 raw[] = {0x4c98078800070004ull, mov32i(4, 1), mov32i(5, 3), 0xeb18048600470400ull};
-    const u64 ms[] = {0x4c98078800070004ull, mov32i(5, 4), mov32i(0, 3), mov32i(1, 5),
-                             0xdd3c0007a0470000ull};
-    const u64 ms_array[] = {0x4c98078800070004ull, mov32i(5, 2), mov32i(0, 3), mov32i(1, 5),
-                                   mov32i(2, 5), 0xdd3c0007b0470000ull};
-    const u64 exchange[] = {mov32i(2, 1), mov32i(3, 2), 0xef5d00000007ff02ull,
-                                   0xec8000002027ff02ull};
+    const u64 ms[] = {0x4c98078800070004ull, mov32i(5, 4), mov32i(0, 3), mov32i(1, 5), 0xdd3c0007a0470000ull};
+    const u64 ms_array[] = {0x4c98078800070004ull, mov32i(5, 2), mov32i(0, 3),
+                            mov32i(1, 5),          mov32i(2, 5), 0xdd3c0007b0470000ull};
+    const u64 exchange[] = {mov32i(2, 1), mov32i(3, 2), 0xef5d00000007ff02ull, 0xec8000002027ff02ull};
     struct {
         const u64* instructions;
         int count;
@@ -238,8 +295,8 @@ static void nro_shader_modes(void) {
         u32* code = translate(cases[i].instructions, cases[i].count, ST_CS, &info, &words, 1);
         check(code && !info.unsupported, "NRO shader mode translates");
         if (code) {
-            if (i < 3) check(info.ntex == 1 && (info.tex[0].flags & 3) == cases[i].flags,
-                             "NRO texture mode is recorded");
+            if (i < 3)
+                check(info.ntex == 1 && (info.tex[0].flags & 3) == cases[i].flags, "NRO texture mode is recorded");
             save_fixture(nro_paths[i], code, words);
         }
         free(code);
@@ -253,6 +310,7 @@ int main(int argc, char** argv) {
         storage_paths[1] = argv[2];
         for (int i = 0; i < 4; i++) nro_paths[i] = argv[i + 3];
     }
+    brx_length();
     f2i_modifiers();
     global_buffers();
     float_controls();

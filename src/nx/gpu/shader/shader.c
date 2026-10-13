@@ -33,6 +33,12 @@ u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
     /* linear scan until an unconditional EXIT past every branch target */
     u32 maxt = 0;
     int unresolved_brx = 0, has_cal = 0;
+    u32 last_code = 11;
+    for (u32 j = n; j-- > 11;)
+        if (IDX_OK(j) && w[j]) {
+            last_code = j;
+            break;
+        }
     for (; i < n; i++) {
         if (!IDX_OK(i)) continue;
         const Op* op = decode(w[i]);
@@ -51,6 +57,8 @@ u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
                 if (tg[q] > maxt) maxt = tg[q];
         }
         if (!unresolved_brx && op->id == O_EXIT && flow_always(w[i]) && i >= maxt) break;
+        /* An unknown BRX can reach later code, but it cannot reach instructions past an all-zero tail. */
+        if (unresolved_brx && op->id == O_EXIT && flow_always(w[i]) && i >= maxt && i >= last_code) break;
         if (!unresolved_brx && has_cal && op->id == O_RET && flow_always(w[i]) && i >= maxt) break;
         if (!unresolved_brx && op->id == O_BRA && flow_always(w[i]) && i >= maxt && bra_target(w[i], i) <= i) break;
         if (i > 16384) break;
@@ -91,7 +99,34 @@ int shader_merge_dual(const u8* a, const u8* b, u8* out, u32 max_bytes) {
     return 1;
 }
 
-/* BRX targets from its jump table (LDC nearby -> cbuf). -1 if we can't tell, or a target is past the n words */
+/* A compiler-generated BRX table uses IMNMX to clamp the index, SHL to turn it into a byte offset, then LDC. */
+static int brx_table_count(const u64* w, u32 ldc, u32* count) {
+    u32 address = B(w[ldc], 8, 8);
+    if (address == 255) return 0;
+    for (u32 k = 1; k <= 32 && k < ldc; k++) {
+        u32 j = ldc - k;
+        if (!IDX_OK(j)) continue;
+        const Op* op = decode(w[j]);
+        if (!op || op->id == O_BRA || op->id == O_BRX || op->id == O_EXIT) break;
+        if (B(w[j], 0, 8) != address) continue;
+        if (op->id != O_SHL_I || B(w[j], 20, 5) != 2 || B(w[j], 16, 3) != 7 || B(w[j], 19, 1)) return 0;
+        u32 index = B(w[j], 8, 8);
+        for (u32 m = 1; m <= 32 && m < j; m++) {
+            u32 p = j - m;
+            if (!IDX_OK(p)) continue;
+            const Op* prior = decode(w[p]);
+            if (!prior || prior->id == O_BRA || prior->id == O_BRX || prior->id == O_EXIT) break;
+            if (B(w[p], 0, 8) != index) continue;
+            if (prior->id != O_IMNMX_I || B(w[p], 56, 1) || B(w[p], 16, 3) != 7 || B(w[p], 19, 1)) return 0;
+            *count = B(w[p], 20, 19) + 1;
+            return 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+/* BRX targets from its jump table (LDC nearby -> cbuf). -1 if the table can't be resolved. */
 int shader_brx_targets(const u64* w, u32 i, u32 n, u32* out, int max) {
     if (!g_shader_cb_read) return -1;
     u32 ra = B(w[i], 8, 8);
@@ -103,20 +138,35 @@ int shader_brx_targets(const u64* w, u32 i, u32 n, u32* out, int max) {
         if (!o2 || o2->id != O_LDC || B(w[j], 0, 8) != ra) continue;
         u32 cidx = B(w[j], 36, 5);
         i32 coff = (i32)(B(w[j], 20, 16) << 16) >> 16;
-        int cnt = 0, seen = 0;
-        for (u32 e = 0; e < 64 && cnt < max; e++) {
+        u32 table_count = 0;
+        int exact = brx_table_count(w, j, &table_count);
+        if (exact && table_count > (u32)max) return -1;
+        int cnt = 0;
+        for (u32 e = 0; e < (exact ? table_count : 64u) && cnt < max; e++) {
             u32 v;
-            if (!g_shader_cb_read(cidx, (u32)(coff + (i32)e * 4), &v)) break;
-            i32 bb = (i32)v + imm;
-            if (bb < 0 || (bb & 7)) break;
-            u32 t = i + 1 + (u32)(bb / 8);
+            if (!g_shader_cb_read(cidx, (u32)(coff + (i32)e * 4), &v)) {
+                if (exact) return -1;
+                break;
+            }
+            i64 bb = (i64)(i32)v + imm;
+            if (bb < 0 || (bb & 7)) {
+                if (exact) return -1;
+                break;
+            }
+            u64 t = (u64)i + 1 + (u64)(bb / 8);
             if (t >= 10 && ((t - 10) & 3) == 0) t++;
-            if (t < 11) break;
-            seen++;
-            if (t >= n) return -1;
-            out[cnt++] = t;
+            if (t < 11) {
+                if (exact) return -1;
+                break;
+            }
+            /* Without an index clamp, an out-of-range word ends the table's valid prefix. */
+            if (t >= n) {
+                if (exact) return -1;
+                break;
+            }
+            out[cnt++] = (u32)t;
         }
-        return seen ? cnt : -1;
+        return cnt ? cnt : -1;
     }
     return -1;
 }
