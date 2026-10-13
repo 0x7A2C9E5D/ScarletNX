@@ -101,6 +101,7 @@ int shader_merge_dual(const u8* a, const u8* b, u8* out, u32 max_bytes) {
 
 /* A compiler-generated BRX table uses IMNMX to clamp the index, SHL to turn it into a byte offset, then LDC. */
 static int brx_table_count(const u64* w, u32 ldc, u32* count) {
+    if (B(w[ldc], 48, 3) != 4) return 0; /* LDC.B32 */
     u32 address = B(w[ldc], 8, 8);
     if (address == 255) return 0;
     for (u32 k = 1; k <= 32 && k < ldc; k++) {

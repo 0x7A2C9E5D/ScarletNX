@@ -233,6 +233,12 @@ static int clamped_brx_table(u32 bank, u32 offset, u32* value) {
     return 1;
 }
 
+static int invalid_brx_table(u32 bank, u32 offset, u32* value) {
+    if (bank || offset) return 0;
+    *value = 1024;
+    return 1;
+}
+
 static void brx_length(void) {
     u64 code[64] = {0};
     code[10] = 0x001F8000FC0007E0ull;
@@ -248,6 +254,8 @@ static void brx_length(void) {
     int count = shader_brx_targets(code, 12, 64, targets, 64);
     check(count == 1 && targets[0] == 15, "BRX table stops at out-of-range trailing constant");
     check(len == 16 * 8, "BRX program length ends after its last reachable exit");
+    g_shader_cb_read = invalid_brx_table;
+    check(shader_brx_targets(code, 12, 64, targets, 64) == -1, "BRX rejects a table with no valid targets");
     memset(code, 0, sizeof code);
     code[10] = 0x001F8000FC0007E0ull;
     code[11] = 0x3820000000170b0bull; /* IMNMX R11, R11, 1: two entries */
