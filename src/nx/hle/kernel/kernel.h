@@ -45,7 +45,8 @@ struct KThread {
     KObj o;
     CPU cpu;
     u64 id;
-    int prio;
+    int prio;           /* the priority it runs at: base_prio raised by the mutex waiters it owns (sync.c) */
+    int base_prio;      /* as the game set it */
     int core;           /* the core it is scheduled on (0 to NCORES - 1), where it runs when it next takes a core */
     int ideal_core;     /* as svcSetThreadCoreMask set it: -1 when the game doesn't care */
     u32 yields;         /* svcSleepThread yields, every 64th of which is a host one */
@@ -66,6 +67,7 @@ struct KThread {
     int wait_kind; /* 0 none 1 objects 2 mutex 3 condvar 4 address 5 a thread being paused (svc.c) */
     u64 wait_addr, wait_key;
     u32 wait_tag;
+    KThread* lock_owner; /* while it waits on a mutex (wait_kind 2): the mutex's owner, who inherits its priority */
     int wait_result;
     KThread* next_waiter;
     char name[32];

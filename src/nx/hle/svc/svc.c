@@ -216,7 +216,7 @@ static void snx_svc_(CPU* c, u32 imm) {
                 return;
             }
             pm_lock(&g_klock); /* the waiter lists pick by priority under it */
-            core_set_prio(n, (int)prio);
+            prio_set_base_nl(n, (int)prio);
             pm_unlock(&g_klock);
             x[0] = 0;
             return;

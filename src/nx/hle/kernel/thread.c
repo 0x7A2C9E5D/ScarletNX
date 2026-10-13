@@ -27,7 +27,7 @@ KThread* kthread_create(u64 entry, u64 arg, u64 stack_top, int prio, int core) {
     t->entry = entry;
     t->arg = arg;
     t->stack_top = stack_top;
-    t->prio = prio;
+    t->prio = t->base_prio = prio;
     t->core = core < 0 ? 0 : core;
     t->ideal_core = t->core;
     t->on_core = -1;
