@@ -25,9 +25,11 @@ static void usage(void) {
          "  --cc CLANG             Compiler executable (portable backend)\n"
          "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: 2)\n"
          "  --jobs N               Parallel compiles (default: CPU count)");
-    puts("  --backend NAME         Code generator: portable (C, compiled with Clang), llvm (LLVM-C, writes\n"
-         "                         the module itself, for this host), gcc (libgccjit, not implemented)");
-    puts("  --chunk N              Instructions per C chunk (default: 30000)\n"
+    puts("  --backend NAME         Code generator: llvm (LLVM-C, writes the module itself, for this host;\n"
+         "                         the default), portable (C, compiled with Clang; the default with --cc,\n"
+         "                         a cross --target, --no-build, or a recompiler built without LLVM),\n"
+         "                         gcc (libgccjit, not implemented)");
+    puts("  --chunk N              Instructions per code unit, whole functions batched (default: 90000)\n"
          "  --target auto|linux|win64\n"
          "  --native               Compile for this host CPU\n"
          "  --no-build             Generate C/data/INI only\n"
@@ -221,6 +223,7 @@ done:
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *arg, *value;
     SnxBackend backend = SNX_BACKEND_PORTABLE;
+    int backend_given = 0;
     SnxLlvmBuild llvm;
     SnxCompileOptions compile;
     SnxCodegenOptions gen;
@@ -239,7 +242,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     memset(&llvm, 0, sizeof(llvm));
     compile.opt = "2";
     compile.jobs = snx_cpu_count();
-    gen.chunk_instrs = 30000;
+    gen.chunk_instrs = SNX_CHUNK_INSTRUCTIONS;
 #ifdef _WIN32
     host_win = 1;
 #endif
@@ -305,6 +308,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
                 compile.cc = value;
             else if (!strcmp(arg, "--backend")) {
                 if (snx_backend_parse(value, &backend)) return snx_error("--backend expects portable, llvm or gcc");
+                backend_given = 1;
             } else if (!strcmp(arg, "-O")) {
                 if (strlen(value) != 1 || !strchr("0123sz", value[0])) return snx_error("-O expects 0,1,2,3,s,z");
                 compile.opt = value;
@@ -332,6 +336,11 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         compile.target_win = 0;
     else if (strcmp(target, "auto"))
         return snx_error("--target expects auto, linux or win64");
+#ifdef SNX_WITH_LLVM
+    /* LLVM by default. Options that only mean something for C keep their meaning without --backend: --cc names
+       the C compiler, a cross --target needs one, --no-build stops at the generated C */
+    if (!backend_given && !compile.cc && compile.target_win == host_win && !no_build) backend = SNX_BACKEND_LLVM;
+#endif
     if (backend == SNX_BACKEND_PORTABLE && !no_build && host_win && !compile.target_win && (!runtime || !compile.cc))
         return snx_error("Linux cross-compilation on Windows requires --cc and --runtime");
     if (backend != SNX_BACKEND_PORTABLE) {
@@ -413,7 +422,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     }
     code = snx_format("%s_code.%s", base, compile.target_win ? "dll" : "so");
     if (backend == SNX_BACKEND_PORTABLE) {
-        if (snx_compile_sources(sources.paths, sources.count, code, paths, &compile)) goto done;
+        if (snx_compile_sources(sources.paths, sources.labels, sources.count, code, paths, &compile)) goto done;
     } else {
 #ifdef SNX_WITH_LLVM
         char* kept = keep_c ? snx_format("%s_build", base) : NULL;

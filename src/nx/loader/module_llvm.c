@@ -85,7 +85,8 @@ static int compile_unit(Queue* q, size_t index, char* error, size_t error_size) 
 }
 
 static void worker(Queue* q) {
-    char error[1024];
+    char error[1024], name[32], *label;
+    double start, seconds;
     for (;;) {
         size_t i;
         int rc;
@@ -97,16 +98,23 @@ static void worker(Queue* q) {
         i = q->next++;
         unlock(q);
         error[0] = 0;
+        start = snx_seconds();
         rc = compile_unit(q, i, error, sizeof(error));
+        seconds = snx_seconds() - start;
+        label = rc || q->build->quiet ? NULL : snx_chunk_label(q->codegen, q->units[i].first, q->units[i].last);
         lock(q);
         ++q->done;
         if (rc && !q->failed) {
             q->failed = 1;
             snprintf(q->error, sizeof(q->error), "%s", error);
         }
-        if (!q->build->quiet && (q->done % 10 == 0 || q->done == q->count))
-            printf("  compiled %lu/%lu\n", (unsigned long)q->done, (unsigned long)q->count);
+        if (label) {
+            /* every unit: a line every few seconds or minutes, whichever the machine manages */
+            sprintf(name, "code_%03lu", (unsigned long)i);
+            snx_report_unit(q->done, q->count + 1, name, label, 0, seconds); /* + the descriptor */
+        }
         unlock(q);
+        free(label);
     }
 }
 #ifdef _WIN32
@@ -398,6 +406,7 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     unsigned long fallbacks = 0;
     const char* exports[1];
     char error[1024], *tmp = NULL;
+    double start;
     int rc = -1;
     memset(&codegen, 0, sizeof(codegen));
     memset(&q, 0, sizeof(q));
@@ -408,7 +417,7 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
         snx_nx_codegen_analyze(&codegen, loaded, options->hints, options->hint_count, options->quiet))
         return -1;
     /* chunks of whole functions, as module.c splits the C */
-    limit = options->chunk_instrs ? options->chunk_instrs : 30000;
+    limit = options->chunk_instrs ? options->chunk_instrs : SNX_CHUNK_INSTRUCTIONS;
     q.units = (Unit*)snx_alloc((codegen.function_count + 1) * sizeof(*q.units));
     memset(q.units, 0, (codegen.function_count + 1) * sizeof(*q.units));
     for (first = 0; first < codegen.function_count; first = last) {
@@ -420,7 +429,8 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     }
     q.codegen = &codegen;
     q.build = build;
-    if (!options->quiet) printf("LLVM: %lu units\n", (unsigned long)q.count);
+    if (!options->quiet)
+        printf("LLVM: %lu code unit%s and the module descriptor\n", (unsigned long)q.count, q.count == 1 ? "" : "s");
     if (q.count) run(&q, build->jobs);
     if (q.failed) {
         snx_error("LLVM backend: %s", q.error);
@@ -428,12 +438,18 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     }
     for (i = 0; i < q.count; ++i) fallbacks += q.units[i].fallbacks;
     /* the module descriptor */
+    start = snx_seconds();
     ir = snx_ir_new("module", build->opt, error, sizeof(error));
     if (!ir || emit_module(ir, &codegen, options, loaded, &entry_count, error, sizeof(error)) ||
         (build->keep_ir && save_ir(ir, build->keep_ir, "module")) ||
         snx_ir_object(ir, build->opt, &module_object, &module_size, error, sizeof(error))) {
         snx_error("LLVM backend: %s", error);
         goto done;
+    }
+    if (!options->quiet) {
+        char* label = snx_format("SnxModule descriptor, %lu entries", (unsigned long)entry_count);
+        snx_report_unit(q.count + 1, q.count + 1, "module", label, 0, snx_seconds() - start);
+        free(label);
     }
     /* link: runtime library, descriptor, chunks */
     inputs = (SnxLinkInput*)snx_alloc((q.count + 2) * sizeof(*inputs));

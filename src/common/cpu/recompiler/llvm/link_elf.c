@@ -369,7 +369,7 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
             value = symbol_address(&l, object, index, &absolute);
             put64(out.data + slot, value);
             r.r_offset = slot;
-            r.r_info = ELF64_R_INFO(0, R_X86_64_RELATIVE);
+            r.r_info = ELF64_R_INFO((Elf64_Xword)0, R_X86_64_RELATIVE);
             r.r_addend = (int64_t)value;
             snx_link_append(&rela, &r, sizeof(r));
         }
@@ -402,7 +402,7 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
                         if (!weak && !absolute) {
                             Elf64_Rela d;
                             d.r_offset = P;
-                            d.r_info = ELF64_R_INFO(0, R_X86_64_RELATIVE);
+                            d.r_info = ELF64_R_INFO((Elf64_Xword)0, R_X86_64_RELATIVE);
                             d.r_addend = (int64_t)value;
                             snx_link_append(&rela, &d, sizeof(d));
                         }
