@@ -323,6 +323,7 @@ static u8* fx_voice(u8 type) {
     wf(mix(SNX_ART_SUBMIX), 0x24, 1.0f);
     wf(mix(SNX_ART_SUBMIX), 0x24 + (24 + 1) * 4, 1.0f);
     w8(sink(1), 1, 1);
+    memset(eff(1), 0, 0xC0); /* no aux after it */
     u8* e = eff(0);
     memset(e, 0, 0xC0);
     w8(e, 0, type);
@@ -334,6 +335,40 @@ static u8* fx_voice(u8 type) {
 static void sink_copy(i16* x, int from, int to, int ch) {
     for (int f = from; f < to; f++) memcpy(x + (f - from) * SNX_ART_FRAME, sink_frame_at(f, ch), SNX_ART_FRAME * 2);
 }
+/* the submix's buffer from into the final mix's buffer to at gain g */
+static void route(int from, int to, float g) { wf(mix(SNX_ART_SUBMIX), 0x24 + (from * 24 + to) * 4, g); }
+/* a delay on effect 0: channels, time in ms, 48 kHz, then gains in Q14 */
+static void delay_set(u8* p, u16 channels, u32 ms, i32 in_gain, i32 fb, i32 wet, i32 dry, i32 spread, i32 lp) {
+    w32(p, 0xC, (u32)channels << 16 | channels);
+    w32(p, 0x10, 2 * ms);
+    w32(p, 0x14, ms);
+    w32(p, 0x18, (u32)SNX_ART_RATE << 14);
+    const i32 g[6] = {in_gain, fb, wet, dry, spread, lp};
+    memcpy(p + 0x1C, g, sizeof g);
+}
+/* Eden's InitializeDelayEffect, SetDelayEffectParameter and ApplyDelay, one or two channels */
+static void ref_delay(int nch, const i16* const* in, i16* const* out, int n, int len, i32 in_gain, i32 fb, i32 wet,
+                      i32 dry, i32 spread, i32 lp) {
+    static i64 line[2][4096];
+    i64 z[2] = {0, 0};
+    memset(line, 0, sizeof line);
+    i32 fbs = (i32)(((i64)fb * 16056) >> 14), dfg = (i32)(((i64)fbs * (16384 - spread)) >> 14),
+        cross = (i32)(((i64)spread * fbs) >> 14), lpf = (i32)(((i64)lp * 15564) >> 14), lpg = 16384 - lpf;
+    i32 m[2][2] = {{nch == 1 ? fbs : dfg, cross}, {cross, dfg}};
+    for (int i = 0, pos = 0; i < n; i++, pos = (pos + 1) % len) {
+        i64 x[2], d[2];
+        for (int c = 0; c < nch; c++) x[c] = (i64)in[c][i] * 64 * 16384, d[c] = line[c][pos];
+        for (int c = 0; c < nch; c++) {
+            i64 fed = 0;
+            for (int j = 0; j < nch; j++) fed += (d[j] * m[j][c]) >> 14;
+            z[c] = (((((x[c] * in_gain) >> 14) + fed) * lpg) >> 14) + ((z[c] * lpf) >> 14);
+            line[c][pos] = z[c];
+        }
+        for (int c = 0; c < nch; c++)
+            out[c][i] = (i16)((i32)((((x[c] * dry) >> 14) + ((d[c] * wet) >> 14)) >> 14) / 64);
+    }
+}
+
 /* the first sample where a and b differ, -1 if none */
 static int first_diff(const i16* a, const i16* b, int n) {
     for (int i = 0; i < n; i++)
@@ -353,7 +388,7 @@ static double captured(int ch, double hz) {
 static void reset(void) {
     audren_state_free(st);
     u8 params[0x34] = {0};
-    u32 p[13] = {SNX_ART_RATE, SNX_ART_FRAME, 6, SNX_ART_MIXES - 1, SNX_ART_VOICES, SNX_ART_SINKS, SNX_ART_EFFECTS};
+    u32 p[13] = {SNX_ART_RATE, SNX_ART_FRAME, 8, SNX_ART_MIXES - 1, SNX_ART_VOICES, SNX_ART_SINKS, SNX_ART_EFFECTS};
     p[9] = split_counts[0], p[10] = split_counts[1]; /* splitter infos 0x24, destinations 0x28 */
     memcpy(params, p, sizeof p);
     st = audren_state_new(params);
@@ -645,6 +680,80 @@ int main(void) {
             CHECK(at < 0, "biquad effect rev %u mode %d: sample %d is %d, want %d", art_rev, mode, at,
                   at < 0 ? 0 : right[at], at < 0 ? 0 : want[at]);
         }
+    }
+    art_rev = 4;
+
+    /* the delay: a mono 10 ms line, an invalid count until frame 5, restarts on initialized and is_new */
+    {
+        static i16 x[12 * SNX_ART_FRAME], y[12 * SNX_ART_FRAME];
+        reset();
+        u8* p = fx_voice(SNX_AUDREN_EFFECT_DELAY);
+        w8(eff(0), 2, 1);
+        p[0] = 0, p[6] = 1;
+        delay_set(p, 1, 10, 16384, 0, 16384, 0, 0, 0);
+        for (int f = 0; f < 12; f++) {
+            w8(p, 0xE, f < 5 ? 3 : 1);
+            w8(p, 0x34, f == 2 || f == 5 ? SNX_AUDREN_PARAM_INITIALIZED : SNX_AUDREN_PARAM_UPDATED);
+            if (f == 8) w8(eff(0), 1, 1);
+            frames(1);
+        }
+        sink_copy(x, 0, 12, 0);
+        sink_copy(y, 0, 12, 1);
+        int bad = -1;
+        for (int i = 0; i < 12 * SNX_ART_FRAME && bad < 0; i++) {
+            int fresh = i < 480 || (i >= 5 * SNX_ART_FRAME && i < 7 * SNX_ART_FRAME) ||
+                        (i >= 8 * SNX_ART_FRAME && i < 10 * SNX_ART_FRAME);
+            if (y[i] != (fresh ? 0 : x[i - 480])) bad = i;
+        }
+        CHECK(bad < 0, "delay of 480: sample %d is %d", bad, bad < 0 ? 0 : y[bad]);
+    }
+
+    /* a stereo delay with every parameter, against Eden's recursion over the same input */
+    {
+        static i16 x0[10 * SNX_ART_FRAME], x1[10 * SNX_ART_FRAME], y0[10 * SNX_ART_FRAME], y1[10 * SNX_ART_FRAME],
+            w0[10 * SNX_ART_FRAME], w1[10 * SNX_ART_FRAME];
+        for (int on = 0; on < 2; on++) {
+            reset();
+            u8* p = fx_voice(SNX_AUDREN_EFFECT_DELAY);
+            tone(1, 1600, 0.3, 0, 1, 1.0f);
+            route(0, 0, 0.0f), route(1, 1, 0.0f), route(2, 0, 1.0f), route(3, 1, 1.0f);
+            w8(eff(0), 2, (u8)on);
+            p[0] = 0, p[1] = 1, p[6] = 2, p[7] = 3;
+            delay_set(p, 2, 5, 12288, 8192, 9830, 6553, 4915, 4096);
+            for (int f = 0; f < 10; f++) {
+                frames(1);
+                w8(p, 0x34, SNX_AUDREN_PARAM_UPDATED);
+            }
+            sink_copy(on ? y0 : x0, 0, 10, 0);
+            sink_copy(on ? y1 : x1, 0, 10, 1);
+        }
+        double lx = level_i16(x0 + 9 * SNX_ART_FRAME, SNX_ART_FRAME, 1000);
+        CHECK(fabs(lx - 0.3) < 0.005, "delay off copies its input: 1 kHz at %.4f", lx);
+        const i16* xs[2] = {x0, x1};
+        i16* ws[2] = {w0, w1};
+        ref_delay(2, xs, ws, 10 * SNX_ART_FRAME, 240, 12288, 8192, 9830, 6553, 4915, 4096);
+        int a = first_diff(y0, w0, 10 * SNX_ART_FRAME), b = first_diff(y1, w1, 10 * SNX_ART_FRAME);
+        CHECK(a < 0 && b < 0, "stereo delay: left off at %d (%d, want %d), right at %d (%d, want %d)", a,
+              a < 0 ? 0 : y0[a], a < 0 ? 0 : w0[a], b, b < 0 ? 0 : y1[b], b < 0 ? 0 : w1[b]);
+    }
+
+    /* six channels: buffer 5 is the back right's line from revision 11, the LFE's before it */
+    for (art_rev = 4; art_rev <= 11; art_rev += 7) {
+        reset();
+        u8* p = fx_voice(SNX_AUDREN_EFFECT_DELAY);
+        tone(0, 1000, 0.3, 0, 5, 1.0f);
+        w32(mix(SNX_ART_SUBMIX), 8, 6);
+        route(0, 0, 0.0f), route(1, 1, 0.0f), route(5, 0, 1.0f);
+        w8(eff(0), 2, 1);
+        for (int c = 0; c < 6; c++) p[c] = p[6 + c] = (u8)c;
+        delay_set(p, 6, 5, 16384, 8192, 16384, 0, 0, 0);
+        for (int f = 0; f < 40; f++) {
+            frames(1);
+            w8(p, 0x34, SNX_AUDREN_PARAM_UPDATED);
+        }
+        double lv = level_i16(sink_frame_at(39, 0), SNX_ART_FRAME, 1000),
+               want = 0.3 / (1.0 - (art_rev >= 11 ? 8028.0 / 16384.0 : 0.5));
+        CHECK(fabs(lv - want) < 0.004, "six-channel delay rev %u: %.4f, want %.4f", art_rev, lv, want);
     }
     art_rev = 4;
 

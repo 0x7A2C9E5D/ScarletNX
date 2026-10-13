@@ -85,6 +85,8 @@ typedef struct {
     float* look;
     u32 look_len, look_pos[SNX_AUDREN_CHANNELS];
     ARBiquad bq[SNX_AUDREN_CHANNELS]; /* the biquad filter's, a channel apiece */
+    void* fx;                         /* the delay's or a reverb's state, made when it initializes */
+    i64* line;                        /* and the delay lines in it */
 } AREffect;
 
 typedef struct {
@@ -120,6 +122,7 @@ enum { SNX_AUDREN_PCM16 = 2, SNX_AUDREN_PCMF32 = 5, SNX_AUDREN_ADPCM = 6 };
 enum {
     SNX_AUDREN_EFFECT_MIX = 1,
     SNX_AUDREN_EFFECT_AUX = 2,
+    SNX_AUDREN_EFFECT_DELAY = 3,
     SNX_AUDREN_EFFECT_BIQUAD = 6,
     SNX_AUDREN_EFFECT_LIMITER = 7
 };
