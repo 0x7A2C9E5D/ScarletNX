@@ -132,6 +132,17 @@ if(BUILD_TESTING AND SNX_VULKAN)
     add_test(NAME shader_denorm COMMAND snx-test-shader-denorm)
 endif()
 
+# The shader translator and glslang offline (no ICD or GPU): the float math keeps the console's order
+if(BUILD_TESTING AND SNX_VULKAN)
+    add_executable(snx-test-shader-precise "${PROJECT_SOURCE_DIR}/tests/shader_precise.c")
+    target_link_libraries(snx-test-shader-precise PRIVATE snx_shader snx_spirv)
+    if(NOT WIN32)
+        target_link_libraries(snx-test-shader-precise PRIVATE Threads::Threads m)
+    endif()
+    set_target_properties(snx-test-shader-precise PROPERTIES LINKER_LANGUAGE CXX)
+    add_test(NAME shader_precise COMMAND snx-test-shader-precise)
+endif()
+
 # Opt-in because normal unit-test runs need neither an ICD nor a GPU. All rendering uses the real runtime.
 if(BUILD_TESTING AND SNX_TEST_VULKAN AND SNX_VULKAN)
     add_executable(snx-test-vulkan "${PROJECT_SOURCE_DIR}/tests/vulkan_headless.c")

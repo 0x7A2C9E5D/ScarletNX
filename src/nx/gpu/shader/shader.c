@@ -920,12 +920,16 @@ char* shader_to_glsl(const u8* code, u32 max_bytes, int stage, ShaderInfo* si) {
     /* a clip distance below the last written one that the program leaves alone doesn't clip */
     for (int i = 0; c->stage == ST_VS && i < 8 && c->si->uses_clip_mask >> i; i++)
         if (!((c->si->uses_clip_mask >> i) & 1)) sb_f(D, "  gl_ClipDistance[%d] = 0.0;\n", i);
-    /* VS regs are precise. depth prepass and color pass use different shaders with the same position math;
-     if the driver fuses an fma in only one of them, depths differ by an ulp and the EQUAL test fails */
+    /* the registers are precise in every stage. Maxwell runs the float math as the console's compiler scheduled it,
+       neither fused nor reassociated, and a driver that does either changes answers: (a * c) * c folded into
+       a * (c * c) skips a product that flushes to 0 (edenprobe fmath); Eden translates FADD and FMUL with
+       no_contraction too. In a VS it also keeps a depth prepass and the color pass, different shaders with the
+       same position math, from fusing an fma in only one of them, which breaks the EQUAL depth test.
+       SNX_NO_PRECISE (or the older SNX_NO_PRECISE_VS) turns it off */
     {
         static int nop = -1;
-        if (nop < 0) nop = getenv("SNX_NO_PRECISE_VS") != NULL;
-        const char* rq = (c->stage == ST_VS && !nop) ? "precise uint" : "uint";
+        if (nop < 0) nop = getenv("SNX_NO_PRECISE") != NULL || getenv("SNX_NO_PRECISE_VS") != NULL;
+        const char* rq = !nop ? "precise uint" : "uint";
         for (int i = 0; i < 255; i++)
             if (c->used_reg[i]) sb_f(D, "  %s r%d = 0u;\n", rq, i);
     }
