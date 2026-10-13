@@ -372,7 +372,6 @@ int main(int argc, char** argv) {
     StepFn *steps_p, *steps_l;
     RtAPI rt;
     int quiet = 0, a, gccjit = 0;
-    TableFn table_g = NULL;
     StepFn* steps_g = NULL;
     TableFn table_h;
     StepFn* steps_h;
