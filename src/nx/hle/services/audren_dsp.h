@@ -49,10 +49,23 @@ typedef struct {
 typedef struct {
     u8 in_use;
     float volume;
-    u32 buffers;
+    u32 buffers, dest_splitter;
     i32 dest, offset, distance;
     float vol[SNX_AUDREN_MIX_OUTS][SNX_AUDREN_MIX_OUTS];
 } ARMix;
+
+/* a splitter's destination: the mix it sends to and its volumes, the last frame's to ramp from */
+typedef struct {
+    float vol[SNX_AUDREN_MIX_OUTS], prev[SNX_AUDREN_MIX_OUTS];
+    u32 mix_id;
+    i32 next; /* the next destination of its splitter, -1 at the end */
+    u8 in_use, need_update;
+} ARDest;
+
+typedef struct {
+    i32 head; /* its first destination, -1 for none */
+    u32 count;
+} ARSplitter;
 
 typedef struct {
     u8 type, enabled, fresh;
@@ -72,12 +85,16 @@ typedef struct {
 
 typedef struct {
     u32 rate, frame, buffers; /* sample rate, samples a frame, mix buffers */
-    u32 nvoices, nres, nmix, neffects, nsinks;
+    u32 nvoices, nres, nmix, neffects, nsinks, nsplit, ndest;
     ARVoice* voice;
     ARChannel* chan;
     ARMix* mix;
     AREffect* effect;
     ARSink* sink;
+    ARSplitter* split;
+    ARDest* dest;
+    i32* stack; /* the mix sort's depth-first search, with splitters: nmix * (nmix + 1) entries */
+    u8* seen;   /* and each mix's state in it, then the edges of the one being searched */
     float*
         buf;   /* (buffers + SNX_AUDREN_CHANNELS) * frame: the mix buffers, then one per voice channel being rendered */
     i16* temp; /* SNX_AUDREN_TEMP + SNX_AUDREN_HISTORY decoded samples */

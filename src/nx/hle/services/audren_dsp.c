@@ -2,10 +2,10 @@
    Copyright 2026 the ScarletNX contributors */
 /* the audio renderer's DSP: RequestUpdate's parameters kept in an ARState, and the frame the console renders every
    5 ms from them. A frame, as Eden's audio_core builds its command list (renderer/command/command_generator.cpp):
-   each playing voice channel decoded and resampled, ramped from its last volume and sent to its mix's buffers; the
-   submixes, farthest from the final mix first, each through its effects and then into the mix it feeds; the final
-   mix through its effects and its volume; then the device sinks, then the circular buffer sinks. The mix buffers
-   hold samples on the 16-bit scale, as floats */
+   each playing voice channel decoded and resampled, ramped from its last volume and sent to its mix's buffers or
+   through its splitter; the submixes, each before the mixes it feeds, through its effects and then into those; the
+   final mix through its effects and its volume; then the device sinks, then the circular buffer sinks. The mix
+   buffers hold samples on the 16-bit scale, as floats */
 #include "hle/services/audren_dsp.h"
 #include "runtime/platform/log.h"
 #include <math.h>
@@ -41,7 +41,7 @@ static i32 sat32(float x) {
 
 /* features met and not rendered, each logged once */
 enum {
-    SNX_AUDREN_WARN_SPLITTER = 1,
+    SNX_AUDREN_WARN_CYCLE = 1,
     SNX_AUDREN_WARN_BIQUAD = 2,
     SNX_AUDREN_WARN_EFFECT = 4,
     SNX_AUDREN_WARN_FORMAT = 8,
@@ -93,6 +93,7 @@ static void make_luts(ARState* s) {
 ARState* audren_state_new(const u8* params) {
     u32 rate = rd32(params), frame = rd32(params + 4), buffers = rd32(params + 8), submixes = rd32(params + 0xC);
     u32 voices = rd32(params + 0x10), sinks = rd32(params + 0x14), effects = rd32(params + 0x18);
+    u32 splitters = rd32(params + 0x24), dests = rd32(params + 0x28);
     if (!rate || !frame || frame > 1024 || buffers > 0x400 || submixes > 0x100 || voices > 0x400 || sinks > 0x40 ||
         effects > 0x100)
         return NULL;
@@ -105,6 +106,10 @@ ARState* audren_state_new(const u8* params) {
     s->nmix = submixes + 1;
     s->neffects = effects;
     s->nsinks = sinks;
+    if (splitters && dests) { /* without both, no splitter is used */
+        s->nsplit = splitters < 0x1000 ? splitters : 0x1000;
+        s->ndest = dests < 0x4000 ? dests : 0x4000;
+    }
     s->voice = calloc(voices ? voices : 1, sizeof *s->voice);
     s->chan = calloc(voices ? voices : 1, sizeof *s->chan);
     s->mix = calloc(s->nmix, sizeof *s->mix);
@@ -113,9 +118,19 @@ ARState* audren_state_new(const u8* params) {
     s->buf = calloc((size_t)(buffers + SNX_AUDREN_CHANNELS) * frame, sizeof *s->buf);
     s->temp = calloc(SNX_AUDREN_TEMP + SNX_AUDREN_HISTORY, sizeof *s->temp);
     s->order = calloc(s->nmix, sizeof *s->order);
-    if (!s->voice || !s->chan || !s->mix || !s->effect || !s->sink || !s->buf || !s->temp || !s->order) {
+    s->split = calloc(s->nsplit ? s->nsplit : 1, sizeof *s->split);
+    s->dest = calloc(s->ndest ? s->ndest : 1, sizeof *s->dest);
+    if (s->nsplit) s->stack = calloc((size_t)s->nmix * (s->nmix + 1), sizeof *s->stack);
+    s->seen = calloc(s->nmix, 2);
+    if (!s->voice || !s->chan || !s->mix || !s->effect || !s->sink || !s->buf || !s->temp || !s->order || !s->split ||
+        !s->dest || (s->nsplit && !s->stack) || !s->seen) {
         audren_state_free(s);
         return NULL;
+    }
+    for (u32 i = 0; i < s->nsplit; i++) s->split[i].head = -1;
+    for (u32 i = 0; i < s->ndest; i++) {
+        s->dest[i].next = -1;
+        s->dest[i].mix_id = SNX_AUDREN_UNUSED_MIX;
     }
     make_luts(s);
     return s;
@@ -132,6 +147,10 @@ void audren_state_free(ARState* s) {
     free(s->buf);
     free(s->temp);
     free(s->order);
+    free(s->split);
+    free(s->dest);
+    free(s->stack);
+    free(s->seen);
     free(s);
 }
 
@@ -215,13 +234,69 @@ static void update_voice(ARState* s, ARVoice* v, const u8* vi, u8* vo) {
     }
 }
 
+/* the number in a revision, 'REV' and '0' + n */
+static int rev_number(u32 rev) {
+    int n = (int)((rev >> 24) & 0xFF) - '0';
+    return n < 0 ? 0 : n;
+}
+
+#define SNX_AUDREN_MAGIC(a, b, c, d) ((u32)(a) | (u32)(b) << 8 | (u32)(c) << 16 | (u32)(d) << 24)
+
+/* the splitters (Eden's SplitterContext::Update): header 'SNDH', infos 'SNDI', destinations 'SNDD' */
+static void update_splitters(ARState* s, const u8* p, u64 size, int revn) {
+    if (!s->nsplit || revn < 2 || size < 0x20 || rd32(p) != SNX_AUDREN_MAGIC('S', 'N', 'D', 'H')) return;
+    u32 ninfo = rd32(p + 4), ndata = rd32(p + 8);
+    u64 off = 0x20;
+    for (u32 i = 0; i < ninfo; i++) {
+        if (off + 0x10 > size || rd32(p + off) != SNX_AUDREN_MAGIC('S', 'N', 'D', 'I')) break;
+        u32 id = rd32(p + off + 4), listed = rd32(p + off + 0xC), n = listed;
+        if (id >= s->nsplit || off + 0x1C + (u64)listed * 4 > size) break;
+        ARSplitter* sp = &s->split[id];
+        for (u32 k = 0; sp->head >= 0 && k < s->ndest; k++) { /* the old chain undone */
+            i32 next = s->dest[sp->head].next;
+            s->dest[sp->head].next = -1;
+            sp->head = next;
+        }
+        sp->head = -1;
+        if (revn < 5 && n > s->ndest / s->nsplit) n = s->ndest / s->nsplit; /* the count bug fixed in revision 5 */
+        i32 last = -1;
+        sp->count = 0;
+        for (u32 k = 0; k < n; k++) {
+            u32 d = rd32(p + off + 0x10 + k * 4);
+            if (d >= s->ndest) break;
+            if (last < 0)
+                sp->head = (i32)d;
+            else
+                s->dest[last].next = (i32)d;
+            s->dest[d].next = -1;
+            last = (i32)d;
+            sp->count++;
+        }
+        off += 0x1C + (u64)listed * 4;
+    }
+    u32 dsize = revn >= 15 ? 0xA8 : revn >= 12 ? 0x90 : 0x70, use = dsize == 0xA8 ? 0x9C : dsize == 0x90 ? 0x84 : 0x6C;
+    for (u32 i = 0; i < ndata; i++) {
+        if (off + dsize > size || rd32(p + off) != SNX_AUDREN_MAGIC('S', 'N', 'D', 'D')) break;
+        u32 id = rd32(p + off + 4);
+        if (id >= s->ndest) break;
+        ARDest* d = &s->dest[id];
+        d->mix_id = rd32(p + off + 0x68);
+        memcpy(d->vol, p + off + 8, sizeof d->vol);
+        if (!d->in_use && p[off + use]) { /* newly in use: no ramp */
+            memcpy(d->prev, d->vol, sizeof d->prev);
+            d->need_update = 0;
+        }
+        d->in_use = p[off + use];
+        off += dsize;
+    }
+}
+
 int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
     if (is < 0x40) return -41; /* InvalidUpdateInfo, the caller makes it a result */
     u32 ih[16];
     memcpy(ih, in, 64);
     u32 rev = ih[0];
-    int revn = (int)((rev >> 24) & 0xFF) - '0';
-    if (revn < 0) revn = 0;
+    int revn = rev_number(rev);
     u64 need = 0x40 + (u64)ih[1] + ih[2] + ih[3] + ih[4] + ih[5] + ih[6] + ih[7] + ih[8] + ih[9];
     if (need > is) {
         WARN_LIMIT(4, "audren: update sections (%llu bytes) don't fit in the %llu byte input\n",
@@ -252,7 +327,8 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
     p += ih[3];
     const u8* effects = p;
     p += ih[5];
-    p += ih[9]; /* splitters: not rendered */
+    update_splitters(s, p, ih[9], revn);
+    p += ih[9];
     const u8* mixes = p;
     p += ih[6];
     const u8* sinks = p;
@@ -302,7 +378,7 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
         q[i * (eff_v2 ? 0x90 : 0x10)] = ei[2] ? 3 : 4;
     }
     q += o_ef;
-    /* mixes, by their mix id: volume 0, buffers 8, in_use 0xC, mix id 0x10, send volumes 0x24, destination 0x924 */
+    /* mixes by mix id; a destination's splitter applies when the destination is unused */
     for (u32 i = 0; i < nmix; i++) {
         const u8* mi = mixes + i * 0x930;
         u32 id = rd32(mi + 0x10);
@@ -315,6 +391,7 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
         if (m->buffers > SNX_AUDREN_MIX_OUTS) m->buffers = SNX_AUDREN_MIX_OUTS;
         memcpy(m->vol, mi + 0x24, sizeof m->vol);
         memcpy(&m->dest, mi + 0x924, 4);
+        m->dest_splitter = rd32(mi + 0x928);
     }
     /* sinks: type 0, in_use 1, the type's parameters from 0x20. Out: a circular buffer sink's write offset, two
        frames behind where it writes, as Eden's CircularBufferSinkInfo reports last_pos2 */
@@ -753,10 +830,91 @@ static void mix_effects(ARState* s, u32 id) {
 
 /* ------------------------------------------------------------ the frame */
 
+/* splitter sp's destination k, NULL past its last */
+static ARDest* split_dest(ARState* s, u32 sp, u32 k) {
+    if (sp >= s->nsplit || k >= s->split[sp].count) return NULL;
+    i32 d = s->split[sp].head;
+    for (; d >= 0 && k > 0; k--) d = s->dest[d].next;
+    return d >= 0 ? &s->dest[d] : NULL;
+}
+
+/* the mix a destination sends to, NULL when it is not in use or that mix is not mixed this frame */
+static ARMix* dest_mix(ARState* s, const ARDest* d) {
+    if (!d || !d->in_use || d->mix_id >= s->nmix) return NULL;
+    ARMix* m = &s->mix[d->mix_id];
+    return m->distance >= 0 ? m : NULL;
+}
+
+/* splitters are used: the renderer opened some, and the revision has them (2) */
+static int splitters_on(const ARState* s) { return s->nsplit && rev_number(s->rev) >= 2; }
+
+/* with splitters, Eden's depth-first sort (NodeStates::Tsort); a cycle fails it: 0 */
+static int tsort_mixes(ARState* s, u32* count) {
+    u32 sp = 0, done = 0;
+    u8* edge = s->seen + s->nmix; /* the mix being searched feeds edge[i] */
+    memset(s->seen, 0, s->nmix);
+    for (u32 node = 0; node < s->nmix; node++) {
+        if (!s->seen[node]) s->stack[sp++] = (i32)node;
+        while (sp > 0) {
+            u32 cur = (u32)s->stack[sp - 1];
+            if (s->seen[cur] == 2) {
+                sp--;
+                continue;
+            }
+            if (s->seen[cur] == 1) { /* its edges done: it comes after all it feeds */
+                s->seen[cur] = 2;
+                s->order[done++] = (i32)cur;
+                sp--;
+                continue;
+            }
+            s->seen[cur] = 1;
+            ARMix* m = &s->mix[cur];
+            memset(edge, 0, s->nmix);
+            if (m->in_use && (u32)m->dest < s->nmix)
+                edge[m->dest] = 1;
+            else if (m->in_use && m->dest == SNX_AUDREN_UNUSED_MIX)
+                for (u32 k = 0;; k++) {
+                    ARDest* d = split_dest(s, m->dest_splitter, k);
+                    if (!d) break;
+                    if (d->mix_id < s->nmix) edge[d->mix_id] = 1;
+                }
+            for (u32 e = 0; e < s->nmix; e++) {
+                if (!edge[e] || s->seen[e] == 2) continue;
+                if (s->seen[e] == 1) return 0;
+                if (sp >= s->nmix * (s->nmix + 1)) return 0;
+                s->stack[sp++] = (i32)e;
+            }
+        }
+    }
+    for (u32 a = 0, b = done ? done - 1 : 0; a < b; a++, b--) { /* the search finishes the final mix first */
+        i32 t = s->order[a];
+        s->order[a] = s->order[b];
+        s->order[b] = t;
+    }
+    *count = done;
+    return 1;
+}
+
 /* the mixes that reach the final mix, farthest first, and their buffers in that order (Eden's MixContext::SortInfo
    and CalcMixBufferOffset): the final mix takes the last ones */
 static u32 sort_mixes(ARState* s) {
     u32 n = 0;
+    if (splitters_on(s)) {
+        if (tsort_mixes(s, &n)) {
+            i32 offset = 0;
+            for (u32 k = 0; k < n; k++) {
+                ARMix* m = &s->mix[s->order[k]];
+                m->distance = -1;
+                if (!m->in_use || (u32)offset + m->buffers > s->buffers) continue;
+                m->distance = 0;
+                m->offset = offset;
+                offset += (i32)m->buffers;
+            }
+            return n;
+        }
+        warn_once(s, SNX_AUDREN_WARN_CYCLE, "the mixes send to each other in a cycle: splitters are not followed");
+        n = 0;
+    }
     for (u32 i = 0; i < s->nmix; i++) {
         ARMix* m = &s->mix[i];
         m->distance = -1;
@@ -792,27 +950,64 @@ static u32 sort_mixes(ARState* s) {
     return n;
 }
 
+/* a voice channel into a mix's buffers, each send ramped from its last frame's volume to its new one */
+static void send_ramp(ARState* s, const ARMix* m, const float* tmp, const float* prev, const float* vol) {
+    u32 n = s->frame;
+    for (u32 j = 0; j < m->buffers; j++) {
+        float g = prev[j], dg = (vol[j] - prev[j]) / (float)n;
+        if (g == 0.0f && dg == 0.0f) continue;
+        float* dst = s->buf + (size_t)(m->offset + (i32)j) * n;
+        for (u32 i = 0; i < n; i++) dst[i] += tmp[i] * (g + dg * (float)i);
+    }
+}
+
+/* a voice with no mix and a splitter sends channel ch through the splitter's destinations ch, ch + channels, ...;
+   their volumes move on once every voice has sent (Eden's GenerateVoiceCommand) */
 static void play_voice(ARState* s, ARVoice* v) {
     u32 n = s->frame;
     ARMix* m = v->mix_id < s->nmix ? &s->mix[v->mix_id] : NULL;
-    if (v->mix_id == SNX_AUDREN_UNUSED_MIX && v->splitter_id != 0xFFFFFFFFu)
-        warn_once(s, SNX_AUDREN_WARN_SPLITTER, "voices sent through splitters are not rendered");
+    int split = v->mix_id == SNX_AUDREN_UNUSED_MIX && v->splitter_id < s->nsplit && splitters_on(s);
     for (int ch = 0; ch < v->channels; ch++) {
         float* tmp = s->buf + (size_t)(s->buffers + ch) * n;
         voice_channel(s, v, ch, tmp);
-        if (!m || m->distance < 0) continue;
+        if (!split && (!m || m->distance < 0)) continue;
         ARChannel* c = &s->chan[v->res[ch]];
         float vol = v->prev_volume, dv = (v->volume - v->prev_volume) / (float)n;
         for (u32 i = 0; i < n; i++) tmp[i] *= vol + dv * (float)i;
-        for (u32 j = 0; j < m->buffers; j++) {
-            float g = c->prev_mix[j], dg = (c->mix[j] - c->prev_mix[j]) / (float)n;
-            if (g == 0.0f && dg == 0.0f) continue;
-            float* dst = s->buf + (size_t)(m->offset + (i32)j) * n;
-            for (u32 i = 0; i < n; i++) dst[i] += tmp[i] * (g + dg * (float)i);
+        if (split) {
+            for (u32 k = (u32)ch;; k += v->channels) {
+                ARDest* d = split_dest(s, v->splitter_id, k);
+                if (!d) break;
+                ARMix* dm = dest_mix(s, d);
+                if (!dm) continue;
+                send_ramp(s, dm, tmp, d->prev, d->vol);
+                d->need_update = 1;
+            }
+            continue;
         }
+        send_ramp(s, m, tmp, c->prev_mix, c->mix);
         memcpy(c->prev_mix, c->mix, sizeof c->mix);
     }
     v->prev_volume = v->volume;
+}
+
+/* a submix through a splitter: buffer k mod count to destination k, not ramped (Eden's GenerateMixCommands) */
+static void mix_to_splitter(ARState* s, const ARMix* m) {
+    u32 n = s->frame;
+    if (!m->buffers) return;
+    for (u32 k = 0;; k++) {
+        ARDest* d = split_dest(s, m->dest_splitter, k);
+        if (!d) break;
+        ARMix* dm = dest_mix(s, d);
+        if (!dm) continue;
+        const float* src = s->buf + (size_t)(m->offset + (i32)(k % m->buffers)) * n;
+        for (u32 b = 0; b < dm->buffers; b++) {
+            float g = m->volume * d->vol[b];
+            if (g == 0.0f) continue;
+            float* dst = s->buf + (size_t)(dm->offset + (i32)b) * n;
+            for (u32 i = 0; i < n; i++) dst[i] += src[i] * g;
+        }
+    }
 }
 
 static void sink_frame(ARState* s, ARSink* k, i16* stereo, int* device) {
@@ -875,6 +1070,11 @@ int audren_frame(ARState* s, i16* stereo) {
         if (!v->in_use || !v->wave_count) continue;
         if (voice_prepare(s, v)) play_voice(s, v);
     }
+    for (u32 i = 0; i < s->ndest; i++) { /* the destinations voices sent through ramp from here next frame */
+        ARDest* d = &s->dest[i];
+        if (d->in_use && d->need_update) memcpy(d->prev, d->vol, sizeof d->prev);
+        d->need_update = 0;
+    }
     for (u32 k = 0; k < nsorted; k++) { /* the submixes, then the final mix */
         u32 id = (u32)s->order[k];
         ARMix* m = &s->mix[id];
@@ -887,6 +1087,11 @@ int audren_frame(ARState* s, i16* stereo) {
             }
             continue;
         }
+        if (m->dest == SNX_AUDREN_UNUSED_MIX) {
+            if (splitters_on(s)) mix_to_splitter(s, m);
+            continue;
+        }
+        if ((u32)m->dest >= s->nmix || s->mix[m->dest].distance < 0) continue;
         ARMix* d = &s->mix[m->dest];
         for (u32 a = 0; a < m->buffers; a++)
             for (u32 b = 0; b < d->buffers; b++) {

@@ -45,13 +45,18 @@ enum {
     SNX_ART_G_AUX_RETURN = 0x340000,
     SNX_ART_G_RING = 0x380000, /* the circular buffer sinks' rings, 0x20000 apiece */
     SNX_ART_G_RING_BYTES = SNX_ART_RING_FRAMES * 2 * SNX_ART_FRAME * 2,
+    /* the splitter section: room for a header, two infos of three destinations and six destinations */
+    SNX_ART_SPLITTERS = 2,
+    SNX_ART_DESTS = 6,
+    SNX_ART_SPLIT_BYTES = 0x20 + SNX_ART_SPLITTERS * (0x1C + 3 * 4) + SNX_ART_DESTS * 0x70,
 };
 
 /* the update, laid out as edenprobe's source/audio.c lays it out */
 static u8 in[0x40 + 0x10 + 0x20 + 0x70 * SNX_ART_VOICES + 0x170 * SNX_ART_VOICES + 0xC0 * SNX_ART_EFFECTS +
-             0x930 * SNX_ART_MIXES + 0x140 * SNX_ART_SINKS + 0x10];
+             SNX_ART_SPLIT_BYTES + 0x930 * SNX_ART_MIXES + 0x140 * SNX_ART_SINKS + 0x10];
 static u8 out[0x1000];
-static u8 *u_pool, *u_res, *u_voice, *u_eff, *u_mix, *u_sink;
+static u8 *u_pool, *u_res, *u_voice, *u_eff, *u_split, *u_mix, *u_sink;
+static u32 split_counts[2]; /* the splitters and destinations reset() opens the renderer with */
 static ARState* st;
 
 static void w8(u8* p, u32 off, u8 v) { p[off] = v; }
@@ -75,7 +80,8 @@ static void layout(void) {
                  0xC0 * SNX_ART_EFFECTS,
                  0x930 * SNX_ART_MIXES,
                  0x140 * SNX_ART_SINKS,
-                 0x10};
+                 0x10,
+                 SNX_ART_SPLIT_BYTES};
     h[15] = sizeof in;
     memcpy(in, h, sizeof h);
     w32(in, 0x40, rev);
@@ -88,6 +94,8 @@ static void layout(void) {
     p += 0x170 * SNX_ART_VOICES;
     u_eff = p;
     p += 0xC0 * SNX_ART_EFFECTS;
+    u_split = p; /* all zero, no splitter, until a case writes one */
+    p += SNX_ART_SPLIT_BYTES;
     u_mix = p;
     p += 0x930 * SNX_ART_MIXES;
     u_sink = p;
@@ -208,6 +216,50 @@ static void tone(int v, double hz, double amp, u8 quality, int channel, float ga
 }
 static void silence(int v) { w8(voice(v), 0xA, 1); /* stopped */ }
 
+/* voice v in stereo: hz0 on its left channel (resource v), hz1 on its right (resource v + 1), interleaved */
+static void tone_stereo(int v, double hz0, double hz1, double amp) {
+    tone(v, hz0, amp, 0, 0, 1.0f);
+    i16* pcm = (i16*)(void*)(g_mem + SNX_ART_G_PCM + (u64)v * SNX_ART_RATE * 2);
+    for (int i = 0; i < SNX_ART_RATE; i++)
+        for (int c = 0; c < 2; c++)
+            pcm[i * 2 + c] = (i16)lrint(amp * 32767.0 * sin(2.0 * M_PI * (c ? hz1 : hz0) * i / SNX_ART_RATE));
+    w32(voice(v), 0x18, 2);
+    w64(voice(v), 0x68, SNX_ART_RATE * 4);
+    w32(voice(v), 0x144, (u32)v + 1);
+    w8(res(v + 1), 0x64, 1);
+}
+
+/* a splitter section written in order: the header, then infos, then destinations */
+static u32 split_at;
+static void split_begin(u32 infos, u32 dests) {
+    memset(u_split, 0, SNX_ART_SPLIT_BYTES);
+    memcpy(u_split, "SNDH", 4);
+    w32(u_split, 4, infos);
+    w32(u_split, 8, dests);
+    split_at = 0x20;
+}
+static void split_info(u32 id, u32 n, const u32* dests) {
+    memcpy(u_split + split_at, "SNDI", 4);
+    w32(u_split, split_at + 4, id);
+    w32(u_split, split_at + 8, SNX_ART_RATE);
+    w32(u_split, split_at + 0xC, n);
+    for (u32 k = 0; k < n; k++) w32(u_split, split_at + 0x10 + k * 4, dests[k]);
+    split_at += 0x1C + n * 4;
+}
+/* destination id to mix, volume v0 into its buffer 0 and v1 into its buffer 1 */
+static u8* split_sent[SNX_ART_DESTS];
+static void split_send(u32 id, u32 mix_id, u8 in_use, float v0, float v1) {
+    u8* d = u_split + split_at;
+    memcpy(d, "SNDD", 4);
+    w32(d, 4, id);
+    wf(d, 8, v0);
+    wf(d, 0xC, v1);
+    w32(d, 0x68, mix_id);
+    w8(d, 0x6C, in_use);
+    split_sent[id] = d;
+    split_at += 0x70;
+}
+
 /* one Fourier bin over n samples, as a fraction of full scale */
 static double level_i32(const i32* x, int n, double hz) {
     double re = 0, im = 0;
@@ -222,6 +274,12 @@ static double level_i16(const i16* x, int n, double hz) {
     for (int i = 0; i < n; i++) tmp[i] = x[i];
     return level_i32(tmp, n, hz);
 }
+/* the left (ch 0) or right channel the first circular buffer sink wrote in frame f since the reset */
+static const i16* sink_frame_at(int f, int ch) {
+    return (const i16*)(const void*)(g_mem + SNX_ART_G_RING) + (f % SNX_ART_RING_FRAMES) * 2 * SNX_ART_FRAME +
+           ch * SNX_ART_FRAME;
+}
+
 /* the aux ring's channel ch in its most recent full frame */
 static double captured(int ch, double hz) {
     u32 woff;
@@ -235,6 +293,7 @@ static void reset(void) {
     audren_state_free(st);
     u8 params[0x34] = {0};
     u32 p[13] = {SNX_ART_RATE, SNX_ART_FRAME, 6, SNX_ART_MIXES - 1, SNX_ART_VOICES, SNX_ART_SINKS, SNX_ART_EFFECTS};
+    p[9] = split_counts[0], p[10] = split_counts[1]; /* splitter infos 0x24, destinations 0x28 */
     memcpy(params, p, sizeof p);
     st = audren_state_new(params);
     CHECK(st != NULL, "no state");
@@ -356,6 +415,97 @@ int main(void) {
     CHECK(n == 28, "decoded %u", n);
     CHECK(!memcmp(got, want0, sizeof want0), "first frame %d %d ... %d", got[0], got[1], got[13]);
     CHECK(got[14] == -27 && got[27] == -14, "second frame %d ... %d", got[14], got[27]);
+
+    /* splitters (Eden's GenerateVoiceCommand): a stereo voice with no mix through destinations c, c + 2, ... */
+    split_counts[0] = SNX_ART_SPLITTERS, split_counts[1] = SNX_ART_DESTS;
+    reset();
+    tone_stereo(0, 1000, 1600, 0.4);
+    w32(voice(0), 0x58, SNX_AUDREN_UNUSED_MIX);
+    w32(voice(0), 0x5C, 0);
+    split_begin(1, 3);
+    split_info(0, 3, (const u32[]){0, 1, 2});
+    split_send(0, SNX_ART_FINAL, 1, 1.0f, 0.0f);
+    split_send(1, SNX_ART_FINAL, 1, 0.0f, 0.5f);
+    split_send(2, SNX_ART_FINAL, 0, 0.0f, 1.0f);
+    w8(sink(1), 1, 1);
+    frames(4);
+    {
+        double ll = level_i16(sink_frame_at(3, 0), SNX_ART_FRAME, 1000),
+               lr = level_i16(sink_frame_at(3, 0), SNX_ART_FRAME, 1600),
+               rr = level_i16(sink_frame_at(3, 1), SNX_ART_FRAME, 1600),
+               rl = level_i16(sink_frame_at(3, 1), SNX_ART_FRAME, 1000);
+        CHECK(fabs(ll - 0.4) < 0.005 && lr < 0.005, "splitter, left: 1 kHz %.4f, 1.6 kHz %.4f", ll, lr);
+        CHECK(fabs(rr - 0.2) < 0.005 && rl < 0.005, "splitter, right: 1.6 kHz %.4f, 1 kHz %.4f", rr, rl);
+    }
+
+    /* a submix with no destination mix through splitter 1: destination k takes buffer k mod 2 */
+    reset();
+    tone(0, 1000, 0.4, 0, 0, 1.0f);
+    tone(1, 1600, 0.4, 0, 1, 1.0f);
+    w32(mix(SNX_ART_SUBMIX), 8, 2);
+    wf(mix(SNX_ART_SUBMIX), 0, 0.5f);
+    w32(mix(SNX_ART_SUBMIX), 0x924, SNX_AUDREN_UNUSED_MIX);
+    w32(mix(SNX_ART_SUBMIX), 0x928, 1);
+    split_begin(1, 3);
+    split_info(1, 3, (const u32[]){3, 4, 5});
+    split_send(3, SNX_ART_FINAL, 1, 1.0f, 0.0f);
+    split_send(4, SNX_ART_FINAL, 1, 0.5f, 1.0f);
+    split_send(5, SNX_ART_FINAL, 1, 0.0f, 0.25f);
+    w8(sink(1), 1, 1);
+    frames(4);
+    {
+        double ll = level_i16(sink_frame_at(3, 0), SNX_ART_FRAME, 1000),
+               lr = level_i16(sink_frame_at(3, 0), SNX_ART_FRAME, 1600),
+               rr = level_i16(sink_frame_at(3, 1), SNX_ART_FRAME, 1600),
+               rl = level_i16(sink_frame_at(3, 1), SNX_ART_FRAME, 1000);
+        CHECK(fabs(ll - 0.2) < 0.004 && fabs(lr - 0.1) < 0.004, "submix splitter, left: %.4f %.4f", ll, lr);
+        CHECK(fabs(rr - 0.2) < 0.004 && fabs(rl - 0.05) < 0.004, "submix splitter, right: %.4f %.4f", rr, rl);
+    }
+
+    /* a destination's volume from 1 to 0 ramps over the next frame */
+    reset();
+    tone(0, 1000, 0.5, 0, 0, 1.0f);
+    for (int i = 0; i < SNX_ART_RATE; i++) ((i16*)(void*)(g_mem + SNX_ART_G_PCM))[i] = 16384;
+    w32(voice(0), 0x58, SNX_AUDREN_UNUSED_MIX);
+    w32(voice(0), 0x5C, 0);
+    split_begin(1, 1);
+    split_info(0, 1, (const u32[]){0});
+    split_send(0, SNX_ART_FINAL, 1, 1.0f, 0.0f);
+    w8(sink(1), 1, 1);
+    frames(3);
+    wf(split_sent[0], 8, 0.0f);
+    frames(2);
+    {
+        const i16 *steady = sink_frame_at(2, 0), *ramp = sink_frame_at(3, 0), *after = sink_frame_at(4, 0);
+        double worst = 0;
+        int loud = 0;
+        for (int i = 0; i < SNX_ART_FRAME; i++) {
+            double d = fabs(ramp[i] - steady[0] * (1.0 - i / (double)SNX_ART_FRAME));
+            if (d > worst) worst = d;
+            loud += after[i] != 0;
+        }
+        CHECK(steady[0] > 16000 && steady[SNX_ART_FRAME - 1] == steady[0], "steady %d %d", steady[0], steady[239]);
+        CHECK(worst <= 1.0, "the ramp is off by %.1f", worst);
+        CHECK(loud == 0, "%d samples after the ramp", loud);
+    }
+
+    /* a submix sending to itself is a cycle: the sort falls back, and the final mix still plays */
+    reset();
+    tone(0, 1000, 0.4, 0, 0, 1.0f);
+    tone(1, 1600, 0.4, 0, 0, 1.0f);
+    w32(voice(1), 0x58, SNX_ART_FINAL);
+    w32(mix(SNX_ART_SUBMIX), 0x924, SNX_AUDREN_UNUSED_MIX);
+    w32(mix(SNX_ART_SUBMIX), 0x928, 0);
+    split_begin(1, 1);
+    split_info(0, 1, (const u32[]){0});
+    split_send(0, SNX_ART_SUBMIX, 1, 1.0f, 0.0f);
+    w8(sink(1), 1, 1);
+    frames(4);
+    {
+        double lr = level_i16(sink_frame_at(3, 0), SNX_ART_FRAME, 1600);
+        CHECK(fabs(lr - 0.4) < 0.005 && (st->warned & SNX_AUDREN_WARN_CYCLE), "cycle: 1.6 kHz %.4f", lr);
+    }
+    split_counts[0] = split_counts[1] = 0;
 
     printf("%u checks, %u failed\n", checks, failures);
     audren_state_free(st);
