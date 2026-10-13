@@ -40,16 +40,15 @@ function(snx_quiet)
     endforeach()
 endfunction()
 
-if(SNX_BUILD_NX AND SNX_H264)
+# Extraction-only builds do not contain the NX runtime or its graphics/media dependencies.
+if(SNX_BUILD_NX AND NOT SNX_HACTOOL_ONLY)
     # FFmpeg builds with its own configure and make, which cmake/ffmpeg.cmake runs
     CPMAddPackage(NAME FFmpeg VERSION 9.0.2
                   URL https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
                   URL_HASH SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
                   DOWNLOAD_ONLY YES)
     include("${CMAKE_SOURCE_DIR}/cmake/ffmpeg.cmake")
-endif()
 
-if(SNX_BUILD_NX AND SNX_VULKAN)
     CPMAddPackage(NAME Vulkan-Headers VERSION 1.4.365
                   URL https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.365.tar.gz
                   URL_HASH SHA256=ed832b3292cce324ebba6522fd2d3004bf1b797fa49bfbcad0b302ff23d56abc
@@ -66,26 +65,17 @@ if(SNX_BUILD_NX AND SNX_VULKAN)
 endif()
 
 set(SNX_SDL3_FROM_SOURCE OFF)
-if((SNX_BUILD_NX AND SNX_BACKEND STREQUAL "sdl3") OR SNX_BUILD_GUI)
-    if(NOT WIN32 AND NOT SNX_BUNDLED_SDL3)
-        find_package(SDL3 QUIET CONFIG)
-    endif()
-    if(WIN32 OR SNX_BUNDLED_SDL3 OR NOT TARGET SDL3::SDL3)
-        if(NOT WIN32 AND NOT SNX_BUNDLED_SDL3)
-            message(STATUS "SDL3 development package not found. Building the pinned SDL3 from source. "
-                           "See docs/BUILD.md for X11/Wayland build dependencies.")
-        endif()
-        # Static: the fallback needs no separately installed SDL3 library at run time.
+if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY AND NOT SNX_HACTOOL_ONLY) OR SNX_BUILD_GUI)
+    # Prefer a compatible system package. CPM handles the pinned static fallback and user overrides.
+    CPMFindPackage(NAME SDL3 VERSION 3.4.18 FIND_PACKAGE_ARGUMENTS CONFIG
+                   URL https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.18.tar.gz
+                   URL_HASH SHA256=c4b08b950bd29d83caae0ab8d884298d27046a9d30700fb42841c50992665c90
+                   EXCLUDE_FROM_ALL YES SYSTEM YES
+                   OPTIONS "SDL_SHARED OFF" "SDL_STATIC ON" "SDL_TEST_LIBRARY OFF" "SDL_TESTS OFF"
+                           "SDL_EXAMPLES OFF" "SDL_INSTALL OFF")
+    if(SDL3_ADDED)
         set(SNX_SDL3_FROM_SOURCE ON)
-        CPMAddPackage(NAME SDL3 VERSION 3.4.18 FORCE YES
-                      URL https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.18.tar.gz
-                      URL_HASH SHA256=c4b08b950bd29d83caae0ab8d884298d27046a9d30700fb42841c50992665c90
-                      EXCLUDE_FROM_ALL YES SYSTEM YES
-                      OPTIONS "SDL_SHARED OFF" "SDL_STATIC ON" "SDL_TEST_LIBRARY OFF" "SDL_TESTS OFF"
-                              "SDL_EXAMPLES OFF" "SDL_INSTALL OFF")
         snx_quiet(SDL3-static)
-    else()
-        message(STATUS "Using the system SDL3 development package")
     endif()
 endif()
 
