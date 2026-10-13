@@ -40,7 +40,13 @@ static i32 sat32(float x) {
 }
 
 /* features met and not rendered, each logged once */
-enum { SNX_AUDREN_WARN_CYCLE = 1, SNX_AUDREN_WARN_EFFECT = 4, SNX_AUDREN_WARN_FORMAT = 8, SNX_AUDREN_WARN_COUNTS = 16 };
+enum {
+    SNX_AUDREN_WARN_CYCLE = 1,
+    SNX_AUDREN_WARN_EFFECT = 4,
+    SNX_AUDREN_WARN_FORMAT = 8,
+    SNX_AUDREN_WARN_COUNTS = 16,
+    SNX_AUDREN_WARN_RANGE = 32
+};
 static void warn_once(ARState* s, u32 bit, const char* what) {
     if (s->warned & bit) return;
     s->warned |= bit;
@@ -303,7 +309,9 @@ static void update_splitters(ARState* s, const u8* p, u64 size, int revn) {
 static int channels_valid(u32 c) { return c == 1 || c == 2 || c == 4 || c == 6; }
 
 /* where an effect type keeps its parameter state, for the ones that take it as Eden's DelayInfo::Update does */
-static u32 stateful_at(u8 type) { return type == SNX_AUDREN_EFFECT_DELAY ? 0x34 : 0; }
+static u32 stateful_at(u8 type) {
+    return type == SNX_AUDREN_EFFECT_DELAY ? 0x34 : type == SNX_AUDREN_EFFECT_REVERB ? 0x40 : 0;
+}
 
 /* a delay or reverb with an invalid channel count takes its maximum (Eden's DelayInfo::Update) */
 static void update_stateful(AREffect* e, const u8* ei, u32 state_at) {
@@ -1030,6 +1038,231 @@ static void effect_delay(ARState* s, ARMix* m, AREffect* e) {
     }
 }
 
+/* Eden's FixedPoint<50, 14>: from a float truncated; to_int rounds up from two thirds */
+static i64 fq(float f) { return (i64)(f * 16384.0f); }
+static float qf(i64 q) { return (float)q / 16384.0f; }
+static i32 q_int(i64 q) { return (i32)((q + ((q & 0x3FFF) >> 1)) >> 14); }
+static i64 q_div(i64 a, i64 b) { return b ? (i64)(((__int128)a * 16384) / b) : 0; }
+
+/* Eden's ReverbDelayLine: a ring of max + 1 samples */
+typedef struct {
+    i64* buf;
+    i32 end, in, out, count, max;
+    i64 decay;
+} ARLine;
+
+static void line_init(ARLine* l, i64* mem, i32 time, i64 decay) {
+    l->buf = mem;
+    l->end = l->count = l->max = time;
+    l->in = l->out = 0;
+    l->decay = decay;
+}
+static void line_write(ARLine* l, i64 v) {
+    l->buf[l->in] = v;
+    if (++l->in >= l->end) l->in = 0;
+}
+static i64 line_tick(ARLine* l, i64 v) {
+    i64 r = l->buf[l->out];
+    if (++l->out >= l->end) l->out = 0;
+    line_write(l, v);
+    return r;
+}
+static i64 line_tap(const ARLine* l, i32 index, i32 wrap) {
+    if (wrap <= 0) return 0;
+    i64 at = ((i64)l->in - index - 1) % wrap;
+    return l->buf[at < 0 ? at + wrap : at];
+}
+
+/* the reverb (Eden's ReverbInfo and ReverbCommand): an update moves each delay and gain a quarter of the way */
+typedef struct {
+    ARLine pre, center, fdn[4], decay[4];
+    i32 early_time[10], pre_time;
+    i64 early_gain[10], hf_gain[4], hf_prev[4], fb[4], cosine;
+    u8 cosine_set;
+} ARReverb;
+
+static const float snx_reverb_early_times[5][11] = {
+    {0.0f, 3.5f, 2.799988f, 3.899963f, 2.699951f, 13.399963f, 7.899963f, 8.399963f, 9.899963f, 12.0f, 12.5f},
+    {0.0f, 11.799988f, 5.5f, 11.199951f, 10.399963f, 38.099976f, 22.199951f, 29.599976f, 21.199951f, 24.799988f, 40.0f},
+    {0.0f, 41.5f, 20.5f, 41.299988f, 0.0f, 29.5f, 33.799988f, 45.199951f, 46.799988f, 0.0f, 50.0f},
+    {33.099976f, 43.299988f, 22.799988f, 37.899963f, 14.899963f, 35.299988f, 17.899963f, 34.199951f, 0.0f, 43.299988f,
+     50.0f},
+    {0}};
+static const float snx_reverb_early_gains[5][10] = {
+    {0.699951f, 0.679993f, 0.699951f, 0.679993f, 0.699951f, 0.679993f, 0.699951f, 0.679993f, 0.679993f, 0.679993f},
+    {0.699951f, 0.679993f, 0.699951f, 0.679993f, 0.699951f, 0.679993f, 0.679993f, 0.679993f, 0.679993f, 0.679993f},
+    {0.5f, 0.699951f, 0.699951f, 0.679993f, 0.5f, 0.679993f, 0.679993f, 0.699951f, 0.679993f, 0.0f},
+    {0.929993f, 0.919983f, 0.869995f, 0.859985f, 0.939941f, 0.809998f, 0.799988f, 0.769958f, 0.759949f, 0.649963f},
+    {0}};
+static const float snx_reverb_fdn_times[5][4] = {{53.953247f, 79.192566f, 116.238770f, 130.615295f},
+                                                 {53.953247f, 79.192566f, 116.238770f, 170.615295f},
+                                                 {5.0f, 10.0f, 5.0f, 10.0f},
+                                                 {47.029968f, 71.0f, 103.0f, 170.0f},
+                                                 {53.953247f, 79.192566f, 116.238770f, 170.615295f}};
+static const float snx_reverb_decay_times[5][4] = {{7.0f, 9.0f, 13.0f, 17.0f},
+                                                   {7.0f, 9.0f, 13.0f, 17.0f},
+                                                   {1.0f, 1.0f, 1.0f, 1.0f},
+                                                   {7.0f, 7.0f, 13.0f, 9.0f},
+                                                   {7.0f, 9.0f, 13.0f, 17.0f}};
+static const float snx_reverb_fdn_max[4] = {53.9532470703125f, 79.19256591796875f, 116.23876953125f,
+                                            170.61529541015625f};
+static const float snx_reverb_decay_max[4] = {7.0f, 9.0f, 13.0f, 17.0f};
+
+static float pow10_clamped(float v) { return v >= 0.0f ? 1.0f : v <= -5.3f ? 0.0f : powf(10.0f, v); }
+static float cos_degrees(float d) { return cosf(d * 3.14159265358979f / 180.0f); }
+static i32 clamp_time(i32 t, i32 max) { return t < 0 ? 0 : t > max ? max : t; }
+
+/* Eden's UpdateReverbEffectParameter. A mode past the tables takes their last, with no early reflections */
+static void reverb_params(ARReverb* r, const u8* p) {
+    u32 early = rd32(p + 0x14) < 5 ? rd32(p + 0x14) : 4, late = rd32(p + 0x20) < 5 ? rd32(p + 0x20) : 4;
+    i64 rate = rd32(p + 0x10), pre = (i32)rd32(p + 0x1C);
+    if (qf(rate) < 1.0f) rate = 16384;
+    if (qf(pre) < 0.0f) pre = 0;
+    for (int i = 0; i < 10; i++) {
+        i32 target = clamp_time(q_int(q14mul64(pre + fq(snx_reverb_early_times[early][i]), rate)), r->pre.max);
+        i32 old = r->early_time[i] - 1;
+        r->early_time[i] = old + (target - old) / 4 + 1;
+        i64 gain = q14mul64((i32)rd32(p + 0x18), fq(snx_reverb_early_gains[early][i]));
+        if (qf(gain) < 0.0f) gain = 0;
+        if (qf(gain) > 1.0f) gain = 16384;
+        r->early_gain[i] += q_div(gain - r->early_gain[i], 4 * 16384);
+    }
+    if (rd16(p + 0xE) == 2) {
+        r->early_gain[4] = q14mul64(r->early_gain[4], 8192);
+        r->early_gain[5] = q14mul64(r->early_gain[5], 8192);
+    }
+    i32 target = clamp_time(q_int(q14mul64(pre + fq(snx_reverb_early_times[early][10]), rate)), r->pre.max);
+    r->pre_time += (target - r->pre_time) / 4;
+    if (!r->cosine_set) { /* Eden keeps it from the first reverb it updates; one per reverb here */
+        r->cosine = fq(cos_degrees(qf(q_div(1280 * 16384, rate))));
+        r->cosine_set = 1;
+    }
+    for (int i = 0; i < 4; i++) {
+        ARLine *f = &r->fdn[i], *d = &r->decay[i];
+        f->count += (clamp_time(q_int(q14mul64(fq(snx_reverb_fdn_times[late][i]), rate)), f->max) - f->count) / 4;
+        f->end = f->count - 1;
+        d->count += (clamp_time(q_int(q14mul64(fq(snx_reverb_decay_times[late][i]), rate)), d->max) - d->count) / 4;
+        d->end = d->count - 1;
+        i64 colour = (i32)rd32(p + 0x30);
+        if (qf(colour) < 0.0f) colour = 0;
+        if (qf(colour) > 1.0f) colour = 16384;
+        d->decay += q_div(q14mul64(9830, 16384 - colour) - d->decay, 4 * 16384); /* 0.5999755859375 */
+        i64 decay_time = (i32)rd32(p + 0x28);
+        if (qf(decay_time) <= 0.0f) decay_time = 1; /* 0.0001 */
+        i64 a = q14mul64((i64)(f->max + d->max) * 16384, -3 * 16384);
+        i64 b = q_div(a, q14mul64(decay_time, rate)), c = 0, dd = 16384;
+        i64 hf = (i32)rd32(p + 0x2C);
+        if (qf(hf) < 0.001f) hf = 16;
+        if (qf(hf) > 0.999f) hf = 16367;
+        if (qf(hf) <= 0.9949f) {
+            float e = pow10_clamped(qf(q14mul64(fq((1.0f / qf(hf) - 1.0f) * 2 / 100), q_div(b, 10 * 16384))));
+            e = e < 0.0001f ? 0.0001f : e > 1.0f ? 1.0f : e;
+            float ff = 1.0f - e < 0.0001f ? 0.0001f : 1.0f - e, g = 2.0f - qf(r->cosine) * e * 2,
+                  h2 = g * g - ff * ff * 4;
+            c = fq((g - sqrtf(h2 < 0.0f ? 0.0f : h2)) / (ff * 2.0f));
+            dd = 16384 - c;
+        }
+        r->hf_prev[i] += q_div(c - r->hf_prev[i], 4 * 16384);
+        i64 gain = q14mul64(q14mul64(fq(pow10_clamped(qf(q_div(b, 1000 * 16384)))), dd), 11585); /* 0.70709228515625 */
+        r->hf_gain[i] += q_div(gain - r->hf_gain[i], 4 * 16384);
+        r->fb[i] = 0;
+    }
+}
+
+/* Eden's InitializeReverbEffect: the lines' lengths at the rate. 0 when one would pass a million samples */
+static int reverb_init(AREffect* e, const u8* p, int long_pre_delay) {
+    fx_free(e);
+    i64 rate = rd32(p + 0x10), len[10];
+    for (int i = 0; i < 4; i++) {
+        len[i] = (u32)(q14mul64(fq(snx_reverb_fdn_max[i]), rate) >> 14);
+        len[4 + i] = (u32)(q14mul64(fq(snx_reverb_decay_max[i]), rate) >> 14);
+    }
+    len[8] = (u32)(q14mul64(fq(long_pre_delay ? 350.0f : 150.0f), rate) >> 14);
+    len[9] = (u32)(q14mul64(5 * 16384, rate) >> 14);
+    size_t total = 0;
+    for (int i = 0; i < 10; i++) {
+        if (len[i] > (1 << 20)) return 0;
+        total += (size_t)len[i] + 1;
+    }
+    ARReverb* r = calloc(1, sizeof *r);
+    i64* mem = calloc(total, sizeof *mem);
+    if (!r || !mem) {
+        free(r);
+        free(mem);
+        return 0;
+    }
+    i64* at = mem;
+    for (int i = 0; i < 4; i++) {
+        line_init(&r->fdn[i], at, (i32)len[i], 16384);
+        at += len[i] + 1;
+        line_init(&r->decay[i], at, (i32)len[4 + i], 0);
+        at += len[4 + i] + 1;
+    }
+    line_init(&r->pre, at, (i32)len[8], 16384);
+    at += len[8] + 1;
+    line_init(&r->center, at, (i32)len[9], 16384);
+    e->fx = r;
+    e->line = mem;
+    reverb_params(r, p);
+    return 1;
+}
+
+static void effect_reverb(ARState* s, ARMix* m, AREffect* e) {
+    static const u8 taps[7][10] = {[2] = {0, 0, 1, 1, 0, 1, 0, 0, 1, 1}, /* the output each early tap goes to */
+                                   [4] = {0, 0, 1, 1, 0, 1, 2, 2, 3, 3},
+                                   [6] = {0, 0, 1, 1, 2, 2, 4, 4, 5, 5}};
+    const u8* p = e->p;
+    u32 count = rd16(p + 0xE), n = s->frame;
+    float *in[SNX_AUDREN_CHANNELS], *out[SNX_AUDREN_CHANNELS];
+    if (!channels_valid(count) || !fx_buffers(s, m, p, count, in, out)) return;
+    if (e->enabled) {
+        if (!e->fx || p[0x40] == SNX_AUDREN_PARAM_INITIALIZED) {
+            if (!reverb_init(e, p, rev_number(s->rev) >= 3))
+                warn_once(s, SNX_AUDREN_WARN_RANGE, "a reverb's delay lines would be too long: it passes its input");
+        } else if (p[0x40] == SNX_AUDREN_PARAM_UPDATING)
+            reverb_params(e->fx, p);
+    }
+    if (!e->enabled || !e->fx) {
+        for (u32 c = 0; c < count; c++)
+            if (in[c] != out[c]) memcpy(out[c], in[c], n * sizeof *out[c]);
+        return;
+    }
+    ARReverb* r = e->fx;
+    i64 base = (i32)rd32(p + 0x34), late = (i32)rd32(p + 0x24), wet = (i32)rd32(p + 0x38), dry = (i32)rd32(p + 0x3C);
+    for (u32 i = 0; i < n; i++) {
+        i64 o[SNX_AUDREN_CHANNELS] = {0}, x[SNX_AUDREN_CHANNELS], sum = 0, ap[SNX_AUDREN_CHANNELS];
+        for (int t = 0; t < 10; t++) {
+            i64 v = q14mul64(line_tap(&r->pre, r->early_time[t], r->pre.count), r->early_gain[t]);
+            o[taps[count][t]] += v;
+            if (count == 6) o[3] += v; /* the LFE takes them all, at 0.2 */
+        }
+        if (count == 6) o[3] = q14mul64(o[3], 3276);
+        for (u32 c = 0; c < count; c++) {
+            x[c] = sat32(in[c][i]);
+            sum += x[c] * 16384;
+        }
+        line_write(&r->pre, q14mul64(sum * 64, base));
+        for (int k = 0; k < 4; k++)
+            r->fb[k] = q14mul64(r->fb[k], r->hf_prev[k]) + q14mul64(r->fdn[k].buf[r->fdn[k].out], r->hf_gain[k]);
+        i64 pre = q14mul64(line_tap(&r->pre, r->pre_time, r->pre.count), late);
+        i64 mix[4] = {r->fb[2] + r->fb[1] + pre, -r->fb[0] - r->fb[3] + pre, r->fb[0] - r->fb[3] + pre,
+                      r->fb[1] - r->fb[2] + pre};
+        for (int k = 0; k < 4; k++) { /* Eden's Axfx2AllPassTick */
+            ARLine* d = &r->decay[k];
+            i64 mixed = mix[k] - q14mul64(d->buf[d->out], d->decay);
+            ap[k] = line_tick(d, mixed) + q14mul64(mixed, d->decay);
+            line_tick(&r->fdn[k], ap[k]);
+        }
+        if (count == 6) { /* centre (through its line, at half) and LFE from the third and fourth, backs after */
+            ap[5] = ap[3];
+            ap[4] = ap[2];
+            ap[2] = line_tick(&r->center, q14mul64(ap[2] - ap[3], 8192));
+        }
+        for (u32 c = 0; c < count; c++)
+            out[c][i] = (float)q_int(q14mul64(x[c] * 16384, dry) + q_div(q14mul64(o[c] + ap[c], wet), 64 * 16384));
+    }
+}
+
 /* a mix's effects, by their process order */
 static void mix_effects(ARState* s, u32 id) {
     ARMix* m = &s->mix[id];
@@ -1052,6 +1285,10 @@ static void mix_effects(ARState* s, u32 id) {
                 break;
             case SNX_AUDREN_EFFECT_DELAY:
                 effect_delay(s, m, next);
+                next->p[stateful_at(next->type)] = SNX_AUDREN_PARAM_UPDATED;
+                break;
+            case SNX_AUDREN_EFFECT_REVERB:
+                effect_reverb(s, m, next);
                 next->p[stateful_at(next->type)] = SNX_AUDREN_PARAM_UPDATED;
                 break;
             default:

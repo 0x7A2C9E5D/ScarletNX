@@ -369,6 +369,165 @@ static void ref_delay(int nch, const i16* const* in, i16* const* out, int n, int
     }
 }
 
+/* Eden's FixedPoint<50, 14>, as the reverb's expected values use it */
+static i64 tq(float f) { return (i64)(f * 16384.0f); }
+static i64 tmul(i64 a, i64 b) { return (i64)(((__int128)a * b) >> 14); }
+static i64 tdiv(i64 a, i64 b) { return (i64)(((__int128)a * 16384) / b); }
+static i32 tint(i64 q) { return (i32)((q + ((q & 0x3FFF) >> 1)) >> 14); }
+static i16 tsat(i32 v) { return (i16)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
+
+/* a reverb on effect 0 at 48 kHz: channels, then v from 0x14 in Q14 */
+static void reverb_set(u8* p, u16 ch, const i32* v) {
+    w32(p, 0xC, (u32)ch << 16 | ch);
+    w32(p, 0x10, 48 << 14);
+    memcpy(p + 0x14, v, 11 * 4);
+}
+
+/* Eden's reverb tables (renderer/command/effect/reverb.cpp), mode 0 to 4 */
+static const float rv_early_t[5][11] = {
+    {0.0f, 3.5f, 2.799988f, 3.899963f, 2.699951f, 13.399963f, 7.899963f, 8.399963f, 9.899963f, 12.0f, 12.5f},
+    {0.0f, 11.799988f, 5.5f, 11.199951f, 10.399963f, 38.099976f, 22.199951f, 29.599976f, 21.199951f, 24.799988f, 40.0f},
+    {0.0f, 41.5f, 20.5f, 41.299988f, 0.0f, 29.5f, 33.799988f, 45.199951f, 46.799988f, 0.0f, 50.0f},
+    {33.099976f, 43.299988f, 22.799988f, 37.899963f, 14.899963f, 35.299988f, 17.899963f, 34.199951f, 0.0f, 43.299988f,
+     50.0f},
+    {0}};
+static const float rv_early_g[5][10] = {
+    {0.699951f, 0.679993f, 0.699951f, 0.679993f, 0.699951f, 0.679993f, 0.699951f, 0.679993f, 0.679993f, 0.679993f},
+    {0.699951f, 0.679993f, 0.699951f, 0.679993f, 0.699951f, 0.679993f, 0.679993f, 0.679993f, 0.679993f, 0.679993f},
+    {0.5f, 0.699951f, 0.699951f, 0.679993f, 0.5f, 0.679993f, 0.679993f, 0.699951f, 0.679993f, 0.0f},
+    {0.929993f, 0.919983f, 0.869995f, 0.859985f, 0.939941f, 0.809998f, 0.799988f, 0.769958f, 0.759949f, 0.649963f},
+    {0}};
+static const float rv_fdn_t[5][4] = {{53.953247f, 79.192566f, 116.238770f, 130.615295f},
+                                     {53.953247f, 79.192566f, 116.238770f, 170.615295f},
+                                     {5.0f, 10.0f, 5.0f, 10.0f},
+                                     {47.029968f, 71.0f, 103.0f, 170.0f},
+                                     {53.953247f, 79.192566f, 116.238770f, 170.615295f}};
+static const float rv_decay_t[5][4] = {{7.0f, 9.0f, 13.0f, 17.0f},
+                                       {7.0f, 9.0f, 13.0f, 17.0f},
+                                       {1.0f, 1.0f, 1.0f, 1.0f},
+                                       {7.0f, 7.0f, 13.0f, 9.0f},
+                                       {7.0f, 9.0f, 13.0f, 17.0f}};
+static const float rv_fdn_max[4] = {53.9532470703125f, 79.19256591796875f, 116.23876953125f, 170.61529541015625f},
+                   rv_decay_max[4] = {7.0f, 9.0f, 13.0f, 17.0f};
+
+/* the early taps right after InitializeReverbEffect: each update moves them a quarter of the way */
+static void rv_first_taps(int mode, i32 early_gain, i32 pre, i32* t, i64* g) {
+    for (int k = 0; k < 10; k++) {
+        i32 target = tint(tmul(pre + tq(rv_early_t[mode][k]), 48 << 14));
+        if (target > 16800) target = 16800;
+        t[k] = (target + 1) / 4;
+        g[k] = tdiv(tmul(early_gain, tq(rv_early_g[mode][k])), 4 * 16384);
+    }
+}
+/* tap k of input x at sample i: x 1 + t[k] samples back, as the pre-delay line holds it (64 times, at base gain 1) */
+static i64 rv_tap(const i32* x, int i, i32 t, i64 g) {
+    int at = i - 1 - t;
+    return at < 0 ? 0 : tmul((i64)x[at] * 16384 * 64, g);
+}
+
+/* Eden's reverb for one channel (renderer/command/effect/reverb.cpp), its lines as arrays */
+typedef struct {
+    i64* b;
+    int end, in, out, count, max;
+    i64 decay;
+} RvLine;
+typedef struct {
+    RvLine pre, fdn[4], decay[4];
+    i32 t[10], pre_t;
+    i64 g[10], hf_gain[4], hf_prev[4], fb[4], cosine;
+} RvRef;
+static void rv_line(RvLine* l, int len, i64 decay) {
+    l->b = calloc((size_t)len + 1, sizeof *l->b);
+    l->end = l->count = l->max = len;
+    l->in = l->out = 0;
+    l->decay = decay;
+}
+static i64 rv_tick(RvLine* l, i64 v) {
+    i64 r = l->b[l->out];
+    if (++l->out >= l->end) l->out = 0;
+    l->b[l->in] = v;
+    if (++l->in >= l->end) l->in = 0;
+    return r;
+}
+static i64 rv_tapout(const RvLine* l, int idx) {
+    int at = l->in - (idx + 1);
+    return l->b[at < 0 ? at + l->count : at];
+}
+static float rv_pow10(float v) { return v >= 0.0f ? 1.0f : v <= -5.3f ? 0.0f : powf(10.0f, v); }
+/* UpdateReverbEffectParameter, v as reverb_set takes it, all in range (the clamps left out) */
+static void rv_update(RvRef* r, const i32* v) {
+    int em = v[0], lm = v[3];
+    i64 rate = 48 << 14, pre = v[2];
+    for (int k = 0; k < 10; k++) {
+        i32 target = tint(tmul(pre + tq(rv_early_t[em][k]), rate)), old = r->t[k] - 1;
+        if (target > r->pre.max) target = r->pre.max;
+        r->t[k] = old + (target - old) / 4 + 1;
+        i64 gain = tmul(v[1], tq(rv_early_g[em][k]));
+        r->g[k] = r->g[k] + tdiv(gain - r->g[k], 4 * 16384);
+    }
+    i32 target = tint(tmul(pre + tq(rv_early_t[em][10]), rate));
+    if (target > r->pre.max) target = r->pre.max;
+    r->pre_t = r->pre_t + (target - r->pre_t) / 4;
+    r->cosine = tq(cosf((float)tdiv(1280 * 16384, rate) / 16384.0f * 3.14159265358979f / 180.0f));
+    for (int i = 0; i < 4; i++) {
+        RvLine *f = &r->fdn[i], *d = &r->decay[i];
+        i32 tf = tint(tmul(tq(rv_fdn_t[lm][i]), rate)), td = tint(tmul(tq(rv_decay_t[lm][i]), rate));
+        f->count = f->count + ((tf > f->max ? f->max : tf) - f->count) / 4;
+        f->end = f->count - 1;
+        d->count = d->count + ((td > d->max ? d->max : td) - d->count) / 4;
+        d->end = d->count - 1;
+        d->decay = d->decay + tdiv(tmul(9830, 16384 - v[7]) - d->decay, 4 * 16384); /* 0.5999755859375 */
+        i64 a = (i64)(f->max + d->max) * 16384 * -3, b = tdiv(a, tmul(v[5], rate)), c = 0, dd = 16384;
+        float hf = (float)v[6] / 16384.0f;
+        if (hf <= 0.9949f) {
+            float e = rv_pow10((float)tmul(tq((1.0f / hf - 1.0f) * 2 / 100), tdiv(b, 10 * 16384)) / 16384.0f);
+            if (e < 0.0001f) e = 0.0001f;
+            float ff = 1.0f - e, gg = 2.0f - (float)r->cosine / 16384.0f * e * 2, h2 = gg * gg - ff * ff * 4;
+            c = tq((gg - sqrtf(h2 < 0 ? 0 : h2)) / (ff * 2.0f));
+            dd = 16384 - c;
+        }
+        r->hf_prev[i] = r->hf_prev[i] + tdiv(c - r->hf_prev[i], 4 * 16384);
+        i64 gain = tmul(tmul(tq(rv_pow10((float)tdiv(b, 1000 * 16384) / 16384.0f)), dd), 11585); /* 0.70709228515625 */
+        r->hf_gain[i] = r->hf_gain[i] + tdiv(gain - r->hf_gain[i], 4 * 16384);
+        r->fb[i] = 0;
+    }
+}
+/* InitializeReverbEffect, then ApplyReverbEffect<1> over x into y */
+static void rv_ref(const i16* x, i16* y, int frames_n, const u8* state, const i32* v) {
+    static RvRef r;
+    for (int f = 0; f < frames_n; f++) {
+        if (state[f] == SNX_AUDREN_PARAM_INITIALIZED) {
+            free(r.pre.b);
+            for (int i = 0; i < 4; i++) free(r.fdn[i].b), free(r.decay[i].b);
+            memset(&r, 0, sizeof r);
+            for (int i = 0; i < 4; i++) {
+                rv_line(&r.fdn[i], (int)(tmul(tq(rv_fdn_max[i]), 48 << 14) >> 14), 16384);
+                rv_line(&r.decay[i], (int)(tmul(tq(rv_decay_max[i]), 48 << 14) >> 14), 0);
+            }
+            rv_line(&r.pre, 16800, 16384);
+            rv_update(&r, v);
+        } else if (state[f] == SNX_AUDREN_PARAM_UPDATING)
+            rv_update(&r, v);
+        for (int i = f * SNX_ART_FRAME; i < (f + 1) * SNX_ART_FRAME; i++) {
+            i64 o = 0, ap[4];
+            for (int k = 0; k < 10; k++) o += tmul(rv_tapout(&r.pre, r.t[k]), r.g[k]);
+            r.pre.b[r.pre.in] = tmul((i64)x[i] * 16384 * 64, v[8]);
+            if (++r.pre.in >= r.pre.end) r.pre.in = 0;
+            for (int k = 0; k < 4; k++)
+                r.fb[k] = tmul(r.fb[k], r.hf_prev[k]) + tmul(r.fdn[k].b[r.fdn[k].out], r.hf_gain[k]);
+            i64 pd = tmul(rv_tapout(&r.pre, r.pre_t), v[4]);
+            i64 mix[4] = {r.fb[2] + r.fb[1] + pd, -r.fb[0] - r.fb[3] + pd, r.fb[0] - r.fb[3] + pd,
+                          r.fb[1] - r.fb[2] + pd};
+            for (int k = 0; k < 4; k++) {
+                i64 mixed = mix[k] - tmul(r.decay[k].b[r.decay[k].out], r.decay[k].decay);
+                ap[k] = rv_tick(&r.decay[k], mixed) + tmul(mixed, r.decay[k].decay);
+                rv_tick(&r.fdn[k], ap[k]);
+            }
+            y[i] = tsat(tint(tmul((i64)x[i] * 16384, v[10]) + tdiv(tmul(o + ap[0], v[9]), 64 * 16384)));
+        }
+    }
+}
+
 /* the first sample where a and b differ, -1 if none */
 static int first_diff(const i16* a, const i16* b, int n) {
     for (int i = 0; i < n; i++)
@@ -754,6 +913,131 @@ int main(void) {
         double lv = level_i16(sink_frame_at(39, 0), SNX_ART_FRAME, 1000),
                want = 0.3 / (1.0 - (art_rev >= 11 ? 8028.0 / 16384.0 : 0.5));
         CHECK(fabs(lv - want) < 0.004, "six-channel delay rev %u: %.4f, want %.4f", art_rev, lv, want);
+    }
+    art_rev = 4;
+
+    /* the reverb's dry path alone: to_int(x * 0.5) rounds up from two thirds */
+    {
+        static i16 x[5 * SNX_ART_FRAME], y[5 * SNX_ART_FRAME];
+        static const i32 v[11] = {0, 0, 0, 0, 0, 24576, 8192, 0, 16384, 0, 8192};
+        reset();
+        u8* p = fx_voice(SNX_AUDREN_EFFECT_REVERB);
+        w8(eff(0), 2, 1);
+        p[0] = 0, p[6] = 1;
+        reverb_set(p, 1, v);
+        for (int f = 0; f < 5; f++) {
+            frames(1);
+            w8(p, 0x40, SNX_AUDREN_PARAM_UPDATED);
+        }
+        sink_copy(x, 0, 5, 0);
+        sink_copy(y, 0, 5, 1);
+        int bad = -1;
+        for (int i = 0; i < 5 * SNX_ART_FRAME && bad < 0; i++)
+            if (y[i] != tint((i64)x[i] * 8192)) bad = i;
+        CHECK(bad < 0, "reverb dry: sample %d is %d for %d", bad, bad < 0 ? 0 : y[bad], bad < 0 ? 0 : x[bad]);
+    }
+
+    /* a mono reverb with every parameter, a hundred frames, against Eden's run here */
+    {
+        static i16 x[100 * SNX_ART_FRAME], y[100 * SNX_ART_FRAME], want[100 * SNX_ART_FRAME];
+        static const i32 v[11] = {1, 13107, 81920, 0, 11469, 24576, 8192, 4915, 14746, 13107, 9830};
+        u8 state[100];
+        reset();
+        u8* p = fx_voice(SNX_AUDREN_EFFECT_REVERB);
+        tone(0, 1000, 0.2, 0, 0, 1.0f);
+        w8(eff(0), 2, 1);
+        p[0] = 0, p[6] = 1;
+        reverb_set(p, 1, v);
+        for (int f = 0; f < 100; f++) {
+            state[f] = f == 0 ? 0 : f == 2 || f == 3 ? 1 : 2;
+            w8(p, 0x40, state[f]);
+            frames(1);
+            if (f % SNX_ART_RING_FRAMES == SNX_ART_RING_FRAMES - 1 || f == 99) { /* before the sink's ring laps */
+                int from = f - f % SNX_ART_RING_FRAMES;
+                sink_copy(x + from * SNX_ART_FRAME, from, f + 1, 0);
+                sink_copy(y + from * SNX_ART_FRAME, from, f + 1, 1);
+            }
+        }
+        rv_ref(x, want, 100, state, v);
+        int at = first_diff(y, want, 100 * SNX_ART_FRAME);
+        CHECK(at < 0, "mono reverb: sample %d is %d, want %d", at, at < 0 ? 0 : y[at], at < 0 ? 0 : want[at]);
+    }
+
+    /* early reflections only, right after it starts: each tap a quarter of the way to Eden's */
+    {
+        static i16 x0[5 * SNX_ART_FRAME], x1[5 * SNX_ART_FRAME], y0[5 * SNX_ART_FRAME], y1[5 * SNX_ART_FRAME],
+            w0[5 * SNX_ART_FRAME], w1[5 * SNX_ART_FRAME];
+        static i32 xs[5 * SNX_ART_FRAME];
+        static const i32 v[11] = {0, 16384, 0, 0, 0, 24576, 8192, 0, 16384, 16384, 0};
+        static const u8 side[10] = {0, 0, 1, 1, 0, 1, 0, 0, 1, 1};
+        for (int run = 0; run < 2; run++) {
+            reset();
+            u8* p = fx_voice(SNX_AUDREN_EFFECT_REVERB);
+            tone(1, 1600, 0.3, 0, 1, 1.0f);
+            if (run) route(0, 0, 0.0f), route(1, 1, 0.0f), route(2, 0, 1.0f), route(3, 1, 1.0f);
+            w8(eff(0), 2, 1);
+            p[0] = 0, p[1] = 1, p[6] = 2, p[7] = 3;
+            reverb_set(p, 2, v);
+            for (int f = 0; f < 5; f++) {
+                frames(1);
+                w8(p, 0x40, SNX_AUDREN_PARAM_UPDATED);
+            }
+            sink_copy(run ? y0 : x0, 0, 5, 0);
+            sink_copy(run ? y1 : x1, 0, 5, 1);
+        }
+        i32 t[10];
+        i64 g[10];
+        rv_first_taps(0, 16384, 0, t, g);
+        g[4] = tmul(g[4], 8192), g[5] = tmul(g[5], 8192);
+        for (int i = 0; i < 5 * SNX_ART_FRAME; i++) xs[i] = x0[i] + x1[i];
+        for (int i = 0; i < 5 * SNX_ART_FRAME; i++) {
+            i64 o[2] = {0, 0};
+            for (int k = 0; k < 10; k++) o[side[k]] += rv_tap(xs, i, t[k], g[k]);
+            w0[i] = tsat(tint(tdiv(o[0], 64 * 16384)));
+            w1[i] = tsat(tint(tdiv(o[1], 64 * 16384)));
+        }
+        int a = first_diff(y0, w0, 5 * SNX_ART_FRAME), b = first_diff(y1, w1, 5 * SNX_ART_FRAME);
+        CHECK(a < 0 && b < 0, "stereo early reflections: left at %d (%d, want %d), right at %d (%d, want %d)", a,
+              a < 0 ? 0 : y0[a], a < 0 ? 0 : w0[a], b, b < 0 ? 0 : y1[b], b < 0 ? 0 : w1[b]);
+    }
+
+    /* six channels: the LFE takes every tap at 0.2; the old order before revision 11 swaps the back right */
+    for (art_rev = 4; art_rev <= 11; art_rev += 7) {
+        static i16 x[5 * SNX_ART_FRAME], b3[5 * SNX_ART_FRAME], b5[5 * SNX_ART_FRAME];
+        static i32 xs[5 * SNX_ART_FRAME];
+        static const i32 v[11] = {0, 16384, 0, 0, 0, 24576, 8192, 0, 16384, 16384, 0};
+        for (int run = 0; run < 2; run++) {
+            reset();
+            u8* p = fx_voice(SNX_AUDREN_EFFECT_REVERB);
+            w32(mix(SNX_ART_SUBMIX), 8, 6);
+            if (run) route(0, 0, 0.0f), route(1, 1, 0.0f), route(3, 0, 1.0f), route(5, 1, 1.0f);
+            w8(eff(0), 2, (u8)run);
+            for (int c = 0; c < 6; c++) p[c] = p[6 + c] = (u8)c;
+            reverb_set(p, 6, v);
+            for (int f = 0; f < 5; f++) {
+                frames(1);
+                w8(p, 0x40, SNX_AUDREN_PARAM_UPDATED);
+            }
+            if (run) {
+                sink_copy(b3, 0, 5, 0);
+                sink_copy(b5, 0, 5, 1);
+            } else
+                sink_copy(x, 0, 5, 0);
+        }
+        i32 t[10];
+        i64 g[10];
+        rv_first_taps(0, 16384, 0, t, g);
+        for (int i = 0; i < 5 * SNX_ART_FRAME; i++) xs[i] = x[i];
+        int bad = -1;
+        for (int i = 0; i < 5 * SNX_ART_FRAME && bad < 0; i++) {
+            i64 all = 0;
+            for (int k = 0; k < 10; k++) all += rv_tap(xs, i, t[k], g[k]);
+            i16 lfe = tsat(tint(tdiv(tmul(all, 3276), 64 * 16384))),
+                back = tsat(tint(tdiv(rv_tap(xs, i, t[8], g[8]) + rv_tap(xs, i, t[9], g[9]), 64 * 16384)));
+            if (b3[i] != (art_rev >= 11 ? lfe : back) || b5[i] != (art_rev >= 11 ? back : lfe)) bad = i;
+        }
+        CHECK(bad < 0, "six-channel reverb rev %u: sample %d is %d and %d", art_rev, bad, bad < 0 ? 0 : b3[bad],
+              bad < 0 ? 0 : b5[bad]);
     }
     art_rev = 4;
 
