@@ -8,7 +8,8 @@ Run from checkout root. [Extract/AOT/run](USAGE.md) · [Tests/diagnostics](DEVEL
 
 - **Linux / FreeBSD:** Clang (CI: 23; FreeBSD's system Clang also works), CMake ≥3.25, Ninja,
   POSIX shell, GNU make (`gmake` on FreeBSD), NASM on x86-64, Git and pkg-config.
-  Use a system SDL3 development package, or X11/Wayland development libraries for the bundled SDL3 build.
+  Use a system SDL3 development package, or X11/Wayland and audio development libraries for the bundled
+  SDL3 build.
 - **Windows:** Win10/11 x64 + Git. Bootstrap stages SHA-256-checked llvm-mingw/Clang, CMake, Ninja,
   NASM and w64devkit in `deps/tools`.
 - **Display:** a Vulkan 1.3 driver. Headless builds omit SDL3 and use Vulkan offscreen.
@@ -24,11 +25,13 @@ FFmpeg also uses **GNU make** and, on x86-64, **NASM**. These tools are not down
 ```sh
 sudo apt update
 sudo apt install build-essential git cmake ninja-build clang nasm pkg-config \
-  libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev
+  libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev \
+  libasound2-dev libpulse-dev libpipewire-0.3-dev
 ```
 
-This includes the X11 development libraries for the SDL3 source fallback. If your release provides
-`libsdl3-dev`, install it to use the distribution's SDL3 instead:
+This includes the X11 and audio development libraries for the SDL3 source fallback. Without the audio
+ones, SDL3 builds with no sound output and games run silent. If your release provides `libsdl3-dev`,
+install it to use the distribution's SDL3 instead:
 
 ```sh
 sudo apt install libsdl3-dev
@@ -83,6 +86,9 @@ installation is needed. It still needs your platform's window-system development
 - To force the source build, pass `-DSNX_BUNDLED_SDL3=ON`.
 - If SDL3's configure reports missing X11/Wayland development libraries, install the packages above.
   Do not work around that by disabling both display backends for a windowed build.
+- No sound, and the log says `audio: SDL could not start its audio: No available audio device`: the
+  SDL3 fallback was configured without audio development libraries (its configure warns `Unable to find
+  the alsa development library`). Install the audio packages above and configure again.
 - A no-window Vulkan build needs no SDL3. Use `-DSNX_BACKEND=headless` as shown below.
   The runtime flag `-H` alone does not remove the SDL3 build dependency from a window-capable binary.
 
