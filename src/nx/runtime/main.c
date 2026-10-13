@@ -211,6 +211,8 @@ int snx_main(int argc, char** argv) {
         const char* e = strchr(argv[i], '=');
         if (!strcmp(argv[i], "-v"))
             ini_override("log", "2");
+        else if (!strcmp(argv[i], "--fullscreen"))
+            ini_override("fullscreen", "1");
         else if (!strncmp(argv[i], "--", 2) && e && e - argv[i] - 2 < 64) {
             char k[64];
             memcpy(k, argv[i] + 2, (size_t)(e - argv[i] - 2));

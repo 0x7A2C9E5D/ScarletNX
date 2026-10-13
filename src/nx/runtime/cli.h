@@ -4,7 +4,15 @@
 #define SNX_CLI_H
 #include <string.h>
 
-enum { SNX_EXTRACT = 1, SNX_RECOMP = 2, SNX_HEADLESS = 4, SNX_GDB = 8, SNX_STOP = 16 };
+enum {
+    SNX_EXTRACT = 1,
+    SNX_RECOMP = 2,
+    SNX_HEADLESS = 4,
+    SNX_GDB = 8,
+    SNX_STOP = 16,
+    SNX_FULLSCREEN = 32,
+    SNX_WINDOWED = 64
+};
 /* Shared by the driver and standalone game runtime. Windows accepts individual
    short options, but deliberately not POSIX-style clusters. */
 static int snx_cli_flag(const char* arg, unsigned* flags) {
@@ -17,6 +25,11 @@ static int snx_cli_flag(const char* arg, unsigned* flags) {
     else if (!strcmp(arg, "--headless"))
         bits = SNX_HEADLESS;
     else if (!strncmp(arg, "--headless=", 11))
+        return -1;
+    else if (!strcmp(arg, "--fullscreen") || !strcmp(arg, "--fullscreen=1") || !strcmp(arg, "--fullscreen=0")) {
+        *flags &= ~(SNX_FULLSCREEN | SNX_WINDOWED);
+        bits = !strcmp(arg, "--fullscreen=0") ? SNX_WINDOWED : SNX_FULLSCREEN;
+    } else if (!strncmp(arg, "--fullscreen=", 13))
         return -1;
     else if (arg[0] == '-' && arg[1] && arg[1] != '-') {
 #ifdef _WIN32

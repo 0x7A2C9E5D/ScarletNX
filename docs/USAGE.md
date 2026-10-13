@@ -3,6 +3,7 @@
 # Usage
 
 Setup: [BUILD](BUILD.md). Checkout CWD; own dumps/keys.
+For the keyboard-controlled SDL3 menu and file drops, see [GUI](GUI.md).
 
 ## Extract → AOT → run
 
@@ -32,6 +33,8 @@ Pass arguments to the game executable after `--`, for example:
 The argument boundary is retained when launching the deployed game, so game arguments
 cannot trigger launcher actions or overwrite runtime settings. This does not add a
 homebrew-loader guest argv block.
+`--fullscreen` (or `--fullscreen=0` for windowed startup) can also precede or follow
+the dump and is forwarded to the game. It overrides that game's INI setting.
 Use the separate commands for updates, custom keys or compiler options.
 
 Run the same command again to retry after a failure or interruption:
