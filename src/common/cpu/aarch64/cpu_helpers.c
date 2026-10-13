@@ -39,28 +39,18 @@ int snx_simd(CPU* c, u8* M, u32 w) {
         }
         if (!U) return 0;
         int sz = size & 1, hi = size >> 1;
-        f64 x = rdf(&a, sz, 0), y = rdf(&a, sz, 1), v;
+        f64 v;
         switch (op) {
             case 0x0D:
                 if (hi) return 0;
-                v = x + y;
+                v = rdf(&a, sz, 0) + rdf(&a, sz, 1);
                 break;
             case 0x0C:
-                if (!sz) { /* f32 straight from the lanes: via double, a signalling NaN would arrive quiet */
-                    r.f[0] = hi ? fp_minnm32(a.f[0], a.f[1]) : fp_maxnm32(a.f[0], a.f[1]);
-                    *VR(rd) = r;
-                    return 1;
-                }
-                v = hi ? fminnm_(x, y, sz) : fmaxnm_(x, y, sz);
-                break;
             case 0x0F:
-                if (!sz) {
-                    r.f[0] = hi ? fp_min32(a.f[0], a.f[1]) : fp_max32(a.f[0], a.f[1]);
-                    *VR(rd) = r;
-                    return 1;
-                }
-                v = hi ? fmin_(x, y, sz) : fmax_(x, y, sz);
-                break;
+                eset(&r, sz ? 3 : 2, 0,
+                     snx_fp_minmax(c, eget(&a, sz ? 3 : 2, 0), eget(&a, sz ? 3 : 2, 1), sz ? 64 : 32, hi, op == 0x0C));
+                *VR(rd) = r;
+                return 1;
             default: return 0;
         }
         wrf(&r, sz, 0, v);

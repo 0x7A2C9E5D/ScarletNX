@@ -121,10 +121,6 @@ static void wrf(V128* v, int sz, int i, f64 x) {
     else
         v->f[i] = (f32)x;
 }
-static f64 fmax_(f64 a, f64 b, int sz) { return sz ? fp_max64(a, b) : fp_max32((f32)a, (f32)b); }
-static f64 fmin_(f64 a, f64 b, int sz) { return sz ? fp_min64(a, b) : fp_min32((f32)a, (f32)b); }
-static f64 fmaxnm_(f64 a, f64 b, int sz) { return sz ? fp_maxnm64(a, b) : fp_maxnm32((f32)a, (f32)b); }
-static f64 fminnm_(f64 a, f64 b, int sz) { return sz ? fp_minnm64(a, b) : fp_minnm32((f32)a, (f32)b); }
 static f64 fmla_(f64 d, f64 a, f64 b, int sz) { return sz ? fp_fma64(a, b, d) : (f64)fp_fma32((f32)a, (f32)b, (f32)d); }
 static f64 fop2(int sel, f64 a, f64 b, int sz) { /* sel = our own op code */
     switch (sel) {
@@ -132,10 +128,6 @@ static f64 fop2(int sel, f64 a, f64 b, int sz) { /* sel = our own op code */
         case 1: return a - b;
         case 2: return a * b;
         case 3: return a / b;
-        case 4: return fmax_(a, b, sz);
-        case 5: return fmin_(a, b, sz);
-        case 6: return fmaxnm_(a, b, sz);
-        case 7: return fminnm_(a, b, sz);
         case 8: return fabs_(sz ? a - b : (f64)((f32)a - (f32)b)); /* FABD: the f32 difference rounds before abs */
         case 9: return sz ? fp_mulx64(a, b) : fp_mulx32((f32)a, (f32)b);
         case 10: return sz ? fp_recps64(a, b) : fp_recps32((f32)a, (f32)b);
@@ -143,16 +135,24 @@ static f64 fop2(int sel, f64 a, f64 b, int sz) { /* sel = our own op code */
     }
     return 0;
 }
-static u64 fcmpmask(int sel, f64 a, f64 b, int sz) {
+static u64 fcmpmask(CPU* c, int sel, u64 a, u64 b, int sz) {
+    if (sel == 3 || sel == 4) {
+        u64 mask = sz ? 0x7FFFFFFFFFFFFFFFull : 0x7FFFFFFFull;
+        a &= mask;
+        b &= mask;
+    }
+    /* Only equality is a quiet comparison. Ordered SIMD predicates signal
+       invalid for either kind of NaN, but never update PSTATE.NZCV. */
+    u32 flags = snx_fp_compare(c, a, b, sz ? 64 : 32, sel != 0);
     int r = 0;
     switch (sel) {
-        case 0: r = a == b; break;
-        case 1: r = a >= b; break;
-        case 2: r = a > b; break;
-        case 3: r = (a < 0 ? -a : a) >= (b < 0 ? -b : b); break;
-        case 4: r = (a < 0 ? -a : a) > (b < 0 ? -b : b); break;
-        case 5: r = a <= b; break;
-        case 6: r = a < b; break;
+        case 0: r = flags == 6; break;
+        case 1:
+        case 3: r = flags == 6 || flags == 2; break;
+        case 2:
+        case 4: r = flags == 2; break;
+        case 5: r = flags == 8 || flags == 6; break;
+        case 6: r = flags == 8; break;
     }
     return r ? (sz ? ~0ull : 0xFFFFFFFFull) : 0;
 }
@@ -239,14 +239,9 @@ static int simd_3same(CPU* c, u32 w, int scalar) {
                 ka = (i < h ? i : i - h) * 2;
                 kb = ka + 1;
             }
-            f64 x = rdf(va, sz, ka), y = rdf(vb, sz, kb);
-            if (!sz && sel >= 4 && sel <= 7) { /* f32 max/min straight from the lanes: via double, a signalling NaN
-                                                  would arrive quiet */
-                f32 p = va->f[ka], q = vb->f[kb];
-                r.f[i] = sel == 4   ? fp_max32(p, q)
-                         : sel == 5 ? fp_min32(p, q)
-                         : sel == 6 ? fp_maxnm32(p, q)
-                                    : fp_minnm32(p, q);
+            if (sel >= 4 && sel <= 7) {
+                int es = sz ? 3 : 2;
+                eset(&r, es, i, snx_fp_minmax(c, eget(va, es, ka), eget(vb, es, kb), sz ? 64 : 32, sel & 1, sel >= 6));
                 continue;
             }
             if (!sz && (acc || sel == 10 || sel == 11)) { /* FMLA FMLS FRECPS FRSQRTS: the same, for their NaN choice */
@@ -258,9 +253,10 @@ static int simd_3same(CPU* c, u32 w, int scalar) {
                 continue;
             }
             if (cmp >= 0) {
-                eset(&r, sz ? 3 : 2, i, fcmpmask(cmp, x, y, sz));
+                eset(&r, sz ? 3 : 2, i, fcmpmask(c, cmp, eget(va, sz ? 3 : 2, ka), eget(vb, sz ? 3 : 2, kb), sz));
                 continue;
             }
+            f64 x = rdf(va, sz, ka), y = rdf(vb, sz, kb);
             if (acc == 1) {
                 wrf(&r, sz, i, fmla_(rdf(&d, sz, i), x, y, sz));
                 continue;
@@ -526,7 +522,6 @@ static int simd_2misc(CPU* c, u32 w, int scalar) {
     if (op >= 0x0C && op <= 0x0F && hi) {
         if (sz && !Q && !scalar) return 0;
         for (int i = 0; i < fn; i++) {
-            f64 x = rdf(&a, sz, i);
             if (op == 0x0F) {
                 if (scalar) return 0;
                 if (U) {
@@ -540,7 +535,7 @@ static int simd_2misc(CPU* c, u32 w, int scalar) {
             }
             int k = op == 0x0C ? (U ? 1 : 2) : op == 0x0D ? (U ? 5 : 0) : op == 0x0E ? (U ? -1 : 6) : -1;
             if (k < 0) return 0;
-            eset(&r, sz ? 3 : 2, i, fcmpmask(k, x, 0.0, sz));
+            eset(&r, sz ? 3 : 2, i, fcmpmask(c, k, eget(&a, sz ? 3 : 2, i), 0, sz));
         }
         *VR(rd) = r;
         return 1;
@@ -595,18 +590,18 @@ static int simd_2misc(CPU* c, u32 w, int scalar) {
         }
         if (sz && !Q && !scalar) return 0;
         for (int i = 0; i < fn; i++) {
-            f64 x = rdf(&a, sz, i);
             u64 bits = eget(&a, sz ? 3 : 2, i);
             int eb2 = sz ? 64 : 32;
             int k = (U << 6) | (hi << 5) | op;
+            /* FRINTN/P/M/Z/A/X/I, before any host FP conversion. */
+            if (k == 0x18 || k == 0x38 || k == 0x19 || k == 0x39 || k == 0x58 || k == 0x59 || k == 0x79) {
+                if (scalar) return 0; /* These are vector encodings only. */
+                int rm = k == 0x18 ? 0 : k == 0x38 ? 1 : k == 0x19 ? 2 : k == 0x39 ? 3 : k == 0x58 ? 4 : FPRM;
+                eset(&r, sz ? 3 : 2, i, snx_fp_round(c, bits, eb2, rm, k == 0x59));
+                continue;
+            }
+            f64 x = rdf(&a, sz, i);
             switch (k) {
-                case 0x18: wrf(&r, sz, i, fp_round(x, 0)); break;    /* FRINTN */
-                case 0x38: wrf(&r, sz, i, fp_round(x, 1)); break;    /* FRINTP */
-                case 0x19: wrf(&r, sz, i, fp_round(x, 2)); break;    /* FRINTM */
-                case 0x39: wrf(&r, sz, i, fp_round(x, 3)); break;    /* FRINTZ */
-                case 0x58: wrf(&r, sz, i, fp_round(x, 4)); break;    /* FRINTA */
-                case 0x59: wrf(&r, sz, i, fp_round(x, FPRM)); break; /* FRINTX */
-                case 0x79: wrf(&r, sz, i, fp_round(x, FPRM)); break; /* FRINTI */
                 case 0x1A:
                 case 0x3A:
                 case 0x1B:
@@ -803,21 +798,11 @@ static int simd_across(CPU* c, u32 w) {
     if (op == 0x0C || op == 0x0F) { /* FMAXNMV FMINNMV FMAXV FMINV, .4s only */
         if (!U || !Q || (size & 1)) return 0;
         int mn = size >> 1;
-        f32 x;
-        /* hw reduces pairwise: (0,1),(2,3) */
-        {
-            f32 p0, p1;
-            if (op == 0x0C) {
-                p0 = mn ? fp_minnm32(a.f[0], a.f[1]) : fp_maxnm32(a.f[0], a.f[1]);
-                p1 = mn ? fp_minnm32(a.f[2], a.f[3]) : fp_maxnm32(a.f[2], a.f[3]);
-                x = mn ? fp_minnm32(p0, p1) : fp_maxnm32(p0, p1);
-            } else {
-                p0 = mn ? fp_min32(a.f[0], a.f[1]) : fp_max32(a.f[0], a.f[1]);
-                p1 = mn ? fp_min32(a.f[2], a.f[3]) : fp_max32(a.f[2], a.f[3]);
-                x = mn ? fp_min32(p0, p1) : fp_max32(p0, p1);
-            }
-        }
-        r.f[0] = x;
+        /* Architectural reduction tree: (0,1),(2,3), then the two results.
+           Numeric min/max can discard an intermediate quiet NaN at the final step. */
+        u64 p0 = snx_fp_minmax(c, a.s[0], a.s[1], 32, mn, op == 0x0C);
+        u64 p1 = snx_fp_minmax(c, a.s[2], a.s[3], 32, mn, op == 0x0C);
+        r.s[0] = (u32)snx_fp_minmax(c, p0, p1, 32, mn, op == 0x0C);
         *VR(rd) = r;
         return 1;
     }
