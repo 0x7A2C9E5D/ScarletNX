@@ -54,6 +54,31 @@ release ships older versions. Install your GPU's Vulkan driver separately. For I
 on Debian/Ubuntu, the usual packages are `libvulkan1 mesa-vulkan-drivers`. NVIDIA users need a
 Vulkan-capable NVIDIA driver.
 
+### Fedora
+
+```sh
+sudo dnf install clang cmake ninja-build nasm make git pkgconf-pkg-config llvm-devel \
+  libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXi-devel libXfixes-devel \
+  libXScrnSaver-devel libXtst-devel alsa-lib-devel pulseaudio-libs-devel pipewire-devel
+```
+
+These are the Debian/Ubuntu packages above under Fedora's names. `llvm-devel` builds the recompiler's
+LLVM backend, the default one; on Debian/Ubuntu `clang` brings its LLVM headers in by itself. Fedora 44
+provides SDL3 3.4; install `SDL3-devel` to use it instead of the source fallback:
+
+```sh
+sudo dnf install SDL3-devel
+```
+
+For native Wayland support in the source fallback, also install:
+
+```sh
+sudo dnf install wayland-devel libxkbcommon-devel wayland-protocols-devel libdecor-devel libglvnd-devel
+```
+
+`libglvnd-devel` holds the EGL headers. For Intel/AMD or lavapipe, the usual Vulkan packages are
+`vulkan-loader mesa-vulkan-drivers`.
+
 ### Arch Linux
 
 ```sh
