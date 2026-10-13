@@ -68,8 +68,9 @@ python3 tests/run_astc_vulkan.py \
 
 Select a specific Vulkan driver with `VK_ICD_FILENAMES` if needed. The harness
 links production `vk/astc.c`, `vk/cmd.c`, volk and VMA. It stubs the window/game
-services, not the upload commands or staging allocator. It checks raw image
-readbacks against the CPU reference for all 14 footprints in both decode modes.
+services and buffer-cache hooks, while exercising the upload commands and staging
+allocator. It checks raw image readbacks against the CPU reference for all 14
+footprints in both decode modes.
 Synthetic blocks exercise all 2048 block-mode encodings, solid-color and invalid
 blocks. Further cases cover non-multiple dimensions, dispatch padding, five mip
 levels down to 1x1, six layers, 3D slices, scratch chunking, frame reuse and staging
@@ -83,7 +84,15 @@ Verification performed in the development container:
 - Changed Vulkan C translation units passed Clang 15 syntax checks using Vulkan
   1.3.239 headers. The standalone harness also built and ran with Clang 15.
 
-This does not replace a full runtime build, a hardware GPU benchmark or a game
-run. Those were not available in this container. In particular, synthetic
+The development-container checks above did not include a full runtime build or
+a game run. In particular, synthetic
 reference comparisons are not an independent ASTC conformance test, and lavapipe
 cannot establish hardware performance or non-coherent memory behavior.
+
+## Integration verification
+
+After applying the patch to ScarletNX `main`, the Vulkan runtime built and all
+12 CTest cases passed. The standalone ASTC Vulkan comparisons passed again.
+Catherine rendered its menu during a 60-second run. Super Mario Odyssey rendered
+a gameplay scene during a 75-second run. Tears of the Kingdom displayed the opening
+cave during a 185-second run. The later cave cutscene was not reached in that run.

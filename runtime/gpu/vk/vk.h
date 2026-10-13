@@ -9,6 +9,7 @@
    surface.c   render targets by guest address (a table textures share), loads from and write-backs to guest memory
    writeback.c landing compute and graphics storage results in guest memory
    texture.c   textures from the guest's texture headers (TIC), views and samplers (TSC)
+   astc.c      compute decoding of ASTC texture blocks during upload
    buffer.c    vertex, index, constant and storage buffers from guest memory
    pipeline.c  translated shaders, the pipeline layout and pipelines by state
    render.c    the render target set (dynamic rendering), clears and draws

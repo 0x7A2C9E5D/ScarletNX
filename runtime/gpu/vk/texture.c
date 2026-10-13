@@ -88,7 +88,6 @@ static void level_convert(const VkFmt* f, const u8* lin, u32 lw, u32 lh, u32 ld,
 static u64 level_out_size(const VkFmt* f, u32 lw, u32 lh, u32 ld, u32 rowb) {
     u32 th = (lh + f->bh - 1) / f->bh;
     switch (f->conv) {
-        case VKC_ASTC:
         case VKC_RGBA4:
         case VKC_RGB5A1:
         case VKC_A5B5G5R1: return (u64)lw * lh * ld * 4;
@@ -117,8 +116,8 @@ static void tex_upload(Surf* t) {
     }
     int is3d = t->type == VK_IMAGE_VIEW_TYPE_3D;
     u32 layers = t->layers, d3 = is3d ? t->depth3d : 1;
-    VkBufferImageCopy* reg = calloc((size_t)layers * t->levels, sizeof *reg);
-    if (!reg) return;
+    VkBufferImageCopy* reg = f->conv == VKC_ASTC ? NULL : calloc((size_t)layers * t->levels, sizeof *reg);
+    if (f->conv != VKC_ASTC && !reg) return;
     u32 nreg = 0;
     VkBuffer buf = VK_NULL_HANDLE, regbuf = VK_NULL_HANDLE;
     u64 off = 0;
