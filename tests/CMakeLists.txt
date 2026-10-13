@@ -84,14 +84,13 @@ add_test(NAME bsd_service COMMAND snx-test-bsd-service)
 set_tests_properties(bsd_service PROPERTIES TIMEOUT 60)
 
 if(SNX_BUILD_NX)
-foreach(backend windowed headless)
-    add_executable(snx-test-startup-${backend} startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
-    snx_test_target(snx-test-startup-${backend} 90)
-    if(backend STREQUAL "headless")
-        target_compile_definitions(snx-test-startup-${backend} PRIVATE SNX_HEADLESS_ONLY)
-    endif()
-    add_test(NAME startup_${backend} COMMAND snx-test-startup-${backend})
-endforeach()
+add_test(NAME llvm_dependency COMMAND "${CMAKE_COMMAND}"
+    "-DSNX_SOURCE_DIR=${PROJECT_SOURCE_DIR}" "-DSNX_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/llvm-dependency"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/llvm_dependency.cmake")
+
+add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
+snx_test_target(snx-test-startup 90)
+add_test(NAME startup_options COMMAND snx-test-startup)
 
 add_library(snx_test_common STATIC "${PROJECT_SOURCE_DIR}/src/common/utilities/common.c")
 snx_test_target(snx_test_common 90)
@@ -137,38 +136,36 @@ snx_test_target(snx_recompiler_test 23)
 target_include_directories(snx_recompiler_test PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
 target_link_libraries(snx_recompiler_test PRIVATE snx_driver ${CMAKE_DL_LIBS})
 
-# what builds game modules: LLVM, which a Windows build may lack for now (cmake/llvm.cmake)
-if(TARGET snx_llvm)
-    add_test(NAME native_recompiler COMMAND snx_recompiler_test
-        $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}")
-    add_executable(snx-test-llvm-differential llvm_differential.c)
-    snx_test_target(snx-test-llvm-differential 11)
-    target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
-    add_test(NAME llvm_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
-        --quiet)
-    set_tests_properties(llvm_differential PROPERTIES TIMEOUT 900)
-    # not a test: timings of the generated code (llvm_bench SCARLETNX REPO CLANG)
-    add_executable(snx-llvm-bench llvm_bench.c)
-    snx_test_target(snx-llvm-bench 11)
-    target_include_directories(snx-llvm-bench PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
-    target_link_libraries(snx-llvm-bench PRIVATE snx_driver ${CMAKE_DL_LIBS})
-    add_executable(snx-test-llvm-module llvm_module.c)
-    snx_test_target(snx-test-llvm-module 11)
-    target_include_directories(snx-test-llvm-module PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
-    target_link_libraries(snx-test-llvm-module PRIVATE snx_driver ${CMAKE_DL_LIBS})
-    if(TARGET snx_jit)
-        set(snx_extra_backends gcc)
-        target_link_libraries(snx-test-llvm-differential PRIVATE snx_jit)
-        target_compile_definitions(snx-test-llvm-differential PRIVATE SNX_TEST_GCCJIT)
-        add_test(NAME gccjit_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
-            --gccjit --quiet --per-case 2 --simd 100 --states 4)
-        set_tests_properties(gccjit_differential PROPERTIES TIMEOUT 900)
-        add_test(NAME native_recompiler_gcc COMMAND snx_recompiler_test
-            $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}" gcc)
-    endif()
-    add_test(NAME llvm_module COMMAND snx-test-llvm-module $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}"
-        "${CMAKE_C_COMPILER}" ${snx_extra_backends})
+# LLVM is always available to the recompiler.
+add_test(NAME native_recompiler COMMAND snx_recompiler_test
+    $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}")
+add_executable(snx-test-llvm-differential llvm_differential.c)
+snx_test_target(snx-test-llvm-differential 11)
+target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
+add_test(NAME llvm_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
+    --quiet)
+set_tests_properties(llvm_differential PROPERTIES TIMEOUT 900)
+# not a test: timings of the generated code (llvm_bench SCARLETNX REPO CLANG)
+add_executable(snx-llvm-bench llvm_bench.c)
+snx_test_target(snx-llvm-bench 11)
+target_include_directories(snx-llvm-bench PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
+target_link_libraries(snx-llvm-bench PRIVATE snx_driver ${CMAKE_DL_LIBS})
+add_executable(snx-test-llvm-module llvm_module.c)
+snx_test_target(snx-test-llvm-module 11)
+target_include_directories(snx-test-llvm-module PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
+target_link_libraries(snx-test-llvm-module PRIVATE snx_driver ${CMAKE_DL_LIBS})
+if(TARGET snx_jit)
+    set(snx_extra_backends gcc)
+    target_link_libraries(snx-test-llvm-differential PRIVATE snx_jit)
+    target_compile_definitions(snx-test-llvm-differential PRIVATE SNX_TEST_GCCJIT)
+    add_test(NAME gccjit_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
+        --gccjit --quiet --per-case 2 --simd 100 --states 4)
+    set_tests_properties(gccjit_differential PROPERTIES TIMEOUT 900)
+    add_test(NAME native_recompiler_gcc COMMAND snx_recompiler_test
+        $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}" gcc)
 endif()
+add_test(NAME llvm_module COMMAND snx-test-llvm-module $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}"
+    "${CMAKE_C_COMPILER}" ${snx_extra_backends})
 
 add_executable(snx_codegen_test codegen_test.c)
 snx_test_target(snx_codegen_test 90)
@@ -181,6 +178,8 @@ add_test(NAME astc_decode COMMAND snx-test-astc)
 
 add_executable(snx-test-audio-out audio_out.c)
 snx_test_target(snx-test-audio-out 11)
+# Isolate audout in this fixture without FFmpeg, also when testing a tools-only build.
+# Production NX targets always link FFmpeg and never define SNX_NO_H264.
 target_compile_definitions(snx-test-audio-out PRIVATE SNX_NO_H264)
 add_test(NAME audio_out COMMAND snx-test-audio-out)
 
@@ -251,7 +250,7 @@ endif()
 if(SNX_TEST_SANITIZERS AND WIN32)
     execute_process(COMMAND "${CMAKE_C_COMPILER}" -print-resource-dir
         OUTPUT_VARIABLE snx_clang_resource OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-    set(snx_sanitized_tests a64_fp_witnesses a64_fp_arithmetic_witnesses startup_windowed startup_headless driver_workflow extraction_native loader_native runtime_nro native_codegen filesystem_tree filesystem_service filesystem_raw astc_decode audio_out render_enable clear_flags instance_array draw_texture etc2_decode)
+    set(snx_sanitized_tests a64_fp_witnesses a64_fp_arithmetic_witnesses startup_options driver_workflow extraction_native loader_native runtime_nro native_codegen filesystem_tree filesystem_service filesystem_raw astc_decode audio_out render_enable clear_flags instance_array draw_texture etc2_decode)
     if(TEST native_recompiler)
         list(APPEND snx_sanitized_tests native_recompiler)
     endif()

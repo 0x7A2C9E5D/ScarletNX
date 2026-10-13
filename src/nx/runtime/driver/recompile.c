@@ -308,11 +308,6 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         return snx_error("--target expects auto, linux or win64");
     /* The backends write the module for the machine they run on (build == host == target) */
     if (compile.target_win != host_win) return snx_error("--target: modules are built for this host only");
-#ifndef SNX_WITH_LLVM
-    if (backend == SNX_BACKEND_LLVM && !no_build)
-        return snx_error("this recompiler was built without LLVM (a cross build, or Windows without an LLVM for "
-                         "MinGW): it can't build game modules");
-#endif
     gen.abi = snx_read_abi(paths);
     if (!gen.abi) return snx_error("cannot read src/common/cpu/aarch64/cpu.h; set --repo to the checkout");
     if (snx_load_program(input, &program, error, sizeof(error))) return snx_error("%s", error);
@@ -379,9 +374,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         llvm.keep_ir = kept;
         i = kept && (snx_is_link(kept) || snx_mkdirs(kept));
         if (i) snx_error("cannot save the generated code in %s", kept);
-#ifdef SNX_WITH_LLVM
         if (!i && backend == SNX_BACKEND_LLVM) i = snx_build_module_llvm(&program, &gen, &llvm);
-#endif
         if (!i && backend == SNX_BACKEND_GCC) i = snx_build_module_gccjit(&program, &gen, &llvm);
         free(kept);
         if (i) goto done;
