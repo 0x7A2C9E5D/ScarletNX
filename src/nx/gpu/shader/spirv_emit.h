@@ -38,6 +38,7 @@ uint32_t spv_emit_type_vec4(SpvEmitter* e, uint32_t component_type);
 uint32_t spv_emit_type_runtime_array(SpvEmitter* e, uint32_t element_type, uint32_t stride);
 uint32_t spv_emit_type_struct_one(SpvEmitter* e, uint32_t member_type);
 uint32_t spv_emit_type_storage_pointer(SpvEmitter* e, uint32_t pointee_type);
+uint32_t spv_emit_type_function_pointer(SpvEmitter* e, uint32_t pointee_type);
 uint32_t spv_emit_type_function_void(SpvEmitter* e, uint32_t void_type);
 uint32_t spv_emit_constant_u32(SpvEmitter* e, uint32_t type, uint32_t value);
 uint32_t spv_emit_constant_f32(SpvEmitter* e, uint32_t type, float value);
@@ -47,6 +48,13 @@ uint32_t spv_emit_output_vec4(SpvEmitter* e, uint32_t vec4_type, uint32_t locati
 uint32_t spv_emit_position_output(SpvEmitter* e, uint32_t vec4_type);
 void spv_emit_function_void(SpvEmitter* e, uint32_t void_type, uint32_t function, uint32_t function_type);
 void spv_emit_label(SpvEmitter* e, uint32_t label);
+uint32_t spv_emit_function_variable(SpvEmitter* e, uint32_t pointer_type);
+uint32_t spv_emit_load(SpvEmitter* e, uint32_t result_type, uint32_t pointer);
+uint32_t spv_emit_bitcast(SpvEmitter* e, uint32_t result_type, uint32_t value);
+uint32_t spv_emit_fadd(SpvEmitter* e, uint32_t f32_type, uint32_t left, uint32_t right);
+uint32_t spv_emit_fmul(SpvEmitter* e, uint32_t f32_type, uint32_t left, uint32_t right);
+uint32_t spv_emit_vec4_construct(SpvEmitter* e, uint32_t vec4_type, const uint32_t components[4]);
+void spv_emit_no_contraction(SpvEmitter* e, uint32_t result);
 uint32_t spv_emit_storage_access_u32(SpvEmitter* e, uint32_t pointer_type, uint32_t buffer, uint32_t member_index,
                                      uint32_t element_index);
 uint32_t spv_emit_iadd_u32(SpvEmitter* e, uint32_t u32_type, uint32_t left, uint32_t right);

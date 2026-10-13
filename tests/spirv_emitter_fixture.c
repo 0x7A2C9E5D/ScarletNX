@@ -50,7 +50,9 @@ uint32_t* snx_test_spirv_graphics(int fragment, size_t* words) {
     uint32_t label = spv_emit_id(&e);
     uint32_t void_type = spv_emit_type_void(&e);
     uint32_t f32_type = spv_emit_type_f32(&e);
+    uint32_t u32_type = spv_emit_type_u32(&e);
     uint32_t vec4_type = spv_emit_type_vec4(&e, f32_type);
+    uint32_t reg_type = spv_emit_type_function_pointer(&e, u32_type);
     uint32_t function_type = spv_emit_type_function_void(&e, void_type);
     uint32_t output = fragment ? spv_emit_output_vec4(&e, vec4_type, 0) : spv_emit_position_output(&e, vec4_type);
     uint32_t output2 = fragment ? spv_emit_output_vec4(&e, vec4_type, 1) : 0;
@@ -60,10 +62,24 @@ uint32_t* snx_test_spirv_graphics(int fragment, size_t* words) {
     if (fragment) spv_emit_fragment_origin_upper_left(&e, function);
     uint32_t zero = spv_emit_constant_f32(&e, f32_type, 0.0f);
     uint32_t one = spv_emit_constant_f32(&e, f32_type, 1.0f);
-    uint32_t components[4] = {fragment ? one : zero, zero, zero, one};
-    uint32_t color = spv_emit_constant_vec4(&e, vec4_type, components);
+    uint32_t half_bits = spv_emit_constant_u32(&e, u32_type, 0x3f000000);
+    uint32_t vertex_components[4] = {zero, zero, zero, one};
+    uint32_t vertex_color = spv_emit_constant_vec4(&e, vec4_type, vertex_components);
     spv_emit_function_void(&e, void_type, function, function_type);
     spv_emit_label(&e, label);
+    uint32_t color = vertex_color;
+    if (fragment) {
+        uint32_t reg = spv_emit_function_variable(&e, reg_type);
+        spv_emit_store(&e, reg, half_bits);
+        uint32_t bits = spv_emit_load(&e, u32_type, reg);
+        uint32_t half = spv_emit_bitcast(&e, f32_type, bits);
+        uint32_t sum = spv_emit_fadd(&e, f32_type, half, half);
+        uint32_t product = spv_emit_fmul(&e, f32_type, half, half);
+        spv_emit_no_contraction(&e, sum);
+        spv_emit_no_contraction(&e, product);
+        uint32_t components[4] = {sum, product, zero, one};
+        color = spv_emit_vec4_construct(&e, vec4_type, components);
+    }
     spv_emit_store(&e, output, color);
     if (fragment) spv_emit_store(&e, output2, color);
     spv_emit_return(&e);

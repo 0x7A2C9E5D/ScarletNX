@@ -18,7 +18,11 @@ def main():
         expected_by_stage = {
             'compute': ('OpEntryPoint GLCompute', 'LocalSize 1 1 1', 'OpAccessChain', 'OpIAdd'),
             'vertex': ('OpEntryPoint Vertex', 'BuiltIn Position', 'OpConstantComposite'),
-            'fragment': ('OpEntryPoint Fragment', 'OriginUpperLeft', 'Location 0', 'OpConstantComposite'),
+            'fragment': (
+                'OpEntryPoint Fragment', 'OriginUpperLeft', 'Location 0', 'Location 1',
+                'OpVariable', 'OpLoad', 'OpBitcast', 'OpFAdd', 'OpFMul', 'NoContraction',
+                'OpCompositeConstruct',
+            ),
         }
         for stage, expected in expected_by_stage.items():
             path = Path(directory) / f'{stage}.spv'

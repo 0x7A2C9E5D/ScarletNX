@@ -25,11 +25,16 @@ enum {
     OP_FUNCTION = 54,
     OP_FUNCTION_END = 56,
     OP_VARIABLE = 59,
+    OP_LOAD = 61,
     OP_STORE = 62,
     OP_ACCESS_CHAIN = 65,
     OP_DECORATE = 71,
     OP_MEMBER_DECORATE = 72,
     OP_IADD = 128,
+    OP_FADD = 129,
+    OP_FMUL = 133,
+    OP_BITCAST = 124,
+    OP_COMPOSITE_CONSTRUCT = 80,
     OP_LABEL = 248,
     OP_RETURN = 253,
 };
@@ -218,6 +223,15 @@ uint32_t spv_emit_type_storage_pointer(SpvEmitter* e, uint32_t pointee_type) {
     return id;
 }
 
+uint32_t spv_emit_type_function_pointer(SpvEmitter* e, uint32_t pointee_type) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->types, OP_TYPE_POINTER, 4);
+    put(&e->types, id);
+    put(&e->types, 7); /* Function */
+    put(&e->types, pointee_type);
+    return id;
+}
+
 uint32_t spv_emit_type_function_void(SpvEmitter* e, uint32_t void_type) {
     uint32_t id = spv_emit_id(e);
     instruction(&e->types, OP_TYPE_FUNCTION, 3);
@@ -305,6 +319,66 @@ void spv_emit_function_void(SpvEmitter* e, uint32_t void_type, uint32_t function
 void spv_emit_label(SpvEmitter* e, uint32_t label) {
     instruction(&e->functions, OP_LABEL, 2);
     put(&e->functions, label);
+}
+
+uint32_t spv_emit_function_variable(SpvEmitter* e, uint32_t pointer_type) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_VARIABLE, 4);
+    put(&e->functions, pointer_type);
+    put(&e->functions, id);
+    put(&e->functions, 7); /* Function */
+    return id;
+}
+
+uint32_t spv_emit_load(SpvEmitter* e, uint32_t result_type, uint32_t pointer) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_LOAD, 4);
+    put(&e->functions, result_type);
+    put(&e->functions, id);
+    put(&e->functions, pointer);
+    return id;
+}
+
+uint32_t spv_emit_bitcast(SpvEmitter* e, uint32_t result_type, uint32_t value) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_BITCAST, 4);
+    put(&e->functions, result_type);
+    put(&e->functions, id);
+    put(&e->functions, value);
+    return id;
+}
+
+static uint32_t binary(SpvEmitter* e, uint32_t opcode, uint32_t result_type, uint32_t left, uint32_t right) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, opcode, 5);
+    put(&e->functions, result_type);
+    put(&e->functions, id);
+    put(&e->functions, left);
+    put(&e->functions, right);
+    return id;
+}
+
+uint32_t spv_emit_fadd(SpvEmitter* e, uint32_t f32_type, uint32_t left, uint32_t right) {
+    return binary(e, OP_FADD, f32_type, left, right);
+}
+
+uint32_t spv_emit_fmul(SpvEmitter* e, uint32_t f32_type, uint32_t left, uint32_t right) {
+    return binary(e, OP_FMUL, f32_type, left, right);
+}
+
+uint32_t spv_emit_vec4_construct(SpvEmitter* e, uint32_t vec4_type, const uint32_t components[4]) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_COMPOSITE_CONSTRUCT, 7);
+    put(&e->functions, vec4_type);
+    put(&e->functions, id);
+    for (size_t i = 0; i < 4; i++) put(&e->functions, components[i]);
+    return id;
+}
+
+void spv_emit_no_contraction(SpvEmitter* e, uint32_t result) {
+    instruction(&e->decorations, OP_DECORATE, 3);
+    put(&e->decorations, result);
+    put(&e->decorations, 42); /* NoContraction */
 }
 
 uint32_t spv_emit_storage_access_u32(SpvEmitter* e, uint32_t pointer_type, uint32_t buffer, uint32_t member_index,
