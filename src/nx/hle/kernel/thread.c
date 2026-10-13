@@ -69,9 +69,10 @@ KThread* kthread_create(u64 entry, u64 arg, u64 stack_top, int prio, int core) {
    runs and lets go only where a console thread is off the CPU too: when it blocks in the kernel, sleeps or yields,
    makes an IPC call, or waits in WFE. A thread letting go hands the core to its waiting thread of highest priority, the
    earliest among equals. The console also preempts a running thread as soon as one of higher priority becomes ready:
-   here the holder is stopped at its next SVC or at its next backward branch (CPU.poll, core_poll), so a thread spinning
-   in a loop lets go of its core within one round of it. A yield hands the core to any waiting thread, even one of lower priority: the console would run
-   that one on an idle core, and threads don't move between cores here */
+   here the holder is stopped at its next SVC, or at its next backward branch (a taken one in the interpreter: CPU.poll,
+   core_poll), so a thread spinning in a loop lets go of its core within one round of it. A yield hands the core to any
+   waiting thread, even one of lower priority: the console would run that one on an idle core, and threads don't move
+   between cores here */
 static PMutex g_core_lk;
 static PCond g_core_cv[NCORES];
 static KThread* g_core_owner[NCORES];
@@ -80,8 +81,9 @@ static int
     g_core_best[NCORES]; /* the best (lowest) priority waiting, 64 when none: core_preempt and core_yield read it
                                    unlocked */
 static u64 g_core_ticket;
-/* the holder of core k is asked to let go (CPU.poll, which generated code checks on every backward branch) while a
-   thread of higher priority waits for the core: the console would have preempted it already */
+/* the holder of core k is asked to let go (CPU.poll, which generated code checks on every backward branch and the
+   interpreter on every taken one) while a thread of higher priority waits for the core: the console would have
+   preempted it already */
 static void core_flag_nl(int k) {
     KThread* o = g_core_owner[k];
     if (o)

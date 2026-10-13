@@ -69,7 +69,8 @@ typedef struct CPU {
     const RtAPI* rt;
     void* thread; /* owning runtime thread or process */
     /* set by another host thread when the runtime wants this one back (a thread of higher priority waits for its
-       core): generated code reads it on every backward branch and then calls rt->poll */
+       core): generated code reads it on every backward branch, the interpreter on every taken branch, and then
+       they call rt->poll */
     u32 poll;
 } CPU;
 

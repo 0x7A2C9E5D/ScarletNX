@@ -351,7 +351,8 @@ done:
 }
 
 /* A loop of generated code runs with CPU.poll set: its backward branch calls rt->poll, the runtime's chance to take
-   the core from a thread that makes no SVC, and the loop still runs to its end. */
+   the core from a thread that makes no SVC, and the loop still runs to its end. The same loop through the
+   interpreter, as a loop the recompiler never found runs, polls on its taken branch. */
 static void poll_test(const char* compiler, const char* repo, const char* directory) {
     static const SnxU32 words[] = {0xF1000400UL,  /* SUBS X0,X0,#1 */
                                    0x54FFFFE1UL,  /* B.NE back to it */
@@ -388,6 +389,7 @@ static void poll_test(const char* compiler, const char* repo, const char* direct
     if (!file) goto done;
     fputs("#include \"cpu.h\"\n#include \"cpu_helpers.c\"\n#include <stdio.h>\nGuestFn snx_interp_entry;\n", file);
     snx_codegen_emit(file, &codegen, function);
+    snx_a64_interp(file, 0);
     fputs("static int polls;\nstatic void poll(CPU* c){ ++polls; __atomic_store_n(&c->poll,0,__ATOMIC_RELAXED); }\n",
           file);
     fputs("static int run(u64 count, u32 flag){ CPU c; RtAPI rt; memset(&c,0,sizeof c); memset(&rt,0,sizeof rt);\n"
@@ -397,9 +399,19 @@ static void poll_test(const char* compiler, const char* repo, const char* direct
     fputs("(&c,", file);
     snx_a64_literal(file, SNX_CODE_BASE);
     fputs(");\n return c.x[0]==0 && c.pc==0x2000 ? polls : -1; }\n", file);
-    fputs("int main(void){ int a=run(3,1), b=run(5,0);\n"
+    /* the loop's words in guest memory at 0x1000, no dispatch table: every lookup lands in the interpreter */
+    fputs("static int interp(u64 count, u32 flag){ static u32 mem[0x1000]; CPU c; RtAPI rt;\n"
+          " memset(&c,0,sizeof c); memset(&rt,0,sizeof rt); mem[0x400]=0xF1000400u; mem[0x401]=0x54FFFFE1u;\n"
+          " mem[0x402]=0xD65F03C0u; snx_interp_entry=snx_interp; rt.poll=poll; c.rt=&rt; c.mem=(u8*)mem;\n"
+          " c.x[0]=count; c.x[30]=0x2000; c.poll=flag; polls=0; snx_interp(&c,0x1000);\n"
+          " return c.x[0]==0 && c.pc==0x2000 ? polls : -1; }\n",
+          file);
+    fputs("int main(void){ int a=run(3,1), b=run(5,0), d=interp(3,1), e=interp(5,0);\n"
           " if(a!=1||b!=0){ fprintf(stderr,\"poll loop: %d polls with the flag, %d without\\n\",a,b); return 1; }\n"
-          " puts(\"A loop's backward branch calls rt->poll once when CPU.poll is set\"); return 0; }\n",
+          " if(d!=1||e!=0){ fprintf(stderr,\"interpreted poll loop: %d polls with the flag, %d without\\n\",d,e);"
+          " return 1; }\n"
+          " puts(\"A loop's backward branch calls rt->poll once when CPU.poll is set, compiled or interpreted\");"
+          " return 0; }\n",
           file);
     check(!fclose(file), "write the poll fixture");
     n = 0;
