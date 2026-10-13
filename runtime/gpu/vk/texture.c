@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gpu/gpu.h"
-#include "gpu/texture/astc.h"
 #include "platform/log.h"
 #include "gpu/vk/vk.h"
 
@@ -52,9 +51,6 @@ static u64 bl_layer_size(u32 w, u32 h, u32 d, const VkFmt* f, u32 bh, u32 bd, u3
 static void level_convert(const VkFmt* f, const u8* lin, u32 lw, u32 lh, u32 ld, u32 rowb, u8* out) {
     u32 th = (lh + f->bh - 1) / f->bh;
     switch (f->conv) {
-        case VKC_ASTC: /* decoded to sRGB storage when the texture header says sRGB (format.c's TA) */
-            astc_decode_image(lin, lw, lh, f->bw, f->bh, out, f->vk == VK_FORMAT_R8G8B8A8_SRGB);
-            break;
         case VKC_RGBA4:
         case VKC_RGB5A1:
         case VKC_A5B5G5R1:
@@ -92,7 +88,6 @@ static void level_convert(const VkFmt* f, const u8* lin, u32 lw, u32 lh, u32 ld,
 static u64 level_out_size(const VkFmt* f, u32 lw, u32 lh, u32 ld, u32 rowb) {
     u32 th = (lh + f->bh - 1) / f->bh;
     switch (f->conv) {
-        case VKC_ASTC:
         case VKC_RGBA4:
         case VKC_RGB5A1:
         case VKC_A5B5G5R1: return (u64)lw * lh * ld * 4;
@@ -121,8 +116,8 @@ static void tex_upload(Surf* t) {
     }
     int is3d = t->type == VK_IMAGE_VIEW_TYPE_3D;
     u32 layers = t->layers, d3 = is3d ? t->depth3d : 1;
-    VkBufferImageCopy* reg = calloc((size_t)layers * t->levels, sizeof *reg);
-    if (!reg) return;
+    VkBufferImageCopy* reg = f->conv == VKC_ASTC ? NULL : calloc((size_t)layers * t->levels, sizeof *reg);
+    if (f->conv != VKC_ASTC && !reg) return;
     u32 nreg = 0;
     VkBuffer buf = VK_NULL_HANDLE, regbuf = VK_NULL_HANDLE;
     u64 off = 0;
@@ -135,7 +130,7 @@ static void tex_upload(Surf* t) {
             if (!ld) ld = 1;
             u32 tw = (lw + f->bw - 1) / f->bw, th = (lh + f->bh - 1) / f->bh;
             u32 rowb = tw * f->bpp, lbh = 0, lbd = 0;
-            u64 lsz = t->bl ? bl_level_size(t->w, t->h, d3, f, t->bh, t->bd, l, &lbh, &lbd) : (u64)t->pitch * th;
+            u64 lsz = t->bl ? bl_level_size(t->w, t->h, d3, f, t->bh, t->bd, l, &lbh, &lbd) : (u64)t->pitch * th * ld;
             u8* src = gmem_ptr(t->gva + at, lsz);
             u8* tmp = NULL;
             if (!src) {
@@ -163,8 +158,14 @@ static void tex_upload(Surf* t) {
                         }
                     }
             } else
-                for (u32 y = 0; y < th; y++) memcpy(lin + (u64)y * rowb, src + (u64)y * t->pitch, rowb);
+                for (u64 y = 0; y < (u64)th * ld; y++) memcpy(lin + y * rowb, src + y * t->pitch, rowb);
             free(tmp);
+            if (f->conv == VKC_ASTC) {
+                vk_astc_upload(cb, t, lin, lw, lh, ld, l, layer);
+                free(lin);
+                at += lsz;
+                continue;
+            }
             u64 osz = level_out_size(f, lw, lh, ld, rowb);
             u8* p = vk_stage(osz, 16, &buf, &off);
             if (p) {
@@ -399,7 +400,7 @@ static Surf* tex_from_tic(const u32* tic) {
     if (vt == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY && !g_vk.feat.imageCubeArray) vt = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     u32 layers = vt == VK_IMAGE_VIEW_TYPE_3D ? 1 : d, d3 = vt == VK_IMAGE_VIEW_TYPE_3D ? d : 1;
     /* bytes from one layer to the next: all the levels the header has, whichever of them it shows */
-    u64 stride = bl ? bl_layer_size(w, h, d3, &f, bh, bd, glevels) : (u64)pitch * ((h + f.bh - 1) / f.bh);
+    u64 stride = bl ? bl_layer_size(w, h, d3, &f, bh, bd, glevels) : (u64)pitch * ((h + f.bh - 1) / f.bh) * d3;
     /* the levels the shader sees, base level to max level (word 7), as a texture of their own the way Ryujinx makes
        it: the base level's address, size and blocks. Pitch-linear textures have one level */
     u32 levels = bl ? glevels : 1;
@@ -447,7 +448,7 @@ static Surf* tex_from_tic(const u32* tic) {
         LOG_LIMIT(1, "vulkan: a %ux%ux%u texture is bigger than the GPU's images can be (not drawn)\n", w, h, d);
         return NULL;
     }
-    u32 ilevels = f.conv == VKC_ASTC ? 1 : levels; /* ASTC is decoded on the CPU: the base level only */
+    u32 ilevels = levels; /* ASTC compute uploads include every mip level. */
     u32 fkey = (tic[0] & 0x7FFFF) | ((u32)srgb << 31);
     for (Surf* t = vk_surf_first(gva); t; t = t->next) {
         if (t->is_rt || t->gva != gva || t->w != w || t->h != h || t->layers != layers || t->depth3d != d3 ||

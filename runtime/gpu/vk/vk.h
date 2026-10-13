@@ -9,6 +9,7 @@
    surface.c   render targets by guest address (a table textures share), loads from and write-backs to guest memory
    writeback.c landing compute and graphics storage results in guest memory
    texture.c   textures from the guest's texture headers (TIC), views and samplers (TSC)
+   astc.c      compute decoding of ASTC texture blocks during upload
    buffer.c    vertex, index, constant and storage buffers from guest memory
    pipeline.c  translated shaders, the pipeline layout and pipelines by state
    render.c    the render target set (dynamic rendering), clears and draws
@@ -207,6 +208,10 @@ VkImageAspectFlags vk_aspect(const VkFmt* f);
 void vk_surf_evict(u32 before); /* textures and render targets last used before that present */
 int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
               double sdy);
+
+/* astc.c: decode tightly packed ASTC blocks and copy to a level/layer of t.
+   Caller ends rendering and transitions t to TRANSFER_DST_OPTIMAL first. */
+void vk_astc_upload(VkCommandBuffer cb, Surf* t, const u8* blocks, u32 w, u32 h, u32 depth, u32 level, u32 layer);
 
 /* texture.c */
 Surf* vk_tex_from_tic(const u32* tic);
