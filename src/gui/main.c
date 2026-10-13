@@ -78,7 +78,7 @@ static void layout(App* app) {
 }
 static void render(App* app) {
     layout(app);
-    SDL_SetRenderDrawColor(app->renderer, 10, 12, 20, 255);
+    SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255); /* Always OLED black */
     SDL_RenderClear(app->renderer);
     text(app, 1, 0, "ScarletNX", yellow);
     if (app->menu.view == GUI_LOAD_GAMES && !app->menu.running && !app->finished) {
