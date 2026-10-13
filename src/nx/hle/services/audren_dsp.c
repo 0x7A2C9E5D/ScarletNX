@@ -40,7 +40,13 @@ static i32 sat32(float x) {
 }
 
 /* features met and not rendered, each logged once */
-enum { AR_WARN_SPLITTER = 1, AR_WARN_BIQUAD = 2, AR_WARN_EFFECT = 4, AR_WARN_FORMAT = 8, AR_WARN_COUNTS = 16 };
+enum {
+    SNX_AUDREN_WARN_SPLITTER = 1,
+    SNX_AUDREN_WARN_BIQUAD = 2,
+    SNX_AUDREN_WARN_EFFECT = 4,
+    SNX_AUDREN_WARN_FORMAT = 8,
+    SNX_AUDREN_WARN_COUNTS = 16
+};
 static void warn_once(ARState* s, u32 bit, const char* what) {
     if (s->warned & bit) return;
     s->warned |= bit;
@@ -52,7 +58,7 @@ static void warn_once(ARState* s, u32 bit, const char* what) {
    Each table is a cutoff, a gain and a window: Hamming (0.54) or Kaiser (beta). These are fitted to the console's
    tables as Eden carries them (renderer/command/resample/resample.cpp) and give them to 1 LSB in Q15, 2 for the
    default 0.75 one; the high quality cutoffs come out as 0.5, 0.75 and 1 times 1024 / 1023 */
-#define AR_PI 3.14159265358979323846
+#define SNX_AUDREN_PI 3.14159265358979323846
 static double bessel_i0(double x) {
     double sum = 1.0, term = 1.0;
     for (int k = 1; k < 64 && term > 1e-17 * sum; k++) {
@@ -66,9 +72,10 @@ static void make_lut(float* out, int taps, double cutoff, double gain, double ha
     for (int p = 0; p < 128; p++)
         for (int k = 0; k < taps; k++) {
             int n = 128 * k + 127 - p;
-            double t = (n - (n_all - 1) / 2.0) / 128.0, x = AR_PI * cutoff * t, u = 2.0 * n / (n_all - 1) - 1.0, w;
+            double t = (n - (n_all - 1) / 2.0) / 128.0, x = SNX_AUDREN_PI * cutoff * t, u = 2.0 * n / (n_all - 1) - 1.0,
+                   w;
             if (hamming > 0)
-                w = hamming - (1 - hamming) * cos(2 * AR_PI * n / (n_all - 1));
+                w = hamming - (1 - hamming) * cos(2 * SNX_AUDREN_PI * n / (n_all - 1));
             else
                 w = bessel_i0(beta * sqrt(fmax(0.0, 1 - u * u))) / bessel_i0(beta);
             out[p * taps + k] = (float)(rint(gain * cutoff * (x == 0 ? 1.0 : sin(x) / x) * w) / 32768.0);
@@ -103,8 +110,8 @@ ARState* audren_state_new(const u8* params) {
     s->mix = calloc(s->nmix, sizeof *s->mix);
     s->effect = calloc(effects ? effects : 1, sizeof *s->effect);
     s->sink = calloc(sinks ? sinks : 1, sizeof *s->sink);
-    s->buf = calloc((size_t)(buffers + AR_CHANNELS) * frame, sizeof *s->buf);
-    s->temp = calloc(AR_TEMP + AR_HISTORY, sizeof *s->temp);
+    s->buf = calloc((size_t)(buffers + SNX_AUDREN_CHANNELS) * frame, sizeof *s->buf);
+    s->temp = calloc(SNX_AUDREN_TEMP + SNX_AUDREN_HISTORY, sizeof *s->temp);
     s->order = calloc(s->nmix, sizeof *s->order);
     if (!s->voice || !s->chan || !s->mix || !s->effect || !s->sink || !s->buf || !s->temp || !s->order) {
         audren_state_free(s);
@@ -137,12 +144,12 @@ static void take_wave(ARWave* w, const u8* wb, u8 format) {
     memcpy(&en, wb + 0x14, 4);
     u64 size = rd64(wb + 8);
     if (st < 0 || en < 0) return;
-    if (format == AR_ADPCM) {
+    if (format == SNX_AUDREN_ADPCM) {
         u64 a = (u64)(st / 14) * 8 + (st % 14 ? (u64)(st % 14) / 2 + 1 + (st % 14) % 2 : 0);
         u64 b = (u64)(en / 14) * 8 + (en % 14 ? (u64)(en % 14) / 2 + 1 + (en % 14) % 2 : 0);
         if (a > size || b > size) return;
     } else {
-        u64 bytes = format == AR_PCMF32 ? 4 : 2;
+        u64 bytes = format == SNX_AUDREN_PCMF32 ? 4 : 2;
         if ((u64)st * bytes > size || (u64)en * bytes > size) return;
     }
     w->addr = rd64(wb);
@@ -166,37 +173,37 @@ static void update_voice(ARState* s, ARVoice* v, const u8* vi, u8* vo) {
     if (vi[8]) { /* is_new: its buffers start over, and the channels with the first frame */
         memset(v, 0, sizeof *v);
         v->fresh = 1;
-        v->play = AR_STOPPED;
-        for (int w = 0; w < AR_WAVES; w++) v->wave[w].sent = 1; /* empty slots: nothing to hand the DSP */
+        v->play = SNX_AUDREN_STOPPED;
+        for (int w = 0; w < SNX_AUDREN_WAVES; w++) v->wave[w].sent = 1; /* empty slots: nothing to hand the DSP */
     }
     v->in_use = vi[9];
     if (v->in_use) {
         v->last_play = v->play;
         switch (vi[0xA]) {
-            case 0: v->play = AR_STARTED; break;
+            case 0: v->play = SNX_AUDREN_STARTED; break;
             case 1:
-                if (v->play != AR_STOPPED) v->play = AR_STOPPING;
+                if (v->play != SNX_AUDREN_STOPPED) v->play = SNX_AUDREN_STOPPING;
                 break;
-            case 2: v->play = AR_PAUSED; break;
+            case 2: v->play = SNX_AUDREN_PAUSED; break;
         }
         if (vi[0x15E] <= 2) v->quality = vi[0x15E];
         v->format = vi[0xB];
         v->rate = rd32(vi + 0xC);
         u32 ch = rd32(vi + 0x18);
-        v->channels = (u8)(ch < 1 ? 1 : ch > AR_CHANNELS ? AR_CHANNELS : ch);
+        v->channels = (u8)(ch < 1 ? 1 : ch > SNX_AUDREN_CHANNELS ? SNX_AUDREN_CHANNELS : ch);
         v->pitch = rdf(vi + 0x1C);
         v->volume = rdf(vi + 0x20);
-        if (vi[0x24] || vi[0x24 + 12]) warn_once(s, AR_WARN_BIQUAD, "voice biquad filters are not rendered");
+        if (vi[0x24] || vi[0x24 + 12]) warn_once(s, SNX_AUDREN_WARN_BIQUAD, "voice biquad filters are not rendered");
         v->wave_count = rd32(vi + 0x3C);
-        v->wave_index = rd16(vi + 0x40) % AR_WAVES;
+        v->wave_index = rd16(vi + 0x40) % SNX_AUDREN_WAVES;
         v->data = rd64(vi + 0x48);
         v->data_size = rd64(vi + 0x50);
         v->flush += vi[0x159];
         v->mix_id = rd32(vi + 0x58);
         v->splitter_id = rd32(vi + 0x5C);
-        for (int c = 0; c < AR_CHANNELS; c++) v->res[c] = rd32(vi + 0x140 + c * 4);
+        for (int c = 0; c < SNX_AUDREN_CHANNELS; c++) v->res[c] = rd32(vi + 0x140 + c * 4);
         v->flags = vi[0x15C];
-        for (int w = 0; w < AR_WAVES; w++) {
+        for (int w = 0; w < SNX_AUDREN_WAVES; w++) {
             const u8* wb = vi + 0x60 + w * 0x38;
             if (!wb[0x1A]) take_wave(&v->wave[w], wb, v->format); /* not yet sent to the DSP */
         }
@@ -233,7 +240,8 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
         return -4;
     }
     if (nvoices > s->nvoices || nres > s->nres || neff > s->neffects || nmix > s->nmix || nsinks > s->nsinks)
-        warn_once(s, AR_WARN_COUNTS, "an update holds more voices, effects, mixes or sinks than the renderer opened");
+        warn_once(s, SNX_AUDREN_WARN_COUNTS,
+                  "an update holds more voices, effects, mixes or sinks than the renderer opened");
     s->rev = rev;
     const u8* p = in + 0x40 + ih[1];
     const u8* pools = p;
@@ -304,7 +312,7 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
         m->in_use = mi[0xC];
         m->volume = rdf(mi);
         m->buffers = rd32(mi + 8);
-        if (m->buffers > AR_MIX_OUTS) m->buffers = AR_MIX_OUTS;
+        if (m->buffers > SNX_AUDREN_MIX_OUTS) m->buffers = SNX_AUDREN_MIX_OUTS;
         memcpy(m->vol, mi + 0x24, sizeof m->vol);
         memcpy(&m->dest, mi + 0x924, 4);
     }
@@ -333,12 +341,12 @@ static u32 decode_pcm(const ARVoice* v, const ARWave* w, int ch, i32 st, i32 en,
     if (!w->addr || !w->size || st >= en) return 0;
     u32 n = (u32)(en - st) - offset;
     if (want < n) n = want;
-    u64 bytes = v->format == AR_PCMF32 ? 4 : 2, first = ((u64)(st + (i32)offset) * v->channels) * bytes;
+    u64 bytes = v->format == SNX_AUDREN_PCMF32 ? 4 : 2, first = ((u64)(st + (i32)offset) * v->channels) * bytes;
     if (first + (u64)n * v->channels * bytes > w->size) return 0;
     const u8* src = GP(w->addr + first);
     for (u32 i = 0; i < n; i++) {
         const u8* at = src + ((u64)i * v->channels + ch) * bytes;
-        if (v->format == AR_PCMF32)
+        if (v->format == SNX_AUDREN_PCMF32)
             out[i] = sat16(rdf(at) * 32767.0f);
         else
             out[i] = (i16)rd16(at);
@@ -367,8 +375,8 @@ static u32 decode_adpcm(const ARVoice* v, ARChannel* c, const ARWave* w, i32 st,
     i32 scale = header & 0xF, ci = (header >> 4) & 7, c0 = coef[ci * 2], c1 = coef[ci * 2 + 1];
     i32 yn0 = c->yn0, yn1 = c->yn1;
     u32 ri = 0, wi = 0, left = todo;
-#define AR_NIB(x) ((x) & 8 ? (i32)(x) - 16 : (i32)(x))
-#define AR_SAMPLE(code)                                                                                                \
+#define SNX_AUDREN_NIB(x) ((x) & 8 ? (i32)(x) - 16 : (i32)(x))
+#define SNX_AUDREN_SAMPLE(code)                                                                                        \
     do {                                                                                                               \
         i32 smp = (((i32)(code) * (1 << scale)) * 2048 + 0x400 + c0 * yn0 + c1 * yn1) >> 11;                           \
         smp = smp > 0x7FFF ? 0x7FFF : smp < -0x8000 ? -0x8000 : smp;                                                   \
@@ -387,8 +395,8 @@ static u32 decode_adpcm(const ARVoice* v, ARChannel* c, const ARWave* w, i32 st,
             pos += 2;
             if (left >= 14 && ri + 7 <= avail) {
                 for (u32 k = 0; k < 7; k++) {
-                    AR_SAMPLE(AR_NIB(wb[ri + k] >> 4));
-                    AR_SAMPLE(AR_NIB(wb[ri + k] & 0xF));
+                    SNX_AUDREN_SAMPLE(SNX_AUDREN_NIB(wb[ri + k] >> 4));
+                    SNX_AUDREN_SAMPLE(SNX_AUDREN_NIB(wb[ri + k] & 0xF));
                 }
                 ri += 7;
                 pos += 14;
@@ -403,12 +411,12 @@ static u32 decode_adpcm(const ARVoice* v, ARChannel* c, const ARWave* w, i32 st,
             ri++;
         } else
             code >>= 4;
-        AR_SAMPLE(AR_NIB(code));
+        SNX_AUDREN_SAMPLE(SNX_AUDREN_NIB(code));
         pos++;
         left--;
     }
-#undef AR_SAMPLE
-#undef AR_NIB
+#undef SNX_AUDREN_SAMPLE
+#undef SNX_AUDREN_NIB
     c->adpcm_header = header;
     c->yn0 = (i16)yn0;
     c->yn1 = (i16)yn1;
@@ -419,7 +427,7 @@ static void end_wave(ARChannel* c, const ARWave* w) {
     c->valid[c->index] = 0;
     c->loop_count = 0;
     if (w->ended) c->played = 0;
-    c->index = (c->index + 1) % AR_WAVES;
+    c->index = (c->index + 1) % SNX_AUDREN_WAVES;
     c->consumed++;
 }
 
@@ -471,7 +479,7 @@ static void voice_channel(ARState* s, ARVoice* v, int ch, float* out) {
     i64 ratio = (i64)((float)rate / (float)s->rate * pitch * 32768.0f);
     if (ratio <= 0) ratio = 0x8000;
     i64 need = (c->fraction + (i64)n * ratio) >> 15;
-    if (need + taps > AR_TEMP) {
+    if (need + taps > SNX_AUDREN_TEMP) {
         memset(out, 0, n * sizeof *out);
         return;
     }
@@ -481,7 +489,7 @@ static void voice_channel(ARState* s, ARVoice* v, int ch, float* out) {
     while (read < (u32)need) {
         if (!c->valid[c->index]) break; /* starved */
         const ARWave* w = &v->wave[c->index];
-        if (c->offset == 0 && v->format == AR_ADPCM && w->ctx && w->ctx_size >= 6) {
+        if (c->offset == 0 && v->format == SNX_AUDREN_ADPCM && w->ctx && w->ctx_size >= 6) {
             const u8* x = GP(w->ctx);
             c->adpcm_header = rd16(x);
             c->yn0 = (i16)rd16(x + 2);
@@ -493,12 +501,12 @@ static void voice_channel(ARState* s, ARVoice* v, int ch, float* out) {
             en = w->loop_end;
         }
         u32 got;
-        if (v->format == AR_PCM16 || v->format == AR_PCMF32)
+        if (v->format == SNX_AUDREN_PCM16 || v->format == SNX_AUDREN_PCMF32)
             got = decode_pcm(v, w, ch, st, en, c->offset, (u32)need - read, t + pos);
-        else if (v->format == AR_ADPCM)
+        else if (v->format == SNX_AUDREN_ADPCM)
             got = decode_adpcm(v, c, w, st, en, c->offset, (u32)need - read, t + pos);
         else {
-            warn_once(s, AR_WARN_FORMAT, "a voice's sample format is not rendered");
+            warn_once(s, SNX_AUDREN_WARN_FORMAT, "a voice's sample format is not rendered");
             got = 0;
         }
         c->played += got;
@@ -529,7 +537,7 @@ static int voice_prepare(ARState* s, ARVoice* v) {
     if (v->fresh) { /* the first frame since is_new: the channels start clean, the volumes without a ramp */
         for (int ch = 0; ch < v->channels; ch++) {
             ARChannel* c = &s->chan[v->res[ch]];
-            float mix[AR_MIX_OUTS];
+            float mix[SNX_AUDREN_MIX_OUTS];
             memcpy(mix, c->mix, sizeof mix);
             u8 in_use = c->in_use;
             memset(c, 0, sizeof *c);
@@ -542,12 +550,12 @@ static int voice_prepare(ARState* s, ARVoice* v) {
     }
     if (v->flush) {
         u32 w = v->wave_index;
-        for (u32 i = 0; i < v->flush && i < AR_WAVES; i++, w = (w + 1) % AR_WAVES) {
+        for (u32 i = 0; i < v->flush && i < SNX_AUDREN_WAVES; i++, w = (w + 1) % SNX_AUDREN_WAVES) {
             v->wave[w].sent = 1;
             for (int ch = 0; ch < v->channels; ch++) {
                 ARChannel* c = &s->chan[v->res[ch]];
                 if (c->index == w) {
-                    c->index = (c->index + 1) % AR_WAVES;
+                    c->index = (c->index + 1) % SNX_AUDREN_WAVES;
                     c->consumed++;
                 }
                 c->valid[w] = 0;
@@ -556,23 +564,23 @@ static int voice_prepare(ARState* s, ARVoice* v) {
         v->flush = 0;
     }
     switch (v->play) {
-        case AR_STARTED:
-            for (int w = 0; w < AR_WAVES; w++)
+        case SNX_AUDREN_STARTED:
+            for (int w = 0; w < SNX_AUDREN_WAVES; w++)
                 if (!v->wave[w].sent) {
                     for (int ch = 0; ch < v->channels; ch++) s->chan[v->res[ch]].valid[w] = 1;
                     v->wave[w].sent = 1;
                 }
             v->was_playing = 0;
-            for (int w = 0; w < AR_WAVES; w++)
+            for (int w = 0; w < SNX_AUDREN_WAVES; w++)
                 if (s->chan[v->res[0]].valid[w]) return 1;
             return 0;
-        case AR_STOPPING:
-            for (int w = 0; w < AR_WAVES; w++) {
+        case SNX_AUDREN_STOPPING:
+            for (int w = 0; w < SNX_AUDREN_WAVES; w++) {
                 v->wave[w].sent = 1;
                 for (int ch = 0; ch < v->channels; ch++) {
                     ARChannel* c = &s->chan[v->res[ch]];
                     if (c->valid[w]) {
-                        c->index = (c->index + 1) % AR_WAVES;
+                        c->index = (c->index + 1) % SNX_AUDREN_WAVES;
                         c->consumed++;
                     }
                     c->valid[w] = 0;
@@ -587,10 +595,10 @@ static int voice_prepare(ARState* s, ARVoice* v) {
                 memset(c->history, 0, sizeof c->history);
                 c->fraction = 0;
             }
-            v->play = AR_STOPPED;
-            v->was_playing = v->last_play == AR_STARTED;
+            v->play = SNX_AUDREN_STOPPED;
+            v->was_playing = v->last_play == SNX_AUDREN_STARTED;
             return 0;
-        default: v->was_playing = v->last_play == AR_STARTED; return 0;
+        default: v->was_playing = v->last_play == SNX_AUDREN_STARTED; return 0;
     }
 }
 
@@ -630,7 +638,7 @@ static void effect_aux(ARState* s, ARMix* m, AREffect* e) {
     u32 count = rd32(p + 0x30), count_max = rd32(p + 0x38), n = s->frame;
     u64 send = rd64(p + 0x40), ret = rd64(p + 0x50);
     if (!send || !ret) return;
-    if (count > AR_MIX_OUTS) count = AR_MIX_OUTS;
+    if (count > SNX_AUDREN_MIX_OUTS) count = SNX_AUDREN_MIX_OUTS;
     if (!e->enabled) {
         for (int k = 0; k < 2; k++) memset(GP((k ? ret : send) + 0x40), 0, 0x10);
         for (u32 ch = 0; ch < count; ch++) {
@@ -661,7 +669,7 @@ static double recip_estimate(double a) {
 static void effect_limiter(ARState* s, ARMix* m, AREffect* e) {
     const u8* p = e->p;
     u32 channels = rd16(p + 0xE), n = s->frame;
-    if (channels > AR_CHANNELS) channels = AR_CHANNELS;
+    if (channels > SNX_AUDREN_CHANNELS) channels = SNX_AUDREN_CHANNELS;
     i32 la_min, la_max;
     memcpy(&la_min, p + 0x38, 4);
     memcpy(&la_max, p + 0x3C, 4);
@@ -671,9 +679,9 @@ static void effect_limiter(ARState* s, ARMix* m, AREffect* e) {
     if (la_min > la_max) la_min = la_max;
     if (e->fresh || e->look_len != (u32)la_max) {
         free(e->look);
-        e->look = calloc((size_t)la_max * AR_CHANNELS, sizeof *e->look);
+        e->look = calloc((size_t)la_max * SNX_AUDREN_CHANNELS, sizeof *e->look);
         e->look_len = e->look ? (u32)la_max : 0;
-        for (int c = 0; c < AR_CHANNELS; c++) {
+        for (int c = 0; c < SNX_AUDREN_CHANNELS; c++) {
             e->avg[c] = 0.0f;
             e->gain[c] = 1.0f;
             e->look_pos[c] = 0;
@@ -711,7 +719,7 @@ static void effect_mix(ARState* s, ARMix* m, AREffect* e) {
     const u8* p = e->p;
     u32 count = rd32(p + 0x90), n = s->frame;
     if (!e->enabled) return;
-    for (u32 i = 0; i < count && i < AR_MIX_OUTS; i++) {
+    for (u32 i = 0; i < count && i < SNX_AUDREN_MIX_OUTS; i++) {
         float vol = rdf(p + 0x30 + i * 4);
         float *in = mixbuf(s, m, (i8)p[i]), *out = mixbuf(s, m, (i8)p[0x18 + i]);
         if (!in || !out || vol == 0.0f) continue;
@@ -732,10 +740,11 @@ static void mix_effects(ARState* s, u32 id) {
         }
         if (!next) return;
         switch (next->type) {
-            case AR_EFFECT_AUX: effect_aux(s, m, next); break;
-            case AR_EFFECT_LIMITER: effect_limiter(s, m, next); break;
-            case AR_EFFECT_MIX: effect_mix(s, m, next); break;
-            default: warn_once(s, AR_WARN_EFFECT, "an effect type (delay, reverb, biquad, ...) is not rendered");
+            case SNX_AUDREN_EFFECT_AUX: effect_aux(s, m, next); break;
+            case SNX_AUDREN_EFFECT_LIMITER: effect_limiter(s, m, next); break;
+            case SNX_AUDREN_EFFECT_MIX: effect_mix(s, m, next); break;
+            default:
+                warn_once(s, SNX_AUDREN_WARN_EFFECT, "an effect type (delay, reverb, biquad, ...) is not rendered");
         }
         done = next->order + 1;
         if (!done) return; /* the order wrapped */
@@ -753,7 +762,7 @@ static u32 sort_mixes(ARState* s) {
         m->distance = -1;
         if (!m->in_use) continue;
         i32 d = 0;
-        for (u32 id = i; id != AR_FINAL_MIX; d++) {
+        for (u32 id = i; id != SNX_AUDREN_FINAL_MIX; d++) {
             if (d >= (i32)s->nmix || id >= s->nmix || !s->mix[id].in_use) {
                 d = -1;
                 break;
@@ -786,8 +795,8 @@ static u32 sort_mixes(ARState* s) {
 static void play_voice(ARState* s, ARVoice* v) {
     u32 n = s->frame;
     ARMix* m = v->mix_id < s->nmix ? &s->mix[v->mix_id] : NULL;
-    if (v->mix_id == AR_UNUSED_MIX && v->splitter_id != 0xFFFFFFFFu)
-        warn_once(s, AR_WARN_SPLITTER, "voices sent through splitters are not rendered");
+    if (v->mix_id == SNX_AUDREN_UNUSED_MIX && v->splitter_id != 0xFFFFFFFFu)
+        warn_once(s, SNX_AUDREN_WARN_SPLITTER, "voices sent through splitters are not rendered");
     for (int ch = 0; ch < v->channels; ch++) {
         float* tmp = s->buf + (size_t)(s->buffers + ch) * n;
         voice_channel(s, v, ch, tmp);
@@ -807,12 +816,13 @@ static void play_voice(ARState* s, ARVoice* v) {
 }
 
 static void sink_frame(ARState* s, ARSink* k, i16* stereo, int* device) {
-    ARMix* f = &s->mix[AR_FINAL_MIX];
+    ARMix* f = &s->mix[SNX_AUDREN_FINAL_MIX];
     u32 n = s->frame;
-    if (k->type == AR_SINK_DEVICE) { /* name 0, input count 0x100, inputs 0x104, downmix 0x10B, coefficients 0x10C */
+    if (k->type ==
+        SNX_AUDREN_SINK_DEVICE) { /* name 0, input count 0x100, inputs 0x104, downmix 0x10B, coefficients 0x10C */
         u32 count = rd32(k->p + 0x100);
-        if (!count || count > AR_CHANNELS || !stereo) return;
-        const float* in[AR_CHANNELS];
+        if (!count || count > SNX_AUDREN_CHANNELS || !stereo) return;
+        const float* in[SNX_AUDREN_CHANNELS];
         for (u32 c = 0; c < count; c++)
             if (!(in[c] = mixbuf(s, f, (i8)k->p[0x104 + c]))) return;
         float coef[4] = {1.0f, 0.707f, 0.251f, 0.707f};
@@ -831,12 +841,12 @@ static void sink_frame(ARState* s, ARSink* k, i16* stereo, int* device) {
             stereo[i * 2 + 1] = sat16(r);
         }
         *device = 1;
-    } else if (k->type == AR_SINK_CIRCULAR) {
+    } else if (k->type == SNX_AUDREN_SINK_CIRCULAR) {
         /* address 0, size 8, input count 0xC, inputs 0x1C (the format is the byte at 0x18). A frame is each input
            in turn, n 16-bit samples apiece (Eden's CircularBufferSinkCommand) */
         u64 addr = rd64(k->p);
         u32 size = rd32(k->p + 8), count = rd32(k->p + 0xC);
-        if (!addr || !size || count > AR_CHANNELS) return;
+        if (!addr || !size || count > SNX_AUDREN_CHANNELS) return;
         u32 pos = k->pos;
         for (u32 c = 0; c < count; c++) {
             const float* in = mixbuf(s, f, (i8)k->p[0x1C + c]);
@@ -858,7 +868,7 @@ static void sink_frame(ARState* s, ARSink* k, i16* stereo, int* device) {
 
 int audren_frame(ARState* s, i16* stereo) {
     u32 n = s->frame;
-    memset(s->buf, 0, (size_t)(s->buffers + AR_CHANNELS) * n * sizeof *s->buf);
+    memset(s->buf, 0, (size_t)(s->buffers + SNX_AUDREN_CHANNELS) * n * sizeof *s->buf);
     u32 nsorted = sort_mixes(s);
     for (u32 i = 0; i < s->nvoices; i++) {
         ARVoice* v = &s->voice[i];
@@ -870,7 +880,7 @@ int audren_frame(ARState* s, i16* stereo) {
         ARMix* m = &s->mix[id];
         if (m->distance < 0) continue;
         mix_effects(s, id);
-        if (id == AR_FINAL_MIX) {
+        if (id == SNX_AUDREN_FINAL_MIX) {
             for (u32 b = 0; b < m->buffers; b++) {
                 float* x = s->buf + (size_t)(m->offset + (i32)b) * n;
                 for (u32 i = 0; i < n; i++) x[i] *= m->volume;
@@ -888,12 +898,13 @@ int audren_frame(ARState* s, i16* stereo) {
             }
     }
     int device = 0;
-    if (s->mix[AR_FINAL_MIX].distance >= 0) {
+    if (s->mix[SNX_AUDREN_FINAL_MIX].distance >= 0) {
         for (u32 i = 0; i < s->nsinks; i++)
-            if (s->sink[i].in_use && s->sink[i].type == AR_SINK_DEVICE)
+            if (s->sink[i].in_use && s->sink[i].type == SNX_AUDREN_SINK_DEVICE)
                 sink_frame(s, &s->sink[i], device ? NULL : stereo, &device);
         for (u32 i = 0; i < s->nsinks; i++)
-            if (s->sink[i].in_use && s->sink[i].type == AR_SINK_CIRCULAR) sink_frame(s, &s->sink[i], NULL, &device);
+            if (s->sink[i].in_use && s->sink[i].type == SNX_AUDREN_SINK_CIRCULAR)
+                sink_frame(s, &s->sink[i], NULL, &device);
     }
     s->frames++;
     return device;
