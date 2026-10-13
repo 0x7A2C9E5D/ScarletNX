@@ -4,6 +4,8 @@
    (the D_ dispatch), a tail call into another function, SVC, exclusives, FP and SIMD, recompiled by the CLI with each
    backend in small chunks (calls cross units). Every module runs it from the same state, AOT and through its
    interpreter; every register, the flags, FP state, stack memory and the SVC calls must match the LLVM AOT run.
+   CPU.poll is set when each run starts: the AOT code must call rt->poll at the loop's backward branch, resuming at
+   its head (the interpreter polls on any taken branch).
      llvm_module SCARLETNX REPO CLANG [BACKEND...]
    llvm always, the others named after CLANG too (gcc). */
 #include "common.h"
@@ -63,7 +65,15 @@ typedef struct {
     CPU cpu;
     unsigned char memory[MEMORY];
     Calls calls;
+    int polls; /* rt->poll calls, and c->pc at the first */
+    u64 poll_pc;
 } Run;
+static Run* current;
+/* the runtime takes the thread off its core here, then gives it back: once, the flag cleared */
+static void on_poll(CPU* c) {
+    if (!current->polls++) current->poll_pc = c->pc;
+    c->poll = 0;
+}
 
 static int run(const char* path, const unsigned char* image, int interp, Run* out) {
     typedef const SnxModule* (*ModuleFn)(void);
@@ -86,7 +96,9 @@ static int run(const char* path, const unsigned char* image, int interp, Run* ou
     memset(&rt, 0, sizeof(rt));
     rt.svc = svc;
     rt.undef = undefined;
+    rt.poll = on_poll;
     calls = &out->calls;
+    current = out;
     memory = (unsigned char*)calloc(1, (size_t)mod->mods[0].base + MEMORY);
     out->cpu.disp = (GuestFn*)calloc((size_t)(mod->code_hi - mod->code_lo) / 4, sizeof(GuestFn));
     memcpy(memory + mod->mods[0].base, image, IMAGE);
@@ -97,6 +109,7 @@ static int run(const char* path, const unsigned char* image, int interp, Run* ou
     out->cpu.code_hi = mod->code_hi;
     out->cpu.x[31] = mod->mods[0].base + MEMORY / 2;
     out->cpu.x[30] = 0xDEAD0000;
+    out->cpu.poll = 1;
     if (interp)
         mod->interp(&out->cpu, mod->mods[0].base);
     else if (out->cpu.disp[0])
@@ -185,6 +198,14 @@ int main(int argc, char** argv) {
               !runs[0][0].calls.undefined,
           "the program returns to 0 after one SVC #7");
     check(same(&runs[0][0], &runs[0][1]), "LLVM AOT and interpreter agree");
+    for (b = 0; b < nbackends; ++b) { /* the loop: b.ne back to main+0x10 */
+        if (runs[b][0].polls != 1 || runs[b][0].poll_pc != runs[0][0].cpu.code_lo + 0x90)
+            fprintf(stderr, "%s: %d polls, the first at %llx\n", backends[b], runs[b][0].polls,
+                    (unsigned long long)runs[b][0].poll_pc);
+        check(runs[b][0].polls == 1 && runs[b][0].poll_pc == runs[0][0].cpu.code_lo + 0x90,
+              "AOT code polls at the loop's backward branch");
+        check(runs[b][1].polls == 1, "the interpreter polls");
+    }
     for (b = 1; b < nbackends; ++b) {
         if (!same(&runs[0][0], &runs[b][0])) fprintf(stderr, "%s AOT differs from LLVM AOT\n", backends[b]);
         if (!same(&runs[0][0], &runs[b][1])) fprintf(stderr, "%s interpreter differs from LLVM AOT\n", backends[b]);

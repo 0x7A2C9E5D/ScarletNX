@@ -352,6 +352,8 @@ size_t ir_rt_note_hint(void) { return offsetof(RtAPI, note_hint); }
 size_t ir_rt_brk(void) { return offsetof(RtAPI, brk); }
 size_t ir_rt_sev(void) { return offsetof(RtAPI, sev); }
 size_t ir_rt_wfe(void) { return offsetof(RtAPI, wfe); }
+size_t ir_rt_poll(void) { return offsetof(RtAPI, poll); }
+size_t ir_off_poll(void) { return offsetof(CPU, poll); }
 
 LLVMValueRef ir_rt_call(SnxIr* ir, size_t offset, LLVMTypeRef ret, LLVMTypeRef* params, LLVMValueRef* args,
                         unsigned count) {

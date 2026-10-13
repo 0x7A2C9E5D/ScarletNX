@@ -211,6 +211,8 @@ size_t ir_rt_note_hint(void);
 size_t ir_rt_brk(void);
 size_t ir_rt_sev(void);
 size_t ir_rt_wfe(void);
+size_t ir_rt_poll(void);
+size_t ir_off_poll(void);                         /* CPU.poll */
 void ir_undef(SnxIr* ir, SnxU64 pc, SnxU32 word); /* c->rt->undef(c,pc,w) */
 void ir_fence(SnxIr* ir);                         /* SNX_FENCE() */
 void ir_yield(SnxIr* ir);                         /* YIELD() */

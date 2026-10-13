@@ -64,7 +64,7 @@ third-party libraries are CPM packages pinned in `cmake/dependencies.cmake`, dow
 built in the same tree as the runtime.
 
 The runtime finds its game module by its own file name, so each game has a copy of the runtime named after it, made
-by the build's deploy step. The LLVM backend's emitters (`src/common/cpu/recompiler/llvm/ir_*.c`) mirror `a64_templates.inc` case by case: a template change needs the same change there, checked with `snx-test-llvm-differential clang .`. Game code (`_code.so`) only needs recompiling when `src/common/cpu/recompiler/codegen.c`, `a64.c`,
+by the build's deploy step. The backends' emitters (`src/common/cpu/recompiler/llvm/ir_*.c`, `gccjit/jit_*.c`) mirror `a64_templates.inc` case by case: a template change needs the same change in both, checked with `snx-test-llvm-differential clang . [--gccjit]`. Game code (`_code.so`) only needs recompiling when `src/common/cpu/recompiler/codegen.c`, `a64.c`,
 `loader.c`, the backends (`src/common/cpu/recompiler/llvm/`, `gccjit/`, `src/nx/loader/module_*.c`) or anything in
 `src/common/cpu/aarch64/` changes (the
 ABI between generated code and runtime). A change there that keeps `SNX_ABI` (`cpu.h`) loads and runs the old code

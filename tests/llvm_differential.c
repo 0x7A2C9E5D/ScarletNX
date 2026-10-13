@@ -314,7 +314,7 @@ static size_t directed(const char* match, size_t want, Word* out) {
 
 #ifdef SNX_TEST_GCCJIT
 /* the libgccjit backend's step functions (snx_jit_static_step), linked by GCC's driver with the runtime library */
-static int build_gccjit(const Word* words, size_t count, const char* dir, const char* path) {
+static int build_gccjit(const Word* words, size_t count, const char* dir, const char* path, unsigned long* fallbacks) {
     SnxJit* jit = snx_jit_new('2');
     gcc_jit_rvalue** fns = (gcc_jit_rvalue**)snx_alloc(count * sizeof(*fns));
     gcc_jit_type *param = jit->t_ptr, *step_ptr, *table_type;
@@ -344,6 +344,7 @@ static int build_gccjit(const Word* words, size_t count, const char* dir, const 
     gcc_jit_context_add_driver_option(jit->ctx, rtlib);
     gcc_jit_context_compile_to_file(jit->ctx, GCC_JIT_OUTPUT_KIND_DYNAMIC_LIBRARY, path);
     if (snx_jit_error(jit)) rc = snx_error("libgccjit: %s", snx_jit_error(jit));
+    *fallbacks = jit->fallbacks;
     snx_jit_free(jit);
     free(fns);
     free(rtlib);
@@ -376,7 +377,7 @@ int main(int argc, char** argv) {
     TableFn table_h;
     StepFn* steps_h;
     char* c_native;
-    unsigned long fallbacks;
+    unsigned long fallbacks, gccjit_fallbacks = 0;
     if (argc < 3) {
         fputs("usage: llvm_differential CLANG REPO [--match NAME] [--per-case N] [--simd N] [--states N] [--seed N]\n",
               stderr);
@@ -514,7 +515,7 @@ int main(int argc, char** argv) {
 #ifdef SNX_TEST_GCCJIT
         char* g_lib = snx_path_join(dir, "gccjit.so");
         if (!quiet) printf("compiling the libgccjit steps\n");
-        if (build_gccjit(words, count, dir, g_lib)) return 1;
+        if (build_gccjit(words, count, dir, g_lib, &gccjit_fallbacks)) return 1;
         if (!load(g_lib, &table_g) || !table_g) return snx_error("cannot load the libgccjit steps");
         steps_g = table_g();
         free(g_lib);
@@ -610,9 +611,12 @@ int main(int argc, char** argv) {
     for (i = 0; i < npatterns; ++i)
         if (pattern_failures[i])
             printf("  %s: %lu words differ\n", patterns[i].name, (unsigned long)pattern_failures[i]);
+    /* every pattern has an emitter, in both backends */
+    fallbacks += gccjit_fallbacks;
+    if (gccjit) printf("libgccjit: %lu through snx_step\n", gccjit_fallbacks);
     printf("LLVM differential: %lu words, %lu runs, %lu differing words, %lu through snx_step: %s\n",
            (unsigned long)count, (unsigned long)compared, (unsigned long)failures, fallbacks,
            failures || fallbacks ? "FAILED" : "passed");
     snx_remove_tree(dir);
-    return failures || fallbacks; /* every pattern has an emitter */
+    return failures || fallbacks;
 }

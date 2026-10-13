@@ -26,10 +26,6 @@ int snx_build_module_gccjit(SnxProgram* loaded, const SnxCodegenOptions* options
 extern const unsigned char snx_rtlib_object[];
 extern const unsigned long snx_rtlib_object_size;
 
-static gcc_jit_rvalue* jit_int(SnxJit* jit, gcc_jit_type* type, SnxU64 v) {
-    return gcc_jit_context_new_rvalue_from_long(jit->ctx, type, (long)v);
-}
-
 /* module.c's emit_module through libgccjit: the same tables and the same snx_module */
 static int emit_module(SnxJit* jit, const SnxCodegen* codegen, const SnxCodegenOptions* options,
                        const SnxProgram* loaded, size_t* entry_count, char* error, size_t error_size) {
@@ -100,7 +96,7 @@ static int emit_module(SnxJit* jit, const SnxCodegen* codegen, const SnxCodegenO
         f[0] = gcc_jit_context_new_cast(x, NULL, gcc_jit_context_new_string_literal(x, m->name), t_cstr);
         f[1] = jit_u64(jit, m->base);
         f[2] = jit_u64(jit, m->size);
-        for (j = 0; j < 32; ++j) id[j] = jit_int(jit, jit->t_u8, m->build_id[j]);
+        for (j = 0; j < 32; ++j) id[j] = jit_k(jit, jit->t_u8, m->build_id[j]);
         f[3] = gcc_jit_context_new_array_constructor(x, NULL, t_id, 32, id);
         f[4] = jit_u32(jit, m->text_off);
         f[5] = jit_u32(jit, m->text_size);
@@ -206,6 +202,7 @@ int snx_build_module_gccjit(SnxProgram* loaded, const SnxCodegenOptions* options
     SnxCodegen codegen;
     SnxJit* jit = NULL;
     size_t first, last, count, limit, i, units = 0, total, entry_count = 0;
+    unsigned long fallbacks = 0;
     char *dir = NULL, *rtlib = NULL, *tmp = NULL, **objects = NULL, error[1024];
     int rc = -1;
     memset(&codegen, 0, sizeof(codegen));
@@ -259,6 +256,7 @@ int snx_build_module_gccjit(SnxProgram* loaded, const SnxCodegenOptions* options
         gcc_jit_context_compile_to_file(jit->ctx, GCC_JIT_OUTPUT_KIND_OBJECT_FILE, objects[units]);
         ++units;
         if (failed(jit, name)) goto done;
+        fallbacks += jit->fallbacks;
         snx_jit_free(jit);
         jit = NULL;
         if (!options->quiet) {
@@ -290,6 +288,7 @@ int snx_build_module_gccjit(SnxProgram* loaded, const SnxCodegenOptions* options
     if (!options->quiet) {
         printf("libgccjit module: %.1f MB, %lu entries\n", (double)snx_file_size(build->output) / 1000000.0,
                (unsigned long)entry_count);
+        if (fallbacks) printf("libgccjit: %lu instructions run through the interpreter step\n", fallbacks);
         puts("note: libgccjit is the backend for DEC Alpha EV67 hosts; elsewhere --backend=llvm (the default) is "
              "the recommended one");
     }

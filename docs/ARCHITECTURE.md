@@ -52,11 +52,17 @@ NX tooling under `src/nx/runtime/driver/` and `src/nx/loader/`:
   states (every pattern, failing if any instruction falls back to the interpreter's `snx_step`), `tests/llvm_module.c`
   a whole program built by both, `tests/llvm_bench.c` times both on assembly kernels. `gcc` (libgccjit,
   optional, built when libgccjit is found: `cmake/gccjit.cmake`, `SNX_GCCJIT_ROOT`) is for DEC Alpha EV67 hosts,
-  which LLVM doesn't generate code for; everywhere else `llvm` is the backend to use. A first port, x86-64 for now:
-  `src/common/cpu/recompiler/gccjit/jit.c` emits `ir_codegen.c`'s control flow, and each instruction calls the
-  interpreter's `snx_step` (the templates, in `rtlib.c`); `src/nx/loader/module_gccjit.c` compiles each chunk to an
-  object and lets GCC's driver link the module with the chunks and the runtime library.
-  `llvm_differential --gccjit` and `llvm_module` check it against the other backends.
+  which LLVM doesn't generate code for; everywhere else `llvm` is the backend to use. Ported on x86-64 for now:
+  `src/common/cpu/recompiler/gccjit/jit.c` emits `ir_codegen.c`'s control flow, and `jit_a64.c`, `jit_fp.c` and
+  `jit_simd.c` each instruction as the LLVM emitters do (cpu.h's helpers written out for the word's constant
+  fields, SIMD a lane at a time, no host intrinsics: GCC picks the instructions with `-march=native`). Guest
+  accesses are relaxed atomics (libgccjit 14 drops volatile on dereferences); `src/nx/loader/module_gccjit.c`
+  compiles each chunk to an object and lets GCC's driver link the module with the chunks and the runtime library.
+  `llvm_differential --gccjit` (also failing on any `snx_step` fallback) and `llvm_module` check it against the
+  other backends. On `llvm_bench` it matches LLVM on integer, FP and calls; SIMD is several times slower (scalar
+  lanes, GCC's SLP vectorizer off: it packs scalar code's CPU fields into vectors).
+- Both backends poll `CPU.poll` on backward branches inside a function and at the `D_` dispatch, as `codegen.c`'s C
+  does, so a loop without SVCs gives its core to a waiting thread of higher priority.
 - The LLVM backend's speed: guest memory and the CPU structure are separate alias scopes (registers stay in host
   registers) and guest accesses are volatile (each happens, as on the hardware); logical immediates and SIMD
   immediates are folded; FP arithmetic, compares and conversions run inline on the host's IEEE unit when the result
