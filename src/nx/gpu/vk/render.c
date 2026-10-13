@@ -163,12 +163,6 @@ static void plain_state(VkCommandBuffer cb, VkRect2D sc) {
     vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
 }
 
-/* an integer target's clear value: the float clear color register converted to the target's type */
-static u32 clear_int(float f, int sint) {
-    if (sint) return f >= 2147483520.0f ? 0x7FFFFFFFu : f <= -2147483648.0f ? 0x80000000u : f == f ? (u32)(i32)f : 0;
-    return f >= 4294967040.0f ? 0xFFFFFFFFu : f > 0 ? (u32)f : 0;
-}
-
 /* a clear of some color components only: a full-screen triangle with that write mask, whose fragment shader writes
    the cleared slot alone, in the target's number type */
 static int clear_masked(u32 slot, u32 mask, const float* cc, VkRect2D rect, u32 layer) {
@@ -212,11 +206,7 @@ static int clear_masked(u32 slot, u32 mask, const float* cc, VkRect2D rect, u32 
     plain_state(cb, rect);
     u32 pc[8] = {0};
     pc[0] = layer;
-    for (int i = 0; i < 4; i++)
-        if (num)
-            pc[4 + i] = clear_int(cc[i], num == 2);
-        else
-            memcpy(&pc[4 + i], &cc[i], 4);
+    memcpy(&pc[4], cc, 16); /* the register bits, read as the shader's vec4, uvec4 or ivec4 */
     vkCmdPushConstants(cb, g_vk_playout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32, pc);
     vkCmdDraw(cb, 3, 1, 0, 0);
     return 1;
@@ -262,13 +252,11 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
     if (mask && slot < g_rp.n && g_rp.rt[slot]) {
         if (mask == 15) {
             at[na] = (VkClearAttachment){.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = slot};
-            if (g_rp.rt[slot]->f.is_int) {
-                /* the float register converted. Whether it holds the integers' raw bits instead isn't settled: the
-                   first such clear is logged with both readings */
-                LOG_LIMIT(1, "vulkan: integer clear: %08x %08x %08x %08x (as floats %g %g %g %g)\n", r[0x360], r[0x361],
-                          r[0x362], r[0x363], cc[0], cc[1], cc[2], cc[3]);
-                for (int i = 0; i < 4; i++) at[na].clearValue.color.uint32[i] = clear_int(cc[i], g_rp.rt[slot]->f.sint);
-            } else
+            /* an integer target's clear color registers hold the integers themselves, not floats to convert: an
+               R8_Uint clear of 185 arrives as 000000b9 */
+            if (g_rp.rt[slot]->f.is_int)
+                memcpy(at[na].clearValue.color.uint32, &r[0x360], 16);
+            else
                 memcpy(at[na].clearValue.color.float32, cc, 16);
             na++;
         } else {
