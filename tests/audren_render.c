@@ -57,6 +57,7 @@ static u8 in[0x40 + 0x10 + 0x20 + 0x70 * SNX_ART_VOICES + 0x170 * SNX_ART_VOICES
 static u8 out[0x1000];
 static u8 *u_pool, *u_res, *u_voice, *u_eff, *u_split, *u_mix, *u_sink;
 static u32 split_counts[2]; /* the splitters and destinations reset() opens the renderer with */
+static u32 art_rev = 4;     /* the revision layout() writes */
 static ARState* st;
 
 static void w8(u8* p, u32 off, u8 v) { p[off] = v; }
@@ -71,7 +72,7 @@ static u8* sink(int i) { return u_sink + i * 0x140; }
 
 static void layout(void) {
     memset(in, 0, sizeof in);
-    u32 rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + 4) << 24);
+    u32 rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + art_rev) << 24);
     u32 h[16] = {rev,
                  0x10,
                  0x20,
@@ -278,6 +279,37 @@ static double level_i16(const i16* x, int n, double hz) {
 static const i16* sink_frame_at(int f, int ch) {
     return (const i16*)(const void*)(g_mem + SNX_ART_G_RING) + (f % SNX_ART_RING_FRAMES) * 2 * SNX_ART_FRAME +
            ch * SNX_ART_FRAME;
+}
+
+/* a 1 kHz voice at 0.3 alone on the final mix's left, recorded by the first circular buffer sink */
+static void bq_voice(void) {
+    tone(0, 1000, 0.3, 0, 0, 1.0f);
+    w32(voice(0), 0x58, SNX_ART_FINAL);
+    w8(sink(1), 1, 1);
+}
+static void bq_set(int f, u8 on, const i16* b, const i16* a) {
+    u8* bq = voice(0) + 0x24 + f * 0xC;
+    w8(bq, 0, on);
+    memcpy(bq + 2, b, 6);
+    memcpy(bq + 8, a, 4);
+}
+/* Eden's ApplyBiquadFilterInt, or ApplyBiquadFilterFloat when dbl, over n samples from a clear state */
+static void ref_biquad(const i16* in, i16* out, int n, const i16* b, const i16* a, int dbl) {
+    i64 s0 = 0, s1 = 0;
+    double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (int i = 0; i < n; i++) {
+        if (dbl) {
+            double x = in[i], y = x * (b[0] / 16384.0) + x1 * (b[1] / 16384.0) + x2 * (b[2] / 16384.0) +
+                                  y1 * (a[0] / 16384.0) + y2 * (a[1] / 16384.0);
+            out[i] = (i16)(i32)y;
+            x2 = x1, x1 = x, y2 = y1, y1 = y;
+        } else {
+            i64 x = in[i], y = (x * b[0] + s0 + (1 << 13)) >> 14;
+            out[i] = (i16)y;
+            s0 = s1 + b[1] * x + a[0] * y;
+            s1 = b[2] * x + a[1] * y;
+        }
+    }
 }
 
 /* the aux ring's channel ch in its most recent full frame */
@@ -506,6 +538,42 @@ int main(void) {
         CHECK(fabs(lr - 0.4) < 0.005 && (st->warned & SNX_AUDREN_WARN_CYCLE), "cycle: 1.6 kHz %.4f", lr);
     }
     split_counts[0] = split_counts[1] = 0;
+
+    /* voice biquads against Eden's recursion, integers at revision 4 and doubles at 7, chained, then reset */
+    static const i16 bq0b[3] = {4096, 8192, 4096}, bq0a[2] = {8192, -4096}, bq1b[3] = {8192, 0, 0}, bq1a[2] = {0, 0};
+    for (art_rev = 4; art_rev <= 7; art_rev += 3) {
+        static i16 plain[5 * SNX_ART_FRAME], got[5 * SNX_ART_FRAME], want[5 * SNX_ART_FRAME], mid[5 * SNX_ART_FRAME];
+        int dbl = art_rev >= 7, nn = 5 * SNX_ART_FRAME;
+        reset();
+        bq_voice();
+        frames(5);
+        for (int f = 0; f < 5; f++) memcpy(plain + f * SNX_ART_FRAME, sink_frame_at(f, 0), SNX_ART_FRAME * 2);
+        for (int mode = 0; mode < 3; mode++) {
+            reset();
+            bq_voice();
+            bq_set(0, 1, bq0b, bq0a);
+            if (mode == 1) bq_set(1, 1, bq1b, bq1a);
+            for (int f = 0; f < 5; f++) {
+                if (mode == 2) w8(voice(0), 0x24, f != 2);
+                frames(1);
+                memcpy(got + f * SNX_ART_FRAME, sink_frame_at(f, 0), SNX_ART_FRAME * 2);
+            }
+            if (mode == 2) {
+                ref_biquad(plain, want, 2 * SNX_ART_FRAME, bq0b, bq0a, dbl);
+                memcpy(want + 2 * SNX_ART_FRAME, plain + 2 * SNX_ART_FRAME, SNX_ART_FRAME * 2);
+                ref_biquad(plain + 3 * SNX_ART_FRAME, want + 3 * SNX_ART_FRAME, 2 * SNX_ART_FRAME, bq0b, bq0a, dbl);
+            } else {
+                ref_biquad(plain, mode ? mid : want, nn, bq0b, bq0a, dbl);
+                if (mode) ref_biquad(mid, want, nn, bq1b, bq1a, dbl);
+            }
+            int bad = 0, first = -1;
+            for (int i = 0; i < nn; i++)
+                if (got[i] != want[i]) bad++, first = first < 0 ? i : first;
+            CHECK(bad == 0, "biquad rev %u mode %d: %d samples off, first %d: %d, want %d", art_rev, mode, bad, first,
+                  first < 0 ? 0 : got[first], first < 0 ? 0 : want[first]);
+        }
+    }
+    art_rev = 4;
 
     printf("%u checks, %u failed\n", checks, failures);
     audren_state_free(st);

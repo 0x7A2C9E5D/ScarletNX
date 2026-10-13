@@ -40,13 +40,7 @@ static i32 sat32(float x) {
 }
 
 /* features met and not rendered, each logged once */
-enum {
-    SNX_AUDREN_WARN_CYCLE = 1,
-    SNX_AUDREN_WARN_BIQUAD = 2,
-    SNX_AUDREN_WARN_EFFECT = 4,
-    SNX_AUDREN_WARN_FORMAT = 8,
-    SNX_AUDREN_WARN_COUNTS = 16
-};
+enum { SNX_AUDREN_WARN_CYCLE = 1, SNX_AUDREN_WARN_EFFECT = 4, SNX_AUDREN_WARN_FORMAT = 8, SNX_AUDREN_WARN_COUNTS = 16 };
 static void warn_once(ARState* s, u32 bit, const char* what) {
     if (s->warned & bit) return;
     s->warned |= bit;
@@ -212,7 +206,12 @@ static void update_voice(ARState* s, ARVoice* v, const u8* vi, u8* vo) {
         v->channels = (u8)(ch < 1 ? 1 : ch > SNX_AUDREN_CHANNELS ? SNX_AUDREN_CHANNELS : ch);
         v->pitch = rdf(vi + 0x1C);
         v->volume = rdf(vi + 0x20);
-        if (vi[0x24] || vi[0x24 + 12]) warn_once(s, SNX_AUDREN_WARN_BIQUAD, "voice biquad filters are not rendered");
+        for (int f = 0; f < 2; f++) { /* enabled 0, b 2, a 8 */
+            const u8* bq = vi + 0x24 + f * 0xC;
+            v->bq_on[f] = bq[0];
+            memcpy(v->bq_b[f], bq + 2, sizeof v->bq_b[f]);
+            memcpy(v->bq_a[f], bq + 8, sizeof v->bq_a[f]);
+        }
         v->wave_count = rd32(vi + 0x3C);
         v->wave_index = rd16(vi + 0x40) % SNX_AUDREN_WAVES;
         v->data = rd64(vi + 0x48);
@@ -804,6 +803,29 @@ static void effect_mix(ARState* s, ARMix* m, AREffect* e) {
     }
 }
 
+/* Eden's BiquadFilterCommand: doubles from revision 7, integers rounded at bit 14 before */
+static void biquad(float* x, u32 n, const i16* b, const i16* a, ARBiquad* st, int float_processing) {
+    if (float_processing) {
+        double b0 = b[0] / 16384.0, b1 = b[1] / 16384.0, b2 = b[2] / 16384.0, a0 = a[0] / 16384.0, a1 = a[1] / 16384.0;
+        for (u32 i = 0; i < n; i++) {
+            double in = x[i], y = in * b0 + st->x1 * b1 + st->x2 * b2 + st->y1 * a0 + st->y2 * a1;
+            x[i] = (float)(i32)(y >= 2147483647.0 ? 2147483647.0 : y <= -2147483648.0 ? -2147483648.0 : y);
+            st->x2 = st->x1;
+            st->x1 = in;
+            st->y2 = st->y1;
+            st->y1 = y;
+        }
+        return;
+    }
+    for (u32 i = 0; i < n; i++) {
+        i64 in = sat32(x[i]), acc = in * b[0] + st->s0, y = (acc + (1 << 13)) >> 14;
+        y = y > 2147483647 ? 2147483647 : y < -2147483647 - 1 ? -2147483647 - 1 : y;
+        x[i] = (float)y;
+        st->s0 = st->s1 + b[1] * in + a[0] * y;
+        st->s1 = b[2] * in + a[1] * y;
+    }
+}
+
 /* a mix's effects, by their process order */
 static void mix_effects(ARState* s, u32 id) {
     ARMix* m = &s->mix[id];
@@ -961,17 +983,22 @@ static void send_ramp(ARState* s, const ARMix* m, const float* tmp, const float*
     }
 }
 
-/* a voice with no mix and a splitter sends channel ch through the splitter's destinations ch, ch + channels, ...;
-   their volumes move on once every voice has sent (Eden's GenerateVoiceCommand) */
+/* a voice channel: its biquads, its volume ramp, its sends (Eden's GenerateVoiceCommand) */
 static void play_voice(ARState* s, ARVoice* v) {
     u32 n = s->frame;
     ARMix* m = v->mix_id < s->nmix ? &s->mix[v->mix_id] : NULL;
-    int split = v->mix_id == SNX_AUDREN_UNUSED_MIX && v->splitter_id < s->nsplit && splitters_on(s);
+    int split = v->mix_id == SNX_AUDREN_UNUSED_MIX && v->splitter_id < s->nsplit && splitters_on(s), sent = 0;
     for (int ch = 0; ch < v->channels; ch++) {
         float* tmp = s->buf + (size_t)(s->buffers + ch) * n;
         voice_channel(s, v, ch, tmp);
         if (!split && (!m || m->distance < 0)) continue;
         ARChannel* c = &s->chan[v->res[ch]];
+        sent = 1;
+        for (int f = 0; f < 2; f++) {
+            if (!v->bq_on[f]) continue;
+            if (!v->bq_was_on[f]) memset(&c->biquad[f], 0, sizeof c->biquad[f]);
+            biquad(tmp, n, v->bq_b[f], v->bq_a[f], &c->biquad[f], rev_number(s->rev) >= 7);
+        }
         float vol = v->prev_volume, dv = (v->volume - v->prev_volume) / (float)n;
         for (u32 i = 0; i < n; i++) tmp[i] *= vol + dv * (float)i;
         if (split) {
@@ -988,6 +1015,7 @@ static void play_voice(ARState* s, ARVoice* v) {
         send_ramp(s, m, tmp, c->prev_mix, c->mix);
         memcpy(c->prev_mix, c->mix, sizeof c->mix);
     }
+    if (sent) memcpy(v->bq_was_on, v->bq_on, sizeof v->bq_was_on);
     v->prev_volume = v->volume;
 }
 

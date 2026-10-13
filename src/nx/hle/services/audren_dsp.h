@@ -21,6 +21,12 @@ typedef struct {
     u8 loop, ended, sent; /* sent: handed to the DSP, the game's buffer slot is free to reuse */
 } ARWave;
 
+/* a biquad's state: the last two inputs and outputs with float processing, two accumulators with integer */
+typedef struct {
+    double x1, x2, y1, y2;
+    i64 s0, s1;
+} ARBiquad;
+
 /* a voice channel resource: its send volumes and what the DSP keeps of the channel between frames */
 typedef struct {
     float mix[SNX_AUDREN_MIX_OUTS], prev_mix[SNX_AUDREN_MIX_OUTS];
@@ -33,6 +39,7 @@ typedef struct {
     u16 adpcm_header;
     i16 yn0, yn1;
     i16 history[SNX_AUDREN_HISTORY];
+    ARBiquad biquad[2];
 } ARChannel;
 
 typedef struct {
@@ -44,6 +51,8 @@ typedef struct {
     float pitch, volume, prev_volume;
     u64 data, data_size;
     ARWave wave[SNX_AUDREN_WAVES];
+    i16 bq_b[2][3], bq_a[2][2]; /* its two biquads in Q14, the feedback ones added */
+    u8 bq_on[2], bq_was_on[2];
 } ARVoice;
 
 typedef struct {
