@@ -39,6 +39,14 @@ if(NOT WIN32)
 endif()
 add_test(NAME a64_fp_witnesses COMMAND snx-test-a64-fp)
 
+add_executable(snx-test-a64-fp-arithmetic a64_fp_arithmetic_test.c
+    "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu_helpers.c")
+snx_test_target(snx-test-a64-fp-arithmetic 11)
+if(NOT WIN32)
+    target_link_libraries(snx-test-a64-fp-arithmetic PRIVATE m)
+endif()
+add_test(NAME a64_fp_arithmetic_witnesses COMMAND snx-test-a64-fp-arithmetic)
+
 option(SNX_TEST_A64_FP_DIFF "Run the Linux AArch64 FP differential harness (requires Python unicorn 2.1.4)" OFF)
 if(SNX_TEST_A64_FP_DIFF)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_CROSSCOMPILING)
@@ -136,7 +144,7 @@ endif()
 if(SNX_TEST_SANITIZERS AND WIN32)
     execute_process(COMMAND "${CMAKE_C_COMPILER}" -print-resource-dir
         OUTPUT_VARIABLE snx_clang_resource OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-    set_tests_properties(a64_fp_witnesses startup_windowed startup_headless driver_workflow extraction_native loader_native runtime_nro native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw astc_decode audio_out
+    set_tests_properties(a64_fp_witnesses a64_fp_arithmetic_witnesses startup_windowed startup_headless driver_workflow extraction_native loader_native runtime_nro native_recompiler native_codegen filesystem_tree filesystem_service filesystem_raw astc_decode audio_out
         PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${snx_clang_resource}/lib/windows")
 endif()
 
