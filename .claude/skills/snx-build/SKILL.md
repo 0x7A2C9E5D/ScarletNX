@@ -93,6 +93,11 @@ under `<outdir>/<Game>_build/` for inspection.
 build/default/scarletnx -r work/Catherine Catherine          # runtime and game module, both with Clang
 ```
 
+`scarletnx -r` uses the LLVM backend (`--backend=gcc`, libgccjit, is for DEC Alpha EV67 hosts). Its objects aren't
+cached: each recompile builds every unit again. A change to `a64_templates.inc`
+needs the matching change in `src/common/cpu/recompiler/llvm/ir_*.c` (`snx-test-llvm-differential` finds the
+difference).
+
 ## Adding or bumping a third-party package
 
 A `CPMAddPackage` in `cmake/dependencies.cmake` with the release archive's URL (a tag, or a commit for projects

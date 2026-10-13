@@ -4,12 +4,9 @@
 #define SNX_TOOLCHAIN_H
 #include "common.h"
 typedef struct {
-    const char* cc;
     const char* opt;
     unsigned jobs;
-    int target_win, native, quiet;
+    int target_win, quiet;
 } SnxCompileOptions;
-int snx_compile_sources(char** sources, size_t count, const char* output, const SnxPaths* paths,
-                        const SnxCompileOptions* options);
 char* snx_build_runtime(const SnxPaths* paths, int target_win, int quiet);
 #endif

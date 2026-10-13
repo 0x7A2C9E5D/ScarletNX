@@ -6,9 +6,10 @@
 #define SNX_TOOL_MODULE_H
 
 #include "loader.h"
+#include "codegen.h"
 
 typedef struct {
-    const char *outdir, *title;
+    const char* title;
     size_t chunk_instrs;
     int interp_only, quiet;
     const SnxU64* hints;
@@ -16,13 +17,18 @@ typedef struct {
     unsigned abi;
 } SnxCodegenOptions;
 
-typedef struct {
-    char** paths;
-    size_t count;
-} SnxSources;
+/* Instructions per code unit (a C file, an LLVM module): whole functions are batched until a unit reaches it */
+#define SNX_CHUNK_INSTRUCTIONS 90000
 
-/* Returns 0 on success, nonzero on output failure. outdir must already exist. */
-int snx_generate_module(SnxProgram* loaded, const SnxCodegenOptions* options, SnxSources* sources);
-void snx_sources_free(SnxSources* sources);
+/* the dispatch entries: every leader of every function by address, the first function's when two share one */
+typedef struct {
+    SnxU64 address;
+    size_t function;
+} SnxModuleEntry;
+SnxModuleEntry* snx_module_entries(const SnxCodegen* codegen, size_t* count);
+/* "0x8012340-0x8019ABC, 512 functions, 90120 instructions": the guest code of functions [first, last) */
+char* snx_chunk_label(const SnxCodegen* codegen, size_t first, size_t last);
+/* one line per finished unit: "  compiled block 3/40: code_002, <label> (4.2 s)" */
+void snx_report_unit(size_t done, size_t count, const char* name, const char* label, int cached, double seconds);
 
 #endif

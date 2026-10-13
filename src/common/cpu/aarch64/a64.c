@@ -86,6 +86,17 @@ const SnxA64Case* snx_a64_decode(SnxU32 word) {
     return &undefined_case;
 }
 
+const SnxA64Pattern* snx_a64_case_pattern(const SnxA64Case* instruction, size_t* index) {
+    size_t i;
+    for (i = 0; i < sizeof(patterns) / sizeof(patterns[0]); ++i)
+        if (instruction >= patterns[i].cases && instruction < patterns[i].cases + patterns[i].case_count) {
+            *index = (size_t)(instruction - patterns[i].cases);
+            return &patterns[i];
+        }
+    *index = 0;
+    return NULL;
+}
+
 SnxU64 snx_a64_target(SnxU32 word, SnxU64 pc) {
     unsigned width, shift;
     SnxU64 offset;
@@ -206,7 +217,9 @@ static void emit_interp(FILE* out, int step_mode, int checked) {
         fputs(" U_: c->rt->undef(c,pc,w); return pc;\n N_: return pc+4;\n}\n", out);
     else
         fputs(" U_: c->pc=pc; c->rt->undef(c,pc,w); return;\n N_: pc+=4; continue;\n"
-              " J_: { GuestFn f_=snx_lookup(c,pc); if(f_!=snx_interp_entry){ f_(c,pc); return; } continue; }\n }\n}\n",
+              /* every taken branch: a loop the recompiler never found spins here, and gives its core up on poll */
+              " J_: { if(UNLIKELY(__atomic_load_n(&c->poll,__ATOMIC_RELAXED))){ c->pc=pc; c->rt->poll(c); }\n"
+              " GuestFn f_=snx_lookup(c,pc); if(f_!=snx_interp_entry){ f_(c,pc); return; } continue; }\n }\n}\n",
               out);
 }
 

@@ -5,6 +5,9 @@
 /* Helpers compiled into the game module: stateful integer-only ARM FP,
    AdvSIMD operations, crypto and system registers. Builds with Clang. */
 #include "cpu.h"
+#if defined(__x86_64__)
+#include <immintrin.h>
+#endif
 
 /* The helpers by topic, in the order they depend on each other (the module compiles this as one file) */
 #include "helpers/fp.c"

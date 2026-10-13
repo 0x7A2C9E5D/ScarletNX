@@ -96,12 +96,12 @@ Remaining examples: POSIX.
 - **Keys:** flags → checkout → `~/.switch` (`%USERPROFILE%\.switch` on Windows). Common NSP tickets supplement title keys.
 - **Extraction:** defaults to `work/<dump stem>`; `--name`/`--out DIR` override. Refuses existing `exefs`;
   builds missing hactool. [Temp cleanup/key filtering](../src/nx/runtime/driver/extract.c).
-- **Recompile:** AOT → module compile/link → final runtime deployment. Host builds use `-march=native`;
-  `--cc CLANG` / `-O 0..3` are accepted.
-- **Codegen:** `--no-build` emits C/data/INI; `--interp-only` omits AOT functions.
-  `--chunk N` sets instructions per TU. Generated C, objects and linker response files use a private system
-  temporary directory (`TMPDIR` on Unix), removed on success or failure. Objects are not cached between runs.
-  `--keep-c` or `--no-build` saves C sources in `<outdir>/<NAME>_build/`.
+- **Recompile:** AOT → module (LLVM, or `--backend=gcc` for libgccjit on DEC Alpha EV67 hosts) →
+  final runtime deployment, for this machine's CPU. Shaders compile directly to SPIR-V at runtime.
+  `-O 0..3,s,z` sets the optimization level.
+- **Codegen:** `--no-build` stages data/INI only; `--interp-only` omits AOT functions.
+  `--chunk N` sets instructions per code unit. Nothing is cached between runs.
+  `--keep-ir` saves the generated code (LLVM IR, libgccjit dumps) in `<outdir>/<NAME>_build/`.
 - **Data updates:** ExeFS refreshes; `Game_data/romfs` is reused.
   Replace cached RomFS after asset changes; preserve `Game_data/save/`.
 
@@ -110,7 +110,8 @@ Remaining examples: POSIX.
 | `work/Game/{exefs,romfs}` | Extracted input |
 | `games/Game[.exe]`, `Game_code.so/.dll` | Runtime + AOT module |
 | `games/Game_data/`, `Game.ini` | Data/saves + settings |
-| `games/Game_build/` | C sources only with `--keep-c` or `--no-build` |
+| `games/Game_build/` | Generated code, only with `--keep-ir` |
+| `games/shader_cache/spirv/` | SPIR-V cache |
 
 ## GDB (UNIX only)
 
@@ -199,6 +200,7 @@ Restart for `docked`, `language`, `fullscreen`, `resolution`, `memory_gb`, `heap
 | `fps_limit=1` | 60 FPS; `0` uncapped; `60..240` explicit cap |
 | `shadows=0` | Skip shadow maps |
 | `language=1` | English (US); other IDs in INI |
+| `network=1` | Online through the computer's connection (bsd, sfdnsres, nifm); `0` offline, loopback only |
 | `log=2` | Verbose, adds runtime overhead |
 
 `audout` PCM playback and the audio renderer's device sink (`audren`) use SDL3's system-default output on

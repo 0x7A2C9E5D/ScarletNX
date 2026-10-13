@@ -5,7 +5,6 @@
 #include "a64.h"
 #include "codegen.h"
 #include "codegen_view.h"
-#include "module.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -80,7 +79,7 @@ static void setup_program(SnxProgram* program, SnxModuleImage* module, unsigned 
     program->npdm.core = 2;
 }
 
-static void analysis_and_module_test(const char* directory) {
+static void analysis_test(void) {
     static const SnxU32 words[] = {0xAA1E03F3UL, 0x91000400UL, 0x9400000AUL, 0xF1002C1FUL, 0x540000A1UL,
                                    0x91000800UL, 0xAA1303FEUL, 0xD65F03C0UL, 0xD503201FUL, 0x91019000UL,
                                    0x17FFFFFCUL, 0xD4200000UL, 0x91002800UL, 0xD65F03C0UL};
@@ -90,12 +89,8 @@ static void analysis_and_module_test(const char* directory) {
     SnxCodegen codegen;
     SnxFde ranges[2];
     SnxU64 interior, symbol;
-    SnxCodegenOptions options;
-    SnxSources sources;
     const SnxFunction* function;
-    unsigned char *text, *again;
-    size_t i, size, again_size;
-    char* saved;
+    size_t i;
     for (i = 0; i < sizeof(words) / sizeof(words[0]); ++i) put32(image, i * 4, words[i]);
     setup_program(&program, &module, image, sizeof(image));
     ranges[0].start = 0;
@@ -124,43 +119,6 @@ static void analysis_and_module_test(const char* directory) {
     function = snx_codegen_function(&codegen, SNX_CODE_BASE);
     check(function && has_leader(function, interior), "execution hint adds interior dispatch entry");
     snx_codegen_free(&codegen);
-
-    memset(&options, 0, sizeof(options));
-    options.outdir = directory;
-    options.title = "Quoted \"title\" \\ UTF-8 \303\251";
-    options.chunk_instrs = 4;
-    options.quiet = 1;
-    options.hints = &interior;
-    options.hint_count = 1;
-    options.abi = 3;
-    check(!snx_generate_module(&program, &options, &sources), "emit chunked module");
-    if (sources.count) {
-        check(sources.count == 3, "instruction budget splits at function boundaries");
-        text = snx_read_file(sources.paths[0], &size);
-        check(text && strstr((char*)text, "MOD.abi=3;") && strstr((char*)text, "MOD.nentries=7;"),
-              "module ABI/entry metadata");
-        check(text && strstr((char*)text, "MOD.title_id=0x123456789ABCDEF0ULL"), "64-bit NPDM title ID");
-        check(text && strstr((char*)text, "\\\"title\\\"") && strstr((char*)text, "\\303\\251"),
-              "C string escaping preserves title bytes");
-        saved = snx_strdup(sources.paths[0]);
-        snx_sources_free(&sources);
-        check(!snx_generate_module(&program, &options, &sources), "regenerate unchanged module");
-        again = snx_read_file(saved, &again_size);
-        check(text && again && size == again_size && !memcmp(text, again, size), "deterministic source cache content");
-        free(text);
-        free(again);
-        free(saved);
-    }
-    snx_sources_free(&sources);
-    options.interp_only = 1;
-    check(!snx_generate_module(&program, &options, &sources), "emit interpreter-only module");
-    if (sources.count) {
-        check(sources.count == 1, "interpreter-only has no AOT chunks");
-        text = snx_read_file(sources.paths[0], &size);
-        check(text && strstr((char*)text, "MOD.nentries=0;"), "interpreter-only empty entry table");
-        free(text);
-    }
-    snx_sources_free(&sources);
 }
 
 static void large_range_test(void) {
@@ -350,6 +308,108 @@ done:
     free(output);
 }
 
+/* A loop of generated code runs with CPU.poll set: its backward branch calls rt->poll, the runtime's chance to take
+   the core from a thread that makes no SVC, and the loop still runs to its end. The same loop through the
+   interpreter, as a loop the recompiler never found runs, polls on its taken branch. */
+static void poll_test(const char* compiler, const char* repo, const char* directory) {
+    static const SnxU32 words[] = {0xF1000400UL,  /* SUBS X0,X0,#1 */
+                                   0x54FFFFE1UL,  /* B.NE back to it */
+                                   0xD65F03C0UL}; /* RET */
+    unsigned char image[sizeof(words)];
+    SnxProgram program;
+    SnxModuleImage module;
+    SnxCodegen codegen;
+    SnxFde range;
+    const SnxFunction* function;
+    const char* args[16];
+    char *source, *binary, *include, *output = NULL;
+    FILE* file;
+    size_t i;
+    int n, status;
+    for (i = 0; i < sizeof(words) / sizeof(words[0]); ++i) put32(image, i * 4, words[i]);
+    setup_program(&program, &module, image, sizeof(image));
+    range.start = 0;
+    range.size = sizeof(image);
+    module.fde = &range;
+    module.fde_count = 1;
+    check(!snx_nx_codegen_analyze(&codegen, &program, NULL, 0, 1), "analyze the poll loop");
+    function = snx_codegen_function(&codegen, SNX_CODE_BASE);
+    check(function != NULL, "the poll loop is one function");
+    source = snx_path_join(directory, "poll.c");
+#ifdef _WIN32
+    binary = snx_path_join(directory, "poll.exe");
+#else
+    binary = snx_path_join(directory, "poll");
+#endif
+    include = snx_path_join(repo, "src/common/cpu/aarch64");
+    file = function ? snx_fopen(source, "wb") : NULL;
+    check(file != NULL, "open the poll fixture");
+    if (!file) goto done;
+    fputs("#include \"cpu.h\"\n#include \"cpu_helpers.c\"\n#include <stdio.h>\nGuestFn snx_interp_entry;\n", file);
+    snx_codegen_emit(file, &codegen, function);
+    snx_a64_interp(file, 0);
+    fputs("static int polls;\nstatic void poll(CPU* c){ ++polls; __atomic_store_n(&c->poll,0,__ATOMIC_RELAXED); }\n",
+          file);
+    fputs("static int run(u64 count, u32 flag){ CPU c; RtAPI rt; memset(&c,0,sizeof c); memset(&rt,0,sizeof rt);\n"
+          " rt.poll=poll; c.rt=&rt; c.x[0]=count; c.x[30]=0x2000; c.poll=flag; polls=0; F_",
+          file);
+    snx_a64_hex(file, SNX_CODE_BASE);
+    fputs("(&c,", file);
+    snx_a64_literal(file, SNX_CODE_BASE);
+    fputs(");\n return c.x[0]==0 && c.pc==0x2000 ? polls : -1; }\n", file);
+    /* the loop's words in guest memory at 0x1000, no dispatch table: every lookup lands in the interpreter */
+    fputs("static int interp(u64 count, u32 flag){ static u32 mem[0x1000]; CPU c; RtAPI rt;\n"
+          " memset(&c,0,sizeof c); memset(&rt,0,sizeof rt); mem[0x400]=0xF1000400u; mem[0x401]=0x54FFFFE1u;\n"
+          " mem[0x402]=0xD65F03C0u; snx_interp_entry=snx_interp; rt.poll=poll; c.rt=&rt; c.mem=(u8*)mem;\n"
+          " c.x[0]=count; c.x[30]=0x2000; c.poll=flag; polls=0; snx_interp(&c,0x1000);\n"
+          " return c.x[0]==0 && c.pc==0x2000 ? polls : -1; }\n",
+          file);
+    fputs("int main(void){ int a=run(3,1), b=run(5,0), d=interp(3,1), e=interp(5,0);\n"
+          " if(a!=1||b!=0){ fprintf(stderr,\"poll loop: %d polls with the flag, %d without\\n\",a,b); return 1; }\n"
+          " if(d!=1||e!=0){ fprintf(stderr,\"interpreted poll loop: %d polls with the flag, %d without\\n\",d,e);"
+          " return 1; }\n"
+          " puts(\"A loop's backward branch calls rt->poll once when CPU.poll is set, compiled or interpreted\");"
+          " return 0; }\n",
+          file);
+    check(!fclose(file), "write the poll fixture");
+    n = 0;
+    args[n++] = compiler;
+    args[n++] = "-O2";
+    args[n++] = "-fno-strict-aliasing";
+    args[n++] = "-fwrapv";
+#if defined(__x86_64__) || defined(_M_X64)
+    args[n++] = "-mcx16";
+#endif
+    args[n++] = "-Wno-unused-label";
+    args[n++] = "-I";
+    args[n++] = include;
+    args[n++] = source;
+#ifndef _WIN32
+    args[n++] = "-lm";
+#endif
+    args[n++] = "-o";
+    args[n++] = binary;
+    args[n] = NULL;
+    status = snx_run(args, directory, NULL, &output);
+    if (status && output) fputs(output, stderr);
+    check(!status, "compile the poll fixture");
+    free(output);
+    output = NULL;
+    if (!status) {
+        args[0] = binary;
+        args[1] = NULL;
+        status = snx_run(args, directory, NULL, &output);
+        if (output) fputs(output, status ? stderr : stdout);
+        check(!status, "a loop with CPU.poll set calls rt->poll and runs to its end");
+    }
+done:
+    snx_codegen_free(&codegen);
+    free(source);
+    free(binary);
+    free(include);
+    free(output);
+}
+
 int main(int argc, char** argv) {
     char* directory;
     if (argc != 3) return 2;
@@ -357,9 +417,10 @@ int main(int argc, char** argv) {
     check(directory != NULL, "create codegen test directory");
     if (!directory) return 1;
     decoder_test();
-    analysis_and_module_test(directory);
+    analysis_test();
     large_range_test();
     semantics_test(argv[1], argv[2], directory);
+    poll_test(argv[1], argv[2], directory);
     check(!snx_remove_tree(directory), "remove codegen test directory");
     free(directory);
     printf("Native codegen: %s\n", failures ? "FAILED" : "passed");

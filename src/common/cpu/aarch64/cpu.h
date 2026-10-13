@@ -28,8 +28,8 @@ typedef double f64;
 
 /* the version of the contract between a game module and the runtime (this header, cpu_helpers.c, RtAPI and the
    module descriptor). The recompiler stamps it into each module, the runtime refuses a module with another one */
-/* Stateful FP arithmetic changes generated semantics: rebuild runtime and modules. */
-#define SNX_ABI 6
+/* 7: CPU.poll and RtAPI.poll, checked on the backward branches of generated code. */
+#define SNX_ABI 7
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)
@@ -68,6 +68,10 @@ typedef struct CPU {
     u64 code_lo, code_hi;
     const RtAPI* rt;
     void* thread; /* owning runtime thread or process */
+    /* set by another host thread when the runtime wants this one back (a thread of higher priority waits for its
+       core): generated code reads it on every backward branch, the interpreter on every taken branch, and then
+       they call rt->poll */
+    u32 poll;
 } CPU;
 
 /* ---- memory: base + addr, no page tables ---- */
@@ -289,6 +293,11 @@ SNX_INLINE u64 bfm_(u64 dst, u64 src, u32 immr, u32 imms, u32 ds) {
     return ds == 32 ? (u32)r : r;
 }
 u64 snx_decode_bitmask(u32 N, u32 imms, u32 immr, u32 ds); /* cpu_helpers.c */
+
+/* ---- host instruction set extensions ----
+   The module runs on the machine that built it (build == host == target): the helpers choose their paths from the
+   compiler's feature macros (-march=native: __AES__, __PCLMUL__, __SSE4_2__, __GFNI__, ...), under __x86_64__, with
+   no detection at run time. Without the macros (another architecture, a generic build) they take the portable C. */
 
 /* ---- CRC32 ---- */
 u32 snx_crc32(u32 acc, u64 val, int bytes, int castagnoli);
