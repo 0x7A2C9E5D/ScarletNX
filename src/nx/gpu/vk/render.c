@@ -237,7 +237,7 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
     if (g_rp.zt && g_rp.zt->layers < layers) layers = g_rp.zt->layers;
     if (layer >= layers) return;
     VkClearRect rect = {{{0, 0}, g_rp.ext}, layer, 1};
-    if ((r[0x43E] & 0x10) && (r[0x380] & 1)) { /* scissored clear */
+    if (r3d_clear_scissored(r)) {
         u32 xs = r[0x381], ys = r[0x382];
         i32 x0 = (i32)vk_scf(xs & 0xFFFF), x1 = (i32)vk_scf(xs >> 16), y0 = (i32)vk_scf(ys & 0xFFFF),
             y1 = (i32)vk_scf(ys >> 16);

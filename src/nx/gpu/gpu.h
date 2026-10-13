@@ -99,6 +99,9 @@ int r3d_pending_on(void);
 
 /* maxwell3d.c: the 3D engine's side of the renderer */
 void r3d_clear(GpuChannel* ch, u32 v);
+/* a clear is cut to scissor 0 when CLEAR_FLAGS (3D 0x43E) has SCISSOR, bit 8, and that scissor is enabled. Bit 4,
+   CLEAR_RECT, is another bound (nouveau's names for the bits; Eden reads the scissor from bit 8 too) */
+static inline int r3d_clear_scissored(const u32* r) { return (r[0x43E] & 0x100) && (r[0x380] & 1); }
 void r3d_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex, u32 base_instance,
               u32 instances);
 void r3d_cb_bind(GpuChannel* ch, int stage, u32 v);
