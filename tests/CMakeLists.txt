@@ -86,6 +86,18 @@ target_link_libraries(snx-test-driver PRIVATE snx_test_common)
 add_test(NAME driver_workflow COMMAND snx-test-driver)
 set_tests_properties(driver_workflow PROPERTIES TIMEOUT 60)
 
+if(UNIX)
+    add_executable(snx-test-gdbstub gdbstub.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/gdbstub.c")
+    snx_test_target(snx-test-gdbstub 11)
+    target_link_libraries(snx-test-gdbstub PRIVATE snx_test_common)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME gdbstub_native COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/gdbstub.py" $<TARGET_FILE:snx-test-gdbstub>)
+        set_tests_properties(gdbstub_native PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 RESOURCE_LOCK gdb_port_1234)
+    endif()
+endif()
+
 add_executable(snx-test-extract extract.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/extract.c")
 snx_test_target(snx-test-extract 90)
 target_link_libraries(snx-test-extract PRIVATE snx_test_common)

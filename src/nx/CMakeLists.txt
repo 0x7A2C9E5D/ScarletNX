@@ -35,7 +35,7 @@ function(snx_component name)
     target_link_libraries(snx_${name} PUBLIC snx_nx_flags)
 endfunction()
 
-snx_component(core runtime/main.c runtime/loader.c runtime/rtapi.c runtime/clock.c runtime/crash.c runtime/options.c runtime/startup.c
+snx_component(core runtime/main.c runtime/loader.c runtime/rtapi.c runtime/clock.c runtime/crash.c runtime/options.c runtime/startup.c runtime/gdbstub.c
               runtime/present.c)
 target_link_libraries(snx_core PRIVATE snx_driver)
 snx_component(kernel hle/kernel/kernel.c hle/kernel/thread.c hle/kernel/sync.c hle/svc/svc.c hle/svc/svc_mem.c hle/kernel/debug.c
@@ -124,7 +124,7 @@ if(BUILD_TESTING AND SNX_TEST_VULKAN AND SNX_VULKAN)
     if(SNX_BACKEND STREQUAL "sdl3")
         target_link_libraries(snx-test-vulkan PRIVATE SDL3::SDL3)
     endif()
-    add_test(NAME vulkan_headless COMMAND snx-test-vulkan --headless)
+    add_test(NAME vulkan_headless COMMAND snx-test-vulkan -H)
     set_tests_properties(vulkan_headless PROPERTIES TIMEOUT 60
         FAIL_REGULAR_EXPRESSION "vulkan validation:;failed: VK_ERROR")
 endif()
