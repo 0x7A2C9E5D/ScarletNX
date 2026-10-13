@@ -147,6 +147,7 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
         int keep;
         switch (m) {
             case 0x586: keep = (v >> 26) & 1; break;
+            case 0x486: keep = 1; break; /* VERTEX_ARRAY_INSTANCE_SUBSEQUENT: decides below */
             case 0x585:
             case 0x35D:
             case 0x35E:
@@ -220,6 +221,34 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
             /* hw consumes the counts on each draw; if we don't, the next non-indexed draw picks up stale indices */
             R3(0x5F8) = 0;
             R3(0x35E) = 0;
+            break;
+        }
+        case 0x485: /* VERTEX_ARRAY_INSTANCE_FIRST: vertices first .. first + count - 1 now, as instance 0 */
+        case 0x486: { /* _SUBSEQUENT: the same range again, as the next instance. Word: first 0-15, count 16-27,
+                         topology 28-31 */
+            u32 first = v & 0xFFFF, count = (v >> 16) & 0xFFF, topo = (v >> 28) & 0xF, bi = R3(0x50E);
+            if (m == 0x485)
+                g_instance_count = 0;
+            else
+                g_instance_count++;
+            if (m == 0x486 && g_pd.on && g_pd.ch == ch && !g_pd.indexed && g_pd.topo == topo && g_pd.first == first &&
+                g_pd.count == count && g_pd.bv == 0 && g_pd.bi == bi) {
+                g_pd.inst = g_instance_count + 1; /* one more instance */
+                break;
+            }
+            if (g_instance_count) /* like END: what doesn't continue the draw before is drawn as instances 0..N */
+                LOG_LIMIT(4, "gpu: instanced array draw at instance %u doesn't continue the one before, drawn as %u\n",
+                          g_instance_count, g_instance_count + 1);
+            r3d_pending_flush();
+            g_pd.on = 1;
+            g_pd.ch = ch;
+            g_pd.indexed = 0;
+            g_pd.topo = topo;
+            g_pd.first = first;
+            g_pd.count = count;
+            g_pd.bv = 0;
+            g_pd.bi = bi;
+            g_pd.inst = g_instance_count + 1;
             break;
         }
         case 0x586: /* BEGIN, bit 26 = next instance */
