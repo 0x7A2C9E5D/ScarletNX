@@ -9,7 +9,8 @@
 #include "cpu/aarch64/cpu.h"
 #include "runtime/platform/plat.h"
 
-#define NCORES 4 /* the console's CPU cores */
+#define K_PROCESS_ID 0x51ull /* the single application process, also injected into IPC PID descriptors */
+#define NCORES       4       /* the console's CPU cores */
 
 enum {
     KO_NONE,
@@ -72,6 +73,7 @@ struct KThread {
     KThread* next_waiter;
     char name[32];
     const char* wait_name;
+    u64 wait_tid; /* the thread a join waits for, for the thread dump */
     i64 wait_timeout;
     u64 sleep_lr, sleep_n, sleep_x[31]; /* for threads.txt: catches SleepThread polling loops */
 };

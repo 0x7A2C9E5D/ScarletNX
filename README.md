@@ -6,7 +6,9 @@
 
 Discord: https://discord.gg/tRTRXXbyjp (my god why don't we just use IRC like good people?)
 
-A GPLv3 static ARM64 to x86 recompiler with a Nintendo Switch translation layer for Linux, Windows and FreeBSD. Forked from MZLab's SwitchRecomp.
+A GPLv3 static ARM64 to x86 recompiler with a Nintendo Switch translation layer for Linux, Windows and FreeBSD.
+
+Forked from MZLab's SwitchRecomp. SwitchRecomp is based off Nexium.
 
 The shared ARM64 recompiler lives under `src/common/`. Nintendo Switch Horizon HLE
 and Maxwell graphics live under `src/nx/`. The CPU-only Linux AArch64 runtime lives
@@ -41,10 +43,10 @@ cd ScarletNX
 cmake --preset default -B build && cmake --build build
 ```
 
-Afterwards, put `prod.keys` (and `title.keys`, for NSPs) in `~/.switch`, or pass them with `--keys` and
-`--title-keys`.
+For encrypted dumps, put `prod.keys` (and `title.keys`, for NSPs) in `~/.switch`, or pass them with
+`--keys` and `--title-keys`. Decrypted DNSP/DXCI content needs no keys.
 ```bash
-./build/scarletnx "Game.xci"  # extract, recompile, then play (also accepts NSP)
+./build/scarletnx "Game.xci"  # extract, recompile, then play (also accepts NSP, DNSP and DXCI)
 ```
 Run the same command again after an interruption. Completed extraction and recompilation are skipped,
 but the game always starts anew. To run the steps separately:
@@ -56,10 +58,10 @@ but the game always starts anew. To run the steps separately:
 cd games && ./Game
 ```
 
-For a keyboard-driven SDL3 menu, run `./build/scarletnx-gui`. Select a driver with
-arrow keys and Enter, then choose drag-and-drop or the paginated `games/` browser.
+For an SDL3 menu, run `./build/scarletnx-gui`. Select a driver with arrow keys and
+Enter or hover and click, then choose drag-and-drop or the paginated `games/` browser.
 The GUI shows live driver/game
-output and combined CPU/RAM usage. See [Keyboard launcher](docs/GUI.md).
+output and combined CPU/RAM usage. See [GUI launcher](docs/GUI.md).
 
 For more detailed information please see: [Build + run](./docs/BUILD.md).
 

@@ -33,7 +33,7 @@ target_link_libraries(snx_core PRIVATE snx_driver)
 snx_component(kernel hle/kernel/kernel.c hle/kernel/thread.c hle/kernel/sync.c hle/svc/svc.c hle/svc/svc_mem.c hle/kernel/debug.c
               memory/mem.c hle/kernel/ipc.c)
 snx_component(hle hle/services/services.c hle/services/audren.c hle/services/audren_dsp.c hle/services/pl.c hle/services/sm.c hle/services/am.c hle/services/set.c hle/services/time.c hle/services/acc.c hle/services/audio.c
-              hle/services/misc.c hle/services/network/bsd.c hle/services/network/dns.c
+              hle/services/misc.c hle/services/ldr.c hle/services/network/bsd.c hle/services/network/dns.c
               hle/services/network/nifm.c hle/filesystem/fs.c hle/filesystem/fs_tree.c hle/services/hid.c hle/services/vi.c hle/services/nvdrv.c)
 snx_component(video gpu/video/host1x.c gpu/video/nvdec.c gpu/video/vic.c)
 target_link_libraries(snx_video PRIVATE FFmpeg::avcodec)
@@ -68,7 +68,8 @@ target_link_libraries(scarletnx PRIVATE scarletnx-nx)
 # the native driver and CI look for it
 set_target_properties(scarletnx PROPERTIES LINKER_LANGUAGE CXX RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 if(WIN32)
-    # Static, so the runtime runs without the MinGW DLLs next to it. user32 has the backends' message boxes:
+    # Prefer static toolchain/SDL libraries. LLVM may still use a DLL import library,
+    # resolved by cmake/llvm.cmake and bundled by CI. user32 provides message boxes;
     # winmm is loaded at run time, and the static SDL3 brings the libraries it needs
     target_link_libraries(scarletnx PRIVATE user32)
     # The application manifest (runtime/platform/runtime.manifest): UTF-8 as the process's code page, long paths
@@ -83,7 +84,8 @@ else()
 endif()
 
 # SDL3 is either the system package or the pinned static source build (cmake/dependencies.cmake)
-target_link_libraries(snx_platform PRIVATE SDL3::SDL3)
+include("${PROJECT_SOURCE_DIR}/cmake/window_icon.cmake")
+target_link_libraries(snx_platform PRIVATE SDL3::SDL3 snx_window_icon)
 target_link_libraries(scarletnx PRIVATE SDL3::SDL3)
 
 if(BUILD_TESTING)

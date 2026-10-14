@@ -17,14 +17,16 @@ VERSION=${VERSION:-$(git -C "$(dirname "$0")/.." describe --always --dirty 2>/de
 export ARCH VERSION
 export OUTPATH=./dist
 export OUTNAME=ScarletNX-$ARCH.AppImage
-export ICON=/usr/share/icons/hicolor/scalable/apps/wimsy.svg
+# .DirIcon, what file managers and integrators show, is this PNG (docs.appimage.org/reference/appdir.html)
+export ICON=/usr/share/icons/hicolor/256x256/apps/wimsy.png
 export DESKTOP=/usr/share/applications/scarletnx.desktop
 # AppImageUpdate finds new builds in the rolling release through the .zsync file next to the AppImage
 export UPINFO="gh-releases-zsync|${REPOSITORY%/*}|${REPOSITORY#*/}|nightly|*$ARCH.AppImage.zsync"
 # The runtime exits at once without a game module, so tracing it for dlopened libraries finds nothing: name them
 export STRACE_MODE=0 DEPLOY_SDL=1 DEPLOY_VULKAN=1
 
-quick-sharun /usr/bin/scarletnx
+# hactool too: --extract looks for it next to the runtime, and without it tries to build it from a checkout
+quick-sharun /usr/bin/scarletnx /usr/bin/hactool
 
 # The licenses travel with the AppImage: the runtime's and those of the libraries built into it (`cmake --install` put
 # them in /usr/share/licenses/scarletnx), and those of the Arch packages quick-sharun took the bundled libraries
@@ -34,6 +36,12 @@ if [ ! -d "$appdir/lib" ]; then
     echo "quick-sharun left no $appdir/lib: where it puts the bundled libraries has changed" >&2
     exit 1
 fi
+if [ "$(head -c 8 "$appdir/.DirIcon" | od -An -tx1 | tr -d ' \n')" != 89504e470d0a1a0a ]; then
+    echo "$appdir/.DirIcon is not a PNG: quick-sharun no longer takes ICON for it" >&2
+    exit 1
+fi
+# and the vector next to it, the best the desktop entry's Icon= can name
+cp /usr/share/icons/hicolor/scalable/apps/wimsy.svg "$appdir/"
 mkdir -p "$appdir/share/licenses"
 cp -r /usr/share/licenses/scarletnx "$appdir/share/licenses/"
 mapfile -t packages < <(cd "$appdir/lib" && find . -name '*.so*' -type f | while read -r lib; do
