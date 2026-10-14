@@ -202,7 +202,7 @@ fade_out_ms = 500
 ; how a step's line comes in: none | typing | slide | fade
 line_in = typing
 line_in_ms = 220
-typing_ms = 25
+typing_ms = 5
 ; async: every line types from when it comes; sync: one at a time, the done ones three times faster
 typing = async
 blink_ms = 500

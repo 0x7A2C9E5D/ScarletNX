@@ -28,7 +28,7 @@ int main(void) {
     assert(same(def->run_colors.page, def->page) && same(def->run_colors.ink, def->ink));
     assert(def->run == GUI_RUN_CONSOLE && !def->fade_in_ms && !def->fade_out_ms && def->line_in == GUI_LINE_NONE);
     assert(loading->run == GUI_RUN_STEPS && loading->ring == GUI_RING_RIGHT && loading->texture && !loading->bar);
-    assert(loading->line_in == GUI_LINE_TYPING && loading->typing_ms == 25 && loading->fade_out_ms == 500);
+    assert(loading->line_in == GUI_LINE_TYPING && loading->typing_ms == 5 && loading->fade_out_ms == 500);
     assert(loading->detailed && !loading->collapse && !def->detailed && !def->collapse);
     for (const GuiTheme* b = def; b; b = b == def ? loading : NULL) {
         const GuiPrompt* p = &b->prompt;

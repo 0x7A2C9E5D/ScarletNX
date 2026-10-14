@@ -69,7 +69,7 @@ static const GuiTheme builtins[] = {
         .fade_in_ms = 250,
         .fade_out_ms = 500,
         .line_in_ms = 220,
-        .typing_ms = 25,
+        .typing_ms = 5,
         .blink_ms = 500,
         .prompt = {.align = GUI_ALIGN_CENTER,
                    .open = "[ ",
