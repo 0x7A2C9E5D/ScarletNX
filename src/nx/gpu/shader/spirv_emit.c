@@ -41,6 +41,7 @@ enum {
     OP_IADD = 128,
     OP_SDIV = 135,
     OP_IMUL = 132,
+    OP_UMUL_EXTENDED = 151,
     OP_CONVERT_F_TO_U = 109,
     OP_CONVERT_F_TO_S = 110,
     OP_CONVERT_S_TO_F = 111,
@@ -195,6 +196,11 @@ void spv_emit_draw_parameters_capability(SpvEmitter* e) {
 void spv_emit_layer_capability(SpvEmitter* e) {
     instruction(&e->capabilities, OP_CAPABILITY, 2);
     put(&e->capabilities, 69); /* ShaderLayer */
+}
+
+void spv_emit_clip_distance_capability(SpvEmitter* e) {
+    instruction(&e->capabilities, OP_CAPABILITY, 2);
+    put(&e->capabilities, 32); /* ClipDistance */
 }
 
 void spv_emit_image_query_capability(SpvEmitter* e) {
@@ -680,6 +686,30 @@ uint32_t spv_emit_point_size_output(SpvEmitter* e, uint32_t f32_type) {
 
 uint32_t spv_emit_layer_output(SpvEmitter* e, uint32_t i32_type) {
     return output_vec4(e, i32_type, 11, 9); /* BuiltIn Layer */
+}
+
+uint32_t spv_emit_clip_distance_output(SpvEmitter* e, uint32_t f32_type, uint32_t u32_type, uint32_t length) {
+    uint32_t length_id = spv_emit_constant_u32(e, u32_type, length);
+    uint32_t array_type = spv_emit_id(e);
+    instruction(&e->types, OP_TYPE_ARRAY, 4);
+    put(&e->types, array_type);
+    put(&e->types, f32_type);
+    put(&e->types, length_id);
+    uint32_t pointer_type = type_pointer(e, 3, array_type);
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->decorations, OP_DECORATE, 4);
+    put(&e->decorations, id);
+    put(&e->decorations, 11); /* BuiltIn */
+    put(&e->decorations, 3);  /* ClipDistance */
+    instruction(&e->types, OP_VARIABLE, 4);
+    put(&e->types, pointer_type);
+    put(&e->types, id);
+    put(&e->types, 3); /* Output */
+    return id;
+}
+
+uint32_t spv_emit_output_element_pointer(SpvEmitter* e, uint32_t f32_type, uint32_t array, uint32_t index) {
+    return spv_emit_function_element_pointer(e, type_pointer(e, 3, f32_type), array, index);
 }
 
 uint32_t spv_emit_frag_depth_output(SpvEmitter* e, uint32_t f32_type) {
@@ -1474,6 +1504,28 @@ uint32_t spv_emit_sample2d_bias(SpvEmitter* e, uint32_t result_type, uint32_t sa
     return id;
 }
 
+uint32_t spv_emit_sample_image(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
+                               uint32_t coordinates, uint32_t depth_reference, uint32_t mode, uint32_t level,
+                               uint32_t offset, int dynamic_offset) {
+    uint32_t image = spv_emit_load(e, sampled_type, sampler);
+    uint32_t id = spv_emit_id(e);
+    uint32_t operands = mode == 1 ? 2 : mode == 2 ? 1 : 0;
+    if (offset) operands |= dynamic_offset ? 16 : 8;
+    uint32_t opcode = mode == 1 ? depth_reference ? OP_IMAGE_SAMPLE_DREF_EXPLICIT_LOD : OP_IMAGE_SAMPLE_EXPLICIT_LOD
+                      : depth_reference ? OP_IMAGE_SAMPLE_DREF_IMPLICIT_LOD
+                                        : OP_IMAGE_SAMPLE_IMPLICIT_LOD;
+    instruction(&e->functions, opcode, 5 + !!depth_reference + !!operands + !!level + !!offset);
+    put(&e->functions, result_type);
+    put(&e->functions, id);
+    put(&e->functions, image);
+    put(&e->functions, coordinates);
+    if (depth_reference) put(&e->functions, depth_reference);
+    if (operands) put(&e->functions, operands);
+    if (level) put(&e->functions, level);
+    if (offset) put(&e->functions, offset);
+    return id;
+}
+
 void spv_emit_no_contraction(SpvEmitter* e, uint32_t result) {
     instruction(&e->decorations, OP_DECORATE, 3);
     put(&e->decorations, result);
@@ -1504,6 +1556,22 @@ uint32_t spv_emit_iadd_u32(SpvEmitter* e, uint32_t u32_type, uint32_t left, uint
 
 uint32_t spv_emit_imul_u32(SpvEmitter* e, uint32_t u32_type, uint32_t left, uint32_t right) {
     return binary(e, OP_IMUL, u32_type, left, right);
+}
+
+uint32_t spv_emit_umul_high_u32(SpvEmitter* e, uint32_t u32_type, uint32_t left, uint32_t right) {
+    uint32_t pair_type = spv_emit_id(e);
+    instruction(&e->types, OP_TYPE_STRUCT, 4);
+    put(&e->types, pair_type);
+    put(&e->types, u32_type);
+    put(&e->types, u32_type);
+    uint32_t pair = binary(e, OP_UMUL_EXTENDED, pair_type, left, right);
+    uint32_t high = spv_emit_id(e);
+    instruction(&e->functions, OP_COMPOSITE_EXTRACT, 5);
+    put(&e->functions, u32_type);
+    put(&e->functions, high);
+    put(&e->functions, pair);
+    put(&e->functions, 1);
+    return high;
 }
 
 void spv_emit_store(SpvEmitter* e, uint32_t pointer, uint32_t value) {

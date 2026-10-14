@@ -53,7 +53,10 @@ void spv_emit_shader_capability(SpvEmitter* e);
 void spv_emit_float64_capability(SpvEmitter* e);
 void spv_emit_draw_parameters_capability(SpvEmitter* e);
 void spv_emit_layer_capability(SpvEmitter* e);
+void spv_emit_clip_distance_capability(SpvEmitter* e);
 uint32_t spv_emit_layer_output(SpvEmitter* e, uint32_t i32_type);
+uint32_t spv_emit_clip_distance_output(SpvEmitter* e, uint32_t f32_type, uint32_t u32_type, uint32_t length);
+uint32_t spv_emit_output_element_pointer(SpvEmitter* e, uint32_t f32_type, uint32_t array, uint32_t index);
 void spv_emit_image_query_capability(SpvEmitter* e);
 void spv_emit_subgroup_capabilities(SpvEmitter* e);
 void spv_emit_image_gather_extended_capability(SpvEmitter* e);
@@ -204,11 +207,16 @@ uint32_t spv_emit_sample2d_offset(SpvEmitter* e, uint32_t vec4_type, uint32_t sa
                                   uint32_t coordinates, uint32_t offset, int dynamic_offset);
 uint32_t spv_emit_sample2d_bias(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
                                 uint32_t coordinates, uint32_t bias);
+/* mode: 0 implicit LOD, 1 explicit LOD, 2 bias. Optional depth and texel offset. */
+uint32_t spv_emit_sample_image(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
+                               uint32_t coordinates, uint32_t depth_reference, uint32_t mode, uint32_t level,
+                               uint32_t offset, int dynamic_offset);
 void spv_emit_no_contraction(SpvEmitter* e, uint32_t result);
 uint32_t spv_emit_storage_access_u32(SpvEmitter* e, uint32_t pointer_type, uint32_t buffer, uint32_t member_index,
                                      uint32_t element_index);
 uint32_t spv_emit_iadd_u32(SpvEmitter* e, uint32_t u32_type, uint32_t left, uint32_t right);
 uint32_t spv_emit_imul_u32(SpvEmitter* e, uint32_t u32_type, uint32_t left, uint32_t right);
+uint32_t spv_emit_umul_high_u32(SpvEmitter* e, uint32_t u32_type, uint32_t left, uint32_t right);
 void spv_emit_store_u32(SpvEmitter* e, uint32_t pointer, uint32_t value);
 void spv_emit_store(SpvEmitter* e, uint32_t pointer, uint32_t value);
 void spv_emit_return(SpvEmitter* e);

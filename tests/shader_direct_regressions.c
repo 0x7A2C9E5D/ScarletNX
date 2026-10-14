@@ -18,6 +18,7 @@
 static int failures;
 static const char* storage_paths[2];
 static const char* nro_paths[4];
+static const char* issue126_paths[9];
 static void check(int condition, const char* what) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s\n", what);
@@ -35,6 +36,7 @@ static u32* translate_with_rt_mask(const u64* instructions, int count, int stage
     }
     memset(info, 0, sizeof *info);
     info->rt_int_mask = rt_mask;
+    if (stage == ST_VS) info->clip_enable = rt_mask;
     if (stage == ST_CS) {
         info->cs_local[0] = info->cs_local[1] = info->cs_local[2] = 1;
         info->shared_size = 16;
@@ -311,12 +313,67 @@ static void nro_shader_modes(void) {
     }
 }
 
+static void issue126_shader_modes(void) {
+    const u64 intmath[] = {
+        0x1f00000000070000ull | (7ull << 20) | (1ull << 8),                               /* IMUL32I low */
+        0x1f00000000070002ull | (1ull << 53) | (1ull << 54) | (3ull << 20) | (1ull << 8), /* signed high */
+        0x8000000000070004ull | (3ull << 20) | (1ull << 8),                               /* IMAD32I */
+    };
+    const u64 clip[] = {0xeff000000007ff00ull | (0x2c0ull << 20)};
+    const u64 bindless[] = {
+        0x4c98078800070004ull, /* MOV R4, c[0][...] supplies the texture handle */
+        0xdea0000000070008ull | (6ull << 28) | (1ull << 37) | (4ull << 20), /* TEX.B cube LZ */
+    };
+    const u64 indexed_handle[] = {
+        0xef94002000070004ull, /* LDC R4, c[0][R0 + 0x20] */
+        0xdd380007a0470000ull, /* TLD.B using the handle loaded above */
+    };
+    const u64 tex3d[] = {0x4c98078800070004ull, 0xdea0000000070008ull | (4ull << 28) | (3ull << 37) | (4ull << 20)};
+    const u64 cube_array_bias[] = {0x4c98078800070004ull,
+                                   0xdea0000000070008ull | (7ull << 28) | (2ull << 37) | (4ull << 20)};
+    const u64 tex1d_array[] = {0x4c98078800070004ull,
+                               0xdea0000000070008ull | (1ull << 28) | (1ull << 37) | (4ull << 20)};
+    const u64 split_handle[] = {
+        0x4c98078800070004ull,
+        0x4c98078800470005ull,
+        0x5c40000000070006ull | (4ull << 8) | (5ull << 20) | (1ull << 41), /* LOP.OR R6, R4, R5 */
+        0xdea0000000070008ull | (2ull << 28) | (1ull << 37) | (6ull << 20),
+    };
+    const u64 dynamic_3d_offset[] = {0x4c98078800070004ull,
+                                     0xdea0000000070008ull | (4ull << 28) | (1ull << 36) | (4ull << 20)};
+    struct {
+        const u64* instructions;
+        int count, stage;
+        u32 mask;
+        u32 opcode;
+    } cases[] = {
+        {intmath, 3, ST_FS, 0, 151},       {clip, 1, ST_VS, 1, 65},         {bindless, 2, ST_FS, 0, 88},
+        {indexed_handle, 2, ST_FS, 0, 95}, {tex3d, 2, ST_FS, 0, 88},        {cube_array_bias, 2, ST_FS, 0, 87},
+        {tex1d_array, 2, ST_FS, 0, 88},    {split_handle, 4, ST_FS, 0, 88}, {dynamic_3d_offset, 2, ST_FS, 0, 103}};
+    for (int i = 0; i < 9; i++) {
+        ShaderInfo info;
+        size_t words = 0;
+        u32* code = translate_with_rt_mask(cases[i].instructions, cases[i].count, cases[i].stage, &info, &words, 1,
+                                           cases[i].mask);
+        check(code && !info.unsupported, "issue 126 shader translates");
+        if (code) {
+            check(count_opcode(code, words, cases[i].opcode, 0xffffffffu) > 0,
+                  "issue 126 emits the expected SPIR-V instruction");
+            if (i == 1) check(info.uses_clip_mask == 1, "enabled clip distance is reported");
+            if (i == 7) check(info.ntex == 1 && info.tex[0].bl2, "split bindless handle retains both descriptor reads");
+            save_fixture(issue126_paths[i], code, words);
+        }
+        free(code);
+    }
+}
+
 int main(int argc, char** argv) {
-    if (argc != 1 && argc != 7) return 2;
-    if (argc == 7) {
+    if (argc != 1 && argc != 16) return 2;
+    if (argc == 16) {
         storage_paths[0] = argv[1];
         storage_paths[1] = argv[2];
         for (int i = 0; i < 4; i++) nro_paths[i] = argv[i + 3];
+        for (int i = 0; i < 9; i++) issue126_paths[i] = argv[i + 7];
     }
     brx_length();
     f2i_modifiers();
@@ -325,5 +382,6 @@ int main(int argc, char** argv) {
     precise_math();
     fragment_storage_images();
     nro_shader_modes();
+    issue126_shader_modes();
     return failures ? 1 : 0;
 }
