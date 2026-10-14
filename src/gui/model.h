@@ -21,6 +21,9 @@ typedef struct {
     GuiLoadView view;
     bool running, fullscreen, gccjit, gdbstub, quit;
     int theme_next; /* the GUI moves to the next theme and clears it */
+    /* the recent games above the items: how many, the focused one + 1 (0: an item has the focus), and the one
+       to run + 1, which the GUI runs and clears */
+    int recent, recent_focus, recent_open;
 } GuiMenu;
 void gui_menu_key(GuiMenu* menu, GuiKey key);
 const char* gui_setting_description(const GuiMenu* menu);

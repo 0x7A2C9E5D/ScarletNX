@@ -36,12 +36,39 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
     } else {
         menu->focus_load = false;
     }
+    /* the recent games and the items are one ring: the last game leads to the first item, Exit to the first game */
     switch (key) {
         case GUI_UP:
-        case GUI_LEFT: menu->selected = (menu->selected + GUI_ITEM_COUNT - 1) % GUI_ITEM_COUNT; break;
+        case GUI_LEFT:
+            if (menu->recent_focus > 1)
+                menu->recent_focus--;
+            else if (menu->recent_focus) {
+                menu->recent_focus = 0;
+                menu->selected = GUI_ITEM_COUNT - 1;
+            } else if (menu->selected == 0 && menu->recent)
+                menu->recent_focus = menu->recent;
+            else
+                menu->selected = (menu->selected + GUI_ITEM_COUNT - 1) % GUI_ITEM_COUNT;
+            break;
         case GUI_DOWN:
-        case GUI_RIGHT: menu->selected = (menu->selected + 1) % GUI_ITEM_COUNT; break;
+        case GUI_RIGHT:
+            if (menu->recent_focus && menu->recent_focus < menu->recent)
+                menu->recent_focus++;
+            else if (menu->recent_focus) {
+                menu->recent_focus = 0;
+                menu->selected = 0;
+            } else if (menu->selected == GUI_ITEM_COUNT - 1 && menu->recent)
+                menu->recent_focus = 1;
+            else
+                menu->selected = (menu->selected + 1) % GUI_ITEM_COUNT;
+            break;
         case GUI_SELECT:
+            if (menu->recent_focus) {
+                menu->recent_open = menu->recent_focus;
+                menu->view = GUI_LOAD_NONE;
+                menu->focus_load = menu->load_activated = false;
+                break;
+            }
             menu->active = menu->selected;
             menu->activated = true;
             menu->load_activated = false;

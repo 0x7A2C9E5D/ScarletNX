@@ -22,6 +22,7 @@
 #include <SDL3/SDL.h>
 #include <time.h>
 #include "window_icon.h"
+#include "build_info.h"
 
 static SDL_Window* g_win;
 /* the window's size in pixels, width | height << 32: the renderer reads it on its own thread, and one atomic keeps
@@ -154,8 +155,10 @@ void video_init(const char* title) {
         SDL_VERSIONNUM_MICRO(SDL_GetVersion()), SDL_GetCurrentVideoDriver());
     unattended_start();
     int w, h;
+    char header[512];
     backend_window_size(&w, &h);
-    g_win = SDL_CreateWindow(title, w, h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    snprintf(header, sizeof header, "%s - %s", title, snx_build_info());
+    g_win = SDL_CreateWindow(header, w, h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     if (!g_win) fatal("SDL could not open a Vulkan window: %s", SDL_GetError());
     snx_window_icon(g_win);
     SDL_GetWindowSizeInPixels(g_win, &w, &h);
