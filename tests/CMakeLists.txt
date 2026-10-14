@@ -32,7 +32,7 @@ function(snx_test_target target standard)
 endfunction()
 
 # Validate the direct writer against SPIRV-Tools when the system tools are installed.
-if(SNX_BUILD_NX AND SNX_VULKAN)
+if(SNX_BUILD_NX)
     find_program(SNX_SPIRV_VAL spirv-val)
     find_program(SNX_SPIRV_DIS spirv-dis)
     find_package(Python3 QUIET COMPONENTS Interpreter)
