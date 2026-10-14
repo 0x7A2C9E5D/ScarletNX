@@ -8,18 +8,33 @@
 void gui_menu_key(GuiMenu* menu, GuiKey key) {
     if (menu->running) return;
     if (menu->view == GUI_LOAD_GAMES) return; /* the paginated browser owns its keys */
-    if (menu->view == GUI_LOAD_DROP) {
-        if (key == GUI_CANCEL) menu->view = GUI_LOAD_OPTIONS;
+    if (menu->view == GUI_LOAD_KEYS) {
+        if (key == GUI_CANCEL) menu->view = GUI_LOAD_NONE;
         return;
     }
-    if (menu->view == GUI_LOAD_OPTIONS) {
-        if (key == GUI_CANCEL)
-            menu->view = GUI_LOAD_NONE;
-        else if (key == GUI_UP || key == GUI_DOWN || key == GUI_LEFT || key == GUI_RIGHT)
-            menu->load_selected ^= 1;
-        else if (key == GUI_SELECT)
-            menu->view = menu->load_selected == GUI_LOAD_DRAG ? GUI_LOAD_DROP : GUI_LOAD_GAMES;
-        return;
+    if (menu->view == GUI_LOAD_OPTIONS || menu->view == GUI_LOAD_DROP) {
+        if (key == GUI_CANCEL) {
+            menu->view = menu->view == GUI_LOAD_DROP ? GUI_LOAD_OPTIONS : GUI_LOAD_NONE;
+            menu->selected = menu->active;
+            menu->focus_load = menu->view == GUI_LOAD_OPTIONS;
+            menu->load_activated = false;
+            return;
+        }
+        if (menu->focus_load) {
+            if (key == GUI_UP || key == GUI_DOWN || key == GUI_LEFT || key == GUI_RIGHT)
+                menu->load_selected ^= 1;
+            else if (key == GUI_SELECT) {
+                menu->selected = menu->active;
+                menu->load_active = menu->load_selected;
+                menu->load_activated = true;
+                menu->view = menu->load_selected == GUI_LOAD_DRAG ? GUI_LOAD_DROP : GUI_LOAD_GAMES;
+            }
+            return;
+        }
+        /* Main-menu focus may move while the submenu stays anchored to active.
+           Only explicit activation below replaces/closes that submenu. */
+    } else {
+        menu->focus_load = false;
     }
     switch (key) {
         case GUI_UP:
@@ -27,17 +42,53 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
         case GUI_DOWN:
         case GUI_RIGHT: menu->selected = (menu->selected + 1) % GUI_ITEM_COUNT; break;
         case GUI_SELECT:
+            menu->active = menu->selected;
+            menu->activated = true;
+            menu->load_activated = false;
+            menu->view = GUI_LOAD_NONE;
             if (menu->selected == GUI_FULLSCREEN)
                 menu->fullscreen = !menu->fullscreen;
+            else if (menu->selected == GUI_GCCJIT) {
+                if (SNX_GUI_HAS_GCCJIT) menu->gccjit = !menu->gccjit;
+            } else if (menu->selected == GUI_GDBSTUB)
+                menu->gdbstub = !menu->gdbstub;
             else if (menu->selected == GUI_EXIT)
                 menu->quit = true;
+            else if (menu->selected == GUI_KEYS)
+                menu->view = GUI_LOAD_KEYS;
             else {
                 menu->view = GUI_LOAD_OPTIONS;
                 menu->load_selected = GUI_LOAD_DRAG;
+                menu->focus_load = true;
             }
             break;
         default: break;
     }
+}
+const char* gui_setting_description(const GuiMenu* menu) {
+    switch (menu->selected) {
+        case GUI_FULLSCREEN:
+            return "Enable fullscreen at startup";
+        case GUI_GCCJIT:
+            return SNX_GUI_HAS_GCCJIT
+                ? "libgccjit will be used instead of llvm"
+                : "Program was not compiled with libgccjit";
+        case GUI_GDBSTUB:
+            return "Enables gdbstub on port 1234";
+        default: return "";
+    }
+}
+size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv) {
+    size_t n = 0;
+    /* These are Switch options, never guest argv for the CPU-only Linux driver. */
+    if (menu->selected != GUI_SWITCH) return 0;
+    if (menu->fullscreen) argv[n++] = "-f";
+    if (menu->gccjit && SNX_GUI_HAS_GCCJIT && !prepared) argv[n++] = "--backend=gcc";
+    if (menu->gdbstub) {
+        argv[n++] = "-S";
+        argv[n++] = "-s";
+    }
+    return n;
 }
 size_t gui_browser_pages(const GuiBrowser* browser) {
     if (!browser->count || !browser->page_size) return 1;
@@ -65,7 +116,11 @@ GuiBrowserAction gui_browser_key(GuiBrowser* browser, GuiKey key) {
     size_t items = gui_browser_items(browser);
     switch (key) {
         case GUI_CANCEL: return GUI_BROWSER_BACK;
-        case GUI_SELECT: return browser->selected ? GUI_BROWSER_OPEN : GUI_BROWSER_BACK;
+        case GUI_SELECT:
+            if (!browser->selected) return GUI_BROWSER_BACK;
+            browser->active = browser->page * browser->page_size + browser->selected - 1;
+            browser->activated = true;
+            return GUI_BROWSER_OPEN;
         case GUI_UP: browser->selected = browser->selected ? browser->selected - 1 : items; break;
         case GUI_DOWN: browser->selected = browser->selected < items ? browser->selected + 1 : 0; break;
         case GUI_LEFT:

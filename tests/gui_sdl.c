@@ -12,21 +12,43 @@ static void key(App* app, SDL_Keycode code) {
     assert(SDL_PushEvent(&e));
     while (SDL_PollEvent(&e)) event(app, &e);
 }
-static void red_text(App* app, int row, const char* prompt) {
-    /* Verify the exact text and its bright red glyphs in the real renderer. */
+static void mouse(App* app, int col, int row, bool click) {
+    layout(app);
+    SDL_Event e = {0};
+    float x, y;
+    assert(SDL_RenderCoordinatesToWindow(app->renderer, (col + 0.5f) * 8 * app->scale,
+                                        (row + 0.5f) * 16 * app->scale, &x, &y));
+    if (click) {
+        e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+        e.button.button = SDL_BUTTON_LEFT;
+        e.button.x = x;
+        e.button.y = y;
+    } else {
+        e.type = SDL_EVENT_MOUSE_MOTION;
+        e.motion.x = x;
+        e.motion.y = y;
+    }
+    event(app, &e);
+}
+static void colored_text_at(App* app, int col, int row, const char* prompt, SDL_Color color) {
+    /* Verify the exact text and its glyph color in the real renderer. */
     SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
     assert(image);
     for (int i = 0; prompt[i]; ++i)
         for (int y = 0; y < 16; ++y)
             for (int x = 0; x < 8; ++x) {
                 Uint8 r, g, b, a;
-                assert(SDL_ReadSurfacePixel(image, ((i + 1) * 8 + x) * app->scale, (row * 16 + y) * app->scale, &r, &g,
+                assert(SDL_ReadSurfacePixel(image, ((i + col) * 8 + x) * app->scale, (row * 16 + y) * app->scale, &r, &g,
                                             &b, &a));
                 bool ink = (gui_vga_font[(unsigned char)prompt[i] * 16 + y] & (0x80 >> x)) != 0;
-                assert(r == (ink ? 255 : 0) && g == 0 && b == 0);
+                assert(r == (ink ? color.r : 0) && g == (ink ? color.g : 0) && b == (ink ? color.b : 0));
             }
     SDL_DestroySurface(image);
 }
+static void colored_text(App* app, int row, const char* prompt, SDL_Color color) {
+    colored_text_at(app, 1, row, prompt, color);
+}
+static void red_text(App* app, int row, const char* prompt) { colored_text(app, row, prompt, red); }
 static void finish(App* app, int status) {
     assert(app->menu.running && !app->finished && !app->aborting && !app->abnormal_exit);
     int selected = app->menu.selected;
@@ -45,6 +67,7 @@ static void finish(App* app, int status) {
     red_text(app, 3, "Press [ESC] to return to menu");
     if (status) red_text(app, 1, expected);
     for (int i = 0; i < 3; ++i) pump(app);
+    mouse(app, 2, 4, true); /* A completed process still requires ESC acknowledgement. */
     key(app, SDLK_DOWN);
     key(app, SDLK_RETURN);
     key(app, SDLK_SPACE);
@@ -54,7 +77,7 @@ static void finish(App* app, int status) {
     assert(!app->menu.quit && !app->message[0] && app->has_output);
     assert(app->menu.selected == selected && app->menu.fullscreen);
     render(app);
-    assert(app->log_top == 16);
+    assert(app->log_top == menu_row(app, GUI_EXIT) + 6);
 }
 static int SDLCALL hang(void* unused) {
     (void)unused;
@@ -67,9 +90,16 @@ int main(int argc, char** argv) {
         SDL_WaitThread(thread, NULL); /* Never returns. ESC must kill, not request a graceful exit. */
         return 1;
     }
-    if (argc == 2 && !strcmp(argv[1], "--fullscreen")) {
+    if (argc == 2 && !strcmp(argv[1], "-f")) {
         puts("prepared game stdout");
         fputs("prepared game stderr\n", stderr);
+        return 0;
+    }
+    if (argc > 1 && strstr(argv[1], "option flags")) {
+        int i = 2;
+        assert(argc == 5 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "-f"));
+        if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
+        assert(!strcmp(argv[i++], "-S") && !strcmp(argv[i++], "-s") && i == argc);
         return 0;
     }
     if (argc > 1) {
@@ -83,7 +113,7 @@ int main(int argc, char** argv) {
         assert(strstr(argv[1], "game with spaces"));
         bool nx = strstr(argv[0], "mariko") != NULL;
         if (nx)
-            assert(argc == 3 && !strcmp(argv[2], "--fullscreen"));
+            assert(argc == 3 && !strcmp(argv[2], "-f"));
         else
             assert(argc == 2);
         size_t size;
@@ -118,15 +148,145 @@ int main(int argc, char** argv) {
     free(app.games_dir);
     app.games_dir = snx_path_join(temporary, "games");
     render(&app);
+    colored_text(&app, menu_row(&app, GUI_SWITCH), "- Load Switch NSP/XCI/NRO", yellow);
+    assert(!app.menu.activated);
     key(&app, SDLK_DOWN);
+    key(&app, SDLK_RIGHT);
+    assert(app.menu.selected == GUI_KEYS);
+    /* Never touch the real user's keys: exercise installation in a private home. */
+    free(app.keys_path);
+    char* switch_dir = snx_path_join(temporary, ".switch");
+    app.keys_path = snx_path_join(switch_dir, "prod.keys");
+    char* source_keys = snx_path_join(temporary, "prod.keys");
+    assert(!snx_write_file(source_keys, "first keys", 10));
+    key(&app, SDLK_RETURN);
+    assert(app.menu.view == GUI_LOAD_KEYS);
+    render(&app);
+    drop(&app, input, false); /* A game is not a key file and must not launch. */
+    assert(app.menu.view == GUI_LOAD_KEYS && !app.menu.running && !snx_is_file(app.keys_path));
+    drop(&app, "file://remote/prod.keys", true);
+    assert(app.menu.view == GUI_LOAD_KEYS && !snx_is_file(app.keys_path));
+    SDL_Event keys_event = {0};
+    keys_event.type = SDL_EVENT_DROP_FILE;
+    keys_event.drop.data = source_keys;
+    event(&app, &keys_event);
+    assert(app.menu.view == GUI_LOAD_NONE && !app.menu.running);
+    size_t keys_size;
+    unsigned char* keys_data = snx_read_file(app.keys_path, &keys_size);
+    assert(keys_data && keys_size == 10 && !memcmp(keys_data, "first keys", 10));
+    free(keys_data);
+#ifndef _WIN32
+    struct stat keys_stat;
+    assert(!stat(app.keys_path, &keys_stat) && (keys_stat.st_mode & 0777) == 0600);
+#endif
+    key(&app, SDLK_RETURN);
+    render(&app);
+    red_text(&app, 4, "Keys already setup. This will overwrite the previous ones");
+    key(&app, SDLK_ESCAPE);
+    assert(app.menu.view == GUI_LOAD_NONE);
+    key(&app, SDLK_RETURN);
+    assert(!snx_write_file(source_keys, "replacement", 11));
+    char* quoted_keys = snx_format("\"%s\"", source_keys);
+    keys_event.type = SDL_EVENT_DROP_TEXT;
+    keys_event.drop.data = quoted_keys;
+    event(&app, &keys_event);
+    free(quoted_keys);
+    keys_data = snx_read_file(app.keys_path, &keys_size);
+    assert(keys_data && keys_size == 11 && !memcmp(keys_data, "replacement", 11));
+    free(keys_data);
+    key(&app, SDLK_RETURN);
+    drop(&app, app.keys_path, false); /* Dropping the destination itself is safe. */
+    keys_data = snx_read_file(app.keys_path, &keys_size);
+    assert(keys_data && keys_size == 11 && !memcmp(keys_data, "replacement", 11));
+    free(keys_data);
+    key(&app, SDLK_RETURN);
+    assert(!snx_remove_tree(source_keys));
+    drop(&app, source_keys, false);
+    assert(app.menu.view == GUI_LOAD_KEYS && snx_file_size(app.keys_path) == 11);
+    /* Failed replacement must leave the destination untouched and permit retry. */
+    assert(!snx_remove_tree(app.keys_path) && !snx_mkdirs(app.keys_path));
+    assert(!snx_write_file(source_keys, "replacement", 11));
+    drop(&app, source_keys, false);
+    assert(app.menu.view == GUI_LOAD_KEYS && snx_is_dir(app.keys_path) && app.message[0]);
+    assert(!snx_remove_tree(app.keys_path));
+    drop(&app, source_keys, false);
+    assert(app.menu.view == GUI_LOAD_NONE && snx_is_file(app.keys_path));
+    free(switch_dir);
+    free(source_keys);
     key(&app, SDLK_RIGHT);
     assert(app.menu.selected == GUI_FULLSCREEN);
     key(&app, SDLK_SPACE);
     assert(app.menu.fullscreen);
+    mouse(&app, 2, menu_row(&app, GUI_GCCJIT), false);
+    assert(app.menu.selected == GUI_GCCJIT && !app.menu.gccjit);
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_GCCJIT), "- [OFF] Enable libgccjit", yellow);
+    colored_text(&app, menu_row(&app, GUI_FULLSCREEN), "- [ON] Fullscreen", pink);
+    colored_text(&app, app.rows - 4, SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
+                                                      : "Program was not compiled with libgccjit", normal);
+    mouse(&app, 2, menu_row(&app, GUI_GCCJIT), true);
+    assert(app.menu.gccjit == !!SNX_GUI_HAS_GCCJIT);
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_GCCJIT),
+                 SNX_GUI_HAS_GCCJIT ? "- [ON] Enable libgccjit" : "- [OFF] Enable libgccjit", pink);
+    mouse(&app, 2, menu_row(&app, GUI_GCCJIT), true);
+    assert(!app.menu.gccjit);
+    mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), false);
+    assert(app.menu.selected == GUI_GDBSTUB && !app.menu.gdbstub);
+    render(&app);
+    colored_text(&app, app.rows - 4, "Enables gdbstub on port 1234", normal);
+    mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), true);
+    assert(app.menu.gdbstub);
+    mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), true);
+    assert(!app.menu.gdbstub);
+    mouse(&app, 2, menu_row(&app, GUI_FULLSCREEN), false);
+    assert(app.menu.selected == GUI_FULLSCREEN && app.menu.fullscreen);
+    render(&app);
+    colored_text(&app, app.rows - 4, "Enable fullscreen at startup", normal);
+    mouse(&app, 2, menu_row(&app, GUI_FULLSCREEN), true);
+    assert(!app.menu.fullscreen);
+    mouse(&app, 0, 0, true); /* Blank space must not activate the current selection. */
+    assert(!app.menu.fullscreen);
+    mouse(&app, 2, menu_row(&app, GUI_FULLSCREEN), true);
+    assert(app.menu.fullscreen);
     key(&app, SDLK_UP);
+    key(&app, SDLK_LEFT);
     key(&app, SDLK_LEFT);
     key(&app, SDLK_RETURN);
     assert(app.menu.selected == GUI_SWITCH && app.menu.view == GUI_LOAD_OPTIONS);
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_SWITCH), "- Load Switch NSP/XCI/NRO", pink);
+    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 1, "-> Select via drag and drop", yellow);
+    /* Leaving a submenu, including crossing another main option, must neither
+       close it nor move its rows or change its activated owner. */
+    int exit_row = menu_row(&app, GUI_EXIT);
+    mouse(&app, 2, menu_row(&app, GUI_LINUX), false);
+    assert(app.menu.selected == GUI_LINUX && app.menu.active == GUI_SWITCH);
+    assert(app.menu.view == GUI_LOAD_OPTIONS && !app.menu.focus_load);
+    assert(menu_row(&app, GUI_EXIT) == exit_row);
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_SWITCH), "- Load Switch NSP/XCI/NRO", pink);
+    colored_text(&app, menu_row(&app, GUI_LINUX), "- Load Linux ARM ELF", yellow);
+    mouse(&app, 0, 0, false);
+    SDL_Event leave = {.type = SDL_EVENT_WINDOW_MOUSE_LEAVE};
+    event(&app, &leave);
+    assert(app.menu.view == GUI_LOAD_OPTIONS && app.menu.active == GUI_SWITCH);
+    /* Enter explicitly activates the hovered main item; clicking another main
+       item also replaces the submenu, unlike merely hovering over it. */
+    key(&app, SDLK_RETURN);
+    assert(app.menu.active == GUI_LINUX && app.menu.view == GUI_LOAD_OPTIONS);
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_LINUX), "- Load Linux ARM ELF", pink);
+    mouse(&app, 2, menu_row(&app, GUI_SWITCH), true);
+    assert(app.menu.active == GUI_SWITCH && app.menu.view == GUI_LOAD_OPTIONS);
+    mouse(&app, 4, menu_row(&app, GUI_SWITCH) + 2, false);
+    assert(app.menu.load_selected == GUI_LOAD_DIRECTORY && app.menu.view == GUI_LOAD_OPTIONS);
+    mouse(&app, 4, menu_row(&app, GUI_SWITCH) + 2, true);
+    assert(app.menu.view == GUI_LOAD_GAMES);
+    mouse(&app, 2, 3, true);
+    assert(app.menu.view == GUI_LOAD_OPTIONS);
+    mouse(&app, 4, menu_row(&app, GUI_SWITCH) + 1, false);
+    assert(app.menu.load_selected == GUI_LOAD_DRAG);
     pump(&app);
     render(&app);
     const char* screenshot = getenv("SNX_GUI_SCREENSHOT");
@@ -139,6 +299,14 @@ int main(int argc, char** argv) {
     assert(app.menu.view == GUI_LOAD_NONE);
     key(&app, SDLK_RETURN);
     key(&app, SDLK_RETURN); /* activate Select via drag and drop */
+    render(&app);
+    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 1, "-> Select via drag and drop", pink);
+    mouse(&app, 4, menu_row(&app, GUI_SWITCH) + 2, false);
+    render(&app);
+    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 1, "-> Select via drag and drop", pink);
+    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 2, "-> Select file from games/ instead", yellow);
+    mouse(&app, 2, menu_row(&app, GUI_LINUX), false);
+    assert(app.menu.active == GUI_SWITCH && app.menu.selected == GUI_LINUX && app.menu.view == GUI_LOAD_DROP);
     SDL_Event e = {0};
     e.type = SDL_EVENT_DROP_TEXT;
     e.drop.data = "one\ntwo";
@@ -147,7 +315,7 @@ int main(int argc, char** argv) {
     e.type = SDL_EVENT_DROP_FILE;
     e.drop.data = input;
     event(&app, &e);
-    assert(app.menu.running);
+    assert(app.menu.running && app.menu.selected == GUI_SWITCH);
     finish(&app, 0);
     key(&app, SDLK_DOWN);
     key(&app, SDLK_SPACE);
@@ -164,6 +332,16 @@ int main(int argc, char** argv) {
     unsigned char* runs = snx_read_file(input, &size);
     assert(runs && size == 1 && runs[0] == '2');
     free(runs);
+    char* flags_input = snx_path_join(temporary, "option flags.nro");
+    assert(!snx_write_file(flags_input, "fixture", 7));
+    app.menu.selected = GUI_SWITCH;
+    app.menu.gccjit = !!SNX_GUI_HAS_GCCJIT;
+    app.menu.gdbstub = true;
+    launch(&app, snx_strdup(flags_input), false);
+    finish(&app, 0);
+    app.menu.gccjit = app.menu.gdbstub = false;
+    app.menu.selected = GUI_LINUX;
+    free(flags_input);
 
     char* hung = snx_path_join(temporary, "hang in join.elf");
     assert(!snx_write_file(hung, "", 0));
@@ -214,7 +392,7 @@ int main(int argc, char** argv) {
     assert(app.menu.view == GUI_LOAD_GAMES && app.games.count == 0 && !app.message[0]);
     key(&app, SDLK_PAGEDOWN);
     assert(app.browser.page == 0 && app.browser.selected == 0);
-    key(&app, SDLK_RETURN); /* Back [ESC] is a selectable item too */
+    mouse(&app, 2, 3, true); /* Back [ESC] is a selectable item too */
     assert(app.menu.view == GUI_LOAD_OPTIONS);
     for (int i = 0; i < 35; ++i) {
         char name[40];
@@ -257,7 +435,11 @@ int main(int argc, char** argv) {
     key(&app, SDLK_PAGEUP);
     key(&app, SDLK_LEFT);
     assert(app.browser.page == 0 && app.browser.selected == 1);
-    key(&app, SDLK_RETURN); /* native prepared game, not another extraction */
+    mouse(&app, 2, 6, false);
+    assert(app.browser.selected == 2 && !app.menu.running && !app.browser.activated);
+    render(&app);
+    colored_text(&app, 6, app.games.names[1], yellow);
+    mouse(&app, 2, 5, true); /* native prepared game, not another extraction */
     assert(app.menu.running);
     finish(&app, 0);
     key(&app, SDLK_DOWN);
@@ -277,9 +459,28 @@ int main(int argc, char** argv) {
     free(removed);
     key(&app, SDLK_RETURN);
     assert(!app.menu.running && app.menu.view == GUI_LOAD_GAMES && app.message[0]);
+    mouse(&app, 2, 6, false);
+    render(&app);
+    colored_text(&app, 5, app.games.names[0], pink);
+    colored_text(&app, 6, app.games.names[1], yellow);
     key(&app, SDLK_ESCAPE);
     key(&app, SDLK_RETURN);
     assert(app.games.count == 34);
+    key(&app, SDLK_ESCAPE);
+    key(&app, SDLK_ESCAPE);
+    /* Compact and spacious layouts share the renderer's mouse hit coordinates. */
+    const int sizes[][2] = {{800, 480}, {1280, 960}, {1280, 800}};
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
+        assert(SDL_SetWindowSize(app.window, sizes[i][0], sizes[i][1]));
+        SDL_SyncWindow(app.window);
+        render(&app);
+        mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), false);
+        assert(app.menu.selected == GUI_GDBSTUB && !app.menu.gdbstub);
+        render(&app);
+        colored_text(&app, menu_row(&app, GUI_GDBSTUB), "- [OFF] Enable gdbstub", yellow);
+        colored_text(&app, app.rows - 4, "Enables gdbstub on port 1234", normal);
+        assert(menu_row(&app, GUI_EXIT) < app.rows - 4);
+    }
     e.type = SDL_EVENT_QUIT;
     event(&app, &e);
     assert(app.menu.quit);
