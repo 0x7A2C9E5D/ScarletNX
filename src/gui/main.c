@@ -12,6 +12,7 @@
 #include "steps.h"
 #include "theme.h"
 #include "window_icon.h"
+#include "build_info.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -911,7 +912,7 @@ static bool initialize(App* app) {
     memset(app, 0, sizeof(*app));
     app->theme = *gui_theme_builtin("default");
     if (!SDL_Init(SDL_INIT_VIDEO)) return false;
-    if (!SDL_CreateWindowAndRenderer("ScarletNX", 1280, 800, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY,
+    if (!SDL_CreateWindowAndRenderer(snx_build_info(), 1280, 800, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY,
                                      &app->window, &app->renderer))
         return false;
     SDL_SetWindowMinimumSize(app->window, 800, 480);

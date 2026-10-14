@@ -161,6 +161,8 @@ int main(int argc, char** argv) {
     }
     App app;
     assert(initialize(&app));
+    /* the window says which build it is: commit, compiler, platform */
+    assert(!strcmp(SDL_GetWindowTitle(app.window), snx_build_info()) && !strncmp(snx_build_info(), "ScarletNX ", 10));
     char* temporary = snx_temp_dir(NULL);
     char* self = snx_executable(argv[0]);
     char* input = snx_path_join(temporary, "game with spaces;literal.nro");
