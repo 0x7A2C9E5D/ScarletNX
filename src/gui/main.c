@@ -12,6 +12,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 typedef struct {
     SDL_Window* window;
@@ -24,15 +27,16 @@ typedef struct {
     GuiConsole console;
     GuiUsage usage;
     const char* drivers;
-    char *cwd, *file, *games_dir;
+    char *cwd, *file, *games_dir, *keys_path;
     char message[512];
     int cols, rows, scale, log_top;
     Uint64 sampled;
     bool has_output, finished, aborting, abnormal_exit;
 } App;
-static const char* const items[] = {"Load Switch NSP/XCI/NRO", "Load Linux ARM ELF", "Fullscreen", "Exit"};
+static const char* const items[] = {"Load Switch NSP/XCI/NRO", "Load Linux ARM ELF", "Setup device keys",
+                                   "Fullscreen", "Enable libgccjit", "Enable gdbstub", "Exit"};
 static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, muted = {160, 170, 180, 255},
-                       red = {255, 0, 0, 255};
+                       red = {255, 0, 0, 255}, pink = {255, 85, 255, 255};
 
 static SDL_Texture* create_font(SDL_Renderer* renderer) {
     SDL_Surface* surface = SDL_CreateSurface(128, 256, SDL_PIXELFORMAT_RGBA32);
@@ -64,6 +68,20 @@ static void text(App* app, int x, int y, const char* value, SDL_Color color) {
         glyph(app, x++, y, gui_glyph(codepoint));
     }
 }
+static int menu_spacing(const App* app) { return app->rows >= 30 ? 2 : 1; }
+static int menu_row(const App* app, int item) {
+    return 4 + item * menu_spacing(app) +
+           (app->menu.view != GUI_LOAD_NONE && item > app->menu.selected ? 2 : 0);
+}
+static void menu_label(const App* app, int item, char* label, size_t size) {
+    if (item == GUI_FULLSCREEN || item == GUI_GCCJIT || item == GUI_GDBSTUB) {
+        bool enabled = item == GUI_FULLSCREEN ? app->menu.fullscreen
+                       : item == GUI_GCCJIT  ? app->menu.gccjit : app->menu.gdbstub;
+        snprintf(label, size, "- [%s] %s", enabled ? "ON" : "OFF", items[item]);
+    } else {
+        snprintf(label, size, "- %s", items[item]);
+    }
+}
 static void layout(App* app) {
     int width, height;
     SDL_GetRenderOutputSize(app->renderer, &width, &height);
@@ -71,7 +89,7 @@ static void layout(App* app) {
     if (app->scale < 1) app->scale = 1;
     app->cols = SDL_min(width / (8 * app->scale), GUI_MAX_COLS);
     app->rows = SDL_min(height / (16 * app->scale), GUI_MAX_ROWS);
-    app->log_top = app->menu.running || app->finished ? 4 : app->menu.view != GUI_LOAD_NONE ? 18 : 16;
+    app->log_top = app->menu.running || app->finished ? 4 : menu_row(app, GUI_EXIT) + 6;
     gui_browser_resize(&app->browser, (size_t)SDL_max(1, app->rows - 10));
     int log_rows = SDL_max(1, app->rows - app->log_top - 4);
     gui_console_resize(&app->console, SDL_max(1, app->cols - 2), log_rows);
@@ -80,16 +98,15 @@ static void render(App* app) {
     layout(app);
     SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255); /* Always OLED black */
     SDL_RenderClear(app->renderer);
-    text(app, 1, 0, "ScarletNX", yellow);
     if (app->menu.view == GUI_LOAD_GAMES && !app->menu.running && !app->finished) {
         text(app, 1, 1, "Up/Down: select. Enter/Space: open. Left/Right or PgUp/PgDown: page.", normal);
         text(app, 1, 2, app->games_dir, muted);
-        text(app, 1, 3, "Back [ESC]", app->browser.selected == 0 ? yellow : normal);
+        text(app, 1, 3, "Back [ESC]", app->browser.selected == 0 ? pink : normal);
         size_t start = app->browser.page * app->browser.page_size;
         size_t count = gui_browser_items(&app->browser);
         for (size_t i = 0; i < count; ++i) {
             bool is_hovered = app->browser.selected == i + 1;
-            text(app, 1, 5 + (int)i, app->games.names[start + i], is_hovered ? yellow : normal);
+            text(app, 1, 5 + (int)i, app->games.names[start + i], is_hovered ? pink : normal);
         }
         if (!app->games.count) text(app, 1, 5, "No executables found in games/.", muted);
         char page[128];
@@ -97,27 +114,31 @@ static void render(App* app) {
                  gui_browser_pages(&app->browser), app->games.count);
         text(app, 1, app->rows - 5, page, muted);
         text(app, 1, app->rows - 4, app->message, yellow);
+    } else if (app->menu.view == GUI_LOAD_KEYS && !app->menu.running && !app->finished) {
+        text(app, 1, 1, "Setup device keys: drag and drop to this window", yellow);
+        text(app, 1, 2, "Ctrl+V: paste a path. ESC: back.", muted);
+        text(app, 1, 3, app->keys_path ? app->keys_path : "Home directory unavailable.", normal);
+        if (app->keys_path && snx_is_file(app->keys_path))
+            text(app, 1, 4, "Keys already setup. This will overwrite the previous ones", red);
+        text(app, 1, 6, app->message, yellow);
+        text(app, 1, 8, "Back [ESC]", pink);
     } else if (!app->menu.running && !app->finished) {
-        text(app, 1, 1, "Arrows: move (Up/Down/Left/Right). Space/Enter: select.", normal);
+        text(app, 1, 1, "Arrows/mouse: move. Space/Enter/click: select.", normal);
         text(app, 1, 2,
              app->menu.view == GUI_LOAD_DROP ? "Drop a file now. Ctrl+V: paste a path. ESC: back."
                                              : "Choose a load option. ESC: back.",
              muted);
         for (int i = 0; i < GUI_ITEM_COUNT; ++i) {
             bool is_hovered = app->menu.selected == i;
-            int row = 4 + i * 2;
-            if (app->menu.view != GUI_LOAD_NONE && i > app->menu.selected) row += 2;
+            int row = menu_row(app, i);
             char label[100];
-            if (i == GUI_FULLSCREEN)
-                snprintf(label, sizeof(label), "- [%s] %s", app->menu.fullscreen ? "ON" : "OFF", items[i]);
-            else
-                snprintf(label, sizeof(label), "- %s", items[i]);
-            text(app, 1, row, label, is_hovered ? yellow : normal);
+            menu_label(app, i, label, sizeof(label));
+            text(app, 1, row, label, is_hovered ? pink : normal);
             if (is_hovered && app->menu.view != GUI_LOAD_NONE) {
                 text(app, 3, row + 1, "-> Select via drag and drop",
-                     app->menu.load_selected == GUI_LOAD_DRAG ? yellow : normal);
+                     app->menu.load_selected == GUI_LOAD_DRAG ? pink : normal);
                 text(app, 3, row + 2, "-> Select file from games/ instead",
-                     app->menu.load_selected == GUI_LOAD_DIRECTORY ? yellow : normal);
+                     app->menu.load_selected == GUI_LOAD_DIRECTORY ? pink : normal);
             }
         }
         text(app, 1, app->log_top - 4, app->message, app->abnormal_exit ? red : yellow);
@@ -131,13 +152,15 @@ static void render(App* app) {
             text(app, 1, 3, app->aborting ? "Aborting process tree..." : "Press [ESC] to abort and return to menu",
                  red);
     }
-    if (app->has_output && app->menu.view != GUI_LOAD_GAMES) {
+    if (app->has_output && app->menu.view != GUI_LOAD_GAMES && app->menu.view != GUI_LOAD_KEYS) {
         SDL_SetTextureColorMod(app->font, normal.r, normal.g, normal.b);
         for (int y = 0; y < app->console.rows; ++y)
             for (int x = 0; x < app->console.cols; ++x)
                 if (app->log_top + y < app->rows - 4 && app->console.cells[y][x] != ' ')
                     glyph(app, x + 1, app->log_top + y, app->console.cells[y][x]);
     }
+    if (!app->menu.running && !app->finished && app->menu.view == GUI_LOAD_NONE)
+        text(app, 1, app->rows - 4, gui_setting_description(&app->menu), normal);
     char footer[256];
     if (app->usage.available)
         snprintf(footer, sizeof(footer), "GUI + children: RAM %.1f MiB (sum RSS)  CPU %.1f%% (100%% = 1 core)",
@@ -211,11 +234,11 @@ static void launch(App* app, char* absolute, bool prepared) {
         free(absolute);
         return;
     }
-    const char* argv[4] = {native ? absolute : driver, native ? NULL : absolute, NULL, NULL};
-    /* GNUABI is a CPU-only ELF driver. Fullscreen is a Switch runtime option,
-       never a Linux guest argv entry and never a change to the GUI window. */
-    if (app->menu.selected == GUI_SWITCH)
-        argv[native ? 1 : 2] = app->menu.fullscreen ? "--fullscreen" : "--fullscreen=0";
+    const char* argv[7] = {native ? absolute : driver};
+    size_t n = 1;
+    if (!native) argv[n++] = absolute;
+    n += gui_launch_options(&app->menu, native, argv + n);
+    argv[n] = NULL;
     bool started = gui_process_start(app->process, argv, app->message, sizeof(app->message));
     free(driver);
     if (!started) {
@@ -233,8 +256,54 @@ static void launch(App* app, char* absolute, bool prepared) {
     app->has_output = true;
     layout(app);
 }
+static char* device_keys_path(void) {
+#ifdef _WIN32
+    const char* home = getenv("USERPROFILE");
+    if (!home || !home[0]) home = getenv("HOME");
+#else
+    const char* home = getenv("HOME");
+#endif
+    if (!home || !home[0]) return NULL;
+    char* directory = snx_path_join(home, ".switch");
+    char* path = directory ? snx_path_join(directory, "prod.keys") : NULL;
+    free(directory);
+    return path;
+}
+static void install_keys(App* app, const char* source) {
+    const char* name = source;
+    if (source)
+        for (const char* p = source; *p; ++p)
+            if (*p == '/' || *p == '\\') name = p + 1;
+    if (!source || strcmp(name, "prod.keys") || !snx_is_file(source)) {
+        snprintf(app->message, sizeof(app->message), "Please drop a readable file named prod.keys.");
+        return;
+    }
+    if (!app->keys_path) {
+        snprintf(app->message, sizeof(app->message), "Cannot locate your home directory. Keys were not installed.");
+        return;
+    }
+    /* Stage privately on the same filesystem, then replace atomically. A failed
+       copy (or dropping the installed file itself) must not destroy existing keys. */
+    char* directory = snx_dirname(app->keys_path);
+    char* temporary = directory && !snx_mkdirs(directory) ? snx_temp_dir(directory) : NULL;
+    char* staged = temporary ? snx_path_join(temporary, "prod.keys") : NULL;
+    bool ok = staged && !snx_copy_file(source, staged);
+#ifndef _WIN32
+    if (ok) ok = chmod(staged, 0600) == 0;
+#endif
+    if (ok) ok = !snx_replace(staged, app->keys_path);
+    if (temporary) snx_remove_tree(temporary);
+    free(staged);
+    free(temporary);
+    free(directory);
+    snprintf(app->message, sizeof(app->message), "%s",
+             ok ? "Device keys installed successfully."
+                : "Cannot install prod.keys. Check file and folder permissions, then try again.");
+    if (ok) app->menu.view = GUI_LOAD_NONE;
+}
 static void drop(App* app, const char* value, bool text_drop) {
-    if (app->menu.view != GUI_LOAD_DROP || app->menu.running || app->finished) return;
+    if ((app->menu.view != GUI_LOAD_DROP && app->menu.view != GUI_LOAD_KEYS) || app->menu.running || app->finished)
+        return;
     char* path = gui_drop_path(value, text_drop);
     if (!path) {
         snprintf(app->message, sizeof(app->message), "Drop one local file path, not a list or remote URL.");
@@ -242,7 +311,12 @@ static void drop(App* app, const char* value, bool text_drop) {
     }
     char* absolute = snx_absolute(path);
     free(path);
-    launch(app, absolute, false);
+    if (app->menu.view == GUI_LOAD_KEYS) {
+        install_keys(app, absolute);
+        free(absolute);
+    } else {
+        launch(app, absolute, false);
+    }
 }
 static void menu_key(App* app, GuiKey key) {
     if (app->finished) {
@@ -273,11 +347,64 @@ static void menu_key(App* app, GuiKey key) {
         return;
     }
     gui_menu_key(&app->menu, key);
-    if (key == GUI_CANCEL) app->message[0] = 0;
+    if (key == GUI_CANCEL || (key == GUI_SELECT && app->menu.view == GUI_LOAD_KEYS)) app->message[0] = 0;
     if (app->menu.view == GUI_LOAD_GAMES) {
         gui_games_scan(&app->games, app->games_dir, app->message, sizeof(app->message));
         app->browser = (GuiBrowser){.count = app->games.count};
         layout(app);
+    }
+}
+static bool hit_text(const App* app, float x, float y, int col, int row, const char* label) {
+    int end = SDL_min(app->cols - 1, col + (int)SDL_utf8strlen(label));
+    return x >= col && x < end && y >= row && y < row + 1;
+}
+static void pointer(App* app, float window_x, float window_y, bool click) {
+    if (app->menu.running || app->finished) return;
+    layout(app);
+    float x, y;
+    if (!SDL_RenderCoordinatesFromWindow(app->renderer, window_x, window_y, &x, &y)) return;
+    x /= 8 * app->scale;
+    y /= 16 * app->scale;
+    if (app->menu.view == GUI_LOAD_KEYS) {
+        if (click && hit_text(app, x, y, 1, 8, "Back [ESC]")) menu_key(app, GUI_CANCEL);
+        return;
+    }
+    if (app->menu.view == GUI_LOAD_GAMES) {
+        if (hit_text(app, x, y, 1, 3, "Back [ESC]")) {
+            app->browser.selected = 0;
+            if (click) menu_key(app, GUI_SELECT);
+            return;
+        }
+        size_t start = app->browser.page * app->browser.page_size;
+        for (size_t i = 0; i < gui_browser_items(&app->browser); ++i) {
+            if (!hit_text(app, x, y, 1, 5 + (int)i, app->games.names[start + i])) continue;
+            app->browser.selected = i + 1;
+            if (click) menu_key(app, GUI_SELECT);
+            return;
+        }
+        return;
+    }
+    if (app->menu.view != GUI_LOAD_NONE) {
+        int row = menu_row(app, app->menu.selected);
+        const char* labels[] = {"-> Select via drag and drop", "-> Select file from games/ instead"};
+        for (int i = 0; i < 2; ++i) {
+            if (!hit_text(app, x, y, 3, row + i + 1, labels[i])) continue;
+            app->menu.load_selected = i;
+            if (click) {
+                app->menu.view = GUI_LOAD_OPTIONS;
+                menu_key(app, GUI_SELECT);
+            }
+            return;
+        }
+    }
+    for (int i = 0; i < GUI_ITEM_COUNT; ++i) {
+        char label[100];
+        menu_label(app, i, label, sizeof(label));
+        if (!hit_text(app, x, y, 1, menu_row(app, i), label)) continue;
+        if (app->menu.selected != i) app->menu.view = GUI_LOAD_NONE;
+        app->menu.selected = i;
+        if (click) menu_key(app, GUI_SELECT);
+        return;
     }
 }
 static void event(App* app, const SDL_Event* e) {
@@ -289,6 +416,14 @@ static void event(App* app, const SDL_Event* e) {
         drop(app, e->drop.data, e->type == SDL_EVENT_DROP_TEXT);
         return; /* SDL3 owns the event's data, unlike SDL2. */
     }
+    if (e->type == SDL_EVENT_MOUSE_MOTION) {
+        pointer(app, e->motion.x, e->motion.y, false);
+        return;
+    }
+    if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN && e->button.button == SDL_BUTTON_LEFT) {
+        pointer(app, e->button.x, e->button.y, true);
+        return;
+    }
     if (e->type != SDL_EVENT_KEY_DOWN) return;
     if (app->menu.running) {
         if (e->key.key == SDLK_ESCAPE && !app->aborting) {
@@ -299,7 +434,8 @@ static void event(App* app, const SDL_Event* e) {
         }
         return;
     }
-    if (e->key.key == SDLK_V && (e->key.mod & SDL_KMOD_CTRL) && app->menu.view == GUI_LOAD_DROP && !e->key.repeat) {
+    if (e->key.key == SDLK_V && (e->key.mod & SDL_KMOD_CTRL) &&
+        (app->menu.view == GUI_LOAD_DROP || app->menu.view == GUI_LOAD_KEYS) && !e->key.repeat) {
         char* clipboard = SDL_GetClipboardText();
         drop(app, clipboard, true);
         SDL_free(clipboard);
@@ -336,6 +472,7 @@ static bool initialize(App* app) {
     app->cwd = SDL_GetCurrentDirectory();
     app->games_dir = snx_path_join(app->cwd ? app->cwd : ".", "games");
     app->drivers = SDL_GetBasePath();
+    app->keys_path = device_keys_path();
     gui_console_init(&app->console, 78, 17);
     if (!app->font || !app->process || !app->drivers) {
         SDL_SetError("Cannot initialize GUI resources");
@@ -348,6 +485,7 @@ static void cleanup(App* app) {
     gui_process_destroy(app->process);
     free(app->file);
     free(app->games_dir);
+    free(app->keys_path);
     gui_games_free(&app->games);
     SDL_free(app->cwd);
     SDL_DestroyTexture(app->font);

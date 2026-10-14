@@ -33,9 +33,13 @@ Pass arguments to the game executable after `--`, for example:
 The argument boundary is retained when launching the deployed game, so game arguments
 cannot trigger launcher actions or overwrite runtime settings. This does not add a
 homebrew-loader guest argv block.
-`--fullscreen` (or `--fullscreen=0` for windowed startup) can also precede or follow
-the dump and is forwarded to the game. It overrides that game's INI setting.
-Use the separate commands for updates, custom keys or compiler options.
+`-f` (or `--fullscreen`) can also precede or follow the dump and is forwarded to
+the game. Omitting it starts windowed, regardless of an older INI value;
+`--fullscreen=0|1` is no longer accepted.
+`--backend=gcc` selects libgccjit instead of the default LLVM backend when preparing
+a dump. An explicit `--backend=llvm|gcc` forces recompilation rather than reusing a
+cached executable built by another compiler.
+Use the separate commands for updates, custom keys or other compiler options.
 
 DXCI and DNSP with decrypted content need no keys. Containers are identified by their headers,
 including renamed files. A matching bundled update is applied automatically. An explicit `--update`
@@ -82,13 +86,13 @@ To run the steps separately:
 ```sh
 ./build/scarletnx -x "Game.xci" --name Game
 ./build/scarletnx -r work/Game Game
-games/Game --fullscreen=0
+games/Game
 ```
 
 ```powershell
 .\build\scarletnx.exe -x "Game.xci" --name Game
 .\build\scarletnx.exe -r work/Game Game
-.\games\Game.exe --fullscreen=0
+.\games\Game.exe
 ```
 
 Remaining examples: POSIX.
@@ -201,11 +205,12 @@ X11 bypasses Wayland. [Licenses](CREDITS.md).
 ## Settings / input
 
 `Game.ini`: help rewritten at startup, most settings hot-reload. `--key=value` overrides one run.
-Restart for `docked`, `language`, `fullscreen`, `resolution`, `memory_gb`, `heap_max_mb`, `profile`.
+Restart for `docked`, `language`, `resolution`, `memory_gb`, `heap_max_mb`, `profile`.
+Fullscreen startup is controlled by `-f`/`--fullscreen`, not the INI; omit it for windowed startup.
 
 | Setting | Effect |
 | --- | --- |
-| `docked=1`, `fullscreen=0` | TV mode, windowed |
+| `docked=1` | TV mode |
 | `resolution=1` | Native scale; range 0.25–4 |
 | `fps_limit=1` | 60 FPS; `0` uncapped; `60..240` explicit cap |
 | `shadows=0` | Skip shadow maps |

@@ -27,6 +27,15 @@ int main(void) {
     assert(menu.view == GUI_LOAD_NONE);
     gui_menu_key(&menu, GUI_DOWN);
     gui_menu_key(&menu, GUI_RIGHT);
+    assert(menu.selected == GUI_KEYS);
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.view == GUI_LOAD_KEYS && !menu.running);
+    gui_menu_key(&menu, GUI_DOWN);
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.selected == GUI_KEYS && menu.view == GUI_LOAD_KEYS);
+    gui_menu_key(&menu, GUI_CANCEL);
+    assert(menu.view == GUI_LOAD_NONE && !menu.quit);
+    gui_menu_key(&menu, GUI_RIGHT);
     assert(menu.selected == GUI_FULLSCREEN);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.fullscreen && menu.view == GUI_LOAD_NONE);
@@ -37,8 +46,40 @@ int main(void) {
     assert(menu.selected == GUI_FULLSCREEN);
     menu.running = false;
     gui_menu_key(&menu, GUI_DOWN);
+    assert(menu.selected == GUI_GCCJIT);
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.gccjit == !!SNX_GUI_HAS_GCCJIT && menu.view == GUI_LOAD_NONE);
+    assert(!strcmp(gui_setting_description(&menu), SNX_GUI_HAS_GCCJIT
+                   ? "libgccjit will be used instead of llvm" : "Program was not compiled with libgccjit"));
+    gui_menu_key(&menu, GUI_DOWN);
+    assert(menu.selected == GUI_GDBSTUB);
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.gdbstub && menu.view == GUI_LOAD_NONE);
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(!menu.gdbstub);
+    gui_menu_key(&menu, GUI_DOWN);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.quit);
+
+    for (int bits = 0; bits < 8; ++bits) {
+        menu = (GuiMenu){.selected = GUI_SWITCH, .fullscreen = !!(bits & 1),
+                         .gccjit = !!(bits & 2), .gdbstub = !!(bits & 4)};
+        for (int prepared = 0; prepared < 2; ++prepared) {
+            const char* args[4];
+            size_t n = gui_launch_options(&menu, prepared, args), i = 0;
+            if (menu.fullscreen) assert(i < n && !strcmp(args[i++], "-f"));
+            if (menu.gccjit && SNX_GUI_HAS_GCCJIT && !prepared)
+                assert(i < n && !strcmp(args[i++], "--backend=gcc"));
+            if (menu.gdbstub) {
+                assert(i < n && !strcmp(args[i++], "-S"));
+                assert(i < n && !strcmp(args[i++], "-s"));
+            }
+            assert(i == n);
+        }
+        menu.selected = GUI_LINUX;
+        const char* args[4];
+        assert(gui_launch_options(&menu, false, args) == 0);
+    }
 
     GuiBrowser browser = {.count = 23};
     gui_browser_resize(&browser, 10);

@@ -8,6 +8,10 @@
 void gui_menu_key(GuiMenu* menu, GuiKey key) {
     if (menu->running) return;
     if (menu->view == GUI_LOAD_GAMES) return; /* the paginated browser owns its keys */
+    if (menu->view == GUI_LOAD_KEYS) {
+        if (key == GUI_CANCEL) menu->view = GUI_LOAD_NONE;
+        return;
+    }
     if (menu->view == GUI_LOAD_DROP) {
         if (key == GUI_CANCEL) menu->view = GUI_LOAD_OPTIONS;
         return;
@@ -29,8 +33,14 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
         case GUI_SELECT:
             if (menu->selected == GUI_FULLSCREEN)
                 menu->fullscreen = !menu->fullscreen;
+            else if (menu->selected == GUI_GCCJIT) {
+                if (SNX_GUI_HAS_GCCJIT) menu->gccjit = !menu->gccjit;
+            } else if (menu->selected == GUI_GDBSTUB)
+                menu->gdbstub = !menu->gdbstub;
             else if (menu->selected == GUI_EXIT)
                 menu->quit = true;
+            else if (menu->selected == GUI_KEYS)
+                menu->view = GUI_LOAD_KEYS;
             else {
                 menu->view = GUI_LOAD_OPTIONS;
                 menu->load_selected = GUI_LOAD_DRAG;
@@ -38,6 +48,31 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
             break;
         default: break;
     }
+}
+const char* gui_setting_description(const GuiMenu* menu) {
+    switch (menu->selected) {
+        case GUI_FULLSCREEN:
+            return "Enable fullscreen at startup";
+        case GUI_GCCJIT:
+            return SNX_GUI_HAS_GCCJIT
+                ? "libgccjit will be used instead of llvm"
+                : "Program was not compiled with libgccjit";
+        case GUI_GDBSTUB:
+            return "Enables gdbstub on port 1234";
+        default: return "";
+    }
+}
+size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv) {
+    size_t n = 0;
+    /* These are Switch options, never guest argv for the CPU-only Linux driver. */
+    if (menu->selected != GUI_SWITCH) return 0;
+    if (menu->fullscreen) argv[n++] = "-f";
+    if (menu->gccjit && SNX_GUI_HAS_GCCJIT && !prepared) argv[n++] = "--backend=gcc";
+    if (menu->gdbstub) {
+        argv[n++] = "-S";
+        argv[n++] = "-s";
+    }
+    return n;
 }
 size_t gui_browser_pages(const GuiBrowser* browser) {
     if (!browser->count || !browser->page_size) return 1;

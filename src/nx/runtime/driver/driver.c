@@ -21,7 +21,8 @@ static void usage(void) {
          "  -x, --extract          Extract XCI/NSP/DXCI/DNSP\n"
          "  -r, --recomp           Recompile ExeFS/NRO or prepare a dump without playing\n"
          "  -H, --headless         Run without a window or swapchain");
-    puts("  --fullscreen[=0|1]     Override the game's fullscreen setting\n"
+    puts("  -f, --fullscreen      Start fullscreen (windowed when omitted)\n"
+         "  --backend=llvm|gcc     Select the recompiler backend for preparation\n"
          "  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game\n"
          "  --repo / --build-dir   Override this build's checkout / build directory");
@@ -70,7 +71,8 @@ static int cached_abi(const char* base, const SnxPaths* paths) {
     free(stamp);
     return expected && abi == expected;
 }
-static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, int game_argc, char** game_argv) {
+static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* backend,
+                     int game_argc, char** game_argv) {
     char *name = game_name(input), *dump = snx_absolute(input);
     char *work = snx_path_join(paths->repo, "work"), *games = snx_path_join(paths->repo, "games");
     char *extracted = snx_path_join(work, name), *pending = snx_format("%s.extracting", extracted);
@@ -123,14 +125,20 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, i
         }
     }
     /* Always restage an NRO: a same-named cached game may belong to another input or an older build. */
-    if (nro || (flags & SNX_RECOMP) || !snx_is_file(game) || !snx_is_file(code) || !cached_abi(base, paths)) {
+    /* An explicit backend must not silently reuse a game built by another compiler. */
+    if (backend || nro || (flags & SNX_RECOMP) || !snx_is_file(game) || !snx_is_file(code) || !cached_abi(base, paths)) {
         command[5] = "-r";
         command[6] = "--outdir";
         command[7] = games;
-        command[8] = "--";
-        command[9] = nro ? dump : extracted;
-        command[10] = name;
-        command[11] = NULL;
+        n = 8;
+        if (backend) {
+            command[n++] = "--backend";
+            command[n++] = backend;
+        }
+        command[n++] = "--";
+        command[n++] = nro ? dump : extracted;
+        command[n++] = name;
+        command[n] = NULL;
         rc = snx_run_stage(command, NULL, "Recompilation");
         if (rc) goto done;
         if (!snx_is_file(game)) {
@@ -145,10 +153,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, i
     n = 0;
     command[n++] = game;
     if (flags & SNX_HEADLESS) command[n++] = "-H";
-    if (flags & SNX_FULLSCREEN)
-        command[n++] = "--fullscreen";
-    else if (flags & SNX_WINDOWED)
-        command[n++] = "--fullscreen=0";
+    if (flags & SNX_FULLSCREEN) command[n++] = "-f";
     if (flags & SNX_STOP)
         command[n++] = "-s";
     else if (flags & SNX_GDB)
@@ -193,10 +198,10 @@ static int container_path(const char* path) {
 }
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
-    const char *repo = SNX_SOURCE_DIR, *build = SNX_BUILD_DIR, *input = NULL;
+    const char *repo = SNX_SOURCE_DIR, *build = SNX_BUILD_DIR, *input = NULL, *backend = NULL;
     char *r = NULL, *b = NULL, *exe = NULL, **rest;
     unsigned flags = 0;
-    int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic;
+    int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, backend_args = 0;
     if (argc <= 1) return -1;
     rest = (char**)snx_alloc((size_t)(argc + 1) * sizeof(*rest));
     for (i = 1; i < argc; ++i) {
@@ -229,6 +234,27 @@ int snx_driver(int argc, char** argv) {
         }
 #endif
         if (parsed) continue;
+        if (!strcmp(argv[i], "--backend") || !strncmp(argv[i], "--backend=", 10)) {
+            const char* option = argv[i];
+            rest[n++] = argv[i];
+            ++backend_args;
+            if (!strcmp(option, "--backend")) {
+                if (++i == argc) {
+                    result = snx_error("--backend requires llvm or gcc");
+                    goto done;
+                }
+                backend = argv[i];
+                rest[n++] = argv[i];
+                ++backend_args;
+            } else {
+                backend = option + 10;
+            }
+            if (strcmp(backend, "llvm") && strcmp(backend, "gcc")) {
+                result = snx_error("unknown backend: %s", backend);
+                goto done;
+            }
+            continue;
+        }
         if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) help = 1;
         if (!input && argv[i][0] != '-') input = argv[i];
         rest[n++] = argv[i];
@@ -241,11 +267,11 @@ int snx_driver(int argc, char** argv) {
         goto done;
     }
     automatic = input && (!(flags & (SNX_EXTRACT | SNX_RECOMP)) || ((flags & SNX_RECOMP) && container_path(input)));
-    if (automatic && (n != 1 || help)) {
+    if (automatic && (n != 1 + backend_args || help)) {
         result = snx_error("automatic preparation accepts one dump file. Pass game arguments after --");
         goto done;
     }
-    if ((flags & (SNX_EXTRACT | SNX_RECOMP)) && (flags & (SNX_HEADLESS | SNX_GDB | SNX_FULLSCREEN | SNX_WINDOWED))) {
+    if ((flags & (SNX_EXTRACT | SNX_RECOMP)) && (flags & (SNX_HEADLESS | SNX_GDB | SNX_FULLSCREEN))) {
         result = snx_error("window and debugger options apply to game execution, not preparation");
         goto done;
     }
@@ -278,7 +304,7 @@ int snx_driver(int argc, char** argv) {
     paths.build = b;
     paths.executable = exe;
     if (automatic)
-        result = play_dump(input, &paths, flags, separator < argc ? argc - separator - 1 : 0,
+        result = play_dump(input, &paths, flags, backend, separator < argc ? argc - separator - 1 : 0,
                            argv + (separator < argc ? separator + 1 : argc));
     else
         result = (flags & SNX_RECOMP) ? snx_recompile(n, rest, &paths) : snx_extract(n, rest, &paths);
