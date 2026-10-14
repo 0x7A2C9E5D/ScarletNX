@@ -60,10 +60,12 @@ static void line(GuiSteps* steps, const char* s, uint64_t now) {
     } else if (prefix(s, "ScarletNX - "))
         begin(steps, "LAUNCH", s + 12, strlen(s + 12), now);
     else if (prefix(s, "vulkan: ") && !steps->gpu && strstr(s, ", Vulkan ")) {
-        /* the first device line: "vulkan: <device> (<driver>), Vulkan <version>, ..." */
+        /* the first device line: "vulkan: <device> [(<driver>)], Vulkan <version>, ..."; a later "(" is not the
+           device's */
         const char* device = s + 8;
-        const char* end = strstr(device, " (");
-        if (!end) end = strstr(device, ", Vulkan ");
+        const char* end = strstr(device, ", Vulkan ");
+        const char* paren = strstr(device, " (");
+        if (paren && paren < end) end = paren;
         begin(steps, "GPU", device, (size_t)(end - device), now);
         steps->gpu = true;
     }

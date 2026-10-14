@@ -59,6 +59,11 @@ int main(void) {
     assert(s.notes == GUI_NOTES_MAX && n == 8 && !strcmp(notes[7]->text, "note 132") &&
            !strcmp(s.note[0].text, "note 5"));
 
+    /* a driver with no "(...)" after the device, and one further on the line */
+    gui_steps_reset(&s);
+    feed(&s, "vulkan: NVIDIA GeForce GT 1030, Vulkan 1.4.312, driver 912B4080, compute 1 (separate family)\n", 1);
+    assert(s.count == 1 && !strcmp(at(&s, 0)->detail, "NVIDIA GeForce GT 1030"));
+
     /* a failed process fails the step it was in, even one already done, and a line cut short still counts */
     gui_steps_reset(&s);
     feed(&s, "Recompiling Broken (2 modules)\n  compiled block 1/2: x\nScarletNX - Bro", 5);
