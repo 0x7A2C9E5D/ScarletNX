@@ -63,29 +63,58 @@ int main(void) {
     assert(!strcmp(theme.marker, def->marker) && same(theme.page, def->page));
 
     char* dir = snx_temp_dir(NULL);
-    assert(dir);
+    char* second = snx_temp_dir(NULL);
+    assert(dir && second);
     write(dir, "alpha", "[theme]\nbase = yorha\nname = Alpha\n");
     write(dir, "beta", NULL); /* a folder without theme.ini */
     write(dir, ".hidden", "[theme]\n");
-    write(dir, "yorha", "[colors]\npage = #FFFFFF\n"); /* a built-in's name stays the built-in */
+    write(dir, "yorha", "[theme]\nbase = yorha\n[colors]\npage = #FFFFFF\n"); /* replaces the built-in */
+    write(second, "alpha", "[theme]\nname = Alpha too\n");                    /* the first folder's wins */
+    write(second, "gamma", "[theme]\nname = Gamma\n");
+    const char* dirs[] = {dir, NULL, second};
     GuiThemes themes = {0};
-    gui_themes_scan(&themes, dir);
-    assert(themes.count == 4 && !strcmp(themes.ids[0], "default") && !strcmp(themes.ids[1], "yorha") &&
-           !strcmp(themes.ids[2], "yorha-loading") && !strcmp(themes.ids[3], "alpha"));
-    gui_theme_load(&theme, dir, "alpha");
+    gui_themes_scan(&themes, dirs, 3);
+    assert(themes.count == 5 && !strcmp(themes.ids[0], "default") && !strcmp(themes.ids[1], "yorha") &&
+           !strcmp(themes.ids[2], "yorha-loading") && !strcmp(themes.ids[3], "alpha") &&
+           !strcmp(themes.ids[4], "gamma"));
+    gui_theme_load(&theme, dirs, 3, "alpha");
     assert(!strcmp(theme.name, "Alpha") && same(theme.page, yorha->page));
-    gui_theme_load(&theme, dir, "yorha");
-    assert(same(theme.page, yorha->page));
-    gui_theme_load(&theme, dir, "beta");
+    gui_theme_load(&theme, dirs, 3, "gamma");
+    assert(!strcmp(theme.name, "Gamma") && same(theme.page, def->page));
+    gui_theme_load(&theme, dirs, 3, "yorha");
+    assert(same(theme.page, (GuiRgb){255, 255, 255}) && same(theme.ink, yorha->ink));
+    gui_theme_load(&theme, dirs, 3, "yorha-loading");
+    assert(same(theme.page, loading->page) && !strcmp(theme.name, loading->name));
+    gui_theme_load(&theme, dirs, 3, "beta");
     assert(!strcmp(theme.id, "default"));
     gui_themes_free(&themes);
     char* missing = snx_path_join(dir, "missing");
-    gui_themes_scan(&themes, missing); /* no themes/ folder: the built-ins */
+    const char* none[] = {missing};
+    gui_themes_scan(&themes, none, 1); /* no themes/ folder: the built-ins */
     assert(themes.count == 3);
     gui_themes_free(&themes);
     free(missing);
-    assert(!snx_remove_tree(dir));
+    assert(!snx_remove_tree(dir) && !snx_remove_tree(second));
     free(dir);
+    free(second);
+
+    /* the versioned theme files are the built-ins, key for key */
+    static const char* const ids[] = {"default", "yorha", "yorha-loading"};
+    const char* shipped[] = {SNX_GUI_THEMES_DIR};
+    for (size_t i = 0; i < sizeof ids / sizeof *ids; ++i) {
+        const GuiTheme* b = gui_theme_builtin(ids[i]);
+        GuiTheme f;
+        gui_theme_load(&f, shipped, 1, ids[i]);
+        assert(!strcmp(f.id, b->id) && !strcmp(f.name, b->name) && !strcmp(f.marker, b->marker));
+        assert(same(f.page, b->page) && same(f.ink, b->ink) && same(f.soft, b->soft) && same(f.focus, b->focus));
+        assert(same(f.active, b->active) && same(f.failure, b->failure) && same(f.dim, b->dim));
+        assert(f.head == b->head && f.footer == b->footer && f.head_rule == b->head_rule);
+        assert(f.footer_rule == b->footer_rule && f.focus_bar == b->focus_bar && f.run == b->run);
+        assert(f.texture == b->texture && f.bar == b->bar && f.ring == b->ring && f.line_in == b->line_in);
+        assert(f.fade_in_ms == b->fade_in_ms && f.fade_out_ms == b->fade_out_ms && f.line_in_ms == b->line_in_ms);
+        assert(f.typing_ms == b->typing_ms && f.blink_ms == b->blink_ms);
+        for (int s = 0; s < GUI_SCREEN_COUNT; ++s) assert(!strcmp(f.title[s], b->title[s]));
+    }
     puts("GUI themes: built-ins, theme.ini over its base, themes/ folders passed");
     return 0;
 }

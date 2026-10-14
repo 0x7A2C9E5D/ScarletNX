@@ -121,15 +121,20 @@ loading screen: the title, the game's name with turning dots and a turning ring;
 step the driver and the runner report (unpack, extract, recompile with its blocks,
 built, launch, GPU) typed down the page, with turning dots while it runs and `...OK` or
 `...FAILED` once it ends, the cursor blinking on the current one; the progress bar and
-its percentage. The run fades in from black, and fades out when ESC leaves it. Any other theme is a folder of
-`themes/` (beside `games/`, in the working directory) holding a `theme.ini`; the folder's
-name is its id. `[theme] base` picks the built-in it starts from, and a key it leaves
-out, or that cannot be read, keeps the base's value.
+its percentage. The run fades in from black, and fades out when ESC leaves it.
+
+A theme is also a folder holding a `theme.ini`, the folder's name its id, in
+`themes/` in the working directory or in `themes/` beside the GUI; the first one found
+wins, and a folder named like a built-in replaces it. The built-ins ship as such files
+(`src/gui/themes/`, copied beside the GUI in the build and installed with it): copy one
+under a new name to make a theme, or edit one to change the built-in. `[theme] base`
+picks the built-in a file starts from, and a key it leaves out, or that cannot be read,
+keeps the base's value.
 
 ```ini
 [theme]
 name = Night ink
-; default | yorha
+; default | yorha | yorha-loading
 base = yorha
 [colors]
 ; #RRGGBB. soft: hints, secondary text, rules. focus: the focused line, or its band.

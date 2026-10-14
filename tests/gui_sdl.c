@@ -506,8 +506,8 @@ int main(int argc, char** argv) {
     const char* ini = "[theme]\nbase = yorha\nname = Custom test\n[colors]\npage = #102030\nink = not a colour\n"
                       "[head]\nmenu = TEST  /  MENU\n[body]\nmarker = \"> \"\n";
     assert(!snx_mkdirs(custom) && !snx_write_file(custom_ini, ini, strlen(ini)));
-    free(app.themes_dir);
-    app.themes_dir = snx_strdup(themes);
+    free(app.themes_dirs[0]);
+    app.themes_dirs[0] = snx_strdup(themes);
     render(&app);
     colored_text(&app, menu_row(&app, GUI_THEME), "- Theme: Default", normal);
     mouse(&app, 2, menu_row(&app, GUI_THEME), true);
@@ -541,7 +541,7 @@ int main(int argc, char** argv) {
     /* YoRHa loading: a run as steps, typed in, with the ring, the dots and the bar; the run fades in, and out */
     char* steps_input = snx_path_join(temporary, "option flags steps.nro");
     assert(!snx_write_file(steps_input, "fixture", 7));
-    gui_theme_load(&app.theme, app.themes_dir, "yorha-loading");
+    gui_theme_load(&app.theme, (const char* const*)app.themes_dirs, 2, "yorha-loading");
     app.menu.selected = GUI_SWITCH;
     app.menu.gccjit = !!SNX_GUI_HAS_GCCJIT;
     app.menu.gdbstub = true;

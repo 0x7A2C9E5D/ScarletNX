@@ -244,20 +244,20 @@ bool gui_theme_parse(GuiTheme* theme, const char* id, const char* text, size_t s
     copy(theme->name, sizeof theme->name, id);
     return visit(text, size, theme, false);
 }
-void gui_theme_load(GuiTheme* theme, const char* themes_dir, const char* id) {
-    const GuiTheme* builtin = gui_theme_builtin(id);
-    if (builtin) {
-        *theme = *builtin;
-        return;
+void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id) {
+    for (size_t i = 0; i < count; ++i) {
+        char* folder = dirs[i] ? snx_path_join(dirs[i], id) : NULL;
+        char* path = folder ? snx_path_join(folder, "theme.ini") : NULL;
+        size_t size = 0;
+        unsigned char* text = path ? snx_read_file(path, &size) : NULL;
+        bool read = text && gui_theme_parse(theme, id, (const char*)text, size);
+        free(text);
+        free(path);
+        free(folder);
+        if (read) return;
     }
-    char* folder = snx_path_join(themes_dir, id);
-    char* path = folder ? snx_path_join(folder, "theme.ini") : NULL;
-    size_t size = 0;
-    unsigned char* text = path ? snx_read_file(path, &size) : NULL;
-    if (!text || !gui_theme_parse(theme, id, (const char*)text, size)) *theme = builtins[0];
-    free(text);
-    free(path);
-    free(folder);
+    const GuiTheme* builtin = gui_theme_builtin(id);
+    *theme = builtin ? *builtin : builtins[0];
 }
 
 void gui_themes_free(GuiThemes* themes) {
@@ -265,29 +265,40 @@ void gui_themes_free(GuiThemes* themes) {
     themes->ids = NULL;
     themes->count = 0;
 }
-void gui_themes_scan(GuiThemes* themes, const char* themes_dir) {
+static bool listed(const GuiThemes* themes, const char* id) {
+    for (size_t i = 0; i < themes->count; ++i)
+        if (!strcmp(themes->ids[i], id)) return true;
+    return false;
+}
+void gui_themes_scan(GuiThemes* themes, const char* const* dirs, size_t count) {
     gui_themes_free(themes);
-    char** names = NULL;
-    size_t count = 0;
-    if (snx_list_dir(themes_dir, &names, &count)) count = 0; /* no themes/: the built-ins alone */
-    size_t total = sizeof(builtins) / sizeof(*builtins);
-    themes->ids = calloc(total + count, sizeof *themes->ids);
-    if (!themes->ids) {
-        snx_free_strings(names, count);
-        return;
-    }
+    size_t total = sizeof(builtins) / sizeof(*builtins), capacity = total;
+    themes->ids = calloc(capacity, sizeof *themes->ids);
+    if (!themes->ids) return;
     for (size_t i = 0; i < total; ++i) themes->ids[themes->count++] = snx_strdup(builtins[i].id);
-    for (size_t i = 0; i < count; ++i) {
-        char* folder = snx_path_join(themes_dir, names[i]);
-        char* file = folder ? snx_path_join(folder, "theme.ini") : NULL;
-        bool usable = names[i][0] != '.' && !gui_theme_builtin(names[i]) &&
-                      strlen(names[i]) < sizeof(((GuiTheme*)0)->id) && file && snx_is_file(file);
-        free(file);
-        free(folder);
-        if (usable) {
-            themes->ids[themes->count++] = names[i];
-            names[i] = NULL;
+    for (size_t d = 0; d < count; ++d) {
+        char** names = NULL;
+        size_t found = 0;
+        if (!dirs[d] || snx_list_dir(dirs[d], &names, &found)) continue; /* no such folder: nothing from it */
+        char** grown = realloc(themes->ids, (capacity + found) * sizeof *themes->ids);
+        if (!grown) {
+            snx_free_strings(names, found);
+            continue;
         }
+        themes->ids = grown;
+        capacity += found;
+        for (size_t i = 0; i < found; ++i) {
+            char* folder = snx_path_join(dirs[d], names[i]);
+            char* file = folder ? snx_path_join(folder, "theme.ini") : NULL;
+            bool usable = names[i][0] != '.' && !listed(themes, names[i]) &&
+                          strlen(names[i]) < sizeof(((GuiTheme*)0)->id) && file && snx_is_file(file);
+            free(file);
+            free(folder);
+            if (usable) {
+                themes->ids[themes->count++] = names[i];
+                names[i] = NULL;
+            }
+        }
+        snx_free_strings(names, found);
     }
-    snx_free_strings(names, count);
 }

@@ -46,8 +46,10 @@ const GuiTheme* gui_theme_builtin(const char* id);
 /* A theme.ini's text over the built-in its [theme] base names (default when absent): a key it lacks, or cannot
    read, keeps the base's value. Returns false only when out of memory. */
 bool gui_theme_parse(GuiTheme* theme, const char* id, const char* text, size_t size);
-/* id as a built-in, else themes_dir/id/theme.ini; the default theme when neither can be read */
-void gui_theme_load(GuiTheme* theme, const char* themes_dir, const char* id);
-void gui_themes_scan(GuiThemes* themes, const char* themes_dir);
+/* The first dirs[i]/id/theme.ini that can be read, else the built-in of that id, else the default theme: a folder
+   named like a built-in replaces it */
+void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id);
+/* the built-ins, then each other folder of dirs with a theme.ini, once */
+void gui_themes_scan(GuiThemes* themes, const char* const* dirs, size_t count);
 void gui_themes_free(GuiThemes* themes);
 #endif

@@ -35,7 +35,8 @@ typedef struct {
     Uint64 clock;                /* fixed time for tests; 0 is the real clock */
     Uint64 fade_ms, leaving_ms; /* a screen fading in from black since; the run fading out since */
     const char* drivers;
-    char *cwd, *file, *games_dir, *keys_path, *themes_dir;
+    char *cwd, *file, *games_dir, *keys_path;
+    char* themes_dirs[2]; /* themes/ in the working directory, then beside the GUI */
     char message[512];
     int cols, rows, scale, log_top;
     Uint64 sampled;
@@ -107,10 +108,11 @@ static GuiScreen screen(const App* app) {
                                              : GUI_SCREEN_MENU;
 }
 static void next_theme(App* app) {
-    gui_themes_scan(&app->themes, app->themes_dir);
+    const char* const* dirs = (const char* const*)app->themes_dirs;
+    gui_themes_scan(&app->themes, dirs, 2);
     size_t i = 0;
     while (i < app->themes.count && strcmp(app->themes.ids[i], app->theme.id)) ++i;
-    if (app->themes.count) gui_theme_load(&app->theme, app->themes_dir, app->themes.ids[(i + 1) % app->themes.count]);
+    if (app->themes.count) gui_theme_load(&app->theme, dirs, 2, app->themes.ids[(i + 1) % app->themes.count]);
 }
 static int menu_spacing(const App* app) { return app->rows >= 30 ? 2 : 1; }
 static int menu_row(const App* app, int item) {
@@ -743,8 +745,9 @@ static bool initialize(App* app) {
     app->process = gui_process_create();
     app->cwd = SDL_GetCurrentDirectory();
     app->games_dir = snx_path_join(app->cwd ? app->cwd : ".", "games");
-    app->themes_dir = snx_path_join(app->cwd ? app->cwd : ".", "themes");
+    app->themes_dirs[0] = snx_path_join(app->cwd ? app->cwd : ".", "themes");
     app->drivers = SDL_GetBasePath();
+    if (app->drivers) app->themes_dirs[1] = snx_path_join(app->drivers, "themes");
     app->keys_path = device_keys_path();
     gui_console_init(&app->console, 78, 17);
     if (!app->font || !app->process || !app->drivers) {
@@ -758,7 +761,8 @@ static void cleanup(App* app) {
     gui_process_destroy(app->process);
     free(app->file);
     free(app->games_dir);
-    free(app->themes_dir);
+    free(app->themes_dirs[0]);
+    free(app->themes_dirs[1]);
     gui_themes_free(&app->themes);
     free(app->keys_path);
     gui_games_free(&app->games);
