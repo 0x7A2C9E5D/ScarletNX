@@ -42,11 +42,11 @@ static u64 clmul_lo(u64 a, u64 b) {
 /* Barrett reduction, as the LLVM backend's crc32() in ir_a64.c */
 static u32 crc32_clmul(u32 acc, u64 val, int bytes, int castagnoli) {
     u64 poly = castagnoli ? 0x105EC76F1ull : 0x1DB710641ull, mu = castagnoli ? 0xDEA713F1ull : 0x1F7011641ull;
-    int steps = bytes == 8 ? 2 : 1, n = bytes == 8 ? 32 : 8 * bytes;
-    for (int k = 0; k < steps; k++) {
-        u32 x = acc ^ (u32)(val >> (32 * k));
+    int steps = bytes == 8 ? 2 : 1, n = bytes == 8 ? 32 : 8 * bytes, k;
+    for (k = 0; k < steps; k++) {
+        u32 x = acc ^ (u32)(val >> (32 * k)), t;
         if (n < 32) x = (x & ((1u << n) - 1)) << (32 - n);
-        u32 t = (u32)(clmul_lo(clmul_lo(x, mu) & 0xFFFFFFFFu, poly) >> 32);
+        t = (u32)(clmul_lo(clmul_lo(x, mu) & 0xFFFFFFFFu, poly) >> 32);
         acc = n < 32 ? t ^ (acc >> n) : t;
     }
     return acc;
@@ -59,13 +59,15 @@ static const u32 crc32_nibble[2][16] = {
     {0x00000000, 0x105EC76F, 0x20BD8EDE, 0x30E349B1, 0x417B1DBC, 0x5125DAD3, 0x61C69362, 0x7198540D, 0x82F63B78,
      0x92A8FC17, 0xA24BB5A6, 0xB21572C9, 0xC38D26C4, 0xD3D3E1AB, 0xE330A81A, 0xF36E6F75}};
 u32 snx_crc32(u32 acc, u64 val, int bytes, int castagnoli) {
+#if !(defined(__x86_64__) && defined(__PCLMUL__))
+    const u32* t = crc32_nibble[castagnoli != 0];
+#endif
 #if defined(__x86_64__) && defined(__SSE4_2__)
     if (castagnoli) return crc32c_sse42(acc, val, bytes);
 #endif
 #if defined(__x86_64__) && defined(__PCLMUL__)
     return crc32_clmul(acc, val, bytes, castagnoli);
 #else
-    const u32* t = crc32_nibble[castagnoli != 0];
     for (int i = 0; i < bytes; i++) {
         acc ^= (u8)(val >> (i * 8));
         acc = (acc >> 4) ^ t[acc & 15];
