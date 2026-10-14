@@ -8,8 +8,10 @@ It prints one line per candidate, file:line: rule: what it saw. Three rules can 
           or is_present / present / valid in a struct with one pointer): NULL already says it
   allocs  one function filling two or more members of one object from separate allocations: one block
           carved by offsets frees once and keeps them together
-  atomics two or more atomics in one struct, or defined at file scope in one file, a later one without an
-          alignas of its own: they may share a cache line, and two threads writing them slow each other down
+  atomics two or more atomics in one struct with no padding array (or alignas) between them, or two defined at
+          file scope in one file: they may share a cache line, and two threads writing them slow each other
+          down. An atomic is declared _Atomic, or reached through an __atomic_* builtin in the struct's own file
+          or in a file read that includes it
 Exit status 0 whatever it finds; 2 when a path cannot be read.
 """
 import os, re, sys
@@ -17,6 +19,18 @@ import os, re, sys
 ALLOC = r"(?:calloc|malloc|realloc|aligned_alloc|snx_alloc|snx_realloc|SDL_calloc|SDL_malloc)"
 ATOMIC = re.compile(r"\b(_Atomic\b|atomic_[a-z_]+\b|SDL_Atomic(?:Int|U32)\b)")
 GENERIC_FLAGS = {"is_present", "present", "valid", "is_valid", "has_value"}
+BUILTIN = re.compile(r"\b__atomic_\w+\s*\(\s*&?\s*([^,()]+?)\s*[,)]")
+ALIGNED = re.compile(r"\b(?:alignas|_Alignas)\s*\(")
+
+
+def builtin_names(text):
+    """The variables and members an __atomic_* builtin reaches: the last name of its first argument."""
+    names = set()
+    for m in BUILTIN.finditer(text):
+        ids = re.findall(r"[A-Za-z_]\w*", re.sub(r"\[[^\]]*\]", "", m.group(1)))
+        if ids:
+            names.add(ids[-1])
+    return names
 
 
 def strip(text):
@@ -61,7 +75,13 @@ def members(body, offset):
     return out
 
 
-def check_structs(path, text, report):
+def atomic(name, decl, used):
+    """Declared _Atomic, or one variable an __atomic_* builtin reaches (an array's elements and a function
+    pointer's parameters are not checked)."""
+    return bool(ATOMIC.search(decl[:decl.rfind(name)])) or (name in used and "[" not in decl and "(" not in decl)
+
+
+def check_structs(path, text, report, used):
     for m in re.finditer(r"\b(?:struct|union)\s*\w*\s*\{", text):
         open_at = m.end() - 1
         body = text[open_at + 1:closing(text, open_at)]
@@ -79,13 +99,13 @@ def check_structs(path, text, report):
                 target = next(iter(pointers))
             if target:
                 report(path, line_of(text, at), "flag", f"'{name}' beside pointer '{target}'")
-        atomics = [(name, decl, at) for name, decl, at in decls if ATOMIC.search(decl[:decl.rfind(name)])]
-        if len(atomics) > 1:
-            bare = [name for name, decl, _ in atomics[1:] if not re.search(r"\b(?:alignas|_Alignas)\s*\(", decl)]
-            if bare:
-                report(path, line_of(text, atomics[0][2]), "atomics",
-                       f"{len(atomics)} atomics in one struct ({', '.join(n for n, _, _ in atomics)}), "
-                       f"no alignas on {', '.join(bare)}")
+        where = [k for k, (name, decl, _) in enumerate(decls) if atomic(name, decl, used)]
+        bare = [decls[k][0] for j, k in zip(where, where[1:])
+                if not ALIGNED.search(decls[k][1]) and not any("[" in d for _, d, _ in decls[j + 1:k])]
+        if bare:
+            report(path, line_of(text, decls[where[0]][2]), "atomics",
+                   f"{len(where)} atomics in one struct ({', '.join(decls[k][0] for k in where)}), "
+                   f"nothing keeps {', '.join(bare)} off the one before")
 
 
 def bodies(text):
@@ -116,7 +136,7 @@ def check_functions(path, text, report):
                        f"{len(hits)} separate allocations into members of '{owner}'")
 
 
-def check_globals(path, text, report):
+def check_globals(path, text, report, used):
     """Atomics defined at file scope: the compiler lays a file's definitions out together."""
     depth, start, found = 0, 0, []
     for i, c in enumerate(text):
@@ -131,17 +151,19 @@ def check_globals(path, text, report):
             lead = len(stmt) - len(stmt.lstrip())
             decl = stmt.strip()
             # an extern or a typedef does not match: only definitions take space here
-            if ATOMIC.match(re.sub(r"^(?:static|_Thread_local|thread_local|volatile)\s+", "", decl)) \
-                    and "(" not in decl.split("=")[0]:
-                name = re.findall(r"(\w+)\s*(?:\[[^\]]*\]\s*)*(?:=|$)", decl.split("=")[0] + "=")[0]
-                found.append((name, decl, start + lead))
+            head = decl.split("=")[0]
+            if "(" not in head and not re.match(r"(?:extern|typedef)\b", decl):
+                name = (re.findall(r"(\w+)\s*(?:\[[^\]]*\]\s*)*$", head.strip()) or [""])[0]
+                bare_decl = re.sub(r"^(?:static|_Thread_local|thread_local|volatile)\s+", "", decl)
+                if ATOMIC.match(bare_decl) or (name in used and "[" not in head):
+                    found.append((name, decl, start + lead))
             start = i + 1
     if len(found) > 1:
-        bare = [name for name, decl, _ in found[1:] if not re.search(r"\b(?:alignas|_Alignas)\s*\(", decl)]
+        bare = [name for name, decl, _ in found[1:] if not ALIGNED.search(decl)]
         if bare:
             report(path, line_of(text, found[0][2]), "atomics",
                    f"{len(found)} atomics at file scope ({', '.join(n for n, _, _ in found)}), "
-                   f"no alignas on {', '.join(bare)}")
+                   f"nothing keeps {', '.join(bare)} off the one before")
 
 
 def files(paths):
@@ -162,17 +184,39 @@ def main(argv):
     def report(path, line, rule, what):
         found.append(f"{path}:{line}: {rule}: {what}")
 
+    texts, includes = {}, {}
     for path in files(paths):
         try:
             with open(path, encoding="utf-8", errors="replace") as f:
-                text = strip(f.read())
+                raw = f.read()
+            texts[path] = strip(raw)
+            includes[path] = {os.path.basename(n) for n in re.findall(r'^\s*#\s*include\s*"([^"]+)"', raw, re.M)}
         except OSError as e:
             print(f"{path}: {e.strerror}", file=sys.stderr)
             failed = True
-            continue
-        check_structs(path, text, report)
+    reached = {path: builtin_names(text) for path, text in texts.items()}
+    by_name = {}
+    for path in texts:
+        by_name.setdefault(os.path.basename(path), []).append(path)
+    seen = {}
+
+    def closure(path):
+        """The headers a file includes, and theirs, by name."""
+        if path not in seen:
+            seen[path], todo = set(), list(includes[path])
+            while todo:
+                n = todo.pop()
+                if n not in seen[path]:
+                    seen[path].add(n)
+                    todo.extend(i for q in by_name.get(n, ()) for i in includes[q])
+        return seen[path]
+    for path, text in texts.items():
+        # a member's name counts where this file's code, or code including it, reaches it atomically
+        name = os.path.basename(path)
+        used = set(reached[path]).union(*(reached[p] for p in texts if name in closure(p)))
+        check_structs(path, text, report, used)
         check_functions(path, text, report)
-        check_globals(path, text, report)
+        check_globals(path, text, report, used)
     for line in found:
         print(line)
     print(f"{len(found)} candidate(s)", file=sys.stderr)

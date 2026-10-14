@@ -1,7 +1,7 @@
 # snx-code-quality: the rules with their wrong and right forms
 
-Each C block here compiles, and each wrong/right pair gives the same results under ASan and UBSan except
-where the right form is meant to differ. Read the rule in doubt, not the whole file.
+Every C block here is strict ANSI C (`-std=c90 -pedantic-errors`), and each wrong/right pair gives the same
+results under ASan and UBSan except where the right form is meant to differ. Read the rule in doubt.
 
 ## 1. No state another value already says
 
@@ -14,9 +14,9 @@ to guess which one is true.
 ```c
 typedef struct {
     void* p;
-    bool is_present;
+    int is_present;
 } Opt;
-bool opt_present(const Opt* o) { return o->is_present; }
+int opt_present(const Opt* o) { return o->is_present; }
 ```
 
 <!-- snippet: flag-right -->
@@ -24,7 +24,7 @@ bool opt_present(const Opt* o) { return o->is_present; }
 typedef struct {
     void* p; /* NULL: not present */
 } Opt;
-bool opt_present(const Opt* o) { return o->p != NULL; }
+int opt_present(const Opt* o) { return o->p != NULL; }
 ```
 
 **Does not apply when:**
@@ -50,16 +50,16 @@ does neither.
 ```c
 typedef struct FsNode {
     struct FsNode* parent;
-    bool attached;
+    int attached;
 } FsNode;
 typedef struct {
     FsNode* root;
 } FsTree;
-bool belongs_to(const FsTree* tree, const FsNode* n) {
-    if (!n || !n->attached) return false;
+int belongs_to(const FsTree* tree, const FsNode* n) {
+    if (!n || !n->attached) return 0;
     while (n->parent) {
         n = n->parent;
-        if (!n->attached) return false;
+        if (!n->attached) return 0;
     }
     return n == tree->root;
 }
@@ -69,17 +69,17 @@ bool belongs_to(const FsTree* tree, const FsNode* n) {
 ```c
 typedef struct {
     u32 parent; /* 0 at the top */
-    bool attached;
+    int attached;
 } FsNode;
 typedef struct {
     FsNode* nodes; /* every node of the tree; nodes[0] is none, so index 0 means no node */
     u32 root;
 } FsTree;
-bool belongs_to(const FsTree* tree, u32 n) {
-    if (!n || !tree->nodes[n].attached) return false;
+int belongs_to(const FsTree* tree, u32 n) {
+    if (!n || !tree->nodes[n].attached) return 0;
     while (tree->nodes[n].parent) {
         n = tree->nodes[n].parent;
-        if (!tree->nodes[n].attached) return false;
+        if (!tree->nodes[n].attached) return 0;
     }
     return n == tree->root;
 }
@@ -97,7 +97,8 @@ bool belongs_to(const FsTree* tree, u32 n) {
 
 **Do:** an object's arrays come from one allocation carved by offsets, and are freed with one `free`.
 When the sizes are fixed, a struct holding the arrays is the simplest block. When they are known only
-at run time, align each offset for its type.
+at run time, put each array at a multiple of its type's size: a size is always a multiple of the
+alignment, and C90 has no `alignof`.
 
 **Why:** one block keeps an owner's data together and leaves less to fragment. It also turns a
 cleanup path with one `free` per array into a single `free`.
@@ -108,9 +109,9 @@ typedef struct {
     Voice* voice;
     Mix* mix;
 } Mixer;
-bool mixer_init(Mixer* m, size_t voices, size_t mixes) {
-    m->voice = calloc(voices, sizeof *m->voice);
-    m->mix = calloc(mixes, sizeof *m->mix);
+int mixer_init(Mixer* m, size_t voices, size_t mixes) {
+    m->voice = (Voice*)calloc(voices, sizeof *m->voice);
+    m->mix = (Mix*)calloc(mixes, sizeof *m->mix);
     return m->voice && m->mix; /* a failure leaks the one that worked */
 }
 void mixer_free(Mixer* m) {
@@ -123,25 +124,27 @@ void mixer_free(Mixer* m) {
 ```c
 typedef struct {
     Voice* voice; /* the block's start: free(voice) frees both */
-    Mix* mix;     /* after the voices, aligned for Mix */
+    Mix* mix;     /* after the voices, at a multiple of sizeof(Mix) */
 } Mixer;
-bool mixer_init(Mixer* m, size_t voices, size_t mixes) {
-    size_t voice_bytes, mix_bytes, total;
-    if (ckd_mul(&voice_bytes, voices, sizeof *m->voice) || ckd_mul(&mix_bytes, mixes, sizeof *m->mix))
-        return false;
-    size_t mix_at = (voice_bytes + alignof(Mix) - 1) / alignof(Mix) * alignof(Mix);
-    if (ckd_add(&total, mix_at, mix_bytes)) return false;
-    char* block = calloc(1, total ? total : 1);
-    if (!block) return false;
+int mixer_init(Mixer* m, size_t voices, size_t mixes) {
+    const size_t most = (size_t)-1; /* SIZE_MAX is C99 */
+    size_t mix_at, total;
+    char* block;
+    if (voices > (most - sizeof(Mix)) / sizeof(Voice) || mixes > most / sizeof(Mix)) return 0;
+    mix_at = (voices * sizeof(Voice) + sizeof(Mix) - 1) / sizeof(Mix) * sizeof(Mix);
+    if (mixes * sizeof(Mix) > most - mix_at) return 0;
+    total = mix_at + mixes * sizeof(Mix);
+    block = (char*)calloc(1, total ? total : 1);
+    if (!block) return 0;
     m->voice = (Voice*)block;
     m->mix = (Mix*)(block + mix_at);
-    return true;
+    return 1;
 }
 void mixer_free(Mixer* m) { free(m->voice); }
 ```
 
-`calloc(n, size)` checked each product for overflow. A sum of your own does not, hence the `ckd_` calls,
-which matter when a size comes from the guest.
+`calloc(n, size)` checked each product for overflow. Products and sums of your own do not, hence the checks
+against `(size_t)-1`, which matter when a size comes from the guest.
 
 **Does not apply when:**
 - One of the arrays grows on its own. A `realloc` moves the whole block, so give that array a block of
@@ -154,7 +157,9 @@ which matter when a size comes from the guest.
 ## 4. Atomics on cache lines of their own
 
 **Do:** when two atomics (or a lock and the data next to it) are written by different threads, give each
-its own cache line with `alignas`. Defining them next to each other at file scope puts them together too.
+its own cache line with a `char` array between them. Atomics are plain integers reached through the
+`__atomic_*` builtins, as `src/` does, not C11's `_Atomic`. Defining two next to each other at file scope
+puts them together too: keep them in one padded struct instead.
 
 **Why:** a core writes a whole 64-byte line. Two threads writing two variables in the same line take
 that line from each other on every write, as slowly as if they wrote one shared variable. This is
@@ -163,8 +168,8 @@ false sharing.
 <!-- snippet: sharing-wrong -->
 ```c
 typedef struct {
-    _Atomic u32 submitted; /* written by the CPU thread */
-    _Atomic u32 completed; /* written by the GPU thread */
+    u32 submitted; /* the CPU thread's, through __atomic_* */
+    u32 completed; /* the GPU thread's */
 } Queue;
 ```
 
@@ -172,10 +177,12 @@ typedef struct {
 ```c
 #define SNX_CACHE_LINE 64 /* x86-64 */
 typedef struct {
-    alignas(SNX_CACHE_LINE) _Atomic u32 submitted; /* written by the CPU thread */
-    alignas(SNX_CACHE_LINE) _Atomic u32 completed; /* written by the GPU thread */
+    u32 submitted; /* the CPU thread's, through __atomic_* */
+    char apart[SNX_CACHE_LINE - sizeof(u32)];
+    u32 completed; /* the GPU thread's */
 } Queue;
-static_assert(offsetof(Queue, completed) - offsetof(Queue, submitted) >= SNX_CACHE_LINE);
+/* C90's static assert: an array of negative size if they would share a line */
+typedef char snx_queue_apart[offsetof(Queue, completed) - offsetof(Queue, submitted) >= SNX_CACHE_LINE ? 1 : -1];
 ```
 
 **Does not apply when:**
@@ -183,9 +190,8 @@ static_assert(offsetof(Queue, completed) - offsetof(Queue, submitted) >= SNX_CAC
 - There are many of them. Each padded atomic costs a full line, and in an array of per-object atomics
   that adds up.
 
-Note that `malloc` aligns to 16, not 64. The fields above stay 64 bytes apart, so apart from each
-other, but they may share a line with a neighbouring allocation. Use `aligned_alloc(SNX_CACHE_LINE, ...)`
-when that matters.
+The padding keeps the two apart from each other, not from a neighbouring allocation: `malloc` aligns to
+16, not 64. Pad before the first one too when that matters.
 
 ## 5. No stored pointers in data
 
