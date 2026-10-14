@@ -50,6 +50,10 @@ add_executable(snx-test-arm-decode arm_decode.c "${PROJECT_SOURCE_DIR}/src/commo
     "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/vector_decode.c")
 snx_test_target(snx-test-arm-decode 11)
 add_test(NAME arm_decode COMMAND snx-test-arm-decode)
+add_executable(snx-test-arm-exec arm_exec_test.c)
+snx_test_target(snx-test-arm-exec 11)
+target_link_libraries(snx-test-arm-exec PRIVATE snx_arm_llvm)
+add_test(NAME arm_exec_dry_svc COMMAND snx-test-arm-exec)
 
 # Small architectural witnesses need neither game assets nor an emulator.
 add_executable(snx-test-a64-fp a64_fp_test.c "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu_helpers.c")
