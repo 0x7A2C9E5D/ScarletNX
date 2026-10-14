@@ -39,6 +39,10 @@ int main(void) {
     gui_steps_finish(&s, false);
     assert(s.count == 2 && at(&s, 0)->state == GUI_STEP_DONE && at(&s, 1)->state == GUI_STEP_FAILED);
     assert(!strcmp(at(&s, 1)->detail, "Bro") && gui_steps_percent(&s) == 100);
+    gui_steps_reset(&s); /* a recompile that fails stops the bar where it was */
+    feed(&s, "Recompiling Broken (1 modules)\n  compiled block 4/9: x\n", 5);
+    gui_steps_finish(&s, false);
+    assert(at(&s, 0)->state == GUI_STEP_FAILED && gui_steps_percent(&s) == 44);
     gui_steps_reset(&s);
     feed(&s, "Built /games/Game\n", 5);
     gui_steps_finish(&s, false);

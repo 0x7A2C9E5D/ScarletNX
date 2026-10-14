@@ -78,7 +78,7 @@ int gui_steps_percent(const GuiSteps* steps) {
     for (int i = 0; i < steps->count; ++i) {
         const GuiStep* s = &steps->step[i];
         if (!strcmp(s->label, "RECOMPILE"))
-            percent = s->state != GUI_STEP_ACTIVE ? 100 : s->total ? (int)(s->value * 100ull / s->total) : 0;
+            percent = s->state == GUI_STEP_DONE ? 100 : s->total ? (int)(s->value * 100ull / s->total) : 0;
         else if (!strcmp(s->label, "BUILT") || !strcmp(s->label, "LAUNCH"))
             percent = 100;
     }
