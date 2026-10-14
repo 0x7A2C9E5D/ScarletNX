@@ -259,7 +259,7 @@ grep -rnw 'syncpt_alloc' src                        # does this function exist?
 grep -nE '^[A-Za-z_].*\(' src/nx/hle/kernel/ipc.h   # a module's API surface is its header
 ```
 
-Then check the SEMANTICS, not just the spelling: `buf_in` and `buf_a` both return an input buffer, but `buf_in` also takes the pointer (X) buffer the SDK uses for small inputs. Picking the wrong one compiles and reads nothing.
+Then check the SEMANTICS, not just the spelling: in a `.swipc` file, buffer attribute 5 and 0x21 both declare an input buffer, but 0x21 (AutoSelect) also takes the pointer (X) buffer the SDK uses for small inputs. Picking the wrong one compiles and reads nothing.
 
 This exists because it is the single most common way this skill produces broken code: a name that looks right but does not exist costs a full rebuild cycle to discover. A full rebuild here takes minutes, and the grep takes two seconds.
 
