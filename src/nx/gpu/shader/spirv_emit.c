@@ -1060,7 +1060,7 @@ uint32_t spv_emit_atomic_load_shared_u32(SpvEmitter* e, uint32_t u32_type, uint3
 }
 
 uint32_t spv_emit_atomic_compare_exchange_shared_u32(SpvEmitter* e, uint32_t u32_type, uint32_t pointer,
-                                                      uint32_t desired, uint32_t expected) {
+                                                     uint32_t desired, uint32_t expected) {
     uint32_t id = spv_emit_id(e);
     instruction(&e->functions, 230, 9); /* OpAtomicCompareExchange */
     put(&e->functions, u32_type);

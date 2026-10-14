@@ -866,9 +866,10 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         if (st->flags & 1) t = vk_tex_from_tic_raw(x->tic);
         if ((st->flags & 1) && !t) return VK_NULL_HANDLE;
         VkImageViewType want = vk_tex_view_type(st);
-        int num = st->flags & 1 ? 1
+        int num = st->flags & 1                                    ? 1
                   : st->shadow || !((s->si.tex_int_mask >> i) & 1) ? 0
-                  : ((s->si.tex_sint_mask >> i) & 1) ? 2 : 1;
+                  : ((s->si.tex_sint_mask >> i) & 1)               ? 2
+                                                                   : 1;
         VkImageView view = VK_NULL_HANDLE;
         VkImageLayout layout = s->si.nimg ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         /* sampling the depth target needs it read-only: no depth writes, and no stencil writes on either face */

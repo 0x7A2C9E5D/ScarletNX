@@ -314,8 +314,7 @@ VkSh* vk_shader_get(u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask, 
                 if (width == 2 && spv[at + 1] == 10) {
                     free(spv);
                     spv = NULL;
-                    snprintf(s->si.first_unsupported, sizeof s->si.first_unsupported,
-                             "shaderFloat64 is unavailable");
+                    snprintf(s->si.first_unsupported, sizeof s->si.first_unsupported, "shaderFloat64 is unavailable");
                     break;
                 }
                 at += width;

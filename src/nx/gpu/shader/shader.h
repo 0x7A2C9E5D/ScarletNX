@@ -19,7 +19,7 @@ typedef struct {
     u8 bl_cbuf;
     u8 bl2;
     u8 bl2_cbuf; /* bl2: handle = read1 | read2 (separate tex/sampler handles) */
-    u8 flags; /* 1: raw integer surface load, 2: multisample texel fetch */
+    u8 flags;    /* 1: raw integer surface load, 2: multisample texel fetch */
     u32 bl2_off; /* word offset of read2 */
 } ShTex;
 typedef struct {

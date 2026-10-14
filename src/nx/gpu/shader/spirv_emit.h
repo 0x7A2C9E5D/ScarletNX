@@ -156,7 +156,7 @@ uint32_t spv_emit_atomic_shared_u32(SpvEmitter* e, uint32_t u32_type, uint32_t o
 uint32_t spv_emit_atomic_load_u32(SpvEmitter* e, uint32_t u32_type, uint32_t pointer);
 uint32_t spv_emit_atomic_load_shared_u32(SpvEmitter* e, uint32_t u32_type, uint32_t pointer);
 uint32_t spv_emit_atomic_compare_exchange_shared_u32(SpvEmitter* e, uint32_t u32_type, uint32_t pointer,
-                                                      uint32_t desired, uint32_t expected);
+                                                     uint32_t desired, uint32_t expected);
 uint32_t spv_emit_atomic_compare_exchange_u32(SpvEmitter* e, uint32_t u32_type, uint32_t pointer, uint32_t desired,
                                               uint32_t expected);
 void spv_emit_control_barrier(SpvEmitter* e, uint32_t u32_type);
