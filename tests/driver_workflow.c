@@ -85,10 +85,7 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
         CHECK(!snx_remove_tree(argv[1]));
     return rc;
 }
-unsigned snx_read_abi(const SnxPaths* paths) {
-    (void)paths;
-    return 4;
-}
+unsigned snx_game_abi(void) { return 4; }
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     char *game, *partial;
     int rc;

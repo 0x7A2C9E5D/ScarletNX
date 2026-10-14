@@ -25,7 +25,8 @@ static void usage(void) {
          "  --backend=llvm|gcc     Select the recompiler backend for preparation\n"
          "  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game\n"
-         "  --repo / --build-dir   Override this build's checkout / build directory");
+         "  --repo / --build-dir   Override this build's checkout / build directory\n"
+         "                         (without its checkout: the current directory)");
 #ifndef _WIN32
     puts("  -S                     Enable the native GDB stub on localhost:1234\n"
          "  -s                     Enable the stub and stop at startup\n"
@@ -58,10 +59,10 @@ static int is_nro_path(const char* path) {
     return ext && strlen(ext) == 4 && tolower((unsigned char)ext[1]) == 'n' && tolower((unsigned char)ext[2]) == 'r' &&
            tolower((unsigned char)ext[3]) == 'o';
 }
-static int cached_abi(const char* base, const SnxPaths* paths) {
+static int cached_abi(const char* base) {
     char* stamp = snx_format("%s.abi", base);
     FILE* f = snx_fopen(stamp, "r");
-    unsigned abi = 0, expected = snx_read_abi(paths);
+    unsigned abi = 0, expected = snx_game_abi();
     if (f) {
         char newline, trailing;
         /* A partial write or trailing garbage is not a completed build. */
@@ -126,7 +127,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
     }
     /* Always restage an NRO: a same-named cached game may belong to another input or an older build. */
     /* An explicit backend must not silently reuse a game built by another compiler. */
-    if (backend || nro || (flags & SNX_RECOMP) || !snx_is_file(game) || !snx_is_file(code) || !cached_abi(base, paths)) {
+    if (backend || nro || (flags & SNX_RECOMP) || !snx_is_file(game) || !snx_is_file(code) || !cached_abi(base)) {
         command[5] = "-r";
         command[6] = "--outdir";
         command[7] = games;
@@ -199,10 +200,15 @@ static int container_path(const char* path) {
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
     const char *repo = SNX_SOURCE_DIR, *build = SNX_BUILD_DIR, *input = NULL, *backend = NULL;
-    char *r = NULL, *b = NULL, *exe = NULL, **rest;
+    char *r = NULL, *b = NULL, *exe = NULL, **rest, *checkout;
     unsigned flags = 0;
     int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, backend_args = 0;
     if (argc <= 1) return -1;
+    /* An installed build (the AppImage, the Windows zip) runs without the checkout it was built from: work/ and games/
+       go in the current directory then */
+    checkout = snx_path_join(repo, "CMakeLists.txt");
+    if (!snx_is_file(checkout)) repo = ".";
+    free(checkout);
     rest = (char**)snx_alloc((size_t)(argc + 1) * sizeof(*rest));
     for (i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--")) {

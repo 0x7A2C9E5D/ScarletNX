@@ -198,9 +198,9 @@ int snx_main(int argc, char** argv) {
        log is only created once a game's code has loaded */
     split_path(game && !dump ? game : in_appimage ? appimage : argv[0]);
     if (dump)
-        fatal("%s is a game dump. ScarletNX does not run dumps: it runs a game recompiled from one. Extract and "
-              "recompile it first with a clone of the repository (scarletnx -x, then -r, as "
-              "the README describes), then point --game at the result, for example --game=games/Game.",
+        fatal("%s is a game dump. ScarletNX does not run dumps: it runs a game recompiled from one. Open the dump "
+              "without --game to extract, recompile and play it (scarletnx Game.nsp), or point --game at a game "
+              "recompiled from it, for example --game=games/Game.",
               dump);
     /* loaded before the .ini is opened, which writes one: a mistyped --game leaves no stray settings file */
     if (load_code()) fatal("Could not load the game's recompiled code.");
