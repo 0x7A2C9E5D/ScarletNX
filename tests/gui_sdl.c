@@ -51,7 +51,7 @@ static void colored_text_on(App* app, int col, int row, const char* prompt, SDL_
 }
 static SDL_Color pixel(App* app, float x, float y) {
     SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
-    Uint8 r, g, b, a;
+    Uint8 r = 0, g = 0, b = 0, a = 0; /* mingw's assert returns, as far as the compiler knows */
     assert(image && SDL_ReadSurfacePixel(image, (int)x, (int)y, &r, &g, &b, &a));
     SDL_DestroySurface(image);
     return (SDL_Color){r, g, b, 255};
