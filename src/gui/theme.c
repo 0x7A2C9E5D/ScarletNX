@@ -328,7 +328,7 @@ void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, cons
 }
 
 void gui_themes_free(GuiThemes* themes) {
-    snx_free_strings(themes->ids, themes->count);
+    free(themes->ids);
     themes->ids = NULL;
     themes->count = 0;
 }
@@ -340,14 +340,15 @@ static bool listed(const GuiThemes* themes, const char* id) {
 void gui_themes_scan(GuiThemes* themes, const char* const* dirs, size_t count) {
     gui_themes_free(themes);
     size_t total = sizeof(builtins) / sizeof(*builtins), capacity = total;
+    _Static_assert(sizeof *themes->ids == sizeof builtins->id, "a theme's id fits its slot");
     themes->ids = calloc(capacity, sizeof *themes->ids);
     if (!themes->ids) return;
-    for (size_t i = 0; i < total; ++i) themes->ids[themes->count++] = snx_strdup(builtins[i].id);
+    for (size_t i = 0; i < total; ++i) memcpy(themes->ids[themes->count++], builtins[i].id, sizeof *themes->ids);
     for (size_t d = 0; d < count; ++d) {
         char** names = NULL;
         size_t found = 0;
         if (!dirs[d] || snx_list_dir(dirs[d], &names, &found)) continue; /* no such folder: nothing from it */
-        char** grown = realloc(themes->ids, (capacity + found) * sizeof *themes->ids);
+        char (*grown)[sizeof *themes->ids] = realloc(themes->ids, (capacity + found) * sizeof *themes->ids);
         if (!grown) {
             snx_free_strings(names, found);
             continue;
@@ -357,14 +358,11 @@ void gui_themes_scan(GuiThemes* themes, const char* const* dirs, size_t count) {
         for (size_t i = 0; i < found; ++i) {
             char* folder = snx_path_join(dirs[d], names[i]);
             char* file = folder ? snx_path_join(folder, "theme.ini") : NULL;
-            bool usable = names[i][0] != '.' && !listed(themes, names[i]) &&
-                          strlen(names[i]) < sizeof(((GuiTheme*)0)->id) && file && snx_is_file(file);
+            bool usable = names[i][0] != '.' && !listed(themes, names[i]) && strlen(names[i]) < sizeof *themes->ids &&
+                          file && snx_is_file(file);
             free(file);
             free(folder);
-            if (usable) {
-                themes->ids[themes->count++] = names[i];
-                names[i] = NULL;
-            }
+            if (usable) snprintf(themes->ids[themes->count++], sizeof *themes->ids, "%s", names[i]);
         }
         snx_free_strings(names, found);
     }

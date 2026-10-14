@@ -63,7 +63,7 @@ typedef struct {
     uint32_t fade_in_ms, fade_out_ms, line_in_ms, typing_ms, blink_ms;
 } GuiTheme;
 typedef struct {
-    char** ids; /* the built-ins, then each folder of themes/ with a theme.ini */
+    char (*ids)[64]; /* the built-ins, then each folder of themes/ with a theme.ini, in one block */
     size_t count;
 } GuiThemes;
 
