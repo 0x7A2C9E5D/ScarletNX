@@ -85,7 +85,7 @@ typedef struct {
     float* look;
     u32 look_len, look_pos[SNX_AUDREN_CHANNELS];
     ARBiquad bq[SNX_AUDREN_CHANNELS]; /* the biquad filter's, a channel apiece */
-    void* fx;                         /* the delay's or a reverb's state, made when it initializes */
+    void* fx;                         /* the delay's, a reverb's or the compressor's state, made when it initializes */
     i64* line;                        /* and the delay lines in it */
 } AREffect;
 
@@ -127,7 +127,8 @@ enum {
     SNX_AUDREN_EFFECT_I3DL2 = 5,
     SNX_AUDREN_EFFECT_BIQUAD = 6,
     SNX_AUDREN_EFFECT_LIMITER = 7,
-    SNX_AUDREN_EFFECT_CAPTURE = 8
+    SNX_AUDREN_EFFECT_CAPTURE = 8,
+    SNX_AUDREN_EFFECT_COMPRESSOR = 9
 };
 /* an effect's parameter state: the game sets it, a rendered frame moves it to updated */
 enum { SNX_AUDREN_PARAM_INITIALIZED = 0, SNX_AUDREN_PARAM_UPDATING = 1, SNX_AUDREN_PARAM_UPDATED = 2 };

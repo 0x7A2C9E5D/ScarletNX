@@ -418,7 +418,9 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
             e->type = ei[0];
             if (stateful_at(e->type))
                 update_stateful(e, ei, stateful_at(e->type));
-            else {
+            else if (e->type == SNX_AUDREN_EFFECT_COMPRESSOR && !eff_v2) {
+                /* Eden takes no version 1 update for the compressor: it stays unused */
+            } else {
                 e->enabled = ei[2];
                 e->mix_id = rd32(ei + 4);
                 e->order = rd32(ei + 0x18);
@@ -1514,6 +1516,79 @@ static void effect_i3dl2(ARState* s, ARMix* m, AREffect* e) {
     }
 }
 
+/* the compressor (Eden's CompressorInfo and CompressorCommand), from revision 9 */
+typedef struct {
+    float detector, held, gain, knee, knee_lo, knee_hi, rate, out;
+} ARCompressor;
+
+static float db_gain(float db) {
+    float e = db / 20.0f * 3.3219f;
+    return powf(2.0f, (e - truncf(e)) * 0.69315f);
+}
+
+static void compressor_params(ARCompressor* c, const u8* p) {
+    float threshold = rdf(p + 0x14), ratio = 1.0f / rdf(p + 0x18), makeup = 0.0f;
+    if (p[0x35]) makeup = threshold * 0.5f * (ratio - 1.0f) - 3.0f;
+    c->rate = rdf(p + 0x28);
+    c->out = db_gain(rdf(p + 0x30) + makeup);
+    c->knee = (1.0f - ratio) / 6.0f;
+    c->knee_hi = threshold + 1.5f;
+    c->knee_lo = threshold - 1.5f;
+}
+
+static void effect_compressor(ARState* s, ARMix* m, AREffect* e) {
+    const u8* p = e->p;
+    u32 count = rd16(p + 0xE), n = s->frame;
+    float *in[SNX_AUDREN_CHANNELS], *out[SNX_AUDREN_CHANNELS];
+    if (!channels_valid(count)) return;
+    for (u32 c = 0; c < count; c++)
+        if (!(in[c] = mixbuf(s, m, (i8)p[c])) || !(out[c] = mixbuf(s, m, (i8)p[6 + c]))) return;
+    if (e->enabled && (!e->fx || p[0x34] == SNX_AUDREN_PARAM_INITIALIZED)) {
+        fx_free(e);
+        ARCompressor* c = calloc(1, sizeof *c);
+        if (c) {
+            c->held = c->gain = 1.0f;
+            compressor_params(c, p);
+        }
+        e->fx = c;
+    } else if (e->enabled && p[0x34] == SNX_AUDREN_PARAM_UPDATING)
+        compressor_params(e->fx, p);
+    if (!e->enabled || !e->fx) {
+        for (u32 c = 0; c < count; c++)
+            if (in[c] != out[c]) memcpy(out[c], in[c], n * sizeof *out[c]);
+        return;
+    }
+    ARCompressor* c = e->fx;
+    float threshold = rdf(p + 0x14), ratio = rdf(p + 0x18), detector = c->detector;
+    for (u32 i = 0; i < n; i++) {
+        float power = 0.0f, x[SNX_AUDREN_CHANNELS];
+        for (u32 ch = 0; ch < count; ch++) {
+            i64 v = sat32(in[ch][i]);
+            x[ch] = (float)v;
+            power += (float)(v * v);
+        }
+        detector += rdf(p + 0x24) * (power / (float)count - c->detector);
+        float level = -100.0f, target = 0.0f;
+        if (detector >= 1.0e-10) {
+            level = log10f(detector) * 10.0f;
+            target = 1.0f;
+        }
+        if (level >= c->knee_lo)
+            target = db_gain(level >= c->knee_hi ? (1.0f / ratio - 1.0f) * (level - threshold)
+                                                 : (level - c->knee_lo) * (level - c->knee_lo) * -c->knee);
+        float held = target;
+        c->rate = rdf(p + 0x28);
+        if (c->held - target <= 0.08f) {
+            c->rate = rdf(p + 0x2C);
+            if (c->held - target >= -0.08f && fabsf(c->gain - target) >= 0.001f) held = c->held;
+        }
+        c->held = held;
+        c->gain += (target - c->gain) * c->rate;
+        for (u32 ch = 0; ch < count; ch++) out[ch][i] = (float)(i32)(x[ch] * c->gain * c->out);
+    }
+    c->detector = detector;
+}
+
 /* a mix's effects, by their process order */
 static void mix_effects(ARState* s, u32 id) {
     ARMix* m = &s->mix[id];
@@ -1529,6 +1604,10 @@ static void mix_effects(ARState* s, u32 id) {
         switch (next->type) {
             case SNX_AUDREN_EFFECT_AUX: effect_aux(s, m, next); break;
             case SNX_AUDREN_EFFECT_CAPTURE: effect_capture(s, m, next); break;
+            case SNX_AUDREN_EFFECT_COMPRESSOR:
+                effect_compressor(s, m, next);
+                next->p[0x34] = SNX_AUDREN_PARAM_UPDATED;
+                break;
             case SNX_AUDREN_EFFECT_LIMITER: effect_limiter(s, m, next); break;
             case SNX_AUDREN_EFFECT_MIX: effect_mix(s, m, next); break;
             case SNX_AUDREN_EFFECT_BIQUAD:
@@ -1547,8 +1626,7 @@ static void mix_effects(ARState* s, u32 id) {
                 effect_i3dl2(s, m, next);
                 next->p[stateful_at(next->type)] = SNX_AUDREN_PARAM_UPDATED;
                 break;
-            default:
-                warn_once(s, SNX_AUDREN_WARN_EFFECT, "an effect type (delay, reverb, biquad, ...) is not rendered");
+            default: warn_once(s, SNX_AUDREN_WARN_EFFECT, "an effect of an unknown type is not rendered");
         }
         done = next->order + 1;
         if (!done) return; /* the order wrapped */

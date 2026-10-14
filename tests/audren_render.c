@@ -683,6 +683,47 @@ static void i3_ref(const i16* x, i16* y, int frames_n, const u8* state, const fl
     }
 }
 
+/* a compressor on effect 0, mono: v is threshold, ratio, detector rate, attack, release, out gain and makeup on */
+static void compressor_set(u8* p, const float* v) {
+    w32(p, 0xC, 1u << 16 | 1);
+    w32(p, 0x10, SNX_ART_RATE);
+    wf(p, 0x14, v[0]);
+    wf(p, 0x18, v[1]);
+    memcpy(p + 0x24, v + 2, 4 * 4);
+    w8(p, 0x35, v[6] != 0.0f);
+}
+/* Eden's compressor (renderer/command/effect/compressor.cpp) for one channel */
+static float cmp_db(float db) {
+    float e = db / 20.0f * 3.3219f;
+    return powf(2.0f, (e - truncf(e)) * 0.69315f);
+}
+static void cmp_ref(const i16* x, i16* y, int frames_n, const u8* state, const float* v) {
+    float s00 = 0, s04 = 1, s08 = 1, c0c = 0, c10 = 0, c14 = 0, c20 = 0;
+    for (int f = 0; f < frames_n; f++) {
+        if (state[f] != SNX_AUDREN_PARAM_UPDATED) {
+            if (state[f] == SNX_AUDREN_PARAM_INITIALIZED) s00 = 0, s04 = 1, s08 = 1;
+            float r = 1.0f / v[1], mk = v[6] != 0.0f ? v[0] * 0.5f * (r - 1.0f) - 3.0f : 0.0f;
+            c20 = cmp_db(v[5] + mk), c0c = (1.0f - r) / 6.0f, c14 = v[0] + 1.5f, c10 = v[0] - 1.5f;
+        }
+        float d00 = s00;
+        for (int i = f * SNX_ART_FRAME; i < (f + 1) * SNX_ART_FRAME; i++) {
+            d00 += v[2] * ((float)((i64)x[i] * x[i]) / 1.0f - s00);
+            float b = -100.0f, c = 0.0f;
+            if (d00 >= 1.0e-10) b = log10f(d00) * 10.0f, c = 1.0f;
+            if (b >= c10) c = cmp_db(b >= c14 ? (1.0f / v[1] - 1.0f) * (b - v[0]) : (b - c10) * (b - c10) * -c0c);
+            float rate = v[3], held = c;
+            if (s04 - c <= 0.08f) {
+                rate = v[4];
+                if (s04 - c >= -0.08f && fabsf(s08 - c) >= 0.001f) held = s04;
+            }
+            s04 = held;
+            s08 += (c - s08) * rate;
+            y[i] = tsat((i32)((float)x[i] * s08 * c20));
+        }
+        s00 = d00;
+    }
+}
+
 /* the first sample where a and b differ, -1 if none */
 static int first_diff(const i16* a, const i16* b, int n) {
     for (int i = 0; i < n; i++)
@@ -1350,6 +1391,50 @@ int main(void) {
         CHECK(lost == 0xFFFFFFFFu && total == 0xFFFFFFFFu, "capture counts at the wrap: lost %08x, total %08x", lost,
               total);
     }
+
+    /* at revision 4 Eden takes no compressor update: it never runs */
+    {
+        static const float v[7] = {70.0f, 4.0f, 0.001f, 0.05f, 0.002f, 3.0f, 1.0f};
+        reset();
+        u8* p = fx_voice(SNX_AUDREN_EFFECT_COMPRESSOR);
+        w8(eff(0), 2, 1);
+        p[0] = 0, p[6] = 1;
+        compressor_set(p, v);
+        frames(5);
+        double lv = level_i16(sink_frame_at(4, 1), SNX_ART_FRAME, 1000);
+        CHECK(lv < 0.001, "a revision 4 compressor ran: %.4f", lv);
+    }
+
+    /* the compressor at revision 9, above and inside the knee, against Eden's run here; off it copies */
+    art_rev = 9;
+    for (int set = 0; set < 3; set++) {
+        static const float vs[2][7] = {{70.0f, 4.0f, 0.001f, 0.05f, 0.002f, 3.0f, 1.0f},
+                                       {78.0f, 2.0f, 0.001f, 0.05f, 0.002f, -2.0f, 0.0f}};
+        static i16 x[30 * SNX_ART_FRAME], y[30 * SNX_ART_FRAME], want[30 * SNX_ART_FRAME];
+        u8 state[30];
+        reset();
+        u8* p = fx_voice(SNX_AUDREN_EFFECT_COMPRESSOR);
+        w8(eff(0), 2, set < 2);
+        p[0] = 0, p[6] = 1;
+        compressor_set(p, vs[set & 1]);
+        for (int f = 0; f < 30; f++) {
+            state[f] = f == 0 ? 0 : f == 10 ? 1 : 2;
+            w8(p, 0x34, state[f]);
+            if (f == 1)
+                frame_only();
+            else
+                frames(1);
+        }
+        sink_copy(x, 0, 30, 0);
+        sink_copy(y, 0, 30, 1);
+        if (set < 2)
+            cmp_ref(x, want, 30, state, vs[set]);
+        else
+            memcpy(want, x, sizeof want);
+        int at = first_diff(y, want, 30 * SNX_ART_FRAME);
+        CHECK(at < 0, "compressor %d: sample %d is %d, want %d", set, at, at < 0 ? 0 : y[at], at < 0 ? 0 : want[at]);
+    }
+    art_rev = 4;
 
     printf("%u checks, %u failed\n", checks, failures);
     audren_state_free(st);
