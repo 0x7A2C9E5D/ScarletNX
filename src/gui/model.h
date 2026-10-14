@@ -10,7 +10,21 @@
 #define SNX_GUI_HAS_GCCJIT 0
 #endif
 
-enum { GUI_SWITCH, GUI_LINUX, GUI_3DS, GUI_KEYS, GUI_FULLSCREEN, GUI_GCCJIT, GUI_GDBSTUB, GUI_THEME, GUI_EXIT, GUI_ITEM_COUNT };
+enum {
+    GUI_SWITCH,
+    GUI_LINUX,
+    GUI_3DS,
+    GUI_KEYS,
+    GUI_FULLSCREEN,
+    GUI_GCCJIT,
+    GUI_GDBSTUB,
+    GUI_THEME,
+#ifdef __ANDROID__
+    GUI_LOG, /* a phone has no terminal: the logs go out through the share sheet */
+#endif
+    GUI_EXIT,
+    GUI_ITEM_COUNT
+};
 typedef enum { GUI_UP, GUI_DOWN, GUI_LEFT, GUI_RIGHT, GUI_SELECT, GUI_CANCEL, GUI_PAGE_UP, GUI_PAGE_DOWN } GuiKey;
 typedef enum { GUI_LOAD_NONE, GUI_LOAD_OPTIONS, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS } GuiLoadView;
 enum { GUI_LOAD_DRAG, GUI_LOAD_DIRECTORY };
@@ -21,6 +35,7 @@ typedef struct {
     GuiLoadView view;
     bool running, fullscreen, gccjit, gdbstub, quit;
     int theme_next; /* the GUI moves to the next theme and clears it */
+    int share_log;  /* the GUI shares the logs and clears it */
     /* the recent games above the items: how many, the focused one + 1 (0: an item has the focus), and the one
        to run + 1, which the GUI runs and clears */
     int recent, recent_focus, recent_open;
@@ -64,4 +79,7 @@ unsigned char gui_glyph(uint32_t codepoint);
 /* SDL_DROP_FILE is already a path. DROP_TEXT/clipboard may contain a quoted path
    or a local file:// URI. Returns owned UTF-8, never shell-expanded. */
 char* gui_drop_path(const char* text, bool text_drop);
+/* The path of a file a picker chose: on Android a document of the device's storage, or a download it names by path,
+   NULL for any other (an app's, a cloud's); elsewhere the path or file:// URI it gave. Owned. */
+char* gui_document_path(const char* uri);
 #endif
