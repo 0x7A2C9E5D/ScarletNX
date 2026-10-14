@@ -28,7 +28,9 @@ file holds the rules sessions get wrong and points to the skills that carry the 
   license). A new file starts with `SPDX-License-Identifier: GPL-3.0-or-later` and the fork's copyright line. Code
   under GPL-3.0, GPL-2.0-or-later (yuzu, suyu, sudachi, Citron, Eden), LGPL, MIT, BSD, ISC, zlib or Apache 2.0 can
   be ported, keeping its copyright lines and naming where it came from (Ryujinx is MIT). GPL-2.0-only code can't be.
-  Switchbrew and the SDK's own behavior, read from the disassembly, are the primary references.
+  Switchbrew and the SDK's own behavior, read from the disassembly, are the primary references, with Atmosphère
+  (Mesosphère's kernel, Stratosphère's services) as the reference for how Horizon behaves. It is GPL-2.0-only, so
+  it is read, never ported.
 - **Formatting:** `scripts/format.sh` before committing (clang-format 23, ruff). It only changes whitespace, and
   the whole history is formatted, so an unformatted file shows up as noise in every diff. Third-party code
   (the packages in `.cache/cpm`) is never formatted.

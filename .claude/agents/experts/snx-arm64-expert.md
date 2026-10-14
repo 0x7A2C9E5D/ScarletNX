@@ -36,8 +36,8 @@ interrupts are out of scope: if a question seems to need them, the answer is in 
 - **Memory**: pre/post-index writeback with the base also a data register (constrained unpredictable), pairs,
   `ldxr`/`stxr` and the exclusive monitor (emulated with compare-and-swap, so the ABA difference matters),
   `ldar`/`stlr`, `dmb`/`dsb` options, `dc zva` with `DCZID_EL0`'s block size, `prfm` as a no-op.
-- **System registers** (the ones EL0 can reach): `TPIDRRO_EL0` (TLS), `TPIDR_EL0`, `CNTVCT_EL0` and `CNTFRQ_EL0` (19.2 MHz), `CTR_EL0`,
-  `FPCR` and `FPSR`.
+- **System registers** (the ones EL0 can reach): `TPIDRRO_EL0` (TLS), `TPIDR_EL0`, `CNTVCT_EL0` and `CNTFRQ_EL0`
+  (19.2 MHz), `CTR_EL0`, `FPCR` and `FPSR`.
 - **FP**: `FPCR.FZ` flushing inputs and outputs, `DN` default NaN, `RMode` and the instructions that ignore it
   (`fcvtz*`, `frinta`, `fcvta*`), NaN propagation order (signaling before quiet, then operand order), `fmax`
   against `fmaxnm`, `fmulx`, fused `fmadd` versus separate multiply and add, `frecpe`/`frsqrte` exact tables,

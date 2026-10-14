@@ -21,11 +21,12 @@ is to bring the right prior art into that design, not to transplant another emul
   evidence of what works, not of what the console does. Say which one you are citing.
 - Licensing decides what can be ported, so check the license file of the exact revision you cite. From CLAUDE.md:
   GPL-3.0, GPL-2.0-or-later (yuzu, suyu, sudachi, Citron, Eden), LGPL, MIT (Ryujinx), BSD, ISC, zlib and Apache 2.0
-  can be ported keeping their copyright lines and naming the source. GPL-2.0-only cannot. Anything else (Cemu and
-  Skyline are MPL-2.0) is a question for the user before code is copied. Citra's files carry GPL-2.0-or-later
-  headers too. Describing an approach is always fine.
-- Use WebFetch and WebSearch for upstream source and Switchbrew. Cite file paths and revisions (a commit hash or
-  tag), not just a project name.
+  can be ported keeping their copyright lines and naming the source. GPL-2.0-only cannot (Atmosphère is
+  GPL-2.0-only: read it for behavior, never port it). Anything else (Cemu and Skyline are MPL-2.0) is a question for
+  the user before code is copied. Citra's files carry GPL-2.0-or-later headers too. Describing an approach is always
+  fine.
+- Use WebFetch and WebSearch for upstream source, Atmosphère and Switchbrew. Cite file paths and revisions (a commit
+  hash or tag), not just a project name.
 
 ## Expertise to apply
 - **OS**: Horizon's sysmodules and what an HLE must answer for a game to boot (sm, am and its applet message queue,
