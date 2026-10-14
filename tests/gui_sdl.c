@@ -574,10 +574,15 @@ int main(int argc, char** argv) {
     colored_text_on(&app, 1, 3, "RECOMPILE: OPTION FLAGS", ls, lp);
     colored_text_on(&app, 24, 3, "...OK", li, lp);
     colored_text_on(&app, 1, 4, "LAUNCH: OPTION FLAGS...OK", li, lp);
-    colored_text_on(&app, app.cols - 6, app.rows - 3, "100%", li, lp);
-    colored_text_on(&app, 1, app.rows - 2, "OPTION FLAGS", li, lp);
     colored_text_on(&app, 1, app.rows - 1, "Press [ESC] to return to menu", ls, lp);
     float cell = 16.0f * (float)app.scale;
+    colored_text_on(&app, app.cols - 6, app.rows - 3, "    ", li, lp); /* YoRHa has no bar unless asked */
+    colored_text_on(&app, 1, app.rows - 2, "            ", li, lp);
+    assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 3) + cell / 2), lp));
+    app.theme.bar = true;
+    render(&app);
+    colored_text_on(&app, app.cols - 6, app.rows - 3, "100%", li, lp);
+    colored_text_on(&app, 1, app.rows - 2, "OPTION FLAGS", li, lp);
     assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 3) + cell / 2), li));
     /* typing: three characters in, the cursor after them */
     app.theme.fade_in_ms = app.theme.fade_out_ms = 0;

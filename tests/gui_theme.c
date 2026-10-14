@@ -27,7 +27,7 @@ int main(void) {
     assert(same(yorha->run_colors.page, (GuiRgb){0x14, 0x14, 0x16}) && !same(yorha->run_colors.page, yorha->page));
     assert(same(def->run_colors.page, def->page) && same(def->run_colors.ink, def->ink));
     assert(def->run == GUI_RUN_CONSOLE && !def->fade_in_ms && !def->fade_out_ms && def->line_in == GUI_LINE_NONE);
-    assert(loading->run == GUI_RUN_STEPS && loading->ring == GUI_RING_RIGHT && loading->texture && loading->bar);
+    assert(loading->run == GUI_RUN_STEPS && loading->ring == GUI_RING_RIGHT && loading->texture && !loading->bar);
     assert(loading->line_in == GUI_LINE_TYPING && loading->typing_ms == 25 && loading->fade_out_ms == 500);
     assert(loading->detailed && !loading->collapse && !def->detailed && !def->collapse);
     assert(!strcmp(loading->title[GUI_SCREEN_LOADING], "BOOTING"));
@@ -53,7 +53,7 @@ int main(void) {
 
     /* the run's layout and its transitions; a time past 10 s, or not a number, keeps the base's */
     parse(&theme,
-          "[theme]\nbase = yorha\n[run]\nlayout = console\nring = left\ntexture = false\nbar = no\npage = #050505\n"
+          "[theme]\nbase = yorha\n[run]\nlayout = console\nring = left\ntexture = false\nbar = true\npage = #050505\n"
           "detailed = false\ncollapse = true\n[transitions]\nline_in = slide\nline_in_ms = 300\nfade_in_ms = 10001\n"
           "fade_out_ms = 5s\ntyping_ms = 0\nblink_ms = -1\n[colors]\ndim = #010203\n");
     assert(theme.run == GUI_RUN_CONSOLE && theme.ring == GUI_RING_LEFT && !theme.texture && theme.bar);

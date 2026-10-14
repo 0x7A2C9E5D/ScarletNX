@@ -58,7 +58,6 @@ static const GuiTheme builtins[] = {
                        .failure = {0xD2, 0x46, 0x3A},
                        .warning = {0xD9, 0xB2, 0x4A}},
         .texture = true,
-        .bar = true,
         .detailed = true,
         .ring = GUI_RING_RIGHT,
         .line_in = GUI_LINE_TYPING,

@@ -121,8 +121,8 @@ dark loading screen in its own colours (`[run]`): the title, the game's name wit
 dots and a turning ring; each step the driver and the runner report (unpack, extract,
 recompile with its blocks, built, launch, GPU) typed down the page, with turning dots
 while it runs and `...OK` or `...FAILED` once it ends, the cursor blinking on the current
-one, and the other lines it printed indented under it; the progress bar and its
-percentage. The menu fades out to black as a run starts and the run fades in from it; ESC
+one, and the other lines it printed indented under it (`[run] bar` adds a progress bar
+with the recompile's percentage). The menu fades out to black as a run starts and the run fades in from it; ESC
 fades the run out and the menu back in.
 
 A theme is also a folder holding a `theme.ini`, the folder's name its id, in
