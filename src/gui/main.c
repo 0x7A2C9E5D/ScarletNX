@@ -13,6 +13,7 @@
 #include "theme.h"
 #include "window_icon.h"
 #include "build_info.h"
+#include "recent.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,7 +35,10 @@ typedef struct {
     GuiThemes themes;
     GuiBanner banner;
     GuiSteps steps;
-    Uint64 clock;                /* fixed time for tests; 0 is the real clock */
+    GuiRecent recent;
+    char* recent_file;          /* where the recent games are kept; NULL keeps none */
+    int recent_named;           /* the run's own name went to its recent game */
+    Uint64 clock;               /* fixed time for tests; 0 is the real clock */
     Uint64 fade_ms, leaving_ms; /* a screen fading in from black since; the run fading out since */
     Uint64 entering_ms;         /* the menu fading out since, before a run fades in */
     const char* drivers;
@@ -151,9 +155,27 @@ static void next_theme(App* app) {
     if (app->themes.count) gui_theme_load(&app->theme, dirs, 2, app->themes.ids[(i + 1) % app->themes.count]);
 }
 static int menu_spacing(const App* app) { return app->rows >= 30 ? 2 : 1; }
+/* the recent games take a title row, a row each and a blank one above the items */
+static int recent_rows(const App* app) { return app->recent.count ? app->recent.count + 2 : 0; }
 static int menu_row(const App* app, int item) {
-    return 4 + item * menu_spacing(app) +
+    return 4 + recent_rows(app) + item * menu_spacing(app) +
            (app->menu.view != GUI_LOAD_NONE && item > app->menu.active ? 2 : 0);
+}
+static void recent_label(const App* app, int index, char* label, size_t size) {
+    snprintf(label, size, "%s%s", app->theme.marker, app->recent.game[index].name);
+}
+/* the list as the menu and the file have it */
+static void recent_changed(App* app) {
+    app->menu.recent = app->recent.count;
+    if (app->menu.recent_focus > app->recent.count) app->menu.recent_focus = app->recent.count;
+    if (app->recent_file) gui_recent_save(&app->recent, app->recent_file);
+}
+static void recent_open(App* app, char* file) {
+    free(app->recent_file);
+    app->recent_file = file;
+    gui_recent_load(&app->recent, file);
+    app->menu.recent = app->recent.count;
+    app->menu.recent_focus = 0;
 }
 static void menu_label(const App* app, int item, char* label, size_t size) {
     if (item == GUI_FULLSCREEN || item == GUI_GCCJIT || item == GUI_GDBSTUB) {
@@ -537,9 +559,19 @@ static void render(App* app) {
                                                  : "Choose a load option. ESC: back.",
                  soft);
         }
+        if (app->recent.count) text(app, 1, 4, "Recent games", soft);
+        {
+            int game;
+            char label[160];
+            for (game = 0; game < app->recent.count; ++game) {
+                recent_label(app, game, label, sizeof label);
+                entry(app, 1, 5 + game, label, false,
+                      app->menu.recent_focus == game + 1 && (app->menu.view == GUI_LOAD_NONE || !app->menu.focus_load));
+            }
+        }
         for (int i = 0; i < GUI_ITEM_COUNT; ++i) {
             bool is_active = app->menu.activated && app->menu.active == i;
-            bool is_focused = app->menu.selected == i &&
+            bool is_focused = app->menu.selected == i && !app->menu.recent_focus &&
                               (app->menu.view == GUI_LOAD_NONE || !app->menu.focus_load);
             int row = menu_row(app, i);
             char label[100];
@@ -554,8 +586,11 @@ static void render(App* app) {
                       app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DIRECTORY);
             }
         }
-        text(app, 1, app->log_top - 4, app->message, app->abnormal_exit ? failure : focus);
-        if (app->has_output && !entering(app)) text(app, 1, app->log_top - 2, "Last output (no scrollback):", soft);
+        /* with recent games a small window has no room left for these: they would run into the footer */
+        if (app->log_top - 4 < app->rows - 4)
+            text(app, 1, app->log_top - 4, app->message, app->abnormal_exit ? failure : focus);
+        if (app->has_output && !entering(app) && app->log_top - 2 < app->rows - 4)
+            text(app, 1, app->log_top - 2, "Last output (no scrollback):", soft);
     } else if (head) {
         text(app, 1, 1, app->finished ? app->message : items[app->menu.selected],
              app->abnormal_exit ? failure : app->finished ? focus : active);
@@ -577,7 +612,10 @@ static void render(App* app) {
     }
     if (idle && (app->menu.view == GUI_LOAD_NONE ||
                  ((app->menu.view == GUI_LOAD_OPTIONS || app->menu.view == GUI_LOAD_DROP) && !app->menu.focus_load)))
-        text(app, 1, app->rows - 4, gui_setting_description(&app->menu), ink);
+        text(app, 1, app->rows - 4,
+             app->menu.recent_focus ? app->recent.game[app->menu.recent_focus - 1].path
+                                    : gui_setting_description(&app->menu),
+             ink);
     if (foot) {
         char footer[256];
         int bar = theme->footer == GUI_STYLE_BAR;
@@ -595,6 +633,17 @@ static void render(App* app) {
     }
     overlay(app);
     SDL_RenderPresent(app->renderer);
+}
+/* the game's name as its run gave it, from the step that names it, for its recent game */
+static void recent_name(App* app, const char* label) {
+    int i;
+    if (!app->recent_file || app->recent_named || !app->file) return;
+    for (i = app->steps.count - 1; i >= 0; --i)
+        if (!strcmp(app->steps.step[i].label, label) && app->steps.step[i].detail[0]) {
+            app->recent_named = 1;
+            if (gui_recent_rename(&app->recent, app->file, app->steps.step[i].detail)) recent_changed(app);
+            return;
+        }
 }
 /* back to the menu from a finished run, which fades in */
 static void leave_run(App* app) {
@@ -618,6 +667,7 @@ static void pump(App* app) {
             gui_steps_feed(&app->steps, buffer, (size_t)n, now_ms(app));
             app->has_output = true;
         }
+        recent_name(app, "LAUNCH");
         int status;
         if (gui_process_finished(app->process, &status)) {
             app->menu.running = false;
@@ -626,6 +676,8 @@ static void pump(App* app) {
             app->finished = !app->aborting;
             app->abnormal_exit = app->aborting || status != 0;
             gui_steps_finish(&app->steps, !app->abnormal_exit);
+            recent_name(app, "LAUNCH");
+            recent_name(app, "RECOMPILE"); /* a run that ended before its game loaded */
             app->menu.view = GUI_LOAD_NONE;
             if (app->aborting)
                 snprintf(app->message, sizeof(app->message), "Program ended abnormally (force-terminated by ESC).");
@@ -692,6 +744,11 @@ static void launch(App* app, char* absolute, bool prepared) {
     }
     free(app->file);
     app->file = absolute;
+    if (app->recent_file && !gui_recent_add(&app->recent, absolute, app->menu.selected == GUI_SWITCH ? GUI_SWITCH
+                                                                                                      : GUI_LINUX,
+                                            prepared))
+        recent_changed(app);
+    app->recent_named = 0;
     app->menu.view = GUI_LOAD_NONE;
     app->menu.running = true;
     app->finished = false;
@@ -700,6 +757,20 @@ static void launch(App* app, char* absolute, bool prepared) {
     gui_console_init(&app->console, app->cols - 2, app->rows - 8);
     app->has_output = true;
     layout(app);
+}
+/* a recent game, run as the menu would: its driver, the options the menu has now */
+static void open_recent(App* app, int index) {
+    GuiRecentGame game = app->recent.game[index];
+    if (!snx_is_file(game.path)) {
+        snprintf(app->message, sizeof(app->message), "%s is gone (%s): it left the recent games.", game.name,
+                 game.path);
+        gui_recent_remove(&app->recent, index);
+        recent_changed(app);
+        return;
+    }
+    app->menu.selected = game.driver;
+    launch(app, snx_strdup(game.path), game.prepared);
+    if (app->menu.running) app->menu.recent_focus = 1; /* back from the run, on the game that is now first */
 }
 static char* device_keys_path(void) {
 #ifdef _WIN32
@@ -796,6 +867,12 @@ static void menu_key(App* app, GuiKey key) {
         return;
     }
     gui_menu_key(&app->menu, key);
+    if (app->menu.recent_open) {
+        int index = app->menu.recent_open - 1;
+        app->menu.recent_open = 0;
+        if (index < app->recent.count) open_recent(app, index);
+        return;
+    }
     if (app->menu.theme_next) {
         app->menu.theme_next = 0;
         next_theme(app);
@@ -848,11 +925,24 @@ static void pointer(App* app, float window_x, float window_y, bool click) {
             return;
         }
     }
+    {
+        int game;
+        char label[160];
+        for (game = 0; game < app->recent.count; ++game) {
+            recent_label(app, game, label, sizeof label);
+            if (!hit_text(app, x, y, 1, 5 + game, label)) continue;
+            app->menu.recent_focus = game + 1;
+            app->menu.focus_load = false;
+            if (click) menu_key(app, GUI_SELECT);
+            return;
+        }
+    }
     for (int i = 0; i < GUI_ITEM_COUNT; ++i) {
         char label[100];
         menu_label(app, i, label, sizeof(label));
         if (!hit_text(app, x, y, 1, menu_row(app, i), label)) continue;
         app->menu.selected = i;
+        app->menu.recent_focus = 0;
         app->menu.focus_load = false;
         if (click) menu_key(app, GUI_SELECT);
         return;
@@ -944,6 +1034,7 @@ static void cleanup(App* app) {
     free(app->themes_dirs[1]);
     gui_themes_free(&app->themes);
     free(app->keys_path);
+    free(app->recent_file);
     gui_games_free(&app->games);
     SDL_free(app->cwd);
     SDL_DestroyTexture(app->font);
@@ -956,12 +1047,18 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
     App app;
+    char* prefs;
     if (!initialize(&app)) {
         fprintf(stderr, "scarletnx-gui: %s\n", SDL_GetError());
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", SDL_GetError(), app.window);
         cleanup(&app);
         return 1;
     }
+    /* the user's data folder (~/.local/share/scarletnx/gui/ on Linux, under %APPDATA% on Windows); main() opens
+       it, not initialize(), so the tests keep their own */
+    prefs = SDL_GetPrefPath("scarletnx", "gui");
+    if (prefs) recent_open(&app, snx_path_join(prefs, "recent.txt"));
+    SDL_free(prefs);
     while (!app.menu.quit) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) event(&app, &e);

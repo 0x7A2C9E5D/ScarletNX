@@ -53,6 +53,16 @@ The window's title tells which build it is, as `ScarletNX <commit> (<compiler>, 
   folder of `themes/` (see [Themes](#themes)). It lasts for the session.
 - **Exit** closes the launcher. Closing its window during a run terminates the
   entire owned process tree, so let the game exit normally to preserve its saves.
+- **Recent games**, above the items, lists the last five games run, newest first, by
+  the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
+  The focus moves between them and the items in one ring, and the line under the menu
+  shows the focused game's path. Choosing one runs it again with the driver it was
+  loaded with and the options the menu has now; a game whose file is gone leaves the
+  list instead. The list is kept in `recent.txt` in the user's data folder
+  (`$XDG_DATA_HOME/scarletnx/gui/`, by default `~/.local/share/scarletnx/gui/`, or
+  `%APPDATA%\scarletnx\gui\` on Windows), a line per
+  game: `switch` or `linux`, `file` or `games` (a program from games/, run as it is),
+  the path and the name, separated by tabs.
 
 The launcher looks beside its executable, then on PATH, for `scarletnx-mariko`
 (the existing Switch driver alias) or `scarletnx-gnuabi`. Files are passed directly

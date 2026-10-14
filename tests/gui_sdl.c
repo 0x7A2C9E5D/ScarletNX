@@ -406,6 +406,76 @@ int main(int argc, char** argv) {
     app.menu.selected = GUI_LINUX;
     free(flags_input);
 
+    /* recent games: what the GUI ran, newest first above the items and kept in a file, named as the run named it;
+       one runs again with the options the menu has now, which the fake driver checks */
+    {
+        GuiRecent kept;
+        char* recent_file = snx_path_join(temporary, "prefs/recent.txt");
+        char* again = snx_path_join(temporary, "option flags again.nro");
+        SDL_Color soft = rgb(app.theme.soft);
+        assert(!snx_write_file(again, "fixture", 7));
+        recent_open(&app, snx_strdup(recent_file));
+        assert(!app.recent.count && !app.menu.recent);
+        app.menu.selected = GUI_SWITCH;
+        app.menu.gccjit = !!SNX_GUI_HAS_GCCJIT;
+        app.menu.gdbstub = true;
+        launch(&app, snx_strdup(again), false);
+        finish(&app, 0);
+        assert(app.recent.count == 1 && app.menu.recent == 1 && !strcmp(app.recent.game[0].name, "option flags"));
+        assert(app.recent.game[0].driver == GUI_SWITCH && !app.recent.game[0].prepared);
+        gui_recent_load(&kept, recent_file);
+        assert(kept.count == 1 && !strcmp(kept.game[0].name, "option flags"));
+        assert(!strcmp(kept.game[0].path, app.recent.game[0].path));
+        /* a title, the game and a blank row, then the items; up from the first item reaches the game */
+        render(&app);
+        colored_text(&app, 4, "Recent games", soft);
+        colored_text(&app, 5, "- option flags", normal);
+        assert(menu_row(&app, GUI_SWITCH) == 7);
+        colored_text(&app, 7, "- Load Switch NSP/XCI/NRO", yellow);
+        key(&app, SDLK_UP);
+        render(&app);
+        assert(app.menu.recent_focus == 1);
+        colored_text(&app, 5, "- option flags", yellow);
+        colored_text(&app, 7, "- Load Switch NSP/XCI/NRO", /* the item gave the focus up */
+                     app.menu.activated && app.menu.active == GUI_SWITCH ? pink : normal);
+        colored_text(&app, app.rows - 4, app.recent.game[0].path, normal); /* the description: where it is */
+        /* run again from there, whatever item the menu last had: its own driver, the options of now */
+        app.menu.selected = GUI_LINUX;
+        key(&app, SDLK_RETURN);
+        assert(app.menu.running && app.menu.selected == GUI_SWITCH);
+        finish(&app, 0);
+        assert(app.recent.count == 1 && app.menu.recent_focus == 1);
+        /* the mouse: over the game it takes the focus, over an item it gives it back */
+        mouse(&app, 3, menu_row(&app, GUI_KEYS), false);
+        assert(!app.menu.recent_focus && app.menu.selected == GUI_KEYS);
+        mouse(&app, 3, 5, false);
+        assert(app.menu.recent_focus == 1);
+        /* YoRHa: the focused game on the band, the title in its soft colour */
+        app.theme = *gui_theme_builtin("yorha");
+        app.theme.texture = 0;
+        render(&app);
+        colored_text_on(&app, 1, 4, "Recent games", rgb(app.theme.soft), rgb(app.theme.page));
+        colored_text_on(&app, 3, 5, "option flags", rgb(app.theme.page), rgb(app.theme.focus));
+        app.theme = *gui_theme_builtin("default");
+        /* a game whose file went away leaves the list when chosen, and the file says so */
+        assert(!remove(again));
+        key(&app, SDLK_RETURN);
+        assert(!app.menu.running && !app.recent.count && !app.menu.recent && !app.menu.recent_focus);
+        assert(strstr(app.message, "is gone"));
+        gui_recent_load(&kept, recent_file);
+        assert(!kept.count);
+        render(&app);
+        assert(menu_row(&app, GUI_SWITCH) == 4);
+        /* the rest runs with no list */
+        free(app.recent_file);
+        app.recent_file = NULL;
+        app.message[0] = 0;
+        app.menu.gccjit = app.menu.gdbstub = false;
+        app.menu.selected = GUI_LINUX;
+        free(again);
+        free(recent_file);
+    }
+
     char* hung = snx_path_join(temporary, "hang in join.elf");
     assert(!snx_write_file(hung, "", 0));
     launch(&app, snx_strdup(hung), false);
