@@ -412,6 +412,7 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
                 memset(e->p, 0, sizeof e->p);
                 e->enabled = 0;
                 e->mix_id = SNX_AUDREN_UNUSED_MIX;
+                memset(e->bq, 0, sizeof e->bq);
                 fx_free(e);
             }
             if (ei[1] || e->type != ei[0]) e->fresh = 1;

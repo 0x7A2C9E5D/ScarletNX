@@ -1092,6 +1092,36 @@ int main(void) {
               a < 0 ? 0 : y0[a], a < 0 ? 0 : w0[a], b, b < 0 ? 0 : y1[b], b < 0 ? 0 : w1[b]);
     }
 
+    /* another effect in a slot starts from nothing (Eden's ResetEffect) */
+    {
+        static i16 left[6 * SNX_ART_FRAME], right[6 * SNX_ART_FRAME], want[3 * SNX_ART_FRAME];
+        static const i16 qb[3] = {4096, 8192, 4096}, qa[2] = {8192, -4096};
+        reset();
+        u8* p = fx_voice(SNX_AUDREN_EFFECT_BIQUAD);
+        w8(eff(0), 2, 1);
+        for (int f = 0; f < 6; f++) {
+            memset(p, 0, 0xA0);
+            p[0] = 0, p[6] = 1;
+            if (f == 2) {
+                w8(eff(0), 0, SNX_AUDREN_EFFECT_DELAY);
+                delay_set(p, 1, 1, 16384, 0, 16384, 0, 0, 0);
+            } else {
+                w8(eff(0), 0, SNX_AUDREN_EFFECT_BIQUAD);
+                memcpy(p + 0xC, qb, sizeof qb);
+                memcpy(p + 0x12, qa, sizeof qa);
+                w8(p, 0x16, 1);
+                w8(p, 0x17, f == 0 ? SNX_AUDREN_PARAM_INITIALIZED : SNX_AUDREN_PARAM_UPDATED);
+            }
+            frames(1);
+        }
+        sink_copy(left, 0, 6, 0);
+        sink_copy(right, 0, 6, 1);
+        ref_biquad(left + 3 * SNX_ART_FRAME, want, 3 * SNX_ART_FRAME, qb, qa, 0);
+        int at = first_diff(right + 3 * SNX_ART_FRAME, want, 3 * SNX_ART_FRAME);
+        CHECK(at < 0, "a biquad filter after a delay in its slot: sample %d is %d, want %d", at,
+              at < 0 ? 0 : right[3 * SNX_ART_FRAME + at], at < 0 ? 0 : want[at]);
+    }
+
     /* six channels: buffer 5 is the back right's line from revision 11, the LFE's before it */
     for (art_rev = 4; art_rev <= 11; art_rev += 7) {
         reset();
