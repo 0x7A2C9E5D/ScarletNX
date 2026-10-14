@@ -15,9 +15,12 @@ static const GuiTheme builtins[] = {
         .focus = {255, 255, 0},
         .active = {255, 85, 255},
         .failure = {255, 0, 0},
+        .dim = {80, 80, 80},
         .head = GUI_STYLE_PLAIN,
         .footer = GUI_STYLE_PLAIN,
         .marker = "- ",
+        .typing_ms = 25,
+        .blink_ms = 500,
     },
     {
         .id = "yorha",
@@ -28,6 +31,7 @@ static const GuiTheme builtins[] = {
         .focus = {0x45, 0x41, 0x3A},
         .active = {0x8A, 0x6A, 0x2A},
         .failure = {0xA5, 0x47, 0x3C},
+        .dim = {0xB4, 0xB0, 0x9C},
         .head = GUI_STYLE_BAR,
         .footer = GUI_STYLE_BAR,
         .head_rule = true,
@@ -35,6 +39,38 @@ static const GuiTheme builtins[] = {
         .marker = "\xE2\x96\xA0 ", /* U+25A0, the font's square */
         .title = {"SCARLETNX  /  MENU", "SCARLETNX  /  GAMES", "SCARLETNX  /  KEYS", "SYSTEM  /  COMPILING",
                   "SYSTEM  /  LOADING"},
+        .fade_in_ms = 250,
+        .fade_out_ms = 500,
+        .line_in_ms = 220,
+        .typing_ms = 25,
+        .blink_ms = 500,
+    },
+    {
+        .id = "yorha-loading",
+        .name = "YoRHa loading",
+        .page = {0x14, 0x14, 0x16},
+        .ink = {0xE6, 0xE4, 0xDC},
+        .soft = {0x8E, 0x8C, 0x86},
+        .focus = {0xE6, 0xE4, 0xDC},
+        .active = {0xD9, 0xB2, 0x4A},
+        .failure = {0xD2, 0x46, 0x3A},
+        .dim = {0x3E, 0x3E, 0x40},
+        .head = GUI_STYLE_BAR,
+        .footer = GUI_STYLE_PLAIN,
+        .footer_rule = true,
+        .focus_bar = true,
+        .marker = "\xE2\x96\xA0 ",
+        .title = {"SCARLETNX  /  MENU", "SCARLETNX  /  GAMES", "SCARLETNX  /  KEYS", "COMPILING", "BOOTING"},
+        .run = GUI_RUN_STEPS,
+        .texture = true,
+        .bar = true,
+        .ring = GUI_RING_RIGHT,
+        .line_in = GUI_LINE_TYPING,
+        .fade_in_ms = 250,
+        .fade_out_ms = 500,
+        .line_in_ms = 220,
+        .typing_ms = 25,
+        .blink_ms = 500,
     },
 };
 static const char* const screens[GUI_SCREEN_COUNT] = {"menu", "games", "keys", "compiling", "loading"};
@@ -102,12 +138,27 @@ static bool flag(bool* out, const char* value) {
         return false;
     return true;
 }
+static bool milliseconds(uint32_t* out, const char* value) {
+    char* end;
+    unsigned long n = strtoul(value, &end, 10);
+    if (!*value || *end || n > 10000) return false;
+    *out = (uint32_t)n;
+    return true;
+}
+static bool word(int* out, const char* value, const char* const* words, int count) {
+    for (int i = 0; i < count; ++i)
+        if (!strcmp(value, words[i])) {
+            *out = i;
+            return true;
+        }
+    return false;
+}
 static void apply(GuiTheme* t, const char* section, const char* key, const char* value) {
     if (!strcmp(section, "theme") && !strcmp(key, "name"))
         copy(t->name, sizeof t->name, value);
     else if (!strcmp(section, "colors")) {
-        GuiRgb* roles[] = {&t->page, &t->ink, &t->soft, &t->focus, &t->active, &t->failure};
-        static const char* const names[] = {"page", "ink", "soft", "focus", "active", "failure"};
+        GuiRgb* roles[] = {&t->page, &t->ink, &t->soft, &t->focus, &t->active, &t->failure, &t->dim};
+        static const char* const names[] = {"page", "ink", "soft", "focus", "active", "failure", "dim"};
         for (size_t i = 0; i < sizeof roles / sizeof *roles; ++i)
             if (!strcmp(key, names[i])) colour(roles[i], value);
     } else if (!strcmp(section, "head") || !strcmp(section, "footer")) {
@@ -124,6 +175,32 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
             copy(t->marker, sizeof t->marker, value);
         else if (!strcmp(key, "focus") && (!strcmp(value, "bar") || !strcmp(value, "color")))
             t->focus_bar = value[0] == 'b';
+    } else if (!strcmp(section, "run")) {
+        static const char *const layouts[] = {"console", "steps"}, *const rings[] = {"none", "left", "right"};
+        int n;
+        if (!strcmp(key, "layout") && word(&n, value, layouts, 2))
+            t->run = (GuiRunLayout)n;
+        else if (!strcmp(key, "ring") && word(&n, value, rings, 3))
+            t->ring = (GuiRing)n;
+        else if (!strcmp(key, "texture"))
+            flag(&t->texture, value);
+        else if (!strcmp(key, "bar"))
+            flag(&t->bar, value);
+    } else if (!strcmp(section, "transitions")) {
+        static const char* const entrances[] = {"none", "typing", "slide", "fade"};
+        int n;
+        if (!strcmp(key, "line_in") && word(&n, value, entrances, 4))
+            t->line_in = (GuiLineIn)n;
+        else if (!strcmp(key, "fade_in_ms"))
+            milliseconds(&t->fade_in_ms, value);
+        else if (!strcmp(key, "fade_out_ms"))
+            milliseconds(&t->fade_out_ms, value);
+        else if (!strcmp(key, "line_in_ms"))
+            milliseconds(&t->line_in_ms, value);
+        else if (!strcmp(key, "typing_ms"))
+            milliseconds(&t->typing_ms, value);
+        else if (!strcmp(key, "blink_ms"))
+            milliseconds(&t->blink_ms, value);
     }
 }
 /* each key = value of text, with its section, to visit; false when out of memory */

@@ -49,6 +49,14 @@ static void colored_text_on(App* app, int col, int row, const char* prompt, SDL_
             }
     SDL_DestroySurface(image);
 }
+static SDL_Color pixel(App* app, float x, float y) {
+    SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
+    Uint8 r, g, b, a;
+    assert(image && SDL_ReadSurfacePixel(image, (int)x, (int)y, &r, &g, &b, &a));
+    SDL_DestroySurface(image);
+    return (SDL_Color){r, g, b, 255};
+}
+static bool same_colour(SDL_Color a, SDL_Color b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
 static void colored_text_at(App* app, int col, int row, const char* prompt, SDL_Color color) {
     colored_text_on(app, col, row, prompt, color, black);
 }
@@ -511,6 +519,11 @@ int main(int argc, char** argv) {
     colored_text_on(&app, 3, menu_row(&app, GUI_EXIT), "Exit", ink, page);
     colored_text_on(&app, 1, app.rows - 2, "CWD:", page, ink);
     mouse(&app, 2, menu_row(&app, GUI_THEME), true);
+    assert(!strcmp(app.theme.id, "yorha-loading"));
+    render(&app);
+    colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", rgb(app.theme.page), rgb(app.theme.ink));
+    colored_text_on(&app, 3, menu_row(&app, GUI_EXIT), "Exit", rgb(app.theme.ink), rgb(app.theme.page));
+    mouse(&app, 2, menu_row(&app, GUI_THEME), true);
     assert(!strcmp(app.theme.id, "custom") && !strcmp(app.theme.name, "Custom test"));
     render(&app);
     page = (SDL_Color){0x10, 0x20, 0x30, 255}; /* its own page; its ink, unreadable, is YoRHa's */
@@ -524,6 +537,77 @@ int main(int argc, char** argv) {
     free(custom_ini);
     free(custom);
     free(themes);
+
+    /* YoRHa loading: a run as steps, typed in, with the ring, the dots and the bar; the run fades in, and out */
+    char* steps_input = snx_path_join(temporary, "option flags steps.nro");
+    assert(!snx_write_file(steps_input, "fixture", 7));
+    gui_theme_load(&app.theme, app.themes_dir, "yorha-loading");
+    app.menu.selected = GUI_SWITCH;
+    app.menu.gccjit = !!SNX_GUI_HAS_GCCJIT;
+    app.menu.gdbstub = true;
+    launch(&app, snx_strdup(steps_input), false);
+    assert(app.menu.running && app.fade_ms);
+    for (Uint64 until = SDL_GetTicks() + 10000; app.menu.running && SDL_GetTicks() < until; SDL_Delay(5)) {
+        pump(&app);
+        render(&app);
+    }
+    assert(app.finished && !app.abnormal_exit && app.steps.count == 2 && screen(&app) == GUI_SCREEN_LOADING);
+    SDL_Color lp = rgb(app.theme.page), li = rgb(app.theme.ink), ls = rgb(app.theme.soft);
+    Uint64 shown = app.steps.step[1].shown_ms, faded = app.fade_ms;
+    Uint64 later = (shown + 60000) / 1600 * 1600; /* where turning dots would show none: the "..." is the end's */
+    app.theme.texture = false; /* exact backgrounds first */
+    app.clock = later;
+    render(&app);
+    colored_text_on(&app, 1, 1, "BOOTING", li, lp);
+    colored_text_on(&app, 9, 1, "OPTION FLAGS...", ls, lp);
+    colored_text_on(&app, 1, 3, "RECOMPILE: OPTION FLAGS", ls, lp);
+    colored_text_on(&app, 24, 3, "...OK", li, lp);
+    colored_text_on(&app, 1, 4, "LAUNCH: OPTION FLAGS...OK", li, lp);
+    colored_text_on(&app, app.cols - 6, app.rows - 3, "100%", li, lp);
+    colored_text_on(&app, 1, app.rows - 2, "OPTION FLAGS", li, lp);
+    colored_text_on(&app, 1, app.rows - 1, "Press [ESC] to return to menu", ls, lp);
+    float cell = 16.0f * (float)app.scale;
+    assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 3) + cell / 2), li));
+    /* typing: three characters in, the cursor after them */
+    app.theme.fade_in_ms = 0;
+    app.theme.blink_ms = 0;
+    app.clock = shown + 3 * app.theme.typing_ms + 1;
+    render(&app);
+    colored_text_on(&app, 1, 4, "LAU_", li, lp);
+    /* the page's faint lines, one pixel row in four */
+    app.theme = *gui_theme_builtin("yorha-loading");
+    app.clock = later;
+    render(&app);
+    float x = 8.0f * (float)app.scale * (float)(app.cols - 10), y = cell * 10;
+    assert(!same_colour(pixel(&app, x, y + 3), lp) && same_colour(pixel(&app, x, y + 2), lp));
+    /* the fade in from black, over fade_in_ms */
+    app.clock = faded;
+    render(&app);
+    assert(same_colour(pixel(&app, x, y + 2), black));
+    app.clock = faded + app.theme.fade_in_ms / 2;
+    render(&app);
+    SDL_Color half = pixel(&app, x, y + 2);
+    assert(!same_colour(half, black) && !same_colour(half, lp));
+    /* ESC: the run fades out to black over fade_out_ms, then the menu fades in */
+    app.clock = later;
+    key(&app, SDLK_ESCAPE);
+    assert(app.finished && app.leaving_ms == app.clock);
+    app.clock += app.theme.fade_out_ms / 2;
+    pump(&app);
+    render(&app);
+    assert(app.finished && !same_colour(pixel(&app, x, y + 2), lp));
+    app.clock += app.theme.fade_out_ms / 2;
+    pump(&app);
+    assert(!app.finished && app.menu.view == GUI_LOAD_NONE && app.fade_ms == app.clock);
+    render(&app);
+    assert(same_colour(pixel(&app, x, y + 2), black));
+    app.clock += app.theme.fade_in_ms;
+    render(&app);
+    colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", lp, li);
+    app.clock = 0;
+    app.theme = *gui_theme_builtin("default");
+    app.menu.gccjit = app.menu.gdbstub = false;
+    free(steps_input);
     e.type = SDL_EVENT_QUIT;
     event(&app, &e);
     assert(app.menu.quit);

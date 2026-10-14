@@ -115,8 +115,13 @@ at the top), the body (the menu, the file list or the driver's output) and the f
 run, which is **compiling** until the runner prints its `ScarletNX - <name>` banner and
 **loading** from then on.
 
-The built-ins are `default`, the look above, and `yorha`, paper and ink with a header
-bar, square markers and the focused line inverted. Any other theme is a folder of
+The built-ins are `default`, the look above; `yorha`, paper and ink with a header bar,
+square markers and the focused line inverted; and `yorha-loading`, which draws a run as a
+loading screen: the title, the game's name with turning dots and a turning ring; each
+step the driver and the runner report (unpack, extract, recompile with its blocks,
+built, launch, GPU) typed down the page, with turning dots while it runs and `...OK` or
+`...FAILED` once it ends, the cursor blinking on the current one; the progress bar and
+its percentage. The run fades in from black, and fades out when ESC leaves it. Any other theme is a folder of
 `themes/` (beside `games/`, in the working directory) holding a `theme.ini`; the folder's
 name is its id. `[theme] base` picks the built-in it starts from, and a key it leaves
 out, or that cannot be read, keeps the base's value.
@@ -127,13 +132,15 @@ name = Night ink
 ; default | yorha
 base = yorha
 [colors]
-; #RRGGBB. soft: hints, secondary text, rules. focus: the focused line, or its band
+; #RRGGBB. soft: hints, secondary text, rules. focus: the focused line, or its band.
+; dim: the ring's outer circle, the progress bar's empty segments and its rule
 page = #101418
 ink = #D8D4C4
 soft = #8A8676
 focus = #D8D4C4
 active = #C8A040
 failure = #D05040
+dim = #3E3E40
 [head]
 ; plain | bar | none; rule: a line under the head
 style = bar
@@ -148,6 +155,22 @@ focus = bar
 [footer]
 style = plain
 rule = true
+[run]
+; console: the driver's output as it comes; steps: the loading screen above
+layout = steps
+; faint lines over the page, the progress bar and percentage, and the ring: none | left | right
+texture = true
+bar = true
+ring = right
+[transitions]
+; milliseconds, 0 to 10000; 0 turns the thing off
+fade_in_ms = 250
+fade_out_ms = 500
+; how a step's line comes in: none | typing | slide | fade
+line_in = typing
+line_in_ms = 220
+typing_ms = 25
+blink_ms = 500
 ```
 
 Comments take a line of their own, starting with `;` or `#`.
@@ -184,7 +207,10 @@ Setting tests cover ON/OFF argument combinations, backend availability, mouse
 hover versus explicit activation, persistent submenus, yellow/pink highlighting
 and footer descriptions. Theme tests cover the built-ins, a `theme.ini` over its base
 (unreadable values and unknown keys included), the `themes/` folders listed, the
-compiling and loading screens, and the YoRHa bars and band in the real renderer.
+compiling and loading screens, and the YoRHa bars and band in the real renderer. Step
+tests cover each driver and runner line, lines split across reads, the progress and how a
+run ends; the renderer tests check the loading screen, its typing, texture and fades at a
+fixed clock.
 SDL tests use the dummy video driver and the
 software renderer, exercising the real font and event handlers without a display.
 The font's provenance and public-domain notice are in

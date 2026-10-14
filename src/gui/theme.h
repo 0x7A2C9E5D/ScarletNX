@@ -10,6 +10,10 @@ typedef struct {
     uint8_t r, g, b;
 } GuiRgb;
 typedef enum { GUI_STYLE_PLAIN, GUI_STYLE_BAR, GUI_STYLE_NONE } GuiStyle;
+/* a run's screens: the driver's output as it comes, or its steps as a loading screen draws them */
+typedef enum { GUI_RUN_CONSOLE, GUI_RUN_STEPS } GuiRunLayout;
+typedef enum { GUI_LINE_NONE, GUI_LINE_TYPING, GUI_LINE_SLIDE, GUI_LINE_FADE } GuiLineIn;
+typedef enum { GUI_RING_NONE, GUI_RING_LEFT, GUI_RING_RIGHT } GuiRing;
 typedef enum {
     GUI_SCREEN_MENU,
     GUI_SCREEN_GAMES,
@@ -20,19 +24,24 @@ typedef enum {
 } GuiScreen;
 typedef struct {
     char id[64], name[64];
-    GuiRgb page, ink, soft, focus, active, failure;
+    GuiRgb page, ink, soft, focus, active, failure, dim;
     GuiStyle head, footer;
     bool head_rule, footer_rule;
     bool focus_bar; /* the focused line as a band of ink, its text in the page colour */
     char marker[16];
     char title[GUI_SCREEN_COUNT][64];
+    GuiRunLayout run;
+    bool texture, bar; /* faint lines over the page; the progress bar and its percentage */
+    GuiRing ring;
+    GuiLineIn line_in;
+    uint32_t fade_in_ms, fade_out_ms, line_in_ms, typing_ms, blink_ms;
 } GuiTheme;
 typedef struct {
     char** ids; /* the built-ins, then each folder of themes/ with a theme.ini */
     size_t count;
 } GuiThemes;
 
-/* "default" and "yorha"; NULL for any other id */
+/* "default", "yorha" and "yorha-loading"; NULL for any other id */
 const GuiTheme* gui_theme_builtin(const char* id);
 /* A theme.ini's text over the built-in its [theme] base names (default when absent): a key it lacks, or cannot
    read, keeps the base's value. Returns false only when out of memory. */
