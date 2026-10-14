@@ -42,11 +42,19 @@ typedef struct {
     char message[512];
     int cols, rows, scale, log_top;
     Uint64 sampled;
-    bool has_output, finished, aborting, abnormal_exit, native;
+    bool has_output, finished, aborting, abnormal_exit;
+    int native;
 } App;
 static const char* const items[] = {"Load Switch NSP/XCI/NRO", "Load Linux ARM ELF", "Setup device keys",
                                    "Fullscreen", "Enable libgccjit", "Enable gdbstub", "Theme", "Exit"};
-static SDL_Color rgb(GuiRgb c) { return (SDL_Color){c.r, c.g, c.b, 255}; }
+static SDL_Color rgb(GuiRgb c) {
+    SDL_Color out;
+    out.r = c.r;
+    out.g = c.g;
+    out.b = c.b;
+    out.a = 255;
+    return out;
+}
 static Uint64 now_ms(const App* app) { return app->clock ? app->clock : SDL_GetTicks(); }
 
 static SDL_Texture* create_font(SDL_Renderer* renderer) {
@@ -81,15 +89,17 @@ static void text(App* app, int x, int y, const char* value, SDL_Color color) {
 }
 /* a line that waits on the user: plain at x, or framed, placed and blinking as the theme's prompt says */
 static void prompt(App* app, GuiPromptLine line, int x, int y, const char* value, SDL_Color color) {
+    char framed[160];
+    int width;
     const GuiPrompt* p = &app->theme.prompt;
     if (!p->lines[line]) {
         text(app, x, y, value, color);
         return;
     }
     if (p->blink && app->theme.blink_ms && (now_ms(app) / app->theme.blink_ms) % 2) return;
-    char framed[160];
+
     snprintf(framed, sizeof framed, "%s%s%s", p->open, value, p->close);
-    int width = (int)SDL_utf8strlen(framed);
+    width = (int)SDL_utf8strlen(framed);
     if (p->align == GUI_ALIGN_CENTER) x = (app->cols - width) / 2;
     if (p->align == GUI_ALIGN_RIGHT) x = app->cols - 1 - width;
     text(app, SDL_max(0, x), y, framed, color);
@@ -97,20 +107,27 @@ static void prompt(App* app, GuiPromptLine line, int x, int y, const char* value
 /* rows of the whole width, as a band behind text */
 static void band(App* app, int row, int rows, GuiRgb c) {
     int width, height;
+    SDL_FRect r;
     SDL_GetRenderOutputSize(app->renderer, &width, &height);
-    SDL_FRect r = {0, (float)(row * 16 * app->scale), (float)width, (float)(rows * 16 * app->scale)};
+    r.x = 0;
+    r.y = (float)(row * 16 * app->scale);
+    r.w = (float)width;
+    r.h = (float)(rows * 16 * app->scale);
     SDL_SetRenderDrawColor(app->renderer, c.r, c.g, c.b, 255);
     SDL_RenderFillRect(app->renderer, &r);
 }
 /* a line between two rows, across the text area */
 static void rule(App* app, int row) {
-    SDL_FRect r = {(float)(8 * app->scale), (float)(row * 16 * app->scale - app->scale),
-                   (float)((app->cols - 2) * 8 * app->scale), (float)app->scale};
+    SDL_FRect r;
+    r.x = (float)(8 * app->scale);
+    r.y = (float)(row * 16 * app->scale - app->scale);
+    r.w = (float)((app->cols - 2) * 8 * app->scale);
+    r.h = (float)app->scale;
     SDL_SetRenderDrawColor(app->renderer, app->theme.soft.r, app->theme.soft.g, app->theme.soft.b, 255);
     SDL_RenderFillRect(app->renderer, &r);
 }
 /* a selectable line: activated, focused (in the focus colour, or on a band) or plain */
-static void entry(App* app, int x, int y, const char* label, bool activated, bool focused) {
+static void entry(App* app, int x, int y, const char* label, int activated, int focused) {
     if (focused && app->theme.focus_bar) {
         band(app, y, 1, app->theme.focus);
         text(app, x, y, label, rgb(app->theme.page));
@@ -125,9 +142,10 @@ static GuiScreen screen(const App* app) {
                                              : GUI_SCREEN_MENU;
 }
 static void next_theme(App* app) {
+    size_t i;
     const char* const* dirs = (const char* const*)app->themes_dirs;
     gui_themes_scan(&app->themes, dirs, 2);
-    size_t i = 0;
+    i = 0;
     while (i < app->themes.count && strcmp(app->themes.ids[i], app->theme.id)) ++i;
     if (app->themes.count) gui_theme_load(&app->theme, dirs, 2, app->themes.ids[(i + 1) % app->themes.count]);
 }
@@ -148,17 +166,18 @@ static void menu_label(const App* app, int item, char* label, size_t size) {
     }
 }
 /* still the menu, fading out, while a run starts */
-static bool entering(const App* app) {
+static int entering(const App* app) {
     return app->entering_ms && now_ms(app) < app->entering_ms + app->theme.fade_out_ms;
 }
 static void layout(App* app) {
+    int run;
     int width, height;
     SDL_GetRenderOutputSize(app->renderer, &width, &height);
     app->scale = SDL_min(width / 640, height / 400);
     if (app->scale < 1) app->scale = 1;
     app->cols = SDL_min(width / (8 * app->scale), GUI_MAX_COLS);
     app->rows = SDL_min(height / (16 * app->scale), GUI_MAX_ROWS);
-    bool run = (app->menu.running || app->finished) && !entering(app);
+    run = (app->menu.running || app->finished) && !entering(app);
     app->log_top = run ? 4 : menu_row(app, GUI_EXIT) + 6;
     gui_browser_resize(&app->browser, (size_t)SDL_max(1, app->rows - 10));
     int log_rows = SDL_max(1, app->rows - app->log_top - 4);
@@ -166,20 +185,33 @@ static void layout(App* app) {
 }
 /* text from a pixel position, chars at most, for the lines that slide or fade in */
 static float text_px(App* app, float x, float y, const char* value, size_t chars, SDL_Color color, float alpha) {
+    size_t i;
     float w = 8.0f * app->scale, h = 16.0f * app->scale, limit = (float)(app->cols - 1) * w;
     SDL_SetTextureColorMod(app->font, color.r, color.g, color.b);
     SDL_SetTextureAlphaMod(app->font, (Uint8)(alpha * 255));
-    for (size_t i = 0; *value && i < chars; ++i, x += w) {
+    for (i = 0; *value && i < chars; ++i, x += w) {
         unsigned char c = gui_glyph(SDL_StepUTF8(&value, NULL));
+        SDL_FRect source, destination;
         if (x + w > limit) continue;
-        SDL_FRect source = {(float)((c % 16) * 8), (float)((c / 16) * 16), 8, 16}, destination = {x, y, w, h};
+        source.x = (float)((c % 16) * 8);
+        source.y = (float)((c / 16) * 16);
+        source.w = 8;
+        source.h = 16;
+        destination.x = x;
+        destination.y = y;
+        destination.w = w;
+        destination.h = h;
         SDL_RenderTexture(app->renderer, app->font, &source, &destination);
     }
     SDL_SetTextureAlphaMod(app->font, 255);
     return x;
 }
 static void fill(App* app, float x, float y, float w, float h, GuiRgb c, Uint8 alpha) {
-    SDL_FRect r = {x, y, w, h};
+    SDL_FRect r;
+    r.x = x;
+    r.y = y;
+    r.w = w;
+    r.h = h;
     SDL_SetRenderDrawBlendMode(app->renderer, alpha == 255 ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(app->renderer, c.r, c.g, c.b, alpha);
     SDL_RenderFillRect(app->renderer, &r);
@@ -187,12 +219,15 @@ static void fill(App* app, float x, float y, float w, float h, GuiRgb c, Uint8 a
 }
 /* an arc of a circle, from and sweep in degrees, thickness pixels inward */
 static void arc(App* app, float cx, float cy, float r, float from, float sweep, float thickness, GuiRgb c) {
+    float t;
     SDL_FPoint p[49];
     SDL_SetRenderDrawColor(app->renderer, c.r, c.g, c.b, 255);
-    for (float t = 0; t < thickness; t += 1.0f) {
-        for (int i = 0; i <= 48; ++i) {
+    for (t = 0; t < thickness; t += 1.0f) {
+        int i;
+        for (i = 0; i <= 48; ++i) {
             float a = (from + sweep * (float)i / 48) * SDL_PI_F / 180;
-            p[i] = (SDL_FPoint){cx + (r - t) * SDL_cosf(a), cy + (r - t) * SDL_sinf(a)};
+            p[i].x = cx + (r - t) * SDL_cosf(a);
+            p[i].y = cy + (r - t) * SDL_sinf(a);
         }
         SDL_RenderLines(app->renderer, p, 49);
     }
@@ -212,18 +247,22 @@ static const char* dots(const App* app) {
 }
 /* the game's name as the run knows it: the runner's banner, else the file's own, in capitals */
 static void run_name(const App* app, char* out, size_t size) {
+    int i;
+    const char* q;
+    size_t n;
+    const char* dot;
     const char* name = app->file ? app->file : "";
-    bool from_file = true;
-    for (int i = 0; i < app->steps.count; ++i)
+    int from_file = 1;
+    for (i = 0; i < app->steps.count; ++i)
         if (!strcmp(app->steps.step[i].label, "LAUNCH")) {
             name = app->steps.step[i].detail;
             from_file = false;
         }
-    for (const char* q = name; *q; ++q)
+    for (q = name; *q; ++q)
         if (*q == '/' || *q == '\\') name = q + 1;
-    size_t n = 0;
-    const char* dot = from_file ? strrchr(name, '.') : NULL;
-    for (const char* q = name; *q && q != dot && n + 1 < size; ++q)
+    n = 0;
+    dot = from_file ? strrchr(name, '.') : NULL;
+    for (q = name; *q && q != dot && n + 1 < size; ++q)
         out[n++] = *q >= 'a' && *q <= 'z' ? (char)(*q - 32) : *q;
     out[n] = 0;
 }
@@ -231,9 +270,12 @@ static void run_name(const App* app, char* out, size_t size) {
    the progress bar and its percentage */
 /* a step's line: its label, its detail in capitals and its status */
 static size_t step_runs(const GuiStep* s, char run[3][112], size_t length[3]) {
+    char* q;
+    size_t total;
+    int r;
     snprintf(run[0], 112, "%s:", s->label);
     snprintf(run[1], 112, " %s", s->detail);
-    for (char* q = run[1]; *q; ++q)
+    for (q = run[1]; *q; ++q)
         if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
     if (s->state == GUI_STEP_FAILED)
         snprintf(run[2], 112, "...FAILED");
@@ -243,40 +285,57 @@ static size_t step_runs(const GuiStep* s, char run[3][112], size_t length[3]) {
         snprintf(run[2], 112, " %u / %u", s->value, s->total);
     else
         run[2][0] = 0;
-    size_t total = 0;
-    for (int r = 0; r < 3; ++r) total += length[r] = SDL_utf8strlen(run[r]);
+    total = 0;
+    for (r = 0; r < 3; ++r) total += length[r] = SDL_utf8strlen(run[r]);
     return total;
 }
 /* a row cut to the columns it has: a step's detail, keeping its label and state, or a line, ending in "..." */
-static void clip_row(char run[3][112], size_t length[3], bool note, int room) {
+static void clip_row(char run[3][112], size_t length[3], int note, int room) {
+    int cut;
+    size_t marker, other, left, i, at;
+    const char* end;
     size_t total = length[0] + length[1] + length[2];
     if (room < 8 || total <= (size_t)room) return;
-    int cut = note ? 0 : 1;
-    size_t marker = note ? 3 : 0, other = total - length[cut];
-    size_t left = (size_t)room > other + marker ? (size_t)room - other - marker : 0;
-    const char* end = run[cut];
-    for (size_t i = 0; i < left; ++i) SDL_StepUTF8(&end, NULL);
-    size_t at = (size_t)(end - run[cut]);
+    cut = note ? 0 : 1;
+    marker = note ? 3 : 0; other = total - length[cut];
+    left = (size_t)room > other + marker ? (size_t)room - other - marker : 0;
+    end = run[cut];
+    for (i = 0; i < left; ++i) SDL_StepUTF8(&end, NULL);
+    at = (size_t)(end - run[cut]);
     snprintf(run[cut] + at, 112 - at, "%s", note ? "..." : "");
     length[cut] = left + marker;
 }
 /* a run as a loading screen: the title, the name and the ring; the steps typed down the page, their status last;
    the progress bar and its percentage */
 static void render_steps(App* app) {
+    /* the rows: each step, then every line it kept when detailed, folded once it is done when collapse says so;
+       each ends before the right edge, with room for a step's dots and the cursor */
+    enum { ROWS = GUI_STEPS_MAX + GUI_NOTES_MAX, SEGMENTS = 40 };
+    static char runs[ROWS][3][112];
+    static size_t lengths[ROWS][3], typed[ROWS];
+    static const GuiStep* owner[ROWS];
+    static int is_note[ROWS];
+    static Uint64 shown[ROWS];
+    static const GuiRgb white = {255, 255, 255};
     const GuiTheme* theme = &app->theme;
     const GuiPalette* colors = &theme->run_colors;
-    Uint64 now = now_ms(app);
+    /* since: a line that came while the menu faded out comes in with the run */
+    Uint64 now = now_ms(app), since = app->fade_ms, free_at = 0;
     float cw = 8.0f * (float)app->scale, ch = 16.0f * (float)app->scale;
-    int width, height;
+    int width, height, name_col, col, y, i, r, rows = 0, last_step = -1, typing = -1, top = 3, bottom, fit, first,
+                                               cursor;
+    const char* title;
+    char name[96], head[128];
+    SDL_Color ink, soft, failure;
     SDL_GetRenderOutputSize(app->renderer, &width, &height);
     if (theme->texture)
-        for (int y = 3; y < height; y += 4) fill(app, 0, (float)y, (float)width, 1, (GuiRgb){255, 255, 255}, 14);
-    SDL_Color ink = rgb(colors->ink), soft = rgb(colors->soft), failure = rgb(colors->failure);
-    char name[96], head[128];
+        for (y = 3; y < height; y += 4) fill(app, 0, (float)y, (float)width, 1, white, 14);
+    ink = rgb(colors->ink); soft = rgb(colors->soft); failure = rgb(colors->failure);
+
     run_name(app, name, sizeof name);
-    int col = theme->ring == GUI_RING_LEFT ? 4 : 1;
-    const char* title = theme->title[screen(app)];
-    int name_col = col + (int)SDL_utf8strlen(title) + (title[0] ? 1 : 0);
+    col = theme->ring == GUI_RING_LEFT ? 4 : 1;
+    title = theme->title[screen(app)];
+    name_col = col + (int)SDL_utf8strlen(title) + (title[0] ? 1 : 0);
     if (theme->ring == GUI_RING_LEFT) ring(app, cw * 2, ch * 1.5f);
     if (theme->ring == GUI_RING_RIGHT) ring(app, (float)width - cw * 2, ch * 1.5f);
     if (theme->ring == GUI_RING_NEAR_TEXT) /* after the name and the dots' whole width, so it stays put */
@@ -285,89 +344,91 @@ static void render_steps(App* app) {
     snprintf(head, sizeof head, "%s%s", name, dots(app));
     text(app, name_col, 1, head, soft);
     if (app->finished) text(app, 1, 2, app->message, app->abnormal_exit ? failure : soft);
-    /* the rows: each step, then every line it kept when detailed, folded once it is done when collapse says so;
-       each ends before the right edge, with room for a step's dots and the cursor */
-    enum { ROWS = GUI_STEPS_MAX + GUI_NOTES_MAX };
-    static char runs[ROWS][3][112];
-    static size_t lengths[ROWS][3], typed[ROWS];
-    static const GuiStep* owner[ROWS];
-    static bool is_note[ROWS];
-    static Uint64 shown[ROWS];
-    Uint64 since = app->fade_ms; /* a line that came while the menu faded out comes in with the run */
-    int rows = 0, last_step = -1;
-    for (int i = 0; i < app->steps.count; ++i) {
+    for (i = 0; i < app->steps.count; ++i) {
+        int n;
+        const GuiNote * notes[GUI_NOTES_MAX];
+        int k;
         const GuiStep* s = &app->steps.step[i];
         owner[rows] = s;
-        is_note[rows] = false;
+        is_note[rows] = 0;
         shown[rows] = SDL_max(s->shown_ms, since);
         step_runs(s, runs[rows], lengths[rows]);
-        clip_row(runs[rows], lengths[rows], false, app->cols - 6);
+        clip_row(runs[rows], lengths[rows], 0, app->cols - 6);
         last_step = rows++;
         if (!theme->detailed || (theme->collapse && s->state == GUI_STEP_DONE)) continue;
-        const GuiNote* notes[GUI_NOTES_MAX];
-        int n = gui_step_notes(&app->steps, s, notes, GUI_NOTES_MAX);
-        for (int k = 0; k < n; ++k, ++rows) {
+
+        n = gui_step_notes(&app->steps, s, notes, GUI_NOTES_MAX);
+        for (k = 0; k < n; ++k, ++rows) {
             owner[rows] = s;
-            is_note[rows] = true;
+            is_note[rows] = 1;
             shown[rows] = SDL_max(notes[k]->shown_ms, since);
             snprintf(runs[rows][0], sizeof runs[rows][0], "%s", notes[k]->text);
             runs[rows][1][0] = runs[rows][2][0] = 0;
             lengths[rows][0] = SDL_utf8strlen(runs[rows][0]);
             lengths[rows][1] = lengths[rows][2] = 0;
-            clip_row(runs[rows], lengths[rows], true, app->cols - 5);
+            clip_row(runs[rows], lengths[rows], 1, app->cols - 5);
         }
     }
     /* when each row types: async, each from when it came; sync, one after the other, a finished step's faster */
-    Uint64 free_at = 0;
-    int typing = -1;
-    for (int r = 0; r < rows; ++r) {
+    for (r = 0; r < rows; ++r) {
+        Uint64 start;
+        float per;
         size_t total = lengths[r][0] + lengths[r][1] + lengths[r][2];
         typed[r] = total;
         if (theme->line_in != GUI_LINE_TYPING || !theme->typing_ms) continue;
-        float per = (float)theme->typing_ms / (theme->typing_sync && owner[r]->state != GUI_STEP_ACTIVE ? 3.0f : 1.0f);
-        Uint64 start = theme->typing_sync ? SDL_max(shown[r], free_at) : shown[r];
+        per = (float)theme->typing_ms / (theme->typing_sync && owner[r]->state != GUI_STEP_ACTIVE ? 3.0f : 1.0f);
+        start = theme->typing_sync ? SDL_max(shown[r], free_at) : shown[r];
         free_at = start + (Uint64)(per * (float)total);
         typed[r] = now < start ? 0 : (size_t)SDL_min((float)total, (float)(now - start) / per);
         if (now >= start && typed[r] < total) typing = r;
     }
-    int top = 3, bottom = theme->bar ? app->rows - 5 : app->rows - 2;
-    int fit = SDL_max(1, bottom - top), first = SDL_max(0, rows - fit);
-    int cursor = typing >= 0 ? typing : last_step;
-    for (int r = first; r < rows; ++r) {
+    bottom = theme->bar ? app->rows - 5 : app->rows - 2;
+    fit = SDL_max(1, bottom - top);
+    first = SDL_max(0, rows - fit);
+    cursor = typing >= 0 ? typing : last_step;
+    for (r = first; r < rows; ++r) {
+        int working, blink, k;
+        size_t left;
         const GuiStep* s = owner[r];
-        bool last = s == &app->steps.step[app->steps.count - 1];
-        bool failed = s->state == GUI_STEP_FAILED, active = s->state == GUI_STEP_ACTIVE;
+        int last = s == &app->steps.step[app->steps.count - 1];
+        int failed = s->state == GUI_STEP_FAILED, active = s->state == GUI_STEP_ACTIVE;
         size_t total = lengths[r][0] + lengths[r][1] + lengths[r][2];
         Uint64 age = now > shown[r] ? now - shown[r] : 0;
-        bool moving = theme->line_in == GUI_LINE_SLIDE || theme->line_in == GUI_LINE_FADE;
+        int moving = theme->line_in == GUI_LINE_SLIDE || theme->line_in == GUI_LINE_FADE;
         float p = moving && theme->line_in_ms ? SDL_min(1.0f, (float)age / (float)theme->line_in_ms) : 1.0f;
         float x = cw * (is_note[r] ? 3 : 1) -
                   (theme->line_in == GUI_LINE_SLIDE ? 16.0f * (float)app->scale * (1 - p) * (1 - p) : 0);
         float y = ch * (float)(top + r - first);
-        SDL_Color color[3] = {failed ? failure : last ? ink : soft, failed ? failure : last || active ? ink : soft,
-                              failed ? failure : ink};
+        SDL_Color color[3];
+        color[0] = failed ? failure : last ? ink : soft;
+        color[1] = failed ? failure : last || active ? ink : soft;
+        color[2] = failed ? failure : ink;
         if (is_note[r]) color[0] = soft;
-        size_t left = typed[r];
-        for (int k = 0; k < 3; ++k) {
+        left = typed[r];
+        for (k = 0; k < 3; ++k) {
             size_t drawn = SDL_min(left, lengths[r][k]);
             x = text_px(app, x, y, runs[r][k], drawn, color[k], p);
             left -= drawn;
         }
         if (!is_note[r] && typed[r] == total && active) x = text_px(app, x, y, dots(app), 3, ink, p);
-        bool blink = !theme->blink_ms || (now / theme->blink_ms) % 2 == 0;
-        bool working = typing == r || (typing < 0 && active);
+        blink = !theme->blink_ms || (now / theme->blink_ms) % 2 == 0;
+        working = typing == r || (typing < 0 && active);
         if (r == cursor && working && blink) text_px(app, x, y, "_", 1, ink, p);
     }
     if (theme->bar) {
-        int percent = gui_steps_percent(&app->steps);
-        fill(app, cw, ch * (float)(app->rows - 4) + ch / 2, (float)(app->cols - 2) * cw, (float)app->scale,
-             colors->dim, 255);
-        enum { SEGMENTS = 40 };
+        int k, percent = gui_steps_percent(&app->steps);
+        int filled = percent < 0 ? 0 : (percent * SEGMENTS + 50) / 100;
         float span = (float)(app->cols - 8) * cw, gap = 2.0f * (float)app->scale;
         float seg = (span - gap * (SEGMENTS - 1)) / SEGMENTS, sy = ch * (float)(app->rows - 3) + ch * 0.3f;
-        int filled = percent < 0 ? 0 : (percent * SEGMENTS + 50) / 100;
-        for (int k = 0; k < SEGMENTS; ++k) {
-            SDL_FRect r = {cw + (float)k * (seg + gap), sy, seg, ch * 0.4f};
+        char number[16];
+        fill(app, cw, ch * (float)(app->rows - 4) + ch / 2, (float)(app->cols - 2) * cw, (float)app->scale, colors->dim,
+             255);
+        for (k = 0; k < SEGMENTS; ++k) {
+            SDL_FRect r;
+            r.x = cw + (float)k * (seg + gap);
+            r.y = sy;
+            r.w = seg;
+            r.h = ch * 0.4f;
             if (k < filled)
                 fill(app, r.x, r.y, r.w, r.h, colors->ink, 255);
             else {
@@ -375,7 +436,6 @@ static void render_steps(App* app) {
                 SDL_RenderRect(app->renderer, &r);
             }
         }
-        char number[16];
         if (percent < 0) snprintf(number, sizeof number, " --%%");
         else snprintf(number, sizeof number, "%3d%%", percent);
         text(app, app->cols - 6, app->rows - 3, number, ink);
@@ -391,6 +451,9 @@ static void render_steps(App* app) {
 }
 /* the screen fading in from black, or the menu or the run fading out to it */
 static void overlay(App* app) {
+    static const GuiRgb black = {0, 0, 0};
+    int width;
+    int height;
     const GuiTheme* theme = &app->theme;
     Uint64 now = now_ms(app);
     float a = 0;
@@ -401,17 +464,21 @@ static void overlay(App* app) {
     else if (app->fade_ms && theme->fade_in_ms && now < app->fade_ms + theme->fade_in_ms)
         a = 1.0f - (float)(now > app->fade_ms ? now - app->fade_ms : 0) / (float)theme->fade_in_ms;
     if (a <= 0) return;
-    int width, height;
+
     SDL_GetRenderOutputSize(app->renderer, &width, &height);
-    fill(app, 0, 0, (float)width, (float)height, (GuiRgb){0, 0, 0}, (Uint8)(a * 255));
+    fill(app, 0, 0, (float)width, (float)height, black, (Uint8)(a * 255));
 }
 static void render(App* app) {
+    SDL_Color ink, soft, focus, paper, active, failure;
+    const char* title;
+    int head, foot, idle;
+    const GuiTheme * theme;
     layout(app);
-    const GuiTheme* theme = &app->theme;
-    bool idle = (!app->menu.running && !app->finished) || entering(app);
-    bool head = theme->head != GUI_STYLE_NONE, foot = theme->footer != GUI_STYLE_NONE;
-    SDL_Color ink = rgb(theme->ink), soft = rgb(theme->soft), focus = rgb(theme->focus), paper = rgb(theme->page);
-    SDL_Color active = rgb(theme->active), failure = rgb(theme->failure);
+    theme = &app->theme;
+    idle = (!app->menu.running && !app->finished) || entering(app);
+    head = theme->head != GUI_STYLE_NONE; foot = theme->footer != GUI_STYLE_NONE;
+    ink = rgb(theme->ink); soft = rgb(theme->soft); focus = rgb(theme->focus); paper = rgb(theme->page);
+    active = rgb(theme->active); failure = rgb(theme->failure);
     SDL_SetRenderDrawColor(app->renderer, theme->page.r, theme->page.g, theme->page.b, 255);
     SDL_RenderClear(app->renderer);
     if (!idle && theme->run == GUI_RUN_STEPS) {
@@ -423,7 +490,7 @@ static void render(App* app) {
         SDL_RenderPresent(app->renderer);
         return;
     }
-    const char* title = theme->title[idle ? (app->menu.view == GUI_LOAD_GAMES  ? GUI_SCREEN_GAMES
+    title = theme->title[idle ? (app->menu.view == GUI_LOAD_GAMES  ? GUI_SCREEN_GAMES
                                              : app->menu.view == GUI_LOAD_KEYS ? GUI_SCREEN_KEYS
                                                                                : GUI_SCREEN_MENU)
                                           : screen(app)];
@@ -433,6 +500,7 @@ static void render(App* app) {
     }
     if (head && theme->head_rule) rule(app, 4);
     if (app->menu.view == GUI_LOAD_GAMES && idle) {
+        size_t i;
         if (head) {
             text(app, 1, 1, "Up/Down: select. Enter/Space: open. Left/Right or PgUp/PgDown: page.", ink);
             text(app, 1, 2, app->games_dir, soft);
@@ -440,7 +508,7 @@ static void render(App* app) {
         entry(app, 1, 3, "Back [ESC]", false, app->browser.selected == 0);
         size_t start = app->browser.page * app->browser.page_size;
         size_t count = gui_browser_items(&app->browser);
-        for (size_t i = 0; i < count; ++i)
+        for (i = 0; i < count; ++i)
             entry(app, 1, 5 + (int)i, app->games.names[start + i],
                   app->browser.activated && app->browser.active == start + i, app->browser.selected == i + 1);
         if (!app->games.count) text(app, 1, 5, "No executables found in games/.", soft);
@@ -510,10 +578,11 @@ static void render(App* app) {
                  ((app->menu.view == GUI_LOAD_OPTIONS || app->menu.view == GUI_LOAD_DROP) && !app->menu.focus_load)))
         text(app, 1, app->rows - 4, gui_setting_description(&app->menu), ink);
     if (foot) {
-        bool bar = theme->footer == GUI_STYLE_BAR;
+        char footer[256];
+        int bar = theme->footer == GUI_STYLE_BAR;
         if (bar) band(app, app->rows - 3, 3, theme->ink);
         if (theme->footer_rule) rule(app, app->rows - 3);
-        char footer[256];
+
         if (app->usage.available)
             snprintf(footer, sizeof(footer), "GUI + children: RAM %.1f MiB (sum RSS)  CPU %.1f%% (100%% = 1 core)",
                      (double)app->usage.memory_bytes / 1048576, app->usage.cpu_percent);
@@ -727,7 +796,7 @@ static void menu_key(App* app, GuiKey key) {
     }
     gui_menu_key(&app->menu, key);
     if (app->menu.theme_next) {
-        app->menu.theme_next = false;
+        app->menu.theme_next = 0;
         next_theme(app);
     }
     if (key == GUI_CANCEL || (key == GUI_SELECT && app->menu.view == GUI_LOAD_KEYS)) app->message[0] = 0;

@@ -6,10 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bool feed(GuiBanner* banner, const char* text) { return gui_banner_feed(banner, text, strlen(text)); }
+static int feed(GuiBanner* banner, const char* text) { return gui_banner_feed(banner, text, strlen(text)); }
 
 int main(void) {
     GuiMenu menu = {0};
+    GuiMenu themed;
+    GuiBanner banner;
     gui_menu_key(&menu, GUI_LEFT);
     assert(menu.selected == GUI_EXIT);
     gui_menu_key(&menu, GUI_RIGHT);
@@ -161,13 +163,13 @@ int main(void) {
     assert(!gui_drop_path("one\ntwo", true));
     assert(!gui_drop_path("", true));
     /* the theme item asks the GUI for the next theme */
-    GuiMenu themed = {.selected = GUI_THEME};
+    memset(&themed, 0, sizeof themed);
+    themed.selected = GUI_THEME;
     gui_menu_key(&themed, GUI_SELECT);
     assert(themed.theme_next && themed.view == GUI_LOAD_NONE && !themed.quit);
     assert(strstr(gui_setting_description(&themed), "themes/"));
 
     /* the runner's banner, at the start of a line, split across reads or not */
-    GuiBanner banner;
     gui_banner_reset(&banner);
     assert(!feed(&banner, "Recompiling x\nnot ScarletNX - x\nScarletNX"));
     assert(feed(&banner, " - x\n") && banner.seen);
