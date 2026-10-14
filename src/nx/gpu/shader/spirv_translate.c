@@ -81,15 +81,15 @@ static u32 shared_atomic_opcode(u64 w) {
     if (B(w, 28, 2) == 2 && B(w, 52, 4) == 8) return 0xfffffffeu; /* U64 exchange */
     if (B(w, 28, 2) > 1) return 0;
     switch (B(w, 52, 4)) {
-        case 0: return 234;                       /* IAdd */
+        case 0: return 234;                     /* IAdd */
         case 1: return B(w, 28, 2) ? 236 : 237; /* SMin / UMin */
         case 2: return B(w, 28, 2) ? 238 : 239; /* SMax / UMax */
         case 3:
         case 4: return 0xffffffffu; /* Inc / Dec use compare exchange. */
-        case 5: return 240;                       /* And */
-        case 6: return 241;                       /* Or */
-        case 7: return 242;                       /* Xor */
-        case 8: return 229;                       /* Exchange */
+        case 5: return 240;         /* And */
+        case 6: return 241;         /* Or */
+        case 7: return 242;         /* Xor */
+        case 8: return 229;         /* Exchange */
         default: return 0;
     }
 }
@@ -606,13 +606,10 @@ static u32 double_source(DirectCtx* c, u32 vec2_u32, u64 w, int kind) {
     u32 low = c->zero, high;
     if (kind == 1) {
         u32 bank = B(w, 34, 5), offset = B(w, 20, 14) * 4;
-        if (!(offset & 4))
-            low = cbuf_read_dynamic(c, bank, spv_emit_constant_u32(&c->emit, c->u32_type, offset));
-        high = cbuf_read_dynamic(c, bank,
-                                 spv_emit_constant_u32(&c->emit, c->u32_type, offset | 4u));
+        if (!(offset & 4)) low = cbuf_read_dynamic(c, bank, spv_emit_constant_u32(&c->emit, c->u32_type, offset));
+        high = cbuf_read_dynamic(c, bank, spv_emit_constant_u32(&c->emit, c->u32_type, offset | 4u));
     } else
-        high = spv_emit_constant_u32(&c->emit, c->u32_type,
-                                     (B(w, 20, 19) << 12) | (B(w, 56, 1) << 31));
+        high = spv_emit_constant_u32(&c->emit, c->u32_type, (B(w, 20, 19) << 12) | (B(w, 56, 1) << 31));
     return spv_emit_bitcast(&c->emit, c->f64_type, spv_emit_vec2_construct(&c->emit, vec2_u32, low, high));
 }
 
@@ -699,8 +696,7 @@ static int supported(u64 w, int op) {
         case O_FSWZADD: return 1;
         case O_VMNMX: return 1;
         case O_VMAD:
-            return (((w >> 48) & ~3ull) == 0x5f04 || ((w >> 48) & ~3ull) == 0x5f00) &&
-                   !B(w, 47, 1) && !B(w, 51, 5);
+            return (((w >> 48) & ~3ull) == 0x5f04 || ((w >> 48) & ~3ull) == 0x5f00) && !B(w, 47, 1) && !B(w, 51, 5);
         case O_VSETP: return (w >> 48) == 0x50f4;
         case O_RED: return global_atomic_opcode(w, 1) != 0;
         case O_ATOM: return global_atomic_opcode(w, 0) != 0;
@@ -789,8 +785,7 @@ static int supported(u64 w, int op) {
         case O_SEL_I: return 1;
         case O_XMAD_R: return (B(w, 50, 3) <= 2 || B(w, 50, 3) == 4) && !B(w, 47, 1) && !B(w, 38, 1);
         case O_XMAD_RC: return B(w, 50, 2) <= 2 && !B(w, 47, 1) && !B(w, 54, 1) && !B(w, 48, 2);
-        case O_XMAD_CR:
-            return (B(w, 50, 3) <= 2 || B(w, 50, 3) == 4) && !B(w, 47, 1) && !B(w, 54, 1) && !B(w, 53, 1);
+        case O_XMAD_CR: return (B(w, 50, 3) <= 2 || B(w, 50, 3) == 4) && !B(w, 47, 1) && !B(w, 54, 1) && !B(w, 53, 1);
         case O_XMAD_I: return (B(w, 50, 3) <= 2 || B(w, 50, 3) == 4) && !B(w, 47, 1) && !B(w, 38, 1) && !B(w, 48, 2);
         case O_LDC: return B(w, 48, 3) <= 5 && B(w, 36, 5) < 18 && (B(w, 48, 3) != 5 || B(w, 0, 8) < 254);
         case O_SHF_LR:
@@ -825,8 +820,8 @@ static int supported(u64 w, int op) {
         case O_F2I_I: return 1;
         case O_I2F_R:
         case O_I2F_C:
-        case O_I2F_I: return (B(w, 8, 2) == 1 || B(w, 8, 2) == 2 || B(w, 8, 2) == 3) &&
-                             (B(w, 10, 2) != 1 || !(B(w, 41, 2) & 1));
+        case O_I2F_I:
+            return (B(w, 8, 2) == 1 || B(w, 8, 2) == 2 || B(w, 8, 2) == 3) && (B(w, 10, 2) != 1 || !(B(w, 41, 2) & 1));
         case O_ISCADD_R:
         case O_ISCADD_C:
         case O_ISCADD_I: return 1;
@@ -877,9 +872,9 @@ static int supported(u64 w, int op) {
         case O_RRO_R:
         case O_RRO_C: return 1;
         case O_TEXS:
-            return (B(w, 53, 4) == 0 || B(w, 53, 4) == 1 || B(w, 53, 4) == 2 || B(w, 53, 4) == 3 ||
-                    B(w, 53, 4) == 4 || B(w, 53, 4) == 7 || B(w, 53, 4) == 8 || B(w, 53, 4) == 10 ||
-                    B(w, 53, 4) == 11 || B(w, 53, 4) == 12 || B(w, 53, 4) == 13);
+            return (B(w, 53, 4) == 0 || B(w, 53, 4) == 1 || B(w, 53, 4) == 2 || B(w, 53, 4) == 3 || B(w, 53, 4) == 4 ||
+                    B(w, 53, 4) == 7 || B(w, 53, 4) == 8 || B(w, 53, 4) == 10 || B(w, 53, 4) == 11 ||
+                    B(w, 53, 4) == 12 || B(w, 53, 4) == 13);
         case O_TLDS:
             return (B(w, 53, 4) == 0 || B(w, 53, 4) == 1 || B(w, 53, 4) == 2 || B(w, 53, 4) == 4 || B(w, 53, 4) == 5 ||
                     B(w, 53, 4) == 6 || B(w, 53, 4) == 7 || B(w, 53, 4) == 8 || B(w, 53, 4) == 12) &&
@@ -890,8 +885,7 @@ static int supported(u64 w, int op) {
                    (!B(w, 35, 1) || B(w, 28, 3) == 2 && !B(w, 50, 1));
         case O_SULD: return B(w, 33, 3) == 3 && (!B(w, 52, 1) || B(w, 20, 4) == 4);
         case O_SUST: return !B(w, 52, 1) && B(w, 33, 3) == 3;
-        case O_SURED: return B(w, 33, 3) == 3 && B(w, 20, 3) == 0 && B(w, 24, 3) <= 2 && !B(w, 23, 1) &&
-                             !B(w, 49, 2);
+        case O_SURED: return B(w, 33, 3) == 3 && B(w, 20, 3) == 0 && B(w, 24, 3) <= 2 && !B(w, 23, 1) && !B(w, 49, 2);
         case O_HADD2_R:
         case O_HADD2_C:
         case O_HADD2_I:
@@ -1089,10 +1083,18 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             else if (op && (op->id == O_TLD4 || op->id == O_TLD4_B || op->id == O_TLD4S))
                 snprintf(si->first_unsupported, sizeof si->first_unsupported,
                          "%s dc%u ao%u comp%u fp16%u da%u db%u mask%u off%u toff%u", op->name, B(insn[i], 50, 1),
-                         B(insn[i], op->id == O_TLD4S ? 51 : op->id == O_TLD4_B ? 36 : 54,
+                         B(insn[i],
+                           op->id == O_TLD4S    ? 51
+                           : op->id == O_TLD4_B ? 36
+                                                : 54,
                            op->id == O_TLD4S ? 1 : 2),
-                         B(insn[i], op->id == O_TLD4S ? 52 : op->id == O_TLD4_B ? 38 : 56, 2), B(insn[i], 55, 1), B(insn[i], 0, 8),
-                         B(insn[i], 28, 8), B(insn[i], 31, 4), B(insn[i], 36, 13), B(insn[i], 54, 2));
+                         B(insn[i],
+                           op->id == O_TLD4S    ? 52
+                           : op->id == O_TLD4_B ? 38
+                                                : 56,
+                           2),
+                         B(insn[i], 55, 1), B(insn[i], 0, 8), B(insn[i], 28, 8), B(insn[i], 31, 4), B(insn[i], 36, 13),
+                         B(insn[i], 54, 2));
             else if (op && op->id == O_AST)
                 snprintf(si->first_unsupported, sizeof si->first_unsupported, "AST addr %u count %u idxreg %u reg %u",
                          B(insn[i], 20, 10), B(insn[i], 47, 2) + 1, B(insn[i], 8, 8), B(insn[i], 0, 8));
@@ -1147,10 +1149,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         if (d < 255 && op->id != O_EXIT && op->id != O_KIL && op->id != O_BRA && op->id != O_BRX && op->id != O_SSY &&
             op->id != O_PBK && op->id != O_PCNT && op->id != O_SYNC && op->id != O_BRK && op->id != O_CONT &&
             op->id != O_AST && op->id != O_NOP && op->id != O_VOTE_VTG && op->id != O_DEPBAR && op->id != O_CAL &&
-            op->id != O_RET && op->id != O_FSETP_R &&
-            op->id != O_FSETP_C && op->id != O_FSETP_I && op->id != O_HSETP2_R && op->id != O_HSETP2_C &&
-            op->id != O_HSETP2_I && op->id != O_DSETP_R && op->id != O_PSETP &&
-            op->id != O_CSETP && op->id != O_R2P_I)
+            op->id != O_RET && op->id != O_FSETP_R && op->id != O_FSETP_C && op->id != O_FSETP_I &&
+            op->id != O_HSETP2_R && op->id != O_HSETP2_C && op->id != O_HSETP2_I && op->id != O_DSETP_R &&
+            op->id != O_PSETP && op->id != O_CSETP && op->id != O_R2P_I)
             used[d] = 1;
         if (op->id == O_ALD || op->id == O_AST) {
             u32 addr = B(insn[i], 20, 10), width = B(insn[i], 47, 2) + 1;
@@ -1400,8 +1401,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         if (op->id == O_TEXS) {
             u32 off = B(insn[i], 36, 13);
             u32 encoding = B(insn[i], 53, 4);
-            int shadow = encoding == 4, type = encoding == 12 || encoding == 13 ? 3 :
-                                                encoding == 10 || encoding == 11 ? 2 : encoding == 0 ? 0 : 1;
+            int shadow = encoding == 4, type = encoding == 12 || encoding == 13   ? 3
+                                               : encoding == 10 || encoding == 11 ? 2
+                                               : encoding == 0                    ? 0
+                                                                                  : 1;
             int array = encoding == 7 || encoding == 8;
             int slot = 0;
             for (; slot < texture_count; slot++)
@@ -1419,7 +1422,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if (!B(insn[i], 59, 1)) needs_glsl = 1;
             if (a < 255) used[a] = 1;
             if (b < 255) used[b] = 1;
-            if ((shadow || encoding == 3 || encoding == 10 || encoding == 11 || encoding == 12 || encoding == 13 || array) && a + 1 < 255)
+            if ((shadow || encoding == 3 || encoding == 10 || encoding == 11 || encoding == 12 || encoding == 13 ||
+                 array) &&
+                a + 1 < 255)
                 used[a + 1] = 1;
             if (encoding == 13 && b + 1 < 255) used[b + 1] = 1;
             u32 regs[4], comps[4];
@@ -1526,11 +1531,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 }
             } else {
                 int slot = 0;
-                while (slot < texture_count && (textures[slot].cbuf_off != off || textures[slot].type != 1 ||
-                                                textures[slot].array || textures[slot].shadow ||
-                                                textures[slot].bindless != bindless ||
-                                                !!(textures[slot].flags & 1) != raw ||
-                                                (bindless && textures[slot].bl_cbuf != bank)))
+                while (slot < texture_count &&
+                       (textures[slot].cbuf_off != off || textures[slot].type != 1 || textures[slot].array ||
+                        textures[slot].shadow || textures[slot].bindless != bindless ||
+                        !!(textures[slot].flags & 1) != raw || (bindless && textures[slot].bl_cbuf != bank)))
                     slot++;
                 if (slot == texture_count) {
                     if (slot >= 32) return direct_reject(si, "texture descriptor count");
@@ -1549,8 +1553,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             needs_glsl = 1;
             if (a < 255) used[a] = 1;
             if ((op->id == O_HADD2_R || op->id == O_HMUL2_R || op->id == O_HFMA2_R) && b < 255) used[b] = 1;
-            if ((op->id == O_HFMA2_R || op->id == O_HFMA2_RC || op->id == O_HFMA2_CR) &&
-                B(insn[i], 39, 8) < 255)
+            if ((op->id == O_HFMA2_R || op->id == O_HFMA2_RC || op->id == O_HFMA2_CR) && B(insn[i], 39, 8) < 255)
                 used[B(insn[i], 39, 8)] = 1;
         }
         if (op->id == O_HSET2_R || op->id == O_HSET2_C || op->id == O_HSET2_I) {
@@ -1573,9 +1576,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             needs_f64 = needs_glsl = 1;
             if (a < 255) used[a] = 1;
             if (a < 254) used[a + 1] = 1;
-            int right_reg = op->id == O_DADD_R || op->id == O_DMUL_R || op->id == O_DFMA_R ||
-                            op->id == O_DFMA_RC || op->id == O_DMNMX_R || op->id == O_DSET_R ||
-                            op->id == O_DSETP_R;
+            int right_reg = op->id == O_DADD_R || op->id == O_DMUL_R || op->id == O_DFMA_R || op->id == O_DFMA_RC ||
+                            op->id == O_DMNMX_R || op->id == O_DSET_R || op->id == O_DSETP_R;
             if (right_reg && b < 255) used[b] = 1;
             if (right_reg && b < 254) used[b + 1] = 1;
             if ((op->id >= O_DADD_R && op->id <= O_DADD_I) || (op->id >= O_DMUL_R && op->id <= O_DMUL_I) ||
@@ -1586,8 +1588,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     if (B(insn[i], 39, 8) < 254) used[B(insn[i], 39, 8) + 1] = 1;
                 }
             }
-            if ((op->id >= O_DMNMX_R && op->id <= O_DMNMX_I) ||
-                (op->id >= O_DSET_R && op->id <= O_DSET_I) ||
+            if ((op->id >= O_DMNMX_R && op->id <= O_DMNMX_I) || (op->id >= O_DSET_R && op->id <= O_DSET_I) ||
                 (op->id >= O_DSETP_R && op->id <= O_DSETP_I))
                 if (B(insn[i], 39, 3) < 7) pred_used[B(insn[i], 39, 3)] = 1;
             if (op->id >= O_DSETP_R && op->id <= O_DSETP_I) {
@@ -1903,11 +1904,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             cbuf_used[0] = 1;
             if ((descriptor | 15u) + 1 > cbuf_max[0]) cbuf_max[0] = (descriptor | 15u) + 1;
         }
-        if (d < 255 && op != O_LDG && op != O_STG && op != O_RED && op != O_STL && op != O_AST &&
-            op != O_PSETP && op != O_CSETP && op != O_R2P_R && op != O_R2P_C && op != O_R2P_I &&
-            op != O_EXIT && op != O_KIL && op != O_BRA &&
-            op != O_BRX && op != O_SSY && op != O_PBK && op != O_PCNT && op != O_SYNC && op != O_BRK && op != O_CONT &&
-            op != O_NOP && op != O_VOTE_VTG && op != O_DEPBAR && op != O_ISETP_R && op != O_ISETP_C &&
+        if (d < 255 && op != O_LDG && op != O_STG && op != O_RED && op != O_STL && op != O_AST && op != O_PSETP &&
+            op != O_CSETP && op != O_R2P_R && op != O_R2P_C && op != O_R2P_I && op != O_EXIT && op != O_KIL &&
+            op != O_BRA && op != O_BRX && op != O_SSY && op != O_PBK && op != O_PCNT && op != O_SYNC && op != O_BRK &&
+            op != O_CONT && op != O_NOP && op != O_VOTE_VTG && op != O_DEPBAR && op != O_ISETP_R && op != O_ISETP_C &&
             op != O_ISETP_I && op != O_FSETP_R && op != O_FSETP_C && op != O_FSETP_I)
             gtags[d] = tag;
     }
@@ -2062,10 +2062,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     }
     u32 texture_scalar[32], texture_vec4[32];
     for (int i = 0; i < texture_count; i++) {
-        u32 scalar = (textures[i].flags & 1) ? c->u32_type
-                     : (si->tex_int_mask & (1u << i))
-                         ? (si->tex_sint_mask & (1u << i)) ? i32_type : c->u32_type
-                         : c->f32_type;
+        u32 scalar = (textures[i].flags & 1)          ? c->u32_type
+                     : (si->tex_int_mask & (1u << i)) ? (si->tex_sint_mask & (1u << i)) ? i32_type : c->u32_type
+                                                      : c->f32_type;
         texture_scalar[i] = scalar;
         texture_vec4[i] = scalar == i32_type ? vec4_i32 : scalar == c->u32_type ? vec4_u32 : vec4;
         c->sampler[i] = spv_emit_sampler_image(&c->emit, scalar, shader_vk_set(stage), 34 + (u32)i,
@@ -2256,19 +2255,18 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         }
         if (op == O_CAL) {
             u32 sp = spv_emit_load(&c->emit, c->u32_type, call_ptr);
-            u32 room = spv_emit_u_less(&c->emit, c->bool_type, sp,
-                                       spv_emit_constant_u32(&c->emit, c->u32_type, 32));
+            u32 room = spv_emit_u_less(&c->emit, c->bool_type, sp, spv_emit_constant_u32(&c->emit, c->u32_type, 32));
             u32 address = spv_emit_constant_u32(&c->emit, c->u32_type, next_instruction(i, n));
             for (u32 k = 0; k < 32; k++) {
-                u32 at = spv_emit_i_equal(&c->emit, c->bool_type, sp,
-                                          spv_emit_constant_u32(&c->emit, c->u32_type, k));
+                u32 at = spv_emit_i_equal(&c->emit, c->bool_type, sp, spv_emit_constant_u32(&c->emit, c->u32_type, k));
                 u32 old = spv_emit_load(&c->emit, c->u32_type, call_stack[k]);
                 spv_emit_store(&c->emit, call_stack[k], spv_emit_select(&c->emit, c->u32_type, at, address, old));
             }
-            spv_emit_store(&c->emit, call_ptr,
-                           spv_emit_iadd_u32(&c->emit, c->u32_type, sp,
-                                             spv_emit_select(&c->emit, c->u32_type, room,
-                                                             spv_emit_constant_u32(&c->emit, c->u32_type, 1), c->zero)));
+            spv_emit_store(
+                &c->emit, call_ptr,
+                spv_emit_iadd_u32(&c->emit, c->u32_type, sp,
+                                  spv_emit_select(&c->emit, c->u32_type, room,
+                                                  spv_emit_constant_u32(&c->emit, c->u32_type, 1), c->zero)));
             spv_emit_store(&c->emit, pc,
                            spv_emit_select(&c->emit, c->u32_type, room,
                                            spv_emit_constant_u32(&c->emit, c->u32_type, bra_target(w, i)),
@@ -2276,17 +2274,15 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         } else if (op == O_RET) {
             u32 sp = spv_emit_load(&c->emit, c->u32_type, call_ptr);
             u32 has_entry = spv_emit_u_less(&c->emit, c->bool_type, c->zero, sp);
-            u32 index = spv_emit_isub_u32(&c->emit, c->u32_type, sp,
-                                          spv_emit_constant_u32(&c->emit, c->u32_type, 1));
+            u32 index = spv_emit_isub_u32(&c->emit, c->u32_type, sp, spv_emit_constant_u32(&c->emit, c->u32_type, 1));
             u32 destination = spv_emit_constant_u32(&c->emit, c->u32_type, UINT32_MAX);
             for (u32 k = 0; k < 32; k++) {
-                u32 at = spv_emit_i_equal(&c->emit, c->bool_type, index,
-                                          spv_emit_constant_u32(&c->emit, c->u32_type, k));
+                u32 at =
+                    spv_emit_i_equal(&c->emit, c->bool_type, index, spv_emit_constant_u32(&c->emit, c->u32_type, k));
                 u32 old = spv_emit_load(&c->emit, c->u32_type, call_stack[k]);
                 destination = spv_emit_select(&c->emit, c->u32_type, at, old, destination);
             }
-            spv_emit_store(&c->emit, call_ptr,
-                           spv_emit_select(&c->emit, c->u32_type, has_entry, index, c->zero));
+            spv_emit_store(&c->emit, call_ptr, spv_emit_select(&c->emit, c->u32_type, has_entry, index, c->zero));
             spv_emit_store(&c->emit, pc, destination);
         } else if (dynamic_stack && (op == O_SSY || op == O_PBK || op == O_PCNT)) {
             u32 sp = spv_emit_load(&c->emit, c->u32_type, stack_ptr);
@@ -2728,8 +2724,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if (B(w, 37, 1)) {
                 u32 low_mask = spv_emit_constant_u32(&c->emit, c->u32_type, 0xffff);
                 u32 high = spv_emit_shift_left_u32(&c->emit, c->u32_type,
-                                                    spv_emit_bitwise_and_u32(&c->emit, c->u32_type, source_b, low_mask),
-                                                    sixteen);
+                                                   spv_emit_bitwise_and_u32(&c->emit, c->u32_type, source_b, low_mask),
+                                                   sixteen);
                 sum = spv_emit_bitwise_or_u32(&c->emit, c->u32_type,
                                               spv_emit_bitwise_and_u32(&c->emit, c->u32_type, sum, low_mask), high);
             }
@@ -2803,10 +2799,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if (operation == 0xfffffffeu) {
                 u32 next_index = spv_emit_bitwise_and_u32(
                     &c->emit, c->u32_type,
-                    spv_emit_iadd_u32(&c->emit, c->u32_type, index,
-                                      spv_emit_constant_u32(&c->emit, c->u32_type, 1)),
+                    spv_emit_iadd_u32(&c->emit, c->u32_type, index, spv_emit_constant_u32(&c->emit, c->u32_type, 1)),
                     spv_emit_constant_u32(&c->emit, c->u32_type, 0xffff));
-                u32 high = spv_emit_function_element_pointer(&c->emit, shared_element_pointer, shared_array, next_index);
+                u32 high =
+                    spv_emit_function_element_pointer(&c->emit, shared_element_pointer, shared_array, next_index);
                 u32 old_low = spv_emit_load(&c->emit, c->u32_type, pointer);
                 u32 old_high = spv_emit_load(&c->emit, c->u32_type, high);
                 spv_emit_store(&c->emit, pointer, reg_read(c, b));
@@ -2829,14 +2825,14 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 value = reg_read(c, b);
                 u32 next;
                 if (B(w, 52, 4) == 3) {
-                    u32 increment = spv_emit_iadd_u32(&c->emit, c->u32_type, old,
-                                                       spv_emit_constant_u32(&c->emit, c->u32_type, 1));
+                    u32 increment =
+                        spv_emit_iadd_u32(&c->emit, c->u32_type, old, spv_emit_constant_u32(&c->emit, c->u32_type, 1));
                     next = spv_emit_select(&c->emit, c->u32_type,
                                            cc_not(c, spv_emit_u_less(&c->emit, c->bool_type, old, value)), c->zero,
                                            increment);
                 } else {
-                    u32 decrement = spv_emit_isub_u32(&c->emit, c->u32_type, old,
-                                                       spv_emit_constant_u32(&c->emit, c->u32_type, 1));
+                    u32 decrement =
+                        spv_emit_isub_u32(&c->emit, c->u32_type, old, spv_emit_constant_u32(&c->emit, c->u32_type, 1));
                     u32 zero = spv_emit_i_equal(&c->emit, c->bool_type, old, c->zero);
                     u32 greater = spv_emit_u_less(&c->emit, c->bool_type, value, old);
                     next = spv_emit_select(&c->emit, c->u32_type, cc_or(c, zero, greater), value, decrement);
@@ -2865,9 +2861,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                                                  spv_emit_constant_u32(&c->emit, c->u32_type, 0xffff));
                 u32 pointer = spv_emit_function_element_pointer(&c->emit, shared_element_pointer, shared_array, index);
                 if (size < 4) {
-                    u32 bit_offset = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, address,
-                                                               spv_emit_constant_u32(&c->emit, c->u32_type,
-                                                                                     size < 2 ? 3 : 2));
+                    u32 bit_offset = spv_emit_bitwise_and_u32(
+                        &c->emit, c->u32_type, address, spv_emit_constant_u32(&c->emit, c->u32_type, size < 2 ? 3 : 2));
                     bit_offset = spv_emit_shift_left_u32(&c->emit, c->u32_type, bit_offset,
                                                          spv_emit_constant_u32(&c->emit, c->u32_type, 3));
                     u32 width = spv_emit_constant_u32(&c->emit, c->u32_type, size < 2 ? 8 : 16);
@@ -2880,10 +2875,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                         spv_emit_branch(&c->emit, body);
                         spv_emit_label(&c->emit, body);
                         u32 old = spv_emit_atomic_load_shared_u32(&c->emit, c->u32_type, pointer);
-                        u32 desired = spv_emit_bitfield_insert(&c->emit, c->u32_type, old, reg_read(c, d), bit_offset,
-                                                                 width);
-                        u32 actual = spv_emit_atomic_compare_exchange_shared_u32(&c->emit, c->u32_type, pointer,
-                                                                                   desired, old);
+                        u32 desired =
+                            spv_emit_bitfield_insert(&c->emit, c->u32_type, old, reg_read(c, d), bit_offset, width);
+                        u32 actual =
+                            spv_emit_atomic_compare_exchange_shared_u32(&c->emit, c->u32_type, pointer, desired, old);
                         u32 success = spv_emit_i_equal(&c->emit, c->bool_type, actual, old);
                         spv_emit_branch_conditional(&c->emit, success, done, retry);
                         spv_emit_label(&c->emit, retry);
@@ -2891,14 +2886,13 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                         spv_emit_label(&c->emit, done);
                     } else {
                         u32 old = spv_emit_atomic_load_shared_u32(&c->emit, c->u32_type, pointer);
-                        u32 value = size & 1 ? spv_emit_bitcast(&c->emit, c->u32_type,
-                                                                 spv_emit_bitfield_sextract(&c->emit, i32_type,
-                                                                                            spv_emit_bitcast(&c->emit,
-                                                                                                             i32_type,
-                                                                                                             old),
-                                                                                            bit_offset, width))
-                                             : spv_emit_bitfield_uextract(&c->emit, c->u32_type, old, bit_offset,
-                                                                          width);
+                        u32 value =
+                            size & 1
+                                ? spv_emit_bitcast(&c->emit, c->u32_type,
+                                                   spv_emit_bitfield_sextract(&c->emit, i32_type,
+                                                                              spv_emit_bitcast(&c->emit, i32_type, old),
+                                                                              bit_offset, width))
+                                : spv_emit_bitfield_uextract(&c->emit, c->u32_type, old, bit_offset, width);
                         reg_write(c, d, value);
                     }
                 } else if (op == O_STS)
@@ -2923,26 +2917,24 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                                                  spv_emit_constant_u32(&c->emit, c->u32_type, local_words - 1));
                 u32 pointer = spv_emit_function_element_pointer(&c->emit, local_element_pointer, local_array, index);
                 if (size < 4) {
-                    u32 bit_offset = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, address,
-                                                               spv_emit_constant_u32(&c->emit, c->u32_type,
-                                                                                     size < 2 ? 3 : 2));
+                    u32 bit_offset = spv_emit_bitwise_and_u32(
+                        &c->emit, c->u32_type, address, spv_emit_constant_u32(&c->emit, c->u32_type, size < 2 ? 3 : 2));
                     bit_offset = spv_emit_shift_left_u32(&c->emit, c->u32_type, bit_offset,
                                                          spv_emit_constant_u32(&c->emit, c->u32_type, 3));
                     u32 width = spv_emit_constant_u32(&c->emit, c->u32_type, size < 2 ? 8 : 16);
                     u32 old = spv_emit_load(&c->emit, c->u32_type, pointer);
                     if (op == O_STL)
-                        spv_emit_store(&c->emit, pointer,
-                                       spv_emit_bitfield_insert(&c->emit, c->u32_type, old, reg_read(c, d), bit_offset,
-                                                                width));
+                        spv_emit_store(
+                            &c->emit, pointer,
+                            spv_emit_bitfield_insert(&c->emit, c->u32_type, old, reg_read(c, d), bit_offset, width));
                     else {
-                        u32 value = size & 1 ? spv_emit_bitcast(&c->emit, c->u32_type,
-                                                                 spv_emit_bitfield_sextract(&c->emit, i32_type,
-                                                                                            spv_emit_bitcast(&c->emit,
-                                                                                                             i32_type,
-                                                                                                             old),
-                                                                                            bit_offset, width))
-                                             : spv_emit_bitfield_uextract(&c->emit, c->u32_type, old, bit_offset,
-                                                                          width);
+                        u32 value =
+                            size & 1
+                                ? spv_emit_bitcast(&c->emit, c->u32_type,
+                                                   spv_emit_bitfield_sextract(&c->emit, i32_type,
+                                                                              spv_emit_bitcast(&c->emit, i32_type, old),
+                                                                              bit_offset, width))
+                                : spv_emit_bitfield_uextract(&c->emit, c->u32_type, old, bit_offset, width);
                         reg_write(c, d, value);
                     }
                 } else if (op == O_STL)
@@ -2968,11 +2960,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 word = gbuf_word_index(c, stage, slot, word);
                 u32 ptr = spv_emit_storage_access_u32(&c->emit, c->gbuf_pointer, c->gbuf[slot], c->zero, word);
                 if (size < 4) {
-                    u32 byte_offset = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, address,
-                                                                 spv_emit_constant_u32(&c->emit, c->u32_type,
-                                                                                       size < 2 ? 3 : 2));
+                    u32 byte_offset = spv_emit_bitwise_and_u32(
+                        &c->emit, c->u32_type, address, spv_emit_constant_u32(&c->emit, c->u32_type, size < 2 ? 3 : 2));
                     u32 bit_offset = spv_emit_shift_left_u32(&c->emit, c->u32_type, byte_offset,
-                                                              spv_emit_constant_u32(&c->emit, c->u32_type, 3));
+                                                             spv_emit_constant_u32(&c->emit, c->u32_type, 3));
                     u32 width = spv_emit_constant_u32(&c->emit, c->u32_type, size < 2 ? 8 : 16);
                     if (op == O_STG) {
                         u32 header = spv_emit_id(&c->emit), body = spv_emit_id(&c->emit);
@@ -2983,8 +2974,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                         spv_emit_branch(&c->emit, body);
                         spv_emit_label(&c->emit, body);
                         u32 old = spv_emit_atomic_load_u32(&c->emit, c->u32_type, ptr);
-                        u32 desired = spv_emit_bitfield_insert(&c->emit, c->u32_type, old, reg_read(c, d),
-                                                                 bit_offset, width);
+                        u32 desired =
+                            spv_emit_bitfield_insert(&c->emit, c->u32_type, old, reg_read(c, d), bit_offset, width);
                         u32 actual = spv_emit_atomic_compare_exchange_u32(&c->emit, c->u32_type, ptr, desired, old);
                         u32 success = spv_emit_i_equal(&c->emit, c->bool_type, actual, old);
                         spv_emit_branch_conditional(&c->emit, success, done, retry);
@@ -2993,14 +2984,13 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                         spv_emit_label(&c->emit, done);
                     } else {
                         u32 old = spv_emit_atomic_load_u32(&c->emit, c->u32_type, ptr);
-                        u32 value = size & 1 ? spv_emit_bitcast(&c->emit, c->u32_type,
-                                                                 spv_emit_bitfield_sextract(&c->emit, i32_type,
-                                                                                            spv_emit_bitcast(&c->emit,
-                                                                                                             i32_type,
-                                                                                                             old),
-                                                                                            bit_offset, width))
-                                             : spv_emit_bitfield_uextract(&c->emit, c->u32_type, old, bit_offset,
-                                                                          width);
+                        u32 value =
+                            size & 1
+                                ? spv_emit_bitcast(&c->emit, c->u32_type,
+                                                   spv_emit_bitfield_sextract(&c->emit, i32_type,
+                                                                              spv_emit_bitcast(&c->emit, i32_type, old),
+                                                                              bit_offset, width))
+                                : spv_emit_bitfield_uextract(&c->emit, c->u32_type, old, bit_offset, width);
                         reg_write(c, d, value);
                     }
                 } else if (op == O_STG)
@@ -3170,7 +3160,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             u32 greater = spv_emit_u_less(&c->emit, c->bool_type, right, left);
             u32 equal = spv_emit_i_equal(&c->emit, c->bool_type, left, right);
             u32 cmp = B(w, 43, 2) | (B(w, 47, 1) << 2);
-            u32 result = cmp == 0 ? c->false_value
+            u32 result = cmp == 0   ? c->false_value
                          : cmp == 1 ? less
                          : cmp == 2 ? equal
                          : cmp == 3 ? cc_not(c, greater)
@@ -3183,10 +3173,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             pred_write(c, B(w, 0, 3), bool_combine(c, B(w, 45, 2), cc_not(c, result), condition));
         } else if (op == O_VMAD) {
             u32 left = vm_select(c, i32_type, reg_read(c, a), B(w, 36, 3) | (B(w, 48, 1) << 3));
-            u32 right = B(w, 50, 1)
-                            ? vm_select(c, i32_type, reg_read(c, b), B(w, 28, 3) | (B(w, 49, 1) << 3))
-                            : vm_select(c, i32_type, spv_emit_constant_u32(&c->emit, c->u32_type, B(w, 20, 16)),
-                                        4 | (B(w, 49, 1) << 3));
+            u32 right = B(w, 50, 1) ? vm_select(c, i32_type, reg_read(c, b), B(w, 28, 3) | (B(w, 49, 1) << 3))
+                                    : vm_select(c, i32_type, spv_emit_constant_u32(&c->emit, c->u32_type, B(w, 20, 16)),
+                                                4 | (B(w, 49, 1) << 3));
             u32 product = spv_emit_imul_u32(&c->emit, c->u32_type, left, right);
             reg_write(c, d, spv_emit_iadd_u32(&c->emit, c->u32_type, product, reg_read(c, B(w, 39, 8))));
         } else if (op == O_VMNMX) {
@@ -3695,12 +3684,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         } else if ((op >= O_DADD_R && op <= O_DADD_I) || (op >= O_DMUL_R && op <= O_DMUL_I) ||
                    (op >= O_DFMA_R && op <= O_DFMA_I) || (op >= O_DMNMX_R && op <= O_DMNMX_I)) {
             u32 left = double_read(c, vec2_u32, a);
-            u32 right = op == O_DFMA_RC ? double_read(c, vec2_u32, b)
-                        : op == O_DFMA_CR ? double_source(c, vec2_u32, w, 1)
-                        : op >= O_DFMA_R && op <= O_DFMA_I ? double_source(c, vec2_u32, w, op == O_DFMA_I ? 2 : 0)
+            u32 right = op == O_DFMA_RC                      ? double_read(c, vec2_u32, b)
+                        : op == O_DFMA_CR                    ? double_source(c, vec2_u32, w, 1)
+                        : op >= O_DFMA_R && op <= O_DFMA_I   ? double_source(c, vec2_u32, w, op == O_DFMA_I ? 2 : 0)
                         : (op >= O_DADD_R && op <= O_DADD_I) ? double_source(c, vec2_u32, w, op - O_DADD_R)
                         : (op >= O_DMUL_R && op <= O_DMUL_I) ? double_source(c, vec2_u32, w, op - O_DMUL_R)
-                                                                   : double_source(c, vec2_u32, w, op - O_DMNMX_R);
+                                                             : double_source(c, vec2_u32, w, op - O_DMNMX_R);
             u32 value;
             if (op >= O_DADD_R && op <= O_DADD_I) {
                 left = double_mod(c, left, B(w, 46, 1), B(w, 48, 1));
@@ -3713,8 +3702,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 spv_emit_no_contraction(&c->emit, value);
             } else if (op >= O_DFMA_R && op <= O_DFMA_I) {
                 right = double_mod(c, right, 0, B(w, 48, 1));
-                u32 third = op == O_DFMA_RC ? double_source(c, vec2_u32, w, 1)
-                                                           : double_read(c, vec2_u32, B(w, 39, 8));
+                u32 third = op == O_DFMA_RC ? double_source(c, vec2_u32, w, 1) : double_read(c, vec2_u32, B(w, 39, 8));
                 u32 addend = double_mod(c, third, 0, B(w, 49, 1));
                 value = spv_emit_glsl_ternary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_FMA, left, right, addend);
             } else {
@@ -3727,16 +3715,14 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             double_write(c, vec2_u32, d, value);
         } else if ((op >= O_DSET_R && op <= O_DSET_I) || (op >= O_DSETP_R && op <= O_DSETP_I)) {
             int is_set = op >= O_DSET_R && op <= O_DSET_I;
-            u32 left = double_mod(c, double_read(c, vec2_u32, a), is_set ? B(w, 54, 1) : B(w, 7, 1),
-                                  B(w, 43, 1));
+            u32 left = double_mod(c, double_read(c, vec2_u32, a), is_set ? B(w, 54, 1) : B(w, 7, 1), B(w, 43, 1));
             u32 right = double_mod(c, double_source(c, vec2_u32, w, is_set ? op - O_DSET_R : op - O_DSETP_R),
                                    B(w, 44, 1), is_set ? B(w, 53, 1) : B(w, 6, 1));
             u32 comparison = spv_emit_fcompare(&c->emit, c->bool_type, B(w, 48, 4), left, right);
             u32 predicate = pred_read(c, B(w, 39, 3), B(w, 42, 1));
             if (is_set) {
                 u32 test = bool_combine(c, B(w, 45, 2), comparison, predicate);
-                u32 truth = spv_emit_constant_u32(&c->emit, c->u32_type,
-                                                  B(w, 52, 1) ? 0x3f800000u : 0xffffffffu);
+                u32 truth = spv_emit_constant_u32(&c->emit, c->u32_type, B(w, 52, 1) ? 0x3f800000u : 0xffffffffu);
                 u32 value = spv_emit_select(&c->emit, c->u32_type, test, truth, c->zero);
                 if (B(w, 47, 1)) flags_logic(c, value);
                 reg_write(c, d, value);
@@ -3865,22 +3851,18 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 hi = (B(w, 30, 9) << 6) | (B(w, 56, 1) << 15);
                 raw_b = spv_emit_constant_u32(&c->emit, c->u32_type, lo | (hi << 16));
             }
-            u32 lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)),
-                                    fma ? 0 : B(w, 44, 1),
-                                    fma                  ? 0
+            u32 lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)), fma ? 0 : B(w, 44, 1),
+                                    fma                   ? 0
                                     : !multiply || !reg_b ? B(w, 43, 1)
                                                           : 0);
             u32 rhs = half_pair_mod(c, vec2, half_pair(c, vec2, raw_b, reg_b ? B(w, 28, 2) : 0),
-                                    fma ? 0 : reg_b && B(w, 30, 1),
-                                    reg_b && B(w, 31, 1) || cbuf_b && B(w, 56, 1));
+                                    fma ? 0 : reg_b && B(w, 30, 1), reg_b && B(w, 31, 1) || cbuf_b && B(w, 56, 1));
             u32 pair;
             if (fma) {
-                u32 add_raw = op == O_HFMA2_RC
-                                  ? spv_emit_bitcast(&c->emit, c->u32_type, cbuf_read(c, w))
-                                  : reg_read(c, B(w, 39, 8));
-                u32 addend =
-                    half_pair_mod(c, vec2, half_pair(c, vec2, add_raw, op == O_HFMA2_RC ? 0 : B(w, 35, 2)), 0,
-                                  op == O_HFMA2_RC ? B(w, 56, 1) : B(w, 30, 1));
+                u32 add_raw = op == O_HFMA2_RC ? spv_emit_bitcast(&c->emit, c->u32_type, cbuf_read(c, w))
+                                               : reg_read(c, B(w, 39, 8));
+                u32 addend = half_pair_mod(c, vec2, half_pair(c, vec2, add_raw, op == O_HFMA2_RC ? 0 : B(w, 35, 2)), 0,
+                                           op == O_HFMA2_RC ? B(w, 56, 1) : B(w, 30, 1));
                 pair = spv_emit_glsl_ternary(&c->emit, vec2, c->glsl, SPV_GLSL_FMA, lhs, rhs, addend);
             } else
                 pair = multiply ? spv_emit_fmul(&c->emit, vec2, lhs, rhs) : spv_emit_fadd(&c->emit, vec2, lhs, rhs);
@@ -3898,10 +3880,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 high = (B(w, 30, 9) << 6) | (B(w, 56, 1) << 15);
                 raw_b = spv_emit_constant_u32(&c->emit, c->u32_type, low | (high << 16));
             }
-            u32 lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)),
-                                    B(w, 44, 1), B(w, 43, 1));
-            u32 rhs = half_pair_mod(c, vec2, half_pair(c, vec2, raw_b, op == O_HSET2_R ? B(w, 28, 2)
-                                                                                : op == O_HSET2_C ? 1 : 0),
+            u32 lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)), B(w, 44, 1), B(w, 43, 1));
+            u32 rhs = half_pair_mod(c, vec2,
+                                    half_pair(c, vec2, raw_b,
+                                              op == O_HSET2_R   ? B(w, 28, 2)
+                                              : op == O_HSET2_C ? 1
+                                                                : 0),
                                     op == O_HSET2_R && B(w, 30, 1),
                                     op == O_HSET2_R ? B(w, 31, 1) : op == O_HSET2_C && B(w, 56, 1));
             u32 predicate = pred_read(c, B(w, 39, 3), B(w, 42, 1));
@@ -3929,10 +3913,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 high = (B(w, 30, 9) << 6) | (B(w, 56, 1) << 15);
                 raw_b = spv_emit_constant_u32(&c->emit, c->u32_type, low | (high << 16));
             }
-            u32 lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)),
-                                    B(w, 44, 1), B(w, 43, 1));
-            u32 rhs = half_pair_mod(c, vec2, half_pair(c, vec2, raw_b, op == O_HSETP2_R ? B(w, 28, 2)
-                                                                                : op == O_HSETP2_C ? 1 : 0),
+            u32 lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)), B(w, 44, 1), B(w, 43, 1));
+            u32 rhs = half_pair_mod(c, vec2,
+                                    half_pair(c, vec2, raw_b,
+                                              op == O_HSETP2_R   ? B(w, 28, 2)
+                                              : op == O_HSETP2_C ? 1
+                                                                 : 0),
                                     op == O_HSETP2_C && B(w, 54, 1) || op == O_HSETP2_R && B(w, 30, 1),
                                     op == O_HSETP2_R ? B(w, 31, 1) : op == O_HSETP2_C && B(w, 56, 1));
             u32 predicate = pred_read(c, B(w, 39, 3), B(w, 42, 1));
@@ -3971,8 +3957,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             u32 y = type == 0 ? spv_emit_constant_u32(&c->emit, i32_type, 0)
                               : spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + array + 1));
             if (B(w, 35, 1)) {
-                u32 packed = spv_emit_bitcast(&c->emit, i32_type,
-                                              reg_read(c, b + (op == O_TLD_B) + B(w, 55, 1)));
+                u32 packed = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, b + (op == O_TLD_B) + B(w, 55, 1)));
                 u32 four = spv_emit_constant_u32(&c->emit, c->u32_type, 4);
                 u32 ox = spv_emit_bitfield_sextract(&c->emit, i32_type, packed, c->zero, four);
                 u32 oy = spv_emit_bitfield_sextract(&c->emit, i32_type, packed, four, four);
@@ -3988,17 +3973,13 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 coord = spv_emit_vec3_construct(&c->emit, vec3_i32, x, y, z);
             }
             u32 sample = multisample
-                             ? spv_emit_image_fetch_sample(&c->emit, texture_vec4[slot], c->sampled_type[slot],
-                                                           c->sampler[slot], coord,
-                                                           spv_emit_bitcast(&c->emit, i32_type,
-                                                                            reg_read(c, b + 1 + B(w, 55, 1) +
-                                                                                             B(w, 35, 1))))
+                             ? spv_emit_image_fetch_sample(
+                                   &c->emit, texture_vec4[slot], c->sampled_type[slot], c->sampler[slot], coord,
+                                   spv_emit_bitcast(&c->emit, i32_type, reg_read(c, b + 1 + B(w, 55, 1) + B(w, 35, 1))))
                              : spv_emit_image_fetch(
                                    &c->emit, texture_vec4[slot], c->sampled_type[slot], c->sampler[slot], coord,
-                                   B(w, 55, 1)
-                                       ? spv_emit_bitcast(&c->emit, i32_type,
-                                                          reg_read(c, b + (op == O_TLD_B)))
-                                       : spv_emit_constant_u32(&c->emit, i32_type, 0));
+                                   B(w, 55, 1) ? spv_emit_bitcast(&c->emit, i32_type, reg_read(c, b + (op == O_TLD_B)))
+                                               : spv_emit_constant_u32(&c->emit, i32_type, 0));
             u32 mask = B(w, 31, 4), target = d;
             if (!mask) mask = 15;
             for (u32 k = 0; k < 4; k++)
@@ -4046,11 +4027,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 }
             } else {
                 int slot = 0;
-                while (slot < texture_count && (textures[slot].cbuf_off != off || textures[slot].type != 1 ||
-                                                textures[slot].array || textures[slot].shadow ||
-                                                textures[slot].bindless != bindless ||
-                                                !!(textures[slot].flags & 1) != !!B(w, 52, 1) ||
-                                                (bindless && textures[slot].bl_cbuf != bank)))
+                while (slot < texture_count &&
+                       (textures[slot].cbuf_off != off || textures[slot].type != 1 || textures[slot].array ||
+                        textures[slot].shadow || textures[slot].bindless != bindless ||
+                        !!(textures[slot].flags & 1) != !!B(w, 52, 1) || (bindless && textures[slot].bl_cbuf != bank)))
                     slot++;
                 u32 sample = spv_emit_image_fetch(&c->emit, texture_vec4[slot], c->sampled_type[slot], c->sampler[slot],
                                                   coord, spv_emit_constant_u32(&c->emit, i32_type, 0));
@@ -4098,15 +4078,19 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         } else if (op == O_TEXS) {
             u32 off = B(w, 36, 13);
             u32 encoding = B(w, 53, 4);
-            int shadow = encoding == 4, type = encoding == 12 || encoding == 13 ? 3 :
-                                                encoding == 10 || encoding == 11 ? 2 : encoding == 0 ? 0 : 1;
+            int shadow = encoding == 4, type = encoding == 12 || encoding == 13   ? 3
+                                               : encoding == 10 || encoding == 11 ? 2
+                                               : encoding == 0                    ? 0
+                                                                                  : 1;
             int array = encoding == 7 || encoding == 8;
             int slot = 0;
             while (slot < texture_count && (textures[slot].cbuf_off != off || textures[slot].shadow != shadow ||
                                             textures[slot].type != type || textures[slot].array != array))
                 slot++;
             u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, array ? a + 1 : a));
-            u32 yreg = shadow || encoding == 3 || encoding == 10 || encoding == 11 || encoding == 12 || encoding == 13 ? a + 1 : b;
+            u32 yreg = shadow || encoding == 3 || encoding == 10 || encoding == 11 || encoding == 12 || encoding == 13
+                           ? a + 1
+                           : b;
             u32 y = encoding == 0 ? spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f)
                                   : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, yreg));
             u32 uv = array ? spv_emit_vec3_construct(&c->emit, vec3, x, y,
@@ -4146,11 +4130,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                         u32 value = k + lane < outputs
                                         ? spv_emit_vec4_extract(&c->emit, texture_scalar[slot], sample, comps[k + lane])
                                         : zero_f;
-                        pair[lane] = texture_scalar[slot] == c->f32_type
-                                         ? value
-                                         : texture_scalar[slot] == i32_type
-                                               ? spv_emit_convert_s_to_f(&c->emit, c->f32_type, value)
-                                               : spv_emit_convert_u_to_f(&c->emit, c->f32_type, value);
+                        pair[lane] = texture_scalar[slot] == c->f32_type ? value
+                                     : texture_scalar[slot] == i32_type
+                                         ? spv_emit_convert_s_to_f(&c->emit, c->f32_type, value)
+                                         : spv_emit_convert_u_to_f(&c->emit, c->f32_type, value);
                     }
                     u32 packed = spv_emit_glsl_unary(&c->emit, c->u32_type, c->glsl, SPV_GLSL_PACK_HALF2X16,
                                                      spv_emit_vec2_construct(&c->emit, vec2, pair[0], pair[1]));
@@ -4335,7 +4318,11 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     coords = spv_emit_vec3_construct(&c->emit, vec3, x, y, z);
             }
             u32 component = spv_emit_constant_u32(&c->emit, c->u32_type,
-                                                   B(w, op == O_TLD4S ? 52 : bindless ? 38 : 56, 2));
+                                                  B(w,
+                                                    op == O_TLD4S ? 52
+                                                    : bindless    ? 38
+                                                                  : 56,
+                                                    2));
             u32 offset = 0, dref = 0;
             int per_tap_offset = 0;
             u32 ptp_source = 0;
@@ -4378,13 +4365,13 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     u32 yoff = spv_emit_bitfield_sextract(&c->emit, i32_type, yraw, shift, width);
                     u32 tap_offset = spv_emit_vec2_construct(&c->emit, vec2_i32, xoff, yoff);
                     u32 sampled = spv_emit_image_gather_ex(&c->emit, texture_vec4[slot], c->sampled_type[slot],
-                                                            c->sampler[slot], coords, component, dref, tap_offset);
+                                                           c->sampler[slot], coords, component, dref, tap_offset);
                     taps[tap] = spv_emit_vec4_extract(&c->emit, texture_scalar[slot], sampled, tap);
                 }
                 gathered = spv_emit_vec4_construct(&c->emit, texture_vec4[slot], taps);
             } else {
                 gathered = spv_emit_image_gather_ex(&c->emit, texture_vec4[slot], c->sampled_type[slot],
-                                                     c->sampler[slot], coords, component, dref, offset);
+                                                    c->sampler[slot], coords, component, dref, offset);
             }
             if (op == O_TLD4S) {
                 u32 db = B(w, 28, 8);

@@ -40,9 +40,7 @@ def main():
         subprocess.run([args.regressions, *(str(path) for path in fixtures)], check=True)
         for fixture in fixtures:
             subprocess.run([args.validator, '--target-env', 'vulkan1.3', str(fixture)], check=True)
-        raw_code = subprocess.run(
-            [args.disassembler, str(nro_raw)], check=True, capture_output=True, text=True
-        ).stdout
+        raw_code = subprocess.run([args.disassembler, str(nro_raw)], check=True, capture_output=True, text=True).stdout
         if 'OpTypeImage %uint 2D 0 0 0 1 Unknown' not in raw_code or 'OpImageFetch %v4uint' not in raw_code:
             raise AssertionError('raw surface load must fetch an unsigned texel')
         for fixture, array in ((nro_ms, 0), (nro_ms_array, 1)):
