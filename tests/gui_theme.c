@@ -56,6 +56,21 @@ int main(void) {
     assert(theme.fade_in_ms == loading->fade_in_ms && theme.fade_out_ms == loading->fade_out_ms);
     assert(theme.blink_ms == loading->blink_ms && same(theme.dim, (GuiRgb){1, 2, 3}));
 
+    /* an ErET file: its layout picks the base when no base does, ErET's own keys apply, the rest waits for it */
+    parse(&theme, "[theme]\nformat = 2\nname = From rEden\nauthor = rEden\nlayout = menu\n[colors]\ntexture = true\n"
+                  "warning = #D9B24A\n[header]\nring_side = right-near-text\n[transitions]\ntyping = sync\n"
+                  "[loading]\ntitle = WAKING\nheader = SYSTEM  /  LOADING\n[plain]\nstage_build = %1 / %2\n"
+                  "[sizes]\ntitle_scale = 0.75\n");
+    assert(same(theme.page, yorha->page) && theme.format == 2 && !strcmp(theme.author, "rEden"));
+    assert(theme.texture && theme.ring == GUI_RING_NEAR_TEXT && theme.typing_sync);
+    assert(same(theme.warning, (GuiRgb){0xD9, 0xB2, 0x4A}) && !strcmp(theme.title[GUI_SCREEN_LOADING], "WAKING"));
+    parse(&theme, "[theme]\nlayout = loading\n");
+    assert(same(theme.page, loading->page));
+    parse(&theme, "[theme]\nbase = default\nlayout = menu\nformat = 0\n"); /* base wins; no format 0 */
+    assert(same(theme.page, def->page) && theme.format == GUI_THEME_FORMAT);
+    parse(&theme, "[header]\nring_side = nowhere\n[run]\nring = right-near-text\n[transitions]\ntyping = later\n");
+    assert(theme.ring == GUI_RING_NEAR_TEXT && !theme.typing_sync);
+
     /* a value longer than its field keeps the base's; an unknown base leaves the default */
     char longer[200] = "[theme]\nbase = elsewhere\n[body]\nmarker = ";
     memset(longer + strlen(longer), 'x', 40);
@@ -112,7 +127,9 @@ int main(void) {
         assert(f.footer_rule == b->footer_rule && f.focus_bar == b->focus_bar && f.run == b->run);
         assert(f.texture == b->texture && f.bar == b->bar && f.ring == b->ring && f.line_in == b->line_in);
         assert(f.fade_in_ms == b->fade_in_ms && f.fade_out_ms == b->fade_out_ms && f.line_in_ms == b->line_in_ms);
-        assert(f.typing_ms == b->typing_ms && f.blink_ms == b->blink_ms);
+        assert(f.typing_ms == b->typing_ms && f.blink_ms == b->blink_ms && f.typing_sync == b->typing_sync);
+        assert(f.format == GUI_THEME_FORMAT && b->format == GUI_THEME_FORMAT && !strcmp(f.author, b->author));
+        assert(same(f.warning, b->warning));
         for (int s = 0; s < GUI_SCREEN_COUNT; ++s) assert(!strcmp(f.title[s], b->title[s]));
     }
     puts("GUI themes: built-ins, theme.ini over its base, themes/ folders passed");

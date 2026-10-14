@@ -13,7 +13,9 @@ typedef enum { GUI_STYLE_PLAIN, GUI_STYLE_BAR, GUI_STYLE_NONE } GuiStyle;
 /* a run's screens: the driver's output as it comes, or its steps as a loading screen draws them */
 typedef enum { GUI_RUN_CONSOLE, GUI_RUN_STEPS } GuiRunLayout;
 typedef enum { GUI_LINE_NONE, GUI_LINE_TYPING, GUI_LINE_SLIDE, GUI_LINE_FADE } GuiLineIn;
-typedef enum { GUI_RING_NONE, GUI_RING_LEFT, GUI_RING_RIGHT } GuiRing;
+typedef enum { GUI_RING_NONE, GUI_RING_LEFT, GUI_RING_RIGHT, GUI_RING_NEAR_TEXT } GuiRing;
+/* the theme.ini format this GUI writes and reads; a newer file's keys this one knows still apply */
+#define GUI_THEME_FORMAT 1
 typedef enum {
     GUI_SCREEN_MENU,
     GUI_SCREEN_GAMES,
@@ -23,8 +25,9 @@ typedef enum {
     GUI_SCREEN_COUNT
 } GuiScreen;
 typedef struct {
-    char id[64], name[64];
-    GuiRgb page, ink, soft, focus, active, failure, dim;
+    char id[64], name[64], author[64];
+    uint32_t format;
+    GuiRgb page, ink, soft, focus, active, failure, dim, warning;
     GuiStyle head, footer;
     bool head_rule, footer_rule;
     bool focus_bar; /* the focused line as a band of ink, its text in the page colour */
@@ -34,6 +37,7 @@ typedef struct {
     bool texture, bar; /* faint lines over the page; the progress bar and its percentage */
     GuiRing ring;
     GuiLineIn line_in;
+    bool typing_sync; /* one line typed at a time, those already done three times faster */
     uint32_t fade_in_ms, fade_out_ms, line_in_ms, typing_ms, blink_ms;
 } GuiTheme;
 typedef struct {

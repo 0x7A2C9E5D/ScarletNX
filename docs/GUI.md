@@ -133,7 +133,10 @@ keeps the base's value.
 
 ```ini
 [theme]
+; the theme file's format, 1; a newer file's keys this GUI knows still apply
+format = 1
 name = Night ink
+author = me
 ; default | yorha | yorha-loading
 base = yorha
 [colors]
@@ -175,10 +178,25 @@ fade_out_ms = 500
 line_in = typing
 line_in_ms = 220
 typing_ms = 25
+; async: every line types from when it comes; sync: one at a time, the done ones three times faster
+typing = async
 blink_ms = 500
 ```
 
 Comments take a line of their own, starting with `;` or `#`.
+
+The format is rEden's ErET format 1, extended, so one file can serve both: each program
+reads the keys it knows and leaves the others. From ErET's, the GUI also reads:
+
+| ErET key | here |
+|---|---|
+| `[theme] layout` | the base when no `base` names one: `menu` is `yorha`, `loading` is `yorha-loading`, `plain`, `debug` and `skip` are `default` |
+| `[colors] texture`, `warning` | as `[run] texture`, and the colour of a run being aborted |
+| `[header] ring_side` | `right`, `left` or `right-near-text` (right after the name and its dots), as `[run] ring` |
+| `[transitions] typing` | `async` or `sync`, as above |
+| `[loading] title` | the loading screen's title |
+
+ErET needs `[theme] layout`, so the built-in files carry one: `debug`, `menu` and `loading`.
 
 ## Building and testing
 

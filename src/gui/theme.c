@@ -8,6 +8,9 @@
 static const GuiTheme builtins[] = {
     {
         .id = "default",
+        .author = "ScarletNX",
+        .format = GUI_THEME_FORMAT,
+        .warning = {255, 170, 0},
         .name = "Default",
         .page = {0, 0, 0},
         .ink = {220, 220, 220},
@@ -24,6 +27,9 @@ static const GuiTheme builtins[] = {
     },
     {
         .id = "yorha",
+        .author = "ScarletNX",
+        .format = GUI_THEME_FORMAT,
+        .warning = {0x8A, 0x6A, 0x2A},
         .name = "YoRHa",
         .page = {0xDA, 0xD6, 0xBE},
         .ink = {0x45, 0x41, 0x3A},
@@ -47,6 +53,9 @@ static const GuiTheme builtins[] = {
     },
     {
         .id = "yorha-loading",
+        .author = "ScarletNX",
+        .format = GUI_THEME_FORMAT,
+        .warning = {0xD9, 0xB2, 0x4A},
         .name = "YoRHa loading",
         .page = {0x14, 0x14, 0x16},
         .ink = {0xE6, 0xE4, 0xDC},
@@ -74,6 +83,7 @@ static const GuiTheme builtins[] = {
     },
 };
 static const char* const screens[GUI_SCREEN_COUNT] = {"menu", "games", "keys", "compiling", "loading"};
+static const char* const rings[] = {"none", "left", "right", "right-near-text"};
 
 const GuiTheme* gui_theme_builtin(const char* id) {
     for (size_t i = 0; id && i < sizeof(builtins) / sizeof(*builtins); ++i)
@@ -138,7 +148,8 @@ static bool flag(bool* out, const char* value) {
         return false;
     return true;
 }
-static bool milliseconds(uint32_t* out, const char* value) {
+/* a whole number, 0 to 10000 */
+static bool integer(uint32_t* out, const char* value) {
     char* end;
     unsigned long n = strtoul(value, &end, 10);
     if (!*value || *end || n > 10000) return false;
@@ -154,11 +165,17 @@ static bool word(int* out, const char* value, const char* const* words, int coun
     return false;
 }
 static void apply(GuiTheme* t, const char* section, const char* key, const char* value) {
+    uint32_t number;
     if (!strcmp(section, "theme") && !strcmp(key, "name"))
         copy(t->name, sizeof t->name, value);
-    else if (!strcmp(section, "colors")) {
-        GuiRgb* roles[] = {&t->page, &t->ink, &t->soft, &t->focus, &t->active, &t->failure, &t->dim};
-        static const char* const names[] = {"page", "ink", "soft", "focus", "active", "failure", "dim"};
+    else if (!strcmp(section, "theme") && !strcmp(key, "author"))
+        copy(t->author, sizeof t->author, value);
+    else if (!strcmp(section, "theme") && !strcmp(key, "format")) {
+        if (integer(&number, value) && number) t->format = number;
+    } else if (!strcmp(section, "colors")) {
+        GuiRgb* roles[] = {&t->page, &t->ink, &t->soft, &t->focus, &t->active, &t->failure, &t->dim, &t->warning};
+        static const char* const names[] = {"page", "ink", "soft", "focus", "active", "failure", "dim", "warning"};
+        if (!strcmp(key, "texture")) flag(&t->texture, value); /* where ErET keeps it */
         for (size_t i = 0; i < sizeof roles / sizeof *roles; ++i)
             if (!strcmp(key, names[i])) colour(roles[i], value);
     } else if (!strcmp(section, "head") || !strcmp(section, "footer")) {
@@ -176,11 +193,11 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
         else if (!strcmp(key, "focus") && (!strcmp(value, "bar") || !strcmp(value, "color")))
             t->focus_bar = value[0] == 'b';
     } else if (!strcmp(section, "run")) {
-        static const char *const layouts[] = {"console", "steps"}, *const rings[] = {"none", "left", "right"};
+        static const char* const layouts[] = {"console", "steps"};
         int n;
         if (!strcmp(key, "layout") && word(&n, value, layouts, 2))
             t->run = (GuiRunLayout)n;
-        else if (!strcmp(key, "ring") && word(&n, value, rings, 3))
+        else if (!strcmp(key, "ring") && word(&n, value, rings, 4))
             t->ring = (GuiRing)n;
         else if (!strcmp(key, "texture"))
             flag(&t->texture, value);
@@ -192,19 +209,37 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
         if (!strcmp(key, "line_in") && word(&n, value, entrances, 4))
             t->line_in = (GuiLineIn)n;
         else if (!strcmp(key, "fade_in_ms"))
-            milliseconds(&t->fade_in_ms, value);
+            integer(&t->fade_in_ms, value);
         else if (!strcmp(key, "fade_out_ms"))
-            milliseconds(&t->fade_out_ms, value);
+            integer(&t->fade_out_ms, value);
         else if (!strcmp(key, "line_in_ms"))
-            milliseconds(&t->line_in_ms, value);
+            integer(&t->line_in_ms, value);
         else if (!strcmp(key, "typing_ms"))
-            milliseconds(&t->typing_ms, value);
+            integer(&t->typing_ms, value);
         else if (!strcmp(key, "blink_ms"))
-            milliseconds(&t->blink_ms, value);
+            integer(&t->blink_ms, value);
+        else if (!strcmp(key, "typing") && (!strcmp(value, "async") || !strcmp(value, "sync")))
+            t->typing_sync = value[0] == 's';
+    } else if (!strcmp(section, "header") && !strcmp(key, "ring_side")) {
+        /* ErET's words; none is ours */
+        static const char* const sides[] = {"right", "left", "right-near-text"};
+        static const GuiRing as[] = {GUI_RING_RIGHT, GUI_RING_LEFT, GUI_RING_NEAR_TEXT};
+        int n;
+        if (word(&n, value, sides, 3)) t->ring = as[n];
+    } else if (!strcmp(section, "loading") && !strcmp(key, "title")) {
+        copy(t->title[GUI_SCREEN_LOADING], sizeof t->title[GUI_SCREEN_LOADING], value); /* ErET's boot word */
     }
 }
 /* each key = value of text, with its section, to visit; false when out of memory */
-static bool visit(const char* text, size_t size, GuiTheme* theme, bool base_only) {
+/* ErET's layout as the built-in to start from, when no base names one */
+static const GuiTheme* layout_base(const char* layout) {
+    if (!strcmp(layout, "menu")) return gui_theme_builtin("yorha");
+    if (!strcmp(layout, "loading")) return gui_theme_builtin("yorha-loading");
+    if (!strcmp(layout, "plain") || !strcmp(layout, "debug") || !strcmp(layout, "skip"))
+        return gui_theme_builtin("default");
+    return NULL;
+}
+static bool visit(const char* text, size_t size, GuiTheme* theme, const GuiTheme** bases, bool base_only) {
     char* copy_of = malloc(size + 1);
     if (!copy_of) return false;
     memcpy(copy_of, text, size);
@@ -229,8 +264,10 @@ static bool visit(const char* text, size_t size, GuiTheme* theme, bool base_only
         *equals = 0;
         char *key = trim(s), *value = unquote(trim(equals + 1));
         if (base_only) {
-            const GuiTheme* base = !strcmp(section, "theme") && !strcmp(key, "base") ? gui_theme_builtin(value) : NULL;
-            if (base) *theme = *base;
+            if (!strcmp(section, "theme") && !strcmp(key, "base") && gui_theme_builtin(value))
+                bases[0] = gui_theme_builtin(value);
+            else if (!strcmp(section, "theme") && !strcmp(key, "layout") && layout_base(value))
+                bases[1] = layout_base(value);
         } else
             apply(theme, section, key, value);
     }
@@ -238,11 +275,12 @@ static bool visit(const char* text, size_t size, GuiTheme* theme, bool base_only
     return true;
 }
 bool gui_theme_parse(GuiTheme* theme, const char* id, const char* text, size_t size) {
-    *theme = builtins[0];
-    if (!visit(text, size, theme, true)) return false;
+    const GuiTheme* bases[2] = {NULL, NULL}; /* the base, ErET's layout */
+    if (!visit(text, size, theme, bases, true)) return false;
+    *theme = bases[0] ? *bases[0] : bases[1] ? *bases[1] : builtins[0];
     copy(theme->id, sizeof theme->id, id);
     copy(theme->name, sizeof theme->name, id);
-    return visit(text, size, theme, false);
+    return visit(text, size, theme, bases, false);
 }
 void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id) {
     for (size_t i = 0; i < count; ++i) {

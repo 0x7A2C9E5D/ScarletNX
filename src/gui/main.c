@@ -207,6 +207,26 @@ static void run_name(const App* app, char* out, size_t size) {
 }
 /* a run as a loading screen: the title, the name and the ring; the steps typed down the page, their status last;
    the progress bar and its percentage */
+/* a step's line: its label, its detail in capitals and its status */
+static size_t step_runs(const GuiStep* s, char run[3][112], size_t length[3]) {
+    snprintf(run[0], 112, "%s:", s->label);
+    snprintf(run[1], 112, " %s", s->detail);
+    for (char* q = run[1]; *q; ++q)
+        if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
+    if (s->state == GUI_STEP_FAILED)
+        snprintf(run[2], 112, "...FAILED");
+    else if (s->state == GUI_STEP_DONE)
+        snprintf(run[2], 112, "...OK");
+    else if (s->total)
+        snprintf(run[2], 112, " %u / %u", s->value, s->total);
+    else
+        run[2][0] = 0;
+    size_t total = 0;
+    for (int r = 0; r < 3; ++r) total += length[r] = SDL_utf8strlen(run[r]);
+    return total;
+}
+/* a run as a loading screen: the title, the name and the ring; the steps typed down the page, their status last;
+   the progress bar and its percentage */
 static void render_steps(App* app) {
     const GuiTheme* theme = &app->theme;
     Uint64 now = now_ms(app);
@@ -219,52 +239,57 @@ static void render_steps(App* app) {
     char name[96], head[128];
     run_name(app, name, sizeof name);
     int col = theme->ring == GUI_RING_LEFT ? 4 : 1;
+    const char* title = theme->title[screen(app)];
+    int name_col = col + (int)SDL_utf8strlen(title) + (title[0] ? 1 : 0);
     if (theme->ring == GUI_RING_LEFT) ring(app, cw * 2, ch * 1.5f);
     if (theme->ring == GUI_RING_RIGHT) ring(app, (float)width - cw * 2, ch * 1.5f);
-    const char* title = theme->title[screen(app)];
+    if (theme->ring == GUI_RING_NEAR_TEXT) /* after the name and the dots' whole width, so it stays put */
+        ring(app, cw * (float)(name_col + (int)SDL_utf8strlen(name) + 4) + 7.0f * (float)app->scale, ch * 1.5f);
     text(app, col, 1, title, ink);
     snprintf(head, sizeof head, "%s%s", name, dots(app));
-    text(app, col + (int)SDL_utf8strlen(title) + (title[0] ? 1 : 0), 1, head, soft);
+    text(app, name_col, 1, head, soft);
     if (app->finished) text(app, 1, 2, app->message, app->abnormal_exit ? failure : soft);
+    /* when each line types: async, each from when it comes; sync, one after the other, the done ones faster */
+    static char runs[GUI_STEPS_MAX][3][112];
+    size_t lengths[GUI_STEPS_MAX][3], typed[GUI_STEPS_MAX];
+    Uint64 free_at = 0;
+    int typing = -1;
+    for (int i = 0; i < app->steps.count; ++i) {
+        const GuiStep* s = &app->steps.step[i];
+        size_t total = step_runs(s, runs[i], lengths[i]);
+        typed[i] = total;
+        if (theme->line_in != GUI_LINE_TYPING || !theme->typing_ms) continue;
+        float per = (float)theme->typing_ms / (theme->typing_sync && s->state != GUI_STEP_ACTIVE ? 3.0f : 1.0f);
+        Uint64 start = theme->typing_sync ? SDL_max(s->shown_ms, free_at) : s->shown_ms;
+        free_at = start + (Uint64)(per * (float)total);
+        typed[i] = now < start ? 0 : (size_t)SDL_min((float)total, (float)(now - start) / per);
+        if (now >= start && typed[i] < total) typing = i;
+    }
     int top = 3, bottom = theme->bar ? app->rows - 5 : app->rows - 2;
     int fit = SDL_max(1, bottom - top), first = SDL_max(0, app->steps.count - fit);
+    int cursor = typing >= 0 ? typing : app->steps.count - 1;
     for (int i = first; i < app->steps.count; ++i) {
         const GuiStep* s = &app->steps.step[i];
         bool last = i == app->steps.count - 1;
         bool failed = s->state == GUI_STEP_FAILED, active = s->state == GUI_STEP_ACTIVE;
-        char run[3][112];
-        snprintf(run[0], sizeof run[0], "%s:", s->label);
-        snprintf(run[1], sizeof run[1], " %s", s->detail);
-        for (char* q = run[1]; *q; ++q)
-            if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
-        if (failed)
-            snprintf(run[2], sizeof run[2], "...FAILED");
-        else if (!active)
-            snprintf(run[2], sizeof run[2], "...OK");
-        else if (s->total)
-            snprintf(run[2], sizeof run[2], " %u / %u", s->value, s->total);
-        else
-            run[2][0] = 0;
-        size_t length[3], total = 0;
-        for (int r = 0; r < 3; ++r) total += length[r] = SDL_utf8strlen(run[r]);
+        size_t total = lengths[i][0] + lengths[i][1] + lengths[i][2];
         Uint64 age = now > s->shown_ms ? now - s->shown_ms : 0;
-        size_t typed = theme->line_in == GUI_LINE_TYPING && theme->typing_ms
-                           ? (size_t)SDL_min((Uint64)total, age / theme->typing_ms) : total;
         bool moving = theme->line_in == GUI_LINE_SLIDE || theme->line_in == GUI_LINE_FADE;
         float p = moving && theme->line_in_ms ? SDL_min(1.0f, (float)age / (float)theme->line_in_ms) : 1.0f;
         float x = cw - (theme->line_in == GUI_LINE_SLIDE ? 16.0f * (float)app->scale * (1 - p) * (1 - p) : 0);
         float y = ch * (float)(top + i - first);
         SDL_Color color[3] = {failed ? failure : last ? ink : soft, failed ? failure : last || active ? ink : soft,
                               failed ? failure : ink};
-        size_t left = typed;
+        size_t left = typed[i];
         for (int r = 0; r < 3; ++r) {
-            size_t shown = SDL_min(left, length[r]);
-            x = text_px(app, x, y, run[r], shown, color[r], p);
+            size_t shown = SDL_min(left, lengths[i][r]);
+            x = text_px(app, x, y, runs[i][r], shown, color[r], p);
             left -= shown;
         }
-        if (typed == total && active) x = text_px(app, x, y, dots(app), 3, ink, p);
+        if (typed[i] == total && active) x = text_px(app, x, y, dots(app), 3, ink, p);
         bool blink = !theme->blink_ms || (now / theme->blink_ms) % 2 == 0;
-        if (last && (active || typed < total) && blink) text_px(app, x, y, "_", 1, ink, p);
+        bool working = typing == i || (typing < 0 && active);
+        if (i == cursor && working && blink) text_px(app, x, y, "_", 1, ink, p);
     }
     if (theme->bar) {
         int percent = gui_steps_percent(&app->steps);
@@ -293,7 +318,7 @@ static void render_steps(App* app) {
          app->finished   ? "Press [ESC] to return to menu"
          : app->aborting ? "Aborting process tree..."
                          : "Press [ESC] to abort and return to menu",
-         soft);
+         app->aborting ? rgb(theme->warning) : soft);
 }
 /* the screen fading in from black, or the run fading out to it */
 static void overlay(App* app) {

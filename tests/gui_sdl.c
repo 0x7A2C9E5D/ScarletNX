@@ -574,6 +574,17 @@ int main(int argc, char** argv) {
     app.clock = shown + 3 * app.theme.typing_ms + 1;
     render(&app);
     colored_text_on(&app, 1, 4, "LAU_", li, lp);
+    /* sync: one line at a time, a done one three times faster; the second waits for the first */
+    app.theme.typing_sync = true;
+    Uint64 first_shown = app.steps.step[0].shown_ms, second_shown = app.steps.step[1].shown_ms;
+    app.steps.step[1].shown_ms = first_shown; /* both lines came at once */
+    app.clock = first_shown + app.theme.typing_ms + 1; /* three characters at a third of typing_ms each */
+    render(&app);
+    colored_text_on(&app, 1, 3, "REC", ls, lp); /* not the last line: soft, with the cursor typing it */
+    colored_text_on(&app, 4, 3, "_", li, lp);
+    colored_text_on(&app, 1, 4, "    ", li, lp);
+    app.theme.typing_sync = false;
+    app.steps.step[1].shown_ms = second_shown;
     /* the page's faint lines, one pixel row in four */
     app.theme = *gui_theme_builtin("yorha-loading");
     app.clock = later;
