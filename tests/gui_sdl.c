@@ -582,6 +582,13 @@ int main(int argc, char** argv) {
     /* typing: three characters in, the cursor after them */
     app.theme.fade_in_ms = app.theme.fade_out_ms = 0;
     app.theme.blink_ms = 0;
+    Uint64 launch_shown = app.steps.step[1].shown_ms;
+    app.steps.step[1].shown_ms = entered + 1; /* it came while the menu still showed: it types once the run is in */
+    app.clock = faded + 3 * app.theme.typing_ms + 1;
+    render(&app);
+    colored_text_on(&app, 1, 4, "LAU_", li, lp);
+    app.steps.step[1].shown_ms = launch_shown;
+    app.fade_ms = 0; /* in view from the start, for the lines below */
     app.clock = shown + 3 * app.theme.typing_ms + 1;
     render(&app);
     colored_text_on(&app, 1, 4, "LAU_", li, lp);
@@ -633,6 +640,12 @@ int main(int argc, char** argv) {
     render(&app);
     colored_text_on(&app, 3, 4, "Fun", ls, lp);
     colored_text_on(&app, 6, 4, "_         ", li, lp);
+    app.fade_ms = shown + 2000; /* or once the run is in, when it came before */
+    app.clock = shown + 2000 + 3 * app.theme.typing_ms + 1;
+    render(&app);
+    colored_text_on(&app, 3, 4, "Fun", ls, lp);
+    colored_text_on(&app, 6, 4, "_         ", li, lp);
+    app.fade_ms = 0;
     app.clock = later + 1200;
     render(&app);
     colored_text_on(&app, 16, 3, "..._", li, lp);
@@ -640,6 +653,7 @@ int main(int argc, char** argv) {
     app.steps = kept;
     /* the page's faint lines, one pixel row in four */
     app.theme = *gui_theme_builtin("yorha");
+    app.fade_ms = faded;
     app.clock = later;
     render(&app);
     float x = 8.0f * (float)app.scale * (float)(app.cols - 10), y = cell * 10;

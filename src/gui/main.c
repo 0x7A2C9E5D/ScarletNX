@@ -263,12 +263,13 @@ static void render_steps(App* app) {
     static const GuiStep* owner[ROWS];
     static bool is_note[ROWS];
     static Uint64 shown[ROWS];
+    Uint64 since = app->fade_ms; /* a line that came while the menu faded out comes in with the run */
     int rows = 0, last_step = -1;
     for (int i = 0; i < app->steps.count; ++i) {
         const GuiStep* s = &app->steps.step[i];
         owner[rows] = s;
         is_note[rows] = false;
-        shown[rows] = s->shown_ms;
+        shown[rows] = SDL_max(s->shown_ms, since);
         step_runs(s, runs[rows], lengths[rows]);
         last_step = rows++;
         if (!theme->detailed || (theme->collapse && s->state == GUI_STEP_DONE)) continue;
@@ -277,7 +278,7 @@ static void render_steps(App* app) {
         for (int k = 0; k < n; ++k, ++rows) {
             owner[rows] = s;
             is_note[rows] = true;
-            shown[rows] = notes[k]->shown_ms;
+            shown[rows] = SDL_max(notes[k]->shown_ms, since);
             snprintf(runs[rows][0], sizeof runs[rows][0], "%s", notes[k]->text);
             runs[rows][1][0] = runs[rows][2][0] = 0;
             lengths[rows][0] = SDL_utf8strlen(runs[rows][0]);
