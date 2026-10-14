@@ -210,11 +210,14 @@ static int stk_resolve(Ctx* c, u32 n, int fwd) {
     for (u32 i = 11; i < n; i++)
         if (IDX_OK(i) && is_leader(c, i)) nl++;
     StkA A = {c, n, fwd};
-    A.lid = malloc(sizeof(int) * (n + 1));
-    u32* ldr = malloc(sizeof(u32) * (nl + 1));
-    A.st = malloc(sizeof(Stk) * (nl + 1));
-    A.has = calloc(nl + 1, 1);
-    A.wl = malloc(sizeof(int) * (nl + 1));
+    /* one block, by alignment: the stacks, the 4-byte arrays, then the flags */
+    u8* block = calloc(1, (sizeof(Stk) + sizeof(u32) + sizeof(int) + 1) * (nl + 1) + sizeof(int) * (n + 1));
+    if (!block) return 0;
+    A.st = (Stk*)block;
+    u32* ldr = (u32*)(A.st + nl + 1);
+    A.wl = (int*)(ldr + nl + 1);
+    A.lid = A.wl + nl + 1;
+    A.has = (u8*)(A.lid + n + 1);
     int k = 0;
     for (u32 i = 11; i < n; i++)
         if (IDX_OK(i) && is_leader(c, i)) {
@@ -292,11 +295,7 @@ static int stk_resolve(Ctx* c, u32 n, int fwd) {
             if (id == O_EXIT && always) break;
         }
     }
-    free(A.lid);
-    free(ldr);
-    free(A.st);
-    free(A.has);
-    free(A.wl);
+    free(block);
     return ok;
 }
 

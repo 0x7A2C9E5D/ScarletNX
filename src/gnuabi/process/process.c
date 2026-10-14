@@ -80,13 +80,9 @@ int gnu_process_stack(GnuProcess* p, int argc, const char* const* argv, const ch
             if (++envc > 65536) return -GNU_E2BIG;
         }
     if (gnu_memory_map(&p->memory, stack_low, sp - stack_low, 3, 0)) return -GNU_ENOMEM;
-    uint64_t* arguments = calloc((size_t)argc, sizeof *arguments);
-    uint64_t* environment = calloc(envc ? envc : 1, sizeof *environment);
-    if (!arguments || !environment) {
-        free(arguments);
-        free(environment);
-        return -GNU_ENOMEM;
-    }
+    uint64_t* arguments = calloc((size_t)argc + envc, sizeof *arguments);
+    if (!arguments) return -GNU_ENOMEM;
+    uint64_t* environment = arguments + argc;
     int result = 0;
     for (size_t i = envc; i > 0; i--) {
         if ((result = push(p, &sp, env[i - 1], strlen(env[i - 1]) + 1))) goto done;
@@ -153,8 +149,7 @@ int gnu_process_stack(GnuProcess* p, int argc, const char* const* argv, const ch
         result = gnu_memory_protect(&p->memory, stack_low, UINT64_C(0x800000), p->elf.stack_permissions);
     }
 done:
-    free(arguments);
-    free(environment);
+    free(arguments); /* and the environment after them */
     return result;
 }
 

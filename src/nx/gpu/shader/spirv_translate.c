@@ -2050,10 +2050,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         dispatch_merge = spv_emit_id(&c->emit);
         loop_continue = spv_emit_id(&c->emit);
         loop_merge = spv_emit_id(&c->emit);
-        case_labels = calloc(n, sizeof *case_labels);
-        case_literals = calloc(n, sizeof *case_literals);
-        block_start = calloc(n, 1);
-        if (!case_labels || !case_literals || !block_start) abort();
+        case_labels = calloc(n, sizeof *case_labels + sizeof *case_literals + 1);
+        if (!case_labels) abort();
+        case_literals = case_labels + n;
+        block_start = (u8*)(case_literals + n);
         block_start[11] = 1;
         int unknown_brx = 0;
         for (u32 i = 11; i < n; i++) {
@@ -4313,9 +4313,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     u32* result = spv_emit_finish(&c->emit, word_count);
     spv_emit_destroy(&c->emit);
     free(c);
-    free(case_labels);
-    free(case_literals);
-    free(block_start);
+    free(case_labels); /* the literals and block starts too */
     free(pop_targets);
     free(gb_at);
     ShaderInfo next = {0};
