@@ -81,6 +81,17 @@ static void finish(App* app, int status) {
     assert(app->has_output && app->log_top == 4);
     red_text(app, 3, "Press [ESC] to return to menu");
     if (status) red_text(app, 1, expected);
+    /* a theme can make that line a prompt: framed and placed, the done and the failed one apart */
+    GuiPromptLine line = status ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE;
+    app->theme.prompt.lines[line] = true;
+    app->theme.prompt.blink = false;
+    render(app);
+    colored_text_at(app, (app->cols - 33) / 2, 3, "[ Press [ESC] to return to menu ]", red);
+    app->theme.prompt.lines[line] = false;
+    app->theme.prompt.lines[status ? GUI_PROMPT_DONE : GUI_PROMPT_FAILED] = true;
+    render(app);
+    red_text(app, 3, "Press [ESC] to return to menu");
+    app->theme.prompt = gui_theme_builtin(app->theme.id)->prompt;
     for (int i = 0; i < 3; ++i) pump(app);
     mouse(app, 2, 4, true); /* A completed process still requires ESC acknowledgement. */
     key(app, SDLK_DOWN);
@@ -178,6 +189,32 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RETURN);
     assert(app.menu.view == GUI_LOAD_KEYS);
     render(&app);
+    /* the drop line waits on the user: framed, in the middle of the screen, blinking at blink_ms */
+    {
+        const char* waiting = "[ Drop prod.keys here ]";
+        int middle = SDL_max(app.rows / 2, 10), width = (int)strlen(waiting);
+        SDL_Color yellow = rgb(app.theme.focus);
+        app.clock = 1000 * app.theme.blink_ms * 2;
+        render(&app);
+        colored_text_at(&app, (app.cols - width) / 2, middle, waiting, yellow);
+        app.clock += app.theme.blink_ms;
+        render(&app);
+        colored_text_at(&app, (app.cols - width) / 2, middle, "                       ", yellow);
+        app.theme.prompt.blink = false; /* steady */
+        render(&app);
+        colored_text_at(&app, (app.cols - width) / 2, middle, waiting, yellow);
+        app.theme.prompt.align = GUI_ALIGN_RIGHT;
+        render(&app);
+        colored_text_at(&app, app.cols - 1 - width, middle, waiting, yellow);
+        app.theme.prompt.align = GUI_ALIGN_LEFT;
+        render(&app);
+        colored_text_at(&app, 1, middle, waiting, yellow);
+        app.theme.prompt.lines[GUI_PROMPT_KEYS] = false; /* plain */
+        render(&app);
+        colored_text_at(&app, 1, middle, "Drop prod.keys here    ", yellow);
+        app.theme.prompt = gui_theme_builtin(app.theme.id)->prompt;
+        app.clock = 0;
+    }
     drop(&app, input, false); /* A game is not a key file and must not launch. */
     assert(app.menu.view == GUI_LOAD_KEYS && !app.menu.running && !snx_is_file(app.keys_path));
     drop(&app, "file://remote/prod.keys", true);
@@ -384,6 +421,13 @@ int main(int argc, char** argv) {
     Uint64 started = SDL_GetTicks();
     key(&app, SDLK_ESCAPE);
     assert(app.aborting && SDL_GetTicks() - started < 1000);
+    render(&app);
+    red_text(&app, 3, "Aborting process tree...");
+    app.theme.prompt.lines[GUI_PROMPT_ABORTING] = true;
+    app.theme.prompt.blink = false;
+    render(&app);
+    colored_text_at(&app, (app.cols - 28) / 2, 3, "[ Aborting process tree... ]", red);
+    app.theme.prompt = gui_theme_builtin(app.theme.id)->prompt;
     key(&app, SDLK_ESCAPE); /* Repeated ESC while reaping is harmless. */
     while (app.menu.running && SDL_GetTicks() - started < 2000) {
         pump(&app);
@@ -575,6 +619,26 @@ int main(int argc, char** argv) {
     colored_text_on(&app, 24, 3, "...OK", li, lp);
     colored_text_on(&app, 1, 4, "LAUNCH: OPTION FLAGS...OK", li, lp);
     colored_text_on(&app, 1, app.rows - 1, "Press [ESC] to return to menu", ls, lp);
+    /* the run's last line as a prompt, when the theme says so: done, failed and aborting each on its own switch */
+    app.theme.prompt.blink = false;
+    app.theme.prompt.lines[GUI_PROMPT_DONE] = true;
+    render(&app);
+    colored_text_on(&app, (app.cols - 33) / 2, app.rows - 1, "[ Press [ESC] to return to menu ]", ls, lp);
+    app.abnormal_exit = true;
+    render(&app);
+    colored_text_on(&app, 1, app.rows - 1, "Press [ESC] to return to menu    ", ls, lp);
+    app.theme.prompt.lines[GUI_PROMPT_FAILED] = true;
+    app.theme.prompt.align = GUI_ALIGN_RIGHT;
+    render(&app);
+    colored_text_on(&app, app.cols - 34, app.rows - 1, "[ Press [ESC] to return to menu ]", ls, lp);
+    app.abnormal_exit = app.finished = false;
+    app.menu.running = app.aborting = true;
+    app.theme.prompt.lines[GUI_PROMPT_ABORTING] = true;
+    render(&app);
+    colored_text_on(&app, app.cols - 29, app.rows - 1, "[ Aborting process tree... ]", rgb(run->warning), lp);
+    app.menu.running = app.aborting = false;
+    app.finished = true;
+    app.theme.prompt = gui_theme_builtin("yorha")->prompt;
     float cell = 16.0f * (float)app.scale;
     colored_text_on(&app, app.cols - 6, app.rows - 3, "    ", li, lp); /* YoRHa has no bar unless asked */
     colored_text_on(&app, 1, app.rows - 2, "            ", li, lp);

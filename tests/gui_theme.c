@@ -30,6 +30,12 @@ int main(void) {
     assert(loading->run == GUI_RUN_STEPS && loading->ring == GUI_RING_RIGHT && loading->texture && !loading->bar);
     assert(loading->line_in == GUI_LINE_TYPING && loading->typing_ms == 25 && loading->fade_out_ms == 500);
     assert(loading->detailed && !loading->collapse && !def->detailed && !def->collapse);
+    for (const GuiTheme* b = def; b; b = b == def ? loading : NULL) {
+        const GuiPrompt* p = &b->prompt;
+        assert(p->align == GUI_ALIGN_CENTER && !strcmp(p->open, "[ ") && !strcmp(p->close, " ]") && p->blink);
+        assert(p->lines[GUI_PROMPT_KEYS] && !p->lines[GUI_PROMPT_DONE] && !p->lines[GUI_PROMPT_FAILED] &&
+               !p->lines[GUI_PROMPT_ABORTING]);
+    }
     assert(!strcmp(loading->title[GUI_SCREEN_LOADING], "BOOTING"));
     assert(def->head == GUI_STYLE_PLAIN && !def->focus_bar && !strcmp(def->marker, "- ") && !def->title[0][0]);
     assert(yorha->head == GUI_STYLE_BAR && yorha->focus_bar && yorha->title[GUI_SCREEN_COMPILING][0]);
@@ -83,6 +89,18 @@ int main(void) {
     assert(same(theme.page, def->page) && theme.format == GUI_THEME_FORMAT);
     parse(&theme, "[header]\nring_side = nowhere\n[run]\nring = right-near-text\n[transitions]\ntyping = later\n");
     assert(theme.ring == GUI_RING_NEAR_TEXT && !theme.typing_sync);
+
+    /* the lines that wait on the user: each one's switch, and their look; what cannot be read keeps the base's */
+    parse(&theme, "[prompt]\nalign = right\nopen = \"<< \"\nclose = \"\"\nblink = false\nfailed = true\n"
+                  "aborting = true\nkeys = maybe\ndone = false\nnowhere = true\n");
+    assert(theme.prompt.align == GUI_ALIGN_RIGHT && !strcmp(theme.prompt.open, "<< ") && !theme.prompt.close[0]);
+    assert(!theme.prompt.blink && theme.prompt.lines[GUI_PROMPT_FAILED] && theme.prompt.lines[GUI_PROMPT_ABORTING]);
+    assert(theme.prompt.lines[GUI_PROMPT_KEYS] && !theme.prompt.lines[GUI_PROMPT_DONE]);
+    parse(&theme, "[prompt]\nalign = middle\nopen = \"[[[[[[[[[[[[[[[[[[[[\"\nkeys = false\n");
+    assert(theme.prompt.align == GUI_ALIGN_CENTER && !strcmp(theme.prompt.open, "[ ") &&
+           !theme.prompt.lines[GUI_PROMPT_KEYS]);
+    parse(&theme, "[prompt]\nalign = left\n");
+    assert(theme.prompt.align == GUI_ALIGN_LEFT);
 
     /* a value longer than its field keeps the base's; an unknown base leaves the default */
     char longer[200] = "[theme]\nbase = elsewhere\n[body]\nmarker = ";
@@ -139,6 +157,9 @@ int main(void) {
         assert(f.fade_in_ms == b->fade_in_ms && f.fade_out_ms == b->fade_out_ms && f.line_in_ms == b->line_in_ms);
         assert(f.typing_ms == b->typing_ms && f.blink_ms == b->blink_ms && f.typing_sync == b->typing_sync);
         assert(f.detailed == b->detailed && f.collapse == b->collapse);
+        assert(f.prompt.align == b->prompt.align && !strcmp(f.prompt.open, b->prompt.open));
+        assert(!strcmp(f.prompt.close, b->prompt.close) && f.prompt.blink == b->prompt.blink);
+        for (int l = 0; l < GUI_PROMPT_COUNT; ++l) assert(f.prompt.lines[l] == b->prompt.lines[l]);
         assert(f.format == GUI_THEME_FORMAT && b->format == GUI_THEME_FORMAT && !strcmp(f.author, b->author));
         assert(same(f.warning, b->warning) && same(f.run_colors.page, b->run_colors.page));
         assert(same(f.run_colors.ink, b->run_colors.ink) && same(f.run_colors.soft, b->run_colors.soft));

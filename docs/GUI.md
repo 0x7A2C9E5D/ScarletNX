@@ -26,8 +26,10 @@ English text only. No font files or localization packages are needed.
   are supported. Ctrl+V also accepts a clipboard path while waiting. ESC returns to
   the two options, and another ESC returns to the main menu.
 - **Setup device keys**, immediately after the two load entries, prompts you to
-  drag and drop `prod.keys` (or paste its path with Ctrl+V). It installs the file
-  to `~/.switch/prod.keys`, or `%USERPROFILE%\.switch\prod.keys` on Windows,
+  drag and drop `prod.keys` (or paste its path with Ctrl+V); a blinking
+  **[ Drop prod.keys here ]** waits in the middle of the screen (the theme's
+  `[prompt]`). It installs the file to `~/.switch/prod.keys`, or
+  `%USERPROFILE%\.switch\prod.keys` on Windows,
   creating the folder if needed. Existing keys trigger the bright-red warning
   **Keys already setup. This will overwrite the previous ones**. A successful
   drop replaces them and returns to the menu; ESC cancels without changing them.
@@ -182,6 +184,16 @@ ring = right
 ; away, a failed one's kept
 detailed = true
 collapse = false
+[prompt]
+; a line that waits on the user, when its key is true: framed, left | center | right on its
+; row, blinking at blink_ms. keys: the keys screen's drop line; done, failed: the ESC line
+; after a run; aborting: a run being aborted
+align = center
+open = "[ "
+close = " ]"
+blink = true
+keys = true
+failed = true
 [transitions]
 ; milliseconds, 0 to 10000; 0 turns the thing off. fade_out_ms: the menu as a run starts,
 ; and a run ESC leaves; fade_in_ms: what comes after

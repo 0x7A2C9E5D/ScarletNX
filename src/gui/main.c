@@ -78,6 +78,21 @@ static void text(App* app, int x, int y, const char* value, SDL_Color color) {
         glyph(app, x++, y, gui_glyph(codepoint));
     }
 }
+/* a line that waits on the user: plain at x, or framed, placed and blinking as the theme's prompt says */
+static void prompt(App* app, GuiPromptLine line, int x, int y, const char* value, SDL_Color color) {
+    const GuiPrompt* p = &app->theme.prompt;
+    if (!p->lines[line]) {
+        text(app, x, y, value, color);
+        return;
+    }
+    if (p->blink && app->theme.blink_ms && (now_ms(app) / app->theme.blink_ms) % 2) return;
+    char framed[160];
+    snprintf(framed, sizeof framed, "%s%s%s", p->open, value, p->close);
+    int width = (int)SDL_utf8strlen(framed);
+    if (p->align == GUI_ALIGN_CENTER) x = (app->cols - width) / 2;
+    if (p->align == GUI_ALIGN_RIGHT) x = app->cols - 1 - width;
+    text(app, SDL_max(0, x), y, framed, color);
+}
 /* rows of the whole width, as a band behind text */
 static void band(App* app, int row, int rows, GuiRgb c) {
     int width, height;
@@ -349,11 +364,13 @@ static void render_steps(App* app) {
         text(app, app->cols - 6, app->rows - 3, number, ink);
         text(app, 1, app->rows - 2, name, ink);
     }
-    text(app, 1, app->rows - 1,
-         app->finished   ? "Press [ESC] to return to menu"
-         : app->aborting ? "Aborting process tree..."
-                         : "Press [ESC] to abort and return to menu",
-         app->aborting ? rgb(colors->warning) : soft);
+    if (app->finished)
+        prompt(app, app->abnormal_exit ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE, 1, app->rows - 1,
+               "Press [ESC] to return to menu", soft);
+    else if (app->aborting)
+        prompt(app, GUI_PROMPT_ABORTING, 1, app->rows - 1, "Aborting process tree...", rgb(colors->warning));
+    else
+        text(app, 1, app->rows - 1, "Press [ESC] to abort and return to menu", soft);
 }
 /* the screen fading in from black, or the menu or the run fading out to it */
 static void overlay(App* app) {
@@ -425,6 +442,7 @@ static void render(App* app) {
             text(app, 1, 4, "Keys already setup. This will overwrite the previous ones", failure);
         text(app, 1, 6, app->message, focus);
         entry(app, 1, 8, "Back [ESC]", false, app->browser.selected == 0);
+        prompt(app, GUI_PROMPT_KEYS, 1, SDL_max(app->rows / 2, 10), "Drop prod.keys here", focus);
     } else if (idle) {
         if (head) {
             text(app, 1, 1, "Arrows/mouse: move. Space/Enter/click: select.", ink);
@@ -457,10 +475,12 @@ static void render(App* app) {
              app->abnormal_exit ? failure : app->finished ? focus : active);
         text(app, 1, 2, app->file ? app->file : "", ink);
         if (app->finished)
-            text(app, 1, 3, "Press [ESC] to return to menu", failure);
+            prompt(app, app->abnormal_exit ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE, 1, 3, "Press [ESC] to return to menu",
+                   failure);
+        else if (app->aborting)
+            prompt(app, GUI_PROMPT_ABORTING, 1, 3, "Aborting process tree...", failure);
         else
-            text(app, 1, 3, app->aborting ? "Aborting process tree..." : "Press [ESC] to abort and return to menu",
-                 failure);
+            text(app, 1, 3, "Press [ESC] to abort and return to menu", failure);
     }
     if (app->has_output && app->menu.view != GUI_LOAD_GAMES && app->menu.view != GUI_LOAD_KEYS && !entering(app)) {
         SDL_SetTextureColorMod(app->font, theme->ink.r, theme->ink.g, theme->ink.b);

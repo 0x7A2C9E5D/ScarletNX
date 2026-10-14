@@ -14,6 +14,22 @@ typedef enum { GUI_STYLE_PLAIN, GUI_STYLE_BAR, GUI_STYLE_NONE } GuiStyle;
 typedef enum { GUI_RUN_CONSOLE, GUI_RUN_STEPS } GuiRunLayout;
 typedef enum { GUI_LINE_NONE, GUI_LINE_TYPING, GUI_LINE_SLIDE, GUI_LINE_FADE } GuiLineIn;
 typedef enum { GUI_RING_NONE, GUI_RING_LEFT, GUI_RING_RIGHT, GUI_RING_NEAR_TEXT } GuiRing;
+typedef enum { GUI_ALIGN_LEFT, GUI_ALIGN_CENTER, GUI_ALIGN_RIGHT } GuiAlign;
+/* the lines that wait on the user: the keys screen's drop line, the ESC line after a run, a run being aborted */
+typedef enum {
+    GUI_PROMPT_KEYS,
+    GUI_PROMPT_DONE,
+    GUI_PROMPT_FAILED,
+    GUI_PROMPT_ABORTING,
+    GUI_PROMPT_COUNT
+} GuiPromptLine;
+/* how such a line is drawn when lines[] says so: framed, placed on its row, blinking at blink_ms; else plain */
+typedef struct {
+    GuiAlign align;
+    char open[16], close[16];
+    bool blink;
+    bool lines[GUI_PROMPT_COUNT];
+} GuiPrompt;
 /* the theme.ini format this GUI writes and reads; a newer file's keys this one knows still apply */
 #define GUI_THEME_FORMAT 1
 typedef enum {
@@ -43,6 +59,7 @@ typedef struct {
     GuiRing ring;
     GuiLineIn line_in;
     bool typing_sync; /* one line typed at a time, those already done three times faster */
+    GuiPrompt prompt;
     uint32_t fade_in_ms, fade_out_ms, line_in_ms, typing_ms, blink_ms;
 } GuiTheme;
 typedef struct {

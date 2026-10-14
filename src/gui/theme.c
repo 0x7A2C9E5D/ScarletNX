@@ -30,6 +30,11 @@ static const GuiTheme builtins[] = {
                        .warning = {255, 170, 0}},
         .typing_ms = 25,
         .blink_ms = 500,
+        .prompt = {.align = GUI_ALIGN_CENTER,
+                   .open = "[ ",
+                   .close = " ]",
+                   .blink = true,
+                   .lines = {[GUI_PROMPT_KEYS] = true}},
     },
     {
         .id = "yorha",
@@ -66,6 +71,11 @@ static const GuiTheme builtins[] = {
         .line_in_ms = 220,
         .typing_ms = 25,
         .blink_ms = 500,
+        .prompt = {.align = GUI_ALIGN_CENTER,
+                   .open = "[ ",
+                   .close = " ]",
+                   .blink = true,
+                   .lines = {[GUI_PROMPT_KEYS] = true}},
     },
 };
 static const char* const screens[GUI_SCREEN_COUNT] = {"menu", "games", "keys", "compiling", "loading"};
@@ -228,6 +238,20 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
         static const GuiRing as[] = {GUI_RING_RIGHT, GUI_RING_LEFT, GUI_RING_NEAR_TEXT};
         int n;
         if (word(&n, value, sides, 3)) t->ring = as[n];
+    } else if (!strcmp(section, "prompt")) {
+        static const char* const aligns[] = {"left", "center", "right"};
+        static const char* const lines[GUI_PROMPT_COUNT] = {"keys", "done", "failed", "aborting"};
+        int n;
+        if (!strcmp(key, "align") && word(&n, value, aligns, 3))
+            t->prompt.align = (GuiAlign)n;
+        else if (!strcmp(key, "open"))
+            copy(t->prompt.open, sizeof t->prompt.open, value);
+        else if (!strcmp(key, "close"))
+            copy(t->prompt.close, sizeof t->prompt.close, value);
+        else if (!strcmp(key, "blink"))
+            flag(&t->prompt.blink, value);
+        else if (word(&n, key, lines, GUI_PROMPT_COUNT))
+            flag(&t->prompt.lines[n], value);
     } else if (!strcmp(section, "loading") && !strcmp(key, "title")) {
         copy(t->title[GUI_SCREEN_LOADING], sizeof t->title[GUI_SCREEN_LOADING], value); /* ErET's boot word */
     }
