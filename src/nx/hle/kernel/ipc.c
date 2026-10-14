@@ -15,7 +15,7 @@ SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t d
     if (ds) o->data = calloc(1, ds);
     return o;
 }
-static void svcobj_ref(SvcObj* o) { __atomic_add_fetch(&o->refs, 1, __ATOMIC_SEQ_CST); }
+void svcobj_ref(SvcObj* o) { __atomic_add_fetch(&o->refs, 1, __ATOMIC_SEQ_CST); }
 void svcobj_unref(SvcObj* o) {
     if (!o) return;
     if (__atomic_sub_fetch(&o->refs, 1, __ATOMIC_SEQ_CST) == 0) {
@@ -100,6 +100,11 @@ int stub_ok(SvcObj* o, IpcCtx* c) {
     if (ipc_warn_once(o->name, c->cmd)) LOG("  [stub] %s cmd %u -> ok\n", o->name, c->cmd);
     return 0;
 }
+int quiet_ok(SvcObj* o, IpcCtx* c) {
+    (void)o;
+    (void)c;
+    return 0;
+}
 void ipc_out_overflow(IpcCtx* c) {
     WARN_LIMIT(1, "IPC: the reply to cmd %u is larger than the message buffer, cut short\n", c->cmd);
 }
@@ -123,64 +128,6 @@ SvcObj* svc_open(const char* name) {
     return NULL;
 }
 
-/* ============================================================ buffers */
-static int buf_a(IpcCtx* c, int i, u64* a, u64* s) {
-    if (i >= c->na) {
-        *a = 0;
-        *s = 0;
-        return 0;
-    }
-    *a = c->a[i].addr;
-    *s = c->a[i].size;
-    return 1;
-}
-static int buf_b(IpcCtx* c, int i, u64* a, u64* s) {
-    if (i >= c->nb) {
-        *a = 0;
-        *s = 0;
-        return 0;
-    }
-    *a = c->b[i].addr;
-    *s = c->b[i].size;
-    return 1;
-}
-int buf_xs(IpcCtx* c, int i, u64* a, u64* s) {
-    if (i >= c->nx) {
-        *a = 0;
-        *s = 0;
-        return 0;
-    }
-    *a = c->x[i].addr;
-    *s = c->x[i].size;
-    return 1;
-}
-static int buf_cs(IpcCtx* c, int i, u64* a, u64* s) {
-    if (i >= c->nc) {
-        *a = 0;
-        *s = 0;
-        return 0;
-    }
-    *a = c->c[i].addr;
-    *s = c->c[i].size;
-    return 1;
-}
-int buf_in(IpcCtx* c, int i, u64* a, u64* s) {
-    if (i < c->na && c->a[i].addr && c->a[i].size) return buf_a(c, i, a, s);
-    if (i < c->nx && c->x[i].addr) return buf_xs(c, i, a, s);
-    if (i < c->na) return buf_a(c, i, a, s);
-    *a = 0;
-    *s = 0;
-    return 0;
-}
-int buf_out(IpcCtx* c, int i, u64* a, u64* s) {
-    if (i < c->nb && c->b[i].addr && c->b[i].size) return buf_b(c, i, a, s);
-    if (i < c->nc && c->c[i].addr) return buf_cs(c, i, a, s);
-    if (i < c->nb && !(c->nc == 1 && i > 0 && c->c[0].addr)) return buf_b(c, i, a, s);
-    *a = 0;
-    *s = 0;
-    return 0;
-}
-
 void out_copy_h(IpcCtx* c, u32 h) {
     if (c->nout_copy < 8) c->out_copy[c->nout_copy++] = h;
 }
@@ -190,6 +137,11 @@ void out_move_h(IpcCtx* c, u32 h) {
 void out_obj(IpcCtx* c, SvcObj* o) {
     if (c->nout_objs < 8) c->out_objs[c->nout_objs++] = o;
 }
+int ipc_unknown(SvcObj* o, IpcCtx* c) {
+    if (ipc_warn_once(o->name, c->cmd)) WARN("  [unknown] %s cmd %u -> UnknownCommandId\n", o->name, c->cmd);
+    return RC(10, 221); /* sf::cmif UnknownCommandId */
+}
+void ipc_close(u32 h) { h_close(h); }
 /* a failed request returns no handles or objects: close and drop what the service put in the reply */
 static void drop_outputs(IpcCtx* c) {
     for (int i = 0; i < c->nout_copy; i++) h_close(c->out_copy[i]);
@@ -269,12 +221,15 @@ static void parse(IpcCtx* c) {
         c->c[i].addr = a | ((u64)(b & 0xFFFF) << 32);
         c->c[i].size = b >> 16;
     }
+    /* the data words end the request: what a command reads past them (a client that sent less than the command
+       takes) reads as zeros (ipc_in), not as what an earlier request left in the message */
+    u8* end = p + ndata * 4 < m + 0x100 ? p + ndata * 4 : m + 0x100;
     /* TIPC (newer SDKs): type is 16+cmd, payload right after the header, no SFCI */
     if (c->type >= 16) {
         c->tipc = 1;
         c->cmd = c->type - 16;
         c->raw = p;
-        c->raw_size = 0x100;
+        c->raw_size = (u32)(end - p);
         return;
     }
     /* CMIF */
@@ -294,7 +249,7 @@ static void parse(IpcCtx* c) {
     memcpy(&c->cmd, d + 8, 4);
     memcpy(&c->token, d + 12, 4);
     c->raw = d + 16;
-    c->raw_size = 0x100;
+    c->raw_size = end > c->raw ? (u32)(end - c->raw) : 0;
 }
 
 /* ============================================================ reply */
@@ -325,16 +280,18 @@ static void respond(IpcCtx* c) {
             memcpy(p, &c->out_copy[i], 4);
             p += 4;
         }
+        /* the out objects' sessions come first among the move handles, as sf writes them: a client that gets both
+           reads the object's handle at index 0. A missing object is handle 0 */
+        if (!dom)
+            for (int i = 0; i < c->nout_objs; i++) {
+                u32 h = c->out_objs[i] ? session_new(c->out_objs[i]) : 0;
+                memcpy(p, &h, 4);
+                p += 4;
+            }
         for (int i = 0; i < c->nout_move; i++) {
             memcpy(p, &c->out_move[i], 4);
             p += 4;
         }
-        if (!dom)
-            for (int i = 0; i < c->nout_objs; i++) {
-                u32 h = session_new(c->out_objs[i]);
-                memcpy(p, &h, 4);
-                p += 4;
-            }
     }
     if (c->tipc) { /* TIPC reply: result + payload after the header */
         w1 = (1 + payload / 4) | (special ? 0x80000000u : 0);
@@ -359,7 +316,7 @@ static void respond(IpcCtx* c) {
     if (dom) {
         u8* o = d + 16 + payload;
         for (int i = 0; i < c->nout_objs; i++) {
-            u32 id = domain_add(c->sess->domain, c->out_objs[i]);
+            u32 id = c->out_objs[i] ? domain_add(c->sess->domain, c->out_objs[i]) : 0;
             memcpy(o + i * 4, &id, 4);
         }
     }
@@ -373,6 +330,10 @@ static SvcObj* domain_get(KSession* s, u32 id) {
     if (o) svcobj_ref(o);
     pm_unlock(&d->lk);
     return o;
+}
+SvcObj* ipc_in_obj(IpcCtx* c, int i) {
+    if (i >= c->nin_objs || !c->sess || !c->sess->domain) return NULL;
+    return domain_get(c->sess, c->in_objs[i]);
 }
 
 /* the control requests (type 5 and 7) */

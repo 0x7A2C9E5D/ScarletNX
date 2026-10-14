@@ -118,9 +118,44 @@ target_link_libraries(snx-test-network-icmp PRIVATE scarletnx-net)
 add_test(NAME network_icmp COMMAND snx-test-network-icmp)
 set_tests_properties(network_icmp PROPERTIES TIMEOUT 30)
 
+# swipc (tools/swipc): the dispatcher generated from tests/swipc/test.swipc, driven with hand-made requests; the same
+# output compiled as C90 against a stand-in for ipc.h (LP64 hosts, where its u64 is unsigned long); and definitions
+# the generator has to refuse, each with its message
+include("${PROJECT_SOURCE_DIR}/cmake/swipc.cmake")
+add_executable(snx-test-swipc-dispatch swipc_dispatch.c)
+snx_test_target(snx-test-swipc-dispatch 23)
+snx_swipc(snx-test-swipc-dispatch ROOT "${PROJECT_SOURCE_DIR}" FILES tests/swipc/test.swipc)
+add_test(NAME swipc_dispatch COMMAND snx-test-swipc-dispatch)
+if(NOT WIN32)
+    add_library(snx-test-swipc-c90 OBJECT
+                "${CMAKE_CURRENT_BINARY_DIR}/snx-test-swipc-dispatch-swipc/tests/swipc/test.swipc.c")
+    set_target_properties(snx-test-swipc-c90 PROPERTIES C_STANDARD 90 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    target_compile_options(snx-test-swipc-c90 PRIVATE -pedantic-errors -Wall -Wextra -Werror)
+    target_include_directories(snx-test-swipc-c90 BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/swipc/c90"
+                               "${CMAKE_CURRENT_BINARY_DIR}/snx-test-swipc-dispatch-swipc")
+endif()
+foreach(bad duplicate_command "command 0 is defined twice" exchange_buffer "exchange \\(W\\) buffers"
+            stub_object "a @stub answers zeros" two_pids "one pid or aruid at most"
+            unknown_interface "object<test::INope>: no such interface" output_too_big "the reply takes 260 bytes"
+            type_before_definition "unknown type test::Later" buffer_two_modes "exactly one of MapAlias"
+            stub_handle "a @stub answers zeros" zero_alignment "bad alignment 0" unnamed_argument "has a name"
+            struct_in_place "give it a name with type" array_of_arrays "give the element a name")
+    if(NOT DEFINED bad_name)
+        set(bad_name "${bad}")
+        continue()
+    endif()
+    add_test(NAME swipc_refuses_${bad_name} COMMAND snx-swipc --root "${CMAKE_CURRENT_SOURCE_DIR}/swipc/bad"
+             --out "${CMAKE_CURRENT_BINARY_DIR}" ${bad_name}.swipc)
+    set_tests_properties(swipc_refuses_${bad_name} PROPERTIES PASS_REGULAR_EXPRESSION "${bad_name}.swipc:[0-9]+: error: .*${bad}")
+    unset(bad_name)
+endforeach()
+
 # This IPC fixture stubs the kernel and needs no NX graphics/media dependencies.
 add_executable(snx-test-bsd-service bsd_service.c)
 snx_test_target(snx-test-bsd-service 23)
+target_compile_options(snx-test-bsd-service PRIVATE -Wno-unused-parameter)
+snx_swipc(snx-test-bsd-service ROOT "${PROJECT_SOURCE_DIR}/src/nx" FILES hle/services/types.swipc
+          hle/services/network/bsd.swipc)
 target_link_libraries(snx-test-bsd-service PRIVATE scarletnx-net)
 add_test(NAME bsd_service COMMAND snx-test-bsd-service)
 set_tests_properties(bsd_service PROPERTIES TIMEOUT 60)
@@ -186,6 +221,9 @@ if(NOT WIN32)
         "${PROJECT_SOURCE_DIR}/src/common/utilities/sha256.c"
         "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu_helpers.c")
     snx_test_target(snx-test-ldr-service 11)
+    target_compile_options(snx-test-ldr-service PRIVATE -Wno-unused-parameter)
+    snx_swipc(snx-test-ldr-service ROOT "${PROJECT_SOURCE_DIR}/src/nx" FILES hle/services/types.swipc
+              hle/services/ldr.swipc)
     target_include_directories(snx-test-ldr-service PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_compile_definitions(snx-test-ldr-service PRIVATE SNX_RO_INTERP_TEST)
     target_link_libraries(snx-test-ldr-service PRIVATE m)
@@ -278,6 +316,9 @@ add_test(NAME astc_decode COMMAND snx-test-astc)
 
 add_executable(snx-test-audio-out audio_out.c)
 snx_test_target(snx-test-audio-out 11)
+# a service's handlers take every argument of their command, used or not
+target_compile_options(snx-test-audio-out PRIVATE -Wno-unused-parameter)
+snx_swipc(snx-test-audio-out ROOT "${PROJECT_SOURCE_DIR}/src/nx" FILES hle/services/types.swipc hle/services/audio.swipc)
 # Isolate audout in this fixture without FFmpeg, also when testing a tools-only build.
 # Production NX targets always link FFmpeg and never define SNX_NO_H264.
 target_compile_definitions(snx-test-audio-out PRIVATE SNX_NO_H264)
@@ -336,6 +377,8 @@ foreach(suite tree service)
     add_test(NAME filesystem_${suite}
         COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-${suite}>)
 endforeach()
+snx_swipc(snx-test-fs-service ROOT "${PROJECT_SOURCE_DIR}/src/nx" FILES hle/services/types.swipc
+          hle/filesystem/fs.swipc)
 add_test(NAME filesystem_raw
     COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> raw)
 

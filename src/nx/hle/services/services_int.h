@@ -25,8 +25,6 @@ extern int g_hle_docked, g_hle_lang;
 
 /* sm.c */
 SvcObj* new_sm(void);
-int quiet_ok(SvcObj* o, IpcCtx* c);
-SvcObj* quiet(const char* name);
 
 /* am.c */
 extern u64 g_user_id[2];
@@ -82,8 +80,8 @@ SvcObj* new_btmu(void);
 SvcObj* new_audin(void);
 
 /* audren.c */
-int audren_update(SvcObj* o, IpcCtx* c);
-void audren_open(SvcObj* o, const u8* params); /* OpenAudioRenderer's parameters into the renderer's state */
-void audren_tick(void);                        /* the audio clock's frame of every started renderer */
+int audren_update(SvcObj* o, IpcBuf in, IpcBuf out); /* RequestUpdate's input and output buffers */
+void audren_open(SvcObj* o, const u8* params);       /* OpenAudioRenderer's parameters into the renderer's state */
+void audren_tick(void);                              /* the audio clock's frame of every started renderer */
 
 #endif

@@ -67,15 +67,12 @@ void audren_open(SvcObj* o, const u8* params) {
         h->st->frame, h->st->buffers, h->st->nvoices, h->st->neffects, h->st->nsinks);
 }
 
-int audren_update(SvcObj* o, IpcCtx* c) {
-    u64 ia, is, oa, os;
-    buf_in(c, 0, &ia, &is);
-    buf_out(c, 0, &oa, &os);
-    if (!ia || !oa || is < 0x40) return RC(153, 41); /* InvalidUpdateInfo */
+int audren_update(SvcObj* o, IpcBuf in, IpcBuf out) {
+    if (!in.addr || !out.addr || in.size < 0x40) return RC(153, 41); /* InvalidUpdateInfo */
     ARHost* h = (ARHost*)(size_t)o->u[4];
     if (!h) return RC(153, 2);
     pm_lock(&h->lk);
-    int rc = audren_state_update(h->st, GP(ia), is, GP(oa), os);
+    int rc = audren_state_update(h->st, GP(in.addr), in.size, GP(out.addr), out.size);
     pm_unlock(&h->lk);
     if (rc == -41) return RC(153, 41);
     if (rc == -4) return RC(153, 4);

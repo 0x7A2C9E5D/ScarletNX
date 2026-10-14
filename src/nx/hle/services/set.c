@@ -4,6 +4,7 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* set and set:sys: system settings */
 #include "hle/services/services_int.h"
+#include "hle/services/set.swipc.h"
 /* ================================================================ set */
 /* the LanguageCode list in index order (nn::settings::Language), used by am's GetDesiredLanguage too */
 static const char* const g_lang_codes[] = {"ja",    "en-US", "fr",     "de",      "it",      "es",
@@ -16,89 +17,88 @@ static u64 lang_code(int i) {
     return v;
 }
 u64 set_language_code(int lang) { return lang_code(lang >= 0 && lang < NLANG ? lang : 1); }
-static int set_disp(SvcObj* o, IpcCtx* c) {
-    switch (c->cmd) {
-        case 0: out64(c, set_language_code(g_hle_lang)); return 0; /* GetLanguageCode */
-        case 1:
-        case 5: {
-            u64 a, s;
-            buf_out(c, 0, &a, &s);
-            u32 n = (u32)(s / 8);
-            u32 max = c->cmd == 1 ? 15 : NLANG;
-            if (n > max) n = max;
-            for (u32 i = 0; i < n; i++) gw64(a + i * 8, lang_code((int)i));
-            out32(c, n);
-            return 0;
-        }
-        case 2: {
-            u32 idx = in32(c, 0);
-            out64(c, idx < NLANG ? lang_code((int)idx) : 0);
-            return 0;
-        } /* MakeLanguageCode */
-        case 3: out32(c, 15); return 0;
-        case 6: out32(c, NLANG); return 0;
-        case 4: out32(c, 1); return 0; /* GetRegionCode: usa */
-        case 7:
-        case 9: {
-            u64 a, s;
-            buf_out(c, 0, &a, &s);
-            if (a) memset(GP(a), 0, s);
-            return 0;
-        }
-        case 8: out32(c, 0); return 0;
-        case 11: { /* GetDeviceNickName: a 0x80 byte buffer */
-            static const char name[] = "ScarletNX";
-            u64 a, s;
-            buf_out(c, 0, &a, &s);
-            if (!a || !s) return 0;
-            memset(GP(a), 0, s);
-            memcpy(GP(a), name, s < sizeof name ? s - 1 : sizeof name);
-            return 0;
-        }
-    }
-    return stub_ok(o, c);
+int nn_settings_ISettingsServer_GetLanguageCode(SvcObj* self, nn_settings_LanguageCode* code) {
+    *code = set_language_code(g_hle_lang);
+    return 0;
 }
-SvcObj* new_set(void) { return svcobj_new("set", set_disp, 0); }
-static int setsys_disp(SvcObj* o, IpcCtx* c) {
-    switch (c->cmd) {
-        case 3:
-        case 4: {
-            u64 a, s;
-            buf_out(c, 0, &a, &s);
-            u8 fw[0x100];
-            memset(fw, 0, sizeof fw);
-            fw[0] = 12;
-            fw[1] = 1;
-            fw[2] = 0;
-            fw[4] = 12;
-            fw[5] = 1;
-            fw[6] = 0;
-            fw[7] = 0;
-            strcpy((char*)fw + 8, "NintendoSDK Firmware for NX");
-            strcpy((char*)fw + 0x28, "12.1.0-1.0");
-            strcpy((char*)fw + 0x68, "12.1.0");
-            strcpy((char*)fw + 0x80, "NintendoSDK Firmware for NX 12.1.0-1.0");
-            memcpy(GP(a), fw, s < 0x100 ? s : 0x100);
-            return 0;
-        }
-        case 23: out32(c, 0); return 0; /* GetColorSetId */
-        case 37: out64(c, 0); return 0; /* GetSettingsItemValueSize(class, key in X buffers): no such setting */
-        case 38: {                      /* GetSettingsItemValue: the value goes to the B buffer, its size out */
-            u64 a, s;
-            buf_out(c, 0, &a, &s);
-            if (a) memset(GP(a), 0, s);
-            out64(c, 0);
-            return 0;
-        }
-        case 62: out8(c, 0); return 0; /* GetDebugModeFlag */
-        case 90: {                     /* GetMiiAuthorId */
-            u8 id[16];
-            memset(id, 0, sizeof id);
-            outbytes(c, id, 16);
-            return 0;
-        }
-        case 91: return 0; /* SetShutdownRtcValue */
-    }
-    return stub_ok(o, c);
+/* the language codes, in index order, as many as the buffer holds up to max */
+static i32 language_codes(IpcBuf codes, int max) {
+    i32 i, n = (i32)(codes.size / 8);
+    if (n > max) n = max;
+    for (i = 0; i < n; i++) gw64(codes.addr + (u64)i * 8, lang_code(i));
+    return n;
 }
-SvcObj* new_setsys(void) { return svcobj_new("set:sys", setsys_disp, 0); }
+/* the 15 languages of the first firmwares */
+int nn_settings_ISettingsServer_GetAvailableLanguageCodes(SvcObj* self, IpcBuf codes, i32* count) {
+    *count = language_codes(codes, 15);
+    return 0;
+}
+int nn_settings_ISettingsServer_MakeLanguageCode(SvcObj* self, u32 language, nn_settings_LanguageCode* code) {
+    *code = language < NLANG ? lang_code((int)language) : 0;
+    return 0;
+}
+int nn_settings_ISettingsServer_GetAvailableLanguageCodeCount(SvcObj* self, i32* count) {
+    *count = 15;
+    return 0;
+}
+int nn_settings_ISettingsServer_GetRegionCode(SvcObj* self, i32* region) {
+    *region = 1; /* usa */
+    return 0;
+}
+int nn_settings_ISettingsServer_GetAvailableLanguageCodes2(SvcObj* self, IpcBuf codes, i32* count) {
+    *count = language_codes(codes, NLANG);
+    return 0;
+}
+int nn_settings_ISettingsServer_GetAvailableLanguageCodeCount2(SvcObj* self, i32* count) {
+    *count = NLANG;
+    return 0;
+}
+static void zero_buffer(IpcBuf b) {
+    if (b.addr) memset(GP(b.addr), 0, b.size);
+}
+int nn_settings_ISettingsServer_GetKeyCodeMap(SvcObj* self, IpcBuf map) {
+    zero_buffer(map);
+    return 0;
+}
+int nn_settings_ISettingsServer_GetKeyCodeMap2(SvcObj* self, IpcBuf map) {
+    zero_buffer(map);
+    return 0;
+}
+int nn_settings_ISettingsServer_GetDeviceNickName(SvcObj* self, IpcBuf name) {
+    static const char nick[] = "ScarletNX";
+    if (!name.addr || !name.size) return 0;
+    memset(GP(name.addr), 0, name.size);
+    memcpy(GP(name.addr), nick, name.size < sizeof nick ? name.size - 1 : sizeof nick);
+    return 0;
+}
+SvcObj* new_set(void) { return nn_settings_ISettingsServer_new(0); }
+static int firmware_version(IpcBuf version) {
+    u8 fw[0x100];
+    memset(fw, 0, sizeof fw);
+    fw[0] = 12;
+    fw[1] = 1;
+    fw[2] = 0;
+    fw[4] = 12;
+    fw[5] = 1;
+    fw[6] = 0;
+    fw[7] = 0;
+    strcpy((char*)fw + 8, "NintendoSDK Firmware for NX");
+    strcpy((char*)fw + 0x28, "12.1.0-1.0");
+    strcpy((char*)fw + 0x68, "12.1.0");
+    strcpy((char*)fw + 0x80, "NintendoSDK Firmware for NX 12.1.0-1.0");
+    if (version.addr) memcpy(GP(version.addr), fw, version.size < 0x100 ? version.size : 0x100);
+    return 0;
+}
+int nn_settings_ISystemSettingsServer_GetFirmwareVersion(SvcObj* self, IpcBuf version) {
+    return firmware_version(version);
+}
+int nn_settings_ISystemSettingsServer_GetFirmwareVersion2(SvcObj* self, IpcBuf version) {
+    return firmware_version(version);
+}
+/* no setting is there: the value is empty */
+int nn_settings_ISystemSettingsServer_GetSettingsItemValue(SvcObj* self, IpcBuf name, IpcBuf key, IpcBuf value,
+                                                           u64* size) {
+    zero_buffer(value);
+    return 0;
+}
+SvcObj* new_setsys(void) { return nn_settings_ISystemSettingsServer_new(0); }

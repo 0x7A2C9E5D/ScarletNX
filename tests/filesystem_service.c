@@ -192,7 +192,6 @@ void svc_register(const char* name, SvcCtor ctor) {
     (void)name;
     (void)ctor;
 }
-SvcObj* svc_generic(const char* name) { return svcobj_new(name, stub_ok, 0); }
 int stub_ok(SvcObj* obj, IpcCtx* c) {
     fprintf(stderr, "Unexpected stub: %s command %u\n", obj->name, c->cmd);
     test_fail("requested a implemented command", __LINE__);
@@ -201,24 +200,6 @@ int stub_ok(SvcObj* obj, IpcCtx* c) {
 void ipc_out_overflow(IpcCtx* c) {
     (void)c;
     test_fail("IPC output overflow", __LINE__);
-}
-
-static int test_buffer(IpcBuf* bufs, int count, int idx, u64* addr, u64* size) {
-    *addr = *size = 0;
-    if (idx < 0 || idx >= count) return 0;
-    *addr = bufs[idx].addr;
-    *size = bufs[idx].size;
-    CHECK(*addr <= 0x10000 && *size <= 0x10000 - *addr);
-    return 1;
-}
-int buf_xs(IpcCtx* c, int idx, u64* addr, u64* size) { return test_buffer(c->x, c->nx, idx, addr, size); }
-int buf_in(IpcCtx* c, int idx, u64* addr, u64* size) {
-    if (idx < c->na && c->a[idx].addr && c->a[idx].size) return test_buffer(c->a, c->na, idx, addr, size);
-    return test_buffer(c->x, c->nx, idx, addr, size);
-}
-int buf_out(IpcCtx* c, int idx, u64* addr, u64* size) {
-    if (idx < c->nb) return test_buffer(c->b, c->nb, idx, addr, size);
-    return test_buffer(c->c, c->nc, idx, addr, size);
 }
 
 typedef struct {

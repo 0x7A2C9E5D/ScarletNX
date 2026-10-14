@@ -117,26 +117,24 @@ int stub_ok(SvcObj* o, IpcCtx* c) {
     return -1;
 }
 int quiet_ok(SvcObj* o, IpcCtx* c) { return stub_ok(o, c); }
-int audren_update(SvcObj* o, IpcCtx* c) { return stub_ok(o, c); }
+void svc_register(const char* name, SvcCtor ctor) {
+    (void)name;
+    (void)ctor;
+}
+void ipc_close(u32 h) {
+    (void)h;
+    test_fail("a failed command left a handle", __LINE__);
+}
+int audren_update(SvcObj* o, IpcBuf in, IpcBuf out) {
+    (void)in;
+    (void)out;
+    return stub_ok(o, NULL);
+}
 void audren_open(SvcObj* o, const u8* params) {
     (void)o;
     (void)params;
 }
 void audren_tick(void) {}
-int buf_in(IpcCtx* c, int i, u64* addr, u64* size) {
-    *addr = *size = 0;
-    if (i >= c->na) return 0;
-    *addr = c->a[i].addr;
-    *size = c->a[i].size;
-    return 1;
-}
-int buf_out(IpcCtx* c, int i, u64* addr, u64* size) {
-    *addr = *size = 0;
-    if (i >= c->nb) return 0;
-    *addr = c->b[i].addr;
-    *size = c->b[i].size;
-    return 1;
-}
 KEvent* kevent_new(const char* name) {
     KEvent* e = calloc(1, sizeof *e);
     CHECK(e != NULL);

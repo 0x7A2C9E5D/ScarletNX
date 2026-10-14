@@ -52,20 +52,7 @@ int stub_ok(SvcObj* o, IpcCtx* c) {
     (void)o, (void)c;
     return 0;
 }
-int buf_in(IpcCtx* c, int i, u64* a, u64* s) {
-    *a = *s = 0;
-    if (i >= c->na) return 0;
-    *a = c->a[i].addr;
-    *s = c->a[i].size;
-    return 1;
-}
-int buf_out(IpcCtx* c, int i, u64* a, u64* s) {
-    *a = *s = 0;
-    if (i >= c->nb) return 0;
-    *a = c->b[i].addr;
-    *s = c->b[i].size;
-    return 1;
-}
+void svc_register(const char* name, SvcCtor ctor) { (void)name, (void)ctor; }
 
 /* guest memory: buffers at fixed addresses */
 enum { IN0 = 0x1000, IN1 = 0x2000, OUT0 = 0x3000, OUT1 = 0x4000, BUFSIZE = 0x1000 };
@@ -278,9 +265,7 @@ int main(void) {
     }
 
     /* EventFd, Close, bad descriptors, offline */
-    raw[0] = 0;
-    request(31, 2, 0, 0x4); /* EventFd(2, EFD_NONBLOCK) */
-    raw[2] = 0x4;
+    request(31, 0x4, 0, 2); /* EventFd(2, EFD_NONBLOCK): the u32 flags at 0, the u64 initval at 8 */
     i32 ev = call(&e);
     CHECK(ev > 0);
     request(25, (u32)ev, 0, 0);

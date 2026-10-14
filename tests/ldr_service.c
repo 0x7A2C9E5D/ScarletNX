@@ -82,6 +82,15 @@ void ipc_out_overflow(IpcCtx* c) {
     (void)c;
     CHECK(0);
 }
+int ipc_unknown(SvcObj* o, IpcCtx* c) {
+    (void)o;
+    (void)c;
+    return RC(10, 221);
+}
+void svc_register(const char* name, SvcCtor ctor) {
+    (void)name;
+    (void)ctor;
+}
 static IpcCtx ctx;
 static u64 raw[5];
 static void request(u32 cmd, u64 a, u64 b, u64 c, u64 d) {
@@ -301,9 +310,6 @@ int main(void) {
     request(0, SRC, 0x3000, BSS, 0x1000);
     ctx.pid = 1;
     CHECK(call(o) == RO(1031));
-    request(0, SRC, 0x3000, BSS, 0x1000);
-    ctx.raw_size = 32;
-    CHECK(call(o) == RO(1026));
     request(0, SRC + 1, 0x3000, BSS, 0x1000);
     CHECK(call(o) == RO(1025));
     request(0, SRC, 0, BSS, 0x1000);
@@ -385,7 +391,7 @@ int main(void) {
     block_is(SRC, MS_NORMAL, PERM_RW, 0);
     CHECK(gr64(SRC + 0x2008) == 0xabcdef && gr64(BSS) == 0x9876);
     request(999, 0, 0, 0, 0);
-    CHECK(call(o) == RO(1022));
+    CHECK(call(o) == RC(10, 221)); /* sf's UnknownCommandId */
     fixture();
     request(2, NRR, 0x1000, 0, 0);
     CHECK(!call(o));
