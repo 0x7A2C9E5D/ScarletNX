@@ -14,10 +14,8 @@ frame.
   flight and staging; `surface.c`, `format.c`; `texture.c`; `astc.c`; `buffer.c` guest memory as buffers;
   `pipeline.c`; `render.c` passes, clears, draws; `compute.c` the compute queue; `writeback.c`; `renderer.c`
   presenting). The shader translator is `src/nx/gpu/shader/` (`spirv_translate.c`, `spirv_compute.c`).
-- `SNX_VK_VALIDATION=1` enables `VK_LAYER_KHRONOS_validation` (installed here) and routes its messages to the
-  log. Synchronization validation is a separate feature of the layer (`VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true`
-  or vkconfig). `spirv-val` and `spirv-dis` are on PATH. `SNX_SHADER_CORPUS=dir` records translated shaders and
-  `snx-shaderc dir --validate` rechecks them offline.
+- `SNX_SHADER_CORPUS=dir` records translated shaders and `snx-shaderc dir --validate` rechecks them offline with
+  `spirv-val`, which must be on PATH. `spirv-dis` shows a module as text.
 - **Nothing in a draw's setup may submit or wait for the GPU** (`vk_finish`, a readback like `vk_rt_flush`): the
   frame's descriptor pools and staging reset after it and the draw's sets already allocated turn to garbage. Copy
   on the GPU instead.
@@ -26,6 +24,31 @@ frame.
   the points where the guest can observe the memory.
 - Shaders must declare `SignedZeroInfNanPreserve`: Maxwell code relies on infinities and NaNs (TotK's lighting
   became NaN blocks without it).
+
+## Validation layers
+Every renderer change is run under the Khronos validation layer before it is called done, and its messages are
+part of the result.
+- The layer comes from the host: the distribution's package (`vulkan-validation-layers` on Arch and Fedora,
+  `vulkan-validationlayers` on Debian and Ubuntu) or the LunarG Vulkan SDK on Windows. Check with
+  `vulkaninfo --summary` or the runtime's own warning ("SNX_VK_VALIDATION is set but VK_LAYER_KHRONOS_validation is
+  not installed"). If it is missing, ask the user to install it rather than skipping the check.
+- `SNX_VK_VALIDATION=1` makes `src/nx/gpu/vk/device.c` enable the layer with a debug messenger. Errors are logged
+  with `WARN` and everything else with `LOG`, each line starting `vulkan validation:`. Count them with
+  `grep -c 'vulkan validation:' games/<Game>.log` and read the distinct ones with
+  `grep 'vulkan validation:' games/<Game>.log | sort | uniq -c | sort -rn | head`. Never print the whole log.
+- The runtime enables only the layer's default checks. Turn on the others per run through the layer's settings
+  variables: `VK_KHRONOS_VALIDATION_VALIDATE_SYNC=true` (synchronization validation: missing barriers, hazards
+  between the graphics and compute queues), `VK_KHRONOS_VALIDATION_VALIDATE_GPU_BASED=GPU_BASED_GPU_ASSISTED`
+  (out-of-bounds descriptor and buffer access inside shaders, slow),
+  `VK_KHRONOS_VALIDATION_VALIDATE_BEST_PRACTICES=true` (advice, not errors). If a variable seems ignored, the
+  layer's version names it differently: check its `VkLayer_khronos_validation.json` or vkconfig.
+- Compare against a baseline: the same scene and script on the unchanged build, so that messages that were already
+  there are not blamed on the change, and a change adds none. A message's VUID (`VUID-...`) names the rule; look it
+  up in the specification before deciding the fix.
+- The layer slows the frame loop a lot, so timing-dependent behavior (movies, audio sync) can differ under it.
+  Judge performance only on runs without it.
+- The headless integration test runs under it too: `SNX_VK_VALIDATION=1 ctest --test-dir build/headless-vk -R
+  vulkan_headless --output-on-failure` (`docs/BUILD.md`).
 
 ## Expertise to apply
 - **Sync**: execution versus memory dependencies, stage and access masks with synchronization2, write-after-read
@@ -41,9 +64,9 @@ frame.
   Y flips, provoking vertex, custom border colors, formats Vulkan lacks or makes optional (with the fallbacks and
   swizzles), sRGB views, 3D and array views, integer render targets and blending, MSAA resolves, logic ops,
   conditional rendering, transform feedback.
-- **Debugging**: reading a validation message back to the call that caused it, device loss (`VK_EXT_device_fault`
-  where present, bisecting by forcing `vk_finish` after each submit in a scratch build only), RenderDoc captures
-  when the user has it installed.
+- **Debugging**: reading a validation message back to the call that caused it (by its VUID and the handles it
+  names), device loss (`VK_EXT_device_fault` where present, bisecting by forcing `vk_finish` after each submit in a
+  scratch build only), RenderDoc captures when the user has it installed.
 
 ## How you work
 - Read `CLAUDE.md` first. It is the authority on the project's rules (nothing of the game leaves the machine, find
