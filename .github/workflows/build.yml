@@ -29,7 +29,7 @@ jobs:
       # llvm: llvm-config and LLVM-C for the recompiler (llvm-libs alone has no headers). libgccjit builds the
       # optional --backend=gcc too, so its tests (gccjit_differential, native_recompiler_gcc) run here
       - name: Install tools
-        run: pacman -Syu --noconfirm --needed cmake ninja make nasm python git clang llvm libgccjit pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast
+        run: pacman -Syu --noconfirm --needed cmake ninja make patch nasm python git clang llvm libgccjit pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast
       - uses: actions/checkout@v7
       - uses: actions/cache@v5
         with:
@@ -101,7 +101,7 @@ jobs:
       # llvm for the recompiler; quick-sharun bundles the libLLVM the runtime links, with its own dependencies
       - name: Install the build tools and the debloated Mesa
         run: |
-          pacman -Syu --noconfirm --needed cmake ninja make nasm clang llvm sdl3 libx11 mesa vulkan-icd-loader
+          pacman -Syu --noconfirm --needed cmake ninja make patch nasm clang llvm sdl3 libx11 mesa vulkan-icd-loader
           get-debloated-pkgs --add-common --prefer-nano
       - name: Build and install into /usr
         run: |

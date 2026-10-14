@@ -7,7 +7,7 @@ For the keyboard-controlled SDL3 menu and file drops, see [GUI](GUI.md).
 
 ## Extract → AOT → run
 
-Pass a single XCI or NSP to extract, recompile and play:
+Pass a single XCI, NSP, DXCI or DNSP to extract, recompile and play:
 
 ```sh
 ./build/scarletnx "Game.xci"
@@ -36,6 +36,16 @@ homebrew-loader guest argv block.
 `--fullscreen` (or `--fullscreen=0` for windowed startup) can also precede or follow
 the dump and is forwarded to the game. It overrides that game's INI setting.
 Use the separate commands for updates, custom keys or compiler options.
+
+DXCI and DNSP with decrypted content need no keys. Containers are identified by their headers,
+including renamed files. A matching bundled update is applied automatically. An explicit `--update`
+replaces the bundled update and must match the base title. DLC-only and update-only dumps cannot
+be used as a base game.
+
+```powershell
+.\build\windows-native\scarletnx.exe "C:\Games\Game.dxci"
+.\build\windows-native\scarletnx.exe --extract "C:\Games\Game.dnsp" --update "C:\Games\Update.dnsp"
+```
 
 Run the same command again to retry after a failure or interruption:
 
@@ -93,7 +103,8 @@ Remaining examples: POSIX.
 ./build/scarletnx -r -h
 ```
 
-- **Keys:** flags → checkout → `~/.switch` (`%USERPROFILE%\.switch` on Windows). Common NSP tickets supplement title keys.
+- **Keys:** encrypted content uses flags → checkout → `~/.switch` (`%USERPROFILE%\.switch` on Windows).
+  Common NSP tickets supplement title keys. Fully decrypted content needs neither key file.
 - **Extraction:** defaults to `work/<dump stem>`; `--name`/`--out DIR` override. Refuses existing `exefs`;
   builds missing hactool. [Temp cleanup/key filtering](../src/nx/runtime/driver/extract.c).
 - **Recompile:** AOT → module (LLVM, or `--backend=gcc` for libgccjit on DEC Alpha EV67 hosts) →
