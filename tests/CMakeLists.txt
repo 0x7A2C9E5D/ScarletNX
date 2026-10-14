@@ -31,6 +31,20 @@ function(snx_test_target target standard)
     endif()
 endfunction()
 
+# Validate the direct writer against SPIRV-Tools when the system tools are installed.
+if(SNX_BUILD_NX AND SNX_VULKAN)
+    find_program(SNX_SPIRV_VAL spirv-val)
+    find_program(SNX_SPIRV_DIS spirv-dis)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(SNX_SPIRV_VAL AND SNX_SPIRV_DIS AND Python3_Interpreter_FOUND)
+        add_executable(snx-test-spirv-emitter spirv_emitter.c spirv_emitter_fixture.c
+            "${PROJECT_SOURCE_DIR}/src/nx/gpu/shader/spirv_emit.c")
+        snx_test_target(snx-test-spirv-emitter 11)
+        add_test(NAME spirv_emitter COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/spirv_emitter_test.py"
+            --generator $<TARGET_FILE:snx-test-spirv-emitter> --validator "${SNX_SPIRV_VAL}" --disassembler "${SNX_SPIRV_DIS}")
+    endif()
+endif()
+
 # Small architectural witnesses need neither game assets nor an emulator.
 add_executable(snx-test-a64-fp a64_fp_test.c "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu_helpers.c")
 snx_test_target(snx-test-a64-fp 11)

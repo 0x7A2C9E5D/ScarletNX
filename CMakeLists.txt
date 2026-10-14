@@ -46,8 +46,7 @@ option(SNX_DEPLOY "Copy the runtime next to every recompiled game in SNX_GAMES_D
 set(SNX_GAMES_DIR "${CMAKE_SOURCE_DIR}/games" CACHE PATH "Folder holding the recompiled games")
 
 # Upstream builds with -O2. RelWithDebInfo keeps that and adds symbols for crash reports. It leaves out -DNDEBUG, as
-# upstream does: the runtime has no assert(), so this only keeps the asserts of the libraries built with it (glslang,
-# VMA) on, which stop at a misuse instead of carrying on with broken state
+# upstream does: the runtime has no assert(), so this keeps VMA's assertions on.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
@@ -123,8 +122,6 @@ install(FILES "${Vulkan-Headers_SOURCE_DIR}/LICENSE.md" DESTINATION ${licenses}/
 install(DIRECTORY "${Vulkan-Headers_SOURCE_DIR}/LICENSES" DESTINATION ${licenses}/Vulkan-Headers)
 install(FILES "${volk_SOURCE_DIR}/LICENSE.md" DESTINATION ${licenses}/volk)
 install(FILES "${VulkanMemoryAllocator_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/VulkanMemoryAllocator)
-install(FILES "${glslang_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/glslang)
-install(DIRECTORY "${glslang_SOURCE_DIR}/LICENSES" DESTINATION ${licenses}/glslang)
 if(SNX_SDL3_FROM_SOURCE)
     install(FILES "${SDL3_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/SDL3)
 endif()

@@ -183,11 +183,9 @@ static int audren_disp(SvcObj* o, IpcCtx* c) {
             /* AudioRendererParameter: voice count at 0x10, sink count 0x14, effect count 0x18 */
             u64 sz = 0x4000;
             u32 voices = in32(c, 0x10), sinks = in32(c, 0x14), effects = in32(c, 0x18);
-            sz += (u64)voices * 0x400 + sinks * 0x200 + effects * 0x800 + 0x40000;
-            /* The estimate above can place the SDK's live renderer config beside memory the game later reuses.
-               Keep a conservative floor until the full renderer work-buffer formula is implemented. */
-            if (sz < 4 * 1024 * 1024) sz = 4 * 1024 * 1024;
-            /* The SDK passes this to svcCreateTransferMemory, which requires whole pages. */
+            sz += (u64)voices * 0x400 + sinks * 0x200 + effects * 0x800;
+            /* The SDK allocates this beside its renderer config. An oversized estimate can place that config
+               outside the pages it mapped. Transfer memory requires whole pages. */
             out64(c, (sz + 0xFFF) & ~0xFFFull);
             return 0;
         }

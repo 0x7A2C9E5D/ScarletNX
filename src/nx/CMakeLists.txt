@@ -6,7 +6,7 @@
 #   core      startup, options, the game module, crash reports      kernel    threads, sync, memory, IPC
 #   hle       the services the game talks to                         video     NVDEC and VIC (host1x)
 #   gpu       the GPU front end: GPFIFO, engines, the renderer interface
-#   shader    Maxwell shaders to GLSL                                 spirv     GLSL to SPIR-V (glslang)
+#   shader    Maxwell shaders to SPIR-V
 #   vk        the renderer                                            platform  the OS layer and a window backend
 
 add_library(snx_nx_flags INTERFACE)
@@ -49,15 +49,12 @@ else()
 endif()
 snx_component(platform ${platform})
 
-snx_component(shader gpu/shader/shader.c gpu/shader/decode.c gpu/shader/translate.c gpu/shader/corpus.c)
-snx_component(spirv gpu/vk/spirv.c)
-target_link_libraries(snx_spirv PUBLIC glslang::glslang glslang::glslang-default-resource-limits)
-# volk uses SDL's loader for windows and loads Vulkan directly for headless runs
+snx_component(shader gpu/shader/shader.c gpu/shader/decode.c gpu/shader/corpus.c
+                     gpu/shader/spirv_translate.c gpu/shader/spirv_compute.c gpu/shader/spirv_emit.c)
 snx_component(vk gpu/vk/renderer.c gpu/vk/device.c gpu/vk/cmd.c gpu/vk/format.c gpu/vk/surface.c gpu/vk/texture.c
-              gpu/vk/buffer.c gpu/vk/writeback.c gpu/vk/pipeline.c gpu/vk/render.c gpu/vk/compute.c
-              gpu/vk/astc.c gpu/texture/etc2.c gpu/vk/vma.cpp
-              "${volk_SOURCE_DIR}/volk.c")
-set(components core kernel hle video gpu platform shader spirv vk)
+                 gpu/vk/buffer.c gpu/vk/writeback.c gpu/vk/pipeline.c gpu/vk/render.c gpu/vk/compute.c
+                 gpu/vk/astc.c gpu/texture/etc2.c gpu/vk/vma.cpp "${volk_SOURCE_DIR}/volk.c")
+set(components core kernel hle video gpu platform shader vk)
 # third-party code (vma.cpp is VMA's implementation)
 set_source_files_properties("${volk_SOURCE_DIR}/volk.c" gpu/vk/vma.cpp PROPERTIES COMPILE_OPTIONS -w)
 
@@ -67,7 +64,7 @@ add_library(scarletnx-nx STATIC)
 set_target_properties(scarletnx-nx PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(scarletnx-nx PUBLIC snx_nx_flags ${components} snx_driver)
 target_link_libraries(scarletnx PRIVATE scarletnx-nx)
-# glslang is C++: link with the C++ driver. It goes in the build folder itself, where
+# VMA is C++: link with the C++ driver. It goes in the build folder itself, where
 # the native driver and CI look for it
 set_target_properties(scarletnx PROPERTIES LINKER_LANGUAGE CXX RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 if(WIN32)
@@ -89,51 +86,34 @@ endif()
 target_link_libraries(snx_platform PRIVATE SDL3::SDL3)
 target_link_libraries(scarletnx PRIVATE SDL3::SDL3)
 
-# The shader translator offline: F2I's negate and absolute value bits
 if(BUILD_TESTING)
-    add_executable(snx-test-shader-f2i "${PROJECT_SOURCE_DIR}/tests/shader_f2i.c")
-    target_link_libraries(snx-test-shader-f2i PRIVATE snx_shader)
+    add_executable(snx-test-shader-direct "${PROJECT_SOURCE_DIR}/tests/shader_direct.c")
+    target_link_libraries(snx-test-shader-direct PRIVATE snx_shader)
     if(NOT WIN32)
-        target_link_libraries(snx-test-shader-f2i PRIVATE Threads::Threads m)
+        target_link_libraries(snx-test-shader-direct PRIVATE Threads::Threads m)
     endif()
-    add_test(NAME shader_f2i COMMAND snx-test-shader-f2i)
-endif()
-
-# The shader translator and its SPIR-V step offline (no ICD or GPU): the FP32 denormal mode a shader declares
-if(BUILD_TESTING)
-    add_executable(snx-test-shader-denorm "${PROJECT_SOURCE_DIR}/tests/shader_denorm.c")
-    target_link_libraries(snx-test-shader-denorm PRIVATE snx_shader snx_spirv)
+    add_test(NAME shader_direct_structure COMMAND $<TARGET_FILE:snx-test-shader-direct> --check-only)
+    add_executable(snx-test-shader-direct-regressions "${PROJECT_SOURCE_DIR}/tests/shader_direct_regressions.c")
+    target_link_libraries(snx-test-shader-direct-regressions PRIVATE snx_shader)
     if(NOT WIN32)
-        target_link_libraries(snx-test-shader-denorm PRIVATE Threads::Threads m)
+        target_link_libraries(snx-test-shader-direct-regressions PRIVATE Threads::Threads m)
     endif()
-    set_target_properties(snx-test-shader-denorm PROPERTIES LINKER_LANGUAGE CXX)
-    add_test(NAME shader_denorm COMMAND snx-test-shader-denorm)
-endif()
-
-# The shader translator and glslang offline (no ICD or GPU): the float math keeps the console's order
-if(BUILD_TESTING)
-    add_executable(snx-test-shader-precise "${PROJECT_SOURCE_DIR}/tests/shader_precise.c")
-    target_link_libraries(snx-test-shader-precise PRIVATE snx_shader snx_spirv)
-    if(NOT WIN32)
-        target_link_libraries(snx-test-shader-precise PRIVATE Threads::Threads m)
+    add_test(NAME shader_direct_regressions COMMAND $<TARGET_FILE:snx-test-shader-direct-regressions>)
+    find_program(SNX_SHADER_SPIRV_VAL spirv-val)
+    find_program(SNX_SHADER_SPIRV_DIS spirv-dis)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(SNX_SHADER_SPIRV_VAL AND SNX_SHADER_SPIRV_DIS AND Python3_Interpreter_FOUND)
+        add_test(NAME shader_direct COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/shader_direct_test.py"
+            --generator $<TARGET_FILE:snx-test-shader-direct> --validator "${SNX_SHADER_SPIRV_VAL}"
+            --disassembler "${SNX_SHADER_SPIRV_DIS}"
+            --regressions $<TARGET_FILE:snx-test-shader-direct-regressions>)
     endif()
-    set_target_properties(snx-test-shader-precise PROPERTIES LINKER_LANGUAGE CXX)
-    add_test(NAME shader_precise COMMAND snx-test-shader-precise)
-endif()
-
-# The shader translator offline: which c0 words become storage buffers
-if(BUILD_TESTING)
-    add_executable(snx-test-shader-gbuf "${PROJECT_SOURCE_DIR}/tests/shader_gbuf.c")
-    target_link_libraries(snx-test-shader-gbuf PRIVATE snx_shader)
-    if(NOT WIN32)
-        target_link_libraries(snx-test-shader-gbuf PRIVATE Threads::Threads m)
-    endif()
-    add_test(NAME shader_gbuf COMMAND snx-test-shader-gbuf)
 endif()
 
 # Opt-in because normal unit-test runs need neither an ICD nor a GPU. All rendering uses the real runtime.
 if(BUILD_TESTING AND SNX_TEST_VULKAN)
-    add_executable(snx-test-vulkan "${PROJECT_SOURCE_DIR}/tests/vulkan_headless.c")
+    add_executable(snx-test-vulkan "${PROJECT_SOURCE_DIR}/tests/vulkan_headless.c"
+        "${PROJECT_SOURCE_DIR}/tests/spirv_emitter_fixture.c")
     target_link_libraries(snx-test-vulkan PRIVATE snx_nx_flags ${components} snx_driver Threads::Threads ${CMAKE_DL_LIBS})
     set_target_properties(snx-test-vulkan PROPERTIES LINKER_LANGUAGE CXX)
     if(WIN32)

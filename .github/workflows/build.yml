@@ -151,6 +151,7 @@ jobs:
             mingw-w64-clang-x86_64-nasm
             mingw-w64-clang-x86_64-pkgconf
             mingw-w64-clang-x86_64-python
+            mingw-w64-clang-x86_64-spirv-tools
       - name: Check required dependencies
         run: |
           set -euo pipefail
@@ -161,6 +162,8 @@ jobs:
           llvm-config --libs core native passes target analysis
           make --version
           nasm --version
+          spirv-val --version
+          spirv-dis --version
       - name: Build the runtime and pinned dependencies
         run: |
           set -euo pipefail

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gpu/gpu.h"
+#include "gpu/renderer.h"
 #include "gpu/texture/etc2.h"
 #include "runtime/platform/log.h"
 #include "gpu/vk/vk.h"
@@ -54,8 +55,7 @@ static void level_convert(const VkFmt* f, const u8* lin, u32 lw, u32 lh, u32 ld,
     if (f->conv >= VKC_ETC2) { /* each slice's blocks, decoded */
         int kind = f->conv - VKC_ETC2;
         for (u32 z = 0; z < ld; z++)
-            etc2_decode_image(lin + (u64)z * rowb * th, lw, lh, kind,
-                              out + (u64)z * lw * lh * etc2_pixel_bytes(kind));
+            etc2_decode_image(lin + (u64)z * rowb * th, lw, lh, kind, out + (u64)z * lw * lh * etc2_pixel_bytes(kind));
         return;
     }
     switch (f->conv) {
@@ -117,9 +117,8 @@ static void tex_upload(Surf* t) {
        texture through its color one. The packed kinds (Z24S8 and friends) would need converting */
     int depth_raw = f->depth && (f->vk == VK_FORMAT_D32_SFLOAT || f->vk == VK_FORMAT_D16_UNORM);
     if (f->depth && !depth_raw) {
-        LOG_LIMIT(1,
-                  "vulkan: packed depth textures from memory aren't loaded yet, they read as 1.0 (only depth render "
-                  "targets are sampled)\n");
+        LOG_LIMIT(1, "vulkan: packed depth textures from memory aren't loaded yet, they read as 1.0 (only depth render "
+                     "targets are sampled)\n");
         /* defined contents rather than whatever the image's memory held: far, so shadow tests pass */
         VkClearDepthStencilValue far = {1.0f, 0};
         VkImageSubresourceRange all = {vk_aspect(f), 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
@@ -188,11 +187,11 @@ static void tex_upload(Surf* t) {
                 }
                 regbuf = buf;
                 level_convert(f, lin, lw, lh, ld, rowb, p);
-                reg[nreg++] = (VkBufferImageCopy){.bufferOffset = off,
-                                                  .imageSubresource = {depth_raw ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                                                 : VK_IMAGE_ASPECT_COLOR_BIT,
-                                                                       l, layer, 1},
-                                                  .imageExtent = {lw, lh, ld}};
+                reg[nreg++] = (VkBufferImageCopy){
+                    .bufferOffset = off,
+                    .imageSubresource = {depth_raw ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, l, layer,
+                                         1},
+                    .imageExtent = {lw, lh, ld}};
             }
             free(lin);
             at += lsz;
@@ -223,6 +222,14 @@ static int tex_rehash(Surf* t) {
     t->hash = hh;
     tex_upload(t);
     return 1;
+}
+
+void vk_tex_note_writeback(Surf* t) {
+    t->hash = mem_hash(t->gva, t->size);
+    t->gw = gpu_mem_generation();
+    t->wseen = vk_ww_now() + 1;
+    t->checked = g_vk_present;
+    t->stable = 0;
 }
 
 static int format_samples(VkFormat f) {
@@ -273,6 +280,12 @@ static Surf* tex_create(u64 gva, u32 w, u32 h, u32 layers, u32 d3, u32 levels, V
                             .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                             .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+    VkFormatProperties format_props;
+    vkGetPhysicalDeviceFormatProperties(g_vk.phys, f.vk, &format_props);
+    if (format_props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) {
+        ii.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+        t->storage_capable = 1;
+    }
     if (type != VK_IMAGE_VIEW_TYPE_3D && layers >= 6 && w == h) ii.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     VkViewFormats vf;
     vk_view_formats(&ii, &vf);
@@ -388,7 +401,7 @@ static VkImageViewType tic_view_type(u32 type, u32 d) {
 
 static u32 g_bud_frame;
 static i64 g_bud;
-static Surf* tex_from_tic(const u32* tic) {
+static Surf* tex_from_tic(const u32* tic, int raw) {
     u64 gva = ((u64)(tic[2] & 0xFFFF) << 32) | tic[1];
     u32 hv = (tic[2] >> 21) & 7;
     int bl = hv == 3 || hv == 4;
@@ -398,9 +411,15 @@ static Surf* tex_from_tic(const u32* tic) {
     u32 glevels = ((tic[3] >> 28) & 0xF) + 1;
     u32 bh = (tic[3] >> 3) & 7, bd = (tic[3] >> 6) & 7, pitch = bl ? 0 : ((tic[3] & 0xFFFF) << 5);
     if (!gva) return NULL;
-    if (hv == 0 || type == 6) { /* a buffer texture: its width spans words 3 and 4, it has no pitch or blocks */
-        LOG_LIMIT(1, "vulkan: buffer textures aren't supported (not drawn)\n");
-        return NULL;
+    if (hv == 0 || type == 6) {
+        /* Buffer TICs describe a linear row of texels. The guest's 1D fetch is represented by our
+           height-one 2D image and the texture shader already supplies y = 0. */
+        if (hv != 0 || type != 6) return NULL;
+        w = (((tic[3] & 0xFFFFu) << 16) | (tic[4] & 0xFFFFu)) + 1;
+        h = d = 1;
+        glevels = 1;
+        bl = 0;
+        bh = bd = 0;
     }
     if ((tic[7] >> 8) & 0xF) LOG_LIMIT(1, "vulkan: multisampled textures are read as single-sampled\n");
     if (type == 0 || type == 4) h = 1;
@@ -409,7 +428,14 @@ static Surf* tex_from_tic(const u32* tic) {
     else if (type == 8)
         d *= 6;
     VkFmt f = vk_tic_format(tic[0], srgb);
-    if (!f.bpp || w > 16384 || h > 16384 || d > 2048) return NULL;
+    if (raw) {
+        if (f.vk != VK_FORMAT_R8G8B8A8_UNORM && f.vk != VK_FORMAT_R8G8B8A8_SRGB) return NULL;
+        f.vk = VK_FORMAT_R32_UINT;
+        f.is_int = 1;
+        f.sint = 0;
+    }
+    if (type == 6 && f.bpp && w <= UINT32_MAX / f.bpp) pitch = w * f.bpp;
+    if (!f.bpp || !w || w > 16384 || h > 16384 || d > 2048) return NULL;
     if ((u64)w * h * d * (f.bw > 1 ? 1 : f.bpp) > (512ull << 20)) return NULL;
     if (!bl && pitch < (w + f.bw - 1) / f.bw * f.bpp) {
         LOG_LIMIT(1, "vulkan: a pitch-linear texture's pitch (%u bytes) is shorter than its rows (not drawn)\n", pitch);
@@ -421,6 +447,8 @@ static Surf* tex_from_tic(const u32* tic) {
     u32 layers = vt == VK_IMAGE_VIEW_TYPE_3D ? 1 : d, d3 = vt == VK_IMAGE_VIEW_TYPE_3D ? d : 1;
     /* bytes from one layer to the next: all the levels the header has, whichever of them it shows */
     u64 stride = bl ? bl_layer_size(w, h, d3, &f, bh, bd, glevels) : (u64)pitch * ((h + f.bh - 1) / f.bh) * d3;
+    /* A texture upload reads guest memory. Complete any compute storage writes that overlap it first. */
+    if (g_cs_any) vk_compute_mem_need(gva, stride * layers);
     /* the levels the shader sees, base level to max level (word 7), as a texture of their own the way Ryujinx makes
        it: the base level's address, size and blocks. Pitch-linear textures have one level */
     u32 levels = bl ? glevels : 1;
@@ -441,7 +469,7 @@ static Surf* tex_from_tic(const u32* tic) {
     if (levels > maxlev) levels = maxlev;
     /* a render target at that address: read it on the GPU, unless its contents are undefined (never drawn, or memory
        it can't load was written over it): then memory has them */
-    Surf* rt = vk_rt_find(gva);
+    Surf* rt = type == 6 ? NULL : vk_rt_find(gva);
     /* a texture of several levels isn't the target (its other levels are other targets' memory, a mip chain drawn level
        by level): loaded from memory */
     if (rt && rt->layout != VK_IMAGE_LAYOUT_UNDEFINED && f.bw == 1 && !f.conv && type != 2 && rt->w >= w &&
@@ -474,7 +502,7 @@ static Surf* tex_from_tic(const u32* tic) {
         return NULL;
     }
     u32 ilevels = levels; /* ASTC compute uploads include every mip level. */
-    u32 fkey = (tic[0] & 0x7FFFF) | ((u32)srgb << 31);
+    u32 fkey = (tic[0] & 0x7FFFF) | ((u32)srgb << 31) | ((u32)raw << 30);
     for (Surf* t = vk_surf_first(gva); t; t = t->next) {
         if (t->is_rt || t->gva != gva || t->w != w || t->h != h || t->layers != layers || t->depth3d != d3 ||
             t->fkey != fkey || t->levels != ilevels || t->type != vt || t->bl != (u32)bl || t->bh != bh ||
@@ -912,7 +940,12 @@ static void tex_take_drawn(Surf* t) {
     if (d != small) free(d);
 }
 Surf* vk_tex_from_tic(const u32* tic) {
-    Surf* t = tex_from_tic(tic);
+    Surf* t = tex_from_tic(tic, 0);
+    tex_take_drawn(t);
+    return t;
+}
+Surf* vk_tex_from_tic_raw(const u32* tic) {
+    Surf* t = tex_from_tic(tic, 1);
     tex_take_drawn(t);
     return t;
 }
