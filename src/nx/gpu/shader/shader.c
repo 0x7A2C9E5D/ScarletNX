@@ -127,16 +127,39 @@ static int brx_table_count(const u64* w, u32 ldc, u32* count) {
     return 0;
 }
 
-/* BRX targets from its jump table (LDC nearby -> cbuf). -1 if the table can't be resolved. */
+/* The LDC that loads the BRX at i its jump target: the last write of ra before the BRX, in the BRX's basic block,
+   however far back the compiler scheduled it. -1 when that write is something else. */
+static int brx_table_load(const u64* w, u32 i, u32 n, u32 ra) {
+    for (u32 j = i; j-- > 11;) {
+        if (!IDX_OK(j)) continue;
+        const Op* op = decode(w[j]);
+        if (!op || op->id == O_BRA || op->id == O_BRX || op->id == O_JMP || op->id == O_CAL || op->id == O_RET ||
+            op->id == O_EXIT || op->id == O_KIL || op->id == O_SYNC || op->id == O_BRK || op->id == O_CONT)
+            return -1;
+        if (!shader_writes_reg(w[j], op->id, ra)) continue;
+        if (op->id != O_LDC || B(w[j], 0, 8) != ra || B(w[j], 16, 3) != 7 || B(w[j], 19, 1)) return -1;
+        for (u32 k = 11; k < n; k++) { /* no other path enters between the load and the jump */
+            if (!IDX_OK(k)) continue;
+            const Op* flow = decode(w[k]);
+            if (!flow || (flow->id != O_BRA && flow->id != O_SSY && flow->id != O_PBK && flow->id != O_PCNT &&
+                          flow->id != O_CAL))
+                continue;
+            u32 t = bra_target(w[k], k);
+            if (t > j && t <= i) return -1;
+        }
+        return (int)j;
+    }
+    return -1;
+}
+
+/* BRX targets from its jump table (an LDC of a constant buffer). -1 if the table can't be resolved. */
 int shader_brx_targets(const u64* w, u32 i, u32 n, u32* out, int max) {
     if (!g_shader_cb_read) return -1;
     u32 ra = B(w[i], 8, 8);
     i32 imm = (i32)(B(w[i], 20, 24) << 8) >> 8;
-    for (u32 k = 1; k <= 8 && k < i; k++) {
-        u32 j = i - k;
-        if (!IDX_OK(j)) continue;
-        const Op* o2 = decode(w[j]);
-        if (!o2 || o2->id != O_LDC || B(w[j], 0, 8) != ra) continue;
+    int load = ra == 255 ? -1 : brx_table_load(w, i, n, ra);
+    if (load >= 0) {
+        u32 j = (u32)load;
         u32 cidx = B(w[j], 36, 5);
         i32 coff = (i32)(B(w[j], 20, 16) << 16) >> 16;
         u32 table_count = 0;

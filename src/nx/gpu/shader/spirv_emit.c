@@ -751,12 +751,15 @@ uint32_t spv_emit_builtin_input_vec3(SpvEmitter* e, uint32_t vec3_type, uint32_t
 
 uint32_t spv_emit_builtin_input_u32(SpvEmitter* e, uint32_t u32_type, uint32_t builtin) {
     uint32_t id = input_vec4(e, u32_type, 11, builtin);
-    if (builtin == 9 || builtin == 41) { /* Integer fragment interfaces need Flat interpolation. */
-        instruction(&e->decorations, OP_DECORATE, 3);
-        put(&e->decorations, id);
-        put(&e->decorations, 14);
-    }
+    if (builtin == 9) spv_emit_flat(e, id); /* Layer is read in fragment shaders only */
     return id;
+}
+
+/* Integer inputs of a fragment shader need Flat interpolation; Vulkan rejects Flat on vertex inputs. */
+void spv_emit_flat(SpvEmitter* e, uint32_t variable) {
+    instruction(&e->decorations, OP_DECORATE, 3);
+    put(&e->decorations, variable);
+    put(&e->decorations, 14);
 }
 
 uint32_t spv_emit_sampler_image(SpvEmitter* e, uint32_t scalar_type, uint32_t set, uint32_t binding, uint32_t type,
@@ -804,21 +807,38 @@ uint32_t spv_emit_sampler_image(SpvEmitter* e, uint32_t scalar_type, uint32_t se
 
 uint32_t spv_emit_storage_image(SpvEmitter* e, uint32_t scalar_type, uint32_t set, uint32_t binding, uint32_t type,
                                 int array, uint32_t format, uint32_t* image_type) {
-    assert(image_type && type <= 2 && (array == 0 || array == 1));
-    if (!format) {
-        instruction(&e->capabilities, OP_CAPABILITY, 2);
-        put(&e->capabilities, 56); /* StorageImageWriteWithoutFormat */
+    assert(image_type && (type <= 2 || type == 5) && (array == 0 || array == 1));
+    /* SPIR-V allows one declaration of each image type: images alike share it */
+    const uint32_t key[4] = {scalar_type, type, (uint32_t)array, format};
+    uint32_t found = 0;
+    for (uint32_t i = 0; i < e->storage_image_count && !found; i++)
+        if (!memcmp(e->storage_image_keys[i], key, sizeof key)) found = e->storage_image_types[i];
+    if (found)
+        *image_type = found;
+    else {
+        if (!format) {
+            instruction(&e->capabilities, OP_CAPABILITY, 2);
+            put(&e->capabilities, 56); /* StorageImageWriteWithoutFormat */
+        }
+        if (type == 5) {
+            instruction(&e->capabilities, OP_CAPABILITY, 2);
+            put(&e->capabilities, 47); /* ImageBuffer: a storage texel buffer */
+        }
+        *image_type = spv_emit_id(e);
+        instruction(&e->types, OP_TYPE_IMAGE, 9);
+        put(&e->types, *image_type);
+        put(&e->types, scalar_type);
+        put(&e->types, type);
+        put(&e->types, 0); /* Depth */
+        put(&e->types, array);
+        put(&e->types, 0); /* MS */
+        put(&e->types, 2); /* storage image */
+        put(&e->types, format);
+        if (e->storage_image_count < 16) {
+            memcpy(e->storage_image_keys[e->storage_image_count], key, sizeof key);
+            e->storage_image_types[e->storage_image_count++] = *image_type;
+        }
     }
-    *image_type = spv_emit_id(e);
-    instruction(&e->types, OP_TYPE_IMAGE, 9);
-    put(&e->types, *image_type);
-    put(&e->types, scalar_type);
-    put(&e->types, type);
-    put(&e->types, 0); /* Depth */
-    put(&e->types, array);
-    put(&e->types, 0); /* MS */
-    put(&e->types, 2); /* storage image */
-    put(&e->types, format);
     uint32_t pointer = type_pointer(e, 0, *image_type);
     uint32_t variable = spv_emit_id(e);
     instruction(&e->decorations, OP_DECORATE, 4);
@@ -843,6 +863,18 @@ void spv_emit_image_write(SpvEmitter* e, uint32_t image_type, uint32_t image_var
     put(&e->functions, image);
     put(&e->functions, coordinates);
     put(&e->functions, texel);
+}
+
+uint32_t spv_emit_image_read(SpvEmitter* e, uint32_t result_type, uint32_t image_type, uint32_t image_variable,
+                             uint32_t coordinates) {
+    uint32_t image = spv_emit_load(e, image_type, image_variable);
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, 98, 5); /* OpImageRead */
+    put(&e->functions, result_type);
+    put(&e->functions, id);
+    put(&e->functions, image);
+    put(&e->functions, coordinates);
+    return id;
 }
 
 uint32_t spv_emit_image_texel_pointer(SpvEmitter* e, uint32_t scalar_type, uint32_t image_variable,

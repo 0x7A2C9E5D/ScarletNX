@@ -22,6 +22,7 @@ typedef struct {
     SpvPointerType* pointer_types;
     size_t pointer_count, pointer_capacity;
     uint32_t sampled_image_types[96], image_types[96], sampled_image_pointee[3];
+    uint32_t storage_image_keys[16][4], storage_image_types[16], storage_image_count; /* one OpTypeImage each */
 } SpvEmitter;
 
 typedef enum { SPV_STAGE_VERTEX = 0, SPV_STAGE_FRAGMENT = 4, SPV_STAGE_COMPUTE = 5 } SpvShaderStage;
@@ -116,6 +117,7 @@ uint32_t spv_emit_input_vec4(SpvEmitter* e, uint32_t vec4_type, uint32_t locatio
 uint32_t spv_emit_fragcoord_input(SpvEmitter* e, uint32_t vec4_type);
 uint32_t spv_emit_builtin_input_vec3(SpvEmitter* e, uint32_t vec3_type, uint32_t builtin);
 uint32_t spv_emit_builtin_input_u32(SpvEmitter* e, uint32_t u32_type, uint32_t builtin);
+void spv_emit_flat(SpvEmitter* e, uint32_t variable);
 uint32_t spv_emit_sampler2d(SpvEmitter* e, uint32_t f32_type, uint32_t set, uint32_t binding, int shadow,
                             uint32_t* sampled_type);
 uint32_t spv_emit_sampler_image(SpvEmitter* e, uint32_t f32_type, uint32_t set, uint32_t binding, uint32_t type,
@@ -124,6 +126,8 @@ uint32_t spv_emit_storage_image(SpvEmitter* e, uint32_t scalar_type, uint32_t se
                                 int array, uint32_t format, uint32_t* image_type);
 void spv_emit_image_write(SpvEmitter* e, uint32_t image_type, uint32_t image_variable, uint32_t coordinates,
                           uint32_t texel);
+uint32_t spv_emit_image_read(SpvEmitter* e, uint32_t result_type, uint32_t image_type, uint32_t image_variable,
+                             uint32_t coordinates);
 uint32_t spv_emit_image_texel_pointer(SpvEmitter* e, uint32_t scalar_type, uint32_t image_variable,
                                       uint32_t coordinates, uint32_t sample);
 uint32_t spv_emit_vec3_construct(SpvEmitter* e, uint32_t vec3_type, uint32_t x, uint32_t y, uint32_t z);

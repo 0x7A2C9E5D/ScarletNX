@@ -27,7 +27,7 @@ def main():
         nro_ms = Path(directory) / 'nro_ms.spv'
         nro_ms_array = Path(directory) / 'nro_ms_array.spv'
         nro_exchange = Path(directory) / 'nro_exchange.spv'
-        issue126 = tuple(Path(directory) / f'issue126_{i}.spv' for i in range(11))
+        issue126 = tuple(Path(directory) / f'issue126_{i}.spv' for i in range(15))
         subprocess.run(
             [args.generator, str(path), str(vertex), str(abs_fragment), str(stack_fragment), str(subgroup)], check=True
         )

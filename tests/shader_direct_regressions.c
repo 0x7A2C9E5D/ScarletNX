@@ -18,7 +18,7 @@
 static int failures;
 static const char* storage_paths[2];
 static const char* nro_paths[4];
-static const char* issue126_paths[11];
+static const char* issue126_paths[15];
 static void check(int condition, const char* what) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s\n", what);
@@ -221,6 +221,11 @@ static void fragment_storage_images(void) {
     free(code);
 }
 
+/* w without its predicate guard, with these destination, coordinate and handle registers */
+static u64 unguarded(u64 w, u32 d, u32 a, u32 handle) {
+    return (w & ~(0xffull | 0xffull << 8 | 0xfull << 16 | 0xffull << 39)) | d | (u64)a << 8 | 7ull << 16 |
+           (u64)handle << 39;
+}
 static u64 mov32i(u32 reg, u32 value) { return 0x0100000000000000ull | ((u64)value << 20) | 0x71000ull | reg; }
 
 static int brx_table(u32 bank, u32 offset, u32* value) {
@@ -347,6 +352,20 @@ static void issue126_shader_modes(void) {
         0x4c47020815c70606ull, /* LOP.OR R6, R6, c[0x2][0x570] */
         0xdea0000000070008ull | (2ull << 28) | (1ull << 37) | (6ull << 20),
     };
+    /* Ender Magnolia's buffer images: SULD.D.32, SUATOM.ADD and SUST.P on the handle MOV R4, c[0x2][0x128] */
+    const u64 buffer_surfaces[] = {
+        0x4c98078804a70004ull,
+        unguarded(0xeb10020200480370ull, 8, 0, 4),
+        (unguarded(0xea70070200980b0aull, 9, 0, 4) & ~(0xffull << 20)) | (1ull << 20),
+        unguarded(0xeb203a0200f77614ull, 12, 0, 4),
+    };
+    /* TXQ.B: the handle in R4, the level in R5 */
+    const u64 bindless_query[] = {(0x4c98078805a7001eull & ~0xffull) | 4, 0x5c9807800ff70005ull, 0xdf50000180470400ull};
+    /* a 2D texture offset from a register the translator can't resolve: the coordinates move instead */
+    const u64 dynamic_2d_offset[] = {0x4c98078800070004ull,
+                                     0xdea0000000070008ull | (2ull << 28) | (1ull << 36) | (4ull << 20)};
+    /* a clip distance and flow: every OpVariable before the clip distance's store */
+    const u64 clip_flow[] = {0xe24000000007000full, 0xeff000000007ff00ull | (0x2c0ull << 20)};
     /* Single-register writers and a TEX.B masked to one result write just below the handle. */
     const u64 handle_past_writers[] = {
         0x4c98078800070006ull,
@@ -370,8 +389,12 @@ static void issue126_shader_modes(void) {
                  {split_handle, 4, ST_FS, 0, 88},
                  {dynamic_3d_offset, 2, ST_FS, 0, 103},
                  {split_cbuf_handle, 3, ST_FS, 0, 88},
-                 {handle_past_writers, 5, ST_FS, 0, 88}};
-    for (int i = 0; i < 11; i++) {
+                 {handle_past_writers, 5, ST_FS, 0, 88},
+                 {buffer_surfaces, 4, ST_CS, 0, 98},
+                 {bindless_query, 3, ST_FS, 0, 103},
+                 {clip_flow, 2, ST_VS, 1, 65},
+                 {dynamic_2d_offset, 2, ST_FS, 0, 103}};
+    for (int i = 0; i < 15; i++) {
         ShaderInfo info;
         size_t words = 0;
         u32* code = translate_with_rt_mask(cases[i].instructions, cases[i].count, cases[i].stage, &info, &words, 1,
@@ -387,6 +410,11 @@ static void issue126_shader_modes(void) {
                           info.tex[0].bl2 && info.tex[0].bl2_cbuf == 2 && info.tex[0].bl2_off == 0x570 / 4,
                       "a handle ORed with a constant buffer operand keeps both reads");
             if (i == 10) check(info.ntex == 1, "a handle is tracked past writes to the registers below it");
+            if (i == 11)
+                check(info.nimg == 2 && info.img[0].type == 1 && info.img[0].kind == 1 && info.img[1].type == 1 &&
+                          info.img[1].kind == 2,
+                      "buffer loads and atomics share an R32ui image, stores take a typeless one");
+            if (i == 12) check(info.ntex == 1 && info.tex[0].bindless, "TXQ.B queries its tracked handle");
             save_fixture(issue126_paths[i], code, words);
         }
         free(code);
@@ -403,15 +431,35 @@ static void issue126_shader_modes(void) {
     check(!code && info.unsupported && !strcmp(info.first_unsupported, "untracked texture handle"),
           "a handle overwritten by a texture result is not tracked");
     free(code);
+    /* A handle loaded under P0 reaches a TEX.B under P0, and not one under !P0. */
+    const u64 tex_b = 0xdea0000000070008ull | (2ull << 28) | (1ull << 37) | (6ull << 20);
+    const u64 guarded[] = {0x4c98078800000006ull, tex_b & ~(0xfull << 16)};
+    code = translate(guarded, 2, ST_FS, &info, &words, 1);
+    check(code && !info.unsupported, "a handle loaded under a predicate reaches a use under the same one");
+    free(code);
+    const u64 other_guard[] = {0x4c98078800000006ull, (tex_b & ~(0xfull << 16)) | (8ull << 16)};
+    code = translate(other_guard, 2, ST_FS, &info, &words, 1);
+    check(!code && info.unsupported, "a handle loaded under P0 doesn't reach a use under !P0");
+    free(code);
+    /* A handle loaded before a forward branch reaches its target, unless the skipped code writes it. */
+    const u64 branch = 0xe24000000000000full | (16ull << 20); /* @P0 BRA over the next instruction */
+    const u64 across[] = {0x4c98078800070006ull, branch, FMUL_KEEP | 5, tex_b};
+    code = translate(across, 4, ST_FS, &info, &words, 1);
+    check(code && !info.unsupported, "a handle loaded before a forward branch reaches the branch target");
+    free(code);
+    const u64 skipped_write[] = {0x4c98078800070006ull, branch, FMUL_KEEP | 6, tex_b};
+    code = translate(skipped_write, 4, ST_FS, &info, &words, 1);
+    check(!code && info.unsupported, "a handle written in code a branch skips doesn't reach the target");
+    free(code);
 }
 
 int main(int argc, char** argv) {
-    if (argc != 1 && argc != 18) return 2;
-    if (argc == 18) {
+    if (argc != 1 && argc != 22) return 2;
+    if (argc == 22) {
         storage_paths[0] = argv[1];
         storage_paths[1] = argv[2];
         for (int i = 0; i < 4; i++) nro_paths[i] = argv[i + 3];
-        for (int i = 0; i < 11; i++) issue126_paths[i] = argv[i + 7];
+        for (int i = 0; i < 15; i++) issue126_paths[i] = argv[i + 7];
     }
     brx_length();
     f2i_modifiers();
