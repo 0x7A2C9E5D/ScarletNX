@@ -9,6 +9,7 @@
 #include "hle/services/audren_dsp.h"
 #include "runtime/platform/log.h"
 #include <math.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -90,6 +91,13 @@ static void make_luts(ARState* s) {
     make_lut(s->lut8[2], 8, 1024.0 / 1023, 32735.86, 0, 5.9); /* up to 1 */
 }
 
+/* the state's arrays follow it in one block */
+static size_t ar_carve(size_t* at, size_t count, size_t size) {
+    size_t off = (*at + _Alignof(max_align_t) - 1) & ~(size_t)(_Alignof(max_align_t) - 1);
+    *at = off + count * size;
+    return off;
+}
+
 ARState* audren_state_new(const u8* params) {
     u32 rate = rd32(params), frame = rd32(params + 4), buffers = rd32(params + 8), submixes = rd32(params + 0xC);
     u32 voices = rd32(params + 0x10), sinks = rd32(params + 0x14), effects = rd32(params + 0x18);
@@ -97,36 +105,49 @@ ARState* audren_state_new(const u8* params) {
     if (!rate || !frame || frame > 1024 || buffers > 0x400 || submixes > 0x100 || voices > 0x400 || sinks > 0x40 ||
         effects > 0x100)
         return NULL;
-    ARState* s = calloc(1, sizeof *s);
+    u32 nmix = submixes + 1, nsplit = 0, ndest = 0;
+    if (splitters && dests) { /* without both, no splitter is used */
+        nsplit = splitters < 0x1000 ? splitters : 0x1000;
+        ndest = dests < 0x4000 ? dests : 0x4000;
+    }
+    const ARState* z = NULL; /* for the element sizes */
+    size_t at = sizeof *z;
+    size_t voice = ar_carve(&at, voices ? voices : 1, sizeof *z->voice);
+    size_t chan = ar_carve(&at, voices ? voices : 1, sizeof *z->chan);
+    size_t mix = ar_carve(&at, nmix, sizeof *z->mix);
+    size_t effect = ar_carve(&at, effects ? effects : 1, sizeof *z->effect);
+    size_t sink = ar_carve(&at, sinks ? sinks : 1, sizeof *z->sink);
+    size_t buf = ar_carve(&at, (size_t)(buffers + SNX_AUDREN_CHANNELS) * frame, sizeof *z->buf);
+    size_t temp = ar_carve(&at, SNX_AUDREN_TEMP + SNX_AUDREN_HISTORY, sizeof *z->temp);
+    size_t order = ar_carve(&at, nmix, sizeof *z->order);
+    size_t split = ar_carve(&at, nsplit ? nsplit : 1, sizeof *z->split);
+    size_t dest = ar_carve(&at, ndest ? ndest : 1, sizeof *z->dest);
+    size_t stack = ar_carve(&at, nsplit ? (size_t)nmix * (nmix + 1) : 0, sizeof *z->stack);
+    size_t seen = ar_carve(&at, nmix, 2);
+    ARState* s = calloc(1, at);
     if (!s) return NULL;
+    u8* base = (u8*)s;
     s->rate = rate;
     s->frame = frame;
     s->buffers = buffers;
     s->nvoices = s->nres = voices;
-    s->nmix = submixes + 1;
+    s->nmix = nmix;
     s->neffects = effects;
     s->nsinks = sinks;
-    if (splitters && dests) { /* without both, no splitter is used */
-        s->nsplit = splitters < 0x1000 ? splitters : 0x1000;
-        s->ndest = dests < 0x4000 ? dests : 0x4000;
-    }
-    s->voice = calloc(voices ? voices : 1, sizeof *s->voice);
-    s->chan = calloc(voices ? voices : 1, sizeof *s->chan);
-    s->mix = calloc(s->nmix, sizeof *s->mix);
-    s->effect = calloc(effects ? effects : 1, sizeof *s->effect);
-    s->sink = calloc(sinks ? sinks : 1, sizeof *s->sink);
-    s->buf = calloc((size_t)(buffers + SNX_AUDREN_CHANNELS) * frame, sizeof *s->buf);
-    s->temp = calloc(SNX_AUDREN_TEMP + SNX_AUDREN_HISTORY, sizeof *s->temp);
-    s->order = calloc(s->nmix, sizeof *s->order);
-    s->split = calloc(s->nsplit ? s->nsplit : 1, sizeof *s->split);
-    s->dest = calloc(s->ndest ? s->ndest : 1, sizeof *s->dest);
-    if (s->nsplit) s->stack = calloc((size_t)s->nmix * (s->nmix + 1), sizeof *s->stack);
-    s->seen = calloc(s->nmix, 2);
-    if (!s->voice || !s->chan || !s->mix || !s->effect || !s->sink || !s->buf || !s->temp || !s->order || !s->split ||
-        !s->dest || (s->nsplit && !s->stack) || !s->seen) {
-        audren_state_free(s);
-        return NULL;
-    }
+    s->nsplit = nsplit;
+    s->ndest = ndest;
+    s->voice = (void*)(base + voice);
+    s->chan = (void*)(base + chan);
+    s->mix = (void*)(base + mix);
+    s->effect = (void*)(base + effect);
+    s->sink = (void*)(base + sink);
+    s->buf = (void*)(base + buf);
+    s->temp = (void*)(base + temp);
+    s->order = (void*)(base + order);
+    s->split = (void*)(base + split);
+    s->dest = (void*)(base + dest);
+    s->stack = nsplit ? (void*)(base + stack) : NULL;
+    s->seen = base + seen;
     for (u32 i = 0; i < s->nsplit; i++) s->split[i].head = -1;
     for (u32 i = 0; i < s->ndest; i++) {
         s->dest[i].next = -1;
@@ -138,9 +159,15 @@ ARState* audren_state_new(const u8* params) {
 
 static void fx_free(AREffect* e) {
     free(e->fx);
-    free(e->line);
     e->fx = NULL;
-    e->line = NULL;
+}
+
+/* an effect's state with its delay lines after it, in one block */
+static void* fx_alloc(size_t size, size_t samples, i64** lines) {
+    size = (size + sizeof(i64) - 1) & ~(sizeof(i64) - 1);
+    u8* p = calloc(1, size + samples * sizeof(i64));
+    *lines = p ? (i64*)(p + size) : NULL;
+    return p;
 }
 
 void audren_state_free(ARState* s) {
@@ -149,18 +176,6 @@ void audren_state_free(ARState* s) {
         free(s->effect[i].look);
         fx_free(&s->effect[i]);
     }
-    free(s->voice);
-    free(s->chan);
-    free(s->mix);
-    free(s->effect);
-    free(s->sink);
-    free(s->buf);
-    free(s->temp);
-    free(s->order);
-    free(s->split);
-    free(s->dest);
-    free(s->stack);
-    free(s->seen);
     free(s);
 }
 
@@ -1010,20 +1025,15 @@ static void delay_init(AREffect* e, const u8* p) {
     if (len > len_max) len = len_max;
     i32 samples = (i32)(len >> 32);
     u32 each = samples > 0 ? (u32)samples : 1;
-    ARDelay* d = calloc(1, sizeof *d);
-    i64* line = calloc((size_t)each * count, sizeof *line);
-    if (!d || !line) {
-        free(d);
-        free(line);
-        return;
-    }
+    i64* line;
+    ARDelay* d = fx_alloc(sizeof *d, (size_t)each * count, &line);
+    if (!d) return;
     d->count = count;
     for (u32 c = 0; c < count; c++) {
         d->line[c] = line + (size_t)c * each;
         d->len[c] = each;
     }
     e->fx = d;
-    e->line = line;
     delay_gains(d, p);
 }
 
@@ -1227,13 +1237,9 @@ static int reverb_init(AREffect* e, const u8* p, int long_pre_delay) {
         if (len[i] > (1 << 20)) return 0;
         total += (size_t)len[i] + 1;
     }
-    ARReverb* r = calloc(1, sizeof *r);
-    i64* mem = calloc(total, sizeof *mem);
-    if (!r || !mem) {
-        free(r);
-        free(mem);
-        return 0;
-    }
+    i64* mem;
+    ARReverb* r = fx_alloc(sizeof *r, total, &mem);
+    if (!r) return 0;
     i64* at = mem;
     for (int i = 0; i < 4; i++) {
         line_init(&r->fdn[i], at, (i32)len[i], 16384);
@@ -1245,7 +1251,6 @@ static int reverb_init(AREffect* e, const u8* p, int long_pre_delay) {
     at += len[8] + 1;
     line_init(&r->center, at, (i32)len[9], 16384);
     e->fx = r;
-    e->line = mem;
     reverb_params(r, p);
     return 1;
 }
@@ -1434,13 +1439,9 @@ static int i3dl2_init(AREffect* e, const u8* p) {
         if (len[i] > (1 << 20)) return 0;
         total += (size_t)len[i] + 1;
     }
-    ARI3dl2* r = calloc(1, sizeof *r);
-    i64* mem = calloc(total, sizeof *mem);
-    if (!r || !mem) {
-        free(r);
-        free(mem);
-        return 0;
-    }
+    i64* mem;
+    ARI3dl2* r = fx_alloc(sizeof *r, total, &mem);
+    if (!r) return 0;
     i64* at = mem;
     ARI3Line* lines[14] = {&r->fdn[0],    &r->fdn[1],    &r->fdn[2],    &r->fdn[3],    &r->decay0[0],
                            &r->decay0[1], &r->decay0[2], &r->decay0[3], &r->decay1[0], &r->decay1[1],
@@ -1450,7 +1451,6 @@ static int i3dl2_init(AREffect* e, const u8* p) {
         at += len[i] + 1;
     }
     e->fx = r;
-    e->line = mem;
     i3dl2_params(r, p);
     return 1;
 }

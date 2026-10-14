@@ -86,7 +86,6 @@ typedef struct {
     u32 look_len, look_pos[SNX_AUDREN_CHANNELS];
     ARBiquad bq[SNX_AUDREN_CHANNELS]; /* the biquad filter's, a channel apiece */
     void* fx;                         /* the delay's, a reverb's or the compressor's state, made when it initializes */
-    i64* line;                        /* and the delay lines in it */
 } AREffect;
 
 typedef struct {
