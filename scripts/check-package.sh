@@ -73,6 +73,27 @@ else
     fail "scarletnx -r smoke.nro exited $status, without games/Smoke$exe and its .abi" "$out"
 fi
 
+# The runtime left next to the game must start on its own, find the game's code by its name and take its ABI. The
+# banner comes after that and before the GPU, which CI runners lack
+if [ -f "games/Smoke$exe" ]; then
+    run env -C games "./Smoke$exe" -H
+    if grep -q '^ScarletNX - Smoke' <<<"$out"; then
+        pass "games/Smoke$exe started the game (exit $status: $(tail -n 1 <<<"$out"))"
+    else
+        fail "games/Smoke$exe exited $status before the game's banner" "$out"
+    fi
+fi
+
+# A dump on its own: recompile, then play, each a child of the first. Another name, which Windows would not tell
+# from Smoke by case
+cp smoke.nro play.nro
+run "$runtime" play.nro -H
+if grep -q '^ScarletNX - play' <<<"$out"; then
+    pass "scarletnx play.nro recompiled and started the game (exit $status)"
+else
+    fail "scarletnx play.nro exited $status before the game's banner" "$out"
+fi
+
 if [ "$failed" -ne 0 ]; then
     echo "$runtime does not work as installed" >&2
     exit 1

@@ -74,6 +74,16 @@ static char* title_name(const char* name, const SnxProgram* p, const char* input
 /* This build's, not the checkout's cpu.h: the modules are laid out as this build's headers say, and an installed
    build has no checkout */
 unsigned snx_game_abi(void) { return snx_module_abi(); }
+#ifdef SNX_WITH_RUNTIME
+/* In an AppImage this program is a launcher in its mount, which runs nothing once copied out: the AppImage is the
+   runtime, and a copy named after the game runs it. APPIMAGE is inherited, so it counts only inside the mount */
+static char* own_runtime(const SnxPaths* paths) {
+    const char *appimage = getenv("APPIMAGE"), *appdir = getenv("APPDIR");
+    if (appimage && *appimage && appdir && *appdir && snx_path_within(paths->executable, appdir))
+        return snx_absolute(appimage);
+    return snx_strdup(paths->executable);
+}
+#endif
 static SnxU64* read_hints(const char* base, size_t* count) {
     char *path = snx_format("%s.hints", base), line[256], *s;
     FILE* f = snx_fopen(path, "r");
@@ -370,7 +380,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     if (runtime) run = snx_absolute(runtime);
 #ifdef SNX_WITH_RUNTIME
     else if (host_win == compile.target_win)
-        run = snx_strdup(paths->executable);
+        run = own_runtime(paths);
 #endif
     else
         run = snx_build_runtime(paths, compile.target_win, compile.quiet);
