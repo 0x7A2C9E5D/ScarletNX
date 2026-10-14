@@ -33,6 +33,32 @@ int main(void) {
     gui_steps_finish(&s, true);
     assert(at(&s, 6)->state == GUI_STEP_DONE);
 
+    /* the lines of a step that start none: its notes, trimmed, the latest max of them, oldest first */
+    const GuiNote* notes[8];
+    int n = gui_step_notes(&s, at(&s, 3), notes, 8);
+    assert(n == 4 && !strcmp(notes[0]->text, "Functions: 9  instructions: 99"));
+    assert(!strcmp(notes[1]->text, "compiled block 1/4: code_000 (1.0 s)") &&
+           !strcmp(notes[3]->text, "LLVM module: 1.1 MB"));
+    assert(notes[0]->shown_ms == 20 && notes[1]->shown_ms == 30);
+    n = gui_step_notes(&s, at(&s, 3), notes, 2);
+    assert(n == 2 && !strcmp(notes[0]->text, "compiled block 3/4: code_002 (1.0 s)"));
+    assert(gui_step_notes(&s, at(&s, 2), notes, 8) == 1 && !strcmp(notes[0]->text, "an unknown line"));
+    n = gui_step_notes(&s, at(&s, 6), notes, 8); /* the second device line is the GPU step's too */
+    assert(n == 2 && !strcmp(notes[0]->text, "vulkan: pipeline cache loaded (662 KB)"));
+    assert(gui_step_notes(&s, at(&s, 0), notes, 8) == 0 && gui_step_notes(&s, at(&s, 4), notes, 8) == 0);
+    gui_steps_reset(&s);
+    feed(&s, "a line before any step\n", 1);
+    assert(s.notes == 0);
+    feed(&s, "Recompiling Many (1 modules)\n", 1);
+    for (int i = 0; i < GUI_NOTES_MAX + 5; ++i) {
+        char note_line[32];
+        snprintf(note_line, sizeof note_line, "note %d\n", i);
+        feed(&s, note_line, 2);
+    }
+    n = gui_step_notes(&s, at(&s, 0), notes, 8);
+    assert(s.notes == GUI_NOTES_MAX && n == 8 && !strcmp(notes[7]->text, "note 132") &&
+           !strcmp(s.note[0].text, "note 5"));
+
     /* a failed process fails the step it was in, even one already done, and a line cut short still counts */
     gui_steps_reset(&s);
     feed(&s, "Recompiling Broken (2 modules)\n  compiled block 1/2: x\nScarletNX - Bro", 5);
@@ -54,11 +80,16 @@ int main(void) {
     assert(gui_steps_percent(&s) == 100);
     for (int i = 0; i < GUI_STEPS_MAX + 3; ++i) {
         char line[64];
-        snprintf(line, sizeof line, "Unpacking part%d\n", i);
+        snprintf(line, sizeof line, "Unpacking part%d\nnote of part%d\n", i, i);
         feed(&s, line, (uint64_t)i);
     }
     assert(s.count == GUI_STEPS_MAX && !strcmp(at(&s, GUI_STEPS_MAX - 1)->detail, "part26"));
     assert(!strcmp(at(&s, 0)->detail, "part3"));
+    /* each step still has its own lines once older steps are gone */
+    n = gui_step_notes(&s, at(&s, GUI_STEPS_MAX - 1), notes, 8);
+    assert(n == 1 && !strcmp(notes[0]->text, "note of part26"));
+    n = gui_step_notes(&s, at(&s, 0), notes, 8);
+    assert(n == 1 && !strcmp(notes[0]->text, "note of part3"));
     puts("GUI steps: driver and runner lines, progress, finish passed");
     return 0;
 }

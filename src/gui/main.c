@@ -256,47 +256,74 @@ static void render_steps(App* app) {
     snprintf(head, sizeof head, "%s%s", name, dots(app));
     text(app, name_col, 1, head, soft);
     if (app->finished) text(app, 1, 2, app->message, app->abnormal_exit ? failure : soft);
-    /* when each line types: async, each from when it comes; sync, one after the other, the done ones faster */
-    static char runs[GUI_STEPS_MAX][3][112];
-    size_t lengths[GUI_STEPS_MAX][3], typed[GUI_STEPS_MAX];
-    Uint64 free_at = 0;
-    int typing = -1;
+    /* the rows: each step, then its lines when detailed, folded once it is done when collapse says so */
+    enum { NOTES_PER_STEP = 8, ROWS = GUI_STEPS_MAX * (NOTES_PER_STEP + 1) };
+    static char runs[ROWS][3][112];
+    static size_t lengths[ROWS][3], typed[ROWS];
+    static const GuiStep* owner[ROWS];
+    static bool is_note[ROWS];
+    static Uint64 shown[ROWS];
+    int rows = 0, last_step = -1;
     for (int i = 0; i < app->steps.count; ++i) {
         const GuiStep* s = &app->steps.step[i];
-        size_t total = step_runs(s, runs[i], lengths[i]);
-        typed[i] = total;
+        owner[rows] = s;
+        is_note[rows] = false;
+        shown[rows] = s->shown_ms;
+        step_runs(s, runs[rows], lengths[rows]);
+        last_step = rows++;
+        if (!theme->detailed || (theme->collapse && s->state == GUI_STEP_DONE)) continue;
+        const GuiNote* notes[NOTES_PER_STEP];
+        int n = gui_step_notes(&app->steps, s, notes, NOTES_PER_STEP);
+        for (int k = 0; k < n; ++k, ++rows) {
+            owner[rows] = s;
+            is_note[rows] = true;
+            shown[rows] = notes[k]->shown_ms;
+            snprintf(runs[rows][0], sizeof runs[rows][0], "%s", notes[k]->text);
+            runs[rows][1][0] = runs[rows][2][0] = 0;
+            lengths[rows][0] = SDL_utf8strlen(runs[rows][0]);
+            lengths[rows][1] = lengths[rows][2] = 0;
+        }
+    }
+    /* when each row types: async, each from when it came; sync, one after the other, a finished step's faster */
+    Uint64 free_at = 0;
+    int typing = -1;
+    for (int r = 0; r < rows; ++r) {
+        size_t total = lengths[r][0] + lengths[r][1] + lengths[r][2];
+        typed[r] = total;
         if (theme->line_in != GUI_LINE_TYPING || !theme->typing_ms) continue;
-        float per = (float)theme->typing_ms / (theme->typing_sync && s->state != GUI_STEP_ACTIVE ? 3.0f : 1.0f);
-        Uint64 start = theme->typing_sync ? SDL_max(s->shown_ms, free_at) : s->shown_ms;
+        float per = (float)theme->typing_ms / (theme->typing_sync && owner[r]->state != GUI_STEP_ACTIVE ? 3.0f : 1.0f);
+        Uint64 start = theme->typing_sync ? SDL_max(shown[r], free_at) : shown[r];
         free_at = start + (Uint64)(per * (float)total);
-        typed[i] = now < start ? 0 : (size_t)SDL_min((float)total, (float)(now - start) / per);
-        if (now >= start && typed[i] < total) typing = i;
+        typed[r] = now < start ? 0 : (size_t)SDL_min((float)total, (float)(now - start) / per);
+        if (now >= start && typed[r] < total) typing = r;
     }
     int top = 3, bottom = theme->bar ? app->rows - 5 : app->rows - 2;
-    int fit = SDL_max(1, bottom - top), first = SDL_max(0, app->steps.count - fit);
-    int cursor = typing >= 0 ? typing : app->steps.count - 1;
-    for (int i = first; i < app->steps.count; ++i) {
-        const GuiStep* s = &app->steps.step[i];
-        bool last = i == app->steps.count - 1;
+    int fit = SDL_max(1, bottom - top), first = SDL_max(0, rows - fit);
+    int cursor = typing >= 0 ? typing : last_step;
+    for (int r = first; r < rows; ++r) {
+        const GuiStep* s = owner[r];
+        bool last = s == &app->steps.step[app->steps.count - 1];
         bool failed = s->state == GUI_STEP_FAILED, active = s->state == GUI_STEP_ACTIVE;
-        size_t total = lengths[i][0] + lengths[i][1] + lengths[i][2];
-        Uint64 age = now > s->shown_ms ? now - s->shown_ms : 0;
+        size_t total = lengths[r][0] + lengths[r][1] + lengths[r][2];
+        Uint64 age = now > shown[r] ? now - shown[r] : 0;
         bool moving = theme->line_in == GUI_LINE_SLIDE || theme->line_in == GUI_LINE_FADE;
         float p = moving && theme->line_in_ms ? SDL_min(1.0f, (float)age / (float)theme->line_in_ms) : 1.0f;
-        float x = cw - (theme->line_in == GUI_LINE_SLIDE ? 16.0f * (float)app->scale * (1 - p) * (1 - p) : 0);
-        float y = ch * (float)(top + i - first);
+        float x = cw * (is_note[r] ? 3 : 1) -
+                  (theme->line_in == GUI_LINE_SLIDE ? 16.0f * (float)app->scale * (1 - p) * (1 - p) : 0);
+        float y = ch * (float)(top + r - first);
         SDL_Color color[3] = {failed ? failure : last ? ink : soft, failed ? failure : last || active ? ink : soft,
                               failed ? failure : ink};
-        size_t left = typed[i];
-        for (int r = 0; r < 3; ++r) {
-            size_t shown = SDL_min(left, lengths[i][r]);
-            x = text_px(app, x, y, runs[i][r], shown, color[r], p);
-            left -= shown;
+        if (is_note[r]) color[0] = soft;
+        size_t left = typed[r];
+        for (int k = 0; k < 3; ++k) {
+            size_t drawn = SDL_min(left, lengths[r][k]);
+            x = text_px(app, x, y, runs[r][k], drawn, color[k], p);
+            left -= drawn;
         }
-        if (typed[i] == total && active) x = text_px(app, x, y, dots(app), 3, ink, p);
+        if (!is_note[r] && typed[r] == total && active) x = text_px(app, x, y, dots(app), 3, ink, p);
         bool blink = !theme->blink_ms || (now / theme->blink_ms) % 2 == 0;
-        bool working = typing == i || (typing < 0 && active);
-        if (i == cursor && working && blink) text_px(app, x, y, "_", 1, ink, p);
+        bool working = typing == r || (typing < 0 && active);
+        if (r == cursor && working && blink) text_px(app, x, y, "_", 1, ink, p);
     }
     if (theme->bar) {
         int percent = gui_steps_percent(&app->steps);

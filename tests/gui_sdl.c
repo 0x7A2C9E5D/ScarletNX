@@ -596,6 +596,48 @@ int main(int argc, char** argv) {
     colored_text_on(&app, 1, 4, "    ", li, lp);
     app.theme.typing_sync = false;
     app.steps.step[1].shown_ms = second_shown;
+    /* detailed: a step's lines under it, indented; collapse folds a done step's lines, never a failed one's */
+    GuiSteps kept = app.steps;
+    SDL_Color lf = rgb(run->failure);
+    gui_steps_reset(&app.steps);
+    const char* detail = "Recompiling Game (1 modules)\n  compiled block 1/2: code_000 (1.0 s)\n"
+                         "  compiled block 2/2: code_001 (1.0 s)\nBuilt games/Game\n"
+                         "ScarletNX - Game\nfs: 3 files mapped\n";
+    gui_steps_feed(&app.steps, detail, strlen(detail), shown);
+    gui_steps_finish(&app.steps, false);
+    app.clock = later;
+    render(&app);
+    colored_text_on(&app, 1, 3, "RECOMPILE: GAME", ls, lp);
+    colored_text_on(&app, 16, 3, "...OK", li, lp);
+    colored_text_on(&app, 3, 4, "compiled block 1/2: code_000 (1.0 s)", ls, lp);
+    colored_text_on(&app, 3, 5, "compiled block 2/2: code_001 (1.0 s)", ls, lp);
+    colored_text_on(&app, 1, 6, "BUILT: GAMES/GAME", ls, lp);
+    colored_text_on(&app, 1, 7, "LAUNCH: GAME...FAILED", lf, lp);
+    colored_text_on(&app, 3, 8, "fs: 3 files mapped", ls, lp);
+    app.theme.collapse = true;
+    render(&app);
+    colored_text_on(&app, 1, 4, "BUILT: GAMES/GAME", ls, lp);
+    colored_text_on(&app, 1, 5, "LAUNCH: GAME...FAILED", lf, lp);
+    colored_text_on(&app, 3, 6, "fs: 3 files mapped", ls, lp);
+    app.theme.detailed = false;
+    render(&app);
+    colored_text_on(&app, 1, 5, "LAUNCH: GAME...FAILED", lf, lp);
+    colored_text_on(&app, 3, 6, "                  ", ls, lp);
+    /* a step still running keeps its lines, folded or not; the dots and the cursor stay on the step's own row */
+    app.theme.detailed = true;
+    gui_steps_reset(&app.steps);
+    const char* live = "Recompiling Live (1 modules)\n";
+    gui_steps_feed(&app.steps, live, strlen(live), shown);
+    gui_steps_feed(&app.steps, "Functions: 2\n", 13, shown + 1000);
+    app.clock = shown + 1000 + 3 * app.theme.typing_ms + 1; /* a line types from when it came */
+    render(&app);
+    colored_text_on(&app, 3, 4, "Fun", ls, lp);
+    colored_text_on(&app, 6, 4, "_         ", li, lp);
+    app.clock = later + 1200;
+    render(&app);
+    colored_text_on(&app, 16, 3, "..._", li, lp);
+    colored_text_on(&app, 3, 4, "Functions: 2    ", ls, lp);
+    app.steps = kept;
     /* the page's faint lines, one pixel row in four */
     app.theme = *gui_theme_builtin("yorha");
     app.clock = later;

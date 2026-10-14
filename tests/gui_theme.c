@@ -29,6 +29,7 @@ int main(void) {
     assert(def->run == GUI_RUN_CONSOLE && !def->fade_in_ms && !def->fade_out_ms && def->line_in == GUI_LINE_NONE);
     assert(loading->run == GUI_RUN_STEPS && loading->ring == GUI_RING_RIGHT && loading->texture && loading->bar);
     assert(loading->line_in == GUI_LINE_TYPING && loading->typing_ms == 25 && loading->fade_out_ms == 500);
+    assert(loading->detailed && !loading->collapse && !def->detailed && !def->collapse);
     assert(!strcmp(loading->title[GUI_SCREEN_LOADING], "BOOTING"));
     assert(def->head == GUI_STYLE_PLAIN && !def->focus_bar && !strcmp(def->marker, "- ") && !def->title[0][0]);
     assert(yorha->head == GUI_STYLE_BAR && yorha->focus_bar && yorha->title[GUI_SCREEN_COMPILING][0]);
@@ -53,9 +54,10 @@ int main(void) {
     /* the run's layout and its transitions; a time past 10 s, or not a number, keeps the base's */
     parse(&theme,
           "[theme]\nbase = yorha\n[run]\nlayout = console\nring = left\ntexture = false\nbar = no\npage = #050505\n"
-          "[transitions]\nline_in = slide\nline_in_ms = 300\nfade_in_ms = 10001\nfade_out_ms = 5s\n"
-          "typing_ms = 0\nblink_ms = -1\n[colors]\ndim = #010203\n");
+          "detailed = false\ncollapse = true\n[transitions]\nline_in = slide\nline_in_ms = 300\nfade_in_ms = 10001\n"
+          "fade_out_ms = 5s\ntyping_ms = 0\nblink_ms = -1\n[colors]\ndim = #010203\n");
     assert(theme.run == GUI_RUN_CONSOLE && theme.ring == GUI_RING_LEFT && !theme.texture && theme.bar);
+    assert(!theme.detailed && theme.collapse);
     assert(theme.line_in == GUI_LINE_SLIDE && theme.line_in_ms == 300 && theme.typing_ms == 0);
     assert(theme.fade_in_ms == loading->fade_in_ms && theme.fade_out_ms == loading->fade_out_ms);
     assert(theme.blink_ms == loading->blink_ms && same(theme.dim, (GuiRgb){1, 2, 3}));
@@ -136,6 +138,7 @@ int main(void) {
         assert(f.texture == b->texture && f.bar == b->bar && f.ring == b->ring && f.line_in == b->line_in);
         assert(f.fade_in_ms == b->fade_in_ms && f.fade_out_ms == b->fade_out_ms && f.line_in_ms == b->line_in_ms);
         assert(f.typing_ms == b->typing_ms && f.blink_ms == b->blink_ms && f.typing_sync == b->typing_sync);
+        assert(f.detailed == b->detailed && f.collapse == b->collapse);
         assert(f.format == GUI_THEME_FORMAT && b->format == GUI_THEME_FORMAT && !strcmp(f.author, b->author));
         assert(same(f.warning, b->warning) && same(f.run_colors.page, b->run_colors.page));
         assert(same(f.run_colors.ink, b->run_colors.ink) && same(f.run_colors.soft, b->run_colors.soft));

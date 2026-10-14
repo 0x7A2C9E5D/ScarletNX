@@ -59,6 +59,7 @@ static const GuiTheme builtins[] = {
                        .warning = {0xD9, 0xB2, 0x4A}},
         .texture = true,
         .bar = true,
+        .detailed = true,
         .ring = GUI_RING_RIGHT,
         .line_in = GUI_LINE_TYPING,
         .fade_in_ms = 250,
@@ -199,6 +200,10 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
             flag(&t->texture, value);
         else if (!strcmp(key, "bar"))
             flag(&t->bar, value);
+        else if (!strcmp(key, "detailed"))
+            flag(&t->detailed, value);
+        else if (!strcmp(key, "collapse"))
+            flag(&t->collapse, value);
         else
             palette(&t->run_colors, key, value);
     } else if (!strcmp(section, "transitions")) {

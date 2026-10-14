@@ -20,10 +20,24 @@ static void begin(GuiSteps* steps, const char* label, const char* detail, size_t
     if (detail_length >= sizeof step->detail) detail_length = sizeof step->detail - 1;
     memcpy(step->detail, detail, detail_length);
     step->shown_ms = now;
+    step->serial = ++steps->serial;
+}
+static void note(GuiSteps* steps, const char* s, uint64_t now) {
+    while (*s == ' ' || *s == '\t') ++s;
+    if (!*s || !steps->count) return;
+    if (steps->notes == GUI_NOTES_MAX)
+        memmove(steps->note, steps->note + 1, sizeof steps->note - sizeof *steps->note);
+    else
+        steps->notes++;
+    GuiNote* n = &steps->note[steps->notes - 1];
+    snprintf(n->text, sizeof n->text, "%s", s);
+    n->shown_ms = now;
+    n->step = steps->step[steps->count - 1].serial;
 }
 static bool prefix(const char* line, const char* text) { return !strncmp(line, text, strlen(text)); }
 static void line(GuiSteps* steps, const char* s, uint64_t now) {
     GuiStep* last = current(steps);
+    uint32_t before = steps->serial;
     unsigned value, total;
     const char* block = strstr(s, "compiled block ");
     if (block && last && !strcmp(last->label, "RECOMPILE") &&
@@ -53,6 +67,7 @@ static void line(GuiSteps* steps, const char* s, uint64_t now) {
         begin(steps, "GPU", device, (size_t)(end - device), now);
         steps->gpu = true;
     }
+    if (steps->serial == before) note(steps, s, now); /* not a step of its own: a line of the current one */
 }
 void gui_steps_feed(GuiSteps* steps, const char* data, size_t size, uint64_t now_ms) {
     for (size_t i = 0; i < size; ++i) {
@@ -83,4 +98,15 @@ int gui_steps_percent(const GuiSteps* steps) {
             percent = 100;
     }
     return percent;
+}
+int gui_step_notes(const GuiSteps* steps, const GuiStep* step, const GuiNote** out, int max) {
+    int count = 0;
+    for (int i = steps->notes - 1; i >= 0 && count < max; --i)
+        if (steps->note[i].step == step->serial) out[count++] = &steps->note[i];
+    for (int i = 0; i < count / 2; ++i) {
+        const GuiNote* swap = out[i];
+        out[i] = out[count - 1 - i];
+        out[count - 1 - i] = swap;
+    }
+    return count;
 }
