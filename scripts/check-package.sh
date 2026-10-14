@@ -94,6 +94,15 @@ else
     fail "scarletnx play.nro exited $status before the game's banner" "$out"
 fi
 
+# A PFS0 without files: only hactool, unpacking it, can tell there is no program in it
+printf 'PFS0\0\0\0\0\0\0\0\0\0\0\0\0' >empty.nsp
+run "$runtime" -x empty.nsp
+if grep -q 'no base Program NCA' <<<"$out"; then
+    pass "scarletnx -x empty.nsp ran hactool"
+else
+    fail "scarletnx -x empty.nsp exited $status without hactool unpacking it" "$out"
+fi
+
 if [ "$failed" -ne 0 ]; then
     echo "$runtime does not work as installed" >&2
     exit 1

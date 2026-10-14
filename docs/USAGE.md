@@ -200,8 +200,9 @@ SDL_VIDEO_DRIVER=x11 games/Game
 ```
 
 `--game` selects `Game_code.so`/`Game_data/`; or name the image `games/Game.AppImage` to load adjacent files.
-Without the checkout it was built from (the AppImage, the Windows zip), the driver works in the current folder:
-`work/` and `games/` go there, and each game gets a copy of the AppImage.
+The AppImage also prepares dumps: `./ScarletNX-x86_64.AppImage Game.nsp`. Without the checkout it was built from
+(the AppImage, the Windows zip), the driver works in the current folder: `work/` and `games/` go there, and each
+game gets a copy of the AppImage.
 X11 bypasses Wayland. [Licenses](CREDITS.md).
 
 ## Settings / input
