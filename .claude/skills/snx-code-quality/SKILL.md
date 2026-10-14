@@ -50,16 +50,18 @@ bool opt_present(const Opt* o) { return o->p != NULL; }
 
 **Does not apply when:**
 - NULL is a value of its own ("present and empty").
-- Every value of the type is valid (a `u32` offset where 0 is a real offset). Then use a sentinel
-  (`UINT32_MAX`), or keep a flag if no value is free.
+- Every value of the type is valid (a `u32` offset where 0 is a real offset). Then reserve zero first
+  (leave slot or byte 0 unused, so 0 still means none, as in rule 2); keep a flag only when nothing can
+  be reserved.
 - The flag says something else: `has_keys` in `extract.c` says the keys file exists, while `keys`
   always holds a path.
 
 ## 2. Indices, not pointer chains
 
-**Do:** keep the objects in one array and link them by index (`u32`, with a named "none" value such as
-`UINT32_MAX`). To sort a list, sort an array of (key, index) pairs with `qsort` instead of
-merge-sorting `next` pointers.
+**Do:** keep the objects in one array and link them by index (`u32`), with 0 as none: slot 0 of the
+array is never a real object. Not `UINT32_MAX` or -1: `if (!n)` then reads like a null pointer check,
+a compare with zero is the cheapest there is, and no index needs an out-of-range case. To sort a list,
+sort an array of (key, index) pairs with `qsort` instead of merge-sorting `next` pointers.
 
 **Why:** walking an array touches memory in order, while a chain of pointers jumps across the heap. An
 index stays valid when the array is reallocated and when the array is written out (rule 5). A pointer
@@ -86,18 +88,17 @@ bool belongs_to(const FsTree* tree, const FsNode* n) {
 
 <!-- snippet: indices-right -->
 ```c
-#define SNX_FS_NONE UINT32_MAX
 typedef struct {
-    u32 parent; /* SNX_FS_NONE at the top */
+    u32 parent; /* 0 at the top */
     bool attached;
 } FsNode;
 typedef struct {
-    FsNode* nodes; /* every node of the tree */
+    FsNode* nodes; /* every node of the tree; nodes[0] is none, so index 0 means no node */
     u32 root;
 } FsTree;
 bool belongs_to(const FsTree* tree, u32 n) {
-    if (n == SNX_FS_NONE || !tree->nodes[n].attached) return false;
-    while (tree->nodes[n].parent != SNX_FS_NONE) {
+    if (!n || !tree->nodes[n].attached) return false;
+    while (tree->nodes[n].parent) {
         n = tree->nodes[n].parent;
         if (!tree->nodes[n].attached) return false;
     }
@@ -228,7 +229,7 @@ typedef struct Node {
 ```c
 typedef struct {
     u32 name;   /* offset of its NUL-terminated name in the names that follow the nodes */
-    u32 parent; /* index in the nodes; UINT32_MAX at the top */
+    u32 parent; /* index in the nodes, 0 at the top: nodes[0] is none */
 } Node;
 typedef struct {
     u32 count; /* then Node[count], then the names: one block, copied or written out as is */
