@@ -52,6 +52,8 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
                 if (SNX_GUI_HAS_GCCJIT) menu->gccjit = !menu->gccjit;
             } else if (menu->selected == GUI_GDBSTUB)
                 menu->gdbstub = !menu->gdbstub;
+            else if (menu->selected == GUI_THEME)
+                menu->theme_next = true;
             else if (menu->selected == GUI_EXIT)
                 menu->quit = true;
             else if (menu->selected == GUI_KEYS)
@@ -75,6 +77,8 @@ const char* gui_setting_description(const GuiMenu* menu) {
                 : "Program was not compiled with libgccjit";
         case GUI_GDBSTUB:
             return "Enables gdbstub on port 1234";
+        case GUI_THEME:
+            return "Built-in themes, then each themes/<name>/theme.ini";
         default: return "";
     }
 }
@@ -274,4 +278,19 @@ char* gui_drop_path(const char* text, bool text_drop) {
 invalid:
     free(result);
     return NULL;
+}
+
+static const char banner_text[] = "\nScarletNX - ";
+void gui_banner_reset(GuiBanner* banner) {
+    banner->matched = 1; /* the output starts at the start of a line */
+    banner->seen = false;
+}
+bool gui_banner_feed(GuiBanner* banner, const char* data, size_t size) {
+    for (size_t i = 0; i < size && !banner->seen; ++i) {
+        if (data[i] == banner_text[banner->matched]) {
+            if (++banner->matched == sizeof banner_text - 1) banner->seen = true;
+        } else
+            banner->matched = data[i] == '\n' ? 1 : 0; /* only a newline starts the text again */
+    }
+    return banner->seen;
 }

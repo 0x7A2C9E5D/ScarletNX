@@ -4,6 +4,9 @@
 #define SNX_GUI_NO_MAIN
 #include "../src/gui/main.c"
 #include <assert.h>
+/* the default theme's colours, as the checks below name them */
+static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, red = {255, 0, 0, 255},
+                       pink = {255, 85, 255, 255}, black = {0, 0, 0, 255};
 
 static void key(App* app, SDL_Keycode code) {
     SDL_Event e = {0};
@@ -30,8 +33,8 @@ static void mouse(App* app, int col, int row, bool click) {
     }
     event(app, &e);
 }
-static void colored_text_at(App* app, int col, int row, const char* prompt, SDL_Color color) {
-    /* Verify the exact text and its glyph color in the real renderer. */
+static void colored_text_on(App* app, int col, int row, const char* prompt, SDL_Color color, SDL_Color back) {
+    /* Verify the exact text, its glyph color and what is behind it in the real renderer. */
     SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
     assert(image);
     for (int i = 0; prompt[i]; ++i)
@@ -41,9 +44,13 @@ static void colored_text_at(App* app, int col, int row, const char* prompt, SDL_
                 assert(SDL_ReadSurfacePixel(image, ((i + col) * 8 + x) * app->scale, (row * 16 + y) * app->scale, &r, &g,
                                             &b, &a));
                 bool ink = (gui_vga_font[(unsigned char)prompt[i] * 16 + y] & (0x80 >> x)) != 0;
-                assert(r == (ink ? color.r : 0) && g == (ink ? color.g : 0) && b == (ink ? color.b : 0));
+                SDL_Color want = ink ? color : back;
+                assert(r == want.r && g == want.g && b == want.b);
             }
     SDL_DestroySurface(image);
+}
+static void colored_text_at(App* app, int col, int row, const char* prompt, SDL_Color color) {
+    colored_text_on(app, col, row, prompt, color, black);
 }
 static void colored_text(App* app, int row, const char* prompt, SDL_Color color) {
     colored_text_at(app, 1, row, prompt, color);
@@ -100,6 +107,7 @@ int main(int argc, char** argv) {
         assert(argc == 5 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "-f"));
         if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
         assert(!strcmp(argv[i++], "-S") && !strcmp(argv[i++], "-s") && i == argc);
+        puts("Recompiling option flags\nScarletNX - option flags"); /* the runner's banner: now loading */
         return 0;
     }
     if (argc > 1) {
@@ -317,6 +325,7 @@ int main(int argc, char** argv) {
     event(&app, &e);
     assert(app.menu.running && app.menu.selected == GUI_SWITCH);
     finish(&app, 0);
+    assert(!app.native && !app.banner.seen); /* a driver that started no game stayed compiling */
     key(&app, SDLK_DOWN);
     key(&app, SDLK_SPACE);
     assert(app.menu.selected == GUI_LINUX && app.menu.view == GUI_LOAD_OPTIONS);
@@ -339,6 +348,7 @@ int main(int argc, char** argv) {
     app.menu.gdbstub = true;
     launch(&app, snx_strdup(flags_input), false);
     finish(&app, 0);
+    assert(!app.native && app.banner.seen);
     app.menu.gccjit = app.menu.gdbstub = false;
     app.menu.selected = GUI_LINUX;
     free(flags_input);
@@ -440,7 +450,7 @@ int main(int argc, char** argv) {
     render(&app);
     colored_text(&app, 6, app.games.names[1], yellow);
     mouse(&app, 2, 5, true); /* native prepared game, not another extraction */
-    assert(app.menu.running);
+    assert(app.menu.running && app.native && screen(&app) == GUI_SCREEN_LOADING);
     finish(&app, 0);
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RETURN);
@@ -481,6 +491,39 @@ int main(int argc, char** argv) {
         colored_text(&app, app.rows - 4, "Enables gdbstub on port 1234", normal);
         assert(menu_row(&app, GUI_EXIT) < app.rows - 4);
     }
+    /* Themes: the menu item goes through the built-ins, then each themes/<id>/theme.ini */
+    char* themes = snx_path_join(temporary, "themes");
+    char* custom = snx_path_join(themes, "custom");
+    char* custom_ini = snx_path_join(custom, "theme.ini");
+    const char* ini = "[theme]\nbase = yorha\nname = Custom test\n[colors]\npage = #102030\nink = not a colour\n"
+                      "[head]\nmenu = TEST  /  MENU\n[body]\nmarker = \"> \"\n";
+    assert(!snx_mkdirs(custom) && !snx_write_file(custom_ini, ini, strlen(ini)));
+    free(app.themes_dir);
+    app.themes_dir = snx_strdup(themes);
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_THEME), "- Theme: Default", normal);
+    mouse(&app, 2, menu_row(&app, GUI_THEME), true);
+    assert(!strcmp(app.theme.id, "yorha"));
+    render(&app);
+    SDL_Color page = rgb(app.theme.page), ink = rgb(app.theme.ink);
+    colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", page, ink);
+    colored_text_on(&app, 3, menu_row(&app, GUI_THEME), "Theme: YoRHa", page, ink); /* the focused line's band */
+    colored_text_on(&app, 3, menu_row(&app, GUI_EXIT), "Exit", ink, page);
+    colored_text_on(&app, 1, app.rows - 2, "CWD:", page, ink);
+    mouse(&app, 2, menu_row(&app, GUI_THEME), true);
+    assert(!strcmp(app.theme.id, "custom") && !strcmp(app.theme.name, "Custom test"));
+    render(&app);
+    page = (SDL_Color){0x10, 0x20, 0x30, 255}; /* its own page; its ink, unreadable, is YoRHa's */
+    colored_text_on(&app, 1, 0, "TEST  /  MENU", page, ink);
+    colored_text_on(&app, 1, menu_row(&app, GUI_THEME), "> Theme: Custom test", page, ink);
+    colored_text_on(&app, 1, menu_row(&app, GUI_EXIT), "> Exit", ink, page);
+    mouse(&app, 2, menu_row(&app, GUI_THEME), true);
+    assert(!strcmp(app.theme.id, "default"));
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_THEME), "- Theme: Default", pink); /* activated, as any option */
+    free(custom_ini);
+    free(custom);
+    free(themes);
     e.type = SDL_EVENT_QUIT;
     event(&app, &e);
     assert(app.menu.quit);

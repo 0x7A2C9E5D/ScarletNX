@@ -43,6 +43,8 @@ English text only. No font files or localization packages are needed.
 - Selecting or hovering these settings shows a short description immediately
   above the CPU/RAM footer. The CPU-only Linux driver does not support these
   Switch options; they are never forwarded as Linux guest arguments.
+- **Theme** switches to the next theme: the built-in Default and YoRHa, then each
+  folder of `themes/` (see [Themes](#themes)). It lasts for the session.
 - **Exit** closes the launcher. Closing its window during a run terminates the
   entire owned process tree, so let the game exit normally to preserve its saves.
 
@@ -105,6 +107,51 @@ immediate parent. Linux uses `/proc`, FreeBSD uses `sysctl`. Windows assigns the
 suspended driver to a Job Object before letting it run, containing its descendants
 and providing job-wide CPU accounting. No elevated privileges are needed.
 
+## Themes
+
+A theme colours and dresses the screen's three parts: the head (a title and the hints
+at the top), the body (the menu, the file list or the driver's output) and the footer
+(resource use and the working directory). It applies to the menu screens and to the
+run, which is **compiling** until the runner prints its `ScarletNX - <name>` banner and
+**loading** from then on.
+
+The built-ins are `default`, the look above, and `yorha`, paper and ink with a header
+bar, square markers and the focused line inverted. Any other theme is a folder of
+`themes/` (beside `games/`, in the working directory) holding a `theme.ini`; the folder's
+name is its id. `[theme] base` picks the built-in it starts from, and a key it leaves
+out, or that cannot be read, keeps the base's value.
+
+```ini
+[theme]
+name = Night ink
+; default | yorha
+base = yorha
+[colors]
+; #RRGGBB. soft: hints, secondary text, rules. focus: the focused line, or its band
+page = #101418
+ink = #D8D4C4
+soft = #8A8676
+focus = #D8D4C4
+active = #C8A040
+failure = #D05040
+[head]
+; plain | bar | none; rule: a line under the head
+style = bar
+rule = true
+; the title per screen: menu, games, keys, compiling, loading
+menu = NIGHT  /  MENU
+[body]
+; before each menu item; quotes keep spaces
+marker = "> "
+; color | bar
+focus = bar
+[footer]
+style = plain
+rule = true
+```
+
+Comments take a line of their own, starting with `;` or `#`.
+
 ## Building and testing
 
 The NX build enables `SNX_BUILD_GUI` by default. Disable it with
@@ -135,7 +182,9 @@ Key setup tests cover installation, replacement, invalid drops, failed writes,
 self-copy safety, cancellation, and the bright-red overwrite warning.
 Setting tests cover ON/OFF argument combinations, backend availability, mouse
 hover versus explicit activation, persistent submenus, yellow/pink highlighting
-and footer descriptions.
+and footer descriptions. Theme tests cover the built-ins, a `theme.ini` over its base
+(unreadable values and unknown keys included), the `themes/` folders listed, the
+compiling and loading screens, and the YoRHa bars and band in the real renderer.
 SDL tests use the dummy video driver and the
 software renderer, exercising the real font and event handlers without a display.
 The font's provenance and public-domain notice are in

@@ -9,6 +9,7 @@
 #include "font.h"
 #include "model.h"
 #include "gui_process.h"
+#include "theme.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,17 +27,19 @@ typedef struct {
     GuiGames games;
     GuiConsole console;
     GuiUsage usage;
+    GuiTheme theme;
+    GuiThemes themes;
+    GuiBanner banner;
     const char* drivers;
-    char *cwd, *file, *games_dir, *keys_path;
+    char *cwd, *file, *games_dir, *keys_path, *themes_dir;
     char message[512];
     int cols, rows, scale, log_top;
     Uint64 sampled;
-    bool has_output, finished, aborting, abnormal_exit;
+    bool has_output, finished, aborting, abnormal_exit, native;
 } App;
 static const char* const items[] = {"Load Switch NSP/XCI/NRO", "Load Linux ARM ELF", "Setup device keys",
-                                   "Fullscreen", "Enable libgccjit", "Enable gdbstub", "Exit"};
-static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, muted = {160, 170, 180, 255},
-                       red = {255, 0, 0, 255}, pink = {255, 85, 255, 255};
+                                   "Fullscreen", "Enable libgccjit", "Enable gdbstub", "Theme", "Exit"};
+static SDL_Color rgb(GuiRgb c) { return (SDL_Color){c.r, c.g, c.b, 255}; }
 
 static SDL_Texture* create_font(SDL_Renderer* renderer) {
     SDL_Surface* surface = SDL_CreateSurface(128, 256, SDL_PIXELFORMAT_RGBA32);
@@ -68,21 +71,56 @@ static void text(App* app, int x, int y, const char* value, SDL_Color color) {
         glyph(app, x++, y, gui_glyph(codepoint));
     }
 }
+/* rows of the whole width, as a band behind text */
+static void band(App* app, int row, int rows, GuiRgb c) {
+    int width, height;
+    SDL_GetRenderOutputSize(app->renderer, &width, &height);
+    SDL_FRect r = {0, (float)(row * 16 * app->scale), (float)width, (float)(rows * 16 * app->scale)};
+    SDL_SetRenderDrawColor(app->renderer, c.r, c.g, c.b, 255);
+    SDL_RenderFillRect(app->renderer, &r);
+}
+/* a line between two rows, across the text area */
+static void rule(App* app, int row) {
+    SDL_FRect r = {(float)(8 * app->scale), (float)(row * 16 * app->scale - app->scale),
+                   (float)((app->cols - 2) * 8 * app->scale), (float)app->scale};
+    SDL_SetRenderDrawColor(app->renderer, app->theme.soft.r, app->theme.soft.g, app->theme.soft.b, 255);
+    SDL_RenderFillRect(app->renderer, &r);
+}
+/* a selectable line: activated, focused (in the focus colour, or on a band) or plain */
+static void entry(App* app, int x, int y, const char* label, bool activated, bool focused) {
+    if (focused && app->theme.focus_bar) {
+        band(app, y, 1, app->theme.focus);
+        text(app, x, y, label, rgb(app->theme.page));
+    } else
+        text(app, x, y, label, rgb(activated ? app->theme.active : focused ? app->theme.focus : app->theme.ink));
+}
+static GuiScreen screen(const App* app) {
+    if (app->menu.running || app->finished) return app->native || app->banner.seen ? GUI_SCREEN_LOADING
+                                                                                    : GUI_SCREEN_COMPILING;
+    return app->menu.view == GUI_LOAD_GAMES ? GUI_SCREEN_GAMES
+           : app->menu.view == GUI_LOAD_KEYS ? GUI_SCREEN_KEYS
+                                             : GUI_SCREEN_MENU;
+}
+static void next_theme(App* app) {
+    gui_themes_scan(&app->themes, app->themes_dir);
+    size_t i = 0;
+    while (i < app->themes.count && strcmp(app->themes.ids[i], app->theme.id)) ++i;
+    if (app->themes.count) gui_theme_load(&app->theme, app->themes_dir, app->themes.ids[(i + 1) % app->themes.count]);
+}
 static int menu_spacing(const App* app) { return app->rows >= 30 ? 2 : 1; }
 static int menu_row(const App* app, int item) {
     return 4 + item * menu_spacing(app) +
            (app->menu.view != GUI_LOAD_NONE && item > app->menu.active ? 2 : 0);
 }
-static SDL_Color item_color(bool activated, bool focused) {
-    return activated ? pink : focused ? yellow : normal;
-}
 static void menu_label(const App* app, int item, char* label, size_t size) {
     if (item == GUI_FULLSCREEN || item == GUI_GCCJIT || item == GUI_GDBSTUB) {
         bool enabled = item == GUI_FULLSCREEN ? app->menu.fullscreen
                        : item == GUI_GCCJIT  ? app->menu.gccjit : app->menu.gdbstub;
-        snprintf(label, size, "- [%s] %s", enabled ? "ON" : "OFF", items[item]);
+        snprintf(label, size, "%s[%s] %s", app->theme.marker, enabled ? "ON" : "OFF", items[item]);
+    } else if (item == GUI_THEME) {
+        snprintf(label, size, "%s%s: %s", app->theme.marker, items[item], app->theme.name);
     } else {
-        snprintf(label, size, "- %s", items[item]);
+        snprintf(label, size, "%s%s", app->theme.marker, items[item]);
     }
 }
 static void layout(App* app) {
@@ -99,39 +137,54 @@ static void layout(App* app) {
 }
 static void render(App* app) {
     layout(app);
-    SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255); /* Always OLED black */
+    const GuiTheme* theme = &app->theme;
+    bool idle = !app->menu.running && !app->finished;
+    bool head = theme->head != GUI_STYLE_NONE, foot = theme->footer != GUI_STYLE_NONE;
+    SDL_Color ink = rgb(theme->ink), soft = rgb(theme->soft), focus = rgb(theme->focus), paper = rgb(theme->page);
+    SDL_Color active = rgb(theme->active), failure = rgb(theme->failure);
+    SDL_SetRenderDrawColor(app->renderer, theme->page.r, theme->page.g, theme->page.b, 255);
     SDL_RenderClear(app->renderer);
-    if (app->menu.view == GUI_LOAD_GAMES && !app->menu.running && !app->finished) {
-        text(app, 1, 1, "Up/Down: select. Enter/Space: open. Left/Right or PgUp/PgDown: page.", normal);
-        text(app, 1, 2, app->games_dir, muted);
-        text(app, 1, 3, "Back [ESC]", app->browser.selected == 0 ? yellow : normal);
+    const char* title = theme->title[screen(app)];
+    if (head && title[0]) {
+        if (theme->head == GUI_STYLE_BAR) band(app, 0, 1, theme->ink);
+        text(app, 1, 0, title, theme->head == GUI_STYLE_BAR ? paper : ink);
+    }
+    if (head && theme->head_rule) rule(app, 4);
+    if (app->menu.view == GUI_LOAD_GAMES && idle) {
+        if (head) {
+            text(app, 1, 1, "Up/Down: select. Enter/Space: open. Left/Right or PgUp/PgDown: page.", ink);
+            text(app, 1, 2, app->games_dir, soft);
+        }
+        entry(app, 1, 3, "Back [ESC]", false, app->browser.selected == 0);
         size_t start = app->browser.page * app->browser.page_size;
         size_t count = gui_browser_items(&app->browser);
-        for (size_t i = 0; i < count; ++i) {
-            text(app, 1, 5 + (int)i, app->games.names[start + i],
-                 item_color(app->browser.activated && app->browser.active == start + i,
-                            app->browser.selected == i + 1));
-        }
-        if (!app->games.count) text(app, 1, 5, "No executables found in games/.", muted);
+        for (size_t i = 0; i < count; ++i)
+            entry(app, 1, 5 + (int)i, app->games.names[start + i],
+                  app->browser.activated && app->browser.active == start + i, app->browser.selected == i + 1);
+        if (!app->games.count) text(app, 1, 5, "No executables found in games/.", soft);
         char page[128];
         snprintf(page, sizeof(page), "Page %zu/%zu   %zu executable(s)", app->browser.page + 1,
                  gui_browser_pages(&app->browser), app->games.count);
-        text(app, 1, app->rows - 5, page, muted);
-        text(app, 1, app->rows - 4, app->message, yellow);
-    } else if (app->menu.view == GUI_LOAD_KEYS && !app->menu.running && !app->finished) {
-        text(app, 1, 1, "Setup device keys: drag and drop to this window", normal);
-        text(app, 1, 2, "Ctrl+V: paste a path. ESC: back.", muted);
-        text(app, 1, 3, app->keys_path ? app->keys_path : "Home directory unavailable.", normal);
+        text(app, 1, app->rows - 5, page, soft);
+        text(app, 1, app->rows - 4, app->message, focus);
+    } else if (app->menu.view == GUI_LOAD_KEYS && idle) {
+        if (head) {
+            text(app, 1, 1, "Setup device keys: drag and drop to this window", ink);
+            text(app, 1, 2, "Ctrl+V: paste a path. ESC: back.", soft);
+            text(app, 1, 3, app->keys_path ? app->keys_path : "Home directory unavailable.", ink);
+        }
         if (app->keys_path && snx_is_file(app->keys_path))
-            text(app, 1, 4, "Keys already setup. This will overwrite the previous ones", red);
-        text(app, 1, 6, app->message, yellow);
-        text(app, 1, 8, "Back [ESC]", app->browser.selected == 0 ? yellow : normal);
-    } else if (!app->menu.running && !app->finished) {
-        text(app, 1, 1, "Arrows/mouse: move. Space/Enter/click: select.", normal);
-        text(app, 1, 2,
-             app->menu.view == GUI_LOAD_DROP ? "Drop a file now. Ctrl+V: paste a path. ESC: back."
-                                             : "Choose a load option. ESC: back.",
-             muted);
+            text(app, 1, 4, "Keys already setup. This will overwrite the previous ones", failure);
+        text(app, 1, 6, app->message, focus);
+        entry(app, 1, 8, "Back [ESC]", false, app->browser.selected == 0);
+    } else if (idle) {
+        if (head) {
+            text(app, 1, 1, "Arrows/mouse: move. Space/Enter/click: select.", ink);
+            text(app, 1, 2,
+                 app->menu.view == GUI_LOAD_DROP ? "Drop a file now. Ctrl+V: paste a path. ESC: back."
+                                                 : "Choose a load option. ESC: back.",
+                 soft);
+        }
         for (int i = 0; i < GUI_ITEM_COUNT; ++i) {
             bool is_active = app->menu.activated && app->menu.active == i;
             bool is_focused = app->menu.selected == i &&
@@ -139,48 +192,52 @@ static void render(App* app) {
             int row = menu_row(app, i);
             char label[100];
             menu_label(app, i, label, sizeof(label));
-            text(app, 1, row, label, item_color(is_active, is_focused));
+            entry(app, 1, row, label, is_active, is_focused);
             if (i == app->menu.active && app->menu.view != GUI_LOAD_NONE) {
-                text(app, 3, row + 1, "-> Select via drag and drop",
-                     item_color(app->menu.load_activated && app->menu.load_active == GUI_LOAD_DRAG,
-                                app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DRAG));
-                text(app, 3, row + 2, "-> Select file from games/ instead",
-                     item_color(app->menu.load_activated && app->menu.load_active == GUI_LOAD_DIRECTORY,
-                                app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DIRECTORY));
+                entry(app, 3, row + 1, "-> Select via drag and drop",
+                      app->menu.load_activated && app->menu.load_active == GUI_LOAD_DRAG,
+                      app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DRAG);
+                entry(app, 3, row + 2, "-> Select file from games/ instead",
+                      app->menu.load_activated && app->menu.load_active == GUI_LOAD_DIRECTORY,
+                      app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DIRECTORY);
             }
         }
-        text(app, 1, app->log_top - 4, app->message, app->abnormal_exit ? red : yellow);
-        if (app->has_output) text(app, 1, app->log_top - 2, "Last output (no scrollback):", muted);
-    } else {
+        text(app, 1, app->log_top - 4, app->message, app->abnormal_exit ? failure : focus);
+        if (app->has_output) text(app, 1, app->log_top - 2, "Last output (no scrollback):", soft);
+    } else if (head) {
         text(app, 1, 1, app->finished ? app->message : items[app->menu.selected],
-             app->abnormal_exit ? red : app->finished ? yellow : pink);
-        text(app, 1, 2, app->file ? app->file : "", normal);
+             app->abnormal_exit ? failure : app->finished ? focus : active);
+        text(app, 1, 2, app->file ? app->file : "", ink);
         if (app->finished)
-            text(app, 1, 3, "Press [ESC] to return to menu", red);
+            text(app, 1, 3, "Press [ESC] to return to menu", failure);
         else
             text(app, 1, 3, app->aborting ? "Aborting process tree..." : "Press [ESC] to abort and return to menu",
-                 red);
+                 failure);
     }
     if (app->has_output && app->menu.view != GUI_LOAD_GAMES && app->menu.view != GUI_LOAD_KEYS) {
-        SDL_SetTextureColorMod(app->font, normal.r, normal.g, normal.b);
+        SDL_SetTextureColorMod(app->font, theme->ink.r, theme->ink.g, theme->ink.b);
         for (int y = 0; y < app->console.rows; ++y)
             for (int x = 0; x < app->console.cols; ++x)
                 if (app->log_top + y < app->rows - 4 && app->console.cells[y][x] != ' ')
                     glyph(app, x + 1, app->log_top + y, app->console.cells[y][x]);
     }
-    if (!app->menu.running && !app->finished &&
-        (app->menu.view == GUI_LOAD_NONE ||
-         ((app->menu.view == GUI_LOAD_OPTIONS || app->menu.view == GUI_LOAD_DROP) && !app->menu.focus_load)))
-        text(app, 1, app->rows - 4, gui_setting_description(&app->menu), normal);
-    char footer[256];
-    if (app->usage.available)
-        snprintf(footer, sizeof(footer), "GUI + children: RAM %.1f MiB (sum RSS)  CPU %.1f%% (100%% = 1 core)",
-                 (double)app->usage.memory_bytes / 1048576, app->usage.cpu_percent);
-    else
-        snprintf(footer, sizeof(footer), "GUI + children: resource usage unavailable");
-    text(app, 1, app->rows - 3, footer, muted);
-    text(app, 1, app->rows - 2, "CWD:", muted);
-    text(app, 6, app->rows - 2, app->cwd ? app->cwd : "(unavailable)", normal);
+    if (idle && (app->menu.view == GUI_LOAD_NONE ||
+                 ((app->menu.view == GUI_LOAD_OPTIONS || app->menu.view == GUI_LOAD_DROP) && !app->menu.focus_load)))
+        text(app, 1, app->rows - 4, gui_setting_description(&app->menu), ink);
+    if (foot) {
+        bool bar = theme->footer == GUI_STYLE_BAR;
+        if (bar) band(app, app->rows - 3, 3, theme->ink);
+        if (theme->footer_rule) rule(app, app->rows - 3);
+        char footer[256];
+        if (app->usage.available)
+            snprintf(footer, sizeof(footer), "GUI + children: RAM %.1f MiB (sum RSS)  CPU %.1f%% (100%% = 1 core)",
+                     (double)app->usage.memory_bytes / 1048576, app->usage.cpu_percent);
+        else
+            snprintf(footer, sizeof(footer), "GUI + children: resource usage unavailable");
+        text(app, 1, app->rows - 3, footer, bar ? paper : soft);
+        text(app, 1, app->rows - 2, "CWD:", bar ? paper : soft);
+        text(app, 6, app->rows - 2, app->cwd ? app->cwd : "(unavailable)", bar ? paper : ink);
+    }
     SDL_RenderPresent(app->renderer);
 }
 static void pump(App* app) {
@@ -192,6 +249,7 @@ static void pump(App* app) {
             int n = gui_process_read(app->process, buffer, sizeof(buffer));
             if (n <= 0) break;
             gui_console_feed(&app->console, buffer, (size_t)n);
+            gui_banner_feed(&app->banner, buffer, (size_t)n);
             app->has_output = true;
         }
         int status;
@@ -251,6 +309,8 @@ static void launch(App* app, char* absolute, bool prepared) {
     n += gui_launch_options(&app->menu, native, argv + n);
     argv[n] = NULL;
     bool started = gui_process_start(app->process, argv, app->message, sizeof(app->message));
+    gui_banner_reset(&app->banner);
+    app->native = native;
     free(driver);
     if (!started) {
         free(absolute);
@@ -364,6 +424,10 @@ static void menu_key(App* app, GuiKey key) {
         return;
     }
     gui_menu_key(&app->menu, key);
+    if (app->menu.theme_next) {
+        app->menu.theme_next = false;
+        next_theme(app);
+    }
     if (key == GUI_CANCEL || (key == GUI_SELECT && app->menu.view == GUI_LOAD_KEYS)) app->message[0] = 0;
     if (app->menu.view == GUI_LOAD_GAMES) {
         gui_games_scan(&app->games, app->games_dir, app->message, sizeof(app->message));
@@ -474,6 +538,7 @@ static void event(App* app, const SDL_Event* e) {
 }
 static bool initialize(App* app) {
     memset(app, 0, sizeof(*app));
+    app->theme = *gui_theme_builtin("default");
     if (!SDL_Init(SDL_INIT_VIDEO)) return false;
     if (!SDL_CreateWindowAndRenderer("ScarletNX", 1280, 800, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY,
                                      &app->window, &app->renderer))
@@ -486,6 +551,7 @@ static bool initialize(App* app) {
     app->process = gui_process_create();
     app->cwd = SDL_GetCurrentDirectory();
     app->games_dir = snx_path_join(app->cwd ? app->cwd : ".", "games");
+    app->themes_dir = snx_path_join(app->cwd ? app->cwd : ".", "themes");
     app->drivers = SDL_GetBasePath();
     app->keys_path = device_keys_path();
     gui_console_init(&app->console, 78, 17);
@@ -500,6 +566,8 @@ static void cleanup(App* app) {
     gui_process_destroy(app->process);
     free(app->file);
     free(app->games_dir);
+    free(app->themes_dir);
+    gui_themes_free(&app->themes);
     free(app->keys_path);
     gui_games_free(&app->games);
     SDL_free(app->cwd);
