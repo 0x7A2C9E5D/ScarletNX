@@ -519,11 +519,6 @@ int main(int argc, char** argv) {
     colored_text_on(&app, 3, menu_row(&app, GUI_EXIT), "Exit", ink, page);
     colored_text_on(&app, 1, app.rows - 2, "CWD:", page, ink);
     mouse(&app, 2, menu_row(&app, GUI_THEME), true);
-    assert(!strcmp(app.theme.id, "yorha-loading"));
-    render(&app);
-    colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", rgb(app.theme.page), rgb(app.theme.ink));
-    colored_text_on(&app, 3, menu_row(&app, GUI_EXIT), "Exit", rgb(app.theme.ink), rgb(app.theme.page));
-    mouse(&app, 2, menu_row(&app, GUI_THEME), true);
     assert(!strcmp(app.theme.id, "custom") && !strcmp(app.theme.name, "Custom test"));
     render(&app);
     page = (SDL_Color){0x10, 0x20, 0x30, 255}; /* its own page; its ink, unreadable, is YoRHa's */
@@ -541,7 +536,7 @@ int main(int argc, char** argv) {
     /* YoRHa loading: a run as steps, typed in, with the ring, the dots and the bar; the run fades in, and out */
     char* steps_input = snx_path_join(temporary, "option flags steps.nro");
     assert(!snx_write_file(steps_input, "fixture", 7));
-    gui_theme_load(&app.theme, (const char* const*)app.themes_dirs, 2, "yorha-loading");
+    gui_theme_load(&app.theme, (const char* const*)app.themes_dirs, 2, "yorha");
     app.menu.selected = GUI_SWITCH;
     app.menu.gccjit = !!SNX_GUI_HAS_GCCJIT;
     app.menu.gdbstub = true;
@@ -552,7 +547,8 @@ int main(int argc, char** argv) {
         render(&app);
     }
     assert(app.finished && !app.abnormal_exit && app.steps.count == 2 && screen(&app) == GUI_SCREEN_LOADING);
-    SDL_Color lp = rgb(app.theme.page), li = rgb(app.theme.ink), ls = rgb(app.theme.soft);
+    const GuiPalette* run = &app.theme.run_colors;
+    SDL_Color lp = rgb(run->page), li = rgb(run->ink), ls = rgb(run->soft);
     Uint64 shown = app.steps.step[1].shown_ms, faded = app.fade_ms;
     Uint64 later = (shown + 60000) / 1600 * 1600; /* where turning dots would show none: the "..." is the end's */
     app.theme.texture = false; /* exact backgrounds first */
@@ -586,7 +582,7 @@ int main(int argc, char** argv) {
     app.theme.typing_sync = false;
     app.steps.step[1].shown_ms = second_shown;
     /* the page's faint lines, one pixel row in four */
-    app.theme = *gui_theme_builtin("yorha-loading");
+    app.theme = *gui_theme_builtin("yorha");
     app.clock = later;
     render(&app);
     float x = 8.0f * (float)app.scale * (float)(app.cols - 10), y = cell * 10;
@@ -614,7 +610,7 @@ int main(int argc, char** argv) {
     assert(same_colour(pixel(&app, x, y + 2), black));
     app.clock += app.theme.fade_in_ms;
     render(&app);
-    colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", lp, li);
+    colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", rgb(app.theme.page), rgb(app.theme.ink)); /* the menus' own */
     app.clock = 0;
     app.theme = *gui_theme_builtin("default");
     app.menu.gccjit = app.menu.gdbstub = false;

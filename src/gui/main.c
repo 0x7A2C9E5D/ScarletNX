@@ -179,9 +179,9 @@ static void arc(App* app, float cx, float cy, float r, float from, float sweep, 
 static void ring(App* app, float cx, float cy) {
     float r = 7.0f * (float)app->scale, inner = r * 0.62f, thick = SDL_max(1.0f, 1.5f * (float)app->scale);
     float angle = app->finished ? 0 : (float)((now_ms(app) / 4) % 360);
-    arc(app, cx, cy, r, 0, 360, SDL_max(1.0f, 0.5f * (float)app->scale), app->theme.dim);
-    arc(app, cx, cy, inner, 0, 360, thick, app->theme.soft);
-    arc(app, cx, cy, inner, angle, 70, thick, app->theme.ink);
+    arc(app, cx, cy, r, 0, 360, SDL_max(1.0f, 0.5f * (float)app->scale), app->theme.run_colors.dim);
+    arc(app, cx, cy, inner, 0, 360, thick, app->theme.run_colors.soft);
+    arc(app, cx, cy, inner, angle, 70, thick, app->theme.run_colors.ink);
 }
 /* "", ".", "..", "..." round and round; "..." once the run is over */
 static const char* dots(const App* app) {
@@ -229,13 +229,14 @@ static size_t step_runs(const GuiStep* s, char run[3][112], size_t length[3]) {
    the progress bar and its percentage */
 static void render_steps(App* app) {
     const GuiTheme* theme = &app->theme;
+    const GuiPalette* colors = &theme->run_colors;
     Uint64 now = now_ms(app);
     float cw = 8.0f * (float)app->scale, ch = 16.0f * (float)app->scale;
     int width, height;
     SDL_GetRenderOutputSize(app->renderer, &width, &height);
     if (theme->texture)
         for (int y = 3; y < height; y += 4) fill(app, 0, (float)y, (float)width, 1, (GuiRgb){255, 255, 255}, 14);
-    SDL_Color ink = rgb(theme->ink), soft = rgb(theme->soft), failure = rgb(theme->failure);
+    SDL_Color ink = rgb(colors->ink), soft = rgb(colors->soft), failure = rgb(colors->failure);
     char name[96], head[128];
     run_name(app, name, sizeof name);
     int col = theme->ring == GUI_RING_LEFT ? 4 : 1;
@@ -294,7 +295,7 @@ static void render_steps(App* app) {
     if (theme->bar) {
         int percent = gui_steps_percent(&app->steps);
         fill(app, cw, ch * (float)(app->rows - 4) + ch / 2, (float)(app->cols - 2) * cw, (float)app->scale,
-             theme->dim, 255);
+             colors->dim, 255);
         enum { SEGMENTS = 40 };
         float span = (float)(app->cols - 8) * cw, gap = 2.0f * (float)app->scale;
         float seg = (span - gap * (SEGMENTS - 1)) / SEGMENTS, sy = ch * (float)(app->rows - 3) + ch * 0.3f;
@@ -302,9 +303,9 @@ static void render_steps(App* app) {
         for (int k = 0; k < SEGMENTS; ++k) {
             SDL_FRect r = {cw + (float)k * (seg + gap), sy, seg, ch * 0.4f};
             if (k < filled)
-                fill(app, r.x, r.y, r.w, r.h, theme->ink, 255);
+                fill(app, r.x, r.y, r.w, r.h, colors->ink, 255);
             else {
-                SDL_SetRenderDrawColor(app->renderer, theme->dim.r, theme->dim.g, theme->dim.b, 255);
+                SDL_SetRenderDrawColor(app->renderer, colors->dim.r, colors->dim.g, colors->dim.b, 255);
                 SDL_RenderRect(app->renderer, &r);
             }
         }
@@ -318,7 +319,7 @@ static void render_steps(App* app) {
          app->finished   ? "Press [ESC] to return to menu"
          : app->aborting ? "Aborting process tree..."
                          : "Press [ESC] to abort and return to menu",
-         app->aborting ? rgb(theme->warning) : soft);
+         app->aborting ? rgb(colors->warning) : soft);
 }
 /* the screen fading in from black, or the run fading out to it */
 static void overlay(App* app) {
@@ -344,6 +345,9 @@ static void render(App* app) {
     SDL_SetRenderDrawColor(app->renderer, theme->page.r, theme->page.g, theme->page.b, 255);
     SDL_RenderClear(app->renderer);
     if (!idle && theme->run == GUI_RUN_STEPS) {
+        GuiRgb page = theme->run_colors.page;
+        SDL_SetRenderDrawColor(app->renderer, page.r, page.g, page.b, 255);
+        SDL_RenderClear(app->renderer);
         render_steps(app);
         overlay(app);
         SDL_RenderPresent(app->renderer);

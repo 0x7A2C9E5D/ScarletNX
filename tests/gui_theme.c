@@ -21,8 +21,11 @@ static void write(const char* dir, const char* name, const char* text) {
 
 int main(void) {
     const GuiTheme *def = gui_theme_builtin("default"), *yorha = gui_theme_builtin("yorha");
-    const GuiTheme* loading = gui_theme_builtin("yorha-loading");
-    assert(def && yorha && loading && !gui_theme_builtin("nothing") && !gui_theme_builtin(NULL));
+    const GuiTheme* loading = yorha; /* YoRHa's runs are its loading screen */
+    assert(def && yorha && !gui_theme_builtin("yorha-loading") && !gui_theme_builtin("nothing") &&
+           !gui_theme_builtin(NULL));
+    assert(same(yorha->run_colors.page, (GuiRgb){0x14, 0x14, 0x16}) && !same(yorha->run_colors.page, yorha->page));
+    assert(same(def->run_colors.page, def->page) && same(def->run_colors.ink, def->ink));
     assert(def->run == GUI_RUN_CONSOLE && !def->fade_in_ms && !def->fade_out_ms && def->line_in == GUI_LINE_NONE);
     assert(loading->run == GUI_RUN_STEPS && loading->ring == GUI_RING_RIGHT && loading->texture && loading->bar);
     assert(loading->line_in == GUI_LINE_TYPING && loading->typing_ms == 25 && loading->fade_out_ms == 500);
@@ -48,13 +51,16 @@ int main(void) {
     assert(!strcmp(theme.title[GUI_SCREEN_COMPILING], yorha->title[GUI_SCREEN_COMPILING]));
 
     /* the run's layout and its transitions; a time past 10 s, or not a number, keeps the base's */
-    parse(&theme, "[theme]\nbase = yorha-loading\n[run]\nlayout = console\nring = left\ntexture = false\nbar = no\n"
-                  "[transitions]\nline_in = slide\nline_in_ms = 300\nfade_in_ms = 10001\nfade_out_ms = 5s\n"
-                  "typing_ms = 0\nblink_ms = -1\n[colors]\ndim = #010203\n");
+    parse(&theme,
+          "[theme]\nbase = yorha\n[run]\nlayout = console\nring = left\ntexture = false\nbar = no\npage = #050505\n"
+          "[transitions]\nline_in = slide\nline_in_ms = 300\nfade_in_ms = 10001\nfade_out_ms = 5s\n"
+          "typing_ms = 0\nblink_ms = -1\n[colors]\ndim = #010203\n");
     assert(theme.run == GUI_RUN_CONSOLE && theme.ring == GUI_RING_LEFT && !theme.texture && theme.bar);
     assert(theme.line_in == GUI_LINE_SLIDE && theme.line_in_ms == 300 && theme.typing_ms == 0);
     assert(theme.fade_in_ms == loading->fade_in_ms && theme.fade_out_ms == loading->fade_out_ms);
     assert(theme.blink_ms == loading->blink_ms && same(theme.dim, (GuiRgb){1, 2, 3}));
+    assert(same(theme.run_colors.page, (GuiRgb){5, 5, 5}) && same(theme.run_colors.ink, yorha->run_colors.ink));
+    assert(same(theme.page, yorha->page));
 
     /* an ErET file: its layout picks the base when no base does, ErET's own keys apply, the rest waits for it */
     parse(&theme, "[theme]\nformat = 2\nname = From rEden\nauthor = rEden\nlayout = menu\n[colors]\ntexture = true\n"
@@ -64,8 +70,13 @@ int main(void) {
     assert(same(theme.page, yorha->page) && theme.format == 2 && !strcmp(theme.author, "rEden"));
     assert(theme.texture && theme.ring == GUI_RING_NEAR_TEXT && theme.typing_sync);
     assert(same(theme.warning, (GuiRgb){0xD9, 0xB2, 0x4A}) && !strcmp(theme.title[GUI_SCREEN_LOADING], "WAKING"));
-    parse(&theme, "[theme]\nlayout = loading\n");
-    assert(same(theme.page, loading->page));
+    /* ErET's loading layout is YoRHa's runs: its [colors] are the run's, the menus keep YoRHa's */
+    parse(&theme, "[theme]\nlayout = loading\n[colors]\npage = #101010\nink = #F0F0F0\ntexture = false\n");
+    assert(same(theme.run_colors.page, (GuiRgb){16, 16, 16}) && same(theme.run_colors.ink, (GuiRgb){240, 240, 240}));
+    assert(same(theme.page, yorha->page) && same(theme.ink, yorha->ink) && !theme.texture &&
+           theme.run == GUI_RUN_STEPS);
+    parse(&theme, "[theme]\nbase = yorha\nlayout = loading\n[colors]\npage = #101010\n"); /* a base: menus' */
+    assert(same(theme.page, (GuiRgb){16, 16, 16}) && same(theme.run_colors.page, yorha->run_colors.page));
     parse(&theme, "[theme]\nbase = default\nlayout = menu\nformat = 0\n"); /* base wins; no format 0 */
     assert(same(theme.page, def->page) && theme.format == GUI_THEME_FORMAT);
     parse(&theme, "[header]\nring_side = nowhere\n[run]\nring = right-near-text\n[transitions]\ntyping = later\n");
@@ -89,24 +100,21 @@ int main(void) {
     const char* dirs[] = {dir, NULL, second};
     GuiThemes themes = {0};
     gui_themes_scan(&themes, dirs, 3);
-    assert(themes.count == 5 && !strcmp(themes.ids[0], "default") && !strcmp(themes.ids[1], "yorha") &&
-           !strcmp(themes.ids[2], "yorha-loading") && !strcmp(themes.ids[3], "alpha") &&
-           !strcmp(themes.ids[4], "gamma"));
+    assert(themes.count == 4 && !strcmp(themes.ids[0], "default") && !strcmp(themes.ids[1], "yorha") &&
+           !strcmp(themes.ids[2], "alpha") && !strcmp(themes.ids[3], "gamma"));
     gui_theme_load(&theme, dirs, 3, "alpha");
     assert(!strcmp(theme.name, "Alpha") && same(theme.page, yorha->page));
     gui_theme_load(&theme, dirs, 3, "gamma");
     assert(!strcmp(theme.name, "Gamma") && same(theme.page, def->page));
     gui_theme_load(&theme, dirs, 3, "yorha");
     assert(same(theme.page, (GuiRgb){255, 255, 255}) && same(theme.ink, yorha->ink));
-    gui_theme_load(&theme, dirs, 3, "yorha-loading");
-    assert(same(theme.page, loading->page) && !strcmp(theme.name, loading->name));
     gui_theme_load(&theme, dirs, 3, "beta");
     assert(!strcmp(theme.id, "default"));
     gui_themes_free(&themes);
     char* missing = snx_path_join(dir, "missing");
     const char* none[] = {missing};
     gui_themes_scan(&themes, none, 1); /* no themes/ folder: the built-ins */
-    assert(themes.count == 3);
+    assert(themes.count == 2);
     gui_themes_free(&themes);
     free(missing);
     assert(!snx_remove_tree(dir) && !snx_remove_tree(second));
@@ -114,7 +122,7 @@ int main(void) {
     free(second);
 
     /* the versioned theme files are the built-ins, key for key */
-    static const char* const ids[] = {"default", "yorha", "yorha-loading"};
+    static const char* const ids[] = {"default", "yorha"};
     const char* shipped[] = {SNX_GUI_THEMES_DIR};
     for (size_t i = 0; i < sizeof ids / sizeof *ids; ++i) {
         const GuiTheme* b = gui_theme_builtin(ids[i]);
@@ -129,7 +137,10 @@ int main(void) {
         assert(f.fade_in_ms == b->fade_in_ms && f.fade_out_ms == b->fade_out_ms && f.line_in_ms == b->line_in_ms);
         assert(f.typing_ms == b->typing_ms && f.blink_ms == b->blink_ms && f.typing_sync == b->typing_sync);
         assert(f.format == GUI_THEME_FORMAT && b->format == GUI_THEME_FORMAT && !strcmp(f.author, b->author));
-        assert(same(f.warning, b->warning));
+        assert(same(f.warning, b->warning) && same(f.run_colors.page, b->run_colors.page));
+        assert(same(f.run_colors.ink, b->run_colors.ink) && same(f.run_colors.soft, b->run_colors.soft));
+        assert(same(f.run_colors.dim, b->run_colors.dim) && same(f.run_colors.failure, b->run_colors.failure));
+        assert(same(f.run_colors.warning, b->run_colors.warning));
         for (int s = 0; s < GUI_SCREEN_COUNT; ++s) assert(!strcmp(f.title[s], b->title[s]));
     }
     puts("GUI themes: built-ins, theme.ini over its base, themes/ folders passed");

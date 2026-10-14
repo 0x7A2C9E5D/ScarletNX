@@ -22,6 +22,12 @@ static const GuiTheme builtins[] = {
         .head = GUI_STYLE_PLAIN,
         .footer = GUI_STYLE_PLAIN,
         .marker = "- ",
+        .run_colors = {.page = {0, 0, 0},
+                       .ink = {220, 220, 220},
+                       .soft = {160, 170, 180},
+                       .dim = {80, 80, 80},
+                       .failure = {255, 0, 0},
+                       .warning = {255, 170, 0}},
         .typing_ms = 25,
         .blink_ms = 500,
     },
@@ -43,34 +49,14 @@ static const GuiTheme builtins[] = {
         .head_rule = true,
         .focus_bar = true,
         .marker = "\xE2\x96\xA0 ", /* U+25A0, the font's square */
-        .title = {"SCARLETNX  /  MENU", "SCARLETNX  /  GAMES", "SCARLETNX  /  KEYS", "SYSTEM  /  COMPILING",
-                  "SYSTEM  /  LOADING"},
-        .fade_in_ms = 250,
-        .fade_out_ms = 500,
-        .line_in_ms = 220,
-        .typing_ms = 25,
-        .blink_ms = 500,
-    },
-    {
-        .id = "yorha-loading",
-        .author = "ScarletNX",
-        .format = GUI_THEME_FORMAT,
-        .warning = {0xD9, 0xB2, 0x4A},
-        .name = "YoRHa loading",
-        .page = {0x14, 0x14, 0x16},
-        .ink = {0xE6, 0xE4, 0xDC},
-        .soft = {0x8E, 0x8C, 0x86},
-        .focus = {0xE6, 0xE4, 0xDC},
-        .active = {0xD9, 0xB2, 0x4A},
-        .failure = {0xD2, 0x46, 0x3A},
-        .dim = {0x3E, 0x3E, 0x40},
-        .head = GUI_STYLE_BAR,
-        .footer = GUI_STYLE_PLAIN,
-        .footer_rule = true,
-        .focus_bar = true,
-        .marker = "\xE2\x96\xA0 ",
         .title = {"SCARLETNX  /  MENU", "SCARLETNX  /  GAMES", "SCARLETNX  /  KEYS", "COMPILING", "BOOTING"},
         .run = GUI_RUN_STEPS,
+        .run_colors = {.page = {0x14, 0x14, 0x16},
+                       .ink = {0xE6, 0xE4, 0xDC},
+                       .soft = {0x8E, 0x8C, 0x86},
+                       .dim = {0x3E, 0x3E, 0x40},
+                       .failure = {0xD2, 0x46, 0x3A},
+                       .warning = {0xD9, 0xB2, 0x4A}},
         .texture = true,
         .bar = true,
         .ring = GUI_RING_RIGHT,
@@ -164,7 +150,14 @@ static bool word(int* out, const char* value, const char* const* words, int coun
         }
     return false;
 }
-static void apply(GuiTheme* t, const char* section, const char* key, const char* value) {
+static void palette(GuiPalette* p, const char* key, const char* value) {
+    GuiRgb* roles[] = {&p->page, &p->ink, &p->soft, &p->dim, &p->failure, &p->warning};
+    static const char* const names[] = {"page", "ink", "soft", "dim", "failure", "warning"};
+    for (size_t i = 0; i < sizeof roles / sizeof *roles; ++i)
+        if (!strcmp(key, names[i])) colour(roles[i], value);
+}
+/* run_colors: an ErET loading theme's [colors] are its loading screen's, here the run's */
+static void apply(GuiTheme* t, const char* section, const char* key, const char* value, bool run_colors) {
     uint32_t number;
     if (!strcmp(section, "theme") && !strcmp(key, "name"))
         copy(t->name, sizeof t->name, value);
@@ -172,6 +165,9 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
         copy(t->author, sizeof t->author, value);
     else if (!strcmp(section, "theme") && !strcmp(key, "format")) {
         if (integer(&number, value) && number) t->format = number;
+    } else if (!strcmp(section, "colors") && run_colors) {
+        if (!strcmp(key, "texture")) flag(&t->texture, value);
+        palette(&t->run_colors, key, value);
     } else if (!strcmp(section, "colors")) {
         GuiRgb* roles[] = {&t->page, &t->ink, &t->soft, &t->focus, &t->active, &t->failure, &t->dim, &t->warning};
         static const char* const names[] = {"page", "ink", "soft", "focus", "active", "failure", "dim", "warning"};
@@ -203,6 +199,8 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
             flag(&t->texture, value);
         else if (!strcmp(key, "bar"))
             flag(&t->bar, value);
+        else
+            palette(&t->run_colors, key, value);
     } else if (!strcmp(section, "transitions")) {
         static const char* const entrances[] = {"none", "typing", "slide", "fade"};
         int n;
@@ -234,12 +232,13 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
 /* ErET's layout as the built-in to start from, when no base names one */
 static const GuiTheme* layout_base(const char* layout) {
     if (!strcmp(layout, "menu")) return gui_theme_builtin("yorha");
-    if (!strcmp(layout, "loading")) return gui_theme_builtin("yorha-loading");
+    if (!strcmp(layout, "loading")) return gui_theme_builtin("yorha");
     if (!strcmp(layout, "plain") || !strcmp(layout, "debug") || !strcmp(layout, "skip"))
         return gui_theme_builtin("default");
     return NULL;
 }
-static bool visit(const char* text, size_t size, GuiTheme* theme, const GuiTheme** bases, bool base_only) {
+static bool visit(const char* text, size_t size, GuiTheme* theme, const GuiTheme** bases, bool base_only,
+                  bool run_colors) {
     char* copy_of = malloc(size + 1);
     if (!copy_of) return false;
     memcpy(copy_of, text, size);
@@ -266,21 +265,23 @@ static bool visit(const char* text, size_t size, GuiTheme* theme, const GuiTheme
         if (base_only) {
             if (!strcmp(section, "theme") && !strcmp(key, "base") && gui_theme_builtin(value))
                 bases[0] = gui_theme_builtin(value);
-            else if (!strcmp(section, "theme") && !strcmp(key, "layout") && layout_base(value))
+            else if (!strcmp(section, "theme") && !strcmp(key, "layout") && layout_base(value)) {
                 bases[1] = layout_base(value);
+                bases[2] = !strcmp(value, "loading") ? bases[1] : NULL;
+            }
         } else
-            apply(theme, section, key, value);
+            apply(theme, section, key, value, run_colors);
     }
     free(copy_of);
     return true;
 }
 bool gui_theme_parse(GuiTheme* theme, const char* id, const char* text, size_t size) {
-    const GuiTheme* bases[2] = {NULL, NULL}; /* the base, ErET's layout */
-    if (!visit(text, size, theme, bases, true)) return false;
+    const GuiTheme* bases[3] = {NULL, NULL, NULL}; /* the base, ErET's layout, set when that is loading */
+    if (!visit(text, size, theme, bases, true, false)) return false;
     *theme = bases[0] ? *bases[0] : bases[1] ? *bases[1] : builtins[0];
     copy(theme->id, sizeof theme->id, id);
     copy(theme->name, sizeof theme->name, id);
-    return visit(text, size, theme, bases, false);
+    return visit(text, size, theme, bases, false, !bases[0] && bases[2]);
 }
 void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id) {
     for (size_t i = 0; i < count; ++i) {

@@ -25,6 +25,9 @@ typedef enum {
     GUI_SCREEN_COUNT
 } GuiScreen;
 typedef struct {
+    GuiRgb page, ink, soft, dim, failure, warning;
+} GuiPalette;
+typedef struct {
     char id[64], name[64], author[64];
     uint32_t format;
     GuiRgb page, ink, soft, focus, active, failure, dim, warning;
@@ -34,7 +37,8 @@ typedef struct {
     char marker[16];
     char title[GUI_SCREEN_COUNT][64];
     GuiRunLayout run;
-    bool texture, bar; /* faint lines over the page; the progress bar and its percentage */
+    GuiPalette run_colors; /* the steps screen's own: a loading screen, darker than the menus */
+    bool texture, bar;     /* faint lines over the page; the progress bar and its percentage */
     GuiRing ring;
     GuiLineIn line_in;
     bool typing_sync; /* one line typed at a time, those already done three times faster */
@@ -45,7 +49,7 @@ typedef struct {
     size_t count;
 } GuiThemes;
 
-/* "default", "yorha" and "yorha-loading"; NULL for any other id */
+/* "default" and "yorha"; NULL for any other id */
 const GuiTheme* gui_theme_builtin(const char* id);
 /* A theme.ini's text over the built-in its [theme] base names (default when absent): a key it lacks, or cannot
    read, keeps the base's value. Returns false only when out of memory. */

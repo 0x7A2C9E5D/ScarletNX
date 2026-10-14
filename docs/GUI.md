@@ -115,13 +115,14 @@ at the top), the body (the menu, the file list or the driver's output) and the f
 run, which is **compiling** until the runner prints its `ScarletNX - <name>` banner and
 **loading** from then on.
 
-The built-ins are `default`, the look above; `yorha`, paper and ink with a header bar,
-square markers and the focused line inverted; and `yorha-loading`, which draws a run as a
-loading screen: the title, the game's name with turning dots and a turning ring; each
-step the driver and the runner report (unpack, extract, recompile with its blocks,
-built, launch, GPU) typed down the page, with turning dots while it runs and `...OK` or
-`...FAILED` once it ends, the cursor blinking on the current one; the progress bar and
-its percentage. The run fades in from black, and fades out when ESC leaves it.
+The built-ins are `default`, the look above, and `yorha`: paper and ink with a header
+bar, square markers and the focused line inverted on the menus, and a run drawn as a
+dark loading screen in its own colours (`[run]`): the title, the game's name with turning
+dots and a turning ring; each step the driver and the runner report (unpack, extract,
+recompile with its blocks, built, launch, GPU) typed down the page, with turning dots
+while it runs and `...OK` or `...FAILED` once it ends, the cursor blinking on the current
+one; the progress bar and its percentage. The run fades in from black, and fades out when
+ESC leaves it.
 
 A theme is also a folder holding a `theme.ini`, the folder's name its id, in
 `themes/` in the working directory or in `themes/` beside the GUI; the first one found
@@ -137,7 +138,7 @@ keeps the base's value.
 format = 1
 name = Night ink
 author = me
-; default | yorha | yorha-loading
+; default | yorha
 base = yorha
 [colors]
 ; #RRGGBB. soft: hints, secondary text, rules. focus: the focused line, or its band.
@@ -164,8 +165,14 @@ focus = bar
 style = plain
 rule = true
 [run]
-; console: the driver's output as it comes; steps: the loading screen above
+; console: the driver's output as it comes; steps: the loading screen above, in its own colours
 layout = steps
+page = #141416
+ink = #E6E4DC
+soft = #8E8C86
+dim = #3E3E40
+failure = #D2463A
+warning = #D9B24A
 ; faint lines over the page, the progress bar and percentage, and the ring: none | left | right
 texture = true
 bar = true
@@ -190,13 +197,14 @@ reads the keys it knows and leaves the others. From ErET's, the GUI also reads:
 
 | ErET key | here |
 |---|---|
-| `[theme] layout` | the base when no `base` names one: `menu` is `yorha`, `loading` is `yorha-loading`, `plain`, `debug` and `skip` are `default` |
+| `[theme] layout` | the base when no `base` names one: `menu` and `loading` are `yorha`, `plain`, `debug` and `skip` are `default` |
+| `[colors]` | with `layout = loading` and no `base`, the run's colours, as `[run]`: ErET's loading screen is YoRHa's runs |
 | `[colors] texture`, `warning` | as `[run] texture`, and the colour of a run being aborted |
 | `[header] ring_side` | `right`, `left` or `right-near-text` (right after the name and its dots), as `[run] ring` |
 | `[transitions] typing` | `async` or `sync`, as above |
 | `[loading] title` | the loading screen's title |
 
-ErET needs `[theme] layout`, so the built-in files carry one: `debug`, `menu` and `loading`.
+ErET needs `[theme] layout`, so the built-in files carry one: `debug` and `menu`.
 
 ## Building and testing
 
