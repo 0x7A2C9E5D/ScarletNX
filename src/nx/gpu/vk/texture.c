@@ -363,18 +363,24 @@ static Surf* rt_crop(Surf* rt, u32 w, u32 h, const VkFmt* as) {
     c->last_used = g_vk_present;
     if (c->crop_gen != rt->wgen) {
         VkCommandBuffer cb = vk_cmd();
+        VkImageCopy r[2];
         vk_surf_use(cb, rt, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
                     VK_ACCESS_2_TRANSFER_READ_BIT);
         vk_surf_use(cb, c, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
                     VK_ACCESS_2_TRANSFER_WRITE_BIT);
         /* VkImageCopy takes one aspect per region: depth and stencil are two (a view samples one of them) */
         VkImageAspectFlags a = rt->f.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-        VkImageCopy r[2] = {{.srcSubresource = {a, 0, 0, rt->layers},
-                             .dstSubresource = {a, 0, 0, rt->layers},
-                             .extent = {c->sw, c->sh, 1}},
-                            {.srcSubresource = {VK_IMAGE_ASPECT_STENCIL_BIT, 0, 0, rt->layers},
-                             .dstSubresource = {VK_IMAGE_ASPECT_STENCIL_BIT, 0, 0, rt->layers},
-                             .extent = {c->sw, c->sh, 1}}};
+        memset(r, 0, sizeof r);
+        r[0].srcSubresource.aspectMask = a;
+        r[0].srcSubresource.layerCount = rt->layers;
+        r[0].dstSubresource.aspectMask = a;
+        r[0].dstSubresource.layerCount = rt->layers;
+        r[0].extent.width = c->sw;
+        r[0].extent.height = c->sh;
+        r[0].extent.depth = 1;
+        r[1] = r[0];
+        r[1].srcSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+        r[1].dstSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
         vkCmdCopyImage(cb, rt->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, c->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                        rt->f.stencil ? 2 : 1, r);
         c->crop_gen = rt->wgen;

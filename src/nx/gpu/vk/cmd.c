@@ -255,11 +255,12 @@ static VkDescriptorPool desc_pool_new(void) {
     /* a thousand sets of the stage layout (gpu/vk/pipeline.c), each with all its descriptors: a frame chains more
        pools when it needs them */
     VkDescriptorPoolSize sz[VK_POOL_TYPES];
+    VkDescriptorPoolCreateInfo ci = {0};
     vk_pool_sizes(sz, 1024);
-    VkDescriptorPoolCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-                                     .maxSets = 1024,
-                                     .poolSizeCount = VK_POOL_TYPES,
-                                     .pPoolSizes = sz};
+    ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    ci.maxSets = 1024;
+    ci.poolSizeCount = VK_POOL_TYPES;
+    ci.pPoolSizes = sz;
     VkDescriptorPool p = VK_NULL_HANDLE;
     VK_OK(vkCreateDescriptorPool(g_vk.dev, &ci, NULL, &p));
     return p;

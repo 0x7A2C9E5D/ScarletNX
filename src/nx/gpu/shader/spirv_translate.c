@@ -465,9 +465,10 @@ static int gbuf_tag(int stage, u32 index, u32 offset) {
 static int texs_outputs(u64 w, u32 regs[4], u32 comps[4]) {
     u32 da = B(w, 0, 8), db = B(w, 28, 8), sw = B(w, 50, 3);
     int n = 0;
+    int i;
     if (db == 255) {
         static const int tab[8][2] = {{0, -1}, {1, -1}, {2, -1}, {3, -1}, {0, 1}, {0, 3}, {1, 3}, {2, 3}};
-        for (int i = 0; i < 2; i++)
+        for (i = 0; i < 2; i++)
             if (tab[sw][i] >= 0) {
                 regs[n] = da == 255 ? 255 : da + (u32)n;
                 comps[n++] = (u32)tab[sw][i];
@@ -475,7 +476,7 @@ static int texs_outputs(u64 w, u32 regs[4], u32 comps[4]) {
     } else {
         static const int tab[5][4] = {{0, 1, 2, -1}, {0, 1, 3, -1}, {0, 2, 3, -1}, {1, 2, 3, -1}, {0, 1, 2, 3}};
         if (sw > 4) sw = 4;
-        for (int i = 0; i < 4; i++)
+        for (i = 0; i < 4; i++)
             if (tab[sw][i] >= 0) {
                 regs[n] = n < 2 ? da + (u32)n : db + (u32)(n - 2);
                 comps[n++] = (u32)tab[sw][i];
@@ -563,8 +564,9 @@ int shader_writes_reg(u64 w, int op, u32 reg) {
         case O_TLDS: {
             u32 regs[4], comps[4];
             int outputs = texs_outputs(w, regs, comps);
+            int k;
             if (!B(w, 59, 1)) return outputs && (d == reg || (outputs > 2 && B(w, 28, 8) == reg));
-            for (int k = 0; k < outputs; k++)
+            for (k = 0; k < outputs; k++)
                 if (regs[k] == reg) return 1;
             return 0;
         }
@@ -676,7 +678,8 @@ static int direct_flow_targets(const u64* insn, u32 n, u32 k, u32 targets[64], u
         case O_JMP: return -1;
         case O_BRX: {
             int count = shader_brx_targets(insn, k, n, targets, 64);
-            for (int t = 0; t < count; t++) elsewhere[t] = 0;
+            int t;
+            for (t = 0; t < count; t++) elsewhere[t] = 0;
             return count;
         }
         case O_CAL:
@@ -701,14 +704,18 @@ static int direct_flow_targets(const u64* insn, u32 n, u32 k, u32 targets[64], u
    def (a branch, or the SYNC or BRK of an SSY or PBK set up before def), from a loop or a jump after use, or from
    instructions that aren't known (CONTs, RETs). */
 static int direct_def_dominates(const u64* insn, u32 n, u32 def, u32 use) {
-    for (u32 k = 11; k < n; k++) {
-        if (!IDX_OK(k)) continue;
+    u32 k;
+    for (k = 11; k < n; k++) {
         u32 targets[64];
         u8 elsewhere[64];
-        int count = direct_flow_targets(insn, n, k, targets, elsewhere);
+        int count;
+        int jump;
+        int t;
+        if (!IDX_OK(k)) continue;
+        count = direct_flow_targets(insn, n, k, targets, elsewhere);
         if (count < 0) return 0;
-        int jump = decode(insn[k])->id != O_SSY && decode(insn[k])->id != O_PBK;
-        for (int t = 0; t < count; t++) {
+        jump = decode(insn[k])->id != O_SSY && decode(insn[k])->id != O_PBK;
+        for (t = 0; t < count; t++) {
             if (targets[t] <= def || targets[t] > use) continue;
             if (elsewhere[t] || k < def || (jump && k > use)) return 0;
         }
@@ -721,23 +728,29 @@ static int direct_def_dominates(const u64* insn, u32 n, u32 def, u32 use) {
    the compiler loads a handle and uses it under the guard of one side of a branch it made predicated. Across flow,
    the write has to be unconditional and dominate index. */
 static int direct_reaching_def(const u64* insn, u32 n, u32 index, u32 reg) {
-    if (reg == 255) return -1;
-    u32 guard = B(insn[index], 16, 4);
+    u32 guard;
     int pred_written = 0, crossed = 0;
     /* where index's basic block starts: the last place control can arrive at before it */
     u32 block_start = 11;
-    for (u32 k = 11; k < n; k++) {
-        if (!IDX_OK(k)) continue;
+    u32 k;
+    u32 j;
+    if (reg == 255) return -1;
+    guard = B(insn[index], 16, 4);
+    for (k = 11; k < n; k++) {
         u32 targets[64];
         u8 elsewhere[64];
-        int count = direct_flow_targets(insn, n, k, targets, elsewhere);
+        int count;
+        int t;
+        if (!IDX_OK(k)) continue;
+        count = direct_flow_targets(insn, n, k, targets, elsewhere);
         if (count < 0) return -1;
-        for (int t = 0; t < count; t++)
+        for (t = 0; t < count; t++)
             if (targets[t] > block_start && targets[t] <= index) block_start = targets[t];
     }
-    for (u32 j = index; j-- > 11;) {
+    for (j = index; j-- > 11;) {
+        const Op* op;
         if (!IDX_OK(j)) continue;
-        const Op* op = decode(insn[j]);
+        op = decode(insn[j]);
         if (!op) return -1;
         if (j < block_start || op->id == O_BRA || op->id == O_BRX || op->id == O_CAL || op->id == O_RET ||
             op->id == O_SYNC || op->id == O_BRK || op->id == O_CONT || op->id == O_EXIT || op->id == O_KIL)
@@ -756,9 +769,11 @@ static int direct_reaching_def(const u64* insn, u32 n, u32 index, u32 reg) {
 
 static int direct_track_const(const u64* insn, u32 n, u32 index, u32 reg, u32* value, int depth) {
     int j = depth > 6 ? -1 : direct_reaching_def(insn, n, index, reg);
+    u64 w;
+    int op;
     if (j < 0) return 0;
-    u64 w = insn[j];
-    int op = decode(w)->id;
+    w = insn[j];
+    op = decode(w)->id;
     if (op == O_MOV32I) {
         *value = B(w, 20, 32);
         return 1;
@@ -770,9 +785,11 @@ static int direct_track_const(const u64* insn, u32 n, u32 index, u32 reg, u32* v
 /* Resolve a register supplied image handle to the constant buffer word read in this basic block. */
 static int direct_track_image_handle(const u64* insn, u32 n, u32 index, u32 reg, u32* bank, u32* off, int depth) {
     int j = depth > 6 ? -1 : direct_reaching_def(insn, n, index, reg);
+    u64 w;
+    int op;
     if (j < 0) return 0;
-    u64 w = insn[j];
-    int op = decode(w)->id;
+    w = insn[j];
+    op = decode(w)->id;
     if (op == O_MOV_C) {
         *bank = B(w, 34, 5);
         *off = B(w, 20, 14);
@@ -796,18 +813,25 @@ static int direct_track_image_handle(const u64* insn, u32 n, u32 index, u32 reg,
    the guest handle. */
 static int direct_track_image_handle_pair(const u64* insn, u32 n, u32 index, u32 reg, u32* bank, u32* off, u32* bank2,
                                           u32* off2, int depth) {
+    int j;
+    u64 w;
+    int op;
+    int plain_or;
+    int plain_add;
+    u32 lhs;
+    u32 rhs;
     *bank2 = *off2 = 0;
     if (direct_track_image_handle(insn, n, index, reg, bank, off, depth)) return 1;
-    int j = depth > 6 ? -1 : direct_reaching_def(insn, n, index, reg);
+    j = depth > 6 ? -1 : direct_reaching_def(insn, n, index, reg);
     if (j < 0) return 0;
-    u64 w = insn[j];
-    int op = decode(w)->id;
+    w = insn[j];
+    op = decode(w)->id;
     if (op == O_MOV_R)
         return direct_track_image_handle_pair(insn, n, (u32)j, B(w, 20, 8), bank, off, bank2, off2, depth + 1);
-    int plain_or = (op == O_LOP_R || op == O_LOP_C) && B(w, 41, 2) == 1 && !B(w, 39, 2) && !B(w, 47, 1);
-    int plain_add = (op == O_IADD_R || op == O_IADD_C) && !B(w, 43, 1) && !B(w, 47, 1) && !B(w, 48, 2);
+    plain_or = (op == O_LOP_R || op == O_LOP_C) && B(w, 41, 2) == 1 && !B(w, 39, 2) && !B(w, 47, 1);
+    plain_add = (op == O_IADD_R || op == O_IADD_C) && !B(w, 43, 1) && !B(w, 47, 1) && !B(w, 48, 2);
     if (!plain_or && !plain_add) return 0;
-    u32 lhs = B(w, 8, 8);
+    lhs = B(w, 8, 8);
     if (op == O_LOP_C || op == O_IADD_C) {
         u32 cbank = B(w, 34, 5), coff = B(w, 20, 14);
         if (cbank >= 18) return 0;
@@ -820,7 +844,7 @@ static int direct_track_image_handle_pair(const u64* insn, u32 n, u32 index, u32
         *off2 = coff;
         return direct_track_image_handle(insn, n, (u32)j, lhs, bank, off, depth + 1) ? 2 : 0;
     }
-    u32 rhs = B(w, 20, 8);
+    rhs = B(w, 20, 8);
     if (lhs == 255) return direct_track_image_handle_pair(insn, n, (u32)j, rhs, bank, off, bank2, off2, depth + 1);
     if (rhs == 255) return direct_track_image_handle_pair(insn, n, (u32)j, lhs, bank, off, bank2, off2, depth + 1);
     return direct_track_image_handle(insn, n, (u32)j, lhs, bank, off, depth + 1) &&
@@ -1200,6 +1224,7 @@ static u32* direct_reject(ShaderInfo* si, const char* reason) {
 
 u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count, int can_flush,
                      int can_preserve, int can_subgroup) {
+    u32 clip;
     if (!code || !si || !word_count || max_bytes < 96 || (stage != ST_FS && stage != ST_VS && stage != ST_CS))
         return NULL;
     if (stage == ST_CS) {
@@ -1751,11 +1776,15 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         }
         if (op->id == O_SULD || op->id == O_SUST || op->id == O_SURED || op->id == O_SUATOM) {
             int buffer = B(insn[i], 33, 3) == 1;
+            u32 bank, off, handle;
+            int bindless;
             if (buffer && stage != ST_CS) return direct_reject(si, "buffer surface outside compute");
             if (stage != ST_CS && (stage != ST_FS || op->id == O_SULD))
                 return direct_reject(si, "surface operation outside supported stage");
-            u32 bank = 0, off = B(insn[i], 36, 13), handle = B(insn[i], 39, 8);
-            int bindless = op->id == O_SUATOM ? (int)B(insn[i], 54, 1) : !B(insn[i], 51, 1);
+            bank = 0;
+            off = B(insn[i], 36, 13);
+            handle = B(insn[i], 39, 8);
+            bindless = op->id == O_SUATOM ? (int)B(insn[i], 54, 1) : !B(insn[i], 51, 1);
             if (bindless && !direct_track_image_handle(insn, n, i, handle, &bank, &off, 0))
                 return direct_reject(si, "untracked surface handle");
             if (a < 255) used[a] = 1;
@@ -1839,11 +1868,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         if ((op->id >= O_DADD_R && op->id <= O_DADD_I) || (op->id >= O_DMUL_R && op->id <= O_DMUL_I) ||
             (op->id >= O_DFMA_R && op->id <= O_DFMA_I) || (op->id >= O_DMNMX_R && op->id <= O_DMNMX_I) ||
             (op->id >= O_DSET_R && op->id <= O_DSET_I) || (op->id >= O_DSETP_R && op->id <= O_DSETP_I)) {
+            int right_reg;
             needs_f64 = needs_glsl = 1;
             if (a < 255) used[a] = 1;
             if (a < 254) used[a + 1] = 1;
-            int right_reg = op->id == O_DADD_R || op->id == O_DMUL_R || op->id == O_DFMA_R || op->id == O_DFMA_RC ||
-                            op->id == O_DMNMX_R || op->id == O_DSET_R || op->id == O_DSETP_R;
+            right_reg = op->id == O_DADD_R || op->id == O_DMUL_R || op->id == O_DFMA_R || op->id == O_DFMA_RC ||
+                        op->id == O_DMNMX_R || op->id == O_DSET_R || op->id == O_DSETP_R;
             if (right_reg && b < 255) used[b] = 1;
             if (right_reg && b < 254) used[b + 1] = 1;
             if ((op->id >= O_DADD_R && op->id <= O_DADD_I) || (op->id >= O_DMUL_R && op->id <= O_DMUL_I) ||
@@ -1917,14 +1947,18 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             u32 source = b + bindless;
             u32 has_level = mode == 2 || mode == 3 || mode == 6 || mode == 7;
             u32 offset_source = source + has_level;
+            u32 off, bank, bank2, off2;
+            int handle_count;
             if (offset_enabled) {
                 u32 packed;
                 int known = direct_track_const(insn, n, i, offset_source, &packed, 0);
                 if (!known) needs_image_query = 1; /* the offset moves the coordinates by the texture's size */
             }
-            u32 off = B(insn[i], 36, 13), bank = 0, bank2 = 0, off2 = 0;
-            int handle_count =
-                bindless ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
+            off = B(insn[i], 36, 13);
+            bank = 0;
+            bank2 = 0;
+            off2 = 0;
+            handle_count = bindless ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
             if (bindless && !handle_count) return direct_reject(si, "untracked texture handle");
             int type = B(insn[i], 28, 3) >> 1;
             int array = B(insn[i], 28, 1), shadow = B(insn[i], 50, 1);
@@ -1984,8 +2018,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             u32 off = B(insn[i], 36, 13), bank = 0, bank2 = 0, off2 = 0;
             int handle_count =
                 bindless ? direct_track_image_handle_pair(insn, n, i, a, &bank, &off, &bank2, &off2, 0) : 0;
+            int slot;
             if (bindless && !handle_count) return direct_reject(si, "untracked texture handle");
-            int slot = direct_query_slot(textures, texture_count, off, bindless, bank, handle_count, bank2, off2);
+            slot = direct_query_slot(textures, texture_count, off, bindless, bank, handle_count, bank2, off2);
             if (slot == texture_count) {
                 if (texture_count >= 32) return direct_reject(si, "texture descriptor count");
                 textures[slot].cbuf_off = off;
@@ -2114,6 +2149,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     u32 gbuf_wmask = 0;
     u32 gbuf_off[16] = {0};
     for (u32 i = 11; i < n; i++) {
+        u32 second;
+        u32 r;
         if (!IDX_OK(i)) continue;
         u64 w = insn[i];
         int op = decode(w)->id;
@@ -2176,10 +2213,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if ((descriptor | 15u) + 1 > cbuf_max[0]) cbuf_max[0] = (descriptor | 15u) + 1;
         }
         /* every register the instruction writes stops being a pointer, then its destination takes the new tag */
-        u32 second = op == O_TEXS || op == O_TLDS || op == O_TLD4S ? B(w, 28, 8) : 255;
-        for (u32 r = d; r < d + 4 && r < 255; r++)
+        second = op == O_TEXS || op == O_TLDS || op == O_TLD4S ? B(w, 28, 8) : 255;
+        for (r = d; r < d + 4 && r < 255; r++)
             if (shader_writes_reg(w, op, r)) gtags[r] = 0;
-        for (u32 r = second; r < second + 2 && r < 255; r++)
+        for (r = second; r < second + 2 && r < 255; r++)
             if (shader_writes_reg(w, op, r)) gtags[r] = 0;
         if (shader_writes_reg(w, op, d)) gtags[d] = tag;
     }
@@ -2248,7 +2285,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             interfaces[count++] = layer_output;
         }
         if (clip_used) {
-            for (u32 i = 0; i < 8; i++)
+            u32 i;
+            for (i = 0; i < 8; i++)
                 if (clip_used & (1u << i)) clip_count = i + 1;
             clip_output = spv_emit_clip_distance_output(&c->emit, c->f32_type, c->u32_type, clip_count);
             interfaces[count++] = clip_output;
@@ -2434,8 +2472,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     /* every OpVariable comes before the first block's other instructions, the clip distances' stores included */
     if (has_flow)
         pc = spv_emit_function_variable_init(&c->emit, reg_ptr, spv_emit_constant_u32(&c->emit, c->u32_type, 11));
-    for (u32 k = 0; k < clip_count; k++) {
-        u32 index = spv_emit_constant_u32(&c->emit, c->u32_type, k);
+    for (clip = 0; clip < clip_count; clip++) {
+        u32 index = spv_emit_constant_u32(&c->emit, c->u32_type, clip);
         u32 ptr = spv_emit_output_element_pointer(&c->emit, c->f32_type, clip_output, index);
         spv_emit_store(&c->emit, ptr, zero_f);
     }
@@ -2714,11 +2752,16 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                                                         : op == O_IMUL_C                 ? 1
                                                                                          : 2);
             u32 addend = c->zero;
+            int high;
+            int signed_lhs;
+            int signed_rhs;
+            u32 product;
             if (mad) {
+                u32 mode;
                 addend = op == O_IMAD32I   ? reg_read(c, d)
                          : op == O_IMAD_RC ? spv_emit_bitcast(&c->emit, c->u32_type, cbuf_read(c, w))
                                            : reg_read(c, B(w, 39, 8));
-                u32 mode = B(w, immediate32 ? 55 : 51, 2);
+                mode = B(w, immediate32 ? 55 : 51, 2);
                 if (mode == 2) rhs = spv_emit_isub_u32(&c->emit, c->u32_type, c->zero, rhs);
                 if (mode == 1) addend = spv_emit_isub_u32(&c->emit, c->u32_type, c->zero, addend);
                 if (mode == 3)
@@ -2730,11 +2773,11 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                         spv_emit_select(&c->emit, c->u32_type, spv_emit_load(&c->emit, c->bool_type, c->cc_c),
                                         spv_emit_constant_u32(&c->emit, c->u32_type, 1), c->zero));
             }
-            int high = B(w, immediate32 ? 53 : mad ? 54 : 39, 1);
-            int signed_lhs = B(w, immediate32 ? 54 : mad ? 48 : 40, 1);
-            int signed_rhs = B(w, immediate32 ? mad ? 57 : 55 : mad ? 53 : 41, 1);
-            u32 product = high ? integer_mul_high(c, lhs, rhs, signed_lhs, signed_rhs)
-                               : spv_emit_imul_u32(&c->emit, c->u32_type, lhs, rhs);
+            high = B(w, immediate32 ? 53 : mad ? 54 : 39, 1);
+            signed_lhs = B(w, immediate32 ? 54 : mad ? 48 : 40, 1);
+            signed_rhs = B(w, immediate32 ? mad ? 57 : 55 : mad ? 53 : 41, 1);
+            product = high ? integer_mul_high(c, lhs, rhs, signed_lhs, signed_rhs)
+                           : spv_emit_imul_u32(&c->emit, c->u32_type, lhs, rhs);
             reg_write(c, d, mad ? spv_emit_iadd_u32(&c->emit, c->u32_type, product, addend) : product);
         } else if (op == O_VOTE) {
             u32 value = pred_read(c, B(w, 39, 3), B(w, 42, 1));
@@ -3792,6 +3835,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                       : op == O_LEA_LI                 ? integer_right(c, w, 2)
                                                        : integer_right(c, w, 1);
             u32 value;
+            int extended;
+            u32 old_carry;
+            u32 sum;
             if (high_form) {
                 u32 hi = reg_read(c, B(w, 39, 8));
                 value = shift ? spv_emit_bitwise_or_u32(
@@ -3819,9 +3865,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             }
             /* .X adds the carry in (LO at 46, HI at 38 or 57), .CC writes the flags, and LO's predicate takes the
                add's carry out: LEA.LO ... P0 then LEA.HI.X is how a 64-bit address is formed */
-            int extended = B(w, op == O_LEA_HR ? 38 : op == O_LEA_HC ? 57 : 46, 1);
-            u32 old_carry = extended ? spv_emit_load(&c->emit, c->bool_type, c->cc_c) : 0;
-            u32 sum = integer_add(c, value, rhs, 0, extended, B(w, 47, 1));
+            extended = B(w, op == O_LEA_HR ? 38 : op == O_LEA_HC ? 57 : 46, 1);
+            old_carry = extended ? spv_emit_load(&c->emit, c->bool_type, c->cc_c) : 0;
+            sum = integer_add(c, value, rhs, 0, extended, B(w, 47, 1));
             reg_write(c, d, sum);
             if (!high_form && B(w, 48, 3) < 7) {
                 u32 carry = spv_emit_u_less(&c->emit, c->bool_type, sum, value);
@@ -4026,8 +4072,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 value = spv_emit_fmul(&c->emit, c->f64_type, left, right);
                 spv_emit_no_contraction(&c->emit, value);
             } else if (op >= O_DFMA_R && op <= O_DFMA_I) {
+                u32 third;
                 right = double_mod(c, right, 0, B(w, 48, 1));
-                u32 third = op == O_DFMA_RC ? double_source(c, vec2_u32, w, 1) : double_read(c, vec2_u32, B(w, 39, 8));
+                third = op == O_DFMA_RC ? double_source(c, vec2_u32, w, 1) : double_read(c, vec2_u32, B(w, 39, 8));
                 u32 addend = double_mod(c, third, 0, B(w, 49, 1));
                 value = spv_emit_glsl_ternary(&c->emit, c->f64_type, c->glsl, SPV_GLSL_FMA, left, right, addend);
             } else {
@@ -4167,6 +4214,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             int fma = op == O_HFMA2_R || op == O_HFMA2_RC || op == O_HFMA2_CR;
             int multiply = op == O_HMUL2_R || op == O_HMUL2_C || op == O_HMUL2_I;
             u32 raw_b;
+            u32 lhs;
+            int rc, cr;
+            u32 swizzle_b;
+            int abs_b;
+            int neg_b;
+            u32 rhs;
             if (reg_b)
                 raw_b = reg_read(c, op == O_HFMA2_RC ? B(w, 39, 8) : b);
             else if (cbuf_b)
@@ -4176,17 +4229,18 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 hi = (B(w, 30, 9) << 6) | (B(w, 56, 1) << 15);
                 raw_b = spv_emit_constant_u32(&c->emit, c->u32_type, lo | (hi << 16));
             }
-            u32 lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)), fma ? 0 : B(w, 44, 1),
-                                    fma                   ? 0
-                                    : !multiply || !reg_b ? B(w, 43, 1)
-                                                          : 0);
+            lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)), fma ? 0 : B(w, 44, 1),
+                                fma                   ? 0
+                                : !multiply || !reg_b ? B(w, 43, 1)
+                                                      : 0);
             /* A constant buffer operand is one F32 for both halves. The HFMA2 forms with one keep B's (RC) or C's
                (CR) register swizzle at 53, neg_b at 56, neg_c at 51 and saturate at 52. */
-            int rc = op == O_HFMA2_RC, cr = op == O_HFMA2_CR;
-            u32 swizzle_b = cbuf_b ? 1 : rc ? B(w, 53, 2) : reg_b ? B(w, 28, 2) : 0;
-            int abs_b = fma ? 0 : reg_b ? (int)B(w, 30, 1) : cbuf_b ? (int)B(w, 54, 1) : 0;
-            int neg_b = rc || cr || op == O_HADD2_C ? (int)B(w, 56, 1) : reg_b ? (int)B(w, 31, 1) : 0;
-            u32 rhs = half_pair_mod(c, vec2, half_pair(c, vec2, raw_b, swizzle_b), abs_b, neg_b);
+            rc = op == O_HFMA2_RC;
+            cr = op == O_HFMA2_CR;
+            swizzle_b = cbuf_b ? 1 : rc ? B(w, 53, 2) : reg_b ? B(w, 28, 2) : 0;
+            abs_b = fma ? 0 : reg_b ? (int)B(w, 30, 1) : cbuf_b ? (int)B(w, 54, 1) : 0;
+            neg_b = rc || cr || op == O_HADD2_C ? (int)B(w, 56, 1) : reg_b ? (int)B(w, 31, 1) : 0;
+            rhs = half_pair_mod(c, vec2, half_pair(c, vec2, raw_b, swizzle_b), abs_b, neg_b);
             u32 pair;
             if (fma) {
                 u32 add_raw = rc ? spv_emit_bitcast(&c->emit, c->u32_type, cbuf_read(c, w)) : reg_read(c, B(w, 39, 8));
@@ -4202,6 +4256,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 half_pair_result(c, vec2, pair, reg_read(c, d), B(w, 49, 2), reg_b && !rc ? B(w, 32, 1) : B(w, 52, 1)));
         } else if (op == O_HSET2_R || op == O_HSET2_C || op == O_HSET2_I) {
             u32 raw_b;
+            u32 lhs;
+            u32 rhs;
             if (op == O_HSET2_R)
                 raw_b = reg_read(c, b);
             else if (op == O_HSET2_C)
@@ -4211,14 +4267,14 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 high = (B(w, 30, 9) << 6) | (B(w, 56, 1) << 15);
                 raw_b = spv_emit_constant_u32(&c->emit, c->u32_type, low | (high << 16));
             }
-            u32 lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)), B(w, 44, 1), B(w, 43, 1));
-            u32 rhs = half_pair_mod(c, vec2,
-                                    half_pair(c, vec2, raw_b,
-                                              op == O_HSET2_R   ? B(w, 28, 2)
-                                              : op == O_HSET2_C ? 1
-                                                                : 0),
-                                    op == O_HSET2_R && B(w, 30, 1),
-                                    op == O_HSET2_R ? B(w, 31, 1) : op == O_HSET2_C && B(w, 56, 1));
+            lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)), B(w, 44, 1), B(w, 43, 1));
+            rhs = half_pair_mod(c, vec2,
+                                half_pair(c, vec2, raw_b,
+                                          op == O_HSET2_R   ? B(w, 28, 2)
+                                          : op == O_HSET2_C ? 1
+                                                            : 0),
+                                op == O_HSET2_R && B(w, 30, 1),
+                                op == O_HSET2_R ? B(w, 31, 1) : op == O_HSET2_C && B(w, 56, 1));
             u32 predicate = pred_read(c, B(w, 39, 3), B(w, 42, 1));
             u32 compare = B(w, op == O_HSET2_R ? 35 : 49, 4);
             u32 result = c->zero;
@@ -4235,6 +4291,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             reg_write(c, d, result);
         } else if (op == O_HSETP2_R || op == O_HSETP2_C || op == O_HSETP2_I) {
             u32 raw_b;
+            u32 lhs;
+            u32 rhs;
             if (op == O_HSETP2_R)
                 raw_b = reg_read(c, b);
             else if (op == O_HSETP2_C)
@@ -4244,14 +4302,14 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 high = (B(w, 30, 9) << 6) | (B(w, 56, 1) << 15);
                 raw_b = spv_emit_constant_u32(&c->emit, c->u32_type, low | (high << 16));
             }
-            u32 lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)), B(w, 44, 1), B(w, 43, 1));
-            u32 rhs = half_pair_mod(c, vec2,
-                                    half_pair(c, vec2, raw_b,
-                                              op == O_HSETP2_R   ? B(w, 28, 2)
-                                              : op == O_HSETP2_C ? 1
-                                                                 : 0),
-                                    op == O_HSETP2_C && B(w, 54, 1) || op == O_HSETP2_R && B(w, 30, 1),
-                                    op == O_HSETP2_R ? B(w, 31, 1) : op == O_HSETP2_C && B(w, 56, 1));
+            lhs = half_pair_mod(c, vec2, half_pair(c, vec2, reg_read(c, a), B(w, 47, 2)), B(w, 44, 1), B(w, 43, 1));
+            rhs = half_pair_mod(c, vec2,
+                                half_pair(c, vec2, raw_b,
+                                          op == O_HSETP2_R   ? B(w, 28, 2)
+                                          : op == O_HSETP2_C ? 1
+                                                             : 0),
+                                op == O_HSETP2_C && B(w, 54, 1) || op == O_HSETP2_R && B(w, 30, 1),
+                                op == O_HSETP2_R ? B(w, 31, 1) : op == O_HSETP2_C && B(w, 56, 1));
             u32 predicate = pred_read(c, B(w, 39, 3), B(w, 42, 1));
             u32 compare = B(w, op == O_HSETP2_R ? 35 : 49, 4);
             u32 outcomes[2];
@@ -4389,19 +4447,20 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             u32 encoding = B(w, 53, 4);
             int array = encoding == 8, type = encoding == 0 || encoding == 1 ? 0 : encoding == 7 ? 2 : 1;
             int slot = 0;
+            u32 x;
+            u32 y;
             while (slot < texture_count &&
                    (textures[slot].cbuf_off != off || textures[slot].type != type || textures[slot].array != array ||
                     textures[slot].shadow || textures[slot].bindless || textures[slot].flags))
                 slot++;
             /* the 2D array form takes x and y from Rb and Rb + 1, the layer from Ra's low 16 bits */
-            u32 x = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, array ? b : a));
-            u32 y = type == 0
-                        ? spv_emit_constant_u32(&c->emit, i32_type, 0)
-                        : spv_emit_bitcast(
-                              &c->emit, i32_type,
-                              reg_read(c, array                                                               ? b + 1
-                                          : encoding == 4 || encoding == 5 || encoding == 7 || encoding == 12 ? a + 1
-                                                                                                              : b));
+            x = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, array ? b : a));
+            y = type == 0 ? spv_emit_constant_u32(&c->emit, i32_type, 0)
+                          : spv_emit_bitcast(
+                                &c->emit, i32_type,
+                                reg_read(c, array                                                               ? b + 1
+                                            : encoding == 4 || encoding == 5 || encoding == 7 || encoding == 12 ? a + 1
+                                                                                                                : b));
             if (encoding == 4 || encoding == 12) {
                 u32 packed = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, b + (encoding == 12)));
                 u32 four = spv_emit_constant_u32(&c->emit, c->u32_type, 4);
@@ -4470,9 +4529,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             int outputs = texs_outputs(w, regs, comps);
             if (B(w, 59, 1)) {
                 for (int k = 0; k < outputs; k++) {
+                    u32 component;
                     if (regs[k] >= 255) continue;
                     /* a depth compare returns its result in x, y and z, and 1.0 in alpha */
-                    u32 component =
+                    component =
                         shadow ? spv_emit_bitcast(&c->emit, c->u32_type,
                                                   comps[k] == 3 ? spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f)
                                                                 : sample)
@@ -4541,8 +4601,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if (offset_enabled) {
                 u32 packed = 0;
                 int known = direct_track_const(insn, n, i, offset_source, &packed, 0);
+                u32 bits;
                 dynamic_offset = !known;
-                u32 bits = known ? 0 : reg_read(c, offset_source);
+                bits = known ? 0 : reg_read(c, offset_source);
                 if (!known) bits = spv_emit_bitcast(&c->emit, i32_type, bits);
                 u32 ox = known ? spv_emit_constant_u32(&c->emit, i32_type, (u32)((i32)(packed << 28) >> 28))
                                : spv_emit_bitfield_sextract(&c->emit, i32_type, bits,
@@ -4573,7 +4634,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 dimensions = spv_emit_image_query_size_lod(&c->emit, components == 3 ? vec3_i32 : vec2_i32,
                                                                c->sampled_type[slot], c->sampler[slot], lod_index);
                 u32 adjusted[3];
-                for (u32 component = 0; component < components; component++) {
+                u32 component;
+                for (component = 0; component < components; component++) {
                     u32 coord = spv_emit_vec4_extract(&c->emit, c->f32_type, coords, component);
                     if (component >= moved) { /* the array layer */
                         adjusted[component] = coord;
@@ -4679,7 +4741,11 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 z =
                     type == 3 ? spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array + 2)) : array_layer(c, a);
                 if (type == 3 && array) {
-                    u32 four[4] = {x, y, z, array_layer(c, a)};
+                    u32 four[4];
+                    four[0] = x;
+                    four[1] = y;
+                    four[2] = z;
+                    four[3] = array_layer(c, a);
                     coords = spv_emit_vec4_construct(&c->emit, vec4, four);
                 } else
                     coords = spv_emit_vec3_construct(&c->emit, vec3, x, y, z);

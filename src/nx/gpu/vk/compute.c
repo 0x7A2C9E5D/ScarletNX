@@ -73,6 +73,8 @@ static int cs_cb_read(u32 idx, u32 off, u32* out) {
 }
 
 static void cs_init(void) {
+    VkDescriptorPoolSize sz[VK_POOL_TYPES];
+    VkDescriptorPoolCreateInfo dci = {0};
     if (g_cpool) return;
     VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -90,12 +92,11 @@ static void cs_init(void) {
     VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &st};
     VK_OK(vkCreateSemaphore(g_vk.dev, &sci, NULL, &g_vk_csem));
     /* the dispatches of a batch: a batch that runs out lands, which resets the pool */
-    VkDescriptorPoolSize sz[VK_POOL_TYPES];
     vk_pool_sizes(sz, 1024);
-    VkDescriptorPoolCreateInfo dci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-                                      .maxSets = 1024,
-                                      .poolSizeCount = VK_POOL_TYPES,
-                                      .pPoolSizes = sz};
+    dci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    dci.maxSets = 1024;
+    dci.poolSizeCount = VK_POOL_TYPES;
+    dci.pPoolSizes = sz;
     VK_OK(vkCreateDescriptorPool(g_vk.dev, &dci, NULL, &g_dpool));
 }
 
@@ -368,12 +369,20 @@ typedef struct {
 } CsBufImg;
 static int cs_buffer_image(const u32* tic, int kind, CsBufImg* out) {
     u32 hv = (tic[2] >> 21) & 7, type = (tic[4] >> 23) & 0xF;
+    u64 gva;
+    u64 texels;
+    VkFmt f;
+    VkFormat fmt;
+    u64 bytes;
+    u32 element;
+    VkFormatProperties fp;
+    VkFormatFeatureFlags want;
     if (hv != 0 || type != 6) return 0;
-    u64 gva = ((u64)(tic[2] & 0xFFFF) << 32) | tic[1];
-    u64 texels = (((u64)(tic[3] & 0xFFFF) << 16) | (tic[4] & 0xFFFF)) + 1;
-    VkFmt f = vk_tic_format(tic[0], 0);
+    gva = ((u64)(tic[2] & 0xFFFF) << 32) | tic[1];
+    texels = (((u64)(tic[3] & 0xFFFF) << 16) | (tic[4] & 0xFFFF)) + 1;
+    f = vk_tic_format(tic[0], 0);
     if (!gva || !f.bpp || f.bw != 1 || !f.raw || f.depth) return 0;
-    VkFormat fmt = f.vk;
+    fmt = f.vk;
     if (kind == 1)
         fmt = VK_FORMAT_R32_UINT;
     else if (kind == 2 && !f.is_int)
@@ -395,15 +404,16 @@ static int cs_buffer_image(const u32* tic, int kind, CsBufImg* out) {
     else if (kind == 0 && f.is_int)
         fmt = VK_FORMAT_UNDEFINED;
     if (fmt == VK_FORMAT_UNDEFINED) return 0;
-    u64 bytes = texels * f.bpp;
-    u32 element = kind == 1 ? 4 : f.bpp;
+    bytes = texels * f.bpp;
+    element = kind == 1 ? 4 : f.bpp;
     if (bytes > (64ull << 20) || bytes / element > g_vk.props.limits.maxTexelBufferElements) return 0;
-    VkFormatProperties fp;
     vkGetPhysicalDeviceFormatProperties(g_vk.phys, fmt, &fp);
-    VkFormatFeatureFlags want = VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT |
-                                (kind == 1 ? VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT : 0);
+    want = VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT |
+           (kind == 1 ? VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT : 0);
     if ((fp.bufferFeatures & want) != want) return 0;
-    *out = (CsBufImg){gva, (u32)(bytes / element * element), fmt};
+    out->gva = gva;
+    out->bytes = (u32)(bytes / element * element);
+    out->fmt = fmt;
     return 1;
 }
 
@@ -411,6 +421,11 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     u32* rc = ch->rcomp;
     u32 gx = q[12] & 0x7FFFFFFF, gy = q[13] & 0xFFFF, gz = q[13] >> 16, lx = q[18] >> 16, ly = q[19] & 0xFFFF,
         lz = q[19] >> 16, shm = q[17] & 0x3FFFF;
+    CsKey ck = {0, 0, 0};
+    u32 tcb_key;
+    u64 tic_key_base;
+    CsBufImg bimg[8] = {0};
+    int i;
     if (!gx || !gy || !gz || !lx || !ly || !lz) return;
     const VkPhysicalDeviceLimits* lim = &g_vk.props.limits;
     if (gx > lim->maxComputeWorkGroupCount[0] || gy > lim->maxComputeWorkGroupCount[1] ||
@@ -449,32 +464,33 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     if (!p || fe->addr != pa || fe->epoch != g_vk_epoch || fe->lx != lx || fe->ly != ly || fe->lz != lz ||
         fe->shm != shm || !vk_cb_reads_hold(&p->cbr, cs_cb_read)) {
         static u8 code_buf[0x10000 + 80]; /* compute programs have no header: 80 zero bytes stand in for one */
+        CsKey unkeyed = {0, 0, 0};
         memset(code_buf, 0, 80);
         gmem_read_code(pa, code_buf + 80, 0x10000);
-        p = cs_pipe(code_buf, lx, ly, lz, shm, (CsKey){0, 0, 0});
+        p = cs_pipe(code_buf, lx, ly, lz, shm, unkeyed);
         *fe = (typeof(fc[0])){pa, g_vk_epoch, lx, ly, lz, shm, p};
     }
     /* A 2D store is translated unsigned for a bindless image and float for a bound one. An image of the other
        class (a bindless RGBA8 target), or an integer texture, needs the program translated again, keyed on it. */
-    CsKey ck = {0, 0, 0};
-    u32 tcb_key = rc[0x982] & 7;
-    u64 tic_key_base = ((u64)rc[0x55D] << 32) | rc[0x55E];
+    tcb_key = rc[0x982] & 7;
+    tic_key_base = ((u64)rc[0x55D] << 32) | rc[0x55E];
     if (!p->failed)
-        for (int i = 0; i < p->si.ntex && i < SH_MAXTEX; i++) {
+        for (i = 0; i < p->si.ntex && i < SH_MAXTEX; i++) {
             ShTex* st = &p->si.tex[i];
-            if (st->shadow || st->flags) continue; /* raw and multisample textures are declared on their own */
             u32 h = 0, h2 = 0, tic[8];
+            VkFmt f;
+            if (st->shadow || st->flags) continue; /* raw and multisample textures are declared on their own */
             if (!cs_cb_read(st->bindless ? (st->bl_cbuf & 7) : tcb_key, st->cbuf_off * 4, &h)) continue;
             if (st->bindless && st->bl2 && cs_cb_read(st->bl2_cbuf & 7, st->bl2_off * 4, &h2)) h |= h2;
             gmem_read(tic_key_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
-            VkFmt f = vk_tic_format(tic[0], 0);
+            f = vk_tic_format(tic[0], 0);
             if (f.is_int || vk_tic_reads_stencil(tic)) ck.tex_int |= 1u << i;
             if (f.is_int && f.sint) ck.tex_sint |= 1u << i;
         }
     if (!p->failed)
-        for (int i = 0; i < p->si.nimg && i < 8; i++) {
-            if (p->si.img[i].type != 3 || p->si.img[i].kind == 1) continue;
+        for (i = 0; i < p->si.nimg && i < 8; i++) {
             u32 h = 0, tic[8];
+            if (p->si.img[i].type != 3 || p->si.img[i].kind == 1) continue;
             if (!cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : tcb_key, p->si.img[i].cbuf_off * 4,
                             &h))
                 continue;
@@ -496,7 +512,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         return;
     }
     int needs_unformatted_image = 0;
-    for (int i = 0; i < p->si.nimg; i++)
+    for (i = 0; i < p->si.nimg; i++)
         needs_unformatted_image |= p->si.img[i].kind == 0 || (p->si.img[i].type == 1 && p->si.img[i].kind == 2);
     if (needs_unformatted_image && !g_vk.feat.shaderStorageImageWriteWithoutFormat) {
         LOG_LIMIT(1, "vulkan: storage image writes need shaderStorageImageWriteWithoutFormat (skipped)\n");
@@ -522,11 +538,11 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     for (int i = 0; i < 8; i++)
         if (p->si.cbuf_mask & (1u << i)) need += g_cbn[i] + vk_stage_align();
     /* buffer images: their headers from the compute engine's texture pool, handles from its texture bank */
-    CsBufImg bimg[8] = {0};
-    for (int i = 0; i < p->si.nimg && i < 8; i++) {
-        if (p->si.img[i].type != 1) continue;
-        u64 tic_base = ((u64)rc[0x55D] << 32) | rc[0x55E];
+    for (i = 0; i < p->si.nimg && i < 8; i++) {
+        u64 tic_base;
         u32 h = 0, tic[8];
+        if (p->si.img[i].type != 1) continue;
+        tic_base = ((u64)rc[0x55D] << 32) | rc[0x55E];
         if ((u32)i >= g_vk_buffer_image_slots ||
             !cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : (rc[0x982] & 7), p->si.img[i].cbuf_off * 4,
                         &h)) {
@@ -744,12 +760,15 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
                                              .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                                              .pImageInfo = &ii[p->si.ntex + i]};
         }
-        for (int i = 0; i < p->si.nimg && i < 8; i++) {
+        for (i = 0; i < p->si.nimg && i < 8; i++) {
+            int alias;
+            int k;
+            VkBufferViewCreateInfo vci;
             if (p->si.img[i].type != 1) continue;
             /* the slots of one buffer (its loads and atomics, and its stores) view one copy, so each sees the
                others' writes as the console's would */
-            int alias = -1;
-            for (int k = 0; k < i && alias < 0; k++)
+            alias = -1;
+            for (k = 0; k < i && alias < 0; k++)
                 if (bufimg_view[k] && bimg[k].gva == bimg[i].gva) alias = k;
             if (alias >= 0) {
                 bufimg_off[i] = bufimg_off[alias];
@@ -758,24 +777,27 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
                 bufimg_off[i] = arena_alloc(bimg[i].bytes);
                 gmem_read(bimg[i].gva, g_ar_ptr + bufimg_off[i], bimg[i].bytes);
             }
-            VkBufferViewCreateInfo vci = {.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO,
-                                          .buffer = g_ar,
-                                          .format = bimg[i].fmt,
-                                          .offset = bufimg_off[i],
-                                          .range = bimg[i].bytes};
+            memset(&vci, 0, sizeof vci);
+            vci.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
+            vci.buffer = g_ar;
+            vci.format = bimg[i].fmt;
+            vci.offset = bufimg_off[i];
+            vci.range = bimg[i].bytes;
             if (!VK_OK(vkCreateBufferView(g_vk.dev, &vci, NULL, &bufimg_view[i]))) {
-                for (int k = 0; k < i; k++)
+                for (k = 0; k < i; k++)
                     if (bufimg_view[k]) vkDestroyBufferView(g_vk.dev, bufimg_view[k], NULL);
                 g_vk_cs_skipped++;
                 cs_abandon_binding(originals);
                 return;
             }
-            w[nw++] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                             .dstSet = set,
-                                             .dstBinding = SNX_VKB_IMGBUF + i,
-                                             .descriptorCount = 1,
-                                             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
-                                             .pTexelBufferView = &bufimg_view[i]};
+            memset(&w[nw], 0, sizeof w[nw]);
+            w[nw].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            w[nw].dstSet = set;
+            w[nw].dstBinding = SNX_VKB_IMGBUF + i;
+            w[nw].descriptorCount = 1;
+            w[nw].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+            w[nw].pTexelBufferView = &bufimg_view[i];
+            nw++;
         }
         if (fmt_used) {
             u64 o = arena_alloc(sizeof fmt);
@@ -799,12 +821,16 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
             if (sa[i] + ss[i] > g_out_hi) g_out_hi = sa[i] + ss[i];
         }
     /* buffer images land like storage buffers: only the bytes the dispatch changed are written back */
-    for (int i = 0; i < p->si.nimg && i < 8; i++) {
+    for (i = 0; i < p->si.nimg && i < 8; i++) {
         int alias = 0;
-        for (int k = 0; k < i; k++) alias |= bufimg_view[k] && bufimg_off[k] == bufimg_off[i];
+        int k;
+        for (k = 0; k < i; k++) alias |= bufimg_view[k] && bufimg_off[k] == bufimg_off[i];
         if (bufimg_view[i] && !alias && g_nout < 256) {
             memcpy(g_org + bufimg_off[i], g_ar_ptr + bufimg_off[i], bimg[i].bytes);
-            g_out[g_nout++] = (CsOut){bimg[i].gva, bufimg_off[i], bimg[i].bytes};
+            g_out[g_nout].addr = bimg[i].gva;
+            g_out[g_nout].off = bufimg_off[i];
+            g_out[g_nout].size = bimg[i].bytes;
+            g_nout++;
             if (bimg[i].gva < g_out_lo) g_out_lo = bimg[i].gva;
             if (bimg[i].gva + bimg[i].bytes > g_out_hi) g_out_hi = bimg[i].gva + bimg[i].bytes;
         }
@@ -852,7 +878,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         g_landing = 1;
         for (int i = 0; i < g_nout; i++)
             vk_write_changed(g_out[i].addr, g_ar_ptr + g_out[i].off, g_org + g_out[i].off, g_out[i].size);
-        for (int i = 0; i < p->si.nimg && i < 8; i++)
+        for (i = 0; i < p->si.nimg && i < 8; i++)
             if (bufimg_view[i]) vkDestroyBufferView(g_vk.dev, bufimg_view[i], NULL);
         for (int i = 0; i < p->si.nimg; i++) {
             if (!images[i]) continue; /* a buffer image, landed with the outputs */

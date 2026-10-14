@@ -111,9 +111,11 @@ void vk_pool_sizes(VkDescriptorPoolSize* sz, u32 sets) {
     static const VkDescriptorType ty[VK_POOL_TYPES] = {
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER};
-    for (int k = 0; k < VK_POOL_TYPES; k++) {
+    int k;
+    for (k = 0; k < VK_POOL_TYPES; k++) {
         u32 n = 0;
-        for (u32 i = 0; i < SNX_VKB_END; i++) n += binding_type(i) == ty[k];
+        u32 i;
+        for (i = 0; i < SNX_VKB_END; i++) n += binding_type(i) == ty[k];
         sz[k] = (VkDescriptorPoolSize){ty[k], n * sets};
     }
 }
@@ -129,15 +131,17 @@ void vk_pipeline_init(void) {
         VkDescriptorSetLayoutBinding b[SNX_VKB_END];
         u32 count = 0;
         u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;
+        u32 buffer_slots;
+        u32 i;
         if (image_slots > g_vk.props.limits.maxDescriptorSetStorageImages)
             image_slots = g_vk.props.limits.maxDescriptorSetStorageImages;
         /* storage texel buffers count against the storage image limits, so buffer images get what images leave */
-        u32 buffer_slots = image_slots;
+        buffer_slots = image_slots;
         if (image_slots > SNX_VKB_RS - SNX_VKB_IMG) image_slots = SNX_VKB_RS - SNX_VKB_IMG;
         buffer_slots -= image_slots;
         if (buffer_slots > SNX_VKB_END - SNX_VKB_IMGBUF) buffer_slots = SNX_VKB_END - SNX_VKB_IMGBUF;
         g_vk_buffer_image_slots = buffer_slots;
-        for (u32 i = 0; i < SNX_VKB_END; i++) {
+        for (i = 0; i < SNX_VKB_END; i++) {
             int image = i >= SNX_VKB_IMG && i < SNX_VKB_RS;
             if (image && (s == 2 || i - SNX_VKB_IMG >= image_slots)) continue;
             if (i >= SNX_VKB_IMGBUF && (s != 0 || i - SNX_VKB_IMGBUF >= buffer_slots)) continue;
