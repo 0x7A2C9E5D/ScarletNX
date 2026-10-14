@@ -3,14 +3,15 @@
 # Copyright 2026 the ScarletNX contributors
 """Make the icons in dist/icons/ from dist/wimsy.svg, or check them.
 
-    scripts/make-icons.py           render them again (needs rsvg-convert, from librsvg)
+    scripts/make-icons.py           render them again (needs rsvg-convert, from librsvg, and optipng)
     scripts/make-icons.py --check   check them against the SVG and the manifest (no renderer needed)
 
 dist/icons/hicolor/ holds the PNG sizes desktops look for, laid out as installed under share/icons/; wimsy.ico packs
 the Windows sizes for the executables' resources (src/nx/runtime/platform/runtime.rc); the 128 one is the window
-icon (cmake/window_icon.cmake). MANIFEST records the SVG's and every output's SHA-256 and the renderer that drew them,
-so a changed SVG, or an output edited by hand, fails the check until this runs again. When the renderer at hand is
-the recorded one, --check also draws each size again and compares the bytes.
+icon (cmake/window_icon.cmake). Each PNG goes through optipng, keeping it RGBA (the ICO's images must be, and a
+palette came out larger). MANIFEST records the SVG's and every output's SHA-256 and the tools that made them, so a
+changed SVG, or an output edited by hand, fails the check until this runs again. When the tools at hand are the
+recorded ones, --check also makes each size again and compares the bytes.
 """
 
 import argparse
@@ -46,16 +47,26 @@ def sha256(path):
     return hashlib.sha256(data).hexdigest()
 
 
-def renderer():
+OPTIPNG = ['optipng', '-quiet', '-o7', '-strip', 'all', '-nc', '-nb']
+
+
+def version(command):
     try:
-        result = subprocess.run(['rsvg-convert', '--version'], capture_output=True, text=True, check=True)
+        result = subprocess.run(command, capture_output=True, text=True, check=True)
     except (OSError, subprocess.CalledProcessError):
         return None
     return result.stdout.splitlines()[0].strip()
 
 
+def renderer():
+    """The tools that make the PNGs, as the manifest names them; None when one is missing."""
+    draw, squeeze = version(['rsvg-convert', '--version']), version(['optipng', '-v'])
+    return f'{draw} and {squeeze} ({" ".join(OPTIPNG[2:])})' if draw and squeeze else None
+
+
 def render(size, destination):
     subprocess.run(['rsvg-convert', '-w', str(size), '-h', str(size), '-o', str(destination), str(SOURCE)], check=True)
+    subprocess.run(OPTIPNG + [str(destination)], check=True)
 
 
 def png_size(data):
@@ -97,7 +108,7 @@ def read_ico(data):
 def make():
     drawn_by = renderer()
     if not drawn_by:
-        sys.exit('make-icons.py: rsvg-convert (librsvg) is needed to draw the icons')
+        sys.exit('make-icons.py: rsvg-convert (librsvg) and optipng are needed to make the icons')
     for size in SIZES:
         png_path(size).parent.mkdir(parents=True, exist_ok=True)
         render(size, png_path(size))
@@ -152,9 +163,9 @@ def check():
                     if drawn.read_bytes() != png_path(size).read_bytes():
                         problems.append(f'{size}x{size} drawn again differs from the checked-in one')
             if not problems:
-                print(f'drew every size again with {at_hand}: the same bytes')
+                print(f'made every size again with {at_hand}: the same bytes')
         else:
-            print(f'not drawn again: drawn with {drawn_by}, and here there is {at_hand or "no rsvg-convert"}')
+            print(f'not made again: made with {drawn_by}, and here there is {at_hand or "no rsvg-convert or optipng"}')
     if problems:
         sys.exit('make-icons.py --check:\n  ' + '\n  '.join(problems))
     print(f'icons checked: {len(outputs())} files match wimsy.svg and the manifest')
