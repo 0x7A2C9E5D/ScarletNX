@@ -131,6 +131,29 @@ add_executable(snx-test-runtime-nro runtime_nro.c "${PROJECT_SOURCE_DIR}/src/nx/
 snx_test_target(snx-test-runtime-nro 11)
 add_test(NAME runtime_nro COMMAND snx-test-runtime-nro)
 
+if(NOT WIN32)
+    # Emit the real fallback interpreter without LLVM, a game dump, or a precompiled code module.
+    add_executable(snx-test-ro-interp-gen "${PROJECT_SOURCE_DIR}/src/common/cpu/recompiler/llvm/rtlib_gen.c"
+        "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/a64.c")
+    snx_test_target(snx-test-ro-interp-gen 11)
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ldr_interp.inc"
+        COMMAND snx-test-ro-interp-gen interp "${CMAKE_CURRENT_BINARY_DIR}/ldr_interp.inc"
+        DEPENDS snx-test-ro-interp-gen VERBATIM)
+    add_executable(snx-test-ldr-service ldr_service.c ldr_interp.c "${CMAKE_CURRENT_BINARY_DIR}/ldr_interp.inc"
+        "${PROJECT_SOURCE_DIR}/src/nx/hle/services/ldr.c" "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c"
+        "${PROJECT_SOURCE_DIR}/src/common/utilities/sha256.c"
+        "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu_helpers.c")
+    snx_test_target(snx-test-ldr-service 11)
+    target_include_directories(snx-test-ldr-service PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_compile_definitions(snx-test-ldr-service PRIVATE SNX_RO_INTERP_TEST)
+    target_link_libraries(snx-test-ldr-service PRIVATE m)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+        target_compile_options(snx-test-ldr-service PRIVATE -mcx16)
+    endif()
+    add_test(NAME ldr_service COMMAND snx-test-ldr-service)
+    set_tests_properties(ldr_service PROPERTIES TIMEOUT 60)
+endif()
+
 add_executable(snx_recompiler_test recompiler_native.c)
 snx_test_target(snx_recompiler_test 23)
 target_include_directories(snx_recompiler_test PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
