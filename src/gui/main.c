@@ -8,7 +8,7 @@
 #include "browser.h"
 #include "font.h"
 #include "model.h"
-#include "process.h"
+#include "gui_process.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
