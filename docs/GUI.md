@@ -10,9 +10,9 @@ English text only. No font files or localization packages are needed.
 ./build/scarletnx-gui
 ```
 
-The window's title tells which build it is, as `ScarletNX <commit> (<compiler>, <OS> <arch>)`, for example
-`ScarletNX 43bf71a (clang 22.1.8, Linux x86_64)`; the commit ends in `-dirty` when the tree had changes, and reads
-`unknown` outside a git checkout. A game's window carries the same line after the game's name.
+The window's title tells which build it is, as `ScarletNX <branch> <commit> (<compiler>, <OS> <arch>)`, for example
+`ScarletNX main 43bf71a (clang 22.1.8, Linux x86_64)`; the commit ends in `-dirty` when the tree had changes, a
+build of a detached checkout outside CI says `detached`, and both read `unknown` outside a git checkout. A game's window carries the same line after the game's name.
 
 - Up/Down and Left/Right move the yellow focus, wrapping at the ends.
 - Moving the mouse over an item focuses it in yellow without activating it.

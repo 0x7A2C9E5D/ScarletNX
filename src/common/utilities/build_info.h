@@ -2,6 +2,6 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_BUILD_INFO_H
 #define SNX_BUILD_INFO_H
-/* "ScarletNX <commit> (<compiler>, <OS> <arch>)", for the window titles */
+/* "ScarletNX <branch> <commit> (<compiler>, <OS> <arch>)", for the window titles */
 const char* snx_build_info(void);
 #endif

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-# snx_build_info: the line the window titles carry, "ScarletNX <commit> (<compiler>, <OS> <arch>)". The commit is read
-# at every build (cmake/commit.cmake), the rest is the compiler's own macros
+# snx_build_info: the line the window titles carry, "ScarletNX <branch> <commit> (<compiler>, <OS> <arch>)". The branch
+# and commit are read at every build (cmake/commit.cmake), the rest is the compiler's own macros
 include_guard(GLOBAL)
 set(snx_commit_header "${CMAKE_BINARY_DIR}/generated/snx_commit.h")
 add_custom_target(snx_commit
