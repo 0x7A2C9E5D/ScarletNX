@@ -243,7 +243,10 @@ static int create_device(void) {
     WANT(shaderInt16);
     WANT(geometryShader);
     WANT(tessellationShader);
+    WANT(shaderTessellationAndGeometryPointSize);
 #undef WANT
+    /* points out of tessellation and geometry programs take the size those write, as the vertex program's do */
+    g_shader_stage_point_size = want->shaderTessellationAndGeometryPointSize != 0;
     const char* ext[4];
     u32 next = 0;
     if (!g_opt_headless) ext[next++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;

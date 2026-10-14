@@ -19,6 +19,7 @@ static int failures;
 static const char* storage_paths[2];
 static const char* nro_paths[4];
 static const char* issue126_paths[17];
+static const char* stage_paths[3];
 static void check(int condition, const char* what) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s\n", what);
@@ -481,6 +482,86 @@ static void issue126_shader_modes(void) {
     free(code);
 }
 
+/* a tessellation or geometry program: the instructions after an SPH with words 2 to 4 set */
+static u32* translate_stage(const u64* instructions, int count, int stage, const u32* sph, u32 primitive,
+                            ShaderInfo* info, size_t* words) {
+    u64 code[128] = {0};
+    int at = 10;
+    memcpy((u32*)code + 2, sph, 3 * sizeof *sph); /* SPH words 2, 3 and 4 */
+    for (int i = 0; i <= count; i++) {
+        if ((at - 10) % 4 == 0) code[at++] = SCHED;
+        code[at++] = i < count ? instructions[i] : EXIT;
+    }
+    memset(info, 0, sizeof *info);
+    info->rt_int_mask = primitive;
+    if (stage == ST_TCS) info->clip_enable = SNX_SH_NOT_LAST;
+    return shader_to_spirv((const u8*)code, sizeof code, stage, info, words, 1, 1, 1);
+}
+
+/* edenprobe's tessellated patch: a control program passing its 4 vertices through and writing every level from
+   vertex 0's attribute, and an evaluation program mixing the corners by the tessellation coordinate and reading
+   the outer level back. Then a geometry program passing a triangle's first vertex on as a strip of one. */
+static void between_stages(void) {
+    const u64 control[] = {
+        0xf0c8000001170004ull, 0xf0c8000001d70000ull, 0x384700000ff70001ull, 0x3800000081070000ull,
+        0x5b00020000170002ull, 0x5b007fa800170001ull, 0x5b30011800170000ull, 0xefd0000000070005ull,
+        0xefd982800707ff00ull, 0xeff1ff800707ff00ull, 0xefd982800907ff00ull, 0xeff1ff800907ff00ull,
+        0xe29000000c800000ull, 0x5b6403800ff70407ull, 0xf0f800000008000full, 0xf0c8000001d70000ull,
+        0x384700000ff70001ull, 0x3800000081070000ull, 0x5b007f8000170002ull, 0x5b007fa800170001ull,
+        0x5b30011800170000ull, 0xefd0000000070000ull, 0xefd8000009c7ff00ull, 0x386810437f070000ull,
+        0x5ca8140000070a00ull, 0xeff07f808007ff00ull, 0xeff07f808047ff00ull, 0xeff07f808087ff00ull,
+        0xeff07f8080c7ff00ull, 0xeff07f808107ff00ull, 0xeff07f808147ff00ull, 0xf0f800000007000full,
+    };
+    const u64 evaluation[] = {
+        0xf0c8000000070002ull, 0xefd881012f07ff00ull, 0xf0c8000001d70002ull, 0x384700000ff70203ull,
+        0xeff0ff800807ff00ull, 0x3800000081070202ull, 0x010000000017f004ull, 0x5b00020000370204ull,
+        0x5b007fa800370211ull, 0x5b30021801170204ull, 0xefd0000000070408ull, 0xefd984000707ff04ull,
+        0x5b007f8000370208ull, 0x5b30041801170208ull, 0xefd000000007080cull, 0xefd986000707ff08ull,
+        0x5c58300000870404ull, 0x59a004000047000dull, 0x5c58300000970504ull, 0x59a004800047000eull,
+        0x5c58300000a70604ull, 0x59a005000047000full, 0x5c58300000b70704ull, 0x59a0058000470010ull,
+        0x010000000027f004ull, 0x5b00020000370204ull, 0x5b30021801170204ull, 0xefd0000000070408ull,
+        0xefd984000707ff04ull, 0x010000000037f008ull, 0x5b00040000370203ull, 0x5b30019801170202ull,
+        0xefd0000000070202ull, 0xefd981000707ff08ull, 0x5c58300000870402ull, 0x59a0040000270002ull,
+        0xefd87f808007ff08ull, 0x5c58300000970503ull, 0x59a0048000370003ull, 0x5c58300000a70604ull,
+        0x59a0050000470006ull, 0xefd806000987ff0aull, 0x5c58300000b70704ull, 0x59a0058000470007ull,
+        0x5c58300000d70202ull, 0x59a0068000270104ull, 0x5c58300000e70302ull, 0x59a0070000270105ull,
+        0x5c58300000f70602ull, 0x59a0078000270106ull, 0x5c58300001070702ull, 0x59a0080000270107ull,
+        0xefd886000907ff02ull, 0x1e23b8080817080bull, 0xeff1ff800707ff04ull, 0x5c98078000270008ull,
+        0x5c98078000370009ull, 0xeff1ff800907ff08ull,
+    };
+    const u64 geometry[] = {
+        0xefd9ff800707ff00ull, /* ALD R0, a[0x70] of vertex RZ, 4 words */
+        0xeff1ff800707ff00ull, /* AST a[0x70], R0, 4 words */
+        0xfbe000800ff70404ull, /* OUT.EMIT R4, R4, RZ */
+        0xfbe001000ff70404ull, /* OUT.CUT R4, R4, RZ */
+    };
+    const u32 control_sph[3] = {4u << 24, 0, 0};         /* 4 threads, each an output vertex */
+    const u32 geometry_sph[3] = {1u << 24, 7u << 24, 3}; /* 1 invocation, a triangle strip of up to 3 vertices */
+    const u32 none[3] = {0, 0, 0};
+    struct {
+        const u64* instructions;
+        int count, stage;
+        const u32* sph;
+        u32 primitive, mode;
+    } cases[] = {{control, (int)(sizeof control / sizeof *control), ST_TCS, control_sph, 0, 26},
+                 /* quads, equal spacing, connected counterclockwise triangles */
+                 {evaluation, (int)(sizeof evaluation / sizeof *evaluation), ST_TES, none, 0x302, 24},
+                 {geometry, 4, ST_GS, geometry_sph, 3, 29}};
+    for (int i = 0; i < 3; i++) {
+        ShaderInfo info;
+        size_t words = 0;
+        u32* code = translate_stage(cases[i].instructions, cases[i].count, cases[i].stage, cases[i].sph,
+                                    cases[i].primitive, &info, &words);
+        check(code && !info.unsupported, "a tessellation or geometry program translates");
+        if (code) {
+            check(count_opcode(code, words, 16, cases[i].mode) == 1, "its execution mode says its primitive");
+            if (i == 2) check(count_opcode(code, words, 218, 0xffffffffu) == 1, "OUT.EMIT emits a vertex");
+            if (stage_paths[i]) save_fixture(stage_paths[i], code, words);
+        }
+        free(code);
+    }
+}
+
 /* a rejected instruction is logged with its word */
 static void unsupported_names_word(void) {
     ShaderInfo info;
@@ -495,12 +576,13 @@ static void unsupported_names_word(void) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 1 && argc != 24) return 2;
-    if (argc == 24) {
+    if (argc != 1 && argc != 27) return 2;
+    if (argc == 27) {
         storage_paths[0] = argv[1];
         storage_paths[1] = argv[2];
         for (int i = 0; i < 4; i++) nro_paths[i] = argv[i + 3];
         for (int i = 0; i < 17; i++) issue126_paths[i] = argv[i + 7];
+        for (int i = 0; i < 3; i++) stage_paths[i] = argv[i + 24];
     }
     brx_length();
     unsupported_names_word();
@@ -511,5 +593,6 @@ int main(int argc, char** argv) {
     fragment_storage_images();
     nro_shader_modes();
     issue126_shader_modes();
+    between_stages();
     return failures ? 1 : 0;
 }

@@ -224,7 +224,7 @@ void spv_emit_image_gather_extended_capability(SpvEmitter* e) {
 
 void spv_emit_entry_str(SpvEmitter* e, SpvShaderStage stage, uint32_t function, const char* name,
                         const uint32_t* interfaces, size_t interface_count) {
-    assert(stage == SPV_STAGE_VERTEX || stage == SPV_STAGE_FRAGMENT || stage == SPV_STAGE_COMPUTE);
+    assert(stage >= SPV_STAGE_VERTEX && stage <= SPV_STAGE_COMPUTE);
     size_t n = string_words(name);
     assert(n <= UINT16_MAX - 3 && interface_count <= UINT16_MAX - 3 - n);
     instruction(&e->entry_points, OP_ENTRY_POINT, (uint32_t)(3 + n + interface_count));
@@ -763,6 +763,73 @@ void spv_emit_flat(SpvEmitter* e, uint32_t variable) {
     instruction(&e->decorations, OP_DECORATE, 3);
     put(&e->decorations, variable);
     put(&e->decorations, 14);
+}
+
+void spv_emit_capability(SpvEmitter* e, uint32_t capability) {
+    instruction(&e->capabilities, OP_CAPABILITY, 2);
+    put(&e->capabilities, capability);
+}
+
+uint32_t spv_emit_interface_variable(SpvEmitter* e, uint32_t storage, uint32_t type, uint32_t u32_type, uint32_t count,
+                                     uint32_t builtin, uint32_t location, int patch) {
+    uint32_t id = spv_emit_id(e), pointer_type;
+    assert(storage == 1 || storage == 3);
+    if (count) {
+        uint32_t length = spv_emit_constant_u32(e, u32_type, count);
+        uint32_t array_type = spv_emit_id(e);
+        instruction(&e->types, OP_TYPE_ARRAY, 4);
+        put(&e->types, array_type);
+        put(&e->types, type);
+        put(&e->types, length);
+        type = array_type;
+    }
+    pointer_type = type_pointer(e, storage, type);
+    instruction(&e->decorations, OP_DECORATE, 4);
+    put(&e->decorations, id);
+    put(&e->decorations, builtin == SPV_NOT_BUILTIN ? 30 : 11); /* Location, BuiltIn */
+    put(&e->decorations, builtin == SPV_NOT_BUILTIN ? location : builtin);
+    if (patch) {
+        instruction(&e->decorations, OP_DECORATE, 3);
+        put(&e->decorations, id);
+        put(&e->decorations, 15); /* Patch */
+    }
+    instruction(&e->types, OP_VARIABLE, 4);
+    put(&e->types, pointer_type);
+    put(&e->types, id);
+    put(&e->types, storage);
+    return id;
+}
+
+uint32_t spv_emit_interface_scalar_pointer(SpvEmitter* e, uint32_t storage, uint32_t scalar_type, uint32_t variable,
+                                           uint32_t element, uint32_t component) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_ACCESS_CHAIN, element ? 6 : 5);
+    put(&e->functions, type_pointer(e, storage, scalar_type));
+    put(&e->functions, id);
+    put(&e->functions, variable);
+    if (element) put(&e->functions, element);
+    put(&e->functions, component);
+    return id;
+}
+
+void spv_emit_execution_mode(SpvEmitter* e, uint32_t function, uint32_t mode, int has_operand, uint32_t operand) {
+    instruction(&e->execution_modes, OP_EXECUTION_MODE, has_operand ? 4 : 3);
+    put(&e->execution_modes, function);
+    put(&e->execution_modes, mode);
+    if (has_operand) put(&e->execution_modes, operand);
+}
+
+void spv_emit_emit_vertex(SpvEmitter* e) { instruction(&e->functions, 218, 1); /* OpEmitVertex */ }
+
+void spv_emit_end_primitive(SpvEmitter* e) { instruction(&e->functions, 219, 1); /* OpEndPrimitive */ }
+
+void spv_emit_patch_barrier(SpvEmitter* e, uint32_t u32_type) {
+    /* as GLSL's barrier() in a tessellation control shader: Workgroup execution, Invocation memory scope and no
+       semantics, which still orders the outputs written before it for the patch's other invocations */
+    instruction(&e->functions, 224, 4); /* OpControlBarrier */
+    put(&e->functions, spv_emit_constant_u32(e, u32_type, 2));
+    put(&e->functions, spv_emit_constant_u32(e, u32_type, 4));
+    put(&e->functions, spv_emit_constant_u32(e, u32_type, 0));
 }
 
 /* Ids that are not dynamically uniform: an element of a texture array, and what is loaded or made from it.

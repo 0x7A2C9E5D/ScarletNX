@@ -5,7 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-int shader_vk_set(int stage) { return stage == ST_FS ? 1 : (stage == ST_VS || stage == ST_CS) ? 0 : 2; }
+/* a set per stage, as each binds its own constant buffers: vertex (and compute), fragment, then tessellation control,
+   tessellation evaluation and geometry */
+int shader_vk_set(int stage) {
+    return stage == ST_FS ? 1 : stage == ST_TCS ? 2 : stage == ST_TES ? 3 : stage == ST_GS ? 4 : 0;
+}
 u32 bra_target(u64 w, u32 idx) {
     i32 off = (i32)(B(w, 20, 24) << 8) >> 8;
     u32 t = (u32)((i32)idx + 1 + off / 8);
@@ -44,10 +48,11 @@ u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
         const Op* op = decode(w[i]);
         last = i;
         if (!op) continue;
-        if (op->id == O_BRA || op->id == O_CAL || op->id == O_SSY || op->id == O_PBK || op->id == O_PCNT) {
+        if (op->id == O_BRA || op->id == O_CAL || op->id == O_PRET || op->id == O_SSY || op->id == O_PBK ||
+            op->id == O_PCNT) {
             u32 t = bra_target(w[i], i);
             if (t > maxt) maxt = t;
-            if (op->id == O_CAL) has_cal = 1;
+            if (op->id == O_CAL || op->id == O_PRET) has_cal = 1;
         }
         if (op->id == O_BRX) { /* its jump table's targets count too */
             u32 tg[64];

@@ -28,7 +28,14 @@ typedef struct {
     int texture_arrays; /* their capabilities declared */
 } SpvEmitter;
 
-typedef enum { SPV_STAGE_VERTEX = 0, SPV_STAGE_FRAGMENT = 4, SPV_STAGE_COMPUTE = 5 } SpvShaderStage;
+typedef enum {
+    SPV_STAGE_VERTEX = 0,
+    SPV_STAGE_TESS_CONTROL = 1,
+    SPV_STAGE_TESS_EVALUATION = 2,
+    SPV_STAGE_GEOMETRY = 3,
+    SPV_STAGE_FRAGMENT = 4,
+    SPV_STAGE_COMPUTE = 5
+} SpvShaderStage;
 typedef enum {
     SPV_GLSL_ROUND_EVEN = 2,
     SPV_GLSL_TRUNC = 3,
@@ -121,6 +128,21 @@ uint32_t spv_emit_fragcoord_input(SpvEmitter* e, uint32_t vec4_type);
 uint32_t spv_emit_builtin_input_vec3(SpvEmitter* e, uint32_t vec3_type, uint32_t builtin);
 uint32_t spv_emit_builtin_input_u32(SpvEmitter* e, uint32_t u32_type, uint32_t builtin);
 void spv_emit_flat(SpvEmitter* e, uint32_t variable);
+void spv_emit_capability(SpvEmitter* e, uint32_t capability);
+/* An Input (1) or Output (3) variable of type, or of an array of count of it when count isn't 0, decorated BuiltIn
+   builtin, or Location location when builtin is SPV_NOT_BUILTIN, and Patch when patch is set */
+#define SPV_NOT_BUILTIN 0xffffffffu
+uint32_t spv_emit_interface_variable(SpvEmitter* e, uint32_t storage, uint32_t type, uint32_t u32_type, uint32_t count,
+                                     uint32_t builtin, uint32_t location, int patch);
+/* a pointer to one scalar of an interface variable: its element (an id, or 0 when the variable isn't an array), then
+   its component (an id) */
+uint32_t spv_emit_interface_scalar_pointer(SpvEmitter* e, uint32_t storage, uint32_t scalar_type, uint32_t variable,
+                                           uint32_t element, uint32_t component);
+void spv_emit_execution_mode(SpvEmitter* e, uint32_t function, uint32_t mode, int has_operand, uint32_t operand);
+void spv_emit_emit_vertex(SpvEmitter* e);
+void spv_emit_end_primitive(SpvEmitter* e);
+/* a tessellation control barrier: the patch's invocations, and its outputs written before it */
+void spv_emit_patch_barrier(SpvEmitter* e, uint32_t u32_type);
 uint32_t spv_emit_sampler_image_array(SpvEmitter* e, uint32_t scalar_type, uint32_t u32_type, uint32_t set,
                                       uint32_t binding, uint32_t type, int array, int shadow, uint32_t count,
                                       uint32_t* sampled_type);

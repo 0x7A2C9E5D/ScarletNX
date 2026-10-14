@@ -32,7 +32,8 @@ typedef struct {
     u32 in_mask;       /* generic attribs 0..31 read */
     u32 attr_int_mask; /* key: integer VS attribs */
     u32 attr_sint_mask;
-    u32 clip_enable; /* key: the clip distances the 3D engine enables (SetUserClipEnable), others aren't written */
+    u32 clip_enable; /* key: the clip distances the 3D engine enables (SetUserClipEnable), others aren't written,
+                        and SNX_SH_NOT_LAST */
     int uses_position_in, uses_clip_mask, writes_layer, writes_point_size;
     int fp32_flush, fp32_preserve; /* FP32 arithmetic whose FTZ/FMZ field flushes denormals, and whose doesn't */
     u32 gbuf_cbuf_off[16];
@@ -46,8 +47,10 @@ typedef struct {
         u32 cbuf_off;
         u8 type, bindless, bl_cbuf, kind; /* 0 float store, 1 unsigned atomic, 2 unsigned store */
     } img[8];
-    int nimg;                                                   /* storage image stores and atomics */
-    u32 tex_int_mask, tex_sint_mask, rt_int_mask, rt_sint_mask; /* FS key: integer textures / outputs */
+    int nimg; /* storage image stores and atomics */
+    /* FS key: integer textures / outputs. rt_int_mask keys the primitives of the other stages instead: the
+       tessellation parameters (register 0xC8) for TES, and the input primitive's vertex count for GS */
+    u32 tex_int_mask, tex_sint_mask, rt_int_mask, rt_sint_mask;
 } ShaderInfo;
 /* the shader flushes FP32 denormals everywhere: every FADD, FMUL and FFMA it has asks for it, as the console's
    compiler emits them (Eden declares DenormFlushToZero on the same condition) */
@@ -69,6 +72,12 @@ typedef struct {
 #define SNX_TEX_INDEXED  4
 /* set by the renderer: the device indexes sampled image arrays per invocation (Vulkan's non-uniform indexing) */
 extern int g_shader_texture_arrays;
+/* set by the renderer: tessellation and geometry shaders may write the point size
+   (shaderTessellationAndGeometryPointSize) */
+extern int g_shader_stage_point_size;
+/* in clip_enable: a later stage before rasterization follows this one (tessellation or geometry), and the last one
+   applies the depth mode and the clip distances */
+#define SNX_SH_NOT_LAST (1u << 31)
 int shader_vk_set(int stage);
 /* Direct SPIR-V translator. Returns NULL when the current opcode set cannot represent the program. */
 u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count, int can_flush,

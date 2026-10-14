@@ -23,7 +23,8 @@ static char g_cache_dir[1100], g_pcache_path[1200], g_pcache_tmp[1230];
 static int g_pcache_dirty; /* pipelines made since the cache was last written (atomic: it is saved outside vk_lock) */
 
 VkPipelineLayout g_vk_playout;
-VkDescriptorSetLayout g_vk_dslayout[3];
+VkDescriptorSetLayout g_vk_dslayout[5];
+u32 g_vk_stage_sets;
 static VkPipelineCache g_pcache;
 u64 g_vk_cb[5][18];
 u32 g_vk_cbsize[5][18];
@@ -123,13 +124,15 @@ void vk_pool_sizes(VkDescriptorPoolSize* sz, u32 sets) {
 }
 
 void vk_pipeline_init(void) {
-    /* a layout per set, the same bindings, each visible to the stages that use the set (shader_vk_set): within the
-       per-stage limits a device has, which all stages seeing every set would multiply by three */
-    static const VkShaderStageFlags vis[3] = {
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT, VK_SHADER_STAGE_FRAGMENT_BIT,
-        VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT |
-            VK_SHADER_STAGE_GEOMETRY_BIT};
-    for (int s = 0; s < 3; s++) {
+    /* a layout per set, the same bindings, each visible to the stage that uses the set (shader_vk_set): within the
+       per-stage limits a device has, which all stages seeing every set would multiply by five */
+    static const VkShaderStageFlags vis[5] = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+                                              VK_SHADER_STAGE_FRAGMENT_BIT, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,
+                                              VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
+                                              VK_SHADER_STAGE_GEOMETRY_BIT};
+    /* the tessellation and geometry stages' sets come after the first two, where the device binds that many */
+    g_vk_stage_sets = g_vk.props.limits.maxBoundDescriptorSets >= 5 ? 5 : 2;
+    for (int s = 0; s < 5; s++) {
         VkDescriptorSetLayoutBinding b[SNX_VKB_END];
         u32 count = 0;
         u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;
@@ -146,12 +149,12 @@ void vk_pipeline_init(void) {
         /* the texture array takes SNX_TEX_ARRAY samplers beside the 32 single textures, in every set */
         if (g_vk.props.limits.maxPerStageDescriptorSamplers < SNX_VKB_IMG - SNX_VKB_TEX + SNX_TEX_ARRAY ||
             g_vk.props.limits.maxPerStageDescriptorSampledImages < SNX_VKB_IMG - SNX_VKB_TEX + SNX_TEX_ARRAY ||
-            g_vk.props.limits.maxDescriptorSetSamplers < 3 * (SNX_VKB_IMG - SNX_VKB_TEX + SNX_TEX_ARRAY) ||
-            g_vk.props.limits.maxDescriptorSetSampledImages < 3 * (SNX_VKB_IMG - SNX_VKB_TEX + SNX_TEX_ARRAY))
+            g_vk.props.limits.maxDescriptorSetSamplers < 5 * (SNX_VKB_IMG - SNX_VKB_TEX + SNX_TEX_ARRAY) ||
+            g_vk.props.limits.maxDescriptorSetSampledImages < 5 * (SNX_VKB_IMG - SNX_VKB_TEX + SNX_TEX_ARRAY))
             g_shader_texture_arrays = 0;
         for (i = 0; i < SNX_VKB_END; i++) {
             int image = i >= SNX_VKB_IMG && i < SNX_VKB_RS;
-            if (image && (s == 2 || i - SNX_VKB_IMG >= image_slots)) continue;
+            if (image && (s >= 2 || i - SNX_VKB_IMG >= image_slots)) continue; /* compute and fragment */
             if (i == SNX_VKB_TEXARRAY && !g_shader_texture_arrays) continue;
             if (i >= SNX_VKB_IMGBUF && i < SNX_VKB_TEXARRAY && (s != 0 || i - SNX_VKB_IMGBUF >= buffer_slots)) continue;
             if (i >= SNX_VKB_IMGBUF && i < SNX_VKB_TEXARRAY) image = 1;
@@ -183,12 +186,11 @@ void vk_pipeline_init(void) {
                  l->maxPerStageDescriptorUniformBuffers, l->maxPerStageDescriptorStorageBuffers,
                  l->maxPerStageDescriptorSamplers, l->maxPerStageDescriptorStorageImages);
     }
-    VkDescriptorSetLayout sets[3] = {g_vk_dslayout[0], g_vk_dslayout[1], g_vk_dslayout[2]};
-    /* push constants: snx_vp (vertex) at 0, snx_at (fragment) at 16 */
-    VkPushConstantRange pc = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32};
+    /* push constants: snx_vp (stages before rasterization) at 0, snx_at (fragment) at 16 */
+    VkPushConstantRange pc = {VK_PUSH_STAGES, 0, 32};
     VkPipelineLayoutCreateInfo pl = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                                     .setLayoutCount = 3,
-                                     .pSetLayouts = sets,
+                                     .setLayoutCount = g_vk_stage_sets,
+                                     .pSetLayouts = g_vk_dslayout,
                                      .pushConstantRangeCount = 1,
                                      .pPushConstantRanges = &pc};
     if (!VK_OK(vkCreatePipelineLayout(g_vk.dev, &pl, NULL, &g_vk_playout)))
@@ -247,7 +249,7 @@ static int code_same(const ShA* ca, u64 gva, u32 len, u64 qh) {
 }
 
 VkSh* vk_shader_get(u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask, u32 rt_int, u32 rt_sint, u32 clip) {
-    g_sh_bind = stage == ST_VS ? 0 : 4;
+    g_sh_bind = stage <= ST_FS ? stage : 0; /* g_vk_cb is by stage */
     u32 mask[5] = {int_mask, sint_mask, rt_int, rt_sint, clip};
     u32 mix = int_mask * 0x9E3779B1u ^ sint_mask * 0x85EBCA6Bu ^ rt_int * 0x27D4EB2Fu ^ rt_sint * 0x165667B1u ^
               clip * 0x61C88647u;
@@ -322,6 +324,7 @@ VkSh* vk_shader_get(u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask, 
         } else {
             s->si.attr_int_mask = int_mask;
             s->si.attr_sint_mask = sint_mask;
+            s->si.rt_int_mask = rt_int; /* the tessellation or geometry primitive */
             s->si.clip_enable = clip;
         }
         {
@@ -426,14 +429,30 @@ typedef struct Pipe {
 static Pipe* g_pipeh[PIPEH];
 
 static VkPipeline pipe_create(const PipeKey* k) {
-    VkPipelineShaderStageCreateInfo st[2] = {{.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                                              .stage = VK_SHADER_STAGE_VERTEX_BIT,
-                                              .module = k->vs,
-                                              .pName = "main"},
-                                             {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                                              .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-                                              .module = k->fs ? k->fs : null_fs(),
-                                              .pName = "main"}};
+    VkPipelineShaderStageCreateInfo st[5];
+    VkShaderModule modules[5];
+    static const VkShaderStageFlagBits bits[5] = {VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,
+                                                  VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
+                                                  VK_SHADER_STAGE_GEOMETRY_BIT, VK_SHADER_STAGE_FRAGMENT_BIT};
+    VkPipelineTessellationStateCreateInfo ts;
+    u32 nst = 0, s;
+    modules[0] = k->vs;
+    modules[1] = k->tcs;
+    modules[2] = k->tes;
+    modules[3] = k->gs;
+    modules[4] = k->fs ? k->fs : null_fs();
+    for (s = 0; s < 5; s++) {
+        if (!modules[s]) continue;
+        memset(&st[nst], 0, sizeof st[nst]);
+        st[nst].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        st[nst].stage = bits[s];
+        st[nst].module = modules[s];
+        st[nst].pName = "main";
+        nst++;
+    }
+    memset(&ts, 0, sizeof ts);
+    ts.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+    ts.patchControlPoints = k->patch;
     VkVertexInputBindingDescription vb[33];
     VkVertexInputBindingDivisorDescriptionEXT dv[33];
     u32 ndv = 0;
@@ -540,10 +559,11 @@ static VkPipeline pipe_create(const PipeKey* k) {
                                         .stencilAttachmentFormat = (VkFormat)k->stencil};
     VkGraphicsPipelineCreateInfo gi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
                                        .pNext = &ri,
-                                       .stageCount = 2,
+                                       .stageCount = nst,
                                        .pStages = st,
                                        .pVertexInputState = &vi,
                                        .pInputAssemblyState = &ia,
+                                       .pTessellationState = k->tes ? &ts : NULL,
                                        .pViewportState = &vp,
                                        .pRasterizationState = &rs,
                                        .pMultisampleState = &ms,

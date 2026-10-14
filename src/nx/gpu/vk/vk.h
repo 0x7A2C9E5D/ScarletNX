@@ -322,18 +322,29 @@ extern VkPipelineLayout g_vk_playout;
 extern int g_vk_preserve_infnan;
 extern int g_vk_flush_denorm;
 extern VkShaderStageFlags g_vk_subgroup_stages;
-extern VkDescriptorSetLayout g_vk_dslayout[3]; /* by set: shader_vk_set(stage) */
+extern VkDescriptorSetLayout g_vk_dslayout[5]; /* by set: shader_vk_set(stage) */
+extern u32 g_vk_stage_sets; /* sets in the pipeline layout: 5, or 2 without the tessellation and geometry stages */
+/* the stages that read the push constants: every graphics stage reads snx_vp (the last one before rasterization
+   applies it), and the fragment stage snx_at */
+#define VK_PUSH_STAGES                                                                                                 \
+    (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |                                           \
+     VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_GEOMETRY_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
 void vk_pipeline_init(void);
 /* the shader at gva (after a VertexA program at gva_a, or 0). The masks key integer inputs: attributes for the
-   vertex stage, textures and render target outputs for the fragment stage. clip: the clip distances the 3D engine
-   enables (vertex stage) */
+   vertex stage, textures and render target outputs for the fragment stage. rt_int keys the primitives of the
+   tessellation evaluation and geometry stages (ShaderInfo.rt_int_mask). clip: the clip distances the 3D engine
+   enables, and SNX_SH_NOT_LAST (the stages before rasterization) */
 VkSh* vk_shader_get(u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask, u32 rt_int, u32 rt_sint, u32 clip);
 /* the bound constant buffers per stage, which the translator also reads to resolve indirect branches */
 extern u64 g_vk_cb[5][18];
 extern u32 g_vk_cbsize[5][18];
 typedef struct {
     VkShaderModule vs, fs;
-    u32 topo_class; /* POINT_LIST, LINE_LIST or TRIANGLE_LIST: the topology is dynamic within its class */
+    VkShaderModule tcs, tes, gs; /* tessellation control and evaluation, geometry: VK_NULL_HANDLE when off */
+    u32 patch;                   /* control points of a patch, with tessellation */
+    /* POINT_LIST, LINE_LIST, TRIANGLE_LIST, their adjacency forms or PATCH_LIST: the topology is dynamic within its
+       class */
+    u32 topo_class;
     u32 polygon;
     u32 nattr, nbind;
     struct {
