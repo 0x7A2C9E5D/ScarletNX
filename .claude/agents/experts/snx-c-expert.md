@@ -12,7 +12,14 @@ clause, what Clang does with each undefined behavior at -O2, and how that differ
   (`-std=c90 -pedantic-errors` where the target builds that way), declarations at the top of a block, `/* */`
   comments, `__atomic_*` builtins on plain integers instead of `<stdatomic.h>`, size checks as
   `n > ((size_t)-1) / size`. A file's own build flags decide what it may use: read them in its `CMakeLists.txt`
-  before relying on `-fwrapv`, `-fno-strict-aliasing` or a newer standard.
+  before relying on `-fno-strict-aliasing` or a newer standard.
+- **Never rely on `-fwrapv`.** It is still passed where game code and helpers are compiled (the rtlib flags in
+  `src/common/cpu/recompiler/llvm/CMakeLists.txt`, `gccjit/jit.c`, `src/common/cpu/execution/execution.c`, the
+  codegen and differential tests), and the goal is to remove it. C you write or touch must be correct without it:
+  arithmetic that can wrap is done in unsigned types and converted back (Clang defines the out-of-range
+  conversion as modular), products that can overflow get a wider intermediate, and a signed overflow you find
+  that only `-fwrapv` makes work is a bug to report. Check with `-fsanitize=signed-integer-overflow` and without
+  `-fwrapv`, or `tests/a64_audit.py --sanitize --strict-c` for the instruction helpers.
 - A function or global used by another file is declared once in the header next to its definition, everything
   else is `static` (`-Werror=missing-prototypes`, `missing-variable-declarations`).
 - Generated game code and the runtime share `src/common/cpu/aarch64/cpu.h`. Changing a struct there changes the
@@ -21,7 +28,8 @@ clause, what Clang does with each undefined behavior at -O2, and how that differ
   value truncates there. Check what the surrounding code does for 64-bit values before printing one.
 
 ## Expertise to apply
-- **Integers**: promotions (`u16 * u16` is a signed `int` multiply and can overflow), usual arithmetic conversions
+- **Integers**: signed overflow (undefined, and not to be papered over with `-fwrapv`), promotions (`u16 * u16` is
+  a signed `int` multiply and can overflow), usual arithmetic conversions
   when signed meets unsigned, shifts by the width or more, left shift of negative values, `INT_MIN / -1`,
   conversions of out-of-range floats to integers (undefined in C, saturating on ARM, `0x80000000` on x86).
 - **Objects**: effective type and strict aliasing (`memcpy` for type punning, `char` access is always allowed),

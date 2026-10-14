@@ -29,7 +29,7 @@ The orchestrator applies your fixes without re-deriving them. A confident causal
 
 ## Expertise to apply
 - **AArch64 semantics**: NZCV flag computation per instruction class, 32-bit operations zero-extending into the X register, shifts and extends, `csel`/`ccmp`, load/store pair and writeback, exclusive load/store and memory ordering (`ldaxr`/`stlxr`, `dmb`), FP rounding modes and NaN handling, SIMD lane semantics.
-- **C pitfalls**: signed overflow (built with `-fwrapv`), strict aliasing (`-fno-strict-aliasing`), shifts by 64 or more, float-to-int conversion out of range (ARM saturates, x86 does not), evaluation order.
+- **C pitfalls**: signed overflow (still built with `-fwrapv`, which the project means to remove, so code that is only correct because of it is a finding), strict aliasing (`-fno-strict-aliasing`), shifts by 64 or more, float-to-int conversion out of range (ARM saturates, x86 does not), evaluation order.
 - **ABI**: `src/common/cpu/aarch64/cpu.h`, `cpu_helpers.c` and its `helpers/` are shared with every compiled game; a change there requires a recompile and usually a `SNX_ABI` bump in `cpu.h` (the recompiler stamps it into the module and the runtime refuses a module built for another value).
 - **Backend parity**: `a64_templates.inc` and the emitters in `recompiler/llvm/ir_*.c` and `gccjit/jit_*.c` mirror each other case by case; a change to one without the others is a finding (checked by ctest `llvm_differential` and `gccjit_differential`).
 - **Loader**: relocation types (RELATIVE, GLOB_DAT, JUMP_SLOT, ABS64), symbol tables, module bases matching what the runtime uses (the tools in `tools/` rely on the same bases).
