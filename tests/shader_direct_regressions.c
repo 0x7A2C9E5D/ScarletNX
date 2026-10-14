@@ -18,7 +18,7 @@
 static int failures;
 static const char* storage_paths[2];
 static const char* nro_paths[4];
-static const char* issue126_paths[9];
+static const char* issue126_paths[11];
 static void check(int condition, const char* what) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s\n", what);
@@ -341,16 +341,37 @@ static void issue126_shader_modes(void) {
     };
     const u64 dynamic_3d_offset[] = {0x4c98078800070004ull,
                                      0xdea0000000070008ull | (4ull << 28) | (1ull << 36) | (4ull << 20)};
+    /* Ender Magnolia ORs the sampler half in from a constant buffer operand. */
+    const u64 split_cbuf_handle[] = {
+        0x4c98078805c70006ull, /* MOV R6, c[0x2][0x170] */
+        0x4c47020815c70606ull, /* LOP.OR R6, R6, c[0x2][0x570] */
+        0xdea0000000070008ull | (2ull << 28) | (1ull << 37) | (6ull << 20),
+    };
+    /* Single-register writers and a TEX.B masked to one result write just below the handle. */
+    const u64 handle_past_writers[] = {
+        0x4c98078800070006ull,
+        FMUL_KEEP | 5,
+        FFMA_KEEP | 3,
+        0xdea0000000070004ull | (2ull << 28) | (1ull << 37) | (6ull << 20) | (1ull << 31),
+        0xdea0000000070008ull | (2ull << 28) | (1ull << 37) | (6ull << 20),
+    };
     struct {
         const u64* instructions;
         int count, stage;
         u32 mask;
         u32 opcode;
-    } cases[] = {
-        {intmath, 3, ST_FS, 0, 151},       {clip, 1, ST_VS, 1, 65},         {bindless, 2, ST_FS, 0, 88},
-        {indexed_handle, 2, ST_FS, 0, 95}, {tex3d, 2, ST_FS, 0, 88},        {cube_array_bias, 2, ST_FS, 0, 87},
-        {tex1d_array, 2, ST_FS, 0, 88},    {split_handle, 4, ST_FS, 0, 88}, {dynamic_3d_offset, 2, ST_FS, 0, 103}};
-    for (int i = 0; i < 9; i++) {
+    } cases[] = {{intmath, 3, ST_FS, 0, 151},
+                 {clip, 1, ST_VS, 1, 65},
+                 {bindless, 2, ST_FS, 0, 88},
+                 {indexed_handle, 2, ST_FS, 0, 95},
+                 {tex3d, 2, ST_FS, 0, 88},
+                 {cube_array_bias, 2, ST_FS, 0, 87},
+                 {tex1d_array, 2, ST_FS, 0, 88},
+                 {split_handle, 4, ST_FS, 0, 88},
+                 {dynamic_3d_offset, 2, ST_FS, 0, 103},
+                 {split_cbuf_handle, 3, ST_FS, 0, 88},
+                 {handle_past_writers, 5, ST_FS, 0, 88}};
+    for (int i = 0; i < 11; i++) {
         ShaderInfo info;
         size_t words = 0;
         u32* code = translate_with_rt_mask(cases[i].instructions, cases[i].count, cases[i].stage, &info, &words, 1,
@@ -361,19 +382,36 @@ static void issue126_shader_modes(void) {
                   "issue 126 emits the expected SPIR-V instruction");
             if (i == 1) check(info.uses_clip_mask == 1, "enabled clip distance is reported");
             if (i == 7) check(info.ntex == 1 && info.tex[0].bl2, "split bindless handle retains both descriptor reads");
+            if (i == 9)
+                check(info.ntex == 1 && info.tex[0].bl_cbuf == 2 && info.tex[0].cbuf_off == 0x170 / 4 &&
+                          info.tex[0].bl2 && info.tex[0].bl2_cbuf == 2 && info.tex[0].bl2_off == 0x570 / 4,
+                      "a handle ORed with a constant buffer operand keeps both reads");
+            if (i == 10) check(info.ntex == 1, "a handle is tracked past writes to the registers below it");
             save_fixture(issue126_paths[i], code, words);
         }
         free(code);
     }
+    /* A TEX.B with all four results from R4 overwrites the handle in R6. */
+    const u64 clobbered_handle[] = {
+        0x4c98078800070006ull,
+        0xdea0000000070004ull | (2ull << 28) | (1ull << 37) | (6ull << 20),
+        0xdea0000000070008ull | (2ull << 28) | (1ull << 37) | (6ull << 20),
+    };
+    ShaderInfo info;
+    size_t words = 0;
+    u32* code = translate(clobbered_handle, 3, ST_FS, &info, &words, 1);
+    check(!code && info.unsupported && !strcmp(info.first_unsupported, "untracked texture handle"),
+          "a handle overwritten by a texture result is not tracked");
+    free(code);
 }
 
 int main(int argc, char** argv) {
-    if (argc != 1 && argc != 16) return 2;
-    if (argc == 16) {
+    if (argc != 1 && argc != 18) return 2;
+    if (argc == 18) {
         storage_paths[0] = argv[1];
         storage_paths[1] = argv[2];
         for (int i = 0; i < 4; i++) nro_paths[i] = argv[i + 3];
-        for (int i = 0; i < 9; i++) issue126_paths[i] = argv[i + 7];
+        for (int i = 0; i < 11; i++) issue126_paths[i] = argv[i + 7];
     }
     brx_length();
     f2i_modifiers();

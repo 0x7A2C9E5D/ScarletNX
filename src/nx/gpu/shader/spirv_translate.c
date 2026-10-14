@@ -446,36 +446,179 @@ static int gbuf_tag(int stage, u32 index, u32 offset) {
     if (stage == ST_VS && index == 0 && offset == 0xb0) return 0xb1;
     return index == 0 && offset >= 0x110 && offset < end && !(offset & 15) ? (int)offset + 1 : 0;
 }
-static int direct_single_reg_writer(int op) {
+static int texs_outputs(u64 w, u32 regs[4], u32 comps[4]) {
+    u32 da = B(w, 0, 8), db = B(w, 28, 8), sw = B(w, 50, 3);
+    int n = 0;
+    if (db == 255) {
+        static const int tab[8][2] = {{0, -1}, {1, -1}, {2, -1}, {3, -1}, {0, 1}, {0, 3}, {1, 3}, {2, 3}};
+        for (int i = 0; i < 2; i++)
+            if (tab[sw][i] >= 0) {
+                regs[n] = da == 255 ? 255 : da + (u32)n;
+                comps[n++] = (u32)tab[sw][i];
+            }
+    } else {
+        static const int tab[5][4] = {{0, 1, 2, -1}, {0, 1, 3, -1}, {0, 2, 3, -1}, {1, 2, 3, -1}, {0, 1, 2, 3}};
+        if (sw > 4) sw = 4;
+        for (int i = 0; i < 4; i++)
+            if (tab[sw][i] >= 0) {
+                regs[n] = n < 2 ? da + (u32)n : db + (u32)(n - 2);
+                comps[n++] = (u32)tab[sw][i];
+            }
+    }
+    return n;
+}
+static u32 direct_mask_count(u32 mask) {
+    u32 count = 0;
+    for (; mask; mask &= mask - 1) count++;
+    return count;
+}
+/* Whether the hardware writes reg when it runs w. Backward scans for a register's
+   definition need the whole range: loads, 64-bit results and masked texture results
+   write registers after the one in bits 0-7, and stores and predicate setters keep a
+   source there instead. Forms the translator rejects are described too, so a scan
+   never skips over a write. */
+static int direct_writes_reg(u64 w, int op, u32 reg) {
+    u32 d = B(w, 0, 8), count = 1;
+    if (reg == 255) return 0;
     switch (op) {
-        case O_MOV32I:
-        case O_MOV_R:
-        case O_MOV_C:
-        case O_MOV_I:
+        case O_FSETP_R:
+        case O_FSETP_C:
+        case O_FSETP_I:
+        case O_ISETP_R:
+        case O_ISETP_C:
+        case O_ISETP_I:
+        case O_HSETP2_R:
+        case O_HSETP2_C:
+        case O_HSETP2_I:
+        case O_DSETP_R:
+        case O_DSETP_C:
+        case O_DSETP_I:
+        case O_PSETP:
+        case O_CSETP:
+        case O_VSETP:
+        case O_FCHK_R:
+        case O_FCHK_C:
+        case O_FCHK_I:
+        case O_R2P_R:
+        case O_R2P_C:
+        case O_R2P_I:
+        case O_R2B:
+        case O_STG:
+        case O_STS:
+        case O_STL:
+        case O_ST:
+        case O_STP:
+        case O_RED:
+        case O_AST:
+        case O_SUST:
+        case O_SURED:
+        case O_BRA:
+        case O_BRX:
+        case O_SSY:
+        case O_SYNC:
+        case O_PBK:
+        case O_BRK:
+        case O_PCNT:
+        case O_CONT:
+        case O_EXIT:
+        case O_KIL:
+        case O_JMP:
+        case O_CAL:
+        case O_RET:
+        case O_PRET:
+        case O_PEXIT:
+        case O_NOP:
+        case O_BAR:
+        case O_MEMBAR:
+        case O_DEPBAR:
+        case O_VOTE_VTG:
+        case O_CCTL:
+        case O_CCTLL:
+        case O_BPT:
+        case O_IDE:
+        case O_SETCRSPTR: return 0;
+        case O_TLD4S: {
+            /* Two destination pairs, the second named in bits 28-35, or one packed register for each. */
+            u32 second = B(w, 28, 8);
+            if (B(w, 55, 1)) return d == reg || second == reg;
+            return (d != 255 && reg - d < 2) || (second != 255 && reg - second < 2);
+        }
+        case O_TEXS:
+        case O_TLDS: {
+            u32 regs[4], comps[4];
+            int outputs = texs_outputs(w, regs, comps);
+            if (!B(w, 59, 1)) return outputs && (d == reg || (outputs > 2 && B(w, 28, 8) == reg));
+            for (int k = 0; k < outputs; k++)
+                if (regs[k] == reg) return 1;
+            return 0;
+        }
+        case O_TEX:
+        case O_TEX_B:
+        case O_TLD:
+        case O_TLD_B:
+        case O_TLD4:
+        case O_TLD4_B:
+        case O_TMML:
+        case O_TXD: count = direct_mask_count(B(w, 31, 4) ? B(w, 31, 4) : 15); break;
+        case O_TXQ:
+        case O_TXQ_B: count = direct_mask_count(B(w, 31, 4)); break;
+        case O_SULD:
+            count = !B(w, 52, 1) ? direct_mask_count(B(w, 20, 4)) : B(w, 20, 3) == 5 ? 2 : B(w, 20, 3) >= 6 ? 4 : 1;
+            break;
+        case O_LDG:
+        case O_LDS:
+        case O_LDL:
+        case O_LD: count = B(w, 48, 3) == 5 ? 2 : B(w, 48, 3) >= 6 ? 4 : 1; break;
+        case O_LDC: count = B(w, 48, 3) == 5 ? 2 : 1; break;
+        case O_ALD: count = B(w, 47, 2) + 1; break;
+        case O_ATOM: count = B(w, 49, 3) == 2 || B(w, 49, 3) == 5 ? 2 : 1; break;
+        case O_ATOMS: count = B(w, 28, 2) >= 2 ? 2 : 1; break;
+        case O_ATOM_CAS:
+        case O_ATOMS_CAS:
+        case O_SUATOM:
+        case O_SUATOM_CAS:
+        case O_CS2R: count = 2; break;
+        case O_DADD_R:
+        case O_DADD_C:
+        case O_DADD_I:
+        case O_DMUL_R:
+        case O_DMUL_C:
+        case O_DMUL_I:
+        case O_DFMA_R:
+        case O_DFMA_RC:
+        case O_DFMA_CR:
+        case O_DFMA_I:
+        case O_DMNMX_R:
+        case O_DMNMX_C:
+        case O_DMNMX_I: count = 2; break;
+        case O_F2F_R:
+        case O_F2F_C:
+        case O_F2F_I:
         case O_F2I_R:
         case O_F2I_C:
         case O_F2I_I:
-        case O_IPA:
-        case O_SHL_R:
-        case O_SHL_C:
-        case O_SHL_I:
-        case O_LOP_R:
-        case O_LOP_C:
-        case O_LOP_I:
-        case O_LOP32I: return 1;
-        default: return 0;
+        case O_I2F_R:
+        case O_I2F_C:
+        case O_I2F_I:
+        case O_I2I_R:
+        case O_I2I_C:
+        case O_I2I_I: count = B(w, 8, 2) == 3 ? 2 : 1; break;
+        default: break;
     }
+    return d != 255 && reg >= d && reg - d < count;
 }
 
-static int direct_track_const(const u64* insn, u32 n, u32 index, u32 reg, u32* value, int depth) {
-    if (reg == 255 || depth > 6) return 0;
+/* The instruction in index's basic block that last wrote reg before index, when it wrote it
+   unconditionally as its first destination, or -1. */
+static int direct_reaching_def(const u64* insn, u32 n, u32 index, u32 reg) {
+    if (reg == 255) return -1;
     /* A lexical predecessor is not a reaching definition when another path enters the block. */
     u32 block_start = 11;
     for (u32 k = 11; k < n; k++) {
         if (!IDX_OK(k)) continue;
         const Op* flow = decode(insn[k]);
         if (!flow) continue;
-        if (flow->id == O_BRX || flow->id == O_JMP || flow->id == O_CAL || flow->id == O_RET) return 0;
+        if (flow->id == O_BRX || flow->id == O_JMP || flow->id == O_CAL || flow->id == O_RET) return -1;
         if (flow->id != O_BRA && flow->id != O_SSY && flow->id != O_PBK && flow->id != O_PCNT) continue;
         u32 target = bra_target(insn[k], k);
         if (target > block_start && target <= index) block_start = target;
@@ -483,111 +626,88 @@ static int direct_track_const(const u64* insn, u32 n, u32 index, u32 reg, u32* v
     for (u32 j = index; j-- > block_start;) {
         if (!IDX_OK(j)) continue;
         const Op* op = decode(insn[j]);
-        if (!op) return 0;
-        if (op->id == O_BRA || op->id == O_SYNC || op->id == O_BRK || op->id == O_CONT) return 0;
-        u32 dst = B(insn[j], 0, 8);
-        u32 second = B(insn[j], 28, 8);
-        if ((op->id == O_TLD4S || op->id == O_TEXS || op->id == O_TLDS) && second <= reg && reg - second < 4) return 0;
-        if (dst != reg) {
-            /* Loads and masked texture operations can write several consecutive registers. */
-            if (dst < reg && reg - dst < 4 && !direct_single_reg_writer(op->id)) return 0;
-            continue;
-        }
-        if (B(insn[j], 16, 3) != 7 || B(insn[j], 19, 1)) return 0;
-        if (op->id == O_MOV32I) {
-            *value = B(insn[j], 20, 32);
-            return 1;
-        }
-        if (op->id == O_MOV_R) return direct_track_const(insn, n, j, B(insn[j], 20, 8), value, depth + 1);
-        return 0;
+        if (!op || op->id == O_BRA || op->id == O_SYNC || op->id == O_BRK || op->id == O_CONT) return -1;
+        if (!direct_writes_reg(insn[j], op->id, reg)) continue;
+        /* A predicated write, or one that reaches reg from a lower destination, leaves no single source. */
+        if (B(insn[j], 0, 8) != reg || B(insn[j], 16, 3) != 7 || B(insn[j], 19, 1)) return -1;
+        return (int)j;
     }
+    return -1;
+}
+
+static int direct_track_const(const u64* insn, u32 n, u32 index, u32 reg, u32* value, int depth) {
+    int j = depth > 6 ? -1 : direct_reaching_def(insn, n, index, reg);
+    if (j < 0) return 0;
+    u64 w = insn[j];
+    int op = decode(w)->id;
+    if (op == O_MOV32I) {
+        *value = B(w, 20, 32);
+        return 1;
+    }
+    if (op == O_MOV_R) return direct_track_const(insn, n, (u32)j, B(w, 20, 8), value, depth + 1);
     return 0;
 }
 
 /* Resolve a register supplied image handle to the constant buffer word read in this basic block. */
 static int direct_track_image_handle(const u64* insn, u32 n, u32 index, u32 reg, u32* bank, u32* off, int depth) {
-    if (reg == 255 || depth > 6) return 0;
-    u32 block_start = 11;
-    for (u32 k = 11; k < n; k++) {
-        if (!IDX_OK(k)) continue;
-        const Op* flow = decode(insn[k]);
-        if (!flow) continue;
-        if (flow->id == O_BRX || flow->id == O_JMP || flow->id == O_CAL || flow->id == O_RET) return 0;
-        if (flow->id != O_BRA && flow->id != O_SSY && flow->id != O_PBK && flow->id != O_PCNT) continue;
-        u32 target = bra_target(insn[k], k);
-        if (target > block_start && target <= index) block_start = target;
+    int j = depth > 6 ? -1 : direct_reaching_def(insn, n, index, reg);
+    if (j < 0) return 0;
+    u64 w = insn[j];
+    int op = decode(w)->id;
+    if (op == O_MOV_C) {
+        *bank = B(w, 34, 5);
+        *off = B(w, 20, 14);
+        return *bank < 18;
     }
-    for (u32 j = index; j-- > block_start;) {
-        if (!IDX_OK(j)) continue;
-        const Op* op = decode(insn[j]);
-        if (!op || op->id == O_BRA || op->id == O_SYNC || op->id == O_BRK || op->id == O_CONT) return 0;
-        u32 dst = B(insn[j], 0, 8);
-        if (dst != reg) {
-            if (dst < reg && reg - dst < 4 && !direct_single_reg_writer(op->id)) return 0;
-            continue;
-        }
-        if (B(insn[j], 16, 3) != 7 || B(insn[j], 19, 1)) return 0;
-        if (op->id == O_MOV_C) {
-            *bank = B(insn[j], 34, 5);
-            *off = B(insn[j], 20, 14);
-            return *bank < 18;
-        }
-        if (op->id == O_LDC && B(insn[j], 48, 3) >= 4 && B(insn[j], 48, 3) <= 5) {
-            i32 byte_off = (i16)B(insn[j], 20, 16);
-            *bank = B(insn[j], 36, 5);
-            *off = (u32)byte_off / 4;
-            /* Keep the legacy first-descriptor behavior for indexed handles.
-               Runtime descriptor selection for arbitrary indices needs a separate path. */
-            return *bank < 18 && byte_off >= 0 && !(byte_off & 3);
-        }
-        if (op->id == O_MOV_R) return direct_track_image_handle(insn, n, j, B(insn[j], 20, 8), bank, off, depth + 1);
-        return 0;
+    if (op == O_LDC && B(w, 48, 3) >= 4 && B(w, 48, 3) <= 5) {
+        i32 byte_off = (i16)B(w, 20, 16);
+        *bank = B(w, 36, 5);
+        *off = (u32)byte_off / 4;
+        /* Keep the legacy first-descriptor behavior for indexed handles.
+           Runtime descriptor selection for arbitrary indices needs a separate path. */
+        return *bank < 18 && byte_off >= 0 && !(byte_off & 3);
     }
+    if (op == O_MOV_R) return direct_track_image_handle(insn, n, (u32)j, B(w, 20, 8), bank, off, depth + 1);
     return 0;
 }
 
 /* Split texture and sampler handles can be ORed or added after separate cbuf
-   reads. Keep both sources so descriptor binding reproduces the guest handle. */
+   reads, the second one either through a register or as the instruction's own
+   constant buffer operand. Keep both sources so descriptor binding reproduces
+   the guest handle. */
 static int direct_track_image_handle_pair(const u64* insn, u32 n, u32 index, u32 reg, u32* bank, u32* off, u32* bank2,
                                           u32* off2, int depth) {
     *bank2 = *off2 = 0;
     if (direct_track_image_handle(insn, n, index, reg, bank, off, depth)) return 1;
-    if (reg == 255 || depth > 6) return 0;
-    u32 block_start = 11;
-    for (u32 k = 11; k < n; k++) {
-        if (!IDX_OK(k)) continue;
-        const Op* flow = decode(insn[k]);
-        if (!flow) continue;
-        if (flow->id == O_BRX || flow->id == O_JMP || flow->id == O_CAL || flow->id == O_RET) return 0;
-        if (flow->id != O_BRA && flow->id != O_SSY && flow->id != O_PBK && flow->id != O_PCNT) continue;
-        u32 target = bra_target(insn[k], k);
-        if (target > block_start && target <= index) block_start = target;
-    }
-    for (u32 j = index; j-- > block_start;) {
-        if (!IDX_OK(j)) continue;
-        const Op* op = decode(insn[j]);
-        if (!op || op->id == O_BRA || op->id == O_SYNC || op->id == O_BRK || op->id == O_CONT) return 0;
-        u32 dst = B(insn[j], 0, 8);
-        if (dst != reg) {
-            if (dst < reg && reg - dst < 4 && !direct_single_reg_writer(op->id)) return 0;
-            continue;
+    int j = depth > 6 ? -1 : direct_reaching_def(insn, n, index, reg);
+    if (j < 0) return 0;
+    u64 w = insn[j];
+    int op = decode(w)->id;
+    if (op == O_MOV_R)
+        return direct_track_image_handle_pair(insn, n, (u32)j, B(w, 20, 8), bank, off, bank2, off2, depth + 1);
+    int plain_or = (op == O_LOP_R || op == O_LOP_C) && B(w, 41, 2) == 1 && !B(w, 39, 2) && !B(w, 47, 1);
+    int plain_add = (op == O_IADD_R || op == O_IADD_C) && !B(w, 43, 1) && !B(w, 47, 1) && !B(w, 48, 2);
+    if (!plain_or && !plain_add) return 0;
+    u32 lhs = B(w, 8, 8);
+    if (op == O_LOP_C || op == O_IADD_C) {
+        u32 cbank = B(w, 34, 5), coff = B(w, 20, 14);
+        if (cbank >= 18) return 0;
+        if (lhs == 255) {
+            *bank = cbank;
+            *off = coff;
+            return 1;
         }
-        u64 w = insn[j];
-        if (B(w, 16, 3) != 7 || B(w, 19, 1)) return 0;
-        if (op->id == O_MOV_R)
-            return direct_track_image_handle_pair(insn, n, j, B(w, 20, 8), bank, off, bank2, off2, depth + 1);
-        int plain_or = op->id == O_LOP_R && B(w, 41, 2) == 1 && !B(w, 39, 2) && !B(w, 47, 1);
-        int plain_add = op->id == O_IADD_R && !B(w, 43, 1) && !B(w, 47, 1) && !B(w, 48, 2);
-        if (!plain_or && !plain_add) return 0;
-        u32 lhs = B(w, 8, 8), rhs = B(w, 20, 8);
-        if (lhs == 255) return direct_track_image_handle_pair(insn, n, j, rhs, bank, off, bank2, off2, depth + 1);
-        if (rhs == 255) return direct_track_image_handle_pair(insn, n, j, lhs, bank, off, bank2, off2, depth + 1);
-        return direct_track_image_handle(insn, n, j, lhs, bank, off, depth + 1) &&
-                       direct_track_image_handle(insn, n, j, rhs, bank2, off2, depth + 1)
-                   ? 2
-                   : 0;
+        *bank2 = cbank;
+        *off2 = coff;
+        return direct_track_image_handle(insn, n, (u32)j, lhs, bank, off, depth + 1) ? 2 : 0;
     }
-    return 0;
+    u32 rhs = B(w, 20, 8);
+    if (lhs == 255) return direct_track_image_handle_pair(insn, n, (u32)j, rhs, bank, off, bank2, off2, depth + 1);
+    if (rhs == 255) return direct_track_image_handle_pair(insn, n, (u32)j, lhs, bank, off, bank2, off2, depth + 1);
+    return direct_track_image_handle(insn, n, (u32)j, lhs, bank, off, depth + 1) &&
+                   direct_track_image_handle(insn, n, (u32)j, rhs, bank2, off2, depth + 1)
+               ? 2
+               : 0;
 }
 static u32 cbuf_read_dynamic(DirectCtx* c, u32 bank, u32 address) {
     u32 four = spv_emit_constant_u32(&c->emit, c->u32_type, 4);
@@ -642,28 +762,6 @@ static u32 gbuf_word_index(DirectCtx* c, int stage, u32 slot, u32 word) {
     mapped = spv_emit_select(&c->emit, c->u32_type, valid, mapped,
                              spv_emit_constant_u32(&c->emit, c->u32_type, 0xffffffffu));
     return spv_emit_select(&c->emit, c->u32_type, no_map, word, mapped);
-}
-
-static int texs_outputs(u64 w, u32 regs[4], u32 comps[4]) {
-    u32 da = B(w, 0, 8), db = B(w, 28, 8), sw = B(w, 50, 3);
-    int n = 0;
-    if (db == 255) {
-        static const int tab[8][2] = {{0, -1}, {1, -1}, {2, -1}, {3, -1}, {0, 1}, {0, 3}, {1, 3}, {2, 3}};
-        for (int i = 0; i < 2; i++)
-            if (tab[sw][i] >= 0) {
-                regs[n] = da == 255 ? 255 : da + (u32)n;
-                comps[n++] = (u32)tab[sw][i];
-            }
-    } else {
-        static const int tab[5][4] = {{0, 1, 2, -1}, {0, 1, 3, -1}, {0, 2, 3, -1}, {1, 2, 3, -1}, {0, 1, 2, 3}};
-        if (sw > 4) sw = 4;
-        for (int i = 0; i < 4; i++)
-            if (tab[sw][i] >= 0) {
-                regs[n] = n < 2 ? da + (u32)n : db + (u32)(n - 2);
-                comps[n++] = (u32)tab[sw][i];
-            }
-    }
-    return n;
 }
 
 static u32 next_instruction(u32 index, u32 limit) {
