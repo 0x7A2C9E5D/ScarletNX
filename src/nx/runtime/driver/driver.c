@@ -25,7 +25,8 @@ static void usage(void) {
          "  --backend=llvm|gcc     Select the recompiler backend for preparation\n"
          "  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game\n"
-         "  --repo / --build-dir   Override this build's checkout / build directory");
+         "  --repo / --build-dir   Override this build's checkout / build directory\n"
+         "                         (without its checkout: the current directory)");
 #ifndef _WIN32
     puts("  -S                     Enable the native GDB stub on localhost:1234\n"
          "  -s                     Enable the stub and stop at startup\n"
@@ -199,10 +200,15 @@ static int container_path(const char* path) {
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
     const char *repo = SNX_SOURCE_DIR, *build = SNX_BUILD_DIR, *input = NULL, *backend = NULL;
-    char *r = NULL, *b = NULL, *exe = NULL, **rest;
+    char *r = NULL, *b = NULL, *exe = NULL, **rest, *checkout;
     unsigned flags = 0;
     int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, backend_args = 0;
     if (argc <= 1) return -1;
+    /* An installed build (the AppImage, the Windows zip) runs without the checkout it was built from: work/ and games/
+       go in the current directory then */
+    checkout = snx_path_join(repo, "CMakeLists.txt");
+    if (!snx_is_file(checkout)) repo = ".";
+    free(checkout);
     rest = (char**)snx_alloc((size_t)(argc + 1) * sizeof(*rest));
     for (i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--")) {

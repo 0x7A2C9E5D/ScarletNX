@@ -248,7 +248,8 @@ Debian, `libgccjit-devel` on Fedora; `-DSNX_GCCJIT_ROOT=` points at another GCC'
 
 Extraction builds missing hactool separately. Recompilation deploys the running full runtime;
 the tools-only build creates one in `build/native-recomp`, or accepts `--runtime FILE`.
-`--repo DIR` and `--build-dir DIR` before the command override compiled-in checkout/tool paths.
+`--repo DIR` and `--build-dir DIR` before the command override compiled-in checkout/tool paths; without that
+checkout (an installed copy), the current folder stands in for it.
 Python ≥3.12 is optional for `tools/*.py` diagnostics.
 
 ## Install / AppImage

@@ -200,6 +200,8 @@ SDL_VIDEO_DRIVER=x11 games/Game
 ```
 
 `--game` selects `Game_code.so`/`Game_data/`; or name the image `games/Game.AppImage` to load adjacent files.
+Without the checkout it was built from (the AppImage, the Windows zip), the driver works in the current folder:
+`work/` and `games/` go there.
 X11 bypasses Wayland. [Licenses](CREDITS.md).
 
 ## Settings / input

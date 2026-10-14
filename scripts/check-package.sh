@@ -65,7 +65,8 @@ for mode in "" -x -r; do
     fi
 done
 
-run "$runtime" -r smoke.nro Smoke --jobs 2 --outdir games
+# No --outdir: an installed copy has no checkout, so its games go in the current folder
+run "$runtime" -r smoke.nro Smoke --jobs 2
 if [ "$status" -eq 0 ] && [ -f "games/Smoke$exe" ] && [ -f games/Smoke.abi ]; then
     pass "scarletnx -r smoke.nro made games/Smoke$exe"
 else
