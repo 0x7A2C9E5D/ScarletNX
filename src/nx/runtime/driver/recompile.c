@@ -84,6 +84,29 @@ static char* own_runtime(const SnxPaths* paths) {
     return snx_strdup(paths->executable);
 }
 #endif
+#ifdef _WIN32
+/* Windows finds a program's DLLs next to it: the game gets copies of those next to the runtime (the zip's LLVM),
+   or it does not start */
+static int copy_dlls(const char* run, const char* out) {
+    char **names = NULL, *from = snx_dirname(run), *src, *dst;
+    size_t i, count = 0, n;
+    int rc = snx_list_dir(from, &names, &count);
+    for (i = 0; !rc && i < count; ++i) {
+        n = strlen(names[i]);
+        if (n < 4 || names[i][n - 4] != '.' || tolower((unsigned char)names[i][n - 3]) != 'd' ||
+            tolower((unsigned char)names[i][n - 2]) != 'l' || tolower((unsigned char)names[i][n - 1]) != 'l')
+            continue;
+        src = snx_path_join(from, names[i]);
+        dst = snx_path_join(out, names[i]);
+        rc = snx_is_file(src) && snx_copy_file(src, dst);
+        free(src);
+        free(dst);
+    }
+    snx_free_strings(names, count);
+    free(from);
+    return rc;
+}
+#endif
 static SnxU64* read_hints(const char* base, size_t* count) {
     char *path = snx_format("%s.hints", base), line[256], *s;
     FILE* f = snx_fopen(path, "r");
@@ -388,6 +411,12 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("runtime unavailable; specify --runtime FILE");
         goto done;
     }
+#ifdef _WIN32
+    if (copy_dlls(run, out)) {
+        snx_error("cannot copy the runtime's DLLs to %s", out);
+        goto done;
+    }
+#endif
     /* Deploy the executable last: automatic play uses it as the completion checkpoint. */
     exe = snx_format("%s%s", base, compile.target_win ? ".exe" : "");
     tmp = snx_format("%s.tmp", exe);

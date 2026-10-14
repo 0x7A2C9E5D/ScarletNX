@@ -73,8 +73,8 @@ else
     fail "scarletnx -r smoke.nro exited $status, without games/Smoke$exe and its .abi" "$out"
 fi
 
-# The runtime left next to the game must start on its own, find the game's code by its name and take its ABI. The
-# banner comes after that and before the GPU, which CI runners lack
+# The runtime left next to the game must start on its own (on Windows, with the DLLs it needs), find the game's code
+# by its name and take its ABI. The banner comes after that and before the GPU, which CI runners lack
 if [ -f "games/Smoke$exe" ]; then
     run env -C games "./Smoke$exe" -H
     if grep -q '^ScarletNX - Smoke' <<<"$out"; then
