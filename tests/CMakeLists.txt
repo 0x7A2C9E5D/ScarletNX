@@ -337,4 +337,10 @@ if(SNX_TEST_SANITIZERS AND WIN32)
 endif()
 
 endif() # SNX_BUILD_NX
+
+# dist/icons/ is what scripts/make-icons.py draws from dist/wimsy.svg: a changed SVG fails until it runs again
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME dist_icons COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/make-icons.py" --check)
+endif()
 include(architecture.cmake)

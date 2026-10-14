@@ -1,0 +1,11 @@
+# scripts/make-icons.py drew these from wimsy.svg with rsvg-convert version 2.62.3; run it again after changing the SVG
+1db48430bc0a3a23885d83591c2160cd7443711fc89d7f86bd78bc68f940932b  wimsy.svg
+bb91ae1dd34a6d96bbb01bbfd2ec42c2c9e738c1ccb89b9f8a8bcf78793a741e  icons/hicolor/16x16/apps/wimsy.png
+7bf15c1268c321a08df62ea7ee42d0ab62b93b87dda33727de926becf4749776  icons/hicolor/22x22/apps/wimsy.png
+4280cef77de780536192994013acba54c9a85005132f551b1530e529596e73de  icons/hicolor/24x24/apps/wimsy.png
+e20ae58af141bd17e0770ce03ac1003fbbcf0818673966b827731cfb3b21ebfe  icons/hicolor/32x32/apps/wimsy.png
+7ec43550116fc54a8dbe0896bd4ce2a8261289515958c521709664f52b0659ec  icons/hicolor/48x48/apps/wimsy.png
+b1485fa2bd180fd73ac46b5afcc3335c022ecab83c497fb550216c67fb9276c1  icons/hicolor/64x64/apps/wimsy.png
+8c53663fcb6fadf8a1451a394a9b29c457651d716785b7698e98ee3740b18a80  icons/hicolor/128x128/apps/wimsy.png
+4f215c18893ac0aa7172aa053201755acde1fdfe5cd1e31d450d6c5da0231046  icons/hicolor/256x256/apps/wimsy.png
+d70d7200b1783dcbc62d92da105e52e631c517ef9b7d9a25fb5fa879a83bbf1c  icons/wimsy.ico
