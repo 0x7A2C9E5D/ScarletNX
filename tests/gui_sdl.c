@@ -551,6 +551,21 @@ int main(int argc, char** argv) {
     SDL_Color lp = rgb(run->page), li = rgb(run->ink), ls = rgb(run->soft);
     Uint64 shown = app.steps.step[1].shown_ms, faded = app.fade_ms;
     Uint64 later = (shown + 60000) / 1600 * 1600; /* where turning dots would show none: the "..." is the end's */
+    /* entering: the menu stays and fades out over fade_out_ms, then the run fades in */
+    Uint64 entered = app.entering_ms;
+    assert(entered && faded == entered + app.theme.fade_out_ms);
+    app.clock = entered;
+    render(&app);
+    colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", rgb(app.theme.page), rgb(app.theme.ink));
+    for (int row = app.log_top - 2; row <= app.log_top; ++row) /* the run's output waits for the run */
+        colored_text_on(&app, 1, row, "                            ", rgb(app.theme.ink), rgb(app.theme.page));
+    app.clock = entered + app.theme.fade_out_ms / 2;
+    render(&app);
+    SDL_Color dimmed = pixel(&app, 4, 4); /* the head's bar, half way to black */
+    assert(!same_colour(dimmed, rgb(app.theme.ink)) && !same_colour(dimmed, black));
+    app.clock = entered + app.theme.fade_out_ms;
+    render(&app);
+    assert(same_colour(pixel(&app, 4, 4), black));
     app.theme.texture = false; /* exact backgrounds first */
     app.clock = later;
     render(&app);
@@ -565,7 +580,7 @@ int main(int argc, char** argv) {
     float cell = 16.0f * (float)app.scale;
     assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 3) + cell / 2), li));
     /* typing: three characters in, the cursor after them */
-    app.theme.fade_in_ms = 0;
+    app.theme.fade_in_ms = app.theme.fade_out_ms = 0;
     app.theme.blink_ms = 0;
     app.clock = shown + 3 * app.theme.typing_ms + 1;
     render(&app);

@@ -34,6 +34,7 @@ typedef struct {
     GuiSteps steps;
     Uint64 clock;                /* fixed time for tests; 0 is the real clock */
     Uint64 fade_ms, leaving_ms; /* a screen fading in from black since; the run fading out since */
+    Uint64 entering_ms;         /* the menu fading out since, before a run fades in */
     const char* drivers;
     char *cwd, *file, *games_dir, *keys_path;
     char* themes_dirs[2]; /* themes/ in the working directory, then beside the GUI */
@@ -130,6 +131,10 @@ static void menu_label(const App* app, int item, char* label, size_t size) {
         snprintf(label, size, "%s%s", app->theme.marker, items[item]);
     }
 }
+/* still the menu, fading out, while a run starts */
+static bool entering(const App* app) {
+    return app->entering_ms && now_ms(app) < app->entering_ms + app->theme.fade_out_ms;
+}
 static void layout(App* app) {
     int width, height;
     SDL_GetRenderOutputSize(app->renderer, &width, &height);
@@ -137,7 +142,8 @@ static void layout(App* app) {
     if (app->scale < 1) app->scale = 1;
     app->cols = SDL_min(width / (8 * app->scale), GUI_MAX_COLS);
     app->rows = SDL_min(height / (16 * app->scale), GUI_MAX_ROWS);
-    app->log_top = app->menu.running || app->finished ? 4 : menu_row(app, GUI_EXIT) + 6;
+    bool run = (app->menu.running || app->finished) && !entering(app);
+    app->log_top = run ? 4 : menu_row(app, GUI_EXIT) + 6;
     gui_browser_resize(&app->browser, (size_t)SDL_max(1, app->rows - 10));
     int log_rows = SDL_max(1, app->rows - app->log_top - 4);
     gui_console_resize(&app->console, SDL_max(1, app->cols - 2), log_rows);
@@ -321,12 +327,14 @@ static void render_steps(App* app) {
                          : "Press [ESC] to abort and return to menu",
          app->aborting ? rgb(colors->warning) : soft);
 }
-/* the screen fading in from black, or the run fading out to it */
+/* the screen fading in from black, or the menu or the run fading out to it */
 static void overlay(App* app) {
     const GuiTheme* theme = &app->theme;
     Uint64 now = now_ms(app);
     float a = 0;
-    if (app->leaving_ms && theme->fade_out_ms)
+    if (entering(app))
+        a = (float)(now > app->entering_ms ? now - app->entering_ms : 0) / (float)theme->fade_out_ms;
+    else if (app->leaving_ms && theme->fade_out_ms)
         a = SDL_min(1.0f, (float)(now > app->leaving_ms ? now - app->leaving_ms : 0) / (float)theme->fade_out_ms);
     else if (app->fade_ms && theme->fade_in_ms && now < app->fade_ms + theme->fade_in_ms)
         a = 1.0f - (float)(now > app->fade_ms ? now - app->fade_ms : 0) / (float)theme->fade_in_ms;
@@ -338,7 +346,7 @@ static void overlay(App* app) {
 static void render(App* app) {
     layout(app);
     const GuiTheme* theme = &app->theme;
-    bool idle = !app->menu.running && !app->finished;
+    bool idle = (!app->menu.running && !app->finished) || entering(app);
     bool head = theme->head != GUI_STYLE_NONE, foot = theme->footer != GUI_STYLE_NONE;
     SDL_Color ink = rgb(theme->ink), soft = rgb(theme->soft), focus = rgb(theme->focus), paper = rgb(theme->page);
     SDL_Color active = rgb(theme->active), failure = rgb(theme->failure);
@@ -353,7 +361,10 @@ static void render(App* app) {
         SDL_RenderPresent(app->renderer);
         return;
     }
-    const char* title = theme->title[screen(app)];
+    const char* title = theme->title[idle ? (app->menu.view == GUI_LOAD_GAMES  ? GUI_SCREEN_GAMES
+                                             : app->menu.view == GUI_LOAD_KEYS ? GUI_SCREEN_KEYS
+                                                                               : GUI_SCREEN_MENU)
+                                          : screen(app)];
     if (head && title[0]) {
         if (theme->head == GUI_STYLE_BAR) band(app, 0, 1, theme->ink);
         text(app, 1, 0, title, theme->head == GUI_STYLE_BAR ? paper : ink);
@@ -412,7 +423,7 @@ static void render(App* app) {
             }
         }
         text(app, 1, app->log_top - 4, app->message, app->abnormal_exit ? failure : focus);
-        if (app->has_output) text(app, 1, app->log_top - 2, "Last output (no scrollback):", soft);
+        if (app->has_output && !entering(app)) text(app, 1, app->log_top - 2, "Last output (no scrollback):", soft);
     } else if (head) {
         text(app, 1, 1, app->finished ? app->message : items[app->menu.selected],
              app->abnormal_exit ? failure : app->finished ? focus : active);
@@ -423,7 +434,7 @@ static void render(App* app) {
             text(app, 1, 3, app->aborting ? "Aborting process tree..." : "Press [ESC] to abort and return to menu",
                  failure);
     }
-    if (app->has_output && app->menu.view != GUI_LOAD_GAMES && app->menu.view != GUI_LOAD_KEYS) {
+    if (app->has_output && app->menu.view != GUI_LOAD_GAMES && app->menu.view != GUI_LOAD_KEYS && !entering(app)) {
         SDL_SetTextureColorMod(app->font, theme->ink.r, theme->ink.g, theme->ink.b);
         for (int y = 0; y < app->console.rows; ++y)
             for (int x = 0; x < app->console.cols; ++x)
@@ -534,7 +545,10 @@ static void launch(App* app, char* absolute, bool prepared) {
     gui_banner_reset(&app->banner);
     gui_steps_reset(&app->steps);
     app->native = native;
-    app->fade_ms = started ? now_ms(app) : 0;
+    /* the menu fades out, then the run fades in */
+    Uint64 now = SDL_max(now_ms(app), 1);
+    app->entering_ms = started && app->theme.fade_out_ms ? now : 0;
+    app->fade_ms = started ? now + (app->entering_ms ? app->theme.fade_out_ms : 0) : 0;
     app->leaving_ms = 0;
     free(driver);
     if (!started) {

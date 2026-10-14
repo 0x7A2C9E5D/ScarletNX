@@ -121,8 +121,8 @@ dark loading screen in its own colours (`[run]`): the title, the game's name wit
 dots and a turning ring; each step the driver and the runner report (unpack, extract,
 recompile with its blocks, built, launch, GPU) typed down the page, with turning dots
 while it runs and `...OK` or `...FAILED` once it ends, the cursor blinking on the current
-one; the progress bar and its percentage. The run fades in from black, and fades out when
-ESC leaves it.
+one; the progress bar and its percentage. The menu fades out to black as a run starts and
+the run fades in from it; ESC fades the run out and the menu back in.
 
 A theme is also a folder holding a `theme.ini`, the folder's name its id, in
 `themes/` in the working directory or in `themes/` beside the GUI; the first one found
@@ -178,7 +178,8 @@ texture = true
 bar = true
 ring = right
 [transitions]
-; milliseconds, 0 to 10000; 0 turns the thing off
+; milliseconds, 0 to 10000; 0 turns the thing off. fade_out_ms: the menu as a run starts,
+; and a run ESC leaves; fade_in_ms: what comes after
 fade_in_ms = 250
 fade_out_ms = 500
 ; how a step's line comes in: none | typing | slide | fade
@@ -240,8 +241,8 @@ and footer descriptions. Theme tests cover the built-ins, a `theme.ini` over its
 (unreadable values and unknown keys included), the `themes/` folders listed, the
 compiling and loading screens, and the YoRHa bars and band in the real renderer. Step
 tests cover each driver and runner line, lines split across reads, the progress and how a
-run ends; the renderer tests check the loading screen, its typing, texture and fades at a
-fixed clock.
+run ends; the renderer tests check the menu fading out into a run, the loading screen, its
+typing, texture and fades at a fixed clock.
 SDL tests use the dummy video driver and the
 software renderer, exercising the real font and event handlers without a display.
 The font's provenance and public-domain notice are in
