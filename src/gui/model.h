@@ -20,7 +20,7 @@ typedef struct {
     bool activated, load_activated, focus_load;
     GuiLoadView view;
     bool running, fullscreen, gccjit, gdbstub, quit;
-    bool theme_next; /* the GUI moves to the next theme and clears it */
+    int theme_next; /* the GUI moves to the next theme and clears it */
 } GuiMenu;
 void gui_menu_key(GuiMenu* menu, GuiKey key);
 const char* gui_setting_description(const GuiMenu* menu);
@@ -30,10 +30,10 @@ size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv)
 /* The runner's banner, "ScarletNX - <name>" at the start of a line: the recompile is over, the game is loading */
 typedef struct {
     size_t matched;
-    bool seen;
+    int seen;
 } GuiBanner;
 void gui_banner_reset(GuiBanner* banner);
-bool gui_banner_feed(GuiBanner* banner, const char* data, size_t size);
+int gui_banner_feed(GuiBanner* banner, const char* data, size_t size);
 
 typedef struct {
     size_t count, page, page_size, selected; /* focus: selected == 0 is Back on every page */

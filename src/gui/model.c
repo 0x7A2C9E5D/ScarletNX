@@ -53,7 +53,7 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
             } else if (menu->selected == GUI_GDBSTUB)
                 menu->gdbstub = !menu->gdbstub;
             else if (menu->selected == GUI_THEME)
-                menu->theme_next = true;
+                menu->theme_next = 1;
             else if (menu->selected == GUI_EXIT)
                 menu->quit = true;
             else if (menu->selected == GUI_KEYS)
@@ -283,12 +283,13 @@ invalid:
 static const char banner_text[] = "\nScarletNX - ";
 void gui_banner_reset(GuiBanner* banner) {
     banner->matched = 1; /* the output starts at the start of a line */
-    banner->seen = false;
+    banner->seen = 0;
 }
-bool gui_banner_feed(GuiBanner* banner, const char* data, size_t size) {
-    for (size_t i = 0; i < size && !banner->seen; ++i) {
+int gui_banner_feed(GuiBanner* banner, const char* data, size_t size) {
+    size_t i;
+    for (i = 0; i < size && !banner->seen; ++i) {
         if (data[i] == banner_text[banner->matched]) {
-            if (++banner->matched == sizeof banner_text - 1) banner->seen = true;
+            if (++banner->matched == sizeof banner_text - 1) banner->seen = 1;
         } else
             banner->matched = data[i] == '\n' ? 1 : 0; /* only a newline starts the text again */
     }
