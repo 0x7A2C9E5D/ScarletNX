@@ -71,20 +71,9 @@ static char* title_name(const char* name, const SnxProgram* p, const char* input
     }
     return out;
 }
-unsigned snx_read_abi(const SnxPaths* paths) {
-    char* path = snx_path_join(paths->repo, "src/common/cpu/aarch64/cpu.h");
-    unsigned char* data;
-    const char* p;
-    size_t n;
-    unsigned abi = 0;
-    data = snx_read_file(path, &n);
-    free(path);
-    if (!data) return 0;
-    p = strstr((const char*)data, "#define SNX_ABI ");
-    if (p) abi = (unsigned)strtoul(p + strlen("#define SNX_ABI "), NULL, 10);
-    free(data);
-    return abi;
-}
+/* This build's, not the checkout's cpu.h: the modules are laid out as this build's headers say, and an installed
+   build has no checkout */
+unsigned snx_game_abi(void) { return snx_module_abi(); }
 static SnxU64* read_hints(const char* base, size_t* count) {
     char *path = snx_format("%s.hints", base), line[256], *s;
     FILE* f = snx_fopen(path, "r");
@@ -308,8 +297,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         return snx_error("--target expects auto, linux or win64");
     /* The backends write the module for the machine they run on (build == host == target) */
     if (compile.target_win != host_win) return snx_error("--target: modules are built for this host only");
-    gen.abi = snx_read_abi(paths);
-    if (!gen.abi) return snx_error("cannot read src/common/cpu/aarch64/cpu.h; set --repo to the checkout");
+    gen.abi = snx_game_abi();
     if (snx_load_program(input, &program, error, sizeof(error))) return snx_error("%s", error);
     if (!program.npdm.is64) {
         snx_error("AArch32 programs are unsupported");

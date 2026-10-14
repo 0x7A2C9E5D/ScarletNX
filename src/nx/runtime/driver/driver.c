@@ -58,10 +58,10 @@ static int is_nro_path(const char* path) {
     return ext && strlen(ext) == 4 && tolower((unsigned char)ext[1]) == 'n' && tolower((unsigned char)ext[2]) == 'r' &&
            tolower((unsigned char)ext[3]) == 'o';
 }
-static int cached_abi(const char* base, const SnxPaths* paths) {
+static int cached_abi(const char* base) {
     char* stamp = snx_format("%s.abi", base);
     FILE* f = snx_fopen(stamp, "r");
-    unsigned abi = 0, expected = snx_read_abi(paths);
+    unsigned abi = 0, expected = snx_game_abi();
     if (f) {
         char newline, trailing;
         /* A partial write or trailing garbage is not a completed build. */
@@ -126,7 +126,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
     }
     /* Always restage an NRO: a same-named cached game may belong to another input or an older build. */
     /* An explicit backend must not silently reuse a game built by another compiler. */
-    if (backend || nro || (flags & SNX_RECOMP) || !snx_is_file(game) || !snx_is_file(code) || !cached_abi(base, paths)) {
+    if (backend || nro || (flags & SNX_RECOMP) || !snx_is_file(game) || !snx_is_file(code) || !cached_abi(base)) {
         command[5] = "-r";
         command[6] = "--outdir";
         command[7] = games;
