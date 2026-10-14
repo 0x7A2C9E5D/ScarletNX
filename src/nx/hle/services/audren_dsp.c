@@ -782,6 +782,43 @@ static void effect_aux(ARState* s, ARMix* m, AREffect* e) {
     }
 }
 
+/* a capture is an aux send without its return (Eden's CaptureInfo and CaptureCommand) */
+static void capture_write(u64 info, u32 count_max, float* in, u32 n, u32 place, u32 update) {
+    if (!count_max || n > count_max) return;
+    u8 *cpu = GP(info), *dsp = GP(info + 0x40);
+    if (rd32(dsp + 4) + place > count_max) return;
+    if (in) aux_ring(info, count_max, in, n, place, 0, 1);
+    if (!update) return;
+    u32 diff = rd32(dsp + 0xC) - rd32(cpu + 0xC);
+    if (diff >= count_max) {
+        u32 lost = rd32(dsp + 8) + update;
+        if (lost - rd32(cpu + 8) < rd32(dsp + 8) - rd32(cpu + 8)) lost = rd32(cpu + 8) - 1;
+        wr32(dsp + 8, lost);
+    }
+    wr32(dsp + 4, (rd32(dsp + 4) + update + count_max) % count_max);
+    u32 total = rd32(dsp + 0xC) + update;
+    if (total - rd32(cpu + 0xC) < diff) total = rd32(cpu + 0xC) - 1;
+    wr32(dsp + 0xC, total);
+}
+
+/* switched off, the DSP's offsets and total go to 0 */
+static void effect_capture(ARState* s, ARMix* m, AREffect* e) {
+    const u8* p = e->p;
+    u32 count = rd32(p + 0x30), count_max = rd32(p + 0x38), n = s->frame;
+    u64 info = rd64(p + 0x40);
+    if (!info) return;
+    if (!e->enabled) {
+        u8* dsp = GP(info + 0x40);
+        wr32(dsp, 0);
+        wr32(dsp + 4, 0);
+        wr32(dsp + 0xC, 0);
+        return;
+    }
+    if (count > SNX_AUDREN_MIX_OUTS) count = SNX_AUDREN_MIX_OUTS;
+    for (u32 ch = 0; ch < count; ch++)
+        capture_write(info, count_max, mixbuf(s, m, (i8)p[ch]), n, ch * n, ch + 1 == count ? count * n : 0);
+}
+
 /* Eden's reciprocal estimate: a in 1/512ths rounded down, its reciprocal from the middle of that step in 1/256ths */
 static double recip_estimate(double a) {
     i32 q = (i32)(a * 512.0);
@@ -1491,6 +1528,7 @@ static void mix_effects(ARState* s, u32 id) {
         if (!next) return;
         switch (next->type) {
             case SNX_AUDREN_EFFECT_AUX: effect_aux(s, m, next); break;
+            case SNX_AUDREN_EFFECT_CAPTURE: effect_capture(s, m, next); break;
             case SNX_AUDREN_EFFECT_LIMITER: effect_limiter(s, m, next); break;
             case SNX_AUDREN_EFFECT_MIX: effect_mix(s, m, next); break;
             case SNX_AUDREN_EFFECT_BIQUAD:

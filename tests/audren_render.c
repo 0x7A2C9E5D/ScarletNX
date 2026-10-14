@@ -1284,6 +1284,73 @@ int main(void) {
     }
     art_rev = 4;
 
+    /* the capture into a 4800-sample ring: offsets, total and lost count after 25 frames unread */
+    for (u32 nch = 1; nch <= 2; nch++) {
+        static i16 x0[25 * SNX_ART_FRAME], x1[25 * SNX_ART_FRAME];
+        const u8* dsp = g_mem + SNX_ART_G_AUX_SEND + 0x40;
+        const i32* ring = (const i32*)(const void*)(g_mem + SNX_ART_G_AUX_SEND + 0x80);
+        reset();
+        u8* p = fx_voice(SNX_AUDREN_EFFECT_CAPTURE);
+        if (nch == 2) tone(1, 1600, 0.3, 0, 1, 1.0f);
+        w8(eff(0), 2, 1);
+        p[0] = 0, p[1] = 1, p[0x18] = 1, p[0x19] = 0;
+        w32(p, 0x30, nch);
+        w32(p, 0x38, 4800);
+        w64(p, 0x40, SNX_ART_G_AUX_SEND);
+        frames(25);
+        sink_copy(x0, 0, 25, 0);
+        sink_copy(x1, 0, 25, 1);
+        int bad = -1;
+        u32 span = SNX_ART_FRAME * nch;
+        for (u32 k = 25 - 4800 / span; k < 25 && bad < 0; k++)
+            for (u32 c = 0; c < nch; c++)
+                for (u32 i = 0; i < SNX_ART_FRAME; i++)
+                    if (ring[(k * span + c * SNX_ART_FRAME + i) % 4800] != (c ? x1 : x0)[k * SNX_ART_FRAME + i])
+                        bad = (int)(k * span + c * SNX_ART_FRAME + i);
+        u32 wo, lost, total;
+        memcpy(&wo, dsp + 4, 4), memcpy(&lost, dsp + 8, 4), memcpy(&total, dsp + 0xC, 4);
+        u32 lost_frames = 25 - 4800 / span;
+        CHECK(bad < 0, "capture of %u: ring sample %d", nch, bad);
+        CHECK(wo == 25 * span % 4800 && total == 25 * span && lost == lost_frames * span,
+              "capture of %u: write %u, total %u, lost %u", nch, wo, total, lost);
+        if (nch == 1) {
+            double lv = level_i16(x1 + 24 * SNX_ART_FRAME, SNX_ART_FRAME, 1000);
+            CHECK(lv < 0.001, "the capture wrote its output: %.4f", lv);
+        }
+        w8(eff(0), 2, 0);
+        frames(1);
+        u32 rd;
+        memcpy(&rd, dsp, 4), memcpy(&wo, dsp + 4, 4), memcpy(&total, dsp + 0xC, 4), memcpy(&lost, dsp + 8, 4);
+        CHECK(rd == 0 && wo == 0 && total == 0 && lost == lost_frames * span,
+              "capture switched off: read %u, write %u, total %u, lost %u", rd, wo, total, lost);
+    }
+
+    /* a game that reads everything before each update loses nothing */
+    {
+        reset();
+        u8* p = fx_voice(SNX_AUDREN_EFFECT_CAPTURE);
+        w8(eff(0), 2, 1);
+        w32(p, 0x30, 1);
+        w32(p, 0x38, 4800);
+        w64(p, 0x40, SNX_ART_G_AUX_SEND);
+        for (int f = 0; f < 25; f++) {
+            memcpy(g_mem + SNX_ART_G_AUX_SEND + 0xC, g_mem + SNX_ART_G_AUX_SEND + 0x40 + 0xC, 4);
+            frames(1);
+        }
+        u32 lost, total;
+        memcpy(&lost, g_mem + SNX_ART_G_AUX_SEND + 0x40 + 8, 4), memcpy(&total, g_mem + SNX_ART_G_AUX_SEND + 0x4C, 4);
+        CHECK(lost == 0 && total == 25 * SNX_ART_FRAME, "a capture read in time: lost %u, total %u", lost, total);
+
+        /* near the wrap, Eden's WriteAuxBufferDsp holds both counts one short of the game's */
+        u32 edge = 0xFFFFFFF0u, zero = 0;
+        memcpy(g_mem + SNX_ART_G_AUX_SEND + 0x40 + 8, &edge, 4), memcpy(g_mem + SNX_ART_G_AUX_SEND + 0x4C, &edge, 4);
+        memcpy(g_mem + SNX_ART_G_AUX_SEND + 8, &zero, 4), memcpy(g_mem + SNX_ART_G_AUX_SEND + 0xC, &zero, 4);
+        frames(1);
+        memcpy(&lost, g_mem + SNX_ART_G_AUX_SEND + 0x40 + 8, 4), memcpy(&total, g_mem + SNX_ART_G_AUX_SEND + 0x4C, 4);
+        CHECK(lost == 0xFFFFFFFFu && total == 0xFFFFFFFFu, "capture counts at the wrap: lost %08x, total %08x", lost,
+              total);
+    }
+
     printf("%u checks, %u failed\n", checks, failures);
     audren_state_free(st);
     free(g_mem);

@@ -126,7 +126,8 @@ enum {
     SNX_AUDREN_EFFECT_REVERB = 4,
     SNX_AUDREN_EFFECT_I3DL2 = 5,
     SNX_AUDREN_EFFECT_BIQUAD = 6,
-    SNX_AUDREN_EFFECT_LIMITER = 7
+    SNX_AUDREN_EFFECT_LIMITER = 7,
+    SNX_AUDREN_EFFECT_CAPTURE = 8
 };
 /* an effect's parameter state: the game sets it, a rendered frame moves it to updated */
 enum { SNX_AUDREN_PARAM_INITIALIZED = 0, SNX_AUDREN_PARAM_UPDATING = 1, SNX_AUDREN_PARAM_UPDATED = 2 };
