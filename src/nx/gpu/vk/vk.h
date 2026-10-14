@@ -95,7 +95,9 @@ void vk_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, VkPi
 /* a descriptor set from the current frame's pools, freed when the frame is reused */
 VkDescriptorSet vk_desc_alloc(VkDescriptorSetLayout layout);
 /* a descriptor pool's sizes (4 entries) for `sets` sets of the stage layouts (gpu/vk/pipeline.c) */
+#define VK_POOL_TYPES 5 /* descriptor types in a set: uniform, storage buffers, textures, images, texel buffers */
 void vk_pool_sizes(VkDescriptorPoolSize* sz, u32 sets);
+extern u32 g_vk_buffer_image_slots; /* storage texel buffer bindings in the compute set, from SNX_VKB_IMGBUF */
 /* the staging alignment that suits every use: uniform, storage, vertex and index buffers */
 u64 vk_stage_align(void);
 u64 vk_hash(const void* p, u64 size);
@@ -134,6 +136,7 @@ enum {
 VkFmt vk_rt_format(u32 fmt);
 VkFmt vk_zt_format(u32 fmt);
 VkFmt vk_tic_format(u32 w0, int srgb); /* bpp 0: not supported */
+int vk_tic_reads_stencil(const u32* tic);
 /* sRGB and linear views of the same bytes: the twin of a color format, or the format itself when it has none */
 VkFormat vk_srgb_as(VkFormat f, int srgb);
 typedef struct {
@@ -241,7 +244,8 @@ Surf* vk_tex_from_tic(const u32* tic);
 Surf* vk_tex_from_tic_raw(const u32* tic); /* UINT view of raw RGBA8 texel bytes */
 /* a view of s as the shader declares it, sRGB or linear (color formats that have both), with a component mapping;
    VK_NULL_HANDLE when the image can't be viewed that way */
-VkImageView vk_tex_view(Surf* s, VkImageViewType type, int srgb, const VkComponentMapping* map);
+/* stencil: a depth/stencil surface's stencil aspect instead of its depth */
+VkImageView vk_tex_view(Surf* s, VkImageViewType type, int srgb, const VkComponentMapping* map, int stencil);
 /* an empty texture of a view type: num 0 float, 1 unsigned, 2 signed integer, 3 depth at 1.0 (shadow samplers) */
 VkImageView vk_null_view(VkImageViewType type, int num);
 VkSampler vk_sampler(const u32* tsc);

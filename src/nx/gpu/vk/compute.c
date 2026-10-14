@@ -28,6 +28,7 @@ typedef struct CsPipe {
     VkCbReads cbr; /* the constant buffer words translation read */
     int failed;
     struct CsPipe* next;
+    struct CsPipe* keyed; /* the program translated for the integer-ness of the 2D images last bound to it */
 } CsPipe;
 static CsPipe* g_csp[256];
 
@@ -89,10 +90,12 @@ static void cs_init(void) {
     VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &st};
     VK_OK(vkCreateSemaphore(g_vk.dev, &sci, NULL, &g_vk_csem));
     /* the dispatches of a batch: a batch that runs out lands, which resets the pool */
-    VkDescriptorPoolSize sz[4];
+    VkDescriptorPoolSize sz[VK_POOL_TYPES];
     vk_pool_sizes(sz, 1024);
-    VkDescriptorPoolCreateInfo dci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1024, .poolSizeCount = 4, .pPoolSizes = sz};
+    VkDescriptorPoolCreateInfo dci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+                                      .maxSets = 1024,
+                                      .poolSizeCount = VK_POOL_TYPES,
+                                      .pPoolSizes = sz};
     VK_OK(vkCreateDescriptorPool(g_vk.dev, &dci, NULL, &g_dpool));
 }
 
@@ -137,7 +140,8 @@ static int arena_fit(u64 need) {
     VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                               .size = cap,
                               .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                       VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT,
                               /* both queues use it, one at a time, without ownership transfers */
                               .sharingMode = fam[0] != fam[1] ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
                               .queueFamilyIndexCount = fam[0] != fam[1] ? 2 : 0,
@@ -273,10 +277,17 @@ void vk_compute_mem_need(u64 a, u64 n) {
 
 /* the pipeline of a program (80 zero bytes, then the code), by its code and launch parameters, and by the constant
    buffer words its translation read */
-static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm) {
+/* A program is translated for the integer textures it is given, as fragment shaders are keyed (an integer texture
+   bound where the shader declares a float one has no view), and for its 2D storage images whose store kind is the
+   other one than a bindless image's default, unsigned (ShaderInfo.rt_int_mask bits 8 and up). */
+typedef struct {
+    u32 tex_int, tex_sint, image;
+} CsKey;
+static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm, CsKey k) {
     u32 blen;
     u64 key = vk_shader_hash(code, 0x10000 + 80, &blen, cs_cb_read) ^ ((u64)lx << 40) ^ ((u64)ly << 48) ^
-              ((u64)lz << 56) ^ ((u64)shm << 20);
+              ((u64)lz << 56) ^ ((u64)shm << 20) ^ ((u64)k.image << 32) ^ (u64)k.tex_int * 0x9E3779B97F4A7C15ull ^
+              (u64)k.tex_sint * 0xC2B2AE3D27D4EB4Full;
     CsPipe* p = g_csp[key & 255];
     while (p && (p->key != key || !vk_cb_reads_hold(&p->cbr, cs_cb_read))) p = p->next;
     if (p) return p;
@@ -288,6 +299,9 @@ static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm) {
     p->si.cs_local[1] = ly;
     p->si.cs_local[2] = lz;
     p->si.shared_size = (int)shm;
+    p->si.rt_int_mask = k.image << 8;
+    p->si.tex_int_mask = k.tex_int;
+    p->si.tex_sint_mask = k.tex_sint;
     const char* corpus = getenv("SNX_SHADER_CORPUS");
     if (corpus) shader_corpus_save(corpus, code, blen, 0x10000 + 80, ST_CS, &p->si, key);
     size_t nw = 0;
@@ -343,6 +357,56 @@ static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm) {
     return p;
 }
 
+/* A buffer image: the texels a buffer header describes, bound as a storage texel buffer over their copy in the
+   arena. Raw loads and atomics view it as R32_UINT, as the console reads it for them whatever its format. Formatted
+   stores are typeless in the shader, unsigned for bindless images: an integer format is viewed as itself, a 32-bit
+   float one as the integer format of the same bits, which the shader's stores of register bits match. */
+typedef struct {
+    u64 gva;
+    u32 bytes;
+    VkFormat fmt;
+} CsBufImg;
+static int cs_buffer_image(const u32* tic, int kind, CsBufImg* out) {
+    u32 hv = (tic[2] >> 21) & 7, type = (tic[4] >> 23) & 0xF;
+    if (hv != 0 || type != 6) return 0;
+    u64 gva = ((u64)(tic[2] & 0xFFFF) << 32) | tic[1];
+    u64 texels = (((u64)(tic[3] & 0xFFFF) << 16) | (tic[4] & 0xFFFF)) + 1;
+    VkFmt f = vk_tic_format(tic[0], 0);
+    if (!gva || !f.bpp || f.bw != 1 || !f.raw || f.depth) return 0;
+    VkFormat fmt = f.vk;
+    if (kind == 1)
+        fmt = VK_FORMAT_R32_UINT;
+    else if (kind == 2 && !f.is_int)
+        fmt = fmt == VK_FORMAT_R32_SFLOAT            ? VK_FORMAT_R32_UINT
+              : fmt == VK_FORMAT_R32G32_SFLOAT       ? VK_FORMAT_R32G32_UINT
+              : fmt == VK_FORMAT_R32G32B32A32_SFLOAT ? VK_FORMAT_R32G32B32A32_UINT
+                                                     : VK_FORMAT_UNDEFINED;
+    else if (kind == 2 && f.sint) /* the shader's image is unsigned: the same bits viewed as such */
+        fmt = fmt == VK_FORMAT_R32_SINT            ? VK_FORMAT_R32_UINT
+              : fmt == VK_FORMAT_R32G32_SINT       ? VK_FORMAT_R32G32_UINT
+              : fmt == VK_FORMAT_R32G32B32A32_SINT ? VK_FORMAT_R32G32B32A32_UINT
+              : fmt == VK_FORMAT_R16G16B16A16_SINT ? VK_FORMAT_R16G16B16A16_UINT
+              : fmt == VK_FORMAT_R16G16_SINT       ? VK_FORMAT_R16G16_UINT
+              : fmt == VK_FORMAT_R16_SINT          ? VK_FORMAT_R16_UINT
+              : fmt == VK_FORMAT_R8G8B8A8_SINT     ? VK_FORMAT_R8G8B8A8_UINT
+              : fmt == VK_FORMAT_R8G8_SINT         ? VK_FORMAT_R8G8_UINT
+              : fmt == VK_FORMAT_R8_SINT           ? VK_FORMAT_R8_UINT
+                                                   : VK_FORMAT_UNDEFINED;
+    else if (kind == 0 && f.is_int)
+        fmt = VK_FORMAT_UNDEFINED;
+    if (fmt == VK_FORMAT_UNDEFINED) return 0;
+    u64 bytes = texels * f.bpp;
+    u32 element = kind == 1 ? 4 : f.bpp;
+    if (bytes > (64ull << 20) || bytes / element > g_vk.props.limits.maxTexelBufferElements) return 0;
+    VkFormatProperties fp;
+    vkGetPhysicalDeviceFormatProperties(g_vk.phys, fmt, &fp);
+    VkFormatFeatureFlags want = VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT |
+                                (kind == 1 ? VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT : 0);
+    if ((fp.bufferFeatures & want) != want) return 0;
+    *out = (CsBufImg){gva, (u32)(bytes / element * element), fmt};
+    return 1;
+}
+
 void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     u32* rc = ch->rcomp;
     u32 gx = q[12] & 0x7FFFFFFF, gy = q[13] & 0xFFFF, gz = q[13] >> 16, lx = q[18] >> 16, ly = q[19] & 0xFFFF,
@@ -387,15 +451,53 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         static u8 code_buf[0x10000 + 80]; /* compute programs have no header: 80 zero bytes stand in for one */
         memset(code_buf, 0, 80);
         gmem_read_code(pa, code_buf + 80, 0x10000);
-        p = cs_pipe(code_buf, lx, ly, lz, shm);
+        p = cs_pipe(code_buf, lx, ly, lz, shm, (CsKey){0, 0, 0});
         *fe = (typeof(fc[0])){pa, g_vk_epoch, lx, ly, lz, shm, p};
+    }
+    /* A 2D store is translated unsigned for a bindless image and float for a bound one. An image of the other
+       class (a bindless RGBA8 target), or an integer texture, needs the program translated again, keyed on it. */
+    CsKey ck = {0, 0, 0};
+    u32 tcb_key = rc[0x982] & 7;
+    u64 tic_key_base = ((u64)rc[0x55D] << 32) | rc[0x55E];
+    if (!p->failed)
+        for (int i = 0; i < p->si.ntex && i < SH_MAXTEX; i++) {
+            ShTex* st = &p->si.tex[i];
+            if (st->shadow || st->flags) continue; /* raw and multisample textures are declared on their own */
+            u32 h = 0, h2 = 0, tic[8];
+            if (!cs_cb_read(st->bindless ? (st->bl_cbuf & 7) : tcb_key, st->cbuf_off * 4, &h)) continue;
+            if (st->bindless && st->bl2 && cs_cb_read(st->bl2_cbuf & 7, st->bl2_off * 4, &h2)) h |= h2;
+            gmem_read(tic_key_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
+            VkFmt f = vk_tic_format(tic[0], 0);
+            if (f.is_int || vk_tic_reads_stencil(tic)) ck.tex_int |= 1u << i;
+            if (f.is_int && f.sint) ck.tex_sint |= 1u << i;
+        }
+    if (!p->failed)
+        for (int i = 0; i < p->si.nimg && i < 8; i++) {
+            if (p->si.img[i].type != 3 || p->si.img[i].kind == 1) continue;
+            u32 h = 0, tic[8];
+            if (!cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : tcb_key, p->si.img[i].cbuf_off * 4,
+                            &h))
+                continue;
+            gmem_read(tic_key_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
+            if (!!vk_tic_format(tic[0], 0).is_int != !!p->si.img[i].bindless) ck.image |= 1u << i;
+        }
+    if (ck.tex_int || ck.image) {
+        if (!p->keyed || (p->keyed->si.rt_int_mask >> 8) != ck.image || p->keyed->si.tex_int_mask != ck.tex_int ||
+            p->keyed->si.tex_sint_mask != ck.tex_sint) {
+            static u8 keyed_code[0x10000 + 80];
+            memset(keyed_code, 0, 80);
+            gmem_read_code(pa, keyed_code + 80, 0x10000);
+            p->keyed = cs_pipe(keyed_code, lx, ly, lz, shm, ck);
+        }
+        p = p->keyed;
     }
     if (p->failed) {
         g_vk_cs_skipped++;
         return;
     }
     int needs_unformatted_image = 0;
-    for (int i = 0; i < p->si.nimg; i++) needs_unformatted_image |= p->si.img[i].kind == 0;
+    for (int i = 0; i < p->si.nimg; i++)
+        needs_unformatted_image |= p->si.img[i].kind == 0 || (p->si.img[i].type == 1 && p->si.img[i].kind == 2);
     if (needs_unformatted_image && !g_vk.feat.shaderStorageImageWriteWithoutFormat) {
         LOG_LIMIT(1, "vulkan: storage image writes need shaderStorageImageWriteWithoutFormat (skipped)\n");
         g_vk_cs_skipped++;
@@ -419,6 +521,26 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     }
     for (int i = 0; i < 8; i++)
         if (p->si.cbuf_mask & (1u << i)) need += g_cbn[i] + vk_stage_align();
+    /* buffer images: their headers from the compute engine's texture pool, handles from its texture bank */
+    CsBufImg bimg[8] = {0};
+    for (int i = 0; i < p->si.nimg && i < 8; i++) {
+        if (p->si.img[i].type != 1) continue;
+        u64 tic_base = ((u64)rc[0x55D] << 32) | rc[0x55E];
+        u32 h = 0, tic[8];
+        if ((u32)i >= g_vk_buffer_image_slots ||
+            !cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : (rc[0x982] & 7), p->si.img[i].cbuf_off * 4,
+                        &h)) {
+            g_vk_cs_skipped++;
+            return;
+        }
+        gmem_read(tic_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
+        if (!cs_buffer_image(tic, p->si.img[i].kind, &bimg[i])) {
+            LOG_LIMIT(4, "vulkan: unsupported compute buffer image (header word 0 %08x, skipped)\n", tic[0]);
+            g_vk_cs_skipped++;
+            return;
+        }
+        need += bimg[i].bytes + vk_stage_align();
+    }
     need += sizeof(i32) * 320 + vk_stage_align(); /* optional format data */
     /* dispatches that read textures run on the graphics queue, after what was recorded before them. Inputs that
        pending results overlap land those first, before anything is put in the arena */
@@ -459,6 +581,8 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
     VkDescriptorImageInfo ii[40];
     Surf* images[8] = {0};
     u8* originals[8] = {0};
+    VkBufferView bufimg_view[8] = {0};
+    u64 bufimg_off[8] = {0};
     u32 nw = 0;
     for (int i = 0; i < 8; i++)
         if (p->si.cbuf_mask & (1u << i)) {
@@ -533,14 +657,19 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
                 cs_abandon_binding(originals);
                 return;
             }
-            VkImageView v = t && !t->f.depth ? vk_tex_bind_view(t, want, tic, st->flags & 1 ? 1 : 0) : VK_NULL_HANDLE;
+            int num = st->flags & 1                      ? 1
+                      : !((p->si.tex_int_mask >> i) & 1) ? 0
+                      : ((p->si.tex_sint_mask >> i) & 1) ? 2
+                                                         : 1;
+            VkImageView v =
+                t && (!t->f.depth || vk_tic_reads_stencil(tic)) ? vk_tex_bind_view(t, want, tic, num) : VK_NULL_HANDLE;
             VkImageLayout sampled_layout =
                 p->si.nimg ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             if (v)
                 vk_surf_use(vk_cmd(), t, sampled_layout, VK_SAMPLED_STAGES, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
             else
-                v = vk_null_view(want, 0);
-            VkSampler smp = vk_tex_bind_sampler(tsc, st, st->flags & 1 ? 1 : 0);
+                v = vk_null_view(want, num);
+            VkSampler smp = vk_tex_bind_sampler(tsc, st, num);
             if (!v || !smp) { /* before any output is recorded: nothing of this dispatch lands */
                 g_vk_cs_skipped++;
                 cs_abandon_binding(originals);
@@ -563,6 +692,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
             fmt_used = 1;
         }
         for (int i = 0; i < p->si.nimg; i++) {
+            if (p->si.img[i].type == 1) continue; /* buffer images are bound below */
             const u32 off = p->si.img[i].cbuf_off;
             u32 h = 0, tic[8];
             if (!cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : tcb, off * 4, &h)) {
@@ -579,10 +709,11 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
                                        (p->si.img[i].kind ? t->f.vk == VK_FORMAT_R32_UINT : !t->f.is_int) &&
                                        t->levels == 1 && t->depth3d == 1 && p->si.img[i].type == 3 && image_bytes &&
                                        image_bytes <= UINT32_MAX
-                                   ? vk_tex_view(t, VK_IMAGE_VIEW_TYPE_2D, 0, &identity)
+                                   ? vk_tex_view(t, VK_IMAGE_VIEW_TYPE_2D, 0, &identity, 0)
                                    : VK_NULL_HANDLE;
             if (!view) {
-                LOG_LIMIT(4, "vulkan: unsupported compute storage image (skipped)\n");
+                LOG_LIMIT(4, "vulkan: unsupported compute storage image (header word 0 %08x, kind %d, skipped)\n",
+                          tic[0], p->si.img[i].kind);
                 g_vk_cs_skipped++;
                 cs_abandon_binding(originals);
                 return;
@@ -613,6 +744,39 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
                                              .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                                              .pImageInfo = &ii[p->si.ntex + i]};
         }
+        for (int i = 0; i < p->si.nimg && i < 8; i++) {
+            if (p->si.img[i].type != 1) continue;
+            /* the slots of one buffer (its loads and atomics, and its stores) view one copy, so each sees the
+               others' writes as the console's would */
+            int alias = -1;
+            for (int k = 0; k < i && alias < 0; k++)
+                if (bufimg_view[k] && bimg[k].gva == bimg[i].gva) alias = k;
+            if (alias >= 0) {
+                bufimg_off[i] = bufimg_off[alias];
+                if (bimg[i].bytes > bimg[alias].bytes) bimg[i].bytes = bimg[alias].bytes;
+            } else {
+                bufimg_off[i] = arena_alloc(bimg[i].bytes);
+                gmem_read(bimg[i].gva, g_ar_ptr + bufimg_off[i], bimg[i].bytes);
+            }
+            VkBufferViewCreateInfo vci = {.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO,
+                                          .buffer = g_ar,
+                                          .format = bimg[i].fmt,
+                                          .offset = bufimg_off[i],
+                                          .range = bimg[i].bytes};
+            if (!VK_OK(vkCreateBufferView(g_vk.dev, &vci, NULL, &bufimg_view[i]))) {
+                for (int k = 0; k < i; k++)
+                    if (bufimg_view[k]) vkDestroyBufferView(g_vk.dev, bufimg_view[k], NULL);
+                g_vk_cs_skipped++;
+                cs_abandon_binding(originals);
+                return;
+            }
+            w[nw++] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                             .dstSet = set,
+                                             .dstBinding = SNX_VKB_IMGBUF + i,
+                                             .descriptorCount = 1,
+                                             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
+                                             .pTexelBufferView = &bufimg_view[i]};
+        }
         if (fmt_used) {
             u64 o = arena_alloc(sizeof fmt);
             memcpy(g_ar_ptr + o, fmt, sizeof fmt);
@@ -634,6 +798,17 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
             if (sa[i] < g_out_lo) g_out_lo = sa[i];
             if (sa[i] + ss[i] > g_out_hi) g_out_hi = sa[i] + ss[i];
         }
+    /* buffer images land like storage buffers: only the bytes the dispatch changed are written back */
+    for (int i = 0; i < p->si.nimg && i < 8; i++) {
+        int alias = 0;
+        for (int k = 0; k < i; k++) alias |= bufimg_view[k] && bufimg_off[k] == bufimg_off[i];
+        if (bufimg_view[i] && !alias && g_nout < 256) {
+            memcpy(g_org + bufimg_off[i], g_ar_ptr + bufimg_off[i], bimg[i].bytes);
+            g_out[g_nout++] = (CsOut){bimg[i].gva, bufimg_off[i], bimg[i].bytes};
+            if (bimg[i].gva < g_out_lo) g_out_lo = bimg[i].gva;
+            if (bimg[i].gva + bimg[i].bytes > g_out_hi) g_out_hi = bimg[i].gva + bimg[i].bytes;
+        }
+    }
     if (gfx) {
         vk_render_end();
         cb = vk_cmd();
@@ -677,7 +852,10 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         g_landing = 1;
         for (int i = 0; i < g_nout; i++)
             vk_write_changed(g_out[i].addr, g_ar_ptr + g_out[i].off, g_org + g_out[i].off, g_out[i].size);
+        for (int i = 0; i < p->si.nimg && i < 8; i++)
+            if (bufimg_view[i]) vkDestroyBufferView(g_vk.dev, bufimg_view[i], NULL);
         for (int i = 0; i < p->si.nimg; i++) {
+            if (!images[i]) continue; /* a buffer image, landed with the outputs */
             int seen = 0;
             for (int k = 0; k < i; k++)
                 if (images[k] == images[i]) {

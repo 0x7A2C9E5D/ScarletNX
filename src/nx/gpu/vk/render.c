@@ -530,7 +530,8 @@ static VkSh* fs_get_keyed(GpuChannel* ch, u64 addr, TexRes* res) {
         tex_resolve(ch, tex_handle(4, r[0x982], st), &res[i]);
         Surf* t = res[i].t;
         u32 ty = (res[i].tic[0] >> 7) & 7;
-        if (t ? t->f.is_int : (ty == 3 || ty == 4)) {
+        /* a depth target's stencil is an unsigned integer, whatever the surface holds */
+        if (vk_tic_reads_stencil(res[i].tic) || (t ? t->f.is_int : (ty == 3 || ty == 4))) {
             tm |= 1u << i;
             if (t ? t->f.sint : ty == 3) ts |= 1u << i;
         }
@@ -558,7 +559,8 @@ VkImageViewType vk_tex_view_type(const ShTex* st) {
 }
 
 VkImageView vk_tex_bind_view(Surf* t, VkImageViewType want, const u32* tic, int num) {
-    if (!t || (t->f.is_int ? (t->f.sint ? 2 : 1) : 0) != num) return VK_NULL_HANDLE;
+    int stencil = t && t->f.stencil && vk_tic_reads_stencil(tic);
+    if (!t || (stencil ? 1 : t->f.is_int ? (t->f.sint ? 2 : 1) : 0) != num) return VK_NULL_HANDLE;
     static const VkComponentSwizzle sw[8] = {
         VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_R,   VK_COMPONENT_SWIZZLE_G,
         VK_COMPONENT_SWIZZLE_B,    VK_COMPONENT_SWIZZLE_A,    VK_COMPONENT_SWIZZLE_ONE, VK_COMPONENT_SWIZZLE_ONE};
@@ -578,7 +580,7 @@ VkImageView vk_tex_bind_view(Surf* t, VkImageViewType want, const u32* tic, int 
                                  ? (VkComponentMapping){VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_ZERO,
                                                         VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ONE}
                                  : (VkComponentMapping){m[0], m[1], m[2], m[3]};
-    return vk_tex_view(t, want, (tic[4] >> 22) & 1, &map);
+    return vk_tex_view(t, want, (tic[4] >> 22) & 1, &map, stencil);
 }
 
 VkSampler vk_tex_bind_sampler(const u32* tsc, const ShTex* st, int num) {
@@ -930,7 +932,7 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         }
         VkComponentMapping identity = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
                                        VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
-        VkImageView view = vk_tex_view(surf, VK_IMAGE_VIEW_TYPE_2D, 0, &identity);
+        VkImageView view = vk_tex_view(surf, VK_IMAGE_VIEW_TYPE_2D, 0, &identity, 0);
         if (!view) return VK_NULL_HANDLE;
         int seen = 0;
         for (int j = 0; j < images->n; j++)

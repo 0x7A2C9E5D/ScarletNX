@@ -95,9 +95,12 @@ int vk_cb_reads_hold(const VkCbReads* reads, VkCbReader read) {
     return 1;
 }
 
+u32 g_vk_buffer_image_slots;
+
 /* descriptors of each type in one set: the binding ranges in shader.h */
 static VkDescriptorType binding_type(u32 i) {
     if (i == SNX_VKB_SMAP) return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    if (i >= SNX_VKB_IMGBUF) return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
     return i < SNX_VKB_SSBO  ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
            : i < SNX_VKB_TEX ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
            : i < SNX_VKB_IMG ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
@@ -105,11 +108,12 @@ static VkDescriptorType binding_type(u32 i) {
                              : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 }
 void vk_pool_sizes(VkDescriptorPoolSize* sz, u32 sets) {
-    static const VkDescriptorType ty[4] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                                           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE};
-    for (int k = 0; k < 4; k++) {
+    static const VkDescriptorType ty[VK_POOL_TYPES] = {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER};
+    for (int k = 0; k < VK_POOL_TYPES; k++) {
         u32 n = 0;
-        for (u32 i = 0; i <= SNX_VKB_SMAP; i++) n += binding_type(i) == ty[k];
+        for (u32 i = 0; i < SNX_VKB_END; i++) n += binding_type(i) == ty[k];
         sz[k] = (VkDescriptorPoolSize){ty[k], n * sets};
     }
 }
@@ -122,15 +126,22 @@ void vk_pipeline_init(void) {
         VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT |
             VK_SHADER_STAGE_GEOMETRY_BIT};
     for (int s = 0; s < 3; s++) {
-        VkDescriptorSetLayoutBinding b[SNX_VKB_SMAP + 1];
+        VkDescriptorSetLayoutBinding b[SNX_VKB_END];
         u32 count = 0;
         u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;
-        if (image_slots > SNX_VKB_RS - SNX_VKB_IMG) image_slots = SNX_VKB_RS - SNX_VKB_IMG;
         if (image_slots > g_vk.props.limits.maxDescriptorSetStorageImages)
             image_slots = g_vk.props.limits.maxDescriptorSetStorageImages;
-        for (u32 i = 0; i <= SNX_VKB_SMAP; i++) {
+        /* storage texel buffers count against the storage image limits, so buffer images get what images leave */
+        u32 buffer_slots = image_slots;
+        if (image_slots > SNX_VKB_RS - SNX_VKB_IMG) image_slots = SNX_VKB_RS - SNX_VKB_IMG;
+        buffer_slots -= image_slots;
+        if (buffer_slots > SNX_VKB_END - SNX_VKB_IMGBUF) buffer_slots = SNX_VKB_END - SNX_VKB_IMGBUF;
+        g_vk_buffer_image_slots = buffer_slots;
+        for (u32 i = 0; i < SNX_VKB_END; i++) {
             int image = i >= SNX_VKB_IMG && i < SNX_VKB_RS;
             if (image && (s == 2 || i - SNX_VKB_IMG >= image_slots)) continue;
+            if (i >= SNX_VKB_IMGBUF && (s != 0 || i - SNX_VKB_IMGBUF >= buffer_slots)) continue;
+            if (i >= SNX_VKB_IMGBUF) image = 1;
             b[count++] = (VkDescriptorSetLayoutBinding){
                 .binding = i,
                 .descriptorType = binding_type(i),
@@ -143,7 +154,7 @@ void vk_pipeline_init(void) {
             fatal("vulkan: cannot create shader descriptor layout");
     }
     {
-        VkDescriptorPoolSize n[4];
+        VkDescriptorPoolSize n[VK_POOL_TYPES];
         vk_pool_sizes(n, 1);
         const VkPhysicalDeviceLimits* l = &g_vk.props.limits;
         if (n[0].descriptorCount > l->maxPerStageDescriptorUniformBuffers ||
