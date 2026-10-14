@@ -172,6 +172,13 @@ static VkFmt TV(VkFormat f, int bpp, int conv) { /* converted on upload */
     r.conv = (u8)conv;
     return r;
 }
+/* Whether a header samples a depth/stencil target's stencil: R24G8 (stencil in G) or R8G24 (stencil in R), with
+   the first component taken from the stencil one. Unreal reads its scene stencil this way, R8G24 with R everywhere. */
+int vk_tic_reads_stencil(const u32* tic) {
+    u32 f = tic[0] & 0x7F, x = (tic[0] >> 19) & 7; /* 2 R, 3 G */
+    return (f == 0x0D && x == 3) || (f == 0x0E && x == 2);
+}
+
 VkFmt vk_tic_format(u32 w0, int srgb) {
     u32 f = w0 & 0x7F, ct = (w0 >> 7) & 7;
     int flt = ct == 7, sn = ct == 1, ui = ct == 4, si = ct == 3;
@@ -253,7 +260,10 @@ VkFmt vk_tic_format(u32 w0, int srgb) {
         case 0x54: return TA(12, 10, srgb);
         case 0x46: return TA(12, 12, srgb);
         /* depth: sampled from render targets. From memory they aren't loaded yet (their packing differs from
-           Vulkan's buffer layout for depth copies) */
+           Vulkan's buffer layout for depth copies). R24G8 and R8G24 are a D24S8 target's two parts as color
+           components, depth in 24 bits and stencil in 8: vk_tic_reads_stencil says which a header samples. */
+        case 0x0D:
+        case 0x0E:
         case 0x29:
         case 0x2A:
         case 0x2B: {
@@ -267,7 +277,7 @@ VkFmt vk_tic_format(u32 w0, int srgb) {
     }
 #undef PICK
     static u32 said[8];
-    if (first_time(said, f)) WARN("vulkan: unsupported texture format %x (not drawn)\n", f);
+    if (first_time(said, f)) WARN("vulkan: unsupported texture format %x, header word 0 %08x (not drawn)\n", f, w0);
     VkFmt r = {0};
     return r;
 }
