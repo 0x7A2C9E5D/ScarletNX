@@ -246,6 +246,19 @@ static size_t step_runs(const GuiStep* s, char run[3][112], size_t length[3]) {
     for (int r = 0; r < 3; ++r) total += length[r] = SDL_utf8strlen(run[r]);
     return total;
 }
+/* a row cut to the columns it has: a step's detail, keeping its label and state, or a line, ending in "..." */
+static void clip_row(char run[3][112], size_t length[3], bool note, int room) {
+    size_t total = length[0] + length[1] + length[2];
+    if (room < 8 || total <= (size_t)room) return;
+    int cut = note ? 0 : 1;
+    size_t marker = note ? 3 : 0, other = total - length[cut];
+    size_t left = (size_t)room > other + marker ? (size_t)room - other - marker : 0;
+    const char* end = run[cut];
+    for (size_t i = 0; i < left; ++i) SDL_StepUTF8(&end, NULL);
+    size_t at = (size_t)(end - run[cut]);
+    snprintf(run[cut] + at, 112 - at, "%s", note ? "..." : "");
+    length[cut] = left + marker;
+}
 /* a run as a loading screen: the title, the name and the ring; the steps typed down the page, their status last;
    the progress bar and its percentage */
 static void render_steps(App* app) {
@@ -271,8 +284,9 @@ static void render_steps(App* app) {
     snprintf(head, sizeof head, "%s%s", name, dots(app));
     text(app, name_col, 1, head, soft);
     if (app->finished) text(app, 1, 2, app->message, app->abnormal_exit ? failure : soft);
-    /* the rows: each step, then its lines when detailed, folded once it is done when collapse says so */
-    enum { NOTES_PER_STEP = 8, ROWS = GUI_STEPS_MAX * (NOTES_PER_STEP + 1) };
+    /* the rows: each step, then every line it kept when detailed, folded once it is done when collapse says so;
+       each ends before the right edge, with room for a step's dots and the cursor */
+    enum { ROWS = GUI_STEPS_MAX + GUI_NOTES_MAX };
     static char runs[ROWS][3][112];
     static size_t lengths[ROWS][3], typed[ROWS];
     static const GuiStep* owner[ROWS];
@@ -286,10 +300,11 @@ static void render_steps(App* app) {
         is_note[rows] = false;
         shown[rows] = SDL_max(s->shown_ms, since);
         step_runs(s, runs[rows], lengths[rows]);
+        clip_row(runs[rows], lengths[rows], false, app->cols - 6);
         last_step = rows++;
         if (!theme->detailed || (theme->collapse && s->state == GUI_STEP_DONE)) continue;
-        const GuiNote* notes[NOTES_PER_STEP];
-        int n = gui_step_notes(&app->steps, s, notes, NOTES_PER_STEP);
+        const GuiNote* notes[GUI_NOTES_MAX];
+        int n = gui_step_notes(&app->steps, s, notes, GUI_NOTES_MAX);
         for (int k = 0; k < n; ++k, ++rows) {
             owner[rows] = s;
             is_note[rows] = true;
@@ -298,6 +313,7 @@ static void render_steps(App* app) {
             runs[rows][1][0] = runs[rows][2][0] = 0;
             lengths[rows][0] = SDL_utf8strlen(runs[rows][0]);
             lengths[rows][1] = lengths[rows][2] = 0;
+            clip_row(runs[rows], lengths[rows], true, app->cols - 5);
         }
     }
     /* when each row types: async, each from when it came; sync, one after the other, a finished step's faster */

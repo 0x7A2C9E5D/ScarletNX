@@ -719,6 +719,43 @@ int main(int argc, char** argv) {
     render(&app);
     colored_text_on(&app, 16, 3, "..._", li, lp);
     colored_text_on(&app, 3, 4, "Functions: 2    ", ls, lp);
+    /* every line a step kept, down the screen; a row too wide for it ends at the edge */
+    app.theme.collapse = app.theme.bar = false;
+    gui_steps_reset(&app.steps);
+    const char* wide_name =
+        "Recompiling A Game Whose Name Runs Far Past The Right Edge Of This Small Window (1 modules)\n";
+    gui_steps_feed(&app.steps, wide_name, strlen(wide_name), shown);
+    for (int i = 0; i < 9; ++i) {
+        char line[32];
+        snprintf(line, sizeof line, "line %d\n", i);
+        gui_steps_feed(&app.steps, line, strlen(line), shown);
+    }
+    const char* wide =
+        "fs: a line long enough to pass the right edge of a window eighty columns wide, and on, and on\n";
+    gui_steps_feed(&app.steps, wide, strlen(wide), shown);
+    gui_steps_finish(&app.steps, true);
+    app.clock = later;
+    render(&app);
+    char row_text[160];
+    /* of the row's cols - 6, "RECOMPILE: ", the detail's space and "...OK" take 16 */
+    snprintf(row_text, sizeof row_text, "RECOMPILE: %.*s", app.cols - 6 - 16,
+             "A GAME WHOSE NAME RUNS FAR PAST THE RIGHT EDGE OF THIS SMALL WINDOW");
+    colored_text_on(&app, 1, 3, row_text, li, lp); /* the last step, in ink */
+    colored_text_on(&app, app.cols - 10, 3, "...OK ", li, lp);
+    colored_text_on(&app, 3, 4, "line 0", ls, lp);
+    colored_text_on(&app, 3, 12, "line 8", ls, lp);
+    snprintf(row_text, sizeof row_text, "%.*s...", app.cols - 8, wide);
+    colored_text_on(&app, 3, 13, row_text, ls, lp);
+    colored_text_on(&app, app.cols - 2, 13, " ", ls, lp);
+    for (int i = 9; i < 20; ++i) { /* past the bottom, the latest rows stay */
+        char line[32];
+        snprintf(line, sizeof line, "line %d\n", i);
+        gui_steps_feed(&app.steps, line, strlen(line), shown);
+    }
+    render(&app);
+    int last_row = app.rows - 3;
+    colored_text_on(&app, 3, last_row, "line 19", ls, lp);
+    colored_text_on(&app, 3, last_row - 1, "line 18", ls, lp);
     app.steps = kept;
     /* the page's faint lines, one pixel row in four */
     app.theme = *gui_theme_builtin("yorha");

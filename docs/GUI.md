@@ -180,8 +180,8 @@ warning = #D9B24A
 texture = true
 bar = true
 ring = right
-; detailed: each step's other lines under it (the latest 8); collapse: a done step's folded
-; away, a failed one's kept
+; detailed: each step's other lines under it, down the screen; collapse: a done step's
+; folded away, a failed one's kept
 detailed = true
 collapse = false
 [prompt]
