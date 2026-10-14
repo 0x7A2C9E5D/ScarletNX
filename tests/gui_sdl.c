@@ -30,7 +30,7 @@ static void mouse(App* app, int col, int row, bool click) {
     }
     event(app, &e);
 }
-static void colored_text(App* app, int row, const char* prompt, SDL_Color color) {
+static void colored_text_at(App* app, int col, int row, const char* prompt, SDL_Color color) {
     /* Verify the exact text and its glyph color in the real renderer. */
     SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
     assert(image);
@@ -38,12 +38,15 @@ static void colored_text(App* app, int row, const char* prompt, SDL_Color color)
         for (int y = 0; y < 16; ++y)
             for (int x = 0; x < 8; ++x) {
                 Uint8 r, g, b, a;
-                assert(SDL_ReadSurfacePixel(image, ((i + 1) * 8 + x) * app->scale, (row * 16 + y) * app->scale, &r, &g,
+                assert(SDL_ReadSurfacePixel(image, ((i + col) * 8 + x) * app->scale, (row * 16 + y) * app->scale, &r, &g,
                                             &b, &a));
                 bool ink = (gui_vga_font[(unsigned char)prompt[i] * 16 + y] & (0x80 >> x)) != 0;
                 assert(r == (ink ? color.r : 0) && g == (ink ? color.g : 0) && b == (ink ? color.b : 0));
             }
     SDL_DestroySurface(image);
+}
+static void colored_text(App* app, int row, const char* prompt, SDL_Color color) {
+    colored_text_at(app, 1, row, prompt, color);
 }
 static void red_text(App* app, int row, const char* prompt) { colored_text(app, row, prompt, red); }
 static void finish(App* app, int status) {
@@ -145,6 +148,8 @@ int main(int argc, char** argv) {
     free(app.games_dir);
     app.games_dir = snx_path_join(temporary, "games");
     render(&app);
+    colored_text(&app, menu_row(&app, GUI_SWITCH), "- Load Switch NSP/XCI/NRO", yellow);
+    assert(!app.menu.activated);
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RIGHT);
     assert(app.menu.selected == GUI_KEYS);
@@ -215,11 +220,15 @@ int main(int argc, char** argv) {
     mouse(&app, 2, menu_row(&app, GUI_GCCJIT), false);
     assert(app.menu.selected == GUI_GCCJIT && !app.menu.gccjit);
     render(&app);
-    colored_text(&app, menu_row(&app, GUI_GCCJIT), "- [OFF] Enable libgccjit", pink);
+    colored_text(&app, menu_row(&app, GUI_GCCJIT), "- [OFF] Enable libgccjit", yellow);
+    colored_text(&app, menu_row(&app, GUI_FULLSCREEN), "- [ON] Fullscreen", pink);
     colored_text(&app, app.rows - 4, SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
                                                       : "Program was not compiled with libgccjit", normal);
     mouse(&app, 2, menu_row(&app, GUI_GCCJIT), true);
     assert(app.menu.gccjit == !!SNX_GUI_HAS_GCCJIT);
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_GCCJIT),
+                 SNX_GUI_HAS_GCCJIT ? "- [ON] Enable libgccjit" : "- [OFF] Enable libgccjit", pink);
     mouse(&app, 2, menu_row(&app, GUI_GCCJIT), true);
     assert(!app.menu.gccjit);
     mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), false);
@@ -245,6 +254,31 @@ int main(int argc, char** argv) {
     key(&app, SDLK_LEFT);
     key(&app, SDLK_RETURN);
     assert(app.menu.selected == GUI_SWITCH && app.menu.view == GUI_LOAD_OPTIONS);
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_SWITCH), "- Load Switch NSP/XCI/NRO", pink);
+    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 1, "-> Select via drag and drop", yellow);
+    /* Leaving a submenu, including crossing another main option, must neither
+       close it nor move its rows or change its activated owner. */
+    int exit_row = menu_row(&app, GUI_EXIT);
+    mouse(&app, 2, menu_row(&app, GUI_LINUX), false);
+    assert(app.menu.selected == GUI_LINUX && app.menu.active == GUI_SWITCH);
+    assert(app.menu.view == GUI_LOAD_OPTIONS && !app.menu.focus_load);
+    assert(menu_row(&app, GUI_EXIT) == exit_row);
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_SWITCH), "- Load Switch NSP/XCI/NRO", pink);
+    colored_text(&app, menu_row(&app, GUI_LINUX), "- Load Linux ARM ELF", yellow);
+    mouse(&app, 0, 0, false);
+    SDL_Event leave = {.type = SDL_EVENT_WINDOW_MOUSE_LEAVE};
+    event(&app, &leave);
+    assert(app.menu.view == GUI_LOAD_OPTIONS && app.menu.active == GUI_SWITCH);
+    /* Enter explicitly activates the hovered main item; clicking another main
+       item also replaces the submenu, unlike merely hovering over it. */
+    key(&app, SDLK_RETURN);
+    assert(app.menu.active == GUI_LINUX && app.menu.view == GUI_LOAD_OPTIONS);
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_LINUX), "- Load Linux ARM ELF", pink);
+    mouse(&app, 2, menu_row(&app, GUI_SWITCH), true);
+    assert(app.menu.active == GUI_SWITCH && app.menu.view == GUI_LOAD_OPTIONS);
     mouse(&app, 4, menu_row(&app, GUI_SWITCH) + 2, false);
     assert(app.menu.load_selected == GUI_LOAD_DIRECTORY && app.menu.view == GUI_LOAD_OPTIONS);
     mouse(&app, 4, menu_row(&app, GUI_SWITCH) + 2, true);
@@ -265,6 +299,14 @@ int main(int argc, char** argv) {
     assert(app.menu.view == GUI_LOAD_NONE);
     key(&app, SDLK_RETURN);
     key(&app, SDLK_RETURN); /* activate Select via drag and drop */
+    render(&app);
+    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 1, "-> Select via drag and drop", pink);
+    mouse(&app, 4, menu_row(&app, GUI_SWITCH) + 2, false);
+    render(&app);
+    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 1, "-> Select via drag and drop", pink);
+    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 2, "-> Select file from games/ instead", yellow);
+    mouse(&app, 2, menu_row(&app, GUI_LINUX), false);
+    assert(app.menu.active == GUI_SWITCH && app.menu.selected == GUI_LINUX && app.menu.view == GUI_LOAD_DROP);
     SDL_Event e = {0};
     e.type = SDL_EVENT_DROP_TEXT;
     e.drop.data = "one\ntwo";
@@ -273,7 +315,7 @@ int main(int argc, char** argv) {
     e.type = SDL_EVENT_DROP_FILE;
     e.drop.data = input;
     event(&app, &e);
-    assert(app.menu.running);
+    assert(app.menu.running && app.menu.selected == GUI_SWITCH);
     finish(&app, 0);
     key(&app, SDLK_DOWN);
     key(&app, SDLK_SPACE);
@@ -394,7 +436,9 @@ int main(int argc, char** argv) {
     key(&app, SDLK_LEFT);
     assert(app.browser.page == 0 && app.browser.selected == 1);
     mouse(&app, 2, 6, false);
-    assert(app.browser.selected == 2 && !app.menu.running);
+    assert(app.browser.selected == 2 && !app.menu.running && !app.browser.activated);
+    render(&app);
+    colored_text(&app, 6, app.games.names[1], yellow);
     mouse(&app, 2, 5, true); /* native prepared game, not another extraction */
     assert(app.menu.running);
     finish(&app, 0);
@@ -415,6 +459,10 @@ int main(int argc, char** argv) {
     free(removed);
     key(&app, SDLK_RETURN);
     assert(!app.menu.running && app.menu.view == GUI_LOAD_GAMES && app.message[0]);
+    mouse(&app, 2, 6, false);
+    render(&app);
+    colored_text(&app, 5, app.games.names[0], pink);
+    colored_text(&app, 6, app.games.names[1], yellow);
     key(&app, SDLK_ESCAPE);
     key(&app, SDLK_RETURN);
     assert(app.games.count == 34);
@@ -429,7 +477,7 @@ int main(int argc, char** argv) {
         mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), false);
         assert(app.menu.selected == GUI_GDBSTUB && !app.menu.gdbstub);
         render(&app);
-        colored_text(&app, menu_row(&app, GUI_GDBSTUB), "- [OFF] Enable gdbstub", pink);
+        colored_text(&app, menu_row(&app, GUI_GDBSTUB), "- [OFF] Enable gdbstub", yellow);
         colored_text(&app, app.rows - 4, "Enables gdbstub on port 1234", normal);
         assert(menu_row(&app, GUI_EXIT) < app.rows - 4);
     }

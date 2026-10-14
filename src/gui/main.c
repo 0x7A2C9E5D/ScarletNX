@@ -71,7 +71,10 @@ static void text(App* app, int x, int y, const char* value, SDL_Color color) {
 static int menu_spacing(const App* app) { return app->rows >= 30 ? 2 : 1; }
 static int menu_row(const App* app, int item) {
     return 4 + item * menu_spacing(app) +
-           (app->menu.view != GUI_LOAD_NONE && item > app->menu.selected ? 2 : 0);
+           (app->menu.view != GUI_LOAD_NONE && item > app->menu.active ? 2 : 0);
+}
+static SDL_Color item_color(bool activated, bool focused) {
+    return activated ? pink : focused ? yellow : normal;
 }
 static void menu_label(const App* app, int item, char* label, size_t size) {
     if (item == GUI_FULLSCREEN || item == GUI_GCCJIT || item == GUI_GDBSTUB) {
@@ -101,12 +104,13 @@ static void render(App* app) {
     if (app->menu.view == GUI_LOAD_GAMES && !app->menu.running && !app->finished) {
         text(app, 1, 1, "Up/Down: select. Enter/Space: open. Left/Right or PgUp/PgDown: page.", normal);
         text(app, 1, 2, app->games_dir, muted);
-        text(app, 1, 3, "Back [ESC]", app->browser.selected == 0 ? pink : normal);
+        text(app, 1, 3, "Back [ESC]", app->browser.selected == 0 ? yellow : normal);
         size_t start = app->browser.page * app->browser.page_size;
         size_t count = gui_browser_items(&app->browser);
         for (size_t i = 0; i < count; ++i) {
-            bool is_hovered = app->browser.selected == i + 1;
-            text(app, 1, 5 + (int)i, app->games.names[start + i], is_hovered ? pink : normal);
+            text(app, 1, 5 + (int)i, app->games.names[start + i],
+                 item_color(app->browser.activated && app->browser.active == start + i,
+                            app->browser.selected == i + 1));
         }
         if (!app->games.count) text(app, 1, 5, "No executables found in games/.", muted);
         char page[128];
@@ -115,13 +119,13 @@ static void render(App* app) {
         text(app, 1, app->rows - 5, page, muted);
         text(app, 1, app->rows - 4, app->message, yellow);
     } else if (app->menu.view == GUI_LOAD_KEYS && !app->menu.running && !app->finished) {
-        text(app, 1, 1, "Setup device keys: drag and drop to this window", yellow);
+        text(app, 1, 1, "Setup device keys: drag and drop to this window", normal);
         text(app, 1, 2, "Ctrl+V: paste a path. ESC: back.", muted);
         text(app, 1, 3, app->keys_path ? app->keys_path : "Home directory unavailable.", normal);
         if (app->keys_path && snx_is_file(app->keys_path))
             text(app, 1, 4, "Keys already setup. This will overwrite the previous ones", red);
         text(app, 1, 6, app->message, yellow);
-        text(app, 1, 8, "Back [ESC]", pink);
+        text(app, 1, 8, "Back [ESC]", app->browser.selected == 0 ? yellow : normal);
     } else if (!app->menu.running && !app->finished) {
         text(app, 1, 1, "Arrows/mouse: move. Space/Enter/click: select.", normal);
         text(app, 1, 2,
@@ -129,22 +133,27 @@ static void render(App* app) {
                                              : "Choose a load option. ESC: back.",
              muted);
         for (int i = 0; i < GUI_ITEM_COUNT; ++i) {
-            bool is_hovered = app->menu.selected == i;
+            bool is_active = app->menu.activated && app->menu.active == i;
+            bool is_focused = app->menu.selected == i &&
+                              (app->menu.view == GUI_LOAD_NONE || !app->menu.focus_load);
             int row = menu_row(app, i);
             char label[100];
             menu_label(app, i, label, sizeof(label));
-            text(app, 1, row, label, is_hovered ? pink : normal);
-            if (is_hovered && app->menu.view != GUI_LOAD_NONE) {
+            text(app, 1, row, label, item_color(is_active, is_focused));
+            if (i == app->menu.active && app->menu.view != GUI_LOAD_NONE) {
                 text(app, 3, row + 1, "-> Select via drag and drop",
-                     app->menu.load_selected == GUI_LOAD_DRAG ? pink : normal);
+                     item_color(app->menu.load_activated && app->menu.load_active == GUI_LOAD_DRAG,
+                                app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DRAG));
                 text(app, 3, row + 2, "-> Select file from games/ instead",
-                     app->menu.load_selected == GUI_LOAD_DIRECTORY ? pink : normal);
+                     item_color(app->menu.load_activated && app->menu.load_active == GUI_LOAD_DIRECTORY,
+                                app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DIRECTORY));
             }
         }
         text(app, 1, app->log_top - 4, app->message, app->abnormal_exit ? red : yellow);
         if (app->has_output) text(app, 1, app->log_top - 2, "Last output (no scrollback):", muted);
     } else {
-        text(app, 1, 1, app->finished ? app->message : items[app->menu.selected], app->abnormal_exit ? red : yellow);
+        text(app, 1, 1, app->finished ? app->message : items[app->menu.selected],
+             app->abnormal_exit ? red : app->finished ? yellow : pink);
         text(app, 1, 2, app->file ? app->file : "", normal);
         if (app->finished)
             text(app, 1, 3, "Press [ESC] to return to menu", red);
@@ -159,7 +168,9 @@ static void render(App* app) {
                 if (app->log_top + y < app->rows - 4 && app->console.cells[y][x] != ' ')
                     glyph(app, x + 1, app->log_top + y, app->console.cells[y][x]);
     }
-    if (!app->menu.running && !app->finished && app->menu.view == GUI_LOAD_NONE)
+    if (!app->menu.running && !app->finished &&
+        (app->menu.view == GUI_LOAD_NONE ||
+         ((app->menu.view == GUI_LOAD_OPTIONS || app->menu.view == GUI_LOAD_DROP) && !app->menu.focus_load)))
         text(app, 1, app->rows - 4, gui_setting_description(&app->menu), normal);
     char footer[256];
     if (app->usage.available)
@@ -315,6 +326,9 @@ static void drop(App* app, const char* value, bool text_drop) {
         install_keys(app, absolute);
         free(absolute);
     } else {
+        /* Hovering another main item must not change the driver for this drop. */
+        app->menu.selected = app->menu.active;
+        app->menu.focus_load = true;
         launch(app, absolute, false);
     }
 }
@@ -334,6 +348,9 @@ static void menu_key(App* app, GuiKey key) {
         GuiBrowserAction action = gui_browser_key(&app->browser, key);
         if (action == GUI_BROWSER_BACK) {
             app->menu.view = GUI_LOAD_OPTIONS;
+            app->menu.focus_load = true;
+            app->menu.load_activated = false;
+            app->menu.selected = app->menu.active;
             app->message[0] = 0;
         } else if (action == GUI_BROWSER_OPEN) {
             size_t index = app->browser.page * app->browser.page_size + app->browser.selected - 1;
@@ -385,15 +402,13 @@ static void pointer(App* app, float window_x, float window_y, bool click) {
         return;
     }
     if (app->menu.view != GUI_LOAD_NONE) {
-        int row = menu_row(app, app->menu.selected);
+        int row = menu_row(app, app->menu.active);
         const char* labels[] = {"-> Select via drag and drop", "-> Select file from games/ instead"};
         for (int i = 0; i < 2; ++i) {
             if (!hit_text(app, x, y, 3, row + i + 1, labels[i])) continue;
             app->menu.load_selected = i;
-            if (click) {
-                app->menu.view = GUI_LOAD_OPTIONS;
-                menu_key(app, GUI_SELECT);
-            }
+            app->menu.focus_load = true;
+            if (click) menu_key(app, GUI_SELECT);
             return;
         }
     }
@@ -401,8 +416,8 @@ static void pointer(App* app, float window_x, float window_y, bool click) {
         char label[100];
         menu_label(app, i, label, sizeof(label));
         if (!hit_text(app, x, y, 1, menu_row(app, i), label)) continue;
-        if (app->menu.selected != i) app->menu.view = GUI_LOAD_NONE;
         app->menu.selected = i;
+        app->menu.focus_load = false;
         if (click) menu_key(app, GUI_SELECT);
         return;
     }

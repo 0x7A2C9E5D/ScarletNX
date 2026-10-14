@@ -12,18 +12,29 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
         if (key == GUI_CANCEL) menu->view = GUI_LOAD_NONE;
         return;
     }
-    if (menu->view == GUI_LOAD_DROP) {
-        if (key == GUI_CANCEL) menu->view = GUI_LOAD_OPTIONS;
-        return;
-    }
-    if (menu->view == GUI_LOAD_OPTIONS) {
-        if (key == GUI_CANCEL)
-            menu->view = GUI_LOAD_NONE;
-        else if (key == GUI_UP || key == GUI_DOWN || key == GUI_LEFT || key == GUI_RIGHT)
-            menu->load_selected ^= 1;
-        else if (key == GUI_SELECT)
-            menu->view = menu->load_selected == GUI_LOAD_DRAG ? GUI_LOAD_DROP : GUI_LOAD_GAMES;
-        return;
+    if (menu->view == GUI_LOAD_OPTIONS || menu->view == GUI_LOAD_DROP) {
+        if (key == GUI_CANCEL) {
+            menu->view = menu->view == GUI_LOAD_DROP ? GUI_LOAD_OPTIONS : GUI_LOAD_NONE;
+            menu->selected = menu->active;
+            menu->focus_load = menu->view == GUI_LOAD_OPTIONS;
+            menu->load_activated = false;
+            return;
+        }
+        if (menu->focus_load) {
+            if (key == GUI_UP || key == GUI_DOWN || key == GUI_LEFT || key == GUI_RIGHT)
+                menu->load_selected ^= 1;
+            else if (key == GUI_SELECT) {
+                menu->selected = menu->active;
+                menu->load_active = menu->load_selected;
+                menu->load_activated = true;
+                menu->view = menu->load_selected == GUI_LOAD_DRAG ? GUI_LOAD_DROP : GUI_LOAD_GAMES;
+            }
+            return;
+        }
+        /* Main-menu focus may move while the submenu stays anchored to active.
+           Only explicit activation below replaces/closes that submenu. */
+    } else {
+        menu->focus_load = false;
     }
     switch (key) {
         case GUI_UP:
@@ -31,6 +42,10 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
         case GUI_DOWN:
         case GUI_RIGHT: menu->selected = (menu->selected + 1) % GUI_ITEM_COUNT; break;
         case GUI_SELECT:
+            menu->active = menu->selected;
+            menu->activated = true;
+            menu->load_activated = false;
+            menu->view = GUI_LOAD_NONE;
             if (menu->selected == GUI_FULLSCREEN)
                 menu->fullscreen = !menu->fullscreen;
             else if (menu->selected == GUI_GCCJIT) {
@@ -44,6 +59,7 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
             else {
                 menu->view = GUI_LOAD_OPTIONS;
                 menu->load_selected = GUI_LOAD_DRAG;
+                menu->focus_load = true;
             }
             break;
         default: break;
@@ -100,7 +116,11 @@ GuiBrowserAction gui_browser_key(GuiBrowser* browser, GuiKey key) {
     size_t items = gui_browser_items(browser);
     switch (key) {
         case GUI_CANCEL: return GUI_BROWSER_BACK;
-        case GUI_SELECT: return browser->selected ? GUI_BROWSER_OPEN : GUI_BROWSER_BACK;
+        case GUI_SELECT:
+            if (!browser->selected) return GUI_BROWSER_BACK;
+            browser->active = browser->page * browser->page_size + browser->selected - 1;
+            browser->activated = true;
+            return GUI_BROWSER_OPEN;
         case GUI_UP: browser->selected = browser->selected ? browser->selected - 1 : items; break;
         case GUI_DOWN: browser->selected = browser->selected < items ? browser->selected + 1 : 0; break;
         case GUI_LEFT:

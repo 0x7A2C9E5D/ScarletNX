@@ -15,7 +15,9 @@ typedef enum { GUI_UP, GUI_DOWN, GUI_LEFT, GUI_RIGHT, GUI_SELECT, GUI_CANCEL, GU
 typedef enum { GUI_LOAD_NONE, GUI_LOAD_OPTIONS, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS } GuiLoadView;
 enum { GUI_LOAD_DRAG, GUI_LOAD_DIRECTORY };
 typedef struct {
-    int selected, load_selected;
+    int selected, load_selected; /* keyboard/mouse focus, not activation */
+    int active, load_active;     /* last explicitly activated items; active owns the submenu */
+    bool activated, load_activated, focus_load;
     GuiLoadView view;
     bool running, fullscreen, gccjit, gdbstub, quit;
 } GuiMenu;
@@ -25,7 +27,9 @@ const char* gui_setting_description(const GuiMenu* menu);
 size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv);
 
 typedef struct {
-    size_t count, page, page_size, selected; /* selected == 0 is Back on every page */
+    size_t count, page, page_size, selected; /* focus: selected == 0 is Back on every page */
+    size_t active; /* absolute file index, preserved across page changes and resizing */
+    bool activated;
 } GuiBrowser;
 typedef enum { GUI_BROWSER_NONE, GUI_BROWSER_BACK, GUI_BROWSER_OPEN } GuiBrowserAction;
 size_t gui_browser_pages(const GuiBrowser* browser);

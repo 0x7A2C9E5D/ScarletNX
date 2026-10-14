@@ -10,10 +10,15 @@ English text only. No font files or localization packages are needed.
 ./build/scarletnx-gui
 ```
 
-- Up/Down and Left/Right move the bright-pink selection, wrapping at the ends.
-- Moving the mouse over an item selects it without activating it.
-- Space, Enter or a left click activates the selected item. Mouse controls also
-  work on load sub-options, browser entries and Back.
+- Up/Down and Left/Right move the yellow focus, wrapping at the ends.
+- Moving the mouse over an item focuses it in yellow without activating it.
+- Space, Enter or a left click explicitly activates an item, marking it bright
+  pink. Activation is tracked separately from hover/focus, so the activated item
+  stays pink while another item is hovered in yellow. Mouse controls also work
+  on load sub-options, browser entries and Back.
+- Moving outside a submenu (including over another main item) leaves it open
+  and anchored to its activated parent. ESC goes back; explicitly activating a
+  different main item replaces/closes the submenu.
 - Selecting **Load Switch NSP/XCI/NRO** or **Load Linux ARM ELF** keeps that item
   visible and opens two selectable options underneath it: **Select via drag and drop**
   and **Select file from games/ instead**.
@@ -129,7 +134,8 @@ directories, pagination, resizing, Back/ESC and launching selected files.
 Key setup tests cover installation, replacement, invalid drops, failed writes,
 self-copy safety, cancellation, and the bright-red overwrite warning.
 Setting tests cover ON/OFF argument combinations, backend availability, mouse
-hover/click selection, bright-pink highlighting and footer descriptions.
+hover versus explicit activation, persistent submenus, yellow/pink highlighting
+and footer descriptions.
 SDL tests use the dummy video driver and the
 software renderer, exercising the real font and event handlers without a display.
 The font's provenance and public-domain notice are in

@@ -11,11 +11,12 @@ int main(void) {
     gui_menu_key(&menu, GUI_LEFT);
     assert(menu.selected == GUI_EXIT);
     gui_menu_key(&menu, GUI_RIGHT);
-    assert(menu.selected == GUI_SWITCH);
+    assert(menu.selected == GUI_SWITCH && !menu.activated);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.view == GUI_LOAD_OPTIONS && !menu.running);
+    assert(menu.activated && menu.active == GUI_SWITCH && menu.focus_load && !menu.load_activated);
     gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.view == GUI_LOAD_DROP);
+    assert(menu.view == GUI_LOAD_DROP && menu.load_activated && menu.load_active == GUI_LOAD_DRAG);
     gui_menu_key(&menu, GUI_CANCEL);
     assert(menu.view == GUI_LOAD_OPTIONS);
     gui_menu_key(&menu, GUI_DOWN);
@@ -46,8 +47,9 @@ int main(void) {
     assert(menu.selected == GUI_FULLSCREEN);
     menu.running = false;
     gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_GCCJIT);
+    assert(menu.selected == GUI_GCCJIT && menu.active == GUI_FULLSCREEN);
     gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.active == GUI_GCCJIT);
     assert(menu.gccjit == !!SNX_GUI_HAS_GCCJIT && menu.view == GUI_LOAD_NONE);
     assert(!strcmp(gui_setting_description(&menu), SNX_GUI_HAS_GCCJIT
                    ? "libgccjit will be used instead of llvm" : "Program was not compiled with libgccjit"));
@@ -60,6 +62,15 @@ int main(void) {
     gui_menu_key(&menu, GUI_DOWN);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.quit);
+
+    menu = (GuiMenu){0};
+    gui_menu_key(&menu, GUI_SELECT);
+    menu.selected = GUI_LINUX; /* Mouse focus outside the open submenu. */
+    menu.focus_load = false;
+    gui_menu_key(&menu, GUI_DOWN);
+    assert(menu.selected == GUI_KEYS && menu.active == GUI_SWITCH && menu.view == GUI_LOAD_OPTIONS);
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.active == GUI_KEYS && menu.view == GUI_LOAD_KEYS);
 
     for (int bits = 0; bits < 8; ++bits) {
         menu = (GuiMenu){.selected = GUI_SWITCH, .fullscreen = !!(bits & 1),
@@ -86,7 +97,7 @@ int main(void) {
     assert(gui_browser_pages(&browser) == 3 && gui_browser_items(&browser) == 10);
     assert(gui_browser_key(&browser, GUI_SELECT) == GUI_BROWSER_BACK);
     gui_browser_key(&browser, GUI_UP);
-    assert(browser.selected == 10);
+    assert(browser.selected == 10 && !browser.activated);
     gui_browser_key(&browser, GUI_RIGHT);
     assert(browser.page == 1 && browser.selected == 10);
     gui_browser_key(&browser, GUI_PAGE_DOWN);
@@ -94,6 +105,7 @@ int main(void) {
     gui_browser_key(&browser, GUI_RIGHT); /* no wrapping past the last page */
     assert(browser.page == 2);
     assert(gui_browser_key(&browser, GUI_SELECT) == GUI_BROWSER_OPEN);
+    assert(browser.activated && browser.active == 22);
     gui_browser_resize(&browser, 7);
     assert(browser.page * browser.page_size + browser.selected - 1 == 22);
     gui_browser_key(&browser, GUI_PAGE_UP);
