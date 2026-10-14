@@ -111,7 +111,7 @@ whether the agent may build and run: only one at a time can):
 - `snx-c-expert`: ISO C, undefined behavior, `__atomic` and the memory model, C90 as #142 requires, LLP64.
 - `snx-kernel-expert`: the Horizon kernel (SVCs, threads, sync, memory) and the Linux and Windows kernels under it.
 - `snx-arm64-expert`: exact ARMv8-A userspace (EL0) semantics for the recompiler's templates and IR emitters.
-- `snx-emu-expert`: how Ryujinx, the yuzu family, Cemu and others solved a problem, with the license of the code.
+- `snx-emu-expert`: how Ryujinx, the yuzu family, Citra, Cemu and others solved a problem, with the license of the code.
 - `snx-vulkan-expert`: Vulkan 1.3 and SPIR-V, synchronization, lifetimes, Maxwell state onto Vulkan.
 - `snx-perf-expert`: profiling and judging optimizations with perf, bpftrace, heaptrack and llvm-mca.
 
