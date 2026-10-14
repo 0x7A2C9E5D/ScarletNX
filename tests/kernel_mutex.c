@@ -171,7 +171,7 @@ int main(void) {
     g_slept = 0;
     CHECK(svc_wait_sync(a, 0x400, 1, -1, &at) == 0 && at == 0 && g_slept == 1, "join: index %u after %u sleeps", at,
           g_slept);
-    CHECK(g_joining == 82, "the joining thread names thread %llu, not 82", (unsigned long long)g_joining);
+    CHECK(g_joining == 82, "the joining thread names thread %lu, not 82", (unsigned long)g_joining);
 
     printf("%u checks, %u failed\n", checks, failures);
     free(g_mem);
