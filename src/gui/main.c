@@ -11,6 +11,7 @@
 #include "gui_process.h"
 #include "steps.h"
 #include "theme.h"
+#include "window_icon.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -845,6 +846,7 @@ static bool initialize(App* app) {
                                      &app->window, &app->renderer))
         return false;
     SDL_SetWindowMinimumSize(app->window, 800, 480);
+    snx_window_icon(app->window);
     SDL_SetRenderVSync(app->renderer, 1);
     SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
     SDL_SetEventEnabled(SDL_EVENT_DROP_TEXT, true);
