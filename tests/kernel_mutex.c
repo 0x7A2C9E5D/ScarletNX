@@ -71,6 +71,8 @@ static unsigned checks, failures;
         }                                                                                                              \
     } while (0)
 
+/* the priorities the cases start from */
+static const int start_prio[] = {46, 44, 45, 40, 50, 30};
 /* fresh threads at these base priorities, nobody waiting */
 static KThread* reset(const int* prio) {
     memset(snx_kmt_thread, 0, sizeof snx_kmt_thread);
@@ -150,7 +152,7 @@ int main(void) {
           a->prio);
 
     /* the condition variable is marked before its mutex changes hands */
-    t = reset((const int[]){46, 44, 45, 40, 50, 30});
+    t = reset(start_prio);
     a = &t[0], b = &t[1];
     lock(b, a, SNX_KMT_M);
     g_watch = SNX_KMT_CV;
@@ -160,7 +162,7 @@ int main(void) {
     g_watch = 0;
 
     /* a join: the thread dump names the thread waited for */
-    t = reset((const int[]){46, 44, 45, 40, 50, 30});
+    t = reset(start_prio);
     a = &t[0], b = &t[1];
     b->id = 82;
     b->o.is_signaled = ended_after_a_sleep;
