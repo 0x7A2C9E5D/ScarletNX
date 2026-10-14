@@ -396,6 +396,7 @@ int vk_buf_copy(u64 gva, u64 len, VkBuffer* buf, u64* off) {
 /* Each writable binding keeps its original bytes until its draw's frame completes. The guest can keep writing RAM:
    vk_write_changed resolves those writes against the GPU result at the fence. */
 int vk_buf_copy_writable(u64 gva, u32 len, VkBuffer* buf, u64* off) {
+    GfxOut* o;
     if (!gva) return vk_buf_copy(0, len, buf, off);
     /* Repeated bindings of one writable range in the same draw must name the same storage. */
     for (GfxOut* p = g_prep; p; p = p->next)
@@ -405,7 +406,7 @@ int vk_buf_copy_writable(u64 gva, u32 len, VkBuffer* buf, u64* off) {
             return 1;
         }
     if (gfx_gpu_src(gva, len, buf, off)) return 1;
-    GfxOut* o = gfx_out_new((u32)(((gva & 0xFFF) + len + 0xFFF) >> 12), len);
+    o = gfx_out_new((u32)(((gva & 0xFFF) + len + 0xFFF) >> 12), len);
     if (!o) return 0;
     const u8* src = guest_bytes(gva, len);
     if (!src) {
@@ -517,8 +518,9 @@ static u32 draw_page_index(const DrawPage* p, size_t n, u64 key) {
     return (u32)lo;
 }
 static int draw_output_page(const DrawPage* p, u8* ptr, VkBuffer buf, u64 off, VmaAllocation mem) {
+    GfxOut* o;
     if (p->key & (1ull << 63)) return 1;
-    GfxOut* o = gfx_out_new(1, 4096);
+    o = gfx_out_new(1, 4096);
     if (!o) return 0;
     memcpy(o->org, ptr, 4096);
     o->pages[0] = p->key;
