@@ -4,6 +4,9 @@
 #define SNX_GUI_NO_MAIN
 #include "../src/gui/main.c"
 #include <assert.h>
+/* the default theme's colours, as the checks below name them */
+static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, red = {255, 0, 0, 255},
+                       pink = {255, 85, 255, 255}, black = {0, 0, 0, 255};
 
 static void key(App* app, SDL_Keycode code) {
     SDL_Event e = {0};
@@ -30,8 +33,8 @@ static void mouse(App* app, int col, int row, bool click) {
     }
     event(app, &e);
 }
-static void colored_text_at(App* app, int col, int row, const char* prompt, SDL_Color color) {
-    /* Verify the exact text and its glyph color in the real renderer. */
+static void colored_text_on(App* app, int col, int row, const char* prompt, SDL_Color color, SDL_Color back) {
+    /* Verify the exact text, its glyph color and what is behind it in the real renderer. */
     SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
     assert(image);
     for (int i = 0; prompt[i]; ++i)
@@ -41,9 +44,21 @@ static void colored_text_at(App* app, int col, int row, const char* prompt, SDL_
                 assert(SDL_ReadSurfacePixel(image, ((i + col) * 8 + x) * app->scale, (row * 16 + y) * app->scale, &r, &g,
                                             &b, &a));
                 bool ink = (gui_vga_font[(unsigned char)prompt[i] * 16 + y] & (0x80 >> x)) != 0;
-                assert(r == (ink ? color.r : 0) && g == (ink ? color.g : 0) && b == (ink ? color.b : 0));
+                SDL_Color want = ink ? color : back;
+                assert(r == want.r && g == want.g && b == want.b);
             }
     SDL_DestroySurface(image);
+}
+static SDL_Color pixel(App* app, float x, float y) {
+    SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
+    Uint8 r = 0, g = 0, b = 0, a = 0; /* mingw's assert returns, as far as the compiler knows */
+    assert(image && SDL_ReadSurfacePixel(image, (int)x, (int)y, &r, &g, &b, &a));
+    SDL_DestroySurface(image);
+    return (SDL_Color){r, g, b, 255};
+}
+static bool same_colour(SDL_Color a, SDL_Color b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
+static void colored_text_at(App* app, int col, int row, const char* prompt, SDL_Color color) {
+    colored_text_on(app, col, row, prompt, color, black);
 }
 static void colored_text(App* app, int row, const char* prompt, SDL_Color color) {
     colored_text_at(app, 1, row, prompt, color);
@@ -66,6 +81,17 @@ static void finish(App* app, int status) {
     assert(app->has_output && app->log_top == 4);
     red_text(app, 3, "Press [ESC] to return to menu");
     if (status) red_text(app, 1, expected);
+    /* a theme can make that line a prompt: framed and placed, the done and the failed one apart */
+    GuiPromptLine line = status ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE;
+    app->theme.prompt.lines[line] = true;
+    app->theme.prompt.blink = false;
+    render(app);
+    colored_text_at(app, (app->cols - 33) / 2, 3, "[ Press [ESC] to return to menu ]", red);
+    app->theme.prompt.lines[line] = false;
+    app->theme.prompt.lines[status ? GUI_PROMPT_DONE : GUI_PROMPT_FAILED] = true;
+    render(app);
+    red_text(app, 3, "Press [ESC] to return to menu");
+    app->theme.prompt = gui_theme_builtin(app->theme.id)->prompt;
     for (int i = 0; i < 3; ++i) pump(app);
     mouse(app, 2, 4, true); /* A completed process still requires ESC acknowledgement. */
     key(app, SDLK_DOWN);
@@ -100,6 +126,7 @@ int main(int argc, char** argv) {
         assert(argc == 5 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "-f"));
         if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
         assert(!strcmp(argv[i++], "-S") && !strcmp(argv[i++], "-s") && i == argc);
+        puts("Recompiling option flags\nScarletNX - option flags"); /* the runner's banner: now loading */
         return 0;
     }
     if (argc > 1) {
@@ -162,6 +189,32 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RETURN);
     assert(app.menu.view == GUI_LOAD_KEYS);
     render(&app);
+    /* the drop line waits on the user: framed, in the middle of the screen, blinking at blink_ms */
+    {
+        const char* waiting = "[ Drop prod.keys here ]";
+        int middle = SDL_max(app.rows / 2, 10), width = (int)strlen(waiting);
+        SDL_Color yellow = rgb(app.theme.focus);
+        app.clock = 1000 * app.theme.blink_ms * 2;
+        render(&app);
+        colored_text_at(&app, (app.cols - width) / 2, middle, waiting, yellow);
+        app.clock += app.theme.blink_ms;
+        render(&app);
+        colored_text_at(&app, (app.cols - width) / 2, middle, "                       ", yellow);
+        app.theme.prompt.blink = false; /* steady */
+        render(&app);
+        colored_text_at(&app, (app.cols - width) / 2, middle, waiting, yellow);
+        app.theme.prompt.align = GUI_ALIGN_RIGHT;
+        render(&app);
+        colored_text_at(&app, app.cols - 1 - width, middle, waiting, yellow);
+        app.theme.prompt.align = GUI_ALIGN_LEFT;
+        render(&app);
+        colored_text_at(&app, 1, middle, waiting, yellow);
+        app.theme.prompt.lines[GUI_PROMPT_KEYS] = false; /* plain */
+        render(&app);
+        colored_text_at(&app, 1, middle, "Drop prod.keys here    ", yellow);
+        app.theme.prompt = gui_theme_builtin(app.theme.id)->prompt;
+        app.clock = 0;
+    }
     drop(&app, input, false); /* A game is not a key file and must not launch. */
     assert(app.menu.view == GUI_LOAD_KEYS && !app.menu.running && !snx_is_file(app.keys_path));
     drop(&app, "file://remote/prod.keys", true);
@@ -317,6 +370,7 @@ int main(int argc, char** argv) {
     event(&app, &e);
     assert(app.menu.running && app.menu.selected == GUI_SWITCH);
     finish(&app, 0);
+    assert(!app.native && !app.banner.seen); /* a driver that started no game stayed compiling */
     key(&app, SDLK_DOWN);
     key(&app, SDLK_SPACE);
     assert(app.menu.selected == GUI_LINUX && app.menu.view == GUI_LOAD_OPTIONS);
@@ -339,6 +393,7 @@ int main(int argc, char** argv) {
     app.menu.gdbstub = true;
     launch(&app, snx_strdup(flags_input), false);
     finish(&app, 0);
+    assert(!app.native && app.banner.seen);
     app.menu.gccjit = app.menu.gdbstub = false;
     app.menu.selected = GUI_LINUX;
     free(flags_input);
@@ -366,6 +421,13 @@ int main(int argc, char** argv) {
     Uint64 started = SDL_GetTicks();
     key(&app, SDLK_ESCAPE);
     assert(app.aborting && SDL_GetTicks() - started < 1000);
+    render(&app);
+    red_text(&app, 3, "Aborting process tree...");
+    app.theme.prompt.lines[GUI_PROMPT_ABORTING] = true;
+    app.theme.prompt.blink = false;
+    render(&app);
+    colored_text_at(&app, (app.cols - 28) / 2, 3, "[ Aborting process tree... ]", red);
+    app.theme.prompt = gui_theme_builtin(app.theme.id)->prompt;
     key(&app, SDLK_ESCAPE); /* Repeated ESC while reaping is harmless. */
     while (app.menu.running && SDL_GetTicks() - started < 2000) {
         pump(&app);
@@ -440,7 +502,7 @@ int main(int argc, char** argv) {
     render(&app);
     colored_text(&app, 6, app.games.names[1], yellow);
     mouse(&app, 2, 5, true); /* native prepared game, not another extraction */
-    assert(app.menu.running);
+    assert(app.menu.running && app.native && screen(&app) == GUI_SCREEN_LOADING);
     finish(&app, 0);
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RETURN);
@@ -481,6 +543,255 @@ int main(int argc, char** argv) {
         colored_text(&app, app.rows - 4, "Enables gdbstub on port 1234", normal);
         assert(menu_row(&app, GUI_EXIT) < app.rows - 4);
     }
+    /* Themes: the menu item goes through the built-ins, then each themes/<id>/theme.ini */
+    char* themes = snx_path_join(temporary, "themes");
+    char* custom = snx_path_join(themes, "custom");
+    char* custom_ini = snx_path_join(custom, "theme.ini");
+    const char* ini = "[theme]\nbase = yorha\nname = Custom test\n[colors]\npage = #102030\nink = not a colour\n"
+                      "[head]\nmenu = TEST  /  MENU\n[body]\nmarker = \"> \"\n";
+    assert(!snx_mkdirs(custom) && !snx_write_file(custom_ini, ini, strlen(ini)));
+    free(app.themes_dirs[0]);
+    app.themes_dirs[0] = snx_strdup(themes);
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_THEME), "- Theme: Default", normal);
+    mouse(&app, 2, menu_row(&app, GUI_THEME), true);
+    assert(!strcmp(app.theme.id, "yorha"));
+    render(&app);
+    SDL_Color page = rgb(app.theme.page), ink = rgb(app.theme.ink);
+    colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", page, ink);
+    colored_text_on(&app, 3, menu_row(&app, GUI_THEME), "Theme: YoRHa", page, ink); /* the focused line's band */
+    colored_text_on(&app, 3, menu_row(&app, GUI_EXIT), "Exit", ink, page);
+    colored_text_on(&app, 1, app.rows - 2, "CWD:", page, ink);
+    mouse(&app, 2, menu_row(&app, GUI_THEME), true);
+    assert(!strcmp(app.theme.id, "custom") && !strcmp(app.theme.name, "Custom test"));
+    render(&app);
+    page = (SDL_Color){0x10, 0x20, 0x30, 255}; /* its own page; its ink, unreadable, is YoRHa's */
+    colored_text_on(&app, 1, 0, "TEST  /  MENU", page, ink);
+    colored_text_on(&app, 1, menu_row(&app, GUI_THEME), "> Theme: Custom test", page, ink);
+    colored_text_on(&app, 1, menu_row(&app, GUI_EXIT), "> Exit", ink, page);
+    mouse(&app, 2, menu_row(&app, GUI_THEME), true);
+    assert(!strcmp(app.theme.id, "default"));
+    render(&app);
+    colored_text(&app, menu_row(&app, GUI_THEME), "- Theme: Default", pink); /* activated, as any option */
+    free(custom_ini);
+    free(custom);
+    free(themes);
+
+    /* YoRHa loading: a run as steps, typed in, with the ring, the dots and the bar; the run fades in, and out */
+    char* steps_input = snx_path_join(temporary, "option flags steps.nro");
+    assert(!snx_write_file(steps_input, "fixture", 7));
+    gui_theme_load(&app.theme, (const char* const*)app.themes_dirs, 2, "yorha");
+    app.menu.selected = GUI_SWITCH;
+    app.menu.gccjit = !!SNX_GUI_HAS_GCCJIT;
+    app.menu.gdbstub = true;
+    launch(&app, snx_strdup(steps_input), false);
+    assert(app.menu.running && app.fade_ms);
+    for (Uint64 until = SDL_GetTicks() + 10000; app.menu.running && SDL_GetTicks() < until; SDL_Delay(5)) {
+        pump(&app);
+        render(&app);
+    }
+    assert(app.finished && !app.abnormal_exit && app.steps.count == 2 && screen(&app) == GUI_SCREEN_LOADING);
+    const GuiPalette* run = &app.theme.run_colors;
+    SDL_Color lp = rgb(run->page), li = rgb(run->ink), ls = rgb(run->soft);
+    Uint64 shown = app.steps.step[1].shown_ms, faded = app.fade_ms;
+    Uint64 later = (shown + 60000) / 1600 * 1600; /* where turning dots would show none: the "..." is the end's */
+    /* entering: the menu stays and fades out over fade_out_ms, then the run fades in */
+    Uint64 entered = app.entering_ms;
+    assert(entered && faded == entered + app.theme.fade_out_ms);
+    app.clock = entered;
+    render(&app);
+    colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", rgb(app.theme.page), rgb(app.theme.ink));
+    for (int row = app.log_top - 2; row <= app.log_top; ++row) /* the run's output waits for the run */
+        colored_text_on(&app, 1, row, "                            ", rgb(app.theme.ink), rgb(app.theme.page));
+    app.clock = entered + app.theme.fade_out_ms / 2;
+    render(&app);
+    SDL_Color dimmed = pixel(&app, 4, 4); /* the head's bar, half way to black */
+    assert(!same_colour(dimmed, rgb(app.theme.ink)) && !same_colour(dimmed, black));
+    app.clock = entered + app.theme.fade_out_ms;
+    render(&app);
+    assert(same_colour(pixel(&app, 4, 4), black));
+    app.theme.texture = false; /* exact backgrounds first */
+    app.clock = later;
+    render(&app);
+    colored_text_on(&app, 1, 1, "BOOTING", li, lp);
+    colored_text_on(&app, 9, 1, "OPTION FLAGS...", ls, lp);
+    colored_text_on(&app, 1, 3, "RECOMPILE: OPTION FLAGS", ls, lp);
+    colored_text_on(&app, 24, 3, "...OK", li, lp);
+    colored_text_on(&app, 1, 4, "LAUNCH: OPTION FLAGS...OK", li, lp);
+    colored_text_on(&app, 1, app.rows - 1, "Press [ESC] to return to menu", ls, lp);
+    /* the run's last line as a prompt, when the theme says so: done, failed and aborting each on its own switch */
+    app.theme.prompt.blink = false;
+    app.theme.prompt.lines[GUI_PROMPT_DONE] = true;
+    render(&app);
+    colored_text_on(&app, (app.cols - 33) / 2, app.rows - 1, "[ Press [ESC] to return to menu ]", ls, lp);
+    app.abnormal_exit = true;
+    render(&app);
+    colored_text_on(&app, 1, app.rows - 1, "Press [ESC] to return to menu    ", ls, lp);
+    app.theme.prompt.lines[GUI_PROMPT_FAILED] = true;
+    app.theme.prompt.align = GUI_ALIGN_RIGHT;
+    render(&app);
+    colored_text_on(&app, app.cols - 34, app.rows - 1, "[ Press [ESC] to return to menu ]", ls, lp);
+    app.abnormal_exit = app.finished = false;
+    app.menu.running = app.aborting = true;
+    app.theme.prompt.lines[GUI_PROMPT_ABORTING] = true;
+    render(&app);
+    colored_text_on(&app, app.cols - 29, app.rows - 1, "[ Aborting process tree... ]", rgb(run->warning), lp);
+    app.menu.running = app.aborting = false;
+    app.finished = true;
+    app.theme.prompt = gui_theme_builtin("yorha")->prompt;
+    float cell = 16.0f * (float)app.scale;
+    colored_text_on(&app, app.cols - 6, app.rows - 3, "    ", li, lp); /* YoRHa has no bar unless asked */
+    colored_text_on(&app, 1, app.rows - 2, "            ", li, lp);
+    assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 3) + cell / 2), lp));
+    app.theme.bar = true;
+    render(&app);
+    colored_text_on(&app, app.cols - 6, app.rows - 3, "100%", li, lp);
+    colored_text_on(&app, 1, app.rows - 2, "OPTION FLAGS", li, lp);
+    assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 3) + cell / 2), li));
+    /* typing: three characters in, the cursor after them */
+    app.theme.fade_in_ms = app.theme.fade_out_ms = 0;
+    app.theme.blink_ms = 0;
+    Uint64 launch_shown = app.steps.step[1].shown_ms;
+    app.steps.step[1].shown_ms = entered + 1; /* it came while the menu still showed: it types once the run is in */
+    app.clock = faded + 3 * app.theme.typing_ms + 1;
+    render(&app);
+    colored_text_on(&app, 1, 4, "LAU_", li, lp);
+    app.steps.step[1].shown_ms = launch_shown;
+    app.fade_ms = 0; /* in view from the start, for the lines below */
+    app.clock = shown + 3 * app.theme.typing_ms + 1;
+    render(&app);
+    colored_text_on(&app, 1, 4, "LAU_", li, lp);
+    /* sync: one line at a time, a done one three times faster; the second waits for the first */
+    app.theme.typing_sync = true;
+    Uint64 first_shown = app.steps.step[0].shown_ms, second_shown = app.steps.step[1].shown_ms;
+    app.steps.step[1].shown_ms = first_shown; /* both lines came at once */
+    app.clock = first_shown + app.theme.typing_ms + 1; /* three characters at a third of typing_ms each */
+    render(&app);
+    colored_text_on(&app, 1, 3, "REC", ls, lp); /* not the last line: soft, with the cursor typing it */
+    colored_text_on(&app, 4, 3, "_", li, lp);
+    colored_text_on(&app, 1, 4, "    ", li, lp);
+    app.theme.typing_sync = false;
+    app.steps.step[1].shown_ms = second_shown;
+    /* detailed: a step's lines under it, indented; collapse folds a done step's lines, never a failed one's */
+    GuiSteps kept = app.steps;
+    SDL_Color lf = rgb(run->failure);
+    gui_steps_reset(&app.steps);
+    const char* detail = "Recompiling Game (1 modules)\n  compiled block 1/2: code_000 (1.0 s)\n"
+                         "  compiled block 2/2: code_001 (1.0 s)\nBuilt games/Game\n"
+                         "ScarletNX - Game\nfs: 3 files mapped\n";
+    gui_steps_feed(&app.steps, detail, strlen(detail), shown);
+    gui_steps_finish(&app.steps, false);
+    app.clock = later;
+    render(&app);
+    colored_text_on(&app, 1, 3, "RECOMPILE: GAME", ls, lp);
+    colored_text_on(&app, 16, 3, "...OK", li, lp);
+    colored_text_on(&app, 3, 4, "compiled block 1/2: code_000 (1.0 s)", ls, lp);
+    colored_text_on(&app, 3, 5, "compiled block 2/2: code_001 (1.0 s)", ls, lp);
+    colored_text_on(&app, 1, 6, "BUILT: GAMES/GAME", ls, lp);
+    colored_text_on(&app, 1, 7, "LAUNCH: GAME...FAILED", lf, lp);
+    colored_text_on(&app, 3, 8, "fs: 3 files mapped", ls, lp);
+    app.theme.collapse = true;
+    render(&app);
+    colored_text_on(&app, 1, 4, "BUILT: GAMES/GAME", ls, lp);
+    colored_text_on(&app, 1, 5, "LAUNCH: GAME...FAILED", lf, lp);
+    colored_text_on(&app, 3, 6, "fs: 3 files mapped", ls, lp);
+    app.theme.detailed = false;
+    render(&app);
+    colored_text_on(&app, 1, 5, "LAUNCH: GAME...FAILED", lf, lp);
+    colored_text_on(&app, 3, 6, "                  ", ls, lp);
+    /* a step still running keeps its lines, folded or not; the dots and the cursor stay on the step's own row */
+    app.theme.detailed = true;
+    gui_steps_reset(&app.steps);
+    const char* live = "Recompiling Live (1 modules)\n";
+    gui_steps_feed(&app.steps, live, strlen(live), shown);
+    gui_steps_feed(&app.steps, "Functions: 2\n", 13, shown + 1000);
+    app.clock = shown + 1000 + 3 * app.theme.typing_ms + 1; /* a line types from when it came */
+    render(&app);
+    colored_text_on(&app, 3, 4, "Fun", ls, lp);
+    colored_text_on(&app, 6, 4, "_         ", li, lp);
+    app.fade_ms = shown + 2000; /* or once the run is in, when it came before */
+    app.clock = shown + 2000 + 3 * app.theme.typing_ms + 1;
+    render(&app);
+    colored_text_on(&app, 3, 4, "Fun", ls, lp);
+    colored_text_on(&app, 6, 4, "_         ", li, lp);
+    app.fade_ms = 0;
+    app.clock = later + 1200;
+    render(&app);
+    colored_text_on(&app, 16, 3, "..._", li, lp);
+    colored_text_on(&app, 3, 4, "Functions: 2    ", ls, lp);
+    /* every line a step kept, down the screen; a row too wide for it ends at the edge */
+    app.theme.collapse = app.theme.bar = false;
+    gui_steps_reset(&app.steps);
+    const char* wide_name =
+        "Recompiling A Game Whose Name Runs Far Past The Right Edge Of This Small Window (1 modules)\n";
+    gui_steps_feed(&app.steps, wide_name, strlen(wide_name), shown);
+    for (int i = 0; i < 9; ++i) {
+        char line[32];
+        snprintf(line, sizeof line, "line %d\n", i);
+        gui_steps_feed(&app.steps, line, strlen(line), shown);
+    }
+    const char* wide =
+        "fs: a line long enough to pass the right edge of a window eighty columns wide, and on, and on\n";
+    gui_steps_feed(&app.steps, wide, strlen(wide), shown);
+    gui_steps_finish(&app.steps, true);
+    app.clock = later;
+    render(&app);
+    char row_text[160];
+    /* of the row's cols - 6, "RECOMPILE: ", the detail's space and "...OK" take 16 */
+    snprintf(row_text, sizeof row_text, "RECOMPILE: %.*s", app.cols - 6 - 16,
+             "A GAME WHOSE NAME RUNS FAR PAST THE RIGHT EDGE OF THIS SMALL WINDOW");
+    colored_text_on(&app, 1, 3, row_text, li, lp); /* the last step, in ink */
+    colored_text_on(&app, app.cols - 10, 3, "...OK ", li, lp);
+    colored_text_on(&app, 3, 4, "line 0", ls, lp);
+    colored_text_on(&app, 3, 12, "line 8", ls, lp);
+    snprintf(row_text, sizeof row_text, "%.*s...", app.cols - 8, wide);
+    colored_text_on(&app, 3, 13, row_text, ls, lp);
+    colored_text_on(&app, app.cols - 2, 13, " ", ls, lp);
+    for (int i = 9; i < 20; ++i) { /* past the bottom, the latest rows stay */
+        char line[32];
+        snprintf(line, sizeof line, "line %d\n", i);
+        gui_steps_feed(&app.steps, line, strlen(line), shown);
+    }
+    render(&app);
+    int last_row = app.rows - 3;
+    colored_text_on(&app, 3, last_row, "line 19", ls, lp);
+    colored_text_on(&app, 3, last_row - 1, "line 18", ls, lp);
+    app.steps = kept;
+    /* the page's faint lines, one pixel row in four */
+    app.theme = *gui_theme_builtin("yorha");
+    app.fade_ms = faded;
+    app.clock = later;
+    render(&app);
+    float x = 8.0f * (float)app.scale * (float)(app.cols - 10), y = cell * 10;
+    assert(!same_colour(pixel(&app, x, y + 3), lp) && same_colour(pixel(&app, x, y + 2), lp));
+    /* the fade in from black, over fade_in_ms */
+    app.clock = faded;
+    render(&app);
+    assert(same_colour(pixel(&app, x, y + 2), black));
+    app.clock = faded + app.theme.fade_in_ms / 2;
+    render(&app);
+    SDL_Color half = pixel(&app, x, y + 2);
+    assert(!same_colour(half, black) && !same_colour(half, lp));
+    /* ESC: the run fades out to black over fade_out_ms, then the menu fades in */
+    app.clock = later;
+    key(&app, SDLK_ESCAPE);
+    assert(app.finished && app.leaving_ms == app.clock);
+    app.clock += app.theme.fade_out_ms / 2;
+    pump(&app);
+    render(&app);
+    assert(app.finished && !same_colour(pixel(&app, x, y + 2), lp));
+    app.clock += app.theme.fade_out_ms / 2;
+    pump(&app);
+    assert(!app.finished && app.menu.view == GUI_LOAD_NONE && app.fade_ms == app.clock);
+    render(&app);
+    assert(same_colour(pixel(&app, x, y + 2), black));
+    app.clock += app.theme.fade_in_ms;
+    render(&app);
+    colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", rgb(app.theme.page), rgb(app.theme.ink)); /* the menus' own */
+    app.clock = 0;
+    app.theme = *gui_theme_builtin("default");
+    app.menu.gccjit = app.menu.gdbstub = false;
+    free(steps_input);
     e.type = SDL_EVENT_QUIT;
     event(&app, &e);
     assert(app.menu.quit);

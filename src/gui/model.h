@@ -10,7 +10,7 @@
 #define SNX_GUI_HAS_GCCJIT 0
 #endif
 
-enum { GUI_SWITCH, GUI_LINUX, GUI_KEYS, GUI_FULLSCREEN, GUI_GCCJIT, GUI_GDBSTUB, GUI_EXIT, GUI_ITEM_COUNT };
+enum { GUI_SWITCH, GUI_LINUX, GUI_KEYS, GUI_FULLSCREEN, GUI_GCCJIT, GUI_GDBSTUB, GUI_THEME, GUI_EXIT, GUI_ITEM_COUNT };
 typedef enum { GUI_UP, GUI_DOWN, GUI_LEFT, GUI_RIGHT, GUI_SELECT, GUI_CANCEL, GUI_PAGE_UP, GUI_PAGE_DOWN } GuiKey;
 typedef enum { GUI_LOAD_NONE, GUI_LOAD_OPTIONS, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS } GuiLoadView;
 enum { GUI_LOAD_DRAG, GUI_LOAD_DIRECTORY };
@@ -20,11 +20,20 @@ typedef struct {
     bool activated, load_activated, focus_load;
     GuiLoadView view;
     bool running, fullscreen, gccjit, gdbstub, quit;
+    bool theme_next; /* the GUI moves to the next theme and clears it */
 } GuiMenu;
 void gui_menu_key(GuiMenu* menu, GuiKey key);
 const char* gui_setting_description(const GuiMenu* menu);
 /* Append up to four Switch options; prepared games do not run a compiler. */
 size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv);
+
+/* The runner's banner, "ScarletNX - <name>" at the start of a line: the recompile is over, the game is loading */
+typedef struct {
+    size_t matched;
+    bool seen;
+} GuiBanner;
+void gui_banner_reset(GuiBanner* banner);
+bool gui_banner_feed(GuiBanner* banner, const char* data, size_t size);
 
 typedef struct {
     size_t count, page, page_size, selected; /* focus: selected == 0 is Back on every page */

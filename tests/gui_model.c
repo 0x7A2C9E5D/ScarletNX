@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static bool feed(GuiBanner* banner, const char* text) { return gui_banner_feed(banner, text, strlen(text)); }
+
 int main(void) {
     GuiMenu menu = {0};
     gui_menu_key(&menu, GUI_LEFT);
@@ -59,6 +61,10 @@ int main(void) {
     assert(menu.gdbstub && menu.view == GUI_LOAD_NONE);
     gui_menu_key(&menu, GUI_SELECT);
     assert(!menu.gdbstub);
+    gui_menu_key(&menu, GUI_DOWN);
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.selected == GUI_THEME && menu.theme_next && !menu.quit);
+    menu.theme_next = false; /* the GUI's to clear */
     gui_menu_key(&menu, GUI_DOWN);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.quit);
@@ -154,6 +160,22 @@ int main(void) {
     assert(!gui_drop_path("file:///tmp/%zz", true));
     assert(!gui_drop_path("one\ntwo", true));
     assert(!gui_drop_path("", true));
+    /* the theme item asks the GUI for the next theme */
+    GuiMenu themed = {.selected = GUI_THEME};
+    gui_menu_key(&themed, GUI_SELECT);
+    assert(themed.theme_next && themed.view == GUI_LOAD_NONE && !themed.quit);
+    assert(strstr(gui_setting_description(&themed), "themes/"));
+
+    /* the runner's banner, at the start of a line, split across reads or not */
+    GuiBanner banner;
+    gui_banner_reset(&banner);
+    assert(!feed(&banner, "Recompiling x\nnot ScarletNX - x\nScarletNX"));
+    assert(feed(&banner, " - x\n") && banner.seen);
+    gui_banner_reset(&banner);
+    assert(feed(&banner, "ScarletNX - first line"));
+    gui_banner_reset(&banner);
+    assert(!feed(&banner, "ScarletNX -x\n\nScarletNX  - x") && !banner.seen);
+    assert(feed(&banner, "\n\nScarletNX - y"));
     puts("GUI menu, bounded console, UTF-8 and file drops passed");
     return 0;
 }
