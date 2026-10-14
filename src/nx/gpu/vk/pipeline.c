@@ -100,6 +100,7 @@ u32 g_vk_buffer_image_slots;
 /* descriptors of each type in one set: the binding ranges in shader.h */
 static VkDescriptorType binding_type(u32 i) {
     if (i == SNX_VKB_SMAP) return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    if (i == SNX_VKB_TEXARRAY) return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     if (i >= SNX_VKB_IMGBUF) return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
     return i < SNX_VKB_SSBO  ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
            : i < SNX_VKB_TEX ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
@@ -115,7 +116,8 @@ void vk_pool_sizes(VkDescriptorPoolSize* sz, u32 sets) {
     for (k = 0; k < VK_POOL_TYPES; k++) {
         u32 n = 0;
         u32 i;
-        for (i = 0; i < SNX_VKB_END; i++) n += binding_type(i) == ty[k];
+        for (i = 0; i < SNX_VKB_END; i++)
+            if (binding_type(i) == ty[k]) n += i == SNX_VKB_TEXARRAY ? SNX_TEX_ARRAY : 1;
         sz[k] = (VkDescriptorPoolSize){ty[k], n * sets};
     }
 }
@@ -141,15 +143,22 @@ void vk_pipeline_init(void) {
         buffer_slots -= image_slots;
         if (buffer_slots > SNX_VKB_END - SNX_VKB_IMGBUF) buffer_slots = SNX_VKB_END - SNX_VKB_IMGBUF;
         g_vk_buffer_image_slots = buffer_slots;
+        /* the texture array takes SNX_TEX_ARRAY samplers beside the 32 single textures, in every set */
+        if (g_vk.props.limits.maxPerStageDescriptorSamplers < SNX_VKB_IMG - SNX_VKB_TEX + SNX_TEX_ARRAY ||
+            g_vk.props.limits.maxPerStageDescriptorSampledImages < SNX_VKB_IMG - SNX_VKB_TEX + SNX_TEX_ARRAY ||
+            g_vk.props.limits.maxDescriptorSetSamplers < 3 * (SNX_VKB_IMG - SNX_VKB_TEX + SNX_TEX_ARRAY) ||
+            g_vk.props.limits.maxDescriptorSetSampledImages < 3 * (SNX_VKB_IMG - SNX_VKB_TEX + SNX_TEX_ARRAY))
+            g_shader_texture_arrays = 0;
         for (i = 0; i < SNX_VKB_END; i++) {
             int image = i >= SNX_VKB_IMG && i < SNX_VKB_RS;
             if (image && (s == 2 || i - SNX_VKB_IMG >= image_slots)) continue;
-            if (i >= SNX_VKB_IMGBUF && (s != 0 || i - SNX_VKB_IMGBUF >= buffer_slots)) continue;
-            if (i >= SNX_VKB_IMGBUF) image = 1;
+            if (i == SNX_VKB_TEXARRAY && !g_shader_texture_arrays) continue;
+            if (i >= SNX_VKB_IMGBUF && i < SNX_VKB_TEXARRAY && (s != 0 || i - SNX_VKB_IMGBUF >= buffer_slots)) continue;
+            if (i >= SNX_VKB_IMGBUF && i < SNX_VKB_TEXARRAY) image = 1;
             b[count++] = (VkDescriptorSetLayoutBinding){
                 .binding = i,
                 .descriptorType = binding_type(i),
-                .descriptorCount = 1,
+                .descriptorCount = i == SNX_VKB_TEXARRAY ? SNX_TEX_ARRAY : 1,
                 .stageFlags = image ? (s == 0 ? VK_SHADER_STAGE_COMPUTE_BIT : VK_SHADER_STAGE_FRAGMENT_BIT) : vis[s]};
         }
         VkDescriptorSetLayoutCreateInfo dl = {

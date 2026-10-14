@@ -15,9 +15,13 @@ typedef struct {
     u32 cbuf[18], cbuf_pointer[18];
     u32 scale_buffer, scale_pointer;
     u32 sampler[32], sampled_type[32];
+    u32 texture_array, tex_index[32]; /* indexed textures: their array, and each slot's element (a variable) */
+    u32 swapped;                      /* 1 + the slot whose sampler is an array element for this instruction */
     u32 image[8], image_type[8];
     u32 gbuf[16], gbuf_pointer, smap, subgroup_lane_input;
 } DirectCtx;
+
+int g_shader_texture_arrays;
 
 static u32 reg_read(DirectCtx* c, u32 r) {
     return r >= 255 ? c->zero : spv_emit_load(&c->emit, c->u32_type, c->reg[r]);
@@ -25,6 +29,17 @@ static u32 reg_read(DirectCtx* c, u32 r) {
 
 static void reg_write(DirectCtx* c, u32 r, u32 value) {
     if (r < 255) spv_emit_store(&c->emit, c->reg[r], value);
+}
+
+/* How a fragment shader's generic input interpolates (the SPH's imap: 1 constant, 2 perspective, 3 screen
+   linear): as its first used component, and perspective when none is marked used, as Eden reads it */
+static u32 ipa_interpolation(const u32* sph, u32 input) {
+    u32 k, mode;
+    for (k = 0; k < 4; k++) {
+        mode = (sph[6 + input / 4] >> ((input % 4) * 8 + k * 2)) & 3;
+        if (mode) return mode;
+    }
+    return 2;
 }
 
 /* a shared memory word index kept inside the array the shader declares: out of range is undefined on the console,
@@ -1201,19 +1216,61 @@ static int direct_image_slot(const ShaderInfo* info, u32 off, int bindless, u32 
     return slot;
 }
 
+/* An indexed handle: the LDC that loads it, through MOVs, takes its address from a register. Its flags
+   (SNX_TEX_INDEXED and the stride's shift: the SHL that made the address, or 2 for words) and *ldc, that LDC's
+   instruction plus one. 0 when the handle isn't indexed, or can't be: the device has no texture arrays, or the
+   stage is compute, which binds none. */
+static u32 direct_indexed_handle(const u64* insn, u32 n, u32 index, u32 reg, int stage, u32* ldc) {
+    int j = -1, k, depth, op = 0;
+    u64 w = 0;
+    u32 shift = 2;
+    if (!g_shader_texture_arrays || stage == ST_CS) return 0;
+    for (depth = 0; depth < 6; depth++) {
+        j = direct_reaching_def(insn, n, index, reg);
+        if (j < 0) return 0;
+        w = insn[j];
+        op = decode(w)->id;
+        if (op != O_MOV_R) break;
+        index = (u32)j;
+        reg = B(w, 20, 8);
+    }
+    if (depth == 6 || op != O_LDC || B(w, 8, 8) == 255 || B(w, 48, 3) != 4) return 0;
+    k = direct_reaching_def(insn, n, (u32)j, B(w, 8, 8));
+    if (k >= 0 && decode(insn[k])->id == O_SHL_I && B(insn[k], 20, 5) >= 2 && B(insn[k], 20, 5) <= 15)
+        shift = B(insn[k], 20, 5);
+    *ldc = (u32)j + 1;
+    return SNX_TEX_INDEXED | shift << 4;
+}
+
+/* Whether a bindless slot reads the handle a tracker found: its bank and second read, or for an indexed handle the
+   same LDC (bl2_off holds its instruction plus one, as no second read is kept). */
+static int direct_bindless_matches(const ShTex* t, u32 bank, int handle_count, u32 bank2, u32 off2, u32 indexed,
+                                   u32 ldc) {
+    if ((u32)(t->flags & 0xF4) != indexed || t->bl_cbuf != bank) return 0;
+    if (indexed) return t->bl2_off == ldc;
+    return t->bl2 == (handle_count == 2) && (handle_count != 2 || (t->bl2_cbuf == bank2 && t->bl2_off == off2));
+}
+
 /* The 2D texture slot a TXQ queries, bound or by a tracked handle: TXQ doesn't say what the texture is, and the
    query is translated for a 2D one like the bound form's. */
 static int direct_query_slot(const ShTex* textures, int count, u32 off, int bindless, u32 bank, int handle_count,
-                             u32 bank2, u32 off2) {
+                             u32 bank2, u32 off2, u32 indexed, u32 ldc) {
     int slot = 0;
-    while (
-        slot < count &&
-        (textures[slot].cbuf_off != off || textures[slot].type != 1 || textures[slot].array || textures[slot].shadow ||
-         textures[slot].flags || textures[slot].bindless != bindless ||
-         (bindless && (textures[slot].bl_cbuf != bank || textures[slot].bl2 != (handle_count == 2) ||
-                       (handle_count == 2 && (textures[slot].bl2_cbuf != bank2 || textures[slot].bl2_off != off2))))))
+    while (slot < count &&
+           (textures[slot].cbuf_off != off || textures[slot].type != 1 || textures[slot].array ||
+            textures[slot].shadow || (textures[slot].flags & 3) || textures[slot].bindless != bindless ||
+            (bindless && !direct_bindless_matches(&textures[slot], bank, handle_count, bank2, off2, indexed, ldc))))
         slot++;
     return slot;
+}
+
+/* For this instruction, an indexed texture's sampler is the array element its LDC chose, clamped to the array */
+static void direct_swap_element(DirectCtx* c, int slot) {
+    u32 limit = spv_emit_constant_u32(&c->emit, c->u32_type, SNX_TEX_ARRAY - 1);
+    u32 index = spv_emit_load(&c->emit, c->u32_type, c->tex_index[slot]);
+    index = spv_emit_select(&c->emit, c->u32_type, spv_emit_u_less(&c->emit, c->bool_type, limit, index), limit, index);
+    c->sampler[slot] = spv_emit_sampler_array_element(&c->emit, c->sampled_type[slot], c->texture_array, index);
+    c->swapped = (u32)slot + 1;
 }
 
 static u32* direct_reject(ShaderInfo* si, const char* reason) {
@@ -1265,7 +1322,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     int needs_local_id = 0, needs_group_id = 0;
     int needs_scale = 0;
     int needs_glsl = 0, needs_f64 = 0;
-    int has_flow = 0, has_calls = 0;
+    int has_flow = 0, has_calls = 0, has_barrier = 0, converge;
+    u32 wait_label = 0;
+    int first_indexed = -1, k_indexed;
     int has_stack = 0;
     int needs_local = 0, needs_shared = 0, needs_subgroup = 0, needs_atomic_cas = 0;
     int needs_gather_extended = 0;
@@ -1570,6 +1629,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             }
         }
         if (op->id == O_BAR && stage != ST_CS) return direct_reject(si, "barrier outside compute");
+        if (op->id == O_BAR) has_barrier = 1;
         if (op->id == O_ISETP_R || op->id == O_ISETP_C || op->id == O_ISETP_I) {
             if (a < 255) used[a] = 1;
             if (op->id == O_ISETP_R && b < 255) used[b] = 1;
@@ -1730,11 +1790,13 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             }
         }
         if (op->id == O_TLD || op->id == O_TLD_B) {
+            u32 indexed = 0, ldc = 0;
             u32 off = B(insn[i], 36, 13), ty = B(insn[i], 28, 3);
             u32 bank = 0, bank2 = 0, off2 = 0;
             int bindless = op->id == O_TLD_B;
             int handle_count =
                 bindless ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
+            if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, b, stage, &ldc);
             if (bindless && !handle_count) return direct_reject(si, "untracked texture handle");
             int type = ty >> 1, array = ty & 1, multisample = op->id == O_TLD_B && B(insn[i], 50, 1), slot = 0;
             while (slot < texture_count &&
@@ -1742,8 +1804,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     textures[slot].shadow || textures[slot].bindless != bindless ||
                     !!(textures[slot].flags & 2) != multisample ||
                     (bindless &&
-                     (textures[slot].bl_cbuf != bank || textures[slot].bl2 != (handle_count == 2) ||
-                      (handle_count == 2 && (textures[slot].bl2_cbuf != bank2 || textures[slot].bl2_off != off2))))))
+                     !direct_bindless_matches(&textures[slot], bank, handle_count, bank2, off2, indexed, ldc))))
                 slot++;
             if (slot == texture_count) {
                 if (slot >= 32) return direct_reject(si, "texture descriptor count");
@@ -1756,6 +1817,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 textures[slot].bl2 = handle_count == 2;
                 textures[slot].bl2_cbuf = (u8)bank2;
                 textures[slot].bl2_off = off2;
+                if (indexed) {
+                    textures[slot].flags |= (u8)indexed;
+                    textures[slot].bl2_off = ldc;
+                }
                 texture_count++;
             }
             u32 coordinate_count = (type == 0 ? 1u : type == 1 ? 2u : 3u) + (u32)array;
@@ -1947,7 +2012,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             u32 source = b + bindless;
             u32 has_level = mode == 2 || mode == 3 || mode == 6 || mode == 7;
             u32 offset_source = source + has_level;
-            u32 off, bank, bank2, off2;
+            u32 off, bank, bank2, off2, indexed = 0, ldc = 0;
             int handle_count;
             if (offset_enabled) {
                 u32 packed;
@@ -1959,16 +2024,17 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             bank2 = 0;
             off2 = 0;
             handle_count = bindless ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
+            if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, b, stage, &ldc);
             if (bindless && !handle_count) return direct_reject(si, "untracked texture handle");
             int type = B(insn[i], 28, 3) >> 1;
             int array = B(insn[i], 28, 1), shadow = B(insn[i], 50, 1);
             int slot = 0;
             for (; slot < texture_count; slot++)
                 if (textures[slot].cbuf_off == off && textures[slot].shadow == shadow && textures[slot].type == type &&
-                    textures[slot].array == array && textures[slot].bindless == bindless && !textures[slot].flags &&
+                    textures[slot].array == array && textures[slot].bindless == bindless &&
+                    !(textures[slot].flags & 3) &&
                     (!bindless ||
-                     textures[slot].bl_cbuf == bank && textures[slot].bl2 == (handle_count == 2) &&
-                         (handle_count != 2 || textures[slot].bl2_cbuf == bank2 && textures[slot].bl2_off == off2)))
+                     direct_bindless_matches(&textures[slot], bank, handle_count, bank2, off2, indexed, ldc)))
                     break;
             if (slot == texture_count) {
                 if (texture_count >= 32) return direct_reject(si, "texture descriptor count");
@@ -1981,6 +2047,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 textures[slot].bl2 = handle_count == 2;
                 textures[slot].bl2_cbuf = (u8)bank2;
                 textures[slot].bl2_off = off2;
+                if (indexed) {
+                    textures[slot].flags |= (u8)indexed;
+                    textures[slot].bl2_off = ldc;
+                }
                 texture_count++;
             }
             if (a < 255) used[a] = 1;
@@ -2001,7 +2071,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         }
         if (op->id == O_TMML) {
             u32 off = B(insn[i], 36, 13);
-            int slot = direct_query_slot(textures, texture_count, off, 0, 0, 0, 0, 0);
+            int slot = direct_query_slot(textures, texture_count, off, 0, 0, 0, 0, 0, 0, 0);
             if (slot == texture_count) {
                 if (texture_count >= 32) return direct_reject(si, "texture descriptor count");
                 textures[slot].cbuf_off = off;
@@ -2015,12 +2085,14 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         if (op->id == O_TXQ || op->id == O_TXQ_B) {
             /* TXQ.B takes the handle in Ra and the level in Ra + 1 */
             int bindless = op->id == O_TXQ_B;
-            u32 off = B(insn[i], 36, 13), bank = 0, bank2 = 0, off2 = 0;
+            u32 off = B(insn[i], 36, 13), bank = 0, bank2 = 0, off2 = 0, indexed = 0, ldc = 0;
             int handle_count =
                 bindless ? direct_track_image_handle_pair(insn, n, i, a, &bank, &off, &bank2, &off2, 0) : 0;
             int slot;
             if (bindless && !handle_count) return direct_reject(si, "untracked texture handle");
-            slot = direct_query_slot(textures, texture_count, off, bindless, bank, handle_count, bank2, off2);
+            if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, a, stage, &ldc);
+            slot = direct_query_slot(textures, texture_count, off, bindless, bank, handle_count, bank2, off2, indexed,
+                                     ldc);
             if (slot == texture_count) {
                 if (texture_count >= 32) return direct_reject(si, "texture descriptor count");
                 textures[slot].cbuf_off = off;
@@ -2030,6 +2102,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 textures[slot].bl2 = handle_count == 2;
                 textures[slot].bl2_cbuf = (u8)bank2;
                 textures[slot].bl2_off = off2;
+                if (indexed) {
+                    textures[slot].flags |= (u8)indexed;
+                    textures[slot].bl2_off = ldc;
+                }
                 texture_count++;
             }
             needs_image_query = 1;
@@ -2043,10 +2119,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 }
         }
         if (op->id == O_TLD4S || op->id == O_TLD4 || op->id == O_TLD4_B) {
+            u32 indexed = 0, ldc = 0;
             int bindless = op->id == O_TLD4_B;
             u32 off = B(insn[i], 36, 13), bank = 0, bank2 = 0, off2 = 0;
             int handle_count =
                 bindless ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
+            if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, b, stage, &ldc);
             if (bindless && !handle_count) return direct_reject(si, "untracked texture handle");
             u32 ty = op->id == O_TLD4S ? 2 : B(insn[i], 28, 3);
             u32 type = ty >> 1, array = ty & 1;
@@ -2056,8 +2134,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 if (textures[slot].cbuf_off == off && textures[slot].type == type && textures[slot].array == array &&
                     textures[slot].shadow == shadow && textures[slot].bindless == bindless &&
                     (!bindless ||
-                     textures[slot].bl_cbuf == bank && textures[slot].bl2 == (handle_count == 2) &&
-                         (handle_count != 2 || textures[slot].bl2_cbuf == bank2 && textures[slot].bl2_off == off2)))
+                     direct_bindless_matches(&textures[slot], bank, handle_count, bank2, off2, indexed, ldc)))
                     break;
             if (slot == texture_count) {
                 if (texture_count >= 32) return direct_reject(si, "texture descriptor count");
@@ -2070,6 +2147,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 textures[slot].bl2 = handle_count == 2;
                 textures[slot].bl2_cbuf = (u8)bank2;
                 textures[slot].bl2_off = off2;
+                if (indexed) {
+                    textures[slot].flags |= (u8)indexed;
+                    textures[slot].bl2_off = ldc;
+                }
                 texture_count++;
             }
             if (a < 255) used[a] = 1;
@@ -2116,8 +2197,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 needs_frontface = 1;
             } else if (addr >= 0x80) {
                 u32 input = (addr - 0x80) >> 4;
-                u32 component = (addr >> 2) & 3;
-                u32 interpolation = (sph[6 + input / 4] >> ((input % 4) * 8 + component * 2)) & 3;
+                u32 interpolation = ipa_interpolation(sph, input);
                 inputs_used[input] = 1;
                 if (interpolation == 2) needs_fragcoord = 1;
             } else
@@ -2133,6 +2213,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     }
     if (!has_exit) return direct_reject(si, "missing exit");
     if (needs_subgroup && !can_subgroup) return direct_reject(si, "subgroup ballot/shuffle unavailable");
+    /* The flow loop runs one block per iteration, so lanes that took the two sides of a branch reach the join on
+       different iterations, and VOTE, SHFL and BAR would see part of the warp. Each iteration runs only the lanes
+       at the subgroup's lowest pc, as the hardware reconverges: lanes ahead wait for the others to reach them. */
+    converge = has_flow && can_subgroup && (needs_subgroup || has_barrier);
     if (needs_shared && (stage != ST_CS || si->shared_size <= 0)) return direct_reject(si, "shared memory size");
     for (int i = 0; i < texture_count; i++)
         if (textures[i].shadow && (si->tex_int_mask & (1u << i))) return direct_reject(si, "integer shadow texture");
@@ -2221,6 +2305,20 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         if (shader_writes_reg(w, op, d)) gtags[d] = tag;
     }
 
+    /* every indexed texture reads the one array binding: one table of handles, one kind of texture */
+    for (k_indexed = 0; k_indexed < texture_count; k_indexed++) {
+        const ShTex* t = &textures[k_indexed];
+        if (!(t->flags & SNX_TEX_INDEXED)) continue;
+        if (t->flags & 3) return direct_reject(si, "indexed multisample texture"); /* the array is single-sampled */
+        if (first_indexed < 0) {
+            first_indexed = k_indexed;
+            continue;
+        }
+        if (t->bl_cbuf != textures[first_indexed].bl_cbuf || t->cbuf_off != textures[first_indexed].cbuf_off ||
+            t->flags != textures[first_indexed].flags || t->type != textures[first_indexed].type ||
+            t->array != textures[first_indexed].array || t->shadow != textures[first_indexed].shadow)
+            return direct_reject(si, "two indexed texture tables");
+    }
     DirectCtx* c = calloc(1, sizeof *c);
     if (!c) {
         free(gb_at);
@@ -2230,7 +2328,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     spv_emit_init(&c->emit, (size_t)n * 20 + 128);
     spv_emit_shader_capability(&c->emit);
     if (needs_f64) spv_emit_float64_capability(&c->emit);
-    if (needs_subgroup) spv_emit_subgroup_capabilities(&c->emit);
+    if (needs_subgroup || converge) spv_emit_subgroup_capabilities(&c->emit);
+    if (converge) spv_emit_subgroup_arithmetic_capability(&c->emit);
     if (needs_gather_extended) spv_emit_image_gather_extended_capability(&c->emit);
     if (needs_instance) spv_emit_draw_parameters_capability(&c->emit);
     if (needs_image_query) spv_emit_image_query_capability(&c->emit);
@@ -2378,6 +2477,18 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                                                       : c->f32_type;
         texture_scalar[i] = scalar;
         texture_vec4[i] = scalar == i32_type ? vec4_i32 : scalar == c->u32_type ? vec4_u32 : vec4;
+        if (textures[i].flags & SNX_TEX_INDEXED) {
+            if (i == first_indexed) {
+                c->texture_array =
+                    spv_emit_sampler_image_array(&c->emit, scalar, c->u32_type, shader_vk_set(stage), SNX_VKB_TEXARRAY,
+                                                 textures[i].type == 0 ? 1 : textures[i].type, textures[i].array,
+                                                 textures[i].shadow, SNX_TEX_ARRAY, &c->sampled_type[i]);
+                interfaces[count++] = c->texture_array;
+            } else
+                c->sampled_type[i] = c->sampled_type[first_indexed];
+            c->sampler[i] = c->texture_array;
+            continue;
+        }
         c->sampler[i] = spv_emit_sampler_image(&c->emit, scalar, shader_vk_set(stage), 34 + (u32)i,
                                                textures[i].type == 0 ? 1 : textures[i].type, textures[i].array,
                                                textures[i].shadow, !!(textures[i].flags & 2), &c->sampled_type[i]);
@@ -2446,6 +2557,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     }
     for (u32 r = 0; r < 255; r++)
         if (used[r]) c->reg[r] = spv_emit_function_variable_init(&c->emit, reg_ptr, c->zero);
+    for (k_indexed = 0; k_indexed < texture_count; k_indexed++)
+        if (textures[k_indexed].flags & SNX_TEX_INDEXED)
+            c->tex_index[k_indexed] = spv_emit_function_variable_init(&c->emit, reg_ptr, c->zero);
     u32 pred_ptr = spv_emit_type_function_pointer(&c->emit, c->bool_type);
     for (u32 p = 0; p < 7; p++)
         if (pred_used[p]) c->pred[p] = spv_emit_function_variable_init(&c->emit, pred_ptr, c->false_value);
@@ -2484,10 +2598,11 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         dispatch_merge = spv_emit_id(&c->emit);
         loop_continue = spv_emit_id(&c->emit);
         loop_merge = spv_emit_id(&c->emit);
-        case_labels = calloc(n, sizeof *case_labels + sizeof *case_literals + 1);
+        /* one case for each instruction, and the case of lanes waiting to reconverge */
+        case_labels = calloc(n + 1, sizeof *case_labels + sizeof *case_literals + 1);
         if (!case_labels) abort();
-        case_literals = case_labels + n;
-        block_start = (u8*)(case_literals + n);
+        case_literals = case_labels + n + 1;
+        block_start = (u8*)(case_literals + n + 1);
         block_start[11] = 1;
         int unknown_brx = 0;
         for (u32 i = 11; i < n; i++) {
@@ -2519,6 +2634,11 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 case_literals[case_count] = i;
                 case_labels[case_count++] = spv_emit_id(&c->emit);
             }
+        if (converge) {
+            wait_label = spv_emit_id(&c->emit);
+            case_literals[case_count] = UINT32_MAX - 1;
+            case_labels[case_count++] = wait_label;
+        }
         if (stage == ST_VS) {
             u32 one_f = spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f);
             spv_emit_store(&c->emit, point_size, one_f);
@@ -2534,6 +2654,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         spv_emit_branch(&c->emit, loop_dispatch);
         spv_emit_label(&c->emit, loop_dispatch);
         u32 selector = spv_emit_load(&c->emit, c->u32_type, pc);
+        if (converge) {
+            u32 lowest = spv_emit_subgroup_umin_u32(&c->emit, c->u32_type, selector);
+            selector =
+                spv_emit_select(&c->emit, c->u32_type, spv_emit_i_equal(&c->emit, c->bool_type, selector, lowest),
+                                selector, spv_emit_constant_u32(&c->emit, c->u32_type, UINT32_MAX - 1));
+        }
         spv_emit_selection_merge(&c->emit, dispatch_merge);
         spv_emit_switch_u32(&c->emit, selector, dispatch_default, case_literals, case_labels, case_count);
     }
@@ -2550,6 +2676,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     size_t case_index = 0;
     for (u32 i = 11; i < n; i++) {
         if (!IDX_OK(i)) continue;
+        if (c->swapped) { /* the array element an indexed texture took for the instruction before */
+            c->sampler[c->swapped - 1] = c->texture_array;
+            c->swapped = 0;
+        }
         if (has_flow && block_start[i]) { spv_emit_label(&c->emit, case_labels[case_index++]); }
         if (has_flow && (next_instruction(i, n) >= n || block_start[next_instruction(i, n)])) {
             u32 following = spv_emit_constant_u32(&c->emit, c->u32_type, next_instruction(i, n));
@@ -3102,6 +3232,13 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             u32 bank = B(w, 36, 5);
             u32 value = cbuf_read_dynamic(c, bank, address);
             u32 size = B(w, 48, 3);
+            /* the element an indexed texture whose handle this loads picks: the address register over the stride */
+            for (k_indexed = 0; k_indexed < texture_count; k_indexed++)
+                if ((textures[k_indexed].flags & SNX_TEX_INDEXED) && textures[k_indexed].bl2_off == i + 1)
+                    spv_emit_store(&c->emit, c->tex_index[k_indexed],
+                                   spv_emit_shift_right_u32(
+                                       &c->emit, c->u32_type, reg_read(c, a),
+                                       spv_emit_constant_u32(&c->emit, c->u32_type, textures[k_indexed].flags >> 4)));
             if (size < 4) {
                 u32 byte_offset = spv_emit_bitwise_and_u32(
                     &c->emit, c->u32_type, address, spv_emit_constant_u32(&c->emit, c->u32_type, size < 2 ? 3 : 2));
@@ -4135,15 +4272,14 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 input = (addr - 0x80) >> 4;
                 value = spv_emit_load(&c->emit, vec4, inputs[input]);
                 value = spv_emit_vec4_extract(&c->emit, c->f32_type, value, component);
-                interpolation = (sph[6 + input / 4] >> ((input % 4) * 8 + component * 2)) & 3;
+                interpolation = ipa_interpolation(sph, input);
             }
             if (addr >= 0x70 && addr < 0x80) {
                 u32 coord = spv_emit_load(&c->emit, vec4, fragcoord);
                 value = spv_emit_vec4_extract(&c->emit, c->f32_type, coord, component);
-                if (addr == 0x7c) {
-                    u32 one = spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f);
-                    value = spv_emit_fdiv(&c->emit, c->f32_type, one, value);
-                } else if (needs_scale && component < 2) {
+                /* a[0x7c] is the interpolated 1/w, FragCoord.w as it is: shaders take its reciprocal for
+                   IPA.MUL */
+                if (addr != 0x7c && needs_scale && component < 2) {
                     u32 zero_index = spv_emit_constant_u32(&c->emit, c->u32_type, 0);
                     u32 scale = spv_emit_uniform_component_f32(&c->emit, c->scale_pointer, c->scale_buffer, zero_index,
                                                                zero_index, zero_index, c->f32_type);
@@ -4151,11 +4287,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     spv_emit_no_contraction(&c->emit, value);
                 }
             } else if (interpolation == 2) {
+                /* The hardware interpolates attr/w for a perspective input, and the shader multiplies by w
+                   (IPA.MUL with the reciprocal of a[0x7c]). Vulkan's input is attr itself: times the
+                   interpolated 1/w, FragCoord.w, it is what the hardware gives. */
                 u32 coord = spv_emit_load(&c->emit, vec4, fragcoord);
                 u32 wcoord = spv_emit_vec4_extract(&c->emit, c->f32_type, coord, 3);
-                u32 one = spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f);
-                u32 reciprocal = spv_emit_fdiv(&c->emit, c->f32_type, one, wcoord);
-                value = spv_emit_fmul(&c->emit, c->f32_type, value, reciprocal);
+                value = spv_emit_fmul(&c->emit, c->f32_type, value, wcoord);
                 spv_emit_no_contraction(&c->emit, value);
             }
             if (B(w, 54, 2) == 1) {
@@ -4328,10 +4465,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 pred_write(c, B(w, 0, 3), outcomes[1]);
             }
         } else if (op == O_TLD || op == O_TLD_B) {
+            u32 indexed = 0, ldc = 0;
             u32 off = B(w, 36, 13), ty = B(w, 28, 3);
             u32 bank = 0, bank2 = 0, off2 = 0;
             int handle_count =
                 op == O_TLD_B ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
+            if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, b, stage, &ldc);
             if (op == O_TLD_B && !handle_count) return direct_reject(si, "untracked texture handle");
             int type = ty >> 1, array = ty & 1, multisample = op == O_TLD_B && B(w, 50, 1), slot = 0;
             while (slot < texture_count &&
@@ -4339,9 +4478,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     textures[slot].shadow || textures[slot].bindless != (op == O_TLD_B) ||
                     !!(textures[slot].flags & 2) != multisample ||
                     (op == O_TLD_B &&
-                     (textures[slot].bl_cbuf != bank || textures[slot].bl2 != (handle_count == 2) ||
-                      (handle_count == 2 && (textures[slot].bl2_cbuf != bank2 || textures[slot].bl2_off != off2))))))
+                     !direct_bindless_matches(&textures[slot], bank, handle_count, bank2, off2, indexed, ldc))))
                 slot++;
+            if (textures[slot].flags & SNX_TEX_INDEXED) direct_swap_element(c, slot);
             u32 x = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + array));
             u32 y = type == 0 ? spv_emit_constant_u32(&c->emit, i32_type, 0)
                               : spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + array + 1));
@@ -4566,19 +4705,20 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             u32 source = b + bindless;
             u32 has_level = mode == 2 || mode == 3 || mode == 6 || mode == 7;
             u32 offset_source = source + has_level;
-            u32 off = B(w, 36, 13), bank = 0, bank2 = 0, off2 = 0;
+            u32 off = B(w, 36, 13), bank = 0, bank2 = 0, off2 = 0, indexed = 0, ldc = 0;
             int handle_count =
                 bindless ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
             int type = B(w, 28, 3) >> 1;
             int array = B(w, 28, 1), shadow = B(w, 50, 1);
             int slot = 0;
-            while (slot < texture_count &&
-                   (textures[slot].cbuf_off != off || textures[slot].shadow != shadow || textures[slot].type != type ||
-                    textures[slot].array != array || textures[slot].bindless != bindless || textures[slot].flags ||
-                    (bindless &&
-                     (textures[slot].bl_cbuf != bank || textures[slot].bl2 != (handle_count == 2) ||
-                      (handle_count == 2 && (textures[slot].bl2_cbuf != bank2 || textures[slot].bl2_off != off2))))))
+            if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, b, stage, &ldc);
+            while (slot < texture_count && (textures[slot].cbuf_off != off || textures[slot].shadow != shadow ||
+                                            textures[slot].type != type || textures[slot].array != array ||
+                                            textures[slot].bindless != bindless || (textures[slot].flags & 3) ||
+                                            (bindless && !direct_bindless_matches(&textures[slot], bank, handle_count,
+                                                                                  bank2, off2, indexed, ldc))))
                 slot++;
+            if (textures[slot].flags & SNX_TEX_INDEXED) direct_swap_element(c, slot);
             u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array));
             u32 y = type == 0 ? spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f)
                               : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array + 1));
@@ -4676,10 +4816,14 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 }
         } else if (op == O_TXQ || op == O_TXQ_B) {
             int bindless = op == O_TXQ_B;
-            u32 off = B(w, 36, 13), bank = 0, bank2 = 0, off2 = 0;
+            u32 off = B(w, 36, 13), bank = 0, bank2 = 0, off2 = 0, indexed = 0, ldc = 0;
             int handle_count =
                 bindless ? direct_track_image_handle_pair(insn, n, i, a, &bank, &off, &bank2, &off2, 0) : 0;
-            int slot = direct_query_slot(textures, texture_count, off, bindless, bank, handle_count, bank2, off2);
+            int slot;
+            if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, a, stage, &ldc);
+            slot = direct_query_slot(textures, texture_count, off, bindless, bank, handle_count, bank2, off2, indexed,
+                                     ldc);
+            if (textures[slot].flags & SNX_TEX_INDEXED) direct_swap_element(c, slot);
             u32 dimensions = spv_emit_image_query_size_lod(&c->emit, vec2_u32, c->sampled_type[slot], c->sampler[slot],
                                                            reg_read(c, a + (u32)bindless));
             u32 values[4] = {
@@ -4695,7 +4839,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 }
         } else if (op == O_TMML) {
             u32 off = B(w, 36, 13);
-            int slot = direct_query_slot(textures, texture_count, off, 0, 0, 0, 0, 0);
+            int slot = direct_query_slot(textures, texture_count, off, 0, 0, 0, 0, 0, 0, 0);
             u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a));
             u32 y = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + 1));
             u32 coords = spv_emit_vec2_construct(&c->emit, vec2, x, y);
@@ -4714,10 +4858,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 if (dst < 255) dst++;
             }
         } else if (op == O_TLD4S || op == O_TLD4 || op == O_TLD4_B) {
+            u32 indexed = 0, ldc = 0;
             int bindless = op == O_TLD4_B;
             u32 off = B(w, 36, 13), bank = 0, bank2 = 0, off2 = 0;
             int handle_count =
                 bindless ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
+            if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, b, stage, &ldc);
             u32 ty = op == O_TLD4S ? 2 : B(w, 28, 3);
             u32 type = ty >> 1, array = ty & 1;
             u32 shadow = B(w, 50, 1);
@@ -4726,9 +4872,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                    (textures[slot].cbuf_off != off || textures[slot].type != type || textures[slot].array != array ||
                     textures[slot].shadow != shadow || textures[slot].bindless != bindless ||
                     (bindless &&
-                     (textures[slot].bl_cbuf != bank || textures[slot].bl2 != (handle_count == 2) ||
-                      (handle_count == 2 && (textures[slot].bl2_cbuf != bank2 || textures[slot].bl2_off != off2))))))
+                     !direct_bindless_matches(&textures[slot], bank, handle_count, bank2, off2, indexed, ldc))))
                 slot++;
+            if (textures[slot].flags & SNX_TEX_INDEXED) direct_swap_element(c, slot);
             u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array));
             u32 y = type == 0
                         ? spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f)
@@ -4878,6 +5024,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     if (has_flow) {
         /* A branch outside the decoded instruction range must terminate. A switch
            default that simply loops would leave a GPU invocation spinning forever. */
+        if (converge) { /* lanes ahead of the subgroup's lowest pc wait for this iteration */
+            spv_emit_label(&c->emit, wait_label);
+            spv_emit_branch(&c->emit, dispatch_merge);
+        }
         spv_emit_label(&c->emit, dispatch_default);
         spv_emit_store(&c->emit, pc, spv_emit_constant_u32(&c->emit, c->u32_type, UINT32_MAX));
         spv_emit_branch(&c->emit, dispatch_merge);

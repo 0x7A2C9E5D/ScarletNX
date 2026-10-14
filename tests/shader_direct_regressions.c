@@ -18,7 +18,7 @@
 static int failures;
 static const char* storage_paths[2];
 static const char* nro_paths[4];
-static const char* issue126_paths[15];
+static const char* issue126_paths[17];
 static void check(int condition, const char* what) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s\n", what);
@@ -364,6 +364,8 @@ static void issue126_shader_modes(void) {
     /* a 2D texture offset from a register the translator can't resolve: the coordinates move instead */
     const u64 dynamic_2d_offset[] = {0x4c98078800070004ull,
                                      0xdea0000000070008ull | (2ull << 28) | (1ull << 36) | (4ull << 20)};
+    /* the lane ID after a branch: lanes reconverge on the subgroup's lowest pc */
+    const u64 lane_after_branch[] = {0xe24000000000000full | (16ull << 20), FMUL_KEEP | 5, 0xf0c8000000070003ull};
     /* a clip distance and flow: every OpVariable before the clip distance's store */
     const u64 clip_flow[] = {0xe24000000007000full, 0xeff000000007ff00ull | (0x2c0ull << 20)};
     /* Single-register writers and a TEX.B masked to one result write just below the handle. */
@@ -373,6 +375,16 @@ static void issue126_shader_modes(void) {
         FFMA_KEEP | 3,
         0xdea0000000070004ull | (2ull << 28) | (1ull << 37) | (6ull << 20) | (1ull << 31),
         0xdea0000000070008ull | (2ull << 28) | (1ull << 37) | (6ull << 20),
+    };
+    /* edenprobe's indexed handle: the table index from an attribute, shifted to a 16-byte stride, then LDC */
+    const u64 indexed_table[] = {
+        0xe003ff870ff7ff00ull, /* IPA R0, a[0x70] */
+        0x5cb0118000070a00ull, /* F2I.U32 R0, R0 */
+        0x3848000000470000ull, /* SHL R0, R0, 4 */
+        0xef94002000070004ull, /* LDC R4, c[2][R0] */
+        0x5c9807800ff70000ull, /* MOV R0, RZ */
+        0x5c9807800ff70001ull, /* MOV R1, RZ */
+        0xdd380007a0470000ull, /* TLD.B using the handle loaded above */
     };
     struct {
         const u64* instructions;
@@ -393,10 +405,13 @@ static void issue126_shader_modes(void) {
                  {buffer_surfaces, 4, ST_CS, 0, 98},
                  {bindless_query, 3, ST_FS, 0, 103},
                  {clip_flow, 2, ST_VS, 1, 65},
-                 {dynamic_2d_offset, 2, ST_FS, 0, 103}};
-    for (int i = 0; i < 15; i++) {
+                 {dynamic_2d_offset, 2, ST_FS, 0, 103},
+                 {lane_after_branch, 3, ST_FS, 0, 354},
+                 {indexed_table, 7, ST_FS, 0, 95}};
+    for (int i = 0; i < 17; i++) {
         ShaderInfo info;
         size_t words = 0;
+        g_shader_texture_arrays = i == 16; /* the device's non-uniform indexing, for the table */
         u32* code = translate_with_rt_mask(cases[i].instructions, cases[i].count, cases[i].stage, &info, &words, 1,
                                            cases[i].mask);
         check(code && !info.unsupported, "issue 126 shader translates");
@@ -415,10 +430,15 @@ static void issue126_shader_modes(void) {
                           info.img[1].kind == 2,
                       "buffer loads and atomics share an R32ui image, stores take a typeless one");
             if (i == 12) check(info.ntex == 1 && info.tex[0].bindless, "TXQ.B queries its tracked handle");
+            if (i == 16)
+                check(info.ntex == 1 && info.tex[0].flags == (SNX_TEX_INDEXED | 4 << 4) &&
+                          count_opcode(code, words, 17, 5307) == 1,
+                      "an indexed handle samples an element of the texture array, 16 bytes apart");
             save_fixture(issue126_paths[i], code, words);
         }
         free(code);
     }
+    g_shader_texture_arrays = 0;
     /* A TEX.B with all four results from R4 overwrites the handle in R6. */
     const u64 clobbered_handle[] = {
         0x4c98078800070006ull,
@@ -447,6 +467,14 @@ static void issue126_shader_modes(void) {
     code = translate(across, 4, ST_FS, &info, &words, 1);
     check(code && !info.unsupported, "a handle loaded before a forward branch reaches the branch target");
     free(code);
+    /* IPA of a[0x7c] reads the interpolated 1/w as it is, FragCoord.w */
+    {
+        const u64 position_w[] = {0xe003ff87cff7ff1dull};
+        code = translate(position_w, 1, ST_FS, &info, &words, 1);
+        check(code && !info.unsupported && count_opcode(code, words, 136, 0xffffffffu) == 0,
+              "IPA of a[0x7c] reads FragCoord.w without a division");
+        free(code);
+    }
     const u64 skipped_write[] = {0x4c98078800070006ull, branch, FMUL_KEEP | 6, tex_b};
     code = translate(skipped_write, 4, ST_FS, &info, &words, 1);
     check(!code && info.unsupported, "a handle written in code a branch skips doesn't reach the target");
@@ -467,12 +495,12 @@ static void unsupported_names_word(void) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 1 && argc != 22) return 2;
-    if (argc == 22) {
+    if (argc != 1 && argc != 24) return 2;
+    if (argc == 24) {
         storage_paths[0] = argv[1];
         storage_paths[1] = argv[2];
         for (int i = 0; i < 4; i++) nro_paths[i] = argv[i + 3];
-        for (int i = 0; i < 15; i++) issue126_paths[i] = argv[i + 7];
+        for (int i = 0; i < 17; i++) issue126_paths[i] = argv[i + 7];
     }
     brx_length();
     unsupported_names_word();

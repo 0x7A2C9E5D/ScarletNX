@@ -654,9 +654,10 @@ static int frame_consts(VkBuffer* buf, u64* off) {
 }
 
 typedef struct {
-    VkWriteDescriptorSet w[SNX_VKB_SMAP + 1];
+    VkWriteDescriptorSet w[SNX_VKB_END];
     VkDescriptorBufferInfo bi[SNX_VKB_SMAP + 1];
     VkDescriptorImageInfo ii[SNX_VKB_SMAP + 1];
+    VkDescriptorImageInfo table[SNX_TEX_ARRAY]; /* SNX_VKB_TEXARRAY's elements */
     u32 n;
 } DescWrites;
 
@@ -783,6 +784,57 @@ static int is_target(Surf* s, Surf** rt, Surf* zt, u32 n) {
         if (rt[i] == s) return 1;
     return 0;
 }
+
+/* The elements of SNX_VKB_TEXARRAY, from an indexed texture slot: SNX_TEX_ARRAY handles from the slot's offset on,
+   (1 << shift) bytes apart. A handle past the constant buffer's size, or with a header or sampler index past its
+   pool's limit (no texture on hardware either), reads as the null texture. So does a texture of another kind than
+   the slot's, and a target the draw renders to (the bound path's snapshot, for every element, would copy each
+   target the table names on every draw). */
+static int tex_table_set(GpuChannel* ch, int stage, const VkSh* s, int slot, Surf** rt, Surf* zt, u32 n,
+                         VkImageLayout layout, DescWrites* d, VkDescriptorSet set) {
+    const ShTex* st = &s->si.tex[slot];
+    u32* r = ch->r3d;
+    u32 shift = (u32)st->flags >> 4, bank = st->bl_cbuf & 31, size, handle, k;
+    u64 cba = bank < 18 ? g_vk_cb[stage][bank] : 0;
+    VkImageViewType want = vk_tex_view_type(st);
+    int num = st->shadow || !((s->si.tex_int_mask >> slot) & 1) ? 0 : ((s->si.tex_sint_mask >> slot) & 1) ? 2 : 1;
+    VkImageView none = vk_null_view(want, st->shadow ? 3 : num), view;
+    VkSampler smp;
+    VkWriteDescriptorSet* w;
+    TexRes x;
+    if (!none) return 0;
+    size = cba ? g_vk_cbsize[stage][bank] : 0;
+    if (size > 65536 || !size) size = 65536;
+    for (k = 0; k < SNX_TEX_ARRAY; k++) {
+        u32 at = st->cbuf_off * 4 + (k << shift);
+        view = VK_NULL_HANDLE;
+        handle = cba && at + 4 <= size ? gmem_r32(cba + at) : 0;
+        memset(&x, 0, sizeof x);
+        if (cba && at + 4 <= size && (handle & 0xFFFFF) <= r[0x55F] && ((handle >> 20) & 0xFFF) <= r[0x559]) {
+            tex_resolve(ch, handle, &x);
+            if (x.t && !is_target(x.t, rt, zt, n)) view = vk_tex_bind_view(x.t, want, x.tic, num);
+        }
+        if (view)
+            vk_surf_use(vk_cmd(), x.t, layout, VK_SAMPLED_STAGES, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        else
+            view = none;
+        smp = vk_tex_bind_sampler(x.tsc, st, num);
+        if (!smp) return 0;
+        d->table[k].sampler = smp;
+        d->table[k].imageView = view;
+        d->table[k].imageLayout = layout;
+    }
+    w = &d->w[d->n++];
+    memset(w, 0, sizeof *w);
+    w->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    w->dstSet = set;
+    w->dstBinding = SNX_VKB_TEXARRAY;
+    w->descriptorCount = SNX_TEX_ARRAY;
+    w->descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    w->pImageInfo = d->table;
+    return 1;
+}
+
 static void draw_storage_read(VkDrawStorage* draw, VkSh* vs, VkSh* fs) {
     VkSh* sh[2] = {vs, fs};
     memset(draw, 0, sizeof *draw);
@@ -852,9 +904,18 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
     if (stage == 4 && frame_consts(&cb, &co))
         dw_buffer(&d, set, SNX_VKB_RS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, cb, co, 16);
     u32 tcb = r[0x982];
-    int nt = s->si.ntex > SH_MAXTEX ? SH_MAXTEX : s->si.ntex;
+    int nt = s->si.ntex > SH_MAXTEX ? SH_MAXTEX : s->si.ntex, table = 0;
     for (int i = 0; i < nt; i++) {
         ShTex* st = &s->si.tex[i];
+        if (st->flags & SNX_TEX_INDEXED) {
+            /* every indexed slot reads the one table (the translator rejects two) */
+            if (!table && !tex_table_set(
+                              ch, stage, s, i, rt, zt, n,
+                              s->si.nimg ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, &d, set))
+                return VK_NULL_HANDLE;
+            table = 1;
+            continue;
+        }
         u32 handle = tex_handle(stage, tcb, st);
         /* what fs_get_keyed resolved, unless it is a render target or a copy of one: a crop of the same target at
            another size, for another stage, replaces it. Other textures stay until the next present */

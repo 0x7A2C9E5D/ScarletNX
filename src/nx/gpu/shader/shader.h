@@ -19,7 +19,7 @@ typedef struct {
     u8 bl_cbuf;
     u8 bl2;
     u8 bl2_cbuf; /* bl2: handle = read1 | read2 (separate tex/sampler handles) */
-    u8 flags;    /* 1: raw integer surface load, 2: multisample texel fetch */
+    u8 flags;    /* 1: raw integer surface load, 2: multisample texel fetch, 4: indexed (SNX_TEX_INDEXED) */
     u32 bl2_off; /* word offset of read2 */
 } ShTex;
 typedef struct {
@@ -52,15 +52,23 @@ typedef struct {
 /* the shader flushes FP32 denormals everywhere: every FADD, FMUL and FFMA it has asks for it, as the console's
    compiler emits them (Eden declares DenormFlushToZero on the same condition) */
 /* One descriptor set per stage, with bindings grouped by resource kind. */
-#define SNX_VKB_CB     0  /* 18 constant buffers */
-#define SNX_VKB_SSBO   18 /* 16 global memory buffers */
-#define SNX_VKB_TEX    34 /* 32 combined image samplers */
-#define SNX_VKB_IMG    66 /* 8 storage images (compute) */
-#define SNX_VKB_RS     74 /* fragment: 1/resolution scale (SNX_RS) */
-#define SNX_VKB_FMT    75 /* compute: image format classes (SNX_FMT) */
-#define SNX_VKB_SMAP   76 /* graphics: storage-buffer page indices for aliased bindings */
-#define SNX_VKB_IMGBUF 77 /* 8 storage texel buffers: surface operations on buffer images (compute) */
-#define SNX_VKB_END    85 /* one past the last binding */
+#define SNX_VKB_CB       0  /* 18 constant buffers */
+#define SNX_VKB_SSBO     18 /* 16 global memory buffers */
+#define SNX_VKB_TEX      34 /* 32 combined image samplers */
+#define SNX_VKB_IMG      66 /* 8 storage images (compute) */
+#define SNX_VKB_RS       74 /* fragment: 1/resolution scale (SNX_RS) */
+#define SNX_VKB_FMT      75 /* compute: image format classes (SNX_FMT) */
+#define SNX_VKB_SMAP     76 /* graphics: storage-buffer page indices for aliased bindings */
+#define SNX_VKB_IMGBUF   77 /* 8 storage texel buffers: surface operations on buffer images (compute) */
+#define SNX_VKB_TEXARRAY 85 /* SNX_TEX_ARRAY textures: the handles an indexed LDC loads (graphics) */
+#define SNX_VKB_END      86 /* one past the last binding */
+/* An indexed texture's handle is loaded by an LDC whose address takes a register: the shader picks one of
+   SNX_TEX_ARRAY handles, each (1 << shift) bytes after the one before, from cbuf_off on. ShTex.flags holds the shift
+   in bits 4-7. */
+#define SNX_TEX_ARRAY    256
+#define SNX_TEX_INDEXED  4
+/* set by the renderer: the device indexes sampled image arrays per invocation (Vulkan's non-uniform indexing) */
+extern int g_shader_texture_arrays;
 int shader_vk_set(int stage);
 /* Direct SPIR-V translator. Returns NULL when the current opcode set cannot represent the program. */
 u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count, int can_flush,
