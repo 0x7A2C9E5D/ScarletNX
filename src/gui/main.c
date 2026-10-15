@@ -53,6 +53,8 @@ typedef struct {
     int cols, rows, scale, log_top;
     Uint64 sampled;
     bool has_output, finished, aborting, abnormal_exit;
+    GuiConfirm confirm; /* the question before a run is aborted, when ask_abort says to ask it */
+    bool ask_abort;     /* ESC asks first: on a phone it is Back, an edge swipe easily made by mistake */
     int native;
     SDL_FingerID finger;      /* the finger on the screen, 0 for none */
     float finger_x, finger_y; /* where it went down, 0 to 1 across the window */
@@ -612,6 +614,42 @@ static void overlay(App* app) {
     fill(app, 0, 0, (float)width, (float)height, black, (Uint8)(a * 255));
     SDL_SetRenderViewport(app->renderer, &safe);
 }
+static const char* ask_question(const App* app) {
+    return screen(app) == GUI_SCREEN_COMPILING ? "Abort the recompile? Its work is lost." : "Abort the run?";
+}
+/* the question's box, in cells: a blank row, the question, a blank row, its two choices and a blank row, two columns
+   either side of the question */
+static void ask_box(const App* app, int* col, int* row, int* cols) {
+    *cols = SDL_min(app->cols - 2, (int)SDL_utf8strlen(ask_question(app)) + 4);
+    *col = (app->cols - *cols) / 2;
+    *row = SDL_max(0, (app->rows - 6) / 2);
+}
+/* the question over a running run, in the run screen's colours, its choices as the menu's entries */
+static void render_ask(App* app) {
+    static const char* const choices[] = {"Keep going", "Abort"}; /* by GUI_CONFIRM_* */
+    const GuiTheme* t = &app->theme;
+    int steps = t->run == GUI_RUN_STEPS, col, row, cols, i;
+    GuiRgb page = steps ? t->run_colors.page : t->page, ink = steps ? t->run_colors.ink : t->ink;
+    GuiRgb soft = steps ? t->run_colors.soft : t->soft, warning = steps ? t->run_colors.warning : t->warning;
+    float cw = 8.0f * (float)app->scale, ch = 16.0f * (float)app->scale, line = (float)app->scale;
+    if (!app->menu.running || !app->confirm.shown) return;
+
+    ask_box(app, &col, &row, &cols);
+    fill(app, (float)col * cw, (float)row * ch, (float)cols * cw, 6 * ch, page, 255);
+    fill(app, (float)col * cw, (float)row * ch, (float)cols * cw, line, soft, 255);
+    fill(app, (float)col * cw, (float)(row + 6) * ch - line, (float)cols * cw, line, soft, 255);
+    fill(app, (float)col * cw, (float)row * ch, line, 6 * ch, soft, 255);
+    fill(app, (float)(col + cols) * cw - line, (float)row * ch, line, 6 * ch, soft, 255);
+    text(app, col + 2, row + 1, ask_question(app), rgb(warning));
+    for (i = 0; i < 2; ++i) {
+        char label[64];
+        int focused = app->confirm.selected == i, bar = focused && (steps || t->focus_bar);
+        snprintf(label, sizeof label, "%s%s", t->marker, choices[i]);
+        if (bar)
+            fill(app, (float)col * cw + line, (float)(row + 3 + i) * ch, (float)cols * cw - 2 * line, ch, ink, 255);
+        text(app, col + 2, row + 3 + i, label, rgb(bar ? page : focused ? t->focus : ink));
+    }
+}
 /* the boot's splash: the program's icon on a theme's splash page, then the menu as the theme brings it in */
 static void splash_start(App* app) {
     const GuiTheme* t = gui_splash_theme(&app->theme, (int)SDL_rand(100));
@@ -667,6 +705,7 @@ static void render(App* app) {
         SDL_SetRenderDrawColor(app->renderer, page.r, page.g, page.b, 255);
         SDL_RenderClear(app->renderer);
         render_steps(app);
+        render_ask(app);
         overlay(app);
         SDL_RenderPresent(app->renderer);
         return;
@@ -791,6 +830,7 @@ static void render(App* app) {
         text(app, 1, app->rows - 2, "CWD:", bar ? paper : soft);
         text(app, 6, app->rows - 2, app->cwd ? app->cwd : "(unavailable)", bar ? paper : ink);
     }
+    render_ask(app);
     overlay(app);
     SDL_RenderPresent(app->renderer);
 }
@@ -895,6 +935,7 @@ static void pump(App* app) {
             else
                 snprintf(app->message, sizeof(app->message), "Driver exited with status %d.", status);
             app->aborting = false;
+            app->confirm.shown = false; /* a run that ended while asking has nothing left to abort */
             layout(app);
 #ifdef SDL_PLATFORM_ANDROID
             /* the game opens in its own activity, over this one: coming back from it is coming back to the menu */
@@ -1238,13 +1279,35 @@ static bool hit_text(const App* app, float x, float y, int col, int row, const c
     int end = touch ? app->cols : SDL_min(app->cols - 1, col + (int)SDL_utf8strlen(label));
     return x >= (touch ? 0 : col) && x < end && y >= row && y < row + 1;
 }
+static void abort_run(App* app) {
+    if (app->aborting) return;
+    /* Do not ask a hung program to shut down or wait on it in the event
+       handler. Kill its tree now and let pump reap it without blocking. */
+    gui_process_terminate(app->process);
+    app->aborting = true;
+}
+/* the pointer on the question, at x, y in cells: on a choice it takes the focus, and a click takes the choice; a click
+   off the box keeps going */
+static void ask_pointer(App* app, float x, float y, bool click) {
+    int col, row, cols;
+    ask_box(app, &col, &row, &cols);
+    if (x >= (float)col && x < (float)(col + cols) && y >= (float)(row + 3) && y < (float)(row + 5)) {
+        app->confirm.selected = (int)y - row - 3;
+        if (click && gui_confirm_key(&app->confirm, GUI_SELECT)) abort_run(app);
+    } else if (click && (x < (float)col || x >= (float)(col + cols) || y < (float)row || y >= (float)(row + 6)))
+        gui_confirm_key(&app->confirm, GUI_CANCEL);
+}
 static void pointer(App* app, float window_x, float window_y, bool click, bool touch) {
-    if (app->menu.running || app->finished) return;
+    if ((app->menu.running && !app->confirm.shown) || app->finished) return;
     layout(app);
     float x, y;
     if (!SDL_RenderCoordinatesFromWindow(app->renderer, window_x, window_y, &x, &y)) return;
     x /= 8 * app->scale;
     y /= 16 * app->scale;
+    if (app->confirm.shown) {
+        ask_pointer(app, x, y, click);
+        return;
+    }
     if (app->menu.view == GUI_LOAD_KEYS) {
         if (click && hit_text(app, x, y, 1, 8, "Back [ESC]", touch)) menu_key(app, GUI_CANCEL);
 #ifdef SDL_PLATFORM_ANDROID
@@ -1317,16 +1380,15 @@ static void picked(App* app, const char* uri) {
         drop(app, path, false);
     free(path);
 }
-/* ESC: a run is aborted, anything else goes back */
+/* ESC: a run is aborted, or asked about first when ask_abort says so; anything else goes back */
 static void cancel(App* app) {
     if (!app->menu.running)
         menu_key(app, GUI_CANCEL);
-    else if (!app->aborting) {
-        /* Do not ask a hung program to shut down or wait on it in the event
-           handler. Kill its tree now and let pump reap it without blocking. */
-        gui_process_terminate(app->process);
-        app->aborting = true;
-    }
+    else if (app->ask_abort && !app->aborting) {
+        app->confirm.shown = true;
+        app->confirm.selected = GUI_CONFIRM_KEEP;
+    } else
+        abort_run(app);
 }
 /* the row of a running run's ESC line, -1 when it has none */
 static int escape_row(const App* app) {
@@ -1356,6 +1418,10 @@ static void touch(App* app, float x, float y) {
         return;
     }
     SDL_GetWindowSize(app->window, &w, &h);
+    if (app->confirm.shown) {
+        pointer(app, x * (float)w, y * (float)h, true, true);
+        return;
+    }
     if (app->menu.running) {
         layout(app);
         if (SDL_RenderCoordinatesFromWindow(app->renderer, x * (float)w, y * (float)h, &rx, &ry) &&
@@ -1375,7 +1441,25 @@ static bool SDLCALL lifecycle(void* data, SDL_Event* e) {
     return true;
 }
 #endif
+/* the menu's key for a key press; false for none and for Enter or Space held down */
+static bool menu_key_of(const SDL_KeyboardEvent* k, GuiKey* key) {
+    switch (k->key) {
+        case SDLK_UP: *key = GUI_UP; return true;
+        case SDLK_DOWN: *key = GUI_DOWN; return true;
+        case SDLK_LEFT: *key = GUI_LEFT; return true;
+        case SDLK_RIGHT: *key = GUI_RIGHT; return true;
+        case SDLK_PAGEUP: *key = GUI_PAGE_UP; return true;
+        case SDLK_PAGEDOWN: *key = GUI_PAGE_DOWN; return true;
+        case SDLK_RETURN:
+        case SDLK_KP_ENTER:
+        case SDLK_SPACE: *key = GUI_SELECT; return !k->repeat;
+        case SDLK_ESCAPE:
+        case SDLK_AC_BACK: *key = GUI_CANCEL; return true;
+        default: return false;
+    }
+}
 static void event(App* app, const SDL_Event* e) {
+    GuiKey key;
     if (e->type == SDL_EVENT_QUIT || e->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
         app->menu.quit = true;
         return;
@@ -1416,8 +1500,13 @@ static void event(App* app, const SDL_Event* e) {
         return;
     }
     if (e->type != SDL_EVENT_KEY_DOWN) return;
+    /* a running run takes ESC, and the question, while it shows, every key; a held key asks and answers nothing */
     if (app->menu.running) {
-        if (e->key.key == SDLK_ESCAPE || e->key.key == SDLK_AC_BACK) cancel(app);
+        if (e->key.repeat || !menu_key_of(&e->key, &key)) return;
+        if (app->confirm.shown) {
+            if (gui_confirm_key(&app->confirm, key)) abort_run(app);
+        } else if (key == GUI_CANCEL)
+            cancel(app);
         return;
     }
     if (e->key.key == SDLK_V && (e->key.mod & SDL_KMOD_CTRL) &&
@@ -1427,22 +1516,7 @@ static void event(App* app, const SDL_Event* e) {
         SDL_free(clipboard);
         return;
     }
-    switch (e->key.key) {
-        case SDLK_UP: menu_key(app, GUI_UP); break;
-        case SDLK_DOWN: menu_key(app, GUI_DOWN); break;
-        case SDLK_LEFT: menu_key(app, GUI_LEFT); break;
-        case SDLK_RIGHT: menu_key(app, GUI_RIGHT); break;
-        case SDLK_PAGEUP: menu_key(app, GUI_PAGE_UP); break;
-        case SDLK_PAGEDOWN: menu_key(app, GUI_PAGE_DOWN); break;
-        case SDLK_RETURN:
-        case SDLK_KP_ENTER:
-        case SDLK_SPACE:
-            if (!e->key.repeat) menu_key(app, GUI_SELECT);
-            break;
-        case SDLK_ESCAPE:
-        case SDLK_AC_BACK: menu_key(app, GUI_CANCEL); break;
-        default: break;
-    }
+    if (menu_key_of(&e->key, &key)) menu_key(app, key);
 }
 static bool initialize(App* app) {
     SDL_WindowFlags flags;
@@ -1451,6 +1525,7 @@ static bool initialize(App* app) {
     app->theme = *gui_theme_builtin("yorha");
     app->menu.fullscreen = true; /* a phone plays on the whole screen; Fullscreen off shows the system's bars */
     app->menu.controls = true;   /* and has no buttons but these */
+    app->ask_abort = true;
     gui_android_start();
     /* back is ESC here: without this it would close the app */
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");

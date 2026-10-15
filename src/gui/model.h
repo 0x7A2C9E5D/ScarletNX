@@ -47,6 +47,15 @@ typedef struct {
     int recent, recent_focus, recent_open;
 } GuiMenu;
 void gui_menu_key(GuiMenu* menu, GuiKey key);
+/* The question a running run's abort asks first: shown or not, and the choice in focus, Keep going first */
+enum { GUI_CONFIRM_KEEP, GUI_CONFIRM_ABORT };
+typedef struct {
+    bool shown;
+    int selected;
+} GuiConfirm;
+/* A key on the question: the arrows move between its choices, Select takes the one in focus and Cancel keeps going,
+   both closing it. True when the run is to be aborted */
+bool gui_confirm_key(GuiConfirm* confirm, GuiKey key);
 const char* gui_setting_description(const GuiMenu* menu);
 /* Append up to GUI_LAUNCH_MAX Switch options; prepared games do not run a compiler. */
 #define GUI_LAUNCH_MAX 6

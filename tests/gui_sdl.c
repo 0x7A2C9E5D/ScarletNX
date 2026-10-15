@@ -660,6 +660,92 @@ int main(int argc, char** argv) {
         SDL_Delay(5);
     }
     assert(!app.menu.running && app.abnormal_exit);
+    /* where ESC is a back gesture made by mistake (ask_abort, Android's) it asks first: ESC again, a click off the box
+       or Keep going leave the run going; Abort aborts it. The ESC line's tap asks too, and a held key answers nothing */
+    {
+        int col, row, cols, pass;
+        SDL_Event held;
+        const GuiPalette* loading = &gui_theme_builtin("yorha")->run_colors;
+        app.ask_abort = true;
+        for (pass = 0; pass < 2; ++pass) {
+            assert(!snx_write_file(hung, "", 0));
+            launch(&app, snx_strdup(hung), false);
+            for (until = SDL_GetTicks() + 5000, ready = false; !ready && SDL_GetTicks() < until; SDL_Delay(5)) {
+                unsigned char* data = snx_read_file(hung, &size);
+                ready = data && size == 5 && !memcmp(data, "ready", 5);
+                free(data);
+                pump(&app);
+            }
+            assert(ready && app.menu.running);
+            key(&app, SDLK_ESCAPE);
+            assert(app.confirm.shown && app.confirm.selected == GUI_CONFIRM_KEEP && !app.aborting && app.menu.running);
+            if (pass) break;
+            render(&app);
+            ask_box(&app, &col, &row, &cols);
+            assert(cols == 42 && col == (app.cols - 42) / 2 && row == (app.rows - 6) / 2);
+            colored_text_on(&app, col + 2, row + 1, "Abort the recompile? Its work is lost.", rgb(app.theme.warning),
+                            black);
+            colored_text_on(&app, col + 2, row + 3, "- Keep going", yellow, black);
+            colored_text_on(&app, col + 2, row + 4, "- Abort", normal, black);
+            key(&app, SDLK_ESCAPE);
+            assert(!app.confirm.shown && app.menu.running && !app.aborting);
+            key(&app, SDLK_AC_BACK);
+            key(&app, SDLK_DOWN);
+            assert(app.confirm.shown && app.confirm.selected == GUI_CONFIRM_ABORT);
+            render(&app);
+            colored_text_on(&app, col + 2, row + 3, "- Keep going", normal, black);
+            colored_text_on(&app, col + 2, row + 4, "- Abort", yellow, black);
+            key(&app, SDLK_ESCAPE); /* on Abort too */
+            assert(!app.confirm.shown && !app.aborting);
+            tap(&app, 20, escape_row(&app));
+            assert(app.confirm.shown && !app.aborting);
+            tap(&app, col + 2, row + 1); /* the question itself: nothing */
+            assert(app.confirm.shown);
+            tap(&app, col - 1, row + 4); /* beside Abort, off the box */
+            assert(!app.confirm.shown && !app.aborting && app.menu.running);
+            key(&app, SDLK_ESCAPE);
+            mouse(&app, col + 3, row + 4, false); /* the pointer moves the focus */
+            assert(app.confirm.shown && app.confirm.selected == GUI_CONFIRM_ABORT);
+            mouse(&app, col + 3, row + 3, true);
+            assert(!app.confirm.shown && !app.aborting && app.menu.running);
+            key(&app, SDLK_ESCAPE);
+            key(&app, SDLK_RETURN);
+            assert(!app.confirm.shown && !app.aborting);
+            SDL_zero(held);
+            held.type = SDL_EVENT_KEY_DOWN;
+            held.key.key = SDLK_ESCAPE;
+            held.key.repeat = true;
+            event(&app, &held);
+            assert(!app.confirm.shown);
+            /* YoRHa's loading screen: its colours, the focused choice on a band of its ink */
+            app.theme = *gui_theme_builtin("yorha");
+            app.fade_ms = 0;
+            key(&app, SDLK_ESCAPE);
+            render(&app);
+            colored_text_on(&app, col + 2, row + 1, "Abort the recompile?", rgb(loading->warning), rgb(loading->page));
+            colored_text_on(&app, col + 4, row + 3, "Keep going", rgb(loading->page), rgb(loading->ink));
+            colored_text_on(&app, col + 4, row + 4, "Abort", rgb(loading->ink), rgb(loading->page));
+            app.theme = *gui_theme_builtin("default");
+            tap(&app, col + 3, row + 4);
+            assert(app.aborting && !app.confirm.shown);
+            while (app.menu.running && SDL_GetTicks() < until) {
+                pump(&app);
+                SDL_Delay(5);
+            }
+            assert(!app.menu.running && app.abnormal_exit && !app.finished);
+            assert(!strcmp(app.message, "Program ended abnormally (force-terminated by ESC)."));
+        }
+        /* a run that ends on its own while asking takes the question with it */
+        gui_process_terminate(app.process);
+        while (app.menu.running && SDL_GetTicks() < until) {
+            pump(&app);
+            SDL_Delay(5);
+        }
+        assert(!app.menu.running && app.finished && app.abnormal_exit && !app.confirm.shown);
+        key(&app, SDLK_ESCAPE);
+        assert(!app.finished && !app.confirm.shown);
+        app.ask_abort = false;
+    }
     free(hung);
 
     /* Browser: missing/empty directories, filtering, page controls and both

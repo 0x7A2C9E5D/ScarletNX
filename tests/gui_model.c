@@ -13,6 +13,7 @@ int main(void) {
     GuiMenu menu = {0};
     GuiMenu themed, ring;
     GuiBanner banner;
+    GuiConfirm confirm = {0};
     gui_menu_key(&menu, GUI_LEFT);
     assert(menu.selected == GUI_EXIT);
     gui_menu_key(&menu, GUI_RIGHT);
@@ -279,6 +280,24 @@ int main(void) {
     ring.selected = GUI_SWITCH;
     gui_menu_key(&ring, GUI_UP); /* none: the items alone, as before */
     assert(ring.selected == GUI_EXIT && !ring.recent_focus);
+
+    /* the question before an abort: keys do nothing while it is not shown; the arrows move between its choices, Select
+       takes the one in focus and Cancel keeps going, both closing it */
+    assert(!gui_confirm_key(&confirm, GUI_SELECT) && !gui_confirm_key(&confirm, GUI_DOWN));
+    assert(!confirm.shown && confirm.selected == GUI_CONFIRM_KEEP);
+    confirm.shown = true;
+    assert(!gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown); /* Keep going is the first choice */
+    confirm.shown = true;
+    assert(!gui_confirm_key(&confirm, GUI_DOWN) && confirm.selected == GUI_CONFIRM_ABORT && confirm.shown);
+    assert(!gui_confirm_key(&confirm, GUI_PAGE_DOWN) && confirm.selected == GUI_CONFIRM_ABORT && confirm.shown);
+    assert(!gui_confirm_key(&confirm, GUI_CANCEL) && !confirm.shown); /* Back again, on Abort too, keeps going */
+    confirm.shown = true;
+    assert(!gui_confirm_key(&confirm, GUI_UP) && confirm.selected == GUI_CONFIRM_KEEP);
+    assert(!gui_confirm_key(&confirm, GUI_RIGHT) && confirm.selected == GUI_CONFIRM_ABORT);
+    assert(!gui_confirm_key(&confirm, GUI_LEFT) && confirm.selected == GUI_CONFIRM_KEEP);
+    assert(!gui_confirm_key(&confirm, GUI_UP) && confirm.selected == GUI_CONFIRM_ABORT);
+    assert(gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown);
+    assert(!gui_confirm_key(&confirm, GUI_SELECT)); /* answered: nothing more to abort */
 
     /* the runner's banner, at the start of a line, split across reads or not */
     gui_banner_reset(&banner);

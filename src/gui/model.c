@@ -103,6 +103,18 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
         default: break;
     }
 }
+bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
+    if (!confirm->shown) return false;
+    switch (key) {
+        case GUI_UP:
+        case GUI_DOWN:
+        case GUI_LEFT:
+        case GUI_RIGHT: confirm->selected ^= 1; return false;
+        case GUI_SELECT: confirm->shown = false; return confirm->selected == GUI_CONFIRM_ABORT;
+        case GUI_CANCEL: confirm->shown = false; return false;
+        default: return false;
+    }
+}
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
         case GUI_FULLSCREEN:
