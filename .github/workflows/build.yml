@@ -68,7 +68,15 @@ jobs:
           path: .cache/ccache
           key: ccache-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ccache-${{ github.job }}-${{ matrix.arch }}-
-      - name: Set up ccache
+      # FFmpeg's and OpenSSL's builds (cmake/deps_cache.cmake), from the newest cache of this job on this branch, else
+      # on main. The key named here is never saved: a run saves its own below, named after the builds it used
+      - uses: actions/cache/restore@v5
+        id: deps
+        with:
+          path: .cache/deps
+          key: deps-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}
+          restore-keys: deps-${{ github.job }}-${{ matrix.arch }}-
+      - name: Set up the caches
         shell: bash
         run: |
           ws=${GITHUB_WORKSPACE//\\//}
@@ -77,6 +85,7 @@ jobs:
             # paths in the keys relative to the checkout, and no build folder in them: build trees share entries
             echo "CCACHE_BASEDIR=$ws"
             echo "CCACHE_NOHASHDIR=true"
+            echo "SNX_DEPS_CACHE=$ws/.cache/deps"
             echo "SNX_CCACHE_START=$(date +%s)"
           } >> "$GITHUB_ENV"
       - name: Build the runtime
@@ -106,6 +115,18 @@ jobs:
         with:
           path: .cache/ccache
           key: ccache-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+      # Only the dependency builds this run's trees used stay, under a key named after them: saved when they changed
+      - name: Name the dependency builds
+        id: deps-used
+        run: |
+          used=$(find build -path '*/snx-deps/*.dir' -exec cat {} + | sort -u)
+          for d in .cache/deps/*; do grep -qxF "${d##*/}" <<<"$used" || rm -rf "$d"; done
+          echo "key=deps-${{ github.job }}-${{ matrix.arch }}-$(sha256sum <<<"$used" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - if: steps.deps-used.outputs.key != steps.deps.outputs.cache-matched-key
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/deps
+          key: ${{ steps.deps-used.outputs.key }}
       - name: Test headless Vulkan and NX runtime
         run: ctest --test-dir build/headless -R '^(vulkan_headless|nx_runtime_homebrew)$' --output-on-failure
       # The game modules compile src/common/cpu/aarch64/cpu_helpers.c, which no CMake target does
@@ -166,7 +187,14 @@ jobs:
           path: .cache/ccache
           key: ccache-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ccache-${{ github.job }}-${{ matrix.arch }}-
-      - name: Set up ccache
+      # the dependency builds, as in the linux job
+      - uses: actions/cache/restore@v5
+        id: deps
+        with:
+          path: .cache/deps
+          key: deps-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}
+          restore-keys: deps-${{ github.job }}-${{ matrix.arch }}-
+      - name: Set up the caches
         shell: bash
         run: |
           ws=${GITHUB_WORKSPACE//\\//}
@@ -174,6 +202,7 @@ jobs:
             echo "CCACHE_DIR=$ws/.cache/ccache"
             echo "CCACHE_BASEDIR=$ws"
             echo "CCACHE_NOHASHDIR=true"
+            echo "SNX_DEPS_CACHE=$ws/.cache/deps"
             echo "SNX_CCACHE_START=$(date +%s)"
           } >> "$GITHUB_ENV"
       # The action pins its own setup script only: the tools that script downloads are pinned here to a commit of
@@ -217,6 +246,17 @@ jobs:
         with:
           path: .cache/ccache
           key: ccache-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Name the dependency builds
+        id: deps-used
+        run: |
+          used=$(find build -path '*/snx-deps/*.dir' -exec cat {} + | sort -u)
+          for d in .cache/deps/*; do grep -qxF "${d##*/}" <<<"$used" || rm -rf "$d"; done
+          echo "key=deps-${{ github.job }}-${{ matrix.arch }}-$(sha256sum <<<"$used" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - if: steps.deps-used.outputs.key != steps.deps.outputs.cache-matched-key
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/deps
+          key: ${{ steps.deps-used.outputs.key }}
       # The script names the AppImage after `git describe`
       - name: Make the AppImage
         run: scripts/make-appimage.sh
@@ -254,7 +294,14 @@ jobs:
           path: .cache/ccache
           key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ccache-${{ github.job }}-
-      - name: Set up ccache
+      # the dependency builds, as in the linux job
+      - uses: actions/cache/restore@v5
+        id: deps
+        with:
+          path: .cache/deps
+          key: deps-${{ github.job }}-${{ github.run_id }}
+          restore-keys: deps-${{ github.job }}-
+      - name: Set up the caches
         shell: bash
         run: |
           ws=${GITHUB_WORKSPACE//\\//}
@@ -262,6 +309,7 @@ jobs:
             echo "CCACHE_DIR=$ws/.cache/ccache"
             echo "CCACHE_BASEDIR=$ws"
             echo "CCACHE_NOHASHDIR=true"
+            echo "SNX_DEPS_CACHE=$ws/.cache/deps"
             echo "SNX_CCACHE_START=$(date +%s)"
           } >> "$GITHUB_ENV"
       # llvm-mingw alone has no LLVM development libraries. Do not mix its C++ runtime with another LLVM build.
@@ -323,6 +371,17 @@ jobs:
         with:
           path: .cache/ccache
           key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Name the dependency builds
+        id: deps-used
+        run: |
+          used=$(find build -path '*/snx-deps/*.dir' -exec cat {} + | sort -u)
+          for d in .cache/deps/*; do grep -qxF "${d##*/}" <<<"$used" || rm -rf "$d"; done
+          echo "key=deps-${{ github.job }}-$(sha256sum <<<"$used" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - if: steps.deps-used.outputs.key != steps.deps.outputs.cache-matched-key
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/deps
+          key: ${{ steps.deps-used.outputs.key }}
       # Explorer and the taskbar show the first icon of an executable's resources (runtime.rc)
       - name: Check the executables' icon
         run: |
@@ -429,7 +488,14 @@ jobs:
           path: .cache/ccache
           key: ccache-${{ github.job }}-${{ matrix.abi }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ccache-${{ github.job }}-${{ matrix.abi }}-
-      - name: Set up ccache
+      # the dependency builds, as in the linux job
+      - uses: actions/cache/restore@v5
+        id: deps
+        with:
+          path: .cache/deps
+          key: deps-${{ github.job }}-${{ matrix.abi }}-${{ github.run_id }}
+          restore-keys: deps-${{ github.job }}-${{ matrix.abi }}-
+      - name: Set up the caches
         shell: bash
         run: |
           ws=${GITHUB_WORKSPACE//\\//}
@@ -439,6 +505,7 @@ jobs:
             echo "CCACHE_NOHASHDIR=true"
             # the NDK is installed afresh on each run: its version, not its files' dates, says which compiler it is
             echo "CCACHE_COMPILERCHECK=string:$ANDROID_NDK_ROOT"
+            echo "SNX_DEPS_CACHE=$ws/.cache/deps"
             echo "SNX_CCACHE_START=$(date +%s)"
           } >> "$GITHUB_ENV"
       - name: Build the native libraries and the APK
@@ -457,6 +524,17 @@ jobs:
         with:
           path: .cache/ccache
           key: ccache-${{ github.job }}-${{ matrix.abi }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Name the dependency builds
+        id: deps-used
+        run: |
+          used=$(find build -path '*/snx-deps/*.dir' -exec cat {} + | sort -u)
+          for d in .cache/deps/*; do grep -qxF "${d##*/}" <<<"$used" || rm -rf "$d"; done
+          echo "key=deps-${{ github.job }}-${{ matrix.abi }}-$(sha256sum <<<"$used" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - if: steps.deps-used.outputs.key != steps.deps.outputs.cache-matched-key
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/deps
+          key: ${{ steps.deps-used.outputs.key }}
       # Not zipped: the artifact is the APK itself, named after it
       - uses: actions/upload-artifact@v7
         with:
