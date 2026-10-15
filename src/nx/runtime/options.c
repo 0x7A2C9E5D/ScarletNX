@@ -198,8 +198,9 @@ static const IniOpt INI_DBG[] = {
      "1 = a service command the runtime doesn't know answers success (logged as [undeclared]), 0 = it fails with "
      "UnknownCommandId, as on a console",
      INI_INT, 0, &g_opt_auto_stub_ipc, 0, 1, NULL},
-    {"diag", "0", "1 = save the data of each new compute shader to captures/compute, for debugging", INI_INT, 0,
-     &g_opt_diag, 0, 1, NULL},
+    {"diag", "0",
+     "1 = save the data of each new compute shader to captures/compute, and every new shader's\n;   snx-shaderc corpus entry to captures/shaders, for debugging",
+     INI_INT, 0, &g_opt_diag, 0, 1, NULL},
     {"profile", "0", "1 = write profile.txt every 10 seconds (CPU profiler, Windows only)", INI_INT, INI_STARTUP,
      &g_opt_prof, 0, 1, NULL},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
