@@ -241,8 +241,8 @@ int snx_main(int argc, char** argv) {
     /* loaded before the .ini is opened, which writes one: a mistyped --game leaves no stray settings file */
     if (load_code()) fatal("Could not load the game's recompiled code.");
     if (g_mod->abi != SNX_ABI) fatal("The recompiled code is from another ScarletNX version.");
-    /* Fullscreen is opt-in on each launch, regardless of an older INI value. */
-    ini_override("fullscreen", g_opt_fullscreen ? "1" : "0");
+    /* -f starts this run fullscreen over the .ini's fullscreen=0; without it the .ini says */
+    if (g_opt_fullscreen) ini_override("fullscreen", "1");
     /* --key=value sets a setting for this run, over the .ini. The value is used where it is, so a long --script
        isn't cut */
     for (int i = 1; i < argc && strcmp(argv[i], "--"); i++) {

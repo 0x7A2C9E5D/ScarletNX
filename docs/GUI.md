@@ -47,8 +47,8 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   **Keys already setup. This will overwrite the previous ones**. A successful
   drop replaces them and returns to the menu; ESC cancels without changing them.
 - **[ON/OFF] Fullscreen** toggles the Switch game's startup setting, not the
-  launcher's window. ON passes `-f` (short for `--fullscreen`); OFF omits the flag
-  and starts windowed, regardless of an older INI value.
+  launcher's window. ON passes `-f` (short for `--fullscreen`); OFF omits the flag,
+  and the game's `.ini` decides (`fullscreen=1` starts fullscreen).
 - **[ON/OFF] Enable libgccjit** passes `--backend=gcc` when preparing a Switch dump.
   It stays OFF if this build lacks libgccjit. Prepared executables in `games/`
   already have a compiled backend, so this setting does not recompile them.

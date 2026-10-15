@@ -7,7 +7,7 @@
 #define SNX_OPTIONS_H
 
 int snx_startup_options(int argc, char** argv); /* shared startup flags, before any window/error dialog */
-extern int g_opt_fullscreen;                    /* -f/--fullscreen; absent means windowed */
+extern int g_opt_fullscreen;                    /* -f/--fullscreen, or the .ini's fullscreen when it is absent */
 extern int g_opt_headless;                      /* startup only, never changed by an INI reload */
 extern int g_opt_gdb, g_opt_gdb_stop;
 
