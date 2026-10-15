@@ -16,10 +16,6 @@
 #include <pthread.h>
 #endif
 
-/* the runtime library, compiled when the recompiler is built (rtlib.c, snx-rtlib-gen embed) */
-extern const unsigned char snx_rtlib_object[];
-extern const unsigned long snx_rtlib_object_size;
-
 typedef struct {
     size_t first, last; /* functions */
     unsigned char* object;
@@ -369,8 +365,8 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
     SnxIr* ir = NULL;
     SnxLinkInput* inputs = NULL;
     SnxLinkOutput linked;
-    unsigned char* module_object = NULL;
-    size_t module_size = 0, first, last, count, limit, i, entry_count = 0, n = 0;
+    unsigned char *module_object = NULL, *rtlib_object = NULL;
+    size_t module_size = 0, rtlib_size = 0, first, last, count, limit, i, entry_count = 0, n = 0;
     unsigned long fallbacks = 0;
     const char* exports[1];
     char error[1024], *tmp = NULL;
@@ -419,10 +415,14 @@ int snx_build_module_llvm(SnxProgram* loaded, const SnxCodegenOptions* options, 
         snx_report_unit(q.count + 1, q.count + 1, "module", label, 0, snx_seconds() - start);
         free(label);
     }
+    if (snx_ir_rtlib_object(build->opt, &rtlib_object, &rtlib_size, error, sizeof(error))) {
+        snx_error("LLVM backend: %s", error);
+        goto done;
+    }
     /* link: runtime library, descriptor, chunks */
     inputs = (SnxLinkInput*)snx_alloc((q.count + 2) * sizeof(*inputs));
-    inputs[n].data = snx_rtlib_object;
-    inputs[n].size = snx_rtlib_object_size;
+    inputs[n].data = rtlib_object;
+    inputs[n].size = rtlib_size;
     inputs[n++].name = "rtlib";
     inputs[n].data = module_object;
     inputs[n].size = module_size;
@@ -453,6 +453,7 @@ done:
     free(q.units);
     free(inputs);
     free(module_object);
+    free(rtlib_object);
     free(linked.data);
     free(tmp);
     snx_ir_free(ir);
