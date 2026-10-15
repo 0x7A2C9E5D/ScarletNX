@@ -27,6 +27,13 @@ jobs:
     timeout-minutes: 60
     container: archlinux:latest
     steps:
+      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
       # llvm: llvm-config and LLVM-C for the recompiler (llvm-libs alone has no headers). libgccjit builds the
       # optional --backend=gcc too, so its tests (gccjit_differential, native_recompiler_gcc) run here
       - name: Install tools
@@ -63,7 +70,7 @@ jobs:
           python tools/run_game.py --help > /dev/null
       - uses: actions/upload-artifact@v7
         with:
-          name: scarletnx-linux
+          name: scarletnx-linux-${{ steps.commit.outputs.short }}
           path: stage
 
   appimage:
@@ -73,6 +80,13 @@ jobs:
     # pkgforge's Arch image and tools (https://github.com/pkgforge-dev/Anylinux-AppImages), see scripts/make-appimage.sh
     container: ghcr.io/pkgforge-dev/archlinux:latest
     steps:
+      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
       # Before the checkout: without git, actions/checkout downloads the files without the history, and the AppImage's
       # version (git describe) is unknown
       - name: Install git
@@ -116,7 +130,7 @@ jobs:
       # Only what the script made: dist/ also holds the tracked desktop entry and icon
       - uses: actions/upload-artifact@v7
         with:
-          name: AppImage-x86_64
+          name: AppImage-x86_64-${{ steps.commit.outputs.short }}
           path: |
             dist/*.AppImage*
             dist/appinfo
@@ -129,6 +143,13 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
+      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
       - uses: actions/cache@v5
         with:
@@ -233,7 +254,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7
         with:
-          name: scarletnx-windows
+          name: scarletnx-windows-${{ steps.commit.outputs.short }}
           path: stage
           if-no-files-found: error
 
@@ -250,6 +271,13 @@ jobs:
     env:
       ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/28.2.13676358
     steps:
+      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
       - uses: actions/cache@v5
         with:
@@ -271,11 +299,11 @@ jobs:
       - name: Build the native libraries and the APK
         run: |
           JAVA_HOME=$JAVA_HOME_21_X64 scripts/android-apk.sh "$PWD/build/android" "$PWD/android-llvm" ${{ matrix.abi }}
-          cp build/android/stage/gradle/outputs/apk/debug/ScarletNX-debug.apk ScarletNX-${{ matrix.abi }}.apk
+          cp build/android/stage/gradle/outputs/apk/debug/ScarletNX-debug.apk ScarletNX-${{ steps.commit.outputs.short }}-${{ matrix.abi }}.apk
       # Not zipped: the artifact is the APK itself, named after it
       - uses: actions/upload-artifact@v7
         with:
-          path: ScarletNX-${{ matrix.abi }}.apk
+          path: ScarletNX-${{ steps.commit.outputs.short }}-${{ matrix.abi }}.apk
           archive: false
           if-no-files-found: error
       # What android-apk packs: the libraries, SDL's Java and the icon, without this APK's Gradle output
@@ -293,6 +321,13 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
+      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
@@ -302,12 +337,12 @@ jobs:
       - name: Pack the APK of both ABIs
         run: |
           JAVA_HOME=$JAVA_HOME_21_X64 gradle -p dist/android assembleDebug -Pscarletnx.stage="$PWD/stage"
-          cp stage/gradle/outputs/apk/debug/ScarletNX-debug.apk ScarletNX.apk
+          cp stage/gradle/outputs/apk/debug/ScarletNX-debug.apk ScarletNX-${{ steps.commit.outputs.short }}.apk
       # A library that needs one Android 5.0 lacks fails to load there, and the app with it
       - name: Check the APK's libraries
         run: |
           set -euo pipefail
-          apk=ScarletNX.apk
+          apk=ScarletNX-${{ steps.commit.outputs.short }}.apk
           readelf=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf
           mkdir apk && unzip -q "$apk" 'lib/*' -d apk
           system=" libc.so libm.so libdl.so liblog.so libandroid.so libz.so libEGL.so libGLESv1_CM.so libGLESv2.so libOpenSLES.so "
@@ -322,7 +357,7 @@ jobs:
           done
       - uses: actions/upload-artifact@v7
         with:
-          path: ScarletNX.apk
+          path: ScarletNX-${{ steps.commit.outputs.short }}.apk
           archive: false
           if-no-files-found: error
 
@@ -334,10 +369,17 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
+      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: AppImage-x86_64
+          name: AppImage-x86_64-${{ steps.commit.outputs.short }}
           path: dist
       # Artifacts drop the executable bit
       - name: Run the AppImage as a user would
@@ -354,23 +396,31 @@ jobs:
       run:
         shell: bash
     steps:
+      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
       # Not in the workspace root: the build's checkout was there, and the package would take this one for it
       - uses: actions/checkout@v7
         with:
           path: source
       - uses: actions/download-artifact@v8
         with:
-          name: scarletnx-windows
+          name: scarletnx-windows-${{ steps.commit.outputs.short }}
           path: package
       - name: Run the zip's scarletnx.exe as a user would
         run: bash source/scripts/check-package.sh package/bin/scarletnx.exe
 
-  # Every push to main that builds everywhere replaces the rolling "nightly" prerelease with Linux and Windows builds.
+  # Every push to main that builds everywhere replaces the rolling "nightly" prerelease with Linux, Windows and Android
+  # builds.
   # A newer push cancels a release still running, so an older commit never publishes last
   release:
     name: Nightly release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [linux, appimage, windows, appimage-check, windows-check]
+    needs: [linux, appimage, windows, appimage-check, windows-check, android-apk]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     concurrency:
@@ -379,9 +429,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
         with:
-          name: AppImage-x86_64
+          name: AppImage-x86_64-${{ steps.commit.outputs.short }}
       - name: Release the AppImage
         uses: pkgforge-dev/make-nightly-appimage-release@17cbe90fc0796286e424619a54a82a3a880efe4c # v1.1
         with:
@@ -389,7 +446,7 @@ jobs:
       - name: Download the Windows build
         uses: actions/download-artifact@v8
         with:
-          name: scarletnx-windows
+          name: scarletnx-windows-${{ steps.commit.outputs.short }}
           path: windows
       - name: Package the Windows nightly
         run: |
@@ -399,6 +456,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload nightly ScarletNX-windows-x86_64.zip --repo "$GITHUB_REPOSITORY" --clobber
+      # Under a fixed name in the release, as the zip, so a link to it keeps working
+      - name: Download the Android APK
+        uses: actions/download-artifact@v8
+        with:
+          name: ScarletNX-${{ steps.commit.outputs.short }}.apk
+          path: android
+      - name: Publish the Android nightly
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp android/ScarletNX-${{ steps.commit.outputs.short }}.apk ScarletNX-android.apk
+          gh release upload nightly ScarletNX-android.apk --repo "$GITHUB_REPOSITORY" --clobber
       # The GPL asks for the way to the source next to the binary
       - name: Say where the source is
         env:
@@ -408,4 +477,6 @@ jobs:
 
           The third-party libraries built into the runtime are fetched from the release archives that cmake/dependencies.cmake lists at that commit, each checked against the SHA-256 written next to it. The AppImage also bundles libraries from Arch Linux packages. Its licenses are in share/licenses, with the package list in share/licenses/bundled-packages.txt.
 
-          ScarletNX-windows-x86_64.zip contains the Windows build, its required runtime DLLs and licenses under share/licenses. The MSYS2 build environment's package versions are recorded in share/licenses/msys2/build-packages.txt."
+          ScarletNX-windows-x86_64.zip contains the Windows build, its required runtime DLLs and licenses under share/licenses. The MSYS2 build environment's package versions are recorded in share/licenses/msys2/build-packages.txt.
+
+          ScarletNX-android.apk is the Android app for arm64-v8a and x86_64 devices, signed with a debug key."
