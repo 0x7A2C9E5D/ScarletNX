@@ -185,6 +185,12 @@ u32 g_ipc_ring_n;
 static void check_buffer(IpcCtx* c, const IpcBuf* b) {
     if (b->size && (b->addr > AS_SIZE || b->size > AS_SIZE - b->addr)) c->kernel_rc = R_BADMEMSTATE;
 }
+/* a CmifInHeader sf takes: the SFCI magic, and a version it knows (1 at most) */
+static int cmif_in_header(const u8* d) {
+    u32 version;
+    memcpy(&version, d + 4, 4);
+    return !memcmp(d, "SFCI", 4) && version <= 1;
+}
 /* The counts stored are clamped to the arrays, the pointer still moves past every descriptor the header announces.
    Handles the client sends are read but not taken from its table: services that get one look it up themselves */
 static void parse(IpcCtx* c) {
@@ -270,10 +276,8 @@ static void parse(IpcCtx* c) {
         c->c[i].size = b >> 16;
         check_buffer(c, &c->c[i]);
     }
-    /* the data words end the request: what a command reads past them (a client that sent less than the command
-       takes) reads as zeros (ipc_in), not as what an earlier request left in the message. Besides the arguments they
-       hold the padding to 16 and the pointer buffers' sizes, so a short request can still read those */
-    u8* end = p + ndata * 4; /* inside the message: the size check above */
+    /* the data words end the request (inside the message: the size check above) */
+    u8* end = p + ndata * 4;
     /* TIPC (newer SDKs): type is 16+cmd, payload right after the header, no SFCI */
     if (c->type >= 16) {
         c->tipc = 1;
@@ -282,7 +286,9 @@ static void parse(IpcCtx* c) {
         c->raw_size = (u32)(end - p);
         return;
     }
-    /* CMIF */
+    /* CMIF: sf's data region starts at the data words aligned to 16 and is 16 bytes shorter than they are, whatever
+       the alignment took (sf's DispatchRequest), so a request is measured as sf measures it */
+    end = ndata * 4 >= 16 ? raw + ndata * 4 - 16 : raw;
     u8* d = raw;
     u32 dlen_max = 0x100; /* a domain message says how long its CMIF part is */
     c->is_domain = 0;
@@ -312,11 +318,10 @@ static void parse(IpcCtx* c) {
         dlen_max = dlen > 16 ? dlen - 16u : 0; /* the CmifInHeader, then the arguments: the object ids come after */
         d += 16;
         /* the object's CmifInHeader is checked once the target is found: it has to be there, with its magic */
-        if (!c->domain_rc && dlen < 16) c->domain_rc = RC(10, 202);            /* InvalidHeaderSize */
-        if (!c->domain_rc && memcmp(d, "SFCI", 4)) c->domain_rc = RC(10, 211); /* InvalidInHeader */
-    } else if (end < d + 16 ||
-               memcmp(d, "SFCI", 4)) { /* a plain request's CmifInHeader: InvalidHeaderSize, InvalidInHeader */
-        c->header_rc = end < d + 16 ? RC(10, 202) : RC(10, 211);
+        if (!c->domain_rc && dlen < 16) c->domain_rc = RC(10, 202);          /* InvalidHeaderSize */
+        if (!c->domain_rc && !cmif_in_header(d)) c->domain_rc = RC(10, 211); /* InvalidInHeader */
+    } else if (end < d + 16 || !cmif_in_header(d)) {                         /* a plain request's CmifInHeader */
+        c->header_rc = end < d + 16 ? RC(10, 202) /* InvalidHeaderSize */ : RC(10, 211) /* InvalidInHeader */;
         return;
     }
     memcpy(&c->cmd, d + 8, 4);

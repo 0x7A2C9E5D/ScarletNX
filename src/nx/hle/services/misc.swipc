@@ -291,6 +291,7 @@ interface nn::ec::IContentsServiceManager {
     [0] RequestContentsAuthorizationToken(bytes<0x41> nonce, pid, buffer<u8, 5> data)
         -> (handle<copy, event> event, object<nn::ec::detail::IAsyncData> async);
 }
+# never made: the token request that gives it fails offline. The SDK's commands are 0 GetSize, 1 Get and 2 Cancel
 interface nn::ec::detail::IAsyncData {
 }
 interface nn::ec::IPurchaseEventManager {

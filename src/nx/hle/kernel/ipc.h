@@ -32,8 +32,9 @@ typedef struct IpcCtx {
     int na, nb, nw, nx, nc;
     u32 kernel_rc; /* the kernel fails the request before the server sees it: a header that describes more than the
                       message, a buffer outside the address space */
-    u32 domain_rc; /* sf refuses a domain request whose header doesn't fit its data */
-    u32 header_rc; /* sf refuses a request whose headers don't fit its data words, or a bad SFCI magic, at once */
+    u32 domain_rc; /* sf refuses a domain request whose headers don't fit its data, with more than 8 objects or a
+                         bad CmifInHeader, once the target is found */
+    u32 header_rc; /* sf refuses a request whose headers don't fit its data, or a bad CmifInHeader, at once */
     int is_domain;
     u32 domain_obj;
     u32 in_objs[8];
@@ -124,6 +125,10 @@ static inline int ipc_counts(const IpcCtx* c, int pid, int na, int nb, int nx, i
 }
 /* and a domain request, the objects it declares (sf's DomainServiceObjectProcessor, which checks them first) */
 static inline int ipc_objects(const IpcCtx* c, int nobj) { return !c->is_domain || c->nin_objs == nobj; }
+/* The refusals below (and the header ones in ipc.c) answer the result in a reply. sf closes the session instead, and
+   the client's SendSyncRequest gets SessionClosed: the runtime keeps the session and replies, because its own
+   declarations can be wrong where the console's aren't, and a game may survive an error result but not a dead
+   session. The log shows each one */
 int ipc_bad_request(SvcObj* o, IpcCtx* c); /* sf's InvalidCmifRequest for a request that doesn't, logged */
 /* a domain request with another number of objects (InvalidNumInObjects), or objects a plain session can't send
    (NotSupported), logged */

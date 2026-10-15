@@ -5,6 +5,18 @@
 /* the SVC dispatch: each supervisor call the game makes, by number */
 #include "hle/kernel/kernel_int.h"
 static void snx_svc_(CPU* c, u32 imm);
+/* SendSyncRequestWithUserBuffer's buffer: inside the address space and mapped, as the kernel finds it when it locks
+   it for the request (InvalidCurrentMemory otherwise) */
+static int user_buffer_mapped(u64 a, u64 size) {
+    if (a + size < a || a + size > AS_SIZE) return 0;
+    for (u64 end = a + size; a < end;) {
+        MemBlock b;
+        mem_query(a, &b);
+        if (b.state == MS_FREE || b.state == MS_INACCESSIBLE || b.addr + b.size <= a) return 0;
+        a = b.addr + b.size;
+    }
+    return 1;
+}
 /* svcCreateEvent's writable end: SignalEvent and ClearEvent take it, WaitSynchronization doesn't */
 typedef struct {
     KObj o;
@@ -383,6 +395,10 @@ static void snx_svc_(CPU* c, u32 imm) {
             }
             if (!x[1] || (x[1] & 0xFFF)) {
                 x[0] = R_BADSIZE;
+                return;
+            }
+            if (!user_buffer_mapped(x[0], x[1])) { /* the kernel locks the buffer for the request */
+                x[0] = R_BADMEMSTATE;
                 return;
             }
             core_leave(t);

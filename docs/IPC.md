@@ -85,7 +85,8 @@ only read):
 - A request's raw data ends where its data words do (for a domain request, where its domain header says). `ipc.c`
   fails a request with a buffer outside the address space (InvalidCurrentMemory), whose header describes more than
   the client's message buffer (InvalidCombination), or larger than the server's 0x100 bytes (MessageTooLarge, from
-  SendSyncRequestWithUserBuffer), before any service sees it, as the kernel does.
+  SendSyncRequestWithUserBuffer, whose buffer has to be page-aligned whole pages: InvalidAddress, InvalidSize), before
+  any service sees it, as the kernel does.
 - A request has to send what its command declares: the pid flag when it takes `pid` or `aruid`, as many A, B and X
   descriptors (an AutoSelect buffer counts in both of its lists), no exchange (W) buffer, as many copy and move
   handles, and at least the command's raw data. Otherwise it is answered with sf's InvalidCmifRequest, RC(11, 420),
@@ -95,8 +96,11 @@ only read):
   and a command that takes objects answers NotSupported on a plain session, which can't send them. A TIPC request
   (sm, from newer SDKs) carries its pid in the special header only, so its raw data has no pid slot, and the
   generated code reads its arguments where TIPC puts them. A request whose data words don't hold its CmifInHeader
-  (or domain header) is answered InvalidHeaderSize, and one without the SFCI magic InvalidInHeader. So a declaration
-  that differs from what the game's SDK sends fails every such request.
+  (or domain header) is answered InvalidHeaderSize, and one without the SFCI magic or with a version above 1
+  InvalidInHeader. So a declaration that differs from what the game's SDK sends fails every such request. One
+  difference from the console, on purpose: sf closes the session for these refusals (the client's SendSyncRequest
+  gets SessionClosed), while the runtime answers the result in a reply and keeps the session. Its own declarations
+  can be wrong where the console's aren't, and a game may survive an error result but not a dead session.
 - The generator refuses a command whose request or reply would not fit the 0x100 byte message with its headers,
   descriptors, handles and domain object ids (0xd0 bytes of raw data out at most), and more than 15 move handles and
   objects out.
