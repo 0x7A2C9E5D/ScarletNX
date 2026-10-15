@@ -9,7 +9,12 @@
 #endif
 #include "loader.h"
 #include <lz4.h>
+/* OpenSSL's bignum header (from evp.h) types BN_ULONG as unsigned long long where long is 32 bits (Windows), which
+   C90 doesn't have: only its declarations use it here */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlong-long"
 #include <openssl/evp.h>
+#pragma clang diagnostic pop
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
