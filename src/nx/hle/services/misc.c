@@ -501,4 +501,23 @@ static int nn_btm_IBtmUser_GetCore(SvcObj* self, SvcObj** core) {
     return 0;
 }
 SvcObj* new_btmu(void) { return nn_btm_IBtmUser_new(0); }
+/* ListAudioIns lists no microphone, so there is none to open: audio's DeviceNotFound (153/1, as Ryujinx answers) */
+static int nn_audio_detail_IAudioInManager_OpenAudioIn(SvcObj* self, const nn_audio_AudioInParameter* params, u64 aruid,
+                                                       u32 process, IpcBuf name, IpcBuf name_out, u32* sample_rate,
+                                                       u32* channel_count, u32* sample_format, u32* state,
+                                                       SvcObj** in) {
+    return RC(153, 1);
+}
+static int nn_audio_detail_IAudioInManager_OpenAudioInAuto(SvcObj* self, const nn_audio_AudioInParameter* params,
+                                                           u64 aruid, u32 process, IpcBuf name, IpcBuf name_out,
+                                                           u32* sample_rate, u32* channel_count, u32* sample_format,
+                                                           u32* state, SvcObj** in) {
+    return RC(153, 1);
+}
+static int nn_audio_detail_IAudioInManager_OpenAudioInProtocolSpecified(
+    SvcObj* self, const nn_audio_AudioInProtocol* protocol, const nn_audio_AudioInParameter* params, u64 aruid,
+    u32 process, IpcBuf name, IpcBuf name_out, u32* sample_rate, u32* channel_count, u32* sample_format, u32* state,
+    SvcObj** in) {
+    return RC(153, 1);
+}
 SvcObj* new_audin(void) { return nn_audio_detail_IAudioInManager_new(0); }
