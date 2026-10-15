@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory() as repo:
     check('no changes from a commit that is not an ancestor', nightly.changes(repo, unmerged, sha) is None)
     check('the title', nightly.title(repo, sha) == f'Nightly 2026-10-15 ({sha[:7]})')
 
-    files = ['ScarletNX-android.apk', 'Other.bin', 'ScarletNX-aarch64.AppImage', 'ScarletNX-x86_64.AppImage']
+    files = ['ScarletNX-android.apk', 'ScarletNX-aarch64.AppImage', 'ScarletNX-x86_64.AppImage']
     text = nightly.notes(repo, sha, previous, 'owner/repo', files)
     check(
         'the built commit is the first one the notes name, where the next nightly looks',
@@ -79,9 +79,17 @@ with tempfile.TemporaryDirectory() as repo:
     )
     rows = [line.split('[')[1].split(']')[0] for line in text.splitlines() if line.startswith('| [')]
     check(
-        'the files in the table order, an unknown one last',
-        rows == ['ScarletNX-x86_64.AppImage', 'ScarletNX-aarch64.AppImage', 'ScarletNX-android.apk', 'Other.bin'],
+        'the files in the table order',
+        rows == ['ScarletNX-x86_64.AppImage', 'ScarletNX-aarch64.AppImage', 'ScarletNX-android.apk'],
     )
+    try:
+        nightly.notes(repo, sha, previous, 'owner/repo', files + ['ScarletNX-windows-arm64.zip'])
+        check('a file with no system stops the notes', False)
+    except SystemExit as stop:
+        check(
+            'a file with no system stops the notes, saying where to add it',
+            'ScarletNX-windows-arm64.zip' in str(stop) and 'SYSTEMS in scripts/nightly-notes.py' in str(stop),
+        )
     check('a merged pull request listed', '- [ci] its title (#5)' in text)
     check('the source named', f'https://github.com/owner/repo/tree/{sha}' in text)
     check(

@@ -17,7 +17,8 @@ import re
 import subprocess
 
 SERVER = 'https://github.com'
-# The release's files in the order the table lists them, with what each is for
+# The release's files in the order the table lists them, with what each is for. A file the release job uploads that
+# is missing here stops the notes (the files are out by then): add its line
 SYSTEMS = {
     'ScarletNX-x86_64.AppImage': 'Linux, x86-64',
     'ScarletNX-aarch64.AppImage': 'Linux, ARM64',
@@ -70,8 +71,11 @@ def notes(checkout, sha, previous, repo, files):
         '| File | For |',
         '|---|---|',
     ]
-    for name in sorted(files, key=lambda f: (list(SYSTEMS).index(f) if f in SYSTEMS else len(SYSTEMS), f)):
-        lines.append(f'| [{name}]({url}/releases/download/nightly/{name}) | {SYSTEMS.get(name, "")} |')
+    unknown = [name for name in files if name not in SYSTEMS]
+    if unknown:
+        raise SystemExit(f'{", ".join(unknown)}: what system is it for? Add it to SYSTEMS in scripts/nightly-notes.py')
+    for name in sorted(files, key=list(SYSTEMS).index):
+        lines.append(f'| [{name}]({url}/releases/download/nightly/{name}) | {SYSTEMS[name]} |')
     lines += [
         '',
         f'How to run them: [USAGE.md]({url}/blob/{sha}/docs/USAGE.md), and '

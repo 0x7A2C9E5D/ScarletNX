@@ -650,7 +650,8 @@ jobs:
           gh release upload nightly ScarletNX-android.apk --repo "$GITHUB_REPOSITORY" --clobber
       # The title the action gives the release, with a number for the time, is replaced by the commit's date and hash.
       # The notes say which file is for which system, what changed since the previous nightly and where the source
-      # is, which the GPL asks for beside the binaries (scripts/nightly-notes.py)
+      # is, which the GPL asks for beside the binaries (scripts/nightly-notes.py). A new file in the release needs its
+      # line in that script's SYSTEMS, or this step stops and names it
       - name: Write the title and the notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
