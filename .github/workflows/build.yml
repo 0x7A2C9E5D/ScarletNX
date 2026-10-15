@@ -601,6 +601,19 @@ jobs:
         env:
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+      # The history the notes list changes from, beside the files the release takes from the workspace
+      - uses: actions/checkout@v7
+        with:
+          path: source
+          fetch-depth: 0
+      # Read before the action below deletes that release: its notes link the commit it was built from first
+      - name: Find the commit of the nightly this one replaces
+        id: previous
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(gh release view nightly --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)
+          echo "sha=$(grep -o -m1 -E '[0-9a-f]{40}' <<<"$body" | head -n1)" >> "$GITHUB_OUTPUT"
       # Both AppImages beside one appinfo (the same name and version), where the action takes *.AppImage*
       - uses: actions/download-artifact@v8
         with:
@@ -635,15 +648,15 @@ jobs:
         run: |
           cp android/ScarletNX-${{ steps.commit.outputs.short }}.apk ScarletNX-android.apk
           gh release upload nightly ScarletNX-android.apk --repo "$GITHUB_REPOSITORY" --clobber
-      # The GPL asks for the way to the source next to the binary
-      - name: Say where the source is
+      # The title the action gives the release, with a number for the time, is replaced by the commit's date and hash.
+      # The notes say which file is for which system, what changed since the previous nightly and where the source
+      # is, which the GPL asks for beside the binaries (scripts/nightly-notes.py)
+      - name: Write the title and the notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREVIOUS: ${{ steps.previous.outputs.sha }}
         run: |
-          gh release edit nightly --repo "$GITHUB_REPOSITORY" --notes "Built from commit $GITHUB_SHA, whose source is at $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$GITHUB_SHA.
-
-          The third-party libraries built into the runtime are fetched from the release archives that cmake/dependencies.cmake lists at that commit, each checked against the SHA-256 written next to it. The AppImages, ScarletNX-x86_64.AppImage and ScarletNX-aarch64.AppImage, also bundle libraries from Arch Linux packages (Arch Linux ARM's for aarch64). Their licenses are in share/licenses, with the package list in share/licenses/bundled-packages.txt.
-
-          ScarletNX-windows-x86_64.zip contains the Windows build, its required runtime DLLs and licenses under share/licenses. The MSYS2 build environment's package versions are recorded in share/licenses/msys2/build-packages.txt.
-
-          ScarletNX-android.apk is the Android app for arm64-v8a and x86_64 devices, signed with a debug key."
+          python3 source/scripts/nightly-notes.py "$GITHUB_SHA" "$PREVIOUS" --checkout source --repo "$GITHUB_REPOSITORY" \
+            --files ScarletNX-*.AppImage ScarletNX-windows-x86_64.zip ScarletNX-android.apk > notes.md
+          gh release edit nightly --repo "$GITHUB_REPOSITORY" --notes-file notes.md \
+            --title "$(python3 source/scripts/nightly-notes.py "$GITHUB_SHA" --checkout source --title)"
