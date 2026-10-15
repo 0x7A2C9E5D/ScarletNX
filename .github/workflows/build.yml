@@ -43,8 +43,9 @@ jobs:
         with:
           path: .cache/cpm
           key: cpm-${{ github.job }}-${{ hashFiles('cmake/dependencies.cmake') }}
-      # ccache under every compile, FFmpeg's and OpenSSL's too (CMake takes the launchers from the environment), from
-      # the newest cache of this job on this branch, else on main
+      # ccache under every compile, FFmpeg's and OpenSSL's too, from the newest cache of this job on this branch, else
+      # on main. Each cmake gets it as its launcher: from the environment CMake would run its configure checks through
+      # it, and they only miss
       - uses: actions/cache/restore@v5
         with:
           path: .cache/ccache
@@ -59,23 +60,23 @@ jobs:
             # paths in the keys relative to the checkout, and no build folder in them: build trees share entries
             echo "CCACHE_BASEDIR=$ws"
             echo "CCACHE_NOHASHDIR=true"
-            echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
-            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
             echo "SNX_CCACHE_START=$(date +%s)"
           } >> "$GITHUB_ENV"
       - name: Build the runtime
         run: |
-          cmake --preset default
+          cmake --preset default -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build --preset default
           cmake --install build/default --prefix stage
       - name: Build the SDL3 fallback without a system package
         run: |
           cmake --preset default -B build/sdl-fallback -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON \
-            -DSNX_DEPLOY=OFF -DBUILD_TESTING=OFF -DSDL_WAYLAND=OFF
+            -DSNX_DEPLOY=OFF -DBUILD_TESTING=OFF -DSDL_WAYLAND=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/sdl-fallback --target scarletnx
       - name: Build SDL3 with headless Vulkan tests
         run: |
-          cmake --preset default -B build/headless -DSNX_BUILD_GUI=OFF -DSNX_DEPLOY=OFF -DSNX_TEST_VULKAN=ON
+          cmake --preset default -B build/headless -DSNX_BUILD_GUI=OFF -DSNX_DEPLOY=OFF -DSNX_TEST_VULKAN=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/headless
       # Only what this run used is kept, so the cache saved is one build's worth
       - name: Trim the compiler cache
@@ -143,8 +144,6 @@ jobs:
             echo "CCACHE_DIR=$ws/.cache/ccache"
             echo "CCACHE_BASEDIR=$ws"
             echo "CCACHE_NOHASHDIR=true"
-            echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
-            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
             echo "SNX_CCACHE_START=$(date +%s)"
           } >> "$GITHUB_ENV"
       # The action pins its own setup script only: the tools that script downloads are pinned here to a commit of
@@ -170,7 +169,8 @@ jobs:
       - name: Build and install into /usr
         run: |
           git config --global --add safe.directory '*'
-          cmake --preset default -DSNX_DEPLOY=OFF -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --preset default -DSNX_DEPLOY=OFF -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build --preset default
           cmake --install build/default
       - name: Trim the compiler cache
@@ -228,8 +228,6 @@ jobs:
             echo "CCACHE_DIR=$ws/.cache/ccache"
             echo "CCACHE_BASEDIR=$ws"
             echo "CCACHE_NOHASHDIR=true"
-            echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
-            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
             echo "SNX_CCACHE_START=$(date +%s)"
           } >> "$GITHUB_ENV"
       # llvm-mingw alone has no LLVM development libraries. Do not mix its C++ runtime with another LLVM build.
@@ -277,7 +275,8 @@ jobs:
             -DSNX_FFMPEG_MAKE="$(cygpath -m /usr/bin/make.exe)" \
             -DPERL_EXECUTABLE="$(cygpath -m /usr/bin/perl.exe)" \
             -DSNX_OPENSSL_MAKE="$(cygpath -m /usr/bin/make.exe)" \
-            -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON -DSNX_DEPLOY=OFF -DSNX_GCCJIT=OFF
+            -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON -DSNX_DEPLOY=OFF -DSNX_GCCJIT=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build --preset default --parallel 4
           cmake --install build/default --prefix stage
       - name: Trim the compiler cache
@@ -398,13 +397,13 @@ jobs:
             echo "CCACHE_DIR=$ws/.cache/ccache"
             echo "CCACHE_BASEDIR=$ws"
             echo "CCACHE_NOHASHDIR=true"
-            echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
-            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
             echo "SNX_CCACHE_START=$(date +%s)"
           } >> "$GITHUB_ENV"
       - name: Build the native libraries and the APK
         run: |
-          JAVA_HOME=$JAVA_HOME_21_X64 scripts/android-apk.sh "$PWD/build/android" "$PWD/android-llvm" ${{ matrix.abi }}
+          JAVA_HOME=$JAVA_HOME_21_X64 scripts/android-apk.sh "$PWD/build/android" "$PWD/android-llvm" \
+            ${{ matrix.abi }} -- \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cp build/android/stage/gradle/outputs/apk/debug/ScarletNX-debug.apk ScarletNX-${{ steps.commit.outputs.short }}-${{ matrix.abi }}.apk
       - name: Trim the compiler cache
         run: |
