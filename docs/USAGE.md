@@ -231,6 +231,7 @@ it for one run.
 | `language=1` | English (US); other IDs in INI |
 | `network=1` | Online through the computer's connection (bsd, sfdnsres, nifm); `0` offline, loopback only |
 | `log=2` | Verbose, adds runtime overhead |
+| `auto_stub_ipc=1` | A service command the runtime doesn't know answers success, logged as `[undeclared]`, and a service it doesn't have answers every command that way. `0` answers them with the console's UnknownCommandId instead, which shows the gap where the game makes the call |
 
 `audout` PCM playback and the audio renderer's device sink (`audren`) use SDL3's system-default output on
 Windows, Linux and supported Unix systems. Choose the output in your operating system's sound settings. The

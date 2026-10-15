@@ -23,6 +23,9 @@ extern int g_opt_docked, g_opt_lang;
 extern int g_opt_fps;
 void fps_limit_text(int fps, char* out, size_t n); /* g_opt_fps as fps_limit's value: "game", "0", "30"... */
 extern int g_opt_diag, g_opt_shadows, g_opt_prof;
+/* auto_stub_ipc: 1 = a service command the runtime doesn't declare answers success with no outputs, 0 = the
+   console's UnknownCommandId (hle/kernel/ipc.c's stub_ok, sm's stand-in for a service there isn't) */
+extern int g_opt_auto_stub_ipc;
 extern int g_opt_network; /* network: 1 = the game is online through the host (hle/services/network) */
 extern float g_opt_resf;
 extern int g_opt_vsync; /* vsync: 1 = presents wait for the display's refresh (FIFO) */
