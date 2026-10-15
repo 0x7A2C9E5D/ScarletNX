@@ -46,9 +46,13 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   creating the folder if needed. Existing keys trigger the bright-red warning
   **Keys already setup. This will overwrite the previous ones**. A successful
   drop replaces them and returns to the menu; ESC cancels without changing them.
-- **[ON/OFF] Fullscreen** toggles the Switch game's startup setting, not the
-  launcher's window. ON passes `-f` (short for `--fullscreen`); OFF omits the flag,
-  and the game's `.ini` decides (`fullscreen=1` starts fullscreen).
+- **[ON/OFF] Fullscreen** sets how the Switch game starts. ON passes `-f` (short for
+  `--fullscreen`) and OFF passes `--fullscreen=0`, so the launcher's choice wins over the
+  game's `.ini`. On Android it also puts the launcher itself on the whole screen.
+- **Touch** sets the game's touch screen: the fingers, the mouse too, or off. It passes
+  `--touch=1`, `--touch=2` or `--touch=0`.
+- **[ON/OFF] On-screen controls** shows or hides the pad drawn over the game. It passes
+  `--controls=1` or `--controls=0`, and the game's menu edits the pad.
 - **[ON/OFF] Enable libgccjit** passes `--backend=gcc` when preparing a Switch dump.
   It stays OFF if this build lacks libgccjit. Prepared executables in `games/`
   already have a compiled backend, so this setting does not recompile them.
@@ -60,6 +64,11 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   Switch options; they are never forwarded as Linux guest arguments or to the 3DS driver.
 - **Theme** switches to the next theme: the built-in Default and YoRHa, then each
   folder of `themes/` (see [Themes](#themes)). It lasts for the session.
+- **Text size** steps the menu's letters through Auto (fit the screen) and four sizes.
+  Bigger letters scroll the menu.
+- **Share log** saves the last run's output and game log to `scarletnx.log`. On the
+  desktop it goes in the working folder with its path copied. On Android it goes to
+  `/sdcard/ScarletNX/` and is shared.
 - **Exit** closes the launcher. Closing its window during a run terminates the
   entire owned process tree, so let the game exit normally to preserve its saves.
 - **Recent games**, above the items, lists the last five games run, newest first, by
@@ -100,11 +109,12 @@ excluded. The list is refreshed each time it is opened.
 - Empty or missing directories show a diagnostic and still provide Back.
 
 For the Switch selection these are already-prepared native game launchers, so
-selecting one runs it directly with the fullscreen/debugger settings rather than trying to
-extract it as a dump. For the Linux selection, the selected file is passed to
-`scarletnx-gnuabi` as an ARM64 ELF. Output capture, resource accounting and the
-return to the main menu work the same way for both input methods. For the 3DS
-selection, the browser passes a CIA input to `scarletnx-3ds`; it never executes it directly.
+selecting one runs it directly with the fullscreen, touch, on-screen controls and
+debugger settings rather than trying to extract it as a dump. For the Linux
+selection, the selected file is passed to `scarletnx-gnuabi` as an ARM64 ELF.
+Output capture, resource accounting and the return to the main menu work the same
+way for both input methods. For the 3DS selection, the browser passes a CIA input
+to `scarletnx-3ds`; it never executes it directly.
 
 ## Output and resource use
 

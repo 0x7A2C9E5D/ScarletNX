@@ -54,8 +54,10 @@ typedef struct {
     Uint64 sampled;
     bool has_output, finished, aborting, abnormal_exit;
     int native;
-    SDL_FingerID finger;      /* the finger on the screen, 0 for none */
+    Uint64 finger;            /* the finger on the screen (finger_id), 0 for none */
     float finger_x, finger_y; /* where it went down, 0 to 1 across the window */
+    bool pen_held;            /* a pen lifted: its hover leaves the focus where the lift put it until it moves away */
+    float pen_x, pen_y;       /* where it lifted, 0 to 1 across the window */
     Uint32 picked;            /* the event a file from the system's picker comes back as */
     SDL_Texture* splash;      /* the boot's splash, its icon, until splash_until */
     Uint64 splash_until;
@@ -836,7 +838,8 @@ static int play(App* app, const char* game) {
     const char* argv[5];
     int ok, n = 0;
     argv[n++] = option;
-    if (app->menu.fullscreen) argv[n++] = "-f"; /* the whole screen, the system's bars out of the way */
+    /* the whole screen, the system's bars out of the way. OFF says so over the game's .ini */
+    argv[n++] = app->menu.fullscreen ? "-f" : "--fullscreen=0";
     argv[n++] = gui_touch_option(&app->menu);
     argv[n++] = gui_controls_option(&app->menu);
     argv[n] = NULL;
@@ -1333,6 +1336,11 @@ static int escape_row(const App* app) {
     if (app->theme.run == GUI_RUN_STEPS) return app->rows - 1;
     return app->theme.head != GUI_STYLE_NONE ? 3 : -1;
 }
+/* a finger's id, the pen's apart: SDL gives a pen's touch the id 1 on every platform, the id Android and Wayland
+   give a first finger and any finger may have, and no real finger's id sets bit 63 */
+static Uint64 finger_id(const SDL_TouchFingerEvent* f) {
+    return (Uint64)f->fingerID | (f->touchID == SDL_PEN_TOUCHID ? 1ull << 63 : 0);
+}
 /* a finger lifted at x, y (0 to 1 across the window): a swipe across turns the games' pages; a tap clicks there, is ESC
    on a finished run and on a running one's ESC line */
 static void touch(App* app, float x, float y) {
@@ -1396,19 +1404,42 @@ static void event(App* app, const SDL_Event* e) {
         return;
     }
     if (e->type == SDL_EVENT_FINGER_DOWN && !app->finger) {
-        app->finger = e->tfinger.fingerID;
+        app->finger = finger_id(&e->tfinger);
         app->finger_x = e->tfinger.x;
         app->finger_y = e->tfinger.y;
         return;
     }
     if ((e->type == SDL_EVENT_FINGER_UP || e->type == SDL_EVENT_FINGER_CANCELED) &&
-        e->tfinger.fingerID == app->finger) {
+        finger_id(&e->tfinger) == app->finger) {
         app->finger = 0;
+        if (e->tfinger.touchID == SDL_PEN_TOUCHID) {
+            app->pen_held = true;
+            app->pen_x = e->tfinger.x;
+            app->pen_y = e->tfinger.y;
+        }
         if (e->type == SDL_EVENT_FINGER_UP) touch(app, e->tfinger.x, e->tfinger.y);
         return;
     }
     if (e->type == SDL_EVENT_MOUSE_MOTION) {
         pointer(app, e->motion.x, e->motion.y, false, false);
+        return;
+    }
+    /* a hovering pen highlights as the mouse does (it sends no mouse motion). Touching, it is a finger, and once it
+       lifts its hover waits until it has moved away as far as a tap may: a drag's scroll by touch() would otherwise
+       be undone by the hover at the lift, which SDL sends right after it */
+    if (e->type == SDL_EVENT_PEN_PROXIMITY_OUT) {
+        app->pen_held = false;
+        return;
+    }
+    if (e->type == SDL_EVENT_PEN_MOTION) {
+        int w, h;
+        if (e->pmotion.pen_state & SDL_PEN_INPUT_DOWN) return;
+        SDL_GetWindowSize(app->window, &w, &h);
+        if (app->pen_held && w > 0 && h > 0 && SDL_fabsf(e->pmotion.x / (float)w - app->pen_x) <= 0.03f &&
+            SDL_fabsf(e->pmotion.y / (float)h - app->pen_y) <= 0.03f)
+            return;
+        app->pen_held = false;
+        pointer(app, e->pmotion.x, e->pmotion.y, false, false);
         return;
     }
     if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN && e->button.button == SDL_BUTTON_LEFT) {
@@ -1457,8 +1488,11 @@ static bool initialize(App* app) {
 #else
     app->theme = *gui_theme_builtin("default");
 #endif
-    /* touch() takes the fingers: SDL would send each as a mouse too */
+    /* touch() takes the fingers, and a finger and the mouse each arrive once: SDL would also send each as the other,
+       and a pen as both (it stays a finger), so one tap would select twice */
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_PEN_MOUSE_EVENTS, "0");
     if (!SDL_Init(SDL_INIT_VIDEO)) return false;
 #ifdef SDL_PLATFORM_ANDROID
     /* the whole screen, the system's bars out of the way, as Fullscreen says: a phone held wide is short */
