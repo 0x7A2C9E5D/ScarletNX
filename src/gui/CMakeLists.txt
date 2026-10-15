@@ -83,7 +83,8 @@ if(BUILD_TESTING)
     add_executable(snx-test-gui-process "${PROJECT_SOURCE_DIR}/tests/gui_process.c")
     target_link_libraries(snx-test-gui-process PRIVATE snx_gui_support scarletnx-common)
     add_test(NAME gui_process_tree COMMAND snx-test-gui-process)
-    set_tests_properties(gui_process_tree PROPERTIES TIMEOUT 30)
+    # alone: it samples the CPU and memory its child tree takes, which tests running beside it can starve
+    set_tests_properties(gui_process_tree PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
     add_executable(snx-test-gui-sdl "${PROJECT_SOURCE_DIR}/tests/gui_sdl.c")
     target_link_libraries(snx-test-gui-sdl PRIVATE snx_gui_support scarletnx-common SDL3::SDL3 snx_window_icon
                           snx_build_info)
