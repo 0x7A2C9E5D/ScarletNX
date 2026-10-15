@@ -92,8 +92,9 @@ bottom of the window. See [GNUABI](GNUABI.md) for supported Linux ELF applicatio
 ## Selecting an executable from games/
 
 **Select file from games/ instead** replaces the menu and old output with a file
-list. It reads `games/` relative to the working directory shown in the footer,
-not relative to the GUI executable. Each entry is displayed by basename, sorted
+list. It reads the `games/` of the folder the driver works in, which the menu passes
+it as `--repo`: the checkout of a build tree, else the folder of an AppImage (or of the
+GUI) that has a `games/` beside it, else the user's data folder (docs/USAGE.md). Each entry is displayed by basename, sorted
 alphabetically. Only immediate executable files are listed (execute permission
 on UNIX, `.exe` on Windows). Hidden files, shared libraries and directories are
 excluded. For **Load 3DS CIA**, only immediate non-hidden `.cia` files are listed
@@ -164,7 +165,7 @@ with the recompile's percentage). The menu fades out to black as a run starts an
 fades the run out and the menu back in.
 
 A theme is also a folder holding a `theme.ini`, the folder's name its id, in
-`themes/` in the working directory or in `themes/` beside the GUI; the first one found
+`themes/` in that same folder or in `themes/` beside the GUI; the first one found
 wins, and a folder named like a built-in replaces it. The built-ins ship as such files
 (`src/gui/themes/`, copied beside the GUI in the build and installed with it): copy one
 under a new name to make a theme, or edit one to change the built-in. `[theme] base`
@@ -239,7 +240,8 @@ fade_out_ms = 500
 line_in = typing
 line_in_ms = 220
 typing_ms = 5
-; async: every line types from when it comes; sync: one at a time, the done ones three times faster
+; async: every line types from when it comes; sync: one at a time. A running step's newest line
+; types a character each typing_ms, any other line whole in typing_ms
 typing = async
 blink_ms = 500
 ; a line too long for its row (big letters) slides left a column every scroll_ms and back; 0 cuts it

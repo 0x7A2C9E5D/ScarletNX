@@ -65,6 +65,7 @@ static const GuiTheme builtins[] = {
         .detailed = 1,
         .ring = GUI_RING_RIGHT,
         .line_in = GUI_LINE_TYPING,
+        .typing_sync = 1,
         .fade_in_ms = 250,
         .fade_out_ms = 500,
         .line_in_ms = 220,

@@ -103,6 +103,18 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
         default: break;
     }
 }
+bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
+    if (!confirm->shown) return false;
+    switch (key) {
+        case GUI_UP:
+        case GUI_DOWN:
+        case GUI_LEFT:
+        case GUI_RIGHT: confirm->selected ^= 1; return false;
+        case GUI_SELECT: confirm->shown = false; return confirm->selected == GUI_CONFIRM_ABORT;
+        case GUI_CANCEL: confirm->shown = false; return false;
+        default: return false;
+    }
+}
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
         case GUI_FULLSCREEN:
@@ -143,7 +155,7 @@ const char* gui_touch_option(const GuiMenu* menu) {
     return options[menu->touch];
 }
 const char* gui_controls_option(const GuiMenu* menu) { return menu->controls ? "--controls=1" : "--controls=0"; }
-size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv) {
+size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char* repo, const char** argv) {
     size_t n = 0;
     /* These are Switch options, never guest argv for the CPU-only Linux driver. */
     if (menu->selected != GUI_SWITCH) return 0;
@@ -155,6 +167,10 @@ size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv)
     if (menu->gdbstub) {
         argv[n++] = "-S";
         argv[n++] = "-s";
+    }
+    if (repo && !prepared) {
+        argv[n++] = "--repo";
+        argv[n++] = repo;
     }
     return n;
 }
@@ -204,12 +220,6 @@ GuiBrowserAction gui_browser_key(GuiBrowser* browser, GuiKey key) {
     items = gui_browser_items(browser);
     if (browser->selected > items) browser->selected = items;
     return GUI_BROWSER_NONE;
-}
-unsigned char gui_glyph(uint32_t codepoint) {
-    if (codepoint < 128) return (unsigned char)codepoint;
-    for (int i = 128; i < 256; ++i)
-        if (gui_codepage[i] == codepoint) return (unsigned char)i;
-    return '?';
 }
 static int clamp(int n, int maximum) { return n < 1 ? 1 : n > maximum ? maximum : n; }
 void gui_console_init(GuiConsole* console, int cols, int rows) {

@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #include "runtime/platform/overlay.h"
 #include "runtime/platform/backend.h"
+#include "runtime/platform/fatal_screen.h"
 #include "runtime/platform/vpad.h"
 #include <stdio.h>
 #include <string.h>
@@ -33,6 +34,7 @@ static int shown, page, focus, top; /* top: the first item showing */
 #define INK       0xFF3A4145u
 #define SOFT      0xFF76868Au
 #define LIGHT     0xFFBED6DAu
+#define FAILURE   0xFF3C47A5u
 
 static int items(void) { return page == PAGE_MAIN ? 2 : page == PAGE_CONTROLS ? C_COUNT : SNX_VPAD_COUNT + 2; }
 static void page_open(int p) {
@@ -145,10 +147,20 @@ void overlay_toggle(void) {
 }
 /* the panel's rows: the page's items under the head, a blank row under them */
 static int rows(void) { return FIRST + (items() < VISIBLE ? items() : VISIBLE) + 1; }
+static int display_percent = 100; /* set on the event thread, read by the renderer's */
+void overlay_set_display_scale(float scale) {
+    __atomic_store_n(&display_percent, scale > 0.0f ? (int)(scale * 100.0f) : 100, __ATOMIC_RELAXED);
+}
 void overlay_place(int sw, int sh, int* x, int* y, int* scale) {
-    /* the tallest page sets the scale, so the letters keep their size from page to page */
+    /* the tallest page sets the scale, so the letters keep their size from page to page: half the picture, or twice
+       the display's scale as the menu's Text size Auto (src/gui) if that is more, within three quarters of it. A
+       phone's short picture held its letters at 2x by the half alone */
     int w = OVERLAY_COLS * 8, h = OVERLAY_ROWS * 16;
     int s = sw / 2 / w < sh / 2 / h ? sw / 2 / w : sh / 2 / h;
+    int dense = 2 * __atomic_load_n(&display_percent, __ATOMIC_RELAXED) / 100;
+    if (dense > s) s = dense;
+    if (s > sw * 3 / 4 / w) s = sw * 3 / 4 / w;
+    if (s > sh * 3 / 4 / h) s = sh * 3 / 4 / h;
     *scale = s < 1 ? 1 : s;
     *x = (sw - w * *scale) / 2;
     *y = (sh - rows() * 16 * *scale) / 2;
@@ -216,4 +228,43 @@ void overlay_draw(SnxUiList* l, int sw, int sh) {
     if (top) ui_text(l, (float)px + cw * (OVERLAY_COLS - 1), (float)py + ch * FIRST, s, "\x18", SOFT);
     if (top + VISIBLE < n)
         ui_text(l, (float)px + cw * (OVERLAY_COLS - 1), (float)py + ch * (FIRST + VISIBLE - 1), s, "\x19", SOFT);
+}
+void overlay_error_draw(SnxUiList* l, int sw, int sh, const char* name, const char* msg, const char* how) {
+    enum { PARAS = 4, LINES = 12 };
+    static char rows_of[PARAS][LINES][FATAL_ROW];
+    const char* text[PARAS] = {name, msg, fatal_hint(msg), how};
+    const u32 color[PARAS] = {SOFT, FAILURE, INK, SOFT};
+    char line[OVERLAY_COLS + 4];
+    int px, py, s, n[PARAS], k, i, total, room, row;
+    float cw, ch, x, y;
+    overlay_place(sw, sh, &px, &py, &s);
+    cw = 8.0f * (float)s;
+    ch = 16.0f * (float)s;
+    for (k = 0; k < PARAS; ++k) n[k] = text[k] ? fatal_wrap(text[k], OVERLAY_COLS - 2, rows_of[k], LINES) : 0;
+    /* the head, the name, then each paragraph after a blank row; a blank, Close and a blank. On a short picture the
+       last paragraphs lose rows first */
+    room = sh / (int)ch;
+    for (;;) {
+        total = 1 + 4;
+        for (k = 0; k < PARAS; ++k) total += (n[k] > LINES ? LINES : n[k]) + (k > 0 && n[k] ? 1 : 0);
+        for (k = PARAS - 1; k > 1 && !n[k]; --k) {}
+        if (total <= room || k < 1 || !n[k]) break;
+        n[k] = (n[k] > LINES ? LINES : n[k]) - 1;
+    }
+    x = (float)px;
+    y = (float)((sh - total * (int)ch) / 2);
+    ui_fill(l, x, y, cw * OVERLAY_COLS, ch * (float)total, PAGE_RGBA);
+    ui_fill(l, x, y, cw * OVERLAY_COLS, ch, INK);
+    ui_text(l, x + cw, y, s, "SCARLETNX  /  STOPPED", LIGHT);
+    row = 1;
+    for (k = 0; k < PARAS; ++k) {
+        if (k > 0 && n[k]) ++row;
+        for (i = 0; i < n[k] && i < LINES; ++i, ++row) {
+            fatal_cp437(rows_of[k][i], line, sizeof line);
+            ui_text(l, x + cw, y + ch * (float)row, s, line, color[k]);
+        }
+    }
+    row = total - 2;
+    ui_fill(l, x, y + ch * (float)row, cw * OVERLAY_COLS, ch, INK);
+    ui_text(l, x + cw, y + ch * (float)row, s, "\xFE Close", LIGHT);
 }

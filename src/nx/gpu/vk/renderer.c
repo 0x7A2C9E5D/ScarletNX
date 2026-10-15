@@ -520,5 +520,6 @@ const Renderer vk_renderer = {
     .screenshot = vkr_screenshot,
     .refresh = vkr_refresh,
     .save = vk_pipeline_save,
+    .release_window = vk_window_release,
 };
 const Renderer* g_renderer = &vk_renderer;

@@ -394,6 +394,23 @@ int vk_surface_recreate(void) {
     return 0;
 }
 
+int vk_window_release(void) {
+    int waited = 0;
+    /* a thread that holds the renderer and doesn't let go (stuck on a lost device) must not keep the error unseen */
+    while (!vk_trylock()) {
+        if (++waited == 200) return 0;
+        plat_sleep_ns(10000000);
+    }
+    vkDeviceWaitIdle(g_vk.dev); /* a lost device answers at once */
+    if (g_vk.swapchain) swapchain_retire();
+    if (g_vk.surface) vkDestroySurfaceKHR(g_vk.instance, g_vk.surface, NULL);
+    g_vk.surface = VK_NULL_HANDLE;
+    /* every hold of this thread's at once: it won't return to the callers that took them */
+    t_vkdepth = 0;
+    pm_unlock(&g_vklock);
+    return 1;
+}
+
 int vk_swapchain_create(int srgb) {
     if (g_opt_headless) return 0; /* no WSI calls, even on a resize/recreate path */
     VkSurfaceCapabilitiesKHR caps;

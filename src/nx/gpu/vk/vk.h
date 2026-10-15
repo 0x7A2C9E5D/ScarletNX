@@ -74,6 +74,7 @@ int vk_init(void);
    create failed: then there is none. A lost surface sets sc_lost; the next present tries again */
 int vk_swapchain_create(int srgb);
 int vk_surface_recreate(void);
+int vk_window_release(void); /* Renderer.release_window */
 /* logs a failed call with where it happened; evaluates to 1 on success */
 #define VK_OK(call) vk_ok_((call), #call, __FILE__, __LINE__)
 int vk_ok_(VkResult r, const char* what, const char* file, int line);

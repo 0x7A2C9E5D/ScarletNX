@@ -273,6 +273,6 @@ GITHUB_REPOSITORY=scarletnx/ScarletNX scripts/make-appimage.sh
 # -> dist/ScarletNX-<arch>.AppImage
 ```
 
-[Nightly AppImage](https://github.com/scarletnx/ScarletNX/releases/tag/nightly) · [Launch](USAGE.md).
+[Nightly AppImages](https://github.com/scarletnx/ScarletNX/releases/tag/nightly), x86_64 and aarch64 · [Launch](USAGE.md).
 
 [Licenses/credits](CREDITS.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md).

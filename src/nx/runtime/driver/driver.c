@@ -29,7 +29,8 @@ static void usage(void) {
          "  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game\n"
          "  --repo / --build-dir   Override this build's checkout / build directory\n"
-         "                         (without its checkout: the user's data folder,\n"
+         "                         (without its checkout: a games/ folder's beside the\n"
+         "                         AppImage or the program, else the user's data folder,\n"
 #ifdef _WIN32
          "                         %APPDATA%\\scarletnx)");
 #elif defined(__APPLE__)
@@ -325,21 +326,21 @@ int snx_driver(int argc, char** argv) {
         for (i = separator; i < argc; ++i) rest[n++] = argv[i];
     rest[n] = NULL;
     /* An installed build (the AppImage, the Windows zip) runs without the checkout it was built from: work/, games/ and
-       prod.keys are in the user's data folder then, unless --repo names a folder (the Android app does). Not the
-       current folder: the GUI, a desktop entry or Explorer start the driver wherever they happen to be, often
-       somewhere read-only (/, the AppImage's mount, Program Files) */
+       prod.keys are in its data folder then (snx_data_dir), unless --repo names one (the menu does). Not the current
+       folder: a desktop entry or Explorer start the driver wherever they happen to be, often somewhere read-only (/,
+       the AppImage's mount, Program Files) */
     if (!repo_given) {
-        checkout = snx_path_join(repo, "CMakeLists.txt");
-        if (!snx_is_file(checkout)) {
-            data = snx_user_data_dir();
-            if (data && snx_mkdirs(data)) {
-                free(checkout);
-                result = snx_error("cannot create the data folder %s", data);
-                goto done;
-            }
-            repo = data ? data : ".";
-        }
+        checkout = snx_executable(argv[0]);
+        exe = checkout ? snx_dirname(checkout) : NULL;
         free(checkout);
+        data = snx_data_dir(repo, exe);
+        free(exe);
+        exe = NULL;
+        if (data && snx_mkdirs(data)) {
+            result = snx_error("cannot create the data folder %s", data);
+            goto done;
+        }
+        repo = data ? data : ".";
     }
     snx_tool_console();
     r = snx_absolute(repo);
