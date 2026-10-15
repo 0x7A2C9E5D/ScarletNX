@@ -397,6 +397,8 @@ jobs:
             echo "CCACHE_DIR=$ws/.cache/ccache"
             echo "CCACHE_BASEDIR=$ws"
             echo "CCACHE_NOHASHDIR=true"
+            # the NDK is installed afresh on each run: its version, not its files' dates, says which compiler it is
+            echo "CCACHE_COMPILERCHECK=string:$ANDROID_NDK_ROOT"
             echo "SNX_CCACHE_START=$(date +%s)"
           } >> "$GITHUB_ENV"
       - name: Build the native libraries and the APK
