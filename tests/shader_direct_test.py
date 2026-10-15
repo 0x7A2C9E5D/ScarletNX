@@ -29,6 +29,7 @@ def main():
         nro_exchange = Path(directory) / 'nro_exchange.spv'
         issue126 = tuple(Path(directory) / f'issue126_{i}.spv' for i in range(17))
         stages = tuple(Path(directory) / f'stage_{i}.spv' for i in range(3))
+        queries = tuple(Path(directory) / f'query_{i}.spv' for i in range(2))
         subprocess.run(
             [args.generator, str(path), str(vertex), str(abs_fragment), str(stack_fragment), str(subgroup)], check=True
         )
@@ -37,7 +38,17 @@ def main():
         subprocess.run([args.validator, '--target-env', 'vulkan1.3', str(abs_fragment)], check=True)
         subprocess.run([args.validator, '--target-env', 'vulkan1.3', str(stack_fragment)], check=True)
         subprocess.run([args.validator, '--target-env', 'vulkan1.3', str(subgroup)], check=True)
-        fixtures = (storage_write, storage_atomic, nro_raw, nro_ms, nro_ms_array, nro_exchange, *issue126, *stages)
+        fixtures = (
+            storage_write,
+            storage_atomic,
+            nro_raw,
+            nro_ms,
+            nro_ms_array,
+            nro_exchange,
+            *issue126,
+            *stages,
+            *queries,
+        )
         subprocess.run([args.regressions, *(str(path) for path in fixtures)], check=True)
         for fixture in fixtures:
             subprocess.run([args.validator, '--target-env', 'vulkan1.3', str(fixture)], check=True)

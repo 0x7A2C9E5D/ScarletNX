@@ -598,6 +598,7 @@ int shader_writes_reg(u64 w, int op, u32 reg) {
         case O_TLD4:
         case O_TLD4_B:
         case O_TMML:
+        case O_TMML_B:
         case O_TXD: count = direct_mask_count(B(w, 31, 4) ? B(w, 31, 4) : 15); break;
         case O_TXQ:
         case O_TXQ_B: count = direct_mask_count(B(w, 31, 4)); break;
@@ -1141,7 +1142,8 @@ static int supported(u64 w, int op) {
         case O_FMNMX_I: return !B(w, 47, 1);
         case O_IPA: {
             u32 addr = B(w, 30, 8) * 4;
-            return ((addr >= 0x80 && addr < 0x280) || (addr >= 0x70 && addr < 0x80) || addr == 0x64 || addr == 0x3fc) &&
+            return ((addr >= 0x80 && addr < 0x280) || (addr >= 0x70 && addr < 0x80) || addr == 0x64 || addr == 0x2e0 ||
+                    addr == 0x2e4 || addr == 0x3fc) &&
                    !B(w, 38, 1);
         }
         case O_PSETP: return B(w, 24, 2) < 3 && B(w, 45, 2) < 3;
@@ -1217,7 +1219,9 @@ static int supported(u64 w, int op) {
         case O_DMNMX_I: return !B(w, 47, 1);
         case O_TEX: return texture_sample_supported(w, 0);
         case O_TEX_B: return texture_sample_supported(w, 1);
-        case O_TMML: return B(w, 28, 3) == 2;
+        /* every type but a 3D array, which doesn't exist */
+        case O_TMML:
+        case O_TMML_B: return B(w, 28, 3) != 5;
         case O_FSETP_R:
         case O_FSETP_C:
         case O_FSETP_I: return 1;
@@ -1309,6 +1313,18 @@ static int direct_query_slot(const ShTex* textures, int count, u32 off, int bind
     return slot;
 }
 
+/* The slot of a texture of that type (Maxwell's type field halved), array and shadow, read through that handle */
+static int direct_typed_slot(const ShTex* textures, int count, u32 off, u32 type, u32 array, u32 shadow, int bindless,
+                             u32 bank, int handle_count, u32 bank2, u32 off2, u32 indexed, u32 ldc) {
+    int slot = 0;
+    while (slot < count &&
+           (textures[slot].cbuf_off != off || textures[slot].type != type || textures[slot].array != array ||
+            textures[slot].shadow != shadow || textures[slot].bindless != bindless ||
+            (bindless && !direct_bindless_matches(&textures[slot], bank, handle_count, bank2, off2, indexed, ldc))))
+        slot++;
+    return slot;
+}
+
 /* For this instruction, an indexed texture's sampler is the array element its LDC chose, clamped to the array */
 static void direct_swap_element(DirectCtx* c, int slot) {
     u32 limit = spv_emit_constant_u32(&c->emit, c->u32_type, SNX_TEX_ARRAY - 1);
@@ -1368,6 +1384,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     ShaderInfo image_info = {0};
     int needs_fragcoord = 0;
     int needs_frontface = 0;
+    int needs_point_coord = 0;
     int needs_image_query = 0;
     int needs_instance = 0;
     int needs_local_id = 0, needs_group_id = 0;
@@ -1398,7 +1415,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         if (!IDX_OK(i)) continue;
         const Op* op = decode(insn[i]);
         if (!op || !supported(insn[i], op->id) || !stage_has(insn[i], op->id, stage) ||
-            (stage != ST_FS && op->id == O_TMML) || (stage != ST_FS && op->id == O_IPA) ||
+            (stage != ST_FS && (op->id == O_TMML || op->id == O_TMML_B)) || (stage != ST_FS && op->id == O_IPA) ||
             (stage != ST_FS && op->id == O_KIL) ||
             (stage != ST_CS && op->id == O_S2R &&
              ((B(insn[i], 20, 8) >= 0x21 && B(insn[i], 20, 8) <= 0x23) ||
@@ -2139,17 +2156,40 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     if (dst < 255) dst++;
                 }
         }
-        if (op->id == O_TMML) {
-            u32 off = B(insn[i], 36, 13);
-            int slot = direct_query_slot(textures, texture_count, off, 0, 0, 0, 0, 0, 0, 0);
+        /* TMML.B takes its handle in Rb. The coordinates follow an array's layer, which the LOD doesn't depend on */
+        if (op->id == O_TMML || op->id == O_TMML_B) {
+            int bindless = op->id == O_TMML_B;
+            u32 ty = B(insn[i], 28, 3), type = ty >> 1, array = ty & 1;
+            u32 off = B(insn[i], 36, 13), bank = 0, bank2 = 0, off2 = 0, indexed = 0, ldc = 0;
+            int handle_count =
+                bindless ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
+            if (bindless && !handle_count) return direct_reject(si, "untracked texture handle");
+            if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, b, stage, &ldc);
+            int slot = direct_typed_slot(textures, texture_count, off, type, array, 0, bindless, bank, handle_count,
+                                         bank2, off2, indexed, ldc);
             if (slot == texture_count) {
                 if (texture_count >= 32) return direct_reject(si, "texture descriptor count");
                 textures[slot].cbuf_off = off;
-                textures[slot].type = 1;
+                textures[slot].type = (u8)type;
+                textures[slot].array = (u8)array;
+                textures[slot].bindless = (u8)bindless;
+                textures[slot].bl_cbuf = (u8)bank;
+                textures[slot].bl2 = handle_count == 2;
+                textures[slot].bl2_cbuf = (u8)bank2;
+                textures[slot].bl2_off = off2;
+                if (indexed) {
+                    textures[slot].flags |= (u8)indexed;
+                    textures[slot].bl2_off = ldc;
+                }
                 texture_count++;
             }
-            if (a < 255) used[a] = 1;
-            if (a + 1 < 255) used[a + 1] = 1;
+            for (u32 k = 0; k < array + (type == 0 ? 1 : type == 1 ? 2 : 3); k++)
+                if (a + k < 255) used[a + k] = 1;
+            if (bindless && b < 255) used[b] = 1;
+            u32 mask = B(insn[i], 31, 4), dst = d;
+            if (!mask) mask = 15;
+            for (u32 component = 0; component < 4; component++)
+                if (mask & (1u << component) && dst < 255) used[dst++] = 1;
             needs_image_query = 1;
         }
         if (op->id == O_TXQ || op->id == O_TXQ_B) {
@@ -2265,6 +2305,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 layer_input_used = 1;
             } else if (addr == 0x3fc) {
                 needs_frontface = 1;
+            } else if (addr == 0x2e0 || addr == 0x2e4) {
+                needs_point_coord = 1;
             } else if (addr >= 0x80) {
                 u32 input = (addr - 0x80) >> 4;
                 u32 interpolation = ipa_interpolation(sph, input);
@@ -2579,6 +2621,12 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     if (needs_frontface) {
         frontface = spv_emit_builtin_input_u32(&c->emit, c->bool_type, 17);
         interfaces[count++] = frontface;
+    }
+    /* a[0x2e0] and a[0x2e4] are the point sprite's S and T */
+    u32 point_coord = 0;
+    if (needs_point_coord) {
+        point_coord = spv_emit_interface_variable(&c->emit, 1, vec2, c->u32_type, 0, 16, 0, 0);
+        interfaces[count++] = point_coord;
     }
     u32 instance_index = 0, base_instance = 0, vertex_index = 0;
     u32 local_input = 0, group_input = 0;
@@ -4527,6 +4575,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 bits = spv_emit_select(&c->emit, c->u32_type, facing,
                                            spv_emit_constant_u32(&c->emit, c->u32_type, 0xffffffffu), c->zero);
                 value = spv_emit_bitcast(&c->emit, c->f32_type, bits);
+            } else if (addr == 0x2e0 || addr == 0x2e4) {
+                value =
+                    spv_emit_vec4_extract(&c->emit, c->f32_type, spv_emit_load(&c->emit, vec2, point_coord), component);
             } else if (addr >= 0x80) {
                 u32 input = (addr - 0x80) >> 4;
                 value = spv_emit_load(&c->emit, vec4, inputs[input]);
@@ -5098,12 +5149,24 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     reg_write(c, dst, values[k]);
                     if (dst < 255) dst++;
                 }
-        } else if (op == O_TMML) {
-            u32 off = B(w, 36, 13);
-            int slot = direct_query_slot(textures, texture_count, off, 0, 0, 0, 0, 0, 0, 0);
-            u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a));
-            u32 y = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + 1));
-            u32 coords = spv_emit_vec2_construct(&c->emit, vec2, x, y);
+        } else if (op == O_TMML || op == O_TMML_B) {
+            int bindless = op == O_TMML_B;
+            u32 ty = B(w, 28, 3), type = ty >> 1, array = ty & 1;
+            u32 off = B(w, 36, 13), bank = 0, bank2 = 0, off2 = 0, indexed = 0, ldc = 0;
+            int handle_count =
+                bindless ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
+            if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, b, stage, &ldc);
+            int slot = direct_typed_slot(textures, texture_count, off, type, array, 0, bindless, bank, handle_count,
+                                         bank2, off2, indexed, ldc);
+            if (textures[slot].flags & SNX_TEX_INDEXED) direct_swap_element(c, slot);
+            /* a 1D texture is bound as a 2D one of height 1 */
+            u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array));
+            u32 y = type == 0 ? spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f)
+                              : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array + 1));
+            u32 coords =
+                type < 2 ? spv_emit_vec2_construct(&c->emit, vec2, x, y)
+                         : spv_emit_vec3_construct(&c->emit, vec3, x, y,
+                                                   spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array + 2)));
             u32 lod = spv_emit_image_query_lod(&c->emit, vec2, c->sampled_type[slot], c->sampler[slot], coords);
             u32 mask = B(w, 31, 4), dst = d;
             if (!mask) mask = 15;

@@ -20,6 +20,7 @@ static const char* storage_paths[2];
 static const char* nro_paths[4];
 static const char* issue126_paths[17];
 static const char* stage_paths[3];
+static const char* query_paths[2];
 static void check(int condition, const char* what) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s\n", what);
@@ -646,12 +647,12 @@ static void between_stages(void) {
     }
 }
 
-/* whether the program decorates a variable BuiltIn Layer */
-static int has_layer(const u32* code, size_t words) {
+/* whether the module decorates a variable BuiltIn builtin */
+static int has_builtin(const u32* code, size_t words, u32 builtin) {
     for (size_t i = 5; i < words;) {
         u32 width = code[i] >> 16;
         if (!width || i + width > words) return -1;
-        if ((code[i] & 0xffff) == 71 && width == 4 && code[i + 2] == 11 && code[i + 3] == 9) return 1;
+        if ((code[i] & 0xffff) == 71 && width == 4 && code[i + 2] == 11 && code[i + 3] == builtin) return 1;
         i += width;
     }
     return 0;
@@ -671,7 +672,7 @@ static void layer_capabilities(void) {
         check(code && !info.unsupported, "a vertex program writing the layer translates");
         if (code) {
             check((count_opcode(code, words, 17, 69) == 1) == out, "a layer write takes ShaderLayer when it can");
-            check(has_layer(code, words) == out, "a layer write is dropped without ShaderLayer");
+            check(has_builtin(code, words, 9) == out, "a layer write is dropped without ShaderLayer");
             check(count_opcode(code, words, 17, 2) == 0, "a layer write never takes Geometry");
         }
         free(code);
@@ -683,7 +684,7 @@ static void layer_capabilities(void) {
                 check(count_opcode(code, words, 17, 2) == geometry, "a layer read takes Geometry when it can");
                 check(count_opcode(code, words, 17, 69) == (!geometry && out),
                       "a layer read takes ShaderLayer without Geometry");
-                check(has_layer(code, words) == (geometry || out), "a layer read is 0 without either");
+                check(has_builtin(code, words, 9) == (geometry || out), "a layer read is 0 without either");
             }
             free(code);
         }
@@ -757,6 +758,36 @@ static void cbuf_integer_loads(void) {
     free(code);
 }
 
+/* TMML.B with its handle in Rb, on a cube array (the layer before the three coordinates), and IPA reading the point
+   sprite's S and T (a[0x2e0] and a[0x2e4]), both as Super Mario Odyssey's fragment programs use them */
+static void fragment_queries(void) {
+    static const u64 tmml[] = {
+        (0x4c98078805a7001eull & ~0xffull) | 4, /* MOV R4, c[2][0x168]: the handle */
+        0xdf60000000000000ull | 3ull << 31 | 7ull << 28 | 4ull << 20 | 7ull << 16 | 8ull << 8, /* TMML.B R0, R8, R4 */
+    };
+    static const u64 sprite[] = {
+        0xe003ffae0ff7ff00ull, /* IPA R0, a[0x2e0] */
+        0xe003ffae4ff7ff01ull, /* IPA R1, a[0x2e4] */
+    };
+    ShaderInfo info;
+    size_t words = 0;
+    u32* code = translate(tmml, 2, ST_FS, &info, &words, 0);
+    check(code && info.ntex == 1 && info.tex[0].bindless && info.tex[0].type == 3 && info.tex[0].array,
+          "TMML.B queries the cube array its handle names");
+    if (code) {
+        check(count_opcode(code, words, 105, 0xffffffffu) == 1, "TMML.B emits OpImageQueryLod");
+        if (query_paths[0]) save_fixture(query_paths[0], code, words);
+    }
+    free(code);
+    code = translate(sprite, 2, ST_FS, &info, &words, 0);
+    check(code && !info.unsupported, "IPA reads the point sprite's coordinates");
+    if (code) {
+        check(has_builtin(code, words, 16) == 1, "the point coordinate is the PointCoord built-in");
+        if (query_paths[1]) save_fixture(query_paths[1], code, words);
+    }
+    free(code);
+}
+
 /* a rejected instruction is logged with its word */
 static void unsupported_names_word(void) {
     ShaderInfo info;
@@ -771,13 +802,14 @@ static void unsupported_names_word(void) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 1 && argc != 27) return 2;
-    if (argc == 27) {
+    if (argc != 1 && argc != 29) return 2;
+    if (argc == 29) {
         storage_paths[0] = argv[1];
         storage_paths[1] = argv[2];
         for (int i = 0; i < 4; i++) nro_paths[i] = argv[i + 3];
         for (int i = 0; i < 17; i++) issue126_paths[i] = argv[i + 7];
         for (int i = 0; i < 3; i++) stage_paths[i] = argv[i + 24];
+        for (int i = 0; i < 2; i++) query_paths[i] = argv[i + 27];
     }
     brx_length();
     cbuf_integer_loads();
@@ -793,5 +825,6 @@ int main(int argc, char** argv) {
     issue126_shader_modes();
     between_stages();
     layer_capabilities();
+    fragment_queries();
     return failures ? 1 : 0;
 }
