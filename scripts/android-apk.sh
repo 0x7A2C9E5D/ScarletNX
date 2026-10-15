@@ -5,10 +5,11 @@
 #
 #   scripts/android-apk.sh OUT LLVM ABI... [-- cmake args]
 #
-# LLVM holds a scripts/android-llvm.sh prefix per ABI (LLVM/x86_64, LLVM/arm64-v8a). GRADLE names a Gradle 9
-# (default: gradle). The APK lands in OUT/stage/gradle/outputs/apk/debug/.
+# LLVM holds a scripts/android-llvm.sh prefix per ABI (LLVM/x86_64, LLVM/arm64-v8a), made for the same ANDROID_API
+# (default 21, the app's minSdk). GRADLE names a Gradle 9 (default: gradle). The APK lands in
+# OUT/stage/gradle/outputs/apk/debug/.
 set -eu
-[ $# -ge 3 ] || { sed -n '4,9p' "$0"; exit 2; }
+[ $# -ge 3 ] || { sed -n '4,10p' "$0"; exit 2; }
 out=$1 llvm=$2
 shift 2
 abis=
@@ -19,7 +20,7 @@ ndk=${ANDROID_NDK_ROOT:-$(ls -d "${ANDROID_HOME:-$HOME/Android/Sdk}"/ndk/* 2>/de
 [ -f "$ndk/build/cmake/android.toolchain.cmake" ] || { echo "no NDK: set ANDROID_NDK_ROOT" >&2; exit 1; }
 for abi in $abis; do
     cmake -S "$src" -B "$out/$abi" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
-        -DANDROID_ABI="$abi" -DANDROID_PLATFORM=android-30 -DLLVM_DIR="$llvm/$abi/lib/cmake/llvm" \
+        -DANDROID_ABI="$abi" -DANDROID_PLATFORM=android-${ANDROID_API:-21} -DLLVM_DIR="$llvm/$abi/lib/cmake/llvm" \
         -DSNX_DEPLOY=OFF -DSNX_BUILD_GNUABI=OFF -DBUILD_TESTING=OFF "$@"
     cmake --build "$out/$abi"
     cmake --install "$out/$abi" --prefix "$out/stage" --strip

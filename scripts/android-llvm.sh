@@ -7,8 +7,8 @@
 #   scripts/android-llvm.sh ABI PREFIX [SOURCE] [-- cmake args]
 #
 # ABI is x86_64 or arm64-v8a; SOURCE an llvm-project folder or .tar.xz (default: the release named by LLVM_VERSION,
-# downloaded). The NDK is ANDROID_NDK_ROOT, else the newest under ANDROID_HOME/ndk. Configure ScarletNX with
-# -DLLVM_DIR=PREFIX/lib/cmake/llvm afterwards.
+# downloaded). The NDK is ANDROID_NDK_ROOT, else the newest under ANDROID_HOME/ndk. ANDROID_API (default 21, the
+# app's minSdk) is the oldest Android it runs on. Configure ScarletNX with -DLLVM_DIR=PREFIX/lib/cmake/llvm afterwards.
 set -eu
 [ $# -ge 2 ] || { sed -n '4,11p' "$0"; exit 2; }
 abi=$1 prefix=$2
@@ -21,7 +21,7 @@ case $abi in
     arm64-v8a) target=AArch64 triple=aarch64-none-linux-android ;;
     *) echo "ABI must be x86_64 or arm64-v8a, not $abi" >&2; exit 2 ;;
 esac
-api=${ANDROID_API:-30}
+api=${ANDROID_API:-21}
 ndk=${ANDROID_NDK_ROOT:-$(ls -d "${ANDROID_HOME:-$HOME/Android/Sdk}"/ndk/* 2>/dev/null | sort -V | tail -1)}
 [ -f "$ndk/build/cmake/android.toolchain.cmake" ] || { echo "no NDK: set ANDROID_NDK_ROOT" >&2; exit 1; }
 version=${LLVM_VERSION:-22.1.8}

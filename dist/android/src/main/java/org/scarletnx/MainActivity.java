@@ -2,14 +2,17 @@
 // Copyright 2026 the ScarletNX contributors
 package org.scarletnx;
 
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.Insets;
+import android.content.pm.PackageManager;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
+import android.view.DisplayCutout;
 import android.view.View;
 import android.view.WindowInsets;
 import org.libsdl.app.SDLActivity;
@@ -25,9 +28,14 @@ public class MainActivity extends SDLActivity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        if (!Environment.isExternalStorageManager())
-            startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                     Uri.parse("package:" + getPackageName())));
+        // dumps and keys are read by their path: all files from Android 11, the shared storage before it
+        if (Build.VERSION.SDK_INT >= 30) {
+            if (!Environment.isExternalStorageManager())
+                startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                         Uri.parse("package:" + getPackageName())));
+        } else if (Build.VERSION.SDK_INT >= 23 &&
+                   checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[] {Manifest.permission.WRITE_EXTERNAL_STORAGE}, 0);
     }
 
     /** src/gui/android.c: the runtime with these arguments, in the game activity's process */
@@ -51,8 +59,12 @@ public class MainActivity extends SDLActivity {
             @Override
             public WindowInsets onApplyWindowInsets(View view, WindowInsets insets) {
                 WindowInsets result = super.onApplyWindowInsets(view, insets);
-                Insets cutout = insets.getInsets(WindowInsets.Type.displayCutout());
-                SDLActivity.onNativeInsetsChanged(cutout.left, cutout.right, cutout.top, cutout.bottom);
+                DisplayCutout cutout = Build.VERSION.SDK_INT >= 28 ? insets.getDisplayCutout() : null;
+                if (cutout != null)
+                    SDLActivity.onNativeInsetsChanged(cutout.getSafeInsetLeft(), cutout.getSafeInsetRight(),
+                                                      cutout.getSafeInsetTop(), cutout.getSafeInsetBottom());
+                else if (Build.VERSION.SDK_INT >= 30)
+                    SDLActivity.onNativeInsetsChanged(0, 0, 0, 0);
                 return result;
             }
         };

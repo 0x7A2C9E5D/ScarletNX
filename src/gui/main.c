@@ -1053,7 +1053,7 @@ static void share_log(App* app) {
                       app->message, app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
     if (!saved || snx_write_file(saved, text, strlen(text)))
-        snprintf(app->message, sizeof(app->message), "The log could not be saved: allow access to all files.");
+        snprintf(app->message, sizeof(app->message), "The log could not be saved: allow the app access to files.");
     else if (gui_android_share(saved, app->message, sizeof(app->message)))
         snprintf(app->message, sizeof(app->message), "Log saved to %s", saved);
     free(saved);

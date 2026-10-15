@@ -9,6 +9,10 @@
 #if defined(__linux__) && !defined(_GNU_SOURCE)
 #define _GNU_SOURCE /* memfd_create */
 #endif
+/* Android's C library has memfd_create from Android 11 (API 30): before it, the temporary file */
+#if defined(__linux__) && (!defined(__ANDROID__) || __ANDROID_API__ >= 30)
+#define SNX_MEMFD 1
+#endif
 #include "snx_recompiler.h"
 #include "codegen.h"
 #include "cpu/arm/exec.h"
@@ -321,7 +325,7 @@ static void* open_image(const char* path) { return dlopen(path, RTLD_NOW | RTLD_
    loaded through the same "/proc/self/fd/N" would be one */
 static int load_image(struct snx_recompiler* r, struct snx_recompiled* m, const unsigned char* data, size_t size) {
     char *dir = NULL, *path = NULL;
-#if defined(__linux__)
+#ifdef SNX_MEMFD
     {
         int fd = memfd_create("scarletnx-recompiled", MFD_CLOEXEC);
         if (fd >= 0) {

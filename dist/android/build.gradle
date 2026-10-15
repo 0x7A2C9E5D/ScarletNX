@@ -14,7 +14,7 @@ android {
     compileSdk = 36
     defaultConfig {
         applicationId = 'org.scarletnx'
-        minSdk = 30
+        minSdk = 21 // the native builds' API level too (scripts/android-*.sh)
         targetSdk = 36
         versionCode = 1
         versionName = '0.1'

@@ -32,6 +32,15 @@
 #include <sched.h>
 #include <errno.h>
 extern char** environ;
+#ifdef __ANDROID__
+/* zenity and kdialog are a desktop's: Android has no dialog to ask for text yet */
+int plat_text_input(char* out, size_t cap, const char* initial) {
+    (void)out;
+    (void)cap;
+    (void)initial;
+    return -1;
+}
+#else
 /* Run a host text dialog without a shell: the initial text is game data, not a command. */
 static int text_dialog_run(char* out, size_t cap, char* const argv[]) {
     int fd[2];
@@ -89,6 +98,7 @@ int plat_text_input(char* out, size_t cap, const char* initial) {
     if (result == -2) result = text_dialog_run(out, cap, kde ? zenity : kdialog);
     return result == -2 ? -1 : result;
 }
+#endif
 /* FreeBSD has no MAP_NORESERVE: it never reserves swap for a mapping up front, so there is nothing to opt out of */
 #ifndef MAP_NORESERVE
 #define MAP_NORESERVE 0
