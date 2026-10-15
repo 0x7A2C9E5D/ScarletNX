@@ -420,15 +420,16 @@ int vk_swapchain_create(int srgb) {
         LOG_LIMIT(1, "vulkan: the window has no sRGB format: frames in sRGB show darker\n");
     }
 
-    /* no vsync: the runtime paces frames itself (fps_limit) */
+    /* vsync=1: FIFO, which every device has. Otherwise mailbox, or immediate, and the runtime alone paces frames
+       (fps_limit) */
     u32 nm = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(g_vk.phys, g_vk.surface, &nm, NULL);
     VkPresentModeKHR* ms = calloc(nm ? nm : 1, sizeof *ms);
     vkGetPhysicalDeviceSurfacePresentModesKHR(g_vk.phys, g_vk.surface, &nm, ms);
     VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
-    for (u32 i = 0; i < nm; i++)
+    for (u32 i = 0; i < nm && !g_opt_vsync; i++)
         if (ms[i] == VK_PRESENT_MODE_MAILBOX_KHR) mode = ms[i];
-    if (mode == VK_PRESENT_MODE_FIFO_KHR)
+    if (mode == VK_PRESENT_MODE_FIFO_KHR && !g_opt_vsync)
         for (u32 i = 0; i < nm; i++)
             if (ms[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) mode = ms[i];
     free(ms);
@@ -477,6 +478,7 @@ int vk_swapchain_create(int srgb) {
     g_vk.sc_srgb = fmt.format == VK_FORMAT_B8G8R8A8_SRGB || fmt.format == VK_FORMAT_R8G8B8A8_SRGB;
     g_vk.sc_format = fmt.format;
     g_vk.sc_turned = transform != caps.currentTransform;
+    g_vk.sc_vsync = g_opt_vsync;
     g_vk.sc_count = nimg;
     vkGetSwapchainImagesKHR(g_vk.dev, sc, &g_vk.sc_count, g_vk.sc_images);
     VkSemaphoreCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};

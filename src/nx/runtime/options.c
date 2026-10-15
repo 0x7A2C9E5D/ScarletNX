@@ -22,6 +22,7 @@ int g_opt_diag = 0;
 int g_opt_docked = 0, g_opt_lang = 1, g_opt_fps = SNX_FPS_GAME;
 float g_opt_resf = 1.0f;
 int g_opt_shadows = 1;
+int g_opt_vsync = 1;
 int g_opt_prof = 0;
 int g_opt_network = 0;
 /* options that went with the OpenGL renderer (renderer choice, its dynamic resolution, LSFG, the F7 recorder) and
@@ -133,11 +134,15 @@ static const IniOpt INI_GRAPHICS[] = {
     {"resolution", "1", "Internal 3D resolution: 1 = native, 2 = double, 0.75 / 0.5 = faster", INI_FLOAT, INI_STARTUP,
      &g_opt_resf, 0.25, 4, NULL},
     {"shadows", "1", "0 = disable shadow maps (more FPS)", INI_INT, 0, &g_opt_shadows, 0, 1, NULL},
+    {"vsync", "1",
+     "1 = each image waits for the display's refresh: no tearing, even pacing. 0 = shown at once (less latency,\n"
+     ";   may tear)",
+     INI_INT, 0, &g_opt_vsync, 0, 1, NULL},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
 static const IniOpt INI_PERF[] = {
     {"fps_limit", "game",
      "game = the pace the game asks for, as on the console: 60 FPS, or 30 for a game made for 30.\n"
-     ";   0 = unlimited. 10 to 1000 = that many FPS.\n"
+     ";   0 = unlimited (vsync=1 still waits for the display). 10 to 1000 = that many FPS.\n"
      ";   A game that advances once per image changes speed with it: 30 runs a 60 FPS game at half speed.\n"
      ";   F4 turns the limit off and on",
      INI_TEXT, 0, NULL, 0, 0, fps_limit_set},

@@ -219,7 +219,9 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
         g_generation = backend_window_generation();
     }
     shown = shown && !g_lost;
-    if (shown && ww > 0 && wh > 0 && (ww != g_vk.sc_win_w || wh != g_vk.sc_win_h || srgb != g_sc_srgb)) {
+    /* a new vsync in the .ini takes a new swapchain, as a new size does */
+    if (shown && ww > 0 && wh > 0 &&
+        (ww != g_vk.sc_win_w || wh != g_vk.sc_win_h || srgb != g_sc_srgb || g_opt_vsync != g_vk.sc_vsync)) {
         vk_finish();
         g_sc_srgb = srgb;
         vk_swapchain_create(srgb);

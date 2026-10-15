@@ -49,6 +49,7 @@ typedef struct {
     int sc_win_w, sc_win_h; /* the window size it was made for (sc_extent: that as the surface takes it) */
     int sc_srgb;            /* its format is sRGB: what presented frames in sRGB formats are blitted to */
     VkFormat sc_format;     /* its images' format, which the on-screen controls draw to (gpu/vk/ui.c) */
+    int sc_vsync;           /* made with FIFO presents, as vsync asked when it was made */
     int sc_turned;          /* upright on a display held another way: Android calls each present suboptimal for it */
     u32 sc_count;
     VkImage sc_images[VK_SC_MAX];

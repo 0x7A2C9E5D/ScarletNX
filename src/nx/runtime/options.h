@@ -24,5 +24,6 @@ void fps_limit_text(int fps, char* out, size_t n); /* g_opt_fps as fps_limit's v
 extern int g_opt_diag, g_opt_shadows, g_opt_prof;
 extern int g_opt_network; /* network: 1 = the game is online through the host (hle/services/network) */
 extern float g_opt_resf;
+extern int g_opt_vsync; /* vsync: 1 = presents wait for the display's refresh (FIFO) */
 
 #endif
