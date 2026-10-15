@@ -59,13 +59,16 @@ if(TARGET snx_ctr_board)
     foreach(target snx-test-3ds-memory snx-test-3ds-blz snx-test-sha256-stream)
         target_compile_options(${target} PRIVATE -UNDEBUG)
     endforeach()
-    find_package(Python3 QUIET COMPONENTS Interpreter)
-    if(Python3_Interpreter_FOUND)
-        add_test(NAME 3ds_driver COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_driver.py"
-            $<TARGET_FILE:scarletnx-3ds>)
-        add_test(NAME 3ds_extract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_extract.py"
-            $<TARGET_FILE:scarletnx-3ds>)
-        set_tests_properties(3ds_extract PROPERTIES TIMEOUT 120)
+
+    if (NOT WIN32)
+        find_package(Python3 QUIET COMPONENTS Interpreter)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME 3ds_driver COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_driver.py"
+                $<TARGET_FILE:scarletnx-3ds>)
+            add_test(NAME 3ds_extract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_extract.py"
+                $<TARGET_FILE:scarletnx-3ds>)
+            set_tests_properties(3ds_extract PROPERTIES TIMEOUT 120)
+        endif()
     endif()
 endif()
 
