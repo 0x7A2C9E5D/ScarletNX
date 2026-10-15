@@ -143,7 +143,7 @@ const char* gui_touch_option(const GuiMenu* menu) {
     return options[menu->touch];
 }
 const char* gui_controls_option(const GuiMenu* menu) { return menu->controls ? "--controls=1" : "--controls=0"; }
-size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv) {
+size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char* repo, const char** argv) {
     size_t n = 0;
     /* These are Switch options, never guest argv for the CPU-only Linux driver. */
     if (menu->selected != GUI_SWITCH) return 0;
@@ -154,6 +154,10 @@ size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv)
     if (menu->gdbstub) {
         argv[n++] = "-S";
         argv[n++] = "-s";
+    }
+    if (repo && !prepared) {
+        argv[n++] = "--repo";
+        argv[n++] = repo;
     }
     return n;
 }

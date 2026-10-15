@@ -206,7 +206,8 @@ SDL_VIDEO_DRIVER=x11 games/Game
 `--game` selects `Game_code.so`/`Game_data/`; or name the image `games/Game.AppImage` to load adjacent files.
 The AppImage also prepares dumps: `./ScarletNX-x86_64.AppImage Game.nsp`. Without the checkout it was built from
 (the AppImage, the Windows zip), the driver works in the user's data folder, wherever it was started from:
-`~/.local/share/scarletnx` (`$XDG_DATA_HOME/scarletnx`) on Linux and `%APPDATA%\scarletnx` on Windows. `work/` and
+`~/.local/share/scarletnx` (`$XDG_DATA_HOME/scarletnx`) on Linux and `%APPDATA%\scarletnx` on Windows; a portable copy
+keeps a `games/` folder beside the AppImage (or beside the zip's programs), and that folder is used instead. `work/` and
 `games/` go there, `prod.keys` is looked for there before `~/.switch`, and each game gets a copy of the AppImage (on
 Windows, of `scarletnx.exe` and the DLLs next to it).
 X11 bypasses Wayland. [Licenses](CREDITS.md).

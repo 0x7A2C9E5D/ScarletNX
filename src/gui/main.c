@@ -24,6 +24,13 @@
 #include <sys/stat.h>
 #endif
 
+/* the checkout the drivers were built from: a build tree's menu lists the games/ its driver makes */
+#ifdef SNX_SOURCE_DIR
+#define GUI_CHECKOUT SNX_SOURCE_DIR
+#else
+#define GUI_CHECKOUT NULL
+#endif
+
 typedef struct {
     SDL_Window* window;
     SDL_Renderer* renderer;
@@ -48,7 +55,8 @@ typedef struct {
     Uint64 entering_ms;         /* the menu fading out since, before a run fades in */
     const char* drivers;
     char *cwd, *file, *games_dir, *keys_path;
-    char* themes_dirs[2]; /* themes/ in the working directory, then beside the GUI */
+    char* data_dir;       /* games/, work/ and themes/: the driver's too, which gets it as --repo (snx_data_dir) */
+    char* themes_dirs[2]; /* themes/ in the data folder, then beside the GUI */
     char message[512];
     int cols, rows, scale, log_top;
     Uint64 sampled;
@@ -824,6 +832,8 @@ static bool android_folder(App* app) {
     }
     SDL_free(app->cwd);
     app->cwd = cwd;
+    free(app->data_dir);
+    app->data_dir = snx_strdup(cwd);
     free(app->games_dir);
     app->games_dir = snx_path_join(cwd, "games");
     free(app->themes_dirs[0]);
@@ -968,7 +978,7 @@ static void launch(App* app, char* absolute, bool prepared) {
     const char* argv[2 + GUI_LAUNCH_MAX + 1] = {native ? absolute : driver}; /* the driver, the file, NULL */
     size_t n = 1;
     if (!native) argv[n++] = absolute;
-    n += gui_launch_options(&app->menu, native, argv + n);
+    n += gui_launch_options(&app->menu, native, app->data_dir, argv + n);
     argv[n] = NULL;
     bool started = gui_process_start(app->process, argv, app->message, sizeof(app->message));
     if (started && app->run_log) {
@@ -1475,13 +1485,16 @@ static bool initialize(App* app) {
     app->font = create_font(app->renderer);
     app->process = gui_process_create();
     app->cwd = SDL_GetCurrentDirectory();
-    app->games_dir = snx_path_join(app->cwd ? app->cwd : ".", "games");
-    app->themes_dirs[0] = snx_path_join(app->cwd ? app->cwd : ".", "themes");
 #ifdef SDL_PLATFORM_ANDROID
     app->drivers = gui_android_libraries();
+    app->data_dir = snx_strdup(app->cwd ? app->cwd : ".");
 #else
     app->drivers = SDL_GetBasePath();
+    app->data_dir = snx_data_dir(GUI_CHECKOUT, app->drivers);
+    if (!app->data_dir) app->data_dir = snx_strdup(app->cwd ? app->cwd : ".");
 #endif
+    app->games_dir = snx_path_join(app->data_dir, "games");
+    app->themes_dirs[0] = snx_path_join(app->data_dir, "themes");
     if (app->drivers) app->themes_dirs[1] = snx_path_join(app->drivers, "themes");
     app->keys_path = device_keys_path();
     gui_console_init(&app->console, 78, 17);
@@ -1501,6 +1514,7 @@ static void cleanup(App* app) {
 #endif
     gui_process_destroy(app->process);
     free(app->file);
+    free(app->data_dir);
     free(app->games_dir);
     free(app->themes_dirs[0]);
     free(app->themes_dirs[1]);
