@@ -340,11 +340,13 @@ int main(void) {
         const char* key;
         int n;
         assert(doc);
+        /* a checkout with CRLF lines (Windows) has the same block, each line ending in "\r\n" */
         from = strstr(doc, "\n## Themes");
-        from = from ? strstr(from, "```ini\n") : NULL;
-        to = from ? strstr(from + 7, "\n```") : NULL;
+        from = from ? strstr(from, "```ini") : NULL;
+        from = from ? strchr(from, '\n') : NULL;
+        to = from ? strstr(from, "\n```") : NULL;
         assert(from && to);
-        from += 7;
+        ++from;
         assert(gui_theme_parse(&theme, "doc", from, (size_t)(to - from)) && !strcmp(theme.name, "Night ink"));
         n = key_lines(from, (size_t)(to - from), keys, sizeof keys);
         assert(n > 40);
