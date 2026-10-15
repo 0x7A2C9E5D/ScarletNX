@@ -46,10 +46,14 @@ extern const unsigned char snx_rtlib_object[];
 extern const unsigned long snx_rtlib_object_size;
 
 /* instructions per code unit (an LLVM module, a libgccjit context): whole functions until a unit reaches it, as the
-   game workflow splits them */
+   game workflow splits them (SNX_CHUNK_INSTRUCTIONS) */
+#ifdef __ANDROID__
+#define CHUNK_INSTRUCTIONS 20000
+#else
 #define CHUNK_INSTRUCTIONS 90000
+#endif
 /* the dispatch table holds a pointer per instruction slot of the code range: a range this wide is not a program */
-#define MAX_CODE_SPAN      ((uint64_t)1 << 30)
+#define MAX_CODE_SPAN ((uint64_t)1 << 30)
 
 /* ---- the descriptor the generated module exports, read back by load_descriptor ----
    Written by the backends field by field at these offsets, into a byte array of this size, so neither backend has to

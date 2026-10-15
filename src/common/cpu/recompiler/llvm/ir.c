@@ -91,6 +91,11 @@ SnxIr* snx_ir_new_target(const char* name, char opt, const char* target_triple, 
     features = target_triple ? LLVMCreateMessage("+cx16") : LLVMGetHostCPUFeatures();
     ir->tm =
         LLVMCreateTargetMachine(target, triple, cpu, features, codegen_level(opt), LLVMRelocPIC, LLVMCodeModelDefault);
+#ifdef __ANDROID__
+    /* AArch64's machine outliner holds a unit's functions in memory and outlines nothing at O2: on Android that memory
+       runs the recompile out of mappings */
+    LLVMSetTargetMachineMachineOutliner(ir->tm, 0);
+#endif
     ir->windows = strstr(triple, "windows") != NULL || strstr(triple, "mingw") != NULL;
     ir->features = target_triple ? &generic_features : &snx_ir_host;
     ir->ctx = LLVMContextCreate();

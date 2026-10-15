@@ -245,7 +245,7 @@ development files are required: `llvm-config` finds them (`-DSNX_LLVM_CONFIG=/pa
 the configure stops without them on every platform, including Windows and cross-builds. There is no recompiler
 build without LLVM. Modules are built for the machine that builds them, with its instruction set
 extensions (build == host == target); nothing is detected at run time. Whole functions are batched into units of 90000
-instructions (`--chunk`), with a progress line per compiled unit.
+instructions (20000 on Android; `--chunk`), with a progress line per compiled unit.
 `--backend=gcc` (libgccjit) is optional, built when libgccjit is found (`libgccjit` on Arch, `libgccjit-14-dev` on
 Debian, `libgccjit-devel` on Fedora; `-DSNX_GCCJIT_ROOT=` points at another GCC's prefix). It is meant for DEC Alpha EV67 hosts, which LLVM has no backend for; everywhere else use LLVM.
 
