@@ -6,20 +6,24 @@ The app is the [GUI](GUI.md) and the runtime, each in SDL's activity (`dist/andr
 recompiles on the phone, then the game opens.
 
 - **The menu** (`MainActivity`) is `scarletnx-gui` as `libmain.so`, in the YoRHa theme. Taps and the back button
-  drive it (see [GUI](GUI.md)). Its working folder and `HOME` are the app's own files
-  (`/data/data/org.scarletnx/files`), where the code it recompiles may run, unlike the shared storage: `games/`,
-  `work/` and `.switch/prod.keys` go there.
-- **Loading** (*Select a file*, *Setup device keys*) opens the system's file picker. A file on the device's storage
-  or a card is read by its path, so the app asks for access to all files when it starts; a document the picker
-  gives without one (Downloads' own list, another app's, a cloud's) is refused: pick it under the device's storage.
+  drive it (see [GUI](GUI.md)). Its working folder is `/sdcard/ScarletNX`, which the user sees: `games/`, `work/`
+  and the logs go there. `HOME` stays the app's own files (`/data/data/org.scarletnx/files`), for
+  `.switch/prod.keys`.
+- **Loading** (*Select a file*, *Setup device keys*) opens the system's file picker. A file is read by its path,
+  so the app asks for access to all files when it starts: the picker's path, or for a document without one
+  (Downloads' own list, Recent) the file its descriptor opens. A cloud's document has none and is refused, its
+  URI in the message. *Select file from games/* lists the games there and the dumps put there, to be prepared.
 - **The driver** runs as a child of the menu, as on a desktop, from `libscarletnx-run.so`: an executable named so
   that Android installs it with the libraries, the only files of its own an app may execute. It loads the runtime,
   `libscarletnx.so`, beside it. It cannot open a window there, so it ends at `Ready <game>` and the menu opens it.
 - **A game** runs in `GameActivity`, in a process of its own: the runtime's `main` with `--game=games/<game>`.
-  Its process ends with the game.
+  Its process ends with the game, and the menu comes back on its first screen. The shared storage maps nothing
+  executable, so the runtime loads a copy of `<game>_code.so` from the app's cache. The back button opens the
+  game's menu over it, in the menu's look (a gamepad's Home does on every system): *Exit* for now; back again
+  returns to the game. Leaving it for the home screen keeps it: its window is made anew when it comes back.
 - **Share log**, in the menu, saves the message on the screen, the last run's output (`last-run.log`, which the
-  menu keeps on every system) and the newest game log to `Download/ScarletNX/scarletnx-log.txt`, then opens the
-  share sheet with them.
+  menu keeps on every system) and the newest game log to `/sdcard/ScarletNX/scarletnx.log`, then opens the
+  share sheet with that file.
 
 Limits: the recompiler makes x86-64 code only, so the app runs on x86_64 Android (the emulator, some tablets and
 Chromebooks) until it makes arm64 code. A game needs a gamepad: there are no on-screen controls yet. Vulkan 1.3

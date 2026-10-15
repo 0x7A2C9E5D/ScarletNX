@@ -7,11 +7,45 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 void gui_android_start(void) {
     const char* files = SDL_GetAndroidInternalStoragePath();
-    if (files && !chdir(files)) setenv("HOME", files, 1);
+    if (files) setenv("HOME", files, 1);
+    if (!gui_android_folder() && files) chdir(files);
+}
+
+const char* gui_android_folder(void) {
+    static const char folder[] = "/sdcard/ScarletNX";
+    mkdir(folder, 0770);
+    return !access(folder, W_OK) && !chdir(folder) ? folder : NULL;
+}
+
+char* gui_android_document_file(const char* uri) {
+    SDL_IOStream* io = SDL_IOFromFile(uri, "rb");
+    long fd =
+        io ? (long)SDL_GetNumberProperty(SDL_GetIOProperties(io), SDL_PROP_IOSTREAM_FILE_DESCRIPTOR_NUMBER, -1) : -1;
+    char link[64], path[4096], *file;
+    ssize_t n = -1;
+    if (fd >= 0) {
+        snprintf(link, sizeof link, "/proc/self/fd/%ld", fd);
+        n = readlink(link, path, sizeof path - 1);
+    }
+    if (io) SDL_CloseIO(io);
+    if (n <= 0 || path[0] != '/') return NULL;
+    path[n] = 0;
+    /* the provider may open it on the storage's own file system, which is the user's shared storage */
+    if (!strncmp(path, "/data/media/", 12)) {
+        file = (char*)malloc((size_t)n + 32);
+        if (file) snprintf(file, (size_t)n + 32, "/storage/emulated/%s", path + 12);
+    } else
+        file = strdup(path);
+    if (file && access(file, R_OK)) {
+        free(file);
+        file = NULL;
+    }
+    return file;
 }
 
 const char* gui_android_libraries(void) {
@@ -69,12 +103,12 @@ int gui_android_play(const char* const* argv, char* message, size_t size) {
     return ok;
 }
 
-int gui_android_share(const char* text, char* message, size_t size) {
+int gui_android_share(const char* path, char* message, size_t size) {
     JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
     jstring s;
     int ok;
     if (!env) return call("share", "", NULL, message, size);
-    s = (*env)->NewStringUTF(env, text);
+    s = (*env)->NewStringUTF(env, path);
     ok = call("share", "(Ljava/lang/String;)V", s, message, size);
     (*env)->DeleteLocalRef(env, s);
     return ok;

@@ -776,6 +776,14 @@ int main(int argc, char** argv) {
         colored_text_on(&app, 3, menu_row(&app, GUI_THEME), "Theme: YoRHa", page, ink); /* the focused line's band */
         colored_text_on(&app, 3, menu_row(&app, GUI_EXIT), "Exit", ink, page);
         colored_text_on(&app, 1, app.rows - 2, "CWD:", page, ink);
+        /* the footer's bar goes on below its last whole row, to the window's edge */
+        assert(SDL_SetWindowSize(app.window, 1280, 810));
+        SDL_SyncWindow(app.window);
+        render(&app);
+        assert(800 % (16 * app.scale) == 0 && same_colour(pixel(&app, 4, 809), ink));
+        assert(same_colour(pixel(&app, 4, 16.0f * (float)(app.scale * (app.rows - 3)) - 1), page));
+        assert(SDL_SetWindowSize(app.window, 1280, 800));
+        SDL_SyncWindow(app.window);
         mouse(&app, 2, menu_row(&app, GUI_THEME), true);
         assert(!strcmp(app.theme.id, "custom") && !strcmp(app.theme.name, "Custom test"));
         render(&app);

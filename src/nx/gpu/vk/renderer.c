@@ -9,11 +9,13 @@
    thread reads their memory first. */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "runtime/main.h"
 #include "runtime/options.h"
 #include "gpu/gpu.h"
 #include "hle/services/nvdrv.h"
 #include "runtime/platform/backend.h"
+#include "runtime/platform/overlay.h"
 #include "runtime/platform/log.h"
 #include "gpu/vk/vk.h"
 #include "gpu/renderer.h"
@@ -193,6 +195,68 @@ static Surf* cpu_frame(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout, u32 bh
     return g_cpu_img;
 }
 
+/* the game's menu (platform/overlay.c) over the frame: its pixels to an image in the swapchain's encoding, so the
+   colours stay the menu's, then scaled up onto the frame without blending */
+static Surf* g_overlay;
+static void draw_overlay(VkCommandBuffer cb, VkImage sc) {
+    VkFormat format = g_vk.sc_srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    VkBuffer buf;
+    u64 off;
+    u8* px;
+    int x, y, s;
+    if (g_overlay && g_overlay->f.vk != format) {
+        vk_defer_image(g_overlay->img, g_overlay->mem, VK_NULL_HANDLE, g_overlay->att);
+        free(g_overlay);
+        g_overlay = NULL;
+    }
+    if (!g_overlay) {
+        VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                                .imageType = VK_IMAGE_TYPE_2D,
+                                .format = format,
+                                .extent = {OVERLAY_W, OVERLAY_H, 1},
+                                .mipLevels = 1,
+                                .arrayLayers = 1,
+                                .samples = VK_SAMPLE_COUNT_1_BIT,
+                                .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+        VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+        g_overlay = calloc(1, sizeof *g_overlay);
+        g_overlay->w = g_overlay->sw = OVERLAY_W;
+        g_overlay->h = g_overlay->sh = OVERLAY_H;
+        g_overlay->f = vk_rt_format(0xD5); /* RGBA8 */
+        g_overlay->f.vk = format;
+        g_overlay->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        if (!VK_OK(vmaCreateImage(g_vk.vma, &ii, &aci, &g_overlay->img, &g_overlay->mem, NULL))) {
+            free(g_overlay);
+            g_overlay = NULL;
+            return;
+        }
+    }
+    px = vk_stage((u64)OVERLAY_W * OVERLAY_H * 4, 4, &buf, &off);
+    if (!px) return;
+    memcpy(px, overlay_pixels(), (size_t)OVERLAY_W * OVERLAY_H * 4);
+    vk_surf_use(cb, g_overlay, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    VkBufferImageCopy c = {.bufferOffset = off,
+                           .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                           .imageExtent = {OVERLAY_W, OVERLAY_H, 1}};
+    vkCmdCopyBufferToImage(cb, buf, g_overlay->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+    vk_surf_use(cb, g_overlay, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
+                VK_ACCESS_2_TRANSFER_READ_BIT);
+    /* after the frame's own blit, which wrote under it */
+    vk_barrier(cb, sc, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    overlay_place((int)g_vk.sc_extent.width, (int)g_vk.sc_extent.height, &x, &y, &s);
+    VkImageBlit b = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .srcOffsets = {{0, 0, 0}, {OVERLAY_W, OVERLAY_H, 1}},
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .dstOffsets = {{x, y, 0}, {x + OVERLAY_W * s, y + OVERLAY_H * s, 1}}};
+    vkCmdBlitImage(cb, g_overlay->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sc, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   1, &b, VK_FILTER_NEAREST);
+}
+
 static int is_srgb(VkFormat f) {
     return f == VK_FORMAT_R8G8B8A8_SRGB || f == VK_FORMAT_B8G8R8A8_SRGB || f == VK_FORMAT_A8B8G8R8_SRGB_PACK32;
 }
@@ -202,6 +266,9 @@ static int is_srgb(VkFormat f) {
 static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, const i32 crop[4],
                                u32 transform) {
     static int sc_srgb; /* what the swapchain was asked for (the surface may not have it) */
+    /* the window's surface: lost while the app is in the background (Android), made anew when it comes back */
+    static u32 generation;
+    static int lost;
     vk_lock();
     vk_buf_writable_abort(); /* a draw abandoned during setup has no shader writes to land */
     vk_render_end();
@@ -237,9 +304,15 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
         g_last_h = (u32)((u64)src->sh * y1 / src->h) - g_last_y;
     }
     /* the size the swapchain was made for, not the extent the surface clamped it to: that can stay different */
-    int ww, wh, srgb = src ? is_srgb(src->f.vk) : sc_srgb;
+    int ww, wh, srgb = src ? is_srgb(src->f.vk) : sc_srgb, shown = backend_window_shown();
     backend_window_size(&ww, &wh);
-    if (!g_opt_headless && ww > 0 && wh > 0 && (ww != g_vk.sc_win_w || wh != g_vk.sc_win_h || srgb != sc_srgb)) {
+    if (shown && (lost || backend_window_generation() != generation)) {
+        vk_finish();
+        lost = !vk_surface_recreate();
+        generation = backend_window_generation();
+    }
+    shown = shown && !lost;
+    if (shown && ww > 0 && wh > 0 && (ww != g_vk.sc_win_w || wh != g_vk.sc_win_h || srgb != sc_srgb)) {
         vk_finish();
         sc_srgb = srgb;
         vk_swapchain_create(srgb);
@@ -247,12 +320,14 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
     VkSemaphore wait = VK_NULL_HANDLE, signal = VK_NULL_HANDLE;
     u32 idx = 0;
     int recreate = 0;
-    if (!g_opt_headless && src && (g_vk.swapchain || vk_swapchain_create(srgb))) {
+    if (shown && src && (g_vk.swapchain || vk_swapchain_create(srgb))) {
         VkCommandBuffer cb = vk_cmd(); /* waits for this frame slot, so its acquire semaphore is free */
         VkSemaphore acq = g_acquired[vk_frame_number() % VK_FRAMES];
         VkResult r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, 1000000000ull, acq, VK_NULL_HANDLE, &idx);
         if (r == VK_ERROR_OUT_OF_DATE_KHR)
             recreate = 1;
+        else if (r == VK_ERROR_SURFACE_LOST_KHR)
+            lost = 1;
         else if (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR) {
             wait = acq;
             signal = g_vk.sc_done[idx];
@@ -294,6 +369,7 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
             }
             vkCmdBlitImage(cb, src->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sc, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                            1, &blit, VK_FILTER_LINEAR);
+            if (overlay_shown()) draw_overlay(cb, sc);
             vk_barrier(cb, sc, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0,
                        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
@@ -322,10 +398,12 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
         VkResult r = vkQueuePresentKHR(g_vk.gfx, &pi);
         if (r == VK_ERROR_OUT_OF_DATE_KHR || (r == VK_SUBOPTIMAL_KHR && !g_vk.sc_turned))
             recreate = 1;
+        else if (r == VK_ERROR_SURFACE_LOST_KHR)
+            lost = 1;
         else
             VK_OK(r);
     }
-    if (recreate) {
+    if (recreate && !lost) {
         vk_finish();
         vk_swapchain_create(srgb);
     }

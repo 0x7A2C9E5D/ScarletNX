@@ -2,12 +2,18 @@
 // Copyright 2026 the ScarletNX contributors
 package org.scarletnx;
 
+import android.content.Context;
 import android.content.Intent;
+import android.graphics.Insets;
+import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
+import android.view.View;
+import android.view.WindowInsets;
 import org.libsdl.app.SDLActivity;
+import org.libsdl.app.SDLSurface;
 
 /** The menu: scarletnx-gui, as libmain.so */
 public class MainActivity extends SDLActivity {
@@ -29,9 +35,26 @@ public class MainActivity extends SDLActivity {
         startActivity(new Intent(this, GameActivity.class).putExtra("args", args));
     }
 
-    /** src/gui/android.c: the logs, as text, to the app the user picks */
-    public void share(String text) {
-        Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text);
-        startActivity(Intent.createChooser(send, "ScarletNX log"));
+    /** src/gui/android.c: the saved log, as a file, to the app the user picks */
+    public void share(String path) {
+        MediaScannerConnection.scanFile(this, new String[] {path}, new String[] {"text/plain"}, (file, uri) -> {
+            if (uri == null) return;
+            Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_STREAM, uri);
+            startActivity(Intent.createChooser(send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "ScarletNX log"));
+        });
+    }
+
+    /** the menu's text keeps out of the camera's cutout only, not the bars it hides nor the gesture edges */
+    @Override
+    protected SDLSurface createSDLSurface(Context context) {
+        return new SDLSurface(context) {
+            @Override
+            public WindowInsets onApplyWindowInsets(View view, WindowInsets insets) {
+                WindowInsets result = super.onApplyWindowInsets(view, insets);
+                Insets cutout = insets.getInsets(WindowInsets.Type.displayCutout());
+                SDLActivity.onNativeInsetsChanged(cutout.left, cutout.right, cutout.top, cutout.bottom);
+                return result;
+            }
+        };
     }
 }

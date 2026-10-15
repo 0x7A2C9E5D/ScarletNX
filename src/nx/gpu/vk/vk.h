@@ -65,6 +65,7 @@ int vk_init(void);
 /* (re)creates the swapchain at the window's size, in an sRGB format when srgb is set and the surface has one. 0 while
    the window has no area (minimized) */
 int vk_swapchain_create(int srgb);
+int vk_surface_recreate(void);
 /* logs a failed call with where it happened; evaluates to 1 on success */
 #define VK_OK(call) vk_ok_((call), #call, __FILE__, __LINE__)
 int vk_ok_(VkResult r, const char* what, const char* file, int line);

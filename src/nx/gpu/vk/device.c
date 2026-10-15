@@ -345,6 +345,32 @@ static int create_device(void) {
     return 1;
 }
 
+/* the swapchain destroyed. Its images' semaphores: a present may still wait on one after the device is idle (the
+   presentation engine isn't covered by vkDeviceWaitIdle), so they go a swapchain later, when those presents are long
+   done */
+static void swapchain_retire(void) {
+    static VkSemaphore retired[VK_SC_MAX];
+    static u32 nretired;
+    for (u32 i = 0; i < nretired; i++) vkDestroySemaphore(g_vk.dev, retired[i], NULL);
+    nretired = 0;
+    for (u32 i = 0; i < g_vk.sc_count; i++) retired[nretired++] = g_vk.sc_done[i];
+    vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL);
+    g_vk.swapchain = VK_NULL_HANDLE;
+    g_vk.sc_count = 0;
+}
+
+/* the window's surface made anew, its swapchain to follow: Android destroys a window's surface while the app is in
+   the background, and the Vulkan surface on it is lost for good */
+int vk_surface_recreate(void) {
+    vkDeviceWaitIdle(g_vk.dev);
+    if (g_vk.swapchain) swapchain_retire();
+    vkDestroySurfaceKHR(g_vk.instance, g_vk.surface, NULL);
+    g_vk.surface = VK_NULL_HANDLE;
+    if (backend_vk_surface(g_vk.instance, &g_vk.surface)) return 1;
+    WARN_LIMIT(4, "vulkan: the window's surface could not be made again\n");
+    return 0;
+}
+
 int vk_swapchain_create(int srgb) {
     if (g_opt_headless) return 0; /* no WSI calls, even on a resize/recreate path */
     VkSurfaceCapabilitiesKHR caps;
@@ -437,16 +463,7 @@ int vk_swapchain_create(int srgb) {
         vkDestroySwapchainKHR(g_vk.dev, sc, NULL);
         return 0;
     }
-    /* the old images' semaphores: a present may still wait on one after the device is idle (the presentation engine
-       isn't covered by vkDeviceWaitIdle), so they go a swapchain later, when those presents are long done */
-    static VkSemaphore retired[VK_SC_MAX];
-    static u32 nretired;
-    for (u32 i = 0; i < nretired; i++) vkDestroySemaphore(g_vk.dev, retired[i], NULL);
-    nretired = 0;
-    if (old) {
-        for (u32 i = 0; i < g_vk.sc_count; i++) retired[nretired++] = g_vk.sc_done[i];
-        vkDestroySwapchainKHR(g_vk.dev, old, NULL);
-    }
+    if (old) swapchain_retire();
     g_vk.swapchain = sc;
     g_vk.sc_extent = ext;
     g_vk.sc_win_w = ww;

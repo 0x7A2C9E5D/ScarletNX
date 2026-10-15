@@ -76,6 +76,8 @@ static const char* const load_labels[] = {"-> Select a file", "-> Select file fr
 #define SAY_KEYS_WAIT "Pick prod.keys"
 #define SAY_DONE "Tap to return to menu"
 #define SAY_ABORT "Tap here to abort and return to menu"
+#define SAY_NO_GAMES "No games in games/: put a game's .nro, .xci or .nsp there."
+#define SAY_COUNT "game(s)"
 #else
 static const char* const load_labels[] = {"-> Select via drag and drop", "-> Select file from games/ instead"};
 #define SAY_MENU "Arrows/mouse: move. Space/Enter/click: select."
@@ -87,6 +89,8 @@ static const char* const load_labels[] = {"-> Select via drag and drop", "-> Sel
 #define SAY_KEYS_WAIT "Drop prod.keys here"
 #define SAY_DONE "Press [ESC] to return to menu"
 #define SAY_ABORT "Press [ESC] to abort and return to menu"
+#define SAY_NO_GAMES "No executables found in games/."
+#define SAY_COUNT "executable(s)"
 #endif
 static SDL_Color rgb(GuiRgb c) {
     SDL_Color out;
@@ -166,17 +170,22 @@ static void area(const App* app, int* width, int* height) {
     *width = r.w;
     *height = r.h;
 }
-/* rows of the whole width, as a band behind text */
+/* rows of the whole width, as a band behind text: on to the window's edges, over the camera's cutout beside the
+   text and what is left below the last row */
 static void band(App* app, int row, int rows, GuiRgb c) {
-    int width, height;
+    SDL_Rect safe;
     SDL_FRect r;
-    area(app, &width, &height);
+    int width, height, bottom = row + rows == app->rows && app->rows < GUI_MAX_ROWS;
+    SDL_GetRenderViewport(app->renderer, &safe);
+    SDL_GetRenderOutputSize(app->renderer, &width, &height);
     r.x = 0;
-    r.y = (float)(row * 16 * app->scale);
+    r.y = row ? (float)(safe.y + row * 16 * app->scale) : 0;
     r.w = (float)width;
-    r.h = (float)(rows * 16 * app->scale);
+    r.h = (bottom ? (float)height : (float)(safe.y + (row + rows) * 16 * app->scale)) - r.y;
+    SDL_SetRenderViewport(app->renderer, NULL);
     SDL_SetRenderDrawColor(app->renderer, c.r, c.g, c.b, 255);
     SDL_RenderFillRect(app->renderer, &r);
+    SDL_SetRenderViewport(app->renderer, &safe);
 }
 /* a line between two rows, across the text area */
 static void rule(App* app, int row) {
@@ -537,6 +546,7 @@ static void render_steps(App* app) {
 /* the screen fading in from black, or the menu or the run fading out to it */
 static void overlay(App* app) {
     static const GuiRgb black = {0, 0, 0};
+    SDL_Rect safe;
     int width;
     int height;
     const GuiTheme* theme = &app->theme;
@@ -550,8 +560,12 @@ static void overlay(App* app) {
         a = 1.0f - (float)(now > app->fade_ms ? now - app->fade_ms : 0) / (float)theme->fade_in_ms;
     if (a <= 0) return;
 
-    area(app, &width, &height);
+    /* the whole window, the cutout beside the text too */
+    SDL_GetRenderViewport(app->renderer, &safe);
+    SDL_GetRenderOutputSize(app->renderer, &width, &height);
+    SDL_SetRenderViewport(app->renderer, NULL);
     fill(app, 0, 0, (float)width, (float)height, black, (Uint8)(a * 255));
+    SDL_SetRenderViewport(app->renderer, &safe);
 }
 static void render(App* app) {
     SDL_Color ink, soft, focus, paper, active, failure;
@@ -596,9 +610,9 @@ static void render(App* app) {
         for (i = 0; i < count; ++i)
             entry(app, 1, 5 + (int)i, app->games.names[start + i],
                   app->browser.activated && app->browser.active == start + i, app->browser.selected == i + 1);
-        if (!app->games.count) text(app, 1, 5, "No executables found in games/.", soft);
+        if (!app->games.count) text(app, 1, 5, SAY_NO_GAMES, soft);
         char page[128];
-        snprintf(page, sizeof(page), "Page %zu/%zu   %zu executable(s)", app->browser.page + 1,
+        snprintf(page, sizeof(page), "Page %zu/%zu   %zu " SAY_COUNT, app->browser.page + 1,
                  gui_browser_pages(&app->browser), app->games.count);
         text(app, 1, app->rows - 5, page, soft);
         text(app, 1, app->rows - 4, app->message, focus);
@@ -716,24 +730,39 @@ static void leave_run(App* app) {
     layout(app);
 }
 #ifdef SDL_PLATFORM_ANDROID
+/* the working folder moves to /sdcard/ScarletNX once the app may write there, which the user grants after it starts */
+static void android_folder(App* app) {
+    char* cwd = gui_android_folder() ? SDL_GetCurrentDirectory() : NULL;
+    if (!cwd || (app->cwd && !strcmp(cwd, app->cwd))) {
+        SDL_free(cwd);
+        return;
+    }
+    SDL_free(app->cwd);
+    app->cwd = cwd;
+    free(app->games_dir);
+    app->games_dir = snx_path_join(cwd, "games");
+    free(app->themes_dirs[0]);
+    app->themes_dirs[0] = snx_path_join(cwd, "themes");
+}
 /* A game runs in the app's game activity, a process of its own: no child of this one gets a window */
 static int play(App* app, const char* game) {
     char* option = snx_format("--game=%s", game);
-    const char* argv[2] = {option, NULL};
+    const char* argv[3] = {option, "-f", NULL}; /* the whole screen, the system's bars out of the way */
     int ok = gui_android_play(argv, app->message, sizeof(app->message));
     free(option);
     return ok;
 }
-/* the game a run of the driver made ready: there the driver names it, as it cannot open it */
-static void ready(App* app) {
-    int i;
+/* the game a run of the driver made ready: there the driver names it, as it cannot open it; whether it opened */
+static int ready(App* app) {
+    int i, ok;
     for (i = app->steps.count - 1; i >= 0; --i)
         if (!strcmp(app->steps.step[i].label, "READY")) {
             char* game = snx_path_join(app->games_dir, app->steps.step[i].detail);
-            play(app, game);
+            ok = play(app, game);
             free(game);
-            return;
+            return ok;
         }
+    return 0;
 }
 #endif
 static void pump(App* app) {
@@ -764,9 +793,6 @@ static void pump(App* app) {
                 fclose(app->run_out);
                 app->run_out = NULL;
             }
-#ifdef SDL_PLATFORM_ANDROID
-            if (!app->abnormal_exit) ready(app);
-#endif
             recent_name(app, "LAUNCH");
             recent_name(app, "RECOMPILE"); /* a run that ended before its game loaded */
             app->menu.view = GUI_LOAD_NONE;
@@ -778,6 +804,10 @@ static void pump(App* app) {
                 snprintf(app->message, sizeof(app->message), "Driver exited with status %d.", status);
             app->aborting = false;
             layout(app);
+#ifdef SDL_PLATFORM_ANDROID
+            /* the game opens in its own activity, over this one: coming back from it is coming back to the menu */
+            if (!app->abnormal_exit && ready(app)) leave_run(app);
+#endif
         }
     }
     Uint64 now = SDL_GetTicks();
@@ -817,6 +847,9 @@ static char* find_driver(App* app) {
     return found ? found : snx_find_tool(name);
 }
 static void launch(App* app, char* absolute, bool prepared) {
+#ifdef SDL_PLATFORM_ANDROID
+    android_folder(app); /* the driver works where the menu stands */
+#endif
     if (!absolute || !snx_is_file(absolute)) {
         snprintf(app->message, sizeof(app->message), "That path is not a readable file. Try again or press ESC.");
         free(absolute);
@@ -1006,24 +1039,23 @@ static char* newest_log(const App* app) {
     SDL_free(names);
     return newest;
 }
-/* the message on the screen, the last run's output and the newest game log: saved to Download/ScarletNX (else the
-   app's own folder on the shared storage) and handed to the share sheet */
+/* the message on the screen, the last run's output and the newest game log: saved to /sdcard/ScarletNX/scarletnx.log
+   and handed to the share sheet as that file */
 static void share_log(App* app) {
-    char *game = newest_log(app), *run = log_tail(app->run_log, 128 << 10), *played = log_tail(game, 128 << 10);
-    char* text = snx_format("%s\nMessage: %s\n\n== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
-                            app->message, app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
-    const char* folders[2] = {"/storage/emulated/0/Download/ScarletNX", SDL_GetAndroidExternalStoragePath()};
-    char* saved = NULL;
-    int i;
-    for (i = 0; i < 2 && !saved; ++i) {
-        char* path = folders[i] && !snx_mkdirs(folders[i]) ? snx_path_join(folders[i], "scarletnx-log.txt") : NULL;
-        if (path && !snx_write_file(path, text, strlen(text)))
-            saved = path;
-        else
-            free(path);
-    }
-    if (gui_android_share(text, app->message, sizeof(app->message)))
-        snprintf(app->message, sizeof(app->message), "Log saved to %s", saved ? saved : "nowhere (no folder to write)");
+    char *game, *run, *played, *text, *saved;
+    const char* folder;
+    android_folder(app);
+    folder = gui_android_folder();
+    game = newest_log(app);
+    run = log_tail(app->run_log, 1 << 20);
+    played = log_tail(game, 4 << 20);
+    text = snx_format("%s\nMessage: %s\n\n== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
+                      app->message, app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
+    saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
+    if (!saved || snx_write_file(saved, text, strlen(text)))
+        snprintf(app->message, sizeof(app->message), "The log could not be saved: allow access to all files.");
+    else if (gui_android_share(saved, app->message, sizeof(app->message)))
+        snprintf(app->message, sizeof(app->message), "Log saved to %s", saved);
     free(saved);
     free(text);
     free(played);
@@ -1055,7 +1087,7 @@ static void menu_key(App* app, GuiKey key) {
                 char* path = snx_path_join(app->games_dir, app->games.names[index]);
                 char* absolute = snx_absolute(path);
                 free(path);
-                launch(app, absolute, true);
+                launch(app, absolute, !gui_is_dump(app->games.names[index]));
             }
         }
         return;
@@ -1082,6 +1114,9 @@ static void menu_key(App* app, GuiKey key) {
 #endif
     if (key == GUI_CANCEL || (key == GUI_SELECT && app->menu.view == GUI_LOAD_KEYS)) app->message[0] = 0;
     if (app->menu.view == GUI_LOAD_GAMES) {
+#ifdef SDL_PLATFORM_ANDROID
+        android_folder(app);
+#endif
         if (app->menu.active == GUI_3DS)
             gui_cias_scan(&app->games, app->games_dir, app->message, sizeof(app->message));
         else
@@ -1157,10 +1192,14 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
 /* the file the system's picker chose, as a dropped one; none (cancelled) goes back */
 static void picked(App* app, const char* uri) {
     char* path = uri ? gui_document_path(uri) : NULL;
+#ifdef SDL_PLATFORM_ANDROID
+    if (uri && !path) path = gui_android_document_file(uri);
+#endif
     if (!uri)
         menu_key(app, GUI_CANCEL);
     else if (!path)
-        snprintf(app->message, sizeof(app->message), "Pick the file from the device's storage, not from an app.");
+        snprintf(app->message, sizeof(app->message), "Pick the file from the device's storage, not from an app (%s).",
+                 uri);
     else
         drop(app, path, false);
     free(path);
