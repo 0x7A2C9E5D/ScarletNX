@@ -4,11 +4,13 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* Unattended-run options for both windowed and headless execution through the SDL3 backend. */
 #include "runtime/platform/unattended.h"
+#include "runtime/ini.h"
 #include "runtime/main.h"
 #include "runtime/rtapi.h"
 #include "gpu/renderer.h"
 #include "runtime/platform/log.h"
 #include "runtime/platform/plat.h"
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,7 +20,8 @@ static int g_seconds = 0, g_maxframes = -1, g_shot_every = 0;
 static const char* g_shot;
 static int g_shots, g_shot_bucket = -1;
 static u64 g_start;
-static u64 g_press = 0, g_press_at = 0, g_press_len = 300;
+static u64 g_press = 0;
+static int g_press_at = 0, g_press_len = 300; /* ms */
 /* script: "ms:hex,ms:hex,...", parsed once when the option is set */
 typedef struct {
     u64 t, mask;
@@ -51,36 +54,42 @@ static void script_parse(const char* v) {
     if (*p) WARN("script: \"%s\" is not ms:hex, so it and the presses after it are ignored\n", p);
 }
 
+static void shot_set(const IniOpt* o, const char* v) {
+    /* Keep the screenshot prefix for numbered shots on the presenting thread. */
+    char* s = strdup(v);
+    (void)o;
+    if (s) g_shot = s[0] ? s : NULL;
+}
+static void press_set(const IniOpt* o, const char* v) {
+    (void)o;
+    g_press = strtoull(v, NULL, 16);
+}
+static void script_set(const IniOpt* o, const char* v) {
+    (void)o;
+    script_parse(v);
+}
+/* given as --key=value; not written to the .ini */
+static const IniOpt INI[] = {{"seconds", NULL, NULL, INI_INT, 0, &g_seconds, 0, INT_MAX, NULL},
+                             {"frames", NULL, NULL, INI_INT, 0, &g_maxframes, -1, INT_MAX, NULL},
+                             {"shot", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, shot_set},
+                             {"shot_every", NULL, NULL, INI_INT, 0, &g_shot_every, 0, INT_MAX, NULL},
+                             {"press", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, press_set},
+                             {"press_at", NULL, NULL, INI_INT, 0, &g_press_at, 0, INT_MAX, NULL},
+                             {"press_len", NULL, NULL, INI_INT, 0, &g_press_len, 0, INT_MAX, NULL},
+                             {"script", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, script_set},
+                             {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
 int unattended_ini(const char* k, const char* v) {
-    if (!strcmp(k, "seconds"))
-        g_seconds = atoi(v);
-    else if (!strcmp(k, "frames"))
-        g_maxframes = atoi(v);
-    else if (!strcmp(k, "shot")) {
-        /* Keep the screenshot prefix for numbered shots on the presenting thread. */
-        char* s = strdup(v);
-        if (s) g_shot = s[0] ? s : NULL;
-    } else if (!strcmp(k, "shot_every"))
-        g_shot_every = atoi(v);
-    else if (!strcmp(k, "press"))
-        g_press = strtoull(v, NULL, 16);
-    else if (!strcmp(k, "press_at"))
-        g_press_at = strtoull(v, NULL, 10);
-    else if (!strcmp(k, "press_len"))
-        g_press_len = strtoull(v, NULL, 10);
-    else if (!strcmp(k, "script"))
-        script_parse(v);
-    else
-        return 0;
-    return 1;
+    const IniOpt* o = ini_find(INI, k);
+    if (o) ini_read(o, v);
+    return o != NULL;
 }
 void unattended_start(void) { g_start = plat_ns(); }
 int unattended_active(void) { return g_seconds || g_maxframes >= 0; }
 u64 unattended_buttons(void) {
     u64 el = (plat_ns() - g_start) / 1000000ull, b = 0;
-    if (g_press && el >= g_press_at && el < g_press_at + g_press_len) b |= g_press;
+    if (g_press && el >= (u64)g_press_at && el < (u64)g_press_at + (u64)g_press_len) b |= g_press;
     for (int i = 0; i < g_nscript; i++)
-        if (el >= g_script[i].t && el < g_script[i].t + g_press_len) b |= g_script[i].mask;
+        if (el >= g_script[i].t && el < g_script[i].t + (u64)g_press_len) b |= g_script[i].mask;
     return b;
 }
 const char* unattended_shot(void) { return g_shot; }

@@ -6,10 +6,12 @@
 #ifndef SNX_BACKEND_H
 #define SNX_BACKEND_H
 #include "cpu/aarch64/cpu.h"
+#include "runtime/ini.h"
 
 void video_init(const char* title);
 void video_present_rgba(const u32* px, int w, int h, int stride); /* final RGBA8 image */
 void video_poll(void);
+extern const IniOpt g_backend_ini[]; /* the backend's settings (touch) */
 void backend_ini(const char* k, const char* v);
 void frontend_frame(void);
 /* the window's size in pixels for the Vulkan swapchain, or 0 x 0 when headless */

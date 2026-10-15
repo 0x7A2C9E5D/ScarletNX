@@ -35,7 +35,6 @@ static SDL_Window* g_win;
 static _Atomic u64 g_wsize = 1280 | (720ull << 32);
 static u64 keys_held;
 static int g_fullscreen;
-static int g_fullscreen_ini; /* the .ini's fullscreen, applied once the window is open */
 static void set_fullscreen(int on);
 static int g_shot_req;
 static SDL_Gamepad* g_pads[4];
@@ -135,24 +134,29 @@ void plat_audio_volume(PAudio* a, float volume) {
 static int g_touch_mode = 1;
 static u64 g_touch_ids[SNX_HID_TOUCHES]; /* the finger in each slot of g_touch */
 
-static void touch_mode(int mode) {
-    g_touch_mode = mode;
+/* g_touch_mode changed: the fingers or the mouse it no longer takes are lifted */
+static void touch_mode_set(const IniOpt* o, const char* v) {
+    (void)o;
+    (void)v;
     if (!g_touch_mode) g_touch.down = 0;
     if (g_touch_mode != 2) touch_up(&g_touch, g_touch_ids, SNX_TOUCH_MOUSE);
 }
+const IniOpt g_backend_ini[] = {
+    {"touch", "1", "The game's touch screen: 1 = fingers, 2 = fingers and the mouse's left button, 0 = off", INI_INT, 0,
+     &g_touch_mode, 0, 2, touch_mode_set},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
 int backend_touch_mode(void) { return g_touch_mode; }
 void backend_touch_set(int mode) {
     char v[16];
-    touch_mode(mode);
     snprintf(v, sizeof v, "%d", mode);
+    ini_read(&g_backend_ini[0], v);
     ini_set("touch", v);
 }
 void backend_ini(const char* k, const char* v) {
     int controls;
-    if (!strcmp(k, "fullscreen"))
-        g_fullscreen_ini = atoi(v);
-    else if (!strcmp(k, "touch"))
-        touch_mode(atoi(v));
+    const IniOpt* o = ini_find(g_backend_ini, k);
+    if (o)
+        ini_read(o, v);
     else {
         ui_lock();
         controls = vpad_ini(k, v);
@@ -279,7 +283,7 @@ void video_init(const char* title) {
         fatal("Vulkan could not start (see the log). ScarletNX needs a GPU and driver with Vulkan 1.3.");
     LOG("renderer: Vulkan\n");
     /* not for an unattended run: nobody is at the screen, and it would cover the desktop of whoever is */
-    if (g_fullscreen_ini && !unattended_active()) set_fullscreen(1);
+    if (g_opt_fullscreen && !unattended_active()) set_fullscreen(1);
 #ifdef _WIN32
     /* keep the display and the system awake while playing (it was set with the crash handler, headless runs too) */
     SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);

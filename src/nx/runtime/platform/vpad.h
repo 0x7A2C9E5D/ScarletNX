@@ -6,6 +6,7 @@
 #ifndef SNX_VPAD_H
 #define SNX_VPAD_H
 #include "runtime/platform/ui.h"
+#include "runtime/ini.h"
 
 /* in the order they are drawn: a finger presses the last one drawn under it */
 enum {
@@ -57,6 +58,7 @@ const char* vpad_name(int control); /* "A", "Left stick"... */
 void vpad_defaults(SnxVpadConfig* c);
 /* places, sizes and the shown ones back to their defaults, kept */
 void vpad_reset_layout(void);
+extern const IniOpt g_vpad_ini[]; /* the settings: controls, controls_scale..., a control's place (controls_a) */
 /* a key of the game's .ini (controls, controls_scale..., controls_a...): applied, 1; not one of these, 0 */
 int vpad_ini(const char* key, const char* value);
 /* where changed settings go: called with each key and its value (the game's .ini) */

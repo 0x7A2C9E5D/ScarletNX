@@ -55,7 +55,7 @@ static void vkr_mapping_end(void) { vk_unlock(); }
 /* 0 when Vulkan can't run here */
 static int vkr_start(void) {
     if (!vk_init()) return 0;
-    g_vk_scale = g_opt_resf >= 0.25f && g_opt_resf <= 4 ? g_opt_resf : 1.0f;
+    g_vk_scale = g_opt_resf; /* the .ini keeps resolution within 0.25 to 4 (options.c) */
     if (g_vk_scale != 1.0f) LOG("vulkan: render targets at %.2fx\n", g_vk_scale);
     vk_cmd_init();
     vk_pipeline_init();
