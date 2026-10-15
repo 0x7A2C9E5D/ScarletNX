@@ -322,20 +322,20 @@ static int pick_auto_scale(float display_scale, int height) {
 }
 static void layout(App* app) {
     int run;
-    int width, height;
+    int width, height, whole_width, whole_height;
     set_area(app);
     area(app, &width, &height);
-    /* Auto's letters are the opening window's; the window then keeps room for 16 rows of them */
-    if (!app->auto_scale && width > 0 && height > 0) {
-        app->auto_scale = pick_auto_scale(SDL_GetWindowDisplayScale(app->window), height);
+    /* Auto's letters are the opening window's, measured whole: a phone's system bars may still show over it then, and
+       the safe area be short. The window then keeps room for 16 rows of them */
+    if (!app->auto_scale && SDL_GetWindowSizeInPixels(app->window, &whole_width, &whole_height) && whole_height > 0) {
+        app->auto_scale = pick_auto_scale(SDL_GetWindowDisplayScale(app->window), whole_height);
         SDL_SetWindowMinimumSize(
             app->window, 800,
             SDL_max(480, (int)SDL_ceilf(256.0f * (float)app->auto_scale / SDL_GetWindowPixelDensity(app->window))));
     }
     app->scale = app->menu.text_size ? app->menu.text_size : app->auto_scale;
-    /* the size Text size chose, as long as 16 rows still fit */
-    if (app->menu.text_size)
-        while (app->scale > 1 && height / (16 * app->scale) < 16) --app->scale;
+    /* as long as 16 rows still fit: Auto's always do on a computer, a phone's not while Fullscreen is off */
+    while (app->scale > 1 && height / (16 * app->scale) < 16) --app->scale;
     if (app->scale < 1) app->scale = 1;
     app->cols = SDL_min(width / (8 * app->scale), GUI_MAX_COLS);
     app->rows = SDL_min(height / (16 * app->scale), GUI_MAX_ROWS);
