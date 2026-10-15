@@ -36,6 +36,8 @@ homebrew-loader guest argv block.
 `-f` (or `--fullscreen`) can also precede or follow the dump and is forwarded to
 the game. Omitting it starts windowed, regardless of an older INI value;
 `--fullscreen=0|1` is no longer accepted.
+`--touch=0|1|2` is forwarded to the game too: its touch screen takes nothing, the fingers (the default), or the
+fingers and the mouse's left button. The menu's *Touch* item passes it; the game's `.ini` keeps its own `touch`.
 `--backend=gcc` selects libgccjit instead of the default LLVM backend when preparing
 a dump. An explicit `--backend=llvm|gcc` forces recompilation rather than reusing a
 cached executable built by another compiler.

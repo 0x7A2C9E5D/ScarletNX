@@ -16,6 +16,7 @@ enum {
     GUI_3DS,
     GUI_KEYS,
     GUI_FULLSCREEN,
+    GUI_TOUCH, /* what the game's touch screen takes */
     GUI_GCCJIT,
     GUI_GDBSTUB,
     GUI_THEME,
@@ -24,6 +25,7 @@ enum {
     GUI_ITEM_COUNT
 };
 typedef enum { GUI_UP, GUI_DOWN, GUI_LEFT, GUI_RIGHT, GUI_SELECT, GUI_CANCEL, GUI_PAGE_UP, GUI_PAGE_DOWN } GuiKey;
+enum { GUI_TOUCH_FINGERS, GUI_TOUCH_MOUSE, GUI_TOUCH_OFF }; /* GuiMenu.touch: fingers, the mouse too, nothing */
 typedef enum { GUI_LOAD_NONE, GUI_LOAD_OPTIONS, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS } GuiLoadView;
 enum { GUI_LOAD_DRAG, GUI_LOAD_DIRECTORY };
 typedef struct {
@@ -32,6 +34,7 @@ typedef struct {
     bool activated, load_activated, focus_load;
     GuiLoadView view;
     bool running, fullscreen, gccjit, gdbstub, quit;
+    int touch; /* GUI_TOUCH_*, fingers the default */
     int theme_next; /* the GUI moves to the next theme and clears it */
     int share_log;  /* the GUI shares the logs and clears it */
     /* the recent games above the items: how many, the focused one + 1 (0: an item has the focus), and the one
@@ -40,8 +43,10 @@ typedef struct {
 } GuiMenu;
 void gui_menu_key(GuiMenu* menu, GuiKey key);
 const char* gui_setting_description(const GuiMenu* menu);
-/* Append up to four Switch options; prepared games do not run a compiler. */
+/* Append up to five Switch options; prepared games do not run a compiler. */
 size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv);
+/* the game's --touch=N for the menu's choice */
+const char* gui_touch_option(const GuiMenu* menu);
 
 /* The runner's banner, "ScarletNX - <name>" at the start of a line: the recompile is over, the game is loading */
 typedef struct {

@@ -28,8 +28,9 @@ recompiles on the phone, then the game opens.
 
 The app runs on arm64 phones and on x86_64 Android (the emulator, some tablets and Chromebooks): the recompiler makes
 the code of the device it runs on. It installs from Android 5.0 (API 21). A game needs Vulkan 1.3: on a device without
-it (Android 5.0 and 6.0 have no Vulkan at all) the menu still prepares games, and a game says what it lacks. A game
-needs a gamepad too: there are no on-screen controls yet.
+it (Android 5.0 and 6.0 have no Vulkan at all) the menu still prepares games, and a game says what it lacks. The
+fingers reach a game's touch screen (the menu's *Touch* item turns them off, or adds a mouse); for the buttons and
+sticks a game needs a gamepad: there are no on-screen controls yet.
 
 ## Building
 

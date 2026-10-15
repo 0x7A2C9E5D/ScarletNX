@@ -258,7 +258,7 @@ add_test(NAME network_service COMMAND snx-test-network-service)
 set_tests_properties(network_service PROPERTIES TIMEOUT 60)
 
 # mm:u and hid's IHidServer (misc.c, hid.c), with the kernel objects stubbed
-add_executable(snx-test-misc-service misc_service.c)
+add_executable(snx-test-misc-service misc_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_touch.c")
 snx_test_target(snx-test-misc-service 23)
 target_compile_options(snx-test-misc-service PRIVATE -Wno-unused-parameter)
 snx_swipc(snx-test-misc-service ROOT "${PROJECT_SOURCE_DIR}/src/nx" FILES hle/services/types.swipc
@@ -288,6 +288,12 @@ add_executable(snx-test-overlay overlay.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/
 snx_test_target(snx-test-overlay 11)
 target_link_libraries(snx-test-overlay PRIVATE scarletnx-common)
 add_test(NAME overlay COMMAND snx-test-overlay)
+
+add_executable(snx-test-hid-touch hid_touch.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/touch.c"
+    "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_touch.c")
+snx_test_target(snx-test-hid-touch 11)
+target_link_libraries(snx-test-hid-touch PRIVATE scarletnx-common)
+add_test(NAME hid_touch COMMAND snx-test-hid-touch)
 
 add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
 snx_test_target(snx-test-startup 90)

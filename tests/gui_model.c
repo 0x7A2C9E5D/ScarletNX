@@ -59,8 +59,17 @@ int main(void) {
     gui_menu_key(&menu, GUI_DOWN);
     assert(menu.selected == GUI_FULLSCREEN);
     menu.running = false;
+    /* Touch goes round fingers, the mouse too, nothing, and back */
     gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_GCCJIT && menu.active == GUI_FULLSCREEN);
+    assert(menu.selected == GUI_TOUCH && menu.touch == GUI_TOUCH_FINGERS);
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.touch == GUI_TOUCH_MOUSE && !strcmp(gui_touch_option(&menu), "--touch=2"));
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.touch == GUI_TOUCH_OFF && !strcmp(gui_touch_option(&menu), "--touch=0"));
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.touch == GUI_TOUCH_FINGERS && !strcmp(gui_touch_option(&menu), "--touch=1"));
+    gui_menu_key(&menu, GUI_DOWN);
+    assert(menu.selected == GUI_GCCJIT && menu.active == GUI_TOUCH);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.active == GUI_GCCJIT);
     assert(menu.gccjit == !!SNX_GUI_HAS_GCCJIT && menu.view == GUI_LOAD_NONE);
@@ -95,13 +104,15 @@ int main(void) {
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.active == GUI_KEYS && menu.view == GUI_LOAD_KEYS);
 
-    for (int bits = 0; bits < 8; ++bits) {
+    for (int bits = 0; bits < 24; ++bits) {
+        static const char* const touch[] = {"--touch=1", "--touch=2", "--touch=0"};
         menu = (GuiMenu){.selected = GUI_SWITCH, .fullscreen = !!(bits & 1),
-                         .gccjit = !!(bits & 2), .gdbstub = !!(bits & 4)};
+                         .gccjit = !!(bits & 2), .gdbstub = !!(bits & 4), .touch = bits >> 3};
         for (int prepared = 0; prepared < 2; ++prepared) {
-            const char* args[4];
+            const char* args[5];
             size_t n = gui_launch_options(&menu, prepared, args), i = 0;
             if (menu.fullscreen) assert(i < n && !strcmp(args[i++], "-f"));
+            assert(i < n && !strcmp(args[i++], touch[menu.touch]));
             if (menu.gccjit && SNX_GUI_HAS_GCCJIT && !prepared)
                 assert(i < n && !strcmp(args[i++], "--backend=gcc"));
             if (menu.gdbstub) {
@@ -111,7 +122,7 @@ int main(void) {
             assert(i == n);
         }
         menu.selected = GUI_LINUX;
-        const char* args[4];
+        const char* args[5];
         assert(gui_launch_options(&menu, false, args) == 0);
         menu.selected = GUI_3DS;
         assert(gui_launch_options(&menu, false, args) == 0);

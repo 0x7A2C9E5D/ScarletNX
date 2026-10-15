@@ -14,6 +14,7 @@
 #include "runtime/platform/plat.h"
 #include "runtime/platform/unattended.h"
 #include "runtime/platform/overlay.h"
+#include "runtime/platform/touch.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -126,10 +127,18 @@ void plat_audio_volume(PAudio* a, float volume) {
         WARN_LIMIT(4, "audio: SDL could not set output volume: %s\n", SDL_GetError());
 }
 
+/* the game's touch screen: 0 nothing, 1 the fingers, 2 the fingers and the mouse's left button (ini key touch) */
+static int g_touch_mode = 1;
+static u64 g_touch_ids[SNX_HID_TOUCHES]; /* the finger in each slot of g_touch */
+
 void backend_ini(const char* k, const char* v) {
     if (!strcmp(k, "fullscreen"))
         g_fullscreen_ini = atoi(v);
-    else
+    else if (!strcmp(k, "touch")) {
+        g_touch_mode = atoi(v);
+        if (!g_touch_mode) g_touch.down = 0;
+        if (g_touch_mode != 2) touch_up(&g_touch, g_touch_ids, SNX_TOUCH_MOUSE);
+    } else
         unattended_ini(k, v);
 }
 
@@ -188,6 +197,9 @@ void video_init(const char* title) {
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1"); /* back opens the game's menu (overlay.c), not leaves */
 #endif
+    /* a finger and the mouse each reach the touch screen once: SDL would also send each as the other */
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) fatal("SDL could not start its video: %s", SDL_GetError());
     /* SDL subsystem initialization belongs to the main thread, before the guest can open audout sessions. */
     g_audio_ready = SDL_InitSubSystem(SDL_INIT_AUDIO);
@@ -400,6 +412,43 @@ static int overlay_event(const SDL_Event* e) {
     return 1;
 }
 
+/* the picture the renderer shows, in the window's pixels: where a finger lands on the game's touch screen */
+static void touch_window(int picture[4]) {
+    int x, y, w, h;
+    backend_window_safe(&x, &y, &w, &h);
+    touch_picture(x, y, w, h, picture);
+}
+static void touch_finger(const SDL_Event* e) {
+    int w, h, picture[4];
+    float px, py;
+    if (!g_touch_mode) return;
+    backend_window_size(&w, &h);
+    px = e->tfinger.x * (float)w;
+    py = e->tfinger.y * (float)h;
+    touch_window(picture);
+    if (e->type == SDL_EVENT_FINGER_DOWN)
+        touch_down(&g_touch, g_touch_ids, e->tfinger.fingerID, picture, px, py);
+    else if (e->type == SDL_EVENT_FINGER_MOTION)
+        touch_move(&g_touch, g_touch_ids, e->tfinger.fingerID, picture, px, py);
+    else
+        touch_up(&g_touch, g_touch_ids, e->tfinger.fingerID);
+}
+/* the mouse's left button as one more finger, when the touch option asks for it; positions come in window points */
+static void touch_mouse(const SDL_Event* e) {
+    int picture[4];
+    float d = SDL_GetWindowPixelDensity(g_win);
+    if (g_touch_mode != 2) return;
+    touch_window(picture);
+    if (e->type == SDL_EVENT_MOUSE_MOTION) {
+        if (e->motion.which != SDL_TOUCH_MOUSEID && (e->motion.state & SDL_BUTTON_LMASK))
+            touch_move(&g_touch, g_touch_ids, SNX_TOUCH_MOUSE, picture, e->motion.x * d, e->motion.y * d);
+    } else if (e->button.which != SDL_TOUCH_MOUSEID && e->button.button == SDL_BUTTON_LEFT) {
+        if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+            touch_down(&g_touch, g_touch_ids, SNX_TOUCH_MOUSE, picture, e->button.x * d, e->button.y * d);
+        else
+            touch_up(&g_touch, g_touch_ids, SNX_TOUCH_MOUSE);
+    }
+}
 void video_poll(void) {
     SDL_Event e;
     while (!g_opt_headless && SDL_PollEvent(&e)) {
@@ -411,6 +460,13 @@ void video_poll(void) {
                 wsafe_set();
                 break;
             case SDL_EVENT_WINDOW_SAFE_AREA_CHANGED: wsafe_set(); break;
+            case SDL_EVENT_FINGER_DOWN:
+            case SDL_EVENT_FINGER_MOTION:
+            case SDL_EVENT_FINGER_UP:
+            case SDL_EVENT_FINGER_CANCELED: touch_finger(&e); break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            case SDL_EVENT_MOUSE_BUTTON_UP:
+            case SDL_EVENT_MOUSE_MOTION: touch_mouse(&e); break;
             case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
                 g_fullscreen = 1;
                 wsafe_set();
@@ -476,7 +532,10 @@ void video_poll(void) {
     }
     input_stick_clamp(&lx, &ly);
     input_stick_clamp(&rx, &ry);
-    if (overlay_shown()) b = (u64)(lx = ly = rx = ry = 0); /* the game's menu has the controls */
+    if (overlay_shown()) { /* the game's menu has the controls and the fingers */
+        b = (u64)(lx = ly = rx = ry = 0);
+        g_touch.down = 0;
+    }
     g_pad.buttons = b;
     g_pad.lx = lx;
     g_pad.ly = ly;

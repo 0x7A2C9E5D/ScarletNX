@@ -59,7 +59,8 @@ typedef struct {
     Uint32 picked;            /* the event a file from the system's picker comes back as */
 } App;
 static const char* const items[] = {"Load Switch NSP/XCI/NRO", "Load Linux ARM ELF", "Load 3DS CIA", "Setup device keys",
-                                   "Fullscreen", "Enable libgccjit", "Enable gdbstub", "Theme", "Share log", "Exit"};
+                                   "Fullscreen", "Touch", "Enable libgccjit", "Enable gdbstub", "Theme", "Share log",
+                                   "Exit"};
 /* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop */
 #ifdef SDL_PLATFORM_ANDROID
 static const char* const load_labels[] = {"-> Select a file", "-> Select file from games/ instead"};
@@ -248,6 +249,9 @@ static void menu_label(const App* app, int item, char* label, size_t size) {
         snprintf(label, size, "%s[%s] %s", app->theme.marker, enabled ? "ON" : "OFF", items[item]);
     } else if (item == GUI_THEME) {
         snprintf(label, size, "%s%s: %s", app->theme.marker, items[item], app->theme.name);
+    } else if (item == GUI_TOUCH) {
+        static const char* const touch[] = {"Fingers", "Fingers and mouse", "Off"}; /* by GUI_TOUCH_* */
+        snprintf(label, size, "%s%s: %s", app->theme.marker, items[item], touch[app->menu.touch]);
     } else {
         snprintf(label, size, "%s%s", app->theme.marker, items[item]);
     }
@@ -746,10 +750,11 @@ static bool android_folder(App* app) {
 /* A game runs in the app's game activity, a process of its own: no child of this one gets a window */
 static int play(App* app, const char* game) {
     char* option = snx_format("--game=%s", game);
-    const char* argv[3];
+    const char* argv[4];
     int ok, n = 0;
     argv[n++] = option;
     if (app->menu.fullscreen) argv[n++] = "-f"; /* the whole screen, the system's bars out of the way */
+    argv[n++] = gui_touch_option(&app->menu);
     argv[n] = NULL;
     ok = gui_android_play(argv, app->message, sizeof(app->message));
     free(option);
@@ -876,7 +881,7 @@ static void launch(App* app, char* absolute, bool prepared) {
         return;
     }
 #endif
-    const char* argv[7] = {native ? absolute : driver};
+    const char* argv[8] = {native ? absolute : driver};
     size_t n = 1;
     if (!native) argv[n++] = absolute;
     n += gui_launch_options(&app->menu, native, argv + n);

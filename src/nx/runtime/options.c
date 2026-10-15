@@ -179,6 +179,9 @@ static const IniOpt INI_PERF[] = {
     {"memory_gb", "0",
      "Memory the game sees: 0 or 4 = 3.2 GB like the console, 6 or 8 = more (like yuzu's extended memory layout).\n;   Games that run out of memory on 3.2 GB, like Tears of the Kingdom, need 6"},
     {NULL, NULL, NULL}};
+static const IniOpt INI_INPUT[] = {
+    {"touch", "1", "The game's touch screen: 1 = fingers, 2 = fingers and the mouse's left button, 0 = off"},
+    {NULL, NULL, NULL}};
 static const IniOpt INI_NETWORK[] = {
     {"network", "0",
      "1 = host networking; known Nintendo service domains are blocked by the resolver, not by an IP firewall.\n;   0 = report offline and restrict outbound destinations to loopback. This is not a network sandbox"},
@@ -189,7 +192,8 @@ static const IniOpt INI_DBG[] = {
     {"profile", "0", "1 = write profile.txt every 10 seconds (CPU profiler, Windows only)"},
     {NULL, NULL, NULL}};
 static const IniSec INI_SECS[] = {{"Display", INI_DISPLAY}, {"Graphics", INI_GRAPHICS}, {"Performance", INI_PERF},
-                                  {"Network", INI_NETWORK}, {"Debug", INI_DBG},         {NULL, NULL}};
+                                  {"Input", INI_INPUT},     {"Network", INI_NETWORK},   {"Debug", INI_DBG},
+                                  {NULL, NULL}};
 static void ini_load(const char* path) {
     FILE* f = fopen(path, "r");
     if (!f) return;

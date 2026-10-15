@@ -76,6 +76,8 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
             menu->view = GUI_LOAD_NONE;
             if (menu->selected == GUI_FULLSCREEN)
                 menu->fullscreen = !menu->fullscreen;
+            else if (menu->selected == GUI_TOUCH)
+                menu->touch = (menu->touch + 1) % (GUI_TOUCH_OFF + 1);
             else if (menu->selected == GUI_GCCJIT) {
                 if (SNX_GUI_HAS_GCCJIT) menu->gccjit = !menu->gccjit;
             } else if (menu->selected == GUI_GDBSTUB)
@@ -105,6 +107,8 @@ const char* gui_setting_description(const GuiMenu* menu) {
 #else
             return "Enable fullscreen at startup";
 #endif
+        case GUI_TOUCH:
+            return "The game's touch screen: fingers, the mouse's left button too, or nothing";
         case GUI_GCCJIT:
             return SNX_GUI_HAS_GCCJIT
                 ? "libgccjit will be used instead of llvm"
@@ -122,11 +126,16 @@ const char* gui_setting_description(const GuiMenu* menu) {
         default: return "";
     }
 }
+const char* gui_touch_option(const GuiMenu* menu) {
+    static const char* const options[] = {"--touch=1", "--touch=2", "--touch=0"}; /* by GUI_TOUCH_* */
+    return options[menu->touch];
+}
 size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv) {
     size_t n = 0;
     /* These are Switch options, never guest argv for the CPU-only Linux driver. */
     if (menu->selected != GUI_SWITCH) return 0;
     if (menu->fullscreen) argv[n++] = "-f";
+    argv[n++] = gui_touch_option(menu);
     if (menu->gccjit && SNX_GUI_HAS_GCCJIT && !prepared) argv[n++] = "--backend=gcc";
     if (menu->gdbstub) {
         argv[n++] = "-S";

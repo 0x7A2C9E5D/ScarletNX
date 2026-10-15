@@ -34,7 +34,7 @@ snx_component(kernel hle/kernel/kernel.c hle/kernel/thread.c hle/kernel/sync.c h
               memory/mem.c hle/kernel/ipc.c)
 snx_component(hle hle/services/services.c hle/services/audren.c hle/services/audren_dsp.c hle/services/pl.c hle/services/sm.c hle/services/am.c hle/services/set.c hle/services/time.c hle/services/acc.c hle/services/audio.c
               hle/services/misc.c hle/services/ldr.c hle/services/network/bsd.c hle/services/network/dns.c
-              hle/services/network/nifm.c hle/filesystem/fs.c hle/filesystem/fs_tree.c hle/services/hid.c hle/services/vi.c hle/services/nvdrv.c)
+              hle/services/network/nifm.c hle/filesystem/fs.c hle/filesystem/fs_tree.c hle/services/hid.c hle/services/hid_touch.c hle/services/vi.c hle/services/nvdrv.c)
 # the IPC interfaces of the services (docs/IPC.md): their dispatchers are generated, the handlers are in the services'
 # files. A type is defined before the files that use it
 include("${PROJECT_SOURCE_DIR}/cmake/swipc.cmake")
@@ -51,7 +51,7 @@ target_link_libraries(snx_hle PRIVATE FFmpeg::avcodec)
 snx_component(gpu gpu/gpu.c gpu/maxwell/engines.c gpu/maxwell/mme.c gpu/maxwell/compute.c gpu/maxwell/fermi2d.c gpu/maxwell/dma.c gpu/maxwell/maxwell3d.c gpu/renderer.c)
 
 set(platform runtime/platform/plat.c runtime/platform/unattended.c runtime/platform/backend/sdl3.c
-             runtime/platform/overlay.c)
+             runtime/platform/overlay.c runtime/platform/touch.c)
 if(WIN32)
     list(APPEND platform runtime/platform/plat_win32.c runtime/platform/profiler_win32.c)
 else()
