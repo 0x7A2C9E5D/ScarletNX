@@ -24,6 +24,11 @@ See [Linux ABI execution and QEMU validation](docs/GNUABI.md) for supported sysc
 virtual filesystems, static ELF execution, and current limits. The NX executable also
 has `scarletnx-erista`, `scarletnx-mariko`, and `scarletnx-aula` aliases.
 
+The recompiler is also a library on its own, `libscarletnx-recompiler`: a program hands
+it ARM64 or AArch32 code in memory and runs the result in its own process with its own
+SVC handler, with no Switch runtime behind it. See
+[The recompiler as a library](docs/LIBRARY.md).
+
 Install the build tools first. On Debian/Ubuntu:
 ```bash
 sudo apt update
