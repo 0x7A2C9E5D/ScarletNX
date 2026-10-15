@@ -27,3 +27,8 @@ android {
     // extracted into the app's libraries folder, where the menu runs the driver from
     packaging.jniLibs.useLegacyPackaging = true
 }
+
+// AGP 9 adds Kotlin's standard library (2.4 MB of dex) to every app; this one is Java only
+configurations.configureEach {
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib'
+}

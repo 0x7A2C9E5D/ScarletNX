@@ -51,7 +51,8 @@ They need the NDK (`ANDROID_NDK_ROOT`, else the newest under `$ANDROID_HOME/ndk`
 Gradle 9 (`GRADLE`, default `gradle`) and a JDK 17 or newer (`JAVA_HOME`). Extra CMake arguments go after `--`.
 `ANDROID_API` (default 21) is the oldest Android both scripts build for, the app's `minSdk`.
 `android-apk.sh` installs each build into `<out>/stage` (the libraries, SDL's Java classes and the icon), which
-`dist/android/build.gradle` packs with the two activities; Gradle's own output goes there too.
+`dist/android/build.gradle` packs with the two activities; Gradle's own output goes there too. The CI does the same
+on every push (`.github/workflows/build.yml`): an APK per ABI, and one holding both.
 
 The Android emulator runs it on an x86_64 image; `-gpu swiftshader_indirect` gives it SwiftShader's Vulkan 1.3. Its
 ARM translation runs the arm64 build too (an APK with arm64 alone, or an arm64 program from `adb shell`), slowly.
