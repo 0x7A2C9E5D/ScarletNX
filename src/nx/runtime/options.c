@@ -22,7 +22,7 @@ int g_opt_diag = 0;
 int g_opt_docked = 0, g_opt_lang = 1, g_opt_fps = SNX_FPS_GAME;
 float g_opt_resf = 1.0f;
 int g_opt_shadows = 1;
-int g_opt_vsync = 1;
+int g_opt_vsync = 1, g_opt_aniso = 0;
 int g_opt_prof = 0;
 int g_opt_network = 0;
 /* options that went with the OpenGL renderer (renderer choice, its dynamic resolution, LSFG, the F7 recorder) and
@@ -138,6 +138,10 @@ static const IniOpt INI_GRAPHICS[] = {
      "1 = each image waits for the display's refresh: no tearing, even pacing. 0 = shown at once (less latency,\n"
      ";   may tear)",
      INI_INT, 0, &g_opt_vsync, 0, 1, NULL},
+    {"anisotropy", "0",
+     "Texture filtering at an angle: 0 = as the game asks, 2, 4, 8 or 16 = at least that much (sharper floors and\n"
+     ";   roads in 3D games, a little more GPU work)",
+     INI_INT, INI_STARTUP, &g_opt_aniso, 0, 16, NULL},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
 static const IniOpt INI_PERF[] = {
     {"fps_limit", "game",

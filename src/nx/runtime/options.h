@@ -25,5 +25,6 @@ extern int g_opt_diag, g_opt_shadows, g_opt_prof;
 extern int g_opt_network; /* network: 1 = the game is online through the host (hle/services/network) */
 extern float g_opt_resf;
 extern int g_opt_vsync; /* vsync: 1 = presents wait for the display's refresh (FIFO) */
+extern int g_opt_aniso; /* anisotropy: 0 = the game's, else at least that much for trilinear-filtered textures */
 
 #endif

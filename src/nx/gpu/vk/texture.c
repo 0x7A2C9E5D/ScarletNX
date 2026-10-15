@@ -9,6 +9,7 @@
 #include "gpu/gpu.h"
 #include "gpu/renderer.h"
 #include "gpu/texture/etc2.h"
+#include "runtime/options.h"
 #include "runtime/platform/log.h"
 #include "gpu/vk/vk.h"
 
@@ -746,6 +747,10 @@ VkSampler vk_sampler(const u32* tsc) {
     if (lb < -lbmax) lb = -lbmax;
     static const float aniso_lut[8] = {1, 2, 4, 6, 8, 10, 12, 16}; /* Ryujinx's SamplerDescriptor */
     u32 aniso = (tsc[0] >> 20) & 7;
+    float af = aniso_lut[aniso];
+    /* anisotropy=N raises trilinear-filtered textures, a 3D scene's surfaces, to N. Textures without mipmaps or with
+       nearest filtering (2D art, the HUD) and depth compares (shadow maps) keep what the game asked for */
+    if ((float)g_opt_aniso > af && min == 2 && mip == 3 && !((tsc[0] >> 9) & 1)) af = (float)g_opt_aniso;
     if ((tsc[1] >> 10) & 3)
         LOG_LIMIT(1, "vulkan: min/max sampler reduction isn't supported (filtered as an average)\n");
     if ((tsc[0] >> 13) & 1)
@@ -758,8 +763,8 @@ VkSampler vk_sampler(const u32* tsc) {
                               .addressModeV = wrap((tsc[0] >> 3) & 7),
                               .addressModeW = wrap((tsc[0] >> 6) & 7),
                               .mipLodBias = lb,
-                              .anisotropyEnable = aniso && g_vk.feat.samplerAnisotropy,
-                              .maxAnisotropy = aniso_lut[aniso],
+                              .anisotropyEnable = af > 1 && g_vk.feat.samplerAnisotropy,
+                              .maxAnisotropy = af,
                               .compareEnable = (tsc[0] >> 9) & 1,
                               .compareOp = (VkCompareOp)((tsc[0] >> 10) & 7),
                               .minLod = minl,
