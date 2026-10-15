@@ -79,10 +79,11 @@ if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY AND NOT SNX_HACTOOL_ONLY) OR SNX_BUILD_G
     endif()
 endif()
 
-# hactool runs on the machine doing the extraction (--extract), so a cross build leaves it out. CPM applies the
-# decrypted-container patch with patch(1) once, when it unpacks hactool. The cache key holds the archive and the patch
-# contents: CPM's default key holds the patch's path instead, so an edited patch would reuse the copy patched before
-if((SNX_BUILD_NX OR SNX_HACTOOL_ONLY) AND NOT CMAKE_CROSSCOMPILING)
+# hactool runs on the machine doing the extraction (--extract), so a cross build leaves it out, but for Android, where
+# the phone extracts its own dumps. CPM applies the decrypted-container patch with patch(1) once, when it unpacks
+# hactool. The cache key holds the archive and the patch contents: CPM's default key holds the patch's path instead,
+# so an edited patch would reuse the copy patched before
+if((SNX_BUILD_NX OR SNX_HACTOOL_ONLY) AND (NOT CMAKE_CROSSCOMPILING OR ANDROID))
     set(hactool_sha256 f7148daad624ba909f5ae253210734b1a0ce19e89a7914b6cf71401f7134ebbc)
     set(hactool_patch "${CMAKE_SOURCE_DIR}/cmake/hactool-decrypted.patch")
     file(SHA256 "${hactool_patch}" hactool_patch_sha256)

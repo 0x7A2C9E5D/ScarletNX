@@ -624,6 +624,8 @@ static char* locate_hactool(const SnxPaths* paths) {
     int result;
 #if defined(_WIN32)
     tool_name = "hactool.exe";
+#elif defined(__ANDROID__)
+    tool_name = "libhactool.so"; /* the app's libraries folder takes no other name (cmake/hactool.cmake) */
 #else
     tool_name = "hactool";
 #endif

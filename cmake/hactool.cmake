@@ -46,3 +46,7 @@ set_target_properties(hactool PROPERTIES C_STANDARD 11 C_EXTENSIONS ON RUNTIME_O
 if(WIN32)
     target_link_options(hactool PRIVATE -static)
 endif()
+# beside the driver in the app's libraries folder, which takes only lib*.so (src/nx/runtime/driver/extract.c)
+if(ANDROID)
+    set_target_properties(hactool PROPERTIES OUTPUT_NAME libhactool.so)
+endif()
