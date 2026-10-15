@@ -1025,32 +1025,67 @@ int main(int argc, char** argv) {
         colored_text_on(&app, 1, app.rows - 4, "OPTION FLAGS", li, lp);
         assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 5) + cell / 2), li));
         colored_text_on(&app, 1, app.rows - 2, "CWD: ", lp, li);
-        /* typing: three characters in, the cursor after them; async, each line from when it came */
+        /* typing: five characters in, the cursor after them; async, each line from when it came. The run is over, so
+           a row types whole in typing_ms: 25 characters in 10 ms */
         app.theme.typing_sync = false;
+        app.theme.typing_ms = 10;
         app.theme.fade_in_ms = app.theme.fade_out_ms = 0;
         app.theme.blink_ms = 0;
         launch_shown = app.steps.step[1].shown_ms;
         app.steps.step[1].shown_ms = entered + 1; /* it came while the menu still showed: it types once the run is in */
-        app.clock = faded + 3 * app.theme.typing_ms + 1;
+        app.clock = faded + 2;
         render(&app);
-        colored_text_on(&app, 1, 4, "LAU_", li, lp);
+        colored_text_on(&app, 1, 4, "LAUNC_", li, lp);
         app.steps.step[1].shown_ms = launch_shown;
         app.fade_ms = 0; /* in view from the start, for the lines below */
-        app.clock = shown + 3 * app.theme.typing_ms + 1;
+        app.clock = shown + 2;
         render(&app);
-        colored_text_on(&app, 1, 4, "LAU_", li, lp);
-        /* sync: one line at a time, a done one three times faster; the second waits for the first */
+        colored_text_on(&app, 1, 4, "LAUNC_", li, lp);
+        /* sync: one line at a time; the second waits for the first */
         app.theme.typing_sync = true;
         first_shown = app.steps.step[0].shown_ms;
         second_shown = app.steps.step[1].shown_ms;
-        app.steps.step[1].shown_ms = first_shown;          /* both lines came at once */
-        app.clock = first_shown + app.theme.typing_ms + 1; /* three characters at a third of typing_ms each */
+        app.steps.step[1].shown_ms = first_shown; /* both lines came at once */
+        app.clock = first_shown + 2;
         render(&app);
-        colored_text_on(&app, 1, 3, "REC", ls, lp); /* not the last line: soft, with the cursor typing it */
-        colored_text_on(&app, 4, 3, "_", li, lp);
+        colored_text_on(&app, 1, 3, "RECOM", ls, lp); /* not the last line: soft, with the cursor typing it */
+        colored_text_on(&app, 6, 3, "_", li, lp);
         colored_text_on(&app, 1, 4, "    ", li, lp);
         app.theme.typing_sync = false;
         app.steps.step[1].shown_ms = second_shown;
+        /* the newest row of a step still running types a character every typing_ms; a done step's, or one a newer
+           row of its step passed, whole in typing_ms; one above the screen at once, the visible ones from when they
+           came: a fast log keeps the cursor on its newest lines */
+        {
+            static size_t total[200], typed[200];
+            static Uint64 came[200];
+            static int slow[200];
+            GuiTheme t = *gui_theme_builtin("yorha");
+            int k;
+            t.typing_ms = 10;
+            for (k = 0; k < 200; ++k) {
+                total[k] = 50;
+                came[k] = 1000;
+                slow[k] = 0;
+            }
+            slow[199] = 1; /* 200 rows at once, the last its running step's newest; rows 180 to 199 on the screen */
+            assert(t.typing_sync && t.line_in == GUI_LINE_TYPING);
+            assert(type_rows(&t, 200, 180, total, came, slow, 1000 + 5, typed) == 180);
+            assert(typed[0] == 50 && typed[179] == 50 && typed[180] == 25 && typed[181] == 0);
+            assert(type_rows(&t, 200, 180, total, came, slow, 1000 + 19 * 10 - 1, typed) == 198);
+            assert(typed[180] == 50 && typed[198] == 45 && typed[199] == 0);
+            assert(type_rows(&t, 200, 180, total, came, slow, 1000 + 19 * 10 + 30, typed) == 199 && typed[199] == 3);
+            slow[199] = 0; /* the step is done: its 20 rows on the screen take 200 ms */
+            assert(type_rows(&t, 200, 180, total, came, slow, 1000 + 20 * 10 - 1, typed) == 199 && typed[199] == 45);
+            assert(type_rows(&t, 200, 180, total, came, slow, 1000 + 20 * 10, typed) == -1 && typed[199] == 50);
+            slow[199] = 1;
+            t.typing_sync = 0; /* async: each row from when it came, at its own speed */
+            assert(type_rows(&t, 200, 180, total, came, slow, 1000 + 30, typed) == 199);
+            assert(typed[180] == 50 && typed[198] == 50 && typed[199] == 3);
+            t.line_in = GUI_LINE_NONE;
+            assert(type_rows(&t, 200, 180, total, came, slow, 1000, typed) == -1 && typed[180] == 50 &&
+                   typed[199] == 50);
+        }
         /* detailed: a step's lines under it, indented; collapse folds a done step's lines, never a failed one's */
         kept = app.steps;
         lf = rgb(run->failure);
@@ -1098,6 +1133,14 @@ int main(int argc, char** argv) {
         render(&app);
         colored_text_on(&app, 16, 3, "..._", li, lp);
         colored_text_on(&app, 3, 4, "Functions: 2    ", ls, lp);
+        /* two lines at once: the one the newer passed types whole, the newer a character every typing_ms */
+        gui_steps_reset(&app.steps);
+        gui_steps_feed(&app.steps, live, strlen(live), shown);
+        gui_steps_feed(&app.steps, "Functions: 2\nBlocks: 3\n", 23, shown + 1000);
+        app.clock = shown + 1000 + 3 * app.theme.typing_ms + 1;
+        render(&app);
+        colored_text_on(&app, 3, 4, "Functions: 2", ls, lp);
+        colored_text_on(&app, 3, 5, "Blo", ls, lp);
         /* every line a step kept, down the screen; a row too wide for it ends at the edge */
         app.theme.collapse = app.theme.bar = false;
         gui_steps_reset(&app.steps);

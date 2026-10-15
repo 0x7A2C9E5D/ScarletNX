@@ -459,6 +459,27 @@ static void clip_row(char run[3][112], size_t length[3], int note, int room) {
     snprintf(run[cut] + at, 112 - at, "%s", note ? "..." : "");
     length[cut] = left + marker;
 }
+/* how far each of rows rows has typed at now, total[r] characters that came at shown[r]: async, each from when it came;
+   sync, one after the other. A slow row types a character every typing_ms, any other the whole row in typing_ms, and
+   one above first, off the screen, at once. Returns the row being typed, -1 for none */
+static int type_rows(const GuiTheme* theme, int rows, int first, const size_t* total, const Uint64* shown,
+                     const int* slow, Uint64 now, size_t* typed) {
+    int r, typing = -1;
+    Uint64 free_at = 0;
+    for (r = 0; r < rows; ++r) {
+        Uint64 start, span = slow[r] ? (Uint64)theme->typing_ms * total[r] : theme->typing_ms;
+        typed[r] = total[r];
+        if (r < first || theme->line_in != GUI_LINE_TYPING || !theme->typing_ms) continue;
+        start = theme->typing_sync ? SDL_max(shown[r], free_at) : shown[r];
+        free_at = start + span;
+        if (now < start)
+            typed[r] = 0;
+        else if (now - start < span)
+            typed[r] = (size_t)((now - start) * total[r] / span);
+        if (now >= start && typed[r] < total[r]) typing = r;
+    }
+    return typing;
+}
 /* a run as a loading screen: the title, the name and the ring; the steps typed down the page, their status last;
    the progress bar and its percentage */
 static void render_steps(App* app) {
@@ -466,18 +487,17 @@ static void render_steps(App* app) {
        each ends before the right edge, with room for a step's dots and the cursor */
     enum { ROWS = GUI_STEPS_MAX + GUI_NOTES_MAX, SEGMENTS = 40 };
     static char runs[ROWS][3][112];
-    static size_t lengths[ROWS][3], typed[ROWS];
+    static size_t lengths[ROWS][3], typed[ROWS], totals[ROWS];
     static const GuiStep* owner[ROWS];
-    static int is_note[ROWS];
+    static int is_note[ROWS], slow[ROWS];
     static Uint64 shown[ROWS];
     static const GuiRgb white = {255, 255, 255};
     const GuiTheme* theme = &app->theme;
     const GuiPalette* colors = &theme->run_colors;
     /* since: a line that came while the menu faded out comes in with the run */
-    Uint64 now = now_ms(app), since = app->fade_ms, free_at = 0;
+    Uint64 now = now_ms(app), since = app->fade_ms;
     float cw = 8.0f * (float)app->scale, ch = 16.0f * (float)app->scale;
-    int width, height, name_col, col, y, i, r, rows = 0, last_step = -1, typing = -1, top = 3, bottom, fit, first,
-                                               cursor;
+    int width, height, name_col, col, y, i, r, rows = 0, last_step = -1, typing, top = 3, bottom, fit, first, cursor;
     int foot = theme->footer != GUI_STYLE_NONE ? 2 : 0; /* the footer's rows, over the ESC line */
     const char* title;
     char name[96], head[128];
@@ -526,22 +546,16 @@ static void render_steps(App* app) {
             clip_row(runs[rows], lengths[rows], 1, app->cols - 5);
         }
     }
-    /* when each row types: async, each from when it came; sync, one after the other, a finished step's faster */
-    for (r = 0; r < rows; ++r) {
-        Uint64 start;
-        float per;
-        size_t total = lengths[r][0] + lengths[r][1] + lengths[r][2];
-        typed[r] = total;
-        if (theme->line_in != GUI_LINE_TYPING || !theme->typing_ms) continue;
-        per = (float)theme->typing_ms / (theme->typing_sync && owner[r]->state != GUI_STEP_ACTIVE ? 3.0f : 1.0f);
-        start = theme->typing_sync ? SDL_max(shown[r], free_at) : shown[r];
-        free_at = start + (Uint64)(per * (float)total);
-        typed[r] = now < start ? 0 : (size_t)SDL_min((float)total, (float)(now - start) / per);
-        if (now >= start && typed[r] < total) typing = r;
-    }
     bottom = (theme->bar ? app->rows - 5 : app->rows - 2) - foot;
     fit = SDL_max(1, bottom - top);
     first = SDL_max(0, rows - fit);
+    /* the newest row of a step still running types readably; a done step's, and one a newer row of its step passed,
+       at once but for a glimpse: a fast log keeps the cursor on its latest lines */
+    for (r = 0; r < rows; ++r) {
+        totals[r] = lengths[r][0] + lengths[r][1] + lengths[r][2];
+        slow[r] = owner[r]->state == GUI_STEP_ACTIVE && (r + 1 == rows || owner[r + 1] != owner[r]);
+    }
+    typing = type_rows(theme, rows, first, totals, shown, slow, now, typed);
     cursor = typing >= 0 ? typing : last_step;
     for (r = first; r < rows; ++r) {
         int working, blink, k;
