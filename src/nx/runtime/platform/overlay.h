@@ -25,6 +25,9 @@ int overlay_back(void);      /* the page above; OVERLAY_CLOSE from the first */
 /* a tap at x, y on a picture of sw x sh: what it did, OVERLAY_CLOSE outside the panel */
 int overlay_tap(float x, float y, int sw, int sh);
 void overlay_draw(SnxUiList* l, int sw, int sh);
+/* a fatal error's panel (backend/sdl3.c), the menu's own: the head, the game's name, the error, what it means and what to
+   do, cut to its width, and Close in focus */
+void overlay_error_draw(SnxUiList* l, int sw, int sh, const char* name, const char* msg, const char* how);
 
 /* the game's touch screen as the menu shows and sets it (sdl3.c): 0 off, 1 the fingers, 2 the mouse too */
 int backend_touch_mode(void);

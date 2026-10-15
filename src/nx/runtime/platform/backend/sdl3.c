@@ -41,6 +41,8 @@ static int g_shot_req;
 static SDL_Gamepad* g_pads[4];
 static int g_audio_ready;
 static int g_hidden;         /* the app is in the background (Android) */
+static int g_given_up;       /* the window went to a fatal error's screen: the renderer presents nothing more */
+static char g_title[256];    /* the game's name, for that screen */
 static SDL_Haptic* g_buzzer; /* the phone's vibrator, for the on-screen controls' taps (Android) */
 static u32 g_generation;     /* the window's surface came back this many times */
 
@@ -197,7 +199,10 @@ static bool SDLCALL lifecycle(void* unused, SDL_Event* e) {
     }
     return true;
 }
-int backend_window_shown(void) { return !g_opt_headless && !__atomic_load_n(&g_hidden, __ATOMIC_ACQUIRE); }
+int backend_window_shown(void) {
+    return !g_opt_headless && !__atomic_load_n(&g_hidden, __ATOMIC_ACQUIRE) &&
+           !__atomic_load_n(&g_given_up, __ATOMIC_ACQUIRE);
+}
 u32 backend_window_generation(void) { return __atomic_load_n(&g_generation, __ATOMIC_ACQUIRE); }
 void backend_window_size(int* w, int* h) {
     u64 s = g_opt_headless ? 0 : g_wsize;
@@ -264,6 +269,7 @@ void video_init(const char* title) {
     SDL_AddEventWatch(lifecycle, NULL);
     int w, h;
     char header[512];
+    snprintf(g_title, sizeof g_title, "%s", title);
     backend_window_size(&w, &h);
     snprintf(header, sizeof header, "%s - %s", title, snx_build_info());
     g_win = SDL_CreateWindow(header, w, h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
@@ -355,14 +361,142 @@ static void set_fullscreen(int on) {
     else
         LOG("video: fullscreen %s failed: %s\n", on ? "on" : "off", SDL_GetError());
 }
-/* plat.c's fatal error box. SDL's box only works on the main thread (with the window as its parent). From another
-   thread, Windows' own box (it takes any thread), and none on Linux: the error is in the log and on stderr. None
-   either for an unattended run, where nobody would close it */
+/* ---- a fatal error's box (plat.c's fatal): the game's menu panel (overlay.c) with the error, what it means and what
+   to do, until the player closes it. The game's renderer lets go of the window first (its device may be what was
+   lost), and an SDL renderer of its own draws the panel's quads from the same atlas ---- */
+static char* g_fatal_left; /* an error another thread left for the main thread to show */
+static int g_fatal_taken;  /* the main thread is showing it */
+
+/* ui.h's quads, as the Vulkan renderer draws them (gpu/vk/ui.c): the atlas's premultiplied texels times their colour */
+static void ui_draw_sdl(SDL_Renderer* r, SDL_Texture* atlas, int aw, int ah, const SnxUiList* l) {
+    static const int corners[6] = {0, 1, 2, 0, 2, 3};
+    int i;
+    for (i = 0; i < l->n; ++i) {
+        const SnxUiQuad* q = &l->q[i];
+        float a = (float)(q->rgba >> 24) / 255.0f;
+        SDL_FColor c = {(float)(q->rgba & 0xFF) / 255.0f * a, (float)(q->rgba >> 8 & 0xFF) / 255.0f * a,
+                        (float)(q->rgba >> 16 & 0xFF) / 255.0f * a, a};
+        float u0 = (float)q->u / (float)aw, v0 = (float)q->v / (float)ah;
+        float u1 = (float)(q->u + q->uw) / (float)aw, v1 = (float)(q->v + q->vh) / (float)ah;
+        SDL_Vertex v[4] = {{{q->x, q->y}, c, {u0, v0}},
+                           {{q->x + q->w, q->y}, c, {u1, v0}},
+                           {{q->x + q->w, q->y + q->h}, c, {u1, v1}},
+                           {{q->x, q->y + q->h}, c, {u0, v1}}};
+        SDL_RenderGeometry(r, atlas, v, 4, corners, 6);
+    }
+}
+/* 0 when no box could be shown (no window, the renderer didn't let go, no renderer or atlas here) */
+static int fatal_screen(const char* msg) {
+#ifdef __ANDROID__
+    static const char* const how = "The menu's Share log sends the game's log, which has what ran last.";
+#else
+    static const char* const how = "The game's log has what ran last: ";
+#endif
+    static SnxUiQuad quads[1024];
+    SnxUiList l = {quads, 0, 1024};
+    char name[256], what[1400];
+    SDL_Renderer* r;
+    SDL_Texture* atlas = NULL;
+    const u32* px;
+    int aw = 0, ah = 0, pressed = 0, done = 0, i;
+    u32 version;
+    Uint64 since;
+    if (!g_win) return 0;
+    __atomic_store_n(&g_given_up, 1, __ATOMIC_RELEASE);
+    if (g_renderer_up && g_renderer->release_window && !g_renderer->release_window()) return 0;
+    /* Vulkan first: the window was made for it */
+    r = SDL_CreateRenderer(g_win, "vulkan");
+    if (!r) r = SDL_CreateRenderer(g_win, NULL);
+    if (!r) {
+        LOG("video: no renderer for the error's box: %s\n", SDL_GetError());
+        return 0;
+    }
+    controls_atlas(); /* the renderer freed its copy once it had it */
+    ui_lock();
+    px = ui_atlas(&aw, &ah, &version);
+    if (px) {
+        SDL_Surface* image = SDL_CreateSurfaceFrom(aw, ah, SDL_PIXELFORMAT_RGBA32, (void*)px, aw * 4);
+        if (image) atlas = SDL_CreateTextureFromSurface(r, image);
+        SDL_DestroySurface(image);
+    }
+    ui_unlock();
+    if (!atlas) {
+        LOG("video: no atlas for the error's box: %s\n", SDL_GetError());
+        SDL_DestroyRenderer(r);
+        return 0;
+    }
+    SDL_SetTextureBlendMode(atlas, SDL_BLENDMODE_BLEND_PREMULTIPLIED);
+    SDL_SetTextureScaleMode(atlas, SDL_SCALEMODE_NEAREST);
+    for (i = 0; g_title[i] && i < (int)sizeof name - 1; ++i)
+        name[i] = g_title[i] >= 'a' && g_title[i] <= 'z' ? (char)(g_title[i] - 32) : g_title[i];
+    name[i] = 0;
+#ifdef __ANDROID__
+    snprintf(what, sizeof what, "%s", how);
+#else
+    snprintf(what, sizeof what, "%s%s%s.log", how, g_exedir, g_exename);
+#endif
+    since = SDL_GetTicks();
+    while (!done) {
+        SDL_Event e;
+        int w = 0, h = 0;
+        while (SDL_PollEvent(&e)) switch (e.type) {
+                case SDL_EVENT_QUIT:
+                case SDL_EVENT_WINDOW_CLOSE_REQUESTED: done = 1; break;
+                /* a press made on this box: not a key held from the game, nor one that came as the error did */
+                case SDL_EVENT_KEY_DOWN:
+                    if (!e.key.repeat && SDL_GetTicks() - since > 500) done = 1;
+                    break;
+                case SDL_EVENT_FINGER_DOWN:
+                case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                case SDL_EVENT_GAMEPAD_BUTTON_DOWN: pressed = 1; break;
+                case SDL_EVENT_FINGER_UP:
+                case SDL_EVENT_MOUSE_BUTTON_UP:
+                case SDL_EVENT_GAMEPAD_BUTTON_UP:
+                    if (pressed) done = 1;
+                    break;
+            }
+        SDL_GetRenderOutputSize(r, &w, &h);
+        l.n = 0;
+        overlay_error_draw(&l, w, h, name, msg, what);
+        /* where the game's picture was: the device that drew it may be gone */
+        SDL_SetRenderDrawColor(r, 0x14, 0x14, 0x16, 255);
+        SDL_RenderClear(r);
+        ui_draw_sdl(r, atlas, aw, ah, &l);
+        SDL_RenderPresent(r);
+        SDL_Delay(16);
+    }
+    SDL_DestroyTexture(atlas);
+    SDL_DestroyRenderer(r);
+    return 1;
+}
+/* plat.c's fatal error: the screen above on the main thread, which owns the window; SDL's box when it can't be drawn.
+   From another thread, the main thread's loop (video_poll) shows it, and this thread waits for the exit; when the main
+   thread doesn't come (held up elsewhere), Windows' own box (it takes any thread) and none on Linux: the error is in
+   the log and on stderr. Nothing for an unattended run, where nobody would close it */
 void win_fatal_box(const char* msg) {
     if (g_opt_headless || unattended_active()) return;
     if (SDL_IsMainThread()) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", msg, g_win);
+        /* an error another thread left first: this one followed from it */
+        char* left = __atomic_load_n(&g_fatal_left, __ATOMIC_ACQUIRE);
+        __atomic_store_n(&g_fatal_taken, 1, __ATOMIC_RELEASE);
+        if (!fatal_screen(left ? left : msg))
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", left ? left : msg, g_win);
         return;
+    }
+    if (g_win) {
+        char* none = NULL;
+        char* copy = SDL_strdup(msg);
+        int i;
+        /* the renderer stops presenting and lets go of the window here: the main thread may be waiting for it */
+        __atomic_store_n(&g_given_up, 1, __ATOMIC_RELEASE);
+        if (g_renderer_up && g_renderer->release_window) g_renderer->release_window();
+        if (!copy || !__atomic_compare_exchange_n(&g_fatal_left, &none, copy, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            SDL_free(copy); /* a second error: the first one shows */
+        for (i = 0; i < 300; ++i) {
+            if (__atomic_load_n(&g_fatal_taken, __ATOMIC_ACQUIRE))
+                for (;;) SDL_Delay(1000); /* the main thread shows it and ends the process */
+            SDL_Delay(10);
+        }
     }
 #ifdef _WIN32
     wchar_t w[4096]; /* on the stack: this also runs in the crash report, where the heap may be what broke */
@@ -580,6 +714,12 @@ static void touch_mouse(const SDL_Event* e) {
 }
 void video_poll(void) {
     SDL_Event e;
+    char* left = __atomic_load_n(&g_fatal_left, __ATOMIC_ACQUIRE);
+    if (left) { /* another thread's fatal error, left for this thread to show */
+        __atomic_store_n(&g_fatal_taken, 1, __ATOMIC_RELEASE);
+        if (!fatal_screen(left)) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", left, g_win);
+        plat_exit_now(1);
+    }
     while (!g_opt_headless && SDL_PollEvent(&e)) {
         if (overlay_event(&e)) continue;
         switch (e.type) {

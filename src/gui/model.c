@@ -220,12 +220,6 @@ GuiBrowserAction gui_browser_key(GuiBrowser* browser, GuiKey key) {
     if (browser->selected > items) browser->selected = items;
     return GUI_BROWSER_NONE;
 }
-unsigned char gui_glyph(uint32_t codepoint) {
-    if (codepoint < 128) return (unsigned char)codepoint;
-    for (int i = 128; i < 256; ++i)
-        if (gui_codepage[i] == codepoint) return (unsigned char)i;
-    return '?';
-}
 static int clamp(int n, int maximum) { return n < 1 ? 1 : n > maximum ? maximum : n; }
 void gui_console_init(GuiConsole* console, int cols, int rows) {
     memset(console, 0, sizeof(*console));
