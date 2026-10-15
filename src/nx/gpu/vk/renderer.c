@@ -320,7 +320,7 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
                                .pSwapchains = &g_vk.swapchain,
                                .pImageIndices = &idx};
         VkResult r = vkQueuePresentKHR(g_vk.gfx, &pi);
-        if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
+        if (r == VK_ERROR_OUT_OF_DATE_KHR || (r == VK_SUBOPTIMAL_KHR && !g_vk.sc_turned))
             recreate = 1;
         else
             VK_OK(r);
