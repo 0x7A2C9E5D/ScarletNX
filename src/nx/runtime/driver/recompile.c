@@ -26,8 +26,9 @@ static void usage(void) {
          "  --jobs N               Parallel compiles (default: CPU count)");
     puts("  --backend NAME         Code generator: llvm (LLVM-C, the default and the recommended one),\n"
          "                         gcc (libgccjit, optional: for DEC Alpha EV67 hosts; elsewhere use llvm)");
-    puts("  --chunk N              Instructions per code unit, whole functions batched (default: 90000)\n"
-         "  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
+    printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
+           SNX_CHUNK_INSTRUCTIONS);
+    puts("  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
          "  --no-build             Stage data/INI only, generate no code");
     puts("  --interp-only          Generate fallback interpreter only\n"
          "  --runtime FILE         Deploy this runtime instead of building one\n"
