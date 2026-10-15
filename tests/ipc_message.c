@@ -44,7 +44,7 @@ void fatal(const char* format, ...) {
 #define H_BASE 0x100u
 static KObj* handles[64];
 /* guest memory blocks for ipc_user_buffer (SendSyncRequestWithUserBuffer): what is not listed is free */
-static MemBlock test_blocks[8];
+static MemBlock test_blocks[16];
 static int test_nblocks;
 void mem_query(u64 a, MemBlock* o) {
     for (int i = 0; i < test_nblocks; i++)
@@ -542,9 +542,13 @@ static void user_buffers(void) {
         {0x16000, 0x1000, MS_NORMAL, PERM_RW, 1, 0, 0}, /* locked */
         {0x17000, 0x1000, MS_NORMAL, PERM_RW, 0, 0, 0}, /* heap, then module data: both take user buffers, not as one */
         {0x18000, 0x1000, MS_CODEDATA, PERM_RW, 0, 0, 0},
+        {0x19000, 0x1000, MS_NORMAL, PERM_RW, 0, 0, 0}, /* read-write, then read-only: not one permission */
+        {0x1A000, 0x1000, MS_NORMAL, PERM_R, 0, 0, 0},
+        {0x1B000, 0x1000, MS_NORMAL, PERM_RW, 0, 0, 0}, /* then a locked block */
+        {0x1C000, 0x1000, MS_NORMAL, PERM_RW, 1, 0, 0},
     };
     memcpy(test_blocks, blocks, sizeof blocks);
-    test_nblocks = 6;
+    test_nblocks = 10;
     CHECK(ipc_user_buffer(0x10000, 0x1000) == 0);
     CHECK(ipc_user_buffer(0x10000, 0x4000) == 0);
     CHECK(ipc_user_buffer(0x10800, 0x1000) == 0xCC01); /* InvalidAddress */
@@ -554,6 +558,8 @@ static void user_buffers(void) {
     CHECK(ipc_user_buffer(0x14000, 0x1000) == 0xD401); /* code, read-write: its state takes no user buffer */
     CHECK(ipc_user_buffer(0x17000, 0x1000) == 0 && ipc_user_buffer(0x18000, 0x1000) == 0);
     CHECK(ipc_user_buffer(0x17000, 0x2000) == 0xD401); /* two states in one range */
+    CHECK(ipc_user_buffer(0x19000, 0x1000) == 0 && ipc_user_buffer(0x19000, 0x2000) == 0xD401);
+    CHECK(ipc_user_buffer(0x1B000, 0x1000) == 0 && ipc_user_buffer(0x1B000, 0x2000) == 0xD401);
     CHECK(ipc_user_buffer(0x15000, 0x1000) == 0xD401);
     CHECK(ipc_user_buffer(0x16000, 0x1000) == 0xD401);
     CHECK(ipc_user_buffer(0x20000, 0x1000) == 0xD401); /* free */
@@ -601,6 +607,27 @@ static void receive_lists(u32 h, SvcObj* root) {
             CHECK(cmif_parse_response(msg(), 0, 12).result == 0);
         }
     }
+
+    /* in TLS: raw data past the server's 0x100 bytes, with the receive list inside it so the message fits the
+       client's buffer: MessageTooLarge, which the console answers before it would look at the receive list */
+    clear();
+    r = cmif_make_request(msg(), (CmifRequestFormat){.request_id = 1, .data_size = 0xF0, .num_out_fixed_pointers = 1});
+    set_recv_list_offset(msg(), 4);
+    hipc_recv_static(msg() + 16, 0x6000, 0x20);
+    memcpy(before, msg(), 0x100);
+    CHECK(send(h) == 0x20801 && !got.calls && !memcmp(before, msg(), 0x100));
+    /* a receive list inside the raw data and a B buffer outside the address space: the buffer's InvalidCurrentMemory,
+       which the console finds first (the receive list only at the reply) */
+    clear();
+    r = cmif_make_request(
+        msg(), (CmifRequestFormat){.request_id = 1, .data_size = 8, .num_out_buffers = 1, .num_out_fixed_pointers = 1});
+    hipc_buffer(r.hipc.recv_buffers, 0x7F00000000ull, 0x100, 0);
+    set_recv_list_offset(msg(), 8);
+    memcpy(before, msg(), 0x100);
+    CHECK(send(h) == 0xD401 && !got.calls && !memcmp(before, msg(), 0x100));
+    /* the same with the buffer inside: the receive list's InvalidCombination */
+    hipc_buffer(r.hipc.recv_buffers, 0x5000, 0x100, 0);
+    CHECK(send(h) == 0xE801 && !got.calls);
 }
 
 /* TIPC: type 16 + the command, the raw data right after the headers, the pid only in the special header */

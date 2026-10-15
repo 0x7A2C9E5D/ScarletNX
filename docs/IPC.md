@@ -87,10 +87,11 @@ only read):
   with its data words.
 - The kernel refuses some requests before any service sees them, and `ipc.c` does as it does (Mesosphere): a header
   that describes more than the client's message buffer, its receive list included, or a receive list inside the raw
-  data (InvalidCombination); raw data that ends past the server's 0x100 bytes (MessageTooLarge, which only
-  SendSyncRequestWithUserBuffer can send); a buffer outside the address space (InvalidCurrentMemory). A
+  data (InvalidCombination, which the console finds at the reply, after the descriptors); raw data that ends past
+  the server's 0x100 bytes (MessageTooLarge); a buffer outside the address space (InvalidCurrentMemory). A
   SendSyncRequestWithUserBuffer's own buffer has to be page-aligned (InvalidAddress), whole pages (InvalidSize), and
-  memory that allows IPC user buffers, read-write with no attribute (InvalidCurrentMemory): `ipc_user_buffer`.
+  memory that allows IPC user buffers, read-write with no attribute, with one state and permission across the range
+  (InvalidCurrentMemory): `ipc_user_buffer`.
 - A request has to send what its command declares: the pid flag when it takes `pid` or `aruid`, as many A, B and X
   descriptors (an AutoSelect buffer counts in both of its lists), no exchange (W) buffer, as many copy and move
   handles, and at least the command's raw data. Otherwise it is answered with sf's InvalidCmifRequest, RC(11, 420),

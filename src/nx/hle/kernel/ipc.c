@@ -73,22 +73,21 @@ u32 session_new(SvcObj* obj) { return h_new(&session_alloc(obj)->o); }
 
 /* Mesosphere's SendSyncRequestWithUserBuffer: a page-aligned address (InvalidAddress), a nonzero size of whole pages
    (InvalidSize), then a range the kernel can lock for the request (LockForIpcUserBuffer): inside the address space,
-   in memory whose state allows IPC user buffers (FlagCanIpcUserBuffer, bit 21), read-write and with no attribute
-   (InvalidCurrentMemory otherwise). The runtime doesn't lock the range for the request's length, as the kernel does:
-   a guest that unmaps it meanwhile from another thread is a bug the console refuses and the runtime doesn't */
+   in memory whose state allows IPC user buffers (FlagCanIpcUserBuffer, bit 21), read-write and with no attribute,
+   one state and permission across the range (InvalidCurrentMemory otherwise). The runtime doesn't lock the range
+   for the request's length, as the kernel does: a guest that unmaps it meanwhile from another thread is a bug the
+   console refuses and the runtime doesn't */
 u32 ipc_user_buffer(u64 a, u64 size) {
     if (a & 0xFFF) return R_BADADDR;
     if (!size || (size & 0xFFF)) return R_BADSIZE;
     if (a + size < a || a + size > AS_SIZE) return R_BADMEMSTATE;
-    MemBlock first;
-    mem_query(a, &first);
-    if (!(first.state & (1u << 21)) || (first.perm & 7) != PERM_RW) return R_BADMEMSTATE;
-    /* and the whole range alike, as the kernel's CheckMemoryState over it requires: one state and permission, no
-       attribute */
+    u32 state = 0;
     for (u64 end = a + size; a < end;) {
         MemBlock b;
         mem_query(a, &b);
-        if (b.state != first.state || b.perm != first.perm || b.attr || b.addr + b.size <= a) return R_BADMEMSTATE;
+        if (!state) state = b.state; /* the first block's, which every other one has to share (CheckMemoryState) */
+        if (!(b.state & (1u << 21)) || b.state != state || b.perm != PERM_RW || b.attr || b.addr + b.size <= a)
+            return R_BADMEMSTATE;
         a = b.addr + b.size;
     }
     return 0;
@@ -231,9 +230,8 @@ static void parse(IpcCtx* c) {
         /* the kernel copies the message the header describes into the server's 0x100 byte buffer before the server
            reads any of it (Mesosphere's ReceiveMessage). A header that describes more than the client's buffer, its
            receive list included, fails the request (InvalidCombination), and raw data that ends past the server's
-           buffer too (MessageTooLarge, which only a SendSyncRequestWithUserBuffer can send). A receive list inside
-           the raw data is InvalidCombination as well: the console finds it at the reply (SendMessage, the client
-           being the destination then), after the handler ran, and the runtime up front */
+           buffer too (MessageTooLarge: a user buffer's request, or one in TLS whose receive list sits inside its
+           raw data). A receive list inside the raw data is refused after the descriptors, below */
         u32 sh = 0, raw_end, all;
         if (special) memcpy(&sh, p, 4);
         raw_end = 8 + (special ? 4 + ((sh & 1) ? 8 : 0) + 4 * (((sh >> 1) & 15) + ((sh >> 5) & 15)) : 0) + 8 * nx +
@@ -243,8 +241,6 @@ static void parse(IpcCtx* c) {
             c->kernel_rc = R_BADCOMBO;
         else if (raw_end > 0x100)
             c->kernel_rc = R_MSGTOOLARGE;
-        else if (recv_off && recv_off * 4 < raw_end) /* the console's last one: at the reply */
-            c->kernel_rc = R_BADCOMBO;
         if (c->kernel_rc) return;
     }
     if (special) {
@@ -292,6 +288,13 @@ static void parse(IpcCtx* c) {
     c->na = na < MAX_BUFS ? (int)na : MAX_BUFS;
     c->nb = nb < MAX_BUFS ? (int)nb : MAX_BUFS;
     c->nw = nw < MAX_BUFS ? (int)nw : MAX_BUFS;
+    /* a receive list inside the raw data is InvalidCombination: the console finds it at the reply (SendMessage, the
+       client being the destination then), after the descriptors above, which the runtime refuses first too */
+    if (c->kernel_rc) return;
+    if (recv_off && recv_off * 4 < (u32)(p - m) + 4 * ndata) {
+        c->kernel_rc = R_BADCOMBO;
+        return;
+    }
     /* raw data is 16-aligned from the message start */
     u8* raw = m + (((p - m) + 15) & ~15);
     /* C descriptors follow the data, or start where the header says */
