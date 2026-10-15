@@ -80,5 +80,6 @@ For more detailed information please see: [Build + run](./docs/BUILD.md).
 - LibHac.
 - [Nexium](https://nexium-emu.org/) for research and development.
 - [Switchbrew](https://switchbrew.org) for research.
+- [Azahar](https://github.com/azahar-emu/azahar) and Citra, for all of the 3DS emulation.
 
 Wimsy, the mascot and the runtime's icon (`dist/wimsy.svg`) was drawn by Liz.
