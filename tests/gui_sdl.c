@@ -1227,6 +1227,18 @@ int main(int argc, char** argv) {
         app.menu.gccjit = app.menu.gdbstub = false;
         free(steps_input);
     }
+    /* ESC on the menu's first screen asks before the app closes: ESC again stays, Exit closes */
+    assert(app.menu.view == GUI_LOAD_NONE && !app.menu.running && !app.finished && !app.confirm.shown);
+    key(&app, SDLK_ESCAPE);
+    assert(app.confirm.shown && app.confirm.exit && app.confirm.selected == GUI_CONFIRM_KEEP && !app.menu.quit);
+    render(&app);
+    key(&app, SDLK_ESCAPE);
+    assert(!app.confirm.shown && !app.menu.quit);
+    key(&app, SDLK_ESCAPE);
+    key(&app, SDLK_DOWN);
+    key(&app, SDLK_RETURN);
+    assert(!app.confirm.shown && app.menu.quit);
+    app.menu.quit = false;
     /* fingers: a tap clicks anywhere on a row, which a mouse does on the label only; a drag is no tap, nor a second
        finger; a swipe across turns the games' pages; back is ESC */
     {

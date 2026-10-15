@@ -45,6 +45,11 @@ public class MainActivity extends SDLActivity {
         startActivity(new Intent(this, GameActivity.class).putExtra("args", args));
     }
 
+    /** src/gui/android.c: Back on the menu's first screen, as an app's first screen takes it: the app goes behind */
+    public void toBack() {
+        moveTaskToBack(true);
+    }
+
     /** src/gui/android.c: the saved log, as a file, to the app the user picks */
     public void share(String path) {
         MediaScannerConnection.scanFile(this, new String[] {path}, new String[] {"text/plain"}, (file, uri) -> {

@@ -661,6 +661,7 @@ static void overlay(App* app) {
     SDL_SetRenderViewport(app->renderer, &safe);
 }
 static const char* ask_question(const App* app) {
+    if (app->confirm.exit) return "Exit ScarletNX?";
     return screen(app) == GUI_SCREEN_COMPILING ? "Abort the recompile? Its work is lost." : "Abort the run?";
 }
 /* the question's box, in cells: a blank row, the question, a blank row, its two choices and a blank row, two columns
@@ -672,13 +673,13 @@ static void ask_box(const App* app, int* col, int* row, int* cols) {
 }
 /* the question over a running run, in the run screen's colours, its choices as the menu's entries */
 static void render_ask(App* app) {
-    static const char* const choices[] = {"Keep going", "Abort"}; /* by GUI_CONFIRM_* */
+    static const char* const choices[2][2] = {{"Keep going", "Abort"}, {"Stay", "Exit"}}; /* by exit, GUI_CONFIRM_* */
     const GuiTheme* t = &app->theme;
-    int steps = t->run == GUI_RUN_STEPS, col, row, cols, i;
+    int steps = t->run == GUI_RUN_STEPS && !app->confirm.exit, col, row, cols, i;
     GuiRgb page = steps ? t->run_colors.page : t->page, ink = steps ? t->run_colors.ink : t->ink;
     GuiRgb soft = steps ? t->run_colors.soft : t->soft, warning = steps ? t->run_colors.warning : t->warning;
     float cw = 8.0f * (float)app->scale, ch = 16.0f * (float)app->scale, line = (float)app->scale;
-    if (!app->menu.running || !app->confirm.shown) return;
+    if (!app->confirm.shown || (!app->menu.running && !app->confirm.exit)) return;
 
     ask_box(app, &col, &row, &cols);
     fill(app, (float)col * cw, (float)row * ch, (float)cols * cw, 6 * ch, page, 255);
@@ -690,7 +691,7 @@ static void render_ask(App* app) {
     for (i = 0; i < 2; ++i) {
         char label[64];
         int focused = app->confirm.selected == i, bar = focused && (steps || t->focus_bar);
-        snprintf(label, sizeof label, "%s%s", t->marker, choices[i]);
+        snprintf(label, sizeof label, "%s%s", t->marker, choices[app->confirm.exit][i]);
         if (bar)
             fill(app, (float)col * cw + line, (float)(row + 3 + i) * ch, (float)cols * cw - 2 * line, ch, ink, 255);
         text(app, col + 2, row + 3 + i, label, rgb(bar ? page : focused ? t->focus : ink));
@@ -1250,8 +1251,8 @@ static void list_games(App* app) {
     layout(app);
 }
 static void menu_key(App* app, GuiKey key) {
-#ifdef SDL_PLATFORM_ANDROID
     GuiLoadView before = app->menu.view; /* the screen this key was pressed on */
+#ifdef SDL_PLATFORM_ANDROID
     bool fullscreen = app->menu.fullscreen;
 #endif
     if (app->finished) {
@@ -1305,6 +1306,17 @@ static void menu_key(App* app, GuiKey key) {
     }
     if (key == GUI_CANCEL || (key == GUI_SELECT && app->menu.view == GUI_LOAD_KEYS)) app->message[0] = 0;
     if (app->menu.view == GUI_LOAD_GAMES) list_games(app);
+    /* Back or ESC with nothing open to close: on Android the app goes behind, as an app's first screen does; on a
+       computer the menu asks before it closes, as rEden does */
+    if (key == GUI_CANCEL && before == GUI_LOAD_NONE && app->menu.view == GUI_LOAD_NONE && !app->menu.running) {
+#ifdef SDL_PLATFORM_ANDROID
+        gui_android_background(app->message, sizeof(app->message));
+#else
+        app->confirm.shown = true;
+        app->confirm.exit = true;
+        app->confirm.selected = GUI_CONFIRM_KEEP;
+#endif
+    }
 }
 /* a label's cells, or its whole row for a finger, which is wider than a mouse pointer */
 static bool hit_text(const App* app, float x, float y, int col, int row, const char* label, bool touch) {
@@ -1318,6 +1330,13 @@ static void abort_run(App* app) {
     gui_process_terminate(app->process);
     app->aborting = true;
 }
+/* the question's second choice taken: the app closes, or the run is aborted */
+static void confirmed(App* app) {
+    if (app->confirm.exit)
+        app->menu.quit = true;
+    else
+        abort_run(app);
+}
 /* the pointer on the question, at x, y in cells: on a choice it takes the focus, and a click takes the choice; a click
    off the box keeps going */
 static void ask_pointer(App* app, float x, float y, bool click) {
@@ -1325,7 +1344,7 @@ static void ask_pointer(App* app, float x, float y, bool click) {
     ask_box(app, &col, &row, &cols);
     if (x >= (float)col && x < (float)(col + cols) && y >= (float)(row + 3) && y < (float)(row + 5)) {
         app->confirm.selected = (int)y - row - 3;
-        if (click && gui_confirm_key(&app->confirm, GUI_SELECT)) abort_run(app);
+        if (click && gui_confirm_key(&app->confirm, GUI_SELECT)) confirmed(app);
     } else if (click && (x < (float)col || x >= (float)(col + cols) || y < (float)row || y >= (float)(row + 6)))
         gui_confirm_key(&app->confirm, GUI_CANCEL);
 }
@@ -1418,6 +1437,7 @@ static void cancel(App* app) {
         menu_key(app, GUI_CANCEL);
     else if (app->ask_abort && !app->aborting) {
         app->confirm.shown = true;
+        app->confirm.exit = false;
         app->confirm.selected = GUI_CONFIRM_KEEP;
     } else
         abort_run(app);
@@ -1536,9 +1556,14 @@ static void event(App* app, const SDL_Event* e) {
     if (app->menu.running) {
         if (e->key.repeat || !menu_key_of(&e->key, &key)) return;
         if (app->confirm.shown) {
-            if (gui_confirm_key(&app->confirm, key)) abort_run(app);
+            if (gui_confirm_key(&app->confirm, key)) confirmed(app);
         } else if (key == GUI_CANCEL)
             cancel(app);
+        return;
+    }
+    /* the exit question takes every key while it shows */
+    if (app->confirm.shown) {
+        if (!e->key.repeat && menu_key_of(&e->key, &key) && gui_confirm_key(&app->confirm, key)) confirmed(app);
         return;
     }
     if (e->key.key == SDLK_V && (e->key.mod & SDL_KMOD_CTRL) &&

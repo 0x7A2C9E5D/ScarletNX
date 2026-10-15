@@ -47,10 +47,12 @@ typedef struct {
     int recent, recent_focus, recent_open;
 } GuiMenu;
 void gui_menu_key(GuiMenu* menu, GuiKey key);
-/* The question a running run's abort asks first: shown or not, and the choice in focus, Keep going first */
+/* The question a running run's abort asks first, or leaving the menu on a computer: shown or not, which one, and the
+   choice in focus, the one that stays first */
 enum { GUI_CONFIRM_KEEP, GUI_CONFIRM_ABORT };
 typedef struct {
     bool shown;
+    bool exit; /* leaving the app, not aborting a run */
     int selected;
 } GuiConfirm;
 /* A key on the question: the arrows move between its choices, Select takes the one in focus and Cancel keeps going,
