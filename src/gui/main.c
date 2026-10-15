@@ -1454,15 +1454,16 @@ static bool drags(const App* app, float x, float y) {
     return SDL_fabsf(dy) > 0.05f && SDL_fabsf(dy) > 2 * SDL_fabsf(dx) && app->menu.view != GUI_LOAD_GAMES &&
            !app->menu.running && !app->finished && menu_row_in_full(app, GUI_EXIT) > menu_last_row(app);
 }
-/* the focus follows the finger, a row each time it passes a row's height, so the highlight is seen going */
+/* the focus follows the finger, up as it goes up, a row each time it passes a row's height, so the highlight is seen
+   going */
 static void drag(App* app, float y) {
     float row = 1.0f / (float)SDL_max(1, app->rows);
     while (y <= app->finger_mark - row) {
-        menu_key(app, GUI_DOWN);
+        menu_key(app, GUI_UP);
         app->finger_mark -= row;
     }
     while (y >= app->finger_mark + row) {
-        menu_key(app, GUI_UP);
+        menu_key(app, GUI_DOWN);
         app->finger_mark += row;
     }
 }

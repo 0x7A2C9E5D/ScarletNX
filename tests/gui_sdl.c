@@ -883,20 +883,20 @@ int main(int argc, char** argv) {
         app.menu.selected = GUI_SWITCH;
         render(&app);
         assert(!menu_offset(&app));
-        /* a drag up moves the focus row by row while the finger goes, not all at once when it lifts */
+        /* a drag down moves the focus down row by row while the finger goes, not all at once when it lifts */
         {
             SDL_Event e = {0};
             float row = 1.0f / (float)app.rows;
             e.tfinger.fingerID = 7;
             e.tfinger.x = 0.5f;
-            e.tfinger.y = 0.8f;
+            e.tfinger.y = 0.2f;
             e.type = SDL_EVENT_FINGER_DOWN;
             event(&app, &e);
             e.type = SDL_EVENT_FINGER_MOTION;
-            e.tfinger.y = 0.8f - 1.5f * row;
+            e.tfinger.y = 0.2f + 1.5f * row;
             event(&app, &e);
             assert(app.menu.selected == GUI_LINUX);
-            e.tfinger.y = 0.8f - 3.2f * row;
+            e.tfinger.y = 0.2f + 3.2f * row;
             event(&app, &e);
             assert(app.menu.selected == GUI_KEYS);
             e.type = SDL_EVENT_FINGER_UP;
