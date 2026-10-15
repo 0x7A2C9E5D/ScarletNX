@@ -2,7 +2,9 @@
 // Copyright 2026 the ScarletNX contributors
 package org.scarletnx;
 
+import android.content.Context;
 import org.libsdl.app.SDLActivity;
+import org.libsdl.app.SDLSurface;
 
 /** A game: the runtime's main in libscarletnx.so, with the menu's arguments */
 public class GameActivity extends SDLActivity {
@@ -14,6 +16,11 @@ public class GameActivity extends SDLActivity {
     @Override
     protected String getMainFunction() {
         return "main";
+    }
+
+    @Override
+    protected SDLSurface createSDLSurface(Context context) {
+        return MainActivity.clearOfBars(context);
     }
 
     @Override

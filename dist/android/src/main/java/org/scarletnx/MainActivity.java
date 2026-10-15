@@ -6,6 +6,7 @@ import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Insets;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
@@ -52,19 +53,29 @@ public class MainActivity extends SDLActivity {
         });
     }
 
-    /** the menu's text keeps out of the camera's cutout only, not the bars it hides nor the gesture edges */
     @Override
     protected SDLSurface createSDLSurface(Context context) {
+        return clearOfBars(context);
+    }
+
+    /** a surface whose safe area keeps out of the camera's cutout and of the system's bars while they show (Fullscreen
+        off), not of the bars it hides nor of the gesture edges: the menu's text and a game's picture stay there */
+    static SDLSurface clearOfBars(Context context) {
         return new SDLSurface(context) {
             @Override
             public WindowInsets onApplyWindowInsets(View view, WindowInsets insets) {
                 WindowInsets result = super.onApplyWindowInsets(view, insets);
-                DisplayCutout cutout = Build.VERSION.SDK_INT >= 28 ? insets.getDisplayCutout() : null;
-                if (cutout != null)
-                    SDLActivity.onNativeInsetsChanged(cutout.getSafeInsetLeft(), cutout.getSafeInsetRight(),
-                                                      cutout.getSafeInsetTop(), cutout.getSafeInsetBottom());
-                else if (Build.VERSION.SDK_INT >= 30)
-                    SDLActivity.onNativeInsetsChanged(0, 0, 0, 0);
+                if (Build.VERSION.SDK_INT >= 30) {
+                    Insets safe = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                    SDLActivity.onNativeInsetsChanged(safe.left, safe.right, safe.top, safe.bottom);
+                } else {
+                    DisplayCutout cut = Build.VERSION.SDK_INT >= 28 ? insets.getDisplayCutout() : null;
+                    SDLActivity.onNativeInsetsChanged(
+                        Math.max(insets.getSystemWindowInsetLeft(), cut != null ? cut.getSafeInsetLeft() : 0),
+                        Math.max(insets.getSystemWindowInsetRight(), cut != null ? cut.getSafeInsetRight() : 0),
+                        Math.max(insets.getSystemWindowInsetTop(), cut != null ? cut.getSafeInsetTop() : 0),
+                        Math.max(insets.getSystemWindowInsetBottom(), cut != null ? cut.getSafeInsetBottom() : 0));
+                }
                 return result;
             }
         };

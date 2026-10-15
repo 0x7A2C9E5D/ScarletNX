@@ -344,13 +344,25 @@ static void vkr_present_buffer(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout
             vk_barrier(cb, sc, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_CLEAR_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
                        VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-            /* letterbox: the largest rectangle of the frame's aspect that fits the window, centered */
-            u32 sw = g_vk.sc_extent.width, sh = g_vk.sc_extent.height, dw = sw, dh = (u32)((u64)sw * fh / fw);
-            if (dh > sh) {
-                dh = sh;
-                dw = (u32)((u64)sh * fw / fh);
+            /* letterbox: the largest rectangle of the frame's aspect that fits the window's part clear of the system's
+               bars, centered there; the clear part scales with the extent the surface may have clamped */
+            u32 sw = g_vk.sc_extent.width, sh = g_vk.sc_extent.height, cx = 0, cy = 0, cw = sw, ch = sh, dw, dh;
+            int sx, sy, sww, swh;
+            backend_window_safe(&sx, &sy, &sww, &swh);
+            if (g_vk.sc_win_w > 0 && g_vk.sc_win_h > 0 && sww > 0 && swh > 0 && sx + sww <= g_vk.sc_win_w &&
+                sy + swh <= g_vk.sc_win_h) {
+                cx = (u32)((u64)sw * (u32)sx / (u32)g_vk.sc_win_w);
+                cy = (u32)((u64)sh * (u32)sy / (u32)g_vk.sc_win_h);
+                cw = (u32)((u64)sw * (u32)sww / (u32)g_vk.sc_win_w);
+                ch = (u32)((u64)sh * (u32)swh / (u32)g_vk.sc_win_h);
             }
-            i32 dx = (i32)(sw - dw) / 2, dy = (i32)(sh - dh) / 2;
+            dw = cw;
+            dh = (u32)((u64)cw * fh / fw);
+            if (dh > ch) {
+                dh = ch;
+                dw = (u32)((u64)ch * fw / fh);
+            }
+            i32 dx = (i32)(cx + (cw - dw) / 2), dy = (i32)(cy + (ch - dh) / 2);
             VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                                 .srcOffsets = {{(i32)g_last_x, (i32)g_last_y, 0},
                                                {(i32)(g_last_x + g_last_w), (i32)(g_last_y + g_last_h), 1}},

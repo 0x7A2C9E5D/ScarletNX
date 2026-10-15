@@ -100,7 +100,11 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
         case GUI_FULLSCREEN:
+#ifdef __ANDROID__
+            return "The menu and the games on the whole screen, the system's bars hidden";
+#else
             return "Enable fullscreen at startup";
+#endif
         case GUI_GCCJIT:
             return SNX_GUI_HAS_GCCJIT
                 ? "libgccjit will be used instead of llvm"

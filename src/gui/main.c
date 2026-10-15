@@ -747,10 +747,10 @@ static bool android_folder(App* app) {
 static int play(App* app, const char* game) {
     char* option = snx_format("--game=%s", game);
     const char* argv[3];
-    int ok;
-    argv[0] = option;
-    argv[1] = "-f"; /* the whole screen, the system's bars out of the way */
-    argv[2] = NULL;
+    int ok, n = 0;
+    argv[n++] = option;
+    if (app->menu.fullscreen) argv[n++] = "-f"; /* the whole screen, the system's bars out of the way */
+    argv[n] = NULL;
     ok = gui_android_play(argv, app->message, sizeof(app->message));
     free(option);
     return ok;
@@ -1091,6 +1091,7 @@ static void list_games(App* app) {
 static void menu_key(App* app, GuiKey key) {
 #ifdef SDL_PLATFORM_ANDROID
     GuiLoadView before = app->menu.view; /* the screen this key was pressed on */
+    bool fullscreen = app->menu.fullscreen;
 #endif
     if (app->finished) {
         if (key == GUI_CANCEL && app->theme.fade_out_ms && !app->leaving_ms)
@@ -1122,6 +1123,7 @@ static void menu_key(App* app, GuiKey key) {
     }
     gui_menu_key(&app->menu, key);
 #ifdef SDL_PLATFORM_ANDROID
+    if (app->menu.fullscreen != fullscreen) SDL_SetWindowFullscreen(app->window, app->menu.fullscreen); /* as a game */
     /* the screen opens first, as on a computer, so what happens shows there; a select on it opens the picker */
     if (key == GUI_SELECT && app->menu.view == before && (before == GUI_LOAD_DROP || before == GUI_LOAD_KEYS))
         open_picker(app);
@@ -1345,6 +1347,7 @@ static bool initialize(App* app) {
     memset(app, 0, sizeof(*app));
 #ifdef SDL_PLATFORM_ANDROID
     app->theme = *gui_theme_builtin("yorha");
+    app->menu.fullscreen = true; /* a phone plays on the whole screen; Fullscreen off shows the system's bars */
     gui_android_start();
     /* back is ESC here: without this it would close the app */
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
@@ -1355,8 +1358,8 @@ static bool initialize(App* app) {
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
     if (!SDL_Init(SDL_INIT_VIDEO)) return false;
 #ifdef SDL_PLATFORM_ANDROID
-    /* the whole screen, the system's bars out of the way: a phone held wide is short */
-    flags = SDL_WINDOW_FULLSCREEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    /* the whole screen, the system's bars out of the way, as Fullscreen says: a phone held wide is short */
+    flags = (app->menu.fullscreen ? SDL_WINDOW_FULLSCREEN : 0) | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #else
     flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #endif

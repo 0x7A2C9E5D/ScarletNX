@@ -136,6 +136,28 @@ void backend_ini(const char* k, const char* v) {
 static void wsize_set(int w, int h) {
     if (w > 0 && h > 0) g_wsize = (u64)(u32)w | (u64)(u32)h << 32;
 }
+/* the window's part clear of the system's bars, in pixels, x | y << 16 | w << 32 | h << 48, or 0 for all of it: set
+   on the main thread with the size, read by the renderer on its own */
+static u64 g_wsafe;
+static void wsafe_set(void) {
+    SDL_Rect r;
+    float d = g_win ? SDL_GetWindowPixelDensity(g_win) : 0;
+    u64 v = 0;
+    if (!g_fullscreen && d > 0 && SDL_GetWindowSafeArea(g_win, &r))
+        v = (u64)(u16)(r.x * d) | (u64)(u16)(r.y * d) << 16 | (u64)(u16)(r.w * d) << 32 | (u64)(u16)(r.h * d) << 48;
+    __atomic_store_n(&g_wsafe, v, __ATOMIC_RELEASE);
+}
+void backend_window_safe(int* x, int* y, int* w, int* h) {
+    u64 v = __atomic_load_n(&g_wsafe, __ATOMIC_ACQUIRE);
+    *x = (int)(u16)v;
+    *y = (int)(u16)(v >> 16);
+    *w = (int)(u16)(v >> 32);
+    *h = (int)(u16)(v >> 48);
+    if (!*w || !*h) {
+        *x = *y = 0;
+        backend_window_size(w, h);
+    }
+}
 /* as SDL queues each event, from its own thread: on Android the main loop is held while the app is in the
    background, and presenting must stop before that */
 static bool SDLCALL lifecycle(void* unused, SDL_Event* e) {
@@ -183,6 +205,7 @@ void video_init(const char* title) {
     snx_window_icon(g_win);
     SDL_GetWindowSizeInPixels(g_win, &w, &h);
     wsize_set(w, h);
+    wsafe_set();
     if (!g_renderer->start())
         fatal("Vulkan could not start (see the log). ScarletNX needs a GPU and driver with Vulkan 1.3.");
     LOG("renderer: Vulkan\n");
@@ -385,9 +408,17 @@ void video_poll(void) {
             case SDL_EVENT_QUIT: g_quit = 1; break;
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                 if (e.window.windowID == SDL_GetWindowID(g_win)) wsize_set(e.window.data1, e.window.data2);
+                wsafe_set();
                 break;
-            case SDL_EVENT_WINDOW_ENTER_FULLSCREEN: g_fullscreen = 1; break;
-            case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN: g_fullscreen = 0; break;
+            case SDL_EVENT_WINDOW_SAFE_AREA_CHANGED: wsafe_set(); break;
+            case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+                g_fullscreen = 1;
+                wsafe_set();
+                break;
+            case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+                g_fullscreen = 0;
+                wsafe_set();
+                break;
             case SDL_EVENT_KEY_DOWN:
                 if (e.key.key == SDLK_ESCAPE) {
                     g_quit = 1;
