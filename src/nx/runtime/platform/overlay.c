@@ -144,10 +144,20 @@ void overlay_toggle(void) {
 }
 /* the panel's rows: the page's items under the head, a blank row under them */
 static int rows(void) { return FIRST + (items() < VISIBLE ? items() : VISIBLE) + 1; }
+static int display_percent = 100; /* set on the event thread, read by the renderer's */
+void overlay_set_display_scale(float scale) {
+    __atomic_store_n(&display_percent, scale > 0.0f ? (int)(scale * 100.0f) : 100, __ATOMIC_RELAXED);
+}
 void overlay_place(int sw, int sh, int* x, int* y, int* scale) {
-    /* the tallest page sets the scale, so the letters keep their size from page to page */
+    /* the tallest page sets the scale, so the letters keep their size from page to page: half the picture, or twice
+       the display's scale as the menu's Text size Auto (src/gui) if that is more, within three quarters of it. A
+       phone's short picture held its letters at 2x by the half alone */
     int w = OVERLAY_COLS * 8, h = OVERLAY_ROWS * 16;
     int s = sw / 2 / w < sh / 2 / h ? sw / 2 / w : sh / 2 / h;
+    int dense = 2 * __atomic_load_n(&display_percent, __ATOMIC_RELAXED) / 100;
+    if (dense > s) s = dense;
+    if (s > sw * 3 / 4 / w) s = sw * 3 / 4 / w;
+    if (s > sh * 3 / 4 / h) s = sh * 3 / 4 / h;
     *scale = s < 1 ? 1 : s;
     *x = (sw - w * *scale) / 2;
     *y = (sh - rows() * 16 * *scale) / 2;
