@@ -26,8 +26,10 @@ set(snx_openssl_env "")
 if(ANDROID)
     if(ANDROID_ABI STREQUAL "arm64-v8a")
         set(snx_openssl_target android-arm64)
+        set(snx_openssl_android_cc aarch64-linux-android${ANDROID_PLATFORM_LEVEL}-clang)
     elseif(ANDROID_ABI STREQUAL "x86_64")
         set(snx_openssl_target android-x86_64)
+        set(snx_openssl_android_cc x86_64-linux-android${ANDROID_PLATFORM_LEVEL}-clang)
     else()
         message(FATAL_ERROR "OpenSSL's Android build is only set up for arm64-v8a and x86_64 (cmake/openssl.cmake)")
     endif()
@@ -65,6 +67,16 @@ if(NOT WIN32)
     list(APPEND snx_openssl_args -fPIC)
 endif()
 
+# The build's compiler launcher (ccache) wraps make's compiles only, as for FFmpeg. On Android the compiler is the
+# <triple><API>-clang the target picks
+set(snx_openssl_make_cc "")
+list(JOIN CMAKE_C_COMPILER_LAUNCHER " " snx_openssl_launcher)
+if(snx_openssl_launcher AND ANDROID)
+    set(snx_openssl_make_cc "CC=${snx_openssl_launcher} ${snx_openssl_android_cc}")
+elseif(snx_openssl_launcher)
+    set(snx_openssl_make_cc "CC=${snx_openssl_launcher} ${CMAKE_C_COMPILER}")
+endif()
+
 # OpenSSL's make does not see the build's -j
 cmake_host_system_information(RESULT snx_openssl_jobs QUERY NUMBER_OF_LOGICAL_CORES)
 if("$ENV{CMAKE_BUILD_PARALLEL_LEVEL}" MATCHES "^[1-9][0-9]*$")
@@ -76,7 +88,7 @@ ExternalProject_Add(openssl_build
     BINARY_DIR "${CMAKE_BINARY_DIR}/openssl-build"
     INSTALL_DIR "${snx_openssl_prefix}"
     CONFIGURE_COMMAND ${snx_openssl_env} "${PERL_EXECUTABLE}" "${snx_openssl_src}/Configure" ${snx_openssl_args}
-    BUILD_COMMAND ${snx_openssl_env} "${SNX_OPENSSL_MAKE}" -j${snx_openssl_jobs} build_libs
+    BUILD_COMMAND ${snx_openssl_env} "${SNX_OPENSSL_MAKE}" -j${snx_openssl_jobs} build_libs ${snx_openssl_make_cc}
     # install_dev: the headers and libraries, without the programs and manuals
     INSTALL_COMMAND ${snx_openssl_env} "${SNX_OPENSSL_MAKE}" install_dev
     BUILD_BYPRODUCTS "${snx_openssl_prefix}/lib/libcrypto.a" "${snx_openssl_prefix}/lib/libssl.a"
