@@ -22,9 +22,6 @@ float g_opt_resf = 1.0f;
 int g_opt_shadows = 1;
 int g_opt_prof = 0;
 int g_opt_network = 0;
-/* legacy (spanish) key names -> current ones */
-static const char* const INI_ALIAS[][2] = {{"modo_tv", "docked"},  {"idioma", "language"}, {"resolucion", "resolution"},
-                                           {"sombras", "shadows"}, {"perfil", "profile"},  {NULL, NULL}};
 /* options that went with the OpenGL renderer (renderer choice, its dynamic resolution, LSFG, the F7 recorder) and
    older ones: dropped on load, so the rewritten .ini loses them. game_dynamic_resolution worked through GPU timings
    the OpenGL renderer's thread measured */
@@ -34,44 +31,25 @@ static const char* const INI_REMOVED[] = {"audio_device", /* Playback now always
                                           "dynamic_resolution",
                                           "dynamic_resolution_min",
                                           "game_dynamic_resolution",
-                                          "resolucion_dinamica_del_juego",
-                                          "resolucion_dinamica",
-                                          "resolucion_minima",
                                           "low_priority_shader_compiler",
-                                          "compilador_prioridad_baja",
                                           "forced_vsync",
-                                          "vsync_forzado",
                                           "smooth_recording",
-                                          "grabacion_fluida",
                                           "recording_fps",
-                                          "grabacion_fps",
                                           "lsfg",
                                           "lsfg_dll",
                                           "lsfg_target",
-                                          "lsfg_objetivo",
                                           "lsfg_multiplier",
-                                          "lsfg_multiplicador",
                                           "lsfg_flow",
-                                          "lsfg_flujo",
                                           "lsfg_resolution",
-                                          "lsfg_resolucion",
                                           "lossless_scaling",
                                           "lossless_path",
-                                          "lossless_ruta",
                                           "touch_controls",
-                                          "controles",
                                           "touch_controls_opacity",
-                                          "controles_opacidad",
                                           NULL};
 static int ini_removed(const char* k) {
     for (int i = 0; INI_REMOVED[i]; i++)
         if (!strcmp(k, INI_REMOVED[i])) return 1;
     return 0;
-}
-static const char* ini_norm(const char* k) {
-    for (int i = 0; INI_ALIAS[i][0]; i++)
-        if (!strcmp(k, INI_ALIAS[i][0])) return INI_ALIAS[i][1];
-    return k;
 }
 /* everything we read, so the rewrite keeps unknown keys */
 #define INI_MAXK 128
@@ -110,7 +88,6 @@ static char g_ovr_k[INI_MAXO][64];
 static const char* g_ovr_v[INI_MAXO];
 static int g_ovr_n;
 void ini_override(const char* k, const char* v) {
-    k = ini_norm(k);
     int i = 0;
     while (i < g_ovr_n && strcmp(g_ovr_k[i], k)) i++;
     if (i == INI_MAXO) return;
@@ -253,9 +230,8 @@ static void ini_load(const char* path) {
             while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t')) *--ve = 0;
         }
         if (ini_removed(k)) continue;
-        const char* kn = ini_norm(k);
-        ini_store(kn, v);
-        if (!ini_overridden(kn)) ini_apply(kn, v);
+        ini_store(k, v);
+        if (!ini_overridden(k)) ini_apply(k, v);
     }
     fclose(f);
     /* a known key missing from the file (deleted while the game runs) goes back to its default */
