@@ -113,7 +113,7 @@ static unsigned char* physical(SnxCtrMemory* m, uint32_t pa, bool* mmio) {
     *mmio = true; /* only reachable for an internally corrupted PTE */
     return NULL;
 }
-static SnxCtrMemResult transfer(SnxCtrAddressSpace* s, uint32_t va, void* buffer, size_t size, unsigned access) {
+static SnxCtrMemResult transfer(SnxCtrAddressSpace* s, uint32_t va, void* buffer, size_t size, unsigned access, bool ram_only) {
     if (!s || !buffer || !size || size > UINT64_C(0x100000000) - va) return SNX_CTR_MEM_INVALID;
     size_t offset = 0;
     while (offset < size) {
@@ -125,7 +125,7 @@ static SnxCtrMemResult transfer(SnxCtrAddressSpace* s, uint32_t va, void* buffer
         (void)physical(s->memory, p->pa, &mmio);
         size_t n = 4096 - (at & 4095);
         if (mmio) {
-            if (offset || size > n || (size != 1 && size != 2 && size != 4 && size != 8) ||
+            if (ram_only || offset || size > n || (size != 1 && size != 2 && size != 4 && size != 8) ||
                 (va & (size - 1)) || access == SNX_CTR_EXEC) return SNX_CTR_MEM_DEVICE;
             SnxCtrMemory* m = s->memory;
             uint32_t pa = p->pa + (at & 4095);
@@ -150,11 +150,17 @@ static SnxCtrMemResult transfer(SnxCtrAddressSpace* s, uint32_t va, void* buffer
     return SNX_CTR_MEM_OK;
 }
 SnxCtrMemResult snx_ctr_read(SnxCtrAddressSpace* s, uint32_t va, void* output, size_t size) {
-    return transfer(s, va, output, size, SNX_CTR_READ);
+    return transfer(s, va, output, size, SNX_CTR_READ, false);
 }
 SnxCtrMemResult snx_ctr_fetch(SnxCtrAddressSpace* s, uint32_t va, void* output, size_t size) {
-    return transfer(s, va, output, size, SNX_CTR_EXEC);
+    return transfer(s, va, output, size, SNX_CTR_EXEC, false);
 }
 SnxCtrMemResult snx_ctr_write(SnxCtrAddressSpace* s, uint32_t va, const void* input, size_t size) {
-    return transfer(s, va, (void*)input, size, SNX_CTR_WRITE);
+    return transfer(s, va, (void*)input, size, SNX_CTR_WRITE, false);
+}
+SnxCtrMemResult snx_ctr_read_ram(SnxCtrAddressSpace* s, uint32_t va, void* output, size_t size) {
+    return transfer(s, va, output, size, SNX_CTR_READ, true);
+}
+SnxCtrMemResult snx_ctr_write_ram(SnxCtrAddressSpace* s, uint32_t va, const void* input, size_t size) {
+    return transfer(s, va, (void*)input, size, SNX_CTR_WRITE, true);
 }

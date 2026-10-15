@@ -88,6 +88,7 @@ def check_graph(graph):
         ('snx_ctr_board', ('scarletnx-nx', 'scarletnx-gnuabi')),
         ('snx_ctr_memory', ('scarletnx-nx', 'scarletnx-gnuabi')),
         ('snx_ctr_loader', ('scarletnx-nx', 'scarletnx-gnuabi', 'snx_driver', 'snx_nx_module')),
+        ('snx_ctr_cpu', ('scarletnx-nx', 'scarletnx-gnuabi', 'snx_driver', 'snx_nx_module', 'snx_arm_llvm')),
     ):
         if owner not in by_name:
             if owner == 'scarletnx-common':

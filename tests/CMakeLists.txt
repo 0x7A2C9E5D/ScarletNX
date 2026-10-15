@@ -2,6 +2,7 @@
 # Copyright 2026 the ScarletNX contributors
 option(SNX_TEST_SANITIZERS "Run native regression tests with ASan and UBSan" OFF)
 option(SNX_TEST_VULKAN "Run offscreen Vulkan integration tests (requires a Vulkan 1.3 ICD, e.g. lavapipe)" OFF)
+option(SNX_TEST_ARM_AOT "Build asset-free static ARM11/checked-memory witnesses (requires native LLVM SDK)" OFF)
 if(SNX_TEST_SANITIZERS AND TARGET snx_driver)
     target_compile_options(snx_driver PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(snx_driver INTERFACE -fsanitize=address,undefined)
@@ -33,7 +34,7 @@ endfunction()
 
 if(TARGET snx_ctr_board)
     if(SNX_TEST_SANITIZERS)
-        foreach(target snx_ctr_board snx_ctr_memory snx_ctr_loader)
+        foreach(target snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu)
             target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
             target_link_options(${target} INTERFACE -fsanitize=address,undefined)
         endforeach()
@@ -66,6 +67,17 @@ if(TARGET snx_ctr_board)
             $<TARGET_FILE:scarletnx-3ds>)
         set_tests_properties(3ds_extract PROPERTIES TIMEOUT 120)
     endif()
+endif()
+
+add_executable(snx-test-arm-profile arm_profile.c "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/a32.c"
+    "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/thumb_decode.c"
+    "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/vector_decode.c"
+    "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/profile.c")
+snx_test_target(snx-test-arm-profile 11)
+target_compile_options(snx-test-arm-profile PRIVATE -UNDEBUG)
+add_test(NAME arm_isa_profiles COMMAND snx-test-arm-profile)
+if(SNX_TEST_ARM_AOT)
+    include(arm_checked.cmake)
 endif()
 
 # Board/GUI-only builds do not configure either AOT runtime or LLVM. Do not

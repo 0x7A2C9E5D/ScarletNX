@@ -2,12 +2,13 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # Nintendo 3DS port
 
-## Status: stage 1 + stage 2a
+## Status: stage 1 + stage 2a + initial stage 2b
 
 `scarletnx-3ds` can extract **decrypted application CIAs**. It is not yet a
 CIA-to-native compiler or a working 3DS runtime. Stage 2 is split into extraction/
-memory (2a, implemented) and ARM11 AOT integration (2b, pending). Stages 3–6 are
-also pending. No firmware, keys, game assets, Azahar CPU JIT/interpreter, DSP or
+memory (2a, implemented) and ARM11 AOT integration (2b, in progress). The first
+2b increment adds an opt-in ISA profile and checked-memory ABI with static AOT
+witnesses, not a production extract/compile/run pipeline. Stages 3–6 remain pending. No firmware, keys, game assets, Azahar CPU JIT/interpreter, DSP or
 PICA renderer are included.
 
 Implemented:
@@ -30,8 +31,17 @@ Implemented:
   physical RAM/VRAM/DSP backings, aliases, R/W/X checks, checked cross-page RAM
   transfers and explicit aligned MMIO callbacks. Failed map/protect/unmap and
   RAM range-validation operations do not partially change guest memory/mappings.
-  No flat host pointer is exposed. This controller is tested but **not yet wired
-  into generated A32 code or automatic HLE process setup**.
+  No flat host pointer is exposed.
+- Initial 2b: shared A32 codegen has independent, explicitly selected ARM11 ISA
+  and checked-memory options. Existing A57 APIs/defaults and `SnxArmCPU` ABI 2
+  remain unchanged. No 3DS global compiler define affects other boards.
+- `src/3ds/cpu/ctr_cpu.h`: versioned checked CPU state, USR initialization and
+  callbacks connecting statically generated integer instructions to the page
+  controller, including aliases, R/W/X, whole-range multiword RAM validation and
+  ordinary MMIO. Every instruction checks execute permission and code identity.
+  Static O0/O2 native witnesses execute against this adapter without LLVM/JIT
+  linked into their executables. **Automatic process setup and CIA execution
+  are not yet connected.**
 
 ```sh
 build/3ds/scarletnx-3ds -x --output work/my-title game.cia
@@ -90,8 +100,21 @@ build/3ds/scarletnx-3ds --model new --board-info
 
 Use `-DSNX_BUILD_GUI=ON` to include the launcher and its regression tests; SDL3
 is then required/fetched as usual. `-DSNX_BUILD_3DS=OFF` omits the driver (the
-GUI diagnoses its absence). CPU/backend execution tests are not registered in
-a board/GUI-only configuration, because neither AOT runtime is configured.
+GUI diagnoses its absence). The profile decoder test needs no LLVM. Additional
+static AOT tests are explicitly opt-in:
+
+```sh
+cmake -S . -B build/arm11 -DSNX_BUILD_NX=OFF -DSNX_BUILD_GNUABI=OFF \
+  -DSNX_BUILD_GUI=OFF -DSNX_TEST_ARM_AOT=ON
+cmake --build build/arm11
+ctest --test-dir build/arm11 --output-on-failure
+```
+
+This requires a native LLVM SDK (select with `SNX_LLVM_CONFIG` if needed).
+`SNX_TEST_ARM_DIFF=ON` additionally requires Python `unicorn==2.1.4`, and enables
+ARM11 MPCore plus shared A57 integer/VFP/NEON/Thumb regressions. See
+`src/common/cpu/arm/README.md` for the codegen contract and exact limitations.
+The CLI behavior is unchanged even when these test options are enabled.
 
 ## Source provenance and licensing
 
@@ -106,6 +129,10 @@ constants from `src/core/core_timing.h`, and the system-initialization design in
 title_metadata,ticket,signature,ncch_container}.*`, `src/core/loader/ncch.cpp`
 and `src/core/hle/romfs.cpp`. The bounded BLZ implementation credits the
 Citra/Azahar algorithm; the extractor and page controller are new C code.
+Initial 2b CPU/profile and bus code is new project C code using ARMv6K/legacy
+Thumb architectural semantics; it does not copy an Azahar CPU engine. The
+shared emitter retains its existing notices. LLVM's `mpcore` assembler model
+and Unicorn 2.1.4's ARM11 MPCore model are test references, not runtime engines.
 Azahar is not a build dependency.
 Azahar's root license is GPLv3; individual files carry GPLv2-or-later or
 GPLv3-or-later notices. Future adaptations must retain each source's notices
@@ -116,18 +143,21 @@ that every dependency has the root license.
 ## Boundaries and prerequisites for stage 2b
 
 The 3DS application CPU is ARM11/ARMv6K with VFP, **not** the Cortex-A57
-ARMv8-A AArch32 model currently implemented in `src/common/cpu/arm/`. That
-backend's user-mode blocks also use a single flat `mem`/`mem_size` range.
+ARMv8-A AArch32 default in `src/common/cpu/arm/`. That backend's existing
+user-mode API still uses a single flat `mem`/`mem_size` range.
 Mapping a sparse 3DS address space into that ABI would make holes accessible and
 would bypass process permissions, aliases and device callbacks.
 
 Before running guest code:
 
-1. Add an ARM11 ISA profile and validation (reject ARMv7/v8-only instructions,
-   Thumb-2, NEON, etc.; verify ARM11 VFP/unaligned-access behavior).
-2. Add an A32 memory-access ABI for translated process mappings with checked
-   access and MMIO callbacks, including atomics/exclusives and multiword accesses.
-   Do not pass an A64 `CPU*` or an NX module to an A32 block.
+1. The initial ARM11 integer profile is implemented. Complete VFPv2 (including
+   short-vector FPSCR behavior), missing ARMv6K instructions and alignment-mode
+   validation. Current ordinary unaligned transfers model unaligned support
+   enabled/alignment checking disabled, not every ARM11 CP15 configuration.
+2. The separate checked-memory ABI and CTR adapter are implemented for integer
+   transfers. Complete architectural reservation monitors/exclusives: these
+   currently stop as unsupported, as do VFP/vector transfers and checked Thumb
+   table branches. Do not pass an A64 `CPU*` or an NX module to an A32 block.
 3. Define/version the CTR native-module ABI and AOT block discovery/dispatch,
    including ARM/Thumb state, indirect branches, execute checks and scheduling.
    No silent interpreter or runtime-JIT substitution for static recompilation.
@@ -137,18 +167,19 @@ Before running guest code:
    title identity and saves in the CTR adapter. Architecture tests enforce the
    runtime boundary.
 
-The new memory controller supplies checked mapping/access operations for future
-A32 callbacks; the existing CPU block ABI is deliberately unchanged. The A32
-runner in `src/common/cpu/arm/exec.c` uses MCJIT and is **not** an acceptable
+The page controller is now connected through an opt-in `SnxArmCheckedCPU`
+callback ABI, while the original CPU block/state ABI is deliberately unchanged.
+The adapter is not linked to the legacy execution runner. The A32 runner in `src/common/cpu/arm/exec.c` uses MCJIT and is **not** an acceptable
 substitute for static recompilation. Stage 2b must emit/load native modules ahead
 of execution, route every memory instruction through the checked ABI, and use an
 ARM11 ISA profile.
 
 The tick domain remains 268,111,856 Hz, with 4,481,136 base ticks per frame, as
 in Azahar. New 3DS CPU scaling is a separate future scheduler concern. There is
-still no CPU execution, interrupt scheduling, ARM9 emulation or boot ROM.
+still no CIA application execution, interrupt scheduling, ARM9 emulation or boot
+ROM; only asset-free statically generated CPU witnesses execute so far.
 
-## Staged roadmap (stage 2a implemented; other portions pending)
+## Staged roadmap (2a implemented; 2b partially implemented)
 
 Each stage should be one independently reviewable commit/diff, with all earlier
 stages as its base. Stubs must return explicit unsupported errors, not pretend
@@ -157,6 +188,10 @@ that an unimplemented service/device succeeded.
 ### 2. CIA extraction, memory controller and static execution
 
 The extraction and independent memory-controller subset is implemented as 2a.
+Initial 2b supplies ARM11 integer profile selection, checked-memory integration
+and static native-object witnesses. There is no CTR module ABI/loader, production
+ARM/Thumb block discovery or indirect dispatch, process/stack/TLS setup from
+ExHeader, validated resume/cache, or end-to-end extract/AOT/run witness yet.
 The complete stage is **not finished** until the ARM11/memory/module integration
 and end-to-end extract/AOT/run gate below pass.
 

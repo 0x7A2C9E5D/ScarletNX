@@ -66,6 +66,17 @@ class ArchitectureTests(unittest.TestCase):
             errors = architecture.check_graph(graph)
             self.assertEqual(errors, ['scarletnx-3ds transitively links forbidden target scarletnx-nx'])
 
+    def test_ctr_cpu_cannot_link_legacy_compiler_runner(self):
+        with tempfile.TemporaryDirectory(prefix='snx-arch-test-') as temporary:
+            graph = Path(temporary) / 'targets.dot'
+            graph.write_text(
+                'digraph {\n"a" [label = "scarletnx-common"];\n'
+                '"b" [label = "snx_ctr_cpu"];\n"c" [label = "adapter"];\n'
+                '"d" [label = "snx_arm_llvm"];\n'
+                '"b" -> "c";\n"c" -> "d";\n}\n', encoding='ascii')
+            self.assertEqual(architecture.check_graph(graph),
+                             ['snx_ctr_cpu transitively links forbidden target snx_arm_llvm'])
+
     def test_transitive_graphics_link_is_rejected(self):
         with tempfile.TemporaryDirectory(prefix='snx-arch-test-') as temporary:
             graph = Path(temporary) / 'targets.dot'

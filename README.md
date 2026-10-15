@@ -65,8 +65,10 @@ output and combined CPU/RAM usage. See [GUI launcher](docs/GUI.md).
 
 The experimental `scarletnx-3ds` driver and **Load 3DS CIA** menu entry support
 decrypted application CIA extraction (`scarletnx-3ds -x game.cia`) and an independent
-page-based memory controller. **ARM11 AOT execution, HLE and devices are not yet
-implemented**; a normal CIA launch extracts, then stops explicitly before execution.
+page-based memory controller. An opt-in ARM11 integer profile and checked-memory
+adapter now have static AOT witnesses, without changing shared A57 defaults.
+**CIA-to-native execution, HLE and devices remain incomplete**; a normal CIA launch
+extracts, then stops explicitly before execution.
 See the [staged 3DS port](docs/3DS.md) for limits, build instructions and remaining work.
 
 For more detailed information please see: [Build + run](./docs/BUILD.md).

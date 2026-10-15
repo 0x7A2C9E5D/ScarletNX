@@ -35,8 +35,12 @@ SnxCtrMemResult snx_ctr_unmap(SnxCtrAddressSpace* space, uint32_t va, uint32_t s
 SnxCtrMemResult snx_ctr_query(const SnxCtrAddressSpace* space, uint32_t va, uint32_t* pa, unsigned* permissions);
 /* RAM transfers may be unaligned and span pages, after preflighting the ENTIRE
    range. MMIO transfers may not span pages or mix with RAM. No flat host pointer
-   is exported. CPU-specific alignment rules/exclusives are a future ABI layer. */
+   is exported. The CPU adapter owns instruction-specific alignment rules. */
 SnxCtrMemResult snx_ctr_read(SnxCtrAddressSpace* space, uint32_t va, void* output, size_t size);
 SnxCtrMemResult snx_ctr_write(SnxCtrAddressSpace* space, uint32_t va, const void* input, size_t size);
 SnxCtrMemResult snx_ctr_fetch(SnxCtrAddressSpace* space, uint32_t va, void* output, size_t size);
+/* Whole-instruction multiword transfers: reject any MMIO before side effects,
+   rather than collapsing LDM/STM or paired accesses into one device access. */
+SnxCtrMemResult snx_ctr_read_ram(SnxCtrAddressSpace* space, uint32_t va, void* output, size_t size);
+SnxCtrMemResult snx_ctr_write_ram(SnxCtrAddressSpace* space, uint32_t va, const void* input, size_t size);
 #endif
