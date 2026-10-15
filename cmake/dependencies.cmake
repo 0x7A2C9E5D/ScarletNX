@@ -53,6 +53,16 @@ if(SNX_BUILD_NX OR SNX_HACTOOL_ONLY)
     snx_quiet(snx_lz4)
 endif()
 
+# OpenSSL for the hashes and ciphers (the NX and 3DS loaders, ldr, csrng, hactool) and the ssl service's TLS. It builds
+# with its own Configure and make, which cmake/openssl.cmake runs
+if(SNX_BUILD_NX OR SNX_BUILD_3DS OR SNX_HACTOOL_ONLY)
+    CPMAddPackage(NAME OpenSSL VERSION 4.0.3
+                  URL https://github.com/openssl/openssl/releases/download/openssl-4.0.3/openssl-4.0.3.tar.gz
+                  URL_HASH SHA256=325b5c806167c13b40b1ffeadfe0248197c00eccc4cf123ec1e28d2d2fd216d9
+                  DOWNLOAD_ONLY YES)
+    include("${CMAKE_SOURCE_DIR}/cmake/openssl.cmake")
+endif()
+
 # Extraction-only and tools-only builds do not contain the NX runtime or its graphics/media dependencies.
 if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY AND NOT SNX_HACTOOL_ONLY)
     # FFmpeg builds with its own configure and make, which cmake/ffmpeg.cmake runs

@@ -72,7 +72,7 @@ bool ctr_cia_load(CtrReader* r, CtrCia* cia) {
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "invalid TMD content count");
     const unsigned char* chunks = body + 0x9c4;
     unsigned char hash[32], covered[65536] = {0}, indices[8192] = {0}, present[8192] = {0};
-    snx_sha256(body + 0xc4, 64 * 0x24, hash);
+    if (!ctr_sha256(r, body + 0xc4, 64 * 0x24, hash)) return false;
     if (memcmp(hash, body + 0xa4, 32)) return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "TMD content-info SHA-256 mismatch");
     for (size_t i = 0; i < 64; ++i) {
         const unsigned char* info = body + 0xc4 + i * 0x24;
@@ -84,7 +84,7 @@ bool ctr_cia_load(CtrReader* r, CtrCia* cia) {
             if (covered[j]) return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "overlapping TMD content-info ranges");
             covered[j] = 1;
         }
-        snx_sha256(chunks + first * 0x30, count * 0x30, hash);
+        if (!ctr_sha256(r, chunks + first * 0x30, count * 0x30, hash)) return false;
         if (memcmp(hash, info + 4, 32)) return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "TMD chunk-table SHA-256 mismatch");
     }
     uint32_t* ids = malloc(cia->chunks * sizeof *ids);

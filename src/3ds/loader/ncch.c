@@ -43,7 +43,7 @@ static bool extract_ncch(CtrReader* r, const CtrCia* cia, const char* stage,
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "invalid ExeFS superblock hash/range");
     if (!ctr_read(r, cia->boot, 0x200, exheader, sizeof exheader)) return false;
     unsigned char hash[32];
-    snx_sha256(exheader, 0x400, hash);
+    if (!ctr_sha256(r, exheader, 0x400, hash)) return false;
     if (memcmp(hash, h + 0x160, 32) || ctr_le64(exheader + 0x200) != cia->title_id)
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "ExHeader hash/program ID mismatch");
     Segment segments[3];
@@ -151,7 +151,7 @@ static bool extract_ncch(CtrReader* r, const CtrCia* cia, const char* stage,
         if (!ok) return false;
     }
     char input_hash[65], code_hash[65];
-    snx_sha256(*code, (size_t)expected, hash);
+    if (!ctr_sha256(r, *code, (size_t)expected, hash)) return false;
     for (size_t i = 0; i < 32; ++i) {
         snprintf(input_hash + i * 2, 3, "%02x", cia->input_hash[i]);
         snprintf(code_hash + i * 2, 3, "%02x", hash[i]);
