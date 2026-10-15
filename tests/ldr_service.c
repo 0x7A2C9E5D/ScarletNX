@@ -261,8 +261,6 @@ static void concurrency(void) {
     }
     svcobj_unref(o);
 }
-/* raw data that ends before the arguments do: they read as zeros. Without the BSS arguments a module has no BSS (its
-   header says none, as one loaded without BSS must), and with only the pid's slot the size is 0 */
 /* a request shorter than its command's arguments (0x28 bytes for MapManualLoadModuleMemory: the pid, then four u64s)
    is refused by sf before ldr sees it: nothing is mapped */
 static void short_request(void) {

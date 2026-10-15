@@ -647,8 +647,8 @@ static void test_virtual_services(SvcObj* fs, SvcObj* proxy) {
     u64 header_size;
     memcpy(&header_size, GP(0x5000), sizeof header_size);
     CHECK(header_size == 0x50);
-    request(&r, 1); /* Write, with its A buffer: the archive's backend refuses it */
-    argument64(&r, 16, 1);
+    request(&r, 1); /* Write (offset 0, size at 8) of one byte from its A buffer: the archive's backend refuses it */
+    argument64(&r, 8, 1);
     r.c.a[0] = (IpcBuf){0x3000, 1, 0};
     r.c.na = 1;
     dispatch(archive, &r, RC(2, 6300));

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 # A cross build also builds programs that run during the build (FFmpeg's configure helpers, swipc), for the machine
-# doing it: SNX_HOST_CC is that machine's C compiler
+# doing it: SNX_HOST_CC is that machine's C compiler, clang or else cc (any compiler will do for these tools)
 include_guard(GLOBAL)
 find_program(SNX_HOST_CC NAMES clang cc)
 if(NOT SNX_HOST_CC)

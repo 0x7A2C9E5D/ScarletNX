@@ -2,8 +2,9 @@
    Copyright 2026 the ScarletNX contributors */
 /* The dispatchers tools/swipc generates for tests/swipc/test.swipc and other.swipc, driven with hand-made requests:
    raw argument offsets (stable sort by alignment, ascending, or declaration order with @unsorted), pid and aruid
-   slots, a request shorter than its arguments or with the wrong descriptors, handles or domain objects, the descriptor list and index of every buffer kind, handles and
-   objects in and out, what a failed request returns, @stub and the fallbacks. The handlers are static, as in a
+   slots, a TIPC request's layout, the requests sf refuses (shorter than their arguments, the wrong descriptors,
+   handles or domain objects), the descriptor list and index of every buffer kind, handles and objects in and out,
+   what a failed request returns, @stub and the fallbacks. The handlers are static, as in a
    service's file, and the generated .inc files are included after the stand-ins for ipc.c, before the handlers they
    declare */
 #include "hle/kernel/ipc.h"
@@ -58,9 +59,9 @@ int ipc_bad_request(SvcObj* o, IpcCtx* c) {
     return 0x3480B; /* RC(11, 420) */
 }
 int ipc_bad_objects(SvcObj* o, IpcCtx* c) {
-    (void)o, (void)c;
+    (void)o;
     bad_objects++;
-    return 0x1D60A; /* RC(10, 235) */
+    return c->is_domain ? 0x1D60A /* RC(10, 235) */ : 0x20A /* RC(10, 1) */;
 }
 int ipc_unknown(SvcObj* o, IpcCtx* c) {
     (void)o, (void)c;
@@ -303,10 +304,10 @@ int main(void) {
     ctx.na = 2, ctx.nx = 3, ctx.nb = 3, ctx.nw = 1;
     CHECK(thing->dispatch(thing, &ctx) == 0x3480B && bad_requests == 2);
 
-    /* [4] objects in and out, handles out */
+    /* [4] objects in (a domain request) and out, handles out */
     request(4);
     in_thing.refs = 1;
-    ctx.nin_objs = 1, ctx.in_objs[0] = 7;
+    ctx.is_domain = 1, ctx.nin_objs = 1, ctx.in_objs[0] = 7;
     unrefs = 0;
     CHECK(thing->dispatch(thing, &ctx) == 0);
     CHECK(got.thing == &in_thing && in_thing.refs == 1 && unrefs == 1);
@@ -314,8 +315,17 @@ int main(void) {
     CHECK(ctx.nout_objs == 1 && !strcmp(ctx.out_objs[0]->name, "out") && ctx.out_size == 0);
     svcobj_unref(ctx.out_objs[0]);
     request(4); /* a domain request with another number of objects than the command takes: InvalidNumInObjects */
-    ctx.is_domain = 2, ctx.nin_objs = 0;
+    ctx.is_domain = 1, ctx.nin_objs = 0;
     CHECK(thing->dispatch(thing, &ctx) == 0x1D60A && bad_objects == 1 && got.thing == NULL);
+    request(4); /* checked before the descriptors, as sf's domain processor does: a stray A buffer doesn't matter */
+    ctx.is_domain = 1, ctx.na = 1;
+    CHECK(thing->dispatch(thing, &ctx) == 0x1D60A && bad_objects == 2);
+    request(4); /* on a plain session the command can't get its object: NotSupported, after the descriptors */
+    CHECK(thing->dispatch(thing, &ctx) == 0x20A && bad_objects == 3 && got.thing == NULL);
+    request(4);
+    ctx.na = 1;
+    bad_requests = 0;
+    CHECK(thing->dispatch(thing, &ctx) == 0x3480B && bad_requests == 1 && bad_objects == 3);
 
     /* [5] a failed request answers no data. What the handler made is in the reply, which ipc.c drops for a failure
        (drop_outputs) */
@@ -368,12 +378,15 @@ int main(void) {
     request(0);
     ctx.raw_size = 0x18;
     CHECK(thing->dispatch(thing, &ctx) == 0);
-    /* a TIPC request has no raw slot for its pid: [2] (aruid, u32 v) takes 8 bytes then, not 16 */
-    request(2);
-    ctx.tipc = 1, ctx.has_pid = 1, ctx.raw_size = 8;
-    CHECK(thing->dispatch(thing, &ctx) == 0);
-    request(2);
-    ctx.tipc = 1, ctx.has_pid = 1, ctx.raw_size = 4;
+    /* a TIPC request has no raw slot for its pid: [1] (u32 a, pid, u64 b) is a 0, b 8, 16 bytes in all */
+    request(1);
+    memset(raw, 0, sizeof raw);
+    v32 = 5, put(0, &v32, 4);
+    v64 = 6, put(8, &v64, 8);
+    ctx.tipc = 1, ctx.has_pid = 1, ctx.pid = 0x51, ctx.raw_size = 16;
+    CHECK(thing->dispatch(thing, &ctx) == 0 && got.a == 5 && got.b == 6 && got.pid == 0x51);
+    request(1);
+    ctx.tipc = 1, ctx.has_pid = 1, ctx.raw_size = 15;
     CHECK(thing->dispatch(thing, &ctx) == 0x3480B);
 
     /* [10] a lone byte: the reply's raw size rounds up to 4. [11] the largest reply */
@@ -385,7 +398,7 @@ int main(void) {
     /* [12] a failed request with an object in drops the dispatcher's reference to it */
     request(12);
     in_thing.refs = 1;
-    ctx.nin_objs = 1, ctx.in_objs[0] = 7;
+    ctx.is_domain = 1, ctx.nin_objs = 1, ctx.in_objs[0] = 7;
     unrefs = 0;
     CHECK(thing->dispatch(thing, &ctx) == 0x4321);
     CHECK(got.thing == &in_thing && in_thing.refs == 1 && unrefs == 1 && ctx.out_size == 0);

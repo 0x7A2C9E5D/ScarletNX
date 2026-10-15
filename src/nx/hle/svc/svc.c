@@ -376,7 +376,15 @@ static void snx_svc_(CPU* c, u32 imm) {
             core_leave(t);
             ipc_handle(t, (u32)x[0], t->tls, 0x100);
             return;
-        case 0x22:
+        case 0x22: /* SendSyncRequestWithUserBuffer: a page-aligned buffer of whole pages, as the kernel requires */
+            if (x[0] & 0xFFF) {
+                x[0] = R_BADADDR;
+                return;
+            }
+            if (!x[1] || (x[1] & 0xFFF)) {
+                x[0] = R_BADSIZE;
+                return;
+            }
             core_leave(t);
             ipc_handle(t, (u32)x[2], x[0], x[1]);
             return;

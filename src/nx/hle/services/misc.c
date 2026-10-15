@@ -417,6 +417,15 @@ static int nn_aocsrv_detail_IAddOnContentManager_CreatePermanentEcPurchasedEvent
     *manager = nn_ec_IPurchaseEventManager_new(0);
     return 0;
 }
+/* offline: nifm's NotConnected, as acc's network requests answer */
+static int nn_ec_IContentsServiceManager_RequestContentsAuthorizationToken(SvcObj* self, const u8* nonce, u64 pid,
+                                                                           IpcBuf data, u32* event, SvcObj** async) {
+    return RC(110, 300);
+}
+static int nn_aocsrv_detail_IAddOnContentManager_CreateContentsServiceManager(SvcObj* self, SvcObj** manager) {
+    *manager = nn_ec_IContentsServiceManager_new(0);
+    return 0;
+}
 SvcObj* new_aoc(void) { return nn_aocsrv_detail_IAddOnContentManager_new(0); }
 /* the one shared memory, kept for the whole run */
 static int nn_irsensor_IIrSensorServer_GetIrsensorSharedMemoryHandle(SvcObj* self, u64 aruid, u32* shared_memory) {

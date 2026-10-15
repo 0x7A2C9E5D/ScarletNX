@@ -27,6 +27,7 @@ typedef struct IpcCtx {
     int ncopy, nmove;
     IpcBuf a[8], b[8], w[8], x[8], c[8];
     int na, nb, nw, nx, nc;
+    int is_domain, tipc;
     u8 out[0x100];
     u32 out_size;
 } IpcCtx;
@@ -45,7 +46,7 @@ void ipc_in(IpcCtx* c, u32 off, void* dst, u32 n);
 void ipc_out(IpcCtx* c, u32 off, const void* src, u32 n);
 IpcBuf ipc_buf(const IpcBuf* list, int n, int i);
 IpcBuf ipc_buf_auto(const IpcBuf* map, int nmap, int i, const IpcBuf* ptr, int nptr, int j);
-int ipc_counts(const IpcCtx* c, int pid, int na, int nb, int nx, int ncopy, int nmove, u32 raw);
+int ipc_counts(const IpcCtx* c, int pid, int na, int nb, int nx, int ncopy, int nmove, u32 raw, u32 tipc_raw);
 int ipc_objects(const IpcCtx* c, int nobj);
 int ipc_bad_request(SvcObj* o, IpcCtx* c);
 int ipc_bad_objects(SvcObj* o, IpcCtx* c);

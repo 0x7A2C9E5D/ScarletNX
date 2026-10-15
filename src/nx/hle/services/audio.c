@@ -440,7 +440,7 @@ static int nn_audio_detail_IAudioOut_GetAudioOutPlayedSampleCount(SvcObj* self, 
     *count = played;
     return 0;
 }
-/* the queued buffers come back, unplayed */
+/* the queued buffers come back, and what the clock played of the head stays counted (audout_flush) */
 static int nn_audio_detail_IAudioOut_FlushAudioOutBuffers(SvcObj* self, u8* released) {
     AudOut* q = (AudOut*)self->data;
     u64 now = plat_ns();

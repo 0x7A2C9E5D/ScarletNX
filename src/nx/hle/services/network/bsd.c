@@ -5,9 +5,9 @@
      SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project, GPL-2.0-or-later
    bsd:u, bsd:a and bsd:s, Horizon's BSD sockets, on the emulated network stack (src/common/network). Requests are
    served on the guest thread that sends them, without its core (ipc_handle), so a blocking call blocks that thread
-   only, as on the console where each of the SDK's sessions has a server thread. A socket command's reply is the call's result
-   and its errno (Linux's numbering, the stack's too); the constants are FreeBSD's, translated with the tables in
-   abi/.
+   only, as on the console where each of the SDK's sessions has a server thread. A socket command's reply is the
+   call's result and its errno (Linux's numbering, the stack's too); the constants are FreeBSD's, translated with the
+   tables in abi/.
 
    Eden stubs Read, Select and EventFd, answers GetSockOpt for SO_ERROR only, and shuts down the read side of a
    SocketExempt socket; those are real here. */

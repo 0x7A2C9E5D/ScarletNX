@@ -30,10 +30,10 @@ typedef struct IpcCtx {
     int ncopy, nmove;
     IpcBuf a[MAX_BUFS], b[MAX_BUFS], w[MAX_BUFS], x[MAX_BUFS], c[MAX_BUFS];
     int na, nb, nw, nx, nc;
-    u32 kernel_rc;    /* the kernel fails the request before the server sees it: a header that describes more than the
+    u32 kernel_rc; /* the kernel fails the request before the server sees it: a header that describes more than the
                       message, a buffer outside the address space */
-    u32 domain_rc;    /* sf refuses a domain request whose header doesn't fit its data */
-    int domain_short; /* the data words don't even hold the domain header: refused before the target is looked up */
+    u32 domain_rc; /* sf refuses a domain request whose header doesn't fit its data */
+    u32 header_rc; /* sf refuses a request whose headers don't fit its data words, or a bad SFCI magic, at once */
     int is_domain;
     u32 domain_obj;
     u32 in_objs[8];
@@ -115,19 +115,20 @@ static inline IpcBuf ipc_buf_auto(const IpcBuf* map, int nmap, int i, const IpcB
 }
 /* whether a request sends what its command declares, as sf's HipcCommandProcessor checks it: the pid flag, the A, B
    and X descriptors (an AutoSelect buffer counts in both of its lists), no exchange buffer, the copy and move handles,
-   and at least the command's raw data. C descriptors aren't checked */
-static inline int ipc_counts(const IpcCtx* c, int pid, int na, int nb, int nx, int ncopy, int nmove, u32 raw) {
-    /* a TIPC request (sm, from newer SDKs) carries the pid in its special header only, with no 8-byte slot in the raw
-       data: sm's pid commands take nothing else, so the slot is the last 8 bytes */
-    u32 need = c->tipc && pid && raw >= 8 ? raw - 8 : raw;
+   and at least the command's raw data: raw bytes, or tipc_raw for a TIPC request, whose pid has no raw slot. C
+   descriptors aren't checked */
+static inline int ipc_counts(const IpcCtx* c, int pid, int na, int nb, int nx, int ncopy, int nmove, u32 raw,
+                             u32 tipc_raw) {
     return c->has_pid == pid && c->na == na && c->nb == nb && c->nx == nx && !c->nw && c->ncopy == ncopy &&
-           c->nmove == nmove && c->raw_size >= need;
+           c->nmove == nmove && c->raw_size >= (c->tipc ? tipc_raw : raw);
 }
-/* and a domain request, the objects it declares (sf's DomainServiceObjectProcessor) */
+/* and a domain request, the objects it declares (sf's DomainServiceObjectProcessor, which checks them first) */
 static inline int ipc_objects(const IpcCtx* c, int nobj) { return !c->is_domain || c->nin_objs == nobj; }
 int ipc_bad_request(SvcObj* o, IpcCtx* c); /* sf's InvalidCmifRequest for a request that doesn't, logged */
-int ipc_bad_objects(SvcObj* o, IpcCtx* c); /* sf's InvalidNumInObjects, logged */
-SvcObj* ipc_in_obj(IpcCtx* c, int i);      /* the request's object i (domains only), with a reference to drop */
+/* a domain request with another number of objects (InvalidNumInObjects), or objects a plain session can't send
+   (NotSupported), logged */
+int ipc_bad_objects(SvcObj* o, IpcCtx* c);
+SvcObj* ipc_in_obj(IpcCtx* c, int i); /* the request's object i (domains only), with a reference to drop */
 #define RC(mod, desc) ((mod) | ((desc) << 9))
 #define RC_OK         0
 int stub_ok(SvcObj* o, IpcCtx* c);            /* success for a command a service doesn't know, logged */

@@ -151,6 +151,12 @@ int ipc_bad_request(SvcObj* o, IpcCtx* c) {
     return RC(11, 420); /* sf::hipc InvalidCmifRequest */
 }
 int ipc_bad_objects(SvcObj* o, IpcCtx* c) {
+    if (!c->is_domain) { /* sf's plain processor has no objects to give a command (GetInObjects) */
+        if (ipc_warn_once(o->name, c->cmd))
+            WARN("  [bad request] %s cmd %u takes objects, on a session that isn't a domain -> NotSupported\n", o->name,
+                 c->cmd);
+        return RC(10, 1); /* sf NotSupported */
+    }
     if (ipc_warn_once(o->name, c->cmd))
         WARN("  [bad request] %s cmd %u: %d objects is not what it declares -> InvalidNumInObjects\n", o->name, c->cmd,
              c->nin_objs);
@@ -267,13 +273,13 @@ static void parse(IpcCtx* c) {
     /* the data words end the request: what a command reads past them (a client that sent less than the command
        takes) reads as zeros (ipc_in), not as what an earlier request left in the message. Besides the arguments they
        hold the padding to 16 and the pointer buffers' sizes, so a short request can still read those */
-    u8* end = p + ndata * 4 < m + 0x100 ? p + ndata * 4 : m + 0x100;
+    u8* end = p + ndata * 4; /* inside the message: the size check above */
     /* TIPC (newer SDKs): type is 16+cmd, payload right after the header, no SFCI */
     if (c->type >= 16) {
         c->tipc = 1;
         c->cmd = c->type - 16;
         c->raw = p;
-        c->raw_size = end > p ? (u32)(end - p) : 0; /* descriptors past the message leave nothing */
+        c->raw_size = (u32)(end - p);
         return;
     }
     /* CMIF */
@@ -281,10 +287,9 @@ static void parse(IpcCtx* c) {
     u32 dlen_max = 0x100; /* a domain message says how long its CMIF part is */
     c->is_domain = 0;
     if (c->sess && c->sess->is_domain && (c->type == 4 || c->type == 6)) {
-        if (end < d + 16) { /* sf's first check, InvalidHeaderSize: nothing of the header is read */
-            c->is_domain = 2;
-            c->domain_rc = RC(10, 202);
-            c->domain_short = 1;
+        if (end < d + 16) {   /* sf's first check, InvalidHeaderSize: nothing of the header is read */
+            c->is_domain = 2; /* the client reads a domain reply */
+            c->header_rc = RC(10, 202);
             return;
         }
         u8 dcmd = d[0];
@@ -306,6 +311,13 @@ static void parse(IpcCtx* c) {
         }
         dlen_max = dlen > 16 ? dlen - 16u : 0; /* the CmifInHeader, then the arguments: the object ids come after */
         d += 16;
+        /* the object's CmifInHeader is checked once the target is found: it has to be there, with its magic */
+        if (!c->domain_rc && dlen < 16) c->domain_rc = RC(10, 202);            /* InvalidHeaderSize */
+        if (!c->domain_rc && memcmp(d, "SFCI", 4)) c->domain_rc = RC(10, 211); /* InvalidInHeader */
+    } else if (end < d + 16 ||
+               memcmp(d, "SFCI", 4)) { /* a plain request's CmifInHeader: InvalidHeaderSize, InvalidInHeader */
+        c->header_rc = end < d + 16 ? RC(10, 202) : RC(10, 211);
+        return;
     }
     memcpy(&c->cmd, d + 8, 4);
     memcpy(&c->token, d + 12, 4);
@@ -465,6 +477,12 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size) {
         cpu->x[0] = c->kernel_rc;
         goto out;
     }
+    if (c->header_rc) { /* the control requests' header too */
+        WARN_LIMIT(8, "IPC: request to %s with a broken header -> %x\n", s->obj->name, c->header_rc);
+        c->rc = c->header_rc;
+        respond(c);
+        goto out;
+    }
     if (c->type == 5 || c->type == 7) {
         control(c, s);
         c->is_domain = 0;
@@ -472,12 +490,7 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size) {
         goto out;
     }
     SvcObj* obj = s->obj;
-    if (c->domain_short) {
-        WARN("domain request without a whole domain header -> InvalidHeaderSize\n");
-        c->rc = c->domain_rc;
-        respond(c);
-        goto out;
-    }
+
     if (c->is_domain) {
         if (c->is_domain == 3) { /* close a domain object */
             Domain* d = s->domain;

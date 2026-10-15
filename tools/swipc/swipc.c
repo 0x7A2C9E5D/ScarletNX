@@ -97,15 +97,15 @@ typedef struct {
     char name[NAME_LEN];
     int type;
     int out;
-    unsigned long offset;    /* raw arguments */
-    int list, index, index2; /* buffers: the descriptor list and the index in it, index2 the pointer list's */
+    unsigned long offset, tipc_offset; /* raw arguments: in a CMIF request, and in a TIPC one (no pid slot) */
+    int list, index, index2;           /* buffers: the descriptor list and the index in it, index2 the pointer list's */
 } Arg;
 typedef struct {
     unsigned long id;
     char name[NAME_LEN];
     int arg0, nargs;
     int stub, unsorted;
-    unsigned long in_size, out_size;
+    unsigned long in_size, out_size, tipc_in_size;
     int pid, na, nb, nx, ncopy, nmove, in_objs; /* what the request has to send: sf refuses any other (ipc_counts) */
     int line;
 } Cmd;
@@ -515,13 +515,14 @@ static void parse_arg(int out) {
     nargs++;
 }
 /* the offsets of the raw arguments of one direction: stable insertion sort by alignment, ascending, unless the
-   command is @unsorted */
-static unsigned long place_raw(const Cmd* c, int out) {
+   command is @unsorted. tipc: the inputs of a TIPC request, where the pid is in the special header only, with no
+   slot in the raw data (sm, for newer SDKs) */
+static unsigned long place_raw(const Cmd* c, int out, int tipc) {
     int arg0 = c->arg0, n = c->nargs;
     int order[64], count = 0, i, j;
     unsigned long off = 0;
     for (i = arg0; i < arg0 + n; i++)
-        if (args[i].out == out && is_raw(args[i].type)) {
+        if (args[i].out == out && is_raw(args[i].type) && !(tipc && types[resolve(args[i].type)].kind == TK_PID)) {
             if (count == 64) fail_at(c->line, "%s: too many raw arguments", c->name);
             order[count++] = i;
         }
@@ -535,7 +536,10 @@ static unsigned long place_raw(const Cmd* c, int out) {
         Arg* a = &args[order[i]];
         unsigned long al = types[a->type].align;
         off = (off + al - 1) / al * al;
-        a->offset = off;
+        if (tipc)
+            a->tipc_offset = off;
+        else
+            a->offset = off;
         off += types[a->type].size;
     }
     return off;
@@ -598,8 +602,9 @@ static void check_cmd(Cmd* c) {
     /* on a plain session the out objects are move handles, and the header counts them in 4 bits */
     if (out_move + out_objs > 15) fail_at(c->line, "%s: more than 15 move handles and objects out", c->name);
     c->pid = pid, c->na = na, c->nb = nb, c->nx = nx, c->ncopy = ncopy, c->nmove = nmove, c->in_objs = in_objs;
-    c->in_size = place_raw(c, 0);
-    c->out_size = place_raw(c, 1);
+    c->in_size = place_raw(c, 0, 0);
+    c->tipc_in_size = place_raw(c, 0, 1);
+    c->out_size = place_raw(c, 1, 0);
     c->out_size = (c->out_size + 3) & ~3ul;
     {
         /* the request as the client writes it into the message (libnx's cmifMakeRequest): the header words, the
@@ -1019,7 +1024,12 @@ static void emit_unpacker(const Iface* f, const Cmd* c) {
                 emit("    a_%s = %d < c->n%s ? c->%s_h[%d] : 0;\n", a->name, a->index, kind, kind, a->index);
                 break;
             }
-            default: emit("    ipc_in(c, 0x%lx, %sa_%s, sizeof a_%s);\n", a->offset, amp, a->name, a->name);
+            default:
+                if (a->tipc_offset != a->offset)
+                    emit("    ipc_in(c, c->tipc ? 0x%lx : 0x%lx, %sa_%s, sizeof a_%s);\n", a->tipc_offset, a->offset,
+                         amp, a->name, a->name);
+                else
+                    emit("    ipc_in(c, 0x%lx, %sa_%s, sizeof a_%s);\n", a->offset, amp, a->name, a->name);
         }
     }
     emit(direct ? "    return %s(self" : "    rc = %s(self", name);
@@ -1076,14 +1086,16 @@ static void write_inc(int fi, const char* out_dir) {
         emit("int %s_dispatch(SvcObj* self, IpcCtx* c) {\n    switch (c->cmd) {\n", cn);
         for (j = f->cmd0; j < f->cmd0 + f->ncmds; j++) {
             Cmd* c = &cmds[j];
-            /* before the command runs, sf answers a request whose pid flag, A, B and X descriptors, handles or raw
-               data aren't the command's with InvalidCmifRequest, and a domain request with another number of objects
-               with InvalidNumInObjects */
-            emit("        case %lu:\n            if (!ipc_counts(c, %d, %d, %d, %d, %d, %d, 0x%lx))", c->id, c->pid,
-                 c->na, c->nb, c->nx, c->ncopy, c->nmove, c->in_size);
+            /* before the command runs, sf answers a domain request with another number of objects than the
+               command takes with InvalidNumInObjects, then a request whose pid flag, A, B and X descriptors, handles
+               or raw data aren't the command's with InvalidCmifRequest. On a plain session a command that takes
+               objects can't get them: NotSupported */
+            emit("        case %lu:\n            if (!ipc_objects(c, %d)) return ipc_bad_objects(self, c);\n", c->id,
+                 c->in_objs);
             emit(
-                " return ipc_bad_request(self, c);\n            if (!ipc_objects(c, %d)) return ipc_bad_objects(self, c);\n",
-                c->in_objs);
+                "            if (!ipc_counts(c, %d, %d, %d, %d, %d, %d, 0x%lx, 0x%lx)) return ipc_bad_request(self, c);\n",
+                c->pid, c->na, c->nb, c->nx, c->ncopy, c->nmove, c->in_size, c->tipc_in_size);
+            if (c->in_objs) emit("            if (!c->is_domain) return ipc_bad_objects(self, c);\n");
             if (!c->stub && !c->nargs) {
                 char name[NAME_LEN * 2];
                 handler_name(name, f, c);

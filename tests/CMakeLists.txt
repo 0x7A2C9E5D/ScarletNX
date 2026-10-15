@@ -142,6 +142,7 @@ foreach(bad IN ITEMS
         duplicate_field 5 "two fields named x"
         duplicate_service 5 "service test:a is served twice"
         exchange_buffer 5 "exchange \\(W\\) buffers"
+        fixed_size_array 4 "it is not FixedSize"
         keyword_argument 4 "a C keyword"
         long_service_name 3 "at most 8 characters"
         output_too_big 5 "the reply takes 260 bytes"

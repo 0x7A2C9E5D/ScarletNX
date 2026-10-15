@@ -35,7 +35,8 @@ description: "Implement or fix a high-level-emulated Switch service or device (I
    ok` from `stub_ok`, `[unknown]` from `ipc_unknown`, `[not implemented]` from bsd's, nothing from `quiet_ok`.
    `[not implemented] NAME cmd N -> ok` also comes from sm's stand-in for a service the runtime doesn't have. A
    `[bad request] I cmd N: pid .., A .., ... -> InvalidCmifRequest` means the declaration doesn't match what the SDK
-   sends (step 2): the game gets an error, and often aborts on it.
+   sends (step 2): the game gets an error, and often aborts on it. `[bad request] ... -> InvalidNumInObjects` is the
+   same for a domain request's objects.
    Switchbrew's page for the service gives the command's name and layout; libnx's client struct shows the raw
    layout and buffer attributes.
 2. **Declare it** in the `.swipc` with the console's full signature, inputs and outputs the runtime ignores

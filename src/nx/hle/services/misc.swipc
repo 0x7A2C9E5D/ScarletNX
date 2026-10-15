@@ -283,8 +283,19 @@ interface nn::aocsrv::detail::IAddOnContentManager is aoc:u {
     @stub [50] CheckAddOnContentMountStatus(pid);
     [100] CreateEcPurchasedEventManager() -> object<nn::ec::IPurchaseEventManager> manager;
     [101] CreatePermanentEcPurchasedEventManager(pid) -> object<nn::ec::IPurchaseEventManager> manager;
+    [110] CreateContentsServiceManager() -> object<nn::ec::IContentsServiceManager> manager;
+    @stub [200] SetRequiredAddOnContentsOnContentsAvailabilityTransition(array<i32, 5> indices, pid);
+}
+# a token from the network, which an offline console can't get
+interface nn::ec::IContentsServiceManager {
+    [0] RequestContentsAuthorizationToken(bytes<0x41> nonce, pid, buffer<u8, 5> data)
+        -> (handle<copy, event> event, object<nn::ec::detail::IAsyncData> async);
+}
+interface nn::ec::detail::IAsyncData {
 }
 interface nn::ec::IPurchaseEventManager {
+    @stub [0] SetDefaultDeliveryTarget(array<i32, 5> indices, pid);
+    @stub [1] SetDeliveryTarget(u64 unknown, array<i32, 5> indices);
     [2] GetPurchasedEventReadableHandle() -> handle<copy, event> event;
     [3] PopPurchasedProductInfo() -> nn::ec::srv::detail::PurchasedProductInfo info;
     [4] PopPurchasedProductInfoWithUid(nn::account::Uid uid) -> nn::ec::srv::detail::PurchasedProductInfo info;

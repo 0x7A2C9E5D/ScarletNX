@@ -16,8 +16,9 @@ if(CMAKE_CROSSCOMPILING)
     ExternalProject_Add(snx_swipc_host
         SOURCE_DIR "${PROJECT_SOURCE_DIR}/tools/swipc"
         BINARY_DIR "${snx_swipc_dir}"
+        # no -Werror: the host compiler may not be clang (SNX_HOST_CC), and its warnings shouldn't stop a cross build
         CMAKE_ARGS -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=${SNX_HOST_CC}"
-                   "-DCMAKE_C_FLAGS=-pedantic-errors -Wall -Wextra -Werror"
+                   "-DCMAKE_C_FLAGS=-pedantic-errors -Wall -Wextra"
                    "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${snx_swipc_dir}/bin"
                    "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE=${snx_swipc_dir}/bin"
         BUILD_COMMAND "${CMAKE_COMMAND}" --build <BINARY_DIR> --config Release

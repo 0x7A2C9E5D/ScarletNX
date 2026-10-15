@@ -36,8 +36,8 @@ interface nn::account::IAccountServiceForApplication is acc:u0, acc:u1, acc:su {
 - Names are the SDK's (Switchbrew, libnx, the SDK's symbols). `is` lists the service names the interface is served
   as (sm's names are 8 bytes at most, and each is served by one interface). Every argument and output has a name, but
   `pid` and `aruid` may go without. Argument, field and command names become C names, so C keywords, `::` and the
-  generated names (a command `dispatch`, `new` or `register`, a field `padN_`, an argument `self`) are refused. A struct is written in a
-  `type` definition.
+  generated names (a command `dispatch`, `new` or `register`, a field `padN_`, an argument `self`) are refused. A
+  struct is written in a `type` definition.
 - Types: `u8` to `u64`, `i8` to `i64` (or `s8` to `s64`), `b8` (or `bool`), `f32`, `f64`, `bytes<N[, A]>`, `T[N]`,
   `struct {...}`, and names given with `type`. A type is defined before it is used. Types more than one file uses
   are in `hle/services/types.swipc`, which comes first in every list of the runtime's .swipc files, and in every
@@ -91,9 +91,12 @@ only read):
   handles, and at least the command's raw data. Otherwise it is answered with sf's InvalidCmifRequest, RC(11, 420),
   before the handler runs, and logged as `[bad request]` (`ipc_counts` and `ipc_bad_request`), as Atmosphère's
   HipcCommandProcessor checks it. C descriptors aren't counted. A domain request with another number of objects is
-  answered InvalidNumInObjects (`ipc_objects`). A TIPC request (sm, from newer SDKs) carries its pid in the special
-  header only, so its raw data has no pid slot. So a declaration that differs from what the game's SDK sends fails
-  every such request.
+  answered InvalidNumInObjects (`ipc_objects`), checked before the rest as sf's DomainServiceObjectProcessor does,
+  and a command that takes objects answers NotSupported on a plain session, which can't send them. A TIPC request
+  (sm, from newer SDKs) carries its pid in the special header only, so its raw data has no pid slot, and the
+  generated code reads its arguments where TIPC puts them. A request whose data words don't hold its CmifInHeader
+  (or domain header) is answered InvalidHeaderSize, and one without the SFCI magic InvalidInHeader. So a declaration
+  that differs from what the game's SDK sends fails every such request.
 - The generator refuses a command whose request or reply would not fit the 0x100 byte message with its headers,
   descriptors, handles and domain object ids (0xd0 bytes of raw data out at most), and more than 15 move handles and
   objects out.
