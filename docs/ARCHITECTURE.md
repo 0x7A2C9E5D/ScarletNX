@@ -12,6 +12,11 @@ Source map: [CLAUDE.md](../CLAUDE.md).
 | `src/nx/` / `scarletnx-nx` | Horizon SVC/kernel/services/filesystems, NSO/NRO loading, Switch memory, Maxwell and graphics/media backends, Switch frontend/tooling |
 | `src/gnuabi/` / `scarletnx-gnuabi` | Linux syscall/errno/structure translation, ELF loading, isolated VFS, Linux process/memory/signal/futex compatibility |
 
+The experimental `src/3ds/` / `scarletnx-3ds` target currently supplies only
+board profiles and launcher plumbing, not guest execution. It depends on common,
+never the NX or GNU ABI runtime. See [3DS port](3DS.md) for its status and the
+ARM11/memory-ABI work needed before static execution.
+
 The common target has no runtime-specific imports. NX and GNU ABI each link
 common and have no dependency on each other. The GNU executable target is
 `scarletnx-gnuabi-run`, whose output is `scarletnx-gnuabi`; its library output is

@@ -31,6 +31,31 @@ function(snx_test_target target standard)
     endif()
 endfunction()
 
+if(TARGET snx_ctr_board)
+    if(SNX_TEST_SANITIZERS)
+        target_compile_options(snx_ctr_board PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(snx_ctr_board INTERFACE -fsanitize=address,undefined)
+        target_compile_options(scarletnx-3ds PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    endif()
+    add_executable(snx-test-3ds-board 3ds_board.c)
+    snx_test_target(snx-test-3ds-board 11)
+    target_compile_options(snx-test-3ds-board PRIVATE -UNDEBUG)
+    target_link_libraries(snx-test-3ds-board PRIVATE snx_ctr_board)
+    add_test(NAME 3ds_board COMMAND snx-test-3ds-board)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME 3ds_driver COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_driver.py"
+            $<TARGET_FILE:scarletnx-3ds>)
+    endif()
+endif()
+
+# Board/GUI-only builds do not configure either AOT runtime or LLVM. Do not
+# create CPU execution tests that link the absent backend targets in that case.
+if(NOT SNX_BUILD_NX AND NOT SNX_BUILD_GNUABI)
+    include(architecture.cmake)
+    return()
+endif()
+
 # Validate the direct writer against SPIRV-Tools when the system tools are installed.
 if(SNX_BUILD_NX)
     find_program(SNX_SPIRV_VAL spirv-val)

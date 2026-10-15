@@ -9,7 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-BOUNDARIES = {'common': {'common'}, 'nx': {'nx', 'common'}, 'gnuabi': {'gnuabi', 'common'}}
+BOUNDARIES = {'common': {'common'}, 'nx': {'nx', 'common'}, 'gnuabi': {'gnuabi', 'common'},
+              '3ds': {'3ds', 'common'}}
 INCLUDE = re.compile(r'^\s*#\s*include\s*(["<])([^">]+)[">]', re.MULTILINE)
 
 
@@ -79,9 +80,11 @@ def check_graph(graph):
 
     errors = []
     for owner, forbidden in (
-        ('scarletnx-common', ('scarletnx-nx', 'scarletnx-gnuabi')),
-        ('scarletnx-nx', ('scarletnx-gnuabi',)),
-        ('scarletnx-gnuabi', ('scarletnx-nx',)),
+        ('scarletnx-common', ('scarletnx-nx', 'scarletnx-gnuabi', 'scarletnx-3ds', 'snx_ctr_board')),
+        ('scarletnx-nx', ('scarletnx-gnuabi', 'scarletnx-3ds', 'snx_ctr_board')),
+        ('scarletnx-gnuabi', ('scarletnx-nx', 'scarletnx-3ds', 'snx_ctr_board')),
+        ('scarletnx-3ds', ('scarletnx-nx', 'scarletnx-gnuabi')),
+        ('snx_ctr_board', ('scarletnx-nx', 'scarletnx-gnuabi')),
     ):
         if owner not in by_name:
             if owner == 'scarletnx-common':
