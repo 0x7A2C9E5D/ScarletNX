@@ -348,11 +348,12 @@ add_test(NAME extraction_native COMMAND snx-test-extract)
 
 add_executable(snx-test-loader loader_test.c "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c")
 snx_test_target(snx-test-loader 90)
-target_link_libraries(snx-test-loader PRIVATE snx_test_common)
+target_link_libraries(snx-test-loader PRIVATE snx_test_common snx_lz4)
 add_test(NAME loader_native COMMAND snx-test-loader)
 
 add_executable(snx-test-runtime-nro runtime_nro.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/loader.c")
 snx_test_target(snx-test-runtime-nro 11)
+target_link_libraries(snx-test-runtime-nro PRIVATE snx_lz4)
 add_test(NAME runtime_nro COMMAND snx-test-runtime-nro)
 
 if(NOT WIN32)

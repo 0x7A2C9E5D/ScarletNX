@@ -40,8 +40,21 @@ function(snx_quiet)
     endforeach()
 endfunction()
 
-# Extraction-only builds do not contain the NX runtime or its graphics/media dependencies.
-if(SNX_BUILD_NX AND NOT SNX_HACTOOL_ONLY)
+# LZ4's block decoder for NSO segments (src/nx/loader/loader.c, src/nx/runtime/loader.c) and hactool's NSO
+# extraction. Only lib/lz4.c is built (BSD-2-Clause): the rest of LZ4 is its frame format, the HC compressor and the
+# command-line program, none of which an NSO uses
+if(SNX_BUILD_NX OR SNX_HACTOOL_ONLY)
+    CPMAddPackage(NAME lz4 VERSION 1.10.0
+                  URL https://github.com/lz4/lz4/releases/download/v1.10.0/lz4-1.10.0.tar.gz
+                  URL_HASH SHA256=537512904744b35e232912055ccf8ec66d768639ff3abe5788d90d792ec5f48b
+                  DOWNLOAD_ONLY YES)
+    add_library(snx_lz4 STATIC "${lz4_SOURCE_DIR}/lib/lz4.c")
+    target_include_directories(snx_lz4 PUBLIC "${lz4_SOURCE_DIR}/lib")
+    snx_quiet(snx_lz4)
+endif()
+
+# Extraction-only and tools-only builds do not contain the NX runtime or its graphics/media dependencies.
+if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY AND NOT SNX_HACTOOL_ONLY)
     # FFmpeg builds with its own configure and make, which cmake/ffmpeg.cmake runs
     CPMAddPackage(NAME FFmpeg VERSION 9.0.2
                   URL https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
@@ -83,7 +96,7 @@ endif()
 # the phone extracts its own dumps. CPM applies the decrypted-container patch with patch(1) once, when it unpacks
 # hactool. The cache key holds the archive and the patch contents: CPM's default key holds the patch's path instead,
 # so an edited patch would reuse the copy patched before
-if((SNX_BUILD_NX OR SNX_HACTOOL_ONLY) AND (NOT CMAKE_CROSSCOMPILING OR ANDROID))
+if((SNX_BUILD_NX OR SNX_HACTOOL_ONLY) AND NOT SNX_TOOLS_ONLY AND (NOT CMAKE_CROSSCOMPILING OR ANDROID))
     set(hactool_sha256 f7148daad624ba909f5ae253210734b1a0ce19e89a7914b6cf71401f7134ebbc)
     set(hactool_patch "${CMAKE_SOURCE_DIR}/cmake/hactool-decrypted.patch")
     file(SHA256 "${hactool_patch}" hactool_patch_sha256)

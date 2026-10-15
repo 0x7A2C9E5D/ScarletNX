@@ -8,6 +8,7 @@
 #define _XOPEN_SOURCE   700
 #endif
 #include "loader.h"
+#include <lz4.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -212,45 +213,14 @@ static int read_file(const char* path, unsigned char** data, size_t* size, char*
     return 0;
 }
 
+/* LZ4_decompress_safe never reads past n bytes or writes past size, and fails on a back reference before the start;
+   a segment has to come out exactly as long as its header says */
 static int lz4_block(Parser* p, const unsigned char* src, size_t n, unsigned char* dst, size_t size) {
-    size_t i, used, literals, match, offset, j;
-    unsigned token, byte;
-    i = 0;
-    used = 0;
-    while (i < n) {
-        token = src[i++];
-        literals = token >> 4;
-        if (literals == 15) {
-            do {
-                if (i == n) return fail(p, "LZ4: truncated literal length");
-                byte = src[i++];
-                if (literals > (size_t)-1 - byte) return fail(p, "LZ4: literal length overflow");
-                literals += byte;
-            } while (byte == 255);
-        }
-        if (literals > n - i || literals > size - used) return fail(p, "LZ4: literal exceeds input or output");
-        memcpy(dst + used, src + i, literals);
-        i += literals;
-        used += literals;
-        if (i == n) break;
-        if (n - i < 2) return fail(p, "LZ4: truncated match offset");
-        offset = get16(src + i);
-        i += 2;
-        if (!offset || offset > used) return fail(p, "LZ4: invalid back reference");
-        match = (token & 15) + 4;
-        if ((token & 15) == 15) {
-            do {
-                if (i == n) return fail(p, "LZ4: truncated match length");
-                byte = src[i++];
-                if (match > (size_t)-1 - byte) return fail(p, "LZ4: match length overflow");
-                match += byte;
-            } while (byte == 255);
-        }
-        if (match > size - used) return fail(p, "LZ4: match exceeds output");
-        for (j = 0; j < match; j++) dst[used + j] = dst[used + j - offset];
-        used += match;
-    }
-    return used == size ? 0 : fail(p, "LZ4: decompressed length differs from segment header");
+    int got;
+    if (n > LZ4_MAX_INPUT_SIZE || size > LZ4_MAX_INPUT_SIZE) return fail(p, "LZ4: segment too large");
+    got = LZ4_decompress_safe((const char*)src, (char*)dst, (int)n, (int)size);
+    if (got < 0) return fail(p, "LZ4: corrupt segment");
+    return (size_t)got == size ? 0 : fail(p, "LZ4: decompressed length differs from segment header");
 }
 
 static SnxU32 rotate32(SnxU32 x, unsigned n) { return (x >> n) | (x << (32 - n)); }

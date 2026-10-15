@@ -27,13 +27,15 @@ target_include_directories(hactool_mbedtls BEFORE PUBLIC "${hactool_src}/mbedtls
 target_compile_options(hactool_mbedtls PRIVATE -w)
 set_target_properties(hactool_mbedtls PROPERTIES C_STANDARD 99 C_EXTENSIONS ON)
 
-set(hactool_sources save sha aes extkeys rsa npdm bktr kip packages pki pfs0 hfs0 nca0_romfs romfs utils nax0 nso lz4
-                    nca xci filepath ConvertUTF cJSON)
+# hactool's lz4.c (LZ4 1.8) is left out for the pinned LZ4 (snx_lz4). nso.c still includes its own lz4.h, found first
+# beside it, which declares LZ4_decompress_safe, the only LZ4 function hactool calls, as every LZ4 since 1.7 does
+set(hactool_sources save sha aes extkeys rsa npdm bktr kip packages pki pfs0 hfs0 nca0_romfs romfs utils nax0 nso nca
+                    xci filepath ConvertUTF cJSON)
 list(TRANSFORM hactool_sources PREPEND "${hactool_src}/")
 list(TRANSFORM hactool_sources APPEND .c)
 add_library(hactool_lib STATIC ${hactool_sources})
 target_include_directories(hactool_lib PUBLIC "${hactool_src}")
-target_link_libraries(hactool_lib PUBLIC hactool_mbedtls)
+target_link_libraries(hactool_lib PUBLIC hactool_mbedtls snx_lz4)
 target_compile_definitions(hactool_lib PUBLIC _BSD_SOURCE _POSIX_SOURCE _POSIX_C_SOURCE=200112L _DEFAULT_SOURCE
                                                __USE_MINGW_ANSI_STDIO=1 _FILE_OFFSET_BITS=64)
 target_compile_options(hactool_lib PRIVATE -w)
