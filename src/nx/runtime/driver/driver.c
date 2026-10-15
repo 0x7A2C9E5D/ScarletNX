@@ -23,7 +23,8 @@ static void usage(void) {
          "  -H, --headless         Run without a window or swapchain");
     puts("  -f, --fullscreen      Start fullscreen (windowed when omitted)\n"
          "  --touch=0|1|2          The game's touch screen: off, fingers, or fingers and the mouse\n"
-         "  --backend=llvm|gcc     Select the recompiler backend for preparation\n"
+         "  --controls=0|1         The on-screen controls: hidden or shown (the game's menu sets them)");
+    puts("  --backend=llvm|gcc     Select the recompiler backend for preparation\n"
          "  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game\n"
          "  --repo / --build-dir   Override this build's checkout / build directory\n"
@@ -74,7 +75,7 @@ static int cached_abi(const char* base) {
     return expected && abi == expected;
 }
 static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* backend, const char* touch,
-                     int game_argc, char** game_argv) {
+                     const char* controls, int game_argc, char** game_argv) {
     char *name = game_name(input), *dump = snx_absolute(input);
     char *work = snx_path_join(paths->repo, "work"), *games = snx_path_join(paths->repo, "games");
     char *extracted = snx_path_join(work, name), *pending = snx_format("%s.extracting", extracted);
@@ -163,6 +164,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
     if (flags & SNX_HEADLESS) command[n++] = "-H";
     if (flags & SNX_FULLSCREEN) command[n++] = "-f";
     if (touch) command[n++] = touch;
+    if (controls) command[n++] = controls;
     if (flags & SNX_STOP)
         command[n++] = "-s";
     else if (flags & SNX_GDB)
@@ -208,6 +210,7 @@ static int container_path(const char* path) {
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
     const char *repo = SNX_SOURCE_DIR, *build = SNX_BUILD_DIR, *input = NULL, *backend = NULL, *touch = NULL;
+    const char* controls = NULL;
     char *r = NULL, *b = NULL, *exe = NULL, **rest, *checkout;
     unsigned flags = 0;
     int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, backend_args = 0;
@@ -236,8 +239,13 @@ int snx_driver(int argc, char** argv) {
                 build = argv[i];
             continue;
         }
-        if (!strncmp(argv[i], "--touch=", 8)) { /* the game's, as it is: its setting of the same name */
+        /* the game's, as they are: its settings of the same names */
+        if (!strncmp(argv[i], "--touch=", 8)) {
             touch = argv[i];
+            continue;
+        }
+        if (!strncmp(argv[i], "--controls=", 11)) {
+            controls = argv[i];
             continue;
         }
         parsed = snx_cli_flag(argv[i], &flags);
@@ -322,7 +330,7 @@ int snx_driver(int argc, char** argv) {
     paths.build = b;
     paths.executable = exe;
     if (automatic)
-        result = play_dump(input, &paths, flags, backend, touch, separator < argc ? argc - separator - 1 : 0,
+        result = play_dump(input, &paths, flags, backend, touch, controls, separator < argc ? argc - separator - 1 : 0,
                            argv + (separator < argc ? separator + 1 : argc));
     else
         result = (flags & SNX_RECOMP) ? snx_recompile(n, rest, &paths) : snx_extract(n, rest, &paths);

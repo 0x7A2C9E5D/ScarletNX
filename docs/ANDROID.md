@@ -20,8 +20,9 @@ recompiles on the phone, then the game opens.
 - **A game** runs in `GameActivity`, in a process of its own: the runtime's `main` with `--game=games/<game>`.
   Its process ends with the game, and the menu comes back on its first screen. The shared storage maps nothing
   executable, so the runtime loads a copy of `<game>_code.so` from the app's cache. The back button opens the
-  game's menu over it, in the menu's look (a gamepad's Home does on every system): *Exit* for now; back again
-  returns to the game. Leaving it for the home screen keeps it: its window is made anew when it comes back.
+  game's menu over it, in the menu's look (a gamepad's Home does on every system): the on-screen controls'
+  settings, the touch screen's, and *Exit*; back again returns to the game. Leaving it for the home screen keeps it:
+  its window is made anew when it comes back.
 - **Share log**, in the menu, saves the message on the screen, the last run's output (`last-run.log`, which the
   menu keeps on every system) and the newest game log to `/sdcard/ScarletNX/scarletnx.log`, then opens the
   share sheet with that file.
@@ -29,8 +30,9 @@ recompiles on the phone, then the game opens.
 The app runs on arm64 phones and on x86_64 Android (the emulator, some tablets and Chromebooks): the recompiler makes
 the code of the device it runs on. It installs from Android 5.0 (API 21). A game needs Vulkan 1.3: on a device without
 it (Android 5.0 and 6.0 have no Vulkan at all) the menu still prepares games, and a game says what it lacks. The
-fingers reach a game's touch screen (the menu's *Touch* item turns them off, or adds a mouse); for the buttons and
-sticks a game needs a gamepad: there are no on-screen controls yet.
+fingers reach a game's touch screen (the menu's *Touch* item turns them off, or adds a mouse). The buttons and
+sticks are on the screen, over the game ([USAGE](USAGE.md#on-screen-controls)), and a gamepad works beside them;
+the menu's *On-screen controls* item hides them.
 
 ## Building
 

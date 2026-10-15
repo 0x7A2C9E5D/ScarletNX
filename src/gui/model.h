@@ -16,7 +16,8 @@ enum {
     GUI_3DS,
     GUI_KEYS,
     GUI_FULLSCREEN,
-    GUI_TOUCH, /* what the game's touch screen takes */
+    GUI_TOUCH,    /* what the game's touch screen takes */
+    GUI_CONTROLS, /* the on-screen controls over the game */
     GUI_GCCJIT,
     GUI_GDBSTUB,
     GUI_THEME,
@@ -36,6 +37,7 @@ typedef struct {
     bool activated, load_activated, focus_load;
     GuiLoadView view;
     bool running, fullscreen, gccjit, gdbstub, quit;
+    bool controls; /* the on-screen controls, on by default on Android */
     int touch;     /* GUI_TOUCH_*, fingers the default */
     int text_size; /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen */
     int theme_next; /* the GUI moves to the next theme and clears it */
@@ -46,10 +48,12 @@ typedef struct {
 } GuiMenu;
 void gui_menu_key(GuiMenu* menu, GuiKey key);
 const char* gui_setting_description(const GuiMenu* menu);
-/* Append up to five Switch options; prepared games do not run a compiler. */
+/* Append up to GUI_LAUNCH_MAX Switch options; prepared games do not run a compiler. */
+#define GUI_LAUNCH_MAX 6
 size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv);
-/* the game's --touch=N for the menu's choice */
+/* the game's --touch=N and --controls=N for the menu's choices */
 const char* gui_touch_option(const GuiMenu* menu);
+const char* gui_controls_option(const GuiMenu* menu);
 /* how many columns a line over columns too many has slid at ms, a column every step_ms: it waits at each end */
 int gui_slide(int over, uint64_t ms, uint32_t step_ms);
 

@@ -62,8 +62,8 @@ typedef struct {
     GuiRgb splash_page;
 } App;
 static const char* const items[] = {"Load Switch NSP/XCI/NRO", "Load Linux ARM ELF", "Load 3DS CIA", "Setup device keys",
-                                   "Fullscreen", "Touch", "Enable libgccjit", "Enable gdbstub", "Theme", "Text size",
-                                   "Share log", "Exit"};
+                                   "Fullscreen", "Touch", "On-screen controls", "Enable libgccjit", "Enable gdbstub",
+                                   "Theme", "Text size", "Share log", "Exit"};
 /* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop */
 #ifdef SDL_PLATFORM_ANDROID
 static const char* const load_labels[] = {"-> Select a file", "-> Select file from games/ instead"};
@@ -263,8 +263,9 @@ static void recent_open(App* app, char* file) {
     app->menu.recent_focus = 0;
 }
 static void menu_label(const App* app, int item, char* label, size_t size) {
-    if (item == GUI_FULLSCREEN || item == GUI_GCCJIT || item == GUI_GDBSTUB) {
+    if (item == GUI_FULLSCREEN || item == GUI_CONTROLS || item == GUI_GCCJIT || item == GUI_GDBSTUB) {
         bool enabled = item == GUI_FULLSCREEN ? app->menu.fullscreen
+                       : item == GUI_CONTROLS ? app->menu.controls
                        : item == GUI_GCCJIT  ? app->menu.gccjit : app->menu.gdbstub;
         snprintf(label, size, "%s[%s] %s", app->theme.marker, enabled ? "ON" : "OFF", items[item]);
     } else if (item == GUI_THEME) {
@@ -814,11 +815,12 @@ static bool android_folder(App* app) {
 /* A game runs in the app's game activity, a process of its own: no child of this one gets a window */
 static int play(App* app, const char* game) {
     char* option = snx_format("--game=%s", game);
-    const char* argv[4];
+    const char* argv[5];
     int ok, n = 0;
     argv[n++] = option;
     if (app->menu.fullscreen) argv[n++] = "-f"; /* the whole screen, the system's bars out of the way */
     argv[n++] = gui_touch_option(&app->menu);
+    argv[n++] = gui_controls_option(&app->menu);
     argv[n] = NULL;
     ok = gui_android_play(argv, app->message, sizeof(app->message));
     free(option);
@@ -945,7 +947,7 @@ static void launch(App* app, char* absolute, bool prepared) {
         return;
     }
 #endif
-    const char* argv[8] = {native ? absolute : driver};
+    const char* argv[2 + GUI_LAUNCH_MAX + 1] = {native ? absolute : driver}; /* the driver, the file, NULL */
     size_t n = 1;
     if (!native) argv[n++] = absolute;
     n += gui_launch_options(&app->menu, native, argv + n);
@@ -1431,6 +1433,7 @@ static bool initialize(App* app) {
 #ifdef SDL_PLATFORM_ANDROID
     app->theme = *gui_theme_builtin("yorha");
     app->menu.fullscreen = true; /* a phone plays on the whole screen; Fullscreen off shows the system's bars */
+    app->menu.controls = true;   /* and has no buttons but these */
     gui_android_start();
     /* back is ESC here: without this it would close the app */
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");

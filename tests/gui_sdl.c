@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
         SDL_WaitThread(thread, NULL); /* Never returns. ESC must kill, not request a graceful exit. */
         return 1;
     }
-    if (argc == 3 && !strcmp(argv[1], "-f") && !strcmp(argv[2], "--touch=1")) {
+    if (argc == 4 && !strcmp(argv[1], "-f") && !strcmp(argv[2], "--touch=1") && !strcmp(argv[3], "--controls=0")) {
         puts("prepared game stdout");
         fputs("prepared game stderr\n", stderr);
         return 0;
@@ -164,14 +164,15 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && strstr(argv[1], "option flags")) {
         int i = 2;
-        assert(argc == 6 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "-f") && !strcmp(argv[i++], "--touch=1"));
+        assert(argc == 7 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "-f") && !strcmp(argv[i++], "--touch=1") &&
+               !strcmp(argv[i++], "--controls=0"));
         if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
         assert(!strcmp(argv[i++], "-S") && !strcmp(argv[i++], "-s") && i == argc);
         puts("Recompiling option flags\nScarletNX - option flags"); /* the runner's banner: now loading */
         return 0;
     }
     if (argc > 1) {
-        assert(argc == 2 || argc == 4);
+        assert(argc == 2 || argc == 5);
         assert(snx_is_file(argv[1]));
         if (strstr(argv[1], "Game00")) {
             assert(argc == 2 && strstr(argv[0], "gnuabi"));
@@ -181,7 +182,8 @@ int main(int argc, char** argv) {
         assert(strstr(argv[1], "game with spaces"));
         bool nx = strstr(argv[0], "mariko") != NULL;
         if (nx)
-            assert(argc == 4 && !strcmp(argv[2], "-f") && !strcmp(argv[3], "--touch=1"));
+            assert(argc == 5 && !strcmp(argv[2], "-f") && !strcmp(argv[3], "--touch=1") &&
+                   !strcmp(argv[4], "--controls=0"));
         else
             assert(argc == 2);
         size_t size;
@@ -444,7 +446,7 @@ int main(int argc, char** argv) {
         size_t size;
         char* kept = (char*)snx_read_file(app.run_log, &size);
         assert(kept && !app.run_out && !strncmp(kept, "$ ", 2) &&
-               strstr(kept, "game with spaces;literal.nro -f --touch=1\n"));
+               strstr(kept, "game with spaces;literal.nro -f --touch=1 --controls=0\n"));
         assert(strstr(kept, "driver stdout") && strstr(kept, "driver stderr") && strstr(kept, "\n[ended, status 0]\n"));
         free(kept);
     }
@@ -876,7 +878,8 @@ int main(int argc, char** argv) {
         app.clock = entered;
         render(&app);
         colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", rgb(app.theme.page), rgb(app.theme.ink));
-        for (row = app.log_top - 2; row <= app.log_top; ++row) /* the run's output waits for the run */
+        /* the run's output waits for the run: its rows, which end above the message (a small window has few) */
+        for (row = app.log_top - 2; row <= app.log_top && row < app.rows - 4; ++row)
             colored_text_on(&app, 1, row, "                            ", rgb(app.theme.ink), rgb(app.theme.page));
         app.clock = entered + app.theme.fade_out_ms / 2;
         render(&app);

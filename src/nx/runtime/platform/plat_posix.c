@@ -106,6 +106,7 @@ int plat_text_input(char* out, size_t cap, const char* initial) {
 void pm_init(PMutex* m) { pthread_mutex_init(&m->l, NULL); }
 void pm_lock(PMutex* m) { pthread_mutex_lock(&m->l); }
 void pm_unlock(PMutex* m) { pthread_mutex_unlock(&m->l); }
+int pm_trylock(PMutex* m) { return !pthread_mutex_trylock(&m->l); }
 void pc_init(PCond* c) {
     pthread_condattr_t a;
     pthread_condattr_init(&a);

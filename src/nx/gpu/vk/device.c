@@ -24,6 +24,11 @@ void vk_lock(void) {
 void vk_unlock(void) {
     if (!--t_vkdepth) pm_unlock(&g_vklock);
 }
+int vk_trylock(void) {
+    if (!t_vkdepth && !pm_trylock(&g_vklock)) return 0;
+    ++t_vkdepth;
+    return 1;
+}
 
 static const char* vk_result_str(VkResult r) {
     switch (r) {
@@ -354,6 +359,7 @@ static void swapchain_retire(void) {
     for (u32 i = 0; i < nretired; i++) vkDestroySemaphore(g_vk.dev, retired[i], NULL);
     nretired = 0;
     for (u32 i = 0; i < g_vk.sc_count; i++) retired[nretired++] = g_vk.sc_done[i];
+    vk_ui_swapchain_gone();
     vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL);
     g_vk.swapchain = VK_NULL_HANDLE;
     g_vk.sc_count = 0;
@@ -469,6 +475,7 @@ int vk_swapchain_create(int srgb) {
     g_vk.sc_win_w = ww;
     g_vk.sc_win_h = wh;
     g_vk.sc_srgb = fmt.format == VK_FORMAT_B8G8R8A8_SRGB || fmt.format == VK_FORMAT_R8G8B8A8_SRGB;
+    g_vk.sc_format = fmt.format;
     g_vk.sc_turned = transform != caps.currentTransform;
     g_vk.sc_count = nimg;
     vkGetSwapchainImagesKHR(g_vk.dev, sc, &g_vk.sc_count, g_vk.sc_images);
