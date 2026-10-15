@@ -2,7 +2,7 @@
    Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the smaller services, most of which answer success: apm, lm, pctl, friend, ns, ssl, prepo, psm, fatal, csrng, mm, nfp, caps, bcat, aoc, irs, mii, ldn, ectx, spl, btm, audin.
+/* the smaller services, most of which answer success: apm, lm, pctl, friend, ns, prepo, psm, fatal, csrng, mm, nfp, caps, bcat, aoc, irs, mii, ldn, ectx, spl, btm, audin.
    Their interfaces are in misc.swipc */
 #include "hle/services/services_int.h"
 #include "hle/services/misc.swipc.inc"
@@ -157,12 +157,6 @@ static int nn_ns_detail_IServiceGetterInterface_GetDocumentInterface(SvcObj* sel
 }
 SvcObj* new_ns(void) { return nn_ns_detail_IServiceGetterInterface_new(0); }
 
-static int nn_ssl_sf_ISslService_CreateContext(SvcObj* self, nn_ssl_sf_SslVersion ssl_version, u64 pid,
-                                               SvcObj** context) {
-    *context = nn_ssl_sf_ISslContext_new(0);
-    return 0;
-}
-SvcObj* new_ssl(void) { return nn_ssl_sf_ISslService_new(0); }
 SvcObj* new_prepo(void) { return nn_prepo_detail_ipc_IPrepoService_new(0); }
 static int nn_psm_IPsmSession_BindStateChangeEvent(SvcObj* self, u32* event) { return new_event(event, "psm", 0); }
 static int nn_psm_IPsmServer_GetBatteryChargePercentage(SvcObj* self, u32* percentage) {

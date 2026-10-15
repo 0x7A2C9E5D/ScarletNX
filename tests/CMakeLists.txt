@@ -254,6 +254,16 @@ target_link_libraries(snx-test-network-service PRIVATE scarletnx-net)
 add_test(NAME network_service COMMAND snx-test-network-service)
 set_tests_properties(network_service PROPERTIES TIMEOUT 60)
 
+# ssl (ssl.c) against a TLS server in the test, on the game's bsd sockets (bsd.c, built beside)
+add_executable(snx-test-ssl-service ssl_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
+snx_test_target(snx-test-ssl-service 23)
+target_compile_options(snx-test-ssl-service PRIVATE -Wno-unused-parameter)
+snx_swipc(snx-test-ssl-service ROOT "${PROJECT_SOURCE_DIR}/src/nx" FILES hle/services/types.swipc
+          hle/services/network/bsd.swipc hle/services/network/ssl.swipc)
+target_link_libraries(snx-test-ssl-service PRIVATE scarletnx-net OpenSSL::SSL)
+add_test(NAME ssl_service COMMAND snx-test-ssl-service)
+set_tests_properties(ssl_service PROPERTIES TIMEOUT 60)
+
 # mm:u and hid's IHidServer (misc.c, hid.c), with the kernel objects stubbed
 add_executable(snx-test-misc-service misc_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_touch.c")
 snx_test_target(snx-test-misc-service 23)
