@@ -26,8 +26,10 @@ set(snx_openssl_env "")
 if(ANDROID)
     if(ANDROID_ABI STREQUAL "arm64-v8a")
         set(snx_openssl_target android-arm64)
+        set(snx_openssl_android_cc aarch64-linux-android${ANDROID_PLATFORM_LEVEL}-clang)
     elseif(ANDROID_ABI STREQUAL "x86_64")
         set(snx_openssl_target android-x86_64)
+        set(snx_openssl_android_cc x86_64-linux-android${ANDROID_PLATFORM_LEVEL}-clang)
     else()
         message(FATAL_ERROR "OpenSSL's Android build is only set up for arm64-v8a and x86_64 (cmake/openssl.cmake)")
     endif()
@@ -65,11 +67,13 @@ if(NOT WIN32)
     list(APPEND snx_openssl_args -fPIC)
 endif()
 
-# The build's compiler launcher (ccache) wraps make's compiles only, as for FFmpeg. Android's targets name their
-# compiler themselves, so that build goes without
+# The build's compiler launcher (ccache) wraps make's compiles only, as for FFmpeg. On Android the compiler is the
+# <triple><API>-clang the target picks
 set(snx_openssl_make_cc "")
 list(JOIN CMAKE_C_COMPILER_LAUNCHER " " snx_openssl_launcher)
-if(snx_openssl_launcher AND NOT ANDROID)
+if(snx_openssl_launcher AND ANDROID)
+    set(snx_openssl_make_cc "CC=${snx_openssl_launcher} ${snx_openssl_android_cc}")
+elseif(snx_openssl_launcher)
     set(snx_openssl_make_cc "CC=${snx_openssl_launcher} ${CMAKE_C_COMPILER}")
 endif()
 
