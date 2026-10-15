@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 # The LLVM backend and the runtime library it links into every module (rtlib.c): helpers and interpreter, compiled
-# here with this Clang and the flags toolchain.c gives generated C, -march=native included
+# here with this Clang and the flags toolchain.c gives generated C
 set(snx_cpu "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
 add_subdirectory("${PROJECT_SOURCE_DIR}/src/common/cpu/arm" arm-backend)
 file(GLOB snx_rtlib_sources CONFIGURE_DEPENDS "${snx_cpu}/*.h" "${snx_cpu}/*.c" "${snx_cpu}/*.inc"
@@ -23,12 +23,15 @@ endif()
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib_interp.inc"
     COMMAND "${snx_rtlib_gen}" interp "${CMAKE_CURRENT_BINARY_DIR}/rtlib_interp.inc"
     DEPENDS "${snx_rtlib_gen}" VERBATIM)
-# -march=native: the recompiler builds modules for the machine it runs on, which built it (build == host == target).
-# Android's is the phone, not the machine building the app: its ABI's own baseline, which Clang targets by default
+# No -march=native: the recompiler builds modules for the machine it runs on, which is often not the one that built
+# it (the Windows zip and the AppImage come from CI runners). The LLVM backend compiles the library's bitcode for each
+# module with the module's target machine, the host CPU as for the generated code; the object below is for the
+# libgccjit backend. A CI runner's -march=native library used AVX-512, an illegal instruction on a Ryzen 3000 the
+# first time a module entered the interpreter. Android's is the phone's ABI baseline, which Clang targets by default
 if(ANDROID)
     set(snx_rtlib_flags --target=${CMAKE_C_COMPILER_TARGET} --sysroot=${CMAKE_SYSROOT})
 else()
-    set(snx_rtlib_flags -march=native)
+    set(snx_rtlib_flags "")
 endif()
 list(APPEND snx_rtlib_flags -O2 -fvisibility=hidden -fno-strict-aliasing -fwrapv -w -fno-semantic-interposition
     -foptimize-sibling-calls -fno-stack-protector)
@@ -52,9 +55,26 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c"
     COMMAND "${snx_rtlib_gen}" embed "${CMAKE_CURRENT_BINARY_DIR}/rtlib${CMAKE_C_OUTPUT_EXTENSION}"
         "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c" snx_rtlib_object
     DEPENDS "${snx_rtlib_gen}" "${CMAKE_CURRENT_BINARY_DIR}/rtlib${CMAKE_C_OUTPUT_EXTENSION}" VERBATIM)
+# LLVM reads the bitcode of its own version and older ones
+string(REGEX MATCH "^[0-9]+" snx_clang_major "${CMAKE_C_COMPILER_VERSION}")
+string(REGEX MATCH "^[0-9]+" snx_llvm_major "${SNX_LLVM_VERSION}")
+if(snx_clang_major GREATER snx_llvm_major)
+    message(FATAL_ERROR "Clang ${CMAKE_C_COMPILER_VERSION} writes the runtime library's bitcode, which LLVM "
+                        "${SNX_LLVM_VERSION} (SNX_LLVM_CONFIG) cannot read. Use a Clang no newer than LLVM "
+                        "${snx_llvm_major}, or an LLVM as new as this Clang.")
+endif()
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib.bc"
+    COMMAND "${CMAKE_C_COMPILER}" ${snx_rtlib_flags} -emit-llvm -I "${CMAKE_CURRENT_BINARY_DIR}" -I "${snx_cpu}"
+        -I "${PROJECT_SOURCE_DIR}/src/common" -c "${CMAKE_CURRENT_SOURCE_DIR}/rtlib.c"
+        -o "${CMAKE_CURRENT_BINARY_DIR}/rtlib.bc"
+    DEPENDS rtlib.c "${CMAKE_CURRENT_BINARY_DIR}/rtlib_interp.inc" ${snx_rtlib_sources} VERBATIM)
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c"
+    COMMAND "${snx_rtlib_gen}" embed "${CMAKE_CURRENT_BINARY_DIR}/rtlib.bc"
+        "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c" snx_rtlib_bitcode
+    DEPENDS "${snx_rtlib_gen}" "${CMAKE_CURRENT_BINARY_DIR}/rtlib.bc" VERBATIM)
 
 add_library(snx_llvm STATIC ir.c ir_a64.c ir_simd.c ir_fp.c ir_codegen.c link.c link_elf.c link_coff.c
-    "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c")
+    "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c" "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c")
 set_target_properties(snx_llvm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
 target_include_directories(snx_llvm PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(snx_llvm SYSTEM PUBLIC "${SNX_LLVM_INCLUDE_DIR}")

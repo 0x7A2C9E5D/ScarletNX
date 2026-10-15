@@ -295,9 +295,12 @@ SNX_INLINE u64 bfm_(u64 dst, u64 src, u32 immr, u32 imms, u32 ds) {
 u64 snx_decode_bitmask(u32 N, u32 imms, u32 immr, u32 ds); /* cpu_helpers.c */
 
 /* ---- host instruction set extensions ----
-   The module runs on the machine that built it (build == host == target): the helpers choose their paths from the
-   compiler's feature macros (-march=native: __AES__, __PCLMUL__, __SSE4_2__, __GFNI__, ...), under __x86_64__, with
-   no detection at run time. Without the macros (another architecture, a generic build) they take the portable C. */
+   The helpers choose their paths from the compiler's feature macros (__AES__, __PCLMUL__, __SSE4_2__, __GFNI__, ...),
+   under __x86_64__, with no detection at run time. Without the macros (another architecture, a generic build) they
+   take the portable C. The runtime library (rtlib.c) is compiled without -march, since the recompiler that embeds it
+   runs on other machines than the one that built it: it has no macros and takes the portable C, which the LLVM backend
+   compiles for the CPU the module is built on (snx_ir_rtlib_object). The generated code uses the host's extensions
+   itself (ir.c's snx_ir_host). */
 
 /* ---- CRC32 ---- */
 u32 snx_crc32(u32 acc, u64 val, int bytes, int castagnoli);

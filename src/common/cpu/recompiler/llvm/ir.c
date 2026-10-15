@@ -3,6 +3,8 @@
 #include "ir.h"
 #include "cpu.h"
 #include <llvm-c/Analysis.h>
+#include <llvm-c/BitReader.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +26,8 @@ static int has_feature(const char* features, const char* name) {
 int snx_ir_init(char* error, size_t error_size) {
     char* triple;
     int x86, arm;
-    if (LLVMInitializeNativeTarget() || LLVMInitializeNativeAsmPrinter()) {
+    /* the asm parser for the runtime library's inline assembly (rtlib.c's divq, cpu.h's compiler barrier) */
+    if (LLVMInitializeNativeTarget() || LLVMInitializeNativeAsmPrinter() || LLVMInitializeNativeAsmParser()) {
         snprintf(error, error_size, "LLVM has no code generator for this host");
         return -1;
     }
@@ -179,6 +182,46 @@ int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char*
         return -1;
     }
     return 0;
+}
+
+/* rtlib.c as LLVM bitcode (CMakeLists.txt, snx-rtlib-gen embed) */
+extern const unsigned char snx_rtlib_bitcode[];
+extern const unsigned long snx_rtlib_bitcode_size;
+
+int snx_ir_rtlib_object(char opt, unsigned char** data, size_t* size, char* error, size_t error_size) {
+    static const char* const target_attributes[] = {"target-cpu", "target-features", "tune-cpu"};
+    SnxIr* ir;
+    LLVMMemoryBufferRef buffer;
+    LLVMModuleRef library;
+    LLVMValueRef fn;
+    unsigned i;
+    int rc;
+    *data = NULL;
+    *size = 0;
+    ir = snx_ir_new("rtlib", opt, error, error_size);
+    if (!ir) return -1;
+    buffer = LLVMCreateMemoryBufferWithMemoryRangeCopy((const char*)snx_rtlib_bitcode, snx_rtlib_bitcode_size, "rtlib");
+    rc = LLVMParseBitcodeInContext2(ir->ctx, buffer, &library);
+    LLVMDisposeMemoryBuffer(buffer);
+    if (rc) {
+        snprintf(error, error_size, "the runtime library's bitcode does not load into LLVM %s", LLVM_VERSION_STRING);
+        snx_ir_free(ir);
+        return -1;
+    }
+    /* Clang wrote the build machine's baseline CPU into every function, which would override the target machine's:
+       without them the library is compiled for this CPU, as the generated code is */
+    for (fn = LLVMGetFirstFunction(library); fn; fn = LLVMGetNextFunction(fn))
+        for (i = 0; i < sizeof(target_attributes) / sizeof(*target_attributes); ++i)
+            LLVMRemoveStringAttributeAtIndex(fn, LLVMAttributeFunctionIndex, target_attributes[i],
+                                             (unsigned)strlen(target_attributes[i]));
+    LLVMSetTarget(library, LLVMGetTarget(ir->mod));
+    LLVMSetDataLayout(library, LLVMGetDataLayoutStr(ir->mod));
+    LLVMDisposeModule(ir->mod);
+    ir->mod = library;
+    /* optimized by Clang already: code generation only */
+    rc = snx_ir_object(ir, '0', data, size, error, error_size);
+    snx_ir_free(ir);
+    return rc;
 }
 
 char* snx_ir_text(SnxIr* ir) { return LLVMPrintModuleToString(ir->mod); }
