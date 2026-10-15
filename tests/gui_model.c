@@ -85,6 +85,15 @@ int main(void) {
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.selected == GUI_THEME && menu.theme_next && !menu.quit);
     menu.theme_next = false; /* the GUI's to clear */
+    /* Text size goes round 1x to the largest, then back to fitting the screen */
+    gui_menu_key(&menu, GUI_DOWN);
+    assert(menu.selected == GUI_TEXT && !menu.text_size);
+    for (int size = 1; size <= GUI_TEXT_MAX; ++size) {
+        gui_menu_key(&menu, GUI_SELECT);
+        assert(menu.text_size == size);
+    }
+    gui_menu_key(&menu, GUI_SELECT);
+    assert(!menu.text_size && !menu.quit);
     gui_menu_key(&menu, GUI_DOWN);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.selected == GUI_LOG && menu.share_log && !menu.quit);
@@ -128,6 +137,12 @@ int main(void) {
         assert(gui_launch_options(&menu, false, args) == 0);
         assert(gui_launch_options(&menu, true, args) == 0);
     }
+
+    /* a line 5 columns too long, a column every 100 ms: rests 8 steps, slides, rests at its end, slides back */
+    assert(!gui_slide(0, 900, 100) && !gui_slide(5, 900, 0) && !gui_slide(-3, 900, 100));
+    assert(!gui_slide(5, 0, 100) && !gui_slide(5, 799, 100) && gui_slide(5, 900, 100) == 1);
+    assert(gui_slide(5, 1300, 100) == 5 && gui_slide(5, 2000, 100) == 5 && gui_slide(5, 2200, 100) == 4);
+    assert(gui_slide(5, 2500, 100) == 1 && !gui_slide(5, 2600, 100) && gui_slide(5, 2600 + 900, 100) == 1);
 
     GuiBrowser browser = {.count = 23};
     gui_browser_resize(&browser, 10);

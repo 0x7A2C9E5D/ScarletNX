@@ -20,11 +20,13 @@ enum {
     GUI_GCCJIT,
     GUI_GDBSTUB,
     GUI_THEME,
+    GUI_TEXT, /* the menu's letters */
     GUI_LOG, /* the logs in one file, for a bug report: a phone has no terminal to copy them from */
     GUI_EXIT,
     GUI_ITEM_COUNT
 };
 typedef enum { GUI_UP, GUI_DOWN, GUI_LEFT, GUI_RIGHT, GUI_SELECT, GUI_CANCEL, GUI_PAGE_UP, GUI_PAGE_DOWN } GuiKey;
+#define GUI_TEXT_MAX 4
 enum { GUI_TOUCH_FINGERS, GUI_TOUCH_MOUSE, GUI_TOUCH_OFF }; /* GuiMenu.touch: fingers, the mouse too, nothing */
 typedef enum { GUI_LOAD_NONE, GUI_LOAD_OPTIONS, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS } GuiLoadView;
 enum { GUI_LOAD_DRAG, GUI_LOAD_DIRECTORY };
@@ -34,7 +36,8 @@ typedef struct {
     bool activated, load_activated, focus_load;
     GuiLoadView view;
     bool running, fullscreen, gccjit, gdbstub, quit;
-    int touch; /* GUI_TOUCH_*, fingers the default */
+    int touch;     /* GUI_TOUCH_*, fingers the default */
+    int text_size; /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen */
     int theme_next; /* the GUI moves to the next theme and clears it */
     int share_log;  /* the GUI shares the logs and clears it */
     /* the recent games above the items: how many, the focused one + 1 (0: an item has the focus), and the one
@@ -47,6 +50,8 @@ const char* gui_setting_description(const GuiMenu* menu);
 size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv);
 /* the game's --touch=N for the menu's choice */
 const char* gui_touch_option(const GuiMenu* menu);
+/* how many columns a line over columns too many has slid at ms, a column every step_ms: it waits at each end */
+int gui_slide(int over, uint64_t ms, uint32_t step_ms);
 
 /* The runner's banner, "ScarletNX - <name>" at the start of a line: the recompile is over, the game is loading */
 typedef struct {

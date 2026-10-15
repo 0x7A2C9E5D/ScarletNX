@@ -60,6 +60,7 @@ typedef struct {
     int typing_sync; /* one line typed at a time, those already done three times faster */
     GuiPrompt prompt;
     uint32_t fade_in_ms, fade_out_ms, line_in_ms, typing_ms, blink_ms;
+    uint32_t scroll_ms; /* a line too long for its row slides a column every scroll_ms, and back; 0 cuts it */
 } GuiTheme;
 typedef struct {
     char (*ids)[64]; /* the built-ins, then each folder of themes/ with a theme.ini, in one block */

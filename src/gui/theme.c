@@ -71,6 +71,7 @@ static const GuiTheme builtins[] = {
         .line_in_ms = 220,
         .typing_ms = 5,
         .blink_ms = 500,
+        .scroll_ms = 120,
         .prompt = {.align = GUI_ALIGN_CENTER,
                    .open = "[ ",
                    .close = " ]",
@@ -246,6 +247,8 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
             integer(&t->typing_ms, value);
         else if (!strcmp(key, "blink_ms"))
             integer(&t->blink_ms, value);
+        else if (!strcmp(key, "scroll_ms"))
+            integer(&t->scroll_ms, value);
         else if (!strcmp(key, "typing") && (!strcmp(value, "async") || !strcmp(value, "sync")))
             t->typing_sync = value[0] == 's';
     } else if (!strcmp(section, "header") && !strcmp(key, "ring_side")) {

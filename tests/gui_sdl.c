@@ -741,6 +741,33 @@ int main(int argc, char** argv) {
         colored_text(&app, app.rows - 4, "Enables gdbstub on port 1234", normal);
         assert(menu_row(&app, GUI_EXIT) < app.rows - 4);
     }
+    /* a text size too big for the window: the menu slides up as the focus goes down, then back, and a size that
+       would leave fewer than 16 rows falls back */
+    {
+        assert(SDL_SetWindowSize(app.window, 1280, 1024));
+        SDL_SyncWindow(app.window);
+        app.menu.text_size = GUI_TEXT_MAX;
+        app.menu.recent_focus = 0;
+        app.menu.selected = GUI_SWITCH;
+        render(&app);
+        assert(app.scale == GUI_TEXT_MAX && app.rows == 16);
+        assert(menu_row_in_full(&app, GUI_EXIT) > menu_last_row(&app) && !menu_offset(&app));
+        assert(menu_shows(&app, menu_row(&app, GUI_SWITCH)) && !menu_shows(&app, menu_row(&app, GUI_EXIT)));
+        app.menu.selected = GUI_EXIT;
+        render(&app);
+        assert(menu_row(&app, GUI_EXIT) == menu_last_row(&app) && !menu_shows(&app, menu_row(&app, GUI_SWITCH)));
+        app.menu.selected = GUI_SWITCH;
+        render(&app);
+        assert(!menu_offset(&app));
+        assert(SDL_SetWindowSize(app.window, 800, 480));
+        SDL_SyncWindow(app.window);
+        render(&app);
+        assert(app.scale == 1);
+        app.menu.text_size = 0;
+        assert(SDL_SetWindowSize(app.window, 1280, 800));
+        SDL_SyncWindow(app.window);
+        render(&app);
+    }
     {
         SDL_Color half;
         char row_text[160];

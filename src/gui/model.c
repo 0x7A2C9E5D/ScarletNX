@@ -84,6 +84,8 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
                 menu->gdbstub = !menu->gdbstub;
             else if (menu->selected == GUI_THEME)
                 menu->theme_next = 1;
+            else if (menu->selected == GUI_TEXT)
+                menu->text_size = (menu->text_size + 1) % (GUI_TEXT_MAX + 1);
             else if (menu->selected == GUI_LOG)
                 menu->share_log = 1;
             else if (menu->selected == GUI_EXIT)
@@ -108,7 +110,7 @@ const char* gui_setting_description(const GuiMenu* menu) {
             return "Enable fullscreen at startup";
 #endif
         case GUI_TOUCH:
-            return "The game's touch screen: fingers, the mouse's left button too, or nothing";
+            return "The game's touch screen: fingers, the mouse too, or off";
         case GUI_GCCJIT:
             return SNX_GUI_HAS_GCCJIT
                 ? "libgccjit will be used instead of llvm"
@@ -117,6 +119,8 @@ const char* gui_setting_description(const GuiMenu* menu) {
             return "Enables gdbstub on port 1234";
         case GUI_THEME:
             return "Built-in themes, then each themes/<name>/theme.ini";
+        case GUI_TEXT:
+            return "Bigger letters scroll the menu; Auto fits the screen";
         case GUI_LOG:
 #ifdef __ANDROID__
             return "Saves the last run's output and game log to /sdcard/ScarletNX/scarletnx.log, then shares it";
@@ -125,6 +129,16 @@ const char* gui_setting_description(const GuiMenu* menu) {
 #endif
         default: return "";
     }
+}
+#define GUI_SLIDE_WAIT 8 /* steps a sliding line rests at each end */
+int gui_slide(int over, uint64_t ms, uint32_t step_ms) {
+    uint64_t t;
+    if (over <= 0 || !step_ms) return 0;
+    t = ms / step_ms % (uint64_t)(2 * (over + GUI_SLIDE_WAIT));
+    if (t < GUI_SLIDE_WAIT) return 0;
+    if (t < (uint64_t)(GUI_SLIDE_WAIT + over)) return (int)(t - GUI_SLIDE_WAIT);
+    if (t < (uint64_t)(2 * GUI_SLIDE_WAIT + over)) return over;
+    return over - (int)(t - 2 * GUI_SLIDE_WAIT - over);
 }
 const char* gui_touch_option(const GuiMenu* menu) {
     static const char* const options[] = {"--touch=1", "--touch=2", "--touch=0"}; /* by GUI_TOUCH_* */

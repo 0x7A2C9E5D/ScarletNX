@@ -59,8 +59,8 @@ typedef struct {
     Uint32 picked;            /* the event a file from the system's picker comes back as */
 } App;
 static const char* const items[] = {"Load Switch NSP/XCI/NRO", "Load Linux ARM ELF", "Load 3DS CIA", "Setup device keys",
-                                   "Fullscreen", "Touch", "Enable libgccjit", "Enable gdbstub", "Theme", "Share log",
-                                   "Exit"};
+                                   "Fullscreen", "Touch", "Enable libgccjit", "Enable gdbstub", "Theme", "Text size",
+                                   "Share log", "Exit"};
 /* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop */
 #ifdef SDL_PLATFORM_ANDROID
 static const char* const load_labels[] = {"-> Select a file", "-> Select file from games/ instead"};
@@ -125,7 +125,9 @@ static void glyph(App* app, int x, int y, unsigned char c) {
     SDL_RenderTexture(app->renderer, app->font, &source, &destination);
 }
 static void text(App* app, int x, int y, const char* value, SDL_Color color) {
+    int skip = gui_slide((int)SDL_utf8strlen(value) - (app->cols - 1 - x), now_ms(app), app->theme.scroll_ms);
     SDL_SetTextureColorMod(app->font, color.r, color.g, color.b);
+    while (skip-- > 0 && *value) SDL_StepUTF8(&value, NULL);
     while (*value && x < app->cols - 1) {
         Uint32 codepoint = SDL_StepUTF8(&value, NULL);
         glyph(app, x++, y, gui_glyph(codepoint));
@@ -219,13 +221,28 @@ static void next_theme(App* app) {
     while (i < app->themes.count && strcmp(app->themes.ids[i], app->theme.id)) ++i;
     if (app->themes.count) gui_theme_load(&app->theme, dirs, 2, app->themes.ids[(i + 1) % app->themes.count]);
 }
-static int menu_spacing(const App* app) { return app->rows >= 30 ? 2 : 1; }
+/* a blank row between the items when they all fit so above the message and the description */
+static int menu_spacing(const App* app) { return 4 + 2 * (GUI_ITEM_COUNT - 1) < app->rows - 5 ? 2 : 1; }
 /* the recent games take a title row, a row each and a blank one above the items */
 static int recent_rows(const App* app) { return app->recent.count ? app->recent.count + 2 : 0; }
-static int menu_row(const App* app, int item) {
+/* the menu's last row: below it a blank, the message, and the focused item's description */
+static int menu_last_row(const App* app) { return app->rows - 7; }
+static int menu_row_in_full(const App* app, int item) {
     return 4 + recent_rows(app) + item * menu_spacing(app) +
            (app->menu.view != GUI_LOAD_NONE && item > app->menu.active ? 2 : 0);
 }
+/* how far the menu slides up for the focus to show: only when its letters are too big for the screen */
+static int menu_offset(const App* app) {
+    int row = app->menu.recent_focus ? 4 + app->menu.recent_focus
+              : app->menu.view != GUI_LOAD_NONE && app->menu.focus_load
+                  ? menu_row_in_full(app, app->menu.active) + 1 + app->menu.load_selected
+                  : menu_row_in_full(app, app->menu.selected);
+    return SDL_max(0, row - menu_last_row(app));
+}
+static int menu_row(const App* app, int item) { return menu_row_in_full(app, item) - menu_offset(app); }
+static int recent_row(const App* app, int game) { return 5 + game - menu_offset(app); }
+/* whether a row of the menu shows: under the head and above the message */
+static int menu_shows(const App* app, int row) { return row >= 4 && row <= menu_last_row(app); }
 static void recent_label(const App* app, int index, char* label, size_t size) {
     snprintf(label, size, "%s%s", app->theme.marker, app->recent.game[index].name);
 }
@@ -249,6 +266,11 @@ static void menu_label(const App* app, int item, char* label, size_t size) {
         snprintf(label, size, "%s[%s] %s", app->theme.marker, enabled ? "ON" : "OFF", items[item]);
     } else if (item == GUI_THEME) {
         snprintf(label, size, "%s%s: %s", app->theme.marker, items[item], app->theme.name);
+    } else if (item == GUI_TEXT) {
+        if (app->menu.text_size)
+            snprintf(label, size, "%s%s: %dx", app->theme.marker, items[item], app->menu.text_size);
+        else
+            snprintf(label, size, "%s%s: Auto", app->theme.marker, items[item]);
     } else if (item == GUI_TOUCH) {
         static const char* const touch[] = {"Fingers", "Fingers and mouse", "Off"}; /* by GUI_TOUCH_* */
         snprintf(label, size, "%s%s: %s", app->theme.marker, items[item], touch[app->menu.touch]);
@@ -270,6 +292,9 @@ static void layout(App* app) {
        fits with five recent games and a submenu (render) */
     app->scale = SDL_max(app->scale, SDL_min((int)(SDL_GetWindowDisplayScale(app->window) + 0.5f),
                                              height / (16 * (19 + GUI_ITEM_COUNT))));
+    /* the size Text size chose, as long as 16 rows still fit */
+    if (app->menu.text_size) app->scale = app->menu.text_size;
+    while (app->scale > 1 && height / (16 * app->scale) < 16) --app->scale;
     if (app->scale < 1) app->scale = 1;
     app->cols = SDL_min(width / (8 * app->scale), GUI_MAX_COLS);
     app->rows = SDL_min(height / (16 * app->scale), GUI_MAX_ROWS);
@@ -636,13 +661,15 @@ static void render(App* app) {
                  app->menu.view == GUI_LOAD_DROP ? SAY_DROP : SAY_LOAD,
                  soft);
         }
-        if (app->recent.count) text(app, 1, 4, "Recent games", soft);
+        if (app->recent.count && menu_shows(app, recent_row(app, -1)))
+            text(app, 1, recent_row(app, -1), "Recent games", soft);
         {
             int game;
             char label[160];
             for (game = 0; game < app->recent.count; ++game) {
+                if (!menu_shows(app, recent_row(app, game))) continue;
                 recent_label(app, game, label, sizeof label);
-                entry(app, 1, 5 + game, label, false,
+                entry(app, 1, recent_row(app, game), label, false,
                       app->menu.recent_focus == game + 1 && (app->menu.view == GUI_LOAD_NONE || !app->menu.focus_load));
             }
         }
@@ -653,14 +680,16 @@ static void render(App* app) {
             int row = menu_row(app, i);
             char label[100];
             menu_label(app, i, label, sizeof(label));
-            entry(app, 1, row, label, is_active, is_focused);
+            if (menu_shows(app, row)) entry(app, 1, row, label, is_active, is_focused);
             if (i == app->menu.active && app->menu.view != GUI_LOAD_NONE) {
-                entry(app, 3, row + 1, load_labels[GUI_LOAD_DRAG],
-                      app->menu.load_activated && app->menu.load_active == GUI_LOAD_DRAG,
-                      app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DRAG);
-                entry(app, 3, row + 2, load_labels[GUI_LOAD_DIRECTORY],
-                      app->menu.load_activated && app->menu.load_active == GUI_LOAD_DIRECTORY,
-                      app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DIRECTORY);
+                if (menu_shows(app, row + 1))
+                    entry(app, 3, row + 1, load_labels[GUI_LOAD_DRAG],
+                          app->menu.load_activated && app->menu.load_active == GUI_LOAD_DRAG,
+                          app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DRAG);
+                if (menu_shows(app, row + 2))
+                    entry(app, 3, row + 2, load_labels[GUI_LOAD_DIRECTORY],
+                          app->menu.load_activated && app->menu.load_active == GUI_LOAD_DIRECTORY,
+                          app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DIRECTORY);
             }
         }
         /* with recent games a small window has no room left for these: they would run into the footer */
@@ -1188,7 +1217,7 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
     if (app->menu.view != GUI_LOAD_NONE) {
         int row = menu_row(app, app->menu.active);
         for (int i = 0; i < 2; ++i) {
-            if (!hit_text(app, x, y, 3, row + i + 1, load_labels[i], touch)) continue;
+            if (!menu_shows(app, row + i + 1) || !hit_text(app, x, y, 3, row + i + 1, load_labels[i], touch)) continue;
             app->menu.load_selected = i;
             app->menu.focus_load = true;
             if (click) menu_key(app, GUI_SELECT);
@@ -1200,7 +1229,8 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
         char label[160];
         for (game = 0; game < app->recent.count; ++game) {
             recent_label(app, game, label, sizeof label);
-            if (!hit_text(app, x, y, 1, 5 + game, label, touch)) continue;
+            if (!menu_shows(app, recent_row(app, game)) || !hit_text(app, x, y, 1, recent_row(app, game), label, touch))
+                continue;
             app->menu.recent_focus = game + 1;
             app->menu.focus_load = false;
             if (click) menu_key(app, GUI_SELECT);
@@ -1210,7 +1240,7 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
     for (int i = 0; i < GUI_ITEM_COUNT; ++i) {
         char label[100];
         menu_label(app, i, label, sizeof(label));
-        if (!hit_text(app, x, y, 1, menu_row(app, i), label, touch)) continue;
+        if (!menu_shows(app, menu_row(app, i)) || !hit_text(app, x, y, 1, menu_row(app, i), label, touch)) continue;
         app->menu.selected = i;
         app->menu.recent_focus = 0;
         app->menu.focus_load = false;
@@ -1257,6 +1287,13 @@ static void touch(App* app, float x, float y) {
     if (SDL_fabsf(dx) > 0.1f && SDL_fabsf(dx) > 2 * SDL_fabsf(dy)) {
         if (app->menu.view == GUI_LOAD_GAMES && !app->menu.running && !app->finished)
             menu_key(app, dx < 0 ? GUI_PAGE_DOWN : GUI_PAGE_UP);
+        return;
+    }
+    /* a drag up or down moves the focus by the rows it went, when the menu's letters make it scroll */
+    if (SDL_fabsf(dy) > 0.05f && SDL_fabsf(dy) > 2 * SDL_fabsf(dx) && app->menu.view != GUI_LOAD_GAMES &&
+        !app->menu.running && !app->finished && menu_row_in_full(app, GUI_EXIT) > menu_last_row(app)) {
+        int steps = (int)(SDL_fabsf(dy) * (float)app->rows) / menu_spacing(app);
+        while (steps-- > 0) menu_key(app, dy < 0 ? GUI_DOWN : GUI_UP);
         return;
     }
     if (SDL_fabsf(dx) > 0.03f || SDL_fabsf(dy) > 0.03f) return; /* a drag, no tap */

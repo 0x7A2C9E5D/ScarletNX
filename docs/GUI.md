@@ -232,6 +232,8 @@ typing_ms = 5
 ; async: every line types from when it comes; sync: one at a time, the done ones three times faster
 typing = async
 blink_ms = 500
+; a line too long for its row (big letters) slides left a column every scroll_ms and back; 0 cuts it
+scroll_ms = 120
 ```
 
 Comments take a line of their own, starting with `;` or `#`.
