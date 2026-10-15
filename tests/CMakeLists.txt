@@ -423,6 +423,11 @@ if(TARGET snx_jit)
 endif()
 add_test(NAME llvm_module COMMAND snx-test-llvm-module $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}"
     "${CMAKE_C_COMPILER}" ${snx_extra_backends})
+# the recompiler as a library (snx_recompiler.h): A64 on every backend built, A32, from code in memory
+add_executable(snx-test-recompiler-library recompiler_library.c)
+snx_test_target(snx-test-recompiler-library 11)
+target_link_libraries(snx-test-recompiler-library PRIVATE scarletnx-recompiler)
+add_test(NAME recompiler_library COMMAND snx-test-recompiler-library)
 
 add_executable(snx_codegen_test codegen_test.c)
 snx_test_target(snx_codegen_test 90)
