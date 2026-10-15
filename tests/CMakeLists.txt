@@ -395,6 +395,11 @@ target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${C
 add_test(NAME llvm_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
     --quiet)
 set_tests_properties(llvm_differential PROPERTIES TIMEOUT 900)
+add_executable(snx-test-llvm-outliner llvm_outliner.c)
+snx_test_target(snx-test-llvm-outliner 11)
+target_link_libraries(snx-test-llvm-outliner PRIVATE snx_llvm ${CMAKE_DL_LIBS})
+add_test(NAME llvm_outliner COMMAND snx-test-llvm-outliner)
+set_tests_properties(llvm_outliner PROPERTIES SKIP_RETURN_CODE 77)
 # not a test: timings of the generated code (llvm_bench SCARLETNX REPO CLANG)
 add_executable(snx-llvm-bench llvm_bench.c)
 snx_test_target(snx-llvm-bench 11)
