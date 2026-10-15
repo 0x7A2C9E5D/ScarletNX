@@ -5,6 +5,7 @@
 /* the settings from <Game>.ini (options.c) */
 #ifndef SNX_OPTIONS_H
 #define SNX_OPTIONS_H
+#include <stddef.h>
 
 int snx_startup_options(int argc, char** argv); /* shared startup flags, before any window/error dialog */
 extern int g_opt_fullscreen;                    /* -f/--fullscreen, or the .ini's fullscreen when it is absent */
@@ -15,7 +16,11 @@ void ini_override(const char* k, const char* v); /* a --key=value from the comma
 void ini_set(const char* k, const char* v);
 void ini_open(const char* path); /* watch the file: ini_poll reloads it when it changes, and writes back what changed */
 void ini_poll(void);
-extern int g_opt_docked, g_opt_lang, g_opt_fps;
+extern int g_opt_docked, g_opt_lang;
+/* fps_limit: 0 = no limit, SNX_FPS_GAME = the game's own pace (its swap interval), else frames a second (10 to 1000) */
+#define SNX_FPS_GAME (-1)
+extern int g_opt_fps;
+void fps_limit_text(int fps, char* out, size_t n); /* g_opt_fps as fps_limit's value: "game", "0", "30"... */
 extern int g_opt_diag, g_opt_shadows, g_opt_prof;
 extern int g_opt_network; /* network: 1 = the game is online through the host (hle/services/network) */
 extern float g_opt_resf;

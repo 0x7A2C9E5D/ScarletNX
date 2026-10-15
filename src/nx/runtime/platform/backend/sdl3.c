@@ -387,18 +387,21 @@ static void hotkey(SDL_Keycode k) {
         }
         case SDLK_F3: g_shot_req = 1; break;
         case SDLK_F4: {
-            /* off and back to the limit the player set (fps_limit=120 stays 120), 60 when it started off */
-            static int was = 1;
+            /* off and back to the limit the player set (fps_limit=120 stays 120), or to the game's pace when it
+               started off */
+            static int was = SNX_FPS_GAME;
             if (g_opt_fps) {
                 was = g_opt_fps;
                 g_opt_fps = 0;
             } else
                 g_opt_fps = was;
             char v[16];
-            snprintf(v, sizeof v, "%d", g_opt_fps);
+            fps_limit_text(g_opt_fps, v, sizeof v);
             ini_set("fps_limit", v);
-            if (g_opt_fps)
-                LOG("FPS limit: %d\n", g_opt_fps >= 60 && g_opt_fps <= 240 ? g_opt_fps : 60);
+            if (g_opt_fps == SNX_FPS_GAME)
+                LOG("FPS limit: the game's pace\n");
+            else if (g_opt_fps)
+                LOG("FPS limit: %d\n", g_opt_fps);
             else
                 LOG("FPS limit: unlimited\n");
             break;

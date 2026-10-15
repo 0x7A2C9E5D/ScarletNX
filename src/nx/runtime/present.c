@@ -72,7 +72,7 @@ void vi_convert_cpu(u64 a, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt
     }
 }
 void vi_show_buffer(u32 nvmap_id, u32 offset, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, const i32 crop[4],
-                    u32 transform) {
+                    u32 transform, u32 interval) {
     u64 a = nvmap_addr_by_id(nvmap_id);
     if (!a) { /* the game queues it every frame: said a few times */
         WARN_LIMIT(5, "vi: buffer without memory (nvmap %u)\n", nvmap_id);
@@ -111,12 +111,10 @@ void vi_show_buffer(u32 nvmap_id, u32 offset, u32 w, u32 h, u32 pitch, u32 layou
         pm_unlock(&g_flock);
     }
     __atomic_add_fetch(&g_frames, 1, __ATOMIC_RELAXED);
-    /* fps_limit: 0 = no limit, 60 to 240 = that many fps, anything else = 60 */
-    if (g_opt_fps) {
-        u64 per = g_opt_fps >= 60 && g_opt_fps <= 240 ? 1000000000ull / (u64)g_opt_fps : 16666667ull;
-        if (g_opt_fps >= 10 && g_opt_fps < 60)
-            WARN_LIMIT(1, "fps_limit=%d would run the game at %d%% speed (one game step per image): using 60\n",
-                       g_opt_fps, g_opt_fps * 100 / 60);
+    /* fps_limit=game: the console's display runs at 60 Hz and keeps each frame for the swap interval it was queued
+       with, so a game made for 30 FPS (interval 2) runs at 30. Interval 0 presents without waiting for a vsync */
+    if (g_opt_fps && (g_opt_fps != SNX_FPS_GAME || interval)) {
+        u64 per = g_opt_fps == SNX_FPS_GAME ? 1000000000ull * interval / 60 : 1000000000ull / (u64)g_opt_fps;
         u64 now = plat_ns();
         u64 next = g_last_present + per;
         if (g_last_present && now < next) plat_sleep_ns((i64)(next - now));

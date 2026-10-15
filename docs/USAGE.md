@@ -221,7 +221,7 @@ Restart for `docked`, `fullscreen`, `language`, `resolution`, `memory_gb`, `heap
 | --- | --- |
 | `docked=1` | TV mode |
 | `resolution=1` | Native scale; range 0.25–4 |
-| `fps_limit=1` | 60 FPS; `0` uncapped; `60..240` explicit cap |
+| `fps_limit=game` | The pace the game asks for, as on the console: 60 FPS, or 30 for a game made for 30; `0` uncapped; `10` to `1000`, that many FPS |
 | `shadows=0` | Skip shadow maps |
 | `language=1` | English (US); other IDs in INI |
 | `network=1` | Online through the computer's connection (bsd, sfdnsres, nifm); `0` offline, loopback only |

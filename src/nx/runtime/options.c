@@ -19,7 +19,7 @@
 #include <sys/stat.h>
 
 int g_opt_diag = 0;
-int g_opt_docked = 0, g_opt_lang = 1, g_opt_fps = 1;
+int g_opt_docked = 0, g_opt_lang = 1, g_opt_fps = SNX_FPS_GAME;
 float g_opt_resf = 1.0f;
 int g_opt_shadows = 1;
 int g_opt_prof = 0;
@@ -94,6 +94,22 @@ static int ini_overridden(const char* k) {
         if (!strcmp(g_ovr_k[i], k)) return 1;
     return 0;
 }
+/* fps_limit: game, 0, or a number. 1, the console's 60 FPS before the swap interval was read, is the game's pace */
+static void fps_limit_set(const IniOpt* o, const char* v) {
+    char* end;
+    long n = strtol(v, &end, 10);
+    (void)o;
+    if (!strcmp(v, "game"))
+        g_opt_fps = SNX_FPS_GAME;
+    else if (end != v)
+        g_opt_fps = n == 1 ? SNX_FPS_GAME : n <= 0 ? 0 : n < 10 ? 10 : n > 1000 ? 1000 : (int)n;
+}
+void fps_limit_text(int fps, char* out, size_t n) {
+    if (fps == SNX_FPS_GAME)
+        snprintf(out, n, "game");
+    else
+        snprintf(out, n, "%d", fps);
+}
 static int g_heap_max_mb;
 static void heap_max_set(const IniOpt* o, const char* v) {
     (void)o;
@@ -119,10 +135,12 @@ static const IniOpt INI_GRAPHICS[] = {
     {"shadows", "1", "0 = disable shadow maps (more FPS)", INI_INT, 0, &g_opt_shadows, 0, 1, NULL},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
 static const IniOpt INI_PERF[] = {
-    {"fps_limit", "1",
-     "1 = 60 FPS (the speed of a Switch), 0 = unlimited (the game runs faster). Values under 60 are treated as 60: "
-     "the game advances one step per image, so 30 meant half speed. F4 changes it in game",
-     INI_INT, 0, &g_opt_fps, 0, 1000, NULL},
+    {"fps_limit", "game",
+     "game = the pace the game asks for, as on the console: 60 FPS, or 30 for a game made for 30.\n"
+     ";   0 = unlimited. 10 to 1000 = that many FPS.\n"
+     ";   A game that advances once per image changes speed with it: 30 runs a 60 FPS game at half speed.\n"
+     ";   F4 turns the limit off and on",
+     INI_TEXT, 0, NULL, 0, 0, fps_limit_set},
     {"memory_gb", "0",
      "Memory the game sees: 0 or 4 = 3.2 GB like the console, 6 or 8 = more (like yuzu's extended memory layout).\n;"
      "   Games that run out of memory on 3.2 GB, like Tears of the Kingdom, need 6",
