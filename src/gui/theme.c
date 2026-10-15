@@ -30,6 +30,8 @@ static const GuiTheme builtins[] = {
                        .warning = {255, 170, 0}},
         .typing_ms = 25,
         .blink_ms = 500,
+        .splash_ms = 1000,
+        .splash_chance = 100,
         .prompt = {.align = GUI_ALIGN_CENTER,
                    .open = "[ ",
                    .close = " ]",
@@ -72,6 +74,9 @@ static const GuiTheme builtins[] = {
         .typing_ms = 5,
         .blink_ms = 500,
         .scroll_ms = 120,
+        .splash_page = {0xDA, 0xD6, 0xBE},
+        .splash_ms = 1000,
+        .splash_chance = 25,
         .prompt = {.align = GUI_ALIGN_CENTER,
                    .open = "[ ",
                    .close = " ]",
@@ -84,6 +89,9 @@ typedef char snx_gui_id_slot[sizeof(((GuiThemes*)0)->ids[0]) == sizeof(((GuiThem
 static const char* const screens[GUI_SCREEN_COUNT] = {"menu", "games", "keys", "compiling", "loading"};
 static const char* const rings[] = {"none", "left", "right", "right-near-text"};
 
+const GuiTheme* gui_splash_theme(const GuiTheme* theme, int roll) {
+    return roll < (int)theme->splash_chance ? theme : gui_theme_builtin("default");
+}
 const GuiTheme* gui_theme_builtin(const char* id) {
     size_t i;
     for (i = 0; id && i < sizeof(builtins) / sizeof(*builtins); ++i)
@@ -251,6 +259,13 @@ static void apply(GuiTheme* t, const char* section, const char* key, const char*
             integer(&t->scroll_ms, value);
         else if (!strcmp(key, "typing") && (!strcmp(value, "async") || !strcmp(value, "sync")))
             t->typing_sync = value[0] == 's';
+    } else if (!strcmp(section, "splash")) {
+        if (!strcmp(key, "page"))
+            colour(&t->splash_page, value);
+        else if (!strcmp(key, "ms"))
+            integer(&t->splash_ms, value);
+        else if (!strcmp(key, "chance") && integer(&t->splash_chance, value) && t->splash_chance > 100)
+            t->splash_chance = 100;
     } else if (!strcmp(section, "header") && !strcmp(key, "ring_side")) {
         /* ErET's words; none is ours */
         static const char* const sides[] = {"right", "left", "right-near-text"};

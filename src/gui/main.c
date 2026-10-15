@@ -57,6 +57,9 @@ typedef struct {
     SDL_FingerID finger;      /* the finger on the screen, 0 for none */
     float finger_x, finger_y; /* where it went down, 0 to 1 across the window */
     Uint32 picked;            /* the event a file from the system's picker comes back as */
+    SDL_Texture* splash;      /* the boot's splash, its icon, until splash_until */
+    Uint64 splash_until;
+    GuiRgb splash_page;
 } App;
 static const char* const items[] = {"Load Switch NSP/XCI/NRO", "Load Linux ARM ELF", "Load 3DS CIA", "Setup device keys",
                                    "Fullscreen", "Touch", "Enable libgccjit", "Enable gdbstub", "Theme", "Text size",
@@ -594,12 +597,44 @@ static void overlay(App* app) {
     fill(app, 0, 0, (float)width, (float)height, black, (Uint8)(a * 255));
     SDL_SetRenderViewport(app->renderer, &safe);
 }
+/* the boot's splash: the program's icon on a theme's splash page, then the menu as the theme brings it in */
+static void splash_start(App* app) {
+    const GuiTheme* t = gui_splash_theme(&app->theme, (int)SDL_rand(100));
+    SDL_Surface* icon = t->splash_ms ? snx_window_icon_surface() : NULL;
+    if (!icon) return;
+    app->splash = SDL_CreateTextureFromSurface(app->renderer, icon);
+    SDL_DestroySurface(icon);
+    app->splash_page = t->splash_page;
+    app->splash_until = SDL_GetTicks() + t->splash_ms;
+}
+static int splash_shown(App* app) {
+    SDL_Rect view;
+    float size;
+    if (!app->splash) return 0;
+    if (now_ms(app) >= app->splash_until) {
+        SDL_DestroyTexture(app->splash);
+        app->splash = NULL;
+        app->fade_ms = app->theme.fade_in_ms ? SDL_max(now_ms(app), 1) : 0;
+        return 0;
+    }
+    SDL_GetRenderViewport(app->renderer, &view);
+    size = 128.0f * (float)SDL_max(1, SDL_min(view.w, view.h) / 3 / 128); /* whole steps of its 128 pixels */
+    SDL_SetRenderDrawColor(app->renderer, app->splash_page.r, app->splash_page.g, app->splash_page.b, 255);
+    SDL_RenderClear(app->renderer);
+    {
+        SDL_FRect at = {((float)view.w - size) / 2, ((float)view.h - size) / 2, size, size};
+        SDL_RenderTexture(app->renderer, app->splash, NULL, &at);
+    }
+    SDL_RenderPresent(app->renderer);
+    return 1;
+}
 static void render(App* app) {
     SDL_Color ink, soft, focus, paper, active, failure;
     const char* title;
     int head, foot, idle;
     const GuiTheme * theme;
     layout(app);
+    if (splash_shown(app)) return;
     theme = &app->theme;
     idle = (!app->menu.running && !app->finished) || entering(app);
     head = theme->head != GUI_STYLE_NONE; foot = theme->footer != GUI_STYLE_NONE;
@@ -1326,6 +1361,12 @@ static void event(App* app, const SDL_Event* e) {
         app->menu.quit = true;
         return;
     }
+    /* the splash takes the input it gets: a key, a button or a finger ends it, and does nothing else */
+    if (app->splash && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                        e->type == SDL_EVENT_FINGER_DOWN || e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)) {
+        app->splash_until = 0;
+        return;
+    }
     if (e->type == SDL_EVENT_DROP_FILE || e->type == SDL_EVENT_DROP_TEXT) {
         drop(app, e->drop.data, e->type == SDL_EVENT_DROP_TEXT);
         return; /* SDL3 owns the event's data, unlike SDL2. */
@@ -1451,6 +1492,7 @@ static void cleanup(App* app) {
     free(app->run_log);
     gui_games_free(&app->games);
     SDL_free(app->cwd);
+    SDL_DestroyTexture(app->splash);
     SDL_DestroyTexture(app->font);
     SDL_DestroyRenderer(app->renderer);
     SDL_DestroyWindow(app->window);
@@ -1474,6 +1516,7 @@ int main(int argc, char** argv) {
     if (prefs) recent_open(&app, snx_path_join(prefs, "recent.txt"));
     if (prefs) app.run_log = snx_path_join(prefs, "last-run.log");
     SDL_free(prefs);
+    splash_start(&app);
     while (!app.menu.quit) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) event(&app, &e);

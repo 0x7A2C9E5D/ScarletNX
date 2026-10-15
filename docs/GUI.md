@@ -234,6 +234,12 @@ typing = async
 blink_ms = 500
 ; a line too long for its row (big letters) slides left a column every scroll_ms and back; 0 cuts it
 scroll_ms = 120
+[splash]
+; the boot's: the program's icon on page for ms milliseconds (0: none). chance: the boots in 100 that
+; show this theme's, the default theme's the others
+page = #DAD6BE
+ms = 1000
+chance = 25
 ```
 
 Comments take a line of their own, starting with `;` or `#`.

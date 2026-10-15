@@ -186,6 +186,11 @@ int main(void) {
     /* a theme.ini's own scroll_ms over its base's */
     parse(&theme, "[theme]\nbase = default\n[transitions]\nscroll_ms = 40\n");
     assert(theme.scroll_ms == 40);
+    /* the splash: its own page, none at all (ms 0), a chance over 100 kept at 100; YoRHa's beige in a quarter */
+    parse(&theme, "[theme]\nbase = yorha\n[splash]\npage = #102030\nms = 0\nchance = 300\n");
+    assert(rgb_is(theme.splash_page, 0x10, 0x20, 0x30) && !theme.splash_ms && theme.splash_chance == 100);
+    assert(rgb_is(yorha->splash_page, 0xDA, 0xD6, 0xBE) && yorha->splash_chance == 25 && yorha->splash_ms);
+    assert(rgb_is(def->splash_page, 0, 0, 0) && def->splash_chance == 100 && def->splash_ms);
     puts("GUI themes: built-ins, theme.ini over its base, themes/ folders passed");
     return 0;
 }

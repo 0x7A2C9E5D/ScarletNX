@@ -15,7 +15,7 @@
     <application
         android:label="ScarletNX"
         android:icon="@mipmap/ic_launcher"
-        android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+        android:theme="@style/ScarletNX"
         android:hardwareAccelerated="true"
         android:requestLegacyExternalStorage="true"
         android:enableOnBackInvokedCallback="false">

@@ -198,6 +198,26 @@ int main(int argc, char** argv) {
     assert(initialize(&app));
     /* the window says which build it is: commit, compiler, platform */
     assert(!strcmp(SDL_GetWindowTitle(app.window), snx_build_info()) && !strncmp(snx_build_info(), "ScarletNX ", 10));
+    /* the boot's splash: the default theme's black page with the icon in the middle until its time; a key ends it and
+       does nothing else. A theme's own shows in its chance of boots, the default's in the others */
+    {
+        SDL_Rect view;
+        SDL_Color black = {0, 0, 0, 255}, icon = {17, 206, 161, 255}; /* wimsy.png's middle */
+        splash_start(&app);
+        assert(app.splash && !app.splash_page.r && !app.splash_page.g && !app.splash_page.b);
+        app.clock = app.splash_until - 1;
+        render(&app);
+        assert(app.splash);
+        SDL_GetRenderViewport(app.renderer, &view);
+        assert(same_colour(pixel(&app, 1, 1), black) && same_colour(pixel(&app, view.w / 2.0f, view.h / 2.0f), icon));
+        key(&app, SDLK_RETURN);
+        assert(!app.splash_until && app.menu.selected == GUI_SWITCH && !app.menu.activated);
+        render(&app);
+        assert(!app.splash);
+        app.clock = 0;
+        assert(gui_splash_theme(gui_theme_builtin("yorha"), 24) == gui_theme_builtin("yorha"));
+        assert(gui_splash_theme(gui_theme_builtin("yorha"), 25) == gui_theme_builtin("default"));
+    }
     char* temporary = snx_temp_dir(NULL);
     char* self = snx_executable(argv[0]);
     char* input = snx_path_join(temporary, "game with spaces;literal.nro");
