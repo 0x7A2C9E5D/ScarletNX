@@ -54,7 +54,7 @@ snx_component(gpu gpu/gpu.c gpu/maxwell/engines.c gpu/maxwell/mme.c gpu/maxwell/
 include("${PROJECT_SOURCE_DIR}/cmake/controls_atlas.cmake")
 set(platform runtime/platform/plat.c runtime/platform/unattended.c runtime/platform/backend/sdl3.c
              runtime/platform/overlay.c runtime/platform/touch.c runtime/platform/ui.c runtime/platform/vpad.c
-             "${CMAKE_BINARY_DIR}/generated/controls_png.c")
+             runtime/platform/fatal_screen.c "${CMAKE_BINARY_DIR}/generated/controls_png.c")
 if(WIN32)
     list(APPEND platform runtime/platform/plat_win32.c runtime/platform/profiler_win32.c)
 else()

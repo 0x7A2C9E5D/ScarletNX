@@ -17,6 +17,8 @@
 #include "runtime/platform/touch.h"
 #include "runtime/platform/ui.h"
 #include "runtime/platform/vpad.h"
+#include "runtime/platform/fatal_screen.h"
+#include "font.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +43,8 @@ static int g_shot_req;
 static SDL_Gamepad* g_pads[4];
 static int g_audio_ready;
 static int g_hidden;         /* the app is in the background (Android) */
+static int g_given_up;       /* the window went to a fatal error's screen: the renderer presents nothing more */
+static char g_title[256];    /* the game's name, for that screen */
 static SDL_Haptic* g_buzzer; /* the phone's vibrator, for the on-screen controls' taps (Android) */
 static u32 g_generation;     /* the window's surface came back this many times */
 
@@ -197,7 +201,10 @@ static bool SDLCALL lifecycle(void* unused, SDL_Event* e) {
     }
     return true;
 }
-int backend_window_shown(void) { return !g_opt_headless && !__atomic_load_n(&g_hidden, __ATOMIC_ACQUIRE); }
+int backend_window_shown(void) {
+    return !g_opt_headless && !__atomic_load_n(&g_hidden, __ATOMIC_ACQUIRE) &&
+           !__atomic_load_n(&g_given_up, __ATOMIC_ACQUIRE);
+}
 u32 backend_window_generation(void) { return __atomic_load_n(&g_generation, __ATOMIC_ACQUIRE); }
 void backend_window_size(int* w, int* h) {
     u64 s = g_opt_headless ? 0 : g_wsize;
@@ -264,6 +271,7 @@ void video_init(const char* title) {
     SDL_AddEventWatch(lifecycle, NULL);
     int w, h;
     char header[512];
+    snprintf(g_title, sizeof g_title, "%s", title);
     backend_window_size(&w, &h);
     snprintf(header, sizeof header, "%s - %s", title, snx_build_info());
     g_win = SDL_CreateWindow(header, w, h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
@@ -355,14 +363,172 @@ static void set_fullscreen(int on) {
     else
         LOG("video: fullscreen %s failed: %s\n", on ? "on" : "off", SDL_GetError());
 }
-/* plat.c's fatal error box. SDL's box only works on the main thread (with the window as its parent). From another
-   thread, Windows' own box (it takes any thread), and none on Linux: the error is in the log and on stderr. None
-   either for an unattended run, where nobody would close it */
+/* ---- a fatal error's screen (plat.c's fatal): the game's window in the menu's look for a run (src/gui, YoRHa's loading
+   screen), with the error, what it means and where its log is, until the player closes it. The game's renderer lets go
+   of the window first (its device may be what was lost), and an SDL renderer of its own draws it ---- */
+static char* g_fatal_left; /* an error another thread left for the main thread to show */
+static int g_fatal_taken;  /* the main thread is showing it */
+
+static void fatal_text(SDL_Renderer* r, SDL_Texture* font, int scale, int col, int row, int cols, const char* s,
+                       SDL_Color c) {
+    SDL_SetTextureColorMod(font, c.r, c.g, c.b);
+    while (*s && col < cols - 1) {
+        Uint32 cp = SDL_StepUTF8(&s, NULL);
+        int i, g = cp < 128 ? (int)cp : '?';
+        for (i = 128; cp >= 128 && i < 256; ++i)
+            if (gui_codepage[i] == cp) {
+                g = i;
+                break;
+            }
+        SDL_FRect src = {(float)(g % 16 * 8), (float)(g / 16 * 16), 8, 16};
+        SDL_FRect dst = {(float)(col * 8 * scale), (float)(row * 16 * scale), (float)(8 * scale), (float)(16 * scale)};
+        SDL_RenderTexture(r, font, &src, &dst);
+        ++col;
+    }
+}
+/* text from row, cut into rows of the screen's width, stopping at last; the row after it */
+static int fatal_para(SDL_Renderer* r, SDL_Texture* font, int scale, int row, int last, int cols, const char* text,
+                      SDL_Color c) {
+    static char rows[64][FATAL_ROW];
+    int i, n = fatal_wrap(text, cols - 2, rows, 64);
+    for (i = 0; i < n && i < 64 && row <= last; ++i) fatal_text(r, font, scale, 1, row++, cols, rows[i], c);
+    return row;
+}
+/* 0 when no screen could be shown (no window, the renderer didn't let go, or SDL has no renderer here) */
+static int fatal_screen(const char* msg) {
+    static const SDL_Color ink = {0xE6, 0xE4, 0xDC, 255}, soft = {0x8E, 0x8C, 0x86, 255},
+                           failure = {0xD2, 0x46, 0x3A, 255};
+#ifdef __ANDROID__
+    static const char* const how = "The menu's Share log sends the game's log, which has what ran last.";
+    static const char* const close = "Tap, Back or any button to close";
+#else
+    static const char* const how = "The game's log has what ran last:";
+    static const char* const close = "Press any key or click to close";
+#endif
+    char name[256], log[1300], prompt[64];
+    const char* hint = fatal_hint(msg);
+    SDL_Renderer* r;
+    SDL_Surface* glyphs;
+    SDL_Texture* font;
+    Uint64 since;
+    int pressed = 0, done = 0, i;
+    if (!g_win) return 0;
+    __atomic_store_n(&g_given_up, 1, __ATOMIC_RELEASE);
+    if (g_renderer_up && g_renderer->release_window && !g_renderer->release_window()) return 0;
+    /* Vulkan first: the window was made for it */
+    r = SDL_CreateRenderer(g_win, "vulkan");
+    if (!r) r = SDL_CreateRenderer(g_win, NULL);
+    if (!r) {
+        LOG("video: no renderer for the error's screen: %s\n", SDL_GetError());
+        return 0;
+    }
+    glyphs = SDL_CreateSurface(128, 256, SDL_PIXELFORMAT_RGBA32);
+    font = NULL;
+    if (glyphs) {
+        int g, y, x;
+        for (g = 0; g < 256; ++g)
+            for (y = 0; y < 16; ++y) {
+                Uint32* line = (Uint32*)((char*)glyphs->pixels + ((g / 16) * 16 + y) * glyphs->pitch);
+                for (x = 0; x < 8; ++x)
+                    line[(g % 16) * 8 + x] = gui_vga_font[g * 16 + y] & (0x80 >> x) ? 0xFFFFFFFFu : 0;
+            }
+        font = SDL_CreateTextureFromSurface(r, glyphs);
+        SDL_DestroySurface(glyphs);
+    }
+    if (!font) {
+        LOG("video: no font for the error's screen: %s\n", SDL_GetError());
+        SDL_DestroyRenderer(r);
+        return 0;
+    }
+    SDL_SetTextureBlendMode(font, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(font, SDL_SCALEMODE_NEAREST);
+    for (i = 0; g_title[i] && i < (int)sizeof name - 1; ++i)
+        name[i] = g_title[i] >= 'a' && g_title[i] <= 'z' ? (char)(g_title[i] - 32) : g_title[i];
+    name[i] = 0;
+    snprintf(log, sizeof log, "%s%s.log", g_exedir, g_exename);
+    snprintf(prompt, sizeof prompt, "[ %s ]", close);
+    since = SDL_GetTicks();
+    while (!done) {
+        SDL_Event e;
+        int w = 0, h = 0, scale, cols, rows, row, y;
+        while (SDL_PollEvent(&e)) switch (e.type) {
+                case SDL_EVENT_QUIT:
+                case SDL_EVENT_WINDOW_CLOSE_REQUESTED: done = 1; break;
+                /* a press made on this screen: not a key held from the game, nor one that came as the error did */
+                case SDL_EVENT_KEY_DOWN:
+                    if (!e.key.repeat && SDL_GetTicks() - since > 500) done = 1;
+                    break;
+                case SDL_EVENT_FINGER_DOWN:
+                case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                case SDL_EVENT_GAMEPAD_BUTTON_DOWN: pressed = 1; break;
+                case SDL_EVENT_FINGER_UP:
+                case SDL_EVENT_MOUSE_BUTTON_UP:
+                case SDL_EVENT_GAMEPAD_BUTTON_UP:
+                    if (pressed) done = 1;
+                    break;
+            }
+        /* the letters as big as the menu's (src/gui: twice the display's scale), as long as 16 rows fit */
+        SDL_GetRenderOutputSize(r, &w, &h);
+        scale = SDL_max(1, (int)(2.0f * SDL_GetWindowDisplayScale(g_win)));
+        while (scale > 1 && (h / (16 * scale) < 16 || w / (8 * scale) < 40)) --scale;
+        cols = w / (8 * scale);
+        rows = h / (16 * scale);
+        SDL_SetRenderDrawColor(r, 0x14, 0x14, 0x16, 255);
+        SDL_RenderClear(r);
+        /* the run screen's faint lines */
+        SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(r, 255, 255, 255, 14);
+        for (y = 3; y < h; y += 4) {
+            SDL_FRect line = {0, (float)y, (float)w, 1};
+            SDL_RenderFillRect(r, &line);
+        }
+        SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
+        fatal_text(r, font, scale, 1, 1, cols, "STOPPED", ink);
+        fatal_text(r, font, scale, 9, 1, cols, name, soft);
+        row = fatal_para(r, font, scale, 3, rows - 5, cols, msg, failure);
+        if (hint) row = fatal_para(r, font, scale, row + 1, rows - 5, cols, hint, ink);
+        row = fatal_para(r, font, scale, row + 1, rows - 4, cols, how, soft);
+#ifndef __ANDROID__
+        fatal_para(r, font, scale, row, rows - 4, cols, log, soft);
+#endif
+        if ((SDL_GetTicks() / 500) % 2 == 0)
+            fatal_text(r, font, scale, SDL_max(1, (cols - (int)SDL_utf8strlen(prompt)) / 2), rows - 2, cols, prompt,
+                       ink);
+        SDL_RenderPresent(r);
+        SDL_Delay(16);
+    }
+    SDL_DestroyTexture(font);
+    SDL_DestroyRenderer(r);
+    return 1;
+}
+/* plat.c's fatal error: the screen above on the main thread, which owns the window; SDL's box when it can't be drawn.
+   From another thread, the main thread's loop (video_poll) shows it, and this thread waits for the exit; when the main
+   thread doesn't come (held up elsewhere), Windows' own box (it takes any thread) and none on Linux: the error is in
+   the log and on stderr. Nothing for an unattended run, where nobody would close it */
 void win_fatal_box(const char* msg) {
     if (g_opt_headless || unattended_active()) return;
     if (SDL_IsMainThread()) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", msg, g_win);
+        /* an error another thread left first: this one followed from it */
+        char* left = __atomic_load_n(&g_fatal_left, __ATOMIC_ACQUIRE);
+        __atomic_store_n(&g_fatal_taken, 1, __ATOMIC_RELEASE);
+        if (!fatal_screen(left ? left : msg))
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", left ? left : msg, g_win);
         return;
+    }
+    if (g_win) {
+        char* none = NULL;
+        char* copy = SDL_strdup(msg);
+        int i;
+        /* the renderer stops presenting and lets go of the window here: the main thread may be waiting for it */
+        __atomic_store_n(&g_given_up, 1, __ATOMIC_RELEASE);
+        if (g_renderer_up && g_renderer->release_window) g_renderer->release_window();
+        if (!copy || !__atomic_compare_exchange_n(&g_fatal_left, &none, copy, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            SDL_free(copy); /* a second error: the first one shows */
+        for (i = 0; i < 300; ++i) {
+            if (__atomic_load_n(&g_fatal_taken, __ATOMIC_ACQUIRE))
+                for (;;) SDL_Delay(1000); /* the main thread shows it and ends the process */
+            SDL_Delay(10);
+        }
     }
 #ifdef _WIN32
     wchar_t w[4096]; /* on the stack: this also runs in the crash report, where the heap may be what broke */
@@ -580,6 +746,12 @@ static void touch_mouse(const SDL_Event* e) {
 }
 void video_poll(void) {
     SDL_Event e;
+    char* left = __atomic_load_n(&g_fatal_left, __ATOMIC_ACQUIRE);
+    if (left) { /* another thread's fatal error, left for this thread to show */
+        __atomic_store_n(&g_fatal_taken, 1, __ATOMIC_RELEASE);
+        if (!fatal_screen(left)) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", left, g_win);
+        plat_exit_now(1);
+    }
     while (!g_opt_headless && SDL_PollEvent(&e)) {
         if (overlay_event(&e)) continue;
         switch (e.type) {

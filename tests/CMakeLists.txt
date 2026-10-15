@@ -304,6 +304,10 @@ snx_test_target(snx-test-vpad 11)
 target_link_libraries(snx-test-vpad PRIVATE scarletnx-common m)
 add_test(NAME vpad COMMAND snx-test-vpad)
 
+add_executable(snx-test-fatal-screen fatal_screen.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/fatal_screen.c")
+snx_test_target(snx-test-fatal-screen 11)
+add_test(NAME fatal_screen COMMAND snx-test-fatal-screen)
+
 # the controls' atlas and their shaders are generated and checked in: their sources must still make them
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
