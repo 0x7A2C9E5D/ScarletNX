@@ -414,12 +414,13 @@ jobs:
       - name: Run the zip's scarletnx.exe as a user would
         run: bash source/scripts/check-package.sh package/bin/scarletnx.exe
 
-  # Every push to main that builds everywhere replaces the rolling "nightly" prerelease with Linux and Windows builds.
+  # Every push to main that builds everywhere replaces the rolling "nightly" prerelease with Linux, Windows and Android
+  # builds.
   # A newer push cancels a release still running, so an older commit never publishes last
   release:
     name: Nightly release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [linux, appimage, windows, appimage-check, windows-check]
+    needs: [linux, appimage, windows, appimage-check, windows-check, android-apk]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     concurrency:
@@ -455,6 +456,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload nightly ScarletNX-windows-x86_64.zip --repo "$GITHUB_REPOSITORY" --clobber
+      # Under a fixed name in the release, as the zip, so a link to it keeps working
+      - name: Download the Android APK
+        uses: actions/download-artifact@v8
+        with:
+          name: ScarletNX-${{ steps.commit.outputs.short }}.apk
+          path: android
+      - name: Publish the Android nightly
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp android/ScarletNX-${{ steps.commit.outputs.short }}.apk ScarletNX-android.apk
+          gh release upload nightly ScarletNX-android.apk --repo "$GITHUB_REPOSITORY" --clobber
       # The GPL asks for the way to the source next to the binary
       - name: Say where the source is
         env:
@@ -464,4 +477,6 @@ jobs:
 
           The third-party libraries built into the runtime are fetched from the release archives that cmake/dependencies.cmake lists at that commit, each checked against the SHA-256 written next to it. The AppImage also bundles libraries from Arch Linux packages. Its licenses are in share/licenses, with the package list in share/licenses/bundled-packages.txt.
 
-          ScarletNX-windows-x86_64.zip contains the Windows build, its required runtime DLLs and licenses under share/licenses. The MSYS2 build environment's package versions are recorded in share/licenses/msys2/build-packages.txt."
+          ScarletNX-windows-x86_64.zip contains the Windows build, its required runtime DLLs and licenses under share/licenses. The MSYS2 build environment's package versions are recorded in share/licenses/msys2/build-packages.txt.
+
+          ScarletNX-android.apk is the Android app for arm64-v8a and x86_64 devices, signed with a debug key."
