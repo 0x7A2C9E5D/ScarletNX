@@ -24,11 +24,13 @@ if(NOT SNX_FFMPEG_SH OR NOT SNX_FFMPEG_MAKE)
                         "Windows, scripts\\bootstrap.ps1 installs them with w64devkit. FFmpeg is required by the NX runtime.")
 endif()
 
-# through the build's compiler launcher (ccache) too, when it has one
+# The build's compiler launcher (ccache) wraps make's compiles only: configure's checks are one-off compiles no cache
+# hits, which through it took twice as long on Windows
 list(JOIN CMAKE_C_COMPILER_LAUNCHER " " snx_ffmpeg_launcher)
-string(STRIP "${snx_ffmpeg_launcher} ${CMAKE_C_COMPILER}" snx_ffmpeg_cc)
-list(JOIN CMAKE_CXX_COMPILER_LAUNCHER " " snx_ffmpeg_launcher)
-string(STRIP "${snx_ffmpeg_launcher} ${CMAKE_CXX_COMPILER}" snx_ffmpeg_cxx)
+set(snx_ffmpeg_make_cc "")
+if(snx_ffmpeg_launcher)
+    set(snx_ffmpeg_make_cc "CC=${snx_ffmpeg_launcher} ${CMAKE_C_COMPILER}")
+endif()
 set(snx_ffmpeg_args
     --prefix=${snx_ffmpeg_prefix}
     --enable-static
@@ -45,8 +47,8 @@ set(snx_ffmpeg_args
     --disable-swscale
     --disable-iconv
     --enable-decoder=h264,vp8,vp9,opus
-    "--cc=${snx_ffmpeg_cc}"
-    "--cxx=${snx_ffmpeg_cxx}"
+    --cc=${CMAKE_C_COMPILER}
+    --cxx=${CMAKE_CXX_COMPILER}
     --ar=${CMAKE_AR}
     --ranlib=${CMAKE_RANLIB}
     --nm=${CMAKE_NM}
@@ -107,7 +109,7 @@ ExternalProject_Add(ffmpeg_build
     BINARY_DIR "${CMAKE_BINARY_DIR}/ffmpeg-build"
     INSTALL_DIR "${snx_ffmpeg_prefix}"
     CONFIGURE_COMMAND "${SNX_FFMPEG_SH}" "${snx_ffmpeg_src}/configure" ${snx_ffmpeg_args}
-    BUILD_COMMAND "${SNX_FFMPEG_MAKE}" -j${snx_ffmpeg_jobs}
+    BUILD_COMMAND "${SNX_FFMPEG_MAKE}" -j${snx_ffmpeg_jobs} ${snx_ffmpeg_make_cc}
     INSTALL_COMMAND "${SNX_FFMPEG_MAKE}" install
     BUILD_BYPRODUCTS "${snx_ffmpeg_prefix}/lib/libavcodec.a" "${snx_ffmpeg_prefix}/lib/libswresample.a"
                      "${snx_ffmpeg_prefix}/lib/libavutil.a"

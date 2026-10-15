@@ -55,10 +55,7 @@ set(snx_openssl_args
 if(ANDROID)
     list(APPEND snx_openssl_args -D__ANDROID_API__=${ANDROID_PLATFORM_LEVEL})
 else()
-    # through the build's compiler launcher (ccache) too, when it has one
-    list(JOIN CMAKE_C_COMPILER_LAUNCHER " " snx_openssl_launcher)
-    string(STRIP "${snx_openssl_launcher} ${CMAKE_C_COMPILER}" snx_openssl_cc)
-    list(APPEND snx_openssl_args "CC=${snx_openssl_cc}" AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB})
+    list(APPEND snx_openssl_args CC=${CMAKE_C_COMPILER} AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB})
 endif()
 if(CMAKE_RC_COMPILER)
     list(APPEND snx_openssl_args RC=${CMAKE_RC_COMPILER})
@@ -66,6 +63,14 @@ endif()
 if(NOT WIN32)
     # position-independent, as FFmpeg is: the libraries go into a shared library too (Android's runtime)
     list(APPEND snx_openssl_args -fPIC)
+endif()
+
+# The build's compiler launcher (ccache) wraps make's compiles only, as for FFmpeg. Android's targets name their
+# compiler themselves, so that build goes without
+set(snx_openssl_make_cc "")
+list(JOIN CMAKE_C_COMPILER_LAUNCHER " " snx_openssl_launcher)
+if(snx_openssl_launcher AND NOT ANDROID)
+    set(snx_openssl_make_cc "CC=${snx_openssl_launcher} ${CMAKE_C_COMPILER}")
 endif()
 
 # OpenSSL's make does not see the build's -j
@@ -79,7 +84,7 @@ ExternalProject_Add(openssl_build
     BINARY_DIR "${CMAKE_BINARY_DIR}/openssl-build"
     INSTALL_DIR "${snx_openssl_prefix}"
     CONFIGURE_COMMAND ${snx_openssl_env} "${PERL_EXECUTABLE}" "${snx_openssl_src}/Configure" ${snx_openssl_args}
-    BUILD_COMMAND ${snx_openssl_env} "${SNX_OPENSSL_MAKE}" -j${snx_openssl_jobs} build_libs
+    BUILD_COMMAND ${snx_openssl_env} "${SNX_OPENSSL_MAKE}" -j${snx_openssl_jobs} build_libs ${snx_openssl_make_cc}
     # install_dev: the headers and libraries, without the programs and manuals
     INSTALL_COMMAND ${snx_openssl_env} "${SNX_OPENSSL_MAKE}" install_dev
     BUILD_BYPRODUCTS "${snx_openssl_prefix}/lib/libcrypto.a" "${snx_openssl_prefix}/lib/libssl.a"
