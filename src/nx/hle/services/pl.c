@@ -7,7 +7,7 @@
 #include "hle/filesystem/fs.h"
 #include "hle/services/services.h"
 #include "hle/kernel/ipc.h"
-#include "hle/services/pl.swipc.h"
+#include "hle/services/pl.swipc.inc"
 #include "hle/kernel/kernel.h"
 #include "memory/mem.h"
 #include "runtime/platform/log.h"
@@ -188,26 +188,26 @@ static KShmem* font_shm(void) {
     return shm;
 }
 static u32 font_index(u32 font_type) { return font_type > 5 ? 0 : font_type; }
-int nn_pl_detail_IPlatformServiceManager_RequestLoad(SvcObj* self, u32 font_type) {
+static int nn_pl_detail_IPlatformServiceManager_RequestLoad(SvcObj* self, u32 font_type) {
     font_shm();
     return 0;
 }
-int nn_pl_detail_IPlatformServiceManager_GetLoadState(SvcObj* self, u32 font_type, u32* state) {
+static int nn_pl_detail_IPlatformServiceManager_GetLoadState(SvcObj* self, u32 font_type, u32* state) {
     font_shm();
     *state = 1; /* loaded */
     return 0;
 }
-int nn_pl_detail_IPlatformServiceManager_GetSize(SvcObj* self, u32 font_type, u32* size) {
+static int nn_pl_detail_IPlatformServiceManager_GetSize(SvcObj* self, u32 font_type, u32* size) {
     font_shm();
     *size = pl.font_size[font_index(font_type)];
     return 0;
 }
-int nn_pl_detail_IPlatformServiceManager_GetSharedMemoryAddressOffset(SvcObj* self, u32 font_type, u32* offset) {
+static int nn_pl_detail_IPlatformServiceManager_GetSharedMemoryAddressOffset(SvcObj* self, u32 font_type, u32* offset) {
     font_shm();
     *offset = pl.font_off[font_index(font_type)];
     return 0;
 }
-int nn_pl_detail_IPlatformServiceManager_GetSharedMemoryNativeHandle(SvcObj* self, u32* shared_memory) {
+static int nn_pl_detail_IPlatformServiceManager_GetSharedMemoryNativeHandle(SvcObj* self, u32* shared_memory) {
     *shared_memory = h_new(&font_shm()->o);
     return 0;
 }
@@ -223,14 +223,14 @@ static int fonts_in_order(IpcBuf codes, IpcBuf offsets, IpcBuf sizes, u8* loaded
     *count = 6;
     return 0;
 }
-int nn_pl_detail_IPlatformServiceManager_GetSharedFontInOrderOfPriority(SvcObj* self, u64 language_code,
-                                                                        IpcBuf font_codes, IpcBuf offsets, IpcBuf sizes,
-                                                                        u8* loaded, u32* count) {
+static int nn_pl_detail_IPlatformServiceManager_GetSharedFontInOrderOfPriority(
+    SvcObj* self, const nn_settings_LanguageCode* language_code, IpcBuf font_codes, IpcBuf offsets, IpcBuf sizes,
+    u8* loaded, u32* count) {
     return fonts_in_order(font_codes, offsets, sizes, loaded, count);
 }
-int nn_pl_detail_IPlatformServiceManager_GetSharedFontInOrderOfPriorityForSystem(SvcObj* self, u64 language_code,
-                                                                                 IpcBuf font_codes, IpcBuf offsets,
-                                                                                 IpcBuf sizes, u8* loaded, u32* count) {
+static int nn_pl_detail_IPlatformServiceManager_GetSharedFontInOrderOfPriorityForSystem(
+    SvcObj* self, const nn_settings_LanguageCode* language_code, IpcBuf font_codes, IpcBuf offsets, IpcBuf sizes,
+    u8* loaded, u32* count) {
     return fonts_in_order(font_codes, offsets, sizes, loaded, count);
 }
 static SvcObj* new_pl(void) { return nn_pl_detail_IPlatformServiceManager_new(0); }

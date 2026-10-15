@@ -45,6 +45,9 @@ void ipc_in(IpcCtx* c, u32 off, void* dst, u32 n);
 void ipc_out(IpcCtx* c, u32 off, const void* src, u32 n);
 IpcBuf ipc_buf(const IpcBuf* list, int n, int i);
 IpcBuf ipc_buf_auto(const IpcBuf* map, int nmap, int i, const IpcBuf* ptr, int nptr, int j);
+int ipc_counts(const IpcCtx* c, int pid, int na, int nb, int nx, int ncopy, int nmove, u32 raw);
+int ipc_objects(const IpcCtx* c, int nobj);
+int ipc_bad_request(SvcObj* o, IpcCtx* c);
+int ipc_bad_objects(SvcObj* o, IpcCtx* c);
 SvcObj* ipc_in_obj(IpcCtx* c, int i);
-void ipc_close(u32 h);
 #endif

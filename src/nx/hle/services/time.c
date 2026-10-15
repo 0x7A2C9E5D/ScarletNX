@@ -5,7 +5,7 @@
 /* time: clocks and the time zone */
 #include "hle/services/services_int.h"
 #include "runtime/clock.h"
-#include "hle/services/time.swipc.h"
+#include "hle/services/time.swipc.inc"
 /* ================================================================ time */
 /* The steady clock is the guest clock (guest_ns, the time base of the ticks the game reads) in seconds, with
    g_clock_id as its source id. The system clocks are a SystemClockContext {i64 offset; SteadyClockTimePoint
@@ -32,19 +32,20 @@ static int ctx_time(const nn_time_SystemClockContext* ctx, i64* t) {
     *t = ctx->offset + steady_s();
     return 1;
 }
-int nn_timesrv_detail_service_ISystemClock_GetCurrentTime(SvcObj* self, nn_time_PosixTime* time) {
+static int nn_timesrv_detail_service_ISystemClock_GetCurrentTime(SvcObj* self, nn_time_PosixTime* time) {
     *time = timesvc.sys_off + steady_s();
     return 0;
 }
-int nn_timesrv_detail_service_ISystemClock_GetSystemClockContext(SvcObj* self, nn_time_SystemClockContext* context) {
+static int nn_timesrv_detail_service_ISystemClock_GetSystemClockContext(SvcObj* self,
+                                                                        nn_time_SystemClockContext* context) {
     sysclock_ctx(context);
     return 0;
 }
-int nn_timesrv_detail_service_ISystemClock_GetOperationEventReadableHandle(SvcObj* self, u32* event) {
-    *event = ev_handle(kevent_new("clock op"));
-    return 0;
+static int nn_timesrv_detail_service_ISystemClock_GetOperationEventReadableHandle(SvcObj* self, u32* event) {
+    return new_event(event, "clock op", 0);
 }
-int nn_timesrv_detail_service_ISteadyClock_GetCurrentTimePoint(SvcObj* self, nn_time_SteadyClockTimePoint* time_point) {
+static int nn_timesrv_detail_service_ISteadyClock_GetCurrentTimePoint(SvcObj* self,
+                                                                      nn_time_SteadyClockTimePoint* time_point) {
     time_point->value = steady_s();
     memcpy(time_point->source_id.v, g_clock_id, 16);
     return 0;
@@ -89,16 +90,17 @@ static void to_calendar(i64 t, nn_time_CalendarTime* cal, nn_time_sf_CalendarAdd
     memcpy(info->time_zone_name, "UTC", 4);
     info->utc_offset = (i32)timesvc.tz_off;
 }
-int nn_timesrv_detail_service_ITimeZoneService_GetDeviceLocationName(SvcObj* self, nn_time_LocationName* name) {
+static int nn_timesrv_detail_service_ITimeZoneService_GetDeviceLocationName(SvcObj* self, nn_time_LocationName* name) {
     memcpy(name->v, "UTC", 4);
     return 0;
 }
-int nn_timesrv_detail_service_ITimeZoneService_GetTotalLocationNameCount(SvcObj* self, i32* count) {
+static int nn_timesrv_detail_service_ITimeZoneService_GetTotalLocationNameCount(SvcObj* self, i32* count) {
     *count = 1;
     return 0;
 }
 /* the one location, "UTC" */
-int nn_timesrv_detail_service_ITimeZoneService_LoadLocationNameList(SvcObj* self, i32 index, IpcBuf names, i32* count) {
+static int nn_timesrv_detail_service_ITimeZoneService_LoadLocationNameList(SvcObj* self, i32 index, IpcBuf names,
+                                                                           i32* count) {
     *count = index == 0 && names.addr && names.size >= 0x24;
     if (*count) {
         memset(GP(names.addr), 0, 0x24);
@@ -106,26 +108,25 @@ int nn_timesrv_detail_service_ITimeZoneService_LoadLocationNameList(SvcObj* self
     }
     return 0;
 }
-int nn_timesrv_detail_service_ITimeZoneService_LoadTimeZoneRule(SvcObj* self, const nn_time_LocationName* name,
-                                                                IpcBuf rule) {
+static int nn_timesrv_detail_service_ITimeZoneService_LoadTimeZoneRule(SvcObj* self, const nn_time_LocationName* name,
+                                                                       IpcBuf rule) {
     if (rule.addr) memset(GP(rule.addr), 0, rule.size);
     return 0;
 }
-int nn_timesrv_detail_service_ITimeZoneService_GetTimeZoneRuleVersion(SvcObj* self,
-                                                                      nn_time_TimeZoneRuleVersion* version) {
+static int nn_timesrv_detail_service_ITimeZoneService_GetTimeZoneRuleVersion(SvcObj* self,
+                                                                             nn_time_TimeZoneRuleVersion* version) {
     memcpy(version->v, "2021a", 6);
     return 0;
 }
 /* guest wall clock = host local time, whatever rule is passed */
-int nn_timesrv_detail_service_ITimeZoneService_ToCalendarTime(SvcObj* self, nn_time_PosixTime time, IpcBuf rule,
-                                                              nn_time_CalendarTime* calendar,
-                                                              nn_time_sf_CalendarAdditionalInfo* info) {
+static int nn_timesrv_detail_service_ITimeZoneService_ToCalendarTime(SvcObj* self, nn_time_PosixTime time, IpcBuf rule,
+                                                                     nn_time_CalendarTime* calendar,
+                                                                     nn_time_sf_CalendarAdditionalInfo* info) {
     to_calendar(time + timesvc.tz_off, calendar, info);
     return 0;
 }
-int nn_timesrv_detail_service_ITimeZoneService_ToCalendarTimeWithMyRule(SvcObj* self, nn_time_PosixTime time,
-                                                                        nn_time_CalendarTime* calendar,
-                                                                        nn_time_sf_CalendarAdditionalInfo* info) {
+static int nn_timesrv_detail_service_ITimeZoneService_ToCalendarTimeWithMyRule(
+    SvcObj* self, nn_time_PosixTime time, nn_time_CalendarTime* calendar, nn_time_sf_CalendarAdditionalInfo* info) {
     to_calendar(time + timesvc.tz_off, calendar, info);
     return 0;
 }
@@ -137,13 +138,14 @@ static i32 to_posix(const nn_time_CalendarTime* cal, IpcBuf times) {
     if (times.addr && times.size >= 8) gw64(times.addr, (u64)t);
     return 1;
 }
-int nn_timesrv_detail_service_ITimeZoneService_ToPosixTime(SvcObj* self, const nn_time_CalendarTime* calendar,
-                                                           IpcBuf rule, IpcBuf times, i32* count) {
+static int nn_timesrv_detail_service_ITimeZoneService_ToPosixTime(SvcObj* self, const nn_time_CalendarTime* calendar,
+                                                                  IpcBuf rule, IpcBuf times, i32* count) {
     *count = to_posix(calendar, times);
     return 0;
 }
-int nn_timesrv_detail_service_ITimeZoneService_ToPosixTimeWithMyRule(SvcObj* self, const nn_time_CalendarTime* calendar,
-                                                                     IpcBuf times, i32* count) {
+static int nn_timesrv_detail_service_ITimeZoneService_ToPosixTimeWithMyRule(SvcObj* self,
+                                                                            const nn_time_CalendarTime* calendar,
+                                                                            IpcBuf times, i32* count) {
     *count = to_posix(calendar, times);
     return 0;
 }
@@ -181,7 +183,8 @@ static void time_shm_update(void) {
         memcpy(e + 0x30 + 8, g_clock_id, 16);
     }
 }
-/* a ClockSnapshot of two contexts. A context on another steady clock gives time 0 */
+/* a ClockSnapshot of two contexts. A user context on another steady clock fails with TimeMismatch, a network one
+   gives time 0 */
 static int clock_snapshot(IpcBuf snapshot, const nn_time_SystemClockContext* user,
                           const nn_time_SystemClockContext* net, u8 type) {
     if (!snapshot.addr || snapshot.size < 0xD0) return RC(116, 1);
@@ -219,78 +222,77 @@ static int two_snapshots(IpcBuf a, IpcBuf b, u8 sa[0xD0], u8 sb[0xD0]) {
     return 1;
 }
 static SvcObj* system_clock(void) { return nn_timesrv_detail_service_ISystemClock_new(0); }
-int nn_timesrv_detail_service_IStaticService_GetStandardUserSystemClock(SvcObj* self, SvcObj** clock) {
+static int nn_timesrv_detail_service_IStaticService_GetStandardUserSystemClock(SvcObj* self, SvcObj** clock) {
     *clock = system_clock();
     return 0;
 }
-int nn_timesrv_detail_service_IStaticService_GetStandardNetworkSystemClock(SvcObj* self, SvcObj** clock) {
+static int nn_timesrv_detail_service_IStaticService_GetStandardNetworkSystemClock(SvcObj* self, SvcObj** clock) {
     *clock = system_clock();
     return 0;
 }
-int nn_timesrv_detail_service_IStaticService_GetStandardLocalSystemClock(SvcObj* self, SvcObj** clock) {
+static int nn_timesrv_detail_service_IStaticService_GetStandardLocalSystemClock(SvcObj* self, SvcObj** clock) {
     *clock = system_clock();
     return 0;
 }
-int nn_timesrv_detail_service_IStaticService_GetEphemeralNetworkSystemClock(SvcObj* self, SvcObj** clock) {
+static int nn_timesrv_detail_service_IStaticService_GetEphemeralNetworkSystemClock(SvcObj* self, SvcObj** clock) {
     *clock = system_clock();
     return 0;
 }
-int nn_timesrv_detail_service_IStaticService_GetStandardSteadyClock(SvcObj* self, SvcObj** clock) {
+static int nn_timesrv_detail_service_IStaticService_GetStandardSteadyClock(SvcObj* self, SvcObj** clock) {
     *clock = nn_timesrv_detail_service_ISteadyClock_new(0);
     return 0;
 }
-int nn_timesrv_detail_service_IStaticService_GetTimeZoneService(SvcObj* self, SvcObj** service) {
+static int nn_timesrv_detail_service_IStaticService_GetTimeZoneService(SvcObj* self, SvcObj** service) {
     *service = nn_timesrv_detail_service_ITimeZoneService_new(0);
     return 0;
 }
-int nn_timesrv_detail_service_IStaticService_GetSharedMemoryNativeHandle(SvcObj* self, u32* shared_memory) {
+static int nn_timesrv_detail_service_IStaticService_GetSharedMemoryNativeHandle(SvcObj* self, u32* shared_memory) {
     *shared_memory = h_new(&timesvc.shm->o);
     return 0;
 }
-int nn_timesrv_detail_service_IStaticService_GetStandardNetworkClockOperationEventReadableHandle(SvcObj* self,
-                                                                                                 u32* event) {
-    *event = ev_handle(kevent_new("clock op"));
-    return 0;
+static int nn_timesrv_detail_service_IStaticService_GetStandardNetworkClockOperationEventReadableHandle(SvcObj* self,
+                                                                                                        u32* event) {
+    return new_event(event, "clock op", 0);
 }
-int nn_timesrv_detail_service_IStaticService_GetEphemeralNetworkClockOperationEventReadableHandle(SvcObj* self,
-                                                                                                  u32* event) {
-    *event = ev_handle(kevent_new("clock op"));
-    return 0;
+static int nn_timesrv_detail_service_IStaticService_GetEphemeralNetworkClockOperationEventReadableHandle(SvcObj* self,
+                                                                                                         u32* event) {
+    return new_event(event, "clock op", 0);
 }
-int nn_timesrv_detail_service_IStaticService_IsStandardUserSystemClockAutomaticCorrectionEnabled(SvcObj* self,
-                                                                                                 u8* enabled) {
+static int nn_timesrv_detail_service_IStaticService_IsStandardUserSystemClockAutomaticCorrectionEnabled(SvcObj* self,
+                                                                                                        u8* enabled) {
     *enabled = 1;
     return 0;
 }
-int nn_timesrv_detail_service_IStaticService_GetStandardUserSystemClockInitialYear(SvcObj* self, i32* year) {
+static int nn_timesrv_detail_service_IStaticService_GetStandardUserSystemClockInitialYear(SvcObj* self, i32* year) {
     *year = 2019;
     return 0;
 }
-int nn_timesrv_detail_service_IStaticService_IsStandardNetworkSystemClockAccuracySufficient(SvcObj* self,
-                                                                                            u8* sufficient) {
+static int nn_timesrv_detail_service_IStaticService_IsStandardNetworkSystemClockAccuracySufficient(SvcObj* self,
+                                                                                                   u8* sufficient) {
     *sufficient = 1;
     return 0;
 }
-/* offset + steady - ticks */
-int nn_timesrv_detail_service_IStaticService_CalculateMonotonicSystemClockBaseTimePoint(
+/* the context's offset plus the steady clock's time less the seconds since boot. This steady clock counts the
+   seconds since boot, so that is the offset */
+static int nn_timesrv_detail_service_IStaticService_CalculateMonotonicSystemClockBaseTimePoint(
     SvcObj* self, const nn_time_SystemClockContext* context, i64* time) {
     if (memcmp(context->timestamp.source_id.v, g_clock_id, 16)) return RC(116, 102); /* TimeMismatch */
     *time = context->offset;
     return 0;
 }
-int nn_timesrv_detail_service_IStaticService_GetClockSnapshot(SvcObj* self, u8 type, IpcBuf snapshot) {
+static int nn_timesrv_detail_service_IStaticService_GetClockSnapshot(SvcObj* self, u8 type, IpcBuf snapshot) {
     nn_time_SystemClockContext user, net;
     sysclock_ctx(&user);
     sysclock_ctx(&net);
     return clock_snapshot(snapshot, &user, &net, type);
 }
-int nn_timesrv_detail_service_IStaticService_GetClockSnapshotFromSystemClockContext(
+static int nn_timesrv_detail_service_IStaticService_GetClockSnapshotFromSystemClockContext(
     SvcObj* self, u8 type, const nn_time_SystemClockContext* user_context,
     const nn_time_SystemClockContext* network_context, IpcBuf snapshot) {
     return clock_snapshot(snapshot, user_context, network_context, type);
 }
 /* the TimeSpan (ns) between the user contexts */
-int nn_timesrv_detail_service_IStaticService_CalculateStandardUserSystemClockDifferenceByUser(
+static int nn_timesrv_detail_service_IStaticService_CalculateStandardUserSystemClockDifferenceByUser(
     SvcObj* self, IpcBuf a, IpcBuf b, nn_TimeSpanType* difference) {
     u8 sa[0xD0], sb[0xD0];
     if (!two_snapshots(a, b, sa, sb)) return RC(116, 1);
@@ -302,8 +304,8 @@ int nn_timesrv_detail_service_IStaticService_CalculateStandardUserSystemClockDif
     return 0;
 }
 /* the TimeSpan (ns) between the steady time points, or the network times */
-int nn_timesrv_detail_service_IStaticService_CalculateSpanBetween(SvcObj* self, IpcBuf a, IpcBuf b,
-                                                                  nn_TimeSpanType* span) {
+static int nn_timesrv_detail_service_IStaticService_CalculateSpanBetween(SvcObj* self, IpcBuf a, IpcBuf b,
+                                                                         nn_TimeSpanType* span) {
     u8 sa[0xD0], sb[0xD0];
     if (!two_snapshots(a, b, sa, sb)) return RC(116, 1);
     i64 ta, tb;

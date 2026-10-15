@@ -187,7 +187,8 @@ interface nn::mmnv::IRequest is mm:u {
 # ================================================================ nfp:user, nfc:user
 type nn::nfc::DeviceHandle = bytes<8, 4>;
 
-# nfc:user is nn::nfc::detail::IUserManager on the console, whose IUser shares only these ids' meaning
+# nfc:user is nn::nfc::detail::IUserManager on the console. Its IUser shares only Initialize (0) and Finalize (1) with
+# nfp's, and its other commands (2, 3, 400 and up) answer success from stub_ok
 @fallback(quiet_ok)
 interface nn::nfp::detail::IUserManager is nfp:user, nfc:user {
     [0] CreateUserInterface() -> object<nn::nfp::detail::IUser> user;
@@ -199,7 +200,8 @@ interface nn::nfp::detail::IUser {
     [19] GetState() -> u32 state;
 }
 
-# ================================================================ bcat: an offline console, sync done at once, the cache empty
+# ================================================================ bcat
+# an offline console: sync done at once, the cache empty
 type nn::bcat::DirectoryName = bytes<0x20>;
 type nn::bcat::FileName = bytes<0x20>;
 type nn::bcat::Digest = bytes<0x10>;
@@ -259,7 +261,7 @@ interface nn::bcat::detail::ipc::IDeliveryTaskSuspensionService {
 }
 
 # ================================================================ aoc:u: no add-on content
-type nn::ec::srv::detail::PurchasedProductInfo = bytes<0x10>;
+type nn::ec::srv::detail::PurchasedProductInfo = bytes<0x80, 8>;
 
 interface nn::aocsrv::detail::IAddOnContentManager is aoc:u {
     @stub [0] CountAddOnContentByApplicationId(nn::ncm::ApplicationId application_id) -> i32 count;
@@ -272,20 +274,20 @@ interface nn::aocsrv::detail::IAddOnContentManager is aoc:u {
     @stub [6] PrepareAddOnContentByApplicationId(i32 index, nn::ncm::ApplicationId application_id);
     @stub [7] PrepareAddOnContent(i32 index, pid);
     [8] GetAddOnContentListChangedEvent() -> handle<copy, event> event;
-    # 9 and 11 to 50: Switchbrew has the names only, Eden answers them with nothing
-    @stub [9] GetAddOnContentLostErrorCode();
+    # 9 and 11 to 50: answered with nothing (as Eden does), declared as the SDK's client sends them
+    @stub [9] GetAddOnContentLostErrorCode(array<i32, 5> indices, pid) -> bytes<8, 4> error_code;
     [10] GetAddOnContentListChangedEventWithProcessId(pid) -> handle<copy, event> event;
-    @stub [11] NotifyMountAddOnContent();
-    @stub [12] NotifyUnmountAddOnContent();
-    @stub [13] IsAddOnContentMountedForDebug();
-    @stub [50] CheckAddOnContentMountStatus();
+    @stub [11] NotifyMountAddOnContent(nn::ncm::DataId data_id, pid);
+    @stub [12] NotifyUnmountAddOnContent(nn::ncm::DataId data_id, pid);
+    @stub [13] IsAddOnContentMountedForDebug(nn::ncm::DataId data_id, pid) -> b8 mounted;
+    @stub [50] CheckAddOnContentMountStatus(pid);
     [100] CreateEcPurchasedEventManager() -> object<nn::ec::IPurchaseEventManager> manager;
-    [101] CreatePermanentEcPurchasedEventManager() -> object<nn::ec::IPurchaseEventManager> manager;
+    [101] CreatePermanentEcPurchasedEventManager(pid) -> object<nn::ec::IPurchaseEventManager> manager;
 }
 interface nn::ec::IPurchaseEventManager {
     [2] GetPurchasedEventReadableHandle() -> handle<copy, event> event;
     [3] PopPurchasedProductInfo() -> nn::ec::srv::detail::PurchasedProductInfo info;
-    [4] PopPurchasedProductInfoWithUid() -> nn::ec::srv::detail::PurchasedProductInfo info;
+    [4] PopPurchasedProductInfoWithUid(nn::account::Uid uid) -> nn::ec::srv::detail::PurchasedProductInfo info;
 }
 
 # ================================================================ irs

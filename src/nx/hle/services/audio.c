@@ -5,7 +5,7 @@
 /* audio services: audout sends guest PCM to the host, audren renders the game's voices (audren.c, audren_dsp.c),
    and hwopus decodes the game's Opus packets with FFmpeg */
 #include "hle/services/services_int.h"
-#include "hle/services/audio.swipc.h"
+#include "hle/services/audio.swipc.inc"
 #ifndef SNX_NO_H264
 #include "gpu/video/host1x.h"
 #include <libavcodec/avcodec.h>
@@ -14,7 +14,8 @@
 /* IAudioOut: appended PCM is copied to the host output and buffers come back at 48 kHz speed like on the console.
    Players time video against the released buffers (CRI movies): never releasing them stalls the video.
    Buffers are laid out on a play clock that runs only while the audout is started: a buffer is released once the
-   clock passes its end, and then waits in rel[] for GetReleasedAudioOutBuffers */
+   clock passes its end, or when Stop or FlushAudioOutBuffers hands the queued ones back, and then waits in rel[] for
+   GetReleasedAudioOutBuffers */
 typedef struct AudOut {
     struct AudOut* next; /* audio.outs */
     u64 tag[64], start[64], end[64], frames[64];
@@ -35,19 +36,9 @@ static struct {
     KEvent* ev; /* the audio renderer's event, signaled every 5ms by audio_clock */
     /* the open IAudioOuts, which audio_clock looks at to signal their buffer events */
     AudOut* outs;
-    PMutex outs_lk;
-    int outs_init; /* 0, 1 while pm_init runs, 2 ready: the first audout can open before audio_clock runs */
-} audio;
+    PMutex outs_lk; /* static: the first audout can open before audio_clock runs */
+} audio = {.outs_lk = PMUTEX_INIT};
 void audio_init(void) { audio.ev = owned_event("audio renderer"); }
-static void outs_init(void) {
-    int s = 0;
-    if (__atomic_load_n(&audio.outs_init, __ATOMIC_ACQUIRE) == 2) return;
-    if (__atomic_compare_exchange_n(&audio.outs_init, &s, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-        pm_init(&audio.outs_lk);
-        __atomic_store_n(&audio.outs_init, 2, __ATOMIC_RELEASE);
-    } else
-        while (__atomic_load_n(&audio.outs_init, __ATOMIC_ACQUIRE) != 2) plat_yield();
-}
 
 /* the rest of audout's helpers take q->lk held */
 static u64 audout_clock(AudOut* q, u64 now) { return q->started ? q->base + (now - q->anchor) : q->base; }
@@ -67,7 +58,6 @@ static void audout_release(AudOut* q, u64 now) {
    has released buffers the game hasn't taken: the SDK clears it after each wait */
 void audio_clock(void* arg) {
     (void)arg;
-    outs_init();
     u64 next = plat_ns();
     for (;;) {
         next += 5000000ull;
@@ -93,45 +83,46 @@ void audio_clock(void* arg) {
 
 /* IAudioRenderer: u[0..2] sample rate, sample count and mix buffer count, u[3] state (0 started, 1 stopped),
    u[4] audren.c's renderer, u[6] the rendering time limit */
-int nn_audio_detail_IAudioRenderer_GetSampleRate(SvcObj* self, u32* sample_rate) {
+static int nn_audio_detail_IAudioRenderer_GetSampleRate(SvcObj* self, u32* sample_rate) {
     *sample_rate = (u32)self->u[0];
     return 0;
 }
-int nn_audio_detail_IAudioRenderer_GetSampleCount(SvcObj* self, u32* sample_count) {
+static int nn_audio_detail_IAudioRenderer_GetSampleCount(SvcObj* self, u32* sample_count) {
     *sample_count = (u32)self->u[1];
     return 0;
 }
-int nn_audio_detail_IAudioRenderer_GetMixBufferCount(SvcObj* self, u32* mix_buffer_count) {
+static int nn_audio_detail_IAudioRenderer_GetMixBufferCount(SvcObj* self, u32* mix_buffer_count) {
     *mix_buffer_count = (u32)self->u[2];
     return 0;
 }
-int nn_audio_detail_IAudioRenderer_GetState(SvcObj* self, u32* state) {
-    *state = (u32)self->u[3];
+static int nn_audio_detail_IAudioRenderer_GetState(SvcObj* self, u32* state) {
+    *state = (u32)__atomic_load_n(&self->u[3], __ATOMIC_ACQUIRE);
     return 0;
 }
-int nn_audio_detail_IAudioRenderer_RequestUpdate(SvcObj* self, IpcBuf input, IpcBuf output, IpcBuf performance) {
+static int nn_audio_detail_IAudioRenderer_RequestUpdate(SvcObj* self, IpcBuf input, IpcBuf output, IpcBuf performance) {
     return audren_update(self, input, output);
 }
-int nn_audio_detail_IAudioRenderer_RequestUpdateAuto(SvcObj* self, IpcBuf input, IpcBuf output, IpcBuf performance) {
+static int nn_audio_detail_IAudioRenderer_RequestUpdateAuto(SvcObj* self, IpcBuf input, IpcBuf output,
+                                                            IpcBuf performance) {
     return audren_update(self, input, output);
 }
-int nn_audio_detail_IAudioRenderer_Start(SvcObj* self) {
-    self->u[3] = 0;
+static int nn_audio_detail_IAudioRenderer_Start(SvcObj* self) { /* audren_tick reads it on the audio clock */
+    __atomic_store_n(&self->u[3], 0, __ATOMIC_RELEASE);
     return 0;
 }
-int nn_audio_detail_IAudioRenderer_Stop(SvcObj* self) {
-    self->u[3] = 1;
+static int nn_audio_detail_IAudioRenderer_Stop(SvcObj* self) {
+    __atomic_store_n(&self->u[3], 1, __ATOMIC_RELEASE);
     return 0;
 }
-int nn_audio_detail_IAudioRenderer_QuerySystemEvent(SvcObj* self, u32* event) {
+static int nn_audio_detail_IAudioRenderer_QuerySystemEvent(SvcObj* self, u32* event) {
     *event = ev_handle(audio.ev);
     return 0;
 }
-int nn_audio_detail_IAudioRenderer_SetRenderingTimeLimit(SvcObj* self, u32 percent) {
+static int nn_audio_detail_IAudioRenderer_SetRenderingTimeLimit(SvcObj* self, u32 percent) {
     self->u[6] = percent;
     return 0;
 }
-int nn_audio_detail_IAudioRenderer_GetRenderingTimeLimit(SvcObj* self, u32* percent) {
+static int nn_audio_detail_IAudioRenderer_GetRenderingTimeLimit(SvcObj* self, u32* percent) {
     *percent = (u32)self->u[6];
     return 0;
 }
@@ -142,119 +133,6 @@ static void auddev_destroy(SvcObj* o) {
         if (o->u[i]) kobj_unref(&((KEvent*)(size_t)o->u[i])->o);
 }
 static const char g_device_name[] = "AudioTvOutput";
-/* the one device, in a list of names */
-static i32 list_device_names(IpcBuf names) {
-    if (!names.addr || names.size < 0x100) return 0;
-    memset(GP(names.addr), 0, 0x100);
-    strcpy((char*)GP(names.addr), g_device_name);
-    return 1;
-}
-int nn_audio_detail_IAudioDevice_ListAudioDeviceName(SvcObj* self, IpcBuf names, i32* count) {
-    *count = list_device_names(names);
-    return 0;
-}
-int nn_audio_detail_IAudioDevice_ListAudioDeviceNameAuto(SvcObj* self, IpcBuf names, i32* count) {
-    *count = list_device_names(names);
-    return 0;
-}
-int nn_audio_detail_IAudioDevice_GetAudioDeviceOutputVolume(SvcObj* self, IpcBuf name, float* volume) {
-    *volume = 1.0f;
-    return 0;
-}
-int nn_audio_detail_IAudioDevice_GetAudioDeviceOutputVolumeAuto(SvcObj* self, IpcBuf name, float* volume) {
-    *volume = 1.0f;
-    return 0;
-}
-/* the active device's name, cut to fit */
-static int active_device_name(IpcBuf name) {
-    if (name.addr) {
-        memset(GP(name.addr), 0, name.size);
-        strncpy((char*)GP(name.addr), g_device_name, name.size);
-    }
-    return 0;
-}
-int nn_audio_detail_IAudioDevice_GetActiveAudioDeviceName(SvcObj* self, IpcBuf name) {
-    return active_device_name(name);
-}
-int nn_audio_detail_IAudioDevice_GetActiveAudioDeviceNameAuto(SvcObj* self, IpcBuf name) {
-    return active_device_name(name);
-}
-int nn_audio_detail_IAudioDevice_GetActiveAudioOutputDeviceName(SvcObj* self, IpcBuf name) {
-    return active_device_name(name);
-}
-int nn_audio_detail_IAudioDevice_QueryAudioDeviceSystemEvent(SvcObj* self, u32* event) {
-    *event = ev_handle((KEvent*)(size_t)self->u[0]);
-    return 0;
-}
-int nn_audio_detail_IAudioDevice_QueryAudioDeviceInputEvent(SvcObj* self, u32* event) {
-    *event = ev_handle((KEvent*)(size_t)self->u[1]);
-    return 0;
-}
-int nn_audio_detail_IAudioDevice_QueryAudioDeviceOutputEvent(SvcObj* self, u32* event) {
-    *event = ev_handle((KEvent*)(size_t)self->u[2]);
-    return 0;
-}
-int nn_audio_detail_IAudioDevice_GetActiveChannelCount(SvcObj* self, u32* count) {
-    *count = 2;
-    return 0;
-}
-static SvcObj* new_auddev(void) {
-    static const char* const names[3] = {"audio device system", "audio device input", "audio device output"};
-    SvcObj* d = nn_audio_detail_IAudioDevice_new(0);
-    for (int i = 0; i < 3; i++) {
-        KEvent* e = kevent_new(names[i]);
-        kobj_ref(&e->o);
-        kevent_signal(e);
-        d->u[i] = (u64)(size_t)e;
-    }
-    d->destroy = auddev_destroy;
-    return d;
-}
-/* OpenAudioRenderer and OpenAudioRendererForManualExecution: the same parameters */
-static SvcObj* open_renderer(const nn_audio_detail_AudioRendererParameterInternal* params) {
-    SvcObj* r = nn_audio_detail_IAudioRenderer_new(0);
-    r->u[0] = params->sample_rate;
-    r->u[1] = params->sample_count;
-    r->u[2] = params->mix_buffer_count;
-    r->u[3] = 1;
-    r->u[6] = 100; /* the rendering time limit starts at 100% */
-    audren_open(r, (const u8*)params);
-    return r;
-}
-int nn_audio_detail_IAudioRendererManager_OpenAudioRenderer(
-    SvcObj* self, const nn_audio_detail_AudioRendererParameterInternal* params, u64 work_buffer_size, u64 aruid,
-    u32 work_buffer, u32 process, SvcObj** renderer) {
-    *renderer = open_renderer(params);
-    return 0;
-}
-int nn_audio_detail_IAudioRendererManager_OpenAudioRendererForManualExecution(
-    SvcObj* self, const nn_audio_detail_AudioRendererParameterInternal* params, u64 work_buffer_address, u64 aruid,
-    u32 process, SvcObj** renderer) {
-    *renderer = open_renderer(params);
-    return 0;
-}
-int nn_audio_detail_IAudioRendererManager_GetWorkBufferSize(
-    SvcObj* self, const nn_audio_detail_AudioRendererParameterInternal* params, u64* size) {
-    u64 sz =
-        0x4000 + (u64)params->voice_count * 0x400 + (u64)params->sink_count * 0x200 + (u64)params->effect_count * 0x800;
-    /* The SDK allocates this beside its renderer config. An oversized estimate can place that config
-       outside the pages it mapped. Transfer memory requires whole pages. */
-    *size = (sz + 0xFFF) & ~0xFFFull;
-    return 0;
-}
-int nn_audio_detail_IAudioRendererManager_GetAudioDeviceService(SvcObj* self, nn_applet_AppletResourceUserId aruid,
-                                                                SvcObj** device) {
-    *device = new_auddev();
-    return 0;
-}
-int nn_audio_detail_IAudioRendererManager_GetAudioDeviceServiceWithRevisionInfo(SvcObj* self,
-                                                                                nn_applet_AppletResourceUserId aruid,
-                                                                                u32 revision, SvcObj** device) {
-    *device = new_auddev();
-    return 0;
-}
-SvcObj* new_audren(void) { return nn_audio_detail_IAudioRendererManager_new(0); }
-
 /* a device name into the game's out buffer, cut to fit and zero padded */
 static u32 put_name(IpcBuf b, const char* nm) {
     if (!b.addr || !b.size) return 0;
@@ -263,6 +141,118 @@ static u32 put_name(IpcBuf b, const char* nm) {
     memcpy(GP(b.addr), nm, strlen(nm) < n ? strlen(nm) : n - 1);
     return 1;
 }
+/* the one device, in a list of names */
+static i32 list_device_names(IpcBuf names) {
+    if (!names.addr || names.size < 0x100) return 0;
+    memset(GP(names.addr), 0, 0x100);
+    strcpy((char*)GP(names.addr), g_device_name);
+    return 1;
+}
+static int nn_audio_detail_IAudioDevice_ListAudioDeviceName(SvcObj* self, IpcBuf names, i32* count) {
+    *count = list_device_names(names);
+    return 0;
+}
+static int nn_audio_detail_IAudioDevice_ListAudioDeviceNameAuto(SvcObj* self, IpcBuf names, i32* count) {
+    *count = list_device_names(names);
+    return 0;
+}
+static int nn_audio_detail_IAudioDevice_GetAudioDeviceOutputVolume(SvcObj* self, IpcBuf name, float* volume) {
+    *volume = 1.0f;
+    return 0;
+}
+static int nn_audio_detail_IAudioDevice_GetAudioDeviceOutputVolumeAuto(SvcObj* self, IpcBuf name, float* volume) {
+    *volume = 1.0f;
+    return 0;
+}
+/* the active device's name, cut to fit */
+static int active_device_name(IpcBuf name) {
+    put_name(name, g_device_name);
+    return 0;
+}
+static int nn_audio_detail_IAudioDevice_GetActiveAudioDeviceName(SvcObj* self, IpcBuf name) {
+    return active_device_name(name);
+}
+static int nn_audio_detail_IAudioDevice_GetActiveAudioDeviceNameAuto(SvcObj* self, IpcBuf name) {
+    return active_device_name(name);
+}
+static int nn_audio_detail_IAudioDevice_GetActiveAudioOutputDeviceName(SvcObj* self, IpcBuf name) {
+    return active_device_name(name);
+}
+static int nn_audio_detail_IAudioDevice_QueryAudioDeviceSystemEvent(SvcObj* self, u32* event) {
+    *event = ev_handle((KEvent*)(size_t)self->u[0]);
+    return 0;
+}
+static int nn_audio_detail_IAudioDevice_QueryAudioDeviceInputEvent(SvcObj* self, u32* event) {
+    *event = ev_handle((KEvent*)(size_t)self->u[1]);
+    return 0;
+}
+static int nn_audio_detail_IAudioDevice_QueryAudioDeviceOutputEvent(SvcObj* self, u32* event) {
+    *event = ev_handle((KEvent*)(size_t)self->u[2]);
+    return 0;
+}
+static int nn_audio_detail_IAudioDevice_GetActiveChannelCount(SvcObj* self, u32* count) {
+    *count = 2;
+    return 0;
+}
+static SvcObj* new_auddev(void) {
+    static const char* const names[3] = {"audio device system", "audio device input", "audio device output"};
+    SvcObj* d = nn_audio_detail_IAudioDevice_new(0);
+    for (int i = 0; i < 3; i++) {
+        KEvent* e = owned_event(names[i]);
+        kevent_signal(e);
+        d->u[i] = (u64)(size_t)e;
+    }
+    d->destroy = auddev_destroy;
+    return d;
+}
+/* OpenAudioRenderer and OpenAudioRendererForManualExecution: the same parameters. Parameters the renderer can't be
+   made with fail the open (OperationFailed), rather than give a renderer every update of which fails */
+static int open_renderer(const nn_audio_detail_AudioRendererParameterInternal* params, SvcObj** renderer) {
+    SvcObj* r = nn_audio_detail_IAudioRenderer_new(0);
+    r->u[0] = params->sample_rate;
+    r->u[1] = params->sample_count;
+    r->u[2] = params->mix_buffer_count;
+    r->u[3] = 1;
+    r->u[6] = 100; /* the rendering time limit starts at 100% */
+    if (!audren_open(r, (const u8*)params)) {
+        svcobj_unref(r);
+        return RC(153, 2);
+    }
+    *renderer = r;
+    return 0;
+}
+static int nn_audio_detail_IAudioRendererManager_OpenAudioRenderer(
+    SvcObj* self, const nn_audio_detail_AudioRendererParameterInternal* params, u64 work_buffer_size, u64 aruid,
+    u32 work_buffer, u32 process, SvcObj** renderer) {
+    return open_renderer(params, renderer);
+}
+static int nn_audio_detail_IAudioRendererManager_OpenAudioRendererForManualExecution(
+    SvcObj* self, const nn_audio_detail_AudioRendererParameterInternal* params, u64 work_buffer_address, u32 process,
+    u64 work_buffer_size, u64 aruid, SvcObj** renderer) {
+    return open_renderer(params, renderer);
+}
+static int nn_audio_detail_IAudioRendererManager_GetWorkBufferSize(
+    SvcObj* self, const nn_audio_detail_AudioRendererParameterInternal* params, u64* size) {
+    u64 sz =
+        0x4000 + (u64)params->voice_count * 0x400 + (u64)params->sink_count * 0x200 + (u64)params->effect_count * 0x800;
+    /* The SDK allocates this beside its renderer config. An oversized estimate can place that config
+       outside the pages it mapped. Transfer memory requires whole pages. */
+    *size = (sz + 0xFFF) & ~0xFFFull;
+    return 0;
+}
+static int nn_audio_detail_IAudioRendererManager_GetAudioDeviceService(SvcObj* self,
+                                                                       nn_applet_AppletResourceUserId aruid,
+                                                                       SvcObj** device) {
+    *device = new_auddev();
+    return 0;
+}
+static int nn_audio_detail_IAudioRendererManager_GetAudioDeviceServiceWithRevisionInfo(
+    SvcObj* self, nn_applet_AppletResourceUserId aruid, u32 revision, SvcObj** device) {
+    *device = new_auddev();
+    return 0;
+}
+SvcObj* new_audren(void) { return nn_audio_detail_IAudioRendererManager_new(0); }
+
 static void audout_destroy(SvcObj* o) {
     AudOut* q = (AudOut*)o->data;
     pm_lock(&audio.outs_lk);
@@ -292,14 +282,14 @@ static int audout_pcm_range(u64 addr, u64 bytes) {
     return 1;
 }
 
-int nn_audio_detail_IAudioOut_GetAudioOutState(SvcObj* self, u32* state) { /* 0 started, 1 stopped */
+static int nn_audio_detail_IAudioOut_GetAudioOutState(SvcObj* self, u32* state) { /* 0 started, 1 stopped */
     AudOut* q = (AudOut*)self->data;
     pm_lock(&q->lk);
     *state = q->started ? 0 : 1;
     pm_unlock(&q->lk);
     return 0;
 }
-int nn_audio_detail_IAudioOut_Start(SvcObj* self) { /* the play clock runs from now */
+static int nn_audio_detail_IAudioOut_Start(SvcObj* self) { /* the play clock runs from now */
     AudOut* q = (AudOut*)self->data;
     pm_lock(&q->lk);
     if (!q->started) {
@@ -310,27 +300,50 @@ int nn_audio_detail_IAudioOut_Start(SvcObj* self) { /* the play clock runs from 
     pm_unlock(&q->lk);
     return 0;
 }
-int nn_audio_detail_IAudioOut_Stop(SvcObj* self) { /* the play clock stops where it is */
+/* the frames of the head buffer the play clock has passed, at time t */
+static u64 audout_head_played(AudOut* q, u64 t) {
+    if (!q->n || t <= q->start[q->head]) return 0;
+    u64 part = (t - q->start[q->head]) * 48000 / 1000000000ull;
+    return part < q->frames[q->head] ? part : q->frames[q->head];
+}
+/* every queued buffer comes back, and the host drops what it holds of them. What the clock had played of the head
+   buffer stays counted (the played count never goes back). 1 when the game has buffers to take */
+static int audout_flush(AudOut* q, u64 now) {
+    q->played += audout_head_played(q, audout_clock(q, now));
+    plat_audio_clear(q->output);
+    while (q->n) {
+        q->rel[(q->rhead + q->rn) & 63] = q->tag[q->head];
+        q->rn++;
+        q->head = (q->head + 1) & 63;
+        q->n--;
+    }
+    q->last_end = 0;
+    return q->rn != 0;
+}
+/* the play clock stops where it is, and the buffers not played yet come back, as on the console (yuzu and Ryujinx
+   release them too) */
+static int nn_audio_detail_IAudioOut_Stop(SvcObj* self) {
     AudOut* q = (AudOut*)self->data;
     u64 now = plat_ns();
+    int any = 0;
     pm_lock(&q->lk);
     if (q->started) {
         audout_release(q, now);
+        any = audout_flush(q, now);
         q->base = audout_clock(q, now);
         q->started = 0;
         plat_audio_start(q->output, 0);
     }
     pm_unlock(&q->lk);
+    if (any) kevent_signal(q->ev);
     return 0;
 }
 static int append_buffer(AudOut* q, u64 tag, IpcBuf b) {
-    u64 a = b.addr, bytes = 0, samples = 0, capacity = 0, offset = 0;
-    if (a && b.size >= 0x20) {
-        samples = gr64(a + 8);
-        capacity = gr64(a + 0x10);
-        bytes = gr64(a + 0x18);
-        if (b.size >= 0x28) offset = gr64(a + 0x20);
-    }
+    nn_audio_AudioOutBuffer ob;
+    const u64 no_offset = offsetof(nn_audio_AudioOutBuffer, data_offset); /* a 0x20 byte buffer has no data_offset */
+    memset(&ob, 0, sizeof ob);
+    if (b.addr && b.size >= no_offset) memcpy(&ob, GP(b.addr), b.size < sizeof ob ? no_offset : sizeof ob);
+    u64 bytes = ob.data_size, samples = ob.buffer, capacity = ob.buffer_capacity, offset = ob.data_offset;
     if (bytes > 0xFFFFFFFFull) bytes = 0xFFFFFFFFull; /* keeps frames * 1e9 in 64 bits */
     u64 now = plat_ns();
     pm_lock(&q->lk);
@@ -360,25 +373,26 @@ static int append_buffer(AudOut* q, u64 tag, IpcBuf b) {
     pm_unlock(&q->lk);
     return 0;
 }
-int nn_audio_detail_IAudioOut_AppendAudioOutBuffer(SvcObj* self, u64 tag, IpcBuf buffer) {
+static int nn_audio_detail_IAudioOut_AppendAudioOutBuffer(SvcObj* self, u64 tag, IpcBuf buffer) {
     return append_buffer((AudOut*)self->data, tag, buffer);
 }
-int nn_audio_detail_IAudioOut_AppendAudioOutBufferAuto(SvcObj* self, u64 tag, IpcBuf buffer) {
+static int nn_audio_detail_IAudioOut_AppendAudioOutBufferAuto(SvcObj* self, u64 tag, IpcBuf buffer) {
     return append_buffer((AudOut*)self->data, tag, buffer);
 }
-int nn_audio_detail_IAudioOut_RegisterBufferEvent(SvcObj* self, u32* event) {
+static int nn_audio_detail_IAudioOut_RegisterBufferEvent(SvcObj* self, u32* event) {
     *event = ev_handle(((AudOut*)self->data)->ev);
     return 0;
 }
 /* the tags of the released buffers, as many as fit: unused slots read as null */
 static u32 released_buffers(AudOut* q, IpcBuf tags) {
     u32 cnt = 0;
-    if (tags.addr && tags.size) memset(GP(tags.addr), 0, tags.size);
+    u64 room = tags.addr ? tags.size : 0; /* no buffer takes none: they stay released for the next call */
+    if (room) memset(GP(tags.addr), 0, room);
     u64 now = plat_ns();
     pm_lock(&q->lk);
     audout_release(q, now);
-    while (q->rn && (u64)(cnt + 1) * 8 <= tags.size) {
-        if (tags.addr) memcpy(GP(tags.addr + (u64)cnt * 8), &q->rel[q->rhead], 8);
+    while (q->rn && (u64)(cnt + 1) * 8 <= room) {
+        memcpy(GP(tags.addr + (u64)cnt * 8), &q->rel[q->rhead], 8);
         q->rhead = (q->rhead + 1) & 63;
         q->rn--;
         cnt++;
@@ -386,16 +400,16 @@ static u32 released_buffers(AudOut* q, IpcBuf tags) {
     pm_unlock(&q->lk);
     return cnt;
 }
-int nn_audio_detail_IAudioOut_GetReleasedAudioOutBuffers(SvcObj* self, IpcBuf tags, u32* count) {
+static int nn_audio_detail_IAudioOut_GetReleasedAudioOutBuffers(SvcObj* self, IpcBuf tags, u32* count) {
     *count = released_buffers((AudOut*)self->data, tags);
     return 0;
 }
-int nn_audio_detail_IAudioOut_GetReleasedAudioOutBuffersAuto(SvcObj* self, IpcBuf tags, u32* count) {
+static int nn_audio_detail_IAudioOut_GetReleasedAudioOutBuffersAuto(SvcObj* self, IpcBuf tags, u32* count) {
     *count = released_buffers((AudOut*)self->data, tags);
     return 0;
 }
 /* appended and not yet taken back by the game */
-int nn_audio_detail_IAudioOut_ContainsAudioOutBuffer(SvcObj* self, u64 tag, u8* contains) {
+static int nn_audio_detail_IAudioOut_ContainsAudioOutBuffer(SvcObj* self, u64 tag, u8* contains) {
     AudOut* q = (AudOut*)self->data;
     pm_lock(&q->lk);
     audout_release(q, plat_ns());
@@ -406,7 +420,8 @@ int nn_audio_detail_IAudioOut_ContainsAudioOutBuffer(SvcObj* self, u64 tag, u8* 
     pm_unlock(&q->lk);
     return 0;
 }
-int nn_audio_detail_IAudioOut_GetAudioOutBufferCount(SvcObj* self, u32* count) { /* appended and not played yet */
+/* appended and not played yet */
+static int nn_audio_detail_IAudioOut_GetAudioOutBufferCount(SvcObj* self, u32* count) {
     AudOut* q = (AudOut*)self->data;
     pm_lock(&q->lk);
     audout_release(q, plat_ns());
@@ -415,39 +430,29 @@ int nn_audio_detail_IAudioOut_GetAudioOutBufferCount(SvcObj* self, u32* count) {
     return 0;
 }
 /* the finished buffers and what the clock played of the next */
-int nn_audio_detail_IAudioOut_GetAudioOutPlayedSampleCount(SvcObj* self, u64* count) {
+static int nn_audio_detail_IAudioOut_GetAudioOutPlayedSampleCount(SvcObj* self, u64* count) {
     AudOut* q = (AudOut*)self->data;
     u64 now = plat_ns();
     pm_lock(&q->lk);
     audout_release(q, now);
-    u64 played = q->played, t = audout_clock(q, now);
-    if (q->n && t > q->start[q->head]) {
-        u64 part = (t - q->start[q->head]) * 48000 / 1000000000ull;
-        played += part < q->frames[q->head] ? part : q->frames[q->head];
-    }
+    u64 played = q->played + audout_head_played(q, audout_clock(q, now));
     pm_unlock(&q->lk);
     *count = played;
     return 0;
 }
-int nn_audio_detail_IAudioOut_FlushAudioOutBuffers(SvcObj* self, u8* released) { /* queued ones come back unplayed */
+/* the queued buffers come back, unplayed */
+static int nn_audio_detail_IAudioOut_FlushAudioOutBuffers(SvcObj* self, u8* released) {
     AudOut* q = (AudOut*)self->data;
+    u64 now = plat_ns();
     pm_lock(&q->lk);
-    audout_release(q, plat_ns());
-    plat_audio_clear(q->output);
-    while (q->n) {
-        q->rel[(q->rhead + q->rn) & 63] = q->tag[q->head];
-        q->rn++;
-        q->head = (q->head + 1) & 63;
-        q->n--;
-    }
-    q->last_end = 0;
-    int any = q->rn != 0;
+    audout_release(q, now);
+    int any = audout_flush(q, now);
     pm_unlock(&q->lk);
     if (any) kevent_signal(q->ev);
     *released = 1;
     return 0;
 }
-int nn_audio_detail_IAudioOut_SetAudioOutVolume(SvcObj* self, float volume) {
+static int nn_audio_detail_IAudioOut_SetAudioOutVolume(SvcObj* self, float volume) {
     AudOut* q = (AudOut*)self->data;
     pm_lock(&q->lk);
     q->volume = volume;
@@ -455,18 +460,18 @@ int nn_audio_detail_IAudioOut_SetAudioOutVolume(SvcObj* self, float volume) {
     pm_unlock(&q->lk);
     return 0;
 }
-int nn_audio_detail_IAudioOut_GetAudioOutVolume(SvcObj* self, float* volume) {
+static int nn_audio_detail_IAudioOut_GetAudioOutVolume(SvcObj* self, float* volume) {
     AudOut* q = (AudOut*)self->data;
     pm_lock(&q->lk);
     *volume = q->volume;
     pm_unlock(&q->lk);
     return 0;
 }
-int nn_audio_detail_IAudioOutManager_ListAudioOuts(SvcObj* self, IpcBuf names, u32* count) {
+static int nn_audio_detail_IAudioOutManager_ListAudioOuts(SvcObj* self, IpcBuf names, u32* count) {
     *count = put_name(names, "DeviceOut");
     return 0;
 }
-int nn_audio_detail_IAudioOutManager_ListAudioOutsAuto(SvcObj* self, IpcBuf names, u32* count) {
+static int nn_audio_detail_IAudioOutManager_ListAudioOutsAuto(SvcObj* self, IpcBuf names, u32* count) {
     *count = put_name(names, "DeviceOut");
     return 0;
 }
@@ -479,10 +484,8 @@ static int open_audio_out(const nn_audio_AudioOutParameter* params, IpcBuf name_
     q->channels = 2; /* what the reply tells the game it gets */
     q->volume = 1.0f;
     q->output = plat_audio_open(48000, q->channels);
-    q->ev = kevent_new("audio out buffers");
-    kobj_ref(&q->ev->o);
+    q->ev = owned_event("audio out buffers");
     r->destroy = audout_destroy;
-    outs_init();
     pm_lock(&audio.outs_lk);
     q->next = audio.outs;
     audio.outs = q;
@@ -497,15 +500,16 @@ static int open_audio_out(const nn_audio_AudioOutParameter* params, IpcBuf name_
     *out = r;
     return 0;
 }
-int nn_audio_detail_IAudioOutManager_OpenAudioOut(SvcObj* self, const nn_audio_AudioOutParameter* params, u64 aruid,
-                                                  u32 process, IpcBuf name, IpcBuf name_out, u32* sample_rate,
-                                                  u32* channel_count, u32* sample_format, u32* state, SvcObj** out) {
+static int nn_audio_detail_IAudioOutManager_OpenAudioOut(SvcObj* self, const nn_audio_AudioOutParameter* params,
+                                                         u64 aruid, u32 process, IpcBuf name, IpcBuf name_out,
+                                                         u32* sample_rate, u32* channel_count, u32* sample_format,
+                                                         u32* state, SvcObj** out) {
     return open_audio_out(params, name_out, sample_rate, channel_count, sample_format, state, out);
 }
-int nn_audio_detail_IAudioOutManager_OpenAudioOutAuto(SvcObj* self, const nn_audio_AudioOutParameter* params, u64 aruid,
-                                                      u32 process, IpcBuf name, IpcBuf name_out, u32* sample_rate,
-                                                      u32* channel_count, u32* sample_format, u32* state,
-                                                      SvcObj** out) {
+static int nn_audio_detail_IAudioOutManager_OpenAudioOutAuto(SvcObj* self, const nn_audio_AudioOutParameter* params,
+                                                             u64 aruid, u32 process, IpcBuf name, IpcBuf name_out,
+                                                             u32* sample_rate, u32* channel_count, u32* sample_format,
+                                                             u32* state, SvcObj** out) {
     return open_audio_out(params, name_out, sample_rate, channel_count, sample_format, state, out);
 }
 SvcObj* new_audout(void) { return nn_audio_detail_IAudioOutManager_new(0); }
@@ -707,41 +711,42 @@ static int decode(SvcObj* self, int reset, IpcBuf input, IpcBuf output, u32* con
     if (perf_us) *perf_us = (plat_ns() - t0) / 1000;
     return 0;
 }
-int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedOld(SvcObj* self, IpcBuf input, IpcBuf output, u32* consumed,
-                                                              u32* samples) {
+static int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedOld(SvcObj* self, IpcBuf input, IpcBuf output,
+                                                                     u32* consumed, u32* samples) {
     return decode(self, 0, input, output, consumed, samples, NULL);
 }
-int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedForMultiStreamOld(SvcObj* self, IpcBuf input, IpcBuf output,
-                                                                            u32* consumed, u32* samples) {
+static int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedForMultiStreamOld(SvcObj* self, IpcBuf input,
+                                                                                   IpcBuf output, u32* consumed,
+                                                                                   u32* samples) {
     return decode(self, 0, input, output, consumed, samples, NULL);
 }
-int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedWithPerfOld(SvcObj* self, IpcBuf input, IpcBuf output,
-                                                                      u32* consumed, u32* samples, u64* perf_us) {
+static int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedWithPerfOld(SvcObj* self, IpcBuf input, IpcBuf output,
+                                                                             u32* consumed, u32* samples,
+                                                                             u64* perf_us) {
     return decode(self, 0, input, output, consumed, samples, perf_us);
 }
-int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedForMultiStreamWithPerfOld(SvcObj* self, IpcBuf input,
-                                                                                    IpcBuf output, u32* consumed,
-                                                                                    u32* samples, u64* perf_us) {
+static int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedForMultiStreamWithPerfOld(SvcObj* self, IpcBuf input,
+                                                                                           IpcBuf output, u32* consumed,
+                                                                                           u32* samples, u64* perf_us) {
     return decode(self, 0, input, output, consumed, samples, perf_us);
 }
-int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedWithPerfAndResetOld(SvcObj* self, u8 reset, IpcBuf input,
-                                                                              IpcBuf output, u32* consumed,
-                                                                              u32* samples, u64* perf_us) {
+static int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedWithPerfAndResetOld(SvcObj* self, u8 reset,
+                                                                                     IpcBuf input, IpcBuf output,
+                                                                                     u32* consumed, u32* samples,
+                                                                                     u64* perf_us) {
     return decode(self, reset & 1, input, output, consumed, samples, perf_us);
 }
-int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedForMultiStreamWithPerfAndResetOld(SvcObj* self, u8 reset,
-                                                                                            IpcBuf input, IpcBuf output,
-                                                                                            u32* consumed, u32* samples,
-                                                                                            u64* perf_us) {
+static int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedForMultiStreamWithPerfAndResetOld(
+    SvcObj* self, u8 reset, IpcBuf input, IpcBuf output, u32* consumed, u32* samples, u64* perf_us) {
     return decode(self, reset & 1, input, output, consumed, samples, perf_us);
 }
-int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleaved(SvcObj* self, u8 reset, IpcBuf input, IpcBuf output,
-                                                           u32* consumed, u32* samples, u64* perf_us) {
+static int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleaved(SvcObj* self, u8 reset, IpcBuf input, IpcBuf output,
+                                                                  u32* consumed, u32* samples, u64* perf_us) {
     return decode(self, reset & 1, input, output, consumed, samples, perf_us);
 }
-int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedForMultiStream(SvcObj* self, u8 reset, IpcBuf input,
-                                                                         IpcBuf output, u32* consumed, u32* samples,
-                                                                         u64* perf_us) {
+static int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedForMultiStream(SvcObj* self, u8 reset, IpcBuf input,
+                                                                                IpcBuf output, u32* consumed,
+                                                                                u32* samples, u64* perf_us) {
     return decode(self, reset & 1, input, output, consumed, samples, perf_us);
 }
 /* a work buffer the game allocates and passes as transfer memory, which the decoder here never touches: about what a
@@ -750,10 +755,11 @@ static u32 hwopus_work_size(u32 streams) { return 0x8000 + 0x8000 * (streams ? s
 /* OpusMultiStreamParameters(Ex), the X buffer of the multistream commands: rate, channels, streams, coupled streams,
    (Ex: flags and padding,) then the channel mapping, 0x100 bytes */
 static int ms_params(IpcBuf b, u32 v[4], const u8** map, int ex) {
-    u32 need = (ex ? 0x18 : 0x10) + 0x100;
-    if (!b.addr || b.size < need) return 0;
-    memcpy(v, GP(b.addr), 16);
-    *map = GP(b.addr) + (ex ? 0x18 : 0x10);
+    typedef nn_codec_detail_HardwareOpusMultiStreamDecoderParameterInternal Params;
+    typedef nn_codec_detail_HardwareOpusMultiStreamDecoderParameterInternalEx ParamsEx;
+    if (!b.addr || b.size < (ex ? sizeof(ParamsEx) : sizeof(Params))) return 0;
+    memcpy(v, GP(b.addr), 16); /* the same four u32s first in both */
+    *map = GP(b.addr) + (ex ? offsetof(ParamsEx, channel_mappings) : offsetof(Params, channel_mappings));
     return 1;
 }
 static int open_decoder(u32 rate, u32 ch, SvcObj** decoder) {
@@ -786,55 +792,51 @@ static u32 ms_work_size(IpcBuf params, int ex) {
     const u8* map;
     return hwopus_work_size(ms_params(params, v, &map, ex) ? v[2] : 1);
 }
-int nn_codec_detail_IHardwareOpusDecoderManager_OpenHardwareOpusDecoder(
+static int nn_codec_detail_IHardwareOpusDecoderManager_OpenHardwareOpusDecoder(
     SvcObj* self, const nn_codec_detail_HardwareOpusDecoderParameterInternal* params, u32 work_buffer_size,
     u32 work_buffer, SvcObj** decoder) {
     return open_decoder(params->sample_rate, params->channel_count, decoder);
 }
-int nn_codec_detail_IHardwareOpusDecoderManager_OpenHardwareOpusDecoderEx(
+static int nn_codec_detail_IHardwareOpusDecoderManager_OpenHardwareOpusDecoderEx(
     SvcObj* self, const nn_codec_detail_HardwareOpusDecoderParameterInternalEx* params, u32 work_buffer_size,
     u32 work_buffer, SvcObj** decoder) {
     return open_decoder(params->sample_rate, params->channel_count, decoder);
 }
-int nn_codec_detail_IHardwareOpusDecoderManager_OpenHardwareOpusDecoderForMultiStream(SvcObj* self, IpcBuf params,
-                                                                                      u32 work_buffer_size,
-                                                                                      u32 work_buffer,
-                                                                                      SvcObj** decoder) {
+static int nn_codec_detail_IHardwareOpusDecoderManager_OpenHardwareOpusDecoderForMultiStream(
+    SvcObj* self, IpcBuf params, u32 work_buffer_size, u32 work_buffer, SvcObj** decoder) {
     return open_ms_decoder(params, 0, decoder);
 }
-int nn_codec_detail_IHardwareOpusDecoderManager_OpenHardwareOpusDecoderForMultiStreamEx(SvcObj* self, IpcBuf params,
-                                                                                        u32 work_buffer_size,
-                                                                                        u32 work_buffer,
-                                                                                        SvcObj** decoder) {
+static int nn_codec_detail_IHardwareOpusDecoderManager_OpenHardwareOpusDecoderForMultiStreamEx(
+    SvcObj* self, IpcBuf params, u32 work_buffer_size, u32 work_buffer, SvcObj** decoder) {
     return open_ms_decoder(params, 1, decoder);
 }
-int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSize(
+static int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSize(
     SvcObj* self, const nn_codec_detail_HardwareOpusDecoderParameterInternal* params, u32* size) {
     *size = hwopus_work_size(1);
     return 0;
 }
-int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeEx(
+static int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeEx(
     SvcObj* self, const nn_codec_detail_HardwareOpusDecoderParameterInternalEx* params, u32* size) {
     *size = hwopus_work_size(1);
     return 0;
 }
-int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeExEx(
+static int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeExEx(
     SvcObj* self, const nn_codec_detail_HardwareOpusDecoderParameterInternalEx* params, u32* size) {
     *size = hwopus_work_size(1);
     return 0;
 }
-int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeForMultiStream(SvcObj* self, IpcBuf params,
-                                                                                u32* size) {
+static int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeForMultiStream(SvcObj* self, IpcBuf params,
+                                                                                       u32* size) {
     *size = ms_work_size(params, 0);
     return 0;
 }
-int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeForMultiStreamEx(SvcObj* self, IpcBuf params,
-                                                                                  u32* size) {
+static int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeForMultiStreamEx(SvcObj* self, IpcBuf params,
+                                                                                         u32* size) {
     *size = ms_work_size(params, 1);
     return 0;
 }
-int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeForMultiStreamExEx(SvcObj* self, IpcBuf params,
-                                                                                    u32* size) {
+static int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeForMultiStreamExEx(SvcObj* self, IpcBuf params,
+                                                                                           u32* size) {
     *size = ms_work_size(params, 1);
     return 0;
 }

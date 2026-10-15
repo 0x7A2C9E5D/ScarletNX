@@ -1,10 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The dispatcher tools/swipc generates for tests/swipc/test.swipc, driven with hand-made requests: raw argument
-   offsets (stable sort by alignment, ascending), pid and aruid slots, the descriptor list and index of every buffer
-   kind, handles and objects in and out, what a failed request returns, @stub and the fallbacks */
+/* The dispatchers tools/swipc generates for tests/swipc/test.swipc and other.swipc, driven with hand-made requests:
+   raw argument offsets (stable sort by alignment, ascending, or declaration order with @unsorted), pid and aruid
+   slots, a request shorter than its arguments or with the wrong descriptors, handles or domain objects, the descriptor list and index of every buffer kind, handles and
+   objects in and out, what a failed request returns, @stub and the fallbacks. The handlers are static, as in a
+   service's file, and the generated .inc files are included after the stand-ins for ipc.c, before the handlers they
+   declare */
 #include "hle/kernel/ipc.h"
-#include "tests/swipc/test.swipc.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -17,7 +19,7 @@
     } while (0)
 
 /* ============================================================ what ipc.c gives the dispatchers */
-static int unrefs, closes, stubs, quiets, unknowns;
+static int unrefs, stubs, quiets, unknowns, bad_requests, bad_objects;
 static const char* registered[4];
 static int nregistered;
 static SvcObj in_thing;
@@ -50,6 +52,16 @@ int quiet_ok(SvcObj* o, IpcCtx* c) {
     quiets++;
     return 0;
 }
+int ipc_bad_request(SvcObj* o, IpcCtx* c) {
+    (void)o, (void)c;
+    bad_requests++;
+    return 0x3480B; /* RC(11, 420) */
+}
+int ipc_bad_objects(SvcObj* o, IpcCtx* c) {
+    (void)o, (void)c;
+    bad_objects++;
+    return 0x1D60A; /* RC(10, 235) */
+}
 int ipc_unknown(SvcObj* o, IpcCtx* c) {
     (void)o, (void)c;
     unknowns++;
@@ -64,13 +76,11 @@ SvcObj* ipc_in_obj(IpcCtx* c, int i) {
     in_thing.refs++;
     return &in_thing;
 }
-void ipc_close(u32 h) {
-    (void)h;
-    closes++;
-}
 void ipc_out_overflow(IpcCtx* c) { (void)c; }
 
 /* ============================================================ the handlers */
+#include "tests/swipc/other.swipc.inc"
+#include "tests/swipc/test.swipc.inc"
 static struct {
     u32 a, f;
     u64 b;
@@ -85,36 +95,37 @@ static struct {
     test_Pair p;
     u8 q, raw[6];
     test_Uid u;
-    int empty;
+    int empty, fallbacks;
 } got;
 static SvcObj* ctor(void) { return NULL; }
-int test_IThing_Layout(SvcObj* self, u32 a, u64 b, u8 c, u16 d, const test_Small* e, u32 f, u8* x, u64* y, u16* z) {
+static int test_IThing_Layout(SvcObj* self, u32 a, u64 b, u8 c, u16 d, const test_Small* e, u32 f, u8* x, u64* y,
+                              u16* z) {
     (void)self;
     got.a = a, got.b = b, got.c = c, got.d = d, got.f = f;
     memcpy(got.e, e->v, 3);
     *x = 0x11, *y = 0x2222222222222222ull, *z = 0x3333;
     return 0;
 }
-int test_IThing_Pid(SvcObj* self, u32 a, u64 pid, u64 b, u64* pid_out) {
+static int test_IThing_Pid(SvcObj* self, u32 a, u64 pid, u64 b, u64* pid_out) {
     (void)self;
     got.a = a, got.pid = pid, got.b = b;
     *pid_out = pid;
     return 0;
 }
-int test_IThing_Aruid(SvcObj* self, u64 aruid, u32 v, test_Id* id) {
+static int test_IThing_Aruid(SvcObj* self, u64 aruid, u32 v, test_Id* id) {
     (void)self;
     got.aruid = aruid, got.v = v;
     *id = 0x99;
     return 0;
 }
-int test_IThing_Buffers(SvcObj* self, IpcBuf a0, IpcBuf auto0, IpcBuf x1, IpcBuf b0, IpcBuf auto1, IpcBuf c1, IpcBuf x2,
-                        IpcBuf b2) {
+static int test_IThing_Buffers(SvcObj* self, IpcBuf a0, IpcBuf auto0, IpcBuf x1, IpcBuf b0, IpcBuf auto1, IpcBuf c1,
+                               IpcBuf x2, IpcBuf b2) {
     (void)self;
     got.bufs[0] = a0, got.bufs[1] = auto0, got.bufs[2] = x1, got.bufs[3] = b0;
     got.bufs[4] = auto1, got.bufs[5] = c1, got.bufs[6] = x2, got.bufs[7] = b2;
     return 0;
 }
-int test_IThing_Objects(SvcObj* self, SvcObj* thing, u32* m, SvcObj** out, u32* h) {
+static int test_IThing_Objects(SvcObj* self, SvcObj* thing, u32* m, SvcObj** out, u32* h) {
     (void)self;
     got.thing = thing;
     CHECK(thing == &in_thing && thing->refs == 2); /* the dispatcher's reference, dropped after */
@@ -122,20 +133,20 @@ int test_IThing_Objects(SvcObj* self, SvcObj* thing, u32* m, SvcObj** out, u32* 
     *out = svcobj_new("out", NULL, 0);
     return 0;
 }
-int test_IThing_Fail(SvcObj* self, SvcObj** o, u32* h, u32* v) {
+static int test_IThing_Fail(SvcObj* self, SvcObj** o, u32* h, u32* v) {
     (void)self;
     *o = svcobj_new("lost", NULL, 0);
     *h = 0x61;
     *v = 5;
     return 0x1234;
 }
-int test_IThing_InHandles(SvcObj* self, u32 a, u32 b, u32 c) {
+static int test_IThing_InHandles(SvcObj* self, u32 a, u32 b, u32 c) {
     (void)self;
     got.ha = a, got.hb = b, got.hc = c;
     return 0;
 }
-int test_IThing_Struct(SvcObj* self, const test_Pair* p, u8 q, const test_Uid* u, const u8* raw, test_Pair* r,
-                       u8* quad) {
+static int test_IThing_Struct(SvcObj* self, const test_Pair* p, u8 q, const test_Uid* u, const u8* raw, test_Pair* r,
+                              u8* quad) {
     (void)self;
     got.p = *p, got.q = q, got.u = *u;
     memcpy(got.raw, raw, 6);
@@ -143,20 +154,55 @@ int test_IThing_Struct(SvcObj* self, const test_Pair* p, u8 q, const test_Uid* u
     quad[0] = 1, quad[1] = 2, quad[2] = 3, quad[3] = 4;
     return 0;
 }
-int test_IThing_Small(SvcObj* self, u8* flag) {
+static int test_IThing_Small(SvcObj* self, u8* flag) {
     (void)self;
     *flag = 0x5A;
     return 0;
 }
-int test_IThing_Big(SvcObj* self, u8* big) {
+static int test_IThing_Big(SvcObj* self, u8* big) {
     (void)self;
     memset(big, 0xB1, 0xd0);
     return 0;
 }
-int test_IThing_Empty(SvcObj* self) {
+static int test_IThing_Empty(SvcObj* self) {
     (void)self;
     got.empty++;
     return 7;
+}
+static int test_IThing_ObjectFail(SvcObj* self, SvcObj* thing, u32* v) {
+    (void)self;
+    got.thing = thing;
+    *v = 1;
+    return 0x4321;
+}
+static int test_IThing_RawFail(SvcObj* self, u32 a, u32* v) {
+    (void)self;
+    got.a = a;
+    *v = 0xFFFFFFFF;
+    return 0x5678;
+}
+static int test_IThing_Unsorted(SvcObj* self, const test_Uid* u, u32 a, u8 b, test_Tail* t, u8* c) {
+    (void)self;
+    got.u = *u, got.a = a, got.c = b;
+    t->x = 0x71, t->b = 0x72;
+    memset(t->a.v, 0x73, sizeof t->a.v);
+    *c = 0x74;
+    return 0;
+}
+static int test_IThing_FixedOut(SvcObj* self, IpcBuf uid) {
+    (void)self;
+    got.bufs[0] = uid;
+    return 0;
+}
+static int test_fallback(SvcObj* self, IpcCtx* c) {
+    (void)self, (void)c;
+    got.fallbacks++;
+    return 0x2A;
+}
+static int test_IOther_Swap(SvcObj* self, const test_Pair* p, test_Id* id) {
+    (void)self;
+    *id = p->c;
+    return 0;
 }
 
 /* ============================================================ requests */
@@ -213,15 +259,16 @@ int main(void) {
     ctx.pid = 0x51, ctx.has_pid = 1;
     CHECK(thing->dispatch(thing, &ctx) == 0);
     CHECK(got.a == 5 && got.pid == 0x51 && got.b == 6 && ctx.out_size == 8 && out_u(0, 8) == 0x51);
-    ctx.has_pid = 0; /* a client that sent no process id: 0 */
-    CHECK(thing->dispatch(thing, &ctx) == 0 && got.pid == 0);
+    ctx.has_pid = 0; /* a client that sent no process id: sf refuses the request, the command doesn't run */
+    bad_requests = 0;
+    CHECK(thing->dispatch(thing, &ctx) == 0x3480B && bad_requests == 1 && got.pid == 0x51);
 
     /* [2] (aruid, u32 v): v 0, the aruid 8, its raw value kept */
     request(2);
     memset(raw, 0, sizeof raw);
     v32 = 3, put(0, &v32, 4);
     v64 = 0x77, put(8, &v64, 8);
-    ctx.pid = 0x51;
+    ctx.pid = 0x51, ctx.has_pid = 1;
     CHECK(thing->dispatch(thing, &ctx) == 0);
     CHECK(got.v == 3 && got.aruid == 0x77 && out_u(0, 8) == 0x99);
 
@@ -241,12 +288,20 @@ int main(void) {
     CHECK(same(got.bufs[6], 0x4000, 0x10));
     CHECK(same(got.bufs[7], 0x6800, 8));
     request(3); /* AutoSelect out: B1 empty, so C0 */
-    ctx.nb = 2, ctx.b[1] = buf(0, 0);
+    ctx.na = 2, ctx.nx = 3, ctx.nb = 3, ctx.b[1] = buf(0, 0);
     ctx.nc = 1, ctx.c[0] = buf(0x7000, 6);
     CHECK(thing->dispatch(thing, &ctx) == 0 && same(got.bufs[4], 0x7000, 6));
-    request(3); /* descriptors the client did not send are empty */
+    request(3); /* C descriptors the client did not send are empty: sf doesn't count them */
+    ctx.na = 2, ctx.nx = 3, ctx.nb = 3;
     CHECK(thing->dispatch(thing, &ctx) == 0);
-    CHECK(same(got.bufs[0], 0, 0) && same(got.bufs[7], 0, 0));
+    CHECK(same(got.bufs[5], 0, 0) && same(got.bufs[7], 0, 0));
+    /* fewer A, B or X descriptors than declared, or an exchange buffer: InvalidCmifRequest */
+    bad_requests = 0;
+    request(3);
+    CHECK(thing->dispatch(thing, &ctx) == 0x3480B);
+    request(3);
+    ctx.na = 2, ctx.nx = 3, ctx.nb = 3, ctx.nw = 1;
+    CHECK(thing->dispatch(thing, &ctx) == 0x3480B && bad_requests == 2);
 
     /* [4] objects in and out, handles out */
     request(4);
@@ -258,12 +313,17 @@ int main(void) {
     CHECK(ctx.nout_move == 1 && ctx.out_move[0] == 0x51 && ctx.nout_copy == 1 && ctx.out_copy[0] == 0x52);
     CHECK(ctx.nout_objs == 1 && !strcmp(ctx.out_objs[0]->name, "out") && ctx.out_size == 0);
     svcobj_unref(ctx.out_objs[0]);
+    request(4); /* a domain request with another number of objects than the command takes: InvalidNumInObjects */
+    ctx.is_domain = 2, ctx.nin_objs = 0;
+    CHECK(thing->dispatch(thing, &ctx) == 0x1D60A && bad_objects == 1 && got.thing == NULL);
 
-    /* [5] a failed request answers no data, handles or objects, and drops what the handler made */
+    /* [5] a failed request answers no data. What the handler made is in the reply, which ipc.c drops for a failure
+       (drop_outputs) */
     request(5);
-    unrefs = closes = 0;
     CHECK(thing->dispatch(thing, &ctx) == 0x1234);
-    CHECK(unrefs == 1 && closes == 1 && ctx.nout_objs == 0 && ctx.nout_copy == 0 && ctx.out_size == 0);
+    CHECK(ctx.out_size == 0 && out_u(0, 4) == 0 && ctx.nout_objs == 1 && !strcmp(ctx.out_objs[0]->name, "lost"));
+    CHECK(ctx.nout_copy == 1 && ctx.out_copy[0] == 0x61);
+    svcobj_unref(ctx.out_objs[0]);
 
     /* [6] @stub: success, zeros of the outputs' size */
     request(6);
@@ -274,8 +334,12 @@ int main(void) {
     ctx.ncopy = 2, ctx.copy_h[0] = 0x71, ctx.copy_h[1] = 0x73;
     ctx.nmove = 1, ctx.move_h[0] = 0x72;
     CHECK(thing->dispatch(thing, &ctx) == 0 && got.ha == 0x71 && got.hb == 0x72 && got.hc == 0x73);
+    request(7); /* handles missing, or too many: refused before the handler */
+    bad_requests = 0;
+    CHECK(thing->dispatch(thing, &ctx) == 0x3480B && got.ha == 0);
     request(7);
-    CHECK(thing->dispatch(thing, &ctx) == 0 && got.ha == 0 && got.hb == 0 && got.hc == 0);
+    ctx.ncopy = 3, ctx.nmove = 1;
+    CHECK(thing->dispatch(thing, &ctx) == 0x3480B && bad_requests == 2 && got.ha == 0);
 
     /* [8] (Pair p, u8 q, Uid u, bytes<6> raw): q 0, raw 1, p 8 (a 8, b 12, c 16), u 24. Out quad 0, r 8 */
     request(8);
@@ -296,11 +360,71 @@ int main(void) {
     request(9);
     CHECK(thing->dispatch(thing, &ctx) == 7 && got.empty == 1);
 
+    /* a request shorter than its arguments (0x18 bytes): refused before the handler, InvalidCmifRequest */
+    request(0);
+    ctx.raw_size = 0x17;
+    bad_requests = 0;
+    CHECK(thing->dispatch(thing, &ctx) == 0x3480B && bad_requests == 1 && got.a == 0);
+    request(0);
+    ctx.raw_size = 0x18;
+    CHECK(thing->dispatch(thing, &ctx) == 0);
+    /* a TIPC request has no raw slot for its pid: [2] (aruid, u32 v) takes 8 bytes then, not 16 */
+    request(2);
+    ctx.tipc = 1, ctx.has_pid = 1, ctx.raw_size = 8;
+    CHECK(thing->dispatch(thing, &ctx) == 0);
+    request(2);
+    ctx.tipc = 1, ctx.has_pid = 1, ctx.raw_size = 4;
+    CHECK(thing->dispatch(thing, &ctx) == 0x3480B);
+
     /* [10] a lone byte: the reply's raw size rounds up to 4. [11] the largest reply */
     request(10);
     CHECK(thing->dispatch(thing, &ctx) == 0 && ctx.out_size == 4 && out_u(0, 1) == 0x5A);
     request(11);
     CHECK(thing->dispatch(thing, &ctx) == 0 && ctx.out_size == 0xd0 && ctx.out[0xcf] == 0xB1);
+
+    /* [12] a failed request with an object in drops the dispatcher's reference to it */
+    request(12);
+    in_thing.refs = 1;
+    ctx.nin_objs = 1, ctx.in_objs[0] = 7;
+    unrefs = 0;
+    CHECK(thing->dispatch(thing, &ctx) == 0x4321);
+    CHECK(got.thing == &in_thing && in_thing.refs == 1 && unrefs == 1 && ctx.out_size == 0);
+    /* [13] a failed request with raw outputs only answers no data */
+    request(13);
+    memset(raw, 0, sizeof raw);
+    v32 = 9, put(0, &v32, 4);
+    CHECK(thing->dispatch(thing, &ctx) == 0x5678 && got.a == 9 && ctx.out_size == 0 && out_u(0, 4) == 0);
+
+    /* [14] @unsorted (Uid u, u32 a, u8 b): u 0, a 16, b 20. Out (Tail t, u8 c): t 0 (x 0, a 8, b 24), c 32 */
+    CHECK(sizeof(test_Tail) == 32 && offsetof(test_Tail, a) == 8 && offsetof(test_Tail, b) == 24);
+    request(14);
+    memset(raw, 0, sizeof raw);
+    put(0, "0123456789abcdef", 16);
+    v32 = 0x12345678, put(16, &v32, 4);
+    raw[20] = 0x9A;
+    CHECK(thing->dispatch(thing, &ctx) == 0);
+    CHECK(!memcmp(got.u.v, "0123456789abcdef", 16) && got.a == 0x12345678 && got.c == 0x9A);
+    CHECK(ctx.out_size == 36 && out_u(0, 1) == 0x71 && out_u(1, 7) == 0 && out_u(8, 8) == 0x7373737373737373ull &&
+          out_u(24, 1) == 0x72 && out_u(25, 7) == 0 && out_u(32, 1) == 0x74);
+
+    /* [15] a fixed-size pointer buffer out is a C descriptor. The handler gets the type's size, or less when the
+       client's buffer is smaller */
+    request(15);
+    ctx.nc = 1, ctx.c[0] = buf(0x9000, 0x40);
+    CHECK(thing->dispatch(thing, &ctx) == 0 && same(got.bufs[0], 0x9000, 0x10));
+    request(15);
+    ctx.nc = 1, ctx.c[0] = buf(0x9000, 8);
+    CHECK(thing->dispatch(thing, &ctx) == 0 && same(got.bufs[0], 0x9000, 8));
+
+    /* an interface of another file, with this file's types */
+    {
+        SvcObj* o = test_IOther_new(0);
+        request(0);
+        memset(raw, 0, sizeof raw);
+        v64 = 0xC0FFEE, put(8, &v64, 8);
+        CHECK(o->dispatch(o, &ctx) == 0 && ctx.out_size == 8 && out_u(0, 8) == 0xC0FFEE);
+        svcobj_unref(o);
+    }
 
     /* commands the interface doesn't have: stub_ok, or the @fallback's function */
     request(99);
@@ -313,6 +437,9 @@ int main(void) {
         svcobj_unref(q);
         q = test_IStrict_new(0);
         CHECK(q->dispatch(q, &ctx) == 0x1BA0A && unknowns == 1);
+        svcobj_unref(q);
+        q = test_ICustom_new(0);
+        CHECK(q->dispatch(q, &ctx) == 0x2A && got.fallbacks == 1);
         svcobj_unref(q);
     }
     svcobj_unref(thing);

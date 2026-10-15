@@ -5,7 +5,7 @@
    applies relocations and calls constructors. NRO code runs through the existing interpreter fallback;
    fixed-address AOT functions cannot safely be rebased by changing their dispatch entries. */
 #include "hle/services/services_int.h"
-#include "hle/services/ldr.swipc.h"
+#include "hle/services/ldr.swipc.inc"
 #include "utilities/sha256.h"
 
 #define RO_ERROR(d) RC(22, d)
@@ -169,24 +169,24 @@ static int ro_session(SvcObj* self, u64 pid) {
     if (pid != K_PROCESS_ID || !s->initialized) return RO_ERROR(1031);
     return 0;
 }
-int nn_ro_detail_IRoInterface_MapManualLoadModuleMemory(SvcObj* self, u64 pid, u64 nro_address, u64 nro_size,
-                                                        u64 bss_address, u64 bss_size, u64* address) {
+static int nn_ro_detail_IRoInterface_MapManualLoadModuleMemory(SvcObj* self, u64 pid, u64 nro_address, u64 nro_size,
+                                                               u64 bss_address, u64 bss_size, u64* address) {
     int r = ro_session(self, pid);
     return r ? r : ro_load_nro(self->data, nro_address, nro_size, bss_address, bss_size, address);
 }
-int nn_ro_detail_IRoInterface_UnmapManualLoadModuleMemory(SvcObj* self, u64 pid, u64 nro_address) {
+static int nn_ro_detail_IRoInterface_UnmapManualLoadModuleMemory(SvcObj* self, u64 pid, u64 nro_address) {
     int r = ro_session(self, pid);
     return r ? r : ro_unload_nro(self->data, nro_address);
 }
-int nn_ro_detail_IRoInterface_RegisterModuleInfo(SvcObj* self, u64 pid, u64 nrr_address, u64 nrr_size) {
+static int nn_ro_detail_IRoInterface_RegisterModuleInfo(SvcObj* self, u64 pid, u64 nrr_address, u64 nrr_size) {
     int r = ro_session(self, pid);
     return r ? r : ro_register_nrr(self->data, nrr_address, nrr_size, 0);
 }
-int nn_ro_detail_IRoInterface_UnregisterModuleInfo(SvcObj* self, u64 pid, u64 nrr_address) {
+static int nn_ro_detail_IRoInterface_UnregisterModuleInfo(SvcObj* self, u64 pid, u64 nrr_address) {
     int r = ro_session(self, pid);
     return r ? r : ro_unregister_nrr(self->data, nrr_address);
 }
-int nn_ro_detail_IRoInterface_RegisterProcessHandle(SvcObj* self, u64 pid, u32 process) {
+static int nn_ro_detail_IRoInterface_RegisterProcessHandle(SvcObj* self, u64 pid, u32 process) {
     RoState* s = self->data;
     if (pid != K_PROCESS_ID || !ro_process_handle(process)) return RO_ERROR(1031);
     if (s->initialized || ro_owner) return RO_ERROR(1030);
@@ -194,8 +194,8 @@ int nn_ro_detail_IRoInterface_RegisterProcessHandle(SvcObj* self, u64 pid, u32 p
     ro_owner = s;
     return 0;
 }
-int nn_ro_detail_IRoInterface_RegisterProcessModuleInfo(SvcObj* self, u64 pid, u64 nrr_address, u64 nrr_size,
-                                                        u32 process) {
+static int nn_ro_detail_IRoInterface_RegisterProcessModuleInfo(SvcObj* self, u64 pid, u64 nrr_address, u64 nrr_size,
+                                                               u32 process) {
     RoState* s = self->data;
     int r = ro_session(self, pid);
     if (r) return r;

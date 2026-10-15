@@ -72,10 +72,11 @@ static KSession* session_alloc(SvcObj* obj) {
 u32 session_new(SvcObj* obj) { return h_new(&session_alloc(obj)->o); }
 
 /* only warn the first few times per command, some games call them in a loop. Requests come from every guest thread,
-   and a service's name goes with the object, so the table keeps a copy under a lock */
+   and a service's name goes with the object, so the table keeps a copy under a lock. A name longer than the copy is
+   told apart by its first 127 characters (interface names are shorter) */
 int ipc_warn_once(const char* name, u32 cmd) {
     static struct {
-        char n[64];
+        char n[128];
         u32 cmd, cnt;
     } t[512];
     static int nt;
@@ -83,7 +84,7 @@ int ipc_warn_once(const char* name, u32 cmd) {
     while (__atomic_test_and_set(&lk, __ATOMIC_ACQUIRE)) plat_yield();
     int r = 1, i = 0;
     for (; i < nt; i++)
-        if (t[i].cmd == cmd && !strcmp(t[i].n, name)) {
+        if (t[i].cmd == cmd && !strncmp(t[i].n, name, sizeof t[i].n - 1)) {
             r = ++t[i].cnt <= 3;
             break;
         }
@@ -127,6 +128,11 @@ SvcObj* svc_open(const char* name) {
         if (!strcmp(regs[i].name, name)) return regs[i].ctor();
     return NULL;
 }
+int svc_registered(const char* name) {
+    for (int i = 0; i < nregs; i++)
+        if (!strcmp(regs[i].name, name)) return 1;
+    return 0;
+}
 
 void out_copy_h(IpcCtx* c, u32 h) {
     if (c->nout_copy < 8) c->out_copy[c->nout_copy++] = h;
@@ -137,22 +143,42 @@ void out_move_h(IpcCtx* c, u32 h) {
 void out_obj(IpcCtx* c, SvcObj* o) {
     if (c->nout_objs < 8) c->out_objs[c->nout_objs++] = o;
 }
+int ipc_bad_request(SvcObj* o, IpcCtx* c) {
+    if (ipc_warn_once(o->name, c->cmd))
+        WARN("  [bad request] %s cmd %u: pid %d, A %d, B %d, X %d, W %d, copy %d, move %d, 0x%x bytes of data is not "
+             "what it declares -> InvalidCmifRequest\n",
+             o->name, c->cmd, c->has_pid, c->na, c->nb, c->nx, c->nw, c->ncopy, c->nmove, c->raw_size);
+    return RC(11, 420); /* sf::hipc InvalidCmifRequest */
+}
+int ipc_bad_objects(SvcObj* o, IpcCtx* c) {
+    if (ipc_warn_once(o->name, c->cmd))
+        WARN("  [bad request] %s cmd %u: %d objects is not what it declares -> InvalidNumInObjects\n", o->name, c->cmd,
+             c->nin_objs);
+    return RC(10, 235); /* sf::cmif InvalidNumInObjects */
+}
 int ipc_unknown(SvcObj* o, IpcCtx* c) {
     if (ipc_warn_once(o->name, c->cmd)) WARN("  [unknown] %s cmd %u -> UnknownCommandId\n", o->name, c->cmd);
     return RC(10, 221); /* sf::cmif UnknownCommandId */
 }
-void ipc_close(u32 h) { h_close(h); }
-/* a failed request returns no handles or objects: close and drop what the service put in the reply */
+/* a failed request returns no data, handles or objects: close and drop what the service put in the reply (the generated
+   dispatchers put a command's objects and handles there whatever its result) */
 static void drop_outputs(IpcCtx* c) {
     for (int i = 0; i < c->nout_copy; i++) h_close(c->out_copy[i]);
     for (int i = 0; i < c->nout_move; i++) h_close(c->out_move[i]);
     for (int i = 0; i < c->nout_objs; i++) svcobj_unref(c->out_objs[i]);
     c->nout_copy = c->nout_move = c->nout_objs = 0;
+    c->out_size = 0;
 }
 
-char g_ipc_ring[32][80];
+char g_ipc_ring[32][160];
 u32 g_ipc_ring_n;
 /* ============================================================ parsing */
+/* the kernel maps or copies a buffer with a size before the server sees the request, so one outside the address space
+   fails it. Only the bounds are checked: the console also refuses a buffer in unmapped memory, but looking each up
+   (mem_query) would take the memory lock on every request */
+static void check_buffer(IpcCtx* c, const IpcBuf* b) {
+    if (b->size && (b->addr > AS_SIZE || b->size > AS_SIZE - b->addr)) c->kernel_rc = R_BADMEMSTATE;
+}
 /* The counts stored are clamped to the arrays, the pointer still moves past every descriptor the header announces.
    Handles the client sends are read but not taken from its table: services that get one look it up themselves */
 static void parse(IpcCtx* c) {
@@ -164,7 +190,22 @@ static void parse(IpcCtx* c) {
     u32 nx = (w0 >> 16) & 15, na = (w0 >> 20) & 15, nb = (w0 >> 24) & 15, nw = (w0 >> 28) & 15;
     u32 ndata = w1 & 0x3FF, cflags = (w1 >> 10) & 15;
     int special = (w1 >> 31) & 1;
+    u32 nc = cflags == 0 ? 0 : cflags == 1 ? 0 : cflags == 2 ? 1 : cflags - 2;
     u8* p = m + 8;
+    {
+        /* the kernel copies the message the header describes into the server's 0x100 byte buffer before the server
+           reads any of it. A header that describes more than the client's buffer fails the request
+           (InvalidCombination), and a message larger than the server's buffer too (MessageTooLarge, which only a
+           SendSyncRequestWithUserBuffer can send) */
+        u32 sh = 0, size;
+        if (special) memcpy(&sh, p, 4);
+        size = 8 + (special ? 4 + ((sh & 1) ? 8 : 0) + 4 * (((sh >> 1) & 15) + ((sh >> 5) & 15)) : 0) + 8 * nx +
+               12 * (na + nb + nw) + 4 * ndata + 8 * nc;
+        if (size > c->msg_size || size > 0x100) {
+            c->kernel_rc = size > c->msg_size ? R_BADCOMBO : R_MSGTOOLARGE;
+            return;
+        }
+    }
     if (special) {
         u32 sh;
         memcpy(&sh, p, 4);
@@ -190,6 +231,7 @@ static void parse(IpcCtx* c) {
         memcpy(&b, p + 4, 4);
         c->x[i].addr = b | ((u64)((a >> 12) & 15) << 32) | ((u64)((a >> 6) & 7) << 36);
         c->x[i].size = a >> 16;
+        check_buffer(c, &c->x[i]);
     }
     c->nx = nx < MAX_BUFS ? (int)nx : MAX_BUFS;
     IpcBuf* lists[3] = {c->a, c->b, c->w};
@@ -204,6 +246,7 @@ static void parse(IpcCtx* c) {
             lists[k][i].addr = a | ((u64)((f >> 28) & 15) << 32) | ((u64)((f >> 2) & 7) << 36);
             lists[k][i].size = s | ((u64)((f >> 24) & 15) << 32);
             lists[k][i].flags = f & 3;
+            check_buffer(c, &lists[k][i]);
         }
     c->na = na < MAX_BUFS ? (int)na : MAX_BUFS;
     c->nb = nb < MAX_BUFS ? (int)nb : MAX_BUFS;
@@ -211,7 +254,6 @@ static void parse(IpcCtx* c) {
     /* raw data is 16-aligned from the message start */
     u8* raw = m + (((p - m) + 15) & ~15);
     /* C descriptors follow the data */
-    u32 nc = cflags == 0 ? 0 : cflags == 1 ? 0 : cflags == 2 ? 1 : cflags - 2;
     u8* cp = p + ndata * 4;
     c->nc = nc < MAX_BUFS ? (int)nc : MAX_BUFS;
     for (int i = 0; i < c->nc; i++, cp += 8) {
@@ -220,36 +262,56 @@ static void parse(IpcCtx* c) {
         memcpy(&b, cp + 4, 4);
         c->c[i].addr = a | ((u64)(b & 0xFFFF) << 32);
         c->c[i].size = b >> 16;
+        check_buffer(c, &c->c[i]);
     }
     /* the data words end the request: what a command reads past them (a client that sent less than the command
-       takes) reads as zeros (ipc_in), not as what an earlier request left in the message */
+       takes) reads as zeros (ipc_in), not as what an earlier request left in the message. Besides the arguments they
+       hold the padding to 16 and the pointer buffers' sizes, so a short request can still read those */
     u8* end = p + ndata * 4 < m + 0x100 ? p + ndata * 4 : m + 0x100;
     /* TIPC (newer SDKs): type is 16+cmd, payload right after the header, no SFCI */
     if (c->type >= 16) {
         c->tipc = 1;
         c->cmd = c->type - 16;
         c->raw = p;
-        c->raw_size = (u32)(end - p);
+        c->raw_size = end > p ? (u32)(end - p) : 0; /* descriptors past the message leave nothing */
         return;
     }
     /* CMIF */
     u8* d = raw;
+    u32 dlen_max = 0x100; /* a domain message says how long its CMIF part is */
     c->is_domain = 0;
     if (c->sess && c->sess->is_domain && (c->type == 4 || c->type == 6)) {
+        if (end < d + 16) { /* sf's first check, InvalidHeaderSize: nothing of the header is read */
+            c->is_domain = 2;
+            c->domain_rc = RC(10, 202);
+            c->domain_short = 1;
+            return;
+        }
         u8 dcmd = d[0];
         u8 nobj = d[1];
         u16 dlen;
         memcpy(&dlen, d + 2, 2);
         memcpy(&c->domain_obj, d + 4, 4);
         c->is_domain = 1 + dcmd; /* 2 = request, 3 = close, anything else is refused */
-        c->nin_objs = nobj > 8 ? 8 : nobj;
-        for (int i = 0; i < c->nin_objs; i++) memcpy(&c->in_objs[i], d + 16 + dlen + i * 4, 4);
+        /* sf's checks of a request's domain header (sf_cmif_domain_service_object.cpp): its data and object ids
+           within the message's data, 8 objects at most */
+        u32 avail = end > d + 16 ? (u32)(end - (d + 16)) : 0;
+        if ((u32)dlen + nobj * 4u > avail)
+            c->domain_rc = RC(10, 202); /* InvalidHeaderSize */
+        else if (nobj > 8)
+            c->domain_rc = RC(10, 235); /* InvalidNumInObjects */
+        else {
+            c->nin_objs = nobj;
+            for (int i = 0; i < c->nin_objs; i++) memcpy(&c->in_objs[i], d + 16 + dlen + i * 4, 4);
+        }
+        dlen_max = dlen > 16 ? dlen - 16u : 0; /* the CmifInHeader, then the arguments: the object ids come after */
         d += 16;
     }
     memcpy(&c->cmd, d + 8, 4);
     memcpy(&c->token, d + 12, 4);
     c->raw = d + 16;
     c->raw_size = end > c->raw ? (u32)(end - c->raw) : 0;
+    if (c->raw_size > dlen_max) c->raw_size = dlen_max;
 }
 
 /* ============================================================ reply */
@@ -374,7 +436,7 @@ static void control(IpcCtx* c, KSession* s) {
     }
 }
 
-void ipc_handle(KThread* t, u32 handle, u64 msg_addr) {
+void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size) {
     CPU* cpu = &t->cpu;
     /* the ref keeps the session alive while the request runs, if another thread closes the handle meanwhile */
     KSession* s = (KSession*)h_get_ref(handle, KO_SESSION);
@@ -389,11 +451,20 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr) {
     c->th = t;
     c->msg = GP(msg_addr);
     c->msg_addr = msg_addr;
+    c->msg_size = msg_size;
     c->sess = s;
     parse(c);
     cpu->x[0] = 0;
     if (c->type == 2 || c->type == 15) /* client closes the handle itself afterwards */
         goto out;
+    if (c->kernel_rc) { /* the client's SendSyncRequest fails, and the server never sees the request */
+        WARN_LIMIT(8, "IPC: request to %s refused by the kernel (%x): %s\n", s->obj->name, c->kernel_rc,
+                   c->kernel_rc == R_BADCOMBO      ? "its header describes more than the message"
+                   : c->kernel_rc == R_MSGTOOLARGE ? "the message is larger than the server's buffer"
+                                                   : "a buffer is outside the address space");
+        cpu->x[0] = c->kernel_rc;
+        goto out;
+    }
     if (c->type == 5 || c->type == 7) {
         control(c, s);
         c->is_domain = 0;
@@ -401,6 +472,12 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr) {
         goto out;
     }
     SvcObj* obj = s->obj;
+    if (c->domain_short) {
+        WARN("domain request without a whole domain header -> InvalidHeaderSize\n");
+        c->rc = c->domain_rc;
+        respond(c);
+        goto out;
+    }
     if (c->is_domain) {
         if (c->is_domain == 3) { /* close a domain object */
             Domain* d = s->domain;
@@ -427,8 +504,15 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr) {
         obj = domain_get(s, c->domain_obj);
         if (!obj) {
             WARN("invalid domain object %u\n", c->domain_obj);
-            c->rc = 0x1D60A;
+            c->rc = RC(10, 261); /* sf::cmif TargetNotFound */
             respond(c);
+            goto out;
+        }
+        if (c->domain_rc) { /* after the target, as sf checks the header's sizes */
+            WARN("domain request to object %u: bad header (%x)\n", c->domain_obj, c->domain_rc);
+            c->rc = c->domain_rc;
+            respond(c);
+            svcobj_unref(obj);
             goto out;
         }
     }
@@ -436,11 +520,10 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr) {
     c->rc = (u32)obj->dispatch(obj, c);
     if (c->rc) drop_outputs(c);
     {
-        u32 i = __atomic_fetch_add(&g_ipc_ring_n, 1, __ATOMIC_RELAXED) & 31;
-        u32 in0 = 0, in1 = 0;
-        memcpy(&in0, c->raw, 4);
-        memcpy(&in1, c->raw + 4, 4);
-        snprintf(g_ipc_ring[i], 80, "%s cmd %u (in %x %x) -> %x", obj->name, c->cmd, in0, in1, c->rc);
+        u32 i = __atomic_fetch_add(&g_ipc_ring_n, 1, __ATOMIC_RELAXED) & 31, in0, in1;
+        ipc_in(c, 0, &in0, 4);
+        ipc_in(c, 4, &in1, 4);
+        snprintf(g_ipc_ring[i], sizeof g_ipc_ring[i], "%s cmd %u (in %x %x) -> %x", obj->name, c->cmd, in0, in1, c->rc);
     }
     respond(c);
     if (c->is_domain) svcobj_unref(obj); /* drop the ref from domain_get */

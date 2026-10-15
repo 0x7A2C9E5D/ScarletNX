@@ -18,7 +18,7 @@ struct SvcObj;
 typedef struct IpcCtx {
     KThread* th;
     u8* msg;
-    u64 msg_addr;
+    u64 msg_addr, msg_size;
     u32 type;
     u32 cmd;
     u32 token;
@@ -30,6 +30,10 @@ typedef struct IpcCtx {
     int ncopy, nmove;
     IpcBuf a[MAX_BUFS], b[MAX_BUFS], w[MAX_BUFS], x[MAX_BUFS], c[MAX_BUFS];
     int na, nb, nw, nx, nc;
+    u32 kernel_rc;    /* the kernel fails the request before the server sees it: a header that describes more than the
+                      message, a buffer outside the address space */
+    u32 domain_rc;    /* sf refuses a domain request whose header doesn't fit its data */
+    int domain_short; /* the data words don't even hold the domain header: refused before the target is looked up */
     int is_domain;
     u32 domain_obj;
     u32 in_objs[8];
@@ -71,7 +75,8 @@ SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t d
 void svcobj_ref(SvcObj* o);
 void svcobj_unref(SvcObj* o);
 u32 session_new(SvcObj* obj);
-void ipc_handle(KThread* t, u32 handle, u64 msg_addr);
+/* a request in the client's message buffer, msg_size bytes (TLS's 0x100, or SendSyncRequestWithUserBuffer's) */
+void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size);
 /* building a reply by hand (the control requests, a service's fallback). What doesn't fit in out[] is dropped, and
    logged once */
 void ipc_out_overflow(IpcCtx* c);
@@ -88,8 +93,9 @@ static inline void out32(IpcCtx* c, u32 v) {
 void out_copy_h(IpcCtx* c, u32 h);
 void out_move_h(IpcCtx* c, u32 h);
 void out_obj(IpcCtx* c, SvcObj* o);
-/* what the dispatchers generated from the .swipc files use (tools/swipc/swipc.c). The generator places every raw
-   argument inside the request's raw data and every output inside out[] */
+/* what the dispatchers generated from the .swipc files use (tools/swipc/swipc.c). The generator places every output
+   inside out[]. A request shorter than its command's raw data is refused (ipc_counts), so ipc_in's zeros only matter
+   to a dispatcher written by hand */
 static inline void ipc_in(IpcCtx* c, u32 off, void* dst, u32 n) {
     if (off + n <= c->raw_size)
         memcpy(dst, c->raw + off, n);
@@ -102,25 +108,39 @@ static inline IpcBuf ipc_buf(const IpcBuf* list, int n, int i) {
     return i < n ? list[i] : none;
 }
 /* an AutoSelect buffer: the client sends it mapped (A or B) or through the pointer buffer (X or C), and the other
-   descriptor empty */
+   descriptor empty. A mapped descriptor with an address is taken whatever its size, as Atmosphere's sf does */
 static inline IpcBuf ipc_buf_auto(const IpcBuf* map, int nmap, int i, const IpcBuf* ptr, int nptr, int j) {
     IpcBuf b = ipc_buf(map, nmap, i);
     return b.addr ? b : ipc_buf(ptr, nptr, j);
 }
-SvcObj* ipc_in_obj(IpcCtx* c, int i); /* the request's object i (domains only), with a reference to drop */
-void ipc_close(u32 h);                /* a handle a failed request made for its reply */
+/* whether a request sends what its command declares, as sf's HipcCommandProcessor checks it: the pid flag, the A, B
+   and X descriptors (an AutoSelect buffer counts in both of its lists), no exchange buffer, the copy and move handles,
+   and at least the command's raw data. C descriptors aren't checked */
+static inline int ipc_counts(const IpcCtx* c, int pid, int na, int nb, int nx, int ncopy, int nmove, u32 raw) {
+    /* a TIPC request (sm, from newer SDKs) carries the pid in its special header only, with no 8-byte slot in the raw
+       data: sm's pid commands take nothing else, so the slot is the last 8 bytes */
+    u32 need = c->tipc && pid && raw >= 8 ? raw - 8 : raw;
+    return c->has_pid == pid && c->na == na && c->nb == nb && c->nx == nx && !c->nw && c->ncopy == ncopy &&
+           c->nmove == nmove && c->raw_size >= need;
+}
+/* and a domain request, the objects it declares (sf's DomainServiceObjectProcessor) */
+static inline int ipc_objects(const IpcCtx* c, int nobj) { return !c->is_domain || c->nin_objs == nobj; }
+int ipc_bad_request(SvcObj* o, IpcCtx* c); /* sf's InvalidCmifRequest for a request that doesn't, logged */
+int ipc_bad_objects(SvcObj* o, IpcCtx* c); /* sf's InvalidNumInObjects, logged */
+SvcObj* ipc_in_obj(IpcCtx* c, int i);      /* the request's object i (domains only), with a reference to drop */
 #define RC(mod, desc) ((mod) | ((desc) << 9))
 #define RC_OK         0
 int stub_ok(SvcObj* o, IpcCtx* c);            /* success for a command a service doesn't know, logged */
 int quiet_ok(SvcObj* o, IpcCtx* c);           /* the same, silent */
 int ipc_unknown(SvcObj* o, IpcCtx* c);        /* what the console answers it: sf's UnknownCommandId, logged */
-int ipc_warn_once(const char* name, u32 cmd); /* 1 the first time a service command is seen unhandled */
-extern char g_ipc_ring[32][80];               /* the last requests, for crash reports */
+int ipc_warn_once(const char* name, u32 cmd); /* 1 the first three times a service command is seen unhandled */
+extern char g_ipc_ring[32][160];              /* the last requests, for crash reports */
 extern u32 g_ipc_ring_n;
 
 /* service registry */
 typedef SvcObj* (*SvcCtor)(void);
 void svc_register(const char* name, SvcCtor ctor);
 SvcObj* svc_open(const char* name);
+int svc_registered(const char* name);
 
 #endif

@@ -374,11 +374,11 @@ static void snx_svc_(CPU* c, u32 imm) {
         }
         case 0x21: /* the caller waits for the reply off its core */
             core_leave(t);
-            ipc_handle(t, (u32)x[0], t->tls);
+            ipc_handle(t, (u32)x[0], t->tls, 0x100);
             return;
         case 0x22:
             core_leave(t);
-            ipc_handle(t, (u32)x[2], x[0]);
+            ipc_handle(t, (u32)x[2], x[0], x[1]);
             return;
         case 0x24:
             x[0] = 0;

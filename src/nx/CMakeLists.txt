@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-# The runtime: one object library per component, linked into scarletnx. Each component sees runtime/ as its include
+# The runtime: one object library per component, linked into scarletnx. Each component sees src/nx/ as its include
 # root (#include "hle/kernel/kernel.h"), and the flags and third-party headers every component shares (snx_nx_flags).
 #
 #   core      startup, options, the game module, crash reports      kernel    threads, sync, memory, IPC

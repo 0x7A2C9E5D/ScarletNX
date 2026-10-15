@@ -15,9 +15,9 @@ type nn::vi::DisplayModeInfo = struct {
 type nn::vi::ProxyName = bytes<8>;
 
 interface nn::visrv::sf::IApplicationRootService is vi:u {
-    [0] GetDisplayService(u32 policy) -> object<nn::visrv::sf::IApplicationDisplayService> service;
-    [1] GetDisplayServiceWithProxyNameExchange(u32 policy)
-        -> object<nn::visrv::sf::IApplicationDisplayService> service;
+    # the SDK's names since 13: before, 0 was GetDisplayService and 1 wasn't there
+    [0] GetDisplayServiceWithWorkaround(u32 policy) -> object<nn::visrv::sf::IApplicationDisplayService> service;
+    [1] GetDisplayService(u32 policy) -> object<nn::visrv::sf::IApplicationDisplayService> service;
 }
 interface nn::visrv::sf::ISystemRootService is vi:s {
     [1] GetDisplayService(u32 policy) -> object<nn::visrv::sf::IApplicationDisplayService> service;
@@ -39,7 +39,7 @@ interface nn::visrv::sf::IApplicationDisplayService {
     [1010] OpenDisplay(nn::vi::DisplayName name) -> u64 display_id;
     [1011] OpenDefaultDisplay() -> u64 display_id;
     @stub [1020] CloseDisplay(u64 display_id);
-    @stub [1101] SetDisplayEnabled(u32 enabled, u64 display_id);
+    @stub [1101] SetDisplayEnabled(b8 enabled, u64 display_id);
     [1102] GetDisplayResolution(u64 display_id) -> (i64 width, i64 height);
     [2020] OpenLayer(nn::vi::DisplayName display_name, u64 layer_id, aruid aruid, buffer<u8, 6> native_window)
         -> i64 native_window_size;

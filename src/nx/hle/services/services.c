@@ -19,10 +19,16 @@
 
 /* ================================================================ shared events */
 u32 ev_handle(KEvent* e) { return h_new(&e->o); }
+int new_event(u32* event, const char* name, int signaled) {
+    KEvent* e = kevent_new(name);
+    e->signaled = signaled;
+    *event = ev_handle(e);
+    return 0;
+}
 int g_hle_docked, g_hle_lang;
 
-/* the service keeps these events for the whole run: its reference keeps them alive when the game closes the
-   handles it was given */
+/* an event the service keeps (for the whole run, or for an object's life, dropped in its destroy): its reference keeps
+   it alive when the game closes the handles it was given */
 KEvent* owned_event(const char* name) {
     KEvent* e = kevent_new(name);
     kobj_ref(&e->o);

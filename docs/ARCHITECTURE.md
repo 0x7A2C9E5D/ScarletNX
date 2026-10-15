@@ -116,7 +116,8 @@ behind its core's holder runs on an idle core of its mask, and an idle core take
 `memory/mem.c`: one guest VA reservation; `GP(addr) = g_mem + addr`, accessed directly by generated code.
 
 SVC -> `hle/svc/svc.c`; `svcSendSyncRequest` -> `hle/kernel/ipc.c` -> session's HLE service object, whose dispatcher
-is generated from the interface's `.swipc` file and calls the service's typed handler ([IPC interfaces](IPC.md)).
+is generated from the interface's `.swipc` file and calls the service's typed handler ([IPC interfaces](IPC.md)). A
+service the runtime doesn't have gets sm's stand-in object, which answers every command with success.
 
 [Filesystem](FILESYSTEM.md): startup scan; indexed lookup, metadata, enumeration, mutations.
 

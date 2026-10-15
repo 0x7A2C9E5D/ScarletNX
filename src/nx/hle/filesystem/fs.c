@@ -9,7 +9,7 @@
 #include "runtime/main.h"
 #include "hle/services/services.h"
 #include "hle/kernel/ipc.h"
-#include "hle/filesystem/fs.swipc.h"
+#include "hle/filesystem/fs.swipc.inc"
 #include "memory/mem.h"
 #include "runtime/platform/backend.h"
 #include "runtime/platform/log.h"
@@ -390,7 +390,7 @@ static FILE* rf_open(FsNode* node) { /* tree.lock held */
 /* -1 when a host file couldn't be read (that part is zeros) */
 static int romfs_read(u64 off, void* dst, u64 size) {
     u8* d = dst;
-    if (fsp.rimage) { /* romstorage keeps off and size within rtotal, the mapping's length */
+    if (fsp.rimage) { /* IStorage_Read keeps off and size within rtotal, the mapping's length */
         memcpy(d, fsp.rimage->map + off, (size_t)size);
         return 0;
     }
@@ -499,21 +499,21 @@ static int file_seek(FILE* f, u64 off) {
 
 /* Atmosphere's StorageInterfaceAdapter and FileInterfaceAdapter validate the signed arguments before the backend, in
    this order, which is observable on errors */
-static int check_read(i64 offset, IpcBuf buffer, i64 size) {
+static int check_transfer(i64 offset, IpcBuf buffer, i64 size) {
     if (offset < 0) return FS_INVALID_OFFSET;
     if (size < 0) return FS_INVALID_SIZE;
     if ((i64)buffer.size < 0 || (u64)size > buffer.size) return FS_INVALID_SIZE;
     return 0;
 }
-int nn_fssrv_sf_IStorage_Read(SvcObj* self, i64 offset, IpcBuf buffer, i64 size_in) {
+static int nn_fssrv_sf_IStorage_Read(SvcObj* self, i64 offset, IpcBuf buffer, i64 size_in) {
     FileData* data = self->data;
     u64 off = (u64)offset, sz = (u64)size_in, a = buffer.addr;
-    int rc = check_read(offset, buffer, size_in);
+    int rc = check_transfer(offset, buffer, size_in);
     if (rc) return rc;
     if (!sz) return 0;
     if (!data) { /* the RomFS */
         if (sz > (u64)INT64_MAX - off || off > fsp.rtotal || sz > fsp.rtotal - off) return FS_OUT_OF_RANGE;
-        if (a > AS_SIZE || sz > AS_SIZE - a) return FS_OUT_OF_RANGE;
+        if (!buffer_valid(a, sz)) return FS_OUT_OF_RANGE;
         return romfs_read(off, GP(a), sz) ? FS_OUT_OF_RANGE : 0;
     }
     if (sz > (u64)INT64_MAX - off || !buffer_valid(a, sz)) return FS_OUT_OF_RANGE;
@@ -530,15 +530,13 @@ int nn_fssrv_sf_IStorage_Read(SvcObj* self, i64 offset, IpcBuf buffer, i64 size_
 }
 /* the read-only storages: their backend rejects Write and SetSize, after the adapter's argument checks. Flush
    succeeds for these immutable images */
-int nn_fssrv_sf_IStorage_Write(SvcObj* self, i64 offset, IpcBuf buffer, i64 size) {
-    if (offset < 0) return FS_INVALID_OFFSET;
-    if (size < 0) return FS_INVALID_SIZE;
-    if ((i64)buffer.size < 0 || (u64)size > buffer.size) return FS_INVALID_SIZE;
-    return RC(2, 6300);
+static int nn_fssrv_sf_IStorage_Write(SvcObj* self, i64 offset, IpcBuf buffer, i64 size) {
+    int rc = check_transfer(offset, buffer, size);
+    return rc ? rc : RC(2, 6300);
 }
-int nn_fssrv_sf_IStorage_Flush(SvcObj* self) { return 0; }
-int nn_fssrv_sf_IStorage_SetSize(SvcObj* self, i64 size) { return size < 0 ? FS_INVALID_SIZE : RC(2, 6300); }
-int nn_fssrv_sf_IStorage_GetSize(SvcObj* self, i64* size) {
+static int nn_fssrv_sf_IStorage_Flush(SvcObj* self) { return 0; }
+static int nn_fssrv_sf_IStorage_SetSize(SvcObj* self, i64 size) { return size < 0 ? FS_INVALID_SIZE : RC(2, 6300); }
+static int nn_fssrv_sf_IStorage_GetSize(SvcObj* self, i64* size) {
     FileData* data = self->data;
     if (!data) {
         *size = (i64)fsp.rtotal;
@@ -550,8 +548,8 @@ int nn_fssrv_sf_IStorage_GetSize(SvcObj* self, i64* size) {
     return 0;
 }
 /* QueryRange (OperateRange): an all-zero QueryRangeInfo */
-int nn_fssrv_sf_IStorage_OperateRange(SvcObj* self, i32 operation_id, i64 offset, i64 size,
-                                      nn_fs_QueryRangeInfo* info) {
+static int nn_fssrv_sf_IStorage_OperateRange(SvcObj* self, i32 operation_id, i64 offset, i64 size,
+                                             nn_fs_QueryRangeInfo* info) {
     return 0;
 }
 
@@ -587,13 +585,15 @@ static int file_truncate(FILE* f, u64 n, u64* actual) {
 }
 
 /* All service operations share tree.lock, including file size updates across different handles: file_disp,
-   dir_disp and fs_disp hold it around the commands */
-int nn_fssrv_sf_IFile_Read(SvcObj* self, nn_fs_ReadOption option, i64 offset, IpcBuf buffer, i64 size,
-                           i64* bytes_read) {
+   dir_disp and fs_disp hold it around the commands. So these objects are made with those dispatchers (file_new,
+   OpenDirectory, hostfs_new), never by the generated _new. ipc.c drops a failed request's objects once the dispatcher
+   returned, outside the lock an IFile's destroy takes */
+static int nn_fssrv_sf_IFile_Read(SvcObj* self, nn_fs_ReadOption option, i64 offset, IpcBuf buffer, i64 size,
+                                  i64* bytes_read) {
     FileData* f = self->data;
     u64 off = (u64)offset, sz = (u64)size, a = buffer.addr;
     /* IFile::Read -> DryRead: the order is observable on errors */
-    int rc = check_read(offset, buffer, size);
+    int rc = check_transfer(offset, buffer, size);
     if (rc) return rc;
     if (!sz) return 0;
     if (sz > (u64)INT64_MAX - off) return FS_OUT_OF_RANGE;
@@ -613,12 +613,11 @@ int nn_fssrv_sf_IFile_Read(SvcObj* self, nn_fs_ReadOption option, i64 offset, Ip
     *bytes_read = (i64)n;
     return 0;
 }
-int nn_fssrv_sf_IFile_Write(SvcObj* self, nn_fs_WriteOption option, i64 offset, IpcBuf buffer, i64 size) {
+static int nn_fssrv_sf_IFile_Write(SvcObj* self, nn_fs_WriteOption option, i64 offset, IpcBuf buffer, i64 size) {
     FileData* f = self->data;
     u64 off = (u64)offset, sz = (u64)size, a = buffer.addr;
-    if (offset < 0) return FS_INVALID_OFFSET;
-    if (size < 0) return FS_INVALID_SIZE;
-    if ((i64)buffer.size < 0 || sz > buffer.size) return FS_INVALID_SIZE;
+    int rc = check_transfer(offset, buffer, size);
+    if (rc) return rc;
     /* IFile::Write succeeds without checking mode/EOF for an empty write, but honors Flush. */
     if (!sz) return (option & 1) && f->f && fflush(f->f) ? FS_NO_SPACE : 0;
     if (sz > (u64)INT64_MAX - off) return FS_OUT_OF_RANGE;
@@ -631,22 +630,23 @@ int nn_fssrv_sf_IFile_Write(SvcObj* self, nn_fs_WriteOption option, i64 offset, 
     if (n != sz || fflush(f->f)) return FS_NO_SPACE;
     return 0;
 }
-int nn_fssrv_sf_IFile_Flush(SvcObj* self) {
+static int nn_fssrv_sf_IFile_Flush(SvcObj* self) {
     FileData* f = self->data;
     return f->f && fflush(f->f) ? FS_NO_SPACE : 0;
 }
-int nn_fssrv_sf_IFile_SetSize(SvcObj* self, i64 size) {
+static int nn_fssrv_sf_IFile_SetSize(SvcObj* self, i64 size) {
     FileData* f = self->data;
     if (size < 0) return FS_INVALID_SIZE;
     if (!(f->mode & 2) || f->node->readonly) return FS_WRITE_NOT_PERMITTED;
     if (file_truncate(f->f, (u64)size, &f->node->size)) return FS_NO_SPACE;
     return 0;
 }
-int nn_fssrv_sf_IFile_GetSize(SvcObj* self, i64* size) {
+static int nn_fssrv_sf_IFile_GetSize(SvcObj* self, i64* size) {
     *size = (i64)((FileData*)self->data)->node->size;
     return 0;
 }
-int nn_fssrv_sf_IFile_OperateRange(SvcObj* self, i32 operation_id, i64 offset, i64 size, nn_fs_QueryRangeInfo* info) {
+static int nn_fssrv_sf_IFile_OperateRange(SvcObj* self, i32 operation_id, i64 offset, i64 size,
+                                          nn_fs_QueryRangeInfo* info) {
     return 0;
 }
 static int file_disp(SvcObj* o, IpcCtx* c) {
@@ -694,7 +694,7 @@ static SvcObj* file_new(FsNode* node, u32 mode, int storage, u32* rc) {
     return o;
 }
 
-int nn_fssrv_sf_IDirectory_Read(SvcObj* self, IpcBuf entries, i64* count) {
+static int nn_fssrv_sf_IDirectory_Read(SvcObj* self, IpcBuf entries, i64* count) {
     DirData* d = self->data;
     u64 a = entries.addr, s = entries.size, n = 0;
     if (!buffer_valid(a, s)) return FS_OUT_OF_RANGE;
@@ -718,7 +718,7 @@ int nn_fssrv_sf_IDirectory_Read(SvcObj* self, IpcBuf entries, i64* count) {
     *count = (i64)n;
     return 0;
 }
-int nn_fssrv_sf_IDirectory_GetEntryCount(SvcObj* self, i64* count) {
+static int nn_fssrv_sf_IDirectory_GetEntryCount(SvcObj* self, i64* count) {
     DirData* d = self->data;
     u64 n = 0;
     for (FsNode* node = d->node->children; node; node = node->next)
@@ -740,20 +740,20 @@ static void dir_destroy(SvcObj* o) {
     pm_unlock(&fsp.tree.lock);
 }
 static FsNode* fs_root(SvcObj* self) { return ((FsData*)self->data)->root; }
-int nn_fssrv_sf_IFileSystem_CreateFile(SvcObj* self, IpcBuf path, i64 size, i32 option) {
+static int nn_fssrv_sf_IFileSystem_CreateFile(SvcObj* self, IpcBuf path, i64 size, i32 option) {
     char p[0x301];
     u32 rc;
     if (size < 0) return FS_INVALID_SIZE;
     if ((rc = read_path(path, p))) return (int)rc;
     return (int)tree_result(fs_tree_create(&fsp.tree, fs_root(self), p, 0, (u64)size, NULL));
 }
-int nn_fssrv_sf_IFileSystem_DeleteFile(SvcObj* self, IpcBuf path) {
+static int nn_fssrv_sf_IFileSystem_DeleteFile(SvcObj* self, IpcBuf path) {
     char p[0x301];
     u32 rc;
     if ((rc = read_path(path, p))) return (int)rc;
     return (int)tree_result(fs_tree_remove(&fsp.tree, fs_root(self), p, 0, 0, 0));
 }
-int nn_fssrv_sf_IFileSystem_CreateDirectory(SvcObj* self, IpcBuf path) {
+static int nn_fssrv_sf_IFileSystem_CreateDirectory(SvcObj* self, IpcBuf path) {
     char p[0x301];
     u32 rc;
     if ((rc = read_path(path, p))) return (int)rc;
@@ -766,11 +766,11 @@ static int remove_dir(SvcObj* self, IpcBuf path, int recursive, int clean) {
     if ((rc = read_path(path, p))) return (int)rc;
     return (int)tree_result(fs_tree_remove(&fsp.tree, fs_root(self), p, 1, recursive, clean));
 }
-int nn_fssrv_sf_IFileSystem_DeleteDirectory(SvcObj* self, IpcBuf path) { return remove_dir(self, path, 0, 0); }
-int nn_fssrv_sf_IFileSystem_DeleteDirectoryRecursively(SvcObj* self, IpcBuf path) {
+static int nn_fssrv_sf_IFileSystem_DeleteDirectory(SvcObj* self, IpcBuf path) { return remove_dir(self, path, 0, 0); }
+static int nn_fssrv_sf_IFileSystem_DeleteDirectoryRecursively(SvcObj* self, IpcBuf path) {
     return remove_dir(self, path, 1, 0);
 }
-int nn_fssrv_sf_IFileSystem_CleanDirectoryRecursively(SvcObj* self, IpcBuf path) {
+static int nn_fssrv_sf_IFileSystem_CleanDirectoryRecursively(SvcObj* self, IpcBuf path) {
     return remove_dir(self, path, 1, 1);
 }
 static int rename_entry(SvcObj* self, IpcBuf old_path, IpcBuf new_path, int dir) {
@@ -780,13 +780,13 @@ static int rename_entry(SvcObj* self, IpcBuf old_path, IpcBuf new_path, int dir)
     if ((rc = read_path(new_path, p2))) return (int)rc;
     return (int)tree_result(fs_tree_rename(&fsp.tree, fs_root(self), p, p2, dir));
 }
-int nn_fssrv_sf_IFileSystem_RenameFile(SvcObj* self, IpcBuf old_path, IpcBuf new_path) {
+static int nn_fssrv_sf_IFileSystem_RenameFile(SvcObj* self, IpcBuf old_path, IpcBuf new_path) {
     return rename_entry(self, old_path, new_path, 0);
 }
-int nn_fssrv_sf_IFileSystem_RenameDirectory(SvcObj* self, IpcBuf old_path, IpcBuf new_path) {
+static int nn_fssrv_sf_IFileSystem_RenameDirectory(SvcObj* self, IpcBuf old_path, IpcBuf new_path) {
     return rename_entry(self, old_path, new_path, 1);
 }
-int nn_fssrv_sf_IFileSystem_GetEntryType(SvcObj* self, IpcBuf path, u32* type) {
+static int nn_fssrv_sf_IFileSystem_GetEntryType(SvcObj* self, IpcBuf path, u32* type) {
     char p[0x301];
     u32 rc;
     FsNode* node;
@@ -795,7 +795,7 @@ int nn_fssrv_sf_IFileSystem_GetEntryType(SvcObj* self, IpcBuf path, u32* type) {
     *type = node->is_dir ? 0 : 1;
     return 0;
 }
-int nn_fssrv_sf_IFileSystem_OpenFile(SvcObj* self, IpcBuf path, u32 mode, SvcObj** file) {
+static int nn_fssrv_sf_IFileSystem_OpenFile(SvcObj* self, IpcBuf path, u32 mode, SvcObj** file) {
     char p[0x301];
     u32 rc;
     FsNode* node;
@@ -809,7 +809,7 @@ int nn_fssrv_sf_IFileSystem_OpenFile(SvcObj* self, IpcBuf path, u32 mode, SvcObj
     *file = file_new(node, mode, 0, &rc);
     return (int)rc;
 }
-int nn_fssrv_sf_IFileSystem_OpenDirectory(SvcObj* self, IpcBuf path, u32 mode, SvcObj** directory) {
+static int nn_fssrv_sf_IFileSystem_OpenDirectory(SvcObj* self, IpcBuf path, u32 mode, SvcObj** directory) {
     char p[0x301];
     u32 rc;
     FsNode* node;
@@ -829,11 +829,11 @@ int nn_fssrv_sf_IFileSystem_OpenDirectory(SvcObj* self, IpcBuf path, u32 mode, S
     *directory = dir;
     return 0;
 }
-int nn_fssrv_sf_IFileSystem_GetFreeSpaceSize(SvcObj* self, IpcBuf path, i64* size) {
+static int nn_fssrv_sf_IFileSystem_GetFreeSpaceSize(SvcObj* self, IpcBuf path, i64* size) {
     *size = 4ll << 30;
     return 0;
 }
-int nn_fssrv_sf_IFileSystem_GetTotalSpaceSize(SvcObj* self, IpcBuf path, i64* size) {
+static int nn_fssrv_sf_IFileSystem_GetTotalSpaceSize(SvcObj* self, IpcBuf path, i64* size) {
     *size = 8ll << 30;
     return 0;
 }
@@ -890,43 +890,56 @@ static u32 save_migrate(void) { /* tree.lock held */
     return tree_result(r);
 }
 /* the filesystems there are not here */
-int nn_fssrv_sf_IFileSystemProxy_OpenDataFileSystemByCurrentProcess(SvcObj* self, SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenDataFileSystemByCurrentProcess(SvcObj* self, SvcObj** filesystem) {
     return RC(2, 1001);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenFileSystemWithPatch(SvcObj* self, nn_ncm_ProgramId program_id,
-                                                         nn_fs_FileSystemProxyType type, SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenFileSystemWithPatch(SvcObj* self, nn_ncm_ProgramId program_id,
+                                                                nn_fs_FileSystemProxyType type, SvcObj** filesystem) {
     return RC(2, 1001);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenFileSystemWithId(SvcObj* self, IpcBuf path, nn_ncm_ProgramId program_id,
-                                                      nn_fs_FileSystemProxyType type, SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenFileSystemWithId(SvcObj* self, IpcBuf path, nn_ncm_ProgramId program_id,
+                                                             nn_fs_FileSystemProxyType type, SvcObj** filesystem) {
     return RC(2, 1001);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenBisFileSystem(SvcObj* self, IpcBuf path, u32 partition_id, SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenBisFileSystem(SvcObj* self, IpcBuf path, u32 partition_id,
+                                                          SvcObj** filesystem) {
     return RC(2, 1001);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenHostFileSystem(SvcObj* self, IpcBuf path, SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenHostFileSystem(SvcObj* self, IpcBuf path, SvcObj** filesystem) {
     return RC(2, 1001);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenHostFileSystemWithOption(SvcObj* self, IpcBuf path, u32 option,
-                                                              SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenHostFileSystemWithOption(SvcObj* self, IpcBuf path, u32 option,
+                                                                     SvcObj** filesystem) {
     return RC(2, 1001);
 }
-int nn_fssrv_sf_IFileSystemProxy_FormatSdCardFileSystem(SvcObj* self) { return RC(2, 1001); }
-int nn_fssrv_sf_IFileSystemProxy_OpenGameCardFileSystem(SvcObj* self, u32 handle, u32 partition, SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_FormatSdCardFileSystem(SvcObj* self) { return RC(2, 1001); }
+static int nn_fssrv_sf_IFileSystemProxy_OpenGameCardFileSystem(SvcObj* self, u32 handle, u32 partition,
+                                                               SvcObj** filesystem) {
     return RC(2, 1001);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenPatchDataStorageByCurrentProcess(SvcObj* self, SvcObj** storage) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenPatchDataStorageByCurrentProcess(SvcObj* self, SvcObj** storage) {
     return RC(2, 1001);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenRegisteredUpdatePartition(SvcObj* self, SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenRegisteredUpdatePartition(SvcObj* self, SvcObj** filesystem) {
     return RC(2, 1001);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenSdCardFileSystem(SvcObj* self, SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenSdCardFileSystem(SvcObj* self, SvcObj** filesystem) {
     u32 rc;
     pm_lock(&fsp.tree.lock);
     *filesystem = hostfs_new("sdmc", &rc);
     pm_unlock(&fsp.tree.lock);
     return (int)rc;
+}
+/* the card OpenSdCardFileSystem serves is always there */
+static int nn_fssrv_sf_IFileSystemProxy_IsSdCardAccessible(SvcObj* self, u8* accessible) {
+    *accessible = 1;
+    return 0;
+}
+/* one program, the first: a program count of 0 doesn't happen on the console */
+static int nn_fssrv_sf_IFileSystemProxy_GetProgramIndexForAccessLog(SvcObj* self, u32* program_index,
+                                                                    u32* program_count) {
+    *program_count = 1;
+    return 0;
 }
 /* save/<kind>, by the attribute's SaveDataType */
 static int open_save(const nn_fs_SaveDataAttribute* attribute, SvcObj** filesystem) {
@@ -940,18 +953,18 @@ static int open_save(const nn_fs_SaveDataAttribute* attribute, SvcObj** filesyst
     pm_unlock(&fsp.tree.lock);
     return (int)rc;
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenSaveDataFileSystem(SvcObj* self, nn_fs_SaveDataSpaceId space_id,
-                                                        const nn_fs_SaveDataAttribute* attribute, SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenSaveDataFileSystem(SvcObj* self, nn_fs_SaveDataSpaceId space_id,
+                                                               const nn_fs_SaveDataAttribute* attribute,
+                                                               SvcObj** filesystem) {
     return open_save(attribute, filesystem);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenSaveDataFileSystemBySystemSaveDataId(SvcObj* self, nn_fs_SaveDataSpaceId space_id,
-                                                                          const nn_fs_SaveDataAttribute* attribute,
-                                                                          SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenSaveDataFileSystemBySystemSaveDataId(
+    SvcObj* self, nn_fs_SaveDataSpaceId space_id, const nn_fs_SaveDataAttribute* attribute, SvcObj** filesystem) {
     return open_save(attribute, filesystem);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenReadOnlySaveDataFileSystem(SvcObj* self, nn_fs_SaveDataSpaceId space_id,
-                                                                const nn_fs_SaveDataAttribute* attribute,
-                                                                SvcObj** filesystem) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenReadOnlySaveDataFileSystem(SvcObj* self, nn_fs_SaveDataSpaceId space_id,
+                                                                       const nn_fs_SaveDataAttribute* attribute,
+                                                                       SvcObj** filesystem) {
     return open_save(attribute, filesystem);
 }
 /* no save data to list */
@@ -959,22 +972,25 @@ static int info_reader(SvcObj** reader) {
     *reader = nn_fssrv_sf_ISaveDataInfoReader_new(0);
     return 0;
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenSaveDataInfoReader(SvcObj* self, SvcObj** reader) { return info_reader(reader); }
-int nn_fssrv_sf_IFileSystemProxy_OpenSaveDataInfoReaderBySaveDataSpaceId(SvcObj* self, nn_fs_SaveDataSpaceId space_id,
-                                                                         SvcObj** reader) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenSaveDataInfoReader(SvcObj* self, SvcObj** reader) {
     return info_reader(reader);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenSaveDataInfoReaderOnlyCacheStorage(SvcObj* self, SvcObj** reader) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenSaveDataInfoReaderBySaveDataSpaceId(SvcObj* self,
+                                                                                nn_fs_SaveDataSpaceId space_id,
+                                                                                SvcObj** reader) {
     return info_reader(reader);
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenDataStorageByCurrentProcess(SvcObj* self, SvcObj** storage) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenSaveDataInfoReaderOnlyCacheStorage(SvcObj* self, SvcObj** reader) {
+    return info_reader(reader);
+}
+static int nn_fssrv_sf_IFileSystemProxy_OpenDataStorageByCurrentProcess(SvcObj* self, SvcObj** storage) {
     if (!fsp.rtotal)
         WARN("fs: the game requests the RomFS but there is none (put the romfs folder in %s)\n", g_datadir);
     *storage = nn_fssrv_sf_IStorage_new(0);
     return 0;
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenDataStorageByDataId(SvcObj* self, nn_ncm_DataId data_id,
-                                                         nn_ncm_StorageId storage_id, SvcObj** storage) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenDataStorageByDataId(SvcObj* self, nn_ncm_DataId data_id,
+                                                                nn_ncm_StorageId storage_id, SvcObj** storage) {
     char p[64];
     snprintf(p, sizeof p, "system/archives/%016llx.romfs", (unsigned long long)data_id);
     pm_lock(&fsp.tree.lock);
@@ -989,15 +1005,15 @@ int nn_fssrv_sf_IFileSystemProxy_OpenDataStorageByDataId(SvcObj* self, nn_ncm_Da
     pm_unlock(&fsp.tree.lock);
     return (int)rc;
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenDeviceOperator(SvcObj* self, SvcObj** device_operator) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenDeviceOperator(SvcObj* self, SvcObj** device_operator) {
     *device_operator = nn_fssrv_sf_IDeviceOperator_new(0);
     return 0;
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenSdCardDetectionEventNotifier(SvcObj* self, SvcObj** notifier) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenSdCardDetectionEventNotifier(SvcObj* self, SvcObj** notifier) {
     *notifier = nn_fssrv_sf_IEventNotifier_new(0);
     return 0;
 }
-int nn_fssrv_sf_IFileSystemProxy_OpenMultiCommitManager(SvcObj* self, SvcObj** manager) {
+static int nn_fssrv_sf_IFileSystemProxy_OpenMultiCommitManager(SvcObj* self, SvcObj** manager) {
     *manager = nn_fssrv_sf_IMultiCommitManager_new(0);
     return 0;
 }

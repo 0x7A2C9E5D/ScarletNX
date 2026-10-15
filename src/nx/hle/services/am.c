@@ -4,7 +4,7 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* am: the applet manager (appletOE, appletAE) and its storages */
 #include "hle/services/services_int.h"
-#include "hle/services/am.swipc.h"
+#include "hle/services/am.swipc.inc"
 /* ================================================================ am */
 static struct {
     KEvent* msg_ev;
@@ -13,7 +13,7 @@ static struct {
     KEvent* launch_ev;
     KEvent* res_ev;
     KEvent* sleep_ev; /* GetAcquiredSleepLockEvent: signaled when a RequestToAcquireSleepLock is granted */
-    u64 layer;        /* the next CreateManagedDisplayLayer id */
+    u64 layer;        /* the next managed display layer id, CreateManagedDisplayLayer's and SeparableLayer's */
     int user_given;   /* PreselectedUser was popped: it is there once */
 } am = {.layer = 1};
 u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
@@ -47,11 +47,11 @@ static void storage_destroy(SvcObj* o) { free(((StorageData*)o->data)->d); }
 /* an accessor holds a reference on its storage (u[0]), dropped when the game closes the accessor */
 static void storage_acc_destroy(SvcObj* o) { svcobj_unref((SvcObj*)(size_t)o->u[0]); }
 static StorageData* accessor_storage(SvcObj* accessor) { return ((SvcObj*)(size_t)accessor->u[0])->data; }
-int nn_am_service_IStorageAccessor_GetSize(SvcObj* self, i64* size) {
+static int nn_am_service_IStorageAccessor_GetSize(SvcObj* self, i64* size) {
     *size = (i64)accessor_storage(self)->size;
     return 0;
 }
-int nn_am_service_IStorageAccessor_Write(SvcObj* self, i64 offset, IpcBuf data) {
+static int nn_am_service_IStorageAccessor_Write(SvcObj* self, i64 offset, IpcBuf data) {
     StorageData* s = accessor_storage(self);
     u64 off = (u64)offset, n = data.size;
     /* off + n can wrap: compare against what is left instead */
@@ -59,7 +59,7 @@ int nn_am_service_IStorageAccessor_Write(SvcObj* self, i64 offset, IpcBuf data) 
     memcpy(s->d + off, GP(data.addr), n);
     return 0;
 }
-int nn_am_service_IStorageAccessor_Read(SvcObj* self, i64 offset, IpcBuf data) {
+static int nn_am_service_IStorageAccessor_Read(SvcObj* self, i64 offset, IpcBuf data) {
     StorageData* s = accessor_storage(self);
     u64 off = (u64)offset, n = data.size;
     if (off > s->size) return RC(128, 503);
@@ -67,7 +67,7 @@ int nn_am_service_IStorageAccessor_Read(SvcObj* self, i64 offset, IpcBuf data) {
     memcpy(GP(data.addr), s->d + off, n);
     return 0;
 }
-int nn_am_service_IStorage_Open(SvcObj* self, SvcObj** accessor) {
+static int nn_am_service_IStorage_Open(SvcObj* self, SvcObj** accessor) {
     SvcObj* a = nn_am_service_IStorageAccessor_new(0);
     a->u[0] = (u64)(size_t)self;
     svcobj_ref(self);
@@ -77,7 +77,7 @@ int nn_am_service_IStorage_Open(SvcObj* self, SvcObj** accessor) {
 }
 /* OpenTransferStorage gives an ITransferStorageAccessor, which only a storage made over transfer memory has. These
    storages are plain memory (CreateTransferMemoryStorage copies the transfer memory into one) */
-int nn_am_service_IStorage_OpenTransferStorage(SvcObj* self, SvcObj** accessor) { return RC(128, 503); }
+static int nn_am_service_IStorage_OpenTransferStorage(SvcObj* self, SvcObj** accessor) { return RC(128, 503); }
 /* NULL when the guest asks for more than the host can allocate */
 static SvcObj* am_storage_new(u64 size, const void* init) {
     u8* d = calloc(1, size ? size : 1);
@@ -100,18 +100,11 @@ static int out_storage(SvcObj** storage, u64 size, const void* init) {
 }
 static int is_storage(const SvcObj* o) { return o && o->dispatch == nn_am_service_IStorage_dispatch; }
 
-/* a new event for the reply: name, signaled or not */
-static int new_event(u32* event, const char* name, int signaled) {
-    KEvent* e = kevent_new(name);
-    e->signaled = signaled;
-    *event = ev_handle(e);
-    return 0;
-}
-int nn_am_service_ICommonStateGetter_GetEventHandle(SvcObj* self, u32* event) {
+static int nn_am_service_ICommonStateGetter_GetEventHandle(SvcObj* self, u32* event) {
     *event = ev_handle(am.msg_ev);
     return 0;
 }
-int nn_am_service_ICommonStateGetter_ReceiveMessage(SvcObj* self, nn_am_AppletMessage* message) {
+static int nn_am_service_ICommonStateGetter_ReceiveMessage(SvcObj* self, nn_am_AppletMessage* message) {
     pm_lock(&g_klock);
     if (!am.nmsg) {
         am.msg_ev->signaled = 0;
@@ -124,71 +117,72 @@ int nn_am_service_ICommonStateGetter_ReceiveMessage(SvcObj* self, nn_am_AppletMe
     pm_unlock(&g_klock);
     return 0;
 }
-int nn_am_service_ICommonStateGetter_GetOperationMode(SvcObj* self, u8* mode) {
+static int nn_am_service_ICommonStateGetter_GetOperationMode(SvcObj* self, u8* mode) {
     *mode = (u8)g_hle_docked;
     return 0;
 }
-int nn_am_service_ICommonStateGetter_GetPerformanceMode(SvcObj* self, u32* mode) {
+static int nn_am_service_ICommonStateGetter_GetPerformanceMode(SvcObj* self, u32* mode) {
     *mode = (u32)g_hle_docked;
     return 0;
 }
-int nn_am_service_ICommonStateGetter_GetCurrentFocusState(SvcObj* self, u8* state) {
+static int nn_am_service_ICommonStateGetter_GetCurrentFocusState(SvcObj* self, u8* state) {
     *state = 1; /* InFocus */
     return 0;
 }
 /* granted at once, there is no sleep here */
-int nn_am_service_ICommonStateGetter_RequestToAcquireSleepLock(SvcObj* self) {
+static int nn_am_service_ICommonStateGetter_RequestToAcquireSleepLock(SvcObj* self) {
     kevent_signal(am.sleep_ev);
     return 0;
 }
-int nn_am_service_ICommonStateGetter_GetAcquiredSleepLockEvent(SvcObj* self, u32* event) {
+static int nn_am_service_ICommonStateGetter_GetAcquiredSleepLockEvent(SvcObj* self, u32* event) {
     *event = ev_handle(am.sleep_ev);
     return 0;
 }
-int nn_am_service_ICommonStateGetter_GetDefaultDisplayResolution(SvcObj* self, i32* width, i32* height) {
+static int nn_am_service_ICommonStateGetter_GetDefaultDisplayResolution(SvcObj* self, i32* width, i32* height) {
     *width = g_hle_docked ? 1920 : 1280;
     *height = g_hle_docked ? 1080 : 720;
     return 0;
 }
-int nn_am_service_ICommonStateGetter_GetDefaultDisplayResolutionChangeEvent(SvcObj* self, u32* event) {
+static int nn_am_service_ICommonStateGetter_GetDefaultDisplayResolutionChangeEvent(SvcObj* self, u32* event) {
     *event = ev_handle(am.res_ev);
     return 0;
 }
-int nn_am_service_ICommonStateGetter_GetHdcpAuthenticationStateChangeEvent(SvcObj* self, u32* event) {
+static int nn_am_service_ICommonStateGetter_GetHdcpAuthenticationStateChangeEvent(SvcObj* self, u32* event) {
     *event = ev_handle(am.res_ev);
     return 0;
 }
-int nn_am_service_ICommonStateGetter_GetCurrentPerformanceConfiguration(SvcObj* self, u32* configuration) {
+static int nn_am_service_ICommonStateGetter_GetCurrentPerformanceConfiguration(SvcObj* self, u32* configuration) {
     *configuration = 0x00020003; /* the one apm reports */
     return 0;
 }
 /* the main loop saves what it keeps and ends the process */
-int nn_am_service_ISelfController_Exit(SvcObj* self) {
+static int nn_am_service_ISelfController_Exit(SvcObj* self) {
     g_quit = 1;
     return 0;
 }
-int nn_am_service_ISelfController_GetLibraryAppletLaunchableEvent(SvcObj* self, u32* event) {
+static int nn_am_service_ISelfController_GetLibraryAppletLaunchableEvent(SvcObj* self, u32* event) {
     *event = ev_handle(am.launch_ev);
     return 0;
 }
-int nn_am_service_ISelfController_CreateManagedDisplayLayer(SvcObj* self, u64* layer_id) {
+static int nn_am_service_ISelfController_CreateManagedDisplayLayer(SvcObj* self, u64* layer_id) {
     *layer_id = __atomic_fetch_add(&am.layer, 1, __ATOMIC_RELAXED);
     return 0;
 }
-int nn_am_service_ISelfController_CreateManagedDisplaySeparableLayer(SvcObj* self, u64* layer_id,
-                                                                     u64* recording_layer_id) {
-    *layer_id = 1;
-    *recording_layer_id = 2;
+static int nn_am_service_ISelfController_CreateManagedDisplaySeparableLayer(SvcObj* self, u64* layer_id,
+                                                                            u64* recording_layer_id) {
+    *layer_id = __atomic_fetch_add(&am.layer, 2, __ATOMIC_RELAXED); /* two layers, never one handed out before */
+    *recording_layer_id = *layer_id + 1;
     return 0;
 }
-int nn_am_service_ISelfController_GetAccumulatedSuspendedTickChangedEvent(SvcObj* self, u32* event) {
+static int nn_am_service_ISelfController_GetAccumulatedSuspendedTickChangedEvent(SvcObj* self, u32* event) {
     return new_event(event, "suspend", 0);
 }
-int nn_am_service_IWindowController_GetAppletResourceUserId(SvcObj* self, nn_applet_AppletResourceUserId* aruid) {
+static int nn_am_service_IWindowController_GetAppletResourceUserId(SvcObj* self,
+                                                                   nn_applet_AppletResourceUserId* aruid) {
     *aruid = 0x1234;
     return 0;
 }
-int nn_am_service_IApplicationFunctions_PopLaunchParameter(SvcObj* self, u32 kind, SvcObj** storage) {
+static int nn_am_service_IApplicationFunctions_PopLaunchParameter(SvcObj* self, u32 kind, SvcObj** storage) {
     u8 buf[0x88];
     u32 magic = 0xC79497CA, one = 1;
     /* only the PreselectedUser (2), there once */
@@ -199,56 +193,58 @@ int nn_am_service_IApplicationFunctions_PopLaunchParameter(SvcObj* self, u32 kin
     memcpy(buf + 8, g_user_id, 16);
     return out_storage(storage, sizeof buf, buf);
 }
-int nn_am_service_IApplicationFunctions_GetDesiredLanguage(SvcObj* self, nn_settings_LanguageCode* code) {
-    *code = set_language_code(g_hle_lang);
+static int nn_am_service_IApplicationFunctions_GetDesiredLanguage(SvcObj* self, nn_settings_LanguageCode* code) {
+    set_language_code(g_hle_lang, code->v);
     return 0;
 }
-int nn_am_service_IApplicationFunctions_GetDisplayVersion(SvcObj* self, nn_oe_DisplayVersion* version) {
+static int nn_am_service_IApplicationFunctions_GetDisplayVersion(SvcObj* self, nn_oe_DisplayVersion* version) {
     strcpy((char*)version->v, "1.0.0");
     return 0;
 }
-int nn_am_service_IApplicationFunctions_GetSaveDataSize(SvcObj* self, u8 type, const nn_account_Uid* uid,
-                                                        i64* normal_size, i64* journal_size) {
+static int nn_am_service_IApplicationFunctions_GetSaveDataSize(SvcObj* self, u8 type, const nn_account_Uid* uid,
+                                                               i64* normal_size, i64* journal_size) {
     *normal_size = 0x4000000;
     *journal_size = 0x4000000;
     return 0;
 }
-int nn_am_service_IApplicationFunctions_GetLimitedApplicationLicenseUpgradableEvent(SvcObj* self, u32* event) {
+static int nn_am_service_IApplicationFunctions_GetLimitedApplicationLicenseUpgradableEvent(SvcObj* self, u32* event) {
     return new_event(event, "appfn ev", 0);
 }
-int nn_am_service_IApplicationFunctions_GetPseudoDeviceId(SvcObj* self, nn_util_Uuid* id) {
+static int nn_am_service_IApplicationFunctions_GetPseudoDeviceId(SvcObj* self, nn_util_Uuid* id) {
     static const u64 pseudo[2] = {0x1111222233334444ull, 0x5555666677778888ull};
     memcpy(id->v, pseudo, 16);
     return 0;
 }
-int nn_am_service_IApplicationFunctions_GetGpuErrorDetectedSystemEvent(SvcObj* self, u32* event) {
+static int nn_am_service_IApplicationFunctions_GetGpuErrorDetectedSystemEvent(SvcObj* self, u32* event) {
     return new_event(event, "appfn ev", 0);
 }
-int nn_am_service_IApplicationFunctions_GetFriendInvitationStorageChannelEvent(SvcObj* self, u32* event) {
+static int nn_am_service_IApplicationFunctions_GetFriendInvitationStorageChannelEvent(SvcObj* self, u32* event) {
     return new_event(event, "appfn ev", 0);
 }
-int nn_am_service_IApplicationFunctions_TryPopFromFriendInvitationStorageChannel(SvcObj* self, SvcObj** storage) {
+static int nn_am_service_IApplicationFunctions_TryPopFromFriendInvitationStorageChannel(SvcObj* self,
+                                                                                        SvcObj** storage) {
     return RC(128, 2); /* nothing queued */
 }
-int nn_am_service_IApplicationFunctions_GetNotificationStorageChannelEvent(SvcObj* self, u32* event) {
+static int nn_am_service_IApplicationFunctions_GetNotificationStorageChannelEvent(SvcObj* self, u32* event) {
     return new_event(event, "appfn ev", 0);
 }
-int nn_am_service_IApplicationFunctions_TryPopFromNotificationStorageChannel(SvcObj* self, SvcObj** storage) {
+static int nn_am_service_IApplicationFunctions_TryPopFromNotificationStorageChannel(SvcObj* self, SvcObj** storage) {
     return RC(128, 2); /* nothing queued */
 }
-int nn_am_service_IApplicationFunctions_GetHealthWarningDisappearedSystemEvent(SvcObj* self, u32* event) {
+static int nn_am_service_IApplicationFunctions_GetHealthWarningDisappearedSystemEvent(SvcObj* self, u32* event) {
     return new_event(event, "appfn ev", 0);
 }
-int nn_am_service_IApplicationFunctions_GetUnknownEvent210(SvcObj* self, u32* event) {
+static int nn_am_service_IApplicationFunctions_GetUnknownEvent210(SvcObj* self, u32* event) {
     return new_event(event, "appfn ev", 0);
 }
 /* library applets (swkbd, error...) finish immediately: no applet UI here */
 typedef struct {
     u32 id, mode;
     int popped_out, popped_interactive;
-    SvcObj* in[8]; /* the storages PushInData passed, in order */
+    SvcObj* in[8]; /* the storages PushInData passed, in order, under lib_lock: game threads push and pop at once */
     int nin;
 } LibApplet;
+static PMutex lib_lock = PMUTEX_INIT;
 static void lib_applet_destroy(SvcObj* o) {
     LibApplet* la = o->data;
     for (int i = 0; i < la->nin; i++) svcobj_unref(la->in[i]);
@@ -257,10 +253,11 @@ static void lib_applet_destroy(SvcObj* o) {
    u32 selected_id} and a u32 result, which the SDK turns into success (0) or cancelled (2). The last storage
    pushed is the ControllerSupportArg, whose byte 0 is min_player_count: one controller (npad No1) satisfies at
    most one player, as a console with one controller connected would */
-static SvcObj* controller_result(LibApplet* la) {
-    i8 min_players = 0;
+static i8 controller_min_players(LibApplet* la) { /* lib_lock held */
     SvcObj* arg = la->nin ? la->in[la->nin - 1] : NULL;
-    if (is_storage(arg) && ((StorageData*)arg->data)->size) min_players = (i8)((StorageData*)arg->data)->d[0];
+    return is_storage(arg) && ((StorageData*)arg->data)->size ? (i8)((StorageData*)arg->data)->d[0] : 0;
+}
+static SvcObj* controller_result(i8 min_players) {
     u8 r[0xC];
     memset(r, 0, sizeof r);
     u32 result = min_players <= 1 ? 0 : 2;
@@ -302,16 +299,22 @@ static u32 swkbd_text(u8* out, const char* text, u32 max_chars) {
     }
     return count;
 }
-static SvcObj* swkbd_result(LibApplet* la) {
-    u8 r[0x7D8] = {0};
-    u32 max_chars = (sizeof r - 4) / 2 - 1, min_chars = 0;
+#define SWKBD_MAX_CHARS ((0x7D8 - 4) / 2 - 1)
+/* the text length limits of the config the game pushed second (lib_lock held) */
+static void swkbd_limits(LibApplet* la, u32* max_chars, u32* min_chars) {
     StorageData* cfg = la->nin > 1 && is_storage(la->in[1]) ? la->in[1]->data : NULL;
+    *max_chars = SWKBD_MAX_CHARS;
+    *min_chars = 0;
     if (cfg && cfg->size >= 0x3B4) {
         u32 limit;
         memcpy(&limit, cfg->d + 0x3AC, 4);
-        if (limit && limit < max_chars) max_chars = limit;
-        memcpy(&min_chars, cfg->d + 0x3B0, 4);
+        if (limit && limit < *max_chars) *max_chars = limit;
+        memcpy(min_chars, cfg->d + 0x3B0, 4);
     }
+}
+/* asks the host for the text, which can take as long as the player types: no lock held */
+static SvcObj* swkbd_result(u32 max_chars, u32 min_chars) {
+    u8 r[0x7D8] = {0};
     if (min_chars > max_chars) {
         WARN("applet: swkbd minimum text length %u exceeds maximum %u\n", min_chars, max_chars);
         min_chars = max_chars;
@@ -339,20 +342,22 @@ static SvcObj* swkbd_result(LibApplet* la) {
     }
     return am_storage_new(sizeof r, r);
 }
-int nn_am_service_ILibraryAppletAccessor_GetAppletStateChangedEvent(SvcObj* self, u32* event) {
+static int nn_am_service_ILibraryAppletAccessor_GetAppletStateChangedEvent(SvcObj* self, u32* event) {
     return new_event(event, "applet state", 1);
 }
-int nn_am_service_ILibraryAppletAccessor_IsCompleted(SvcObj* self, u8* completed) {
+static int nn_am_service_ILibraryAppletAccessor_IsCompleted(SvcObj* self, u8* completed) {
     *completed = 1;
     return 0;
 }
 /* the controller applet's answer depends on what was pushed */
-int nn_am_service_ILibraryAppletAccessor_PushInData(SvcObj* self, SvcObj* storage) {
+static int nn_am_service_ILibraryAppletAccessor_PushInData(SvcObj* self, SvcObj* storage) {
     LibApplet* la = self->data;
+    pm_lock(&lib_lock);
     if (storage && la->nin < 8) {
         svcobj_ref(storage);
         la->in[la->nin++] = storage;
     }
+    pm_unlock(&lib_lock);
     return 0;
 }
 /* PopOutData and PopInteractiveOutData are separate channels, each with one storage. Web applets (Web, Shop,
@@ -367,10 +372,17 @@ static int pop_data(LibApplet* la, int interactive, SvcObj** storage) {
         return RC(128, 2);
     SvcObj* st;
     if (id == 0x0C && !interactive) {
-        st = controller_result(la);
+        pm_lock(&lib_lock);
+        i8 min_players = controller_min_players(la);
+        pm_unlock(&lib_lock);
+        st = controller_result(min_players);
         n = 0xC;
     } else if (id == 0x11 && !interactive) {
-        st = swkbd_result(la);
+        u32 max_chars, min_chars;
+        pm_lock(&lib_lock);
+        swkbd_limits(la, &max_chars, &min_chars);
+        pm_unlock(&lib_lock);
+        st = swkbd_result(max_chars, min_chars);
         n = 0x7D8;
     } else if (id == 0x10) {
         u8 r[0x18];
@@ -389,27 +401,28 @@ static int pop_data(LibApplet* la, int interactive, SvcObj** storage) {
     *storage = st;
     return 0;
 }
-int nn_am_service_ILibraryAppletAccessor_PopOutData(SvcObj* self, SvcObj** storage) {
+static int nn_am_service_ILibraryAppletAccessor_PopOutData(SvcObj* self, SvcObj** storage) {
     return pop_data(self->data, 0, storage);
 }
-int nn_am_service_ILibraryAppletAccessor_PopInteractiveOutData(SvcObj* self, SvcObj** storage) {
+static int nn_am_service_ILibraryAppletAccessor_PopInteractiveOutData(SvcObj* self, SvcObj** storage) {
     return pop_data(self->data, 1, storage);
 }
-int nn_am_service_ILibraryAppletAccessor_GetPopOutDataEvent(SvcObj* self, u32* event) {
+static int nn_am_service_ILibraryAppletAccessor_GetPopOutDataEvent(SvcObj* self, u32* event) {
     return new_event(event, "applet data", 1);
 }
 /* swkbd gives no interactive output: that one never signals */
-int nn_am_service_ILibraryAppletAccessor_GetPopInteractiveOutDataEvent(SvcObj* self, u32* event) {
+static int nn_am_service_ILibraryAppletAccessor_GetPopInteractiveOutDataEvent(SvcObj* self, u32* event) {
     return new_event(event, "applet data", ((LibApplet*)self->data)->id != 0x11);
 }
-int nn_am_service_ILibraryAppletAccessor_GetLibraryAppletInfo(SvcObj* self, nn_am_service_LibraryAppletInfo* info) {
+static int nn_am_service_ILibraryAppletAccessor_GetLibraryAppletInfo(SvcObj* self,
+                                                                     nn_am_service_LibraryAppletInfo* info) {
     LibApplet* la = self->data;
     info->applet_id = la->id;
     info->library_applet_mode = la->mode;
     return 0;
 }
-int nn_am_service_ILibraryAppletCreator_CreateLibraryApplet(SvcObj* self, u32 applet_id, u32 library_applet_mode,
-                                                            SvcObj** accessor) {
+static int nn_am_service_ILibraryAppletCreator_CreateLibraryApplet(SvcObj* self, u32 applet_id, u32 library_applet_mode,
+                                                                   SvcObj** accessor) {
     SvcObj* a = nn_am_service_ILibraryAppletAccessor_new(sizeof(LibApplet));
     ((LibApplet*)a->data)->id = applet_id;
     ((LibApplet*)a->data)->mode = library_applet_mode;
@@ -417,13 +430,13 @@ int nn_am_service_ILibraryAppletCreator_CreateLibraryApplet(SvcObj* self, u32 ap
     *accessor = a;
     return 0;
 }
-int nn_am_service_ILibraryAppletCreator_CreateStorage(SvcObj* self, i64 size, SvcObj** storage) {
+static int nn_am_service_ILibraryAppletCreator_CreateStorage(SvcObj* self, i64 size, SvcObj** storage) {
     return out_storage(storage, (u64)size, NULL);
 }
 /* a storage holding what the transfer memory holds. A copy is enough: the library applets here finish at once and
    only read what was pushed */
-int nn_am_service_ILibraryAppletCreator_CreateTransferMemoryStorage(SvcObj* self, u8 is_writable, i64 size,
-                                                                    u32 transfer_memory, SvcObj** storage) {
+static int nn_am_service_ILibraryAppletCreator_CreateTransferMemoryStorage(SvcObj* self, u8 is_writable, i64 size,
+                                                                           u32 transfer_memory, SvcObj** storage) {
     KTmem* m = (KTmem*)h_get_ref(transfer_memory, KO_TMEM);
     if (!m) return out_storage(storage, (u64)size, NULL);
     SvcObj* st = am_storage_new((u64)size, NULL);
@@ -433,56 +446,57 @@ int nn_am_service_ILibraryAppletCreator_CreateTransferMemoryStorage(SvcObj* self
     *storage = st;
     return 0;
 }
-int nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(SvcObj* self, float* volume) {
+static int nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(SvcObj* self, float* volume) {
     *volume = 1.0f;
     return 0;
 }
-int nn_am_service_IAudioController_GetLibraryAppletExpectedMasterVolume(SvcObj* self, float* volume) {
+static int nn_am_service_IAudioController_GetLibraryAppletExpectedMasterVolume(SvcObj* self, float* volume) {
     *volume = 1.0f;
     return 0;
 }
-int nn_am_service_IApplicationProxy_GetCommonStateGetter(SvcObj* self, SvcObj** getter) {
+static int nn_am_service_IApplicationProxy_GetCommonStateGetter(SvcObj* self, SvcObj** getter) {
     *getter = nn_am_service_ICommonStateGetter_new(0);
     return 0;
 }
-int nn_am_service_IApplicationProxy_GetSelfController(SvcObj* self, SvcObj** controller) {
+static int nn_am_service_IApplicationProxy_GetSelfController(SvcObj* self, SvcObj** controller) {
     *controller = nn_am_service_ISelfController_new(0);
     return 0;
 }
-int nn_am_service_IApplicationProxy_GetWindowController(SvcObj* self, SvcObj** controller) {
+static int nn_am_service_IApplicationProxy_GetWindowController(SvcObj* self, SvcObj** controller) {
     *controller = nn_am_service_IWindowController_new(0);
     return 0;
 }
-int nn_am_service_IApplicationProxy_GetAudioController(SvcObj* self, SvcObj** controller) {
+static int nn_am_service_IApplicationProxy_GetAudioController(SvcObj* self, SvcObj** controller) {
     *controller = nn_am_service_IAudioController_new(0);
     return 0;
 }
-int nn_am_service_IApplicationProxy_GetDisplayController(SvcObj* self, SvcObj** controller) {
+static int nn_am_service_IApplicationProxy_GetDisplayController(SvcObj* self, SvcObj** controller) {
     *controller = nn_am_service_IDisplayController_new(0);
     return 0;
 }
-int nn_am_service_IApplicationProxy_GetProcessWindingController(SvcObj* self, SvcObj** controller) {
+static int nn_am_service_IApplicationProxy_GetProcessWindingController(SvcObj* self, SvcObj** controller) {
     *controller = nn_am_service_IProcessWindingController_new(0);
     return 0;
 }
-int nn_am_service_IApplicationProxy_GetLibraryAppletCreator(SvcObj* self, SvcObj** creator) {
+static int nn_am_service_IApplicationProxy_GetLibraryAppletCreator(SvcObj* self, SvcObj** creator) {
     *creator = nn_am_service_ILibraryAppletCreator_new(0);
     return 0;
 }
-int nn_am_service_IApplicationProxy_GetApplicationFunctions(SvcObj* self, SvcObj** functions) {
+static int nn_am_service_IApplicationProxy_GetApplicationFunctions(SvcObj* self, SvcObj** functions) {
     *functions = nn_am_service_IApplicationFunctions_new(0);
     return 0;
 }
-int nn_am_service_IApplicationProxy_GetDebugFunctions(SvcObj* self, SvcObj** functions) {
+static int nn_am_service_IApplicationProxy_GetDebugFunctions(SvcObj* self, SvcObj** functions) {
     *functions = nn_am_service_IDebugFunctions_new(0);
     return 0;
 }
-int nn_am_service_IApplicationProxyService_OpenApplicationProxy(SvcObj* self, u64 pid, u32 process, SvcObj** proxy) {
+static int nn_am_service_IApplicationProxyService_OpenApplicationProxy(SvcObj* self, u64 pid, u32 process,
+                                                                       SvcObj** proxy) {
     *proxy = nn_am_service_IApplicationProxy_new(0);
     return 0;
 }
-int nn_am_service_IAllSystemAppletProxiesService_OpenSystemApplicationProxy(SvcObj* self, u64 pid, u32 process,
-                                                                            SvcObj** proxy) {
+static int nn_am_service_IAllSystemAppletProxiesService_OpenSystemApplicationProxy(SvcObj* self, u64 pid, u32 process,
+                                                                                   SvcObj** proxy) {
     *proxy = nn_am_service_IApplicationProxy_new(0);
     return 0;
 }

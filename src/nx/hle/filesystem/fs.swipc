@@ -19,7 +19,6 @@ type nn::fs::MemoryReportInfo = bytes<0x80, 8>;
 type nn::fs::SaveDataCreationInfo2 = bytes<0x200>;
 type nn::fs::FileSystemProxyType = u32;
 type nn::ncm::ProgramId = u64;
-type nn::ncm::DataId = u64;
 type nn::ncm::StorageId = u8;
 type nn::fs::SaveDataAttribute = struct {
     nn::ncm::ProgramId program_id;
@@ -109,10 +108,11 @@ interface nn::fssrv::sf::IFileSystemProxy is fsp-srv {
     [17] OpenHostFileSystem(buffer<nn::fssrv::sf::Path, 0x19> path) -> object<nn::fssrv::sf::IFileSystem> filesystem;
     [18] OpenSdCardFileSystem() -> object<nn::fssrv::sf::IFileSystem> filesystem;
     [19] FormatSdCardFileSystem();
-    # libnx sends the attribute, the creation info and the meta info in this order; the layout rule puts the meta
-    # info first. Saves are made on demand here, these are never read
-    @stub [22] CreateSaveDataFileSystem(nn::fs::SaveDataAttribute attribute, nn::fs::SaveDataCreationInfo creation_info,
-                                        nn::fs::SaveDataMetaInfo meta_info);
+    # the SDK sends these two in declaration order (attribute 0, creation info 0x40, meta info 0x80, salt 0x90), not
+    # by alignment. Saves are made on demand here, so they are never read
+    @unsorted @stub [22] CreateSaveDataFileSystem(nn::fs::SaveDataAttribute attribute,
+                                                  nn::fs::SaveDataCreationInfo creation_info,
+                                                  nn::fs::SaveDataMetaInfo meta_info);
     @stub [23] CreateSaveDataFileSystemBySystemSaveDataId(nn::fs::SaveDataAttribute attribute,
                                                           nn::fs::SaveDataCreationInfo creation_info);
     @stub [25] DeleteSaveDataFileSystemBySaveDataSpaceId(nn::fs::SaveDataSpaceId space_id, u64 save_data_id);
@@ -125,9 +125,10 @@ interface nn::fssrv::sf::IFileSystemProxy is fsp-srv {
                                         i64 journal_size);
     @stub [33] DeleteCacheStorage(u16 index);
     @stub [34] GetCacheStorageSize(u16 index) -> (i64 size, i64 journal_size);
-    @stub [35] CreateSaveDataFileSystemWithHashSalt(nn::fs::SaveDataAttribute attribute,
-                                                    nn::fs::SaveDataCreationInfo creation_info,
-                                                    nn::fs::SaveDataMetaInfo meta_info, nn::fs::HashSalt salt);
+    @unsorted @stub [35] CreateSaveDataFileSystemWithHashSalt(nn::fs::SaveDataAttribute attribute,
+                                                              nn::fs::SaveDataCreationInfo creation_info,
+                                                              nn::fs::SaveDataMetaInfo meta_info,
+                                                              nn::fs::HashSalt salt);
     [36] OpenHostFileSystemWithOption(buffer<nn::fssrv::sf::Path, 0x19> path, u32 option)
         -> object<nn::fssrv::sf::IFileSystem> filesystem;
     @stub [37] CreateSaveDataFileSystemWithCreationInfo2(buffer<nn::fs::SaveDataCreationInfo2, 0x19> creation_info);
@@ -149,7 +150,7 @@ interface nn::fssrv::sf::IFileSystemProxy is fsp-srv {
     [500] OpenSdCardDetectionEventNotifier() -> object<nn::fssrv::sf::IEventNotifier> notifier;
     @stub [620] SetSdCardEncryptionSeed(nn::fs::EncryptionSeed seed);
     @stub [630] SetSdCardAccessibility(b8 accessible);
-    @stub [631] IsSdCardAccessible() -> b8 accessible;
+    [631] IsSdCardAccessible() -> b8 accessible;
     @stub [632] TestExternalKey();
     @stub [800] GetAndClearErrorInfo() -> nn::fs::FileSystemProxyErrorInfo info;
     @stub [1003] DisableAutoSaveDataCreation();
@@ -159,7 +160,7 @@ interface nn::fssrv::sf::IFileSystemProxy is fsp-srv {
     @stub [1007] RegisterUpdatePartition();
     [1008] OpenRegisteredUpdatePartition() -> object<nn::fssrv::sf::IFileSystem> filesystem;
     @stub [1009] GetAndClearMemoryReportInfo() -> nn::fs::MemoryReportInfo info;
-    @stub [1011] GetProgramIndexForAccessLog() -> (u32 program_index, u32 program_count);
+    [1011] GetProgramIndexForAccessLog() -> (u32 program_index, u32 program_count);
     @stub [1012] GetFsStackUsage(u32 type) -> u32 usage;
     @stub [1013] UnsetSaveDataRootPath();
     [1200] OpenMultiCommitManager() -> object<nn::fssrv::sf::IMultiCommitManager> manager;

@@ -29,8 +29,8 @@ interface nn::settings::ISystemSettingsServer is set:sys {
     # no setting is there: the size is 0, and the value an empty one
     @stub [37] GetSettingsItemValueSize(buffer<nn::settings::SettingsName, 0x19> name,
                                         buffer<nn::settings::SettingsItemKey, 0x19> key) -> u64 size;
-    [38] GetSettingsItemValue(buffer<nn::settings::SettingsName, 0x19> name, buffer<nn::settings::SettingsItemKey, 0x19> key,
-                              buffer<u8, 6> value) -> u64 size;
+    [38] GetSettingsItemValue(buffer<nn::settings::SettingsName, 0x19> name,
+                              buffer<nn::settings::SettingsItemKey, 0x19> key, buffer<u8, 6> value) -> u64 size;
     @stub [62] GetDebugModeFlag() -> b8 debug;
     @stub [90] GetMiiAuthorId() -> nn::util::Uuid id;
     @stub [91] SetShutdownRtcValue(i64 value);

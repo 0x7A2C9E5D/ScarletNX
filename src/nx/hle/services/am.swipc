@@ -15,7 +15,8 @@ type nn::pdm::ApplicationPlayStatistics = bytes<0x18, 8>;
 interface nn::am::service::IApplicationProxyService is appletOE {
     [0] OpenApplicationProxy(pid, handle<copy, process> process) -> object<nn::am::service::IApplicationProxy> proxy;
 }
-# an application opens its proxy through appletAE with 350. The other proxies are the system applets'
+# 350 opens a system application's proxy, an IApplicationProxy as appletOE's is. The other proxies are the system
+# applets'
 interface nn::am::service::IAllSystemAppletProxiesService is appletAE {
     [350] OpenSystemApplicationProxy(pid, handle<copy, process> process)
         -> object<nn::am::service::IApplicationProxy> proxy;
@@ -116,7 +117,8 @@ interface nn::am::service::IApplicationFunctions {
     [23] GetDisplayVersion() -> nn::oe::DisplayVersion version;
     @stub [25] ExtendSaveData(u8 type, nn::account::Uid uid, i64 normal_size, i64 journal_size) -> i64 required_size;
     [26] GetSaveDataSize(u8 type, nn::account::Uid uid) -> (i64 normal_size, i64 journal_size);
-    @stub [27] CreateCacheStorage(u16 index, i64 normal_size, i64 journal_size) -> (u32 target_media, i64 required_size);
+    @stub [27] CreateCacheStorage(u16 index, i64 normal_size, i64 journal_size)
+        -> (u32 target_media, i64 required_size);
     @stub [28] GetSaveDataSizeMax() -> (i64 normal_size, i64 journal_size);
     @stub [32] BeginBlockingHomeButton(i64 timeout_ns);
     @stub [33] EndBlockingHomeButton();

@@ -11,7 +11,8 @@
 #include "hle/services/nvdrv.h"
 #include "hle/services/services.h"
 #include "hle/kernel/ipc.h"
-#include "hle/services/vi.swipc.h"
+#include "hle/services/services_int.h"
+#include "hle/services/vi.swipc.inc"
 #include "hle/kernel/kernel.h"
 #include "memory/mem.h"
 #include "runtime/platform/log.h"
@@ -74,7 +75,7 @@ static void pr_skip_token(PR* p) {
     pr_u32(p);
     i32 n = (i32)pr_u32(p);
     if (n <= 0) return;
-    u64 skip = ((u64)(n + 1) * 2 + 3) & ~3ull;
+    u64 skip = (((u64)n + 1) * 2 + 3) & ~3ull; /* the UTF-16 string and its terminator, padded to 4 */
     p->pos = skip > p->size - p->pos ? p->size : p->pos + (u32)skip;
 }
 typedef struct {
@@ -361,56 +362,53 @@ static int transact(i32 id, u32 code, IpcBuf parcel, IpcBuf reply) {
     free(out);
     return 0;
 }
-int nns_hosbinder_IHOSBinderDriver_TransactParcel(SvcObj* self, i32 binder_id, u32 code, IpcBuf parcel, IpcBuf reply,
-                                                  u32 flags) {
+static int nns_hosbinder_IHOSBinderDriver_TransactParcel(SvcObj* self, i32 binder_id, u32 code, IpcBuf parcel,
+                                                         IpcBuf reply, u32 flags) {
     return transact(binder_id, code, parcel, reply);
 }
-int nns_hosbinder_IHOSBinderDriver_TransactParcelAuto(SvcObj* self, i32 binder_id, u32 code, IpcBuf parcel,
-                                                      IpcBuf reply, u32 flags) {
+static int nns_hosbinder_IHOSBinderDriver_TransactParcelAuto(SvcObj* self, i32 binder_id, u32 code, IpcBuf parcel,
+                                                             IpcBuf reply, u32 flags) {
     return transact(binder_id, code, parcel, reply);
 }
-int nns_hosbinder_IHOSBinderDriver_GetNativeHandle(SvcObj* self, i32 binder_id, u32 type_id, u32* event) {
+static int nns_hosbinder_IHOSBinderDriver_GetNativeHandle(SvcObj* self, i32 binder_id, u32 type_id, u32* event) {
     *event = h_new(&vi.bufavail_ev->o);
     return 0;
 }
 
-int nn_visrv_sf_ISystemDisplayService_GetZOrderCountMin(SvcObj* self, u64 display_id, i64* count) {
+static int nn_visrv_sf_ISystemDisplayService_GetZOrderCountMin(SvcObj* self, u64 display_id, i64* count) {
     *count = 1;
     return 0;
 }
-int nn_visrv_sf_ISystemDisplayService_GetZOrderCountMax(SvcObj* self, u64 display_id, i64* count) {
+static int nn_visrv_sf_ISystemDisplayService_GetZOrderCountMax(SvcObj* self, u64 display_id, i64* count) {
     *count = 255;
     return 0;
 }
-int nn_visrv_sf_ISystemDisplayService_GetDisplayLogicalResolution(SvcObj* self, u64 display_id, i32* width,
-                                                                  i32* height) {
+static int nn_visrv_sf_ISystemDisplayService_GetDisplayLogicalResolution(SvcObj* self, u64 display_id, i32* width,
+                                                                         i32* height) {
     *width = vi.width;
     *height = vi.height;
     return 0;
 }
-int nn_visrv_sf_ISystemDisplayService_GetDisplayMode(SvcObj* self, u64 display_id, nn_vi_DisplayModeInfo* mode) {
+static int nn_visrv_sf_ISystemDisplayService_GetDisplayMode(SvcObj* self, u64 display_id, nn_vi_DisplayModeInfo* mode) {
     mode->width = (u32)vi.width;
     mode->height = (u32)vi.height;
     mode->refresh_rate = 60.0f;
     return 0;
 }
-int nn_visrv_sf_IManagerDisplayService_CreateManagedLayer(SvcObj* self, u32 layer_flags, u64 display_id,
-                                                          nn_applet_AppletResourceUserId aruid, u64* layer_id) {
+static int nn_visrv_sf_IManagerDisplayService_CreateManagedLayer(SvcObj* self, u32 layer_flags, u64 display_id,
+                                                                 nn_applet_AppletResourceUserId aruid, u64* layer_id) {
     *layer_id = __atomic_fetch_add(&vi.managed_layer, 1, __ATOMIC_RELAXED);
     return 0;
 }
-static int display_event(u32* event) {
-    *event = h_new(&kevent_new("vi display")->o);
-    return 0;
+static int nn_visrv_sf_IManagerDisplayService_AcquireLayerTexturePresentingEvent(SvcObj* self, u64 layer_id,
+                                                                                 u32* event) {
+    return new_event(event, "vi display", 0);
 }
-int nn_visrv_sf_IManagerDisplayService_AcquireLayerTexturePresentingEvent(SvcObj* self, u64 layer_id, u32* event) {
-    return display_event(event);
+static int nn_visrv_sf_IManagerDisplayService_GetDisplayHotplugEvent(SvcObj* self, u64 display_id, u32* event) {
+    return new_event(event, "vi display", 0);
 }
-int nn_visrv_sf_IManagerDisplayService_GetDisplayHotplugEvent(SvcObj* self, u64 display_id, u32* event) {
-    return display_event(event);
-}
-int nn_visrv_sf_IManagerDisplayService_GetDisplayModeChangedEvent(SvcObj* self, u64 display_id, u32* event) {
-    return display_event(event);
+static int nn_visrv_sf_IManagerDisplayService_GetDisplayModeChangedEvent(SvcObj* self, u64 display_id, u32* event) {
+    return new_event(event, "vi display", 0);
 }
 
 /* the native window parcel of a layer, in the game's buffer: HOS Parcel: flat_binder_object {type=2, flags,
@@ -440,22 +438,22 @@ static int binder_driver(SvcObj** service) {
     *service = nns_hosbinder_IHOSBinderDriver_new(0);
     return 0;
 }
-int nn_visrv_sf_IApplicationDisplayService_GetRelayService(SvcObj* self, SvcObj** service) {
+static int nn_visrv_sf_IApplicationDisplayService_GetRelayService(SvcObj* self, SvcObj** service) {
     return binder_driver(service);
 }
-int nn_visrv_sf_IApplicationDisplayService_GetIndirectDisplayTransactionService(SvcObj* self, SvcObj** service) {
+static int nn_visrv_sf_IApplicationDisplayService_GetIndirectDisplayTransactionService(SvcObj* self, SvcObj** service) {
     return binder_driver(service);
 }
-int nn_visrv_sf_IApplicationDisplayService_GetSystemDisplayService(SvcObj* self, SvcObj** service) {
+static int nn_visrv_sf_IApplicationDisplayService_GetSystemDisplayService(SvcObj* self, SvcObj** service) {
     *service = nn_visrv_sf_ISystemDisplayService_new(0);
     return 0;
 }
-int nn_visrv_sf_IApplicationDisplayService_GetManagerDisplayService(SvcObj* self, SvcObj** service) {
+static int nn_visrv_sf_IApplicationDisplayService_GetManagerDisplayService(SvcObj* self, SvcObj** service) {
     *service = nn_visrv_sf_IManagerDisplayService_new(0);
     return 0;
 }
 /* the one display, "Default" */
-int nn_visrv_sf_IApplicationDisplayService_ListDisplays(SvcObj* self, IpcBuf displays, i64* count) {
+static int nn_visrv_sf_IApplicationDisplayService_ListDisplays(SvcObj* self, IpcBuf displays, i64* count) {
     if (displays.addr) {
         u8 info[0x60];
         memset(info, 0, sizeof info);
@@ -470,47 +468,52 @@ int nn_visrv_sf_IApplicationDisplayService_ListDisplays(SvcObj* self, IpcBuf dis
     *count = 1;
     return 0;
 }
-int nn_visrv_sf_IApplicationDisplayService_OpenDisplay(SvcObj* self, const nn_vi_DisplayName* name, u64* display_id) {
+static int nn_visrv_sf_IApplicationDisplayService_OpenDisplay(SvcObj* self, const nn_vi_DisplayName* name,
+                                                              u64* display_id) {
     *display_id = 1;
     return 0;
 }
-int nn_visrv_sf_IApplicationDisplayService_OpenDefaultDisplay(SvcObj* self, u64* display_id) {
+static int nn_visrv_sf_IApplicationDisplayService_OpenDefaultDisplay(SvcObj* self, u64* display_id) {
     *display_id = 1;
     return 0;
 }
-int nn_visrv_sf_IApplicationDisplayService_GetDisplayResolution(SvcObj* self, u64 display_id, i64* width, i64* height) {
+static int nn_visrv_sf_IApplicationDisplayService_GetDisplayResolution(SvcObj* self, u64 display_id, i64* width,
+                                                                       i64* height) {
     *width = vi.width;
     *height = vi.height;
     return 0;
 }
-int nn_visrv_sf_IApplicationDisplayService_OpenLayer(SvcObj* self, const nn_vi_DisplayName* display_name, u64 layer_id,
-                                                     u64 aruid, IpcBuf native_window_buf, i64* native_window_size) {
+static int nn_visrv_sf_IApplicationDisplayService_OpenLayer(SvcObj* self, const nn_vi_DisplayName* display_name,
+                                                            u64 layer_id, u64 aruid, IpcBuf native_window_buf,
+                                                            i64* native_window_size) {
     return native_window(native_window_buf, 1, native_window_size);
 }
-int nn_visrv_sf_IApplicationDisplayService_CreateStrayLayer(SvcObj* self, u32 layer_flags, u64 display_id,
-                                                            IpcBuf native_window_buf, u64* layer_id,
-                                                            i64* native_window_size) {
+static int nn_visrv_sf_IApplicationDisplayService_CreateStrayLayer(SvcObj* self, u32 layer_flags, u64 display_id,
+                                                                   IpcBuf native_window_buf, u64* layer_id,
+                                                                   i64* native_window_size) {
     *layer_id = __atomic_fetch_add(&vi.stray_layer, 1, __ATOMIC_RELAXED);
     return native_window(native_window_buf, 1, native_window_size);
 }
 /* nn::vi's ScalingMode to the layer's: None, Freeze, ScaleToWindow, ScaleAndCrop, PreserveAspect */
-int nn_visrv_sf_IApplicationDisplayService_ConvertScalingMode(SvcObj* self, u32 mode, u64* converted) {
+static int nn_visrv_sf_IApplicationDisplayService_ConvertScalingMode(SvcObj* self, u32 mode, u64* converted) {
     static const u8 conv[5] = {3, 0, 1, 2, 4};
     if (mode >= 5) return RC(114, 1);
     *converted = conv[mode];
     return 0;
 }
-int nn_visrv_sf_IApplicationDisplayService_GetIndirectLayerImageRequiredMemoryInfo(SvcObj* self, i64 width, i64 height,
-                                                                                   i64* size, i64* alignment) {
+static int nn_visrv_sf_IApplicationDisplayService_GetIndirectLayerImageRequiredMemoryInfo(SvcObj* self, i64 width,
+                                                                                          i64 height, i64* size,
+                                                                                          i64* alignment) {
     *size = 0x1000;
     *alignment = 0x1000;
     return 0;
 }
-int nn_visrv_sf_IApplicationDisplayService_GetDisplayVsyncEvent(SvcObj* self, u64 display_id, u32* event) {
+static int nn_visrv_sf_IApplicationDisplayService_GetDisplayVsyncEvent(SvcObj* self, u64 display_id, u32* event) {
     *event = h_new(&vi.vsync_ev->o);
     return 0;
 }
-int nn_visrv_sf_IApplicationDisplayService_GetDisplayVsyncEventForDebug(SvcObj* self, u64 display_id, u32* event) {
+static int nn_visrv_sf_IApplicationDisplayService_GetDisplayVsyncEventForDebug(SvcObj* self, u64 display_id,
+                                                                               u32* event) {
     *event = h_new(&vi.vsync_ev->o);
     return 0;
 }
@@ -518,27 +521,27 @@ static int display_service(SvcObj** service) {
     *service = nn_visrv_sf_IApplicationDisplayService_new(0);
     return 0;
 }
-int nn_visrv_sf_IApplicationRootService_GetDisplayService(SvcObj* self, u32 policy, SvcObj** service) {
-    return display_service(service);
-}
-int nn_visrv_sf_IApplicationRootService_GetDisplayServiceWithProxyNameExchange(SvcObj* self, u32 policy,
+static int nn_visrv_sf_IApplicationRootService_GetDisplayServiceWithWorkaround(SvcObj* self, u32 policy,
                                                                                SvcObj** service) {
     return display_service(service);
 }
-int nn_visrv_sf_ISystemRootService_GetDisplayService(SvcObj* self, u32 policy, SvcObj** service) {
+static int nn_visrv_sf_IApplicationRootService_GetDisplayService(SvcObj* self, u32 policy, SvcObj** service) {
     return display_service(service);
 }
-int nn_visrv_sf_ISystemRootService_GetDisplayServiceWithProxyNameExchange(SvcObj* self,
-                                                                          const nn_vi_ProxyName* proxy_name, u32 policy,
-                                                                          SvcObj** service) {
+static int nn_visrv_sf_ISystemRootService_GetDisplayService(SvcObj* self, u32 policy, SvcObj** service) {
     return display_service(service);
 }
-int nn_visrv_sf_IManagerRootService_GetDisplayService(SvcObj* self, u32 policy, SvcObj** service) {
+static int nn_visrv_sf_ISystemRootService_GetDisplayServiceWithProxyNameExchange(SvcObj* self,
+                                                                                 const nn_vi_ProxyName* proxy_name,
+                                                                                 u32 policy, SvcObj** service) {
     return display_service(service);
 }
-int nn_visrv_sf_IManagerRootService_GetDisplayServiceWithProxyNameExchange(SvcObj* self,
-                                                                           const nn_vi_ProxyName* proxy_name,
-                                                                           u32 policy, SvcObj** service) {
+static int nn_visrv_sf_IManagerRootService_GetDisplayService(SvcObj* self, u32 policy, SvcObj** service) {
+    return display_service(service);
+}
+static int nn_visrv_sf_IManagerRootService_GetDisplayServiceWithProxyNameExchange(SvcObj* self,
+                                                                                  const nn_vi_ProxyName* proxy_name,
+                                                                                  u32 policy, SvcObj** service) {
     return display_service(service);
 }
 static SvcObj* new_vi_u(void) { return nn_visrv_sf_IApplicationRootService_new(0); }
@@ -551,10 +554,8 @@ void svc_vi_init(void) {
     pm_init(&vi.lock);
     pc_init(&vi.free_cv);
     /* the service keeps these for the whole run: its reference keeps them alive when the game closes its handles */
-    vi.vsync_ev = kevent_new("vsync");
-    kobj_ref(&vi.vsync_ev->o);
-    vi.bufavail_ev = kevent_new("buffer");
-    kobj_ref(&vi.bufavail_ev->o);
+    vi.vsync_ev = owned_event("vsync");
+    vi.bufavail_ev = owned_event("buffer");
     kevent_signal(vi.bufavail_ev);
     if (g_opt_docked) {
         vi.width = 1920;

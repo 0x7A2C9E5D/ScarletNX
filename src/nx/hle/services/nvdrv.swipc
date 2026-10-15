@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 # nvdrv, nvdrv:a, nvdrv:s and nvdrv:t: the IPC side of the nvhost devices (nvdrv.c). The ioctls' own layouts are the
-# devices'. Every command answers an NvError besides its result
+# devices'. Every command but DumpStatus (9) and 13 answers an NvError besides its result
 
 type nns::nvdrv::NvDrvStatus = struct {
     u32 free_size;

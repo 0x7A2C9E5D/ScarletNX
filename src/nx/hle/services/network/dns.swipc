@@ -16,17 +16,18 @@ interface nn::socket::resolver::IResolver is sfdnsres {
                            buffer<u8, 5> hints, buffer<u8, 6> response) -> (u32 bsd_errno, i32 gai_error, u32 size);
     [8] GetCancelHandleRequest(pid) -> u32 cancel_handle;
     @stub [9] CancelRequest(u32 cancel_handle, pid);
-    [10] GetHostByNameRequestWithOptions(b8 use_nsd_resolve, u32 cancel_handle, pid, buffer<u8, 0x21> name,
+    [10] GetHostByNameRequestWithOptions(u32 use_nsd_resolve, u32 cancel_handle, pid, buffer<u8, 0x21> name,
                                          buffer<u8, 0x22> hostent, buffer<u8, 0x21> options)
         -> (u32 size, u32 netdb_error, u32 bsd_errno);
-    [11] GetHostByAddrRequestWithOptions(u32 addr_len, u32 type, u32 cancel_handle, pid, buffer<u8, 0x21> addr,
-                                         buffer<u8, 0x22> hostent, buffer<u8, 0x21> options)
+    # four u32s in the SDK: the third's meaning is not known
+    [11] GetHostByAddrRequestWithOptions(u32 addr_len, u32 type, u32 unknown, u32 cancel_handle, pid,
+                                         buffer<u8, 0x21> addr, buffer<u8, 0x22> hostent, buffer<u8, 0x21> options)
         -> (u32 size, u32 netdb_error, u32 bsd_errno);
-    [12] GetAddrInfoRequestWithOptions(b8 use_nsd_resolve, u32 cancel_handle, pid, buffer<u8, 5> host,
+    [12] GetAddrInfoRequestWithOptions(u32 use_nsd_resolve, u32 cancel_handle, pid, buffer<u8, 5> host,
                                        buffer<u8, 5> service, buffer<u8, 5> hints, buffer<u8, 0x21> options,
                                        buffer<u8, 0x22> response)
         -> (u32 size, i32 gai_error, u32 netdb_error, u32 bsd_errno);
-    @stub [14] ResolverSetOptionRequest(u64 unknown, pid, buffer<u8, 5> options) -> u32 bsd_errno;
+    @stub [14] ResolverSetOptionRequest(u32 unknown, pid, buffer<u8, 5> options) -> (i32 ret, u32 bsd_errno);
 }
 
 # Resolve(Ex) returns the FQDN as it is, which serves every server but Nintendo's (Eden). The environment is the

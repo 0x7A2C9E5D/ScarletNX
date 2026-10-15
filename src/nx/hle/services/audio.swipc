@@ -12,13 +12,15 @@ type nn::audio::detail::AudioRendererParameterInternal = struct {
     u32 effect_count;
     u32 performance_frame_count;
     b8 is_voice_drop_enabled;
-    bytes<3> reserved;
+    u8 reserved;
+    u8 rendering_device;
+    u8 execution_mode;
     u32 splitter_count;
     u32 splitter_send_channel_count;
-    u32 reserved2;
+    u32 external_context_size;
     u32 revision;
 };
-type nn::audio::AudioOutName = bytes<0x100>;
+type nn::audio::AudioOutName = nn::audio::AudioDeviceName;
 type nn::audio::AudioOutParameter = struct {
     u32 sample_rate;
     u16 channel_count;
@@ -65,8 +67,10 @@ interface nn::audio::detail::IAudioRendererManager is audren:u {
         -> object<nn::audio::detail::IAudioRenderer> renderer;
     [1] GetWorkBufferSize(nn::audio::detail::AudioRendererParameterInternal params) -> u64 size;
     [2] GetAudioDeviceService(nn::applet::AppletResourceUserId aruid) -> object<nn::audio::detail::IAudioDevice> device;
+    # two u64s around the process handle: the SDK's server uses the first whole and the second as 32 bits
     [3] OpenAudioRendererForManualExecution(nn::audio::detail::AudioRendererParameterInternal params,
-                                            u64 work_buffer_address, aruid aruid, handle<copy, process> process)
+                                            u64 work_buffer_address, handle<copy, process> process,
+                                            u64 work_buffer_size, aruid aruid)
         -> object<nn::audio::detail::IAudioRenderer> renderer;
     [4] GetAudioDeviceServiceWithRevisionInfo(nn::applet::AppletResourceUserId aruid, u32 revision)
         -> object<nn::audio::detail::IAudioDevice> device;
@@ -98,7 +102,8 @@ interface nn::audio::detail::IAudioDevice {
     [10] GetActiveAudioDeviceNameAuto(buffer<nn::audio::AudioDeviceName, 0x22> name);
     [11] QueryAudioDeviceInputEvent() -> handle<copy, event> event;
     [12] QueryAudioDeviceOutputEvent() -> handle<copy, event> event;
-    [13] GetActiveAudioOutputDeviceName(buffer<nn::audio::AudioDeviceName, 0x22> name);
+    # SDK 13 and later: before, 13 was another command (an A buffer in, a u32 out), which this declaration refuses
+    [13] GetActiveAudioOutputDeviceName(buffer<nn::audio::AudioDeviceName, 6> name);
 }
 
 interface nn::audio::detail::IAudioOutManager is audout:u {
@@ -161,13 +166,13 @@ interface nn::codec::detail::IHardwareOpusDecoder {
     @stub [1] SetContext(buffer<u8, 5> context);
     [2] DecodeInterleavedForMultiStreamOld(buffer<u8, 5> input, buffer<i16, 6> output) -> (u32 consumed, u32 samples);
     @stub [3] SetContextForMultiStream(buffer<u8, 5> context);
-    [4] DecodeInterleavedWithPerfOld(buffer<u8, 5> input, buffer<i16, 6> output)
+    [4] DecodeInterleavedWithPerfOld(buffer<u8, 5> input, buffer<i16, 0x46> output)
         -> (u32 consumed, u32 samples, u64 perf_us);
-    [5] DecodeInterleavedForMultiStreamWithPerfOld(buffer<u8, 5> input, buffer<i16, 6> output)
+    [5] DecodeInterleavedForMultiStreamWithPerfOld(buffer<u8, 5> input, buffer<i16, 0x46> output)
         -> (u32 consumed, u32 samples, u64 perf_us);
-    [6] DecodeInterleavedWithPerfAndResetOld(b8 reset, buffer<u8, 5> input, buffer<i16, 6> output)
+    [6] DecodeInterleavedWithPerfAndResetOld(b8 reset, buffer<u8, 5> input, buffer<i16, 0x46> output)
         -> (u32 consumed, u32 samples, u64 perf_us);
-    [7] DecodeInterleavedForMultiStreamWithPerfAndResetOld(b8 reset, buffer<u8, 5> input, buffer<i16, 6> output)
+    [7] DecodeInterleavedForMultiStreamWithPerfAndResetOld(b8 reset, buffer<u8, 5> input, buffer<i16, 0x46> output)
         -> (u32 consumed, u32 samples, u64 perf_us);
     [8] DecodeInterleaved(b8 reset, buffer<u8, 0x45> input, buffer<i16, 0x46> output)
         -> (u32 consumed, u32 samples, u64 perf_us);

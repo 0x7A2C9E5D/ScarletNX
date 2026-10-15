@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-# bsd:u, bsd:a, bsd:s and bsdcfg: sockets (bsd.c). Every command answers the BSD result and errno
+# bsd:u, bsd:a, bsd:s and bsdcfg: sockets (bsd.c). The socket commands, 2 (Socket) to 32, answer the BSD result and
+# errno
 
 type nn::socket::sf::LibraryConfigData = struct {
     u32 version;
@@ -32,6 +33,9 @@ interface nn::socket::sf::IClient is bsd:u, bsd:a, bsd:s {
                buffer<u8, 0x21> writefds_in, buffer<u8, 0x21> errorfds_in, buffer<u8, 0x22> readfds_out,
                buffer<u8, 0x22> writefds_out, buffer<u8, 0x22> errorfds_out) -> (i32 ret, u32 bsd_errno);
     [6] Poll(i32 nfds, i32 timeout, buffer<u8, 0x21> fds_in, buffer<u8, 0x22> fds_out) -> (i32 ret, u32 bsd_errno);
+    # no raw input: the name and the new value in, the old value out, and its length (the SDK's proxy)
+    [7] Sysctl(buffer<u8, 0x21> name, buffer<u8, 0x22> old_value, buffer<u8, 0x21> new_value)
+        -> (i32 ret, u32 bsd_errno, u32 old_length);
     [8] Recv(i32 fd, i32 flags, buffer<u8, 0x22> message) -> (i32 ret, u32 bsd_errno);
     [9] RecvFrom(i32 fd, i32 flags, buffer<u8, 0x22> message, buffer<u8, 0x22> addr)
         -> (i32 ret, u32 bsd_errno, u32 addrlen);
@@ -57,7 +61,8 @@ interface nn::socket::sf::IClient is bsd:u, bsd:a, bsd:s {
     [26] Close(i32 fd) -> (i32 ret, u32 bsd_errno);
     [27] DuplicateSocket(i32 fd, u64 reserved) -> (i32 ret, u32 bsd_errno);
     [31] EventFd(u64 initval, u32 flags) -> (i32 ret, u32 bsd_errno);
-    @stub [32] RegisterResourceStatisticsName() -> (i32 ret, u32 bsd_errno);
+    # SDK 8 sends the pid slot alone, SDK 13 a u8 before it: declared as the shorter, which both send at least
+    @stub [32] RegisterResourceStatisticsName(buffer<u8, 0x21> name, pid) -> (i32 ret, u32 bsd_errno);
     @stub [33] RegisterClientShared(nn::socket::sf::LibraryConfigData config, pid, u64 work_buffer_size)
         -> u32 bsd_errno;
 }

@@ -5,18 +5,18 @@
 /* the smaller services, most of which answer success: apm, lm, pctl, friend, ns, ssl, prepo, psm, fatal, csrng, mm, nfp, caps, bcat, aoc, irs, mii, ldn, ectx, spl, btm, audin.
    Their interfaces are in misc.swipc */
 #include "hle/services/services_int.h"
-#include "hle/services/misc.swipc.h"
+#include "hle/services/misc.swipc.inc"
 /* ================================================================ apm and misc */
-int nn_apm_ISession_GetPerformanceConfiguration(SvcObj* self, nn_apm_PerformanceMode mode,
-                                                nn_apm_PerformanceConfiguration* config) {
+static int nn_apm_ISession_GetPerformanceConfiguration(SvcObj* self, nn_apm_PerformanceMode mode,
+                                                       nn_apm_PerformanceConfiguration* config) {
     *config = 0x00020003;
     return 0;
 }
-int nn_apm_IManager_OpenSession(SvcObj* self, SvcObj** session) {
+static int nn_apm_IManager_OpenSession(SvcObj* self, SvcObj** session) {
     *session = nn_apm_ISession_new(0);
     return 0;
 }
-int nn_apm_IManager_GetPerformanceMode(SvcObj* self, nn_apm_PerformanceMode* mode) {
+static int nn_apm_IManager_GetPerformanceMode(SvcObj* self, nn_apm_PerformanceMode* mode) {
     *mode = g_hle_docked;
     return 0;
 }
@@ -31,7 +31,7 @@ static u64 uleb128(const u8* p, u64 s, u64* i) {
     }
     return v;
 }
-int nn_lm_ILogger_Log(SvcObj* self, IpcBuf message) {
+static int nn_lm_ILogger_Log(SvcObj* self, IpcBuf message) {
     u64 s = message.size;
     if (message.addr && s > 0x18) { /* lm packet: 0x18 hdr, then fields {uleb128 key; uleb128 size; data} */
         u8* p = GP(message.addr);
@@ -54,140 +54,139 @@ int nn_lm_ILogger_Log(SvcObj* self, IpcBuf message) {
     }
     return 0;
 }
-int nn_lm_ILogService_OpenLogger(SvcObj* self, u64 pid, SvcObj** logger) {
+static int nn_lm_ILogService_OpenLogger(SvcObj* self, u64 pid, SvcObj** logger) {
     *logger = nn_lm_ILogger_new(0);
     return 0;
 }
 SvcObj* new_lm(void) { return nn_lm_ILogService_new(0); }
 
-/* a new event, which nothing signals, for the reply */
-static int new_event(u32* event, const char* name) {
-    *event = ev_handle(kevent_new(name));
-    return 0;
-}
-int nn_pctl_detail_ipc_IParentalControlService_IsStereoVisionPermitted(SvcObj* self, u8* permitted) {
+static int nn_pctl_detail_ipc_IParentalControlService_IsStereoVisionPermitted(SvcObj* self, u8* permitted) {
     *permitted = 1;
     return 0;
 }
-int nn_pctl_detail_ipc_IParentalControlService_GetSynchronizationEvent(SvcObj* self, u32* event) {
-    return new_event(event, "pctl ev");
+static int nn_pctl_detail_ipc_IParentalControlService_GetSynchronizationEvent(SvcObj* self, u32* event) {
+    return new_event(event, "pctl ev", 0);
 }
-int nn_pctl_detail_ipc_IParentalControlService_GetPlayTimerEventToRequestSuspension(SvcObj* self, u32* event) {
-    return new_event(event, "pctl ev");
+static int nn_pctl_detail_ipc_IParentalControlService_GetPlayTimerEventToRequestSuspension(SvcObj* self, u32* event) {
+    return new_event(event, "pctl ev", 0);
 }
-int nn_pctl_detail_ipc_IParentalControlService_GetUnlinkedEvent(SvcObj* self, u32* event) {
-    return new_event(event, "pctl ev");
+static int nn_pctl_detail_ipc_IParentalControlService_GetUnlinkedEvent(SvcObj* self, u32* event) {
+    return new_event(event, "pctl ev", 0);
 }
-int nn_pctl_detail_ipc_IParentalControlServiceFactory_CreateService(SvcObj* self, u64 pid, SvcObj** service) {
+static int nn_pctl_detail_ipc_IParentalControlServiceFactory_CreateService(SvcObj* self, u64 pid, SvcObj** service) {
     *service = nn_pctl_detail_ipc_IParentalControlService_new(0);
     return 0;
 }
-int nn_pctl_detail_ipc_IParentalControlServiceFactory_CreateServiceWithoutInitialize(SvcObj* self, u64 pid,
-                                                                                     SvcObj** service) {
+static int nn_pctl_detail_ipc_IParentalControlServiceFactory_CreateServiceWithoutInitialize(SvcObj* self, u64 pid,
+                                                                                            SvcObj** service) {
     *service = nn_pctl_detail_ipc_IParentalControlService_new(0);
     return 0;
 }
 SvcObj* new_pctl(void) { return nn_pctl_detail_ipc_IParentalControlServiceFactory_new(0); }
 
-int nn_friends_detail_ipc_IFriendService_GetCompletionEvent(SvcObj* self, u32* event) {
-    return new_event(event, "friend");
+static int nn_friends_detail_ipc_IFriendService_GetCompletionEvent(SvcObj* self, u32* event) {
+    return new_event(event, "friend", 0);
 }
-int nn_friends_detail_ipc_INotificationService_GetEvent(SvcObj* self, u32* event) {
-    return new_event(event, "friend notif");
+static int nn_friends_detail_ipc_INotificationService_GetEvent(SvcObj* self, u32* event) {
+    return new_event(event, "friend notif", 0);
 }
-int nn_friends_detail_ipc_INotificationService_Pop(SvcObj* self, nn_friends_detail_ipc_SizedNotificationInfo* info) {
+static int nn_friends_detail_ipc_INotificationService_Pop(SvcObj* self,
+                                                          nn_friends_detail_ipc_SizedNotificationInfo* info) {
     return RC(121, 15); /* no notification */
 }
-int nn_friends_detail_ipc_IServiceCreator_CreateFriendService(SvcObj* self, SvcObj** service) {
+static int nn_friends_detail_ipc_IServiceCreator_CreateFriendService(SvcObj* self, SvcObj** service) {
     *service = nn_friends_detail_ipc_IFriendService_new(0);
     return 0;
 }
-int nn_friends_detail_ipc_IServiceCreator_CreateNotificationService(SvcObj* self, const nn_account_Uid* uid,
-                                                                    SvcObj** service) {
+static int nn_friends_detail_ipc_IServiceCreator_CreateNotificationService(SvcObj* self, const nn_account_Uid* uid,
+                                                                           SvcObj** service) {
     *service = nn_friends_detail_ipc_INotificationService_new(0);
     return 0;
 }
-int nn_friends_detail_ipc_IServiceCreator_CreateDaemonSuspendSessionService(SvcObj* self, SvcObj** service) {
+static int nn_friends_detail_ipc_IServiceCreator_CreateDaemonSuspendSessionService(SvcObj* self, SvcObj** service) {
     *service = nn_friends_detail_ipc_IDaemonSuspendSessionService_new(0);
     return 0;
 }
 SvcObj* new_friend(void) { return nn_friends_detail_ipc_IServiceCreator_new(0); }
 
-int nn_ns_detail_IServiceGetterInterface_GetDynamicRightsInterface(SvcObj* self, SvcObj** iface) {
+static int nn_ns_detail_IServiceGetterInterface_GetDynamicRightsInterface(SvcObj* self, SvcObj** iface) {
     *iface = nn_ns_detail_IDynamicRightsInterface_new(0);
     return 0;
 }
-int nn_ns_detail_IServiceGetterInterface_GetReadOnlyApplicationControlDataInterface(SvcObj* self, SvcObj** iface) {
+static int nn_ns_detail_IServiceGetterInterface_GetReadOnlyApplicationControlDataInterface(SvcObj* self,
+                                                                                           SvcObj** iface) {
     *iface = nn_ns_detail_IReadOnlyApplicationControlDataInterface_new(0);
     return 0;
 }
-int nn_ns_detail_IServiceGetterInterface_GetReadOnlyApplicationRecordInterface(SvcObj* self, SvcObj** iface) {
+static int nn_ns_detail_IServiceGetterInterface_GetReadOnlyApplicationRecordInterface(SvcObj* self, SvcObj** iface) {
     *iface = nn_ns_detail_IReadOnlyApplicationRecordInterface_new(0);
     return 0;
 }
-int nn_ns_detail_IServiceGetterInterface_GetECommerceInterface(SvcObj* self, SvcObj** iface) {
+static int nn_ns_detail_IServiceGetterInterface_GetECommerceInterface(SvcObj* self, SvcObj** iface) {
     *iface = nn_ns_detail_IECommerceInterface_new(0);
     return 0;
 }
-int nn_ns_detail_IServiceGetterInterface_GetApplicationVersionInterface(SvcObj* self, SvcObj** iface) {
+static int nn_ns_detail_IServiceGetterInterface_GetApplicationVersionInterface(SvcObj* self, SvcObj** iface) {
     *iface = nn_ns_detail_IApplicationVersionInterface_new(0);
     return 0;
 }
-int nn_ns_detail_IServiceGetterInterface_GetFactoryResetInterface(SvcObj* self, SvcObj** iface) {
+static int nn_ns_detail_IServiceGetterInterface_GetFactoryResetInterface(SvcObj* self, SvcObj** iface) {
     *iface = nn_ns_detail_IFactoryResetInterface_new(0);
     return 0;
 }
-int nn_ns_detail_IServiceGetterInterface_GetAccountProxyInterface(SvcObj* self, SvcObj** iface) {
+static int nn_ns_detail_IServiceGetterInterface_GetAccountProxyInterface(SvcObj* self, SvcObj** iface) {
     *iface = nn_ns_detail_IAccountProxyInterface_new(0);
     return 0;
 }
-int nn_ns_detail_IServiceGetterInterface_GetApplicationManagerInterface(SvcObj* self, SvcObj** iface) {
+static int nn_ns_detail_IServiceGetterInterface_GetApplicationManagerInterface(SvcObj* self, SvcObj** iface) {
     *iface = nn_ns_detail_IApplicationManagerInterface_new(0);
     return 0;
 }
-int nn_ns_detail_IServiceGetterInterface_GetDownloadTaskInterface(SvcObj* self, SvcObj** iface) {
+static int nn_ns_detail_IServiceGetterInterface_GetDownloadTaskInterface(SvcObj* self, SvcObj** iface) {
     *iface = nn_ns_detail_IDownloadTaskInterface_new(0);
     return 0;
 }
-int nn_ns_detail_IServiceGetterInterface_GetContentManagementInterface(SvcObj* self, SvcObj** iface) {
+static int nn_ns_detail_IServiceGetterInterface_GetContentManagementInterface(SvcObj* self, SvcObj** iface) {
     *iface = nn_ns_detail_IContentManagementInterface_new(0);
     return 0;
 }
-int nn_ns_detail_IServiceGetterInterface_GetDocumentInterface(SvcObj* self, SvcObj** iface) {
+static int nn_ns_detail_IServiceGetterInterface_GetDocumentInterface(SvcObj* self, SvcObj** iface) {
     *iface = nn_ns_detail_IDocumentInterface_new(0);
     return 0;
 }
 SvcObj* new_ns(void) { return nn_ns_detail_IServiceGetterInterface_new(0); }
 
-int nn_ssl_sf_ISslService_CreateContext(SvcObj* self, nn_ssl_sf_SslVersion ssl_version, u64 pid, SvcObj** context) {
+static int nn_ssl_sf_ISslService_CreateContext(SvcObj* self, nn_ssl_sf_SslVersion ssl_version, u64 pid,
+                                               SvcObj** context) {
     *context = nn_ssl_sf_ISslContext_new(0);
     return 0;
 }
 SvcObj* new_ssl(void) { return nn_ssl_sf_ISslService_new(0); }
 SvcObj* new_prepo(void) { return nn_prepo_detail_ipc_IPrepoService_new(0); }
-int nn_psm_IPsmSession_BindStateChangeEvent(SvcObj* self, u32* event) { return new_event(event, "psm"); }
-int nn_psm_IPsmServer_GetBatteryChargePercentage(SvcObj* self, u32* percentage) {
+static int nn_psm_IPsmSession_BindStateChangeEvent(SvcObj* self, u32* event) { return new_event(event, "psm", 0); }
+static int nn_psm_IPsmServer_GetBatteryChargePercentage(SvcObj* self, u32* percentage) {
     *percentage = 100;
     return 0;
 }
-int nn_psm_IPsmServer_GetChargerType(SvcObj* self, nn_psm_ChargerType* charger_type) {
+static int nn_psm_IPsmServer_GetChargerType(SvcObj* self, nn_psm_ChargerType* charger_type) {
     *charger_type = 1;
     return 0;
 }
-int nn_psm_IPsmServer_OpenSession(SvcObj* self, SvcObj** session) {
+static int nn_psm_IPsmServer_OpenSession(SvcObj* self, SvcObj** session) {
     *session = nn_psm_IPsmSession_new(0);
     return 0;
 }
 SvcObj* new_psm(void) { return nn_psm_IPsmServer_new(0); }
-int nn_fatalsrv_IService_ThrowFatal(SvcObj* self, u32 result, u64 pid) {
+static int nn_fatalsrv_IService_ThrowFatal(SvcObj* self, u32 result, u64 pid) {
     fatal("The game called fatal:u (code %x)", result);
     return 0;
 }
-int nn_fatalsrv_IService_ThrowFatalWithPolicy(SvcObj* self, u32 result, u32 policy, u64 pid) {
+static int nn_fatalsrv_IService_ThrowFatalWithPolicy(SvcObj* self, u32 result, u32 policy, u64 pid) {
     fatal("The game called fatal:u (code %x)", result);
     return 0;
 }
-int nn_fatalsrv_IService_ThrowFatalWithCpuContext(SvcObj* self, u32 result, u32 policy, u64 pid, IpcBuf context) {
+static int nn_fatalsrv_IService_ThrowFatalWithCpuContext(SvcObj* self, u32 result, u32 policy, u64 pid,
+                                                         IpcBuf context) {
     fatal("The game called fatal:u (code %x)", result);
     return 0;
 }
@@ -214,7 +213,7 @@ static int random_fill(IpcBuf b) {
     }
     return 0;
 }
-int nn_spl_detail_IRandomInterface_GenerateRandomBytes(SvcObj* self, IpcBuf data) { return random_fill(data); }
+static int nn_spl_detail_IRandomInterface_GenerateRandomBytes(SvcObj* self, IpcBuf data) { return random_fill(data); }
 SvcObj* new_csrng(void) { return nn_spl_detail_IRandomInterface_new(0); }
 /* mm:u (multimedia clock requests): Get has to return what SetAndWait asked for, since NvMM reads the decoder clock
    back. Each Initialize is its own request with a new id, as the SDK keeps them. The old forms name the module
@@ -259,42 +258,44 @@ static int mm_get(u32 key, int by_module, u32* current) {
     pm_unlock(&g_klock);
     return 0;
 }
-int nn_mmnv_IRequest_InitializeOld(SvcObj* self, nn_mmnv_Module module, nn_mmnv_Priority priority,
-                                   u32 event_clear_mode) {
+static int nn_mmnv_IRequest_InitializeOld(SvcObj* self, nn_mmnv_Module module, nn_mmnv_Priority priority,
+                                          u32 event_clear_mode) {
     mm_initialize(module);
     return 0;
 }
-int nn_mmnv_IRequest_FinalizeOld(SvcObj* self, nn_mmnv_Module module) { return mm_finalize(module, 1); }
-int nn_mmnv_IRequest_SetAndWaitOld(SvcObj* self, nn_mmnv_Module module, nn_mmnv_Setting min, nn_mmnv_Setting max) {
+static int nn_mmnv_IRequest_FinalizeOld(SvcObj* self, nn_mmnv_Module module) { return mm_finalize(module, 1); }
+static int nn_mmnv_IRequest_SetAndWaitOld(SvcObj* self, nn_mmnv_Module module, nn_mmnv_Setting min,
+                                          nn_mmnv_Setting max) {
     return mm_set(module, 1, min);
 }
-int nn_mmnv_IRequest_GetOld(SvcObj* self, nn_mmnv_Module module, nn_mmnv_Setting* current) {
+static int nn_mmnv_IRequest_GetOld(SvcObj* self, nn_mmnv_Module module, nn_mmnv_Setting* current) {
     return mm_get(module, 1, current);
 }
-int nn_mmnv_IRequest_Initialize(SvcObj* self, nn_mmnv_Module module, nn_mmnv_Priority priority, u32 event_clear_mode,
-                                u32* request_id) {
+static int nn_mmnv_IRequest_Initialize(SvcObj* self, nn_mmnv_Module module, nn_mmnv_Priority priority,
+                                       u32 event_clear_mode, u32* request_id) {
     *request_id = mm_initialize(module);
     return 0;
 }
-int nn_mmnv_IRequest_Finalize(SvcObj* self, u32 request_id) { return mm_finalize(request_id, 0); }
-int nn_mmnv_IRequest_SetAndWait(SvcObj* self, u32 request_id, nn_mmnv_Setting min, nn_mmnv_Setting max) {
+static int nn_mmnv_IRequest_Finalize(SvcObj* self, u32 request_id) { return mm_finalize(request_id, 0); }
+static int nn_mmnv_IRequest_SetAndWait(SvcObj* self, u32 request_id, nn_mmnv_Setting min, nn_mmnv_Setting max) {
     return mm_set(request_id, 0, min);
 }
-int nn_mmnv_IRequest_Get(SvcObj* self, u32 request_id, nn_mmnv_Setting* current) {
+static int nn_mmnv_IRequest_Get(SvcObj* self, u32 request_id, nn_mmnv_Setting* current) {
     return mm_get(request_id, 0, current);
 }
 SvcObj* new_mm(void) { return nn_mmnv_IRequest_new(0); }
-int nn_nfp_detail_IUser_AttachActivateEvent(SvcObj* self, const nn_nfc_DeviceHandle* device_handle, u32* event) {
-    return new_event(event, "nfp");
+static int nn_nfp_detail_IUser_AttachActivateEvent(SvcObj* self, const nn_nfc_DeviceHandle* device_handle, u32* event) {
+    return new_event(event, "nfp", 0);
 }
-int nn_nfp_detail_IUser_AttachDeactivateEvent(SvcObj* self, const nn_nfc_DeviceHandle* device_handle, u32* event) {
-    return new_event(event, "nfp");
+static int nn_nfp_detail_IUser_AttachDeactivateEvent(SvcObj* self, const nn_nfc_DeviceHandle* device_handle,
+                                                     u32* event) {
+    return new_event(event, "nfp", 0);
 }
-int nn_nfp_detail_IUser_GetState(SvcObj* self, u32* state) {
+static int nn_nfp_detail_IUser_GetState(SvcObj* self, u32* state) {
     *state = 1; /* initialized */
     return 0;
 }
-int nn_nfp_detail_IUserManager_CreateUserInterface(SvcObj* self, SvcObj** user) {
+static int nn_nfp_detail_IUserManager_CreateUserInterface(SvcObj* self, SvcObj** user) {
     *user = nn_nfp_detail_IUser_new(0);
     return 0;
 }
@@ -302,13 +303,10 @@ SvcObj* new_nfp(void) { return nn_nfp_detail_IUserManager_new(0); }
 SvcObj* new_caps(void) { return nn_capsrv_sf_IAlbumApplicationService_new(0); }
 /* BCAT. behave like an offline console: sync completes immediately (Done/OK) and the delivery cache
    is empty. games do wait on the progress object, so it has to exist */
-int nn_bcat_detail_ipc_IDeliveryCacheProgressService_GetEvent(SvcObj* self, u32* event) {
-    KEvent* e = kevent_new("bcat progress");
-    e->signaled = 1;
-    *event = ev_handle(e);
-    return 0;
+static int nn_bcat_detail_ipc_IDeliveryCacheProgressService_GetEvent(SvcObj* self, u32* event) {
+    return new_event(event, "bcat progress", 1);
 }
-int nn_bcat_detail_ipc_IDeliveryCacheProgressService_GetImpl(SvcObj* self, IpcBuf impl) { /* Done/OK */
+static int nn_bcat_detail_ipc_IDeliveryCacheProgressService_GetImpl(SvcObj* self, IpcBuf impl) { /* Done/OK */
     if (impl.addr && impl.size) {
         memset(GP(impl.addr), 0, impl.size);
         if (impl.size >= 8) {
@@ -319,15 +317,15 @@ int nn_bcat_detail_ipc_IDeliveryCacheProgressService_GetImpl(SvcObj* self, IpcBu
     }
     return 0;
 }
-int nn_bcat_detail_ipc_IDeliveryCacheFileService_Open(SvcObj* self, const nn_bcat_DirectoryName* directory_name,
-                                                      const nn_bcat_FileName* file_name) {
+static int nn_bcat_detail_ipc_IDeliveryCacheFileService_Open(SvcObj* self, const nn_bcat_DirectoryName* directory_name,
+                                                             const nn_bcat_FileName* file_name) {
     return RC(122, 2); /* not found */
 }
-int nn_bcat_detail_ipc_IDeliveryCacheStorageService_CreateFileService(SvcObj* self, SvcObj** file) {
+static int nn_bcat_detail_ipc_IDeliveryCacheStorageService_CreateFileService(SvcObj* self, SvcObj** file) {
     *file = nn_bcat_detail_ipc_IDeliveryCacheFileService_new(0);
     return 0;
 }
-int nn_bcat_detail_ipc_IDeliveryCacheStorageService_CreateDirectoryService(SvcObj* self, SvcObj** directory) {
+static int nn_bcat_detail_ipc_IDeliveryCacheStorageService_CreateDirectoryService(SvcObj* self, SvcObj** directory) {
     *directory = nn_bcat_detail_ipc_IDeliveryCacheDirectoryService_new(0);
     return 0;
 }
@@ -335,90 +333,93 @@ static int sync_progress(SvcObj** progress) {
     *progress = nn_bcat_detail_ipc_IDeliveryCacheProgressService_new(0);
     return 0;
 }
-int nn_bcat_detail_ipc_IBcatService_RequestSyncDeliveryCache(SvcObj* self, SvcObj** progress) {
+static int nn_bcat_detail_ipc_IBcatService_RequestSyncDeliveryCache(SvcObj* self, SvcObj** progress) {
     return sync_progress(progress);
 }
-int nn_bcat_detail_ipc_IBcatService_RequestSyncDeliveryCacheWithDirectoryName(
+static int nn_bcat_detail_ipc_IBcatService_RequestSyncDeliveryCacheWithDirectoryName(
     SvcObj* self, const nn_bcat_DirectoryName* directory_name, SvcObj** progress) {
     return sync_progress(progress);
 }
-int nn_bcat_detail_ipc_IBcatService_RequestSyncDeliveryCacheWithApplicationId(SvcObj* self,
-                                                                              nn_ApplicationId application_id,
-                                                                              u32 unknown, SvcObj** progress) {
+static int nn_bcat_detail_ipc_IBcatService_RequestSyncDeliveryCacheWithApplicationId(SvcObj* self,
+                                                                                     nn_ApplicationId application_id,
+                                                                                     u32 unknown, SvcObj** progress) {
     return sync_progress(progress);
 }
-int nn_bcat_detail_ipc_IBcatService_RequestSyncDeliveryCacheWithApplicationIdAndDirectoryName(
+static int nn_bcat_detail_ipc_IBcatService_RequestSyncDeliveryCacheWithApplicationIdAndDirectoryName(
     SvcObj* self, nn_ApplicationId application_id, u32 unknown, const nn_bcat_DirectoryName* directory_name,
     SvcObj** progress) {
     return sync_progress(progress);
 }
-int nn_bcat_detail_ipc_IBcatService_GetDeliveryCacheStorageUpdateNotifier(SvcObj* self, nn_ApplicationId application_id,
-                                                                          SvcObj** notifier) {
+static int nn_bcat_detail_ipc_IBcatService_GetDeliveryCacheStorageUpdateNotifier(SvcObj* self,
+                                                                                 nn_ApplicationId application_id,
+                                                                                 SvcObj** notifier) {
     *notifier = nn_bcat_detail_ipc_INotifierService_new(0);
     return 0;
 }
-int nn_bcat_detail_ipc_IBcatService_RequestSuspendDeliveryTask(SvcObj* self, nn_ApplicationId application_id,
-                                                               SvcObj** suspension) {
+static int nn_bcat_detail_ipc_IBcatService_RequestSuspendDeliveryTask(SvcObj* self, nn_ApplicationId application_id,
+                                                                      SvcObj** suspension) {
     *suspension = nn_bcat_detail_ipc_IDeliveryTaskSuspensionService_new(0);
     return 0;
 }
-int nn_bcat_detail_ipc_INotifierService_GetEvent(SvcObj* self, u32* event) {
-    return new_event(event, "bcat storage update");
+static int nn_bcat_detail_ipc_INotifierService_GetEvent(SvcObj* self, u32* event) {
+    return new_event(event, "bcat storage update", 0);
 }
-int nn_bcat_detail_ipc_IServiceCreator_CreateBcatService(SvcObj* self, u64 pid, SvcObj** service) {
+static int nn_bcat_detail_ipc_IServiceCreator_CreateBcatService(SvcObj* self, u64 pid, SvcObj** service) {
     *service = nn_bcat_detail_ipc_IBcatService_new(0);
     return 0;
 }
-int nn_bcat_detail_ipc_IServiceCreator_CreateDeliveryCacheStorageService(SvcObj* self, u64 pid, SvcObj** service) {
+static int nn_bcat_detail_ipc_IServiceCreator_CreateDeliveryCacheStorageService(SvcObj* self, u64 pid,
+                                                                                SvcObj** service) {
     *service = nn_bcat_detail_ipc_IDeliveryCacheStorageService_new(0);
     return 0;
 }
-int nn_bcat_detail_ipc_IServiceCreator_CreateDeliveryCacheStorageServiceWithApplicationId(
+static int nn_bcat_detail_ipc_IServiceCreator_CreateDeliveryCacheStorageServiceWithApplicationId(
     SvcObj* self, nn_ApplicationId application_id, SvcObj** service) {
     *service = nn_bcat_detail_ipc_IDeliveryCacheStorageService_new(0);
     return 0;
 }
 SvcObj* new_bcat(void) { return nn_bcat_detail_ipc_IServiceCreator_new(0); }
-int nn_ec_IPurchaseEventManager_GetPurchasedEventReadableHandle(SvcObj* self, u32* event) {
-    return new_event(event, "aoc purchase");
+static int nn_ec_IPurchaseEventManager_GetPurchasedEventReadableHandle(SvcObj* self, u32* event) {
+    return new_event(event, "aoc purchase", 0);
 }
-int nn_ec_IPurchaseEventManager_PopPurchasedProductInfo(SvcObj* self, nn_ec_srv_detail_PurchasedProductInfo* info) {
+static int nn_ec_IPurchaseEventManager_PopPurchasedProductInfo(SvcObj* self,
+                                                               nn_ec_srv_detail_PurchasedProductInfo* info) {
     return RC(164, 400); /* nothing purchased */
 }
-int nn_ec_IPurchaseEventManager_PopPurchasedProductInfoWithUid(SvcObj* self,
-                                                               nn_ec_srv_detail_PurchasedProductInfo* info) {
+static int nn_ec_IPurchaseEventManager_PopPurchasedProductInfoWithUid(SvcObj* self, const nn_account_Uid* uid,
+                                                                      nn_ec_srv_detail_PurchasedProductInfo* info) {
     return RC(164, 400);
 }
 /* the first add-on content id of the game's */
 static u64 aoc_base_id(void) { return (g_title_id & ~0xFFFull) + 0x1000; }
-int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentBaseIdByApplicationId(SvcObj* self,
-                                                                               nn_ncm_ApplicationId application_id,
-                                                                               u64* base_id) {
+static int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentBaseIdByApplicationId(
+    SvcObj* self, nn_ncm_ApplicationId application_id, u64* base_id) {
     *base_id = aoc_base_id();
     return 0;
 }
-int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentBaseId(SvcObj* self, u64 pid, u64* base_id) {
+static int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentBaseId(SvcObj* self, u64 pid, u64* base_id) {
     *base_id = aoc_base_id();
     return 0;
 }
-int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentListChangedEvent(SvcObj* self, u32* event) {
-    return new_event(event, "aoc");
+static int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentListChangedEvent(SvcObj* self, u32* event) {
+    return new_event(event, "aoc", 0);
 }
-int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentListChangedEventWithProcessId(SvcObj* self, u64 pid,
-                                                                                       u32* event) {
-    return new_event(event, "aoc");
+static int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentListChangedEventWithProcessId(SvcObj* self, u64 pid,
+                                                                                              u32* event) {
+    return new_event(event, "aoc", 0);
 }
-int nn_aocsrv_detail_IAddOnContentManager_CreateEcPurchasedEventManager(SvcObj* self, SvcObj** manager) {
+static int nn_aocsrv_detail_IAddOnContentManager_CreateEcPurchasedEventManager(SvcObj* self, SvcObj** manager) {
     *manager = nn_ec_IPurchaseEventManager_new(0);
     return 0;
 }
-int nn_aocsrv_detail_IAddOnContentManager_CreatePermanentEcPurchasedEventManager(SvcObj* self, SvcObj** manager) {
+static int nn_aocsrv_detail_IAddOnContentManager_CreatePermanentEcPurchasedEventManager(SvcObj* self, u64 pid,
+                                                                                        SvcObj** manager) {
     *manager = nn_ec_IPurchaseEventManager_new(0);
     return 0;
 }
 SvcObj* new_aoc(void) { return nn_aocsrv_detail_IAddOnContentManager_new(0); }
 /* the one shared memory, kept for the whole run */
-int nn_irsensor_IIrSensorServer_GetIrsensorSharedMemoryHandle(SvcObj* self, u64 aruid, u32* shared_memory) {
+static int nn_irsensor_IIrSensorServer_GetIrsensorSharedMemoryHandle(SvcObj* self, u64 aruid, u32* shared_memory) {
     KShmem* s = __atomic_load_n(&misc.irs_shm, __ATOMIC_ACQUIRE);
     if (!s) {
         KShmem* n = kshmem_new(0x8000, "irs");
@@ -432,66 +433,67 @@ int nn_irsensor_IIrSensorServer_GetIrsensorSharedMemoryHandle(SvcObj* self, u64 
     return 0;
 }
 SvcObj* new_irs(void) { return nn_irsensor_IIrSensorServer_new(0); }
-int nn_mii_detail_IStaticService_GetDatabaseService(SvcObj* self, i32 key_code, SvcObj** database) {
+static int nn_mii_detail_IStaticService_GetDatabaseService(SvcObj* self, i32 key_code, SvcObj** database) {
     *database = nn_mii_detail_IDatabaseService_new(0);
     return 0;
 }
 SvcObj* new_mii(void) { return nn_mii_detail_IStaticService_new(0); }
-/* ldn: local wireless. Initialize and GetState follow the state in u[0], AttachStateChangeEvent gives an event */
-int nn_ldn_detail_IUserLocalCommunicationService_GetState(SvcObj* self, u32* state) {
-    *state = self->u[0] ? 1 : 0; /* Initialized, or None */
+/* ldn: local wireless. Initialize and GetState follow the state in u[0] (an atomic: game threads call both),
+   AttachStateChangeEvent gives an event */
+static int nn_ldn_detail_IUserLocalCommunicationService_GetState(SvcObj* self, u32* state) {
+    *state = __atomic_load_n(&self->u[0], __ATOMIC_RELAXED) ? 1 : 0; /* Initialized, or None */
     return 0;
 }
-int nn_ldn_detail_IUserLocalCommunicationService_AttachStateChangeEvent(SvcObj* self, u32* event) {
-    return new_event(event, "ldn state");
+static int nn_ldn_detail_IUserLocalCommunicationService_AttachStateChangeEvent(SvcObj* self, u32* event) {
+    return new_event(event, "ldn state", 0);
 }
-int nn_ldn_detail_IUserLocalCommunicationService_Initialize(SvcObj* self, u64 pid) {
-    self->u[0] = 1;
+static int nn_ldn_detail_IUserLocalCommunicationService_Initialize(SvcObj* self, u64 pid) {
+    __atomic_store_n(&self->u[0], 1, __ATOMIC_RELAXED);
     return 0;
 }
-int nn_ldn_detail_IUserLocalCommunicationService_InitializeWithVersion(SvcObj* self, i32 version, u64 pid) {
-    self->u[0] = 1;
+static int nn_ldn_detail_IUserLocalCommunicationService_InitializeWithVersion(SvcObj* self, i32 version, u64 pid) {
+    __atomic_store_n(&self->u[0], 1, __ATOMIC_RELAXED);
     return 0;
 }
-int nn_ldn_detail_IUserLocalCommunicationService_Finalize(SvcObj* self) {
-    self->u[0] = 0;
+static int nn_ldn_detail_IUserLocalCommunicationService_Finalize(SvcObj* self) {
+    __atomic_store_n(&self->u[0], 0, __ATOMIC_RELAXED);
     return 0;
 }
-int nn_ldn_detail_IUserServiceCreator_CreateUserLocalCommunicationService(SvcObj* self, SvcObj** service) {
+static int nn_ldn_detail_IUserServiceCreator_CreateUserLocalCommunicationService(SvcObj* self, SvcObj** service) {
     *service = nn_ldn_detail_IUserLocalCommunicationService_new(0);
     return 0;
 }
 SvcObj* new_ldn(void) { return nn_ldn_detail_IUserServiceCreator_new(0); }
-int nn_err_context_IWriterForApplication_CreateContextRegistrar(SvcObj* self, SvcObj** registrar) {
+static int nn_err_context_IWriterForApplication_CreateContextRegistrar(SvcObj* self, SvcObj** registrar) {
     *registrar = nn_err_context_IContextRegistrar_new(0);
     return 0;
 }
 SvcObj* new_ectx(void) { return nn_err_context_IWriterForApplication_new(0); }
-int nn_spl_detail_IGeneralInterface_GenerateRandomBytes(SvcObj* self, IpcBuf data) { return random_fill(data); }
+static int nn_spl_detail_IGeneralInterface_GenerateRandomBytes(SvcObj* self, IpcBuf data) { return random_fill(data); }
 SvcObj* new_spl(void) { return nn_spl_detail_IGeneralInterface_new(0); }
 
 /* btm:u GetCore returns an interface object, which the SDK requires during initialization. BLE operations are not
    emulated: their events stay unsignaled, with the success flag the SDK requires */
 static int ble_event(u8* success, u32* event, const char* name) {
     *success = 1;
-    return new_event(event, name);
+    return new_event(event, name, 0);
 }
-int nn_btm_IBtmUserCore_AcquireBleScanEvent(SvcObj* self, u8* success, u32* event) {
+static int nn_btm_IBtmUserCore_AcquireBleScanEvent(SvcObj* self, u8* success, u32* event) {
     return ble_event(success, event, "btm BLE scan");
 }
-int nn_btm_IBtmUserCore_AcquireBleConnectionEvent(SvcObj* self, u8* success, u32* event) {
+static int nn_btm_IBtmUserCore_AcquireBleConnectionEvent(SvcObj* self, u8* success, u32* event) {
     return ble_event(success, event, "btm BLE connection");
 }
-int nn_btm_IBtmUserCore_AcquireBlePairingEvent(SvcObj* self, u8* success, u32* event) {
+static int nn_btm_IBtmUserCore_AcquireBlePairingEvent(SvcObj* self, u8* success, u32* event) {
     return ble_event(success, event, "btm BLE pairing");
 }
-int nn_btm_IBtmUserCore_AcquireBleServiceDiscoveryEvent(SvcObj* self, u8* success, u32* event) {
+static int nn_btm_IBtmUserCore_AcquireBleServiceDiscoveryEvent(SvcObj* self, u8* success, u32* event) {
     return ble_event(success, event, "btm BLE service discovery");
 }
-int nn_btm_IBtmUserCore_AcquireBleMtuConfigEvent(SvcObj* self, u8* success, u32* event) {
+static int nn_btm_IBtmUserCore_AcquireBleMtuConfigEvent(SvcObj* self, u8* success, u32* event) {
     return ble_event(success, event, "btm BLE MTU");
 }
-int nn_btm_IBtmUser_GetCore(SvcObj* self, SvcObj** core) {
+static int nn_btm_IBtmUser_GetCore(SvcObj* self, SvcObj** core) {
     *core = nn_btm_IBtmUserCore_new(0);
     return 0;
 }
