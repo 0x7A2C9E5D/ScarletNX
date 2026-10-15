@@ -928,7 +928,8 @@ int main(int argc, char** argv) {
         colored_text_on(&app, app.cols - 6, app.rows - 3, "100%", li, lp);
         colored_text_on(&app, 1, app.rows - 2, "OPTION FLAGS", li, lp);
         assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 3) + cell / 2), li));
-        /* typing: three characters in, the cursor after them */
+        /* typing: three characters in, the cursor after them; async, each line from when it came */
+        app.theme.typing_sync = false;
         app.theme.fade_in_ms = app.theme.fade_out_ms = 0;
         app.theme.blink_ms = 0;
         launch_shown = app.steps.step[1].shown_ms;
