@@ -552,6 +552,9 @@ int main(void) {
     set_u32(c, 2, 1);
     CHECK(handshake(c) == 0);
     CHECK(ssl_write(c, "close", &n) == 0);
+    /* the server's close_notify, before closing: a socket closed with unread data (the server's session tickets)
+       resets the connection on Windows, which discards what the server had not read yet, the client's Finished too */
+    CHECK(ssl_read(c, 10, 64, &n) == 0 && n == 0);
     svcobj_unref(c);
     c = new_connection(context);
     fd = game_socket(port);
