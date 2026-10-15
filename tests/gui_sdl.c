@@ -1059,10 +1059,17 @@ int main(int argc, char** argv) {
         app.menu.view = GUI_LOAD_NONE;
         app.browser = (GuiBrowser){0};
     }
-    /* the system's picker, as the Android menu opens it for a file to load: a document with no path stays on the
-       screen, none goes back, a path loads */
+    /* the system's picker, as the Android menu opens it for a file to load or for the keys: a document with no path
+       stays on the screen, and so does none, saying so, for the screen's messages to be read; a path loads */
     app.picked = SDL_RegisterEvents(1);
     assert(app.picked);
+    app.menu.selected = GUI_KEYS;
+    key(&app, SDLK_RETURN);
+    assert(app.menu.view == GUI_LOAD_KEYS);
+    pick(&app, NULL);
+    assert(app.menu.view == GUI_LOAD_KEYS && !strcmp(app.message, "No file was picked."));
+    key(&app, SDLK_ESCAPE);
+    assert(app.menu.view == GUI_LOAD_NONE);
     app.menu.selected = GUI_SWITCH;
     key(&app, SDLK_RETURN);
     key(&app, SDLK_RETURN);
@@ -1070,8 +1077,7 @@ int main(int argc, char** argv) {
     pick(&app, "content://com.android.providers.downloads.documents/document/msf%3A12");
     assert(app.menu.view == GUI_LOAD_DROP && !app.menu.running && app.message[0]);
     pick(&app, NULL);
-    assert(app.menu.view == GUI_LOAD_OPTIONS);
-    key(&app, SDLK_RETURN);
+    assert(app.menu.view == GUI_LOAD_DROP && !strcmp(app.message, "No file was picked."));
     pick(&app, input);
     assert(app.menu.running && app.menu.selected == GUI_SWITCH);
     finish(&app, 0);

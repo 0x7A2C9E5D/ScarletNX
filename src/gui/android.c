@@ -19,7 +19,11 @@ void gui_android_start(void) {
 const char* gui_android_folder(void) {
     static const char folder[] = "/sdcard/ScarletNX";
     mkdir(folder, 0770);
-    return !access(folder, W_OK) && !chdir(folder) ? folder : NULL;
+    if (access(folder, W_OK) || chdir(folder)) return NULL;
+    /* a phone has no terminal to make them: games/ is where the user puts dumps, work/ where the driver extracts */
+    mkdir("games", 0770);
+    mkdir("work", 0770);
+    return folder;
 }
 
 char* gui_android_document_file(const char* uri) {

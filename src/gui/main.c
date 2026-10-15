@@ -69,9 +69,9 @@ static const char* const items[] = {"Load Switch NSP/XCI/NRO", "Load Linux ARM E
 static const char* const load_labels[] = {"-> Select a file", "-> Select file from games/ instead"};
 #define SAY_MENU "Tap: select. Back: go back."
 #define SAY_LOAD "Choose a load option."
-#define SAY_DROP "Pick the file in the window that opened. Back: go back."
+#define SAY_DROP "Tap -> Select a file again to open the file picker. Back: go back."
 #define SAY_GAMES "Tap: open. Swipe across: turn the page. Back: go back."
-#define SAY_KEYS "Setup device keys: pick prod.keys in the window that opened"
+#define SAY_KEYS "Setup device keys: tap Pick prod.keys to open the file picker"
 #define SAY_KEYS_HOW "Back: go back."
 #define SAY_KEYS_WAIT "Pick prod.keys"
 #define SAY_DONE "Tap to return to menu"
@@ -731,11 +731,11 @@ static void leave_run(App* app) {
 }
 #ifdef SDL_PLATFORM_ANDROID
 /* the working folder moves to /sdcard/ScarletNX once the app may write there, which the user grants after it starts */
-static void android_folder(App* app) {
+static bool android_folder(App* app) {
     char* cwd = gui_android_folder() ? SDL_GetCurrentDirectory() : NULL;
     if (!cwd || (app->cwd && !strcmp(cwd, app->cwd))) {
         SDL_free(cwd);
-        return;
+        return false;
     }
     SDL_free(app->cwd);
     app->cwd = cwd;
@@ -743,12 +743,17 @@ static void android_folder(App* app) {
     app->games_dir = snx_path_join(cwd, "games");
     free(app->themes_dirs[0]);
     app->themes_dirs[0] = snx_path_join(cwd, "themes");
+    return true;
 }
 /* A game runs in the app's game activity, a process of its own: no child of this one gets a window */
 static int play(App* app, const char* game) {
     char* option = snx_format("--game=%s", game);
-    const char* argv[3] = {option, "-f", NULL}; /* the whole screen, the system's bars out of the way */
-    int ok = gui_android_play(argv, app->message, sizeof(app->message));
+    const char* argv[3];
+    int ok;
+    argv[0] = option;
+    argv[1] = "-f"; /* the whole screen, the system's bars out of the way */
+    argv[2] = NULL;
+    ok = gui_android_play(argv, app->message, sizeof(app->message));
     free(option);
     return ok;
 }
@@ -880,9 +885,10 @@ static void launch(App* app, char* absolute, bool prepared) {
     argv[n] = NULL;
     bool started = gui_process_start(app->process, argv, app->message, sizeof(app->message));
     if (started && app->run_log) {
+        size_t k;
         if (app->run_out) fclose(app->run_out);
         app->run_out = snx_fopen(app->run_log, "wb");
-        for (size_t k = 0; app->run_out && k < n; ++k) fprintf(app->run_out, "%s%s", k ? " " : "$ ", argv[k]);
+        for (k = 0; app->run_out && k < n; ++k) fprintf(app->run_out, "%s%s", k ? " " : "$ ", argv[k]);
         if (app->run_out) fputc('\n', app->run_out);
     }
     gui_banner_reset(&app->banner);
@@ -1063,7 +1069,22 @@ static void share_log(App* app) {
     free(game);
 }
 #endif
+static void list_games(App* app) {
+#ifdef SDL_PLATFORM_ANDROID
+    android_folder(app);
+#endif
+    if (app->menu.active == GUI_3DS)
+        gui_cias_scan(&app->games, app->games_dir, app->message, sizeof(app->message));
+    else
+        gui_games_scan(&app->games, app->games_dir, app->message, sizeof(app->message));
+    memset(&app->browser, 0, sizeof(app->browser));
+    app->browser.count = app->games.count;
+    layout(app);
+}
 static void menu_key(App* app, GuiKey key) {
+#ifdef SDL_PLATFORM_ANDROID
+    GuiLoadView before = app->menu.view; /* the screen this key was pressed on */
+#endif
     if (app->finished) {
         if (key == GUI_CANCEL && app->theme.fade_out_ms && !app->leaving_ms)
             app->leaving_ms = SDL_max(now_ms(app), 1); /* the run fades out first; pump() comes back */
@@ -1094,7 +1115,9 @@ static void menu_key(App* app, GuiKey key) {
     }
     gui_menu_key(&app->menu, key);
 #ifdef SDL_PLATFORM_ANDROID
-    if (key == GUI_SELECT && (app->menu.view == GUI_LOAD_DROP || app->menu.view == GUI_LOAD_KEYS)) open_picker(app);
+    /* the screen opens first, as on a computer, so what happens shows there; a select on it opens the picker */
+    if (key == GUI_SELECT && app->menu.view == before && (before == GUI_LOAD_DROP || before == GUI_LOAD_KEYS))
+        open_picker(app);
 #endif
     if (app->menu.recent_open) {
         int index = app->menu.recent_open - 1;
@@ -1113,17 +1136,7 @@ static void menu_key(App* app, GuiKey key) {
     }
 #endif
     if (key == GUI_CANCEL || (key == GUI_SELECT && app->menu.view == GUI_LOAD_KEYS)) app->message[0] = 0;
-    if (app->menu.view == GUI_LOAD_GAMES) {
-#ifdef SDL_PLATFORM_ANDROID
-        android_folder(app);
-#endif
-        if (app->menu.active == GUI_3DS)
-            gui_cias_scan(&app->games, app->games_dir, app->message, sizeof(app->message));
-        else
-            gui_games_scan(&app->games, app->games_dir, app->message, sizeof(app->message));
-        app->browser = (GuiBrowser){.count = app->games.count};
-        layout(app);
-    }
+    if (app->menu.view == GUI_LOAD_GAMES) list_games(app);
 }
 /* a label's cells, or its whole row for a finger, which is wider than a mouse pointer */
 static bool hit_text(const App* app, float x, float y, int col, int row, const char* label, bool touch) {
@@ -1139,6 +1152,10 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
     y /= 16 * app->scale;
     if (app->menu.view == GUI_LOAD_KEYS) {
         if (click && hit_text(app, x, y, 1, 8, "Back [ESC]", touch)) menu_key(app, GUI_CANCEL);
+#ifdef SDL_PLATFORM_ANDROID
+        else if (click && hit_text(app, x, y, 1, SDL_max(app->rows / 2, 10), SAY_KEYS_WAIT, true))
+            menu_key(app, GUI_SELECT); /* its whole row: the theme may center or frame the prompt */
+#endif
         return;
     }
     if (app->menu.view == GUI_LOAD_GAMES) {
@@ -1189,14 +1206,14 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
         return;
     }
 }
-/* the file the system's picker chose, as a dropped one; none (cancelled) goes back */
+/* the file the system's picker chose, as a dropped one; none (cancelled) stays on the screen and says so */
 static void picked(App* app, const char* uri) {
     char* path = uri ? gui_document_path(uri) : NULL;
 #ifdef SDL_PLATFORM_ANDROID
     if (uri && !path) path = gui_android_document_file(uri);
 #endif
     if (!uri)
-        menu_key(app, GUI_CANCEL);
+        snprintf(app->message, sizeof(app->message), "No file was picked.");
     else if (!path)
         snprintf(app->message, sizeof(app->message), "Pick the file from the device's storage, not from an app (%s).",
                  uri);
@@ -1245,6 +1262,16 @@ static void touch(App* app, float x, float y) {
     }
     pointer(app, x * (float)w, y * (float)h, true, true);
 }
+#ifdef SDL_PLATFORM_ANDROID
+/* SDL hands the app's lifecycle to watchers only, inside SDL_PollEvent on this thread. Back from the system's settings,
+   the user may have just let the app write to /sdcard */
+static bool SDLCALL lifecycle(void* data, SDL_Event* e) {
+    App* app = (App*)data;
+    if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND && android_folder(app) && app->menu.view == GUI_LOAD_GAMES)
+        list_games(app);
+    return true;
+}
+#endif
 static void event(App* app, const SDL_Event* e) {
     if (e->type == SDL_EVENT_QUIT || e->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
         app->menu.quit = true;
@@ -1309,6 +1336,7 @@ static void event(App* app, const SDL_Event* e) {
     }
 }
 static bool initialize(App* app) {
+    SDL_WindowFlags flags;
     memset(app, 0, sizeof(*app));
 #ifdef SDL_PLATFORM_ANDROID
     app->theme = *gui_theme_builtin("yorha");
@@ -1323,9 +1351,9 @@ static bool initialize(App* app) {
     if (!SDL_Init(SDL_INIT_VIDEO)) return false;
 #ifdef SDL_PLATFORM_ANDROID
     /* the whole screen, the system's bars out of the way: a phone held wide is short */
-    SDL_WindowFlags flags = SDL_WINDOW_FULLSCREEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    flags = SDL_WINDOW_FULLSCREEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #else
-    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #endif
     if (!SDL_CreateWindowAndRenderer(snx_build_info(), 1280, 800, flags, &app->window, &app->renderer))
         return false;
@@ -1351,10 +1379,16 @@ static bool initialize(App* app) {
         SDL_SetError("Cannot initialize GUI resources");
         return false;
     }
+#ifdef SDL_PLATFORM_ANDROID
+    SDL_AddEventWatch(lifecycle, app);
+#endif
     layout(app);
     return true;
 }
 static void cleanup(App* app) {
+#ifdef SDL_PLATFORM_ANDROID
+    SDL_RemoveEventWatch(lifecycle, app);
+#endif
     gui_process_destroy(app->process);
     free(app->file);
     free(app->games_dir);

@@ -8,7 +8,8 @@
 /* The app's own files as HOME, for the keys (.switch/), and the working folder: the shared storage's ScarletNX, which
    the user sees, else those files until the app may write there */
 void gui_android_start(void);
-/* Changes to /sdcard/ScarletNX, made when missing; NULL while the app may not write there (no access to all files) */
+/* Changes to /sdcard/ScarletNX, made with its games/ and work/ when missing; NULL while the app may not write there
+   (no access to all files) */
 const char* gui_android_folder(void);
 /* The file under a picked document without a path (Downloads' own list, Recent): what its descriptor opens, when that
    is a file on the device's storage; NULL else. Owned */
