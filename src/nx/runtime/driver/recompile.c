@@ -420,7 +420,14 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     /* Deploy the executable last: automatic play uses it as the completion checkpoint. */
     exe = snx_format("%s%s", base, compile.target_win ? ".exe" : "");
     tmp = snx_format("%s.tmp", exe);
-    if (snx_copy_file(run, tmp) || snx_make_executable(tmp) || snx_replace(tmp, exe)) {
+#ifdef __ANDROID__
+    /* the shared storage runs nothing (the game runs on the app's own runtime), and before Android 11 it refuses a
+       mode change: there the copy only marks the recompile done */
+    i = snx_copy_file(run, tmp) || snx_replace(tmp, exe);
+#else
+    i = snx_copy_file(run, tmp) || snx_make_executable(tmp) || snx_replace(tmp, exe);
+#endif
+    if (i) {
         snx_error("cannot deploy runtime to %s", exe);
         if (snx_is_file(tmp)) snx_remove_tree(tmp);
         goto done;

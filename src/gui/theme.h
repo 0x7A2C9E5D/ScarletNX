@@ -60,6 +60,11 @@ typedef struct {
     int typing_sync; /* one line typed at a time, those already done three times faster */
     GuiPrompt prompt;
     uint32_t fade_in_ms, fade_out_ms, line_in_ms, typing_ms, blink_ms;
+    uint32_t scroll_ms; /* a line too long for its row slides a column every scroll_ms, and back; 0 cuts it */
+    /* the boot's splash: the program's icon on splash_page for splash_ms (0: none), this theme's in splash_chance
+       boots of 100, the default theme's in the others */
+    GuiRgb splash_page;
+    uint32_t splash_ms, splash_chance;
 } GuiTheme;
 typedef struct {
     char (*ids)[64]; /* the built-ins, then each folder of themes/ with a theme.ini, in one block */
@@ -68,6 +73,8 @@ typedef struct {
 
 /* "default" and "yorha"; NULL for any other id */
 const GuiTheme* gui_theme_builtin(const char* id);
+/* the theme whose splash a boot shows: this one when roll (0 to 99) is under its chance, else the default */
+const GuiTheme* gui_splash_theme(const GuiTheme* theme, int roll);
 /* A theme.ini's text over the built-in its [theme] base names (default when absent): a key it lacks, or cannot
    read, keeps the base's value. Returns false only when out of memory. */
 int gui_theme_parse(GuiTheme* theme, const char* id, const char* text, size_t size);
