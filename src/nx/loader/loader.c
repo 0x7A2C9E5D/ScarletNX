@@ -238,9 +238,40 @@ static int lz4_block(Parser* p, const unsigned char* src, size_t n, unsigned cha
 /* The dynamic table's tags it reads: DT_PLTRELSZ (2) to DT_RELENT (19). A 64-bit module has RELA relocations, a
    32-bit one REL, whose addend is the word the relocation is applied to */
 #define DYN_TAGS 20
+static int relr_pointer(Parser* p, SnxU64 target) {
+    SnxModuleImage* m = p->module;
+    SnxU64 addend, word = p->elf32 ? 4 : 8;
+    if (target > m->size || m->size - target < word) return fail(p, "ELF: relocation target exceeds module");
+    addend = span(m->image_size, target, word)
+                 ? (p->elf32 ? get32(m->image + (size_t)target) : get64(m->image + (size_t)target))
+                 : 0;
+    return in_text32(m, addend, p->elf32) ? add_offset(p, &m->relptrs, &m->relptr_count, &p->relptr_cap, addend) : 0;
+}
+
+static int parse_relr(Parser* p, SnxU64 table, SnxU64 size, SnxU64 entry_size) {
+    const SnxModuleImage* m = p->module;
+    SnxU64 at, entry, where, i, word = p->elf32 ? 4 : 8;
+    if ((entry_size && entry_size != word) || size % word) return fail(p, "ELF: invalid RELR entry size");
+    if (!span(m->image_size, table, size)) return fail(p, "ELF: RELR table exceeds image");
+    where = 0;
+    for (at = table; at < table + size; at += word) {
+        entry = p->elf32 ? get32(m->image + (size_t)at) : get64(m->image + (size_t)at);
+        if (!(entry & 1)) {
+            if (relr_pointer(p, entry)) return -1;
+            where = entry + word;
+            continue;
+        }
+        if (where > m->size) return fail(p, "ELF: relocation target exceeds module");
+        for (i = 0, entry >>= 1; entry; entry >>= 1, i++)
+            if ((entry & 1) && relr_pointer(p, where + i * word)) return -1;
+        where += (word * 8 - 1) * word;
+    }
+    return 0;
+}
+
 static int parse_dynamic(Parser* p, size_t offset) {
     SnxModuleImage* m;
-    SnxU64 tags[DYN_TAGS], present, tag, value, count, i, at, string_size, name_at, symbol_value, symbol_size;
+    SnxU64 tags[DYN_TAGS], relr[3], present, tag, value, count, i, at, string_size, name_at, symbol_value, symbol_size;
     SnxU64 addend, target, info, word, entry, symbol_entry, table, table_size, table_entry;
     unsigned relative;
     const unsigned char *s, *end;
@@ -255,6 +286,8 @@ static int parse_dynamic(Parser* p, size_t offset) {
     symbol_entry = p->elf32 ? 16 : 24; /* Elf32_Sym, Elf64_Sym */
     relative = p->elf32 ? 23 : 1027;   /* R_ARM_RELATIVE, R_AARCH64_RELATIVE */
     memset(tags, 0, sizeof tags);
+    memset(relr, 0, sizeof relr);
+    memset(relr, 0, sizeof relr);
     present = 0;
     terminated = 0;
     while (span(m->image_size, offset, entry)) {
@@ -267,6 +300,12 @@ static int parse_dynamic(Parser* p, size_t offset) {
         }
         if (tag < DYN_TAGS && !(present & ((SnxU64)1 << (unsigned)tag))) {
             tags[(unsigned)tag] = value;
+            present |= (SnxU64)1 << (unsigned)tag;
+        } else if (tag >= 35 && tag <= 37 && !(present & ((SnxU64)1 << (unsigned)tag))) {
+            relr[(unsigned)tag - 35] = value;
+            present |= (SnxU64)1 << (unsigned)tag;
+        } else if (tag >= 35 && tag <= 37 && !(present & ((SnxU64)1 << (unsigned)tag))) {
+            relr[(unsigned)tag - 35] = value; /* DT_RELRSZ, DT_RELR, DT_RELRENT */
             present |= (SnxU64)1 << (unsigned)tag;
         }
     }
@@ -364,6 +403,7 @@ static int parse_dynamic(Parser* p, size_t offset) {
                 return -1;
         }
     }
+    if ((present & ((SnxU64)1 << 36)) && parse_relr(p, relr[1], relr[0], relr[2])) return -1;
     return 0;
 }
 
