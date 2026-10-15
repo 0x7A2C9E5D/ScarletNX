@@ -883,6 +883,28 @@ int main(int argc, char** argv) {
         app.menu.selected = GUI_SWITCH;
         render(&app);
         assert(!menu_offset(&app));
+        /* a drag up moves the focus row by row while the finger goes, not all at once when it lifts */
+        {
+            SDL_Event e = {0};
+            float row = 1.0f / (float)app.rows;
+            e.tfinger.fingerID = 7;
+            e.tfinger.x = 0.5f;
+            e.tfinger.y = 0.8f;
+            e.type = SDL_EVENT_FINGER_DOWN;
+            event(&app, &e);
+            e.type = SDL_EVENT_FINGER_MOTION;
+            e.tfinger.y = 0.8f - 1.5f * row;
+            event(&app, &e);
+            assert(app.menu.selected == GUI_LINUX);
+            e.tfinger.y = 0.8f - 3.2f * row;
+            event(&app, &e);
+            assert(app.menu.selected == GUI_KEYS);
+            e.type = SDL_EVENT_FINGER_UP;
+            event(&app, &e);
+            assert(app.menu.selected == GUI_KEYS && !app.finger);
+            app.menu.selected = GUI_SWITCH;
+            render(&app);
+        }
         assert(SDL_SetWindowSize(app.window, 800, 480)); /* 800x512 at least: 4x would leave 8 rows */
         SDL_SyncWindow(app.window);
         render(&app);

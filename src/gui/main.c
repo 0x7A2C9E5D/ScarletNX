@@ -59,6 +59,7 @@ typedef struct {
     int native;
     SDL_FingerID finger;      /* the finger on the screen, 0 for none */
     float finger_x, finger_y; /* where it went down, 0 to 1 across the window */
+    float finger_mark;        /* the height a drag last moved the focus at, a row at a time */
     Uint32 picked;            /* the event a file from the system's picker comes back as */
     SDL_Texture* splash;      /* the boot's splash, its icon, until splash_until */
     Uint64 splash_until;
@@ -1447,6 +1448,24 @@ static int escape_row(const App* app) {
     if (app->theme.run == GUI_RUN_STEPS) return app->rows - 1;
     return app->theme.head != GUI_STYLE_NONE ? 3 : -1;
 }
+/* a drag up or down from where the finger went down, on a menu whose letters make it scroll */
+static bool drags(const App* app, float x, float y) {
+    float dx = x - app->finger_x, dy = y - app->finger_y;
+    return SDL_fabsf(dy) > 0.05f && SDL_fabsf(dy) > 2 * SDL_fabsf(dx) && app->menu.view != GUI_LOAD_GAMES &&
+           !app->menu.running && !app->finished && menu_row_in_full(app, GUI_EXIT) > menu_last_row(app);
+}
+/* the focus follows the finger, a row each time it passes a row's height, so the highlight is seen going */
+static void drag(App* app, float y) {
+    float row = 1.0f / (float)SDL_max(1, app->rows);
+    while (y <= app->finger_mark - row) {
+        menu_key(app, GUI_DOWN);
+        app->finger_mark -= row;
+    }
+    while (y >= app->finger_mark + row) {
+        menu_key(app, GUI_UP);
+        app->finger_mark += row;
+    }
+}
 /* a finger lifted at x, y (0 to 1 across the window): a swipe across turns the games' pages; a tap clicks there, is ESC
    on a finished run and on a running one's ESC line */
 static void touch(App* app, float x, float y) {
@@ -1457,11 +1476,8 @@ static void touch(App* app, float x, float y) {
             menu_key(app, dx < 0 ? GUI_PAGE_DOWN : GUI_PAGE_UP);
         return;
     }
-    /* a drag up or down moves the focus by the rows it went, when the menu's letters make it scroll */
-    if (SDL_fabsf(dy) > 0.05f && SDL_fabsf(dy) > 2 * SDL_fabsf(dx) && app->menu.view != GUI_LOAD_GAMES &&
-        !app->menu.running && !app->finished && menu_row_in_full(app, GUI_EXIT) > menu_last_row(app)) {
-        int steps = (int)(SDL_fabsf(dy) * (float)app->rows);
-        while (steps-- > 0) menu_key(app, dy < 0 ? GUI_DOWN : GUI_UP);
+    if (drags(app, x, y)) {
+        drag(app, y); /* what its last moves did not reach */
         return;
     }
     if (SDL_fabsf(dx) > 0.03f || SDL_fabsf(dy) > 0.03f) return; /* a drag, no tap */
@@ -1534,7 +1550,11 @@ static void event(App* app, const SDL_Event* e) {
     if (e->type == SDL_EVENT_FINGER_DOWN && !app->finger) {
         app->finger = e->tfinger.fingerID;
         app->finger_x = e->tfinger.x;
-        app->finger_y = e->tfinger.y;
+        app->finger_y = app->finger_mark = e->tfinger.y;
+        return;
+    }
+    if (e->type == SDL_EVENT_FINGER_MOTION && e->tfinger.fingerID == app->finger) {
+        if (drags(app, e->tfinger.x, e->tfinger.y)) drag(app, e->tfinger.y);
         return;
     }
     if ((e->type == SDL_EVENT_FINGER_UP || e->type == SDL_EVENT_FINGER_CANCELED) &&
