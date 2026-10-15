@@ -842,12 +842,14 @@ int main(int argc, char** argv) {
        the window it opened in (1280x800: 2x), however the window is resized, and the window keeps 16 rows of them */
     const int sizes[][4] = {{2560, 1440, 45, 160}, {1280, 960, 30, 80}, {800, 480, 16, 50}, {1280, 800, 25, 80}};
     assert(app.auto_scale == 2);
-    /* Auto is twice the display's scale, as far as 16 rows fit: a computer at 100%, 125%, 150% and 200%; the Poco F8
-       (408 dpi, 1156 rows of pixels) and the Pixel 9 (420 dpi, 1080) at 4x where 5x would leave 14 and 13 rows */
-    assert(pick_auto_scale(1.0f, 800) == 2 && pick_auto_scale(1.25f, 1000) == 2);
-    assert(pick_auto_scale(1.5f, 1200) == 3 && pick_auto_scale(2.0f, 1600) == 4);
-    assert(pick_auto_scale(408.0f / 160, 1156) == 4 && pick_auto_scale(420.0f / 160, 1080) == 4);
-    assert(pick_auto_scale(1.0f, 480) == 1 && pick_auto_scale(0.5f, 800) == 1 && pick_auto_scale(3.0f, 2400) == 6);
+    /* Auto is twice the display's scale, as far as 16 rows fit on a computer: 100%, 125%, 150% and 200%; a phone keeps
+       20, so the Poco F8 (408 dpi, 1156 rows of pixels) and the Pixel 9 (420 dpi, 1080) get 3x, with 24 and 22 rows */
+    assert(pick_auto_scale(1.0f, 800, 16) == 2 && pick_auto_scale(1.25f, 1000, 16) == 2);
+    assert(pick_auto_scale(1.5f, 1200, 16) == 3 && pick_auto_scale(2.0f, 1600, 16) == 4);
+    assert(pick_auto_scale(408.0f / 160, 1156, 20) == 3 && pick_auto_scale(420.0f / 160, 1080, 20) == 3);
+    assert(pick_auto_scale(408.0f / 160, 1156, 16) == 4);
+    assert(pick_auto_scale(1.0f, 480, 16) == 1 && pick_auto_scale(0.5f, 800, 16) == 1 &&
+           pick_auto_scale(3.0f, 2400, 16) == 6);
     for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
         assert(SDL_SetWindowSize(app.window, sizes[i][0], sizes[i][1]));
         SDL_SyncWindow(app.window);
