@@ -7,9 +7,11 @@
 #include <openssl/evp.h>
 #include <stdio.h>
 #define CTR_METADATA_LIMIT (16u * 1024u * 1024u)
-#define CTR_CODE_LIMIT (64u * 1024u * 1024u)
-#define CTR_OUTPUT_LIMIT UINT64_C(1073741824)
-typedef struct { uint64_t offset, size; } CtrSpan;
+#define CTR_CODE_LIMIT     (64u * 1024u * 1024u)
+#define CTR_OUTPUT_LIMIT   UINT64_C(1073741824)
+typedef struct {
+    uint64_t offset, size;
+} CtrSpan;
 typedef struct {
     FILE* input;
     uint64_t size, output_bytes;

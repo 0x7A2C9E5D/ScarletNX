@@ -225,8 +225,12 @@ static const IniOpt INI_DBG[] = {
     {"diag", "0", "1 = save the data of each new compute shader to captures/compute, for debugging"},
     {"profile", "0", "1 = write profile.txt every 10 seconds (CPU profiler, Windows only)"},
     {NULL, NULL, NULL}};
-static const IniSec INI_SECS[] = {{"Display", INI_DISPLAY}, {"Graphics", INI_GRAPHICS}, {"Performance", INI_PERF},
-                                  {"Input", INI_INPUT},     {"Network", INI_NETWORK},   {"Debug", INI_DBG},
+static const IniSec INI_SECS[] = {{"Display", INI_DISPLAY},
+                                  {"Graphics", INI_GRAPHICS},
+                                  {"Performance", INI_PERF},
+                                  {"Input", INI_INPUT},
+                                  {"Network", INI_NETWORK},
+                                  {"Debug", INI_DBG},
                                   {NULL, NULL}};
 static void ini_load(const char* path) {
     FILE* f = fopen(path, "r");

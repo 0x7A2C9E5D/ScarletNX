@@ -57,8 +57,8 @@ bool ctr_hash(CtrReader* r, CtrSpan span, unsigned char hash[32]) {
 }
 bool ctr_hash_matches(CtrReader* r, CtrSpan span, const unsigned char expected[32]) {
     unsigned char hash[32];
-    return ctr_hash(r, span, hash) && (!memcmp(hash, expected, 32) ||
-        ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "archive SHA-256 mismatch"));
+    return ctr_hash(r, span, hash) &&
+           (!memcmp(hash, expected, 32) || ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "archive SHA-256 mismatch"));
 }
 static bool budget(CtrReader* r, uint64_t bytes) {
     if (bytes > CTR_OUTPUT_LIMIT - r->output_bytes || r->entries >= 100000)
@@ -108,8 +108,9 @@ bool ctr_directory(CtrReader* r, const char* path) {
 }
 bool ctr_name(const char* name) {
     size_t size = strlen(name);
-    if (!size || size > 255 || !strcmp(name, ".") || !strcmp(name, "..") ||
-        name[size - 1] == '.' || name[size - 1] == ' ') return false;
+    if (!size || size > 255 || !strcmp(name, ".") || !strcmp(name, "..") || name[size - 1] == '.' ||
+        name[size - 1] == ' ')
+        return false;
     for (const unsigned char* p = (const unsigned char*)name; *p; ++p)
         if (*p < 32 || *p == 127 || strchr("/\\:<>\"|?*", *p)) return false;
     char base[8] = {0};
@@ -117,7 +118,8 @@ bool ctr_name(const char* name) {
     if (n <= 7) {
         for (size_t i = 0; i < n; ++i) base[i] = (char)toupper((unsigned char)name[i]);
         if (!strcmp(base, "CON") || !strcmp(base, "PRN") || !strcmp(base, "AUX") || !strcmp(base, "NUL") ||
-            !strcmp(base, "CONIN$") || !strcmp(base, "CONOUT$") || !strcmp(base, "CLOCK$")) return false;
+            !strcmp(base, "CONIN$") || !strcmp(base, "CONOUT$") || !strcmp(base, "CLOCK$"))
+            return false;
         if (!memcmp(base, "COM", 3) || !memcmp(base, "LPT", 3)) {
             if (n == 4 && base[3] >= '1' && base[3] <= '9') return false;
             /* Windows also recognizes superscript 1/2/3 as device numbers. */
@@ -144,8 +146,8 @@ static bool no_links(const char* path) {
     free(part);
     return ok;
 }
-SnxCtrExtractResult snx_ctr_extract(const char* input, const char* destination,
-                                  char** published, char* error, size_t error_size) {
+SnxCtrExtractResult snx_ctr_extract(const char* input, const char* destination, char** published, char* error,
+                                    size_t error_size) {
     CtrReader r = {.error = error, .error_size = error_size};
     CtrCia cia = {0};
     char *target = NULL, *parent = NULL, *stage = NULL, *generated = NULL;
@@ -203,7 +205,10 @@ SnxCtrExtractResult snx_ctr_extract(const char* input, const char* destination,
     }
     free(stage);
     stage = NULL;
-    if (published) { *published = target; target = NULL; }
+    if (published) {
+        *published = target;
+        target = NULL;
+    }
 done:
     if (stage) snx_remove_tree(stage);
     if (r.input) fclose(r.input);

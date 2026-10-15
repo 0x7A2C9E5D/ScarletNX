@@ -81,8 +81,8 @@ int main(void) {
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.active == GUI_GCCJIT);
     assert(menu.gccjit == !!SNX_GUI_HAS_GCCJIT && menu.view == GUI_LOAD_NONE);
-    assert(!strcmp(gui_setting_description(&menu), SNX_GUI_HAS_GCCJIT
-                   ? "libgccjit will be used instead of llvm" : "Program was not compiled with libgccjit"));
+    assert(!strcmp(gui_setting_description(&menu), SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
+                                                                      : "Program was not compiled with libgccjit"));
     gui_menu_key(&menu, GUI_DOWN);
     assert(menu.selected == GUI_GDBSTUB);
     gui_menu_key(&menu, GUI_SELECT);
@@ -123,8 +123,12 @@ int main(void) {
 
     for (int bits = 0; bits < 48; ++bits) {
         static const char* const touch[] = {"--touch=1", "--touch=2", "--touch=0"};
-        menu = (GuiMenu){.selected = GUI_SWITCH, .fullscreen = !!(bits & 1), .gccjit = !!(bits & 2),
-                         .gdbstub = !!(bits & 4), .controls = !!(bits & 8), .touch = bits >> 4};
+        menu = (GuiMenu){.selected = GUI_SWITCH,
+                         .fullscreen = !!(bits & 1),
+                         .gccjit = !!(bits & 2),
+                         .gdbstub = !!(bits & 4),
+                         .controls = !!(bits & 8),
+                         .touch = bits >> 4};
         for (int prepared = 0; prepared < 2; ++prepared) {
             const char* args[GUI_LAUNCH_MAX];
             size_t n = gui_launch_options(&menu, prepared, args), i = 0;
@@ -132,8 +136,7 @@ int main(void) {
             if (menu.fullscreen) assert(i < n && !strcmp(args[i++], "-f"));
             assert(i < n && !strcmp(args[i++], touch[menu.touch]));
             assert(i < n && !strcmp(args[i++], menu.controls ? "--controls=1" : "--controls=0"));
-            if (menu.gccjit && SNX_GUI_HAS_GCCJIT && !prepared)
-                assert(i < n && !strcmp(args[i++], "--backend=gcc"));
+            if (menu.gccjit && SNX_GUI_HAS_GCCJIT && !prepared) assert(i < n && !strcmp(args[i++], "--backend=gcc"));
             if (menu.gdbstub) {
                 assert(i < n && !strcmp(args[i++], "-S"));
                 assert(i < n && !strcmp(args[i++], "-s"));
@@ -218,8 +221,8 @@ int main(void) {
     assert(!gui_drop_path("", true));
     /* what a picker gives: the Android one's documents of the device's storage and its cards, a download by path; no
        other of its documents has a path */
-    path = gui_document_path(
-        "content://com.android.externalstorage.documents/document/primary%3ADownload%2FGame%20X.xci");
+    path =
+        gui_document_path("content://com.android.externalstorage.documents/document/primary%3ADownload%2FGame%20X.xci");
     assert(path && !strcmp(path, "/storage/emulated/0/Download/Game X.xci"));
     free(path);
     path = gui_document_path("content://com.android.externalstorage.documents/document/1A2B-3C4D%3Agames%2Fa.nsp");

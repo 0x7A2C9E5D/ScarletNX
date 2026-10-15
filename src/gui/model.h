@@ -22,7 +22,7 @@ enum {
     GUI_GDBSTUB,
     GUI_THEME,
     GUI_TEXT, /* the menu's letters */
-    GUI_LOG, /* the logs in one file, for a bug report: a phone has no terminal to copy them from */
+    GUI_LOG,  /* the logs in one file, for a bug report: a phone has no terminal to copy them from */
     GUI_EXIT,
     GUI_ITEM_COUNT
 };
@@ -37,9 +37,9 @@ typedef struct {
     bool activated, load_activated, focus_load;
     GuiLoadView view;
     bool running, fullscreen, gccjit, gdbstub, quit;
-    bool controls; /* the on-screen controls, on by default on Android */
-    int touch;     /* GUI_TOUCH_*, fingers the default */
-    int text_size; /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen */
+    bool controls;  /* the on-screen controls, on by default on Android */
+    int touch;      /* GUI_TOUCH_*, fingers the default */
+    int text_size;  /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen */
     int theme_next; /* the GUI moves to the next theme and clears it */
     int share_log;  /* the GUI shares the logs and clears it */
     /* the recent games above the items: how many, the focused one + 1 (0: an item has the focus), and the one
@@ -67,7 +67,7 @@ int gui_banner_feed(GuiBanner* banner, const char* data, size_t size);
 
 typedef struct {
     size_t count, page, page_size, selected; /* focus: selected == 0 is Back on every page */
-    size_t active; /* absolute file index, preserved across page changes and resizing */
+    size_t active;                           /* absolute file index, preserved across page changes and resizing */
     bool activated;
 } GuiBrowser;
 typedef enum { GUI_BROWSER_NONE, GUI_BROWSER_BACK, GUI_BROWSER_OPEN } GuiBrowserAction;

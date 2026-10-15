@@ -52,7 +52,7 @@ typedef struct {
     char marker[16];
     char title[GUI_SCREEN_COUNT][64];
     GuiRunLayout run;
-    GuiPalette run_colors;   /* the steps screen's own: a loading screen, darker than the menus */
+    GuiPalette run_colors;  /* the steps screen's own: a loading screen, darker than the menus */
     int texture, bar;       /* faint lines over the page; the progress bar and its percentage */
     int detailed, collapse; /* each step's lines under it; folded once the step is done */
     GuiRing ring;
