@@ -211,7 +211,7 @@ cmake --preset windows-cross && cmake --build --preset windows-cross
 # -> build/windows-cross/scarletnx.exe; requires llvm-mingw on PATH
 ```
 
-All NX builds use SDL3 and support `-H` at runtime. Omit the flag for windowed startup.
+All NX builds use SDL3 and support `-H` at runtime. Omit the flag to run with a window.
 [Software Vulkan / lavapipe setup](USAGE.md#headless-vulkan--lavapipe).
 
 Offscreen integration test, with an installed Vulkan 1.3 ICD (lavapipe works):

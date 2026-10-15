@@ -305,6 +305,11 @@ snx_test_target(snx-test-vpad 11)
 target_link_libraries(snx-test-vpad PRIVATE scarletnx-common m)
 add_test(NAME vpad COMMAND snx-test-vpad)
 
+add_executable(snx-test-ini ini.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
+snx_test_target(snx-test-ini 11)
+target_compile_options(snx-test-ini PRIVATE -UNDEBUG) # its checks are asserts
+add_test(NAME ini COMMAND snx-test-ini)
+
 # the controls' atlas and their shaders are generated and checked in: their sources must still make them
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)

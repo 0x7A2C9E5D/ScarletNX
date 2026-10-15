@@ -3,6 +3,7 @@
 /* The game's menu (runtime/platform/overlay.c): where it goes, its pages, what a tap, a move or a step does, its look;
    and ui.c's atlas and text */
 #include "runtime/platform/overlay.h"
+#include "runtime/platform/backend.h"
 #include "runtime/platform/vpad.h"
 #include "runtime/platform/controls_atlas.h"
 #include "runtime/platform/plat.h"

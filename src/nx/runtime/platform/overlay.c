@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "runtime/platform/overlay.h"
+#include "runtime/platform/backend.h"
 #include "runtime/platform/vpad.h"
 #include <stdio.h>
 #include <string.h>
@@ -75,14 +76,14 @@ static void label(int i, char* text, size_t size, char* value, size_t vsize) {
         case C_STICK: snprintf(value, vsize, "%s", v->rel_center ? "On" : "Off"); break;
         case C_DPAD: snprintf(value, vsize, "%s", v->dpad_slide ? "On" : "Off"); break;
         case C_HAPTICS: snprintf(value, vsize, "%s", v->haptics ? "On" : "Off"); break;
-        case C_TOUCH: snprintf(value, vsize, "%s", touch[clamp(backend_touch_mode(), 0, 2)]); break;
+        case C_TOUCH: snprintf(value, vsize, "%s", touch[backend_touch_mode()]); break; /* 0 to 2, as the .ini clamps */
         case C_BUTTONS: snprintf(value, vsize, ">"); break;
         default: break;
     }
 }
-static void flip(int* v, const char* key) {
+static void flip(int* v) {
     *v = !*v;
-    vpad_store(key);
+    vpad_store(v);
 }
 /* the item i done, or its value stepped (step -1 or 1; 0 for a select) */
 static int act(int i, int step) {
@@ -107,16 +108,16 @@ static int act(int i, int step) {
         return OVERLAY_NONE;
     }
     switch (i) {
-        case C_SHOW: flip(&v->on, "controls"); break;
-        case C_SNAP: flip(&v->snap, "controls_snap"); break;
-        case C_STICK: flip(&v->rel_center, "controls_rel_center"); break;
-        case C_DPAD: flip(&v->dpad_slide, "controls_dpad_slide"); break;
-        case C_HAPTICS: flip(&v->haptics, "controls_haptics"); break;
+        case C_SHOW: flip(&v->on); break;
+        case C_SNAP: flip(&v->snap); break;
+        case C_STICK: flip(&v->rel_center); break;
+        case C_DPAD: flip(&v->dpad_slide); break;
+        case C_HAPTICS: flip(&v->haptics); break;
         case C_SCALE:
         case C_OPACITY: {
             int* n = i == C_SCALE ? &v->scale : &v->opacity;
             *n = clamp(*n + (step ? step : 1) * 10, 0, 100);
-            vpad_store(i == C_SCALE ? "controls_scale" : "controls_opacity");
+            vpad_store(n);
             break;
         }
         case C_TOUCH: backend_touch_set((backend_touch_mode() + (step < 0 ? 2 : 1)) % 3); break;

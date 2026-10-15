@@ -24,7 +24,4 @@ int overlay_back(void);      /* the page above; OVERLAY_CLOSE from the first */
 int overlay_tap(float x, float y, int sw, int sh);
 void overlay_draw(SnxUiList* l, int sw, int sh);
 
-/* the game's touch screen as the menu shows and sets it (sdl3.c): 0 off, 1 the fingers, 2 the mouse too */
-int backend_touch_mode(void);
-void backend_touch_set(int mode);
 #endif

@@ -63,8 +63,9 @@ extern const IniOpt g_vpad_ini[]; /* the settings: controls, controls_scale..., 
 int vpad_ini(const char* key, const char* value);
 /* where changed settings go: called with each key and its value (the game's .ini) */
 void vpad_set_store(void (*store)(const char* key, const char* value));
-/* a setting's current value to the store: "controls", "controls_scale"..., or a control's ("controls_a") */
-void vpad_store(const char* key);
+/* a setting's current value to the store, named by its variable in vpad_config() (&cfg->scale); a control's place
+   with vpad_store_control */
+void vpad_store(const int* setting);
 void vpad_store_control(int control);
 
 /* Fingers, and the mouse as one, in window pixels; safe is the window's clear part (x, y, w, h). A finger that lands

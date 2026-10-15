@@ -23,10 +23,13 @@ void ini_read(const IniOpt* o, const char* v) {
     if (end == v || d != d) return; /* NaN would pass the range unclamped */
     if (d < o->lo) d = o->lo;
     if (d > o->hi) d = o->hi;
+    /* atomic: other threads read some of the settings while a reload writes them (the GPU thread's vsync) */
     if (o->type == INI_INT)
-        *(int*)o->var = (int)d;
-    else
-        *(float*)o->var = (float)d;
+        __atomic_store_n((int*)o->var, (int)d, __ATOMIC_RELAXED);
+    else {
+        float f = (float)d;
+        __atomic_store((float*)o->var, &f, __ATOMIC_RELAXED);
+    }
     if (o->set) o->set(o, v);
 }
 
