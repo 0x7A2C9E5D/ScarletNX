@@ -27,6 +27,7 @@ jobs:
     timeout-minutes: 60
     container: ${{ matrix.container }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64
@@ -126,6 +127,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64
@@ -385,6 +387,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 120
     strategy:
+      fail-fast: false
       matrix:
         abi: [x86_64, arm64-v8a]
     env:
@@ -523,6 +526,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64
