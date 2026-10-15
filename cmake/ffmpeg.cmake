@@ -24,6 +24,11 @@ if(NOT SNX_FFMPEG_SH OR NOT SNX_FFMPEG_MAKE)
                         "Windows, scripts\\bootstrap.ps1 installs them with w64devkit. FFmpeg is required by the NX runtime.")
 endif()
 
+# through the build's compiler launcher (ccache) too, when it has one
+list(JOIN CMAKE_C_COMPILER_LAUNCHER " " snx_ffmpeg_launcher)
+string(STRIP "${snx_ffmpeg_launcher} ${CMAKE_C_COMPILER}" snx_ffmpeg_cc)
+list(JOIN CMAKE_CXX_COMPILER_LAUNCHER " " snx_ffmpeg_launcher)
+string(STRIP "${snx_ffmpeg_launcher} ${CMAKE_CXX_COMPILER}" snx_ffmpeg_cxx)
 set(snx_ffmpeg_args
     --prefix=${snx_ffmpeg_prefix}
     --enable-static
@@ -40,8 +45,8 @@ set(snx_ffmpeg_args
     --disable-swscale
     --disable-iconv
     --enable-decoder=h264,vp8,vp9,opus
-    --cc=${CMAKE_C_COMPILER}
-    --cxx=${CMAKE_CXX_COMPILER}
+    "--cc=${snx_ffmpeg_cc}"
+    "--cxx=${snx_ffmpeg_cxx}"
     --ar=${CMAKE_AR}
     --ranlib=${CMAKE_RANLIB}
     --nm=${CMAKE_NM}

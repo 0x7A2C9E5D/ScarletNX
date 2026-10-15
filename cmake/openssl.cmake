@@ -55,7 +55,10 @@ set(snx_openssl_args
 if(ANDROID)
     list(APPEND snx_openssl_args -D__ANDROID_API__=${ANDROID_PLATFORM_LEVEL})
 else()
-    list(APPEND snx_openssl_args CC=${CMAKE_C_COMPILER} AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB})
+    # through the build's compiler launcher (ccache) too, when it has one
+    list(JOIN CMAKE_C_COMPILER_LAUNCHER " " snx_openssl_launcher)
+    string(STRIP "${snx_openssl_launcher} ${CMAKE_C_COMPILER}" snx_openssl_cc)
+    list(APPEND snx_openssl_args "CC=${snx_openssl_cc}" AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB})
 endif()
 if(CMAKE_RC_COMPILER)
     list(APPEND snx_openssl_args RC=${CMAKE_RC_COMPILER})
