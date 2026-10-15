@@ -30,8 +30,10 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   are supported. Ctrl+V also accepts a clipboard path while waiting. ESC returns to
   the two options, and another ESC returns to the main menu.
 - **Load 3DS CIA** uses `scarletnx-3ds`. Its `games/` browser lists CIA inputs,
-  not host executables. The driver currently provides only stage-1 board logic;
-  CIA extraction/execution returns an explicit unsupported error. See [3DS port](3DS.md).
+  not host executables. The driver extracts supported decrypted application CIAs,
+  then returns an explicit error because ARM11 AOT/execution is still pending.
+  Existing extraction directories are refused rather than treated as cache hits.
+  See [3DS port](3DS.md) for limits and extract-only usage.
 - **Setup device keys**, immediately after the three load entries, prompts you to
   drag and drop `prod.keys` (or paste its path with Ctrl+V); a blinking
   **[ Drop prod.keys here ]** waits in the middle of the screen (the theme's

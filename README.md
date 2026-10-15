@@ -63,10 +63,11 @@ Enter or hover and click, then choose drag-and-drop or the paginated `games/` br
 The GUI shows live driver/game
 output and combined CPU/RAM usage. See [GUI launcher](docs/GUI.md).
 
-The experimental `scarletnx-3ds` driver and **Load 3DS CIA** menu entry provide
-stage-1 board/launcher foundations only; CIA extraction, ARM11 AOT execution,
-HLE and devices are **not implemented yet**. See the [staged 3DS port](docs/3DS.md)
-for build instructions, source provenance and remaining work.
+The experimental `scarletnx-3ds` driver and **Load 3DS CIA** menu entry support
+decrypted application CIA extraction (`scarletnx-3ds -x game.cia`) and an independent
+page-based memory controller. **ARM11 AOT execution, HLE and devices are not yet
+implemented**; a normal CIA launch extracts, then stops explicitly before execution.
+See the [staged 3DS port](docs/3DS.md) for limits, build instructions and remaining work.
 
 For more detailed information please see: [Build + run](./docs/BUILD.md).
 

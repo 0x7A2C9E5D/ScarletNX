@@ -1,26 +1,36 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "board/board.h"
+#include "loader/ctr_loader.h"
 #include "common.h"
 #include <ctype.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void usage(FILE* out) {
-    fputs("Usage: scarletnx-3ds [--model old|new] [--] game.cia\n"
+    fputs("Usage: scarletnx-3ds [--model old|new] [-x] [--output NEW_DIRECTORY] [--] game.cia\n"
           "       scarletnx-3ds [--model old|new] --board-info\n"
-          "Stage 1: board/launcher foundation only; CIA extraction and execution are not implemented.\n", out);
+          "Stage 2a: decrypted application CIA extraction and memory controller.\n"
+          "  -x, --extract   extract only (no guest execution)\n"
+          "  --output DIR    new output directory; default work/3ds/<title>-<sha256>\n"
+          "ARM11 static compilation/execution and encrypted content are not implemented.\n", out);
 }
 static bool cia_path(const char* path) {
     size_t n = strlen(path);
     return n >= 4 && path[n - 4] == '.' && tolower((unsigned char)path[n - 3]) == 'c' &&
            tolower((unsigned char)path[n - 2]) == 'i' && tolower((unsigned char)path[n - 1]) == 'a';
 }
+static bool visible_path(const char* path) {
+    for (const unsigned char* p = (const unsigned char*)path; *p; ++p)
+        if (*p < 32 || *p == 127) return false;
+    return true;
+}
 int main(int argc, char** argv) {
     SnxCtrModel model = SNX_CTR_OLD;
-    const char* input = NULL;
-    bool info = false, positional = false;
+    const char *input = NULL, *output = NULL;
+    bool info = false, positional = false, extract_only = false;
     SnxCtrBoard board;
     snx_tool_console();
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -31,7 +41,11 @@ int main(int argc, char** argv) {
             usage(stdout);
             return 0;
         } else if (!positional && !strcmp(arg, "--board-info")) info = true;
-        else if (!positional && !strcmp(arg, "--model")) {
+        else if (!positional && (!strcmp(arg, "-x") || !strcmp(arg, "--extract"))) extract_only = true;
+        else if (!positional && !strcmp(arg, "--output")) {
+            if (++i == argc || !*argv[i]) { fputs("scarletnx-3ds: --output requires a directory\n", stderr); return 2; }
+            output = argv[i];
+        } else if (!positional && !strcmp(arg, "--model")) {
             if (++i == argc || (strcmp(argv[i], "old") && strcmp(argv[i], "new"))) {
                 fputs("scarletnx-3ds: --model requires old or new\n", stderr);
                 return 2;
@@ -43,7 +57,7 @@ int main(int argc, char** argv) {
             return 2;
         } else input = arg;
     }
-    if ((!input && !info) || (input && info)) {
+    if ((!input && !info) || (info && (input || extract_only || output))) {
         usage(stderr);
         return 2;
     }
@@ -60,18 +74,27 @@ int main(int argc, char** argv) {
         return 0;
     }
     snx_ctr_board_shutdown(&board);
+    /* Do not let a host filename inject progress/launch banners into the GUI. */
+    if (!visible_path(input) || (output && !visible_path(output))) {
+        fputs("scarletnx-3ds: input/output paths may not contain control characters\n", stderr);
+        return 2;
+    }
     if (!cia_path(input) || !snx_is_file(input)) {
         fputs("scarletnx-3ds: expected a readable .cia file\n", stderr);
         return 2;
     }
-    FILE* file = snx_fopen(input, "rb");
-    if (!file) {
-        fputs("scarletnx-3ds: cannot read CIA input\n", stderr);
-        return 2;
+    char error[512], *published = NULL;
+    printf("Extracting %s\n", input);
+    SnxCtrExtractResult result = snx_ctr_extract(input, output, &published, error, sizeof error);
+    if (result != SNX_CTR_EXTRACT_OK) {
+        fprintf(stderr, "scarletnx-3ds: %s\n", error);
+        return result == SNX_CTR_EXTRACT_UNSUPPORTED ? 3 : 1;
     }
-    fclose(file);
-    /* Never route CTR content to NX's A64 compiler, or emit a launch/success banner. */
-    fputs("scarletnx-3ds: CIA extraction, ARM11 AOT compilation and execution are not implemented (stage 2).\n",
+    printf("Extracted %s\n", published);
+    free(published);
+    if (extract_only) return 0;
+    /* Never silently substitute NX's A64 compiler or A32's MCJIT runner. */
+    fputs("scarletnx-3ds: extraction complete; ARM11 static compilation/execution is not implemented (stage 2b).\n",
           stderr);
     return 3;
 }

@@ -2,40 +2,84 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # Nintendo 3DS port
 
-## Status: stage 1 only
+## Status: stage 1 + stage 2a
 
-`scarletnx-3ds` is a **board/launcher foundation**, not a working 3DS emulator
-or CIA-to-native compiler. Stages 2–6 below are not implemented. No CIA contents,
-firmware, keys, Azahar CPU interpreter/JIT, DSP or PICA renderer are included.
+`scarletnx-3ds` can extract **decrypted application CIAs**. It is not yet a
+CIA-to-native compiler or a working 3DS runtime. Stage 2 is split into extraction/
+memory (2a, implemented) and ARM11 AOT integration (2b, pending). Stages 3–6 are
+also pending. No firmware, keys, game assets, Azahar CPU JIT/interpreter, DSP or
+PICA renderer are included.
 
 Implemented:
 
-- `SNX_BUILD_3DS` (default ON), independently buildable/installable `scarletnx-3ds`.
-- `src/3ds/board/`: Old/New 3DS physical-region descriptions (128/256 MiB
-  FCRAM, VRAM, DSP RAM, AXI WRAM, IO/MPCore, New 3DS extra RAM), hardware
-  ARM11 core counts, base-clock tick accounting, reset/shutdown lifecycle.
-- Physical-range lookup rejects empty, crossing, out-of-region and wrapping
-  ranges. These descriptions allocate **no memory** and expose no host pointers.
-- `scarletnx-gui`: **Load 3DS CIA**, driver discovery beside the GUI then on
-  PATH, existing drop/process/output handling, CIA-only browser in `games/`, and
-  a distinct `3ds` driver in saved recents. Uppercase `.CIA` and non-executable
-  CIA files are supported. A CIA is never launched as a native executable or
-  passed to the Switch/Linux driver. Switch settings are not forwarded.
+- Stage 1: `SNX_BUILD_3DS`, independent driver, Old/New 3DS board profiles,
+  physical-range bounds checks, lifecycle/base ticks, GUI CIA drops/browser/
+  recents and strict routing to the 3DS driver without Switch-only flags.
+- `src/3ds/loader/`: streaming CIA sections; signature-dependent ticket/TMD
+  offsets; title, boot-index, content bitmap, unique ID/index, content-info and
+  SHA-256 validation. Boot content is selected by its TMD index, not table order.
+  All present contents and container metadata are materialized on disk.
+- Decrypted application NCCH/ExHeader, checked process segment/BSS metadata,
+  ExeFS files and hashes, bounded backward LZSS/BLZ `.code` expansion, and IVFC
+  level-3 RomFS extraction into a host tree. Traversal/invalid UTF-16, metadata
+  directory/file traversal cycles, overlaps, duplicate paths and excessive expansion are rejected.
+- Shared NX host utilities (`common` filesystem paths, file IO, private staging,
+  cleanup, publication) are reused; the NX kernel/NSO loader/FS service are not
+  linked. Shared SHA-256 now also supports incremental hashing.
+- `src/3ds/memory/ctr_memory.h`: independent page-based address spaces, shared
+  physical RAM/VRAM/DSP backings, aliases, R/W/X checks, checked cross-page RAM
+  transfers and explicit aligned MMIO callbacks. Failed map/protect/unmap and
+  RAM range-validation operations do not partially change guest memory/mappings.
+  No flat host pointer is exposed. This controller is tested but **not yet wired
+  into generated A32 code or automatic HLE process setup**.
 
-The driver accepts `--model old|new` (default Old 3DS), `--board-info`, `--help`
-and one CIA input (use `--` for a filename beginning with `-`). `--board-info`
-prints physical addresses, not process virtual addresses. Exit codes:
+```sh
+build/3ds/scarletnx-3ds -x --output work/my-title game.cia
+```
 
-- 0: help or board information.
-- 2: invalid arguments or missing/unreadable input.
-- 3: CIA pipeline is not implemented yet. This is an intentional hard failure,
-  not success. No extraction/cache/output directories are created and no
-  `ScarletNX - ...` launch banner is printed.
+The output is a **new** directory containing `contents/*.app`, `exefs/` (with
+expanded/page-padded `.code`), `romfs/`, raw container/NCCH/ExHeader metadata and
+`manifest.ini` with source/code hashes and segment layout. The default directory
+is `work/3ds/<title-id>-<full-input-sha256>`. No source CIA needs to be mounted by
+the future guest FS. Extraction is privately staged, then published only after
+all checks succeed; failures remove staging files. Existing destinations are
+**refused**, never overwritten or blindly reused as a cache hit. Resume/cache
+validation is still stage-2b work. Keep the input and output parent trusted and
+not concurrently modified; extraction is not a sandbox against hostile host
+processes racing parent directory changes.
+
+`-x`/`--extract` stops after extraction. Without it the driver extracts, then
+returns an explicit unsupported error **before** compilation or guest execution.
+The GUI follows that default path; it cannot run a title yet. `--model old|new`
+selects the board profile (default Old); it does not change the extracted code.
+`--board-info` prints physical regions without allocating RAM. Exit codes:
+
+- 0: help, board information, or successful extract-only operation.
+- 1: malformed/inconsistent data, IO/limit failure, or existing destination.
+- 2: invalid CLI arguments or missing/non-CIA file path.
+- 3: unsupported encrypted/type variant, or missing ARM11 AOT/execution stage.
+
+### Current limits and trust
+
+Only decrypted application CIA/NCCH content is supported, not encrypted layers,
+updates, DLC, system titles or nonstandard NCCH media units/platforms. Input and
+total materialized output are each capped at 1 GiB; metadata tables at 16 MiB,
+code at 64 MiB, entries at 100000, and RomFS nesting at 64. Host filenames must
+be portable safe components (maximum 255 UTF-8 bytes); unsafe/reserved names
+are rejected rather than silently renamed. Host paths with control characters
+are refused to prevent log/banner injection. Larger/unsupported inputs fail closed.
+
+**Hashes are integrity checks, not signature authentication.** RSA/ECDSA
+signatures, certificate trust, ticket rights and ExHeader access-descriptor
+signatures are not authenticated. RomFS superblock and entire CIA-content
+hashes are checked, but the internal IVFC hash tree is not separately verified.
+No untrusted extracted code is executed. Future AOT/HLE must not mistake these
+checks or an editable extraction manifest for authenticated console permissions.
 
 ### Build and test
 
 With the normal Clang/CMake prerequisites (no LLVM SDK, SDL or media dependencies
-needed for the stage-1 board-only configuration):
+needed for the extraction/memory-only configuration):
 
 ```sh
 cmake -S . -B build/3ds -DSNX_BUILD_NX=OFF -DSNX_BUILD_GNUABI=OFF -DSNX_BUILD_GUI=OFF
@@ -58,14 +102,18 @@ The initial shallow checkouts were:
 
 Stage 1 uses physical-layout facts from Azahar `src/core/memory.h`, the tick
 constants from `src/core/core_timing.h`, and the system-initialization design in
-`src/core/core.cpp`. Board code is new C code; Azahar is not a build dependency.
+`src/core/core.cpp`. Stage 2a references `src/core/file_sys/{cia_container,
+title_metadata,ticket,signature,ncch_container}.*`, `src/core/loader/ncch.cpp`
+and `src/core/hle/romfs.cpp`. The bounded BLZ implementation credits the
+Citra/Azahar algorithm; the extractor and page controller are new C code.
+Azahar is not a build dependency.
 Azahar's root license is GPLv3; individual files carry GPLv2-or-later or
 GPLv3-or-later notices. Future adaptations must retain each source's notices
 and record its origin/revision here; select the GPLv3-compatible terms where
 applicable. Audit third-party/external components separately rather than assuming
 that every dependency has the root license.
 
-## Boundaries and prerequisites for stage 2
+## Boundaries and prerequisites for stage 2b
 
 The 3DS application CPU is ARM11/ARMv6K with VFP, **not** the Cortex-A57
 ARMv8-A AArch32 model currently implemented in `src/common/cpu/arm/`. That
@@ -89,17 +137,28 @@ Before running guest code:
    title identity and saves in the CTR adapter. Architecture tests enforce the
    runtime boundary.
 
-The tick domain remains 268,111,856 Hz, with 4,481,136 base ticks per frame, as
-in Azahar. New 3DS CPU scaling is a separate future scheduler concern. Stage 1
-has no CPU execution, interrupts, event callbacks, ARM9 emulation or boot ROM.
+The new memory controller supplies checked mapping/access operations for future
+A32 callbacks; the existing CPU block ABI is deliberately unchanged. The A32
+runner in `src/common/cpu/arm/exec.c` uses MCJIT and is **not** an acceptable
+substitute for static recompilation. Stage 2b must emit/load native modules ahead
+of execution, route every memory instruction through the checked ABI, and use an
+ARM11 ISA profile.
 
-## Remaining staged patches (not yet implemented)
+The tick domain remains 268,111,856 Hz, with 4,481,136 base ticks per frame, as
+in Azahar. New 3DS CPU scaling is a separate future scheduler concern. There is
+still no CPU execution, interrupt scheduling, ARM9 emulation or boot ROM.
+
+## Staged roadmap (stage 2a implemented; other portions pending)
 
 Each stage should be one independently reviewable commit/diff, with all earlier
 stages as its base. Stubs must return explicit unsupported errors, not pretend
 that an unimplemented service/device succeeded.
 
 ### 2. CIA extraction, memory controller and static execution
+
+The extraction and independent memory-controller subset is implemented as 2a.
+The complete stage is **not finished** until the ARM11/memory/module integration
+and end-to-end extract/AOT/run gate below pass.
 
 Reference Azahar `src/core/file_sys/{cia_container,ticket,title_metadata,
 ncch_container,romfs_reader}.*`, `src/core/hle/service/am/am.cpp` (installation),

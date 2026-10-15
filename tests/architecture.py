@@ -80,11 +80,14 @@ def check_graph(graph):
 
     errors = []
     for owner, forbidden in (
-        ('scarletnx-common', ('scarletnx-nx', 'scarletnx-gnuabi', 'scarletnx-3ds', 'snx_ctr_board')),
-        ('scarletnx-nx', ('scarletnx-gnuabi', 'scarletnx-3ds', 'snx_ctr_board')),
-        ('scarletnx-gnuabi', ('scarletnx-nx', 'scarletnx-3ds', 'snx_ctr_board')),
-        ('scarletnx-3ds', ('scarletnx-nx', 'scarletnx-gnuabi')),
+        ('scarletnx-common', ('scarletnx-nx', 'scarletnx-gnuabi', 'scarletnx-3ds', 'snx_ctr_board',
+                              'snx_ctr_memory', 'snx_ctr_loader')),
+        ('scarletnx-nx', ('scarletnx-gnuabi', 'scarletnx-3ds', 'snx_ctr_board', 'snx_ctr_memory', 'snx_ctr_loader')),
+        ('scarletnx-gnuabi', ('scarletnx-nx', 'scarletnx-3ds', 'snx_ctr_board', 'snx_ctr_memory', 'snx_ctr_loader')),
+        ('scarletnx-3ds', ('scarletnx-nx', 'scarletnx-gnuabi', 'snx_driver', 'snx_nx_module')),
         ('snx_ctr_board', ('scarletnx-nx', 'scarletnx-gnuabi')),
+        ('snx_ctr_memory', ('scarletnx-nx', 'scarletnx-gnuabi')),
+        ('snx_ctr_loader', ('scarletnx-nx', 'scarletnx-gnuabi', 'snx_driver', 'snx_nx_module')),
     ):
         if owner not in by_name:
             if owner == 'scarletnx-common':

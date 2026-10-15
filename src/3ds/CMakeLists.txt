@@ -1,12 +1,22 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-# Stage 1 deliberately needs no NX runtime, LLVM, SDL or Azahar build tree.
+# Extraction/memory do not need the NX runtime, LLVM, SDL or an Azahar build tree.
 add_library(snx_ctr_board STATIC board/board.c)
 target_include_directories(snx_ctr_board PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 set_target_properties(snx_ctr_board PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_ctr_board PRIVATE -Wall -Wextra -Werror=missing-prototypes)
+add_library(snx_ctr_memory STATIC memory/memory.c)
+target_link_libraries(snx_ctr_memory PUBLIC snx_ctr_board)
+add_library(snx_ctr_loader STATIC loader/loader.c loader/cia.c loader/ncch.c loader/romfs.c loader/blz.c)
+target_include_directories(snx_ctr_loader PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(snx_ctr_loader PUBLIC scarletnx-common)
+target_compile_definitions(snx_ctr_loader PRIVATE _FILE_OFFSET_BITS=64 _CRT_SECURE_NO_WARNINGS)
+foreach(target snx_ctr_memory snx_ctr_loader)
+    set_target_properties(${target} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror=missing-prototypes)
+endforeach()
 add_executable(scarletnx-3ds runtime/main.c)
-target_link_libraries(scarletnx-3ds PRIVATE snx_ctr_board scarletnx-common)
+target_link_libraries(scarletnx-3ds PRIVATE snx_ctr_board snx_ctr_loader)
 set_target_properties(scarletnx-3ds PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_compile_options(scarletnx-3ds PRIVATE -Wall -Wextra -Werror=missing-prototypes)
