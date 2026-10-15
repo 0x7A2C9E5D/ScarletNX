@@ -51,6 +51,7 @@ typedef struct {
     char* themes_dirs[2]; /* themes/ in the working directory, then beside the GUI */
     char message[512];
     int cols, rows, scale, log_top;
+    int auto_scale; /* Text size Auto's scale, chosen when the window opens: a resize keeps the letters as they were */
     Uint64 sampled;
     bool has_output, finished, aborting, abnormal_exit;
     GuiConfirm confirm; /* the question before a run is aborted, when ask_abort says to ask it */
@@ -315,19 +316,31 @@ static void menu_label(const App* app, int item, char* label, size_t size) {
 static int entering(const App* app) {
     return app->entering_ms && now_ms(app) < app->entering_ms + app->theme.fade_out_ms;
 }
+/* Text size Auto's scale for a width x height window on a display of the given scale, as long as 16 rows fit */
+static int pick_auto_scale(float display_scale, int width, int height) {
+    int scale = SDL_min(width / 640, height / 400);
+    /* a phone packs its pixels tight: the display's own scale, for text and taps of a size, as far as the menu still
+       fits with five recent games and a submenu (render) */
+    scale = SDL_max(scale, SDL_min((int)(display_scale + 0.5f), height / (16 * (19 + GUI_ITEM_COUNT))));
+    while (scale > 1 && height / (16 * scale) < 16) --scale;
+    return SDL_max(scale, 1);
+}
 static void layout(App* app) {
     int run;
     int width, height;
     set_area(app);
     area(app, &width, &height);
-    app->scale = SDL_min(width / 640, height / 400);
-    /* a phone packs its pixels tight: the display's own scale, for text and taps of a size, as far as the menu still
-       fits with five recent games and a submenu (render) */
-    app->scale = SDL_max(app->scale, SDL_min((int)(SDL_GetWindowDisplayScale(app->window) + 0.5f),
-                                             height / (16 * (19 + GUI_ITEM_COUNT))));
+    /* Auto's letters are the opening window's; the window then keeps room for 16 rows of them */
+    if (!app->auto_scale && width > 0 && height > 0) {
+        app->auto_scale = pick_auto_scale(SDL_GetWindowDisplayScale(app->window), width, height);
+        SDL_SetWindowMinimumSize(
+            app->window, 800,
+            SDL_max(480, (int)SDL_ceilf(256.0f * (float)app->auto_scale / SDL_GetWindowPixelDensity(app->window))));
+    }
+    app->scale = app->menu.text_size ? app->menu.text_size : app->auto_scale;
     /* the size Text size chose, as long as 16 rows still fit */
-    if (app->menu.text_size) app->scale = app->menu.text_size;
-    while (app->scale > 1 && height / (16 * app->scale) < 16) --app->scale;
+    if (app->menu.text_size)
+        while (app->scale > 1 && height / (16 * app->scale) < 16) --app->scale;
     if (app->scale < 1) app->scale = 1;
     app->cols = SDL_min(width / (8 * app->scale), GUI_MAX_COLS);
     app->rows = SDL_min(height / (16 * app->scale), GUI_MAX_ROWS);
@@ -1560,7 +1573,6 @@ static bool initialize(App* app) {
     flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #endif
     if (!SDL_CreateWindowAndRenderer(snx_build_info(), 1280, 800, flags, &app->window, &app->renderer)) return false;
-    SDL_SetWindowMinimumSize(app->window, 800, 480);
     snx_window_icon(app->window);
     SDL_SetRenderVSync(app->renderer, 1);
     SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);

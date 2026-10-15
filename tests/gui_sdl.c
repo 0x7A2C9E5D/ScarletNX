@@ -838,18 +838,23 @@ int main(int argc, char** argv) {
     assert(app.games.count == 34);
     key(&app, SDLK_ESCAPE);
     key(&app, SDLK_ESCAPE);
-    /* Compact and spacious layouts share the renderer's mouse hit coordinates. */
-    const int sizes[][2] = {{800, 480}, {1280, 960}, {1280, 800}};
+    /* Compact and spacious layouts share the renderer's mouse hit coordinates. Text size Auto keeps the letters of
+       the window it opened in (1280x800: 2x), however the window is resized, and the window keeps 16 rows of them */
+    const int sizes[][4] = {{2560, 1440, 45, 160}, {1280, 960, 30, 80}, {800, 480, 16, 50}, {1280, 800, 25, 80}};
+    assert(app.auto_scale == 2);
     for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
         assert(SDL_SetWindowSize(app.window, sizes[i][0], sizes[i][1]));
         SDL_SyncWindow(app.window);
+        render(&app);
+        assert(app.scale == 2 && app.rows == sizes[i][2] && app.cols == sizes[i][3]);
+        app.menu.selected = app.rows == 16 ? GUI_GDBSTUB : GUI_SWITCH; /* 16 rows: the menu slides to its focus */
         render(&app);
         mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), false);
         assert(app.menu.selected == GUI_GDBSTUB && !app.menu.gdbstub);
         render(&app);
         colored_text(&app, menu_row(&app, GUI_GDBSTUB), "- [OFF] Enable gdbstub", yellow);
         colored_text(&app, app.rows - 4, "Enables gdbstub on port 1234", normal);
-        assert(menu_row(&app, GUI_EXIT) < app.rows - 4);
+        assert(app.rows == 16 ? menu_offset(&app) > 0 : menu_row(&app, GUI_EXIT) < app.rows - 4);
     }
     /* a text size too big for the window: the menu slides up as the focus goes down, then back, and a size that
        would leave fewer than 16 rows falls back */
@@ -869,10 +874,10 @@ int main(int argc, char** argv) {
         app.menu.selected = GUI_SWITCH;
         render(&app);
         assert(!menu_offset(&app));
-        assert(SDL_SetWindowSize(app.window, 800, 480));
+        assert(SDL_SetWindowSize(app.window, 800, 480)); /* 800x512 at least: 4x would leave 8 rows */
         SDL_SyncWindow(app.window);
         render(&app);
-        assert(app.scale == 1);
+        assert(app.scale == 2 && app.rows == 16);
         app.menu.text_size = 0;
         assert(SDL_SetWindowSize(app.window, 1280, 800));
         SDL_SyncWindow(app.window);
