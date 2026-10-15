@@ -204,14 +204,30 @@ static void band(App* app, int row, int rows, GuiRgb c) {
     SDL_SetRenderViewport(app->renderer, &safe);
 }
 /* a line between two rows, across the text area */
-static void rule(App* app, int row) {
+static void rule(App* app, int row, GuiRgb c) {
     SDL_FRect r;
     r.x = (float)(8 * app->scale);
     r.y = (float)(row * 16 * app->scale - app->scale);
     r.w = (float)((app->cols - 2) * 8 * app->scale);
     r.h = (float)app->scale;
-    SDL_SetRenderDrawColor(app->renderer, app->theme.soft.r, app->theme.soft.g, app->theme.soft.b, 255);
+    SDL_SetRenderDrawColor(app->renderer, c.r, c.g, c.b, 255);
     SDL_RenderFillRect(app->renderer, &r);
+}
+/* the footer from row: the usage, then the working folder, which games/ and themes/ are found in. The theme's bar style
+   puts them on a band of ink over rows rows, its plain one in soft and ink; a rule above when it says so */
+static void footer(App* app, int row, int rows, GuiRgb page, GuiRgb ink, GuiRgb soft) {
+    char usage[256];
+    int bar = app->theme.footer == GUI_STYLE_BAR;
+    if (bar) band(app, row, rows, ink);
+    if (app->theme.footer_rule) rule(app, row, soft);
+    if (app->usage.available)
+        snprintf(usage, sizeof(usage), "GUI + children: RAM %.1f MiB (sum RSS)  CPU %.1f%% (100%% = 1 core)",
+                 (double)app->usage.memory_bytes / 1048576, app->usage.cpu_percent);
+    else
+        snprintf(usage, sizeof(usage), "GUI + children: resource usage unavailable");
+    text(app, 1, row, usage, rgb(bar ? page : soft));
+    text(app, 1, row + 1, "CWD:", rgb(bar ? page : soft));
+    text(app, 6, row + 1, app->cwd ? app->cwd : "(unavailable)", rgb(bar ? page : ink));
 }
 /* a selectable line: activated, focused (in the focus colour, or on a band) or plain */
 static void entry(App* app, int x, int y, const char* label, int activated, int focused) {
@@ -462,6 +478,7 @@ static void render_steps(App* app) {
     float cw = 8.0f * (float)app->scale, ch = 16.0f * (float)app->scale;
     int width, height, name_col, col, y, i, r, rows = 0, last_step = -1, typing = -1, top = 3, bottom, fit, first,
                                                cursor;
+    int foot = theme->footer != GUI_STYLE_NONE ? 2 : 0; /* the footer's rows, over the ESC line */
     const char* title;
     char name[96], head[128];
     SDL_Color ink, soft, failure;
@@ -522,7 +539,7 @@ static void render_steps(App* app) {
         typed[r] = now < start ? 0 : (size_t)SDL_min((float)total, (float)(now - start) / per);
         if (now >= start && typed[r] < total) typing = r;
     }
-    bottom = theme->bar ? app->rows - 5 : app->rows - 2;
+    bottom = (theme->bar ? app->rows - 5 : app->rows - 2) - foot;
     fit = SDL_max(1, bottom - top);
     first = SDL_max(0, rows - fit);
     cursor = typing >= 0 ? typing : last_step;
@@ -559,10 +576,10 @@ static void render_steps(App* app) {
         int k, percent = gui_steps_percent(&app->steps);
         int filled = percent < 0 ? 0 : (percent * SEGMENTS + 50) / 100;
         float span = (float)(app->cols - 8) * cw, gap = 2.0f * (float)app->scale;
-        float seg = (span - gap * (SEGMENTS - 1)) / SEGMENTS, sy = ch * (float)(app->rows - 3) + ch * 0.3f;
+        float seg = (span - gap * (SEGMENTS - 1)) / SEGMENTS, sy = ch * (float)(app->rows - foot - 3) + ch * 0.3f;
         char number[16];
-        fill(app, cw, ch * (float)(app->rows - 4) + ch / 2, (float)(app->cols - 2) * cw, (float)app->scale, colors->dim,
-             255);
+        fill(app, cw, ch * (float)(app->rows - foot - 4) + ch / 2, (float)(app->cols - 2) * cw, (float)app->scale,
+             colors->dim, 255);
         for (k = 0; k < SEGMENTS; ++k) {
             SDL_FRect r;
             r.x = cw + (float)k * (seg + gap);
@@ -580,9 +597,10 @@ static void render_steps(App* app) {
             snprintf(number, sizeof number, " --%%");
         else
             snprintf(number, sizeof number, "%3d%%", percent);
-        text(app, app->cols - 6, app->rows - 3, number, ink);
-        text(app, 1, app->rows - 2, name, ink);
+        text(app, app->cols - 6, app->rows - foot - 3, number, ink);
+        text(app, 1, app->rows - foot - 2, name, ink);
     }
+    if (foot) footer(app, app->rows - 3, 2, colors->page, colors->ink, colors->soft);
     if (app->finished)
         prompt(app, app->abnormal_exit ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE, 1, app->rows - 1, SAY_DONE, soft);
     else if (app->aborting)
@@ -718,7 +736,7 @@ static void render(App* app) {
         if (theme->head == GUI_STYLE_BAR) band(app, 0, 1, theme->ink);
         text(app, 1, 0, title, theme->head == GUI_STYLE_BAR ? paper : ink);
     }
-    if (head && theme->head_rule) rule(app, 4);
+    if (head && theme->head_rule) rule(app, 4, theme->soft);
     if (app->menu.view == GUI_LOAD_GAMES && idle) {
         size_t i;
         if (head) {
@@ -815,21 +833,7 @@ static void render(App* app) {
              app->menu.recent_focus ? app->recent.game[app->menu.recent_focus - 1].path
                                     : gui_setting_description(&app->menu),
              ink);
-    if (foot) {
-        char footer[256];
-        int bar = theme->footer == GUI_STYLE_BAR;
-        if (bar) band(app, app->rows - 3, 3, theme->ink);
-        if (theme->footer_rule) rule(app, app->rows - 3);
-
-        if (app->usage.available)
-            snprintf(footer, sizeof(footer), "GUI + children: RAM %.1f MiB (sum RSS)  CPU %.1f%% (100%% = 1 core)",
-                     (double)app->usage.memory_bytes / 1048576, app->usage.cpu_percent);
-        else
-            snprintf(footer, sizeof(footer), "GUI + children: resource usage unavailable");
-        text(app, 1, app->rows - 3, footer, bar ? paper : soft);
-        text(app, 1, app->rows - 2, "CWD:", bar ? paper : soft);
-        text(app, 6, app->rows - 2, app->cwd ? app->cwd : "(unavailable)", bar ? paper : ink);
-    }
+    if (foot) footer(app, app->rows - 3, 3, theme->page, theme->ink, theme->soft);
     render_ask(app);
     overlay(app);
     SDL_RenderPresent(app->renderer);

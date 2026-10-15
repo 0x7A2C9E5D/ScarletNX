@@ -1006,14 +1006,25 @@ int main(int argc, char** argv) {
         app.finished = true;
         app.theme.prompt = gui_theme_builtin("yorha")->prompt;
         cell = 16.0f * (float)app.scale;
-        colored_text_on(&app, app.cols - 6, app.rows - 3, "    ", li, lp); /* YoRHa has no bar unless asked */
-        colored_text_on(&app, 1, app.rows - 2, "            ", li, lp);
-        assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 3) + cell / 2), lp));
+        /* the menu's footer over the ESC line, in the run's colours: YoRHa's bar style, a band of its ink */
+        colored_text_on(&app, 1, app.rows - 3, "GUI + children: ", lp, li);
+        colored_text_on(&app, 1, app.rows - 2, "CWD: ", lp, li);
+        app.theme.footer = GUI_STYLE_PLAIN;
+        render(&app);
+        colored_text_on(&app, 1, app.rows - 2, "CWD:", ls, lp);
+        app.theme.footer = GUI_STYLE_NONE;
+        render(&app);
+        colored_text_on(&app, 1, app.rows - 2, "    ", ls, lp);
+        app.theme.footer = GUI_STYLE_BAR;
+        colored_text_on(&app, app.cols - 6, app.rows - 5, "    ", li, lp); /* YoRHa has no bar unless asked */
+        colored_text_on(&app, 1, app.rows - 4, "            ", li, lp);
+        assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 5) + cell / 2), lp));
         app.theme.bar = true;
         render(&app);
-        colored_text_on(&app, app.cols - 6, app.rows - 3, "100%", li, lp);
-        colored_text_on(&app, 1, app.rows - 2, "OPTION FLAGS", li, lp);
-        assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 3) + cell / 2), li));
+        colored_text_on(&app, app.cols - 6, app.rows - 5, "100%", li, lp); /* above the footer */
+        colored_text_on(&app, 1, app.rows - 4, "OPTION FLAGS", li, lp);
+        assert(same_colour(pixel(&app, 8.0f * (float)app.scale + 2, cell * (float)(app.rows - 5) + cell / 2), li));
+        colored_text_on(&app, 1, app.rows - 2, "CWD: ", lp, li);
         /* typing: three characters in, the cursor after them; async, each line from when it came */
         app.theme.typing_sync = false;
         app.theme.fade_in_ms = app.theme.fade_out_ms = 0;
@@ -1118,7 +1129,7 @@ int main(int argc, char** argv) {
             gui_steps_feed(&app.steps, line, strlen(line), shown);
         }
         render(&app);
-        last_row = app.rows - 3;
+        last_row = app.rows - 5; /* a blank row above the footer */
         colored_text_on(&app, 3, last_row, "line 19", ls, lp);
         colored_text_on(&app, 3, last_row - 1, "line 18", ls, lp);
         app.steps = kept;
