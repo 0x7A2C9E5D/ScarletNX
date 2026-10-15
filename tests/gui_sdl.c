@@ -1059,6 +1059,22 @@ int main(int argc, char** argv) {
         app.menu.view = GUI_LOAD_NONE;
         app.browser = (GuiBrowser){0};
     }
+    /* Share log off Android: scarletnx.log in the working folder, with the message and the last run's output */
+    {
+        char* saved = snx_path_join(temporary, "scarletnx.log");
+        size_t size = 0;
+        char* text;
+        SDL_free(app.cwd);
+        app.cwd = SDL_strdup(temporary);
+        snprintf(app.message, sizeof(app.message), "before the log");
+        app.menu.selected = GUI_LOG;
+        key(&app, SDLK_RETURN);
+        assert(!strncmp(app.message, "Log saved to ", 13) && strstr(app.message, "scarletnx.log"));
+        text = (char*)snx_read_file(saved, &size);
+        assert(text && strstr(text, "Message: before the log") && strstr(text, "== the last run: "));
+        free(text);
+        free(saved);
+    }
     /* the system's picker, as the Android menu opens it for a file to load or for the keys: a document with no path
        stays on the screen, and so does none, saying so, for the screen's messages to be read; a path loads */
     app.picked = SDL_RegisterEvents(1);

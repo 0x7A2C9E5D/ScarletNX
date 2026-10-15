@@ -78,6 +78,10 @@ int main(void) {
     menu.theme_next = false; /* the GUI's to clear */
     gui_menu_key(&menu, GUI_DOWN);
     gui_menu_key(&menu, GUI_SELECT);
+    assert(menu.selected == GUI_LOG && menu.share_log && !menu.quit);
+    menu.share_log = 0; /* the GUI's to clear */
+    gui_menu_key(&menu, GUI_DOWN);
+    gui_menu_key(&menu, GUI_SELECT);
     assert(menu.quit);
 
     menu = (GuiMenu){0};

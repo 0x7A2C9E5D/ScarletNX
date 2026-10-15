@@ -59,11 +59,7 @@ typedef struct {
     Uint32 picked;            /* the event a file from the system's picker comes back as */
 } App;
 static const char* const items[] = {"Load Switch NSP/XCI/NRO", "Load Linux ARM ELF", "Load 3DS CIA", "Setup device keys",
-                                   "Fullscreen", "Enable libgccjit", "Enable gdbstub", "Theme",
-#ifdef SDL_PLATFORM_ANDROID
-                                   "Share log",
-#endif
-                                   "Exit"};
+                                   "Fullscreen", "Enable libgccjit", "Enable gdbstub", "Theme", "Share log", "Exit"};
 /* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop */
 #ifdef SDL_PLATFORM_ANDROID
 static const char* const load_labels[] = {"-> Select a file", "-> Select file from games/ instead"};
@@ -78,6 +74,7 @@ static const char* const load_labels[] = {"-> Select a file", "-> Select file fr
 #define SAY_ABORT "Tap here to abort and return to menu"
 #define SAY_NO_GAMES "No games in games/: put a game's .nro, .xci or .nsp there."
 #define SAY_COUNT "game(s)"
+#define SAY_LOG_FAILED "The log could not be saved: allow the app access to files."
 #else
 static const char* const load_labels[] = {"-> Select via drag and drop", "-> Select file from games/ instead"};
 #define SAY_MENU "Arrows/mouse: move. Space/Enter/click: select."
@@ -91,6 +88,7 @@ static const char* const load_labels[] = {"-> Select via drag and drop", "-> Sel
 #define SAY_ABORT "Press [ESC] to abort and return to menu"
 #define SAY_NO_GAMES "No executables found in games/."
 #define SAY_COUNT "executable(s)"
+#define SAY_LOG_FAILED "The log could not be saved in the working folder."
 #endif
 static SDL_Color rgb(GuiRgb c) {
     SDL_Color out;
@@ -1012,7 +1010,6 @@ static void open_picker(App* app) {
     if (app->picked) SDL_ShowOpenFileDialog(picker_done, &app->picked, app->window, NULL, 0, NULL, false);
 }
 #endif
-#ifdef SDL_PLATFORM_ANDROID
 /* the last max bytes of a file, as text with only ASCII (what Java takes as a string from any log), or "" */
 static char* log_tail(const char* path, size_t max) {
     size_t size = 0, i;
@@ -1045,13 +1042,17 @@ static char* newest_log(const App* app) {
     SDL_free(names);
     return newest;
 }
-/* the message on the screen, the last run's output and the newest game log: saved to /sdcard/ScarletNX/scarletnx.log
-   and handed to the share sheet as that file */
+/* the message on the screen, the last run's output and the newest game log, as scarletnx.log: on Android in
+   /sdcard/ScarletNX and handed to the share sheet as that file, elsewhere in the working folder with its path copied */
 static void share_log(App* app) {
     char *game, *run, *played, *text, *saved;
     const char* folder;
+#ifdef SDL_PLATFORM_ANDROID
     android_folder(app);
     folder = gui_android_folder();
+#else
+    folder = app->cwd;
+#endif
     game = newest_log(app);
     run = log_tail(app->run_log, 1 << 20);
     played = log_tail(game, 4 << 20);
@@ -1059,16 +1060,22 @@ static void share_log(App* app) {
                       app->message, app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
     if (!saved || snx_write_file(saved, text, strlen(text)))
-        snprintf(app->message, sizeof(app->message), "The log could not be saved: allow the app access to files.");
+        snprintf(app->message, sizeof(app->message), SAY_LOG_FAILED);
+#ifdef SDL_PLATFORM_ANDROID
     else if (gui_android_share(saved, app->message, sizeof(app->message)))
         snprintf(app->message, sizeof(app->message), "Log saved to %s", saved);
+#else
+    else if (SDL_SetClipboardText(saved))
+        snprintf(app->message, sizeof(app->message), "Log saved to %s (path copied)", saved);
+    else
+        snprintf(app->message, sizeof(app->message), "Log saved to %s", saved);
+#endif
     free(saved);
     free(text);
     free(played);
     free(run);
     free(game);
 }
-#endif
 static void list_games(App* app) {
 #ifdef SDL_PLATFORM_ANDROID
     android_folder(app);
@@ -1129,12 +1136,10 @@ static void menu_key(App* app, GuiKey key) {
         app->menu.theme_next = 0;
         next_theme(app);
     }
-#ifdef SDL_PLATFORM_ANDROID
     if (app->menu.share_log) {
         app->menu.share_log = 0;
         share_log(app);
     }
-#endif
     if (key == GUI_CANCEL || (key == GUI_SELECT && app->menu.view == GUI_LOAD_KEYS)) app->message[0] = 0;
     if (app->menu.view == GUI_LOAD_GAMES) list_games(app);
 }

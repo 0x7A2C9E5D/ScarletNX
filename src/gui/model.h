@@ -19,9 +19,7 @@ enum {
     GUI_GCCJIT,
     GUI_GDBSTUB,
     GUI_THEME,
-#ifdef __ANDROID__
-    GUI_LOG, /* a phone has no terminal: the logs go out through the share sheet */
-#endif
+    GUI_LOG, /* the logs in one file, for a bug report: a phone has no terminal to copy them from */
     GUI_EXIT,
     GUI_ITEM_COUNT
 };
