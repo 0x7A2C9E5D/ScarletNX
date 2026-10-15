@@ -72,7 +72,7 @@ int main(void) {
     /* the on-screen controls, off and on: what the game gets */
     gui_menu_key(&menu, GUI_DOWN);
     assert(menu.selected == GUI_CONTROLS && !menu.controls && !strcmp(gui_controls_option(&menu), "--controls=0"));
-    assert(!strcmp(gui_setting_description(&menu), "A pad on the screen; the game's menu edits it"));
+    assert(!strcmp(gui_setting_description(&menu), "A pad on the screen. The game's menu edits it"));
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.controls && !strcmp(gui_controls_option(&menu), "--controls=1") && menu.view == GUI_LOAD_NONE);
     gui_menu_key(&menu, GUI_SELECT);
@@ -134,7 +134,7 @@ int main(void) {
             const char* args[GUI_LAUNCH_MAX];
             size_t n = gui_launch_options(&menu, prepared, "data folder", args), i = 0;
             assert(n <= GUI_LAUNCH_MAX && (bits != 47 || prepared || n == 7 + !!SNX_GUI_HAS_GCCJIT)); /* all of them */
-            if (menu.fullscreen) assert(i < n && !strcmp(args[i++], "-f"));
+            assert(i < n && !strcmp(args[i++], menu.fullscreen ? "-f" : "--fullscreen=0"));
             assert(i < n && !strcmp(args[i++], touch[menu.touch]));
             assert(i < n && !strcmp(args[i++], menu.controls ? "--controls=1" : "--controls=0"));
             if (menu.gccjit && SNX_GUI_HAS_GCCJIT && !prepared) assert(i < n && !strcmp(args[i++], "--backend=gcc"));

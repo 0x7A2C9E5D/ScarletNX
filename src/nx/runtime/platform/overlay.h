@@ -29,7 +29,4 @@ void overlay_draw(SnxUiList* l, int sw, int sh);
    do, cut to its width, and Close in focus */
 void overlay_error_draw(SnxUiList* l, int sw, int sh, const char* name, const char* msg, const char* how);
 
-/* the game's touch screen as the menu shows and sets it (sdl3.c): 0 off, 1 the fingers, 2 the mouse too */
-int backend_touch_mode(void);
-void backend_touch_set(int mode);
 #endif

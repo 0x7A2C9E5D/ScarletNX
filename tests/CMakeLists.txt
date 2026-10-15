@@ -294,13 +294,14 @@ add_test(NAME llvm_dependency COMMAND "${CMAKE_COMMAND}"
 
 add_executable(snx-test-overlay overlay.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/overlay.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/fatal_screen.c"
-    "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c")
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c"
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-overlay 11)
 target_link_libraries(snx-test-overlay PRIVATE scarletnx-common m)
 add_test(NAME overlay COMMAND snx-test-overlay)
 
 add_executable(snx-test-vpad vpad.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c"
-    "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c")
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-vpad 11)
 target_link_libraries(snx-test-vpad PRIVATE scarletnx-common m)
 add_test(NAME vpad COMMAND snx-test-vpad)
@@ -309,6 +310,11 @@ add_executable(snx-test-fatal-screen fatal_screen.c "${PROJECT_SOURCE_DIR}/src/n
 snx_test_target(snx-test-fatal-screen 11)
 target_link_libraries(snx-test-fatal-screen PRIVATE scarletnx-common)
 add_test(NAME fatal_screen COMMAND snx-test-fatal-screen)
+
+add_executable(snx-test-ini ini.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
+snx_test_target(snx-test-ini 11)
+target_compile_options(snx-test-ini PRIVATE -UNDEBUG) # its checks are asserts
+add_test(NAME ini COMMAND snx-test-ini)
 
 # the controls' atlas and their shaders are generated and checked in: their sources must still make them
 find_package(Python3 QUIET COMPONENTS Interpreter)

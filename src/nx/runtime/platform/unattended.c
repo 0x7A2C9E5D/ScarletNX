@@ -4,22 +4,27 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* Unattended-run options for both windowed and headless execution through the SDL3 backend. */
 #include "runtime/platform/unattended.h"
+#include "runtime/ini.h"
 #include "runtime/main.h"
+#include "runtime/options.h"
 #include "runtime/rtapi.h"
 #include "gpu/renderer.h"
 #include "runtime/platform/log.h"
 #include "runtime/platform/plat.h"
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static int g_seconds = 0, g_maxframes = -1, g_shot_every = 0;
-static const char* g_shot;
+static char* g_shot; /* owned: --shot= points into argv, a reload's line buffer is gone after it */
 static int g_shots, g_shot_bucket = -1;
 static u64 g_start;
-static u64 g_press = 0, g_press_at = 0, g_press_len = 300;
-/* script: "ms:hex,ms:hex,...", parsed once when the option is set */
+static u64 g_press = 0;
+static int g_press_at = 0, g_press_len = 300; /* ms */
+/* script: "ms:hex,ms:hex,...", parsed each time the option is set (a script= under the .ini's [Other] again on
+   each reload) */
 typedef struct {
     u64 t, mask;
 } ScriptPress;
@@ -42,7 +47,10 @@ static void script_parse(const char* v) {
         if (g_nscript == cap) {
             cap = cap ? cap * 2 : 16;
             ScriptPress* n = realloc(g_script, sizeof *n * (size_t)cap);
-            if (!n) break;
+            if (!n) {
+                WARN("script: out of memory, so the presses from \"%s\" on are ignored\n", p);
+                return;
+            }
             g_script = n;
         }
         g_script[g_nscript++] = (ScriptPress){t, m};
@@ -51,36 +59,41 @@ static void script_parse(const char* v) {
     if (*p) WARN("script: \"%s\" is not ms:hex, so it and the presses after it are ignored\n", p);
 }
 
+static void shot_set(const IniOpt* o, const char* v) {
+    (void)o;
+    free(g_shot);
+    g_shot = v[0] ? strdup(v) : NULL;
+}
+static void press_set(const IniOpt* o, const char* v) {
+    (void)o;
+    g_press = strtoull(v, NULL, 16);
+}
+static void script_set(const IniOpt* o, const char* v) {
+    (void)o;
+    script_parse(v);
+}
+/* given as --key=value, or read from the .ini's [Other] (none is in its sections, so none is written with help) */
+static const IniOpt INI[] = {{"seconds", NULL, NULL, INI_INT, 0, &g_seconds, 0, INT_MAX, NULL},
+                             {"frames", NULL, NULL, INI_INT, 0, &g_maxframes, -1, INT_MAX, NULL},
+                             {"shot", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, shot_set},
+                             {"shot_every", NULL, NULL, INI_INT, 0, &g_shot_every, 0, INT_MAX, NULL},
+                             {"press", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, press_set},
+                             {"press_at", NULL, NULL, INI_INT, 0, &g_press_at, 0, INT_MAX, NULL},
+                             {"press_len", NULL, NULL, INI_INT, 0, &g_press_len, 0, INT_MAX, NULL},
+                             {"script", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, script_set},
+                             {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
 int unattended_ini(const char* k, const char* v) {
-    if (!strcmp(k, "seconds"))
-        g_seconds = atoi(v);
-    else if (!strcmp(k, "frames"))
-        g_maxframes = atoi(v);
-    else if (!strcmp(k, "shot")) {
-        /* Keep the screenshot prefix for numbered shots on the presenting thread. */
-        char* s = strdup(v);
-        if (s) g_shot = s[0] ? s : NULL;
-    } else if (!strcmp(k, "shot_every"))
-        g_shot_every = atoi(v);
-    else if (!strcmp(k, "press"))
-        g_press = strtoull(v, NULL, 16);
-    else if (!strcmp(k, "press_at"))
-        g_press_at = strtoull(v, NULL, 10);
-    else if (!strcmp(k, "press_len"))
-        g_press_len = strtoull(v, NULL, 10);
-    else if (!strcmp(k, "script"))
-        script_parse(v);
-    else
-        return 0;
-    return 1;
+    const IniOpt* o = ini_find(INI, k);
+    if (o) ini_read(o, v);
+    return o != NULL;
 }
 void unattended_start(void) { g_start = plat_ns(); }
 int unattended_active(void) { return g_seconds || g_maxframes >= 0; }
 u64 unattended_buttons(void) {
     u64 el = (plat_ns() - g_start) / 1000000ull, b = 0;
-    if (g_press && el >= g_press_at && el < g_press_at + g_press_len) b |= g_press;
+    if (g_press && el >= (u64)g_press_at && el < (u64)g_press_at + (u64)g_press_len) b |= g_press;
     for (int i = 0; i < g_nscript; i++)
-        if (el >= g_script[i].t && el < g_script[i].t + g_press_len) b |= g_script[i].mask;
+        if (el >= g_script[i].t && el < g_script[i].t + (u64)g_press_len) b |= g_script[i].mask;
     return b;
 }
 const char* unattended_shot(void) { return g_shot; }
@@ -88,7 +101,7 @@ int unattended_periodic_shot(char* path, size_t n) {
     if (!g_shot_every || !g_shot) return 0;
     /* by bucket rather than g_frames % shot_every: the SDL3 backend asks once per tick, and frames can go by two
        at a time */
-    int b = g_frames / g_shot_every;
+    int b = __atomic_load_n(&g_frames, __ATOMIC_RELAXED) / g_shot_every;
     if (b == g_shot_bucket) return 0;
     g_shot_bucket = b;
     snprintf(path, n, "%s_%04d", g_shot, g_shots++);
@@ -96,13 +109,16 @@ int unattended_periodic_shot(char* path, size_t n) {
 }
 int unattended_done(void) {
     u64 el = plat_ns() - g_start;
-    return (g_maxframes >= 0 && g_frames >= g_maxframes) || (g_seconds && el >= (u64)g_seconds * 1000000000ull);
+    return (g_maxframes >= 0 && __atomic_load_n(&g_frames, __ATOMIC_RELAXED) >= g_maxframes) ||
+           (g_seconds && el >= (u64)g_seconds * 1000000000ull);
 }
 void unattended_exit(u64 hash, int w, int h) {
+    int frames = __atomic_load_n(&g_frames, __ATOMIC_RELAXED);
     if (w > 0 && h > 0)
-        fprintf(stderr, "\nframes=%d hash=%016llx %dx%d\n", g_frames, (unsigned long long)hash, w, h);
+        fprintf(stderr, "\nframes=%d hash=%016llx %dx%d\n", frames, (unsigned long long)hash, w, h);
     else
-        fprintf(stderr, "\nframes=%d hash=%016llx\n", g_frames, (unsigned long long)hash);
+        fprintf(stderr, "\nframes=%d hash=%016llx\n", frames, (unsigned long long)hash);
+    ini_poll(1); /* what changed in the run since the last poll is saved, as on a quit */
     save_hints();
     /* the process ends without shutting the renderer down, so it saves its pipeline cache here */
     if (g_renderer && g_renderer->save) g_renderer->save();

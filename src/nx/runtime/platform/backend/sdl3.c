@@ -2,9 +2,9 @@
    Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* SDL3 backend, the window backend on Linux and Windows: the window and its Vulkan surface, keyboard and gamepads. Runs
-   natively on Wayland and on X11 (SDL_VIDEO_DRIVER=x11 picks X11), and takes the unattended-run options (seconds,
-   frames, shot, shot_every, press, press_at, press_len, script: platform/unattended.c). */
+/* SDL3 backend, the window backend on Linux, Windows and Android: the window and its Vulkan surface, keyboard, gamepads
+   and touch. Runs natively on Wayland and on X11 (SDL_VIDEO_DRIVER=x11 picks X11), and takes the unattended-run
+   options (seconds, frames, shot, shot_every, press, press_at, press_len, script: platform/unattended.c). */
 #include "runtime/main.h"
 #include "runtime/options.h"
 #include "hle/services/hid.h"
@@ -34,8 +34,9 @@ static SDL_Window* g_win;
    a width from one resize from pairing with the height of another */
 static _Atomic u64 g_wsize = 1280 | (720ull << 32);
 static u64 keys_held;
+static u64 g_menu_held; /* buttons held while the menu had the controls (the B that closed it): kept from the game until
+                           they are let go */
 static int g_fullscreen;
-static int g_fullscreen_ini; /* the .ini's fullscreen, applied once the window is open */
 static void set_fullscreen(int on);
 static int g_shot_req;
 static SDL_Gamepad* g_pads[4];
@@ -137,30 +138,36 @@ void plat_audio_volume(PAudio* a, float volume) {
 static int g_touch_mode = 1;
 static u64 g_touch_ids[SNX_HID_TOUCHES]; /* the finger in each slot of g_touch */
 
-static void touch_mode(int mode) {
-    g_touch_mode = mode;
+/* g_touch_mode changed: the fingers or the mouse it no longer takes are lifted */
+static void touch_mode_set(const IniOpt* o, const char* v) {
+    (void)o;
+    (void)v;
     if (!g_touch_mode) g_touch.down = 0;
     if (g_touch_mode != 2) touch_up(&g_touch, g_touch_ids, SNX_TOUCH_MOUSE);
 }
+const IniOpt g_backend_ini[] = {
+    {"touch", "1", "The game's touch screen: 1 = fingers, 2 = fingers and the mouse's left button, 0 = off", INI_INT, 0,
+     &g_touch_mode, 0, 2, touch_mode_set},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
 int backend_touch_mode(void) { return g_touch_mode; }
+/* from the in-game menu, under ui_lock: the mode as the .ini clamps it, saved */
 void backend_touch_set(int mode) {
+    const IniOpt* o = ini_find(g_backend_ini, "touch");
     char v[16];
-    touch_mode(mode);
     snprintf(v, sizeof v, "%d", mode);
+    ini_read(o, v);
+    ini_format(o, v, sizeof v);
     ini_set("touch", v);
 }
-void backend_ini(const char* k, const char* v) {
-    int controls;
-    if (!strcmp(k, "fullscreen"))
-        g_fullscreen_ini = atoi(v);
-    else if (!strcmp(k, "touch"))
-        touch_mode(atoi(v));
-    else {
-        ui_lock();
-        controls = vpad_ini(k, v);
-        ui_unlock();
-        if (!controls) unattended_ini(k, v);
-    }
+int backend_ini(const char* k, const char* v) {
+    const IniOpt* o = ini_find(g_backend_ini, k);
+    int known;
+    /* the in-game menu reads the touch mode, and the renderer the on-screen controls, under ui_lock */
+    ui_lock();
+    if (o) ini_read(o, v);
+    known = o || vpad_ini(k, v);
+    ui_unlock();
+    return known || unattended_ini(k, v);
 }
 
 static void wsize_set(int w, int h) {
@@ -199,9 +206,12 @@ static bool SDLCALL lifecycle(void* unused, SDL_Event* e) {
     }
     return true;
 }
+/* minimized or covered: a compositor shows nothing of it, and may never hand its swapchain's images back (Wayland
+   with FIFO), so presenting stops until it is back (the main thread sets it, the renderer reads it) */
+static int g_minimized;
 int backend_window_shown(void) {
     return !g_opt_headless && !__atomic_load_n(&g_hidden, __ATOMIC_ACQUIRE) &&
-           !__atomic_load_n(&g_given_up, __ATOMIC_ACQUIRE);
+           !__atomic_load_n(&g_minimized, __ATOMIC_ACQUIRE) && !__atomic_load_n(&g_given_up, __ATOMIC_ACQUIRE);
 }
 u32 backend_window_generation(void) { return __atomic_load_n(&g_generation, __ATOMIC_ACQUIRE); }
 void backend_window_size(int* w, int* h) {
@@ -256,9 +266,11 @@ void video_init(const char* title) {
 #ifdef __ANDROID__
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1"); /* back opens the game's menu (overlay.c), not leaves */
 #endif
-    /* a finger and the mouse each reach the touch screen once: SDL would also send each as the other */
+    /* a finger and the mouse each reach the touch screen once: SDL would also send each as the other, and a pen as both
+       (it stays a finger) */
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_PEN_MOUSE_EVENTS, "0");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) fatal("SDL could not start its video: %s", SDL_GetError());
     /* SDL subsystem initialization belongs to the main thread, before the guest can open audout sessions. */
     g_audio_ready = SDL_InitSubSystem(SDL_INIT_AUDIO);
@@ -286,7 +298,7 @@ void video_init(const char* title) {
         fatal("Vulkan could not start (see the log). ScarletNX needs a GPU and driver with Vulkan 1.3.");
     LOG("renderer: Vulkan\n");
     /* not for an unattended run: nobody is at the screen, and it would cover the desktop of whoever is */
-    if (g_fullscreen_ini && !unattended_active()) set_fullscreen(1);
+    if (g_opt_fullscreen && !unattended_active()) set_fullscreen(1);
 #ifdef _WIN32
     /* keep the display and the system awake while playing (it was set with the crash handler, headless runs too) */
     SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
@@ -305,20 +317,12 @@ int backend_vk_surface(VkInstance instance, VkSurfaceKHR* surface) {
     LOG("video: no Vulkan surface: %s\n", SDL_GetError());
     return 0;
 }
-void video_present_rgba(const u32* px, int w, int h, int stride) {
-    /* the renderer presents from the game's buffers (present_buffer), so a frame made on the CPU isn't shown */
-    (void)px;
-    (void)w;
-    (void)h;
-    (void)stride;
-}
-
 static const char* HELP = "Controller: like a Switch controller, buttons by position. Home: the game's menu.\n\n"
                           "Keyboard (keys by position, as on a US layout):\n"
                           "  Arrows = D-Pad     W A S D = left stick    I J K L = right stick\n"
                           "  X / Space = A    Z = B    C = X    V = Y\n"
                           "  Q = L   E = R   1 = ZL   3 = ZR   Enter = +   Backspace = -\n\n"
-                          "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / unlimited\n"
+                          "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
                           "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = quit";
 
 /* keys -> HidNpadButton bits; 40..47 are the stick keys, turned into axes in video_poll. By scancode, the key's
@@ -518,20 +522,23 @@ static void hotkey(SDL_Keycode k) {
         }
         case SDLK_F3: g_shot_req = 1; break;
         case SDLK_F4: {
-            /* off and back to the limit the player set (fps_limit=120 stays 120), 60 when it started off */
-            static int was = 1;
+            /* off and back to the limit the player set (fps_limit=120 stays 120), or to the game's pace when it
+               started off */
+            static int was = SNX_FPS_GAME;
             if (g_opt_fps) {
                 was = g_opt_fps;
-                g_opt_fps = 0;
+                __atomic_store_n(&g_opt_fps, 0, __ATOMIC_RELAXED); /* present_pace reads it on the game's threads */
             } else
-                g_opt_fps = was;
+                __atomic_store_n(&g_opt_fps, was, __ATOMIC_RELAXED);
             char v[16];
-            snprintf(v, sizeof v, "%d", g_opt_fps);
+            fps_limit_text(g_opt_fps, v, sizeof v);
             ini_set("fps_limit", v);
-            if (g_opt_fps)
-                LOG("FPS limit: %d\n", g_opt_fps >= 60 && g_opt_fps <= 240 ? g_opt_fps : 60);
+            if (g_opt_fps == SNX_FPS_GAME)
+                LOG("FPS limit: the game's pace\n");
+            else if (g_opt_fps)
+                LOG("FPS limit: %d\n", g_opt_fps);
             else
-                LOG("FPS limit: unlimited\n");
+                LOG("FPS limit: off\n");
             break;
         }
         case SDLK_F5: kernel_dump_threads(); break;
@@ -574,12 +581,23 @@ static void dz(i32* x, i32* y) {
 /* SDL's Y axes point down, the Switch's up */
 static i32 up(i32 v) { return v == -32768 ? 32767 : -v; }
 
-/* The game's menu takes the keys, the buttons, the fingers and the mouse while it is open; Back, Home and F2 open
-   and close it, and end the on-screen controls' edit mode. Under ui_lock: the renderer draws them on its thread */
+/* The game's menu takes the keys, the buttons, the fingers and the mouse while it is open. Back, Home and F2 open
+   and close it, and they and Esc end the on-screen controls' edit mode. Under ui_lock: the renderer draws them on its
+   thread */
+static u64 g_tap_finger;     /* the finger that went down on the open menu (0, which SDL never uses, for none) */
+static int g_tap_mouse_down; /* and the mouse's left button: only their lifts tap it */
+/* a finger's id, the pen's apart: SDL gives a pen's touch the id 1 on every platform, the id Android and Wayland
+   give a first finger and any finger may have, and no real finger's id sets bit 63 */
+static u64 finger_id(const SDL_TouchFingerEvent* f) {
+    return (u64)f->fingerID | (f->touchID == SDL_PEN_TOUCHID ? 1ull << 63 : 0);
+}
 static void menu_open(int open) {
     if (overlay_shown() != open) overlay_toggle();
     vpad_release();
     keys_held = 0;
+    /* a finger or button down before this (Home on the on-screen controls opened it) lifts without a tap */
+    g_tap_finger = 0;
+    g_tap_mouse_down = 0;
 }
 static void overlay_do(int action) {
     if (action == OVERLAY_EXIT) g_quit = 1;
@@ -631,16 +649,29 @@ static int menu_event(const SDL_Event* e) {
             case SDL_GAMEPAD_BUTTON_SOUTH: overlay_do(overlay_back()); break;
             default: break;
         }
+    } else if (e->type == SDL_EVENT_FINGER_DOWN) {
+        g_tap_finger = finger_id(&e->tfinger);
     } else if (e->type == SDL_EVENT_FINGER_UP) {
-        backend_window_size(&w, &h);
-        overlay_do(overlay_tap(e->tfinger.x * (float)w, e->tfinger.y * (float)h, w, h));
-    } else if (e->type == SDL_EVENT_MOUSE_BUTTON_UP && e->button.which != SDL_TOUCH_MOUSEID &&
-               e->button.button == SDL_BUTTON_LEFT) {
-        backend_window_size(&w, &h);
-        d = SDL_GetWindowPixelDensity(g_win);
-        overlay_do(overlay_tap(e->button.x * d, e->button.y * d, w, h));
-    } else if (e->type != SDL_EVENT_FINGER_DOWN && e->type != SDL_EVENT_FINGER_MOTION &&
-               e->type != SDL_EVENT_MOUSE_BUTTON_DOWN && e->type != SDL_EVENT_MOUSE_MOTION)
+        if (g_tap_finger && finger_id(&e->tfinger) == g_tap_finger) {
+            g_tap_finger = 0;
+            backend_window_size(&w, &h);
+            overlay_do(overlay_tap(e->tfinger.x * (float)w, e->tfinger.y * (float)h, w, h));
+        }
+    } else if ((e->type == SDL_EVENT_MOUSE_BUTTON_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_UP) &&
+               e->button.which != SDL_TOUCH_MOUSEID && e->button.button == SDL_BUTTON_LEFT) {
+        if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+            g_tap_mouse_down = 1;
+        else if (g_tap_mouse_down) {
+            g_tap_mouse_down = 0;
+            backend_window_size(&w, &h);
+            d = SDL_GetWindowPixelDensity(g_win);
+            overlay_do(overlay_tap(e->button.x * d, e->button.y * d, w, h));
+        }
+    } else if (e->type == SDL_EVENT_FINGER_CANCELED) {
+        if (finger_id(&e->tfinger) == g_tap_finger) g_tap_finger = 0;
+        return 0; /* the game's touch screen lets it go too */
+    } else if (e->type != SDL_EVENT_FINGER_MOTION && e->type != SDL_EVENT_MOUSE_BUTTON_DOWN &&
+               e->type != SDL_EVENT_MOUSE_BUTTON_UP && e->type != SDL_EVENT_MOUSE_MOTION)
         return 0; /* the window's events, and keys let go: the game still has them */
     return 1;
 }
@@ -668,20 +699,20 @@ static void touch_finger(const SDL_Event* e) {
     backend_window_safe(&safe[0], &safe[1], &safe[2], &safe[3]);
     ui_lock();
     if (e->type == SDL_EVENT_FINGER_DOWN)
-        taken = vpad_down(e->tfinger.fingerID, px, py, safe);
+        taken = vpad_down(finger_id(&e->tfinger), px, py, safe);
     else if (e->type == SDL_EVENT_FINGER_MOTION)
-        vpad_move(e->tfinger.fingerID, px, py, safe);
+        vpad_move(finger_id(&e->tfinger), px, py, safe);
     else
-        vpad_up(e->tfinger.fingerID);
+        vpad_up(finger_id(&e->tfinger));
     ui_unlock();
     if (taken || !g_touch_mode) return;
     touch_window(picture);
     if (e->type == SDL_EVENT_FINGER_DOWN)
-        touch_down(&g_touch, g_touch_ids, e->tfinger.fingerID, picture, px, py);
+        touch_down(&g_touch, g_touch_ids, finger_id(&e->tfinger), picture, px, py);
     else if (e->type == SDL_EVENT_FINGER_MOTION)
-        touch_move(&g_touch, g_touch_ids, e->tfinger.fingerID, picture, px, py);
+        touch_move(&g_touch, g_touch_ids, finger_id(&e->tfinger), picture, px, py);
     else
-        touch_up(&g_touch, g_touch_ids, e->tfinger.fingerID);
+        touch_up(&g_touch, g_touch_ids, finger_id(&e->tfinger));
 }
 /* the mouse's left button as one more finger: on the on-screen controls when they are on, and on the touch screen
    when the touch option asks for it; positions come in window points */
@@ -720,10 +751,18 @@ void video_poll(void) {
         if (!fatal_screen(left)) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", left, g_win);
         plat_exit_now(1);
     }
+    /* the menu had the controls when this poll began: the press that closes it (B) is in this poll's state */
+    int menu_had = overlay_shown() || vpad_editing();
     while (!g_opt_headless && SDL_PollEvent(&e)) {
         if (overlay_event(&e)) continue;
         switch (e.type) {
             case SDL_EVENT_QUIT: g_quit = 1; break;
+            case SDL_EVENT_WINDOW_MINIMIZED:
+            case SDL_EVENT_WINDOW_OCCLUDED: __atomic_store_n(&g_minimized, 1, __ATOMIC_RELEASE); break;
+            case SDL_EVENT_WINDOW_RESTORED:
+            case SDL_EVENT_WINDOW_MAXIMIZED:
+            case SDL_EVENT_WINDOW_EXPOSED:
+            case SDL_EVENT_WINDOW_SHOWN: __atomic_store_n(&g_minimized, 0, __ATOMIC_RELEASE); break;
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                 if (e.window.windowID == SDL_GetWindowID(g_win)) wsize_set(e.window.data1, e.window.data2);
                 wsafe_set();
@@ -748,8 +787,8 @@ void video_poll(void) {
                 wsafe_set();
                 break;
             case SDL_EVENT_KEY_DOWN:
-                if (e.key.key == SDLK_ESCAPE) {
-                    g_quit = 1;
+                if (e.key.key == SDLK_ESCAPE) { /* a fresh press: the repeats of the Esc that closed the menu don't */
+                    if (!e.key.repeat) g_quit = 1;
                     break;
                 }
                 if (e.key.key == SDLK_RETURN && (e.key.mod & SDL_KMOD_ALT)) {
@@ -758,14 +797,21 @@ void video_poll(void) {
                 }
                 /* not with Ctrl, Alt or the system key: Alt+F4 also arrives as F4 on Windows */
                 if (!e.key.repeat && !(e.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI))) hotkey(e.key.key);
-                keys_held |= keymap(e.key.scancode);
+                /* a repeat doesn't press again: a key held as the menu closed (which cleared keys_held) stays from
+                   the game until it is let go */
+                if (!e.key.repeat) keys_held |= keymap(e.key.scancode);
                 break;
             case SDL_EVENT_KEY_UP: keys_held &= ~keymap(e.key.scancode); break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 keys_held = 0;
                 ui_lock();
                 vpad_release();
+                g_tap_finger = 0; /* lifts that come without their presses don't tap the menu */
+                g_tap_mouse_down = 0;
                 ui_unlock();
+                /* SDL leaves a held mouse button to the system's implicit grab, whose release may go to the window
+                   that took the focus: the game's touch from the mouse lifts now (a later release finds it up) */
+                touch_up(&g_touch, g_touch_ids, SNX_TOUCH_MOUSE);
                 break;
             case SDL_EVENT_GAMEPAD_ADDED: pad_open(e.gdevice.which); break;
             case SDL_EVENT_GAMEPAD_REMOVED: pad_close(e.gdevice.which); break;
@@ -830,9 +876,13 @@ void video_poll(void) {
     }
     input_stick_clamp(&lx, &ly);
     input_stick_clamp(&rx, &ry);
-    if (overlay_shown() || vpad_editing()) { /* the game's menu, or the controls' edit mode, has the controls */
+    if (menu_had || overlay_shown() || vpad_editing()) { /* the game's menu, or the controls' edit mode, has them */
+        g_menu_held = b;
         b = (u64)(lx = ly = rx = ry = 0);
         g_touch.down = 0;
+    } else {
+        g_menu_held &= b;
+        b &= ~g_menu_held;
     }
     g_pad.buttons = b;
     g_pad.lx = lx;

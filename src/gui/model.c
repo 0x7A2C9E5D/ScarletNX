@@ -124,13 +124,13 @@ const char* gui_setting_description(const GuiMenu* menu) {
             return "Enable fullscreen at startup";
 #endif
         case GUI_TOUCH: return "The game's touch screen: fingers, the mouse too, or off";
-        case GUI_CONTROLS: return "A pad on the screen; the game's menu edits it";
+        case GUI_CONTROLS: return "A pad on the screen. The game's menu edits it";
         case GUI_GCCJIT:
             return SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
                                       : "Program was not compiled with libgccjit";
         case GUI_GDBSTUB: return "Enables gdbstub on port 1234";
         case GUI_THEME: return "Built-in themes, then each themes/<name>/theme.ini";
-        case GUI_TEXT: return "Bigger letters scroll the menu; Auto fits the screen";
+        case GUI_TEXT: return "Bigger letters scroll the menu. Auto fits the screen";
         case GUI_LOG:
 #ifdef __ANDROID__
             return "Saves the last run's output and game log to /sdcard/ScarletNX/scarletnx.log, then shares it";
@@ -159,7 +159,8 @@ size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char* repo, 
     size_t n = 0;
     /* These are Switch options, never guest argv for the CPU-only Linux driver. */
     if (menu->selected != GUI_SWITCH) return 0;
-    if (menu->fullscreen) argv[n++] = "-f";
+    /* the game's .ini has a fullscreen of its own: OFF has to say so, or the .ini would decide */
+    argv[n++] = menu->fullscreen ? "-f" : "--fullscreen=0";
     argv[n++] = gui_touch_option(menu);
     argv[n++] = gui_controls_option(menu);
     if (menu->gccjit && SNX_GUI_HAS_GCCJIT && !prepared) argv[n++] = "--backend=gcc";
