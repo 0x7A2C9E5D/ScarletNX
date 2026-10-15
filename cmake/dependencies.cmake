@@ -99,6 +99,10 @@ if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY AND NOT SNX_HACTOOL_ONLY) OR SNX_BUILD_G
     if(SDL3_ADDED)
         set(SNX_SDL3_FROM_SOURCE ON)
         snx_quiet(SDL3-static)
+        # ccache can't reuse a compile that read a precompiled header: under a launcher, SDL3 goes without one
+        if(CMAKE_C_COMPILER_LAUNCHER)
+            set_target_properties(SDL3-static PROPERTIES DISABLE_PRECOMPILE_HEADERS ON)
+        endif()
     endif()
 endif()
 
