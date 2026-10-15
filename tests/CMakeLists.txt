@@ -330,6 +330,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME nightly_notes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/nightly_notes_test.py")
 endif()
 
+# the dependency cache's keys and how a build is published to it (cmake/deps_cache.cmake)
+add_test(NAME deps_cache COMMAND "${CMAKE_COMMAND}" "-DCC=${CMAKE_C_COMPILER}" "-DSRC=${PROJECT_SOURCE_DIR}"
+         "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/deps-cache-test" -P "${CMAKE_CURRENT_SOURCE_DIR}/deps_cache_test.cmake")
+
 add_executable(snx-test-hid-touch hid_touch.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/touch.c"
     "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_touch.c")
 snx_test_target(snx-test-hid-touch 11)

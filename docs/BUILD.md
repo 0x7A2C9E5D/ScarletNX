@@ -183,6 +183,11 @@ CPM: [SHA-256-pinned sources](../cmake/dependencies.cmake), shared `.cache/cpm` 
 Override via CMake/env `CPM_SOURCE_CACHE`. SDL3 uses CPM's system-package discovery with a pinned static
 source fallback. Use `-DCPM_DOWNLOAD_SDL3=ON` to request the bundled source build.
 
+FFmpeg and OpenSSL build with their own configure and make, in each build tree. With `SNX_DEPS_CACHE` (CMake or env)
+naming a folder, a tree reuses a finished build there whose inputs match (source, configure line, compiler, C headers
+and the cmake file that builds it, see [deps_cache.cmake](../cmake/deps_cache.cmake)) and publishes the ones it
+builds, so other trees and branches skip both. A change to any input is a new folder; old ones are only left behind.
+
 ## Build variants
 
 SDL3, Vulkan and FFmpeg are mandatory for the NX runtime, including when running with `-H`.
