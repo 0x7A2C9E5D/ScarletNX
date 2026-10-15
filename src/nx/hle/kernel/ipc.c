@@ -200,23 +200,26 @@ static void parse(IpcCtx* c) {
     memcpy(&w1, m + 4, 4);
     c->type = w0 & 0xFFFF;
     u32 nx = (w0 >> 16) & 15, na = (w0 >> 20) & 15, nb = (w0 >> 24) & 15, nw = (w0 >> 28) & 15;
-    u32 ndata = w1 & 0x3FF, cflags = (w1 >> 10) & 15;
+    u32 ndata = w1 & 0x3FF, cflags = (w1 >> 10) & 15, recv_off = (w1 >> 20) & 0x7FF; /* the receive list's word */
     int special = (w1 >> 31) & 1;
     u32 nc = cflags == 0 ? 0 : cflags == 1 ? 0 : cflags == 2 ? 1 : cflags - 2;
     u8* p = m + 8;
     {
         /* the kernel copies the message the header describes into the server's 0x100 byte buffer before the server
-           reads any of it. A header that describes more than the client's buffer fails the request
-           (InvalidCombination), and a message larger than the server's buffer too (MessageTooLarge, which only a
+           reads any of it (Mesosphere's ReceiveMessage). A header that describes more than the client's buffer, its
+           receive list included, or a receive list inside the raw data, fails the request (InvalidCombination). Raw
+           data that ends past the server's buffer fails it too (MessageTooLarge, which only a
            SendSyncRequestWithUserBuffer can send) */
-        u32 sh = 0, size;
+        u32 sh = 0, raw_end, all;
         if (special) memcpy(&sh, p, 4);
-        size = 8 + (special ? 4 + ((sh & 1) ? 8 : 0) + 4 * (((sh >> 1) & 15) + ((sh >> 5) & 15)) : 0) + 8 * nx +
-               12 * (na + nb + nw) + 4 * ndata + 8 * nc;
-        if (size > c->msg_size || size > 0x100) {
-            c->kernel_rc = size > c->msg_size ? R_BADCOMBO : R_MSGTOOLARGE;
-            return;
-        }
+        raw_end = 8 + (special ? 4 + ((sh & 1) ? 8 : 0) + 4 * (((sh >> 1) & 15) + ((sh >> 5) & 15)) : 0) + 8 * nx +
+                  12 * (na + nb + nw) + 4 * ndata;
+        all = (recv_off ? recv_off * 4 : raw_end) + 8 * nc;
+        if (all > c->msg_size || (recv_off && recv_off * 4 < raw_end))
+            c->kernel_rc = R_BADCOMBO;
+        else if (raw_end > 0x100)
+            c->kernel_rc = R_MSGTOOLARGE;
+        if (c->kernel_rc) return;
     }
     if (special) {
         u32 sh;
@@ -265,8 +268,8 @@ static void parse(IpcCtx* c) {
     c->nw = nw < MAX_BUFS ? (int)nw : MAX_BUFS;
     /* raw data is 16-aligned from the message start */
     u8* raw = m + (((p - m) + 15) & ~15);
-    /* C descriptors follow the data */
-    u8* cp = p + ndata * 4;
+    /* C descriptors follow the data, or start where the header says */
+    u8* cp = recv_off ? m + recv_off * 4 : p + ndata * 4;
     c->nc = nc < MAX_BUFS ? (int)nc : MAX_BUFS;
     for (int i = 0; i < c->nc; i++, cp += 8) {
         u32 a, b;

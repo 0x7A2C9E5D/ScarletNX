@@ -213,6 +213,12 @@ snx_swipc(snx-test-nvdrv-service ROOT "${PROJECT_SOURCE_DIR}/src/nx" FILES hle/s
           hle/services/nvdrv.swipc)
 add_test(NAME nvdrv_service COMMAND snx-test-nvdrv-service)
 
+# ipc.c's parsing and replies (hle/kernel/ipc.c, included by the test) with raw HIPC messages laid out as libnx
+# writes them, a test service, and the kernel's handles and objects stubbed
+add_executable(snx-test-ipc-message ipc_message.c)
+snx_test_target(snx-test-ipc-message 23)
+add_test(NAME ipc_message COMMAND snx-test-ipc-message)
+
 if(SNX_BUILD_NX)
 add_test(NAME llvm_dependency COMMAND "${CMAKE_COMMAND}"
     "-DSNX_SOURCE_DIR=${PROJECT_SOURCE_DIR}" "-DSNX_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/llvm-dependency"
