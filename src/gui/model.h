@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "font.h" /* gui_glyph */
 
 #ifndef SNX_GUI_HAS_GCCJIT
 #define SNX_GUI_HAS_GCCJIT 0
@@ -98,8 +99,6 @@ typedef struct {
 void gui_console_init(GuiConsole* console, int cols, int rows);
 void gui_console_resize(GuiConsole* console, int cols, int rows);
 void gui_console_feed(GuiConsole* console, const char* data, size_t size);
-/* The VGA BIOS font uses CP437. Unrepresentable Unicode becomes '?'. */
-unsigned char gui_glyph(uint32_t codepoint);
 /* SDL_DROP_FILE is already a path. DROP_TEXT/clipboard may contain a quoted path
    or a local file:// URI. Returns owned UTF-8, never shell-expanded. */
 char* gui_drop_path(const char* text, bool text_drop);
