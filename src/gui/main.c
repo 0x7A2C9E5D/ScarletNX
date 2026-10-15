@@ -253,15 +253,12 @@ static void next_theme(App* app) {
     while (i < app->themes.count && strcmp(app->themes.ids[i], app->theme.id)) ++i;
     if (app->themes.count) gui_theme_load(&app->theme, dirs, 2, app->themes.ids[(i + 1) % app->themes.count]);
 }
-/* a blank row between the items when they all fit so above the message and the description */
-static int menu_spacing(const App* app) { return 4 + 2 * (GUI_ITEM_COUNT - 1) < app->rows - 5 ? 2 : 1; }
 /* the recent games take a title row, a row each and a blank one above the items */
 static int recent_rows(const App* app) { return app->recent.count ? app->recent.count + 2 : 0; }
 /* the menu's last row: below it a blank, the message, and the focused item's description */
 static int menu_last_row(const App* app) { return app->rows - 7; }
 static int menu_row_in_full(const App* app, int item) {
-    return 4 + recent_rows(app) + item * menu_spacing(app) +
-           (app->menu.view != GUI_LOAD_NONE && item > app->menu.active ? 2 : 0);
+    return 4 + recent_rows(app) + item + (app->menu.view != GUI_LOAD_NONE && item > app->menu.active ? 2 : 0);
 }
 /* how far the menu slides up for the focus to show: only when its letters are too big for the screen */
 static int menu_offset(const App* app) {
@@ -1437,7 +1434,7 @@ static void touch(App* app, float x, float y) {
     /* a drag up or down moves the focus by the rows it went, when the menu's letters make it scroll */
     if (SDL_fabsf(dy) > 0.05f && SDL_fabsf(dy) > 2 * SDL_fabsf(dx) && app->menu.view != GUI_LOAD_GAMES &&
         !app->menu.running && !app->finished && menu_row_in_full(app, GUI_EXIT) > menu_last_row(app)) {
-        int steps = (int)(SDL_fabsf(dy) * (float)app->rows) / menu_spacing(app);
+        int steps = (int)(SDL_fabsf(dy) * (float)app->rows);
         while (steps-- > 0) menu_key(app, dy < 0 ? GUI_DOWN : GUI_UP);
         return;
     }

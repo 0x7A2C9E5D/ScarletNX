@@ -853,7 +853,8 @@ int main(int argc, char** argv) {
         SDL_SyncWindow(app.window);
         render(&app);
         assert(app.scale == 2 && app.rows == sizes[i][2] && app.cols == sizes[i][3]);
-        app.menu.selected = app.rows == 16 ? GUI_GDBSTUB : GUI_SWITCH; /* 16 rows: the menu slides to its focus */
+        assert(menu_row(&app, GUI_LINUX) == menu_row(&app, GUI_SWITCH) + 1); /* no blank rows between the items */
+        app.menu.selected = app.rows == 16 ? GUI_GDBSTUB : GUI_SWITCH;       /* 16 rows: the menu slides to its focus */
         render(&app);
         mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), false);
         assert(app.menu.selected == GUI_GDBSTUB && !app.menu.gdbstub);
