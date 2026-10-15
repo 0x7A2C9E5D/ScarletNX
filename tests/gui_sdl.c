@@ -19,8 +19,8 @@ static void mouse(App* app, int col, int row, bool click) {
     layout(app);
     SDL_Event e = {0};
     float x, y;
-    assert(SDL_RenderCoordinatesToWindow(app->renderer, (col + 0.5f) * 8 * app->scale,
-                                        (row + 0.5f) * 16 * app->scale, &x, &y));
+    assert(SDL_RenderCoordinatesToWindow(app->renderer, (col + 0.5f) * 8 * app->scale, (row + 0.5f) * 16 * app->scale,
+                                         &x, &y));
     if (click) {
         e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
         e.button.button = SDL_BUTTON_LEFT;
@@ -43,13 +43,13 @@ static void swipe(App* app, int col, int row, int to_col, int to_row) {
     e.tfinger.fingerID = 7;
     e.type = SDL_EVENT_FINGER_DOWN;
     assert(SDL_RenderCoordinatesToWindow(app->renderer, (col + 0.5f) * 8 * app->scale, (row + 0.5f) * 16 * app->scale,
-                                        &x, &y));
+                                         &x, &y));
     e.tfinger.x = x / (float)w;
     e.tfinger.y = y / (float)h;
     event(app, &e);
     e.type = SDL_EVENT_FINGER_UP;
     assert(SDL_RenderCoordinatesToWindow(app->renderer, (to_col + 0.5f) * 8 * app->scale,
-                                        (to_row + 0.5f) * 16 * app->scale, &x, &y));
+                                         (to_row + 0.5f) * 16 * app->scale, &x, &y));
     e.tfinger.x = x / (float)w;
     e.tfinger.y = y / (float)h;
     event(app, &e);
@@ -71,8 +71,8 @@ static void colored_text_on(App* app, int col, int row, const char* prompt, SDL_
         for (int y = 0; y < 16; ++y)
             for (int x = 0; x < 8; ++x) {
                 Uint8 r, g, b, a;
-                assert(SDL_ReadSurfacePixel(image, ((i + col) * 8 + x) * app->scale, (row * 16 + y) * app->scale, &r, &g,
-                                            &b, &a));
+                assert(SDL_ReadSurfacePixel(image, ((i + col) * 8 + x) * app->scale, (row * 16 + y) * app->scale, &r,
+                                            &g, &b, &a));
                 bool ink = (gui_vga_font[(unsigned char)prompt[i] * 16 + y] & (0x80 >> x)) != 0;
                 SDL_Color want = ink ? color : back;
                 assert(r == want.r && g == want.g && b == want.b);
@@ -344,8 +344,10 @@ int main(int argc, char** argv) {
     render(&app);
     colored_text(&app, menu_row(&app, GUI_GCCJIT), "- [OFF] Enable libgccjit", yellow);
     colored_text(&app, menu_row(&app, GUI_FULLSCREEN), "- [ON] Fullscreen", pink);
-    colored_text(&app, app.rows - 4, SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
-                                                      : "Program was not compiled with libgccjit", normal);
+    colored_text(&app, app.rows - 4,
+                 SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
+                                    : "Program was not compiled with libgccjit",
+                 normal);
     mouse(&app, 2, menu_row(&app, GUI_GCCJIT), true);
     assert(app.menu.gccjit == !!SNX_GUI_HAS_GCCJIT);
     render(&app);

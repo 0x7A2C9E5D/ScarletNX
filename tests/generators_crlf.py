@@ -10,8 +10,14 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-TEXT = ['scripts/build-controls.py', 'scripts/build-ui-shaders.py', 'src/nx/runtime/platform/controls_atlas.h',
-        'src/nx/gpu/vk/ui_spv.h', 'src/nx/gpu/vk/shaders/ui.vert', 'src/nx/gpu/vk/shaders/ui.frag']
+TEXT = [
+    'scripts/build-controls.py',
+    'scripts/build-ui-shaders.py',
+    'src/nx/runtime/platform/controls_atlas.h',
+    'src/nx/gpu/vk/ui_spv.h',
+    'src/nx/gpu/vk/shaders/ui.vert',
+    'src/nx/gpu/vk/shaders/ui.frag',
+]
 
 
 def main():

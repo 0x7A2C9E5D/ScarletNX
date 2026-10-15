@@ -8,7 +8,7 @@ void gui_steps_reset(GuiSteps* steps) { memset(steps, 0, sizeof *steps); }
 
 static GuiStep* current(GuiSteps* steps) { return steps->count ? &steps->step[steps->count - 1] : NULL; }
 static void begin(GuiSteps* steps, const char* label, const char* detail, size_t detail_length, uint64_t now) {
-    GuiStep * step;
+    GuiStep* step;
     GuiStep* last = current(steps);
     if (last && last->state == GUI_STEP_ACTIVE) last->state = GUI_STEP_DONE;
     if (steps->count == GUI_STEPS_MAX)
@@ -24,7 +24,7 @@ static void begin(GuiSteps* steps, const char* label, const char* detail, size_t
     step->serial = ++steps->serial;
 }
 static void note(GuiSteps* steps, const char* s, uint64_t now) {
-    GuiNote * n;
+    GuiNote* n;
     while (*s == ' ' || *s == '\t') ++s;
     if (!*s || !steps->count) return;
     if (steps->notes == GUI_NOTES_MAX)
@@ -88,7 +88,7 @@ void gui_steps_feed(GuiSteps* steps, const char* data, size_t size, uint64_t now
     }
 }
 void gui_steps_finish(GuiSteps* steps, int ok) {
-    GuiStep * last;
+    GuiStep* last;
     if (steps->length) gui_steps_feed(steps, "\n", 1, current(steps) ? current(steps)->shown_ms : 0);
     last = current(steps);
     if (last && last->state == GUI_STEP_ACTIVE)

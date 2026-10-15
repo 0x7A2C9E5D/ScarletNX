@@ -28,7 +28,14 @@ static void usage(void) {
          "  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game\n"
          "  --repo / --build-dir   Override this build's checkout / build directory\n"
-         "                         (without its checkout: the current directory)");
+         "                         (without its checkout: the user's data folder,\n"
+#ifdef _WIN32
+         "                         %APPDATA%\\scarletnx)");
+#elif defined(__APPLE__)
+         "                         ~/Library/Application Support/scarletnx)");
+#else
+         "                         ~/.local/share/scarletnx)");
+#endif
 #ifndef _WIN32
     puts("  -S                     Enable the native GDB stub on localhost:1234\n"
          "  -s                     Enable the stub and stop at startup\n"
@@ -211,15 +218,11 @@ int snx_driver(int argc, char** argv) {
     SnxPaths paths;
     const char *repo = SNX_SOURCE_DIR, *build = SNX_BUILD_DIR, *input = NULL, *backend = NULL, *touch = NULL;
     const char* controls = NULL;
-    char *r = NULL, *b = NULL, *exe = NULL, **rest, *checkout;
+    char *r = NULL, *b = NULL, *exe = NULL, **rest, *checkout, *data = NULL;
     unsigned flags = 0;
     int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, backend_args = 0;
+    int repo_given = 0;
     if (argc <= 1) return -1;
-    /* An installed build (the AppImage, the Windows zip) runs without the checkout it was built from: work/ and games/
-       go in the current directory then */
-    checkout = snx_path_join(repo, "CMakeLists.txt");
-    if (!snx_is_file(checkout)) repo = ".";
-    free(checkout);
     rest = (char**)snx_alloc((size_t)(argc + 1) * sizeof(*rest));
     for (i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--")) {
@@ -233,9 +236,10 @@ int snx_driver(int argc, char** argv) {
                 result = snx_error("%s requires a directory", argv[i - 1]);
                 goto done;
             }
-            if (is_repo)
+            if (is_repo) {
                 repo = argv[i];
-            else
+                repo_given = 1;
+            } else
                 build = argv[i];
             continue;
         }
@@ -318,6 +322,23 @@ int snx_driver(int argc, char** argv) {
     if (!automatic)
         for (i = separator; i < argc; ++i) rest[n++] = argv[i];
     rest[n] = NULL;
+    /* An installed build (the AppImage, the Windows zip) runs without the checkout it was built from: work/, games/ and
+       prod.keys are in the user's data folder then, unless --repo names a folder (the Android app does). Not the
+       current folder: the GUI, a desktop entry or Explorer start the driver wherever they happen to be, often
+       somewhere read-only (/, the AppImage's mount, Program Files) */
+    if (!repo_given) {
+        checkout = snx_path_join(repo, "CMakeLists.txt");
+        if (!snx_is_file(checkout)) {
+            data = snx_user_data_dir();
+            if (data && snx_mkdirs(data)) {
+                free(checkout);
+                result = snx_error("cannot create the data folder %s", data);
+                goto done;
+            }
+            repo = data ? data : ".";
+        }
+        free(checkout);
+    }
     snx_tool_console();
     r = snx_absolute(repo);
     b = snx_absolute(build);
@@ -339,5 +360,6 @@ done:
     free(r);
     free(b);
     free(exe);
+    free(data);
     return result;
 }

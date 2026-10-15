@@ -6,8 +6,8 @@
 #define SNX_HID_TOUCH_H
 #include "cpu/aarch64/cpu.h"
 
-#define SNX_HID_TOUCHES 16        /* fingers the touch screen tracks */
-#define SNX_HID_TOUCH_WIDTH 1280  /* its size, whatever the screen the game is shown on */
+#define SNX_HID_TOUCHES      16   /* fingers the touch screen tracks */
+#define SNX_HID_TOUCH_WIDTH  1280 /* its size, whatever the screen the game is shown on */
 #define SNX_HID_TOUCH_HEIGHT 720
 
 /* the fingers on the screen now, each in its slot for as long as it stays down */

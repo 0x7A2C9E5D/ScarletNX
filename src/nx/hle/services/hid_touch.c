@@ -4,8 +4,8 @@
 #include "hle/services/hid_layout.h"
 #include <string.h>
 
-#define SNX_HID_TOUCH_STARTED 1u
-#define SNX_HID_TOUCH_ENDED 2u
+#define SNX_HID_TOUCH_STARTED  1u
+#define SNX_HID_TOUCH_ENDED    2u
 #define SNX_HID_TOUCH_DIAMETER 90 /* a finger's, in the screen's pixels, as Eden reports it */
 
 void hid_touch_sample(HidFingers* f, const TouchState* seen, u64 sampling, u8* out) {

@@ -29,7 +29,7 @@ int main(void) {
     char* second;
     char* dir;
     char longer[200];
-    const GuiTheme * b;
+    const GuiTheme* b;
     GuiTheme theme;
     size_t i;
     const GuiTheme *def = gui_theme_builtin("default"), *yorha = gui_theme_builtin("yorha");

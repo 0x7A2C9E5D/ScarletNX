@@ -795,9 +795,7 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
     out.data = NULL;
     rc = 0;
 done:
-    for (i = 0; l.objs && i < count; ++i) {
-        free(l.objs[i].address);
-    }
+    for (i = 0; l.objs && i < count; ++i) { free(l.objs[i].address); }
     free(l.objs);
     free(export_address);
     snx_link_names_free(&l.globals);

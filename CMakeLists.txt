@@ -66,8 +66,9 @@ option(SNX_BUILD_GUI "Build the keyboard-driven SDL3 launcher" ${snx_gui_default
 if(SNX_BUILD_GUI AND (SNX_TOOLS_ONLY OR SNX_HACTOOL_ONLY))
     message(FATAL_ERROR "SNX_BUILD_GUI requires a runtime build, not a tools-only build")
 endif()
+# Before the sources: the C90 driver of a tools-only build links LZ4 too
+include(cmake/dependencies.cmake)
 if(SNX_HACTOOL_ONLY)
-    include(cmake/dependencies.cmake)
     return()
 endif()
 add_subdirectory(src/common)
@@ -89,9 +90,6 @@ if(SNX_TOOLS_ONLY AND SNX_BUILD_NX)
 endif()
 if(SNX_BUILD_GNUABI)
     add_subdirectory(src/gnuabi)
-endif()
-if(SNX_BUILD_NX OR SNX_BUILD_GUI)
-    include(cmake/dependencies.cmake)
 endif()
 if(SNX_BUILD_GUI)
     add_subdirectory(src/gui)
@@ -150,13 +148,15 @@ install(FILES "${Vulkan-Headers_SOURCE_DIR}/LICENSE.md" DESTINATION ${licenses}/
 install(DIRECTORY "${Vulkan-Headers_SOURCE_DIR}/LICENSES" DESTINATION ${licenses}/Vulkan-Headers)
 install(FILES "${volk_SOURCE_DIR}/LICENSE.md" DESTINATION ${licenses}/volk)
 install(FILES "${VulkanMemoryAllocator_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/VulkanMemoryAllocator)
+install(FILES "${OpenSSL_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/OpenSSL)
+# lib/LICENSE is the library's BSD-2-Clause. The top-level LICENSE covers the rest of LZ4 (GPL-2.0-or-later), none
+# of which is built here
+install(FILES "${lz4_SOURCE_DIR}/lib/LICENSE" DESTINATION ${licenses}/lz4)
 if(SNX_SDL3_FROM_SOURCE)
     install(FILES "${SDL3_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/SDL3)
 endif()
 if(TARGET hactool)
     install(FILES "${hactool_SOURCE_DIR}/LICENSE" DESTINATION ${licenses}/hactool)
-    install(FILES "${hactool_SOURCE_DIR}/mbedtls/LICENSE" "${hactool_SOURCE_DIR}/mbedtls/apache-2.0.txt"
-            DESTINATION ${licenses}/hactool/mbedtls)
     # cJSON's license is the comment at the top of its header
     file(READ "${hactool_SOURCE_DIR}/cJSON.h" cjson)
     string(FIND "${cjson}" "*/" cjson_end)

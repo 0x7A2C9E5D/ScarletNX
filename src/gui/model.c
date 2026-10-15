@@ -111,20 +111,14 @@ const char* gui_setting_description(const GuiMenu* menu) {
 #else
             return "Enable fullscreen at startup";
 #endif
-        case GUI_TOUCH:
-            return "The game's touch screen: fingers, the mouse too, or off";
-        case GUI_CONTROLS:
-            return "A pad on the screen; the game's menu edits it";
+        case GUI_TOUCH: return "The game's touch screen: fingers, the mouse too, or off";
+        case GUI_CONTROLS: return "A pad on the screen; the game's menu edits it";
         case GUI_GCCJIT:
-            return SNX_GUI_HAS_GCCJIT
-                ? "libgccjit will be used instead of llvm"
-                : "Program was not compiled with libgccjit";
-        case GUI_GDBSTUB:
-            return "Enables gdbstub on port 1234";
-        case GUI_THEME:
-            return "Built-in themes, then each themes/<name>/theme.ini";
-        case GUI_TEXT:
-            return "Bigger letters scroll the menu; Auto fits the screen";
+            return SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
+                                      : "Program was not compiled with libgccjit";
+        case GUI_GDBSTUB: return "Enables gdbstub on port 1234";
+        case GUI_THEME: return "Built-in themes, then each themes/<name>/theme.ini";
+        case GUI_TEXT: return "Bigger letters scroll the menu; Auto fits the screen";
         case GUI_LOG:
 #ifdef __ANDROID__
             return "Saves the last run's output and game log to /sdcard/ScarletNX/scarletnx.log, then shares it";

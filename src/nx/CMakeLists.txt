@@ -29,12 +29,12 @@ endfunction()
 
 snx_component(core runtime/main.c runtime/loader.c runtime/rtapi.c runtime/clock.c runtime/crash.c runtime/options.c runtime/startup.c runtime/gdbstub.c
               runtime/present.c)
-target_link_libraries(snx_core PRIVATE snx_driver)
+target_link_libraries(snx_core PRIVATE snx_driver snx_lz4)
 snx_component(kernel hle/kernel/kernel.c hle/kernel/thread.c hle/kernel/sync.c hle/svc/svc.c hle/svc/svc_mem.c hle/kernel/debug.c
               memory/mem.c hle/kernel/ipc.c)
 snx_component(hle hle/services/services.c hle/services/audren.c hle/services/audren_dsp.c hle/services/pl.c hle/services/sm.c hle/services/am.c hle/services/set.c hle/services/time.c hle/services/acc.c hle/services/audio.c
               hle/services/misc.c hle/services/ldr.c hle/services/network/bsd.c hle/services/network/dns.c
-              hle/services/network/nifm.c hle/filesystem/fs.c hle/filesystem/fs_tree.c hle/services/hid.c hle/services/hid_touch.c hle/services/vi.c hle/services/nvdrv.c)
+              hle/services/network/nifm.c hle/services/network/ssl.c hle/filesystem/fs.c hle/filesystem/fs_tree.c hle/services/hid.c hle/services/hid_touch.c hle/services/vi.c hle/services/nvdrv.c)
 # the IPC interfaces of the services (docs/IPC.md): their dispatchers are generated, the handlers are in the services'
 # files. A type is defined before the files that use it
 include("${PROJECT_SOURCE_DIR}/cmake/swipc.cmake")
@@ -43,11 +43,12 @@ snx_swipc(snx_hle ROOT "${CMAKE_CURRENT_SOURCE_DIR}" FILES
           hle/services/audio.swipc hle/services/ldr.swipc hle/services/pl.swipc hle/services/time.swipc
           hle/services/misc.swipc hle/services/am.swipc hle/services/hid.swipc
           hle/services/vi.swipc hle/services/nvdrv.swipc hle/services/network/bsd.swipc
-          hle/services/network/dns.swipc hle/services/network/nifm.swipc hle/filesystem/fs.swipc)
+          hle/services/network/dns.swipc hle/services/network/nifm.swipc hle/services/network/ssl.swipc
+          hle/filesystem/fs.swipc)
 snx_component(video gpu/video/host1x.c gpu/video/nvdec.c gpu/video/vic.c)
 target_link_libraries(snx_video PRIVATE FFmpeg::avcodec)
 # hwopus (hle/services/audio.c) decodes Opus with FFmpeg too
-target_link_libraries(snx_hle PRIVATE FFmpeg::avcodec)
+target_link_libraries(snx_hle PRIVATE FFmpeg::avcodec OpenSSL::SSL)
 snx_component(gpu gpu/gpu.c gpu/maxwell/engines.c gpu/maxwell/mme.c gpu/maxwell/compute.c gpu/maxwell/fermi2d.c gpu/maxwell/dma.c gpu/maxwell/maxwell3d.c gpu/renderer.c)
 
 include("${PROJECT_SOURCE_DIR}/cmake/controls_atlas.cmake")

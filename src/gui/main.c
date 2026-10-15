@@ -39,8 +39,8 @@ typedef struct {
     GuiBanner banner;
     GuiSteps steps;
     GuiRecent recent;
-    char* recent_file;          /* where the recent games are kept; NULL keeps none */
-    char* run_log;              /* where a run's output goes as it comes, the last run's; NULL keeps none */
+    char* recent_file; /* where the recent games are kept; NULL keeps none */
+    char* run_log;     /* where a run's output goes as it comes, the last run's; NULL keeps none */
     FILE* run_out;
     int recent_named;           /* the run's own name went to its recent game */
     Uint64 clock;               /* fixed time for tests; 0 is the real clock */
@@ -61,37 +61,47 @@ typedef struct {
     Uint64 splash_until;
     GuiRgb splash_page;
 } App;
-static const char* const items[] = {"Load Switch NSP/XCI/NRO", "Load Linux ARM ELF", "Load 3DS CIA", "Setup device keys",
-                                   "Fullscreen", "Touch", "On-screen controls", "Enable libgccjit", "Enable gdbstub",
-                                   "Theme", "Text size", "Share log", "Exit"};
+static const char* const items[] = {"Load Switch NSP/XCI/NRO",
+                                    "Load Linux ARM ELF",
+                                    "Load 3DS CIA",
+                                    "Setup device keys",
+                                    "Fullscreen",
+                                    "Touch",
+                                    "On-screen controls",
+                                    "Enable libgccjit",
+                                    "Enable gdbstub",
+                                    "Theme",
+                                    "Text size",
+                                    "Share log",
+                                    "Exit"};
 /* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop */
 #ifdef SDL_PLATFORM_ANDROID
 static const char* const load_labels[] = {"-> Select a file", "-> Select file from games/ instead"};
-#define SAY_MENU "Tap: select. Back: go back."
-#define SAY_LOAD "Choose a load option."
-#define SAY_DROP "Tap -> Select a file again to open the file picker. Back: go back."
-#define SAY_GAMES "Tap: open. Swipe across: turn the page. Back: go back."
-#define SAY_KEYS "Setup device keys: tap Pick prod.keys to open the file picker"
-#define SAY_KEYS_HOW "Back: go back."
-#define SAY_KEYS_WAIT "Pick prod.keys"
-#define SAY_DONE "Tap to return to menu"
-#define SAY_ABORT "Tap here to abort and return to menu"
-#define SAY_NO_GAMES "No games in games/: put a game's .nro, .xci or .nsp there."
-#define SAY_COUNT "game(s)"
+#define SAY_MENU       "Tap: select. Back: go back."
+#define SAY_LOAD       "Choose a load option."
+#define SAY_DROP       "Tap -> Select a file again to open the file picker. Back: go back."
+#define SAY_GAMES      "Tap: open. Swipe across: turn the page. Back: go back."
+#define SAY_KEYS       "Setup device keys: tap Pick prod.keys to open the file picker"
+#define SAY_KEYS_HOW   "Back: go back."
+#define SAY_KEYS_WAIT  "Pick prod.keys"
+#define SAY_DONE       "Tap to return to menu"
+#define SAY_ABORT      "Tap here to abort and return to menu"
+#define SAY_NO_GAMES   "No games in games/: put a game's .nro, .xci or .nsp there."
+#define SAY_COUNT      "game(s)"
 #define SAY_LOG_FAILED "The log could not be saved: allow the app access to files."
 #else
 static const char* const load_labels[] = {"-> Select via drag and drop", "-> Select file from games/ instead"};
-#define SAY_MENU "Arrows/mouse: move. Space/Enter/click: select."
-#define SAY_LOAD "Choose a load option. ESC: back."
-#define SAY_DROP "Drop a file now. Ctrl+V: paste a path. ESC: back."
-#define SAY_GAMES "Up/Down: select. Enter/Space: open. Left/Right or PgUp/PgDown: page."
-#define SAY_KEYS "Setup device keys: drag and drop to this window"
-#define SAY_KEYS_HOW "Ctrl+V: paste a path. ESC: back."
-#define SAY_KEYS_WAIT "Drop prod.keys here"
-#define SAY_DONE "Press [ESC] to return to menu"
-#define SAY_ABORT "Press [ESC] to abort and return to menu"
-#define SAY_NO_GAMES "No executables found in games/."
-#define SAY_COUNT "executable(s)"
+#define SAY_MENU       "Arrows/mouse: move. Space/Enter/click: select."
+#define SAY_LOAD       "Choose a load option. ESC: back."
+#define SAY_DROP       "Drop a file now. Ctrl+V: paste a path. ESC: back."
+#define SAY_GAMES      "Up/Down: select. Enter/Space: open. Left/Right or PgUp/PgDown: page."
+#define SAY_KEYS       "Setup device keys: drag and drop to this window"
+#define SAY_KEYS_HOW   "Ctrl+V: paste a path. ESC: back."
+#define SAY_KEYS_WAIT  "Drop prod.keys here"
+#define SAY_DONE       "Press [ESC] to return to menu"
+#define SAY_ABORT      "Press [ESC] to abort and return to menu"
+#define SAY_NO_GAMES   "No executables found in games/."
+#define SAY_COUNT      "executable(s)"
 #define SAY_LOG_FAILED "The log could not be saved in the working folder."
 #endif
 static SDL_Color rgb(GuiRgb c) {
@@ -210,9 +220,9 @@ static void entry(App* app, int x, int y, const char* label, int activated, int 
         text(app, x, y, label, rgb(activated ? app->theme.active : focused ? app->theme.focus : app->theme.ink));
 }
 static GuiScreen screen(const App* app) {
-    if (app->menu.running || app->finished) return app->native || app->banner.seen ? GUI_SCREEN_LOADING
-                                                                                    : GUI_SCREEN_COMPILING;
-    return app->menu.view == GUI_LOAD_GAMES ? GUI_SCREEN_GAMES
+    if (app->menu.running || app->finished)
+        return app->native || app->banner.seen ? GUI_SCREEN_LOADING : GUI_SCREEN_COMPILING;
+    return app->menu.view == GUI_LOAD_GAMES  ? GUI_SCREEN_GAMES
            : app->menu.view == GUI_LOAD_KEYS ? GUI_SCREEN_KEYS
                                              : GUI_SCREEN_MENU;
 }
@@ -266,7 +276,8 @@ static void menu_label(const App* app, int item, char* label, size_t size) {
     if (item == GUI_FULLSCREEN || item == GUI_CONTROLS || item == GUI_GCCJIT || item == GUI_GDBSTUB) {
         bool enabled = item == GUI_FULLSCREEN ? app->menu.fullscreen
                        : item == GUI_CONTROLS ? app->menu.controls
-                       : item == GUI_GCCJIT  ? app->menu.gccjit : app->menu.gdbstub;
+                       : item == GUI_GCCJIT   ? app->menu.gccjit
+                                              : app->menu.gdbstub;
         snprintf(label, size, "%s[%s] %s", app->theme.marker, enabled ? "ON" : "OFF", items[item]);
     } else if (item == GUI_THEME) {
         snprintf(label, size, "%s%s: %s", app->theme.marker, items[item], app->theme.name);
@@ -387,8 +398,7 @@ static void run_name(const App* app, char* out, size_t size) {
         if (*q == '/' || *q == '\\') name = q + 1;
     n = 0;
     dot = from_file ? strrchr(name, '.') : NULL;
-    for (q = name; *q && q != dot && n + 1 < size; ++q)
-        out[n++] = *q >= 'a' && *q <= 'z' ? (char)(*q - 32) : *q;
+    for (q = name; *q && q != dot && n + 1 < size; ++q) out[n++] = *q >= 'a' && *q <= 'z' ? (char)(*q - 32) : *q;
     out[n] = 0;
 }
 /* a run as a loading screen: the title, the name and the ring; the steps typed down the page, their status last;
@@ -422,7 +432,8 @@ static void clip_row(char run[3][112], size_t length[3], int note, int room) {
     size_t total = length[0] + length[1] + length[2];
     if (room < 8 || total <= (size_t)room) return;
     cut = note ? 0 : 1;
-    marker = note ? 3 : 0; other = total - length[cut];
+    marker = note ? 3 : 0;
+    other = total - length[cut];
     left = (size_t)room > other + marker ? (size_t)room - other - marker : 0;
     end = run[cut];
     for (i = 0; i < left; ++i) SDL_StepUTF8(&end, NULL);
@@ -455,7 +466,9 @@ static void render_steps(App* app) {
     area(app, &width, &height);
     if (theme->texture)
         for (y = 3; y < height; y += 4) fill(app, 0, (float)y, (float)width, 1, white, 14);
-    ink = rgb(colors->ink); soft = rgb(colors->soft); failure = rgb(colors->failure);
+    ink = rgb(colors->ink);
+    soft = rgb(colors->soft);
+    failure = rgb(colors->failure);
 
     run_name(app, name, sizeof name);
     col = theme->ring == GUI_RING_LEFT ? 4 : 1;
@@ -471,7 +484,7 @@ static void render_steps(App* app) {
     if (app->finished) text(app, 1, 2, app->message, app->abnormal_exit ? failure : soft);
     for (i = 0; i < app->steps.count; ++i) {
         int n;
-        const GuiNote * notes[GUI_NOTES_MAX];
+        const GuiNote* notes[GUI_NOTES_MAX];
         int k;
         const GuiStep* s = &app->steps.step[i];
         owner[rows] = s;
@@ -561,14 +574,15 @@ static void render_steps(App* app) {
                 SDL_RenderRect(app->renderer, &r);
             }
         }
-        if (percent < 0) snprintf(number, sizeof number, " --%%");
-        else snprintf(number, sizeof number, "%3d%%", percent);
+        if (percent < 0)
+            snprintf(number, sizeof number, " --%%");
+        else
+            snprintf(number, sizeof number, "%3d%%", percent);
         text(app, app->cols - 6, app->rows - 3, number, ink);
         text(app, 1, app->rows - 2, name, ink);
     }
     if (app->finished)
-        prompt(app, app->abnormal_exit ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE, 1, app->rows - 1,
-               SAY_DONE, soft);
+        prompt(app, app->abnormal_exit ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE, 1, app->rows - 1, SAY_DONE, soft);
     else if (app->aborting)
         prompt(app, GUI_PROMPT_ABORTING, 1, app->rows - 1, "Aborting process tree...", rgb(colors->warning));
     else
@@ -633,14 +647,19 @@ static void render(App* app) {
     SDL_Color ink, soft, focus, paper, active, failure;
     const char* title;
     int head, foot, idle;
-    const GuiTheme * theme;
+    const GuiTheme* theme;
     layout(app);
     if (splash_shown(app)) return;
     theme = &app->theme;
     idle = (!app->menu.running && !app->finished) || entering(app);
-    head = theme->head != GUI_STYLE_NONE; foot = theme->footer != GUI_STYLE_NONE;
-    ink = rgb(theme->ink); soft = rgb(theme->soft); focus = rgb(theme->focus); paper = rgb(theme->page);
-    active = rgb(theme->active); failure = rgb(theme->failure);
+    head = theme->head != GUI_STYLE_NONE;
+    foot = theme->footer != GUI_STYLE_NONE;
+    ink = rgb(theme->ink);
+    soft = rgb(theme->soft);
+    focus = rgb(theme->focus);
+    paper = rgb(theme->page);
+    active = rgb(theme->active);
+    failure = rgb(theme->failure);
     SDL_SetRenderDrawColor(app->renderer, theme->page.r, theme->page.g, theme->page.b, 255);
     SDL_RenderClear(app->renderer);
     if (!idle && theme->run == GUI_RUN_STEPS) {
@@ -653,9 +672,9 @@ static void render(App* app) {
         return;
     }
     title = theme->title[idle ? (app->menu.view == GUI_LOAD_GAMES  ? GUI_SCREEN_GAMES
-                                             : app->menu.view == GUI_LOAD_KEYS ? GUI_SCREEN_KEYS
-                                                                               : GUI_SCREEN_MENU)
-                                          : screen(app)];
+                                 : app->menu.view == GUI_LOAD_KEYS ? GUI_SCREEN_KEYS
+                                                                   : GUI_SCREEN_MENU)
+                              : screen(app)];
     if (head && title[0]) {
         if (theme->head == GUI_STYLE_BAR) band(app, 0, 1, theme->ink);
         text(app, 1, 0, title, theme->head == GUI_STYLE_BAR ? paper : ink);
@@ -693,9 +712,7 @@ static void render(App* app) {
     } else if (idle) {
         if (head) {
             text(app, 1, 1, SAY_MENU, ink);
-            text(app, 1, 2,
-                 app->menu.view == GUI_LOAD_DROP ? SAY_DROP : SAY_LOAD,
-                 soft);
+            text(app, 1, 2, app->menu.view == GUI_LOAD_DROP ? SAY_DROP : SAY_LOAD, soft);
         }
         if (app->recent.count && menu_shows(app, recent_row(app, -1)))
             text(app, 1, recent_row(app, -1), "Recent games", soft);
@@ -735,11 +752,12 @@ static void render(App* app) {
             text(app, 1, app->log_top - 2, "Last output (no scrollback):", soft);
     } else if (head) {
         text(app, 1, 1, app->finished ? app->message : items[app->menu.selected],
-             app->abnormal_exit ? failure : app->finished ? focus : active);
+             app->abnormal_exit ? failure
+             : app->finished    ? focus
+                                : active);
         text(app, 1, 2, app->file ? app->file : "", ink);
         if (app->finished)
-            prompt(app, app->abnormal_exit ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE, 1, 3, SAY_DONE,
-                   failure);
+            prompt(app, app->abnormal_exit ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE, 1, 3, SAY_DONE, failure);
         else if (app->aborting)
             prompt(app, GUI_PROMPT_ABORTING, 1, 3, "Aborting process tree...", failure);
         else
@@ -975,8 +993,7 @@ static void launch(App* app, char* absolute, bool prepared) {
     }
     free(app->file);
     app->file = absolute;
-    if (app->recent_file && !gui_recent_add(&app->recent, absolute, app->menu.selected, prepared))
-        recent_changed(app);
+    if (app->recent_file && !gui_recent_add(&app->recent, absolute, app->menu.selected, prepared)) recent_changed(app);
     app->recent_named = 0;
     app->menu.view = GUI_LOAD_NONE;
     app->menu.running = true;
@@ -1127,8 +1144,8 @@ static void share_log(App* app) {
     game = newest_log(app);
     run = log_tail(app->run_log, 1 << 20);
     played = log_tail(game, 4 << 20);
-    text = snx_format("%s\nMessage: %s\n\n== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
-                      app->message, app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
+    text = snx_format("%s\nMessage: %s\n\n== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(), app->message,
+                      app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
     if (!saved || snx_write_file(saved, text, strlen(text)))
         snprintf(app->message, sizeof(app->message), SAY_LOG_FAILED);
@@ -1449,8 +1466,7 @@ static bool initialize(App* app) {
 #else
     flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #endif
-    if (!SDL_CreateWindowAndRenderer(snx_build_info(), 1280, 800, flags, &app->window, &app->renderer))
-        return false;
+    if (!SDL_CreateWindowAndRenderer(snx_build_info(), 1280, 800, flags, &app->window, &app->renderer)) return false;
     SDL_SetWindowMinimumSize(app->window, 800, 480);
     snx_window_icon(app->window);
     SDL_SetRenderVSync(app->renderer, 1);

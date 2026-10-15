@@ -40,9 +40,9 @@ static void set_fullscreen(int on);
 static int g_shot_req;
 static SDL_Gamepad* g_pads[4];
 static int g_audio_ready;
-static int g_hidden;      /* the app is in the background (Android) */
+static int g_hidden;         /* the app is in the background (Android) */
 static SDL_Haptic* g_buzzer; /* the phone's vibrator, for the on-screen controls' taps (Android) */
-static u32 g_generation;  /* the window's surface came back this many times */
+static u32 g_generation;     /* the window's surface came back this many times */
 
 struct PAudio {
     SDL_AudioStream* stream;
