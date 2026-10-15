@@ -3,7 +3,6 @@
 #include "ir.h"
 #include "cpu.h"
 #include <llvm-c/Analysis.h>
-#include <llvm-c/Support.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,15 +22,12 @@ static int has_feature(const char* features, const char* name) {
 }
 
 int snx_ir_init(char* error, size_t error_size) {
-    static const char* const options[] = {"scarletnx", "-enable-machine-outliner=never"};
     char* triple;
     int x86, arm;
     if (LLVMInitializeNativeTarget() || LLVMInitializeNativeAsmPrinter()) {
         snprintf(error, error_size, "LLVM has no code generator for this host");
         return -1;
     }
-    /* AArch64 adds the machine outliner by default: it outlines nothing at O2 but holds a unit's functions in memory */
-    LLVMParseCommandLineOptions(2, options, NULL);
     /* x86-64 and AArch64 hosts: the guest's barriers, acquires, releases and exclusives are fences and seq_cst atomics
        (cpu.h), so its plain accesses need no ordering of their own from the host */
     triple = LLVMGetDefaultTargetTriple();
@@ -92,6 +88,11 @@ SnxIr* snx_ir_new_target(const char* name, char opt, const char* target_triple, 
     features = target_triple ? LLVMCreateMessage("+cx16") : LLVMGetHostCPUFeatures();
     ir->tm =
         LLVMCreateTargetMachine(target, triple, cpu, features, codegen_level(opt), LLVMRelocPIC, LLVMCodeModelDefault);
+#ifdef __ANDROID__
+    /* AArch64's machine outliner holds a unit's functions in memory and outlines nothing at O2: on Android that memory
+       runs the recompile out of mappings */
+    LLVMSetTargetMachineMachineOutliner(ir->tm, 0);
+#endif
     ir->windows = strstr(triple, "windows") != NULL || strstr(triple, "mingw") != NULL;
     ir->features = target_triple ? &generic_features : &snx_ir_host;
     ir->ctx = LLVMContextCreate();
