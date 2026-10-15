@@ -316,14 +316,12 @@ static void menu_label(const App* app, int item, char* label, size_t size) {
 static int entering(const App* app) {
     return app->entering_ms && now_ms(app) < app->entering_ms + app->theme.fade_out_ms;
 }
-/* Text size Auto's scale for a width x height window on a display of the given scale, as long as 16 rows fit */
-static int pick_auto_scale(float display_scale, int width, int height) {
-    int scale = SDL_min(width / 640, height / 400);
-    /* a phone packs its pixels tight: the display's own scale, for text and taps of a size, as far as the menu still
-       fits with five recent games and a submenu (render) */
-    scale = SDL_max(scale, SDL_min((int)(display_scale + 0.5f), height / (16 * (19 + GUI_ITEM_COUNT))));
+/* Text size Auto's scale: twice the display's own (Android's dpi / 160), so a computer at 100% gets 2x and a phone's
+   letters come out as big to the eye, as long as 16 rows fit in a window height pixels high */
+static int pick_auto_scale(float display_scale, int height) {
+    int scale = SDL_max(1, (int)(2.0f * display_scale));
     while (scale > 1 && height / (16 * scale) < 16) --scale;
-    return SDL_max(scale, 1);
+    return scale;
 }
 static void layout(App* app) {
     int run;
@@ -332,7 +330,7 @@ static void layout(App* app) {
     area(app, &width, &height);
     /* Auto's letters are the opening window's; the window then keeps room for 16 rows of them */
     if (!app->auto_scale && width > 0 && height > 0) {
-        app->auto_scale = pick_auto_scale(SDL_GetWindowDisplayScale(app->window), width, height);
+        app->auto_scale = pick_auto_scale(SDL_GetWindowDisplayScale(app->window), height);
         SDL_SetWindowMinimumSize(
             app->window, 800,
             SDL_max(480, (int)SDL_ceilf(256.0f * (float)app->auto_scale / SDL_GetWindowPixelDensity(app->window))));
