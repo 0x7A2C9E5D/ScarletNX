@@ -80,10 +80,15 @@ u32 ipc_user_buffer(u64 a, u64 size) {
     if (a & 0xFFF) return R_BADADDR;
     if (!size || (size & 0xFFF)) return R_BADSIZE;
     if (a + size < a || a + size > AS_SIZE) return R_BADMEMSTATE;
+    MemBlock first;
+    mem_query(a, &first);
+    if (!(first.state & (1u << 21)) || (first.perm & 7) != PERM_RW) return R_BADMEMSTATE;
+    /* and the whole range alike, as the kernel's CheckMemoryState over it requires: one state and permission, no
+       attribute */
     for (u64 end = a + size; a < end;) {
         MemBlock b;
         mem_query(a, &b);
-        if (!(b.state & (1u << 21)) || (b.perm & 7) != PERM_RW || b.attr || b.addr + b.size <= a) return R_BADMEMSTATE;
+        if (b.state != first.state || b.perm != first.perm || b.attr || b.addr + b.size <= a) return R_BADMEMSTATE;
         a = b.addr + b.size;
     }
     return 0;
@@ -234,10 +239,12 @@ static void parse(IpcCtx* c) {
         raw_end = 8 + (special ? 4 + ((sh & 1) ? 8 : 0) + 4 * (((sh >> 1) & 15) + ((sh >> 5) & 15)) : 0) + 8 * nx +
                   12 * (na + nb + nw) + 4 * ndata;
         all = (recv_off ? recv_off * 4 : raw_end) + 8 * nc;
-        if (all > c->msg_size || (recv_off && recv_off * 4 < raw_end))
+        if (all > c->msg_size)
             c->kernel_rc = R_BADCOMBO;
         else if (raw_end > 0x100)
             c->kernel_rc = R_MSGTOOLARGE;
+        else if (recv_off && recv_off * 4 < raw_end) /* the console's last one: at the reply */
+            c->kernel_rc = R_BADCOMBO;
         if (c->kernel_rc) return;
     }
     if (special) {

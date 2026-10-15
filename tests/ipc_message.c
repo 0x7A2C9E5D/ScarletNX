@@ -537,18 +537,23 @@ static void set_recv_list_offset(u8* base, u32 word) {
 static void user_buffers(void) {
     static const MemBlock blocks[] = {
         {0x10000, 0x4000, MS_NORMAL, PERM_RW, 0, 0, 0}, /* heap */
-        {0x14000, 0x1000, MS_CODE, PERM_RX, 0, 0, 0},   /* code: no user buffers */
+        {0x14000, 0x1000, MS_CODE, PERM_RW, 0, 0, 0},   /* code, mapped RW as the loader first does: no user buffers */
         {0x15000, 0x1000, MS_NORMAL, PERM_R, 0, 0, 0},  /* read-only */
         {0x16000, 0x1000, MS_NORMAL, PERM_RW, 1, 0, 0}, /* locked */
+        {0x17000, 0x1000, MS_NORMAL, PERM_RW, 0, 0, 0}, /* heap, then module data: both take user buffers, not as one */
+        {0x18000, 0x1000, MS_CODEDATA, PERM_RW, 0, 0, 0},
     };
     memcpy(test_blocks, blocks, sizeof blocks);
-    test_nblocks = 4;
+    test_nblocks = 6;
     CHECK(ipc_user_buffer(0x10000, 0x1000) == 0);
     CHECK(ipc_user_buffer(0x10000, 0x4000) == 0);
     CHECK(ipc_user_buffer(0x10800, 0x1000) == 0xCC01); /* InvalidAddress */
     CHECK(ipc_user_buffer(0x10000, 0) == 0xCA01);      /* InvalidSize */
     CHECK(ipc_user_buffer(0x10000, 0x800) == 0xCA01);
     CHECK(ipc_user_buffer(0x13000, 0x2000) == 0xD401); /* into code: InvalidCurrentMemory */
+    CHECK(ipc_user_buffer(0x14000, 0x1000) == 0xD401); /* code, read-write: its state takes no user buffer */
+    CHECK(ipc_user_buffer(0x17000, 0x1000) == 0 && ipc_user_buffer(0x18000, 0x1000) == 0);
+    CHECK(ipc_user_buffer(0x17000, 0x2000) == 0xD401); /* two states in one range */
     CHECK(ipc_user_buffer(0x15000, 0x1000) == 0xD401);
     CHECK(ipc_user_buffer(0x16000, 0x1000) == 0xD401);
     CHECK(ipc_user_buffer(0x20000, 0x1000) == 0xD401); /* free */
