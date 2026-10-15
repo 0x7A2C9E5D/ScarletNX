@@ -203,6 +203,7 @@ chmod +x ScarletNX-x86_64.AppImage
 SDL_VIDEO_DRIVER=x11 games/Game
 ```
 
+On an ARM64 machine the image is `ScarletNX-aarch64.AppImage`.
 `--game` selects `Game_code.so`/`Game_data/`; or name the image `games/Game.AppImage` to load adjacent files.
 The AppImage also prepares dumps: `./ScarletNX-x86_64.AppImage Game.nsp`. Without the checkout it was built from
 (the AppImage, the Windows zip), the driver works in the user's data folder, wherever it was started from:

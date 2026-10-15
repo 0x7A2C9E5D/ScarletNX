@@ -22,10 +22,20 @@ permissions:
 # with them.
 jobs:
   linux:
-    name: Linux
-    runs-on: ubuntu-26.04
+    name: Linux (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    container: archlinux:latest
+    container: ${{ matrix.container }}
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-26.04
+            container: archlinux:latest
+          # Arch's image is x86-64 only; pkgforge's (the AppImage's) is Arch Linux ARM on AArch64, with the same LLVM
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            container: ghcr.io/pkgforge-dev/archlinux:latest
     steps:
       # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
       - name: Name the commit
@@ -42,15 +52,15 @@ jobs:
       - uses: actions/cache@v5
         with:
           path: .cache/cpm
-          key: cpm-${{ github.job }}-${{ hashFiles('cmake/dependencies.cmake') }}
+          key: cpm-${{ github.job }}-${{ matrix.arch }}-${{ hashFiles('cmake/dependencies.cmake') }}
       # ccache under every compile, FFmpeg's and OpenSSL's too, from the newest cache of this job on this branch, else
       # on main. Each cmake gets it as its launcher: from the environment CMake would run its configure checks through
       # it, and they only miss
       - uses: actions/cache/restore@v5
         with:
           path: .cache/ccache
-          key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ccache-${{ github.job }}-
+          key: ccache-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-${{ github.job }}-${{ matrix.arch }}-
       - name: Set up ccache
         shell: bash
         run: |
@@ -88,7 +98,7 @@ jobs:
       - uses: actions/cache/save@v5
         with:
           path: .cache/ccache
-          key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ccache-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Test headless Vulkan and NX runtime
         run: ctest --test-dir build/headless -R '^(vulkan_headless|nx_runtime_homebrew)$' --output-on-failure
       # The game modules compile src/common/cpu/aarch64/cpu_helpers.c, which no CMake target does
@@ -102,13 +112,20 @@ jobs:
           python tools/run_game.py --help > /dev/null
       - uses: actions/upload-artifact@v7
         with:
-          name: scarletnx-linux-${{ steps.commit.outputs.short }}
+          name: scarletnx-linux-${{ matrix.arch }}-${{ steps.commit.outputs.short }}
           path: stage
 
   appimage:
-    name: Linux AppImage
-    runs-on: ubuntu-26.04
+    name: Linux AppImage (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-26.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
     # pkgforge's Arch image and tools (https://github.com/pkgforge-dev/Anylinux-AppImages), see scripts/make-appimage.sh
     container: ghcr.io/pkgforge-dev/archlinux:latest
     steps:
@@ -129,13 +146,13 @@ jobs:
       - uses: actions/cache@v5
         with:
           path: .cache/cpm
-          key: cpm-${{ github.job }}-${{ hashFiles('cmake/dependencies.cmake') }}
+          key: cpm-${{ github.job }}-${{ matrix.arch }}-${{ hashFiles('cmake/dependencies.cmake') }}
       # ccache, set up as in the linux job
       - uses: actions/cache/restore@v5
         with:
           path: .cache/ccache
-          key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ccache-${{ github.job }}-
+          key: ccache-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-${{ github.job }}-${{ matrix.arch }}-
       - name: Set up ccache
         shell: bash
         run: |
@@ -182,14 +199,14 @@ jobs:
       - uses: actions/cache/save@v5
         with:
           path: .cache/ccache
-          key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ccache-${{ github.job }}-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
       # The script names the AppImage after `git describe`
       - name: Make the AppImage
         run: scripts/make-appimage.sh
       # Only what the script made: dist/ also holds the tracked desktop entry and icon
       - uses: actions/upload-artifact@v7
         with:
-          name: AppImage-x86_64-${{ steps.commit.outputs.short }}
+          name: AppImage-${{ matrix.arch }}-${{ steps.commit.outputs.short }}
           path: |
             dist/*.AppImage*
             dist/appinfo
@@ -481,10 +498,17 @@ jobs:
   # The packages as a user gets them, each on a runner of its own (scripts/check-package.sh): in the build jobs the
   # checkout sits where the package looks for one, and stands in for what an installed copy lacks
   appimage-check:
-    name: Linux AppImage, as installed
+    name: Linux AppImage (${{ matrix.arch }}), as installed
     needs: appimage
-    runs-on: ubuntu-26.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-26.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
     steps:
       # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
       - name: Name the commit
@@ -496,7 +520,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: AppImage-x86_64-${{ steps.commit.outputs.short }}
+          name: AppImage-${{ matrix.arch }}-${{ steps.commit.outputs.short }}
           path: dist
       # Artifacts drop the executable bit
       - name: Run the AppImage as a user would
@@ -531,8 +555,8 @@ jobs:
       - name: Run the zip's scarletnx.exe as a user would
         run: bash source/scripts/check-package.sh package/bin/scarletnx.exe
 
-  # Every push to main that builds everywhere replaces the rolling "nightly" prerelease with Linux, Windows and Android
-  # builds.
+  # Every push to main that builds everywhere replaces the rolling "nightly" prerelease with Linux (x86-64 and
+  # AArch64), Windows and Android builds.
   # A newer push cancels a release still running, so an older commit never publishes last
   release:
     name: Nightly release
@@ -553,10 +577,12 @@ jobs:
         env:
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+      # Both AppImages beside one appinfo (the same name and version), where the action takes *.AppImage*
       - uses: actions/download-artifact@v8
         with:
-          name: AppImage-x86_64-${{ steps.commit.outputs.short }}
-      - name: Release the AppImage
+          pattern: AppImage-*-${{ steps.commit.outputs.short }}
+          merge-multiple: true
+      - name: Release the AppImages
         uses: pkgforge-dev/make-nightly-appimage-release@17cbe90fc0796286e424619a54a82a3a880efe4c # v1.1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -592,7 +618,7 @@ jobs:
         run: |
           gh release edit nightly --repo "$GITHUB_REPOSITORY" --notes "Built from commit $GITHUB_SHA, whose source is at $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$GITHUB_SHA.
 
-          The third-party libraries built into the runtime are fetched from the release archives that cmake/dependencies.cmake lists at that commit, each checked against the SHA-256 written next to it. The AppImage also bundles libraries from Arch Linux packages. Its licenses are in share/licenses, with the package list in share/licenses/bundled-packages.txt.
+          The third-party libraries built into the runtime are fetched from the release archives that cmake/dependencies.cmake lists at that commit, each checked against the SHA-256 written next to it. The AppImages, ScarletNX-x86_64.AppImage and ScarletNX-aarch64.AppImage, also bundle libraries from Arch Linux packages (Arch Linux ARM's for aarch64). Their licenses are in share/licenses, with the package list in share/licenses/bundled-packages.txt.
 
           ScarletNX-windows-x86_64.zip contains the Windows build, its required runtime DLLs and licenses under share/licenses. The MSYS2 build environment's package versions are recorded in share/licenses/msys2/build-packages.txt.
 
