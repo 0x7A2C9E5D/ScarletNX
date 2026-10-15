@@ -269,6 +269,7 @@ void video_init(const char* title) {
     g_win = SDL_CreateWindow(header, w, h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     if (!g_win) fatal("SDL could not open a Vulkan window: %s", SDL_GetError());
     snx_window_icon(g_win);
+    overlay_set_display_scale(SDL_GetWindowDisplayScale(g_win));
     controls_atlas();
     vpad_set_store(ini_set);
     buzzer_open();
@@ -588,6 +589,9 @@ void video_poll(void) {
                 wsafe_set();
                 break;
             case SDL_EVENT_WINDOW_SAFE_AREA_CHANGED: wsafe_set(); break;
+            case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+                overlay_set_display_scale(SDL_GetWindowDisplayScale(g_win));
+                break;
             case SDL_EVENT_FINGER_DOWN:
             case SDL_EVENT_FINGER_MOTION:
             case SDL_EVENT_FINGER_UP:

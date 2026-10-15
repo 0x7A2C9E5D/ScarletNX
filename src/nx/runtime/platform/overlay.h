@@ -14,6 +14,8 @@ enum { OVERLAY_NONE, OVERLAY_CLOSE, OVERLAY_EXIT, OVERLAY_EDIT };
 /* whether it is open, for the renderer's thread too */
 int overlay_shown(void);
 void overlay_toggle(void);
+/* the display's own scale (SDL's: dpi / 160 on a phone), which the panel's letters follow; 1 until told */
+void overlay_set_display_scale(float scale);
 /* where the panel goes on a picture of sw x sh pixels: its corner and the whole number it is scaled by */
 void overlay_place(int sw, int sh, int* x, int* y, int* scale);
 int overlay_select(void);    /* the focused item's action: a page, a setting changed, or an OVERLAY_ for the caller */

@@ -70,6 +70,17 @@ int main(void) {
     assert(s == 2 && px == (SW - 640) / 2 && py == (SH - 6 * 32) / 2);
     overlay_place(500, 100, &x, &y, &sc);
     assert(sc == 1 && x == 90 && y == 2);
+    /* a phone's display scale: the Poco F8 (408 dpi, 2510x1156) and the Pixel 9 (420 dpi) at 3x, where half the
+       picture gave 2x; a 4K picture at 100% keeps the 4x half of it gives */
+    overlay_set_display_scale(408.0f / 160);
+    overlay_place(2510, 1156, &x, &y, &sc);
+    assert(sc == 3);
+    overlay_set_display_scale(420.0f / 160);
+    overlay_place(SW, SH, &x, &y, &sc);
+    assert(sc == 3);
+    overlay_set_display_scale(1.0f);
+    overlay_place(3840, 2160, &x, &y, &sc);
+    assert(sc == 4);
 
     /* the first page: the title on a band of ink, the items under it, the focused one on a band */
     draw();
