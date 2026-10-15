@@ -13,7 +13,8 @@
      (ClientAppletResourceUserId) one whose value is kept. Both make the client send its process id
    - a buffer's attributes give its descriptor list (A, B, X, C, or A and X / B and C for AutoSelect). Each list is
      numbered in declaration order, and an AutoSelect buffer takes the next index of both of its lists
-   - handles in and out in declaration order. Out objects become move handles ahead of the declared ones (ipc.c)
+   - copy handles in, copy and move handles out, each in declaration order. Out objects become move handles ahead of
+     the declared ones (ipc.c)
    It is strict C90 and depends on nothing, so a cross build can build it for the machine it runs on.
 
    Usage: swipc --root DIR --out DIR FILE.swipc...
@@ -106,7 +107,7 @@ typedef struct {
     int arg0, nargs;
     int stub, unsorted;
     unsigned long in_size, out_size, tipc_in_size;
-    int pid, na, nb, nx, ncopy, nmove, in_objs; /* what the request has to send: sf refuses any other (ipc_counts) */
+    int pid, na, nb, nx, ncopy, in_objs; /* what the request has to send: sf refuses any other (ipc_counts) */
     int line;
 } Cmd;
 typedef struct {
@@ -545,7 +546,7 @@ static unsigned long place_raw(const Cmd* c, int out, int tipc) {
     return off;
 }
 static void check_cmd(Cmd* c) {
-    int i, na = 0, nb = 0, nx = 0, nc = 0, ncopy = 0, nmove = 0, pid = 0, in_objs = 0;
+    int i, na = 0, nb = 0, nx = 0, nc = 0, ncopy = 0, pid = 0, in_objs = 0;
     int out_copy = 0, out_move = 0, out_objs = 0, nc_sized = 0; /* nc_sized: C buffers whose size the request sends */
     for (i = c->arg0; i < c->arg0 + c->nargs; i++) {
         Arg* a = &args[i];
@@ -590,18 +591,21 @@ static void check_cmd(Cmd* c) {
                     else
                         out_copy++;
                 } else {
-                    a->index = types[t].move ? nmove++ : ncopy++;
+                    /* the kernel refuses a request with move handles before any server sees it (Mesosphere's
+                       ReceiveMessage): a client sends copy handles only */
+                    if (types[t].move) fail_at(c->line, "%s: a client can't send a move handle", c->name);
+                    a->index = ncopy++;
                 }
                 break;
             default: break;
         }
     }
     if (na > 8 || nb > 8 || nx > 8 || nc > 8) fail_at(c->line, "%s: more than 8 buffers of one kind", c->name);
-    if (ncopy > 8 || nmove > 8 || in_objs > 8 || out_copy > 8 || out_move > 8 || out_objs > 8)
+    if (ncopy > 8 || in_objs > 8 || out_copy > 8 || out_move > 8 || out_objs > 8)
         fail_at(c->line, "%s: more than 8 handles or objects of one kind", c->name);
     /* on a plain session the out objects are move handles, and the header counts them in 4 bits */
     if (out_move + out_objs > 15) fail_at(c->line, "%s: more than 15 move handles and objects out", c->name);
-    c->pid = pid, c->na = na, c->nb = nb, c->nx = nx, c->ncopy = ncopy, c->nmove = nmove, c->in_objs = in_objs;
+    c->pid = pid, c->na = na, c->nb = nb, c->nx = nx, c->ncopy = ncopy, c->in_objs = in_objs;
     c->in_size = place_raw(c, 0, 0);
     c->tipc_in_size = place_raw(c, 0, 1);
     c->out_size = place_raw(c, 1, 0);
@@ -611,7 +615,7 @@ static void check_cmd(Cmd* c) {
            special header (the pid and the handles), the X, A and B descriptors, then the data words: 16 bytes for the
            alignment, the domain header with its object ids, the CmifInHeader and the raw data, aligned to 2, the u16
            sizes of the C buffers that aren't FixedSize, all in words; then the C descriptors */
-        unsigned long handles = (unsigned long)(ncopy + nmove), descs = 8ul * nx + 12ul * (na + nb), data, req;
+        unsigned long handles = (unsigned long)ncopy, descs = 8ul * nx + 12ul * (na + nb), data, req;
         data = (16 + 16 + 4ul * in_objs + 16 + c->in_size + 1) / 2 * 2 + 2ul * nc_sized;
         req = 8 + (pid || handles ? 4 + (pid ? 8 : 0) + 4 * handles : 0) + descs + (data + 3) / 4 * 4 + 8ul * nc;
         if (req > MAX_MSG)
@@ -1019,11 +1023,9 @@ static void emit_unpacker(const Iface* f, const Cmd* c) {
                          types[t].count);
                 break;
             case TK_OBJECT: emit("    a_%s = ipc_in_obj(c, %d);\n", a->name, a->index); break;
-            case TK_HANDLE: {
-                const char* kind = types[t].move ? "move" : "copy";
-                emit("    a_%s = %d < c->n%s ? c->%s_h[%d] : 0;\n", a->name, a->index, kind, kind, a->index);
+            case TK_HANDLE: /* a copy handle: check_cmd refuses a move handle in */
+                emit("    a_%s = %d < c->ncopy ? c->copy_h[%d] : 0;\n", a->name, a->index, a->index);
                 break;
-            }
             default:
                 if (a->tipc_offset != a->offset)
                     emit("    ipc_in(c, c->tipc ? 0x%lx : 0x%lx, %sa_%s, sizeof a_%s);\n", a->tipc_offset, a->offset,
@@ -1092,9 +1094,8 @@ static void write_inc(int fi, const char* out_dir) {
                objects can't get them: NotSupported */
             emit("        case %lu:\n            if (!ipc_objects(c, %d)) return ipc_bad_objects(self, c);\n", c->id,
                  c->in_objs);
-            emit(
-                "            if (!ipc_counts(c, %d, %d, %d, %d, %d, %d, 0x%lx, 0x%lx)) return ipc_bad_request(self, c);\n",
-                c->pid, c->na, c->nb, c->nx, c->ncopy, c->nmove, c->in_size, c->tipc_in_size);
+            emit("            if (!ipc_counts(c, %d, %d, %d, %d, %d, 0x%lx, 0x%lx)) return ipc_bad_request(self, c);\n",
+                 c->pid, c->na, c->nb, c->nx, c->ncopy, c->in_size, c->tipc_in_size);
             if (c->in_objs) emit("            if (!c->is_domain) return ipc_bad_objects(self, c);\n");
             if (!c->stub && !c->nargs) {
                 char name[NAME_LEN * 2];

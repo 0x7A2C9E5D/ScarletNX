@@ -339,16 +339,15 @@ int main(void) {
     request(6);
     CHECK(thing->dispatch(thing, &ctx) == 0 && ctx.out_size == 16 && out_u(0, 8) == 0 && out_u(8, 8) == 0);
 
-    /* [7] copy handles and move handles, each in declaration order */
+    /* [7] copy handles in declaration order */
     request(7);
-    ctx.ncopy = 2, ctx.copy_h[0] = 0x71, ctx.copy_h[1] = 0x73;
-    ctx.nmove = 1, ctx.move_h[0] = 0x72;
+    ctx.ncopy = 3, ctx.copy_h[0] = 0x71, ctx.copy_h[1] = 0x72, ctx.copy_h[2] = 0x73;
     CHECK(thing->dispatch(thing, &ctx) == 0 && got.ha == 0x71 && got.hb == 0x72 && got.hc == 0x73);
     request(7); /* handles missing, or too many: refused before the handler */
     bad_requests = 0;
     CHECK(thing->dispatch(thing, &ctx) == 0x3480B && got.ha == 0);
     request(7);
-    ctx.ncopy = 3, ctx.nmove = 1;
+    ctx.ncopy = 4;
     CHECK(thing->dispatch(thing, &ctx) == 0x3480B && bad_requests == 2 && got.ha == 0);
 
     /* [8] (Pair p, u8 q, Uid u, bytes<6> raw): q 0, raw 1, p 8 (a 8, b 12, c 16), u 24. Out quad 0, r 8 */

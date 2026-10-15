@@ -145,6 +145,7 @@ foreach(bad IN ITEMS
         fixed_size_array 4 "it is not FixedSize"
         keyword_argument 4 "a C keyword"
         long_service_name 3 "at most 8 characters"
+        move_handle_in 5 "a client can't send a move handle"
         output_too_big 5 "the reply takes 260 bytes"
         padding_name 4 "padN_ names"
         pid_field 4 "not struct fields"

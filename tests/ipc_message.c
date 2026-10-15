@@ -307,7 +307,7 @@ static struct {
     ptrdiff_t raw_off; /* where the raw data starts in the message */
     int has_pid, tipc, is_domain;
     u64 pid;
-    int na, nb, nw, nx, nc, ncopy, nmove;
+    int na, nb, nw, nx, nc, ncopy;
     IpcBuf a, b, x, c;
     u32 copy_h, nin_objs, in_objs[8];
     SvcObj* in_obj[8];
@@ -335,7 +335,7 @@ static int test_dispatch(SvcObj* self, IpcCtx* c) {
     got.raw_off = c->raw - c->msg;
     got.has_pid = c->has_pid, got.pid = c->pid, got.tipc = c->tipc, got.is_domain = c->is_domain;
     got.na = c->na, got.nb = c->nb, got.nw = c->nw, got.nx = c->nx, got.nc = c->nc;
-    got.ncopy = c->ncopy, got.nmove = c->nmove;
+    got.ncopy = c->ncopy;
     got.a = c->a[0], got.b = c->b[0], got.x = c->x[0], got.c = c->c[0], got.copy_h = c->copy_h[0];
     got.nin_objs = (u32)c->nin_objs;
     for (int i = 0; i < c->nin_objs; i++) {
@@ -429,7 +429,7 @@ static void plain_requests(u32 h, SvcObj* root) {
     r.out_pointer_sizes[0] = 0x80, r.out_pointer_sizes[1] = 0;
     CHECK(send(h) == 0);
     CHECK(got.calls == 1 && got.type == 6 && got.cmd == 1 && got.token == 0x77);
-    CHECK(got.has_pid && got.pid == K_PROCESS_ID && got.ncopy == 1 && got.copy_h == 0xFFFF8001u && !got.nmove);
+    CHECK(got.has_pid && got.pid == K_PROCESS_ID && got.ncopy == 1 && got.copy_h == 0xFFFF8001u);
     CHECK(got.nx == 1 && got.x.addr == 0x123456789ull && got.x.size == 0x40);
     CHECK(got.na == 1 && got.a.addr == 0x3000 && got.a.size == 0x100 && got.a.flags == 0);
     CHECK(got.nb == 1 && got.b.addr == 0x1234567000ull && got.b.size == 0x100000200ull && got.b.flags == 1);
@@ -493,6 +493,20 @@ static void kernel_refusals(u32 h) {
     hipc_make_request(msg(), (HipcMetadata){.type = 4, .num_data_words = 0x3FF});
     memcpy(before, msg(), 0x100);
     CHECK(send(h) == 0xE801 && !got.calls && !memcmp(before, msg(), 0x100));
+    /* a move handle, which a client can't send a server: InvalidCombination, ahead of a B buffer outside the address
+       space. The handle stays the client's */
+    clear();
+    HipcRequest hr = hipc_make_request(
+        msg(), (HipcMetadata){.type = 4, .num_recv_buffers = 1, .num_data_words = 8, .num_move_handles = 1});
+    put32(hr.move_handles, h);
+    hipc_buffer(hr.recv_buffers, 0x7F00000000ull, 0x100, 0);
+    memcpy(before, msg(), 0x100);
+    CHECK(send(h) == 0xE801 && !got.calls && !memcmp(before, msg(), 0x100));
+    /* a close goes through the same checks: refused, and not answered with success */
+    clear();
+    hr = hipc_make_request(msg(), (HipcMetadata){.type = 2, .num_move_handles = 1});
+    put32(hr.move_handles, h);
+    CHECK(send(h) == 0xE801);
     /* a B buffer outside the address space, then one that runs past its end: InvalidCurrentMemory */
     clear();
     CmifRequest r = cmif_make_request(msg(), (CmifRequestFormat){.request_id = 1, .num_out_buffers = 1});
@@ -527,8 +541,8 @@ static void kernel_refusals(u32 h) {
 /* the receive list (C descriptors), as Mesosphere's ReceiveMessage places and measures it: after the raw data, or at
    the word the header's recv_list_offset (w1 bits 20-30) names. libnx leaves the offset 0, so the test sets it by
    hand. The whole message with its receive list has to fit the client's buffer and the list can't start inside the
-   raw data (InvalidCombination: the console finds that one at the reply, the runtime up front), and only the raw
-   data has to fit the server's 0x100 bytes (MessageTooLarge) */
+   raw data (InvalidCombination: the console finds that one at the reply, the runtime after the request's descriptors
+   and before the handler), and only the raw data has to fit the server's 0x100 bytes (MessageTooLarge) */
 static void set_recv_list_offset(u8* base, u32 word) {
     put32(base + 4, (get32(base + 4) & ~(0x7FFu << 20)) | word << 20);
 }
@@ -546,9 +560,10 @@ static void user_buffers(void) {
         {0x1A000, 0x1000, MS_NORMAL, PERM_R, 0, 0, 0},
         {0x1B000, 0x1000, MS_NORMAL, PERM_RW, 0, 0, 0}, /* then a locked block */
         {0x1C000, 0x1000, MS_NORMAL, PERM_RW, 1, 0, 0},
+        {0x1D000, 0x1000, MS_NORMAL, PERM_RW | PERM_DONTCARE, 0, 0, 0}, /* read-write with more bits: not read-write */
     };
     memcpy(test_blocks, blocks, sizeof blocks);
-    test_nblocks = 10;
+    test_nblocks = 11;
     CHECK(ipc_user_buffer(0x10000, 0x1000) == 0);
     CHECK(ipc_user_buffer(0x10000, 0x4000) == 0);
     CHECK(ipc_user_buffer(0x10800, 0x1000) == 0xCC01); /* InvalidAddress */
@@ -560,6 +575,7 @@ static void user_buffers(void) {
     CHECK(ipc_user_buffer(0x17000, 0x2000) == 0xD401); /* two states in one range */
     CHECK(ipc_user_buffer(0x19000, 0x1000) == 0 && ipc_user_buffer(0x19000, 0x2000) == 0xD401);
     CHECK(ipc_user_buffer(0x1B000, 0x1000) == 0 && ipc_user_buffer(0x1B000, 0x2000) == 0xD401);
+    CHECK(ipc_user_buffer(0x1D000, 0x1000) == 0xD401);
     CHECK(ipc_user_buffer(0x15000, 0x1000) == 0xD401);
     CHECK(ipc_user_buffer(0x16000, 0x1000) == 0xD401);
     CHECK(ipc_user_buffer(0x20000, 0x1000) == 0xD401); /* free */
@@ -627,7 +643,8 @@ static void receive_lists(u32 h, SvcObj* root) {
     CHECK(send(h) == 0xD401 && !got.calls && !memcmp(before, msg(), 0x100));
     /* the same with the buffer inside: the receive list's InvalidCombination */
     hipc_buffer(r.hipc.recv_buffers, 0x5000, 0x100, 0);
-    CHECK(send(h) == 0xE801 && !got.calls);
+    memcpy(before, msg(), 0x100);
+    CHECK(send(h) == 0xE801 && !got.calls && !memcmp(before, msg(), 0x100));
 }
 
 /* TIPC: type 16 + the command, the raw data right after the headers, the pid only in the special header */

@@ -52,7 +52,8 @@ interface nn::account::IAccountServiceForApplication is acc:u0, acc:u1, acc:su {
   0x22 AutoSelect, 0x46 a NonSecure B. A FixedSize buffer reaches its handler with the type's size (or the given
   size), or the client's if that is smaller, as sf gives the handler the type's size.
 - `object<I>` is an interface object (I is declared in some .swipc file, with no commands if none is served),
-  `handle<copy, kind>` and `handle<move, kind>` a handle.
+  `handle<copy, kind>` and `handle<move, kind>` a handle. A move handle is only an output: the kernel refuses a request
+  that carries one, so the generator refuses one among a command's inputs.
 - `@stub` before a command: the generated code answers it with success and zeros, and there is no handler. A command
   that gives an object or a handle can't be a stub. `@unsorted` before a command keeps its raw arguments in
   declaration order (see the layout). `@fallback(function)` before an interface names the C function that answers the
@@ -76,36 +77,36 @@ only read):
 - Each buffer's attributes give its descriptor list: A, B, X or C, or A and X (B and C) for AutoSelect. Each list is
   numbered in declaration order, and an AutoSelect buffer takes the next index in both of its lists. The server uses
   its mapped half when that has an address.
-- Copy and move handles in come in declaration order, each kind numbered on its own. Out objects become move handles
-  (sessions) ahead of the declared move handles on a plain session, and object ids after the data on a domain. An out
-  object a handler leaves NULL is handle 0 or id 0 (`respond` in `ipc.c`).
+- Copy handles in come in declaration order. Out copy and move handles too, each kind numbered on its own, and out
+  objects become move handles (sessions) ahead of the declared move handles on a plain session, and object ids after the
+  data on a domain. An out object a handler leaves NULL is handle 0 or id 0 (`respond` in `ipc.c`).
 - A failed request answers no data, handles or objects. The generated code puts a command's objects and handles in the
   reply whatever its result, and `ipc.c` closes and drops a failed request's (`drop_outputs`) once the dispatcher has
   returned, outside any lock a service's own dispatcher holds.
 - A CMIF request is measured as sf measures it: its data region starts at the data words aligned to 16 and is 16
   bytes shorter than they are, and a domain request's data ends where its domain header says. A TIPC request's ends
   with its data words.
-- The kernel refuses some requests before any service sees them, and `ipc.c` does as it does (Mesosphere): a header
-  that describes more than the client's message buffer, its receive list included, or a receive list inside the raw
-  data (InvalidCombination, which the console finds at the reply, after the descriptors); raw data that ends past
-  the server's 0x100 bytes (MessageTooLarge); a buffer outside the address space (InvalidCurrentMemory). A
-  SendSyncRequestWithUserBuffer's own buffer has to be page-aligned (InvalidAddress), whole pages (InvalidSize), and
-  memory that allows IPC user buffers, read-write with no attribute, with one state and permission across the range
-  (InvalidCurrentMemory): `ipc_user_buffer`.
+- The kernel refuses some requests before any service sees them, and `ipc.c` does as it does (Mesosphere): a header that
+  describes more than the client's message buffer, its receive list included, or a receive list inside the raw data
+  (InvalidCombination, which the console finds at the reply, after the descriptors); raw data that ends past the
+  server's 0x100 bytes (MessageTooLarge); a move handle, which a client can't send a server (InvalidCombination); a
+  buffer outside the address space (InvalidCurrentMemory). A SendSyncRequestWithUserBuffer's own buffer has to be
+  page-aligned (InvalidAddress), whole pages (InvalidSize), and memory that allows IPC user buffers, read-write with no
+  attribute, with one state and permission across the range (InvalidCurrentMemory): `ipc_user_buffer`.
 - A request has to send what its command declares: the pid flag when it takes `pid` or `aruid`, as many A, B and X
-  descriptors (an AutoSelect buffer counts in both of its lists), no exchange (W) buffer, as many copy and move
-  handles, and at least the command's raw data. Otherwise it is answered with sf's InvalidCmifRequest, RC(11, 420),
-  before the handler runs, and logged as `[bad request]` (`ipc_counts` and `ipc_bad_request`), as Atmosphère's
-  HipcCommandProcessor checks it. C descriptors aren't counted. A domain request with another number of objects is
-  answered InvalidNumInObjects (`ipc_objects`), checked before the rest as sf's DomainServiceObjectProcessor does,
-  and a command that takes objects answers NotSupported on a plain session, which can't send them. A TIPC request
-  (sm, from newer SDKs) carries its pid in the special header only, so its raw data has no pid slot, and the
-  generated code reads its arguments where TIPC puts them. A request whose data region doesn't hold its CmifInHeader
-  (or domain header) is answered InvalidHeaderSize, and one without the SFCI magic or with a version above 1
-  InvalidInHeader. So a declaration that differs from what the game's SDK sends fails every such request. One
-  difference from the console, on purpose: sf closes the session for these refusals (the client's SendSyncRequest
-  gets SessionClosed), while the runtime answers the result in a reply and keeps the session. Its own declarations
-  can be wrong where the console's aren't, and a game may survive an error result but not a dead session.
+  descriptors (an AutoSelect buffer counts in both of its lists), no exchange (W) buffer, as many copy handles, and at
+  least the command's raw data. Otherwise it is answered with sf's InvalidCmifRequest, RC(11, 420), before the handler
+  runs, and logged as `[bad request]` (`ipc_counts` and `ipc_bad_request`), as Atmosphère's HipcCommandProcessor checks
+  it. C descriptors aren't counted. A domain request with another number of objects is answered InvalidNumInObjects
+  (`ipc_objects`), checked before the rest as sf's DomainServiceObjectProcessor does, and a command that takes objects
+  answers NotSupported on a plain session, which can't send them. A TIPC request (sm, from newer SDKs) carries its pid
+  in the special header only, so its raw data has no pid slot, and the generated code reads its arguments where TIPC
+  puts them. A request whose data region doesn't hold its CmifInHeader (or domain header) is answered InvalidHeaderSize,
+  and one without the SFCI magic or with a version above 1 InvalidInHeader. So a declaration that differs from what the
+  game's SDK sends fails every such request. One difference from the console, on purpose: sf closes the session for
+  these refusals (the client's SendSyncRequest gets SessionClosed), while the runtime answers the result in a reply and
+  keeps the session. Its own declarations can be wrong where the console's aren't, and a game may survive an error
+  result but not a dead session.
 - The generator refuses a command whose request or reply would not fit the 0x100 byte message with its headers,
   descriptors, handles and domain object ids (0xd0 bytes of raw data out at most), and more than 15 move handles and
   objects out.

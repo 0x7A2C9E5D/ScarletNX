@@ -26,7 +26,7 @@ interface test::IThing is test:t, test:u {
     [4] Objects(object<test::IThing> thing) -> (handle<move, event> m, object<test::IThing> out, handle<copy, event> h);
     [5] Fail() -> (object<test::IThing> o, handle<copy, event> h, u32 v);
     @stub [6] Stub() -> (u32 a, u64 b);
-    [7] InHandles(handle<copy, process> a, handle<move, event> b, handle<copy, event> c);
+    [7] InHandles(handle<copy, process> a, handle<copy, event> b, handle<copy, event> c);
     [8] Struct(test::Pair p, u8 q, test::Uid u, bytes<6> raw) -> (test::Pair r, u8[4] quad);
     @version(1.0.0+) @undocumented [9] Empty();
     [10] Small() -> b8 flag;

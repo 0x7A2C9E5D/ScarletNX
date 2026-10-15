@@ -167,9 +167,9 @@ void out_obj(IpcCtx* c, SvcObj* o) {
 }
 int ipc_bad_request(SvcObj* o, IpcCtx* c) {
     if (ipc_warn_once(o->name, c->cmd))
-        WARN("  [bad request] %s cmd %u: pid %d, A %d, B %d, X %d, W %d, copy %d, move %d, 0x%x bytes of data is not "
-             "what it declares -> InvalidCmifRequest\n",
-             o->name, c->cmd, c->has_pid, c->na, c->nb, c->nx, c->nw, c->ncopy, c->nmove, c->raw_size);
+        WARN("  [bad request] %s cmd %u: pid %d, A %d, B %d, X %d, W %d, copy %d, 0x%x bytes of data is not what it "
+             "declares -> InvalidCmifRequest\n",
+             o->name, c->cmd, c->has_pid, c->na, c->nb, c->nx, c->nw, c->ncopy, c->raw_size);
     return RC(11, 420); /* sf::hipc InvalidCmifRequest */
 }
 int ipc_bad_objects(SvcObj* o, IpcCtx* c) {
@@ -231,7 +231,8 @@ static void parse(IpcCtx* c) {
            reads any of it (Mesosphere's ReceiveMessage). A header that describes more than the client's buffer, its
            receive list included, fails the request (InvalidCombination), and raw data that ends past the server's
            buffer too (MessageTooLarge: a user buffer's request, or one in TLS whose receive list sits inside its
-           raw data). A receive list inside the raw data is refused after the descriptors, below */
+           raw data). Then move handles, which a client can't send a server (InvalidCombination). A receive list
+           inside the raw data is refused after the descriptors, below */
         u32 sh = 0, raw_end, all;
         if (special) memcpy(&sh, p, 4);
         raw_end = 8 + (special ? 4 + ((sh & 1) ? 8 : 0) + 4 * (((sh >> 1) & 15) + ((sh >> 5) & 15)) : 0) + 8 * nx +
@@ -241,6 +242,8 @@ static void parse(IpcCtx* c) {
             c->kernel_rc = R_BADCOMBO;
         else if (raw_end > 0x100)
             c->kernel_rc = R_MSGTOOLARGE;
+        else if ((sh >> 5) & 15)
+            c->kernel_rc = R_BADCOMBO;
         if (c->kernel_rc) return;
     }
     if (special) {
@@ -248,7 +251,7 @@ static void parse(IpcCtx* c) {
         memcpy(&sh, p, 4);
         p += 4;
         c->has_pid = sh & 1;
-        u32 ncopy = (sh >> 1) & 15, nmove = (sh >> 5) & 15;
+        u32 ncopy = (sh >> 1) & 15; /* and no move handles, refused above */
         if (c->has_pid) {
             /* HIPC replaces the client placeholder with the sender's real process id. */
             c->pid = K_PROCESS_ID;
@@ -256,10 +259,7 @@ static void parse(IpcCtx* c) {
         }
         for (u32 i = 0; i < ncopy; i++, p += 4)
             if (i < 8) memcpy(&c->copy_h[i], p, 4);
-        for (u32 i = 0; i < nmove; i++, p += 4)
-            if (i < 8) memcpy(&c->move_h[i], p, 4);
         c->ncopy = ncopy < 8 ? (int)ncopy : 8;
-        c->nmove = nmove < 8 ? (int)nmove : 8;
     }
     for (u32 i = 0; i < nx; i++, p += 8) {
         if (i >= MAX_BUFS) continue;
@@ -505,17 +505,17 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size) {
     c->sess = s;
     parse(c);
     cpu->x[0] = 0;
-    if (c->type == 2 || c->type == 15) /* client closes the handle itself afterwards */
-        goto out;
-    if (c->kernel_rc) { /* the client's SendSyncRequest fails, and the server never sees the request */
+    if (c->kernel_rc) { /* the client's SendSyncRequest fails, and the server never sees the request, a close too */
         WARN_LIMIT(8, "IPC: request to %s refused by the kernel (%x): %s\n", s->obj->name, c->kernel_rc,
                    c->kernel_rc == R_BADCOMBO
-                       ? "its header describes more than its buffer, or a receive list inside its data"
+                       ? "its header describes more than its buffer, a receive list inside its data, or a move handle"
                    : c->kernel_rc == R_MSGTOOLARGE ? "the message is larger than the server's buffer"
                                                    : "a buffer is outside the address space");
         cpu->x[0] = c->kernel_rc;
         goto out;
     }
+    if (c->type == 2 || c->type == 15) /* client closes the handle itself afterwards */
+        goto out;
     if (c->header_rc) { /* the control requests' header too */
         WARN_LIMIT(8, "IPC: request to %s with a broken header -> %x\n", s->obj->name, c->header_rc);
         c->rc = c->header_rc;
