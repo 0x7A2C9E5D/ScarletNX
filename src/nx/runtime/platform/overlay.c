@@ -4,6 +4,7 @@
 #include "runtime/platform/backend.h"
 #include "runtime/platform/fatal_screen.h"
 #include "runtime/platform/vpad.h"
+#include "gui_theme_colors.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -29,12 +30,14 @@ static const char* const CONTROLS[C_COUNT] = {"Show controls", "Edit layout",  "
                                               "Opacity",       "Buttons",      "Relative stick center", "D-pad slide",
                                               "Haptics",       "Touch screen", "Reset layout",          "Back"};
 static int shown, page, focus, top; /* top: the first item showing */
-/* the YoRHa menu's colours, R G B A */
-#define PAGE_RGBA 0xF2BED6DAu
-#define INK       0xFF3A4145u
-#define SOFT      0xFF76868Au
-#define LIGHT     0xFFBED6DAu
-#define FAILURE   0xFF3C47A5u
+/* the YoRHa menu's colours, from its theme.ini (gui_theme_colors.h), as R G B A bytes; the page lets the game show
+   through a little */
+#define SNX_OVERLAY_RGBA(rgb, a) ((u32)(a) << 24 | ((rgb) & 0xFFu) << 16 | ((rgb) & 0xFF00u) | ((rgb) >> 16 & 0xFFu))
+#define PAGE_RGBA                SNX_OVERLAY_RGBA(SNX_GUI_THEME_YORHA_PAGE, 0xF2u)
+#define INK                      SNX_OVERLAY_RGBA(SNX_GUI_THEME_YORHA_INK, 0xFFu)
+#define SOFT                     SNX_OVERLAY_RGBA(SNX_GUI_THEME_YORHA_SOFT, 0xFFu)
+#define LIGHT                    SNX_OVERLAY_RGBA(SNX_GUI_THEME_YORHA_PAGE, 0xFFu)
+#define FAILURE                  SNX_OVERLAY_RGBA(SNX_GUI_THEME_YORHA_FAILURE, 0xFFu)
 
 static int items(void) { return page == PAGE_MAIN ? 2 : page == PAGE_CONTROLS ? C_COUNT : SNX_VPAD_COUNT + 2; }
 static void page_open(int p) {

@@ -52,6 +52,7 @@ target_link_libraries(snx_hle PRIVATE FFmpeg::avcodec OpenSSL::SSL)
 snx_component(gpu gpu/gpu.c gpu/maxwell/engines.c gpu/maxwell/mme.c gpu/maxwell/compute.c gpu/maxwell/fermi2d.c gpu/maxwell/dma.c gpu/maxwell/maxwell3d.c gpu/renderer.c)
 
 include("${PROJECT_SOURCE_DIR}/cmake/controls_atlas.cmake")
+include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
 set(platform runtime/platform/plat.c runtime/platform/unattended.c runtime/platform/backend/sdl3.c
              runtime/platform/overlay.c runtime/platform/touch.c runtime/platform/ui.c runtime/platform/vpad.c
              runtime/platform/fatal_screen.c "${CMAKE_BINARY_DIR}/generated/controls_png.c")
@@ -113,6 +114,8 @@ endif()
 include("${PROJECT_SOURCE_DIR}/cmake/window_icon.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/build_info.cmake")
 target_link_libraries(snx_platform PRIVATE SDL3::SDL3 snx_window_icon snx_build_info)
+# the game's menu in YoRHa's colours, from src/gui/themes/yorha/theme.ini (cmake/gui_themes.cmake)
+target_include_directories(snx_platform PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(scarletnx PRIVATE SDL3::SDL3)
 
 if(BUILD_TESTING)

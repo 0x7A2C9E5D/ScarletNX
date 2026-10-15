@@ -166,11 +166,14 @@ fades the run out and the menu back in.
 
 A theme is also a folder holding a `theme.ini`, the folder's name its id, in
 `themes/` in that same folder or in `themes/` beside the GUI; the first one found
-wins, and a folder named like a built-in replaces it. The built-ins ship as such files
-(`src/gui/themes/`, copied beside the GUI in the build and installed with it): copy one
-under a new name to make a theme, or edit one to change the built-in. `[theme] base`
-picks the built-in a file starts from, and a key it leaves out, or that cannot be read,
-keeps the base's value.
+wins, and a folder named like a built-in replaces it. The built-ins are such files, and
+nothing else: each folder of `src/gui/themes/` is one, its `theme.ini` compiled into the GUI
+(`cmake/gui_themes.cmake`) and read as any other, setting every key. The runtime's game menu
+takes YoRHa's colours from the same file at build time. The files are copied beside the GUI
+in the build and installed with it: copy one under a new name to make a theme, or edit one
+to change the built-in. `[theme] base` picks the built-in a file starts from, and a key it
+leaves out, or that cannot be read, keeps the base's value. The theme builder at
+<https://scarletnx.github.io/theme/> writes a theme.ini with a preview drawn as the GUI draws.
 
 ```ini
 [theme]
@@ -269,6 +272,27 @@ reads the keys it knows and leaves the others. From ErET's, the GUI also reads:
 | `[loading] title` | the loading screen's title |
 
 ErET needs `[theme] layout`, so the built-in files carry one: `debug` and `menu`.
+
+### Theme formats
+
+`[theme] format = N` names the theme format a file was written for; this GUI's is 1
+(`GUI_THEME_FORMAT`).
+
+- A file of a format the GUI knows reads the same in it and in every later GUI: each key
+  keeps its meaning, and each value reads to the same theme. `tests/gui_themes/<N>/` holds
+  files of format N as the theme builder writes them, with the theme each reads to
+  (`<name>.json`, the GUI's fields in the builder's names); `gui_theme_formats` checks them.
+  They are never changed: a field added to themes later is simply not in an older one's JSON.
+- A new key, or a new word for a key, keeps N: an older GUI leaves what it does not know, and
+  the base's value stays. A new key's value in the built-ins must keep an older file looking
+  as it did.
+- N goes up only when a key that exists has to mean something else. The GUI then reads the
+  older format's files with the older meaning, their fixtures stay, and the new format's go
+  in `tests/gui_themes/<N+1>/`.
+- A file of a newer format than the GUI's: the keys it knows still apply, the others are left.
+- The theme builder writes every key and the newest format it knows, so its files never lean
+  on a built-in's values, which may change. It reads an older file as that format reads, and
+  writes it in the current one.
 
 ## Building and testing
 
