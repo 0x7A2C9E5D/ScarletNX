@@ -63,6 +63,14 @@ Enter or hover and click, then choose drag-and-drop or the paginated `games/` br
 The GUI shows live driver/game
 output and combined CPU/RAM usage. See [GUI launcher](docs/GUI.md).
 
+The experimental `scarletnx-3ds` driver and **Load 3DS CIA** menu entry support
+decrypted application CIA extraction (`scarletnx-3ds -x game.cia`) and an independent
+page-based memory controller. An opt-in ARM11 integer profile and checked-memory
+adapter now have static AOT witnesses, without changing shared A57 defaults.
+**CIA-to-native execution, HLE and devices remain incomplete**; a normal CIA launch
+extracts, then stops explicitly before execution.
+See the [staged 3DS port](docs/3DS.md) for limits, build instructions and remaining work.
+
 For more detailed information please see: [Build + run](./docs/BUILD.md).
 
 # Special thanks
@@ -72,5 +80,6 @@ For more detailed information please see: [Build + run](./docs/BUILD.md).
 - LibHac.
 - [Nexium](https://nexium-emu.org/) for research and development.
 - [Switchbrew](https://switchbrew.org) for research.
+- [Azahar](https://github.com/azahar-emu/azahar) and Citra, for all of the 3DS emulation.
 
 Wimsy, the mascot and the runtime's icon (`dist/wimsy.svg`) was drawn by Liz.

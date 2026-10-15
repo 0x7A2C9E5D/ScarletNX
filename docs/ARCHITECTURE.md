@@ -12,6 +12,16 @@ Source map: [CLAUDE.md](../CLAUDE.md).
 | `src/nx/` / `scarletnx-nx` | Horizon SVC/kernel/services/filesystems, NSO/NRO loading, Switch memory, Maxwell and graphics/media backends, Switch frontend/tooling |
 | `src/gnuabi/` / `scarletnx-gnuabi` | Linux syscall/errno/structure translation, ELF loading, isolated VFS, Linux process/memory/signal/futex compatibility |
 
+The experimental `src/3ds/` / `scarletnx-3ds` target supplies board profiles,
+decrypted CIA/NCCH/ExeFS/RomFS extraction and an independent checked page-memory
+controller, not CIA application execution. `snx_ctr_cpu` connects the page
+controller to a separate opt-in checked A32 ABI, with static native-object
+witnesses. The common A32 backend's A57/flat defaults and CPU ABI 2 are unchanged;
+ARM11 ISA and callback memory are explicit codegen options, never global 3DS
+defines. The CPU adapter links neither LLVM/MCJIT nor NX/GNU ABI runtimes.
+See [3DS port](3DS.md) for unsupported instructions and production process,
+module/discovery/dispatch and cache work still needed.
+
 The common target has no runtime-specific imports. NX and GNU ABI each link
 common and have no dependency on each other. The GNU executable target is
 `scarletnx-gnuabi-run`, whose output is `scarletnx-gnuabi`; its library output is
