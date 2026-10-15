@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* What a fatal error's screen says (runtime/platform/fatal_screen.c): the hint for each known error, and the text cut
-   into the screen's rows at spaces, a long word cut, UTF-8 counted as characters */
+/* What a fatal error's box says (runtime/platform/fatal_screen.c): the hint for each known error, the text cut into
+   the box's rows at spaces, a long word cut, UTF-8 counted as characters, and those in the font's bytes */
 #include "runtime/platform/fatal_screen.h"
 #include <assert.h>
 #include <stdio.h>
@@ -43,6 +43,18 @@ int main(void) {
     strcpy(rows[1], "kept");
     n = fatal_wrap("aa bb cc", 2, rows, 1);
     assert(n == 3 && !strcmp(rows[0], "aa") && !strcmp(rows[1], "kept"));
-    puts("fatal screen: hints and rows");
+    /* the font's bytes: CP437 for what it has, '?' for the rest and for bytes that are no UTF-8 */
+    {
+        char out[32];
+        fatal_cp437("caf\xC3\xA9 \xE2\x96\xA0 \xE6\x97\xA5", out, sizeof out);
+        assert(!strcmp(out, "caf\x82 \xFE ?"));
+        fatal_cp437("a\x80"
+                    "b\xC3",
+                    out, sizeof out);
+        assert(!strcmp(out, "a?b?"));
+        fatal_cp437("abcdef", out, 4);
+        assert(!strcmp(out, "abc"));
+    }
+    puts("fatal screen: hints, rows and the font's bytes");
     return 0;
 }

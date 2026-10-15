@@ -293,6 +293,7 @@ add_test(NAME llvm_dependency COMMAND "${CMAKE_COMMAND}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/llvm_dependency.cmake")
 
 add_executable(snx-test-overlay overlay.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/overlay.c"
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/fatal_screen.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c")
 snx_test_target(snx-test-overlay 11)
 target_link_libraries(snx-test-overlay PRIVATE scarletnx-common m)
@@ -306,6 +307,7 @@ add_test(NAME vpad COMMAND snx-test-vpad)
 
 add_executable(snx-test-fatal-screen fatal_screen.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/fatal_screen.c")
 snx_test_target(snx-test-fatal-screen 11)
+target_link_libraries(snx-test-fatal-screen PRIVATE scarletnx-common)
 add_test(NAME fatal_screen COMMAND snx-test-fatal-screen)
 
 # the controls' atlas and their shaders are generated and checked in: their sources must still make them
