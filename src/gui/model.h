@@ -48,9 +48,10 @@ typedef struct {
 } GuiMenu;
 void gui_menu_key(GuiMenu* menu, GuiKey key);
 const char* gui_setting_description(const GuiMenu* menu);
-/* Append up to GUI_LAUNCH_MAX Switch options; prepared games do not run a compiler. */
-#define GUI_LAUNCH_MAX 6
-size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char** argv);
+/* Append up to GUI_LAUNCH_MAX Switch options; prepared games do not run a compiler. repo, when not NULL, is the folder
+   the driver keeps work/ and games/ in: the menu's own, so the two list the same games */
+#define GUI_LAUNCH_MAX 8
+size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char* repo, const char** argv);
 /* the game's --touch=N and --controls=N for the menu's choices */
 const char* gui_touch_option(const GuiMenu* menu);
 const char* gui_controls_option(const GuiMenu* menu);

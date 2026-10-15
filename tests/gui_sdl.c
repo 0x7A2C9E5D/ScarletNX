@@ -164,15 +164,16 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && strstr(argv[1], "option flags")) {
         int i = 2;
-        assert(argc == 7 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "-f") && !strcmp(argv[i++], "--touch=1") &&
+        assert(argc == 9 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "-f") && !strcmp(argv[i++], "--touch=1") &&
                !strcmp(argv[i++], "--controls=0"));
         if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
-        assert(!strcmp(argv[i++], "-S") && !strcmp(argv[i++], "-s") && i == argc);
+        assert(!strcmp(argv[i++], "-S") && !strcmp(argv[i++], "-s"));
+        assert(!strcmp(argv[i++], "--repo") && argv[i++][0] && i == argc);
         puts("Recompiling option flags\nScarletNX - option flags"); /* the runner's banner: now loading */
         return 0;
     }
     if (argc > 1) {
-        assert(argc == 2 || argc == 5);
+        assert(argc == 2 || argc == 7);
         assert(snx_is_file(argv[1]));
         if (strstr(argv[1], "Game00")) {
             assert(argc == 2 && strstr(argv[0], "gnuabi"));
@@ -182,8 +183,8 @@ int main(int argc, char** argv) {
         assert(strstr(argv[1], "game with spaces"));
         bool nx = strstr(argv[0], "mariko") != NULL;
         if (nx)
-            assert(argc == 5 && !strcmp(argv[2], "-f") && !strcmp(argv[3], "--touch=1") &&
-                   !strcmp(argv[4], "--controls=0"));
+            assert(argc == 7 && !strcmp(argv[2], "-f") && !strcmp(argv[3], "--touch=1") &&
+                   !strcmp(argv[4], "--controls=0") && !strcmp(argv[5], "--repo") && argv[6][0]);
         else
             assert(argc == 2);
         size_t size;
@@ -197,7 +198,15 @@ int main(int argc, char** argv) {
         return nx ? 0 : 7; /* Both successful and failed drivers need ESC acknowledgement. */
     }
     App app;
+    /* the menu's data folder from the test's own environment, never the user's */
+    SDL_setenv_unsafe("XDG_DATA_HOME", "/nonexistent/snx-gui-test", 1);
     assert(initialize(&app));
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(SDL_PLATFORM_ANDROID)
+    /* no checkout and no games/ beside the test: games/ and themes/ come from the user's data folder */
+    assert(!strcmp(app.data_dir, "/nonexistent/snx-gui-test/scarletnx"));
+    assert(!strcmp(app.games_dir, "/nonexistent/snx-gui-test/scarletnx/games"));
+    assert(!strcmp(app.themes_dirs[0], "/nonexistent/snx-gui-test/scarletnx/themes"));
+#endif
     /* the window says which build it is: commit, compiler, platform */
     assert(!strcmp(SDL_GetWindowTitle(app.window), snx_build_info()) && !strncmp(snx_build_info(), "ScarletNX ", 10));
     /* the boot's splash: the default theme's black page with the icon in the middle until its time; a key ends it and
@@ -447,8 +456,9 @@ int main(int argc, char** argv) {
     {
         size_t size;
         char* kept = (char*)snx_read_file(app.run_log, &size);
-        assert(kept && !app.run_out && !strncmp(kept, "$ ", 2) &&
-               strstr(kept, "game with spaces;literal.nro -f --touch=1 --controls=0\n"));
+        char* line = snx_format("game with spaces;literal.nro -f --touch=1 --controls=0 --repo %s\n", app.data_dir);
+        assert(kept && line && !app.run_out && !strncmp(kept, "$ ", 2) && strstr(kept, line));
+        free(line);
         assert(strstr(kept, "driver stdout") && strstr(kept, "driver stderr") && strstr(kept, "\n[ended, status 0]\n"));
         free(kept);
     }

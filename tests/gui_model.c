@@ -131,8 +131,8 @@ int main(void) {
                          .touch = bits >> 4};
         for (int prepared = 0; prepared < 2; ++prepared) {
             const char* args[GUI_LAUNCH_MAX];
-            size_t n = gui_launch_options(&menu, prepared, args), i = 0;
-            assert(n <= GUI_LAUNCH_MAX && (bits != 47 || prepared || n == 5 + !!SNX_GUI_HAS_GCCJIT)); /* all of them */
+            size_t n = gui_launch_options(&menu, prepared, "data folder", args), i = 0;
+            assert(n <= GUI_LAUNCH_MAX && (bits != 47 || prepared || n == 7 + !!SNX_GUI_HAS_GCCJIT)); /* all of them */
             if (menu.fullscreen) assert(i < n && !strcmp(args[i++], "-f"));
             assert(i < n && !strcmp(args[i++], touch[menu.touch]));
             assert(i < n && !strcmp(args[i++], menu.controls ? "--controls=1" : "--controls=0"));
@@ -141,14 +141,20 @@ int main(void) {
                 assert(i < n && !strcmp(args[i++], "-S"));
                 assert(i < n && !strcmp(args[i++], "-s"));
             }
+            /* the driver works in the menu's data folder; a prepared game runs no driver */
+            if (!prepared) {
+                assert(i < n && !strcmp(args[i++], "--repo"));
+                assert(i < n && !strcmp(args[i++], "data folder"));
+            }
             assert(i == n);
+            assert(gui_launch_options(&menu, prepared, NULL, args) == n - (prepared ? 0 : 2));
         }
         menu.selected = GUI_LINUX;
         const char* args[GUI_LAUNCH_MAX];
-        assert(gui_launch_options(&menu, false, args) == 0);
+        assert(gui_launch_options(&menu, false, "data folder", args) == 0);
         menu.selected = GUI_3DS;
-        assert(gui_launch_options(&menu, false, args) == 0);
-        assert(gui_launch_options(&menu, true, args) == 0);
+        assert(gui_launch_options(&menu, false, "data folder", args) == 0);
+        assert(gui_launch_options(&menu, true, "data folder", args) == 0);
     }
 
     /* a line 5 columns too long, a column every 100 ms: rests 8 steps, slides, rests at its end, slides back */
