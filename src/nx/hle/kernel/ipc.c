@@ -71,6 +71,24 @@ static KSession* session_alloc(SvcObj* obj) {
 }
 u32 session_new(SvcObj* obj) { return h_new(&session_alloc(obj)->o); }
 
+/* Mesosphere's SendSyncRequestWithUserBuffer: a page-aligned address (InvalidAddress), a nonzero size of whole pages
+   (InvalidSize), then a range the kernel can lock for the request (LockForIpcUserBuffer): inside the address space,
+   in memory whose state allows IPC user buffers (FlagCanIpcUserBuffer, bit 21), read-write and with no attribute
+   (InvalidCurrentMemory otherwise). The runtime doesn't lock the range for the request's length, as the kernel does:
+   a guest that unmaps it meanwhile from another thread is a bug the console refuses and the runtime doesn't */
+u32 ipc_user_buffer(u64 a, u64 size) {
+    if (a & 0xFFF) return R_BADADDR;
+    if (!size || (size & 0xFFF)) return R_BADSIZE;
+    if (a + size < a || a + size > AS_SIZE) return R_BADMEMSTATE;
+    for (u64 end = a + size; a < end;) {
+        MemBlock b;
+        mem_query(a, &b);
+        if (!(b.state & (1u << 21)) || (b.perm & 7) != PERM_RW || b.attr || b.addr + b.size <= a) return R_BADMEMSTATE;
+        a = b.addr + b.size;
+    }
+    return 0;
+}
+
 /* only warn the first few times per command, some games call them in a loop. Requests come from every guest thread,
    and a service's name goes with the object, so the table keeps a copy under a lock. A name longer than the copy is
    told apart by its first 127 characters (interface names are shorter) */
@@ -207,9 +225,10 @@ static void parse(IpcCtx* c) {
     {
         /* the kernel copies the message the header describes into the server's 0x100 byte buffer before the server
            reads any of it (Mesosphere's ReceiveMessage). A header that describes more than the client's buffer, its
-           receive list included, or a receive list inside the raw data, fails the request (InvalidCombination). Raw
-           data that ends past the server's buffer fails it too (MessageTooLarge, which only a
-           SendSyncRequestWithUserBuffer can send) */
+           receive list included, fails the request (InvalidCombination), and raw data that ends past the server's
+           buffer too (MessageTooLarge, which only a SendSyncRequestWithUserBuffer can send). A receive list inside
+           the raw data is InvalidCombination as well: the console finds it at the reply (SendMessage, the client
+           being the destination then), after the handler ran, and the runtime up front */
         u32 sh = 0, raw_end, all;
         if (special) memcpy(&sh, p, 4);
         raw_end = 8 + (special ? 4 + ((sh & 1) ? 8 : 0) + 4 * (((sh >> 1) & 15) + ((sh >> 5) & 15)) : 0) + 8 * nx +
@@ -290,7 +309,8 @@ static void parse(IpcCtx* c) {
         return;
     }
     /* CMIF: sf's data region starts at the data words aligned to 16 and is 16 bytes shorter than they are, whatever
-       the alignment took (sf's DispatchRequest), so a request is measured as sf measures it */
+       the alignment took (sf's DispatchRequest), so a request is measured as sf measures it. Fewer than 4 data
+       words answer InvalidHeaderSize below, where Atmosphere answers InvalidRequestSize: no SDK sends one */
     end = ndata * 4 >= 16 ? raw + ndata * 4 - 16 : raw;
     u8* d = raw;
     u32 dlen_max = 0x100; /* a domain message says how long its CMIF part is */
@@ -479,7 +499,8 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size) {
         goto out;
     if (c->kernel_rc) { /* the client's SendSyncRequest fails, and the server never sees the request */
         WARN_LIMIT(8, "IPC: request to %s refused by the kernel (%x): %s\n", s->obj->name, c->kernel_rc,
-                   c->kernel_rc == R_BADCOMBO      ? "its header describes more than the message"
+                   c->kernel_rc == R_BADCOMBO
+                       ? "its header describes more than its buffer, or a receive list inside its data"
                    : c->kernel_rc == R_MSGTOOLARGE ? "the message is larger than the server's buffer"
                                                    : "a buffer is outside the address space");
         cpu->x[0] = c->kernel_rc;

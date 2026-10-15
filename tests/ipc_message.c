@@ -43,6 +43,20 @@ void fatal(const char* format, ...) {
 /* the handle table: a handle takes a reference, as h_new does, and an object goes once its last one does */
 #define H_BASE 0x100u
 static KObj* handles[64];
+/* guest memory blocks for ipc_user_buffer (SendSyncRequestWithUserBuffer): what is not listed is free */
+static MemBlock test_blocks[8];
+static int test_nblocks;
+void mem_query(u64 a, MemBlock* o) {
+    for (int i = 0; i < test_nblocks; i++)
+        if (test_blocks[i].addr <= a && a < test_blocks[i].addr + test_blocks[i].size) {
+            *o = test_blocks[i];
+            return;
+        }
+    memset(o, 0, sizeof *o);
+    o->addr = a & ~0xFFFull;
+    o->size = 0x1000;
+    o->state = MS_FREE;
+}
 void kobj_ref(KObj* o) { o->refs++; }
 void kobj_unref(KObj* o) {
     CHECK(o->refs > 0);
@@ -87,10 +101,20 @@ static u32 event_handle(void) {
 }
 
 /* ============================================================ the requests, as libnx lays them out */
-/* ported from libnx's nx/include/switch/sf/hipc.h, cmif.h and tipc.h (Copyright 2017-2018 libnx Authors, ISC
-   license): hipcMakeRequest, hipcMakeBuffer, hipcMakeSendStatic, hipcMakeRecvStatic, cmifMakeRequest,
-   cmifMakeControlRequest, cmifMakeCloseRequest, tipcMakeRequest and the response parsers, writing the words their
-   bitfields hold */
+/* ported from libnx's nx/include/switch/sf/hipc.h, cmif.h and tipc.h: hipcMakeRequest, hipcMakeBuffer,
+   hipcMakeSendStatic, hipcMakeRecvStatic, cmifMakeRequest, cmifMakeControlRequest, cmifMakeCloseRequest,
+   tipcMakeRequest and the response parsers, writing the words their bitfields hold.
+
+   Copyright 2017-2018 libnx Authors
+
+   Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby
+   granted, provided that the above copyright notice and this permission notice appear in all copies.
+
+   THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL
+   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+   INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+   AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+   PERFORMANCE OF THIS SOFTWARE. */
 static void put32(u8* p, u32 v) { memcpy(p, &v, 4); }
 static u32 get32(const u8* p) {
     u32 v;
@@ -503,9 +527,34 @@ static void kernel_refusals(u32 h) {
 /* the receive list (C descriptors), as Mesosphere's ReceiveMessage places and measures it: after the raw data, or at
    the word the header's recv_list_offset (w1 bits 20-30) names. libnx leaves the offset 0, so the test sets it by
    hand. The whole message with its receive list has to fit the client's buffer and the list can't start inside the
-   raw data (InvalidCombination), and only the raw data has to fit the server's 0x100 bytes (MessageTooLarge) */
+   raw data (InvalidCombination: the console finds that one at the reply, the runtime up front), and only the raw
+   data has to fit the server's 0x100 bytes (MessageTooLarge) */
 static void set_recv_list_offset(u8* base, u32 word) {
     put32(base + 4, (get32(base + 4) & ~(0x7FFu << 20)) | word << 20);
+}
+/* SendSyncRequestWithUserBuffer's buffer, as Mesosphere checks it: page-aligned, whole pages, then a range it can
+   lock (memory that allows IPC user buffers, read-write, no attribute) */
+static void user_buffers(void) {
+    static const MemBlock blocks[] = {
+        {0x10000, 0x4000, MS_NORMAL, PERM_RW, 0, 0, 0}, /* heap */
+        {0x14000, 0x1000, MS_CODE, PERM_RX, 0, 0, 0},   /* code: no user buffers */
+        {0x15000, 0x1000, MS_NORMAL, PERM_R, 0, 0, 0},  /* read-only */
+        {0x16000, 0x1000, MS_NORMAL, PERM_RW, 1, 0, 0}, /* locked */
+    };
+    memcpy(test_blocks, blocks, sizeof blocks);
+    test_nblocks = 4;
+    CHECK(ipc_user_buffer(0x10000, 0x1000) == 0);
+    CHECK(ipc_user_buffer(0x10000, 0x4000) == 0);
+    CHECK(ipc_user_buffer(0x10800, 0x1000) == 0xCC01); /* InvalidAddress */
+    CHECK(ipc_user_buffer(0x10000, 0) == 0xCA01);      /* InvalidSize */
+    CHECK(ipc_user_buffer(0x10000, 0x800) == 0xCA01);
+    CHECK(ipc_user_buffer(0x13000, 0x2000) == 0xD401); /* into code: InvalidCurrentMemory */
+    CHECK(ipc_user_buffer(0x15000, 0x1000) == 0xD401);
+    CHECK(ipc_user_buffer(0x16000, 0x1000) == 0xD401);
+    CHECK(ipc_user_buffer(0x20000, 0x1000) == 0xD401); /* free */
+    CHECK(ipc_user_buffer(AS_SIZE - 0x1000, 0x2000) == 0xD401);
+    CHECK(ipc_user_buffer(~0xFFFull, 0x2000) == 0xD401); /* wraps */
+    test_nblocks = 0;
 }
 static void receive_lists(u32 h, SvcObj* root) {
     static u8 before[0x1000];
@@ -690,6 +739,7 @@ static void domain_requests(u32 h, SvcObj* root) {
 }
 
 int main(void) {
+    user_buffers();
     test_log = getenv("SNX_TEST_LOG") != NULL;
     g_mem = calloc(1, 0x10000);
     CHECK(g_mem != NULL);

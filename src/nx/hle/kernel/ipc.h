@@ -31,7 +31,8 @@ typedef struct IpcCtx {
     IpcBuf a[MAX_BUFS], b[MAX_BUFS], w[MAX_BUFS], x[MAX_BUFS], c[MAX_BUFS];
     int na, nb, nw, nx, nc;
     u32 kernel_rc; /* the kernel fails the request before the server sees it: a header that describes more than the
-                      message, a buffer outside the address space */
+                      client's buffer or a receive list inside the raw data (InvalidCombination), raw data past the
+                      server's 0x100 bytes (MessageTooLarge), a buffer outside the address space */
     u32 domain_rc; /* sf refuses a domain request whose headers don't fit its data, with more than 8 objects or a
                          bad CmifInHeader, once the target is found */
     u32 header_rc; /* sf refuses a request whose headers don't fit its data, or a bad CmifInHeader, at once */
@@ -76,6 +77,8 @@ SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t d
 void svcobj_ref(SvcObj* o);
 void svcobj_unref(SvcObj* o);
 u32 session_new(SvcObj* obj);
+/* SendSyncRequestWithUserBuffer's buffer, checked as the kernel does: 0, or the result the SVC answers */
+u32 ipc_user_buffer(u64 addr, u64 size);
 /* a request in the client's message buffer, msg_size bytes (TLS's 0x100, or SendSyncRequestWithUserBuffer's) */
 void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size);
 /* building a reply by hand (the control requests, a service's fallback). What doesn't fit in out[] is dropped, and

@@ -82,11 +82,15 @@ only read):
 - A failed request answers no data, handles or objects. The generated code puts a command's objects and handles in the
   reply whatever its result, and `ipc.c` closes and drops a failed request's (`drop_outputs`) once the dispatcher has
   returned, outside any lock a service's own dispatcher holds.
-- A request's raw data ends where its data words do (for a domain request, where its domain header says). `ipc.c`
-  fails a request with a buffer outside the address space (InvalidCurrentMemory), whose header describes more than
-  the client's message buffer (InvalidCombination), or larger than the server's 0x100 bytes (MessageTooLarge, from
-  SendSyncRequestWithUserBuffer, whose buffer has to be page-aligned whole pages: InvalidAddress, InvalidSize), before
-  any service sees it, as the kernel does.
+- A CMIF request is measured as sf measures it: its data region starts at the data words aligned to 16 and is 16
+  bytes shorter than they are, and a domain request's data ends where its domain header says. A TIPC request's ends
+  with its data words.
+- The kernel refuses some requests before any service sees them, and `ipc.c` does as it does (Mesosphere): a header
+  that describes more than the client's message buffer, its receive list included, or a receive list inside the raw
+  data (InvalidCombination); raw data that ends past the server's 0x100 bytes (MessageTooLarge, which only
+  SendSyncRequestWithUserBuffer can send); a buffer outside the address space (InvalidCurrentMemory). A
+  SendSyncRequestWithUserBuffer's own buffer has to be page-aligned (InvalidAddress), whole pages (InvalidSize), and
+  memory that allows IPC user buffers, read-write with no attribute (InvalidCurrentMemory): `ipc_user_buffer`.
 - A request has to send what its command declares: the pid flag when it takes `pid` or `aruid`, as many A, B and X
   descriptors (an AutoSelect buffer counts in both of its lists), no exchange (W) buffer, as many copy and move
   handles, and at least the command's raw data. Otherwise it is answered with sf's InvalidCmifRequest, RC(11, 420),
@@ -95,7 +99,7 @@ only read):
   answered InvalidNumInObjects (`ipc_objects`), checked before the rest as sf's DomainServiceObjectProcessor does,
   and a command that takes objects answers NotSupported on a plain session, which can't send them. A TIPC request
   (sm, from newer SDKs) carries its pid in the special header only, so its raw data has no pid slot, and the
-  generated code reads its arguments where TIPC puts them. A request whose data words don't hold its CmifInHeader
+  generated code reads its arguments where TIPC puts them. A request whose data region doesn't hold its CmifInHeader
   (or domain header) is answered InvalidHeaderSize, and one without the SFCI magic or with a version above 1
   InvalidInHeader. So a declaration that differs from what the game's SDK sends fails every such request. One
   difference from the console, on purpose: sf closes the session for these refusals (the client's SendSyncRequest
