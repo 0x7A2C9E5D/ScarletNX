@@ -220,11 +220,12 @@ jobs:
           217ff68aafe085d2d4ab34a50e267805af43736ad8ef880c01ef88e52db8589f  /usr/local/bin/get-debloated-pkgs
           86afbf5045b78020c93fcd35bf0f642765a8dc339bb2dce534a0461ce3d3508d  /usr/local/bin/make-aur-package
           EOF
-      # llvm for the recompiler; quick-sharun bundles the libLLVM the runtime links, with its own dependencies
+      # llvm for the recompiler, libgccjit for its --backend=gcc; quick-sharun bundles the libLLVM and libgccjit the
+      # runtime links, with their own dependencies. GNU as and ld, which --backend=gcc runs, stay the system's
       - name: Install the build tools and the debloated Mesa
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl clang llvm sdl3 libx11 mesa vulkan-icd-loader ccache && break
+            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl clang llvm libgccjit sdl3 libx11 mesa vulkan-icd-loader ccache && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done

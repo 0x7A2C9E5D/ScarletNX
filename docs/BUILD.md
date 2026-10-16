@@ -281,6 +281,9 @@ GITHUB_REPOSITORY=scarletnx/ScarletNX scripts/make-appimage.sh
 # -> dist/ScarletNX-<arch>.AppImage
 ```
 
+It carries libgccjit (with `libgccjit` installed in the container) but not GNU binutils: `--backend=gcc` uses the
+system's `as` and `ld`.
+
 [Nightly AppImages](https://github.com/scarletnx/ScarletNX/releases/tag/nightly), x86_64 and aarch64 · [Launch](USAGE.md).
 
 [Licenses/credits](CREDITS.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md).
