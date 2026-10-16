@@ -19,9 +19,11 @@ def main():
         assert 'ScarletNX - ' not in output, output  # no false launch/completion banner
         return output
 
-    help_text = run(['--help'], 0, 'Stage 2a')
-    assert ('Static ARM11 AOT enabled:' in help_text) != ('ARM11 pipeline disabled' in help_text)
-    assert 'static compilation/execution and encrypted content are not implemented' not in help_text
+    help_text = run(['--help'], 0, 'recompile if needed, then play')
+    assert '--recomp' in help_text and '--extract' in help_text and 'scarletnx-3ds-aot' not in help_text
+    run(['-x', '-r', 'game.cia'], 2, 'Usage:')
+    run(['-r', '--max-blocks', '5', 'game.cia'], 2, 'Usage:')
+    run(['--board-info', '-r'], 2, 'Usage:')
     run(['--output'], 2, 'requires a directory')
     run(['--repo'], 2, 'requires a directory')
     run(['--board-info', '--repo', '.'], 0, 'Old 3DS')  # --repo is a global data-directory option

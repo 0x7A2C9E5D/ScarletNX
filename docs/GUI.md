@@ -44,9 +44,9 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   images use bounded conservative discovery (16 MiB text cap). SuperTux now
   connects/registers `srv:`, then waits for absent `APT:S`, before main,
   graphics or audio. No service/session success is invented to bypass that wait.
-  Full HLE/devices remain incomplete. Install the
-  adjacent `scarletnx-3ds-aot` compiler too. Existing extraction directories are
-  refused rather than treated as cache hits. See [3DS port](3DS.md) for limits.
+  Full HLE/devices remain incomplete. Like the Switch driver, it uses an
+  extraction and a compiled module already there, and recompiles only when needed.
+  See [3DS port](3DS.md) for limits.
 - **Setup device keys**, immediately after the three load entries, blinks red (the theme's `failure` colour, at its
   `blink_ms`) while no `prod.keys` is in use. It prompts you to
   pick `prod.keys` (a click on the blinking **[ Pick or drop prod.keys ]** in the middle of

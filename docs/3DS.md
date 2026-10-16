@@ -61,8 +61,8 @@ Implemented:
   zeroed page-appended BSS, guarded stack and one private initial TLS page.
   `TPIDRURO` points at this page. Initial 3b adds per-thread zeroed TLS slots
   and serialized native context scheduling, not a host-thread/multicore scheduler.
-- Optional `scarletnx-3ds-aot`: separate offline LLVM compiler and native host
-  linker, private staging/publication, versioned module ABI and exact image
+- The offline LLVM compiler and native host linker, part of `scarletnx-3ds`:
+  private staging/publication, versioned module ABI and exact image
   identity. Images up to 4096 bytes retain exhaustive one-instruction ARM/Thumb
   entries. Stage 2b3 adds conservative static CFG discovery for larger images:
   direct branches/calls, conditional continuations, literal/ADR code pointers,
@@ -219,27 +219,29 @@ Unknown SVCs still stop explicitly. No service/device success is fabricated.
 build/3ds/scarletnx-3ds -x --output work/my-title game.cia
 ```
 
-The output is a **new** directory containing `contents/*.app`, `exefs/` (with
+The output is a directory containing `contents/*.app`, `exefs/` (with
 expanded/page-padded `.code`), `romfs/`, raw container/NCCH/ExHeader metadata and
 `manifest.ini` with source/code hashes and segment layout. The default directory
-is `work/3ds/<title-id>-<full-input-sha256>` of the data folder the Switch driver uses
+is `work/3ds/<name>`, named after the CIA's file as the Switch driver names a dump's, in the data folder the Switch driver uses
 (the checkout, a portable copy's folder, else the user's data folder; `--repo DIR` names
 another), which an installed copy on Linux keeps in `~/.cache/scarletnx/work/3ds/`. No source CIA needs to be mounted by
 the future guest FS. Extraction is privately staged, then published only after
-all checks succeed; failures remove staging files. Existing destinations are
-**refused**, never overwritten or blindly reused as a cache hit. Resume/cache
-validation is still stage-2b work. Keep the input and output parent trusted and
+all checks succeed; failures remove staging files. As in the Switch driver, a
+finished extraction already there is used as it is, never extracted again or
+hashed. Keep the input and output parent trusted and
 not concurrently modified; extraction is not a sandbox against hostile host
 processes racing parent directory changes.
 
-`-x`/`--extract` always stops after extraction. Without it, the default build
-(`SNX_3DS_AOT=OFF`) still returns an explicit missing-AOT error. In an AOT-enabled
-build the driver invokes the adjacent compiler, waits for native linking, then
-loads `<extracted>/native/code.so`. `native/code.o` holds the descriptor/index;
-`native/block-*.o` hold the guest code. All objects are retained for review.
-There is no compilation during dispatch and no reuse of existing extraction or
-native outputs. A failed compile removes private native staging; the successfully
-extracted tree remains. The GUI uses this same driver path, not a separate engine.
+`-x`/`--extract` stops after extraction and `-r`/`--recomp` compiles without
+playing, as the Switch driver's do. Otherwise the driver loads
+`<extracted>/native/code.so` and compiles it first only when needed: when it is
+missing, or no longer loads or matches the build's module ABI or the extracted
+image's identity (a changed `.code`). `-r` always compiles again. A new module
+replaces the old one only once it is complete. `native/code.o` holds the
+descriptor/index; `native/block-*.o` hold the guest code. All objects are retained
+for review. There is no compilation during dispatch. A failed compile removes
+private native staging; the extracted tree remains. The GUI uses this same
+driver path, not a separate engine.
 
 `--max-blocks N` selects a 1..10000000 native-block budget (default 100000).
 A larger-image block may execute up to 32 instructions; this is not a cycle or
@@ -332,10 +334,9 @@ build/ctr-aot/scarletnx-3ds --output work/small-title --max-blocks 100000 small.
 ```
 
 The compiler calls the host C compiler selected by CMake to link its PIC object;
-that compiler must remain installed at the configured path. Install both
-`scarletnx-3ds` and `scarletnx-3ds-aot` together. Other hosts/cross builds reject
-this opt-in configuration rather than substituting another execution engine.
-The runtime/module need no LLVM shared library; only the offline compiler does.
+that compiler must remain installed at the configured path. The compiler is part of
+`scarletnx-3ds`, which links LLVM as `scarletnx` does; the compiled modules need no
+LLVM library.
 Use both `SNX_3DS_AOT=ON` and `SNX_TEST_ARM_AOT=ON` for pipeline plus CPU tests.
 The bounded CFG unit test needs no LLVM. To run the optional external SuperTux
 bootstrap gate, set `SNX_TEST_3DS_SUPERTUX=/absolute/path/to/Supertux.cia`.

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/aot/ctr_module.h"
+#include "3ds/aot/ctr_compile.h"
 #include "common/utilities/common.h"
 #include "3ds/runtime/internal.h"
 #include "3ds/gpu/present.h"
@@ -10,36 +11,30 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-int snx_ctr_aot_run(const char* driver, const char* directory, SnxCtrModel model, uint64_t limit, char* error,
+int snx_ctr_aot_run(const char* directory, SnxCtrModel model, uint64_t limit, unsigned flags, char* error,
                     size_t error_size) {
     SnxCtrImage image = {0};
     SnxCtrProcess* process = NULL;
     SnxCtrNative native = {0};
-    char *executable = NULL, *parent = NULL, *compiler = NULL, *module_path = NULL, *frames = NULL, *wav = NULL;
+    char *module_path = NULL, *frames = NULL, *wav = NULL;
     int result = 1;
     if (!snx_ctr_image_load(directory, &image, error, error_size)) goto done;
-    executable = snx_executable(driver);
-    if (!executable) {
-        snprintf(error, error_size, "cannot locate 3DS compiler beside driver");
-        goto done;
-    }
-    parent = snx_dirname(executable);
-    compiler = snx_path_join(parent, "scarletnx-3ds-aot");
-    if (!snx_is_file(compiler)) {
-        snprintf(error, error_size, "missing adjacent scarletnx-3ds-aot compiler");
-        result = 3;
-        goto done;
-    }
-    printf("Recompiling ARM11 (offline static AOT)\n");
-    const char* command[] = {compiler, directory, NULL};
-    int status = snx_run_stage(command, NULL, "ARM11 static compilation");
-    if (status) {
-        snprintf(error, error_size, "ARM11 static compiler failed (status %d); guest was not run", status);
-        result = status == 3 ? 3 : 1;
-        goto done;
-    }
     module_path = snx_format("%s/native/code.so", directory);
-    if (!snx_ctr_native_open(module_path, &image, &native, error, error_size)) goto done;
+    /* like the Switch driver's recompile: only when needed, an existing module is no error */
+    if ((flags & SNX_CTR_RECOMPILE) || !snx_ctr_native_open(module_path, &image, &native, error, error_size)) {
+        snx_ctr_native_close(&native);
+        printf("Recompiling ARM11 (offline static AOT)\n");
+        int status = snx_ctr_aot_compile(directory, error, error_size);
+        if (status) {
+            result = status == 3 ? 3 : 1;
+            goto done;
+        }
+        if (!snx_ctr_native_open(module_path, &image, &native, error, error_size)) goto done;
+    }
+    if (flags & SNX_CTR_COMPILE_ONLY) {
+        result = 0;
+        goto done;
+    }
     process = snx_ctr_process_new(&image, model);
     if (!process) {
         snprintf(error, error_size, "cannot create checked ARM11 process mappings");
@@ -52,7 +47,7 @@ int snx_ctr_aot_run(const char* driver, const char* directory, SnxCtrModel model
     /* Vulkan-only presentation: real frames land in <output>/frames as PPM.
        Without a Vulkan loader/device no frame is shown or fabricated. */
     frames = snx_path_join(directory, "frames");
-    if (!frames || plat_mkdir(frames)) {
+    if (!frames || (!snx_is_dir(frames) && plat_mkdir(frames))) {
         snprintf(error, error_size, "cannot create frame output directory");
         goto done;
     }
@@ -87,9 +82,6 @@ done:
     free(frames);
     snx_ctr_native_close(&native);
     free(module_path);
-    free(compiler);
-    free(parent);
-    free(executable);
     snx_ctr_image_free(&image);
     return result;
 }

@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* Separate offline compiler executable. Never creates an execution engine. */
+/* The offline compiler, part of the driver: the extracted image's static blocks to a native module. Never creates an
+   execution engine. */
+#include "3ds/aot/ctr_compile.h"
 #include "3ds/aot/ctr_module.h"
 #include "3ds/aot/ctr_runtime.h"
 #include "3ds/aot/ctr_discover.h"
@@ -197,48 +199,40 @@ done:
     LLVMContextDispose(c);
     return ok;
 }
-int main(int argc, char** argv) {
-    char error[512] = {0};
+int snx_ctr_aot_compile(const char* extracted, char* error, size_t error_size) {
     int result = 1;
     SnxCtrImage image = {0}, check = {0};
     SnxCtrPlan plan = {0};
     Host host = {0};
     char *directory = NULL, *target = NULL, *stage = NULL, *module = NULL, *runtime = NULL, **objects = NULL;
+    char* previous = NULL;
     Entry* entries = NULL;
     unsigned count = 0, files = 0;
     const char** command = NULL;
     LLVMTargetRef backend;
     char* detail = NULL;
-    if (argc != 2) {
-        fputs("Usage: scarletnx-3ds-aot EXTRACTED_DIRECTORY\n", stderr);
-        return 2;
-    }
-    setvbuf(stdout, NULL, _IOLBF, 0);
-    if (!snx_ctr_image_load(argv[1], &image, error, sizeof error)) goto done;
+    if (error_size) error[0] = 0;
+    if (!snx_ctr_image_load(extracted, &image, error, error_size)) goto done;
     if (image.segment[0].bytes > SNX_CTR_AOT_TEXT_LIMIT) {
-        snprintf(error, sizeof error, "static AOT text limit is %u bytes", SNX_CTR_AOT_TEXT_LIMIT);
+        snprintf(error, error_size, "static AOT text limit is %u bytes", SNX_CTR_AOT_TEXT_LIMIT);
         result = 3;
         goto done;
     }
-    directory = snx_absolute(argv[1]);
+    directory = snx_absolute(extracted);
     if (!directory) {
-        snprintf(error, sizeof error, "invalid extracted path");
+        snprintf(error, error_size, "invalid extracted path");
         goto done;
     }
     target = snx_path_join(directory, "native");
-    if (snx_path_exists(target)) {
-        snprintf(error, sizeof error, "native output already exists; no cache reuse or overwrite");
-        goto done;
-    }
     bool exhaustive = image.segment[0].bytes <= SNX_CTR_AOT_EXHAUSTIVE_LIMIT;
     unsigned capacity = image.segment[0].bytes / 4 + image.segment[0].bytes / 2;
-    if (!exhaustive && !snx_ctr_discover(&image, &plan, error, sizeof error)) {
+    if (!exhaustive && !snx_ctr_discover(&image, &plan, error, error_size)) {
         result = 3;
         goto done;
     }
     entries = calloc(exhaustive ? capacity : plan.entries, sizeof *entries);
     if (!entries) {
-        snprintf(error, sizeof error, "out of memory for static entries");
+        snprintf(error, error_size, "out of memory for static entries");
         goto done;
     }
     for (unsigned mode = 0; mode < 2; ++mode) {
@@ -251,62 +245,62 @@ int main(int argc, char** argv) {
     printf("Discovered ARM11 static coverage: %u blocks%s\n", count,
            exhaustive ? " (exhaustive tiny image)" : " (conservative CFG)");
     if (LLVMInitializeNativeTarget() || LLVMInitializeNativeAsmPrinter()) {
-        snprintf(error, sizeof error, "cannot initialize native LLVM target");
+        snprintf(error, error_size, "cannot initialize native LLVM target");
         goto done;
     }
     host.triple = LLVMGetDefaultTargetTriple();
     if (LLVMGetTargetFromTriple(host.triple, &backend, &detail)) {
-        snprintf(error, sizeof error, "%s", detail);
+        snprintf(error, error_size, "%s", detail);
         goto done;
     }
     host.machine = LLVMCreateTargetMachine(backend, host.triple, "generic", "", LLVMCodeGenLevelDefault, LLVMRelocPIC,
                                            LLVMCodeModelDefault);
     if (!host.machine) {
-        snprintf(error, sizeof error, "cannot create native LLVM target");
+        snprintf(error, error_size, "cannot create native LLVM target");
         goto done;
     }
     host.layout = LLVMCreateTargetDataLayout(host.machine);
     stage = snx_temp_dir(directory);
     if (!stage) {
-        snprintf(error, sizeof error, "cannot create private native staging directory");
+        snprintf(error, error_size, "cannot create private native staging directory");
         goto done;
     }
     files = (count + CHUNK_ENTRIES - 1) / CHUNK_ENTRIES + 1;
     objects = calloc(files, sizeof *objects);
     if (!objects) {
-        snprintf(error, sizeof error, "out of memory for native chunks");
+        snprintf(error, error_size, "out of memory for native chunks");
         goto done;
     }
     objects[0] = snx_path_join(stage, "code.o");
-    if (!index_object(&host, &image, entries, count, objects[0], error, sizeof error)) goto done;
+    if (!index_object(&host, &image, entries, count, objects[0], error, error_size)) goto done;
     uint64_t output_bytes = snx_file_size(objects[0]);
     for (unsigned i = 1; i < files; ++i) {
         unsigned begin = (i - 1) * CHUNK_ENTRIES, n = count - begin;
         if (n > CHUNK_ENTRIES) n = CHUNK_ENTRIES;
         objects[i] = snx_format("%s/block-%05u.o", stage, i);
-        if (!chunk(&host, &image, entries + begin, n, objects[i], exhaustive, error, sizeof error)) goto done;
+        if (!chunk(&host, &image, entries + begin, n, objects[i], exhaustive, error, error_size)) goto done;
         output_bytes += snx_file_size(objects[i]);
         if (output_bytes > OBJECT_LIMIT) {
-            snprintf(error, sizeof error, "native object output limit exceeded");
+            snprintf(error, error_size, "native object output limit exceeded");
             result = 3;
             goto done;
         }
         if (!(i % 16) || i + 1 == files) printf("ARM11 AOT: %u/%u static blocks emitted\n", begin + n, count);
     }
     if (output_bytes > OBJECT_LIMIT || snx_ctr_aot_runtime_size > OBJECT_LIMIT - output_bytes) {
-        snprintf(error, sizeof error, "native object output limit exceeded including semantic helpers");
+        snprintf(error, error_size, "native object output limit exceeded including semantic helpers");
         result = 3;
         goto done;
     }
     runtime = snx_path_join(stage, "arm-runtime.a");
     if (!runtime || snx_write_file(runtime, snx_ctr_aot_runtime, snx_ctr_aot_runtime_size)) {
-        snprintf(error, sizeof error, "cannot stage bounded native semantic helpers");
+        snprintf(error, error_size, "cannot stage bounded native semantic helpers");
         goto done;
     }
     module = snx_path_join(stage, "code.so");
     command = calloc(files + 7, sizeof *command);
     if (!command) {
-        snprintf(error, sizeof error, "out of memory for native linker arguments");
+        snprintf(error, error_size, "out of memory for native linker arguments");
         goto done;
     }
     command[0] = SNX_CTR_HOST_CC;
@@ -317,32 +311,35 @@ int main(int argc, char** argv) {
     command[4 + files] = "-o";
     command[5 + files] = module;
     if (snx_run_stage(command, NULL, "native linking")) {
-        snprintf(error, sizeof error, "native linker failed; no runnable module published");
+        snprintf(error, error_size, "native linker failed; no runnable module published");
         goto done;
     }
     if (!snx_is_file(module) || snx_is_link(module) || !snx_file_size(module)) {
-        snprintf(error, sizeof error, "native linker did not produce a regular nonempty module");
+        snprintf(error, error_size, "native linker did not produce a regular nonempty module");
         goto done;
     }
     if (snx_file_size(module) > MODULE_LIMIT) {
-        snprintf(error, sizeof error, "native module output limit exceeded");
+        snprintf(error, error_size, "native module output limit exceeded");
         result = 3;
         goto done;
     }
-    if (!snx_ctr_image_load(directory, &check, error, sizeof error) || memcmp(image.identity, check.identity, 32)) {
-        snprintf(error, sizeof error, "extracted image changed during compilation");
+    if (!snx_ctr_image_load(directory, &check, error, error_size) || memcmp(image.identity, check.identity, 32)) {
+        snprintf(error, error_size, "extracted image changed during compilation");
         goto done;
     }
-    if (snx_path_exists(target) || snx_replace(stage, target)) {
-        snprintf(error, sizeof error, "cannot publish new native output");
+    /* a module from an earlier compile is replaced, only once the new one is complete */
+    previous = snx_path_join(directory, "native.previous");
+    if ((snx_path_exists(previous) && snx_remove_tree(previous)) ||
+        (snx_path_exists(target) && snx_replace(target, previous)) || snx_replace(stage, target)) {
+        snprintf(error, error_size, "cannot publish new native output");
         goto done;
     }
+    (void)snx_remove_tree(previous);
     free(stage);
     stage = NULL;
     printf("Compiled ARM11 static module: %u blocks in %u objects\n", count, files);
     result = 0;
 done:
-    if (result) fprintf(stderr, "scarletnx-3ds-aot: %s\n", error);
     if (stage) snx_remove_tree(stage);
     if (objects)
         for (unsigned i = 0; i < files; ++i) free(objects[i]);
@@ -353,6 +350,7 @@ done:
     free(module);
     free(stage);
     free(target);
+    free(previous);
     free(directory);
     LLVMDisposeMessage(detail);
     if (host.layout) LLVMDisposeTargetData(host.layout);
