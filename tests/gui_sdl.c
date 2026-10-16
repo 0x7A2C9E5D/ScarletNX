@@ -1150,8 +1150,16 @@ int main(int argc, char** argv) {
     char* directory = snx_path_join(app.games_dir, "directory.exe");
     assert(!snx_mkdirs(directory));
     free(directory);
-    count_games(&app);
+    /* the menu finds them itself, looking once a second while it is open */
+    app.clock = 50000;
+    app.games_checked = app.clock;
+    pump(&app);
+    assert(!app.menu.games);
+    app.clock += 1000;
+    pump(&app);
     assert(app.menu.games && app.games_total == 35);
+    app.clock = 0;
+    app.games_checked = 0;
     app.menu.selected = GUI_GAMES;
     app.menu.recent_focus = 0;
     render(&app);
@@ -1195,6 +1203,26 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RIGHT);
     key(&app, SDLK_DOWN);
     assert(app.browser.page == 1 && app.browser.selected == 1);
+    /* a game put in while the list shows joins it, the list staying on its page and file; taken out, it leaves */
+    {
+#ifdef _WIN32
+        char* late = snx_path_join(app.games_dir, "Game35.exe");
+#else
+        char* late = snx_path_join(app.games_dir, "Game35");
+#endif
+        assert(!snx_write_file(late, "fixture", 7) && !snx_make_executable(late));
+        app.clock = 60000;
+        app.games_checked = 59000;
+        pump(&app);
+        assert(app.games.count == 36 && app.games_total == 36 && app.browser.page == 1 && app.browser.selected == 1);
+        assert(!snx_remove_tree(late));
+        app.clock += 1000;
+        pump(&app);
+        assert(app.games.count == 35 && app.browser.page == 1 && app.browser.selected == 1);
+        app.clock = 0;
+        app.games_checked = 0;
+        free(late);
+    }
     render(&app);
     marks(&app, 5, 5 + (int)app.browser.page_size - 1, true, true); /* games on the pages before and after */
     screenshot = getenv("SNX_GUI_BROWSER_SCREENSHOT");

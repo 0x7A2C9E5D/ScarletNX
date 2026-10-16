@@ -121,6 +121,8 @@ typedef struct {
     GuiThemeKey folder_keys[GUI_FOLDERS_MAX + 1];
     int folder_armed;       /* a folder's row Select was pressed on once, + 1: again takes it off */
     size_t games_total;     /* what Games counts, games/ and the folders: Games shows when there are any */
+    uint64_t games_stamp;   /* what the game folders held when last counted (games_stamp) */
+    Uint64 games_checked;   /* when they were last looked at */
     bool recent_all;        /* every recent game shows, not GUI_RECENT_SHOWN and a row for the rest */
     Uint32 picked_folder;   /* the event a folder from the system's picker comes back as */
     SDL_Texture* preview;   /* the editor's: the menu or a run drawn in its theme, at 1x */
@@ -1754,6 +1756,8 @@ static void recent_name(App* app, const char* label) {
 }
 /* back to the menu from a finished run, which fades in */
 static void count_games(App* app);
+static void list_games(App* app);
+static uint64_t games_stamp(const App* app);
 static void leave_run(App* app) {
     app->finished = false;
     app->menu.view = GUI_LOAD_NONE;
@@ -1955,6 +1959,21 @@ static void pump(App* app) {
         app->left_shown = app->lefts > 0;
     }
     if (app->leaving_ms && now_ms(app) - app->leaving_ms >= app->theme.fade_out_ms) leave_run(app);
+    /* games put in or taken out of the folders while the menu is open, looked for once a second: Games and its list
+       follow, the list on the file it had */
+    if (!app->menu.running && !app->finished && now_ms(app) - app->games_checked >= 1000) {
+        app->games_checked = now_ms(app);
+        if (games_stamp(app) != app->games_stamp) {
+            count_games(app);
+            if (app->menu.view == GUI_LOAD_GAMES) {
+                GuiBrowser was = app->browser;
+                list_games(app);
+                app->browser.page = was.page;
+                app->browser.selected = was.selected;
+                gui_browser_resize(&app->browser, app->browser.page_size);
+            }
+        }
+    }
 }
 static void launch(App* app, char* absolute, bool prepared) {
 #ifdef SDL_PLATFORM_ANDROID
@@ -2212,11 +2231,33 @@ static void games_scan(App* app, GuiGames* games, char* message, size_t size) {
         if (!gui_games_add(games, app->folders[i], kinds, error, sizeof error) && !message[0])
             snprintf(message, size, "%s It is in Settings > App > Game folders.", error);
 }
+/* the names games/ and the player's folders hold, hashed: a game put in, taken out or renamed changes it, and so does a
+   folder that comes or goes */
+static uint64_t games_stamp(const App* app) {
+    uint64_t h = 1469598103934665603ull; /* FNV-1a */
+    int i;
+    for (i = -1; i < app->folder_count; ++i) {
+        const char* dir = i < 0 ? app->games_dir : app->folders[i];
+        char** names = NULL;
+        size_t count = 0, k;
+        const char* c;
+        if (!dir || snx_list_dir(dir, &names, &count)) count = (size_t)-1; /* none: not the same as an empty one */
+        for (k = 0; k < count && names; ++k)
+            for (c = names[k];; ++c) {
+                h = (h ^ (unsigned char)*c) * 1099511628211ull;
+                if (!*c) break;
+            }
+        h = (h ^ (uint64_t)count) * 1099511628211ull;
+        if (names) snx_free_strings(names, count);
+    }
+    return h;
+}
 /* how many games Games has: it shows when there are any */
 static void count_games(App* app) {
     GuiGames games = {0};
     char message[sizeof app->message];
     games_scan(app, &games, message, sizeof message);
+    app->games_stamp = games_stamp(app);
     app->games_total = games.count;
     app->menu.games = games.count > 0;
     if (!app->menu.games && app->menu.selected == GUI_GAMES) app->menu.selected = GUI_SWITCH;

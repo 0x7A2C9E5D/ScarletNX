@@ -126,8 +126,9 @@ data folder (docs/USAGE.md), then each folder of Settings > App > Game folders. 
 displayed by basename, sorted alphabetically in each folder. Only immediate files are listed:
 executables (execute permission on UNIX, `.exe` on Windows) and `.cia` files (case-insensitive,
 no execute permission needed), which run with the 3DS driver. Hidden files, shared libraries and
-directories are excluded. The list is refreshed each time it is opened; a folder that cannot be
-read is named and the others still listed.
+directories are excluded. The folders are looked at once a second while the menu is open (their
+names only), so a game put in or taken out shows in Games and in the open list; a folder that
+cannot be read is named and the others still listed.
 
 - **Back [ESC]** is the first selectable item on every page. Enter/Space on it, or
   ESC anywhere in the browser, returns to the menu, on Games.
