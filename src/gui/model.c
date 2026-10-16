@@ -7,14 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* the item before or after one, round the menu, past Games while it is hidden */
-static int step_item(const GuiMenu* menu, int item, int step) {
-    do item = (item + GUI_ITEM_COUNT + step) % GUI_ITEM_COUNT;
-    while (item == GUI_GAMES && !menu->games);
-    return item;
-}
+/* the item before or after one, round the menu */
+static int step_item(int item, int step) { return (item + GUI_ITEM_COUNT + step) % GUI_ITEM_COUNT; }
 GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
-    int first = menu->games ? GUI_GAMES : GUI_SWITCH;
     if (menu->running || menu->view == GUI_LOAD_GAMES) return GUI_MENU_STAY; /* the browser owns its keys */
     if (menu->view != GUI_LOAD_NONE && key == GUI_CANCEL) {
         menu->view = GUI_LOAD_NONE;
@@ -22,44 +17,16 @@ GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
         return GUI_MENU_STAY;
     }
     if (menu->view == GUI_LOAD_KEYS) return GUI_MENU_STAY;
-    if (menu->selected == GUI_GAMES && !menu->games) menu->selected = GUI_SWITCH; /* the games are gone */
-    /* the recent games and the items are one ring: the last recent row leads to the first item, Exit to the first
-       game */
     switch (key) {
         case GUI_UP:
-        case GUI_LEFT:
-            if (menu->recent_focus > 1)
-                menu->recent_focus--;
-            else if (menu->recent_focus) {
-                menu->recent_focus = 0;
-                menu->selected = GUI_EXIT;
-            } else if (menu->selected == first && menu->recent)
-                menu->recent_focus = menu->recent;
-            else
-                menu->selected = step_item(menu, menu->selected, -1);
-            break;
+        case GUI_LEFT: menu->selected = step_item(menu->selected, -1); break;
         case GUI_DOWN:
-        case GUI_RIGHT:
-            if (menu->recent_focus && menu->recent_focus < menu->recent)
-                menu->recent_focus++;
-            else if (menu->recent_focus) {
-                menu->recent_focus = 0;
-                menu->selected = first;
-            } else if (menu->selected == GUI_EXIT && menu->recent)
-                menu->recent_focus = 1;
-            else
-                menu->selected = step_item(menu, menu->selected, 1);
-            break;
+        case GUI_RIGHT: menu->selected = step_item(menu->selected, 1); break;
         case GUI_SELECT:
-            if (menu->recent_focus) {
-                menu->view = GUI_LOAD_NONE;
-                return GUI_MENU_RECENT;
-            }
             menu->active = menu->selected;
             menu->activated = true;
             menu->view = GUI_LOAD_NONE;
             switch (menu->selected) {
-                case GUI_GAMES: menu->view = GUI_LOAD_GAMES; break;
                 case GUI_SWITCH:
                 case GUI_LINUX:
                 case GUI_3DS: menu->view = GUI_LOAD_DROP; break;
@@ -106,7 +73,6 @@ void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_byte
 }
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
-        case GUI_GAMES: return "The games of games/ and of the folders added in Settings > App";
         case GUI_SETTINGS: return "The game's .ini settings, the launcher's for the next runs, and its theme";
         case GUI_LOG:
 #ifdef __ANDROID__
@@ -150,30 +116,36 @@ size_t gui_browser_items(const GuiBrowser* browser) {
     size_t remaining = browser->count - browser->page * browser->page_size;
     return remaining < browser->page_size ? remaining : browser->page_size;
 }
+/* the focus on the last row there is, when it is past it */
+static void browser_clamp(GuiBrowser* browser) {
+    size_t rows = browser->head + gui_browser_items(browser);
+    if (browser->selected >= rows) browser->selected = rows ? rows - 1 : 0;
+}
 void gui_browser_resize(GuiBrowser* browser, size_t page_size) {
+    int on_game = browser->selected >= browser->head;
     if (!page_size) page_size = 1;
     /* Preserve the selected file across a resize, not merely its row number. */
     size_t anchor = browser->page * browser->page_size;
-    if (browser->selected) anchor += browser->selected - 1;
+    if (on_game) anchor += browser->selected - browser->head;
     browser->page_size = page_size;
     browser->page = anchor / page_size;
     size_t pages = gui_browser_pages(browser);
     if (browser->page >= pages) browser->page = pages - 1;
-    if (browser->selected) browser->selected = anchor % page_size + 1;
-    size_t items = gui_browser_items(browser);
-    if (browser->selected > items) browser->selected = items;
+    if (on_game) browser->selected = browser->head + anchor % page_size;
+    browser_clamp(browser);
 }
 GuiBrowserAction gui_browser_key(GuiBrowser* browser, GuiKey key) {
-    size_t items = gui_browser_items(browser);
+    size_t rows = browser->head + gui_browser_items(browser);
     switch (key) {
         case GUI_CANCEL: return GUI_BROWSER_BACK;
         case GUI_SELECT:
-            if (!browser->selected) return GUI_BROWSER_BACK;
-            browser->active = browser->page * browser->page_size + browser->selected - 1;
+            if (browser->selected < browser->head) return GUI_BROWSER_HEAD;
+            if (browser->selected >= rows) return GUI_BROWSER_NONE;
+            browser->active = browser->page * browser->page_size + browser->selected - browser->head;
             browser->activated = true;
             return GUI_BROWSER_OPEN;
-        case GUI_UP: browser->selected = browser->selected ? browser->selected - 1 : items; break;
-        case GUI_DOWN: browser->selected = browser->selected < items ? browser->selected + 1 : 0; break;
+        case GUI_UP: browser->selected = browser->selected ? browser->selected - 1 : rows ? rows - 1 : 0; break;
+        case GUI_DOWN: browser->selected = browser->selected + 1 < rows ? browser->selected + 1 : 0; break;
         case GUI_LEFT:
         case GUI_PAGE_UP:
             if (browser->page) --browser->page;
@@ -184,8 +156,7 @@ GuiBrowserAction gui_browser_key(GuiBrowser* browser, GuiKey key) {
             break;
         default: break;
     }
-    items = gui_browser_items(browser);
-    if (browser->selected > items) browser->selected = items;
+    browser_clamp(browser);
     return GUI_BROWSER_NONE;
 }
 static int clamp(int n, int maximum) { return n < 1 ? 1 : n > maximum ? maximum : n; }
