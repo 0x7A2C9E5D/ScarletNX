@@ -2913,8 +2913,8 @@ int main(int argc, char** argv) {
             run_place(&app, &p);
             text_px_is(&app, p.list.x + cw, p.list.y + head_h(&app) + 2 * s, "driver std", normal, black);
             text_px_is(&app, p.side.x + cw,
-                       p.side.y + head_h(&app) + 2 * s + wrap_rows(app.file, (p.side.w - 2 * cw) / cw, 1) * 16 * s +
-                           8 * s,
+                       p.side.y + head_h(&app) + 2 * s +
+                           wrap_rows(&app, app.file, (p.side.w - 2 * cw) / cw, 1) * 16 * s + 8 * s,
                        "Driver exited with status 0.", yellow, black);
             r = foot_text(&app, p.keys, app.theme.footer_box);
             text_px_is(&app, r.x, r.y, SAY_DONE, red, black);
@@ -2963,6 +2963,19 @@ int main(int argc, char** argv) {
         shows(&app, "extracted with", page);
         app.theme.tips_wrap = false;
         app.clock = 0;
+        /* [body] text: a text too long for its box over its rows, or on one row that slides */
+        {
+            const char* many = "one two three four five six seven eight";
+            GuiRect box = gui_rect(0, 0, 10 * cw, 4 * 16 * s);
+            int rows = wrap_rows(&app, many, 10, 0);
+            assert(app.theme.text == GUI_TEXT_WRAP && rows > 1 &&
+                   wrap_in(&app, box, 0, 0, many, 0, ink) == SDL_min(rows, 4));
+            app.theme.text = GUI_TEXT_SLIDE;
+            assert(wrap_rows(&app, many, 10, 0) == 1 && wrap_in(&app, box, 0, 0, many, 0, ink) == 1);
+            assert(!wrap_in(&app, box, 0, 0, "", 0, ink) &&
+                   !wrap_in(&app, gui_rect(0, 0, 10 * cw, 8), 0, 0, many, 0, ink));
+            app.theme.text = GUI_TEXT_WRAP;
+        }
         /* its title twice the text's size, in the row of tabs against its right; with its shadow, in the dim colour a big
            pixel down and right */
         r = m.place.title;

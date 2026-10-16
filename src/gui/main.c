@@ -1001,11 +1001,16 @@ static size_t wrap_at(const char* s, int width, int path) {
     return !*p ? strlen(s) : space ? (size_t)(space - s) : gui_wrap(s, width);
 }
 /* s from pixel x, y wrapped to the right edge of r (path: at its slashes), a row under the other while they fit above
-   its bottom: the rows it took */
+   its bottom, or on one row that slides with the theme's [body] text = slide: the rows it took */
 static int wrap_in(App* app, GuiRect r, int x, int y, const char* s, int path, SDL_Color color) {
     char row[1100];
     int width = (r.x + r.w - x) / cell_w(app), rows = 0;
     if (width <= 0) return 0;
+    if (app->theme.text == GUI_TEXT_SLIDE) {
+        if (!*s || y + cell_h(app) > r.y + r.h) return 0;
+        text_in(app, r, x, y, s, color);
+        return 1;
+    }
     while (*s && y + (rows + 1) * cell_h(app) <= r.y + r.h) {
         size_t n = wrap_at(s, width, path);
         snprintf(row, sizeof row, "%.*s", (int)n, s);
@@ -1015,10 +1020,10 @@ static int wrap_in(App* app, GuiRect r, int x, int y, const char* s, int path, S
     }
     return rows;
 }
-/* the rows s takes wrapped to width columns */
-static int wrap_rows(const char* s, int width, int path) {
+/* the rows s takes wrapped to width columns, one where the theme slides it */
+static int wrap_rows(const App* app, const char* s, int width, int path) {
     int rows = 0;
-    if (width <= 0) return 1;
+    if (width <= 0 || app->theme.text == GUI_TEXT_SLIDE) return 1;
     for (; *s; ++rows)
         for (s += wrap_at(s, width, path); *s == ' ';) ++s;
     return SDL_max(rows, 1);
@@ -1060,7 +1065,7 @@ static void render_files(App* app, int report) {
     for (shown = 0; at && shown < count; ++shown) {
         int need;
         at = files_entry(app, report, at, a, b, sizeof a, &ca, &cb, &path);
-        need = wrap_rows(a, cols - 2, 1) + wrap_rows(b, cols - 3, path);
+        need = wrap_rows(app, a, cols - 2, 1) + wrap_rows(app, b, cols - 3, path);
         if (shown && used + need > room) break;
         used += need;
     }
@@ -1344,7 +1349,7 @@ static int status_rows(App* app, int width, GuiRect r, int y, int draw) {
         if (draw)
             rows += wrap_in(app, r, r.x, y + rows * cell_h(app), lines[i], i == 2, i == 2 ? ink : soft);
         else
-            rows += wrap_rows(lines[i], width, i == 2);
+            rows += wrap_rows(app, lines[i], width, i == 2);
     }
     return rows;
 }
@@ -2708,7 +2713,7 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
     else
         list_place(app, &f->left, f->place.list, app->groups + 1,
                    app->form == GUI_FORM_SETTINGS ? app->editor.row : -1);
-    rows = note ? wrap_rows(note, inner(app, f->place.side).w / cell_w(app), 0) : 1; /* the note whole */
+    rows = note ? wrap_rows(app, note, inner(app, f->place.side).w / cell_w(app), 0) : 1; /* the note whole */
     f->info = gui_rect(f->place.side.x, f->place.side.y + f->place.side.h - rows * cell_h(app) - 4 * app->scale,
                        f->place.side.w, rows * cell_h(app) + 2 * app->scale);
     top = f->place.side.y + head_h(app) + 4 * app->scale;

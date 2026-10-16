@@ -220,7 +220,8 @@ opens the picker) and Back at its foot. The Settings list their groups, and besi
 rows: Enter, or a click on a row, opens the group, its rows taking the focus under a Back that a click or a finger
 takes as ESC, the group shown as the focused one; a click on another group opens that one. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
 every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
-column is as wide as its entries and the side box goes under the list. A run of the console layout shows the driver's output in a box sized to it,
+column is as wide as its entries and the side box goes under the list. A text too long for its box wraps over
+its rows, or takes one that slides with `[body] text = slide`. A run of the console layout shows the driver's output in a box sized to it,
 beside it what runs and how it ended over the status, the file in the tips and the ESC line where the keys
 go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question, or
 the files an older version left, comes in a box over the screen darkened.
@@ -291,6 +292,8 @@ focus = bar
 panels = fill
 ; fixed: the list two fifths of every screen, alone on a narrow one | adaptive: as wide as its entries
 sizing = fixed
+; a text too long for its box: wrap (over its rows) | slide (on one row)
+text = wrap
 ; in the list's margin, beside the focused box
 cursor = "> "
 [backdrop]
