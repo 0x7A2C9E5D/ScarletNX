@@ -271,6 +271,8 @@ void spv_emit_return(SpvEmitter* e);
 void spv_emit_kill(SpvEmitter* e);
 /* OpDemoteToHelperInvocation: the module declares the DemoteToHelperInvocation capability (5379) */
 void spv_emit_demote(SpvEmitter* e);
+/* OpIsHelperInvocationEXT, with the same capability: whether the lane is a helper, a demoted one too */
+uint32_t spv_emit_is_helper(SpvEmitter* e, uint32_t bool_type);
 void spv_emit_selection_merge(SpvEmitter* e, uint32_t merge_label);
 void spv_emit_branch_conditional(SpvEmitter* e, uint32_t condition, uint32_t yes_label, uint32_t no_label);
 void spv_emit_branch(SpvEmitter* e, uint32_t label);

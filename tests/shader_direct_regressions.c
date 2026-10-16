@@ -26,6 +26,7 @@ static const char* gradient_paths[3];
 static const char* texture_paths[6];
 static const char* arithmetic_path;
 static const char* beyond_paths[3];
+static const char* attribute_paths[3];
 static void check(int condition, const char* what) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s\n", what);
@@ -1025,6 +1026,45 @@ static void beyond_eden(void) {
     }
 }
 
+/* A fragment program writing a sample mask and depth after its colour; reading PrimitiveId, SR_THREAD_KILL and
+   PIXLD's sample and coverage; and a compute program reading SR_TID packed and the clock's high word */
+static void system_values(void) {
+    u64 program[64] = {0};
+    ShaderInfo info;
+    size_t words = 0;
+    ((u32*)program)[18] = 0xf; /* render target 0, RGBA in R0-R3 */
+    ((u32*)program)[19] = 3;   /* then the sample mask in R4 and depth in R5 */
+    program[10] = SCHED;
+    program[11] = mov32i(4, 0xff);
+    program[12] = EXIT;
+    memset(&info, 0, sizeof info);
+    u32* code = shader_to_spirv((const u8*)program, sizeof program, ST_FS, &info, &words, 0, 1, 1);
+    check(code && has_builtin(code, words, 20) == 1 && has_builtin(code, words, 22) == 1,
+          "a fragment program writes its sample mask and depth");
+    if (code && attribute_paths[0]) save_fixture(attribute_paths[0], code, words);
+    free(code);
+    static const u64 fragment[] = {
+        0xe003ff860ff7ff00ull, /* IPA R0, a[0x60]: PrimitiveId */
+        0xf0c8000001370001ull, /* S2R R1, SR_THREAD_KILL */
+        0xefe8e0028007ff02ull, /* PIXLD.MYINDEX R2 */
+        0xefe8e0008007ff03ull, /* PIXLD.COVMASK R3 */
+    };
+    code = translate(fragment, 4, ST_FS, &info, &words, 0);
+    check(code && has_builtin(code, words, 7) == 1 && has_builtin(code, words, 18) == 1 &&
+              count_opcode(code, words, 5381, 0xffffffffu) == 1,
+          "a fragment program reads PrimitiveId, its helper state, its sample and its coverage");
+    if (code && attribute_paths[1]) save_fixture(attribute_paths[1], code, words);
+    free(code);
+    static const u64 compute[] = {
+        0xf0c8000002070000ull, /* S2R R0, SR_TID */
+        0xf0c8000005170001ull, /* S2R R1, SR_CLOCKHI */
+    };
+    code = translate(compute, 2, ST_CS, &info, &words, 0);
+    check(code && !info.unsupported, "a compute program reads SR_TID and SR_CLOCKHI");
+    if (code && attribute_paths[2]) save_fixture(attribute_paths[2], code, words);
+    free(code);
+}
+
 /* a rejected instruction is logged with its word */
 static void unsupported_names_word(void) {
     ShaderInfo info;
@@ -1039,8 +1079,8 @@ static void unsupported_names_word(void) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 1 && argc != 46) return 2;
-    if (argc == 46) {
+    if (argc != 1 && argc != 49) return 2;
+    if (argc == 49) {
         storage_paths[0] = argv[1];
         storage_paths[1] = argv[2];
         for (int i = 0; i < 4; i++) nro_paths[i] = argv[i + 3];
@@ -1052,6 +1092,7 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 6; i++) texture_paths[i] = argv[i + 36];
         arithmetic_path = argv[42];
         for (int i = 0; i < 3; i++) beyond_paths[i] = argv[i + 43];
+        for (int i = 0; i < 3; i++) attribute_paths[i] = argv[i + 46];
     }
     brx_length();
     cbuf_integer_loads();
@@ -1073,5 +1114,6 @@ int main(int argc, char** argv) {
     texture_forms();
     arithmetic_forms();
     beyond_eden();
+    system_values();
     return failures ? 1 : 0;
 }

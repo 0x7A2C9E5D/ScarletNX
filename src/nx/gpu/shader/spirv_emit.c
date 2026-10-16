@@ -792,7 +792,7 @@ uint32_t spv_emit_builtin_input_vec3(SpvEmitter* e, uint32_t vec3_type, uint32_t
 
 uint32_t spv_emit_builtin_input_u32(SpvEmitter* e, uint32_t u32_type, uint32_t builtin) {
     uint32_t id = input_vec4(e, u32_type, 11, builtin);
-    if (builtin == 9) spv_emit_flat(e, id); /* Layer is read in fragment shaders only */
+    if (builtin == 9 || builtin == 18) spv_emit_flat(e, id); /* Layer and SampleId are read in fragment shaders only */
     return id;
 }
 
@@ -1856,6 +1856,13 @@ void spv_emit_store_u32(SpvEmitter* e, uint32_t pointer, uint32_t value) { spv_e
 void spv_emit_return(SpvEmitter* e) { instruction(&e->functions, OP_RETURN, 1); }
 void spv_emit_kill(SpvEmitter* e) { instruction(&e->functions, OP_KILL, 1); }
 void spv_emit_demote(SpvEmitter* e) { instruction(&e->functions, OP_DEMOTE_TO_HELPER_INVOCATION, 1); }
+uint32_t spv_emit_is_helper(SpvEmitter* e, uint32_t bool_type) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, 5381, 3); /* OpIsHelperInvocationEXT */
+    put(&e->functions, bool_type);
+    put(&e->functions, id);
+    return id;
+}
 void spv_emit_selection_merge(SpvEmitter* e, uint32_t merge_label) {
     instruction(&e->functions, OP_SELECTION_MERGE, 3);
     put(&e->functions, merge_label);

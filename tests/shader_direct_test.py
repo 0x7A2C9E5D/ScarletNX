@@ -35,6 +35,7 @@ def main():
         textures = tuple(Path(directory) / f'texture_{i}.spv' for i in range(6))
         arithmetic = Path(directory) / 'arithmetic.spv'
         beyond = tuple(Path(directory) / f'beyond_{i}.spv' for i in range(3))
+        attributes = tuple(Path(directory) / f'attribute_{i}.spv' for i in range(3))
         subprocess.run(
             [args.generator, str(path), str(vertex), str(abs_fragment), str(stack_fragment), str(subgroup)], check=True
         )
@@ -58,6 +59,7 @@ def main():
             *textures,
             arithmetic,
             *beyond,
+            *attributes,
         )
         subprocess.run([args.regressions, *(str(path) for path in fixtures)], check=True)
         for fixture in fixtures:
