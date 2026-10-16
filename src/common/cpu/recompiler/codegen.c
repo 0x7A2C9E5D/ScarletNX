@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors
    Derived from SwitchRecomp codegen.py, Copyright 2026 MZ Labs, Apache-2.0.
    Retain LICENSE.apache and NOTICE; the fork's changes are GPL-3.0-or-later. */
-#include "codegen.h"
+#include "common/cpu/recompiler/codegen.h"
 #include <stdlib.h>
 #include <string.h>
 

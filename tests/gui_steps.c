@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* A run's output as a loading screen's steps. */
-#include "steps.h"
+#include "gui/steps.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -87,6 +87,55 @@ int main(void) {
     assert(s.count == 2 && !strcmp(at(&s, 1)->label, "READY") && !strcmp(at(&s, 1)->detail, "Game"));
     assert(at(&s, 1)->state == GUI_STEP_DONE && gui_steps_percent(&s) == 100);
 
+    /* the driver's row a second while hactool unpacks and extracts, each over the last (\r): the step's value and total
+       in MB, its percent the bar's, no note under it; a row of another step's word is a plain line */
+    gui_steps_reset(&s);
+    feed(&s, "Unpacking Game.xci\n", 1);
+    assert(gui_steps_percent(&s) == -1); /* nothing said yet */
+    feed(&s, "  unpacked 1024 of 4096 MB (25%)\r  unpacked 2048 of 4096 MB (50%)\r", 2);
+    assert(at(&s, 0)->value == 2048 && at(&s, 0)->total == 4096 && at(&s, 0)->megabytes);
+    assert(gui_steps_percent(&s) == 50 && gui_step_notes(&s, at(&s, 0), notes, 8) == 0);
+    feed(&s, "  unpacked 4000 of 4096 MB (97%)\r\nExtracting the base game\n", 3);
+    assert(at(&s, 0)->state == GUI_STEP_DONE && at(&s, 0)->value == 4000 && gui_steps_percent(&s) == -1);
+    feed(&s, "  unpacked 9 of 9 MB (100%)\n  extracted 300 of 400 MB (75%)\r", 4);
+    assert(at(&s, 1)->value == 300 && at(&s, 1)->total == 400 && gui_steps_percent(&s) == 75);
+    assert(gui_step_notes(&s, at(&s, 1), notes, 8) == 1 && !strcmp(notes[0]->text, "unpacked 9 of 9 MB (100%)"));
+
+    /* a step's progress on its line, as the theme says: amount in MB, GB past 1024 of them, blocks bare; percent;
+       the time left at its pace so far, once a second of it has gone; nothing while it has no total */
+    {
+        GuiStep step;
+        char text[32];
+        memset(&step, 0, sizeof step);
+        step.shown_ms = 1000;
+        gui_step_progress(&step, GUI_PROGRESS_AMOUNT, 2000, text, sizeof text);
+        assert(!strcmp(text, ""));
+        step.value = 300;
+        step.total = 900;
+        step.megabytes = 1;
+        gui_step_progress(&step, GUI_PROGRESS_AMOUNT, 2000, text, sizeof text);
+        assert(!strcmp(text, "300 / 900 MB"));
+        step.value = 2048;
+        step.total = 4096;
+        gui_step_progress(&step, GUI_PROGRESS_AMOUNT, 2000, text, sizeof text);
+        assert(!strcmp(text, "2.0 / 4.0 GB"));
+        gui_step_progress(&step, GUI_PROGRESS_PERCENT, 2000, text, sizeof text);
+        assert(!strcmp(text, "50%"));
+        gui_step_progress(&step, GUI_PROGRESS_TIME, 1500, text, sizeof text);
+        assert(!strcmp(text, "--:-- left"));
+        gui_step_progress(&step, GUI_PROGRESS_TIME, 31000, text, sizeof text); /* half in 30 s: 30 s more */
+        assert(!strcmp(text, "00:30 left"));
+        step.value = 1;
+        step.total = 1000;
+        gui_step_progress(&step, GUI_PROGRESS_TIME, 11000, text, sizeof text); /* 10 s a block, 999 to go */
+        assert(!strcmp(text, "2:46:30 left"));
+        step.megabytes = 0;
+        step.value = 3;
+        step.total = 6;
+        gui_step_progress(&step, GUI_PROGRESS_AMOUNT, 2000, text, sizeof text);
+        assert(!strcmp(text, "3 / 6"));
+    }
+
     /* a native launch, no recompile: 100% from the banner; the oldest steps go past the maximum */
     gui_steps_reset(&s);
     feed(&s, "ScarletNX - Native\n", 1);
@@ -103,6 +152,25 @@ int main(void) {
     assert(n == 1 && !strcmp(notes[0]->text, "note of part26"));
     n = gui_step_notes(&s, at(&s, 0), notes, 8);
     assert(n == 1 && !strcmp(notes[0]->text, "note of part3"));
+
+    /* the runner's banner, at the start of a line, split across reads or not: the game is loading */
+    gui_steps_reset(&s);
+    feed(&s, "Recompiling x\nnot ScarletNX - x\nScarletNX", 1);
+    assert(!gui_steps_last(&s, "LAUNCH") && gui_steps_last(&s, "RECOMPILE") == at(&s, 0));
+    feed(&s, " - x\n", 2);
+    assert(gui_steps_last(&s, "LAUNCH") == at(&s, 1) && !strcmp(at(&s, 1)->detail, "x"));
+    gui_steps_reset(&s);
+    feed(&s, "ScarletNX -x\n\nScarletNX  - x", 1);
+    feed(&s, "\n", 1);
+    assert(!gui_steps_last(&s, "LAUNCH"));
+    feed(&s, "\n\nScarletNX - y\nScarletNX - z\n", 2);
+    assert(gui_steps_last(&s, "LAUNCH") == at(&s, 1) && !strcmp(at(&s, 1)->detail, "z") &&
+           !gui_steps_last(&s, "READY"));
+    gui_steps_reset(&s); /* a banner cut short counts once the run ends */
+    feed(&s, "ScarletNX - first line", 1);
+    assert(!gui_steps_last(&s, "LAUNCH"));
+    gui_steps_finish(&s, 1);
+    assert(gui_steps_last(&s, "LAUNCH"));
     puts("GUI steps: driver and runner lines, progress, finish passed");
     return 0;
 }

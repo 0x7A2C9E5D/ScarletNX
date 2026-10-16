@@ -6,21 +6,22 @@
 #ifndef SNX_ENGINES_INT_H
 #define SNX_ENGINES_INT_H
 #include <string.h>
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "gpu/renderer.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/gpu/renderer.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include "gpu/gpu.h"
-#include "runtime/clock.h"
+#include "nx/gpu/gpu.h"
+#include "nx/runtime/clock.h"
 
 /* engines.c (gpu_ticks is in gpu.h) */
 void query_get(GpuChannel* ch, u32* r, int base, u32 v);
 
 /* mme.c */
-void mme_run(GpuChannel* ch, u32 idx, const u32* params, u32 np);
+/* runs macro idx over the np parameters in ch->mme_params (it may stop at a wait, gpu.h's mme_resume) */
+void mme_run(GpuChannel* ch, u32 idx, u32 np);
 
 #endif

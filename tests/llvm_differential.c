@@ -7,11 +7,11 @@
    must all match.
      llvm_differential CLANG REPO [--match NAME] [--per-case N] [--simd N] [--states N] [--seed N] [--quiet]
    --match keeps patterns whose name starts with NAME. */
-#include "common.h"
-#include "cpu.h"
-#include "a64.h"
-#include "ir.h"
-#include "link.h"
+#include "common/utilities/common.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/recompiler/llvm/ir.h"
+#include "common/cpu/recompiler/llvm/link.h"
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
@@ -22,7 +22,7 @@
 #endif
 
 #ifdef SNX_TEST_GCCJIT
-#include "jit.h"
+#include "common/cpu/recompiler/gccjit/jit.h"
 #endif
 extern const unsigned char snx_rtlib_object[];
 extern const unsigned long snx_rtlib_object_size;
@@ -359,7 +359,7 @@ int main(int argc, char** argv) {
     size_t pattern_failures[64] = {0};
     Word* words = NULL;
     const SnxA64Pattern* patterns = snx_a64_patterns(&npatterns);
-    char error[1024], *dir, *c_path, *c_lib, *l_lib, *text = NULL, *abi, *common;
+    char error[1024], *dir, *c_path, *c_lib, *l_lib, *text = NULL, *abi, *root;
     const char* args[24];
     FILE* f;
     SnxIr* ir;
@@ -441,7 +441,7 @@ int main(int argc, char** argv) {
     fputs("};\nSNX_EXPORT StepFnPtr* snx_test_steps(void){ return TABLE; }\n", f);
     fclose(f);
     abi = snx_path_join(repo, "src/common/cpu/aarch64");
-    common = snx_path_join(repo, "src/common");
+    root = snx_path_join(repo, "src"); /* what cpu.h includes */
     c_native = snx_path_join(dir, "native.so");
     k = 0;
     args[k++] = clang;
@@ -463,7 +463,7 @@ int main(int argc, char** argv) {
     args[k++] = "-I";
     args[k++] = abi;
     args[k++] = "-I";
-    args[k++] = common;
+    args[k++] = root;
     args[k++] = c_path;
     args[k++] = "-o";
     args[k++] = c_lib;

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "ir.h"
-#include "cpu.h"
+#include "common/cpu/recompiler/llvm/ir.h"
+#include "common/cpu/aarch64/cpu.h"
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitReader.h>
 #include <llvm/Config/llvm-config.h>

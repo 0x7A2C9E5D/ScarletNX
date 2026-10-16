@@ -5,7 +5,7 @@
    reads it; edenprobe's audio family writes the same layout field by field */
 #ifndef SNX_AUDREN_DSP_H
 #define SNX_AUDREN_DSP_H
-#include "memory/mem.h"
+#include "nx/memory/mem.h"
 
 enum {
     SNX_AUDREN_WAVES = 4,     /* wave buffers per voice */

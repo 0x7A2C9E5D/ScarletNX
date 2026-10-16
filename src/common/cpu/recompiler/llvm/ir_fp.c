@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Scalar floating point: the FP patterns of a64_templates.inc. Their C calls the integer-only FP of cpu_helpers.c
    (snx_fp_*), in the runtime library, and writes the result with SETSB/SETDB/SETH. */
-#include "ir.h"
+#include "common/cpu/recompiler/llvm/ir.h"
 #include <string.h>
 
 typedef LLVMValueRef V;

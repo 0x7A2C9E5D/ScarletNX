@@ -2,11 +2,15 @@
    Copyright 2026 the ScarletNX contributors */
 /* Compile with src/common/utilities/common.c + extract.c. This executable also acts as a synthetic hactool. */
 #define _POSIX_C_SOURCE 200809L
-#include "extract.h"
+#include "nx/runtime/driver/extract.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -79,6 +83,36 @@ static char* container_mode(const char* path, int* xci) {
     mode = snx_strdup((const char*)bytes + 0x200);
     free(bytes);
     return mode;
+}
+
+static void pause_ms(long ms) {
+#if defined(_WIN32)
+    Sleep((DWORD)ms);
+#else
+    struct timespec t;
+    t.tv_sec = ms / 1000;
+    t.tv_nsec = ms % 1000 * 1000000L;
+    while (nanosleep(&t, &t)) {}
+#endif
+}
+/* size zero bytes added to path, in pieces a pause apart when slow: a tool writing for a while */
+static void grow(const char* path, unsigned long size, int slow) {
+    static const char zeros[65536];
+    unsigned long left = size, piece;
+    FILE* file;
+    while (left) {
+        piece = slow && left > size / 3 ? size / 3 : left;
+        left -= piece;
+        file = snx_fopen(path, "ab");
+        CHECK(file != NULL);
+        while (piece) {
+            unsigned long n = piece < sizeof zeros ? piece : (unsigned long)sizeof zeros;
+            CHECK(fwrite(zeros, 1, n, file) == n);
+            piece -= n;
+        }
+        CHECK(!fclose(file));
+        if (slow && left) pause_ms(600);
+    }
 }
 
 static void write_child(const char* dir, const char* name, const void* content, size_t size) {
@@ -202,6 +236,14 @@ static int fake_hactool(int argc, char** argv) {
         write_nca(dir, "large.nca", !strcmp(input, "dlc") ? "Control" : "Program", 0x300, encrypted);
         write_nca(dir, "control.nca", "Control", 0x400, encrypted);
         write_nca(dir, "ignored.cnmt.nca", "Program", 0x600, encrypted);
+        if (!strncmp(input, "slow", 4)) { /* the program NCA 3 MiB, and a while writing another 3 */
+            char* path = snx_path_join(dir, "large.nca");
+            grow(path, 3UL << 20, 0);
+            free(path);
+            path = snx_path_join(dir, "big.bin");
+            grow(path, 3UL << 20, 1);
+            free(path);
+        }
         if (update) {
             ticket(dir, 4, 0xa1, 0xff, 0);
             ticket(dir, 4, 0xb0, 0xb1, 0);
@@ -248,6 +290,11 @@ static int fake_hactool(int argc, char** argv) {
         CHECK(!snx_mkdirs(exefs) && !snx_mkdirs(romfs));
         if (strcmp(mode, "no-main")) write_child(exefs, "main", "NSO0 synthetic", 14);
         write_child(romfs, "asset", update ? "updated" : "base", update ? 7 : 4);
+        if (!strncmp(mode, "slow", 4)) {
+            char* path = snx_path_join(romfs, "big");
+            grow(path, 3UL << 20, 1);
+            free(path);
+        }
         free(mode);
     }
     free(mode_path);
@@ -345,7 +392,8 @@ static int scenario(const char* self, const char* scratch, const char* mode) {
     set_env("XDG_CONFIG_HOME", "must not reach hactool");
     kind = "pfs0";
     base_name = "Base Game (&).NSP";
-    if (!strcmp(mode, "xci") || !strcmp(mode, "xci-keyless") || !strcmp(mode, "xci-renamed-dnsp")) {
+    if (!strcmp(mode, "xci") || !strcmp(mode, "xci-keyless") || !strcmp(mode, "xci-renamed-dnsp") ||
+        !strcmp(mode, "slow-xci")) {
         kind = "xci";
         base_name = !strcmp(mode, "xci-renamed-dnsp") ? "Base Game (&).DNsP" : "Base Game (&).XCI";
     } else if (strstr(mode, "dxci") || merged) {
@@ -356,9 +404,9 @@ static int scenario(const char* self, const char* scratch, const char* mode) {
     } else if (strstr(mode, "dnsp") || !strcmp(mode, "encrypted-no-keys"))
         base_name = !strcmp(mode, "dnsp") ? "Base Game (&).dnsp" : "Base Game (&).dNsP";
     payload = "base";
-    if (!strcmp(mode, "failure") || !strcmp(mode, "no-main") || !strcmp(mode, "dlc") || !strcmp(mode, "base-update") ||
-        !strcmp(mode, "dnsp-update") || !strcmp(mode, "dxci-update") || !strcmp(mode, "encrypted-no-keys") ||
-        !strcmp(mode, "unmatched-update") || merged)
+    if (!strncmp(mode, "slow", 4) || !strcmp(mode, "failure") || !strcmp(mode, "no-main") || !strcmp(mode, "dlc") ||
+        !strcmp(mode, "base-update") || !strcmp(mode, "dnsp-update") || !strcmp(mode, "dxci-update") ||
+        !strcmp(mode, "encrypted-no-keys") || !strcmp(mode, "unmatched-update") || merged)
         payload = mode;
     if (!strcmp(mode, "preserve") || !strcmp(mode, "dot-parent")) payload = "no-main";
     if (!strcmp(mode, "malformed-dxci")) kind = "invalid";
@@ -371,6 +419,26 @@ static int scenario(const char* self, const char* scratch, const char* mode) {
         CHECK(!snx_write_file(base, "DXCI", 4));
     else
         write_container(base, kind, payload);
+    if (!strcmp(mode, "slow")) grow(base, 3UL << 20, 0);
+    if (!strcmp(mode, "slow-xci")) { /* 8 MiB, of which the root HFS0 at 0x400 says the secure partition is 3 */
+        unsigned char root[0x10 + 2 * 0x40 + 14], at[8];
+        FILE* file;
+        memset(root, 0, sizeof root);
+        memcpy(root, "HFS0", 4);
+        root[4] = 2;                               /* files */
+        root[8] = 14;                              /* the names' bytes */
+        root[0x10 + 8 + 2] = 0x10;                 /* normal: 1 MiB, its name at 0 */
+        root[0x50 + 2] = 0x10;                     /* secure: at 1 MiB, */
+        root[0x50 + 8 + 2] = 0x30;                 /* 3 MiB, */
+        root[0x50 + 0x10] = 7;                     /* its name at 7 */
+        memcpy(root + 0x90, "normal\0secure", 14); /* both NUL-terminated */
+        memset(at, 0, sizeof at);
+        at[1] = 4; /* 0x400 */
+        file = snx_fopen(base, "r+b");
+        CHECK(file != NULL && !fseek(file, 0x130, SEEK_SET) && fwrite(at, 1, 8, file) == 8);
+        CHECK(!fseek(file, 0x400, SEEK_SET) && fwrite(root, 1, sizeof root, file) == sizeof root && !fclose(file));
+        grow(base, 8UL << 20, 0);
+    }
     original = snx_read_file(base, &original_size);
     CHECK(original != NULL);
     patch = snx_path_join(scratch, !strcmp(mode, "dxci-update") ? "Update file.DXCI" : "Update file.dnsp");
@@ -490,7 +558,9 @@ int main(int argc, char** argv) {
                                   "truncated-dxci",
                                   "invalid-update",
                                   "encrypted-no-keys",
-                                  "explicit-missing-keys"};
+                                  "explicit-missing-keys",
+                                  "slow",
+                                  "slow-xci"};
     const char* command[6];
     char *self, *scratch, *directory, *output, *marker, *text;
     size_t i;
@@ -532,6 +602,15 @@ int main(int argc, char** argv) {
             CHECK(strstr(output, "Update has no Program NCA matching the selected base game") != NULL);
         if (!strcmp(modes[i], "explicit-missing-keys"))
             CHECK(strstr(output, "Specified prod.keys file is missing") != NULL);
+        /* a hactool of seconds: a row a second, each over the last (a carriage return), the last one ended; an XCI's
+           total its secure partition, not the file's padding */
+        if (!strncmp(modes[i], "slow", 4)) {
+            CHECK(strstr(output, "%)\r  unpacked ") && (strstr(output, "  unpacked 3 of 3 MB (100%)\n") ||
+                                                        strstr(output, "  unpacked 3 of 3 MB (100%)\r\n")));
+            /* the program NCA is its content and its headers: 99% of it */
+            CHECK(strstr(output, "%)\r  extracted ") && strstr(output, "  extracted 3 of 3 MB (99%)"));
+        } else
+            CHECK(!strstr(output, "  unpacked ") && !strstr(output, "  extracted ")); /* a quick one says nothing */
         printf("PASS extraction scenario %s\n", modes[i]);
         free(output);
         free(directory);

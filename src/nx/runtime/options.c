@@ -3,17 +3,21 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the settings in <Game>.ini: loading, applying, and writing back what changes */
-#include "runtime/options.h"
-#include "runtime/loader.h"
-#include "runtime/main.h"
-#include "hle/kernel/kernel.h"
-#include "memory/mem.h"
-#include "runtime/ini.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "runtime/platform/vpad.h"
-#include "hle/services/services.h"
+#include "nx/runtime/options.h"
+#include "nx/runtime/loader.h"
+#include "nx/runtime/main.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/ini.h"
+#include "common/utilities/common.h"
+#include "common/utilities/ini_lines.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/unattended.h"
+#include "nx/runtime/platform/vpad.h"
+#include "nx/runtime/platform/gamepad.h"
+#include "nx/hle/services/services.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -30,35 +34,7 @@ int g_opt_prof = 0;
 int g_opt_network = 0;
 /* the variables above hold until ini_open, which applies the file's values, or the tables' defaults for keys it
    lacks (the logging before it needs g_verbose's) */
-/* options that went with the OpenGL renderer (renderer choice, its dynamic resolution, LSFG, the F7 recorder) and
-   older ones: dropped on load, so the rewritten .ini loses them. game_dynamic_resolution worked through GPU timings
-   the OpenGL renderer's thread measured. vsync is a setting again (the Vulkan swapchain's present mode) */
-static const char* const INI_REMOVED[] = {"audio_device", /* Playback now always follows the system default. */
-                                          "renderer",
-                                          "dynamic_resolution",
-                                          "dynamic_resolution_min",
-                                          "game_dynamic_resolution",
-                                          "low_priority_shader_compiler",
-                                          "forced_vsync",
-                                          "smooth_recording",
-                                          "recording_fps",
-                                          "lsfg",
-                                          "lsfg_dll",
-                                          "lsfg_target",
-                                          "lsfg_multiplier",
-                                          "lsfg_flow",
-                                          "lsfg_resolution",
-                                          "lossless_scaling",
-                                          "lossless_path",
-                                          "touch_controls",
-                                          "touch_controls_opacity",
-                                          NULL};
-static int ini_removed(const char* k) {
-    for (int i = 0; INI_REMOVED[i]; i++)
-        if (!strcmp(k, INI_REMOVED[i])) return 1;
-    return 0;
-}
-/* everything we read, so the rewrite keeps unknown keys. A line is at most INI_LINE bytes */
+/* everything we read, so the rewrite keeps unknown keys. A value is under INI_LINE bytes */
 #define INI_MAXK 128
 #define INI_LINE 2048
 static char g_ini_k[INI_MAXK][64], g_ini_v[INI_MAXK][INI_LINE];
@@ -146,31 +122,31 @@ static void heap_max_set(const IniOpt* o, const char* v) {
 /* the settings this file reads; the platform's (backend.h, vpad.h) are written with them */
 static const IniOpt INI_DISPLAY[] = {
     {"docked", "0", "1 = TV mode (1920x1080 / 1600x900 games), 0 = handheld mode (1280x720)", INI_INT, INI_STARTUP,
-     &g_opt_docked, 0, 1, NULL},
+     &g_opt_docked, 0, 1, NULL, NULL, NULL, 0, 0},
     {"fullscreen", "0",
      "1 = start in fullscreen (not in timed test runs). -f or --fullscreen=0 sets it for one run.\n"
      ";   F11 or Alt+Enter switches while playing without changing this setting",
-     INI_INT, INI_STARTUP, &g_opt_fullscreen, 0, 1, NULL},
+     INI_INT, INI_STARTUP, &g_opt_fullscreen, 0, 1, NULL, NULL, NULL, 0, 0},
     {"language", "1",
      "Game language: 0 Japanese, 1 English (US), 2 French, 3 German, 4 Italian, 5 Spanish,\n;   6 Chinese, 7 Korean, "
      "8 Dutch, 9 Portuguese, 10 Russian, 11 Taiwanese, 12 English (UK),\n;   13 French (Canada), 14 Spanish (Latin "
      "America), 15 Chinese (Simplified), 16 Chinese (Traditional),\n;   17 Portuguese (Brazil)",
-     INI_INT, INI_STARTUP, &g_opt_lang, INT_MIN, INT_MAX, language_set},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+     INI_INT, INI_STARTUP, &g_opt_lang, INT_MIN, INT_MAX, language_set, NULL, NULL, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 static const IniOpt INI_GRAPHICS[] = {
     {"resolution", "1", "Internal 3D resolution: 1 = native, 2 = double, 0.75 / 0.5 = faster", INI_FLOAT, INI_STARTUP,
-     &g_opt_resf, 0.25, 4, NULL},
-    {"shadows", "1", "0 = disable shadow maps (more FPS)", INI_INT, 0, &g_opt_shadows, 0, 1, NULL},
+     &g_opt_resf, 0.25, 4, NULL, NULL, NULL, 0, 0},
+    {"shadows", "1", "0 = disable shadow maps (more FPS)", INI_INT, 0, &g_opt_shadows, 0, 1, NULL, NULL, NULL, 0, 0},
     {"vsync", "1",
      "1 = images are shown only on a refresh of the display, so nothing tears. 0 = no wait for the refresh: the\n"
      ";   newest image is shown on the next one where the display can do that, else at once (which may tear).\n"
      ";   A display that can do neither waits for the refresh as 1 does",
-     INI_INT, 0, &g_opt_vsync, 0, 1, NULL},
+     INI_INT, 0, &g_opt_vsync, 0, 1, NULL, NULL, NULL, 0, 0},
     {"anisotropy", "0",
      "Texture filtering at an angle: 0 = as the game asks. 2 to 16 = at least that much (sharper floors and roads\n"
      ";   in 3D games, a little more GPU work)",
-     INI_INT, INI_STARTUP, &g_opt_aniso, 0, 16, NULL},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+     INI_INT, INI_STARTUP, &g_opt_aniso, 0, 16, NULL, NULL, NULL, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 static const IniOpt INI_PERF[] = {
     {"fps_limit", "game",
      "game = the pace the game asks for, as on the console: 60 FPS, or 30 for a game made for 30.\n"
@@ -178,50 +154,55 @@ static const IniOpt INI_PERF[] = {
      ";   10 to 1000 = that many FPS.\n"
      ";   A game that advances once per image changes speed with it: 30 runs a 60 FPS game at half speed.\n"
      ";   F4 turns the limit off and on",
-     INI_TEXT, 0, NULL, 0, 0, fps_limit_set},
+     INI_TEXT, 0, NULL, 0, 0, fps_limit_set, NULL, NULL, 0, 0},
     {"memory_gb", "0",
      "Memory the game sees: 0 or 4 = 3.2 GB like the console, 6 or 8 = more (like yuzu's extended memory layout).\n;"
      "   Games that run out of memory on 3.2 GB, like Tears of the Kingdom, need 6",
-     INI_INT, INI_STARTUP, &g_opt_mem_gb, 0, 8, NULL},
+     INI_INT, INI_STARTUP, &g_opt_mem_gb, 0, 8, NULL, NULL, NULL, 0, 0},
     {"heap_max_mb", "0", "The most heap the game can allocate, in MB: 0 = as much as the memory allows", INI_TEXT,
-     INI_STARTUP, NULL, 0, 0, heap_max_set},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+     INI_STARTUP, NULL, 0, 0, heap_max_set, NULL, NULL, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 static const IniOpt INI_NETWORK[] = {
     {"network", "0",
      "1 = host networking. Known Nintendo service domains are blocked by the resolver, not by an IP firewall.\n;   0 = "
      "report offline and restrict outbound destinations to loopback. This is not a network sandbox",
-     INI_INT, 0, &g_opt_network, 0, 1, NULL},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+     INI_INT, 0, &g_opt_network, 0, 1, NULL, NULL, NULL, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 static const IniOpt INI_DBG[] = {
-    {"log", "1", "Log detail: 1 = normal, 2 = everything (slow)", INI_INT, 0, &g_verbose, 0, 2, NULL},
+    {"log", "1", "Log detail: 1 = normal, 2 = everything (slow)", INI_INT, 0, &g_verbose, 0, 2, NULL, NULL, NULL, 0, 0},
     {"auto_stub_ipc", "1",
      "1 = a service command the runtime doesn't know answers success (logged as [undeclared]), 0 = it fails with "
      "UnknownCommandId, as on a console",
-     INI_INT, 0, &g_opt_auto_stub_ipc, 0, 1, NULL},
+     INI_INT, 0, &g_opt_auto_stub_ipc, 0, 1, NULL, NULL, NULL, 0, 0},
     {"diag", "0",
      "1 = save the data of each new compute shader to captures/compute, and every new shader's\n;   snx-shaderc corpus entry to captures/shaders, for debugging",
-     INI_INT, 0, &g_opt_diag, 0, 1, NULL},
+     INI_INT, 0, &g_opt_diag, 0, 1, NULL, NULL, NULL, 0, 0},
     {"profile", "0", "1 = write profile.txt every 10 seconds (CPU profiler, Windows only)", INI_INT, INI_STARTUP,
-     &g_opt_prof, 0, 1, NULL},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+     &g_opt_prof, 0, 1, NULL, NULL, NULL, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 /* a table of the file's sections, and what reads its keys: NULL for this file's own (ini_read), backend_ini for the
-   platform's, which takes the lock the on-screen controls need */
+   platform's, which takes the lock the on-screen controls need. page: a page of the section's own in the menus,
+   listed after the section's other keys; one a section */
 typedef struct {
     const IniOpt* opts;
     int (*apply)(const char* k, const char* v);
+    const char* page;
 } IniTable;
-#define INI_SEC_TABLES 2
+#define INI_SEC_TABLES 3
 typedef struct {
     const char* title;
     IniTable t[INI_SEC_TABLES];
 } IniSec;
-static const IniSec INI_SECS[] = {{"Display", {{INI_DISPLAY, NULL}}},
-                                  {"Graphics", {{INI_GRAPHICS, NULL}}},
-                                  {"Performance", {{INI_PERF, NULL}}},
-                                  {"Input", {{g_backend_ini, backend_ini}, {g_vpad_ini, backend_ini}}},
-                                  {"Network", {{INI_NETWORK, NULL}}},
-                                  {"Debug", {{INI_DBG, NULL}}},
-                                  {NULL, {{NULL, NULL}}}};
+static const IniSec INI_SECS[] = {
+    {"Display", {{INI_DISPLAY, NULL}}},
+    {"Graphics", {{INI_GRAPHICS, NULL}}},
+    {"Performance", {{INI_PERF, NULL}}},
+    {SNX_VPAD_PAGE,
+     {{g_vpad_ini, backend_ini}, {g_backend_ini, backend_ini}, {g_vpad_shown_ini, backend_ini, SNX_VPAD_BUTTONS}}},
+    {SNX_GAMEPAD_PAGE, {{g_gamepad_ini, backend_ini}, {g_gamepad_map_ini, backend_ini, SNX_GAMEPAD_MAP}}},
+    {"Network", {{INI_NETWORK, NULL}}},
+    {"Debug", {{INI_DBG, NULL}}},
+    {NULL, {{NULL, NULL}}}};
 /* k's row in the file's sections, and its table */
 static const IniOpt* ini_known(const char* k, const IniTable** table) {
     for (int s = 0; INI_SECS[s].title; s++)
@@ -234,6 +215,7 @@ static const IniOpt* ini_known(const char* k, const IniTable** table) {
         }
     return NULL;
 }
+int snx_setting_known(const char* key) { return ini_known(key, NULL) || unattended_known(key); }
 /* 1 when some table knows k (the unattended-run options go to backend_ini too) */
 static int ini_apply(const char* k, const char* v) {
     const IniTable* t = NULL;
@@ -267,42 +249,60 @@ static int file_hash(const char* p, u64* h) {
 }
 /* the file's keys into the store, applied: 0, -1 when it can't be read (errno says why) */
 static int ini_load(const char* path) {
-    FILE* f = fopen(path, "r");
-    if (!f) return -1;
-    char ln[INI_LINE];
-    int first = 1;
-    while (fgets(ln, sizeof ln, f)) {
-        char* k = ln;
-        if (!strchr(ln, '\n') && !feof(f)) { /* longer than a line can be: dropped, not cut */
-            int c;
-            while ((c = fgetc(f)) != EOF && c != '\n') {}
-            WARN_LIMIT(
-                1, "settings: a line of %s is longer than %d bytes: it is not read, and the rewritten file drops it\n",
-                path, INI_LINE - 2);
+    size_t size;
+    char* text = (char*)snx_read_file(path, &size);
+    SnxIni ini;
+    char *k, *v;
+    if (!text) return -1;
+    snx_ini_start(&ini, text); /* sections only arrange the file: a key means the same in any */
+    while (snx_ini_next(&ini, &k, &v)) {
+        if (strlen(v) >= INI_LINE) { /* longer than the store keeps: dropped, not cut */
+            WARN_LIMIT(1,
+                       "settings: %s's %s is longer than %d bytes: it is not read, and the rewritten file drops it\n",
+                       path, k, INI_LINE - 1);
             continue;
         }
-        if (first && !strncmp(k, "\xEF\xBB\xBF", 3)) k += 3; /* the UTF-8 mark Windows editors may start with */
-        first = 0;
-        while (*k == ' ' || *k == '\t') k++;
-        char* eq = strchr(k, '=');
-        if (!eq || *k == ';' || *k == '#' || *k == '[') continue;
-        *eq = 0;
-        char* v = eq + 1;
-        char* nl = strpbrk(v, "\r\n");
-        if (nl) *nl = 0;
-        char* ke = k + strlen(k);
-        while (ke > k && (ke[-1] == ' ' || ke[-1] == '\t')) *--ke = 0;
-        while (*v == ' ' || *v == '\t') v++;
-        {
-            char* ve = v + strlen(v);
-            while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t')) *--ve = 0;
-        }
-        if (ini_removed(k)) continue;
         ini_store(k, v);
+        if (ini_deprecated(k)) continue; /* kept to show, never applied */
         if (!ini_overridden(k)) ini_apply(k, v);
     }
-    fclose(f);
+    free(text);
     return 0;
+}
+/* an INI_INT's values as the menus step through them, value=word between '|': those of its words, or a whole number
+   of few values (anisotropy's 0 to 16); none for the others, which are typed */
+static void list_words(const IniOpt* o) {
+    int step = o->step > 0 ? o->step : 1;
+    char word[64];
+    if (o->type != INI_INT || (!o->words && (o->lo < 0 || o->hi - o->lo > 16))) return;
+    for (double v = o->lo; v <= o->hi; v += step) {
+        ini_word(o, (int)v, word, sizeof word);
+        printf("%s%d=%s", v > o->lo ? "|" : "", (int)v, word);
+    }
+}
+void ini_list(void) {
+    static const char* const types[] = {"int", "float", "text"}; /* by INI_INT, INI_FLOAT, INI_TEXT */
+    for (int s = 0; INI_SECS[s].title; s++)
+        for (int t = 0; t < INI_SEC_TABLES && INI_SECS[s].t[t].opts; t++) {
+            const IniTable* table = &INI_SECS[s].t[t];
+            const char* help = "";
+            for (const IniOpt* o = table->opts; o->key; o++) {
+                if (o->help) help = o->help;
+                if (o->flags & INI_IN_GAME) continue;
+                printf("%s%s%s\t%s\t%s\t%s\t%g\t%g\t", INI_SECS[s].title, table->page ? "/" : "",
+                       table->page ? table->page : "", o->key, o->def ? o->def : "", types[o->type], o->lo, o->hi);
+                for (const char* c = help; *c; c++)
+                    if (*c != '\n')
+                        putchar(*c);
+                    else { /* the help on one line: a "\n;   " that goes on in the file is a space */
+                        putchar(' ');
+                        c += strspn(c + 1, "; ");
+                    }
+                printf("\t%s\t", o->name ? o->name : "");
+                list_words(o);
+                putchar('\n');
+            }
+        }
 }
 /* the startup-only keys, wrapped to the header's box */
 static void write_startup_keys(FILE* f) {
@@ -344,14 +344,21 @@ static int ini_write(void) {
                 if (v) fprintf(f, "%s=%s\n", o->key, v);
             }
     }
-    int other = 0;
+    int other = 0, deprecated = 0;
     for (int i = 0; i < g_ini_n; i++)
-        if (!ini_known(g_ini_k[i], NULL)) {
+        if (!ini_known(g_ini_k[i], NULL) && !ini_deprecated(g_ini_k[i])) {
             if (!other) {
                 fprintf(f, "\n[Other]\n");
                 other = 1;
             }
             fprintf(f, "%s=%s\n", g_ini_k[i], g_ini_v[i]);
+        }
+    /* last, so the launcher's Clean old settings takes the section to the end of the file */
+    for (int i = 0; i < g_ini_n; i++)
+        if (ini_deprecated(g_ini_k[i])) {
+            if (!deprecated) ini_deprecated_head(f);
+            deprecated = 1;
+            ini_deprecated_key(f, g_ini_k[i], g_ini_v[i]);
         }
     /* the old file stays until the new one replaces it: a failure or a kill in between keeps the player's settings.
        plat_replace_file removes tmp when it fails */
@@ -364,7 +371,7 @@ static int ini_write(void) {
     return 0;
 }
 /* in-game toggles (F4) get persisted. Kept until written, so a reload of a file edited meanwhile doesn't lose them */
-#define INI_MAXS 32 /* the on-screen controls' reset sets one key per control */
+#define INI_MAXS 64 /* the on-screen controls' reset sets two keys per control */
 static char g_set_k[INI_MAXS][64], g_set_v[INI_MAXS][64];
 static int g_set_n;
 void ini_set(const char* k, const char* v) {
@@ -377,6 +384,15 @@ void ini_set(const char* k, const char* v) {
     snprintf(g_set_v[i], sizeof g_set_v[i], "%s", v);
     if (i == g_set_n) g_set_n++;
 }
+/* the deprecated keys the file has, said once a run where the player reads */
+static void ini_say_deprecated(const char* path) {
+    const char* keys[INI_MAXK];
+    char note[1024];
+    int n = 0;
+    for (int i = 0; i < g_ini_n; i++)
+        if (ini_deprecated(g_ini_k[i])) keys[n++] = g_ini_k[i];
+    if (ini_deprecated_note(note, sizeof note, path, keys, n)) WARN("%s\n", note);
+}
 void ini_open(const char* path) {
     snprintf(g_ini_path, sizeof g_ini_path, "%s", path);
     int missing = ini_load(path) && errno == ENOENT, unreadable = !missing && file_hash(path, &g_ini_hash);
@@ -386,8 +402,10 @@ void ini_open(const char* path) {
             WARN("settings: --%s is not a setting, so it does nothing\n", g_ovr_k[i]);
     if (unreadable) /* it would be replaced by defaults: left as it is */
         WARN("settings: %s could not be read, so the defaults apply and it is left as it is\n", path);
-    else
+    else {
+        ini_say_deprecated(path);
         ini_write();
+    }
     g_ini_started = 1;
 }
 /* ini edited while running: reloaded and applied what we can live, once it has stopped changing (an editor saving

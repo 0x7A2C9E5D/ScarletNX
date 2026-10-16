@@ -7,7 +7,7 @@
    connection) it answers what misc.c answered before the network stack existed: no request is accepted, and the
    queries about the connection fail like GetCurrentIpAddress does on a console without one. Online it reports the
    host's interface, the one with the default route. */
-#include "hle/services/network/network.h"
+#include "nx/hle/services/network/network.h"
 #include "hle/services/network/nifm.swipc.inc"
 
 enum { REQ_INVALID = 1, REQ_ON_HOLD = 2, REQ_ACCEPTED = 3 }; /* nn::nifm::RequestState (1 is also NotSubmitted) */

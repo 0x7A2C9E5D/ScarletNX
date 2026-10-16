@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-find_package(Python3 COMPONENTS Interpreter)
-if(Python3_Interpreter_FOUND)
+if(Python3_Interpreter_FOUND) # tests/CMakeLists.txt looked it up
     add_test(NAME runtime_architecture
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/architecture.py"
             --repo "${PROJECT_SOURCE_DIR}" --build "${PROJECT_BINARY_DIR}" --cmake "${CMAKE_COMMAND}")
@@ -16,5 +15,10 @@ if(Python3_Interpreter_FOUND)
                 --runtime $<TARGET_FILE:scarletnx> --repo "${PROJECT_SOURCE_DIR}"
                 --artifact-dir "${PROJECT_BINARY_DIR}/nx-smoke-failures")
         set_tests_properties(nx_runtime_homebrew PROPERTIES TIMEOUT 90)
+    endif()
+    if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY AND UNIX AND NOT APPLE)
+        add_test(NAME xdg_layout
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/xdg_layout.py" --driver $<TARGET_FILE:scarletnx>)
+        set_tests_properties(xdg_layout PROPERTIES TIMEOUT 240)
     endif()
 endif()

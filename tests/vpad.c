@@ -1,15 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The on-screen controls (runtime/platform/vpad.c): what fingers on them press, edit mode, the .ini keys, the draw */
-#include "runtime/platform/vpad.h"
-#include "runtime/platform/controls_atlas.h"
+#include "nx/runtime/platform/vpad.h"
+#include "nx/runtime/platform/controls_atlas.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
 /* ui.c's lock, without the platform layer */
-#include "runtime/platform/plat.h"
+#include "nx/runtime/platform/plat.h"
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
 
@@ -163,13 +163,24 @@ int main(void) {
            !vpad_ini("seconds", "5"));
     vpad_ini("controls_scale", "50");
     vpad_store_control(SNX_VPAD_B);
-    assert(!strcmp(stored_key, "controls_b") && !strcmp(stored_value, "1.000 0.000 200 1"));
+    assert(!strcmp(stored_key, "controls_b") && !strcmp(stored_value, "1.000 0.000 200"));
+    /* shown in a key of its own; an older version's fourth number of the place still read */
+    assert(vpad_ini("controls_b", "0.5 0.5 100") && vpad_config()->at[SNX_VPAD_B].shown);
+    assert(vpad_ini("controls_b_shown", "0") && !vpad_config()->at[SNX_VPAD_B].shown);
+    assert(vpad_ini("controls_b", "0.5 0.5 100") && !vpad_config()->at[SNX_VPAD_B].shown);
+    assert(vpad_ini("controls_b", "0.5 0.5 100 1") && vpad_config()->at[SNX_VPAD_B].shown);
+    assert(vpad_ini("controls_b", "0.5 0.5 100 x") && vpad_config()->at[SNX_VPAD_B].shown); /* not a fourth */
+    assert(vpad_ini("controls_b", "0.7 0.5") && vpad_config()->at[SNX_VPAD_B].x == 0.5f);   /* not a place */
+    assert(vpad_ini("controls_b_shown", "0"));
+    vpad_store_shown(SNX_VPAD_B);
+    assert(!strcmp(stored_key, "controls_b_shown") && !strcmp(stored_value, "0"));
+    assert(vpad_ini("controls_b_shown", "1") && vpad_ini("controls_b", "1 0 200"));
     vpad_store(&vpad_config()->haptics);
     assert(!strcmp(stored_key, "controls_haptics") && !strcmp(stored_value, "1"));
-    /* the reset: every control back, each kept */
+    /* the reset: every control back, its place and shown kept */
     stores = 0;
     vpad_reset_layout();
-    assert(stores == SNX_VPAD_COUNT && vpad_config()->at[SNX_VPAD_B].x == d.at[SNX_VPAD_B].x &&
+    assert(stores == 2 * SNX_VPAD_COUNT && vpad_config()->at[SNX_VPAD_B].x == d.at[SNX_VPAD_B].x &&
            vpad_config()->at[SNX_VPAD_B].size == 100);
 
     /* edit mode: every finger is its, a control dragged moves and is kept on its lift, on the grid when snapping */

@@ -23,7 +23,6 @@ const size_t snx_window_icon_png_size = @snx_window_icon_size@;
 ")
 add_library(snx_window_icon STATIC "${PROJECT_SOURCE_DIR}/src/common/utilities/window_icon.c"
     "${CMAKE_BINARY_DIR}/generated/window_icon_png.c")
-target_include_directories(snx_window_icon PUBLIC "${PROJECT_SOURCE_DIR}/src/common/utilities")
 target_link_libraries(snx_window_icon PUBLIC SDL3::SDL3)
 target_compile_options(snx_window_icon PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 if(BUILD_TESTING)

@@ -5,8 +5,8 @@
    read before the first result is written (Vd may be Vn), and GCC's vectorizer turns the lanes into the host's
    vector instructions. ir_simd.c's x86-only forms (AES-NI, PCLMULQDQ, GFNI, VPTERNLOG) have no counterpart here: their
    encodings take the generic lanes or snx_simd. */
-#include "jit.h"
-#include "cpu.h"
+#include "common/cpu/recompiler/gccjit/jit.h"
+#include "common/cpu/aarch64/cpu.h"
 #include <string.h>
 
 typedef gcc_jit_rvalue* V;

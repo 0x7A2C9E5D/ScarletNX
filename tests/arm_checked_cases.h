@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_TEST_ARM_CHECKED_CASES_H
 #define SNX_TEST_ARM_CHECKED_CASES_H
-#include "cpu/arm/checked.h"
+#include "common/cpu/arm/checked.h"
 /* id, Thumb, ISA, checked, PC, words or halfwords */
 #define ARM_CHECKED_CASES(F)                                                                                           \
     F(nop, 0, 1, 1, 0x1000, 0xe1a00000)                                                                                \

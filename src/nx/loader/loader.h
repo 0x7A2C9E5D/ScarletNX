@@ -5,8 +5,8 @@
 #ifndef SNX_TOOL_LOADER_H
 #define SNX_TOOL_LOADER_H
 
-#include "common.h"
-#include "image.h"
+#include "common/utilities/common.h"
+#include "common/cpu/recompiler/image.h"
 #include <stddef.h>
 
 #define SNX_CODE_BASE 0x08000000UL

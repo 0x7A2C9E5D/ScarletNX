@@ -4,7 +4,7 @@
    runs on an idle core its mask allows, a core that falls idle takes a thread waiting for another one, a thread of
    better priority stays and flags the holder, and only svcSleepThread(0) keeps a yielding thread on its core. The
    threads here are bare KThreads; each one that has to wait for a core waits on a host thread of its own */
-#include "hle/kernel/thread.c"
+#include "nx/hle/kernel/thread.c"
 #include <stdarg.h>
 #include <stdio.h>
 #include <time.h>

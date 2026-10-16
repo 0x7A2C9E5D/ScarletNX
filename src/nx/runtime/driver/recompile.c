@@ -5,12 +5,12 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later (LICENSE). */
 #define _POSIX_C_SOURCE 200809L
-#include "recompile.h"
-#include "loader.h"
-#include "module.h"
-#include "module_llvm.h"
-#include "backend.h"
-#include "toolchain.h"
+#include "nx/runtime/driver/recompile.h"
+#include "nx/loader/loader.h"
+#include "nx/loader/module.h"
+#include "nx/loader/module_llvm.h"
+#include "common/cpu/recompiler/backend.h"
+#include "nx/runtime/driver/toolchain.h"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -108,6 +108,26 @@ static int copy_dlls(const char* run, const char* out) {
     return rc;
 }
 #endif
+/* The game's settings: beside it, or in an installed build's config folder (snx_user_path), where the runtime reads
+   them. An older build's beside the game stays, a line saying so. NULL when that folder cannot be made */
+static char* settings_path(const char* out, const char* title) {
+    char *folder = snx_user_path(out, SNX_USER_CONFIG), *base, *path = NULL, *old;
+    if (!strcmp(folder, out) || !snx_mkdirs(folder)) {
+        base = snx_path_join(folder, title);
+        path = snx_format("%s.ini", base);
+        free(base);
+    }
+    if (path && strcmp(folder, out)) {
+        base = snx_path_join(out, title);
+        old = snx_format("%s.ini", base);
+        free(base);
+        if (snx_left_behind(old, path))
+            fprintf(stderr, "scarletnx: %s was left by an older version: this one keeps it in %s\n", old, path);
+        free(old);
+    }
+    free(folder);
+    return path;
+}
 static SnxU64* read_hints(const char* base, size_t* count) {
     char *path = snx_format("%s.hints", base), line[256], *s;
     FILE* f = snx_fopen(path, "r");
@@ -264,9 +284,11 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
             no_build = 1;
         else if (!strcmp(arg, "--interp-only"))
             gen.interp_only = 1;
-        else if (!strcmp(arg, "--keep-ir") || !strcmp(arg, "--keep-c"))
+        else if (!strcmp(arg, "--keep-ir") || !strcmp(arg, "--keep-c")) {
+            if (!strcmp(arg, "--keep-c"))
+                fprintf(stderr, "scarletnx: --keep-c is deprecated: use --keep-ir (docs/DEPRECATIONS.md)\n");
             keep_c = 1;
-        else if (!strcmp(arg, "--quiet") || !strcmp(arg, "-q"))
+        } else if (!strcmp(arg, "--quiet") || !strcmp(arg, "-q"))
             compile.quiet = gen.quiet = 1;
         else if (arg[0] == '-') {
             value = NULL;
@@ -373,7 +395,11 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("cannot stage game data in %s", data);
         goto done;
     }
-    ini = snx_format("%s.ini", base);
+    ini = settings_path(out, title);
+    if (!ini) {
+        snx_error("cannot create the settings folder for %s", title);
+        goto done;
+    }
     if (!snx_is_file(ini)) {
         ini_text = snx_format(
             "; ScarletNX settings for %s\n; Full option help is written on first run.\n[Display]\nlanguage=1\n", title);

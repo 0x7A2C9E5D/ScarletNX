@@ -5,8 +5,8 @@
 /* what a window backend (platform/backend/) provides: the window, input and presenting */
 #ifndef SNX_BACKEND_H
 #define SNX_BACKEND_H
-#include "cpu/aarch64/cpu.h"
-#include "runtime/ini.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/runtime/ini.h"
 
 void video_init(const char* title);
 void video_poll(void);
@@ -14,9 +14,8 @@ extern const IniOpt g_backend_ini[]; /* the backend's settings (touch) */
 /* a key of the .ini or the command line for the backend, the on-screen controls or the unattended-run options:
    applied, 1; none of theirs, 0 */
 int backend_ini(const char* k, const char* v);
-/* the game's touch screen as the in-game menu shows and sets it: 0 off, 1 the fingers, 2 the mouse too. The set
-   is saved to the .ini */
-int backend_touch_mode(void);
+/* the game's touch screen set from the in-game menu (touch's row of g_backend_ini: 0 off, 1 the fingers, 2 the mouse
+   too), and saved to the .ini */
 void backend_touch_set(int mode);
 void frontend_frame(void);
 /* the window's size in pixels for the Vulkan swapchain, or 0 x 0 when headless */

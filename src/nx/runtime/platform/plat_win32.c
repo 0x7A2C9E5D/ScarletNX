@@ -4,10 +4,10 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the platform layer on Windows: locks, threads, time, virtual memory and write watching, files, DLLs, the crash
    handler */
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

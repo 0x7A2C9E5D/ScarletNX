@@ -4,11 +4,11 @@
    synchronization2 and dynamic rendering (1.3) are what the renderer is built on. */
 #include <stdlib.h>
 #include <string.h>
-#include "runtime/options.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "gpu/vk/vk.h"
+#include "nx/runtime/options.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/gpu/vk/vk.h"
 
 int g_vk_preserve_infnan;
 int g_vk_flush_denorm;
@@ -303,12 +303,14 @@ static int create_device(void) {
                                             .pNext = &f11,
                                             .samplerMirrorClampToEdge = q12.samplerMirrorClampToEdge,
                                             .timelineSemaphore = VK_TRUE,
+                                            .shaderFloat16 = q12.shaderFloat16,
                                             .shaderOutputViewportIndex = q12.shaderOutputViewportIndex,
                                             .shaderOutputLayer = q12.shaderOutputLayer,
                                             .shaderSampledImageArrayNonUniformIndexing =
                                                 q12.shaderSampledImageArrayNonUniformIndexing};
     /* shaders pick an indexed texture per invocation from an array (SNX_VKB_TEXARRAY) */
     g_shader_texture_arrays = q12.shaderSampledImageArrayNonUniformIndexing != 0;
+    g_shader_float16 = q12.shaderFloat16 != 0;
     g_shader_output_layer = q12.shaderOutputLayer != 0; /* ShaderLayer: a vertex or tessellation program's layer */
     VkPhysicalDeviceVulkan13Features f13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
                                             .pNext = &f12,

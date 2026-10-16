@@ -43,10 +43,42 @@ int snx_write_file(const char* path, const void* data, size_t size);
 int snx_write_changed(const char* path, const void* data, size_t size);
 char* snx_temp_dir(const char* parent);
 char* snx_user_data_dir(void);
+/* Systems that follow the XDG Base Directory spec, where settings, state and caches have folders of their own */
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__ANDROID__)
+#define SNX_XDG 1
+#endif
+enum { SNX_USER_DATA, SNX_USER_CONFIG, SNX_USER_STATE, SNX_USER_CACHE };
+/* An installed build's folder for one kind of file: $XDG_CONFIG_HOME/scarletnx (~/.config), $XDG_STATE_HOME/scarletnx
+   (~/.local/state) or $XDG_CACHE_HOME/scarletnx (~/.cache), a relative path ignored. Without SNX_XDG all four are the
+   data folder. NULL when the environment names no home */
+char* snx_user_dir(int kind);
+/* A path in the user's data folder, moved to the same place in the folder of kind: games/X.ini of the data folder is
+   games/X.ini of the config folder. Any other path (a checkout, a portable copy, --outdir) is returned as it is */
+char* snx_user_path(const char* path, int kind);
+/* 1 while what an older build left at old is still there, for the caller to say each run where it is and that this
+   build keeps it at now. Nothing is moved: the player does that */
+int snx_left_behind(const char* old, const char* now);
+/* 1 for a name the program has as the launcher, not as a game's copy: scarletnx, a model's (scarletnx-mariko), the
+   AppImage's (ScarletNX-x86_64), in any case, without .exe or .AppImage. Started bare under another name it is a
+   game's copy, which says what is missing and never opens the menu */
+int snx_launcher_name(const char* name);
+/* A game's own files in its folder, where an older build kept them, and the kind of folder this one keeps each in: its
+   log and threads.txt, its settings, its pipeline cache. A name starting with '.' follows the game's name; the others
+   the folder has once, for all its games. The runtime says so for a game it runs, the menu for every game */
+#define SNX_GAME_FILES 4
+typedef struct {
+    const char* name;
+    int kind;
+} SnxGameFile;
+extern const SnxGameFile snx_game_files[SNX_GAME_FILES];
+/* work/ of a data folder, the drivers' extractions: an installed build's is in its cache folder. An older build's
+   work/ in the data folder stays, a line on stdout saying so */
+char* snx_work_dir(const char* data_dir);
 /* The folder work/, games/ and the keys are in when a run names none (--repo), and the menu's games/: the checkout a build
-   came from; else, when a games/ folder is beside it, the folder of the AppImage or of the program (a portable copy);
-   else the user's data folder. NULL when none can be named */
-char* snx_data_dir(const char* checkout, const char* program_dir);
+   came from, for a program run from that build's tree (build; NULL: any program); else, when a games/ folder is beside
+   it, the folder of the AppImage or of the program (a portable copy); else the user's data folder. NULL when none can be
+   named */
+char* snx_data_dir(const char* checkout, const char* build, const char* program_dir);
 SnxU64 snx_free_space(const char* path);
 SnxU64 snx_file_size(const char* path);
 int snx_make_executable(const char* path);
@@ -58,6 +90,9 @@ char* snx_find_tool(const char* name);
 /* argv is NULL terminated. No shell. Captured output is heap-owned by caller.
    home isolates HOME/USERPROFILE and removes XDG_CONFIG_HOME in the child. */
 int snx_run(const char* const* argv, const char* cwd, const char* home, char** output);
+/* snx_run calling tick(data) about once a second while the child runs: a long tool can say how far it is */
+int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, char** output, void (*tick)(void*),
+                    void* data);
 /* Foreground workflow stage with inherited stdio, interruption forwarding and diagnostics.
    A stopped POSIX child is aborted so a rerun can restart that stage. Not thread safe. */
 int snx_run_stage(const char* const* argv, const char* cwd, const char* stage);

@@ -3,14 +3,14 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* Unattended-run options for both windowed and headless execution through the SDL3 backend. */
-#include "runtime/platform/unattended.h"
-#include "runtime/ini.h"
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "runtime/rtapi.h"
-#include "gpu/renderer.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/runtime/platform/unattended.h"
+#include "nx/runtime/ini.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/runtime/rtapi.h"
+#include "nx/gpu/renderer.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -73,20 +73,21 @@ static void script_set(const IniOpt* o, const char* v) {
     script_parse(v);
 }
 /* given as --key=value, or read from the .ini's [Other] (none is in its sections, so none is written with help) */
-static const IniOpt INI[] = {{"seconds", NULL, NULL, INI_INT, 0, &g_seconds, 0, INT_MAX, NULL},
-                             {"frames", NULL, NULL, INI_INT, 0, &g_maxframes, -1, INT_MAX, NULL},
-                             {"shot", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, shot_set},
-                             {"shot_every", NULL, NULL, INI_INT, 0, &g_shot_every, 0, INT_MAX, NULL},
-                             {"press", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, press_set},
-                             {"press_at", NULL, NULL, INI_INT, 0, &g_press_at, 0, INT_MAX, NULL},
-                             {"press_len", NULL, NULL, INI_INT, 0, &g_press_len, 0, INT_MAX, NULL},
-                             {"script", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, script_set},
-                             {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+static const IniOpt INI[] = {{"seconds", NULL, NULL, INI_INT, 0, &g_seconds, 0, INT_MAX, NULL, NULL, NULL, 0, 0},
+                             {"frames", NULL, NULL, INI_INT, 0, &g_maxframes, -1, INT_MAX, NULL, NULL, NULL, 0, 0},
+                             {"shot", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, shot_set, NULL, NULL, 0, 0},
+                             {"shot_every", NULL, NULL, INI_INT, 0, &g_shot_every, 0, INT_MAX, NULL, NULL, NULL, 0, 0},
+                             {"press", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, press_set, NULL, NULL, 0, 0},
+                             {"press_at", NULL, NULL, INI_INT, 0, &g_press_at, 0, INT_MAX, NULL, NULL, NULL, 0, 0},
+                             {"press_len", NULL, NULL, INI_INT, 0, &g_press_len, 0, INT_MAX, NULL, NULL, NULL, 0, 0},
+                             {"script", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, script_set, NULL, NULL, 0, 0},
+                             {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 int unattended_ini(const char* k, const char* v) {
     const IniOpt* o = ini_find(INI, k);
     if (o) ini_read(o, v);
     return o != NULL;
 }
+int unattended_known(const char* k) { return ini_find(INI, k) != NULL; }
 void unattended_start(void) { g_start = plat_ns(); }
 int unattended_active(void) { return g_seconds || g_maxframes >= 0; }
 u64 unattended_buttons(void) {

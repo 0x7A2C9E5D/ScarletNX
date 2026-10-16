@@ -24,11 +24,11 @@
    land on whichever thread reads their memory first. */
 #ifndef SNX_VK_H
 #define SNX_VK_H
-#include "cpu/aarch64/cpu.h"
-#include "gpu/gpu.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/gpu/gpu.h"
 #include "volk.h"
 #include "vk_mem_alloc.h"
-#include "gpu/shader/shader.h"
+#include "nx/gpu/shader/shader.h"
 
 #define VK_FRAMES 2  /* frames in flight */
 #define VK_SC_MAX 16 /* swapchain images */
@@ -360,11 +360,10 @@ void vk_pipeline_init(void);
 /* the shader at gva (after a VertexA program at gva_a, or 0). The masks key integer inputs: attributes for the
    vertex stage, textures and render target outputs for the fragment stage. rt_int keys the primitives of the
    tessellation evaluation and geometry stages (ShaderInfo.rt_int_mask). clip: the clip distances the 3D engine
-   enables, and SNX_SH_NOT_LAST (the stages before rasterization) */
-VkSh* vk_shader_get(u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask, u32 rt_int, u32 rt_sint, u32 clip);
-/* the bound constant buffers per stage, which the translator also reads to resolve indirect branches */
-extern u64 g_vk_cb[5][18];
-extern u32 g_vk_cbsize[5][18];
+   enables, and SNX_SH_NOT_LAST (the stages before rasterization). The translator reads ch's bound constant buffers
+   (ch->cbind) to resolve indirect branches */
+VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask, u32 rt_int,
+                    u32 rt_sint, u32 clip);
 typedef struct {
     VkShaderModule vs, fs;
     VkShaderModule tcs, tes, gs; /* tessellation control and evaluation, geometry: VK_NULL_HANDLE when off */

@@ -3,13 +3,13 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* hid. Games read the shared memory directly, so we fill it in the real layout (17 entry LIFOs). */
-#include "hle/services/hid.h"
-#include "hle/services/services.h"
-#include "hle/kernel/ipc.h"
-#include "hle/kernel/kernel.h"
+#include "nx/hle/services/hid.h"
+#include "nx/hle/services/services.h"
+#include "nx/hle/kernel/ipc.h"
+#include "nx/hle/kernel/kernel.h"
 #include <string.h>
-#include "hle/services/hid_layout.h"
-#include "hle/services/services_int.h"
+#include "nx/hle/services/hid_layout.h"
+#include "nx/hle/services/services_int.h"
 #include "hle/services/hid.swipc.inc"
 
 PadState g_pad;
@@ -241,6 +241,31 @@ static int nn_hid_IHidServer_GetVibrationDeviceInfo(SvcObj* self, nn_hid_Vibrati
                                                     nn_hid_VibrationDeviceInfo* info) {
     info->type = 1;
     info->position = ((handle >> 16) & 0xFF) == 0 ? 1 : 2;
+    return 0;
+}
+/* an amplitude, 0 to 1, as 0 to 65535 (a NaN is none) */
+static u32 amplitude(float a) { return a > 0 ? a < 1 ? (u32)(a * 65535.0f) : 65535 : 0; }
+/* the value for one device: the left one (index 0 in the handle's third byte) or the right one, on any controller,
+   as every gamepad plays the one controller */
+static void vibrate(nn_hid_VibrationDeviceHandle handle, const nn_hid_VibrationValue* v) {
+    __atomic_store_n(&g_pad.rumble[(handle >> 16) & 1], amplitude(v->amp_low) | amplitude(v->amp_high) << 16,
+                     __ATOMIC_RELAXED);
+}
+static int nn_hid_IHidServer_SendVibrationValue(SvcObj* self, nn_hid_VibrationDeviceHandle handle,
+                                                const nn_hid_VibrationValue* value, u64 aruid) {
+    vibrate(handle, value);
+    return 0;
+}
+static int nn_hid_IHidServer_SendVibrationValues(SvcObj* self, nn_applet_AppletResourceUserId aruid, IpcBuf handles,
+                                                 IpcBuf values) {
+    u64 i, n = handles.size / 4 < values.size / 16 ? handles.size / 4 : values.size / 16;
+    for (i = 0; i < n; i++) {
+        nn_hid_VibrationDeviceHandle h;
+        nn_hid_VibrationValue v;
+        memcpy(&h, GP(handles.addr + i * 4), 4);
+        memcpy(&v, GP(values.addr + i * 16), 16);
+        vibrate(h, &v);
+    }
     return 0;
 }
 static int nn_hid_IHidServer_GetActualVibrationValue(SvcObj* self, nn_hid_VibrationDeviceHandle handle, u64 aruid,

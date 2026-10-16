@@ -3,7 +3,7 @@
 /* The audio renderer's DSP offline: updates written field by field as edenprobe's audio family writes them
    (revision 4, 48 kHz, 240 samples a frame), frames rendered, and what the aux, the circular buffer sinks and the
    voices' counters show. Levels are one bin of a Fourier transform over a frame of whole periods */
-#include "hle/services/audren_dsp.c"
+#include "nx/hle/services/audren_dsp.c"
 #include <math.h>
 #include <stdio.h>
 

@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_TRANSLATOR_H
 #define SNX_TRANSLATOR_H
-#include "gpu/shader/shader.h"
+#include "nx/gpu/shader/shader.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>

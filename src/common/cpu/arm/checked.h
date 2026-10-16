@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_ARM_CHECKED_H
 #define SNX_ARM_CHECKED_H
-#include "arm.h"
+#include "common/cpu/arm/arm.h"
 
 /* Separate opt-in ABI; SnxArmCPU and SNX_ARM_ABI are unchanged. Generated
    checked blocks take &state.cpu, NEVER a standalone SnxArmCPU. No flat memory

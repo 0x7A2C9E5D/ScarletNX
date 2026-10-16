@@ -5,19 +5,19 @@
 /* vi + the nvnflinger buffer queue. There's no compositor: QueueBuffer has the GPU thread show the frame once the work
    queued before it is done, and DequeueBuffer waits out the last frame's turn on the display (its swap interval) before
    handing the game a buffer for the next, as the console's compositor holds it (present_pace). */
-#include "hle/services/vi.h"
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "gpu/gpu.h"
-#include "hle/services/nvdrv.h"
-#include "hle/services/services.h"
-#include "hle/kernel/ipc.h"
-#include "hle/services/services_int.h"
+#include "nx/hle/services/vi.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/gpu/gpu.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/hle/services/services.h"
+#include "nx/hle/kernel/ipc.h"
+#include "nx/hle/services/services_int.h"
 #include "hle/services/vi.swipc.inc"
-#include "hle/kernel/kernel.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -131,12 +131,12 @@ typedef struct {
 } QueuedFrame;
 static void present_queued(void* p) {
     QueuedFrame* q = p;
-    /* nv_gpu_call_after left only fences the submissions before this reach: a wait here means one fell short */
+    /* nv_gpu_call_after left only fences the submissions before this reach, and they have all run: one not reached
+       now fell short, and waiting here would only stall the GPU thread */
     for (u32 i = 0; i < q->nf; i++)
-        if (q->id[i] != 0xFFFFFFFFu && !syncpt_wait(q->id[i], q->val[i], 1000000000))
-            WARN_LIMIT(8,
-                       "binder: QUEUE_BUFFER slot %d: fence syncpoint %u did not reach %u in 1 s, presenting anyway\n",
-                       q->slot, q->id[i], q->val[i]);
+        if (q->id[i] != 0xFFFFFFFFu && !syncpt_wait(q->id[i], q->val[i], 0))
+            WARN_LIMIT(8, "binder: QUEUE_BUFFER slot %d: fence syncpoint %u is at %u, short of %u, presenting anyway\n",
+                       q->slot, q->id[i], syncpt_read(q->id[i]), q->val[i]);
     Slot* s = &q->s;
     if (s->used)
         vi_show_buffer(s->nvmap_id, s->offset, s->w, s->h, s->pitch, s->layout, s->bhl, s->afmt, s->crop, s->transform);

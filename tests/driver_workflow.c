@@ -2,10 +2,10 @@
    Copyright 2026 the ScarletNX contributors */
 /* Exercise the real driver/supervisor with synthetic extraction, compilation and game children. */
 #define _POSIX_C_SOURCE 200809L
-#include "common.h"
-#include "driver.h"
-#include "extract.h"
-#include "recompile.h"
+#include "common/utilities/common.h"
+#include "nx/runtime/driver/driver.h"
+#include "nx/runtime/driver/extract.h"
+#include "nx/runtime/driver/recompile.h"
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -179,6 +179,14 @@ static void run(const char* exe, const char* repo, const char* dump, const char*
     free(recorded);
     free(output);
 }
+/* the runtime's settings (runtime/options.c): those this test gives */
+int snx_setting_known(const char* key) {
+    static const char* const known[] = {"touch", "controls", "resolution", "controls_a", "seconds"};
+    size_t i;
+    for (i = 0; i < sizeof known / sizeof *known; ++i)
+        if (!strcmp(key, known[i])) return 1;
+    return 0;
+}
 static void reset(const char* repo, const char* dump) {
     CHECK(!snx_remove_tree(repo));
     CHECK(!snx_mkdirs(repo));
@@ -212,8 +220,9 @@ int main(int argc, char** argv) {
             (!strcmp(fullscreen, "--fullscreen") || !strcmp(fullscreen, "--fullscreen=1") || !strcmp(fullscreen, "-f")))
             CHECK(argc == 2 && !strcmp(argv[1], "-f"));
         if (fullscreen && !strcmp(fullscreen, "--fullscreen=0")) CHECK(argc == 2 && !strcmp(argv[1], "--fullscreen=0"));
-        /* the game's own settings reach it as they were given */
-        if (fullscreen && (!strncmp(fullscreen, "--touch=", 8) || !strncmp(fullscreen, "--controls=", 11)))
+        /* the game's own settings, any --key=value of its .ini, reach it as they were given */
+        if (fullscreen && strchr(fullscreen, '=') && strncmp(fullscreen, "--fullscreen=", 13) &&
+            strncmp(fullscreen, "--backend=", 10))
             CHECK(argc == 2 && !strcmp(argv[1], fullscreen));
         if (getenv("SNX_WORKFLOW_BACKEND") && *getenv("SNX_WORKFLOW_BACKEND")) CHECK(argc == 1);
         if (flag && *flag) CHECK(argc == 2 && !strcmp(argv[1], "-H"));
@@ -288,6 +297,14 @@ int main(int argc, char** argv) {
         set_env("SNX_WORKFLOW_FLAGS", "--touch=2");
         run(exe, repo, dump, log, 0, "G", NULL);
         set_env("SNX_WORKFLOW_FLAGS", "--controls=1");
+        run(exe, repo, dump, log, 0, "G", NULL);
+        set_env("SNX_WORKFLOW_FLAGS", "--resolution=2");
+        run(exe, repo, dump, log, 0, "G", NULL);
+        set_env("SNX_WORKFLOW_FLAGS", "--seconds=5");
+        run(exe, repo, dump, log, 0, "G", NULL);
+        set_env("SNX_WORKFLOW_FLAGS", "--resoltion=2");
+        run(exe, repo, dump, log, 1, "", "unknown option: --resoltion=2");
+        set_env("SNX_WORKFLOW_FLAGS", "--controls_a=0.5 0.5 100 1");
         run(exe, repo, dump, log, 0, "G", NULL);
         set_env("SNX_WORKFLOW_FLAGS", "--fullscreen=invalid");
         run(exe, repo, dump, log, 1, "", "unknown option");

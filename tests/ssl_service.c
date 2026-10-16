@@ -4,12 +4,12 @@
    the game's socket comes from bsd:u (bsd.c, built beside), as the SDK makes it, and the server's certificate is
    self-signed, made here. Verification with and without the certificate imported, the host name check, Read and
    Write in both I/O modes, Peek, Pending, Poll, the server's certificate, and the raw layouts the SDK sends */
-#include "hle/services/network/network.h"
+#include "nx/hle/services/network/network.h"
 #include <stdarg.h>
 #include <time.h>
 
 #include "hle/services/network/bsd.swipc.h"
-#include "hle/services/network/ssl.c"
+#include "nx/hle/services/network/ssl.c"
 
 #ifdef _WIN32
 #include <windows.h>

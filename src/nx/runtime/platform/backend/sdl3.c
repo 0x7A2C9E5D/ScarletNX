@@ -5,29 +5,31 @@
 /* SDL3 backend, the window backend on Linux, Windows and Android: the window and its Vulkan surface, keyboard, gamepads
    and touch. Runs natively on Wayland and on X11 (SDL_VIDEO_DRIVER=x11 picks X11), and takes the unattended-run
    options (seconds, frames, shot, shot_every, press, press_at, press_len, script: platform/unattended.c). */
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "hle/services/hid.h"
-#include "hle/kernel/kernel.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "runtime/platform/unattended.h"
-#include "runtime/platform/overlay.h"
-#include "runtime/platform/touch.h"
-#include "runtime/platform/ui.h"
-#include "runtime/platform/vpad.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/hle/services/hid.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/unattended.h"
+#include "nx/runtime/platform/overlay.h"
+#include "nx/runtime/platform/touch.h"
+#include "nx/runtime/platform/ui.h"
+#include "nx/runtime/platform/vpad.h"
+#include "nx/runtime/platform/gamepad.h"
+#include "common/utilities/pad_sdl.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "gpu/renderer.h"
+#include "nx/gpu/renderer.h"
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL.h>
 #include <time.h>
-#include "window_icon.h"
-#include "runtime/platform/controls_png.h"
-#include "build_info.h"
+#include "common/utilities/window_icon.h"
+#include "nx/runtime/platform/controls_png.h"
+#include "common/utilities/build_info.h"
 
 static SDL_Window* g_win;
 /* the window's size in pixels, width | height << 32: the renderer reads it on its own thread, and one atomic keeps
@@ -39,7 +41,6 @@ static u64 g_menu_held; /* buttons held while the menu had the controls (the B t
 static int g_fullscreen;
 static void set_fullscreen(int on);
 static int g_shot_req;
-static SDL_Gamepad* g_pads[4];
 static int g_audio_ready;
 static int g_hidden;         /* the app is in the background (Android) */
 static int g_given_up;       /* the window went to a fatal error's screen: the renderer presents nothing more */
@@ -135,7 +136,7 @@ void plat_audio_volume(PAudio* a, float volume) {
 }
 
 /* the game's touch screen: 0 nothing, 1 the fingers, 2 the fingers and the mouse's left button (ini key touch) */
-static int g_touch_mode = 1;
+static int g_touch_mode = 2;
 static u64 g_touch_ids[SNX_HID_TOUCHES]; /* the finger in each slot of g_touch */
 
 /* g_touch_mode changed: the fingers or the mouse it no longer takes are lifted */
@@ -146,10 +147,9 @@ static void touch_mode_set(const IniOpt* o, const char* v) {
     if (g_touch_mode != 2) touch_up(&g_touch, g_touch_ids, SNX_TOUCH_MOUSE);
 }
 const IniOpt g_backend_ini[] = {
-    {"touch", "1", "The game's touch screen: 1 = fingers, 2 = fingers and the mouse's left button, 0 = off", INI_INT, 0,
-     &g_touch_mode, 0, 2, touch_mode_set},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
-int backend_touch_mode(void) { return g_touch_mode; }
+    {"touch", "2", "The game's touch screen: 1 = fingers, 2 = fingers and the mouse's left button, 0 = off", INI_INT, 0,
+     &g_touch_mode, 0, 2, touch_mode_set, "Touch screen", "Off|Fingers|Mouse too", 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 /* from the in-game menu, under ui_lock: the mode as the .ini clamps it, saved */
 void backend_touch_set(int mode) {
     const IniOpt* o = ini_find(g_backend_ini, "touch");
@@ -165,7 +165,7 @@ int backend_ini(const char* k, const char* v) {
     /* the in-game menu reads the touch mode, and the renderer the on-screen controls, under ui_lock */
     ui_lock();
     if (o) ini_read(o, v);
-    known = o || vpad_ini(k, v);
+    known = o || vpad_ini(k, v) || gamepad_ini(k, v);
     ui_unlock();
     return known || unattended_ini(k, v);
 }
@@ -317,7 +317,8 @@ int backend_vk_surface(VkInstance instance, VkSurfaceKHR* surface) {
     LOG("video: no Vulkan surface: %s\n", SDL_GetError());
     return 0;
 }
-static const char* HELP = "Controller: like a Switch controller, buttons by position. Home: the game's menu.\n\n"
+static const char* HELP = "Controller: A, B, X and Y as their labels say (gamepad_buttons=0: by position). Home: "
+                          "the game's menu.\n\n"
                           "Keyboard (keys by position, as on a US layout):\n"
                           "  Arrows = D-Pad     W A S D = left stick    I J K L = right stick\n"
                           "  X / Space = A    Z = B    C = X    V = Y\n"
@@ -546,41 +547,6 @@ static void hotkey(SDL_Keycode k) {
     }
 }
 
-static int pad_is_open(SDL_JoystickID id) {
-    for (int i = 0; i < 4; i++)
-        if (g_pads[i] && SDL_GetGamepadID(g_pads[i]) == id) return 1;
-    return 0;
-}
-static void pad_open(SDL_JoystickID id) {
-    if (pad_is_open(id)) return;
-    for (int i = 0; i < 4; i++)
-        if (!g_pads[i]) {
-            g_pads[i] = SDL_OpenGamepad(id);
-            if (g_pads[i]) LOG("input: gamepad %s\n", SDL_GetGamepadName(g_pads[i]));
-            return;
-        }
-}
-static void pad_close(SDL_JoystickID id) {
-    for (int i = 0; i < 4; i++)
-        if (g_pads[i] && SDL_GetGamepadID(g_pads[i]) == id) {
-            SDL_CloseGamepad(g_pads[i]);
-            g_pads[i] = NULL;
-        }
-    /* a fifth pad connected while four were open takes the free place */
-    int n = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&n);
-    if (!ids) return;
-    for (int i = 0; i < n; i++) pad_open(ids[i]);
-    SDL_free(ids);
-}
-
-/* the dead zone as a circle, so a stick pushed along one axis keeps the small part of the other */
-static void dz(i32* x, i32* y) {
-    if ((i64)*x * *x + (i64)*y * *y < 7000ll * 7000) *x = *y = 0;
-}
-/* SDL's Y axes point down, the Switch's up */
-static i32 up(i32 v) { return v == -32768 ? 32767 : -v; }
-
 /* The game's menu takes the keys, the buttons, the fingers and the mouse while it is open. Back, Home and F2 open
    and close it, and they and Esc end the on-screen controls' edit mode. Under ui_lock: the renderer draws them on its
    thread */
@@ -639,18 +605,26 @@ static int menu_event(const SDL_Event* e) {
                 break;
             default: break;
         }
-    } else if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) { /* by position, as the game's pad: A right, B bottom */
-        switch (e->gbutton.button) {
-            case SDL_GAMEPAD_BUTTON_DPAD_UP: overlay_move(-1); break;
-            case SDL_GAMEPAD_BUTTON_DPAD_DOWN: overlay_move(1); break;
-            case SDL_GAMEPAD_BUTTON_DPAD_LEFT: overlay_side(-1); break;
-            case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: overlay_side(1); break;
-            case SDL_GAMEPAD_BUTTON_EAST: overlay_do(overlay_select()); break;
-            case SDL_GAMEPAD_BUTTON_SOUTH: overlay_do(overlay_back()); break;
-            default: break;
-        }
-    } else if (e->type == SDL_EVENT_FINGER_DOWN) {
-        g_tap_finger = finger_id(&e->tfinger);
+    } else if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        /* the pads' presses act on the menu from the poll, with their sticks and the on-screen controls'; the button
+           map page waiting for one takes it as the control it is */
+        overlay_press(snx_pad_of_button(e->gbutton.button));
+    } else if (e->type == SDL_EVENT_GAMEPAD_AXIS_MOTION && overlay_listening() && e->gaxis.value > SNX_PAD_TRIGGER &&
+               (e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || e->gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)) {
+        overlay_press(e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? SNX_PAD_LT : SNX_PAD_RT);
+    } else if (e->type == SDL_EVENT_MOUSE_WHEEL) { /* a notch up is a row up, as the system turns the wheel */
+        overlay_scroll(-e->wheel.integer_y);
+    } else if (e->type == SDL_EVENT_FINGER_DOWN || e->type == SDL_EVENT_FINGER_MOTION) {
+        int safe[4];
+        backend_window_size(&w, &h);
+        backend_window_safe(&safe[0], &safe[1], &safe[2], &safe[3]);
+        /* a finger on an on-screen control stays the controls': their presses move the menu (menu_vpad) */
+        if (e->type == SDL_EVENT_FINGER_MOTION)
+            vpad_move(finger_id(&e->tfinger), e->tfinger.x * (float)w, e->tfinger.y * (float)h, safe);
+        else if (!vpad_down(finger_id(&e->tfinger), e->tfinger.x * (float)w, e->tfinger.y * (float)h, safe))
+            g_tap_finger = finger_id(&e->tfinger);
+    } else if (e->type == SDL_EVENT_FINGER_UP && vpad_up(finger_id(&e->tfinger))) {
+        /* the controls' finger lifted: no tap */
     } else if (e->type == SDL_EVENT_FINGER_UP) {
         if (g_tap_finger && finger_id(&e->tfinger) == g_tap_finger) {
             g_tap_finger = 0;
@@ -813,45 +787,29 @@ void video_poll(void) {
                    that took the focus: the game's touch from the mouse lifts now (a later release finds it up) */
                 touch_up(&g_touch, g_touch_ids, SNX_TOUCH_MOUSE);
                 break;
-            case SDL_EVENT_GAMEPAD_ADDED: pad_open(e.gdevice.which); break;
-            case SDL_EVENT_GAMEPAD_REMOVED: pad_close(e.gdevice.which); break;
+            case SDL_EVENT_GAMEPAD_ADDED: gamepad_open(e.gdevice.which); break;
+            case SDL_EVENT_GAMEPAD_REMOVED: gamepad_close(e.gdevice.which); break;
         }
     }
     /* the scripted presses act like keys, stick keys included. Bits 16..23 (the stick directions as buttons) can be
        scripted too, but the stick keys (40..47) are no npad buttons */
     u64 s = unattended_buttons(), k = keys_held | s, b = (k & 0xFFFFull) | (s & 0xFF0000ull);
-    i32 st[4];
+    i32 st[4], pad[4];
+    u64 pb;
     input_key_sticks(k, st);
     i32 lx = st[0], ly = st[1], rx = st[2], ry = st[3];
     /* every pad and the keyboard drive the one controller the game sees (hid.c has a single PadState) */
-    for (int i = 0; i < 4; i++) {
-        SDL_Gamepad* g = g_pads[i];
-        if (!g) continue;
-        /* by position like a Switch pad: A right, B bottom, X top, Y left */
-        static const struct {
-            SDL_GamepadButton btn;
-            int bit;
-        } map[] = {{SDL_GAMEPAD_BUTTON_EAST, 0},          {SDL_GAMEPAD_BUTTON_SOUTH, 1},
-                   {SDL_GAMEPAD_BUTTON_NORTH, 2},         {SDL_GAMEPAD_BUTTON_WEST, 3},
-                   {SDL_GAMEPAD_BUTTON_LEFT_STICK, 4},    {SDL_GAMEPAD_BUTTON_RIGHT_STICK, 5},
-                   {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, 6}, {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 7},
-                   {SDL_GAMEPAD_BUTTON_START, 10},        {SDL_GAMEPAD_BUTTON_BACK, 11},
-                   {SDL_GAMEPAD_BUTTON_DPAD_LEFT, 12},    {SDL_GAMEPAD_BUTTON_DPAD_UP, 13},
-                   {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, 14},   {SDL_GAMEPAD_BUTTON_DPAD_DOWN, 15}};
-        for (size_t m = 0; m < sizeof map / sizeof map[0]; m++)
-            if (SDL_GetGamepadButton(g, map[m].btn)) b |= 1ull << map[m].bit;
-        if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 8000) b |= 1ull << 8;
-        if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 8000) b |= 1ull << 9;
-        if (!lx && !ly) {
-            lx = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX);
-            ly = up(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY));
-            dz(&lx, &ly);
-        }
-        if (!rx && !ry) {
-            rx = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTX);
-            ry = up(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTY));
-            dz(&rx, &ry);
-        }
+    gamepad_state(&pb, pad);
+    gamepad_rumble(__atomic_load_n(&g_pad.rumble[0], __ATOMIC_RELAXED),
+                   __atomic_load_n(&g_pad.rumble[1], __ATOMIC_RELAXED));
+    b |= pb;
+    if (!lx && !ly) {
+        lx = pad[0];
+        ly = pad[1];
+    }
+    if (!rx && !ry) {
+        rx = pad[2];
+        ry = pad[3];
     }
     { /* the on-screen controls, as one more pad: their sticks over the others' while held */
         u64 vb;
@@ -861,6 +819,8 @@ void video_poll(void) {
         vpad_state(&vb, vs);
         acts = vpad_actions();
         if (acts & SNX_VPAD_DO_MENU) menu_open(1);
+        /* with the menu open, the pads move it: the on-screen controls' and the connected ones', sticks too */
+        overlay_do(overlay_controls(vb | pb, vs[0] || vs[1] ? vs : pad, SDL_GetTicks()));
         ui_unlock();
         b |= vb;
         if (vs[0] || vs[1]) {

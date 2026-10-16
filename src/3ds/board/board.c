@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "board.h"
+#include "3ds/board/board.h"
 
 /* Layout follows Azahar src/core/memory.h; see docs/3DS.md for provenance.
    No Azahar interpreter/JIT or privileged ARM9 firmware is embedded here. */

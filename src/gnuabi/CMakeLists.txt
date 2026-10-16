@@ -6,12 +6,14 @@ add_library(scarletnx-gnuabi STATIC
     filesystem/vfs.c filesystem/devfs/devfs.c filesystem/tmpfs/tmpfs.c filesystem/procfs/procfs.c
     network/socket.c network/poll.c network/etc.c)
 set_target_properties(scarletnx-gnuabi PROPERTIES OUTPUT_NAME scarletnx-gnuabi-runtime C_STANDARD 23 C_STANDARD_REQUIRED ON)
-target_include_directories(scarletnx-gnuabi PUBLIC "${PROJECT_SOURCE_DIR}/src/gnuabi" "${PROJECT_SOURCE_DIR}/src/common")
 # AArch32 execution needs the ARM LLVM block backend. Build it here when the NX
 # runtime (which normally owns it) is not part of this configuration.
 if(NOT TARGET snx_arm_llvm AND NOT SNX_BUILD_NX)
     include("${CMAKE_SOURCE_DIR}/cmake/llvm.cmake")
     add_subdirectory("${CMAKE_SOURCE_DIR}/src/common/cpu/arm" gnuabi-arm-backend)
+    if(COMMAND snx_test_sanitize) # tests/CMakeLists.txt: made after it looked
+        snx_test_sanitize(snx_arm_llvm)
+    endif()
 endif()
 target_link_libraries(scarletnx-gnuabi PUBLIC scarletnx-common scarletnx-net snx_arm_llvm)
 target_compile_options(scarletnx-gnuabi PRIVATE -Wall -Wextra -Werror)
@@ -49,3 +51,7 @@ endif()
 
 include(GNUInstallDirs)
 install(TARGETS scarletnx-gnuabi-run RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(COMMAND snx_sanitizer_path) # tests/CMakeLists.txt: the runtime made here, and this folder's tests
+    snx_test_sanitize(scarletnx-gnuabi)
+    snx_sanitizer_path()
+endif()

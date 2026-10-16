@@ -6,11 +6,11 @@
    often at first, rarely once they have stayed the same. */
 #include <stdlib.h>
 #include <string.h>
-#include "gpu/gpu.h"
-#include "gpu/renderer.h"
-#include "gpu/texture/etc2.h"
-#include "runtime/platform/log.h"
-#include "gpu/vk/vk.h"
+#include "nx/gpu/gpu.h"
+#include "nx/gpu/renderer.h"
+#include "nx/gpu/texture/etc2.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/gpu/vk/vk.h"
 
 /* the block height and depth (log2 GOBs) of a mip level of a block-linear texture. The hardware shrinks them for
    small levels: the height from the base level on, the depth only from level 1 on and by one step a level

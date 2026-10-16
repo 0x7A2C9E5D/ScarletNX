@@ -5,11 +5,11 @@
 #define _GNU_SOURCE
 /* what every platform shares: the guest thread pointer, logging and fatal errors. The rest of the platform layer is
    plat_posix.c or plat_win32.c (with profiler_win32.c) */
-#include "runtime/platform/plat.h"
-#include "runtime/loader.h"
-#include "runtime/main.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/runtime/loader.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/log.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
@@ -88,7 +88,7 @@ void logf_(int lvl, const char* fmt, ...) {
        game, leaves no stray <name>.log. Until then the lines go to stderr, and are kept for the log's top */
     if (!g_logf && !g_logf_failed && g_mod) {
         char p[1200];
-        snprintf(p, sizeof p, "%s%s.log", g_exedir, g_exename);
+        snprintf(p, sizeof p, "%s%s.log", g_statedir, g_exename);
         g_logf = fopen(p, "w");
         if (!g_logf) {
             g_logf_failed = 1;

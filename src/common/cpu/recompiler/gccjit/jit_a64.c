@@ -4,8 +4,8 @@
    as ir_a64.c does for LLVM. Field values are the template's f_ declarations evaluated here, and cpu.h's inline
    helpers are written out for them: their selector arguments (a shift type, an extension, a condition, an access
    size, bitfield positions) are fields of the constant word, so only the selected computation is emitted. */
-#include "jit.h"
-#include "cpu.h"
+#include "common/cpu/recompiler/gccjit/jit.h"
+#include "common/cpu/aarch64/cpu.h"
 #include <string.h>
 
 typedef gcc_jit_rvalue* V;

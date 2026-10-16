@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Switch container extraction through hactool. Keys stay in a private temporary HOME. */
-#include "extract.h"
+#include "nx/runtime/driver/extract.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,8 +45,11 @@ static void extract_help(void) {
          "  --keys FILE         prod.keys (default: REPO, then ~/.switch)\n"
          "  --title-keys FILE   title.keys (same discovery order; optional)\n"
          "  --help              Show this help");
-    puts("REPO is the checkout, or for an installed build the user's data folder (scarletnx --help).\n"
-         "Decrypted content needs no keys. Refuses output containing exefs.");
+    puts("REPO is the checkout, or for an installed build the user's data folder (scarletnx --help).");
+#ifdef SNX_XDG
+    puts("An installed build's work/ is in its cache folder, $XDG_CACHE_HOME/scarletnx (~/.cache/scarletnx).");
+#endif
+    puts("Decrypted content needs no keys. Refuses output containing exefs.");
 }
 
 static char* text_copy(const char* text, size_t size) {
@@ -364,6 +367,11 @@ static int read_title_keys(const char* source, TitleKey** list) {
     return failed;
 }
 
+static SnxU64 le_bytes(const unsigned char* p, unsigned n) {
+    SnxU64 value = 0;
+    while (n--) value = value << 8 | p[n];
+    return value;
+}
 static int ticket_key(const char* path, TitleKey** list) {
     unsigned char data[1024];
     char name[33], value[33];
@@ -380,7 +388,7 @@ static int ticket_key(const char* path, TitleKey** list) {
     if (fclose(file)) failed = 1;
     if (failed) return snx_error("Cannot read an extracted ticket");
     if (size < 4) return 0;
-    signature = (SnxU32)data[0] | ((SnxU32)data[1] << 8) | ((SnxU32)data[2] << 16) | ((SnxU32)data[3] << 24);
+    signature = (SnxU32)le_bytes(data, 4);
     switch (signature) {
         case 0x10000UL:
         case 0x10003UL: offset = 4 + 0x200 + 0x3c; break;
@@ -446,8 +454,78 @@ static int write_title_keys(const char* path, const TitleKey* list) {
     return failed ? snx_error("Cannot write private title.keys") : 0;
 }
 
+/* what hactool writes in a run of minutes, said once a second on one row: how far it is, never its own output */
+typedef struct {
+    const char* verb;    /* "unpacked", "extracted" */
+    const char* dirs[2]; /* where it writes, NULL for none */
+    SnxU64 total;        /* what it will have written */
+    int said;            /* a row went out, which the last one ends */
+} Progress;
+
+static SnxU64 tree_bytes(const char* path, unsigned depth) {
+    char** names;
+    char* child;
+    size_t count, i;
+    SnxU64 sum;
+    if (!path || depth > 16) return 0;
+    if (!snx_is_dir(path)) return snx_is_file(path) ? snx_file_size(path) : 0;
+    if (snx_list_dir(path, &names, &count)) return 0;
+    sum = 0;
+    for (i = 0; i < count; i++) {
+        child = snx_path_join(path, names[i]);
+        if (child) sum += tree_bytes(child, depth + 1);
+        free(child);
+    }
+    snx_free_strings(names, count);
+    return sum;
+}
+
+/* "  unpacked 1229 of 4096 MB (30%)", ending in a carriage return while hactool runs: a terminal and the launcher's
+   console write the next over it, the last one ends the row */
+static void progress_say(Progress* progress, int last) {
+    SnxU64 done = tree_bytes(progress->dirs[0], 0) + tree_bytes(progress->dirs[1], 0);
+    if (done > progress->total) done = progress->total;
+    printf("  %s %lu of %lu MB (%d%%)%s", progress->verb, (unsigned long)(done >> 20),
+           (unsigned long)(progress->total >> 20), progress->total ? (int)(done * 100 / progress->total) : 100,
+           last ? "\n" : "\r");
+    fflush(stdout);
+    progress->said = 1;
+}
+static void progress_tick(void* progress) { progress_say((Progress*)progress, 0); }
+
+/* what -txci or -tpfs0 writes of a container: an XCI's secure partition, as its root HFS0 (the header at 0x130 says
+   where) lists it, its padding and other partitions left; an NSP whole. The file's size when it cannot be read */
+static SnxU64 container_payload(const char* path, int xci) {
+    unsigned char head[0x140], root[0x10], entries[8 * 0x40];
+    char names[0x200];
+    SnxU64 size = snx_file_size(path), at, found;
+    unsigned files, strings, i, name;
+    FILE* file;
+    if (!xci) return size;
+    file = snx_fopen(path, "rb");
+    if (!file) return size;
+    found = 0;
+    if (fread(head, 1, sizeof head, file) == sizeof head && (at = le_bytes(head + 0x130, 8)) < 0x7fffffffUL &&
+        !fseek(file, (long)at, SEEK_SET) && fread(root, 1, sizeof root, file) == sizeof root &&
+        !memcmp(root, "HFS0", 4)) {
+        files = (unsigned)le_bytes(root + 4, 4);
+        strings = (unsigned)le_bytes(root + 8, 4);
+        if (files && files <= 8 && strings < sizeof names && fread(entries, 0x40, files, file) == files &&
+            fread(names, 1, strings, file) == strings) {
+            names[strings] = 0;
+            for (i = 0; i < files; i++) {
+                name = (unsigned)le_bytes(entries + i * 0x40 + 0x10, 4);
+                if (name < strings && !strcmp(names + name, "secure")) found = le_bytes(entries + i * 0x40 + 8, 8);
+            }
+        }
+    }
+    fclose(file);
+    return found ? found : size;
+}
+
 /* Hactool warnings can print secret values. Never forward its captured output, including on failure. */
-static int run_hactool(const ExtractState* state, const char* const* args, size_t count, char** information) {
+static int run_hactool(const ExtractState* state, const char* const* args, size_t count, char** information,
+                       Progress* progress) {
     const char* command[12];
     char* output;
     size_t i;
@@ -458,7 +536,9 @@ static int run_hactool(const ExtractState* state, const char* const* args, size_
     for (i = 0; i < count; i++) command[i + 2] = args[i];
     command[count + 2] = NULL;
     output = NULL;
-    result = snx_run(command, NULL, state->home, &output);
+    result = progress ? snx_run_ticking(command, NULL, state->home, &output, progress_tick, progress)
+                      : snx_run(command, NULL, state->home, &output);
+    if (progress && progress->said) progress_say(progress, 1);
     if (result) {
         if (output) secret_free(output, strlen(output));
         return snx_error(
@@ -475,6 +555,7 @@ static int unpack(const ExtractState* state, const char* container, const char* 
     const char* command[3];
     char* output_option;
     int result;
+    Progress progress;
     output_option = option_arg(xci ? "--securedir=" : "--outdir=", directory);
     if (!output_option) return snx_error("Out of memory unpacking container");
     command[0] = xci ? "-txci" : "-tpfs0";
@@ -482,7 +563,12 @@ static int unpack(const ExtractState* state, const char* container, const char* 
     command[2] = container;
     printf("Unpacking %s\n", container);
     fflush(stdout);
-    result = run_hactool(state, command, 3, NULL);
+    progress.verb = "unpacked";
+    progress.dirs[0] = directory;
+    progress.dirs[1] = NULL;
+    progress.total = container_payload(container, xci);
+    progress.said = 0;
+    result = run_hactool(state, command, 3, NULL, &progress);
     free(output_option);
     if (!result && !snx_is_dir(directory))
         result = snx_error("hactool did not create the extracted container directory");
@@ -558,7 +644,7 @@ static int program_nca(const ExtractState* state, const char* folder, int update
         args[0] = "-i";
         args[1] = path;
         information = NULL;
-        failed = run_hactool(state, args, 2, &information);
+        failed = run_hactool(state, args, 2, &information, NULL);
         if (!failed && program_type(information)) {
             if (!program_title_id(information, &title_id))
                 failed = snx_error("hactool did not report a valid Program NCA title ID");
@@ -709,11 +795,12 @@ static int prepare_paths(ExtractState* state, const ExtractOptions* options, con
         free(name);
         return snx_error("Extraction name must be a single nonempty filename");
     }
-    work = snx_path_join(paths->repo, "work");
+    /* only when --out names none: play_dump names one, and has said where an older build's extractions are */
+    work = options->out ? NULL : snx_work_dir(paths->repo);
     target = work ? snx_path_join(work, name) : NULL;
     free(work);
     free(name);
-    if (!target) return snx_error("Out of memory resolving extraction output");
+    if (!options->out && !target) return snx_error("Out of memory resolving extraction output");
     state->out = snx_absolute(options->out ? options->out : target);
     free(target);
     if (!state->out) return snx_error("Cannot resolve extraction output");
@@ -757,6 +844,7 @@ static int extract_files(ExtractState* state) {
     const char* command[4];
     char *switch_dir, *prod_path, *title_path, *exefs_arg, *romfs_arg, *base_arg, *main_path;
     int result;
+    Progress progress;
     switch_dir = snx_path_join(state->home, ".switch");
     prod_path = switch_dir ? snx_path_join(switch_dir, "prod.keys") : NULL;
     title_path = switch_dir ? snx_path_join(switch_dir, "title.keys") : NULL;
@@ -790,6 +878,12 @@ static int extract_files(ExtractState* state) {
     if (state->update_dir) {
         if (program_nca(state, state->update_dir, 1, state->title_id, &state->patch, NULL, NULL)) goto done;
     }
+    /* the base's program NCA: its RomFS is most of it, and an update's RomFS is about as big */
+    progress.verb = "extracted";
+    progress.dirs[0] = state->exefs;
+    progress.dirs[1] = state->romfs;
+    progress.total = snx_file_size(state->program);
+    progress.said = 0;
     if (state->patch) {
         base_arg = option_arg("--basenca=", state->program);
         if (!base_arg) {
@@ -802,14 +896,14 @@ static int extract_files(ExtractState* state) {
         command[3] = state->patch;
         puts("Extracting the base with the update applied");
         fflush(stdout);
-        if (run_hactool(state, command, 4, NULL)) goto done;
+        if (run_hactool(state, command, 4, NULL, &progress)) goto done;
     } else {
         command[0] = exefs_arg;
         command[1] = romfs_arg;
         command[2] = state->program;
         puts("Extracting the base game");
         fflush(stdout);
-        if (run_hactool(state, command, 3, NULL)) goto done;
+        if (run_hactool(state, command, 3, NULL, &progress)) goto done;
     }
     if (!snx_is_file(main_path)) {
         snx_error("Extracted exefs has no main; verify that the update matches the base game");

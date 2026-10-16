@@ -2,8 +2,8 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_GNU_VFS_INTERNAL_H
 #define SNX_GNU_VFS_INTERNAL_H
-#include "filesystem/vfs.h"
-#include "abi/errno/errno.h"
+#include "gnuabi/filesystem/vfs.h"
+#include "gnuabi/abi/errno/errno.h"
 #define GNU_VFS_PATH_MAX 4096
 #define GNU_VFS_FD_MAX   256
 #define GNU_VFS_FILE_MAX (64u * 1024u * 1024u)

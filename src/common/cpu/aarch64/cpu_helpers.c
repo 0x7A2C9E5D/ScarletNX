@@ -4,17 +4,17 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* Helpers compiled into the game module: stateful integer-only ARM FP,
    AdvSIMD operations, crypto and system registers. Builds with Clang. */
-#include "cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 #if defined(__x86_64__)
 #include <immintrin.h>
 #endif
 
 /* The helpers by topic, in the order they depend on each other (the module compiles this as one file) */
-#include "helpers/fp.c"
-#include "helpers/integer.c"
-#include "helpers/simd.c"
-#include "helpers/crypto.c"
-#include "helpers/simd_mem.c"
+#include "common/cpu/aarch64/helpers/fp.c"
+#include "common/cpu/aarch64/helpers/integer.c"
+#include "common/cpu/aarch64/helpers/simd.c"
+#include "common/cpu/aarch64/helpers/crypto.c"
+#include "common/cpu/aarch64/helpers/simd_mem.c"
 
 /* ---- dispatcher for anything AdvSIMD / crypto ---- */
 int snx_simd(CPU* c, u8* M, u32 w) {

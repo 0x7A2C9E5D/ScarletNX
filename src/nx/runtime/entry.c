@@ -3,10 +3,16 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* executable entry point */
-#include "runtime/main.h"
-#include "driver.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/driver/driver.h"
+#ifdef SNX_WITH_GUI
+#include "gui/gui.h"
+#endif
 #include <stdio.h>
 int main(int argc, char** argv) {
+#ifdef SNX_WITH_GUI
+    snx_menu = snx_gui_main;
+#endif
     /* Keep progress visible when a GUI or another supervisor captures our pipes. */
     setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);

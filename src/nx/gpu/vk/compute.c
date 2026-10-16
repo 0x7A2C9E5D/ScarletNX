@@ -14,12 +14,12 @@
    Dispatches that read textures run on the graphics queue, after everything recorded before them. */
 #include <stdlib.h>
 #include <string.h>
-#include "gpu/gpu.h"
-#include "gpu/shader/shader.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "gpu/vk/vk.h"
-#include "gpu/renderer.h"
+#include "nx/gpu/gpu.h"
+#include "nx/gpu/shader/shader.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/gpu/vk/vk.h"
+#include "nx/gpu/renderer.h"
 
 typedef struct CsPipe {
     u64 key;

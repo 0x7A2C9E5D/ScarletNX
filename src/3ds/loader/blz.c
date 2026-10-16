@@ -3,7 +3,7 @@
    Format/algorithm reference: Citra/Azahar ncch_container.cpp LZSS helpers,
    Copyright 2014-2026 Citra Emulator Project / Azahar Emulator Project,
    GPL-3.0-or-later. This variant requires an exact bounded expansion. */
-#include "internal.h"
+#include "3ds/loader/internal.h"
 #include <string.h>
 
 bool snx_ctr_blz(const unsigned char* input, size_t size, unsigned char* output, size_t expanded) {

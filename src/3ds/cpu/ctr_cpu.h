@@ -2,8 +2,8 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_CTR_CPU_H
 #define SNX_CTR_CPU_H
-#include "cpu/arm/checked.h"
-#include "memory/ctr_memory.h"
+#include "common/cpu/arm/checked.h"
+#include "3ds/memory/ctr_memory.h"
 
 /* Opt-in checked A32 state, no NX/A64 CPU casts and no LLVM/JIT dependency.
    This adapter does NOT discover/load native blocks or implement an OS. */

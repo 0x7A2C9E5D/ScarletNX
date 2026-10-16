@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "filesystem/internal.h"
-#include "process/process.h"
+#include "gnuabi/filesystem/internal.h"
+#include "gnuabi/process/process.h"
 #include <string.h>
 
 int gnu_devfs_init(GnuVfsState* state) {

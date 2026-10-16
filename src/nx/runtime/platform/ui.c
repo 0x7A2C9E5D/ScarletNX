@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "runtime/platform/ui.h"
-#include "runtime/platform/controls_atlas.h"
-#include "runtime/platform/plat.h"
-#include "font.h"
+#include "nx/runtime/platform/ui.h"
+#include "nx/runtime/platform/controls_atlas.h"
+#include "nx/runtime/platform/plat.h"
+#include "common/utilities/font.h"
 #include <stdlib.h>
 #include <string.h>
 

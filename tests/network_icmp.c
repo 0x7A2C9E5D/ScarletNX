@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Deterministic ICMP backend tests: inject replies, not fake network success. Including the backend lets this
    exercise its helper queue even on hosts where raw or unprivileged ping sockets are available. */
-#include "network/net_icmp.c"
+#include "common/network/net_icmp.c"
 #include <stdio.h>
 
 #define CHECK(x)                                                                                                       \

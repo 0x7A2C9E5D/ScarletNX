@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Exercise the production audout IPC commands with a deterministic clock and a copying PCM sink. */
-#include "hle/services/services_int.h"
+#include "nx/hle/services/services_int.h"
 #include <stdarg.h>
 
-#include "hle/services/audio.c"
+#include "nx/hle/services/audio.c"
 
 u8* g_mem;
 int g_verbose;
@@ -17,6 +17,7 @@ struct PAudio {
     unsigned queued, cleared;
     int started;
     float volume;
+    u32 channels;
 };
 
 static void test_fail(const char* expression, int line) {
@@ -39,11 +40,12 @@ void plat_sleep_ns(i64 ns) {
     test_fail("the test must not start the audio clock thread", __LINE__);
 }
 PAudio* plat_audio_open(u32 rate, u32 channels) {
-    CHECK(rate == 48000 && channels == 2);
+    CHECK(rate == 48000 && (channels == 1 || channels == 2 || channels == 4 || channels == 6));
     if (test_no_device) return NULL;
     PAudio* a = calloc(1, sizeof *a);
     CHECK(a != NULL);
     a->volume = 1.0f;
+    a->channels = channels;
     return a;
 }
 void plat_audio_close(PAudio* a) { free(a); }
@@ -330,8 +332,10 @@ static void test_open_audio_out(SvcObj* manager) {
     c.ncopy = 1;
     c.copy_h[0] = 0xFFFF8001u;
     CHECK(manager->dispatch(manager, &c) == 0 && c.nout_objs == 1 && c.out_size == 16);
-    /* whatever the game asked for, 48 kHz stereo s16, stopped */
-    CHECK(reply32(&c, 0) == 48000 && reply32(&c, 4) == 2 && reply32(&c, 8) == 2 && reply32(&c, 12) == 1);
+    /* the game gets what it asked for: here 6 channels, 48 kHz s16, stopped */
+    CHECK(reply32(&c, 0) == 48000 && reply32(&c, 4) == 6 && reply32(&c, 8) == 2 && reply32(&c, 12) == 1);
+    CHECK(((AudOut*)c.out_objs[0]->data)->channels == 6);
+    CHECK(((AudOut*)c.out_objs[0]->data)->output->channels == 6);
     CHECK(!strcmp((char*)GP(0x1100), "DeviceOut"));
     for (u32 i = 9; i < 0x100; i++) CHECK(GP(0x1100)[i] == 0);
     for (u32 i = 0x100; i < 0x120; i++) CHECK(GP(0x1100)[i] == 0xCC);

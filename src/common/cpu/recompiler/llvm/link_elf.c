@@ -5,7 +5,7 @@
    Every symbol must be defined by one of the objects; the only dynamic relocations are R_*_RELATIVE, for absolute
    addresses in writable data and for GOT slots. The two machines' relocation numbers don't overlap (AArch64's start
    at 257), so one switch takes both. */
-#include "link.h"
+#include "common/cpu/recompiler/llvm/link.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

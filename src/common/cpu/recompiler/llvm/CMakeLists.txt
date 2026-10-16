@@ -11,7 +11,7 @@ if(CMAKE_CROSSCOMPILING)
     find_program(SNX_HOST_CC NAMES clang cc REQUIRED)
     set(snx_rtlib_gen "${CMAKE_CURRENT_BINARY_DIR}/snx-rtlib-gen-host")
     add_custom_command(OUTPUT "${snx_rtlib_gen}"
-        COMMAND "${SNX_HOST_CC}" -O1 -w -I "${snx_cpu}" -I "${PROJECT_SOURCE_DIR}/src/common/utilities"
+        COMMAND "${SNX_HOST_CC}" -O1 -w -I "${PROJECT_SOURCE_DIR}/src"
             "${CMAKE_CURRENT_SOURCE_DIR}/rtlib_gen.c" "${snx_cpu}/a64.c"
             -o "${snx_rtlib_gen}"
         DEPENDS rtlib_gen.c ${snx_rtlib_sources} VERBATIM)
@@ -47,8 +47,8 @@ else()
     list(APPEND snx_rtlib_flags -fPIC)
 endif()
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib${CMAKE_C_OUTPUT_EXTENSION}"
-    COMMAND "${CMAKE_C_COMPILER}" ${snx_rtlib_flags} -I "${CMAKE_CURRENT_BINARY_DIR}" -I "${snx_cpu}"
-        -I "${PROJECT_SOURCE_DIR}/src/common" -c "${CMAKE_CURRENT_SOURCE_DIR}/rtlib.c"
+    COMMAND "${CMAKE_C_COMPILER}" ${snx_rtlib_flags} -I "${CMAKE_CURRENT_BINARY_DIR}"
+        -I "${PROJECT_SOURCE_DIR}/src" -c "${CMAKE_CURRENT_SOURCE_DIR}/rtlib.c"
         -o "${CMAKE_CURRENT_BINARY_DIR}/rtlib${CMAKE_C_OUTPUT_EXTENSION}"
     DEPENDS rtlib.c "${CMAKE_CURRENT_BINARY_DIR}/rtlib_interp.inc" ${snx_rtlib_sources} VERBATIM)
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c"
@@ -64,8 +64,8 @@ if(snx_clang_major GREATER snx_llvm_major)
                         "${snx_llvm_major}, or an LLVM as new as this Clang.")
 endif()
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib.bc"
-    COMMAND "${CMAKE_C_COMPILER}" ${snx_rtlib_flags} -emit-llvm -I "${CMAKE_CURRENT_BINARY_DIR}" -I "${snx_cpu}"
-        -I "${PROJECT_SOURCE_DIR}/src/common" -c "${CMAKE_CURRENT_SOURCE_DIR}/rtlib.c"
+    COMMAND "${CMAKE_C_COMPILER}" ${snx_rtlib_flags} -emit-llvm -I "${CMAKE_CURRENT_BINARY_DIR}"
+        -I "${PROJECT_SOURCE_DIR}/src" -c "${CMAKE_CURRENT_SOURCE_DIR}/rtlib.c"
         -o "${CMAKE_CURRENT_BINARY_DIR}/rtlib.bc"
     DEPENDS rtlib.c "${CMAKE_CURRENT_BINARY_DIR}/rtlib_interp.inc" ${snx_rtlib_sources} VERBATIM)
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c"
@@ -76,7 +76,6 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c"
 add_library(snx_llvm STATIC ir.c ir_a64.c ir_simd.c ir_fp.c ir_codegen.c link.c link_elf.c link_coff.c
     "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c" "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c")
 set_target_properties(snx_llvm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
-target_include_directories(snx_llvm PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(snx_llvm SYSTEM PUBLIC "${SNX_LLVM_INCLUDE_DIR}")
 target_compile_options(snx_llvm PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 target_compile_definitions(snx_llvm PRIVATE _CRT_SECURE_NO_WARNINGS)

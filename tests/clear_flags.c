@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Which CLEAR_FLAGS bit cuts a clear to scissor 0: SCISSOR, bit 8, with the scissor enabled. */
-#include "gpu/gpu.h"
+#include "nx/gpu/gpu.h"
 #include <stdio.h>
 
 static u32 r[0x1000];

@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* sfdnsres (dns.c) and nifm (nifm.c) through their generated dispatchers, with the network option off: what a console
    without a connection answers. bsd.c, built beside this file, says whether the console is online */
-#include "hle/services/network/network.h"
+#include "nx/hle/services/network/network.h"
 #include <stdarg.h>
 
 /* the raw reads the generated unpackers make, recorded: the WithOptions commands' layout is what the SDK's client
@@ -20,8 +20,8 @@ static void test_ipc_in(IpcCtx* c, u32 off, void* dst, u32 n) {
     ipc_in(c, off, dst, n);
 }
 #define ipc_in test_ipc_in
-#include "hle/services/network/dns.c"
-#include "hle/services/network/nifm.c"
+#include "nx/hle/services/network/dns.c"
+#include "nx/hle/services/network/nifm.c"
 #undef ipc_in
 
 u8* g_mem;

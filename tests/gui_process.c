@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #define _POSIX_C_SOURCE 200809L
-#include "gui_process.h"
-#include "common.h"
+#include "gui/gui_process.h"
+#include "common/utilities/common.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

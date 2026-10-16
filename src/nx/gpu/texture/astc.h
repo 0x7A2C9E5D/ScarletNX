@@ -5,7 +5,7 @@
 /* ASTC decoding on the CPU (astc.c) */
 #ifndef SNX_ASTC_H
 #define SNX_ASTC_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 
 /* a w x h image in bw x bh blocks, to RGBA8. srgb: the texture is sRGB, which expands endpoints differently */
 void astc_decode_image(const u8* src, u32 w, u32 h, u32 bw, u32 bh, u8* dst, int srgb);

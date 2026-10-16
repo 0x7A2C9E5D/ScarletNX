@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_EXECUTION_H
 #define SNX_EXECUTION_H
-#include "cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 typedef struct {
     u64 address;
     const u8* data;

@@ -2,9 +2,9 @@
    Copyright 2026 the ScarletNX contributors */
 /* Synthetic NRO -> CLI -> module -> AOT/interpreter execution. No game data.
    A fourth argument names the backend (llvm by default, gcc). */
-#include "common.h"
-#include "cpu.h"
-#include "loader/module_abi.h"
+#include "common/utilities/common.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/loader/module_abi.h"
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
@@ -12,6 +12,9 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#endif
+#ifdef __linux__
+#include <elf.h>
 #endif
 
 static int failures;
@@ -109,6 +112,41 @@ done:
     dlclose(handle);
 #endif
 }
+#ifdef __linux__
+/* The module imports nothing (link.h; gcc: -nostdlib): no library and no undefined symbol, so linking it took none of
+   the start files and libraries of the GCC libgccjit was built with, which a packaged libgccjit's system lacks */
+static void check_no_imports(const char* path) {
+    size_t size = 0, i, j;
+    unsigned char* file = snx_read_file(path, &size);
+    const Elf64_Ehdr* eh = (const Elf64_Ehdr*)file;
+    int needed = 0, undefined = 0;
+    if (!file || size < sizeof(*eh) || memcmp(eh->e_ident, ELFMAG, SELFMAG) || eh->e_ident[EI_CLASS] != ELFCLASS64 ||
+        eh->e_phoff + (size_t)eh->e_phnum * sizeof(Elf64_Phdr) > size ||
+        eh->e_shoff + (size_t)eh->e_shnum * sizeof(Elf64_Shdr) > size) {
+        check(0, "module is a 64-bit ELF");
+        free(file);
+        return;
+    }
+    for (i = 0; i < eh->e_phnum; ++i) {
+        const Elf64_Phdr* ph = (const Elf64_Phdr*)(file + eh->e_phoff) + i;
+        if (ph->p_type != PT_DYNAMIC || ph->p_offset + ph->p_filesz > size) continue;
+        for (j = 0; (j + 1) * sizeof(Elf64_Dyn) <= ph->p_filesz; ++j) {
+            const Elf64_Dyn* d = (const Elf64_Dyn*)(file + ph->p_offset) + j;
+            if (d->d_tag == DT_NULL) break;
+            needed |= d->d_tag == DT_NEEDED;
+        }
+    }
+    for (i = 0; i < eh->e_shnum; ++i) {
+        const Elf64_Shdr* sh = (const Elf64_Shdr*)(file + eh->e_shoff) + i;
+        if (sh->sh_type != SHT_DYNSYM || sh->sh_offset + sh->sh_size > size) continue;
+        for (j = 1; (j + 1) * sizeof(Elf64_Sym) <= sh->sh_size; ++j) /* 0 is the null symbol */
+            undefined |= ((const Elf64_Sym*)(file + sh->sh_offset))[j].st_shndx == SHN_UNDEF;
+    }
+    check(!needed, "module needs no library");
+    check(!undefined, "module has no undefined symbol");
+    free(file);
+}
+#endif
 int main(int argc, char** argv) {
     unsigned char image[0x200];
     const char* args[24];
@@ -200,6 +238,9 @@ int main(int argc, char** argv) {
         module = snx_path_join(out, "Native Fixture_code.so");
 #endif
         if (!rc) execute_module(module, image, pass == 2);
+#ifdef __linux__
+        if (!rc) check_no_imports(module);
+#endif
         /* Force a link publish failure without relying on compiler-specific flags. */
         if (pass == 3) {
             check(!snx_remove_tree(module), "remove previous module");
@@ -240,6 +281,13 @@ int main(int argc, char** argv) {
     check_empty(temp);
     free(text);
     text = NULL;
+    { /* --keep-c, --keep-ir's old name: still taken, and said to be deprecated */
+        const char* old[] = {argv[1], "--repo", argv[2], "--recomp", "/nonexistent/old.nro", "--keep-c", NULL};
+        check(snx_run(old, root, NULL, &text) != 0 && strstr(text, "--keep-c is deprecated: use --keep-ir"),
+              "--keep-c said to be deprecated");
+        free(text);
+        text = NULL;
+    }
     k = 0;
     args[k++] = argv[1];
     args[k++] = "--repo";
@@ -251,6 +299,31 @@ int main(int argc, char** argv) {
     args[k] = NULL;
     check(snx_run(args, root, NULL, &text) != 0, "reject zero jobs");
     free(text);
+    text = NULL;
+#ifndef _WIN32 /* a Windows child without PATH can't load libgccjit's DLLs, which are in the toolchain's folder */
+    if (!strcmp(backend, "gcc")) { /* without binutils it says so, where GCC's driver would end the process */
+        char* path = getenv("PATH") ? snx_strdup(getenv("PATH")) : NULL;
+        k = 0;
+        args[k++] = argv[1];
+        args[k++] = "--repo";
+        args[k++] = argv[2];
+        args[k++] = "-r";
+        args[k++] = input;
+        args[k++] = "--outdir";
+        args[k++] = out;
+        args[k++] = "--backend";
+        args[k++] = "gcc";
+        args[k] = NULL;
+        environment("PATH", "");
+        rc = snx_run(args, root, NULL, &text);
+        environment("PATH", path);
+        check(rc != 0 && text && strstr(text, "PATH has no as and ld: install binutils"), "missing binutils named");
+        check_empty(temp);
+        free(path);
+        free(text);
+        text = NULL;
+    }
+#endif
     source = snx_path_join(root, "copy source");
     nested = snx_path_join(source, "nested/output");
     check(!snx_mkdirs(source), "copy source fixture");

@@ -3,15 +3,15 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* vi's framebuffers: handed to the renderer, and the pace the game's frames are shown at */
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "gpu/gpu.h"
-#include "gpu/renderer.h"
-#include "hle/services/nvdrv.h"
-#include "hle/services/vi.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/gpu/gpu.h"
+#include "nx/gpu/renderer.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/hle/services/vi.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdlib.h>
 #include <string.h>
 

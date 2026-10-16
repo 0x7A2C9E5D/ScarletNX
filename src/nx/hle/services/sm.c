@@ -3,7 +3,7 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* sm: the service manager, which hands out sessions to the other services */
-#include "hle/services/services_int.h"
+#include "nx/hle/services/services_int.h"
 #include "hle/services/sm.swipc.inc"
 /* ================================================================ sm */
 static SvcObj* svc_generic(const char* name); /* an empty success reply for every command, logged */

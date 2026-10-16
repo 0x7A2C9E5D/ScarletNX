@@ -8,6 +8,8 @@
 #
 #   scripts/check-package.sh dist/ScarletNX-x86_64.AppImage
 #   scripts/check-package.sh stage/bin/scarletnx.exe
+#
+# --backend=gcc must build and run the game with the package's own libgccjit, as and ld.
 set -euo pipefail
 
 if [ $# -ne 1 ] || [ ! -f "$1" ]; then
@@ -24,13 +26,17 @@ esac
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work"
-# An installed copy keeps work/, games/ and prod.keys in the user's data folder, wherever it was started from: point
-# that folder into this run's
-export XDG_DATA_HOME="$work/data"
+# An installed copy keeps games/ and prod.keys in the user's data folder, wherever it was started from, and on Linux a
+# game's settings, log and caches (work/ too) in the XDG config, state and cache folders: point them into this run's
+export XDG_DATA_HOME="$work/data" XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" XDG_CACHE_HOME="$work/cache"
 data=$XDG_DATA_HOME/scarletnx
+config=$XDG_CONFIG_HOME/scarletnx/games
+state=$XDG_STATE_HOME/scarletnx/games
 if [ -n "$exe" ]; then
     APPDATA=$(cygpath -w "$work/data")
     export APPDATA
+    config=$data/games
+    state=$data/games
 fi
 
 failed=0
@@ -80,6 +86,11 @@ if [ "$status" -eq 0 ] && [ -f "$data/games/Smoke$exe" ] && [ -f "$data/games/Sm
 else
     fail "scarletnx -r smoke.nro exited $status, without $data/games/Smoke$exe and its .abi" "$out"
 fi
+if [ -f "$config/Smoke.ini" ] && { [ "$config" = "$data/games" ] || [ ! -e "$data/games/Smoke.ini" ]; }; then
+    pass "its settings are $config/Smoke.ini"
+else
+    fail "scarletnx -r smoke.nro did not write its settings in $config only" "$out"
+fi
 
 # The runtime left next to the game must start on its own (on Windows, with the DLLs it needs), find the game's code
 # by its name and take its ABI. The banner comes after that and before the GPU, which CI runners lack
@@ -90,6 +101,34 @@ if [ -f "$data/games/Smoke$exe" ]; then
     else
         fail "$data/games/Smoke$exe exited $status before the game's banner" "$out"
     fi
+    if grep -q 'ScarletNX - Smoke' "$state/Smoke.log" 2>/dev/null &&
+        { [ "$state" = "$data/games" ] || [ ! -e "$data/games/Smoke.log" ]; }; then
+        pass "its log is $state/Smoke.log"
+    else
+        fail "the game did not log in $state only" "$out"
+    fi
+fi
+
+# The gcc backend: libgccjit, as and ld from the package, the folders of PATH with the system's left out of its run. Its
+# game must start as the LLVM one does
+nobinutils=
+IFS=: read -ra folders <<<"$PATH"
+for folder in "${folders[@]}"; do
+    for tool in as ld as.exe ld.exe; do [ -e "$folder/$tool" ] && continue 2; done
+    nobinutils+=${nobinutils:+:}$folder
+done
+run env PATH="$nobinutils" "$runtime" -r smoke.nro GccSmoke --backend=gcc --jobs 2
+if [ "$status" -eq 0 ] && [ -f "$data/games/GccSmoke$exe" ] && [ -f "$data/games/GccSmoke.abi" ]; then
+    pass "scarletnx -r smoke.nro --backend=gcc made $data/games/GccSmoke$exe"
+    run env -C "$data/games" "./GccSmoke$exe" -H
+    if grep -q '^ScarletNX - GccSmoke' <<<"$out"; then
+        pass "$data/games/GccSmoke$exe started the game (exit $status: $(tail -n 1 <<<"$out"))"
+    else
+        fail "$data/games/GccSmoke$exe exited $status before the game's banner" "$out"
+    fi
+else
+    fail "scarletnx -r smoke.nro --backend=gcc exited $status, without $data/games/GccSmoke$exe and its .abi" \
+        "$out"
 fi
 
 # A dump on its own: recompile, then play, each a child of the first. Another name, which Windows would not tell

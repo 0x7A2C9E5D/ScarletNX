@@ -8,7 +8,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* EAI_NODATA, EAI_ADDRFAMILY on glibc */
 #endif
-#include "network/net_internal.h"
+#include "common/network/net_internal.h"
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
@@ -48,28 +48,28 @@ static int gai_from_host(int e) {
     if (!e) return 0;
 #define SNX_NET_GAI(name, value, host, text)                                                                           \
     if (e == (host)) return value;
-#include "network/abi/gai.inc"
+#include "common/network/abi/gai.inc"
     return SNX_EAI_FAIL;
 }
 const char* snx_net_gai_strerror(int e) {
     if (!e) return "Success";
 #define SNX_NET_GAI(name, value, host, text)                                                                           \
     if (e == value) return text;
-#include "network/abi/gai.inc"
+#include "common/network/abi/gai.inc"
     return "Unknown error";
 }
 static int aiflags_to_host(int f) {
     int h = 0;
 #define SNX_NET_AIFLAG(name, value, host)                                                                              \
     if (f & value) h |= host;
-#include "network/abi/aiflag.inc"
+#include "common/network/abi/aiflag.inc"
     return h;
 }
 static int niflags_to_host(int f) {
     int h = 0;
 #define SNX_NET_NIFLAG(name, value, host)                                                                              \
     if (f & value) h |= host;
-#include "network/abi/niflag.inc"
+#include "common/network/abi/niflag.inc"
     return h;
 }
 

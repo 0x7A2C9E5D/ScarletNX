@@ -5,25 +5,25 @@
 #define _GNU_SOURCE
 /* startup: load GAME_code.dll/.so, set up memory + services + main thread, then run the frontend
    loop (window, input, vsync). */
-#include "runtime/main.h"
-#include "runtime/clock.h"
-#include "runtime/loader.h"
-#include "runtime/options.h"
-#include "runtime/gdbstub.h"
-#include "runtime/rtapi.h"
-#include "gpu/gpu.h"
-#include "gpu/renderer.h"
-#include "hle/filesystem/fs.h"
-#include "hle/services/hid.h"
-#include "hle/services/nvdrv.h"
-#include "hle/services/services.h"
-#include "hle/services/vi.h"
-#include "hle/kernel/kernel.h"
-#include "memory/mem.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "utilities/common.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/clock.h"
+#include "nx/runtime/loader.h"
+#include "nx/runtime/options.h"
+#include "nx/runtime/gdbstub.h"
+#include "nx/runtime/rtapi.h"
+#include "nx/gpu/gpu.h"
+#include "nx/gpu/renderer.h"
+#include "nx/hle/filesystem/fs.h"
+#include "nx/hle/services/hid.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/hle/services/services.h"
+#include "nx/hle/services/vi.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "common/utilities/common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,7 +31,7 @@
 const SnxModule* g_mod;
 GuestFn* g_disp;
 GuestFn snx_interp_entry;
-char g_datadir[1024], g_exename[256], g_exedir[1024];
+char g_datadir[1024], g_exename[256], g_exedir[1024], g_confdir[1024], g_statedir[1024], g_cachedir[1024];
 volatile int g_quit;
 int g_frames;
 /* ============================================================ code module */
@@ -49,26 +49,15 @@ static void code_path(char* p, size_t size) {
     snprintf(p, size, "%s%s_code.so", g_exedir, g_exename);
 #endif
 }
+int (*snx_menu)(const char* self);
 /* Started with nothing to run and no game of its name: a double-clicked AppImage or scarletnx.exe, or the desktop
-   entry. The launcher beside this program opens instead of the error about a missing game. In an AppImage argv[0] is
-   the launcher in its mount's bin/ (sharun's), which sets up the bundled libraries for whatever it runs from there,
-   so the GUI is looked for beside argv[0] when it names a folder, beside the real executable otherwise (a PATH
-   lookup). Returns -1 when there is no launcher */
-static int open_launcher(const char* argv0) {
-    char* self = strchr(argv0, '/') || strchr(argv0, '\\') ? snx_strdup(argv0) : snx_executable(argv0);
-    char *folder = self ? snx_dirname(self) : NULL, *gui;
-#if defined(_WIN32)
-    gui = folder ? snx_path_join(folder, "scarletnx-gui.exe") : NULL;
-#else
-    gui = folder ? snx_path_join(folder, "scarletnx-gui") : NULL;
-#endif
-    int result = -1;
-    if (gui && snx_is_file(gui)) {
-        const char* command[] = {gui, NULL};
-        result = snx_run_stage(command, NULL, "Launcher");
-    }
-    free(gui);
-    free(folder);
+   entry. The menu opens instead of the error about a missing game, and runs games with this program. In an AppImage
+   argv[0] is the launcher in its mount's bin/ (sharun's), which sets up the bundled libraries for whatever it runs
+   from there: that is the program when argv[0] names one, the real executable otherwise (a PATH lookup) */
+static int open_menu(const char* argv0) {
+    int named = (strchr(argv0, '/') || strchr(argv0, '\\')) && snx_is_file(argv0);
+    char* self = named ? snx_absolute(argv0) : snx_executable(argv0);
+    int result = snx_menu(self);
     free(self);
     return result;
 }
@@ -100,6 +89,42 @@ static int load_code(void) {
     }
     g_mod = f();
     return g_mod ? 0 : -1;
+}
+
+/* the folder one kind of the game's files goes in, with its separator: beside the game, or for a game in an installed
+   build's data folder the XDG folder of that kind (utilities/common.h) */
+static void user_folder(char* dir, size_t size, const char* games, int kind) {
+    char* moved = games ? snx_user_path(games, kind) : NULL;
+    int apart = moved && strcmp(moved, games);
+    if (apart && snx_mkdirs(moved)) {
+        WARN("cannot create %s, so the game's files of that kind stay beside it\n", moved);
+        apart = 0;
+    }
+    if (apart)
+        snprintf(dir, size, "%s/", moved);
+    else
+        snprintf(dir, size, "%s", g_exedir);
+    free(moved);
+}
+/* the settings, the log and threads.txt, and the pipeline cache. What an older build left beside the game stays, a
+   line in the log saying so each start */
+static void user_folders(void) {
+    char from[1400], to[1400];
+    char* games = snx_absolute(g_exedir[0] ? g_exedir : ".");
+    user_folder(g_confdir, sizeof g_confdir, games, SNX_USER_CONFIG);
+    user_folder(g_statedir, sizeof g_statedir, games, SNX_USER_STATE);
+    user_folder(g_cachedir, sizeof g_cachedir, games, SNX_USER_CACHE);
+    for (int i = 0; games && i < SNX_GAME_FILES; i++) {
+        const char* name = snx_game_files[i].name;
+        const char* game = name[0] == '.' ? g_exename : "";
+        int kind = snx_game_files[i].kind;
+        const char* dir = kind == SNX_USER_CONFIG ? g_confdir : kind == SNX_USER_STATE ? g_statedir : g_cachedir;
+        if (!strcmp(dir, g_exedir)) continue;
+        snprintf(from, sizeof from, "%s/%s%s", games, game, name);
+        snprintf(to, sizeof to, "%s%s%s", dir, game, name);
+        if (snx_left_behind(from, to)) WARN("%s was left by an older version: this one keeps it in %s\n", from, to);
+    }
+    free(games);
 }
 
 static void build_dispatch(void) {
@@ -205,6 +230,10 @@ static int is_dump(const char* path) {
 int snx_main(int argc, char** argv) {
     int startup = snx_startup_options(argc, argv);
     if (startup) return startup;
+    if (argc == 2 && !strcmp(argv[1], "--settings")) { /* what the menu's Settings offer */
+        ini_list();
+        return 0;
+    }
     /* Start the helper before creating any host threads. */
     if (g_opt_gdb && snx_gdb_start(g_opt_gdb_stop)) return 2;
     /* In an AppImage argv[0] points into its mount (APPDIR). APPIMAGE is the file that was run, so a copy named after
@@ -231,16 +260,15 @@ int snx_main(int argc, char** argv) {
               "without --game to extract, recompile and play it (scarletnx Game.nsp), or point --game at a game "
               "recompiled from it, for example --game=games/Game.",
               dump);
-    if (argc == 1 && !snx_module_static) {
+    /* the launcher started bare opens the menu; a game's copy without its code says so, as below */
+    if (argc == 1 && !snx_module_static && snx_menu && snx_launcher_name(g_exename)) {
         char p[1200];
         code_path(p, sizeof p);
-        if (!snx_is_file(p)) {
-            int launched = open_launcher(argv[0]);
-            if (launched >= 0) return launched;
-        }
+        if (!snx_is_file(p)) return open_menu(argv[0]);
     }
     /* loaded before the .ini is opened, which writes one: a mistyped --game leaves no stray settings file */
     if (load_code()) fatal("Could not load the game's recompiled code.");
+    user_folders(); /* before the log's first line */
     if (g_mod->abi != SNX_ABI) fatal("The recompiled code is from another ScarletNX version.");
     /* --key=value sets a setting for this run, over the .ini. The value is used where it is, so a long --script
        isn't cut */
@@ -259,7 +287,7 @@ int snx_main(int argc, char** argv) {
        .ini's (after the loop, which saw the --fullscreen= ones as they came); without any the .ini says */
     if (g_cli_fullscreen >= 0) ini_override("fullscreen", g_cli_fullscreen ? "1" : "0");
     char ini[1400];
-    snprintf(ini, sizeof ini, "%s%s.ini", g_exedir, g_exename);
+    snprintf(ini, sizeof ini, "%s%s.ini", g_confdir, g_exename);
     ini_open(ini);
     snprintf(g_datadir, sizeof g_datadir, "%s%s_data/", g_exedir, g_exename);
     hints_init();
@@ -306,7 +334,7 @@ int snx_main(int argc, char** argv) {
         /* dump thread states to threads.txt every 15s, useful when something hangs */
         if (tick % 900 == 0) {
             char p[1200];
-            snprintf(p, sizeof p, "%sthreads.txt", g_exedir);
+            snprintf(p, sizeof p, "%sthreads.txt", g_statedir);
             FILE* f = fopen(p, "w");
             if (f) {
                 fprintf(f, "second %d, frames %d\n", tick / 60, __atomic_load_n(&g_frames, __ATOMIC_RELAXED));

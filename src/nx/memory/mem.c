@@ -4,10 +4,10 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* Guest address space. One big host reservation, guest address == offset into it.
    The block list (kept sorted) says what is mapped where, in which state: mapping checks it, svcQueryMemory reads it. */
-#include "memory/mem.h"
-#include "gpu/gpu.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/memory/mem.h"
+#include "nx/gpu/gpu.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>

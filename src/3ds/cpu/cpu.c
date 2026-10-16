@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "ctr_cpu.h"
+#include "3ds/cpu/ctr_cpu.h"
 #include <string.h>
 
 static uint32_t access_memory(void* context, uint32_t op, uint32_t va, uint32_t size, void* bytes) {

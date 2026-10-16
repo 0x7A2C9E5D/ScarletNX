@@ -5,7 +5,7 @@
    and a white block for plain fills in the places its header keeps for them */
 #ifndef SNX_UI_H
 #define SNX_UI_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 
 typedef struct {
     float x, y, w, h; /* where, in the pixels of the picture drawn on */

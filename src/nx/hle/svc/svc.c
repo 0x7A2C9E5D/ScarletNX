@@ -3,7 +3,7 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the SVC dispatch: each supervisor call the game makes, by number */
-#include "hle/kernel/kernel_int.h"
+#include "nx/hle/kernel/kernel_int.h"
 static void snx_svc_(CPU* c, u32 imm);
 /* svcCreateEvent's writable end: SignalEvent and ClearEvent take it, WaitSynchronization doesn't */
 typedef struct {

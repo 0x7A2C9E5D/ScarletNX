@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "build_info.h"
+#include "common/utilities/build_info.h"
 #include "snx_commit.h"
 
 #define SNX_TEXT(x)   #x

@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE   700
-#include "common.h"
+#include "common/utilities/common.h"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -20,6 +20,7 @@
 #else
 #include <dirent.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
@@ -613,35 +614,85 @@ SnxU64 snx_free_space(const char* path) {
 /* The per-user folder of an installed build, which has no checkout: $XDG_DATA_HOME/scarletnx or
    ~/.local/share/scarletnx, ~/Library/Application Support/scarletnx on macOS, %APPDATA%\scarletnx on Windows. These are
    the folders SDL_GetPrefPath("scarletnx", ...) gives the GUI. NULL when the environment names no home */
-char* snx_user_data_dir(void) {
-    const char* base;
-#ifdef _WIN32
-    base = getenv("APPDATA");
-    return base && base[0] ? snx_path_join(base, "scarletnx") : NULL;
-#else
+#ifndef _WIN32
+/* $var/scarletnx, else ~/fallback/scarletnx: the XDG spec ignores a relative path */
+static char* home_folder(const char* var, const char* fallback) {
+    const char* base = var ? getenv(var) : NULL;
     char *parent, *path;
-    base = getenv("XDG_DATA_HOME");
-#ifndef __APPLE__
-    /* the XDG spec ignores a relative XDG_DATA_HOME */
     if (base && base[0] == '/') return snx_path_join(base, "scarletnx");
-#endif
     base = getenv("HOME");
     if (!base || !base[0]) return NULL;
-#ifdef __APPLE__
-    parent = snx_path_join(base, "Library/Application Support");
-#else
-    parent = snx_path_join(base, ".local/share");
-#endif
-    path = parent ? snx_path_join(parent, "scarletnx") : NULL;
+    parent = snx_path_join(base, fallback);
+    path = snx_path_join(parent, "scarletnx");
     free(parent);
     return path;
+}
+#endif
+char* snx_user_data_dir(void) {
+#ifdef _WIN32
+    const char* base = getenv("APPDATA");
+    return base && base[0] ? snx_path_join(base, "scarletnx") : NULL;
+#elif defined(__APPLE__)
+    return home_folder(NULL, "Library/Application Support");
+#else
+    return home_folder("XDG_DATA_HOME", ".local/share");
 #endif
 }
-char* snx_data_dir(const char* checkout, const char* program_dir) {
+char* snx_user_dir(int kind) {
+#ifdef SNX_XDG
+    if (kind == SNX_USER_CONFIG) return home_folder("XDG_CONFIG_HOME", ".config");
+    if (kind == SNX_USER_STATE) return home_folder("XDG_STATE_HOME", ".local/state");
+    if (kind == SNX_USER_CACHE) return home_folder("XDG_CACHE_HOME", ".cache");
+#else
+    (void)kind;
+#endif
+    return snx_user_data_dir();
+}
+char* snx_user_path(const char* path, int kind) {
+    char *data = snx_user_data_dir(), *root = snx_user_dir(kind), *full = NULL, *base = NULL, *moved = NULL;
+    const char* rest;
+    /* both resolved: a data folder reached through a link is still the data folder */
+    if (data && root && strcmp(data, root)) {
+        full = snx_absolute(path);
+        base = snx_absolute(data);
+    }
+    if (full && base && snx_path_within(full, base)) {
+        rest = full + strlen(base);
+        while (separator(*rest)) ++rest;
+        moved = *rest ? snx_path_join(root, rest) : snx_strdup(root);
+    }
+    free(data);
+    free(root);
+    free(full);
+    free(base);
+    return moved ? moved : snx_strdup(path);
+}
+int snx_left_behind(const char* old, const char* now) { return strcmp(old, now) && snx_path_exists(old); }
+int snx_launcher_name(const char* name) {
+    static const char own[] = "scarletnx";
+    size_t i;
+    for (i = 0; own[i]; ++i)
+        if (tolower((unsigned char)name[i]) != own[i]) return 0;
+    return !name[i] || name[i] == '-' || name[i] == '.';
+}
+const SnxGameFile snx_game_files[SNX_GAME_FILES] = {{".log", SNX_USER_STATE},
+                                                    {"threads.txt", SNX_USER_STATE},
+                                                    {".ini", SNX_USER_CONFIG},
+                                                    {"shader_cache/vk_pipelines.bin", SNX_USER_CACHE}};
+char* snx_work_dir(const char* data_dir) {
+    char *old = snx_path_join(data_dir, "work"), *work = snx_user_path(old, SNX_USER_CACHE);
+    if (snx_left_behind(old, work))
+        printf("%s was left by an older version: this one keeps extractions in %s\n", old, work);
+    free(old);
+    return work;
+}
+char* snx_data_dir(const char* checkout, const char* build, const char* program_dir) {
     const char *appimage = getenv("APPIMAGE"), *appdir = getenv("APPDIR");
     char *path = checkout ? snx_path_join(checkout, "CMakeLists.txt") : NULL, *dir = NULL, *games;
     int portable;
-    if (path && snx_is_file(path)) {
+    /* a copy installed from that build (cmake --install) is installed, even where the checkout still is */
+    if (path && snx_is_file(path) &&
+        (!build || !program_dir || (snx_is_dir(build) && snx_path_within(program_dir, build)))) {
         free(path);
         return snx_strdup(checkout);
     }
@@ -875,9 +926,20 @@ static wchar_t* child_environment(const char* home) {
     return out;
 }
 #endif
+/* tick(data) once a second has gone by since the last one */
+static void tick_due(double* ticked, void (*tick)(void*), void* data) {
+    if (snx_seconds() - *ticked < 1) return;
+    *ticked = snx_seconds();
+    tick(data);
+}
 int snx_run(const char* const* argv, const char* cwd, const char* home, char** output) {
+    return snx_run_ticking(argv, cwd, home, output, NULL, NULL);
+}
+int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, char** output, void (*tick)(void*),
+                    void* data) {
     char buf[8192];
     size_t used = 0;
+    double ticked = snx_seconds();
 #ifdef _WIN32
     STARTUPINFOEXW si;
     PROCESS_INFORMATION pi;
@@ -894,7 +956,7 @@ int snx_run(const char* const* argv, const char* cwd, const char* home, char** o
         free(cmd);
         free(dir);
         free(env);
-        result = snx_run(argv, cwd, home, &captured);
+        result = snx_run_ticking(argv, cwd, home, &captured, tick, data);
         if (captured) {
             fputs(captured, stdout);
             free(captured);
@@ -963,7 +1025,19 @@ int snx_run(const char* const* argv, const char* cwd, const char* home, char** o
         return 127;
     }
     if (output) {
-        while (ReadFile(rd, buf, sizeof(buf), &got, NULL) && got) append_output(output, &used, buf, got);
+        for (;;) {
+            DWORD ready = 0;
+            if (tick) { /* a read waits only for what is there, so the tick keeps its second */
+                tick_due(&ticked, tick, data);
+                if (!PeekNamedPipe(rd, NULL, 0, NULL, &ready, NULL)) break; /* every writer gone */
+                if (!ready) {
+                    Sleep(50);
+                    continue;
+                }
+            }
+            if (!ReadFile(rd, buf, ready && ready < sizeof(buf) ? ready : sizeof(buf), &got, NULL) || !got) break;
+            append_output(output, &used, buf, got);
+        }
         CloseHandle(rd);
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
@@ -1002,6 +1076,16 @@ int snx_run(const char* const* argv, const char* cwd, const char* home, char** o
     }
     if (output) {
         for (;;) {
+            if (tick) { /* a read waits only for what is there, so the tick keeps its second */
+                struct pollfd ready;
+                int ms = (int)((ticked + 1 - snx_seconds()) * 1000), any;
+                ready.fd = fds[0];
+                ready.events = POLLIN;
+                ready.revents = 0;
+                any = poll(&ready, 1, ms > 0 ? ms : 0);
+                tick_due(&ticked, tick, data);
+                if (!any || (any < 0 && errno == EINTR)) continue;
+            }
             got = read(fds[0], buf, sizeof(buf));
             if (got > 0)
                 append_output(output, &used, buf, (size_t)got);
@@ -1010,7 +1094,13 @@ int snx_run(const char* const* argv, const char* cwd, const char* home, char** o
         }
         close(fds[0]);
     }
-    do { waited = waitpid(pid, &status, 0); } while (waited < 0 && errno == EINTR);
+    for (;;) {
+        waited = waitpid(pid, &status, tick && !output ? WNOHANG : 0);
+        if (waited < 0 && errno == EINTR) continue;
+        if (waited) break;
+        poll(NULL, 0, 50); /* no output to wait on: the child's end is looked for, the tick kept */
+        tick_due(&ticked, tick, data);
+    }
     return waited < 0 ? 1 : WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
 #endif
 }

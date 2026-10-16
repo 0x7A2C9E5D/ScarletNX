@@ -4,8 +4,8 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the events the services share, and the registration of the services in sm.c, am.c, set.c, time.c, acc.c,
    audio.c, misc.c, ldr.c and network/ */
-#include "hle/services/services_int.h"
-#include "hle/services/network/network.h"
+#include "nx/hle/services/services_int.h"
+#include "nx/hle/services/network/network.h"
 #include "hle/services/acc.swipc.h"
 #include "hle/services/am.swipc.h"
 #include "hle/services/audio.swipc.h"

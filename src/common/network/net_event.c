@@ -4,7 +4,7 @@
    which Eden only stubs, and the SDK uses to interrupt a Poll from another thread. Linux's semantics: reads take
    the counter (or 1 of it, as a semaphore) and block while it is 0, writes add to it. A notifier is readable while
    the counter isn't 0. */
-#include "network/net_internal.h"
+#include "common/network/net_internal.h"
 #include <stdlib.h>
 #include <string.h>
 

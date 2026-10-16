@@ -3,7 +3,7 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the Maxwell instruction table: decoding an instruction word to its opcode */
-#include "gpu/shader/translator.h"
+#include "nx/gpu/shader/translator.h"
 /* each opcode's top 16 bits: 0 and 1 fixed, - either */
 static const struct {
     const char* pattern;

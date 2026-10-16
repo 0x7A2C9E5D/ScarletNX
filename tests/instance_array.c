@@ -3,14 +3,14 @@
 /* VERTEX_ARRAY_INSTANCE_FIRST and _SUBSEQUENT (3D 0x485, 0x486): the 3D engine's methods run against a renderer that
    records the draws reaching it. FIRST draws its range as instance 0; each SUBSEQUENT of the same range is one more
    instance of that draw. */
-#include "gpu/gpu.h"
-#include "gpu/maxwell/engines_int.h"
-#include "gpu/renderer.h"
-#include "hle/services/nvdrv.h"
-#include "memory/mem.h"
-#include "runtime/clock.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/gpu/gpu.h"
+#include "nx/gpu/maxwell/engines_int.h"
+#include "nx/gpu/renderer.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/clock.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -48,13 +48,14 @@ u64 bl_offset(u32 x_bytes, u32 y, u32 z, u32 width_bytes, u32 height, u32 bh_log
 }
 void gpu_signal_point(void) {}
 u64 guest_ns(void) { return 0; }
-u64 plat_ns(void) { return 0; }
-void plat_yield(void) {}
+void gpu_park(GpuChannel* ch, u32 kind, u64 addr, u32 val, int geq) {
+    (void)ch, (void)kind, (void)addr, (void)val, (void)geq;
+}
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
 void i2m_launch(GpuChannel* ch, u32* regs, int base) { (void)ch, (void)regs, (void)base; }
 void i2m_data(GpuChannel* ch, u32 v) { (void)ch, (void)v; }
-void mme_run(GpuChannel* ch, u32 idx, const u32* params, u32 np) { (void)ch, (void)idx, (void)params, (void)np; }
+void mme_run(GpuChannel* ch, u32 idx, u32 np) { (void)ch, (void)idx, (void)np; }
 void logf_(int lvl, const char* fmt, ...) { (void)lvl, (void)fmt; }
 
 static GpuChannel ch;

@@ -18,7 +18,7 @@ if(NX)
     list(APPEND want "${DATADIR}/applications/scarletnx.desktop")
     list(APPEND from "scarletnx.desktop")
 endif()
-if(GUI)
+if(GUI AND NOT NX) # with the Switch runtime the menu is part of it
     list(APPEND want "${DATADIR}/applications/scarletnx-gui.desktop")
     list(APPEND from "scarletnx-gui.desktop")
 endif()

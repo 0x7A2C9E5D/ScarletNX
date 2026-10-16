@@ -5,7 +5,7 @@
    works too, since the guest's sockets are the host's), hosts with the runtime's hostname (uname's), and the
    service and protocol names getaddrinfo() and getservbyname() look up. Without resolv.conf, glibc and musl would
    ask 127.0.0.1. */
-#include "network/network.h"
+#include "gnuabi/network/network.h"
 #include <stdio.h>
 #include <string.h>
 

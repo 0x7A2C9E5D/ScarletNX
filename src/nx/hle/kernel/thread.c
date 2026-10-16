@@ -3,8 +3,8 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* threads: creating, starting, the thread a host thread runs, exiting */
-#include "hle/kernel/kernel_int.h"
-#include "gpu/renderer.h"
+#include "nx/hle/kernel/kernel_int.h"
+#include "nx/gpu/renderer.h"
 /* ============================================================ threads */
 KThread* g_threads[256];
 int g_nthreads;

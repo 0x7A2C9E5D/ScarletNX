@@ -6,8 +6,8 @@
    through its splitter; the submixes, each before the mixes it feeds, through its effects and then into those; the
    final mix through its effects and its volume; then the device sinks, then the circular buffer sinks. The mix
    buffers hold samples on the 16-bit scale, as floats */
-#include "hle/services/audren_dsp.h"
-#include "runtime/platform/log.h"
+#include "nx/hle/services/audren_dsp.h"
+#include "nx/runtime/platform/log.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdlib.h>

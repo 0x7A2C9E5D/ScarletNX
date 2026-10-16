@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "exec.h"
-#include "llvm.h"
+#include "common/cpu/arm/exec.h"
+#include "common/cpu/arm/llvm.h"
 #include <llvm-c/ExecutionEngine.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/Core.h>

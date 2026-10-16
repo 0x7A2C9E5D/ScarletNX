@@ -2,8 +2,8 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_CTR_LOADER_INTERNAL_H
 #define SNX_CTR_LOADER_INTERNAL_H
-#include "ctr_loader.h"
-#include "common.h"
+#include "3ds/loader/ctr_loader.h"
+#include "common/utilities/common.h"
 #include <openssl/evp.h>
 #include <stdio.h>
 #define CTR_METADATA_LIMIT (16u * 1024u * 1024u)

@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* What a fatal error's box says (runtime/platform/fatal_screen.c): the hint for each known error, the text cut into
    the box's rows at spaces, a long word cut, UTF-8 counted as characters, and those in the font's bytes */
-#include "runtime/platform/fatal_screen.h"
+#include "nx/runtime/platform/fatal_screen.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

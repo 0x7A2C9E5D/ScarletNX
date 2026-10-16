@@ -3,9 +3,9 @@
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
 #endif
-#include "futex.h"
-#include "../process/process.h"
-#include "../abi/errno/errno.h"
+#include "gnuabi/threading/futex.h"
+#include "gnuabi/process/process.h"
+#include "gnuabi/abi/errno/errno.h"
 #include <time.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN

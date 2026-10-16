@@ -3,7 +3,7 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the 2D engine (Fermi 2D): blits between surfaces, on the renderer or in guest memory */
-#include "gpu/maxwell/engines_int.h"
+#include "nx/gpu/maxwell/engines_int.h"
 /* ============================================================ Fermi 2D (blits) */
 static void surf2d(u32* r, int b, Surf2D* s) {
     s->format = r[b];

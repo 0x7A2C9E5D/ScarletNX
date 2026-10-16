@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Build-time static object generation only. No execution engine or MCJIT. */
-#include "cpu/arm/llvm.h"
+#include "common/cpu/arm/llvm.h"
 #include "arm_checked_cases.h"
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Error.h>

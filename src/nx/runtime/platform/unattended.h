@@ -6,10 +6,11 @@
    press_at, press_len, script. Also the stick handling the backends share */
 #ifndef SNX_UNATTENDED_H
 #define SNX_UNATTENDED_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 #include <stddef.h>
 
 int unattended_ini(const char* k, const char* v); /* 1 when k is one of the options */
+int unattended_known(const char* k);              /* the same, nothing set */
 void unattended_start(void);                      /* time zero for seconds, press_at and the script */
 int unattended_active(void);                      /* seconds or frames is set: nobody is at the screen */
 /* the buttons the options hold now: HidNpadButton bits, and 40..47 for the stick directions (as keys, see

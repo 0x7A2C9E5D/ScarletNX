@@ -18,7 +18,7 @@
    ICMPv6 sockets and datagram ICMP sockets receive the message alone.
 
    Eden's RecvFrom read the entry after the one it erased, and its ping wrote to the runtime's stdout. */
-#include "network/net_internal.h"
+#include "common/network/net_internal.h"
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32

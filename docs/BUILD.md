@@ -255,12 +255,14 @@ extensions (build == host == target); nothing is detected at run time. Whole fun
 instructions (20000 on Android; `--chunk`), with a progress line per compiled unit.
 `--backend=gcc` (libgccjit) is optional, built when libgccjit is found (`libgccjit` on Arch, `libgccjit-14-dev` on
 Debian, `libgccjit-devel` on Fedora; `-DSNX_GCCJIT_ROOT=` points at another GCC's prefix). It is meant for DEC Alpha EV67 hosts, which LLVM has no backend for; everywhere else use LLVM.
+Running it needs only GNU binutils (`as`, `ld`) on PATH besides libgccjit: the module links none of GCC's files.
 
 Extraction builds missing hactool separately. Recompilation deploys the running full runtime;
 the tools-only build creates one in `build/native-recomp`, or accepts `--runtime FILE`.
-`--repo DIR` and `--build-dir DIR` before the command override compiled-in checkout/tool paths; without that
-checkout (an installed copy), the user's data folder stands in for it (`~/.local/share/scarletnx`,
-`%APPDATA%\scarletnx` on Windows).
+`--repo DIR` and `--build-dir DIR` before the command override compiled-in checkout/tool paths; a program run outside
+its build tree (an installed copy) uses the user's data folder instead (`~/.local/share/scarletnx`,
+`%APPDATA%\scarletnx` on Windows), and on Linux the XDG config, state and cache folders hold its settings, logs and
+caches ([USAGE](USAGE.md#folders)).
 Python ≥3.12 is optional for `tools/*.py` diagnostics.
 
 ## Install / AppImage
@@ -280,6 +282,11 @@ GITHUB_REPOSITORY=scarletnx/ScarletNX scripts/make-appimage.sh
 # -> dist/ScarletNX-<arch>.AppImage
 ```
 
+It carries libgccjit and the `as` and `ld` of the same Arch (an older binutils' `as` can't read what it writes), so
+`--backend=gcc` needs nothing from the system.
+
 [Nightly AppImages](https://github.com/scarletnx/ScarletNX/releases/tag/nightly), x86_64 and aarch64 · [Launch](USAGE.md).
+
+A pull request's own builds are linked from a comment on it once CI has built them.
 
 [Licenses/credits](CREDITS.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md).

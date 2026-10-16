@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "steps.h"
+#include "gui/steps.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -46,6 +46,14 @@ static void line(GuiSteps* steps, const char* s, uint64_t now) {
         sscanf(block, "compiled block %u/%u", &value, &total) == 2) {
         last->value = value;
         last->total = total;
+    } else if (last &&
+               ((!strcmp(last->label, "UNPACK") && sscanf(s, " unpacked %u of %u MB", &value, &total) == 2) ||
+                (!strcmp(last->label, "EXTRACT") && sscanf(s, " extracted %u of %u MB", &value, &total) == 2))) {
+        /* the driver's row a second, over itself: the step's own line shows it, no note under it */
+        last->value = value;
+        last->total = total;
+        last->megabytes = 1;
+        return;
     } else if (prefix(s, "Unpacking "))
         begin(steps, "UNPACK", s + 10, strlen(s + 10), now);
     else if (prefix(s, "Extracting "))
@@ -103,10 +111,38 @@ int gui_steps_percent(const GuiSteps* steps) {
         const GuiStep* s = &steps->step[i];
         if (!strcmp(s->label, "RECOMPILE"))
             percent = s->state == GUI_STEP_DONE ? 100 : s->total ? (int)(s->value * 100ull / s->total) : 0;
+        else if (!strcmp(s->label, "UNPACK") || !strcmp(s->label, "EXTRACT"))
+            percent = s->state == GUI_STEP_DONE ? 100 : s->total ? (int)(s->value * 100ull / s->total) : -1;
         else if (!strcmp(s->label, "BUILT") || !strcmp(s->label, "LAUNCH") || !strcmp(s->label, "READY"))
             percent = 100;
     }
     return percent;
+}
+void gui_step_progress(const GuiStep* s, int how, uint64_t now, char* out, size_t size) {
+    uint64_t spent = now > s->shown_ms ? now - s->shown_ms : 0, done = s->value < s->total ? s->value : s->total, left;
+    if (!s->total)
+        snprintf(out, size, "%s", "");
+    else if (how == GUI_PROGRESS_PERCENT)
+        snprintf(out, size, "%u%%", (unsigned)(done * 100 / s->total));
+    else if (how == GUI_PROGRESS_TIME && (!done || spent < 1000))
+        snprintf(out, size, "--:-- left");
+    else if (how == GUI_PROGRESS_TIME) {
+        left = (spent * (s->total - done) / done + 999) / 1000;
+        if (left >= 3600)
+            snprintf(out, size, "%u:%02u:%02u left", (unsigned)(left / 3600), (unsigned)(left / 60 % 60),
+                     (unsigned)(left % 60));
+        else
+            snprintf(out, size, "%02u:%02u left", (unsigned)(left / 60), (unsigned)(left % 60));
+    } else if (s->megabytes && s->total >= 1024)
+        snprintf(out, size, "%.1f / %.1f GB", s->value / 1024.0, s->total / 1024.0);
+    else
+        snprintf(out, size, s->megabytes ? "%u / %u MB" : "%u / %u", s->value, s->total);
+}
+const GuiStep* gui_steps_last(const GuiSteps* steps, const char* label) {
+    int i;
+    for (i = steps->count - 1; i >= 0; --i)
+        if (!strcmp(steps->step[i].label, label)) return &steps->step[i];
+    return NULL;
 }
 int gui_step_notes(const GuiSteps* steps, const GuiStep* step, const GuiNote** out, int max) {
     int i;

@@ -13,15 +13,15 @@
 #if defined(__linux__) && (!defined(__ANDROID__) || __ANDROID_API__ >= 30)
 #define SNX_MEMFD 1
 #endif
-#include "snx_recompiler.h"
-#include "codegen.h"
-#include "cpu/arm/exec.h"
-#include "cpu/arm/simd.h"
-#include "ir.h"
-#include "link.h"
+#include "common/cpu/recompiler/snx_recompiler.h"
+#include "common/cpu/recompiler/codegen.h"
+#include "common/cpu/arm/exec.h"
+#include "common/cpu/arm/simd.h"
+#include "common/cpu/recompiler/llvm/ir.h"
+#include "common/cpu/recompiler/llvm/link.h"
 #include <llvm-c/Support.h>
 #ifdef SNX_WITH_GCCJIT
-#include "jit.h"
+#include "common/cpu/recompiler/gccjit/jit.h"
 #endif
 #include <stdarg.h>
 #include <stdio.h>

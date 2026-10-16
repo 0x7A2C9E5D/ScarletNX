@@ -3,8 +3,8 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the guest clock: real time since startup */
-#include "runtime/clock.h"
-#include "runtime/platform/plat.h"
+#include "nx/runtime/clock.h"
+#include "nx/runtime/platform/plat.h"
 
 static u64 g_t0;
 void clock_start(void) { g_t0 = plat_ns(); }

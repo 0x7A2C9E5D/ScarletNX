@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "gpu/shader/shader.h"
+#include "nx/gpu/shader/shader.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1063,6 +1063,38 @@ static void system_values(void) {
     check(code && !info.unsupported, "a compute program reads SR_TID and SR_CLOCKHI");
     if (code && attribute_paths[2]) save_fixture(attribute_paths[2], code, words);
     free(code);
+/* Fire Emblem Three Houses fragment shaders sample fp16 surfaces with TLDS.
+   The f32 forms translate; the fp16 form must translate the same way, with the
+   components converted and packed into halves. */
+static void tlds_fp16(void) {
+    static const u64 words[] = {0xD244012030570A02ull, 0xD252010040570A18ull, 0xD252014000570A1Aull,
+                                0xD25200E000B70A17ull, 0xD252014010B70A06ull};
+    for (size_t i = 0; i < sizeof words / sizeof *words; i++) {
+        ShaderInfo info;
+        size_t size = 0;
+        u32* code = translate(&words[i], 1, ST_FS, &info, &size, 1);
+        if (!code || info.unsupported)
+            fprintf(stderr, "tlds fp16 %zu: %s\n", i, info.first_unsupported);
+        check(code && !info.unsupported, "TLDS fp16 translates");
+        if (code) check(count_opcode(code, size, 115, 0xffffffffu) >= 1, "TLDS fp16 converts to halves");
+        free(code);
+    }
+}
+
+/* Fire Emblem Three Houses fragment shaders sample array textures with TXD,
+   explicit gradients in Rb. It must sample with the Grad operands and write
+   the masked components to consecutive registers. */
+static void txd_grad(void) {
+    static const u64 words[] = {0xDE3800A3B0071010ull};
+    for (size_t i = 0; i < sizeof words / sizeof *words; i++) {
+        ShaderInfo info;
+        size_t size = 0;
+        u32* code = translate(&words[i], 1, ST_FS, &info, &size, 1);
+        if (!code || info.unsupported) fprintf(stderr, "txd %zu: %s\n", i, info.first_unsupported);
+        check(code && !info.unsupported, "TXD translates");
+        if (code) check(count_opcode(code, size, 88, 0xffffffffu) >= 1, "TXD samples with explicit LOD");
+        free(code);
+    }
 }
 
 /* a rejected instruction is logged with its word */
@@ -1103,6 +1135,8 @@ int main(int argc, char** argv) {
     precise_math();
     f2f_half_rounding();
     hfma2_immediate();
+    tlds_fp16();
+    txd_grad();
     fragment_storage_images();
     nro_shader_modes();
     issue126_shader_modes();

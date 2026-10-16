@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* The emulated network stack (src/common/network) over the host's loopback: blocking emulated on non-blocking host
    sockets, timeouts, poll, options, eventfd, cancellation and the ICMP emulation's fallback. */
-#include "network/net.h"
+#include "common/network/net.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

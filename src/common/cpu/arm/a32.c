@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "arm.h"
-#include "simd.h"
+#include "common/cpu/arm/arm.h"
+#include "common/cpu/arm/simd.h"
 
 SnxArmExit snx_arm_gccjit_stub(void) { return SNX_ARM_BACKEND_UNSUPPORTED; }
 

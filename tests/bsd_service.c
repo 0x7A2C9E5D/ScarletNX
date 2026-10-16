@@ -2,10 +2,10 @@
    Copyright 2026 the ScarletNX contributors */
 /* bsd:u's IPC commands, sent as the SDK and libnx send them (FreeBSD's constants and sockaddr layout), over the
    host's loopback, and the network option's offline mode */
-#include "hle/services/services_int.h"
+#include "nx/hle/services/services_int.h"
 #include <stdarg.h>
 
-#include "hle/services/network/bsd.c"
+#include "nx/hle/services/network/bsd.c"
 
 u8* g_mem;
 int g_verbose;

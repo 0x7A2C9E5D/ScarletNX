@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Shared AArch32 executor: runs A32 blocks and checks the DRY SVC surface
    zero-extends r0-r7 from 32-bit to 64-bit for the common HLE handler. */
-#include "cpu/arm/exec.h"
+#include "common/cpu/arm/exec.h"
 #include <stdio.h>
 #include <string.h>
 

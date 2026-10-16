@@ -44,9 +44,8 @@ foreach(kind IN LISTS snx_recompiler_kinds)
     set_target_properties(${target} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON
         OUTPUT_NAME scarletnx-recompiler)
     add_dependencies(${target} ${snx_recompiler_parts})
-    target_include_directories(${target} PUBLIC
-        "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/common>" "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
-        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/scarletnx>")
+    target_include_directories(${target} PUBLIC "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+                                                "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/scarletnx>")
     # the parts' headers, as their own targets publish them (library.c is built against the objects, not the targets)
     foreach(part IN LISTS snx_recompiler_parts)
         target_include_directories(${target} PRIVATE "$<TARGET_PROPERTY:${part},INTERFACE_INCLUDE_DIRECTORIES>")
@@ -96,9 +95,11 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ScarletNXRecompilerConfig.cmake"
     "endif()\n")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ScarletNXRecompilerConfig.cmake"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ScarletNXRecompiler)
-# the headers, in the layout they include each other with (cpu.h includes ../../runtime/interface.h)
+# the headers, in the layout they include each other with: their paths from src/ (common/cpu/aarch64/cpu.h)
 set(snx_recompiler_include "${CMAKE_INSTALL_INCLUDEDIR}/scarletnx")
 install(FILES snx_recompiler.h DESTINATION ${snx_recompiler_include})
-install(FILES "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu.h" DESTINATION ${snx_recompiler_include}/cpu/aarch64)
-install(FILES "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/arm.h" DESTINATION ${snx_recompiler_include}/cpu/arm)
-install(FILES "${PROJECT_SOURCE_DIR}/src/common/runtime/interface.h" DESTINATION ${snx_recompiler_include}/runtime)
+install(FILES "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu.h"
+        DESTINATION ${snx_recompiler_include}/common/cpu/aarch64)
+install(FILES "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/arm.h" DESTINATION ${snx_recompiler_include}/common/cpu/arm)
+install(FILES "${PROJECT_SOURCE_DIR}/src/common/runtime/interface.h"
+        DESTINATION ${snx_recompiler_include}/common/runtime)

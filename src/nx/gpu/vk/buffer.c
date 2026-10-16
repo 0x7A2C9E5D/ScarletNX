@@ -7,13 +7,13 @@
    for long are checked less often. */
 #include <stdlib.h>
 #include <string.h>
-#include "gpu/gpu.h"
-#include "gpu/renderer.h"
-#include "hle/services/nvdrv.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "gpu/vk/vk.h"
+#include "nx/gpu/gpu.h"
+#include "nx/gpu/renderer.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/gpu/vk/vk.h"
 
 typedef struct Vb {
     u64 start, len, hash, shash;

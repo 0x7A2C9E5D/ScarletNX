@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* GUI themes: the built-ins, a theme.ini over its base, and the themes/ folders the GUI offers. */
-#include "common.h"
+#include "common/utilities/common.h"
 #include "gui_theme_colors.h"
-#include "theme.h"
+#include "gui/steps.h" /* GuiProgress */
+#include "gui/theme.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,8 +24,12 @@ static const char* const format_keys[] = {"theme/format",
                                           "colors/failure",
                                           "colors/dim",
                                           "colors/warning",
+                                          "colors/added",
                                           "head/style",
                                           "head/rule",
+                                          "head/place",
+                                          "head/size",
+                                          "head/shadow",
                                           "head/menu",
                                           "head/games",
                                           "head/keys",
@@ -32,8 +37,14 @@ static const char* const format_keys[] = {"theme/format",
                                           "head/loading",
                                           "body/marker",
                                           "body/focus",
+                                          "body/panels",
+                                          "body/cursor",
+                                          "backdrop/grid",
+                                          "tips/place",
+                                          "tips/box",
                                           "footer/style",
                                           "footer/rule",
+                                          "footer/box",
                                           "run/layout",
                                           "run/page",
                                           "run/ink",
@@ -46,6 +57,7 @@ static const char* const format_keys[] = {"theme/format",
                                           "run/detailed",
                                           "run/collapse",
                                           "run/ring",
+                                          "run/progress",
                                           "prompt/align",
                                           "prompt/open",
                                           "prompt/close",
@@ -135,11 +147,23 @@ int main(void) {
     const GuiTheme* loading = yorha; /* YoRHa's runs are its loading screen */
     assert(def && yorha && !gui_theme_builtin("yorha-loading") && !gui_theme_builtin("nothing") &&
            !gui_theme_builtin(NULL));
+    /* the key table is format 1's keys, but for the three that are no field of a theme */
+    for (i = 0; gui_theme_keys[i].section; ++i) {
+        snprintf(longer, sizeof longer, "%s/%s", gui_theme_keys[i].section, gui_theme_keys[i].key);
+        assert(listed_in(format_keys, sizeof format_keys / sizeof *format_keys, longer));
+    }
+    assert(i == sizeof format_keys / sizeof *format_keys - 3 && !gui_theme_key("theme", "format") &&
+           !gui_theme_key("theme", "layout") && !gui_theme_key("theme", "base"));
     assert(rgb_is(yorha->run_colors.page, 0x14, 0x14, 0x16) && !same(yorha->run_colors.page, yorha->page));
     assert(same(def->run_colors.page, def->page) && same(def->run_colors.ink, def->ink));
     assert(def->run == GUI_RUN_CONSOLE && !def->fade_in_ms && !def->fade_out_ms && def->line_in == GUI_LINE_NONE);
     assert(loading->run == GUI_RUN_STEPS && loading->ring == GUI_RING_RIGHT && loading->texture && !loading->bar);
     assert(loading->line_in == GUI_LINE_TYPING && loading->typing_ms == 5 && loading->fade_out_ms == 500);
+    /* a running step's progress: the default theme's amount, YoRHa's percent; a theme names its own */
+    assert(def->progress == GUI_PROGRESS_AMOUNT && yorha->progress == GUI_PROGRESS_PERCENT);
+    theme = *def;
+    parse(&theme, "[run]\nprogress = time\n");
+    assert(theme.progress == GUI_PROGRESS_TIME);
     assert(loading->typing_sync && !def->typing_sync);  /* YoRHa types one line at a time */
     assert(yorha->scroll_ms == 120 && !def->scroll_ms); /* a long line slides in YoRHa, is cut in the default */
     assert(loading->detailed && !loading->collapse && !def->detailed && !def->collapse);
@@ -150,8 +174,19 @@ int main(void) {
                !p->lines[GUI_PROMPT_ABORTING]);
     }
     assert(!strcmp(loading->title[GUI_SCREEN_LOADING], "BOOTING"));
-    assert(def->head == GUI_STYLE_PLAIN && !def->focus_bar && !strcmp(def->marker, "- ") && !def->title[0][0]);
-    assert(yorha->head == GUI_STYLE_BAR && yorha->focus_bar && yorha->title[GUI_SCREEN_COMPILING][0]);
+    assert(def->head == GUI_STYLE_PLAIN && !def->focus_bar && !strcmp(def->marker, "- ") &&
+           !strcmp(def->title[GUI_SCREEN_MENU], yorha->title[GUI_SCREEN_MENU]));
+    assert(yorha->head == GUI_STYLE_PLAIN && yorha->focus_bar && yorha->title[GUI_SCREEN_COMPILING][0]);
+    /* the boxes: the default's framed, YoRHa's filled with a cursor in the margin; the title in the row of tabs in
+       both, YoRHa's twice as big; the grid, the tips' and the keys' boxes and the foot on a band YoRHa's alone */
+    assert(def->panels == GUI_PANELS_OUTLINE && !def->cursor[0] && yorha->panels == GUI_PANELS_FILL &&
+           !strcmp(yorha->cursor, "\xe2\x96\xba "));
+    assert(def->head_place == GUI_HEAD_TABS && yorha->head_place == GUI_HEAD_TABS);
+    assert(def->title_size == 1 && !def->title_shadow && yorha->title_size == 2 && !yorha->title_shadow);
+    assert(!def->grid && yorha->grid && def->tips_place == GUI_TIPS_BOTTOM && yorha->tips_place == GUI_TIPS_BOTTOM);
+    assert(!def->tips_box && !def->footer_box && yorha->tips_box && yorha->footer_box);
+    assert(def->footer == GUI_STYLE_PLAIN && yorha->footer == GUI_STYLE_BAR && yorha->head_rule && !def->head_rule);
+    assert(!gui_theme_key("body", "layout") && !gui_theme_key("head", "tabs") && !gui_theme_key("frame", "edges"));
 
     parse(&theme, ""); /* nothing: the default, named after its folder */
     assert(same(theme.ink, def->ink) && !strcmp(theme.id, "mine") && !strcmp(theme.name, "mine"));
@@ -165,7 +200,7 @@ int main(void) {
     assert(theme.scroll_ms == yorha->scroll_ms);
     assert(rgb_is(theme.page, 0x0A, 0x0B, 0x0C));
     assert(same(theme.ink, yorha->ink) && same(theme.soft, yorha->soft) && same(theme.focus, yorha->focus));
-    assert(theme.head == GUI_STYLE_NONE && theme.head_rule == yorha->head_rule);
+    assert(theme.head == yorha->head && theme.head_rule == yorha->head_rule); /* the head has no none */
     assert(theme.footer == GUI_STYLE_PLAIN && theme.footer_rule && !theme.focus_bar && !strcmp(theme.marker, "* "));
     assert(!strcmp(theme.title[GUI_SCREEN_LOADING], "  BOOT  ") && !theme.title[GUI_SCREEN_MENU][0]);
     assert(!strcmp(theme.title[GUI_SCREEN_COMPILING], yorha->title[GUI_SCREEN_COMPILING]));
@@ -214,6 +249,21 @@ int main(void) {
            !theme.prompt.lines[GUI_PROMPT_KEYS]);
     parse(&theme, "[prompt]\nalign = left\n");
     assert(theme.prompt.align == GUI_ALIGN_LEFT);
+
+    /* the boxes: a file that names none of their keys takes its base's; the title's place, the tips', the foot's
+       boxes and its style; an unknown word keeps the base's */
+    parse(&theme, "[theme]\nformat = 1\nbase = default\n[colors]\npage = #102030\n");
+    assert(theme.panels == GUI_PANELS_OUTLINE && theme.head_place == GUI_HEAD_TABS &&
+           rgb_is(theme.page, 0x10, 0x20, 0x30));
+    parse(&theme, "[theme]\nbase = yorha\n[body]\ncursor = \"> \"\n");
+    assert(theme.panels == GUI_PANELS_FILL && !strcmp(theme.cursor, "> "));
+    parse(&theme, "[theme]\nbase = yorha\n[body]\npanels = outline\n[head]\nplace = below\n[tips]\nplace = top\n"
+                  "box = false\n[footer]\nbox = false\nstyle = none\n");
+    assert(theme.panels == GUI_PANELS_OUTLINE && theme.head_place == GUI_HEAD_BELOW &&
+           theme.tips_place == GUI_TIPS_TOP);
+    assert(!theme.tips_box && !theme.footer_box && theme.footer == GUI_STYLE_NONE);
+    parse(&theme, "[body]\npanels = round\n[head]\nplace = left\n[tips]\nplace = side\n");
+    assert(theme.panels == def->panels && theme.head_place == def->head_place && theme.tips_place == def->tips_place);
 
     /* a value longer than its field keeps the base's; an unknown base leaves the default */
     memset(longer, 0, sizeof longer);
@@ -277,7 +327,7 @@ int main(void) {
         assert(!strcmp(f.prompt.close, b->prompt.close) && f.prompt.blink == b->prompt.blink);
         for (l = 0; l < GUI_PROMPT_COUNT; ++l) assert(f.prompt.lines[l] == b->prompt.lines[l]);
         assert(f.format == GUI_THEME_FORMAT && b->format == GUI_THEME_FORMAT && !strcmp(f.author, b->author));
-        assert(same(f.warning, b->warning) && same(f.run_colors.page, b->run_colors.page));
+        assert(same(f.warning, b->warning) && same(f.added, b->added) && same(f.run_colors.page, b->run_colors.page));
         assert(same(f.run_colors.ink, b->run_colors.ink) && same(f.run_colors.soft, b->run_colors.soft));
         assert(same(f.run_colors.dim, b->run_colors.dim) && same(f.run_colors.failure, b->run_colors.failure));
         assert(same(f.run_colors.warning, b->run_colors.warning));

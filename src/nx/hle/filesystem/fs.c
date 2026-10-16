@@ -4,17 +4,17 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* fs: RomFS (built on the fly from an extracted romfs/ folder, or a romfs.bin), plus save data
    and SD card mapped to normal folders. */
-#include "hle/filesystem/fs.h"
-#include "hle/filesystem/fs_tree.h"
-#include "runtime/main.h"
-#include "hle/services/services.h"
-#include "hle/services/services_int.h"
-#include "hle/kernel/ipc.h"
+#include "nx/hle/filesystem/fs.h"
+#include "nx/hle/filesystem/fs_tree.h"
+#include "nx/runtime/main.h"
+#include "nx/hle/services/services.h"
+#include "nx/hle/services/services_int.h"
+#include "nx/hle/kernel/ipc.h"
 #include "hle/filesystem/fs.swipc.inc"
-#include "memory/mem.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

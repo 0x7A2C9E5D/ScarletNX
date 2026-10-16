@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #define _POSIX_C_SOURCE 200809L
-#include "gdbstub.h"
-#include "common.h"
+#include "nx/runtime/gdbstub.h"
+#include "common/utilities/common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #ifdef _WIN32

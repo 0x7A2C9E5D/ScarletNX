@@ -2,8 +2,8 @@
    Copyright 2026 the ScarletNX contributors */
 /* Real ldr:ro, memory block list and generated A64 interpreter; only platform and IPC transport are fakes.
    No game assets, RSA keys or precompiled NRO host libraries are required. */
-#include "hle/services/services_int.h"
-#include "gpu/gpu.h"
+#include "nx/hle/services/services_int.h"
+#include "nx/gpu/gpu.h"
 #include <openssl/evp.h>
 #include <stdarg.h>
 #include <sys/mman.h>

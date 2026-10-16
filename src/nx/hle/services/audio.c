@@ -4,10 +4,10 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* audio services: audout sends guest PCM to the host, audren renders the game's voices (audren.c, audren_dsp.c),
    and hwopus decodes the game's Opus packets with FFmpeg */
-#include "hle/services/services_int.h"
+#include "nx/hle/services/services_int.h"
 #include "hle/services/audio.swipc.inc"
 #ifndef SNX_NO_H264
-#include "gpu/video/host1x.h"
+#include "nx/gpu/video/host1x.h"
 #include <libavcodec/avcodec.h>
 #include <math.h>
 #endif
@@ -475,13 +475,15 @@ static int nn_audio_detail_IAudioOutManager_ListAudioOutsAuto(SvcObj* self, IpcB
     *count = put_name(names, "DeviceOut");
     return 0;
 }
-/* OpenAudioOut(Auto): whatever the game asks for, 48 kHz stereo s16 */
+/* OpenAudioOut(Auto): 48 kHz s16, with the channel count the game asked for */
 static int open_audio_out(const nn_audio_AudioOutParameter* params, IpcBuf name_out, u32* sample_rate,
                           u32* channel_count, u32* sample_format, u32* state, SvcObj** out) {
     SvcObj* r = nn_audio_detail_IAudioOut_new(sizeof(AudOut));
     AudOut* q = (AudOut*)r->data;
     pm_init(&q->lk);
-    q->channels = 2; /* what the reply tells the game it gets */
+    u32 channels = params->channel_count;
+    if (channels != 1 && channels != 2 && channels != 4 && channels != 6) channels = 2;
+    q->channels = channels; /* what the reply tells the game it gets */
     q->volume = 1.0f;
     q->output = plat_audio_open(48000, q->channels);
     q->ev = owned_event("audio out buffers");
@@ -491,8 +493,8 @@ static int open_audio_out(const nn_audio_AudioOutParameter* params, IpcBuf name_
     audio.outs = q;
     pm_unlock(&audio.outs_lk);
     put_name(name_out, "DeviceOut");
-    LOG_LIMIT(1, "audout: opened (the game asked for %u channels, it gets 48000 Hz stereo s16)\n",
-              params->channel_count);
+    LOG_LIMIT(1, "audout: opened (the game asked for %u channels, it gets %u)\n", params->channel_count,
+              q->channels);
     *sample_rate = 48000;
     *channel_count = q->channels;
     *sample_format = 2; /* PCM s16 */

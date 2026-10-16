@@ -5,7 +5,7 @@
 /* the guest clock (clock.c): real time since startup */
 #ifndef SNX_CLOCK_H
 #define SNX_CLOCK_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 
 void clock_start(void);
 u64 g_t0_ns(void);     /* plat_ns() at startup */

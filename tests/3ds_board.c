@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "board/board.h"
+#include "3ds/board/board.h"
 #include <assert.h>
 #include <stdio.h>
 
