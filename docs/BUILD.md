@@ -287,4 +287,6 @@ It carries libgccjit and the `as` and `ld` of the same Arch (an older binutils' 
 
 [Nightly AppImages](https://github.com/scarletnx/ScarletNX/releases/tag/nightly), x86_64 and aarch64 · [Launch](USAGE.md).
 
+A pull request's own builds are linked from a comment on it once CI has built them.
+
 [Licenses/credits](CREDITS.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md).
