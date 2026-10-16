@@ -492,10 +492,10 @@ int main(int argc, char** argv) {
         assert(app.space->done && app.space->used == total && !strcmp(app.space->dirs[0], app.games_dir));
         gui_size_text(used, sizeof used, total);
         gui_size_text(left, sizeof left, app.free_bytes);
-        snprintf(line, sizeof line, "Disk: %s used by ScarletNX, %s free", used, left);
+        snprintf(line, sizeof line, "Disk: %s, %s free", used, left);
         render(&app);
         colored_text(&app, app.rows - 1, line, rgb(app.theme.soft));
-        assert(total == 3 << 20 && !strncmp(line, "Disk: 3 MB used by ScarletNX, ", 30));
+        assert(total == 3 << 20 && !strncmp(line, "Disk: 3 MB, ", 12));
         assert(!snx_remove_tree(app.games_dir)); /* the browser's checks below start with no games/ */
         free(app.themes_dirs[0]);
         free(app.data_dir);

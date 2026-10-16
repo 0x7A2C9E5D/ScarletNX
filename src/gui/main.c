@@ -1273,9 +1273,9 @@ static void render_editor(App* app) {
         gui_size_text(left, sizeof left, app->free_bytes);
         if (app->space && __atomic_load_n(&app->space->done, __ATOMIC_ACQUIRE)) {
             gui_size_text(used, sizeof used, app->space->used);
-            snprintf(value, sizeof value, "Disk: %s used by ScarletNX, %s free", used, left);
+            snprintf(value, sizeof value, "Disk: %s, %s free", used, left);
         } else
-            snprintf(value, sizeof value, "Disk: counting what ScarletNX uses, %s free", left);
+            snprintf(value, sizeof value, "Disk: counting, %s free", left);
         text(app, 1, app->rows - 1, value, rgb(theme->soft));
         return;
     }
