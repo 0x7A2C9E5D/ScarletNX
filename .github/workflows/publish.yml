@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 the ScarletNX contributors
+name: Publish builds
+
+# The builds as releases of scarletnx/nightly, each said on Discord (scripts/publish-builds.py): every push to main that
+# builds everywhere a nightly, the newest 30 kept; every pull request a prerelease, pr-<number>, replaced at each push
+# and deleted when it closes. A fork's pull request only once someone of the team labels it "publish builds" after its
+# last push. Nothing of a pull request runs here: the files are its Build run's artifacts, and the checkout is main's.
+# The secrets: NIGHTLY_TOKEN may write scarletnx/nightly's contents; DISCORD_WEBHOOK_NIGHTLY and DISCORD_WEBHOOK_PRS
+# are the channels' webhooks (without one, nothing is posted there and the run says so)
+on:
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+  # pull_request_target, so a fork's are seen too: closed, labeled, or pushed to (its label then comes off)
+  pull_request_target:
+    types: [closed, labeled, synchronize]
+
+permissions:
+  contents: read
+  actions: read # the Build run's artifacts
+  pull-requests: write # a fork's label, taken off at its push
+
+# One at a time for each nightly and each pull request: the nightlies are counted, and a pull request's message is
+# edited from the id its prerelease keeps. A group holds one waiting run, which a newer one replaces: the newer build
+# is the one to publish (a fork's pull request, which its run cannot name, goes by its commit)
+concurrency:
+  group: >-
+    publish-${{ github.event.workflow_run.event == 'push' && 'nightly' || github.event.pull_request.number ||
+    github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
+
+jobs:
+  publish:
+    name: Publish the builds
+    # a push to the repository's own pull request, or another label, has nothing for it
+    if: >-
+      github.event_name == 'workflow_run' || github.event.action == 'closed' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'publish builds') ||
+      (github.event.action == 'synchronize' && github.event.pull_request.head.repo.full_name != github.repository)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    env:
+      NIGHTLY_REPO: scarletnx/nightly
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NIGHTLY_TOKEN: ${{ secrets.NIGHTLY_TOKEN }}
+      DISCORD_WEBHOOK_NIGHTLY: ${{ secrets.DISCORD_WEBHOOK_NIGHTLY }}
+      DISCORD_WEBHOOK_PRS: ${{ secrets.DISCORD_WEBHOOK_PRS }}
+    steps:
+      # main's scripts, and its history for the changes a nightly lists
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      # A closed pull request's prerelease is deleted, and a fork's pushed one loses its label, here
+      - name: Find the builds to publish
+        id: plan
+        run: python3 scripts/publish-builds.py plan --repo "$GITHUB_REPOSITORY" --to "$NIGHTLY_REPO"
+      # Each by its name, as the release job takes them, into a folder of its own. A pull request's job that failed made
+      # none: its notes say so
+      - name: Download the x86-64 AppImage
+        if: steps.plan.outputs.run
+        continue-on-error: ${{ steps.plan.outputs.kind == 'pr' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: AppImage-x86_64-${{ steps.plan.outputs.short }}
+          path: artifacts/AppImage-x86_64-${{ steps.plan.outputs.short }}
+          run-id: ${{ steps.plan.outputs.run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download the ARM64 AppImage
+        if: steps.plan.outputs.run
+        continue-on-error: ${{ steps.plan.outputs.kind == 'pr' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: AppImage-aarch64-${{ steps.plan.outputs.short }}
+          path: artifacts/AppImage-aarch64-${{ steps.plan.outputs.short }}
+          run-id: ${{ steps.plan.outputs.run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download the Windows build
+        if: steps.plan.outputs.run
+        continue-on-error: ${{ steps.plan.outputs.kind == 'pr' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: scarletnx-windows-${{ steps.plan.outputs.short }}
+          path: artifacts/scarletnx-windows-${{ steps.plan.outputs.short }}
+          run-id: ${{ steps.plan.outputs.run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download the Android APK
+        if: steps.plan.outputs.run
+        continue-on-error: ${{ steps.plan.outputs.kind == 'pr' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ScarletNX-${{ steps.plan.outputs.short }}.apk
+          path: artifacts/ScarletNX-${{ steps.plan.outputs.short }}.apk
+          run-id: ${{ steps.plan.outputs.run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish them
+        if: steps.plan.outputs.run
+        env:
+          KIND: ${{ steps.plan.outputs.kind }}
+          RUN: ${{ steps.plan.outputs.run }}
+          SHA: ${{ steps.plan.outputs.sha }}
+          PR: ${{ steps.plan.outputs.pr }}
+        run: |
+          python3 scripts/publish-builds.py publish --repo "$GITHUB_REPOSITORY" --to "$NIGHTLY_REPO" --kind "$KIND" \
+            --run "$RUN" --sha "$SHA" ${PR:+--pr "$PR"} --artifacts artifacts --checkout .

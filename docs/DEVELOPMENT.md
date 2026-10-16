@@ -22,7 +22,12 @@ FS tests use production tree/HLE + synthetic temp data; `--only tree|service` se
 
 CI: Linux/Windows builds, ABI syntax, native tool/FS regressions, optional Python diagnostics, the Linux AppImages
 and the Windows zip (each then run as installed) and the Android APK. A push to `main` that builds everywhere
-publishes them as the `nightly` prerelease. Formatting is checked locally (`scripts/format.sh --check`).
+publishes them as the `nightly` prerelease. `.github/workflows/publish.yml` also makes each such push a release of
+[scarletnx/nightly](https://github.com/scarletnx/nightly/releases) (the newest 30 kept) and each pull request a
+prerelease there, `pr-<number>`, said on Discord (`scripts/publish-builds.py`). A fork's pull request is published
+once someone of the team labels it `publish builds`, after each push. Its secrets: `NIGHTLY_TOKEN` (writes that
+repository's contents), `DISCORD_WEBHOOK_NIGHTLY` and `DISCORD_WEBHOOK_PRS`. Formatting is checked locally
+(`scripts/format.sh --check`).
 Verify affected scenes manually, repeat intermittent failures, record evidence/scope.
 Test guest semantics + malformed IPC with synthetic cases.
 
