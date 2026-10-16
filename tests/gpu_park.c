@@ -6,13 +6,13 @@
    channel doesn't; a release the CPU writes and a syncpoint incremented off the GPU thread end waits; a stream
    resumes in the middle of a method batch, of a job's entries, and of a macro; and a wait nothing ends times out.
    Each mark is a ClearBuffers value the stand-in renderer records; the platform's locks are pthreads */
-#include "gpu/gpu.h"
-#include "gpu/renderer.h"
-#include "hle/services/nvdrv.h"
-#include "memory/mem.h"
-#include "runtime/clock.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/gpu/gpu.h"
+#include "nx/gpu/renderer.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/clock.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
