@@ -1929,6 +1929,14 @@ static void event(App* app, const SDL_Event* e) {
     }
     if (menu_key_of(&e->key, &key)) menu_key(app, key);
 }
+/* the themes that come with the GUI: beside it in a build tree, else where an install puts data, share/scarletnx/themes
+   beside its bin/ (/usr/local, the Windows zip) */
+static char* shipped_themes(const char* program_dir) {
+    char* beside = snx_path_join(program_dir, "themes");
+    if (snx_is_dir(beside)) return beside;
+    free(beside);
+    return snx_path_join(program_dir, "../share/scarletnx/themes");
+}
 static bool initialize(App* app) {
     SDL_WindowFlags flags;
     memset(app, 0, sizeof(*app));
@@ -1973,7 +1981,7 @@ static bool initialize(App* app) {
 #endif
     app->games_dir = snx_path_join(app->data_dir, "games");
     app->themes_dirs[0] = snx_path_join(app->data_dir, "themes");
-    if (app->drivers) app->themes_dirs[1] = snx_path_join(app->drivers, "themes");
+    if (app->drivers) app->themes_dirs[1] = shipped_themes(app->drivers);
     app->keys_path = device_keys_path(app);
     gui_console_init(&app->console, 78, 17);
     if (!app->font || !app->process || !app->drivers) {
