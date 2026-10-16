@@ -317,11 +317,11 @@ snx_test_target(snx-test-pad-screen 11)
 target_link_libraries(snx-test-pad-screen PRIVATE scarletnx-common)
 add_test(NAME pad_screen COMMAND snx-test-pad-screen)
 
+include("${PROJECT_SOURCE_DIR}/cmake/pad_sdl.cmake")
 add_executable(snx-test-gamepad gamepad.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/backend/gamepad.c"
-    "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/backend/pad_sdl.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-gamepad 11)
-target_link_libraries(snx-test-gamepad PRIVATE scarletnx-common SDL3::SDL3 m)
+target_link_libraries(snx-test-gamepad PRIVATE scarletnx-common snx_pad_sdl m)
 add_test(NAME gamepad COMMAND snx-test-gamepad)
 
 add_executable(snx-test-fatal-screen fatal_screen.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/fatal_screen.c")

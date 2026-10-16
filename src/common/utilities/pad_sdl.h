@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* pad_map.h's controls on SDL's gamepads, for the runtime's (gamepad.c) */
+/* pad_map.h's controls on SDL's gamepads, for the runtime (gamepad.c) and the launcher (cmake/pad_sdl.cmake) */
 #ifndef SNX_PAD_SDL_H
 #define SNX_PAD_SDL_H
 #include <SDL3/SDL.h>

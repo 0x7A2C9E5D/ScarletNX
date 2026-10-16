@@ -28,6 +28,7 @@ if(WIN32)
 endif()
 include("${PROJECT_SOURCE_DIR}/cmake/window_icon.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/build_info.cmake")
+include("${PROJECT_SOURCE_DIR}/cmake/pad_sdl.cmake")
 include(GNUInstallDirs)
 # The menu: Android's activity loads it as libmain.so and runs its SDL_main (dist/android); scarletnx, the Switch
 # runtime, links it and opens it when started with nothing to run (#243); a build without that runtime makes it a
@@ -53,7 +54,7 @@ set_target_properties(scarletnx-gui PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED
 target_compile_options(scarletnx-gui PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 target_compile_definitions(scarletnx-gui PRIVATE SNX_SOURCE_DIR="${CMAKE_SOURCE_DIR}" SNX_BUILD_DIR="${CMAKE_BINARY_DIR}")
 target_link_libraries(scarletnx-gui PUBLIC snx_gui_support PRIVATE scarletnx-common SDL3::SDL3 snx_window_icon
-                      snx_build_info)
+                      snx_build_info snx_pad_sdl)
 if(WIN32 AND NOT SNX_BUILD_NX)
     enable_language(RC)
     target_sources(scarletnx-gui PRIVATE ../nx/runtime/platform/runtime.rc)
@@ -117,7 +118,7 @@ if(BUILD_TESTING)
     set_tests_properties(gui_process_tree PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
     add_executable(snx-test-gui-sdl "${PROJECT_SOURCE_DIR}/tests/gui_sdl.c")
     target_link_libraries(snx-test-gui-sdl PRIVATE snx_gui_support scarletnx-common SDL3::SDL3 snx_window_icon
-                          snx_build_info)
+                          snx_build_info snx_pad_sdl)
     foreach(test snx-test-gui-model snx-test-gui-cia-browser snx-test-gui-recent snx-test-gui-steps snx-test-gui-theme snx-test-gui-process
                  snx-test-gui-sdl snx-test-gui-theme-formats snx-test-gui-theme-write snx-test-gui-editor
                  snx-test-gui-settings)
