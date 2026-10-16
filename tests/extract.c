@@ -57,19 +57,21 @@ static char* read_text(const char* path) {
 
 /* Only the container signatures are real; the payload selects the synthetic hactool scenario. */
 static void write_container(const char* path, const char* kind, const char* mode) {
-    unsigned char bytes[0x240];
+    unsigned char bytes[0x1200];
     size_t size;
     memset(bytes, 0, sizeof bytes);
     if (!strcmp(kind, "pfs0"))
         memcpy(bytes, "PFS0", 4);
     else if (!strcmp(kind, "xci"))
         memcpy(bytes + 0x100, "HEAD", 4);
+    else if (!strcmp(kind, "xci-keyarea")) /* the header after the card's key area */
+        memcpy(bytes + 0x1100, "HEAD", 4);
     else if (!strcmp(kind, "dxci"))
         memcpy(bytes + 0x100, "DXCI", 4);
     size = strlen(mode);
-    CHECK(size < sizeof bytes - 0x200);
+    CHECK(size < 0x100);
     memcpy(bytes + 0x200, mode, size);
-    CHECK(!snx_write_file(path, bytes, 0x200 + size));
+    CHECK(!snx_write_file(path, bytes, strcmp(kind, "xci-keyarea") ? 0x200 + size : sizeof bytes));
 }
 
 static char* container_mode(const char* path, int* xci) {
@@ -78,7 +80,8 @@ static char* container_mode(const char* path, int* xci) {
     size_t size;
     bytes = snx_read_file(path, &size);
     CHECK(bytes != NULL && size >= 0x200);
-    *xci = !memcmp(bytes + 0x100, "HEAD", 4) || !memcmp(bytes + 0x100, "DXCI", 4);
+    *xci = !memcmp(bytes + 0x100, "HEAD", 4) || !memcmp(bytes + 0x100, "DXCI", 4) ||
+           (size >= 0x1104 && !memcmp(bytes + 0x1100, "HEAD", 4));
     CHECK(*xci || !memcmp(bytes, "PFS0", 4));
     mode = snx_strdup((const char*)bytes + 0x200);
     free(bytes);
@@ -403,9 +406,9 @@ static int scenario(const char* self, const char* scratch, const char* mode) {
     set_env("XDG_CONFIG_HOME", "must not reach hactool");
     kind = "pfs0";
     base_name = "Base Game (&).NSP";
-    if (!strcmp(mode, "xci") || !strcmp(mode, "xci-keyless") || !strcmp(mode, "xci-renamed-dnsp") ||
-        !strcmp(mode, "slow-xci")) {
-        kind = "xci";
+    if (!strcmp(mode, "xci") || !strcmp(mode, "xci-keyless") || !strcmp(mode, "xci-renamed-dnsp")
+        || !strcmp(mode, "slow-xci") || !strcmp(mode, "xci-keyarea")) {
+        kind = !strcmp(mode, "xci-keyarea") ? "xci-keyarea" : "xci";
         base_name = !strcmp(mode, "xci-renamed-dnsp") ? "Base Game (&).DNsP" : "Base Game (&).XCI";
     } else if (strstr(mode, "dxci") || merged) {
         kind = "dxci";
@@ -551,6 +554,7 @@ static int scenario(const char* self, const char* scratch, const char* mode) {
 int main(int argc, char** argv) {
     static const char* modes[] = {"base",
                                   "xci",
+                                  "xci-keyarea",
                                   "dnsp",
                                   "dnsp-mixed",
                                   "dxci",

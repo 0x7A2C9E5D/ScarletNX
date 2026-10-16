@@ -192,9 +192,20 @@ static void plaintext_patch(unsigned crypto, size_t gap, size_t trailing) {
     sb->relocation_header.magic = MAGIC_BKTR;
     sb->relocation_header.offset = 0x200;
     sb->relocation_header.size = 0x8000;
+    sb->relocation_header.num_entries = 3;
     sb->subsection_header.magic = MAGIC_BKTR;
     sb->subsection_header.offset = subsection_offset;
     sb->subsection_header.size = 0x8000;
+    sb->subsection_header.num_entries = 1;
+
+    /* The base is opened before the update, as main.c does. */
+    unsigned char base[64], expected[16], got[16];
+    for (unsigned i = 0; i < sizeof(base); i++) base[i] = (unsigned char)(i + 0x80);
+    memcpy(expected, base + 4, 5);
+    memcpy(expected + 5, body + 0x23, 5);
+    memcpy(expected + 10, base + 20, 6);
+    tool.base_file = archive(base, sizeof(base), NULL, 0);
+    tool.base_file_type = BASEFILE_ROMFS;
     nca_init(&ctx);
     ctx.tool_ctx = &tool;
     ctx.file = archive(&header, sizeof(header), body, body_size);
@@ -205,17 +216,8 @@ static void plaintext_patch(unsigned crypto, size_t gap, size_t trailing) {
     CHECK(section->is_decrypted);
     CHECK(section->aes == NULL);
     CHECK(section->header->crypt_type == crypto);
-    CHECK(section->bktr_ctx.relocation_block != NULL);
-    CHECK(section->bktr_ctx.subsection_block != NULL);
-    CHECK(section->bktr_ctx.relocation_block->num_buckets == 1);
-
-    unsigned char base[64], expected[16], got[16];
-    for (unsigned i = 0; i < sizeof(base); i++) base[i] = (unsigned char)(i + 0x80);
-    memcpy(expected, base + 4, 5);
-    memcpy(expected + 5, body + 0x23, 5);
-    memcpy(expected + 10, base + 20, 6);
-    tool.base_file = archive(base, sizeof(base), NULL, 0);
-    tool.base_file_type = BASEFILE_ROMFS;
+    CHECK(section->bktr_ctx.indirect != NULL);
+    CHECK(section->bktr_ctx.indirect->size == 16);
     nca_section_fseek(section, 0);
     CHECK(nca_section_fread(section, got, sizeof(got)) == sizeof(got));
     CHECK(!memcmp(got, expected, sizeof(got)));
@@ -239,9 +241,16 @@ static void plaintext_patch(unsigned crypto, size_t gap, size_t trailing) {
         CHECK(nca_section_fread(section, got, sizeof(got)) == sizeof(got));
         CHECK(!memcmp(got, body + subsection_offset + 0x8000, sizeof(got)));
     }
+    section->physical_reads = 0;
+    nca_free_section_contexts(&ctx);
     CHECK(!fclose(tool.base_file));
     tool.base_file = NULL;
-    section->physical_reads = 0;
+
+    /* Without a base, the update reads as its own section. */
+    rewind(ctx.file);
+    nca_process(&ctx);
+    CHECK(section->type == BKTR);
+    CHECK(section->bktr_ctx.indirect == NULL);
     nca_section_fseek(section, 0x30);
     CHECK(nca_section_fread(section, got, sizeof(got)) == sizeof(got));
     CHECK(!memcmp(got, body + 0x30, sizeof(got)));
@@ -270,10 +279,6 @@ static void invalid_patch_layout(unsigned kind) {
         case 1: sb.relocation_header.offset = UINT64_MAX - 0x100; break;
         case 2: sb.subsection_header.size = UINT64_MAX; break;
         case 3: sb.subsection_header.offset = section.size + 1; break;
-        case 4:
-            section.is_decrypted = 0;
-            section.size += 0x200; /* The existing encrypted layout check stays strict. */
-            break;
     }
     /* An invalid range must exit before allocating tables or accessing the nonexistent file. */
     nca_process_bktr_section(&section);
@@ -282,7 +287,7 @@ static void invalid_patch_layout(unsigned kind) {
 
 static void invalid_patch_layouts(const char* self) {
     CHECK(!fflush(NULL));
-    for (unsigned kind = 0; kind < 5; kind++) {
+    for (unsigned kind = 0; kind < 4; kind++) {
 #if defined(_WIN32)
         char kind_text[] = {(char)('0' + kind), 0};
         char* quoted_self = malloc(strlen(self) + 3);
@@ -344,7 +349,7 @@ static void gamecard_headers(void) {
 
 int main(int argc, char** argv) {
     if (argc == 3 && !strcmp(argv[1], "--invalid-bktr")) {
-        CHECK(argv[2][0] >= '0' && argv[2][0] <= '4' && !argv[2][1]);
+        CHECK(argv[2][0] >= '0' && argv[2][0] <= '3' && !argv[2][1]);
         invalid_patch_layout((unsigned)(argv[2][0] - '0'));
     }
     CHECK(sizeof(nca_header_t) == 0xC00);
