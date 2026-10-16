@@ -661,6 +661,9 @@ int main(int argc, char** argv) {
         assert(app.folder_count == 0 && !strncmp(app.editor.note, "Not a folder: ", 14));
         e.drop.data = more;
         event(&app, &e);
+        if (app.folder_count != 1 || strcmp(app.folders[0], kept_as) || strcmp(app.editor.note, "Added"))
+            fprintf(stderr, "folders: %d, first \"%s\", expected \"%s\", note \"%s\"\n", app.folder_count,
+                    app.folder_count ? app.folders[0] : "", kept_as, app.editor.note);
         assert(app.folder_count == 1 && !strcmp(app.folders[0], kept_as) && !strcmp(app.editor.note, "Added"));
         assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 1 && gui_editor_rows(&app.editor) == 3);
         kept = (char*)snx_read_file(app.folders_file, &size);
