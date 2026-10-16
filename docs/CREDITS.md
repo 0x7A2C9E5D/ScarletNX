@@ -29,3 +29,5 @@ and package manifest: `share/licenses/`. Component license files contain the ful
 Community credits: [README](../README.md#special-thanks).
 
 Wimsy ([SVG metadata](../dist/wimsy.svg)): drawn by Liz, GPL-3.0-or-later.
+The splash's Fuddles ([SVG metadata](../dist/splash/wimsy-fuddles.svg)): Wimsy with Fuddles' tails, circuits and
+colours, by AO55 after Liz's Wimsy, GPL-3.0-or-later.

@@ -16,6 +16,10 @@ The window's title tells which build it is, as `ScarletNX <branch> <commit> (<co
 `ScarletNX main 43bf71a (clang 22.1.8, Linux x86_64)`; the commit ends in `-dirty` when the tree had changes, a
 build of a detached checkout outside CI says `detached`, and both read `unknown` outside a git checkout. A game's window carries the same line after the game's name.
 
+It opens on a splash: Wimsy, or Fuddles (`dist/splash/`), picked at random each start, a third of the window's
+shorter side on the theme's `[splash] page` for its `ms`; a key, a click or a finger ends it. The drawings are SVGs
+built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lunasvg)).
+
 - Up/Down and Left/Right move the yellow focus, wrapping at the ends.
 - Tab and Shift+Tab go round the menu, Games and the Settings, the tabs at the top; a click on a tab
   opens it. A theme edited and not saved keeps its screen.
@@ -364,8 +368,8 @@ blink_ms = 500
 ; a line too long for its row (big letters) slides left a column every scroll_ms and back; 0 cuts it
 scroll_ms = 120
 [splash]
-; the boot's: the program's icon on page for ms milliseconds (0: none). chance: the boots in 100 that
-; show this theme's, the default theme's the others
+; the boot's: one of Wimsy's drawings, at random, on page for ms milliseconds (0: none). chance: the
+; boots in 100 that show this theme's, the default theme's the others
 page = #DAD6BE
 ms = 1000
 chance = 25

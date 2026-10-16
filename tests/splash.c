@@ -38,7 +38,7 @@ int main(void) {
     Uint32* pixels = malloc(1024 * 1024 * 4);
     assert(pixels);
     /* Wimsy first, then dist/splash's, each one once, as the SVG text without its metadata and comments */
-    assert(snx_splash_svg_count >= 1 && !strcmp(snx_splash_svgs[0].name, "wimsy"));
+    assert(snx_splash_svg_count >= 2 && !strcmp(snx_splash_svgs[0].name, "wimsy"));
     for (i = 0; i < snx_splash_svg_count; ++i) {
         const SnxSplashSvg* svg = &snx_splash_svgs[i];
         char* text = malloc(svg->size + 1);

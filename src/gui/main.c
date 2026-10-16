@@ -110,7 +110,7 @@ typedef struct {
     float pen_x, pen_y;       /* where it lifted, 0 to 1 across the window */
     Uint32 picked;            /* the event a file from the system's picker comes back as */
     SDL_Texture* splash;      /* the boot's splash, its drawing splash_side pixels square, until splash_until */
-    const SnxSplashSvg* splash_svg;   /* the boot's pick of snx_splash_svgs */
+    const SnxSplashSvg* splash_svg;   /* the boot's pick: Wimsy, or one of dist/splash's */
     SnxSplashDrawing* splash_drawing; /* it, read once; NULL: the icon shows */
     int splash_side;
     Uint64 splash_until;
@@ -1138,7 +1138,7 @@ static void render_ask(App* app) {
         list_item(app, &l, i, label, app->confirm.selected == i, false);
     }
 }
-/* the boot's splash: the program's icon, Wimsy, drawn from its SVG a third of the window's shorter side on a theme's
+/* the boot's splash: a drawing of Wimsy's, picked at random, drawn a third of the window's shorter side on a theme's
    splash page, then the menu as the theme brings it in */
 static int splash_size(const App* app) {
     SDL_Rect view;
