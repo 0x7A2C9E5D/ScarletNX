@@ -6,6 +6,9 @@
 #
 # Bumping a package: change its version, URL and hash together, the hash taken from the release asset's digest or from
 # a download checked by hand, never from what the next configure happens to fetch (snx-build skill).
+#
+# Patching a package: snx_patched_copy (cmake/patched_copy.cmake) on a copy in the build tree, never CPM's PATCHES, which
+# patches only what CPM itself downloads into the cache.
 
 set(CPM_VERSION 0.43.2)
 set(CPM_HASH 49a3bef91ceb65bb66d57255e12d1ffd22abc2f6408fa9fe4534c544a2f232aa)
