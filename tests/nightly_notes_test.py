@@ -97,6 +97,16 @@ with tempfile.TemporaryDirectory() as repo:
         '### Changes' not in nightly.notes(repo, sha, '', 'owner/repo', files),
     )
     check('the same commit built again', 'None: the same commit' in nightly.notes(repo, sha, sha, 'owner/repo', files))
+    # the files of another repository's release, and what becomes of it
+    kept = nightly.notes(
+        repo, sha, previous, 'owner/repo', files, 'https://github.com/owner/nightly/releases/download/t', 'Kept.'
+    )
+    check(
+        "another release's files and fate",
+        '[ScarletNX-android.apk](https://github.com/owner/nightly/releases/download/t/ScarletNX-android.apk)' in kept
+        and 'committed 2026-10-15. Kept.' in kept
+        and 'replaces it' not in kept,
+    )
 
     # two more than the list holds, on top of the two above
     git('switch', '-q', 'main')
