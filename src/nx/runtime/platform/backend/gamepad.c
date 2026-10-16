@@ -21,7 +21,7 @@ static int g_labels[SNX_GAMEPADS][4], g_symmetric[SNX_GAMEPADS]; /* and how its 
 static unsigned g_held;                                          /* the controls held, a bit each, as last polled */
 #define UNSET SNX_PAD_UNSET
 static SnxGamepadConfig g_cfg = {
-    SNX_PAD_BY_LABEL,
+    0,
     20,
     100,
     0,
@@ -41,7 +41,8 @@ static void joycon_pair_set(const IniOpt* o, const char* v) {
     (void)v;
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS, g_cfg.joycon_pair ? "1" : "0");
 }
-/* the custom map: what it does not name goes as the labels say. One that cannot be read is said, and changes nothing */
+/* the player's map: what it does not name sends the button in its place. One that cannot be read is said, and changes
+   nothing */
 static void map_set(const IniOpt* o, const char* v) {
     SnxPadMap map;
     char word[64];
@@ -55,10 +56,8 @@ static void map_set(const IniOpt* o, const char* v) {
         g_cfg.own = map;
 }
 const IniOpt g_gamepad_ini[] = {
-    {"gamepad_buttons", "1",
-     "A controller's A, B, X and Y: 1 = as their labels say, 0 = by position, as on the console's, 2 = the map of\n"
-     ";   gamepad_map",
-     INI_INT, 0, &g_cfg.labels, 0, 2, NULL, "A B X Y", "By position|By label|Custom", 0, 0},
+    {"gamepad_swap_ab", "0", "1 = a controller's A and B swapped: 0 = where the console's are (A right, B bottom)",
+     INI_INT, 0, &g_cfg.swap_ab, 0, 1, NULL, "Swap A/B", "Off|On", 0, 0},
     {"gamepad_deadzone", "20", "The sticks' dead zone, in percent of their travel", INI_INT, 0, &g_cfg.deadzone, 0, 90,
      NULL, "Stick dead zone", "#%", 5, 0},
     {"gamepad_rumble", "100", "How strongly the controllers vibrate when the game asks, in percent: 0 = never", INI_INT,
@@ -70,9 +69,9 @@ const IniOpt g_gamepad_ini[] = {
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 const IniOpt g_gamepad_map_ini[] = {
     {"gamepad_map", NULL,
-     "gamepad_buttons=2's map: a control by where it sits and the console's button it sends, as south:B east:A.\n"
+     "A control by where it sits and the console's button it sends, as south:B east:A.\n"
      ";   Controls south east west north lb rb lt rt ls rs back start up down left right; buttons A B X Y L R ZL\n"
-     ";   ZR L3 R3 Plus Minus Up Down Left Right None. One left out goes as its label says",
+     ";   ZR L3 R3 Plus Minus Up Down Left Right None. One left out sends the button in its place",
      INI_TEXT, 0, NULL, 0, 0, map_set, SNX_GAMEPAD_MAP, NULL, 0, 0},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 int gamepad_ini(const char* key, const char* value) {
@@ -268,21 +267,13 @@ static void dz(i32* x, i32* y) {
 /* SDL's Y axes point down, the Switch's up */
 static i32 up(i32 v) { return v == -32768 ? 32767 : -v; }
 
-/* what each control of g sends, as gamepad_buttons says */
-static void map_of(SDL_Gamepad* g, SnxPadMap* map) {
-    int labels[4];
-    SnxPadMap labeled;
-    if (g_cfg.labels == SNX_PAD_BY_POSITION) {
-        snx_pad_map_position(map);
-        return;
-    }
-    snx_pad_labels(g, labels);
-    snx_pad_map_labels(&labeled, labels);
-    *map = labeled;
-    if (g_cfg.labels == SNX_PAD_CUSTOM) {
-        *map = g_cfg.own;
-        snx_pad_map_fill(map, &labeled);
-    }
+/* what each control sends: the button in its place, the player's map over that, then A and B swapped when asked */
+static void map_of(SnxPadMap* map) {
+    SnxPadMap placed;
+    snx_pad_map_position(&placed);
+    *map = g_cfg.own;
+    snx_pad_map_fill(map, &placed);
+    if (g_cfg.swap_ab) snx_pad_map_swap_ab(map);
 }
 static int joycon_button_bit(int button, int right) {
     static const int LEFT_FACE[4] = {12, 15, 13, 14};
@@ -309,7 +300,7 @@ u64 gamepad_button(u32 id, int button) {
         return bit < 0 ? 0 : 1ull << bit;
     }
     if (control < 0) return 0;
-    map_of(g, &map);
+    map_of(&map);
     return map.bit[control] < 0 ? 0 : 1ull << map.bit[control];
 }
 int gamepad_slot_type(int slot) {
@@ -343,7 +334,7 @@ void gamepad_state_slot(int slot, u64* buttons, i32 sticks[4]) {
         dz(&sticks[right ? 2 : 0], &sticks[right ? 3 : 1]);
         return;
     }
-    map_of(g, &map);
+    map_of(&map);
     for (c = 0; c < SNX_PAD_CONTROLS; c++)
         if (snx_pad_held(g, c) && map.bit[c] >= 0) *buttons |= 1ull << map.bit[c];
     sticks[0] = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX);

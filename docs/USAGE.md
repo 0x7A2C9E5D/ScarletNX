@@ -287,8 +287,8 @@ type, range and help, tab-separated.
 | `touch` | `2` | The game's touch screen: `2` fingers and the mouse's left button, `1` fingers, `0` off |
 | `controls` | `1` on Android, else `0` | The [on-screen controls](#on-screen-controls) shown |
 | `controls_snap`, `controls_scale`, `controls_opacity`, `controls_rel_center`, `controls_dpad_slide`, `controls_haptics` | `0`, `50`, `100`, `1`, `1`, `1` | As [On-screen controls](#on-screen-controls) describes them. `controls_scale` runs from `0` to `100` for 50% to 150% |
-| `gamepad_buttons` | `1` | A gamepad's A, B, X and Y as their labels say. `0` and `2` are below |
-| `gamepad_map` | none | The map `gamepad_buttons=2` uses, below |
+| `gamepad_swap_ab` | `0` | `1` swaps a gamepad's A and B. `0` sends A, B, X and Y where the console's are |
+| `gamepad_map` | none | The player's map over that, below |
 | `gamepad_deadzone` | `20` | The sticks' dead zone, in percent of their travel (`0` to `90`) |
 | `gamepad_rumble` | `100` | How strongly gamepads vibrate when the game asks, in percent. `0` is never |
 | `gamepad_background` | `0` | `1` keeps gamepads playing while the window is not focused |
@@ -304,10 +304,9 @@ A gamepad's motion sensors, a Joy-Con's among them, go to the game when SDL expo
 Windows, Linux and supported Unix systems. Choose the output in your operating system's sound settings. The
 renderer does not render splitters, voice biquad filters, or the delay, reverb and biquad effects yet.
 
-SDL gamepads take A, B, X and Y as their labels say (`gamepad_buttons=0`: by Switch positions; `2`: the map in
-`gamepad_map`, a control by where it sits and the button it sends, as `south:B east:A lt:ZL`, the ones it leaves out
-as their labels say). A mapped pad without readable face labels uses the usual south:A, east:B, west:X, north:Y
-layout. The sticks'
+SDL gamepads send A, B, X and Y where the console's are (A right, B bottom, X top, Y left), as emulators do;
+`gamepad_swap_ab=1` swaps A and B. `gamepad_map` sets what any control sends, a control by where it sits and the
+button it sends, as `south:B east:A lt:ZL`; the ones it leaves out send the button in their place. The sticks'
 dead zone in `gamepad_deadzone` and the game's vibration as strong as `gamepad_rumble` (both in percent), and with
 `gamepad_background=1` still play while the window is not focused; the game's menu (Home, F2) sets them under
 *Controllers*, which names the pads connected. Each connected gamepad uses its own player slot, up to eight.

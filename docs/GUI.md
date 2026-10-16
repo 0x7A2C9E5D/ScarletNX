@@ -64,13 +64,13 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   prints them from the runtime's own tables. The game's menu's settings have its names and words
   (*Scale* 100%, *Touch screen* Fingers), and its **Buttons** page, whose **All** steps every row;
   *Edit layout* and *Reset layout* stay in the game's menu, as the layout is each game's own.
-  Controllers' **Button map** draws the pad as the game's menu does: the presets on the left (*Each
-  game's*, the `.ini`'s, then *By position*, *By label*, *Custom*), each control in a box with the
-  console button it sends, and what the focus does at the bottom. Enter (or the pad's A) uses a
-  preset and Right goes to the controls, where Left/Right change a control's button and Enter waits
-  for a press on the pad, which takes it. A change makes *Custom* the preset in use, kept as
-  `gamepad_buttons` and `gamepad_map`; Del puts both back to the `.ini`'s. The first pad plugged in
-  is shown, its held buttons lit; the launcher reads pads only on this page.
+  Controllers' **Button map** draws the pad as the game's menu does: each control in a box down either
+  side with the console button it sends (where the console's is, unless the player's map says otherwise, A and B
+  swapped when the group's **Swap A/B** is on), and what the focus does at the bottom. Up/Down move, Left/Right
+  change a control's button and Enter (or the pad's A) waits for a press on the pad, which takes it; a change keeps
+  the whole map as `gamepad_map`, and Del puts it back to the `.ini`'s. The first pad plugged in is shown, its held
+  buttons lit; with none, the middle says why (a joystick SDL has no mapping for is named, with its GUID and the
+  file its line goes in). The launcher reads pads only on this page.
   **App** holds **Theme** and **Text size**, which Left/Right or Enter go round either way, **Theme editor**, which comes back to App, and **Game folders**: `games/`,
   always listed, then the player's own folders, whose games the `games/` browser lists after
   `games/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
@@ -83,7 +83,7 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   (only while the runtime lists its settings) and those of `app.ini` the menu does not know. A box
   over the screen then lists each file and what was done to it, or why not, until a key closes it;
   Share log lists them too. A group of settings shows
-  a row each, its help above, Left/Right going round its values, Enter typing one. A setting not picked shows the runtime's default and `[default]` (*By label [default]*):
+  a row each, its help above, Left/Right going round its values, Enter typing one. A setting not picked shows the runtime's default and `[default]` (*Off [default]*):
   the run takes the game's `.ini`'s, which starts as that; one picked goes to every
   Switch run as `--key=value`, over the `.ini` ([USAGE](USAGE.md)), and is kept for every game:
   what was changed, by the `.ini`'s sections and keys, in `settings.ini` of the config folder on

@@ -323,15 +323,15 @@ static bool picks_have(App* app, const char* line) {
     return has;
 }
 /* Settings > Controllers > Button map: the pad drawn (pad_screen.h) with what each control sends, on SDL's virtual
-   Xbox pad. Its presets are gamepad_buttons' words after the game's own, its map gamepad_map; the keys, the pad's
-   presses, its triggers and stick, a click and the wheel act on it, each change kept in the picks at once, Del puts
-   both back, and ESC goes back to the page's row with the pads closed */
+   Xbox pad. No presets: each control the button in its place, gamepad_map over that, A and B as gamepad_swap_ab says;
+   the keys, the pad's presses, its triggers and stick, a click and the wheel act on it, each change kept in the picks
+   at once, Del puts the map back, and ESC goes back to the page's row with the pads closed */
 static void button_map(App* app) {
     static const char list[] =
-        "Controllers\tgamepad_buttons\t1\tint\t0\t2\tA B X Y\tA B X Y\t0=By position|1=By label|2=Custom\n"
+        "Controllers\tgamepad_swap_ab\t0\tint\t0\t1\tSwap A/B\tSwap A/B\t0=Off|1=On\n"
         "Controllers\tgamepad_deadzone\t10\tint\t0\t90\tDead zone\tStick dead zone\t0=0%|10=10%\n"
         "Controllers\tgamepad_joycon_pair\t1\tint\t0\t1\tJoy-Cons\tPair Joy-Cons\t0=Separate|1=Together\n"
-        "Controllers/Button map\tgamepad_map\t\ttext\t\t\tgamepad_buttons=2's map\tButton map\t\n";
+        "Controllers/Button map\tgamepad_map\t\ttext\t\t\tEach control's button\tButton map\t\n";
     SDL_VirtualJoystickDesc d;
     SDL_JoystickID id;
     SDL_Joystick* j;
@@ -355,17 +355,16 @@ static void button_map(App* app) {
     key(app, SDLK_RETURN);
     /* drawn before SDL looks for pads, which takes it most of a second, saying so */
     shows(app, "Looking for controllers...", rgb(app->theme.soft));
-    /* no pad: the presets, the one in use focused, the game's own as nothing is picked */
-    assert(app->form == GUI_FORM_PAD && app->pads_read && !app->gamepad && app->pad.presets == 4);
-    assert(app->pad.in_use == 0 && app->pad.focus == 0 && !strcmp(app->pad.name[3], "Custom"));
+    /* no pad: no presets, the first control focused, A and B where the console's are */
+    assert(app->form == GUI_FORM_PAD && app->pads_read && !app->gamepad && app->pad.focus == SNX_PAD_LT &&
+           !app->pad.swap_ab);
     /* two Joy-Cons one pad, as gamepad_joycon_pair has it when not picked */
     assert(!strcmp(SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS), "1"));
     render(app);
     shows(app, "SETTINGS  /  CONTROLLERS  /  BUTTON MAP", normal);
-    assert(drawn_text(app, "No controller") && drawn_text(app, "Each game's") && drawn_text(app, "By label"));
-    assert(drawn(app, 0, SNX_PAD_SHAPE_BOX, SNX_PAD_STYLE_FOCUS));
-    /* its texts in the font's own glyphs, a byte each: the preset in use marked with a square */
-    assert(drawn_text(app, "\xFE Each game's"));
+    assert(drawn_text(app, "No controller") && !drawn_text(app, "By position") && !drawn_text(app, "By label"));
+    assert(drawn(app, SNX_PAD_LT, SNX_PAD_SHAPE_BOX, SNX_PAD_STYLE_FOCUS) && drawn_text(app, "LT sends ZL"));
+    /* its texts in the font's own glyphs, a byte each */
     {
         SnxPadShape shape = {SNX_PAD_SHAPE_TEXT,
                              SNX_PAD_STYLE_PLAIN,
@@ -380,10 +379,8 @@ static void button_map(App* app) {
         pad_text(app, &shape, app->theme.ink);
         colored_text_on(app, 2, 20, "\xFE \x82", rgb(app->theme.ink), black);
     }
-    key(app, SDLK_DOWN);
-    key(app, SDLK_DOWN);
-    key(app, SDLK_RETURN);
-    assert(app->pad.in_use == 2 && setting_is(app, "gamepad_buttons", "1") && picks_have(app, "gamepad_buttons=1"));
+    key(app, SDLK_RETURN); /* with no pad, nothing to wait for */
+    assert(!app->pad.listening && !gui_settings_value(&app->settings, "gamepad_map"));
     /* a pad plugged in is opened, named, and what it holds lit */
     SDL_INIT_INTERFACE(&d);
     d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
@@ -399,35 +396,33 @@ static void button_map(App* app) {
         SDL_SetJoystickVirtualAxis(j, a, a >= SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? SDL_JOYSTICK_AXIS_MIN : 0);
     pads(app);
     assert(app->gamepad && SDL_GetGamepadID(app->gamepad) == id);
-    SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, true);
+    SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_NORTH, true); /* X: no key of the page's */
     pads(app);
     render(app);
-    assert(!strcmp(app->pad.pad, "Man\x82 Pad") && !drawn_text(app, "No controller") && drawn_text(app, "Man\x82 Pad"));
-    assert(drawn(app, SNX_PAD_PRESETS + SNX_PAD_SOUTH, SNX_PAD_SHAPE_DISC, SNX_PAD_STYLE_LIT));
-    SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, false);
+    assert(!strcmp(app->pad.pad, "Man\x82 Pad"));
+    assert(!drawn_text(app, "No controller"));
+    assert(drawn_text(app, "Man\x82 Pad"));
+    assert(drawn(app, SNX_PAD_NORTH, SNX_PAD_SHAPE_DISC, SNX_PAD_STYLE_LIT) && app->form == GUI_FORM_PAD);
+    SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_NORTH, false);
     pads(app);
-    /* its presses as the game's menu takes them, by the button each sends: the D-pad moves, A selects */
-    pad_press(app, j, SDL_GAMEPAD_BUTTON_DPAD_UP);
-    assert(app->pad.focus == 1 && app->pad.in_use == 2);
-    pad_press(app, j, SDL_GAMEPAD_BUTTON_SOUTH);
-    assert(app->pad.in_use == 1 && setting_is(app, "gamepad_buttons", "0"));
-    /* by position the right one sends A, the bottom one B */
+    /* its presses as the game's menu takes them, by the button each sends: the D-pad moves; A, the right one as on
+       the console, waits for a press, which takes the focused control's button and gives its own */
+    app->pad.focus = SNX_PAD_SOUTH;
     pad_press(app, j, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    assert(app->pad.focus == SNX_PAD_RS);
+    pad_press(app, j, SDL_GAMEPAD_BUTTON_DPAD_UP);
+    assert(app->pad.focus == SNX_PAD_SOUTH && !app->pad.listening);
     pad_press(app, j, SDL_GAMEPAD_BUTTON_EAST);
-    assert(app->pad.in_use == 2 && app->form == GUI_FORM_PAD);
-    /* a control: A waits for a press, which takes its button and gives its own; Custom is then the one in use */
-    app->pad.focus = SNX_PAD_PRESETS + SNX_PAD_SOUTH;
-    pad_press(app, j, SDL_GAMEPAD_BUTTON_SOUTH);
     assert(app->pad.listening);
     pad_press(app, j, SDL_GAMEPAD_BUTTON_EAST);
-    assert(!app->pad.listening && app->pad.in_use == 3 && setting_is(app, "gamepad_buttons", "2"));
+    assert(!app->pad.listening && app->pad.focus == SNX_PAD_EAST && app->form == GUI_FORM_PAD);
     /* the whole map is the player's from then on, whatever pad comes next */
     assert(setting_is(app, "gamepad_map",
-                      "south:B east:A west:X north:Y lb:L rb:R lt:ZL rt:ZR ls:L3 rs:R3 back:Minus "
+                      "south:A east:B west:Y north:X lb:L rb:R lt:ZL rt:ZR ls:L3 rs:R3 back:Minus "
                       "start:Plus up:Up down:Down left:Left right:Right"));
-    assert(picks_have(app, "gamepad_map=south:B east:A west:X"));
+    assert(picks_have(app, "gamepad_map=south:A east:B west:Y"));
     /* a trigger is pressed once it is past SNX_PAD_TRIGGER */
-    app->pad.focus = SNX_PAD_PRESETS + SNX_PAD_LT;
+    app->pad.focus = SNX_PAD_LT;
     key(app, SDLK_RETURN);
     assert(app->pad.listening);
     /* a trigger's 0 to 32767 from its axis' whole range */
@@ -455,27 +450,40 @@ static void button_map(App* app) {
     assert(app->pad.focus != focus);
     SDL_SetJoystickVirtualAxis(j, SDL_GAMEPAD_AXIS_LEFTY, 0);
     pads(app);
-    /* the wheel moves as Up and Down; a click on a preset uses it */
+    /* the wheel moves as Up and Down; a click on a control's box focuses it, a second one waits for a press */
     focus = app->pad.focus;
     e.type = SDL_EVENT_MOUSE_WHEEL;
     e.wheel.integer_y = 1;
     event(app, &e);
     assert(app->pad.focus != focus);
     render(app);
-    box = drawn(app, 1, SNX_PAD_SHAPE_BOX, -1);
+    box = drawn(app, SNX_PAD_NORTH, SNX_PAD_SHAPE_BOX, -1);
     assert(box && SDL_RenderCoordinatesToWindow(app->renderer, box->x + box->w / 2, box->y + box->h / 2, &x, &y));
     e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
     e.button.button = SDL_BUTTON_LEFT;
     e.button.x = x;
     e.button.y = y;
     event(app, &e);
-    assert(app->pad.in_use == 1 && setting_is(app, "gamepad_buttons", "0"));
-    /* Del: the preset and the map the game's .ini's again */
+    assert(app->pad.focus == SNX_PAD_NORTH && !app->pad.listening);
+    event(app, &e);
+    assert(app->pad.listening);
+    key(app, SDLK_ESCAPE); /* stops waiting, stays */
+    assert(!app->pad.listening && app->form == GUI_FORM_PAD);
+    /* Del: the map the game's .ini's again; Swap A/B, its row's, over it when the page opens */
     key(app, SDLK_DELETE);
-    assert(app->pad.in_use == 0 && !gui_settings_value(&app->settings, "gamepad_buttons") &&
-           !gui_settings_value(&app->settings, "gamepad_map") && !picks_have(app, "gamepad_"));
+    assert(!gui_settings_value(&app->settings, "gamepad_map") && !picks_have(app, "gamepad_"));
+    {
+        SnxPadMap shown;
+        assert(gui_settings_set(&app->settings, "gamepad_swap_ab", "1"));
+        pad_start(app);
+        snx_pad_screen_map(&app->pad, &shown);
+        assert(app->pad.swap_ab && shown.bit[SNX_PAD_SOUTH] == 0 && shown.bit[SNX_PAD_EAST] == 1); /* A, B */
+        assert(gui_settings_set(&app->settings, "gamepad_swap_ab", ".ini"));
+        pad_start(app);
+        assert(!app->pad.swap_ab);
+    }
     /* the pad unplugged: none shown, nothing waited for */
-    app->pad.focus = SNX_PAD_PRESETS + SNX_PAD_NORTH;
+    app->pad.focus = SNX_PAD_NORTH;
     key(app, SDLK_RETURN);
     assert(app->pad.listening);
     SDL_CloseJoystick(j);
@@ -484,12 +492,13 @@ static void button_map(App* app) {
     assert(!app->gamepad && !app->pad.listening);
     render(app);
     assert(drawn_text(app, "No controller"));
-    /* a joystick SDL has no gamepad mapping for, plugged in: named, with its GUID and the file its mapping goes in */
+    /* a joystick SDL has no gamepad mapping for, plugged in: named in the middle, with its GUID and the file its
+       mapping goes in, in the failure colour; gone once it is unplugged */
     {
         char *folder = snx_dirname(app->settings_file), *file = snx_path_join(folder, "gamecontrollerdb.txt");
         SDL_VirtualJoystickDesc odd;
         SDL_JoystickID stick;
-        assert(!app->editor.note[0]);
+        assert(!app->editor.note[0] && !app->pad.note[0]);
         SDL_INIT_INTERFACE(&odd);
         odd.type = SDL_JOYSTICK_TYPE_UNKNOWN;
         odd.naxes = 2;
@@ -500,17 +509,23 @@ static void button_map(App* app) {
         stick = SDL_AttachVirtualJoystick(&odd);
         assert(stick);
         pads(app);
-        assert(!app->gamepad && !strncmp(app->editor.note, "Joystick Odd Stick needs an SDL mapping (GUID ", 46));
-        assert(strstr(app->editor.note, ", a line in ") && strstr(app->editor.note, file));
+        assert(!app->gamepad && !strncmp(app->pad.note, "Odd Stick has no SDL mapping: add a line for GUID ",
+                                         sizeof "Odd Stick has no SDL mapping: add a line for GUID " - 1));
+        assert(strstr(app->pad.note, file) && !app->editor.note[0]);
+        render(app);
+        assert(drawn_text(app, "Odd Stick has no SDL"));
+        {
+            int i, noted = 0;
+            for (i = 0; i < app->pad_drawing.n; ++i) noted |= app->pad_drawing.shape[i].style == SNX_PAD_STYLE_NOTE;
+            assert(noted);
+        }
         assert(SDL_DetachVirtualJoystick(stick));
         pads(app);
-        app->editor.note[0] = 0;
+        assert(!app->pad.note[0]);
         free(file);
         free(folder);
     }
-    /* ESC: to the presets, then back to the page's row, the pads closed */
-    key(app, SDLK_ESCAPE);
-    assert(app->form == GUI_FORM_PAD && app->pad.focus < SNX_PAD_PRESETS);
+    /* ESC: back to the page's row, the pads closed */
     key(app, SDLK_ESCAPE);
     assert(app->form == GUI_FORM_GROUP && app->page < 0 && app->editor.row == page - app->first);
     assert(!app->pads_read && !SDL_WasInit(SDL_INIT_GAMEPAD));
@@ -528,7 +543,7 @@ static void button_map(App* app) {
         snprintf(start, sizeof start, "%s", app->editor.note);
         shows(app, start, rgb(app->theme.failure));
     }
-    key(app, SDLK_ESCAPE); /* on a preset: back at once */
+    key(app, SDLK_ESCAPE);
     assert(app->form == GUI_FORM_GROUP);
     leave_editor(app);
     /* the games it starts read the mappings file the page names, once it is there; one the player named stays */

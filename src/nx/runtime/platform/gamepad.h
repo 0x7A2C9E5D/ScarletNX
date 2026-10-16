@@ -30,12 +30,12 @@ void gamepad_rumble(u32 left, u32 right);
 void gamepad_rumble_slot(int slot, u32 left, u32 right);
 /* the settings, kept in the game's .ini; the game's menu changes them under ui_lock */
 typedef struct {
-    int labels;      /* the buttons: SNX_PAD_BY_POSITION, _BY_LABEL or _CUSTOM (own) */
+    int swap_ab;     /* 1: A and B swapped, from the console's layout */
     int deadzone;    /* the sticks', in percent of their travel */
     int rumble;      /* the vibration's strength in percent, 0 for none */
     int background;  /* 1: they play while the game's window is not focused */
     int joycon_pair; /* 1: SDL combines a left and a right Joy-Con */
-    SnxPadMap own;   /* the custom map, SNX_PAD_UNSET where it follows the labels */
+    SnxPadMap own;   /* the player's map, SNX_PAD_UNSET where a control sends the button in its place */
 } SnxGamepadConfig;
 SnxGamepadConfig* gamepad_config(void);
 void gamepad_store(const int* setting); /* one of gamepad_config()'s, to the .ini, and applied */
@@ -48,7 +48,7 @@ const char* gamepad_name(int i);
 extern const IniOpt g_gamepad_ini[];                 /* the settings, keys gamepad_* */
 #define SNX_GAMEPAD_PAGE "Controllers"               /* their page in the game's menu and the launcher's Settings */
 #define SNX_GAMEPAD_MAP  "Button map"                /* and the screen of what each button sends */
-extern const IniOpt g_gamepad_map_ini[];             /* gamepad_map, the custom map that screen sets */
+extern const IniOpt g_gamepad_map_ini[];             /* gamepad_map, the player's map that screen sets */
 int gamepad_ini(const char* key, const char* value); /* a key of the game's .ini: applied, 1; not one of these, 0 */
 
 #endif

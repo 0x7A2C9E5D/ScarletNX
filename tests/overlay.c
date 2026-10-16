@@ -27,7 +27,7 @@ void pm_unlock(PMutex* m) { (void)m; }
 static int touch = 1;
 void backend_touch_set(int mode) { touch = mode; }
 /* and the gamepads' settings and names, as backend/gamepad.c keeps them; their rows and touch's name them */
-static SnxGamepadConfig pads = {.labels = 1, .deadzone = 20, .rumble = 100};
+static SnxGamepadConfig pads = {.swap_ab = 0, .deadzone = 20, .rumble = 100};
 static const int* pad_stored;
 static const char* pad_names[3];
 SnxGamepadConfig* gamepad_config(void) { return &pads; }
@@ -47,8 +47,7 @@ const IniOpt g_backend_ini[] = {
     {"touch", "2", NULL, INI_INT, 0, &touch, 0, 2, NULL, "Touch screen", "Off|Fingers|Mouse too", 0, 0},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 const IniOpt g_gamepad_ini[] = {
-    {"gamepad_buttons", "1", NULL, INI_INT, 0, &pads.labels, 0, 2, NULL, "A B X Y", "By position|By label|Custom", 0,
-     0},
+    {"gamepad_swap_ab", "0", NULL, INI_INT, 0, &pads.swap_ab, 0, 1, NULL, "Swap A/B", "Off|On", 0, 0},
     {"gamepad_deadzone", "20", NULL, INI_INT, 0, &pads.deadzone, 0, 90, NULL, "Stick dead zone", "#%", 5, 0},
     {"gamepad_rumble", "100", NULL, INI_INT, 0, &pads.rumble, 0, 100, NULL, "Vibration", "Off|#%", 10, 0},
     {"gamepad_background", "0", NULL, INI_INT, 0, &pads.background, 0, 1, NULL, "Background input", "Off|On", 0, 0},
@@ -135,7 +134,7 @@ int main(void) {
     const u32 ink = 0xFF3A4145u;
     int x, y, sc;
     vpad_set_store(store);
-    snx_pad_map_unset(&pads.own); /* as gamepad.c starts it: every control as its label says */
+    snx_pad_map_unset(&pads.own); /* as gamepad.c starts it: every control the button in its place */
     assert(!overlay_shown());
     overlay_toggle();
     assert(overlay_shown());
@@ -325,20 +324,21 @@ int main(void) {
         }
     }
 
-    /* the controllers' page: the ones connected, A B X Y by label or position, the dead zone by fives, the
-       vibration by tens down to Off and the background input, each kept */
+    /* the controllers' page: the ones connected, Swap A/B, the dead zone by fives, the vibration by tens down to Off
+       and the background input, each kept */
     assert(tap(1, 3) == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  CONTROLLERS") && text_at(1, 1, "None connected."));
-    assert(list.q[0].h == 10 * 32 && text_at(1, 3, "\xFE A B X Y") && text_at(C - 9, 3, "By label"));
-    tap(0, 3); /* round its words: Custom, then By position */
-    assert(pads.labels == SNX_PAD_CUSTOM && pad_stored == &pads.labels);
+    assert(list.q[0].h == 10 * 32 && text_at(1, 3, "\xFE Swap A/B") && text_at(C - 4, 3, "Off"));
     tap(0, 3);
-    assert(!pads.labels);
+    assert(pads.swap_ab && pad_stored == &pads.swap_ab);
     draw();
-    assert(text_at(C - 12, 3, "By position"));
+    assert(text_at(C - 3, 3, "On"));
+    tap(0, 3);
+    assert(!pads.swap_ab);
     overlay_side(1);
-    assert(pads.labels);
+    assert(pads.swap_ab);
+    pads.swap_ab = 0;
     draw();
     assert(text_at(C - 8, 4, "< 20% >"));
     tap(1, C - 2);
@@ -373,9 +373,9 @@ int main(void) {
     pad_names[0] = pad_names[2];
     draw();
     assert(text_at(1, 1, "A controller with a very lo and 2 more"));
-    /* Button map: NieR's CONTROLS over the picture, the preset in use focused; a preset used, a control's button
-       changed (Custom from then on), a press on the pad while waiting swapping two, that press no menu key; Back goes
-       up to its item */
+    /* Button map: NieR's CONTROLS over the picture, no presets, the first control focused; its button changed (the map
+       the player's from then on), a press on the pad while waiting swapping two, that press no menu key; Back goes up
+       to its item */
     pad_names[0] = "Xbox Wireless Controller";
     pad_names[1] = pad_names[2] = NULL;
     draw();
@@ -383,18 +383,15 @@ int main(void) {
     assert(tap(4, 3) == OVERLAY_NONE);
     pads_held = 1u << SNX_PAD_RT;
     draw();
-    assert(shows("SCARLETNX  /  BUTTON MAP") && shows("By label") && shows("Xbox Wireless Controller"));
-    assert(shows("A B X Y as the pad's labels say") && quads_of(FAILURE) > 0); /* RT held: lit */
-    overlay_move(1);
-    assert(overlay_select() == OVERLAY_NONE && pads.labels == SNX_PAD_CUSTOM && pad_stored == &pads.labels);
-    overlay_side(1); /* to the controls, LT first */
-    overlay_side(1); /* its button, ZL as the labels have it, up one: ZR */
+    assert(shows("SCARLETNX  /  BUTTON MAP") && !shows("By label") && shows("Xbox Wireless Controller"));
+    assert(shows("LT sends ZL") && quads_of(FAILURE) > 0); /* RT held: lit */
+    overlay_side(1);                                       /* LT's button, ZL, up one: ZR */
     assert(pads.own.bit[SNX_PAD_LT] == 9 && maps_stored == 1);
     draw();
-    assert(shows("LT : ZR") && shows("LT sends ZR"));
+    assert(shows("LT sends ZR"));
     assert(overlay_select() == OVERLAY_NONE && overlay_listening());
-    overlay_press(SNX_PAD_SOUTH); /* A: LT and A swap */
-    assert(!overlay_listening() && pads.own.bit[SNX_PAD_LT] == 0 && pads.own.bit[SNX_PAD_SOUTH] == 9 &&
+    overlay_press(SNX_PAD_SOUTH); /* the bottom one, B: LT and it swap */
+    assert(!overlay_listening() && pads.own.bit[SNX_PAD_LT] == 1 && pads.own.bit[SNX_PAD_SOUTH] == 9 &&
            maps_stored == 2);
     {
         static const i32 rest[4];
@@ -402,7 +399,7 @@ int main(void) {
         assert(overlay_controls(1ull << 0, rest, 5001) == OVERLAY_NONE && !overlay_listening());
         assert(overlay_controls(0, rest, 5002) == OVERLAY_NONE);
     }
-    assert(overlay_back() == OVERLAY_NONE && overlay_back() == OVERLAY_NONE);
+    assert(overlay_back() == OVERLAY_NONE); /* no presets to go back to: up to its item at once */
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  CONTROLLERS") && text_at(1, 7, "\xFE Button map"));
     pads_held = 0;

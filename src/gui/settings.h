@@ -57,7 +57,7 @@ void gui_settings_reset(GuiSettings* settings, int row);
 int gui_settings_step_all(GuiSettings* settings, int row, int step);
 /* the Alls' values after a change: their rows' word when they share one */
 void gui_settings_sync(GuiSettings* settings);
-/* row's value as the Settings show it: a pick as it is, a row not picked its default and [default] ("By label
+/* row's value as the Settings show it: a pick as it is, a row not picked its default and [default] ("Off
    [default]", "[default]" for an empty one), an All's [default] while none of its rows is picked */
 void gui_settings_shown(const GuiSettings* settings, int row, char* out, size_t size);
 /* the value picked for key, NULL for the .ini's or no such row */

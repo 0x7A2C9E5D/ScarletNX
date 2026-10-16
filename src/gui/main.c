@@ -121,7 +121,7 @@ typedef struct {
     int group;           /* the group open, or the one the Settings come back to */
     int first, page;     /* a group's: the settings' row of its first, and of the page's row it opened (-1 none) */
     bool theme_from_app; /* the theme editor goes back to the App's rows */
-    SnxPadScreen pad;    /* the button map's, on the rows gamepad_buttons and gamepad_map */
+    SnxPadScreen pad;    /* the button map's, on the row gamepad_map, A and B as gamepad_swap_ab says */
     SnxPadDrawing pad_drawing; /* as last drawn: what a click or a tap lands on */
     SDL_Gamepad* gamepad;      /* the pad it shows, the first one plugged in, while it is open */
     bool pads_read;            /* SDL's gamepads started for it */
@@ -184,7 +184,7 @@ static const char* const items[] = {"Load Switch NSP/XCI/NRO",
 #define SAY_GROUPS     "Tap a group to open it. Back: go back."
 #define SAY_APP        "Tap a row to change or open it. Back: go back."
 #define SAY_FOLDERS    "Add a folder: tap it. Tap a folder twice to take it off. Back: go back."
-#define SAY_PAD        "Tap a preset or a control; tap it again for a press. Back: go back."
+#define SAY_PAD        "Tap a control; tap it again for a press. Back: go back."
 #else
 #define SAY_MENU       "Arrows/mouse: move. Space/Enter/click: select."
 #define SAY_GAMES      "Up/Down: select. Enter/Space: open. Left/Right/PgUp/PgDown: page."
@@ -2345,12 +2345,11 @@ static int setting_row(const App* app, const char* key) {
         if (app->settings.values[i].key && !strcmp(app->settings.values[i].key, key)) return i;
     return -1;
 }
-/* a page of gamepad_map's, while gamepad_buttons has the presets' words */
+/* the page gamepad_map is on */
 static bool pad_page(const App* app, int row) {
     const GuiSetting* page = &app->settings.values[row];
-    int map = setting_row(app, "gamepad_map"), buttons = setting_row(app, "gamepad_buttons");
-    return map >= page->first && map < page->first + page->count && buttons >= 0 &&
-           app->settings.keys[buttons].type == GUI_KEY_WORD && app->settings.values[buttons].values;
+    int map = setting_row(app, "gamepad_map");
+    return map >= 0 && map >= page->first && map < page->first + page->count;
 }
 /* the pad's name, its labels and what it holds now */
 static void pad_sync(App* app) {
@@ -2373,20 +2372,17 @@ static void pad_sync(App* app) {
     for (c = 0; c < SNX_PAD_CONTROLS; ++c)
         if (snx_pad_held(app->gamepad, c)) p->held |= 1u << c;
 }
-/* the presets, gamepad_buttons' words after the .ini's, and the map as gamepad_map says; a map it cannot read is
-   named, and left out */
+/* the map as gamepad_map says, A and B as gamepad_swap_ab does; a map it cannot read is named, and left out. Why there is
+   no pad stays */
 static void pad_start(App* app) {
     const GuiSettings* s = &app->settings;
-    int buttons = setting_row(app, "gamepad_buttons"), map = setting_row(app, "gamepad_map"), modes[SNX_PAD_PRESETS], w;
-    const GuiSetting* b = &s->values[buttons];
-    const char* names[SNX_PAD_PRESETS];
-    char error[64];
-    for (w = 0; w < SNX_PAD_PRESETS && s->keys[buttons].words[w]; ++w) {
-        names[w] = w ? s->keys[buttons].words[w] : "Each game's";
-        modes[w] = w ? atoi(b->values[w]) : -1;
-    }
-    snx_pad_screen_start(&app->pad, w, names, modes, b->word < w ? b->word : 0);
-    snx_pad_map_unset(&app->pad.own);
+    const char* swap = gui_settings_value(s, "gamepad_swap_ab");
+    int map = setting_row(app, "gamepad_map");
+    char error[64], note[sizeof app->pad.note];
+    snprintf(note, sizeof note, "%s", app->pad.note);
+    snx_pad_screen_start(&app->pad);
+    snprintf(app->pad.note, sizeof app->pad.note, "%s", note);
+    app->pad.swap_ab = swap && atoi(swap);
     if (snx_pad_map_read(&app->pad.own, s->values[map].text, error, sizeof error))
         snprintf(app->editor.note, sizeof app->editor.note,
                  "gamepad_map's \"%s\" is not a control and the button it sends (south:B)", error);
@@ -2423,23 +2419,19 @@ static void pad_attach(App* app) {
     for (i = 0; ids && i < n && !app->gamepad; i++) {
         app->gamepad = SDL_OpenGamepad(ids[i]);
         if (!app->gamepad)
-            snprintf(app->editor.note, sizeof app->editor.note, "The controller could not be opened: %s",
-                     SDL_GetError());
+            snprintf(app->pad.note, sizeof app->pad.note, "The controller could not be opened: %s", SDL_GetError());
     }
     SDL_free(ids);
-    if (app->gamepad && (!strncmp(app->editor.note, "The controller could not be opened:",
-                                  sizeof "The controller could not be opened:" - 1) ||
-                         !strncmp(app->editor.note, "Joystick ", sizeof "Joystick " - 1)))
-        app->editor.note[0] = 0; /* an earlier failed/unmapped pad no longer describes this one */
-    if (!app->gamepad && !n && !app->editor.note[0]) {
+    if (app->gamepad) app->pad.note[0] = 0; /* an earlier failed/unmapped pad no longer describes this one */
+    if (!app->gamepad && !n) {              /* none, or a joystick SDL has no mapping for, named */
         SDL_JoystickID* joysticks = SDL_GetJoysticks(&n);
+        app->pad.note[0] = 0;
         if (joysticks && n > 0) {
             char guid[33], *file = pad_mappings_file(app);
             SDL_GUIDToString(SDL_GetJoystickGUIDForID(joysticks[0]), guid, sizeof guid);
-            snprintf(app->editor.note, sizeof app->editor.note,
-                     "Joystick %s needs an SDL mapping (GUID %s), a line in %s",
-                     SDL_GetJoystickNameForID(joysticks[0]) ? SDL_GetJoystickNameForID(joysticks[0]) : "Unknown", guid,
-                     file ? file : "gamecontrollerdb.txt");
+            snprintf(app->pad.note, sizeof app->pad.note, "%s has no SDL mapping: add a line for GUID %s to %s",
+                     SDL_GetJoystickNameForID(joysticks[0]) ? SDL_GetJoystickNameForID(joysticks[0]) : "The joystick",
+                     guid, file ? file : "gamecontrollerdb.txt");
             free(file);
         }
         SDL_free(joysticks);
@@ -2463,6 +2455,7 @@ static void open_pad(App* app, int row) {
     app->form = GUI_FORM_PAD;
     app->page = row;
     app->editor.note[0] = 0;
+    app->pad.note[0] = 0;
     pad_start(app);
     render(app); /* SDL looks for pads for most of a second: the page shows first, saying so */
     /* two Joy-Cons one pad, or two, as the games take them (gamepad_joycon_pair, 1 when not picked) */
@@ -2472,7 +2465,7 @@ static void open_pad(App* app, int row) {
     }
     app->pads_read = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
     if (!app->pads_read)
-        snprintf(app->editor.note, sizeof app->editor.note, "Controllers cannot be read: %s", SDL_GetError());
+        snprintf(app->pad.note, sizeof app->pad.note, "Controllers cannot be read: %s", SDL_GetError());
     else
         pad_load_mappings(app);
     pad_attach(app);
@@ -2483,7 +2476,7 @@ static void pad_close(App* app) {
     if (app->pads_read) SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
     app->pads_read = false;
 }
-/* what the page did: a preset or a map kept at once, as the Settings' other picks */
+/* what the page did: the map kept at once, as the Settings' other picks */
 static void pad_did(App* app, int did) {
     GuiSettings* s = &app->settings;
     int map = setting_row(app, "gamepad_map");
@@ -2491,12 +2484,9 @@ static void pad_did(App* app, int did) {
         leave_form(app);
         return;
     }
-    if (did != SNX_PAD_DID_PRESET && did != SNX_PAD_DID_MAP) return;
-    s->values[setting_row(app, "gamepad_buttons")].word = app->pad.in_use;
-    if (did == SNX_PAD_DID_MAP) {
-        snx_pad_map_write(&app->pad.own, s->values[map].text, sizeof s->values[map].text);
-        app->editor.note[0] = 0; /* a map it could not read is replaced */
-    }
+    if (did != SNX_PAD_DID_MAP) return;
+    snx_pad_map_write(&app->pad.own, s->values[map].text, sizeof s->values[map].text);
+    app->editor.note[0] = 0; /* a map it could not read is replaced */
     app->editor.dirty = true;
     keep_settings(app);
 }
@@ -2539,12 +2529,11 @@ static void pad_axis(App* app, const SDL_GamepadAxisEvent* a) {
     }
 }
 static bool menu_key_of(const SDL_KeyboardEvent* k, GuiKey* key);
-/* the page's keys; Del puts the preset and the map back to the .ini's */
+/* the page's keys; Del puts the map back to the .ini's */
 static void pad_keyboard(App* app, const SDL_KeyboardEvent* k) {
     GuiKey key;
     if (k->key == SDLK_DELETE || k->key == SDLK_BACKSPACE) {
         int focus = app->pad.focus;
-        gui_settings_reset(&app->settings, setting_row(app, "gamepad_buttons"));
         gui_settings_reset(&app->settings, setting_row(app, "gamepad_map"));
         app->editor.note[0] = 0;
         pad_start(app);
@@ -2570,7 +2559,8 @@ static bool pad_event(App* app, const SDL_Event* e) {
     switch (e->type) {
         case SDL_EVENT_KEY_DOWN: pad_keyboard(app, &e->key); return true;
         case SDL_EVENT_TEXT_INPUT: return true;
-        case SDL_EVENT_JOYSTICK_ADDED: /* one SDL has no mapping for is named */
+        case SDL_EVENT_JOYSTICK_ADDED: /* one SDL has no mapping for is named, and no longer once it is out */
+        case SDL_EVENT_JOYSTICK_REMOVED:
         case SDL_EVENT_GAMEPAD_ADDED: pad_attach(app); return true;
         case SDL_EVENT_GAMEPAD_REMOVED:
             if (ours && e->gdevice.which == ours) {
@@ -2637,7 +2627,11 @@ static void render_pad(App* app) {
         GuiRgb on = p->style == SNX_PAD_STYLE_FOCUS ? theme->focus : theme->active;
         bool marked = p->style == SNX_PAD_STYLE_FOCUS || p->style == SNX_PAD_STYLE_LIT;
         if (p->kind == SNX_PAD_SHAPE_TEXT)
-            pad_text(app, p, marked ? theme->page : p->style == SNX_PAD_STYLE_SOFT ? theme->soft : theme->ink);
+            pad_text(app, p,
+                     marked                           ? theme->page
+                     : p->style == SNX_PAD_STYLE_SOFT ? theme->soft
+                     : p->style == SNX_PAD_STYLE_NOTE ? theme->failure
+                                                      : theme->ink);
         else if (p->kind == SNX_PAD_SHAPE_DISC)
             pad_disc(app, p, marked ? on : theme->soft);
         else if (marked)
