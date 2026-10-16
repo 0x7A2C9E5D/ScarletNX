@@ -49,26 +49,15 @@ static void code_path(char* p, size_t size) {
     snprintf(p, size, "%s%s_code.so", g_exedir, g_exename);
 #endif
 }
+int (*snx_menu)(const char* self);
 /* Started with nothing to run and no game of its name: a double-clicked AppImage or scarletnx.exe, or the desktop
-   entry. The launcher beside this program opens instead of the error about a missing game. In an AppImage argv[0] is
-   the launcher in its mount's bin/ (sharun's), which sets up the bundled libraries for whatever it runs from there,
-   so the GUI is looked for beside argv[0] when it names a folder, beside the real executable otherwise (a PATH
-   lookup). Returns -1 when there is no launcher */
-static int open_launcher(const char* argv0) {
-    char* self = strchr(argv0, '/') || strchr(argv0, '\\') ? snx_strdup(argv0) : snx_executable(argv0);
-    char *folder = self ? snx_dirname(self) : NULL, *gui;
-#if defined(_WIN32)
-    gui = folder ? snx_path_join(folder, "scarletnx-gui.exe") : NULL;
-#else
-    gui = folder ? snx_path_join(folder, "scarletnx-gui") : NULL;
-#endif
-    int result = -1;
-    if (gui && snx_is_file(gui)) {
-        const char* command[] = {gui, NULL};
-        result = snx_run_stage(command, NULL, "Launcher");
-    }
-    free(gui);
-    free(folder);
+   entry. The menu opens instead of the error about a missing game, and runs games with this program. In an AppImage
+   argv[0] is the launcher in its mount's bin/ (sharun's), which sets up the bundled libraries for whatever it runs
+   from there: that is the program when argv[0] names one, the real executable otherwise (a PATH lookup) */
+static int open_menu(const char* argv0) {
+    int named = (strchr(argv0, '/') || strchr(argv0, '\\')) && snx_is_file(argv0);
+    char* self = named ? snx_absolute(argv0) : snx_executable(argv0);
+    int result = snx_menu(self);
     free(self);
     return result;
 }
@@ -267,13 +256,10 @@ int snx_main(int argc, char** argv) {
               "without --game to extract, recompile and play it (scarletnx Game.nsp), or point --game at a game "
               "recompiled from it, for example --game=games/Game.",
               dump);
-    if (argc == 1 && !snx_module_static) {
+    if (argc == 1 && !snx_module_static && snx_menu) {
         char p[1200];
         code_path(p, sizeof p);
-        if (!snx_is_file(p)) {
-            int launched = open_launcher(argv[0]);
-            if (launched >= 0) return launched;
-        }
+        if (!snx_is_file(p)) return open_menu(argv[0]);
     }
     /* loaded before the .ini is opened, which writes one: a mistyped --game leaves no stray settings file */
     if (load_code()) fatal("Could not load the game's recompiled code.");

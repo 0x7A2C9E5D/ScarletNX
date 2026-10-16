@@ -195,7 +195,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         assert(strstr(argv[1], "game with spaces"));
-        bool nx = strstr(argv[0], "mariko") != NULL;
+        bool nx = strstr(argv[0], "runtime") != NULL; /* the program the menu is part of */
         if (nx)
             assert(argc == 7 && !strcmp(argv[2], "-f") && !strcmp(argv[3], "--touch=1") &&
                    !strcmp(argv[4], "--controls=0") && !strcmp(argv[5], "--repo") && argv[6][0]);
@@ -214,7 +214,10 @@ int main(int argc, char** argv) {
     App app;
     /* the menu's data folder from the test's own environment, never the user's */
     SDL_setenv_unsafe("XDG_DATA_HOME", "/nonexistent/snx-gui-test", 1);
-    assert(initialize(&app));
+    /* the menu runs Switch inputs with the runtime it is part of, the other drivers from beside it */
+    assert(initialize(&app, "/nonexistent/snx-gui-test/bin/scarletnx"));
+    assert(!strcmp(app.self, "/nonexistent/snx-gui-test/bin/scarletnx"));
+    assert(!strcmp(app.drivers, "/nonexistent/snx-gui-test/bin"));
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(SDL_PLATFORM_ANDROID)
     /* no checkout and no games/ beside the test: games/ and themes/ come from the user's data folder */
     assert(!strcmp(app.data_dir, "/nonexistent/snx-gui-test/scarletnx"));
@@ -267,7 +270,7 @@ int main(int argc, char** argv) {
     char* self = snx_executable(argv[0]);
     char* input = snx_path_join(temporary, "game with spaces;literal.nro");
     assert(!snx_write_file(input, "0", 1));
-    const char* names[] = {"scarletnx-mariko", "scarletnx-gnuabi", "scarletnx-3ds"};
+    const char* names[] = {"runtime", "scarletnx-gnuabi", "scarletnx-3ds"};
     for (size_t i = 0; i < sizeof names / sizeof *names; ++i) {
 #ifdef _WIN32
         char* filename = snx_format("%s.exe", names[i]);
@@ -279,7 +282,14 @@ int main(int argc, char** argv) {
         free(filename);
         free(path);
     }
-    app.drivers = temporary;
+    free(app.drivers);
+    app.drivers = snx_strdup(temporary);
+    free(app.self);
+#ifdef _WIN32
+    app.self = snx_path_join(temporary, "runtime.exe");
+#else
+    app.self = snx_path_join(temporary, "runtime");
+#endif
     free(app.games_dir);
     app.games_dir = snx_path_join(temporary, "games");
     render(&app);
@@ -516,6 +526,19 @@ int main(int argc, char** argv) {
     assert(app.menu.running && app.menu.selected == GUI_SWITCH);
     finish(&app, 0);
     assert(!app.native && !app.banner.seen); /* a driver that started no game stayed compiling */
+    /* a menu that is no runtime's (a build without one) looks for scarletnx beside it, then on PATH */
+    {
+        char* own = app.self;
+        char* path = SDL_strdup(SDL_getenv("PATH"));
+        app.self = NULL;
+        SDL_setenv_unsafe("PATH", "/nonexistent", 1);
+        launch(&app, snx_strdup(input), false);
+        assert(!app.menu.running && !strcmp(app.message, "Cannot find scarletnx beside the GUI or on PATH."));
+        SDL_setenv_unsafe("PATH", path, 1);
+        SDL_free(path);
+        app.self = own;
+        app.message[0] = 0;
+    }
     {
         size_t size;
         char* kept = (char*)snx_read_file(app.run_log, &size);

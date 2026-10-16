@@ -2,12 +2,13 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # GUI launcher
 
-`scarletnx-gui` is a small SDL3 launcher for the command-line drivers. It uses an
+`scarletnx` started with no arguments, and no game of its name beside it, opens its launcher: a
+small SDL3 menu for the command-line drivers. It uses an
 embedded public-domain 8x16 VGA BIOS font, nearest-neighbor integer scaling, and
 English text only. No font files or localization packages are needed.
 
 ```sh
-./build/scarletnx-gui
+./build/scarletnx
 ```
 
 The window's title tells which build it is, as `ScarletNX <branch> <commit> (<compiler>, <OS> <arch>)`, for example
@@ -91,8 +92,8 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   game: `switch`, `linux` or `3ds`, `file` or `games` (a program from games/, run as it is),
   the path and the name, separated by tabs.
 
-The launcher looks beside its executable, then on PATH, for `scarletnx-mariko`
-(the existing Switch driver alias), `scarletnx-gnuabi` or `scarletnx-3ds`. Files are passed directly
+The launcher runs Switch inputs with the `scarletnx` it is part of, and looks beside it, then on
+PATH, for `scarletnx-gnuabi` or `scarletnx-3ds`. Files are passed directly
 as argv entries, never through a shell. Spaces, Unicode paths and shell punctuation
 are not evaluated. Local `file://` text drops are decoded, but lists and remote URI
 authorities are rejected. The working directory is not changed and is shown at the
@@ -319,7 +320,8 @@ cmake --build build/gui
 ctest --test-dir build/gui -R '^gui_' --output-on-failure
 ```
 
-For just the GUI and Linux runtime, use `-DSNX_BUILD_NX=OFF -DSNX_BUILD_GUI=ON`.
+For just the GUI and Linux runtime, use `-DSNX_BUILD_NX=OFF -DSNX_BUILD_GUI=ON`: the launcher is
+then `scarletnx-gui`, a program of its own, which looks for `scarletnx` as it does for the other drivers.
 Tools-only and hactool-only builds cannot enable the GUI.
 Supported host platforms are Linux, FreeBSD, Windows (llvm-mingw) and Android (`dist/android`).
 SDL3 handles window creation, keyboard/mouse input, rendering, clipboard and drag-and-drop

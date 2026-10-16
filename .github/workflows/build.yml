@@ -398,7 +398,7 @@ jobs:
       - name: Check the executables' icon
         run: |
           set -euo pipefail
-          for exe in stage/bin/scarletnx.exe stage/bin/scarletnx-gui.exe; do
+          for exe in stage/bin/scarletnx.exe; do
             # the whole listing first: grep -q stopping early would fail the pipe under pipefail
             resources=$(llvm-readobj --coff-resources "$exe")
             if ! grep -q 'Type: GROUP_ICON' <<<"$resources"; then

@@ -8,6 +8,7 @@
 #include "browser.h"
 #include "editor.h"
 #include "font.h"
+#include "gui.h"
 #include "model.h"
 #include "gui_process.h"
 #include "steps.h"
@@ -56,7 +57,8 @@ typedef struct {
     Uint64 clock;               /* fixed time for tests; 0 is the real clock */
     Uint64 fade_ms, leaving_ms; /* a screen fading in from black since; the run fading out since */
     Uint64 entering_ms;         /* the menu fading out since, before a run fades in */
-    const char* drivers;
+    char* self;    /* the program that runs Switch inputs: the runtime the menu is part of, NULL to look for one */
+    char* drivers; /* the folder the other drivers are looked for in first */
     char *cwd, *file, *games_dir, *keys_path;
     char* data_dir;       /* games/, work/ and themes/: the driver's too, which gets it as --repo (snx_data_dir) */
     char* themes_dirs[2]; /* themes/ in the data folder, then beside the GUI */
@@ -1327,7 +1329,7 @@ static const char* driver_name(const App* app) {
         case GUI_LINUX: return "libscarletnx-gnuabi.so";
         case GUI_3DS: return "libscarletnx-3ds.so";
 #else
-        case GUI_SWITCH: return "scarletnx-mariko";
+        case GUI_SWITCH: return "scarletnx";
         case GUI_LINUX: return "scarletnx-gnuabi";
         case GUI_3DS: return "scarletnx-3ds";
 #endif
@@ -1336,6 +1338,7 @@ static const char* driver_name(const App* app) {
 }
 static char* find_driver(App* app) {
     const char* name = driver_name(app);
+    if (app->self && app->menu.selected == GUI_SWITCH) return snx_strdup(app->self);
     if (!name) return NULL;
 #ifdef _WIN32
     char* filename = snx_format("%s.exe", name);
@@ -1988,9 +1991,10 @@ static char* shipped_themes(const char* program_dir) {
     free(beside);
     return snx_path_join(program_dir, "../share/scarletnx/themes");
 }
-static bool initialize(App* app) {
+static bool initialize(App* app, const char* self) {
     SDL_WindowFlags flags;
     memset(app, 0, sizeof(*app));
+    if (self) app->self = snx_strdup(self);
 #ifdef SDL_PLATFORM_ANDROID
     app->theme = *gui_theme_builtin("yorha");
     app->menu.fullscreen = true; /* a phone plays on the whole screen; Fullscreen off shows the system's bars */
@@ -2025,10 +2029,10 @@ static bool initialize(App* app) {
     app->process = gui_process_create();
     app->cwd = SDL_GetCurrentDirectory();
 #ifdef SDL_PLATFORM_ANDROID
-    app->drivers = gui_android_libraries();
+    app->drivers = gui_android_libraries() ? snx_strdup(gui_android_libraries()) : NULL;
     app->data_dir = snx_strdup(app->cwd ? app->cwd : ".");
 #else
-    app->drivers = SDL_GetBasePath();
+    app->drivers = self ? snx_dirname(self) : SDL_GetBasePath() ? snx_strdup(SDL_GetBasePath()) : NULL;
     app->data_dir = snx_data_dir(GUI_CHECKOUT, GUI_BUILD, app->drivers);
     if (!app->data_dir) app->data_dir = snx_strdup(app->cwd ? app->cwd : ".");
 #endif
@@ -2053,6 +2057,8 @@ static void cleanup(App* app) {
     gui_android_ran(NULL); /* the run goes with the menu */
 #endif
     gui_process_destroy(app->process);
+    free(app->self);
+    free(app->drivers);
     free(app->file);
     free(app->data_dir);
     free(app->games_dir);
@@ -2098,19 +2104,16 @@ static char* state_folder(void) {
     return folder;
 }
 #endif
-#ifndef SNX_GUI_NO_MAIN
-int main(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
+int snx_gui_main(const char* self) {
     App app;
     char* prefs;
-    if (!initialize(&app)) {
-        fprintf(stderr, "scarletnx-gui: %s\n", SDL_GetError());
+    if (!initialize(&app, self)) {
+        fprintf(stderr, "scarletnx: %s\n", SDL_GetError());
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", SDL_GetError(), app.window);
         cleanup(&app);
         return 1;
     }
-    /* the menu's own files; main() opens them, not initialize(), so the tests keep their own */
+    /* the menu's own files, opened here, not in initialize(), so the tests keep their own */
 #ifdef SNX_XDG
     prefs = state_folder();
 #else
@@ -2140,5 +2143,11 @@ int main(int argc, char** argv) {
     }
     cleanup(&app);
     return 0;
+}
+#ifndef SNX_GUI_NO_MAIN /* the menu alone: Android's activity runs it, and a build without the Switch runtime */
+int main(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
+    return snx_gui_main(NULL);
 }
 #endif

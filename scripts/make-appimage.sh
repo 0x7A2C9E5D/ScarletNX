@@ -26,11 +26,11 @@ export UPINFO="gh-releases-zsync|${REPOSITORY%/*}|${REPOSITORY#*/}|nightly|*$ARC
 export STRACE_MODE=0 DEPLOY_SDL=1 DEPLOY_VULKAN=1
 
 # The runtime stays the AppImage's program (the desktop entry's Exec), so a copy named after a game runs that game.
-# Started bare it opens the launcher beside it, which runs the drivers it names (scarletnx-mariko and the other
-# models, links to the runtime; scarletnx-3ds; scarletnx-gnuabi). hactool too: --extract looks for it next to the
-# runtime, and without it tries to build it from a checkout. as and ld: --backend=gcc assembles and links with them,
-# and what libgccjit writes needs its own binutils (Ubuntu 24.04's as can't read AArch64's .aeabi_subsection)
-quick-sharun /usr/bin/scarletnx /usr/bin/scarletnx-gui /usr/bin/scarletnx-erista /usr/bin/scarletnx-mariko \
+# Started bare it opens its launcher, which runs Switch games with it and the other drivers from beside it
+# (scarletnx-3ds, scarletnx-gnuabi). hactool too: --extract looks for it next to the runtime, and without it tries to
+# build it from a checkout. as and ld: --backend=gcc assembles and links with them, and what libgccjit writes needs its
+# own binutils (Ubuntu 24.04's as can't read AArch64's .aeabi_subsection)
+quick-sharun /usr/bin/scarletnx /usr/bin/scarletnx-erista /usr/bin/scarletnx-mariko \
     /usr/bin/scarletnx-aula /usr/bin/scarletnx-3ds /usr/bin/scarletnx-gnuabi /usr/bin/hactool /usr/bin/as /usr/bin/ld
 
 # The licenses travel with the AppImage: the runtime's and those of the libraries built into it (`cmake --install` put
@@ -83,7 +83,7 @@ check "$probe/Probe_code.so" -H
 check "$probe/games/Other_code.so" --game="$probe/games/Other"
 # Started bare it opens the launcher, which needs everything it runs beside it (the launcher itself can't be run
 # here: without a display SDL may fall back to an offscreen one and keep it open)
-for program in scarletnx-gui scarletnx-mariko scarletnx-3ds scarletnx-gnuabi hactool as ld; do
+for program in scarletnx-3ds scarletnx-gnuabi hactool as ld; do
     if [ ! -e "$appdir/bin/$program" ]; then
         echo "The AppImage has no bin/$program, which the launcher runs" >&2
         exit 1
