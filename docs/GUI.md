@@ -41,7 +41,8 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   then returns an explicit error because ARM11 AOT/execution is still pending.
   Existing extraction directories are refused rather than treated as cache hits.
   See [3DS port](3DS.md) for limits and extract-only usage.
-- **Setup device keys**, immediately after the three load entries, prompts you to
+- **Setup device keys**, immediately after the three load entries, blinks red (the theme's `failure` colour, at its
+  `blink_ms`) while no `prod.keys` is in use. It prompts you to
   pick `prod.keys` (a click on the blinking **[ Pick or drop prod.keys ]** in the middle of
   the screen, the theme's `[prompt]`, or Enter), drop it, or paste its path with Ctrl+V. It installs the file to `~/.switch/prod.keys`, or
   `%USERPROFILE%\.switch\prod.keys` on Windows; an installed copy on Linux puts it in its
