@@ -323,12 +323,13 @@ joystick GUID shown in the game log or the launcher's Controllers page, which na
 and SDL button and axis bindings. For example:
 
 ```text
-GUID,My Controller,a:b0,b:b1,x:b2,y:b3,leftx:a0,lefty:a1,rightx:a2,righty:a3
+GUID,My Controller,a:b0,b:b1,x:b2,y:b3,leftx:a0,lefty:a1,rightx:a2,righty:a3,platform:Linux,
 ```
 
-Replace `GUID` and each binding with values for the device. This SDL mapping selects physical joystick controls;
-`gamepad_map` instead selects which Switch buttons the mapped controls send. The game log reports every detected
-joystick, whether it has an SDL mapping, and any gamepad open error. On Linux, installing
+Replace `GUID` and each binding with values for the device, and `Linux` with `Windows`, `FreeBSD` or `Android`
+where it runs: SDL takes a line of the file only with its own platform. This SDL mapping selects physical joystick
+controls; `gamepad_map` instead selects which Switch buttons the mapped controls send. The game log reports every
+detected joystick, whether it has an SDL mapping, and any gamepad open error. On Linux, installing
 `dist/72-scarletnx-input.rules` in `/etc/udev/rules.d/` grants desktop seat access to joystick event nodes and
 Nintendo hidraw nodes for Joy-Con features. Reload udev rules and reconnect the controller after installation.
 Other HIDAPI controllers may need their vendor's own hidraw rule.
