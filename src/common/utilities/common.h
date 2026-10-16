@@ -34,6 +34,9 @@ int snx_mkdirs(const char* path);
 int snx_remove_tree(const char* path);
 int snx_copy_file(const char* src, const char* dst);
 int snx_copy_tree(const char* src, const char* dst);
+/* dst a second name of the file src, on the same disk: nonzero when dst is there already, or the disk or system takes
+   none (another volume, FAT), for the caller to copy instead */
+int snx_link_file(const char* src, const char* dst);
 int snx_path_within(const char* path, const char* parent);
 int snx_replace(const char* src, const char* dst);
 int snx_list_dir(const char* path, char*** names, size_t* count);
@@ -48,12 +51,22 @@ char* snx_user_data_dir(void);
 #define SNX_XDG 1
 #endif
 enum { SNX_USER_DATA, SNX_USER_CONFIG, SNX_USER_STATE, SNX_USER_CACHE };
+/* A portable copy's data folder: this folder beside the AppImage or the program */
+#define SNX_PORTABLE_DIR ".scarletnx"
+/* Android's data folder, which the user sees (the app's working folder once it may write there) */
+#define SNX_ANDROID_DIR  "/sdcard/ScarletNX"
 /* An installed build's folder for one kind of file: $XDG_CONFIG_HOME/scarletnx (~/.config), $XDG_STATE_HOME/scarletnx
-   (~/.local/state) or $XDG_CACHE_HOME/scarletnx (~/.cache), a relative path ignored. Without SNX_XDG all four are the
-   data folder. NULL when the environment names no home */
+   (~/.local/state) or $XDG_CACHE_HOME/scarletnx (~/.cache), a relative path ignored. Without SNX_XDG config/, state/
+   and cache/ of the data folder. NULL when the environment names no home */
 char* snx_user_dir(int kind);
-/* A path in the user's data folder, moved to the same place in the folder of kind: games/X.ini of the data folder is
-   games/X.ini of the config folder. Any other path (a checkout, a portable copy, --outdir) is returned as it is */
+/* 1 for a data folder that keeps each kind of file apart: the user's, a portable copy's (SNX_PORTABLE_DIR), Android's.
+   A checkout's or an --outdir's games keep their files in their folders */
+int snx_app_dir(const char* folder);
+/* Such a data folder's folder for one kind of file: the user's as snx_user_dir says, another's config/, state/ and
+   cache/ in it; the data folder itself for SNX_USER_DATA */
+char* snx_app_kind_dir(const char* app, int kind);
+/* A path in a data folder (snx_app_dir), moved to the same place in its folder of kind: games/X/X.ini of the data
+   folder is games/X/X.ini of the config folder. Any other path (a checkout, an --outdir) is returned as it is */
 char* snx_user_path(const char* path, int kind);
 /* 1 while what an older build left at old is still there, for the caller to say each run where it is and that this
    build keeps it at now. Nothing is moved: the player does that */
@@ -75,8 +88,8 @@ extern const SnxGameFile snx_game_files[SNX_GAME_FILES];
    work/ in the data folder stays, a line on stdout saying so */
 char* snx_work_dir(const char* data_dir);
 /* The folder work/, games/ and the keys are in when a run names none (--repo), and the menu's games/: the checkout a build
-   came from, for a program run from that build's tree (build; NULL: any program); else, when a games/ folder is beside
-   it, the folder of the AppImage or of the program (a portable copy); else the user's data folder. NULL when none can be
+   came from, for a program run from that build's tree (build; NULL: any program); else SNX_PORTABLE_DIR beside the
+   AppImage or the program, when it is there (a portable copy); else the user's data folder. NULL when none can be
    named */
 char* snx_data_dir(const char* checkout, const char* build, const char* program_dir);
 SnxU64 snx_free_space(const char* path);
@@ -100,4 +113,15 @@ int snx_run_stage(const char* const* argv, const char* cwd, const char* stage);
 int snx_run_debug_stage(const char* const* argv, const char* cwd, const char* stage);
 FILE* snx_fopen(const char* path, const char* mode);
 
+/* The game's name in a control.nacp: American English's, else the first language's that has one, in UTF-8 without
+   control characters. 1 when it has one, else 0 and "" */
+int snx_nacp_name(const unsigned char* nacp, size_t size, char* name, size_t name_size);
+/* The title ID of a program without an NPDM (an NRO, an ExeFS without main.npdm): none of its own */
+#define SNX_NPDM_DEFAULT_TITLE (((SnxU64)0x01000000UL << 32) | 0x1000)
+/* The title ID a main.npdm's ACI0 gives its program, as the loader reads it, for one not loaded; SNX_NPDM_DEFAULT_TITLE
+   for none */
+SnxU64 snx_npdm_title(const unsigned char* npdm, size_t size);
+/* id as a game's folder and files are named, 16 hex digits into out (17 bytes): 1, or 0 for an ID that is none of the
+   game's own (0, SNX_NPDM_DEFAULT_TITLE) */
+int snx_title_text(SnxU64 id, char* out);
 #endif

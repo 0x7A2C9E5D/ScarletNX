@@ -234,7 +234,7 @@ static int fake_hactool(int argc, char** argv) {
         encrypted = !strcmp(input, "encrypted-no-keys");
         write_nca(dir, "small.nca", !strcmp(input, "dlc") ? "Data" : "Program", 0x240, encrypted);
         write_nca(dir, "large.nca", !strcmp(input, "dlc") ? "Control" : "Program", 0x300, encrypted);
-        write_nca(dir, "control.nca", "Control", 0x400, encrypted);
+        if (strcmp(input, "no-control")) write_nca(dir, "control.nca", "Control", 0x400, encrypted);
         write_nca(dir, "ignored.cnmt.nca", "Program", 0x600, encrypted);
         if (!strncmp(input, "slow", 4)) { /* the program NCA 3 MiB, and a while writing another 3 */
             char* path = snx_path_join(dir, "large.nca");
@@ -272,6 +272,17 @@ static int fake_hactool(int argc, char** argv) {
             puts("Title ID: 0100000000000000");
         free(input);
         free(mode);
+    } else if (!find_arg(argc, argv, "--exefsdir=") && find_arg(argc, argv, "--romfsdir=")) {
+        /* the Control NCA's RomFS: its control.nacp, the game's name first of 16 languages; the update's its own */
+        unsigned char nacp[0x4000];
+        const char* name = strstr(argv[argc - 1], "/update/") || strstr(argv[argc - 1], "\\update\\")
+                               ? "Synthetic Game Updated"
+                               : "Synthetic Game"; /* the scenario's own folder may be named for an update */
+        romfs = find_arg(argc, argv, "--romfsdir=");
+        CHECK(strstr(argv[argc - 1], "control.nca") != NULL && !snx_mkdirs(romfs));
+        memset(nacp, 0, sizeof nacp);
+        memcpy(nacp, name, strlen(name));
+        write_child(romfs, "control.nacp", (const char*)nacp, sizeof nacp);
     } else {
         exefs = find_arg(argc, argv, "--exefsdir=");
         romfs = find_arg(argc, argv, "--romfsdir=");
@@ -406,7 +417,8 @@ static int scenario(const char* self, const char* scratch, const char* mode) {
     payload = "base";
     if (!strncmp(mode, "slow", 4) || !strcmp(mode, "failure") || !strcmp(mode, "no-main") || !strcmp(mode, "dlc") ||
         !strcmp(mode, "base-update") || !strcmp(mode, "dnsp-update") || !strcmp(mode, "dxci-update") ||
-        !strcmp(mode, "encrypted-no-keys") || !strcmp(mode, "unmatched-update") || merged)
+        !strcmp(mode, "encrypted-no-keys") || !strcmp(mode, "unmatched-update") || !strcmp(mode, "no-control") ||
+        merged)
         payload = mode;
     if (!strcmp(mode, "preserve") || !strcmp(mode, "dot-parent")) payload = "no-main";
     if (!strcmp(mode, "malformed-dxci")) kind = "invalid";
@@ -501,6 +513,18 @@ static int scenario(const char* self, const char* scratch, const char* mode) {
         child_equals(text, "asset",
                      apply_update || (merged && strcmp(mode, "unrelated-embedded-update")) ? "updated" : "base");
         free(text);
+        /* the game's name beside exefs/, from the update's Control NCA when there is one */
+        text = snx_path_join(out, "control.nacp");
+        if (!strcmp(mode, "no-control"))
+            CHECK(!snx_path_exists(text));
+        else {
+            size_t size;
+            unsigned char* nacp = (unsigned char*)snx_read_file(text, &size);
+            const char* name = apply_update ? "Synthetic Game Updated" : "Synthetic Game";
+            CHECK(nacp && size == 0x4000 && !memcmp(nacp, name, strlen(name)) && !nacp[strlen(name)]);
+            free(nacp);
+        }
+        free(text);
     }
     if (!strcmp(mode, "existing") || !strcmp(mode, "explicit-missing-keys") || invalid)
         CHECK(!snx_is_file(report));
@@ -558,6 +582,7 @@ int main(int argc, char** argv) {
                                   "truncated-dxci",
                                   "invalid-update",
                                   "encrypted-no-keys",
+                                  "no-control",
                                   "explicit-missing-keys",
                                   "slow",
                                   "slow-xci"};
@@ -602,6 +627,10 @@ int main(int argc, char** argv) {
             CHECK(strstr(output, "Update has no Program NCA matching the selected base game") != NULL);
         if (!strcmp(modes[i], "explicit-missing-keys"))
             CHECK(strstr(output, "Specified prod.keys file is missing") != NULL);
+        /* a game without a Control NCA keeps the name of its file, and says why */
+        CHECK(!strstr(output, "The game keeps the name of its file") == !!strcmp(modes[i], "no-control"));
+        if (!strcmp(modes[i], "no-control"))
+            CHECK(strstr(output, "The game keeps the name of its file: it has no Control NCA") != NULL);
         /* a hactool of seconds: a row a second, each over the last (a carriage return), the last one ended; an XCI's
            total its secure partition, not the file's padding */
         if (!strncmp(modes[i], "slow", 4)) {

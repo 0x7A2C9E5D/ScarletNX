@@ -330,6 +330,25 @@ static bool installed(const App* app) {
     return same;
 }
 #endif
+/* the folder of kind for the menu's own files (settings.ini, app.ini and folders.txt in config, recent.txt and
+   last-run.log in state), made: its data folder's (snx_app_dir: the user's, a portable copy's), else the user's (a
+   checkout's menu). On Android the app's own storage, which needs no permission. Made with make; NULL when none can be */
+static char* menu_folder(const App* app, int kind, bool make) {
+    char* folder;
+#ifdef SDL_PLATFORM_ANDROID
+    char* sdl = kind == SNX_USER_CACHE ? NULL : SDL_GetPrefPath("scarletnx", "gui");
+    (void)app;
+    folder = sdl ? snx_strdup(sdl) : NULL;
+    SDL_free(sdl);
+#else
+    folder = app->data_dir && snx_app_dir(app->data_dir) ? snx_app_kind_dir(app->data_dir, kind) : snx_user_dir(kind);
+#endif
+    if (folder && make && snx_mkdirs(folder)) {
+        free(folder);
+        folder = NULL;
+    }
+    return folder;
+}
 /* where the keys are installed: an installed build's data folder, which the driver reads first, so nothing is written
    in the home folder itself (XDG); else ~/.switch */
 static char* device_keys_path(const App* app) {
@@ -584,7 +603,7 @@ static void games_place(App* app, GuiPlace* p) {
     size_t i;
     int longest = (int)strlen("Recent games");
     char keys[256];
-    for (i = 0; i < app->games.count; ++i) longest = SDL_max(longest, (int)SDL_utf8strlen(app->games.names[i]));
+    for (i = 0; i < app->games.count; ++i) longest = SDL_max(longest, (int)SDL_utf8strlen(app->games.shown[i]));
     for (i = 0; i < (size_t)recent_shown(app); ++i)
         longest = SDL_max(longest, (int)SDL_utf8strlen(app->recent.game[i].name));
     place_screen(app, p, screen_keys(app, SAY_GAMES, keys, sizeof keys),
@@ -1583,13 +1602,13 @@ static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** ab
         return "...show more";
     }
     {
-        const char* name = app->games.names[g->start + selected - head];
+        const char* name = app->games.names[g->start + selected - head]; /* its file's: what kind it is */
         snprintf(kind, size, "%s",
                  gui_is_cia(name)    ? "3DS CIA, opened with scarletnx-3ds"
                  : gui_is_dump(name) ? "A dump, prepared when it runs"
                                      : "Ready to run");
         *about = app->games.paths[g->start + selected - head];
-        return name;
+        return app->games.shown[g->start + selected - head];
     }
 }
 static void draw_games(App* app) {
@@ -1612,7 +1631,7 @@ static void draw_games(App* app) {
             list_item(app, &g.list, e, label, app->browser.selected == (size_t)e, false);
         } else {
             i = (size_t)(e - g.lead);
-            snprintf(label, sizeof label, "%s%s", app->theme.marker, app->games.names[g.start + i]);
+            snprintf(label, sizeof label, "%s%s", app->theme.marker, app->games.shown[g.start + i]);
             list_item(app, &g.list, e, label, app->browser.selected == head + i,
                       app->browser.activated && app->browser.active == g.start + i);
         }
@@ -1948,19 +1967,13 @@ static uint64_t free_space(const char* path) {
     return left;
 }
 static void space_start(App* app) {
+    /* settings, logs and caches, the menu's files among them; an older version's work/ is the data folder's */
     char* dirs[GUI_SPACE_DIRS] = {snx_strdup(app->games_dir),
                                   snx_path_join(app->data_dir, "work"),
                                   app->themes_dirs[0] ? snx_strdup(app->themes_dirs[0]) : NULL,
-#ifdef SNX_XDG /* settings, logs and caches, the menu's files among them; an older version's work/ is the data folder's */
-                                  snx_user_dir(SNX_USER_CONFIG),
-                                  snx_user_dir(SNX_USER_STATE),
-                                  snx_user_dir(SNX_USER_CACHE)
-#else
-                                  app->recent_file ? snx_dirname(app->recent_file) : NULL,
-                                  NULL,
-                                  NULL
-#endif
-    };
+                                  menu_folder(app, SNX_USER_CONFIG, false),
+                                  menu_folder(app, SNX_USER_STATE, false),
+                                  menu_folder(app, SNX_USER_CACHE, false)};
     size_t size = sizeof *app->space;
     char* at;
     int i;
@@ -3093,12 +3106,15 @@ static int play(App* app, const char* game) {
     free(option);
     return ok;
 }
-/* the game a run of the driver made ready: there the driver names it, as it cannot open it; whether it opened */
+/* the game a run of the driver made ready, in its folder of games/: there the driver names it, as it cannot open it;
+   whether it opened */
 static int ready(App* app) {
     const GuiStep* made = gui_steps_last(&app->steps, "READY");
-    char* game = made ? snx_path_join(app->games_dir, made->detail) : NULL;
+    char* folder = made ? snx_path_join(app->games_dir, made->detail) : NULL;
+    char* game = folder ? snx_path_join(folder, made->detail) : NULL;
     int ok = game && play(app, game);
     free(game);
+    free(folder);
     return ok;
 }
 /* the run in its notification: the game, the step on the screen and the percent, as they change, a second apart at
@@ -3122,14 +3138,13 @@ static void tell(App* app) {
     app->told_ms = now;
 }
 #endif
-#ifdef SNX_XDG
-/* a line more while an older build's file is at old, which this one keeps at now */
-static void left_line(App* app, const char* old, const char* now) {
+/* a line more while what an older version left at old (a folder, or a game's files) is there; this one keeps it at now */
+static void left_line(App* app, const char* old, const char* now, bool there) {
     char *line, *grown;
     size_t n = app->left ? strlen(app->left) : 0;
-    if (!snx_left_behind(old, now)) return;
+    if (!there || !strcmp(old, now)) return;
     line = snx_format("%s" SAY_LEFT_BY "%s\n", old, now);
-    grown = (char*)realloc(app->left, n + strlen(line) + 1);
+    grown = line ? (char*)realloc(app->left, n + strlen(line) + 1) : NULL;
     if (grown) {
         strcpy(grown + n, line);
         app->left = grown;
@@ -3137,50 +3152,87 @@ static void left_line(App* app, const char* old, const char* now) {
     }
     free(line);
 }
-#endif
-/* what older builds left where this one no longer looks, for the menu to say while it is there: the menu's own files,
-   work/, each game's (common.h). An installed build's alone (XDG): elsewhere the folders are as they were */
+/* the games of folder an older version laid out beside each other (<name>, its code, <name>_data/): each one's folder
+   now, games/<title ID>/ or games/<name>/ for one without an ID of its own (main.npdm in its data) */
+static void left_games(App* app, const char* folder) {
+    char** names = NULL;
+    size_t count = 0, i, n;
+    if (!folder || snx_list_dir(folder, &names, &count)) return;
+    for (i = 0; i < count; ++i) {
+        char *data, *npdm, *name, *old, *now, id[17];
+        unsigned char* bytes;
+        size_t size = 0;
+        n = strlen(names[i]);
+        if (n <= 5 || strcmp(names[i] + n - 5, "_data")) continue;
+        data = snx_path_join(folder, names[i]);
+        name = snx_format("%.*s", (int)(n - 5), names[i]);
+        npdm = data ? snx_path_join(data, "exefs/main.npdm") : NULL;
+        bytes = npdm && snx_is_file(npdm) ? (unsigned char*)snx_read_file(npdm, &size) : NULL;
+        old = name ? snx_path_join(folder, name) : NULL;
+        now = name ? snx_format("%s/%s/", folder, snx_title_text(snx_npdm_title(bytes, size), id) ? id : name) : NULL;
+        if (old && now && data && snx_is_dir(data)) left_line(app, old, now, true);
+        free(bytes);
+        free(npdm);
+        free(now);
+        free(old);
+        free(name);
+        free(data);
+    }
+    snx_free_strings(names, count);
+}
+/* what older versions left where this one no longer looks, a folder at a time, for the menu to say while it is there:
+   the menu's own files' folder (gui/), work/, each game laid out beside the others, a portable copy's games/ beside
+   the program (its data in .scarletnx/ now). Nothing is moved: the player does that (docs/DEPRECATIONS.md) */
 static void left_behind(App* app) {
+    char *config = menu_folder(app, SNX_USER_CONFIG, false), *state = menu_folder(app, SNX_USER_STATE, false);
+    char *data = snx_user_data_dir(), *gui = data ? snx_path_join(data, "gui") : NULL, *kept = NULL;
+    char* work = app->data_dir ? snx_path_join(app->data_dir, "work") : NULL;
+    char *moved = work ? snx_user_path(work, SNX_USER_CACHE) : NULL, *old = NULL, *now = NULL;
+    int i;
     free(app->left);
     app->left = NULL;
     app->lefts = 0;
     app->left_at = SDL_GetTicks();
-#ifdef SNX_XDG
-    static const char* const mine[] = {"recent.txt", "last-run.log"};
-    char *data = snx_user_data_dir(), *folder = app->recent_file ? snx_dirname(app->recent_file) : NULL;
-    char *work = snx_path_join(app->data_dir, "work"), *moved = snx_user_path(work, SNX_USER_CACHE);
-    char** names = NULL;
-    size_t count = 0, i, j;
-    for (i = 0; data && folder && i < sizeof mine / sizeof *mine; ++i) {
-        char *old = snx_format("%s/gui/%s", data, mine[i]), *now = snx_path_join(folder, mine[i]);
-        left_line(app, old, now);
-        free(old);
-        free(now);
-    }
-    left_line(app, work, moved);
-    snx_list_dir(app->games_dir, &names, &count);
-    for (i = 0; i < SNX_GAME_FILES; ++i) {
-        const char* name = snx_game_files[i].name;
-        char* to = snx_user_path(app->games_dir, snx_game_files[i].kind);
-        for (j = 0; j < (name[0] == '.' ? count : 1); ++j) { /* a game's own, by its name, or the folder's */
-            const char* file = name[0] == '.' ? names[j] : name;
-            size_t n = strlen(file), k = strlen(name);
-            char *old, *now;
-            if (name[0] == '.' && (n <= k || strcmp(file + n - k, name))) continue;
-            old = snx_path_join(app->games_dir, file);
-            now = snx_path_join(to, file);
-            left_line(app, old, now);
-            free(old);
-            free(now);
+#ifndef SDL_PLATFORM_ANDROID /* the app's own storage, as before */
+    /* gui/: the menu's own, now in the config and state folders, each where it goes */
+    for (i = 0; gui && i < 2; ++i) {
+        static const char* const files[2][3] = {{"settings.ini", "app.ini", "folders.txt"},
+                                                {"recent.txt", "last-run.log", ""}};
+        const char* to = i ? state : config;
+        int k, there = 0;
+        for (k = 0; k < 3 && files[i][k][0]; ++k) {
+            char* file = snx_path_join(gui, files[i][k]);
+            there |= file && snx_is_file(file);
+            free(file);
         }
-        free(to);
+        if (to) left_line(app, gui, to, there);
     }
-    snx_free_strings(names, count);
+#ifdef SNX_XDG /* and the state folder's gui/ of the version just before */
+    kept = snx_user_dir(SNX_USER_STATE);
+    old = kept ? snx_path_join(kept, "gui") : NULL;
+    if (old && state) left_line(app, old, state, snx_is_dir(old));
+    free(old);
+    old = NULL;
+#endif
+#endif
+    if (work && moved) left_line(app, work, moved, snx_path_exists(work));
+    left_games(app, app->games_dir);
+    for (i = 0; i < app->folder_count; ++i) left_games(app, app->folders[i]);
+    /* a portable copy's games/ beside the program, which a .scarletnx/ there holds now */
+    if (app->drivers && app->data_dir) {
+        old = snx_path_join(app->drivers, "games");
+        now = snx_format("%s/" SNX_PORTABLE_DIR "/games", app->drivers);
+        if (old && now && app->games_dir && strcmp(old, app->games_dir)) left_line(app, old, now, snx_is_dir(old));
+    }
+    free(old);
+    free(now);
+    free(kept);
     free(moved);
     free(work);
-    free(folder);
+    free(gui);
     free(data);
-#endif
+    free(state);
+    free(config);
 }
 /* ---- Clean old settings (clean.c): [Deprecated] out of each game's .ini the menu reaches, and the keys the menu's own
    files hold that nothing reads ---- */
@@ -3519,24 +3571,36 @@ static char* log_tail(const char* path, size_t max) {
     free(data);
     return text;
 }
-/* the game log written last, games/<game>.log: beside the games, or an installed build's in its state folder */
+/* the game log written last, games/<game>/<game>.log, or an older version's games/<game>.log: beside the games, or an
+   installed build's in its state folder */
 static char* newest_log(const App* app) {
-    int count = 0, i;
-    char* folder = snx_user_path(app->games_dir, SNX_USER_STATE);
-    char** names = SDL_GlobDirectory(folder, "*.log", 0, &count);
-    char* newest = NULL;
+    char *folder = snx_user_path(app->games_dir, SNX_USER_STATE), *newest = NULL, **names = NULL;
+    size_t count = 0, i, n;
     SDL_Time time = 0;
-    for (i = 0; names && i < count; ++i) {
+    if (folder) snx_list_dir(folder, &names, &count);
+    for (i = 0; i < count; ++i) {
         SDL_PathInfo info;
-        char* path = snx_path_join(folder, names[i]);
-        if (SDL_GetPathInfo(path, &info) && (!newest || info.modify_time > time)) {
+        char *path = snx_path_join(folder, names[i]), *log = NULL;
+        n = strlen(names[i]);
+        if (path && snx_is_dir(path)) { /* a game's folder: its own log */
+            char* own = snx_format("%s.log", names[i]);
+            log = snx_path_join(path, own);
+            free(own);
+        } else if (n > 4 && !strcmp(names[i] + n - 4, ".log")) {
+            log = path;
+            path = NULL;
+        }
+        if (log && SDL_GetPathInfo(log, &info) && info.type == SDL_PATHTYPE_FILE &&
+            (!newest || info.modify_time > time)) {
             free(newest);
-            newest = path;
+            newest = log;
+            log = NULL;
             time = info.modify_time;
-        } else
-            free(path);
+        }
+        free(log);
+        free(path);
     }
-    SDL_free(names);
+    snx_free_strings(names, count);
     free(folder);
     return newest;
 }
@@ -3553,8 +3617,8 @@ static void share_log(App* app) {
 #else
     folder = app->cwd;
 #endif
-#ifdef SNX_XDG
-    if (installed(app)) state = snx_user_dir(SNX_USER_STATE);
+#ifndef SDL_PLATFORM_ANDROID
+    if (app->data_dir && snx_app_dir(app->data_dir)) state = snx_app_kind_dir(app->data_dir, SNX_USER_STATE);
     if (state && snx_mkdirs(state)) {
         free(state);
         state = NULL;
@@ -4241,37 +4305,11 @@ static void cleanup(App* app) {
     SDL_DestroyWindow(app->window);
     SDL_Quit();
 }
-#ifdef SNX_XDG
-/* recent.txt and last-run.log: in the state folder's gui/ (~/.local/state/scarletnx/gui/). An older build's in the data
-   folder's stay, the menu saying so (left_behind). Elsewhere SDL_GetPrefPath's folder (under %APPDATA% on Windows) */
-static char* state_folder(void) {
-    char *state = snx_user_dir(SNX_USER_STATE), *folder = state ? snx_path_join(state, "gui") : NULL;
-    if (folder && snx_mkdirs(folder)) {
-        free(folder);
-        folder = NULL;
-    }
-    free(state);
-    return folder;
-}
-#endif
-/* the file of Settings picks: the global one, every game's (game NULL), in the config folder (XDG) or the menu's own;
-   a game's own, games/<game>.ini there, is to come. See settings.h for which a run takes first */
-static char* settings_path(const App* app, const char* game) {
-#ifdef SNX_XDG
-    char* folder = snx_user_dir(SNX_USER_CONFIG);
-#else
-    char* folder = app->recent_file ? snx_dirname(app->recent_file) : NULL;
-#endif
-    char* path = !folder ? NULL
-                 : game  ? snx_format("%s/games/%s.ini", folder, game)
-                         : snx_path_join(folder, "settings.ini");
-    (void)app;
-    free(folder);
-    return path;
-}
+/* the settings, its picks and its game folders in a file each */
+static char* settings_path(const char* config) { return config ? snx_path_join(config, "settings.ini") : NULL; }
 int snx_gui_main(const char* self) {
     App app;
-    char* prefs;
+    char *prefs, *config;
     if (!initialize(&app, self)) {
         fprintf(stderr, "scarletnx: %s\n", SDL_GetError());
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", SDL_GetError(), app.window);
@@ -4279,26 +4317,18 @@ int snx_gui_main(const char* self) {
         return 1;
     }
     /* the menu's own files, opened here, not in initialize(), so the tests keep their own */
-#ifdef SNX_XDG
-    prefs = state_folder();
-#else
-    {
-        char* sdl = SDL_GetPrefPath("scarletnx", "gui");
-        prefs = sdl ? snx_strdup(sdl) : NULL;
-        SDL_free(sdl);
-    }
-#endif
+    prefs = menu_folder(&app, SNX_USER_STATE, true);
+    config = menu_folder(&app, SNX_USER_CONFIG, true);
     if (prefs) recent_open(&app, snx_path_join(prefs, "recent.txt"));
     if (prefs) app.run_log = snx_path_join(prefs, "last-run.log");
-    app.settings_file = settings_path(&app, NULL);
+    app.settings_file = settings_path(config);
     if (app.settings_file) {
-        char* config = snx_dirname(app.settings_file);
-        app.folders_file = config ? snx_path_join(config, "folders.txt") : NULL;
-        app.app_file = config ? snx_path_join(config, "app.ini") : NULL;
-        free(config);
+        app.folders_file = snx_path_join(config, "folders.txt");
+        app.app_file = snx_path_join(config, "app.ini");
         folders_load(&app);
         app_load(&app);
     }
+    free(config);
     app.games_stamp = games_stamp(&app);
     space_start(&app); /* the footer's disk */
     free(prefs);

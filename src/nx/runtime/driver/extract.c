@@ -25,6 +25,7 @@ typedef struct {
     char *base, *update, *out, *keys, *title_keys;
     char *hactool, *temp, *home, *base_dir, *update_dir;
     char *program, *patch, *exefs, *romfs;
+    char* control; /* the Control NCA the game's name comes from: the update's, else the base's */
     int made_out, base_xci, update_xci, has_keys;
     SnxU64 title_id;
     TitleKey* titles;
@@ -33,7 +34,7 @@ typedef struct {
 typedef struct ProgramNca {
     char* path;
     SnxU64 title_id, size;
-    int patch;
+    int patch, control; /* control: a Control NCA, not a Program one */
     struct ProgramNca* next;
 } ProgramNca;
 
@@ -575,14 +576,16 @@ static int unpack(const ExtractState* state, const char* container, const char* 
     return result;
 }
 
-static int program_type(const char* information) {
+/* the NCA hactool -i described holds type, "Program" or "Control" */
+static int content_type(const char* information, const char* type) {
     const char* p;
+    size_t n = strlen(type);
     if (!information) return 0;
     p = strstr(information, "Content Type:");
     if (!p) return 0;
     p += strlen("Content Type:");
     while (*p && isspace((unsigned char)*p)) p++;
-    return !strncmp(p, "Program", 7) && !ascii_name((unsigned char)p[7]);
+    return !strncmp(p, type, n) && !ascii_name((unsigned char)p[n]);
 }
 
 static int program_title_id(const char* information, SnxU64* title_id) {
@@ -605,8 +608,10 @@ static int program_title_id(const char* information, SnxU64* title_id) {
     return 1;
 }
 
+/* the Program NCA of folder's NCAs to extract: the base's, or with update the patch of expected_title; the patch an
+   NSP of both has (embedded_patch), its title (selected_title), and the Control NCA of the same title (control) */
 static int program_nca(const ExtractState* state, const char* folder, int update, SnxU64 expected_title,
-                       char** selected, char** embedded_patch, SnxU64* selected_title) {
+                       char** selected, char** embedded_patch, SnxU64* selected_title, char** control) {
     char **names, *path, *information;
     const char* args[2];
     size_t count, i;
@@ -618,6 +623,7 @@ static int program_nca(const ExtractState* state, const char* folder, int update
     programs = base = patch = NULL;
     *selected = NULL;
     if (embedded_patch) *embedded_patch = NULL;
+    if (control) *control = NULL;
     if (snx_list_dir(folder, &names, &count)) return snx_error("Cannot enumerate extracted NCAs");
     failed = 0;
     for (i = 0; i < count; i++) {
@@ -645,7 +651,19 @@ static int program_nca(const ExtractState* state, const char* folder, int update
         args[1] = path;
         information = NULL;
         failed = run_hactool(state, args, 2, &information, NULL);
-        if (!failed && program_type(information)) {
+        if (!failed && content_type(information, "Control") && program_title_id(information, &title_id)) {
+            item = (ProgramNca*)calloc(1, sizeof *item);
+            if (!item)
+                failed = snx_error("Out of memory selecting Program NCA");
+            else {
+                item->path = path;
+                path = NULL;
+                item->title_id = title_id;
+                item->control = 1;
+                item->next = programs;
+                programs = item;
+            }
+        } else if (!failed && content_type(information, "Program")) {
             if (!program_title_id(information, &title_id))
                 failed = snx_error("hactool did not report a valid Program NCA title ID");
             else {
@@ -670,6 +688,7 @@ static int program_nca(const ExtractState* state, const char* folder, int update
     snx_free_strings(names, count);
     if (!failed) {
         for (item = programs; item; item = item->next) {
+            if (item->control) continue;
             if (update) {
                 if (item->patch && (item->title_id & ~(SnxU64)0x800UL) == expected_title &&
                     (!base || item->size > base->size))
@@ -684,7 +703,7 @@ static int program_nca(const ExtractState* state, const char* folder, int update
         else {
             if (embedded_patch) {
                 for (item = programs; item; item = item->next)
-                    if (item->patch && (item->title_id & ~(SnxU64)0x800UL) == base->title_id &&
+                    if (!item->control && item->patch && (item->title_id & ~(SnxU64)0x800UL) == base->title_id &&
                         (!patch || item->size > patch->size))
                         patch = item;
                 if (patch) {
@@ -692,6 +711,12 @@ static int program_nca(const ExtractState* state, const char* folder, int update
                     patch->path = NULL;
                 }
             }
+            for (item = programs; control && item; item = item->next) /* the same game's, base or update */
+                if (item->control && (item->title_id & ~(SnxU64)0x800UL) == (base->title_id & ~(SnxU64)0x800UL)) {
+                    *control = item->path;
+                    item->path = NULL;
+                    break;
+                }
             *selected = base->path;
             base->path = NULL;
             if (selected_title) *selected_title = base->title_id;
@@ -840,6 +865,35 @@ static int prepare_paths(ExtractState* state, const ExtractOptions* options, con
     return 0;
 }
 
+/* the game's control.nacp beside exefs/, where the loader reads the game's name from: out of the Control NCA's RomFS.
+   A game without one, or one that cannot be read, keeps the name of its file, a line saying why */
+static void control_nacp(const ExtractState* state) {
+    const char* command[2];
+    char *dir = snx_path_join(state->temp, "control"), *arg = dir ? option_arg("--romfsdir=", dir) : NULL;
+    char *from = dir ? snx_path_join(dir, "control.nacp") : NULL, *to = snx_path_join(state->out, "control.nacp");
+    const char* why = NULL;
+    if (!state->control)
+        why = "it has no Control NCA";
+    else if (!arg || !from || !to)
+        why = "out of memory";
+    else {
+        command[0] = arg;
+        command[1] = state->control;
+        if (run_hactool(state, command, 2, NULL, NULL))
+            why = "hactool could not open its Control NCA";
+        else if (!snx_is_file(from))
+            why = "its Control NCA holds no control.nacp";
+        else if (snx_copy_file(from, to))
+            why = "its control.nacp could not be copied";
+    }
+    if (why) printf("The game keeps the name of its file: %s\n", why);
+    fflush(stdout);
+    free(dir);
+    free(arg);
+    free(from);
+    free(to);
+}
+
 static int extract_files(ExtractState* state) {
     const char* command[4];
     char *switch_dir, *prod_path, *title_path, *exefs_arg, *romfs_arg, *base_arg, *main_path;
@@ -873,10 +927,15 @@ static int extract_files(ExtractState* state) {
     if (state->update_dir && read_tickets(state->update_dir, &state->titles)) goto done;
     if (write_title_keys(title_path, state->titles) ||
         program_nca(state, state->base_dir, 0, 0, &state->program, state->update_dir ? NULL : &state->patch,
-                    &state->title_id))
+                    &state->title_id, &state->control))
         goto done;
     if (state->update_dir) {
-        if (program_nca(state, state->update_dir, 1, state->title_id, &state->patch, NULL, NULL)) goto done;
+        char* newer = NULL; /* the update's Control NCA, which a name changed in it comes with */
+        if (program_nca(state, state->update_dir, 1, state->title_id, &state->patch, NULL, NULL, &newer)) goto done;
+        if (newer) {
+            free(state->control);
+            state->control = newer;
+        }
     }
     /* the base's program NCA: its RomFS is most of it, and an update's RomFS is about as big */
     progress.verb = "extracted";
@@ -909,6 +968,7 @@ static int extract_files(ExtractState* state) {
         snx_error("Extracted exefs has no main; verify that the update matches the base game");
         goto done;
     }
+    control_nacp(state);
     result = 0;
 done:
     free(switch_dir);
@@ -950,6 +1010,7 @@ static int cleanup(ExtractState* state, int result) {
     free(state->update_dir);
     free(state->program);
     free(state->patch);
+    free(state->control);
     free(state->exefs);
     free(state->romfs);
     return result;

@@ -106,23 +106,20 @@ static void user_folder(char* dir, size_t size, const char* games, int kind) {
         snprintf(dir, size, "%s", g_exedir);
     free(moved);
 }
-/* the settings, the log and threads.txt, and the pipeline cache. What an older build left beside the game stays, a
-   line in the log saying so each start */
+/* the settings, the log and threads.txt, and the pipeline cache. A game an older version laid out beside the others
+   runs where it is, a line in the log saying where its folder goes each start */
 static void user_folders(void) {
-    char from[1400], to[1400];
     char* games = snx_absolute(g_exedir[0] ? g_exedir : ".");
+    const char* folder = games ? games + strlen(games) : NULL;
+    while (folder && folder > games && folder[-1] != '/' && folder[-1] != '\\') --folder; /* the folder's own name */
     user_folder(g_confdir, sizeof g_confdir, games, SNX_USER_CONFIG);
     user_folder(g_statedir, sizeof g_statedir, games, SNX_USER_STATE);
     user_folder(g_cachedir, sizeof g_cachedir, games, SNX_USER_CACHE);
-    for (int i = 0; games && i < SNX_GAME_FILES; i++) {
-        const char* name = snx_game_files[i].name;
-        const char* game = name[0] == '.' ? g_exename : "";
-        int kind = snx_game_files[i].kind;
-        const char* dir = kind == SNX_USER_CONFIG ? g_confdir : kind == SNX_USER_STATE ? g_statedir : g_cachedir;
-        if (!strcmp(dir, g_exedir)) continue;
-        snprintf(from, sizeof from, "%s/%s%s", games, game, name);
-        snprintf(to, sizeof to, "%s%s%s", dir, game, name);
-        if (snx_left_behind(from, to)) WARN("%s was left by an older version: this one keeps it in %s\n", from, to);
+    if (folder && strcmp(folder, g_exename)) { /* not in a folder of its own name */
+        char id[17];
+        WARN(
+            "%s/%s and its files were left by an older version: this one keeps them in %s/%s/ (docs/DEPRECATIONS.md)\n",
+            games, g_exename, games, snx_title_text(g_mod->title_id, id) ? id : g_exename);
     }
     free(games);
 }
@@ -157,11 +154,19 @@ static void split_path(const char* argv0) {
     for (size_t n = strlen(p); n > 1 && (p[n - 1] == '/' || p[n - 1] == '\\'); n--) p[n - 1] = 0;
     char *s1 = strrchr(p, '/'), *s2 = strrchr(p, '\\'), *s = s1 > s2 ? s1 : s2;
     const char* base = s ? s + 1 : p;
+    /* --game=games/0100ABCD12345000 names the game in that folder, games/0100ABCD12345000/0100ABCD12345000 */
+    size_t n = strlen(p), b = strlen(base);
+    if (b && n + 1 + b < sizeof p && snx_is_dir(p)) {
+        memmove(p + n + 1, base, b + 1);
+        p[n] = '/';
+        s = p + n;
+        base = s + 1;
+    }
     strncpy(g_exename, base, 255);
     char* dot = strrchr(g_exename, '.');
     if (dot && (!strcmp(dot, ".exe") || !strcmp(dot, ".EXE") || !strcmp(dot, ".AppImage"))) *dot = 0;
     /* --game=games/Catherine_code.so names the same game as --game=games/Catherine */
-    size_t n = strlen(g_exename);
+    n = strlen(g_exename);
     if (n > 8 && (!strcmp(g_exename + n - 8, "_code.so"))) g_exename[n - 8] = 0;
     if (n > 9 && (!strcmp(g_exename + n - 9, "_code.dll"))) g_exename[n - 9] = 0;
     if (s) {
@@ -293,7 +298,8 @@ int snx_main(int argc, char** argv) {
     hints_init();
     plat_install_crash_handler();
     clock_start();
-    LOG("ScarletNX - %s\n", g_exename);
+    /* the game as it is shown, its files being named by its title ID: the menu takes its recent game's name here */
+    LOG("ScarletNX - %s\n", g_mod->title ? g_mod->title : g_exename);
     g_title_id = g_mod->title_id;
     fs_init();
     mem_init();

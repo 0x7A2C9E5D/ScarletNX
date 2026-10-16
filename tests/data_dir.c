@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* snx_data_dir, the folder the driver and the menu share: the checkout, else a portable copy's folder (a games/ beside
-   the AppImage or the program), else the user's data folder. */
+/* snx_data_dir, the folder the driver and the menu share: the checkout, else a portable copy's (.scarletnx beside the
+   AppImage or the program), else the user's data folder. */
 #define _POSIX_C_SOURCE 200809L
 #include "common/utilities/common.h"
 #include <assert.h>
@@ -17,6 +17,7 @@ static char* join(const char* a, const char* b) {
 
 int main(void) {
     char *root = snx_temp_dir(NULL), *checkout, *build, *built, *program, *mount, *copy, *data, *xdg, *expected, *file;
+    char *portable, *beside;
     assert(root);
     checkout = join(root, "checkout");
     build = join(root, "build");
@@ -53,12 +54,18 @@ int main(void) {
     data = snx_data_dir(NULL, NULL, NULL);
     assert(data && !strcmp(data, expected));
     free(data);
-    /* a games/ beside the program (the Windows zip, a portable install) */
+    /* a games/ beside the program is an older version's portable copy: not one now */
     file = join(program, "games");
     assert(!snx_mkdirs(file));
     free(file);
     data = snx_data_dir(NULL, NULL, program);
-    assert(data && !strcmp(data, program));
+    assert(data && !strcmp(data, expected));
+    free(data);
+    /* .scarletnx beside the program (the Windows zip, a portable install) is the folder */
+    beside = join(program, ".scarletnx");
+    assert(!snx_mkdirs(beside));
+    data = snx_data_dir(NULL, NULL, program);
+    assert(data && !strcmp(data, beside));
     free(data);
 
     /* an AppImage: its programs run from the mount, the copy is the AppImage file's folder */
@@ -69,23 +76,23 @@ int main(void) {
     free(file);
     file = join(mount, "bin");
     data = snx_data_dir(NULL, NULL, file);
-    assert(data && !strcmp(data, expected)); /* no games/ beside the AppImage yet */
+    assert(data && !strcmp(data, expected)); /* no .scarletnx beside the AppImage yet */
     free(data);
-    data = join(copy, "games");
-    assert(!snx_mkdirs(data));
-    free(data);
+    portable = join(copy, ".scarletnx");
+    assert(!snx_mkdirs(portable));
     data = snx_data_dir(NULL, NULL, file);
-    assert(data && !strcmp(data, copy));
+    assert(data && !strcmp(data, portable));
     free(data);
     free(file);
     /* APPIMAGE inherited by a program outside the mount: that program's own folder decides */
     data = snx_data_dir(NULL, NULL, program);
-    assert(data && !strcmp(data, program));
+    assert(data && !strcmp(data, beside));
     free(data);
+    free(portable);
+    free(beside);
 
-    puts(
-        "snx_data_dir: the checkout for its build tree's programs, beside the program, beside the AppImage, the user's "
-        "data folder");
+    puts("snx_data_dir: the checkout for its build tree's programs, .scarletnx beside the program or the AppImage, the "
+         "user's data folder");
     free(expected);
     free(xdg);
     free(copy);

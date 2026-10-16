@@ -40,9 +40,9 @@ typedef struct {
     int is_nro, has_mod0;
     SnxMod0 mod0;
     char* eh_error;
-    /* Asset and RomFS pointers alias the allocation owned by image. */
-    const unsigned char *nro_asset, *romfs_data;
-    size_t nro_asset_size, romfs_size;
+    /* Asset, NACP and RomFS pointers alias the allocation owned by image. */
+    const unsigned char *nro_asset, *nacp_data, *romfs_data;
+    size_t nro_asset_size, nacp_size, romfs_size;
 } SnxModuleImage;
 
 typedef struct {
@@ -63,6 +63,10 @@ typedef struct {
     /* Embedded NRO RomFS aliases modules[0].image and is valid until snx_free_program. */
     const unsigned char* romfs_data;
     size_t romfs_size;
+    /* the game's control.nacp, owned: an NRO's from its assets, an ExeFS's beside it (<root>/control.nacp, where the
+       extraction puts it); NULL for none */
+    unsigned char* nacp;
+    size_t nacp_size;
 } SnxProgram;
 
 /* Return 0 on success, -1 with a bounded error string on failure. Output structs are zeroed on failure.
@@ -74,5 +78,8 @@ int snx_load_nso(const char* path, const char* name, SnxModuleImage* module, cha
 int snx_load_nro(const char* path, SnxModuleImage* module, char* error, size_t error_size);
 void snx_free_module(SnxModuleImage* module);
 int snx_parse_npdm(const unsigned char* data, size_t size, SnxNpdm* npdm, char* error, size_t error_size);
+/* The NPDM snx_load_program would take for entry, without loading its modules: an NRO's, or a missing one's,
+   defaults. 0, else -1 with a bounded error string */
+int snx_load_npdm(const char* entry, SnxNpdm* npdm, char* error, size_t error_size);
 
 #endif

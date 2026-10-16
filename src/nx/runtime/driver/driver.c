@@ -3,6 +3,7 @@
 #include "nx/runtime/driver/driver.h"
 #include "common/utilities/common.h"
 #include "nx/runtime/driver/extract.h"
+#include "nx/runtime/driver/game_name.h"
 #include "nx/runtime/driver/recompile.h"
 #include "nx/runtime/cli.h"
 #include <ctype.h>
@@ -30,7 +31,7 @@ static void usage(void) {
          "  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game\n"
          "  --repo / --build-dir   Override this build's checkout / build directory\n"
-         "                         (without its checkout: a games/ folder's beside the\n"
+         "                         (without its checkout: a .scarletnx folder beside the\n"
          "                         AppImage or the program, else the user's data folder,\n"
 #ifdef _WIN32
          "                         %APPDATA%\\scarletnx)");
@@ -45,8 +46,9 @@ static void usage(void) {
          "Short options may be combined, for example -rx or -Hs.");
 #endif
 }
-/* Use the same filename alphabet as the recompiler's explicit output name. */
-static char* game_name(const char* input) {
+/* the dump's extraction in work/, named after its file in the alphabet of the recompiler's explicit output name: the
+   title ID is only known once it is extracted */
+static char* dump_name(const char* input) {
     const char *base = input, *p, *end;
     char* name;
     size_t n = 0;
@@ -86,22 +88,13 @@ static int cached_abi(const char* base) {
 }
 static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* backend, int settings,
                      char** setting, int game_argc, char** game_argv) {
-    char *name = game_name(input), *dump = snx_absolute(input);
+    char *dumped = dump_name(input), *dump = snx_absolute(input), *name = NULL;
     char *work = snx_work_dir(paths->repo), *games = snx_path_join(paths->repo, "games");
-    char *extracted = snx_path_join(work, name), *pending = snx_format("%s.extracting", extracted);
-    char *game, *base = snx_path_join(games, name), *code;
+    char *extracted = snx_path_join(work, dumped), *pending = snx_format("%s.extracting", extracted);
+    char *game = NULL, *folder = NULL, *base = NULL, *code = NULL, error[256];
     const char** command = (const char**)snx_alloc((size_t)(game_argc + settings + 16) * sizeof(*command));
     int rc = 1, nro = is_nro_path(input), n, j;
-#ifdef _WIN32
-    code = snx_format("%s_code.dll", base);
-#else
-    code = snx_format("%s_code.so", base);
-#endif
-#ifdef _WIN32
-    game = snx_format("%s/%s.exe", games, name);
-#else
-    game = snx_path_join(games, name);
-#endif
+    SnxNpdm npdm;
     if (!dump || !snx_is_file(dump)) {
         snx_error("Input dump is missing or is not a file: %s", input);
         goto done;
@@ -137,6 +130,21 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
             goto done;
         }
     }
+    /* named as the recompile names it: by the title ID, which the extraction's NPDM gives */
+    if (snx_load_npdm(nro ? dump : extracted, &npdm, error, sizeof error)) {
+        rc = snx_error("%s", error);
+        goto done;
+    }
+    name = snx_game_name(NULL, &npdm, nro ? dump : extracted);
+    folder = snx_path_join(games, name); /* the game's own, as the recompile makes it */
+    base = snx_path_join(folder, name);
+#ifdef _WIN32
+    code = snx_format("%s_code.dll", base);
+    game = snx_format("%s.exe", base);
+#else
+    code = snx_format("%s_code.so", base);
+    game = snx_strdup(base);
+#endif
     /* Always restage an NRO: a same-named cached game may belong to another input or an older build. */
     /* An explicit backend must not silently reuse a game built by another compiler. */
     if (backend || nro || (flags & SNX_RECOMP) || !snx_is_file(game) || !snx_is_file(code) || !cached_abi(base)) {
@@ -150,7 +158,6 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
         }
         command[n++] = "--";
         command[n++] = nro ? dump : extracted;
-        command[n++] = name;
         command[n] = NULL;
         rc = snx_run_stage(command, NULL, "Recompilation");
         if (rc) goto done;
@@ -184,8 +191,9 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
     if (game_argc) command[n++] = "--";
     for (j = 0; j < game_argc; ++j) command[n++] = game_argv[j];
     command[n] = NULL;
-    rc = (flags & SNX_GDB) ? snx_run_debug_stage(command, games, "Game") : snx_run_stage(command, games, "Game");
+    rc = (flags & SNX_GDB) ? snx_run_debug_stage(command, folder, "Game") : snx_run_stage(command, folder, "Game");
 done:
+    free(dumped);
     free(name);
     free(dump);
     free(work);
@@ -193,6 +201,7 @@ done:
     free(extracted);
     free(pending);
     free(game);
+    free(folder);
     free(base);
     free(code);
     free(command);

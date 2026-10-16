@@ -3160,9 +3160,11 @@ int main(int argc, char** argv) {
         app.browser = (GuiBrowser){0};
         app.theme = *gui_theme_builtin("default");
     }
-    /* Share log off Android: scarletnx.log in the working folder, with the message and the last run's output */
+    /* Share log off Android: scarletnx.log with the message and the last run's output, in the state folder of a data
+       folder that keeps its kinds apart, else in the working folder */
     {
-        char* saved = snx_path_join(temporary, "scarletnx.log");
+        char *saved = snx_path_join(temporary, "scarletnx.log"), *installed_dir = app.data_dir;
+        char *portable = snx_path_join(temporary, ".scarletnx"), *kept = snx_path_join(portable, "state/scarletnx.log");
         size_t size = 0;
         char* text;
         SDL_free(app.cwd);
@@ -3171,66 +3173,67 @@ int main(int argc, char** argv) {
         app.menu.selected = GUI_LOG;
 #ifdef SNX_XDG
         /* an installed build's in its state folder, as the working folder is the home folder from the desktop */
-        char *state = snx_path_join(temporary, "state"), *logged = snx_path_join(state, "scarletnx/scarletnx.log");
-        char* installed_dir = app.data_dir;
-        SDL_setenv_unsafe("XDG_STATE_HOME", state, 1);
+        {
+            char *state = snx_path_join(temporary, "state"), *logged = snx_path_join(state, "scarletnx/scarletnx.log");
+            SDL_setenv_unsafe("XDG_STATE_HOME", state, 1);
+            key(&app, SDLK_RETURN);
+            assert(strstr(app.message, logged) && !snx_path_exists(saved));
+            text = (char*)snx_read_file(logged, &size);
+            assert(text && strstr(text, "Message: before the log"));
+            free(text);
+            free(logged);
+            free(state);
+        }
+#endif
+        /* a portable copy's .scarletnx/: its state/, on every system */
+        app.data_dir = snx_strdup(portable);
+        snprintf(app.message, sizeof(app.message), "before the log");
         key(&app, SDLK_RETURN);
-        assert(strstr(app.message, logged) && !snx_path_exists(saved));
-        text = (char*)snx_read_file(logged, &size);
+        assert(strstr(app.message, "scarletnx.log") && snx_is_file(kept) && !snx_path_exists(saved));
+        text = (char*)snx_read_file(kept, &size);
         assert(text && strstr(text, "Message: before the log"));
         free(text);
-        free(logged);
-        free(state);
-        /* any other build's (a checkout, a portable copy) in the working folder */
+        /* any other build's (a checkout) in the working folder */
+        free(app.data_dir);
         app.data_dir = snx_strdup(temporary);
         snprintf(app.message, sizeof(app.message), "before the log");
-#endif
         key(&app, SDLK_RETURN);
         assert(!strncmp(app.message, "Log saved to ", 13) && strstr(app.message, "scarletnx.log"));
         text = (char*)snx_read_file(saved, &size);
         assert(text && strstr(text, "Message: before the log") && strstr(text, "== the last run: "));
         free(text);
-        free(saved);
-#ifdef SNX_XDG
         free(app.data_dir);
         app.data_dir = installed_dir;
-#endif
+        assert(!snx_remove_tree(portable));
+        free(kept);
+        free(portable);
+        free(saved);
     }
 #ifdef SNX_XDG
-    /* the menu's recent.txt and last-run.log in the state folder's gui/; an older build's in the data folder's stay */
+    /* the menu's recent.txt and last-run.log in the state folder; an older build's in the data folder's gui/ stay */
     {
         char *data = snx_path_join(temporary, "data"), *state = snx_path_join(temporary, "state");
         char *old = snx_path_join(data, "scarletnx/gui"), *recent = snx_path_join(old, "recent.txt");
-        char *run = snx_path_join(old, "last-run.log"), *folder, *expected = snx_path_join(state, "scarletnx/gui"),
-             *now;
+        char *run = snx_path_join(old, "last-run.log"), *folder, *expected = snx_path_join(state, "scarletnx"), *now;
         assert(!snx_mkdirs(old) && !snx_write_file(recent, "recent", 6) && !snx_write_file(run, "run", 3));
         SDL_setenv_unsafe("XDG_DATA_HOME", data, 1);
-        folder = state_folder();
+        folder = menu_folder(&app, SNX_USER_STATE, true);
         assert(folder && !strcmp(folder, expected) && snx_file_size(recent) == 6 && snx_file_size(run) == 3);
         now = snx_path_join(folder, "recent.txt");
         assert(!snx_path_exists(now) && snx_left_behind(recent, now));
         free(now);
         free(folder);
-        /* the menu says, a line at a time, what an older build left where this one no longer looks: its own files,
-           work/ and each game's, until they are gone */
+        /* the menu says, a folder at a time, what an older build left where this one no longer looks: its own files'
+           gui/, work/, each game laid out beside the others (its folder now by its title ID, else by its name), until
+           they are gone */
 #define LONG "Foo, a game whose name is longer than a row of the box has room for"
         {
-            char *installed_dir = app.data_dir, *games = app.games_dir, *ini, *log, *threads, *work, *line;
-            const char* const lines[] = {"%s/scarletnx/gui/recent.txt",
-                                         "%s/scarletnx/gui/recent.txt",
-                                         "%s/scarletnx/gui/last-run.log",
-                                         "%s/scarletnx/gui/last-run.log",
-                                         "%s/scarletnx/work",
-                                         "%s/scarletnx/work",
-                                         "%s/scarletnx/games/" LONG ".log",
-                                         "%s/scarletnx/games/" LONG ".log",
-                                         "%s/scarletnx/games/threads.txt",
-                                         "%s/scarletnx/games/threads.txt",
-                                         "%s/scarletnx/games/" LONG ".ini",
-                                         "%s/scarletnx/games/" LONG ".ini"};
-            const char* const into[] = {state, state, "cache", "state", "state", "config"};
+            char *installed_dir = app.data_dir, *games = app.games_dir, *loose, *loose_data, *named, *npdm, *work,
+                 *line;
             char* config = snx_path_join(temporary, "config");
             char* cache = snx_path_join(temporary, "cache");
+            char* lines[5][2];
+            unsigned char meta[0xa0];
             const char* at;
             int i;
             SDL_setenv_unsafe("XDG_CONFIG_HOME", config, 1);
@@ -3238,23 +3241,40 @@ int main(int argc, char** argv) {
             app.data_dir = snx_path_join(data, "scarletnx");
             app.games_dir = snx_path_join(app.data_dir, "games");
             app.recent_file = snx_path_join(expected, "recent.txt");
-            ini = snx_path_join(app.games_dir, LONG ".ini");
-            log = snx_path_join(app.games_dir, LONG ".log");
-            threads = snx_path_join(app.games_dir, "threads.txt");
+            loose = snx_path_join(app.games_dir, LONG);
+            loose_data = snx_format("%s_data", loose);
+            named = snx_path_join(app.games_dir, "Tunic");
+            npdm = snx_path_join(app.games_dir, "Tunic_data/exefs/main.npdm");
             work = snx_path_join(app.data_dir, "work");
-            assert(!snx_mkdirs(work) && !snx_mkdirs(app.games_dir) && !snx_write_file(ini, "", 0));
-            assert(!snx_write_file(log, "", 0) && !snx_write_file(threads, "", 0));
+            memset(meta, 0, sizeof meta); /* an NPDM whose ACI0 at 0x80 gives the game its title ID */
+            memcpy(meta, "META", 4);
+            meta[0x70] = 0x80;
+            meta[0x74] = 0x20;
+            memcpy(meta + 0x80, "ACI0", 4);
+            for (i = 0; i < 8; ++i) meta[0x90 + i] = (unsigned char)(0x0100DA801624E000ull >> (8 * i));
+            line = snx_dirname(npdm);
+            assert(!snx_mkdirs(work) && !snx_mkdirs(loose_data) && !snx_mkdirs(line) && !snx_write_file(loose, "", 0));
+            assert(!snx_write_file(named, "", 0) && !snx_write_file(npdm, meta, sizeof meta));
+            free(line);
+            lines[0][0] = snx_strdup(old); /* the menu's gui/, its recent games and last run in the state folder */
+            lines[0][1] = snx_strdup(expected);
+            lines[1][0] = snx_strdup(work);
+            lines[1][1] = snx_format("%s/scarletnx/work", cache);
+            lines[2][0] = snx_strdup(loose);
+            lines[2][1] = snx_format("%s/" LONG "/", app.games_dir);
+            lines[3][0] = snx_strdup(named);
+            lines[3][1] = snx_format("%s/0100DA801624E000/", app.games_dir);
+            lines[4][0] = snx_path_join(app.drivers, "games"); /* a portable copy's games/ beside the program */
+            lines[4][1] = snx_format("%s/.scarletnx/games", app.drivers);
             left_behind(&app);
-            assert(app.lefts == 6);
-            for (i = 0, at = app.left; i < 6; ++i, at = strchr(at, '\n') + 1) {
-                char *old_path = snx_format(lines[2 * i], data), *now_path;
-                const char* root = !strcmp(into[i], "config") ? config : !strcmp(into[i], "cache") ? cache : state;
-                now_path = snx_format(lines[2 * i + 1], root);
-                line = snx_format("%s was left by an older version: this one keeps it in %s\n", old_path, now_path);
+            assert(app.lefts == 5 && snx_is_dir(lines[4][0]));
+            for (i = 0, at = app.left; i < 5; ++i, at = strchr(at, '\n') + 1) {
+                line =
+                    snx_format("%s was left by an older version: this one keeps it in %s\n", lines[i][0], lines[i][1]);
                 assert(!strncmp(at, line, strlen(line)));
                 free(line);
-                free(now_path);
-                free(old_path);
+                free(lines[i][0]);
+                free(lines[i][1]);
             }
             /* in a box over the menu as it opens: each where it is (-) and where it would go (->, in ink: a proposal,
                not a diff's added green), a path too long for a row going on in the next, as many as fit */
@@ -3265,7 +3285,7 @@ int main(int argc, char** argv) {
                 int window_w, window_h, text_size = app.menu.text_size;
                 app.left_shown = true;
                 app.clock = 1;
-                /* tall enough for all six, whatever the temporary folder's path, at the letters' size of now */
+                /* tall enough for all five, whatever the temporary folder's path, at the letters' size of now */
                 assert(SDL_GetWindowSize(app.window, &window_w, &window_h));
                 app.menu.text_size = app.scale;
                 assert(SDL_SetWindowSize(app.window, window_w, 30 * 16 * app.scale));
@@ -3286,14 +3306,14 @@ int main(int argc, char** argv) {
                             rest += cut;
                         }
                 }
-                assert(wraps >= 4); /* the long game's paths wrap */
+                assert(wraps >= 2); /* the long game's paths wrap */
                 shows(&app, "- OK, nothing is moved", yellow);
                 hides(&app, "which Share log lists", rgb(app.theme.soft));
                 /* a window too short for them all: as many as fit, then how many more */
                 assert(SDL_SetWindowSize(app.window, window_w, 14 * 16 * app.scale));
                 SDL_SyncWindow(app.window);
                 render(&app);
-                for (more = 0, n = 1; n < 6; ++n) {
+                for (more = 0, n = 1; n < 5; ++n) {
                     char said[64];
                     int x, y;
                     snprintf(said, sizeof said, "and %d more, which Share log lists", n);
@@ -3316,20 +3336,26 @@ int main(int argc, char** argv) {
                 }
                 /* a key closes it and does nothing else; nothing was moved */
                 key(&app, SDLK_DOWN);
-                assert(!app.left_shown && app.menu.selected == selected && snx_is_file(ini));
+                assert(!app.left_shown && app.menu.selected == selected && snx_is_file(loose));
                 /* Clean old settings cleans settings only: what an older version left stays where it is */
                 clean_old(&app);
-                assert(snx_is_file(ini) && snx_is_file(log) && snx_is_file(threads) && snx_is_dir(work));
+                assert(snx_is_file(loose) && snx_is_dir(loose_data) && snx_is_file(npdm) && snx_is_dir(work));
                 left_behind(&app);
-                assert(app.lefts == 6);
+                assert(app.lefts == 5);
                 gui_cleaned_free(&app.cleaned);
                 app.cleaned_shown = false;
-                /* gone while it shows, it closes */
-                app.left_shown = true;
-                assert(!snx_remove_tree(app.data_dir)); /* its gui/ too */
-                app.left_at = 0;
-                pump(&app);
-                assert(!app.left_shown && !app.lefts && !app.left);
+                /* gone while it shows, it closes: the data folder's, and the program in a folder with no games/ */
+                {
+                    char* drivers = app.drivers;
+                    app.drivers = snx_path_join(temporary, "program alone");
+                    app.left_shown = true;
+                    assert(!snx_remove_tree(app.data_dir)); /* its gui/ too */
+                    app.left_at = 0;
+                    pump(&app);
+                    assert(!app.left_shown && !app.lefts && !app.left);
+                    free(app.drivers);
+                    app.drivers = drivers;
+                }
             }
             SDL_setenv_unsafe("XDG_CONFIG_HOME", "/nonexistent/snx-gui-test/config", 1);
             SDL_setenv_unsafe("XDG_CACHE_HOME", "/nonexistent/snx-gui-test/cache", 1);
@@ -3340,16 +3366,17 @@ int main(int argc, char** argv) {
             free(app.data_dir);
             app.data_dir = installed_dir;
             free(work);
-            free(threads);
-            free(log);
-            free(ini);
+            free(npdm);
+            free(named);
+            free(loose_data);
+            free(loose);
             free(cache);
             free(config);
         }
 #undef LONG
         /* and an empty state folder is made for the first run */
         assert(!snx_remove_tree(state));
-        folder = state_folder();
+        folder = menu_folder(&app, SNX_USER_STATE, true);
         assert(folder && snx_is_dir(folder));
         free(folder);
         SDL_setenv_unsafe("XDG_DATA_HOME", "/nonexistent/snx-gui-test", 1);

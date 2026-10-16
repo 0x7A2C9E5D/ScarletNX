@@ -63,7 +63,7 @@ Run the same command again to retry after a failure or interruption:
 
 - `work/Game/` skips extraction. Automatic extraction publishes this directory only after success,
   using `work/Game.extracting/` while running. An incomplete staging directory is discarded on retry.
-- A complete `games/Game` (`Game.exe` on Windows), code module and matching `Game.abi` stamp
+- A complete `games/Game/Game` (`Game.exe` on Windows), code module and matching `Game.abi` stamp
   skip recompilation. An ABI change or missing/invalid stamp triggers recompilation automatically.
   Older unstamped games rebuild once. Failed builds never publish a valid ABI checkpoint.
 - Changing directory and running the game happen on every launch. A game failure never invalidates the build.
@@ -94,7 +94,7 @@ To run the steps separately:
 ```sh
 ./build/scarletnx -x "Game.xci" --name Game
 ./build/scarletnx -r work/Game Game
-games/Game
+games/Game/Game
 ```
 
 ```powershell
@@ -125,17 +125,17 @@ Remaining examples: POSIX.
   `-O 0..3,s,z` sets the optimization level.
 - **Codegen:** `--no-build` stages data/INI only; `--interp-only` omits AOT functions.
   `--chunk N` sets instructions per code unit. Nothing is cached between runs.
-  `--keep-ir` saves the generated code (LLVM IR, libgccjit dumps) in `<outdir>/<NAME>_build/`.
+  `--keep-ir` saves the generated code (LLVM IR, libgccjit dumps) in `<outdir>/<NAME>/<NAME>_build/`.
 - **Data updates:** ExeFS refreshes; `Game_data/romfs` is reused.
   Replace cached RomFS after asset changes; preserve `Game_data/save/`.
 
 | Output | Contents |
 | --- | --- |
 | `work/Game/{exefs,romfs}` | Extracted input |
-| `games/Game[.exe]`, `Game_code.so/.dll` | Runtime + AOT module |
-| `games/Game_data/`, `Game.ini` | Data/saves + settings |
-| `games/Game_build/` | Generated code, only with `--keep-ir` |
-| `games/shader_cache/vk_pipelines.bin` | Vulkan pipeline cache |
+| `games/Game/Game[.exe]`, `Game_code.so/.dll` | Runtime + AOT module |
+| `games/Game/Game_data/`, `Game.ini` | Data/saves (and `control.nacp`) + settings |
+| `games/Game/Game_build/` | Generated code, only with `--keep-ir` |
+| `games/Game/shader_cache/vk_pipelines.bin` | Vulkan pipeline cache |
 
 ## GDB (UNIX only)
 
@@ -145,13 +145,13 @@ Install `gdbserver` on PATH. `-S` enables the native-code stub on loopback port 
 
 ```sh
 ./build/scarletnx -s "Game.xci"
-# Or: games/Game -Hs
+# Or: games/Game/Game -Hs
 ```
 
 In GDB, load the deployed executable's symbols and connect:
 
 ```gdb
-file games/Game
+file games/Game/Game
 tar rem :1234
 continue
 ```
@@ -205,11 +205,12 @@ This does not impose a staging-memory cap or fix the allocation/flush issues ide
 ```sh
 chmod +x ScarletNX-x86_64.AppImage
 ./ScarletNX-x86_64.AppImage --game=games/Game
-SDL_VIDEO_DRIVER=x11 games/Game
+SDL_VIDEO_DRIVER=x11 games/Game/Game
 ```
 
 On an ARM64 machine the image is `ScarletNX-aarch64.AppImage`.
-`--game` selects `Game_code.so`/`Game_data/`; or name the image `games/Game.AppImage` to load adjacent files.
+`--game` selects the game's folder, its `Game_code.so` and `Game_data/`; or name the image `games/Game/Game.AppImage`
+to load the files beside it.
 The AppImage also prepares dumps: `./ScarletNX-x86_64.AppImage Game.nsp`, in the folder [Folders](#folders) names,
 and each game gets a copy of the AppImage (on Windows, of `scarletnx.exe` and the DLLs next to it).
 X11 bypasses Wayland. [Licenses](CREDITS.md).
@@ -219,31 +220,39 @@ X11 bypasses Wayland. [Licenses](CREDITS.md).
 The driver works in one folder, the first of these that applies (`--repo DIR` names another):
 
 1. the checkout it was built from, for a program run from its build tree;
-2. a portable copy's: the folder of the AppImage, or of the Windows zip's programs, with a `games/` folder beside it;
+2. a portable copy's: `.scarletnx/` beside the AppImage, or beside the Windows zip's programs, when it is there;
 3. the user's data folder: `~/.local/share/scarletnx` on Linux, `%APPDATA%\scarletnx` on Windows,
    `~/Library/Application Support/scarletnx` on macOS. On Android the app names its own, `/sdcard/ScarletNX`.
 
-Everything stays in that folder, except on Linux when it is the user's data folder: there what is not a game itself
-goes in the [XDG](https://specifications.freedesktop.org/basedir/latest/) folder of its kind.
+Each game is a folder of `games/` named by its title ID, `games/0100DA801624E000/` and its files
+`0100DA801624E000*` in it; a program without an ID of its own (an NRO, an ExeFS without NPDM) by its name, and
+`--name` names any. The game is shown by the name in its `control.nacp` (the window, the recompile, the menu's
+list). A data folder that is not a checkout keeps each kind of file apart: on Linux in the
+[XDG](https://specifications.freedesktop.org/basedir/latest/) folder of its kind, elsewhere in its own `config/`,
+`state/` and `cache/`. A checkout's games, and an `--outdir`'s, keep everything in their folders.
 
-| What | In the folder | Linux, the user's data folder |
-| --- | --- | --- |
-| a game: its program, `Game_code.so`, `Game_data/` (saves), `captures/` | `games/` | `~/.local/share/scarletnx/games/` |
-| its settings, `Game.ini` | `games/` | `~/.config/scarletnx/games/` |
-| its `Game.log` and `threads.txt` | `games/` | `~/.local/state/scarletnx/games/` |
-| its pipeline cache | `games/shader_cache/` | `~/.cache/scarletnx/games/shader_cache/` |
-| extractions (`3ds/` for the 3DS driver) | `work/` | `~/.cache/scarletnx/work/` |
-| the menu's themes, `<name>/theme.ini` | `themes/` | `~/.local/share/scarletnx/themes/` |
-| `prod.keys`, read before `~/.switch` | the folder | `~/.local/share/scarletnx/` |
-| the menu's Share log, `scarletnx.log` | the working folder (`/sdcard/ScarletNX/` on Android) | `~/.local/state/scarletnx/` |
+| What | A checkout, an `--outdir` | Linux, the user's data folder | Another data folder |
+| --- | --- | --- | --- |
+| a game: its program, `<id>_code.so`, `<id>_data/` (saves, `control.nacp`), `captures/` | `games/<id>/` | `~/.local/share/scarletnx/games/<id>/` | `games/<id>/` |
+| its settings, `<id>.ini` | `games/<id>/` | `~/.config/scarletnx/games/<id>/` | `config/games/<id>/` |
+| its `<id>.log` and `threads.txt` | `games/<id>/` | `~/.local/state/scarletnx/games/<id>/` | `state/games/<id>/` |
+| its pipeline cache | `games/<id>/shader_cache/` | `~/.cache/scarletnx/games/<id>/shader_cache/` | `cache/games/<id>/shader_cache/` |
+| extractions (`3ds/` for the 3DS driver) | `work/` | `~/.cache/scarletnx/work/` | `cache/work/` |
+| the menu's themes, `<name>/theme.ini` | `themes/` | `~/.local/share/scarletnx/themes/` | `themes/` |
+| the menu's `settings.ini`, `app.ini`, `folders.txt` | the user's, as in the next columns | `~/.config/scarletnx/` | `config/` |
+| the menu's `recent.txt`, `last-run.log` | the user's, as in the next columns | `~/.local/state/scarletnx/` | `state/` |
+| the menu's Share log, `scarletnx.log` | the working folder | `~/.local/state/scarletnx/` | `state/` |
+| `prod.keys`, read before `~/.switch` | the folder | `~/.local/share/scarletnx/` | the folder |
 
-The menu's `recent.txt` and `last-run.log` follow the user, not the folder: `~/.local/state/scarletnx/gui/` on Linux,
-`%APPDATA%\scarletnx\gui\` on Windows. `~/.local/share`, `~/.config`, `~/.local/state` and `~/.cache` are the defaults
-of `$XDG_DATA_HOME`, `$XDG_CONFIG_HOME`, `$XDG_STATE_HOME` and `$XDG_CACHE_HOME` (a relative one is ignored).
+On Android the menu's own files stay in the app's own storage, which needs no permission. `~/.local/share`,
+`~/.config`, `~/.local/state` and `~/.cache` are the defaults of `$XDG_DATA_HOME`, `$XDG_CONFIG_HOME`,
+`$XDG_STATE_HOME` and `$XDG_CACHE_HOME` (a relative one is ignored).
 
-An older version kept all of it in the data folder (`games/Game.ini`, `games/Game.log`, `work/`, `gui/recent.txt`).
-This one moves none of it: as long as an older file is there, each run says where it is and where it goes now, in
-the output or the game's log.
+An older version kept a game's files side by side in `games/` (`games/Game`, `Game_code.so`, `Game_data/`,
+`Game.ini`), the menu's in the data folder's `gui/`, outside Linux the rest in the data folder itself, and a portable
+copy's in a `games/` beside the program. This one moves none of it: as long as it is there, the menu lists each
+folder and where it goes now, and an older game runs where it is, its run saying where its folder goes.
+[DEPRECATIONS](DEPRECATIONS.md) says how to move them.
 
 ## Settings / input
 

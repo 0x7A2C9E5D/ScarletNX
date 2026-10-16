@@ -81,37 +81,50 @@ static int ends_ini(const char* name) {
     return n > 4 && name[n - 4] == '.' && tolower((unsigned char)name[n - 3]) == 'i' &&
            tolower((unsigned char)name[n - 2]) == 'n' && tolower((unsigned char)name[n - 1]) == 'i';
 }
+/* 1 when the .ini at path has a [Deprecated] section; with done, written again without it */
+static int clean_ini(GuiCleaned* done, const char* path) {
+    size_t size = 0, kept;
+    char *text, *staged, what[300];
+    int found = 0;
+    text = snx_is_file(path) ? (char*)snx_read_file(path, &size) : NULL;
+    if (!text && snx_is_file(path) && done) {
+        snprintf(what, sizeof what, "Not read: %s", strerror(errno));
+        gui_cleaned_add(done, false, path, what);
+    }
+    kept = text ? gui_clean_deprecated(text, size) : size;
+    if (text && kept != size) {
+        ++found;
+        if (done) { /* staged beside it, then put in place: a crash mid-write leaves it as it was */
+            int failed;
+            staged = snx_format("%s.new", path);
+            failed = !staged || snx_write_file(staged, text, kept) || snx_replace(staged, path);
+            if (failed) {
+                snprintf(what, sizeof what, "Not written without [Deprecated]: %s", strerror(errno));
+                if (staged) remove(staged);
+            }
+            gui_cleaned_add(done, !failed, path, failed ? what : "[Deprecated] taken out");
+            free(staged);
+        }
+    }
+    free(text);
+    return found;
+}
 int gui_clean_inis(GuiCleaned* done, const char* folder) {
-    char** names = NULL;
+    char **names = NULL, *path, *inside, *own;
     size_t count = 0, i;
     int found = 0;
     if (!folder || snx_list_dir(folder, &names, &count)) return 0;
     for (i = 0; i < count; ++i) {
-        size_t size = 0, kept;
-        char *path, *text, *staged, what[300];
-        if (!ends_ini(names[i])) continue;
         path = snx_path_join(folder, names[i]);
-        text = snx_is_file(path) ? (char*)snx_read_file(path, &size) : NULL;
-        if (!text && snx_is_file(path) && done) {
-            snprintf(what, sizeof what, "Not read: %s", strerror(errno));
-            gui_cleaned_add(done, false, path, what);
+        if (ends_ini(names[i]))
+            found += clean_ini(done, path);
+        else if (path && snx_is_dir(path) && !snx_is_link(path)) { /* a game's folder: its own <name>.ini */
+            own = snx_format("%s.ini", names[i]);
+            inside = own ? snx_path_join(path, own) : NULL;
+            if (inside && snx_is_file(inside)) found += clean_ini(done, inside);
+            free(inside);
+            free(own);
         }
-        kept = text ? gui_clean_deprecated(text, size) : size;
-        if (text && kept != size) {
-            ++found;
-            if (done) { /* staged beside it, then put in place: a crash mid-write leaves it as it was */
-                int failed;
-                staged = snx_format("%s.new", path);
-                failed = !staged || snx_write_file(staged, text, kept) || snx_replace(staged, path);
-                if (failed) {
-                    snprintf(what, sizeof what, "Not written without [Deprecated]: %s", strerror(errno));
-                    if (staged) remove(staged);
-                }
-                gui_cleaned_add(done, !failed, path, failed ? what : "[Deprecated] taken out");
-                free(staged);
-            }
-        }
-        free(text);
         free(path);
     }
     snx_free_strings(names, count);

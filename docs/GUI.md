@@ -114,11 +114,11 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   `/sdcard/ScarletNX/` and is shared.
 - **Exit** closes the launcher. Closing its window during a run terminates the
   entire owned process tree, so let the game exit normally to preserve its saves.
-- On Linux, as it opens, the menu shows in a box what an older version left where this one no
-  longer looks: each file where it is (`- `, in the failure colour) and where to move it (`-> `),
-  a path too long for a row going on in the next. They are the menu's
-  `recent.txt` and `last-run.log`, `work/`, and each game's settings, log, `threads.txt` and
-  pipeline cache. Any key, click or tap closes it;
+- As it opens, the menu shows in a box what an older version left where this one no longer looks, a
+  folder at a time: where it is (`- `, in the failure colour) and where it goes now (`-> `), a path
+  too long for a row going on in the next. They are the menu's `gui/`, `work/`, each game laid out
+  beside the others in `games/` or a game folder (`games/<id>/` now) and a portable copy's `games/`
+  beside the program ([USAGE](USAGE.md#folders)). Any key, click or tap closes it;
   nothing is moved, and it shows again at the next start for as long as they are there.
   **Share log** lists them all.
 - **Recent games**, in Games under Add a folder, lists the last games run, newest first, three and a row that
@@ -147,8 +147,8 @@ Status box. See [GNUABI](GNUABI.md) for supported Linux ELF applications.
 on Android, and CIA files, which go to the 3DS driver. It reads the `games/` of the
 folder the driver works in, which the menu passes it as `--repo`: the checkout of a build tree,
 else the folder of an AppImage (or of the GUI) that has a `games/` beside it, else the user's
-data folder (docs/USAGE.md), then each folder of Settings > App > Game folders. Each entry is
-displayed by basename, sorted alphabetically in each folder. Only immediate files are listed:
+data folder (docs/USAGE.md), then each folder of Settings > App > Game folders. Each game is shown by the name in its `control.nacp`, which the recompile copies into
+its data, else by its folder's or file's name, sorted by it in each folder. Only immediate files are listed:
 executables (execute permission on UNIX, `.exe` on Windows) and `.cia` files (case-insensitive,
 no execute permission needed), which run with the 3DS driver. Hidden files, shared libraries and
 directories are excluded. The folders are looked at once a second while the menu is open (their

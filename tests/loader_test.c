@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "nx/loader/loader.h"
+#include "nx/runtime/driver/game_name.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -359,6 +360,105 @@ static void test_nro_npdm(void) {
     puts("PASS NRO assets/program loading and bounded NPDM metadata");
 }
 
+/* the name a game is shown by: an NRO's control.nacp in its assets, an ExeFS's beside it, American English's name,
+   else the first language's that has one, trimmed and cut whole at a UTF-8 sequence; --name over it, the title
+   without it. The files keep the title ID */
+static void test_nacp(const char* root, const char* exefs) {
+    static unsigned char nacp[0x600];
+    char name[32], error[256], *path, *shown;
+    SnxProgram program;
+    memset(nacp, 0, sizeof nacp);
+    memcpy(nacp + 0x300, "  Synth\xc3\xa9tique ", 15); /* the second language's; American English's is empty */
+    CHECK(snx_nacp_name(nacp, sizeof nacp, name, sizeof name) && !strcmp(name, "Synth\xc3\xa9tique"));
+    CHECK(snx_nacp_name(nacp, sizeof nacp, name, 9) && !strcmp(name, "Synth")); /* "  Synth\xc3": the \xc3 goes */
+    CHECK(!snx_nacp_name(nacp, 0x300, name, sizeof name) && !name[0]);
+    CHECK(!snx_nacp_name(NULL, 0, name, sizeof name) && !name[0]);
+    memcpy(nacp, "First\x01", 6); /* American English's, a control character left out */
+    CHECK(snx_nacp_name(nacp, sizeof nacp, name, sizeof name) && !strcmp(name, "First"));
+    /* in an NRO's assets, after its RomFS */
+    build_nro();
+    put64(file_bytes + 0x418, 0x40);
+    put64(file_bytes + 0x420, sizeof nacp);
+    memcpy(file_bytes + 0x440, nacp, sizeof nacp);
+    path = fixture("named.nro", file_bytes, 0x440 + sizeof nacp);
+    CHECK(!snx_load_program(path, &program, error, sizeof error));
+    CHECK(program.nacp_size == sizeof nacp && !memcmp(program.nacp, nacp, sizeof nacp) && program.romfs_size == 5);
+    shown = snx_game_shown(NULL, &program);
+    CHECK(!strcmp(shown, "First"));
+    free(shown);
+    shown = snx_game_shown("My Game", &program);
+    CHECK(!strcmp(shown, "My Game"));
+    free(shown);
+    snx_free_program(&program);
+    free(path);
+    /* beside an ExeFS, where the extraction puts it; none: the title */
+    CHECK(!snx_load_program(exefs, &program, error, sizeof error) && !program.nacp);
+    shown = snx_game_shown(NULL, &program);
+    CHECK(!strcmp(shown, "Synthetic Loader"));
+    free(shown);
+    snx_free_program(&program);
+    path = snx_path_join(root, "control.nacp");
+    CHECK(!snx_write_file(path, nacp, sizeof nacp));
+    CHECK(!snx_load_program(exefs, &program, error, sizeof error) && program.nacp_size == sizeof nacp);
+    shown = snx_game_shown(NULL, &program);
+    CHECK(!strcmp(shown, "First"));
+    free(shown);
+    shown = snx_game_name(NULL, &program.npdm, program.entry_path);
+    CHECK(!strcmp(shown, "123456789ABCDEF0")); /* the files: the title ID still */
+    free(shown);
+    snx_free_program(&program);
+    CHECK(!snx_remove_tree(path));
+    free(path);
+    puts("PASS the name in an NRO's or an ExeFS's control.nacp");
+}
+
+/* snx_load_npdm finds the NPDM snx_load_program takes, without the modules; snx_game_name names the game's files by
+   its title ID when it has one of its own, else as it is shown */
+static void test_npdm_of(const char* root, const char* exefs) {
+    SnxNpdm npdm;
+    char error[256], *path, *name, *nro;
+    size_t size;
+    CHECK(!snx_load_npdm(root, &npdm, error, sizeof error) && npdm.prio == 37);
+    CHECK(!snx_load_npdm(exefs, &npdm, error, sizeof error));
+    CHECK(npdm.title_id == (((SnxU64)0x12345678UL << 32) | 0x9abcdef0UL));
+    name = snx_game_name(NULL, &npdm, root);
+    CHECK(!strcmp(name, "123456789ABCDEF0"));
+    free(name);
+    name = snx_game_title(NULL, &npdm, root);
+    CHECK(!strcmp(name, "Synthetic Loader"));
+    free(name);
+    name = snx_game_name("My Game", &npdm, root); /* --name: the player's word */
+    CHECK(!strcmp(name, "My Game"));
+    free(name);
+    npdm.title_id = SNX_NPDM_DEFAULT_TITLE; /* an NRO's, or an ExeFS's without NPDM: none of its own */
+    name = snx_game_name(NULL, &npdm, root);
+    CHECK(!strcmp(name, "Synthetic Loader"));
+    free(name);
+    npdm.title_id = 0;
+    strcpy(npdm.name, "Application");
+    name = snx_game_name(NULL, &npdm, "/dumps/Some Game v1.0.nro");
+    CHECK(!strcmp(name, "Some Game v1.0"));
+    free(name);
+    path = snx_path_join(exefs, "main.npdm");
+    CHECK(!snx_remove_tree(path));
+    CHECK(!snx_load_npdm(root, &npdm, error, sizeof error) && npdm.title_id == SNX_NPDM_DEFAULT_TITLE);
+    CHECK(!snx_write_file(path, "META", 4)); /* a broken one is refused, as snx_load_program refuses it */
+    CHECK(snx_load_npdm(root, &npdm, error, sizeof error) == -1 && strstr(error, "NPDM"));
+    CHECK(!snx_remove_tree(path));
+    free(path);
+    path = snx_path_join(scratch, "no-exefs");
+    CHECK(!snx_mkdirs(path));
+    CHECK(snx_load_npdm(path, &npdm, error, sizeof error) == -1 && strstr(error, "exefs/main"));
+    free(path);
+    size = build_nro();
+    nro = fixture("homebrew.nro", file_bytes, size);
+    CHECK(!snx_load_npdm(nro, &npdm, error, sizeof error) && npdm.title_id == SNX_NPDM_DEFAULT_TITLE);
+    name = snx_game_name(NULL, &npdm, nro);
+    CHECK(!strcmp(name, "homebrew"));
+    free(name);
+    free(nro);
+}
+
 static void test_program(void) {
     static const char* names[4] = {"rtld", "main", "subsdk2", "sdk"};
     SnxProgram program;
@@ -398,6 +498,8 @@ static void test_program(void) {
     CHECK(!snx_load_program(exefs, &program, error, sizeof error));
     CHECK(program.module_count == 4 && program.root_path != NULL);
     snx_free_program(&program);
+    test_nacp(root, exefs);
+    test_npdm_of(root, exefs);
     free(root);
     free(exefs);
     free(romfs);

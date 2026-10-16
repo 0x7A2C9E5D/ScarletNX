@@ -47,7 +47,7 @@ python3 tools/disasm.py work/Game cf34240 cf343c0
 ## Shaders
 
 ```sh
-SNX_SHADER_CORPUS=corpus games/Game
+SNX_SHADER_CORPUS=corpus games/Game/Game
 build/snx-shaderc corpus --validate --out translated
 ```
 

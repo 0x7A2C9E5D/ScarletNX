@@ -827,6 +827,10 @@ int snx_load_nro(const char* path, SnxModuleImage* m, char* error, size_t error_
                 fail(&p, "NRO: asset exceeds ASET data");
                 goto bad;
             }
+            if (i == 1 && length) {
+                m->nacp_data = m->nro_asset + (size_t)offset;
+                m->nacp_size = (size_t)length;
+            }
             if (i == 2 && length) {
                 m->romfs_data = m->nro_asset + (size_t)offset;
                 m->romfs_size = (size_t)length;
@@ -852,7 +856,7 @@ int snx_parse_npdm(const unsigned char* data, size_t size, SnxNpdm* npdm, char* 
     npdm->prio = 44;
     npdm->is64 = 1;
     npdm->aspace = 3;
-    npdm->title_id = ((SnxU64)0x01000000UL << 32) | 0x1000;
+    npdm->title_id = SNX_NPDM_DEFAULT_TITLE;
     memcpy(npdm->name, "Application", 12);
     if (!size) return 0;
     if (!data) {
@@ -1003,6 +1007,7 @@ void snx_free_program(SnxProgram* program) {
     for (i = 0; i < program->module_count; i++) snx_free_module(&program->modules[i]);
     free(program->modules);
     free(program->npdm_data);
+    free(program->nacp);
     free(program->entry_path);
     free(program->exefs_path);
     free(program->root_path);
@@ -1049,6 +1054,12 @@ int snx_load_program(const char* entry, SnxProgram* program, char* error, size_t
         if (!program->root_path) goto memory;
         program->romfs_data = program->modules[0].romfs_data;
         program->romfs_size = program->modules[0].romfs_size;
+        if (program->modules[0].nacp_size) {
+            program->nacp = (unsigned char*)malloc(program->modules[0].nacp_size);
+            if (!program->nacp) goto memory;
+            memcpy(program->nacp, program->modules[0].nacp_data, program->modules[0].nacp_size);
+            program->nacp_size = program->modules[0].nacp_size;
+        }
     } else {
         if (find_exefs(program->entry_path, &program->exefs_path, error, error_size)) goto bad;
         for (i = 0; i < 13; i++) {
@@ -1083,6 +1094,15 @@ int snx_load_program(const char* entry, SnxProgram* program, char* error, size_t
         program->root_path = same_ascii(path_basename(program->exefs_path), "exefs") ? parent_path(program->exefs_path)
                                                                                      : copy_string(program->exefs_path);
         if (!program->root_path) goto memory;
+        path = join_path(program->root_path, "control.nacp");
+        if (!path) goto memory;
+        kind = path_kind(path, 0);
+        if (kind < 0 || (kind && read_file(path, &program->nacp, &program->nacp_size, error, error_size))) {
+            free(path);
+            if (kind < 0) error_text(error, error_size, "loader: cannot query control.nacp");
+            goto bad;
+        }
+        free(path);
         for (i = 0; i < 2; i++) {
             path = join_path(program->root_path, romfs_names[i]);
             if (!path) goto memory;
@@ -1116,4 +1136,34 @@ memory:
 bad:
     snx_free_program(program);
     return -1;
+}
+
+int snx_load_npdm(const char* entry, SnxNpdm* npdm, char* error, size_t error_size) {
+    char *full, *exefs = NULL, *path = NULL;
+    const char* extension;
+    unsigned char* data = NULL;
+    size_t size = 0;
+    int rc = -1;
+    error_text(error, error_size, "");
+    full = entry && *entry ? absolute_path(entry) : NULL;
+    if (!full) {
+        error_text(error, error_size, "loader: cannot resolve input path");
+        return -1;
+    }
+    extension = strrchr(path_basename(full), '.');
+    /* an NRO carries no NPDM: the defaults, as snx_load_program gives it */
+    if (extension && same_ascii(extension, ".nro") && path_kind(full, 0))
+        rc = snx_parse_npdm(NULL, 0, npdm, error, error_size);
+    else if (!find_exefs(full, &exefs, error, error_size)) {
+        path = join_path(exefs, "main.npdm");
+        if (!path)
+            error_text(error, error_size, "loader: out of memory");
+        else if (!path_kind(path, 0) || !read_file(path, &data, &size, error, error_size))
+            rc = snx_parse_npdm(data, size, npdm, error, error_size);
+    }
+    free(data);
+    free(path);
+    free(exefs);
+    free(full);
+    return rc;
 }

@@ -69,6 +69,58 @@ int main(void) {
         free(beta);
         free(more);
     }
+    /* a game in a folder of its own is listed by the folder, run from inside it; an older version's game beside the
+       others still is; a folder holding no game of its name (its _data/, another program) is not */
+    {
+#ifdef _WIN32
+#define EXE ".exe"
+#else
+#define EXE ""
+#endif
+        static const char* const made[] = {"0100ABCD12345000/0100ABCD12345000" EXE, "Old" EXE, "Old_data/main",
+                                           "Other/Else" EXE, "Plain/Plain.txt"};
+        char *ready = snx_temp_dir(NULL), *path, *inside;
+        size_t i;
+        assert(ready);
+        for (i = 0; i < sizeof made / sizeof *made; ++i) {
+            char* folder;
+            path = snx_path_join(ready, made[i]);
+            folder = snx_dirname(path);
+            assert(!snx_mkdirs(folder) && !snx_write_file(path, "#!/bin/sh\n", 10) && !snx_make_executable(path));
+            free(folder);
+            free(path);
+        }
+        assert(gui_games_scan(&games, ready, false, error, sizeof error) && games.count == 2);
+        assert(!strcmp(games.names[0], "0100ABCD12345000") && !strcmp(games.names[1], "Old" EXE));
+        inside = snx_path_join(ready, made[0]);
+        path = snx_path_join(ready, made[1]);
+        assert(!strcmp(games.paths[0], inside) && !strcmp(games.paths[1], path));
+        assert(!strcmp(games.shown[0], games.names[0]) && !strcmp(games.shown[1], games.names[1])); /* no NACP */
+        /* shown by the name in the control.nacp its data holds, and sorted by it, the folder still its title ID */
+        {
+            static unsigned char nacp[0x300 * 2];
+            char* file = snx_path_join(ready, "0100ABCD12345000/0100ABCD12345000_data/control.nacp");
+            char* data = snx_dirname(file);
+            assert(data && !snx_mkdirs(data));
+            memcpy(nacp + 0x300, "Zeta Quest", 10); /* the second language's: American English's is empty */
+            assert(!snx_write_file(file, nacp, sizeof nacp));
+            assert(gui_games_scan(&games, ready, false, error, sizeof error) && games.count == 2);
+            assert(!strcmp(games.shown[0], "Old" EXE) && !strcmp(games.shown[1], "Zeta Quest"));
+            assert(!strcmp(games.names[1], "0100ABCD12345000") && !strcmp(games.paths[1], inside));
+            memcpy(nacp, "alpha quest", 11); /* before Old whatever the letters' case */
+            assert(!snx_write_file(file, nacp, sizeof nacp));
+            assert(gui_games_scan(&games, ready, false, error, sizeof error) && games.count == 2);
+            assert(!strcmp(games.shown[0], "alpha quest") && !strcmp(games.names[0], "0100ABCD12345000"));
+            assert(!strcmp(games.paths[0], inside) && !strcmp(games.paths[1], path));
+            free(data);
+            free(file);
+        }
+        free(path);
+        free(inside);
+        assert(!snx_remove_tree(ready));
+        free(ready);
+#undef EXE
+    }
     /* Repeated scans replace the old list; neither recursion nor execute bits. */
     assert(gui_games_scan(&games, subdir, true, error, sizeof error) && !games.count);
     assert(!snx_remove_tree(dir));

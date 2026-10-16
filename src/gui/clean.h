@@ -14,8 +14,8 @@ typedef struct {
 /* text without its [Deprecated] sections, in place: the line [Deprecated] (a CR before its end allowed), every line
    after it up to the next [section] or the end, and the blank lines just before it. Its new size, size for none */
 size_t gui_clean_deprecated(char* text, size_t size);
-/* the .ini files directly in folder with a [Deprecated] section: how many. With done, each is written again without
-   it, an entry each */
+/* the .ini files directly in folder, and the one of each game's folder in it (<name>/<name>.ini), with a [Deprecated]
+   section: how many. With done, each is written again without it, an entry each */
 int gui_clean_inis(GuiCleaned* done, const char* folder);
 /* an entry of the caller's: file, and what was done to it or why not */
 void gui_cleaned_add(GuiCleaned* done, bool ok, const char* file, const char* what);

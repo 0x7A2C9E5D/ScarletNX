@@ -5,6 +5,7 @@
 #include "common/utilities/common.h"
 #include "nx/runtime/driver/driver.h"
 #include "nx/runtime/driver/extract.h"
+#include "nx/runtime/driver/game_name.h"
 #include "nx/runtime/driver/recompile.h"
 #include <signal.h>
 #include <stdlib.h>
@@ -79,6 +80,29 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     partial = snx_path_join(argv[1], "partial");
     CHECK(!snx_write_file(partial, "partial", 7));
     free(partial);
+    /* an ExeFS, with the NPDM SNX_WORKFLOW_NPDM names: "id" one with a title ID, "bad" a broken one */
+    partial = snx_path_join(argv[1], "exefs");
+    CHECK(!snx_mkdirs(partial));
+    {
+        char *main = snx_path_join(partial, "main"), *npdm = snx_path_join(partial, "main.npdm");
+        const char* kind = getenv("SNX_WORKFLOW_NPDM");
+        unsigned char meta[0xa0];
+        SnxU64 id = ((SnxU64)0x0100ABCDUL << 32) | 0x12345000UL;
+        int i;
+        memset(meta, 0, sizeof meta);
+        memcpy(meta, "META", 4);
+        meta[12] = 1;
+        meta[0x70] = 0x80;                                   /* the ACI0 at 0x80 */
+        meta[0x74] = 0x20;                                   /* its size */
+        if (kind && !strcmp(kind, "bad")) meta[0x75] = 0x10; /* past the file's end */
+        memcpy(meta + 0x80, "ACI0", 4);
+        for (i = 0; i < 8; ++i) meta[0x90 + i] = (unsigned char)(id >> (8 * i));
+        CHECK(!snx_write_file(main, "main", 4));
+        if (kind && *kind) CHECK(!snx_write_file(npdm, meta, sizeof meta));
+        free(main);
+        free(npdm);
+    }
+    free(partial);
     rc = event('E');
     if (!strcmp(getenv("SNX_WORKFLOW_MODE"), "missing") && getenv("SNX_WORKFLOW_FAIL") &&
         !strcmp(getenv("SNX_WORKFLOW_FAIL"), "E"))
@@ -87,17 +111,17 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
 }
 unsigned snx_game_abi(void) { return 4; }
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
-    char *game, *partial;
+    char *game, *partial, *name, *folder;
     int rc;
     if (getenv("SNX_WORKFLOW_BACKEND") && *getenv("SNX_WORKFLOW_BACKEND")) {
-        CHECK(argc == 7 && !strcmp(argv[2], "--backend") && !strcmp(argv[3], getenv("SNX_WORKFLOW_BACKEND")));
+        CHECK(argc == 6 && !strcmp(argv[2], "--backend") && !strcmp(argv[3], getenv("SNX_WORKFLOW_BACKEND")));
         /* Normalize for the shared synthetic compilation assertions below. */
         argv[2] = argv[4];
         argv[3] = argv[5];
-        argv[4] = argv[6];
-        argc = 5;
+        argc = 4;
     }
-    CHECK(argc == 5 && !strcmp(argv[0], "--outdir") && !strcmp(argv[2], "--"));
+    /* no name given: the recompile names the game */
+    CHECK(argc == 4 && !strcmp(argv[0], "--outdir") && !strcmp(argv[2], "--"));
     if (getenv("SNX_WORKFLOW_NRO") && *getenv("SNX_WORKFLOW_NRO")) {
         char *given, *expected;
         CHECK(snx_is_file(argv[3]));
@@ -118,16 +142,25 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     if (rc || (!strcmp(getenv("SNX_WORKFLOW_MODE"), "missing") && getenv("SNX_WORKFLOW_FAIL") &&
                !strcmp(getenv("SNX_WORKFLOW_FAIL"), "R")))
         return rc;
+    {
+        SnxNpdm npdm;
+        char error[256];
+        CHECK(!snx_load_npdm(argv[3], &npdm, error, sizeof error));
+        name = snx_game_name(NULL, &npdm, argv[3]);
+    }
+    /* the game in a folder of its own, as the recompile makes it */
+    folder = snx_path_join(argv[1], name);
+    CHECK(!snx_mkdirs(folder));
 #ifdef _WIN32
-    game = snx_format("%s/%s.exe", argv[1], argv[4]);
+    game = snx_format("%s/%s.exe", folder, name);
 #else
-    game = snx_path_join(argv[1], argv[4]);
+    game = snx_path_join(folder, name);
 #endif
     CHECK(!snx_copy_file(paths->executable, game));
     CHECK(!snx_make_executable(game));
     {
-        char* stamp = snx_format("%s/%s.abi", argv[1], argv[4]);
-        char* code = snx_format("%s/%s_code.%s", argv[1], argv[4],
+        char* stamp = snx_format("%s/%s.abi", folder, name);
+        char* code = snx_format("%s/%s_code.%s", folder, name,
 #ifdef _WIN32
                                 "dll"
 #else
@@ -140,6 +173,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         free(code);
     }
     free(game);
+    free(folder);
+    free(name);
     return 0;
 }
 static void run(const char* exe, const char* repo, const char* dump, const char* log, int expected, const char* events,
@@ -248,11 +283,11 @@ int main(int argc, char** argv) {
     log = snx_path_join(root, "events");
     extracted = snx_path_join(repo, "work/Test game");
 #ifdef _WIN32
-    game = snx_path_join(repo, "games/Test game.exe");
+    game = snx_path_join(repo, "games/Test game/Test game.exe");
 #else
-    game = snx_path_join(repo, "games/Test game");
+    game = snx_path_join(repo, "games/Test game/Test game");
 #endif
-    cwd = snx_path_join(repo, "games");
+    cwd = snx_path_join(repo, "games/Test game"); /* the game runs in its folder */
     set_env("SNX_WORKFLOW_GAMES", cwd);
     free(cwd);
     set_env("SNX_WORKFLOW_CHILD", "1");
@@ -274,7 +309,7 @@ int main(int argc, char** argv) {
 
     /* Missing/mismatched/malformed ABI stamps are never trusted. */
     {
-        char* stamp = snx_path_join(repo, "games/Test game.abi");
+        char* stamp = snx_path_join(repo, "games/Test game/Test game.abi");
         CHECK(!snx_write_file(stamp, "3\n", 2));
         run(exe, repo, dump, log, 0, "RG", NULL);
         CHECK(!snx_write_file(stamp, "broken", 6));
@@ -421,6 +456,32 @@ int main(int argc, char** argv) {
             free(decrypted);
             free(directory);
         }
+    }
+    /* a game with a title ID of its own is named by it, whatever its dump is called; a broken NPDM stops the run */
+    {
+#ifdef _WIN32
+        char* named = snx_path_join(repo, "games/0100ABCD12345000/0100ABCD12345000.exe");
+#else
+        char* named = snx_path_join(repo, "games/0100ABCD12345000/0100ABCD12345000");
+#endif
+        char* folder = snx_path_join(repo, "games/0100ABCD12345000");
+        reset(repo, dump);
+        set_env("SNX_WORKFLOW_MODE", "exit");
+        set_env("SNX_WORKFLOW_NPDM", "id");
+        set_env("SNX_WORKFLOW_GAMES", folder);
+        run(exe, repo, dump, log, 0, "ERG", NULL);
+        CHECK(snx_is_file(named) && !snx_is_file(game));
+        run(exe, repo, dump, log, 0, "G", NULL);
+        reset(repo, dump);
+        set_env("SNX_WORKFLOW_NPDM", "bad");
+        run(exe, repo, dump, log, 1, "E", "NPDM: access-control region exceeds file");
+        CHECK(!snx_is_file(named) && !snx_is_file(game));
+        set_env("SNX_WORKFLOW_NPDM", "");
+        free(folder);
+        folder = snx_path_join(repo, "games/Test game");
+        set_env("SNX_WORKFLOW_GAMES", folder);
+        free(folder);
+        free(named);
     }
     /* NROs bypass extraction even with a stale same-stem work directory or game executable. */
     {

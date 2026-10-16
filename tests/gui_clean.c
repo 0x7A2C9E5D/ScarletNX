@@ -86,19 +86,45 @@ int main(void) {
     path = snx_path_join(games, "notes.txt");
     write_text(path, "[Deprecated]\nx=1\n");
     free(path);
-    assert(gui_clean_inis(NULL, games) == 2 && !done.count);
+    /* a game's folder: its own .ini, not another file of it, nor a folder that is not a game's */
+    {
+        char* folder = snx_path_join(games, "0100ABCD12345000");
+        char* data = snx_path_join(games, "Hades_data");
+        assert(!snx_mkdirs(folder) && !snx_mkdirs(data));
+        path = snx_path_join(folder, "0100ABCD12345000.ini");
+        write_text(path, "[Deprecated]\nx=1\n");
+        free(path);
+        path = snx_path_join(folder, "other.ini");
+        write_text(path, "[Deprecated]\nx=1\n");
+        free(path);
+        path = snx_path_join(data, "Hades_data.ini");
+        write_text(path, "[Display]\n");
+        free(path);
+        path = snx_path_join(data, "save.ini");
+        write_text(path, "[Deprecated]\nx=1\n");
+        free(path);
+        free(folder);
+        free(data);
+    }
+    assert(gui_clean_inis(NULL, games) == 3 && !done.count);
     assert(gui_clean_inis(NULL, NULL) == 0 && gui_clean_inis(NULL, root) == 0);
     {
         char* other = snx_path_join(root, "absent");
         assert(gui_clean_inis(&done, other) == 0 && !done.count);
         free(other);
     }
-    assert(gui_clean_inis(&done, games) == 2 && done.count == 2 && done.done == 2);
+    assert(gui_clean_inis(&done, games) == 3 && done.count == 3 && done.done == 3);
     {
         const char* list = entries(&done, games);
         assert(strstr(list, "+/Celeste.ini|[Deprecated] taken out\n") &&
-               strstr(list, "+/Hades.INI|[Deprecated] taken out\n"));
+               strstr(list, "+/Hades.INI|[Deprecated] taken out\n") &&
+               strstr(list, "+/0100ABCD12345000/0100ABCD12345000.ini|[Deprecated] taken out\n"));
     }
+    path = snx_path_join(games, "0100ABCD12345000/other.ini");
+    text = read_text(path);
+    assert(!strcmp(text, "[Deprecated]\nx=1\n"));
+    free(text);
+    free(path);
     path = snx_path_join(games, "Celeste.ini");
     text = read_text(path);
     assert(!strcmp(text, "[Display]\nfullscreen=1\n\n[Other]\nlanguage=en\n"));

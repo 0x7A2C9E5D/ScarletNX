@@ -6,6 +6,7 @@
    This fork's changes are under GPL-3.0-or-later (LICENSE). */
 #define _POSIX_C_SOURCE 200809L
 #include "nx/runtime/driver/recompile.h"
+#include "nx/runtime/driver/game_name.h"
 #include "nx/loader/loader.h"
 #include "nx/loader/module.h"
 #include "nx/loader/module_llvm.h"
@@ -20,8 +21,8 @@
 static void usage(void) {
     puts("Usage: scarletnx -r INPUT [NAME] [OPTIONS]\n"
          "  INPUT                  Game/ExeFS directory or .nro\n"
-         "  -o, --name, --out NAME  Output name (default: NPDM or input name)\n"
-         "  --outdir DIR           Output directory (default: checkout/games, else ./games)\n"
+         "  -o, --name, --out NAME  Output name (default: the title ID, else the NPDM's or input name)\n"
+         "  --outdir DIR           Where the game's folder goes (default: checkout/games, else ./games)\n"
          "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: 2)\n"
          "  --jobs N               Parallel compiles (default: CPU count)");
     puts("  --backend NAME         Code generator: llvm (LLVM-C, the default and the recommended one),\n"
@@ -32,9 +33,10 @@ static void usage(void) {
          "  --no-build             Stage data/INI only, generate no code");
     puts("  --interp-only          Generate fallback interpreter only\n"
          "  --runtime FILE         Deploy this runtime instead of building one\n"
-         "  --keep-ir              Save the generated code (LLVM IR, libgccjit dumps) in <outdir>/<NAME>_build\n"
+         "  --keep-ir              Save the generated code (LLVM IR, libgccjit dumps) in <NAME>/<NAME>_build\n"
          "  -q, --quiet            Suppress progress");
-    puts("Hints: <outdir>/<NAME>.hints (hex PCs, one per line).");
+    puts("Each game is a folder of <outdir>, <NAME>/: its program <NAME>, <NAME>_code and <NAME>_data/.\n"
+         "Hints: <outdir>/<NAME>/<NAME>.hints (hex PCs, one per line).");
 }
 static unsigned number(const char* text, unsigned max) {
     char* end;
@@ -42,35 +44,6 @@ static unsigned number(const char* text, unsigned max) {
     errno = 0;
     n = strtoul(text, &end, 10);
     return errno || !*text || *end || n == 0 || n > max ? 0 : (unsigned)n;
-}
-static char* title_name(const char* name, const SnxProgram* p, const char* input) {
-    const char *start, *s;
-    char *out, *dot;
-    size_t n = 0;
-    int input_name = 0;
-    if (!name && p->npdm.name[0] && strcmp(p->npdm.name, "Application")) name = p->npdm.name;
-    if (!name) {
-        start = input;
-        for (s = input; *s; ++s)
-            if (*s == '/' || *s == '\\') start = s + 1;
-        name = start;
-        input_name = 1;
-    }
-    out = (char*)snx_alloc(strlen(name) + 1);
-    /* Preserve UTF-8 names; exclude path delimiters and C/OS metacharacters. */
-    for (s = name; *s; ++s)
-        if ((unsigned char)*s >= 128 || isalnum((unsigned char)*s) || *s == '-' || *s == '_' || *s == ' ' ||
-            (input_name && *s == '.'))
-            out[n++] = *s;
-    out[n] = 0;
-    if (input_name && (dot = strrchr(out, '.')) != NULL) *dot = 0;
-    n = strlen(out);
-    while (n && (out[n - 1] == ' ' || out[n - 1] == '.')) out[--n] = 0;
-    if (!n) {
-        free(out);
-        return snx_strdup("Game");
-    }
-    return out;
 }
 /* This build's, not the checkout's cpu.h: the modules are laid out as this build's headers say, and an installed
    build has no checkout */
@@ -86,8 +59,8 @@ static char* own_runtime(const SnxPaths* paths) {
 }
 #endif
 #ifdef _WIN32
-/* Windows finds a program's DLLs next to it: the game gets copies of those next to the runtime (the zip's LLVM),
-   or it does not start */
+/* Windows finds a program's DLLs next to it: the game's folder gets those next to the runtime (the zip's LLVM), or
+   it does not start. Links where the disk takes them, so each game does not hold copies */
 static int copy_dlls(const char* run, const char* out) {
     char **names = NULL, *from = snx_dirname(run), *src, *dst;
     size_t i, count = 0, n;
@@ -99,7 +72,8 @@ static int copy_dlls(const char* run, const char* out) {
             continue;
         src = snx_path_join(from, names[i]);
         dst = snx_path_join(out, names[i]);
-        rc = snx_is_file(src) && snx_copy_file(src, dst);
+        /* a new one linked, else copied; one there already copied over when it differs (a newer zip's) */
+        rc = snx_is_file(src) && (snx_path_exists(dst) || snx_link_file(src, dst)) && snx_copy_file(src, dst);
         free(src);
         free(dst);
     }
@@ -244,7 +218,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     SnxCompileOptions compile;
     SnxCodegenOptions gen;
     SnxProgram program;
-    char *title = NULL, *out = NULL, *base = NULL, *data = NULL, *code = NULL;
+    char *title = NULL, *game = NULL, *out = NULL, *folder = NULL, *base = NULL, *data = NULL, *code = NULL;
     char *ini = NULL, *ini_text = NULL, *run = NULL, *exe = NULL, *tmp = NULL;
     char error[1024], option[64];
     const char* equal;
@@ -359,7 +333,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("AArch32 programs are unsupported");
         goto done;
     }
-    title = title_name(name, &program, program.entry_path);
+    title = snx_game_shown(name, &program);
+    game = snx_game_name(name, &program.npdm, program.entry_path);
     out = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
     if (!out) {
         snx_error("cannot resolve output directory");
@@ -374,7 +349,19 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("cannot create output directory");
         goto done;
     }
-    base = snx_path_join(out, title);
+    /* each game in a folder of its own, where an older version put the game's program (a file) */
+    folder = snx_path_join(out, game);
+    if (snx_is_link(folder) || (snx_path_exists(folder) && !snx_is_dir(folder))) {
+        snx_error("%s is a file where this game's folder goes: a game an older version made there, named %s; move "
+                  "its files as docs/DEPRECATIONS.md says",
+                  folder, game);
+        goto done;
+    }
+    if (snx_mkdirs(folder)) {
+        snx_error("cannot create the game's folder %s", folder);
+        goto done;
+    }
+    base = snx_path_join(folder, game);
     /* Invalidate the completion stamp before touching an existing game's data
        or module. Failed recompilation must never leave a trusted checkpoint. */
     if (!no_build) {
@@ -395,7 +382,16 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("cannot stage game data in %s", data);
         goto done;
     }
-    ini = settings_path(out, title);
+    if (program.nacp) { /* the name the launcher lists the game by */
+        char* nacp = snx_path_join(data, "control.nacp");
+        int failed = !nacp || snx_write_file(nacp, program.nacp, program.nacp_size);
+        free(nacp);
+        if (failed) {
+            snx_error("cannot write the game's control.nacp in %s", data);
+            goto done;
+        }
+    }
+    ini = settings_path(folder, game);
     if (!ini) {
         snx_error("cannot create the settings folder for %s", title);
         goto done;
@@ -439,8 +435,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         goto done;
     }
 #ifdef _WIN32
-    if (copy_dlls(run, out)) {
-        snx_error("cannot copy the runtime's DLLs to %s", out);
+    if (copy_dlls(run, folder)) {
+        snx_error("cannot copy the runtime's DLLs to %s", folder);
         goto done;
     }
 #endif
@@ -476,7 +472,9 @@ done:
     snx_free_program(&program);
     free((void*)gen.hints);
     free(title);
+    free(game);
     free(out);
+    free(folder);
     free(base);
     free(data);
     free(code);

@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #include "gui/android.h"
 #include "gui/model.h"
+#include "common/utilities/common.h"
 #include <SDL3/SDL.h>
 #include <dlfcn.h>
 #include <jni.h>
@@ -18,12 +19,11 @@ void gui_android_start(void) {
 }
 
 const char* gui_android_folder(void) {
-    static const char folder[] = "/sdcard/ScarletNX";
+    static const char folder[] = SNX_ANDROID_DIR;
     mkdir(folder, 0770);
     if (access(folder, W_OK) || chdir(folder)) return NULL;
-    /* a phone has no terminal to make them: games/ is where the user puts dumps, work/ where the driver extracts */
+    /* a phone has no terminal to make it: games/ is where the user puts dumps. The driver makes cache/work/ */
     mkdir("games", 0770);
-    mkdir("work", 0770);
     return folder;
 }
 

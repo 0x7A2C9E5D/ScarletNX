@@ -521,6 +521,17 @@ int snx_copy_file(const char* src, const char* dst) {
     if (fclose(out)) rc = 1;
     return rc;
 }
+int snx_link_file(const char* src, const char* dst) {
+#ifdef _WIN32
+    wchar_t *a = wide(src), *b = wide(dst);
+    int ok = a && b && CreateHardLinkW(b, a, NULL);
+    free(a);
+    free(b);
+    return !ok;
+#else
+    return link(src, dst) != 0;
+#endif
+}
 int snx_path_within(const char* path, const char* parent) {
     char *a = snx_absolute(path), *b = snx_absolute(parent);
     size_t i = 0, n;
@@ -638,33 +649,69 @@ char* snx_user_data_dir(void) {
     return home_folder("XDG_DATA_HOME", ".local/share");
 #endif
 }
+static const char* const kind_names[] = {NULL, "config", "state", "cache"};
 char* snx_user_dir(int kind) {
+    char *data, *dir;
 #ifdef SNX_XDG
     if (kind == SNX_USER_CONFIG) return home_folder("XDG_CONFIG_HOME", ".config");
     if (kind == SNX_USER_STATE) return home_folder("XDG_STATE_HOME", ".local/state");
     if (kind == SNX_USER_CACHE) return home_folder("XDG_CACHE_HOME", ".cache");
-#else
-    (void)kind;
 #endif
-    return snx_user_data_dir();
+    data = snx_user_data_dir();
+    if (!data || kind == SNX_USER_DATA) return data;
+    dir = snx_path_join(data, kind_names[kind]);
+    free(data);
+    return dir;
+}
+/* the same folder, each resolved: one reached through a link is still it */
+static int same_folder(const char* a, const char* b) { return snx_path_within(a, b) && snx_path_within(b, a); }
+int snx_app_dir(const char* folder) {
+    char *user = snx_user_data_dir(), *full = snx_absolute(folder);
+    const char *base = full, *s;
+    int app = full && user && same_folder(full, user);
+    for (s = full; s && *s; ++s)
+        if (separator(*s) && s[1]) base = s + 1;
+    if (full && !app)
+        app = !strncmp(base, SNX_PORTABLE_DIR, strlen(SNX_PORTABLE_DIR)) &&
+              (!base[strlen(SNX_PORTABLE_DIR)] || separator(base[strlen(SNX_PORTABLE_DIR)]));
+#ifdef __ANDROID__
+    if (full && !app) app = same_folder(full, SNX_ANDROID_DIR);
+#endif
+    free(user);
+    free(full);
+    return app;
+}
+char* snx_app_kind_dir(const char* app, int kind) {
+    char* user = snx_user_data_dir();
+    int own = user && same_folder(app, user);
+    free(user);
+    if (own) return snx_user_dir(kind);
+    return kind == SNX_USER_DATA ? snx_strdup(app) : snx_path_join(app, kind_names[kind]);
 }
 char* snx_user_path(const char* path, int kind) {
-    char *data = snx_user_data_dir(), *root = snx_user_dir(kind), *full = NULL, *base = NULL, *moved = NULL;
+    char *full = kind == SNX_USER_DATA ? NULL : snx_absolute(path), *app = full ? snx_strdup(full) : NULL;
+    char *up, *root = NULL, *moved = NULL;
     const char* rest;
-    /* both resolved: a data folder reached through a link is still the data folder */
-    if (data && root && strcmp(data, root)) {
-        full = snx_absolute(path);
-        base = snx_absolute(data);
+    /* the data folder it is in, from its own folder up */
+    while (app && !snx_app_dir(app)) {
+        up = snx_dirname(app);
+        if (!strcmp(up, app)) {
+            free(up);
+            up = NULL;
+        }
+        free(app);
+        app = up;
     }
-    if (full && base && snx_path_within(full, base)) {
-        rest = full + strlen(base);
+    if (app) root = snx_app_kind_dir(app, kind);
+    /* a config folder that is the data folder divides nothing */
+    if (root && !same_folder(root, app)) {
+        rest = full + strlen(app);
         while (separator(*rest)) ++rest;
         moved = *rest ? snx_path_join(root, rest) : snx_strdup(root);
     }
-    free(data);
-    free(root);
     free(full);
-    free(base);
+    free(app);
+    free(root);
     return moved ? moved : snx_strdup(path);
 }
 int snx_left_behind(const char* old, const char* now) { return strcmp(old, now) && snx_path_exists(old); }
@@ -688,8 +735,7 @@ char* snx_work_dir(const char* data_dir) {
 }
 char* snx_data_dir(const char* checkout, const char* build, const char* program_dir) {
     const char *appimage = getenv("APPIMAGE"), *appdir = getenv("APPDIR");
-    char *path = checkout ? snx_path_join(checkout, "CMakeLists.txt") : NULL, *dir = NULL, *games;
-    int portable;
+    char *path = checkout ? snx_path_join(checkout, "CMakeLists.txt") : NULL, *dir = NULL, *copy;
     /* a copy installed from that build (cmake --install) is installed, even where the checkout still is */
     if (path && snx_is_file(path) &&
         (!build || !program_dir || (snx_is_dir(build) && snx_path_within(program_dir, build)))) {
@@ -703,11 +749,10 @@ char* snx_data_dir(const char* checkout, const char* build, const char* program_
         dir = snx_dirname(appimage);
     else if (program_dir)
         dir = snx_strdup(program_dir);
-    games = dir ? snx_path_join(dir, "games") : NULL;
-    portable = games && snx_is_dir(games);
-    free(games);
-    if (portable) return dir;
+    copy = dir ? snx_path_join(dir, SNX_PORTABLE_DIR) : NULL;
     free(dir);
+    if (copy && snx_is_dir(copy)) return copy;
+    free(copy);
     return snx_user_data_dir();
 }
 char* snx_temp_dir(const char* parent) {
@@ -1103,4 +1148,46 @@ int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, 
     }
     return waited < 0 ? 1 : WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
 #endif
+}
+int snx_nacp_name(const unsigned char* nacp, size_t size, char* name, size_t name_size) {
+    /* 16 languages of 0x300 bytes, each a name of 0x200 then a publisher; American English first */
+    size_t language, i, n = 0;
+    const unsigned char* title;
+    if (name_size) name[0] = 0;
+    for (language = 0; nacp && name_size && language < 16 && (language + 1) * 0x300 <= size && !name[0]; ++language) {
+        title = nacp + language * 0x300;
+        for (i = 0, n = 0; i < 0x200 && title[i] && n + 1 < name_size; ++i)
+            if (title[i] >= 0x20 && title[i] != 0x7f) name[n++] = (char)title[i];
+        while (n && name[n - 1] == ' ') --n;
+        /* a name cut in a UTF-8 sequence loses the sequence */
+        i = n;
+        while (i && ((unsigned char)name[i - 1] & 0xc0) == 0x80) --i;
+        if (i && ((unsigned char)name[i - 1] & 0x80)) {
+            unsigned char lead = (unsigned char)name[i - 1];
+            size_t want = (lead & 0xe0) == 0xc0 ? 2 : (lead & 0xf0) == 0xe0 ? 3 : (lead & 0xf8) == 0xf0 ? 4 : 1;
+            if (n - (i - 1) < want) n = i - 1;
+        }
+        name[n] = 0;
+        for (i = 0; name[i] == ' '; ++i) {}
+        if (i) memmove(name, name + i, n - i + 1);
+    }
+    return name_size && name[0];
+}
+static SnxU64 le_get(const unsigned char* p, unsigned n) {
+    SnxU64 value = 0;
+    while (n--) value = value << 8 | p[n];
+    return value;
+}
+SnxU64 snx_npdm_title(const unsigned char* npdm, size_t size) {
+    SnxU64 aci;
+    if (!npdm || size < 0x80 || memcmp(npdm, "META", 4)) return SNX_NPDM_DEFAULT_TITLE;
+    aci = le_get(npdm + 0x70, 4);
+    if (!aci || aci > size || size - aci < 0x18 || memcmp(npdm + aci, "ACI0", 4)) return SNX_NPDM_DEFAULT_TITLE;
+    return le_get(npdm + aci + 0x10, 8);
+}
+int snx_title_text(SnxU64 id, char* out) {
+    out[0] = 0;
+    if (!id || id == SNX_NPDM_DEFAULT_TITLE) return 0;
+    sprintf(out, "%08lX%08lX", (unsigned long)(id >> 32), (unsigned long)(id & 0xFFFFFFFFUL));
+    return 1;
 }
