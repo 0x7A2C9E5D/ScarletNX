@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "nx/hle/services/hid_motion.h"
+#include <cglm/cglm.h>
 #include <math.h>
 #include <string.h>
 
@@ -18,95 +19,63 @@ int hid_motion_at_rest(const PadMotion* motion) {
 
 void hid_motion_sample(HidMotionState* state, const PadMotion* motion, u64 dt_ns, u64 sampling_number,
                        u8 out[HS_HidSixAxisSensorState]) {
-    float acc[3] = {0.0f, 0.0f, -1.0f};
-    float gyro[3] = {0.0f, 0.0f, 0.0f};
-    float corrected[3];
+    vec3 acc = {0.0f, 0.0f, -1.0f};
+    vec3 gyro = {0.0f, 0.0f, 0.0f};
+    vec3 corrected = {0.0f, 0.0f, 0.0f};
+    versor q = {state->quaternion[1], state->quaternion[2], state->quaternion[3], state->quaternion[0]};
+    mat3 matrix;
     float dir[9];
-    float* q = state->quaternion;
-    float rate, theta, s, x, y, z, w, norm, gravity_norm, mx, my, mz;
-    float px, py, pz, gain;
-    float dq[4];
+    float rate, gravity_norm;
     u32 attr = 1; /* HidSixAxisSensorAttribute_IsConnected */
-    int i;
     memset(out, 0, HS_HidSixAxisSensorState);
-    if (q[0] == 0.0f && q[1] == 0.0f && q[2] == 0.0f && q[3] == 0.0f) q[0] = 1.0f;
+    if (glm_quat_norm(q) == 0.0f) glm_quat_identity(q);
     if (motion && motion->valid) {
         memcpy(acc, motion->acceleration, sizeof acc);
         memcpy(gyro, motion->angular_velocity, sizeof gyro);
-        gravity_norm = sqrtf(acc[0] * acc[0] + acc[1] * acc[1] + acc[2] * acc[2]);
         memcpy(corrected, gyro, sizeof corrected);
-        /* Acceleration includes gravity. Use it to establish physical pitch and roll on the first reading,
-           then gently correct gyro drift when linear acceleration is small. Yaw has no gravity reference. */
+        gravity_norm = glm_vec3_norm(acc);
+        /* Acceleration includes gravity. It sets the first pitch and roll, then corrects gyro drift when linear
+           acceleration is small. Yaw has no gravity reference. */
         if (gravity_norm > 0.85f && gravity_norm < 1.15f) {
-            mx = acc[0] / gravity_norm;
-            my = acc[1] / gravity_norm;
-            mz = acc[2] / gravity_norm;
+            vec3 measured, down = {0.0f, 0.0f, -1.0f};
+            glm_vec3_scale(acc, 1.0f / gravity_norm, measured);
             if (!state->was_valid) {
-                w = 1.0f - mz;
-                if (w < 0.0001f) {
-                    q[0] = 0.0f;
-                    q[1] = 1.0f;
-                    q[2] = q[3] = 0.0f;
-                } else {
-                    norm = sqrtf(w * w + mx * mx + my * my);
-                    q[0] = w / norm;
-                    q[1] = -my / norm;
-                    q[2] = mx / norm;
-                    q[3] = 0.0f;
-                }
+                if (1.0f - measured[2] < 0.0001f)
+                    glm_quat_init(q, 1.0f, 0.0f, 0.0f, 0.0f); /* keep the upside-down pose's X axis */
+                else
+                    glm_quat_from_vecs(measured, down, q);
             } else {
-                px = -2.0f * (q[1] * q[3] - q[2] * q[0]);
-                py = -2.0f * (q[2] * q[3] + q[1] * q[0]);
-                pz = -1.0f + 2.0f * (q[1] * q[1] + q[2] * q[2]);
-                gain = 2.5f;
-                corrected[0] += gain * (my * pz - mz * py);
-                corrected[1] += gain * (mz * px - mx * pz);
-                corrected[2] += gain * (mx * py - my * px);
+                versor inverse;
+                vec3 predicted, error;
+                glm_quat_conjugate(q, inverse);
+                glm_quat_rotatev(inverse, down, predicted);
+                glm_vec3_cross(measured, predicted, error);
+                for (int i = 0; i < 3; i++) corrected[i] += 2.5f * error[i];
             }
         }
         state->was_valid = 1;
     } else if (state->was_valid) {
         /* A disconnected or disabled sensor starts from a neutral pose when it returns. */
         memset(state, 0, sizeof *state);
-        q[0] = 1.0f;
+        glm_quat_identity(q);
     }
-    if (!motion || !motion->valid) memcpy(corrected, gyro, sizeof corrected);
     /* Guard a suspended host or debugger pause from producing a huge jump. */
     if (dt_ns > 100000000ull) dt_ns = 100000000ull;
-    rate = sqrtf(corrected[0] * corrected[0] + corrected[1] * corrected[1] + corrected[2] * corrected[2]);
-    theta = rate * ((float)dt_ns * 0.000000001f);
+    rate = glm_vec3_norm(corrected);
     if (rate > 0.000001f && rate < 1000000.0f) {
-        s = sinf(theta * 0.5f) / rate;
-        dq[0] = cosf(theta * 0.5f);
-        dq[1] = corrected[0] * s;
-        dq[2] = corrected[1] * s;
-        dq[3] = corrected[2] * s;
-        w = q[0] * dq[0] - q[1] * dq[1] - q[2] * dq[2] - q[3] * dq[3];
-        x = q[0] * dq[1] + q[1] * dq[0] + q[2] * dq[3] - q[3] * dq[2];
-        y = q[0] * dq[2] - q[1] * dq[3] + q[2] * dq[0] + q[3] * dq[1];
-        z = q[0] * dq[3] + q[1] * dq[2] - q[2] * dq[1] + q[3] * dq[0];
-        norm = sqrtf(w * w + x * x + y * y + z * z);
-        if (norm > 0.0f) {
-            q[0] = w / norm;
-            q[1] = x / norm;
-            q[2] = y / norm;
-            q[3] = z / norm;
-        }
+        versor delta, next;
+        glm_quatv(delta, rate * ((float)dt_ns * 0.000000001f), corrected);
+        glm_quat_mul(q, delta, next);
+        glm_quat_normalize_to(next, q);
     }
-    for (i = 0; i < 3; i++) state->angle[i] += gyro[i] * ((float)dt_ns * 0.000000001f);
-    w = q[0];
-    x = q[1];
-    y = q[2];
-    z = q[3];
-    dir[0] = 1.0f - 2.0f * (y * y + z * z);
-    dir[1] = 2.0f * (x * y - z * w);
-    dir[2] = 2.0f * (x * z + y * w);
-    dir[3] = 2.0f * (x * y + z * w);
-    dir[4] = 1.0f - 2.0f * (x * x + z * z);
-    dir[5] = 2.0f * (y * z - x * w);
-    dir[6] = 2.0f * (x * z - y * w);
-    dir[7] = 2.0f * (y * z + x * w);
-    dir[8] = 1.0f - 2.0f * (x * x + y * y);
+    for (int i = 0; i < 3; i++) state->angle[i] += gyro[i] * ((float)dt_ns * 0.000000001f);
+    /* cglm stores [x,y,z,w] and column-major matrices. The HID state stores a scalar-first quaternion internally
+       and serializes the direction matrix row by row. */
+    state->quaternion[0] = q[3];
+    for (int i = 0; i < 3; i++) state->quaternion[i + 1] = q[i];
+    glm_quat_mat3(q, matrix);
+    for (int row = 0; row < 3; row++)
+        for (int column = 0; column < 3; column++) dir[row * 3 + column] = matrix[column][row];
     memcpy(out, &dt_ns, 8);
     memcpy(out + 8, &sampling_number, 8);
     memcpy(out + HO_HidSixAxisSensorState_acceleration, acc, sizeof acc);

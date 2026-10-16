@@ -33,6 +33,17 @@ if(NOT cpm_have STREQUAL CPM_HASH)
 endif()
 include("${cpm_file}")
 
+# HID six-axis fusion uses cglm's header-only C quaternion and vector operations.
+# The tests also compile that service outside a full NX runtime build.
+if(NOT SNX_HACTOOL_ONLY)
+    CPMAddPackage(NAME cglm VERSION 0.9.6
+                  URL https://github.com/recp/cglm/archive/refs/tags/v0.9.6.tar.gz
+                  URL_HASH SHA256=be5e7d384561eb0fca59724a92b7fb44bf03e588a7eae5123a7d796002928184
+                  DOWNLOAD_ONLY YES)
+    add_library(snx_cglm INTERFACE)
+    target_include_directories(snx_cglm INTERFACE "${cglm_SOURCE_DIR}/include")
+endif()
+
 # Packages whose headers a system may also have (Vulkan) are added without SYSTEM. The compiler searches every
 # -I folder before any -isystem one, so as -isystem they lost to an -I/usr/local/include in CFLAGS, usual on FreeBSD,
 # and the build mixed in the system's copies. Third-party code builds with its own flags and stays out of the warning
