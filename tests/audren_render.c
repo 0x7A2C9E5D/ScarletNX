@@ -830,7 +830,7 @@ static void reset(void) {
 /* #222: input sections can hold more entries than the renderer opened. The
    reply still has the opened counts, including at the revision-9 effect stride. */
 static void update_output_counts(void) {
-    const u32 voices = 128, effects = 68, sinks = 2, pools = effects + voices * 4;
+    enum { voices = 128, effects = 68, sinks = 2, pools = effects + voices * 4 };
     const u32 counts[][4] = {{pools, voices, effects, sinks},
                              {pools + 8, voices, effects, sinks},
                              {pools, voices + 8, effects, sinks},
@@ -839,19 +839,16 @@ static void update_output_counts(void) {
                              {pools + 8, voices + 8, effects + 8, sinks + 8},
                              {0, 0, 0, 0}};
     const u32 revisions[] = {4, 5, 9};
-    for (size_t r = 0; r < sizeof revisions / sizeof *revisions; r++) {
+    size_t r, c;
+    for (r = 0; r < sizeof revisions / sizeof *revisions; r++) {
         u32 revn = revisions[r], rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + revn) << 24);
         u32 effect_stride = revn >= 9 ? 0x90 : 0x10;
         u32 reply = 0x40 + pools * 0x10 + voices * 0x10 + effects * effect_stride + sinks * 0x20 + 0x10 + 0xB0 +
                     (revn >= 5 ? 0x10 : 0);
         if (revn == 9) CHECK(reply == 21456, "reported output size is %u", reply);
-        for (size_t c = 0; c < sizeof counts / sizeof *counts; c++) {
+        for (c = 0; c < sizeof counts / sizeof *counts; c++) {
             u32 params[13] = {48000, 240, 216, 0, voices, sinks, effects};
             ARState* state = audren_state_new((const u8*)params);
-            CHECK(state != NULL, "no state for output counts");
-            if (!state) continue;
-            state->frames = 42;
-            state->sink[1].last2 = 0x12345678;
             u32 h[16] = {rev,
                          0x10,
                          counts[c][0] * 0x20,
@@ -861,17 +858,26 @@ static void update_output_counts(void) {
                          0,
                          counts[c][3] * 0x140};
             u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[7];
+            u8 *input, *output;
+            u32 i;
+            CHECK(state != NULL, "no state for output counts");
+            if (!state) continue;
+            state->frames = 42;
+            state->sink[1].last2 = 0x12345678;
             h[15] = size;
-            u8* input = calloc(1, size);
-            u8* output = malloc(reply + 32);
-            CHECK(input && output, "no update buffers");
-            if (input && output) {
+            /* The input and reply have the same lifetime and share one allocation. */
+            input = calloc(1, size + reply + 32);
+            CHECK(input != NULL, "no update buffers");
+            if (input) {
+                int rc;
+                output = input + size;
                 memcpy(input, h, sizeof h);
-                for (u32 i = 0; i < counts[c][0]; i++) w32(input, 0x40 + h[1] + i * 0x20 + 0x10, 4);
+                for (i = 0; i < counts[c][0]; i++) w32(input, 0x40 + h[1] + i * 0x20 + 0x10, 4);
                 memset(output, 0xA5, reply + 32);
-                int rc = audren_state_update(state, input, size, output, reply);
-                CHECK(rc == 0, "revision %u, count case %zu: update returned %d", revn, c, rc);
+                rc = audren_state_update(state, input, size, output, reply);
+                CHECK(rc == 0, "revision %u, count case %lu: update returned %d", revn, (unsigned long)c, rc);
                 if (!rc) {
+                    u32 at = 0x40 + pools * 0x10 + voices * 0x10;
                     CHECK(rd32(output + 8) == pools * 0x10, "wrong pool output size");
                     CHECK(rd32(output + 12) == voices * 0x10, "wrong voice output size");
                     CHECK(rd32(output + 20) == effects * effect_stride, "wrong effect output size");
@@ -879,21 +885,18 @@ static void update_output_counts(void) {
                     CHECK(rd32(output + 60) == reply, "wrong total output size");
                     CHECK(rd32(output + 0x40 + (pools - 1) * 0x10) == (counts[c][0] ? 5u : 0u),
                           "wrong last pool status");
-                    u32 at = 0x40 + pools * 0x10 + voices * 0x10;
                     CHECK(output[at + (effects - 1) * effect_stride] == (counts[c][2] ? 4u : 0u),
                           "wrong last effect status");
                     at += effects * effect_stride;
                     CHECK(rd32(output + at + 0x20) == (counts[c][3] ? 0x12345678u : 0u), "sink output was misplaced");
                     if (revn >= 5) CHECK(rd64(output + reply - 0x10) == 42, "frame count was misplaced");
                 }
-                for (u32 i = 0; i < 32; i++) CHECK(output[reply + i] == 0xA5, "output guard byte %u overwritten", i);
+                for (i = 0; i < 32; i++) CHECK(output[reply + i] == 0xA5, "output guard byte %u overwritten", i);
                 memset(output, 0xA5, reply + 32);
                 CHECK(audren_state_update(state, input, size, output, reply - 1) == -4, "short output accepted");
                 CHECK(audren_state_update(state, input, size - 1, output, reply) == -41, "short input accepted");
-                for (u32 i = 0; i < reply + 32; i++)
-                    CHECK(output[i] == 0xA5, "rejected update wrote output byte %u", i);
+                for (i = 0; i < reply + 32; i++) CHECK(output[i] == 0xA5, "rejected update wrote output byte %u", i);
             }
-            free(output);
             free(input);
             audren_state_free(state);
         }

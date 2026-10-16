@@ -461,27 +461,25 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
        Used(3) while enabled, Removed(4) */
     for (u32 i = 0; i < neff && i < s->neffects; i++) {
         const u8* ei = effects + i * 0xC0;
-        if (i < s->neffects) {
-            AREffect* e = &s->effect[i];
-            if (e->type != ei[0]) { /* another effect in the slot starts from nothing (Eden's ResetEffect) */
-                memset(e->p, 0, sizeof e->p);
-                e->enabled = 0;
-                e->mix_id = SNX_AUDREN_UNUSED_MIX;
-                memset(e->bq, 0, sizeof e->bq);
-                fx_free(e);
-            }
-            if (ei[1] || e->type != ei[0]) e->fresh = 1;
-            e->type = ei[0];
-            if (stateful_at(e->type))
-                update_stateful(e, ei, stateful_at(e->type));
-            else if (e->type == SNX_AUDREN_EFFECT_COMPRESSOR && !eff_v2) {
-                /* Eden takes no version 1 update for the compressor: it stays unused */
-            } else {
-                e->enabled = ei[2];
-                e->mix_id = rd32(ei + 4);
-                e->order = rd32(ei + 0x18);
-                memcpy(e->p, ei + 0x20, sizeof e->p);
-            }
+        AREffect* e = &s->effect[i];
+        if (e->type != ei[0]) { /* another effect in the slot starts from nothing (Eden's ResetEffect) */
+            memset(e->p, 0, sizeof e->p);
+            e->enabled = 0;
+            e->mix_id = SNX_AUDREN_UNUSED_MIX;
+            memset(e->bq, 0, sizeof e->bq);
+            fx_free(e);
+        }
+        if (ei[1] || e->type != ei[0]) e->fresh = 1;
+        e->type = ei[0];
+        if (stateful_at(e->type))
+            update_stateful(e, ei, stateful_at(e->type));
+        else if (e->type == SNX_AUDREN_EFFECT_COMPRESSOR && !eff_v2) {
+            /* Eden takes no version 1 update for the compressor: it stays unused */
+        } else {
+            e->enabled = ei[2];
+            e->mix_id = rd32(ei + 4);
+            e->order = rd32(ei + 0x18);
+            memcpy(e->p, ei + 0x20, sizeof e->p);
         }
         q[i * (eff_v2 ? 0x90 : 0x10)] = ei[2] ? 3 : 4;
     }
@@ -505,13 +503,11 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
        frames behind where it writes, as Eden's CircularBufferSinkInfo reports last_pos2 */
     for (u32 i = 0; i < nsinks && i < s->nsinks; i++) {
         const u8* si = sinks + i * 0x140;
-        if (i < s->nsinks) {
-            ARSink* k = &s->sink[i];
-            k->type = si[0];
-            k->in_use = si[1];
-            memcpy(k->p, si + 0x20, sizeof k->p);
-            wr32(q + i * 0x20, k->last2);
-        }
+        ARSink* k = &s->sink[i];
+        k->type = si[0];
+        k->in_use = si[1];
+        memcpy(k->p, si + 0x20, sizeof k->p);
+        wr32(q + i * 0x20, k->last2);
     }
     q += o_sk;
     q += o_pf;
