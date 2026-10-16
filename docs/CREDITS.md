@@ -27,4 +27,4 @@ and package manifest: `share/licenses/`. Component license files contain the ful
 
 Community credits: [README](../README.md#special-thanks).
 
-Wimsy ([SVG metadata](../dist/wimsy.svg)): Madeline_Dev, copyright 2025 Eden Emulator Project, GPL-3.0.
+Wimsy ([SVG metadata](../dist/wimsy.svg)): drawn by Liz, GPL-3.0-or-later.
