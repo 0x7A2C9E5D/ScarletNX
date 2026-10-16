@@ -288,6 +288,43 @@ int main(int argc, char** argv) {
         free(text);
         text = NULL;
     }
+    { /* no name given: the name the NRO's control.nacp gives it, shown as it is recompiled and in its settings' head,
+         its control.nacp in its data for the launcher; its files by the file's name, as an NRO has no title ID */
+        static unsigned char named[0x200 + 0x40 + 0x300];
+        char *nro = snx_path_join(root, "named nro.nro"), *nacp, *ini;
+        size_t size;
+        memcpy(named, image, sizeof image);
+        put32(named, 0x18, sizeof image); /* the NRO itself; its assets after it */
+        memcpy(named + 0x200, "ASET", 4);
+        put32(named, 0x200 + 0x18, 0x40); /* the NACP's offset in the assets, and its size */
+        put32(named, 0x200 + 0x20, 0x300);
+        memcpy(named + 0x240, "Named by NACP", 13);
+        check(!snx_write_file(nro, named, sizeof named), "NRO with a NACP");
+        k = 0;
+        args[k++] = argv[1];
+        args[k++] = "--repo";
+        args[k++] = argv[2];
+        args[k++] = "-r";
+        args[k++] = nro;
+        args[k++] = "--outdir";
+        args[k++] = out;
+        args[k++] = "--no-build";
+        args[k] = NULL;
+        check(!snx_run(args, root, NULL, &text) && strstr(text, "Recompiling Named by NACP"), "shown by its NACP");
+        free(text);
+        text = NULL;
+        nacp = snx_path_join(out, "named nro/named nro_data/control.nacp");
+        cached = (char*)snx_read_file(nacp, &size);
+        check(cached && size == 0x300 && !memcmp(cached, named + 0x240, 0x300), "its NACP in its data");
+        free(cached);
+        ini = snx_path_join(out, "named nro/named nro.ini");
+        cached = (char*)snx_read_file(ini, &size);
+        check(cached && !strncmp(cached, "; ScarletNX settings for Named by NACP\n", 39), "its settings' head");
+        free(cached);
+        free(ini);
+        free(nacp);
+        free(nro);
+    }
     k = 0;
     args[k++] = argv[1];
     args[k++] = "--repo";

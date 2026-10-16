@@ -11,4 +11,7 @@ char* snx_game_title(const char* name, const SnxNpdm* npdm, const char* input);
 /* name when given, else the title ID, 16 hex digits, when the NPDM gives the game one of its own, else its title: the
    same game is the same files whatever its dump was called */
 char* snx_game_name(const char* name, const SnxNpdm* npdm, const char* input);
+/* what the game is shown as (its window, the recompile's lines, its settings' head): name when given, else the name
+   in its control.nacp, else its title */
+char* snx_game_shown(const char* name, const SnxProgram* program);
 #endif

@@ -333,7 +333,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("AArch32 programs are unsupported");
         goto done;
     }
-    title = snx_game_title(name, &program.npdm, program.entry_path);
+    title = snx_game_shown(name, &program);
     game = snx_game_name(name, &program.npdm, program.entry_path);
     out = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
     if (!out) {
@@ -381,6 +381,15 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     if (copy_data(&program, data, compile.quiet)) {
         snx_error("cannot stage game data in %s", data);
         goto done;
+    }
+    if (program.nacp) { /* the name the launcher lists the game by */
+        char* nacp = snx_path_join(data, "control.nacp");
+        int failed = !nacp || snx_write_file(nacp, program.nacp, program.nacp_size);
+        free(nacp);
+        if (failed) {
+            snx_error("cannot write the game's control.nacp in %s", data);
+            goto done;
+        }
     }
     ini = settings_path(folder, game);
     if (!ini) {

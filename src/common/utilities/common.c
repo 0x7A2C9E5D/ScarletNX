@@ -1149,3 +1149,27 @@ int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, 
     return waited < 0 ? 1 : WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
 #endif
 }
+int snx_nacp_name(const unsigned char* nacp, size_t size, char* name, size_t name_size) {
+    /* 16 languages of 0x300 bytes, each a name of 0x200 then a publisher; American English first */
+    size_t language, i, n = 0;
+    const unsigned char* title;
+    if (name_size) name[0] = 0;
+    for (language = 0; nacp && name_size && language < 16 && (language + 1) * 0x300 <= size && !name[0]; ++language) {
+        title = nacp + language * 0x300;
+        for (i = 0, n = 0; i < 0x200 && title[i] && n + 1 < name_size; ++i)
+            if (title[i] >= 0x20 && title[i] != 0x7f) name[n++] = (char)title[i];
+        while (n && name[n - 1] == ' ') --n;
+        /* a name cut in a UTF-8 sequence loses the sequence */
+        i = n;
+        while (i && ((unsigned char)name[i - 1] & 0xc0) == 0x80) --i;
+        if (i && ((unsigned char)name[i - 1] & 0x80)) {
+            unsigned char lead = (unsigned char)name[i - 1];
+            size_t want = (lead & 0xe0) == 0xc0 ? 2 : (lead & 0xf0) == 0xe0 ? 3 : (lead & 0xf8) == 0xf0 ? 4 : 1;
+            if (n - (i - 1) < want) n = i - 1;
+        }
+        name[n] = 0;
+        for (i = 0; name[i] == ' '; ++i) {}
+        if (i) memmove(name, name + i, n - i + 1);
+    }
+    return name_size && name[0];
+}

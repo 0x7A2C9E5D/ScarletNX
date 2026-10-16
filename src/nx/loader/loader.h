@@ -40,9 +40,9 @@ typedef struct {
     int is_nro, has_mod0;
     SnxMod0 mod0;
     char* eh_error;
-    /* Asset and RomFS pointers alias the allocation owned by image. */
-    const unsigned char *nro_asset, *romfs_data;
-    size_t nro_asset_size, romfs_size;
+    /* Asset, NACP and RomFS pointers alias the allocation owned by image. */
+    const unsigned char *nro_asset, *nacp_data, *romfs_data;
+    size_t nro_asset_size, nacp_size, romfs_size;
 } SnxModuleImage;
 
 typedef struct {
@@ -63,6 +63,10 @@ typedef struct {
     /* Embedded NRO RomFS aliases modules[0].image and is valid until snx_free_program. */
     const unsigned char* romfs_data;
     size_t romfs_size;
+    /* the game's control.nacp, owned: an NRO's from its assets, an ExeFS's beside it (<root>/control.nacp, where the
+       extraction puts it); NULL for none */
+    unsigned char* nacp;
+    size_t nacp_size;
 } SnxProgram;
 
 /* Return 0 on success, -1 with a bounded error string on failure. Output structs are zeroed on failure.

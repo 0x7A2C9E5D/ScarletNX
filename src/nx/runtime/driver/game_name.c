@@ -39,6 +39,11 @@ char* snx_game_title(const char* name, const SnxNpdm* npdm, const char* input) {
     }
     return out;
 }
+char* snx_game_shown(const char* name, const SnxProgram* program) {
+    char shown[0x200];
+    if (!name && snx_nacp_name(program->nacp, program->nacp_size, shown, sizeof shown)) return snx_strdup(shown);
+    return snx_game_title(name, &program->npdm, program->entry_path);
+}
 char* snx_game_name(const char* name, const SnxNpdm* npdm, const char* input) {
     char id[17];
     if (name || !npdm->title_id || npdm->title_id == SNX_NPDM_DEFAULT_TITLE) return snx_game_title(name, npdm, input);

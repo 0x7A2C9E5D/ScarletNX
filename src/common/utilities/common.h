@@ -113,4 +113,7 @@ int snx_run_stage(const char* const* argv, const char* cwd, const char* stage);
 int snx_run_debug_stage(const char* const* argv, const char* cwd, const char* stage);
 FILE* snx_fopen(const char* path, const char* mode);
 
+/* The game's name in a control.nacp: American English's, else the first language's that has one, in UTF-8 without
+   control characters. 1 when it has one, else 0 and "" */
+int snx_nacp_name(const unsigned char* nacp, size_t size, char* name, size_t name_size);
 #endif
