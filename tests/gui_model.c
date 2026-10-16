@@ -157,6 +157,12 @@ int main(void) {
     gui_console_feed(&screen, "\xc3", 1);
     gui_console_feed(&screen, "\xa9", 1);
     assert(screen.cells[0][4] == gui_glyph(0xe9));
+    /* the font's symbols under 32 and its house at 127 come from their Unicode, as a theme's cursor or a key's arrow;
+       the control bytes stay themselves */
+    assert(gui_glyph(0x25ba) == 0x10 && gui_glyph(0x2022) == 0x07 && gui_glyph(0x25ac) == 0x16);
+    assert(gui_glyph(0x2191) == 0x18 && gui_glyph(0x2193) == 0x19 && gui_glyph(0x2192) == 0x1a);
+    assert(gui_glyph(0x2190) == 0x1b && gui_glyph(0x263a) == 0x01 && gui_glyph(0x25bc) == 0x1f);
+    assert(gui_glyph(0x2302) == 0x7f && gui_glyph(0x00a7) == 0x15 && gui_glyph(0x10) == 0x10);
     for (int i = 0; i < 1000000; ++i) gui_console_feed(&screen, "z", 1);
     assert(screen.row < screen.rows && screen.col <= screen.cols);
     gui_console_resize(&screen, 3, 1);
@@ -196,6 +202,17 @@ int main(void) {
     assert(!gui_document_path("content://com.android.externalstorage.documents/document/primary%3A%zz"));
     assert(!gui_document_path("content://com.android.externalstorage.documents/document/primary%3A%00.xci"));
     assert(!gui_document_path("content://com.android.externalstorage.documents/document/primary"));
+    /* a folder its folder picker gave: a tree of the device's storage, its root too, or a card's; Downloads' has none */
+    path = gui_document_path("content://com.android.externalstorage.documents/tree/primary%3AGames%2FSwitch");
+    assert(path && !strcmp(path, "/storage/emulated/0/Games/Switch"));
+    free(path);
+    path = gui_document_path("content://com.android.externalstorage.documents/tree/primary%3A");
+    assert(path && !strcmp(path, "/storage/emulated/0/"));
+    free(path);
+    path = gui_document_path("content://com.android.externalstorage.documents/tree/1A2B-3C4D%3Agames");
+    assert(path && !strcmp(path, "/storage/1A2B-3C4D/games"));
+    free(path);
+    assert(!gui_document_path("content://com.android.providers.downloads.documents/tree/downloads"));
     path = gui_document_path("file:///tmp/a%20b.nro");
     assert(path && !strcmp(path, "/tmp/a b.nro"));
     free(path);

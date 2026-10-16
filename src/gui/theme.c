@@ -16,10 +16,12 @@ static GuiTheme builtins[SNX_GUI_THEME_COUNT];
 typedef char snx_gui_id_slot[sizeof(((GuiThemes*)0)->ids[0]) == sizeof(((GuiTheme*)0)->id) ? 1 : -1];
 typedef char snx_gui_word_int[sizeof(GuiStyle) == sizeof(int) && sizeof(GuiRunLayout) == sizeof(int) &&
                                       sizeof(GuiRing) == sizeof(int) && sizeof(GuiLineIn) == sizeof(int) &&
-                                      sizeof(GuiAlign) == sizeof(int)
+                                      sizeof(GuiAlign) == sizeof(int) && sizeof(GuiPanels) == sizeof(int) &&
+                                      sizeof(GuiHeadPlace) == sizeof(int) && sizeof(GuiTipsPlace) == sizeof(int)
                                   ? 1
                                   : -1];
 
+static const char* const heads[] = {"plain", "bar", NULL};
 static const char* const styles[] = {"plain", "bar", "none", NULL};
 static const char* const focuses[] = {"color", "bar", NULL};
 static const char* const layouts[] = {"console", "steps", NULL};
@@ -28,6 +30,9 @@ static const char* const progresses[] = {"amount", "percent", "time", NULL}; /* 
 static const char* const aligns[] = {"left", "center", "right", NULL};
 static const char* const entrances[] = {"none", "typing", "slide", "fade", NULL};
 static const char* const typings[] = {"async", "sync", NULL};
+static const char* const panel_words[] = {"outline", "fill", NULL};
+static const char* const head_places[] = {"tabs", "below", NULL};
+static const char* const tips_places[] = {"bottom", "top", NULL};
 #define FIELD(f)                    offsetof(GuiTheme, f), sizeof(((GuiTheme*)0)->f)
 #define TEXT(s, k, f, about)        {s, k, GUI_KEY_TEXT, FIELD(f), NULL, 0, about}
 #define COLOUR(s, k, f, about)      {s, k, GUI_KEY_COLOUR, FIELD(f), NULL, 0, about}
@@ -43,20 +48,29 @@ const GuiThemeKey gui_theme_keys[] = {
     COLOUR("colors", "focus", focus, "the focused line, or its band"),
     COLOUR("colors", "active", active, "the item chosen, the run's head"),
     COLOUR("colors", "failure", failure, "warnings, the ESC line, a failed run"),
-    COLOUR("colors", "dim", dim, "unused by the menus; [run] dim is the loading screen's"),
+    COLOUR("colors", "dim", dim, "the boxes' frames, a filled box, the grid and the title's shadow"),
     COLOUR("colors", "warning", warning, "the abort question in the console layout"),
     COLOUR("colors", "added", added, "a diff's added lines, as failure its removed ones; no screen uses it yet"),
-    WORD("head", "style", head, styles, "bar: the title on a band of ink; none: no title and no hints"),
+    WORD("head", "style", head, heads, "bar: the tabs and the title on a band of ink"),
     FLAG("head", "rule", head_rule, "a line under the head"),
+    WORD("head", "place", head_place, head_places, "the title after the tabs, or on a row of its own under them"),
+    NUMBER("head", "size", title_size, 3, "the title's letters, times the text's, 1 to 3"),
+    FLAG("head", "shadow", title_shadow, "a shadow under the title's letters, in the dim colour"),
     TEXT("head", "menu", title[GUI_SCREEN_MENU], "the menu's title"),
     TEXT("head", "games", title[GUI_SCREEN_GAMES], "the games/ list's title"),
     TEXT("head", "keys", title[GUI_SCREEN_KEYS], "the keys screen's title"),
     TEXT("head", "compiling", title[GUI_SCREEN_COMPILING], "a run's title until the game loads"),
     TEXT("head", "loading", title[GUI_SCREEN_LOADING], "a run's title once the runner's banner came"),
-    TEXT("body", "marker", marker, "before each menu item"),
-    WORD("body", "focus", focus_bar, focuses, "the focused line in the focus colour, or on a band of it"),
-    WORD("footer", "style", footer, styles, "bar: on a band of ink"),
-    FLAG("footer", "rule", footer_rule, "a line over the footer"),
+    TEXT("body", "marker", marker, "before each item"),
+    WORD("body", "focus", focus_bar, focuses, "the focused box in the focus colour, or on a band of it"),
+    WORD("body", "panels", panels, panel_words, "the boxes outlined or filled"),
+    TEXT("body", "cursor", cursor, "in the margin, beside the focused box"),
+    FLAG("backdrop", "grid", grid, "a faint grid on the page, in the dim colour"),
+    WORD("tips", "place", tips_place, tips_places, "in a box at the foot beside the keys, or on a row under the head"),
+    FLAG("tips", "box", tips_box, "in a box with a bar at its left, or on the page"),
+    WORD("footer", "style", footer, styles, "bar: on a band of ink; none: no Status box"),
+    FLAG("footer", "rule", footer_rule, "a line over the foot"),
+    FLAG("footer", "box", footer_box, "the keys in a box with a bar at its left, or on the page"),
     WORD("run", "layout", run, layouts, "steps: the loading screen; the keys below but colours are its"),
     COLOUR("run", "page", run_colors.page, "the loading screen's background"),
     COLOUR("run", "ink", run_colors.ink, "its text, the cursor, the ring's turning bar"),
@@ -94,9 +108,11 @@ const GuiThemeKey gui_theme_keys[] = {
 static const char* const sections[][2] = {
     {"theme", "Who made it. The theme's id is its folder's name."},
     {"colors", "The menus' colours, #RRGGBB."},
-    {"head", "The top: a title per screen and the hints under it."},
-    {"body", "The menu's lines."},
-    {"footer", "The bottom: resource use and the working folder."},
+    {"head", "The top: the menu, Games and the Settings as tabs, and a title per screen."},
+    {"body", "The screens' boxes: a list, the box beside it about the focus, the Status box under that one."},
+    {"backdrop", "The page behind the boxes."},
+    {"tips", "What the focus is about, or the screen's message."},
+    {"footer", "The foot: the screen's keys, the tips beside them; the Status box: resource use, the working folder."},
     {"run", "A run: the driver's output as it comes, or a loading screen in its own colours."},
     {"prompt", "A line that waits on the user: framed, placed and blinking when its key is true."},
     {"transitions", "Milliseconds, 0 to 10000; 0 turns the thing off."},

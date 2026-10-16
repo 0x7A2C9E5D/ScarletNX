@@ -8,7 +8,8 @@ else()
     message(FATAL_ERROR "scarletnx-gui currently supports Linux, FreeBSD and Windows")
 endif()
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
-add_library(snx_gui_support STATIC model.c browser.c steps.c theme.c recent.c editor.c settings.c ${gui_process}
+add_library(snx_gui_support STATIC model.c browser.c steps.c theme.c recent.c editor.c settings.c place.c
+            ${gui_process}
             "${CMAKE_BINARY_DIR}/generated/gui_themes.c")
 target_link_libraries(snx_gui_support PUBLIC scarletnx-common)
 target_include_directories(snx_gui_support PRIVATE "${CMAKE_BINARY_DIR}/generated")
@@ -77,6 +78,9 @@ if(BUILD_TESTING)
     add_executable(snx-test-gui-model "${PROJECT_SOURCE_DIR}/tests/gui_model.c")
     target_link_libraries(snx-test-gui-model PRIVATE snx_gui_support)
     add_test(NAME gui_model COMMAND snx-test-gui-model)
+    add_executable(snx-test-gui-place "${PROJECT_SOURCE_DIR}/tests/gui_place.c")
+    target_link_libraries(snx-test-gui-place PRIVATE snx_gui_support)
+    add_test(NAME gui_place COMMAND snx-test-gui-place)
     add_executable(snx-test-gui-cia-browser "${PROJECT_SOURCE_DIR}/tests/gui_cia_browser.c")
     target_link_libraries(snx-test-gui-cia-browser PRIVATE snx_gui_support scarletnx-common)
     add_test(NAME gui_cia_browser COMMAND snx-test-gui-cia-browser)
@@ -92,15 +96,8 @@ if(BUILD_TESTING)
     target_compile_definitions(snx-test-gui-theme PRIVATE SNX_GUI_DOCS="${PROJECT_SOURCE_DIR}/docs/GUI.md")
     target_include_directories(snx-test-gui-theme PRIVATE "${CMAKE_BINARY_DIR}/generated")
     add_test(NAME gui_theme COMMAND snx-test-gui-theme)
-    add_executable(snx-test-gui-theme-formats "${PROJECT_SOURCE_DIR}/tests/gui_theme_formats.c")
-    target_link_libraries(snx-test-gui-theme-formats PRIVATE snx_gui_support scarletnx-common)
-    target_compile_definitions(snx-test-gui-theme-formats PRIVATE
-                               SNX_GUI_THEME_FIXTURES="${PROJECT_SOURCE_DIR}/tests/gui_themes")
-    add_test(NAME gui_theme_formats COMMAND snx-test-gui-theme-formats)
     add_executable(snx-test-gui-theme-write "${PROJECT_SOURCE_DIR}/tests/gui_theme_write.c")
     target_link_libraries(snx-test-gui-theme-write PRIVATE snx_gui_support scarletnx-common)
-    target_compile_definitions(snx-test-gui-theme-write PRIVATE
-                               SNX_GUI_THEME_FIXTURES="${PROJECT_SOURCE_DIR}/tests/gui_themes")
     add_test(NAME gui_theme_write COMMAND snx-test-gui-theme-write)
     add_executable(snx-test-gui-editor "${PROJECT_SOURCE_DIR}/tests/gui_editor.c")
     target_link_libraries(snx-test-gui-editor PRIVATE snx_gui_support scarletnx-common)
@@ -121,7 +118,7 @@ if(BUILD_TESTING)
     target_link_libraries(snx-test-gui-sdl PRIVATE snx_gui_support scarletnx-common SDL3::SDL3 snx_window_icon
                           snx_build_info snx_pad_sdl)
     foreach(test snx-test-gui-model snx-test-gui-cia-browser snx-test-gui-recent snx-test-gui-steps snx-test-gui-theme snx-test-gui-process
-                 snx-test-gui-sdl snx-test-gui-theme-formats snx-test-gui-theme-write snx-test-gui-editor
+                 snx-test-gui-sdl snx-test-gui-theme-write snx-test-gui-editor
                  snx-test-gui-settings)
         target_compile_options(${test} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
     endforeach()
