@@ -179,7 +179,7 @@ wins, and a folder named like a built-in replaces it. The built-ins are such fil
 nothing else: each folder of `src/gui/themes/` is one, its `theme.ini` compiled into the GUI
 (`cmake/gui_themes.cmake`) and read as any other, setting every key. The runtime's game menu
 takes YoRHa's colours from the same file at build time. The files are copied beside the GUI
-in the build and installed with it: copy one under a new name to make a theme, or edit one
+in the build and installed in `share/scarletnx/themes`: copy one under a new name to make a theme, or edit one
 to change the built-in. `[theme] base` picks the built-in a file starts from, and a key it
 leaves out, or that cannot be read, keeps the base's value. The menu's **Theme editor**
 writes one with every key.

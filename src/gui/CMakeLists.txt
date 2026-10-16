@@ -60,12 +60,13 @@ if(SNX_SDL3_FROM_SOURCE AND NOT SNX_BUILD_NX)
     install(FILES "${SDL3_SOURCE_DIR}/LICENSE.txt" DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/scarletnx/SDL3)
 endif()
 install(FILES FONT-NOTICE.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/scarletnx)
-# The built-in themes as files to copy and edit, beside the GUI where it looks for them, in the build and installed
+# The built-in themes as files to copy and edit: beside the GUI in the build, in share/scarletnx installed, where it
+# looks for them
 file(GLOB_RECURSE gui_themes RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS themes/*/theme.ini)
 foreach(theme IN LISTS gui_themes)
     configure_file(${theme} "${CMAKE_BINARY_DIR}/${theme}" COPYONLY)
 endforeach()
-install(DIRECTORY themes DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY themes DESTINATION ${CMAKE_INSTALL_DATADIR}/scarletnx)
 if(BUILD_TESTING)
     add_executable(snx-test-gui-model "${PROJECT_SOURCE_DIR}/tests/gui_model.c")
     target_link_libraries(snx-test-gui-model PRIVATE snx_gui_support)

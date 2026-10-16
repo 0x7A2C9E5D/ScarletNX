@@ -223,6 +223,24 @@ int main(int argc, char** argv) {
     /* and the keys go in it, where the driver reads them first, not in ~/.switch */
     assert(!strcmp(app.keys_path, "/nonexistent/snx-gui-test/scarletnx/prod.keys"));
 #endif
+    /* the themes that come with the GUI: beside it in a build tree, else in share/scarletnx beside its bin/ */
+    {
+        char *root = snx_temp_dir(NULL), *bin = snx_path_join(root, "bin"), *beside = snx_path_join(bin, "themes");
+        char *shared = snx_path_join(bin, "../share/scarletnx/themes"), *found;
+        assert(root && !snx_mkdirs(bin));
+        found = shipped_themes(bin);
+        assert(!strcmp(found, shared));
+        free(found);
+        assert(!snx_mkdirs(beside));
+        found = shipped_themes(bin);
+        assert(!strcmp(found, beside));
+        free(found);
+        assert(!snx_remove_tree(root));
+        free(shared);
+        free(beside);
+        free(bin);
+        free(root);
+    }
     /* the window says which build it is: commit, compiler, platform */
     assert(!strcmp(SDL_GetWindowTitle(app.window), snx_build_info()) && !strncmp(snx_build_info(), "ScarletNX ", 10));
     /* the boot's splash: the default theme's black page with the icon in the middle until its time; a key ends it and
