@@ -17,6 +17,9 @@ void ini_set(const char* k, const char* v);
    int | float | text, the lowest and highest number, and the help on one line, tabs between (scarletnx --settings, the
    launcher's Settings) */
 void ini_list(void);
+/* 1 when key is a setting of the file, or an unattended-run option (platform/unattended.h): the driver passes only
+   those to a game (driver.h) */
+int snx_setting_known(const char* key);
 void ini_open(const char* path); /* watch the file: ini_poll reloads it when it changes, and writes back what changed */
 /* final: at exit. An edit that hasn't settled is left for the next start, unless a toggle needs saving: then it is
    read as it is */

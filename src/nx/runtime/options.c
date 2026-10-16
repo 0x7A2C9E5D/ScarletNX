@@ -14,6 +14,7 @@
 #include "runtime/platform/backend.h"
 #include "runtime/platform/log.h"
 #include "runtime/platform/plat.h"
+#include "runtime/platform/unattended.h"
 #include "runtime/platform/vpad.h"
 #include "hle/services/services.h"
 #include <errno.h>
@@ -236,6 +237,7 @@ static const IniOpt* ini_known(const char* k, const IniTable** table) {
         }
     return NULL;
 }
+int snx_setting_known(const char* key) { return ini_known(key, NULL) || unattended_known(key); }
 /* 1 when some table knows k (the unattended-run options go to backend_ini too) */
 static int ini_apply(const char* k, const char* v) {
     const IniTable* t = NULL;

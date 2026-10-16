@@ -87,6 +87,7 @@ int unattended_ini(const char* k, const char* v) {
     if (o) ini_read(o, v);
     return o != NULL;
 }
+int unattended_known(const char* k) { return ini_find(INI, k) != NULL; }
 void unattended_start(void) { g_start = plat_ns(); }
 int unattended_active(void) { return g_seconds || g_maxframes >= 0; }
 u64 unattended_buttons(void) {

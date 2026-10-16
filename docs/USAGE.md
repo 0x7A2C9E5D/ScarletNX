@@ -40,7 +40,8 @@ game's `.ini` decides (`fullscreen=1` starts fullscreen).
 mouse's left button (the default). The game's menu sets it; the game's `.ini` keeps its own `touch`.
 `--controls=0|1` likewise hides or shows the [on-screen controls](#on-screen-controls) (on by default on Android);
 the game's `.ini` keeps `controls`. Any other `--key=value` of the game's
-`.ini` is forwarded as well, for that run (`scarletnx --settings` lists them all).
+`.ini` is forwarded as well, for that run (`scarletnx --settings` lists them all), and so are the timed-run ones
+(`--seconds=`, `--shot=`...); any other key stops the run with `unknown option`.
 `--backend=gcc` selects libgccjit instead of the default LLVM backend when preparing
 a dump. An explicit `--backend=llvm|gcc` forces recompilation rather than reusing a
 cached executable built by another compiler.

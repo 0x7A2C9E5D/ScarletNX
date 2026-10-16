@@ -179,6 +179,14 @@ static void run(const char* exe, const char* repo, const char* dump, const char*
     free(recorded);
     free(output);
 }
+/* the runtime's settings (runtime/options.c): those this test gives */
+int snx_setting_known(const char* key) {
+    static const char* const known[] = {"touch", "controls", "resolution", "controls_a", "seconds"};
+    size_t i;
+    for (i = 0; i < sizeof known / sizeof *known; ++i)
+        if (!strcmp(key, known[i])) return 1;
+    return 0;
+}
 static void reset(const char* repo, const char* dump) {
     CHECK(!snx_remove_tree(repo));
     CHECK(!snx_mkdirs(repo));
@@ -292,6 +300,10 @@ int main(int argc, char** argv) {
         run(exe, repo, dump, log, 0, "G", NULL);
         set_env("SNX_WORKFLOW_FLAGS", "--resolution=2");
         run(exe, repo, dump, log, 0, "G", NULL);
+        set_env("SNX_WORKFLOW_FLAGS", "--seconds=5");
+        run(exe, repo, dump, log, 0, "G", NULL);
+        set_env("SNX_WORKFLOW_FLAGS", "--resoltion=2");
+        run(exe, repo, dump, log, 1, "", "unknown option: --resoltion=2");
         set_env("SNX_WORKFLOW_FLAGS", "--controls_a=0.5 0.5 100 1");
         run(exe, repo, dump, log, 0, "G", NULL);
         set_env("SNX_WORKFLOW_FLAGS", "--fullscreen=invalid");

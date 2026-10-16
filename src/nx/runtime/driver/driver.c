@@ -208,6 +208,15 @@ static int takes_value(const char* arg) {
         if (!strcmp(arg, names[i])) return 1;
     return 0;
 }
+/* key=value's key, a setting the runtime knows */
+static int setting_known(const char* option) {
+    char key[64];
+    size_t n = (size_t)(strchr(option, '=') - option);
+    if (!snx_setting_known || n >= sizeof key) return 0;
+    memcpy(key, option, n);
+    key[n] = 0;
+    return snx_setting_known(key);
+}
 static int container_path(const char* path) {
     const char* ext = strrchr(path, '.');
     char lower[6];
@@ -291,11 +300,16 @@ int snx_driver(int argc, char** argv) {
         goto done;
     }
     automatic = input && (!(flags & (SNX_EXTRACT | SNX_RECOMP)) || ((flags & SNX_RECOMP) && container_path(input)));
-    /* played, a --key=value that is not the driver's own is a setting of the game's .ini, passed on to it */
+    /* played, a --key=value that is not the driver's own is a setting of the game's .ini, passed on to it when the
+       runtime knows the key; any other is refused */
     for (i = 0; automatic && i < n; ++i)
-        if (!strncmp(rest[i], "--", 2) && strchr(rest[i], '=') && strncmp(rest[i], "--backend=", 10))
+        if (!strncmp(rest[i], "--", 2) && strchr(rest[i], '=') && strncmp(rest[i], "--backend=", 10)) {
+            if (!setting_known(rest[i] + 2)) {
+                result = snx_error("unknown option: %s", rest[i]);
+                goto done;
+            }
             setting[settings++] = rest[i];
-        else
+        } else
             rest[i - settings] = rest[i];
     n -= settings;
     if (automatic && (n != 1 + backend_args || help)) {
