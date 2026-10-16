@@ -70,10 +70,11 @@ def main():
             (scratch / 'compile.stderr').write_bytes(compiled.stderr)
             if compiled.returncode:
                 raise RuntimeError(f'NRO recompilation returned {compiled.returncode}')
-            launcher = output / ('NX Smoke.exe' if os.name == 'nt' else 'NX Smoke')
+            folder = output / 'NX Smoke'  # the game's own
+            launcher = folder / ('NX Smoke.exe' if os.name == 'nt' else 'NX Smoke')
             result = subprocess.run(
                 [str(launcher), '-H'],
-                cwd=output,
+                cwd=folder,
                 env=env,
                 capture_output=True,
                 timeout=args.timeout,
@@ -81,7 +82,7 @@ def main():
             )
             (scratch / 'runtime.stdout').write_bytes(result.stdout)
             (scratch / 'runtime.stderr').write_bytes(result.stderr)
-            log = output / 'NX Smoke.log'
+            log = folder / 'NX Smoke.log'
             text = log.read_text(encoding='utf-8', errors='replace') if log.is_file() else ''
             if result.returncode or '[game] NX runtime smoke' not in text or 'The game exited (code 0)' not in text:
                 raise RuntimeError(

@@ -79,33 +79,34 @@ for mode in "" -x -r; do
     fi
 done
 
-# No --outdir: an installed copy has no checkout, so its games go in the data folder
+# No --outdir: an installed copy has no checkout, so its games go in the data folder, each in a folder of its own
+game=$data/games/Smoke
 run "$runtime" -r smoke.nro Smoke --jobs 2
-if [ "$status" -eq 0 ] && [ -f "$data/games/Smoke$exe" ] && [ -f "$data/games/Smoke.abi" ]; then
-    pass "scarletnx -r smoke.nro made $data/games/Smoke$exe"
+if [ "$status" -eq 0 ] && [ -f "$game/Smoke$exe" ] && [ -f "$game/Smoke.abi" ]; then
+    pass "scarletnx -r smoke.nro made $game/Smoke$exe"
 else
-    fail "scarletnx -r smoke.nro exited $status, without $data/games/Smoke$exe and its .abi" "$out"
+    fail "scarletnx -r smoke.nro exited $status, without $game/Smoke$exe and its .abi" "$out"
 fi
-if [ -f "$config/Smoke.ini" ] && { [ "$config" = "$data/games" ] || [ ! -e "$data/games/Smoke.ini" ]; }; then
-    pass "its settings are $config/Smoke.ini"
+if [ -f "$config/Smoke/Smoke.ini" ] && { [ "$config" = "$data/games" ] || [ ! -e "$game/Smoke.ini" ]; }; then
+    pass "its settings are $config/Smoke/Smoke.ini"
 else
-    fail "scarletnx -r smoke.nro did not write its settings in $config only" "$out"
+    fail "scarletnx -r smoke.nro did not write its settings in $config/Smoke only" "$out"
 fi
 
-# The runtime left next to the game must start on its own (on Windows, with the DLLs it needs), find the game's code
-# by its name and take its ABI. The banner comes after that and before the GPU, which CI runners lack
-if [ -f "$data/games/Smoke$exe" ]; then
-    run env -C "$data/games" "./Smoke$exe" -H
+# The runtime left in the game's folder must start on its own (on Windows, with the DLLs it needs), find the game's
+# code by its name and take its ABI. The banner comes after that and before the GPU, which CI runners lack
+if [ -f "$game/Smoke$exe" ]; then
+    run env -C "$game" "./Smoke$exe" -H
     if grep -q '^ScarletNX - Smoke' <<<"$out"; then
-        pass "$data/games/Smoke$exe started the game (exit $status: $(tail -n 1 <<<"$out"))"
+        pass "$game/Smoke$exe started the game (exit $status: $(tail -n 1 <<<"$out"))"
     else
-        fail "$data/games/Smoke$exe exited $status before the game's banner" "$out"
+        fail "$game/Smoke$exe exited $status before the game's banner" "$out"
     fi
-    if grep -q 'ScarletNX - Smoke' "$state/Smoke.log" 2>/dev/null &&
-        { [ "$state" = "$data/games" ] || [ ! -e "$data/games/Smoke.log" ]; }; then
-        pass "its log is $state/Smoke.log"
+    if grep -q 'ScarletNX - Smoke' "$state/Smoke/Smoke.log" 2>/dev/null &&
+        { [ "$state" = "$data/games" ] || [ ! -e "$game/Smoke.log" ]; }; then
+        pass "its log is $state/Smoke/Smoke.log"
     else
-        fail "the game did not log in $state only" "$out"
+        fail "the game did not log in $state/Smoke only" "$out"
     fi
 fi
 
@@ -118,17 +119,17 @@ for folder in "${folders[@]}"; do
     nobinutils+=${nobinutils:+:}$folder
 done
 run env PATH="$nobinutils" "$runtime" -r smoke.nro GccSmoke --backend=gcc --jobs 2
-if [ "$status" -eq 0 ] && [ -f "$data/games/GccSmoke$exe" ] && [ -f "$data/games/GccSmoke.abi" ]; then
-    pass "scarletnx -r smoke.nro --backend=gcc made $data/games/GccSmoke$exe"
-    run env -C "$data/games" "./GccSmoke$exe" -H
+game=$data/games/GccSmoke
+if [ "$status" -eq 0 ] && [ -f "$game/GccSmoke$exe" ] && [ -f "$game/GccSmoke.abi" ]; then
+    pass "scarletnx -r smoke.nro --backend=gcc made $game/GccSmoke$exe"
+    run env -C "$game" "./GccSmoke$exe" -H
     if grep -q '^ScarletNX - GccSmoke' <<<"$out"; then
-        pass "$data/games/GccSmoke$exe started the game (exit $status: $(tail -n 1 <<<"$out"))"
+        pass "$game/GccSmoke$exe started the game (exit $status: $(tail -n 1 <<<"$out"))"
     else
-        fail "$data/games/GccSmoke$exe exited $status before the game's banner" "$out"
+        fail "$game/GccSmoke$exe exited $status before the game's banner" "$out"
     fi
 else
-    fail "scarletnx -r smoke.nro --backend=gcc exited $status, without $data/games/GccSmoke$exe and its .abi" \
-        "$out"
+    fail "scarletnx -r smoke.nro --backend=gcc exited $status, without $game/GccSmoke$exe and its .abi" "$out"
 fi
 
 # A dump on its own: recompile, then play, each a child of the first. Another name, which Windows would not tell

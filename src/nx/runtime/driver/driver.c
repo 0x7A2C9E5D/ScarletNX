@@ -91,7 +91,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
     char *dumped = dump_name(input), *dump = snx_absolute(input), *name = NULL;
     char *work = snx_work_dir(paths->repo), *games = snx_path_join(paths->repo, "games");
     char *extracted = snx_path_join(work, dumped), *pending = snx_format("%s.extracting", extracted);
-    char *game = NULL, *base = NULL, *code = NULL, error[256];
+    char *game = NULL, *folder = NULL, *base = NULL, *code = NULL, error[256];
     const char** command = (const char**)snx_alloc((size_t)(game_argc + settings + 16) * sizeof(*command));
     int rc = 1, nro = is_nro_path(input), n, j;
     SnxNpdm npdm;
@@ -136,7 +136,8 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
         goto done;
     }
     name = snx_game_name(NULL, &npdm, nro ? dump : extracted);
-    base = snx_path_join(games, name);
+    folder = snx_path_join(games, name); /* the game's own, as the recompile makes it */
+    base = snx_path_join(folder, name);
 #ifdef _WIN32
     code = snx_format("%s_code.dll", base);
     game = snx_format("%s.exe", base);
@@ -190,7 +191,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
     if (game_argc) command[n++] = "--";
     for (j = 0; j < game_argc; ++j) command[n++] = game_argv[j];
     command[n] = NULL;
-    rc = (flags & SNX_GDB) ? snx_run_debug_stage(command, games, "Game") : snx_run_stage(command, games, "Game");
+    rc = (flags & SNX_GDB) ? snx_run_debug_stage(command, folder, "Game") : snx_run_stage(command, folder, "Game");
 done:
     free(dumped);
     free(name);
@@ -200,6 +201,7 @@ done:
     free(extracted);
     free(pending);
     free(game);
+    free(folder);
     free(base);
     free(code);
     free(command);

@@ -521,6 +521,17 @@ int snx_copy_file(const char* src, const char* dst) {
     if (fclose(out)) rc = 1;
     return rc;
 }
+int snx_link_file(const char* src, const char* dst) {
+#ifdef _WIN32
+    wchar_t *a = wide(src), *b = wide(dst);
+    int ok = a && b && CreateHardLinkW(b, a, NULL);
+    free(a);
+    free(b);
+    return !ok;
+#else
+    return link(src, dst) != 0;
+#endif
+}
 int snx_path_within(const char* path, const char* parent) {
     char *a = snx_absolute(path), *b = snx_absolute(parent);
     size_t i = 0, n;

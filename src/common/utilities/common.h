@@ -34,6 +34,9 @@ int snx_mkdirs(const char* path);
 int snx_remove_tree(const char* path);
 int snx_copy_file(const char* src, const char* dst);
 int snx_copy_tree(const char* src, const char* dst);
+/* dst a second name of the file src, on the same disk: nonzero when dst is there already, or the disk or system takes
+   none (another volume, FAT), for the caller to copy instead */
+int snx_link_file(const char* src, const char* dst);
 int snx_path_within(const char* path, const char* parent);
 int snx_replace(const char* src, const char* dst);
 int snx_list_dir(const char* path, char*** names, size_t* count);

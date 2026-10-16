@@ -3057,12 +3057,15 @@ static int play(App* app, const char* game) {
     free(option);
     return ok;
 }
-/* the game a run of the driver made ready: there the driver names it, as it cannot open it; whether it opened */
+/* the game a run of the driver made ready, in its folder of games/: there the driver names it, as it cannot open it;
+   whether it opened */
 static int ready(App* app) {
     const GuiStep* made = gui_steps_last(&app->steps, "READY");
-    char* game = made ? snx_path_join(app->games_dir, made->detail) : NULL;
+    char* folder = made ? snx_path_join(app->games_dir, made->detail) : NULL;
+    char* game = folder ? snx_path_join(folder, made->detail) : NULL;
     int ok = game && play(app, game);
     free(game);
+    free(folder);
     return ok;
 }
 /* the run in its notification: the game, the step on the screen and the percent, as they change, a second apart at
@@ -3483,24 +3486,36 @@ static char* log_tail(const char* path, size_t max) {
     free(data);
     return text;
 }
-/* the game log written last, games/<game>.log: beside the games, or an installed build's in its state folder */
+/* the game log written last, games/<game>/<game>.log, or an older version's games/<game>.log: beside the games, or an
+   installed build's in its state folder */
 static char* newest_log(const App* app) {
-    int count = 0, i;
-    char* folder = snx_user_path(app->games_dir, SNX_USER_STATE);
-    char** names = SDL_GlobDirectory(folder, "*.log", 0, &count);
-    char* newest = NULL;
+    char *folder = snx_user_path(app->games_dir, SNX_USER_STATE), *newest = NULL, **names = NULL;
+    size_t count = 0, i, n;
     SDL_Time time = 0;
-    for (i = 0; names && i < count; ++i) {
+    if (folder) snx_list_dir(folder, &names, &count);
+    for (i = 0; i < count; ++i) {
         SDL_PathInfo info;
-        char* path = snx_path_join(folder, names[i]);
-        if (SDL_GetPathInfo(path, &info) && (!newest || info.modify_time > time)) {
+        char *path = snx_path_join(folder, names[i]), *log = NULL;
+        n = strlen(names[i]);
+        if (path && snx_is_dir(path)) { /* a game's folder: its own log */
+            char* own = snx_format("%s.log", names[i]);
+            log = snx_path_join(path, own);
+            free(own);
+        } else if (n > 4 && !strcmp(names[i] + n - 4, ".log")) {
+            log = path;
+            path = NULL;
+        }
+        if (log && SDL_GetPathInfo(log, &info) && info.type == SDL_PATHTYPE_FILE &&
+            (!newest || info.modify_time > time)) {
             free(newest);
-            newest = path;
+            newest = log;
+            log = NULL;
             time = info.modify_time;
-        } else
-            free(path);
+        }
+        free(log);
+        free(path);
     }
-    SDL_free(names);
+    snx_free_strings(names, count);
     free(folder);
     return newest;
 }

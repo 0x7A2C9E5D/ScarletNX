@@ -157,11 +157,19 @@ static void split_path(const char* argv0) {
     for (size_t n = strlen(p); n > 1 && (p[n - 1] == '/' || p[n - 1] == '\\'); n--) p[n - 1] = 0;
     char *s1 = strrchr(p, '/'), *s2 = strrchr(p, '\\'), *s = s1 > s2 ? s1 : s2;
     const char* base = s ? s + 1 : p;
+    /* --game=games/0100ABCD12345000 names the game in that folder, games/0100ABCD12345000/0100ABCD12345000 */
+    size_t n = strlen(p), b = strlen(base);
+    if (b && n + 1 + b < sizeof p && snx_is_dir(p)) {
+        memmove(p + n + 1, base, b + 1);
+        p[n] = '/';
+        s = p + n;
+        base = s + 1;
+    }
     strncpy(g_exename, base, 255);
     char* dot = strrchr(g_exename, '.');
     if (dot && (!strcmp(dot, ".exe") || !strcmp(dot, ".EXE") || !strcmp(dot, ".AppImage"))) *dot = 0;
     /* --game=games/Catherine_code.so names the same game as --game=games/Catherine */
-    size_t n = strlen(g_exename);
+    n = strlen(g_exename);
     if (n > 8 && (!strcmp(g_exename + n - 8, "_code.so"))) g_exename[n - 8] = 0;
     if (n > 9 && (!strcmp(g_exename + n - 9, "_code.dll"))) g_exename[n - 9] = 0;
     if (s) {

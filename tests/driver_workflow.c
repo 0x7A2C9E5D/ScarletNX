@@ -111,7 +111,7 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
 }
 unsigned snx_game_abi(void) { return 4; }
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
-    char *game, *partial, *name;
+    char *game, *partial, *name, *folder;
     int rc;
     if (getenv("SNX_WORKFLOW_BACKEND") && *getenv("SNX_WORKFLOW_BACKEND")) {
         CHECK(argc == 6 && !strcmp(argv[2], "--backend") && !strcmp(argv[3], getenv("SNX_WORKFLOW_BACKEND")));
@@ -148,16 +148,19 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         CHECK(!snx_load_npdm(argv[3], &npdm, error, sizeof error));
         name = snx_game_name(NULL, &npdm, argv[3]);
     }
+    /* the game in a folder of its own, as the recompile makes it */
+    folder = snx_path_join(argv[1], name);
+    CHECK(!snx_mkdirs(folder));
 #ifdef _WIN32
-    game = snx_format("%s/%s.exe", argv[1], name);
+    game = snx_format("%s/%s.exe", folder, name);
 #else
-    game = snx_path_join(argv[1], name);
+    game = snx_path_join(folder, name);
 #endif
     CHECK(!snx_copy_file(paths->executable, game));
     CHECK(!snx_make_executable(game));
     {
-        char* stamp = snx_format("%s/%s.abi", argv[1], name);
-        char* code = snx_format("%s/%s_code.%s", argv[1], name,
+        char* stamp = snx_format("%s/%s.abi", folder, name);
+        char* code = snx_format("%s/%s_code.%s", folder, name,
 #ifdef _WIN32
                                 "dll"
 #else
@@ -170,6 +173,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         free(code);
     }
     free(game);
+    free(folder);
     free(name);
     return 0;
 }
@@ -279,11 +283,11 @@ int main(int argc, char** argv) {
     log = snx_path_join(root, "events");
     extracted = snx_path_join(repo, "work/Test game");
 #ifdef _WIN32
-    game = snx_path_join(repo, "games/Test game.exe");
+    game = snx_path_join(repo, "games/Test game/Test game.exe");
 #else
-    game = snx_path_join(repo, "games/Test game");
+    game = snx_path_join(repo, "games/Test game/Test game");
 #endif
-    cwd = snx_path_join(repo, "games");
+    cwd = snx_path_join(repo, "games/Test game"); /* the game runs in its folder */
     set_env("SNX_WORKFLOW_GAMES", cwd);
     free(cwd);
     set_env("SNX_WORKFLOW_CHILD", "1");
@@ -305,7 +309,7 @@ int main(int argc, char** argv) {
 
     /* Missing/mismatched/malformed ABI stamps are never trusted. */
     {
-        char* stamp = snx_path_join(repo, "games/Test game.abi");
+        char* stamp = snx_path_join(repo, "games/Test game/Test game.abi");
         CHECK(!snx_write_file(stamp, "3\n", 2));
         run(exe, repo, dump, log, 0, "RG", NULL);
         CHECK(!snx_write_file(stamp, "broken", 6));
@@ -456,13 +460,15 @@ int main(int argc, char** argv) {
     /* a game with a title ID of its own is named by it, whatever its dump is called; a broken NPDM stops the run */
     {
 #ifdef _WIN32
-        char* named = snx_path_join(repo, "games/0100ABCD12345000.exe");
+        char* named = snx_path_join(repo, "games/0100ABCD12345000/0100ABCD12345000.exe");
 #else
-        char* named = snx_path_join(repo, "games/0100ABCD12345000");
+        char* named = snx_path_join(repo, "games/0100ABCD12345000/0100ABCD12345000");
 #endif
+        char* folder = snx_path_join(repo, "games/0100ABCD12345000");
         reset(repo, dump);
         set_env("SNX_WORKFLOW_MODE", "exit");
         set_env("SNX_WORKFLOW_NPDM", "id");
+        set_env("SNX_WORKFLOW_GAMES", folder);
         run(exe, repo, dump, log, 0, "ERG", NULL);
         CHECK(snx_is_file(named) && !snx_is_file(game));
         run(exe, repo, dump, log, 0, "G", NULL);
@@ -471,6 +477,10 @@ int main(int argc, char** argv) {
         run(exe, repo, dump, log, 1, "E", "NPDM: access-control region exceeds file");
         CHECK(!snx_is_file(named) && !snx_is_file(game));
         set_env("SNX_WORKFLOW_NPDM", "");
+        free(folder);
+        folder = snx_path_join(repo, "games/Test game");
+        set_env("SNX_WORKFLOW_GAMES", folder);
+        free(folder);
         free(named);
     }
     /* NROs bypass extraction even with a stale same-stem work directory or game executable. */

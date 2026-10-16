@@ -163,7 +163,7 @@ int main(int argc, char** argv) {
     out = snx_path_join(root, "output with spaces");
     self = snx_executable(argv[0]);
     temp = snx_path_join(root, "temporary files with spaces");
-    build = snx_path_join(out, "Native Fixture_build");
+    build = snx_path_join(out, "Native Fixture/Native Fixture_build");
     check(!snx_mkdirs(temp), "temporary build parent");
 #ifdef _WIN32
     environment("TMP", temp);
@@ -187,7 +187,7 @@ int main(int argc, char** argv) {
     check(!snx_write_file(input, image, sizeof(image)), "write NRO");
     for (pass = 0; pass < 6; ++pass) {
         if (pass == 1) {
-            data_file = snx_path_join(out, "Native Fixture_data/romfs.bin");
+            data_file = snx_path_join(out, "Native Fixture/Native Fixture_data/romfs.bin");
             check(!snx_write_file(data_file, "old RomFS", 9), "stale NRO assets fixture");
             free(data_file);
         }
@@ -217,11 +217,11 @@ int main(int argc, char** argv) {
             check(rc != 0, "link output replacement failure");
         else
             check(!rc, pass == 2 ? "interpreter CLI build" : "AOT CLI build");
-        data_file = snx_path_join(out, "Native Fixture.abi");
+        data_file = snx_path_join(out, "Native Fixture/Native Fixture.abi");
         check(snx_is_file(data_file) == !rc, "ABI checkpoint published only after a successful build");
         free(data_file);
         if (pass == 1) {
-            data_file = snx_path_join(out, "Native Fixture_data/romfs.bin");
+            data_file = snx_path_join(out, "Native Fixture/Native Fixture_data/romfs.bin");
             check(!snx_is_file(data_file), "asset-free NRO removes stale RomFS");
             free(data_file);
         }
@@ -233,9 +233,9 @@ int main(int argc, char** argv) {
         free(text);
         text = NULL;
 #ifdef _WIN32
-        module = snx_path_join(out, "Native Fixture_code.dll");
+        module = snx_path_join(out, "Native Fixture/Native Fixture_code.dll");
 #else
-        module = snx_path_join(out, "Native Fixture_code.so");
+        module = snx_path_join(out, "Native Fixture/Native Fixture_code.so");
 #endif
         if (!rc) execute_module(module, image, pass == 2);
 #ifdef __linux__
@@ -250,13 +250,13 @@ int main(int argc, char** argv) {
         free(module);
     }
     check(!snx_remove_tree(build), "remove kept sources before no-build test");
-    data_file = snx_path_join(out, "Native Fixture_data/exefs/main.nro");
+    data_file = snx_path_join(out, "Native Fixture/Native Fixture_data/exefs/main.nro");
     cached = (char*)snx_read_file(data_file, &cached_size);
     check(cached && cached_size == sizeof(image) && !memcmp(cached, image, sizeof(image)), "NRO staging");
     free(cached);
     free(data_file);
     /* A previously staged NSO must not silently shadow the new NRO. */
-    data_file = snx_path_join(out, "Native Fixture_data/exefs/main");
+    data_file = snx_path_join(out, "Native Fixture/Native Fixture_data/exefs/main");
     check(!snx_write_file(data_file, "old NSO", 7), "conflicting format fixture");
     k = 0;
     args[k++] = argv[1];

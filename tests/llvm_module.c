@@ -189,9 +189,9 @@ int main(int argc, char** argv) {
     for (b = 0; b < nbackends; ++b) {
         out[b] = snx_path_join(root, backends[b]);
 #ifdef _WIN32
-        module[b] = snx_path_join(out[b], "Program_code.dll");
+        module[b] = snx_path_join(out[b], "Program/Program_code.dll");
 #else
-        module[b] = snx_path_join(out[b], "Program_code.so");
+        module[b] = snx_path_join(out[b], "Program/Program_code.so");
 #endif
         k = 0;
         args[k++] = argv[1];

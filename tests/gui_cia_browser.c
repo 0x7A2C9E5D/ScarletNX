@@ -69,6 +69,38 @@ int main(void) {
         free(beta);
         free(more);
     }
+    /* a game in a folder of its own is listed by the folder, run from inside it; an older version's game beside the
+       others still is; a folder holding no game of its name (its _data/, another program) is not */
+    {
+#ifdef _WIN32
+#define EXE ".exe"
+#else
+#define EXE ""
+#endif
+        static const char* const made[] = {"0100ABCD12345000/0100ABCD12345000" EXE, "Old" EXE, "Old_data/main",
+                                           "Other/Else" EXE, "Plain/Plain.txt"};
+        char *ready = snx_temp_dir(NULL), *path, *inside;
+        size_t i;
+        assert(ready);
+        for (i = 0; i < sizeof made / sizeof *made; ++i) {
+            char* folder;
+            path = snx_path_join(ready, made[i]);
+            folder = snx_dirname(path);
+            assert(!snx_mkdirs(folder) && !snx_write_file(path, "#!/bin/sh\n", 10) && !snx_make_executable(path));
+            free(folder);
+            free(path);
+        }
+        assert(gui_games_scan(&games, ready, false, error, sizeof error) && games.count == 2);
+        assert(!strcmp(games.names[0], "0100ABCD12345000") && !strcmp(games.names[1], "Old" EXE));
+        inside = snx_path_join(ready, made[0]);
+        path = snx_path_join(ready, made[1]);
+        assert(!strcmp(games.paths[0], inside) && !strcmp(games.paths[1], path));
+        free(path);
+        free(inside);
+        assert(!snx_remove_tree(ready));
+        free(ready);
+#undef EXE
+    }
     /* Repeated scans replace the old list; neither recursion nor execute bits. */
     assert(gui_games_scan(&games, subdir, true, error, sizeof error) && !games.count);
     assert(!snx_remove_tree(dir));

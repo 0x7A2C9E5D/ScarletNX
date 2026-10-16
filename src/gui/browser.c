@@ -85,6 +85,26 @@ static bool playable(const char* directory, char* name, int kinds) {
     return listed;
 #endif
 }
+/* a game in a folder of its own, <name>/<name> (<name>.exe on Windows, <name>_code.so on Android): where it is, else
+   NULL. Any other folder (an older version's <name>_data/, the player's) is no game */
+static char* folder_game(const char* directory, const char* name, int kinds) {
+    char *folder, *own = NULL, *path = NULL;
+    if (!(kinds & GUI_GAMES_RUN) || name[0] == '.') return NULL;
+    folder = snx_path_join(directory, name);
+    if (folder && snx_is_dir(folder) && !snx_is_link(folder)) {
+#if defined(__ANDROID__)
+        own = snx_format("%s_code.so", name);
+#elif defined(_WIN32)
+        own = snx_format("%s.exe", name);
+#else
+        own = snx_strdup(name);
+#endif
+        if (own && playable(folder, own, GUI_GAMES_RUN)) path = snx_path_join(folder, own);
+    }
+    free(own);
+    free(folder);
+    return path;
+}
 bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* error, size_t size) {
     char **names = NULL, **more;
     size_t count = 0, i;
@@ -104,7 +124,8 @@ bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* erro
     }
     /* snx_list_dir already sorts names */
     for (i = 0; i < count; ++i) {
-        char* path = playable(directory, names[i], kinds) ? snx_path_join(directory, names[i]) : NULL;
+        char* path = folder_game(directory, names[i], kinds);
+        if (!path && playable(directory, names[i], kinds)) path = snx_path_join(directory, names[i]);
         if (!path) continue;
         games->names[games->count] = names[i];
         games->paths[games->count++] = path;
