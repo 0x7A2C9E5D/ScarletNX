@@ -139,11 +139,7 @@ static const char* const load_labels[] = {"-> Select via drag and drop", "-> Sel
 #define SAY_EDITOR     "Up/Down: key. Left/Right: change. Enter: type. Ctrl+S: save. ESC: back."
 #endif
 static SDL_Color rgb(GuiRgb c) {
-    SDL_Color out;
-    out.r = c.r;
-    out.g = c.g;
-    out.b = c.b;
-    out.a = 255;
+    SDL_Color out = {c.r, c.g, c.b, 255};
     return out;
 }
 static Uint64 now_ms(const App* app) { return app->clock ? app->clock : SDL_GetTicks(); }
@@ -165,20 +161,30 @@ static SDL_Texture* create_font(SDL_Renderer* renderer) {
     }
     return texture;
 }
-static void glyph(App* app, int x, int y, unsigned char c) {
-    SDL_FRect source = {(float)((c % 16) * 8), (float)((c / 16) * 16), 8, 16};
-    SDL_FRect destination = {(float)(x * 8 * app->scale), (float)(y * 16 * app->scale), (float)(8 * app->scale),
-                             (float)(16 * app->scale)};
+/* the font's glyph c, its corner at x, y in pixels */
+static void glyph(App* app, float x, float y, unsigned char c) {
+    SDL_FRect source = {(float)(c % 16 * 8), (float)(c / 16 * 16), 8, 16};
+    SDL_FRect destination = {x, y, 8.0f * (float)app->scale, 16.0f * (float)app->scale};
     SDL_RenderTexture(app->renderer, app->font, &source, &destination);
 }
+/* text from a pixel position, chars at most, alpha its opacity, cut at the last column; where it ends */
+static float text_px(App* app, float x, float y, const char* value, size_t chars, SDL_Color color, float alpha) {
+    size_t i;
+    float w = 8.0f * (float)app->scale, limit = (float)(app->cols - 1) * w;
+    SDL_SetTextureColorMod(app->font, color.r, color.g, color.b);
+    SDL_SetTextureAlphaMod(app->font, (Uint8)(alpha * 255));
+    for (i = 0; *value && i < chars; ++i, x += w) {
+        unsigned char c = gui_glyph(SDL_StepUTF8(&value, NULL));
+        if (x + w <= limit) glyph(app, x, y, c);
+    }
+    SDL_SetTextureAlphaMod(app->font, 255);
+    return x;
+}
+/* text at a cell, a line too long for its row sliding as the theme says */
 static void text(App* app, int x, int y, const char* value, SDL_Color color) {
     int skip = gui_slide((int)SDL_utf8strlen(value) - (app->cols - 1 - x), now_ms(app), app->theme.scroll_ms);
-    SDL_SetTextureColorMod(app->font, color.r, color.g, color.b);
     while (skip-- > 0 && *value) SDL_StepUTF8(&value, NULL);
-    while (*value && x < app->cols - 1) {
-        Uint32 codepoint = SDL_StepUTF8(&value, NULL);
-        glyph(app, x++, y, gui_glyph(codepoint));
-    }
+    text_px(app, (float)(x * 8 * app->scale), (float)(y * 16 * app->scale), value, SIZE_MAX, color, 1);
 }
 /* a line that waits on the user: plain at x, or framed, placed and blinking as the theme's prompt says */
 static void prompt(App* app, GuiPromptLine line, int x, int y, const char* value, SDL_Color color) {
@@ -212,6 +218,13 @@ static void set_area(App* app) {
     } else
         SDL_SetRenderViewport(app->renderer, NULL);
 }
+static void fill(App* app, float x, float y, float w, float h, GuiRgb c, Uint8 alpha) {
+    SDL_FRect r = {x, y, w, h};
+    SDL_SetRenderDrawBlendMode(app->renderer, alpha == 255 ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(app->renderer, c.r, c.g, c.b, alpha);
+    SDL_RenderFillRect(app->renderer, &r);
+    SDL_SetRenderDrawBlendMode(app->renderer, SDL_BLENDMODE_NONE);
+}
 static void area(const App* app, int* width, int* height) {
     SDL_Rect r;
     SDL_GetRenderViewport(app->renderer, &r);
@@ -222,28 +235,20 @@ static void area(const App* app, int* width, int* height) {
    text and what is left below the last row */
 static void band(App* app, int row, int rows, GuiRgb c) {
     SDL_Rect safe;
-    SDL_FRect r;
     int width, height, bottom = row + rows == app->rows && app->rows < GUI_MAX_ROWS;
+    float top;
     SDL_GetRenderViewport(app->renderer, &safe);
     SDL_GetRenderOutputSize(app->renderer, &width, &height);
-    r.x = 0;
-    r.y = row ? (float)(safe.y + row * 16 * app->scale) : 0;
-    r.w = (float)width;
-    r.h = (bottom ? (float)height : (float)(safe.y + (row + rows) * 16 * app->scale)) - r.y;
+    top = row ? (float)(safe.y + row * 16 * app->scale) : 0;
     SDL_SetRenderViewport(app->renderer, NULL);
-    SDL_SetRenderDrawColor(app->renderer, c.r, c.g, c.b, 255);
-    SDL_RenderFillRect(app->renderer, &r);
+    fill(app, 0, top, (float)width, (bottom ? (float)height : (float)(safe.y + (row + rows) * 16 * app->scale)) - top,
+         c, 255);
     SDL_SetRenderViewport(app->renderer, &safe);
 }
 /* a line between two rows, across the text area */
 static void rule(App* app, int row, GuiRgb c) {
-    SDL_FRect r;
-    r.x = (float)(8 * app->scale);
-    r.y = (float)(row * 16 * app->scale - app->scale);
-    r.w = (float)((app->cols - 2) * 8 * app->scale);
-    r.h = (float)app->scale;
-    SDL_SetRenderDrawColor(app->renderer, c.r, c.g, c.b, 255);
-    SDL_RenderFillRect(app->renderer, &r);
+    float s = (float)app->scale;
+    fill(app, 8 * s, (float)(row * 16) * s - s, (float)((app->cols - 2) * 8) * s, s, c, 255);
 }
 /* ~/.switch/prod.keys (%USERPROFILE%\.switch on Windows), where hactool and other tools keep them */
 static char* home_keys_path(void) {
@@ -421,40 +426,6 @@ static void layout(App* app) {
     gui_browser_resize(&app->browser, (size_t)SDL_max(1, app->rows - 10));
     int log_rows = SDL_max(1, app->rows - app->log_top - 4);
     gui_console_resize(&app->console, SDL_max(1, app->cols - 2), log_rows);
-}
-/* text from a pixel position, chars at most, for the lines that slide or fade in */
-static float text_px(App* app, float x, float y, const char* value, size_t chars, SDL_Color color, float alpha) {
-    size_t i;
-    float w = 8.0f * app->scale, h = 16.0f * app->scale, limit = (float)(app->cols - 1) * w;
-    SDL_SetTextureColorMod(app->font, color.r, color.g, color.b);
-    SDL_SetTextureAlphaMod(app->font, (Uint8)(alpha * 255));
-    for (i = 0; *value && i < chars; ++i, x += w) {
-        unsigned char c = gui_glyph(SDL_StepUTF8(&value, NULL));
-        SDL_FRect source, destination;
-        if (x + w > limit) continue;
-        source.x = (float)((c % 16) * 8);
-        source.y = (float)((c / 16) * 16);
-        source.w = 8;
-        source.h = 16;
-        destination.x = x;
-        destination.y = y;
-        destination.w = w;
-        destination.h = h;
-        SDL_RenderTexture(app->renderer, app->font, &source, &destination);
-    }
-    SDL_SetTextureAlphaMod(app->font, 255);
-    return x;
-}
-static void fill(App* app, float x, float y, float w, float h, GuiRgb c, Uint8 alpha) {
-    SDL_FRect r;
-    r.x = x;
-    r.y = y;
-    r.w = w;
-    r.h = h;
-    SDL_SetRenderDrawBlendMode(app->renderer, alpha == 255 ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(app->renderer, c.r, c.g, c.b, alpha);
-    SDL_RenderFillRect(app->renderer, &r);
-    SDL_SetRenderDrawBlendMode(app->renderer, SDL_BLENDMODE_NONE);
 }
 /* an arc of a circle, from and sweep in degrees, thickness pixels inward */
 static void arc(App* app, float cx, float cy, float r, float from, float sweep, float thickness, GuiRgb c) {
@@ -672,11 +643,7 @@ static void render_steps(App* app) {
         fill(app, cw, ch * (float)(app->rows - foot - 4) + ch / 2, (float)(app->cols - 2) * cw, (float)app->scale,
              colors->dim, 255);
         for (k = 0; k < SEGMENTS; ++k) {
-            SDL_FRect r;
-            r.x = cw + (float)k * (seg + gap);
-            r.y = sy;
-            r.w = seg;
-            r.h = ch * 0.4f;
+            SDL_FRect r = {cw + (float)k * (seg + gap), sy, seg, ch * 0.4f};
             if (k < filled)
                 fill(app, r.x, r.y, r.w, r.h, colors->ink, 255);
             else {
@@ -922,7 +889,8 @@ static void draw_screen(App* app) {
         for (int y = 0; y < app->console.rows; ++y)
             for (int x = 0; x < app->console.cols; ++x)
                 if (app->log_top + y < app->rows - 4 && app->console.cells[y][x] != ' ')
-                    glyph(app, x + 1, app->log_top + y, app->console.cells[y][x]);
+                    glyph(app, (float)((x + 1) * 8 * app->scale), (float)((app->log_top + y) * 16 * app->scale),
+                          app->console.cells[y][x]);
     }
     if (idle && (app->menu.view == GUI_LOAD_NONE ||
                  ((app->menu.view == GUI_LOAD_OPTIONS || app->menu.view == GUI_LOAD_DROP) && !app->menu.focus_load)))
