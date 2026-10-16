@@ -138,6 +138,8 @@ static void level_rows(const Surf* t, const u8* src, u64 lsz, u32 rowb, u32 th, 
 }
 
 static u32 g_tex_upload_gen;
+static u32 g_tex_inval_gen;
+void vk_tex_invalidate_all(void) { g_tex_inval_gen++; }
 static void tex_upload(Surf* t) {
     const VkFmt* f = &t->f;
     t->wgen = ++g_tex_upload_gen; /* even a new texture at a reused address invalidates an old target's copy */
@@ -551,9 +553,10 @@ texture_from_memory:
            below says, as writes within a frame have to show in the same frame. Not written: it still matches as of
            now, which keeps the next check's walk of the write log short */
         int fresh = 0;
-        if (gpu_mem_dirty_since(t->gw, gva, t->size)) {
+        if (t->tex_inval_gen != g_tex_inval_gen || gpu_mem_dirty_since(t->gw, gva, t->size)) {
             fresh = 1;
             if (tex_rehash(t)) t->stable = 0;
+            t->tex_inval_gen = g_tex_inval_gen;
         } else
             t->gw = gpu_mem_generation();
         /* with write tracking, checked once a frame only when its memory was written */
@@ -600,6 +603,7 @@ texture_from_memory:
     if (!format_samples(f.vk)) return NULL;
     Surf* t = tex_create(gva, w, h, layers, d3, levels, vt, f, fkey, bl, bh, bd, pitch, stride);
     if (!t) return NULL;
+    t->tex_inval_gen = g_tex_inval_gen;
     /* this texture's levels in one layer; the layers before the last one take their whole stride */
     u64 sz = 0;
     for (u32 l = 0; l < levels; l++) sz += bl ? bl_level_size(w, h, d3, &f, bh, bd, l, NULL, NULL) : stride;
