@@ -81,6 +81,7 @@ static void dump(Dump* d, const GuiTheme* t) {
     add_colour(d, "colors.failure", t->failure);
     add_colour(d, "colors.dim", t->dim);
     add_colour(d, "colors.warning", t->warning);
+    add_colour(d, "colors.added", t->added);
     add_word(d, "head", styles[t->head]);
     add_flag(d, "head_rule", t->head_rule);
     add_word(d, "footer", styles[t->footer]);

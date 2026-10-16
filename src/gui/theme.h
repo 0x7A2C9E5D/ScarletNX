@@ -45,7 +45,7 @@ typedef struct {
 typedef struct {
     char id[64], name[64], author[64];
     uint32_t format;
-    GuiRgb page, ink, soft, focus, active, failure, dim, warning;
+    GuiRgb page, ink, soft, focus, active, failure, dim, warning, added;
     GuiStyle head, footer;
     int head_rule, footer_rule;
     int focus_bar; /* the focused line as a band of ink, its text in the page colour */

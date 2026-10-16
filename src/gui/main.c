@@ -726,37 +726,71 @@ static void ask_box(const App* app, int* col, int* row, int* cols) {
     *col = (app->cols - *cols) / 2;
     *row = SDL_max(0, (app->rows - 6) / 2);
 }
-/* the question over a running run, in the run screen's colours, its choices as the menu's entries */
-#define SAY_LEFT_BY " was left by an older version: this one keeps it in "
-/* the box with what older builds left: each file where it is and where to move it, as many as fit, and OK. Nothing is
-   moved: the player does that */
+#define SAY_LEFT_BY    " was left by an older version: this one keeps it in "
+#define SAY_LEFT_TITLE "An older version left these files: move each from - to +"
+/* s at column x of row y, wrapped to width columns: first before its first row, as many spaces before the others. A
+   NULL color only counts them. The rows it takes */
+static int wrapped(App* app, int x, int y, const char* first, const char* s, int width, const SDL_Color* color) {
+    char row[1100];
+    int indent = (int)strlen(first), rows = 0;
+    do {
+        size_t n = gui_wrap(s, width - indent);
+        if (color) {
+            snprintf(row, sizeof row, "%*s%.*s", indent, rows ? "" : first, (int)n, s);
+            text(app, x, y + rows, row, *color);
+        }
+        s += n;
+        ++rows;
+    } while (*s);
+    return rows;
+}
+/* a line of app->left: the file where an older build left it, and where this one keeps it */
+static void left_paths(const char* line, char* old, char* now, size_t size) {
+    const char* by = strstr(line, SAY_LEFT_BY);
+    snprintf(old, size, "%.*s", (int)(by - line), line);
+    by += strlen(SAY_LEFT_BY);
+    snprintf(now, size, "%.*s", (int)strcspn(by, "\n"), by);
+}
+/* the box with what older builds left, as a diff: each file where it is (-) and where this one keeps it (+), whole
+   over as many rows as it needs, as many files as fit, and OK. Nothing is moved: the player does that */
 static void render_left(App* app) {
     const GuiTheme* t = &app->theme;
-    int shown = SDL_min(app->lefts, SDL_max(1, (app->rows - 8) / 2)), i;
-    int rows = 2 * shown + 6, row = SDL_max(0, (app->rows - rows) / 2); /* a title, a blank row, two a file, OK */
+    SDL_Color warning = rgb(t->warning), failure = rgb(t->failure), added = rgb(t->added), soft = rgb(t->soft);
+    int width = SDL_max(8, app->cols - 7), title, room, used = 0, shown, rows, row, y;
     float cw = 8.0f * (float)app->scale, ch = 16.0f * (float)app->scale, line = (float)app->scale;
-    float w = (float)(app->cols - 3) * cw, h = (float)rows * ch; /* past the last column text takes */
-    const char* at = app->left;
-    char label[2200];
+    const char* at;
+    char old[4200], now[4200], label[64];
     if (!app->left_shown || !app->lefts) return;
-    fill(app, 2 * cw, (float)row * ch, w, h, t->soft, 255); /* framed in soft */
-    fill(app, 2 * cw + line, (float)row * ch + line, w - 2 * line, h - 2 * line, t->page, 255);
-    text(app, 4, row + 1, "An older version left these files, which this one does not read:", rgb(t->warning));
-    for (i = 0; i < shown; ++i, at = strchr(at, '\n') + 1) {
-        const char* by = strstr(at, SAY_LEFT_BY);
-        snprintf(label, sizeof label, "%.*s", (int)(by - at), at);
-        text(app, 4, row + 3 + 2 * i, label, rgb(t->ink));
-        by += strlen(SAY_LEFT_BY);
-        snprintf(label, sizeof label, "  move it to %.*s", (int)strcspn(by, "\n"), by);
-        text(app, 4, row + 4 + 2 * i, label, rgb(t->soft));
+    /* a blank row, the title, a blank row, the files, a blank row or how many more, OK and a blank row */
+    title = wrapped(app, 0, 0, "", SAY_LEFT_TITLE, width, NULL);
+    room = app->rows - 2 - (title + 5);
+    for (shown = 0, at = app->left; shown < app->lefts; ++shown, at = strchr(at, '\n') + 1) {
+        int need;
+        left_paths(at, old, now, sizeof old);
+        need = wrapped(app, 0, 0, "- ", old, width, NULL) + wrapped(app, 0, 0, "+ ", now, width, NULL);
+        if (shown && used + need > room) break;
+        used += need;
+    }
+    rows = title + used + 5;
+    row = SDL_max(0, (app->rows - rows) / 2);
+    fill(app, 2 * cw, (float)row * ch, (float)(app->cols - 3) * cw, (float)rows * ch, t->soft, 255); /* framed */
+    fill(app, 2 * cw + line, (float)row * ch + line, (float)(app->cols - 3) * cw - 2 * line,
+         (float)rows * ch - 2 * line, t->page, 255);
+    y = row + 1 + wrapped(app, 4, row + 1, "", SAY_LEFT_TITLE, width, &warning) + 1;
+    at = app->left;
+    for (int i = 0; i < shown; ++i, at = strchr(at, '\n') + 1) {
+        left_paths(at, old, now, sizeof old);
+        y += wrapped(app, 4, y, "- ", old, width, &failure);
+        y += wrapped(app, 4, y, "+ ", now, width, &added);
     }
     if (shown < app->lefts) {
         snprintf(label, sizeof label, "and %d more, which Share log lists", app->lefts - shown);
-        text(app, 4, row + 3 + 2 * shown, label, rgb(t->soft));
+        text(app, 4, y, label, soft);
     }
     snprintf(label, sizeof label, "%sOK, nothing is moved", t->marker);
     text(app, 4, row + rows - 2, label, rgb(t->focus));
 }
+/* the question over a running run, in the run screen's colours, its choices as the menu's entries */
 static void render_ask(App* app) {
     static const char* const choices[2][2] = {{"Keep going", "Abort"}, {"Stay", "Exit"}}; /* by exit, GUI_CONFIRM_* */
     const GuiTheme* t = &app->theme;

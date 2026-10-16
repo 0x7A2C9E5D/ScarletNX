@@ -64,6 +64,9 @@ void gui_size_text(char* out, size_t size, uint64_t bytes);
 void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_bytes, double cpu_percent, int cores);
 /* how many columns a line over columns too many has slid at ms, a column every step_ms: it waits at each end */
 int gui_slide(int over, uint64_t ms, uint32_t step_ms);
+/* the bytes of s's first row when it is wrapped at width characters (at least 1): all of it when it fits, else up to
+   the last slash or backslash that fits, else the last space, else width characters */
+size_t gui_wrap(const char* s, int width);
 
 typedef struct {
     size_t count, page, page_size, selected; /* focus: selected == 0 is Back on every page */

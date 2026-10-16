@@ -155,6 +155,17 @@ int gui_slide(int over, uint64_t ms, uint32_t step_ms) {
     if (t < (uint64_t)(2 * GUI_SLIDE_WAIT + over)) return over;
     return over - (int)(t - 2 * GUI_SLIDE_WAIT - over);
 }
+size_t gui_wrap(const char* s, int width) {
+    size_t at = 0, slash = 0, space = 0;
+    int chars;
+    for (chars = 0; s[at]; ++chars) {
+        if (chars == (width < 1 ? 1 : width)) return slash ? slash : space ? space : at;
+        while ((s[++at] & 0xC0) == 0x80) {} /* a character's other bytes */
+        if (s[at - 1] == '/' || s[at - 1] == '\\') slash = at;
+        if (s[at - 1] == ' ') space = at;
+    }
+    return at;
+}
 size_t gui_browser_pages(const GuiBrowser* browser) {
     if (!browser->count || !browser->page_size) return 1;
     return 1 + (browser->count - 1) / browser->page_size;

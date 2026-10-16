@@ -117,6 +117,15 @@ int main(void) {
     assert(gui_slide(5, 1300, 100) == 5 && gui_slide(5, 2000, 100) == 5 && gui_slide(5, 2200, 100) == 4);
     assert(gui_slide(5, 2500, 100) == 1 && !gui_slide(5, 2600, 100) && gui_slide(5, 2600 + 900, 100) == 1);
 
+    /* a row of a wrapped line: whole when it fits, else after its last slash, else its last space, else cut */
+    assert(gui_wrap("abc", 5) == 3 && gui_wrap("abcde", 5) == 5 && gui_wrap("", 5) == 0);
+    assert(gui_wrap("/home/me/games/Super Mario Maker 2.ini", 20) == 15); /* "/home/me/games/" */
+    assert(gui_wrap("C:\\Users\\me\\Super Mario", 16) == 12);             /* up to the last backslash */
+    assert(gui_wrap("An older version left", 10) == 9);                   /* "An older " */
+    assert(gui_wrap("abc/", 4) == 4 && gui_wrap("abc/def", 4) == 4 && gui_wrap("abcdefghij", 4) == 4);
+    assert(gui_wrap("ab", 0) == 1 && gui_wrap("ab", -3) == 1);
+    assert(gui_wrap("\xc3\xa9\xc3\xa9\xc3\xa9", 2) == 4); /* characters, not bytes */
+
     GuiBrowser browser = {.count = 23};
     gui_browser_resize(&browser, 10);
     assert(gui_browser_pages(&browser) == 3 && gui_browser_items(&browser) == 10);

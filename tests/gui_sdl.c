@@ -106,6 +106,12 @@ static SDL_Color pixel(App* app, float x, float y) {
     return out;
 }
 static int same_colour(SDL_Color a, SDL_Color b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
+/* the rows a path takes wrapped at width */
+static int path_rows(const char* path, int width) {
+    int n = 0;
+    for (; *path; path += gui_wrap(path, width)) ++n;
+    return n;
+}
 static void colored_text_at(App* app, int col, int row, const char* prompt, SDL_Color color) {
     colored_text_on(app, col, row, prompt, color, black);
 }
@@ -1618,13 +1624,21 @@ int main(int argc, char** argv) {
         free(folder);
         /* the menu says, a line at a time, what an older build left where this one no longer looks: its own files,
            work/ and each game's, until they are gone */
+#define LONG "Foo, a game whose name is longer than a row of the box has room for"
         {
             char *installed_dir = app.data_dir, *games = app.games_dir, *ini, *log, *threads, *work, *line;
-            const char* const lines[] = {
-                "%s/scarletnx/gui/recent.txt",    "%s/scarletnx/gui/recent.txt", "%s/scarletnx/gui/last-run.log",
-                "%s/scarletnx/gui/last-run.log",  "%s/scarletnx/work",           "%s/scarletnx/work",
-                "%s/scarletnx/games/Foo.log",     "%s/scarletnx/games/Foo.log",  "%s/scarletnx/games/threads.txt",
-                "%s/scarletnx/games/threads.txt", "%s/scarletnx/games/Foo.ini",  "%s/scarletnx/games/Foo.ini"};
+            const char* const lines[] = {"%s/scarletnx/gui/recent.txt",
+                                         "%s/scarletnx/gui/recent.txt",
+                                         "%s/scarletnx/gui/last-run.log",
+                                         "%s/scarletnx/gui/last-run.log",
+                                         "%s/scarletnx/work",
+                                         "%s/scarletnx/work",
+                                         "%s/scarletnx/games/" LONG ".log",
+                                         "%s/scarletnx/games/" LONG ".log",
+                                         "%s/scarletnx/games/threads.txt",
+                                         "%s/scarletnx/games/threads.txt",
+                                         "%s/scarletnx/games/" LONG ".ini",
+                                         "%s/scarletnx/games/" LONG ".ini"};
             const char* const into[] = {state, state, "cache", "state", "state", "config"};
             char* config = snx_path_join(temporary, "config");
             char* cache = snx_path_join(temporary, "cache");
@@ -1635,8 +1649,8 @@ int main(int argc, char** argv) {
             app.data_dir = snx_path_join(data, "scarletnx");
             app.games_dir = snx_path_join(app.data_dir, "games");
             app.recent_file = snx_path_join(expected, "recent.txt");
-            ini = snx_path_join(app.games_dir, "Foo.ini");
-            log = snx_path_join(app.games_dir, "Foo.log");
+            ini = snx_path_join(app.games_dir, LONG ".ini");
+            log = snx_path_join(app.games_dir, LONG ".log");
             threads = snx_path_join(app.games_dir, "threads.txt");
             work = snx_path_join(app.data_dir, "work");
             assert(!snx_mkdirs(work) && !snx_mkdirs(app.games_dir) && !snx_write_file(ini, "", 0));
@@ -1653,25 +1667,60 @@ int main(int argc, char** argv) {
                 free(now_path);
                 free(old_path);
             }
-            /* in a box over the menu as it opens: each where it is and where to move it, as many as fit */
+            /* in a box over the menu as it opens, as a diff: each where it is (-) and where it goes (+), a path too long
+               for a row going on in the next, as many as fit */
             {
-                int rows = 2 * 6 + 6, row = (app.rows - rows) / 2, selected = app.menu.selected;
-                SDL_Color page = rgb(app.theme.page);
+                int width = app.cols - 7, rows = 6, row, y, wraps = 0, selected = app.menu.selected;
+                SDL_Color page = rgb(app.theme.page), added = rgb(app.theme.added), green = {0x55, 0xFF, 0x55, 255};
+                static char paths[2][4200]; /* where each file is, and where it goes */
                 app.left_shown = true;
-                app.clock = 1; /* the long lines rest before they slide */
+                app.clock = 1;
                 render(&app);
-                assert(app.rows >= 20 && row > 0);
-                colored_text_on(&app, 4, row + 1, "An older version left these files, which this one does not read:",
+                assert(app.rows >= 20 && width >= 57 && same_colour(added, green));
+                for (at = app.left; *at; at = strchr(at, '\n') + 1) {
+                    left_paths(at, paths[0], paths[1], sizeof paths[0]);
+                    for (i = 0; i < 2; ++i) { /* each path's rows: the whole of it, in pieces */
+                        rows += path_rows(paths[i], width - 2);
+                        wraps += path_rows(paths[i], width - 2) > 1;
+                    }
+                }
+                assert(wraps >= 4 && rows <= app.rows - 2); /* the long game's paths wrap, and all six files fit */
+                row = (app.rows - rows) / 2;
+                colored_text_on(&app, 4, row + 1, "An older version left these files: move each from - to +",
                                 rgb(app.theme.warning), page);
-                line = snx_format("%s/scarletnx/gui/recent.txt", data);
-                if ((int)strlen(line) > app.cols - 5) line[app.cols - 5] = 0;
-                colored_text_on(&app, 4, row + 3, line, rgb(app.theme.ink), page);
-                free(line);
-                line = snx_format("  move it to %s/scarletnx/gui/recent.txt", state);
-                if ((int)strlen(line) > app.cols - 5) line[app.cols - 5] = 0;
-                colored_text_on(&app, 4, row + 4, line, rgb(app.theme.soft), page);
-                free(line);
+                for (y = row + 3, at = app.left; *at; at = strchr(at, '\n') + 1) {
+                    left_paths(at, paths[0], paths[1], sizeof paths[0]);
+                    for (i = 0; i < 2; ++i)
+                        for (const char* rest = paths[i]; *rest; ++y) { /* the whole path, a piece a row */
+                            size_t n = gui_wrap(rest, width - 2);
+                            line = snx_format("%s%.*s", rest == paths[i] ? (i ? "+ " : "- ") : "  ", (int)n, rest);
+                            colored_text_on(&app, 4, y, line, i ? added : rgb(app.theme.failure), page);
+                            free(line);
+                            rest += n;
+                        }
+                }
+                assert(y == row + rows - 3);
                 colored_text_on(&app, 4, row + rows - 2, "- OK, nothing is moved", rgb(app.theme.focus), page);
+                /* a window too short for them all: as many as fit, then how many more */
+                {
+                    int used = 0, shown = 0;
+                    app.rows = 14;
+                    for (at = app.left; *at; at = strchr(at, '\n') + 1, ++shown) {
+                        int need;
+                        left_paths(at, paths[0], paths[1], sizeof paths[0]);
+                        need = path_rows(paths[0], width - 2) + path_rows(paths[1], width - 2);
+                        if (shown && used + need > app.rows - 2 - 6) break;
+                        used += need;
+                    }
+                    assert(shown > 0 && shown < 6);
+                    render_left(&app);
+                    row = (app.rows - (used + 6)) / 2;
+                    line = snx_format("and %d more, which Share log lists", 6 - shown);
+                    colored_text_on(&app, 4, row + 3 + used, line, rgb(app.theme.soft), page);
+                    free(line);
+                    colored_text_on(&app, 4, row + 4 + used, "- OK, nothing is moved", rgb(app.theme.focus), page);
+                    layout(&app);
+                }
                 app.clock = 0;
                 /* a key closes it and does nothing else; nothing was moved */
                 key(&app, SDLK_DOWN);
@@ -1698,6 +1747,7 @@ int main(int argc, char** argv) {
             free(cache);
             free(config);
         }
+#undef LONG
         /* and an empty state folder is made for the first run */
         assert(!snx_remove_tree(state));
         folder = state_folder();
