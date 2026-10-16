@@ -25,12 +25,10 @@ static void mark(Ctx* c, u32 i) {
     if (i < 65536) c->leader[i >> 3] |= 1 << (i & 7);
 }
 static int is_leader(Ctx* c, u32 i) { return i < 65536 && (c->leader[i >> 3] >> (i & 7)) & 1; }
-static void mark_tgt(Ctx* c, u32 i) { mark(c, i); }
 
 int (*g_shader_cb_read)(u32 idx, u32 off, u32* out);
-int shader_brx_targets(const u64* w, u32 i, u32 n, u32* out, int max);
 u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
-    if (!ops_ready) ops_init();
+    ops_init();
     const u64* w = (const u64*)code;
     u32 n = max_bytes / 8;
     u32 i = 11, last = 11;
@@ -48,8 +46,8 @@ u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
         const Op* op = decode(w[i]);
         last = i;
         if (!op) continue;
-        if (op->id == O_BRA || op->id == O_CAL || op->id == O_PRET || op->id == O_SSY || op->id == O_PBK ||
-            op->id == O_PCNT) {
+        if (op->id == O_BRA || op->id == O_CAL || op->id == O_PRET || op->id == O_PEXIT || op->id == O_SSY ||
+            op->id == O_PBK || op->id == O_PCNT) {
             u32 t = bra_target(w[i], i);
             if (t > maxt) maxt = t;
             if (op->id == O_CAL || op->id == O_PRET) has_cal = 1;
@@ -83,7 +81,7 @@ u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
    A's bundles go first and its EXITs become branches to B's first bundle; branches are relative so both keep working.
    B's header is used (declarations come from what the code touches). 0 if it doesn't fit in max_bytes */
 int shader_merge_dual(const u8* a, const u8* b, u8* out, u32 max_bytes) {
-    if (!ops_ready) ops_init();
+    ops_init();
     u32 la, lb;
     shader_hash(a, max_bytes, &la);
     shader_hash(b, max_bytes, &lb);
@@ -220,7 +218,6 @@ static int stk_eq(const Stk* a, const Stk* b) {
 typedef struct {
     Ctx* c;
     u32 n;
-    int fwd;
     int* lid;
     Stk* st;
     u8* has;
@@ -228,8 +225,7 @@ typedef struct {
     int nwl;
 } StkA;
 /* edge i -> tg, 0 on conflict */
-static int stk_succ(StkA* A, u32 i, u32 tg, const Stk* s) {
-    if (A->fwd && tg <= i) return 1;                  /* linear mode: no later block -> return */
+static int stk_succ(StkA* A, u32 tg, const Stk* s) {
     if (tg >= A->n || !is_leader(A->c, tg)) return 1; /* no block -> return */
     int L = A->lid[tg];
     if (A->has[L]) return stk_eq(&A->st[L], s);
@@ -238,11 +234,11 @@ static int stk_succ(StkA* A, u32 i, u32 tg, const Stk* s) {
     A->wl[A->nwl++] = L;
     return 1;
 }
-static int stk_resolve(Ctx* c, u32 n, int fwd) {
+static int stk_resolve(Ctx* c, u32 n) {
     int nl = 0;
     for (u32 i = 11; i < n; i++)
         if (IDX_OK(i) && is_leader(c, i)) nl++;
-    StkA A = {.c = c, .n = n, .fwd = fwd};
+    StkA A = {.c = c, .n = n};
     /* one block, by alignment: the stacks, the 4-byte arrays, then the flags */
     u8* block = calloc(1, (sizeof(Stk) + sizeof(u32) + sizeof(int) + 1) * (nl + 1) + sizeof(int) * (n + 1));
     if (!block) return 0;
@@ -258,6 +254,10 @@ static int stk_resolve(Ctx* c, u32 n, int fwd) {
             ldr[k++] = i;
         }
     c->pop_tgt = calloc(n + 1, sizeof(u32));
+    if (!c->pop_tgt) {
+        free(block);
+        return 0;
+    }
     int ok = 1;
     Stk s0;
     memset(&s0, 0, sizeof s0);
@@ -270,7 +270,7 @@ static int stk_resolve(Ctx* c, u32 n, int fwd) {
         for (u32 i = ldr[L]; i < n && ok; i++) {
             if (!IDX_OK(i)) continue;
             if (i != ldr[L] && is_leader(c, i)) {
-                ok = stk_succ(&A, i - 1, i, &s);
+                ok = stk_succ(&A, i, &s);
                 break;
             } /* fall through */
             const Op* op = decode(c->w[i]);
@@ -305,12 +305,12 @@ static int stk_resolve(Ctx* c, u32 n, int fwd) {
                 c->pop_tgt[i] = tg;
                 Stk s2 = s;
                 s2.n = (u8)(j - 1);
-                ok = stk_succ(&A, i, tg, &s2);
+                ok = stk_succ(&A, tg, &s2);
                 if (always) break;
                 continue;
             }
             if (id == O_BRA) {
-                ok = stk_succ(&A, i, bra_target(w, i), &s);
+                ok = stk_succ(&A, bra_target(w, i), &s);
                 if (always) break;
                 continue;
             }
@@ -321,7 +321,7 @@ static int stk_resolve(Ctx* c, u32 n, int fwd) {
                     ok = 0;
                     break;
                 }
-                for (int q = 0; q < nt && ok; q++) ok = stk_succ(&A, i, targets[q], &s);
+                for (int q = 0; q < nt && ok; q++) ok = stk_succ(&A, targets[q], &s);
                 if (always) break;
                 continue;
             }
@@ -344,7 +344,12 @@ int shader_resolve_crs(const u64* words, u32 count, u32* pop_targets) {
         const Op* op = decode(words[i]);
         if (!op) continue;
         int id = op->id;
-        if (id == O_BRA || id == O_SSY || id == O_PBK || id == O_PCNT) mark_tgt(c, bra_target(words[i], i));
+        /* The static walk does not follow calls. A callee can consume a caller's CRS token. */
+        if (id == O_CAL || id == O_PRET) {
+            unresolved = 1;
+            break;
+        }
+        if (id == O_BRA || id == O_SSY || id == O_PBK || id == O_PCNT) mark(c, bra_target(words[i], i));
         if (id == O_BRX) {
             u32 targets[64];
             int n = shader_brx_targets(words, i, count, targets, 64);
@@ -363,7 +368,7 @@ int shader_resolve_crs(const u64* words, u32 count, u32* pop_targets) {
             mark(c, next);
         }
     }
-    int ok = !unresolved && stk_resolve(c, count, 0);
+    int ok = !unresolved && stk_resolve(c, count);
     if (ok) memcpy(pop_targets, c->pop_tgt, (size_t)count * sizeof *pop_targets);
     free(c->pop_tgt);
     free(c);

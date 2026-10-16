@@ -236,6 +236,14 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
         u32 xs = r[0x381], ys = r[0x382];
         i32 x0 = (i32)vk_scf(xs & 0xFFFF), x1 = (i32)vk_scf(xs >> 16), y0 = (i32)vk_scf(ys & 0xFFFF),
             y1 = (i32)vk_scf(ys >> 16);
+        if (r[0x4EB] & 1) {
+            i32 clip_height = (i32)vk_scf((float)(r[0x3FE] >> 16));
+            i32 old_y0 = y0;
+            y0 = clip_height - y1;
+            y1 = clip_height - old_y0;
+        }
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
         if (x1 > (i32)g_rp.ext.width) x1 = (i32)g_rp.ext.width;
         if (y1 > (i32)g_rp.ext.height) y1 = (i32)g_rp.ext.height;
         if (x1 <= x0 || y1 <= y0) return;
@@ -1053,6 +1061,11 @@ VkViewport vk_render_viewport(const u32* r) {
         vp = (VkViewport){vk_scf(vx & 0xFFFF), vk_scf(vy & 0xFFFF), vk_scf(vx >> 16), vk_scf(vy >> 16), 0, 1};
     } else
         vp = (VkViewport){vk_scf(tx - ax), vk_scf(ty - sy), vk_scf(2 * ax), vk_scf(2 * sy), 0, 1};
+    /* A lower-left window measures y from the surface clip's bottom. Match the 3D blit path's conversion. */
+    if (r[0x4EB] & 1) {
+        vp.y += vk_scf((float)(r[0x3FE] >> 16));
+        vp.height = -vp.height;
+    }
     if (((r[0x286] >> 4) & 7) == 3) {
         vp.y += vp.height;
         vp.height = -vp.height;
@@ -1145,7 +1158,7 @@ retry:
     gs = gs_on
              ? vk_shader_get(ch, code + r[0x841], 0, ST_GS, 0, 0, gs_input_vertices(topology, tes_on, r[0xC8]), 0, clip)
              : NULL;
-    if ((tcs && tcs->failed) || (tes && tes->failed) || (gs && gs->failed)) {
+    if ((tcs_on && (!tcs || tcs->failed)) || (tes_on && (!tes || tes->failed)) || (gs_on && (!gs || gs->failed))) {
         g_vk_skipped++;
         return;
     }
@@ -1546,6 +1559,14 @@ retry:
         u32 xs = r[0x381], ys = r[0x382];
         i32 x0 = (i32)vk_scf(xs & 0xFFFF), x1 = (i32)vk_scf(xs >> 16), y0 = (i32)vk_scf(ys & 0xFFFF),
             y1 = (i32)vk_scf(ys >> 16);
+        if (r[0x4EB] & 1) {
+            i32 clip_height = (i32)vk_scf((float)(r[0x3FE] >> 16));
+            i32 old_y0 = y0;
+            y0 = clip_height - y1;
+            y1 = clip_height - old_y0;
+        }
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
         if (x1 > (i32)g_rp.ext.width) x1 = (i32)g_rp.ext.width;
         if (y1 > (i32)g_rp.ext.height) y1 = (i32)g_rp.ext.height;
         sc = x1 > x0 && y1 > y0 ? (VkRect2D){{x0, y0}, {(u32)(x1 - x0), (u32)(y1 - y0)}} : (VkRect2D){{0, 0}, {0, 0}};

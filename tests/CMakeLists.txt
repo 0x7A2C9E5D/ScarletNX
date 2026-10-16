@@ -145,6 +145,8 @@ if(SNX_BUILD_NX)
         snx_test_target(snx-test-spirv-emitter 11)
         add_test(NAME spirv_emitter COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/spirv_emitter_test.py"
             --generator $<TARGET_FILE:snx-test-spirv-emitter> --validator "${SNX_SPIRV_VAL}" --disassembler "${SNX_SPIRV_DIS}")
+    else()
+        message(STATUS "Skipping spirv_emitter: Python3, spirv-val, and spirv-dis are required")
     endif()
 endif()
 

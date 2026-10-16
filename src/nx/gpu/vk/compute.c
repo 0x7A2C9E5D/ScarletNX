@@ -285,6 +285,7 @@ typedef struct {
     u32 tex_int, tex_sint, image;
 } CsKey;
 static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm, CsKey k) {
+    static CsPipe allocation_failed = {.failed = 1};
     u32 blen;
     u64 key = vk_shader_hash(code, 0x10000 + 80, &blen, cs_cb_read) ^ ((u64)lx << 40) ^ ((u64)ly << 48) ^
               ((u64)lz << 56) ^ ((u64)shm << 20) ^ ((u64)k.image << 32) ^ (u64)k.tex_int * 0x9E3779B97F4A7C15ull ^
@@ -293,6 +294,7 @@ static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm, CsKey k)
     while (p && (p->key != key || !vk_cb_reads_hold(&p->cbr, cs_cb_read))) p = p->next;
     if (p) return p;
     p = calloc(1, sizeof *p);
+    if (!p) return &allocation_failed;
     p->key = key;
     p->next = g_csp[key & 255];
     g_csp[key & 255] = p;
@@ -307,15 +309,10 @@ static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm, CsKey k)
     if (corpus) shader_corpus_save(corpus, code, blen, 0x10000 + 80, ST_CS, &p->si, key);
     size_t nw = 0;
     u32* spv = vk_translate_spirv(code, 0x10000 + 80, ST_CS, &p->si, &nw, cs_cb_read, &p->cbr);
-    if (spv && vk_spirv_unavailable(spv, nw)) {
-        snprintf(p->si.first_unsupported, sizeof p->si.first_unsupported, "%s", vk_spirv_unavailable(spv, nw));
-        free(spv);
-        spv = NULL;
-    }
     if (!spv || p->si.unsupported) {
         p->failed = 1;
-        LOG("vulkan: compute %016llx not translated (%d instructions, first %s)\n", (unsigned long long)key,
-            p->si.unsupported, p->si.first_unsupported);
+        LOG("vulkan: compute %016llx not translated: %s\n", (unsigned long long)key,
+            p->si.first_unsupported[0] ? p->si.first_unsupported : "unsupported feature or shader");
         return p;
     }
     u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;

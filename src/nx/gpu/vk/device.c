@@ -11,6 +11,7 @@
 #include "nx/gpu/vk/vk.h"
 
 int g_vk_preserve_infnan;
+int g_vk_preserve_infnan64;
 int g_vk_flush_denorm;
 VkShaderStageFlags g_vk_subgroup_stages;
 
@@ -199,6 +200,7 @@ static int create_device(void) {
             ? subgroup.supportedStages
             : 0;
     g_vk_preserve_infnan = p12.shaderSignedZeroInfNanPreserveFloat32 != 0;
+    g_vk_preserve_infnan64 = p12.shaderSignedZeroInfNanPreserveFloat64 != 0;
     /* 32 bit alone: a device whose denorm modes can't differ per width would need 16 and 64 bit declared too */
     g_vk_flush_denorm = p12.shaderDenormFlushToZeroFloat32 &&
                         p12.denormBehaviorIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
@@ -235,6 +237,7 @@ static int create_device(void) {
     WANT(wideLines);
     WANT(largePoints);
     WANT(samplerAnisotropy);
+    WANT(sampleRateShading);
     WANT(textureCompressionBC);
     WANT(vertexPipelineStoresAndAtomics);
     WANT(fragmentStoresAndAtomics);
@@ -254,8 +257,10 @@ static int create_device(void) {
     /* points out of tessellation and geometry programs take the size those write, as the vertex program's do */
     g_shader_stage_point_size = want->shaderTessellationAndGeometryPointSize != 0;
     g_shader_geometry = want->geometryShader != 0;
-    const char* ext[4];
+    g_shader_tessellation = want->tessellationShader != 0;
+    const char* ext[5];
     u32 next = 0;
+    int has_shader_clock = 0;
     if (!g_opt_headless) ext[next++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
     {
         u32 n = 0;
@@ -265,6 +270,7 @@ static int create_device(void) {
         for (u32 i = 0; i < n; i++) {
             if (!strcmp(e[i].extensionName, VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME)) g_vk.has_divisor = 1;
             if (!strcmp(e[i].extensionName, VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) g_vk.has_border_color = 1;
+            if (!strcmp(e[i].extensionName, VK_KHR_SHADER_CLOCK_EXTENSION_NAME)) has_shader_clock = 1;
         }
         free(e);
     }
@@ -272,6 +278,8 @@ static int create_device(void) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT};
     VkPhysicalDeviceCustomBorderColorFeaturesEXT fbc = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT};
+    VkPhysicalDeviceShaderClockFeaturesKHR qclock = {.sType =
+                                                         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR};
     VkPhysicalDeviceVulkan12Features q12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     VkPhysicalDeviceVulkan11Features q11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
                                             .pNext = &q12};
@@ -285,7 +293,10 @@ static int create_device(void) {
         *tail = &fbc;
         tail = &fbc.pNext;
     }
+    if (has_shader_clock) *tail = &qclock;
     vkGetPhysicalDeviceFeatures2(g_vk.phys, &f2);
+    g_shader_clock_scopes =
+        has_shader_clock ? (qclock.shaderSubgroupClock ? 1 : 0) | (qclock.shaderDeviceClock ? 2 : 0) : 0;
     g_vk.has_divisor = g_vk.has_divisor && fdiv.vertexAttributeInstanceRateDivisor;
     g_vk.has_border_color = g_vk.has_border_color && fbc.customBorderColors && fbc.customBorderColorWithoutFormat;
     if (g_vk.has_border_color) { /* how many samplers may have a custom border color: as few as 32 */
@@ -297,6 +308,7 @@ static int create_device(void) {
     }
     VkPhysicalDeviceVulkan11Features f11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
                                             .shaderDrawParameters = q11.shaderDrawParameters};
+    g_vk.has_shader_draw_parameters = q11.shaderDrawParameters != 0;
     /* Enable mirror clamp and vertex shader Layer output when the device supports them. */
     g_vk.has_mirror_clamp = q12.samplerMirrorClampToEdge;
     VkPhysicalDeviceVulkan12Features f12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
@@ -316,7 +328,7 @@ static int create_device(void) {
                                             .pNext = &f12,
                                             .synchronization2 = VK_TRUE,
                                             .dynamicRendering = VK_TRUE,
-                                            /* KIL demotes the lane (every Vulkan 1.3 device has it) */
+                                            /* KIL demotes the lane; S2R queries its helper status */
                                             .shaderDemoteToHelperInvocation = VK_TRUE};
     void* chain = &f13;
     if (g_vk.has_divisor) {
@@ -335,6 +347,15 @@ static int create_device(void) {
             .customBorderColorWithoutFormat = VK_TRUE};
         chain = &fbc;
         ext[next++] = VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME;
+    }
+    VkPhysicalDeviceShaderClockFeaturesKHR fclock = {.sType =
+                                                         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR,
+                                                     .pNext = chain,
+                                                     .shaderSubgroupClock = !!(g_shader_clock_scopes & 1),
+                                                     .shaderDeviceClock = !!(g_shader_clock_scopes & 2)};
+    if (g_shader_clock_scopes) {
+        chain = &fclock;
+        ext[next++] = VK_KHR_SHADER_CLOCK_EXTENSION_NAME;
     }
     VkDeviceCreateInfo dci = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
                               .pNext = chain,

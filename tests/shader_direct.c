@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
     code[27] = EXIT;
     ShaderInfo info = {0};
     size_t words = 0;
-    u32* spv = shader_to_spirv((const u8*)code, sizeof code, ST_FS, &info, &words, 1, 1, 1);
+    u32* spv = shader_to_spirv((const u8*)code, sizeof code, ST_FS, &info, &words, 1, 1, 1, 1);
     if (!spv || info.stage != ST_FS || info.sph[18] != 15 || info.cbuf_mask != 1 || info.cbuf_max[0] != 16 ||
         info.ntex != 2 || !info.tex[1].shadow) {
         free(spv);
@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
     code[11] = AST | (0x70ull << 20) | (255ull << 8); /* position.x = r0; W retains its default 1 */
     code[12] = EXIT;
     info = (ShaderInfo){0};
-    spv = shader_to_spirv((const u8*)code, sizeof code, ST_VS, &info, &words, 1, 1, 1);
+    spv = shader_to_spirv((const u8*)code, sizeof code, ST_VS, &info, &words, 1, 1, 1, 1);
     if (!spv || info.stage != ST_VS || (!check_only && !save(argv[2], spv, words))) ok = 0;
     free(spv);
     memset(code, 0, sizeof code);
@@ -81,12 +81,12 @@ int main(int argc, char** argv) {
     code[11] = FADD32I | (1ull << 57); /* right-operand absolute value needs GLSL.std.450 */
     code[12] = EXIT;
     info = (ShaderInfo){0};
-    spv = shader_to_spirv((const u8*)code, sizeof code, ST_FS, &info, &words, 1, 1, 1);
+    spv = shader_to_spirv((const u8*)code, sizeof code, ST_FS, &info, &words, 1, 1, 1, 1);
     if (!spv || (!check_only && !save(argv[3], spv, words))) ok = 0;
     free(spv);
     code[11] = SYNC;
     info = (ShaderInfo){0};
-    spv = shader_to_spirv((const u8*)code, sizeof code, ST_FS, &info, &words, 1, 1, 1);
+    spv = shader_to_spirv((const u8*)code, sizeof code, ST_FS, &info, &words, 1, 1, 1, 1);
     if (!spv || (!check_only && !save(argv[4], spv, words))) ok = 0;
     free(spv);
     memset(code, 0, sizeof code);
@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
     info = (ShaderInfo){0};
     info.cs_local[0] = 32;
     info.cs_local[1] = info.cs_local[2] = 1;
-    spv = shader_to_spirv((const u8*)code, sizeof code, ST_CS, &info, &words, 1, 1, 1);
+    spv = shader_to_spirv((const u8*)code, sizeof code, ST_CS, &info, &words, 1, 1, 1, 1);
     if (!spv || (!check_only && !save(argv[5], spv, words))) ok = 0;
     free(spv);
     return ok ? 0 : 1;

@@ -286,8 +286,9 @@ typedef struct {
     u8 leader[65536 / 8];
     u32* pop_tgt;
 } Ctx;
-#define IDX_OK(i)    ((i) >= 11 && ((i) - 10) % 4 != 0)
-#define CRS_KIND(id) ((id) == O_SSY || (id) == O_SYNC ? 0 : (id) == O_PBK || (id) == O_BRK ? 1 : 2)
+#define IDX_OK(i) ((i) >= 11 && ((i) - 10) % 4 != 0)
+#define CRS_KIND(id)                                                                                                   \
+    ((id) == O_SSY || (id) == O_SYNC ? 0 : (id) == O_PBK || (id) == O_BRK ? 1 : (id) == O_PEXIT ? 3 : 2)
 extern int ops_ready;
 void ops_init(void);
 const Op* decode(u64 w);

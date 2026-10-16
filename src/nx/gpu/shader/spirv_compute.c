@@ -96,7 +96,7 @@ u32* shader_compute_to_spirv(const u8* code, u32 max_bytes, ShaderInfo* si, size
                              int can_preserve) {
     if (!code || !si || !word_count || max_bytes < 96 || !si->cs_local[0] || !si->cs_local[1] || !si->cs_local[2])
         return NULL;
-    if (!ops_ready) ops_init();
+    ops_init();
     u32 len;
     shader_hash(code, max_bytes, &len);
     u32 n = len / 8;
@@ -263,7 +263,7 @@ u32* shader_compute_to_spirv(const u8* code, u32 max_bytes, ShaderInfo* si, size
     }
     spv_emit_compute_entry_str(&c->e, fn, "main", interfaces, ninterface);
     spv_emit_local_size(&c->e, fn, meta.cs_local[0], meta.cs_local[1], meta.cs_local[2]);
-    spv_emit_float_controls(&c->e, fn, flush && can_flush, can_preserve);
+    spv_emit_float_controls(&c->e, fn, flush && can_flush, can_preserve, 0);
     spv_emit_function_void(&c->e, vt, fn, fnt);
     spv_emit_label(&c->e, label);
     for (u32 i = 0; i < 255; i++)

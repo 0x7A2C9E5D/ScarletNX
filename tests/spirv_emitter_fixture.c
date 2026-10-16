@@ -70,7 +70,7 @@ uint32_t* snx_test_spirv_graphics(int fragment, size_t* words) {
     spv_emit_entry_str(&e, fragment ? SPV_STAGE_FRAGMENT : SPV_STAGE_VERTEX, function, "main", interfaces,
                        fragment ? 7 : 1);
     if (fragment) spv_emit_fragment_origin_upper_left(&e, function);
-    if (fragment) spv_emit_float_controls(&e, function, 1, 1);
+    if (fragment) spv_emit_float_controls(&e, function, 1, 1, 0);
     uint32_t zero = spv_emit_constant_f32(&e, f32_type, 0.0f);
     uint32_t one = spv_emit_constant_f32(&e, f32_type, 1.0f);
     uint32_t half_bits = spv_emit_constant_u32(&e, u32_type, 0x3f000000);

@@ -278,17 +278,26 @@ static const struct {
 /* the opcodes, the most fixed bits first so that a narrower pattern wins */
 static Op ops[OP_COUNT];
 int ops_ready;
+static int ops_initializing;
+static const Op* op_nop;
 static int opcmp(const void* a, const void* b) {
     const Op *x = a, *y = b;
     return y->bits - x->bits;
 }
 void ops_init(void) {
+    Op sorted[OP_COUNT];
+    int expected = 0;
     size_t n;
+    if (__atomic_load_n(&ops_ready, __ATOMIC_ACQUIRE)) return;
+    if (!__atomic_compare_exchange_n(&ops_initializing, &expected, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        while (!__atomic_load_n(&ops_ready, __ATOMIC_ACQUIRE)) {}
+        return;
+    }
     for (n = 0; n < OP_COUNT; n++) {
         u64 m = 0, v = 0;
         int bits = 0;
-        ops[n].id = patterns[n].id;
-        ops[n].name = patterns[n].name;
+        sorted[n].id = patterns[n].id;
+        sorted[n].name = patterns[n].name;
         for (int i = 0; i < 16; i++) {
             char ch = patterns[n].pattern[i];
             u64 bit = 1ull << (63 - i);
@@ -298,25 +307,24 @@ void ops_init(void) {
                 if (ch == '1') v |= bit;
             }
         }
-        ops[n].mask = m;
-        ops[n].val = v;
-        ops[n].bits = bits;
+        sorted[n].mask = m;
+        sorted[n].val = v;
+        sorted[n].bits = bits;
     }
-    qsort(ops, n, sizeof(Op), opcmp);
-    ops_ready = 1;
+    qsort(sorted, n, sizeof(Op), opcmp);
+    memcpy(ops, sorted, sizeof ops);
+    for (n = 0; n < OP_COUNT; n++)
+        if (ops[n].id == O_NOP) {
+            op_nop = &ops[n];
+            break;
+        }
+    __atomic_store_n(&ops_ready, 1, __ATOMIC_RELEASE);
 }
-static const Op* op_nop;
 /* EXIT.FCSM_TR after VOTE.VTG is a hw cull exit; treat as NOP or the VS never writes position */
 const Op* decode(u64 w) {
     for (size_t i = 0; i < OP_COUNT; i++)
         if ((w & ops[i].mask) == ops[i].val) {
             if (ops[i].id == O_EXIT && ((w & 31) == 0x1c)) {
-                if (!op_nop)
-                    for (size_t k = 0; k < OP_COUNT; k++)
-                        if (ops[k].id == O_NOP) {
-                            op_nop = &ops[k];
-                            break;
-                        }
                 if (op_nop) return op_nop;
             }
             return &ops[i];

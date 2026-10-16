@@ -63,6 +63,7 @@ typedef struct {
     int has_border_color; /* VK_EXT_custom_border_color */
     u32 border_color_max; /* maxCustomBorderColorSamplers: past it, samplers take the nearest built-in color */
     int has_mirror_clamp; /* samplerMirrorClampToEdge: VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE */
+    int has_shader_draw_parameters;
 } VkState;
 extern VkState g_vk;
 
@@ -347,12 +348,14 @@ typedef struct VkSh {
 } VkSh;
 extern VkPipelineLayout g_vk_playout;
 extern int g_vk_preserve_infnan;
+extern int g_vk_preserve_infnan64;
 extern int g_vk_flush_denorm;
 extern VkShaderStageFlags g_vk_subgroup_stages;
 extern VkDescriptorSetLayout g_vk_dslayout[5]; /* by set: shader_vk_set(stage) */
 extern u32 g_vk_stage_sets; /* sets in the pipeline layout: 5, or 2 without the tessellation and geometry stages */
-/* the stages that read the push constants: every graphics stage reads snx_vp (the last one before rasterization
-   applies it), and the fragment stage snx_at */
+/* the stages that read the push constants: every graphics stage reads the viewport/depth parameters in pc[0..3]
+   (the last one before rasterization applies them); fragment reads the alpha test in pc[4..6] and sprite T flip
+   in pc[7] */
 #define VK_PUSH_STAGES                                                                                                 \
     (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |                                           \
      VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_GEOMETRY_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)
