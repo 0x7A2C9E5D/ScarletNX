@@ -210,8 +210,8 @@ and providing job-wide CPU accounting. No elevated privileges are needed.
 ## Themes
 
 A theme colours and dresses the screens: the head (the tabs and a title), the boxes (the list, the box
-beside it about the focus, the Status box: resource use, the disk and the working folder) and the foot (the
-tips, what the focus is about or the screen's message, and the screen's keys). It applies to the menu screens
+beside it about the focus, the Status box: resource use, the disk and the working folder), the tips (what the
+focus is about or the screen's message) and the foot (the screen's keys). It applies to the menu screens
 and to the run, which is **compiling** until the runner prints its `ScarletNX - <name>` banner and
 **loading** from then on.
 
@@ -220,10 +220,11 @@ filling them. At the top the tabs, Menu, Games and Settings, and the screen's ti
 right (`[head] place = tabs`) or on a row of its own under them (`below`). Under them the list, each entry a box
 of its own, the focused one framed in the focus colour or inverted, with the theme's cursor in the margin;
 beside it a box with what the focus is about (a recent game's path, Games' folders, the keys in use, the last
-run's output) and under that one the Status box. At the foot the tips, under the list's column, and the
-screen's keys, under the side box's, each in a box with a bar down its left (`[tips] box`, `[footer] box`) or on
-the page; the tips take one row of the foot, a long one sliding, or wrap over its rows with `[tips] wrap`, and go on
-a row of their own under the head with `[tips] place = top`. Games lists Add a folder, the recent games and a
+run's output) and under that one the Status box. The tips have a row of their own under the head (`[tips] place =
+top`, both built-ins'), or go to the foot under the list's column with `bottom`, where they take one row, a long one
+sliding, or wrap over its rows with `[tips] wrap`. At the foot the screen's keys, the whole width, or under the side
+box's column beside the tips; the tips and the keys each in a box with a bar down its left (`[tips] box`, `[footer]
+box`) or on the page. Games lists Add a folder, the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
 opens the picker) and Back at its foot. The Settings list their groups, and beside them the focused group's
@@ -237,8 +238,8 @@ go, which a tap aborts. The button map draws the pad in the box between the head
 the files an older version left, comes in a box over the screen darkened.
 
 The built-ins are `default`, the look above, and `yorha`: paper and ink, a title twice the text's size, a faint
-grid on the page, square markers, the focused box inverted, the tips and the keys in boxes on a band of ink at
-the foot, and a run drawn as a
+grid on the page, square markers, the focused box inverted, the tips in a box under the head, the keys in one on a
+band of ink at the foot, and a run drawn as a
 dark loading screen in its own colours (`[run]`): the title, the game's name with turning
 dots and a turning ring; each step the driver and the runner report (unpack, extract,
 recompile with its blocks, built, launch, GPU) typed down the page, with turning dots

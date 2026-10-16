@@ -2808,8 +2808,24 @@ int main(int argc, char** argv) {
         text_px_is(&app, r.x + cw, r.y + 2 * s, "Setup device keys", normal, black);
         text_px_is(&app, r.x + cw, r.y + head_h(&app) + 2 * s, "Installs prod.keys", normal, black);
         text_px_is(&app, m.place.status.x + cw, m.place.status.y + 2 * s, "Status", normal, black);
-        /* the foot: the tips under the list, what the focus is about; the keys beside them, against the right edge,
-           each key in the focus colour; the default's on the page, no box */
+        /* the tips on a row of their own under the head, what the focus is about or the screen's message, a failure's
+           in its colour; the keys alone at the foot, the whole width */
+        r = m.place.tips;
+        assert(app.theme.tips_place == GUI_TIPS_TOP && r.x == m.place.head.x && r.w == m.place.head.w);
+        assert(r.y > m.place.tabs.y + m.place.tabs.h && r.y + r.h < m.place.list.y);
+        assert(m.place.keys.x == m.place.head.x && m.place.keys.w == m.place.head.w && m.place.keys.y > r.y);
+        text_px_is(&app, r.x, r.y + 2 * s, "Installs prod.keys", normal, black);
+        snprintf(app.message, sizeof app.message, "Program ended abnormally (status 7).");
+        app.abnormal_exit = true;
+        render(&app);
+        text_px_is(&app, r.x, r.y + 2 * s, "Program ended abnormally", red, black);
+        app.message[0] = 0;
+        app.abnormal_exit = false;
+        /* in the foot with [tips] place = bottom: under the list, the keys beside them, against the right edge, each key
+           in the focus colour; the default's on the page, no box */
+        app.theme.tips_place = GUI_TIPS_BOTTOM;
+        render(&app);
+        menu_boxes(&app, &m);
         r = m.place.tips;
         assert(r.y == m.place.keys.y && r.x == m.place.list.x && r.w == m.place.list.w &&
                m.place.keys.x == m.place.side.x);
@@ -3186,7 +3202,13 @@ int main(int argc, char** argv) {
         text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Exit", ink, dim = rgb(app.theme.dim));
         r = m.place.side;
         text_px_is(&app, r.x + cw, r.y + 2 * s, "Setup device keys", page, ink);
-        r = foot_text(&app, m.place.tips, app.theme.tips_box); /* the tips on the foot's band, in the page's colour */
+        r = foot_text(&app, m.place.tips, app.theme.tips_box); /* the tips in their box under the head, off the band */
+        assert(m.place.tips.y < m.place.list.y);
+        text_px_is(&app, r.x, r.y, "Installs prod.keys", ink, page);
+        app.theme.tips_place = GUI_TIPS_BOTTOM; /* in the foot: on its band, in the page's colour */
+        render(&app);
+        menu_boxes(&app, &m);
+        r = foot_text(&app, m.place.tips, app.theme.tips_box);
         text_px_is(&app, r.x, r.y, "Installs prod.keys", page, ink);
         /* on one row of the foot, the rest of a long one out of it until it slides there; [tips] wrap puts the rest on
            the foot's next rows */
