@@ -130,3 +130,7 @@ if(BUILD_TESTING)
     set_tests_properties(gui_sdl_events PROPERTIES TIMEOUT 30
                          ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_FILE_DIALOG_DRIVER=none")
 endif()
+if(COMMAND snx_sanitizer_path) # tests/CMakeLists.txt: the library made here, and this folder's tests
+    snx_test_sanitize(snx_gui_support)
+    snx_sanitizer_path()
+endif()

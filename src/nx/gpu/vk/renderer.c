@@ -76,14 +76,8 @@ static int vkr_start(void) {
 }
 
 /* ------------------------------------------------------------ the front end's calls */
-static int vkr_async_submit(u64* e, u32 n, u32 syncpt, u32 incs) {
-    (void)e;
-    (void)n;
-    (void)syncpt;
-    (void)incs;
-    __atomic_add_fetch(&g_vk_epoch, 1, __ATOMIC_RELAXED); /* memory may have changed since the last submit */
-    return 0;                                             /* gpu_submit queues it for the GPU thread */
-}
+/* a new epoch: the caches that trust what they checked in this one (buffers, constant buffers, shaders) check again */
+static void vkr_mem_may_have_changed(void) { __atomic_add_fetch(&g_vk_epoch, 1, __ATOMIC_RELAXED); }
 static void vkr_draw_texture(GpuChannel* ch) {
     vk_lock();
     vk_render_draw_texture(ch);
@@ -513,11 +507,10 @@ static u64 vkr_screenshot(const char* path) {
 const Renderer vk_renderer = {
     .name = "Vulkan",
     .start = vkr_start,
-    .async_submit = vkr_async_submit,
+    .mem_may_have_changed = vkr_mem_may_have_changed,
     .clear = vkr_clear,
     .draw_texture = vkr_draw_texture,
     .draw = vkr_draw,
-    .cb_bind = vkr_cb_bind,
     .blit = vkr_blit,
     .rt_flush = vkr_rt_flush,
     .rt_reload = vkr_rt_reload,
