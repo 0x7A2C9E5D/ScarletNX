@@ -14,7 +14,7 @@ if(NOT rest STREQUAL "" OR list STREQUAL "")
 endif()
 foreach(row "Display\tdocked\t0\tint\t0\t1\t1 = TV mode" "Display\tfullscreen\t0\tint\t0\t1\t"
             "Graphics\tresolution\t1\tfloat\t0.25\t4\t" "Performance\tfps_limit\tgame\ttext\t"
-            "Input\ttouch\t1\tint\t0\t2\t" "Input\tcontrols_a\t\ttext\t0\t0\tA control's place" "Debug\tlog\t1\tint\t0\t2\t"
+            "Input\ttouch\t2\tint\t0\t2\t" "Input\tcontrols_a\t\ttext\t0\t0\tA control's place" "Debug\tlog\t1\tint\t0\t2\t"
             ", 2 French, 3 German, 4 Italian, 5 Spanish, 6 Chinese, 7 Korean,")
     string(FIND "${list}" "${row}" at)
     if(at LESS 0)
