@@ -23,6 +23,10 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   editor) shows an arrow past the right edge of its boxes, up on its first row and down on its last, in
   the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it.
+- The keys at the foot are buttons: a click or a tap on one presses it, as the keyboard does (ESC or
+  Back goes back, Tab to the next screen, Enter or Tap selects, Swipe across turns the page). A key of
+  words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
+  presses the key when its words all press one. `Arrows`, `mouse` and `pad` press nothing.
 - The menu, top to bottom: the three loads, **Setup device keys**, **Settings**, **Share log** and
   **Exit**. The games, and the recent ones, are the Games tab's.
 - Space, Enter or a left click explicitly activates an item, marking it bright

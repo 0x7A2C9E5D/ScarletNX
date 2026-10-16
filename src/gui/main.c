@@ -601,6 +601,7 @@ typedef struct {
    (a run has none) */
 enum { GUI_SHOWS_STATUS = 1, GUI_SHOWS_TABS = 2 };
 static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols, int shows);
+static const char* shown_keys(const App* app, char* out, size_t size);
 /* a screen's keys, Tab's after them */
 static const char* screen_keys(const App* app, const char* keys, char* out, size_t size) {
 #ifdef SDL_PLATFORM_ANDROID
@@ -621,7 +622,7 @@ static void games_place(App* app, GuiPlace* p) {
     for (i = 0; i < app->games.count; ++i) longest = SDL_max(longest, (int)SDL_utf8strlen(app->games.shown[i]));
     for (i = 0; i < (size_t)recent_shown(app); ++i)
         longest = SDL_max(longest, (int)SDL_utf8strlen(app->recent.game[i].name));
-    place_screen(app, p, screen_keys(app, SAY_GAMES, keys, sizeof keys),
+    place_screen(app, p, shown_keys(app, keys, sizeof keys),
                  longest + 2 + (int)SDL_utf8strlen(app->theme.marker) + (int)SDL_utf8strlen(app->theme.cursor),
                  GUI_SHOWS_STATUS | GUI_SHOWS_TABS);
 }
@@ -1187,6 +1188,23 @@ static int splash_shown(App* app) {
 #else
 #define SAY_MENU_KEYS SAY_MENU " ESC: exit."
 #endif
+/* the keys the foot of the screen shown says, Tab's after them: what it draws, and what a click on one presses */
+static const char* shown_keys(const App* app, char* out, size_t size) {
+    const char* keys = SAY_MENU_KEYS;
+    if (app->editing)
+        keys = app->form == GUI_FORM_PAD        ? SAY_PAD
+               : app->editor.picking            ? SAY_PICKER
+               : app->form == GUI_FORM_THEME    ? SAY_EDITOR
+               : app->form == GUI_FORM_SETTINGS ? SAY_GROUPS
+               : app->form == GUI_FORM_APP      ? SAY_APP
+               : app->form == GUI_FORM_FOLDERS  ? SAY_FOLDERS
+                                                : SAY_SETTINGS;
+    else if (app->menu.view == GUI_LOAD_GAMES)
+        keys = SAY_GAMES;
+    else if (pick_screen(app))
+        keys = SAY_KEYS_HOW;
+    return screen_keys(app, keys, out, size);
+}
 /* the colour picker's box, its rows and the bars of the first three, in pixels */
 typedef struct {
     GuiRect box, rows[GUI_PICK_ROWS], bars[3];
@@ -1266,8 +1284,16 @@ static int hint_next(const char** s, char* key, char* what, size_t size) {
 static int hint_width(const char* key, const char* what) {
     return (int)SDL_utf8strlen(key) + (key[0] ? 1 : 0) + (int)SDL_utf8strlen(what);
 }
-/* the rows keys take in width columns; with draw, drawn from pixel y in r, on the foot's band of ink when band */
-static int hints(App* app, const char* keys, int width, GuiRect r, int y, int draw, int band) {
+/* a click or a tap, for hints() to say which sentence with keys it is on: their keys, and how many columns into the
+   sentence (-1: the margin before it); key empty for none */
+typedef struct {
+    float x, y;
+    char key[128];
+    int col;
+} GuiHintHit;
+/* the rows keys take in width columns; with draw, drawn from pixel y in r, on the foot's band of ink when band; with
+   hit, the sentence its pixel is on, a column of the gap either side of one its own */
+static int hints(App* app, const char* keys, int width, GuiRect r, int y, int draw, int band, GuiHintHit* hit) {
     const GuiTheme* t = &app->theme;
     char key[128], what[128];
     const char* row = keys;
@@ -1282,14 +1308,18 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
             end = at;
         }
         if (end == row) break;
-        for (x = r.x + r.w - used * cell_w(app); draw && u != end && hint_next(&u, key, what, sizeof key);) {
-            int cy = y + rows * cell_h(app), k = (int)SDL_utf8strlen(key);
-            if (k && t->focus_bar)
+        for (x = r.x + r.w - used * cell_w(app); (draw || hit) && u != end && hint_next(&u, key, what, sizeof key);) {
+            int cy = y + rows * cell_h(app), k = (int)SDL_utf8strlen(key), w = hint_width(key, what) * cell_w(app);
+            if (hit && k && hit->y >= (float)cy && hit->y < (float)(cy + cell_h(app)) &&
+                hit->x >= (float)(x - cell_w(app)) && hit->x < (float)(x + w + cell_w(app))) {
+                snprintf(hit->key, sizeof hit->key, "%s", key);
+                hit->col = (int)SDL_floorf((hit->x - (float)x) / (float)cell_w(app));
+            }
+            if (draw && k && t->focus_bar)
                 fill_rect(app, gui_rect(x - s, cy, k * cell_w(app) + 2 * s, cell_h(app)), band ? t->soft : t->focus);
-            if (k) text_in(app, r, x, cy, key, rgb(t->focus_bar || band ? t->page : t->focus));
-            x += (k + (k ? 1 : 0)) * cell_w(app);
-            text_in(app, r, x, cy, what, rgb(band ? t->page : t->ink));
-            x += ((int)SDL_utf8strlen(what) + 2) * cell_w(app);
+            if (draw && k) text_in(app, r, x, cy, key, rgb(t->focus_bar || band ? t->page : t->focus));
+            if (draw) text_in(app, r, x + (k + (k ? 1 : 0)) * cell_w(app), cy, what, rgb(band ? t->page : t->ink));
+            x += w + 2 * cell_w(app);
         }
         ++rows;
         row = end;
@@ -1338,7 +1368,7 @@ static void foot(App* app, const GuiPlace* p, const char* tips, SDL_Color color,
         text_in(app, text, text.x, text.y, tips, color);
     app->scale = small;
     text = foot_box(app, p->keys, t->footer_box, band);
-    hints(app, keys, text.w / cell_w(app), text, text.y, 1, band);
+    hints(app, keys, text.w / cell_w(app), text, text.y, 1, band, NULL);
     app->scale = s;
 }
 /* the foot of a screen: the message while there is one, a failure's in its colour, else about */
@@ -1493,7 +1523,7 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols,
     in.foot = cell_h(app);
     gui_place(&in, p); /* the columns, which the foot's rows and the status box's follow */
     in.foot = SDL_max(in.tips || !t->tips_wrap ? 1 : 2,
-                      hints(app, keys, foot_text(app, p->keys, t->footer_box).w / cell_w(app), none, 0, 0, 0)) *
+                      hints(app, keys, foot_text(app, p->keys, t->footer_box).w / cell_w(app), none, 0, 0, 0, NULL)) *
                   cell_h(app) +
               4 * app->scale;
     app->scale = s;
@@ -1534,7 +1564,7 @@ static void menu_boxes(App* app, GuiMenuBoxes* m) {
         menu_label(app, i, label, sizeof label);
         longest = SDL_max(longest, (int)SDL_utf8strlen(label));
     }
-    place_screen(app, &m->place, screen_keys(app, SAY_MENU_KEYS, keys, sizeof keys),
+    place_screen(app, &m->place, shown_keys(app, keys, sizeof keys),
                  longest + 2 + (int)SDL_utf8strlen(app->theme.cursor), GUI_SHOWS_STATUS | GUI_SHOWS_TABS);
     list_place(app, &m->list, m->place.list, GUI_ITEM_COUNT, app->menu.selected);
 }
@@ -1597,7 +1627,7 @@ static void draw_menu(App* app) {
     list_marks(app, &m.list);
     menu_side(app, &m);
     status_box(app, m.place.status);
-    screen_foot(app, &m.place, item_about(app, m.list.focus), screen_keys(app, SAY_MENU_KEYS, keys, sizeof keys));
+    screen_foot(app, &m.place, item_about(app, m.list.focus), shown_keys(app, keys, sizeof keys));
 }
 /* ---- Games: Add a folder, then "Recent games" over the recent rows and a page of the games, as many as the list's
    box holds ---- */
@@ -1703,7 +1733,7 @@ static void draw_games(App* app) {
         list_arrows(app, &g.list, g.lead, g.lead + (int)items - 1, app->browser.page > 0,
                     app->browser.page + 1 < gui_browser_pages(&app->browser));
     status_box(app, g.place.status);
-    screen_foot(app, &g.place, about, screen_keys(app, SAY_GAMES, keys, sizeof keys));
+    screen_foot(app, &g.place, about, shown_keys(app, keys, sizeof keys));
 }
 /* a line that waits on the user, at pixel row y of r: plain at its left, or framed, placed and blinking as the theme's
    prompt says */
@@ -1732,7 +1762,7 @@ static void pick_boxes(App* app, GuiPickBoxes* k) {
     GuiRect r;
     int item = item_h(app);
     char keys[256];
-    place_screen(app, &k->place, screen_keys(app, SAY_KEYS_HOW, keys, sizeof keys), 0, GUI_SHOWS_TABS);
+    place_screen(app, &k->place, shown_keys(app, keys, sizeof keys), 0, GUI_SHOWS_TABS);
     r = inner(app, k->place.list);
     list_place(
         app, &k->back,
@@ -1782,7 +1812,7 @@ static void draw_pick(App* app) {
                   rgb(app->theme.focus));
     list_item(app, &k.back, 0, "Back [ESC]", false, false); /* nothing to move to: ESC's */
     snprintf(line, sizeof line, "%s: " SAY_PICK_BOX, items[keys ? GUI_KEYS : app->menu.active]);
-    screen_foot(app, &k.place, line, screen_keys(app, SAY_KEYS_HOW, hints_line, sizeof hints_line));
+    screen_foot(app, &k.place, line, shown_keys(app, hints_line, sizeof hints_line));
 }
 static void draw_run(App* app) {
     GuiPlace p;
@@ -2668,7 +2698,7 @@ static void render_pad(App* app) {
     GuiRect r;
     int i;
     /* the pad drawn in the box between the head and the foot */
-    place_screen(app, &place, screen_keys(app, SAY_PAD, keys, sizeof keys), 0, GUI_SHOWS_TABS);
+    place_screen(app, &place, shown_keys(app, keys, sizeof keys), 0, GUI_SHOWS_TABS);
     chrome(app, &place);
     r = inner(app, place.list);
     pad_sync(app);
@@ -2816,16 +2846,6 @@ typedef struct {
     const GuiEditor* rows; /* the right box's rows: the editor's, or peek */
     GuiRect info;          /* the right box's foot, for a line about its rows */
 } GuiFormBoxes;
-static const char* form_keys(const App* app, char* out, size_t size) {
-    return screen_keys(app,
-                       app->editor.picking              ? SAY_PICKER
-                       : app->form == GUI_FORM_THEME    ? SAY_EDITOR
-                       : app->form == GUI_FORM_SETTINGS ? SAY_GROUPS
-                       : app->form == GUI_FORM_APP      ? SAY_APP
-                       : app->form == GUI_FORM_FOLDERS  ? SAY_FOLDERS
-                                                        : SAY_SETTINGS,
-                       out, size);
-}
 /* the group the groups' list shows open, -1 for none: the one being edited, App for its folders */
 static int form_group(const App* app) {
     if (app->form == GUI_FORM_GROUP) return app->group;
@@ -2854,7 +2874,7 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
     int theme = app->form == GUI_FORM_THEME, width, height, g, longest = (int)strlen("Reset all to the defaults");
     area(app, &width, &height);
     for (g = 0; g < app->groups; ++g) longest = SDL_max(longest, (int)strlen(app->group_keys[g].key));
-    place_screen(app, &f->place, form_keys(app, keys, sizeof keys),
+    place_screen(app, &f->place, shown_keys(app, keys, sizeof keys),
                  theme ? width / cell_w(app)
                        : longest + 2 + (int)SDL_utf8strlen(app->theme.marker) + (int)SDL_utf8strlen(app->theme.cursor),
                  GUI_SHOWS_TABS);
@@ -2995,7 +3015,7 @@ static void draw_form(App* app) {
     }
     draw_picker(app);
     about = form_about(app, &color);
-    foot(app, &f.place, about, color, form_keys(app, keys, sizeof keys));
+    foot(app, &f.place, about, color, shown_keys(app, keys, sizeof keys));
 }
 /* ---- the colour picker: over the theme editor's keys, so the preview shows the colour as it changes;
    a bar per channel, then the colour typed beside it and the one it had ---- */
@@ -4063,11 +4083,129 @@ static void screen_pointer(App* app, float x, float y, bool click, bool touch) {
     app->menu.selected = i;
     if (click) menu_key(app, GUI_SELECT);
 }
+/* the keys the foot names, a word each ("Up/Down" is two): what a click or a tap on the word presses. Space selects
+   where the foot names it, as Enter; Add a folder's opens the folder picker, as Enter on its row */
+static const struct {
+    const char* word;
+    SDL_Keycode key;
+    SDL_Keymod mod;
+} hint_keys[] = {{"ESC", SDLK_ESCAPE, 0},
+                 {"Back", SDLK_AC_BACK, 0},
+                 {"Tab", SDLK_TAB, 0},
+                 {"Enter", SDLK_RETURN, 0},
+                 {"Space", SDLK_RETURN, 0},
+                 {"click", SDLK_RETURN, 0},
+                 {"Tap", SDLK_RETURN, 0},
+                 {"A", SDLK_RETURN, 0},
+                 {"Up", SDLK_UP, 0},
+                 {"Down", SDLK_DOWN, 0},
+                 {"Left", SDLK_LEFT, 0},
+                 {"Right", SDLK_RIGHT, 0},
+                 {"PgUp", SDLK_PAGEUP, 0},
+                 {"PgDn", SDLK_PAGEDOWN, 0},
+                 {"PgDown", SDLK_PAGEDOWN, 0},
+                 {"Swipe across", SDLK_PAGEDOWN, 0},
+                 {"Del", SDLK_DELETE, 0},
+                 {"Ctrl+S", SDLK_S, SDL_KMOD_CTRL},
+                 {"Ctrl+V", SDLK_V, SDL_KMOD_CTRL},
+                 {"Add a folder", SDLK_UNKNOWN, 0}};
+/* the hint_keys entry of the n bytes at word, -1 for none */
+static int hint_word(const char* word, size_t n) {
+    int i;
+    for (i = 0; i < (int)SDL_arraysize(hint_keys); ++i)
+        if (strlen(hint_keys[i].word) == n && !strncmp(hint_keys[i].word, word, n)) return i;
+    return -1;
+}
+/* a click or a tap col columns into the foot's sentence of key (hints()): the word of key it is on, the slash after a
+   word its own and the margin before the first's, pressed as on the keyboard; the sentence's text, and the margin
+   after it, press what every word does when they all do one thing. Whether a key was pressed */
+static bool hint_press(App* app, const char* key, int col) {
+    const char *word = key, *end;
+    int k = (int)strlen(key), pick = -1, first = 1, w;
+    SDL_Event e;
+    for (;; word = end + 1) {
+        end = strchr(word, '/');
+        if (!end) end = word + strlen(word);
+        w = hint_word(word, (size_t)(end - word));
+        if (col < k && col <= (int)(end - key)) {
+            pick = w;
+            break;
+        }
+        if (col >= k && first)
+            pick = w;
+        else if (col >= k && (w < 0 || pick < 0 || hint_keys[w].key != hint_keys[pick].key ||
+                              hint_keys[w].mod != hint_keys[pick].mod))
+            pick = -1;
+        first = 0;
+        if (!*end) break;
+    }
+    if (pick < 0) return false;
+    if (hint_keys[pick].key == SDLK_UNKNOWN) {
+        open_folder_picker(app);
+        return true;
+    }
+    SDL_zero(e);
+    e.type = SDL_EVENT_KEY_DOWN;
+    e.key.key = hint_keys[pick].key;
+    e.key.mod = hint_keys[pick].mod;
+    e.key.down = true;
+    event(app, &e);
+    return true;
+}
+/* the boxes of the screen shown, and the keys its foot says */
+static const char* shown_place(App* app, GuiPlace* p, char* keys, size_t size) {
+    if (app->editing && app->form == GUI_FORM_PAD)
+        place_screen(app, p, shown_keys(app, keys, size), 0, GUI_SHOWS_TABS); /* render_pad's */
+    else if (app->editing) {
+        GuiFormBoxes f;
+        form_boxes(app, &f);
+        *p = f.place;
+    } else if (app->menu.view == GUI_LOAD_GAMES)
+        games_place(app, p);
+    else if (pick_screen(app)) {
+        GuiPickBoxes k;
+        pick_boxes(app, &k);
+        *p = k.place;
+    } else {
+        GuiMenuBoxes m;
+        menu_boxes(app, &m);
+        *p = m.place;
+    }
+    return shown_keys(app, keys, size);
+}
+/* a click or a tap at pixel x, y on a key of the foot presses it (hint_press), the keys' box's whole height their rows';
+   whether it did */
+static bool foot_press(App* app, float x, float y) {
+    GuiPlace p;
+    GuiRect text;
+    GuiHintHit hit;
+    char keys[256];
+    const char* say = shown_place(app, &p, keys, sizeof keys);
+    int s = app->scale, rows;
+    if (x < (float)p.keys.x || x >= (float)(p.keys.x + p.keys.w) || y < (float)p.keys.y ||
+        y >= (float)(p.keys.y + p.keys.h))
+        return false;
+    app->scale = foot_scale(app);
+    text = foot_text(app, p.keys, app->theme.footer_box);
+    rows = hints(app, say, text.w / cell_w(app), text, text.y, 0, 0, NULL);
+    hit.x = x;
+    hit.y = SDL_clamp(y, (float)text.y, (float)(text.y + rows * cell_h(app) - 1));
+    hit.key[0] = 0;
+    hints(app, say, text.w / cell_w(app), text, text.y, 0, 0, &hit);
+    app->scale = s;
+    return hit.key[0] && hint_press(app, hit.key, hit.col);
+}
 static void pointer(App* app, float window_x, float window_y, bool click, bool touch) {
     float x, y;
+    bool picking = app->editing && app->editor.picking;
     if ((app->menu.running && !app->confirm.shown) || app->finished) return;
     layout(app);
     if (!SDL_RenderCoordinatesFromWindow(app->renderer, window_x, window_y, &x, &y)) return;
+    /* under a question, the folder's too, a click is the question's */
+    if (click && !app->confirm.shown && foot_press(app, x, y)) {
+        if (touch && picking) app->pick_press = GUI_PICK_ROWS + 1; /* the picker's finger, pressed as it went down */
+        return;
+    }
     if (app->folder_asked) /* over the folders' screen or Games */
         ask_pointer(app, x, y, click);
     else if (app->editing && app->form == GUI_FORM_PAD) {
