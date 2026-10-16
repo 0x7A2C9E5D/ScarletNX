@@ -21,6 +21,7 @@ typedef struct {
     int foot;           /* the foot's height: the keys' box, and the tips' beside it unless they are under the head */
     int keys_w;         /* the keys' box at least this wide, the tips' giving way */
     int list_cols;      /* the columns the list asks for; 0: one box, the whole width */
+    int fixed;          /* the list two fifths of the width whatever it asks, the side box gone where both do not fit */
     int status;         /* the status box's height, 0 for none */
 } GuiPlaceIn;
 typedef struct {

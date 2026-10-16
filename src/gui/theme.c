@@ -31,6 +31,7 @@ static const char* const aligns[] = {"left", "center", "right", NULL};
 static const char* const entrances[] = {"none", "typing", "slide", "fade", NULL};
 static const char* const typings[] = {"async", "sync", NULL};
 static const char* const panel_words[] = {"outline", "fill", NULL};
+static const char* const sizings[] = {"fixed", "adaptive", NULL};
 static const char* const head_places[] = {"tabs", "below", NULL};
 static const char* const tips_places[] = {"bottom", "top", NULL};
 #define FIELD(f)                    offsetof(GuiTheme, f), sizeof(((GuiTheme*)0)->f)
@@ -64,6 +65,8 @@ const GuiThemeKey gui_theme_keys[] = {
     TEXT("body", "marker", marker, "before each item"),
     WORD("body", "focus", focus_bar, focuses, "the focused box in the focus colour, or on a band of it"),
     WORD("body", "panels", panels, panel_words, "the boxes outlined or filled"),
+    WORD("body", "sizing", sizing, sizings,
+         "fixed: the list two fifths of every screen, alone on a narrow one; adaptive: as wide as its entries"),
     TEXT("body", "cursor", cursor, "in the margin, beside the focused box"),
     FLAG("backdrop", "grid", grid, "a faint grid on the page, in the dim colour"),
     WORD("tips", "place", tips_place, tips_places, "in a box at the foot beside the keys, or on a row under the head"),

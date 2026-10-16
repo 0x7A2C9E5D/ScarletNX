@@ -159,5 +159,25 @@ int main(void) {
     assert(gui_place_pitch(300, 2, 20, 50) == 50 && gui_place_pitch(300, 30, 20, 50) == 20);
     assert(gui_place_pitch(300, 0, 20, 50) == 50);
     puts("gui place ok");
+    /* fixed: the list two fifths of the width whatever it asks, the same on every screen; too narrow for both, the
+       list alone */
+    {
+        GuiPlaceIn f = in;
+        GuiPlace a, b;
+        f.fixed = 1;
+        f.list_cols = 20;
+        gui_place(&f, &a);
+        f.list_cols = 60;
+        gui_place(&f, &b);
+        sound(&a, 1280, 800);
+        assert(a.list.w == (1248 / 16) * 2 / 5 * 16 && b.list.w == a.list.w && b.side.x == a.side.x);
+        f.width = 600; /* 37 columns: under a list's least and a side box's */
+        gui_place(&f, &a);
+        sound(&a, 600, 800);
+        assert(!a.stacked && empty(a.side) && empty(a.status) && a.list.w == 600 - 32);
+        f.fixed = 0;
+        gui_place(&f, &b);
+        assert(b.stacked && !empty(b.side)); /* adaptive: under it */
+    }
     return 0;
 }

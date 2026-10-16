@@ -1434,6 +1434,7 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols,
     }
     if (t->tips_place == GUI_TIPS_TOP) in.tips = cell_h(app) + 4 * s;
     in.list_cols = list_cols ? SDL_min(SDL_max(list_cols, 20), SDL_max(20, (width / cell_w(app) - 2) * 3 / 5)) : 0;
+    in.fixed = t->sizing == GUI_SIZING_FIXED && list_cols && list_cols < width / cell_w(app); /* a list, not a run */
     { /* the widest key, which a row cannot break */
         const char* at = keys;
         char key[128], what[128];
@@ -2734,7 +2735,10 @@ static void form_row(App* app, const GuiList* l, const GuiEditor* e, int r, int 
         gui_settings_shown(&app->settings, (int)(k - app->settings.keys), value, sizeof value);
     else
         gui_editor_value(e, r, value, sizeof value);
-    snprintf(line, sizeof line, "%s%-*s %s", app->theme.marker, labels, label, value);
+    if (value[0])
+        snprintf(line, sizeof line, "%s%-*s %s", app->theme.marker, labels, label, value);
+    else /* no value to line up: padding would make a short row too long for its box, and slide */
+        snprintf(line, sizeof line, "%s%s", app->theme.marker, label);
     n = SDL_utf8strlen(line);
     if (typing && room > 4 && n > (size_t)room) { /* the typed end in view */
         const char* tail = value;

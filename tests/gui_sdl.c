@@ -1149,6 +1149,16 @@ int main(int argc, char** argv) {
         form_boxes(&app, &f);
         assert(f.back.count == 1 &&
                list_box(&f.right, 0).y - (list_box(&f.back, 0).y + list_box(&f.back, 0).h) > 14 * app.scale);
+        /* a row with no value has no padding to the widest label: short, it stays whole while a long one slides */
+        {
+            Uint32 kept = app.theme.scroll_ms;
+            app.theme.scroll_ms = 100; /* the default theme slides nothing */
+            for (app.clock = 1; gui_slide(1000, app.clock, app.theme.scroll_ms) != 3;) app.clock += 100;
+            render(&app);
+            shows(&app, "- Add a folder", normal);
+            app.theme.scroll_ms = kept;
+            app.clock = 0;
+        }
         point(&app, list_box(&f.back, 0), true);
         assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_FOLDERS);
         render(&app);
@@ -1755,6 +1765,22 @@ int main(int argc, char** argv) {
     }
     go_tab(&app, GUI_TAB_GAMES);
     assert(app.menu.view == GUI_LOAD_GAMES && app.games.count == 35 && !app.message[0]);
+    { /* fixed: the list's column as wide on the menu as on Games, however long their entries; adaptive: each its own */
+        GuiMenuBoxes m;
+        GuiGamesBoxes g;
+        app.menu.view = GUI_LOAD_NONE;
+        menu_boxes(&app, &m);
+        app.menu.view = GUI_LOAD_GAMES;
+        games_boxes(&app, &g);
+        assert(app.theme.sizing == GUI_SIZING_FIXED && g.place.list.w == m.place.list.w);
+        app.theme.sizing = GUI_SIZING_ADAPTIVE;
+        app.menu.view = GUI_LOAD_NONE;
+        menu_boxes(&app, &m);
+        app.menu.view = GUI_LOAD_GAMES;
+        games_boxes(&app, &g);
+        assert(g.place.list.w != m.place.list.w);
+        app.theme.sizing = GUI_SIZING_FIXED;
+    }
     key(&app, SDLK_PAGEDOWN);
     assert(app.browser.page == 1 && app.browser.selected == 0);
     /* Add a folder over every page, a wider gap under it than between the games, and no Back: ESC is the menu's */
@@ -1902,8 +1928,15 @@ int main(int argc, char** argv) {
         SDL_SyncWindow(app.window);
         app.menu.text_size = GUI_TEXT_MAX;
         app.menu.selected = GUI_SWITCH;
+        /* too narrow for the side box at that size: fixed shows the list alone, its whole height */
         render(&app);
         menu_boxes(&app, &m);
+        assert(app.theme.sizing == GUI_SIZING_FIXED && !m.place.side.h && !m.place.status.h && !m.place.stacked);
+        assert(m.place.list.w == m.place.head.w);
+        app.theme.sizing = GUI_SIZING_ADAPTIVE; /* the side box under the list, which leaves room for fewer */
+        render(&app);
+        menu_boxes(&app, &m);
+        assert(m.place.stacked && m.place.side.h);
         assert(app.scale == GUI_TEXT_MAX && app.rows == 16 && m.list.shown < m.list.count && !m.list.first);
         hides(&app, "\x1e", soft);
         shows(&app, "\x1f", soft); /* items below the last box */
@@ -1984,6 +2017,7 @@ int main(int argc, char** argv) {
         render(&app);
         assert(app.scale == 2 && app.rows == 16);
         app.menu.text_size = 0;
+        app.theme.sizing = GUI_SIZING_FIXED;
         assert(SDL_SetWindowSize(app.window, 1280, 800));
         SDL_SyncWindow(app.window);
         render(&app);
@@ -2807,7 +2841,7 @@ int main(int argc, char** argv) {
             text_px_is(&app, r.x + cw, r.y + 4 * s, "Exit ScarletNX?", rgb(app.theme.warning), black);
             text_px_is(&app, list_box(&choices, 0).x + cw / 2, item_text_y(&app, list_box(&choices, 0)), "- Stay",
                        yellow, black);
-            assert(b.x + b.w < r.x &&
+            assert(b.x < r.x && /* its left edge, off the question's box, darkened */
                    same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), (SDL_Color){0x7F, 0x7F, 0, 255}));
             mouse_px(&app, list_box(&choices, 1).x + 4, list_box(&choices, 1).y + 4, false);
             assert(app.confirm.shown && app.confirm.selected == GUI_CONFIRM_ABORT);
@@ -3031,12 +3065,17 @@ int main(int argc, char** argv) {
         text_px_is(&app, m.list.at.x + m.list.at.w - 8 * app.scale, item_text_y(&app, b), "\x1e", rgb(app.theme.soft),
                    page);
         assert(!m.place.stacked);
-        /* and on a window too narrow for both, the side box goes under the list */
+        /* and on a window too narrow for both, the list alone (fixed), or the side box under it (adaptive) */
         assert(SDL_SetWindowSize(app.window, 800, 800));
         SDL_SyncWindow(app.window);
         render(&app);
         menu_boxes(&app, &m);
+        assert(!m.place.stacked && !m.place.side.h && m.place.list.w == m.place.head.w);
+        app.theme.sizing = GUI_SIZING_ADAPTIVE;
+        render(&app);
+        menu_boxes(&app, &m);
         assert(m.place.stacked && m.place.side.y > m.place.list.y + m.place.list.h && m.place.side.h > 0);
+        app.theme.sizing = GUI_SIZING_FIXED;
         assert(SDL_SetWindowSize(app.window, 1280, 800));
         SDL_SyncWindow(app.window);
         app.menu.text_size = 0;
