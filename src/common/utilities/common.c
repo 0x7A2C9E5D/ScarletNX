@@ -20,6 +20,7 @@
 #else
 #include <dirent.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
@@ -925,9 +926,20 @@ static wchar_t* child_environment(const char* home) {
     return out;
 }
 #endif
+/* tick(data) once a second has gone by since the last one */
+static void tick_due(double* ticked, void (*tick)(void*), void* data) {
+    if (snx_seconds() - *ticked < 1) return;
+    *ticked = snx_seconds();
+    tick(data);
+}
 int snx_run(const char* const* argv, const char* cwd, const char* home, char** output) {
+    return snx_run_ticking(argv, cwd, home, output, NULL, NULL);
+}
+int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, char** output, void (*tick)(void*),
+                    void* data) {
     char buf[8192];
     size_t used = 0;
+    double ticked = snx_seconds();
 #ifdef _WIN32
     STARTUPINFOEXW si;
     PROCESS_INFORMATION pi;
@@ -944,7 +956,7 @@ int snx_run(const char* const* argv, const char* cwd, const char* home, char** o
         free(cmd);
         free(dir);
         free(env);
-        result = snx_run(argv, cwd, home, &captured);
+        result = snx_run_ticking(argv, cwd, home, &captured, tick, data);
         if (captured) {
             fputs(captured, stdout);
             free(captured);
@@ -1013,7 +1025,19 @@ int snx_run(const char* const* argv, const char* cwd, const char* home, char** o
         return 127;
     }
     if (output) {
-        while (ReadFile(rd, buf, sizeof(buf), &got, NULL) && got) append_output(output, &used, buf, got);
+        for (;;) {
+            DWORD ready = 0;
+            if (tick) { /* a read waits only for what is there, so the tick keeps its second */
+                tick_due(&ticked, tick, data);
+                if (!PeekNamedPipe(rd, NULL, 0, NULL, &ready, NULL)) break; /* every writer gone */
+                if (!ready) {
+                    Sleep(50);
+                    continue;
+                }
+            }
+            if (!ReadFile(rd, buf, ready && ready < sizeof(buf) ? ready : sizeof(buf), &got, NULL) || !got) break;
+            append_output(output, &used, buf, got);
+        }
         CloseHandle(rd);
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
@@ -1052,6 +1076,16 @@ int snx_run(const char* const* argv, const char* cwd, const char* home, char** o
     }
     if (output) {
         for (;;) {
+            if (tick) { /* a read waits only for what is there, so the tick keeps its second */
+                struct pollfd ready;
+                int ms = (int)((ticked + 1 - snx_seconds()) * 1000), any;
+                ready.fd = fds[0];
+                ready.events = POLLIN;
+                ready.revents = 0;
+                any = poll(&ready, 1, ms > 0 ? ms : 0);
+                tick_due(&ticked, tick, data);
+                if (!any || (any < 0 && errno == EINTR)) continue;
+            }
             got = read(fds[0], buf, sizeof(buf));
             if (got > 0)
                 append_output(output, &used, buf, (size_t)got);
@@ -1060,7 +1094,13 @@ int snx_run(const char* const* argv, const char* cwd, const char* home, char** o
         }
         close(fds[0]);
     }
-    do { waited = waitpid(pid, &status, 0); } while (waited < 0 && errno == EINTR);
+    for (;;) {
+        waited = waitpid(pid, &status, tick && !output ? WNOHANG : 0);
+        if (waited < 0 && errno == EINTR) continue;
+        if (waited) break;
+        poll(NULL, 0, 50); /* no output to wait on: the child's end is looked for, the tick kept */
+        tick_due(&ticked, tick, data);
+    }
     return waited < 0 ? 1 : WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
 #endif
 }

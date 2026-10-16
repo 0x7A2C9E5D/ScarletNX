@@ -407,6 +407,11 @@ if(UNIX)
     endif()
 endif()
 
+add_executable(snx-test-run-ticking run_ticking.c)
+snx_test_target(snx-test-run-ticking 90)
+target_link_libraries(snx-test-run-ticking PRIVATE snx_test_common)
+add_test(NAME run_ticking COMMAND snx-test-run-ticking)
+
 add_executable(snx-test-extract extract.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/extract.c")
 snx_test_target(snx-test-extract 90)
 target_link_libraries(snx-test-extract PRIVATE snx_test_common)
