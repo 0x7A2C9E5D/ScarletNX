@@ -147,23 +147,6 @@ static u32 subgroup_ballot_word(DirectCtx* c, u32 vec4_u32, u32 lane, u32 predic
     return result;
 }
 
-static void flags_add(DirectCtx* c, u32 left, u32 right, u32 sum) {
-    u32 carry = spv_emit_u_less(&c->emit, c->bool_type, sum, left);
-    u32 signs = spv_emit_bitwise_xor_u32(&c->emit, c->u32_type, sum, left);
-    u32 same = spv_emit_not_u32(&c->emit, c->u32_type, spv_emit_bitwise_xor_u32(&c->emit, c->u32_type, left, right));
-    u32 bits = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, signs, same);
-    u32 top = spv_emit_constant_u32(&c->emit, c->u32_type, 0x80000000u);
-    u32 overflow = spv_emit_i_not_equal(&c->emit, c->bool_type,
-                                        spv_emit_bitwise_and_u32(&c->emit, c->u32_type, bits, top), c->zero);
-    u32 zero = spv_emit_i_equal(&c->emit, c->bool_type, sum, c->zero);
-    u32 sign = spv_emit_i_not_equal(&c->emit, c->bool_type, spv_emit_bitwise_and_u32(&c->emit, c->u32_type, sum, top),
-                                    c->zero);
-    spv_emit_store(&c->emit, c->cc_c, carry);
-    spv_emit_store(&c->emit, c->cc_o, overflow);
-    spv_emit_store(&c->emit, c->cc_z, zero);
-    spv_emit_store(&c->emit, c->cc_s, sign);
-}
-
 static u32 integer_add(DirectCtx* c, u32 left, u32 right, u32 avg, int extended, int write_cc) {
     if (!extended && !write_cc) {
         if (avg == 2) left = spv_emit_isub_u32(&c->emit, c->u32_type, c->zero, left);
@@ -1171,7 +1154,7 @@ static int supported(u64 w, int op) {
         case O_TLD: return B(w, 28, 3) <= 4 && !B(w, 50, 1) && (!B(w, 35, 1) || B(w, 28, 3) == 2);
         case O_TLD_B:
             return B(w, 28, 3) <= 4 && (!B(w, 50, 1) || B(w, 28, 3) == 2 || B(w, 28, 3) == 3) &&
-                   (!B(w, 35, 1) || B(w, 28, 3) == 2 && !B(w, 50, 1));
+                   (!B(w, 35, 1) || (B(w, 28, 3) == 2 && !B(w, 50, 1)));
         /* 2D surfaces, and buffer images as storage texel buffers: their raw 32-bit loads and formatted stores */
         case O_SULD:
             return (B(w, 33, 3) == 3 && (!B(w, 52, 1) || B(w, 20, 4) == 4)) ||
@@ -4757,7 +4740,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                                           op == O_HSETP2_R   ? B(w, 28, 2)
                                           : op == O_HSETP2_C ? 1
                                                              : 0),
-                                op == O_HSETP2_C && B(w, 54, 1) || op == O_HSETP2_R && B(w, 30, 1),
+                                (op == O_HSETP2_C && B(w, 54, 1)) || (op == O_HSETP2_R && B(w, 30, 1)),
                                 op == O_HSETP2_R ? B(w, 31, 1) : op == O_HSETP2_C && B(w, 56, 1));
             u32 predicate = pred_read(c, B(w, 39, 3), B(w, 42, 1));
             u32 compare = B(w, op == O_HSETP2_R ? 35 : 49, 4);
@@ -4805,7 +4788,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 y = spv_emit_iadd_u32(&c->emit, i32_type, y, oy);
             }
             u32 coord;
-            if (type == 0 && !array || type == 1 && !array)
+            if (type <= 1 && !array)
                 coord = spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
             else {
                 u32 z = type == 0 || array ? spv_emit_bitcast(&c->emit, i32_type,

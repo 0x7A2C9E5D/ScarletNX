@@ -242,7 +242,7 @@ static int stk_resolve(Ctx* c, u32 n, int fwd) {
     int nl = 0;
     for (u32 i = 11; i < n; i++)
         if (IDX_OK(i) && is_leader(c, i)) nl++;
-    StkA A = {c, n, fwd};
+    StkA A = {.c = c, .n = n, .fwd = fwd};
     /* one block, by alignment: the stacks, the 4-byte arrays, then the flags */
     u8* block = calloc(1, (sizeof(Stk) + sizeof(u32) + sizeof(int) + 1) * (nl + 1) + sizeof(int) * (n + 1));
     if (!block) return 0;

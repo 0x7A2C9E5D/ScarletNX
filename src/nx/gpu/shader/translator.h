@@ -269,8 +269,8 @@ enum {
     O_GETCRSPTR,
     O__COUNT
 };
+/* an opcode: the bits its pattern fixes (mask) and their values (val), and how many it fixes */
 typedef struct {
-    const char* pat;
     int id;
     const char* name;
     u64 mask, val;
