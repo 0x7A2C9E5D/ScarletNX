@@ -9,9 +9,10 @@
 
 /* ---- context ---- */
 
-/* -march=native is resolved by GCC's driver, which libgccjit's compiler proper doesn't run through: ask the driver
-   once what it means on this host (build == host == target) and pass the CPU by name, with what it says of the
-   instructions the FP fast paths need. Generic code for the target without a driver */
+/* -march=native is resolved by GCC's driver, which libgccjit's compiler proper doesn't run through: the CPU by name
+   (build == host == target), from libgccjit itself where it can tell (GCC 15), else from a GCC on PATH, with what it
+   supports of the instructions the FP fast paths need. Those are used only with the name passed: without it the code
+   is the target's generic one, which calls libm for them, and a module links no libm. Generic without either */
 typedef struct {
     char march[96];
     int fma, round;
@@ -35,8 +36,28 @@ static const HostTarget* host_target(void) {
     static int done;
     if (!done) {
         const char* args[5] = {"gcc", "-march=native", "-Q", "--help=target", NULL};
-        char *gcc = snx_find_tool("gcc"), *output = NULL, *p;
+        char *gcc = NULL, *output = NULL, *p;
         done = 1;
+#if defined(LIBGCCJIT_HAVE_TARGET_INFO_API) && (defined(__x86_64__) || defined(__i386__))
+        {
+            gcc_jit_context* ctx = gcc_jit_context_acquire();
+            gcc_jit_target_info* info = gcc_jit_context_get_target_info(ctx);
+            const char* arch = gcc_jit_target_info_arch(info);
+            if (arch && *arch && strlen(arch) < sizeof(host.march) - 8) sprintf(host.march, "-march=%s", arch);
+            gcc_jit_target_info_release(info);
+            gcc_jit_context_release(ctx);
+            if (host.march[0]) { /* what the CPU supports shows only in a context told its name */
+                ctx = gcc_jit_context_acquire();
+                gcc_jit_context_add_command_line_option(ctx, host.march);
+                info = gcc_jit_context_get_target_info(ctx);
+                host.fma = gcc_jit_target_info_cpu_supports(info, "fma");
+                host.round = gcc_jit_target_info_cpu_supports(info, "sse4.1");
+                gcc_jit_target_info_release(info);
+                gcc_jit_context_release(ctx);
+            }
+        }
+#endif
+        if (!host.march[0]) gcc = snx_find_tool("gcc");
         if (gcc) {
             args[0] = gcc;
             if (!snx_run(args, NULL, NULL, &output) && output && (p = strstr(output, "-march=")) != NULL) {
@@ -44,10 +65,11 @@ static const HostTarget* host_target(void) {
                 p += 7;
                 while (*p == ' ' || *p == '\t') ++p;
                 /* AArch64's GCC lists it empty: what follows is the next option */
-                if (*p != '\n' && *p != '\r' && sscanf(p, "%63s", name) == 1 && strcmp(name, "native"))
+                if (*p != '\n' && *p != '\r' && sscanf(p, "%63s", name) == 1 && strcmp(name, "native")) {
                     sprintf(host.march, "-march=%s", name);
-                host.fma = enabled(output, "-mfma");
-                host.round = enabled(output, "-msse4.1");
+                    host.fma = enabled(output, "-mfma");
+                    host.round = enabled(output, "-msse4.1");
+                }
             }
             free(output);
             free(gcc);
@@ -73,7 +95,20 @@ SnxJit* snx_jit_new(char opt) {
     } else
         gcc_jit_context_set_int_option(jit->ctx, GCC_JIT_INT_OPTION_OPTIMIZATION_LEVEL, opt - '0');
     /* a shared object for this machine (build == host == target), with the flags generated C had */
+#ifdef _WIN32
+    /* no stack probes: they call libgcc's ___chkstk_ms, which the module doesn't link (nor the LLVM backend's) */
+    gcc_jit_context_add_command_line_option(jit->ctx, "-mno-stack-arg-probe");
+#else
     gcc_jit_context_add_command_line_option(jit->ctx, "-fPIC");
+#endif
+    /* linked from its own objects only, as the LLVM backend's linker does (link.h): the start files, C library and
+       libgcc GCC's driver adds are those of the GCC libgccjit was built with, at its paths, which a system with
+       another GCC or none lacks. The runtime library defines what the code calls (rtlib.c) */
+    gcc_jit_context_add_driver_option(jit->ctx, "-nostdlib");
+#if defined(__aarch64__)
+    /* atomics inline: GCC would call libgcc's, which the module doesn't link (rtlib.c is built the same way) */
+    gcc_jit_context_add_command_line_option(jit->ctx, "-mno-outline-atomics");
+#endif
     if (host->march[0]) gcc_jit_context_add_command_line_option(jit->ctx, host->march);
     gcc_jit_context_add_command_line_option(jit->ctx, "-fno-strict-aliasing");
     gcc_jit_context_add_command_line_option(jit->ctx, "-fwrapv");
@@ -125,12 +160,27 @@ const char* snx_jit_error(SnxJit* jit) { return gcc_jit_context_get_first_error(
 
 /* v fitted to the type: truncated, sign-extended for signed types; 128-bit types take v zero-extended (a long would
    sign-extend from bit 63) */
+/* libgccjit takes constants as a C long, 32 bits on Windows: a wider one is built from its halves, which GCC folds */
+static gcc_jit_rvalue* constant(SnxJit* jit, gcc_jit_type* type, SnxU64 v) {
+    gcc_jit_rvalue *high, *low;
+    if ((SnxU64)(long)v == v) return gcc_jit_context_new_rvalue_from_long(jit->ctx, type, (long)v);
+    high = gcc_jit_context_new_cast(jit->ctx, NULL,
+                                    gcc_jit_context_new_rvalue_from_long(jit->ctx, jit->t_u32, (long)(SnxU32)(v >> 32)),
+                                    jit->t_u64);
+    low = gcc_jit_context_new_cast(
+        jit->ctx, NULL, gcc_jit_context_new_rvalue_from_long(jit->ctx, jit->t_u32, (long)(SnxU32)v), jit->t_u64);
+    high = gcc_jit_context_new_binary_op(jit->ctx, NULL, GCC_JIT_BINARY_OP_LSHIFT, jit->t_u64, high,
+                                         gcc_jit_context_new_rvalue_from_int(jit->ctx, jit->t_u64, 32));
+    return gcc_jit_context_new_cast(
+        jit->ctx, NULL,
+        gcc_jit_context_new_binary_op(jit->ctx, NULL, GCC_JIT_BINARY_OP_BITWISE_OR, jit->t_u64, high, low), type);
+}
+
 gcc_jit_rvalue* jit_k(SnxJit* jit, gcc_jit_type* type, SnxU64 v) {
     unsigned bits = 64;
     int is_signed = 0;
     if (type == jit->t_u128 || type == jit->t_s128)
-        return gcc_jit_context_new_cast(jit->ctx, NULL,
-                                        gcc_jit_context_new_rvalue_from_long(jit->ctx, jit->t_u64, (long)v), type);
+        return gcc_jit_context_new_cast(jit->ctx, NULL, constant(jit, jit->t_u64, v), type);
     if (type == jit->t_u8 || type == jit->t_s8)
         bits = 8;
     else if (type == jit->t_u16 || type == jit->t_s16)
@@ -143,7 +193,7 @@ gcc_jit_rvalue* jit_k(SnxJit* jit, gcc_jit_type* type, SnxU64 v) {
         v &= mask;
         if (is_signed && (v >> (bits - 1))) v |= ~mask;
     }
-    return gcc_jit_context_new_rvalue_from_long(jit->ctx, type, (long)v);
+    return constant(jit, type, v);
 }
 gcc_jit_rvalue* jit_u64(SnxJit* jit, SnxU64 v) { return jit_k(jit, jit->t_u64, v); }
 gcc_jit_rvalue* jit_u32(SnxJit* jit, SnxU32 v) { return jit_k(jit, jit->t_u32, v); }

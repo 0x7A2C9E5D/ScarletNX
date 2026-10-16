@@ -69,6 +69,8 @@ NX tooling under `src/nx/runtime/driver/` and `src/nx/loader/`:
   fields, SIMD a lane at a time, no host intrinsics: GCC picks the instructions with `-march=native`). Guest
   accesses are relaxed atomics (libgccjit 14 drops volatile on dereferences); `src/nx/loader/module_gccjit.c`
   compiles each chunk to an object and lets GCC's driver link the module with the chunks and the runtime library.
+  Nothing else (`-nostdlib`): the driver runs only `as` and `ld` and links none of GCC's start files, libgcc or the
+  C library, so a packaged libgccjit works next to another GCC or none.
   libgccjit compiles one context at a time per process (GCC's state is global, behind one lock), so
   `gccjit/jit_units.c` compiles the chunks `--jobs` at a time in processes of their own (one after another in the
   recompiler's process with one job, and on Windows, which has no `fork`).
