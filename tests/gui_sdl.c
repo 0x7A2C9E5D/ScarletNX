@@ -833,7 +833,7 @@ int main(int argc, char** argv) {
         assert(app.menu.view == GUI_LOAD_KEYS && strstr(app.message, "could not be read as prod.keys"));
         app.menu.view = GUI_LOAD_DROP;
         picked(&app, "content://com.android.providers.downloads.documents/document/msf%3A12");
-        assert(app.menu.view == GUI_LOAD_DROP && strstr(app.message, "not from an app"));
+        assert(app.menu.view == GUI_LOAD_DROP && strstr(app.message, "from this computer's storage"));
         app.menu.view = GUI_LOAD_NONE;
         app.message[0] = 0;
         free(big);

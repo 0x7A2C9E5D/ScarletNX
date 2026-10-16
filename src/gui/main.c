@@ -3564,15 +3564,27 @@ static void install_keys(App* app, const char* source) {
         keys_write(app, data, size);
     free(data);
 }
+/* what a picked file that cannot be used says, for the platform's picker: Android's documents, a desktop's files */
+#ifdef SDL_PLATFORM_ANDROID
+#define SAY_KEYS_UNREAD "This file could not be read. Pick prod.keys again, from the device's storage (%s)."
+#define SAY_KEYS_NOT    "This file is not a prod.keys. Pick the prod.keys file (%s)."
+#define SAY_PICK_UNREAD                                                                                                \
+    "Cannot read this file by its path. Check that ScarletNX may access the device's files in Android's settings, "    \
+    "then pick it from the device's storage (%s)."
+#else
+#define SAY_KEYS_UNREAD "The picked file could not be read as prod.keys (%s)."
+#define SAY_KEYS_NOT    "The picked file is not a prod.keys (%s)."
+#define SAY_PICK_UNREAD "Pick the file from this computer's storage (%s)."
+#endif
 /* keys the picker gave as a document of an app's (Android's), read through it: a path to it may be one this app cannot
    read, or there is none (Downloads by number, #280). With no name to go by, its text has to be a prod.keys' */
 static void install_keys_document(App* app, const char* uri) {
     size_t size = 0;
     char* data = keys_read(uri, &size);
     if (!data)
-        snprintf(app->message, sizeof(app->message), "The picked file could not be read as prod.keys (%s).", uri);
+        snprintf(app->message, sizeof(app->message), SAY_KEYS_UNREAD, uri);
     else if (!gui_keys_text(data, size))
-        snprintf(app->message, sizeof(app->message), "The picked file is not a prod.keys (%s).", uri);
+        snprintf(app->message, sizeof(app->message), SAY_KEYS_NOT, uri);
     else
         keys_write(app, data, size);
     free(data);
@@ -3949,8 +3961,7 @@ static void picked(App* app, const char* uri) {
     if (!uri)
         snprintf(app->message, sizeof(app->message), "No file was picked.");
     else if (!path)
-        snprintf(app->message, sizeof(app->message), "Pick the file from the device's storage, not from an app (%s).",
-                 uri);
+        snprintf(app->message, sizeof(app->message), SAY_PICK_UNREAD, uri);
     else
         drop(app, path, false);
     free(path);
