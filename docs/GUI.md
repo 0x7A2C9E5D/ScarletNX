@@ -85,8 +85,8 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   shows the focused game's path. Choosing one runs it again with the driver it was
   loaded with and the options the menu has now; a game whose file is gone leaves the
   list instead. The list is kept in `recent.txt`, beside `last-run.log`, in the user's state
-  folder on Linux (`$XDG_STATE_HOME/scarletnx/gui/`, by default `~/.local/state/scarletnx/gui/`,
-  where an older version's move from `~/.local/share/scarletnx/gui/`), or in
+  folder on Linux (`$XDG_STATE_HOME/scarletnx/gui/`, by default `~/.local/state/scarletnx/gui/`;
+  an older version's in `~/.local/share/scarletnx/gui/` stay where they are), or in
   `%APPDATA%\scarletnx\gui\` on Windows, a line per
   game: `switch`, `linux` or `3ds`, `file` or `games` (a program from games/, run as it is),
   the path and the name, separated by tabs.

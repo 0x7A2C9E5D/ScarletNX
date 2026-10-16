@@ -261,7 +261,7 @@ the tools-only build creates one in `build/native-recomp`, or accepts `--runtime
 `--repo DIR` and `--build-dir DIR` before the command override compiled-in checkout/tool paths; without that
 checkout (an installed copy), the user's data folder stands in for it (`~/.local/share/scarletnx`,
 `%APPDATA%\scarletnx` on Windows), and on Linux the XDG config, state and cache folders hold its settings, logs and
-caches ([USAGE](USAGE.md#appimage--display)).
+caches ([USAGE](USAGE.md#folders)).
 Python ≥3.12 is optional for `tools/*.py` diagnostics.
 
 ## Install / AppImage

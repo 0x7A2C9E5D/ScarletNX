@@ -206,29 +206,40 @@ SDL_VIDEO_DRIVER=x11 games/Game
 
 On an ARM64 machine the image is `ScarletNX-aarch64.AppImage`.
 `--game` selects `Game_code.so`/`Game_data/`; or name the image `games/Game.AppImage` to load adjacent files.
-The AppImage also prepares dumps: `./ScarletNX-x86_64.AppImage Game.nsp`. Without the checkout it was built from
-(the AppImage, the Windows zip), the driver works in the user's data folder, wherever it was started from:
-`~/.local/share/scarletnx` (`$XDG_DATA_HOME/scarletnx`) on Linux and `%APPDATA%\scarletnx` on Windows; a portable copy
-keeps a `games/` folder beside the AppImage (or beside the zip's programs), and that folder is used instead. `work/` and
-`games/` go there, `prod.keys` is looked for there before `~/.switch`, and each game gets a copy of the AppImage (on
-Windows, of `scarletnx.exe` and the DLLs next to it).
+The AppImage also prepares dumps: `./ScarletNX-x86_64.AppImage Game.nsp`, in the folder [Folders](#folders) names,
+and each game gets a copy of the AppImage (on Windows, of `scarletnx.exe` and the DLLs next to it).
 X11 bypasses Wayland. [Licenses](CREDITS.md).
 
-On Linux an installed copy follows the [XDG Base Directory spec](https://specifications.freedesktop.org/basedir/latest/):
-the data folder keeps `games/` (each game's program, code, `Game_data/` with its saves, `captures/`), `themes/` (the
-menu's, `<name>/theme.ini`) and `prod.keys`, and the rest goes in the folder of its kind. A relative `$XDG_*_HOME` is ignored, as the spec says.
+## Folders
 
-| Folder | Holds |
-| --- | --- |
-| `~/.config/scarletnx/games/` (`$XDG_CONFIG_HOME`) | `Game.ini` |
-| `~/.local/state/scarletnx/games/` (`$XDG_STATE_HOME`) | `Game.log`, `threads.txt` |
-| `~/.local/state/scarletnx/` | the menu's Share log, `scarletnx.log` |
-| `~/.local/state/scarletnx/gui/` | the menu's `recent.txt` and `last-run.log`, for every copy (the checkout's too) |
-| `~/.cache/scarletnx/` (`$XDG_CACHE_HOME`) | `work/` (`work/3ds/` for the 3DS driver), `games/shader_cache/` |
+The driver works in one folder, the first of these that applies (`--repo DIR` names another):
 
-What an older version left in the data folder is not moved: as long as it is there, each run says where it is and
-where this version keeps it, in the output or the game's log. The checkout and a portable copy keep everything beside
-the game, as on Windows.
+1. the checkout it was built from;
+2. a portable copy's: the folder of the AppImage, or of the Windows zip's programs, with a `games/` folder beside it;
+3. the user's data folder: `~/.local/share/scarletnx` on Linux, `%APPDATA%\scarletnx` on Windows,
+   `~/Library/Application Support/scarletnx` on macOS. On Android the app names its own, `/sdcard/ScarletNX`.
+
+Everything stays in that folder, except on Linux when it is the user's data folder: there what is not a game itself
+goes in the [XDG](https://specifications.freedesktop.org/basedir/latest/) folder of its kind.
+
+| What | In the folder | Linux, the user's data folder |
+| --- | --- | --- |
+| a game: its program, `Game_code.so`, `Game_data/` (saves), `captures/` | `games/` | `~/.local/share/scarletnx/games/` |
+| its settings, `Game.ini` | `games/` | `~/.config/scarletnx/games/` |
+| its `Game.log` and `threads.txt` | `games/` | `~/.local/state/scarletnx/games/` |
+| its pipeline cache | `games/shader_cache/` | `~/.cache/scarletnx/games/shader_cache/` |
+| extractions (`3ds/` for the 3DS driver) | `work/` | `~/.cache/scarletnx/work/` |
+| the menu's themes, `<name>/theme.ini` | `themes/` | `~/.local/share/scarletnx/themes/` |
+| `prod.keys`, read before `~/.switch` | the folder | `~/.local/share/scarletnx/` |
+| the menu's Share log, `scarletnx.log` | the working folder (`/sdcard/ScarletNX/` on Android) | `~/.local/state/scarletnx/` |
+
+The menu's `recent.txt` and `last-run.log` follow the user, not the folder: `~/.local/state/scarletnx/gui/` on Linux,
+`%APPDATA%\scarletnx\gui\` on Windows. `~/.local/share`, `~/.config`, `~/.local/state` and `~/.cache` are the defaults
+of `$XDG_DATA_HOME`, `$XDG_CONFIG_HOME`, `$XDG_STATE_HOME` and `$XDG_CACHE_HOME` (a relative one is ignored).
+
+An older version kept all of it in the data folder (`games/Game.ini`, `games/Game.log`, `work/`, `gui/recent.txt`).
+This one moves none of it: as long as an older file is there, each run says where it is and where it goes now, in
+the output or the game's log.
 
 ## Settings / input
 
@@ -281,5 +292,5 @@ screen, and *Reset layout*. The game's `.ini` keeps them: `controls`, `controls_
 `controls_snap`, `controls_rel_center`, `controls_dpad_slide`, `controls_haptics`, and a control's place once it
 was moved (`controls_a=0.930 0.470 100 1`: its middle across the screen, its size in percent, shown).
 Beside the executable: `Game.log`, `threads.txt` (15 s refresh), `captures/` (screenshots); an installed copy on Linux
-keeps the first two in its state folder ([above](#appimage--display)).
+keeps the first two in its state folder ([Folders](#folders)).
 Scripts/disasm/shaders: [DEVELOPMENT](DEVELOPMENT.md).
