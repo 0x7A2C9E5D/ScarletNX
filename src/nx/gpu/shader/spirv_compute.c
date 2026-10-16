@@ -124,9 +124,7 @@ u32* shader_compute_to_spirv(const u8* code, u32 max_bytes, ShaderInfo* si, size
         u32 d = B(w, 0, 8), a = B(w, 8, 8), b = B(w, 20, 8), id = op->id;
         u32 guard = B(w, 16, 3);
         if (guard < 7) pred_used[guard] = 1;
-        if (id == O_EXIT) {
-            continue;
-        }
+        if (id == O_EXIT) { continue; }
         if (id == O_DEPBAR || id == O_MEMBAR) continue;
         if (d < 255 && id != O_STG && id != O_ISETP_R && id != O_ISETP_C && id != O_ISETP_I) used[d] = 1;
         if (a < 255 && id != O_MOV_R && id != O_MOV_C && id != O_MOV32I && id != O_S2R && id != O_ISETP_R &&

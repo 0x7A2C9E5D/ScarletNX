@@ -1551,10 +1551,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         if (d < 255 && op->id != O_EXIT && op->id != O_KIL && op->id != O_BRA && op->id != O_BRX && op->id != O_SSY &&
             op->id != O_PBK && op->id != O_PCNT && op->id != O_SYNC && op->id != O_BRK && op->id != O_CONT &&
             op->id != O_AST && op->id != O_NOP && op->id != O_VOTE_VTG && op->id != O_DEPBAR && op->id != O_MEMBAR &&
-            op->id != O_CAL &&
-            op->id != O_PRET && op->id != O_RET && op->id != O_FSETP_R && op->id != O_FSETP_C && op->id != O_FSETP_I &&
-            op->id != O_HSETP2_R && op->id != O_HSETP2_C && op->id != O_HSETP2_I && op->id != O_DSETP_R &&
-            op->id != O_PSETP && op->id != O_CSETP && op->id != O_R2P_I)
+            op->id != O_CAL && op->id != O_PRET && op->id != O_RET && op->id != O_FSETP_R && op->id != O_FSETP_C &&
+            op->id != O_FSETP_I && op->id != O_HSETP2_R && op->id != O_HSETP2_C && op->id != O_HSETP2_I &&
+            op->id != O_DSETP_R && op->id != O_PSETP && op->id != O_CSETP && op->id != O_R2P_I)
             used[d] = 1;
         if (op->id == O_ALD || op->id == O_AST) {
             u32 addr = B(insn[i], 20, 10), width = B(insn[i], 47, 2) + 1, vertex = B(insn[i], 39, 8);
@@ -4951,7 +4950,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 }
             } else
                 for (int k = 0; k < outputs; k++)
-                    if (regs[k] < 255) reg_write(c, regs[k], texture_component(c, sample, texture_scalar[slot], comps[k]));
+                    if (regs[k] < 255)
+                        reg_write(c, regs[k], texture_component(c, sample, texture_scalar[slot], comps[k]));
         } else if (op == O_TXD) {
             /* explicit gradients: Ra the coordinates and one packed register, Rb the derivatives per axis */
             u32 dim = B(w, 28, 3);
