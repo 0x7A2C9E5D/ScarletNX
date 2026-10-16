@@ -46,8 +46,8 @@ static uint64_t fnv(const unsigned char* bytes, size_t n) {
     for (size_t i = 0; i < n; ++i) hash = (hash ^ bytes[i]) * 1099511628211ull;
     return hash;
 }
-/* PPM pixels of the 90-degree clockwise rotation of a width x height RGBA
-   framebuffer: the saved image has height columns and width rows. */
+/* PPM pixels of the landscape screen a width x height RGBA framebuffer shows: the saved image has height columns
+   and width rows, screen (x, y) being framebuffer row x, pixel width - 1 - y (libctru's console addressing). */
 static void ppm_pixel(const unsigned char* ppm, size_t size, unsigned width, unsigned height, unsigned x, unsigned y,
                       unsigned char out[3]) {
     const char* header = "P6\n400 240\n255\n";
@@ -289,10 +289,11 @@ int main(int argc, char** argv) {
         for (unsigned y = 0; y < 400; ++y)
             for (unsigned x = 0; x < 240; ++x) {
                 unsigned char* px = pattern + ((size_t)y * 240 + x) * 4;
-                px[0] = (unsigned char)x;
-                px[1] = (unsigned char)y;
-                px[2] = (unsigned char)(model + 1);
-                px[3] = 255;
+                /* RGBA8 is stored A, B, G, R */
+                px[3] = (unsigned char)x;
+                px[2] = (unsigned char)y;
+                px[1] = (unsigned char)(model + 1);
+                px[0] = 255;
             }
         assert(snx_ctr_write_ram(p->space, fb, pattern, 240u * 400 * 4) == SNX_CTR_MEM_OK);
         uint32_t swap[] = {0x00050200, 0, 0, fb, fb, 960, 0, 0, 0};
@@ -316,20 +317,20 @@ int main(int argc, char** argv) {
             const char* header = "P6\n400 240\n255\n";
             assert(!memcmp(ppm, header, strlen(header)));
             unsigned char rgb[3];
-            ppm_pixel(ppm, (size_t)length, 240, 400, 0, 0, rgb); /* fb bottom-left: (0,399) */
-            assert(rgb[0] == 0 && rgb[1] == 143 && rgb[2] == 1);
-            ppm_pixel(ppm, (size_t)length, 240, 400, 399, 0, rgb); /* fb top-left: (0,0) */
-            assert(rgb[0] == 0 && rgb[1] == 0 && rgb[2] == 1);
-            ppm_pixel(ppm, (size_t)length, 240, 400, 0, 239, rgb); /* fb bottom-right: (239,399) */
+            ppm_pixel(ppm, (size_t)length, 240, 400, 0, 0, rgb); /* screen top-left: row 0, pixel 239 */
+            assert(rgb[0] == 239 && rgb[1] == 0 && rgb[2] == 1);
+            ppm_pixel(ppm, (size_t)length, 240, 400, 399, 0, rgb); /* top-right: row 399, pixel 239 */
             assert(rgb[0] == 239 && rgb[1] == 143 && rgb[2] == 1);
+            ppm_pixel(ppm, (size_t)length, 240, 400, 0, 239, rgb); /* bottom-left: row 0, pixel 0 */
+            assert(rgb[0] == 0 && rgb[1] == 0 && rgb[2] == 1);
             free(ppm);
             /* The libctru path posts framebuffers through the shared
                FrameBufferUpdate blocks; vblank must latch and show those too. */
             for (unsigned i = 0; i < 240u * 400; ++i) {
                 unsigned char* px = pattern + (size_t)i * 4;
-                px[0] = 0x21;
-                px[1] = 0x43;
-                px[2] = 0x65;
+                px[3] = 0x21;
+                px[2] = 0x43;
+                px[1] = 0x65;
             }
             assert(snx_ctr_write_ram(p->space, fb, pattern, 240u * 400 * 4) == SNX_CTR_MEM_OK);
             uint32_t block = QUEUE + 0x200;
@@ -376,6 +377,15 @@ int main(int argc, char** argv) {
                         (unsigned long long)fnv(expect2, sizeof expect2));
             }
             assert(hash2 == fnv(expect2, sizeof expect2));
+            /* RGBA8 (A,B,G,R bytes) and RGBA4 decode on the host */
+            unsigned char abgr[4] = {0x40, 0x30, 0x20, 0x10}, rgba4[2] = {0x8c, 0x1f};
+            uint64_t hash3 = 0, hash4 = 0;
+            assert(snx_ctr_present_frame(1, 1, 1, 0, 4, abgr, &hash3));
+            const unsigned char expect3[4] = {0x10, 0x20, 0x30, 0x40};
+            assert(hash3 == fnv(expect3, sizeof expect3));
+            assert(snx_ctr_present_frame(1, 1, 1, 4, 2, rgba4, &hash4)); /* 0x1f8c: R 1, G 15, B 8, A 12 */
+            const unsigned char expect4[4] = {0x11, 0xff, 0x88, 0xcc};
+            assert(hash4 == fnv(expect4, sizeof expect4));
         }
         free(pattern);
         /* WaitSynchronization1 on the relay event, not signaled: the thread blocks, and the scheduler's next

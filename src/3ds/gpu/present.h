@@ -14,10 +14,11 @@ bool snx_ctr_present_ready(void);
 /* Live window output is active (SDL3 Vulkan window + swapchain). When false,
    frames still render but only PPM snapshots record them. */
 bool snx_ctr_present_windowed(void);
-/* Raw guest pixels, pitch bytes per row. Format 0 = RGBA8, 1 = RGB8
-   (B,G,R bytes, libctru BGR8_OES), 2 = RGB565 (little-endian 16-bit, R in
-   bits 11..15, G 5..10, B 0..4). The Vulkan device performs the format
-   conversion to RGBA8. */
+/* Raw guest pixels, pitch bytes per row, in GSP's framebuffer formats: 0 =
+   RGBA8 (A,B,G,R bytes, libctru RGBA8_OES), 1 = RGB8 (B,G,R bytes, BGR8_OES),
+   2 = RGB565 (little-endian 16-bit, R in bits 11..15, G 5..10, B 0..4),
+   3 = RGB5A1, 4 = RGBA4. RGB8 and RGB565 convert to RGBA8 on the device, the
+   others with the transfer engine's codecs on the host. */
 bool snx_ctr_present_frame(unsigned screen, unsigned width, unsigned height, unsigned format, unsigned pitch,
                            const unsigned char* pixels, uint64_t* hash);
 void snx_ctr_present_free(void);

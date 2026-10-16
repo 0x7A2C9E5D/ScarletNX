@@ -5,9 +5,11 @@
    the device and show it live in an SDL3 window through a Vulkan swapchain.
    Without a display the window path is unavailable; frames then go only to
    bounded PPM snapshots in frame_dir. The 3DS framebuffer is 240x400/320
-   portrait; both the window and the snapshots show it rotated 90 degrees
-   clockwise, like the console's landscape top screen. */
+   portrait, one 240-pixel row per screen column from the left, each row from
+   the bottom of the screen up (libctru's console draws pixel (x, y) at
+   x * 240 + 239 - y); the window and the snapshots show it that way round. */
 #include "3ds/gpu/present.h"
+#include "3ds/gpu/transfer.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -269,12 +271,12 @@ static void write_ppm(unsigned screen, unsigned width, unsigned height, const un
     snprintf(path, sizeof path, "%s/frame-%u-%02u.ppm", v.frame_dir, screen, v.dumps);
     FILE* file = fopen(path, "wb");
     if (!file) return;
-    /* the console screens are landscape: rotate the portrait framebuffer 90
-       degrees clockwise for the saved image */
+    /* the console screens are landscape: framebuffer row x is screen column x,
+       its pixel width - 1 - y screen row y */
     fprintf(file, "P6\n%u %u\n255\n", height, width);
     for (uint32_t y = 0; y < width; ++y)        /* destination rows */
         for (uint32_t x = 0; x < height; ++x) { /* destination columns */
-            const unsigned char* p = rgba + ((uint64_t)(height - 1 - x) * width + y) * 4;
+            const unsigned char* p = rgba + ((uint64_t)x * width + (width - 1 - y)) * 4;
             const unsigned char rgb[3] = {p[0], p[1], p[2]};
             if (fwrite(rgb, 1, 3, file) != 3) break;
         }
@@ -303,7 +305,7 @@ static bool window_show(const unsigned char* rgba, unsigned width, unsigned heig
     }
     for (uint32_t y = 0; y < landscape_h; ++y)
         for (uint32_t x = 0; x < landscape_w; ++x) {
-            const unsigned char* p = rgba + ((uint64_t)(height - 1 - x) * width + y) * 4;
+            const unsigned char* p = rgba + ((uint64_t)x * width + (width - 1 - y)) * 4;
             memcpy(v.rotated + ((size_t)y * landscape_w + x) * 4, p, 4);
         }
     VkBuffer staging = VK_NULL_HANDLE;
@@ -382,16 +384,19 @@ static bool window_show(const unsigned char* rgba, unsigned width, unsigned heig
 }
 bool snx_ctr_present_frame(unsigned screen, unsigned width, unsigned height, unsigned format, unsigned pitch,
                            const unsigned char* pixels, uint64_t* hash) {
-    if (!v.up || !pixels || !width || !height || width > 1024 || height > 1024 || format > 2) return false;
+    if (!v.up || !pixels || !width || !height || width > 1024 || height > 1024 || format > 4) return false;
     uint32_t bytes = format == 0 ? 4 : format == 1 ? 3 : 2;
     if (pitch < width * bytes) return false;
-    VkFormat source = format == 0   ? VK_FORMAT_R8G8B8A8_UNORM
+    /* RGBA8 stores A,B,G,R, which no Vulkan format reads, and RGB5A1 and RGBA4 have no portable one: those
+       decode on the host to R8G8B8A8 */
+    bool host = format == 0 || format >= 3;
+    VkFormat source = host          ? VK_FORMAT_R8G8B8A8_UNORM
                       : format == 1 ? VK_FORMAT_B8G8R8A8_UNORM
                                     : VK_FORMAT_R5G6B5_UNORM_PACK16;
     /* RGB8 is uploaded padded to its implicit opaque alpha in B8G8R8A8
        (layout normalization on transfer); the channel conversion to RGBA8
        stays on the device. */
-    VkDeviceSize raw_size = format == 1 ? (VkDeviceSize)width * height * 4 : (VkDeviceSize)pitch * height;
+    VkDeviceSize raw_size = format == 1 || host ? (VkDeviceSize)width * height * 4 : (VkDeviceSize)pitch * height;
     VkBuffer staging = VK_NULL_HANDLE, readback = VK_NULL_HANDLE;
     VkDeviceMemory staging_mem = VK_NULL_HANDLE, readback_mem = VK_NULL_HANDLE;
     VkImage src = VK_NULL_HANDLE, dst = VK_NULL_HANDLE;
@@ -415,6 +420,11 @@ bool snx_ctr_present_frame(unsigned screen, unsigned width, unsigned height, uns
                     dst[3] = 255; /* RGB8 has implicit opaque alpha */
                     dst += 4;
                 }
+        } else if (host) {
+            unsigned char* dst = raw;
+            for (uint32_t y = 0; y < height; ++y)
+                for (uint32_t x = 0; x < width; ++x, dst += 4)
+                    snx_ctr_pixel_decode(format, pixels + (size_t)y * pitch + (size_t)x * bytes, dst);
         } else
             memcpy(raw, pixels, (size_t)raw_size);
         VkCommandBufferAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
