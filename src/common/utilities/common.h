@@ -62,9 +62,10 @@ int snx_left_behind(const char* old, const char* now);
    work/ in the data folder stays, a line on stdout saying so */
 char* snx_work_dir(const char* data_dir);
 /* The folder work/, games/ and the keys are in when a run names none (--repo), and the menu's games/: the checkout a build
-   came from; else, when a games/ folder is beside it, the folder of the AppImage or of the program (a portable copy);
-   else the user's data folder. NULL when none can be named */
-char* snx_data_dir(const char* checkout, const char* program_dir);
+   came from, for a program run from that build's tree (build; NULL: any program); else, when a games/ folder is beside
+   it, the folder of the AppImage or of the program (a portable copy); else the user's data folder. NULL when none can be
+   named */
+char* snx_data_dir(const char* checkout, const char* build, const char* program_dir);
 SnxU64 snx_free_space(const char* path);
 SnxU64 snx_file_size(const char* path);
 int snx_make_executable(const char* path);

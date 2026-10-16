@@ -333,7 +333,7 @@ int snx_driver(int argc, char** argv) {
         checkout = snx_executable(argv[0]);
         exe = checkout ? snx_dirname(checkout) : NULL;
         free(checkout);
-        data = snx_data_dir(repo, exe);
+        data = snx_data_dir(repo, build, exe);
         free(exe);
         exe = NULL;
         if (data && snx_mkdirs(data)) {

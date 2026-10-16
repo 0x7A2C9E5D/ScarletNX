@@ -259,8 +259,8 @@ Running it needs only GNU binutils (`as`, `ld`) on PATH besides libgccjit: the m
 
 Extraction builds missing hactool separately. Recompilation deploys the running full runtime;
 the tools-only build creates one in `build/native-recomp`, or accepts `--runtime FILE`.
-`--repo DIR` and `--build-dir DIR` before the command override compiled-in checkout/tool paths; without that
-checkout (an installed copy), the user's data folder stands in for it (`~/.local/share/scarletnx`,
+`--repo DIR` and `--build-dir DIR` before the command override compiled-in checkout/tool paths; a program run outside
+its build tree (an installed copy) uses the user's data folder instead (`~/.local/share/scarletnx`,
 `%APPDATA%\scarletnx` on Windows), and on Linux the XDG config, state and cache folders hold its settings, logs and
 caches ([USAGE](USAGE.md#folders)).
 Python ≥3.12 is optional for `tools/*.py` diagnostics.
