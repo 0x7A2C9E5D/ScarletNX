@@ -856,16 +856,10 @@ static void draw_screen(App* app) {
             char label[100];
             menu_label(app, i, label, sizeof(label));
             if (menu_shows(app, row)) entry(app, 1, row, label, is_active, is_focused);
-            if (i == app->menu.active && app->menu.view != GUI_LOAD_NONE) {
-                if (menu_shows(app, row + 1))
-                    entry(app, 3, row + 1, load_labels[GUI_LOAD_DRAG],
-                          app->menu.load_activated && app->menu.load_active == GUI_LOAD_DRAG,
-                          app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DRAG);
-                if (menu_shows(app, row + 2))
-                    entry(app, 3, row + 2, load_labels[GUI_LOAD_DIRECTORY],
-                          app->menu.load_activated && app->menu.load_active == GUI_LOAD_DIRECTORY,
-                          app->menu.focus_load && app->menu.load_selected == GUI_LOAD_DIRECTORY);
-            }
+            for (int k = 0; i == app->menu.active && app->menu.view != GUI_LOAD_NONE && k < 2; ++k)
+                if (menu_shows(app, row + 1 + k)) /* the load options, by GUI_LOAD_DRAG and GUI_LOAD_DIRECTORY */
+                    entry(app, 3, row + 1 + k, load_labels[k], app->menu.load_activated && app->menu.load_active == k,
+                          app->menu.focus_load && app->menu.load_selected == k);
         }
         /* with recent games a small window has no room left for these: they would run into the footer */
         if (app->log_top - 4 < app->rows - 4)
