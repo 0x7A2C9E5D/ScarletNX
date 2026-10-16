@@ -455,6 +455,11 @@ int main(int argc, char** argv) {
         Uint64 until = SDL_GetTicks() + 5000;
         char* big = snx_path_join(app.games_dir, "big.bin");
         char* bytes = (char*)calloc(1, 3 << 20);
+        /* the test's own folders alone: the user's data folder (%APPDATA%\scarletnx on Windows) may be another
+           test's at the same time */
+        char *data_dir = app.data_dir, *themes = app.themes_dirs[0];
+        app.data_dir = snx_path_join(temporary, "data");
+        app.themes_dirs[0] = snx_path_join(app.data_dir, "themes");
         assert(bytes && !snx_mkdirs(app.games_dir) && !snx_write_file(big, bytes, 3 << 20));
         key(&app, SDLK_ESCAPE); /* counted again as the Settings open */
         key(&app, SDLK_SPACE);
@@ -470,6 +475,10 @@ int main(int argc, char** argv) {
         colored_text(&app, app.rows - 1, line, rgb(app.theme.soft));
         assert(total == 3 << 20 && !strncmp(line, "Disk: 3 MB used by ScarletNX, ", 30));
         assert(!snx_remove_tree(app.games_dir)); /* the browser's checks below start with no games/ */
+        free(app.themes_dirs[0]);
+        free(app.data_dir);
+        app.themes_dirs[0] = themes;
+        app.data_dir = data_dir;
         free(bytes);
         free(big);
     }
