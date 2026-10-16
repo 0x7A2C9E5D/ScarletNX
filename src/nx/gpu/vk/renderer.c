@@ -34,6 +34,7 @@ static void vkr_before_write(u64 gva, u64 size) {
     else
         vk_gfx_image_land();
     vk_compute_before_write(gva, size);
+    vk_rt_before_write(gva, size);
 }
 static void vkr_gfx_mem_need(u64 gva, u64 size) {
     vk_buf_mem_need(gva, size);

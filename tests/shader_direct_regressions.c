@@ -573,10 +573,13 @@ static void float_controls(void) {
             u32* code = translate(cases[i], 2, ST_FS, &info, &words, available);
             check_translated(code, &info, "FP32 mode translates");
             if (code) {
-                int flush = (i == 0 || i == 3) && available;
-                check(info.fp32_flush == (i != 2) && info.fp32_preserve == (i == 1 || i == 2 || i == 4),
+                int flush = i == 0 && available;
+                int soft_ftz = (i == 0 && !available) || i == 1;
+                check(info.fp32_flush == (i == 0 || i == 1) && info.fp32_preserve == (i != 0),
                       "FP32 modes recorded");
                 check((count_opcode(code, words, 17, 4465) > 0) == flush, "FP32 flush capability");
+                check((count_opcode(code, words, 199, 0xffffffffu) > 0) == soft_ftz,
+                      "FTZ instructions use integer-bit fallback when a module mode cannot apply");
                 int mode = 0;
                 for (size_t k = 5; k < words;) {
                     u32 width = code[k] >> 16;
