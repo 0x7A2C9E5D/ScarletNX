@@ -531,6 +531,25 @@ static void button_map(App* app) {
     key(app, SDLK_ESCAPE); /* on a preset: back at once */
     assert(app->form == GUI_FORM_GROUP);
     leave_editor(app);
+    /* the games it starts read the mappings file the page names, once it is there; one the player named stays */
+    {
+        char *folder = snx_dirname(app->settings_file), *db = snx_path_join(folder, "gamecontrollerdb.txt");
+        const char* named;
+        SDL_unsetenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE");
+        pad_mappings_share(app);
+        assert(!SDL_getenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE"));
+        assert(!snx_write_file(db, "", 0));
+        pad_mappings_share(app);
+        named = SDL_getenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE");
+        assert(named && !strcmp(named, db));
+        SDL_setenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE", "/elsewhere/mine.txt", 1);
+        pad_mappings_share(app);
+        assert(!strcmp(SDL_getenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE"), "/elsewhere/mine.txt"));
+        SDL_unsetenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE");
+        assert(!snx_remove_tree(db));
+        free(db);
+        free(folder);
+    }
 }
 /* a running step's line ends in its progress as the theme says, a done one in OK */
 static void step_line(void) {

@@ -2371,6 +2371,17 @@ static char* pad_mappings_file(const App* app) {
     free(folder);
     return path;
 }
+#ifndef SDL_PLATFORM_ANDROID
+/* the mappings file the page names, for the games the launcher starts: one outside its games/ (a folder the player
+   added) would read the user's otherwise. A file the player named stays theirs */
+static void pad_mappings_share(const App* app) {
+    char* file;
+    if (SDL_getenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE")) return;
+    file = pad_mappings_file(app);
+    if (file && snx_is_file(file)) SDL_setenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE", file, 1);
+    free(file);
+}
+#endif
 /* the first pad plugged in, when none is open */
 static void pad_attach(App* app) {
     SDL_JoystickID* ids;
@@ -3468,6 +3479,9 @@ static void launch(App* app, char* absolute, bool prepared) {
         argv[n++] = app->data_dir;
     }
     argv[n] = NULL;
+#ifndef SDL_PLATFORM_ANDROID /* there the app's own storage, the one place both read */
+    pad_mappings_share(app);
+#endif
     bool started = gui_process_start(app->process, argv, app->message, sizeof(app->message));
     if (started && app->run_log) {
         size_t k;
