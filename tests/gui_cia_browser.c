@@ -21,12 +21,12 @@ int main(void) {
     }
     char* subdir = snx_path_join(dir, "directory.cia");
     assert(!snx_mkdirs(subdir));
-    assert(gui_cias_scan(&games, dir, error, sizeof error) && !error[0]);
+    assert(gui_games_scan(&games, dir, true, error, sizeof error) && !error[0]);
     assert(games.count == 2 && !strcmp(games.names[0], "Alpha.CIA") && !strcmp(games.names[1], "game with spaces.cia"));
     /* Repeated scans replace the old list; neither recursion nor execute bits. */
-    assert(gui_cias_scan(&games, subdir, error, sizeof error) && !games.count);
+    assert(gui_games_scan(&games, subdir, true, error, sizeof error) && !games.count);
     assert(!snx_remove_tree(dir));
-    assert(!gui_cias_scan(&games, dir, error, sizeof error) && error[0] && !games.count);
+    assert(!gui_games_scan(&games, dir, true, error, sizeof error) && error[0] && !games.count);
     gui_games_free(&games);
     free(subdir);
     free(dir);

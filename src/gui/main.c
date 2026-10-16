@@ -1527,10 +1527,7 @@ static void list_games(App* app) {
 #ifdef SDL_PLATFORM_ANDROID
     android_folder(app);
 #endif
-    if (app->menu.active == GUI_3DS)
-        gui_cias_scan(&app->games, app->games_dir, app->message, sizeof(app->message));
-    else
-        gui_games_scan(&app->games, app->games_dir, app->message, sizeof(app->message));
+    gui_games_scan(&app->games, app->games_dir, app->menu.active == GUI_3DS, app->message, sizeof(app->message));
     memset(&app->browser, 0, sizeof(app->browser));
     app->browser.count = app->games.count;
     layout(app);

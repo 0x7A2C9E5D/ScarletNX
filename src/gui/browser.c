@@ -26,7 +26,7 @@ void gui_games_free(GuiGames* games) {
     games->names = NULL;
     games->count = 0;
 }
-static bool scan(GuiGames* games, const char* directory, char* error, size_t size, bool cia) {
+bool gui_games_scan(GuiGames* games, const char* directory, bool cia, char* error, size_t size) {
     gui_games_free(games);
     if (size) error[0] = 0;
     char** names = NULL;
@@ -89,10 +89,4 @@ static bool scan(GuiGames* games, const char* directory, char* error, size_t siz
     }
     snx_free_strings(names, count);
     return true;
-}
-bool gui_games_scan(GuiGames* games, const char* directory, char* error, size_t size) {
-    return scan(games, directory, error, size, false);
-}
-bool gui_cias_scan(GuiGames* games, const char* directory, char* error, size_t size) {
-    return scan(games, directory, error, size, true);
 }
