@@ -3,6 +3,7 @@
 #include "3ds/aot/ctr_module.h"
 #include "3ds/kernel/ctr_kernel.h"
 #include "3ds/runtime/internal.h"
+#include "common/utilities/common.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -259,13 +260,16 @@ int main(void) {
         r[2] = 0;
         assert(snx_ctr_svc(p, 0x16) == SNX_CTR_SVC_RETURN && r[0] == INVALID_ENUM);
         close_handle(p, sem, 0);
-        /* SleepThread: zero yields, real delays complete, negative stops */
+        /* SleepThread: zero yields, a delay blocks the thread until its deadline (the only thread here, so the
+           scheduler sleeps the host for it), negative stops */
         r[0] = 0;
         r[1] = 0;
         assert(snx_ctr_svc(p, 0x0a) == SNX_CTR_SVC_RETURN);
         r[0] = 1000000;
         r[1] = 0;
-        assert(snx_ctr_svc(p, 0x0a) == SNX_CTR_SVC_RETURN);
+        double slept = snx_seconds();
+        assert(snx_ctr_svc(p, 0x0a) == SNX_CTR_SVC_BLOCKED && snx_ctr_thread(p)->wake_ns);
+        assert(snx_ctr_schedule(p) && !snx_ctr_thread(p)->wake_ns && snx_seconds() - slept >= 0.001);
         r[0] = 0xffffffff;
         r[1] = 0xffffffffu;
         assert(snx_ctr_svc(p, 0x0a) == SNX_CTR_SVC_UNSUPPORTED);

@@ -11,11 +11,6 @@
 #include "common/utilities/common.h"
 #include <stdlib.h>
 #include <string.h>
-#if defined(_WIN32)
-#include <windows.h>
-#else
-#include <time.h>
-#endif
 #define GSP_SHARED_SIZE        0x1000u
 #define GSP_REG_BYTES          (CTR_GSP_REGS * 4u)
 #define GSP_ERR_INVALID_HANDLE 0xd8e007f7u
@@ -31,14 +26,6 @@ static CtrSharedMap* shared_map(SnxCtrProcess* p, uint32_t object) {
     for (unsigned i = 0; i < 8; ++i)
         if (p->shared_maps[i].object == object) return &p->shared_maps[i];
     return NULL;
-}
-static void sleep_ns(uint64_t ns) {
-#if defined(_WIN32)
-    Sleep((DWORD)(ns / 1000000 ? ns / 1000000 : 1));
-#else
-    struct timespec ts = {(time_t)(ns / 1000000000), (long)(ns % 1000000000)};
-    nanosleep(&ts, NULL);
-#endif
 }
 /* One interrupt relay slot per registered thread; the queue lives in the
    shared block the client maps. Full queues report the documented error byte
@@ -146,27 +133,17 @@ bool snx_ctr_gsp_event(const SnxCtrProcess* p, uint32_t object) {
         if (p->gsp.event_object[thread] == object) return true;
     return false;
 }
-/* Waits on the registered interrupt event complete at the next real vblank
-   delivery. Immediate and infinite forms only; finite deadlines stop. */
+/* Waits on a registered interrupt event that is not signaled block the thread on it; the scheduler delivers
+   vblanks when due (snx_ctr_schedule), which signals the event and wakes it, while the other threads run.
+   Immediate and infinite forms only; finite deadlines stop. */
 SnxCtrSvcResult snx_ctr_gsp_wait(SnxCtrProcess* p, uint32_t object, uint32_t* r) {
     if (!r[2] && !r[3]) {
         r[0] = GSP_TIMED_OUT;
         return SNX_CTR_SVC_RETURN;
     }
     if (r[2] != UINT32_MAX || r[3] != UINT32_MAX) return SNX_CTR_SVC_UNSUPPORTED;
-    for (unsigned attempt = 0; attempt < 2; ++attempt) {
-        double now = snx_seconds() * 1e9;
-        uint64_t deadline = p->gsp.next_vblank_ns;
-        if (deadline > (uint64_t)now) sleep_ns(deadline - (uint64_t)now);
-        snx_ctr_gsp_vblank(p);
-        CtrObject* o = &p->objects[object];
-        if (o->data.event.signaled) {
-            if (!o->data.event.reset_type) o->data.event.signaled = 0;
-            r[0] = 0;
-            return SNX_CTR_SVC_RETURN;
-        }
-    }
-    return SNX_CTR_SVC_UNSUPPORTED;
+    snx_ctr_thread_block(p, object, 0);
+    return SNX_CTR_SVC_BLOCKED;
 }
 static uint32_t* regs(SnxCtrProcess* p) {
     if (!p->gsp.regs) p->gsp.regs = calloc(CTR_GSP_REGS, 4);

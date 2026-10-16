@@ -10,19 +10,6 @@
 #include "3ds/services/gsp.h"
 #include <string.h>
 #include <stdio.h>
-#if defined(_WIN32)
-#include <windows.h>
-#else
-#include <time.h>
-#endif
-static void sleep_ns(uint64_t ns) {
-#if defined(_WIN32)
-    Sleep((DWORD)(ns / 1000000 ? ns / 1000000 : 1));
-#else
-    struct timespec ts = {(time_t)(ns / 1000000000), (long)(ns % 1000000000)};
-    nanosleep(&ts, NULL);
-#endif
-}
 #include "common/utilities/common.h"
 
 #define OK                  0u
@@ -443,13 +430,17 @@ SnxCtrSvcResult snx_ctr_svc(SnxCtrProcess* p, uint32_t number) {
             r[1] = out;
             return SNX_CTR_SVC_RETURN;
         }
-        case 0x0a: { /* SleepThread: host-paced delay in the serialized scheduler.
-                        Zero yields at the next dispatch boundary; negative
-                        (sleep forever) is not modeled and stops. */
+        case 0x0a: { /* SleepThread: the thread is not runnable until a host deadline, and
+                        the others run meanwhile; the scheduler sleeps the host only when
+                        no thread can run. Zero yields at the next dispatch boundary;
+                        negative (sleep forever) is not modeled and stops. */
             int64_t ns = (int64_t)((uint64_t)r[0] | (uint64_t)r[1] << 32);
             if (ns < 0 || ns > INT64_C(3600) * 1000000000) return SNX_CTR_SVC_UNSUPPORTED;
-            if (ns) sleep_ns((uint64_t)ns);
-            return SNX_CTR_SVC_RETURN;
+            if (!ns) return SNX_CTR_SVC_RETURN;
+            snx_ctr_thread(p)->wake_ns = (uint64_t)(snx_seconds() * 1e9) + (uint64_t)ns;
+            cpu->exit = SNX_ARM_OK; /* resumes after the SVC when it wakes */
+            cpu->syndrome = 0;
+            return SNX_CTR_SVC_BLOCKED;
         }
         case 0x13: { /* CreateMutex: initially-locked flag at r1 */
             if (r[1] > 1) {

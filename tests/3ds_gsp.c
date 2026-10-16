@@ -253,12 +253,17 @@ int main(int argc, char** argv) {
             assert(hash2 == fnv(expect2, sizeof expect2));
         }
         free(pattern);
-        /* WaitSynchronization1 on the relay event completes at a real vblank. */
+        /* WaitSynchronization1 on the relay event, not signaled: the thread blocks, and the scheduler's next
+           vblank wakes it with success (the only thread, so it sleeps the host until then). */
+        p->objects[snx_ctr_handle_object(p, event)].data.event.signaled = 0;
         p->cpu.state.cpu.r[0] = event;
         p->cpu.state.cpu.r[1] = 0;
         p->cpu.state.cpu.r[2] = UINT32_MAX;
         p->cpu.state.cpu.r[3] = UINT32_MAX;
-        assert(snx_ctr_svc(p, 0x24) == SNX_CTR_SVC_RETURN && !p->cpu.state.cpu.r[0]);
+        uint32_t vblanks = p->gsp.vblank_count;
+        assert(snx_ctr_svc(p, 0x24) == SNX_CTR_SVC_BLOCKED);
+        p->cpu.state.cpu.r[0] = 0xdeadbeef;
+        assert(snx_ctr_schedule(p) && !p->cpu.state.cpu.r[0] && p->gsp.vblank_count > vblanks);
         snx_ctr_present_free();
         snx_ctr_process_free(p);
     }

@@ -10,5 +10,6 @@ void snx_ctr_gsp_dispatch(SnxCtrIpc* c);
    Not cycle accurate. */
 void snx_ctr_gsp_vblank(struct SnxCtrProcess* p);
 bool snx_ctr_gsp_event(const struct SnxCtrProcess* p, uint32_t object);
+/* WaitSynchronization1 on one: blocks the thread until a vblank signals it (SnxCtrSvcResult) */
 uint32_t snx_ctr_gsp_wait(struct SnxCtrProcess* p, uint32_t object, uint32_t* registers);
 #endif

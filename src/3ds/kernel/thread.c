@@ -3,7 +3,14 @@
    Serialized, bounded single-core thread contexts; no host threads or JIT.
    SVC register layout from Azahar kernel/svc_wrapper.h (revision in 3DS.md). */
 #include "3ds/runtime/internal.h"
+#include "3ds/services/gsp.h"
+#include "common/utilities/common.h"
 #include <string.h>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <time.h>
+#endif
 #define THREAD_LIMIT 16u
 CtrThread* snx_ctr_thread(SnxCtrProcess* p) { return &p->objects[p->current_thread].data.thread; }
 void snx_ctr_object_release(SnxCtrProcess* p, uint32_t id) {
@@ -185,25 +192,59 @@ void snx_ctr_wake_waiters(SnxCtrProcess* p, uint32_t object) {
         t->waiting_object = t->waiting_address = t->wait_more_count = t->wait_multiple = t->wait_all = 0;
     }
 }
+static uint64_t now_ns(void) { return (uint64_t)(snx_seconds() * 1e9); }
+static void sleep_until(uint64_t deadline) {
+    uint64_t now = now_ns();
+    if (deadline <= now) return;
+#if defined(_WIN32)
+    Sleep((DWORD)((deadline - now) / 1000000 ? (deadline - now) / 1000000 : 1));
+#else
+    struct timespec ts = {(time_t)((deadline - now) / 1000000000), (long)((deadline - now) % 1000000000)};
+    nanosleep(&ts, NULL);
+#endif
+}
+/* The highest-priority runnable thread, the current one among equals. Time is part of it: a thread in SleepThread
+   is runnable again at its deadline, and the display's vblank is delivered when due, which wakes the threads
+   waiting on GSP's interrupt events. When no thread can run but a deadline or a vblank is ahead, the host sleeps
+   until the first of them; only a process with nothing left to wake for is blocked. */
 bool snx_ctr_schedule(SnxCtrProcess* p) {
-    uint32_t next = 0;
-    for (uint32_t i = 1; i < CTR_OBJECTS; ++i) {
-        if (p->objects[i].type != CTR_OBJ_THREAD) continue;
-        CtrThread* t = &p->objects[i].data.thread;
-        if (t->dead || t->waiting_object) continue;
-        if (!next || t->priority < p->objects[next].data.thread.priority ||
-            (t->priority == p->objects[next].data.thread.priority && i == p->current_thread))
-            next = i;
+    /* The current thread's registers go to its context first: a vblank already due wakes the threads waiting on
+       GSP's events, the current one included, by editing their saved contexts, and the thread chosen below always
+       resumes from its context. Only the plain CPU prefix is saved. The checked adapter/callback context never
+       moves. A context switch or an idle wait loses exclusives, the current thread carrying on keeps them. */
+    uint32_t current = p->current_thread, exclusive = p->cpu.state.cpu.exclusive_valid;
+    p->cpu.state.cpu.exclusive_valid = 0;
+    snx_ctr_thread(p)->context = p->cpu.state.cpu;
+    for (;;) {
+        uint64_t now = now_ns(), earliest = UINT64_MAX;
+        if (p->gsp.shared_object && now >= p->gsp.next_vblank_ns) snx_ctr_gsp_vblank(p);
+        uint32_t next = 0;
+        for (uint32_t i = 1; i < CTR_OBJECTS; ++i) {
+            if (p->objects[i].type != CTR_OBJ_THREAD) continue;
+            CtrThread* t = &p->objects[i].data.thread;
+            if (t->dead) continue;
+            if (t->wake_ns) {
+                if (t->wake_ns > now) {
+                    if (t->wake_ns < earliest) earliest = t->wake_ns;
+                    continue;
+                }
+                t->wake_ns = 0;
+            }
+            if (t->waiting_object) continue;
+            if (!next || t->priority < p->objects[next].data.thread.priority ||
+                (t->priority == p->objects[next].data.thread.priority && i == p->current_thread))
+                next = i;
+        }
+        if (next) {
+            p->current_thread = next;
+            p->cpu.state.cpu = snx_ctr_thread(p)->context;
+            if (next == current) p->cpu.state.cpu.exclusive_valid = exclusive;
+            return true;
+        }
+        uint64_t deadline = earliest;
+        if (p->gsp.shared_object && p->gsp.next_vblank_ns < deadline) deadline = p->gsp.next_vblank_ns;
+        if (deadline == UINT64_MAX) return false;
+        exclusive = 0;
+        sleep_until(deadline);
     }
-    if (!next) return false;
-    if (next != p->current_thread) {
-        /* Only the plain CPU prefix is saved. The checked adapter/callback
-           context never moves; exception/context switch loses exclusives. */
-        p->cpu.state.cpu.exclusive_valid = 0;
-        snx_ctr_thread(p)->context = p->cpu.state.cpu;
-        p->current_thread = next;
-        p->cpu.state.cpu = snx_ctr_thread(p)->context;
-        p->cpu.state.cpu.exclusive_valid = 0;
-    }
-    return true;
 }

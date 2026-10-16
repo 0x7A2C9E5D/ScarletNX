@@ -43,6 +43,7 @@ typedef struct {
 typedef struct {
     SnxArmCPU context; /* inactive architectural prefix only; never the checked adapter */
     uint32_t priority, dead, waiting_object, waiting_address;
+    uint64_t wake_ns; /* SleepThread: not runnable before this host monotonic time (0: not sleeping) */
     uint32_t wait_multiple, wait_all, wait_more_count, wait_more[63];
     char waiting_service[9];
 } CtrThread;
