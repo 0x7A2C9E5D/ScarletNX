@@ -2218,10 +2218,10 @@ static void event(App* app, const SDL_Event* e) {
         pointer(app, e->motion.x, e->motion.y, false, false);
         return;
     }
-    /* a notch of the wheel is a row, as a finger's drag, the way the system turns it */
+    /* a notch of the wheel is a row, as a finger's drag, the way the system turns it; not under a box */
     if (e->type == SDL_EVENT_MOUSE_WHEEL) {
         int rows = e->wheel.integer_y;
-        if (app->splash || app->menu.running || app->finished || app->confirm.shown) return;
+        if (app->splash || app->menu.running || app->finished || app->confirm.shown || app->left_shown) return;
         for (; rows > 0; --rows) scroll(app, GUI_UP);
         for (; rows < 0; ++rows) scroll(app, GUI_DOWN);
         return;

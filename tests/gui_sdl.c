@@ -1788,6 +1788,14 @@ int main(int argc, char** argv) {
                     layout(&app);
                 }
                 app.clock = 0;
+                /* the wheel moves nothing under it, and leaves it open */
+                {
+                    SDL_Event wheel = {0};
+                    wheel.type = SDL_EVENT_MOUSE_WHEEL;
+                    wheel.wheel.integer_y = -2;
+                    event(&app, &wheel);
+                    assert(app.left_shown && app.menu.selected == selected);
+                }
                 /* a key closes it and does nothing else; nothing was moved */
                 key(&app, SDLK_DOWN);
                 assert(!app.left_shown && app.menu.selected == selected && snx_is_file(ini));
