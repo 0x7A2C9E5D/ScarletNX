@@ -314,12 +314,16 @@ static void entry(App* app, int x, int y, const char* label, int activated, int 
     } else
         text(app, x, y, label, rgb(activated ? app->theme.active : focused ? app->theme.focus : app->theme.ink));
 }
-static GuiScreen screen(const App* app) {
-    if (app->menu.running || app->finished)
-        return app->native || gui_steps_last(&app->steps, "LAUNCH") ? GUI_SCREEN_LOADING : GUI_SCREEN_COMPILING;
+/* the menu's screen, a run or not */
+static GuiScreen menu_screen(const App* app) {
     return app->menu.view == GUI_LOAD_GAMES  ? GUI_SCREEN_GAMES
            : app->menu.view == GUI_LOAD_KEYS ? GUI_SCREEN_KEYS
                                              : GUI_SCREEN_MENU;
+}
+static GuiScreen screen(const App* app) {
+    if (app->menu.running || app->finished)
+        return app->native || gui_steps_last(&app->steps, "LAUNCH") ? GUI_SCREEN_LOADING : GUI_SCREEN_COMPILING;
+    return menu_screen(app);
 }
 static void next_theme(App* app) {
     size_t i;
@@ -785,10 +789,7 @@ static void draw_screen(App* app) {
         overlay(app);
         return;
     }
-    title = theme->title[idle ? (app->menu.view == GUI_LOAD_GAMES  ? GUI_SCREEN_GAMES
-                                 : app->menu.view == GUI_LOAD_KEYS ? GUI_SCREEN_KEYS
-                                                                   : GUI_SCREEN_MENU)
-                              : screen(app)];
+    title = theme->title[idle ? menu_screen(app) : screen(app)];
     if (head && title[0]) {
         if (theme->head == GUI_STYLE_BAR) band(app, 0, 1, theme->ink);
         text(app, 1, 0, title, theme->head == GUI_STYLE_BAR ? paper : ink);
