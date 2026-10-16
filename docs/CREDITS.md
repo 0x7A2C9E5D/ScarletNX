@@ -11,6 +11,7 @@ Generated modules include runtime ABI code. Game assets, keys and firmware are e
 | --- | --- |
 | FFmpeg | LGPL-2.1-or-later |
 | hactool / cJSON / ConvertUTF | ISC / MIT / Unicode license |
+| LibHac storage code, ported into hactool by `cmake/hactool-libhac.patch` | MIT |
 | OpenSSL | Apache 2.0 |
 | LZ4 (the library, `lib/`) | BSD-2-Clause |
 | Vulkan-Headers | Apache 2.0 |

@@ -120,6 +120,8 @@ Remaining examples: POSIX.
   Common NSP tickets supplement title keys. Fully decrypted content needs neither key file.
 - **Extraction:** defaults to `work/<dump stem>`; `--name`/`--out DIR` override. Refuses existing `exefs`;
   builds missing hactool. [Temp cleanup/key filtering](../src/nx/runtime/driver/extract.c).
+  Sparse and compressed NCAs, updates with large relocation tables and gamecard dumps that start with the card's key
+  area all extract, through what [`cmake/hactool-libhac.patch`](../cmake/hactool-libhac.patch) ports from LibHac.
 - **Recompile:** AOT → module (LLVM, or `--backend=gcc` for libgccjit on DEC Alpha EV67 hosts) →
   final runtime deployment, for this machine's CPU. Shaders compile directly to SPIR-V at runtime.
   `-O 0..3,s,z` sets the optimization level.

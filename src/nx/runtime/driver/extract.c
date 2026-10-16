@@ -153,8 +153,9 @@ static int has_suffix(const char* text, const char* suffix) {
     return 1;
 }
 
+/* A gamecard dump can start with the card's 0x1000-byte key area, its header after it (LibHac's XciHeader) */
 static int container_kind(const char* path, int* xci) {
-    unsigned char header[0x104];
+    unsigned char header[0x1104];
     size_t size;
     FILE* file;
     int failed;
@@ -168,7 +169,8 @@ static int container_kind(const char* path, int* xci) {
         *xci = 0;
         return 0;
     }
-    if (size == sizeof header && (!memcmp(header + 0x100, "HEAD", 4) || !memcmp(header + 0x100, "DXCI", 4))) {
+    if ((size >= 0x104 && (!memcmp(header + 0x100, "HEAD", 4) || !memcmp(header + 0x100, "DXCI", 4))) ||
+        (size == sizeof header && (!memcmp(header + 0x1100, "HEAD", 4) || !memcmp(header + 0x1100, "DXCI", 4)))) {
         *xci = 1;
         return 0;
     }

@@ -115,10 +115,11 @@ endif()
 
 # hactool runs on the machine doing the extraction (--extract), so a cross build leaves it out, but for Android, where
 # the phone extracts its own dumps. The cache keeps it as released; cmake/hactool.cmake applies the decrypted-container
-# patch and the OpenSSL one to a copy in the build tree
+# patch, the OpenSSL one and the LibHac port to a copy in the build tree
 if((SNX_BUILD_NX OR SNX_HACTOOL_ONLY) AND NOT SNX_TOOLS_ONLY AND (NOT CMAKE_CROSSCOMPILING OR ANDROID))
     set(hactool_patch "${CMAKE_SOURCE_DIR}/cmake/hactool-decrypted.patch")
     set(hactool_openssl_patch "${CMAKE_SOURCE_DIR}/cmake/hactool-openssl.patch")
+    set(hactool_libhac_patch "${CMAKE_SOURCE_DIR}/cmake/hactool-libhac.patch")
     CPMAddPackage(NAME hactool VERSION 1.4.0.13
                   URL https://github.com/SciresM/hactool/archive/1d64a83450e025622f3468c28fc4164dad2c5ef6.tar.gz
                   URL_HASH SHA256=f7148daad624ba909f5ae253210734b1a0ce19e89a7914b6cf71401f7134ebbc

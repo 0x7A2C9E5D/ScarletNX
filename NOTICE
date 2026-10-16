@@ -32,5 +32,7 @@ later version, which is in LICENSE. The third-party components and their
 licenses are listed in README.md (the release's README.txt). The repository
 holds none of their code: they are downloaded as source when the runtime is
 built (cmake/dependencies.cmake) and compiled into the runtime and its tools.
+The one exception is cmake/hactool-libhac.patch, which adds code ported from
+LibHac (MIT, Copyright (c) 2018 Alex Barney) to hactool, with LibHac's notice.
 A built runtime, and the AppImage with the system libraries it carries,
 contains them under their own licenses.

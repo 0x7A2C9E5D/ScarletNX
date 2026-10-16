@@ -113,6 +113,11 @@ if(BUILD_TESTING AND TARGET hactool_lib)
     snx_test_target(snx-test-hactool-decrypted 11)
     target_link_libraries(snx-test-hactool-decrypted PRIVATE hactool_lib)
     add_test(NAME hactool_decrypted COMMAND snx-test-hactool-decrypted)
+    # the storages cmake/hactool-libhac.patch ports from LibHac, in-process and through the executable
+    add_executable(snx-test-hactool-layers tests/hactool_layers.c)
+    snx_test_target(snx-test-hactool-layers 11)
+    target_link_libraries(snx-test-hactool-layers PRIVATE hactool_lib)
+    add_test(NAME hactool_layers COMMAND snx-test-hactool-layers $<TARGET_FILE:hactool>)
     snx_sanitizer_path() # tests/CMakeLists.txt
 endif()
 add_subdirectory(src/nx)
