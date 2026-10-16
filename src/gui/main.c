@@ -335,6 +335,17 @@ static void entry(App* app, int x, int y, const char* label, int activated, int 
     } else
         text(app, x, y, label, rgb(activated ? app->theme.active : focused ? app->theme.focus : app->theme.ink));
 }
+/* a list shown from row first to row last: in the margin, an arrow up on the first while rows are hidden above, and
+   one down on the last while rows are hidden below */
+static void more_marks(App* app, int first, int last, int above, int below) {
+    SDL_Color soft = rgb(app->theme.soft);
+    if (above && below && first == last)
+        text(app, 0, first, "\x12", soft); /* the font's up and down arrow */
+    else {
+        if (above) text(app, 0, first, "\x1e", soft);
+        if (below) text(app, 0, last, "\x1f", soft);
+    }
+}
 /* the screen a file is picked or dropped on: the keys', and on a computer the load options' file too (on a phone the
    menu keeps those, and a tap on the option opens the picker) */
 static int pick_screen(const App* app) {
@@ -890,6 +901,9 @@ static void draw_screen(App* app) {
         for (i = 0; i < count; ++i)
             entry(app, 1, 5 + (int)i, app->games.names[start + i],
                   app->browser.activated && app->browser.active == start + i, app->browser.selected == i + 1);
+        if (count)
+            more_marks(app, 5, 5 + (int)count - 1, app->browser.page > 0,
+                       app->browser.page + 1 < gui_browser_pages(&app->browser));
         if (!app->games.count) text(app, 1, 5, SAY_NO_GAMES, soft);
         char page[128];
         snprintf(page, sizeof(page), "Page %zu/%zu   %zu " SAY_COUNT, app->browser.page + 1,
@@ -949,6 +963,8 @@ static void draw_screen(App* app) {
                     entry(app, 3, row + 1 + k, load_labels[k], app->menu.load_activated && app->menu.load_active == k,
                           app->menu.focus_load && app->menu.load_selected == k);
         }
+        more_marks(app, 4, menu_last_row(app), menu_offset(app) > 0,
+                   menu_row(app, GUI_ITEM_COUNT - 1) > menu_last_row(app));
         /* with recent games a small window has no room left for these: they would run into the footer */
         if (app->log_top - 4 < app->rows - 4)
             text(app, 1, app->log_top - 4, app->message, app->abnormal_exit ? failure : focus);
@@ -1194,6 +1210,8 @@ static void render_editor(App* app) {
             }
         }
     }
+    more_marks(app, 4, 4 + SDL_min(editor_rows(app), gui_editor_rows(e) - e->top) - 1, e->top > 0,
+               e->top + editor_rows(app) < gui_editor_rows(e));
     if (e->object) {
         char used[32], left[32];
         text(app, 1, app->rows - 2,

@@ -17,6 +17,8 @@ The window's title tells which build it is, as `ScarletNX <branch> <commit> (<co
 build of a detached checkout outside CI says `detached`, and both read `unknown` outside a git checkout. A game's window carries the same line after the game's name.
 
 - Up/Down and Left/Right move the yellow focus, wrapping at the ends.
+- A list with rows out of sight (the menu with big letters, `games/`'s pages, the Settings, the theme
+  editor) shows an arrow in its left margin, up on its first row and down on its last, in the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it.
 - Space, Enter or a left click explicitly activates an item, marking it bright
   pink. Activation is tracked separately from hover/focus, so the activated item

@@ -106,6 +106,12 @@ static SDL_Color pixel(App* app, float x, float y) {
     return out;
 }
 static int same_colour(SDL_Color a, SDL_Color b) { return a.r == b.r && a.g == b.g && a.b == b.b; }
+/* a list's margin: an arrow up on row first or none, and one down on row last or none */
+static void marks(App* app, int first, int last, bool up, bool down) {
+    SDL_Color soft = rgb(app->theme.soft), page = rgb(app->theme.page);
+    colored_text_on(app, 0, first, up ? "\x1e" : " ", soft, page);
+    colored_text_on(app, 0, last, down ? "\x1f" : " ", soft, page);
+}
 /* the rows a path takes wrapped at width */
 static int path_rows(const char* path, int width) {
     int n = 0;
@@ -499,6 +505,7 @@ int main(int argc, char** argv) {
     colored_text(&app, 6, "- Display     fullscreen   0", normal); /* the launcher's choice wins */
     colored_text(&app, 7, "- Graphics    resolution   .ini", normal);
     colored_text(&app, 8, "- Input       controls     0", normal);
+    marks(&app, 4, 4 + gui_editor_rows(&app.editor) - 1, false, false); /* every row shows: no arrows */
     key(&app, SDLK_RIGHT);
     assert(setting_is(&app, "libgccjit", SNX_GUI_HAS_GCCJIT ? "on" : NULL));
     key(&app, SDLK_LEFT);
@@ -1000,6 +1007,7 @@ int main(int argc, char** argv) {
     key(&app, SDLK_DOWN);
     assert(app.browser.page == 1 && app.browser.selected == 1);
     render(&app);
+    marks(&app, 5, 5 + (int)app.browser.page_size - 1, true, true); /* games on the pages before and after */
     screenshot = getenv("SNX_GUI_BROWSER_SCREENSHOT");
     if (screenshot) {
         SDL_Surface* image = SDL_RenderReadPixels(app.renderer, NULL);
@@ -1007,10 +1015,14 @@ int main(int argc, char** argv) {
         SDL_DestroySurface(image);
     }
     key(&app, SDLK_PAGEDOWN);
-    assert(app.browser.page == 2);
+    assert(app.browser.page == 2 && gui_browser_items(&app.browser) == 5);
+    render(&app);
+    marks(&app, 5, 9, true, false);
     key(&app, SDLK_PAGEUP);
     key(&app, SDLK_LEFT);
     assert(app.browser.page == 0 && app.browser.selected == 1);
+    render(&app);
+    marks(&app, 5, 5 + (int)app.browser.page_size - 1, false, true);
     mouse(&app, 2, 6, false);
     assert(app.browser.selected == 2 && !app.menu.running && !app.browser.activated);
     render(&app);
@@ -1085,9 +1097,15 @@ int main(int argc, char** argv) {
         assert(app.scale == GUI_TEXT_MAX && app.rows == 16);
         assert(menu_row_in_full(&app, GUI_EXIT) > menu_last_row(&app) && !menu_offset(&app));
         assert(menu_shows(&app, menu_row(&app, GUI_SWITCH)) && !menu_shows(&app, menu_row(&app, GUI_EXIT)));
+        marks(&app, 4, menu_last_row(&app), false, true); /* items below the last row */
+        app.menu.selected = GUI_EXIT - 2;
+        render(&app);
+        assert(menu_offset(&app) > 0 && menu_row(&app, GUI_EXIT) > menu_last_row(&app));
+        marks(&app, 4, menu_last_row(&app), true, true);
         app.menu.selected = GUI_EXIT;
         render(&app);
         assert(menu_row(&app, GUI_EXIT) == menu_last_row(&app) && !menu_shows(&app, menu_row(&app, GUI_SWITCH)));
+        marks(&app, 4, menu_last_row(&app), true, false);
         app.menu.selected = GUI_SWITCH;
         render(&app);
         assert(!menu_offset(&app));
@@ -1193,6 +1211,18 @@ int main(int argc, char** argv) {
             assert(app.editing && !strcmp(app.editor.id, "mytheme") && !strcmp(app.editor.theme.id, "default"));
             render(&app);
             colored_text_at(&app, 1, 0, "THEME EDITOR  /  mytheme", normal);
+            /* more rows than the screen has: an arrow down at the top, both in the middle, up at the end */
+            assert(app.editor.row == 0 && gui_editor_rows(&app.editor) > 2 * editor_rows(&app));
+            marks(&app, 4, 3 + editor_rows(&app), false, true);
+            app.editor.row = gui_editor_rows(&app.editor) / 2;
+            render(&app);
+            assert(app.editor.top > 0);
+            marks(&app, 4, 3 + editor_rows(&app), true, true);
+            app.editor.row = gui_editor_rows(&app.editor) - 1;
+            render(&app);
+            marks(&app, 4, 3 + editor_rows(&app), true, false);
+            app.editor.row = 0;
+            render(&app);
             preview_box(&app, &col, &prow, &cols, &rows);
             /* page = #102030, typed: the preview's page takes it, the editor's own stays the menu's */
             for (r = 0; !gui_editor_key_of(&app.editor, r) || strcmp(gui_editor_key_of(&app.editor, r)->key, "page");
@@ -1209,7 +1239,7 @@ int main(int argc, char** argv) {
             assert(same_colour(
                 pixel(&app, (col + cols * 76.0f / 80) * 8 * app.scale, (prow + rows * 12.5f / 25) * 16 * app.scale),
                 night));
-            assert(same_colour(pixel(&app, 4, (app.rows - 4) * 16.0f * app.scale + 8), black));
+            assert(same_colour(pixel(&app, 4, (app.rows - 3) * 16.0f * app.scale + 8), black)); /* under its rows */
             /* Tab, or a tap on the preview: a run in the theme, then the menu again */
             key(&app, SDLK_TAB);
             assert(app.editor.preview == GUI_SCREEN_COMPILING);
