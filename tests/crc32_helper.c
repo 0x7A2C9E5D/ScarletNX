@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* snx_crc32 against the bit-at-a-time definition, both polynomials, every width */
-#include "cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 #include <stdio.h>
 
 static int failures;

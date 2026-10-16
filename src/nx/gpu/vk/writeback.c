@@ -4,9 +4,9 @@
    running: shader-changed bytes land only where the guest still holds the value the shader originally read. */
 #include <stdlib.h>
 #include <string.h>
-#include "gpu/gpu.h"
-#include "runtime/platform/log.h"
-#include "gpu/vk/vk.h"
+#include "nx/gpu/gpu.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/gpu/vk/vk.h"
 
 void vk_write_changed(u64 addr, const u8* res, const u8* org, u32 size) {
     u8* dst = gmem_ptr(addr, size);

@@ -3,8 +3,8 @@
 /* Guest formats -> Vulkan formats: render targets (the 3D class's RT_FORMAT and ZETA_FORMAT values) and textures
    (the texture header's format word). raw marks formats whose guest bytes are exactly the Vulkan format's, so the
    render target can be copied to and from guest memory as is. */
-#include "runtime/platform/log.h"
-#include "gpu/vk/vk.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/gpu/vk/vk.h"
 
 /* whether optimal-tiling images of a format have these features, asked of the device once per format */
 static int has_features(VkFormat f, VkFormatFeatureFlags need) {

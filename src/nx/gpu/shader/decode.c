@@ -3,7 +3,7 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the Maxwell instruction table: decoding an instruction word to its opcode */
-#include "gpu/shader/translator.h"
+#include "nx/gpu/shader/translator.h"
 static Op ops[] = {{"1110111110100---", O_AL2P, "AL2P"},
                    {"1110111111011---", O_ALD, "ALD"},
                    {"1110111111110---", O_AST, "AST"},

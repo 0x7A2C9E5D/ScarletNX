@@ -10,14 +10,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "runtime/options.h"
-#include "gpu/gpu.h"
-#include "gpu/renderer.h"
-#include "gpu/shader/shader.h"
-#include "hle/services/nvdrv.h"
-#include "runtime/platform/log.h"
-#include "gpu/vk/vk.h"
-#include "gpu/vk/internal_spv.h"
+#include "nx/runtime/options.h"
+#include "nx/gpu/gpu.h"
+#include "nx/gpu/renderer.h"
+#include "nx/gpu/shader/shader.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/gpu/vk/vk.h"
+#include "nx/gpu/vk/internal_spv.h"
 
 static struct {
     Surf* rt[8];

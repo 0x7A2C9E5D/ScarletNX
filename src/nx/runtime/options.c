@@ -3,21 +3,21 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the settings in <Game>.ini: loading, applying, and writing back what changes */
-#include "runtime/options.h"
-#include "runtime/loader.h"
-#include "runtime/main.h"
-#include "hle/kernel/kernel.h"
-#include "memory/mem.h"
-#include "runtime/ini.h"
-#include "utilities/common.h"
-#include "utilities/ini_lines.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "runtime/platform/unattended.h"
-#include "runtime/platform/vpad.h"
-#include "runtime/platform/gamepad.h"
-#include "hle/services/services.h"
+#include "nx/runtime/options.h"
+#include "nx/runtime/loader.h"
+#include "nx/runtime/main.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/ini.h"
+#include "common/utilities/common.h"
+#include "common/utilities/ini_lines.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/unattended.h"
+#include "nx/runtime/platform/vpad.h"
+#include "nx/runtime/platform/gamepad.h"
+#include "nx/hle/services/services.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>

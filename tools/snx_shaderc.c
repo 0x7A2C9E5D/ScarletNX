@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Translate a captured shader corpus directly to SPIR-V and optionally validate the modules. */
-#include "gpu/shader/shader.h"
+#include "nx/gpu/shader/shader.h"
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -5,7 +5,7 @@
 #ifndef SNX_NX_MODULE_LLVM_H
 #define SNX_NX_MODULE_LLVM_H
 
-#include "module.h"
+#include "nx/loader/module.h"
 
 typedef struct {
     const char* output; /* <Game>_code.so or .dll, replaced only by a complete module */

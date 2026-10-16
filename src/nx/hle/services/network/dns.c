@@ -7,7 +7,7 @@
    turns Nintendo's placeholder FQDNs into names. The console only resolves IPv4. The serialized hostent and
    addrinfo are libnx's resolver.c layout, which Eden verified against the console: big-endian fields, except the
    address and port, which the console passes through htonl once more. */
-#include "hle/services/network/network.h"
+#include "nx/hle/services/network/network.h"
 #include "hle/services/network/dns.swipc.inc"
 #ifndef _WIN32
 #include <strings.h>
@@ -23,7 +23,7 @@ static int blocked(const char* host) {
         size_t k = sizeof(d) - 1;                                                                                      \
         if (n >= k && !strcasecmp(host + n - k, d) && (n == k || host[n - k - 1] == '.')) return 1;                    \
     }
-#include "hle/services/network/abi/blocked_hosts.inc"
+#include "nx/hle/services/network/abi/blocked_hosts.inc"
     return 0;
 }
 /* what the game may resolve: anything online; offline only numbers and localhost, as a console without a

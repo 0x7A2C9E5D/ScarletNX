@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* The .ini's settings tables (runtime/ini.c): a value read into its variable, clamped, and written back; and as the
    menus word it and step it */
-#include "runtime/ini.h"
+#include "nx/runtime/ini.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

@@ -5,7 +5,7 @@
 /* what the game module calls through RtAPI (rtapi.c), and the hints it records */
 #ifndef SNX_RTAPI_H
 #define SNX_RTAPI_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 
 extern const RtAPI g_rtapi;
 void hints_init(void);

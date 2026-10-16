@@ -7,7 +7,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 
-#include "hle/kernel/ipc.c"
+#include "nx/hle/kernel/ipc.c"
 
 #define CHECK(x)                                                                                                       \
     do {                                                                                                               \

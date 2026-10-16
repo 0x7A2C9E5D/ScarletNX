@@ -2,9 +2,9 @@
    Copyright 2026 the ScarletNX contributors */
 /* The GNU ABI's socket, poll and epoll syscalls, called the way a guest's libc calls them, over the host's loopback.
    No guest code runs: the guest's memory and descriptor table are set up and the syscalls dispatched directly. */
-#include "process/process.h"
-#include "abi/errno/errno.h"
-#include "network/network.h"
+#include "gnuabi/process/process.h"
+#include "gnuabi/abi/errno/errno.h"
+#include "gnuabi/network/network.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

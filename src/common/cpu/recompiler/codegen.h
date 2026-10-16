@@ -5,8 +5,8 @@
 #ifndef SNX_TOOL_CODEGEN_H
 #define SNX_TOOL_CODEGEN_H
 
-#include "image.h"
-#include "a64.h"
+#include "common/cpu/recompiler/image.h"
+#include "common/cpu/aarch64/a64.h"
 
 typedef struct {
     SnxU64 start, end;

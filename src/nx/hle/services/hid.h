@@ -5,8 +5,8 @@
 /* input (hid.c) */
 #ifndef SNX_HID_H
 #define SNX_HID_H
-#include "cpu/aarch64/cpu.h"
-#include "hle/services/hid_touch.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/hle/services/hid_touch.h"
 
 typedef struct {
     u64 buttons;

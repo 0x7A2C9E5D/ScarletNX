@@ -10,7 +10,7 @@
 #ifndef SNX_RECOMPILER_GCCJIT_JIT_H
 #define SNX_RECOMPILER_GCCJIT_JIT_H
 
-#include "codegen.h"
+#include "common/cpu/recompiler/codegen.h"
 #include <libgccjit.h>
 
 typedef struct {

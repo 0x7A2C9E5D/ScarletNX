@@ -5,9 +5,9 @@
      llvm_bench SCARLETNX REPO CLANG [--iterations N] [--backend NAME]... [--kernel NAME] [-O LEVEL]
    Default backend: llvm (add gcc with --backend). Prints one line per kernel and backend: seconds and ns per
    iteration. */
-#include "common.h"
-#include "cpu.h"
-#include "loader/module_abi.h"
+#include "common/utilities/common.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/loader/module_abi.h"
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32

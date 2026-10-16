@@ -5,7 +5,7 @@
 /* GPU state shared between the engines and the backends */
 #ifndef SNX_GPU_H
 #define SNX_GPU_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 typedef struct GpuChannel {
     u32 id;
     u32 sub_class[8];

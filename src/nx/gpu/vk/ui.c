@@ -5,11 +5,11 @@
    shows */
 #include <stdlib.h>
 #include <string.h>
-#include "gpu/vk/vk.h"
-#include "gpu/vk/ui_spv.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/overlay.h"
-#include "runtime/platform/vpad.h"
+#include "nx/gpu/vk/vk.h"
+#include "nx/gpu/vk/ui_spv.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/overlay.h"
+#include "nx/runtime/platform/vpad.h"
 
 #define MAX_QUADS 4096
 typedef struct {

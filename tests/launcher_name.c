@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* snx_launcher_name: the names the program opens the menu under when started bare; any other is a game's copy */
-#include "common.h"
+#include "common/utilities/common.h"
 #include <assert.h>
 #include <stdio.h>
 

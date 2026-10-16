@@ -6,12 +6,12 @@
    memory before the renderer starts. Also the log of what the GPU wrote to memory */
 #include <stdlib.h>
 #include <string.h>
-#include "gpu/renderer.h"
-#include "hle/services/nvdrv.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "gpu/gpu.h"
+#include "nx/gpu/renderer.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/gpu/gpu.h"
 void r3d_clear(GpuChannel* ch, u32 v) {
     if (ch->render_off) return; /* SetRenderEnable says no */
     if (g_renderer_up) {

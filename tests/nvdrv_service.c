@@ -3,15 +3,15 @@
 /* nvdrv's IPC side (nvdrv.c) through its generated dispatcher: Ioctl2's and Ioctl3's inline buffers reaching the
    device, the NvError of a bad fd, QueryEvent, and a Close that comes while an ioctl is running on the fd. The GPU and
    host1x are stand-ins that record what nvdrv asks of them */
-#include "hle/services/nvdrv.h"
-#include "hle/kernel/ipc.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/hle/kernel/ipc.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "hle/services/nvdrv.c"
+#include "nx/hle/services/nvdrv.c"
 
 u8* g_mem;
 int g_verbose;

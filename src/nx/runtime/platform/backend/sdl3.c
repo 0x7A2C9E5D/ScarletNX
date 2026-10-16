@@ -5,31 +5,31 @@
 /* SDL3 backend, the window backend on Linux, Windows and Android: the window and its Vulkan surface, keyboard, gamepads
    and touch. Runs natively on Wayland and on X11 (SDL_VIDEO_DRIVER=x11 picks X11), and takes the unattended-run
    options (seconds, frames, shot, shot_every, press, press_at, press_len, script: platform/unattended.c). */
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "hle/services/hid.h"
-#include "hle/kernel/kernel.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "runtime/platform/unattended.h"
-#include "runtime/platform/overlay.h"
-#include "runtime/platform/touch.h"
-#include "runtime/platform/ui.h"
-#include "runtime/platform/vpad.h"
-#include "runtime/platform/gamepad.h"
-#include "pad_sdl.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/hle/services/hid.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/runtime/platform/unattended.h"
+#include "nx/runtime/platform/overlay.h"
+#include "nx/runtime/platform/touch.h"
+#include "nx/runtime/platform/ui.h"
+#include "nx/runtime/platform/vpad.h"
+#include "nx/runtime/platform/gamepad.h"
+#include "common/utilities/pad_sdl.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "gpu/renderer.h"
+#include "nx/gpu/renderer.h"
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL.h>
 #include <time.h>
-#include "window_icon.h"
-#include "runtime/platform/controls_png.h"
-#include "build_info.h"
+#include "common/utilities/window_icon.h"
+#include "nx/runtime/platform/controls_png.h"
+#include "common/utilities/build_info.h"
 
 static SDL_Window* g_win;
 /* the window's size in pixels, width | height << 32: the renderer reads it on its own thread, and one atomic keeps

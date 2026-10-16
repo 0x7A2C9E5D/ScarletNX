@@ -3,7 +3,7 @@
 /* snx_left_behind, which tells an older build's file this one keeps elsewhere, and moves nothing; and snx_work_dir,
    the drivers' extractions, which leaves an older build's work/ where it is. */
 #define _POSIX_C_SOURCE 200809L
-#include "common.h"
+#include "common/utilities/common.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

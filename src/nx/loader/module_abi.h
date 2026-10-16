@@ -6,8 +6,8 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 #ifndef SNX_NX_MODULE_ABI_H
 #define SNX_NX_MODULE_ABI_H
-#include "cpu.h"
-#include "cpu/arm/arm.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "common/cpu/arm/arm.h"
 /* the module descriptor: what snx_module() in the game module's module.c (written by src/nx/loader/module.c) hands
    the runtime's loader. abi stays the first field so a module from another version is recognized before anything
    else is read */

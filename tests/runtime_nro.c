@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Exercise the real runtime loader with synthetic files and a bounded guest mapping. */
-#include "runtime/loader.h"
-#include "runtime/main.h"
-#include "hle/filesystem/fs.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
+#include "nx/runtime/loader.h"
+#include "nx/runtime/main.h"
+#include "nx/hle/filesystem/fs.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
 #include <stdlib.h>
 #include <string.h>
 

@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "jit.h"
-#include "cpu.h"
-#include "common.h"
+#include "common/cpu/recompiler/gccjit/jit.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "common/utilities/common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

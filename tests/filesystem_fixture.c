@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Native fixture runner for the existing filesystem harnesses; no Python dependency. */
-#include "common.h"
+#include "common/utilities/common.h"
 #include <stdlib.h>
 #include <string.h>
 #if defined(_WIN32)

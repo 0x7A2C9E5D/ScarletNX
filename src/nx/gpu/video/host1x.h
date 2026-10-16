@@ -5,7 +5,7 @@
 /* host1x (host1x.c): NVDEC and VIC, reached through nvdrv */
 #ifndef SNX_HOST1X_H
 #define SNX_HOST1X_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 
 /* one channel per nvdrv fd of /dev/nvhost-nvdec or /dev/nvhost-vic: its registers, syncpoints and (NVDEC) decoder.
    NULL when out of memory */

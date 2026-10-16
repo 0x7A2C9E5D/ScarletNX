@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "model.h"
-#include "common.h"
-#include "font.h"
+#include "gui/model.h"
+#include "common/utilities/common.h"
+#include "common/utilities/font.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

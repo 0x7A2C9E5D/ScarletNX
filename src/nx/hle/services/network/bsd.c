@@ -11,7 +11,7 @@
 
    Eden stubs Read, Select and EventFd, answers GetSockOpt for SO_ERROR only, and shuts down the read side of a
    SocketExempt socket; those are real here. */
-#include "hle/services/network/network.h"
+#include "nx/hle/services/network/network.h"
 #include "hle/services/network/bsd.swipc.inc"
 #include <time.h>
 
@@ -81,34 +81,34 @@ void network_init(void) {
 static int domain_in(u32 d) {
 #define BSD_DOMAIN(guest, name)                                                                                        \
     if (d == guest) return SNX_AF_##name;
-#include "hle/services/network/abi/bsd_domain.inc"
+#include "nx/hle/services/network/abi/bsd_domain.inc"
     return -1;
 }
 static u32 domain_out(int d) {
 #define BSD_DOMAIN(guest, name)                                                                                        \
     if (d == SNX_AF_##name) return guest;
-#include "hle/services/network/abi/bsd_domain.inc"
+#include "nx/hle/services/network/abi/bsd_domain.inc"
     return 0;
 }
 static int msg_in(u32 f) {
     int r = 0;
 #define BSD_MSG(guest, name)                                                                                           \
     if (f & guest) r |= SNX_MSG_##name;
-#include "hle/services/network/abi/bsd_msgflag.inc"
+#include "nx/hle/services/network/abi/bsd_msgflag.inc"
     return r;
 }
 static uint16_t poll_in(u16 e) {
     uint16_t r = 0;
 #define BSD_POLL(guest, name)                                                                                          \
     if (e & guest) r |= SNX_POLL##name;
-#include "hle/services/network/abi/bsd_poll.inc"
+#include "nx/hle/services/network/abi/bsd_poll.inc"
     return r;
 }
 static u16 poll_out(uint16_t e) {
     u16 r = 0;
 #define BSD_POLL(guest, name)                                                                                          \
     if (e & SNX_POLL##name) r |= guest;
-#include "hle/services/network/abi/bsd_poll.inc"
+#include "nx/hle/services/network/abi/bsd_poll.inc"
     if (e & SNX_POLLWRNORM) r |= 0x0004;
     return r;
 }
@@ -117,7 +117,7 @@ static int sockopt_in(u32 level, u32 name, int* l, int* n) {
     int sl = -1;
 #define BSD_LEVEL(guest, nm)                                                                                           \
     if (level == guest) sl = SNX_SOL_##nm;
-#include "hle/services/network/abi/bsd_sockopt.inc"
+#include "nx/hle/services/network/abi/bsd_sockopt.inc"
     if (sl < 0) return -1;
     *l = sl;
 #define BSD_SOCKOPT(lv, guest, nm)                                                                                     \
@@ -127,7 +127,7 @@ static int sockopt_in(u32 level, u32 name, int* l, int* n) {
     }
 #define BSD_SOCKOPT_IGNORED(lv, guest, nm)                                                                             \
     if (sl == SNX_SOL_##lv && name == guest) return 0;
-#include "hle/services/network/abi/bsd_sockopt.inc"
+#include "nx/hle/services/network/abi/bsd_sockopt.inc"
     return -1;
 }
 

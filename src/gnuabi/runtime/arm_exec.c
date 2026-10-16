@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "arm_exec.h"
-#include "cpu/arm/llvm.h"
-#include "../abi/syscalls/syscalls.h"
-#include "../abi/errno/errno.h"
+#include "gnuabi/runtime/arm_exec.h"
+#include "common/cpu/arm/llvm.h"
+#include "gnuabi/abi/syscalls/syscalls.h"
+#include "gnuabi/abi/errno/errno.h"
 #include <llvm-c/ExecutionEngine.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/Core.h>

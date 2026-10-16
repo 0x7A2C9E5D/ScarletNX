@@ -4,7 +4,7 @@
    cmif_serialization.h (see docs/LDR_RO.md). The guest nn::ro linker, not this service, resolves symbols,
    applies relocations and calls constructors. NRO code runs through the existing interpreter fallback;
    fixed-address AOT functions cannot safely be rebased by changing their dispatch entries. */
-#include "hle/services/services_int.h"
+#include "nx/hle/services/services_int.h"
 #include "hle/services/ldr.swipc.inc"
 #include <openssl/evp.h>
 

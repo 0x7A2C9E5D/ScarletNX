@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "driver.h"
-#include "common.h"
-#include "extract.h"
-#include "recompile.h"
-#include "../cli.h"
+#include "nx/runtime/driver/driver.h"
+#include "common/utilities/common.h"
+#include "nx/runtime/driver/extract.h"
+#include "nx/runtime/driver/recompile.h"
+#include "nx/runtime/cli.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>

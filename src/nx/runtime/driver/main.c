@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "driver.h"
+#include "nx/runtime/driver/driver.h"
 #include <stdio.h>
 /* Standalone build for the host tools. The full runtime uses the same driver. */
 int main(int argc, char** argv) {

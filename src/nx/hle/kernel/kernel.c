@@ -4,7 +4,7 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* HLE kernel objects: handles, references, waiting and waking, events. Threads are in thread.c, synchronization in
    sync.c, the SVCs in svc.c and svc_mem.c */
-#include "hle/kernel/kernel_int.h"
+#include "nx/hle/kernel/kernel_int.h"
 
 PMutex g_klock;
 u64 g_title_id = 0x0100000000001000ull;

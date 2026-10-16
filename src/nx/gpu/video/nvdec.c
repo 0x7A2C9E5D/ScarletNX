@@ -5,7 +5,7 @@
 /* NVDEC: H.264 decoding with FFmpeg's libavcodec. The game passes no SPS or PPS: they are rebuilt from the picture
    setup struct (nvdec_h264_pic_s, its iova in register 0x404). Each NVDEC channel has its own decoder, and each
    picture goes into the output surface its job names, where VIC reads it */
-#include "gpu/video/host1x_int.h"
+#include "nx/gpu/video/host1x_int.h"
 #ifndef SNX_NO_H264
 #include <libavcodec/avcodec.h>
 #include <libavutil/error.h>

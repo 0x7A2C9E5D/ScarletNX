@@ -3,7 +3,7 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the compute engine's launches, and inline-to-memory uploads */
-#include "gpu/maxwell/engines_int.h"
+#include "nx/gpu/maxwell/engines_int.h"
 /* ============================================================ compute + I2M */
 void compute_method(GpuChannel* ch, u32 m, u32 v, int last) {
     (void)last;

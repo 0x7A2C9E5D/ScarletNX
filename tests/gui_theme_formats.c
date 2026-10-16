@@ -6,8 +6,8 @@
 
      snx-test-gui-theme-formats [DIR]       every format's fixtures in DIR (tests/gui_themes)
      snx-test-gui-theme-formats --print FILE ID   the JSON FILE reads to, for a new fixture */
-#include "common.h"
-#include "theme.h"
+#include "common/utilities/common.h"
+#include "gui/theme.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

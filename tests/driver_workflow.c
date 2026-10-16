@@ -2,10 +2,10 @@
    Copyright 2026 the ScarletNX contributors */
 /* Exercise the real driver/supervisor with synthetic extraction, compilation and game children. */
 #define _POSIX_C_SOURCE 200809L
-#include "common.h"
-#include "driver.h"
-#include "extract.h"
-#include "recompile.h"
+#include "common/utilities/common.h"
+#include "nx/runtime/driver/driver.h"
+#include "nx/runtime/driver/extract.h"
+#include "nx/runtime/driver/recompile.h"
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>

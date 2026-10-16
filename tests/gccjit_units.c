@@ -3,9 +3,9 @@
 /* snx_jit_compile_units (gccjit/jit_units.c): the same units compiled one after another in this process and several
    at a time in processes of their own make the same objects; a unit that fails, or whose process dies, fails the
    call with its name; no process is left behind and this process can compile again afterwards. */
-#include "common.h"
-#include "codegen.h"
-#include "jit.h"
+#include "common/utilities/common.h"
+#include "common/cpu/recompiler/codegen.h"
+#include "common/cpu/recompiler/gccjit/jit.h"
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32

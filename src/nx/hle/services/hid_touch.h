@@ -4,7 +4,7 @@
    started and the one after it lifts says it ended, as the console's driver reports them */
 #ifndef SNX_HID_TOUCH_H
 #define SNX_HID_TOUCH_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 
 #define SNX_HID_TOUCHES      16   /* fingers the touch screen tracks */
 #define SNX_HID_TOUCH_WIDTH  1280 /* its size, whatever the screen the game is shown on */

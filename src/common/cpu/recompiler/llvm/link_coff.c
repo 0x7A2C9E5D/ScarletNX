@@ -4,7 +4,7 @@
    Sections: .text, .rdata (read-only data, unwind data, the export directory), .data, .bss, .pdata (function table,
    sorted), .reloc (DIR64 base relocations for absolute addresses). COMDAT sections keep their first copy.
    The structures are read and written byte by byte, so this builds anywhere (no <windows.h>). */
-#include "link.h"
+#include "common/cpu/recompiler/llvm/link.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

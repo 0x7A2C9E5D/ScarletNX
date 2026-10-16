@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "settings.h"
-#include "common.h"
-#include "ini_lines.h"
+#include "gui/settings.h"
+#include "common/utilities/common.h"
+#include "common/utilities/ini_lines.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

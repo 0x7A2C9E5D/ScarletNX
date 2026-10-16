@@ -5,8 +5,8 @@
 #ifndef SNX_TOOL_MODULE_H
 #define SNX_TOOL_MODULE_H
 
-#include "loader.h"
-#include "codegen.h"
+#include "nx/loader/loader.h"
+#include "common/cpu/recompiler/codegen.h"
 
 typedef struct {
     const char* title;

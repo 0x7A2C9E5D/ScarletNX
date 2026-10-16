@@ -3,8 +3,8 @@
 #ifndef _WIN32
 #define _GNU_SOURCE
 #endif
-#include "memory.h"
-#include "../abi/errno/errno.h"
+#include "gnuabi/memory/memory.h"
+#include "gnuabi/abi/errno/errno.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>

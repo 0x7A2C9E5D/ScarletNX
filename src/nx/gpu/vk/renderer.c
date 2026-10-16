@@ -11,15 +11,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "gpu/gpu.h"
-#include "hle/services/nvdrv.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "gpu/vk/vk.h"
-#include "gpu/renderer.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/gpu/gpu.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/gpu/vk/vk.h"
+#include "nx/gpu/renderer.h"
 
 static VkSemaphore g_acquired[VK_FRAMES];
 /* the CPU fallback's image, and the last presented frame for screenshots */

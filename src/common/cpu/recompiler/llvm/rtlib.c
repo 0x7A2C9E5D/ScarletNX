@@ -5,8 +5,8 @@
    intrinsics to. It is compiled once, when the recompiler is built, with the project's Clang and the flags
    toolchain.c gives generated C (-march=native: build == host == target), and linked into each
    module by link_elf.c / link_coff.c. The modules import nothing, so they need no dynamic symbol resolution */
-#include "cpu.h"
-#include "cpu_helpers.c"
+#include "common/cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu_helpers.c"
 
 GuestFn snx_interp_entry;
 

@@ -4,8 +4,8 @@
    recompiled in this process on each backend the build has and run against the SVC, BRK and undefined-instruction
    hooks a caller supplies. No game data, no files but the optional IR dump. Arguments: --verbose for the recompiler's
    progress lines. */
-#include "snx_recompiler.h"
-#include "common.h"
+#include "common/cpu/recompiler/snx_recompiler.h"
+#include "common/utilities/common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

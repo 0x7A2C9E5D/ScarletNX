@@ -5,8 +5,8 @@
 /* the file system services and the game's romfs (fs.c) */
 #ifndef SNX_FS_H
 #define SNX_FS_H
-#include "cpu/aarch64/cpu.h"
-#include "runtime/platform/plat.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/runtime/platform/plat.h"
 
 /* Index the game data directory once, before loading guest files. */
 void fs_init(void);

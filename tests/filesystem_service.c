@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Exercise the actual HLE dispatchers with synthetic IPC buffers and a small guest address space. */
-#include "hle/filesystem/fs.h"
-#include "hle/kernel/ipc.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
+#include "nx/hle/filesystem/fs.h"
+#include "nx/hle/kernel/ipc.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -18,7 +18,7 @@
 #endif
 
 /* Including the production file exposes its service constructors without test hooks in the runtime. */
-#include "hle/filesystem/fs.c"
+#include "nx/hle/filesystem/fs.c"
 
 u8* g_mem;
 char g_datadir[1024], g_exename[256], g_exedir[1024];

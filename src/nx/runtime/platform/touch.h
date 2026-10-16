@@ -4,7 +4,7 @@
    pixels, each kept in a slot of TouchState while it stays down, placed on the game's picture */
 #ifndef SNX_TOUCH_H
 #define SNX_TOUCH_H
-#include "hle/services/hid_touch.h"
+#include "nx/hle/services/hid_touch.h"
 
 #define SNX_TOUCH_MOUSE (~(u64)0) /* the mouse's id among the fingers' */
 

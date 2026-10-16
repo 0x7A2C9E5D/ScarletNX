@@ -4,9 +4,9 @@
    keyboard does */
 #ifndef SNX_GAMEPAD_H
 #define SNX_GAMEPAD_H
-#include "cpu/aarch64/cpu.h"
-#include "runtime/ini.h"
-#include "pad_map.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/runtime/ini.h"
+#include "common/utilities/pad_map.h"
 
 #define SNX_GAMEPADS 4 /* read at once; one more takes the place of one that goes */
 /* a gamepad the system added or removed (its SDL joystick id): opened, closed */

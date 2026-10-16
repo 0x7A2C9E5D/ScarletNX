@@ -7,11 +7,11 @@
    come back. */
 #include <stdlib.h>
 #include <string.h>
-#include "gpu/gpu.h"
-#include "hle/services/nvdrv.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "gpu/vk/vk.h"
+#include "nx/gpu/gpu.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/gpu/vk/vk.h"
 
 #define SURFH 4096
 static Surf* g_surfh[SURFH];

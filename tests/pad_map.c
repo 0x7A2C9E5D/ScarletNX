@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* What a gamepad's controls send (src/common/utilities/pad_map.c): by position, by the pad's labels, or the player's
    own map as gamepad_map writes it, read back word by word, a bad word naming itself and leaving the map */
-#include "pad_map.h"
+#include "common/utilities/pad_map.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

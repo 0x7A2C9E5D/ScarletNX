@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "simd.h"
+#include "common/cpu/arm/simd.h"
 /* The shared reference rounds retain their original notices. No AES-NI,
    CLMUL or host feature dispatch in this initial A32 implementation. */
 #define SNX_CRYPTO_PORTABLE
@@ -9,8 +9,8 @@
 #define v_sha1   snx_arm_reference_sha1
 #define v_sha256 snx_arm_reference_sha256
 #define v_pmull  snx_arm_reference_pmull
-#include "../aarch64/cpu.h"
-#include "../aarch64/helpers/crypto.c"
+#include "common/cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/helpers/crypto.c"
 
 void snx_arm_crypto(SnxArmCPU* cpu, uint32_t d, uint32_t n, uint32_t m, uint32_t op) {
     CPU c;

@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* The button map screen (src/common/utilities/pad_screen.c): what the keys, a press on the pad and a tap do to it,
    and its layout, wide and narrow, every part inside the area and none over another */
-#include "pad_screen.h"
+#include "common/utilities/pad_screen.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The line the window titles carry: the branch and commit the build read, this compiler's version, this host. */
-#include "build_info.h"
+#include "common/utilities/build_info.h"
 #include "snx_commit.h"
 #include <assert.h>
 #include <stdio.h>

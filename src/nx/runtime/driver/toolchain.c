@@ -5,8 +5,8 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later (LICENSE). */
 #define _POSIX_C_SOURCE 200809L
-#include "toolchain.h"
-#include "module.h"
+#include "nx/runtime/driver/toolchain.h"
+#include "nx/loader/module.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>

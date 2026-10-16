@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Exercise the actual renderer and SDL event handlers without production test flags. */
 #define SNX_GUI_NO_MAIN
-#include "../src/gui/main.c"
+#include "gui/main.c"
 #include <assert.h>
 /* the default theme's colours, as the checks below name them */
 static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, red = {255, 0, 0, 255},

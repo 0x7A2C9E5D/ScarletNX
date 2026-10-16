@@ -4,8 +4,8 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* HIPC/CMIF (+domains). Requests are served on the calling thread, no server threads and
    no context switches. */
-#include "hle/kernel/kernel_int.h"
-#include "runtime/options.h"
+#include "nx/hle/kernel/kernel_int.h"
+#include "nx/runtime/options.h"
 
 /* ============================================================ service objects */
 SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t ds) {

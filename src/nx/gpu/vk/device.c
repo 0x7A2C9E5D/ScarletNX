@@ -4,11 +4,11 @@
    synchronization2 and dynamic rendering (1.3) are what the renderer is built on. */
 #include <stdlib.h>
 #include <string.h>
-#include "runtime/options.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "gpu/vk/vk.h"
+#include "nx/runtime/options.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/gpu/vk/vk.h"
 
 int g_vk_preserve_infnan;
 int g_vk_flush_denorm;

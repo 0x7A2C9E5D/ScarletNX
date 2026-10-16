@@ -5,14 +5,14 @@
 /* what the service files in hle share (services.c registers them all) */
 #ifndef SNX_SERVICES_INT_H
 #define SNX_SERVICES_INT_H
-#include "hle/services/services.h"
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "hle/kernel/ipc.h"
-#include "hle/kernel/kernel.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/hle/services/services.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/hle/kernel/ipc.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdlib.h>
 #include <string.h>
 

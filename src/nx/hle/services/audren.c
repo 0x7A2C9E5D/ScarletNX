@@ -5,11 +5,11 @@
 /* the audio renderer's service side: each IAudioRenderer keeps an ARState (audren_dsp.c) that RequestUpdate
    fills, and the audio clock renders a frame of every started one each 5 ms, before it signals the renderer
    event, sending the device sink's output to the host */
-#include "hle/services/services_int.h"
-#include "hle/services/audren_dsp.h"
-#include "hle/kernel/ipc.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
+#include "nx/hle/services/services_int.h"
+#include "nx/hle/services/audren_dsp.h"
+#include "nx/hle/kernel/ipc.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
 #include <stdlib.h>
 #include <string.h>
 

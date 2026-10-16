@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "memory/memory.h"
+#include "gnuabi/memory/memory.h"
 
 typedef struct GnuVfs {
     struct GnuVfsState* state;

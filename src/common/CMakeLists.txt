@@ -10,7 +10,7 @@ target_include_directories(scarletnx-common PUBLIC
 target_compile_definitions(scarletnx-common PRIVATE _CRT_SECURE_NO_WARNINGS
     SNX_HOST_COMPILER="${CMAKE_C_COMPILER}"
     SNX_CPU_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}/cpu/aarch64"
-    SNX_COMMON_INCLUDE="${CMAKE_CURRENT_SOURCE_DIR}")
+    SNX_SOURCE_INCLUDE="${PROJECT_SOURCE_DIR}/src")
 target_compile_options(scarletnx-common PRIVATE -fno-strict-aliasing -Wall -Wextra -Werror=missing-prototypes)
 target_link_libraries(scarletnx-common PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 if(WIN32)

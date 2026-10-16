@@ -71,6 +71,9 @@ include(cmake/dependencies.cmake)
 if(SNX_HACTOOL_ONLY)
     return()
 endif()
+# every local include is a path from src/ ("nx/hle/kernel/ipc.h"); generated and third-party headers come with their
+# targets
+include_directories("${PROJECT_SOURCE_DIR}/src")
 add_subdirectory(src/common)
 if(SNX_BUILD_NX)
     add_subdirectory(src/nx/runtime/driver host-tools)

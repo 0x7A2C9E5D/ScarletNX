@@ -2,14 +2,14 @@
    Copyright 2026 the ScarletNX contributors */
 /* SetRenderEnable (3D 0x554-0x556) and its override (0x651) gate draws and clears: the 3D engine's methods run
    against a renderer that counts what reaches it, with a few words of GPU memory the conditions read. */
-#include "gpu/gpu.h"
-#include "gpu/maxwell/engines_int.h"
-#include "gpu/renderer.h"
-#include "hle/services/nvdrv.h"
-#include "memory/mem.h"
-#include "runtime/clock.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/gpu/gpu.h"
+#include "nx/gpu/maxwell/engines_int.h"
+#include "nx/gpu/renderer.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/clock.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>

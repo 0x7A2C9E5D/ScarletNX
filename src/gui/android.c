@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "android.h"
+#include "gui/android.h"
 #include <SDL3/SDL.h>
 #include <dlfcn.h>
 #include <jni.h>

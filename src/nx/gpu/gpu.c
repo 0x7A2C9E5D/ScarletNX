@@ -4,14 +4,14 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* GM20B front end: guest memory through the GPU page table, GPFIFO, the puller (semaphores, syncpoints), I2M and the
    method dispatch to the engines (engines.c, maxwell3d.c, compute.c, fermi2d.c, dma.c). Drawing is the renderer's job. */
-#include "gpu/renderer.h"
-#include "hle/services/nvdrv.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/gpu/renderer.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdlib.h>
 #include <string.h>
-#include "gpu/gpu.h"
+#include "nx/gpu/gpu.h"
 
 GpuState g_gpu;
 static PMutex g_gpulock; /* everything below runs on the GPU thread, which takes it anyway for any future caller */

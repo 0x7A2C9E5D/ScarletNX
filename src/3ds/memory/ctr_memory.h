@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_CTR_MEMORY_H
 #define SNX_CTR_MEMORY_H
-#include "board/board.h"
+#include "3ds/board/board.h"
 #define SNX_CTR_PAGE_SIZE 4096u
 #define SNX_CTR_READ      1u
 #define SNX_CTR_WRITE     2u

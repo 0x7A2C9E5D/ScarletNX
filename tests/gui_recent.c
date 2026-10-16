@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The recent games: newest first, five at most, a file once, the name its run gave it, and the list in a file. */
-#include "recent.h"
-#include "common.h"
-#include "model.h"
+#include "gui/recent.h"
+#include "common/utilities/common.h"
+#include "gui/model.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

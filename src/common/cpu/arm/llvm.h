@@ -2,8 +2,8 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_ARM_LLVM_H
 #define SNX_ARM_LLVM_H
-#include "arm.h"
-#include "checked.h"
+#include "common/cpu/arm/arm.h"
+#include "common/cpu/arm/checked.h"
 #include <llvm-c/Core.h>
 
 /* Emit void name(SnxArmCPU*) into a host-target module. No interpreter or runtime

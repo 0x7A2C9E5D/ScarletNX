@@ -7,7 +7,7 @@
    first interface getifaddrs lists, or the one its settings name. Here the interface the host routes the internet
    through comes first: a UDP socket connected to a public address (connecting sends nothing) is bound to its
    address. */
-#include "network/net_internal.h"
+#include "common/network/net_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

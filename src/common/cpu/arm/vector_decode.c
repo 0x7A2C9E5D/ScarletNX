@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "simd.h"
+#include "common/cpu/arm/simd.h"
 #include <string.h>
 
 static unsigned vd(uint32_t w) { return (((w >> 12) & 15) | ((w >> 18) & 16)) * 8; }

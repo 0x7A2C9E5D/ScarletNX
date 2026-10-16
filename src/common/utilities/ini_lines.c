@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "ini_lines.h"
+#include "common/utilities/ini_lines.h"
 #include <string.h>
 
 static char* trim(char* s) {

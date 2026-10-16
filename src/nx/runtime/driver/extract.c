@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Switch container extraction through hactool. Keys stay in a private temporary HOME. */
-#include "extract.h"
+#include "nx/runtime/driver/extract.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>

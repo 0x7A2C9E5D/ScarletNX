@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "gpu/texture/astc.h"
+#include "nx/gpu/texture/astc.h"
 #include <stdio.h>
 #include <string.h>
 

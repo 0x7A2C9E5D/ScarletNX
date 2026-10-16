@@ -3,7 +3,7 @@
    Format reference: Azahar CIAContainer, Ticket, TitleMetadata at
    68202bc4ff7edf9d7280ec0dcd6572b7cd1ae26e (GPL-3.0-or-later).
    New bounds-checked streaming implementation; signatures are NOT authenticated. */
-#include "internal.h"
+#include "3ds/loader/internal.h"
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>

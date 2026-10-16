@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "cpu/ctr_cpu.h"
+#include "3ds/cpu/ctr_cpu.h"
 #include "arm_checked_cases.h"
 #include <assert.h>
 #include <stdio.h>

@@ -4,8 +4,8 @@
    ssl (ssl.c) */
 #ifndef SNX_HLE_NETWORK_H
 #define SNX_HLE_NETWORK_H
-#include "hle/services/services_int.h"
-#include "network/net.h"
+#include "nx/hle/services/services_int.h"
+#include "common/network/net.h"
 
 /* bsd.c */
 void network_init(void); /* the stack, with its messages in the log */

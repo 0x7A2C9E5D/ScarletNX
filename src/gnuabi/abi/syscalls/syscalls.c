@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "syscalls.h"
-#include "../errno/errno.h"
-#include "../../process/process.h"
-#include "../../signals/signals.h"
-#include "../../threading/futex.h"
-#include "network/network.h"
+#include "gnuabi/abi/syscalls/syscalls.h"
+#include "gnuabi/abi/errno/errno.h"
+#include "gnuabi/process/process.h"
+#include "gnuabi/signals/signals.h"
+#include "gnuabi/threading/futex.h"
+#include "gnuabi/network/network.h"
 #include <string.h>
 #include <stdio.h>
 static int64_t file_mmap(GnuProcess* p, const uint64_t a[6]) {

@@ -3,12 +3,12 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* what the game module calls through RtAPI: undefined instructions, BRK, hints, ticks, FPCR */
-#include "runtime/rtapi.h"
-#include "runtime/clock.h"
-#include "runtime/main.h"
-#include "hle/kernel/kernel.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/runtime/rtapi.h"
+#include "nx/runtime/clock.h"
+#include "nx/runtime/main.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -5,11 +5,11 @@
 #define _GNU_SOURCE
 /* what every platform shares: the guest thread pointer, logging and fatal errors. The rest of the platform layer is
    plat_posix.c or plat_win32.c (with profiler_win32.c) */
-#include "runtime/platform/plat.h"
-#include "runtime/loader.h"
-#include "runtime/main.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/runtime/loader.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/log.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>

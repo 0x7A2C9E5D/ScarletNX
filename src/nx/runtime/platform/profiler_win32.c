@@ -4,10 +4,10 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the sampling profiler (profile=1, Windows): about every millisecond it suspends each thread, reads its instruction
    pointer and maps it to a game function, the runtime or another module. profile.txt is rewritten every 10 s */
-#include "runtime/loader.h"
-#include "runtime/main.h"
-#include "memory/mem.h"
-#include "runtime/platform/plat.h"
+#include "nx/runtime/loader.h"
+#include "nx/runtime/main.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* the .ini's settings tables (ini.h): finding a key, reading a value into its variable, and writing it back */
-#include "runtime/ini.h"
+#include "nx/runtime/ini.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

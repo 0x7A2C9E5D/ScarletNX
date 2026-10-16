@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* GUI themes: the built-ins, a theme.ini over its base, and the themes/ folders the GUI offers. */
-#include "common.h"
+#include "common/utilities/common.h"
 #include "gui_theme_colors.h"
-#include "theme.h"
+#include "gui/theme.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

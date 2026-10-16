@@ -9,7 +9,7 @@
 #ifndef SNX_RECOMPILER_LLVM_IR_H
 #define SNX_RECOMPILER_LLVM_IR_H
 
-#include "codegen.h"
+#include "common/cpu/recompiler/codegen.h"
 #include <llvm-c/Core.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>

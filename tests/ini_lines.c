@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The .ini reader the game's settings and the GUI's themes share (src/common/utilities/ini_lines.c) */
-#include "ini_lines.h"
+#include "common/utilities/ini_lines.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

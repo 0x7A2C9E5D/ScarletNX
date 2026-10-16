@@ -3,8 +3,8 @@
 /* theme.ini written from a theme reads back to that theme (gui_theme_write), over any base: the built-ins, every
    format's fixtures (tests/gui_themes), ErET's loading layout and the keys the GUI does not read; and the key table's
    values: what each type takes and leaves */
-#include "common.h"
-#include "theme.h"
+#include "common/utilities/common.h"
+#include "gui/theme.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

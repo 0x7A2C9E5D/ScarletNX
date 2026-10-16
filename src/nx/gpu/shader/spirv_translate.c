@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Direct Maxwell to SPIR-V translation. Unsupported instructions reject the entire module. */
-#include "gpu/shader/spirv_emit.h"
-#include "gpu/shader/translator.h"
+#include "nx/gpu/shader/spirv_emit.h"
+#include "nx/gpu/shader/translator.h"
 #include <assert.h>
 #include <stdlib.h>
 

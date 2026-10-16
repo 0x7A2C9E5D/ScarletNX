@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "hle/services/hid_touch.h"
-#include "hle/services/hid_layout.h"
+#include "nx/hle/services/hid_touch.h"
+#include "nx/hle/services/hid_layout.h"
 #include <string.h>
 
 #define SNX_HID_TOUCH_STARTED  1u

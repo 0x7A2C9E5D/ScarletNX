@@ -7,7 +7,7 @@
    another. No SDL: the caller tells it the pad's labels and what is held */
 #ifndef SNX_PAD_SCREEN_H
 #define SNX_PAD_SCREEN_H
-#include "pad_map.h"
+#include "common/utilities/pad_map.h"
 
 #define SNX_PAD_PRESETS 4
 typedef struct {
