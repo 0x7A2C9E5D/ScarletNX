@@ -133,6 +133,32 @@ static int same(const Run* a, const Run* b) {
            !memcmp(&a->calls, &b->calls, sizeof(a->calls));
 }
 
+/* what same() found apart, with both values, for a log from a machine the test can't be rerun on */
+static void differences(const Run* a, const Run* b, const char* what) {
+    size_t i;
+    for (i = 0; i < sizeof(a->cpu.x) / sizeof(a->cpu.x[0]); ++i)
+        if (a->cpu.x[i] != b->cpu.x[i])
+            fprintf(stderr, "  %s x%lu=%llx, llvm %llx\n", what, (unsigned long)i, (unsigned long long)b->cpu.x[i],
+                    (unsigned long long)a->cpu.x[i]);
+    for (i = 0; i < sizeof(a->cpu.v) / sizeof(a->cpu.v[0]); ++i)
+        if (memcmp(&a->cpu.v[i], &b->cpu.v[i], sizeof(a->cpu.v[i])))
+            fprintf(stderr, "  %s v%lu=%llx:%llx, llvm %llx:%llx\n", what, (unsigned long)i,
+                    (unsigned long long)b->cpu.v[i].d[1], (unsigned long long)b->cpu.v[i].d[0],
+                    (unsigned long long)a->cpu.v[i].d[1], (unsigned long long)a->cpu.v[i].d[0]);
+    if (a->cpu.pc != b->cpu.pc || a->cpu.n != b->cpu.n || a->cpu.z != b->cpu.z || a->cpu.cf != b->cpu.cf ||
+        a->cpu.vf != b->cpu.vf || a->cpu.fpsr != b->cpu.fpsr || a->cpu.excl_on != b->cpu.excl_on)
+        fprintf(stderr, "  %s pc=%llx nzcv=%u%u%u%u fpsr=%x excl=%u, llvm pc=%llx nzcv=%u%u%u%u fpsr=%x excl=%u\n",
+                what, (unsigned long long)b->cpu.pc, b->cpu.n, b->cpu.z, b->cpu.cf, b->cpu.vf, (unsigned)b->cpu.fpsr,
+                b->cpu.excl_on, (unsigned long long)a->cpu.pc, a->cpu.n, a->cpu.z, a->cpu.cf, a->cpu.vf,
+                (unsigned)a->cpu.fpsr, a->cpu.excl_on);
+    for (i = 0; i < MEMORY; ++i)
+        if (a->memory[i] != b->memory[i]) {
+            fprintf(stderr, "  %s memory differs from offset %lx\n", what, (unsigned long)i);
+            break;
+        }
+    if (memcmp(&a->calls, &b->calls, sizeof(a->calls))) fprintf(stderr, "  %s calls differ\n", what);
+}
+
 int main(int argc, char** argv) {
     static const char* backends[8] = {"llvm"};
     static Run runs[8][2];
@@ -207,8 +233,14 @@ int main(int argc, char** argv) {
         check(runs[b][1].polls == 1, "the interpreter polls");
     }
     for (b = 1; b < nbackends; ++b) {
-        if (!same(&runs[0][0], &runs[b][0])) fprintf(stderr, "%s AOT differs from LLVM AOT\n", backends[b]);
-        if (!same(&runs[0][0], &runs[b][1])) fprintf(stderr, "%s interpreter differs from LLVM AOT\n", backends[b]);
+        if (!same(&runs[0][0], &runs[b][0])) {
+            fprintf(stderr, "%s AOT differs from LLVM AOT\n", backends[b]);
+            differences(&runs[0][0], &runs[b][0], "AOT");
+        }
+        if (!same(&runs[0][0], &runs[b][1])) {
+            fprintf(stderr, "%s interpreter differs from LLVM AOT\n", backends[b]);
+            differences(&runs[0][0], &runs[b][1], "interpreter");
+        }
         check(same(&runs[0][0], &runs[b][0]) && same(&runs[0][0], &runs[b][1]), "backends agree");
     }
     printf("x0=%llx x9=%llx d0=%llx v2=%llx:%llx\n", (unsigned long long)runs[0][0].cpu.x[0],
