@@ -292,6 +292,29 @@ int main(int argc, char** argv) {
     args[k] = NULL;
     check(snx_run(args, root, NULL, &text) != 0, "reject zero jobs");
     free(text);
+    text = NULL;
+    if (!strcmp(backend, "gcc")) { /* without binutils it says so, where GCC's driver would end the process */
+        char* path = getenv("PATH") ? snx_strdup(getenv("PATH")) : NULL;
+        k = 0;
+        args[k++] = argv[1];
+        args[k++] = "--repo";
+        args[k++] = argv[2];
+        args[k++] = "-r";
+        args[k++] = input;
+        args[k++] = "--outdir";
+        args[k++] = out;
+        args[k++] = "--backend";
+        args[k++] = "gcc";
+        args[k] = NULL;
+        environment("PATH", "");
+        rc = snx_run(args, root, NULL, &text);
+        environment("PATH", path);
+        check(rc != 0 && text && strstr(text, "PATH has no as and ld: install binutils"), "missing binutils named");
+        check_empty(temp);
+        free(path);
+        free(text);
+        text = NULL;
+    }
     source = snx_path_join(root, "copy source");
     nested = snx_path_join(source, "nested/output");
     check(!snx_mkdirs(source), "copy source fixture");

@@ -225,6 +225,22 @@ static int compile_forked(SnxJitUnits* u, unsigned jobs) {
 }
 #endif
 
+/* GCC's driver assembles every unit and links the module with GNU as and ld, from PATH when libgccjit's own GCC has
+   none there (a packaged libgccjit), and a missing one ends the process from inside libgccjit: name it before */
+static int missing_tools(char* error, size_t size) {
+    char missing[16] = "", *path;
+    if ((path = snx_find_tool("as")) == NULL) strcpy(missing, "as");
+    free(path);
+    if ((path = snx_find_tool("ld")) == NULL) strcat(missing, missing[0] ? " and ld" : "ld");
+    free(path);
+    if (!missing[0]) return 0;
+    snprintf(error, size,
+             "the gcc backend assembles and links with GNU binutils, and PATH has no %s: install binutils, or use "
+             "--backend=llvm",
+             missing);
+    return -1;
+}
+
 int snx_jit_compile_units(SnxJitUnits* u) {
     unsigned jobs = u->jobs ? u->jobs : snx_cpu_count();
     unsigned long fallbacks;
@@ -232,6 +248,7 @@ int snx_jit_compile_units(SnxJitUnits* u) {
     size_t i;
     u->fallbacks = 0;
     u->error[0] = 0;
+    if (missing_tools(u->error, sizeof(u->error))) return -1;
     if (jobs > u->count) jobs = (unsigned)u->count;
 #ifndef _WIN32
     if (jobs > 1) {
