@@ -212,6 +212,30 @@ cmake --preset default -B build -DSNX_FFMPEG_ASM=OFF && cmake --build build
 - `-DSNX_DEPLOY=OFF`: disable runtime deployment.
 - `-DSNX_GAMES_DIR=/path`: override deployment dir (default: `games/`).
 - `-DCPM_SOURCE_CACHE=/path`: override source-download cache.
+- `-DSNX_DEPS_CACHE=/path`: reuse and publish finished FFmpeg and OpenSSL builds there (default: the environment's
+  `SNX_DEPS_CACHE`, else none).
+- `-DSNX_BUILD_NX=OFF`: omit the Switch runtime (default ON).
+- `-DSNX_BUILD_GNUABI=OFF`: omit the CPU-only Linux AArch64 runtime, see [GNUABI.md](GNUABI.md) (default ON).
+- `-DSNX_BUILD_3DS=OFF`: omit the 3DS extraction and memory support, see [3DS.md](3DS.md) (default ON).
+- `-DSNX_BUILD_GUI=OFF`: omit the SDL3 launcher. The default is ON when `SNX_BUILD_NX` is on and neither
+  `SNX_TOOLS_ONLY` nor `SNX_HACTOOL_ONLY` is, OFF otherwise.
+- `-DSNX_TOOLS_ONLY=ON`: build the extraction/recompilation driver without the runtime, see below (default OFF).
+- `-DSNX_HACTOOL_ONLY=ON`: build only the native container extractor (hactool) and its dependencies (default OFF).
+- `-DSNX_GCCJIT=OFF`: never build the libgccjit backend, even when libgccjit is found (default ON, built only when
+  found).
+- `-DSNX_GCCJIT_ROOT=/prefix`: another GCC's prefix to look for libgccjit in.
+- `-DSNX_RECOMPILER_SHARED=ON`, `-DSNX_RECOMPILER_INSTALL=ON`: also build the recompiler as a shared library, and
+  install the library, see [LIBRARY.md](LIBRARY.md) (defaults OFF and the value of `SNX_TOOLS_ONLY`).
+
+Test options, read when `BUILD_TESTING` is on (CTest's default), all OFF by default:
+
+- `-DSNX_TEST_SANITIZERS=ON`: build the native tests and the in-tree libraries they exercise with ASan and UBSan.
+  The runtime links those libraries too, so it is not deployed.
+- `-DSNX_TEST_VULKAN=ON`: add the offscreen Vulkan integration tests, see below.
+- `-DSNX_TEST_A64_FP_DIFF=ON`: add the AArch64 FP differential test, which needs Python unicorn 2.1.4 and a native
+  Linux host.
+- `-DSNX_TEST_ARM_AOT=ON`, `-DSNX_TEST_ARM_DIFF=ON`: the 3DS ARM11 witnesses and the A32 unicorn comparison, see
+  [3DS.md](3DS.md).
 
 ```sh
 # Build without the GUI launcher; SDL3 remains required by the runtime:
