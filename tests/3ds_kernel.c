@@ -152,6 +152,11 @@ int main(void) {
         r[1] = 2;
         r[2] = 0;
         assert(snx_ctr_svc(p, 0x2a) == SNX_CTR_SVC_RETURN && r[0] == 0xe0e01bf4u && !r[1] && !r[2]);
+        /* GetThreadId (0x37) answers in r1 and is not the debug string (0x3d) */
+        r[1] = CTR_THREAD_HANDLE;
+        assert(snx_ctr_svc(p, 0x37) == SNX_CTR_SVC_RETURN && !r[0] && r[1] == p->current_thread && r[1]);
+        r[1] = 0;
+        assert(snx_ctr_svc(p, 0x37) == SNX_CTR_SVC_RETURN && r[0] == 0xd8e007f7u);
         uint32_t handle = create(p);
         assert(handle && object_count(p) == 3);
         r[1] = handle;

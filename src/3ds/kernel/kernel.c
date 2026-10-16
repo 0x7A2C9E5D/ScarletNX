@@ -617,7 +617,15 @@ SnxCtrSvcResult snx_ctr_svc(SnxCtrProcess* p, uint32_t number) {
             r[1] = out;
             return SNX_CTR_SVC_RETURN;
         }
-        case 0x37: { /* debug string: validated in full, captured to the host log */
+        case 0x37: { /* GetThreadId: the thread's object index, unique among the process's live threads */
+            uint32_t id = snx_ctr_handle_object(p, r[1]);
+            if (!id || p->objects[id].type != CTR_OBJ_THREAD)
+                r[0] = INVALID_HANDLE;
+            else
+                r[0] = OK, r[1] = id;
+            return SNX_CTR_SVC_RETURN;
+        }
+        case 0x3d: { /* OutputDebugString: validated in full, captured to the host log */
             uint32_t length = r[1] == UINT32_MAX ? 256u : r[1] > 256u ? 256u : r[1];
             unsigned char text[256];
             if (length && (snx_ctr_check_ram(p->space, r[0], length, SNX_CTR_READ) != SNX_CTR_MEM_OK ||
