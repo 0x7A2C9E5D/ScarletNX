@@ -32,23 +32,37 @@ static CtrSharedMap* shared_map(SnxCtrProcess* p, uint32_t object) {
         if (p->shared_maps[i].object == object) return &p->shared_maps[i];
     return NULL;
 }
-/* One interrupt relay slot per registered thread; the queue lives in the
-   shared block the client maps. Full queues report the documented error byte
-   and drop the interrupt instead of overwriting pending slots. */
+/* GSP_GPU::ProcessPendingInterruptImpl: one relay queue per registered thread in the shared block, a header
+   (index, count, error, flags with ignore_pdc in bit 0), the missed PDC0 and PDC1 counters and 0x34 slots at
+   0xc, which libctru's popInterrupt reads. A full queue sets the error and drops the interrupt. Vblanks (PDC0,
+   PDC1) are dropped when the thread asked to ignore them, and only counted as missed once 0x20 are pending */
 static void queue_interrupt(SnxCtrProcess* p, uint32_t thread, uint32_t id) {
     CtrSharedMap* map = shared_map(p, p->gsp.shared_object);
     if (!map) return;
     uint32_t at = map->va + thread * 0x40;
     unsigned char header[4];
     if (snx_ctr_read_ram(p->space, at, header, sizeof header) != SNX_CTR_MEM_OK) return;
-    unsigned next = (unsigned)(header[0] + header[1]) % 0x34;
+    if (id == 2 || id == 3) {
+        if (header[3] & 1) return;
+        if (header[1] >= 0x20) {
+            unsigned char missed[4];
+            uint32_t counter = at + (id == 2 ? 4 : 8), n;
+            if (snx_ctr_read_ram(p->space, counter, missed, 4) != SNX_CTR_MEM_OK) return;
+            n = (uint32_t)missed[0] | (uint32_t)missed[1] << 8 | (uint32_t)missed[2] << 16 | (uint32_t)missed[3] << 24;
+            ++n;
+            for (unsigned i = 0; i < 4; ++i) missed[i] = (unsigned char)(n >> (i * 8));
+            (void)snx_ctr_write_ram(p->space, counter, missed, 4);
+            return;
+        }
+    }
     if (header[1] >= 0x34) {
         header[2] = 1;
         (void)snx_ctr_write_ram(p->space, at + 2, &header[2], 1);
         return;
     }
+    unsigned next = (unsigned)(header[0] + header[1]) % 0x34;
     unsigned char slot = (unsigned char)id;
-    if (snx_ctr_write_ram(p->space, at + 8 + next, &slot, 1) != SNX_CTR_MEM_OK) return;
+    if (snx_ctr_write_ram(p->space, at + 0xc + next, &slot, 1) != SNX_CTR_MEM_OK) return;
     ++header[1];
     (void)snx_ctr_write_ram(p->space, at + 1, &header[1], 1);
 }

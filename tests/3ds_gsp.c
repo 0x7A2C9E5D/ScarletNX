@@ -159,7 +159,7 @@ int main(int argc, char** argv) {
             assert(b[0] == 0x44 && b[1] == 0x33 && b[2] == 0x22 && b[3] == 0x11);
         }
         /* one region filled: exactly one PSC0 in the relay queue, and the GX queue drained */
-        assert((at(p, QUEUE) & 0xffff) == 0x0100 && (at(p, QUEUE + 8) & 0xff) == 0);
+        assert((at(p, QUEUE) & 0xffff) == 0x0100 && (at(p, QUEUE + 12) & 0xff) == 0);
         assert((at(p, QUEUE + 0x800) & 0xff00) == 0);
         /* an untriggered fill (control without bit 0) writes nothing and raises nothing */
         word(p, QUEUE, 0);
@@ -206,7 +206,7 @@ int main(int argc, char** argv) {
                     assert(q[0] == 0x80 && q[1] == y && q[2] == x);
                 }
             /* PPF, once */
-            assert((at(p, QUEUE) & 0xffff) == 0x0100 && (at(p, QUEUE + 8) & 0xff) == 4);
+            assert((at(p, QUEUE) & 0xffff) == 0x0100 && (at(p, QUEUE + 12) & 0xff) == 4);
         }
         /* TextureCopy with an input gap, then an invalid fill and an unknown command: GSP stores the errors, sets
            the FAILED status and keeps going */
@@ -236,7 +236,7 @@ int main(int argc, char** argv) {
             uint32_t header = at(p, QUEUE + 0x800);
             assert((header & 0xff) == 6 && ((header >> 8) & 0xff) == 0 && ((header >> 16) & 0xff) == 0x80);
             assert(at(p, QUEUE + 0x804) == 0xe0c02bf4u); /* the last error: the unknown command's */
-            assert((at(p, QUEUE) & 0xffff) == 0x0100 && (at(p, QUEUE + 8) & 0xff) == 4); /* only the copy's PPF */
+            assert((at(p, QUEUE) & 0xffff) == 0x0100 && (at(p, QUEUE + 12) & 0xff) == 4); /* only the copy's PPF */
             word(p, QUEUE + 0x800, 0); /* status cleared for what follows */
         }
         /* SubmitCmdList: a list in the linear heap whose interrupt request matches irq_compare's low byte raises
@@ -254,7 +254,7 @@ int main(int argc, char** argv) {
         request(p, gsp, trigger, 1, SNX_CTR_SVC_RETURN, 0);
         assert(!get(p, 1));
         assert((at(p, QUEUE + 0x800) & 0xffff) == 2);
-        assert((at(p, QUEUE) & 0xffff) == 0x0200 && (at(p, QUEUE + 8) & 0xffff) == 0x0505);
+        assert((at(p, QUEUE) & 0xffff) == 0x0200 && (at(p, QUEUE + 12) & 0xffff) == 0x0505);
         /* a draw needing a part not ported yet (a geometry shader) stops the run */
         word(p, target + 0x800, 2);
         word(p, target + 0x804, 0x000f0229u); /* use_gs */
@@ -265,6 +265,22 @@ int main(int argc, char** argv) {
         word(p, QUEUE + 0x828, 16);
         request(p, gsp, trigger, 1, SNX_CTR_SVC_UNSUPPORTED, 0);
         word(p, QUEUE + 0x800, 0);
+        /* vblanks reach the relay queue's slots at 0xc (libctru's popInterrupt), are dropped with ignore_pdc set,
+           and only counted as missed once 0x20 interrupts are pending */
+        word(p, QUEUE, 0);
+        snx_ctr_gsp_vblank(p);
+        assert((at(p, QUEUE) & 0xffff) == 0x0200 && (at(p, QUEUE + 12) & 0xffff) == 0x0302);
+        word(p, QUEUE, 0x01000000);
+        snx_ctr_gsp_vblank(p);
+        assert((at(p, QUEUE) & 0xffff) == 0);
+        word(p, QUEUE, 0x2000);
+        word(p, QUEUE + 4, 0);
+        word(p, QUEUE + 8, 0);
+        snx_ctr_gsp_vblank(p);
+        assert(at(p, QUEUE + 4) == 1 && at(p, QUEUE + 8) == 1 && (at(p, QUEUE) & 0xffff) == 0x2000);
+        word(p, QUEUE, 0);
+        word(p, QUEUE + 4, 0);
+        word(p, QUEUE + 8, 0);
         /* SetBufferSwap: a real RGBA8 framebuffer with a distinctive pattern. */
         uint32_t fb = 0;
         assert(!snx_ctr_kernel_memory(p, 0x10003, 0, 0, 0x60000, 3, &fb) && fb);
