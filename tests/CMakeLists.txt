@@ -484,6 +484,11 @@ if(TARGET snx_jit)
     set_tests_properties(gccjit_differential PROPERTIES TIMEOUT 900)
     add_test(NAME native_recompiler_gcc COMMAND snx_recompiler_test
         $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}" gcc)
+    # code units in this process and in processes of their own (gccjit/jit_units.c)
+    add_executable(snx-test-gccjit-units gccjit_units.c)
+    snx_test_target(snx-test-gccjit-units 11)
+    target_link_libraries(snx-test-gccjit-units PRIVATE snx_jit)
+    add_test(NAME gccjit_units COMMAND snx-test-gccjit-units)
 endif()
 add_test(NAME llvm_module COMMAND snx-test-llvm-module $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}"
     "${CMAKE_C_COMPILER}" ${snx_extra_backends})
