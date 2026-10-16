@@ -13,10 +13,10 @@ Forked from MZLab's SwitchRecomp. SwitchRecomp is based off Nexium.
 ## Quick start
 
 Each push to `main` that builds everywhere replaces the [nightly](https://github.com/scarletnx/ScarletNX/releases/tag/nightly) prerelease:
-[ScarletNX-x86_64.AppImage](https://github.com/scarletnx/ScarletNX/releases/download/nightly/ScarletNX-x86_64.AppImage) and
-[ScarletNX-aarch64.AppImage](https://github.com/scarletnx/ScarletNX/releases/download/nightly/ScarletNX-aarch64.AppImage) for Linux (`chmod +x` it first),
+[ScarletNX-linux-x86_64.AppImage](https://github.com/scarletnx/ScarletNX/releases/download/nightly/ScarletNX-linux-x86_64.AppImage) and
+[ScarletNX-linux-aarch64.AppImage](https://github.com/scarletnx/ScarletNX/releases/download/nightly/ScarletNX-linux-aarch64.AppImage) for Linux (`chmod +x` it first),
 [ScarletNX-windows-x86_64.zip](https://github.com/scarletnx/ScarletNX/releases/download/nightly/ScarletNX-windows-x86_64.zip) for Windows (run `bin\scarletnx.exe`)
-and [ScarletNX-android.apk](https://github.com/scarletnx/ScarletNX/releases/download/nightly/ScarletNX-android.apk) ([Android](docs/ANDROID.md)).
+and [ScarletNX-android-universal.apk](https://github.com/scarletnx/ScarletNX/releases/download/nightly/ScarletNX-android-universal.apk) ([Android](docs/ANDROID.md)).
 Games need a Vulkan 1.3 driver. The 30 newest nightlies, and each open pull request's builds, are in
 [scarletnx/nightly](https://github.com/scarletnx/nightly/releases).
 

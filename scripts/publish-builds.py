@@ -48,12 +48,12 @@ SERVER = nightly_notes.SERVER
 LABEL = 'publish builds'
 TEAM = {'admin', 'maintain', 'write'}
 DISCORD = re.compile(r'<!-- discord-message: (\d+) -->')
-# A run's artifacts, by the commit's first 7 digits, and the release file each gives
+# A run's artifacts, by the commit's first 7 digits: the release file each gives, ScarletNX-<system>-<arch>
 ARTIFACTS = {
-    'AppImage-x86_64-{short}': 'ScarletNX-x86_64.AppImage',
-    'AppImage-aarch64-{short}': 'ScarletNX-aarch64.AppImage',
-    'scarletnx-windows-{short}': 'ScarletNX-windows-x86_64.zip',
-    'ScarletNX-{short}.apk': 'ScarletNX-android.apk',
+    'ScarletNX-linux-x86_64-{short}.AppImage': 'ScarletNX-linux-x86_64.AppImage',
+    'ScarletNX-linux-aarch64-{short}.AppImage': 'ScarletNX-linux-aarch64.AppImage',
+    'ScarletNX-windows-x86_64-{short}': 'ScarletNX-windows-x86_64.zip',
+    'ScarletNX-android-universal-{short}.apk': 'ScarletNX-android-universal.apk',
 }
 SCARLET = 0xB0102A
 
@@ -296,7 +296,7 @@ class Publisher:
         tag = f'pr-{number}'
         existing = self.release(tag)
         message = next(iter(DISCORD.findall((existing or {}).get('body') or '')), None)
-        title = f'#{number} {pr["title"]}'
+        title = f'PR #{number}: {pr["title"]}'
         made, new = self.put_release(tag, title, self.pull_notes(pr, sha, files, missing, message), True, files)
         print(f'{"published" if new else "replaced"} {tag} with the builds of {sha[:7]}')
         url = made.get('html_url', f'{SERVER}/{self.to}/releases/tag/{tag}')
@@ -331,7 +331,7 @@ class Publisher:
             self.discord(
                 'prs',
                 {
-                    'title': f'#{pr["number"]} {pr["title"]}'[:256],
+                    'title': f'PR #{pr["number"]}: {pr["title"]}'[:256],
                     'url': pr['html_url'],
                     'description': f'{"Merged" if pr.get("merged") else "Closed"}: its builds are gone.',
                 },

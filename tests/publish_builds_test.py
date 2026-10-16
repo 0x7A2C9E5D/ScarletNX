@@ -216,14 +216,14 @@ with tempfile.TemporaryDirectory() as temporary:
         folder = root / name
         short = commit[:7]
         made = {
-            f'AppImage-x86_64-{short}': {
-                'ScarletNX-x86_64.AppImage': 'elf x86',
-                'ScarletNX-x86_64.AppImage.zsync': 'z',
+            f'ScarletNX-linux-x86_64-{short}.AppImage': {
+                'ScarletNX-linux-x86_64.AppImage': 'elf x86',
+                'ScarletNX-linux-x86_64.AppImage.zsync': 'z',
                 'appinfo': 'i',
             },
-            f'AppImage-aarch64-{short}': {'ScarletNX-aarch64.AppImage': 'elf arm'},
-            f'scarletnx-windows-{short}': {'bin/scarletnx.exe': 'MZ', 'share/licenses/LICENSE': 'GPL'},
-            f'ScarletNX-{short}.apk': {f'ScarletNX-{short}.apk': 'PK apk'},
+            f'ScarletNX-linux-aarch64-{short}.AppImage': {'ScarletNX-linux-aarch64.AppImage': 'elf arm'},
+            f'ScarletNX-windows-x86_64-{short}': {'bin/scarletnx.exe': 'MZ', 'share/licenses/LICENSE': 'GPL'},
+            f'ScarletNX-android-universal-{short}.apk': {f'ScarletNX-android-universal-{short}.apk': 'PK apk'},
         }
         for artifact, files in made.items():
             if any(artifact.startswith(s) for s in skip):
@@ -343,10 +343,10 @@ with tempfile.TemporaryDirectory() as temporary:
         and sorted(a['name'] for a in made['assets'])
         == sorted(
             [
-                'ScarletNX-x86_64.AppImage',
-                'ScarletNX-aarch64.AppImage',
+                'ScarletNX-linux-x86_64.AppImage',
+                'ScarletNX-linux-aarch64.AppImage',
                 'ScarletNX-windows-x86_64.zip',
-                'ScarletNX-android.apk',
+                'ScarletNX-android-universal.apk',
             ]
         ),
         made and made['assets'],
@@ -354,7 +354,7 @@ with tempfile.TemporaryDirectory() as temporary:
     check(
         'its notes: the files linked from this release, the changes, the source',
         made
-        and f'https://github.com/{TO}/releases/download/{tag}/ScarletNX-android.apk' in made['body']
+        and f'https://github.com/{TO}/releases/download/{tag}/ScarletNX-android-universal.apk' in made['body']
         and '- [ci] its title (#5)' in made['body']
         and f'https://github.com/{REPO}/tree/{sha}' in made['body']
         and 'newest 2 nightlies' in made['body'],
@@ -441,7 +441,7 @@ with tempfile.TemporaryDirectory() as temporary:
         '--sha',
         sha,
         '--artifacts',
-        str(artifacts('part', sha, skip=('scarletnx-windows',))),
+        str(artifacts('part', sha, skip=('ScarletNX-windows',))),
         '--checkout',
         str(checkout),
     )
@@ -511,7 +511,7 @@ with tempfile.TemporaryDirectory() as temporary:
         '--pr',
         '7',
         '--artifacts',
-        str(artifacts('pr1', head1, skip=('scarletnx-windows',))),
+        str(artifacts('pr1', head1, skip=('ScarletNX-windows',))),
     )
     s = state()
     pre = next((r for r in s['releases'] if r['tag_name'] == 'pr-7'), None)
@@ -525,7 +525,7 @@ with tempfile.TemporaryDirectory() as temporary:
         len(prs) == 1
         and prs[0]['path'].endswith('?thread_id=55&wait=true')
         and prs[0]['body']['allowed_mentions'] == {'parse': []}
-        and prs[0]['body']['embeds'][0]['title'] == '#7 Fix it @everyone',
+        and prs[0]['body']['embeds'][0]['title'] == 'PR #7: Fix it @everyone',
         prs,
     )
     message = str(Discord.next_id[0])

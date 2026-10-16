@@ -62,8 +62,8 @@ jobs:
         continue-on-error: ${{ steps.plan.outputs.kind == 'pr' }}
         uses: actions/download-artifact@v8
         with:
-          name: AppImage-x86_64-${{ steps.plan.outputs.short }}
-          path: artifacts/AppImage-x86_64-${{ steps.plan.outputs.short }}
+          name: ScarletNX-linux-x86_64-${{ steps.plan.outputs.short }}.AppImage
+          path: artifacts/ScarletNX-linux-x86_64-${{ steps.plan.outputs.short }}.AppImage
           run-id: ${{ steps.plan.outputs.run }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download the ARM64 AppImage
@@ -71,8 +71,8 @@ jobs:
         continue-on-error: ${{ steps.plan.outputs.kind == 'pr' }}
         uses: actions/download-artifact@v8
         with:
-          name: AppImage-aarch64-${{ steps.plan.outputs.short }}
-          path: artifacts/AppImage-aarch64-${{ steps.plan.outputs.short }}
+          name: ScarletNX-linux-aarch64-${{ steps.plan.outputs.short }}.AppImage
+          path: artifacts/ScarletNX-linux-aarch64-${{ steps.plan.outputs.short }}.AppImage
           run-id: ${{ steps.plan.outputs.run }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download the Windows build
@@ -80,8 +80,8 @@ jobs:
         continue-on-error: ${{ steps.plan.outputs.kind == 'pr' }}
         uses: actions/download-artifact@v8
         with:
-          name: scarletnx-windows-${{ steps.plan.outputs.short }}
-          path: artifacts/scarletnx-windows-${{ steps.plan.outputs.short }}
+          name: ScarletNX-windows-x86_64-${{ steps.plan.outputs.short }}
+          path: artifacts/ScarletNX-windows-x86_64-${{ steps.plan.outputs.short }}
           run-id: ${{ steps.plan.outputs.run }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download the Android APK
@@ -89,8 +89,8 @@ jobs:
         continue-on-error: ${{ steps.plan.outputs.kind == 'pr' }}
         uses: actions/download-artifact@v8
         with:
-          name: ScarletNX-${{ steps.plan.outputs.short }}.apk
-          path: artifacts/ScarletNX-${{ steps.plan.outputs.short }}.apk
+          name: ScarletNX-android-universal-${{ steps.plan.outputs.short }}.apk
+          path: artifacts/ScarletNX-android-universal-${{ steps.plan.outputs.short }}.apk
           run-id: ${{ steps.plan.outputs.run }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish them

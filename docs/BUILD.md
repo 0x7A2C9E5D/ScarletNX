@@ -363,7 +363,7 @@ cmake --preset default -B build/appimage -DSNX_DEPLOY=OFF -DCMAKE_INSTALL_PREFIX
 cmake --build build/appimage &&
 cmake --install build/appimage &&
 GITHUB_REPOSITORY=scarletnx/ScarletNX scripts/make-appimage.sh
-# -> dist/ScarletNX-<arch>.AppImage
+# -> dist/ScarletNX-linux-<arch>.AppImage
 ```
 
 It carries libgccjit and the `as` and `ld` of the same Arch (an older binutils' `as` can't read what it writes), so

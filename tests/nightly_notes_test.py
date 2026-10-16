@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory() as repo:
     check('no changes from a commit that is not an ancestor', nightly.changes(repo, unmerged, sha) is None)
     check('the title', nightly.title(repo, sha) == f'Nightly 2026-10-15 ({sha[:7]})')
 
-    files = ['ScarletNX-android.apk', 'ScarletNX-aarch64.AppImage', 'ScarletNX-x86_64.AppImage']
+    files = ['ScarletNX-android-universal.apk', 'ScarletNX-linux-aarch64.AppImage', 'ScarletNX-linux-x86_64.AppImage']
     text = nightly.notes(repo, sha, previous, 'owner/repo', files)
     check(
         'the built commit is the first one the notes name, where the next nightly looks',
@@ -80,7 +80,8 @@ with tempfile.TemporaryDirectory() as repo:
     rows = [line.split('[')[1].split(']')[0] for line in text.splitlines() if line.startswith('| [')]
     check(
         'the files in the table order',
-        rows == ['ScarletNX-x86_64.AppImage', 'ScarletNX-aarch64.AppImage', 'ScarletNX-android.apk'],
+        rows
+        == ['ScarletNX-linux-x86_64.AppImage', 'ScarletNX-linux-aarch64.AppImage', 'ScarletNX-android-universal.apk'],
     )
     try:
         nightly.notes(repo, sha, previous, 'owner/repo', files + ['ScarletNX-windows-arm64.zip'])
@@ -103,7 +104,8 @@ with tempfile.TemporaryDirectory() as repo:
     )
     check(
         "another release's files and fate",
-        '[ScarletNX-android.apk](https://github.com/owner/nightly/releases/download/t/ScarletNX-android.apk)' in kept
+        '[ScarletNX-android-universal.apk](https://github.com/owner/nightly/releases/download/t/ScarletNX-android-universal.apk)'
+        in kept
         and 'committed 2026-10-15. Kept.' in kept
         and 'replaces it' not in kept,
     )

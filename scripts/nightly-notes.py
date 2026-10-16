@@ -18,13 +18,13 @@ import re
 import subprocess
 
 SERVER = 'https://github.com'
-# The release's files in the order the table lists them, with what each is for. A file the release job uploads that
-# is missing here stops the notes (the files are out by then): add its line
+# The release's files in the order the table lists them, with what each is for, named ScarletNX-<system>-<arch>. A
+# file the release job uploads that is missing here stops the notes (the files are out by then): add its line
 SYSTEMS = {
-    'ScarletNX-x86_64.AppImage': 'Linux, x86-64',
-    'ScarletNX-aarch64.AppImage': 'Linux, ARM64',
+    'ScarletNX-linux-x86_64.AppImage': 'Linux, x86-64',
+    'ScarletNX-linux-aarch64.AppImage': 'Linux, ARM64',
     'ScarletNX-windows-x86_64.zip': 'Windows, x86-64',
-    'ScarletNX-android.apk': 'Android 5.0 and later, ARM64 and x86-64 (signed with a debug key)',
+    'ScarletNX-android-universal.apk': 'Android 5.0 and later, ARM64 and x86-64 (signed with a debug key)',
 }
 MERGE = re.compile(r'Merge pull request #(\d+) from \S+')
 MOST_CHANGES = 30
