@@ -472,7 +472,7 @@ int main(int argc, char** argv) {
     assert(app.editing && app.editor.object && app.editor.count == GUI_SETTINGS_OWN + 3);
     /* and the disk: what ScarletNX's folders take, counted on a thread, and what is left */
     {
-        char line[128], used[32], left[32];
+        char line[256], used[32], left[32];
         uint64_t total = 0;
         Uint64 until = SDL_GetTicks() + 5000;
         char* big = snx_path_join(app.games_dir, "big.bin");
@@ -492,10 +492,18 @@ int main(int argc, char** argv) {
         assert(app.space->done && app.space->used == total && !strcmp(app.space->dirs[0], app.games_dir));
         gui_size_text(used, sizeof used, total);
         gui_size_text(left, sizeof left, app.free_bytes);
-        snprintf(line, sizeof line, "Disk: %s, %s free", used, left);
+        /* on the footer's line, after the RAM and the CPU */
+        {
+            char usage[256];
+            gui_usage_text(usage, sizeof usage, app.usage.available, app.usage.memory_bytes, app.usage.cpu_percent,
+                           SDL_GetNumLogicalCPUCores());
+            snprintf(line, sizeof line, "%s  Disk: %s, %s free", usage, used, left);
+        }
+        key(&app, SDLK_ESCAPE);
         render(&app);
-        colored_text(&app, app.rows - 1, line, rgb(app.theme.soft));
-        assert(total == 3 << 20 && !strncmp(line, "Disk: 3 MB, ", 12));
+        colored_text(&app, app.rows - 3, line, rgb(app.theme.soft));
+        assert(total == 3 << 20 && strstr(line, "  Disk: 3 MB, "));
+        key(&app, SDLK_SPACE);
         assert(!snx_remove_tree(app.games_dir)); /* the browser's checks below start with no games/ */
         free(app.themes_dirs[0]);
         free(app.data_dir);

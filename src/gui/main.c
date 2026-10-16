@@ -344,13 +344,29 @@ static char* keys_in_use(const App* app) {
 }
 /* the footer from row: the usage, then the working folder, which games/ and themes/ are found in. The theme's bar style
    puts them on a band of ink over rows rows, its plain one in soft and ink; a rule above when it says so */
+/* what ScarletNX's folders take, counted on a thread, and what is left on their disk; "" before the first count */
+static void disk_text(const App* app, char* out, size_t size) {
+    char used[32], left[32];
+    out[0] = 0;
+    if (!app->space) return;
+    gui_size_text(left, sizeof left, app->free_bytes);
+    if (__atomic_load_n(&app->space->done, __ATOMIC_ACQUIRE)) {
+        gui_size_text(used, sizeof used, app->space->used);
+        snprintf(out, size, "Disk: %s, %s free", used, left);
+    } else
+        snprintf(out, size, "Disk: counting, %s free", left);
+}
 static void footer(App* app, int row, int rows, GuiRgb page, GuiRgb ink, GuiRgb soft) {
-    char usage[256];
+    char usage[256], disk[96];
     int bar = app->theme.footer == GUI_STYLE_BAR;
+    size_t n;
     if (bar) band(app, row, rows, ink);
     if (app->theme.footer_rule) rule(app, row, soft);
     gui_usage_text(usage, sizeof(usage), app->usage.available, app->usage.memory_bytes, app->usage.cpu_percent,
                    SDL_GetNumLogicalCPUCores());
+    disk_text(app, disk, sizeof disk);
+    n = strlen(usage);
+    if (disk[0]) snprintf(usage + n, sizeof usage - n, "  %s", disk);
     text(app, 1, row, usage, rgb(bar ? page : soft));
     text(app, 1, row + 1, "CWD:", rgb(bar ? page : soft));
     text(app, 6, row + 1, app->cwd ? app->cwd : "(unavailable)", rgb(bar ? page : ink));
@@ -1264,19 +1280,11 @@ static void render_editor(App* app) {
     more_marks(app, 4, 4 + SDL_min(editor_rows(app), gui_editor_rows(e) - e->top) - 1, e->top > 0,
                e->top + editor_rows(app) < gui_editor_rows(e));
     if (app->form != GUI_FORM_THEME) {
-        char used[32], left[32];
         if (app->form != GUI_FORM_APP && app->form != GUI_FORM_FOLDERS)
             text(app, 1, app->rows - 2,
                  app->settings.count > GUI_SETTINGS_OWN ? "For the next runs. .ini: as the game's .ini says"
                                                         : "The runtime listed no settings",
                  rgb(theme->soft));
-        gui_size_text(left, sizeof left, app->free_bytes);
-        if (app->space && __atomic_load_n(&app->space->done, __ATOMIC_ACQUIRE)) {
-            gui_size_text(used, sizeof used, app->space->used);
-            snprintf(value, sizeof value, "Disk: %s, %s free", used, left);
-        } else
-            snprintf(value, sizeof value, "Disk: counting, %s free", left);
-        text(app, 1, app->rows - 1, value, rgb(theme->soft));
         return;
     }
     snprintf(value, sizeof value, "Saves in %s", app->themes_dirs[0] ? app->themes_dirs[0] : "(no themes folder)");
@@ -1749,7 +1757,8 @@ static void count_games(App* app);
 static void leave_run(App* app) {
     app->finished = false;
     app->menu.view = GUI_LOAD_NONE;
-    count_games(app); /* a run may have made one */
+    count_games(app); /* a run may have made one, and taken disk */
+    space_start(app);
     if (app->menu.active == GUI_GAMES && app->menu.games) app->menu.selected = GUI_GAMES;
     app->message[0] = 0;
     app->leaving_ms = 0;
@@ -2811,6 +2820,7 @@ int snx_gui_main(const char* self) {
     }
     count_games(&app);
     if (app.menu.games) app.menu.selected = GUI_GAMES; /* the first item */
+    space_start(&app);                                 /* the footer's disk */
     free(prefs);
     left_behind(&app);
     app.left_shown = app.lefts > 0;
