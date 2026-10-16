@@ -38,22 +38,26 @@ int main(void) {
     GuiTheme back;
     while (gui_theme_keys[keys].section) ++keys;
 
-    /* a row for the folder, one per key, and Save */
+    /* Save first, a row for the folder, one per key */
     gui_editor_start(&e, def, NULL, "mytheme");
-    assert(gui_editor_rows(&e) == keys + 2 && !gui_editor_key_of(&e, GUI_EDITOR_FOLDER) &&
-           !gui_editor_key_of(&e, keys + 1));
-    assert(gui_editor_key_of(&e, 1) == &gui_theme_keys[0] && gui_editor_key_of(&e, keys) == &gui_theme_keys[keys - 1]);
+    assert(gui_editor_rows(&e) == keys + 2 && !gui_editor_key_of(&e, GUI_EDITOR_SAVE_ROW) &&
+           !gui_editor_key_of(&e, GUI_EDITOR_FOLDER));
+    assert(gui_editor_key_of(&e, 2) == &gui_theme_keys[0] &&
+           gui_editor_key_of(&e, keys + 1) == &gui_theme_keys[keys - 1]);
     gui_editor_label(&e, row_of("colors", "page"), label, sizeof label);
     assert(!strncmp(label, "colors", 6) && strstr(label, "page"));
     gui_editor_label(&e, row_of("colors", "ink"), label, sizeof label);
     assert(label[0] == ' ' && strstr(label, "ink"));
-    gui_editor_label(&e, keys + 1, label, sizeof label);
+    gui_editor_label(&e, GUI_EDITOR_SAVE_ROW, label, sizeof label);
     assert(!strcmp(label, "Save"));
+    gui_editor_label(&e, GUI_EDITOR_FOLDER, label, sizeof label);
+    assert(!strcmp(label, "Folder"));
 
     /* a built-in is edited as a new theme that starts from it */
     gui_editor_start(&e, def, NULL, "mytheme");
-    assert(!strcmp(e.id, "mytheme") && !strcmp(e.file.base, "default") && e.row == GUI_EDITOR_FOLDER && !e.dirty);
-    assert(!strcmp(value_of(keys + 1), "themes/mytheme/theme.ini"));
+    assert(!strcmp(e.id, "mytheme") && !strcmp(e.file.base, "default") && e.row == GUI_EDITOR_SAVE_ROW && !e.dirty);
+    assert(!strcmp(value_of(GUI_EDITOR_SAVE_ROW), "themes/mytheme/theme.ini") &&
+           !strcmp(value_of(GUI_EDITOR_FOLDER), "mytheme"));
 
     /* moving: the ends hold, the pages go ten */
     assert(gui_editor_key(&e, GUI_UP) == GUI_EDITOR_STAY && e.row == 0);
@@ -69,10 +73,9 @@ int main(void) {
     gui_editor_key(&e, GUI_RIGHT);
     assert(e.theme.head == GUI_STYLE_BAR && e.dirty);
     gui_editor_key(&e, GUI_RIGHT);
-    gui_editor_key(&e, GUI_RIGHT);
     assert(e.theme.head == GUI_STYLE_PLAIN);
     gui_editor_key(&e, GUI_LEFT);
-    assert(e.theme.head == GUI_STYLE_NONE);
+    assert(e.theme.head == GUI_STYLE_BAR);
     gui_editor_key(&e, GUI_SELECT); /* Select changes a word too, without typing */
     assert(e.theme.head == GUI_STYLE_PLAIN && !e.typing);
     e.row = row_of("head", "rule");
@@ -94,15 +97,71 @@ int main(void) {
     assert(e.theme.splash_chance == 100);
     gui_editor_key(&e, GUI_LEFT);
     assert(e.theme.splash_chance == 99);
-    /* a colour is typed: Left and Right only say so */
+    /* a colour is picked: Left and Right only say so */
     e.row = row_of("colors", "page");
     back = e.theme;
     gui_editor_key(&e, GUI_RIGHT);
     assert(!memcmp(&back.page, &e.theme.page, sizeof back.page) && strstr(e.note, "#RRGGBB"));
+    assert(gui_editor_colour(&e) == &e.theme.page);
 
-    /* typing: it starts from the value, what the row does not take keeps it typing, Cancel drops it */
+    /* the picker: Select opens it on red; Left/Right step a channel by 1, the pages by 16, held in 0 to 255; Up/Down go
+       between its rows, which hold at their ends; Cancel puts the colour back, and the editor's changes as they were */
+    {
+        GuiRgb was = {10, 250, 128};
+        int dirty = e.dirty, r = row_of("colors", "page");
+        e.theme.page = was;
+        gui_editor_key(&e, GUI_SELECT);
+        assert(e.picking && e.channel == GUI_PICK_RED && !e.typing && e.row == r);
+        gui_editor_key(&e, GUI_RIGHT);
+        assert(e.theme.page.r == 11 && e.dirty);
+        gui_editor_key(&e, GUI_LEFT);
+        gui_editor_key(&e, GUI_PAGE_DOWN);
+        assert(e.theme.page.r == 0);
+        gui_editor_key(&e, GUI_UP);
+        assert(e.channel == GUI_PICK_RED);
+        gui_editor_key(&e, GUI_DOWN);
+        gui_editor_key(&e, GUI_PAGE_UP);
+        assert(e.channel == GUI_PICK_GREEN && e.theme.page.g == 255 && e.row == r);
+        gui_editor_key(&e, GUI_DOWN);
+        gui_editor_key(&e, GUI_LEFT);
+        assert(e.channel == GUI_PICK_BLUE && e.theme.page.b == 127);
+        gui_editor_key(&e, GUI_DOWN);
+        gui_editor_key(&e, GUI_DOWN);
+        assert(e.channel == GUI_PICK_HEX);
+        gui_editor_key(&e, GUI_RIGHT); /* the typed row says how */
+        assert(e.theme.page.b == 127 && strstr(e.note, "#RRGGBB"));
+        /* a click or a drag: a channel set, held in range, its row focused */
+        gui_editor_pick(&e, GUI_PICK_GREEN, 300);
+        assert(e.channel == GUI_PICK_GREEN && e.theme.page.g == 255);
+        gui_editor_pick(&e, GUI_PICK_RED, -5);
+        gui_editor_pick(&e, 7, 40); /* no such channel */
+        assert(e.channel == GUI_PICK_RED && e.theme.page.r == 0);
+        e.dirty = dirty;
+        gui_editor_pick(&e, GUI_PICK_RED, 0); /* the same value changes nothing */
+        assert(e.dirty == dirty);
+        gui_editor_key(&e, GUI_CANCEL);
+        assert(!e.picking && !memcmp(&e.theme.page, &was, sizeof was) && e.dirty == dirty && e.row == r);
+        assert(gui_editor_key(&e, GUI_DOWN) == GUI_EDITOR_STAY && e.row == r + 1); /* the rows move again */
+        e.row = r;
+        /* Select keeps it, on the editor's row */
+        gui_editor_key(&e, GUI_SELECT);
+        gui_editor_key(&e, GUI_RIGHT);
+        gui_editor_key(&e, GUI_SELECT);
+        assert(!e.picking && e.theme.page.r == 11 && e.dirty);
+        gui_editor_pick(&e, GUI_PICK_RED, 99); /* closed, it changes nothing */
+        assert(e.theme.page.r == 11);
+        e.theme.page = was;
+    }
+
+    /* typing, the picker's last row: it starts from the value, what the row does not take keeps it typing, Cancel
+       drops it and the picker stays */
     gui_editor_key(&e, GUI_SELECT);
-    assert(e.typing && !strcmp(e.text, value_of(e.row)));
+    for (r = 0; r < 3; ++r) gui_editor_key(&e, GUI_DOWN);
+    gui_editor_key(&e, GUI_SELECT);
+    assert(e.picking && e.typing && !strcmp(e.text, value_of(e.row)));
+    gui_editor_key(&e, GUI_CANCEL);
+    assert(e.picking && !e.typing && e.channel == GUI_PICK_HEX);
+    gui_editor_key(&e, GUI_SELECT);
     gui_editor_erase(&e);
     assert(strlen(e.text) == 6);
     type("#12");
@@ -111,8 +170,15 @@ int main(void) {
     assert(gui_editor_key(&e, GUI_UP) == GUI_EDITOR_STAY && e.typing); /* the keys type, they do not move */
     type("#1a2B3c");
     gui_editor_key(&e, GUI_SELECT);
-    assert(!e.typing && e.theme.page.r == 0x1A && e.theme.page.g == 0x2B && e.theme.page.b == 0x3C);
-    assert(!strcmp(value_of(e.row), "#1A2B3C"));
+    assert(!e.typing && e.picking && e.theme.page.r == 0x1A && e.theme.page.g == 0x2B && e.theme.page.b == 0x3C);
+    gui_editor_key(&e, GUI_UP);
+    gui_editor_key(&e, GUI_SELECT);
+    assert(!e.picking && !strcmp(value_of(e.row), "#1A2B3C"));
+    e.row = row_of("body", "marker");
+    assert(!gui_editor_colour(&e)); /* a text holds none */
+    gui_editor_key(&e, GUI_SELECT);
+    assert(e.typing && !e.picking);
+    gui_editor_key(&e, GUI_CANCEL);
     e.row = row_of("body", "marker");
     gui_editor_key(&e, GUI_SELECT);
     type("12345678901234567");
@@ -156,14 +222,14 @@ int main(void) {
     assert(gui_editor_key(&e, GUI_CANCEL) == GUI_EDITOR_LEAVE);
 
     /* Save: the row says so, and the file reads back to the theme edited */
-    e.row = keys + 1;
+    e.row = GUI_EDITOR_SAVE_ROW;
     assert(gui_editor_key(&e, GUI_SELECT) == GUI_EDITOR_SAVE);
     dir = snx_temp_dir(NULL);
     assert(dir && !gui_editor_save(&e, dir) && !e.dirty && strstr(e.note, "Saved in"));
     path = snx_format("%s/Night ink_2/theme.ini", dir);
     text = (char*)snx_read_file(path, &size);
     assert(text && gui_theme_parse(&back, "Night ink_2", text, size));
-    for (r = 1; r <= keys; ++r) {
+    for (r = 2; r <= keys + 1; ++r) {
         char a[96], b[96];
         gui_theme_get(&e.theme, gui_editor_key_of(&e, r), a, sizeof a);
         gui_theme_get(&back, gui_editor_key_of(&e, r), b, sizeof b);

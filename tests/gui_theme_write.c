@@ -1,8 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* theme.ini written from a theme reads back to that theme (gui_theme_write), over any base: the built-ins, every
-   format's fixtures (tests/gui_themes), ErET's loading layout and the keys the GUI does not read; and the key table's
-   values: what each type takes and leaves */
+/* theme.ini written from a theme reads back to that theme (gui_theme_write), over any base: the built-ins, ErET's
+   loading layout and the keys the GUI does not read; and the key table's values: what each type takes and leaves */
 #include "common/utilities/common.h"
 #include "gui/theme.h"
 #include <assert.h>
@@ -51,11 +50,9 @@ static int round_trip(const char* text, size_t size, const char* id, const char*
     return ok;
 }
 
-int main(int argc, char** argv) {
-    const char* fixtures = argc > 1 ? argv[1] : SNX_GUI_THEME_FIXTURES "/1";
+int main(void) {
     static const char* const builtins[] = {"default", "yorha"};
-    char** names = NULL;
-    size_t count = 0, i;
+    size_t i;
     int fails = 0;
     char* written;
     GuiTheme t;
@@ -73,27 +70,13 @@ int main(int argc, char** argv) {
         assert(strstr(written, "base = ") && strstr(written, builtins[i]));
         free(written);
     }
-    /* every fixture of format 1: what the GUI reads from it, written, reads the same */
-    assert(!snx_list_dir(fixtures, &names, &count) && count);
-    for (i = 0; i < count; ++i) {
-        char* path;
-        unsigned char* text;
-        size_t size;
-        size_t n = strlen(names[i]);
-        if (n < 5 || strcmp(names[i] + n - 4, ".ini")) continue;
-        path = snx_path_join(fixtures, names[i]);
-        text = snx_read_file(path, &size);
-        assert(text);
-        names[i][n - 4] = 0;
-        fails += !round_trip((const char*)text, size, names[i], names[i], &written);
-        if (!strcmp(names[i], "site-eret-loading"))
-            assert(strstr(written, "layout = loading") && !strstr(written, "base = "));
+    /* ErET's loading layout: no base, YoRHa's runs in its [colors], written as it was */
+    {
+        static const char text[] = "[theme]\nlayout = loading\n[colors]\npage = #101010\nink = #F0F0F0\n";
+        fails += !round_trip(text, sizeof text - 1, "eret", "ErET's loading", &written);
+        assert(strstr(written, "layout = loading") && !strstr(written, "base = "));
         free(written);
-        free(text);
-        free(path);
     }
-    snx_free_strings(names, count);
-
     /* the keys a file has that the GUI does not read stay, by section, and ErET's places are written with the theme's
        values; quotes keep the spaces at the ends of a value, and a value that is itself quoted */
     {

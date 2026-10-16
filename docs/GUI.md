@@ -17,8 +17,11 @@ The window's title tells which build it is, as `ScarletNX <branch> <commit> (<co
 build of a detached checkout outside CI says `detached`, and both read `unknown` outside a git checkout. A game's window carries the same line after the game's name.
 
 - Up/Down and Left/Right move the yellow focus, wrapping at the ends.
+- Tab and Shift+Tab go round the menu, Games and the Settings, the tabs at the top; a click on a tab
+  opens it. A theme edited and not saved keeps its screen.
 - A list with rows out of sight (the menu with big letters, `games/`'s pages, the Settings, the theme
-  editor) shows an arrow in its left margin, up on its first row and down on its last, in the soft colour.
+  editor) shows an arrow past the right edge of its boxes, up on its first row and down on its last, in
+  the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it.
 - The menu, top to bottom: **Recent games**, **Games**, the three loads, **Setup device keys**,
   **Settings**, **Share log** and **Exit**.
@@ -82,15 +85,23 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   libgccjit; games in `games/` are not recompiled), **gdbstub** passes `-S` and `-s`, the
   runtime's stub on port 1234 waiting for the debugger at startup (UNIX only). None of them
   reaches the Linux or the 3DS driver.
-- The footer's first line, after the RAM and the CPU, says what ScarletNX's folders take (games/,
+- The Status box, after the RAM and the CPU, says what ScarletNX's folders take (games/,
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
   the menu's own) and what is left on that disk, counted as the menu opens and after each run.
 - Settings > App's **Theme** switches to the next theme, or the one before: the built-in Default
-  and YoRHa, then each folder of `themes/` (see [Themes](#themes)). It lasts for the session.
-- Settings > App's **Theme editor** edits the current theme: a row per `theme.ini` key, and beside them a
-  preview of the menu or a run (Tab switches). Left/Right change a word, a switch or a
-  number, Enter types a colour, a text or a number.
-  Save (Ctrl+S) writes `themes/<folder>/theme.ini` in the data folder and switches to it;
+  and YoRHa, then each folder of `themes/` (see [Themes](#themes)). It is kept for the next start,
+  as is Text size, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
+  name) and `text_size` (`auto` or 1 to 4). A value the
+  menu does not know, or a theme no longer there, is named in the menu's message as it opens and
+  left out; a file that cannot be written is named in App's note.
+- Settings > App's **Theme editor** edits the current theme: **Save** first, the folder it is saved in, a row
+  per `theme.ini` key, and beside them a
+  preview of the menu or a run (Ctrl+P, or a click on it, switches). Left/Right change a word, a switch or a
+  number, Enter types a text or a number and opens a colour's picker. The picker sits over the keys, so the preview
+  shows the colour as it changes: a bar per channel, R, G and B, which Left/Right step by 1 and PgUp/PgDn by 16, or
+  a click, a drag or a finger sets, then the colour as `#RRGGBB`, which Enter there types. Enter keeps the colour, as
+  does a click or a tap off the picker; ESC (Back on Android) puts back the one it had.
+  Save (or Ctrl+S) writes `themes/<folder>/theme.ini` in the data folder and switches to it;
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
 - Settings > App's **Text size** steps the menu's letters through Auto (fit the screen) and four
@@ -109,22 +120,23 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   **Share log** lists them all.
 - **Recent games**, above the items, lists the last five games run, newest first, by
   the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
-  The focus moves between them and the items in one ring, and the line under the menu
-  shows the focused game's path. Choosing one runs it again with the driver it was
+  The focus moves between them and the items in one ring, and the tips show the focused game's
+  path. Choosing one runs it again with the driver it was
   loaded with and the options the menu has now; a game whose file is gone leaves the
   list instead. The list is kept in `recent.txt`, beside `last-run.log`, in the user's state
   folder on Linux (`$XDG_STATE_HOME/scarletnx/gui/`, by default `~/.local/state/scarletnx/gui/`;
   an older version's in `~/.local/share/scarletnx/gui/` stay where they are), or in
   `%APPDATA%\scarletnx\gui\` on Windows, a line per
   game: `switch`, `linux` or `3ds`, `file` or `games` (a program from games/, run as it is),
-  the path and the name, separated by tabs.
+  the path and the name, separated by tabs. A list that cannot be written there is named in the
+  message, after a run's end too, until it can be.
 
 The launcher runs Switch inputs with the `scarletnx` it is part of, and looks beside it, then on
 PATH, for `scarletnx-gnuabi` or `scarletnx-3ds`. Files are passed directly
 as argv entries, never through a shell. Spaces, Unicode paths and shell punctuation
 are not evaluated. Local `file://` text drops are decoded, but lists and remote URI
-authorities are rejected. The working directory is not changed and is shown at the
-bottom of the window. See [GNUABI](GNUABI.md) for supported Linux ELF applications.
+authorities are rejected. The working directory is not changed and is shown in the
+Status box. See [GNUABI](GNUABI.md) for supported Linux ELF applications.
 
 ## Games: the games of games/ and the player's folders
 
@@ -168,7 +180,7 @@ A missing driver or invalid dropped path leaves the prompt open with a diagnosti
 Drivers use line-buffered stdout so progress remains visible when piped. A third-party
 program that buffers or privately redirects its output still controls when it flushes.
 
-The footer samples combined GUI and descendant resource use every half second:
+The Status box samples combined GUI and descendant resource use every half second:
 
 - RAM is the sum of resident sets (Windows working sets), in MB or GB. Shared pages may
   be counted more than once. It is not the machine's total installed memory.
@@ -183,14 +195,33 @@ and providing job-wide CPU accounting. No elevated privileges are needed.
 
 ## Themes
 
-A theme colours and dresses the screen's three parts: the head (a title and the hints
-at the top), the body (the menu, the file list or the driver's output) and the footer
-(resource use and the working directory). It applies to the menu screens and to the
-run, which is **compiling** until the runner prints its `ScarletNX - <name>` banner and
+A theme colours and dresses the screens: the head (the tabs and a title), the boxes (the list, the box
+beside it about the focus, the Status box: resource use, the disk and the working folder) and the foot (the
+tips, what the focus is about or the screen's message, and the screen's keys). It applies to the menu screens
+and to the run, which is **compiling** until the runner prints its `ScarletNX - <name>` banner and
 **loading** from then on.
 
-The built-ins are `default`, the look above, and `yorha`: paper and ink with a header
-bar, square markers and the focused line inverted on the menus, and a run drawn as a
+The screens are boxes side by side, nothing over another, the default framing them in thin lines and YoRHa
+filling them. At the top the tabs, Menu, Games and Settings, and the screen's title after them against the
+right (`[head] place = tabs`) or on a row of its own under them (`below`). Under them the list, each entry a box
+of its own, the focused one framed in the focus colour or inverted, with the theme's cursor in the margin;
+beside it a box with what the focus is about (a recent game's path, Games' folders, the keys in use, the last
+run's output) and under that one the Status box. At the foot the tips, under the list's column, and the
+screen's keys, under the side box's, each in a box with a bar down its left (`[tips] box`, `[footer] box`) or on
+the page; the tips go on a row of their own under the head with `[tips] place = top`. Games lists Back and a
+page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
+screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
+opens the picker) and Back at its foot. The Settings list their groups, and beside them the focused group's
+rows: Enter, or a click on a row, opens the group, its rows taking the focus, and a click on another group
+opens that one. The theme editor lists its keys, the preview beside them. A window too narrow for both puts
+the side box under the list. A run of the console layout shows the driver's output in a box sized to it,
+beside it what runs and how it ended over the status, the file in the tips and the ESC line where the keys
+go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question, or
+the files an older version left, comes in a box over the screen darkened.
+
+The built-ins are `default`, the look above, and `yorha`: paper and ink, a title twice the text's size, a faint
+grid on the page, square markers, the focused box inverted, the tips and the keys in boxes on a band of ink at
+the foot, and a run drawn as a
 dark loading screen in its own colours (`[run]`): the title, the game's name with turning
 dots and a turning ring; each step the driver and the runner report (unpack, extract,
 recompile with its blocks, built, launch, GPU) typed down the page, with turning dots
@@ -223,8 +254,8 @@ author = me
 ; default | yorha
 base = yorha
 [colors]
-; #RRGGBB. soft: hints, secondary text, rules. focus: the focused line, or its band.
-; dim: the ring's outer circle, the progress bar's empty segments and its rule
+; #RRGGBB. soft: hints, secondary text, rules. focus: the focused box, or its band.
+; dim: the boxes' frames, a filled box, the grid and the title's shadow
 page = #101418
 ink = #D8D4C4
 soft = #8A8676
@@ -235,19 +266,39 @@ dim = #3E3E40
 ; a diff's added lines, as failure its removed ones; no screen uses it yet
 added = #6A9A50
 [head]
-; plain | bar | none; rule: a line under the head
+; plain | bar: the tabs and the title on a band of ink; rule: a line under the head
 style = bar
 rule = true
+; the title after the tabs (tabs) or on a row of its own under them (below)
+place = tabs
+; the title's letters, times the text's (1 to 3), and a shadow under them in the dim colour
+size = 2
+shadow = true
 ; the title per screen: menu, games, keys, compiling, loading
 menu = NIGHT  /  MENU
 [body]
-; before each menu item; quotes keep spaces
+; before each item; quotes keep spaces
 marker = "> "
-; color | bar
+; the focused box: color | bar
 focus = bar
+; the boxes outline (framed) or fill (filled)
+panels = fill
+; in the list's margin, beside the focused box
+cursor = "> "
+[backdrop]
+; a faint grid on the page behind the boxes, in the dim colour
+grid = true
+[tips]
+; what the focus is about: bottom (a box at the foot beside the keys) | top (a row under the head)
+place = top
+; in a box with a bar at its left, or on the page
+box = false
 [footer]
+; plain | bar: on a band of ink | none: no Status box; rule: a line over the foot
 style = plain
 rule = true
+; the keys in a box with a bar at its left, or on the page
+box = true
 [run]
 ; console: the driver's output as it comes; steps: the loading screen above, in its own colours
 layout = steps
@@ -322,17 +373,14 @@ ErET needs `[theme] layout`, so the built-in files carry one: `debug` and `menu`
 (`GUI_THEME_FORMAT`).
 
 - A file of a format the GUI knows reads the same in it and in every later GUI: each key
-  keeps its meaning, and each value reads to the same theme. `tests/gui_themes/<N>/` holds
-  files of format N as a theme tool wrote them, with the theme each reads to (`<name>.json`,
-  the GUI's fields by key); `gui_theme_formats` checks them, and `gui_theme_write` checks
-  that each, written again, reads to the same theme.
-  They are never changed: a field added to themes later is simply not in an older one's JSON.
+  keeps its meaning, and each value reads to the same theme.
 - A new key, or a new word for a key, keeps N: an older GUI leaves what it does not know, and
-  the base's value stays. A new key's value in the built-ins must keep an older file looking
-  as it did.
+  a file that does not name it takes its base's value, so an older theme gets the new look of
+  the built-in it starts from (the title's place, the tips, the foot's boxes).
+- A key a newer one replaces is deprecated, never given a new meaning: it still reads as the new keys say, and the
+  GUI never writes it again. The format has none so far.
 - N goes up only when a key that exists has to mean something else. The GUI then reads the
-  older format's files with the older meaning, their fixtures stay, and the new format's go
-  in `tests/gui_themes/<N+1>/`.
+  older format's files with the older meaning.
 - A file of a newer format than the GUI's: the keys it knows still apply, the others are left.
 - The theme editor writes every key and the newest format it knows (`gui_theme_write`), so its
   files never lean on a built-in's values, which may change. It reads an older file as that
@@ -370,7 +418,7 @@ self-copy safety, cancellation, and the bright-red overwrite warning.
 Settings tests cover the runtime's list read into rows, picks, the options each combination
 passes, and the screens of its groups and App; menu tests cover mouse hover versus explicit
 activation, Games shown only with games, the recent games' show-more row,
-yellow/pink highlighting and footer descriptions. Theme tests cover the built-ins, a `theme.ini` over its base
+yellow/pink highlighting and the tips. Theme tests cover the built-ins, a `theme.ini` over its base
 (unreadable values and unknown keys included), the `themes/` folders listed, the
 compiling and loading screens, and the YoRHa bars and band in the real renderer. Step
 tests cover each driver and runner line, the other lines kept under their step, lines

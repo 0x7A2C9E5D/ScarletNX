@@ -27,6 +27,9 @@ static const char* const format_keys[] = {"theme/format",
                                           "colors/added",
                                           "head/style",
                                           "head/rule",
+                                          "head/place",
+                                          "head/size",
+                                          "head/shadow",
                                           "head/menu",
                                           "head/games",
                                           "head/keys",
@@ -34,8 +37,14 @@ static const char* const format_keys[] = {"theme/format",
                                           "head/loading",
                                           "body/marker",
                                           "body/focus",
+                                          "body/panels",
+                                          "body/cursor",
+                                          "backdrop/grid",
+                                          "tips/place",
+                                          "tips/box",
                                           "footer/style",
                                           "footer/rule",
+                                          "footer/box",
                                           "run/layout",
                                           "run/page",
                                           "run/ink",
@@ -165,8 +174,19 @@ int main(void) {
                !p->lines[GUI_PROMPT_ABORTING]);
     }
     assert(!strcmp(loading->title[GUI_SCREEN_LOADING], "BOOTING"));
-    assert(def->head == GUI_STYLE_PLAIN && !def->focus_bar && !strcmp(def->marker, "- ") && !def->title[0][0]);
-    assert(yorha->head == GUI_STYLE_BAR && yorha->focus_bar && yorha->title[GUI_SCREEN_COMPILING][0]);
+    assert(def->head == GUI_STYLE_PLAIN && !def->focus_bar && !strcmp(def->marker, "- ") &&
+           !strcmp(def->title[GUI_SCREEN_MENU], yorha->title[GUI_SCREEN_MENU]));
+    assert(yorha->head == GUI_STYLE_PLAIN && yorha->focus_bar && yorha->title[GUI_SCREEN_COMPILING][0]);
+    /* the boxes: the default's framed, YoRHa's filled with a cursor in the margin; the title in the row of tabs in
+       both, YoRHa's twice as big; the grid, the tips' and the keys' boxes and the foot on a band YoRHa's alone */
+    assert(def->panels == GUI_PANELS_OUTLINE && !def->cursor[0] && yorha->panels == GUI_PANELS_FILL &&
+           !strcmp(yorha->cursor, "\xe2\x96\xba "));
+    assert(def->head_place == GUI_HEAD_TABS && yorha->head_place == GUI_HEAD_TABS);
+    assert(def->title_size == 1 && !def->title_shadow && yorha->title_size == 2 && !yorha->title_shadow);
+    assert(!def->grid && yorha->grid && def->tips_place == GUI_TIPS_BOTTOM && yorha->tips_place == GUI_TIPS_BOTTOM);
+    assert(!def->tips_box && !def->footer_box && yorha->tips_box && yorha->footer_box);
+    assert(def->footer == GUI_STYLE_PLAIN && yorha->footer == GUI_STYLE_BAR && yorha->head_rule && !def->head_rule);
+    assert(!gui_theme_key("body", "layout") && !gui_theme_key("head", "tabs") && !gui_theme_key("frame", "edges"));
 
     parse(&theme, ""); /* nothing: the default, named after its folder */
     assert(same(theme.ink, def->ink) && !strcmp(theme.id, "mine") && !strcmp(theme.name, "mine"));
@@ -180,7 +200,7 @@ int main(void) {
     assert(theme.scroll_ms == yorha->scroll_ms);
     assert(rgb_is(theme.page, 0x0A, 0x0B, 0x0C));
     assert(same(theme.ink, yorha->ink) && same(theme.soft, yorha->soft) && same(theme.focus, yorha->focus));
-    assert(theme.head == GUI_STYLE_NONE && theme.head_rule == yorha->head_rule);
+    assert(theme.head == yorha->head && theme.head_rule == yorha->head_rule); /* the head has no none */
     assert(theme.footer == GUI_STYLE_PLAIN && theme.footer_rule && !theme.focus_bar && !strcmp(theme.marker, "* "));
     assert(!strcmp(theme.title[GUI_SCREEN_LOADING], "  BOOT  ") && !theme.title[GUI_SCREEN_MENU][0]);
     assert(!strcmp(theme.title[GUI_SCREEN_COMPILING], yorha->title[GUI_SCREEN_COMPILING]));
@@ -229,6 +249,21 @@ int main(void) {
            !theme.prompt.lines[GUI_PROMPT_KEYS]);
     parse(&theme, "[prompt]\nalign = left\n");
     assert(theme.prompt.align == GUI_ALIGN_LEFT);
+
+    /* the boxes: a file that names none of their keys takes its base's; the title's place, the tips', the foot's
+       boxes and its style; an unknown word keeps the base's */
+    parse(&theme, "[theme]\nformat = 1\nbase = default\n[colors]\npage = #102030\n");
+    assert(theme.panels == GUI_PANELS_OUTLINE && theme.head_place == GUI_HEAD_TABS &&
+           rgb_is(theme.page, 0x10, 0x20, 0x30));
+    parse(&theme, "[theme]\nbase = yorha\n[body]\ncursor = \"> \"\n");
+    assert(theme.panels == GUI_PANELS_FILL && !strcmp(theme.cursor, "> "));
+    parse(&theme, "[theme]\nbase = yorha\n[body]\npanels = outline\n[head]\nplace = below\n[tips]\nplace = top\n"
+                  "box = false\n[footer]\nbox = false\nstyle = none\n");
+    assert(theme.panels == GUI_PANELS_OUTLINE && theme.head_place == GUI_HEAD_BELOW &&
+           theme.tips_place == GUI_TIPS_TOP);
+    assert(!theme.tips_box && !theme.footer_box && theme.footer == GUI_STYLE_NONE);
+    parse(&theme, "[body]\npanels = round\n[head]\nplace = left\n[tips]\nplace = side\n");
+    assert(theme.panels == def->panels && theme.head_place == def->head_place && theme.tips_place == def->tips_place);
 
     /* a value longer than its field keeps the base's; an unknown base leaves the default */
     memset(longer, 0, sizeof longer);

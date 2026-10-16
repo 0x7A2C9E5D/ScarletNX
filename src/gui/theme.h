@@ -14,6 +14,11 @@ typedef enum { GUI_RUN_CONSOLE, GUI_RUN_STEPS } GuiRunLayout;
 typedef enum { GUI_LINE_NONE, GUI_LINE_TYPING, GUI_LINE_SLIDE, GUI_LINE_FADE } GuiLineIn;
 typedef enum { GUI_RING_NONE, GUI_RING_LEFT, GUI_RING_RIGHT, GUI_RING_NEAR_TEXT } GuiRing;
 typedef enum { GUI_ALIGN_LEFT, GUI_ALIGN_CENTER, GUI_ALIGN_RIGHT } GuiAlign;
+typedef enum { GUI_PANELS_OUTLINE, GUI_PANELS_FILL } GuiPanels; /* the boxes framed, or filled */
+/* the title in the row of tabs, after them, or on a row of its own under them */
+typedef enum { GUI_HEAD_TABS, GUI_HEAD_BELOW } GuiHeadPlace;
+/* what the focus is about: in the foot's box beside the keys, or on a row under the head */
+typedef enum { GUI_TIPS_BOTTOM, GUI_TIPS_TOP } GuiTipsPlace;
 /* the lines that wait on the user: the keys screen's drop line, the ESC line after a run, a run being aborted */
 typedef enum {
     GUI_PROMPT_KEYS,
@@ -46,10 +51,18 @@ typedef struct {
     char id[64], name[64], author[64];
     uint32_t format;
     GuiRgb page, ink, soft, focus, active, failure, dim, warning, added;
-    GuiStyle head, footer;
+    GuiStyle head, footer; /* the head plain or on a band of ink; the foot too, or (none) without the Status box */
     int head_rule, footer_rule;
-    int focus_bar; /* the focused line as a band of ink, its text in the page colour */
+    GuiHeadPlace head_place;
+    uint32_t title_size; /* the title's letters, times the text's; 0 is 1 */
+    int title_shadow;
+    int focus_bar; /* the focused box as a band of the focus colour, its text in the page colour */
     char marker[16];
+    GuiPanels panels;
+    char cursor[16]; /* in the list's margin, beside the focused box */
+    int grid;        /* a faint grid on the page behind the boxes, in the dim colour */
+    GuiTipsPlace tips_place;
+    int tips_box, footer_box; /* the tips and the keys in a box with a bar at its left, or on the page */
     char title[GUI_SCREEN_COUNT][64];
     GuiRunLayout run;
     GuiPalette run_colors;  /* the steps screen's own: a loading screen, darker than the menus */
