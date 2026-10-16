@@ -18,10 +18,25 @@ void overlay_toggle(void);
 void overlay_set_display_scale(float scale);
 /* where the panel goes on a picture of sw x sh pixels: its corner and the whole number it is scaled by */
 void overlay_place(int sw, int sh, int* x, int* y, int* scale);
-int overlay_select(void);    /* the focused item's action: a page, a setting changed, or an OVERLAY_ for the caller */
-void overlay_move(int rows); /* the focus up (-1) or down (1), round the page */
-void overlay_side(int step); /* the focused setting down (-1) or up (1) */
-int overlay_back(void);      /* the page above; OVERLAY_CLOSE from the first */
+int overlay_select(void);      /* the focused item's action: a page, a setting changed, or an OVERLAY_ for the caller */
+void overlay_move(int rows);   /* the focus up (-1) or down (1), round the page */
+void overlay_scroll(int rows); /* the mouse's wheel: the same, stopping at the ends */
+void overlay_side(int step);   /* the focused setting down (-1) or up (1) */
+int overlay_back(void);        /* the page above; OVERLAY_CLOSE from the first */
+/* a button pressed, as the game reads it (one HidNpadButton bit): the D-pad and the left stick move, A selects, B goes
+   back, the rest do nothing. What it did, as overlay_select */
+int overlay_pad(u64 button);
+/* the pads each poll, the on-screen controls and the connected ones: their buttons and sticks at ms. With the menu
+   shown, each button pressed since the last call acts as overlay_pad, the left stick past half way as the D-pad; a
+   direction held goes on after SNX_OVERLAY_REPEAT_DELAY ms, every SNX_OVERLAY_REPEAT_MS; a press held as the menu opens
+   does not act. What the last one did, or the first that leaves the menu */
+#define SNX_OVERLAY_REPEAT_DELAY 400
+#define SNX_OVERLAY_REPEAT_MS    120
+int overlay_controls(u64 buttons, const i32 sticks[4], u64 ms);
+/* the button map page waits for a control pressed on a pad (pad_map.h's): it takes it, and that press is no menu
+   key */
+int overlay_listening(void);
+void overlay_press(int control);
 /* a tap at x, y on a picture of sw x sh: what it did, OVERLAY_CLOSE outside the panel */
 int overlay_tap(float x, float y, int sw, int sh);
 void overlay_draw(SnxUiList* l, int sw, int sh);

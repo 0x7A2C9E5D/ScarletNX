@@ -667,6 +667,17 @@ char* snx_user_path(const char* path, int kind) {
     return moved ? moved : snx_strdup(path);
 }
 int snx_left_behind(const char* old, const char* now) { return strcmp(old, now) && snx_path_exists(old); }
+int snx_launcher_name(const char* name) {
+    static const char own[] = "scarletnx";
+    size_t i;
+    for (i = 0; own[i]; ++i)
+        if (tolower((unsigned char)name[i]) != own[i]) return 0;
+    return !name[i] || name[i] == '-' || name[i] == '.';
+}
+const SnxGameFile snx_game_files[SNX_GAME_FILES] = {{".log", SNX_USER_STATE},
+                                                    {"threads.txt", SNX_USER_STATE},
+                                                    {".ini", SNX_USER_CONFIG},
+                                                    {"shader_cache/vk_pipelines.bin", SNX_USER_CACHE}};
 char* snx_work_dir(const char* data_dir) {
     char *old = snx_path_join(data_dir, "work"), *work = snx_user_path(old, SNX_USER_CACHE);
     if (snx_left_behind(old, work))

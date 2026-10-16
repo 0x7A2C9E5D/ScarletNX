@@ -7,38 +7,24 @@
 #include <stdlib.h>
 #include <string.h>
 
-void gui_menu_key(GuiMenu* menu, GuiKey key) {
-    if (menu->running) return;
-    if (menu->view == GUI_LOAD_GAMES) return; /* the paginated browser owns its keys */
-    if (menu->view == GUI_LOAD_KEYS) {
-        if (key == GUI_CANCEL) menu->view = GUI_LOAD_NONE;
-        return;
+/* the item before or after one, round the menu, past Games while it is hidden */
+static int step_item(const GuiMenu* menu, int item, int step) {
+    do item = (item + GUI_ITEM_COUNT + step) % GUI_ITEM_COUNT;
+    while (item == GUI_GAMES && !menu->games);
+    return item;
+}
+GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
+    int first = menu->games ? GUI_GAMES : GUI_SWITCH;
+    if (menu->running || menu->view == GUI_LOAD_GAMES) return GUI_MENU_STAY; /* the browser owns its keys */
+    if (menu->view != GUI_LOAD_NONE && key == GUI_CANCEL) {
+        menu->view = GUI_LOAD_NONE;
+        menu->selected = menu->active;
+        return GUI_MENU_STAY;
     }
-    if (menu->view == GUI_LOAD_OPTIONS || menu->view == GUI_LOAD_DROP) {
-        if (key == GUI_CANCEL) {
-            menu->view = menu->view == GUI_LOAD_DROP ? GUI_LOAD_OPTIONS : GUI_LOAD_NONE;
-            menu->selected = menu->active;
-            menu->focus_load = menu->view == GUI_LOAD_OPTIONS;
-            menu->load_activated = false;
-            return;
-        }
-        if (menu->focus_load) {
-            if (key == GUI_UP || key == GUI_DOWN || key == GUI_LEFT || key == GUI_RIGHT)
-                menu->load_selected ^= 1;
-            else if (key == GUI_SELECT) {
-                menu->selected = menu->active;
-                menu->load_active = menu->load_selected;
-                menu->load_activated = true;
-                menu->view = menu->load_selected == GUI_LOAD_DRAG ? GUI_LOAD_DROP : GUI_LOAD_GAMES;
-            }
-            return;
-        }
-        /* Main-menu focus may move while the submenu stays anchored to active.
-           Only explicit activation below replaces/closes that submenu. */
-    } else {
-        menu->focus_load = false;
-    }
-    /* the recent games and the items are one ring: the last game leads to the first item, Exit to the first game */
+    if (menu->view == GUI_LOAD_KEYS) return GUI_MENU_STAY;
+    if (menu->selected == GUI_GAMES && !menu->games) menu->selected = GUI_SWITCH; /* the games are gone */
+    /* the recent games and the items are one ring: the last recent row leads to the first item, Exit to the first
+       game */
     switch (key) {
         case GUI_UP:
         case GUI_LEFT:
@@ -46,11 +32,11 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
                 menu->recent_focus--;
             else if (menu->recent_focus) {
                 menu->recent_focus = 0;
-                menu->selected = GUI_ITEM_COUNT - 1;
-            } else if (menu->selected == 0 && menu->recent)
+                menu->selected = GUI_EXIT;
+            } else if (menu->selected == first && menu->recent)
                 menu->recent_focus = menu->recent;
             else
-                menu->selected = (menu->selected + GUI_ITEM_COUNT - 1) % GUI_ITEM_COUNT;
+                menu->selected = step_item(menu, menu->selected, -1);
             break;
         case GUI_DOWN:
         case GUI_RIGHT:
@@ -58,53 +44,35 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
                 menu->recent_focus++;
             else if (menu->recent_focus) {
                 menu->recent_focus = 0;
-                menu->selected = 0;
-            } else if (menu->selected == GUI_ITEM_COUNT - 1 && menu->recent)
+                menu->selected = first;
+            } else if (menu->selected == GUI_EXIT && menu->recent)
                 menu->recent_focus = 1;
             else
-                menu->selected = (menu->selected + 1) % GUI_ITEM_COUNT;
+                menu->selected = step_item(menu, menu->selected, 1);
             break;
         case GUI_SELECT:
             if (menu->recent_focus) {
-                menu->recent_open = menu->recent_focus;
                 menu->view = GUI_LOAD_NONE;
-                menu->focus_load = menu->load_activated = false;
-                break;
+                return GUI_MENU_RECENT;
             }
             menu->active = menu->selected;
             menu->activated = true;
-            menu->load_activated = false;
             menu->view = GUI_LOAD_NONE;
-            if (menu->selected == GUI_FULLSCREEN)
-                menu->fullscreen = !menu->fullscreen;
-            else if (menu->selected == GUI_TOUCH)
-                menu->touch = (menu->touch + 1) % (GUI_TOUCH_OFF + 1);
-            else if (menu->selected == GUI_CONTROLS)
-                menu->controls = !menu->controls;
-            else if (menu->selected == GUI_GCCJIT) {
-                if (SNX_GUI_HAS_GCCJIT) menu->gccjit = !menu->gccjit;
-            } else if (menu->selected == GUI_GDBSTUB)
-                menu->gdbstub = !menu->gdbstub;
-            else if (menu->selected == GUI_THEME)
-                menu->theme_next = 1;
-            else if (menu->selected == GUI_THEME_EDIT)
-                menu->theme_edit = 1;
-            else if (menu->selected == GUI_TEXT)
-                menu->text_size = (menu->text_size + 1) % (GUI_TEXT_MAX + 1);
-            else if (menu->selected == GUI_LOG)
-                menu->share_log = 1;
-            else if (menu->selected == GUI_EXIT)
-                menu->quit = true;
-            else if (menu->selected == GUI_KEYS)
-                menu->view = GUI_LOAD_KEYS;
-            else {
-                menu->view = GUI_LOAD_OPTIONS;
-                menu->load_selected = GUI_LOAD_DRAG;
-                menu->focus_load = true;
+            switch (menu->selected) {
+                case GUI_GAMES: menu->view = GUI_LOAD_GAMES; break;
+                case GUI_SWITCH:
+                case GUI_LINUX:
+                case GUI_3DS: menu->view = GUI_LOAD_DROP; break;
+                case GUI_KEYS: menu->view = GUI_LOAD_KEYS; break;
+                case GUI_SETTINGS: return GUI_MENU_SETTINGS;
+                case GUI_LOG: return GUI_MENU_LOG;
+                case GUI_EXIT: menu->quit = true; break;
+                default: break;
             }
             break;
         default: break;
     }
+    return GUI_MENU_STAY;
 }
 bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
     if (!confirm->shown) return false;
@@ -118,35 +86,28 @@ bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
         default: return false;
     }
 }
+void gui_size_text(char* out, size_t size, uint64_t bytes) {
+    double mb = (double)bytes / 1048576;
+    if (mb < 1024)
+        snprintf(out, size, "%.0f MB", mb);
+    else
+        snprintf(out, size, "%.1f GB", mb / 1024);
+}
 void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_bytes, double cpu_percent, int cores) {
-    double mb = (double)memory_bytes / 1048576, n = cores > 0 ? cores : 1, used = cpu_percent / 100;
+    double n = cores > 0 ? cores : 1, used = cpu_percent / 100;
+    char ram[32];
     if (!available) {
         snprintf(out, size, "GUI + children: resource usage unavailable");
         return;
     }
     used = used < 0 ? 0 : used > n ? n : used; /* a sample taken over a little more than its interval */
-    if (mb < 1024)
-        snprintf(out, size, "GUI + children: RAM %.0f MB  CPU %.0f%% (%.1f cores)", mb, used / n * 100, used);
-    else
-        snprintf(out, size, "GUI + children: RAM %.1f GB  CPU %.0f%% (%.1f cores)", mb / 1024, used / n * 100, used);
+    gui_size_text(ram, sizeof ram, memory_bytes);
+    snprintf(out, size, "GUI + children: RAM %s  CPU %.0f%% (%.1f cores)", ram, used / n * 100, used);
 }
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
-        case GUI_FULLSCREEN:
-#ifdef __ANDROID__
-            return "The menu and the games on the whole screen, the system's bars hidden";
-#else
-            return "Enable fullscreen at startup";
-#endif
-        case GUI_TOUCH: return "The game's touch screen: fingers, the mouse too, or off";
-        case GUI_CONTROLS: return "A pad on the screen. The game's menu edits it";
-        case GUI_GCCJIT:
-            return SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
-                                      : "Program was not compiled with libgccjit";
-        case GUI_GDBSTUB: return "Enables gdbstub on port 1234";
-        case GUI_THEME: return "Built-in themes, then each themes/<name>/theme.ini";
-        case GUI_THEME_EDIT: return "This theme's keys with a preview, saved as themes/<name>/theme.ini";
-        case GUI_TEXT: return "Bigger letters scroll the menu. Auto fits the screen";
+        case GUI_GAMES: return "The games of games/ and of the folders added in Settings > App";
+        case GUI_SETTINGS: return "The game's .ini settings, the launcher's for the next runs, and its theme";
         case GUI_LOG:
 #ifdef __ANDROID__
             return "Saves the last run's output and game log to /sdcard/ScarletNX/scarletnx.log, then shares it";
@@ -169,29 +130,16 @@ int gui_slide(int over, uint64_t ms, uint32_t step_ms) {
     if (t < (uint64_t)(2 * GUI_SLIDE_WAIT + over)) return over;
     return over - (int)(t - 2 * GUI_SLIDE_WAIT - over);
 }
-const char* gui_touch_option(const GuiMenu* menu) {
-    static const char* const options[] = {"--touch=1", "--touch=2", "--touch=0"}; /* by GUI_TOUCH_* */
-    return options[menu->touch];
-}
-const char* gui_controls_option(const GuiMenu* menu) { return menu->controls ? "--controls=1" : "--controls=0"; }
-size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char* repo, const char** argv) {
-    size_t n = 0;
-    /* These are Switch options, never guest argv for the CPU-only Linux driver. */
-    if (menu->selected != GUI_SWITCH) return 0;
-    /* the game's .ini has a fullscreen of its own: OFF has to say so, or the .ini would decide */
-    argv[n++] = menu->fullscreen ? "-f" : "--fullscreen=0";
-    argv[n++] = gui_touch_option(menu);
-    argv[n++] = gui_controls_option(menu);
-    if (menu->gccjit && SNX_GUI_HAS_GCCJIT && !prepared) argv[n++] = "--backend=gcc";
-    if (menu->gdbstub) {
-        argv[n++] = "-S";
-        argv[n++] = "-s";
+size_t gui_wrap(const char* s, int width) {
+    size_t at = 0, slash = 0, space = 0;
+    int chars;
+    for (chars = 0; s[at]; ++chars) {
+        if (chars == (width < 1 ? 1 : width)) return slash ? slash : space ? space : at;
+        while ((s[++at] & 0xC0) == 0x80) {} /* a character's other bytes */
+        if (s[at - 1] == '/' || s[at - 1] == '\\') slash = at;
+        if (s[at - 1] == ' ') space = at;
     }
-    if (repo && !prepared) {
-        argv[n++] = "--repo";
-        argv[n++] = repo;
-    }
-    return n;
+    return at;
 }
 size_t gui_browser_pages(const GuiBrowser* browser) {
     if (!browser->count || !browser->page_size) return 1;
@@ -331,6 +279,26 @@ static int hex(char c) {
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     return -1;
 }
+/* size bytes of at, percent-decoded when uri; NULL when a % is not two hex digits, or makes a NUL */
+static char* decoded(const char* at, size_t size, bool uri) {
+    const char* end = at + size;
+    size_t n = 0;
+    char* out = malloc(size + 1);
+    while (out && at < end) {
+        unsigned char c = (unsigned char)*at++;
+        if (uri && c == '%') {
+            if (end - at < 2 || hex(at[0]) < 0 || hex(at[1]) < 0 ||
+                !(c = (unsigned char)(hex(at[0]) << 4 | hex(at[1])))) {
+                free(out);
+                return NULL;
+            }
+            at += 2;
+        }
+        out[n++] = (char)c;
+    }
+    if (out) out[n] = 0;
+    return out;
+}
 char* gui_drop_path(const char* text, bool text_drop) {
     if (!text) return NULL;
     const char* end = text + strlen(text);
@@ -350,59 +318,29 @@ char* gui_drop_path(const char* text, bool text_drop) {
         }
     }
     if (text == end) return NULL;
-    char* result = malloc((size_t)(end - text) + 1);
-    if (!result) return NULL;
-    size_t n = 0;
-    while (text < end) {
-        unsigned char c = (unsigned char)*text++;
-        if (uri && c == '%') {
-            if (end - text < 2 || hex(text[0]) < 0 || hex(text[1]) < 0) goto invalid;
-            c = (unsigned char)((hex(text[0]) << 4) | hex(text[1]));
-            text += 2;
-        }
-        if (!c || (text_drop && (c == '\r' || c == '\n'))) goto invalid;
-        result[n++] = (char)c;
+    char* result = decoded(text, (size_t)(end - text), uri);
+    if (result && text_drop && strpbrk(result, "\r\n")) {
+        free(result);
+        return NULL;
     }
-    result[n] = 0;
 #ifdef _WIN32
-    if (uri && n >= 3 && result[0] == '/' && result[2] == ':') memmove(result, result + 1, n);
+    if (result && uri && result[0] == '/' && result[1] && result[2] == ':') memmove(result, result + 1, strlen(result));
 #endif
     return result;
-invalid:
-    free(result);
-    return NULL;
-}
-/* text from at, percent-decoded; NULL when a % is not followed by two hex digits */
-static char* decoded(const char* at) {
-    size_t n = 0;
-    char* out = malloc(strlen(at) + 1);
-    if (!out) return NULL;
-    while (*at) {
-        if (*at != '%') {
-            out[n++] = *at++;
-            continue;
-        }
-        if (hex(at[1]) < 0 || hex(at[2]) < 0) {
-            free(out);
-            return NULL;
-        }
-        out[n++] = (char)(hex(at[1]) << 4 | hex(at[2]));
-        at += 3;
-    }
-    out[n] = 0;
-    return out;
 }
 char* gui_document_path(const char* uri) {
     static const char storage[] = "content://com.android.externalstorage.documents/document/";
     static const char downloads[] = "content://com.android.providers.downloads.documents/document/";
     int download = !strncmp(uri, downloads, sizeof downloads - 1);
+    const char* id_text;
     char *id, *colon, *path = NULL;
     size_t n;
     if (!download && strncmp(uri, storage, sizeof storage - 1)) /* other systems' pickers: a path or a file:// URI */
         return !strstr(uri, "://")           ? gui_drop_path(uri, false)
                : !strncmp(uri, "file://", 7) ? gui_drop_path(uri, true)
                                              : NULL;
-    id = decoded(uri + (download ? sizeof downloads : sizeof storage) - 1);
+    id_text = uri + (download ? sizeof downloads : sizeof storage) - 1;
+    id = decoded(id_text, strlen(id_text), true);
     colon = id ? strchr(id, ':') : NULL;
     if (colon && download && !strncmp(id, "raw:/", 5)) { /* a download by path; "msf:12" is by number */
         path = malloc(strlen(colon + 1) + 1);
@@ -416,20 +354,4 @@ char* gui_document_path(const char* uri) {
     }
     free(id);
     return path;
-}
-
-static const char banner_text[] = "\nScarletNX - ";
-void gui_banner_reset(GuiBanner* banner) {
-    banner->matched = 1; /* the output starts at the start of a line */
-    banner->seen = 0;
-}
-int gui_banner_feed(GuiBanner* banner, const char* data, size_t size) {
-    size_t i;
-    for (i = 0; i < size && !banner->seen; ++i) {
-        if (data[i] == banner_text[banner->matched]) {
-            if (++banner->matched == sizeof banner_text - 1) banner->seen = 1;
-        } else
-            banner->matched = data[i] == '\n' ? 1 : 0; /* only a newline starts the text again */
-    }
-    return banner->seen;
 }

@@ -45,7 +45,7 @@ typedef struct {
 typedef struct {
     char id[64], name[64], author[64];
     uint32_t format;
-    GuiRgb page, ink, soft, focus, active, failure, dim, warning;
+    GuiRgb page, ink, soft, focus, active, failure, dim, warning, added;
     GuiStyle head, footer;
     int head_rule, footer_rule;
     int focus_bar; /* the focused line as a band of ink, its text in the page colour */
@@ -73,7 +73,9 @@ typedef struct {
 
 /* A key of theme.ini: where a GuiTheme keeps it and what it takes. gui_theme_keys lists every one the GUI writes, by
    section, the editor's form and the file in the same order */
-typedef enum { GUI_KEY_TEXT, GUI_KEY_COLOUR, GUI_KEY_FLAG, GUI_KEY_NUMBER, GUI_KEY_WORD } GuiKeyType;
+/* GUI_KEY_ACTION: a row that does something rather than hold a value (a form's own, never theme.ini's); its value, when
+   size, the text at at */
+typedef enum { GUI_KEY_TEXT, GUI_KEY_COLOUR, GUI_KEY_FLAG, GUI_KEY_NUMBER, GUI_KEY_WORD, GUI_KEY_ACTION } GuiKeyType;
 typedef struct {
     const char* section;
     const char* key;
@@ -87,10 +89,11 @@ extern const GuiThemeKey gui_theme_keys[]; /* a NULL section ends it */
 /* what a section of the file holds, for the editor's and the file's heading */
 const char* gui_theme_section_about(const char* section);
 const GuiThemeKey* gui_theme_key(const char* section, const char* key);
-/* value into the key's field: 1 when the GUI takes it, 0 leaves the field as it was */
-int gui_theme_set(GuiTheme* theme, const GuiThemeKey* key, const char* value);
+/* value into the key's field of object, a theme or another object its offsets are in: 1 when the GUI takes it, 0
+   leaves the field as it was */
+int gui_theme_set(void* object, const GuiThemeKey* key, const char* value);
 /* the key's value as the file writes it */
-void gui_theme_get(const GuiTheme* theme, const GuiThemeKey* key, char* out, size_t size);
+void gui_theme_get(const void* object, const GuiThemeKey* key, char* out, size_t size);
 
 /* What a theme's file says beyond the theme, to be written back: its base and ErET's layout, ErET's places for the
    ring, the boot word and the texture (written again with the theme's values), and the keys the GUI does not read,
@@ -114,6 +117,8 @@ const GuiTheme* gui_splash_theme(const GuiTheme* theme, int roll);
 /* A theme.ini's text over the built-in its [theme] base names (default when absent): a key it lacks, or cannot
    read, keeps the base's value. Returns false only when out of memory. */
 int gui_theme_parse(GuiTheme* theme, const char* id, const char* text, size_t size);
+/* the text of the first dirs[i]/id/theme.ini that can be read; owned, NULL for none */
+char* gui_theme_text(const char* const* dirs, size_t count, const char* id, size_t* size);
 /* The first dirs[i]/id/theme.ini that can be read, else the built-in of that id, else the default theme: a folder
    named like a built-in replaces it */
 void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id);

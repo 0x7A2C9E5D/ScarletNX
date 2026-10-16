@@ -54,6 +54,7 @@ snx_component(gpu gpu/gpu.c gpu/maxwell/engines.c gpu/maxwell/mme.c gpu/maxwell/
 include("${PROJECT_SOURCE_DIR}/cmake/controls_atlas.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
 set(platform runtime/platform/plat.c runtime/platform/unattended.c runtime/platform/backend/sdl3.c
+             runtime/platform/backend/gamepad.c
              runtime/platform/overlay.c runtime/platform/touch.c runtime/platform/ui.c runtime/platform/vpad.c
              runtime/platform/fatal_screen.c "${CMAKE_BINARY_DIR}/generated/controls_png.c")
 if(WIN32)
@@ -84,6 +85,11 @@ if(ANDROID)
     install(TARGETS scarletnx scarletnx-run LIBRARY DESTINATION lib/${ANDROID_ABI} RUNTIME DESTINATION lib/${ANDROID_ABI})
 else()
     add_executable(scarletnx runtime/entry.c)
+    # started with nothing to run, it opens the menu (src/gui), which runs games with it
+    if(TARGET scarletnx-gui)
+        target_link_libraries(scarletnx PRIVATE scarletnx-gui)
+        target_compile_definitions(scarletnx PRIVATE SNX_WITH_GUI)
+    endif()
 endif()
 list(TRANSFORM components PREPEND snx_)
 add_library(scarletnx-nx STATIC)
@@ -113,7 +119,8 @@ endif()
 # SDL3 is either the system package or the pinned static source build (cmake/dependencies.cmake)
 include("${PROJECT_SOURCE_DIR}/cmake/window_icon.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/build_info.cmake")
-target_link_libraries(snx_platform PRIVATE SDL3::SDL3 snx_window_icon snx_build_info)
+include("${PROJECT_SOURCE_DIR}/cmake/pad_sdl.cmake")
+target_link_libraries(snx_platform PRIVATE SDL3::SDL3 snx_window_icon snx_build_info snx_pad_sdl)
 # the game's menu in YoRHa's colours, from src/gui/themes/yorha/theme.ini (cmake/gui_themes.cmake)
 target_include_directories(snx_platform PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(scarletnx PRIVATE SDL3::SDL3)
@@ -131,6 +138,14 @@ if(BUILD_TESTING)
         target_link_libraries(snx-test-shader-direct-regressions PRIVATE Threads::Threads m)
     endif()
     add_test(NAME shader_direct_regressions COMMAND $<TARGET_FILE:snx-test-shader-direct-regressions>)
+    add_test(NAME runtime_settings_list COMMAND "${CMAKE_COMMAND}" -DRUNTIME=$<TARGET_FILE:scarletnx>
+             -P "${PROJECT_SOURCE_DIR}/tests/settings_list.cmake")
+    add_test(NAME runtime_unknown_option COMMAND "${CMAKE_COMMAND}" -DRUNTIME=$<TARGET_FILE:scarletnx>
+             -P "${PROJECT_SOURCE_DIR}/tests/unknown_option.cmake")
+    if(NOT WIN32) # Windows' error box would wait for a click
+        add_test(NAME runtime_game_copy COMMAND "${CMAKE_COMMAND}" -DRUNTIME=$<TARGET_FILE:scarletnx>
+                 -P "${PROJECT_SOURCE_DIR}/tests/game_copy.cmake")
+    endif()
     find_program(SNX_SHADER_SPIRV_VAL spirv-val)
     find_program(SNX_SHADER_SPIRV_DIS spirv-dis)
     find_package(Python3 QUIET COMPONENTS Interpreter)

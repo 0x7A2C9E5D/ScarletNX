@@ -49,26 +49,15 @@ static void code_path(char* p, size_t size) {
     snprintf(p, size, "%s%s_code.so", g_exedir, g_exename);
 #endif
 }
+int (*snx_menu)(const char* self);
 /* Started with nothing to run and no game of its name: a double-clicked AppImage or scarletnx.exe, or the desktop
-   entry. The launcher beside this program opens instead of the error about a missing game. In an AppImage argv[0] is
-   the launcher in its mount's bin/ (sharun's), which sets up the bundled libraries for whatever it runs from there,
-   so the GUI is looked for beside argv[0] when it names a folder, beside the real executable otherwise (a PATH
-   lookup). Returns -1 when there is no launcher */
-static int open_launcher(const char* argv0) {
-    char* self = strchr(argv0, '/') || strchr(argv0, '\\') ? snx_strdup(argv0) : snx_executable(argv0);
-    char *folder = self ? snx_dirname(self) : NULL, *gui;
-#if defined(_WIN32)
-    gui = folder ? snx_path_join(folder, "scarletnx-gui.exe") : NULL;
-#else
-    gui = folder ? snx_path_join(folder, "scarletnx-gui") : NULL;
-#endif
-    int result = -1;
-    if (gui && snx_is_file(gui)) {
-        const char* command[] = {gui, NULL};
-        result = snx_run_stage(command, NULL, "Launcher");
-    }
-    free(gui);
-    free(folder);
+   entry. The menu opens instead of the error about a missing game, and runs games with this program. In an AppImage
+   argv[0] is the launcher in its mount's bin/ (sharun's), which sets up the bundled libraries for whatever it runs
+   from there: that is the program when argv[0] names one, the real executable otherwise (a PATH lookup) */
+static int open_menu(const char* argv0) {
+    int named = (strchr(argv0, '/') || strchr(argv0, '\\')) && snx_is_file(argv0);
+    char* self = named ? snx_absolute(argv0) : snx_executable(argv0);
+    int result = snx_menu(self);
     free(self);
     return result;
 }
@@ -120,19 +109,19 @@ static void user_folder(char* dir, size_t size, const char* games, int kind) {
 /* the settings, the log and threads.txt, and the pipeline cache. What an older build left beside the game stays, a
    line in the log saying so each start */
 static void user_folders(void) {
-    /* the game's own name before those that start with a dot */
-    static const char* const what[] = {".log", "threads.txt", ".ini", "shader_cache/vk_pipelines.bin"};
-    const char* const dirs[] = {g_statedir, g_statedir, g_confdir, g_cachedir};
     char from[1400], to[1400];
     char* games = snx_absolute(g_exedir[0] ? g_exedir : ".");
     user_folder(g_confdir, sizeof g_confdir, games, SNX_USER_CONFIG);
     user_folder(g_statedir, sizeof g_statedir, games, SNX_USER_STATE);
     user_folder(g_cachedir, sizeof g_cachedir, games, SNX_USER_CACHE);
-    for (int i = 0; games && i < 4; i++) {
-        const char* game = what[i][0] == '.' ? g_exename : "";
-        if (!strcmp(dirs[i], g_exedir)) continue;
-        snprintf(from, sizeof from, "%s/%s%s", games, game, what[i]);
-        snprintf(to, sizeof to, "%s%s%s", dirs[i], game, what[i]);
+    for (int i = 0; games && i < SNX_GAME_FILES; i++) {
+        const char* name = snx_game_files[i].name;
+        const char* game = name[0] == '.' ? g_exename : "";
+        int kind = snx_game_files[i].kind;
+        const char* dir = kind == SNX_USER_CONFIG ? g_confdir : kind == SNX_USER_STATE ? g_statedir : g_cachedir;
+        if (!strcmp(dir, g_exedir)) continue;
+        snprintf(from, sizeof from, "%s/%s%s", games, game, name);
+        snprintf(to, sizeof to, "%s%s%s", dir, game, name);
         if (snx_left_behind(from, to)) WARN("%s was left by an older version: this one keeps it in %s\n", from, to);
     }
     free(games);
@@ -241,6 +230,10 @@ static int is_dump(const char* path) {
 int snx_main(int argc, char** argv) {
     int startup = snx_startup_options(argc, argv);
     if (startup) return startup;
+    if (argc == 2 && !strcmp(argv[1], "--settings")) { /* what the menu's Settings offer */
+        ini_list();
+        return 0;
+    }
     /* Start the helper before creating any host threads. */
     if (g_opt_gdb && snx_gdb_start(g_opt_gdb_stop)) return 2;
     /* In an AppImage argv[0] points into its mount (APPDIR). APPIMAGE is the file that was run, so a copy named after
@@ -267,13 +260,11 @@ int snx_main(int argc, char** argv) {
               "without --game to extract, recompile and play it (scarletnx Game.nsp), or point --game at a game "
               "recompiled from it, for example --game=games/Game.",
               dump);
-    if (argc == 1 && !snx_module_static) {
+    /* the launcher started bare opens the menu; a game's copy without its code says so, as below */
+    if (argc == 1 && !snx_module_static && snx_menu && snx_launcher_name(g_exename)) {
         char p[1200];
         code_path(p, sizeof p);
-        if (!snx_is_file(p)) {
-            int launched = open_launcher(argv[0]);
-            if (launched >= 0) return launched;
-        }
+        if (!snx_is_file(p)) return open_menu(argv[0]);
     }
     /* loaded before the .ini is opened, which writes one: a mistyped --game leaves no stray settings file */
     if (load_code()) fatal("Could not load the game's recompiled code.");

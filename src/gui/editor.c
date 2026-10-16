@@ -6,20 +6,20 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int key_count(void) {
-    static int n = -1;
-    if (n < 0)
-        for (n = 0; gui_theme_keys[n].section; ++n) {}
-    return n;
+int gui_editor_rows(const GuiEditor* editor) { return editor->count + (editor->object ? editor->action != NULL : 2); }
+const GuiThemeKey* gui_editor_key_of(const GuiEditor* editor, int row) {
+    int first = editor->object ? 0 : 1; /* after the theme's folder */
+    return row >= first && row < first + editor->count ? &editor->keys[row - first] : NULL;
 }
-int gui_editor_rows(void) { return key_count() + 2; }
-const GuiThemeKey* gui_editor_key_of(int row) {
-    return row > GUI_EDITOR_FOLDER && row <= key_count() ? &gui_theme_keys[row - 1] : NULL;
+static int is_save(const GuiEditor* editor, int row) {
+    return (!editor->object || editor->action) && row == gui_editor_rows(editor) - 1;
 }
-static int is_save(int row) { return row == gui_editor_rows() - 1; }
+static char* object(GuiEditor* editor) { return editor->object ? editor->object : (char*)&editor->theme; }
 
 void gui_editor_start(GuiEditor* editor, const GuiTheme* theme, GuiThemeFile* file, const char* id) {
     memset(editor, 0, sizeof *editor);
+    editor->keys = gui_theme_keys;
+    while (gui_theme_keys[editor->count].section) ++editor->count;
     editor->theme = *theme;
     if (file) {
         editor->file = *file;
@@ -28,6 +28,13 @@ void gui_editor_start(GuiEditor* editor, const GuiTheme* theme, GuiThemeFile* fi
         snprintf(editor->file.base, sizeof editor->file.base, "%s", gui_theme_builtin(theme->id) ? theme->id : "");
     snprintf(editor->id, sizeof editor->id, "%s", id);
     editor->preview = GUI_SCREEN_MENU;
+}
+void gui_editor_form(GuiEditor* editor, const GuiThemeKey* keys, int count, void* object, const char* action) {
+    memset(editor, 0, sizeof *editor);
+    editor->action = action;
+    editor->keys = keys;
+    editor->count = count;
+    editor->object = (char*)object;
 }
 void gui_editor_stop(GuiEditor* editor) { gui_theme_file_free(&editor->file); }
 
@@ -43,7 +50,7 @@ static int folder_name(const char* s) {
 }
 /* a word, a flag or a number moved by step: a word goes round, a number stays in 0 to its max */
 static void change(GuiEditor* editor, const GuiThemeKey* key, int step) {
-    char* field = (char*)&editor->theme + key->at;
+    char* field = object(editor) + key->at;
     if (key->type == GUI_KEY_FLAG)
         *(int*)field = !*(int*)field;
     else if (key->type == GUI_KEY_WORD) {
@@ -62,7 +69,7 @@ static void change(GuiEditor* editor, const GuiThemeKey* key, int step) {
 }
 /* what was typed into the focused row: kept, or the note says what the row takes */
 static void take(GuiEditor* editor) {
-    const GuiThemeKey* key = gui_editor_key_of(editor->row);
+    const GuiThemeKey* key = gui_editor_key_of(editor, editor->row);
     if (!key) {
         if (!folder_name(editor->text)) {
             snprintf(editor->note, sizeof editor->note,
@@ -70,7 +77,7 @@ static void take(GuiEditor* editor) {
             return;
         }
         snprintf(editor->id, sizeof editor->id, "%s", editor->text);
-    } else if (!gui_theme_set(&editor->theme, key, editor->text)) {
+    } else if (!gui_theme_set(object(editor), key, editor->text)) {
         if (key->type == GUI_KEY_TEXT)
             snprintf(editor->note, sizeof editor->note, "At most %u bytes", (unsigned)key->size - 1);
         else
@@ -82,8 +89,8 @@ static void take(GuiEditor* editor) {
     editor->dirty = true;
 }
 GuiEditorDo gui_editor_key(GuiEditor* editor, GuiKey key) {
-    const GuiThemeKey* k = gui_editor_key_of(editor->row);
-    int rows = gui_editor_rows(), leaving = editor->leaving;
+    const GuiThemeKey* k = gui_editor_key_of(editor, editor->row);
+    int rows = gui_editor_rows(editor), leaving = editor->leaving;
     editor->leaving = false;
     editor->note[0] = 0;
     if (editor->typing) {
@@ -100,10 +107,18 @@ GuiEditorDo gui_editor_key(GuiEditor* editor, GuiKey key) {
         case GUI_PAGE_DOWN: editor->row = editor->row + 10 < rows ? editor->row + 10 : rows - 1; break;
         case GUI_LEFT:
         case GUI_RIGHT:
+            if (k && k->type == GUI_KEY_ACTION) {
+                editor->step = key == GUI_RIGHT ? 1 : -1;
+                return GUI_EDITOR_ACTION;
+            }
             if (k) change(editor, k, key == GUI_RIGHT ? 1 : -1);
             break;
         case GUI_SELECT:
-            if (is_save(editor->row)) return GUI_EDITOR_SAVE;
+            if (is_save(editor, editor->row)) return GUI_EDITOR_SAVE;
+            if (k && k->type == GUI_KEY_ACTION) {
+                editor->step = 0;
+                return GUI_EDITOR_ACTION;
+            }
             if (k && (k->type == GUI_KEY_FLAG || k->type == GUI_KEY_WORD)) {
                 change(editor, k, 1);
                 break;
@@ -112,7 +127,7 @@ GuiEditorDo gui_editor_key(GuiEditor* editor, GuiKey key) {
             editor->typing = true;
             break;
         case GUI_CANCEL:
-            if (!editor->dirty || leaving) return GUI_EDITOR_LEAVE;
+            if (!editor->dirty || leaving || editor->object) return GUI_EDITOR_LEAVE;
             editor->leaving = true;
             snprintf(editor->note, sizeof editor->note, "Not saved: ESC again leaves without it, Save keeps it");
             break;
@@ -133,18 +148,22 @@ void gui_editor_erase(GuiEditor* editor) {
     editor->text[n] = 0;
 }
 
-void gui_editor_label(int row, char* out, size_t size) {
-    const GuiThemeKey* k = gui_editor_key_of(row);
-    int first = k && (row == 1 || strcmp(gui_editor_key_of(row - 1)->section, k->section));
+void gui_editor_label(const GuiEditor* editor, int row, char* out, size_t size) {
+    const GuiThemeKey *k = gui_editor_key_of(editor, row), *before = gui_editor_key_of(editor, row - 1);
+    int first = k && (!before || strcmp(before->section, k->section));
     if (!k)
-        snprintf(out, size, "%s", row == GUI_EDITOR_FOLDER ? "Folder" : "Save");
+        snprintf(out, size, "%s", editor->object ? editor->action : row == GUI_EDITOR_FOLDER ? "Folder" : "Save");
+    else if (editor->flat)
+        snprintf(out, size, "%s", k->key);
     else
         snprintf(out, size, "%-11s %s", first ? k->section : "", k->key);
 }
 void gui_editor_value(const GuiEditor* editor, int row, char* out, size_t size) {
-    const GuiThemeKey* k = gui_editor_key_of(row);
+    const GuiThemeKey* k = gui_editor_key_of(editor, row);
     if (k)
-        gui_theme_get(&editor->theme, k, out, size);
+        gui_theme_get(editor->object ? editor->object : (const char*)&editor->theme, k, out, size);
+    else if (editor->object)
+        snprintf(out, size, "%s", "");
     else if (row == GUI_EDITOR_FOLDER)
         snprintf(out, size, "%s", editor->id);
     else
@@ -173,6 +192,6 @@ void gui_editor_scroll(GuiEditor* editor, int rows) {
     if (rows < 1) rows = 1;
     if (editor->row < editor->top) editor->top = editor->row;
     if (editor->row >= editor->top + rows) editor->top = editor->row - rows + 1;
-    if (editor->top > gui_editor_rows() - rows) editor->top = gui_editor_rows() - rows;
+    if (editor->top > gui_editor_rows(editor) - rows) editor->top = gui_editor_rows(editor) - rows;
     if (editor->top < 0) editor->top = 0;
 }

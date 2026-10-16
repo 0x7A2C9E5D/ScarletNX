@@ -41,3 +41,35 @@ void ini_format(const IniOpt* o, char* out, size_t n) {
     else if (n)
         out[0] = 0;
 }
+
+static int step_of(const IniOpt* o) { return o->step > 0 ? o->step : 1; }
+void ini_word(const IniOpt* o, int v, char* out, size_t n) {
+    const char* w = o->words;
+    double at = o->lo;
+    size_t len;
+    for (; w; w += len + 1, at += step_of(o)) {
+        const char* mark;
+        len = strcspn(w, "|");
+        mark = (const char*)memchr(w, '#', len);
+        if (mark) { /* a number from here on */
+            snprintf(out, n, "%.*s%d%.*s", (int)(mark - w), w, v + o->shift, (int)(len - (size_t)(mark - w) - 1),
+                     mark + 1);
+            return;
+        }
+        if ((double)v == at) {
+            snprintf(out, n, "%.*s", (int)len, w);
+            return;
+        }
+        if (!w[len]) break;
+    }
+    snprintf(out, n, "%d", v); /* no word for it */
+}
+int ini_step(const IniOpt* o, int v, int dir) {
+    int step = step_of(o), count;
+    if (!o->words || strchr(o->words, '#')) {
+        double n = (double)v + (double)dir * step;
+        return n < o->lo ? (int)o->lo : n > o->hi ? (int)o->hi : (int)n;
+    }
+    count = (int)((o->hi - o->lo) / step) + 1;
+    return (int)o->lo + (((v - (int)o->lo) / step + dir) % count + count) % count * step;
+}

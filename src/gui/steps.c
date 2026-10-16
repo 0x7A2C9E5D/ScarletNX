@@ -108,6 +108,12 @@ int gui_steps_percent(const GuiSteps* steps) {
     }
     return percent;
 }
+const GuiStep* gui_steps_last(const GuiSteps* steps, const char* label) {
+    int i;
+    for (i = steps->count - 1; i >= 0; --i)
+        if (!strcmp(steps->step[i].label, label)) return &steps->step[i];
+    return NULL;
+}
 int gui_step_notes(const GuiSteps* steps, const GuiStep* step, const GuiNote** out, int max) {
     int i;
     int count = 0;

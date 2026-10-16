@@ -44,6 +44,7 @@ const GuiThemeKey gui_theme_keys[] = {
     COLOUR("colors", "failure", failure, "warnings, the ESC line, a failed run"),
     COLOUR("colors", "dim", dim, "unused by the menus; [run] dim is the loading screen's"),
     COLOUR("colors", "warning", warning, "the abort question in the console layout"),
+    COLOUR("colors", "added", added, "a diff's added lines, as failure its removed ones; no screen uses it yet"),
     WORD("head", "style", head, styles, "bar: the title on a band of ink; none: no title and no hints"),
     FLAG("head", "rule", head_rule, "a line under the head"),
     TEXT("head", "menu", title[GUI_SCREEN_MENU], "the menu's title"),
@@ -112,24 +113,13 @@ static int copy(char* out, size_t size, const char* value) {
     strcpy(out, value);
     return 1;
 }
-static int hex(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
 static int colour(GuiRgb* out, const char* value) {
-    int i;
-    uint8_t v[3];
-    if (strlen(value) != 7 || value[0] != '#') return 0;
-    for (i = 0; i < 3; ++i) {
-        int hi = hex(value[1 + 2 * i]), lo = hex(value[2 + 2 * i]);
-        if (hi < 0 || lo < 0) return 0;
-        v[i] = (uint8_t)(hi * 16 + lo);
-    }
-    out->r = v[0];
-    out->g = v[1];
-    out->b = v[2];
+    unsigned r, g, b;
+    if (strlen(value) != 7 || value[0] != '#' || strspn(value + 1, "0123456789abcdefABCDEF") != 6) return 0;
+    sscanf(value + 1, "%2x%2x%2x", &r, &g, &b);
+    out->r = (uint8_t)r;
+    out->g = (uint8_t)g;
+    out->b = (uint8_t)b;
     return 1;
 }
 /* a whole number, 0 to 10000 */
@@ -152,8 +142,8 @@ const GuiThemeKey* gui_theme_key(const char* section, const char* key) {
         if (!strcmp(k->section, section) && !strcmp(k->key, key)) return k;
     return NULL;
 }
-int gui_theme_set(GuiTheme* theme, const GuiThemeKey* key, const char* value) {
-    char* field = (char*)theme + key->at;
+int gui_theme_set(void* object, const GuiThemeKey* key, const char* value) {
+    char* field = (char*)object + key->at;
     uint32_t n;
     int i;
     switch (key->type) {
@@ -174,11 +164,12 @@ int gui_theme_set(GuiTheme* theme, const GuiThemeKey* key, const char* value) {
                     return 1;
                 }
             return 0;
+        case GUI_KEY_ACTION: return 0; /* nothing to set */
     }
     return 0;
 }
-void gui_theme_get(const GuiTheme* theme, const GuiThemeKey* key, char* out, size_t size) {
-    const char* field = (const char*)theme + key->at;
+void gui_theme_get(const void* object, const GuiThemeKey* key, char* out, size_t size) {
+    const char* field = (const char*)object + key->at;
     const GuiRgb* c = (const GuiRgb*)field;
     int i, n;
     switch (key->type) {
@@ -191,6 +182,7 @@ void gui_theme_get(const GuiTheme* theme, const GuiThemeKey* key, char* out, siz
             for (n = 0; key->words[n]; ++n) {}
             snprintf(out, size, "%s", key->words[i >= 0 && i < n ? i : 0]);
             return;
+        case GUI_KEY_ACTION: snprintf(out, size, "%s", key->size ? field : ""); return;
     }
 }
 /* run_colors: an ErET loading theme's [colors] are its loading screen's, here the run's */
@@ -285,22 +277,24 @@ int gui_theme_parse(GuiTheme* theme, const char* id, const char* text, size_t si
     copy(theme->name, sizeof theme->name, id);
     return visit(text, size, theme, bases, 0, !bases[0] && bases[2]);
 }
-void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id) {
+char* gui_theme_text(const char* const* dirs, size_t count, const char* id, size_t* size) {
     size_t i;
-    const GuiTheme* builtin;
-    for (i = 0; i < count; ++i) {
+    char* text = NULL;
+    for (i = 0; i < count && !text; ++i) {
         char* folder = dirs[i] ? snx_path_join(dirs[i], id) : NULL;
         char* path = folder ? snx_path_join(folder, "theme.ini") : NULL;
-        size_t size = 0;
-        unsigned char* text = path ? snx_read_file(path, &size) : NULL;
-        int read = text && gui_theme_parse(theme, id, (const char*)text, size);
-        free(text);
+        text = path ? (char*)snx_read_file(path, size) : NULL;
         free(path);
         free(folder);
-        if (read) return;
     }
-    builtin = gui_theme_builtin(id);
-    *theme = builtin ? *builtin : builtins_read()[0];
+    return text;
+}
+void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id) {
+    size_t size = 0;
+    char* text = gui_theme_text(dirs, count, id, &size);
+    const GuiTheme* builtin = gui_theme_builtin(id);
+    if (!text || !gui_theme_parse(theme, id, text, size)) *theme = builtin ? *builtin : builtins_read()[0];
+    free(text);
 }
 
 void gui_themes_free(GuiThemes* themes) {

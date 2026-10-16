@@ -9,6 +9,8 @@
 #include "cpu/aarch64/cpu.h"
 
 int snx_main(int argc, char** argv);
+/* the menu (src/gui), set by an executable that has one: started with nothing to run, the runtime opens it */
+extern int (*snx_menu)(const char* self);
 extern char g_datadir[1024], g_exename[256], g_exedir[1024];
 /* where the game's settings, its log and threads.txt, and its caches go: g_exedir, or the XDG folders of a game in
    an installed build's data folder */

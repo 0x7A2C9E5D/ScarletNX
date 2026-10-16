@@ -23,6 +23,7 @@ static const char* const format_keys[] = {"theme/format",
                                           "colors/failure",
                                           "colors/dim",
                                           "colors/warning",
+                                          "colors/added",
                                           "head/style",
                                           "head/rule",
                                           "head/menu",
@@ -284,7 +285,7 @@ int main(void) {
         assert(!strcmp(f.prompt.close, b->prompt.close) && f.prompt.blink == b->prompt.blink);
         for (l = 0; l < GUI_PROMPT_COUNT; ++l) assert(f.prompt.lines[l] == b->prompt.lines[l]);
         assert(f.format == GUI_THEME_FORMAT && b->format == GUI_THEME_FORMAT && !strcmp(f.author, b->author));
-        assert(same(f.warning, b->warning) && same(f.run_colors.page, b->run_colors.page));
+        assert(same(f.warning, b->warning) && same(f.added, b->added) && same(f.run_colors.page, b->run_colors.page));
         assert(same(f.run_colors.ink, b->run_colors.ink) && same(f.run_colors.soft, b->run_colors.soft));
         assert(same(f.run_colors.dim, b->run_colors.dim) && same(f.run_colors.failure, b->run_colors.failure));
         assert(same(f.run_colors.warning, b->run_colors.warning));

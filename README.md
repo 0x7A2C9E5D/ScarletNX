@@ -63,7 +63,7 @@ but the game always starts anew. To run the steps separately:
 cd games && ./Game
 ```
 
-For an SDL3 menu, run `./build/scarletnx-gui`. Select a driver with arrow keys and
+For an SDL3 menu, run `./build/scarletnx` with no arguments. Select a driver with arrow keys and
 Enter or hover and click, then choose drag-and-drop or the paginated `games/` browser.
 The GUI shows live driver/game
 output and combined CPU/RAM usage. See [GUI launcher](docs/GUI.md).

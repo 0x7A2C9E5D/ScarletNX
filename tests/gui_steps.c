@@ -103,6 +103,25 @@ int main(void) {
     assert(n == 1 && !strcmp(notes[0]->text, "note of part26"));
     n = gui_step_notes(&s, at(&s, 0), notes, 8);
     assert(n == 1 && !strcmp(notes[0]->text, "note of part3"));
+
+    /* the runner's banner, at the start of a line, split across reads or not: the game is loading */
+    gui_steps_reset(&s);
+    feed(&s, "Recompiling x\nnot ScarletNX - x\nScarletNX", 1);
+    assert(!gui_steps_last(&s, "LAUNCH") && gui_steps_last(&s, "RECOMPILE") == at(&s, 0));
+    feed(&s, " - x\n", 2);
+    assert(gui_steps_last(&s, "LAUNCH") == at(&s, 1) && !strcmp(at(&s, 1)->detail, "x"));
+    gui_steps_reset(&s);
+    feed(&s, "ScarletNX -x\n\nScarletNX  - x", 1);
+    feed(&s, "\n", 1);
+    assert(!gui_steps_last(&s, "LAUNCH"));
+    feed(&s, "\n\nScarletNX - y\nScarletNX - z\n", 2);
+    assert(gui_steps_last(&s, "LAUNCH") == at(&s, 1) && !strcmp(at(&s, 1)->detail, "z") &&
+           !gui_steps_last(&s, "READY"));
+    gui_steps_reset(&s); /* a banner cut short counts once the run ends */
+    feed(&s, "ScarletNX - first line", 1);
+    assert(!gui_steps_last(&s, "LAUNCH"));
+    gui_steps_finish(&s, 1);
+    assert(gui_steps_last(&s, "LAUNCH"));
     puts("GUI steps: driver and runner lines, progress, finish passed");
     return 0;
 }

@@ -17,82 +17,106 @@ static bool suffix(const char* name, const char* extension) {
         if (tolower((unsigned char)name[n - e + i]) != extension[i]) return false;
     return true;
 }
+bool gui_is_cia(const char* name) { return suffix(name, ".cia"); }
 bool gui_is_dump(const char* name) {
     return suffix(name, ".nro") || suffix(name, ".xci") || suffix(name, ".nsp") || suffix(name, ".dxci") ||
            suffix(name, ".dnsp");
 }
 void gui_games_free(GuiGames* games) {
     snx_free_strings(games->names, games->count);
-    games->names = NULL;
+    snx_free_strings(games->paths, games->count);
+    games->names = games->paths = NULL;
     games->count = 0;
 }
-static bool scan(GuiGames* games, const char* directory, char* error, size_t size, bool cia) {
-    gui_games_free(games);
-    if (size) error[0] = 0;
+uint64_t gui_tree_size(const char* path, const int* stop) {
     char** names = NULL;
-    size_t count = 0;
-    if (snx_list_dir(directory, &names, &count)) {
-        snprintf(error, size, "Cannot open games/. Create it in the displayed working directory.");
-        return false;
+    size_t count = 0, i;
+    uint64_t total = 0;
+    if (!*path || snx_list_dir(path, &names, &count)) return 0; /* "" is none: Windows would list the working folder */
+    for (i = 0; i < count && !__atomic_load_n(stop, __ATOMIC_RELAXED); ++i) {
+        char* entry = snx_path_join(path, names[i]);
+        if (entry && !snx_is_link(entry))
+            total += snx_is_dir(entry) ? gui_tree_size(entry, stop) : snx_file_size(entry);
+        free(entry);
     }
-    games->names = calloc(count ? count : 1, sizeof(*games->names));
-    if (!games->names) {
-        snx_free_strings(names, count);
-        snprintf(error, size, "Not enough memory to list games/.");
-        return false;
-    }
-    /* snx_list_dir already sorts names. Libraries often carry executable bits,
-       but they are not game launchers. Do not show them or hidden files. */
-    for (size_t i = 0; i < count; ++i) {
-        char* name = names[i];
-        if (name[0] == '.') continue;
-        if (cia) {
-            if (!suffix(name, ".cia")) continue;
-            char* path = snx_path_join(directory, name);
-            bool regular = path && snx_is_file(path);
-            free(path);
-            if (regular) {
-                games->names[games->count++] = names[i];
-                names[i] = NULL;
-            }
-            continue;
-        }
-#ifdef __ANDROID__
-        /* the shared storage runs nothing, so nothing there is executable: a game is <name> beside <name>_code.so,
-           and a dump put there (to be prepared) shows with its own name */
-        if (suffix(name, "_code.so"))
-            name[strlen(name) - 8] = 0;
-        else if (!gui_is_dump(name))
-            continue;
-        games->names[games->count++] = names[i];
-        names[i] = NULL;
-        continue;
-#endif
-#ifdef _WIN32
-        if (!suffix(name, ".exe")) continue;
-#else
-        if (suffix(name, ".so") || strstr(name, ".so.") || suffix(name, ".dll") || suffix(name, ".dylib")) continue;
-#endif
-        char* path = snx_path_join(directory, name);
-#ifndef _WIN32
-        if (access(path, X_OK)) {
-            free(path);
-            continue;
-        }
-#endif
-        char* executable = snx_find_tool(path); /* regular file, with UTF-8 paths on Windows */
+    snx_free_strings(names, count);
+    return total;
+}
+/* whether a folder's entry is a game of kinds: a CIA, or one ready to run. Libraries often carry executable bits but
+   are not games, and hidden files are not shown. On Android the shared storage runs nothing: a game is <name> beside
+   <name>_code.so (name is cut there), and a dump put there, to be prepared, shows with its own name */
+static bool playable(const char* directory, char* name, int kinds) {
+    char* path;
+    bool listed;
+    if (name[0] == '.') return false;
+    if (suffix(name, ".cia")) {
+        if (!(kinds & GUI_GAMES_CIA)) return false;
+        path = snx_path_join(directory, name);
+        listed = path && snx_is_file(path);
         free(path);
-        if (!executable) continue;
+        return listed;
+    }
+    if (!(kinds & GUI_GAMES_RUN)) return false;
+#ifdef __ANDROID__
+    if (suffix(name, "_code.so")) {
+        name[strlen(name) - 8] = 0;
+        return true;
+    }
+    return gui_is_dump(name);
+#else
+#ifdef _WIN32
+    if (!suffix(name, ".exe")) return false;
+#else
+    if (suffix(name, ".so") || strstr(name, ".so.") || suffix(name, ".dll") || suffix(name, ".dylib")) return false;
+#endif
+    path = snx_path_join(directory, name);
+#ifndef _WIN32
+    if (!path || access(path, X_OK)) {
+        free(path);
+        return false;
+    }
+#endif
+    {
+        char* executable = path ? snx_find_tool(path) : NULL; /* regular file, with UTF-8 paths on Windows */
+        free(path);
+        listed = executable != NULL;
         free(executable);
-        games->names[games->count++] = names[i];
+    }
+    return listed;
+#endif
+}
+bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* error, size_t size) {
+    char **names = NULL, **more;
+    size_t count = 0, i;
+    if (size) error[0] = 0;
+    if (snx_list_dir(directory, &names, &count)) {
+        snprintf(error, size, "Cannot open %s.", directory);
+        return false;
+    }
+    more = (char**)realloc(games->names, (games->count + count + 1) * sizeof *more);
+    if (more) games->names = more;
+    more = more ? (char**)realloc(games->paths, (games->count + count + 1) * sizeof *more) : NULL;
+    if (more) games->paths = more;
+    if (!more) {
+        snx_free_strings(names, count);
+        snprintf(error, size, "Not enough memory to list %s.", directory);
+        return false;
+    }
+    /* snx_list_dir already sorts names */
+    for (i = 0; i < count; ++i) {
+        char* path = playable(directory, names[i], kinds) ? snx_path_join(directory, names[i]) : NULL;
+        if (!path) continue;
+        games->names[games->count] = names[i];
+        games->paths[games->count++] = path;
         names[i] = NULL;
     }
     snx_free_strings(names, count);
     return true;
 }
-bool gui_games_scan(GuiGames* games, const char* directory, char* error, size_t size) {
-    return scan(games, directory, error, size, false);
-}
-bool gui_cias_scan(GuiGames* games, const char* directory, char* error, size_t size) {
-    return scan(games, directory, error, size, true);
+bool gui_games_scan(GuiGames* games, const char* directory, bool cia, char* error, size_t size) {
+    gui_games_free(games);
+    if (gui_games_add(games, directory, cia ? GUI_GAMES_CIA : GUI_GAMES_RUN, error, size)) return true;
+    if (!strncmp(error, "Cannot open", 11))
+        snprintf(error, size, "Cannot open games/. Create it in the displayed working directory.");
+    return false;
 }
