@@ -9,9 +9,8 @@
 
 int main(void) {
     GuiMenu menu = {0};
-    GuiMenu ring;
     GuiConfirm confirm = {0};
-    /* no games: Games is hidden, and the ring goes past it */
+    /* the items alone make the ring: the games are the Games tab's */
     menu.selected = GUI_SWITCH;
     gui_menu_key(&menu, GUI_LEFT);
     assert(menu.selected == GUI_EXIT);
@@ -22,21 +21,10 @@ int main(void) {
     assert(menu.view == GUI_LOAD_DROP && menu.activated && menu.active == GUI_SWITCH && !menu.running);
     gui_menu_key(&menu, GUI_CANCEL);
     assert(menu.view == GUI_LOAD_NONE && menu.selected == GUI_SWITCH);
-    /* with games, Games comes first and opens their browser, which takes the keys */
-    menu.games = true;
-    gui_menu_key(&menu, GUI_UP);
-    assert(menu.selected == GUI_GAMES);
-    assert(!strcmp(gui_setting_description(&menu), "The games of games/ and of the folders added in Settings > App"));
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.view == GUI_LOAD_GAMES && menu.active == GUI_GAMES);
-    assert(gui_menu_key(&menu, GUI_DOWN) == GUI_MENU_STAY && menu.selected == GUI_GAMES);
-    menu.view = GUI_LOAD_NONE; /* Back from the browser */
-    gui_menu_key(&menu, GUI_UP);
-    assert(menu.selected == GUI_EXIT);
-    gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_GAMES);
-    /* the games gone while Games had the focus: the first load takes it */
-    menu.games = false;
+    /* the Games tab's browser takes the keys */
+    menu.view = GUI_LOAD_GAMES;
+    assert(gui_menu_key(&menu, GUI_DOWN) == GUI_MENU_STAY && menu.selected == GUI_SWITCH);
+    menu.view = GUI_LOAD_NONE;
     gui_menu_key(&menu, GUI_DOWN);
     assert(menu.selected == GUI_LINUX);
     gui_menu_key(&menu, GUI_DOWN);
@@ -116,31 +104,50 @@ int main(void) {
     assert(gui_wrap("ab", 0) == 1 && gui_wrap("ab", -3) == 1);
     assert(gui_wrap("\xc3\xa9\xc3\xa9\xc3\xa9", 2) == 4); /* characters, not bytes */
 
-    GuiBrowser browser = {.count = 23};
+    /* the head (Add a folder and two recent games) over each page of the games, one ring with the page */
+    GuiBrowser browser = {.count = 23, .head = 3};
     gui_browser_resize(&browser, 10);
     assert(gui_browser_pages(&browser) == 3 && gui_browser_items(&browser) == 10);
-    assert(gui_browser_key(&browser, GUI_SELECT) == GUI_BROWSER_BACK);
+    assert(gui_browser_key(&browser, GUI_SELECT) == GUI_BROWSER_HEAD && !browser.selected);
+    gui_browser_key(&browser, GUI_DOWN);
+    gui_browser_key(&browser, GUI_DOWN);
+    assert(gui_browser_key(&browser, GUI_SELECT) == GUI_BROWSER_HEAD && browser.selected == 2);
+    gui_browser_key(&browser, GUI_DOWN); /* the page's first game */
+    assert(browser.selected == 3 && !browser.activated);
     gui_browser_key(&browser, GUI_UP);
-    assert(browser.selected == 10 && !browser.activated);
+    gui_browser_key(&browser, GUI_UP);
+    gui_browser_key(&browser, GUI_UP);
+    gui_browser_key(&browser, GUI_UP); /* round to the page's last */
+    assert(browser.selected == 12 && !browser.activated);
     gui_browser_key(&browser, GUI_RIGHT);
-    assert(browser.page == 1 && browser.selected == 10);
+    assert(browser.page == 1 && browser.selected == 12);
     gui_browser_key(&browser, GUI_PAGE_DOWN);
-    assert(browser.page == 2 && browser.selected == 3 && gui_browser_items(&browser) == 3);
+    assert(browser.page == 2 && browser.selected == 5 && gui_browser_items(&browser) == 3);
     gui_browser_key(&browser, GUI_RIGHT); /* no wrapping past the last page */
     assert(browser.page == 2);
     assert(gui_browser_key(&browser, GUI_SELECT) == GUI_BROWSER_OPEN);
     assert(browser.activated && browser.active == 22);
     gui_browser_resize(&browser, 7);
-    assert(browser.page * browser.page_size + browser.selected - 1 == 22);
+    assert(browser.page * browser.page_size + browser.selected - browser.head == 22);
     gui_browser_key(&browser, GUI_PAGE_UP);
     gui_browser_key(&browser, GUI_LEFT);
     assert(browser.page == 1);
+    browser.selected = 1; /* a head row keeps the focus as the page changes */
+    gui_browser_key(&browser, GUI_RIGHT);
+    gui_browser_resize(&browser, 5);
+    assert(browser.selected == 1);
+    gui_browser_key(&browser, GUI_DOWN);
+    gui_browser_key(&browser, GUI_DOWN);
+    assert(browser.selected == 3);
     assert(gui_browser_key(&browser, GUI_CANCEL) == GUI_BROWSER_BACK);
-    browser = (GuiBrowser){0};
+    browser = (GuiBrowser){.head = 1}; /* no games: Add a folder alone */
     gui_browser_resize(&browser, 0);
     gui_browser_key(&browser, GUI_DOWN);
     gui_browser_key(&browser, GUI_PAGE_DOWN);
     assert(browser.page == 0 && browser.selected == 0 && gui_browser_pages(&browser) == 1);
+    assert(gui_browser_key(&browser, GUI_SELECT) == GUI_BROWSER_HEAD);
+    browser = (GuiBrowser){0};
+    assert(gui_browser_key(&browser, GUI_SELECT) == GUI_BROWSER_NONE && !browser.selected);
 
     GuiConsole screen;
     gui_console_init(&screen, 5, 3);
@@ -225,37 +232,6 @@ int main(void) {
     path = gui_document_path("C:\\Games\\a.nro"); /* Windows' */
     assert(path && !strcmp(path, "C:\\Games\\a.nro"));
     free(path);
-    /* two recent games and the items make one ring; selecting a game asks the GUI to run it */
-    memset(&ring, 0, sizeof ring);
-    ring.recent = 2;
-    ring.selected = GUI_SWITCH;
-    gui_menu_key(&ring, GUI_UP);
-    assert(ring.recent_focus == 2 && ring.selected == GUI_SWITCH);
-    gui_menu_key(&ring, GUI_LEFT);
-    assert(ring.recent_focus == 1);
-    gui_menu_key(&ring, GUI_UP);
-    assert(!ring.recent_focus && ring.selected == GUI_EXIT);
-    gui_menu_key(&ring, GUI_DOWN);
-    assert(ring.recent_focus == 1);
-    gui_menu_key(&ring, GUI_RIGHT);
-    assert(ring.recent_focus == 2);
-    gui_menu_key(&ring, GUI_DOWN);
-    assert(!ring.recent_focus && ring.selected == GUI_SWITCH);
-    ring.games = true; /* with games, the recent rows lead to Games */
-    ring.recent_focus = 2;
-    gui_menu_key(&ring, GUI_DOWN);
-    assert(!ring.recent_focus && ring.selected == GUI_GAMES);
-    gui_menu_key(&ring, GUI_UP);
-    assert(ring.recent_focus == 2);
-    ring.view = GUI_LOAD_DROP;
-    assert(gui_menu_key(&ring, GUI_SELECT) == GUI_MENU_RECENT && ring.recent_focus == 2);
-    assert(ring.view == GUI_LOAD_NONE && !ring.activated);
-    ring.recent = 0;
-    ring.recent_focus = 0;
-    ring.games = false;
-    ring.selected = GUI_SWITCH;
-    gui_menu_key(&ring, GUI_UP); /* none: the items alone, as before */
-    assert(ring.selected == GUI_EXIT && !ring.recent_focus);
 
     /* the question before an abort: keys do nothing while it is not shown; the arrows move between its choices, Select
        takes the one in focus and Cancel keeps going, both closing it */

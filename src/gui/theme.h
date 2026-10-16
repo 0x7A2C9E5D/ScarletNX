@@ -15,6 +15,10 @@ typedef enum { GUI_LINE_NONE, GUI_LINE_TYPING, GUI_LINE_SLIDE, GUI_LINE_FADE } G
 typedef enum { GUI_RING_NONE, GUI_RING_LEFT, GUI_RING_RIGHT, GUI_RING_NEAR_TEXT } GuiRing;
 typedef enum { GUI_ALIGN_LEFT, GUI_ALIGN_CENTER, GUI_ALIGN_RIGHT } GuiAlign;
 typedef enum { GUI_PANELS_OUTLINE, GUI_PANELS_FILL } GuiPanels; /* the boxes framed, or filled */
+/* the list's column two fifths of the screen on every one, or as wide as its entries */
+typedef enum { GUI_SIZING_FIXED, GUI_SIZING_ADAPTIVE } GuiSizing;
+/* a text too long for its box: over as many rows as it takes, or on one that slides */
+typedef enum { GUI_TEXT_WRAP, GUI_TEXT_SLIDE } GuiTextFlow;
 /* the title in the row of tabs, after them, or on a row of its own under them */
 typedef enum { GUI_HEAD_TABS, GUI_HEAD_BELOW } GuiHeadPlace;
 /* what the focus is about: in the foot's box beside the keys, or on a row under the head */
@@ -59,10 +63,13 @@ typedef struct {
     int focus_bar; /* the focused box as a band of the focus colour, its text in the page colour */
     char marker[16];
     GuiPanels panels;
+    GuiSizing sizing;
+    GuiTextFlow text;
     char cursor[16]; /* in the list's margin, beside the focused box */
     int grid;        /* a faint grid on the page behind the boxes, in the dim colour */
     GuiTipsPlace tips_place;
     int tips_box, footer_box; /* the tips and the keys in a box with a bar at its left, or on the page */
+    int tips_wrap;            /* the tips over the foot's rows, or on one row that slides */
     char title[GUI_SCREEN_COUNT][64];
     GuiRunLayout run;
     GuiPalette run_colors;  /* the steps screen's own: a loading screen, darker than the menus */

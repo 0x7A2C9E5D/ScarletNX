@@ -44,11 +44,14 @@ void gui_place(const GuiPlaceIn* in, GuiPlace* out) {
     if (in->list_cols) {
         cols = content.w / in->cw;
         if (cols >= GUI_PLACE_LIST_MIN + 1 + GUI_PLACE_SIDE_MIN) { /* the list gives way to the side box's least */
-            int w = (in->list_cols < cols - 1 - GUI_PLACE_SIDE_MIN ? in->list_cols : cols - 1 - GUI_PLACE_SIDE_MIN) *
-                    in->cw;
+            int asks =
+                in->fixed ? (cols * 2 / 5 > GUI_PLACE_LIST_MIN ? cols * 2 / 5 : GUI_PLACE_LIST_MIN) : in->list_cols;
+            int w = (asks < cols - 1 - GUI_PLACE_SIDE_MIN ? asks : cols - 1 - GUI_PLACE_SIDE_MIN) * in->cw;
             out->list = gui_rect(content.x, content.y, w, content.h);
             out->side = gui_rect(content.x + w + in->cw, content.y, content.w - w - in->cw, content.h);
-        } else { /* a phone held upright: the list over three fifths, the side box under it */
+        } else if (in->fixed) { /* a phone held upright: the list alone */
+            out->list = content;
+        } else { /* the list over three fifths, the side box under it */
             int h = (content.h - gap) * 3 / 5;
             out->stacked = 1;
             out->list = gui_rect(content.x, content.y, content.w, h);

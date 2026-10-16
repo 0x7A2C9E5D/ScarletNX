@@ -7,9 +7,8 @@
 #include <stdint.h>
 #include "common/utilities/font.h" /* gui_glyph */
 
-/* the menu's items, in order: Games, the loads, the keys, Settings and Share log, Exit */
+/* the menu's items, in order: the loads, the keys, Settings and Share log, Exit. The games are the Games tab's */
 enum {
-    GUI_GAMES, /* games/ and the player's folders' games: shown only when they hold any */
     GUI_SWITCH,
     GUI_LINUX,
     GUI_3DS,
@@ -27,16 +26,12 @@ typedef struct {
     int selected; /* keyboard/mouse focus, not activation */
     int active;   /* the last explicitly activated item: the load a picked file goes to */
     bool activated;
-    bool games; /* Games shows */
     GuiLoadView view;
     bool running, quit;
     int text_size; /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen */
-    /* the recent games above the items: how many, and the focused one + 1 (0: an item has the focus) */
-    int recent, recent_focus;
 } GuiMenu;
-/* what a key on the menu asks of the GUI: nothing more, the Settings, the logs shared, or the focused recent row (a
-   game, or the one that shows the rest) */
-typedef enum { GUI_MENU_STAY, GUI_MENU_SETTINGS, GUI_MENU_LOG, GUI_MENU_RECENT } GuiMenuDo;
+/* what a key on the menu asks of the GUI: nothing more, the Settings or the logs shared */
+typedef enum { GUI_MENU_STAY, GUI_MENU_SETTINGS, GUI_MENU_LOG } GuiMenuDo;
 GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key);
 /* The question a running run's abort asks first, or leaving the menu on a computer: shown or not, which one, and the
    choice in focus, the one that stays first */
@@ -62,11 +57,14 @@ int gui_slide(int over, uint64_t ms, uint32_t step_ms);
 size_t gui_wrap(const char* s, int width);
 
 typedef struct {
-    size_t count, page, page_size, selected; /* focus: selected == 0 is Back on every page */
-    size_t active;                           /* absolute file index, preserved across page changes and resizing */
+    size_t count, page, page_size;
+    size_t head;     /* the rows over the games on every page: Add a folder, then the recent games */
+    size_t selected; /* focus: a row of the head under head, else the page's game selected - head */
+    size_t active;   /* absolute file index, preserved across page changes and resizing */
     bool activated;
 } GuiBrowser;
-typedef enum { GUI_BROWSER_NONE, GUI_BROWSER_BACK, GUI_BROWSER_OPEN } GuiBrowserAction;
+/* a key's ask: nothing, back to the menu (Cancel), the focused head row, or the focused game run */
+typedef enum { GUI_BROWSER_NONE, GUI_BROWSER_BACK, GUI_BROWSER_HEAD, GUI_BROWSER_OPEN } GuiBrowserAction;
 size_t gui_browser_pages(const GuiBrowser* browser);
 size_t gui_browser_items(const GuiBrowser* browser);
 void gui_browser_resize(GuiBrowser* browser, size_t page_size);

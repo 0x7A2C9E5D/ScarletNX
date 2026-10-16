@@ -23,19 +23,16 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   editor) shows an arrow past the right edge of its boxes, up on its first row and down on its last, in
   the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it.
-- The menu, top to bottom: **Recent games**, **Games**, the three loads, **Setup device keys**,
-  **Settings**, **Share log** and **Exit**.
+- The menu, top to bottom: the three loads, **Setup device keys**, **Settings**, **Share log** and
+  **Exit**. The games, and the recent ones, are the Games tab's.
 - Space, Enter or a left click explicitly activates an item, marking it bright
   pink. Activation is tracked separately from hover/focus, so the activated item
   stays pink while another item is hovered in yellow. Mouse controls also work
-  on browser entries and Back.
+  on Games' rows.
 - A finger taps an item anywhere on its row, as a click does on its label; a swipe across
   turns the pages of `games/`; a tap on a finished run returns to the menu, and one on a
   running run's ESC line aborts it. Android's back button is ESC. On a screen packed with
   pixels (a phone) the text takes the display's own scale, as far as the menu still fits.
-- **Games (N games)** shows only when `games/` or a folder of Settings > App > Game folders
-  holds a game, and opens their browser: the games ready to run (a recompiled game runs
-  directly), the dumps to prepare on Android, and CIA files, which go to the 3DS driver.
 - **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF** and **Load 3DS CIA** open a screen as the
   keys': a click on its blinking **[ Pick or drop a file ]**, or Enter, opens the system's file
   picker (on Linux the desktop's, else zenity's). Dropping a file on the window and Ctrl+V with
@@ -124,10 +121,10 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   pipeline cache. Any key, click or tap closes it;
   nothing is moved, and it shows again at the next start for as long as they are there.
   **Share log** lists them all.
-- **Recent games**, above the items, lists the last five games run, newest first, by
-  the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
-  The focus moves between them and the items in one ring, and the tips show the focused game's
-  path. Choosing one runs it again with the driver it was
+- **Recent games**, in Games under Add a folder, lists the last games run, newest first, three and a row that
+  shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
+  The focus moves between them, Add a folder and the page's games in one ring, and the tips show the focused
+  game's path. Choosing one runs it again with the driver it was
   loaded with and the options the menu has now; a game whose file is gone leaves the
   list instead. The list is kept in `recent.txt`, beside `last-run.log`, in the user's state
   folder on Linux (`$XDG_STATE_HOME/scarletnx/gui/`, by default `~/.local/state/scarletnx/gui/`;
@@ -146,7 +143,8 @@ Status box. See [GNUABI](GNUABI.md) for supported Linux ELF applications.
 
 ## Games: the games of games/ and the player's folders
 
-**Games** replaces the menu and old output with a file list. It reads the `games/` of the
+**Games**, the tab, lists the games: the ones ready to run (a recompiled game runs directly), the dumps to prepare
+on Android, and CIA files, which go to the 3DS driver. It reads the `games/` of the
 folder the driver works in, which the menu passes it as `--repo`: the checkout of a build tree,
 else the folder of an AppImage (or of the GUI) that has a `games/` beside it, else the user's
 data folder (docs/USAGE.md), then each folder of Settings > App > Game folders. Each entry is
@@ -154,16 +152,16 @@ displayed by basename, sorted alphabetically in each folder. Only immediate file
 executables (execute permission on UNIX, `.exe` on Windows) and `.cia` files (case-insensitive,
 no execute permission needed), which run with the 3DS driver. Hidden files, shared libraries and
 directories are excluded. The folders are looked at once a second while the menu is open (their
-names only), so a game put in or taken out shows in Games and in the open list; a folder that
+names only), so a game put in or taken out shows in the open list; a folder that
 cannot be read is named and the others still listed.
 
-- **Back [ESC]** is the first selectable item on every page. Enter/Space on it, or
-  ESC anywhere in the browser, returns to the menu, on Games.
-- Up/Down select Back or a file on the current page. Enter/Space opens a file.
+- **Add a folder** is the first row on every page, a wider gap under it: it opens the folder picker of Settings >
+  App > Game folders. Under it the recent games, then the page's games. ESC returns to the menu.
+- Up/Down go round Add a folder, the recent games and the page's files. Enter/Space opens one.
 - Left/Right and PgUp/PgDown go to the previous/next page. The page number and
   total file count are shown. Paging stops at the first and last pages.
 - Resizing adjusts the page size while keeping the selected file visible.
-- Empty or missing directories show a diagnostic and still provide Back.
+- Empty or missing directories show a diagnostic and still provide Add a folder.
 
 A recompiled game is an already-prepared native launcher, so selecting one runs it directly with
 the Settings rather than trying to extract it as a dump. A CIA goes to `scarletnx-3ds`, which is
@@ -214,13 +212,16 @@ of its own, the focused one framed in the focus colour or inverted, with the the
 beside it a box with what the focus is about (a recent game's path, Games' folders, the keys in use, the last
 run's output) and under that one the Status box. At the foot the tips, under the list's column, and the
 screen's keys, under the side box's, each in a box with a bar down its left (`[tips] box`, `[footer] box`) or on
-the page; the tips go on a row of their own under the head with `[tips] place = top`. Games lists Back and a
+the page; the tips take one row of the foot, a long one sliding, or wrap over its rows with `[tips] wrap`, and go on
+a row of their own under the head with `[tips] place = top`. Games lists Add a folder, the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
 opens the picker) and Back at its foot. The Settings list their groups, and beside them the focused group's
-rows: Enter, or a click on a row, opens the group, its rows taking the focus, and a click on another group
-opens that one. The theme editor lists its keys, the preview beside them. A window too narrow for both puts
-the side box under the list. A run of the console layout shows the driver's output in a box sized to it,
+rows: Enter, or a click on a row, opens the group, its rows taking the focus under a Back that a click or a finger
+takes as ESC, the group shown as the focused one; a click on another group opens that one. The theme editor lists its keys, the preview beside them. The list's column is two fifths of
+every screen (`[body] sizing = fixed`), and a window too narrow for both shows the list alone; with `adaptive` the
+column is as wide as its entries and the side box goes under the list. A text too long for its box wraps over
+its rows, or takes one that slides with `[body] text = slide`. A run of the console layout shows the driver's output in a box sized to it,
 beside it what runs and how it ended over the status, the file in the tips and the ESC line where the keys
 go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question, or
 the files an older version left, comes in a box over the screen darkened.
@@ -289,6 +290,10 @@ marker = "> "
 focus = bar
 ; the boxes outline (framed) or fill (filled)
 panels = fill
+; fixed: the list two fifths of every screen, alone on a narrow one | adaptive: as wide as its entries
+sizing = fixed
+; a text too long for its box: wrap (over its rows) | slide (on one row)
+text = wrap
 ; in the list's margin, beside the focused box
 cursor = "> "
 [backdrop]
@@ -299,6 +304,8 @@ grid = true
 place = top
 ; in a box with a bar at its left, or on the page
 box = false
+; over the foot's rows, or on one row that slides
+wrap = false
 [footer]
 ; plain | bar: on a band of ink | none: no Status box; rule: a line over the foot
 style = plain
@@ -423,7 +430,7 @@ Key setup tests cover installation, replacement, invalid drops, failed writes,
 self-copy safety, cancellation, and the bright-red overwrite warning.
 Settings tests cover the runtime's list read into rows, picks, the options each combination
 passes, and the screens of its groups and App; menu tests cover mouse hover versus explicit
-activation, Games shown only with games, the recent games' show-more row,
+activation, the menu without the games and Games with Add a folder and the recent games' show-more row,
 yellow/pink highlighting and the tips. Theme tests cover the built-ins, a `theme.ini` over its base
 (unreadable values and unknown keys included), the `themes/` folders listed, the
 compiling and loading screens, and the YoRHa bars and band in the real renderer. Step
