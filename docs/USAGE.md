@@ -37,9 +37,9 @@ homebrew-loader guest argv block.
 which then starts fullscreen (not in timed test runs). `--fullscreen=0` starts it windowed. Without either, the
 game's `.ini` decides (`fullscreen=1` starts fullscreen).
 `--touch=0|1|2` is forwarded to the game too: its touch screen takes nothing, the fingers (the default), or the
-fingers and the mouse's left button. The menu's *Touch* item passes it; the game's `.ini` keeps its own `touch`.
-`--controls=0|1` likewise hides or shows the [on-screen controls](#on-screen-controls) (the menu's *On-screen
-controls* item, on by default on Android); the game's `.ini` keeps `controls`. Any other `--key=value` of the game's
+fingers and the mouse's left button. The menu's *Settings* pass it; the game's `.ini` keeps its own `touch`.
+`--controls=0|1` likewise hides or shows the [on-screen controls](#on-screen-controls) (on by default on Android);
+the game's `.ini` keeps `controls`. Any other `--key=value` of the game's
 `.ini` is forwarded as well, for that run (`scarletnx --settings` lists them all).
 `--backend=gcc` selects libgccjit instead of the default LLVM backend when preparing
 a dump. An explicit `--backend=llvm|gcc` forces recompilation rather than reusing a

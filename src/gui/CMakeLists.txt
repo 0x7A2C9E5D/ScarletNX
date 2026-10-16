@@ -8,7 +8,7 @@ else()
     message(FATAL_ERROR "scarletnx-gui currently supports Linux, FreeBSD and Windows")
 endif()
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
-add_library(snx_gui_support STATIC model.c browser.c steps.c theme.c recent.c editor.c ${gui_process}
+add_library(snx_gui_support STATIC model.c browser.c steps.c theme.c recent.c editor.c settings.c ${gui_process}
             "${CMAKE_BINARY_DIR}/generated/gui_themes.c")
 target_link_libraries(snx_gui_support PUBLIC scarletnx-common)
 target_include_directories(snx_gui_support PRIVATE "${CMAKE_BINARY_DIR}/generated")
@@ -103,6 +103,13 @@ if(BUILD_TESTING)
     add_executable(snx-test-gui-editor "${PROJECT_SOURCE_DIR}/tests/gui_editor.c")
     target_link_libraries(snx-test-gui-editor PRIVATE snx_gui_support scarletnx-common)
     add_test(NAME gui_editor COMMAND snx-test-gui-editor)
+    add_executable(snx-test-gui-settings "${PROJECT_SOURCE_DIR}/tests/gui_settings.c")
+    target_link_libraries(snx-test-gui-settings PRIVATE snx_gui_support scarletnx-common)
+    if(SNX_BUILD_NX) # and the runtime's own list
+        add_test(NAME gui_settings COMMAND snx-test-gui-settings $<TARGET_FILE:scarletnx>)
+    else()
+        add_test(NAME gui_settings COMMAND snx-test-gui-settings)
+    endif()
     add_executable(snx-test-gui-process "${PROJECT_SOURCE_DIR}/tests/gui_process.c")
     target_link_libraries(snx-test-gui-process PRIVATE snx_gui_support scarletnx-common)
     add_test(NAME gui_process_tree COMMAND snx-test-gui-process)
@@ -112,7 +119,8 @@ if(BUILD_TESTING)
     target_link_libraries(snx-test-gui-sdl PRIVATE snx_gui_support scarletnx-common SDL3::SDL3 snx_window_icon
                           snx_build_info)
     foreach(test snx-test-gui-model snx-test-gui-cia-browser snx-test-gui-recent snx-test-gui-steps snx-test-gui-theme snx-test-gui-process
-                 snx-test-gui-sdl snx-test-gui-theme-formats snx-test-gui-theme-write snx-test-gui-editor)
+                 snx-test-gui-sdl snx-test-gui-theme-formats snx-test-gui-theme-write snx-test-gui-editor
+                 snx-test-gui-settings)
         target_compile_options(${test} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
     endforeach()
     add_test(NAME gui_sdl_events COMMAND snx-test-gui-sdl)

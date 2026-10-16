@@ -49,22 +49,17 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   folder if needed. Existing keys trigger the bright-red warning
   **Keys already setup. This will overwrite the previous ones**. A successful
   drop replaces them and returns to the menu; ESC cancels without changing them.
-- **[ON/OFF] Fullscreen** sets how the Switch game starts. ON passes `-f` (short for
-  `--fullscreen`) and OFF passes `--fullscreen=0`, so the launcher's choice wins over the
-  game's `.ini`. On Android it also puts the launcher itself on the whole screen.
-- **Touch** sets the game's touch screen: the fingers, the mouse too, or off. It passes
-  `--touch=1`, `--touch=2` or `--touch=0`.
-- **[ON/OFF] On-screen controls** shows or hides the pad drawn over the game. It passes
-  `--controls=1` or `--controls=0`, and the game's menu edits the pad.
-- **[ON/OFF] Enable libgccjit** passes `--backend=gcc` when preparing a Switch dump.
-  It stays OFF if this build lacks libgccjit. Prepared executables in `games/`
-  already have a compiled backend, so this setting does not recompile them.
-- **[ON/OFF] Enable gdbstub** passes `-S` and `-s` as separate arguments, enabling
-  the Switch runtime's stub on port 1234 and waiting for the debugger at startup.
-  The runtime currently supports the stub on UNIX only.
-- Selecting or hovering these settings shows a short description immediately
-  above the CPU/RAM footer. The CPU-only Linux driver does not support these
-  Switch options; they are never forwarded as Linux guest arguments or to the 3DS driver.
+- **Settings** lists every setting of the game's `.ini` by its sections (Display, Graphics,
+  Performance, Input, Network, Debug), as `scarletnx --settings` prints them from the runtime's
+  own tables, after the launcher's two: a row each, its help above, Left/Right going round its
+  values, Enter typing one. A setting at `.ini` is the game's `.ini`'s; one picked goes to the
+  session's Switch runs as `--key=value`, over the `.ini` ([USAGE](USAGE.md)). The launcher's
+  own choices start picked: `fullscreen` 0, `touch` 1, `controls` 0 (on Android `fullscreen`
+  and `controls` 1, and `fullscreen` puts the launcher itself on the whole screen too).
+  **libgccjit** passes `--backend=gcc` when preparing a dump (it stays off in a build without
+  libgccjit; games in `games/` are not recompiled), **gdbstub** passes `-S` and `-s`, the
+  runtime's stub on port 1234 waiting for the debugger at startup (UNIX only). None of them
+  reaches the Linux or the 3DS driver.
 - **Theme** switches to the next theme: the built-in Default and YoRHa, then each
   folder of `themes/` (see [Themes](#themes)). It lasts for the session.
 - **Theme editor** edits the current theme: a row per `theme.ini` key, and beside them a
@@ -120,8 +115,7 @@ excluded. The list is refreshed each time it is opened.
 - Empty or missing directories show a diagnostic and still provide Back.
 
 For the Switch selection these are already-prepared native game launchers, so
-selecting one runs it directly with the fullscreen, touch, on-screen controls and
-debugger settings rather than trying to extract it as a dump. For the Linux
+selecting one runs it directly with the Settings rather than trying to extract it as a dump. For the Linux
 selection, the selected file is passed to `scarletnx-gnuabi` as an ARM64 ELF.
 Output capture, resource accounting and the return to the main menu work the same
 way for both input methods. For the 3DS selection, the browser passes a CIA input
@@ -334,9 +328,9 @@ accounting and process-tree cleanup. Browser tests cover filtering, missing/empt
 directories, pagination, resizing, Back/ESC and launching selected files.
 Key setup tests cover installation, replacement, invalid drops, failed writes,
 self-copy safety, cancellation, and the bright-red overwrite warning.
-Setting tests cover ON/OFF argument combinations, backend availability, mouse
-hover versus explicit activation, persistent submenus, yellow/pink highlighting
-and footer descriptions. Theme tests cover the built-ins, a `theme.ini` over its base
+Settings tests cover the runtime's list read into rows, picks, the options each combination
+passes, and the screen; menu tests cover mouse hover versus explicit activation, persistent
+submenus, yellow/pink highlighting and footer descriptions. Theme tests cover the built-ins, a `theme.ini` over its base
 (unreadable values and unknown keys included), the `themes/` folders listed, the
 compiling and loading screens, and the YoRHa bars and band in the real renderer. Step
 tests cover each driver and runner line, the other lines kept under their step, lines

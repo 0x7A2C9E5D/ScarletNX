@@ -48,45 +48,15 @@ int main(void) {
     gui_menu_key(&menu, GUI_CANCEL);
     assert(menu.view == GUI_LOAD_NONE && !menu.quit);
     gui_menu_key(&menu, GUI_RIGHT);
-    assert(menu.selected == GUI_FULLSCREEN);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.fullscreen && menu.view == GUI_LOAD_NONE);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(!menu.fullscreen);
+    assert(menu.selected == GUI_SETTINGS);
+    /* Settings opens the screen of the game's settings and the launcher's (settings.h, tests/gui_settings.c) */
+    assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_SETTINGS && menu.active == GUI_SETTINGS);
+    assert(menu.view == GUI_LOAD_NONE &&
+           !strcmp(gui_setting_description(&menu), "The game's .ini settings and the launcher's, for the next runs"));
     menu.running = true;
-    gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_FULLSCREEN);
+    assert(gui_menu_key(&menu, GUI_DOWN) == GUI_MENU_STAY && menu.selected == GUI_SETTINGS);
+    assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_STAY);
     menu.running = false;
-    /* Touch goes round fingers, the mouse too, nothing, and back */
-    gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_TOUCH && menu.touch == GUI_TOUCH_FINGERS);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.touch == GUI_TOUCH_MOUSE && !strcmp(gui_touch_option(&menu), "--touch=2"));
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.touch == GUI_TOUCH_OFF && !strcmp(gui_touch_option(&menu), "--touch=0"));
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.touch == GUI_TOUCH_FINGERS && !strcmp(gui_touch_option(&menu), "--touch=1"));
-    /* the on-screen controls, off and on: what the game gets */
-    gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_CONTROLS && !menu.controls && !strcmp(gui_controls_option(&menu), "--controls=0"));
-    assert(!strcmp(gui_setting_description(&menu), "A pad on the screen. The game's menu edits it"));
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.controls && !strcmp(gui_controls_option(&menu), "--controls=1") && menu.view == GUI_LOAD_NONE);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(!menu.controls);
-    gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_GCCJIT && menu.active == GUI_CONTROLS);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.active == GUI_GCCJIT);
-    assert(menu.gccjit == !!SNX_GUI_HAS_GCCJIT && menu.view == GUI_LOAD_NONE);
-    assert(!strcmp(gui_setting_description(&menu), SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
-                                                                      : "Program was not compiled with libgccjit"));
-    gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_GDBSTUB);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.gdbstub && menu.view == GUI_LOAD_NONE);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(!menu.gdbstub);
     gui_menu_key(&menu, GUI_DOWN);
     assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_THEME && menu.selected == GUI_THEME && !menu.quit);
     assert(gui_menu_key(&menu, GUI_DOWN) == GUI_MENU_STAY);
@@ -117,42 +87,6 @@ int main(void) {
     assert(menu.selected == GUI_KEYS && menu.active == GUI_SWITCH);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.active == GUI_KEYS && menu.view == GUI_LOAD_KEYS);
-
-    for (int bits = 0; bits < 48; ++bits) {
-        static const char* const touch[] = {"--touch=1", "--touch=2", "--touch=0"};
-        menu = (GuiMenu){.selected = GUI_SWITCH,
-                         .fullscreen = !!(bits & 1),
-                         .gccjit = !!(bits & 2),
-                         .gdbstub = !!(bits & 4),
-                         .controls = !!(bits & 8),
-                         .touch = bits >> 4};
-        for (int prepared = 0; prepared < 2; ++prepared) {
-            const char* args[GUI_LAUNCH_MAX];
-            size_t n = gui_launch_options(&menu, prepared, "data folder", args), i = 0;
-            assert(n <= GUI_LAUNCH_MAX && (bits != 47 || prepared || n == 7 + !!SNX_GUI_HAS_GCCJIT)); /* all of them */
-            assert(i < n && !strcmp(args[i++], menu.fullscreen ? "-f" : "--fullscreen=0"));
-            assert(i < n && !strcmp(args[i++], touch[menu.touch]));
-            assert(i < n && !strcmp(args[i++], menu.controls ? "--controls=1" : "--controls=0"));
-            if (menu.gccjit && SNX_GUI_HAS_GCCJIT && !prepared) assert(i < n && !strcmp(args[i++], "--backend=gcc"));
-            if (menu.gdbstub) {
-                assert(i < n && !strcmp(args[i++], "-S"));
-                assert(i < n && !strcmp(args[i++], "-s"));
-            }
-            /* the driver works in the menu's data folder; a prepared game runs no driver */
-            if (!prepared) {
-                assert(i < n && !strcmp(args[i++], "--repo"));
-                assert(i < n && !strcmp(args[i++], "data folder"));
-            }
-            assert(i == n);
-            assert(gui_launch_options(&menu, prepared, NULL, args) == n - (prepared ? 0 : 2));
-        }
-        menu.selected = GUI_LINUX;
-        const char* args[GUI_LAUNCH_MAX];
-        assert(gui_launch_options(&menu, false, "data folder", args) == 0);
-        menu.selected = GUI_3DS;
-        assert(gui_launch_options(&menu, false, "data folder", args) == 0);
-        assert(gui_launch_options(&menu, true, "data folder", args) == 0);
-    }
 
     /* the footer's use, as a player reads it: MB under a GB, the CPU a share of every core, never over 100% */
     {

@@ -113,6 +113,16 @@ static void colored_text(App* app, int row, const char* prompt, SDL_Color color)
     colored_text_at(app, 1, row, prompt, color);
 }
 static void red_text(App* app, int row, const char* prompt) { colored_text(app, row, prompt, red); }
+/* the Settings' pick for key is value; NULL: the .ini's */
+static bool setting_is(App* app, const char* key, const char* value) {
+    const char* v = gui_settings_value(&app->settings, key);
+    return value ? v && !strcmp(v, value) : !v;
+}
+/* the launcher's own two Settings on or off */
+static void launcher(App* app, bool on) {
+    assert(gui_settings_set(&app->settings, "libgccjit", on && SNX_GUI_HAS_GCCJIT ? "on" : "off"));
+    assert(gui_settings_set(&app->settings, "gdbstub", on ? "on" : "off"));
+}
 static void finish(App* app, int status) {
     assert(app->menu.running && !app->finished && !app->aborting && !app->abnormal_exit);
     int selected = app->menu.selected;
@@ -150,7 +160,7 @@ static void finish(App* app, int status) {
     key(app, SDLK_ESCAPE);
     assert(!app->menu.running && !app->finished && app->menu.view == GUI_LOAD_NONE);
     assert(!app->menu.quit && !app->message[0] && app->has_output);
-    assert(app->menu.selected == selected && app->menu.fullscreen);
+    assert(app->menu.selected == selected && setting_is(app, "fullscreen", "1"));
     render(app);
     assert(app->log_top == menu_row(app, GUI_EXIT) + 6);
 }
@@ -160,13 +170,22 @@ static int SDLCALL hang(void* unused) {
 }
 int main(int argc, char** argv) {
     int row;
+    if (argc == 2 && !strcmp(argv[1], "--settings")) { /* as the runtime lists its settings */
+        fputs("Display\tfullscreen\t0\tint\t0\t1\t1 = start in fullscreen\n"
+              "Graphics\tresolution\t1\tfloat\t0.25\t4\tInternal 3D resolution\n"
+              "Input\ttouch\t1\tint\t0\t2\tThe game's touch screen\n"
+              "Input\tcontrols\t0\tint\t0\t1\tThe on-screen controls\n",
+              stdout);
+        return 0;
+    }
     if (argc > 1 && strstr(argv[1], "hang in join")) {
         SDL_Thread* thread = SDL_CreateThread(hang, "hung worker", NULL);
         assert(thread && !snx_write_file(argv[1], "ready", 5));
         SDL_WaitThread(thread, NULL); /* Never returns. ESC must kill, not request a graceful exit. */
         return 1;
     }
-    if (argc == 4 && !strcmp(argv[1], "-f") && !strcmp(argv[2], "--touch=1") && !strcmp(argv[3], "--controls=0")) {
+    if (argc == 4 && !strcmp(argv[1], "--fullscreen=1") && !strcmp(argv[2], "--touch=1") &&
+        !strcmp(argv[3], "--controls=0")) {
         puts("prepared game stdout");
         fputs("prepared game stderr\n", stderr);
         return 0;
@@ -178,8 +197,8 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && strstr(argv[1], "option flags")) {
         int i = 2;
-        assert(argc == 9 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "-f") && !strcmp(argv[i++], "--touch=1") &&
-               !strcmp(argv[i++], "--controls=0"));
+        assert(argc == 9 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "--fullscreen=1") &&
+               !strcmp(argv[i++], "--touch=1") && !strcmp(argv[i++], "--controls=0"));
         if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
         assert(!strcmp(argv[i++], "-S") && !strcmp(argv[i++], "-s"));
         assert(!strcmp(argv[i++], "--repo") && argv[i++][0] && i == argc);
@@ -197,7 +216,7 @@ int main(int argc, char** argv) {
         assert(strstr(argv[1], "game with spaces"));
         bool nx = strstr(argv[0], "runtime") != NULL; /* the program the menu is part of */
         if (nx)
-            assert(argc == 7 && !strcmp(argv[2], "-f") && !strcmp(argv[3], "--touch=1") &&
+            assert(argc == 7 && !strcmp(argv[2], "--fullscreen=1") && !strcmp(argv[3], "--touch=1") &&
                    !strcmp(argv[4], "--controls=0") && !strcmp(argv[5], "--repo") && argv[6][0]);
         else
             assert(argc == 2);
@@ -418,43 +437,55 @@ int main(int argc, char** argv) {
     }
 #endif
     key(&app, SDLK_RIGHT);
-    assert(app.menu.selected == GUI_FULLSCREEN);
-    key(&app, SDLK_SPACE);
-    assert(app.menu.fullscreen);
-    mouse(&app, 2, menu_row(&app, GUI_GCCJIT), false);
-    assert(app.menu.selected == GUI_GCCJIT && !app.menu.gccjit);
+    assert(app.menu.selected == GUI_SETTINGS);
     render(&app);
-    colored_text(&app, menu_row(&app, GUI_GCCJIT), "- [OFF] Enable libgccjit", yellow);
-    colored_text(&app, menu_row(&app, GUI_FULLSCREEN), "- [ON] Fullscreen", pink);
-    colored_text(&app, app.rows - 4,
+    colored_text(&app, app.rows - 4, "The game's .ini settings and the launcher's, for the next runs", normal);
+    mouse(&app, 0, 0, true); /* Blank space must not activate the current selection. */
+    assert(!app.editing);
+    /* Settings: the launcher's own, then each setting the runtime lists, a row each with its help above; what the
+       menu's items used to set is in them */
+    key(&app, SDLK_SPACE);
+    assert(app.editing && app.editor.object && app.editor.count == GUI_SETTINGS_OWN + 4);
+    render(&app);
+    colored_text(&app, 0, "SETTINGS", normal);
+    colored_text(&app, 1, "Up/Down: setting. Left/Right: change. Enter: type. ESC: back.", normal);
+    colored_text(&app, 2,
                  SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
                                     : "Program was not compiled with libgccjit",
-                 normal);
-    mouse(&app, 2, menu_row(&app, GUI_GCCJIT), true);
-    assert(app.menu.gccjit == !!SNX_GUI_HAS_GCCJIT);
+                 rgb(app.theme.soft));
+    colored_text(&app, 4, "- Launch      libgccjit    off", yellow);
+    colored_text(&app, 6, "- Display     fullscreen   0", normal); /* the launcher's choice wins */
+    colored_text(&app, 7, "- Graphics    resolution   .ini", normal);
+    colored_text(&app, 8, "- Input       touch        1", normal);
+    key(&app, SDLK_RIGHT);
+    assert(setting_is(&app, "libgccjit", SNX_GUI_HAS_GCCJIT ? "on" : NULL));
+    key(&app, SDLK_LEFT);
+    assert(!gui_settings_value(&app.settings, "libgccjit"));
+    mouse(&app, 2, 5, true); /* a click focuses a row, one on the focused row changes it */
+    assert(app.editor.row == 1 && !gui_settings_value(&app.settings, "gdbstub"));
     render(&app);
-    colored_text(&app, menu_row(&app, GUI_GCCJIT),
-                 SNX_GUI_HAS_GCCJIT ? "- [ON] Enable libgccjit" : "- [OFF] Enable libgccjit", pink);
-    mouse(&app, 2, menu_row(&app, GUI_GCCJIT), true);
-    assert(!app.menu.gccjit);
-    mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), false);
-    assert(app.menu.selected == GUI_GDBSTUB && !app.menu.gdbstub);
+    colored_text(&app, 2, "Enables gdbstub on port 1234", rgb(app.theme.soft));
+    mouse(&app, 2, 5, true);
+    assert(setting_is(&app, "gdbstub", "on"));
+    key(&app, SDLK_RETURN);
+    assert(!gui_settings_value(&app.settings, "gdbstub"));
+    key(&app, SDLK_DOWN);
+    key(&app, SDLK_RIGHT);
+    assert(setting_is(&app, "fullscreen", "1"));
     render(&app);
-    colored_text(&app, app.rows - 4, "Enables gdbstub on port 1234", normal);
-    mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), true);
-    assert(app.menu.gdbstub);
-    mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), true);
-    assert(!app.menu.gdbstub);
-    mouse(&app, 2, menu_row(&app, GUI_FULLSCREEN), false);
-    assert(app.menu.selected == GUI_FULLSCREEN && app.menu.fullscreen);
-    render(&app);
-    colored_text(&app, app.rows - 4, "Enable fullscreen at startup", normal);
-    mouse(&app, 2, menu_row(&app, GUI_FULLSCREEN), true);
-    assert(!app.menu.fullscreen);
-    mouse(&app, 0, 0, true); /* Blank space must not activate the current selection. */
-    assert(!app.menu.fullscreen);
-    mouse(&app, 2, menu_row(&app, GUI_FULLSCREEN), true);
-    assert(app.menu.fullscreen);
+    colored_text(&app, 6, "- Display     fullscreen   1", yellow);
+    /* a number typed, and nothing typed for the .ini's again */
+    key(&app, SDLK_DOWN);
+    key(&app, SDLK_RETURN);
+    typed(&app, "0.5");
+    key(&app, SDLK_RETURN);
+    assert(setting_is(&app, "resolution", "0.5"));
+    key(&app, SDLK_RETURN);
+    for (int i = 0; i < 3; ++i) key(&app, SDLK_BACKSPACE);
+    key(&app, SDLK_RETURN);
+    assert(!gui_settings_value(&app.settings, "resolution"));
+    key(&app, SDLK_ESCAPE);
+    assert(!app.editing && app.menu.selected == GUI_SETTINGS);
     key(&app, SDLK_UP);
     key(&app, SDLK_LEFT);
     key(&app, SDLK_LEFT);
@@ -542,7 +573,8 @@ int main(int argc, char** argv) {
     {
         size_t size;
         char* kept = (char*)snx_read_file(app.run_log, &size);
-        char* line = snx_format("game with spaces;literal.nro -f --touch=1 --controls=0 --repo %s\n", app.data_dir);
+        char* line =
+            snx_format("game with spaces;literal.nro --fullscreen=1 --touch=1 --controls=0 --repo %s\n", app.data_dir);
         assert(kept && line && !app.run_out && !strncmp(kept, "$ ", 2) && strstr(kept, line));
         free(line);
         assert(strstr(kept, "driver stdout") && strstr(kept, "driver stderr") && strstr(kept, "\n[ended, status 0]\n"));
@@ -566,12 +598,11 @@ int main(int argc, char** argv) {
     char* flags_input = snx_path_join(temporary, "option flags.nro");
     assert(!snx_write_file(flags_input, "fixture", 7));
     app.menu.selected = GUI_SWITCH;
-    app.menu.gccjit = !!SNX_GUI_HAS_GCCJIT;
-    app.menu.gdbstub = true;
+    launcher(&app, true);
     launch(&app, snx_strdup(flags_input), false);
     finish(&app, 0);
     assert(!app.native && gui_steps_last(&app.steps, "LAUNCH"));
-    app.menu.gccjit = app.menu.gdbstub = false;
+    launcher(&app, false);
     app.menu.selected = GUI_LINUX;
     free(flags_input);
 
@@ -586,8 +617,7 @@ int main(int argc, char** argv) {
         recent_open(&app, snx_strdup(recent_file));
         assert(!app.recent.count && !app.menu.recent);
         app.menu.selected = GUI_SWITCH;
-        app.menu.gccjit = !!SNX_GUI_HAS_GCCJIT;
-        app.menu.gdbstub = true;
+        launcher(&app, true);
         launch(&app, snx_strdup(again), false);
         finish(&app, 0);
         assert(app.recent.count == 1 && app.menu.recent == 1 && !strcmp(app.recent.game[0].name, "option flags"));
@@ -639,7 +669,7 @@ int main(int argc, char** argv) {
         free(app.recent_file);
         app.recent_file = NULL;
         app.message[0] = 0;
-        app.menu.gccjit = app.menu.gdbstub = false;
+        launcher(&app, false);
         app.menu.selected = GUI_LINUX;
         free(again);
         free(recent_file);
@@ -654,8 +684,7 @@ int main(int argc, char** argv) {
         char* cia = snx_path_join(app.games_dir, "3ds input.CIA");
         assert(!snx_mkdirs(app.games_dir) && !snx_write_file(cia, "fixture", 7));
         recent_open(&app, snx_strdup(recent_file));
-        app.menu.gccjit = !!SNX_GUI_HAS_GCCJIT;
-        app.menu.gdbstub = true;
+        launcher(&app, true);
         mouse(&app, 2, menu_row(&app, GUI_3DS), true);
         key(&app, SDLK_RETURN);
         assert(app.menu.view == GUI_LOAD_DROP && app.menu.active == GUI_3DS);
@@ -684,7 +713,7 @@ int main(int argc, char** argv) {
         app.menu.recent = app.menu.recent_focus = 0;
         free(app.recent_file);
         app.recent_file = NULL;
-        app.menu.gccjit = app.menu.gdbstub = false;
+        launcher(&app, false);
         app.menu.selected = GUI_LINUX;
         free(app.games_dir);
         app.games_dir = original_games;
@@ -952,13 +981,15 @@ int main(int argc, char** argv) {
         render(&app);
         assert(app.scale == 2 && app.rows == sizes[i][2] && app.cols == sizes[i][3]);
         assert(menu_row(&app, GUI_LINUX) == menu_row(&app, GUI_SWITCH) + 1); /* no blank rows between the items */
-        app.menu.selected = app.rows == 16 ? GUI_GDBSTUB : GUI_SWITCH;       /* 16 rows: the menu slides to its focus */
+        app.menu.selected = app.rows == 16 ? GUI_TEXT : GUI_SWITCH;          /* 16 rows: the menu slides to its focus */
         render(&app);
-        mouse(&app, 2, menu_row(&app, GUI_GDBSTUB), false);
-        assert(app.menu.selected == GUI_GDBSTUB && !app.menu.gdbstub);
+        mouse(&app, 2, menu_row(&app, GUI_TEXT), false);
+        assert(app.menu.selected == GUI_TEXT && !app.menu.text_size);
+        app.clock = 1; /* a description too long for 50 columns rests before it slides */
         render(&app);
-        colored_text(&app, menu_row(&app, GUI_GDBSTUB), "- [OFF] Enable gdbstub", yellow);
-        colored_text(&app, app.rows - 4, "Enables gdbstub on port 1234", normal);
+        colored_text(&app, menu_row(&app, GUI_TEXT), "- Text size: Auto", yellow);
+        colored_text(&app, app.rows - 4, "Bigger letters scroll the menu.", normal);
+        app.clock = 0;
         assert(app.rows == 16 ? menu_offset(&app) > 0 : menu_row(&app, GUI_EXIT) < app.rows - 4);
     }
     /* a text size too big for the window: the menu slides up as the focus goes down, then back, and a size that
@@ -1138,8 +1169,7 @@ int main(int argc, char** argv) {
         assert(!snx_write_file(steps_input, "fixture", 7));
         gui_theme_load(&app.theme, (const char* const*)app.themes_dirs, 2, "yorha");
         app.menu.selected = GUI_SWITCH;
-        app.menu.gccjit = !!SNX_GUI_HAS_GCCJIT;
-        app.menu.gdbstub = true;
+        launcher(&app, true);
         launch(&app, snx_strdup(steps_input), false);
         assert(app.menu.running && app.fade_ms);
         for (until = SDL_GetTicks() + 10000; app.menu.running && SDL_GetTicks() < until; SDL_Delay(5)) {
@@ -1404,7 +1434,7 @@ int main(int argc, char** argv) {
         colored_text_on(&app, 1, 0, "SCARLETNX  /  MENU", rgb(app.theme.page), rgb(app.theme.ink)); /* the menus' own */
         app.clock = 0;
         app.theme = *gui_theme_builtin("default");
-        app.menu.gccjit = app.menu.gdbstub = false;
+        launcher(&app, false);
         free(steps_input);
     }
     /* ESC on the menu's first screen asks before the app closes: ESC again stays, Exit closes */
@@ -1422,29 +1452,30 @@ int main(int argc, char** argv) {
     /* fingers: a tap clicks anywhere on a row, which a mouse does on the label only; a drag is no tap, nor a second
        finger; a swipe across turns the games' pages; back is ESC */
     {
-        bool fullscreen = app.menu.fullscreen;
-        int row = menu_row(&app, GUI_FULLSCREEN);
+        int row = menu_row(&app, GUI_SETTINGS);
         SDL_Event second = {0};
-        assert(app.menu.view == GUI_LOAD_NONE && !app.menu.running && !app.finished);
+        assert(app.menu.view == GUI_LOAD_NONE && !app.menu.running && !app.finished && !app.editing);
         mouse(&app, app.cols - 3, row, true);
-        assert(app.menu.fullscreen == fullscreen);
+        assert(!app.editing);
         tap(&app, app.cols - 3, row);
-        assert(app.menu.fullscreen != fullscreen && app.menu.selected == GUI_FULLSCREEN);
+        assert(app.editing && app.menu.selected == GUI_SETTINGS);
+        key(&app, SDLK_ESCAPE);
         swipe(&app, 10, row, 10, row + 4);
-        assert(app.menu.fullscreen != fullscreen);
+        assert(!app.editing);
         second.type = SDL_EVENT_FINGER_DOWN;
         second.tfinger.fingerID = 8;
         event(&app, &second); /* the first finger is still down */
         assert(app.finger == 8);
         tap(&app, 2, row); /* finger 7: no finger of the screen's */
-        assert(app.menu.fullscreen != fullscreen);
+        assert(!app.editing);
         second.type = SDL_EVENT_FINGER_UP;
         second.tfinger.x = app.finger_x;
         second.tfinger.y = app.finger_y;
         event(&app, &second); /* finger 8 lifts where it went down, on the title: nothing there */
-        assert(!app.finger && app.menu.fullscreen != fullscreen);
+        assert(!app.finger && !app.editing);
         tap(&app, 2, row);
-        assert(app.menu.fullscreen == fullscreen);
+        assert(app.editing);
+        key(&app, SDLK_ESCAPE);
         tap(&app, 2, menu_row(&app, GUI_SWITCH));
         assert(app.menu.view == GUI_LOAD_OPTIONS);
         key(&app, SDLK_AC_BACK);

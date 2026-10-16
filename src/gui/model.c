@@ -73,16 +73,8 @@ GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
             menu->activated = true;
             menu->load_activated = false;
             menu->view = GUI_LOAD_NONE;
-            if (menu->selected == GUI_FULLSCREEN)
-                menu->fullscreen = !menu->fullscreen;
-            else if (menu->selected == GUI_TOUCH)
-                menu->touch = (menu->touch + 1) % (GUI_TOUCH_OFF + 1);
-            else if (menu->selected == GUI_CONTROLS)
-                menu->controls = !menu->controls;
-            else if (menu->selected == GUI_GCCJIT) {
-                if (SNX_GUI_HAS_GCCJIT) menu->gccjit = !menu->gccjit;
-            } else if (menu->selected == GUI_GDBSTUB)
-                menu->gdbstub = !menu->gdbstub;
+            if (menu->selected == GUI_SETTINGS)
+                return GUI_MENU_SETTINGS;
             else if (menu->selected == GUI_THEME)
                 return GUI_MENU_THEME;
             else if (menu->selected == GUI_THEME_EDIT)
@@ -131,18 +123,7 @@ void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_byte
 }
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
-        case GUI_FULLSCREEN:
-#ifdef __ANDROID__
-            return "The menu and the games on the whole screen, the system's bars hidden";
-#else
-            return "Enable fullscreen at startup";
-#endif
-        case GUI_TOUCH: return "The game's touch screen: fingers, the mouse too, or off";
-        case GUI_CONTROLS: return "A pad on the screen. The game's menu edits it";
-        case GUI_GCCJIT:
-            return SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
-                                      : "Program was not compiled with libgccjit";
-        case GUI_GDBSTUB: return "Enables gdbstub on port 1234";
+        case GUI_SETTINGS: return "The game's .ini settings and the launcher's, for the next runs";
         case GUI_THEME: return "Built-in themes, then each themes/<name>/theme.ini";
         case GUI_THEME_EDIT: return "This theme's keys with a preview, saved as themes/<name>/theme.ini";
         case GUI_TEXT: return "Bigger letters scroll the menu. Auto fits the screen";
@@ -167,30 +148,6 @@ int gui_slide(int over, uint64_t ms, uint32_t step_ms) {
     if (t < (uint64_t)(GUI_SLIDE_WAIT + over)) return (int)(t - GUI_SLIDE_WAIT);
     if (t < (uint64_t)(2 * GUI_SLIDE_WAIT + over)) return over;
     return over - (int)(t - 2 * GUI_SLIDE_WAIT - over);
-}
-const char* gui_touch_option(const GuiMenu* menu) {
-    static const char* const options[] = {"--touch=1", "--touch=2", "--touch=0"}; /* by GUI_TOUCH_* */
-    return options[menu->touch];
-}
-const char* gui_controls_option(const GuiMenu* menu) { return menu->controls ? "--controls=1" : "--controls=0"; }
-size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char* repo, const char** argv) {
-    size_t n = 0;
-    /* These are Switch options, never guest argv for the CPU-only Linux driver. */
-    if (menu->selected != GUI_SWITCH) return 0;
-    /* the game's .ini has a fullscreen of its own: OFF has to say so, or the .ini would decide */
-    argv[n++] = menu->fullscreen ? "-f" : "--fullscreen=0";
-    argv[n++] = gui_touch_option(menu);
-    argv[n++] = gui_controls_option(menu);
-    if (menu->gccjit && SNX_GUI_HAS_GCCJIT && !prepared) argv[n++] = "--backend=gcc";
-    if (menu->gdbstub) {
-        argv[n++] = "-S";
-        argv[n++] = "-s";
-    }
-    if (repo && !prepared) {
-        argv[n++] = "--repo";
-        argv[n++] = repo;
-    }
-    return n;
 }
 size_t gui_browser_pages(const GuiBrowser* browser) {
     if (!browser->count || !browser->page_size) return 1;

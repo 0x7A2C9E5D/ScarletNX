@@ -7,20 +7,12 @@
 #include <stdint.h>
 #include "font.h" /* gui_glyph */
 
-#ifndef SNX_GUI_HAS_GCCJIT
-#define SNX_GUI_HAS_GCCJIT 0
-#endif
-
 enum {
     GUI_SWITCH,
     GUI_LINUX,
     GUI_3DS,
     GUI_KEYS,
-    GUI_FULLSCREEN,
-    GUI_TOUCH,    /* what the game's touch screen takes */
-    GUI_CONTROLS, /* the on-screen controls over the game */
-    GUI_GCCJIT,
-    GUI_GDBSTUB,
+    GUI_SETTINGS, /* the game's .ini settings and the launcher's own for the runs: settings.h */
     GUI_THEME,
     GUI_THEME_EDIT, /* the theme editor: its keys, a preview, and Save */
     GUI_TEXT,       /* the menu's letters */
@@ -30,7 +22,6 @@ enum {
 };
 typedef enum { GUI_UP, GUI_DOWN, GUI_LEFT, GUI_RIGHT, GUI_SELECT, GUI_CANCEL, GUI_PAGE_UP, GUI_PAGE_DOWN } GuiKey;
 #define GUI_TEXT_MAX 4
-enum { GUI_TOUCH_FINGERS, GUI_TOUCH_MOUSE, GUI_TOUCH_OFF }; /* GuiMenu.touch: fingers, the mouse too, nothing */
 typedef enum { GUI_LOAD_NONE, GUI_LOAD_OPTIONS, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS } GuiLoadView;
 enum { GUI_LOAD_DRAG, GUI_LOAD_DIRECTORY };
 typedef struct {
@@ -38,16 +29,21 @@ typedef struct {
     int active, load_active;     /* last explicitly activated items; active owns the submenu */
     bool activated, load_activated, focus_load;
     GuiLoadView view;
-    bool running, fullscreen, gccjit, gdbstub, quit;
-    bool controls; /* the on-screen controls, on by default on Android */
-    int touch;     /* GUI_TOUCH_*, fingers the default */
+    bool running, quit;
     int text_size; /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen */
     /* the recent games above the items: how many, and the focused one + 1 (0: an item has the focus) */
     int recent, recent_focus;
 } GuiMenu;
-/* what a key on the menu asks of the GUI: nothing more, the next theme, the theme editor, the logs shared, or the
-   focused recent game run */
-typedef enum { GUI_MENU_STAY, GUI_MENU_THEME, GUI_MENU_EDITOR, GUI_MENU_LOG, GUI_MENU_RECENT } GuiMenuDo;
+/* what a key on the menu asks of the GUI: nothing more, the Settings, the next theme, the theme editor, the logs
+   shared, or the focused recent game run */
+typedef enum {
+    GUI_MENU_STAY,
+    GUI_MENU_SETTINGS,
+    GUI_MENU_THEME,
+    GUI_MENU_EDITOR,
+    GUI_MENU_LOG,
+    GUI_MENU_RECENT
+} GuiMenuDo;
 GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key);
 /* The question a running run's abort asks first, or leaving the menu on a computer: shown or not, which one, and the
    choice in focus, the one that stays first */
@@ -61,13 +57,6 @@ typedef struct {
    both closing it. True when the run is to be aborted */
 bool gui_confirm_key(GuiConfirm* confirm, GuiKey key);
 const char* gui_setting_description(const GuiMenu* menu);
-/* Append up to GUI_LAUNCH_MAX Switch options; prepared games do not run a compiler. repo, when not NULL, is the folder
-   the driver keeps work/ and games/ in: the menu's own, so the two list the same games */
-#define GUI_LAUNCH_MAX 8
-size_t gui_launch_options(const GuiMenu* menu, bool prepared, const char* repo, const char** argv);
-/* the game's --touch=N and --controls=N for the menu's choices */
-const char* gui_touch_option(const GuiMenu* menu);
-const char* gui_controls_option(const GuiMenu* menu);
 /* the footer's line: RAM in MB or GB, the CPU as a share of all cores and the cores in use (cpu_percent counts one
    core as 100%) */
 void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_bytes, double cpu_percent, int cores);

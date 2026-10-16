@@ -16,6 +16,7 @@
 #include "window_icon.h"
 #include "build_info.h"
 #include "recent.h"
+#include "settings.h"
 #ifdef SDL_PLATFORM_ANDROID
 #include "android.h"
 #endif
@@ -49,8 +50,9 @@ typedef struct {
     GuiThemes themes;
     GuiSteps steps;
     GuiRecent recent;
-    char* recent_file; /* where the recent games are kept; NULL keeps none */
-    char* run_log;     /* where a run's output goes as it comes, the last run's; NULL keeps none */
+    GuiSettings settings; /* read the first time a run or the Settings need them */
+    char* recent_file;    /* where the recent games are kept; NULL keeps none */
+    char* run_log;        /* where a run's output goes as it comes, the last run's; NULL keeps none */
     FILE* run_out;
     int recent_named;           /* the run's own name went to its recent game */
     Uint64 clock;               /* fixed time for tests; 0 is the real clock */
@@ -96,11 +98,7 @@ static const char* const items[] = {"Load Switch NSP/XCI/NRO",
                                     "Load Linux ARM ELF",
                                     "Load 3DS CIA",
                                     "Setup device keys",
-                                    "Fullscreen",
-                                    "Touch",
-                                    "On-screen controls",
-                                    "Enable libgccjit",
-                                    "Enable gdbstub",
+                                    "Settings",
                                     "Theme",
                                     "Theme editor",
                                     "Text size",
@@ -122,6 +120,7 @@ static const char* const load_labels[] = {"-> Select a file", "-> Select file fr
 #define SAY_COUNT      "game(s)"
 #define SAY_LOG_FAILED "The log could not be saved: allow the app access to files."
 #define SAY_EDITOR     "Tap a key to change it or type it. Back: go back."
+#define SAY_SETTINGS   SAY_EDITOR
 #else
 static const char* const load_labels[] = {"-> Select via drag and drop", "-> Select file from games/ instead"};
 #define SAY_MENU       "Arrows/mouse: move. Space/Enter/click: select."
@@ -137,6 +136,7 @@ static const char* const load_labels[] = {"-> Select via drag and drop", "-> Sel
 #define SAY_COUNT      "executable(s)"
 #define SAY_LOG_FAILED "The log could not be saved: check the folder's permissions."
 #define SAY_EDITOR     "Up/Down: key. Left/Right: change. Enter: type. Ctrl+S: save. ESC: back."
+#define SAY_SETTINGS   "Up/Down: setting. Left/Right: change. Enter: type. ESC: back."
 #endif
 static SDL_Color rgb(GuiRgb c) {
     SDL_Color out = {c.r, c.g, c.b, 255};
@@ -369,22 +369,13 @@ static void recent_open(App* app, char* file) {
     app->menu.recent_focus = 0;
 }
 static void menu_label(const App* app, int item, char* label, size_t size) {
-    if (item == GUI_FULLSCREEN || item == GUI_CONTROLS || item == GUI_GCCJIT || item == GUI_GDBSTUB) {
-        bool enabled = item == GUI_FULLSCREEN ? app->menu.fullscreen
-                       : item == GUI_CONTROLS ? app->menu.controls
-                       : item == GUI_GCCJIT   ? app->menu.gccjit
-                                              : app->menu.gdbstub;
-        snprintf(label, size, "%s[%s] %s", app->theme.marker, enabled ? "ON" : "OFF", items[item]);
-    } else if (item == GUI_THEME) {
+    if (item == GUI_THEME) {
         snprintf(label, size, "%s%s: %s", app->theme.marker, items[item], app->theme.name);
     } else if (item == GUI_TEXT) {
         if (app->menu.text_size)
             snprintf(label, size, "%s%s: %dx", app->theme.marker, items[item], app->menu.text_size);
         else
             snprintf(label, size, "%s%s: Auto", app->theme.marker, items[item]);
-    } else if (item == GUI_TOUCH) {
-        static const char* const touch[] = {"Fingers", "Fingers and mouse", "Off"}; /* by GUI_TOUCH_* */
-        snprintf(label, size, "%s%s: %s", app->theme.marker, items[item], touch[app->menu.touch]);
     } else {
         snprintf(label, size, "%s%s", app->theme.marker, items[item]);
     }
@@ -896,7 +887,88 @@ static void draw_screen(App* app) {
     overlay(app);
 }
 
-/* ---- the theme editor (editor.c): its rows on the left, the menu or a run in its theme on the right ---- */
+static const char* driver_name(int item) {
+    switch (item) {
+#ifdef SDL_PLATFORM_ANDROID
+        /* the app's libraries folder only takes lib*.so: the drivers go in as ones */
+        case GUI_SWITCH: return "libscarletnx-run.so";
+        case GUI_LINUX: return "libscarletnx-gnuabi.so";
+        case GUI_3DS: return "libscarletnx-3ds.so";
+#else
+        case GUI_SWITCH: return "scarletnx";
+        case GUI_LINUX: return "scarletnx-gnuabi";
+        case GUI_3DS: return "scarletnx-3ds";
+#endif
+        default: return NULL;
+    }
+}
+static char* find_driver(const App* app, int item) {
+    const char* name = driver_name(item);
+    if (app->self && item == GUI_SWITCH) return snx_strdup(app->self);
+    if (!name) return NULL;
+#ifdef _WIN32
+    char* filename = snx_format("%s.exe", name);
+#else
+    char* filename = snx_strdup(name);
+#endif
+    char* local = snx_path_join(app->drivers, filename);
+    char* found = snx_find_tool(local);
+    free(filename);
+    free(local);
+    return found ? found : snx_find_tool(name);
+}
+/* what argv prints, NULL unless it ends with 0, killed after ten seconds; owned */
+static char* capture(App* app, const char* const* argv) {
+    char buffer[4096], *out = snx_strdup("");
+    size_t size = 0;
+    int status = 1, n;
+    Uint64 until = SDL_GetTicks() + 10000;
+    if (!gui_process_start(app->process, argv, app->message, sizeof(app->message))) status = -1;
+    while (status >= 0 && !gui_process_finished(app->process, &status) && SDL_GetTicks() < until + 5000) {
+        char* grown;
+        n = gui_process_read(app->process, buffer, sizeof buffer);
+        if (n > 0 && (grown = realloc(out, size + (size_t)n + 1)) != NULL) {
+            out = grown;
+            memcpy(out + size, buffer, (size_t)n);
+            out[size += (size_t)n] = 0;
+        } else if (n <= 0)
+            SDL_Delay(1);
+        if (SDL_GetTicks() > until) gui_process_terminate(app->process);
+    }
+    if (status) {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+/* the Settings' rows: the runtime's list, read the first time from the program that runs Switch inputs, after the
+   launcher's own */
+static GuiSettings* settings_of(App* app) {
+    char* driver;
+    char* list;
+    if (app->settings.keys) return &app->settings;
+    driver = find_driver(app, GUI_SWITCH);
+    {
+        const char* argv[] = {driver, "--settings", NULL};
+        list = driver ? capture(app, argv) : NULL;
+    }
+    gui_settings_read(&app->settings, list ? list : "");
+    free(list);
+    free(driver);
+    /* the launcher's own choices win over the game's .ini, as its items did: a phone plays on the whole screen, its
+       pad shown */
+#ifdef SDL_PLATFORM_ANDROID
+    gui_settings_set(&app->settings, "fullscreen", "1");
+    gui_settings_set(&app->settings, "controls", "1");
+#else
+    gui_settings_set(&app->settings, "fullscreen", "0");
+    gui_settings_set(&app->settings, "controls", "0");
+#endif
+    gui_settings_set(&app->settings, "touch", "1");
+    return &app->settings;
+}
+/* ---- the editor's forms (editor.c): the Settings, or the theme editor's rows on the left and the menu or a run in
+   its theme on the right ---- */
 #define GUI_PREVIEW_MS 8000
 static const char preview_run[] = "Extracting Cult of the Lamb.nsp\n"
                                   "Extracted 3 NCAs, the program's 4 modules\n"
@@ -972,15 +1044,19 @@ static void render_editor(App* app) {
     const GuiTheme* theme = &app->theme;
     const GuiThemeKey* focused = gui_editor_key_of(e, e->row);
     char label[64], value[96], title[96];
-    int r, col, row, cols, rows, width;
+    int r, col, row, cols, rows, width, labels = 24;
     SDL_SetRenderDrawColor(app->renderer, theme->page.r, theme->page.g, theme->page.b, 255);
     SDL_RenderClear(app->renderer);
     preview_box(app, &col, &row, &cols, &rows);
-    width = col - 2; /* the rows' text, left of the preview */
-    snprintf(title, sizeof title, "THEME EDITOR  /  %s", e->id);
+    width = e->object ? app->cols - 2 : col - 2; /* the rows' text, left of the theme's preview */
+    for (r = 0; r < gui_editor_rows(e); ++r) {   /* the values' column, past the widest label */
+        gui_editor_label(e, r, label, sizeof label);
+        labels = SDL_max(labels, (int)strlen(label));
+    }
+    snprintf(title, sizeof title, "%s%s", e->object ? "SETTINGS" : "THEME EDITOR  /  ", e->object ? "" : e->id);
     if (theme->head == GUI_STYLE_BAR) band(app, 0, 1, theme->ink);
     text(app, 1, 0, title, rgb(theme->head == GUI_STYLE_BAR ? theme->page : theme->ink));
-    text(app, 1, 1, SAY_EDITOR, rgb(theme->ink));
+    text(app, 1, 1, e->object ? SAY_SETTINGS : SAY_EDITOR, rgb(theme->ink));
     if (e->note[0])
         text(app, 1, 2, e->note, rgb(e->leaving ? theme->failure : theme->focus));
     else if (focused)
@@ -988,14 +1064,15 @@ static void render_editor(App* app) {
     gui_editor_scroll(e, editor_rows(app));
     for (r = e->top; r < gui_editor_rows(&app->editor) && r - e->top < editor_rows(app); ++r) {
         const GuiThemeKey* k = gui_editor_key_of(e, r);
-        int y = 4 + r - e->top, at = 1 + 25;
+        int y = 4 + r - e->top, at = 1 + labels + 1;
         char line[160];
         gui_editor_label(e, r, label, sizeof label);
         if (r == e->row && e->typing)
             snprintf(value, sizeof value, "%s_", e->text);
         else
             gui_editor_value(e, r, value, sizeof value);
-        snprintf(line, sizeof line, "%s%-24s %s", theme->marker, label, value);
+        if (e->object && !value[0]) snprintf(value, sizeof value, ".ini"); /* a setting not typed */
+        snprintf(line, sizeof line, "%s%-*s %s", theme->marker, labels, label, value);
         {
             int n = 0; /* what fits left of the preview, a character at a time */
             char* c;
@@ -1015,6 +1092,13 @@ static void render_editor(App* app) {
             }
         }
     }
+    if (e->object) {
+        text(app, 1, app->rows - 2,
+             e->count > GUI_SETTINGS_OWN ? "For the next runs. .ini: as the game's .ini says"
+                                         : "The runtime listed no settings",
+             rgb(theme->soft));
+        return;
+    }
     snprintf(value, sizeof value, "Saves in %s", app->themes_dirs[0] ? app->themes_dirs[0] : "(no themes folder)");
     text(app, 1, app->rows - 2, value, rgb(theme->soft));
     render_preview(app);
@@ -1032,6 +1116,11 @@ static void open_editor(App* app) {
     if (from_file) gui_theme_file_free(&file);
     app->editing = true;
     app->preview_since = 0;
+}
+static void open_settings(App* app) {
+    GuiSettings* s = settings_of(app);
+    gui_editor_form(&app->editor, s->keys, s->count, s->values);
+    app->editing = true;
 }
 static void leave_editor(App* app) {
     gui_editor_stop(&app->editor);
@@ -1052,6 +1141,12 @@ static void editor_key(App* app, GuiKey key) {
         leave_editor(app);
         return;
     }
+#ifdef SDL_PLATFORM_ANDROID
+    if (app->editor.object) { /* the menu on the whole screen too, as the games, unless fullscreen is 0 */
+        const char* fullscreen = gui_settings_value(&app->settings, "fullscreen");
+        SDL_SetWindowFullscreen(app->window, !fullscreen || strcmp(fullscreen, "0"));
+    }
+#endif
     if (app->editor.typing && !SDL_TextInputActive(app->window))
         SDL_StartTextInput(app->window); /* a phone's keyboard comes up */
     else if (!app->editor.typing && SDL_TextInputActive(app->window))
@@ -1064,11 +1159,11 @@ static void editor_input(App* app, const SDL_Event* e) {
         gui_editor_type(&app->editor, e->text.text);
         return;
     }
-    if (e->key.key == SDLK_S && (e->key.mod & SDL_KMOD_CTRL) && !e->key.repeat) {
+    if (!app->editor.object && e->key.key == SDLK_S && (e->key.mod & SDL_KMOD_CTRL) && !e->key.repeat) {
         save_editor(app);
         return;
     }
-    if (e->key.key == SDLK_TAB && !e->key.repeat) {
+    if (!app->editor.object && e->key.key == SDLK_TAB && !e->key.repeat) {
         app->editor.preview = app->editor.preview == GUI_SCREEN_MENU ? GUI_SCREEN_COMPILING : GUI_SCREEN_MENU;
         app->preview_since = 0;
         return;
@@ -1089,7 +1184,7 @@ static void editor_pointer(App* app, float x, float y, bool click) {
     int col, row, cols, rows, r = app->editor.top + (int)y - 4;
     preview_box(app, &col, &row, &cols, &rows);
     if (!click) return;
-    if (x >= col && x < col + cols && y >= row && y < row + rows + 1) {
+    if (!app->editor.object && x >= col && x < col + cols && y >= row && y < row + rows + 1) {
         app->editor.preview = app->editor.preview == GUI_SCREEN_MENU ? GUI_SCREEN_COMPILING : GUI_SCREEN_MENU;
         app->preview_since = 0;
         return;
@@ -1147,16 +1242,14 @@ static bool android_folder(App* app) {
 }
 /* A game runs in the app's game activity, a process of its own: no child of this one gets a window */
 static int play(App* app, const char* game) {
+    GuiSettings* s = settings_of(app);
     char* option = snx_format("--game=%s", game);
-    const char* argv[5];
-    int ok, n = 0;
-    argv[n++] = option;
-    /* the whole screen, the system's bars out of the way. OFF says so over the game's .ini */
-    argv[n++] = app->menu.fullscreen ? "-f" : "--fullscreen=0";
-    argv[n++] = gui_touch_option(&app->menu);
-    argv[n++] = gui_controls_option(&app->menu);
-    argv[n] = NULL;
+    const char** argv = (const char**)snx_alloc((size_t)(s->count + 3) * sizeof(*argv));
+    int ok;
+    argv[0] = option;
+    argv[1 + gui_settings_options(s, 0, 1, argv + 1)] = NULL;
     ok = gui_android_play(argv, app->message, sizeof(app->message));
+    free(argv);
     free(option);
     return ok;
 }
@@ -1256,36 +1349,6 @@ static void pump(App* app) {
     }
     if (app->leaving_ms && now_ms(app) - app->leaving_ms >= app->theme.fade_out_ms) leave_run(app);
 }
-static const char* driver_name(const App* app) {
-    switch (app->menu.selected) {
-#ifdef SDL_PLATFORM_ANDROID
-        /* the app's libraries folder only takes lib*.so: the drivers go in as ones */
-        case GUI_SWITCH: return "libscarletnx-run.so";
-        case GUI_LINUX: return "libscarletnx-gnuabi.so";
-        case GUI_3DS: return "libscarletnx-3ds.so";
-#else
-        case GUI_SWITCH: return "scarletnx";
-        case GUI_LINUX: return "scarletnx-gnuabi";
-        case GUI_3DS: return "scarletnx-3ds";
-#endif
-        default: return NULL;
-    }
-}
-static char* find_driver(App* app) {
-    const char* name = driver_name(app);
-    if (app->self && app->menu.selected == GUI_SWITCH) return snx_strdup(app->self);
-    if (!name) return NULL;
-#ifdef _WIN32
-    char* filename = snx_format("%s.exe", name);
-#else
-    char* filename = snx_strdup(name);
-#endif
-    char* local = snx_path_join(app->drivers, filename);
-    char* found = snx_find_tool(local);
-    free(filename);
-    free(local);
-    return found ? found : snx_find_tool(name);
-}
 static void launch(App* app, char* absolute, bool prepared) {
 #ifdef SDL_PLATFORM_ANDROID
     android_folder(app); /* the driver works where the menu stands */
@@ -1298,10 +1361,10 @@ static void launch(App* app, char* absolute, bool prepared) {
     /* The 3DS browser lists CIA inputs, not prepared host executables. */
     if (app->menu.selected == GUI_3DS) prepared = false;
     bool native = prepared && app->menu.selected == GUI_SWITCH;
-    char* driver = native ? NULL : find_driver(app);
+    char* driver = native ? NULL : find_driver(app, app->menu.selected);
     if (!native && !driver) {
         snprintf(app->message, sizeof(app->message), "Cannot find %s beside the GUI or on PATH.",
-                 driver_name(app) ? driver_name(app) : "the selected driver");
+                 driver_name(app->menu.selected) ? driver_name(app->menu.selected) : "the selected driver");
         free(absolute);
         return;
     }
@@ -1313,10 +1376,19 @@ static void launch(App* app, char* absolute, bool prepared) {
         return;
     }
 #endif
-    const char* argv[2 + GUI_LAUNCH_MAX + 1] = {native ? absolute : driver}; /* the driver, the file, NULL */
+    /* the driver, the file, the settings, --repo and its folder, NULL */
+    GuiSettings* s = settings_of(app);
+    const char** argv = (const char**)snx_alloc((size_t)(s->count + 6) * sizeof(*argv));
     size_t n = 1;
+    argv[0] = native ? absolute : driver;
     if (!native) argv[n++] = absolute;
-    n += gui_launch_options(&app->menu, native, app->data_dir, argv + n);
+    /* Switch options only, never guest argv for the CPU-only Linux driver or the 3DS one. The driver works in the
+       menu's data folder, so the two list the same games */
+    if (app->menu.selected == GUI_SWITCH) n += gui_settings_options(s, 1, native, argv + n);
+    if (app->menu.selected == GUI_SWITCH && !native) {
+        argv[n++] = "--repo";
+        argv[n++] = app->data_dir;
+    }
     argv[n] = NULL;
     bool started = gui_process_start(app->process, argv, app->message, sizeof(app->message));
     if (started && app->run_log) {
@@ -1326,6 +1398,7 @@ static void launch(App* app, char* absolute, bool prepared) {
         for (k = 0; app->run_out && k < n; ++k) fprintf(app->run_out, "%s%s", k ? " " : "$ ", argv[k]);
         if (app->run_out) fputc('\n', app->run_out);
     }
+    free(argv);
     gui_steps_reset(&app->steps);
     app->native = native;
     /* the menu fades out, then the run fades in */
@@ -1527,9 +1600,6 @@ static void list_games(App* app) {
 }
 static void menu_key(App* app, GuiKey key) {
     GuiLoadView before = app->menu.view; /* the screen this key was pressed on */
-#ifdef SDL_PLATFORM_ANDROID
-    bool fullscreen = app->menu.fullscreen;
-#endif
     if (app->finished) {
         if (key == GUI_CANCEL && app->theme.fade_out_ms && !app->leaving_ms)
             app->leaving_ms = SDL_max(now_ms(app), 1); /* the run fades out first; pump() comes back */
@@ -1562,13 +1632,13 @@ static void menu_key(App* app, GuiKey key) {
         case GUI_MENU_RECENT:
             if (app->menu.recent_focus <= app->recent.count) open_recent(app, app->menu.recent_focus - 1);
             return;
+        case GUI_MENU_SETTINGS: open_settings(app); break;
         case GUI_MENU_THEME: next_theme(app); break;
         case GUI_MENU_EDITOR: open_editor(app); break;
         case GUI_MENU_LOG: share_log(app); break;
         default: break;
     }
 #ifdef SDL_PLATFORM_ANDROID
-    if (app->menu.fullscreen != fullscreen) SDL_SetWindowFullscreen(app->window, app->menu.fullscreen); /* as a game */
     /* the screen opens first, as on a computer, so what happens shows there; a select on it opens the picker */
     if (key == GUI_SELECT && app->menu.view == before && (before == GUI_LOAD_DROP || before == GUI_LOAD_KEYS))
         open_picker(app);
@@ -1914,8 +1984,6 @@ static bool initialize(App* app, const char* self) {
     if (self) app->self = snx_strdup(self);
 #ifdef SDL_PLATFORM_ANDROID
     app->theme = *gui_theme_builtin("yorha");
-    app->menu.fullscreen = true; /* a phone plays on the whole screen; Fullscreen off shows the system's bars */
-    app->menu.controls = true;   /* and has no buttons but these */
     app->ask_abort = true;
     gui_android_start();
     /* back is ESC here: without this it would close the app */
@@ -1932,8 +2000,8 @@ static bool initialize(App* app, const char* self) {
     SDL_SetHint(SDL_HINT_PEN_MOUSE_EVENTS, "0");
     if (!SDL_Init(SDL_INIT_VIDEO)) return false;
 #ifdef SDL_PLATFORM_ANDROID
-    /* the whole screen, the system's bars out of the way, as Fullscreen says: a phone held wide is short */
-    flags = (app->menu.fullscreen ? SDL_WINDOW_FULLSCREEN : 0) | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    /* the whole screen, the system's bars out of the way, as the Settings' fullscreen says: a phone held wide is short */
+    flags = SDL_WINDOW_FULLSCREEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #else
     flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #endif
@@ -1974,6 +2042,7 @@ static void cleanup(App* app) {
     gui_android_ran(NULL); /* the run goes with the menu */
 #endif
     gui_process_destroy(app->process);
+    gui_settings_free(&app->settings);
     free(app->self);
     free(app->drivers);
     free(app->file);
