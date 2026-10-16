@@ -459,12 +459,13 @@ static int fatal_screen(const char* msg) {
     snprintf(what, sizeof what, "%s", how);
 #else
     /* the log plat.c writes, in the state folder. Beside the game that is argv[0]'s folder, which may be relative (./
-       for ./Catherine), and a file URI needs an absolute path: without one the path stays plain text, as before */
+       for ./Catherine), and a file URI needs an absolute path: without one the path stays plain text, as before. A
+       link only to a log that is there: plat.c makes it once the game's code has loaded, an error before that has none */
     snprintf(log_path, sizeof log_path, "%s%s.log", g_statedir, g_exename);
     full = snx_absolute(log_path);
     if (full && strlen(full) < sizeof log_path) memcpy(log_path, full, strlen(full) + 1);
     free(full);
-    if (fatal_log_url(log_path, log_url, sizeof log_url)) {
+    if (snx_is_file(log_path) && fatal_log_url(log_path, log_url, sizeof log_url)) {
         snprintf(what, sizeof what, "%s", how);
         log = log_path;
     } else
@@ -487,7 +488,11 @@ static int fatal_screen(const char* msg) {
 #ifndef __ANDROID__
                 case SDL_EVENT_MOUSE_BUTTON_DOWN: {
                     float x, y;
-                    if (e.button.which == SDL_TOUCH_MOUSEID || e.button.button != SDL_BUTTON_LEFT || pointer) break;
+                    if (e.button.which == SDL_TOUCH_MOUSEID || pointer) break;
+                    if (e.button.button != SDL_BUTTON_LEFT) { /* any other button closes, as before the link */
+                        pointer = 3;
+                        break;
+                    }
                     if (!SDL_RenderCoordinatesFromWindow(r, e.button.x, e.button.y, &x, &y)) break;
                     pointer = 1;
                     on_link = overlay_error_link(&link, x, y);
@@ -504,6 +509,11 @@ static int fatal_screen(const char* msg) {
                 case SDL_EVENT_FINGER_UP: {
                     float x, y;
                     int hit;
+                    if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && pointer == 3 && e.button.which != SDL_TOUCH_MOUSEID) {
+                        done = 1;
+                        pointer = 0;
+                        break;
+                    }
                     if (e.type == SDL_EVENT_MOUSE_BUTTON_UP) {
                         if (pointer != 1 || e.button.which == SDL_TOUCH_MOUSEID || e.button.button != SDL_BUTTON_LEFT)
                             break;
