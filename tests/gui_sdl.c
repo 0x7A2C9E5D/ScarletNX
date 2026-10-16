@@ -982,7 +982,7 @@ int main(int argc, char** argv) {
         char first[64], line[96];
         snprintf(first, sizeof first, "%s", app.theme.name);
         render(&app);
-        shows(&app, "- App", pink); /* the group open */
+        shows(&app, "- App", yellow); /* the group open, as focused while its rows have the focus */
         snprintf(line, sizeof line, "- %-18s %s", "Theme", first);
         shows(&app, line, yellow);
         shows(&app, "- Text size          Auto", normal);
@@ -2688,7 +2688,7 @@ int main(int argc, char** argv) {
             render(&app);
             form_boxes(&app, &f);
             b = list_box(&f.left, launch);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Launch", pink, black); /* the group open */
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Launch", yellow, black); /* the group open */
             b = list_box(&f.right, 0);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- libgccjit", yellow, black);
             {

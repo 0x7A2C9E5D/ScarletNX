@@ -1169,7 +1169,8 @@ static int list_hit(const GuiList* l, float x, float y, bool touch) {
     return -1;
 }
 /* an entry as a box of its own: on the dim colour (fill) or framed in it (line); the focused one inverted on the focus
-   colour with a rule over and under it (fill), or framed and written in it; the cursor in the margin */
+   colour with a rule over and under it (fill), or framed and written in it; the cursor in the margin. focused 2: that
+   look without the cursor, for the group whose rows have the focus */
 static void list_item(App* app, const GuiList* l, int i, const char* label, int focused, int activated) {
     const GuiTheme* t = &app->theme;
     GuiRect b = list_box(l, i);
@@ -1188,7 +1189,7 @@ static void list_item(App* app, const GuiList* l, int i, const char* label, int 
                 : activated ? t->active
                 : focused   ? t->focus
                             : t->ink));
-    if (focused && t->cursor[0]) text_in(app, l->at, l->at.x, item_text_y(app, b), t->cursor, rgb(t->focus));
+    if (focused == 1 && t->cursor[0]) text_in(app, l->at, l->at.x, item_text_y(app, b), t->cursor, rgb(t->focus));
 }
 /* a label between a list's boxes, as "Recent games" */
 static void list_label(App* app, const GuiList* l, int i, const char* label) {
@@ -2773,8 +2774,8 @@ static void draw_form(App* app) {
         for (r = f.left.first; r < f.left.first + f.left.shown; ++r) {
             snprintf(line, sizeof line, "%s%s", app->theme.marker,
                      r < app->groups ? app->group_keys[r].key : "Reset all to the defaults");
-            list_item(app, &f.left, r, line, app->form == GUI_FORM_SETTINGS && r == app->editor.row,
-                      r == form_group(app));
+            list_item(app, &f.left, r, line,
+                      app->form == GUI_FORM_SETTINGS ? r == app->editor.row : 2 * (r == form_group(app)), false);
         }
     list_marks(app, &f.left);
     if (theme) { /* the preview, 16 by 10, and what switches it */
