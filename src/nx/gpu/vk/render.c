@@ -1602,7 +1602,9 @@ retry:
     vkCmdSetStencilCompareMask(cb, VK_STENCIL_FACE_BACK_BIT, r[two ? 0x3D7 : 0x4E6]);
     vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_BACK_BIT, r[two ? 0x3D6 : 0x4E7]);
     /* push constants: the depth mode (snx_vp.y) for the vertex stage, the alpha test (0x4BB on, 0x4C4 reference,
-       0x4C5 function) for the fragment stage */
+       0x4C5 function) and the point sprite's T flip for the fragment stage. PointCoord's T is 0 at row 0, which is a
+       lower-left window's bottom (0x4EB bit 0): it flips when the sprite's origin (0x581 bit 2, 1 the top) is the
+       other side */
     float pc[8] = {0, (r[0x35F] & 1) ? 0.0f : 1.0f, 0, 0};
     {
         u32 fn = r[0x4C5];
@@ -1610,6 +1612,7 @@ retry:
         pc[4] = (r[0x4BB] & 1) ? 1.0f : 0.0f;
         pc[5] = (float)f;
         memcpy(&pc[6], &r[0x4C4], 4);
+        pc[7] = ((r[0x581] >> 2) & 1) == (r[0x4EB] & 1) ? 1.0f : 0.0f;
     }
     vkCmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
 

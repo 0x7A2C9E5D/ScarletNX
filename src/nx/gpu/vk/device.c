@@ -313,7 +313,9 @@ static int create_device(void) {
     VkPhysicalDeviceVulkan13Features f13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
                                             .pNext = &f12,
                                             .synchronization2 = VK_TRUE,
-                                            .dynamicRendering = VK_TRUE};
+                                            .dynamicRendering = VK_TRUE,
+                                            /* KIL demotes the lane (every Vulkan 1.3 device has it) */
+                                            .shaderDemoteToHelperInvocation = VK_TRUE};
     void* chain = &f13;
     if (g_vk.has_divisor) {
         fdiv = (VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT){

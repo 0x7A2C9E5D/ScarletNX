@@ -106,6 +106,7 @@ enum {
     OP_SWITCH = 251,
     OP_RETURN = 253,
     OP_KILL = 252,
+    OP_DEMOTE_TO_HELPER_INVOCATION = 5380,
 };
 
 static void reserve(SpvWords* s, size_t more) {
@@ -1283,6 +1284,12 @@ void spv_emit_control_barrier(SpvEmitter* e, uint32_t u32_type) {
     put(&e->functions, spv_emit_constant_u32(e, u32_type, 0x108)); /* AcquireRelease | WorkgroupMemory */
 }
 
+void spv_emit_memory_barrier(SpvEmitter* e, uint32_t u32_type, uint32_t scope, uint32_t semantics) {
+    instruction(&e->functions, 225, 3); /* OpMemoryBarrier */
+    put(&e->functions, spv_emit_constant_u32(e, u32_type, scope));
+    put(&e->functions, spv_emit_constant_u32(e, u32_type, semantics));
+}
+
 uint32_t spv_emit_bitfield_insert(SpvEmitter* e, uint32_t u32_type, uint32_t base, uint32_t insert, uint32_t offset,
                                   uint32_t count) {
     uint32_t id = spv_emit_id(e);
@@ -1735,6 +1742,22 @@ uint32_t spv_emit_sample_image(SpvEmitter* e, uint32_t result_type, uint32_t sam
     return id;
 }
 
+uint32_t spv_emit_sample_grad(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
+                              uint32_t coordinates, uint32_t dx, uint32_t dy, uint32_t offset) {
+    uint32_t image = spv_emit_load(e, sampled_type, sampler);
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_IMAGE_SAMPLE_EXPLICIT_LOD, 8 + !!offset);
+    put(&e->functions, result_type);
+    put(&e->functions, id);
+    put(&e->functions, image);
+    put(&e->functions, coordinates);
+    put(&e->functions, 4 | (offset ? 8 : 0)); /* ImageOperands Grad, ConstOffset */
+    put(&e->functions, dx);
+    put(&e->functions, dy);
+    if (offset) put(&e->functions, offset);
+    return id;
+}
+
 void spv_emit_no_contraction(SpvEmitter* e, uint32_t result) {
     instruction(&e->decorations, OP_DECORATE, 3);
     put(&e->decorations, result);
@@ -1795,6 +1818,7 @@ void spv_emit_store_u32(SpvEmitter* e, uint32_t pointer, uint32_t value) { spv_e
 
 void spv_emit_return(SpvEmitter* e) { instruction(&e->functions, OP_RETURN, 1); }
 void spv_emit_kill(SpvEmitter* e) { instruction(&e->functions, OP_KILL, 1); }
+void spv_emit_demote(SpvEmitter* e) { instruction(&e->functions, OP_DEMOTE_TO_HELPER_INVOCATION, 1); }
 void spv_emit_selection_merge(SpvEmitter* e, uint32_t merge_label) {
     instruction(&e->functions, OP_SELECTION_MERGE, 3);
     put(&e->functions, merge_label);

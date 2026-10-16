@@ -30,6 +30,8 @@ def main():
         issue126 = tuple(Path(directory) / f'issue126_{i}.spv' for i in range(17))
         stages = tuple(Path(directory) / f'stage_{i}.spv' for i in range(3))
         queries = tuple(Path(directory) / f'query_{i}.spv' for i in range(2))
+        opcodes = tuple(Path(directory) / f'opcode_{i}.spv' for i in range(4))
+        gradients = tuple(Path(directory) / f'gradient_{i}.spv' for i in range(3))
         subprocess.run(
             [args.generator, str(path), str(vertex), str(abs_fragment), str(stack_fragment), str(subgroup)], check=True
         )
@@ -48,6 +50,8 @@ def main():
             *issue126,
             *stages,
             *queries,
+            *opcodes,
+            *gradients,
         )
         subprocess.run([args.regressions, *(str(path) for path in fixtures)], check=True)
         for fixture in fixtures:

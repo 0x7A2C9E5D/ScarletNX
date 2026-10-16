@@ -193,6 +193,8 @@ uint32_t spv_emit_atomic_compare_exchange_shared_u32(SpvEmitter* e, uint32_t u32
 uint32_t spv_emit_atomic_compare_exchange_u32(SpvEmitter* e, uint32_t u32_type, uint32_t pointer, uint32_t desired,
                                               uint32_t expected);
 void spv_emit_control_barrier(SpvEmitter* e, uint32_t u32_type);
+/* OpMemoryBarrier in that memory scope (1 Device, 2 Workgroup), with those memory semantics */
+void spv_emit_memory_barrier(SpvEmitter* e, uint32_t u32_type, uint32_t scope, uint32_t semantics);
 uint32_t spv_emit_bitfield_insert(SpvEmitter* e, uint32_t u32_type, uint32_t base, uint32_t insert, uint32_t offset,
                                   uint32_t count);
 uint32_t spv_emit_bit_count(SpvEmitter* e, uint32_t u32_type, uint32_t value);
@@ -246,6 +248,9 @@ uint32_t spv_emit_sample2d_bias(SpvEmitter* e, uint32_t result_type, uint32_t sa
 uint32_t spv_emit_sample_image(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
                                uint32_t coordinates, uint32_t depth_reference, uint32_t mode, uint32_t level,
                                uint32_t offset, int dynamic_offset);
+/* OpImageSampleExplicitLod with the Grad operand (dx and dy) and an optional constant offset */
+uint32_t spv_emit_sample_grad(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
+                              uint32_t coordinates, uint32_t dx, uint32_t dy, uint32_t offset);
 void spv_emit_no_contraction(SpvEmitter* e, uint32_t result);
 uint32_t spv_emit_storage_access_u32(SpvEmitter* e, uint32_t pointer_type, uint32_t buffer, uint32_t member_index,
                                      uint32_t element_index);
@@ -256,6 +261,8 @@ void spv_emit_store_u32(SpvEmitter* e, uint32_t pointer, uint32_t value);
 void spv_emit_store(SpvEmitter* e, uint32_t pointer, uint32_t value);
 void spv_emit_return(SpvEmitter* e);
 void spv_emit_kill(SpvEmitter* e);
+/* OpDemoteToHelperInvocation: the module declares the DemoteToHelperInvocation capability (5379) */
+void spv_emit_demote(SpvEmitter* e);
 void spv_emit_selection_merge(SpvEmitter* e, uint32_t merge_label);
 void spv_emit_branch_conditional(SpvEmitter* e, uint32_t condition, uint32_t yes_label, uint32_t no_label);
 void spv_emit_branch(SpvEmitter* e, uint32_t label);

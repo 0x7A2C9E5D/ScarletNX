@@ -21,6 +21,8 @@ static const char* nro_paths[4];
 static const char* issue126_paths[17];
 static const char* stage_paths[3];
 static const char* query_paths[2];
+static const char* opcode_paths[4];
+static const char* gradient_paths[3];
 static void check(int condition, const char* what) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s\n", what);
@@ -788,6 +790,111 @@ static void fragment_queries(void) {
     free(code);
 }
 
+/* Forms compared with Eden's translator: the half-float immediates, MEMBAR, ISCADD32I, OUT on any stream, KIL as
+   a demote and the sparse predicate, and the branch and program forms that are refused rather than mistranslated */
+static void eden_forms(void) {
+    static const u64 halves[] = {
+        0x2c00000000070002ull | 0x3c003c00ull << 20,                     /* HADD2_32I R2, R0, (1, 1) */
+        0x2a00000000070003ull | 2ull << 55 | 0x3c003c00ull << 20,        /* HMUL2_32I.FMZ R3, R0, (1, 1) */
+        0x2800000000070004ull | 0x3c003c00ull << 20,                     /* HFMA2_32I R4, R0, (1, 1), R4 */
+        0x7000000000070005ull | 2ull << 57 | 6ull << 39 | 0xf0ull << 20, /* HFMA2.FMZ R5, R0, imm, R6 */
+        0x1400000000070100ull | 3ull << 53 | 0x1234ull << 20,            /* ISCADD32I R0, R1, 0x1234, 3 */
+        0xef98000000070100ull,                                           /* MEMBAR.GL */
+        0xc1020087a0970a00ull,                                           /* TEX.LB R0, R10, R9 with sparse P0 */
+    };
+    static const u64 geometry[] = {
+        0xefd9ff800707ff00ull, /* ALD R0, a[0x70] of vertex RZ, 4 words */
+        0xeff1ff800707ff00ull, /* AST a[0x70], R0, 4 words */
+        0xfbe0008000570404ull, /* OUT.EMIT R4, R4, R5: the stream from a register */
+        0xebe0010400470404ull, /* OUT.CUT R4, R4, c[1][0x10] */
+        0xf6e0008000170404ull, /* OUT.EMIT R4, R4, 1: stream 1, which isn't rasterized */
+    };
+    static const u32 geometry_sph[3] = {1u << 24, 7u << 24, 3};
+    ShaderInfo info;
+    size_t words = 0;
+    u32* code = translate(halves, 7, ST_FS, &info, &words, 0);
+    check(code && !info.unsupported, "the half-float immediates, ISCADD32I, MEMBAR and a sparse TEX translate");
+    if (code) {
+        check(count_opcode(code, words, 225, 0xffffffffu) == 1, "MEMBAR is a memory barrier");
+        if (opcode_paths[0]) save_fixture(opcode_paths[0], code, words);
+    }
+    free(code);
+    code = translate_stage(geometry, 5, ST_GS, geometry_sph, 3, &info, &words);
+    check(code && !info.unsupported, "OUT translates with a register, constant buffer or immediate stream");
+    if (code) {
+        check(count_opcode(code, words, 218, 0xffffffffu) == 1, "only the stream that may be 0 emits a vertex");
+        check(count_opcode(code, words, 219, 0xffffffffu) == 1, "OUT.CUT ends the primitive");
+        if (opcode_paths[1]) save_fixture(opcode_paths[1], code, words);
+    }
+    free(code);
+    code = translate((const u64[]){0xe33000000007000full}, 1, ST_FS, &info, &words, 0); /* KIL */
+    check(code != NULL, "KIL translates");
+    if (code) {
+        check(count_opcode(code, words, 252, 0xffffffffu) == 0 && count_opcode(code, words, 5380, 0xffffffffu) == 1 &&
+                  count_opcode(code, words, 17, 5379) == 1,
+              "KIL demotes the lane to a helper");
+        if (opcode_paths[2]) save_fixture(opcode_paths[2], code, words);
+    }
+    free(code);
+    code = translate((const u64[]){0xe24000000007002full}, 1, ST_FS, &info, &words, 0); /* BRA through c[] */
+    check(!code && info.unsupported, "a branch to a constant buffer target is refused");
+    free(code);
+    {
+        u64 program[64] = {0};
+        ((u32*)program)[0] = 1u << 24; /* geometry passthrough */
+        memcpy((u32*)program + 2, geometry_sph, sizeof geometry_sph);
+        program[10] = SCHED;
+        program[11] = EXIT;
+        memset(&info, 0, sizeof info);
+        info.rt_int_mask = 3;
+        code = shader_to_spirv((const u8*)program, sizeof program, ST_GS, &info, &words, 1, 1, 1);
+        check(!code && !strcmp(info.first_unsupported, "geometry passthrough"), "a passthrough program is refused");
+        free(code);
+    }
+    /* the point sprite's T reads its flip from the push constants */
+    code = translate((const u64[]){0xe003ffae4ff7ff01ull}, 1, ST_FS, &info, &words, 0);
+    check(code && has_builtin(code, words, 16) == 1 && count_opcode(code, words, 127, 0xffffffffu) == 1,
+          "the point sprite's T is flipped by its origin");
+    if (code && opcode_paths[3]) save_fixture(opcode_paths[3], code, words);
+    free(code);
+}
+
+/* TXD: a 2D texture with a constant offset, TXD.B on a cube array (the handle in Ra), and a 1D array whose offset
+   isn't known, which moves the coordinates */
+static void gradients(void) {
+    static const u64 offset_2d[] = {
+        0x0100000000000000ull | (0x00110000ull << 20) | 0x71000ull | 6, /* MOV32I R6, 0x110000: offset (1, 1) */
+        0xde00000000000000ull | 1ull << 35 | 0x10ull << 36 | 0xfull << 31 | 2ull << 28 | 8ull << 20 | 7ull << 16 |
+            4ull << 8, /* TXD R0, R4, R8, 2D, AOFFI */
+    };
+    static const u64 cube_array[] = {
+        (0x4c98078805a7001eull & ~0xffull) | 4,                                                /* MOV R4, c[2][0x168] */
+        0xde40000000000000ull | 3ull << 31 | 7ull << 28 | 8ull << 20 | 7ull << 16 | 4ull << 8, /* TXD.B R0, R4, R8 */
+    };
+    static const u64 dynamic_1d[] = {
+        0xe003ff880ff7ff05ull, /* IPA R5, a[0x80]: a packed register only known at run time */
+        0xde00000000000000ull | 1ull << 35 | 0x10ull << 36 | 1ull << 31 | 1ull << 28 | 8ull << 20 | 7ull << 16 |
+            4ull << 8, /* TXD R0, R4, R8, 1D array, AOFFI */
+    };
+    struct {
+        const u64* instructions;
+        u32 type, array, bindless;
+    } cases[] = {{offset_2d, 1, 0, 0}, {cube_array, 3, 1, 1}, {dynamic_1d, 0, 1, 0}};
+    for (int i = 0; i < 3; i++) {
+        ShaderInfo info;
+        size_t words = 0;
+        u32* code = translate(cases[i].instructions, 2, ST_FS, &info, &words, 0);
+        check(code && info.ntex == 1 && info.tex[0].type == cases[i].type && info.tex[0].array == cases[i].array &&
+                  info.tex[0].bindless == cases[i].bindless,
+              "TXD samples the texture its type names");
+        if (code) {
+            check(count_opcode(code, words, 88, 0xffffffffu) == 1, "TXD is an explicit-LOD sample with gradients");
+            if (gradient_paths[i]) save_fixture(gradient_paths[i], code, words);
+        }
+        free(code);
+    }
+}
+
 /* a rejected instruction is logged with its word */
 static void unsupported_names_word(void) {
     ShaderInfo info;
@@ -802,14 +909,16 @@ static void unsupported_names_word(void) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 1 && argc != 29) return 2;
-    if (argc == 29) {
+    if (argc != 1 && argc != 36) return 2;
+    if (argc == 36) {
         storage_paths[0] = argv[1];
         storage_paths[1] = argv[2];
         for (int i = 0; i < 4; i++) nro_paths[i] = argv[i + 3];
         for (int i = 0; i < 17; i++) issue126_paths[i] = argv[i + 7];
         for (int i = 0; i < 3; i++) stage_paths[i] = argv[i + 24];
         for (int i = 0; i < 2; i++) query_paths[i] = argv[i + 27];
+        for (int i = 0; i < 4; i++) opcode_paths[i] = argv[i + 29];
+        for (int i = 0; i < 3; i++) gradient_paths[i] = argv[i + 33];
     }
     brx_length();
     cbuf_integer_loads();
@@ -826,5 +935,7 @@ int main(int argc, char** argv) {
     between_stages();
     layer_capabilities();
     fragment_queries();
+    eden_forms();
+    gradients();
     return failures ? 1 : 0;
 }
