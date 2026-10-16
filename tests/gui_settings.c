@@ -133,8 +133,8 @@ int main(int argc, char** argv) {
         for (c = output; *c; ++c) lines += *c == '\n';
         assert(!gui_settings_read(&s, output) && s.count == GUI_SETTINGS_OWN + lines);
         assert(!strcmp(s.keys[GUI_SETTINGS_OWN].section, "Display") && !strcmp(s.keys[s.count - 1].section, "Debug"));
-        assert(words(key(&s, "fullscreen")) == 3 && words(key(&s, "touch")) == 4 && words(key(&s, "controls")) == 3);
-        assert(gui_settings_set(&s, "fullscreen", "0") && gui_settings_set(&s, "touch", "1"));
+        assert(words(key(&s, "fullscreen")) == 3 && !key(&s, "touch") && words(key(&s, "controls")) == 3);
+        assert(gui_settings_set(&s, "fullscreen", "0") && !gui_settings_set(&s, "touch", "1")); /* the game's menu's */
         assert(gui_settings_set(&s, "controls", "0") && key(&s, "resolution")->type == GUI_KEY_TEXT);
         gui_settings_free(&s);
         free(output);

@@ -37,7 +37,7 @@ homebrew-loader guest argv block.
 which then starts fullscreen (not in timed test runs). `--fullscreen=0` starts it windowed. Without either, the
 game's `.ini` decides (`fullscreen=1` starts fullscreen).
 `--touch=0|1|2` is forwarded to the game too: its touch screen takes nothing, the fingers, or the fingers and the
-mouse's left button (the default). The menu's *Settings* pass it; the game's `.ini` keeps its own `touch`.
+mouse's left button (the default). The game's menu sets it; the game's `.ini` keeps its own `touch`.
 `--controls=0|1` likewise hides or shows the [on-screen controls](#on-screen-controls) (on by default on Android);
 the game's `.ini` keeps `controls`. Any other `--key=value` of the game's
 `.ini` is forwarded as well, for that run (`scarletnx --settings` lists them all).

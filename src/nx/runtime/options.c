@@ -296,6 +296,7 @@ void ini_list(void) {
             const char* help = "";
             for (const IniOpt* o = INI_SECS[s].t[t].opts; o->key; o++) {
                 if (o->help) help = o->help;
+                if (o->flags & INI_IN_GAME) continue;
                 printf("%s\t%s\t%s\t%s\t%g\t%g\t", INI_SECS[s].title, o->key, o->def ? o->def : "", types[o->type],
                        o->lo, o->hi);
                 for (const char* c = help; *c; c++)

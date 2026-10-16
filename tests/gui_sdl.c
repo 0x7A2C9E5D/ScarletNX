@@ -173,7 +173,6 @@ int main(int argc, char** argv) {
     if (argc == 2 && !strcmp(argv[1], "--settings")) { /* as the runtime lists its settings */
         fputs("Display\tfullscreen\t0\tint\t0\t1\t1 = start in fullscreen\n"
               "Graphics\tresolution\t1\tfloat\t0.25\t4\tInternal 3D resolution\n"
-              "Input\ttouch\t1\tint\t0\t2\tThe game's touch screen\n"
               "Input\tcontrols\t0\tint\t0\t1\tThe on-screen controls\n",
               stdout);
         return 0;
@@ -184,8 +183,7 @@ int main(int argc, char** argv) {
         SDL_WaitThread(thread, NULL); /* Never returns. ESC must kill, not request a graceful exit. */
         return 1;
     }
-    if (argc == 4 && !strcmp(argv[1], "--fullscreen=1") && !strcmp(argv[2], "--touch=1") &&
-        !strcmp(argv[3], "--controls=0")) {
+    if (argc == 3 && !strcmp(argv[1], "--fullscreen=1") && !strcmp(argv[2], "--controls=0")) {
         puts("prepared game stdout");
         fputs("prepared game stderr\n", stderr);
         return 0;
@@ -197,8 +195,8 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && strstr(argv[1], "option flags")) {
         int i = 2;
-        assert(argc == 9 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "--fullscreen=1") &&
-               !strcmp(argv[i++], "--touch=1") && !strcmp(argv[i++], "--controls=0"));
+        assert(argc == 8 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "--fullscreen=1") &&
+               !strcmp(argv[i++], "--controls=0"));
         if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
         assert(!strcmp(argv[i++], "-S") && !strcmp(argv[i++], "-s"));
         assert(!strcmp(argv[i++], "--repo") && argv[i++][0] && i == argc);
@@ -206,7 +204,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (argc > 1) {
-        assert(argc == 2 || argc == 7);
+        assert(argc == 2 || argc == 6);
         assert(snx_is_file(argv[1]));
         if (strstr(argv[1], "Game00")) {
             assert(argc == 2 && strstr(argv[0], "gnuabi"));
@@ -216,8 +214,8 @@ int main(int argc, char** argv) {
         assert(strstr(argv[1], "game with spaces"));
         bool nx = strstr(argv[0], "runtime") != NULL; /* the program the menu is part of */
         if (nx)
-            assert(argc == 7 && !strcmp(argv[2], "--fullscreen=1") && !strcmp(argv[3], "--touch=1") &&
-                   !strcmp(argv[4], "--controls=0") && !strcmp(argv[5], "--repo") && argv[6][0]);
+            assert(argc == 6 && !strcmp(argv[2], "--fullscreen=1") && !strcmp(argv[3], "--controls=0") &&
+                   !strcmp(argv[4], "--repo") && argv[5][0]);
         else
             assert(argc == 2);
         size_t size;
@@ -445,7 +443,7 @@ int main(int argc, char** argv) {
     /* Settings: the launcher's own, then each setting the runtime lists, a row each with its help above; what the
        menu's items used to set is in them */
     key(&app, SDLK_SPACE);
-    assert(app.editing && app.editor.object && app.editor.count == GUI_SETTINGS_OWN + 4);
+    assert(app.editing && app.editor.object && app.editor.count == GUI_SETTINGS_OWN + 3);
     /* and the disk: what ScarletNX's folders take, counted on a thread, and what is left */
     {
         char line[128], used[32], left[32];
@@ -481,7 +479,7 @@ int main(int argc, char** argv) {
     colored_text(&app, 4, "- Launch      libgccjit    off", yellow);
     colored_text(&app, 6, "- Display     fullscreen   0", normal); /* the launcher's choice wins */
     colored_text(&app, 7, "- Graphics    resolution   .ini", normal);
-    colored_text(&app, 8, "- Input       touch        1", normal);
+    colored_text(&app, 8, "- Input       controls     0", normal);
     key(&app, SDLK_RIGHT);
     assert(setting_is(&app, "libgccjit", SNX_GUI_HAS_GCCJIT ? "on" : NULL));
     key(&app, SDLK_LEFT);
@@ -598,8 +596,7 @@ int main(int argc, char** argv) {
     {
         size_t size;
         char* kept = (char*)snx_read_file(app.run_log, &size);
-        char* line =
-            snx_format("game with spaces;literal.nro --fullscreen=1 --touch=1 --controls=0 --repo %s\n", app.data_dir);
+        char* line = snx_format("game with spaces;literal.nro --fullscreen=1 --controls=0 --repo %s\n", app.data_dir);
         assert(kept && line && !app.run_out && !strncmp(kept, "$ ", 2) && strstr(kept, line));
         free(line);
         assert(strstr(kept, "driver stdout") && strstr(kept, "driver stderr") && strstr(kept, "\n[ended, status 0]\n"));

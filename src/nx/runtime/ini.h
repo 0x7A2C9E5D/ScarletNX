@@ -13,6 +13,7 @@ enum {
     INI_TEXT   /* read by set */
 };
 #define INI_STARTUP 1 /* read when the game starts: a reload while it runs leaves it alone (options.c's sections) */
+#define INI_IN_GAME 2 /* set in the game's menu, as a controller comes and goes: the launcher's Settings leave it out */
 
 typedef struct IniOpt IniOpt;
 struct IniOpt {

@@ -13,8 +13,9 @@ extern int g_opt_fullscreen; /* fullscreen: the .ini's, or the command line's fo
 
 void ini_override(const char* k, const char* v); /* a --key=value from the command line, before ini_open. Keeps v */
 void ini_set(const char* k, const char* v);
-/* every setting of the file's sections on stdout, a line each: section, key, default, int | float | text, the lowest
-   and highest number, and the help on one line, tabs between (scarletnx --settings, the menu's Settings) */
+/* every setting of the file's sections but those of the game's menu on stdout, a line each: section, key, default,
+   int | float | text, the lowest and highest number, and the help on one line, tabs between (scarletnx --settings, the
+   launcher's Settings) */
 void ini_list(void);
 void ini_open(const char* path); /* watch the file: ini_poll reloads it when it changes, and writes back what changed */
 /* final: at exit. An edit that hasn't settled is left for the next start, unless a toggle needs saving: then it is

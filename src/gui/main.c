@@ -975,7 +975,6 @@ static GuiSettings* settings_of(App* app) {
     gui_settings_set(&app->settings, "fullscreen", "0");
     gui_settings_set(&app->settings, "controls", "0");
 #endif
-    gui_settings_set(&app->settings, "touch", "1");
     return &app->settings;
 }
 /* ---- the editor's forms (editor.c): the Settings, or the theme editor's rows on the left and the menu or a run in

@@ -146,8 +146,8 @@ static void touch_mode_set(const IniOpt* o, const char* v) {
     if (g_touch_mode != 2) touch_up(&g_touch, g_touch_ids, SNX_TOUCH_MOUSE);
 }
 const IniOpt g_backend_ini[] = {
-    {"touch", "2", "The game's touch screen: 1 = fingers, 2 = fingers and the mouse's left button, 0 = off", INI_INT, 0,
-     &g_touch_mode, 0, 2, touch_mode_set},
+    {"touch", "2", "The game's touch screen: 1 = fingers, 2 = fingers and the mouse's left button, 0 = off", INI_INT,
+     INI_IN_GAME, &g_touch_mode, 0, 2, touch_mode_set},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
 int backend_touch_mode(void) { return g_touch_mode; }
 /* from the in-game menu, under ui_lock: the mode as the .ini clamps it, saved */
