@@ -83,6 +83,10 @@ typedef struct {
     GuiSteps preview_steps; /* the run it shows, over again every GUI_PREVIEW_MS */
     GuiConsole preview_console;
     Uint64 preview_since;
+#ifdef SDL_PLATFORM_ANDROID
+    bool hidden;     /* behind other apps: nothing is drawn, a run is still read */
+    bool play_later; /* a game made ready while hidden, which opens once the menu shows */
+#endif
 } App;
 static const char* const items[] = {"Load Switch NSP/XCI/NRO",
                                     "Load Linux ARM ELF",
@@ -1265,11 +1269,21 @@ static void pump(App* app) {
             app->confirm.shown = false; /* a run that ended while asking has nothing left to abort */
             layout(app);
 #ifdef SDL_PLATFORM_ANDROID
-            /* the game opens in its own activity, over this one: coming back from it is coming back to the menu */
-            if (!app->abnormal_exit && ready(app)) leave_run(app);
+            /* the game opens in its own activity, over this one: coming back from it is coming back to the menu.
+               Android lets no app behind others open one, so then it waits for the menu to show */
+            if (!app->abnormal_exit && app->hidden)
+                app->play_later = true;
+            else if (!app->abnormal_exit && ready(app))
+                leave_run(app);
 #endif
         }
     }
+#ifdef SDL_PLATFORM_ANDROID
+    if (app->play_later && !app->hidden) {
+        app->play_later = false;
+        if (ready(app)) leave_run(app);
+    }
+#endif
     Uint64 now = SDL_GetTicks();
     if (!app->sampled || now - app->sampled >= 500) {
         app->usage = gui_process_usage(app->process);
@@ -1813,6 +1827,8 @@ static void touch(App* app, float x, float y) {
    the user may have just let the app write to /sdcard */
 static bool SDLCALL lifecycle(void* data, SDL_Event* e) {
     App* app = (App*)data;
+    if (e->type == SDL_EVENT_DID_ENTER_BACKGROUND) app->hidden = true;
+    if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) app->hidden = false;
     if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND && android_folder(app) && app->menu.view == GUI_LOAD_GAMES)
         list_games(app);
     return true;
@@ -1950,6 +1966,8 @@ static bool initialize(App* app) {
     gui_android_start();
     /* back is ESC here: without this it would close the app */
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+    /* a run goes on behind other apps: its output is read, or it stops once the pipe is full */
+    SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
 #else
     app->theme = *gui_theme_builtin("default");
 #endif
@@ -2074,9 +2092,16 @@ int main(int argc, char** argv) {
     splash_start(&app);
     while (!app.menu.quit) {
         SDL_Event e;
+#ifdef SDL_PLATFORM_ANDROID
+        /* behind other apps with no run to read, the menu waits to show again */
+        if (app.hidden && !app.menu.running && SDL_WaitEvent(&e)) event(&app, &e);
+#endif
         while (SDL_PollEvent(&e)) event(&app, &e);
         pump(&app);
-        render(&app);
+#ifdef SDL_PLATFORM_ANDROID
+        if (!app.hidden)
+#endif
+            render(&app);
         SDL_Delay(16);
     }
     cleanup(&app);
