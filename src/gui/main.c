@@ -120,7 +120,8 @@ static const char* const items[] = {"Load Switch NSP/XCI/NRO",
                                     "Text size",
                                     "Share log",
                                     "Exit"};
-/* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop */
+/* what the screens say to press: a phone has a finger, the back button and the system's file picker, nothing to drop;
+   a computer has the picker too (on Linux the desktop's portal, else zenity), on a screen of its own as the keys' */
 #ifdef SDL_PLATFORM_ANDROID
 static const char* const load_labels[] = {"-> Select a file", "-> Select file from games/ instead"};
 #define SAY_MENU       "Tap: select. Back: go back."
@@ -130,6 +131,8 @@ static const char* const load_labels[] = {"-> Select a file", "-> Select file fr
 #define SAY_KEYS       "Setup device keys: tap Pick prod.keys to open the file picker"
 #define SAY_KEYS_HOW   "Back: go back."
 #define SAY_KEYS_WAIT  "Pick prod.keys"
+#define SAY_PICK       "tap below to open the file picker" /* these two not shown: the menu keeps the load options */
+#define SAY_FILE_WAIT  SAY_KEYS_WAIT
 #define SAY_DONE       "Tap to return to menu"
 #define SAY_ABORT      "Tap here to abort and return to menu"
 #define SAY_NO_GAMES   "No games in games/: put a game's .nro, .xci or .nsp there."
@@ -138,14 +141,16 @@ static const char* const load_labels[] = {"-> Select a file", "-> Select file fr
 #define SAY_EDITOR     "Tap a key to change it or type it. Back: go back."
 #define SAY_SETTINGS   SAY_EDITOR
 #else
-static const char* const load_labels[] = {"-> Select via drag and drop", "-> Select file from games/ instead"};
+static const char* const load_labels[] = {"-> Select a file", "-> Select file from games/ instead"};
 #define SAY_MENU       "Arrows/mouse: move. Space/Enter/click: select."
 #define SAY_LOAD       "Choose a load option. ESC: back."
-#define SAY_DROP       "Drop a file now. Ctrl+V: paste a path. ESC: back."
+#define SAY_DROP       SAY_LOAD /* not shown: the file is picked on a screen of its own */
 #define SAY_GAMES      "Up/Down: select. Enter/Space: open. Left/Right or PgUp/PgDown: page."
-#define SAY_KEYS       "Setup device keys: drag and drop to this window"
-#define SAY_KEYS_HOW   "Ctrl+V: paste a path. ESC: back."
-#define SAY_KEYS_WAIT  "Drop prod.keys here"
+#define SAY_PICK       "click below (or Enter) to open the file picker"
+#define SAY_KEYS       "Setup device keys: " SAY_PICK
+#define SAY_KEYS_HOW   "Drop it on this window, or Ctrl+V: paste a path. ESC: back."
+#define SAY_KEYS_WAIT  "Pick or drop prod.keys"
+#define SAY_FILE_WAIT  "Pick or drop a file"
 #define SAY_DONE       "Press [ESC] to return to menu"
 #define SAY_ABORT      "Press [ESC] to abort and return to menu"
 #define SAY_NO_GAMES   "No executables found in games/."
@@ -329,6 +334,15 @@ static void entry(App* app, int x, int y, const char* label, int activated, int 
         text(app, x, y, label, rgb(app->theme.page));
     } else
         text(app, x, y, label, rgb(activated ? app->theme.active : focused ? app->theme.focus : app->theme.ink));
+}
+/* the screen a file is picked or dropped on: the keys', and on a computer the load options' file too (on a phone the
+   menu keeps those, and a tap on the option opens the picker) */
+static int pick_screen(const App* app) {
+#ifdef SDL_PLATFORM_ANDROID
+    return app->menu.view == GUI_LOAD_KEYS;
+#else
+    return app->menu.view == GUI_LOAD_KEYS || app->menu.view == GUI_LOAD_DROP;
+#endif
 }
 /* the menu's screen, a run or not */
 static GuiScreen menu_screen(const App* app) {
@@ -848,13 +862,18 @@ static void draw_screen(App* app) {
                  gui_browser_pages(&app->browser), app->games.count);
         text(app, 1, app->rows - 5, page, soft);
         text(app, 1, app->rows - 4, app->message, focus);
-    } else if (app->menu.view == GUI_LOAD_KEYS && idle) {
-        if (head) {
+    } else if (pick_screen(app) && idle) {
+        bool keys = app->menu.view == GUI_LOAD_KEYS;
+        if (head && keys) {
             text(app, 1, 1, SAY_KEYS, ink);
-            text(app, 1, 2, SAY_KEYS_HOW, soft);
             text(app, 1, 3, app->keys_path ? app->keys_path : "Home directory unavailable.", ink);
+        } else if (head) {
+            char line[128];
+            snprintf(line, sizeof line, "%s: " SAY_PICK, items[app->menu.active]);
+            text(app, 1, 1, line, ink);
         }
-        char* in_use = keys_in_use(app);
+        if (head) text(app, 1, 2, SAY_KEYS_HOW, soft);
+        char* in_use = keys ? keys_in_use(app) : NULL;
         if (in_use && app->keys_path && !strcmp(in_use, app->keys_path))
             text(app, 1, 4, "Keys already setup. This will overwrite the previous ones", failure);
         else if (in_use) {
@@ -865,7 +884,7 @@ static void draw_screen(App* app) {
         free(in_use);
         text(app, 1, 6, app->message, focus);
         entry(app, 1, 8, "Back [ESC]", false, app->browser.selected == 0);
-        prompt(app, GUI_PROMPT_KEYS, 1, SDL_max(app->rows / 2, 10), SAY_KEYS_WAIT, focus);
+        prompt(app, GUI_PROMPT_KEYS, 1, SDL_max(app->rows / 2, 10), keys ? SAY_KEYS_WAIT : SAY_FILE_WAIT, focus);
     } else if (idle) {
         if (head) {
             text(app, 1, 1, SAY_MENU, ink);
@@ -914,7 +933,7 @@ static void draw_screen(App* app) {
         else
             text(app, 1, 3, SAY_ABORT, failure);
     }
-    if (app->has_output && app->menu.view != GUI_LOAD_GAMES && app->menu.view != GUI_LOAD_KEYS && !entering(app)) {
+    if (app->has_output && app->menu.view != GUI_LOAD_GAMES && !pick_screen(app) && !entering(app)) {
         SDL_SetTextureColorMod(app->font, theme->ink.r, theme->ink.g, theme->ink.b);
         for (int y = 0; y < app->console.rows; ++y)
             for (int x = 0; x < app->console.cols; ++x)
@@ -922,8 +941,9 @@ static void draw_screen(App* app) {
                     glyph(app, (float)((x + 1) * 8 * app->scale), (float)((app->log_top + y) * 16 * app->scale),
                           app->console.cells[y][x]);
     }
-    if (idle && (app->menu.view == GUI_LOAD_NONE ||
-                 ((app->menu.view == GUI_LOAD_OPTIONS || app->menu.view == GUI_LOAD_DROP) && !app->menu.focus_load)))
+    if (idle && !pick_screen(app) &&
+        (app->menu.view == GUI_LOAD_NONE ||
+         ((app->menu.view == GUI_LOAD_OPTIONS || app->menu.view == GUI_LOAD_DROP) && !app->menu.focus_load)))
         text(app, 1, app->rows - 4,
              app->menu.recent_focus ? app->recent.game[app->menu.recent_focus - 1].path
                                     : gui_setting_description(&app->menu),
@@ -1695,8 +1715,7 @@ static void drop(App* app, const char* value, bool text_drop) {
         launch(app, absolute, false);
     }
 }
-#ifdef SDL_PLATFORM_ANDROID
-/* the picker answers on its own thread: the choice comes back to event() as an app->picked event */
+/* the system's file picker answers on its own thread: the choice comes back to event() as an app->picked event */
 static void SDLCALL picker_done(void* userdata, const char* const* files, int filter) {
     SDL_Event e;
     (void)filter;
@@ -1709,7 +1728,6 @@ static void open_picker(App* app) {
     if (!app->picked) app->picked = SDL_RegisterEvents(1);
     if (app->picked) SDL_ShowOpenFileDialog(picker_done, &app->picked, app->window, NULL, 0, NULL, false);
 }
-#endif
 /* the last max bytes of a file, as text with only ASCII (what Java takes as a string from any log), or "" */
 static char* log_tail(const char* path, size_t max) {
     size_t size = 0, i;
@@ -1830,6 +1848,7 @@ static void menu_key(App* app, GuiKey key) {
         }
         return;
     }
+    if (pick_screen(app) && key != GUI_SELECT && key != GUI_CANCEL) return; /* nothing there to move to */
     switch (gui_menu_key(&app->menu, key)) {
         case GUI_MENU_RECENT:
             if (app->menu.recent_focus <= app->recent.count) open_recent(app, app->menu.recent_focus - 1);
@@ -1840,12 +1859,11 @@ static void menu_key(App* app, GuiKey key) {
         case GUI_MENU_LOG: share_log(app); break;
         default: break;
     }
-#ifdef SDL_PLATFORM_ANDROID
-    /* the screen opens first, as on a computer, so what happens shows there; a select on it opens the picker */
+    if (key == GUI_CANCEL || (key == GUI_SELECT && pick_screen(app))) app->message[0] = 0;
+    /* the screen opens first, so what happens shows there; a select on it opens the picker, whose answer may come at
+       once */
     if (key == GUI_SELECT && app->menu.view == before && (before == GUI_LOAD_DROP || before == GUI_LOAD_KEYS))
         open_picker(app);
-#endif
-    if (key == GUI_CANCEL || (key == GUI_SELECT && app->menu.view == GUI_LOAD_KEYS)) app->message[0] = 0;
     if (app->menu.view == GUI_LOAD_GAMES) list_games(app);
     /* Back or ESC with nothing open to close: on Android the app goes behind, as an app's first screen does; on a
        computer the menu asks before it closes, as rEden does */
@@ -1904,12 +1922,11 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
         ask_pointer(app, x, y, click);
         return;
     }
-    if (app->menu.view == GUI_LOAD_KEYS) {
-        if (click && hit_text(app, x, y, 1, 8, "Back [ESC]", touch)) menu_key(app, GUI_CANCEL);
-#ifdef SDL_PLATFORM_ANDROID
+    if (pick_screen(app)) {
+        if (click && hit_text(app, x, y, 1, 8, "Back [ESC]", touch))
+            menu_key(app, GUI_CANCEL);
         else if (click && hit_text(app, x, y, 1, SDL_max(app->rows / 2, 10), SAY_KEYS_WAIT, true))
             menu_key(app, GUI_SELECT); /* its whole row: the theme may center or frame the prompt */
-#endif
         return;
     }
     /* the line under the pointer takes the focus, and a click selects it */

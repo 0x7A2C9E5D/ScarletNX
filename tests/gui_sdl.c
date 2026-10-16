@@ -334,7 +334,7 @@ int main(int argc, char** argv) {
     render(&app);
     /* the drop line waits on the user: framed, in the middle of the screen, blinking at blink_ms */
     {
-        const char* waiting = "[ Drop prod.keys here ]";
+        const char* waiting = "[ Pick or drop prod.keys ]";
         int middle = SDL_max(app.rows / 2, 10), width = (int)strlen(waiting);
         SDL_Color yellow = rgb(app.theme.focus);
         app.clock = 1000 * app.theme.blink_ms * 2;
@@ -354,7 +354,7 @@ int main(int argc, char** argv) {
         colored_text_at(&app, 1, middle, waiting, yellow);
         app.theme.prompt.lines[GUI_PROMPT_KEYS] = false; /* plain */
         render(&app);
-        colored_text_at(&app, 1, middle, "Drop prod.keys here    ", yellow);
+        colored_text_at(&app, 1, middle, "Pick or drop prod.keys    ", yellow);
         app.theme.prompt = gui_theme_builtin(app.theme.id)->prompt;
         app.clock = 0;
     }
@@ -555,7 +555,7 @@ int main(int argc, char** argv) {
     assert(app.menu.selected == GUI_SWITCH && app.menu.view == GUI_LOAD_OPTIONS);
     render(&app);
     colored_text(&app, menu_row(&app, GUI_SWITCH), "- Load Switch NSP/XCI/NRO", pink);
-    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 1, "-> Select via drag and drop", yellow);
+    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 1, "-> Select a file", yellow);
     /* Leaving a submenu, including crossing another main option, must neither
        close it nor move its rows or change its activated owner. */
     int exit_row = menu_row(&app, GUI_EXIT);
@@ -597,15 +597,30 @@ int main(int argc, char** argv) {
     key(&app, SDLK_ESCAPE);
     assert(app.menu.view == GUI_LOAD_NONE);
     key(&app, SDLK_RETURN);
-    key(&app, SDLK_RETURN); /* activate Select via drag and drop */
-    render(&app);
-    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 1, "-> Select via drag and drop", pink);
-    mouse(&app, 4, menu_row(&app, GUI_SWITCH) + 2, false);
-    render(&app);
-    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 1, "-> Select via drag and drop", pink);
-    colored_text_at(&app, 3, menu_row(&app, GUI_SWITCH) + 2, "-> Select file from games/ instead", yellow);
-    mouse(&app, 2, menu_row(&app, GUI_LINUX), false);
-    assert(app.menu.active == GUI_SWITCH && app.menu.selected == GUI_LINUX && app.menu.view == GUI_LOAD_DROP);
+    key(&app, SDLK_RETURN); /* Select a file: a screen of its own, as the keys' */
+    assert(app.menu.view == GUI_LOAD_DROP && app.menu.active == GUI_SWITCH);
+    {
+        const char* waiting = "[ Pick or drop a file ]";
+        int middle = SDL_max(app.rows / 2, 10);
+        app.clock = 1000 * app.theme.blink_ms * 2; /* the prompt shown, not blinked away */
+        render(&app);
+        colored_text(&app, 1, "Load Switch NSP/XCI/NRO: click below (or Enter) to open the file picker", normal);
+        colored_text_at(&app, (app.cols - (int)strlen(waiting)) / 2, middle, waiting, yellow);
+        app.clock = 0;
+        /* the arrows have nothing to move to there; a click on the prompt, or Enter, opens the system's picker, which
+           answers no file here (SDL_FILE_DIALOG_DRIVER=none) */
+        key(&app, SDLK_DOWN);
+        assert(app.menu.view == GUI_LOAD_DROP && app.menu.load_selected == GUI_LOAD_DRAG && !app.picked);
+        mouse(&app, 10, middle, true);
+        assert(app.picked && app.menu.view == GUI_LOAD_DROP);
+        key(&app, SDLK_RETURN);
+        {
+            SDL_Event answer; /* its answer comes in the next poll, as a frame's */
+            while (SDL_PollEvent(&answer)) event(&app, &answer);
+        }
+        assert(app.menu.view == GUI_LOAD_DROP && !strcmp(app.message, "No file was picked."));
+    }
+    app.menu.selected = GUI_LINUX; /* a drop runs the item that opened the screen */
     SDL_Event e = {0};
     e.type = SDL_EVENT_DROP_TEXT;
     e.drop.data = "one\ntwo";

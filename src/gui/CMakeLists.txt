@@ -124,5 +124,7 @@ if(BUILD_TESTING)
         target_compile_options(${test} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
     endforeach()
     add_test(NAME gui_sdl_events COMMAND snx-test-gui-sdl)
-    set_tests_properties(gui_sdl_events PROPERTIES TIMEOUT 30 ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_RENDER_DRIVER=software")
+    # no file picker of the desktop's: the portal would open one on the screen, DBus being there without a display
+    set_tests_properties(gui_sdl_events PROPERTIES TIMEOUT 30
+                         ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_FILE_DIALOG_DRIVER=none")
 endif()
