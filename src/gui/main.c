@@ -62,8 +62,12 @@ typedef struct {
     GuiSpace* space;      /* the latest count, its thread counter until joined */
     SDL_Thread* counter;
     uint64_t free_bytes; /* on the data folder's disk, when the count started */
-    char* recent_file;   /* where the recent games are kept; NULL keeps none */
-    char* run_log;       /* where a run's output goes as it comes, the last run's; NULL keeps none */
+    char* left;          /* what older builds left where this one no longer looks, a line each, lefts of them */
+    int lefts;
+    bool left_shown;   /* in a box as the menu opens, until a key, a button or a finger closes it */
+    Uint64 left_at;    /* when they were looked for */
+    char* recent_file; /* where the recent games are kept; NULL keeps none */
+    char* run_log;     /* where a run's output goes as it comes, the last run's; NULL keeps none */
     FILE* run_out;
     int recent_named;           /* the run's own name went to its recent game */
     Uint64 clock;               /* fixed time for tests; 0 is the real clock */
@@ -708,6 +712,36 @@ static void ask_box(const App* app, int* col, int* row, int* cols) {
     *row = SDL_max(0, (app->rows - 6) / 2);
 }
 /* the question over a running run, in the run screen's colours, its choices as the menu's entries */
+#define SAY_LEFT_BY " was left by an older version: this one keeps it in "
+/* the box with what older builds left: each file where it is and where to move it, as many as fit, and OK. Nothing is
+   moved: the player does that */
+static void render_left(App* app) {
+    const GuiTheme* t = &app->theme;
+    int shown = SDL_min(app->lefts, SDL_max(1, (app->rows - 8) / 2)), i;
+    int rows = 2 * shown + 6, row = SDL_max(0, (app->rows - rows) / 2); /* a title, a blank row, two a file, OK */
+    float cw = 8.0f * (float)app->scale, ch = 16.0f * (float)app->scale, line = (float)app->scale;
+    float w = (float)(app->cols - 3) * cw, h = (float)rows * ch; /* past the last column text takes */
+    const char* at = app->left;
+    char label[2200];
+    if (!app->left_shown || !app->lefts) return;
+    fill(app, 2 * cw, (float)row * ch, w, h, t->soft, 255); /* framed in soft */
+    fill(app, 2 * cw + line, (float)row * ch + line, w - 2 * line, h - 2 * line, t->page, 255);
+    text(app, 4, row + 1, "An older version left these files, which this one does not read:", rgb(t->warning));
+    for (i = 0; i < shown; ++i, at = strchr(at, '\n') + 1) {
+        const char* by = strstr(at, SAY_LEFT_BY);
+        snprintf(label, sizeof label, "%.*s", (int)(by - at), at);
+        text(app, 4, row + 3 + 2 * i, label, rgb(t->ink));
+        by += strlen(SAY_LEFT_BY);
+        snprintf(label, sizeof label, "  move it to %.*s", (int)strcspn(by, "\n"), by);
+        text(app, 4, row + 4 + 2 * i, label, rgb(t->soft));
+    }
+    if (shown < app->lefts) {
+        snprintf(label, sizeof label, "and %d more, which Share log lists", app->lefts - shown);
+        text(app, 4, row + 3 + 2 * shown, label, rgb(t->soft));
+    }
+    snprintf(label, sizeof label, "%sOK, nothing is moved", t->marker);
+    text(app, 4, row + rows - 2, label, rgb(t->focus));
+}
 static void render_ask(App* app) {
     static const char* const choices[2][2] = {{"Keep going", "Abort"}, {"Stay", "Exit"}}; /* by exit, GUI_CONFIRM_* */
     const GuiTheme* t = &app->theme;
@@ -895,6 +929,7 @@ static void draw_screen(App* app) {
              ink);
     if (foot) footer(app, app->rows - 3, 3, theme->page, theme->ink, theme->soft);
     render_ask(app);
+    render_left(app);
     overlay(app);
 }
 
@@ -1361,6 +1396,66 @@ static void tell(App* app) {
     app->told_ms = now;
 }
 #endif
+#ifdef SNX_XDG
+/* a line more while an older build's file is at old, which this one keeps at now */
+static void left_line(App* app, const char* old, const char* now) {
+    char *line, *grown;
+    size_t n = app->left ? strlen(app->left) : 0;
+    if (!snx_left_behind(old, now)) return;
+    line = snx_format("%s" SAY_LEFT_BY "%s\n", old, now);
+    grown = (char*)realloc(app->left, n + strlen(line) + 1);
+    if (grown) {
+        strcpy(grown + n, line);
+        app->left = grown;
+        app->lefts++;
+    }
+    free(line);
+}
+#endif
+/* what older builds left where this one no longer looks, for the menu to say while it is there: the menu's own files,
+   work/, each game's (common.h). An installed build's alone (XDG): elsewhere the folders are as they were */
+static void left_behind(App* app) {
+    free(app->left);
+    app->left = NULL;
+    app->lefts = 0;
+    app->left_at = SDL_GetTicks();
+#ifdef SNX_XDG
+    static const char* const mine[] = {"recent.txt", "last-run.log"};
+    char *data = snx_user_data_dir(), *folder = app->recent_file ? snx_dirname(app->recent_file) : NULL;
+    char *work = snx_path_join(app->data_dir, "work"), *moved = snx_user_path(work, SNX_USER_CACHE);
+    char** names = NULL;
+    size_t count = 0, i, j;
+    for (i = 0; data && folder && i < sizeof mine / sizeof *mine; ++i) {
+        char *old = snx_format("%s/gui/%s", data, mine[i]), *now = snx_path_join(folder, mine[i]);
+        left_line(app, old, now);
+        free(old);
+        free(now);
+    }
+    left_line(app, work, moved);
+    snx_list_dir(app->games_dir, &names, &count);
+    for (i = 0; i < SNX_GAME_FILES; ++i) {
+        const char* name = snx_game_files[i].name;
+        char* to = snx_user_path(app->games_dir, snx_game_files[i].kind);
+        for (j = 0; j < (name[0] == '.' ? count : 1); ++j) { /* a game's own, by its name, or the folder's */
+            const char* file = name[0] == '.' ? names[j] : name;
+            size_t n = strlen(file), k = strlen(name);
+            char *old, *now;
+            if (name[0] == '.' && (n <= k || strcmp(file + n - k, name))) continue;
+            old = snx_path_join(app->games_dir, file);
+            now = snx_path_join(to, file);
+            left_line(app, old, now);
+            free(old);
+            free(now);
+        }
+        free(to);
+    }
+    snx_free_strings(names, count);
+    free(moved);
+    free(work);
+    free(folder);
+    free(data);
+#endif
+}
 static void pump(App* app) {
     if (app->menu.running) {
         char buffer[4096];
@@ -1425,6 +1520,10 @@ static void pump(App* app) {
     if (!app->sampled || now - app->sampled >= 500) {
         app->usage = gui_process_usage(app->process);
         app->sampled = now;
+    }
+    if (app->left_shown && (!app->left_at || now - app->left_at >= 5000)) { /* the player may have moved them */
+        left_behind(app);
+        app->left_shown = app->lefts > 0;
     }
     if (app->leaving_ms && now_ms(app) - app->leaving_ms >= app->theme.fade_out_ms) leave_run(app);
 }
@@ -1644,11 +1743,13 @@ static void share_log(App* app) {
     }
     if (state) folder = state;
 #endif
+    left_behind(app);
     game = newest_log(app);
     run = log_tail(app->run_log, 1 << 20);
     played = log_tail(game, 4 << 20);
-    text = snx_format("%s\nMessage: %s\n\n== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(), app->message,
-                      app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
+    text = snx_format("%s\nMessage: %s\n%s\n== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
+                      app->message, app->left ? app->left : "", app->run_log ? app->run_log : "", run,
+                      game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
     if (!saved || snx_write_file(saved, text, strlen(text)))
         snprintf(app->message, sizeof(app->message), SAY_LOG_FAILED);
@@ -1959,6 +2060,12 @@ static void event(App* app, const SDL_Event* e) {
         app->menu.quit = true;
         return;
     }
+    /* the box of an older version's files takes the first key, button or finger, which closes it */
+    if (app->left_shown && !app->splash &&
+        (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN || e->type == SDL_EVENT_FINGER_DOWN)) {
+        app->left_shown = false;
+        return;
+    }
     /* the splash takes the input it gets: a key, a button or a finger ends it, and does nothing else */
     if (app->splash && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
                         e->type == SDL_EVENT_FINGER_DOWN || e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)) {
@@ -2123,6 +2230,7 @@ static void cleanup(App* app) {
     gui_process_destroy(app->process);
     space_stop(app);
     gui_settings_free(&app->settings);
+    free(app->left);
     free(app->self);
     free(app->drivers);
     free(app->file);
@@ -2147,25 +2255,13 @@ static void cleanup(App* app) {
 }
 #ifdef SNX_XDG
 /* recent.txt and last-run.log: in the state folder's gui/ (~/.local/state/scarletnx/gui/). An older build's in the data
-   folder's stay, a line saying so each start. Elsewhere SDL_GetPrefPath's folder (under %APPDATA% on Windows) */
+   folder's stay, the menu saying so (left_behind). Elsewhere SDL_GetPrefPath's folder (under %APPDATA% on Windows) */
 static char* state_folder(void) {
-    static const char* const names[] = {"recent.txt", "last-run.log"};
-    char *state = snx_user_dir(SNX_USER_STATE), *data = snx_user_data_dir();
-    char *folder = state ? snx_path_join(state, "gui") : NULL, *old = data ? snx_path_join(data, "gui") : NULL;
-    size_t i;
-    for (i = 0; folder && old && i < sizeof(names) / sizeof(*names); ++i) {
-        char *from = snx_path_join(old, names[i]), *to = snx_path_join(folder, names[i]);
-        if (snx_left_behind(from, to))
-            fprintf(stderr, "scarletnx-gui: %s was left by an older version: this one keeps it in %s\n", from, to);
-        free(from);
-        free(to);
-    }
+    char *state = snx_user_dir(SNX_USER_STATE), *folder = state ? snx_path_join(state, "gui") : NULL;
     if (folder && snx_mkdirs(folder)) {
         free(folder);
         folder = NULL;
     }
-    free(old);
-    free(data);
     free(state);
     return folder;
 }
@@ -2192,6 +2288,8 @@ int snx_gui_main(const char* self) {
     if (prefs) recent_open(&app, snx_path_join(prefs, "recent.txt"));
     if (prefs) app.run_log = snx_path_join(prefs, "last-run.log");
     free(prefs);
+    left_behind(&app);
+    app.left_shown = app.lefts > 0;
     splash_start(&app);
     while (!app.menu.quit) {
         SDL_Event e;

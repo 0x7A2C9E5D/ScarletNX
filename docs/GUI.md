@@ -78,6 +78,11 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   `/sdcard/ScarletNX/` and is shared.
 - **Exit** closes the launcher. Closing its window during a run terminates the
   entire owned process tree, so let the game exit normally to preserve its saves.
+- On Linux, as it opens, the menu shows in a box what an older version left where this one no
+  longer looks, and where to move it: the menu's `recent.txt` and `last-run.log`, `work/`, and
+  each game's settings, log, `threads.txt` and pipeline cache. Any key, click or tap closes it;
+  nothing is moved, and it shows again at the next start for as long as they are there.
+  **Share log** lists them all.
 - **Recent games**, above the items, lists the last five games run, newest first, by
   the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
   The focus moves between them and the items in one ring, and the line under the menu

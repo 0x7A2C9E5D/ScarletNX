@@ -1566,6 +1566,88 @@ int main(int argc, char** argv) {
         assert(!snx_path_exists(now) && snx_left_behind(recent, now));
         free(now);
         free(folder);
+        /* the menu says, a line at a time, what an older build left where this one no longer looks: its own files,
+           work/ and each game's, until they are gone */
+        {
+            char *installed_dir = app.data_dir, *games = app.games_dir, *ini, *log, *threads, *work, *line;
+            const char* const lines[] = {
+                "%s/scarletnx/gui/recent.txt",    "%s/scarletnx/gui/recent.txt", "%s/scarletnx/gui/last-run.log",
+                "%s/scarletnx/gui/last-run.log",  "%s/scarletnx/work",           "%s/scarletnx/work",
+                "%s/scarletnx/games/Foo.log",     "%s/scarletnx/games/Foo.log",  "%s/scarletnx/games/threads.txt",
+                "%s/scarletnx/games/threads.txt", "%s/scarletnx/games/Foo.ini",  "%s/scarletnx/games/Foo.ini"};
+            const char* const into[] = {state, state, "cache", "state", "state", "config"};
+            char* config = snx_path_join(temporary, "config");
+            char* cache = snx_path_join(temporary, "cache");
+            const char* at;
+            int i;
+            SDL_setenv_unsafe("XDG_CONFIG_HOME", config, 1);
+            SDL_setenv_unsafe("XDG_CACHE_HOME", cache, 1);
+            app.data_dir = snx_path_join(data, "scarletnx");
+            app.games_dir = snx_path_join(app.data_dir, "games");
+            app.recent_file = snx_path_join(expected, "recent.txt");
+            ini = snx_path_join(app.games_dir, "Foo.ini");
+            log = snx_path_join(app.games_dir, "Foo.log");
+            threads = snx_path_join(app.games_dir, "threads.txt");
+            work = snx_path_join(app.data_dir, "work");
+            assert(!snx_mkdirs(work) && !snx_mkdirs(app.games_dir) && !snx_write_file(ini, "", 0));
+            assert(!snx_write_file(log, "", 0) && !snx_write_file(threads, "", 0));
+            left_behind(&app);
+            assert(app.lefts == 6);
+            for (i = 0, at = app.left; i < 6; ++i, at = strchr(at, '\n') + 1) {
+                char *old_path = snx_format(lines[2 * i], data), *now_path;
+                const char* root = !strcmp(into[i], "config") ? config : !strcmp(into[i], "cache") ? cache : state;
+                now_path = snx_format(lines[2 * i + 1], root);
+                line = snx_format("%s was left by an older version: this one keeps it in %s\n", old_path, now_path);
+                assert(!strncmp(at, line, strlen(line)));
+                free(line);
+                free(now_path);
+                free(old_path);
+            }
+            /* in a box over the menu as it opens: each where it is and where to move it, as many as fit */
+            {
+                int rows = 2 * 6 + 6, row = (app.rows - rows) / 2, selected = app.menu.selected;
+                SDL_Color page = rgb(app.theme.page);
+                app.left_shown = true;
+                app.clock = 1; /* the long lines rest before they slide */
+                render(&app);
+                assert(app.rows >= 20 && row > 0);
+                colored_text_on(&app, 4, row + 1, "An older version left these files, which this one does not read:",
+                                rgb(app.theme.warning), page);
+                line = snx_format("%s/scarletnx/gui/recent.txt", data);
+                if ((int)strlen(line) > app.cols - 5) line[app.cols - 5] = 0;
+                colored_text_on(&app, 4, row + 3, line, rgb(app.theme.ink), page);
+                free(line);
+                line = snx_format("  move it to %s/scarletnx/gui/recent.txt", state);
+                if ((int)strlen(line) > app.cols - 5) line[app.cols - 5] = 0;
+                colored_text_on(&app, 4, row + 4, line, rgb(app.theme.soft), page);
+                free(line);
+                colored_text_on(&app, 4, row + rows - 2, "- OK, nothing is moved", rgb(app.theme.focus), page);
+                app.clock = 0;
+                /* a key closes it and does nothing else; nothing was moved */
+                key(&app, SDLK_DOWN);
+                assert(!app.left_shown && app.menu.selected == selected && snx_is_file(ini));
+                /* gone while it shows, it closes */
+                app.left_shown = true;
+                assert(!snx_remove_tree(app.data_dir)); /* its gui/ too */
+                app.left_at = 0;
+                pump(&app);
+                assert(!app.left_shown && !app.lefts && !app.left);
+            }
+            SDL_setenv_unsafe("XDG_CONFIG_HOME", "/nonexistent/snx-gui-test/config", 1);
+            SDL_setenv_unsafe("XDG_CACHE_HOME", "/nonexistent/snx-gui-test/cache", 1);
+            free(app.recent_file);
+            app.recent_file = NULL;
+            free(app.games_dir);
+            app.games_dir = games;
+            free(app.data_dir);
+            app.data_dir = installed_dir;
+            free(work);
+            free(threads);
+            free(log);
+            free(ini);
+            free(cache);
+            free(config);
+        }
         /* and an empty state folder is made for the first run */
         assert(!snx_remove_tree(state));
         folder = state_folder();
