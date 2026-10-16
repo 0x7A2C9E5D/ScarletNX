@@ -74,7 +74,8 @@ typedef enum {
     SNX_A32_TLS,
     SNX_A32_VECTOR,
     SNX_A32_UADD8,
-    SNX_A32_SEL
+    SNX_A32_SEL,
+    SNX_A32_MULH /* ARMv5TE signed halfword multiplies (ARM11 profile) */
 } SnxA32Kind;
 
 /* Reserved, privileged and unpredictable encodings are rejected.

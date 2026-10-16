@@ -578,6 +578,42 @@ static void multiply(ArmIR* a, SnxA32Kind kind) {
         setreg(a, n, r);
     }
 }
+/* ARMv5TE signed halfword multiplies (ARM11 profile, profile.c): the bottom or top half of Rm (x, bit 5) and of Rs
+   (y, bit 6), sign-extended. SMULWy and SMLAWy take all of Rm and keep bits 47..16 of the 48-bit product. The
+   32-bit accumulates (SMLAxy, SMLAWy) set the sticky Q flag (CPSR bit 27) on signed overflow; SMLALxy accumulates
+   into RdHi:RdLo without flags */
+static LLVMValueRef half(ArmIR* a, LLVMValueRef v, int top) {
+    return LLVMBuildAShr(a->b, top ? v : shl(a, v, 16), c32(a, 16), "");
+}
+static void halfword_multiply(ArmIR* a) {
+    uint32_t w = a->word;
+    unsigned op = (w >> 21) & 3, d = (w >> 16) & 15, n = (w >> 12) & 15;
+    LLVMValueRef m = reg(a, w & 15), y = half(a, reg(a, (w >> 8) & 15), !!(w & 0x40)), r;
+    int accumulate;
+    if (op == 1) {
+        LLVMValueRef p = LLVMBuildMul(a->b, LLVMBuildSExt(a->b, m, a->i64, ""), LLVMBuildSExt(a->b, y, a->i64, ""), "");
+        r = LLVMBuildTrunc(a->b, LLVMBuildAShr(a->b, p, c64(a, 16), ""), a->i32, "");
+        accumulate = !(w & 0x20);
+    } else {
+        r = LLVMBuildMul(a->b, half(a, m, !!(w & 0x20)), y, ""); /* at most 0x40000000: no overflow */
+        if (op == 2) {
+            LLVMValueRef acc = bor(a, z64(a, reg(a, n)), LLVMBuildShl(a->b, z64(a, reg(a, d)), c64(a, 32), ""));
+            acc = add(a, acc, LLVMBuildSExt(a->b, r, a->i64, ""));
+            setreg(a, n, LLVMBuildTrunc(a->b, acc, a->i32, ""));
+            setreg(a, d, LLVMBuildTrunc(a->b, LLVMBuildLShr(a->b, acc, c64(a, 32), ""), a->i32, ""));
+            return;
+        }
+        accumulate = op == 0;
+    }
+    if (accumulate) {
+        LLVMValueRef args[2] = {r, reg(a, n)};
+        LLVMValueRef sum = intrinsic(a, "llvm.sadd.with.overflow", 23, a->i32, args, 2);
+        LLVMValueRef overflow = z32(a, LLVMBuildExtractValue(a->b, sum, 1, ""));
+        r = LLVMBuildExtractValue(a->b, sum, 0, "");
+        PUT(a, cpsr, bor(a, GET(a, cpsr), shl(a, overflow, 27)));
+    }
+    setreg(a, d, r);
+}
 static void miscellaneous(ArmIR* a, SnxA32Kind kind) {
     uint32_t w = a->word;
     unsigned d = (w >> 12) & 15, n = (w >> 16) & 15;
@@ -694,6 +730,7 @@ static int instruction(ArmIR* a, SnxA32Kind kind) {
         case SNX_A32_MUL:
         case SNX_A32_MULL:
         case SNX_A32_MLS: multiply(a, kind); break;
+        case SNX_A32_MULH: halfword_multiply(a); break;
         case SNX_A32_EXCLUSIVE:
             if (a->memory == SNX_ARM_MEMORY_CHECKED)
                 checked_exclusive(a);

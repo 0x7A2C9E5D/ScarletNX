@@ -33,6 +33,24 @@ def main():
             for opcode in (0x06500F90, 0x06800FB0):
                 A.case(condition << 28 | opcode | n << 16 | d << 12 | m, 'packed')
     A.CASES.append((A.program(0xE6513F92, 0xE0233004, 0xE6815FB2), 'packed'))
+
+    # ARMv5TE signed halfword multiplies: SMLAxy, SMLAWy, SMULWy, SMLALxy, SMULxy, every x/y half. Fields are
+    # Rd (19:16), Rn/RdLo (15:12), Rs (11:8), Rm (3:0). The 'mulh' group clears the sticky Q flag on half the
+    # seeds, so an overflowing accumulate is seen setting it.
+    def mulh(op, x, y, d, n, s, m):
+        return 0x01000080 | op << 21 | y << 6 | x << 5 | d << 16 | n << 12 | s << 8 | m
+
+    forms = [(0, x, y) for x in (0, 1) for y in (0, 1)] + [(1, 0, y) for y in (0, 1)] + [(1, 1, y) for y in (0, 1)]
+    forms += [(2, x, y) for x in (0, 1) for y in (0, 1)] + [(3, x, y) for x in (0, 1) for y in (0, 1)]
+    for op, x, y in forms:
+        accumulates = op in (0, 2) or (op == 1 and not x)
+        for condition in range(15) if (x, y) == (0, 0) else (14,):
+            for d, n, s, m in ((3, 4, 2, 1), (1, 2, 1, 2), (14, 1, 2, 1)):
+                if not accumulates:
+                    n = 0
+                elif op == 2 and d == n:
+                    continue
+                A.case(condition << 28 | mulh(op, x, y, d, n, s, m), 'mulh')
     # A32 base-in-list transfers with writeback: ARM11 MPCore (and ARMv8)
     # semantics, checked against Unicorn. STM stores the old base; LDM's
     # loaded base wins over writeback.
@@ -66,6 +84,8 @@ def main():
                     cpu, memory = A.state(words, seed, group)
                     if group == 'packed':
                         cpu.cpsr = (cpu.cpsr & ~0xF0000) | (seed & 15) << 16
+                    if group == 'mulh' and seed & 16:
+                        cpu.cpsr &= ~(1 << 27)
                     emu.mem_write(0, bytes(memory))
                     emu.ctl_remove_cache(A.PC, A.PC + 4 * len(words))
                     emu.reg_write(R.UC_ARM_REG_CPSR, cpu.cpsr)

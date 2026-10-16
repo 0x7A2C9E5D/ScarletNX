@@ -28,6 +28,16 @@ int main(void) {
             assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM11, packed[i] | (15u << shifts[j])) == SNX_A32_UNDEFINED);
         assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM11, packed[i] | 0xf0000000u) == SNX_A32_UNDEFINED);
     }
+    /* ARMv5TE halfword multiplies (llvm-mc -mcpu=mpcore): smulbb r3,r1,r3; smultt r3,r1,r2; smlabb r3,r1,r2,r9;
+       smlawt r3,r1,r2,r9; smulwb r3,r1,r2; smlalbt r4,r5,r1,r2. The A57 contract keeps its own decoder */
+    const uint32_t mulh[] = {0xe1630381, 0xe16302e1, 0xe1039281, 0xe12392c1, 0xe12302a1, 0xe14542c1};
+    for (unsigned i = 0; i < sizeof mulh / sizeof *mulh; ++i) {
+        assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM11, mulh[i]) == SNX_A32_MULH);
+        assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM11, mulh[i] | 15u) == SNX_A32_UNDEFINED); /* Rm = PC */
+        assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM11, mulh[i] | 0xf0000000u) == SNX_A32_UNDEFINED);
+    }
+    assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM11, 0xe1631381) == SNX_A32_UNDEFINED); /* SMULBB, Rn not 0 */
+    assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM11, 0xe14442c1) == SNX_A32_UNDEFINED); /* SMLAL RdHi == RdLo */
     assert(snx_a32_decode_profile((SnxArmProfile)99, 0xe1a00000) == SNX_A32_UNDEFINED);
     uint32_t state = 1234;
     for (unsigned i = 0; i < 100000; ++i) {
