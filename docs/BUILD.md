@@ -11,9 +11,10 @@ Run from checkout root. [Extract/AOT/run](USAGE.md) · [Tests/diagnostics](DEVEL
   NASM on x86-64, Perl, Git, pkg-config and `patch`.
   Use a system SDL3 development package, or X11/Wayland and audio development libraries for the bundled
   SDL3 build.
-- **Windows:** Win10/11 x64 + Git. Bootstrap stages SHA-256-checked llvm-mingw/Clang, CMake, Ninja,
-  NASM, Strawberry Perl and w64devkit in `deps/tools`. llvm-mingw has no LLVM libraries. Install LLVM development files
-  compatible with MinGW and set `-DSNX_LLVM_CONFIG=/path/to/llvm-config`. CMake fails without them.
+- **Windows:** Win10/11 x64. CI builds in MSYS2's CLANG64 environment, which has LLVM's development files
+  ([steps](#windows--msys2-clang64)). Bootstrap stages SHA-256-checked llvm-mingw/Clang, CMake, Ninja,
+  NASM, Strawberry Perl and w64devkit in `deps/tools`. llvm-mingw has no LLVM libraries, so that route also needs a
+  MinGW LLVM's `llvm-config` set with `-DSNX_LLVM_CONFIG=/path/to/llvm-config`. CMake fails without it.
 - **Display:** a Vulkan 1.3 driver. Headless runs use Vulkan offscreen and skip SDL video initialization.
   SDL3 remains a required build dependency.
 - **FFmpeg:** required by every NX runtime build. CMake builds the pinned source release.
@@ -175,6 +176,59 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```
 
 `env.ps1 -Isolated` restricts PATH to bundled tools, Git and Windows.
+
+## Windows / MSYS2 CLANG64
+
+The `windows` job in [build.yml](../.github/workflows/build.yml) builds this way. Clang, LLVM and the FFmpeg and
+OpenSSL build tools come from MSYS2, not from `bootstrap.ps1`. Keep `env.ps1` out of this shell: llvm-mingw's C++
+runtime must not mix with another LLVM build.
+
+1. Install MSYS2 from [msys2.org](https://www.msys2.org/) and open the **MSYS2 CLANG64** shell. Run every step below
+   in it.
+2. Update MSYS2, then install CI's packages. If the update closes the shell, reopen it and run `pacman -Syu` again.
+
+   ```sh
+   pacman -Syu
+   pacman -S --needed git make patch perl patchutils \
+     mingw-w64-clang-x86_64-clang mingw-w64-clang-x86_64-llvm mingw-w64-clang-x86_64-lld \
+     mingw-w64-clang-x86_64-cmake mingw-w64-clang-x86_64-ninja mingw-w64-clang-x86_64-nasm \
+     mingw-w64-clang-x86_64-pkgconf mingw-w64-clang-x86_64-python mingw-w64-clang-x86_64-spirv-tools
+   ```
+
+   Python and spirv-tools are only for the `shader_direct` test. CI also installs ccache, and UCRT64's libgccjit and
+   binutils for the optional `--backend=gcc` ([gccjit.cmake](../cmake/gccjit.cmake)). Neither is needed here.
+3. Clone to a path without spaces:
+
+   ```sh
+   git clone https://github.com/scarletnx/ScarletNX.git
+   cd ScarletNX
+   ```
+
+4. Configure and build. These are CI's options without its ccache, libgccjit and `-DSNX_DEPLOY=OFF` ones. They give
+   CMake the MSYS2 tools as Windows paths and build the pinned SDL3.
+
+   ```sh
+   cmake --preset default \
+     -DSNX_LLVM_CONFIG="$(cygpath -m "$(command -v llvm-config)")" \
+     -DSNX_FFMPEG_SH="$(cygpath -m /usr/bin/sh.exe)" \
+     -DSNX_FFMPEG_MAKE="$(cygpath -m /usr/bin/make.exe)" \
+     -DPERL_EXECUTABLE="$(cygpath -m /usr/bin/perl.exe)" \
+     -DSNX_OPENSSL_MAKE="$(cygpath -m /usr/bin/make.exe)" \
+     -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON
+   cmake --build --preset default
+   ```
+
+5. The executables land in `build/default`. CI checks them with:
+
+   ```sh
+   build/default/scarletnx.exe --help
+   ctest --test-dir build/default --output-on-failure
+   ```
+
+6. Run `build/default/scarletnx.exe` from the CLANG64 shell, which has the DLLs it imports on PATH
+   ([USAGE](USAGE.md)). For a copy that runs without MSYS2, `cmake --install build/default --prefix stage` puts
+   `scarletnx.exe` and `hactool.exe` in `stage/bin`. Then copy the DLLs they import from `/clang64/bin`, as CI's
+   "Bundle runtime DLLs and licenses" step does.
 
 ## Rebuild, deploy, cache
 
