@@ -12,6 +12,9 @@
 #ifndef SNX_SOURCE_DIR
 #define SNX_SOURCE_DIR "."
 #endif
+#ifndef SNX_BUILD_DIR
+#define SNX_BUILD_DIR NULL
+#endif
 
 static void usage(FILE* out) {
     fputs("Usage: scarletnx-3ds [--model old|new] [-x] [--output NEW_DIRECTORY] [--repo DIR] [--] game.cia\n"
@@ -39,7 +42,7 @@ static bool visible_path(const char* path) {
    folder (snx_work_dir); resolved, as the loader refuses a link on the way to its output */
 static char* work_folder(const char* repo, const char* argv0) {
     char *exe = repo ? NULL : snx_executable(argv0), *dir = exe ? snx_dirname(exe) : NULL;
-    char* data = repo ? snx_strdup(repo) : snx_data_dir(SNX_SOURCE_DIR, dir);
+    char* data = repo ? snx_strdup(repo) : snx_data_dir(SNX_SOURCE_DIR, SNX_BUILD_DIR, dir);
     char *work = data ? snx_work_dir(data) : snx_strdup("work"), *folder = snx_path_join(work, "3ds");
     char* resolved = snx_absolute(folder);
     free(folder);

@@ -25,11 +25,13 @@
 #include <sys/stat.h>
 #endif
 
-/* the checkout the drivers were built from: a build tree's menu lists the games/ its driver makes */
+/* the checkout the drivers were built from and its build tree: a build tree's menu lists the games/ its driver makes */
 #ifdef SNX_SOURCE_DIR
 #define GUI_CHECKOUT SNX_SOURCE_DIR
+#define GUI_BUILD    SNX_BUILD_DIR
 #else
 #define GUI_CHECKOUT NULL
+#define GUI_BUILD    NULL
 #endif
 
 typedef struct {
@@ -1968,7 +1970,7 @@ static bool initialize(App* app) {
     app->data_dir = snx_strdup(app->cwd ? app->cwd : ".");
 #else
     app->drivers = SDL_GetBasePath();
-    app->data_dir = snx_data_dir(GUI_CHECKOUT, app->drivers);
+    app->data_dir = snx_data_dir(GUI_CHECKOUT, GUI_BUILD, app->drivers);
     if (!app->data_dir) app->data_dir = snx_strdup(app->cwd ? app->cwd : ".");
 #endif
     app->games_dir = snx_path_join(app->data_dir, "games");

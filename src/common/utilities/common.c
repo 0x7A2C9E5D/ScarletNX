@@ -674,11 +674,13 @@ char* snx_work_dir(const char* data_dir) {
     free(old);
     return work;
 }
-char* snx_data_dir(const char* checkout, const char* program_dir) {
+char* snx_data_dir(const char* checkout, const char* build, const char* program_dir) {
     const char *appimage = getenv("APPIMAGE"), *appdir = getenv("APPDIR");
     char *path = checkout ? snx_path_join(checkout, "CMakeLists.txt") : NULL, *dir = NULL, *games;
     int portable;
-    if (path && snx_is_file(path)) {
+    /* a copy installed from that build (cmake --install) is installed, even where the checkout still is */
+    if (path && snx_is_file(path) &&
+        (!build || !program_dir || (snx_is_dir(build) && snx_path_within(program_dir, build)))) {
         free(path);
         return snx_strdup(checkout);
     }

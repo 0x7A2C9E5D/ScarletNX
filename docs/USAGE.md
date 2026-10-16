@@ -216,7 +216,7 @@ X11 bypasses Wayland. [Licenses](CREDITS.md).
 
 The driver works in one folder, the first of these that applies (`--repo DIR` names another):
 
-1. the checkout it was built from;
+1. the checkout it was built from, for a program run from its build tree;
 2. a portable copy's: the folder of the AppImage, or of the Windows zip's programs, with a `games/` folder beside it;
 3. the user's data folder: `~/.local/share/scarletnx` on Linux, `%APPDATA%\scarletnx` on Windows,
    `~/Library/Application Support/scarletnx` on macOS. On Android the app names its own, `/sdcard/ScarletNX`.
