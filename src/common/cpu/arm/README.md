@@ -140,17 +140,18 @@ cache/resume still need work; none of these are shared A57 defaults.
 
 ## Implemented instructions (default A57/flat configuration)
 
-- Word/byte LDR and STR, immediate and shifted-register offsets, positive/negative offsets, pre/post indexing, writeback and unprivileged aliases.
+- Word/byte LDR and STR, immediate and shifted-register offsets, positive/negative offsets, pre/post indexing, writeback and unprivileged aliases. Stores, like loads, take the PC (PC+8) as their base without writeback.
 - LDRH, STRH, LDRSB, LDRSH, LDRD, STRD, including literal loads and applicable unprivileged aliases.
 - LDM/STM IA, IB, DA, DB, PUSH/POP, and loads of PC. Register sources and writeback use the original base.
 - LDREX/STREX byte, halfword, word and doubleword, CLREX, and ARMv8 LDA/STL and LDAEX/STLEX variants.
-- DMB, DSB, ISB and PLD/PLDW/PLI prefetch hints.
+- DMB, DSB, ISB and PLD/PLDW/PLI prefetch hints. NOP, YIELD, WFE, WFI, SEV, SEVL and the unallocated hints (CSDB, ESB, DBG) complete as NOP.
 - All sixteen ordinary data-processing opcodes, including ADC/SBC/RSC and tests/comparisons, with NZCV semantics and conditional execution.
 - Immediate rotation, LSL/LSR/ASR/ROR/RRX, including register-shift amounts zero, 32, above 32 and multiples of 32.
-- MOVW/MOVT, MUL/MLA/MLS, signed/unsigned long multiplies and accumulates, SDIV/UDIV.
-- CLZ, REV/REV16/REVSH/RBIT, scalar byte/halfword extends and extend-adds, UBFX/SBFX/BFI/BFC.
+- MOVW/MOVT, MUL/MLA/MLS, signed/unsigned long multiplies and accumulates, UMAAL, SDIV/UDIV.
+- CLZ, REV/REV16/REVSH/RBIT, scalar byte/halfword extends and extend-adds, SXTB16/UXTB16 and their adds, UBFX/SBFX/BFI/BFC.
+- The ARMv6 media and DSP instructions: SSAT/USAT/SSAT16/USAT16, PKHBT/PKHTB, SEL, the parallel add and subtract family (signed, unsigned, saturating and halving ADD16/ASX/SAX/SUB16/ADD8/SUB8, setting GE), QADD/QSUB/QDADD/QDSUB, the halfword multiplies SMLA<x><y>/SMUL<x><y>/SMLAW<y>/SMULW<y>/SMLAL<x><y>, the dual multiplies SMLAD/SMUAD/SMLSD/SMUSD/SMLALD/SMLSLD (with X), SMMLA/SMMUL/SMMLS (with R), USAD8/USADA8, with the sticky Q flag. CRC32 and CRC32C (B, H, W).
 - B, BL, BX, BLX immediate/register, SVC and BKPT.
-- MRS CPSR, MSR APSR flag fields, and user TPIDRURW/TPIDRURO accesses through MRC/MCR.
+- MRS CPSR, MSR to the CPSR as EL0 writes it (NZCVQ, GE and E, the privileged fields ignored), SETEND, and user TPIDRURW/TPIDRURO accesses through MRC/MCR. A block reads E on entry, so SETEND and MSR to the x field end it; a big-endian E then stops the next block with `SNX_ARM_ENDIAN_UNSUPPORTED`.
 
 ## VFP and Advanced SIMD
 
@@ -169,7 +170,8 @@ than host floating point:
 - FP approximation instructions VRSQRTE/VSQRTE/VRECPE/VRSQRTS/VRECPS and the integer urecpe/ursqrte forms,
   using ARM's estimate algorithms.
 - VLDn/VSTn structure loads and stores (1 to 4 registers, single/multiple elements, all lanes, replicate,
-  pre/post-indexed with writeback), VLD/VSTM/VLDR/VSTR, and core-to-lane and lane-to-core moves.
+  pre/post-indexed with writeback), VLD/VSTM/VLDR/VSTR (in A32 with a PC base too, VLDM/VSTM without writeback), and
+  core-to-lane and lane-to-core moves.
 - AES (AESE/AESD/AESMC/AESIMC), SHA1 and SHA256 (SHA1H/P/M/C/SU0/SU1, SHA256H/H2/SU0/SU1), and polynomial
   multiply VMULL.P8/P64, all through portable reference implementations. No AES-NI or CLMUL is used here.
 

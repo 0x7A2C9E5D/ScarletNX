@@ -102,6 +102,16 @@ typedef enum {
     SNX_A32_SEL,
     SNX_A32_MULH /* ARMv5TE signed halfword multiplies (ARM11 profile) */
     SNX_A32_COPROC, /* MRC/MCR/MRRC/MCRR to coprocessor 14 or 15: the backend's (SnxArmRt.coproc) */
+    SNX_A32_SATURATE,   /* SSAT, USAT, SSAT16, USAT16 */
+    SNX_A32_PACK,       /* PKHBT, PKHTB */
+    SNX_A32_SELECT,     /* SEL */
+    SNX_A32_PARALLEL,   /* the parallel add and subtract family: {S,Q,SH,U,UQ,UH}{ADD16,ASX,SAX,SUB16,ADD8,SUB8} */
+    SNX_A32_QARITH,     /* QADD, QSUB, QDADD, QDSUB */
+    SNX_A32_HALF_MUL,   /* SMLA<x><y>, SMUL<x><y>, SMLAW<y>, SMULW<y>, SMLAL<x><y> */
+    SNX_A32_DUAL_MUL,   /* SMLAD, SMUAD, SMLSD, SMUSD, SMLALD, SMLSLD, SMMLA, SMMUL, SMMLS */
+    SNX_A32_ABS_DIFF,   /* USAD8, USADA8 */
+    SNX_A32_CRC32,      /* CRC32 and CRC32C, byte, halfword and word */
+    SNX_A32_SETEND      /* SETEND: E, which a block reads only on entry, so the block ends after it */
 } SnxA32Kind;
 
 /* Reserved, privileged and unpredictable encodings are rejected.

@@ -12,6 +12,8 @@ int main(void) {
     } cases[] = {
         {0xe1a00000, SNX_A32_DATA},
         {0xe59f0004, SNX_A32_SINGLE},
+        {0xe78f1000, SNX_A32_SINGLE},    /* STR r1, [pc, r0] */
+        {0xe7af1000, SNX_A32_UNDEFINED}, /* STR r1, [pc, r0]!: PC base with writeback */
         {0xe1cf00d8, SNX_A32_EXTRA},
         {0xe8bd8001, SNX_A32_MULTIPLE},
         {0xe12fff3e, SNX_A32_BX},
@@ -46,7 +48,8 @@ int main(void) {
         {0xf1a00000, SNX_A32_UNDEFINED}, /* cond=1111 in the integer space is not AL */
         {0xf3a00000, SNX_A32_VECTOR},    /* VADDL.U32, the AdvSIMD space uses cond=1111 */
         {0xe14f3000, SNX_A32_UNDEFINED}, /* MRS SPSR */
-        {0xe121f002, SNX_A32_UNDEFINED}, /* MSR control */
+        {0xe121f002, SNX_A32_MSR},       /* MSR CPSR_c: EL0 writes nothing of the c field */
+        {0xe161f002, SNX_A32_UNDEFINED}, /* MSR SPSR_c */
         {0xe1b0f00e, SNX_A32_UNDEFINED}, /* MOVS PC,LR exception return */
         {0xe8fd8000, SNX_A32_UNDEFINED}, /* privileged LDM^ */
         {0xe5b44004, SNX_A32_UNDEFINED}, /* writeback/load base overlap */

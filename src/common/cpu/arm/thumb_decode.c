@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "common/cpu/arm/arm.h"
+#include "common/cpu/arm/simd.h"
 
 static unsigned thumb16(uint16_t h, SnxThumb* o) {
     unsigned g = h >> 11;
@@ -251,6 +252,12 @@ static unsigned coprocessor(unsigned a, unsigned b, SnxThumb* o) {
     else
         word = ((uint32_t)a << 16) | b;
     kind = snx_a32_decode(word);
+    if (kind == SNX_A32_VECTOR) { /* Thumb's VSTR, VLDM and VSTM can't take the PC as their base, as A32's can */
+        SnxArmVector v;
+        snx_arm_vector_decode(word, &v);
+        if (v.op == AV_MEM && v.n == 15 && (!(v.flags & AV_LOAD) || !(v.flags & AV_PRE) || (v.flags & AV_WB)))
+            return 0;
+    }
     return kind == SNX_A32_VECTOR || kind == SNX_A32_COPROC ? twin_kind(o, word, kind, 0) : 0;
 }
 
