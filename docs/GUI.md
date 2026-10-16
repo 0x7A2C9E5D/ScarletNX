@@ -55,8 +55,9 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   data folder instead (`~/.local/share/scarletnx/prod.keys`), which the driver reads before
   `~/.switch`, and names the keys of `~/.switch` it would use until then. It creates the
   folder if needed. Existing keys trigger the bright-red warning
-  **Keys already setup. This will overwrite the previous ones**. A successful
-  drop replaces them and returns to the menu; ESC cancels without changing them.
+  **Keys already setup. This will overwrite the previous ones**. The screen then says what the try
+  did, *Installed* or *Not installed* and why, and goes back to the menu by itself after 3 seconds
+  (10 after a failure, while another file can still be picked); ESC cancels without changing them.
 - **Settings** opens on its groups, Enter opening one and ESC coming back: **App**, then
   **Launch** (the launcher's two), then a group per section of the game's `.ini` (Display,
   Graphics, Performance, On-screen controls, Controllers, Network, Debug), as `scarletnx --settings`

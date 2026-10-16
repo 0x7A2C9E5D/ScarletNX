@@ -95,6 +95,8 @@ typedef struct {
     char* data_dir;       /* games/, work/ and themes/: the driver's too, which gets it as --repo (snx_data_dir) */
     char* themes_dirs[2]; /* themes/ in the data folder, then beside the GUI */
     char message[512];
+    Uint64 keys_done; /* the keys screen's outcome shown since, 0 for none: then the menu by itself */
+    bool keys_ok;
     int cols, rows, scale;
     int auto_scale; /* Text size Auto's scale, chosen when the window opens: a resize keeps the letters as they were */
     Uint64 sampled;
@@ -208,6 +210,22 @@ static SDL_Color rgb(GuiRgb c) {
     return out;
 }
 static Uint64 now_ms(const App* app) { return app->clock ? app->clock : SDL_GetTicks(); }
+#define GUI_KEYS_OK_MS     3000  /* how long the keys screen shows they were installed, then the menu */
+#define GUI_KEYS_FAILED_MS 10000 /* and why they were not, the menu's line saying it after */
+/* the keys screen's outcome, gone back to the menu once shown long enough; the seconds it still shows, 0 for none */
+static int keys_left(App* app) {
+    Uint64 shown = app->keys_ok ? GUI_KEYS_OK_MS : GUI_KEYS_FAILED_MS, now = now_ms(app);
+    if (!app->keys_done || app->menu.view != GUI_LOAD_KEYS) {
+        app->keys_done = 0;
+        return 0;
+    }
+    if (now - app->keys_done >= shown) {
+        app->keys_done = 0;
+        app->menu.view = GUI_LOAD_NONE;
+        return 0;
+    }
+    return (int)((shown - (now - app->keys_done) + 999) / 1000);
+}
 static void glyph(App* app, float x, float y, unsigned char c);
 static SDL_Texture* create_font(SDL_Renderer* renderer) {
     SDL_Surface* surface = SDL_CreateSurface(128, 256, SDL_PIXELFORMAT_RGBA32);
@@ -1729,6 +1747,19 @@ static void draw_pick(App* app) {
         snprintf(line, sizeof line, "Installs to: %s", app->keys_path ? app->keys_path : "Home directory unavailable.");
         y += wrap_in(app, r, r.x, y, line, 1, rgb(app->theme.ink)) * cell_h(app);
     }
+    if (keys && keys_left(app)) { /* what the last try did, and when the menu comes back */
+        GuiRgb said = app->keys_ok ? app->theme.focus : app->theme.failure;
+        y += cell_h(app);
+        y += wrap_in(app, r, r.x, y, app->keys_ok ? "Installed" : "Not installed", 0, rgb(said)) * cell_h(app);
+        y += wrap_in(app, r, r.x, y, app->message, 1, rgb(app->keys_ok ? app->theme.ink : said)) * cell_h(app);
+        snprintf(line, sizeof line, "Back to the menu in %d s%s", keys_left(app),
+                 app->keys_ok ? "" : ", or pick another file");
+        y += wrap_in(app, r, r.x, y, line, 0, rgb(app->theme.soft)) * cell_h(app);
+        if (app->keys_ok) { /* the keys just installed: nothing to warn about, nor to pick */
+            free(in_use);
+            in_use = NULL;
+        }
+    }
     if (in_use && app->keys_path && !strcmp(in_use, app->keys_path))
         y += wrap_in(app, r, r.x, y, "Keys already setup. This will overwrite the previous ones", 0,
                      rgb(app->theme.failure)) *
@@ -1738,8 +1769,9 @@ static void draw_pick(App* app) {
         y += wrap_in(app, r, r.x, y, line, 1, rgb(app->theme.soft)) * cell_h(app);
     }
     free(in_use);
-    prompt_in(app, r, SDL_max(y, k.prompt), GUI_PROMPT_KEYS, keys ? SAY_KEYS_WAIT : SAY_FILE_WAIT,
-              rgb(app->theme.focus));
+    if (!keys || !app->keys_done || !app->keys_ok)
+        prompt_in(app, r, SDL_max(y, k.prompt), GUI_PROMPT_KEYS, keys ? SAY_KEYS_WAIT : SAY_FILE_WAIT,
+                  rgb(app->theme.focus));
     list_item(app, &k.back, 0, "Back [ESC]", false, false); /* nothing to move to: ESC's */
     snprintf(line, sizeof line, "%s: " SAY_PICK_BOX, items[keys ? GUI_KEYS : app->menu.active]);
     screen_foot(app, &k.place, line, screen_keys(app, SAY_KEYS_HOW, hints_line, sizeof hints_line));
@@ -3352,6 +3384,7 @@ static void clean_row(App* app) {
     if (keys && n < (int)size) snprintf(note + n, size - (size_t)n, " %d old key%s", keys, keys > 1 ? "s" : "");
 }
 static void pump(App* app) {
+    keys_left(app);
     if (app->menu.running) {
         char buffer[4096];
         /* Bounded work per frame keeps keyboard/window events responsive even
@@ -3553,9 +3586,16 @@ static char* keys_read(const char* file, size_t* size) {
     return data;
 }
 /* the keys read into keys_path */
+/* what installing keys did, on their screen in app->message until it goes back to the menu by itself */
+static void keys_result(App* app, bool ok) {
+    if (app->menu.view != GUI_LOAD_KEYS) return;
+    app->keys_ok = ok;
+    app->keys_done = now_ms(app) ? now_ms(app) : 1;
+}
 static void keys_write(App* app, const char* data, size_t size) {
     if (!app->keys_path) {
         snprintf(app->message, sizeof(app->message), "Cannot locate your home directory. Keys were not installed.");
+        keys_result(app, false);
         return;
     }
     /* Stage privately on the same filesystem, then replace atomically. A failed
@@ -3573,9 +3613,9 @@ static void keys_write(App* app, const char* data, size_t size) {
     free(temporary);
     free(directory);
     snprintf(app->message, sizeof(app->message), "%s",
-             ok ? "Device keys installed successfully."
+             ok ? "prod.keys installed: games can be extracted now."
                 : "Cannot install prod.keys. Check file and folder permissions, then try again.");
-    if (ok) app->menu.view = GUI_LOAD_NONE;
+    keys_result(app, ok);
 }
 static void install_keys(App* app, const char* source) {
     const char* name = source;
@@ -3585,9 +3625,10 @@ static void install_keys(App* app, const char* source) {
         for (const char* p = source; *p; ++p)
             if (*p == '/' || *p == '\\') name = p + 1;
     if (source && !strcmp(name, "prod.keys") && snx_is_file(source)) data = keys_read(source, &size);
-    if (!data)
+    if (!data) {
         snprintf(app->message, sizeof(app->message), "Please drop a readable file named prod.keys.");
-    else
+        keys_result(app, false);
+    } else
         keys_write(app, data, size);
     free(data);
 }
@@ -3614,6 +3655,7 @@ static void install_keys_document(App* app, const char* uri) {
         snprintf(app->message, sizeof(app->message), SAY_KEYS_NOT, uri);
     else
         keys_write(app, data, size);
+    if (!data || !gui_keys_text(data, size)) keys_result(app, false);
     free(data);
 }
 static void drop(App* app, const char* value, bool text_drop) {
@@ -3622,6 +3664,7 @@ static void drop(App* app, const char* value, bool text_drop) {
     char* path = gui_drop_path(value, text_drop);
     if (!path) {
         snprintf(app->message, sizeof(app->message), "Drop one local file path, not a list or remote URL.");
+        keys_result(app, false);
         return;
     }
     char* absolute = snx_absolute(path);
@@ -3646,6 +3689,7 @@ static void SDLCALL picker_done(void* userdata, const char* const* files, int fi
 }
 static void picked(App* app, const char* uri);
 static void open_picker(App* app) {
+    app->keys_done = 0; /* another try: the last one's outcome no longer stands */
     if (!app->picked) app->picked = SDL_RegisterEvents(1);
     if (app->picked) SDL_ShowOpenFileDialog(picker_done, &app->picked, app->window, NULL, 0, NULL, false);
 }
@@ -3987,9 +4031,10 @@ static void picked(App* app, const char* uri) {
 #endif
     if (!uri)
         snprintf(app->message, sizeof(app->message), "No file was picked.");
-    else if (!path)
+    else if (!path) {
         snprintf(app->message, sizeof(app->message), SAY_PICK_UNREAD, uri);
-    else
+        keys_result(app, false);
+    } else
         drop(app, path, false);
     free(path);
 }

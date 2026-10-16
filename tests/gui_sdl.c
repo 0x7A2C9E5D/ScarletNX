@@ -578,6 +578,21 @@ static int SDLCALL hang(void* unused) {
     (void)unused;
     for (;;) SDL_Delay(100);
 }
+/* the keys screen's outcome: installed or not, said on it, then the menu once it has shown long enough, not before */
+static void keys_outcome(App* app, bool ok) {
+    Uint64 at = app->keys_done, shown = ok ? GUI_KEYS_OK_MS : GUI_KEYS_FAILED_MS;
+    assert(app->menu.view == GUI_LOAD_KEYS && at && app->keys_ok == ok);
+    app->clock = at + shown - 1;
+    pump(app);
+    render(app);
+    shows(app, ok ? "Installed" : "Not installed", rgb(ok ? app->theme.focus : app->theme.failure));
+    shows(app, "Back to the menu in 1 s", rgb(app->theme.soft));
+    assert(app->menu.view == GUI_LOAD_KEYS);
+    app->clock = at + shown;
+    pump(app);
+    assert(app->menu.view == GUI_LOAD_NONE && !app->keys_done);
+    app->clock = 0;
+}
 int main(int argc, char** argv) {
     if (argc == 2 && !strcmp(argv[1], "--settings")) { /* as the runtime lists its settings */
         fputs("Display\tfullscreen\t0\tint\t0\t1\t1 = start in fullscreen\t\t0=0|1=1\n"
@@ -808,7 +823,8 @@ int main(int argc, char** argv) {
     keys_event.type = SDL_EVENT_DROP_FILE;
     keys_event.drop.data = source_keys;
     event(&app, &keys_event);
-    assert(app.menu.view == GUI_LOAD_NONE && !app.menu.running);
+    assert(!app.menu.running && strstr(app.message, "installed"));
+    keys_outcome(&app, true);
     size_t keys_size;
     unsigned char* keys_data = snx_read_file(app.keys_path, &keys_size);
     assert(keys_data && keys_size == 10 && !memcmp(keys_data, "first keys", 10));
@@ -834,11 +850,13 @@ int main(int argc, char** argv) {
     keys_data = snx_read_file(app.keys_path, &keys_size);
     assert(keys_data && keys_size == 11 && !memcmp(keys_data, "replacement", 11));
     free(keys_data);
+    keys_outcome(&app, true);
     key(&app, SDLK_RETURN);
     drop(&app, app.keys_path, false); /* Dropping the destination itself is safe. */
     keys_data = snx_read_file(app.keys_path, &keys_size);
     assert(keys_data && keys_size == 11 && !memcmp(keys_data, "replacement", 11));
     free(keys_data);
+    keys_outcome(&app, true);
     key(&app, SDLK_RETURN);
     assert(!snx_remove_tree(source_keys));
     drop(&app, source_keys, false);
@@ -848,9 +866,16 @@ int main(int argc, char** argv) {
     assert(!snx_write_file(source_keys, "replacement", 11));
     drop(&app, source_keys, false);
     assert(app.menu.view == GUI_LOAD_KEYS && snx_is_dir(app.keys_path) && app.message[0]);
+    assert(app.keys_done && !app.keys_ok); /* not installed: said, then the menu after a while */
     assert(!snx_remove_tree(app.keys_path));
-    drop(&app, source_keys, false);
-    assert(app.menu.view == GUI_LOAD_NONE && snx_is_file(app.keys_path));
+    drop(&app, source_keys, false); /* a try that works says so in place of it */
+    assert(snx_is_file(app.keys_path));
+    keys_outcome(&app, true);
+    /* a try that fails, left alone, goes back to the menu too, its line saying why */
+    app.menu.view = GUI_LOAD_KEYS;
+    drop(&app, "file://remote/prod.keys", true);
+    keys_outcome(&app, false);
+    assert(strstr(app.message, "local file path"));
     /* a document of an app's (Android's picker): read through it, as a path to it may not be readable or there is none
        (Downloads by number, #280), and installed when its text is a prod.keys', whatever its name; refused when it is
        not one or is too big. The picker's message for a document with no path stays on the other screens */
@@ -861,7 +886,7 @@ int main(int argc, char** argv) {
         app.menu.view = GUI_LOAD_KEYS;
         install_keys_document(&app, document);
         keys_data = snx_read_file(app.keys_path, &keys_size);
-        assert(app.menu.view == GUI_LOAD_NONE && keys_data && keys_size == sizeof keys_text - 1 &&
+        assert(app.menu.view == GUI_LOAD_KEYS && app.keys_ok && keys_data && keys_size == sizeof keys_text - 1 &&
                !memcmp(keys_data, keys_text, keys_size));
         free(keys_data);
         assert(!snx_write_file(document, "a game, not keys", 16));
