@@ -260,7 +260,8 @@ int snx_main(int argc, char** argv) {
               "without --game to extract, recompile and play it (scarletnx Game.nsp), or point --game at a game "
               "recompiled from it, for example --game=games/Game.",
               dump);
-    if (argc == 1 && !snx_module_static && snx_menu) {
+    /* the launcher started bare opens the menu; a game's copy without its code says so, as below */
+    if (argc == 1 && !snx_module_static && snx_menu && snx_launcher_name(g_exename)) {
         char p[1200];
         code_path(p, sizeof p);
         if (!snx_is_file(p)) return open_menu(argv[0]);

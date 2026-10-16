@@ -138,6 +138,10 @@ if(BUILD_TESTING)
     add_test(NAME shader_direct_regressions COMMAND $<TARGET_FILE:snx-test-shader-direct-regressions>)
     add_test(NAME runtime_settings_list COMMAND "${CMAKE_COMMAND}" -DRUNTIME=$<TARGET_FILE:scarletnx>
              -P "${PROJECT_SOURCE_DIR}/tests/settings_list.cmake")
+    if(NOT WIN32) # Windows' error box would wait for a click
+        add_test(NAME runtime_game_copy COMMAND "${CMAKE_COMMAND}" -DRUNTIME=$<TARGET_FILE:scarletnx>
+                 -P "${PROJECT_SOURCE_DIR}/tests/game_copy.cmake")
+    endif()
     find_program(SNX_SHADER_SPIRV_VAL spirv-val)
     find_program(SNX_SHADER_SPIRV_DIS spirv-dis)
     find_package(Python3 QUIET COMPONENTS Interpreter)

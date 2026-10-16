@@ -58,6 +58,10 @@ char* snx_user_path(const char* path, int kind);
 /* 1 while what an older build left at old is still there, for the caller to say each run where it is and that this
    build keeps it at now. Nothing is moved: the player does that */
 int snx_left_behind(const char* old, const char* now);
+/* 1 for a name the program has as the launcher, not as a game's copy: scarletnx, a model's (scarletnx-mariko), the
+   AppImage's (ScarletNX-x86_64), in any case, without .exe or .AppImage. Started bare under another name it is a
+   game's copy, which says what is missing and never opens the menu */
+int snx_launcher_name(const char* name);
 /* A game's own files in its folder, where an older build kept them, and the kind of folder this one keeps each in: its
    log and threads.txt, its settings, its pipeline cache. A name starting with '.' follows the game's name; the others
    the folder has once, for all its games. The runtime says so for a game it runs, the menu for every game */

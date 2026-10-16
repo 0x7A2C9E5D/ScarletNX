@@ -2,8 +2,9 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # GUI launcher
 
-`scarletnx` started with no arguments, and no game of its name beside it, opens its launcher: a
-small SDL3 menu for the command-line drivers. It uses an
+`scarletnx` started with no arguments (or a model's name, or the AppImage), with no game of its
+name beside it, opens its launcher: a small SDL3 menu for the command-line drivers. A copy named
+after a game, without its code, says so and never opens it. It uses an
 embedded public-domain 8x16 VGA BIOS font, nearest-neighbor integer scaling, and
 English text only. No font files or localization packages are needed.
 
