@@ -19,4 +19,8 @@ void fatal_cp437(const char* text, char* out, size_t size);
    percent encoded. Returns 0, leaving an empty string, if it will not fit or
    the path is relative. Windows drive and UNC paths use forward slashes. */
 int fatal_log_url(const char* path, char* out, size_t size);
+/* Share log's file, as the launcher's: the build, the error and the game's log (its last 4 MiB, or a line saying it is
+   missing), written to scarletnx.log in folder. Its path in saved; 0 when written */
+int fatal_share_log(const char* folder, const char* build, const char* msg, const char* game_log, char* saved,
+                    size_t size);
 #endif

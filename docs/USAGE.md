@@ -346,10 +346,12 @@ the pace `fps_limit` sets.
 In the game's menu the arrows, Enter and Escape move, select and go back; a gamepad's D-pad or left stick, A and
 B do the same, the on-screen controls' too, and a direction held goes on after a moment.
 
-On the desktop, the stopped-game panel underlines the game's log path. Click or
-tap it to ask the system's viewer to open the file while keeping the panel open.
-The path follows the game's state folder, including an installed build's XDG
-state folder on Linux. On Android, use the launcher's **Share log** instead.
+A game that stops on an error shows a panel with **Share log**, **Copy path** and **Close**. Share log saves
+`scarletnx.log` (the build, the error and the game's log) beside the game's log, as the menu's does, and on Android
+sends it to the app you pick; Copy path copies that file's path once it is saved, else the game's log's. The panel says
+what each did. Up and Down move between the items, Enter or A does the one in focus, and any other key or button
+closes it. On a desktop the game's log path is
+underlined once the log exists: a click opens it in the system's viewer, the panel staying open.
 
 ### On-screen controls
 

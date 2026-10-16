@@ -49,14 +49,21 @@ void overlay_pointer_cancel(u64 id);
 void overlay_pointers_reset(void);
 void overlay_draw(SnxUiList* l, int sw, int sh);
 /* a fatal error's panel (backend/sdl3.c), the menu's own: the head, the game's name, the error, what it means and what to
-   do, cut to its width, and Close in focus */
+   do, cut to its width, then Share log, Copy path and Close, one in focus */
 typedef struct {
     float x, y, w, h;
 } SnxOverlayRect;
-/* log and link may be NULL. A visible log is underlined and its bounds returned
-   in link. A hidden or absent log returns an empty rectangle. */
-void overlay_error_draw(SnxUiList* l, int sw, int sh, const char* name, const char* msg, const char* how,
-                        const char* log, SnxOverlayRect* link);
-int overlay_error_link(const SnxOverlayRect* link, float x, float y);
+enum { SNX_OVERLAY_ERROR_SHARE, SNX_OVERLAY_ERROR_COPY, SNX_OVERLAY_ERROR_CLOSE, SNX_OVERLAY_ERROR_ITEMS };
+typedef struct {
+    const char *name, *msg, *how;
+    const char* log;  /* the game's log, underlined as a link; NULL for none */
+    const char* said; /* what Share log or Copy path did, over the items; NULL before either */
+    int focus;        /* one of SNX_OVERLAY_ERROR_SHARE, _COPY and _CLOSE */
+    /* drawn: where the log's link and each item are, empty when not shown */
+    SnxOverlayRect link, items[SNX_OVERLAY_ERROR_ITEMS];
+} SnxOverlayError;
+void overlay_error_draw(SnxUiList* l, int sw, int sh, SnxOverlayError* e);
+/* 1 when x, y falls in r, an empty one taking nothing */
+int overlay_error_hit(const SnxOverlayRect* r, float x, float y);
 
 #endif

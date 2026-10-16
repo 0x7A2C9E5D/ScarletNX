@@ -117,6 +117,18 @@ static int text_at(int col, int row, const char* text) {
     return 1;
 }
 
+/* a stopped panel's texts, Close in focus */
+static SnxOverlayError panel_of(const char* name, const char* msg, const char* how, const char* log, const char* said) {
+    SnxOverlayError e;
+    memset(&e, 0, sizeof e);
+    e.name = name;
+    e.msg = msg;
+    e.how = how;
+    e.log = log;
+    e.said = said;
+    e.focus = SNX_OVERLAY_ERROR_CLOSE;
+    return e;
+}
 int main(void) {
     const u32 ink = 0xFF3A4145u;
     int x, y, sc;
@@ -432,14 +444,16 @@ int main(void) {
         free(sprites);
     }
     /* a fatal error's panel: the menu's, centred on its own rows; the head, the game's name, the error in the
-       failure's colour, its hint, and Close in focus at its foot. UTF-8 comes out in the font's bytes, and on a short
-       picture the last paragraphs give up rows so the panel stays on it */
+       failure's colour, its hint, then Share log and Close at its foot, Close in focus. UTF-8 comes out in the font's
+       bytes, and on a short picture the last paragraphs give up rows so the panel stays on it, what Share log did last */
     {
         float top, row_h;
-        int total, i, close_band = -1;
+        int total, i, close_band = -1, share_band = -1;
+        unsigned plain, focused;
+        SnxOverlayError panel = panel_of("ENDER MAGNOLIA", "vulkan: the GPU device was lost (driver reset or crash)",
+                                         "Share log sends the game's log, which has what ran last.", NULL, NULL);
         list.n = 0;
-        overlay_error_draw(&list, SW, SH, "ENDER MAGNOLIA", "vulkan: the GPU device was lost (driver reset or crash)",
-                           "The menu's Share log sends the game's log, which has what ran last.", NULL, NULL);
+        overlay_error_draw(&list, SW, SH, &panel);
         overlay_place(SW, SH, &px, &py, &s);
         row_h = 16.0f * (float)s;
         top = list.q[0].y;
@@ -455,44 +469,115 @@ int main(void) {
         for (i = 0; i < list.n; ++i)
             if (list.q[i].y == top + row_h * (float)(total - 2) && list.q[i].h == row_h && list.q[i].w == list.q[0].w)
                 close_band = i;
-        assert(close_band >= 0 && text_at(1, total - 2, "\xFE Close"));
+        assert(close_band >= 0 && text_at(1, total - 2, "\xFE Close") && text_at(1, total - 3, "\xFE Copy path") &&
+               text_at(1, total - 4, "\xFE Share log"));
+        i = glyph_at(3, total - 4, 'S');
+        assert(i >= 0);
+        plain = list.q[i].rgba;
+        i = glyph_at(3, total - 2, 'C');
+        assert(i >= 0 && list.q[i].rgba != plain);
+        focused = list.q[i].rgba;
+        for (i = 0; i < SNX_OVERLAY_ERROR_ITEMS; ++i)
+            assert(panel.items[i].y == top + row_h * (float)(total - 1 - SNX_OVERLAY_ERROR_ITEMS + i) &&
+                   panel.items[i].h == row_h && panel.items[i].x == list.q[0].x && panel.items[i].w == list.q[0].w);
+        assert(overlay_error_hit(&panel.items[SNX_OVERLAY_ERROR_SHARE], panel.items[0].x + 1, panel.items[0].y + 1));
+        assert(!overlay_error_hit(&panel.items[SNX_OVERLAY_ERROR_SHARE], panel.items[1].x + 1, panel.items[1].y + 1));
+        /* the band follows the focus */
+        panel.focus = SNX_OVERLAY_ERROR_SHARE;
         list.n = 0;
-        overlay_error_draw(&list, SW, SH, "CAF\xC3\x89", "x", "y", NULL, NULL);
+        overlay_error_draw(&list, SW, SH, &panel);
+        for (i = 0; i < list.n; ++i)
+            if (list.q[i].y == top + row_h * (float)(total - 4) && list.q[i].h == row_h && list.q[i].w == list.q[0].w)
+                share_band = i;
+        assert(share_band >= 0);
+        i = glyph_at(3, total - 2, 'C');
+        assert(i >= 0 && list.q[i].rgba == plain);
+        i = glyph_at(3, total - 4, 'S');
+        assert(i >= 0 && list.q[i].rgba == focused);
+        /* what Share log did, over the items, and kept when the picture is short */
+        panel.said = "Log saved to /home/player/.local/state/scarletnx/games/0100DA801624E000/scarletnx.log.";
+        list.n = 0;
+        overlay_error_draw(&list, SW, 260, &panel);
+        overlay_place(SW, 260, &px, &py, &s);
+        py = (int)list.q[0].y;
+        assert(list.q[0].y >= 0 && list.q[0].y + list.q[0].h <= 260.0f);
+        total = (int)(list.q[0].h / (16.0f * (float)s));
+        for (i = 1, share_band = 0; i < total - 5; ++i) share_band |= text_at(1, i, "Log saved to");
+        assert(share_band);
+        list.n = 0;
+        panel = panel_of("CAF\xC3\x89", "x", "y", NULL, NULL);
+        overlay_error_draw(&list, SW, SH, &panel);
+        overlay_place(SW, SH, &px, &py, &s);
         py = (int)list.q[0].y;
         assert(text_at(1, 1, "CAF\x90"));
         list.n = 0;
-        overlay_error_draw(
-            &list, SW, 200, "N", "message",
-            "a b c d e f g h i j k l m n o p q r s t u v w x y z a b c d e f g h i j k l m n o p q r s t u "
-            "v w x y z a b c d e f g h i j k l m n o p q r s t u v w x y z",
-            NULL, NULL);
+        panel =
+            panel_of("N", "message",
+                     "a b c d e f g h i j k l m n o p q r s t u v w x y z a b c d e f g h i j k l m n o p q r s t u "
+                     "v w x y z a b c d e f g h i j k l m n o p q r s t u v w x y z",
+                     NULL, NULL);
+        overlay_error_draw(&list, SW, 200, &panel);
         assert(list.q[0].y >= 0 && list.q[0].y + list.q[0].h <= 200.0f);
     }
     /* Only visible log rows are a link. Wrapped paths remain one target, and a
        short screen that hides the path leaves no invisible click target. */
     {
-        SnxOverlayRect link;
         int i, underlines = 0;
         const char* path = "/home/player/.local/state/scarletnx/A game with a long name.log";
+        SnxOverlayError panel = panel_of("GAME", "message", "The game's log:", path, NULL);
+        SnxOverlayRect link;
         list.n = 0;
-        overlay_error_draw(&list, SW, SH, "GAME", "message", "The game's log:", path, &link);
+        overlay_error_draw(&list, SW, SH, &panel);
+        link = panel.link;
         assert(link.w > 0 && link.h >= 16.0f * (float)s);
-        assert(overlay_error_link(&link, link.x, link.y));
-        assert(overlay_error_link(&link, link.x + link.w - 1, link.y + link.h - 1));
-        assert(!overlay_error_link(&link, link.x - 1, link.y));
-        assert(!overlay_error_link(&link, link.x + link.w, link.y));
-        assert(!overlay_error_link(&link, link.x, link.y + link.h));
+        /* right under its label, no blank row between */
+        overlay_place(SW, SH, &px, &py, &s);
+        py = (int)list.q[0].y;
+        assert(text_at(1, (int)((link.y - (float)py) / (16.0f * (float)s)) - 1, "The game's log:"));
+        assert(overlay_error_hit(&link, link.x, link.y));
+        assert(overlay_error_hit(&link, link.x + link.w - 1, link.y + link.h - 1));
+        assert(!overlay_error_hit(&link, link.x - 1, link.y));
+        assert(!overlay_error_hit(&link, link.x + link.w, link.y));
+        assert(!overlay_error_hit(&link, link.x, link.y + link.h));
         for (i = 0; i < list.n; ++i)
             if (list.q[i].x == link.x && list.q[i].h == (float)s && list.q[i].w > 0 && list.q[i].y >= link.y &&
                 list.q[i].y < link.y + link.h)
                 ++underlines;
         assert(underlines == (int)(link.h / (16.0f * (float)s)));
         list.n = 0;
-        overlay_error_draw(&list, SW, 160, "GAME", "message", "The game's log:", path, &link);
-        assert(!overlay_error_link(&link, link.x, link.y) && !link.h);
+        overlay_error_draw(&list, SW, 160, &panel);
+        assert(!overlay_error_hit(&panel.link, panel.link.x, panel.link.y) && !panel.link.h);
         list.n = 0;
-        overlay_error_draw(&list, SW, SH, "GAME", "message", "Share log", NULL, &link);
-        assert(!link.w && !link.h && !overlay_error_link(NULL, 0, 0));
+        panel = panel_of("GAME", "message", "Share log", NULL, NULL);
+        overlay_error_draw(&list, SW, SH, &panel);
+        assert(!panel.link.w && !panel.link.h && !overlay_error_hit(NULL, 0, 0));
+        /* Share log's line takes room from the log's label and the hint first: on a picture the panel just fills with
+           both, the whole path is still there and still a link */
+        {
+            const char* said =
+                "Log saved to /home/player/.local/state/scarletnx/games/0100DA801624E000/scarletnx.log (path copied).";
+            int whole;
+            panel = panel_of("GAME", "Unsupported instruction ce62c820 at 801b67c",
+                             "The game's log has what ran last:", path, NULL);
+            list.n = 0;
+            overlay_error_draw(&list, 1280, 720, &panel);
+            overlay_place(1280, 720, &px, &py, &s);
+            whole = (int)(panel.link.h / (16.0f * (float)s));
+            panel.said = said;
+            for (int height = 720, cut = 0; height >= 300; height -= 4) {
+                int label = 0, rows;
+                list.n = 0;
+                overlay_error_draw(&list, 1280, height, &panel);
+                overlay_place(1280, height, &px, &py, &s);
+                py = (int)list.q[0].y;
+                assert(list.q[0].y >= 0 && list.q[0].y + list.q[0].h <= (float)height);
+                rows = (int)(panel.link.h / (16.0f * (float)s));
+                for (int r = 0; r < 64; ++r) label |= text_at(1, r, "The game's log has");
+                assert(rows == whole || !label);
+                cut |= !label;
+                if (height == 300) assert(cut && whole >= 2); /* the sweep got to where rows are cut */
+            }
+        }
     }
     {
         char url[256];

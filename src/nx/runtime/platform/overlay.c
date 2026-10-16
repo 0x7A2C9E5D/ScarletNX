@@ -428,33 +428,37 @@ void overlay_draw(SnxUiList* l, int sw, int sh) {
     if (top + VISIBLE < n)
         ui_text(l, (float)px + cw * (OVERLAY_COLS - 1), (float)py + ch * (FIRST + VISIBLE - 1), s, "\x19", SOFT);
 }
-int overlay_error_link(const SnxOverlayRect* link, float x, float y) {
-    return link && link->w > 0 && link->h > 0 && x >= link->x && x < link->x + link->w && y >= link->y &&
-           y < link->y + link->h;
+int overlay_error_hit(const SnxOverlayRect* r, float x, float y) {
+    return r && r->w > 0 && r->h > 0 && x >= r->x && x < r->x + r->w && y >= r->y && y < r->y + r->h;
 }
-void overlay_error_draw(SnxUiList* l, int sw, int sh, const char* name, const char* msg, const char* how,
-                        const char* log, SnxOverlayRect* link) {
-    enum { PARAS = 5, LINES = 12 };
+void overlay_error_draw(SnxUiList* l, int sw, int sh, SnxOverlayError* e) {
+    enum { PARAS = 6, LINES = 12, HOW = 3, LOG = 4, SAID = 5 };
+    /* what gives up rows first on a short picture: the log's label, the hint, the log, the error; never what Share log
+       did */
+    static const int cut[] = {HOW, 2, LOG, 1};
     static char rows_of[PARAS][LINES][FATAL_ROW];
-    const char* text[PARAS] = {name, msg, fatal_hint(msg), how, log};
-    const u32 color[PARAS] = {SOFT, FAILURE, INK, SOFT, INK};
+    static const char* const items[SNX_OVERLAY_ERROR_ITEMS] = {"\xFE Share log", "\xFE Copy path", "\xFE Close"};
+    const char* text[PARAS] = {e->name, e->msg, fatal_hint(e->msg), e->how, e->log, e->said};
+    const u32 color[PARAS] = {SOFT, FAILURE, INK, SOFT, INK, SOFT};
     char line[OVERLAY_COLS + 4];
-    int px, py, s, n[PARAS], k, i, total, room, row;
+    int px, py, s, n[PARAS], k, i, c, total, room, row;
     float cw, ch, x, y;
-    if (link) memset(link, 0, sizeof *link);
+    memset(&e->link, 0, sizeof e->link);
+    memset(e->items, 0, sizeof e->items);
     overlay_place(sw, sh, &px, &py, &s);
     cw = 8.0f * (float)s;
     ch = 16.0f * (float)s;
     for (k = 0; k < PARAS; ++k) n[k] = text[k] ? fatal_wrap(text[k], OVERLAY_COLS - 2, rows_of[k], LINES) : 0;
-    /* the head, the name, then each paragraph after a blank row; a blank, Close and a blank. On a short picture the
-       last paragraphs lose rows first */
+    /* the head, the name, then each paragraph after a blank row (the log right under its label); two blanks, the
+       items and a blank */
     room = sh / (int)ch;
     for (;;) {
-        total = 1 + 4;
-        for (k = 0; k < PARAS; ++k) total += (n[k] > LINES ? LINES : n[k]) + (k > 0 && n[k] ? 1 : 0);
-        for (k = PARAS - 1; k > 1 && !n[k]; --k) {}
-        if (total <= room || k < 1 || !n[k]) break;
-        n[k] = (n[k] > LINES ? LINES : n[k]) - 1;
+        total = 1 + 3 + SNX_OVERLAY_ERROR_ITEMS;
+        for (k = 0; k < PARAS; ++k)
+            total += (n[k] > LINES ? LINES : n[k]) + (k > 0 && (k != LOG || !n[HOW]) && n[k] ? 1 : 0);
+        for (c = 0; c < (int)(sizeof cut / sizeof *cut) && !n[cut[c]]; ++c) {}
+        if (total <= room || c == (int)(sizeof cut / sizeof *cut)) break;
+        n[cut[c]] = (n[cut[c]] > LINES ? LINES : n[cut[c]]) - 1;
     }
     x = (float)px;
     y = (float)((sh - total * (int)ch) / 2);
@@ -463,25 +467,29 @@ void overlay_error_draw(SnxUiList* l, int sw, int sh, const char* name, const ch
     ui_text(l, x + cw, y, s, "SCARLETNX  /  STOPPED", LIGHT);
     row = 1;
     for (k = 0; k < PARAS; ++k) {
-        if (k > 0 && n[k]) ++row;
+        if (k > 0 && (k != LOG || !n[HOW]) && n[k]) ++row;
         for (i = 0; i < n[k] && i < LINES; ++i, ++row) {
             float width;
             fatal_cp437(rows_of[k][i], line, sizeof line);
             width = ui_text(l, x + cw, y + ch * (float)row, s, line, color[k]);
-            if (k == PARAS - 1 && width > 0) {
+            if (k == LOG && width > 0) {
                 ui_fill(l, x + cw, y + ch * (float)(row + 1) - (float)s, width, (float)s, color[k]);
-                if (link) {
-                    if (!link->h) {
-                        link->x = x + cw;
-                        link->y = y + ch * (float)row;
-                    }
-                    if (width > link->w) link->w = width;
-                    link->h += ch;
+                if (!e->link.h) {
+                    e->link.x = x + cw;
+                    e->link.y = y + ch * (float)row;
                 }
+                if (width > e->link.w) e->link.w = width;
+                e->link.h += ch;
             }
         }
     }
-    row = total - 2;
-    ui_fill(l, x, y + ch * (float)row, cw * OVERLAY_COLS, ch, INK);
-    ui_text(l, x + cw, y + ch * (float)row, s, "\xFE Close", LIGHT);
+    for (i = 0; i < SNX_OVERLAY_ERROR_ITEMS; ++i) {
+        SnxOverlayRect* at = &e->items[i];
+        at->x = x;
+        at->y = y + ch * (float)(total - 1 - SNX_OVERLAY_ERROR_ITEMS + i);
+        at->w = cw * OVERLAY_COLS;
+        at->h = ch;
+        if (i == e->focus) ui_fill(l, at->x, at->y, at->w, at->h, INK);
+        ui_text(l, x + cw, at->y, s, items[i], i == e->focus ? LIGHT : INK);
+    }
 }
