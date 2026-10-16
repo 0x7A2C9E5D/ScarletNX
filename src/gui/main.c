@@ -44,12 +44,14 @@ typedef struct {
     uint64_t used;
     int done, stop;
 } GuiSpace;
-/* the editor's screens: the Settings' groups, a group's settings, the App's rows, the theme editor */
-enum { GUI_FORM_SETTINGS, GUI_FORM_GROUP, GUI_FORM_APP, GUI_FORM_THEME };
-#define GUI_GROUPS_MAX 32
-/* the App screen's values, as its rows show them */
+/* the editor's screens: the Settings' groups, a group's settings, the App's rows, its game folders, the theme editor */
+enum { GUI_FORM_SETTINGS, GUI_FORM_GROUP, GUI_FORM_APP, GUI_FORM_FOLDERS, GUI_FORM_THEME };
+#define GUI_GROUPS_MAX  32
+#define GUI_FOLDERS_MAX 16 /* the player's game folders, past games/ */
+/* the App screen's values, as its rows show them, and the game folders' (games/ first) */
 typedef struct {
-    char theme[64], text[16];
+    char theme[64], text[16], folders[32];
+    char folder[GUI_FOLDERS_MAX + 1][16];
 } GuiAppForm;
 typedef struct {
     SDL_Window* window;
@@ -113,6 +115,12 @@ typedef struct {
     GuiThemeKey group_keys[GUI_GROUPS_MAX];
     char group_about[GUI_GROUPS_MAX][128];
     GuiAppForm app_form;
+    char* folders[GUI_FOLDERS_MAX]; /* the player's game folders, listed after games/ */
+    int folder_count;
+    char* folders_file; /* where they are kept; NULL keeps none */
+    GuiThemeKey folder_keys[GUI_FOLDERS_MAX + 1];
+    int folder_armed;       /* a folder's row Select was pressed on once, + 1: again takes it off */
+    Uint32 picked_folder;   /* the event a folder from the system's picker comes back as */
     SDL_Texture* preview;   /* the editor's: the menu or a run drawn in its theme, at 1x */
     GuiSteps preview_steps; /* the run it shows, over again every GUI_PREVIEW_MS */
     GuiConsole preview_console;
@@ -157,6 +165,7 @@ static const char* const load_labels[] = {"-> Select a file", "-> Select file fr
 #define SAY_SETTINGS   SAY_EDITOR
 #define SAY_GROUPS     "Tap a group to open it. Back: go back."
 #define SAY_APP        "Tap a row to change or open it. Back: go back."
+#define SAY_FOLDERS    "Add a folder: tap it. Tap a folder twice to take it off. Back: go back."
 #else
 static const char* const load_labels[] = {"-> Select a file", "-> Select file from games/ instead"};
 #define SAY_MENU       "Arrows/mouse: move. Space/Enter/click: select."
@@ -177,6 +186,7 @@ static const char* const load_labels[] = {"-> Select a file", "-> Select file fr
 #define SAY_SETTINGS   "Up/Down: setting. Left/Right: change. Enter: type. Del: default. ESC: back."
 #define SAY_GROUPS     "Up/Down: group. Enter: open. ESC: back."
 #define SAY_APP        "Up/Down: row. Left/Right: change. Enter: change or open. ESC: back."
+#define SAY_FOLDERS    "Add a folder: pick, drop or paste one. Del: take one off. ESC: back."
 #endif
 static SDL_Color rgb(GuiRgb c) {
     SDL_Color out = {c.r, c.g, c.b, 255};
@@ -1198,6 +1208,8 @@ static void render_editor(App* app) {
         snprintf(title, sizeof title, "THEME EDITOR  /  %s", e->id);
     else if (app->form == GUI_FORM_SETTINGS)
         snprintf(title, sizeof title, "SETTINGS");
+    else if (app->form == GUI_FORM_FOLDERS)
+        snprintf(title, sizeof title, "SETTINGS  /  APP  /  GAME FOLDERS");
     else {
         char* c;
         snprintf(title, sizeof title, "SETTINGS  /  %s", app->group_keys[app->group].key);
@@ -1209,6 +1221,7 @@ static void render_editor(App* app) {
          app->form == GUI_FORM_THEME      ? SAY_EDITOR
          : app->form == GUI_FORM_SETTINGS ? SAY_GROUPS
          : app->form == GUI_FORM_APP      ? SAY_APP
+         : app->form == GUI_FORM_FOLDERS  ? SAY_FOLDERS
                                           : SAY_SETTINGS,
          rgb(theme->ink));
     if (e->note[0])
@@ -1250,7 +1263,7 @@ static void render_editor(App* app) {
                e->top + editor_rows(app) < gui_editor_rows(e));
     if (app->form != GUI_FORM_THEME) {
         char used[32], left[32];
-        if (app->form != GUI_FORM_APP)
+        if (app->form != GUI_FORM_APP && app->form != GUI_FORM_FOLDERS)
             text(app, 1, app->rows - 2,
                  app->settings.count > GUI_SETTINGS_OWN ? "For the next runs. .ini: as the game's .ini says"
                                                         : "The runtime listed no settings",
@@ -1350,8 +1363,10 @@ static const GuiThemeKey app_keys[] = {
     {"", "Text size", GUI_KEY_ACTION, offsetof(GuiAppForm, text), sizeof(((GuiAppForm*)0)->text), NULL, 0,
      "Bigger letters scroll the menu. Auto fits the screen"},
     {"", "Theme editor", GUI_KEY_ACTION, 0, 0, NULL, 0,
-     "This theme's keys with a preview, saved as themes/<name>/theme.ini"}};
-enum { GUI_APP_THEME, GUI_APP_TEXT, GUI_APP_EDITOR, GUI_APP_ROWS };
+     "This theme's keys with a preview, saved as themes/<name>/theme.ini"},
+    {"", "Game folders", GUI_KEY_ACTION, offsetof(GuiAppForm, folders), sizeof(((GuiAppForm*)0)->folders), NULL, 0,
+     "Folders of games listed with games/"}};
+enum { GUI_APP_THEME, GUI_APP_TEXT, GUI_APP_EDITOR, GUI_APP_FOLDERS, GUI_APP_ROWS };
 static void app_values(App* app) {
     GuiAppForm* f = &app->app_form;
     snprintf(f->theme, sizeof f->theme, "%s", app->theme.name);
@@ -1359,6 +1374,88 @@ static void app_values(App* app) {
         snprintf(f->text, sizeof f->text, "%dx", app->menu.text_size);
     else
         snprintf(f->text, sizeof f->text, "Auto");
+    if (app->folder_count)
+        snprintf(f->folders, sizeof f->folders, "games/ and %d more", app->folder_count);
+    else
+        snprintf(f->folders, sizeof f->folders, "games/");
+}
+/* ---- the player's game folders: listed after games/, kept a line each in folders_file ---- */
+static void folders_load(App* app) {
+    size_t size = 0;
+    char *text = app->folders_file ? (char*)snx_read_file(app->folders_file, &size) : NULL, *line, *next;
+    for (line = text; line && *line && app->folder_count < GUI_FOLDERS_MAX; line = next) {
+        next = line + strcspn(line, "\n");
+        if (*next) *next++ = 0;
+        if (*line) app->folders[app->folder_count++] = snx_strdup(line);
+    }
+    free(text);
+}
+/* 0, else the note says why not */
+static int folders_save(App* app) {
+    size_t size = 1, n;
+    char *text, *dir;
+    int i, failed;
+    if (!app->folders_file) return 0;
+    for (i = 0; i < app->folder_count; ++i) size += strlen(app->folders[i]) + 1;
+    text = (char*)malloc(size);
+    for (i = 0, n = 0; text && i < app->folder_count; ++i)
+        n += (size_t)snprintf(text + n, size - n, "%s\n", app->folders[i]);
+    dir = snx_dirname(app->folders_file);
+    failed = !text || !dir || snx_mkdirs(dir) || snx_write_file(app->folders_file, text, n);
+    if (failed)
+        snprintf(app->editor.note, sizeof app->editor.note, "Not saved: %s could not be written", app->folders_file);
+    free(dir);
+    free(text);
+    return failed;
+}
+static void open_folders(App* app, int row);
+/* a folder the player picked, dropped or pasted: a folder that is there, once. What happened goes on the folders'
+   screen, or in the menu's message when the picker answered after the player left it */
+static void folder_add(App* app, const char* path) {
+    char *absolute = path ? snx_absolute(path) : NULL, note[sizeof app->editor.note];
+    int i, added = 0, here = app->editing && app->form == GUI_FORM_FOLDERS;
+    for (i = 0; absolute && i < app->folder_count && strcmp(app->folders[i], absolute); ++i) {}
+    if (!absolute || !snx_is_dir(absolute))
+        snprintf(note, sizeof note, "Not a folder: %s", path ? path : "(none)");
+    else if (app->games_dir && !strcmp(absolute, app->games_dir))
+        snprintf(note, sizeof note, "games/ is always listed");
+    else if (i < app->folder_count)
+        snprintf(note, sizeof note, "Already listed: %s", absolute);
+    else if (app->folder_count == GUI_FOLDERS_MAX)
+        snprintf(note, sizeof note, "At most %d folders", GUI_FOLDERS_MAX);
+    else {
+        app->folders[app->folder_count++] = absolute;
+        absolute = NULL;
+        added = 1;
+        snprintf(note, sizeof note, "%s", folders_save(app) ? app->editor.note : "Added");
+    }
+    free(absolute);
+    if (here && added) open_folders(app, app->folder_count);
+    if (here)
+        snprintf(app->editor.note, sizeof app->editor.note, "%s", note);
+    else
+        snprintf(app->message, sizeof app->message, "Game folders: %s", note);
+}
+static void folder_remove(App* app, int folder) {
+    char note[160];
+    free(app->folders[folder]);
+    memmove(app->folders + folder, app->folders + folder + 1, (size_t)(app->folder_count - folder - 1) * sizeof(char*));
+    --app->folder_count;
+    note[0] = 0;
+    if (folders_save(app)) snprintf(note, sizeof note, "%s", app->editor.note);
+    open_folders(app, SDL_min(folder + 1, app->folder_count));
+    snprintf(app->editor.note, sizeof app->editor.note, "%s", note[0] ? note : "Taken off the list; the folder stays");
+}
+/* the system's folder picker answers on its own thread, as the file picker */
+static void SDLCALL folder_picked(void* userdata, const char* const* files, int filter) {
+    SDL_Event e;
+    (void)filter;
+    SDL_zero(e);
+    e.type = *(const Uint32*)userdata;
+    e.user.code = files == NULL; /* an error, which SDL_GetError names */
+    e.user.data1 = files && files[0] ? SDL_strdup(files[0]) : NULL;
+    e.user.data2 = files ? NULL : SDL_strdup(SDL_GetError());
+    SDL_PushEvent(&e);
 }
 /* a group's row of the Settings, its help the keys it holds */
 static void group_add(App* app, const char* name, int first, const char* about) {
@@ -1377,7 +1474,7 @@ static void settings_groups(App* app) {
     GuiSettings* s = settings_of(app);
     int r;
     app->groups = 0;
-    group_add(app, "App", 0, "The theme, the menu's letters and the theme editor");
+    group_add(app, "App", 0, "The theme, the menu's letters, the theme editor and the game folders");
     for (r = 0; r < s->count; ++r) {
         int g = app->groups - 1;
         char* about = app->group_about[g];
@@ -1411,6 +1508,46 @@ static void open_app(App* app, int row) {
     app->group = 0;
     app->editing = true;
 }
+/* games/, then the player's folders, a row each with its state, and Add a folder */
+static void open_folders(App* app, int row) {
+    int i;
+    for (i = 0; i <= app->folder_count; ++i) {
+        GuiThemeKey* k = &app->folder_keys[i];
+        const char* path = i ? app->folders[i - 1] : app->games_dir;
+        memset(k, 0, sizeof *k);
+        k->section = "";
+        k->key = path ? path : "games/";
+        k->type = GUI_KEY_ACTION;
+        k->at = offsetof(GuiAppForm, folder) + (size_t)i * sizeof app->app_form.folder[0];
+        k->size = sizeof app->app_form.folder[0];
+        k->about = i ? "Del, or Enter twice: take it off the list; the folder stays"
+                     : "The data folder's games/, always "
+                       "listed";
+        snprintf(app->app_form.folder[i], sizeof app->app_form.folder[i], "%s",
+                 path && snx_is_dir(path) ? "" : "not found");
+    }
+    gui_editor_form(&app->editor, app->folder_keys, app->folder_count + 1, &app->app_form, "Add a folder");
+    app->editor.flat = true;
+    app->editor.row = SDL_min(row, gui_editor_rows(&app->editor) - 1);
+    app->form = GUI_FORM_FOLDERS;
+    app->folder_armed = 0;
+    app->editing = true;
+}
+static void open_folder_picker(App* app) {
+    if (!app->picked_folder) app->picked_folder = SDL_RegisterEvents(1);
+    if (app->picked_folder) SDL_ShowOpenFolderDialog(folder_picked, &app->picked_folder, app->window, NULL, false);
+}
+/* Select on a folder's row: once arms it, twice takes it off; games/ stays */
+static void folder_select(App* app, int row) {
+    if (!row)
+        snprintf(app->editor.note, sizeof app->editor.note, "games/ is always listed");
+    else if (app->folder_armed == row)
+        folder_remove(app, row - 1);
+    else {
+        app->folder_armed = row;
+        snprintf(app->editor.note, sizeof app->editor.note, "Enter again takes it off the list");
+    }
+}
 static void open_group(App* app, int g) {
     if (!g) {
         open_app(app, 0);
@@ -1434,12 +1571,13 @@ static void leave_editor(App* app) {
 }
 /* ESC on a screen: a group's and the App's go back to the groups, the theme editor to where it was opened */
 static void leave_form(App* app) {
-    int back = app->form == GUI_FORM_GROUP || app->form == GUI_FORM_APP,
-        app_rows = app->form == GUI_FORM_THEME && app->theme_from_app;
+    int form = app->form;
     leave_editor(app);
-    if (back)
+    if (form == GUI_FORM_GROUP || form == GUI_FORM_APP)
         settings_top(app, app->group);
-    else if (app_rows) {
+    else if (form == GUI_FORM_FOLDERS)
+        open_app(app, GUI_APP_FOLDERS);
+    else if (form == GUI_FORM_THEME && app->theme_from_app) {
         app->theme_from_app = false;
         open_app(app, GUI_APP_EDITOR);
     }
@@ -1453,6 +1591,9 @@ static void app_action(App* app, int row, int step) {
     else if (row == GUI_APP_EDITOR && !step) {
         app->theme_from_app = true;
         open_editor(app);
+        return;
+    } else if (row == GUI_APP_FOLDERS && !step) {
+        open_folders(app, 0);
         return;
     }
     app_values(app);
@@ -1480,6 +1621,14 @@ static void editor_key(App* app, GuiKey key) {
     if (what == GUI_EDITOR_ACTION && app->form == GUI_FORM_APP) {
         app_action(app, app->editor.row, app->editor.step);
         return;
+    }
+    if (app->form == GUI_FORM_FOLDERS) {
+        if (what == GUI_EDITOR_ACTION && !app->editor.step)
+            folder_select(app, app->editor.row);
+        else if (what == GUI_EDITOR_SAVE) /* Add a folder */
+            open_folder_picker(app);
+        if (what != GUI_EDITOR_ACTION || app->editor.step) app->folder_armed = 0;
+        if (what != GUI_EDITOR_LEAVE) return;
     }
     if (what == GUI_EDITOR_SAVE && app->form == GUI_FORM_SETTINGS) { /* the groups' last row */
         gui_settings_reset(&app->settings, -1);
@@ -1519,6 +1668,25 @@ static void editor_input(App* app, const SDL_Event* e) {
         gui_settings_reset(&app->settings, app->group_first[app->group] + app->editor.row);
         app->editor.dirty = true;
         keep_settings(app);
+        return;
+    }
+    /* the game folders: Del takes one off, Ctrl+V adds the one pasted */
+    if (app->form == GUI_FORM_FOLDERS && (e->key.key == SDLK_DELETE || e->key.key == SDLK_BACKSPACE)) {
+        if (app->editor.row && app->editor.row <= app->folder_count)
+            folder_remove(app, app->editor.row - 1);
+        else if (!app->editor.row)
+            snprintf(app->editor.note, sizeof app->editor.note, "games/ is always listed");
+        return;
+    }
+    if (app->form == GUI_FORM_FOLDERS && e->key.key == SDLK_V && (e->key.mod & SDL_KMOD_CTRL) && !e->key.repeat) {
+        char* clipboard = SDL_GetClipboardText();
+        char* path = gui_drop_path(clipboard ? clipboard : "", true);
+        if (path)
+            folder_add(app, path);
+        else
+            snprintf(app->editor.note, sizeof app->editor.note, "Paste one local folder's path");
+        free(path);
+        SDL_free(clipboard);
         return;
     }
     if (app->form == GUI_FORM_THEME && e->key.key == SDLK_TAB && !e->key.repeat) {
@@ -2015,7 +2183,13 @@ static void list_games(App* app) {
 #ifdef SDL_PLATFORM_ANDROID
     android_folder(app);
 #endif
-    gui_games_scan(&app->games, app->games_dir, app->menu.active == GUI_3DS, app->message, sizeof(app->message));
+    int kinds = app->menu.active == GUI_3DS ? GUI_GAMES_CIA : GUI_GAMES_RUN, i;
+    char error[sizeof app->message];
+    gui_games_scan(&app->games, app->games_dir, kinds == GUI_GAMES_CIA, app->message, sizeof(app->message));
+    /* then the player's folders; the first that cannot be read is named, the others still listed */
+    for (i = 0; i < app->folder_count; ++i)
+        if (!gui_games_add(&app->games, app->folders[i], kinds, error, sizeof error) && !app->message[0])
+            snprintf(app->message, sizeof app->message, "%s It is in Settings > App > Game folders.", error);
     memset(&app->browser, 0, sizeof(app->browser));
     app->browser.count = app->games.count;
     layout(app);
@@ -2042,10 +2216,7 @@ static void menu_key(App* app, GuiKey key) {
         } else if (action == GUI_BROWSER_OPEN) {
             size_t index = app->browser.page * app->browser.page_size + app->browser.selected - 1;
             if (index < app->games.count) {
-                char* path = snx_path_join(app->games_dir, app->games.names[index]);
-                char* absolute = snx_absolute(path);
-                free(path);
-                launch(app, absolute, !gui_is_dump(app->games.names[index]));
+                launch(app, snx_absolute(app->games.paths[index]), !gui_is_dump(app->games.names[index]));
             }
         }
         return;
@@ -2333,9 +2504,39 @@ static void event(App* app, const SDL_Event* e) {
         editor_input(app, e);
         return;
     }
+    if ((e->type == SDL_EVENT_DROP_FILE || e->type == SDL_EVENT_DROP_TEXT) && app->editing &&
+        app->form == GUI_FORM_FOLDERS) {
+        char* path = gui_drop_path(e->drop.data, e->type == SDL_EVENT_DROP_TEXT);
+        if (path)
+            folder_add(app, path);
+        else
+            snprintf(app->editor.note, sizeof app->editor.note, "Drop one local folder");
+        free(path);
+        return;
+    }
     if (e->type == SDL_EVENT_DROP_FILE || e->type == SDL_EVENT_DROP_TEXT) {
         drop(app, e->drop.data, e->type == SDL_EVENT_DROP_TEXT);
         return; /* SDL3 owns the event's data, unlike SDL2. */
+    }
+    /* the folder picker's answer: a folder, none, or why it could not open */
+    if (app->picked_folder && e->type == app->picked_folder) {
+        char* error = (char*)e->user.data2;
+        if (e->user.data1)
+            folder_add(app, (const char*)e->user.data1);
+        else {
+            char note[sizeof app->editor.note];
+            if (e->user.code)
+                snprintf(note, sizeof note, "The folder picker could not open: %s", error ? error : "no reason given");
+            else
+                snprintf(note, sizeof note, "No folder was picked.");
+            if (app->editing && app->form == GUI_FORM_FOLDERS)
+                snprintf(app->editor.note, sizeof app->editor.note, "%s", note);
+            else
+                snprintf(app->message, sizeof app->message, "Game folders: %s", note);
+        }
+        SDL_free(e->user.data1);
+        SDL_free(error);
+        return;
     }
     if (app->picked && e->type == app->picked) {
         picked(app, e->user.data1);
@@ -2496,6 +2697,8 @@ static void cleanup(App* app) {
     space_stop(app);
     gui_settings_free(&app->settings);
     free(app->settings_file);
+    for (int i = 0; i < app->folder_count; ++i) free(app->folders[i]);
+    free(app->folders_file);
     free(app->left);
     free(app->self);
     free(app->drivers);
@@ -2569,6 +2772,12 @@ int snx_gui_main(const char* self) {
     if (prefs) recent_open(&app, snx_path_join(prefs, "recent.txt"));
     if (prefs) app.run_log = snx_path_join(prefs, "last-run.log");
     app.settings_file = settings_path(&app, NULL);
+    if (app.settings_file) {
+        char* config = snx_dirname(app.settings_file);
+        app.folders_file = config ? snx_path_join(config, "folders.txt") : NULL;
+        free(config);
+        folders_load(&app);
+    }
     free(prefs);
     left_behind(&app);
     app.left_shown = app.lefts > 0;

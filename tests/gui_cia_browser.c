@@ -48,6 +48,26 @@ int main(void) {
     }
     assert(gui_games_scan(&games, dir, true, error, sizeof error) && !error[0]);
     assert(games.count == 2 && !strcmp(games.names[0], "Alpha.CIA") && !strcmp(games.names[1], "game with spaces.cia"));
+    /* each with where it is */
+    {
+        char* alpha = snx_path_join(dir, "Alpha.CIA");
+        assert(!strcmp(games.paths[0], alpha));
+        free(alpha);
+    }
+    /* more folders' games go after the ones listed, each with its path; one that is not there is named */
+    {
+        char* more = snx_temp_dir(NULL);
+        char* beta = snx_path_join(more, "beta.cia");
+        assert(more && !snx_write_file(beta, "fixture", 7));
+        assert(gui_games_add(&games, more, GUI_GAMES_CIA, error, sizeof error) && !error[0] && games.count == 3);
+        assert(!strcmp(games.names[2], "beta.cia") && !strcmp(games.paths[2], beta));
+        assert(gui_games_add(&games, more, GUI_GAMES_RUN, error, sizeof error) && games.count == 3); /* no CIA */
+        assert(!gui_games_add(&games, "/nonexistent/snx-games", GUI_GAMES_CIA, error, sizeof error));
+        assert(strstr(error, "/nonexistent/snx-games") && games.count == 3);
+        assert(!snx_remove_tree(more));
+        free(beta);
+        free(more);
+    }
     /* Repeated scans replace the old list; neither recursion nor execute bits. */
     assert(gui_games_scan(&games, subdir, true, error, sizeof error) && !games.count);
     assert(!snx_remove_tree(dir));

@@ -325,6 +325,7 @@ int main(int argc, char** argv) {
     free(app.games_dir);
     app.games_dir = snx_path_join(temporary, "games");
     app.settings_file = snx_path_join(temporary, "config/settings.ini"); /* the Settings' picks, kept */
+    app.folders_file = snx_path_join(temporary, "config/folders.txt");   /* the player's game folders */
     render(&app);
     colored_text(&app, menu_row(&app, GUI_SWITCH), "- Load Switch NSP/XCI/NRO", yellow);
     assert(!app.menu.activated);
@@ -499,7 +500,7 @@ int main(int argc, char** argv) {
     assert(app.form == GUI_FORM_SETTINGS && app.groups == 5 && gui_editor_rows(&app.editor) == 6);
     colored_text(&app, 0, "SETTINGS", normal);
     colored_text(&app, 1, "Up/Down: group. Enter: open. ESC: back.", normal);
-    colored_text(&app, 2, "The theme, the menu's letters and the theme editor", rgb(app.theme.soft));
+    colored_text(&app, 2, "The theme, the menu's letters, the theme editor and the game folders", rgb(app.theme.soft));
     colored_text(&app, 4, "- App", yellow);
     colored_text(&app, 5, "- Launch", normal);
     colored_text(&app, 6, "- Display", normal);
@@ -610,6 +611,71 @@ int main(int argc, char** argv) {
     assert(app.form == GUI_FORM_THEME && app.editing);
     key(&app, SDLK_ESCAPE);
     assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_EDITOR);
+    /* the game folders: games/ first, always; one dropped is added and kept, once; the picker answers none here
+       (SDL_FILE_DIALOG_DRIVER=none); Del or Enter twice takes one off, the folder staying */
+    key(&app, SDLK_DOWN);
+    render(&app);
+    colored_text(&app, 7, "- Game folders             games/", yellow);
+    key(&app, SDLK_RETURN);
+    assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 2 && app.editor.row == 0);
+    {
+        char* more = snx_path_join(temporary, "more games");
+        char* file = snx_path_join(more, "Zed");
+        char *kept, line[160];
+        size_t size;
+        SDL_Event e = {0};
+        assert(!snx_mkdirs(more) && !snx_write_file(file, "fixture", 7));
+        render(&app);
+        colored_text(&app, 0, "SETTINGS  /  APP  /  GAME FOLDERS", normal);
+        colored_text(&app, 1, "Add a folder: pick, drop or paste one. Del: take one off. ESC: back.", normal);
+        colored_text(&app, 2, "The data folder's games/, always listed", rgb(app.theme.soft));
+        snprintf(line, sizeof line, "- %s", app.games_dir);
+        colored_text(&app, 4, line, yellow);
+        colored_text(&app, 5, "- Add a folder", normal);
+        assert(!strcmp(app.app_form.folder[0], "not found")); /* games/ was taken away above */
+        key(&app, SDLK_DELETE);
+        assert(!strcmp(app.editor.note, "games/ is always listed"));
+        e.type = SDL_EVENT_DROP_FILE;
+        e.drop.data = file;
+        event(&app, &e);
+        assert(app.folder_count == 0 && !strncmp(app.editor.note, "Not a folder: ", 14));
+        e.drop.data = more;
+        event(&app, &e);
+        assert(app.folder_count == 1 && !strcmp(app.folders[0], more) && !strcmp(app.editor.note, "Added"));
+        assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 1 && gui_editor_rows(&app.editor) == 3);
+        kept = (char*)snx_read_file(app.folders_file, &size);
+        snprintf(line, sizeof line, "%s\n", more);
+        assert(kept && !strcmp(kept, line));
+        free(kept);
+        event(&app, &e);
+        assert(app.folder_count == 1 && !strncmp(app.editor.note, "Already listed: ", 16));
+        render(&app);
+        snprintf(line, sizeof line, "- %s", more);
+        colored_text(&app, 5, line, yellow);
+        app.editor.row = 2;
+        key(&app, SDLK_RETURN);
+        {
+            SDL_Event answer;
+            Uint64 until = SDL_GetTicks() + 2000;
+            while (!app.editor.note[0] && SDL_GetTicks() < until) /* its answer comes on the picker's thread */
+                while (SDL_PollEvent(&answer)) event(&app, &answer);
+        }
+        assert(app.folder_count == 1 && (!strcmp(app.editor.note, "No folder was picked.") ||
+                                         !strncmp(app.editor.note, "The folder picker could not open: ", 34)));
+        app.editor.row = 1;
+        key(&app, SDLK_RETURN);
+        assert(app.folder_count == 1 && !strcmp(app.editor.note, "Enter again takes it off the list"));
+        key(&app, SDLK_RETURN);
+        assert(!app.folder_count && !strcmp(app.editor.note, "Taken off the list; the folder stays"));
+        assert(snx_is_dir(more) && (kept = (char*)snx_read_file(app.folders_file, &size)) && !size);
+        free(kept);
+        event(&app, &e); /* back for the games below */
+        key(&app, SDLK_ESCAPE);
+        assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_FOLDERS);
+        assert(!strcmp(app.app_form.folders, "games/ and 1 more"));
+        free(file);
+        free(more);
+    }
     key(&app, SDLK_ESCAPE);
     assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 0);
     key(&app, SDLK_ESCAPE);
@@ -1066,6 +1132,28 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RETURN);
     assert(app.menu.view == GUI_LOAD_GAMES && app.games.count == 35 && !app.message[0]);
     assert(!strncmp(app.games.names[0], "Game00", 6));
+    /* the player's folders' games after games/'s, each run from where it is; a folder gone is named */
+    {
+#ifdef _WIN32
+        char* zed = snx_path_join(app.folders[0], "Zed.exe");
+#else
+        char* zed = snx_path_join(app.folders[0], "Zed");
+#endif
+        assert(app.folder_count == 1 && !snx_write_file(zed, "fixture", 7) && !snx_make_executable(zed));
+        list_games(&app);
+        assert(app.games.count == 36 && !strcmp(app.games.paths[35], zed) && !app.message[0]);
+        app.folders[1] = snx_strdup("/nonexistent/snx-games");
+        app.folder_count = 2;
+        list_games(&app);
+        assert(app.games.count == 36 && strstr(app.message, "/nonexistent/snx-games") &&
+               strstr(app.message, "Settings > App > Game folders"));
+        free(app.folders[1]);
+        app.folder_count = 1;
+        assert(!snx_remove_tree(zed));
+        list_games(&app);
+        assert(app.games.count == 35 && !app.message[0]);
+        free(zed);
+    }
     assert(gui_browser_pages(&app.browser) > 1);
     key(&app, SDLK_RIGHT);
     key(&app, SDLK_DOWN);

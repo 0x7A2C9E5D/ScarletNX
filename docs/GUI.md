@@ -57,7 +57,12 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   **Launch** (the launcher's two), then a group per section of the game's `.ini` (Display,
   Graphics, Performance, Input, Network, Debug), as `scarletnx --settings` prints them from the
   runtime's own tables. **App** holds **Theme** and **Text size**, which Left/Right or Enter go
-  round either way, and **Theme editor**, which comes back to App. A group of settings shows
+  round either way, **Theme editor**, which comes back to App, and **Game folders**: `games/`,
+  always listed, then the player's own folders, whose games the `games/` browser lists after
+  `games/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
+  or a path pasted with Ctrl+V is added too. Del, or Enter twice, takes one off the list (the
+  folder stays). They are kept in `folders.txt` beside `settings.ini`; one that cannot be read
+  is named when the games are listed. A group of settings shows
   a row each, its help above, Left/Right going round its values, Enter typing one. A setting at `.ini` is the game's `.ini`'s; one picked goes to every
   Switch run as `--key=value`, over the `.ini` ([USAGE](USAGE.md)), and is kept for every game:
   what was changed, by the `.ini`'s sections and keys, in `settings.ini` of the config folder on
