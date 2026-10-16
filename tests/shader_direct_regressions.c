@@ -775,6 +775,22 @@ static void tlds_fp16(void) {
     }
 }
 
+/* Fire Emblem Three Houses fragment shaders sample array textures with TXD,
+   explicit gradients in Rb. It must sample with the Grad operands and write
+   the masked components to consecutive registers. */
+static void txd_grad(void) {
+    static const u64 words[] = {0xDE3800A3B0071010ull};
+    for (size_t i = 0; i < sizeof words / sizeof *words; i++) {
+        ShaderInfo info;
+        size_t size = 0;
+        u32* code = translate(&words[i], 1, ST_FS, &info, &size, 1);
+        if (!code || info.unsupported) fprintf(stderr, "txd %zu: %s\n", i, info.first_unsupported);
+        check(code && !info.unsupported, "TXD translates");
+        if (code) check(count_opcode(code, size, 88, 0xffffffffu) >= 1, "TXD samples with explicit LOD");
+        free(code);
+    }
+}
+
 /* a rejected instruction is logged with its word */
 static void unsupported_names_word(void) {
     ShaderInfo info;
@@ -807,6 +823,7 @@ int main(int argc, char** argv) {
     f2f_half_rounding();
     hfma2_immediate();
     tlds_fp16();
+    txd_grad();
     fragment_storage_images();
     nro_shader_modes();
     issue126_shader_modes();

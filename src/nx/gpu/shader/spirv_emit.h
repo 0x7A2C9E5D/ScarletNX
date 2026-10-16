@@ -250,6 +250,9 @@ uint32_t spv_emit_sample2d_bias(SpvEmitter* e, uint32_t result_type, uint32_t sa
 uint32_t spv_emit_sample_image(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
                                uint32_t coordinates, uint32_t depth_reference, uint32_t mode, uint32_t level,
                                uint32_t offset, int dynamic_offset);
+/* explicit gradients (TXD): OpImageSampleExplicitLod with the Grad operands */
+uint32_t spv_emit_sample_image_grad(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
+                                    uint32_t coordinates, uint32_t dx, uint32_t dy);
 void spv_emit_no_contraction(SpvEmitter* e, uint32_t result);
 uint32_t spv_emit_storage_access_u32(SpvEmitter* e, uint32_t pointer_type, uint32_t buffer, uint32_t member_index,
                                      uint32_t element_index);

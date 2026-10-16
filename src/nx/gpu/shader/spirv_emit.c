@@ -1761,6 +1761,21 @@ uint32_t spv_emit_sample_image(SpvEmitter* e, uint32_t result_type, uint32_t sam
     return id;
 }
 
+uint32_t spv_emit_sample_image_grad(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
+                                    uint32_t coordinates, uint32_t dx, uint32_t dy) {
+    uint32_t image = spv_emit_load(e, sampled_type, sampler);
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_IMAGE_SAMPLE_EXPLICIT_LOD, 8);
+    put(&e->functions, result_type);
+    put(&e->functions, id);
+    put(&e->functions, image);
+    put(&e->functions, coordinates);
+    put(&e->functions, 4); /* ImageOperands Grad */
+    put(&e->functions, dx);
+    put(&e->functions, dy);
+    return id;
+}
+
 void spv_emit_no_contraction(SpvEmitter* e, uint32_t result) {
     instruction(&e->decorations, OP_DECORATE, 3);
     put(&e->decorations, result);

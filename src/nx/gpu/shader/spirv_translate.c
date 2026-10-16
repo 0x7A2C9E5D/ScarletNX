@@ -1219,6 +1219,8 @@ static int supported(u64 w, int op) {
         case O_TEX: return texture_sample_supported(w, 0);
         case O_TEX_B: return texture_sample_supported(w, 1);
         case O_TMML: return B(w, 28, 3) == 2;
+        /* TXD: 1D/2D/3D and their arrays (cube is another image kind); texture offsets ride dynamic coordinates */
+        case O_TXD: return B(w, 28, 3) <= 4 && !B(w, 35, 1);
         case O_FSETP_R:
         case O_FSETP_C:
         case O_FSETP_I: return 1;
@@ -1410,6 +1412,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             else if (op && op->id == O_TLDS)
                 snprintf(si->first_unsupported, sizeof si->first_unsupported, "TLDS encoding %u mask %u fp32 %u",
                          B(insn[i], 53, 4), B(insn[i], 50, 3), B(insn[i], 59, 1));
+            else if (op && op->id == O_TXD)
+                snprintf(si->first_unsupported, sizeof si->first_unsupported, "TXD dim %u offset %u", B(insn[i], 28, 3),
+                         B(insn[i], 35, 1));
             else if (op && (op->id == O_HADD2_R || op->id == O_HADD2_C || op->id == O_HADD2_I || op->id == O_HADD2_32I))
                 snprintf(si->first_unsupported, sizeof si->first_unsupported,
                          "HADD2 kind %d merge %u swa %u swb %u sat %u", op->id - O_HADD2_R, B(insn[i], 49, 2),
@@ -2082,6 +2087,36 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             } else
                 for (int k = 0; k < outputs; k++)
                     if (regs[k] < 255) used[regs[k]] = 1;
+        }
+        if (op->id == O_TXD) {
+            /* Ra holds the coordinates and one packed register (the array layer); Rb the 2 x N derivatives */
+            u32 dim = B(insn[i], 28, 3);
+            int coords = dim <= 1 ? 1 : dim <= 3 ? 2 : 3;
+            int array = dim & 1, type = dim >> 1;
+            u32 off = B(insn[i], 36, 13);
+            int slot = 0;
+            for (; slot < texture_count; slot++)
+                if (textures[slot].cbuf_off == off && textures[slot].type == type && textures[slot].array == array &&
+                    !textures[slot].shadow && !textures[slot].bindless && !textures[slot].flags)
+                    break;
+            if (slot == texture_count) {
+                if (texture_count >= 32) return direct_reject(si, "texture descriptor count");
+                textures[slot].cbuf_off = off;
+                textures[slot].type = (u8)type;
+                textures[slot].array = (u8)array;
+                texture_count++;
+            }
+            for (int k = 0; k < coords + 1; k++)
+                if (a + k < 255) used[a + k] = 1;
+            for (int k = 0; k < 2 * coords; k++)
+                if (b + k < 255) used[b + k] = 1;
+            u32 mask = B(insn[i], 31, 4), dst = d;
+            if (!mask) mask = 15;
+            for (u32 component = 0; component < 4; component++)
+                if (mask & (1u << component)) {
+                    if (dst < 255) used[dst] = 1;
+                    if (dst < 255) dst++;
+                }
         }
         if (op->id == O_TEX || op->id == O_TEX_B) {
             int bindless = op->id == O_TEX_B;
@@ -4917,6 +4952,50 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             } else
                 for (int k = 0; k < outputs; k++)
                     if (regs[k] < 255) reg_write(c, regs[k], texture_component(c, sample, texture_scalar[slot], comps[k]));
+        } else if (op == O_TXD) {
+            /* explicit gradients: Ra the coordinates and one packed register, Rb the derivatives per axis */
+            u32 dim = B(w, 28, 3);
+            int coords = dim <= 1 ? 1 : dim <= 3 ? 2 : 3;
+            int type = dim >> 1, array = dim & 1;
+            u32 off = B(w, 36, 13);
+            int slot = 0;
+            while (slot < texture_count &&
+                   (textures[slot].cbuf_off != off || textures[slot].type != type || textures[slot].array != array ||
+                    textures[slot].shadow || textures[slot].bindless || textures[slot].flags))
+                slot++;
+            u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a));
+            u32 y = type == 0 ? spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f)
+                              : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + 1));
+            u32 coordvec = array ? spv_emit_vec3_construct(&c->emit, vec3, x, y, array_layer(c, a + coords))
+                           : type >= 2
+                               ? spv_emit_vec3_construct(&c->emit, vec3, x, y,
+                                                         spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + 2)))
+                               : spv_emit_vec2_construct(&c->emit, vec2, x, y);
+            u32 d0 = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b));
+            u32 d1 = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b + 1));
+            u32 dx = coords == 1 ? spv_emit_vec2_construct(&c->emit, vec2, d0, zero_f)
+                     : coords == 2
+                         ? spv_emit_vec2_construct(&c->emit, vec2, d0,
+                                                   spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b + 1)))
+                         : spv_emit_vec3_construct(&c->emit, vec3, d0, d1,
+                                                   spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b + 2)));
+            u32 e0 = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b + coords));
+            u32 dy = coords == 1 ? spv_emit_vec2_construct(&c->emit, vec2, e0, zero_f)
+                     : coords == 2
+                         ? spv_emit_vec2_construct(&c->emit, vec2, e0,
+                                                   spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b + coords + 1)))
+                         : spv_emit_vec3_construct(
+                               &c->emit, vec3, e0, spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b + coords + 1)),
+                               spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b + coords + 2)));
+            u32 sample = spv_emit_sample_image_grad(&c->emit, texture_vec4[slot], c->sampled_type[slot],
+                                                    c->sampler[slot], coordvec, dx, dy);
+            u32 mask = B(w, 31, 4), dst = d;
+            if (!mask) mask = 15;
+            for (u32 component = 0; component < 4; component++)
+                if (mask & (1u << component)) {
+                    reg_write(c, dst, texture_component(c, sample, texture_scalar[slot], component));
+                    if (dst < 255) dst++;
+                }
         } else if (op == O_TEXS) {
             u32 off = B(w, 36, 13);
             u32 encoding = B(w, 53, 4);
