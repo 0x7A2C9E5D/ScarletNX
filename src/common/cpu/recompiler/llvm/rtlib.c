@@ -96,3 +96,14 @@ u128 __umodti3(u128 n, u128 d) {
     divmod128(n, d, &r);
     return r;
 }
+#ifdef _WIN32
+/* GNU ld enters a DLL at DllMainCRTStartup, which the C runtime the gcc backend leaves out (-nostdlib) defines: without
+   it the DLL would be entered at the start of its code. link_coff.c gives modules no entry */
+int DllMainCRTStartup(void* module, unsigned long reason, void* reserved);
+int DllMainCRTStartup(void* module, unsigned long reason, void* reserved) {
+    (void)module;
+    (void)reason;
+    (void)reserved;
+    return 1;
+}
+#endif

@@ -73,7 +73,12 @@ SnxJit* snx_jit_new(char opt) {
     } else
         gcc_jit_context_set_int_option(jit->ctx, GCC_JIT_INT_OPTION_OPTIMIZATION_LEVEL, opt - '0');
     /* a shared object for this machine (build == host == target), with the flags generated C had */
+#ifdef _WIN32
+    /* no stack probes: they call libgcc's ___chkstk_ms, which the module doesn't link (nor the LLVM backend's) */
+    gcc_jit_context_add_command_line_option(jit->ctx, "-mno-stack-arg-probe");
+#else
     gcc_jit_context_add_command_line_option(jit->ctx, "-fPIC");
+#endif
     /* linked from its own objects only, as the LLVM backend's linker does (link.h): the start files, C library and
        libgcc GCC's driver adds are those of the GCC libgccjit was built with, at its paths, which a system with
        another GCC or none lacks. The runtime library defines what the code calls (rtlib.c) */

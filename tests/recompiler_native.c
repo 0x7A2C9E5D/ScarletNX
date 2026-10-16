@@ -293,6 +293,7 @@ int main(int argc, char** argv) {
     check(snx_run(args, root, NULL, &text) != 0, "reject zero jobs");
     free(text);
     text = NULL;
+#ifndef _WIN32 /* a Windows child without PATH can't load libgccjit's DLLs, which are in the toolchain's folder */
     if (!strcmp(backend, "gcc")) { /* without binutils it says so, where GCC's driver would end the process */
         char* path = getenv("PATH") ? snx_strdup(getenv("PATH")) : NULL;
         k = 0;
@@ -315,6 +316,7 @@ int main(int argc, char** argv) {
         free(text);
         text = NULL;
     }
+#endif
     source = snx_path_join(root, "copy source");
     nested = snx_path_join(source, "nested/output");
     check(!snx_mkdirs(source), "copy source fixture");

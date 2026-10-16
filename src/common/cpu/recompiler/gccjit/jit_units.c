@@ -229,6 +229,20 @@ static int compile_forked(SnxJitUnits* u, unsigned jobs) {
    none there (a packaged libgccjit), and a missing one ends the process from inside libgccjit: name it before */
 static int missing_tools(char* error, size_t size) {
     char missing[16] = "", *path;
+#ifdef _WIN32
+    static int beside;
+    if (!beside) { /* the zip carries as.exe and ld.exe beside the runtime, a folder PATH doesn't hold */
+        char *self = snx_executable("scarletnx"), *dir = self ? snx_dirname(self) : NULL;
+        beside = 1;
+        if (dir) {
+            path = snx_format("%s;%s", dir, getenv("PATH") ? getenv("PATH") : "");
+            _putenv_s("PATH", path);
+            free(path);
+        }
+        free(dir);
+        free(self);
+    }
+#endif
     if ((path = snx_find_tool("as")) == NULL) strcpy(missing, "as");
     free(path);
     if ((path = snx_find_tool("ld")) == NULL) strcat(missing, missing[0] ? " and ld" : "ld");
