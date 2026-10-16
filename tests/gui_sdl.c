@@ -640,11 +640,12 @@ int main(int argc, char** argv) {
     {
         char* more = snx_path_join(temporary, "more games");
         char* file = snx_path_join(more, "Zed");
-        char* kept_as = snx_absolute(more); /* as the system writes it: with backslashes on Windows */
+        char* kept_as;
         char *kept, line[160];
         size_t size;
         SDL_Event e = {0};
         assert(!snx_mkdirs(more) && !snx_write_file(file, "fixture", 7));
+        kept_as = snx_absolute(more); /* as the system writes the folder once it is there: backslashes on Windows */
         render(&app);
         colored_text(&app, 0, "SETTINGS  /  APP  /  GAME FOLDERS", normal);
         colored_text(&app, 1, "Add a folder: pick, drop or paste one. Del: take one off. ESC: back.", normal);
