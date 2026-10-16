@@ -2638,6 +2638,7 @@ static void editor_input(App* app, const SDL_Event* e) {
 typedef struct {
     GuiPlace place;
     GuiList left, right;
+    GuiList back;          /* Back over the open group's rows, for a click or a finger: ESC's */
     GuiEditor peek;        /* the focused group's rows, shown while the focus is on the groups */
     const GuiEditor* rows; /* the right box's rows: the editor's, or peek */
     GuiRect info;          /* the right box's foot, for a line about its rows */
@@ -2676,7 +2677,7 @@ static const char* form_note(const App* app) {
 static void form_boxes(App* app, GuiFormBoxes* f) {
     const char* note = form_note(app);
     char keys[256];
-    int rows;
+    int rows, top, back;
     int theme = app->form == GUI_FORM_THEME, width, height, g, longest = (int)strlen("Reset all to the defaults");
     area(app, &width, &height);
     for (g = 0; g < app->groups; ++g) longest = SDL_max(longest, (int)strlen(app->group_keys[g].key));
@@ -2708,9 +2709,14 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
     rows = note ? wrap_rows(note, inner(app, f->place.side).w / cell_w(app), 0) : 1; /* the note whole */
     f->info = gui_rect(f->place.side.x, f->place.side.y + f->place.side.h - rows * cell_h(app) - 4 * app->scale,
                        f->place.side.w, rows * cell_h(app) + 2 * app->scale);
+    top = f->place.side.y + head_h(app) + 4 * app->scale;
+    back = !theme && app->form != GUI_FORM_SETTINGS ? item_h(app) + 24 * app->scale : 0; /* wider than the rows' */
+    list_place(app, &f->back,
+               gui_rect(f->place.side.x + cell_w(app), top, f->place.side.w - 2 * cell_w(app), item_h(app)),
+               back ? 1 : 0, -1);
     list_place(app, &f->right,
-               gui_rect(f->place.side.x + cell_w(app), f->place.side.y + head_h(app) + 4 * app->scale,
-                        f->place.side.w - 2 * cell_w(app), f->info.y - f->place.side.y - head_h(app) - 6 * app->scale),
+               gui_rect(f->place.side.x + cell_w(app), top + back, f->place.side.w - 2 * cell_w(app),
+                        f->info.y - top - back - 2 * app->scale),
                theme ? 0 : gui_editor_rows(f->rows), app->form == GUI_FORM_SETTINGS ? -1 : f->rows->row);
 }
 /* a row of a form as its box shows it: its label, the value past the widest label; one being typed ends where the
@@ -2799,6 +2805,10 @@ static void draw_form(App* app) {
              : app->form == GUI_FORM_GROUP && app->page >= 0 ? app->settings.keys[app->page].key
              : g < app->groups                               ? app->group_keys[g].key
                                                              : "Reset all to the defaults");
+        if (f.back.count) {
+            snprintf(line, sizeof line, "%sBack [ESC]", app->theme.marker);
+            list_item(app, &f.back, 0, line, false, false);
+        }
         labels = form_labels(f.rows);
         for (r = f.right.first; r < f.right.first + f.right.shown; ++r)
             form_row(app, &f.right, f.rows, r, labels, f.rows == &app->editor && r == app->editor.row,
@@ -2958,6 +2968,11 @@ static void form_pointer(App* app, float x, float y, bool touch) {
         leave_editor(app);
         settings_top(app, i); /* another group: from its row, as Enter there */
         if (i < app->groups) open_group(app, i);
+        return;
+    }
+    if (f.back.count && list_hit(&f.back, x, y, touch) >= 0) { /* as ESC: a typed value first, then the rows */
+        if (app->editor.typing) editor_key(app, GUI_CANCEL);
+        editor_key(app, GUI_CANCEL);
         return;
     }
     if ((i = list_hit(&f.right, x, y, touch)) < 0) return;

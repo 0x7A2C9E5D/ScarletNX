@@ -219,8 +219,8 @@ a row of their own under the head with `[tips] place = top`. Games lists Back an
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
 opens the picker) and Back at its foot. The Settings list their groups, and beside them the focused group's
-rows: Enter, or a click on a row, opens the group, its rows taking the focus, and a click on another group
-opens that one. The theme editor lists its keys, the preview beside them. A window too narrow for both puts
+rows: Enter, or a click on a row, opens the group, its rows taking the focus under a Back that a click or a finger
+takes as ESC, the group shown as the focused one; a click on another group opens that one. The theme editor lists its keys, the preview beside them. A window too narrow for both puts
 the side box under the list. A run of the console layout shows the driver's output in a box sized to it,
 beside it what runs and how it ended over the status, the file in the tips and the ESC line where the keys
 go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question, or

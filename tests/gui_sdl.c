@@ -1150,6 +1150,28 @@ int main(int argc, char** argv) {
     shows(&app, "- Game folders       games/", yellow);
     key(&app, SDLK_RETURN);
     assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 2 && app.editor.row == 0);
+    /* Back over the rows, for a click or a finger: it does what ESC does, back on the App's row; the groups' list has
+       none */
+    {
+        GuiFormBoxes f;
+        render(&app);
+        shows(&app, "- Back [ESC]", normal);
+        form_boxes(&app, &f);
+        assert(f.back.count == 1 &&
+               list_box(&f.right, 0).y - (list_box(&f.back, 0).y + list_box(&f.back, 0).h) > 14 * app.scale);
+        point(&app, list_box(&f.back, 0), true);
+        assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_FOLDERS);
+        render(&app);
+        shows(&app, "- Back [ESC]", normal);
+        key(&app, SDLK_ESCAPE);
+        assert(app.form == GUI_FORM_SETTINGS);
+        render(&app);
+        hides(&app, "- Back [ESC]", normal);
+        key(&app, SDLK_RETURN);
+        app.editor.row = GUI_APP_FOLDERS;
+        key(&app, SDLK_RETURN);
+        assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 0);
+    }
     {
         char* more = snx_path_join(temporary, "more games");
         char* file = snx_path_join(more, "Zed");
