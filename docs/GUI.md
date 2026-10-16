@@ -64,15 +64,12 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   Switch options; they are never forwarded as Linux guest arguments or to the 3DS driver.
 - **Theme** switches to the next theme: the built-in Default and YoRHa, then each
   folder of `themes/` (see [Themes](#themes)). It lasts for the session.
-- **Theme editor** opens the theme shown in a screen of its own: a row per key of its
-  `theme.ini` with its value, and beside them the menu or a run (Tab, or a tap on it)
-  drawn in the theme as it is. Up and Down move, Left and Right change a word, a switch
-  or a number, and Enter (a tap on the focused row) changes a word or types the others: a
-  colour as `#RRGGBB`, a text, a number; what the key does not take stays typed, with a note.
-  Save, or Ctrl+S, writes `themes/<folder>/theme.ini` in the data folder, the first row
-  naming the folder, and the menu takes the theme; ESC leaves, asking once over changes.
-  A built-in is saved as a new theme (`mytheme` until renamed); a theme of `themes/` is
-  saved in its own folder, with the keys it had that the GUI does not read.
+- **Theme editor** edits the current theme: a row per `theme.ini` key, and beside them a
+  preview of the menu or a run (Tab switches). Left/Right change a word, a switch or a
+  number, Enter types a colour, a text or a number.
+  Save (Ctrl+S) writes `themes/<folder>/theme.ini` in the data folder and switches to it;
+  a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
+  there are unsaved changes.
 - **Text size** steps the menu's letters through Auto (fit the screen) and four sizes.
   Bigger letters scroll the menu.
 - **Share log** saves the last run's output and game log to `scarletnx.log`. On the
@@ -182,7 +179,7 @@ takes YoRHa's colours from the same file at build time. The files are copied bes
 in the build and installed with it: copy one under a new name to make a theme, or edit one
 to change the built-in. `[theme] base` picks the built-in a file starts from, and a key it
 leaves out, or that cannot be read, keeps the base's value. The menu's **Theme editor**
-writes a theme.ini with every key, a preview beside it drawn by the menu's own code.
+writes one with every key.
 
 ```ini
 [theme]
@@ -290,8 +287,8 @@ ErET needs `[theme] layout`, so the built-in files carry one: `debug` and `menu`
 - A file of a format the GUI knows reads the same in it and in every later GUI: each key
   keeps its meaning, and each value reads to the same theme. `tests/gui_themes/<N>/` holds
   files of format N as a theme tool wrote them, with the theme each reads to (`<name>.json`,
-  the GUI's fields by key); `gui_theme_formats` checks them, and `gui_theme_write` that each,
-  written again, reads to the same theme.
+  the GUI's fields by key); `gui_theme_formats` checks them, and `gui_theme_write` checks
+  that each, written again, reads to the same theme.
   They are never changed: a field added to themes later is simply not in an older one's JSON.
 - A new key, or a new word for a key, keeps N: an older GUI leaves what it does not know, and
   the base's value stays. A new key's value in the built-ins must keep an older file looking
@@ -308,7 +305,7 @@ ErET needs `[theme] layout`, so the built-in files carry one: `debug` and `menu`
 
 The NX build enables `SNX_BUILD_GUI` by default. Disable it with
 `-DSNX_BUILD_GUI=OFF`. Tools-only builds do not enable the GUI.
-The GUI itself needs only SDL3, not Vulkan or FFmpeg. Both driver binaries can be
+The GUI itself needs only SDL3, not Vulkan or FFmpeg. The driver binaries can be
 built separately and installed beside it or made available on PATH.
 
 To build it alongside the NX runtime (which supports `-H` for no-window runs):
@@ -321,7 +318,7 @@ ctest --test-dir build/gui -R '^gui_' --output-on-failure
 
 For just the GUI and Linux runtime, use `-DSNX_BUILD_NX=OFF -DSNX_BUILD_GUI=ON`.
 Tools-only and hactool-only builds cannot enable the GUI.
-Supported host platforms are Linux, FreeBSD and Windows (llvm-mingw).
+Supported host platforms are Linux, FreeBSD, Windows (llvm-mingw) and Android (`dist/android`).
 SDL3 handles window creation, keyboard/mouse input, rendering, clipboard and drag-and-drop
 on every host. The platform-specific code only handles child processes and resource
 accounting. See [BUILD](BUILD.md) for SDL3's desktop dependencies.
