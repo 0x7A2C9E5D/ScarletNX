@@ -1647,54 +1647,50 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
 #endif
         return;
     }
+    /* the line under the pointer takes the focus, and a click selects it */
     if (app->menu.view == GUI_LOAD_GAMES) {
+        size_t start = app->browser.page * app->browser.page_size;
         if (hit_text(app, x, y, 1, 3, "Back [ESC]", touch)) {
             app->browser.selected = 0;
-            if (click) menu_key(app, GUI_SELECT);
-            return;
+            goto hit;
         }
-        size_t start = app->browser.page * app->browser.page_size;
-        for (size_t i = 0; i < gui_browser_items(&app->browser); ++i) {
-            if (!hit_text(app, x, y, 1, 5 + (int)i, app->games.names[start + i], touch)) continue;
-            app->browser.selected = i + 1;
-            if (click) menu_key(app, GUI_SELECT);
-            return;
-        }
+        for (size_t i = 0; i < gui_browser_items(&app->browser); ++i)
+            if (hit_text(app, x, y, 1, 5 + (int)i, app->games.names[start + i], touch)) {
+                app->browser.selected = i + 1;
+                goto hit;
+            }
         return;
     }
-    if (app->menu.view != GUI_LOAD_NONE) {
-        int row = menu_row(app, app->menu.active);
-        for (int i = 0; i < 2; ++i) {
-            if (!menu_shows(app, row + i + 1) || !hit_text(app, x, y, 3, row + i + 1, load_labels[i], touch)) continue;
+    for (int i = 0; app->menu.view != GUI_LOAD_NONE && i < 2; ++i) {
+        int row = menu_row(app, app->menu.active) + i + 1;
+        if (menu_shows(app, row) && hit_text(app, x, y, 3, row, load_labels[i], touch)) {
             app->menu.load_selected = i;
             app->menu.focus_load = true;
-            if (click) menu_key(app, GUI_SELECT);
-            return;
+            goto hit;
         }
     }
-    {
-        int game;
+    for (int game = 0; game < app->recent.count; ++game) {
         char label[160];
-        for (game = 0; game < app->recent.count; ++game) {
-            recent_label(app, game, label, sizeof label);
-            if (!menu_shows(app, recent_row(app, game)) || !hit_text(app, x, y, 1, recent_row(app, game), label, touch))
-                continue;
+        recent_label(app, game, label, sizeof label);
+        if (menu_shows(app, recent_row(app, game)) && hit_text(app, x, y, 1, recent_row(app, game), label, touch)) {
             app->menu.recent_focus = game + 1;
             app->menu.focus_load = false;
-            if (click) menu_key(app, GUI_SELECT);
-            return;
+            goto hit;
         }
     }
     for (int i = 0; i < GUI_ITEM_COUNT; ++i) {
         char label[100];
         menu_label(app, i, label, sizeof(label));
-        if (!menu_shows(app, menu_row(app, i)) || !hit_text(app, x, y, 1, menu_row(app, i), label, touch)) continue;
-        app->menu.selected = i;
-        app->menu.recent_focus = 0;
-        app->menu.focus_load = false;
-        if (click) menu_key(app, GUI_SELECT);
-        return;
+        if (menu_shows(app, menu_row(app, i)) && hit_text(app, x, y, 1, menu_row(app, i), label, touch)) {
+            app->menu.selected = i;
+            app->menu.recent_focus = 0;
+            app->menu.focus_load = false;
+            goto hit;
+        }
     }
+    return;
+hit:
+    if (click) menu_key(app, GUI_SELECT);
 }
 /* the file the system's picker chose, as a dropped one; none (cancelled) stays on the screen and says so */
 static void picked(App* app, const char* uri) {
