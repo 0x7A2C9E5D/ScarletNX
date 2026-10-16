@@ -230,6 +230,10 @@ static int is_dump(const char* path) {
 int snx_main(int argc, char** argv) {
     int startup = snx_startup_options(argc, argv);
     if (startup) return startup;
+    if (argc == 2 && !strcmp(argv[1], "--settings")) { /* what the menu's Settings offer */
+        ini_list();
+        return 0;
+    }
     /* Start the helper before creating any host threads. */
     if (g_opt_gdb && snx_gdb_start(g_opt_gdb_stop)) return 2;
     /* In an AppImage argv[0] points into its mount (APPDIR). APPIMAGE is the file that was run, so a copy named after

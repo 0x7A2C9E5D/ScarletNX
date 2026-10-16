@@ -136,6 +136,8 @@ if(BUILD_TESTING)
         target_link_libraries(snx-test-shader-direct-regressions PRIVATE Threads::Threads m)
     endif()
     add_test(NAME shader_direct_regressions COMMAND $<TARGET_FILE:snx-test-shader-direct-regressions>)
+    add_test(NAME runtime_settings_list COMMAND "${CMAKE_COMMAND}" -DRUNTIME=$<TARGET_FILE:scarletnx>
+             -P "${PROJECT_SOURCE_DIR}/tests/settings_list.cmake")
     find_program(SNX_SHADER_SPIRV_VAL spirv-val)
     find_program(SNX_SHADER_SPIRV_DIS spirv-dis)
     find_package(Python3 QUIET COMPONENTS Interpreter)

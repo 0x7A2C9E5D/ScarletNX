@@ -289,6 +289,26 @@ static int ini_load(const char* path) {
     free(text);
     return 0;
 }
+void ini_list(void) {
+    static const char* const types[] = {"int", "float", "text"}; /* by INI_INT, INI_FLOAT, INI_TEXT */
+    for (int s = 0; INI_SECS[s].title; s++)
+        for (int t = 0; t < INI_SEC_TABLES && INI_SECS[s].t[t].opts; t++) {
+            const char* help = "";
+            for (const IniOpt* o = INI_SECS[s].t[t].opts; o->key; o++) {
+                if (o->help) help = o->help;
+                printf("%s\t%s\t%s\t%s\t%g\t%g\t", INI_SECS[s].title, o->key, o->def ? o->def : "", types[o->type],
+                       o->lo, o->hi);
+                for (const char* c = help; *c; c++)
+                    if (*c != '\n')
+                        putchar(*c);
+                    else { /* the help on one line: a "\n;   " that goes on in the file is a space */
+                        putchar(' ');
+                        c += strspn(c + 1, "; ");
+                    }
+                putchar('\n');
+            }
+        }
+}
 /* the startup-only keys, wrapped to the header's box */
 static void write_startup_keys(FILE* f) {
     int col = fprintf(f, ";  These apply when the game starts again: "), n = 0;
