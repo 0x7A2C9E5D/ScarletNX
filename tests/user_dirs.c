@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* snx_user_dir and snx_user_path: an installed build's config, state and cache folders (the XDG Base Directory spec),
-   and where a file of its data folder goes in them. tests/data_dir.c has the data folder itself. */
+   a portable copy's (config/, state/ and cache/ of its .scarletnx), and where a file of a data folder goes in them.
+   tests/data_dir.c has the data folder itself. */
 #define _POSIX_C_SOURCE 200809L
 #include "common/utilities/common.h"
 #include <assert.h>
@@ -63,11 +64,19 @@ int main(void) {
         }
     }
 #else
-    /* one folder for everything where the spec does not apply */
-    base = snx_user_data_dir();
-    assert(base);
-    for (kind = SNX_USER_DATA; kind <= SNX_USER_CACHE; ++kind) expect_dir(kind, base);
-    free(base);
+    /* config/, state/ and cache/ of the data folder where the spec does not apply */
+    {
+        static const char* const names[] = {NULL, "config", "state", "cache"};
+        base = snx_user_data_dir();
+        assert(base);
+        expect_dir(SNX_USER_DATA, base);
+        for (kind = SNX_USER_CONFIG; kind <= SNX_USER_CACHE; ++kind) {
+            path = join(base, names[kind]);
+            expect_dir(kind, path);
+            free(path);
+        }
+        free(base);
+    }
 #endif
 
     for (kind = SNX_USER_DATA; kind <= SNX_USER_CACHE; ++kind) {
@@ -86,8 +95,8 @@ int main(void) {
         path = join(dir[SNX_USER_CONFIG], "games");
         expect_path(games, SNX_USER_CONFIG, path);
         free(path);
-        path = join(games, "Game.ini");
-        expected = join(dir[SNX_USER_CONFIG], "games/Game.ini");
+        path = join(games, "Game/Game.ini"); /* a game's folder */
+        expected = join(dir[SNX_USER_CONFIG], "games/Game/Game.ini");
         expect_path(path, SNX_USER_CONFIG, expected);
         free(expected);
         free(path);
@@ -121,12 +130,36 @@ int main(void) {
         free(expected);
     }
 #endif
-    /* data stays; a checkout's, a portable copy's or an --outdir's games/ keep everything beside the game */
+    /* data stays; a checkout's or an --outdir's games/, or an older version's portable copy's, keep everything beside
+       the game */
     expect_path(games, SNX_USER_DATA, games);
     path = join(root, "portable/games");
     expect_path(path, SNX_USER_CONFIG, path);
     expect_path(path, SNX_USER_CACHE, path);
     free(path);
+    /* a portable copy's .scarletnx: its config/, state/ and cache/, on every system */
+    {
+        char *expected, *copy = join(root, "portable/.scarletnx");
+        path = join(copy, "games/Game");
+        expected = join(copy, "config/games/Game");
+        expect_path(path, SNX_USER_CONFIG, expected);
+        free(expected);
+        expected = join(copy, "cache/work");
+        free(path);
+        path = join(copy, "work");
+        expect_path(path, SNX_USER_CACHE, expected);
+        expect_path(path, SNX_USER_DATA, path);
+        free(expected);
+        free(path);
+        expected = join(copy, "state");
+        expect_path(copy, SNX_USER_STATE, expected);
+        assert(snx_app_dir(copy) && !snx_app_dir(root));
+        free(expected);
+        path = join(root, "portable/.scarletnx-other/games"); /* only that name */
+        expect_path(path, SNX_USER_STATE, path);
+        free(path);
+        free(copy);
+    }
     path = snx_format("%s-other/games", dir[SNX_USER_DATA]);
     expect_path(path, SNX_USER_STATE, path);
     free(path);
@@ -136,7 +169,7 @@ int main(void) {
     expect_path(games, SNX_USER_CONFIG, games);
 
     puts("snx_user_dir: the XDG variables, their defaults, a relative path ignored; snx_user_path: the installed "
-         "games/ divided, any other folder kept");
+         "and a portable copy's games/ divided, any other folder kept");
     for (kind = SNX_USER_DATA; kind <= SNX_USER_CACHE; ++kind) free(dir[kind]);
     free(games);
     free(home);

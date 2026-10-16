@@ -138,6 +138,25 @@ def main():
             not (config / 'games/Beside').exists() and not (state / 'games/Beside').exists(),
             'the game in a folder of its own wrote in the XDG folders',
         )
+        # a portable copy's .scarletnx: its config/, state/ and cache/, as off Linux
+        portable = root / 'copy/.scarletnx'
+        port = portable / 'games/Port'
+        status, out = run(
+            [driver, '--repo', str(portable), '-r', str(nro), 'Port', '--runtime', driver, '--jobs', '2']
+            + ['--outdir', str(port.parent)]
+        )
+        check(
+            status == 0 and (portable / 'config/games/Port/Port.ini').is_file() and not (port / 'Port.ini').exists(),
+            "the portable copy's recompile did not keep Port.ini in its config/",
+            out,
+        )
+        shutil.rmtree(port / 'Port_data/exefs')
+        status, out = run(['./Port', '-H'], cwd=port)
+        check(
+            (portable / 'state/games/Port/Port.log').is_file() and not (state / 'games/Port').exists(),
+            "the portable copy's game did not log in its state/",
+            out,
+        )
         check(not (root / 'home').exists(), 'something was written in HOME')
 
     if failures:

@@ -3160,9 +3160,11 @@ int main(int argc, char** argv) {
         app.browser = (GuiBrowser){0};
         app.theme = *gui_theme_builtin("default");
     }
-    /* Share log off Android: scarletnx.log in the working folder, with the message and the last run's output */
+    /* Share log off Android: scarletnx.log with the message and the last run's output, in the state folder of a data
+       folder that keeps its kinds apart, else in the working folder */
     {
-        char* saved = snx_path_join(temporary, "scarletnx.log");
+        char *saved = snx_path_join(temporary, "scarletnx.log"), *installed_dir = app.data_dir;
+        char *portable = snx_path_join(temporary, ".scarletnx"), *kept = snx_path_join(portable, "state/scarletnx.log");
         size_t size = 0;
         char* text;
         SDL_free(app.cwd);
@@ -3171,41 +3173,51 @@ int main(int argc, char** argv) {
         app.menu.selected = GUI_LOG;
 #ifdef SNX_XDG
         /* an installed build's in its state folder, as the working folder is the home folder from the desktop */
-        char *state = snx_path_join(temporary, "state"), *logged = snx_path_join(state, "scarletnx/scarletnx.log");
-        char* installed_dir = app.data_dir;
-        SDL_setenv_unsafe("XDG_STATE_HOME", state, 1);
+        {
+            char *state = snx_path_join(temporary, "state"), *logged = snx_path_join(state, "scarletnx/scarletnx.log");
+            SDL_setenv_unsafe("XDG_STATE_HOME", state, 1);
+            key(&app, SDLK_RETURN);
+            assert(strstr(app.message, logged) && !snx_path_exists(saved));
+            text = (char*)snx_read_file(logged, &size);
+            assert(text && strstr(text, "Message: before the log"));
+            free(text);
+            free(logged);
+            free(state);
+        }
+#endif
+        /* a portable copy's .scarletnx/: its state/, on every system */
+        app.data_dir = snx_strdup(portable);
+        snprintf(app.message, sizeof(app.message), "before the log");
         key(&app, SDLK_RETURN);
-        assert(strstr(app.message, logged) && !snx_path_exists(saved));
-        text = (char*)snx_read_file(logged, &size);
+        assert(strstr(app.message, "scarletnx.log") && snx_is_file(kept) && !snx_path_exists(saved));
+        text = (char*)snx_read_file(kept, &size);
         assert(text && strstr(text, "Message: before the log"));
         free(text);
-        free(logged);
-        free(state);
-        /* any other build's (a checkout, a portable copy) in the working folder */
+        /* any other build's (a checkout) in the working folder */
+        free(app.data_dir);
         app.data_dir = snx_strdup(temporary);
         snprintf(app.message, sizeof(app.message), "before the log");
-#endif
         key(&app, SDLK_RETURN);
         assert(!strncmp(app.message, "Log saved to ", 13) && strstr(app.message, "scarletnx.log"));
         text = (char*)snx_read_file(saved, &size);
         assert(text && strstr(text, "Message: before the log") && strstr(text, "== the last run: "));
         free(text);
-        free(saved);
-#ifdef SNX_XDG
         free(app.data_dir);
         app.data_dir = installed_dir;
-#endif
+        assert(!snx_remove_tree(portable));
+        free(kept);
+        free(portable);
+        free(saved);
     }
 #ifdef SNX_XDG
-    /* the menu's recent.txt and last-run.log in the state folder's gui/; an older build's in the data folder's stay */
+    /* the menu's recent.txt and last-run.log in the state folder; an older build's in the data folder's gui/ stay */
     {
         char *data = snx_path_join(temporary, "data"), *state = snx_path_join(temporary, "state");
         char *old = snx_path_join(data, "scarletnx/gui"), *recent = snx_path_join(old, "recent.txt");
-        char *run = snx_path_join(old, "last-run.log"), *folder, *expected = snx_path_join(state, "scarletnx/gui"),
-             *now;
+        char *run = snx_path_join(old, "last-run.log"), *folder, *expected = snx_path_join(state, "scarletnx"), *now;
         assert(!snx_mkdirs(old) && !snx_write_file(recent, "recent", 6) && !snx_write_file(run, "run", 3));
         SDL_setenv_unsafe("XDG_DATA_HOME", data, 1);
-        folder = state_folder();
+        folder = menu_folder(&app, SNX_USER_STATE, true);
         assert(folder && !strcmp(folder, expected) && snx_file_size(recent) == 6 && snx_file_size(run) == 3);
         now = snx_path_join(folder, "recent.txt");
         assert(!snx_path_exists(now) && snx_left_behind(recent, now));
@@ -3217,9 +3229,9 @@ int main(int argc, char** argv) {
         {
             char *installed_dir = app.data_dir, *games = app.games_dir, *ini, *log, *threads, *work, *line;
             const char* const lines[] = {"%s/scarletnx/gui/recent.txt",
-                                         "%s/scarletnx/gui/recent.txt",
+                                         "%s/scarletnx/recent.txt",
                                          "%s/scarletnx/gui/last-run.log",
-                                         "%s/scarletnx/gui/last-run.log",
+                                         "%s/scarletnx/last-run.log",
                                          "%s/scarletnx/work",
                                          "%s/scarletnx/work",
                                          "%s/scarletnx/games/" LONG ".log",
@@ -3349,7 +3361,7 @@ int main(int argc, char** argv) {
 #undef LONG
         /* and an empty state folder is made for the first run */
         assert(!snx_remove_tree(state));
-        folder = state_folder();
+        folder = menu_folder(&app, SNX_USER_STATE, true);
         assert(folder && snx_is_dir(folder));
         free(folder);
         SDL_setenv_unsafe("XDG_DATA_HOME", "/nonexistent/snx-gui-test", 1);

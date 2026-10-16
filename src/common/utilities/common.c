@@ -649,33 +649,69 @@ char* snx_user_data_dir(void) {
     return home_folder("XDG_DATA_HOME", ".local/share");
 #endif
 }
+static const char* const kind_names[] = {NULL, "config", "state", "cache"};
 char* snx_user_dir(int kind) {
+    char *data, *dir;
 #ifdef SNX_XDG
     if (kind == SNX_USER_CONFIG) return home_folder("XDG_CONFIG_HOME", ".config");
     if (kind == SNX_USER_STATE) return home_folder("XDG_STATE_HOME", ".local/state");
     if (kind == SNX_USER_CACHE) return home_folder("XDG_CACHE_HOME", ".cache");
-#else
-    (void)kind;
 #endif
-    return snx_user_data_dir();
+    data = snx_user_data_dir();
+    if (!data || kind == SNX_USER_DATA) return data;
+    dir = snx_path_join(data, kind_names[kind]);
+    free(data);
+    return dir;
+}
+/* the same folder, each resolved: one reached through a link is still it */
+static int same_folder(const char* a, const char* b) { return snx_path_within(a, b) && snx_path_within(b, a); }
+int snx_app_dir(const char* folder) {
+    char *user = snx_user_data_dir(), *full = snx_absolute(folder);
+    const char *base = full, *s;
+    int app = full && user && same_folder(full, user);
+    for (s = full; s && *s; ++s)
+        if (separator(*s) && s[1]) base = s + 1;
+    if (full && !app)
+        app = !strncmp(base, SNX_PORTABLE_DIR, strlen(SNX_PORTABLE_DIR)) &&
+              (!base[strlen(SNX_PORTABLE_DIR)] || separator(base[strlen(SNX_PORTABLE_DIR)]));
+#ifdef __ANDROID__
+    if (full && !app) app = same_folder(full, SNX_ANDROID_DIR);
+#endif
+    free(user);
+    free(full);
+    return app;
+}
+char* snx_app_kind_dir(const char* app, int kind) {
+    char* user = snx_user_data_dir();
+    int own = user && same_folder(app, user);
+    free(user);
+    if (own) return snx_user_dir(kind);
+    return kind == SNX_USER_DATA ? snx_strdup(app) : snx_path_join(app, kind_names[kind]);
 }
 char* snx_user_path(const char* path, int kind) {
-    char *data = snx_user_data_dir(), *root = snx_user_dir(kind), *full = NULL, *base = NULL, *moved = NULL;
+    char *full = kind == SNX_USER_DATA ? NULL : snx_absolute(path), *app = full ? snx_strdup(full) : NULL;
+    char *up, *root = NULL, *moved = NULL;
     const char* rest;
-    /* both resolved: a data folder reached through a link is still the data folder */
-    if (data && root && strcmp(data, root)) {
-        full = snx_absolute(path);
-        base = snx_absolute(data);
+    /* the data folder it is in, from its own folder up */
+    while (app && !snx_app_dir(app)) {
+        up = snx_dirname(app);
+        if (!strcmp(up, app)) {
+            free(up);
+            up = NULL;
+        }
+        free(app);
+        app = up;
     }
-    if (full && base && snx_path_within(full, base)) {
-        rest = full + strlen(base);
+    if (app) root = snx_app_kind_dir(app, kind);
+    /* a config folder that is the data folder divides nothing */
+    if (root && !same_folder(root, app)) {
+        rest = full + strlen(app);
         while (separator(*rest)) ++rest;
         moved = *rest ? snx_path_join(root, rest) : snx_strdup(root);
     }
-    free(data);
-    free(root);
     free(full);
-    free(base);
+    free(app);
+    free(root);
     return moved ? moved : snx_strdup(path);
 }
 int snx_left_behind(const char* old, const char* now) { return strcmp(old, now) && snx_path_exists(old); }
@@ -699,8 +735,7 @@ char* snx_work_dir(const char* data_dir) {
 }
 char* snx_data_dir(const char* checkout, const char* build, const char* program_dir) {
     const char *appimage = getenv("APPIMAGE"), *appdir = getenv("APPDIR");
-    char *path = checkout ? snx_path_join(checkout, "CMakeLists.txt") : NULL, *dir = NULL, *games;
-    int portable;
+    char *path = checkout ? snx_path_join(checkout, "CMakeLists.txt") : NULL, *dir = NULL, *copy;
     /* a copy installed from that build (cmake --install) is installed, even where the checkout still is */
     if (path && snx_is_file(path) &&
         (!build || !program_dir || (snx_is_dir(build) && snx_path_within(program_dir, build)))) {
@@ -714,11 +749,10 @@ char* snx_data_dir(const char* checkout, const char* build, const char* program_
         dir = snx_dirname(appimage);
     else if (program_dir)
         dir = snx_strdup(program_dir);
-    games = dir ? snx_path_join(dir, "games") : NULL;
-    portable = games && snx_is_dir(games);
-    free(games);
-    if (portable) return dir;
+    copy = dir ? snx_path_join(dir, SNX_PORTABLE_DIR) : NULL;
     free(dir);
+    if (copy && snx_is_dir(copy)) return copy;
+    free(copy);
     return snx_user_data_dir();
 }
 char* snx_temp_dir(const char* parent) {

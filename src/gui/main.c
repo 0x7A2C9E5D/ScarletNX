@@ -330,6 +330,25 @@ static bool installed(const App* app) {
     return same;
 }
 #endif
+/* the folder of kind for the menu's own files (settings.ini, app.ini and folders.txt in config, recent.txt and
+   last-run.log in state), made: its data folder's (snx_app_dir: the user's, a portable copy's), else the user's (a
+   checkout's menu). On Android the app's own storage, which needs no permission. Made with make; NULL when none can be */
+static char* menu_folder(const App* app, int kind, bool make) {
+    char* folder;
+#ifdef SDL_PLATFORM_ANDROID
+    char* sdl = kind == SNX_USER_CACHE ? NULL : SDL_GetPrefPath("scarletnx", "gui");
+    (void)app;
+    folder = sdl ? snx_strdup(sdl) : NULL;
+    SDL_free(sdl);
+#else
+    folder = app->data_dir && snx_app_dir(app->data_dir) ? snx_app_kind_dir(app->data_dir, kind) : snx_user_dir(kind);
+#endif
+    if (folder && make && snx_mkdirs(folder)) {
+        free(folder);
+        folder = NULL;
+    }
+    return folder;
+}
 /* where the keys are installed: an installed build's data folder, which the driver reads first, so nothing is written
    in the home folder itself (XDG); else ~/.switch */
 static char* device_keys_path(const App* app) {
@@ -1948,19 +1967,13 @@ static uint64_t free_space(const char* path) {
     return left;
 }
 static void space_start(App* app) {
+    /* settings, logs and caches, the menu's files among them; an older version's work/ is the data folder's */
     char* dirs[GUI_SPACE_DIRS] = {snx_strdup(app->games_dir),
                                   snx_path_join(app->data_dir, "work"),
                                   app->themes_dirs[0] ? snx_strdup(app->themes_dirs[0]) : NULL,
-#ifdef SNX_XDG /* settings, logs and caches, the menu's files among them; an older version's work/ is the data folder's */
-                                  snx_user_dir(SNX_USER_CONFIG),
-                                  snx_user_dir(SNX_USER_STATE),
-                                  snx_user_dir(SNX_USER_CACHE)
-#else
-                                  app->recent_file ? snx_dirname(app->recent_file) : NULL,
-                                  NULL,
-                                  NULL
-#endif
-    };
+                                  menu_folder(app, SNX_USER_CONFIG, false),
+                                  menu_folder(app, SNX_USER_STATE, false),
+                                  menu_folder(app, SNX_USER_CACHE, false)};
     size_t size = sizeof *app->space;
     char* at;
     int i;
@@ -3532,8 +3545,8 @@ static void share_log(App* app) {
 #else
     folder = app->cwd;
 #endif
-#ifdef SNX_XDG
-    if (installed(app)) state = snx_user_dir(SNX_USER_STATE);
+#ifndef SDL_PLATFORM_ANDROID
+    if (app->data_dir && snx_app_dir(app->data_dir)) state = snx_app_kind_dir(app->data_dir, SNX_USER_STATE);
     if (state && snx_mkdirs(state)) {
         free(state);
         state = NULL;
@@ -4219,37 +4232,11 @@ static void cleanup(App* app) {
     SDL_DestroyWindow(app->window);
     SDL_Quit();
 }
-#ifdef SNX_XDG
-/* recent.txt and last-run.log: in the state folder's gui/ (~/.local/state/scarletnx/gui/). An older build's in the data
-   folder's stay, the menu saying so (left_behind). Elsewhere SDL_GetPrefPath's folder (under %APPDATA% on Windows) */
-static char* state_folder(void) {
-    char *state = snx_user_dir(SNX_USER_STATE), *folder = state ? snx_path_join(state, "gui") : NULL;
-    if (folder && snx_mkdirs(folder)) {
-        free(folder);
-        folder = NULL;
-    }
-    free(state);
-    return folder;
-}
-#endif
-/* the file of Settings picks: the global one, every game's (game NULL), in the config folder (XDG) or the menu's own;
-   a game's own, games/<game>.ini there, is to come. See settings.h for which a run takes first */
-static char* settings_path(const App* app, const char* game) {
-#ifdef SNX_XDG
-    char* folder = snx_user_dir(SNX_USER_CONFIG);
-#else
-    char* folder = app->recent_file ? snx_dirname(app->recent_file) : NULL;
-#endif
-    char* path = !folder ? NULL
-                 : game  ? snx_format("%s/games/%s.ini", folder, game)
-                         : snx_path_join(folder, "settings.ini");
-    (void)app;
-    free(folder);
-    return path;
-}
+/* the settings, its picks and its game folders in a file each */
+static char* settings_path(const char* config) { return config ? snx_path_join(config, "settings.ini") : NULL; }
 int snx_gui_main(const char* self) {
     App app;
-    char* prefs;
+    char *prefs, *config;
     if (!initialize(&app, self)) {
         fprintf(stderr, "scarletnx: %s\n", SDL_GetError());
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", SDL_GetError(), app.window);
@@ -4257,26 +4244,18 @@ int snx_gui_main(const char* self) {
         return 1;
     }
     /* the menu's own files, opened here, not in initialize(), so the tests keep their own */
-#ifdef SNX_XDG
-    prefs = state_folder();
-#else
-    {
-        char* sdl = SDL_GetPrefPath("scarletnx", "gui");
-        prefs = sdl ? snx_strdup(sdl) : NULL;
-        SDL_free(sdl);
-    }
-#endif
+    prefs = menu_folder(&app, SNX_USER_STATE, true);
+    config = menu_folder(&app, SNX_USER_CONFIG, true);
     if (prefs) recent_open(&app, snx_path_join(prefs, "recent.txt"));
     if (prefs) app.run_log = snx_path_join(prefs, "last-run.log");
-    app.settings_file = settings_path(&app, NULL);
+    app.settings_file = settings_path(config);
     if (app.settings_file) {
-        char* config = snx_dirname(app.settings_file);
-        app.folders_file = config ? snx_path_join(config, "folders.txt") : NULL;
-        app.app_file = config ? snx_path_join(config, "app.ini") : NULL;
-        free(config);
+        app.folders_file = snx_path_join(config, "folders.txt");
+        app.app_file = snx_path_join(config, "app.ini");
         folders_load(&app);
         app_load(&app);
     }
+    free(config);
     app.games_stamp = games_stamp(&app);
     space_start(&app); /* the footer's disk */
     free(prefs);

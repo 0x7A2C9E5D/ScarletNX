@@ -31,7 +31,7 @@ static void usage(void) {
          "  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game\n"
          "  --repo / --build-dir   Override this build's checkout / build directory\n"
-         "                         (without its checkout: a games/ folder's beside the\n"
+         "                         (without its checkout: a .scarletnx folder beside the\n"
          "                         AppImage or the program, else the user's data folder,\n"
 #ifdef _WIN32
          "                         %APPDATA%\\scarletnx)");

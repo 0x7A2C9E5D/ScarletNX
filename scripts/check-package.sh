@@ -26,8 +26,9 @@ esac
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work"
-# An installed copy keeps games/ and prod.keys in the user's data folder, wherever it was started from, and on Linux a
-# game's settings, log and caches (work/ too) in the XDG config, state and cache folders: point them into this run's
+# An installed copy keeps games/ and prod.keys in the user's data folder, wherever it was started from, and a game's
+# settings, log and caches (work/ too) in the XDG config, state and cache folders on Linux, in config/, state/ and
+# cache/ of the data folder elsewhere: point them into this run's
 export XDG_DATA_HOME="$work/data" XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" XDG_CACHE_HOME="$work/cache"
 data=$XDG_DATA_HOME/scarletnx
 config=$XDG_CONFIG_HOME/scarletnx/games
@@ -35,8 +36,8 @@ state=$XDG_STATE_HOME/scarletnx/games
 if [ -n "$exe" ]; then
     APPDATA=$(cygpath -w "$work/data")
     export APPDATA
-    config=$data/games
-    state=$data/games
+    config=$data/config/games
+    state=$data/state/games
 fi
 
 failed=0
@@ -87,7 +88,7 @@ if [ "$status" -eq 0 ] && [ -f "$game/Smoke$exe" ] && [ -f "$game/Smoke.abi" ]; 
 else
     fail "scarletnx -r smoke.nro exited $status, without $game/Smoke$exe and its .abi" "$out"
 fi
-if [ -f "$config/Smoke/Smoke.ini" ] && { [ "$config" = "$data/games" ] || [ ! -e "$game/Smoke.ini" ]; }; then
+if [ -f "$config/Smoke/Smoke.ini" ] && [ ! -e "$game/Smoke.ini" ]; then
     pass "its settings are $config/Smoke/Smoke.ini"
 else
     fail "scarletnx -r smoke.nro did not write its settings in $config/Smoke only" "$out"
@@ -102,8 +103,7 @@ if [ -f "$game/Smoke$exe" ]; then
     else
         fail "$game/Smoke$exe exited $status before the game's banner" "$out"
     fi
-    if grep -q 'ScarletNX - Smoke' "$state/Smoke/Smoke.log" 2>/dev/null &&
-        { [ "$state" = "$data/games" ] || [ ! -e "$game/Smoke.log" ]; }; then
+    if grep -q 'ScarletNX - Smoke' "$state/Smoke/Smoke.log" 2>/dev/null && [ ! -e "$game/Smoke.log" ]; then
         pass "its log is $state/Smoke/Smoke.log"
     else
         fail "the game did not log in $state/Smoke only" "$out"
