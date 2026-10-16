@@ -86,6 +86,8 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
                 menu->gdbstub = !menu->gdbstub;
             else if (menu->selected == GUI_THEME)
                 menu->theme_next = 1;
+            else if (menu->selected == GUI_THEME_EDIT)
+                menu->theme_edit = 1;
             else if (menu->selected == GUI_TEXT)
                 menu->text_size = (menu->text_size + 1) % (GUI_TEXT_MAX + 1);
             else if (menu->selected == GUI_LOG)
@@ -115,6 +117,18 @@ bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
         default: return false;
     }
 }
+void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_bytes, double cpu_percent, int cores) {
+    double mb = (double)memory_bytes / 1048576, n = cores > 0 ? cores : 1, used = cpu_percent / 100;
+    if (!available) {
+        snprintf(out, size, "GUI + children: resource usage unavailable");
+        return;
+    }
+    used = used < 0 ? 0 : used > n ? n : used; /* a sample taken over a little more than its interval */
+    if (mb < 1024)
+        snprintf(out, size, "GUI + children: RAM %.0f MB  CPU %.0f%% (%.1f cores)", mb, used / n * 100, used);
+    else
+        snprintf(out, size, "GUI + children: RAM %.1f GB  CPU %.0f%% (%.1f cores)", mb / 1024, used / n * 100, used);
+}
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
         case GUI_FULLSCREEN:
@@ -130,6 +144,7 @@ const char* gui_setting_description(const GuiMenu* menu) {
                                       : "Program was not compiled with libgccjit";
         case GUI_GDBSTUB: return "Enables gdbstub on port 1234";
         case GUI_THEME: return "Built-in themes, then each themes/<name>/theme.ini";
+        case GUI_THEME_EDIT: return "This theme's keys with a preview, saved as themes/<name>/theme.ini";
         case GUI_TEXT: return "Bigger letters scroll the menu. Auto fits the screen";
         case GUI_LOG:
 #ifdef __ANDROID__
