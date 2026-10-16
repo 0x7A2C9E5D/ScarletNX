@@ -59,11 +59,15 @@ static bool playable(const char* directory, char* name, int kinds) {
     }
     if (!(kinds & GUI_GAMES_RUN)) return false;
 #ifdef __ANDROID__
-    if (suffix(name, "_code.so")) {
-        name[strlen(name) - 8] = 0;
-        return true;
+    { /* a game's code or a dump, a file: a folder named so is neither */
+        bool code = suffix(name, "_code.so");
+        if (!code && !gui_is_dump(name)) return false;
+        path = snx_path_join(directory, name);
+        listed = path && snx_is_file(path);
+        free(path);
+        if (listed && code) name[strlen(name) - 8] = 0;
+        return listed;
     }
-    return gui_is_dump(name);
 #else
 #ifdef _WIN32
     if (!suffix(name, ".exe")) return false;
