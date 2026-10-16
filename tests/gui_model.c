@@ -9,34 +9,40 @@
 
 int main(void) {
     GuiMenu menu = {0};
-    GuiMenu themed, ring;
+    GuiMenu ring;
     GuiConfirm confirm = {0};
+    /* no games: Games is hidden, and the ring goes past it */
+    menu.selected = GUI_SWITCH;
     gui_menu_key(&menu, GUI_LEFT);
     assert(menu.selected == GUI_EXIT);
     gui_menu_key(&menu, GUI_RIGHT);
     assert(menu.selected == GUI_SWITCH && !menu.activated);
+    /* a load opens its screen at once; ESC goes back to the menu, on it */
     gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.view == GUI_LOAD_OPTIONS && !menu.running);
-    assert(menu.activated && menu.active == GUI_SWITCH && menu.focus_load && !menu.load_activated);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.view == GUI_LOAD_DROP && menu.load_activated && menu.load_active == GUI_LOAD_DRAG);
+    assert(menu.view == GUI_LOAD_DROP && menu.activated && menu.active == GUI_SWITCH && !menu.running);
     gui_menu_key(&menu, GUI_CANCEL);
-    assert(menu.view == GUI_LOAD_OPTIONS);
-    gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_SWITCH && menu.load_selected == GUI_LOAD_DIRECTORY);
+    assert(menu.view == GUI_LOAD_NONE && menu.selected == GUI_SWITCH);
+    /* with games, Games comes first and opens their browser, which takes the keys */
+    menu.games = true;
+    gui_menu_key(&menu, GUI_UP);
+    assert(menu.selected == GUI_GAMES);
+    assert(!strcmp(gui_setting_description(&menu), "The games of games/ and of the folders added in Settings > App"));
     gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.view == GUI_LOAD_GAMES);
-    menu.view = GUI_LOAD_OPTIONS; /* Back from the browser */
-    gui_menu_key(&menu, GUI_CANCEL);
-    assert(menu.view == GUI_LOAD_NONE);
+    assert(menu.view == GUI_LOAD_GAMES && menu.active == GUI_GAMES);
+    assert(gui_menu_key(&menu, GUI_DOWN) == GUI_MENU_STAY && menu.selected == GUI_GAMES);
+    menu.view = GUI_LOAD_NONE; /* Back from the browser */
+    gui_menu_key(&menu, GUI_UP);
+    assert(menu.selected == GUI_EXIT);
     gui_menu_key(&menu, GUI_DOWN);
-    gui_menu_key(&menu, GUI_RIGHT);
+    assert(menu.selected == GUI_GAMES);
+    /* the games gone while Games had the focus: the first load takes it */
+    menu.games = false;
+    gui_menu_key(&menu, GUI_DOWN);
+    assert(menu.selected == GUI_LINUX);
+    gui_menu_key(&menu, GUI_DOWN);
     assert(menu.selected == GUI_3DS);
     gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.active == GUI_3DS && menu.view == GUI_LOAD_OPTIONS);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.view == GUI_LOAD_DROP && menu.active == GUI_3DS);
-    gui_menu_key(&menu, GUI_CANCEL);
+    assert(menu.active == GUI_3DS && menu.view == GUI_LOAD_DROP);
     gui_menu_key(&menu, GUI_CANCEL);
     gui_menu_key(&menu, GUI_RIGHT);
     assert(menu.selected == GUI_KEYS);
@@ -49,44 +55,28 @@ int main(void) {
     assert(menu.view == GUI_LOAD_NONE && !menu.quit);
     gui_menu_key(&menu, GUI_RIGHT);
     assert(menu.selected == GUI_SETTINGS);
-    /* Settings opens the screen of the game's settings and the launcher's (settings.h, tests/gui_settings.c) */
+    /* Settings opens the screens of the game's settings, the launcher's and its App (settings.h, gui_settings.c) */
     assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_SETTINGS && menu.active == GUI_SETTINGS);
-    assert(menu.view == GUI_LOAD_NONE &&
-           !strcmp(gui_setting_description(&menu), "The game's .ini settings and the launcher's, for the next runs"));
+    assert(menu.view == GUI_LOAD_NONE && strstr(gui_setting_description(&menu), "its theme"));
     menu.running = true;
     assert(gui_menu_key(&menu, GUI_DOWN) == GUI_MENU_STAY && menu.selected == GUI_SETTINGS);
     assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_STAY);
     menu.running = false;
-    gui_menu_key(&menu, GUI_DOWN);
-    assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_THEME && menu.selected == GUI_THEME && !menu.quit);
-    assert(gui_menu_key(&menu, GUI_DOWN) == GUI_MENU_STAY);
-    assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_EDITOR && menu.selected == GUI_THEME_EDIT);
-    assert(menu.view == GUI_LOAD_NONE);
-    /* Text size goes round 1x to the largest, then back to fitting the screen */
-    gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_TEXT && !menu.text_size);
-    for (int size = 1; size <= GUI_TEXT_MAX; ++size) {
-        gui_menu_key(&menu, GUI_SELECT);
-        assert(menu.text_size == size);
-    }
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(!menu.text_size && !menu.quit);
     gui_menu_key(&menu, GUI_DOWN);
     assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_LOG && menu.selected == GUI_LOG && !menu.quit);
     gui_menu_key(&menu, GUI_DOWN);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.quit);
 
+    /* a load's screen keeps the load a picked file goes to while the focus moves (a phone's menu shows under it) */
     menu = (GuiMenu){0};
-    gui_menu_key(&menu, GUI_SELECT);
-    menu.selected = GUI_LINUX; /* Mouse focus outside the open submenu. */
-    menu.focus_load = false;
+    gui_menu_key(&menu, GUI_SELECT); /* Games hidden: the first load */
+    assert(menu.active == GUI_SWITCH && menu.view == GUI_LOAD_DROP);
+    menu.selected = GUI_LINUX;
     gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_3DS && menu.active == GUI_SWITCH && menu.view == GUI_LOAD_OPTIONS);
-    gui_menu_key(&menu, GUI_DOWN);
-    assert(menu.selected == GUI_KEYS && menu.active == GUI_SWITCH);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.active == GUI_KEYS && menu.view == GUI_LOAD_KEYS);
+    assert(menu.selected == GUI_3DS && menu.active == GUI_SWITCH && menu.view == GUI_LOAD_DROP);
+    gui_menu_key(&menu, GUI_CANCEL);
+    assert(menu.view == GUI_LOAD_NONE && menu.selected == GUI_SWITCH);
 
     /* the footer's use, as a player reads it: MB under a GB, the CPU a share of every core, never over 100% */
     {
@@ -218,15 +208,10 @@ int main(void) {
     path = gui_document_path("C:\\Games\\a.nro"); /* Windows' */
     assert(path && !strcmp(path, "C:\\Games\\a.nro"));
     free(path);
-    /* the theme item asks the GUI for the next theme */
-    memset(&themed, 0, sizeof themed);
-    themed.selected = GUI_THEME;
-    assert(gui_menu_key(&themed, GUI_SELECT) == GUI_MENU_THEME && themed.view == GUI_LOAD_NONE && !themed.quit);
-    assert(strstr(gui_setting_description(&themed), "themes/"));
-
-    /* two recent games and the items make one ring; selecting a game asks the GUI to run it, closing a submenu */
+    /* two recent games and the items make one ring; selecting a game asks the GUI to run it */
     memset(&ring, 0, sizeof ring);
     ring.recent = 2;
+    ring.selected = GUI_SWITCH;
     gui_menu_key(&ring, GUI_UP);
     assert(ring.recent_focus == 2 && ring.selected == GUI_SWITCH);
     gui_menu_key(&ring, GUI_LEFT);
@@ -239,12 +224,18 @@ int main(void) {
     assert(ring.recent_focus == 2);
     gui_menu_key(&ring, GUI_DOWN);
     assert(!ring.recent_focus && ring.selected == GUI_SWITCH);
+    ring.games = true; /* with games, the recent rows lead to Games */
     ring.recent_focus = 2;
-    ring.view = GUI_LOAD_OPTIONS;
+    gui_menu_key(&ring, GUI_DOWN);
+    assert(!ring.recent_focus && ring.selected == GUI_GAMES);
+    gui_menu_key(&ring, GUI_UP);
+    assert(ring.recent_focus == 2);
+    ring.view = GUI_LOAD_DROP;
     assert(gui_menu_key(&ring, GUI_SELECT) == GUI_MENU_RECENT && ring.recent_focus == 2);
-    assert(ring.view == GUI_LOAD_NONE && !ring.activated && !ring.focus_load);
+    assert(ring.view == GUI_LOAD_NONE && !ring.activated);
     ring.recent = 0;
     ring.recent_focus = 0;
+    ring.games = false;
     ring.selected = GUI_SWITCH;
     gui_menu_key(&ring, GUI_UP); /* none: the items alone, as before */
     assert(ring.selected == GUI_EXIT && !ring.recent_focus);

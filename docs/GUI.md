@@ -20,27 +20,24 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
 - A list with rows out of sight (the menu with big letters, `games/`'s pages, the Settings, the theme
   editor) shows an arrow in its left margin, up on its first row and down on its last, in the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it.
+- The menu, top to bottom: **Recent games**, **Games**, the three loads, **Setup device keys**,
+  **Settings**, **Share log** and **Exit**.
 - Space, Enter or a left click explicitly activates an item, marking it bright
   pink. Activation is tracked separately from hover/focus, so the activated item
   stays pink while another item is hovered in yellow. Mouse controls also work
-  on load sub-options, browser entries and Back.
+  on browser entries and Back.
 - A finger taps an item anywhere on its row, as a click does on its label; a swipe across
   turns the pages of `games/`; a tap on a finished run returns to the menu, and one on a
   running run's ESC line aborts it. Android's back button is ESC. On a screen packed with
   pixels (a phone) the text takes the display's own scale, as far as the menu still fits.
-- Moving outside a submenu (including over another main item) leaves it open
-  and anchored to its activated parent. ESC goes back; explicitly activating a
-  different main item replaces/closes the submenu.
-- Selecting **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF** or **Load 3DS CIA** keeps that item
-  visible and opens two selectable options underneath it: **Select a file**
-  and **Select file from games/ instead**.
-- **Select a file** opens a screen as the keys': a click on its blinking **[ Pick or drop a
-  file ]**, or Enter, opens the system's file picker (on Linux the desktop's, else zenity's).
-  Dropping a file on the window and Ctrl+V with a path work too. ESC returns to the two
-  options, and another ESC to the main menu. On Android the option stays in the menu, and a
-  second tap on it opens the picker.
-- **Load 3DS CIA** uses `scarletnx-3ds`. Its `games/` browser lists CIA inputs,
-  not host executables. The driver extracts supported decrypted application CIAs,
+- **Games (N games)** shows only when `games/` or a folder of Settings > App > Game folders
+  holds a game, and opens their browser: the games ready to run (a recompiled game runs
+  directly), the dumps to prepare on Android, and CIA files, which go to the 3DS driver.
+- **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF** and **Load 3DS CIA** open a screen as the
+  keys': a click on its blinking **[ Pick or drop a file ]**, or Enter, opens the system's file
+  picker (on Linux the desktop's, else zenity's). Dropping a file on the window and Ctrl+V with
+  a path work too. ESC returns to the menu. On Android the picker opens at once.
+- **Load 3DS CIA** uses `scarletnx-3ds`. The driver extracts supported decrypted application CIAs,
   then returns an explicit error because ARM11 AOT/execution is still pending.
   Existing extraction directories are refused rather than treated as cache hits.
   See [3DS port](3DS.md) for limits and extract-only usage.
@@ -78,16 +75,16 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   reaches the Linux or the 3DS driver. Its last line says what ScarletNX's folders take (games/,
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
   the menu's own) and what is left on that disk.
-- **Theme** switches to the next theme: the built-in Default and YoRHa, then each
-  folder of `themes/` (see [Themes](#themes)). It lasts for the session.
-- **Theme editor** edits the current theme: a row per `theme.ini` key, and beside them a
+- Settings > App's **Theme** switches to the next theme, or the one before: the built-in Default
+  and YoRHa, then each folder of `themes/` (see [Themes](#themes)). It lasts for the session.
+- Settings > App's **Theme editor** edits the current theme: a row per `theme.ini` key, and beside them a
   preview of the menu or a run (Tab switches). Left/Right change a word, a switch or a
   number, Enter types a colour, a text or a number.
   Save (Ctrl+S) writes `themes/<folder>/theme.ini` in the data folder and switches to it;
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
-- **Text size** steps the menu's letters through Auto (fit the screen) and four sizes.
-  Bigger letters scroll the menu.
+- Settings > App's **Text size** steps the menu's letters through Auto (fit the screen) and four
+  sizes. Bigger letters scroll the menu.
 - **Share log** saves the last run's output and game log to `scarletnx.log`. On the
   desktop it goes in the working folder with its path copied. On Android it goes to
   `/sdcard/ScarletNX/` and is shared.
@@ -119,32 +116,30 @@ are not evaluated. Local `file://` text drops are decoded, but lists and remote 
 authorities are rejected. The working directory is not changed and is shown at the
 bottom of the window. See [GNUABI](GNUABI.md) for supported Linux ELF applications.
 
-## Selecting an executable from games/
+## Games: the games of games/ and the player's folders
 
-**Select file from games/ instead** replaces the menu and old output with a file
-list. It reads the `games/` of the folder the driver works in, which the menu passes
-it as `--repo`: the checkout of a build tree, else the folder of an AppImage (or of the
-GUI) that has a `games/` beside it, else the user's data folder (docs/USAGE.md). Each entry is displayed by basename, sorted
-alphabetically. Only immediate executable files are listed (execute permission
-on UNIX, `.exe` on Windows). Hidden files, shared libraries and directories are
-excluded. For **Load 3DS CIA**, only immediate non-hidden `.cia` files are listed
-(case-insensitive); they do not need execute permission, and directories are
-excluded. The list is refreshed each time it is opened.
+**Games** replaces the menu and old output with a file list. It reads the `games/` of the
+folder the driver works in, which the menu passes it as `--repo`: the checkout of a build tree,
+else the folder of an AppImage (or of the GUI) that has a `games/` beside it, else the user's
+data folder (docs/USAGE.md), then each folder of Settings > App > Game folders. Each entry is
+displayed by basename, sorted alphabetically in each folder. Only immediate files are listed:
+executables (execute permission on UNIX, `.exe` on Windows) and `.cia` files (case-insensitive,
+no execute permission needed), which run with the 3DS driver. Hidden files, shared libraries and
+directories are excluded. The list is refreshed each time it is opened; a folder that cannot be
+read is named and the others still listed.
 
 - **Back [ESC]** is the first selectable item on every page. Enter/Space on it, or
-  ESC anywhere in the browser, returns to the two load options.
+  ESC anywhere in the browser, returns to the menu, on Games.
 - Up/Down select Back or a file on the current page. Enter/Space opens a file.
 - Left/Right and PgUp/PgDown go to the previous/next page. The page number and
   total file count are shown. Paging stops at the first and last pages.
 - Resizing adjusts the page size while keeping the selected file visible.
 - Empty or missing directories show a diagnostic and still provide Back.
 
-For the Switch selection these are already-prepared native game launchers, so
-selecting one runs it directly with the Settings rather than trying to extract it as a dump. For the Linux
-selection, the selected file is passed to `scarletnx-gnuabi` as an ARM64 ELF.
-Output capture, resource accounting and the return to the main menu work the same
-way for both input methods. For the 3DS selection, the browser passes a CIA input
-to `scarletnx-3ds`; it never executes it directly.
+A recompiled game is an already-prepared native launcher, so selecting one runs it directly with
+the Settings rather than trying to extract it as a dump. A CIA goes to `scarletnx-3ds`, which is
+never executed on it directly. Output capture, resource accounting and the return to the main menu
+work as for a file picked by a load.
 
 ## Output and resource use
 
@@ -356,8 +351,9 @@ directories, pagination, resizing, Back/ESC and launching selected files.
 Key setup tests cover installation, replacement, invalid drops, failed writes,
 self-copy safety, cancellation, and the bright-red overwrite warning.
 Settings tests cover the runtime's list read into rows, picks, the options each combination
-passes, and the screen; menu tests cover mouse hover versus explicit activation, persistent
-submenus, yellow/pink highlighting and footer descriptions. Theme tests cover the built-ins, a `theme.ini` over its base
+passes, and the screens of its groups and App; menu tests cover mouse hover versus explicit
+activation, Games shown only with games, the recent games' show-more row,
+yellow/pink highlighting and footer descriptions. Theme tests cover the built-ins, a `theme.ini` over its base
 (unreadable values and unknown keys included), the `themes/` folders listed, the
 compiling and loading screens, and the YoRHa bars and band in the real renderer. Step
 tests cover each driver and runner line, the other lines kept under their step, lines

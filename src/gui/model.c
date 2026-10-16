@@ -7,37 +7,24 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* the item before or after one, round the menu, past Games while it is hidden */
+static int step_item(const GuiMenu* menu, int item, int step) {
+    do item = (item + GUI_ITEM_COUNT + step) % GUI_ITEM_COUNT;
+    while (item == GUI_GAMES && !menu->games);
+    return item;
+}
 GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
+    int first = menu->games ? GUI_GAMES : GUI_SWITCH;
     if (menu->running || menu->view == GUI_LOAD_GAMES) return GUI_MENU_STAY; /* the browser owns its keys */
-    if (menu->view == GUI_LOAD_KEYS) {
-        if (key == GUI_CANCEL) menu->view = GUI_LOAD_NONE;
+    if (menu->view != GUI_LOAD_NONE && key == GUI_CANCEL) {
+        menu->view = GUI_LOAD_NONE;
+        menu->selected = menu->active;
         return GUI_MENU_STAY;
     }
-    if (menu->view == GUI_LOAD_OPTIONS || menu->view == GUI_LOAD_DROP) {
-        if (key == GUI_CANCEL) {
-            menu->view = menu->view == GUI_LOAD_DROP ? GUI_LOAD_OPTIONS : GUI_LOAD_NONE;
-            menu->selected = menu->active;
-            menu->focus_load = menu->view == GUI_LOAD_OPTIONS;
-            menu->load_activated = false;
-            return GUI_MENU_STAY;
-        }
-        if (menu->focus_load) {
-            if (key == GUI_UP || key == GUI_DOWN || key == GUI_LEFT || key == GUI_RIGHT)
-                menu->load_selected ^= 1;
-            else if (key == GUI_SELECT) {
-                menu->selected = menu->active;
-                menu->load_active = menu->load_selected;
-                menu->load_activated = true;
-                menu->view = menu->load_selected == GUI_LOAD_DRAG ? GUI_LOAD_DROP : GUI_LOAD_GAMES;
-            }
-            return GUI_MENU_STAY;
-        }
-        /* Main-menu focus may move while the submenu stays anchored to active.
-           Only explicit activation below replaces/closes that submenu. */
-    } else {
-        menu->focus_load = false;
-    }
-    /* the recent games and the items are one ring: the last game leads to the first item, Exit to the first game */
+    if (menu->view == GUI_LOAD_KEYS) return GUI_MENU_STAY;
+    if (menu->selected == GUI_GAMES && !menu->games) menu->selected = GUI_SWITCH; /* the games are gone */
+    /* the recent games and the items are one ring: the last recent row leads to the first item, Exit to the first
+       game */
     switch (key) {
         case GUI_UP:
         case GUI_LEFT:
@@ -45,11 +32,11 @@ GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
                 menu->recent_focus--;
             else if (menu->recent_focus) {
                 menu->recent_focus = 0;
-                menu->selected = GUI_ITEM_COUNT - 1;
-            } else if (menu->selected == 0 && menu->recent)
+                menu->selected = GUI_EXIT;
+            } else if (menu->selected == first && menu->recent)
                 menu->recent_focus = menu->recent;
             else
-                menu->selected = (menu->selected + GUI_ITEM_COUNT - 1) % GUI_ITEM_COUNT;
+                menu->selected = step_item(menu, menu->selected, -1);
             break;
         case GUI_DOWN:
         case GUI_RIGHT:
@@ -57,40 +44,30 @@ GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
                 menu->recent_focus++;
             else if (menu->recent_focus) {
                 menu->recent_focus = 0;
-                menu->selected = 0;
-            } else if (menu->selected == GUI_ITEM_COUNT - 1 && menu->recent)
+                menu->selected = first;
+            } else if (menu->selected == GUI_EXIT && menu->recent)
                 menu->recent_focus = 1;
             else
-                menu->selected = (menu->selected + 1) % GUI_ITEM_COUNT;
+                menu->selected = step_item(menu, menu->selected, 1);
             break;
         case GUI_SELECT:
             if (menu->recent_focus) {
                 menu->view = GUI_LOAD_NONE;
-                menu->focus_load = menu->load_activated = false;
                 return GUI_MENU_RECENT;
             }
             menu->active = menu->selected;
             menu->activated = true;
-            menu->load_activated = false;
             menu->view = GUI_LOAD_NONE;
-            if (menu->selected == GUI_SETTINGS)
-                return GUI_MENU_SETTINGS;
-            else if (menu->selected == GUI_THEME)
-                return GUI_MENU_THEME;
-            else if (menu->selected == GUI_THEME_EDIT)
-                return GUI_MENU_EDITOR;
-            else if (menu->selected == GUI_TEXT)
-                menu->text_size = (menu->text_size + 1) % (GUI_TEXT_MAX + 1);
-            else if (menu->selected == GUI_LOG)
-                return GUI_MENU_LOG;
-            else if (menu->selected == GUI_EXIT)
-                menu->quit = true;
-            else if (menu->selected == GUI_KEYS)
-                menu->view = GUI_LOAD_KEYS;
-            else {
-                menu->view = GUI_LOAD_OPTIONS;
-                menu->load_selected = GUI_LOAD_DRAG;
-                menu->focus_load = true;
+            switch (menu->selected) {
+                case GUI_GAMES: menu->view = GUI_LOAD_GAMES; break;
+                case GUI_SWITCH:
+                case GUI_LINUX:
+                case GUI_3DS: menu->view = GUI_LOAD_DROP; break;
+                case GUI_KEYS: menu->view = GUI_LOAD_KEYS; break;
+                case GUI_SETTINGS: return GUI_MENU_SETTINGS;
+                case GUI_LOG: return GUI_MENU_LOG;
+                case GUI_EXIT: menu->quit = true; break;
+                default: break;
             }
             break;
         default: break;
@@ -129,10 +106,8 @@ void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_byte
 }
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
-        case GUI_SETTINGS: return "The game's .ini settings and the launcher's, for the next runs";
-        case GUI_THEME: return "Built-in themes, then each themes/<name>/theme.ini";
-        case GUI_THEME_EDIT: return "This theme's keys with a preview, saved as themes/<name>/theme.ini";
-        case GUI_TEXT: return "Bigger letters scroll the menu. Auto fits the screen";
+        case GUI_GAMES: return "The games of games/ and of the folders added in Settings > App";
+        case GUI_SETTINGS: return "The game's .ini settings, the launcher's for the next runs, and its theme";
         case GUI_LOG:
 #ifdef __ANDROID__
             return "Saves the last run's output and game log to /sdcard/ScarletNX/scarletnx.log, then shares it";

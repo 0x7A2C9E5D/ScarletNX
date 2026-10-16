@@ -24,4 +24,6 @@ void gui_games_free(GuiGames* games);
 uint64_t gui_tree_size(const char* path, const int* stop);
 /* An NRO, XCI or NSP (or a decrypted one) by its name: a dump the driver prepares, not a game ready to run */
 bool gui_is_dump(const char* name);
+/* A 3DS CIA by its name */
+bool gui_is_cia(const char* name);
 #endif

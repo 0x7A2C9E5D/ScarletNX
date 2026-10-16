@@ -17,6 +17,7 @@ static bool suffix(const char* name, const char* extension) {
         if (tolower((unsigned char)name[n - e + i]) != extension[i]) return false;
     return true;
 }
+bool gui_is_cia(const char* name) { return suffix(name, ".cia"); }
 bool gui_is_dump(const char* name) {
     return suffix(name, ".nro") || suffix(name, ".xci") || suffix(name, ".nsp") || suffix(name, ".dxci") ||
            suffix(name, ".dnsp");

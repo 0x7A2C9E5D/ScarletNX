@@ -7,43 +7,36 @@
 #include <stdint.h>
 #include "font.h" /* gui_glyph */
 
+/* the menu's items, in order: Games, the loads, the keys, Settings and Share log, Exit */
 enum {
+    GUI_GAMES, /* games/ and the player's folders' games: shown only when they hold any */
     GUI_SWITCH,
     GUI_LINUX,
     GUI_3DS,
     GUI_KEYS,
-    GUI_SETTINGS, /* the game's .ini settings and the launcher's own for the runs: settings.h */
-    GUI_THEME,
-    GUI_THEME_EDIT, /* the theme editor: its keys, a preview, and Save */
-    GUI_TEXT,       /* the menu's letters */
-    GUI_LOG,        /* the logs in one file, for a bug report: a phone has no terminal to copy them from */
+    GUI_SETTINGS, /* the game's .ini settings, the launcher's own for the runs and its App: settings.h */
+    GUI_LOG,      /* the logs in one file, for a bug report: a phone has no terminal to copy them from */
     GUI_EXIT,
     GUI_ITEM_COUNT
 };
 typedef enum { GUI_UP, GUI_DOWN, GUI_LEFT, GUI_RIGHT, GUI_SELECT, GUI_CANCEL, GUI_PAGE_UP, GUI_PAGE_DOWN } GuiKey;
 #define GUI_TEXT_MAX 4
-typedef enum { GUI_LOAD_NONE, GUI_LOAD_OPTIONS, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS } GuiLoadView;
-enum { GUI_LOAD_DRAG, GUI_LOAD_DIRECTORY };
+/* the screen over the menu: none, a load's file to pick, the games' browser, the keys' */
+typedef enum { GUI_LOAD_NONE, GUI_LOAD_DROP, GUI_LOAD_GAMES, GUI_LOAD_KEYS } GuiLoadView;
 typedef struct {
-    int selected, load_selected; /* keyboard/mouse focus, not activation */
-    int active, load_active;     /* last explicitly activated items; active owns the submenu */
-    bool activated, load_activated, focus_load;
+    int selected; /* keyboard/mouse focus, not activation */
+    int active;   /* the last explicitly activated item: the load a picked file goes to */
+    bool activated;
+    bool games; /* Games shows */
     GuiLoadView view;
     bool running, quit;
     int text_size; /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen */
     /* the recent games above the items: how many, and the focused one + 1 (0: an item has the focus) */
     int recent, recent_focus;
 } GuiMenu;
-/* what a key on the menu asks of the GUI: nothing more, the Settings, the next theme, the theme editor, the logs
-   shared, or the focused recent game run */
-typedef enum {
-    GUI_MENU_STAY,
-    GUI_MENU_SETTINGS,
-    GUI_MENU_THEME,
-    GUI_MENU_EDITOR,
-    GUI_MENU_LOG,
-    GUI_MENU_RECENT
-} GuiMenuDo;
+/* what a key on the menu asks of the GUI: nothing more, the Settings, the logs shared, or the focused recent row (a
+   game, or the one that shows the rest) */
+typedef enum { GUI_MENU_STAY, GUI_MENU_SETTINGS, GUI_MENU_LOG, GUI_MENU_RECENT } GuiMenuDo;
 GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key);
 /* The question a running run's abort asks first, or leaving the menu on a computer: shown or not, which one, and the
    choice in focus, the one that stays first */
