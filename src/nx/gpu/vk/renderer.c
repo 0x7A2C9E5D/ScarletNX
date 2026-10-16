@@ -89,6 +89,11 @@ static void vkr_draw_texture(GpuChannel* ch) {
     vk_render_draw_texture(ch);
     vk_unlock();
 }
+/* the active constant buffer set is the drawing channel's: binds from another channel's submission must not leak in */
+static void vkr_cb_sync(const GpuChannel* ch) {
+    memcpy(g_vk_cb, ch->vk_cb, sizeof ch->vk_cb);
+    memcpy(g_vk_cbsize, ch->vk_cbsize, sizeof ch->vk_cbsize);
+}
 static void vkr_clear(GpuChannel* ch, u32 v) {
     vk_lock();
     vk_render_clear(ch, v);
@@ -97,6 +102,7 @@ static void vkr_clear(GpuChannel* ch, u32 v) {
 static void vkr_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 bv, u32 bi, u32 instances) {
     g_draws++;
     vk_lock();
+    vkr_cb_sync(ch);
     vk_render_draw(ch, indexed, topology, first, count, bv, bi, instances);
     vk_unlock();
 }
@@ -105,14 +111,18 @@ static void vkr_cb_bind(GpuChannel* ch, int stage, u32 v) {
     u32* r = ch->r3d;
     u32 idx = (v >> 4) & 31;
     if (stage > 4 || idx >= 18) return;
-    /* the bindings are kept once, not per channel: a second channel drawing in 3D would take the first's. The first
-       time two channels bind is logged */
+    /* the binding is the channel's own: channels drawing in 3D keep theirs apart. The renderer's active set follows
+       the binds as they come, and each draw syncs it from its own channel first (vkr_draw) */
     static GpuChannel* last;
     if (last && last != ch)
-        LOG_LIMIT(1, "vulkan: constant buffers bound from a second GPU channel (bindings are shared)\n");
+        LOG_LIMIT(1, "vulkan: constant buffers bound from a second GPU channel (each keeps its own)\n");
     last = ch;
-    g_vk_cb[stage][idx] = (v & 1) ? ((u64)r[0x8E1] << 32) | r[0x8E2] : 0;
-    g_vk_cbsize[stage][idx] = (v & 1) ? r[0x8E0] : 0;
+    u64 addr = (v & 1) ? ((u64)r[0x8E1] << 32) | r[0x8E2] : 0;
+    u32 size = (v & 1) ? r[0x8E0] : 0;
+    ch->vk_cb[stage][idx] = addr;
+    ch->vk_cbsize[stage][idx] = size;
+    g_vk_cb[stage][idx] = addr;
+    g_vk_cbsize[stage][idx] = size;
 }
 static int vkr_blit(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
                     double sdy) {

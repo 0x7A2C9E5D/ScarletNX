@@ -34,6 +34,10 @@ typedef struct GpuChannel {
     u64 cb_addr;
     u32 cb_n;
     u32 cb_words[256];
+    /* the renderer's mirror of the channel's constant buffer bindings (3D CB bind methods): per channel, since
+       channels bind their own. The renderer keeps one active set itself, synced from here on each draw */
+    u64 vk_cb[5][18];
+    u32 vk_cbsize[5][18];
     /* SetRenderEnable (3D 0x554-0x556) or its override (0x651) turned drawing off: draws and clears are skipped */
     int render_off;
 } GpuChannel;
