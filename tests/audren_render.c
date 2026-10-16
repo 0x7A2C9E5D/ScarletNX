@@ -33,6 +33,7 @@ enum {
     SNX_ART_EFFECTS = 2,
     SNX_ART_SINKS = 3,
     SNX_ART_MIXES = 2,
+    SNX_ART_POOLS = SNX_ART_EFFECTS + 4 * SNX_ART_VOICES,
     SNX_ART_FINAL = 0,
     SNX_ART_SUBMIX = 1,
     SNX_ART_RING_FRAMES = 40,
@@ -826,11 +827,85 @@ static void reset(void) {
     layout();
 }
 
+/* #222: input sections can hold more entries than the renderer opened. The
+   reply still has the opened counts, including at the revision-9 effect stride. */
+static void update_output_counts(void) {
+    const u32 voices = 128, effects = 68, sinks = 2, pools = effects + voices * 4;
+    const u32 counts[][4] = {{pools, voices, effects, sinks},
+                             {pools + 8, voices, effects, sinks},
+                             {pools, voices + 8, effects, sinks},
+                             {pools, voices, effects + 8, sinks},
+                             {pools, voices, effects, sinks + 8},
+                             {pools + 8, voices + 8, effects + 8, sinks + 8},
+                             {0, 0, 0, 0}};
+    const u32 revisions[] = {4, 5, 9};
+    for (size_t r = 0; r < sizeof revisions / sizeof *revisions; r++) {
+        u32 revn = revisions[r], rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + revn) << 24);
+        u32 effect_stride = revn >= 9 ? 0x90 : 0x10;
+        u32 reply = 0x40 + pools * 0x10 + voices * 0x10 + effects * effect_stride + sinks * 0x20 + 0x10 + 0xB0 +
+                    (revn >= 5 ? 0x10 : 0);
+        if (revn == 9) CHECK(reply == 21456, "reported output size is %u", reply);
+        for (size_t c = 0; c < sizeof counts / sizeof *counts; c++) {
+            u32 params[13] = {48000, 240, 216, 0, voices, sinks, effects};
+            ARState* state = audren_state_new((const u8*)params);
+            CHECK(state != NULL, "no state for output counts");
+            if (!state) continue;
+            state->frames = 42;
+            state->sink[1].last2 = 0x12345678;
+            u32 h[16] = {rev,
+                         0x10,
+                         counts[c][0] * 0x20,
+                         counts[c][1] * 0x170,
+                         voices * 0x70,
+                         counts[c][2] * 0xC0,
+                         0,
+                         counts[c][3] * 0x140};
+            u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[7];
+            h[15] = size;
+            u8* input = calloc(1, size);
+            u8* output = malloc(reply + 32);
+            CHECK(input && output, "no update buffers");
+            if (input && output) {
+                memcpy(input, h, sizeof h);
+                for (u32 i = 0; i < counts[c][0]; i++) w32(input, 0x40 + h[1] + i * 0x20 + 0x10, 4);
+                memset(output, 0xA5, reply + 32);
+                int rc = audren_state_update(state, input, size, output, reply);
+                CHECK(rc == 0, "revision %u, count case %zu: update returned %d", revn, c, rc);
+                if (!rc) {
+                    CHECK(rd32(output + 8) == pools * 0x10, "wrong pool output size");
+                    CHECK(rd32(output + 12) == voices * 0x10, "wrong voice output size");
+                    CHECK(rd32(output + 20) == effects * effect_stride, "wrong effect output size");
+                    CHECK(rd32(output + 28) == sinks * 0x20, "wrong sink output size");
+                    CHECK(rd32(output + 60) == reply, "wrong total output size");
+                    CHECK(rd32(output + 0x40 + (pools - 1) * 0x10) == (counts[c][0] ? 5u : 0u),
+                          "wrong last pool status");
+                    u32 at = 0x40 + pools * 0x10 + voices * 0x10;
+                    CHECK(output[at + (effects - 1) * effect_stride] == (counts[c][2] ? 4u : 0u),
+                          "wrong last effect status");
+                    at += effects * effect_stride;
+                    CHECK(rd32(output + at + 0x20) == (counts[c][3] ? 0x12345678u : 0u), "sink output was misplaced");
+                    if (revn >= 5) CHECK(rd64(output + reply - 0x10) == 42, "frame count was misplaced");
+                }
+                for (u32 i = 0; i < 32; i++) CHECK(output[reply + i] == 0xA5, "output guard byte %u overwritten", i);
+                memset(output, 0xA5, reply + 32);
+                CHECK(audren_state_update(state, input, size, output, reply - 1) == -4, "short output accepted");
+                CHECK(audren_state_update(state, input, size - 1, output, reply) == -41, "short input accepted");
+                for (u32 i = 0; i < reply + 32; i++)
+                    CHECK(output[i] == 0xA5, "rejected update wrote output byte %u", i);
+            }
+            free(output);
+            free(input);
+            audren_state_free(state);
+        }
+    }
+}
+
 int main(void) {
     u32 nch;
     int set;
     g_mem = calloc(1, SNX_ART_G_ARENA);
     if (!g_mem) return 1;
+    update_output_counts();
 
     /* the resampler at a ratio of one: an 11 kHz voice keeps its level at default quality as at high */
     for (u8 q = 0; q < 2; q++) {
@@ -859,7 +934,7 @@ int main(void) {
     CHECK(fabs(r16 - 0.25) < 0.005 && r1k < 0.005, "right channel: 1.6 kHz %.4f, 1 kHz %.4f", r16, r1k);
     u32 woff;
     update();
-    memcpy(&woff, out + 0x40 + 0x10 + SNX_ART_VOICES * 0x10 + SNX_ART_EFFECTS * 0x10 + 0x20, 4);
+    memcpy(&woff, out + 0x40 + SNX_ART_POOLS * 0x10 + SNX_ART_VOICES * 0x10 + SNX_ART_EFFECTS * 0x10 + 0x20, 4);
     CHECK(woff != 0 && woff % (2 * SNX_ART_FRAME * 2) == 0, "write offset %u", woff);
 
     /* the limiter switched off keeps a tone's level; in mode 1 the tone comes out at threshold over the detector:
@@ -892,8 +967,8 @@ int main(void) {
     update();
     u64 played;
     u32 consumed;
-    memcpy(&played, out + 0x40 + 0x10, 8);
-    memcpy(&consumed, out + 0x40 + 0x10 + 8, 4);
+    memcpy(&played, out + 0x40 + SNX_ART_POOLS * 0x10, 8);
+    memcpy(&consumed, out + 0x40 + SNX_ART_POOLS * 0x10 + 8, 4);
     CHECK(played == 480 && consumed == 1, "played %llu, consumed %u", (unsigned long long)played, consumed);
     /* a stop consumes what was queued and starts the count over */
     tone(1, 1000, 0.25, 0, 0, 1.0f);
@@ -901,8 +976,8 @@ int main(void) {
     silence(1);
     frames(2);
     update();
-    memcpy(&played, out + 0x40 + 0x10 + 0x10, 8);
-    memcpy(&consumed, out + 0x40 + 0x10 + 0x10 + 8, 4);
+    memcpy(&played, out + 0x40 + SNX_ART_POOLS * 0x10 + 0x10, 8);
+    memcpy(&consumed, out + 0x40 + SNX_ART_POOLS * 0x10 + 0x10 + 8, 4);
     CHECK(played == 0 && consumed == 1, "after a stop: played %llu, consumed %u", (unsigned long long)played, consumed);
 
     /* the resampler tables made from their windowed sincs, against the console's: phase 0 of default quality's
