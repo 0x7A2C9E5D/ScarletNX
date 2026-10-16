@@ -3,12 +3,10 @@
 # what the backends share: function discovery over NX images, chunk labels, progress lines, the entry table
 add_library(snx_nx_module STATIC ../../loader/module.c ../../loader/codegen_view.c)
 set_target_properties(snx_nx_module PROPERTIES C_STANDARD 90 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
-target_include_directories(snx_nx_module PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../../loader")
 target_compile_options(snx_nx_module PRIVATE -pedantic-errors -Wall -Wextra -Werror=missing-prototypes)
 target_link_libraries(snx_nx_module PUBLIC scarletnx-common)
 add_library(snx_driver STATIC driver.c extract.c recompile.c toolchain.c ../../loader/loader.c)
 set_target_properties(snx_driver PROPERTIES C_STANDARD 90 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
-target_include_directories(snx_driver PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../../loader")
 target_compile_definitions(snx_driver PRIVATE
     SNX_SOURCE_DIR="${CMAKE_SOURCE_DIR}" SNX_BUILD_DIR="${CMAKE_BINARY_DIR}" _CRT_SECURE_NO_WARNINGS
     SNX_NX_ABI_INCLUDE="${CMAKE_SOURCE_DIR}/src/nx/loader"
@@ -26,7 +24,6 @@ add_subdirectory("${CMAKE_SOURCE_DIR}/src/common/cpu/recompiler/llvm" llvm-backe
 # the NX game module through the LLVM backend; C11 for the LLVM-C headers, the driver itself stays C90
 add_library(snx_driver_llvm STATIC ../../loader/module_llvm.c)
 set_target_properties(snx_driver_llvm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
-target_include_directories(snx_driver_llvm PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../../loader")
 target_compile_options(snx_driver_llvm PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 target_link_libraries(snx_driver_llvm PUBLIC snx_llvm snx_nx_module)
 target_link_libraries(snx_driver PUBLIC snx_driver_llvm)
@@ -36,7 +33,6 @@ if(SNX_GCCJIT_FOUND)
     # module_gccjit.c with libgccjit: C11 for its header, linked with the LLVM backend's runtime library
     add_library(snx_driver_gccjit STATIC ../../loader/module_gccjit.c)
     set_target_properties(snx_driver_gccjit PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
-    target_include_directories(snx_driver_gccjit PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../../loader")
     target_compile_definitions(snx_driver_gccjit PRIVATE SNX_WITH_GCCJIT)
     target_compile_options(snx_driver_gccjit PRIVATE -Wall -Wextra -Werror=missing-prototypes)
     target_link_libraries(snx_driver_gccjit PUBLIC snx_jit snx_llvm snx_nx_module)

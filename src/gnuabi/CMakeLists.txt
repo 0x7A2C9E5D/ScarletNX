@@ -6,7 +6,6 @@ add_library(scarletnx-gnuabi STATIC
     filesystem/vfs.c filesystem/devfs/devfs.c filesystem/tmpfs/tmpfs.c filesystem/procfs/procfs.c
     network/socket.c network/poll.c network/etc.c)
 set_target_properties(scarletnx-gnuabi PROPERTIES OUTPUT_NAME scarletnx-gnuabi-runtime C_STANDARD 23 C_STANDARD_REQUIRED ON)
-target_include_directories(scarletnx-gnuabi PUBLIC "${PROJECT_SOURCE_DIR}/src/gnuabi" "${PROJECT_SOURCE_DIR}/src/common")
 # AArch32 execution needs the ARM LLVM block backend. Build it here when the NX
 # runtime (which normally owns it) is not part of this configuration.
 if(NOT TARGET snx_arm_llvm AND NOT SNX_BUILD_NX)
