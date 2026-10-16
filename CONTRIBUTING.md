@@ -7,18 +7,17 @@
 
 ## Game data stays out
 
-Nothing of a game goes into git, an issue, a pull request or a comment. That covers keys, dumps (XCI, NSP, NCA),
-`work/`, `games/` (code, data, saves, logs) and shader or texture dumps. They belong to their owners. `.gitignore`
-lists them, and `.claude/hooks/guard.py` blocks the obvious ways. A commit message, issue or doc may quote addresses,
-symbol names and short disassembly, never extracted files.
+Nothing of a game goes into git, an issue, a pull request or a comment: keys, dumps (XCI, NSP, NCA, CIA), `work/`,
+`games/` and shader or texture dumps. [CLAUDE.md](CLAUDE.md) has the full rule.
 
 ## Build and check
 
-[BUILD.md](docs/BUILD.md) covers the toolchains and presets. Before a pull request, from the checkout root:
+[BUILD.md](docs/BUILD.md) covers the toolchains. Before a pull request, from the checkout root:
 
 ```sh
-cmake --build --preset default
-ctest --test-dir build/default --output-on-failure
+cmake -DCMAKE_BUILD_TYPE=Release -Bbuild -S.
+cmake --build build
+ctest --test-dir build --output-on-failure
 scripts/format.sh --check
 python3 tests/run_filesystem_tree.py --cc clang --sanitize
 ```
@@ -32,15 +31,17 @@ says what was run. [DEVELOPMENT.md](docs/DEVELOPMENT.md) has the run and diagnos
 
 ## Commits
 
-The subject is a bracketed area followed by an imperative sentence. The body says why, and how it was verified.
-From the history (9daf3d5):
+The subject is a bracketed area followed by a lowercase imperative sentence. The body says why, and how it was
+verified. A `Signed-off-by` line (`git commit -s`) is encouraged but not required. For example:
 
 ```
-[tests] Avoid Windows near macro in motion test
+[tests] avoid the Windows near macro in the motion test
 
 Rename the local float comparison helper so the Windows header macro does not corrupt its
 declaration and calls. Verified with x86_64-w64-mingw32-clang using the CI compile flags and
 the hid_motion CTest.
+
+Signed-off-by: Your Name <you@example.org>
 ```
 
 Common areas, from the history: `[gui]`, `[shader]`, `[ci]`, `[runtime]`, `[gpu]`, `[audio]`, `[cmake]`, `[docs]`,
