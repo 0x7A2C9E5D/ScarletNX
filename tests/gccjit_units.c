@@ -11,7 +11,9 @@
 #ifndef _WIN32
 #include <errno.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 #define SNX_UNITS_BASE      0x10000
@@ -160,6 +162,21 @@ int main(void) {
           "a unit whose process dies fails the compile with its name");
     if (!strstr(u.error, "its process")) fprintf(stderr, "error: %s\n", u.error);
     check(no_children(), "no unit process left after one died");
+    /* a failure stops the units still compiling: one fails at once (its object in a folder that doesn't exist), the
+       other would wait for ever to write its object into a FIFO nobody reads; the call ends with the first one's error */
+    {
+        char *fifo = snx_path_join(root, "fifo.o"), *objects[2];
+        check(!mkfifo(fifo, 0600), "a FIFO");
+        objects[0] = snx_path_join(missing, "code_000.o");
+        objects[1] = fifo;
+        alarm(60); /* a unit left running would hang the call: the test ends here instead, failed */
+        check(compile(&codegen, bounds, objects, 2, 2, NULL, &u, &d) && !strncmp(u.error, "libgccjit (code_000)", 20),
+              "a failing unit stops the units still compiling");
+        alarm(0);
+        check(no_children(), "no unit process left after the others were stopped");
+        free(objects[0]);
+        free(fifo);
+    }
 #else
     (void)broken;
 #endif

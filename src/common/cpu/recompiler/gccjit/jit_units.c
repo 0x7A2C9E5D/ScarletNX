@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -108,10 +109,12 @@ static int start(const SnxJitUnits* u, size_t i, Slot* s) {
     if (!s->pid) {
         unlock();
         close(fds[0]);
+        setpgid(0, 0); /* with the compiler driver's processes it starts: stop() ends them all */
         run_unit(u, i, fds[1]);
     }
     e = errno;
     unlock();
+    if (s->pid > 0) setpgid(s->pid, s->pid);
     close(fds[1]);
     if (s->pid < 0) {
         close(fds[0]);
@@ -151,6 +154,13 @@ static int finish(SnxJitUnits* u, Slot* s, char* error, size_t size) {
     return -1;
 }
 
+/* the first failure ends the call: the units still compiling are stopped, and reaped as their pipes close */
+static void stop(const Slot* slots, unsigned jobs) {
+    unsigned k;
+    for (k = 0; k < jobs; ++k)
+        if (slots[k].pid && kill(-slots[k].pid, SIGKILL)) kill(slots[k].pid, SIGKILL);
+}
+
 static int compile_forked(SnxJitUnits* u, unsigned jobs) {
     Slot* slots;
     struct pollfd* polls;
@@ -165,19 +175,20 @@ static int compile_forked(SnxJitUnits* u, unsigned jobs) {
         return -1;
     }
     polls = (struct pollfd*)(slots + jobs);
-    for (;;) {
+    while (running || (next < u->count && !failed)) {
         for (k = 0; k < jobs && next < u->count && !failed; ++k) {
             if (slots[k].pid) continue;
             if (start(u, next, &slots[k])) {
                 snprintf(u->error, sizeof(u->error), "libgccjit (code_%03lu): cannot start a process: %s",
                          (unsigned long)next, strerror(errno));
                 failed = 1;
+                stop(slots, jobs);
             } else {
                 ++next;
                 ++running;
             }
         }
-        if (!running) break;
+        if (!running) continue;
         for (k = 0; k < jobs; ++k) {
             polls[k].fd = slots[k].pid ? slots[k].fd : -1;
             polls[k].events = POLLIN;
@@ -198,8 +209,11 @@ static int compile_forked(SnxJitUnits* u, unsigned jobs) {
             seconds = snx_seconds() - s->start;
             --running;
             if (finish(u, s, error, sizeof(error))) {
-                if (!failed) snprintf(u->error, sizeof(u->error), "%s", error);
-                failed = 1;
+                if (!failed) {
+                    snprintf(u->error, sizeof(u->error), "%s", error);
+                    failed = 1;
+                    stop(slots, jobs);
+                }
             } else if (u->done)
                 u->done(u, unit, ++finished, seconds);
         }
