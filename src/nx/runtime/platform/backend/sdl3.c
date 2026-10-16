@@ -36,8 +36,9 @@ static SDL_Window* g_win;
    a width from one resize from pairing with the height of another */
 static _Atomic u64 g_wsize = 1280 | (720ull << 32);
 static u64 keys_held;
-static u64 g_menu_held; /* buttons held while the menu had the controls (the B that closed it): kept from the game until
-                           they are let go */
+static u64 g_menu_held;      /* keyboard, scripted and on-screen buttons held while the menu had them */
+static u64 g_menu_held_pad0; /* No1's physical pad, tracked separately so a replacement has fresh presses */
+static u64 g_menu_held_extra[SNX_GAMEPADS - 1];
 static int g_fullscreen;
 static void set_fullscreen(int on);
 static int g_shot_req;
@@ -272,6 +273,7 @@ void video_init(const char* title) {
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
     SDL_SetHint(SDL_HINT_PEN_MOUSE_EVENTS, "0");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) fatal("SDL could not start its video: %s", SDL_GetError());
+    gamepad_scan();
     /* SDL subsystem initialization belongs to the main thread, before the guest can open audout sessions. */
     g_audio_ready = SDL_InitSubSystem(SDL_INIT_AUDIO);
     if (!g_audio_ready) WARN("audio: SDL could not start its audio: %s\n", SDL_GetError());
@@ -325,6 +327,15 @@ static const char* HELP = "Controller: A, B, X and Y as their labels say (gamepa
                           "  Q = L   E = R   1 = ZL   3 = ZR   Enter = +   Backspace = -\n\n"
                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
                           "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = quit";
+
+static PadKind gamepad_kind(int type) {
+    switch (type) {
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT: return SNX_PAD_JOY_LEFT;
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT: return SNX_PAD_JOY_RIGHT;
+        case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR: return SNX_PAD_JOY_DUAL;
+        default: return SNX_PAD_FULL_KEY;
+    }
+}
 
 /* keys -> HidNpadButton bits; 40..47 are the stick keys, turned into axes in video_poll. By scancode, the key's
    position: the keycode depends on the layout and on the modifiers, so Shift pressed while 1 was held made its release
@@ -787,29 +798,62 @@ void video_poll(void) {
                    that took the focus: the game's touch from the mouse lifts now (a later release finds it up) */
                 touch_up(&g_touch, g_touch_ids, SNX_TOUCH_MOUSE);
                 break;
+            case SDL_EVENT_JOYSTICK_ADDED: gamepad_detect(e.jdevice.which); break;
             case SDL_EVENT_GAMEPAD_ADDED: gamepad_open(e.gdevice.which); break;
             case SDL_EVENT_GAMEPAD_REMOVED: gamepad_close(e.gdevice.which); break;
         }
     }
     /* the scripted presses act like keys, stick keys included. Bits 16..23 (the stick directions as buttons) can be
        scripted too, but the stick keys (40..47) are no npad buttons */
-    u64 s = unattended_buttons(), k = keys_held | s, b = (k & 0xFFFFull) | (s & 0xFF0000ull);
-    i32 st[4], pad[4];
+    u64 s = unattended_buttons(), k = keys_held | s;
+    u64 nonpad = (k & 0xFFFFull) | (s & 0xFF0000ull), b;
+    i32 st[4], pad[4], pad0[4];
     u64 pb;
     input_key_sticks(k, st);
     i32 lx = st[0], ly = st[1], rx = st[2], ry = st[3];
-    /* every pad and the keyboard drive the one controller the game sees (hid.c has a single PadState) */
-    gamepad_state(&pb, pad);
-    gamepad_rumble(__atomic_load_n(&g_pad.rumble[0], __ATOMIC_RELAXED),
-                   __atomic_load_n(&g_pad.rumble[1], __ATOMIC_RELAXED));
-    b |= pb;
+    pm_lock(&g_pad_input_lock);
+    /* Each SDL slot is one guest Npad. Keyboard, scripted and on-screen input also drive No1. */
+    static u32 previous_ids[SNX_GAMEPADS];
+    pad0[0] = pad0[1] = pad0[2] = pad0[3] = 0;
+    for (int i = 0; i < SNX_GAMEPADS; i++) {
+        PadState* player = i ? &g_pad_extra[i - 1] : &g_pad;
+        u64 one_buttons;
+        i32 one_sticks[4];
+        u32 id = gamepad_slot_id(i);
+        int connected = id != 0;
+        /* A disconnect and replacement can happen in one poll. Do not send the old player's rumble to the new pad. */
+        if (previous_ids[i] != id) {
+            __atomic_store_n(&player->rumble[0], 0, __ATOMIC_RELAXED);
+            __atomic_store_n(&player->rumble[1], 0, __ATOMIC_RELAXED);
+            if (i)
+                g_menu_held_extra[i - 1] = 0;
+            else
+                g_menu_held_pad0 = 0;
+            previous_ids[i] = id;
+        }
+        gamepad_state_slot(i, &one_buttons, one_sticks);
+        gamepad_rumble_slot(i, __atomic_load_n(&player->rumble[0], __ATOMIC_RELAXED),
+                            __atomic_load_n(&player->rumble[1], __ATOMIC_RELAXED));
+        __atomic_store_n(&player->connected, connected || i == 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&player->kind, connected ? gamepad_kind(gamepad_slot_type(i)) : SNX_PAD_FULL_KEY,
+                         __ATOMIC_RELAXED);
+        player->source_id = id;
+        player->buttons = one_buttons;
+        player->lx = one_sticks[0];
+        player->ly = one_sticks[1];
+        player->rx = one_sticks[2];
+        player->ry = one_sticks[3];
+        gamepad_motion(i, player->motion);
+        if (i == 0) memcpy(pad0, one_sticks, sizeof pad0);
+    }
+    gamepad_state(&pb, pad); /* the combined state drives the menu and its held-control display */
     if (!lx && !ly) {
-        lx = pad[0];
-        ly = pad[1];
+        lx = pad0[0];
+        ly = pad0[1];
     }
     if (!rx && !ry) {
-        rx = pad[2];
-        ry = pad[3];
+        rx = pad0[2];
+        ry = pad0[3];
     }
     { /* the on-screen controls, as one more pad: their sticks over the others' while held */
         u64 vb;
@@ -822,7 +866,7 @@ void video_poll(void) {
         /* with the menu open, the pads move it: the on-screen controls' and the connected ones', sticks too */
         overlay_do(overlay_controls(vb | pb, vs[0] || vs[1] ? vs : pad, SDL_GetTicks()));
         ui_unlock();
-        b |= vb;
+        nonpad |= vb;
         if (vs[0] || vs[1]) {
             lx = vs[0];
             ly = vs[1];
@@ -837,18 +881,33 @@ void video_poll(void) {
     input_stick_clamp(&lx, &ly);
     input_stick_clamp(&rx, &ry);
     if (menu_had || overlay_shown() || vpad_editing()) { /* the game's menu, or the controls' edit mode, has them */
-        g_menu_held = b;
-        b = (u64)(lx = ly = rx = ry = 0);
+        g_menu_held = nonpad;
+        g_menu_held_pad0 = g_pad.buttons;
+        b = 0;
+        lx = ly = rx = ry = 0;
         g_touch.down = 0;
+        for (int i = 0; i < SNX_GAMEPADS - 1; i++) {
+            g_menu_held_extra[i] = g_pad_extra[i].buttons;
+            g_pad_extra[i].buttons = 0;
+            g_pad_extra[i].lx = g_pad_extra[i].ly = g_pad_extra[i].rx = g_pad_extra[i].ry = 0;
+            memset(g_pad_extra[i].motion, 0, sizeof g_pad_extra[i].motion);
+        }
+        memset(g_pad.motion, 0, sizeof g_pad.motion);
     } else {
-        g_menu_held &= b;
-        b &= ~g_menu_held;
+        g_menu_held &= nonpad;
+        g_menu_held_pad0 &= g_pad.buttons;
+        b = (nonpad & ~g_menu_held) | (g_pad.buttons & ~g_menu_held_pad0);
+        for (int i = 0; i < SNX_GAMEPADS - 1; i++) {
+            g_menu_held_extra[i] &= g_pad_extra[i].buttons;
+            g_pad_extra[i].buttons &= ~g_menu_held_extra[i];
+        }
     }
     g_pad.buttons = b;
     g_pad.lx = lx;
     g_pad.ly = ly;
     g_pad.rx = rx;
     g_pad.ry = ry;
+    pm_unlock(&g_pad_input_lock);
 }
 
 void frontend_frame(void) {

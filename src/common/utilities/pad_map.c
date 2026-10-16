@@ -34,8 +34,12 @@ void snx_pad_map_labels(SnxPadMap* map, const int* labels) {
     int c;
     snx_pad_map_position(map);
     if (!labels) labels = XBOX;
-    for (c = SNX_PAD_SOUTH; c <= SNX_PAD_NORTH; ++c)
-        if (labels[c] > SNX_PAD_LABEL_NONE && labels[c] <= SNX_PAD_LABEL_TRIANGLE) map->bit[c] = BY_LABEL[labels[c]];
+    for (c = SNX_PAD_SOUTH; c <= SNX_PAD_NORTH; ++c) {
+        int label = labels[c];
+        /* SDL leaves labels unset for some third-party pads even when they have a valid gamepad mapping. */
+        if (label <= SNX_PAD_LABEL_NONE || label > SNX_PAD_LABEL_TRIANGLE) label = XBOX[c];
+        map->bit[c] = BY_LABEL[label];
+    }
 }
 void snx_pad_map_unset(SnxPadMap* map) { memset(map->bit, SNX_PAD_UNSET, sizeof map->bit); }
 void snx_pad_map_fill(SnxPadMap* map, const SnxPadMap* from) {

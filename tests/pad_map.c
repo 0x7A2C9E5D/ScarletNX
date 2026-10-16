@@ -31,6 +31,11 @@ int main(void) {
            map.bit[SNX_PAD_NORTH] == Y && map.bit[SNX_PAD_LT] == ZL);
     snx_pad_map_labels(&labeled, NULL);
     assert(!memcmp(&labeled, &map, sizeof map));
+    {
+        const int unknown[4] = {SNX_PAD_LABEL_NONE, SNX_PAD_LABEL_NONE, SNX_PAD_LABEL_NONE, SNX_PAD_LABEL_NONE};
+        snx_pad_map_labels(&labeled, unknown);
+        assert(!memcmp(&labeled, &map, sizeof map));
+    }
     snx_pad_map_labels(&map, sony);
     assert(map.bit[SNX_PAD_SOUTH] == A && map.bit[SNX_PAD_EAST] == B && map.bit[SNX_PAD_WEST] == X &&
            map.bit[SNX_PAD_NORTH] == Y);

@@ -26,7 +26,7 @@ void pm_unlock(PMutex* m) { (void)m; }
 static int touch = 1;
 void backend_touch_set(int mode) { touch = mode; }
 /* and the gamepads' settings and names, as backend/gamepad.c keeps them; their rows and touch's name them */
-static SnxGamepadConfig pads = {1, 20, 100, 0, {{0}}};
+static SnxGamepadConfig pads = {.labels = 1, .deadzone = 20, .rumble = 100};
 static const int* pad_stored;
 static const char* pad_names[3];
 SnxGamepadConfig* gamepad_config(void) { return &pads; }

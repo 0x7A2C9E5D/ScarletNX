@@ -4,6 +4,7 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* am: the applet manager (appletOE, appletAE) and its storages */
 #include "nx/hle/services/services_int.h"
+#include "nx/hle/services/hid.h"
 #include "hle/services/am.swipc.inc"
 /* ================================================================ am */
 static struct {
@@ -288,19 +289,23 @@ static void lib_applet_destroy(SvcObj* o) {
 }
 /* the controller applet (ShowControllerSupport) answers ControllerSupportResultInfo {i8 player_count; pad[3];
    u32 selected_id} and a u32 result, which the SDK turns into success (0) or cancelled (2). The last storage
-   pushed is the ControllerSupportArg, whose byte 0 is min_player_count: one controller (npad No1) satisfies at
-   most one player, as a console with one controller connected would */
+   pushed is the ControllerSupportArg, whose byte 0 is min_player_count. */
 static i8 controller_min_players(LibApplet* la) { /* lib_lock held */
     SvcObj* arg = la->nin ? la->in[la->nin - 1] : NULL;
     return is_storage(arg) && ((StorageData*)arg->data)->size ? (i8)((StorageData*)arg->data)->d[0] : 0;
 }
 static SvcObj* controller_result(i8 min_players) {
     u8 r[0xC];
+    u32 selected_id = 0;
+    int players = hid_connected_players(&selected_id);
     memset(r, 0, sizeof r);
-    u32 result = min_players <= 1 ? 0 : 2;
-    if (!result) r[0] = 1; /* player_count 1, selected_id 0 (No1) */
+    u32 result = min_players <= players ? 0 : 2;
+    if (!result) {
+        r[0] = (u8)players;
+        memcpy(r + 4, &selected_id, 4);
+    }
     memcpy(r + 8, &result, 4);
-    if (result) LOG("applet: controller support asks for %d players, one controller here: cancelled\n", min_players);
+    if (result) LOG("applet: controller support asks for %d players, %d connected: cancelled\n", min_players, players);
     return am_storage_new(sizeof r, r);
 }
 /* Standard swkbd returns 0x7D8 bytes: u32 close result, then a UTF-16 name. */

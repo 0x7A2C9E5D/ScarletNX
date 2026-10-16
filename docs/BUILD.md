@@ -131,6 +131,12 @@ installation is needed. It still needs your platform's window-system development
 - SDL3 is mandatory for the NX runtime, including headless runs. Use `-H` at runtime to skip
   SDL video initialization and run without a display server. The separate headless backend was removed.
   For an old build directory, remove the cached backend selection with `-USNX_BACKEND`.
+- If a controller does not appear, check the game's `input: joystick` lines. A GUID with no gamepad mapping needs
+  an SDL mapping in `gamecontrollerdb.txt`, as described in [USAGE](USAGE.md). If no joystick appears on Linux,
+  check whether `/dev/input/event*` is readable and whether udev marks its event node `ID_INPUT_JOYSTICK=1`.
+  The supplied `dist/72-scarletnx-input.rules` grants seat access to recognized joystick event nodes and Nintendo
+  hidraw nodes. Other HIDAPI controllers may need their vendor's own udev rule. If the gamepad opens but sends no
+  input, compare the log's controller name and GUID with its mapping and test its event node with `evtest`.
 
 After installing dependencies, rerun:
 

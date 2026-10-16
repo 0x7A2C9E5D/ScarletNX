@@ -271,11 +271,31 @@ renderer does not render splitters, voice biquad filters, or the delay, reverb a
 
 SDL gamepads take A, B, X and Y as their labels say (`gamepad_buttons=0`: by Switch positions; `2`: the map in
 `gamepad_map`, a control by where it sits and the button it sends, as `south:B east:A lt:ZL`, the ones it leaves out
-as their labels say), with the sticks'
+as their labels say). A mapped pad without readable face labels uses the usual south:A, east:B, west:X, north:Y
+layout. The sticks'
 dead zone in `gamepad_deadzone` and the game's vibration as strong as `gamepad_rumble` (both in percent), and with
 `gamepad_background=1` still play while the window is not focused; the game's menu (Home, F2) sets them under
-*Controllers*, which names the pads connected. Pads + keyboard share one guest controller. On Linux,
-`dist/72-scarletnx-input.rules` copied to `/etc/udev/rules.d/` lets SDL's own drivers (HIDAPI) open a pad directly.
+*Controllers*, which names the pads connected. Each connected gamepad uses its own player slot, up to eight.
+Keyboard and on-screen controls also drive player one.
+`gamepad_joycon_pair=1` makes SDL combine a left and right Joy-Con. Set it to `0` to expose them separately and
+restart the game after changing it.
+
+For a joystick that SDL detects but does not recognize as a gamepad, put SDL mapping lines in
+`gamecontrollerdb.txt` beside the launcher's `settings.ini` in the user configuration folder. The game reads the
+same file. To use a file elsewhere, set `SDL_GAMECONTROLLERCONFIG_FILE` to its path before starting the
+launcher or game. A mapping line starts with the joystick GUID shown in the game log or the launcher's Controllers
+page, followed by a name and SDL button and axis bindings. For example:
+
+```text
+GUID,My Controller,a:b0,b:b1,x:b2,y:b3,leftx:a0,lefty:a1,rightx:a2,righty:a3
+```
+
+Replace `GUID` and each binding with values for the device. This SDL mapping selects physical joystick controls;
+`gamepad_map` instead selects which Switch buttons the mapped controls send. The game log reports every detected
+joystick, whether it has an SDL mapping, and any gamepad open error. On Linux, installing
+`dist/72-scarletnx-input.rules` in `/etc/udev/rules.d/` grants desktop seat access to joystick event nodes and
+Nintendo hidraw nodes for Joy-Con features. Reload udev rules and reconnect the controller after installation.
+Other HIDAPI controllers may need their vendor's own hidraw rule.
 
 | Keyboard | Switch |
 | --- | --- |
