@@ -114,6 +114,8 @@ const GuiTheme* gui_splash_theme(const GuiTheme* theme, int roll);
 /* A theme.ini's text over the built-in its [theme] base names (default when absent): a key it lacks, or cannot
    read, keeps the base's value. Returns false only when out of memory. */
 int gui_theme_parse(GuiTheme* theme, const char* id, const char* text, size_t size);
+/* the text of the first dirs[i]/id/theme.ini that can be read; owned, NULL for none */
+char* gui_theme_text(const char* const* dirs, size_t count, const char* id, size_t* size);
 /* The first dirs[i]/id/theme.ini that can be read, else the built-in of that id, else the default theme: a folder
    named like a built-in replaces it */
 void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id);

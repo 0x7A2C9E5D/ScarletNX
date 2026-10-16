@@ -1031,18 +1031,10 @@ static bool menu_key_of(const SDL_KeyboardEvent* k, GuiKey* key);
    saved as a new theme */
 static void open_editor(App* app) {
     GuiThemeFile file;
-    int from_file = 0;
-    size_t i;
-    for (i = 0; i < 2 && !from_file; ++i) {
-        char* folder = app->themes_dirs[i] ? snx_path_join(app->themes_dirs[i], app->theme.id) : NULL;
-        char* path = folder ? snx_path_join(folder, "theme.ini") : NULL;
-        size_t size = 0;
-        unsigned char* text = path ? snx_read_file(path, &size) : NULL;
-        from_file = text && gui_theme_file_read(&file, (const char*)text, size);
-        free(text);
-        free(path);
-        free(folder);
-    }
+    size_t size = 0;
+    char* text = gui_theme_text((const char* const*)app->themes_dirs, 2, app->theme.id, &size);
+    int from_file = text && gui_theme_file_read(&file, text, size);
+    free(text);
     gui_editor_start(&app->editor, &app->theme, from_file ? &file : NULL, from_file ? app->theme.id : "mytheme");
     if (from_file) gui_theme_file_free(&file);
     app->editing = true;

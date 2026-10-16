@@ -285,22 +285,24 @@ int gui_theme_parse(GuiTheme* theme, const char* id, const char* text, size_t si
     copy(theme->name, sizeof theme->name, id);
     return visit(text, size, theme, bases, 0, !bases[0] && bases[2]);
 }
-void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id) {
+char* gui_theme_text(const char* const* dirs, size_t count, const char* id, size_t* size) {
     size_t i;
-    const GuiTheme* builtin;
-    for (i = 0; i < count; ++i) {
+    char* text = NULL;
+    for (i = 0; i < count && !text; ++i) {
         char* folder = dirs[i] ? snx_path_join(dirs[i], id) : NULL;
         char* path = folder ? snx_path_join(folder, "theme.ini") : NULL;
-        size_t size = 0;
-        unsigned char* text = path ? snx_read_file(path, &size) : NULL;
-        int read = text && gui_theme_parse(theme, id, (const char*)text, size);
-        free(text);
+        text = path ? (char*)snx_read_file(path, size) : NULL;
         free(path);
         free(folder);
-        if (read) return;
     }
-    builtin = gui_theme_builtin(id);
-    *theme = builtin ? *builtin : builtins_read()[0];
+    return text;
+}
+void gui_theme_load(GuiTheme* theme, const char* const* dirs, size_t count, const char* id) {
+    size_t size = 0;
+    char* text = gui_theme_text(dirs, count, id, &size);
+    const GuiTheme* builtin = gui_theme_builtin(id);
+    if (!text || !gui_theme_parse(theme, id, text, size)) *theme = builtin ? *builtin : builtins_read()[0];
+    free(text);
 }
 
 void gui_themes_free(GuiThemes* themes) {
