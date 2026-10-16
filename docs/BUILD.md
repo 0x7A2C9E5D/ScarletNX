@@ -200,7 +200,7 @@ runtime must not mix with another LLVM build.
 3. Clone to a path without spaces:
 
    ```sh
-   git clone https://github.com/scarletnx/ScarletNX.git
+   git clone --depth=1 https://github.com/scarletnx/ScarletNX.git
    cd ScarletNX
    ```
 
