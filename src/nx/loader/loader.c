@@ -852,7 +852,7 @@ int snx_parse_npdm(const unsigned char* data, size_t size, SnxNpdm* npdm, char* 
     npdm->prio = 44;
     npdm->is64 = 1;
     npdm->aspace = 3;
-    npdm->title_id = ((SnxU64)0x01000000UL << 32) | 0x1000;
+    npdm->title_id = SNX_NPDM_DEFAULT_TITLE;
     memcpy(npdm->name, "Application", 12);
     if (!size) return 0;
     if (!data) {
@@ -1116,4 +1116,34 @@ memory:
 bad:
     snx_free_program(program);
     return -1;
+}
+
+int snx_load_npdm(const char* entry, SnxNpdm* npdm, char* error, size_t error_size) {
+    char *full, *exefs = NULL, *path = NULL;
+    const char* extension;
+    unsigned char* data = NULL;
+    size_t size = 0;
+    int rc = -1;
+    error_text(error, error_size, "");
+    full = entry && *entry ? absolute_path(entry) : NULL;
+    if (!full) {
+        error_text(error, error_size, "loader: cannot resolve input path");
+        return -1;
+    }
+    extension = strrchr(path_basename(full), '.');
+    /* an NRO carries no NPDM: the defaults, as snx_load_program gives it */
+    if (extension && same_ascii(extension, ".nro") && path_kind(full, 0))
+        rc = snx_parse_npdm(NULL, 0, npdm, error, error_size);
+    else if (!find_exefs(full, &exefs, error, error_size)) {
+        path = join_path(exefs, "main.npdm");
+        if (!path)
+            error_text(error, error_size, "loader: out of memory");
+        else if (!path_kind(path, 0) || !read_file(path, &data, &size, error, error_size))
+            rc = snx_parse_npdm(data, size, npdm, error, error_size);
+    }
+    free(data);
+    free(path);
+    free(exefs);
+    free(full);
+    return rc;
 }

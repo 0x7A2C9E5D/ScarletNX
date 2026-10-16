@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "nx/loader/loader.h"
+#include "nx/runtime/driver/game_name.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -359,6 +360,53 @@ static void test_nro_npdm(void) {
     puts("PASS NRO assets/program loading and bounded NPDM metadata");
 }
 
+/* snx_load_npdm finds the NPDM snx_load_program takes, without the modules; snx_game_name names the game's files by
+   its title ID when it has one of its own, else as it is shown */
+static void test_npdm_of(const char* root, const char* exefs) {
+    SnxNpdm npdm;
+    char error[256], *path, *name, *nro;
+    size_t size;
+    CHECK(!snx_load_npdm(root, &npdm, error, sizeof error) && npdm.prio == 37);
+    CHECK(!snx_load_npdm(exefs, &npdm, error, sizeof error));
+    CHECK(npdm.title_id == (((SnxU64)0x12345678UL << 32) | 0x9abcdef0UL));
+    name = snx_game_name(NULL, &npdm, root);
+    CHECK(!strcmp(name, "123456789ABCDEF0"));
+    free(name);
+    name = snx_game_title(NULL, &npdm, root);
+    CHECK(!strcmp(name, "Synthetic Loader"));
+    free(name);
+    name = snx_game_name("My Game", &npdm, root); /* --name: the player's word */
+    CHECK(!strcmp(name, "My Game"));
+    free(name);
+    npdm.title_id = SNX_NPDM_DEFAULT_TITLE; /* an NRO's, or an ExeFS's without NPDM: none of its own */
+    name = snx_game_name(NULL, &npdm, root);
+    CHECK(!strcmp(name, "Synthetic Loader"));
+    free(name);
+    npdm.title_id = 0;
+    strcpy(npdm.name, "Application");
+    name = snx_game_name(NULL, &npdm, "/dumps/Some Game v1.0.nro");
+    CHECK(!strcmp(name, "Some Game v1.0"));
+    free(name);
+    path = snx_path_join(exefs, "main.npdm");
+    CHECK(!snx_remove_tree(path));
+    CHECK(!snx_load_npdm(root, &npdm, error, sizeof error) && npdm.title_id == SNX_NPDM_DEFAULT_TITLE);
+    CHECK(!snx_write_file(path, "META", 4)); /* a broken one is refused, as snx_load_program refuses it */
+    CHECK(snx_load_npdm(root, &npdm, error, sizeof error) == -1 && strstr(error, "NPDM"));
+    CHECK(!snx_remove_tree(path));
+    free(path);
+    path = snx_path_join(scratch, "no-exefs");
+    CHECK(!snx_mkdirs(path));
+    CHECK(snx_load_npdm(path, &npdm, error, sizeof error) == -1 && strstr(error, "exefs/main"));
+    free(path);
+    size = build_nro();
+    nro = fixture("homebrew.nro", file_bytes, size);
+    CHECK(!snx_load_npdm(nro, &npdm, error, sizeof error) && npdm.title_id == SNX_NPDM_DEFAULT_TITLE);
+    name = snx_game_name(NULL, &npdm, nro);
+    CHECK(!strcmp(name, "homebrew"));
+    free(name);
+    free(nro);
+}
+
 static void test_program(void) {
     static const char* names[4] = {"rtld", "main", "subsdk2", "sdk"};
     SnxProgram program;
@@ -398,6 +446,7 @@ static void test_program(void) {
     CHECK(!snx_load_program(exefs, &program, error, sizeof error));
     CHECK(program.module_count == 4 && program.root_path != NULL);
     snx_free_program(&program);
+    test_npdm_of(root, exefs);
     free(root);
     free(exefs);
     free(romfs);

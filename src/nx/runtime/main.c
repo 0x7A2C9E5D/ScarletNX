@@ -293,7 +293,8 @@ int snx_main(int argc, char** argv) {
     hints_init();
     plat_install_crash_handler();
     clock_start();
-    LOG("ScarletNX - %s\n", g_exename);
+    /* the game as it is shown, its files being named by its title ID: the menu takes its recent game's name here */
+    LOG("ScarletNX - %s\n", g_mod->title ? g_mod->title : g_exename);
     g_title_id = g_mod->title_id;
     fs_init();
     mem_init();

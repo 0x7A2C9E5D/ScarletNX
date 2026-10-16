@@ -6,6 +6,7 @@
    This fork's changes are under GPL-3.0-or-later (LICENSE). */
 #define _POSIX_C_SOURCE 200809L
 #include "nx/runtime/driver/recompile.h"
+#include "nx/runtime/driver/game_name.h"
 #include "nx/loader/loader.h"
 #include "nx/loader/module.h"
 #include "nx/loader/module_llvm.h"
@@ -20,7 +21,7 @@
 static void usage(void) {
     puts("Usage: scarletnx -r INPUT [NAME] [OPTIONS]\n"
          "  INPUT                  Game/ExeFS directory or .nro\n"
-         "  -o, --name, --out NAME  Output name (default: NPDM or input name)\n"
+         "  -o, --name, --out NAME  Output name (default: the title ID, else the NPDM's or input name)\n"
          "  --outdir DIR           Output directory (default: checkout/games, else ./games)\n"
          "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: 2)\n"
          "  --jobs N               Parallel compiles (default: CPU count)");
@@ -42,35 +43,6 @@ static unsigned number(const char* text, unsigned max) {
     errno = 0;
     n = strtoul(text, &end, 10);
     return errno || !*text || *end || n == 0 || n > max ? 0 : (unsigned)n;
-}
-static char* title_name(const char* name, const SnxProgram* p, const char* input) {
-    const char *start, *s;
-    char *out, *dot;
-    size_t n = 0;
-    int input_name = 0;
-    if (!name && p->npdm.name[0] && strcmp(p->npdm.name, "Application")) name = p->npdm.name;
-    if (!name) {
-        start = input;
-        for (s = input; *s; ++s)
-            if (*s == '/' || *s == '\\') start = s + 1;
-        name = start;
-        input_name = 1;
-    }
-    out = (char*)snx_alloc(strlen(name) + 1);
-    /* Preserve UTF-8 names; exclude path delimiters and C/OS metacharacters. */
-    for (s = name; *s; ++s)
-        if ((unsigned char)*s >= 128 || isalnum((unsigned char)*s) || *s == '-' || *s == '_' || *s == ' ' ||
-            (input_name && *s == '.'))
-            out[n++] = *s;
-    out[n] = 0;
-    if (input_name && (dot = strrchr(out, '.')) != NULL) *dot = 0;
-    n = strlen(out);
-    while (n && (out[n - 1] == ' ' || out[n - 1] == '.')) out[--n] = 0;
-    if (!n) {
-        free(out);
-        return snx_strdup("Game");
-    }
-    return out;
 }
 /* This build's, not the checkout's cpu.h: the modules are laid out as this build's headers say, and an installed
    build has no checkout */
@@ -244,7 +216,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     SnxCompileOptions compile;
     SnxCodegenOptions gen;
     SnxProgram program;
-    char *title = NULL, *out = NULL, *base = NULL, *data = NULL, *code = NULL;
+    char *title = NULL, *game = NULL, *out = NULL, *base = NULL, *data = NULL, *code = NULL;
     char *ini = NULL, *ini_text = NULL, *run = NULL, *exe = NULL, *tmp = NULL;
     char error[1024], option[64];
     const char* equal;
@@ -359,7 +331,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("AArch32 programs are unsupported");
         goto done;
     }
-    title = title_name(name, &program, program.entry_path);
+    title = snx_game_title(name, &program.npdm, program.entry_path);
+    game = snx_game_name(name, &program.npdm, program.entry_path);
     out = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
     if (!out) {
         snx_error("cannot resolve output directory");
@@ -374,7 +347,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("cannot create output directory");
         goto done;
     }
-    base = snx_path_join(out, title);
+    base = snx_path_join(out, game);
     /* Invalidate the completion stamp before touching an existing game's data
        or module. Failed recompilation must never leave a trusted checkpoint. */
     if (!no_build) {
@@ -395,7 +368,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("cannot stage game data in %s", data);
         goto done;
     }
-    ini = settings_path(out, title);
+    ini = settings_path(out, game);
     if (!ini) {
         snx_error("cannot create the settings folder for %s", title);
         goto done;
@@ -476,6 +449,7 @@ done:
     snx_free_program(&program);
     free((void*)gen.hints);
     free(title);
+    free(game);
     free(out);
     free(base);
     free(data);

@@ -1,0 +1,47 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* SwitchRecomp - Copyright 2026 MZ Labs
+   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
+   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
+   This fork's changes are under GPL-3.0-or-later (LICENSE). */
+#include "nx/runtime/driver/game_name.h"
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+char* snx_game_title(const char* name, const SnxNpdm* npdm, const char* input) {
+    const char *start, *s;
+    char *out, *dot;
+    size_t n = 0;
+    int input_name = 0;
+    if (!name && npdm->name[0] && strcmp(npdm->name, "Application")) name = npdm->name;
+    if (!name) {
+        start = input;
+        for (s = input; *s; ++s)
+            if (*s == '/' || *s == '\\') start = s + 1;
+        name = start;
+        input_name = 1;
+    }
+    out = (char*)snx_alloc(strlen(name) + 1);
+    /* Preserve UTF-8 names; exclude path delimiters and C/OS metacharacters. */
+    for (s = name; *s; ++s)
+        if ((unsigned char)*s >= 128 || isalnum((unsigned char)*s) || *s == '-' || *s == '_' || *s == ' ' ||
+            (input_name && *s == '.'))
+            out[n++] = *s;
+    out[n] = 0;
+    if (input_name && (dot = strrchr(out, '.')) != NULL) *dot = 0;
+    n = strlen(out);
+    while (n && (out[n - 1] == ' ' || out[n - 1] == '.')) out[--n] = 0;
+    if (!n) {
+        free(out);
+        return snx_strdup("Game");
+    }
+    return out;
+}
+char* snx_game_name(const char* name, const SnxNpdm* npdm, const char* input) {
+    char id[17];
+    if (name || !npdm->title_id || npdm->title_id == SNX_NPDM_DEFAULT_TITLE) return snx_game_title(name, npdm, input);
+    sprintf(id, "%08lX%08lX", (unsigned long)(npdm->title_id >> 32), (unsigned long)(npdm->title_id & 0xFFFFFFFFUL));
+    return snx_strdup(id);
+}

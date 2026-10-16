@@ -422,9 +422,10 @@ if(WIN32)
 endif()
 
 add_executable(snx-test-driver driver_workflow.c
-    "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/driver.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/process.c")
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/driver.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/game_name.c"
+    "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/process.c")
 snx_test_target(snx-test-driver 90)
-target_link_libraries(snx-test-driver PRIVATE snx_test_common)
+target_link_libraries(snx-test-driver PRIVATE snx_test_common snx_lz4 OpenSSL::Crypto)
 add_test(NAME driver_workflow COMMAND snx-test-driver)
 set_tests_properties(driver_workflow PROPERTIES TIMEOUT 60)
 add_executable(snx-test-launcher-name launcher_name.c)
@@ -466,7 +467,8 @@ snx_test_target(snx-test-extract 90)
 target_link_libraries(snx-test-extract PRIVATE snx_test_common)
 add_test(NAME extraction_native COMMAND snx-test-extract)
 
-add_executable(snx-test-loader loader_test.c "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c")
+add_executable(snx-test-loader loader_test.c "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c"
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/game_name.c")
 snx_test_target(snx-test-loader 90)
 target_link_libraries(snx-test-loader PRIVATE snx_test_common snx_lz4 OpenSSL::Crypto)
 add_test(NAME loader_native COMMAND snx-test-loader)
