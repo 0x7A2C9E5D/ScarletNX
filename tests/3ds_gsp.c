@@ -255,11 +255,14 @@ int main(int argc, char** argv) {
         assert(!get(p, 1));
         assert((at(p, QUEUE + 0x800) & 0xffff) == 2);
         assert((at(p, QUEUE) & 0xffff) == 0x0200 && (at(p, QUEUE + 8) & 0xffff) == 0x0505);
-        /* a draw is the next part of the port: the run stops there */
-        word(p, target + 0x800, 1);
-        word(p, target + 0x804, 0x000f022eu); /* trigger_draw */
+        /* a draw needing a part not ported yet (a geometry shader) stops the run */
+        word(p, target + 0x800, 2);
+        word(p, target + 0x804, 0x000f0229u); /* use_gs */
+        word(p, target + 0x808, 1);
+        word(p, target + 0x80c, 0x000f022eu); /* trigger_draw */
         word(p, QUEUE + 0x800, 0x100);
         word(p, QUEUE + 0x820, 1);
+        word(p, QUEUE + 0x828, 16);
         request(p, gsp, trigger, 1, SNX_CTR_SVC_UNSUPPORTED, 0);
         word(p, QUEUE + 0x800, 0);
         /* SetBufferSwap: a real RGBA8 framebuffer with a distinctive pattern. */

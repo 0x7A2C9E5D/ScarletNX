@@ -55,6 +55,7 @@ void snx_ctr_pica_init(SnxCtrPica* p) {
     p->regs[SNX_PICA_IRQ_COMPARE] = 0x12345678u;
     /* "Tales of Abyss expects this register to have the following default values": GS max input index 1, VS mode */
     p->regs[SNX_PICA_GS + SNX_PICA_SH_INPUT_CONFIG] = 1u | (0xa0u << 24);
+    p->immediate_reset = true;
 }
 
 void snx_ctr_pica_free(SnxCtrPica* p) {
@@ -137,9 +138,18 @@ static SnxCtrPicaResult special(SnxCtrPica* p, SnxCtrMemory* memory, uint32_t id
                 if (p->regs[SNX_PICA_IRQ_AUTOSTOP]) *stop = true;
             }
             return SNX_CTR_PICA_OK;
-        case SNX_PICA_DEFAULT_ATTR_INDEX:
+        case SNX_PICA_TOPOLOGY: /* PrimitiveAssembler::Reconfigure */
+            memset(&p->assembler, 0, sizeof p->assembler);
+            p->assembler.topology = (p->regs[id] >> 8) & 3;
+            return SNX_CTR_PICA_OK;
+        case SNX_PICA_RESTART_PRIMITIVE:
+            p->assembler.index = 0;
+            p->assembler.strip_ready = p->assembler.winding = false;
+            return SNX_CTR_PICA_OK;
+        case SNX_PICA_DEFAULT_ATTR_INDEX: /* ImmediateModeState::Reset */
             p->immediate_queued = 0;
             p->immediate_attribute = 0;
+            p->immediate_reset = true;
             return SNX_CTR_PICA_OK;
         case SNX_PICA_DEFAULT_ATTR_VALUE:
         case SNX_PICA_DEFAULT_ATTR_VALUE + 1:
@@ -160,17 +170,12 @@ static SnxCtrPicaResult special(SnxCtrPica* p, SnxCtrMemory* memory, uint32_t id
                 return SNX_CTR_PICA_OK;
             }
             p->immediate_attribute = 0;
-            if (!host || !host->draw_immediate || !host->draw_immediate(host->context, p))
-                return SNX_CTR_PICA_UNSUPPORTED;
-            return SNX_CTR_PICA_OK;
+            return snx_ctr_pica_draw_immediate(p, memory);
         }
         case SNX_PICA_CMDBUF_TRIGGER:
         case SNX_PICA_CMDBUF_TRIGGER + 1: return jump(p, memory, id - SNX_PICA_CMDBUF_TRIGGER);
         case SNX_PICA_TRIGGER_DRAW:
-        case SNX_PICA_TRIGGER_DRAW_INDEXED:
-            if (!host || !host->draw || !host->draw(host->context, p, id == SNX_PICA_TRIGGER_DRAW_INDEXED))
-                return SNX_CTR_PICA_UNSUPPORTED;
-            return SNX_CTR_PICA_OK;
+        case SNX_PICA_TRIGGER_DRAW_INDEXED: return snx_ctr_pica_draw(p, memory, id == SNX_PICA_TRIGGER_DRAW_INDEXED);
         case SNX_PICA_GS + SNX_PICA_SH_BOOL: uniform_bools(&p->gs, p->regs[id]); return SNX_CTR_PICA_OK;
         case SNX_PICA_VS + SNX_PICA_SH_BOOL:
             uniform_bools(&p->vs, p->regs[id]);
@@ -233,8 +238,7 @@ static SnxCtrPicaResult special(SnxCtrPica* p, SnxCtrMemory* memory, uint32_t id
         }
         *config = (*config & ~0xffu) | ((index + 1) & 0xff);
     }
-    /* triangle_topology and restart_primitive reconfigure the primitive assembler, which lives with the draws;
-       gpu_mode needs nothing */
+    /* gpu_mode needs nothing */
     return SNX_CTR_PICA_OK;
 }
 

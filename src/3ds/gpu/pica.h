@@ -6,7 +6,8 @@
    shader_setup.cpp and packed_attribute.h, with register positions from regs_internal.h and the regs_*.h it
    includes (GPL-2.0-or-later), at azahar-emu/azahar a4b335e. Copyright 2015-2026 Citra Emulator Project / Azahar
    Emulator Project.
-   Drawing is not here: a draw trigger is handed to the host's draw hook, and without one the list stops there. */
+   A draw trigger runs the software pipeline of draw.c (vertex loading, the vertex shader, primitive assembly) and
+   raster.c (the fixed-function back end). */
 #ifndef SNX_CTR_PICA_H
 #define SNX_CTR_PICA_H
 #include "3ds/memory/ctr_memory.h"
@@ -70,14 +71,23 @@ typedef struct {
     unsigned queued;
 } SnxCtrShaderSetup;
 
+/* OutputVertex: the rasterizer's attributes, in the semantic order of RasterizerRegs::VSOutputAttributes */
+typedef struct {
+    float pos[4], quat[4], color[4], tc0[2], tc1[2], tc0_w, unused0, view[3], unused1, tc2[2];
+} SnxCtrVertex;
+
+/* PrimitiveAssembler's state: topology 0 list, 1 strip, 2 fan, 3 geometry shader */
+typedef struct {
+    SnxCtrVertex buffer[2];
+    unsigned index, topology;
+    bool strip_ready, winding;
+} SnxCtrAssembler;
+
 typedef struct SnxCtrPica SnxCtrPica;
-/* the host side of the command processor: the P3D interrupt and the draws. draw returns false when it cannot draw
-   (not implemented, a fault), which stops the list */
+/* the host side of the command processor: the P3D interrupt */
 typedef struct {
     void* context;
-    void (*interrupt)(void* context); /* P3D */
-    bool (*draw)(void* context, SnxCtrPica* pica, bool indexed);
-    bool (*draw_immediate)(void* context, SnxCtrPica* pica);
+    void (*interrupt)(void* context);
 } SnxCtrPicaHost;
 
 struct SnxCtrPica {
@@ -91,10 +101,14 @@ struct SnxCtrPica {
     uint32_t immediate_queue[3];
     unsigned immediate_queued, immediate_attribute;
     float immediate_vertex[16][4];
+    bool immediate_reset; /* reset_geometry_pipeline: the next immediate vertex starts a new batch */
+    /* the primitive assembler (PrimitiveAssembler), kept across draws; topology and restart writes reset it */
+    SnxCtrAssembler assembler;
     /* the list being run, a staged copy of guest memory; a jump (a command buffer trigger) replaces it */
     uint32_t* list;
     uint32_t list_address, list_words, list_index;
-    uint32_t stop_register; /* the register whose write stopped the last run (UNSUPPORTED, FAULT) */
+    uint32_t stop_register;  /* the register whose write stopped the last run (UNSUPPORTED, FAULT) */
+    const char* stop_reason; /* what was unsupported */
 };
 
 /* registers as GSP initializes them (PicaCore::InitializeRegs) */
@@ -103,9 +117,12 @@ void snx_ctr_pica_free(SnxCtrPica* pica);
 
 typedef enum {
     SNX_CTR_PICA_OK,          /* the list ran to its end or to an interrupt with autostop */
-    SNX_CTR_PICA_UNSUPPORTED, /* a draw the host cannot do, or a list larger than the staging bound */
+    SNX_CTR_PICA_UNSUPPORTED, /* a draw using a part not ported yet (stop_reason), or a list past the staging bound */
     SNX_CTR_PICA_FAULT        /* a jump to a list outside the board's memory */
 } SnxCtrPicaResult;
+/* the draw triggers (draw.c): DrawArrays, indexed or not, and DrawImmediate for the vertex immediate mode formed */
+SnxCtrPicaResult snx_ctr_pica_draw(SnxCtrPica* pica, SnxCtrMemory* memory, bool indexed);
+SnxCtrPicaResult snx_ctr_pica_draw_immediate(SnxCtrPica* pica, SnxCtrMemory* memory);
 /* Runs the command list of size bytes at physical address (GPU::SubmitCmdList's checks are the caller's). A list
    outside memory raises P3D and does nothing, as the GPU does */
 SnxCtrPicaResult snx_ctr_pica_run(SnxCtrPica* pica, SnxCtrMemory* memory, uint32_t address, uint32_t size,

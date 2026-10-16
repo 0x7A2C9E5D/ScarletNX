@@ -6,7 +6,7 @@
    register file and host-paced 60 Hz display timing. The GX queue's DMA, memory
    fills, display transfers and texture copies run on physical memory through the
    transfer engine (gpu/transfer.c), PICA command lists (SubmitCmdList) through the
-   command processor (gpu/pica.c) up to their first draw; the save-VRAM paths stop. */
+   command processor (gpu/pica.c) and its software draws; the save-VRAM paths stop. */
 #include "3ds/runtime/internal.h"
 #include "3ds/services/gsp.h"
 #include "3ds/gpu/present.h"
@@ -537,11 +537,11 @@ static GxStep gx_transfer(SnxCtrIpc* c, GxInterrupts* irq) {
 
 /* SubmitCmdList (GPU::Execute): GSP writes the list's physical address (0 outside GPU-visible memory) and size to
    the first command buffer channel and triggers it. A list GPU::SubmitCmdList finds outside memory raises P3D. The
-   list's own interrupt requests raise P3D as it runs. Drawing is the next part of the port: a draw stops the run */
+   list's own interrupt requests raise P3D as it runs. A draw needing a part not ported yet stops the run */
 static void gx_p3d(void* context) { gx_raise((GxInterrupts*)context, GX_P3D); }
 static GxStep gx_submit(SnxCtrIpc* c, const uint32_t* a, GxInterrupts* irq) {
     SnxCtrGsp* g = &c->process->gsp;
-    SnxCtrPicaHost host = {irq, gx_p3d, NULL, NULL};
+    SnxCtrPicaHost host = {irq, gx_p3d};
     uint32_t pa = gx_physical(a[0], a[1]);
     if (!g->pica) {
         g->pica = (SnxCtrPica*)malloc(sizeof *g->pica);
@@ -562,8 +562,10 @@ static GxStep gx_submit(SnxCtrIpc* c, const uint32_t* a, GxInterrupts* irq) {
         gx_raise(irq, GX_P3D);
     g->pica->regs[SNX_PICA_CMDBUF_TRIGGER] = 0;
     if (r == SNX_CTR_PICA_OK) return GX_DONE;
-    fprintf(stderr, "3ds gpu: command list at 0x%08x stopped at register 0x%03x (%s)\n", pa, g->pica->stop_register,
-            r == SNX_CTR_PICA_FAULT ? "a jump outside memory" : "not implemented");
+    fprintf(stderr, "3ds gpu: the command list at 0x%08x stopped at register 0x%03x: %s\n", pa, g->pica->stop_register,
+            r == SNX_CTR_PICA_FAULT ? "it jumps outside memory"
+            : g->pica->stop_reason  ? g->pica->stop_reason
+                                    : "it is larger than the staging bound");
     c->state = SNX_CTR_IPC_UNSUPPORTED;
     return GX_STOP;
 }

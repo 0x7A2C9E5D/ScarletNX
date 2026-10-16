@@ -87,6 +87,14 @@ static void encode(unsigned format, Color c, unsigned char* p) {
     p[0] = (unsigned char)v;
     p[1] = (unsigned char)(v >> 8);
 }
+void snx_ctr_pixel_decode(unsigned format, const unsigned char* bytes, uint8_t rgba[4]) {
+    Color c = decode(format, bytes);
+    rgba[0] = (uint8_t)c.r, rgba[1] = (uint8_t)c.g, rgba[2] = (uint8_t)c.b, rgba[3] = (uint8_t)c.a;
+}
+void snx_ctr_pixel_encode(unsigned format, const uint8_t rgba[4], unsigned char* bytes) {
+    Color c = {rgba[0], rgba[1], rgba[2], rgba[3]};
+    encode(format, c, bytes);
+}
 
 /* ---- display transfer ---- */
 

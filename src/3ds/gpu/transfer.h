@@ -16,6 +16,9 @@
 enum { SNX_CTR_PIX_RGBA8, SNX_CTR_PIX_RGB8, SNX_CTR_PIX_RGB565, SNX_CTR_PIX_RGB5A1, SNX_CTR_PIX_RGBA4 };
 /* 0 for a format value the hardware does not define (5 to 7) */
 unsigned snx_ctr_pixel_bytes(unsigned format);
+/* one pixel of the format as Common::Color decodes and encodes it, components most significant first */
+void snx_ctr_pixel_decode(unsigned format, const unsigned char* bytes, uint8_t rgba[4]);
+void snx_ctr_pixel_encode(unsigned format, const uint8_t rgba[4], unsigned char* bytes);
 
 /* MemoryFill control bits (MemoryFillConfig.control): the fill width. Neither: 16-bit values */
 #define SNX_CTR_FILL_24BIT (1u << 8)

@@ -1,9 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors
-   Tests of the PICA200 command processor (src/3ds/gpu/pica.c): command lists written into the board's FCRAM and
-   run from their physical address. The expected values come from the layouts Azahar documents (CommandHeader in
-   pica_core.h, PackedAttribute's float24 packing, pica_types.h's float24), worked out by hand here. */
+   Tests of the PICA200 command processor (src/3ds/gpu/pica.c) and the software pipeline behind its draws
+   (shader.c, draw.c, raster.c, texture.c): command lists written into the board's FCRAM and run from their
+   physical address. The expected values come from the layouts Azahar documents (CommandHeader in pica_core.h,
+   PackedAttribute's float24 packing, pica_types.h's float24, nihstro's instruction encoding, the tiled framebuffer
+   of sw_framebuffer.cpp), worked out by hand here. */
 #include "3ds/gpu/pica.h"
+#include "3ds/gpu/shader.h"
+#include "3ds/gpu/texture.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,21 +37,7 @@ static void cmd(List* l, uint32_t id, uint32_t mask, bool group, const uint32_t*
 }
 static void put(List* l, uint32_t id, uint32_t value) { cmd(l, id, 15, false, &value, 1); }
 
-typedef struct {
-    unsigned interrupts, draws, indexed, immediates;
-} Host;
-static void on_interrupt(void* c) { ++((Host*)c)->interrupts; }
-static bool on_draw(void* c, SnxCtrPica* p, bool indexed) {
-    (void)p;
-    ++((Host*)c)->draws;
-    ((Host*)c)->indexed += indexed;
-    return true;
-}
-static bool on_immediate(void* c, SnxCtrPica* p) {
-    (void)p;
-    ++((Host*)c)->immediates;
-    return true;
-}
+static void on_interrupt(void* c) { ++*(unsigned*)c; }
 
 static SnxCtrPicaResult run(SnxCtrPica* p, SnxCtrMemory* m, uint32_t pa, const List* l, const SnxCtrPicaHost* h) {
     if (snx_ctr_phys_write(m, pa, l->w, l->n * 4) != SNX_CTR_MEM_OK) return SNX_CTR_PICA_FAULT;
@@ -142,8 +132,8 @@ static void uploads(SnxCtrMemory* m) {
 
 static void control(SnxCtrMemory* m) {
     SnxCtrPica* p = calloc(1, sizeof *p);
-    Host count = {0, 0, 0, 0};
-    SnxCtrPicaHost host = {&count, on_interrupt, on_draw, on_immediate};
+    unsigned interrupts = 0;
+    SnxCtrPicaHost host = {&interrupts, on_interrupt};
     List l = {{0}, 0}, sub = {{0}, 0};
     const uint32_t attr[3] = {0x3e0000c0u, 0x00004000u, 0x003f0000u};
     snx_ctr_pica_init(p);
@@ -154,7 +144,7 @@ static void control(SnxCtrMemory* m) {
     put(&l, SNX_PICA_IRQ_REQUEST, 0x00000078u);
     put(&l, 0x111, 1);
     check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_OK, "an interrupting list runs");
-    check(count.interrupts == 1 && p->regs[0x110] == 1 && p->regs[0x111] == 0,
+    check(interrupts == 1 && p->regs[0x110] == 1 && p->regs[0x111] == 0,
           "a matching request raises P3D and stops the list");
 
     /* a jump: the second channel's list replaces the rest of this one */
@@ -173,13 +163,15 @@ static void control(SnxCtrMemory* m) {
     put(&l, SNX_PICA_CMDBUF_TRIGGER, 1);
     check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_FAULT, "a jump outside memory faults");
 
-    /* draws go to the host, and stop the list without one */
+    /* a draw with a part not ported yet stops the list and says which */
     l.n = 0;
+    put(&l, SNX_PICA_USE_GS, 2);
     put(&l, SNX_PICA_TRIGGER_DRAW, 1);
-    put(&l, SNX_PICA_TRIGGER_DRAW_INDEXED, 1);
-    check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_OK && count.draws == 2 && count.indexed == 1,
-          "draw triggers reach the host");
-    check(run(p, m, FCRAM, &l, NULL) == SNX_CTR_PICA_UNSUPPORTED, "a draw without a host stops the list");
+    put(&l, SNX_PICA_USE_GS, 0);
+    check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_UNSUPPORTED && p->stop_register == SNX_PICA_TRIGGER_DRAW &&
+              !strcmp(p->stop_reason, "geometry shaders are not ported yet") && (p->regs[SNX_PICA_USE_GS] & 3) == 2,
+          "a geometry shader draw stops");
+    p->regs[SNX_PICA_USE_GS] = 0;
 
     /* default attributes, then immediate mode with two input attributes */
     l.n = 0;
@@ -188,19 +180,208 @@ static void control(SnxCtrMemory* m) {
     put(&l, SNX_PICA_MAX_INPUT_ATTR, 1);
     put(&l, SNX_PICA_DEFAULT_ATTR_INDEX, 15);
     cmd(&l, SNX_PICA_DEFAULT_ATTR_VALUE, 15, false, attr, 3);
-    check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_OK && count.immediates == 0, "one attribute is no vertex");
+    p->regs[0x1c6] = 1; /* lighting off, as libctru and citro3d leave it */
+    check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_OK && p->assembler.index == 0, "one attribute is no vertex");
     check(p->default_attributes[3][0] == 1.0f && p->default_attributes[3][3] == 0.5f &&
               p->regs[SNX_PICA_DEFAULT_ATTR_INDEX] == 15,
           "a default attribute is stored and the index advances");
     l.n = 0;
     cmd(&l, SNX_PICA_DEFAULT_ATTR_VALUE, 15, false, attr, 3);
-    check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_OK && count.immediates == 1 && p->immediate_vertex[1][1] == 2.0f,
-          "the last attribute of an immediate vertex draws it");
+    check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_OK && p->assembler.index == 1 &&
+              p->immediate_vertex[1][1] == 2.0f,
+          "the last attribute of an immediate vertex draws it into the primitive assembler");
 
     /* GPU::SubmitCmdList: a list outside memory raises P3D and runs nothing */
-    count.interrupts = 0;
-    check(snx_ctr_pica_run(p, m, 0x08000000u, 16, &host) == SNX_CTR_PICA_OK && count.interrupts == 1,
+    interrupts = 0;
+    check(snx_ctr_pica_run(p, m, 0x08000000u, 16, &host) == SNX_CTR_PICA_OK && interrupts == 1,
           "an invalid list raises P3D");
+    snx_ctr_pica_free(p);
+    free(p);
+}
+
+/* nihstro encodings: format 1 (opcode, dest 21..25, src1 12..18, src2 7..11, operand descriptor 0..6) */
+static uint32_t op1(unsigned op, unsigned dest, unsigned src1, unsigned src2, unsigned desc) {
+    return (uint32_t)op << 26 | dest << 21 | src1 << 12 | src2 << 7 | desc;
+}
+/* a swizzle pattern: all four components enabled, both sources unswizzled */
+#define XYZW 0x6c36fu
+#define END  (0x22u << 26)
+
+static void shaders(void) {
+    SnxCtrShaderSetup* s = calloc(1, sizeof *s);
+    SnxCtrShaderUnit u;
+    memset(&u, 0, sizeof u);
+    s->swizzle[0] = XYZW;
+    s->swizzle[1] = 0x6c368u | (1u << 4);                           /* x only, src1 negated */
+    s->f[0][0] = 2, s->f[0][1] = 3, s->f[0][2] = 4, s->f[0][3] = 5; /* c0 */
+    s->code[0] = op1(0x08, 0x10, 0x20, 0x00, 0);                    /* mul r0, c0, v0 */
+    s->code[1] = op1(0x00, 0x00, 0x10, 0x00, 0);                    /* add o0, r0, v0 */
+    s->code[2] = op1(0x02, 0x01, 0x10, 0x00, 0);                    /* dp4 o1, r0, v0 */
+    s->code[3] = op1(0x13, 0x02, 0x00, 0x00, 1);                    /* mov o2.x, -v0 */
+    s->code[4] = END;
+    u.input[0][0] = 1, u.input[0][1] = 1, u.input[0][2] = 1, u.input[0][3] = 2;
+    snx_ctr_shader_run(s, &u, 0, NULL);
+    check(u.temporary[0][0] == 2 && u.temporary[0][3] == 10, "mul with a float uniform");
+    check(u.output[0][0][0] == 3 && u.output[0][0][1] == 4 && u.output[0][0][2] == 5 && u.output[0][0][3] == 12, "add");
+    check(u.output[0][1][0] == 29 && u.output[0][1][3] == 29, "dp4 writes the dot product to every component");
+    check(u.output[0][2][0] == -1 && u.output[0][2][1] == 0, "a negated source, one destination component");
+
+    /* LOOP over i0 = (count 2, start 0, step 1): three passes add 1 to r1 each */
+    memset(&u, 0, sizeof u);
+    memset(s->code, 0, sizeof s->code);
+    s->f[1][0] = s->f[1][1] = s->f[1][2] = s->f[1][3] = 1; /* c1 */
+    s->i[0][0] = 2, s->i[0][1] = 0, s->i[0][2] = 1;
+    s->code[0] = (0x29u << 26) | (1u << 10);     /* loop i0, end at 1 */
+    s->code[1] = op1(0x00, 0x11, 0x21, 0x11, 0); /* add r1, c1, r1 */
+    s->code[2] = END;
+    snx_ctr_shader_run(s, &u, 0, NULL);
+    check(u.temporary[1][0] == 3 && u.address[2] == 3, "a loop runs count + 1 times and steps aL");
+
+    /* IFU on b0: the else branch when it is clear */
+    memset(&u, 0, sizeof u);
+    memset(s->code, 0, sizeof s->code);
+    s->b = 0;
+    s->code[0] = (0x27u << 26) | (2u << 10) | 1u; /* ifu b0, else at 2, 1 instruction after */
+    s->code[1] = op1(0x13, 0x12, 0x21, 0x00, 0);  /* mov r2, c1 (then) */
+    s->swizzle[2] = XYZW | 1u << 4;
+    s->code[2] = op1(0x13, 0x12, 0x21, 0x00, 2); /* mov r2, -c1 (else) */
+    s->code[3] = END;
+    snx_ctr_shader_run(s, &u, 0, NULL);
+    check(u.temporary[2][0] == -1, "ifu takes the else branch with its bool clear");
+    s->b = 1;
+    memset(&u, 0, sizeof u);
+    snx_ctr_shader_run(s, &u, 0, NULL);
+    check(u.temporary[2][0] == 1, "ifu takes the then branch and skips the else one");
+    free(s);
+}
+
+static void texels(SnxCtrMemory* m) {
+    /* an 8x8 I8 texture: texel (x, y) in memory order holds its Morton index */
+    unsigned char tile[64];
+    uint8_t c[4];
+    for (unsigned i = 0; i < 64; ++i) tile[i] = (unsigned char)i;
+    check(snx_ctr_phys_write(m, FCRAM + 0x8000, tile, 64) == SNX_CTR_MEM_OK, "the texture is written");
+    check(snx_ctr_texel(m, FCRAM + 0x8000, 8, SNX_CTR_TEX_I8, 3, 2, c) && c[0] == 13 && c[2] == 13 && c[3] == 255,
+          "I8 texels are Z-ordered in their tile");
+    /* (7, 6) is texel 61, the high nibble of byte 30 (0x1e) */
+    check(snx_ctr_texel(m, FCRAM + 0x8000, 8, SNX_CTR_TEX_A4, 7, 6, c) && c[0] == 0 && c[3] == 0x11,
+          "A4 reads the high nibble of odd texels");
+    check(snx_ctr_texel(m, FCRAM + 0x8000, 8, SNX_CTR_TEX_IA4, 2, 0, c) && c[0] == 0x00 && c[3] == 0x44,
+          "IA4: intensity high, alpha low");
+    /* ETC1, individual mode: both halves 4-bit (8, 4, 2) -> (0x88, 0x44, 0x22), table 0, all modifiers +2 */
+    uint64_t block = (uint64_t)0x88 << 56 | (uint64_t)0x44 << 48 | (uint64_t)0x22 << 40;
+    snx_ctr_etc1(block, 1, 1, c);
+    check(c[0] == 0x8a && c[1] == 0x46 && c[2] == 0x24, "ETC1 individual mode with its smallest modifier");
+    snx_ctr_etc1(block | 1u << (16 + 5) | 1u << 5, 1, 1, c); /* texel 4 * 1 + 1: large modifier, negated */
+    check(c[0] == 0x80 && c[1] == 0x3c && c[2] == 0x1a, "ETC1 negates and selects the large modifier per texel");
+}
+
+/* a full-viewport triangle (clipped down to the square), coloured by its vertices through TEV stage 0 */
+static void render(SnxCtrMemory* m) {
+    enum { FB = FCRAM + 0x20000, VERTICES = FCRAM + 0x10000, TEXTURE = FCRAM + 0x30000, W = 16, H = 16 };
+    SnxCtrPica* p = calloc(1, sizeof *p);
+    unsigned interrupts = 0;
+    SnxCtrPicaHost host = {&interrupts, on_interrupt};
+    List l = {{0}, 0};
+    /* position, colour, texture coordinate */
+    float vertices[3][10] = {{-1, -1, -0.5f, 1, 1, 0.6f, 0.25f, 1, 0, 0},
+                             {3, -1, -0.5f, 1, 1, 0.6f, 0.25f, 1, 2, 0},
+                             {-1, 3, -0.5f, 1, 1, 0.6f, 0.25f, 1, 0, 2}};
+    const uint32_t program[] = {op1(0x13, 0, 0, 0, 0), op1(0x13, 1, 1, 0, 0), op1(0x13, 2, 2, 0, 0), END};
+    unsigned char fb[W * H * 4], texture[64];
+    memset(fb, 0xee, sizeof fb);
+    memset(texture, 0x80, sizeof texture);
+    check(snx_ctr_phys_write(m, VERTICES, vertices, sizeof vertices) == SNX_CTR_MEM_OK &&
+              snx_ctr_phys_write(m, FB, fb, sizeof fb) == SNX_CTR_MEM_OK &&
+              snx_ctr_phys_write(m, TEXTURE, texture, sizeof texture) == SNX_CTR_MEM_OK,
+          "the draw's buffers are written");
+    snx_ctr_pica_init(p);
+    put(&l, SNX_PICA_VS + SNX_PICA_SH_PROGRAM_OFFSET, 0);
+    cmd(&l, SNX_PICA_VS + SNX_PICA_SH_PROGRAM_WORD, 15, false, program, 4);
+    put(&l, SNX_PICA_VS + SNX_PICA_SH_SWIZZLE_OFFSET, 0);
+    put(&l, SNX_PICA_VS + SNX_PICA_SH_SWIZZLE_WORD, XYZW);
+    put(&l, SNX_PICA_VS + SNX_PICA_SH_INPUT_CONFIG, 2 | 0xa0u << 24); /* three input attributes */
+    put(&l, SNX_PICA_VS + SNX_PICA_SH_ATTR_MAP_LOW, 0x210);
+    put(&l, SNX_PICA_VS + SNX_PICA_SH_OUTPUT_MASK, 7);
+    put(&l, 0x04f, 3);           /* vs_output_total */
+    put(&l, 0x050, 0x03020100u); /* position */
+    put(&l, 0x051, 0x0b0a0908u); /* colour */
+    put(&l, 0x052, 0x1f1f0d0cu); /* texture coordinate 0 */
+    put(&l, 0x041, 0x420000u);   /* viewport half width and height 8.0 */
+    put(&l, 0x043, 0x420000u);
+    put(&l, 0x1c6, 1); /* lighting off */
+    for (unsigned s = 1; s < 6; ++s) put(&l, s < 4 ? 0x0c0 + s * 8 : 0x0f0 + (s - 4) * 8, 0x000f000fu); /* previous */
+    /* framebuffer: RGBA8, 16x16, colour writes on, no depth */
+    put(&l, 0x11d, FB / 8);
+    put(&l, 0x117, 0);
+    put(&l, 0x11e, W | (H - 1) << 12);
+    put(&l, 0x113, 15);
+    put(&l, 0x107, 0xf00);
+    put(&l, 0x102, 3); /* logic op copy, blending off */
+    /* vertex arrays: three float attributes of 4, 4 and 2 elements in one loader of 40-byte vertices */
+    put(&l, 0x200, VERTICES >> 3);
+    put(&l, 0x201, 0x7ff);
+    put(&l, 0x202, 2u << 28);
+    put(&l, 0x203, 0);
+    put(&l, 0x204, 0x210);
+    put(&l, 0x205, 3u << 28 | 40u << 16);
+    put(&l, 0x228, 3);
+    put(&l, SNX_PICA_TRIGGER_DRAW, 1);
+    check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_OK, "a vertex-coloured draw runs");
+    check(snx_ctr_phys_read(m, FB, fb, sizeof fb) == SNX_CTR_MEM_OK, "the framebuffer is read back");
+    unsigned wrong = 0;
+    for (unsigned i = 0; i < W * H; ++i) /* RGBA8 is stored a, b, g, r */
+        wrong += !(fb[i * 4] == 255 && fb[i * 4 + 1] == 64 && fb[i * 4 + 2] == 153 && fb[i * 4 + 3] == 255);
+    if (wrong)
+        fprintf(stderr, "%u wrong, pixel 0: %02x %02x %02x %02x, pixel 255: %02x %02x %02x %02x\n", wrong, fb[0], fb[1],
+                fb[2], fb[3], fb[1020], fb[1021], fb[1022], fb[1023]);
+    check(!wrong, "every pixel gets the interpolated vertex colour");
+
+    /* the same triangle sampling a uniform I8 texture: TEV stage 0 takes texture 0's colour */
+    l.n = 0;
+    put(&l, 0x080, 1);            /* texture 0 on */
+    put(&l, 0x082, 8 | 8u << 16); /* 8x8 */
+    put(&l, 0x083, 0);            /* 2D, clamp to edge */
+    put(&l, 0x085, TEXTURE / 8);
+    put(&l, 0x08e, SNX_CTR_TEX_I8);
+    put(&l, 0x0c0, 3); /* colour from texture 0, alpha from the vertex */
+    put(&l, SNX_PICA_TRIGGER_DRAW, 1);
+    check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_OK, "a textured draw runs");
+    check(snx_ctr_phys_read(m, FB, fb, sizeof fb) == SNX_CTR_MEM_OK, "the framebuffer is read back");
+    wrong = 0;
+    for (unsigned i = 0; i < W * H; ++i)
+        wrong += !(fb[i * 4] == 255 && fb[i * 4 + 1] == 0x80 && fb[i * 4 + 2] == 0x80 && fb[i * 4 + 3] == 0x80);
+    check(!wrong, "every pixel gets the texture's intensity");
+
+    /* blending: zero times the source plus one times the destination keeps the framebuffer */
+    l.n = 0;
+    put(&l, 0x0c0, 0);
+    put(&l, 0x100, 1u << 8);             /* blending on */
+    put(&l, 0x101, 1u << 20 | 1u << 28); /* add, source factors zero, destination factors one */
+    put(&l, SNX_PICA_TRIGGER_DRAW, 1);
+    check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_OK, "a blended draw runs");
+    check(snx_ctr_phys_read(m, FB, fb, sizeof fb) == SNX_CTR_MEM_OK, "the framebuffer is read back");
+    wrong = 0;
+    for (unsigned i = 0; i < W * H; ++i) wrong += fb[i * 4 + 3] != 0x80;
+    check(!wrong, "zero times the source plus the destination keeps the framebuffer");
+
+    /* fragment lighting: one directional light along the normal the unmapped quaternion (all ones) rotates +z to,
+       a diffuse colour past 1 in red and blue, the LUTs and attenuations off, TEV taking the primary fragment colour */
+    l.n = 0;
+    put(&l, 0x100, 0);                       /* blending off */
+    put(&l, 0x140 + 2, 1023u << 20 | 1023u); /* light 0 diffuse */
+    put(&l, 0x140 + 4, 0x3c00);              /* x = 1.0 (float16) */
+    put(&l, 0x140 + 9, 1);                   /* directional */
+    put(&l, 0x1c4, 0xff7bff00u);             /* LUTs, spot and distance attenuation off */
+    put(&l, 0x1c6, 0);                       /* lighting on */
+    put(&l, 0x0c0, 1);
+    put(&l, SNX_PICA_TRIGGER_DRAW, 1);
+    check(run(p, m, FCRAM, &l, &host) == SNX_CTR_PICA_OK, "a lit draw runs");
+    check(snx_ctr_phys_read(m, FB, fb, sizeof fb) == SNX_CTR_MEM_OK, "the framebuffer is read back");
+    wrong = 0;
+    for (unsigned i = 0; i < W * H; ++i)
+        wrong += !(fb[i * 4] == 255 && fb[i * 4 + 1] == 255 && fb[i * 4 + 2] == 0 && fb[i * 4 + 3] == 255);
+    check(!wrong, "every pixel gets the saturated diffuse colour");
     snx_ctr_pica_free(p);
     free(p);
 }
@@ -212,6 +393,9 @@ int main(void) {
     writes(m);
     uploads(m);
     control(m);
+    shaders();
+    texels(m);
+    render(m);
     snx_ctr_memory_free(m);
     if (failures) return 1;
     puts("3ds pica: ok");

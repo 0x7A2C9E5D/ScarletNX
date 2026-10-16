@@ -165,7 +165,15 @@ processor (`src/3ds/gpu/pica.c`, ported from Azahar's `PicaCore`): masked regist
 writes, batched and sequential extra data, shader program, swizzle and uniform uploads,
 the lighting, fog and procedural-texture LUTs, default attributes and immediate mode,
 command buffer jumps and the P3D interrupt request with autostop. A list outside memory
-raises P3D without running. A draw trigger stops the run. The ExHeader's address-mapping capabilities
+raises P3D without running. Draws run in software, ported from Azahar's software
+renderer: the shader interpreter (`gpu/shader.c`), vertex loading with the indexed
+vertex cache and primitive assembly (`gpu/draw.c`), and clipping, rasterization,
+texturing in the fourteen texture formats with cube and projected textures, fragment
+lighting, the six texture combiner stages, fog, the alpha, stencil and depth tests,
+blending and logic ops into the tiled framebuffer in physical memory (`gpu/raster.c`,
+`gpu/lighting.c`, `gpu/texture.c`). Geometry shaders, procedural textures and shadow
+textures and rendering are not ported yet: a draw that needs one stops the run and
+names it. The ExHeader's address-mapping capabilities
 are applied at process creation (VRAM, DSP RAM, New 3DS extra RAM), as Azahar's
 `HandleSpecialMapping` does; MMIO areas stay unmapped. SetBufferSwap latches real
 framebuffer descriptors (RGBA8/RGB565; other layouts stop rather than being
@@ -358,6 +366,12 @@ special mappings follow `core/hle/kernel/{process,memory}.cpp` (GPL-2.0-or-later
 The command processor ports `video_core/pica/pica_core.cpp`, `shader_setup.cpp`,
 `packed_attribute.h`, `pica_types.h` and the register layouts of `regs_*.h`
 (GPL-2.0-or-later) at the same revision.
+The software pipeline ports `video_core/shader/shader_interpreter.cpp`,
+`video_core/pica/{shader_unit,vertex_loader,primitive_assembly,output_vertex}.cpp`,
+`video_core/renderer_software/{sw_rasterizer,sw_clipper,sw_texturing,sw_framebuffer,sw_lighting}.cpp`
+and `video_core/texture/{texture_decode,etc1}.cpp` (GPL-2.0-or-later), with the shader
+instruction encoding of nihstro's `shader_bytecode.h` (BSD-3-Clause, notice kept in
+`gpu/shader.c`).
 Stage 3a references GPL-2.0-or-later `core/hle/ipc.h`, `kernel/hle_ipc.cpp`,
 `kernel/svc.cpp`, `service/sm/{srv.cpp,sm.h}` and `service/fs/fs_user.cpp` at that
 revision for wire/result/initialization facts. Its new C transport/services and

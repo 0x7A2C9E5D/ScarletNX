@@ -12,7 +12,7 @@ add_library(snx_ctr_loader STATIC loader/loader.c loader/cia.c loader/ncch.c loa
 target_link_libraries(snx_ctr_loader PUBLIC scarletnx-common OpenSSL::Crypto)
 target_compile_definitions(snx_ctr_loader PRIVATE _FILE_OFFSET_BITS=64 _CRT_SECURE_NO_WARNINGS)
 add_library(snx_ctr_process STATIC runtime/process.c kernel/kernel.c kernel/thread.c aot/dispatch.c ipc/ipc.c services/srv.c services/fs.c services/apt.c services/ptm.c services/hid.c services/romfs.c services/file.c services/gsp.c)
-add_library(snx_ctr_gpu STATIC gpu/present.c gpu/transfer.c gpu/pica.c "${volk_SOURCE_DIR}/volk.c")
+add_library(snx_ctr_gpu STATIC gpu/present.c gpu/transfer.c gpu/pica.c gpu/shader.c gpu/draw.c gpu/raster.c gpu/lighting.c gpu/texture.c "${volk_SOURCE_DIR}/volk.c")
 target_include_directories(snx_ctr_gpu PUBLIC "${volk_SOURCE_DIR}")
 target_link_libraries(snx_ctr_gpu PUBLIC snx_ctr_memory Vulkan::Headers SDL3::SDL3 ${CMAKE_DL_LIBS})
 set_source_files_properties("${volk_SOURCE_DIR}/volk.c" PROPERTIES COMPILE_OPTIONS -w)
