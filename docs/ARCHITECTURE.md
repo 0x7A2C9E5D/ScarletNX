@@ -10,8 +10,8 @@
   * [Renderer coherence + lifetime](#renderer-coherence--lifetime)
   * [Videodec/VIC channels](#videodecvic-channels)
 
-ScarletNX AOT: AArch64 -> C -> native module, shared by Horizon HLE/Maxwell
-and CPU-only Linux AArch64 ABI runtimes.
+ScarletNX compiles AArch64 code into native modules through LLVM IR (or libgccjit).
+The CPU implementation is shared by Horizon HLE/Maxwell and CPU-only Linux AArch64 ABI runtimes.
 Source map: [CLAUDE.md](../CLAUDE.md).
 
 ## Runtime boundaries
