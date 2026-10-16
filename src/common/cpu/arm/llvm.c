@@ -346,7 +346,10 @@ static void memory(ArmIR* a, SnxA32Kind kind) {
     }
     adjusted = up ? add(a, base, offset) : sub(a, base, offset);
     addr = pre ? adjusted : base;
-    unsigned alignment = pair ? (a->profile == SNX_ARM_PROFILE_ARM11 ? 8 : 4) : (load && d == 15) ? 4 : 1;
+    /* With unaligned support on (ARMv6 SCTLR.U, the model ordinary transfers follow), LDRD and STRD need word
+       alignment only. Doubleword alignment is the legacy U=0 rule, and libctru's file code loads 64-bit offsets
+       from word-aligned structures */
+    unsigned alignment = pair || (load && d == 15) ? 4 : 1;
     transfer_begin(a, addr, pair ? 8 : bytes, alignment, !load, pair);
     if (load) {
         value = readmem(a, addr, bytes, sign);

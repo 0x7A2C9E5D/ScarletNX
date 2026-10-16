@@ -170,10 +170,17 @@ int main(void) {
     put32(0x4004, 7);
     run(F_ldrd, SNX_ARM_OK);
     assert(c->r[2] == 5 && c->r[3] == 7 && c->r[0] == 0x4008);
+    /* unaligned support on (SCTLR.U): a doubleword needs word alignment, not doubleword alignment */
     c = start(F_ldrd);
     c->r[0] += 4;
+    put32(0x4004, 7);
+    put32(0x4008, 9);
+    run(F_ldrd, SNX_ARM_OK);
+    assert(c->r[2] == 7 && c->r[3] == 9 && c->r[0] == 0x400c);
+    c = start(F_ldrd);
+    c->r[0] += 2;
     run(F_ldrd, SNX_ARM_ALIGNMENT);
-    assert(c->r[0] == 0x4004);
+    assert(c->r[0] == 0x4002);
     c = start(F_movpc11);
     c->r[0] = 0x4003;
     run(F_movpc11, SNX_ARM_OK);
