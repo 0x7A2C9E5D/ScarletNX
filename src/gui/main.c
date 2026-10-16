@@ -38,7 +38,7 @@
 
 /* the space ScarletNX takes, counted on a thread of its own when the Settings open: its folders may hold many files,
    on a slow card. The thread's until done is set; one block with the folders' paths */
-#define GUI_SPACE_DIRS 4 /* games/, work/ and themes/ of the data folder, and the menu's own */
+#define GUI_SPACE_DIRS 6 /* games/, work/ and themes/ of the data folder; the XDG folders, or the menu's own */
 typedef struct {
     char* dirs[GUI_SPACE_DIRS];
     uint64_t used;
@@ -1169,17 +1169,27 @@ static uint64_t free_space(const char* path) {
     return left;
 }
 static void space_start(App* app) {
-    char* dirs[GUI_SPACE_DIRS] = {snx_strdup(app->games_dir), snx_path_join(app->data_dir, "work"),
-                                  snx_strdup(app->themes_dirs[0] ? app->themes_dirs[0] : ""),
-                                  app->recent_file ? snx_dirname(app->recent_file) : snx_strdup("")};
+    char* dirs[GUI_SPACE_DIRS] = {snx_strdup(app->games_dir),
+                                  snx_path_join(app->data_dir, "work"),
+                                  app->themes_dirs[0] ? snx_strdup(app->themes_dirs[0]) : NULL,
+#ifdef SNX_XDG /* settings, logs and caches, the menu's files among them; an older version's work/ is the data folder's */
+                                  snx_user_dir(SNX_USER_CONFIG),
+                                  snx_user_dir(SNX_USER_STATE),
+                                  snx_user_dir(SNX_USER_CACHE)
+#else
+                                  app->recent_file ? snx_dirname(app->recent_file) : NULL,
+                                  NULL,
+                                  NULL
+#endif
+    };
     size_t size = sizeof *app->space;
     char* at;
     int i;
     space_stop(app);
-    for (i = 0; i < GUI_SPACE_DIRS; ++i) size += strlen(dirs[i]) + 1;
+    for (i = 0; i < GUI_SPACE_DIRS; ++i) size += (dirs[i] ? strlen(dirs[i]) : 0) + 1;
     app->space = (GuiSpace*)calloc(1, size);
     for (i = 0, at = (char*)(app->space + 1); app->space && i < GUI_SPACE_DIRS; at += strlen(at) + 1, ++i)
-        app->space->dirs[i] = strcpy(at, dirs[i]);
+        app->space->dirs[i] = strcpy(at, dirs[i] ? dirs[i] : ""); /* "": none */
     for (i = 0; i < GUI_SPACE_DIRS; ++i) free(dirs[i]);
     app->free_bytes = free_space(app->data_dir);
     if (app->space && !(app->counter = SDL_CreateThread(count_space, "space", app->space)))

@@ -61,7 +61,8 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   libgccjit; games in `games/` are not recompiled), **gdbstub** passes `-S` and `-s`, the
   runtime's stub on port 1234 waiting for the debugger at startup (UNIX only). None of them
   reaches the Linux or the 3DS driver. Its last line says what ScarletNX's folders take (games/,
-  work/ and themes/ of the data folder, and the menu's own) and what is left on that disk.
+  work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
+  the menu's own) and what is left on that disk.
 - **Theme** switches to the next theme: the built-in Default and YoRHa, then each
   folder of `themes/` (see [Themes](#themes)). It lasts for the session.
 - **Theme editor** edits the current theme: a row per `theme.ini` key, and beside them a
