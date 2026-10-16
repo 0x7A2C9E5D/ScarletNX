@@ -4,6 +4,7 @@
 #define SNX_GUI_BROWSER_H
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 typedef struct {
     char** names; /* sorted basenames, not display paths */
     size_t count;
@@ -12,6 +13,9 @@ typedef struct {
    recurse into data/save directories. */
 bool gui_games_scan(GuiGames* games, const char* directory, bool cia, char* error, size_t size);
 void gui_games_free(GuiGames* games);
+/* The bytes of the files under path, in its folders too, links not followed: 0 for no such folder. It stops, with what
+   it counted, once *stop is set by another thread */
+uint64_t gui_tree_size(const char* path, const int* stop);
 /* An NRO, XCI or NSP (or a decrypted one) by its name: a dump the driver prepares, not a game ready to run */
 bool gui_is_dump(const char* name);
 #endif

@@ -26,6 +26,20 @@ void gui_games_free(GuiGames* games) {
     games->names = NULL;
     games->count = 0;
 }
+uint64_t gui_tree_size(const char* path, const int* stop) {
+    char** names = NULL;
+    size_t count = 0, i;
+    uint64_t total = 0;
+    if (snx_list_dir(path, &names, &count)) return 0;
+    for (i = 0; i < count && !__atomic_load_n(stop, __ATOMIC_RELAXED); ++i) {
+        char* entry = snx_path_join(path, names[i]);
+        if (entry && !snx_is_link(entry))
+            total += snx_is_dir(entry) ? gui_tree_size(entry, stop) : snx_file_size(entry);
+        free(entry);
+    }
+    snx_free_strings(names, count);
+    return total;
+}
 bool gui_games_scan(GuiGames* games, const char* directory, bool cia, char* error, size_t size) {
     gui_games_free(games);
     if (size) error[0] = 0;

@@ -36,6 +36,14 @@
 #define GUI_BUILD    NULL
 #endif
 
+/* the space ScarletNX takes, counted on a thread of its own when the Settings open: its folders may hold many files,
+   on a slow card. The thread's until done is set; one block with the folders' paths */
+#define GUI_SPACE_DIRS 4 /* games/, work/ and themes/ of the data folder, and the menu's own */
+typedef struct {
+    char* dirs[GUI_SPACE_DIRS];
+    uint64_t used;
+    int done, stop;
+} GuiSpace;
 typedef struct {
     SDL_Window* window;
     SDL_Renderer* renderer;
@@ -51,8 +59,11 @@ typedef struct {
     GuiSteps steps;
     GuiRecent recent;
     GuiSettings settings; /* read the first time a run or the Settings need them */
-    char* recent_file;    /* where the recent games are kept; NULL keeps none */
-    char* run_log;        /* where a run's output goes as it comes, the last run's; NULL keeps none */
+    GuiSpace* space;      /* the latest count, its thread counter until joined */
+    SDL_Thread* counter;
+    uint64_t free_bytes; /* on the data folder's disk, when the count started */
+    char* recent_file;   /* where the recent games are kept; NULL keeps none */
+    char* run_log;       /* where a run's output goes as it comes, the last run's; NULL keeps none */
     FILE* run_out;
     int recent_named;           /* the run's own name went to its recent game */
     Uint64 clock;               /* fixed time for tests; 0 is the real clock */
@@ -1093,10 +1104,18 @@ static void render_editor(App* app) {
         }
     }
     if (e->object) {
+        char used[32], left[32];
         text(app, 1, app->rows - 2,
              e->count > GUI_SETTINGS_OWN ? "For the next runs. .ini: as the game's .ini says"
                                          : "The runtime listed no settings",
              rgb(theme->soft));
+        gui_size_text(left, sizeof left, app->free_bytes);
+        if (app->space && __atomic_load_n(&app->space->done, __ATOMIC_ACQUIRE)) {
+            gui_size_text(used, sizeof used, app->space->used);
+            snprintf(value, sizeof value, "Disk: %s used by ScarletNX, %s free", used, left);
+        } else
+            snprintf(value, sizeof value, "Disk: counting what ScarletNX uses, %s free", left);
+        text(app, 1, app->rows - 1, value, rgb(theme->soft));
         return;
     }
     snprintf(value, sizeof value, "Saves in %s", app->themes_dirs[0] ? app->themes_dirs[0] : "(no themes folder)");
@@ -1117,10 +1136,61 @@ static void open_editor(App* app) {
     app->editing = true;
     app->preview_since = 0;
 }
+static int SDLCALL count_space(void* data) {
+    GuiSpace* space = (GuiSpace*)data;
+    uint64_t used = 0;
+    for (int i = 0; i < GUI_SPACE_DIRS; ++i)
+        used += space->dirs[i][0] ? gui_tree_size(space->dirs[i], &space->stop) : 0;
+    space->used = used;
+    __atomic_store_n(&space->done, 1, __ATOMIC_RELEASE);
+    return 0;
+}
+static void space_stop(App* app) {
+    if (app->counter) {
+        __atomic_store_n(&app->space->stop, 1, __ATOMIC_RELAXED);
+        SDL_WaitThread(app->counter, NULL);
+        app->counter = NULL;
+    }
+    free(app->space);
+    app->space = NULL;
+}
+/* the space left on the disk of path, or of the folder it will be made in */
+static uint64_t free_space(const char* path) {
+    char* at = snx_strdup(path);
+    uint64_t left;
+    while (!snx_is_dir(at)) {
+        char* up = snx_dirname(at);
+        int top = !strcmp(up, at);
+        free(at);
+        at = up;
+        if (top) break;
+    }
+    left = snx_free_space(at);
+    free(at);
+    return left;
+}
+static void space_start(App* app) {
+    char* dirs[GUI_SPACE_DIRS] = {snx_strdup(app->games_dir), snx_path_join(app->data_dir, "work"),
+                                  snx_strdup(app->themes_dirs[0] ? app->themes_dirs[0] : ""),
+                                  app->recent_file ? snx_dirname(app->recent_file) : snx_strdup("")};
+    size_t size = sizeof *app->space;
+    char* at;
+    int i;
+    space_stop(app);
+    for (i = 0; i < GUI_SPACE_DIRS; ++i) size += strlen(dirs[i]) + 1;
+    app->space = (GuiSpace*)calloc(1, size);
+    for (i = 0, at = (char*)(app->space + 1); app->space && i < GUI_SPACE_DIRS; at += strlen(at) + 1, ++i)
+        app->space->dirs[i] = strcpy(at, dirs[i]);
+    for (i = 0; i < GUI_SPACE_DIRS; ++i) free(dirs[i]);
+    app->free_bytes = free_space(app->data_dir);
+    if (app->space && !(app->counter = SDL_CreateThread(count_space, "space", app->space)))
+        count_space(app->space); /* no thread to count it: here, then */
+}
 static void open_settings(App* app) {
     GuiSettings* s = settings_of(app);
     gui_editor_form(&app->editor, s->keys, s->count, s->values);
     app->editing = true;
+    space_start(app);
 }
 static void leave_editor(App* app) {
     gui_editor_stop(&app->editor);
@@ -2042,6 +2112,7 @@ static void cleanup(App* app) {
     gui_android_ran(NULL); /* the run goes with the menu */
 #endif
     gui_process_destroy(app->process);
+    space_stop(app);
     gui_settings_free(&app->settings);
     free(app->self);
     free(app->drivers);

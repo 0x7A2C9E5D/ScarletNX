@@ -57,6 +57,8 @@ typedef struct {
    both closing it. True when the run is to be aborted */
 bool gui_confirm_key(GuiConfirm* confirm, GuiKey key);
 const char* gui_setting_description(const GuiMenu* menu);
+/* bytes in MB, or in GB from 1024 MB on */
+void gui_size_text(char* out, size_t size, uint64_t bytes);
 /* the footer's line: RAM in MB or GB, the CPU as a share of all cores and the cores in use (cpu_percent counts one
    core as 100%) */
 void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_bytes, double cpu_percent, int cores);

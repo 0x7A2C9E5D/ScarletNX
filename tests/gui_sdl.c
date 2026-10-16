@@ -446,6 +446,31 @@ int main(int argc, char** argv) {
        menu's items used to set is in them */
     key(&app, SDLK_SPACE);
     assert(app.editing && app.editor.object && app.editor.count == GUI_SETTINGS_OWN + 4);
+    /* and the disk: what ScarletNX's folders take, counted on a thread, and what is left */
+    {
+        char line[128], used[32], left[32];
+        uint64_t total = 0;
+        Uint64 until = SDL_GetTicks() + 5000;
+        char* big = snx_path_join(app.games_dir, "big.bin");
+        char* bytes = (char*)calloc(1, 3 << 20);
+        assert(bytes && !snx_mkdirs(app.games_dir) && !snx_write_file(big, bytes, 3 << 20));
+        key(&app, SDLK_ESCAPE); /* counted again as the Settings open */
+        key(&app, SDLK_SPACE);
+        assert(app.space && app.free_bytes);
+        render(&app);
+        while (!__atomic_load_n(&app.space->done, __ATOMIC_ACQUIRE) && SDL_GetTicks() < until) SDL_Delay(5);
+        for (int i = 0; i < GUI_SPACE_DIRS; ++i) total += gui_tree_size(app.space->dirs[i], &app.space->stop);
+        assert(app.space->done && app.space->used == total && !strcmp(app.space->dirs[0], app.games_dir));
+        gui_size_text(used, sizeof used, total);
+        gui_size_text(left, sizeof left, app.free_bytes);
+        snprintf(line, sizeof line, "Disk: %s used by ScarletNX, %s free", used, left);
+        render(&app);
+        colored_text(&app, app.rows - 1, line, rgb(app.theme.soft));
+        assert(total == 3 << 20 && !strncmp(line, "Disk: 3 MB used by ScarletNX, ", 30));
+        assert(!snx_remove_tree(app.games_dir)); /* the browser's checks below start with no games/ */
+        free(bytes);
+        free(big);
+    }
     render(&app);
     colored_text(&app, 0, "SETTINGS", normal);
     colored_text(&app, 1, "Up/Down: setting. Left/Right: change. Enter: type. ESC: back.", normal);

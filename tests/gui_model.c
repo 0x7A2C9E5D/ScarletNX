@@ -101,6 +101,15 @@ int main(void) {
         assert(!strcmp(use, "GUI + children: RAM 0 MB  CPU 100% (1.0 cores)"));
         gui_usage_text(use, sizeof use, false, 1, 1, 1);
         assert(!strcmp(use, "GUI + children: resource usage unavailable"));
+        /* sizes, as the footer and the Settings' disk line write them: MB under a GB */
+        gui_size_text(use, sizeof use, 0);
+        assert(!strcmp(use, "0 MB"));
+        gui_size_text(use, sizeof use, 1023ull << 20);
+        assert(!strcmp(use, "1023 MB"));
+        gui_size_text(use, sizeof use, 1ull << 30);
+        assert(!strcmp(use, "1.0 GB"));
+        gui_size_text(use, sizeof use, 26ull << 30 | 400ull << 20);
+        assert(!strcmp(use, "26.4 GB"));
     }
     /* a line 5 columns too long, a column every 100 ms: rests 8 steps, slides, rests at its end, slides back */
     assert(!gui_slide(0, 900, 100) && !gui_slide(5, 900, 0) && !gui_slide(-3, 900, 100));
