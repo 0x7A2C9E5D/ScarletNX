@@ -96,6 +96,9 @@ void vk_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, VkPi
         (void)to;
 }
 void vk_compute_mem_need(u64 a, u64 n) { (void)a, (void)n; }
+void vk_depth_unpack(const VkFmt* f, const u8* src, u64 pixels, u8* depth, u8* stencil) {
+    (void)f, (void)src, (void)pixels, (void)depth, (void)stencil;
+}
 void vk_defer_image(VkImage img, VmaAllocation a, VkImageView v1, VkImageView v2) {
     (void)img, (void)a, (void)v1, (void)v2;
 }

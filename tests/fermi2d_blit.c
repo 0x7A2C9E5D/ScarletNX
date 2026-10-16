@@ -75,7 +75,16 @@ u64 bl_offset(u32 x, u32 y, u32 z, u32 wb, u32 h, u32 bh_log2, u32 bd_log2) {
 void (*g_gpu_before_write)(u64 gva, u64 size);
 void gmem_w32(u64 gva, u32 v) { gmem_write(gva, &v, 4); }
 void gpu_signal_point(void) {}
+void gpu_release_write(u64 gva, const void* data, u32 len) { gmem_write(gva, data, len); }
 u64 gpu_ticks(void) { return 0; }
+/* dma.c's snapshots of linear sources: one thread here, and no GPU write ever lands */
+void pm_lock(PMutex* m) { (void)m; }
+void pm_unlock(PMutex* m) { (void)m; }
+u64 gpu_mem_generation(void) { return 0; }
+int gpu_mem_dirty_since(u64 since, u64 a, u64 sz) {
+    (void)since, (void)a, (void)sz;
+    return 0;
+}
 u32 gpu_color_bpp(u32 format) {
     (void)format;
     return 4;
