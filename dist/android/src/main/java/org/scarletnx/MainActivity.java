@@ -3,6 +3,7 @@
 package org.scarletnx;
 
 import android.Manifest;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -13,6 +14,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.view.DisplayCutout;
 import android.view.View;
@@ -25,7 +27,7 @@ import org.libsdl.app.SDLSurface;
 /** The menu: scarletnx-gui, as libmain.so */
 public class MainActivity extends SDLActivity {
     /** past the request codes SDL counts up from 0 */
-    private static final int ASKED_NOTIFICATIONS = 0x10000;
+    private static final int ASKED_NOTIFICATIONS = 0x10000, ASKED_BATTERY = 0x10001;
 
     @Override
     protected String[] getLibraries() {
@@ -76,13 +78,27 @@ public class MainActivity extends SDLActivity {
         RecompileService.seen(this);
     }
 
-    /** what a run behind other apps needs, each asked once: its notification (Android 13) */
+    /** what a run behind other apps needs, each asked once: its notification (Android 13), no battery limit
+        (Android 6), then the maker's own setting (Makers) */
     private void askBackground() {
         SharedPreferences asked = getSharedPreferences("asked", MODE_PRIVATE);
+        String[] maker = Makers.limits();
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
             once(asked, "notifications"))
             requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, ASKED_NOTIFICATIONS);
+        else if (Build.VERSION.SDK_INT >= 23 &&
+                 !((PowerManager)getSystemService(POWER_SERVICE)).isIgnoringBatteryOptimizations(getPackageName()) &&
+                 once(asked, "battery")) {
+            try {
+                startActivityForResult(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                                  Uri.parse("package:" + getPackageName())),
+                                       ASKED_BATTERY);
+            } catch (ActivityNotFoundException e) {
+                askBackground();
+            }
+        } else if (maker != null && once(asked, "maker"))
+            Makers.ask(this, maker);
     }
 
     /** true the first time, which it records */
@@ -98,6 +114,12 @@ public class MainActivity extends SDLActivity {
             askBackground();
         else
             super.onRequestPermissionsResult(code, permissions, results);
+    }
+
+    @Override
+    protected void onActivityResult(int code, int result, Intent data) {
+        super.onActivityResult(code, result, data);
+        if (code == ASKED_BATTERY) askBackground();
     }
 
     /** src/gui/android.c: the saved log, as a file, to the app the user picks */

@@ -19,6 +19,8 @@ recompiles on the phone, then the game opens.
   `libscarletnx.so`, beside it. It cannot open a window there, so it ends at `Ready <game>` and the menu opens it.
 - **Behind other apps** the driver keeps going: a notification shows the game, its step and a bar, and a tap on it
   returns to the menu. A run that ends there leaves a notification saying so, and its game opens once the menu shows.
+  The first run asks to show it (Android 13) and to lift the battery limit; on a phone whose maker adds its own limit
+  (Samsung, Xiaomi, OPPO, vivo, Huawei...) it names the setting, with a button to its screen.
 - **A game** runs in `GameActivity`, in a process of its own: the runtime's `main` with `--game=games/<game>`.
   Its process ends with the game, and the menu comes back on its first screen. The shared storage maps nothing
   executable, so the runtime loads a copy of `<game>_code.so` from the app's cache. The back button opens the
