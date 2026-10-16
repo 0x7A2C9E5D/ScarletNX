@@ -112,12 +112,14 @@ static void marks(App* app, int first, int last, bool up, bool down) {
     colored_text_on(app, 0, first, up ? "\x1e" : " ", soft, page);
     colored_text_on(app, 0, last, down ? "\x1f" : " ", soft, page);
 }
+#ifdef SNX_XDG /* the old-files box's check: only an XDG system has older files to move */
 /* the rows a path takes wrapped at width */
 static int path_rows(const char* path, int width) {
     int n = 0;
     for (; *path; path += gui_wrap(path, width)) ++n;
     return n;
 }
+#endif
 static void colored_text_at(App* app, int col, int row, const char* prompt, SDL_Color color) {
     colored_text_on(app, col, row, prompt, color, black);
 }
