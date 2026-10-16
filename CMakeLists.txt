@@ -195,6 +195,7 @@ elseif(NOT ANDROID) # src/nx puts Android's in the app's libraries
 endif()
 if(NOT WIN32)
     install(FILES dist/scarletnx.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT desktop)
+    install(FILES dist/io.github.scarletnx.scarletnx.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo COMPONENT desktop)
 endif()
 if(ANDROID) # the app's launcher icon (dist/android)
     install(FILES dist/icons/hicolor/256x256/apps/wimsy.png DESTINATION res/mipmap-xxxhdpi RENAME ic_launcher.png)
