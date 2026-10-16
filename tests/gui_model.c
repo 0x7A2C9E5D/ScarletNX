@@ -252,6 +252,7 @@ int main(void) {
     assert(!gui_document_path("content://com.android.providers.downloads.documents/document/msf%3A1234"));
     assert(!gui_document_path("content://com.android.providers.media.documents/document/document%3A12"));
     assert(!gui_document_path("content://com.android.externalstorage.documents/document/primary%3A%zz"));
+    assert(!gui_document_path("content://com.android.externalstorage.documents/document/primary%3A%00.xci"));
     assert(!gui_document_path("content://com.android.externalstorage.documents/document/primary"));
     path = gui_document_path("file:///tmp/a%20b.nro");
     assert(path && !strcmp(path, "/tmp/a b.nro"));

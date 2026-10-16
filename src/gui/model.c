@@ -330,6 +330,26 @@ static int hex(char c) {
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     return -1;
 }
+/* size bytes of at, percent-decoded when uri; NULL when a % is not two hex digits, or makes a NUL */
+static char* decoded(const char* at, size_t size, bool uri) {
+    const char* end = at + size;
+    size_t n = 0;
+    char* out = malloc(size + 1);
+    while (out && at < end) {
+        unsigned char c = (unsigned char)*at++;
+        if (uri && c == '%') {
+            if (end - at < 2 || hex(at[0]) < 0 || hex(at[1]) < 0 ||
+                !(c = (unsigned char)(hex(at[0]) << 4 | hex(at[1])))) {
+                free(out);
+                return NULL;
+            }
+            at += 2;
+        }
+        out[n++] = (char)c;
+    }
+    if (out) out[n] = 0;
+    return out;
+}
 char* gui_drop_path(const char* text, bool text_drop) {
     if (!text) return NULL;
     const char* end = text + strlen(text);
@@ -349,59 +369,29 @@ char* gui_drop_path(const char* text, bool text_drop) {
         }
     }
     if (text == end) return NULL;
-    char* result = malloc((size_t)(end - text) + 1);
-    if (!result) return NULL;
-    size_t n = 0;
-    while (text < end) {
-        unsigned char c = (unsigned char)*text++;
-        if (uri && c == '%') {
-            if (end - text < 2 || hex(text[0]) < 0 || hex(text[1]) < 0) goto invalid;
-            c = (unsigned char)((hex(text[0]) << 4) | hex(text[1]));
-            text += 2;
-        }
-        if (!c || (text_drop && (c == '\r' || c == '\n'))) goto invalid;
-        result[n++] = (char)c;
+    char* result = decoded(text, (size_t)(end - text), uri);
+    if (result && text_drop && strpbrk(result, "\r\n")) {
+        free(result);
+        return NULL;
     }
-    result[n] = 0;
 #ifdef _WIN32
-    if (uri && n >= 3 && result[0] == '/' && result[2] == ':') memmove(result, result + 1, n);
+    if (result && uri && result[0] == '/' && result[1] && result[2] == ':') memmove(result, result + 1, strlen(result));
 #endif
     return result;
-invalid:
-    free(result);
-    return NULL;
-}
-/* text from at, percent-decoded; NULL when a % is not followed by two hex digits */
-static char* decoded(const char* at) {
-    size_t n = 0;
-    char* out = malloc(strlen(at) + 1);
-    if (!out) return NULL;
-    while (*at) {
-        if (*at != '%') {
-            out[n++] = *at++;
-            continue;
-        }
-        if (hex(at[1]) < 0 || hex(at[2]) < 0) {
-            free(out);
-            return NULL;
-        }
-        out[n++] = (char)(hex(at[1]) << 4 | hex(at[2]));
-        at += 3;
-    }
-    out[n] = 0;
-    return out;
 }
 char* gui_document_path(const char* uri) {
     static const char storage[] = "content://com.android.externalstorage.documents/document/";
     static const char downloads[] = "content://com.android.providers.downloads.documents/document/";
     int download = !strncmp(uri, downloads, sizeof downloads - 1);
+    const char* id_text;
     char *id, *colon, *path = NULL;
     size_t n;
     if (!download && strncmp(uri, storage, sizeof storage - 1)) /* other systems' pickers: a path or a file:// URI */
         return !strstr(uri, "://")           ? gui_drop_path(uri, false)
                : !strncmp(uri, "file://", 7) ? gui_drop_path(uri, true)
                                              : NULL;
-    id = decoded(uri + (download ? sizeof downloads : sizeof storage) - 1);
+    id_text = uri + (download ? sizeof downloads : sizeof storage) - 1;
+    id = decoded(id_text, strlen(id_text), true);
     colon = id ? strchr(id, ':') : NULL;
     if (colon && download && !strncmp(id, "raw:/", 5)) { /* a download by path; "msf:12" is by number */
         path = malloc(strlen(colon + 1) + 1);
