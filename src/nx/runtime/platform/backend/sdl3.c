@@ -18,6 +18,7 @@
 #include "runtime/platform/ui.h"
 #include "runtime/platform/vpad.h"
 #include "runtime/platform/gamepad.h"
+#include "pad_sdl.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -605,7 +606,12 @@ static int menu_event(const SDL_Event* e) {
             default: break;
         }
     } else if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
-        /* the pads' presses act on the menu from the poll, with their sticks and the on-screen controls' */
+        /* the pads' presses act on the menu from the poll, with their sticks and the on-screen controls'; the button
+           map page waiting for one takes it as the control it is */
+        overlay_press(snx_pad_of_button(e->gbutton.button));
+    } else if (e->type == SDL_EVENT_GAMEPAD_AXIS_MOTION && overlay_listening() && e->gaxis.value > SNX_PAD_TRIGGER &&
+               (e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || e->gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)) {
+        overlay_press(e->gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? SNX_PAD_LT : SNX_PAD_RT);
     } else if (e->type == SDL_EVENT_MOUSE_WHEEL) { /* a notch up is a row up, as the system turns the wheel */
         overlay_scroll(-e->wheel.integer_y);
     } else if (e->type == SDL_EVENT_FINGER_DOWN || e->type == SDL_EVENT_FINGER_MOTION) {

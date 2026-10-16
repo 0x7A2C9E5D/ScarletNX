@@ -9,6 +9,11 @@
 #include "runtime/platform/controls_atlas.h"
 #include "runtime/platform/plat.h"
 #include "font.h"
+#include "gui_theme_colors.h"
+/* the menu's colour of a held control, as R G B A bytes */
+#define FAILURE                                                                                                        \
+    (0xFFu << 24 | (SNX_GUI_THEME_YORHA_FAILURE & 0xFFu) << 16 | (SNX_GUI_THEME_YORHA_FAILURE & 0xFF00u) |             \
+     (SNX_GUI_THEME_YORHA_FAILURE >> 16 & 0xFFu))
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,12 +30,23 @@ static const int* pad_stored;
 static const char* pad_names[3];
 SnxGamepadConfig* gamepad_config(void) { return &pads; }
 void gamepad_store(const int* setting) { pad_stored = setting; }
+static int maps_stored;
+static unsigned pads_held;
+void gamepad_store_map(void) { ++maps_stored; }
+int gamepad_layout(int i, int labels[4], int* symmetric) {
+    (void)i;
+    (void)labels;
+    (void)symmetric;
+    return 0; /* no labels known: an Xbox pad's */
+}
+unsigned gamepad_held(void) { return pads_held; }
 const char* gamepad_name(int i) { return i >= 0 && i < 3 ? pad_names[i] : NULL; }
 const IniOpt g_backend_ini[] = {
     {"touch", "2", NULL, INI_INT, 0, &touch, 0, 2, NULL, "Touch screen", "Off|Fingers|Mouse too", 0, 0},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 const IniOpt g_gamepad_ini[] = {
-    {"gamepad_buttons", "1", NULL, INI_INT, 0, &pads.labels, 0, 1, NULL, "A B X Y", "By position|By label", 0, 0},
+    {"gamepad_buttons", "1", NULL, INI_INT, 0, &pads.labels, 0, 2, NULL, "A B X Y", "By position|By label|Custom", 0,
+     0},
     {"gamepad_deadzone", "20", NULL, INI_INT, 0, &pads.deadzone, 0, 90, NULL, "Stick dead zone", "#%", 5, 0},
     {"gamepad_rumble", "100", NULL, INI_INT, 0, &pads.rumble, 0, 100, NULL, "Vibration", "Off|#%", 10, 0},
     {"gamepad_background", "0", NULL, INI_INT, 0, &pads.background, 0, 1, NULL, "Background input", "Off|On", 0, 0},
@@ -58,6 +74,30 @@ static void draw(void) {
     list.max = 2048;
     overlay_draw(&list, SW, SH);
 }
+/* whether text shows anywhere on the picture, its letters a cell apart on one row (spaces draw nothing) */
+static int shows(const char* text) {
+    int i, k;
+    for (i = 0; i < list.n; ++i) {
+        float x = list.q[i].x, y = list.q[i].y, step = 8.0f * (float)s;
+        for (k = 0; text[k]; ++k) {
+            unsigned char c = (unsigned char)text[k];
+            int j, found = c == ' ';
+            for (j = 0; j < list.n && !found; ++j)
+                found = list.q[j].x == x + (float)k * step && list.q[j].y == y &&
+                        list.q[j].u == SNX_CONTROLS_FONT_X + c % 16 * 8 &&
+                        list.q[j].v == SNX_CONTROLS_FONT_Y + c / 16 * 16;
+            if (!found) break;
+        }
+        if (!text[k]) return 1;
+    }
+    return 0;
+}
+/* the quads filled with rgba */
+static int quads_of(u32 rgba) {
+    int i, n = 0;
+    for (i = 0; i < list.n; ++i) n += list.q[i].rgba == rgba && list.q[i].w > 0;
+    return n;
+}
 /* the quad of a glyph at a cell, or -1 */
 static int glyph_at(int col, int row, u8 c) {
     int i;
@@ -79,6 +119,7 @@ int main(void) {
     const u32 ink = 0xFF3A4145u;
     int x, y, sc;
     vpad_set_store(store);
+    snx_pad_map_unset(&pads.own); /* as gamepad.c starts it: every control as its label says */
     assert(!overlay_shown());
     overlay_toggle();
     assert(overlay_shown());
@@ -240,9 +281,11 @@ int main(void) {
     assert(tap(1, 3) == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  CONTROLLERS") && text_at(1, 1, "None connected."));
-    assert(list.q[0].h == 9 * 32 && text_at(1, 3, "\xFE A B X Y") && text_at(31, 3, "By label"));
+    assert(list.q[0].h == 10 * 32 && text_at(1, 3, "\xFE A B X Y") && text_at(31, 3, "By label"));
+    tap(0, 3); /* round its words: Custom, then By position */
+    assert(pads.labels == SNX_PAD_CUSTOM && pad_stored == &pads.labels);
     tap(0, 3);
-    assert(!pads.labels && pad_stored == &pads.labels);
+    assert(!pads.labels);
     draw();
     assert(text_at(28, 3, "By position"));
     overlay_side(1);
@@ -281,8 +324,41 @@ int main(void) {
     pad_names[0] = pad_names[2];
     draw();
     assert(text_at(1, 1, "A controller with a very lo and 2 more"));
-    /* Back, on its item or the key, comes up to the controllers' item */
+    /* Button map: NieR's CONTROLS over the picture, the preset in use focused; a preset used, a control's button
+       changed (Custom from then on), a press on the pad while waiting swapping two, that press no menu key; Back goes
+       up to its item */
+    pad_names[0] = "Xbox Wireless Controller";
+    pad_names[1] = pad_names[2] = NULL;
+    draw();
+    assert(text_at(1, 7, "\xFE Button map") && text_at(38, 7, ">"));
     assert(tap(4, 3) == OVERLAY_NONE);
+    pads_held = 1u << SNX_PAD_RT;
+    draw();
+    assert(shows("SCARLETNX  /  BUTTON MAP") && shows("By label") && shows("Xbox Wireless Controller"));
+    assert(shows("A B X Y as the pad's labels say") && quads_of(FAILURE) > 0); /* RT held: lit */
+    overlay_move(1);
+    assert(overlay_select() == OVERLAY_NONE && pads.labels == SNX_PAD_CUSTOM && pad_stored == &pads.labels);
+    overlay_side(1); /* to the controls, LT first */
+    overlay_side(1); /* its button, ZL as the labels have it, up one: ZR */
+    assert(pads.own.bit[SNX_PAD_LT] == 9 && maps_stored == 1);
+    draw();
+    assert(shows("LT : ZR") && shows("LT sends ZR"));
+    assert(overlay_select() == OVERLAY_NONE && overlay_listening());
+    overlay_press(SNX_PAD_SOUTH); /* A: LT and A swap */
+    assert(!overlay_listening() && pads.own.bit[SNX_PAD_LT] == 0 && pads.own.bit[SNX_PAD_SOUTH] == 9 &&
+           maps_stored == 2);
+    {
+        static const i32 rest[4];
+        assert(overlay_controls(1ull << 0, rest, 5000) == OVERLAY_NONE && !overlay_listening()); /* taken: no A */
+        assert(overlay_controls(1ull << 0, rest, 5001) == OVERLAY_NONE && !overlay_listening());
+        assert(overlay_controls(0, rest, 5002) == OVERLAY_NONE);
+    }
+    assert(overlay_back() == OVERLAY_NONE && overlay_back() == OVERLAY_NONE);
+    draw();
+    assert(text_at(1, 0, "SCARLETNX  /  CONTROLLERS") && text_at(1, 7, "\xFE Button map"));
+    pads_held = 0;
+    /* Back, on its item or the key, comes up to the controllers' item */
+    assert(tap(5, 3) == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  MENU") && overlay_select() == OVERLAY_NONE);
     draw();

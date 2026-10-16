@@ -33,6 +33,10 @@ int overlay_pad(u64 button);
 #define SNX_OVERLAY_REPEAT_DELAY 400
 #define SNX_OVERLAY_REPEAT_MS    120
 int overlay_controls(u64 buttons, const i32 sticks[4], u64 ms);
+/* the button map page waits for a control pressed on a pad (pad_map.h's): it takes it, and that press is no menu
+   key */
+int overlay_listening(void);
+void overlay_press(int control);
 /* a tap at x, y on a picture of sw x sh: what it did, OVERLAY_CLOSE outside the panel */
 int overlay_tap(float x, float y, int sw, int sh);
 void overlay_draw(SnxUiList* l, int sw, int sh);
