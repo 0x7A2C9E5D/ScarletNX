@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 """An installed build's files in the XDG Base Directory folders: the game's settings in the config folder, its log and
-threads.txt in the state folder, the pipeline cache and the extractions in the cache folder, and what an older build
-left in the data folder moved there. A game in a folder of its own keeps everything beside it. No GPU: the game stops
+threads.txt in the state folder, the pipeline cache and the extractions in the cache folder. What an older build left
+in the data folder stays there, each run saying where it is and where this one keeps it. A game in a folder of its own keeps everything beside it. No GPU: the game stops
 before it, its ExeFS taken away."""
 
 import argparse
@@ -14,6 +14,11 @@ import tempfile
 from pathlib import Path
 
 from nx_runtime_smoke import make_nro
+
+
+def older_ini_kept(games):
+    text = (games / 'Smoke.ini').read_text()
+    return 'kept from the older build' in text and 'Game language' not in text
 
 
 def main():
@@ -59,53 +64,53 @@ def main():
         status, out = run([driver, '--repo', str(data), '-r', str(nro), 'Smoke', '--runtime', driver, '--jobs', '2'])
         check(status == 0 and (games / 'Smoke').is_file(), 'the recompile did not put Smoke in games/', out)
         ini = config / 'games/Smoke.ini'
-        check(
-            ini.is_file() and 'kept from the older build' in ini.read_text() and not (games / 'Smoke.ini').exists(),
-            f'the older Smoke.ini did not move to {ini}',
-            out,
-        )
-        check(f'Moved {games / "Smoke.ini"} to {ini}' in out, 'the recompile did not say it moved Smoke.ini', out)
+        older = 'kept from the older build'
+        check(ini.is_file() and older not in ini.read_text(), f'the recompile did not write {ini}', out)
+        check(older in (games / 'Smoke.ini').read_text(), 'the older Smoke.ini was touched', out)
+        told = f'{games / "Smoke.ini"} was left by an older version: this one keeps it in {ini}'
+        check(told in out, 'the recompile did not say where the older Smoke.ini is', out)
 
-        # the game, started in games/ as ./Smoke, logs in the state folder and stops before the GPU without its ExeFS
+        # the game, started in games/ as ./Smoke, logs in the state folder and stops before the GPU without its ExeFS.
+        # Each start says where the older files are, as long as they are there
         shutil.rmtree(games / 'Smoke_data/exefs')
-        status, out = run(['./Smoke', '-H'], cwd=games)
         log = state / 'games/Smoke.log'
-        text = log.read_text(errors='replace') if log.is_file() else ''
-        check(
-            status != 0 and 'ScarletNX - Smoke' in text and 'Could not load the game executables' in text,
-            f'the game did not log to {log} and stop before the GPU (exit {status})',
-            out,
-        )
-        check(f'moved {games / "Smoke.log"} to {log}' in text, 'the log does not say the older one moved', text)
-        check(not (games / 'Smoke.log').exists(), 'a log is left in games/', out)
         threads = state / 'games/threads.txt'
-        check(
-            threads.is_file() and threads.read_text() == 'older threads\n' and not (games / 'threads.txt').exists(),
-            f'threads.txt did not move to {threads}',
-            text,
-        )
         pipelines = cache / 'games/shader_cache/vk_pipelines.bin'
+        for start in ('first', 'second'):
+            status, out = run(['./Smoke', '-H'], cwd=games)
+            text = log.read_text(errors='replace') if log.is_file() else ''
+            check(
+                status != 0 and 'ScarletNX - Smoke' in text and 'Could not load the game executables' in text,
+                f'the game did not log to {log} and stop before the GPU (exit {status}, {start} start)',
+                out,
+            )
+            for older, now in (
+                (games / 'Smoke.log', log),
+                (games / 'threads.txt', threads),
+                (games / 'Smoke.ini', ini),
+                (games / 'shader_cache/vk_pipelines.bin', pipelines),
+            ):
+                told = f'{older} was left by an older version: this one keeps it in {now}'
+                check(told in text, f'the {start} start did not say where {older.name} is', text)
+        check((games / 'Smoke.log').read_text() == 'older log\n', 'the game wrote in the older Smoke.log', out)
+        check((games / 'threads.txt').read_text() == 'older threads\n', 'the older threads.txt was touched', out)
         check(
-            pipelines.is_file() and pipelines.read_bytes() == b'pipelines' and not (games / 'shader_cache').exists(),
-            f'the pipeline cache did not move to {pipelines}',
-            text,
+            (games / 'shader_cache/vk_pipelines.bin').read_bytes() == b'pipelines',
+            'the older pipeline cache was touched',
         )
-        check(ini.is_file() and not (games / 'Smoke.ini').exists(), 'the game wrote its settings in games/', text)
+        check(older_ini_kept(games), 'the game wrote its settings in games/', text)
         check(
             all((games / name).exists() for name in ('Smoke.abi', 'Smoke_code.so', 'Smoke_data')),
             'the game itself left games/',
         )
 
-        # an extraction: the older build's work/ moved to the cache folder. hactool finds no program in an empty PFS0
+        # an extraction: the older build's work/ stays, and the driver says the cache folder's is used. hactool finds
+        # no program in an empty PFS0
         (root / 'empty.nsp').write_bytes(b'PFS0' + bytes(12))
         status, out = run([driver, '--repo', str(data), '-x', str(root / 'empty.nsp')])
-        moved = cache / 'work/Old/exefs/main'
-        check(
-            moved.is_file() and moved.read_bytes() == b'code' and not (data / 'work').exists(),
-            f'work/ did not move to {cache / "work"}',
-            out,
-        )
-        check(f'Moved {data / "work/Old"} to {cache / "work/Old"}' in out, 'the extraction did not say what moved', out)
+        check((data / 'work/Old/exefs/main').read_bytes() == b'code', 'the older work/ was touched', out)
+        told = f'{data / "work"} was left by an older version: this one keeps extractions in {cache / "work"}'
+        check(told in out, 'the extraction did not say where the older work/ is', out)
 
         # a folder of its own (a checkout's or a portable copy's games/, --outdir): everything beside the game
         beside = root / 'portable/games'
@@ -128,7 +133,7 @@ def main():
         return 1
     print(
         'XDG layout: settings in config, log and threads.txt in state, pipeline cache and work/ in cache, older '
-        'files moved; a folder of its own keeps them beside the game'
+        'files told on each run and left alone; a folder of its own keeps them beside the game'
     )
     return 0
 

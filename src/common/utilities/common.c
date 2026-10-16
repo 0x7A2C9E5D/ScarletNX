@@ -666,45 +666,11 @@ char* snx_user_path(const char* path, int kind) {
     free(base);
     return moved ? moved : snx_strdup(path);
 }
-int snx_move_old(const char* from, const char* to, int copy) {
-    char *folder, *staged;
-    int moved;
-    if (!strcmp(from, to) || !snx_path_exists(from) || snx_path_exists(to)) return SNX_MOVE_NONE;
-    folder = snx_dirname(to);
-    moved = !snx_mkdirs(folder) && !snx_replace(from, to);
-    free(folder);
-    if (moved) return SNX_MOVE_DONE;
-    /* another filesystem (~/.cache often is one): the copy lands beside to under another name, so a stopped copy is
-       never taken for the file */
-    if (!copy || snx_is_link(from) || !snx_is_file(from)) return SNX_MOVE_LEFT;
-    staged = snx_format("%s.moving", to);
-    moved = !snx_copy_file(from, staged) && !snx_replace(staged, to);
-    if (!moved) remove_one(staged, 0);
-    free(staged);
-    if (!moved) return SNX_MOVE_LEFT;
-    remove_one(from, 0);
-    return SNX_MOVE_DONE;
-}
+int snx_left_behind(const char* old, const char* now) { return strcmp(old, now) && snx_path_exists(old); }
 char* snx_work_dir(const char* data_dir) {
-    char *old = snx_path_join(data_dir, "work"), *work = snx_user_path(old, SNX_USER_CACHE), *from, *to, **names;
-    size_t i, n;
-    int left = 0;
-    if (strcmp(old, work) && snx_is_dir(old) && !snx_list_dir(old, &names, &n)) {
-        for (i = 0; i < n; ++i) {
-            from = snx_path_join(old, names[i]);
-            to = snx_path_join(work, names[i]);
-            if (snx_move_old(from, to, 0) == SNX_MOVE_DONE) printf("Moved %s to %s\n", from, to);
-            left |= snx_path_exists(from);
-            free(from);
-            free(to);
-        }
-        snx_free_strings(names, n);
-        if (left)
-            printf("%s holds extractions an older version made: this one makes them in %s, so they can be deleted\n",
-                   old, work);
-        else
-            remove_one(old, 1);
-    }
+    char *old = snx_path_join(data_dir, "work"), *work = snx_user_path(old, SNX_USER_CACHE);
+    if (snx_left_behind(old, work))
+        printf("%s was left by an older version: this one keeps extractions in %s\n", old, work);
     free(old);
     return work;
 }

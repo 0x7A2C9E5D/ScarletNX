@@ -712,7 +712,7 @@ static int prepare_paths(ExtractState* state, const ExtractOptions* options, con
         free(name);
         return snx_error("Extraction name must be a single nonempty filename");
     }
-    /* only when --out names none: play_dump names one, and has moved an older build's extractions already */
+    /* only when --out names none: play_dump names one, and has said where an older build's extractions are */
     work = options->out ? NULL : snx_work_dir(paths->repo);
     target = work ? snx_path_join(work, name) : NULL;
     free(work);

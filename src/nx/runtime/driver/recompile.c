@@ -109,8 +109,8 @@ static int copy_dlls(const char* run, const char* out) {
 }
 #endif
 /* The game's settings: beside it, or in an installed build's config folder (snx_user_path), where the runtime reads
-   them and where an older build's file moves first. NULL when that folder cannot be made */
-static char* settings_path(const char* out, const char* title, int quiet) {
+   them. An older build's beside the game stays, a line saying so. NULL when that folder cannot be made */
+static char* settings_path(const char* out, const char* title) {
     char *folder = snx_user_path(out, SNX_USER_CONFIG), *base, *path = NULL, *old;
     if (!strcmp(folder, out) || !snx_mkdirs(folder)) {
         base = snx_path_join(folder, title);
@@ -121,12 +121,8 @@ static char* settings_path(const char* out, const char* title, int quiet) {
         base = snx_path_join(out, title);
         old = snx_format("%s.ini", base);
         free(base);
-        switch (snx_move_old(old, path, 1)) {
-            case SNX_MOVE_DONE:
-                if (!quiet) printf("Moved %s to %s\n", old, path);
-                break;
-            case SNX_MOVE_LEFT: fprintf(stderr, "scarletnx: could not move %s to %s\n", old, path); break;
-        }
+        if (snx_left_behind(old, path))
+            fprintf(stderr, "scarletnx: %s was left by an older version: this one keeps it in %s\n", old, path);
         free(old);
     }
     free(folder);
@@ -397,7 +393,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("cannot stage game data in %s", data);
         goto done;
     }
-    ini = settings_path(out, title, compile.quiet);
+    ini = settings_path(out, title);
     if (!ini) {
         snx_error("cannot create the settings folder for %s", title);
         goto done;

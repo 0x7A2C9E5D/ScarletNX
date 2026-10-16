@@ -226,9 +226,9 @@ the rest goes in the folder of its kind. A relative `$XDG_*_HOME` is ignored, as
 | `~/.local/state/scarletnx/gui/` | the menu's `recent.txt` and `last-run.log`, for every copy (the checkout's too) |
 | `~/.cache/scarletnx/` (`$XDG_CACHE_HOME`) | `work/` (`work/3ds/` for the 3DS driver), `games/shader_cache/` |
 
-What an older version left in the data folder moves to these on first use, a line in the output or the game's log for
-each; across filesystems a file is copied, and `work/` stays where it is with a line saying it can be deleted. The
-checkout and a portable copy keep everything beside the game, as on Windows.
+What an older version left in the data folder is not moved: as long as it is there, each run says where it is and
+where this version keeps it, in the output or the game's log. The checkout and a portable copy keep everything beside
+the game, as on Windows.
 
 ## Settings / input
 

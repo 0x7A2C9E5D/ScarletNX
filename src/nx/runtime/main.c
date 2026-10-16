@@ -117,37 +117,25 @@ static void user_folder(char* dir, size_t size, const char* games, int kind) {
         snprintf(dir, size, "%s", g_exedir);
     free(moved);
 }
-/* the settings, the log and threads.txt, and the pipeline cache. What an older build left beside the game moves there
-   first, the log before anything is written to it */
+/* the settings, the log and threads.txt, and the pipeline cache. What an older build left beside the game stays, a
+   line in the log saying so each start */
 static void user_folders(void) {
     /* the game's own name before those that start with a dot */
     static const char* const what[] = {".log", "threads.txt", ".ini", "shader_cache/vk_pipelines.bin"};
     const char* const dirs[] = {g_statedir, g_statedir, g_confdir, g_cachedir};
-    char from[4][1400], to[4][1400];
-    int moved[4];
+    char from[1400], to[1400];
     char* games = snx_absolute(g_exedir[0] ? g_exedir : ".");
     user_folder(g_confdir, sizeof g_confdir, games, SNX_USER_CONFIG);
     user_folder(g_statedir, sizeof g_statedir, games, SNX_USER_STATE);
     user_folder(g_cachedir, sizeof g_cachedir, games, SNX_USER_CACHE);
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; games && i < 4; i++) {
         const char* game = what[i][0] == '.' ? g_exename : "";
-        moved[i] = SNX_MOVE_NONE;
-        if (!games || !strcmp(dirs[i], g_exedir)) continue;
-        snprintf(from[i], sizeof from[i], "%s/%s%s", games, game, what[i]);
-        snprintf(to[i], sizeof to[i], "%s%s%s", dirs[i], game, what[i]);
-        moved[i] = snx_move_old(from[i], to[i], 1);
-    }
-    if (moved[3] == SNX_MOVE_DONE) {
-        char old[1100];
-        snprintf(old, sizeof old, "%s/shader_cache", games);
-        remove(old); /* when nothing else is left in it */
+        if (!strcmp(dirs[i], g_exedir)) continue;
+        snprintf(from, sizeof from, "%s/%s%s", games, game, what[i]);
+        snprintf(to, sizeof to, "%s%s%s", dirs[i], game, what[i]);
+        if (snx_left_behind(from, to)) WARN("%s was left by an older version: this one keeps it in %s\n", from, to);
     }
     free(games);
-    for (int i = 0; i < 4; i++)
-        if (moved[i] == SNX_MOVE_DONE)
-            LOG("moved %s to %s\n", from[i], to[i]);
-        else if (moved[i] == SNX_MOVE_LEFT)
-            WARN("could not move %s to %s, where this version keeps it\n", from[i], to[i]);
 }
 
 static void build_dispatch(void) {

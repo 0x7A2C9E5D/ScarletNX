@@ -55,13 +55,11 @@ char* snx_user_dir(int kind);
 /* A path in the user's data folder, moved to the same place in the folder of kind: games/X.ini of the data folder is
    games/X.ini of the config folder. Any other path (a checkout, a portable copy, --outdir) is returned as it is */
 char* snx_user_path(const char* path, int kind);
-enum { SNX_MOVE_NONE, SNX_MOVE_DONE, SNX_MOVE_LEFT };
-/* Moves what an older build left at from to to, never over something already there: SNX_MOVE_NONE when there is
-   nothing to move or to is taken, SNX_MOVE_DONE, SNX_MOVE_LEFT when from stays. Across filesystems, where a rename
-   fails, a file is copied when copy is set; a folder stays */
-int snx_move_old(const char* from, const char* to, int copy);
-/* work/ of a data folder, the drivers' extractions: an installed build's is in its cache folder, and an older build's
-   extractions move there first, a line each on stdout; what cannot move stays, with a line saying so */
+/* 1 while what an older build left at old is still there, for the caller to say each run where it is and that this
+   build keeps it at now. Nothing is moved: the player does that */
+int snx_left_behind(const char* old, const char* now);
+/* work/ of a data folder, the drivers' extractions: an installed build's is in its cache folder. An older build's
+   work/ in the data folder stays, a line on stdout saying so */
 char* snx_work_dir(const char* data_dir);
 /* The folder work/, games/ and the keys are in when a run names none (--repo), and the menu's games/: the checkout a build
    came from; else, when a games/ folder is beside it, the folder of the AppImage or of the program (a portable copy);

@@ -2012,8 +2012,8 @@ static void cleanup(App* app) {
     SDL_Quit();
 }
 #ifdef SNX_XDG
-/* recent.txt and last-run.log: in the state folder's gui/ (~/.local/state/scarletnx/gui/), where an older build's move
-   from the data folder's. Elsewhere SDL_GetPrefPath's folder (under %APPDATA% on Windows) */
+/* recent.txt and last-run.log: in the state folder's gui/ (~/.local/state/scarletnx/gui/). An older build's in the data
+   folder's stay, a line saying so each start. Elsewhere SDL_GetPrefPath's folder (under %APPDATA% on Windows) */
 static char* state_folder(void) {
     static const char* const names[] = {"recent.txt", "last-run.log"};
     char *state = snx_user_dir(SNX_USER_STATE), *data = snx_user_data_dir();
@@ -2021,13 +2021,11 @@ static char* state_folder(void) {
     size_t i;
     for (i = 0; folder && old && i < sizeof(names) / sizeof(*names); ++i) {
         char *from = snx_path_join(old, names[i]), *to = snx_path_join(folder, names[i]);
-        int moved = snx_move_old(from, to, 1);
-        if (moved == SNX_MOVE_DONE) fprintf(stderr, "scarletnx-gui: moved %s to %s\n", from, to);
-        if (moved == SNX_MOVE_LEFT) fprintf(stderr, "scarletnx-gui: could not move %s to %s\n", from, to);
+        if (snx_left_behind(from, to))
+            fprintf(stderr, "scarletnx-gui: %s was left by an older version: this one keeps it in %s\n", from, to);
         free(from);
         free(to);
     }
-    if (old) remove(old); /* when nothing else is left in it */
     if (folder && snx_mkdirs(folder)) {
         free(folder);
         folder = NULL;

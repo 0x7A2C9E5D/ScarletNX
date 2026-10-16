@@ -1454,22 +1454,19 @@ int main(int argc, char** argv) {
 #endif
     }
 #ifdef SNX_XDG
-    /* the menu's recent.txt and last-run.log in the state folder's gui/, moved there from the data folder's */
+    /* the menu's recent.txt and last-run.log in the state folder's gui/; an older build's in the data folder's stay */
     {
         char *data = snx_path_join(temporary, "data"), *state = snx_path_join(temporary, "state");
         char *old = snx_path_join(data, "scarletnx/gui"), *recent = snx_path_join(old, "recent.txt");
         char *run = snx_path_join(old, "last-run.log"), *folder, *expected = snx_path_join(state, "scarletnx/gui"),
-             *moved;
+             *now;
         assert(!snx_mkdirs(old) && !snx_write_file(recent, "recent", 6) && !snx_write_file(run, "run", 3));
         SDL_setenv_unsafe("XDG_DATA_HOME", data, 1);
         folder = state_folder();
-        assert(folder && !strcmp(folder, expected) && !snx_path_exists(old));
-        moved = snx_path_join(folder, "recent.txt");
-        assert(snx_file_size(moved) == 6);
-        free(moved);
-        moved = snx_path_join(folder, "last-run.log");
-        assert(snx_file_size(moved) == 3);
-        free(moved);
+        assert(folder && !strcmp(folder, expected) && snx_file_size(recent) == 6 && snx_file_size(run) == 3);
+        now = snx_path_join(folder, "recent.txt");
+        assert(!snx_path_exists(now) && snx_left_behind(recent, now));
+        free(now);
         free(folder);
         /* and an empty state folder is made for the first run */
         assert(!snx_remove_tree(state));
