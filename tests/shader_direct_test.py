@@ -33,6 +33,8 @@ def main():
         opcodes = tuple(Path(directory) / f'opcode_{i}.spv' for i in range(4))
         gradients = tuple(Path(directory) / f'gradient_{i}.spv' for i in range(3))
         textures = tuple(Path(directory) / f'texture_{i}.spv' for i in range(6))
+        arithmetic = Path(directory) / 'arithmetic.spv'
+        beyond = tuple(Path(directory) / f'beyond_{i}.spv' for i in range(3))
         subprocess.run(
             [args.generator, str(path), str(vertex), str(abs_fragment), str(stack_fragment), str(subgroup)], check=True
         )
@@ -54,6 +56,8 @@ def main():
             *opcodes,
             *gradients,
             *textures,
+            arithmetic,
+            *beyond,
         )
         subprocess.run([args.regressions, *(str(path) for path in fixtures)], check=True)
         for fixture in fixtures:

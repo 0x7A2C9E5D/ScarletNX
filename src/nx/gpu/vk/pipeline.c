@@ -71,6 +71,18 @@ const char* vk_corpus_dir(void) {
     }
     return at;
 }
+
+const char* vk_spirv_unavailable(const u32* spv, size_t words) {
+    for (size_t at = 5; at < words;) { /* the capabilities come first */
+        u32 width = spv[at] >> 16;
+        if (!width || at + width > words || (spv[at] & 0xffffu) != 17) break;
+        if (width == 2 && spv[at + 1] == 10 && !g_vk.feat.shaderFloat64) return "shaderFloat64 is unavailable";
+        if (width == 2 && spv[at + 1] == 11 && !g_vk.feat.shaderInt64) return "shaderInt64 is unavailable";
+        at += width;
+    }
+    return NULL;
+}
+
 u32* vk_translate_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* words, VkCbReader read,
                         VkCbReads* reads) {
     int (*old)(u32, u32, u32*) = g_shader_cb_read;
@@ -345,18 +357,10 @@ VkSh* vk_shader_get(u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask, 
         if (vk_corpus_dir()) shader_corpus_save(vk_corpus_dir(), code, mlen, 0x10000, stage, &s->si, h ^ mix);
         size_t nw = 0;
         u32* spv = vk_translate_spirv(code, 0x10000, stage, &s->si, &nw, sh_cb_read, &s->cbr);
-        if (spv && !g_vk.feat.shaderFloat64) {
-            for (size_t at = 5; at < nw;) {
-                u32 width = spv[at] >> 16;
-                if (!width || at + width > nw || (spv[at] & 0xffffu) != 17) break;
-                if (width == 2 && spv[at + 1] == 10) {
-                    free(spv);
-                    spv = NULL;
-                    snprintf(s->si.first_unsupported, sizeof s->si.first_unsupported, "shaderFloat64 is unavailable");
-                    break;
-                }
-                at += width;
-            }
+        if (spv && vk_spirv_unavailable(spv, nw)) {
+            snprintf(s->si.first_unsupported, sizeof s->si.first_unsupported, "%s", vk_spirv_unavailable(spv, nw));
+            free(spv);
+            spv = NULL;
         }
         if (spv && s->si.nimg) {
             u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;

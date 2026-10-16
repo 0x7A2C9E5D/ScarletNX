@@ -325,6 +325,33 @@ uint32_t spv_emit_type_i32(SpvEmitter* e) {
     return id;
 }
 
+uint32_t spv_emit_type_int64(SpvEmitter* e, int is_signed) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->types, OP_TYPE_INT, 4);
+    put(&e->types, id);
+    put(&e->types, 64);
+    put(&e->types, is_signed ? 1 : 0);
+    return id;
+}
+
+uint32_t spv_emit_int_convert(SpvEmitter* e, uint32_t type, uint32_t value, int is_signed) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, is_signed ? 114 : 113, 4); /* OpSConvert, OpUConvert */
+    put(&e->functions, type);
+    put(&e->functions, id);
+    put(&e->functions, value);
+    return id;
+}
+
+uint32_t spv_emit_fconvert(SpvEmitter* e, uint32_t type, uint32_t value) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, 115, 4); /* OpFConvert */
+    put(&e->functions, type);
+    put(&e->functions, id);
+    put(&e->functions, value);
+    return id;
+}
+
 uint32_t spv_emit_convert_f_to_s(SpvEmitter* e, uint32_t i32_type, uint32_t value) {
     uint32_t id = spv_emit_id(e);
     instruction(&e->functions, OP_CONVERT_F_TO_S, 4);
@@ -508,6 +535,16 @@ uint32_t spv_emit_constant_u32(SpvEmitter* e, uint32_t type, uint32_t value) {
     put(&e->types, type);
     put(&e->types, id);
     put(&e->types, value);
+    return id;
+}
+
+uint32_t spv_emit_constant64(SpvEmitter* e, uint32_t type, uint64_t value) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->types, OP_CONSTANT, 5);
+    put(&e->types, type);
+    put(&e->types, id);
+    put(&e->types, (uint32_t)value); /* the low word first */
+    put(&e->types, (uint32_t)(value >> 32));
     return id;
 }
 

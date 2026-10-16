@@ -84,6 +84,12 @@ uint32_t spv_emit_type_void(SpvEmitter* e);
 uint32_t spv_emit_type_bool(SpvEmitter* e);
 uint32_t spv_emit_type_u32(SpvEmitter* e);
 uint32_t spv_emit_type_i32(SpvEmitter* e);
+/* a 64-bit integer type: the module declares the Int64 capability (11) */
+uint32_t spv_emit_type_int64(SpvEmitter* e, int is_signed);
+/* OpSConvert (sign-extending) or OpUConvert (zero-extending): an integer to another width, truncating to a narrower */
+uint32_t spv_emit_int_convert(SpvEmitter* e, uint32_t type, uint32_t value, int is_signed);
+/* OpFConvert: a float of one width to another (F32 and F64) */
+uint32_t spv_emit_fconvert(SpvEmitter* e, uint32_t type, uint32_t value);
 uint32_t spv_emit_convert_f_to_s(SpvEmitter* e, uint32_t i32_type, uint32_t value);
 uint32_t spv_emit_convert_f_to_u(SpvEmitter* e, uint32_t u32_type, uint32_t value);
 uint32_t spv_emit_convert_s_to_f(SpvEmitter* e, uint32_t f32_type, uint32_t value);
@@ -104,6 +110,8 @@ uint32_t spv_emit_function_element_pointer(SpvEmitter* e, uint32_t pointer_type,
 uint32_t spv_emit_type_function_void(SpvEmitter* e, uint32_t void_type);
 uint32_t spv_emit_constant_u32(SpvEmitter* e, uint32_t type, uint32_t value);
 uint32_t spv_emit_constant_bool(SpvEmitter* e, uint32_t type, int value);
+/* a constant of a 64-bit type (F64, or a 64-bit integer) from its bits */
+uint32_t spv_emit_constant64(SpvEmitter* e, uint32_t type, uint64_t value);
 uint32_t spv_emit_constant_f32(SpvEmitter* e, uint32_t type, float value);
 uint32_t spv_emit_constant_vec4(SpvEmitter* e, uint32_t type, const uint32_t components[4]);
 uint32_t spv_emit_constant_vec2(SpvEmitter* e, uint32_t type, uint32_t x, uint32_t y);

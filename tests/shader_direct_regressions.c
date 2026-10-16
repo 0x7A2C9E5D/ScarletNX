@@ -24,6 +24,8 @@ static const char* query_paths[2];
 static const char* opcode_paths[4];
 static const char* gradient_paths[3];
 static const char* texture_paths[6];
+static const char* arithmetic_path;
+static const char* beyond_paths[3];
 static void check(int condition, const char* what) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s\n", what);
@@ -945,6 +947,84 @@ static void texture_forms(void) {
     }
 }
 
+/* Arithmetic forms compared with Eden's: XMAD's signed RC and immediate forms with X, CC, CBCC, PSL and MRG, LOP's
+   and LOP32I's flags, FMUL32I.FMZ, the F64 and 64-bit integer conversions, VSETP's signed immediate, DADD's rounding,
+   BFE's and LOP3's flags. SHL.CC, whose flags no source describes, is refused. */
+static void arithmetic_forms(void) {
+    static const u64 forms[] = {
+        0x5143818400470200ull, /* XMAD.S16.S16.CC.X R0, R2, R3, c[1][0x10] */
+        0x361201b800170200ull, /* XMAD.S16.CBCC.PSL.MRG R0, R2, 0x8001, R3 */
+        0x5c47880000370201ull, /* LOP.AND.CC.X R1, R2, R3 */
+        0x041000000ff70201ull, /* LOP32I.AND.CC R1, R2, 0xff */
+        0x1e43f80000070201ull, /* FMUL32I.FMZ R1, R2, 1.0 */
+        0x5ca8000000470e01ull, /* F2F.F32.F64 R1, R4 */
+        0x5ca8000000270b06ull, /* F2F.F64.F32 R6, R2 */
+        0x5cb0000000271b08ull, /* F2I.S64.F32 R8, R2 */
+        0x5cb0000000470e01ull, /* F2I.U32.F64 R1, R4 */
+        0x5cb8200000472f0aull, /* I2F.F64.S64 R10, -R4 */
+        0x5cb8000000470e01ull, /* I2F.F32.U64 R1, R4 */
+        0x50f30b8840070201ull, /* VSETP.LT.S16 P0, P1, R2, -32768 */
+        0x5c70008000470206ull, /* DADD.RM R6, R2, R4 */
+        0x5c00800000370201ull, /* BFE.CC R1, R2, R3 */
+        0x5be7824800370201ull, /* LOP3.CC.X R1, R2, R3, R4 */
+    };
+    ShaderInfo info;
+    size_t words = 0;
+    u32* code = translate(forms, (int)(sizeof forms / sizeof *forms), ST_FS, &info, &words, 0);
+    check(code && !info.unsupported, "the arithmetic forms Eden translates translate");
+    if (code) {
+        check(count_opcode(code, words, 17, 11) == 1, "a 64-bit integer conversion declares Int64");
+        if (arithmetic_path) save_fixture(arithmetic_path, code, words);
+    }
+    free(code);
+    code = translate((const u64[]){0x5c48800000370201ull}, 1, ST_FS, &info, &words, 0); /* SHL.CC R1, R2, R3 */
+    check(!code && info.unsupported, "SHL.CC is refused");
+    free(code);
+}
+
+/* Opcodes Eden doesn't translate: the scalar video instructions with saturation, merges and secondary operations,
+   PRMT's index, F4E and RC16 modes, FCHK, RRO's immediate form, MUFU.RCP64H, CS2R, CCTL and IDE, and the 32-bit
+   compare and swaps on global and shared memory */
+static void beyond_eden(void) {
+    static const u64 arithmetic[] = {
+        0x20c7036060370201ull, /* VADD.SAT.S32 R1.H1, R2, R3, R6 */
+        0x5424031020370201ull, /* VABSDIFF.ACC R1, R2.B1, R3.B2, R6 */
+        0x4073036fffb70201ull, /* VSET.LT.MAX R1, R2, -5, R6 */
+        0x573e036060370201ull, /* VSHL.WRAP R1, R2, R3, R6 */
+        0x5615036060370201ull, /* VSHR.S32 R1.B0, R2, R3, R6 */
+        0x5bc0030000370201ull, /* PRMT R1, R2, R3, R6 */
+        0x5bc1030000370201ull, /* PRMT.F4E R1, R2, R3, R6 */
+        0x36c6030000270201ull, /* PRMT.RC16 R1, R2, 0x2, R6 */
+        0x5c88000000370200ull, /* FCHK.DIVIDE P0, R2, R3 */
+        0x3890003f80070001ull, /* RRO.SINCOS R1, 1.0 */
+        0x5080000000670201ull, /* MUFU.RCP64H R1, R2 */
+        0x50c800000ff70004ull, /* CS2R R4, SRZ */
+        0xef6000000007ff00ull, /* CCTL.IVALL */
+        0xe390000000070000ull, /* IDE.EN */
+    };
+    static const u64 global_cas[] = {
+        0xef9500007307ff02ull, /* LDC R2, c[0][0x730]: the buffer's address */
+        0xeef0000000470200ull, /* ATOM.CAS R0, [R2], R4, R5 */
+    };
+    static const u64 shared_cas[] = {0xee4000000047ff00ull}; /* ATOMS.CAS R0, [RZ], R4, R5 */
+    struct {
+        const u64* instructions;
+        int count, stage;
+        const char* what;
+    } cases[] = {{arithmetic, (int)(sizeof arithmetic / sizeof *arithmetic), ST_FS, "the opcodes Eden lacks translate"},
+                 {global_cas, 2, ST_FS, "ATOM.CAS translates"},
+                 {shared_cas, 1, ST_CS, "ATOMS.CAS translates"}};
+    for (int i = 0; i < 3; i++) {
+        ShaderInfo info;
+        size_t words = 0;
+        u32* code = translate(cases[i].instructions, cases[i].count, cases[i].stage, &info, &words, 1);
+        check(code && !info.unsupported, cases[i].what);
+        if (code && i > 0) check(count_opcode(code, words, 230, 0xffffffffu) == 1, "a compare and swap is atomic");
+        if (code && beyond_paths[i]) save_fixture(beyond_paths[i], code, words);
+        free(code);
+    }
+}
+
 /* a rejected instruction is logged with its word */
 static void unsupported_names_word(void) {
     ShaderInfo info;
@@ -959,8 +1039,8 @@ static void unsupported_names_word(void) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 1 && argc != 42) return 2;
-    if (argc == 42) {
+    if (argc != 1 && argc != 46) return 2;
+    if (argc == 46) {
         storage_paths[0] = argv[1];
         storage_paths[1] = argv[2];
         for (int i = 0; i < 4; i++) nro_paths[i] = argv[i + 3];
@@ -970,6 +1050,8 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 4; i++) opcode_paths[i] = argv[i + 29];
         for (int i = 0; i < 3; i++) gradient_paths[i] = argv[i + 33];
         for (int i = 0; i < 6; i++) texture_paths[i] = argv[i + 36];
+        arithmetic_path = argv[42];
+        for (int i = 0; i < 3; i++) beyond_paths[i] = argv[i + 43];
     }
     brx_length();
     cbuf_integer_loads();
@@ -989,5 +1071,7 @@ int main(int argc, char** argv) {
     eden_forms();
     gradients();
     texture_forms();
+    arithmetic_forms();
+    beyond_eden();
     return failures ? 1 : 0;
 }

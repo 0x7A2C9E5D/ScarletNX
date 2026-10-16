@@ -326,6 +326,8 @@ typedef struct {
 typedef int (*VkCbReader)(u32 idx, u32 off, u32* out);
 u32* vk_translate_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* words, VkCbReader read,
                         VkCbReads* reads);
+/* why the device can't take the module: a capability it declares (Float64, Int64) whose feature is off, or NULL */
+const char* vk_spirv_unavailable(const u32* spv, size_t words);
 u64 vk_shader_hash(const u8* code, u32 max_bytes, u32* out_len, VkCbReader read); /* BRX tables through read */
 /* where each new shader's snx-shaderc corpus entry goes: SNX_SHADER_CORPUS, else with diag=1 captures/shaders beside
    the games; NULL for neither */

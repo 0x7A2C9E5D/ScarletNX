@@ -307,18 +307,10 @@ static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm, CsKey k)
     if (corpus) shader_corpus_save(corpus, code, blen, 0x10000 + 80, ST_CS, &p->si, key);
     size_t nw = 0;
     u32* spv = vk_translate_spirv(code, 0x10000 + 80, ST_CS, &p->si, &nw, cs_cb_read, &p->cbr);
-    if (spv && !g_vk.feat.shaderFloat64) {
-        for (size_t at = 5; at < nw;) {
-            u32 width = spv[at] >> 16;
-            if (!width || at + width > nw || (spv[at] & 0xffffu) != 17) break;
-            if (width == 2 && spv[at + 1] == 10) {
-                free(spv);
-                spv = NULL;
-                snprintf(p->si.first_unsupported, sizeof p->si.first_unsupported, "shaderFloat64 is unavailable");
-                break;
-            }
-            at += width;
-        }
+    if (spv && vk_spirv_unavailable(spv, nw)) {
+        snprintf(p->si.first_unsupported, sizeof p->si.first_unsupported, "%s", vk_spirv_unavailable(spv, nw));
+        free(spv);
+        spv = NULL;
     }
     if (!spv || p->si.unsupported) {
         p->failed = 1;
