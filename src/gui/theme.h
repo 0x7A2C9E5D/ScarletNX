@@ -63,6 +63,7 @@ typedef struct {
     int grid;        /* a faint grid on the page behind the boxes, in the dim colour */
     GuiTipsPlace tips_place;
     int tips_box, footer_box; /* the tips and the keys in a box with a bar at its left, or on the page */
+    int tips_wrap;            /* the tips over the foot's rows, or on one row that slides */
     char title[GUI_SCREEN_COUNT][64];
     GuiRunLayout run;
     GuiPalette run_colors;  /* the steps screen's own: a loading screen, darker than the menus */

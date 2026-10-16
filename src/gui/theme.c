@@ -68,6 +68,7 @@ const GuiThemeKey gui_theme_keys[] = {
     FLAG("backdrop", "grid", grid, "a faint grid on the page, in the dim colour"),
     WORD("tips", "place", tips_place, tips_places, "in a box at the foot beside the keys, or on a row under the head"),
     FLAG("tips", "box", tips_box, "in a box with a bar at its left, or on the page"),
+    FLAG("tips", "wrap", tips_wrap, "over the foot's rows, or on one row that slides"),
     WORD("footer", "style", footer, styles, "bar: on a band of ink; none: no Status box"),
     FLAG("footer", "rule", footer_rule, "a line over the foot"),
     FLAG("footer", "box", footer_box, "the keys in a box with a bar at its left, or on the page"),

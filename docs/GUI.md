@@ -214,7 +214,8 @@ of its own, the focused one framed in the focus colour or inverted, with the the
 beside it a box with what the focus is about (a recent game's path, Games' folders, the keys in use, the last
 run's output) and under that one the Status box. At the foot the tips, under the list's column, and the
 screen's keys, under the side box's, each in a box with a bar down its left (`[tips] box`, `[footer] box`) or on
-the page; the tips go on a row of their own under the head with `[tips] place = top`. Games lists Back and a
+the page; the tips take one row of the foot, a long one sliding, or wrap over its rows with `[tips] wrap`, and go on
+a row of their own under the head with `[tips] place = top`. Games lists Back and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
 opens the picker) and Back at its foot. The Settings list their groups, and beside them the focused group's
@@ -299,6 +300,8 @@ grid = true
 place = top
 ; in a box with a bar at its left, or on the page
 box = false
+; over the foot's rows, or on one row that slides
+wrap = false
 [footer]
 ; plain | bar: on a band of ink | none: no Status box; rule: a line over the foot
 style = plain

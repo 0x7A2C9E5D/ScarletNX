@@ -1288,9 +1288,9 @@ static void foot(App* app, const GuiPlace* p, const char* tips, SDL_Color color,
     if (below && band && !(color.r == t->failure.r && color.g == t->failure.g && color.b == t->failure.b))
         color = rgb(t->page); /* on the band but a failure */
     text = foot_box(app, p->tips, t->tips_box, below && band);
-    if (below)
+    if (below && t->tips_wrap)
         wrap_in(app, text, text.x, text.y, tips, 0, color);
-    else if (p->tips.h) /* a row of its own: a long one slides */
+    else if (p->tips.h) /* one row: a long one slides */
         text_in(app, text, text.x, text.y, tips, color);
     text = foot_box(app, p->keys, t->footer_box, band);
     hints(app, keys, text.w / cell_w(app), text, text.y, 1, band);
@@ -1444,7 +1444,7 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols,
     }
     in.foot = cell_h(app);
     gui_place(&in, p); /* the columns, which the foot's rows and the status box's follow */
-    in.foot = SDL_max(in.tips ? 1 : 2,
+    in.foot = SDL_max(in.tips || !t->tips_wrap ? 1 : 2,
                       hints(app, keys, foot_text(app, p->keys, t->footer_box).w / cell_w(app), none, 0, 0, 0)) *
                   cell_h(app) +
               4 * s;

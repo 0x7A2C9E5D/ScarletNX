@@ -2888,6 +2888,7 @@ int main(int argc, char** argv) {
         }
         page = rgb(app.theme.page);
         ink = rgb(app.theme.ink);
+        app.clock = 1; /* the tips at their start, before they slide */
         render(&app);
         menu_boxes(&app, &m);
         b = list_box(&m.list, m.list.focus);
@@ -2899,6 +2900,18 @@ int main(int argc, char** argv) {
         text_px_is(&app, r.x + cw, r.y + 2 * s, "Setup device keys", page, ink);
         r = foot_text(&app, m.place.tips, app.theme.tips_box); /* the tips on the foot's band, in the page's colour */
         text_px_is(&app, r.x, r.y, "Installs prod.keys", page, ink);
+        /* on one row of the foot, the rest of a long one out of it until it slides there; [tips] wrap puts the rest on
+           the foot's next rows */
+        hides(&app, "extracted with", page);
+        for (app.clock = 1; gui_slide(1000, app.clock, app.theme.scroll_ms) != 2;) app.clock += app.theme.scroll_ms;
+        render(&app);
+        text_px_is(&app, r.x, r.y, "stalls prod.keys", page, ink);
+        app.clock = 1;
+        app.theme.tips_wrap = true;
+        render(&app);
+        shows(&app, "extracted with", page);
+        app.theme.tips_wrap = false;
+        app.clock = 0;
         /* its title twice the text's size, in the row of tabs against its right; with its shadow, in the dim colour a big
            pixel down and right */
         r = m.place.title;
