@@ -127,10 +127,10 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   The focus moves between them, Add a folder and the page's games in one ring, and the tips show the focused
   game's path. Choosing one runs it again with the driver it was
   loaded with and the options the menu has now; a game whose file is gone leaves the
-  list instead. The list is kept in `recent.txt`, beside `last-run.log`, in the user's state
-  folder on Linux (`$XDG_STATE_HOME/scarletnx/gui/`, by default `~/.local/state/scarletnx/gui/`;
-  an older version's in `~/.local/share/scarletnx/gui/` stay where they are), or in
-  `%APPDATA%\scarletnx\gui\` on Windows, a line per
+  list instead. The list is kept in `recent.txt`, beside `last-run.log`, at the root of the menu's state
+  folder ([USAGE](USAGE.md#folders)): `$XDG_STATE_HOME/scarletnx/` on Linux, by default
+  `~/.local/state/scarletnx/`, or `%APPDATA%\scarletnx\state\` on Windows. An older version's, in a `gui/`
+  folder, stay where they are. A line per
   game: `switch`, `linux` or `3ds`, `file` or `games` (a program from games/, run as it is),
   the path and the name, separated by tabs. A list that cannot be written there is named in the
   message, after a run's end too, until it can be.

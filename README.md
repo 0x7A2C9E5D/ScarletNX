@@ -75,7 +75,7 @@ but the game always starts anew. To run the steps separately:
 ./build/scarletnx -r work/Game Game         # -> games/Game/Game
 ./build/scarletnx -rx "Game.xci"            # prepare without playing (UNIX)
 ./build/scarletnx -Hs "Game.xci"            # headless, wait for GDB (UNIX)
-cd games && ./Game
+cd games/Game && ./Game
 ```
 
 For an SDL3 menu, run `./build/scarletnx` with no arguments. Select a driver with arrow keys and
