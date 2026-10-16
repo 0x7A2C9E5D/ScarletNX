@@ -308,10 +308,14 @@ endif()
 
 # mm:u and hid's IHidServer (misc.c, hid.c), with the kernel objects stubbed
 if(TARGET OpenSSL::Crypto)
-    add_executable(snx-test-misc-service misc_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_touch.c")
+    add_executable(snx-test-misc-service misc_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_touch.c"
+        "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_motion.c")
     snx_test_target(snx-test-misc-service 23)
     snx_service_swipc(snx-test-misc-service hle/services/hid.swipc hle/services/misc.swipc)
     target_link_libraries(snx-test-misc-service PRIVATE OpenSSL::Crypto)
+    if(NOT WIN32)
+        target_link_libraries(snx-test-misc-service PRIVATE m)
+    endif()
     add_test(NAME misc_service COMMAND snx-test-misc-service)
 endif()
 
@@ -410,6 +414,15 @@ add_executable(snx-test-hid-touch hid_touch.c "${PROJECT_SOURCE_DIR}/src/nx/runt
 snx_test_target(snx-test-hid-touch 11)
 target_link_libraries(snx-test-hid-touch PRIVATE scarletnx-common)
 add_test(NAME hid_touch COMMAND snx-test-hid-touch)
+
+add_executable(snx-test-hid-motion hid_motion.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_motion.c")
+snx_test_target(snx-test-hid-motion 11)
+target_compile_options(snx-test-hid-motion PRIVATE -UNDEBUG)
+target_link_libraries(snx-test-hid-motion PRIVATE scarletnx-common)
+if(NOT WIN32)
+    target_link_libraries(snx-test-hid-motion PRIVATE m)
+endif()
+add_test(NAME hid_motion COMMAND snx-test-hid-motion)
 
 add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/startup.c")
 snx_test_target(snx-test-startup 90)

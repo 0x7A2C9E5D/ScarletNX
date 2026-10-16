@@ -1,8 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The gamepads (runtime/platform/backend/gamepad.c) on SDL's virtual ones, under its dummy video driver: what a press,
-   a trigger or a stick gives the game and the game's menu, on the common layouts, with the window's focus or without,
-   and a fifth pad taking the place of one that goes */
+/* The gamepads (runtime/platform/backend/gamepad.c) on SDL's virtual ones, under its dummy video driver: per-slot and
+   legacy combined input, common layouts, focus behavior, motion sensors, and a waiting pad taking a freed slot */
 #include "nx/runtime/platform/gamepad.h"
 #include "nx/runtime/options.h"
 #include "nx/runtime/platform/plat.h"
@@ -10,8 +9,10 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 int g_verbose;
+char g_confdir[1024];
 void logf_(int lvl, const char* fmt, ...) {
     (void)lvl;
     (void)fmt;
@@ -36,11 +37,13 @@ static int checks;
 enum { A = 1, B = 2, X = 4, Y = 8, ZL = 1 << 8, ZR = 1 << 9, PLUS = 1 << 10, LEFT = 1 << 12, UP = 1 << 13 };
 /* the virtual pads, by the vendor and product SDL tells their layout from: only they are read, a real pad plugged in
    stays out */
-#define XBOX     0x045e, 0x02ea
-#define SWITCH   0x057e, 0x2009
-#define SONY     0x054c, 0x09cc
-#define GAMECUBE 0x057e, 0x0337
-#define PADS_IDS "0x045e/0x02ea,0x057e/0x2009,0x054c/0x09cc,0x057e/0x0337"
+#define XBOX      0x045e, 0x02ea
+#define SWITCH    0x057e, 0x2009
+#define SONY      0x054c, 0x09cc
+#define GAMECUBE  0x057e, 0x0337
+#define JOY_LEFT  0x057e, 0x2006
+#define JOY_RIGHT 0x057e, 0x2007
+#define PADS_IDS  "0x045e/0x02ea,0x057e/0x2009,0x054c/0x09cc,0x057e/0x0337,0x057e/0x2006,0x057e/0x2007"
 
 /* the backend's event loop (sdl3.c's video_poll), for the gamepads */
 static void pump(void) {
@@ -52,10 +55,15 @@ static void pump(void) {
             gamepad_close(e.gdevice.which);
 }
 /* what each pad's motors were last told: low (the heavy one) | high << 16 */
-static Uint32 motors[8];
+static Uint32 motors[12];
 static int pads;
 static bool SDLCALL rumble(void* pad, Uint16 low, Uint16 high) {
     *(Uint32*)pad = low | (Uint32)high << 16;
+    return true;
+}
+static bool SDLCALL sensors_enabled(void* pad, bool enabled) {
+    (void)pad;
+    (void)enabled;
     return true;
 }
 /* a pad with every gamepad button and axis (button i is SDL_GamepadButton i) and two motors, at rest */
@@ -77,6 +85,26 @@ static SDL_Joystick* attach(Uint16 vendor, Uint16 product) {
        bottom of the range */
     for (a = 0; a < SDL_GAMEPAD_AXIS_COUNT; a++)
         SDL_SetJoystickVirtualAxis(j, a, a >= SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? SDL_JOYSTICK_AXIS_MIN : 0);
+    pump();
+    return j;
+}
+static SDL_Joystick* attach_motion(void) {
+    static const SDL_VirtualJoystickSensorDesc sensors[6] = {{SDL_SENSOR_ACCEL, 60.0f},   {SDL_SENSOR_GYRO, 60.0f},
+                                                             {SDL_SENSOR_ACCEL_L, 60.0f}, {SDL_SENSOR_GYRO_L, 60.0f},
+                                                             {SDL_SENSOR_ACCEL_R, 60.0f}, {SDL_SENSOR_GYRO_R, 60.0f}};
+    SDL_VirtualJoystickDesc d;
+    SDL_Joystick* j;
+    SDL_INIT_INTERFACE(&d);
+    d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+    d.naxes = SDL_GAMEPAD_AXIS_COUNT;
+    d.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+    d.nsensors = 6;
+    d.sensors = sensors;
+    d.SetSensorsEnabled = sensors_enabled;
+    d.vendor_id = 0x057e;
+    d.product_id = 0x2009;
+    j = SDL_OpenJoystick(SDL_AttachVirtualJoystick(&d));
+    CHECK(j != NULL);
     pump();
     return j;
 }
@@ -105,7 +133,7 @@ static void sticks(SDL_Joystick* j, Sint16 lx, Sint16 ly, i32 s[4]) {
 }
 
 int main(void) {
-    SDL_Joystick *xbox, *pro, *sony, *cube, *fifth;
+    SDL_Joystick *xbox, *pro, *sony, *cube, *fifth, *motion;
     SDL_Window* w;
     i32 s[4];
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
@@ -235,7 +263,7 @@ int main(void) {
     gamepad_rumble(0, 0); /* the game stops it */
     CHECK(motors[0] == 0);
 
-    /* every pad drives the one controller, and the first stick that is pushed wins */
+    /* the legacy combined state merges every pad, and the first stick that is pushed wins */
     SDL_SetJoystickVirtualButton(xbox, SDL_GAMEPAD_BUTTON_SOUTH, true);
     SDL_SetJoystickVirtualButton(pro, SDL_GAMEPAD_BUTTON_SOUTH, true);
     CHECK(buttons() == (A | B));
@@ -245,17 +273,61 @@ int main(void) {
     CHECK(s[0] <= -32767 && s[1] == 0);
     sticks(pro, 0, 0, s);
 
-    /* four are read; a fifth takes the place of one that goes, and the game's menu names them */
+    /* each open pad gets its own slot, and the game's menu names them */
     fifth = attach(SWITCH);
-    CHECK(with(fifth, SDL_GAMEPAD_BUTTON_EAST) == 0);
-    CHECK(gamepad_name(3) && !strcmp(gamepad_name(3), SDL_GetJoystickName(cube)) && !gamepad_name(4));
+    CHECK(with(fifth, SDL_GAMEPAD_BUTTON_EAST) == A);
+    CHECK(gamepad_name(4) && !strcmp(gamepad_name(4), SDL_GetJoystickName(fifth)) && !gamepad_name(5));
     SDL_DetachVirtualJoystick(SDL_GetJoystickID(sony));
     pump();
     CHECK(with(fifth, SDL_GAMEPAD_BUTTON_EAST) == A);
-    CHECK(!strcmp(gamepad_name(0), SDL_GetJoystickName(xbox)) && !strcmp(gamepad_name(2), SDL_GetJoystickName(fifth)));
+    CHECK(!strcmp(gamepad_name(0), SDL_GetJoystickName(xbox)) && !strcmp(gamepad_name(3), SDL_GetJoystickName(fifth)));
     SDL_DetachVirtualJoystick(SDL_GetJoystickID(pro));
     pump();
-    CHECK(!strcmp(gamepad_name(1), SDL_GetJoystickName(fifth)) && !gamepad_name(3));
+    CHECK(!strcmp(gamepad_name(2), SDL_GetJoystickName(fifth)) && !gamepad_name(3));
+
+    /* SDL's left and right Joy-Con sensors take precedence over a primary sensor. The guest receives g and rad/s. */
+    motion = attach_motion();
+    CHECK(gamepad_slot_connected(1));
+    {
+        const float accel_left[3] = {9.80665f, 19.6133f, 29.41995f};
+        const float gyro_left[3] = {1.0f, 2.0f, 3.0f};
+        const float accel_right[3] = {-9.80665f, 0.0f, 9.80665f};
+        const float gyro_right[3] = {-1.0f, 0.0f, 2.0f};
+        PadMotion sample[2];
+        Uint64 now = SDL_GetTicksNS();
+        CHECK(SDL_SendJoystickVirtualSensorData(motion, SDL_SENSOR_ACCEL_L, now, accel_left, 3));
+        CHECK(SDL_SendJoystickVirtualSensorData(motion, SDL_SENSOR_GYRO_L, now, gyro_left, 3));
+        CHECK(SDL_SendJoystickVirtualSensorData(motion, SDL_SENSOR_ACCEL_R, now, accel_right, 3));
+        CHECK(SDL_SendJoystickVirtualSensorData(motion, SDL_SENSOR_GYRO_R, now, gyro_right, 3));
+        SDL_UpdateGamepads();
+        gamepad_motion(1, sample);
+        CHECK(sample[0].valid && sample[1].valid);
+        CHECK(fabsf(sample[0].acceleration[0] + 1.0f) < 0.001f && fabsf(sample[0].acceleration[1] - 3.0f) < 0.001f &&
+              fabsf(sample[0].acceleration[2] + 2.0f) < 0.001f);
+        CHECK(fabsf(sample[0].angular_velocity[0] - 1.0f) < 0.001f &&
+              fabsf(sample[0].angular_velocity[1] + 3.0f) < 0.001f &&
+              fabsf(sample[0].angular_velocity[2] - 2.0f) < 0.001f);
+        CHECK(fabsf(sample[1].acceleration[0] - 1.0f) < 0.001f && fabsf(sample[1].acceleration[1] - 1.0f) < 0.001f &&
+              sample[1].acceleration[2] == 0.0f);
+        gamepad_motion(0, sample);
+        CHECK(!sample[0].valid && !sample[1].valid);
+    }
+    {
+        SDL_Joystick* left = attach(JOY_LEFT);
+        SDL_Joystick* right = attach(JOY_RIGHT);
+        SDL_JoystickID left_id = SDL_GetJoystickID(left), right_id = SDL_GetJoystickID(right);
+        CHECK(gamepad_slot_type(2) == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT);
+        CHECK(gamepad_slot_type(5) == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT);
+        CHECK(gamepad_button(left_id, SDL_GAMEPAD_BUTTON_LEFT_STICK) == (1ull << 4));
+        CHECK(gamepad_button(left_id, SDL_GAMEPAD_BUTTON_LEFT_PADDLE1) == (1ull << 6));
+        CHECK(gamepad_button(left_id, SDL_GAMEPAD_BUTTON_LEFT_PADDLE2) == (1ull << 8));
+        CHECK(gamepad_button(right_id, SDL_GAMEPAD_BUTTON_LEFT_STICK) == (1ull << 5));
+        CHECK(gamepad_button(right_id, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1) == (1ull << 7));
+        CHECK(gamepad_button(right_id, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2) == (1ull << 9));
+        SDL_DetachVirtualJoystick(left_id);
+        SDL_DetachVirtualJoystick(right_id);
+        pump();
+    }
 
     /* the game's menu changes a setting and keeps it */
     gamepad_config()->deadzone = 35;
@@ -268,6 +340,21 @@ int main(void) {
     gamepad_store(&gamepad_config()->background);
     CHECK(!strcmp(stored, "gamepad_background=1") &&
           SDL_GetHintBoolean(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, false));
+
+    /* All eight player slots can be occupied; a ninth pad waits for one to disconnect. */
+    {
+        SDL_Joystick* extra[5];
+        SDL_JoystickID old_id = SDL_GetJoystickID(motion);
+        int i;
+        for (i = 0; i < 5; i++) extra[i] = attach(SWITCH);
+        CHECK(gamepad_slot_connected(0) && gamepad_slot_connected(7));
+        CHECK(gamepad_slot_id(1) == old_id);
+        CHECK(with(extra[4], SDL_GAMEPAD_BUTTON_SOUTH) == 0);
+        SDL_DetachVirtualJoystick(SDL_GetJoystickID(motion));
+        pump();
+        CHECK(gamepad_slot_id(1) == SDL_GetJoystickID(extra[4]) && gamepad_slot_id(1) != old_id);
+        CHECK(with(extra[4], SDL_GAMEPAD_BUTTON_SOUTH) == B);
+    }
 
     SDL_DestroyWindow(w);
     SDL_Quit();

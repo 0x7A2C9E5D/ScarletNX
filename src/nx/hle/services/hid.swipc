@@ -79,7 +79,7 @@ interface nn::hid::IHidServer is hid {
     @stub [91] ActivateGesture(i32 basic_gesture_id, aruid aruid);
     [100] SetSupportedNpadStyleSet(nn::hid::NpadStyleSet style_set, aruid aruid);
     [101] GetSupportedNpadStyleSet(aruid aruid) -> nn::hid::NpadStyleSet style_set;
-    @stub [102] SetSupportedNpadIdType(aruid aruid, array<nn::hid::NpadIdType, 9> ids);
+    [102] SetSupportedNpadIdType(aruid aruid, array<nn::hid::NpadIdType, 9> ids);
     @stub [103] ActivateNpad(aruid aruid);
     @stub [104] DeactivateNpad(aruid aruid);
     [106] AcquireNpadStyleSetUpdateEventHandle(nn::hid::NpadIdType id, aruid aruid, u64 event_ptr)
@@ -89,10 +89,10 @@ interface nn::hid::IHidServer is hid {
     @stub [109] ActivateNpadWithRevision(i32 revision, aruid aruid);
     [120] SetNpadJoyHoldType(aruid aruid, nn::hid::NpadJoyHoldType hold_type);
     [121] GetNpadJoyHoldType(aruid aruid) -> nn::hid::NpadJoyHoldType hold_type;
-    @stub [122] SetNpadJoyAssignmentModeSingleByDefault(nn::hid::NpadIdType id, aruid aruid);
-    @stub [123] SetNpadJoyAssignmentModeSingle(nn::hid::NpadIdType id, aruid aruid, nn::hid::NpadJoyDeviceType type);
-    @stub [124] SetNpadJoyAssignmentModeDual(nn::hid::NpadIdType id, aruid aruid);
-    @stub [125] MergeSingleJoyAsDualJoy(nn::hid::NpadIdType id1, nn::hid::NpadIdType id2, aruid aruid);
+    [122] SetNpadJoyAssignmentModeSingleByDefault(nn::hid::NpadIdType id, aruid aruid);
+    [123] SetNpadJoyAssignmentModeSingle(nn::hid::NpadIdType id, aruid aruid, nn::hid::NpadJoyDeviceType type);
+    [124] SetNpadJoyAssignmentModeDual(nn::hid::NpadIdType id, aruid aruid);
+    [125] MergeSingleJoyAsDualJoy(nn::hid::NpadIdType id1, nn::hid::NpadIdType id2, aruid aruid);
     @stub [126] StartLrAssignmentMode(aruid aruid);
     @stub [127] StopLrAssignmentMode(aruid aruid);
     [128] SetNpadHandheldActivationMode(aruid aruid, nn::hid::NpadHandheldActivationMode mode);
@@ -100,7 +100,7 @@ interface nn::hid::IHidServer is hid {
     @stub [130] SwapNpadAssignment(nn::hid::NpadIdType id1, nn::hid::NpadIdType id2, aruid aruid);
     @stub [131] IsUnintendedHomeButtonInputProtectionEnabled(nn::hid::NpadIdType id, aruid aruid) -> b8 enabled;
     @stub [132] EnableUnintendedHomeButtonInputProtection(b8 enabled, nn::hid::NpadIdType id, aruid aruid);
-    @stub [133] SetNpadJoyAssignmentModeSingleWithDestination(nn::hid::NpadIdType id, aruid aruid,
+    [133] SetNpadJoyAssignmentModeSingleWithDestination(nn::hid::NpadIdType id, aruid aruid,
                                                               nn::hid::NpadJoyDeviceType type)
         -> (b8 is_reassigned, nn::hid::NpadIdType new_id);
     @stub [134] SetNpadAnalogStickUseCenterClamp(b8 use_center_clamp, aruid aruid);

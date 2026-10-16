@@ -1,32 +1,41 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The controllers SDL knows as gamepads (backend/gamepad.c): each one drives the game's one controller, as the
-   keyboard does */
+/* SDL gamepad discovery and per-player input (backend/gamepad.c). */
 #ifndef SNX_GAMEPAD_H
 #define SNX_GAMEPAD_H
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/runtime/ini.h"
 #include "common/utilities/pad_map.h"
+#include "nx/hle/services/hid.h"
 
-#define SNX_GAMEPADS 4 /* read at once; one more takes the place of one that goes */
+#define SNX_GAMEPADS 8 /* one slot for each guest Npad player */
 /* a gamepad the system added or removed (its SDL joystick id): opened, closed */
 void gamepad_open(u32 id);
 void gamepad_close(u32 id);
-/* the open gamepads together: their HidNpadButton bits, and the first stick past the dead zone of each side (lx, ly,
-   rx, ry; right and up) */
+/* enumerate connected SDL joysticks at startup, or inspect one newly attached joystick */
+void gamepad_scan(void);
+void gamepad_detect(u32 id);
+/* all open gamepads together, for the game's controller overlay and legacy callers */
 void gamepad_state(u64* buttons, i32 sticks[4]);
+void gamepad_state_slot(int slot, u64* buttons, i32 sticks[4]);
+int gamepad_slot_type(int slot); /* SDL_GamepadType, or SDL_GAMEPAD_TYPE_UNKNOWN */
+int gamepad_slot_connected(int slot);
+u32 gamepad_slot_id(int slot); /* SDL joystick instance ID, 0 for an empty slot */
+void gamepad_motion(int slot, PadMotion out[2]);
 /* the HidNpadButton bit one of a gamepad's buttons (an SDL_GamepadButton) is, as the game reads it; 0 for none */
 u64 gamepad_button(u32 id, int button);
-/* the vibration the game sent its left and right devices (hid.h's PadState.rumble), played on every gamepad that can:
-   called each frame */
+/* legacy combined rumble, played on every open gamepad that can vibrate */
 void gamepad_rumble(u32 left, u32 right);
+/* one guest player's vibration (hid.h's PadState.rumble), played on that slot's gamepad each frame */
+void gamepad_rumble_slot(int slot, u32 left, u32 right);
 /* the settings, kept in the game's .ini; the game's menu changes them under ui_lock */
 typedef struct {
-    int labels;     /* the buttons: SNX_PAD_BY_POSITION, _BY_LABEL or _CUSTOM (own) */
-    int deadzone;   /* the sticks', in percent of their travel */
-    int rumble;     /* the vibration's strength in percent, 0 for none */
-    int background; /* 1: they play while the game's window is not focused */
-    SnxPadMap own;  /* the custom map, SNX_PAD_UNSET where it follows the labels */
+    int labels;      /* the buttons: SNX_PAD_BY_POSITION, _BY_LABEL or _CUSTOM (own) */
+    int deadzone;    /* the sticks', in percent of their travel */
+    int rumble;      /* the vibration's strength in percent, 0 for none */
+    int background;  /* 1: they play while the game's window is not focused */
+    int joycon_pair; /* 1: SDL combines a left and a right Joy-Con */
+    SnxPadMap own;   /* the custom map, SNX_PAD_UNSET where it follows the labels */
 } SnxGamepadConfig;
 SnxGamepadConfig* gamepad_config(void);
 void gamepad_store(const int* setting); /* one of gamepad_config()'s, to the .ini, and applied */

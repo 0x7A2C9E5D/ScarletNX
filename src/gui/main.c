@@ -2334,14 +2334,48 @@ static void pad_start(App* app) {
 /* the first pad plugged in, when none is open */
 static void pad_attach(App* app) {
     SDL_JoystickID* ids;
-    int n = 0;
+    int i, n = 0;
     if (app->gamepad || !app->pads_read) return;
     ids = SDL_GetGamepads(&n);
-    if (n > 0 && !(app->gamepad = SDL_OpenGamepad(ids[0])))
-        snprintf(app->editor.note, sizeof app->editor.note, "The controller could not be opened: %s", SDL_GetError());
+    for (i = 0; ids && i < n && !app->gamepad; i++) {
+        app->gamepad = SDL_OpenGamepad(ids[i]);
+        if (!app->gamepad)
+            snprintf(app->editor.note, sizeof app->editor.note, "The controller could not be opened: %s",
+                     SDL_GetError());
+    }
     SDL_free(ids);
+    if (app->gamepad && (!strncmp(app->editor.note, "The controller could not be opened:",
+                                  sizeof "The controller could not be opened:" - 1) ||
+                         !strncmp(app->editor.note, "Joystick ", sizeof "Joystick " - 1)))
+        app->editor.note[0] = 0; /* an earlier failed/unmapped pad no longer describes this one */
+    if (!app->gamepad && !n && !app->editor.note[0]) {
+        SDL_JoystickID* joysticks = SDL_GetJoysticks(&n);
+        if (joysticks && n > 0) {
+            char guid[33];
+            SDL_GUIDToString(SDL_GetJoystickGUIDForID(joysticks[0]), guid, sizeof guid);
+            snprintf(app->editor.note, sizeof app->editor.note, "Joystick %s needs an SDL mapping (GUID %s)",
+                     SDL_GetJoystickNameForID(joysticks[0]) ? SDL_GetJoystickNameForID(joysticks[0]) : "Unknown", guid);
+        }
+        SDL_free(joysticks);
+    }
     app->pad_pushed = 0;
     pad_sync(app);
+}
+static void pad_load_mappings(App* app) {
+    const char* override = SDL_GetHint(SDL_HINT_GAMECONTROLLERCONFIG_FILE);
+    char *folder, *path;
+    int count;
+    if (override && *override) return; /* SDL loaded the explicit file at subsystem startup */
+    if (!app->settings_file) return;
+    folder = snx_dirname(app->settings_file);
+    path = folder ? snx_path_join(folder, "gamecontrollerdb.txt") : NULL;
+    if (path && snx_is_file(path)) {
+        count = SDL_AddGamepadMappingsFromFile(path);
+        if (count < 0)
+            snprintf(app->editor.note, sizeof app->editor.note, "SDL mappings could not be read: %s", SDL_GetError());
+    }
+    free(path);
+    free(folder);
 }
 static void render(App* app);
 static void open_pad(App* app, int row) {
@@ -2355,6 +2389,8 @@ static void open_pad(App* app, int row) {
     app->pads_read = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
     if (!app->pads_read)
         snprintf(app->editor.note, sizeof app->editor.note, "Controllers cannot be read: %s", SDL_GetError());
+    else
+        pad_load_mappings(app);
     pad_attach(app);
 }
 static void pad_close(App* app) {
@@ -3609,6 +3645,7 @@ static void go_tab(App* app, int tab) {
             return;
         }
         keep_settings(app);
+        if (app->form == GUI_FORM_PAD) pad_close(app);
         leave_editor(app);
         app->theme_from_app = false;
     }

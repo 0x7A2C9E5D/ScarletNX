@@ -16,6 +16,10 @@ u64 g_title_id = 0x0100BF00112C0000ull;
 PMutex g_klock;
 static unsigned test_checks, test_objects, test_kobjs;
 static u32 test_next_handle = 0x100;
+u64 plat_ns(void) {
+    static u64 now;
+    return now += 16666666ull;
+}
 
 static void test_fail(const char* expression, int line) {
     fprintf(stderr, "misc_service.c:%d: check failed: %s\n", line, expression);
@@ -250,6 +254,79 @@ static u32 no1_style(void) {
     memcpy(&style, kshmem_ptr(hid.shm) + HO_HidSharedMemory_npad + HO_HidNpadInternalState_style_set, 4);
     return style;
 }
+static u32 npad_style_at(int id) {
+    u32 style;
+    u8* e = kshmem_ptr(hid.shm) + HO_HidSharedMemory_npad + id * HS_HidNpadSharedMemoryEntry;
+    memcpy(&style, e + HO_HidNpadInternalState_style_set, 4);
+    return style;
+}
+static u64 npad_latest_buttons(int id, u32 lifo_offset) {
+    u8* lifo = kshmem_ptr(hid.shm) + HO_HidSharedMemory_npad + id * HS_HidNpadSharedMemoryEntry + lifo_offset;
+    u64 tail, buttons;
+    memcpy(&tail, lifo + HO_HidCommonLifoHeader_tail, 8);
+    memcpy(&buttons,
+           lifo + HO_HidNpadCommonLifo_storage + tail * HS_HidNpadCommonStateAtomicStorage + 8 +
+               HO_HidNpadCommonState_buttons,
+           8);
+    return buttons;
+}
+static void npad_latest_sticks(int id, u32 lifo_offset, i32 sticks[4]) {
+    u8* lifo = kshmem_ptr(hid.shm) + HO_HidSharedMemory_npad + id * HS_HidNpadSharedMemoryEntry + lifo_offset;
+    u64 tail;
+    memcpy(&tail, lifo + HO_HidCommonLifoHeader_tail, 8);
+    memcpy(sticks,
+           lifo + HO_HidNpadCommonLifo_storage + tail * HS_HidNpadCommonStateAtomicStorage + 8 +
+               HO_HidNpadCommonState_analog_stick_l,
+           16);
+}
+static float npad_latest_direction(int id, u32 lifo_offset, u32 direction_offset) {
+    u8* lifo = kshmem_ptr(hid.shm) + HO_HidSharedMemory_npad + id * HS_HidNpadSharedMemoryEntry + lifo_offset;
+    u64 tail;
+    float direction;
+    memcpy(&tail, lifo + HO_HidCommonLifoHeader_tail, 8);
+    memcpy(&direction,
+           lifo + HO_HidNpadSixAxisSensorLifo_storage + tail * HS_HidSixAxisSensorStateAtomicStorage + 8 +
+               HO_HidSixAxisSensorState_direction + direction_offset,
+           sizeof direction);
+    return direction;
+}
+static void set_ids(SvcObj* h, const u32* ids, u32 n) {
+    Request r;
+    request(&r, 102);
+    r.c.has_pid = 1;
+    argument64(&r, 0, 0x55);
+    memcpy(g_mem + 0x3000, ids, n * 4);
+    r.c.nx = 1;
+    r.c.x[0].addr = 0x3000;
+    r.c.x[0].size = n * 4;
+    call(h, &r);
+}
+static void joy_assign(SvcObj* h, u32 cmd, u32 id, u32 type) {
+    Request r;
+    request(&r, cmd);
+    r.c.has_pid = 1;
+    argument32(&r, 0, id);
+    argument64(&r, 8, 0x55);
+    if (cmd == 123) argument64(&r, 16, type);
+    call(h, &r);
+}
+static void joy_merge(SvcObj* h, u32 id1, u32 id2) {
+    Request r;
+    request(&r, 125);
+    r.c.has_pid = 1;
+    argument32(&r, 0, id1);
+    argument32(&r, 4, id2);
+    argument64(&r, 8, 0x55);
+    call(h, &r);
+}
+static void joy_hold(SvcObj* h, u64 hold) {
+    Request r;
+    request(&r, 120);
+    r.c.has_pid = 1;
+    argument64(&r, 0, 0x55);
+    argument64(&r, 8, hold);
+    call(h, &r);
+}
 static u32 get_styles(SvcObj* h) {
     Request r;
     request(&r, 101);
@@ -280,6 +357,16 @@ static KEvent* style_event(SvcObj* h, u32 id) {
     KObj* o = handle_object(r.c.out_copy[0]);
     CHECK(o->type == KO_EVENT);
     return (KEvent*)o;
+}
+static u8 six_axis_at_rest(SvcObj* h, u32 handle) {
+    Request r;
+    request(&r, 82);
+    r.c.has_pid = 1;
+    argument32(&r, 0, handle);
+    argument64(&r, 8, 0x55);
+    call(h, &r);
+    CHECK(r.c.out_size == 4);
+    return r.c.out[0];
 }
 /* SendVibrationValue (201) {u32 handle, VibrationValue at 4, aruid at 0x18} and SendVibrationValues (206) {aruid},
    with the handles and the values in two pointer buffers: what the frontend plays, per device */
@@ -323,6 +410,142 @@ static void test_vibration(SvcObj* h) {
     vibrations(h, both, values, 0);
     CHECK(g_pad.rumble[0] == 16383u);
 }
+static void test_npad_players(SvcObj* h) {
+    static const u32 first_ids[] = {0, 1, 2, 3, 0x20};
+    static const u32 fewer_ids[] = {0, 1, 3, 0x20};
+    static const u32 all_ids[] = {0, 1, 2, 3, 4, 0x20};
+    static const u32 no2_only[] = {1};
+    u8* e1 = kshmem_ptr(hid.shm) + HO_HidSharedMemory_npad + HS_HidNpadSharedMemoryEntry;
+    u32 assignment, selected_id;
+    i32 sticks[4];
+    KEvent* no2 = style_event(h, 1);
+    KEvent* no3 = style_event(h, 2);
+    g_pad_extra[0].connected = 1;
+    g_pad_extra[0].kind = SNX_PAD_JOY_LEFT;
+    g_pad_extra[0].buttons = 1ull << 12;
+    g_pad_extra[0].lx = 1000;
+    g_pad_extra[1].connected = 1;
+    g_pad_extra[1].kind = SNX_PAD_JOY_RIGHT;
+    g_pad_extra[1].buttons = 1ull << 0;
+    g_pad_extra[1].rx = 2000;
+    g_pad_extra[2].connected = 1;
+    g_pad_extra[2].kind = SNX_PAD_JOY_DUAL;
+    g_pad_extra[2].buttons = (1ull << 12) | (1ull << 0);
+    g_pad_extra[2].lx = 3000;
+    g_pad_extra[2].rx = 4000;
+    no2->signaled = no3->signaled = 0;
+    hid_update();
+    CHECK(npad_style_at(0) == 1 && npad_style_at(1) == 1u << 3 && npad_style_at(2) == 1u << 4 &&
+          npad_style_at(3) == 1u << 2);
+    /* ControllerSupport selects the first visible player even when No1 is excluded. */
+    set_ids(h, no2_only, 1);
+    selected_id = 0xFFFFFFFFu;
+    CHECK(hid_connected_players(&selected_id) == 1 && selected_id == 1);
+    set_ids(h, first_ids, 5);
+    CHECK(no2->signaled && no3->signaled);
+    CHECK(npad_latest_buttons(1, HO_HidNpadInternalState_joy_left_lifo) == 1ull << 12);
+    CHECK(npad_latest_buttons(2, HO_HidNpadInternalState_joy_right_lifo) == 1ull);
+    CHECK(npad_latest_buttons(1, HO_HidNpadInternalState_full_key_lifo) == 0);
+    npad_latest_sticks(1, HO_HidNpadInternalState_joy_left_lifo, sticks);
+    CHECK(sticks[0] == 0 && sticks[1] == -1000);
+    npad_latest_sticks(2, HO_HidNpadInternalState_joy_right_lifo, sticks);
+    CHECK(sticks[2] == 0 && sticks[3] == 2000);
+    /* Replacing a physical controller in No2 resets its sensor orientation before reading the new sample. */
+    g_pad_extra[0].source_id = 111;
+    g_pad_extra[0].motion[0].valid = 1;
+    g_pad_extra[0].motion[0].acceleration[1] = 1.0f;
+    hid_update();
+    CHECK(fabsf(npad_latest_direction(1, HO_HidNpadInternalState_joy_left_six_axis_sensor_lifo, 28) + 1.0f) < 0.0005f);
+    g_pad_extra[0].source_id = 222;
+    g_pad_extra[0].motion[0].acceleration[1] = 0.0f;
+    g_pad_extra[0].motion[0].acceleration[2] = -1.0f;
+    hid_update();
+    CHECK(fabsf(npad_latest_direction(1, HO_HidNpadInternalState_joy_left_six_axis_sensor_lifo, 28)) < 0.0005f);
+    g_pad_extra[0].motion[0].valid = 0;
+    joy_hold(h, 1);
+    hid_update();
+    npad_latest_sticks(1, HO_HidNpadInternalState_joy_left_lifo, sticks);
+    CHECK(sticks[0] == 1000 && sticks[1] == 0);
+    joy_hold(h, 0);
+    memcpy(&assignment, e1 + HO_HidNpadInternalState_joy_assignment_mode, 4);
+    CHECK(assignment == 1);
+    set_ids(h, fewer_ids, 4);
+    CHECK(npad_style_at(2) == 0 && npad_style_at(1) == 1u << 3);
+    set_ids(h, first_ids, 5);
+    CHECK(npad_style_at(2) == 1u << 4);
+    /* A combined host Joy-Con splits into two guest players, keeping each half's own buttons and motor. */
+    joy_assign(h, 123, 3, 0);
+    CHECK(npad_style_at(3) == 1u << 2 && npad_style_at(4) == 0); /* no permitted slot for the other half */
+    set_ids(h, all_ids, 6);
+    joy_assign(h, 124, 3, 0);
+    joy_assign(h, 123, 3, 0);
+    CHECK(npad_style_at(3) == 1u << 3 && npad_style_at(4) == 1u << 4);
+    /* A new dual controller in the same host slot must not inherit the old one's split assignment. */
+    g_pad_extra[2].source_id = 333;
+    hid_update();
+    CHECK(npad_style_at(3) == 1u << 2 && npad_style_at(4) == 0);
+    joy_assign(h, 123, 3, 0);
+    CHECK(npad_style_at(3) == 1u << 3 && npad_style_at(4) == 1u << 4);
+    /* Removing the destination ID must restore the physical pair instead of hiding one half. */
+    set_ids(h, first_ids, 5);
+    CHECK(npad_style_at(3) == 1u << 2 && npad_style_at(4) == 0);
+    set_ids(h, all_ids, 6);
+    joy_assign(h, 123, 3, 0);
+    CHECK(npad_style_at(3) == 1u << 3 && npad_style_at(4) == 1u << 4);
+    hid_update();
+    CHECK(npad_latest_buttons(3, HO_HidNpadInternalState_joy_left_lifo) == 1ull << 12);
+    CHECK(npad_latest_buttons(4, HO_HidNpadInternalState_joy_right_lifo) == 1ull);
+    vibration(h, 0x00010407u, 0.5f, 0); /* virtual No5's right device belongs to physical No4 */
+    CHECK(g_pad_extra[2].rumble[1] == 32767u);
+    joy_assign(h, 124, 3, 0);
+    CHECK(npad_style_at(3) == 1u << 2 && npad_style_at(4) == 0);
+    /* Two physical single Joy-Cons can become one JoyDual without mixing player buttons. */
+    joy_merge(h, 1, 2);
+    CHECK(npad_style_at(1) == 1u << 2 && npad_style_at(2) == 0);
+    hid_update();
+    CHECK(npad_latest_buttons(1, HO_HidNpadInternalState_joy_dual_lifo) == ((1ull << 12) | 1ull));
+    npad_latest_sticks(1, HO_HidNpadInternalState_joy_dual_lifo, sticks);
+    CHECK(sticks[0] == 0 && sticks[1] == -1000 && sticks[2] == 0 && sticks[3] == 2000);
+    vibration(h, 0x00010105u, 0.25f, 0); /* merged No2's right device goes to physical No3 */
+    CHECK(g_pad_extra[1].rumble[1] == 16383u);
+    g_pad_extra[0].motion[0].valid = g_pad_extra[1].motion[0].valid = 1;
+    g_pad_extra[0].motion[0].acceleration[2] = g_pad_extra[1].motion[0].acceleration[2] = -1;
+    g_pad_extra[1].motion[0].angular_velocity[0] = 1;
+    CHECK(six_axis_at_rest(h, 0x00000105u) == 1); /* left sensor */
+    CHECK(six_axis_at_rest(h, 0x00010105u) == 0); /* right sensor */
+    g_pad_extra[0].motion[0].valid = g_pad_extra[1].motion[0].valid = 0;
+    /* A new right Joy-Con with the same kind must not inherit the old right Joy-Con's pair. */
+    g_pad_extra[1].source_id = 444;
+    hid_update();
+    CHECK(npad_style_at(1) == 1u << 3 && npad_style_at(2) == 1u << 4);
+    joy_merge(h, 1, 2);
+    CHECK(npad_style_at(1) == 1u << 2 && npad_style_at(2) == 0);
+    /* Reassigning one member to another pair releases the old hidden partner. */
+    g_pad_extra[2].kind = SNX_PAD_JOY_RIGHT;
+    hid_update();
+    joy_merge(h, 1, 3);
+    CHECK(npad_style_at(1) == 1u << 2 && npad_style_at(2) == 1u << 4 && npad_style_at(3) == 0);
+    joy_merge(h, 1, 2);
+    CHECK(npad_style_at(1) == 1u << 2 && npad_style_at(2) == 0 && npad_style_at(3) == 1u << 4);
+    g_pad_extra[2].kind = SNX_PAD_JOY_DUAL;
+    hid_update();
+    /* A replacement in No3's physical slot must not inherit its old Joy-Con pairing. */
+    g_pad_extra[1].kind = SNX_PAD_FULL_KEY;
+    hid_update();
+    CHECK(npad_style_at(1) == 1u << 3 && npad_style_at(2) == 1u);
+    g_pad_extra[1].kind = SNX_PAD_JOY_RIGHT;
+    hid_update();
+    CHECK(npad_style_at(1) == 1u << 3 && npad_style_at(2) == 1u << 4);
+    joy_merge(h, 1, 2);
+    CHECK(npad_style_at(1) == 1u << 2 && npad_style_at(2) == 0);
+    joy_assign(h, 122, 2, 0); /* the hidden secondary can release the pair too */
+    CHECK(npad_style_at(1) == 1u << 3 && npad_style_at(2) == 1u << 4);
+    joy_merge(h, 1, 2);
+    CHECK(npad_style_at(1) == 1u << 2 && npad_style_at(2) == 0);
+    joy_assign(h, 122, 1, 0); /* return merged Joy-Cons to their original Npad IDs */
+    CHECK(npad_style_at(1) == 1u << 3 && npad_style_at(2) == 1u << 4);
+    set_ids(h, first_ids, 5);
+}
 static void test_hid(void) {
     svc_hid_init();
     SvcObj* h = new_hid();
@@ -341,7 +564,17 @@ static void test_hid(void) {
     CHECK(get_styles(h) == 2 && no1_style() == 0 && no1->signaled);
     set_styles(h, 0x7F);
     CHECK(get_styles(h) == 0x7F && no1_style() == 1);
+    /* Keyboard and scripted No1 input remains usable when slot 0 is an unsupported single Joy-Con. */
+    g_pad.kind = SNX_PAD_JOY_LEFT;
+    g_pad.buttons = 1ull;
+    set_styles(h, 1u);
+    hid_update();
+    CHECK(no1_style() == 1 && npad_latest_buttons(0, HO_HidNpadInternalState_full_key_lifo) == 1ull);
+    g_pad.kind = SNX_PAD_FULL_KEY;
+    g_pad.buttons = 0;
+    set_styles(h, 0x7F);
     test_vibration(h);
+    test_npad_players(h);
     svcobj_unref(h);
     close_handles();
     /* the service's own references: everything it made goes with them */
