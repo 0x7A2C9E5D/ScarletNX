@@ -233,7 +233,7 @@ static void button_map(App* app) {
     SDL_Joystick* j;
     SDL_Event e = {0};
     const SnxPadShape* box;
-    float x, y;
+    float x = 0, y = 0; /* mingw's assert returns, as far as the compiler knows */
     int page = -1, focus;
     SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT, "0x045e/0x02ea"); /* a real pad plugged in stays out */
     gui_settings_free(&app->settings);
