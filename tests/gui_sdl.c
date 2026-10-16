@@ -484,6 +484,30 @@ static void button_map(App* app) {
     assert(!app->gamepad && !app->pad.listening);
     render(app);
     assert(drawn_text(app, "No controller"));
+    /* a joystick SDL has no gamepad mapping for, plugged in: named, with its GUID and the file its mapping goes in */
+    {
+        char *folder = snx_dirname(app->settings_file), *file = snx_path_join(folder, "gamecontrollerdb.txt");
+        SDL_VirtualJoystickDesc odd;
+        SDL_JoystickID stick;
+        assert(!app->editor.note[0]);
+        SDL_INIT_INTERFACE(&odd);
+        odd.type = SDL_JOYSTICK_TYPE_UNKNOWN;
+        odd.naxes = 2;
+        odd.nbuttons = 4;
+        odd.vendor_id = 0x1234;
+        odd.product_id = 0x5678;
+        odd.name = "Odd Stick";
+        stick = SDL_AttachVirtualJoystick(&odd);
+        assert(stick);
+        pads(app);
+        assert(!app->gamepad && !strncmp(app->editor.note, "Joystick Odd Stick needs an SDL mapping (GUID ", 46));
+        assert(strstr(app->editor.note, ", a line in ") && strstr(app->editor.note, file));
+        assert(SDL_DetachVirtualJoystick(stick));
+        pads(app);
+        app->editor.note[0] = 0;
+        free(file);
+        free(folder);
+    }
     /* ESC: to the presets, then back to the page's row, the pads closed */
     key(app, SDLK_ESCAPE);
     assert(app->form == GUI_FORM_PAD && app->pad.focus < SNX_PAD_PRESETS);

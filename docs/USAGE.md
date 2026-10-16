@@ -319,8 +319,8 @@ For a joystick that SDL detects but does not recognize as a gamepad, put SDL map
 `gamecontrollerdb.txt` beside the launcher's `settings.ini` ([Folders](#folders)). A game in the launcher's
 `games/` reads the same file; any other game, the user's. To use a file elsewhere, set
 `SDL_GAMECONTROLLERCONFIG_FILE` to its path before starting the launcher or game. A mapping line starts with the
-joystick GUID shown in the game log or the launcher's Controllers page, followed by a name and SDL button and
-axis bindings. For example:
+joystick GUID shown in the game log or the launcher's Controllers page, which names the file too, followed by a name
+and SDL button and axis bindings. For example:
 
 ```text
 GUID,My Controller,a:b0,b:b1,x:b2,y:b3,leftx:a0,lefty:a1,rightx:a2,righty:a3
