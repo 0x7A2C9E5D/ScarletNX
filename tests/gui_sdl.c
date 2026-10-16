@@ -155,6 +155,15 @@ static void shows_at(int line, App* app, const char* text, SDL_Color color, int 
     }
     assert(!"the text drawn");
 }
+/* the same in the foot's letters, a size under the rest's (foot_scale) */
+#define shows_foot(app, text, color) foot_shows_at(__LINE__, app, text, color, 1)
+#define hides_foot(app, text, color) foot_shows_at(__LINE__, app, text, color, 0)
+static void foot_shows_at(int line, App* app, const char* text, SDL_Color color, int drawn) {
+    int scale = app->scale;
+    app->scale = foot_scale(app);
+    shows_at(line, app, text, color, 1, drawn);
+    app->scale = scale;
+}
 /* the boxes a pointer or a finger goes to: a menu's item, Games' rows (0 Add a folder, then the page's games; with
    recent a recent row), a form's row on the left or the right; a pointer at a box's middle */
 static GuiRect entry_box(App* app, int item) {
@@ -196,6 +205,23 @@ static void text_px_is_at(int line, App* app, int x0, int y0, const char* text, 
                 assert(!"the text drawn");
             }
     SDL_DestroySurface(image);
+}
+/* the same in the foot's letters */
+#define foot_px_is(app, x0, y0, text, color, back) foot_px_is_at(__LINE__, app, x0, y0, text, color, back)
+static void foot_px_is_at(int line, App* app, int x0, int y0, const char* text, SDL_Color color, SDL_Color back) {
+    int scale = app->scale;
+    app->scale = foot_scale(app);
+    text_px_is_at(line, app, x0, y0, text, color, back);
+    app->scale = scale;
+}
+/* where the text of a box of the foot goes, in its letters (foot_text) */
+static GuiRect foot_room(App* app, GuiRect r, int box) {
+    int scale = app->scale;
+    GuiRect out;
+    app->scale = foot_scale(app);
+    out = foot_text(app, r, box);
+    app->scale = scale;
+    return out;
 }
 /* the mouse at pixel x, y of the render, moved there or clicking */
 static void mouse_px(App* app, int x, int y, bool click) {
@@ -262,19 +288,19 @@ static void finish(App* app, int status) {
     snprintf(expected, sizeof(expected),
              status ? "Program ended abnormally (status %d)." : "Driver exited with status %d.", status);
     assert(!strcmp(app->message, expected) && app->abnormal_exit == (status != 0) && app->has_output);
-    shows(app, "Press [ESC] to return to menu", red);
+    shows_foot(app, "Press [ESC] to return to menu", red);   /* where the keys go, in their letters */
     if (status) shows(app, "Program ended abnormally", red); /* beside the output, how it ended */
     /* a theme can make that line a prompt: framed and placed, the done and the failed one apart */
     GuiPromptLine line = status ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE;
     app->theme.prompt.lines[line] = true;
     app->theme.prompt.blink = false;
     render(app);
-    shows(app, "[ Press [ESC] to return to menu ]", red);
+    shows_foot(app, "[ Press [ESC] to return to menu ]", red);
     app->theme.prompt.lines[line] = false;
     app->theme.prompt.lines[status ? GUI_PROMPT_DONE : GUI_PROMPT_FAILED] = true;
     render(app);
-    hides(app, "[ Press [ESC] to return to menu ]", red);
-    shows(app, "Press [ESC] to return to menu", red);
+    hides_foot(app, "[ Press [ESC] to return to menu ]", red);
+    shows_foot(app, "Press [ESC] to return to menu", red);
     app->theme.prompt = gui_theme_builtin(app->theme.id)->prompt;
     for (int i = 0; i < 3; ++i) pump(app);
     mouse_px(app, 4, 4, true); /* A completed process still requires ESC acknowledgement. */
@@ -1791,7 +1817,7 @@ int main(int argc, char** argv) {
     }
     assert(ready && app.menu.running);
     render(&app);
-    shows(&app, SAY_ABORT, red);
+    shows_foot(&app, SAY_ABORT, red);
     int selected = app.menu.selected;
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RETURN);
@@ -1804,7 +1830,7 @@ int main(int argc, char** argv) {
     app.theme.prompt.lines[GUI_PROMPT_ABORTING] = true;
     app.theme.prompt.blink = false;
     render(&app);
-    shows(&app, "[ Aborting process tree... ]", red);
+    shows_foot(&app, "[ Aborting process tree... ]", red); /* where the keys go */
     app.theme.prompt = gui_theme_builtin(app.theme.id)->prompt;
     key(&app, SDLK_ESCAPE); /* Repeated ESC while reaping is harmless. */
     while (app.menu.running && SDL_GetTicks() - started < 2000) {
@@ -2292,13 +2318,14 @@ int main(int argc, char** argv) {
         shows(&app, "\xfe Exit", ink);
         shows(&app, "CWD: ", ink);
         {
-            GuiMenuBoxes m; /* the foot on a band of ink, the keys' box's bar in the page's colour */
+            GuiMenuBoxes
+                m; /* the foot on a band of ink, the keys' box's bar in the page's colour, in the foot's size */
             menu_boxes(&app, &m);
             assert(same_colour(pixel(&app, (float)(m.place.keys.x + m.place.keys.w - 2), (float)(m.place.keys.y + 1)),
                                ink));
-            assert(same_colour(
-                pixel(&app, (float)(m.place.keys.x + 3 * app.scale), (float)(m.place.keys.y + m.place.keys.h / 2)),
-                page));
+            assert(same_colour(pixel(&app, (float)(m.place.keys.x + 3 * foot_scale(&app)),
+                                     (float)(m.place.keys.y + m.place.keys.h / 2)),
+                               page));
         }
         app_select(&app, GUI_APP_THEME);
         assert(!strcmp(app.theme.id, "custom") && !strcmp(app.theme.name, "Custom test"));
@@ -2365,7 +2392,7 @@ int main(int argc, char** argv) {
                 int s = app.scale, w;
                 SDL_Color c;
                 render(&app);
-                shows(&app, "put back", normal); /* the picker's keys */
+                shows_foot(&app, "put back", normal); /* the picker's keys */
                 picker_place(&app, &pk);
                 assert(pk.box.x + pk.box.w <= f.place.list.x + f.place.list.w); /* over the keys: the preview shows */
                 /* each bar the colours its channel goes through, the red one's ends black and red */
@@ -2830,11 +2857,26 @@ int main(int argc, char** argv) {
         assert(r.y == m.place.keys.y && r.x == m.place.list.x && r.w == m.place.list.w &&
                m.place.keys.x == m.place.side.x);
         assert(r.y > m.place.list.y + m.place.list.h && r.y + r.h <= 800 - 8 * s);
-        text_px_is(&app, r.x, r.y + 2 * s, "Installs prod.keys", normal, black);
-        r = m.place.keys;
-        shows(&app, "ESC", yellow);
-        shows(&app, "exit", normal);
-        text_px_is(&app, r.x + r.w - 10 * cw, r.y + 2 * s + 16 * s, "Tab", yellow, black);
+        { /* the tips and the keys in the foot's letters, a size under the rest's; Tab's the last key, against the right
+             edge of the keys' last row */
+            int fs = foot_scale(&app), rows;
+            assert(fs == s - 1);
+            foot_px_is(&app, r.x, r.y + 2 * fs, "Installs prod.keys", normal, black);
+            r = m.place.keys;
+            rows = (r.h - 4 * fs) / (16 * fs);
+            assert(rows >= 1 && r.h == rows * 16 * fs + 4 * fs);
+            shows_foot(&app, "ESC", yellow);
+            shows_foot(&app, "exit", normal);
+            hides(&app, "ESC", yellow);
+            foot_px_is(&app, r.x + r.w - 10 * 8 * fs, r.y + 2 * fs + (rows - 1) * 16 * fs, "Tab", yellow, black);
+            app.menu.text_size = 1; /* 1x: the foot's too, never under it */
+            render(&app);
+            assert(app.scale == 1 && foot_scale(&app) == 1);
+            shows(&app, "ESC", yellow);
+            app.menu.text_size = 0;
+            render(&app);
+            menu_boxes(&app, &m);
+        }
         /* the screens as tabs over it all, the one shown framed in the focus colour */
         r = m.place.tabs;
         assert(r.h && r.y + r.h <= m.place.list.y);
@@ -2863,7 +2905,7 @@ int main(int argc, char** argv) {
         snprintf(app.message, sizeof app.message, "Program ended abnormally (status 7).");
         app.abnormal_exit = true;
         render(&app);
-        text_px_is(&app, r.x, r.y + 2 * s, "Program ended abnormally", red, black);
+        foot_px_is(&app, r.x, r.y + 2 * foot_scale(&app), "Program ended abnormally", red, black);
         app.message[0] = 0;
         app.abnormal_exit = false;
         /* the pointer: over Exit's box it takes the focus, a click on Setup device keys opens its screen */
@@ -2901,7 +2943,7 @@ int main(int argc, char** argv) {
             {
                 char start[9]; /* its path, from a drive's letter on Windows */
                 snprintf(start, sizeof start, "%s", app.games.paths[0]);
-                text_px_is(&app, g.place.tips.x, g.place.tips.y + 2 * s, start, normal, black);
+                foot_px_is(&app, g.place.tips.x, g.place.tips.y + 2 * foot_scale(&app), start, normal, black);
             }
             key(&app, SDLK_RIGHT);
             assert(app.browser.page == 1);
@@ -2927,14 +2969,16 @@ int main(int argc, char** argv) {
             r = inner(&app, k.place.list);
             text_px_is(&app, r.x, k.place.list.y + 2 * s, "Setup device keys", normal, black);
             text_px_is(&app, r.x + (r.w - (int)strlen(waiting) * cw) / 2, k.prompt, waiting, yellow, black);
-            text_px_is(&app, k.place.tips.x, k.place.tips.y + 2 * s, "Setup device keys:", normal, black);
+            foot_px_is(&app, k.place.tips.x, k.place.tips.y + 2 * foot_scale(&app), "Setup device keys:", normal,
+                       black);
             app.clock = 0;
             mouse_px(&app, r.x + 10, k.prompt + 4, true);
             for (until = SDL_GetTicks() + 2000; !app.message[0] && SDL_GetTicks() < until;)
                 while (SDL_PollEvent(&answer)) event(&app, &answer);
             assert(app.menu.view == GUI_LOAD_KEYS && !strcmp(app.message, "No file was picked."));
             render(&app);
-            text_px_is(&app, k.place.tips.x, k.place.tips.y + 2 * s, "No file was picked.", yellow, black);
+            foot_px_is(&app, k.place.tips.x, k.place.tips.y + 2 * foot_scale(&app), "No file was picked.", yellow,
+                       black);
             b = list_box(&k.back, 0);
             mouse_px(&app, b.x + 4, b.y + 4, true);
             assert(app.menu.view == GUI_LOAD_NONE);
@@ -2998,9 +3042,9 @@ int main(int argc, char** argv) {
             b = list_box(&f.right, 0);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- libgccjit", yellow, black);
             {
-                char start[16]; /* in the tips, its first row */
+                char start[16]; /* in the tips, its first row: in the foot here, in its letters */
                 snprintf(start, sizeof start, "%s", app.settings.keys[0].about);
-                shows(&app, start, normal);
+                shows_foot(&app, start, normal);
             }
             /* a click on the second row focuses it, a second click changes it */
             launcher(&app, false);
@@ -3150,8 +3194,8 @@ int main(int argc, char** argv) {
             assert(app.console.cols == cols && app.console.rows == rows && !p.tabs.h);
             text_px_is(&app, p.list.x + cw, p.list.y + 2 * s, "Output", normal, black);
             text_px_is(&app, p.side.x + cw, p.side.y + 2 * s, "Load Linux ARM ELF", normal, black);
-            r = foot_text(&app, p.keys, app.theme.footer_box);
-            text_px_is(&app, r.x + r.w - (int)strlen(SAY_ABORT) * cw, r.y, SAY_ABORT, red, black);
+            r = foot_room(&app, p.keys, app.theme.footer_box);
+            foot_px_is(&app, r.x + r.w - (int)strlen(SAY_ABORT) * 8 * foot_scale(&app), r.y, SAY_ABORT, red, black);
             touch_box(&app, p.keys);
             assert(app.aborting);
             for (until = SDL_GetTicks() + 3000; app.menu.running && SDL_GetTicks() < until; SDL_Delay(5)) pump(&app);
@@ -3169,8 +3213,8 @@ int main(int argc, char** argv) {
                        p.side.y + head_h(&app) + 2 * s +
                            wrap_rows(&app, app.file, (p.side.w - 2 * cw) / cw, 1) * 16 * s + 8 * s,
                        "Driver exited with status 0.", yellow, black);
-            r = foot_text(&app, p.keys, app.theme.footer_box);
-            text_px_is(&app, r.x, r.y, SAY_DONE, red, black);
+            r = foot_room(&app, p.keys, app.theme.footer_box);
+            foot_px_is(&app, r.x, r.y, SAY_DONE, red, black);
             key(&app, SDLK_ESCAPE);
             assert(!app.finished && app.menu.view == GUI_LOAD_NONE);
             pump(&app);
@@ -3208,19 +3252,25 @@ int main(int argc, char** argv) {
         app.theme.tips_place = GUI_TIPS_BOTTOM; /* in the foot: on its band, in the page's colour */
         render(&app);
         menu_boxes(&app, &m);
-        r = foot_text(&app, m.place.tips, app.theme.tips_box);
-        text_px_is(&app, r.x, r.y, "Installs prod.keys", page, ink);
+        r = foot_room(&app, m.place.tips, app.theme.tips_box);
+        foot_px_is(&app, r.x, r.y, "Installs prod.keys", page, ink);
         /* on one row of the foot, the rest of a long one out of it until it slides there; [tips] wrap puts the rest on
            the foot's next rows */
-        hides(&app, "extracted with", page);
+        snprintf(app.message, sizeof app.message,
+                 "The tips take a row of the foot: a long line slides, or wraps over its rows.");
+        assert((int)strlen(app.message) > r.w / (8 * foot_scale(&app)));
+        render(&app);
+        foot_px_is(&app, r.x, r.y, "The tips take", page, ink);
+        hides_foot(&app, "its rows.", page);
         for (app.clock = 1; gui_slide(1000, app.clock, app.theme.scroll_ms) != 2;) app.clock += app.theme.scroll_ms;
         render(&app);
-        text_px_is(&app, r.x, r.y, "stalls prod.keys", page, ink);
+        foot_px_is(&app, r.x, r.y, "e tips take", page, ink);
         app.clock = 1;
         app.theme.tips_wrap = true;
         render(&app);
-        shows(&app, "extracted with", page);
+        shows_foot(&app, "its rows.", page);
         app.theme.tips_wrap = false;
+        app.message[0] = 0;
         app.clock = 0;
         /* [body] text: a text too long for its box over its rows, or on one row that slides */
         {
@@ -3326,11 +3376,15 @@ int main(int argc, char** argv) {
             app.recent = kept;
             recent_changed(&app);
         }
-        /* letters too big for the screen: the list scrolls, the focus in view, an arrow where entries are hidden */
+        /* letters too big for the screen: the list scrolls, the focus in view, an arrow where entries are hidden. At
+           800 high the whole menu fits 3x, its foot's letters 2x: 768 keeps 3x and one entry fewer */
+        assert(SDL_SetWindowSize(app.window, 1280, 768));
+        SDL_SyncWindow(app.window);
         app.menu.text_size = GUI_TEXT_MAX;
         app.menu.selected = GUI_EXIT;
         render(&app);
         menu_boxes(&app, &m);
+        assert(app.scale == 3 && foot_scale(&app) == 2);
         assert(m.list.shown < m.list.count && m.list.first > 0 && m.list.focus < m.list.first + m.list.shown);
         assert(menu_scrolls(&app));
         b = list_box(&m.list, m.list.first);

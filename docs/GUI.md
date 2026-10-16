@@ -118,7 +118,8 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
 - Settings > App's **Text size** steps the menu's letters through Auto (fit the screen) and four
-  sizes. Bigger letters scroll the menu.
+  sizes. Bigger letters scroll the menu. The foot's letters (its keys, and the tips when they are
+  there) are a size under the rest's, 1x at the least.
 - **Share log** saves the last run's output and game log to `scarletnx.log`. On the
   desktop it goes in the working folder with its path copied. On Android it goes to
   `/sdcard/ScarletNX/` and is shared.
@@ -223,8 +224,8 @@ beside it a box with what the focus is about (a recent game's path, Games' folde
 run's output) and under that one the Status box. The tips have a row of their own under the head (`[tips] place =
 top`, both built-ins'), or go to the foot under the list's column with `bottom`, where they take one row, a long one
 sliding, or wrap over its rows with `[tips] wrap`. At the foot the screen's keys, the whole width, or under the side
-box's column beside the tips; the tips and the keys each in a box with a bar down its left (`[tips] box`, `[footer]
-box`) or on the page. Games lists Add a folder, the recent games and a
+box's column beside the tips, in letters a size under the rest's; the tips and the keys each in a box with a bar down
+its left (`[tips] box`, `[footer] box`) or on the page. Games lists Add a folder, the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
 opens the picker) and Back at its foot. The Settings list their groups, and beside them the focused group's

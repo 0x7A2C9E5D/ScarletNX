@@ -1297,6 +1297,9 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
     return SDL_max(rows, 1);
 }
 /* ---- the foot and the tips: the keys' box, the tips' beside it or on a row under the head ---- */
+/* the foot's letters, a size under the rest's but 1 at the least: what draws or measures the keys, and the tips when
+   they are in the foot, does it with app->scale set to them, then puts the menus' back */
+static int foot_scale(const App* app) { return SDL_max(1, app->scale - 1); }
 /* the text's room in a box of them: past the bar at its left in a box, else the box's own width */
 static GuiRect foot_text(const App* app, GuiRect r, int box) {
     int s = app->scale;
@@ -1319,6 +1322,7 @@ static GuiRect foot_box(App* app, GuiRect r, int box, int band) {
 static void foot(App* app, const GuiPlace* p, const char* tips, SDL_Color color, const char* keys) {
     const GuiTheme* t = &app->theme;
     int band = t->footer == GUI_STYLE_BAR, below = p->tips.h && p->tips.y == p->keys.y, s = app->scale;
+    int small = foot_scale(app);
     GuiRect foot = below ? gui_rect(p->tips.x, p->keys.y, p->keys.x + p->keys.w - p->tips.x, p->keys.h) : p->keys;
     GuiRect text;
     if (!p->keys.h) return;
@@ -1326,13 +1330,16 @@ static void foot(App* app, const GuiPlace* p, const char* tips, SDL_Color color,
     if (t->footer_rule) fill_rect(app, gui_rect(foot.x, foot.y - cell_h(app) / 4 - s / 2, foot.w, s), t->soft);
     if (below && band && !(color.r == t->failure.r && color.g == t->failure.g && color.b == t->failure.b))
         color = rgb(t->page); /* on the band but a failure */
+    if (below) app->scale = small;
     text = foot_box(app, p->tips, t->tips_box, below && band);
     if (below && t->tips_wrap)
         wrap_in(app, text, text.x, text.y, tips, 0, color);
     else if (p->tips.h) /* one row: a long one slides */
         text_in(app, text, text.x, text.y, tips, color);
+    app->scale = small;
     text = foot_box(app, p->keys, t->footer_box, band);
     hints(app, keys, text.w / cell_w(app), text, text.y, 1, band);
+    app->scale = s;
 }
 /* the foot of a screen: the message while there is one, a failure's in its colour, else about */
 static void screen_foot(App* app, const GuiPlace* p, const char* about, const char* keys) {
@@ -1476,6 +1483,7 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols,
     if (t->tips_place == GUI_TIPS_TOP) in.tips = cell_h(app) + 4 * s;
     in.list_cols = list_cols ? SDL_min(SDL_max(list_cols, 20), SDL_max(20, (width / cell_w(app) - 2) * 3 / 5)) : 0;
     in.fixed = t->sizing == GUI_SIZING_FIXED && list_cols && list_cols < width / cell_w(app); /* a list, not a run */
+    app->scale = foot_scale(app);
     { /* the widest key, which a row cannot break */
         const char* at = keys;
         char key[128], what[128];
@@ -1487,7 +1495,8 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols,
     in.foot = SDL_max(in.tips || !t->tips_wrap ? 1 : 2,
                       hints(app, keys, foot_text(app, p->keys, t->footer_box).w / cell_w(app), none, 0, 0, 0)) *
                   cell_h(app) +
-              4 * s;
+              4 * app->scale;
+    app->scale = s;
     if (shows & GUI_SHOWS_STATUS && in.list_cols && t->footer != GUI_STYLE_NONE) /* at the side's width */
         in.status =
             head_h(app) + 4 * s + status_rows(app, inner(app, p->side).w / cell_w(app), none, 0, 0) * cell_h(app);
@@ -1779,7 +1788,7 @@ static void draw_run(App* app) {
     GuiPlace p;
     GuiRect r, text;
     const GuiTheme* t = &app->theme;
-    int y, x, i, cols, rows;
+    int y, x, i, cols, rows, s = app->scale;
     GuiPromptLine line =
         app->finished ? (app->abnormal_exit ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE) : GUI_PROMPT_ABORTING;
     run_place(app, &p);
@@ -1803,11 +1812,13 @@ static void draw_run(App* app) {
         wrap_in(app, text, text.x, y + cell_h(app) / 2, "Aborting process tree...", 0, rgb(t->failure));
     status_box(app, p.status);
     foot(app, &p, app->file ? app->file : "", rgb(t->soft), "");
+    app->scale = foot_scale(app); /* the ESC line where the keys go, in their letters */
     text = foot_text(app, p.keys, t->footer_box);
     if (app->finished || app->aborting)
         prompt_in(app, text, text.y, line, app->finished ? SAY_DONE : "Aborting process tree...", rgb(t->failure));
     else
         text_in(app, text, text.x + text.w - (int)strlen(SAY_ABORT) * cell_w(app), text.y, SAY_ABORT, rgb(t->failure));
+    app->scale = s;
 }
 /* the menu's screen or a run's, in app->theme, on the render target as it is; the boxes over it */
 static void draw_screen(App* app) {
