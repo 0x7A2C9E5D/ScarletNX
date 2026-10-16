@@ -112,24 +112,13 @@ static int copy(char* out, size_t size, const char* value) {
     strcpy(out, value);
     return 1;
 }
-static int hex(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
 static int colour(GuiRgb* out, const char* value) {
-    int i;
-    uint8_t v[3];
-    if (strlen(value) != 7 || value[0] != '#') return 0;
-    for (i = 0; i < 3; ++i) {
-        int hi = hex(value[1 + 2 * i]), lo = hex(value[2 + 2 * i]);
-        if (hi < 0 || lo < 0) return 0;
-        v[i] = (uint8_t)(hi * 16 + lo);
-    }
-    out->r = v[0];
-    out->g = v[1];
-    out->b = v[2];
+    unsigned r, g, b;
+    if (strlen(value) != 7 || value[0] != '#' || strspn(value + 1, "0123456789abcdefABCDEF") != 6) return 0;
+    sscanf(value + 1, "%2x%2x%2x", &r, &g, &b);
+    out->r = (uint8_t)r;
+    out->g = (uint8_t)g;
+    out->b = (uint8_t)b;
     return 1;
 }
 /* a whole number, 0 to 10000 */
