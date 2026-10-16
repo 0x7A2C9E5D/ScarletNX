@@ -43,7 +43,8 @@ controls* item, on by default on Android); the game's `.ini` keeps `controls`.
 `--backend=gcc` selects libgccjit instead of the default LLVM backend when preparing
 a dump. An explicit `--backend=llvm|gcc` forces recompilation rather than reusing a
 cached executable built by another compiler.
-It assembles and links with GNU binutils' `as` and `ld` from PATH; without them it stops and says so.
+It assembles and links with GNU binutils' `as` and `ld`: the AppImage and the Windows zip carry theirs, elsewhere
+they come from PATH, and without them it stops and says so.
 Use the separate commands for updates, custom keys or other compiler options.
 
 DXCI and DNSP with decrypted content need no keys. Containers are identified by their headers,
