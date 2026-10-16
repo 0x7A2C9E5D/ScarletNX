@@ -53,7 +53,9 @@ if(SNX_TOOLS_ONLY)
         else()
             enable_language(RC)
             target_sources(scarletnx PRIVATE "${CMAKE_SOURCE_DIR}/src/nx/runtime/platform/runtime.rc")
-            target_include_directories(scarletnx PRIVATE "${CMAKE_SOURCE_DIR}/src/nx/runtime/platform")
+            # where the resource compiler finds the manifest and the icon; C includes from src/ alone
+            target_include_directories(scarletnx PRIVATE
+                                       "$<$<COMPILE_LANGUAGE:RC>:${CMAKE_SOURCE_DIR}/src/nx/runtime/platform>")
         endif()
     endif()
 endif()
