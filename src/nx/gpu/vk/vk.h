@@ -199,7 +199,7 @@ typedef struct Surf {
         u32 wgen, tgen;
     } copied[2];
     u32 mem_wgen; /* render targets: wgen when guest memory last held the same (written back or loaded) */
-    u64 gw; /* gpu_mem_generation() when it last matched guest memory (textures) or was bound to draw (render targets) */
+    u64 gw; /* gpu_mem_generation() when it last matched guest memory or its unchanged range was checked */
     /* textures: views by type and swizzle, and the change check (gpu/vk/texture.c) */
     SurfView sv[6];
     int nsv;
@@ -211,6 +211,7 @@ typedef struct Surf {
     struct Surf* crop;
     u32 crop_gen;
     struct Surf* next;
+    struct Surf* rt_next; /* real render targets, for overlapping guest-memory writes */
 } Surf;
 /* resolution= in the .ini: render targets are made this much bigger (read once, at startup) */
 extern float g_vk_scale;
@@ -222,9 +223,9 @@ Surf* vk_rt_array(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, u32 pitch, u32 layer
 Surf* vk_rt_find(u64 gva);
 Surf* vk_rt_snapshot(Surf* rt);                  /* copy a target so a draw can sample its contents while writing it */
 Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h); /* the render target the guest presents from that memory */
-/* a render target read where its guest memory is (a texture, a present): keeps it from being evicted, and says
-   once when the GPU front end wrote that memory after the target was last drawn */
+/* a render target read where its guest memory is (a texture, a present): reload it if the GPU wrote its memory */
 void vk_rt_note_read(Surf* s);
+void vk_rt_before_write(u64 gva, u64 size);
 /* an image of a scaled target's format at the guest's size with that many layers, a transfer's source and
    destination: to move it to and from guest memory, or into a texture a blit can't reach. VK_NULL_HANDLE on failure */
 VkImage vk_unscaled_image(const Surf* s, u32 layers, VmaAllocation* mem);
@@ -423,7 +424,7 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
    the header's sampler with the declaration's comparison (integer textures unfiltered). The sampler's t and want,
    the texture whose own view is bound (NULL for none) and its view type, say whether anisotropy= may raise it */
 VkImageViewType vk_tex_view_type(const ShTex* st);
-VkImageView vk_tex_bind_view(Surf* t, VkImageViewType want, const u32* tic, int num);
+VkImageView vk_tex_bind_view(Surf* t, VkImageViewType want, const u32* tic, const u32* tsc, int num);
 VkSampler vk_tex_bind_sampler(const u32* tsc, const ShTex* st, int num, const Surf* t, VkImageViewType want);
 extern u64 g_vk_drawn, g_vk_skipped; /* draws recorded, and draws skipped (unsupported topology, failed shader) */
 

@@ -15,6 +15,8 @@
 
 #define SURFH 4096
 static Surf* g_surfh[SURFH];
+static Surf* g_rt_first;
+static _Thread_local int g_rt_flushing;
 static u32 hkey(u64 a) { return (u32)((a >> 8) ^ (a >> 20)) & (SURFH - 1); }
 
 /* bytes of a block-linear surface of w_bytes x h, block height 2^bh GOBs (shrunk for small surfaces, as the
@@ -126,6 +128,10 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
     u32 k = hkey(gva);
     s->next = g_surfh[k];
     g_surfh[k] = s;
+    if (is_rt) {
+        s->rt_next = g_rt_first;
+        g_rt_first = s;
+    }
     return s;
 }
 
@@ -369,6 +375,7 @@ void vk_surf_flush(Surf* s, const u8* original) {
         }
         guest_changed = memcmp(current, original, sz) != 0;
         free(current_copy);
+        s->mem_wgen = s->wgen; /* avoid flushing this target again when writeback checks overlapping targets */
         vk_write_changed(gva, dst, original, (u32)sz);
         free(tmp);
     } else if (tmp) {
@@ -387,6 +394,17 @@ void vk_surf_flush(Surf* s, const u8* original) {
     }
 }
 void vk_rt_flush(u64 gva) { vk_surf_flush(vk_rt_find(gva), NULL); }
+
+void vk_rt_before_write(u64 gva, u64 size) {
+    if (!size || g_rt_flushing) return;
+    vk_lock();
+    g_rt_flushing = 1;
+    for (Surf* s = g_rt_first; s; s = s->rt_next)
+        if (!(s->gva >> 63) && gva < s->gva + rt_bytes(s) && s->gva < gva + size)
+            vk_surf_flush(s, NULL);
+    g_rt_flushing = 0;
+    vk_unlock();
+}
 
 static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 pitch, u32 layers, u64 layer_size,
                        int volume) {
@@ -407,7 +425,7 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
             s->pitch == pitch && s->layers == layers && s->layer_size == layer_size && s->bd == bd &&
             s->volume == volume) {
             s->last_used = g_vk_present;
-            s->gw = gpu_mem_generation();
+            vk_rt_note_read(s);
             return s;
         }
     /* another size, format or layout at this address: park the current one, reuse a parked one that fits */
@@ -422,7 +440,7 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
     if (parked) {
         parked->gva = gva;
         parked->last_used = g_vk_present;
-        parked->gw = gpu_mem_generation();
+        vk_rt_note_read(parked);
         return parked;
     }
     VkFmt f = depth ? vk_zt_format(fmt) : vk_rt_format(fmt);
@@ -448,18 +466,18 @@ Surf* vk_rt_array(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, u32 pitch, u32 layer
 
 void vk_rt_note_read(Surf* s) {
     s->last_used = g_vk_present;
+    if (!s->is_rt) return;
     /* writes the 3D engine's draws don't see: I2M uploads, constant updates and compute results landing there go
        to memory, which DMA and 2D copies would load (vk_rt_reload) but these don't */
-    static int said;
-    if (said || s->gw == gpu_mem_generation()) return;
+    if (s->gw == gpu_mem_generation()) return;
     if (!gpu_mem_dirty_since(s->gw, s->gva, rt_bytes(s))) {
         s->gw = gpu_mem_generation(); /* still unwritten as of now: the next check walks less of the write log */
         return;
     }
-    said = 1;
-    LOG("vulkan: the render target at %llx is read after the GPU wrote its memory outside the 3D engine: the target's "
-        "contents are used, not the memory's\n",
-        (unsigned long long)s->gva);
+    vk_rt_reload(s->gva);
+    if (s->gw != gpu_mem_generation())
+        LOG_LIMIT(1, "vulkan: could not reload render target at %llx after its guest memory changed\n",
+                  (unsigned long long)s->gva);
 }
 
 Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h) {
@@ -478,7 +496,7 @@ Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h) {
             }
         }
     if (best) vk_rt_note_read(best);
-    return best;
+    return best && best->layout != VK_IMAGE_LAYOUT_UNDEFINED ? best : NULL;
 }
 
 /* render targets drawn this frame or the last, for a texture made of them (gpu/vk/texture.c) */
@@ -551,6 +569,13 @@ int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max) {
 
 /* a surface's image and views go when the frame being recorded is done (descriptors in it may name them) */
 static void surf_free(Surf* s) {
+    if (s->is_rt) {
+        for (Surf** pp = &g_rt_first; *pp; pp = &(*pp)->rt_next)
+            if (*pp == s) {
+                *pp = s->rt_next;
+                break;
+            }
+    }
     for (int i = 0; i < g_ndrawn; i++)
         if (g_drawn[i] == s) {
             g_drawn[i] = g_drawn[--g_ndrawn];
@@ -607,6 +632,7 @@ int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, 
     if (x1 <= x0 || y1 <= y0 || X1 <= dx || Y1 <= dy || x0 < 0 || y0 < 0 || dx < 0 || dy < 0) return 0;
     int scaled = x1 - x0 != X1 - dx || y1 - y0 != Y1 - dy;
     vk_rt_note_read(st);
+    if (st->layout == VK_IMAGE_LAYOUT_UNDEFINED) return 0;
     VkCommandBuffer cb = vk_cmd();
     vk_surf_use(cb, st, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
                 VK_ACCESS_2_TRANSFER_READ_BIT);

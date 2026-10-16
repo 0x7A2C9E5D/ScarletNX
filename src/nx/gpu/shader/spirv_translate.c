@@ -376,6 +376,19 @@ static u32 float_mod(DirectCtx* c, u32 value, int absolute, int negative) {
     return value;
 }
 
+/* An FTZ arithmetic instruction consumes and produces signed zero instead of a subnormal. Do it with integer bits
+   when the Vulkan device can't request DenormFlushToZero, or when this shader mixes FTZ and non-FTZ instructions. */
+static u32 float_ftz(DirectCtx* c, u32 value) {
+    u32 bits = spv_emit_bitcast(&c->emit, c->u32_type, value);
+    u32 exponent = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, bits,
+                                            spv_emit_constant_u32(&c->emit, c->u32_type, 0x7f800000u));
+    u32 sign = spv_emit_bitwise_and_u32(&c->emit, c->u32_type, bits,
+                                        spv_emit_constant_u32(&c->emit, c->u32_type, 0x80000000u));
+    u32 flushed = spv_emit_select(&c->emit, c->u32_type,
+                                  spv_emit_i_equal(&c->emit, c->bool_type, exponent, c->zero), sign, bits);
+    return spv_emit_bitcast(&c->emit, c->f32_type, flushed);
+}
+
 static u32 double_read(DirectCtx* c, u32 vec2_u32, u32 index) {
     u32 low = reg_read(c, index);
     u32 high = reg_read(c, index < 254 ? index + 1 : 255);
@@ -1952,7 +1965,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                        : op->id >= O_FADD_R && op->id <= O_FADD_I ? B(insn[i], 44, 1)
                        : op->id >= O_FMUL_R && op->id <= O_FMUL_I ? B(insn[i], 44, 2)
                                                                   : B(insn[i], 53, 2);
-            if (mode)
+            if (mode & 1)
                 fp32_flush = 1;
             else
                 fp32_preserve = 1;
@@ -5066,10 +5079,20 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             } else if (op == O_FMUL_R || op == O_FMUL_C || op == O_FMUL_I) {
                 right = float_mod(c, right, 0, B(w, 48, 1));
             }
+            u32 mode = op == O_FADD32I ? B(w, 55, 1)
+                       : op == O_FMUL32I ? B(w, 53, 2)
+                       : op == O_FADD_R || op == O_FADD_C || op == O_FADD_I ? B(w, 44, 1)
+                                                                            : B(w, 44, 2);
+            int soft_ftz = (mode & 1) && (!can_flush || fp32_preserve);
+            if (soft_ftz) {
+                left = float_ftz(c, left);
+                right = float_ftz(c, right);
+            }
             u32 result = op == O_FADD_R || op == O_FADD_C || op == O_FADD_I || op == O_FADD32I
                              ? spv_emit_fadd(&c->emit, c->f32_type, left, right)
                              : spv_emit_fmul(&c->emit, c->f32_type, left, right);
             spv_emit_no_contraction(&c->emit, result);
+            if (soft_ftz) result = float_ftz(c, result);
             /* FMZ (FMUL's 44-45, FMUL32I's 53-54 = 2): a zero factor makes the product 0, even with an infinity */
             if ((op == O_FMUL32I                                      ? B(w, 53, 2)
                  : op == O_FMUL_R || op == O_FMUL_C || op == O_FMUL_I ? B(w, 44, 2)
@@ -5109,7 +5132,14 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 if (B(w, 48, 1)) right = spv_emit_fnegate(&c->emit, c->f32_type, right);
                 if (B(w, 49, 1)) addend = spv_emit_fnegate(&c->emit, c->f32_type, addend);
             }
+            int soft_ftz = (B(w, 53, 2) & 1) && (!can_flush || fp32_preserve);
+            if (soft_ftz) {
+                left = float_ftz(c, left);
+                right = float_ftz(c, right);
+                addend = float_ftz(c, addend);
+            }
             u32 result = spv_emit_glsl_ternary(&c->emit, c->f32_type, c->glsl, SPV_GLSL_FMA, left, right, addend);
+            if (soft_ftz) result = float_ftz(c, result);
             if (B(w, 53, 2) == 2) {
                 u32 zero = spv_emit_constant_f32(&c->emit, c->f32_type, 0.0f);
                 u32 left_zero = spv_emit_fcompare(&c->emit, c->bool_type, 2, left, zero);

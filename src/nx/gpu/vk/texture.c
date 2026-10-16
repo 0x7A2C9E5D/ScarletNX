@@ -494,6 +494,7 @@ static Surf* tex_from_tic(const u32* tic, int raw) {
            own aspect, whatever the host format's size) */
         if (f.bpp == rt->f.bpp || f.depth || rt->f.depth) {
             vk_rt_note_read(rt);
+            if (rt->layout == VK_IMAGE_LAYOUT_UNDEFINED) goto texture_from_memory;
             /* the same bytes in another color format (an RGBA8 target read as R32_Uint): sampling the target itself
                would convert its texels, so a copy in the texture's format holds them as they are. sRGB and linear
                twins are views of one image and need no copy */
@@ -506,6 +507,7 @@ static Surf* tex_from_tic(const u32* tic, int raw) {
                   "is loaded from memory\n",
                   f.bpp, (unsigned long long)gva, rt->f.bpp);
     }
+texture_from_memory:
     /* loaded from memory, with what render targets drew into its layers and levels copied in after (tex_take_drawn) */
     /* what the device can make */
     const VkPhysicalDeviceLimits* lim = &g_vk.props.limits;
@@ -767,8 +769,6 @@ VkSampler vk_sampler(const u32* tsc, int raise, int integer) {
         af = (float)g_vk_anisotropy;
     if ((tsc[1] >> 10) & 3)
         LOG_LIMIT(1, "vulkan: min/max sampler reduction isn't supported (filtered as an average)\n");
-    if ((tsc[0] >> 13) & 1)
-        LOG_LIMIT(1, "vulkan: a sampler's sRGB conversion flag (TSC word 0 bit 13) isn't applied\n");
     VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
                               .magFilter = mag == 2 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST,
                               .minFilter = min == 2 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST,

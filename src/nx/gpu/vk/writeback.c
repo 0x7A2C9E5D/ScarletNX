@@ -9,6 +9,7 @@
 #include "nx/gpu/vk/vk.h"
 
 void vk_write_changed(u64 addr, const u8* res, const u8* org, u32 size) {
+    vk_rt_before_write(addr, size);
     u8* dst = gmem_ptr(addr, size);
     u8* tmp = NULL;
     const u8* cur = dst;

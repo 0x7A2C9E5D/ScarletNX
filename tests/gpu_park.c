@@ -206,6 +206,16 @@ int main(void) {
     struct timespec ms20 = {0, 20000000};
     gpu_init();
 
+    /* Falcon firmware call 4 signals a waiting MME macro through shadow scratch 0. */
+    GpuChannel* fw = calloc(1, sizeof *fw);
+    expect(fw != NULL, "firmware test channel allocated");
+    if (fw) {
+        maxwell3d_method(fw, 0x8C4, 0x1234, 1);
+        expect(fw->r3d[0xD00] == 1 && fw->r3d[0x8C4] == 0x1234,
+               "firmware call 4 signals completion and keeps its argument");
+        free(fw);
+    }
+
     /* channel 21's job waits for SEM to reach 1 (a mark after it, a second entry with another), its next job and a
        call naming it come after; channel 22's job, queued last, releases it (op 2, bit 24: one word) */
     u64 a[2] = {sem_then(SEM, 1, 4, 0xA1), mark(0xA2)};

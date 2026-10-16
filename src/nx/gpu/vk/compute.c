@@ -667,7 +667,8 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
                       : ((p->si.tex_sint_mask >> i) & 1) ? 2
                                                          : 1;
             VkImageView v =
-                t && (!t->f.depth || vk_tic_reads_stencil(tic)) ? vk_tex_bind_view(t, want, tic, num) : VK_NULL_HANDLE;
+                t && (!t->f.depth || vk_tic_reads_stencil(tic)) ? vk_tex_bind_view(t, want, tic, tsc, num)
+                                                                : VK_NULL_HANDLE;
             VkImageLayout sampled_layout =
                 p->si.nimg ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             const Surf* sampled = v ? t : NULL; /* the texture whose own view is bound, for the sampler */

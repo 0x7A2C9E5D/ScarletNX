@@ -566,7 +566,7 @@ VkImageViewType vk_tex_view_type(const ShTex* st) {
                            : VK_IMAGE_VIEW_TYPE_2D;
 }
 
-VkImageView vk_tex_bind_view(Surf* t, VkImageViewType want, const u32* tic, int num) {
+VkImageView vk_tex_bind_view(Surf* t, VkImageViewType want, const u32* tic, const u32* tsc, int num) {
     int stencil = t && t->f.stencil && vk_tic_reads_stencil(tic);
     if (!t || (stencil ? 1 : t->f.is_int ? (t->f.sint ? 2 : 1) : 0) != num) return VK_NULL_HANDLE;
     static const VkComponentSwizzle sw[8] = {
@@ -588,7 +588,8 @@ VkImageView vk_tex_bind_view(Surf* t, VkImageViewType want, const u32* tic, int 
                                  ? (VkComponentMapping){VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_ZERO,
                                                         VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ONE}
                                  : (VkComponentMapping){m[0], m[1], m[2], m[3]};
-    return vk_tex_view(t, want, (tic[4] >> 22) & 1, &map, stencil);
+    /* The TIC selects an sRGB-capable format; the TSC controls whether sampling unpacks it to linear. */
+    return vk_tex_view(t, want, ((tic[4] >> 22) & 1) && ((tsc[0] >> 13) & 1), &map, stencil);
 }
 
 /* the texture (NULL for none) and the view type say whether anisotropy= may raise its filtering: 2D textures with
@@ -825,7 +826,7 @@ static int tex_table_set(GpuChannel* ch, int stage, const VkSh* s, int slot, Sur
         memset(&x, 0, sizeof x);
         if (cba && at + 4 <= size && (handle & 0xFFFFF) <= r[0x55F] && ((handle >> 20) & 0xFFF) <= r[0x559]) {
             tex_resolve(ch, handle, &x);
-            if (x.t && !is_target(x.t, rt, zt, n)) view = vk_tex_bind_view(x.t, want, x.tic, num);
+            if (x.t && !is_target(x.t, rt, zt, n)) view = vk_tex_bind_view(x.t, want, x.tic, x.tsc, num);
         }
         if (view)
             vk_surf_use(vk_cmd(), x.t, layout, VK_SAMPLED_STAGES, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
@@ -962,11 +963,11 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
             Surf* snap = vk_rt_snapshot(t);
             if (snap != t) {
                 t = snap;
-                view = vk_tex_bind_view(t, want, x->tic, num);
+                view = vk_tex_bind_view(t, want, x->tic, x->tsc, num);
             } else
                 LOG_LIMIT(1, "vulkan: a draw samples a target it renders to (read as empty)\n");
         } else
-            view = vk_tex_bind_view(t, want, x->tic, num);
+            view = vk_tex_bind_view(t, want, x->tic, x->tsc, num);
         const Surf* sampled = view ? t : NULL; /* the texture whose own view is bound, for the sampler */
         if (view && depth_ro) {
             *zt_ro = 1; /* render_begin moves it to the read-only layout */
@@ -1092,12 +1093,16 @@ static u32 gs_input_vertices(u32 topology, int tes_on, u32 params) {
                                               : 3;
 }
 
-VkFrontFace vk_render_front_face(const u32* r) {
+static VkFrontFace front_face_at_viewport(const u32* r, float viewport_height) {
     int cw = r[0x647] == 0x900;
+    /* Vulkan tests facing in framebuffer coordinates. A negative viewport height reverses the winding there; reverse
+       the selected front face as well to preserve the guest's culling. */
+    if (viewport_height < 0) cw = !cw;
     /* NVB197_SET_WINDOW_ORIGIN_FLIP_Y changes triangle facing, not viewport or display row order. */
     if (r[0x4EB] & 0x10) cw = !cw;
     return cw ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
 }
+VkFrontFace vk_render_front_face(const u32* r) { return front_face_at_viewport(r, vk_render_viewport(r).height); }
 
 void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex, u32 base_instance,
                     u32 instances) {
@@ -1577,7 +1582,7 @@ retry:
                          : r[0x648] == 0x404 ? VK_CULL_MODE_FRONT_BIT
                          : r[0x648] == 0x408 ? VK_CULL_MODE_FRONT_AND_BACK
                                              : VK_CULL_MODE_BACK_BIT);
-    vkCmdSetFrontFace(cb, vk_render_front_face(r));
+    vkCmdSetFrontFace(cb, front_face_at_viewport(r, vp.height));
     vkCmdSetPrimitiveTopology(cb, topo);
     vkCmdSetPrimitiveRestartEnable(cb, restart && indexed == 1);
     vkCmdSetRasterizerDiscardEnable(cb, VK_FALSE);
@@ -1705,6 +1710,7 @@ void vk_render_draw_texture(GpuChannel* ch) {
         (x.tsc[1] & 3) == 2 && !t->f.is_int && format_has(t->f.vk, VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
     vk_render_end(); /* blits happen outside rendering passes */
     vk_rt_note_read(t);
+    if (t->layout == VK_IMAGE_LAYOUT_UNDEFINED) return;
     VkCommandBuffer cb = vk_cmd();
     vk_surf_use(cb, t, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
                 VK_ACCESS_2_TRANSFER_READ_BIT);

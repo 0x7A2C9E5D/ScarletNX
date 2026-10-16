@@ -147,6 +147,7 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
             case 0x6C:
             case 0x6D:
             case 0xB2:
+            case 0x8C4:
             case 0x674:
             case 0x6C3:
             case 0x904:
@@ -164,6 +165,9 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
         case 0x46: ch->mme_code[ch->mme_upload_ptr++ & 0x1FFF] = v; break;
         case 0x47: ch->mme_start_ptr = v; break;
         case 0x48: ch->mme_start[ch->mme_start_ptr++ & 0xFF] = v; break;
+        case 0x8C4: /* Falcon firmware call 4 signals completion through shadow scratch 0. */
+            R3(0xD00) = 1;
+            break;
         case 0x6C: i2m_launch(ch, ch->r3d, 0x60); break;
         case 0x6D: i2m_data(ch, v); break;
         case 0xB2: /* SyncInfo */
