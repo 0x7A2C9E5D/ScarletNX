@@ -100,7 +100,7 @@ typedef enum {
     SNX_A32_VECTOR,
     SNX_A32_UADD8,
     SNX_A32_SEL,
-    SNX_A32_MULH /* ARMv5TE signed halfword multiplies (ARM11 profile) */
+    SNX_A32_MULH, /* ARMv5TE signed halfword multiplies (ARM11 profile) */
     SNX_A32_COPROC, /* MRC/MCR/MRRC/MCRR to coprocessor 14 or 15: the backend's (SnxArmRt.coproc) */
     SNX_A32_SATURATE,   /* SSAT, USAT, SSAT16, USAT16 */
     SNX_A32_PACK,       /* PKHBT, PKHTB */
