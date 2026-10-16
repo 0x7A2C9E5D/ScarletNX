@@ -7,8 +7,9 @@
 #define SNX_OVERLAY_H
 #include "nx/runtime/platform/ui.h"
 
-#define OVERLAY_COLS 40 /* the panel, in cells of the 8x16 font */
-#define OVERLAY_ROWS 16 /* the tallest page's: the others are as tall as their items */
+#define OVERLAY_COLS     40 /* the panel, in cells of the 8x16 font: the narrowest */
+#define OVERLAY_COLS_MAX 72 /* and the widest, as far as three quarters of the picture let it */
+#define OVERLAY_ROWS     16 /* the tallest page's: the others are as tall as their items */
 enum { OVERLAY_NONE, OVERLAY_CLOSE, OVERLAY_EXIT, OVERLAY_EDIT };
 
 /* whether it is open, for the renderer's thread too */
@@ -48,8 +49,11 @@ int overlay_pointer_up(u64 id, float x, float y, int sw, int sh);
 void overlay_pointer_cancel(u64 id);
 void overlay_pointers_reset(void);
 void overlay_draw(SnxUiList* l, int sw, int sh);
-/* a fatal error's panel (backend/sdl3.c), the menu's own: the head, the game's name, the error, what it means and what to
-   do, cut to its width, then Share log, Copy path and Close, one in focus */
+/* the columns the menu's pages and the stopped panel take at scale on a picture sw wide: as many as three quarters of it
+   holds, within OVERLAY_COLS and OVERLAY_COLS_MAX */
+int overlay_cols(int sw, int scale);
+/* a fatal error's panel (backend/sdl3.c), a dialog as the menu's pages are: the head, the game's name, the error, what it
+   means and what to do, cut to its width, then Share log, Copy path and Close, one in focus */
 typedef struct {
     float x, y, w, h;
 } SnxOverlayRect;

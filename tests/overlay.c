@@ -61,16 +61,18 @@ static void store(const char* key, const char* value) {
 }
 
 enum { SW = 2424, SH = 1080 };
-static int px, py, s;
+static int px, py, s, C; /* C: the panel's columns, overlay_cols' */
 /* a tap on a row of items, at a column, where the panel is for its page */
 static int tap(int row, int col) {
     overlay_place(SW, SH, &px, &py, &s);
+    C = overlay_cols(SW, s);
     return overlay_tap((float)(px + col * 8 * s + 2), (float)(py + (3 + row) * 16 * s + 5), SW, SH);
 }
 static SnxUiQuad quads[2048];
 static SnxUiList list;
 static void draw(void) {
     overlay_place(SW, SH, &px, &py, &s);
+    C = overlay_cols(SW, s);
     list.q = quads;
     list.n = 0;
     list.max = 2048;
@@ -137,12 +139,16 @@ int main(void) {
     assert(!overlay_shown());
     overlay_toggle();
     assert(overlay_shown());
-    /* half the screen at most, in whole steps, in the middle: a phone held wide, a small window. The page is as
-       tall as its items (three here, under three rows of head, over a blank one), at the scale of the tallest page */
+    /* letters half the screen's height at most, in whole steps, in the middle: a phone held wide, a small window. The
+       page is as tall as its items (three here, under three rows of head, over a blank one), at the scale of the
+       tallest page, and as wide as three quarters of the picture hold, between 40 and 72 columns */
     overlay_place(SW, SH, &px, &py, &s);
-    assert(s == 2 && px == (SW - 640) / 2 && py == (SH - 7 * 32) / 2);
+    C = overlay_cols(SW, s);
+    assert(s == 2 && C == OVERLAY_COLS_MAX && px == (SW - C * 16) / 2 && py == (SH - 7 * 32) / 2);
+    assert(overlay_cols(1280, 2) == 60 && overlay_cols(500, 1) == 46 && overlay_cols(400, 1) == OVERLAY_COLS &&
+           overlay_cols(3840, 4) == OVERLAY_COLS_MAX);
     overlay_place(500, 120, &x, &y, &sc);
-    assert(sc == 1 && x == 90 && y == 4);
+    assert(sc == 1 && x == (500 - 46 * 8) / 2 && y == 4);
     /* a phone's display scale: the Poco F8 (408 dpi, 2510x1156) and the Pixel 9 (420 dpi) at 3x, where half the
        picture gave 2x; a 4K picture at 100% keeps the 4x half of it gives */
     overlay_set_display_scale(408.0f / 160);
@@ -157,8 +163,8 @@ int main(void) {
 
     /* the first page: the title on a band of ink, the items under it, the focused one on a band */
     draw();
-    assert(list.q[0].w == 640 && list.q[0].h == 7 * 32 && list.q[1].rgba == ink && list.q[1].h == 32);
-    assert(text_at(38, 3, ">") && text_at(38, 4, ">")); /* a page under each */
+    assert(list.q[0].w == (float)(C * 16) && list.q[0].h == 7 * 32 && list.q[1].rgba == ink && list.q[1].h == 32);
+    assert(text_at(C - 2, 3, ">") && text_at(C - 2, 4, ">")); /* a page under each */
     assert(text_at(1, 0, "SCARLETNX  /  MENU") && text_at(1, 3, "\xFE On-screen controls") &&
            text_at(1, 4, "\xFE Controllers") && text_at(1, 5, "\xFE Exit"));
     /* a tap on Exit exits; on the title, nothing; outside the panel, it closes */
@@ -173,7 +179,7 @@ int main(void) {
     assert(tap(0, 3) == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  CONTROLS") && text_at(1, 3, "\xFE Show controls"));
-    assert(list.q[0].h == 16 * 32 && text_at(38, 12, ">")); /* twelve items: the tallest; Buttons opens a page */
+    assert(list.q[0].h == 16 * 32 && text_at(C - 2, 12, ">")); /* twelve items: the tallest; Buttons opens a page */
     /* named as the .ini's rows name them, in the launcher's order, the game's own actions among them */
     assert(text_at(1, 4, "\xFE Edit layout") && text_at(1, 5, "\xFE Snap to grid") &&
            text_at(1, 8, "\xFE Relative stick center"));
@@ -181,20 +187,20 @@ int main(void) {
            text_at(1, 13, "\xFE Reset layout"));
     vpad_config()->on = 0;
     draw();
-    assert(text_at(36, 3, "Off"));
+    assert(text_at(C - 4, 3, "Off"));
     assert(tap(0, 3) == OVERLAY_NONE && vpad_config()->on && !strcmp(stored, "controls"));
     draw();
-    assert(text_at(37, 3, "On"));
+    assert(text_at(C - 3, 3, "On"));
     /* Scale's arrows: the left one down, the right one up, by tens, between 50% and 150% */
     assert(vpad_config()->scale == 50);
     draw();
-    assert(text_at(31, 6, "< 100% >"));
-    tap(3, 38);
+    assert(text_at(C - 9, 6, "< 100% >"));
+    tap(3, C - 2);
     assert(vpad_config()->scale == 60 && !strcmp(stored, "controls_scale"));
-    tap(3, 31);
-    tap(3, 31);
+    tap(3, C - 9);
+    tap(3, C - 9);
     assert(vpad_config()->scale == 40);
-    for (x = 0; x < 9; ++x) tap(3, 31);
+    for (x = 0; x < 9; ++x) tap(3, C - 9);
     assert(vpad_config()->scale == 0);
     vpad_config()->scale = 50;
     /* the keys: down from Scale to Opacity, left steps it */
@@ -212,11 +218,11 @@ int main(void) {
     tap(8, 3);
     assert(touch == 2);
     draw();
-    assert(text_at(30, 11, "Mouse too"));
+    assert(text_at(C - 10, 11, "Mouse too"));
     tap(8, 3);
     assert(touch == 0);
     draw();
-    assert(text_at(36, 11, "Off"));
+    assert(text_at(C - 4, 11, "Off"));
     tap(8, 3);
     /* Edit layout is the caller's to do */
     assert(tap(1, 3) == OVERLAY_EDIT);
@@ -229,7 +235,7 @@ int main(void) {
     tap(1, 3);
     assert(!vpad_config()->at[SNX_VPAD_L].shown && !strcmp(log_, "controls_l_shown=0;")); /* its place stays */
     draw();
-    assert(text_at(33, 4, "Hidden") && text_at(28, 3, "Some hidden"));
+    assert(text_at(C - 7, 4, "Hidden") && text_at(C - 12, 3, "Some hidden"));
     tap(0, 3);
     assert(vpad_config()->at[SNX_VPAD_L].shown);
     tap(0, 3); /* all shown: All hides them */
@@ -237,11 +243,11 @@ int main(void) {
     tap(0, 3);
     overlay_move(-1); /* round to Back, at the bottom */
     draw();
-    assert(text_at(1, 3 + 11, "\xFE Back") && text_at(39, 3, "\x18") && !text_at(39, 14, "\x19"));
+    assert(text_at(1, 3 + 11, "\xFE Back") && text_at(C - 1, 3, "\x18") && !text_at(C - 1, 14, "\x19"));
     /* the wheel stops at the ends: up past All, and down past Back, where Back still goes up a page */
     overlay_scroll(-20);
     draw();
-    assert(text_at(1, 3, "\xFE All") && !text_at(39, 3, "\x18") && text_at(39, 14, "\x19"));
+    assert(text_at(1, 3, "\xFE All") && !text_at(C - 1, 3, "\x18") && text_at(C - 1, 14, "\x19"));
     overlay_scroll(20);
     overlay_scroll(1);
     /* Back on it, and the key Back, go up a page each */
@@ -324,37 +330,37 @@ int main(void) {
     assert(tap(1, 3) == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  CONTROLLERS") && text_at(1, 1, "None connected."));
-    assert(list.q[0].h == 10 * 32 && text_at(1, 3, "\xFE A B X Y") && text_at(31, 3, "By label"));
+    assert(list.q[0].h == 10 * 32 && text_at(1, 3, "\xFE A B X Y") && text_at(C - 9, 3, "By label"));
     tap(0, 3); /* round its words: Custom, then By position */
     assert(pads.labels == SNX_PAD_CUSTOM && pad_stored == &pads.labels);
     tap(0, 3);
     assert(!pads.labels);
     draw();
-    assert(text_at(28, 3, "By position"));
+    assert(text_at(C - 12, 3, "By position"));
     overlay_side(1);
     assert(pads.labels);
     draw();
-    assert(text_at(32, 4, "< 20% >"));
-    tap(1, 38);
+    assert(text_at(C - 8, 4, "< 20% >"));
+    tap(1, C - 2);
     assert(pads.deadzone == 25 && pad_stored == &pads.deadzone);
-    tap(1, 31);
-    tap(1, 31);
+    tap(1, C - 9);
+    tap(1, C - 9);
     assert(pads.deadzone == 15);
-    for (x = 0; x < 20; ++x) tap(1, 38);
+    for (x = 0; x < 20; ++x) tap(1, C - 2);
     assert(pads.deadzone == 90);
     pads.deadzone = 20;
-    for (x = 0; x < 10; ++x) tap(2, 31);
+    for (x = 0; x < 10; ++x) tap(2, C - 9);
     assert(pads.rumble == 0 && pad_stored == &pads.rumble);
     draw();
-    assert(text_at(32, 5, "< Off >"));
+    assert(text_at(C - 8, 5, "< Off >"));
     assert(overlay_select() == OVERLAY_NONE && pads.rumble == 10); /* the focus is on it: a select steps up */
     pads.rumble = 100;
     draw();
-    assert(text_at(1, 6, "\xFE Background input") && text_at(36, 6, "Off"));
+    assert(text_at(1, 6, "\xFE Background input") && text_at(C - 4, 6, "Off"));
     tap(3, 3);
     assert(pads.background && pad_stored == &pads.background);
     draw();
-    assert(text_at(37, 6, "On"));
+    assert(text_at(C - 3, 6, "On"));
     tap(3, 3);
     assert(!pads.background);
     pad_names[0] = "Xbox Wireless Controller";
@@ -373,7 +379,7 @@ int main(void) {
     pad_names[0] = "Xbox Wireless Controller";
     pad_names[1] = pad_names[2] = NULL;
     draw();
-    assert(text_at(1, 7, "\xFE Button map") && text_at(38, 7, ">"));
+    assert(text_at(1, 7, "\xFE Button map") && text_at(C - 2, 7, ">"));
     assert(tap(4, 3) == OVERLAY_NONE);
     pads_held = 1u << SNX_PAD_RT;
     draw();
@@ -458,14 +464,16 @@ int main(void) {
         row_h = 16.0f * (float)s;
         top = list.q[0].y;
         total = (int)(list.q[0].h / row_h);
-        assert(list.n > 4 && list.q[0].x == (float)px && list.q[0].w == (float)(OVERLAY_COLS * 8 * s));
+        C = overlay_cols(SW, s);
+        assert(list.n > 4 && list.q[0].x == (float)px && list.q[0].w == (float)(C * 8 * s));
         assert(top >= 0 && top + list.q[0].h <= (float)SH && list.q[1].y == top && list.q[1].h == row_h);
         py = (int)top;
         assert(text_at(1, 0, "SCARLETNX  /  STOPPED") && text_at(1, 1, "ENDER MAGNOLIA"));
-        assert(text_at(1, 3, "vulkan: the GPU device was lost") && text_at(1, 4, "(driver reset or crash)"));
+        assert(
+            text_at(1, 3, "vulkan: the GPU device was lost (driver reset or crash)")); /* one row, as wide as it is */
         i = glyph_at(1, 3, 'v');
         assert(i >= 0 && list.q[i].rgba == 0xFF3C47A5u);
-        assert(text_at(1, 6, "The GPU stopped answering and its"));
+        assert(text_at(1, 5, "The GPU stopped answering and its"));
         for (i = 0; i < list.n; ++i)
             if (list.q[i].y == top + row_h * (float)(total - 2) && list.q[i].h == row_h && list.q[i].w == list.q[0].w)
                 close_band = i;
@@ -563,19 +571,23 @@ int main(void) {
             overlay_error_draw(&list, 1280, 720, &panel);
             overlay_place(1280, 720, &px, &py, &s);
             whole = (int)(panel.link.h / (16.0f * (float)s));
-            panel.said = said;
-            for (int height = 720, cut = 0; height >= 300; height -= 4) {
+            for (int height = 720, cut = 0; height >= 200; height -= 4) {
                 int label = 0, rows;
+                panel.said = NULL; /* the log whole at this size, its columns and scale */
                 list.n = 0;
                 overlay_error_draw(&list, 1280, height, &panel);
                 overlay_place(1280, height, &px, &py, &s);
+                whole = (int)(panel.link.h / (16.0f * (float)s));
+                panel.said = said;
+                list.n = 0;
+                overlay_error_draw(&list, 1280, height, &panel);
                 py = (int)list.q[0].y;
                 assert(list.q[0].y >= 0 && list.q[0].y + list.q[0].h <= (float)height);
                 rows = (int)(panel.link.h / (16.0f * (float)s));
                 for (int r = 0; r < 64; ++r) label |= text_at(1, r, "The game's log has");
                 assert(rows == whole || !label);
                 cut |= !label;
-                if (height == 300) assert(cut && whole >= 2); /* the sweep got to where rows are cut */
+                if (height == 200) assert(cut); /* the sweep got to where rows are cut */
             }
         }
     }
