@@ -39,17 +39,16 @@ typedef struct {
     bool activated, load_activated, focus_load;
     GuiLoadView view;
     bool running, fullscreen, gccjit, gdbstub, quit;
-    bool controls;  /* the on-screen controls, on by default on Android */
-    int touch;      /* GUI_TOUCH_*, fingers the default */
-    int text_size;  /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen */
-    int theme_next; /* the GUI moves to the next theme and clears it */
-    int theme_edit; /* the GUI opens the theme editor and clears it */
-    int share_log;  /* the GUI shares the logs and clears it */
-    /* the recent games above the items: how many, the focused one + 1 (0: an item has the focus), and the one
-       to run + 1, which the GUI runs and clears */
-    int recent, recent_focus, recent_open;
+    bool controls; /* the on-screen controls, on by default on Android */
+    int touch;     /* GUI_TOUCH_*, fingers the default */
+    int text_size; /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen */
+    /* the recent games above the items: how many, and the focused one + 1 (0: an item has the focus) */
+    int recent, recent_focus;
 } GuiMenu;
-void gui_menu_key(GuiMenu* menu, GuiKey key);
+/* what a key on the menu asks of the GUI: nothing more, the next theme, the theme editor, the logs shared, or the
+   focused recent game run */
+typedef enum { GUI_MENU_STAY, GUI_MENU_THEME, GUI_MENU_EDITOR, GUI_MENU_LOG, GUI_MENU_RECENT } GuiMenuDo;
+GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key);
 /* The question a running run's abort asks first, or leaving the menu on a computer: shown or not, which one, and the
    choice in focus, the one that stays first */
 enum { GUI_CONFIRM_KEEP, GUI_CONFIRM_ABORT };

@@ -88,13 +88,10 @@ int main(void) {
     gui_menu_key(&menu, GUI_SELECT);
     assert(!menu.gdbstub);
     gui_menu_key(&menu, GUI_DOWN);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.selected == GUI_THEME && menu.theme_next && !menu.quit);
-    menu.theme_next = false; /* the GUI's to clear */
-    gui_menu_key(&menu, GUI_DOWN);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.selected == GUI_THEME_EDIT && menu.theme_edit && !menu.theme_next && menu.view == GUI_LOAD_NONE);
-    menu.theme_edit = 0; /* the GUI's to clear */
+    assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_THEME && menu.selected == GUI_THEME && !menu.quit);
+    assert(gui_menu_key(&menu, GUI_DOWN) == GUI_MENU_STAY);
+    assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_EDITOR && menu.selected == GUI_THEME_EDIT);
+    assert(menu.view == GUI_LOAD_NONE);
     /* Text size goes round 1x to the largest, then back to fitting the screen */
     gui_menu_key(&menu, GUI_DOWN);
     assert(menu.selected == GUI_TEXT && !menu.text_size);
@@ -105,9 +102,7 @@ int main(void) {
     gui_menu_key(&menu, GUI_SELECT);
     assert(!menu.text_size && !menu.quit);
     gui_menu_key(&menu, GUI_DOWN);
-    gui_menu_key(&menu, GUI_SELECT);
-    assert(menu.selected == GUI_LOG && menu.share_log && !menu.quit);
-    menu.share_log = 0; /* the GUI's to clear */
+    assert(gui_menu_key(&menu, GUI_SELECT) == GUI_MENU_LOG && menu.selected == GUI_LOG && !menu.quit);
     gui_menu_key(&menu, GUI_DOWN);
     gui_menu_key(&menu, GUI_SELECT);
     assert(menu.quit);
@@ -273,8 +268,7 @@ int main(void) {
     /* the theme item asks the GUI for the next theme */
     memset(&themed, 0, sizeof themed);
     themed.selected = GUI_THEME;
-    gui_menu_key(&themed, GUI_SELECT);
-    assert(themed.theme_next && themed.view == GUI_LOAD_NONE && !themed.quit);
+    assert(gui_menu_key(&themed, GUI_SELECT) == GUI_MENU_THEME && themed.view == GUI_LOAD_NONE && !themed.quit);
     assert(strstr(gui_setting_description(&themed), "themes/"));
 
     /* two recent games and the items make one ring; selecting a game asks the GUI to run it, closing a submenu */
@@ -294,8 +288,8 @@ int main(void) {
     assert(!ring.recent_focus && ring.selected == GUI_SWITCH);
     ring.recent_focus = 2;
     ring.view = GUI_LOAD_OPTIONS;
-    gui_menu_key(&ring, GUI_SELECT);
-    assert(ring.recent_open == 2 && ring.view == GUI_LOAD_NONE && !ring.activated && !ring.focus_load);
+    assert(gui_menu_key(&ring, GUI_SELECT) == GUI_MENU_RECENT && ring.recent_focus == 2);
+    assert(ring.view == GUI_LOAD_NONE && !ring.activated && !ring.focus_load);
     ring.recent = 0;
     ring.recent_focus = 0;
     ring.selected = GUI_SWITCH;

@@ -7,12 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-void gui_menu_key(GuiMenu* menu, GuiKey key) {
-    if (menu->running) return;
-    if (menu->view == GUI_LOAD_GAMES) return; /* the paginated browser owns its keys */
+GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
+    if (menu->running || menu->view == GUI_LOAD_GAMES) return GUI_MENU_STAY; /* the browser owns its keys */
     if (menu->view == GUI_LOAD_KEYS) {
         if (key == GUI_CANCEL) menu->view = GUI_LOAD_NONE;
-        return;
+        return GUI_MENU_STAY;
     }
     if (menu->view == GUI_LOAD_OPTIONS || menu->view == GUI_LOAD_DROP) {
         if (key == GUI_CANCEL) {
@@ -20,7 +19,7 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
             menu->selected = menu->active;
             menu->focus_load = menu->view == GUI_LOAD_OPTIONS;
             menu->load_activated = false;
-            return;
+            return GUI_MENU_STAY;
         }
         if (menu->focus_load) {
             if (key == GUI_UP || key == GUI_DOWN || key == GUI_LEFT || key == GUI_RIGHT)
@@ -31,7 +30,7 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
                 menu->load_activated = true;
                 menu->view = menu->load_selected == GUI_LOAD_DRAG ? GUI_LOAD_DROP : GUI_LOAD_GAMES;
             }
-            return;
+            return GUI_MENU_STAY;
         }
         /* Main-menu focus may move while the submenu stays anchored to active.
            Only explicit activation below replaces/closes that submenu. */
@@ -66,10 +65,9 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
             break;
         case GUI_SELECT:
             if (menu->recent_focus) {
-                menu->recent_open = menu->recent_focus;
                 menu->view = GUI_LOAD_NONE;
                 menu->focus_load = menu->load_activated = false;
-                break;
+                return GUI_MENU_RECENT;
             }
             menu->active = menu->selected;
             menu->activated = true;
@@ -86,13 +84,13 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
             } else if (menu->selected == GUI_GDBSTUB)
                 menu->gdbstub = !menu->gdbstub;
             else if (menu->selected == GUI_THEME)
-                menu->theme_next = 1;
+                return GUI_MENU_THEME;
             else if (menu->selected == GUI_THEME_EDIT)
-                menu->theme_edit = 1;
+                return GUI_MENU_EDITOR;
             else if (menu->selected == GUI_TEXT)
                 menu->text_size = (menu->text_size + 1) % (GUI_TEXT_MAX + 1);
             else if (menu->selected == GUI_LOG)
-                menu->share_log = 1;
+                return GUI_MENU_LOG;
             else if (menu->selected == GUI_EXIT)
                 menu->quit = true;
             else if (menu->selected == GUI_KEYS)
@@ -105,6 +103,7 @@ void gui_menu_key(GuiMenu* menu, GuiKey key) {
             break;
         default: break;
     }
+    return GUI_MENU_STAY;
 }
 bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
     if (!confirm->shown) return false;

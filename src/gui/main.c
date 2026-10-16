@@ -1608,31 +1608,21 @@ static void menu_key(App* app, GuiKey key) {
         }
         return;
     }
-    gui_menu_key(&app->menu, key);
+    switch (gui_menu_key(&app->menu, key)) {
+        case GUI_MENU_RECENT:
+            if (app->menu.recent_focus <= app->recent.count) open_recent(app, app->menu.recent_focus - 1);
+            return;
+        case GUI_MENU_THEME: next_theme(app); break;
+        case GUI_MENU_EDITOR: open_editor(app); break;
+        case GUI_MENU_LOG: share_log(app); break;
+        default: break;
+    }
 #ifdef SDL_PLATFORM_ANDROID
     if (app->menu.fullscreen != fullscreen) SDL_SetWindowFullscreen(app->window, app->menu.fullscreen); /* as a game */
     /* the screen opens first, as on a computer, so what happens shows there; a select on it opens the picker */
     if (key == GUI_SELECT && app->menu.view == before && (before == GUI_LOAD_DROP || before == GUI_LOAD_KEYS))
         open_picker(app);
 #endif
-    if (app->menu.recent_open) {
-        int index = app->menu.recent_open - 1;
-        app->menu.recent_open = 0;
-        if (index < app->recent.count) open_recent(app, index);
-        return;
-    }
-    if (app->menu.theme_next) {
-        app->menu.theme_next = 0;
-        next_theme(app);
-    }
-    if (app->menu.theme_edit) {
-        app->menu.theme_edit = 0;
-        open_editor(app);
-    }
-    if (app->menu.share_log) {
-        app->menu.share_log = 0;
-        share_log(app);
-    }
     if (key == GUI_CANCEL || (key == GUI_SELECT && app->menu.view == GUI_LOAD_KEYS)) app->message[0] = 0;
     if (app->menu.view == GUI_LOAD_GAMES) list_games(app);
     /* Back or ESC with nothing open to close: on Android the app goes behind, as an app's first screen does; on a
