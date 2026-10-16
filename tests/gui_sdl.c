@@ -640,6 +640,7 @@ int main(int argc, char** argv) {
     {
         char* more = snx_path_join(temporary, "more games");
         char* file = snx_path_join(more, "Zed");
+        char* kept_as = snx_absolute(more); /* as the system writes it: with backslashes on Windows */
         char *kept, line[160];
         size_t size;
         SDL_Event e = {0};
@@ -660,16 +661,16 @@ int main(int argc, char** argv) {
         assert(app.folder_count == 0 && !strncmp(app.editor.note, "Not a folder: ", 14));
         e.drop.data = more;
         event(&app, &e);
-        assert(app.folder_count == 1 && !strcmp(app.folders[0], more) && !strcmp(app.editor.note, "Added"));
+        assert(app.folder_count == 1 && !strcmp(app.folders[0], kept_as) && !strcmp(app.editor.note, "Added"));
         assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 1 && gui_editor_rows(&app.editor) == 3);
         kept = (char*)snx_read_file(app.folders_file, &size);
-        snprintf(line, sizeof line, "%s\n", more);
+        snprintf(line, sizeof line, "%s\n", kept_as);
         assert(kept && !strcmp(kept, line));
         free(kept);
         event(&app, &e);
         assert(app.folder_count == 1 && !strncmp(app.editor.note, "Already listed: ", 16));
         render(&app);
-        snprintf(line, sizeof line, "- %s", more);
+        snprintf(line, sizeof line, "- %s", kept_as);
         colored_text(&app, 5, line, yellow);
         app.editor.row = 2;
         key(&app, SDLK_RETURN);
@@ -693,6 +694,7 @@ int main(int argc, char** argv) {
         assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_FOLDERS);
         assert(!strcmp(app.app_form.folders, "games/ and 1 more"));
         free(file);
+        free(kept_as);
         free(more);
     }
     key(&app, SDLK_ESCAPE);
