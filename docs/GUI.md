@@ -56,6 +56,13 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   prints them from the runtime's own tables. The game's menu's settings have its names and words
   (*Scale* 100%, *Touch screen* Fingers), and its **Buttons** page, whose **All** steps every row;
   *Edit layout* and *Reset layout* stay in the game's menu, as the layout is each game's own.
+  Controllers' **Button map** draws the pad as the game's menu does: the presets on the left (*Each
+  game's*, the `.ini`'s, then *By position*, *By label*, *Custom*), each control in a box with the
+  console button it sends, and what the focus does at the bottom. Enter (or the pad's A) uses a
+  preset and Right goes to the controls, where Left/Right change a control's button and Enter waits
+  for a press on the pad, which takes it. A change makes *Custom* the preset in use, kept as
+  `gamepad_buttons` and `gamepad_map`; Del puts both back to the `.ini`'s. The first pad plugged in
+  is shown, its held buttons lit; the launcher reads pads only on this page.
   **App** holds **Theme** and **Text size**, which Left/Right or Enter go round either way, **Theme editor**, which comes back to App, and **Game folders**: `games/`,
   always listed, then the player's own folders, whose games the `games/` browser lists after
   `games/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window

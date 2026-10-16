@@ -17,6 +17,8 @@
 #include "build_info.h"
 #include "recent.h"
 #include "settings.h"
+#include "pad_sdl.h"
+#include "pad_screen.h"
 #ifdef SDL_PLATFORM_ANDROID
 #include "android.h"
 #endif
@@ -44,8 +46,9 @@ typedef struct {
     uint64_t used;
     int done, stop;
 } GuiSpace;
-/* the editor's screens: the Settings' groups, a group's settings, the App's rows, its game folders, the theme editor */
-enum { GUI_FORM_SETTINGS, GUI_FORM_GROUP, GUI_FORM_APP, GUI_FORM_FOLDERS, GUI_FORM_THEME };
+/* the editor's screens: the Settings' groups, a group's settings, the App's rows, its game folders, the theme editor,
+   and the Controllers' button map, the pad drawn (pad_screen.h) */
+enum { GUI_FORM_SETTINGS, GUI_FORM_GROUP, GUI_FORM_APP, GUI_FORM_FOLDERS, GUI_FORM_THEME, GUI_FORM_PAD };
 #define GUI_GROUPS_MAX  32
 #define GUI_FOLDERS_MAX 16 /* the player's game folders, past games/ */
 /* the App screen's values, as its rows show them, and the game folders' (games/ first) */
@@ -111,6 +114,11 @@ typedef struct {
     int group;           /* the group open, or the one the Settings come back to */
     int first, page;     /* a group's: the settings' row of its first, and of the page's row it opened (-1 none) */
     bool theme_from_app; /* the theme editor goes back to the App's rows */
+    SnxPadScreen pad;    /* the button map's, on the rows gamepad_buttons and gamepad_map */
+    SnxPadDrawing pad_drawing; /* as last drawn: what a click or a tap lands on */
+    SDL_Gamepad* gamepad;      /* the pad it shows, the first one plugged in, while it is open */
+    bool pads_read;            /* SDL's gamepads started for it */
+    unsigned pad_pushed;       /* the triggers and the left stick's directions past half way, a bit each */
     /* the Settings' groups: App, then a group per section of the settings, its first row and rows; a row each */
     int groups, group_first[GUI_GROUPS_MAX], group_rows[GUI_GROUPS_MAX];
     GuiThemeKey group_keys[GUI_GROUPS_MAX];
@@ -169,6 +177,7 @@ static const char* const items[] = {"Games",
 #define SAY_GROUPS     "Tap a group to open it. Back: go back."
 #define SAY_APP        "Tap a row to change or open it. Back: go back."
 #define SAY_FOLDERS    "Add a folder: tap it. Tap a folder twice to take it off. Back: go back."
+#define SAY_PAD        "Tap a preset or a control; tap it again for a press. Back: go back."
 #else
 #define SAY_MENU       "Arrows/mouse: move. Space/Enter/click: select."
 #define SAY_LOAD       "Choose a game or what to load. ESC: exit."
@@ -189,6 +198,7 @@ static const char* const items[] = {"Games",
 #define SAY_GROUPS     "Up/Down: group. Enter: open. ESC: back."
 #define SAY_APP        "Up/Down: row. Left/Right: change. Enter: change or open. ESC: back."
 #define SAY_FOLDERS    "Add a folder: pick, drop or paste one. Del: take one off. ESC: back."
+#define SAY_PAD        "Arrows/pad: move, change. Enter/A: select. Del: the .ini's. ESC: back."
 #endif
 static SDL_Color rgb(GuiRgb c) {
     SDL_Color out = {c.r, c.g, c.b, 255};
@@ -1579,9 +1589,16 @@ static void open_group(App* app, int g) {
     app->first = app->group_first[g];
     app->page = -1;
 }
-/* a page's rows (settings.h), from its row in the group */
+static bool pad_page(const App* app, int row);
+static void open_pad(App* app, int row);
+static void pad_close(App* app);
+/* a page's rows (settings.h), from its row in the group; the button map's, the pad drawn */
 static void open_page(App* app, int row) {
     const GuiSetting* page = &app->settings.values[row];
+    if (pad_page(app, row)) {
+        open_pad(app, row);
+        return;
+    }
     gui_editor_form(&app->editor, app->settings.keys + page->first, page->count, app->settings.values, NULL);
     app->editor.flat = true;
     app->first = page->first;
@@ -1601,7 +1618,8 @@ static void leave_editor(App* app) {
 static void leave_form(App* app) {
     int form = app->form;
     leave_editor(app);
-    if (form == GUI_FORM_GROUP && app->page >= 0) { /* a page: back to its row */
+    if (form == GUI_FORM_PAD) pad_close(app);
+    if ((form == GUI_FORM_GROUP || form == GUI_FORM_PAD) && app->page >= 0) { /* a page: back to its row */
         int row = app->page;
         open_group(app, app->group);
         app->editor.row = row - app->first;
@@ -1640,11 +1658,268 @@ static void save_editor(App* app) {
 }
 /* a Settings pick, kept at once */
 static void keep_settings(App* app) {
-    if ((app->form != GUI_FORM_GROUP && app->form != GUI_FORM_SETTINGS) || !app->editor.dirty) return;
+    if ((app->form != GUI_FORM_GROUP && app->form != GUI_FORM_SETTINGS && app->form != GUI_FORM_PAD) ||
+        !app->editor.dirty)
+        return;
     app->editor.dirty = false;
     gui_settings_sync(&app->settings);
     if (app->settings_file && gui_settings_save(&app->settings, app->settings_file))
         snprintf(app->editor.note, sizeof app->editor.note, "Not saved: %s could not be written", app->settings_file);
+}
+/* ---- the Controllers' button map: the pad drawn with what each control sends (pad_screen.h), as the game's menu has
+   it, its preset the row gamepad_buttons and its own map the row gamepad_map ---- */
+static int setting_row(const App* app, const char* key) {
+    int i;
+    for (i = 0; i < app->settings.count; ++i)
+        if (app->settings.values[i].key && !strcmp(app->settings.values[i].key, key)) return i;
+    return -1;
+}
+/* a page of gamepad_map's, while gamepad_buttons has the presets' words */
+static bool pad_page(const App* app, int row) {
+    const GuiSetting* page = &app->settings.values[row];
+    int map = setting_row(app, "gamepad_map"), buttons = setting_row(app, "gamepad_buttons");
+    return map >= page->first && map < page->first + page->count && buttons >= 0 &&
+           app->settings.keys[buttons].type == GUI_KEY_WORD && app->settings.values[buttons].values;
+}
+/* the pad's name, its labels and what it holds now */
+static void pad_sync(App* app) {
+    SnxPadScreen* p = &app->pad;
+    const char* name = app->gamepad ? SDL_GetGamepadName(app->gamepad) : NULL;
+    size_t n = 0;
+    int c;
+    if (app->gamepad && !name) name = "Controller";
+    while (name && *name && n + 1 < sizeof p->pad) /* in the font's glyphs, as the page's other texts */
+        p->pad[n++] = (char)gui_glyph(SDL_StepUTF8(&name, NULL));
+    p->pad[n] = 0;
+    p->held = 0;
+    if (!app->gamepad) {
+        memset(p->labels, 0, sizeof p->labels);
+        p->symmetric = 0;
+        return;
+    }
+    snx_pad_labels(app->gamepad, p->labels);
+    p->symmetric = snx_pad_symmetric(app->gamepad);
+    for (c = 0; c < SNX_PAD_CONTROLS; ++c)
+        if (snx_pad_held(app->gamepad, c)) p->held |= 1u << c;
+}
+/* the presets, gamepad_buttons' words after the .ini's, and the map as gamepad_map says; a map it cannot read is
+   named, and left out */
+static void pad_start(App* app) {
+    const GuiSettings* s = &app->settings;
+    int buttons = setting_row(app, "gamepad_buttons"), map = setting_row(app, "gamepad_map"), modes[SNX_PAD_PRESETS], w;
+    const GuiSetting* b = &s->values[buttons];
+    const char* names[SNX_PAD_PRESETS];
+    char error[64];
+    for (w = 0; w < SNX_PAD_PRESETS && s->keys[buttons].words[w]; ++w) {
+        names[w] = w ? s->keys[buttons].words[w] : "Each game's";
+        modes[w] = w ? atoi(b->values[w]) : -1;
+    }
+    snx_pad_screen_start(&app->pad, w, names, modes, b->word < w ? b->word : 0);
+    snx_pad_map_unset(&app->pad.own);
+    if (snx_pad_map_read(&app->pad.own, s->values[map].text, error, sizeof error))
+        snprintf(app->editor.note, sizeof app->editor.note,
+                 "gamepad_map's \"%s\" is not a control and the button it sends (south:B)", error);
+    pad_sync(app);
+}
+/* the first pad plugged in, when none is open */
+static void pad_attach(App* app) {
+    SDL_JoystickID* ids;
+    int n = 0;
+    if (app->gamepad || !app->pads_read) return;
+    ids = SDL_GetGamepads(&n);
+    if (n > 0 && !(app->gamepad = SDL_OpenGamepad(ids[0])))
+        snprintf(app->editor.note, sizeof app->editor.note, "The controller could not be opened: %s", SDL_GetError());
+    SDL_free(ids);
+    app->pad_pushed = 0;
+    pad_sync(app);
+}
+static void render(App* app);
+static void open_pad(App* app, int row) {
+    leave_editor(app);
+    app->editing = true;
+    app->form = GUI_FORM_PAD;
+    app->page = row;
+    app->editor.note[0] = 0;
+    pad_start(app);
+    render(app); /* SDL looks for pads for most of a second: the page shows first, saying so */
+    app->pads_read = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+    if (!app->pads_read)
+        snprintf(app->editor.note, sizeof app->editor.note, "Controllers cannot be read: %s", SDL_GetError());
+    pad_attach(app);
+}
+static void pad_close(App* app) {
+    if (app->gamepad) SDL_CloseGamepad(app->gamepad);
+    app->gamepad = NULL;
+    if (app->pads_read) SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    app->pads_read = false;
+}
+/* what the page did: a preset or a map kept at once, as the Settings' other picks */
+static void pad_did(App* app, int did) {
+    GuiSettings* s = &app->settings;
+    int map = setting_row(app, "gamepad_map");
+    if (did == SNX_PAD_DID_LEAVE) {
+        leave_form(app);
+        return;
+    }
+    if (did != SNX_PAD_DID_PRESET && did != SNX_PAD_DID_MAP) return;
+    s->values[setting_row(app, "gamepad_buttons")].word = app->pad.in_use;
+    if (did == SNX_PAD_DID_MAP) {
+        snx_pad_map_write(&app->pad.own, s->values[map].text, sizeof s->values[map].text);
+        app->editor.note[0] = 0; /* a map it could not read is replaced */
+    }
+    app->editor.dirty = true;
+    keep_settings(app);
+}
+/* a control of the pad: while the page waits, the press it waits for; else the key the console's button it sends
+   is in the game's menu: A selects, B goes back, the D-pad moves */
+static void pad_control(App* app, int control) {
+    static const int KEYS[SNX_PAD_BUTTONS] = {
+        SNX_PAD_KEY_SELECT, SNX_PAD_KEY_BACK, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, SNX_PAD_KEY_LEFT, SNX_PAD_KEY_UP,
+        SNX_PAD_KEY_RIGHT,  SNX_PAD_KEY_DOWN};
+    SnxPadMap map;
+    int bit;
+    if (control < 0) return;
+    if (app->pad.listening) {
+        pad_did(app, snx_pad_screen_press(&app->pad, control));
+        return;
+    }
+    snx_pad_screen_map(&app->pad, &map);
+    bit = map.bit[control];
+    if (bit >= 0 && bit < SNX_PAD_BUTTONS && KEYS[bit] >= 0) pad_did(app, snx_pad_screen_key(&app->pad, KEYS[bit]));
+}
+/* a trigger past SNX_PAD_TRIGGER is its control pressed, the left stick past half way the D-pad: once as each crosses */
+static void pad_axis(App* app, const SDL_GamepadAxisEvent* a) {
+    int side;
+    if (a->axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || a->axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
+        unsigned bit = 1u << (a->axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
+        bool on = a->value > SNX_PAD_TRIGGER, was = (app->pad_pushed & bit) != 0;
+        app->pad_pushed = on ? app->pad_pushed | bit : app->pad_pushed & ~bit;
+        if (on && !was) pad_control(app, a->axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER ? SNX_PAD_RT : SNX_PAD_LT);
+        return;
+    }
+    if (a->axis != SDL_GAMEPAD_AXIS_LEFTX && a->axis != SDL_GAMEPAD_AXIS_LEFTY) return;
+    for (side = 0; side < 2; ++side) {
+        bool y = a->axis == SDL_GAMEPAD_AXIS_LEFTY, on = side ? a->value > 16384 : a->value < -16384;
+        unsigned bit = 4u << (2 * y + side);
+        bool was = (app->pad_pushed & bit) != 0;
+        app->pad_pushed = on ? app->pad_pushed | bit : app->pad_pushed & ~bit;
+        if (on && !was)
+            pad_did(app, snx_pad_screen_key(&app->pad, y ? (side ? SNX_PAD_KEY_DOWN : SNX_PAD_KEY_UP)
+                                                         : (side ? SNX_PAD_KEY_RIGHT : SNX_PAD_KEY_LEFT)));
+    }
+}
+/* the page's keys; Del puts the preset and the map back to the .ini's */
+static void pad_keyboard(App* app, const SDL_KeyboardEvent* k) {
+    GuiKey key;
+    if (k->key == SDLK_DELETE || k->key == SDLK_BACKSPACE) {
+        int focus = app->pad.focus;
+        gui_settings_reset(&app->settings, setting_row(app, "gamepad_buttons"));
+        gui_settings_reset(&app->settings, setting_row(app, "gamepad_map"));
+        app->editor.note[0] = 0;
+        pad_start(app);
+        app->pad.focus = focus;
+        app->editor.dirty = true;
+        keep_settings(app);
+        return;
+    }
+    if (!menu_key_of(k, &key)) return;
+    switch (key) {
+        case GUI_UP: pad_did(app, snx_pad_screen_key(&app->pad, SNX_PAD_KEY_UP)); break;
+        case GUI_DOWN: pad_did(app, snx_pad_screen_key(&app->pad, SNX_PAD_KEY_DOWN)); break;
+        case GUI_LEFT: pad_did(app, snx_pad_screen_key(&app->pad, SNX_PAD_KEY_LEFT)); break;
+        case GUI_RIGHT: pad_did(app, snx_pad_screen_key(&app->pad, SNX_PAD_KEY_RIGHT)); break;
+        case GUI_SELECT: pad_did(app, snx_pad_screen_key(&app->pad, SNX_PAD_KEY_SELECT)); break;
+        case GUI_CANCEL: pad_did(app, snx_pad_screen_key(&app->pad, SNX_PAD_KEY_BACK)); break;
+        default: break;
+    }
+}
+/* the page's events: keys, its pad's presses, pads plugged in and out; false for what the rest takes */
+static bool pad_event(App* app, const SDL_Event* e) {
+    SDL_JoystickID ours = app->gamepad ? SDL_GetGamepadID(app->gamepad) : 0;
+    switch (e->type) {
+        case SDL_EVENT_KEY_DOWN: pad_keyboard(app, &e->key); return true;
+        case SDL_EVENT_TEXT_INPUT: return true;
+        case SDL_EVENT_GAMEPAD_ADDED: pad_attach(app); return true;
+        case SDL_EVENT_GAMEPAD_REMOVED:
+            if (ours && e->gdevice.which == ours) {
+                SDL_CloseGamepad(app->gamepad);
+                app->gamepad = NULL;
+                app->pad.listening = 0;
+                pad_attach(app);
+            }
+            return true;
+        case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+            if (ours && e->gbutton.which == ours) pad_control(app, snx_pad_of_button(e->gbutton.button));
+            return true;
+        case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+            if (ours && e->gaxis.which == ours) pad_axis(app, &e->gaxis);
+            return true;
+        default: return false;
+    }
+}
+/* a text of the page, in the font's glyphs (CP437) a byte each */
+static void pad_text(App* app, const SnxPadShape* p, GuiRgb c) {
+    float x = p->x;
+    const char* s;
+    SDL_SetTextureColorMod(app->font, c.r, c.g, c.b);
+    for (s = p->text; *s; ++s, x += 8.0f * (float)app->scale) glyph(app, x, p->y, (unsigned char)*s);
+}
+/* a round part of the pad */
+static void pad_disc(App* app, const SnxPadShape* p, GuiRgb c) {
+    enum { SIDES = 32 };
+    SDL_Vertex v[SIDES + 1];
+    int index[SIDES * 3], k;
+    float r = SDL_min(p->w, p->h) / 2;
+    SDL_FColor color = {(float)c.r / 255, (float)c.g / 255, (float)c.b / 255, 1};
+    for (k = 0; k <= SIDES; ++k) {
+        float a = 2 * SDL_PI_F * (float)k / SIDES;
+        v[k].position.x = p->x + p->w / 2 + (k ? r * SDL_cosf(a) : 0);
+        v[k].position.y = p->y + p->h / 2 + (k ? r * SDL_sinf(a) : 0);
+        v[k].color = color;
+        v[k].tex_coord.x = v[k].tex_coord.y = 0;
+    }
+    for (k = 0; k < SIDES; ++k) {
+        index[3 * k] = 0;
+        index[3 * k + 1] = k + 1;
+        index[3 * k + 2] = k + 1 < SIDES ? k + 2 : 1;
+    }
+    SDL_RenderGeometry(app->renderer, NULL, v, SIDES + 1, index, SIDES * 3);
+}
+/* the page in the theme's colours: the panels a little darker than the page, the focus as the menus' and what is held
+   on the pad in the active colour */
+static void render_pad(App* app) {
+    const GuiTheme* theme = &app->theme;
+    float cw = 8.0f * (float)app->scale, ch = 16.0f * (float)app->scale;
+    char title[160], *c;
+    int i;
+    SDL_SetRenderDrawColor(app->renderer, theme->page.r, theme->page.g, theme->page.b, 255);
+    SDL_RenderClear(app->renderer);
+    snprintf(title, sizeof title, "SETTINGS  /  %s  /  %s", app->group_keys[app->group].key,
+             app->settings.keys[app->page].key);
+    for (c = title; *c; ++c) *c = (char)SDL_toupper((unsigned char)*c);
+    if (theme->head == GUI_STYLE_BAR) band(app, 0, 1, theme->ink);
+    text(app, 1, 0, title, rgb(theme->head == GUI_STYLE_BAR ? theme->page : theme->ink));
+    text(app, 1, 1, SAY_PAD, rgb(theme->ink));
+    if (app->editor.note[0])
+        text(app, 1, 2, app->editor.note, rgb(theme->failure));
+    else if (!app->pads_read)
+        text(app, 1, 2, "Looking for controllers...", rgb(theme->soft));
+    pad_sync(app);
+    snx_pad_screen_lay(&app->pad, cw, 3 * ch, (float)(app->cols - 2) * cw, (float)SDL_max(1, app->rows - 4) * ch, cw,
+                       ch, &app->pad_drawing);
+    for (i = 0; i < app->pad_drawing.n; ++i) {
+        const SnxPadShape* p = &app->pad_drawing.shape[i];
+        GuiRgb on = p->style == SNX_PAD_STYLE_FOCUS ? theme->focus : theme->active;
+        bool marked = p->style == SNX_PAD_STYLE_FOCUS || p->style == SNX_PAD_STYLE_LIT;
+        if (p->kind == SNX_PAD_SHAPE_TEXT)
+            pad_text(app, p, marked ? theme->page : p->style == SNX_PAD_STYLE_SOFT ? theme->soft : theme->ink);
+        else if (p->kind == SNX_PAD_SHAPE_DISC)
+            pad_disc(app, p, marked ? on : theme->soft);
+        else if (marked)
+            fill(app, p->x, p->y, p->w, p->h, on, 255);
+        else
+            fill(app, p->x, p->y, p->w, p->h, theme->soft, p->kind == SNX_PAD_SHAPE_BAR ? 255 : 0x40);
+    }
 }
 static void editor_key(App* app, GuiKey key) {
     GuiEditorDo what = gui_editor_key(&app->editor, key);
@@ -1770,7 +2045,9 @@ static void editor_pointer(App* app, float x, float y, bool click) {
 static void render(App* app) {
     layout(app);
     if (splash_shown(app)) return;
-    if (app->editing)
+    if (app->editing && app->form == GUI_FORM_PAD)
+        render_pad(app);
+    else if (app->editing)
         render_editor(app);
     else
         draw_screen(app);
@@ -2399,6 +2676,10 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
     layout(app);
     float x, y;
     if (!SDL_RenderCoordinatesFromWindow(app->renderer, window_x, window_y, &x, &y)) return;
+    if (app->editing && app->form == GUI_FORM_PAD) {
+        if (click) pad_did(app, snx_pad_screen_tap(&app->pad, snx_pad_screen_hit(&app->pad_drawing, x, y)));
+        return;
+    }
     x /= 8 * app->scale;
     y /= 16 * app->scale;
     if (app->editing) {
@@ -2491,6 +2772,10 @@ static Uint64 finger_id(const SDL_TouchFingerEvent* f) {
 /* a row up or down for a finger's drag and the wheel, which stop at the first and last rows where the keys go round */
 static void scroll(App* app, GuiKey key) {
     int row;
+    if (app->editing && app->form == GUI_FORM_PAD) {
+        pad_did(app, snx_pad_screen_key(&app->pad, key == GUI_UP ? SNX_PAD_KEY_UP : SNX_PAD_KEY_DOWN));
+        return;
+    }
     if (app->editing) {
         editor_key(app, key); /* stops at its ends */
         return;
@@ -2510,7 +2795,7 @@ static bool drags(const App* app, float x, float y) {
     float dx = x - app->finger_x, dy = y - app->finger_y;
     return SDL_fabsf(dy) > 0.05f && SDL_fabsf(dy) > 2 * SDL_fabsf(dx) && app->menu.view != GUI_LOAD_GAMES &&
            !app->menu.running && !app->finished &&
-           (app->editing || menu_row_in_full(app, GUI_EXIT) > menu_last_row(app));
+           (app->editing ? app->form != GUI_FORM_PAD : menu_row_in_full(app, GUI_EXIT) > menu_last_row(app));
 }
 /* the focus follows the finger, up as it goes up, a row each time it passes a row's height, so the highlight is seen
    going */
@@ -2609,6 +2894,7 @@ static void event(App* app, const SDL_Event* e) {
         app->splash_until = 0;
         return;
     }
+    if (app->editing && app->form == GUI_FORM_PAD && pad_event(app, e)) return;
     if (app->editing && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
         editor_input(app, e);
         return;

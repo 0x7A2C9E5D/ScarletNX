@@ -18,15 +18,16 @@
 /* a row that is no setting: a page's, which opens the section/page rows listed after it, and its All, first on that
    page, which steps them together */
 enum { GUI_SETTING_PAGE = 1, GUI_SETTING_ALL };
+#define GUI_SETTING_TEXT 192 /* a typed value's room: gamepad_map's whole map (pad_map.h) is 165 at most */
 typedef struct {
-    int word;            /* a word row's: the word, 0 the .ini's */
-    char text[64];       /* a typed row's: empty, the .ini's. A page's and an All's: the value shown */
-    char start[64];      /* the value the menu starts with, which a file of picks leaves out */
-    char option[136];    /* a run's --key=value; a page's row: the section it is in */
-    const char* key;     /* the .ini's, the row's key being its name in the menus */
-    const char** values; /* a word row's values by word, NULL where the words are the values */
-    int kind;            /* 0, GUI_SETTING_PAGE or GUI_SETTING_ALL */
-    int first, count;    /* the rows a page opens, an All steps */
+    int word;                           /* a word row's: the word, 0 the .ini's */
+    char text[GUI_SETTING_TEXT];        /* a typed row's: empty, the .ini's. A page's and an All's: the value shown */
+    char start[GUI_SETTING_TEXT];       /* the value the menu starts with, which a file of picks leaves out */
+    char option[GUI_SETTING_TEXT + 72]; /* a run's --key=value; a page's row: the section it is in */
+    const char* key;                    /* the .ini's, the row's key being its name in the menus */
+    const char** values;                /* a word row's values by word, NULL where the words are the values */
+    int kind;                           /* 0, GUI_SETTING_PAGE or GUI_SETTING_ALL */
+    int first, count;                   /* the rows a page opens, an All steps */
 } GuiSetting;
 typedef struct {
     GuiThemeKey* keys;  /* the rows: the launcher's, then the runtime's by section */
