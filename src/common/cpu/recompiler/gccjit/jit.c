@@ -74,6 +74,14 @@ SnxJit* snx_jit_new(char opt) {
         gcc_jit_context_set_int_option(jit->ctx, GCC_JIT_INT_OPTION_OPTIMIZATION_LEVEL, opt - '0');
     /* a shared object for this machine (build == host == target), with the flags generated C had */
     gcc_jit_context_add_command_line_option(jit->ctx, "-fPIC");
+    /* linked from its own objects only, as the LLVM backend's linker does (link.h): the start files, C library and
+       libgcc GCC's driver adds are those of the GCC libgccjit was built with, at its paths, which a system with
+       another GCC or none lacks. The runtime library defines what the code calls (rtlib.c) */
+    gcc_jit_context_add_driver_option(jit->ctx, "-nostdlib");
+#if defined(__aarch64__)
+    /* atomics inline: GCC would call libgcc's, which the module doesn't link (rtlib.c is built the same way) */
+    gcc_jit_context_add_command_line_option(jit->ctx, "-mno-outline-atomics");
+#endif
     if (host->march[0]) gcc_jit_context_add_command_line_option(jit->ctx, host->march);
     gcc_jit_context_add_command_line_option(jit->ctx, "-fno-strict-aliasing");
     gcc_jit_context_add_command_line_option(jit->ctx, "-fwrapv");

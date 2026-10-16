@@ -13,6 +13,9 @@
 #else
 #include <dlfcn.h>
 #endif
+#ifdef __linux__
+#include <elf.h>
+#endif
 
 static int failures;
 static void check(int ok, const char* what) {
@@ -109,6 +112,41 @@ done:
     dlclose(handle);
 #endif
 }
+#ifdef __linux__
+/* The module imports nothing (link.h; gcc: -nostdlib): no library and no undefined symbol, so linking it took none of
+   the start files and libraries of the GCC libgccjit was built with, which a packaged libgccjit's system lacks */
+static void check_no_imports(const char* path) {
+    size_t size = 0, i, j;
+    unsigned char* file = snx_read_file(path, &size);
+    const Elf64_Ehdr* eh = (const Elf64_Ehdr*)file;
+    int needed = 0, undefined = 0;
+    if (!file || size < sizeof(*eh) || memcmp(eh->e_ident, ELFMAG, SELFMAG) || eh->e_ident[EI_CLASS] != ELFCLASS64 ||
+        eh->e_phoff + (size_t)eh->e_phnum * sizeof(Elf64_Phdr) > size ||
+        eh->e_shoff + (size_t)eh->e_shnum * sizeof(Elf64_Shdr) > size) {
+        check(0, "module is a 64-bit ELF");
+        free(file);
+        return;
+    }
+    for (i = 0; i < eh->e_phnum; ++i) {
+        const Elf64_Phdr* ph = (const Elf64_Phdr*)(file + eh->e_phoff) + i;
+        if (ph->p_type != PT_DYNAMIC || ph->p_offset + ph->p_filesz > size) continue;
+        for (j = 0; (j + 1) * sizeof(Elf64_Dyn) <= ph->p_filesz; ++j) {
+            const Elf64_Dyn* d = (const Elf64_Dyn*)(file + ph->p_offset) + j;
+            if (d->d_tag == DT_NULL) break;
+            needed |= d->d_tag == DT_NEEDED;
+        }
+    }
+    for (i = 0; i < eh->e_shnum; ++i) {
+        const Elf64_Shdr* sh = (const Elf64_Shdr*)(file + eh->e_shoff) + i;
+        if (sh->sh_type != SHT_DYNSYM || sh->sh_offset + sh->sh_size > size) continue;
+        for (j = 1; (j + 1) * sizeof(Elf64_Sym) <= sh->sh_size; ++j) /* 0 is the null symbol */
+            undefined |= ((const Elf64_Sym*)(file + sh->sh_offset))[j].st_shndx == SHN_UNDEF;
+    }
+    check(!needed, "module needs no library");
+    check(!undefined, "module has no undefined symbol");
+    free(file);
+}
+#endif
 int main(int argc, char** argv) {
     unsigned char image[0x200];
     const char* args[24];
@@ -200,6 +238,9 @@ int main(int argc, char** argv) {
         module = snx_path_join(out, "Native Fixture_code.so");
 #endif
         if (!rc) execute_module(module, image, pass == 2);
+#ifdef __linux__
+        if (!rc) check_no_imports(module);
+#endif
         /* Force a link publish failure without relying on compiler-specific flags. */
         if (pass == 3) {
             check(!snx_remove_tree(module), "remove previous module");
