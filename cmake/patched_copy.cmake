@@ -10,7 +10,7 @@
 # copy left half patched) and, after that, stops the configure.
 #
 # The one way a package is patched here: CPM's PATCHES leaves a cache it did not fill unpatched (#214). Only hactool
-# uses it, and it goes with hactool's patches once hactool is a fork of ours.
+# uses it, and it goes with hactool's patches once hactool is a fork of ours (#166).
 function(snx_patched_copy)
     cmake_parse_arguments(arg "" "SOURCE;DEST" "PATCHES;FILES" ${ARGN})
     set(stale FALSE)
