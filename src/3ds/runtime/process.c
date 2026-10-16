@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/runtime/internal.h"
+#include "3ds/gpu/pica.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -59,6 +60,8 @@ static bool special_mappings(SnxCtrProcess* p, const uint32_t* caps) {
 void snx_ctr_process_free(SnxCtrProcess* p) {
     if (!p) return;
     free(p->gsp.regs);
+    if (p->gsp.pica) snx_ctr_pica_free(p->gsp.pica);
+    free(p->gsp.pica);
     snx_ctr_romfs_free(p->romfs);
     if (p->tree) {
         fs_tree_destroy(p->tree);

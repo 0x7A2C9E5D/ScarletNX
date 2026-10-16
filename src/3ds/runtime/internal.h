@@ -99,6 +99,7 @@ typedef struct {
         uint32_t input, output, output_size, input_size, flags;
         uint32_t copy_size, copy_input, copy_output;
     } transfer;
+    struct SnxCtrPica* pica; /* the PICA command processor, made on the first SubmitCmdList (gpu/pica.h) */
 } SnxCtrGsp;
 struct SnxCtrProcess {
     SnxCtrRomfs* romfs; /* runtime-owned immutable host filesystem view */

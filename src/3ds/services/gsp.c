@@ -5,12 +5,14 @@
    shared GX/interrupt block per process, four relay threads, a checked GX/LCD
    register file and host-paced 60 Hz display timing. The GX queue's DMA, memory
    fills, display transfers and texture copies run on physical memory through the
-   transfer engine (gpu/transfer.c); PICA command lists (SubmitCmdList) and the
-   save-VRAM paths stop. */
+   transfer engine (gpu/transfer.c), PICA command lists (SubmitCmdList) through the
+   command processor (gpu/pica.c) up to their first draw; the save-VRAM paths stop. */
 #include "3ds/runtime/internal.h"
 #include "3ds/services/gsp.h"
 #include "3ds/gpu/present.h"
+#include "3ds/gpu/pica.h"
 #include "3ds/gpu/transfer.h"
+#include <stdio.h>
 #include "common/utilities/common.h"
 #include <stdlib.h>
 #include <string.h>
@@ -533,11 +535,44 @@ static GxStep gx_transfer(SnxCtrIpc* c, GxInterrupts* irq) {
     return GX_DONE;
 }
 
+/* SubmitCmdList (GPU::Execute): GSP writes the list's physical address (0 outside GPU-visible memory) and size to
+   the first command buffer channel and triggers it. A list GPU::SubmitCmdList finds outside memory raises P3D. The
+   list's own interrupt requests raise P3D as it runs. Drawing is the next part of the port: a draw stops the run */
+static void gx_p3d(void* context) { gx_raise((GxInterrupts*)context, GX_P3D); }
+static GxStep gx_submit(SnxCtrIpc* c, const uint32_t* a, GxInterrupts* irq) {
+    SnxCtrGsp* g = &c->process->gsp;
+    SnxCtrPicaHost host = {irq, gx_p3d, NULL, NULL};
+    uint32_t pa = gx_physical(a[0], a[1]);
+    if (!g->pica) {
+        g->pica = (SnxCtrPica*)malloc(sizeof *g->pica);
+        if (!g->pica) {
+            c->state = SNX_CTR_IPC_UNSUPPORTED;
+            return GX_STOP;
+        }
+        snx_ctr_pica_init(g->pica);
+    }
+    g->pica->regs[SNX_PICA_CMDBUF_ADDR] = (pa >> 3) & 0x0fffffffu;
+    g->pica->regs[SNX_PICA_CMDBUF_SIZE] = (a[1] >> 3) & 0xfffffu;
+    g->pica->regs[SNX_PICA_CMDBUF_TRIGGER] = 1;
+    SnxCtrPicaResult r = SNX_CTR_PICA_OK;
+    if (pa)
+        r = snx_ctr_pica_run(g->pica, c->process->memory, g->pica->regs[SNX_PICA_CMDBUF_ADDR] * 8,
+                             g->pica->regs[SNX_PICA_CMDBUF_SIZE] * 8, &host);
+    else
+        gx_raise(irq, GX_P3D);
+    g->pica->regs[SNX_PICA_CMDBUF_TRIGGER] = 0;
+    if (r == SNX_CTR_PICA_OK) return GX_DONE;
+    fprintf(stderr, "3ds gpu: command list at 0x%08x stopped at register 0x%03x (%s)\n", pa, g->pica->stop_register,
+            r == SNX_CTR_PICA_FAULT ? "a jump outside memory" : "not implemented");
+    c->state = SNX_CTR_IPC_UNSUPPORTED;
+    return GX_STOP;
+}
+
 /* TriggerCmdReqQueue: the right holder's queue in the shared block, a 0x20-byte header (index, count, status,
    should_stop, the last error) and 15 commands of 0x20 bytes. Each command is taken off the queue before it runs; a
    failing one leaves its error and the FAILED status and the queue goes on; its stop flag stops the queue after it.
-   Interrupts go to the right holder's relay queue as the commands raise them. SubmitCmdList (PICA command lists)
-   is not implemented yet and stops the run with the command still queued */
+   Interrupts go to the right holder's relay queue as the commands raise them. A command the runtime cannot finish
+   (a PICA draw) stops the run */
 static void trigger_queue(SnxCtrIpc* c) {
     if (!snx_ctr_ipc_expect(c, 0, 0)) return;
     SnxCtrProcess* p = c->process;
@@ -570,17 +605,13 @@ static void trigger_queue(SnxCtrIpc* c) {
         const unsigned char* cmd = queue + 0x20 + (index % 15) * 0x20;
         uint32_t id = cmd[0], args[7], error = 0;
         memcpy(args, cmd + 4, sizeof args);
-        if (id == 1) { /* SubmitCmdList: the PICA command processor is the next part of the port */
-            c->state = SNX_CTR_IPC_UNSUPPORTED;
-            stopped = true;
-            break;
-        }
         index = (index + 1) % 15;
         --pending;
         GxStep step = GX_DONE;
         SnxCtrGsp* g = &p->gsp;
         switch (id) {
             case 0: step = gx_dma(c, args, &irq); break;
+            case 1: step = gx_submit(c, args, &irq); break;
             case 2: step = gx_fill(c, args, &error, &irq); break;
             case 3: /* DisplayTransfer: the addresses must be GPU visible at their first byte */
                 g->transfer.input = gx_physical(args[0], 1) & ~7u;

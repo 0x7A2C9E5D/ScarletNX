@@ -159,8 +159,13 @@ transfers. RequestDma resolves the application's pages to physical ones the same
 MemoryFill honors its control halfwords (trigger bit, 16/24/32-bit width) and fills from
 start to end rounded down to 8 bytes. Each command raises its own interrupt (DMA, PSC0 or
 PSC1, PPF) on the right holder's relay queue, a failing command stores its error and the
-FAILED status as GSP does, and the queue goes on. PICA SubmitCmdList still stops
-explicitly, with the command left queued. The ExHeader's address-mapping capabilities
+FAILED status as GSP does, and the queue goes on. SubmitCmdList writes the list's
+address and size to the first command buffer channel and runs it on the PICA command
+processor (`src/3ds/gpu/pica.c`, ported from Azahar's `PicaCore`): masked register
+writes, batched and sequential extra data, shader program, swizzle and uniform uploads,
+the lighting, fog and procedural-texture LUTs, default attributes and immediate mode,
+command buffer jumps and the P3D interrupt request with autostop. A list outside memory
+raises P3D without running. A draw trigger stops the run. The ExHeader's address-mapping capabilities
 are applied at process creation (VRAM, DSP RAM, New 3DS extra RAM), as Azahar's
 `HandleSpecialMapping` does; MMIO areas stay unmapped. SetBufferSwap latches real
 framebuffer descriptors (RGBA8/RGB565; other layouts stop rather than being
@@ -350,6 +355,9 @@ on 2026-10-16): `video_core/renderer_software/sw_blitter.cpp`, `video_core/pica/
 `video_core/utils.h` and `common/color.h` (GPL-2.0-or-later), and the command semantics of
 `video_core/gpu.cpp` and `core/hle/service/gsp/gsp_gpu.cpp` (GPL-3.0-or-later); the
 special mappings follow `core/hle/kernel/{process,memory}.cpp` (GPL-2.0-or-later).
+The command processor ports `video_core/pica/pica_core.cpp`, `shader_setup.cpp`,
+`packed_attribute.h`, `pica_types.h` and the register layouts of `regs_*.h`
+(GPL-2.0-or-later) at the same revision.
 Stage 3a references GPL-2.0-or-later `core/hle/ipc.h`, `kernel/hle_ipc.cpp`,
 `kernel/svc.cpp`, `service/sm/{srv.cpp,sm.h}` and `service/fs/fs_user.cpp` at that
 revision for wire/result/initialization facts. Its new C transport/services and

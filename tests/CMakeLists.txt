@@ -175,6 +175,11 @@ if(TARGET snx_ctr_board)
             snx_test_target(snx-test-3ds-transfer 11)
             target_link_libraries(snx-test-3ds-transfer PRIVATE snx_ctr_gpu)
             add_test(NAME 3ds_transfer COMMAND snx-test-3ds-transfer)
+            # the PICA command processor: lists in FCRAM, uploads, interrupts, jumps, draw and immediate hooks
+            add_executable(snx-test-3ds-pica 3ds_pica.c)
+            snx_test_target(snx-test-3ds-pica 11)
+            target_link_libraries(snx-test-3ds-pica PRIVATE snx_ctr_gpu m)
+            add_test(NAME 3ds_pica COMMAND snx-test-3ds-pica)
     # No Vulkan loader/ICD: presentation cannot run here; the probe skips, never fakes a frame.
     set_tests_properties(3ds_gsp_gpu PROPERTIES SKIP_RETURN_CODE 77)
             add_test(NAME ctr_swipc_validation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ctr_swipc.py"

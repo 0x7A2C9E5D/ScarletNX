@@ -239,11 +239,29 @@ int main(int argc, char** argv) {
             assert((at(p, QUEUE) & 0xffff) == 0x0100 && (at(p, QUEUE + 8) & 0xff) == 4); /* only the copy's PPF */
             word(p, QUEUE + 0x800, 0); /* status cleared for what follows */
         }
-        /* SubmitCmdList (PICA) stops explicitly and leaves the command queued. */
+        /* SubmitCmdList: a list in the linear heap whose interrupt request matches irq_compare's low byte raises
+           P3D, then a list outside GPU-visible memory raises it without running */
+        word(p, target + 0x800, 0x78);
+        word(p, target + 0x804, 0x000f0010u); /* irq_request, all bytes */
+        word(p, QUEUE, 0);
+        word(p, QUEUE + 0x800, 0x200);
+        word(p, QUEUE + 0x820, 1);
+        word(p, QUEUE + 0x824, target + 0x800);
+        word(p, QUEUE + 0x828, 8);
+        word(p, QUEUE + 0x840, 1);
+        word(p, QUEUE + 0x844, 0x00100000);
+        word(p, QUEUE + 0x848, 8);
+        request(p, gsp, trigger, 1, SNX_CTR_SVC_RETURN, 0);
+        assert(!get(p, 1));
+        assert((at(p, QUEUE + 0x800) & 0xffff) == 2);
+        assert((at(p, QUEUE) & 0xffff) == 0x0200 && (at(p, QUEUE + 8) & 0xffff) == 0x0505);
+        /* a draw is the next part of the port: the run stops there */
+        word(p, target + 0x800, 1);
+        word(p, target + 0x804, 0x000f022eu); /* trigger_draw */
         word(p, QUEUE + 0x800, 0x100);
         word(p, QUEUE + 0x820, 1);
         request(p, gsp, trigger, 1, SNX_CTR_SVC_UNSUPPORTED, 0);
-        assert((at(p, QUEUE + 0x800) & 0xffff) == 0x0100);
+        word(p, QUEUE + 0x800, 0);
         /* SetBufferSwap: a real RGBA8 framebuffer with a distinctive pattern. */
         uint32_t fb = 0;
         assert(!snx_ctr_kernel_memory(p, 0x10003, 0, 0, 0x60000, 3, &fb) && fb);
