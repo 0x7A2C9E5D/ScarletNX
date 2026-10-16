@@ -716,11 +716,9 @@ static void render_ask(App* app) {
     if (!app->confirm.shown || (!app->menu.running && !app->confirm.exit)) return;
 
     ask_box(app, &col, &row, &cols);
-    fill(app, (float)col * cw, (float)row * ch, (float)cols * cw, 6 * ch, page, 255);
-    fill(app, (float)col * cw, (float)row * ch, (float)cols * cw, line, soft, 255);
-    fill(app, (float)col * cw, (float)(row + 6) * ch - line, (float)cols * cw, line, soft, 255);
-    fill(app, (float)col * cw, (float)row * ch, line, 6 * ch, soft, 255);
-    fill(app, (float)(col + cols) * cw - line, (float)row * ch, line, 6 * ch, soft, 255);
+    fill(app, (float)col * cw, (float)row * ch, (float)cols * cw, 6 * ch, soft, 255); /* framed in soft */
+    fill(app, (float)col * cw + line, (float)row * ch + line, (float)cols * cw - 2 * line, 6 * ch - 2 * line, page,
+         255);
     text(app, col + 2, row + 1, ask_question(app), rgb(warning));
     for (i = 0; i < 2; ++i) {
         char label[64];
