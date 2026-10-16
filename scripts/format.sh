@@ -45,7 +45,7 @@ py_extra=()
 c_files=()
 if [ ${#c_dirs[@]} -gt 0 ]; then
     mapfile -t c_files < <(find "${c_dirs[@]}" -type f \( -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.hpp' \) \
-        -not -name 'overlay_font.h' -not -name 'glfn.h' -not -name 'controls_atlas.h' | sort)
+        -not -name 'overlay_font.h' -not -name 'glfn.h' | sort)
 fi
 mapfile -t py_files < <( (find . -maxdepth 2 -name '*.py' -not -path './third_party/*' -not -path './.cache/*' \
     -not -path './build*' -not -path './python/*'; [ ${#py_extra[@]} -eq 0 ] || find "${py_extra[@]}" -name '*.py') | sort)
