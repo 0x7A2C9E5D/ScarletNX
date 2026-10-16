@@ -102,6 +102,11 @@ int gui_settings_save(const GuiSettings* s, const char* path) {
     free(text);
     return failed;
 }
+void gui_settings_reset(GuiSettings* s, int row) {
+    int i;
+    for (i = row < 0 ? 0 : row; i < (row < 0 ? s->count : row + 1) && i < s->count; ++i)
+        gui_theme_set(s->values, &s->keys[i], s->values[i].start);
+}
 static int find(const GuiSettings* s, const char* key) {
     int i;
     for (i = 0; i < s->count && strcmp(s->keys[i].key, key); ++i) {}

@@ -152,7 +152,7 @@ static const char* const load_labels[] = {"-> Select via drag and drop", "-> Sel
 #define SAY_COUNT      "executable(s)"
 #define SAY_LOG_FAILED "The log could not be saved: check the folder's permissions."
 #define SAY_EDITOR     "Up/Down: key. Left/Right: change. Enter: type. Ctrl+S: save. ESC: back."
-#define SAY_SETTINGS   "Up/Down: setting. Left/Right: change. Enter: type. ESC: back."
+#define SAY_SETTINGS   "Up/Down: setting. Left/Right: change. Enter: type. Del: default. ESC: back."
 #endif
 static SDL_Color rgb(GuiRgb c) {
     SDL_Color out = {c.r, c.g, c.b, 255};
@@ -1097,8 +1097,8 @@ static void render_editor(App* app) {
     SDL_RenderClear(app->renderer);
     preview_box(app, &col, &row, &cols, &rows);
     width = e->object ? app->cols - 2 : col - 2; /* the rows' text, left of the theme's preview */
-    for (r = 0; r < gui_editor_rows(e); ++r) {   /* the values' column, past the widest label */
-        gui_editor_label(e, r, label, sizeof label);
+    for (r = 0; r < e->count; ++r) {             /* the values' column, past the widest key's label */
+        gui_editor_label(e, r + !e->object, label, sizeof label);
         labels = SDL_max(labels, (int)strlen(label));
     }
     snprintf(title, sizeof title, "%s%s", e->object ? "SETTINGS" : "THEME EDITOR  /  ", e->object ? "" : e->id);
@@ -1119,7 +1119,7 @@ static void render_editor(App* app) {
             snprintf(value, sizeof value, "%s_", e->text);
         else
             gui_editor_value(e, r, value, sizeof value);
-        if (e->object && !value[0]) snprintf(value, sizeof value, ".ini"); /* a setting not typed */
+        if (e->object && k && !value[0]) snprintf(value, sizeof value, ".ini"); /* a setting not typed */
         snprintf(line, sizeof line, "%s%-*s %s", theme->marker, labels, label, value);
         {
             int n = 0; /* what fits left of the preview, a character at a time */
@@ -1235,7 +1235,7 @@ static void space_start(App* app) {
 }
 static void open_settings(App* app) {
     GuiSettings* s = settings_of(app);
-    gui_editor_form(&app->editor, s->keys, s->count, s->values);
+    gui_editor_form(&app->editor, s->keys, s->count, s->values, "Reset all to the defaults");
     app->editing = true;
     space_start(app);
 }
@@ -1251,15 +1251,21 @@ static void save_editor(App* app) {
     gui_themes_scan(&app->themes, dirs, 2);
     gui_theme_load(&app->theme, dirs, 2, app->editor.id);
 }
+/* a Settings pick, kept at once */
+static void keep_settings(App* app) {
+    if (!app->editor.object || !app->editor.dirty) return;
+    app->editor.dirty = false;
+    if (app->settings_file && gui_settings_save(&app->settings, app->settings_file))
+        snprintf(app->editor.note, sizeof app->editor.note, "Not saved: %s could not be written", app->settings_file);
+}
 static void editor_key(App* app, GuiKey key) {
     GuiEditorDo what = gui_editor_key(&app->editor, key);
-    if (what == GUI_EDITOR_SAVE) save_editor(app);
-    if (app->editor.object && app->editor.dirty) { /* a Settings pick, kept at once */
-        app->editor.dirty = false;
-        if (app->settings_file && gui_settings_save(&app->settings, app->settings_file))
-            snprintf(app->editor.note, sizeof app->editor.note, "Not saved: %s could not be written",
-                     app->settings_file);
-    }
+    if (what == GUI_EDITOR_SAVE && app->editor.object) { /* the Settings' last row */
+        gui_settings_reset(&app->settings, -1);
+        app->editor.dirty = true;
+    } else if (what == GUI_EDITOR_SAVE)
+        save_editor(app);
+    keep_settings(app);
     if (what == GUI_EDITOR_LEAVE) {
         leave_editor(app);
         return;
@@ -1284,6 +1290,13 @@ static void editor_input(App* app, const SDL_Event* e) {
     }
     if (!app->editor.object && e->key.key == SDLK_S && (e->key.mod & SDL_KMOD_CTRL) && !e->key.repeat) {
         save_editor(app);
+        return;
+    }
+    /* Del, or Backspace when nothing is typed: a setting back to its default */
+    if (app->editor.object && !app->editor.typing && (e->key.key == SDLK_DELETE || e->key.key == SDLK_BACKSPACE)) {
+        gui_settings_reset(&app->settings, app->editor.row);
+        app->editor.dirty = true;
+        keep_settings(app);
         return;
     }
     if (!app->editor.object && e->key.key == SDLK_TAB && !e->key.repeat) {

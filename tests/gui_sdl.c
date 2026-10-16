@@ -475,7 +475,7 @@ int main(int argc, char** argv) {
     }
     render(&app);
     colored_text(&app, 0, "SETTINGS", normal);
-    colored_text(&app, 1, "Up/Down: setting. Left/Right: change. Enter: type. ESC: back.", normal);
+    colored_text(&app, 1, "Up/Down: setting. Left/Right: change. Enter: type. Del: default. ESC: back.", normal);
     colored_text(&app, 2,
                  SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
                                     : "Program was not compiled with libgccjit",
@@ -511,6 +511,21 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 3; ++i) key(&app, SDLK_BACKSPACE);
     key(&app, SDLK_RETURN);
     assert(!gui_settings_value(&app.settings, "resolution"));
+    /* Del puts a setting back as it started, and the last row all of them */
+    key(&app, SDLK_UP);
+    key(&app, SDLK_DELETE);
+    assert(setting_is(&app, "fullscreen", "0"));
+    key(&app, SDLK_UP);
+    key(&app, SDLK_RETURN);
+    assert(setting_is(&app, "gdbstub", "on"));
+    app.editor.row = gui_editor_rows(&app.editor) - 1;
+    render(&app);
+    colored_text(&app, 4 + app.editor.row - app.editor.top, "- Reset all to the defaults", yellow);
+    key(&app, SDLK_RETURN);
+    assert(!gui_settings_value(&app.settings, "gdbstub") && setting_is(&app, "fullscreen", "0"));
+    app.editor.row = 2; /* fullscreen 1 again, for the runs below */
+    key(&app, SDLK_RIGHT);
+    assert(setting_is(&app, "fullscreen", "1"));
     key(&app, SDLK_ESCAPE);
     assert(!app.editing && app.menu.selected == GUI_SETTINGS);
     /* kept in a file, the changed ones alone, they come back as the menu opens again; the runs below get them */

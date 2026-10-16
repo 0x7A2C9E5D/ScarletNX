@@ -42,6 +42,8 @@ void gui_settings_mark(GuiSettings* settings);
 void gui_settings_load(GuiSettings* settings, const char* path);
 /* the rows that are not at their start in path, by section; 0, else nonzero */
 int gui_settings_save(const GuiSettings* settings, const char* path);
+/* row back to its start, every row for -1 */
+void gui_settings_reset(GuiSettings* settings, int row);
 /* the value picked for key, NULL for the .ini's or no such row */
 const char* gui_settings_value(const GuiSettings* settings, const char* key);
 /* argv's options for a run: --key=value for each setting picked; with launch the launcher's too, -S -s for the stub

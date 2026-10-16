@@ -6,12 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-int gui_editor_rows(const GuiEditor* editor) { return editor->count + (editor->object ? 0 : 2); }
+int gui_editor_rows(const GuiEditor* editor) { return editor->count + (editor->object ? editor->action != NULL : 2); }
 const GuiThemeKey* gui_editor_key_of(const GuiEditor* editor, int row) {
     int first = editor->object ? 0 : 1; /* after the theme's folder */
     return row >= first && row < first + editor->count ? &editor->keys[row - first] : NULL;
 }
-static int is_save(const GuiEditor* editor, int row) { return !editor->object && row == gui_editor_rows(editor) - 1; }
+static int is_save(const GuiEditor* editor, int row) {
+    return (!editor->object || editor->action) && row == gui_editor_rows(editor) - 1;
+}
 static char* object(GuiEditor* editor) { return editor->object ? editor->object : (char*)&editor->theme; }
 
 void gui_editor_start(GuiEditor* editor, const GuiTheme* theme, GuiThemeFile* file, const char* id) {
@@ -27,8 +29,9 @@ void gui_editor_start(GuiEditor* editor, const GuiTheme* theme, GuiThemeFile* fi
     snprintf(editor->id, sizeof editor->id, "%s", id);
     editor->preview = GUI_SCREEN_MENU;
 }
-void gui_editor_form(GuiEditor* editor, const GuiThemeKey* keys, int count, void* object) {
+void gui_editor_form(GuiEditor* editor, const GuiThemeKey* keys, int count, void* object, const char* action) {
     memset(editor, 0, sizeof *editor);
+    editor->action = action;
     editor->keys = keys;
     editor->count = count;
     editor->object = (char*)object;
@@ -141,7 +144,7 @@ void gui_editor_label(const GuiEditor* editor, int row, char* out, size_t size) 
     const GuiThemeKey *k = gui_editor_key_of(editor, row), *before = gui_editor_key_of(editor, row - 1);
     int first = k && (!before || strcmp(before->section, k->section));
     if (!k)
-        snprintf(out, size, "%s", row == GUI_EDITOR_FOLDER ? "Folder" : "Save");
+        snprintf(out, size, "%s", editor->object ? editor->action : row == GUI_EDITOR_FOLDER ? "Folder" : "Save");
     else
         snprintf(out, size, "%-11s %s", first ? k->section : "", k->key);
 }
@@ -149,6 +152,8 @@ void gui_editor_value(const GuiEditor* editor, int row, char* out, size_t size) 
     const GuiThemeKey* k = gui_editor_key_of(editor, row);
     if (k)
         gui_theme_get(editor->object ? editor->object : (const char*)&editor->theme, k, out, size);
+    else if (editor->object)
+        snprintf(out, size, "%s", "");
     else if (row == GUI_EDITOR_FOLDER)
         snprintf(out, size, "%s", editor->id);
     else

@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
     assert(gui_settings_set(&s, "touch", ".ini") && gui_settings_set(&s, "controls_a", ""));
 
     /* the form edits them: Left and Right go round a row's words, .ini among them */
-    gui_editor_form(&form, s.keys, s.count, s.values);
+    gui_editor_form(&form, s.keys, s.count, s.values, NULL);
     form.row = (int)(key(&s, "fullscreen") - s.keys);
     gui_editor_key(&form, GUI_RIGHT);
     assert(!strcmp(gui_settings_value(&s, "fullscreen"), "0"));
@@ -143,6 +143,13 @@ int main(int argc, char** argv) {
         assert(!strcmp(gui_settings_value(&s, "gdbstub"), "on") && !strcmp(gui_settings_value(&s, "language"), "3"));
         assert(!gui_settings_value(&s, "fullscreen") && !strcmp(gui_settings_value(&s, "touch"), "2"));
         assert(!gui_settings_value(&s, "log") && gui_settings_options(&s, 1, 0, options) == 4);
+        /* a row back to where it started, then every one */
+        gui_settings_reset(&s, (int)(key(&s, "language") - s.keys));
+        assert(!gui_settings_value(&s, "language") && !strcmp(gui_settings_value(&s, "touch"), "2"));
+        gui_settings_reset(&s, -1);
+        assert(!strcmp(gui_settings_value(&s, "fullscreen"), "0") && !gui_settings_value(&s, "touch"));
+        assert(!gui_settings_value(&s, "gdbstub") && gui_settings_options(&s, 1, 0, options) == 1);
+        gui_settings_load(&s, path);                        /* and the file's picks again */
         gui_settings_load(&s, "/nonexistent/settings.ini"); /* none: nothing changes */
         assert(!strcmp(gui_settings_value(&s, "language"), "3"));
         {

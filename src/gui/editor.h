@@ -14,7 +14,8 @@
 typedef struct {
     const GuiThemeKey* keys; /* a row each */
     int count;
-    char* object; /* what the keys' offsets are in; NULL: the theme, its rows between the folder's and Save */
+    char* object;       /* what the keys' offsets are in; NULL: the theme, its rows between the folder's and Save */
+    const char* action; /* a form's last row, as the theme editor's Save, when not NULL: its label */
     /* the theme editor's: the theme, the extras of the file it started from (written back with it), its folder */
     GuiTheme theme;
     GuiThemeFile file;
@@ -28,14 +29,15 @@ typedef struct {
 } GuiEditor;
 #define GUI_EDITOR_FOLDER 0 /* the theme editor's first row */
 int gui_editor_rows(const GuiEditor* editor);
-/* the key of a row, NULL for the folder and Save */
+/* the key of a row, NULL for the folder and Save, or a form's action */
 const GuiThemeKey* gui_editor_key_of(const GuiEditor* editor, int row);
 /* edits theme, its file's extras taken over (file may be NULL), saved as themes/id */
 void gui_editor_start(GuiEditor* editor, const GuiTheme* theme, GuiThemeFile* file, const char* id);
-/* edits object through count keys: no folder, no Save, its changes kept as they are made */
-void gui_editor_form(GuiEditor* editor, const GuiThemeKey* keys, int count, void* object);
+/* edits object through count keys: no folder, no Save, its changes kept as they are made; action, when not NULL, a last
+   row that Select on returns GUI_EDITOR_SAVE for */
+void gui_editor_form(GuiEditor* editor, const GuiThemeKey* keys, int count, void* object, const char* action);
 void gui_editor_stop(GuiEditor* editor);
-/* what a key asks of the screen: nothing more, to leave it, to save */
+/* what a key asks of the screen: nothing more, to leave it, to save (a form: to do its action) */
 typedef enum { GUI_EDITOR_STAY, GUI_EDITOR_LEAVE, GUI_EDITOR_SAVE } GuiEditorDo;
 /* Up/Down and the pages move; Left/Right change a word, a flag or a number; Select changes a word or a flag, starts
    typing the others and takes what was typed; Cancel stops typing, or leaves (asking once over changes) */

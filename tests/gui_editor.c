@@ -201,7 +201,7 @@ int main(void) {
         const GuiThemeKey form[] = {
             {"Display", "fullscreen", GUI_KEY_WORD, offsetof(Values, word), sizeof(int), words, 0, "1 = fullscreen"},
             {"Display", "language", GUI_KEY_TEXT, offsetof(Values, text), 8, NULL, 0, "0 Japanese, 1 English"}};
-        gui_editor_form(&e, form, 2, &values);
+        gui_editor_form(&e, form, 2, &values, NULL);
         assert(gui_editor_rows(&e) == 2 && gui_editor_key_of(&e, 0) == &form[0] && !gui_editor_key_of(&e, 2));
         gui_editor_label(&e, 0, label, sizeof label);
         assert(!strncmp(label, "Display", 7) && strstr(label, "fullscreen"));
@@ -217,6 +217,14 @@ int main(void) {
         assert(!strcmp(values.text, "12") && e.dirty && gui_editor_key(&e, GUI_CANCEL) == GUI_EDITOR_LEAVE);
         gui_editor_key(&e, GUI_DOWN);
         assert(e.row == 1 && gui_editor_key(&e, GUI_SELECT) == GUI_EDITOR_STAY && e.typing); /* no Save to reach */
+        gui_editor_stop(&e);
+        /* with an action: a last row of that label, which Select asks the screen to do */
+        gui_editor_form(&e, form, 2, &values, "Reset all");
+        assert(gui_editor_rows(&e) == 3 && !gui_editor_key_of(&e, 2));
+        gui_editor_label(&e, 2, label, sizeof label);
+        assert(!strcmp(label, "Reset all") && !value_of(2)[0]);
+        gui_editor_key(&e, GUI_PAGE_DOWN);
+        assert(e.row == 2 && gui_editor_key(&e, GUI_SELECT) == GUI_EDITOR_SAVE && !e.typing);
         gui_editor_stop(&e);
     }
 

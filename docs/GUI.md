@@ -57,7 +57,8 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   what was changed, by the `.ini`'s sections and keys, in `settings.ini` of the config folder on
   Linux (`~/.config/scarletnx/`), else beside `recent.txt`. A run takes a setting from what that
   run picks, then from the game's own picks (to come), then from these, and last from the game's
-  `.ini`. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
+  `.ini`. Del puts a setting back to its default, and the last row, **Reset all to the
+  defaults**, every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
   and `fullscreen` puts the launcher itself on the whole screen too). The touch screen is the
   game's menu's, to turn off for a controller.
   **libgccjit** passes `--backend=gcc` when preparing a dump (it stays off in a build without
