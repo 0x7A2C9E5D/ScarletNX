@@ -117,6 +117,18 @@ bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
         default: return false;
     }
 }
+void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_bytes, double cpu_percent, int cores) {
+    double mb = (double)memory_bytes / 1048576, n = cores > 0 ? cores : 1, used = cpu_percent / 100;
+    if (!available) {
+        snprintf(out, size, "GUI + children: resource usage unavailable");
+        return;
+    }
+    used = used < 0 ? 0 : used > n ? n : used; /* a sample taken over a little more than its interval */
+    if (mb < 1024)
+        snprintf(out, size, "GUI + children: RAM %.0f MB  CPU %.0f%% (%.1f cores)", mb, used / n * 100, used);
+    else
+        snprintf(out, size, "GUI + children: RAM %.1f GB  CPU %.0f%% (%.1f cores)", mb / 1024, used / n * 100, used);
+}
 const char* gui_setting_description(const GuiMenu* menu) {
     switch (menu->selected) {
         case GUI_FULLSCREEN:

@@ -144,10 +144,10 @@ program that buffers or privately redirects its output still controls when it fl
 
 The footer samples combined GUI and descendant resource use every half second:
 
-- RAM is the sum of resident sets (Windows working sets), in MiB. Shared pages may
+- RAM is the sum of resident sets (Windows working sets), in MB or GB. Shared pages may
   be counted more than once. It is not the machine's total installed memory.
-- CPU is aggregate utilization. 100% means one fully occupied host CPU, so parallel
-  compilation can exceed 100%.
+- CPU is a share of the whole machine, 100% being every core busy, then how many cores'
+  worth of time that is.
 
 Linux and FreeBSD track a private child session, including the separate process
 groups created by the driver's stage supervisor and descendants that outlive their
