@@ -171,8 +171,8 @@ static const char* const items[] = {"Load Switch NSP/XCI/NRO",
 #define SAY_GAMES      "Tap: open. Swipe across: turn the page. Back: go back."
 #define SAY_KEYS_HOW   "Back: go back."
 #define SAY_KEYS_WAIT  "Pick prod.keys"
-#define SAY_PICK_BOX   "tap the box to open the file picker" /* not shown: the menu keeps the load options */
-#define SAY_FILE_WAIT  SAY_KEYS_WAIT
+#define SAY_PICK_BOX   "tap the box to open the file picker"
+#define SAY_FILE_WAIT  "Pick a file"
 #define SAY_DONE       "Tap to return to menu"
 #define SAY_ABORT      "Tap here to abort and return to menu"
 #define SAY_NO_GAMES   "No games in games/: put a game's .nro, .xci or .nsp there."
@@ -416,15 +416,8 @@ static void footer(App* app, int row, int rows, GuiRgb page, GuiRgb ink, GuiRgb 
     text(app, 1, row + 1, "CWD:", rgb(bar ? page : soft));
     text(app, 6, row + 1, app->cwd ? app->cwd : "(unavailable)", rgb(bar ? page : ink));
 }
-/* the screen a file is picked or dropped on: the keys', and on a computer the load options' file too (on a phone the
-   menu keeps those, and a tap on the option opens the picker) */
-static int pick_screen(const App* app) {
-#ifdef SDL_PLATFORM_ANDROID
-    return app->menu.view == GUI_LOAD_KEYS;
-#else
-    return app->menu.view == GUI_LOAD_KEYS || app->menu.view == GUI_LOAD_DROP;
-#endif
-}
+/* the screen a file is picked or dropped on: the keys', and a load option's */
+static int pick_screen(const App* app) { return app->menu.view == GUI_LOAD_KEYS || app->menu.view == GUI_LOAD_DROP; }
 /* the menu's screen, a run or not */
 static GuiScreen menu_screen(const App* app) {
     return app->menu.view == GUI_LOAD_GAMES  ? GUI_SCREEN_GAMES
@@ -3900,14 +3893,9 @@ static void menu_key(App* app, GuiKey key) {
         default: break;
     }
     if (key == GUI_CANCEL || (key == GUI_SELECT && pick_screen(app))) app->message[0] = 0;
-    /* the screen opens first, so what happens shows there; a select on it opens the picker, whose answer may come at
-       once */
-#ifdef SDL_PLATFORM_ANDROID
-    /* a phone has no screen to pick on: a load opens the picker at once; the keys' screen does on a tap */
-    if (key == GUI_SELECT && (app->menu.view == GUI_LOAD_DROP || (before == GUI_LOAD_KEYS && app->menu.view == before)))
-#else
+    /* the screen opens first, so what happens shows there; a select on it (a tap in its box) opens the picker, whose
+       answer may come at once */
     if (key == GUI_SELECT && app->menu.view == before && (before == GUI_LOAD_DROP || before == GUI_LOAD_KEYS))
-#endif
         open_picker(app);
     if (app->menu.view == GUI_LOAD_GAMES) list_games(app);
     /* Back or ESC with nothing open to close: on Android the app goes behind, as an app's first screen does; on a
