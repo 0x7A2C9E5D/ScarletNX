@@ -675,6 +675,33 @@ jobs:
       - name: Run the zip's scarletnx.exe as a user would
         run: bash source/scripts/check-package.sh package/bin/scarletnx.exe
 
+  # A pull request's builds, linked from a comment on it that each run rewrites, as soon as they are built
+  # (scripts/pr-builds.sh). A pull request from a fork gets a token that may not write, so it gets none
+  links:
+    name: Links to the builds
+    if: >-
+      !cancelled() && github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: [linux, appimage, windows, android-apk]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts/pr-builds.sh
+          sparse-checkout-cone-mode: false
+      - name: Link the builds from the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEEDS: ${{ toJSON(needs) }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: scripts/pr-builds.sh "$GITHUB_REPOSITORY" "$PR" "$GITHUB_RUN_ID" "$SHA"
+
   # Every push to main that builds everywhere replaces the rolling "nightly" prerelease with Linux (x86-64 and
   # AArch64), Windows and Android builds.
   # A newer push cancels a release still running, so an older commit never publishes last
