@@ -386,7 +386,7 @@ static GpuChannel* chan_get(u32 id) {
     c->r3d[0x4B8] = 1;
     /* the color write masks default to enabled: games that never set them draw nothing at all
        (Eden defaults these for Sonic Mania; Unicorn Overlord and Fire Emblem need it too) */
-    for (int i = 0; i < 8; i++) c->r3d[0x680 + i] = 0x1111;
+    memset(&c->r3d[0x680], 0x11, 8 * sizeof c->r3d[0]);
     g_gpu.chan[g_gpu.nchan++] = c;
     return c;
 }

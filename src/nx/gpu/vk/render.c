@@ -821,8 +821,13 @@ static int tex_table_set(GpuChannel* ch, int stage, const VkSh* s, int slot, Sur
         }
         if (view)
             vk_surf_use(vk_cmd(), x.t, layout, VK_SAMPLED_STAGES, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-        else
+        else {
             view = none;
+            /* unused slots read null by design (handle 0): a handle that names nothing is the black-texture signal */
+            if (handle)
+                LOG_LIMIT(4, "vulkan: texture slot %d[%u] reads the null texture (bank %u handle %08x)\n", slot, k,
+                          bank, handle);
+        }
         smp = vk_tex_bind_sampler(x.tsc, st, num, view != none ? x.t : NULL, want);
         if (!smp) return 0;
         d->table[k].sampler = smp;

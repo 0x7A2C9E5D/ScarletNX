@@ -46,6 +46,7 @@ enum {
     OP_CONVERT_F_TO_S = 110,
     OP_CONVERT_S_TO_F = 111,
     OP_CONVERT_U_TO_F = 112,
+    OP_FCONVERT = 115,
     OP_ISUB = 130,
     OP_FADD = 129,
     OP_FMUL = 133,
@@ -183,6 +184,10 @@ uint32_t spv_emit_glsl450_import(SpvEmitter* e) {
 void spv_emit_shader_capability(SpvEmitter* e) {
     instruction(&e->capabilities, OP_CAPABILITY, 2);
     put(&e->capabilities, 1); /* Shader */
+}
+void spv_emit_float16_capability(SpvEmitter* e) {
+    instruction(&e->capabilities, OP_CAPABILITY, 2);
+    put(&e->capabilities, 9); /* Float16 */
 }
 void spv_emit_float64_capability(SpvEmitter* e) {
     instruction(&e->capabilities, OP_CAPABILITY, 2);
@@ -360,6 +365,22 @@ uint32_t spv_emit_convert_u_to_f(SpvEmitter* e, uint32_t f32_type, uint32_t valu
     return id;
 }
 
+uint32_t spv_emit_convert_f_to_f(SpvEmitter* e, uint32_t result_type, uint32_t value) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_FCONVERT, 4);
+    put(&e->functions, result_type);
+    put(&e->functions, id);
+    put(&e->functions, value);
+    return id;
+}
+
+uint32_t spv_emit_type_f16(SpvEmitter* e) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->types, OP_TYPE_FLOAT, 3);
+    put(&e->types, id);
+    put(&e->types, 16);
+    return id;
+}
 uint32_t spv_emit_type_f32(SpvEmitter* e) {
     uint32_t id = spv_emit_id(e);
     instruction(&e->types, OP_TYPE_FLOAT, 3);
@@ -1282,6 +1303,11 @@ void spv_emit_control_barrier(SpvEmitter* e, uint32_t u32_type) {
     put(&e->functions, spv_emit_constant_u32(e, u32_type, 2));     /* Workgroup memory scope */
     put(&e->functions, spv_emit_constant_u32(e, u32_type, 0x108)); /* AcquireRelease | WorkgroupMemory */
 }
+void spv_emit_memory_barrier(SpvEmitter* e, uint32_t u32_type, uint32_t scope, uint32_t semantics) {
+    instruction(&e->functions, 225, 3); /* OpMemoryBarrier: scope and semantics, no result */
+    put(&e->functions, spv_emit_constant_u32(e, u32_type, scope));
+    put(&e->functions, spv_emit_constant_u32(e, u32_type, semantics));
+}
 
 uint32_t spv_emit_bitfield_insert(SpvEmitter* e, uint32_t u32_type, uint32_t base, uint32_t insert, uint32_t offset,
                                   uint32_t count) {
@@ -1732,6 +1758,21 @@ uint32_t spv_emit_sample_image(SpvEmitter* e, uint32_t result_type, uint32_t sam
     if (operands) put(&e->functions, operands);
     if (level) put(&e->functions, level);
     if (offset) put(&e->functions, offset);
+    return id;
+}
+
+uint32_t spv_emit_sample_image_grad(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
+                                    uint32_t coordinates, uint32_t dx, uint32_t dy) {
+    uint32_t image = spv_emit_load(e, sampled_type, sampler);
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_IMAGE_SAMPLE_EXPLICIT_LOD, 8);
+    put(&e->functions, result_type);
+    put(&e->functions, id);
+    put(&e->functions, image);
+    put(&e->functions, coordinates);
+    put(&e->functions, 4); /* ImageOperands Grad */
+    put(&e->functions, dx);
+    put(&e->functions, dy);
     return id;
 }
 
