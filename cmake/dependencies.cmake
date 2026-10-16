@@ -116,6 +116,19 @@ if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY AND NOT SNX_HACTOOL_ONLY) OR SNX_BUILD_G
     endif()
 endif()
 
+# The boot splash's drawings are SVGs, drawn at the splash's size by lunasvg (MIT) on plutovg (MIT; its rasterizer and
+# stroker come from FreeType, under the FreeType License, source/FTL.TXT). cmake/splash.cmake builds both
+if(SNX_BUILD_GUI)
+    CPMAddPackage(NAME plutovg VERSION 1.3.3
+                  URL https://github.com/sammycage/plutovg/archive/refs/tags/v1.3.3.tar.gz
+                  URL_HASH SHA256=2b0d17a6e016f47b86f9c00e2cb82600041b1ea1f7d2a00c2d46ae542cbfed3c
+                  DOWNLOAD_ONLY YES)
+    CPMAddPackage(NAME lunasvg VERSION 3.5.0
+                  URL https://github.com/sammycage/lunasvg/archive/refs/tags/v3.5.0.tar.gz
+                  URL_HASH SHA256=1abf1472ee6c4d19797916e8cc3c2e4b628e0d81178ffac60bdb0d457e32c690
+                  DOWNLOAD_ONLY YES)
+endif()
+
 # hactool runs on the machine doing the extraction (--extract), so a cross build leaves it out, but for Android, where
 # the phone extracts its own dumps. The cache keeps it as released; cmake/hactool.cmake applies the decrypted-container
 # patch, the OpenSSL one and the LibHac port to a copy in the build tree

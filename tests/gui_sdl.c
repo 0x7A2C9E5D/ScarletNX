@@ -96,6 +96,37 @@ static int keys_red(App* app, Uint64 clock) {
     return same_colour(pixel(app, (float)(b.x + b.w - 3 * app->scale - 1), (float)(b.y + b.h / 2)),
                        rgb(app->theme.failure));
 }
+static int near_colour(SDL_Color a, SDL_Color b, int by) {
+    return abs(a.r - b.r) <= by && abs(a.g - b.g) <= by && abs(a.b - b.b) <= by;
+}
+/* the splash on the screen: page all around the square of side pixels in the middle, and in it svg's drawing at that
+   size on the page as snx_splash_draw makes it (premultiplied, so over black its own colours) */
+static void splash_drawn(App* app, const SDL_Rect* view, const SnxSplashSvg* svg, int side, SDL_Color page) {
+    SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
+    Uint32* drawing = malloc((size_t)side * (size_t)side * 4);
+    int left = (view->w - side) / 2, top = (view->h - side) / 2, x, y, drawn = 0;
+    SnxSplashDrawing* read = snx_splash_open(svg);
+    assert(image && drawing && read && !snx_splash_draw(read, side, drawing, side * 4));
+    snx_splash_close(read);
+    for (y = 0; y < view->h; ++y)
+        for (x = 0; x < view->w; ++x) {
+            Uint8 r = 0, g = 0, b = 0, a = 0;
+            int in = x >= left && x < left + side && y >= top && y < top + side;
+            assert(SDL_ReadSurfacePixel(image, x, y, &r, &g, &b, &a));
+            if (!in) {
+                assert(r == page.r && g == page.g && b == page.b);
+            } else {
+                Uint32 p = drawing[(y - top) * side + (x - left)];
+                int alpha = (int)(p >> 24), want[3] = {(int)(p >> 16 & 255), (int)(p >> 8 & 255), (int)(p & 255)};
+                int c, got[3] = {r, g, b}, on[3] = {page.r, page.g, page.b};
+                for (c = 0; c < 3; ++c) assert(abs(got[c] - (want[c] + on[c] * (255 - alpha) / 255)) <= 2);
+                drawn += alpha > 0;
+            }
+        }
+    assert(drawn > side * side / 4);
+    free(drawing);
+    SDL_DestroySurface(image);
+}
 /* text in color anywhere on the render, glyph by glyph in the font's own bytes: its ink pixels in color, the others
    not (a box's frame may cross the font's last row, which is empty); 1 and where it starts, else 0 */
 static int find_text(App* app, const char* text, SDL_Color color, int size, int* at_x, int* at_y) {
@@ -628,23 +659,46 @@ int main(int argc, char** argv) {
     }
     /* the window says which build it is: commit, compiler, platform */
     assert(!strcmp(SDL_GetWindowTitle(app.window), snx_build_info()) && !strncmp(snx_build_info(), "ScarletNX ", 10));
-    /* the boot's splash: the default theme's black page with the icon in the middle until its time; a key ends it and
-       does nothing else. A theme's own shows in its chance of boots, the default's in the others */
+    /* the boot's splash: a drawing of Wimsy's in the middle of the default theme's black page, a third of the window's
+       shorter side, until its time, drawn again when the window changes; a key ends it and does nothing else. Every
+       drawing built in shows. A theme's own page shows in its chance of boots, the default's in the others */
     {
         SDL_Rect view;
-        SDL_Color black = {0, 0, 0, 255}, icon = {17, 206, 161, 255}; /* wimsy.png's middle */
-        splash_start(&app);
-        assert(app.splash && !app.splash_page.r && !app.splash_page.g && !app.splash_page.b);
-        app.clock = app.splash_until - 1;
+        SDL_Color black = {0, 0, 0, 255}, wimsy = {17, 206, 161, 255}; /* wimsy.svg's middle */
+        SnxSplashDrawing* read;
+        int i, w, h;
+        assert(SDL_GetWindowSize(app.window, &w, &h));
+        for (i = 0; i < snx_splash_svg_count; ++i) {
+            splash_with(&app, gui_theme_builtin("default"), &snx_splash_svgs[i]);
+            app.clock = app.splash_until - 1;
+            render(&app);
+            assert(app.splash && app.splash_svg == &snx_splash_svgs[i]);
+            SDL_GetRenderViewport(app.renderer, &view);
+            assert(app.splash_side == SDL_min(view.w, view.h) / 3);
+            splash_drawn(&app, &view, &snx_splash_svgs[i], app.splash_side, black);
+            if (!i) assert(near_colour(pixel(&app, view.w / 2.0f, view.h / 2.0f), wimsy, 8));
+            if (i + 1 < snx_splash_svg_count) {
+                SDL_DestroyTexture(app.splash);
+                app.splash = NULL;
+                snx_splash_close(app.splash_drawing);
+                app.splash_drawing = NULL;
+            }
+        }
+        read = app.splash_drawing; /* read once: a new size only draws it again */
+        assert(read && SDL_SetWindowSize(app.window, 900, 600));
+        SDL_SyncWindow(app.window);
         render(&app);
-        assert(app.splash);
         SDL_GetRenderViewport(app.renderer, &view);
-        assert(same_colour(pixel(&app, 1, 1), black) && same_colour(pixel(&app, view.w / 2.0f, view.h / 2.0f), icon));
+        assert(view.w == 900 && view.h == 600 && app.splash && app.splash_side == 200 && app.splash_drawing == read);
+        splash_drawn(&app, &view, app.splash_svg, 200, black);
         key(&app, SDLK_RETURN);
         assert(!app.splash_until && app.menu.selected == GUI_SWITCH && !app.menu.activated);
         render(&app);
-        assert(!app.splash);
+        assert(!app.splash && !app.splash_drawing);
         app.clock = 0;
+        assert(SDL_SetWindowSize(app.window, w, h));
+        SDL_SyncWindow(app.window);
+        render(&app);
         assert(gui_splash_theme(gui_theme_builtin("yorha"), 24) == gui_theme_builtin("yorha"));
         assert(gui_splash_theme(gui_theme_builtin("yorha"), 25) == gui_theme_builtin("default"));
     }

@@ -20,6 +20,7 @@
 #include "gui/recent.h"
 #include "gui/clean.h"
 #include "gui/settings.h"
+#include "gui/splash.h"
 #include "common/utilities/pad_sdl.h"
 #include "common/utilities/pad_screen.h"
 #ifdef SDL_PLATFORM_ANDROID
@@ -108,7 +109,10 @@ typedef struct {
     bool pen_held;            /* a pen lifted: its hover leaves the focus where the lift put it until it moves away */
     float pen_x, pen_y;       /* where it lifted, 0 to 1 across the window */
     Uint32 picked;            /* the event a file from the system's picker comes back as */
-    SDL_Texture* splash;      /* the boot's splash, its icon, until splash_until */
+    SDL_Texture* splash;      /* the boot's splash, its drawing splash_side pixels square, until splash_until */
+    const SnxSplashSvg* splash_svg;   /* the boot's pick of snx_splash_svgs */
+    SnxSplashDrawing* splash_drawing; /* it, read once; NULL: the icon shows */
+    int splash_side;
     Uint64 splash_until;
     GuiRgb splash_page;
     bool editing; /* the editor's screen (form says which) instead of the menu's */
@@ -1134,32 +1138,90 @@ static void render_ask(App* app) {
         list_item(app, &l, i, label, app->confirm.selected == i, false);
     }
 }
-/* the boot's splash: the program's icon on a theme's splash page, then the menu as the theme brings it in */
-static void splash_start(App* app) {
-    const GuiTheme* t = gui_splash_theme(&app->theme, (int)SDL_rand(100));
-    SDL_Surface* icon = t->splash_ms ? snx_window_icon_surface() : NULL;
-    if (!icon) return;
-    app->splash = SDL_CreateTextureFromSurface(app->renderer, icon);
-    SDL_DestroySurface(icon);
+/* the boot's splash: the program's icon, Wimsy, drawn from its SVG a third of the window's shorter side on a theme's
+   splash page, then the menu as the theme brings it in */
+static int splash_size(const App* app) {
+    SDL_Rect view;
+    SDL_GetRenderViewport(app->renderer, &view);
+    return SDL_max(1, SDL_min(view.w, view.h) / 3);
+}
+/* the drawing at side pixels; the program's icon when it cannot be, said once */
+static SDL_Texture* splash_texture(App* app, int side) {
+    SDL_Texture* texture = NULL;
+    void* pixels = app->splash_drawing ? SDL_malloc((size_t)side * (size_t)side * 4) : NULL;
+    if (pixels && !snx_splash_draw(app->splash_drawing, side, pixels, side * 4)) {
+        texture = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, side, side);
+        if (texture && (!SDL_UpdateTexture(texture, NULL, pixels, side * 4) ||
+                        !SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND_PREMULTIPLIED))) {
+            SDL_DestroyTexture(texture);
+            texture = NULL;
+        }
+    }
+    SDL_free(pixels);
+    if (!texture && app->splash_drawing) {
+        fprintf(stderr, "scarletnx: the splash's %s could not be drawn %d pixels square, so the icon shows\n",
+                app->splash_svg->name, side);
+        snx_splash_close(app->splash_drawing);
+        app->splash_drawing = NULL;
+    }
+    if (!texture) {
+        SDL_Surface* icon = snx_window_icon_surface();
+        texture = icon ? SDL_CreateTextureFromSurface(app->renderer, icon) : NULL;
+        SDL_DestroySurface(icon);
+    }
+    return texture;
+}
+/* the splash over, its time up or nothing to show: the menu comes in as the theme brings it */
+static void splash_end(App* app) {
+    if (app->splash) SDL_DestroyTexture(app->splash);
+    app->splash = NULL;
+    snx_splash_close(app->splash_drawing);
+    app->splash_drawing = NULL;
+    app->fade_ms = app->theme.fade_in_ms ? SDL_max(now_ms(app), 1) : 0;
+}
+/* svg's drawing on t's splash page until its time */
+static void splash_with(App* app, const GuiTheme* t, const SnxSplashSvg* svg) {
+    app->splash_svg = svg;
+    app->splash_drawing = snx_splash_open(svg);
+    if (!app->splash_drawing)
+        fprintf(stderr, "scarletnx: the splash's %s could not be read, so the icon shows\n", svg->name);
+    app->splash_side = splash_size(app);
+    app->splash = splash_texture(app, app->splash_side);
+    if (!app->splash) {
+        snx_splash_close(app->splash_drawing);
+        app->splash_drawing = NULL;
+        return;
+    }
     app->splash_page = t->splash_page;
     app->splash_until = SDL_GetTicks() + t->splash_ms;
 }
+static void splash_start(App* app) {
+    const GuiTheme* t = gui_splash_theme(&app->theme, (int)SDL_rand(100));
+    if (t->splash_ms) splash_with(app, t, &snx_splash_svgs[SDL_rand(snx_splash_svg_count)]);
+}
 static int splash_shown(App* app) {
     SDL_Rect view;
-    float size;
+    int side;
     if (!app->splash) return 0;
     if (now_ms(app) >= app->splash_until) {
-        SDL_DestroyTexture(app->splash);
-        app->splash = NULL;
-        app->fade_ms = app->theme.fade_in_ms ? SDL_max(now_ms(app), 1) : 0;
+        splash_end(app);
         return 0;
     }
+    side = splash_size(app);
+    if (side != app->splash_side) { /* the window changed: drawn again at its size */
+        SDL_DestroyTexture(app->splash);
+        app->splash_side = side;
+        app->splash = splash_texture(app, side);
+        if (!app->splash) {
+            splash_end(app);
+            return 0;
+        }
+    }
     SDL_GetRenderViewport(app->renderer, &view);
-    size = 128.0f * (float)SDL_max(1, SDL_min(view.w, view.h) / 3 / 128); /* whole steps of its 128 pixels */
     SDL_SetRenderDrawColor(app->renderer, app->splash_page.r, app->splash_page.g, app->splash_page.b, 255);
     SDL_RenderClear(app->renderer);
     {
-        SDL_FRect at = {((float)view.w - size) / 2, ((float)view.h - size) / 2, size, size};
+        SDL_FRect at = {(float)((view.w - side) / 2), (float)((view.h - side) / 2), (float)side, (float)side};
         SDL_RenderTexture(app->renderer, app->splash, NULL, &at);
     }
     SDL_RenderPresent(app->renderer);
@@ -4368,6 +4430,7 @@ static void cleanup(App* app) {
     if (app->editing) gui_editor_stop(&app->editor);
     SDL_DestroyTexture(app->preview);
     SDL_DestroyTexture(app->splash);
+    snx_splash_close(app->splash_drawing);
     SDL_DestroyTexture(app->font);
     SDL_DestroyRenderer(app->renderer);
     SDL_DestroyWindow(app->window);
