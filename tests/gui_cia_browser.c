@@ -39,6 +39,7 @@ int main(void) {
         free(link);
 #endif
         assert(gui_tree_size(elsewhere, &stop) == 10 && !gui_tree_size("/nonexistent/snx-tree", &stop));
+        assert(!gui_tree_size("", &stop)); /* none, not the working folder (Windows lists that for "*") */
         stop = 1;
         assert(!gui_tree_size(dir, &stop));
         assert(!snx_remove_tree(deep) && !snx_remove_tree(elsewhere));

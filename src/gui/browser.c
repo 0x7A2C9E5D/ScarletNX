@@ -32,7 +32,7 @@ uint64_t gui_tree_size(const char* path, const int* stop) {
     char** names = NULL;
     size_t count = 0, i;
     uint64_t total = 0;
-    if (snx_list_dir(path, &names, &count)) return 0;
+    if (!*path || snx_list_dir(path, &names, &count)) return 0; /* "" is none: Windows would list the working folder */
     for (i = 0; i < count && !__atomic_load_n(stop, __ATOMIC_RELAXED); ++i) {
         char* entry = snx_path_join(path, names[i]);
         if (entry && !snx_is_link(entry))
