@@ -150,31 +150,31 @@ static void heap_max_set(const IniOpt* o, const char* v) {
 /* the settings this file reads; the platform's (backend.h, vpad.h) are written with them */
 static const IniOpt INI_DISPLAY[] = {
     {"docked", "0", "1 = TV mode (1920x1080 / 1600x900 games), 0 = handheld mode (1280x720)", INI_INT, INI_STARTUP,
-     &g_opt_docked, 0, 1, NULL},
+     &g_opt_docked, 0, 1, NULL, NULL, NULL, 0, 0},
     {"fullscreen", "0",
      "1 = start in fullscreen (not in timed test runs). -f or --fullscreen=0 sets it for one run.\n"
      ";   F11 or Alt+Enter switches while playing without changing this setting",
-     INI_INT, INI_STARTUP, &g_opt_fullscreen, 0, 1, NULL},
+     INI_INT, INI_STARTUP, &g_opt_fullscreen, 0, 1, NULL, NULL, NULL, 0, 0},
     {"language", "1",
      "Game language: 0 Japanese, 1 English (US), 2 French, 3 German, 4 Italian, 5 Spanish,\n;   6 Chinese, 7 Korean, "
      "8 Dutch, 9 Portuguese, 10 Russian, 11 Taiwanese, 12 English (UK),\n;   13 French (Canada), 14 Spanish (Latin "
      "America), 15 Chinese (Simplified), 16 Chinese (Traditional),\n;   17 Portuguese (Brazil)",
-     INI_INT, INI_STARTUP, &g_opt_lang, INT_MIN, INT_MAX, language_set},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+     INI_INT, INI_STARTUP, &g_opt_lang, INT_MIN, INT_MAX, language_set, NULL, NULL, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 static const IniOpt INI_GRAPHICS[] = {
     {"resolution", "1", "Internal 3D resolution: 1 = native, 2 = double, 0.75 / 0.5 = faster", INI_FLOAT, INI_STARTUP,
-     &g_opt_resf, 0.25, 4, NULL},
-    {"shadows", "1", "0 = disable shadow maps (more FPS)", INI_INT, 0, &g_opt_shadows, 0, 1, NULL},
+     &g_opt_resf, 0.25, 4, NULL, NULL, NULL, 0, 0},
+    {"shadows", "1", "0 = disable shadow maps (more FPS)", INI_INT, 0, &g_opt_shadows, 0, 1, NULL, NULL, NULL, 0, 0},
     {"vsync", "1",
      "1 = images are shown only on a refresh of the display, so nothing tears. 0 = no wait for the refresh: the\n"
      ";   newest image is shown on the next one where the display can do that, else at once (which may tear).\n"
      ";   A display that can do neither waits for the refresh as 1 does",
-     INI_INT, 0, &g_opt_vsync, 0, 1, NULL},
+     INI_INT, 0, &g_opt_vsync, 0, 1, NULL, NULL, NULL, 0, 0},
     {"anisotropy", "0",
      "Texture filtering at an angle: 0 = as the game asks. 2 to 16 = at least that much (sharper floors and roads\n"
      ";   in 3D games, a little more GPU work)",
-     INI_INT, INI_STARTUP, &g_opt_aniso, 0, 16, NULL},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+     INI_INT, INI_STARTUP, &g_opt_aniso, 0, 16, NULL, NULL, NULL, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 static const IniOpt INI_PERF[] = {
     {"fps_limit", "game",
      "game = the pace the game asks for, as on the console: 60 FPS, or 30 for a game made for 30.\n"
@@ -182,37 +182,39 @@ static const IniOpt INI_PERF[] = {
      ";   10 to 1000 = that many FPS.\n"
      ";   A game that advances once per image changes speed with it: 30 runs a 60 FPS game at half speed.\n"
      ";   F4 turns the limit off and on",
-     INI_TEXT, 0, NULL, 0, 0, fps_limit_set},
+     INI_TEXT, 0, NULL, 0, 0, fps_limit_set, NULL, NULL, 0, 0},
     {"memory_gb", "0",
      "Memory the game sees: 0 or 4 = 3.2 GB like the console, 6 or 8 = more (like yuzu's extended memory layout).\n;"
      "   Games that run out of memory on 3.2 GB, like Tears of the Kingdom, need 6",
-     INI_INT, INI_STARTUP, &g_opt_mem_gb, 0, 8, NULL},
+     INI_INT, INI_STARTUP, &g_opt_mem_gb, 0, 8, NULL, NULL, NULL, 0, 0},
     {"heap_max_mb", "0", "The most heap the game can allocate, in MB: 0 = as much as the memory allows", INI_TEXT,
-     INI_STARTUP, NULL, 0, 0, heap_max_set},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+     INI_STARTUP, NULL, 0, 0, heap_max_set, NULL, NULL, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 static const IniOpt INI_NETWORK[] = {
     {"network", "0",
      "1 = host networking. Known Nintendo service domains are blocked by the resolver, not by an IP firewall.\n;   0 = "
      "report offline and restrict outbound destinations to loopback. This is not a network sandbox",
-     INI_INT, 0, &g_opt_network, 0, 1, NULL},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+     INI_INT, 0, &g_opt_network, 0, 1, NULL, NULL, NULL, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 static const IniOpt INI_DBG[] = {
-    {"log", "1", "Log detail: 1 = normal, 2 = everything (slow)", INI_INT, 0, &g_verbose, 0, 2, NULL},
+    {"log", "1", "Log detail: 1 = normal, 2 = everything (slow)", INI_INT, 0, &g_verbose, 0, 2, NULL, NULL, NULL, 0, 0},
     {"auto_stub_ipc", "1",
      "1 = a service command the runtime doesn't know answers success (logged as [undeclared]), 0 = it fails with "
      "UnknownCommandId, as on a console",
-     INI_INT, 0, &g_opt_auto_stub_ipc, 0, 1, NULL},
+     INI_INT, 0, &g_opt_auto_stub_ipc, 0, 1, NULL, NULL, NULL, 0, 0},
     {"diag", "0",
      "1 = save the data of each new compute shader to captures/compute, and every new shader's\n;   snx-shaderc corpus entry to captures/shaders, for debugging",
-     INI_INT, 0, &g_opt_diag, 0, 1, NULL},
+     INI_INT, 0, &g_opt_diag, 0, 1, NULL, NULL, NULL, 0, 0},
     {"profile", "0", "1 = write profile.txt every 10 seconds (CPU profiler, Windows only)", INI_INT, INI_STARTUP,
-     &g_opt_prof, 0, 1, NULL},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+     &g_opt_prof, 0, 1, NULL, NULL, NULL, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 /* a table of the file's sections, and what reads its keys: NULL for this file's own (ini_read), backend_ini for the
-   platform's, which takes the lock the on-screen controls need */
+   platform's, which takes the lock the on-screen controls need. page: a page of the section's own in the menus,
+   listed after the section's other keys; one a section */
 typedef struct {
     const IniOpt* opts;
     int (*apply)(const char* k, const char* v);
+    const char* page;
 } IniTable;
 #define INI_SEC_TABLES 3
 typedef struct {
@@ -223,7 +225,9 @@ static const IniSec INI_SECS[] = {
     {"Display", {{INI_DISPLAY, NULL}}},
     {"Graphics", {{INI_GRAPHICS, NULL}}},
     {"Performance", {{INI_PERF, NULL}}},
-    {"Input", {{g_backend_ini, backend_ini}, {g_vpad_ini, backend_ini}, {g_gamepad_ini, backend_ini}}},
+    {SNX_VPAD_PAGE,
+     {{g_vpad_ini, backend_ini}, {g_backend_ini, backend_ini}, {g_vpad_shown_ini, backend_ini, SNX_VPAD_BUTTONS}}},
+    {SNX_GAMEPAD_PAGE, {{g_gamepad_ini, backend_ini}}},
     {"Network", {{INI_NETWORK, NULL}}},
     {"Debug", {{INI_DBG, NULL}}},
     {NULL, {{NULL, NULL}}}};
@@ -293,16 +297,28 @@ static int ini_load(const char* path) {
     free(text);
     return 0;
 }
+/* an INI_INT's values as the menus step through them, value=word between '|': those of its words, or a whole number
+   of few values (anisotropy's 0 to 16); none for the others, which are typed */
+static void list_words(const IniOpt* o) {
+    int step = o->step > 0 ? o->step : 1;
+    char word[64];
+    if (o->type != INI_INT || (!o->words && (o->lo < 0 || o->hi - o->lo > 16))) return;
+    for (double v = o->lo; v <= o->hi; v += step) {
+        ini_word(o, (int)v, word, sizeof word);
+        printf("%s%d=%s", v > o->lo ? "|" : "", (int)v, word);
+    }
+}
 void ini_list(void) {
     static const char* const types[] = {"int", "float", "text"}; /* by INI_INT, INI_FLOAT, INI_TEXT */
     for (int s = 0; INI_SECS[s].title; s++)
         for (int t = 0; t < INI_SEC_TABLES && INI_SECS[s].t[t].opts; t++) {
+            const IniTable* table = &INI_SECS[s].t[t];
             const char* help = "";
-            for (const IniOpt* o = INI_SECS[s].t[t].opts; o->key; o++) {
+            for (const IniOpt* o = table->opts; o->key; o++) {
                 if (o->help) help = o->help;
                 if (o->flags & INI_IN_GAME) continue;
-                printf("%s\t%s\t%s\t%s\t%g\t%g\t", INI_SECS[s].title, o->key, o->def ? o->def : "", types[o->type],
-                       o->lo, o->hi);
+                printf("%s%s%s\t%s\t%s\t%s\t%g\t%g\t", INI_SECS[s].title, table->page ? "/" : "",
+                       table->page ? table->page : "", o->key, o->def ? o->def : "", types[o->type], o->lo, o->hi);
                 for (const char* c = help; *c; c++)
                     if (*c != '\n')
                         putchar(*c);
@@ -310,6 +326,8 @@ void ini_list(void) {
                         putchar(' ');
                         c += strspn(c + 1, "; ");
                     }
+                printf("\t%s\t", o->name ? o->name : "");
+                list_words(o);
                 putchar('\n');
             }
         }
@@ -374,7 +392,7 @@ static int ini_write(void) {
     return 0;
 }
 /* in-game toggles (F4) get persisted. Kept until written, so a reload of a file edited meanwhile doesn't lose them */
-#define INI_MAXS 32 /* the on-screen controls' reset sets one key per control */
+#define INI_MAXS 64 /* the on-screen controls' reset sets two keys per control */
 static char g_set_k[INI_MAXS][64], g_set_v[INI_MAXS][64];
 static int g_set_n;
 void ini_set(const char* k, const char* v) {

@@ -13,8 +13,9 @@ extern int g_opt_fullscreen; /* fullscreen: the .ini's, or the command line's fo
 
 void ini_override(const char* k, const char* v); /* a --key=value from the command line, before ini_open. Keeps v */
 void ini_set(const char* k, const char* v);
-/* every setting of the file's sections but those of the game's menu on stdout, a line each: section, key, default,
-   int | float | text, the lowest and highest number, and the help on one line, tabs between (scarletnx --settings, the
+/* every setting of the file's sections but the game's own (a control's place) on stdout, a line each: section (with
+   /page for a page of its own), key, default, int | float | text, the lowest and highest number, the help on one line,
+   the menus' name, and the values value=word between '|' (none: typed), tabs between (scarletnx --settings, the
    launcher's Settings) */
 void ini_list(void);
 /* 1 when key is a setting of the file, or an unattended-run option (platform/unattended.h): the driver passes only

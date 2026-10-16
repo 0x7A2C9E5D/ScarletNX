@@ -18,19 +18,28 @@
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
 static int touch = 1;
-int backend_touch_mode(void) { return touch; }
 void backend_touch_set(int mode) { touch = mode; }
-/* and the gamepads' settings and names, as backend/gamepad.c keeps them */
+/* and the gamepads' settings and names, as backend/gamepad.c keeps them; their rows and touch's name them */
 static SnxGamepadConfig pads = {1, 20, 100, 0};
 static const int* pad_stored;
 static const char* pad_names[3];
 SnxGamepadConfig* gamepad_config(void) { return &pads; }
 void gamepad_store(const int* setting) { pad_stored = setting; }
 const char* gamepad_name(int i) { return i >= 0 && i < 3 ? pad_names[i] : NULL; }
-static char stored[64];
+const IniOpt g_backend_ini[] = {
+    {"touch", "2", NULL, INI_INT, 0, &touch, 0, 2, NULL, "Touch screen", "Off|Fingers|Mouse too", 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
+const IniOpt g_gamepad_ini[] = {
+    {"gamepad_buttons", "1", NULL, INI_INT, 0, &pads.labels, 0, 1, NULL, "A B X Y", "By position|By label", 0, 0},
+    {"gamepad_deadzone", "20", NULL, INI_INT, 0, &pads.deadzone, 0, 90, NULL, "Stick dead zone", "#%", 5, 0},
+    {"gamepad_rumble", "100", NULL, INI_INT, 0, &pads.rumble, 0, 100, NULL, "Vibration", "Off|#%", 10, 0},
+    {"gamepad_background", "0", NULL, INI_INT, 0, &pads.background, 0, 1, NULL, "Background input", "Off|On", 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
+static char stored[64], log_[512]; /* the last key kept, and every key=value since log_ was emptied */
 static void store(const char* key, const char* value) {
-    (void)value;
+    size_t n = strlen(log_);
     snprintf(stored, sizeof stored, "%s", key);
+    snprintf(log_ + n, sizeof log_ - n, "%s=%s;", key, value);
 }
 
 enum { SW = 2424, SH = 1080 };
@@ -109,7 +118,12 @@ int main(void) {
     assert(tap(0, 3) == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  CONTROLS") && text_at(1, 3, "\xFE Show controls"));
-    assert(list.q[0].h == 16 * 32 && text_at(38, 8, ">")); /* twelve items: the tallest; Buttons opens a page */
+    assert(list.q[0].h == 16 * 32 && text_at(38, 12, ">")); /* twelve items: the tallest; Buttons opens a page */
+    /* named as the .ini's rows name them, in the launcher's order, the game's own actions among them */
+    assert(text_at(1, 4, "\xFE Edit layout") && text_at(1, 5, "\xFE Snap to grid") &&
+           text_at(1, 8, "\xFE Relative stick center"));
+    assert(text_at(1, 11, "\xFE Touch screen") && text_at(1, 12, "\xFE Buttons") &&
+           text_at(1, 13, "\xFE Reset layout"));
     vpad_config()->on = 0;
     draw();
     assert(text_at(36, 3, "Off"));
@@ -137,25 +151,28 @@ int main(void) {
     tap(2, 3);
     assert(vpad_config()->snap && !strcmp(stored, "controls_snap"));
     tap(2, 3);
-    tap(6, 3);
+    tap(5, 3);
     assert(!vpad_config()->rel_center && !strcmp(stored, "controls_rel_center"));
-    tap(6, 3);
-    tap(9, 3);
+    tap(5, 3);
+    tap(8, 3);
     assert(touch == 2);
-    tap(9, 3);
+    draw();
+    assert(text_at(30, 11, "Mouse too"));
+    tap(8, 3);
     assert(touch == 0);
     draw();
-    assert(text_at(36, 12, "Off"));
-    tap(9, 3);
+    assert(text_at(36, 11, "Off"));
+    tap(8, 3);
     /* Edit layout is the caller's to do */
     assert(tap(1, 3) == OVERLAY_EDIT);
 
     /* the buttons' page: one hidden and kept, All shows them again; it scrolls to its last item */
-    assert(tap(5, 3) == OVERLAY_NONE);
+    assert(tap(9, 3) == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  BUTTONS") && text_at(1, 4, "\xFE L"));
+    log_[0] = 0;
     tap(1, 3);
-    assert(!vpad_config()->at[SNX_VPAD_L].shown && !strcmp(stored, "controls_l"));
+    assert(!vpad_config()->at[SNX_VPAD_L].shown && !strcmp(log_, "controls_l_shown=0;")); /* its place stays */
     draw();
     assert(text_at(33, 4, "Hidden") && text_at(28, 3, "Some hidden"));
     tap(0, 3);

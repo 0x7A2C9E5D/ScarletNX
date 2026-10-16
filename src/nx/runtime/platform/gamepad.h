@@ -31,6 +31,7 @@ void gamepad_store(const int* setting); /* one of gamepad_config()'s, to the .in
 /* the open gamepads' names, from 0 on: NULL past the last. Under ui_lock */
 const char* gamepad_name(int i);
 extern const IniOpt g_gamepad_ini[];                 /* the settings, keys gamepad_* */
+#define SNX_GAMEPAD_PAGE "Controllers"               /* their page in the game's menu and the launcher's Settings */
 int gamepad_ini(const char* key, const char* value); /* a key of the game's .ini: applied, 1; not one of these, 0 */
 
 #endif

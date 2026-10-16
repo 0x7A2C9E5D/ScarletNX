@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The menu's Settings: the launcher's own two (libgccjit, gdbstub), then every setting of the game's .ini as the
-   runtime lists them (scarletnx --settings, its tables), each a row of the form (editor.h). A setting is the .ini's,
-   passed to no run, until one is picked. The picks are kept in a file, an .ini of the game's sections and keys, and go
-   to every run as --key=value. A run takes a setting from what that run picks, then from the game's own file of picks
-   (to come: today there is only the global one, every game's), then from the global file, and last from the game's
-   .ini */
+   runtime lists them (scarletnx --settings, its tables), each a row of the form (editor.h), named and its values worded
+   as the game's menu shows them. A setting is the .ini's, passed to no run, until one is picked. The picks are kept in
+   a file, an .ini of the game's sections and keys, and go to every run as --key=value. A run takes a setting from what
+   that run picks, then from the game's own file of picks (to come: today there is only the global one, every game's),
+   then from the global file, and last from the game's .ini */
 #ifndef SNX_GUI_SETTINGS_H
 #define SNX_GUI_SETTINGS_H
 #include <stddef.h>
@@ -14,24 +14,28 @@
 #ifndef SNX_GUI_HAS_GCCJIT
 #define SNX_GUI_HAS_GCCJIT 0
 #endif
-#define GUI_SETTINGS_OWN  2 /* the launcher's own rows, first: libgccjit and gdbstub */
-/* the most numbers a whole-number setting goes round, anisotropy's 0 to 16; one with more is typed */
-#define GUI_SETTING_WORDS 17
+#define GUI_SETTINGS_OWN 2 /* the launcher's own rows, first: libgccjit and gdbstub */
+/* a row that is no setting: a page's, which opens the section/page rows listed after it, and its All, first on that
+   page, which steps them together */
+enum { GUI_SETTING_PAGE = 1, GUI_SETTING_ALL };
 typedef struct {
-    int word;       /* a word row's: the word, 0 the .ini's */
-    char text[64];  /* a typed row's: empty, the .ini's */
-    char start[64]; /* the value the menu starts with, which a file of picks leaves out */
-    char option[136];
-    const char* words[GUI_SETTING_WORDS + 2]; /* ".ini", the numbers, NULL */
-    char numbers[GUI_SETTING_WORDS][4];
+    int word;            /* a word row's: the word, 0 the .ini's */
+    char text[64];       /* a typed row's: empty, the .ini's. A page's and an All's: the value shown */
+    char start[64];      /* the value the menu starts with, which a file of picks leaves out */
+    char option[136];    /* a run's --key=value; a page's row: the section it is in */
+    const char* key;     /* the .ini's, the row's key being its name in the menus */
+    const char** values; /* a word row's values by word, NULL where the words are the values */
+    int kind;            /* 0, GUI_SETTING_PAGE or GUI_SETTING_ALL */
+    int first, count;    /* the rows a page opens, an All steps */
 } GuiSetting;
 typedef struct {
     GuiThemeKey* keys;  /* the rows: the launcher's, then the runtime's by section */
     GuiSetting* values; /* their values, which the keys' offsets are in */
     int count;          /* in one block with the list the keys' names and help point into */
 } GuiSettings;
-/* list's settings, a line each (section, key, default, int | float | text, lowest, highest, help, tabs between),
-   after the launcher's own; another line is left out. 0, else nonzero when out of memory */
+/* list's settings, a line each (section[/page], key, default, int | float | text, lowest, highest, help, name, the
+   values value=word between '|', tabs between), after the launcher's own; another line is left out. A page's rows are
+   listed after its section's others, one page a section. 0, else nonzero when out of memory */
 int gui_settings_read(GuiSettings* settings, const char* list);
 void gui_settings_free(GuiSettings* settings);
 /* the row of key set to value, a word or a text as the row takes: 1 when it did */
@@ -42,8 +46,12 @@ void gui_settings_mark(GuiSettings* settings);
 void gui_settings_load(GuiSettings* settings, const char* path);
 /* the rows that are not at their start in path, by section; 0, else nonzero */
 int gui_settings_save(const GuiSettings* settings, const char* path);
-/* row back to its start, every row for -1 */
+/* row back to its start (a page's or an All's: their rows), every row for -1 */
 void gui_settings_reset(GuiSettings* settings, int row);
+/* an All's row stepped (-1 or 1, 0 for a select) with every row it steps: 1, else 0 */
+int gui_settings_step_all(GuiSettings* settings, int row, int step);
+/* the Alls' values after a change: their rows' word when they share one */
+void gui_settings_sync(GuiSettings* settings);
 /* the value picked for key, NULL for the .ini's or no such row */
 const char* gui_settings_value(const GuiSettings* settings, const char* key);
 /* argv's options for a run: --key=value for each setting picked; with launch the launcher's too, -S -s for the stub

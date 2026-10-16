@@ -109,6 +109,7 @@ typedef struct {
     GuiEditor editor;
     int form;            /* GUI_FORM_* */
     int group;           /* the group open, or the one the Settings come back to */
+    int first, page;     /* a group's: the settings' row of its first, and of the page's row it opened (-1 none) */
     bool theme_from_app; /* the theme editor goes back to the App's rows */
     /* the Settings' groups: App, then a group per section of the settings, its first row and rows; a row each */
     int groups, group_first[GUI_GROUPS_MAX], group_rows[GUI_GROUPS_MAX];
@@ -1232,7 +1233,8 @@ static void render_editor(App* app) {
         snprintf(title, sizeof title, "SETTINGS  /  APP  /  GAME FOLDERS");
     else {
         char* c;
-        snprintf(title, sizeof title, "SETTINGS  /  %s", app->group_keys[app->group].key);
+        snprintf(title, sizeof title, "SETTINGS  /  %s%s%s", app->group_keys[app->group].key,
+                 app->page < 0 ? "" : "  /  ", app->page < 0 ? "" : app->settings.keys[app->page].key);
         for (c = title; *c; ++c) *c = (char)SDL_toupper((unsigned char)*c);
     }
     if (theme->head == GUI_STYLE_BAR) band(app, 0, 1, theme->ink);
@@ -1494,6 +1496,7 @@ static void settings_groups(App* app) {
         int g = app->groups - 1;
         char* about = app->group_about[g];
         size_t n = strlen(about);
+        if (strchr(s->keys[r].section, '/')) continue; /* a page's: its row in the group opens it */
         /* past the most groups the rest go in the last one: every row is still reached */
         if (g == 0 || (strcmp(s->keys[r].section, app->group_keys[g].key) && app->groups < GUI_GROUPS_MAX)) {
             group_add(app, s->keys[r].section, r, "");
@@ -1573,6 +1576,16 @@ static void open_group(App* app, int g) {
     app->editor.flat = true;
     app->form = GUI_FORM_GROUP;
     app->group = g;
+    app->first = app->group_first[g];
+    app->page = -1;
+}
+/* a page's rows (settings.h), from its row in the group */
+static void open_page(App* app, int row) {
+    const GuiSetting* page = &app->settings.values[row];
+    gui_editor_form(&app->editor, app->settings.keys + page->first, page->count, app->settings.values, NULL);
+    app->editor.flat = true;
+    app->first = page->first;
+    app->page = row;
 }
 static void open_settings(App* app) {
     app->group = 0;
@@ -1588,7 +1601,12 @@ static void leave_editor(App* app) {
 static void leave_form(App* app) {
     int form = app->form;
     leave_editor(app);
-    if (form == GUI_FORM_GROUP || form == GUI_FORM_APP)
+    if (form == GUI_FORM_GROUP && app->page >= 0) { /* a page: back to its row */
+        int row = app->page;
+        open_group(app, app->group);
+        app->editor.row = row - app->first;
+        app->editing = true;
+    } else if (form == GUI_FORM_GROUP || form == GUI_FORM_APP)
         settings_top(app, app->group);
     else if (form == GUI_FORM_FOLDERS)
         open_app(app, GUI_APP_FOLDERS);
@@ -1624,6 +1642,7 @@ static void save_editor(App* app) {
 static void keep_settings(App* app) {
     if ((app->form != GUI_FORM_GROUP && app->form != GUI_FORM_SETTINGS) || !app->editor.dirty) return;
     app->editor.dirty = false;
+    gui_settings_sync(&app->settings);
     if (app->settings_file && gui_settings_save(&app->settings, app->settings_file))
         snprintf(app->editor.note, sizeof app->editor.note, "Not saved: %s could not be written", app->settings_file);
 }
@@ -1631,6 +1650,16 @@ static void editor_key(App* app, GuiKey key) {
     GuiEditorDo what = gui_editor_key(&app->editor, key);
     if (what == GUI_EDITOR_ACTION && app->form == GUI_FORM_SETTINGS && !app->editor.step) {
         open_group(app, app->editor.row);
+        return;
+    }
+    if (what == GUI_EDITOR_ACTION && app->form == GUI_FORM_GROUP) { /* a page's row opens it, an All steps its rows */
+        int row = app->first + app->editor.row;
+        if (app->settings.values[row].kind == GUI_SETTING_PAGE && !app->editor.step)
+            open_page(app, row);
+        else if (gui_settings_step_all(&app->settings, row, app->editor.step)) {
+            app->editor.dirty = true;
+            keep_settings(app);
+        }
         return;
     }
     if (what == GUI_EDITOR_ACTION && app->form == GUI_FORM_APP) {
@@ -1680,7 +1709,7 @@ static void editor_input(App* app, const SDL_Event* e) {
     /* Del, or Backspace when nothing is typed: a setting back to its default */
     if (app->form == GUI_FORM_GROUP && !app->editor.typing &&
         (e->key.key == SDLK_DELETE || e->key.key == SDLK_BACKSPACE)) {
-        gui_settings_reset(&app->settings, app->group_first[app->group] + app->editor.row);
+        gui_settings_reset(&app->settings, app->first + app->editor.row);
         app->editor.dirty = true;
         keep_settings(app);
         return;

@@ -20,18 +20,31 @@ enum {
     C_SNAP,
     C_SCALE,
     C_OPACITY,
-    C_BUTTONS,
     C_STICK,
     C_DPAD,
     C_HAPTICS,
     C_TOUCH,
+    C_BUTTONS,
     C_RESET,
     C_BACK,
     C_COUNT
 };
-static const char* const CONTROLS[C_COUNT] = {"Show controls", "Edit layout",  "Snap to grid",          "Scale",
-                                              "Opacity",       "Buttons",      "Relative stick center", "D-pad slide",
-                                              "Haptics",       "Touch screen", "Reset layout",          "Back"};
+/* the settings among them by their keys, which name them and their values (the .ini's tables, as the launcher's
+   Settings show them); the others, actions, by their names */
+static const char* const CONTROLS[C_COUNT] = {"controls",
+                                              "Edit layout",
+                                              "controls_snap",
+                                              "controls_scale",
+                                              "controls_opacity",
+                                              "controls_rel_center",
+                                              "controls_dpad_slide",
+                                              "controls_haptics",
+                                              "touch",
+                                              SNX_VPAD_BUTTONS,
+                                              "Reset layout",
+                                              "Back"};
+static const char* const PADS[P_COUNT] = {"gamepad_buttons", "gamepad_deadzone", "gamepad_rumble", "gamepad_background",
+                                          "Back"};
 static int shown, page, focus, top; /* top: the first item showing */
 /* the YoRHa menu's colours, from its theme.ini (gui_theme_colors.h), as R G B A bytes; the page lets the game show
    through a little */
@@ -64,122 +77,81 @@ static int all_shown(void) {
     return 1;
 }
 static int clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
+/* the setting an item is, NULL for an action */
+static const IniOpt* setting(int i) {
+    if (page == PAGE_CONTROLS) return ini_find(i == C_TOUCH ? g_backend_ini : g_vpad_ini, CONTROLS[i]);
+    if (page == PAGE_PADS) return ini_find(g_gamepad_ini, PADS[i]);
+    return page == PAGE_BUTTONS && i > 0 && i <= SNX_VPAD_COUNT ? &g_vpad_shown_ini[i - 1] : NULL;
+}
+/* a number, stepped by the arrows around it, not a word */
+static int arrows(const IniOpt* o) { return o && (!o->words || strchr(o->words, '#')); }
 /* an item's text, and its value at the right */
 static void label(int i, char* text, size_t size, char* value, size_t vsize) {
-    static const char* const touch[] = {"Off", "Fingers", "Mouse too"};
-    const SnxVpadConfig* v = vpad_config();
+    const IniOpt* o = setting(i);
     *value = 0;
+    if (o) {
+        char word[OVERLAY_COLS];
+        snprintf(text, size, "%s", o->name);
+        ini_word(o, *(const int*)o->var, word, sizeof word);
+        snprintf(value, vsize, arrows(o) ? "< %s >" : "%s", word);
+        return;
+    }
     if (page == PAGE_MAIN) {
-        static const char* const main_items[M_COUNT] = {"On-screen controls", "Controllers", "Exit"};
+        static const char* const main_items[M_COUNT] = {SNX_VPAD_PAGE, SNX_GAMEPAD_PAGE, "Exit"};
         snprintf(text, size, "%s", main_items[i]);
         if (i != M_EXIT) snprintf(value, vsize, ">");
         return;
     }
-    if (page == PAGE_PADS) {
-        static const char* const pads[P_COUNT] = {"A B X Y", "Stick dead zone", "Vibration", "Background input",
-                                                  "Back"};
-        const SnxGamepadConfig* g = gamepad_config();
-        snprintf(text, size, "%s", pads[i]);
-        if (i == P_LABELS) snprintf(value, vsize, "%s", g->labels ? "By label" : "By position");
-        if (i == P_DEADZONE) snprintf(value, vsize, "< %d%% >", g->deadzone);
-        if (i == P_RUMBLE && g->rumble) snprintf(value, vsize, "< %d%% >", g->rumble);
-        if (i == P_RUMBLE && !g->rumble) snprintf(value, vsize, "< Off >");
-        if (i == P_BACKGROUND) snprintf(value, vsize, "%s", g->background ? "On" : "Off");
-        return;
-    }
     if (page == PAGE_BUTTONS) {
-        snprintf(text, size, "%s", i == 0 ? "All" : i == SNX_VPAD_COUNT + 1 ? "Back" : vpad_name(i - 1));
+        snprintf(text, size, "%s", i == 0 ? "All" : "Back");
         if (i == 0) snprintf(value, vsize, "%s", all_shown() ? "Shown" : "Some hidden");
-        if (i > 0 && i <= SNX_VPAD_COUNT) snprintf(value, vsize, "%s", v->at[i - 1].shown ? "Shown" : "Hidden");
         return;
     }
-    snprintf(text, size, "%s", CONTROLS[i]);
-    switch (i) {
-        case C_SHOW: snprintf(value, vsize, "%s", v->on ? "On" : "Off"); break;
-        case C_SNAP: snprintf(value, vsize, "%s", v->snap ? "On" : "Off"); break;
-        case C_SCALE: snprintf(value, vsize, "< %d%% >", v->scale + 50); break;
-        case C_OPACITY: snprintf(value, vsize, "< %d%% >", v->opacity); break;
-        case C_STICK: snprintf(value, vsize, "%s", v->rel_center ? "On" : "Off"); break;
-        case C_DPAD: snprintf(value, vsize, "%s", v->dpad_slide ? "On" : "Off"); break;
-        case C_HAPTICS: snprintf(value, vsize, "%s", v->haptics ? "On" : "Off"); break;
-        case C_TOUCH: snprintf(value, vsize, "%s", touch[backend_touch_mode()]); break; /* 0 to 2, as the .ini clamps */
-        case C_BUTTONS: snprintf(value, vsize, ">"); break;
-        default: break;
-    }
+    snprintf(text, size, "%s", page == PAGE_PADS ? PADS[i] : CONTROLS[i]);
+    if (page == PAGE_CONTROLS && i == C_BUTTONS) snprintf(value, vsize, ">");
 }
-static void flip(int* v) {
-    *v = !*v;
-    vpad_store(v);
-}
-static void flip_pad(int* v) {
-    *v = !*v;
-    gamepad_store(v);
-}
-/* the item i done, or its value stepped (step -1 or 1; 0 for a select) */
+/* the item i done, or its value stepped (step -1 or 1; 0 for a select, which steps up) */
 static int act(int i, int step) {
-    SnxVpadConfig* v = vpad_config();
+    const IniOpt* o = setting(i);
+    if (o) {
+        int* v = (int*)o->var;
+        int to = ini_step(o, *v, step ? step : 1);
+        if (page == PAGE_CONTROLS && i == C_TOUCH)
+            backend_touch_set(to);
+        else if (page == PAGE_BUTTONS) {
+            *v = to;
+            vpad_store_shown(i - 1);
+        } else {
+            *v = to;
+            if (page == PAGE_PADS)
+                gamepad_store(v);
+            else
+                vpad_store(v);
+        }
+        return OVERLAY_NONE;
+    }
     if (page == PAGE_MAIN) {
         if (step) return OVERLAY_NONE;
         if (i == M_EXIT) return OVERLAY_EXIT;
         page_open(i == M_PADS ? PAGE_PADS : PAGE_CONTROLS);
         return OVERLAY_NONE;
     }
-    if (page == PAGE_PADS) {
-        SnxGamepadConfig* g = gamepad_config();
-        if (i == P_BACK) {
-            if (!step) overlay_back();
-            return OVERLAY_NONE;
-        }
-        if (i == P_LABELS || i == P_BACKGROUND) {
-            flip_pad(i == P_LABELS ? &g->labels : &g->background);
-        } else { /* a select steps up, as a tap on the right arrow */
-            int* n = i == P_DEADZONE ? &g->deadzone : &g->rumble;
-            *n = clamp(*n + (step ? step : 1) * (i == P_DEADZONE ? 5 : 10), 0, i == P_DEADZONE ? 90 : 100);
-            gamepad_store(n);
-        }
-        return OVERLAY_NONE;
-    }
-    if (page == PAGE_BUTTONS) {
+    if (step) return OVERLAY_NONE;
+    if (page == PAGE_BUTTONS && i == 0) {
+        SnxVpadConfig* v = vpad_config();
         int c, all = all_shown();
-        if (i == SNX_VPAD_COUNT + 1) {
-            if (!step) overlay_back();
-            return OVERLAY_NONE;
+        for (c = 0; c < SNX_VPAD_COUNT; ++c) {
+            v->at[c].shown = !all;
+            vpad_store_shown(c);
         }
-        for (c = 0; c < SNX_VPAD_COUNT; ++c)
-            if (i == 0 || i - 1 == c) {
-                v->at[c].shown = i == 0 ? !all : !v->at[c].shown;
-                vpad_store_control(c);
-            }
-        return OVERLAY_NONE;
-    }
-    switch (i) {
-        case C_SHOW: flip(&v->on); break;
-        case C_SNAP: flip(&v->snap); break;
-        case C_STICK: flip(&v->rel_center); break;
-        case C_DPAD: flip(&v->dpad_slide); break;
-        case C_HAPTICS: flip(&v->haptics); break;
-        case C_SCALE:
-        case C_OPACITY: {
-            int* n = i == C_SCALE ? &v->scale : &v->opacity;
-            *n = clamp(*n + (step ? step : 1) * 10, 0, 100);
-            vpad_store(n);
-            break;
-        }
-        case C_TOUCH: backend_touch_set((backend_touch_mode() + (step < 0 ? 2 : 1)) % 3); break;
-        case C_EDIT:
-            if (!step) return OVERLAY_EDIT;
-            break;
-        case C_BUTTONS:
-            if (!step) page_open(PAGE_BUTTONS);
-            break;
-        case C_RESET:
-            if (!step) vpad_reset_layout();
-            break;
-        case C_BACK:
-            if (!step) page_open(PAGE_MAIN);
-            break;
-        default: break;
-    }
+    } else if (page == PAGE_CONTROLS && i == C_EDIT)
+        return OVERLAY_EDIT;
+    else if (page == PAGE_CONTROLS && i == C_BUTTONS)
+        page_open(PAGE_BUTTONS);
+    else if (page == PAGE_CONTROLS && i == C_RESET)
+        vpad_reset_layout();
+    else /* Back */
+        overlay_back();
     return OVERLAY_NONE;
 }
 
@@ -279,9 +251,7 @@ int overlay_tap(float x, float y, int sw, int sh) {
     if (row < 0 || row >= VISIBLE || i >= items()) return OVERLAY_NONE;
     focus = i;
     /* a value's arrows: the left half of its last ten columns steps it down */
-    if ((page == PAGE_CONTROLS && (i == C_SCALE || i == C_OPACITY)) ||
-        (page == PAGE_PADS && (i == P_DEADZONE || i == P_RUMBLE)))
-        return act(i, col < OVERLAY_COLS - 5 ? -1 : 1);
+    if (arrows(setting(i))) return act(i, col < OVERLAY_COLS - 5 ? -1 : 1);
     return act(i, 0);
 }
 /* the gamepads' page's second row: the first one connected by name, and how many more */

@@ -37,7 +37,7 @@ homebrew-loader guest argv block.
 which then starts fullscreen (not in timed test runs). `--fullscreen=0` starts it windowed. Without either, the
 game's `.ini` decides (`fullscreen=1` starts fullscreen).
 `--touch=0|1|2` is forwarded to the game too: its touch screen takes nothing, the fingers, or the fingers and the
-mouse's left button (the default). The game's menu sets it; the game's `.ini` keeps its own `touch`.
+mouse's left button (the default). The game's menu sets it too; the game's `.ini` keeps its own `touch`.
 `--controls=0|1` likewise hides or shows the [on-screen controls](#on-screen-controls) (on by default on Android);
 the game's `.ini` keeps `controls`. Any other `--key=value` of the game's
 `.ini` is forwarded as well, for that run (`scarletnx --settings` lists them all), and so are the timed-run ones
@@ -300,8 +300,9 @@ The game's menu (Back on Android, Home on a gamepad, F2) has their page: show th
 tap one and size it with the bar on top; *Done* or Back ends it), snap to a grid, scale and opacity, the buttons
 shown, a stick's middle where the finger lands, a D-pad a finger slides on, a buzz on each press (Android), the touch
 screen, and *Reset layout*. The game's `.ini` keeps them: `controls`, `controls_scale`, `controls_opacity`,
-`controls_snap`, `controls_rel_center`, `controls_dpad_slide`, `controls_haptics`, and a control's place once it
-was moved (`controls_a=0.930 0.470 100 1`: its middle across the screen, its size in percent, shown).
+`controls_snap`, `controls_rel_center`, `controls_dpad_slide`, `controls_haptics`, a control's place once it
+was moved (`controls_a=0.930 0.470 100`: its middle across the screen and its size in percent), and whether it is
+shown once that changed (`controls_a_shown=0`). The launcher's Settings have the same, but the layout.
 Beside the executable: `Game.log`, `threads.txt` (15 s refresh), `captures/` (screenshots); an installed copy on Linux
 keeps the first two in its state folder ([Folders](#folders)).
 Scripts/disasm/shaders: [DEVELOPMENT](DEVELOPMENT.md).

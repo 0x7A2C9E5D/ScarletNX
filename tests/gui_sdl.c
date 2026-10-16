@@ -193,9 +193,11 @@ static int SDLCALL hang(void* unused) {
 int main(int argc, char** argv) {
     int row;
     if (argc == 2 && !strcmp(argv[1], "--settings")) { /* as the runtime lists its settings */
-        fputs("Display\tfullscreen\t0\tint\t0\t1\t1 = start in fullscreen\n"
-              "Graphics\tresolution\t1\tfloat\t0.25\t4\tInternal 3D resolution\n"
-              "Input\tcontrols\t0\tint\t0\t1\tThe on-screen controls\n",
+        fputs("Display\tfullscreen\t0\tint\t0\t1\t1 = start in fullscreen\t\t0=0|1=1\n"
+              "Graphics\tresolution\t1\tfloat\t0.25\t4\tInternal 3D resolution\t\t\n"
+              "On-screen controls\tcontrols\t0\tint\t0\t1\tThe on-screen controls\tShow controls\t0=Off|1=On\n"
+              "On-screen controls/Buttons\tcontrols_a_shown\t\tint\t0\t1\tA control drawn\tA\t0=Hidden|1=Shown\n"
+              "On-screen controls/Buttons\tcontrols_b_shown\t\tint\t0\t1\tA control drawn\tB\t0=Hidden|1=Shown\n",
               stdout);
         return 0;
     }
@@ -524,7 +526,7 @@ int main(int argc, char** argv) {
     colored_text(&app, 5, "- Launch", normal);
     colored_text(&app, 6, "- Display", normal);
     colored_text(&app, 7, "- Graphics", normal);
-    colored_text(&app, 8, "- Input", normal);
+    colored_text(&app, 8, "- On-screen controls", normal);
     colored_text(&app, 9, "- Reset all to the defaults", normal);
     marks(&app, 4, 9, false, false); /* every row shows: no arrows */
     key(&app, SDLK_DOWN);
@@ -587,6 +589,47 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RETURN);
     assert(!gui_settings_value(&app.settings, "resolution"));
     key(&app, SDLK_ESCAPE);
+    /* the game's menu's settings, named and worded as it shows them; a page's row opens the page, All first */
+    {
+        char line[64];
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RETURN);
+        render(&app);
+        colored_text(&app, 0, "SETTINGS  /  ON-SCREEN CONTROLS", normal);
+        snprintf(line, sizeof line, "- %-24s %s", "Show controls", "Off"); /* the launcher's choice, 0 */
+        colored_text(&app, 4, line, yellow);
+        snprintf(line, sizeof line, "- %-24s %s", "Buttons", ">");
+        colored_text(&app, 5, line, normal);
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RIGHT); /* a page opens with Enter only */
+        assert(app.page < 0);
+        key(&app, SDLK_RETURN);
+        assert(app.form == GUI_FORM_GROUP && app.page >= 0 && app.editor.count == 3);
+        render(&app);
+        colored_text(&app, 0, "SETTINGS  /  ON-SCREEN CONTROLS  /  BUTTONS", normal);
+        snprintf(line, sizeof line, "- %-24s %s", "All", ".ini");
+        colored_text(&app, 4, line, yellow);
+        snprintf(line, sizeof line, "- %-24s %s", "B", ".ini");
+        colored_text(&app, 6, line, normal);
+        key(&app, SDLK_RIGHT);
+        assert(setting_is(&app, "controls_a_shown", "0") && setting_is(&app, "controls_b_shown", "0"));
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RIGHT);
+        assert(setting_is(&app, "controls_a_shown", "1") && setting_is(&app, "controls_b_shown", "0"));
+        render(&app);
+        snprintf(line, sizeof line, "- %-24s %s", "All", "Mixed");
+        colored_text(&app, 4, line, normal);
+        snprintf(line, sizeof line, "- %-24s %s", "A", "Shown");
+        colored_text(&app, 5, line, yellow);
+        /* ESC comes back to the page's row, Del on it puts its rows back */
+        key(&app, SDLK_ESCAPE);
+        assert(app.form == GUI_FORM_GROUP && app.page < 0 && app.editor.row == 1);
+        key(&app, SDLK_DELETE);
+        assert(!gui_settings_value(&app.settings, "controls_a_shown") &&
+               !gui_settings_value(&app.settings, "controls_b_shown"));
+        key(&app, SDLK_ESCAPE);
+        assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 4);
+    }
     /* the groups' last row puts every setting back as it started */
     app.editor.row = gui_editor_rows(&app.editor) - 1;
     key(&app, SDLK_RETURN);

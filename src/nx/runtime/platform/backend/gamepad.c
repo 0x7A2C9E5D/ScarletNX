@@ -24,14 +24,14 @@ static void background_set(const IniOpt* o, const char* v) {
 const IniOpt g_gamepad_ini[] = {
     {"gamepad_buttons", "1",
      "A controller's A, B, X and Y: 1 = as their labels say, 0 = by position, as on the console's", INI_INT, 0,
-     &g_cfg.labels, 0, 1, NULL},
+     &g_cfg.labels, 0, 1, NULL, "A B X Y", "By position|By label", 0, 0},
     {"gamepad_deadzone", "20", "The sticks' dead zone, in percent of their travel", INI_INT, 0, &g_cfg.deadzone, 0, 90,
-     NULL},
+     NULL, "Stick dead zone", "#%", 5, 0},
     {"gamepad_rumble", "100", "How strongly the controllers vibrate when the game asks, in percent: 0 = never", INI_INT,
-     0, &g_cfg.rumble, 0, 100, NULL},
+     0, &g_cfg.rumble, 0, 100, NULL, "Vibration", "Off|#%", 10, 0},
     {"gamepad_background", "0", "1 = the controllers still play the game while its window is not focused", INI_INT, 0,
-     &g_cfg.background, 0, 1, background_set},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+     &g_cfg.background, 0, 1, background_set, "Background input", "Off|On", 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 int gamepad_ini(const char* key, const char* value) {
     const IniOpt* o = ini_find(g_gamepad_ini, key);
     if (o) ini_read(o, value);

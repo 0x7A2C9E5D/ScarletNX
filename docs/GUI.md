@@ -52,9 +52,11 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   drop replaces them and returns to the menu; ESC cancels without changing them.
 - **Settings** opens on its groups, Enter opening one and ESC coming back: **App**, then
   **Launch** (the launcher's two), then a group per section of the game's `.ini` (Display,
-  Graphics, Performance, Input, Network, Debug), as `scarletnx --settings` prints them from the
-  runtime's own tables. **App** holds **Theme** and **Text size**, which Left/Right or Enter go
-  round either way, **Theme editor**, which comes back to App, and **Game folders**: `games/`,
+  Graphics, Performance, On-screen controls, Controllers, Network, Debug), as `scarletnx --settings`
+  prints them from the runtime's own tables. The game's menu's settings have its names and words
+  (*Scale* 100%, *Touch screen* Fingers), and its **Buttons** page, whose **All** steps every row;
+  *Edit layout* and *Reset layout* stay in the game's menu, as the layout is each game's own.
+  **App** holds **Theme** and **Text size**, which Left/Right or Enter go round either way, **Theme editor**, which comes back to App, and **Game folders**: `games/`,
   always listed, then the player's own folders, whose games the `games/` browser lists after
   `games/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
   or a path pasted with Ctrl+V is added too. Del, or Enter twice, takes one off the list (the
@@ -67,8 +69,7 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   run picks, then from the game's own picks (to come), then from these, and last from the game's
   `.ini`. Del puts a setting back to its default, and the groups' last row, **Reset all to the
   defaults**, every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
-  and `fullscreen` puts the launcher itself on the whole screen too). The touch screen is the
-  game's menu's, to turn off for a controller.
+  and `fullscreen` puts the launcher itself on the whole screen too).
   **libgccjit** passes `--backend=gcc` when preparing a dump (it stays off in a build without
   libgccjit; games in `games/` are not recompiled), **gdbstub** passes `-S` and `-s`, the
   runtime's stub on port 1234 waiting for the debugger at startup (UNIX only). None of them

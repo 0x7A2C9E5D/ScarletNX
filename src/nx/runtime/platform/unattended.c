@@ -73,15 +73,15 @@ static void script_set(const IniOpt* o, const char* v) {
     script_parse(v);
 }
 /* given as --key=value, or read from the .ini's [Other] (none is in its sections, so none is written with help) */
-static const IniOpt INI[] = {{"seconds", NULL, NULL, INI_INT, 0, &g_seconds, 0, INT_MAX, NULL},
-                             {"frames", NULL, NULL, INI_INT, 0, &g_maxframes, -1, INT_MAX, NULL},
-                             {"shot", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, shot_set},
-                             {"shot_every", NULL, NULL, INI_INT, 0, &g_shot_every, 0, INT_MAX, NULL},
-                             {"press", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, press_set},
-                             {"press_at", NULL, NULL, INI_INT, 0, &g_press_at, 0, INT_MAX, NULL},
-                             {"press_len", NULL, NULL, INI_INT, 0, &g_press_len, 0, INT_MAX, NULL},
-                             {"script", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, script_set},
-                             {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL}};
+static const IniOpt INI[] = {{"seconds", NULL, NULL, INI_INT, 0, &g_seconds, 0, INT_MAX, NULL, NULL, NULL, 0, 0},
+                             {"frames", NULL, NULL, INI_INT, 0, &g_maxframes, -1, INT_MAX, NULL, NULL, NULL, 0, 0},
+                             {"shot", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, shot_set, NULL, NULL, 0, 0},
+                             {"shot_every", NULL, NULL, INI_INT, 0, &g_shot_every, 0, INT_MAX, NULL, NULL, NULL, 0, 0},
+                             {"press", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, press_set, NULL, NULL, 0, 0},
+                             {"press_at", NULL, NULL, INI_INT, 0, &g_press_at, 0, INT_MAX, NULL, NULL, NULL, 0, 0},
+                             {"press_len", NULL, NULL, INI_INT, 0, &g_press_len, 0, INT_MAX, NULL, NULL, NULL, 0, 0},
+                             {"script", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, script_set, NULL, NULL, 0, 0},
+                             {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 int unattended_ini(const char* k, const char* v) {
     const IniOpt* o = ini_find(INI, k);
     if (o) ini_read(o, v);
