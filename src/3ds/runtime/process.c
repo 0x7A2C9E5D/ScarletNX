@@ -14,6 +14,48 @@ static bool map(SnxCtrProcess* p, uint32_t va, uint32_t size, unsigned permissio
     p->physical_next += size;
     return true;
 }
+/* The ExHeader's address-mapping capabilities, as Azahar's Process::ParseKernelCaps and
+   KernelSystem::HandleSpecialMapping (core/hle/kernel/{process,memory}.cpp, GPL-2.0-or-later, Copyright 2014-2025
+   Citra Emulator Project / Azahar Emulator Project, azahar-emu/azahar a4b335e) read and apply them: a range is two
+   descriptors (type 0x7f, start page, read-only bit 20, then the end page), a page is one (type 0xffe). Mappings
+   resolve against the special areas in that order, VRAM before IO (their virtual ranges overlap). MMIO areas are
+   not mapped, as Azahar leaves them, so an access to one faults instead of reading invented values. */
+static bool special_mappings(SnxCtrProcess* p, const uint32_t* caps) {
+    static const struct {
+        uint32_t va, pa, size;
+    } areas[] = {
+        {0x1f000000u, 0x18000000u, 0x00600000u},            /* VRAM */
+        {0x1ec00000u, 0x10100000u, 0x00400000u},            /* IO: not mapped */
+        {0x1ff00000u, 0x1ff00000u, 0x00080000u},            /* DSP RAM */
+        {0x1e800000u, 0x1f000000u, 0x00400000u - 0x20000u}, /* New 3DS extra RAM */
+    };
+    for (unsigned i = 0; i < 28; ++i) {
+        uint32_t d = caps[i], type = d >> 20, va, size, permissions;
+        if ((type & 0xffe) == 0xff8) {
+            if (i + 1 >= 28 || ((caps[i + 1] >> 20) & 0xffe) != 0xff8) continue; /* incomplete: ignored */
+            uint32_t end = caps[++i] << 12;
+            va = d << 12;
+            size = va < end ? end - va : 0;
+            permissions = (d & (1u << 20)) ? SNX_CTR_READ : SNX_CTR_READ | SNX_CTR_WRITE;
+        } else if ((type & 0xfff) == 0xffe) {
+            va = d << 12;
+            size = 4096;
+            permissions = SNX_CTR_READ | SNX_CTR_WRITE;
+        } else
+            continue;
+        if (!size) continue;
+        unsigned area = 0;
+        while (area < 4 &&
+               !(va >= areas[area].va && (uint64_t)va + size <= (uint64_t)areas[area].va + areas[area].size))
+            ++area;
+        if (area == 4 || area == 1) continue; /* unhandled or MMIO */
+        uint32_t pa = areas[area].pa + (va - areas[area].va);
+        /* an area this board lacks (extra RAM on an Old 3DS) has no physical region: left unmapped */
+        if (!snx_ctr_physical_region(snx_ctr_memory_profile(p->memory), pa, size)) continue;
+        if (snx_ctr_map(p->space, va, pa, size, permissions) != SNX_CTR_MEM_OK) return false;
+    }
+    return true;
+}
 void snx_ctr_process_free(SnxCtrProcess* p) {
     if (!p) return;
     free(p->gsp.regs);
@@ -112,6 +154,7 @@ SnxCtrProcess* snx_ctr_process_new(const SnxCtrImage* image, SnxCtrModel model) 
         snx_ctr_write_ram(p->space, 0x1ff81000, shared, sizeof shared) != SNX_CTR_MEM_OK ||
         snx_ctr_protect(p->space, 0x1ff81000, 4096, SNX_CTR_READ) != SNX_CTR_MEM_OK)
         goto fail;
+    if (!special_mappings(p, image->kernel_caps)) goto fail;
     return p;
 fail:
     snx_ctr_process_free(p);

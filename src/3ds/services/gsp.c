@@ -3,11 +3,14 @@
    gsp::Gpu wire shapes and GX queue formats referenced against Azahar
    core/hle/service/gsp/* and libctru services/gspgpu.c. Bounded model: one
    shared GX/interrupt block per process, four relay threads, a checked GX/LCD
-   register file and host-paced 60 Hz display timing. PICA command lists
-   (SubmitCmdList), format-converting transfers and save-VRAM paths stop. */
+   register file and host-paced 60 Hz display timing. The GX queue's DMA, memory
+   fills, display transfers and texture copies run on physical memory through the
+   transfer engine (gpu/transfer.c); PICA command lists (SubmitCmdList) and the
+   save-VRAM paths stop. */
 #include "3ds/runtime/internal.h"
 #include "3ds/services/gsp.h"
 #include "3ds/gpu/present.h"
+#include "3ds/gpu/transfer.h"
 #include "common/utilities/common.h"
 #include <stdlib.h>
 #include <string.h>
@@ -346,9 +349,196 @@ static void release_right(SnxCtrIpc* c) {
     p->gsp.rights_thread = UINT32_MAX;
     c->out[0] = (c->in[0] & 0xffff0000u) | 0x40;
 }
-/* GX command queue in the shared block: DMA copies and memory fills run as
-   checked RAM transactions; cache flushes are coherent no-ops. PICA command
-   lists and format-converting transfers stop explicitly. */
+/* ---- the GX command queue (Azahar GSP_GPU::TriggerCmdReqQueue and VideoCore::GPU::Execute, GPL-3.0-or-later,
+   Copyright 2014-2026 Citra Emulator Project / Azahar Emulator Project, azahar-emu/azahar a4b335e) ---- */
+
+/* interrupt sources, GSP InterruptId */
+enum { GX_PSC0, GX_PSC1, GX_PDC0, GX_PDC1, GX_PPF, GX_P3D, GX_DMA };
+#define GX_ERR_INVALID_BUFFER  0xe0e02bf5u
+#define GX_ERR_UNKNOWN_COMMAND 0xe0c02bf4u
+#define GX_STATUS_STOPPED      0x01u
+#define GX_STATUS_FAILED       0x80u
+/* the largest span one transfer stages in host memory */
+#define GX_STAGE_LIMIT         (32u * 1024 * 1024)
+
+/* GPU::VirtualToPhysicalAddress: the GSP module's own view of the application's buffers. The linear heaps and the
+   New 3DS extra RAM must contain the start and the end, VRAM only the start; the ranges' ends are inclusive.
+   0 when the buffer is outside GPU-visible memory, the value GSP writes to the registers then. */
+static uint32_t gx_physical(uint32_t va, uint32_t size) {
+    uint32_t end = va + size;
+#define GX_IN(lo, hi) (va >= (lo) && va <= (hi) && end >= (lo) && end <= (hi))
+    if (GX_IN(0x14000000u, 0x1c000000u)) return va - 0x14000000u + 0x20000000u;        /* linear heap -> FCRAM */
+    if (GX_IN(0x30000000u, 0x40000000u)) return va - 0x30000000u + 0x20000000u;        /* New 3DS linear heap */
+    if (va >= 0x1f000000u && va <= 0x1f600000u) return va - 0x1f000000u + 0x18000000u; /* VRAM */
+    if (GX_IN(0x1e800000u, 0x1ec00000u)) return va - 0x1e800000u + 0x1f000000u;        /* New 3DS extra RAM */
+#undef GX_IN
+    return 0;
+}
+
+/* a physical address the transfer engine can start at: in a RAM, VRAM or DSP RAM region of the board */
+static bool gx_valid(const SnxCtrProcess* p, uint32_t pa) {
+    const SnxCtrRegion* r = pa ? snx_ctr_physical_region(snx_ctr_memory_profile(p->memory), pa, 1) : NULL;
+    return r && r->kind != SNX_CTR_MMIO;
+}
+
+typedef struct {
+    unsigned char ids[16];
+    unsigned count;
+} GxInterrupts;
+static void gx_raise(GxInterrupts* irq, unsigned id) {
+    if (irq->count < sizeof irq->ids) irq->ids[irq->count++] = (unsigned char)id;
+}
+
+/* the outcome of one command: done (with an error GSP stores, or 0), or the run stops here */
+typedef enum { GX_DONE, GX_STOP } GxStep;
+
+/* RequestDma: a copy between the application's virtual addresses, which the GSP module makes through the
+   application's mapping but as a bus master (no CPU page permission applies: libctru DMAs textures into VRAM the
+   CPU maps read-only). Each page is resolved to its physical address and copied through a staging buffer */
+static bool gx_resolve(SnxCtrProcess* p, uint32_t va, uint32_t size, unsigned char* buffer, bool write) {
+    for (uint32_t off = 0; off < size;) {
+        uint32_t at = va + off, pa, n = 4096 - (at & 4095);
+        if (n > size - off) n = size - off;
+        if (snx_ctr_query(p->space, at, &pa, NULL) != SNX_CTR_MEM_OK) return false;
+        SnxCtrMemResult r = write ? snx_ctr_phys_write(p->memory, pa, buffer + off, n)
+                                  : snx_ctr_phys_read(p->memory, pa, buffer + off, n);
+        if (r != SNX_CTR_MEM_OK) return false;
+        off += n;
+    }
+    return true;
+}
+static GxStep gx_dma(SnxCtrIpc* c, const uint32_t* a, GxInterrupts* irq) {
+    SnxCtrProcess* p = c->process;
+    uint32_t source = a[0], dest = a[1], size = a[2];
+    if (size > GX_STAGE_LIMIT || (uint64_t)source + size > UINT64_C(0x100000000) ||
+        (uint64_t)dest + size > UINT64_C(0x100000000)) {
+        c->state = SNX_CTR_IPC_UNSUPPORTED;
+        return GX_STOP;
+    }
+    if (size) {
+        unsigned char* staged = malloc(size);
+        if (!staged) {
+            snx_ctr_ipc_error_reply(c, GSP_ERR_OOM);
+            return GX_STOP;
+        }
+        bool ok = gx_resolve(p, source, size, staged, false) && gx_resolve(p, dest, size, staged, true);
+        free(staged);
+        if (!ok) {
+            c->state = SNX_CTR_IPC_FAULT;
+            return GX_STOP;
+        }
+    }
+    gx_raise(irq, GX_DMA);
+    return GX_DONE;
+}
+
+/* MemoryFill: GPU::Execute writes each requested region's registers, GPU::MemoryFill runs it when its control
+   word carries the trigger bit, from start to end rounded down to 8 bytes (the registers hold address / 8). With
+   both regions requested only the second raises an interrupt, PSC0 */
+static GxStep gx_fill_region(SnxCtrIpc* c, uint32_t start, uint32_t end, uint32_t value, uint32_t control,
+                             int interrupt, GxInterrupts* irq) {
+    SnxCtrProcess* p = c->process;
+    uint32_t pa_start = start & ~7u, pa_end = end & ~7u;
+    if (!(control & 1)) return GX_DONE; /* not triggered: no fill, no interrupt */
+    if (gx_valid(p, pa_start) && gx_valid(p, pa_end) && pa_end > pa_start) {
+        uint32_t size = pa_end - pa_start;
+        unsigned char* staged = size <= GX_STAGE_LIMIT ? malloc(size) : NULL;
+        if (!staged) {
+            c->state = SNX_CTR_IPC_UNSUPPORTED;
+            return GX_STOP;
+        }
+        snx_ctr_fill(staged, size, value, control);
+        SnxCtrMemResult r = snx_ctr_phys_write(p->memory, pa_start, staged, size);
+        free(staged);
+        if (r != SNX_CTR_MEM_OK) { /* the span leaves its region */
+            c->state = SNX_CTR_IPC_FAULT;
+            return GX_STOP;
+        }
+    }
+    /* "It seems that it won't signal interrupt if address_start is zero" */
+    if (pa_start && interrupt >= 0) gx_raise(irq, (unsigned)interrupt);
+    return GX_DONE;
+}
+static GxStep gx_fill(SnxCtrIpc* c, const uint32_t* a, uint32_t* error, GxInterrupts* irq) {
+    uint32_t start1 = a[0], value1 = a[1], end1 = a[2], start2 = a[3], value2 = a[4], end2 = a[5];
+    uint32_t control1 = a[6] & 0xffff, control2 = a[6] >> 16;
+    bool both = start1 && start2;
+    if (start1) {
+        uint32_t pa = start1 < end1 ? gx_physical(start1, end1 - start1) : 0;
+        if (!pa) {
+            *error = GX_ERR_INVALID_BUFFER;
+            return GX_DONE;
+        }
+        if (gx_fill_region(c, pa, pa + (end1 - start1), value1, control1, both ? -1 : GX_PSC0, irq) == GX_STOP)
+            return GX_STOP;
+    }
+    if (start2) {
+        uint32_t pa = start2 < end2 ? gx_physical(start2, end2 - start2) : 0;
+        if (!pa) {
+            *error = GX_ERR_INVALID_BUFFER;
+            return GX_DONE;
+        }
+        return gx_fill_region(c, pa, pa + (end2 - start2), value2, control2, both ? GX_PSC0 : GX_PSC1, irq);
+    }
+    return GX_DONE;
+}
+
+/* GPU::MemoryTransfer over the transfer registers: a texture copy when the flags say so, a display transfer
+   otherwise, then PPF. Addresses outside the board's memory do nothing (the blitter's check); an unimplemented
+   mode stops instead of writing something the hardware would not */
+static GxStep gx_transfer(SnxCtrIpc* c, GxInterrupts* irq) {
+    SnxCtrProcess* p = c->process;
+    SnxCtrGsp* g = &p->gsp;
+    size_t in_bytes = 0, out_bytes = 0;
+    bool copy = (g->transfer.flags & SNX_CTR_XFER_TEXCOPY) != 0;
+    SnxCtrDisplayTransfer display = {g->transfer.input_size, g->transfer.output_size, g->transfer.flags};
+    SnxCtrTextureCopy texture = {g->transfer.copy_size, g->transfer.copy_input, g->transfer.copy_output};
+    if (gx_valid(p, g->transfer.input) && gx_valid(p, g->transfer.output)) {
+        bool spans = copy ? snx_ctr_texture_spans(&texture, &in_bytes, &out_bytes)
+                          : snx_ctr_display_spans(&display, &in_bytes, &out_bytes);
+        if (!spans) {
+            /* no span: an empty transfer does nothing, an unsupported one stops */
+            SnxCtrXferResult r = copy ? snx_ctr_texture_copy(&texture, NULL, 0, NULL, 0)
+                                      : snx_ctr_display_transfer(&display, NULL, 0, NULL, 0);
+            if (r != SNX_CTR_XFER_EMPTY) {
+                c->state = SNX_CTR_IPC_UNSUPPORTED;
+                return GX_STOP;
+            }
+        } else {
+            unsigned char *in = NULL, *out = NULL;
+            SnxCtrXferResult r = SNX_CTR_XFER_BOUNDS;
+            if (in_bytes > GX_STAGE_LIMIT || out_bytes > GX_STAGE_LIMIT) {
+                c->state = SNX_CTR_IPC_UNSUPPORTED;
+                return GX_STOP;
+            }
+            in = malloc(in_bytes);
+            out = malloc(out_bytes);
+            /* the output is read first so the bytes a transfer leaves alone (texture copy gaps) keep their values */
+            if (in && out && snx_ctr_phys_read(p->memory, g->transfer.input, in, in_bytes) == SNX_CTR_MEM_OK &&
+                snx_ctr_phys_read(p->memory, g->transfer.output, out, out_bytes) == SNX_CTR_MEM_OK) {
+                r = copy ? snx_ctr_texture_copy(&texture, in, in_bytes, out, out_bytes)
+                         : snx_ctr_display_transfer(&display, in, in_bytes, out, out_bytes);
+                if (r == SNX_CTR_XFER_OK &&
+                    snx_ctr_phys_write(p->memory, g->transfer.output, out, out_bytes) != SNX_CTR_MEM_OK)
+                    r = SNX_CTR_XFER_BOUNDS;
+            }
+            free(in);
+            free(out);
+            if (r != SNX_CTR_XFER_OK) { /* a span leaving its memory region, or out of host memory */
+                c->state = SNX_CTR_IPC_FAULT;
+                return GX_STOP;
+            }
+        }
+    }
+    gx_raise(irq, GX_PPF);
+    return GX_DONE;
+}
+
+/* TriggerCmdReqQueue: the right holder's queue in the shared block, a 0x20-byte header (index, count, status,
+   should_stop, the last error) and 15 commands of 0x20 bytes. Each command is taken off the queue before it runs; a
+   failing one leaves its error and the FAILED status and the queue goes on; its stop flag stops the queue after it.
+   Interrupts go to the right holder's relay queue as the commands raise them. SubmitCmdList (PICA command lists)
+   is not implemented yet and stops the run with the command still queued */
 static void trigger_queue(SnxCtrIpc* c) {
     if (!snx_ctr_ipc_expect(c, 0, 0)) return;
     SnxCtrProcess* p = c->process;
@@ -363,90 +553,76 @@ static void trigger_queue(SnxCtrIpc* c) {
         return;
     }
     unsigned char queue[0x200];
-    uint32_t at = map->va + 0x800 + thread * 0x200;
+    uint32_t at = map->va + 0x800 + thread * 0x200, last_error = 0;
     if (snx_ctr_read_ram(p->space, at, queue, sizeof queue) != SNX_CTR_MEM_OK) {
         c->transport_result = 0xe0e01bf5u;
         return;
     }
+    memcpy(&last_error, queue + 4, 4);
+    GxInterrupts irq = {{0}, 0};
+    bool stopped = false;
     unsigned index = queue[0], pending = queue[1];
-    if (pending > 15) {
-        snx_ctr_ipc_error_reply(c, GSP_ERR_REGS_RANGE);
-        return;
-    }
-    while (pending && !queue[3]) {
-        if (queue[2] == 1) break;
+    while (pending) {
+        if (queue[3]) { /* should_stop */
+            queue[2] = GX_STATUS_STOPPED;
+            break;
+        }
+        if (queue[2] == GX_STATUS_STOPPED) break;
         const unsigned char* cmd = queue + 0x20 + (index % 15) * 0x20;
-        uint32_t id = cmd[0];
+        uint32_t id = cmd[0], args[7], error = 0;
+        memcpy(args, cmd + 4, sizeof args);
+        if (id == 1) { /* SubmitCmdList: the PICA command processor is the next part of the port */
+            c->state = SNX_CTR_IPC_UNSUPPORTED;
+            stopped = true;
+            break;
+        }
         index = (index + 1) % 15;
         --pending;
-        if (id == 0) { /* RequestDma: one checked RAM copy */
-            uint32_t args[3];
-            memcpy(args, cmd + 4, sizeof args);
-            uint64_t span = args[2];
-            if (span > 16u * 1024 * 1024 || !span) {
-                c->state = SNX_CTR_IPC_UNSUPPORTED;
-                return;
-            }
-            unsigned char* staged = malloc((size_t)span);
-            if (!staged) {
-                snx_ctr_ipc_error_reply(c, GSP_ERR_OOM);
-                return;
-            }
-            if (snx_ctr_check_ram(p->space, args[0], (size_t)span, SNX_CTR_READ) != SNX_CTR_MEM_OK ||
-                snx_ctr_check_ram(p->space, args[1], (size_t)span, SNX_CTR_WRITE) != SNX_CTR_MEM_OK ||
-                snx_ctr_read_ram(p->space, args[0], staged, (size_t)span) != SNX_CTR_MEM_OK ||
-                snx_ctr_write_ram(p->space, args[1], staged, (size_t)span) != SNX_CTR_MEM_OK) {
-                free(staged);
-                c->state = SNX_CTR_IPC_FAULT;
-                return;
-            }
-            free(staged);
-        } else if (id == 2) { /* MemoryFill: two checked fill regions */
-            uint32_t args[6];
-            memcpy(args, cmd + 4, sizeof args);
-            for (unsigned region = 0; region < 2; ++region) {
-                uint32_t start = args[region * 3], value = args[region * 3 + 1], end = args[region * 3 + 2];
-                if (!start && !end) continue;
-                end &= 0x7fffffffu; /* the width flag lives in the high bit */
-                uint64_t span = (uint64_t)end - start;
-                if (end <= start || (start & 3) || (end & 3) || span > 32u * 1024 * 1024 ||
-                    snx_ctr_check_ram(p->space, start, (size_t)span, SNX_CTR_WRITE) != SNX_CTR_MEM_OK) {
-                    c->state = SNX_CTR_IPC_FAULT;
-                    return;
-                }
-                for (uint32_t at4 = start; at4 < end; at4 += 4)
-                    if (snx_ctr_write_ram(p->space, at4, &value, 4) != SNX_CTR_MEM_OK) {
-                        c->state = SNX_CTR_IPC_FAULT;
-                        return;
-                    }
-            }
-        } else if (id == 5) {
-            /* CacheFlush: genuine no-op on coherent host memory. */
-        } else if (id == 1 || id == 3 || id == 4) {
-            /* SubmitCmdList (PICA), DisplayTransfer, TextureCopy: stop. */
-            c->state = SNX_CTR_IPC_UNSUPPORTED;
-            return;
-        } else {
-            c->state = SNX_CTR_IPC_UNSUPPORTED;
-            return;
+        GxStep step = GX_DONE;
+        SnxCtrGsp* g = &p->gsp;
+        switch (id) {
+            case 0: step = gx_dma(c, args, &irq); break;
+            case 2: step = gx_fill(c, args, &error, &irq); break;
+            case 3: /* DisplayTransfer: the addresses must be GPU visible at their first byte */
+                g->transfer.input = gx_physical(args[0], 1) & ~7u;
+                g->transfer.output = gx_physical(args[1], 1) & ~7u;
+                g->transfer.input_size = args[2];
+                g->transfer.output_size = args[3];
+                g->transfer.flags = args[4];
+                step = gx_transfer(c, &irq);
+                break;
+            case 4: /* TextureCopy: the addresses must hold the whole size */
+                g->transfer.input = gx_physical(args[0], args[2]) & ~7u;
+                g->transfer.output = gx_physical(args[1], args[2]) & ~7u;
+                g->transfer.copy_size = args[2];
+                g->transfer.copy_input = args[3];
+                g->transfer.copy_output = args[4];
+                g->transfer.flags = args[5];
+                step = gx_transfer(c, &irq);
+                break;
+            case 5: break; /* CacheFlush: host memory is coherent with the guest's view */
+            default: error = GX_ERR_UNKNOWN_COMMAND; break;
         }
-        if (cmd[2]) queue[2] = 1; /* stop flag on the processed command */
+        if (step == GX_STOP) {
+            stopped = true;
+            break;
+        }
+        if (error) {
+            last_error = error;
+            queue[2] = GX_STATUS_FAILED;
+        }
+        if (cmd[2]) queue[2] = GX_STATUS_STOPPED; /* the command's stop flag */
     }
     queue[0] = (unsigned char)index;
     queue[1] = (unsigned char)pending;
-    if (snx_ctr_write_ram(p->space, at, queue, 4) != SNX_CTR_MEM_OK) {
+    memcpy(queue + 4, &last_error, 4);
+    if (snx_ctr_write_ram(p->space, at, queue, 8) != SNX_CTR_MEM_OK) {
         c->state = SNX_CTR_IPC_FAULT;
         return;
     }
-    if (p->gsp.shared_object) {
-        if (pending == 0) {
-            queue_interrupt(p, thread, 0); /* PSC0/PSC1 and PPF completed */
-            queue_interrupt(p, thread, 1);
-            queue_interrupt(p, thread, 4);
-            signal_registered(p, thread);
-        }
-    }
-    c->out[0] = (c->in[0] & 0xffff0000u) | 0x40;
+    for (unsigned i = 0; i < irq.count; ++i) queue_interrupt(p, thread, irq.ids[i]);
+    if (irq.count) signal_registered(p, thread);
+    if (!stopped) c->out[0] = (c->in[0] & 0xffff0000u) | 0x40;
 }
 void snx_ctr_gsp_dispatch(SnxCtrIpc* c) {
     switch (c->in[0] >> 16) {

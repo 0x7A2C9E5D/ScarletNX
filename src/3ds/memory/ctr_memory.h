@@ -54,4 +54,10 @@ SnxCtrMemResult snx_ctr_fetch(SnxCtrAddressSpace* space, uint32_t va, void* outp
 SnxCtrMemResult snx_ctr_check_ram(SnxCtrAddressSpace* space, uint32_t va, size_t size, unsigned permissions);
 SnxCtrMemResult snx_ctr_read_ram(SnxCtrAddressSpace* space, uint32_t va, void* output, size_t size);
 SnxCtrMemResult snx_ctr_write_ram(SnxCtrAddressSpace* space, uint32_t va, const void* input, size_t size);
+/* Bus-master (GPU, DMA) access by physical address: the whole nonempty range inside one RAM, VRAM or DSP RAM
+   region of the board. No address space or page permission applies, as the CPU's mappings do not govern the other
+   masters (an application maps VRAM read-only and the GPU still renders into it). Writes advance the reservation
+   epoch like CPU stores. MMIO is refused (SNX_CTR_MEM_DEVICE). */
+SnxCtrMemResult snx_ctr_phys_read(SnxCtrMemory* memory, uint32_t pa, void* output, size_t size);
+SnxCtrMemResult snx_ctr_phys_write(SnxCtrMemory* memory, uint32_t pa, const void* input, size_t size);
 #endif

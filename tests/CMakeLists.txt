@@ -170,6 +170,11 @@ if(TARGET snx_ctr_board)
             target_compile_options(snx-test-3ds-gsp PRIVATE -UNDEBUG)
             target_link_libraries(snx-test-3ds-gsp PRIVATE snx_ctr_process)
             add_test(NAME 3ds_gsp_gpu COMMAND snx-test-3ds-gsp "${CMAKE_CURRENT_BINARY_DIR}/gsp-frames")
+            # the transfer engine alone: fills, display transfers, texture copies against hand-written goldens
+            add_executable(snx-test-3ds-transfer 3ds_transfer.c)
+            snx_test_target(snx-test-3ds-transfer 11)
+            target_link_libraries(snx-test-3ds-transfer PRIVATE snx_ctr_gpu)
+            add_test(NAME 3ds_transfer COMMAND snx-test-3ds-transfer)
     # No Vulkan loader/ICD: presentation cannot run here; the probe skips, never fakes a frame.
     set_tests_properties(3ds_gsp_gpu PROPERTIES SKIP_RETURN_CODE 77)
             add_test(NAME ctr_swipc_validation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ctr_swipc.py"

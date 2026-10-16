@@ -213,3 +213,22 @@ SnxCtrMemResult snx_ctr_read_ram(SnxCtrAddressSpace* s, uint32_t va, void* outpu
 SnxCtrMemResult snx_ctr_write_ram(SnxCtrAddressSpace* s, uint32_t va, const void* input, size_t size) {
     return transfer(s, va, (void*)input, size, SNX_CTR_WRITE, true);
 }
+static SnxCtrMemResult device(SnxCtrMemory* m, uint32_t pa, void* buffer, size_t size, bool write) {
+    if (!m || !buffer || !size || size > UINT32_MAX) return SNX_CTR_MEM_INVALID;
+    const SnxCtrRegion* r = snx_ctr_physical_region(m->profile, pa, (uint32_t)size);
+    if (!r) return SNX_CTR_MEM_INVALID;
+    if (r->kind == SNX_CTR_MMIO) return SNX_CTR_MEM_DEVICE;
+    unsigned char* host = m->backing[r - m->profile->regions] + (pa - r->base);
+    if (write) {
+        memcpy(host, buffer, size);
+        changed(m);
+    } else
+        memcpy(buffer, host, size);
+    return SNX_CTR_MEM_OK;
+}
+SnxCtrMemResult snx_ctr_phys_read(SnxCtrMemory* m, uint32_t pa, void* output, size_t size) {
+    return device(m, pa, output, size, false);
+}
+SnxCtrMemResult snx_ctr_phys_write(SnxCtrMemory* m, uint32_t pa, const void* input, size_t size) {
+    return device(m, pa, (void*)input, size, true);
+}

@@ -93,6 +93,12 @@ typedef struct {
     uint32_t fb_screen[2][7];
     uint64_t next_vblank_ns; /* host monotonic deadline, 60 Hz */
     uint32_t* regs;          /* bounded GX/LCD register file, CTR_GSP_REGS words */
+    /* the transfer engine's registers (DisplayTransferConfig), physical addresses: a GX command writes some of them
+       and triggers it, the rest keep their last values, as on hardware (gpu/transfer.h) */
+    struct {
+        uint32_t input, output, output_size, input_size, flags;
+        uint32_t copy_size, copy_input, copy_output;
+    } transfer;
 } SnxCtrGsp;
 struct SnxCtrProcess {
     SnxCtrRomfs* romfs; /* runtime-owned immutable host filesystem view */
