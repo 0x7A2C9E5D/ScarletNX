@@ -4,14 +4,16 @@
 """Publish a Build run's packages as releases, and say so on Discord.
 
     scripts/publish-builds.py plan --repo OWNER/REPO --to OWNER/NIGHTLY
-    scripts/publish-builds.py publish --repo OWNER/REPO --to OWNER/NIGHTLY --kind nightly|pr --run ID --sha SHA
-        [--pr N] --artifacts DIR [--checkout DIR] [--keep N]
+    scripts/publish-builds.py publish --repo OWNER/REPO --to OWNER/NIGHTLY --kind nightly|pr|release --run ID
+        --sha SHA [--pr N] [--tag TAG] --artifacts DIR [--checkout DIR] [--keep N]
 
 plan follows the event GitHub Actions ran it for (GITHUB_EVENT_NAME, GITHUB_EVENT_PATH), and writes to GITHUB_OUTPUT
-the run whose artifacts publish takes (kind, run, sha, short, pr), when there is one to publish:
-- a Build run that ended (workflow_run): a push to main that built everywhere becomes NIGHTLY's release
-  nightly-<date>-<commit>, the latest there, only the newest N nightlies staying, and REPO's prerelease "nightly" a link
-  to it; a pull request's run becomes NIGHTLY's prerelease pr-<number>, its files and notes replaced at each push;
+the run whose artifacts publish takes (kind, run, sha, short, pr, tag), when there is one to publish:
+- a Build run that ended (workflow_run): a push of a version tag (v...) that built everywhere becomes REPO's release of
+  that tag, the latest (a prerelease for a tag with a '-', v1.0.0-rc1); a push to main that built everywhere becomes
+  NIGHTLY's release nightly-<date>-<commit>, the latest there, only the newest N nightlies staying, and REPO's
+  prerelease "nightly" a link to it; a pull request's run becomes NIGHTLY's prerelease pr-<number>, its files and notes
+  replaced at each push;
 - a pull request closed (pull_request_target): its prerelease and tag are deleted;
 - a fork's pull request is published only once someone of the team (write, maintain or admin) labels it LABEL after
   its last push, which a new push takes off (synchronize). The label put on a finished run publishes it at once.
@@ -19,11 +21,11 @@ Nothing is built: the files come from the run's artifacts, which the workflow do
 folder each, as actions/download-artifact puts them), and no code of the pull request runs. Each file is named
 ScarletNX-<system>-<arch> (scripts/nightly-notes.py), an AppImage with the .zsync AppImageUpdate reads beside it.
 
-Discord: each nightly gets a message on DISCORD_WEBHOOK_NIGHTLY's channel, each pull request one message on
-DISCORD_WEBHOOK_PRS's, edited at each push and when it closes (its id is kept in the prerelease's notes). Without a
-webhook nothing is posted, and the run says so. gh reads and writes REPO with GH_TOKEN, and NIGHTLY with NIGHTLY_TOKEN.
---dry-run reads and prints each write instead. .github/workflows/publish.yml runs this; tests/publish_builds_test.py
-runs it against a fake gh and a fake Discord.
+Discord: each release and each nightly gets a message on DISCORD_WEBHOOK_RELEASES's and DISCORD_WEBHOOK_NIGHTLY's
+channels, each pull request one message on DISCORD_WEBHOOK_PRS's, edited at each push and when it closes (its id is
+kept in the prerelease's notes). Without a webhook nothing is posted, and the run says so. gh reads and writes REPO
+with GH_TOKEN, and NIGHTLY with NIGHTLY_TOKEN. --dry-run reads and prints each write instead.
+.github/workflows/publish.yml runs this; tests/publish_builds_test.py runs it against a fake gh and a fake Discord.
 """
 
 import argparse
@@ -49,6 +51,7 @@ SERVER = nightly_notes.SERVER
 LABEL = 'publish builds'
 TEAM = {'admin', 'maintain', 'write'}
 DISCORD = re.compile(r'<!-- discord-message: (\d+) -->')
+VERSION = re.compile(r'v\d[0-9A-Za-z.+-]*')
 ROLLING = 'nightly'
 # A run's artifacts, by the commit's first 7 digits: the release file each gives, ScarletNX-<system>-<arch>
 ARTIFACTS = {
@@ -117,7 +120,7 @@ class Publisher:
     def release(self, repo, tag):
         return next((r for r in self.releases(repo) if r['tag_name'] == tag), None)
 
-    def put_release(self, repo, tag, name, body, prerelease, files):
+    def put_release(self, repo, tag, name, body, prerelease, files, target=None):
         """the release of tag with these notes and exactly these files (each name to its path), made or replaced; it
         and whether it is new"""
         existing = self.release(repo, tag)
@@ -125,7 +128,7 @@ class Publisher:
         if existing:
             made = self.write(repo, 'PATCH', f'repos/{repo}/releases/{existing["id"]}', fields) or existing
         else:
-            fields = dict(fields, tag_name=tag)
+            fields = dict(fields, tag_name=tag, **({'target_commitish': target} if target else {}))
             made = self.write(repo, 'POST', f'repos/{repo}/releases', fields)
         if files:
             self.gh(
@@ -183,7 +186,7 @@ class Publisher:
 
     # ---- Discord
     def discord(self, kind, embed, message=None):
-        """the message of kind (nightly or prs) posted, or edited when message names it: its id, or None"""
+        """the message of kind (releases, nightly or prs) posted, or edited when message names it: its id, or None"""
         hook = os.environ.get(f'DISCORD_WEBHOOK_{kind.upper()}', '')
         if not hook:
             print(f'::notice::No DISCORD_WEBHOOK_{kind.upper()}: nothing posted on Discord')
@@ -288,6 +291,30 @@ class Publisher:
                 self.write(self.repo, 'DELETE', f'repos/{self.repo}/releases/assets/{asset["id"]}')
         print(f'{self.repo} "{ROLLING}" links {title}')
 
+    def version(self, run, sha, tag):
+        files, uploads = self.complete(run, sha)
+        earlier = sorted(
+            (
+                r
+                for r in self.releases(self.repo)
+                if VERSION.fullmatch(r['tag_name']) and r['tag_name'] != tag and not r.get('draft')
+            ),
+            key=lambda r: r['created_at'],
+            reverse=True,
+        )
+        since = earlier[0]['tag_name'] if earlier else ''
+        previous = nightly_notes.git(self.checkout, 'rev-list', '-n', '1', since).strip() if since else ''
+        download = f'{SERVER}/{self.repo}/releases/download/{tag}'
+        body = nightly_notes.notes(self.checkout, sha, previous, self.repo, list(files), download, '', since)
+        title = f'ScarletNX {tag}'
+        made, new = self.put_release(self.repo, tag, title, body, '-' in tag, uploads, sha)
+        print(f'{"published" if new else "replaced the files of"} {self.repo} {tag}')
+        if new:
+            url = made.get('html_url', f'{SERVER}/{self.repo}/releases/tag/{tag}')
+            self.discord(
+                'releases', {'title': title, 'url': url, 'description': self.changes(previous, sha), 'color': SCARLET}
+            )
+
     def pull_notes(self, pr, sha, files, missing, message):
         url = f'{SERVER}/{self.repo}'
         commit = f'{url}/pull/{pr["number"]}/commits/{sha}'
@@ -382,7 +409,7 @@ class Publisher:
         pulls = self.pages(f'repos/{self.repo}/pulls?state=open', self.repo)
         return next((pr for pr in pulls if pr['head']['sha'] == sha), None)
 
-    def take(self, kind, run, pr=None):
+    def take(self, kind, run, pr=None, tag=''):
         """the run publish takes the artifacts of, for the workflow to download them"""
         self.output = {
             'kind': kind,
@@ -390,17 +417,30 @@ class Publisher:
             'sha': run['head_sha'],
             'short': run['head_sha'][:7],
             'pr': str(pr['number']) if pr else '',
+            'tag': tag,
         }
         print(f'to publish: the {kind} builds of run {run["id"]} ({run["head_sha"][:7]})')
 
+    def tagged(self, name):
+        """name is a tag of REPO (a run's head_branch is the tag a tag push pushed)"""
+        try:
+            return bool(self.read(f'repos/{self.repo}/git/ref/tags/{urllib.parse.quote(name)}'))
+        except RuntimeError:
+            return False
+
     def on_run(self, run):
         if run['event'] == 'push':
-            if run['head_branch'] != 'main' or run['head_repository']['full_name'] != self.repo:
-                print(f'a push to {run["head_branch"]}: no nightly')
+            name = run['head_branch']
+            if run['head_repository']['full_name'] != self.repo:
+                print(f'a push to {run["head_repository"]["full_name"]}: nothing to publish')
+            elif name != 'main' and not (VERSION.fullmatch(name) and self.tagged(name)):
+                print(f'a push to {name}: neither main nor a version tag, nothing to publish')
             elif run['conclusion'] != 'success':
-                print(f'run {run["id"]} ended {run["conclusion"]}: no nightly')
-            else:
+                print(f'run {run["id"]} of {name} ended {run["conclusion"]}: nothing published')
+            elif name == 'main':
                 self.take('nightly', run)
+            else:
+                self.take('release', run, tag=name)
             return
         if run['event'] != 'pull_request':
             print(f'a run of {run["event"]}: nothing to publish')
@@ -443,12 +483,13 @@ def main():
     parser.add_argument('step', choices=['plan', 'publish'])
     parser.add_argument('--repo', required=True)
     parser.add_argument('--to', required=True, help='the nightly repository')
-    parser.add_argument('--kind', choices=['nightly', 'pr'])
+    parser.add_argument('--kind', choices=['nightly', 'pr', 'release'])
     parser.add_argument('--run', help='the Build run the artifacts are of')
     parser.add_argument('--sha', help='the commit it built')
     parser.add_argument('--pr', type=int, help="the pull request's number")
+    parser.add_argument('--tag', help="the release's version tag")
     parser.add_argument('--artifacts', help='the folder the workflow downloaded the artifacts into')
-    parser.add_argument('--checkout', default='.', help="REPO's history, for the nightly's notes")
+    parser.add_argument('--checkout', default='.', help="REPO's history and tags, for the notes")
     parser.add_argument('--keep', type=int, default=30, help='the nightlies kept')
     parser.add_argument('--dry-run', action='store_true', help='read, and print each write instead')
     args = parser.parse_args()
@@ -458,11 +499,15 @@ def main():
         parser.error('publish takes --kind, --run, --sha and --artifacts')
     if args.kind == 'pr' and not args.pr:
         parser.error('--kind pr takes --pr')
+    if args.kind == 'release' and not (args.tag and VERSION.fullmatch(args.tag)):
+        parser.error('--kind release takes a version --tag (v...)')
     publisher = Publisher(args)
     try:
         if args.step == 'publish':
             if args.kind == 'nightly':
                 publisher.nightly(args.run, args.sha)
+            elif args.kind == 'release':
+                publisher.version(args.run, args.sha, args.tag)
             else:
                 publisher.pull(publisher.read(f'repos/{args.repo}/pulls/{args.pr}'), args.sha)
             return

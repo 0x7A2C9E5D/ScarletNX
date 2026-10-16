@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 """scripts/publish-builds.py against a fake gh (a small GitHub kept in a JSON file) and a fake Discord (a local HTTP
-server): the nightly made in the nightly repository, kept to the newest N, never one older than the latest, and linked
-from the repository's rolling prerelease; a pull request's prerelease
+server): a version tag's release in the repository; the nightly made in the nightly repository, kept to the newest N,
+never one older than the latest, and linked from the repository's rolling prerelease; a pull request's prerelease
 replaced at each push and gone when it closes, its one Discord message edited; a fork's only once the team labels it
 after its last push; and the writes to the nightly repository made with its own token. Offline."""
 
@@ -188,7 +188,7 @@ with tempfile.TemporaryDirectory() as temporary:
         env = dict(os.environ, GIT_COMMITTER_DATE='2026-10-15T12:00:00Z', GIT_AUTHOR_DATE='2026-10-15T12:00:00Z')
         return subprocess.run(
             ['git', '-C', str(checkout), '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false']
-            + ['-c', 'core.hooksPath=' + os.devnull, *args],
+            + ['-c', 'core.hooksPath=' + os.devnull, '-c', 'tag.gpgsign=false', *args],
             check=True,
             capture_output=True,
             text=True,
@@ -201,11 +201,13 @@ with tempfile.TemporaryDirectory() as temporary:
     oldest = git('rev-parse', 'HEAD')
     git('commit', '-q', '--allow-empty', '-m', 'the previous nightly')
     previous = git('rev-parse', 'HEAD')
+    git('tag', 'v0.1.0')
     git('switch', '-q', '-c', 'feature')
     git('commit', '-q', '--allow-empty', '-m', '[cpu] a commit of the pull request')
     git('switch', '-q', 'main')
     git('merge', '-q', '--no-ff', 'feature', '-m', 'Merge pull request #5 from someone/feature\n\n[ci] its title')
     sha = git('rev-parse', 'HEAD')
+    git('tag', 'v0.2.0')
 
     def save_state(state):
         state_file.write_text(json.dumps(state))
@@ -264,10 +266,11 @@ with tempfile.TemporaryDirectory() as temporary:
             GITHUB_EVENT_PATH=str(event_file),
             GITHUB_OUTPUT=str(output),
         )
-        for kind in ('NIGHTLY', 'PRS'):
+        for kind in ('RELEASES', 'NIGHTLY', 'PRS'):
             env.pop(f'DISCORD_WEBHOOK_{kind}', None)
         if hooks:
             env.update(
+                DISCORD_WEBHOOK_RELEASES=f'{HOOK}-releases',
                 DISCORD_WEBHOOK_NIGHTLY=f'{HOOK}-nightly',
                 DISCORD_WEBHOOK_PRS=f'{HOOK}-prs?thread_id=55',
             )
@@ -332,7 +335,7 @@ with tempfile.TemporaryDirectory() as temporary:
             'runs': [],
             'tags': {
                 TO: {f'nightly-2026-10-15-{c[:7]}': 'x' for c in (oldest, previous)},
-                REPO: {'nightly': oldest},
+                REPO: {'nightly': oldest, 'v0.1.0': previous, 'v0.2.0': sha},
             },
             'releases': {
                 TO: [nightly_release(oldest, '2026-10-01', 1), nightly_release(previous, '2026-10-02', 2)],
@@ -343,12 +346,13 @@ with tempfile.TemporaryDirectory() as temporary:
     done, planned = run('plan', event=push_run(sha, number=41))
     check(
         'a green push to main is planned as a nightly',
-        planned == {'kind': 'nightly', 'run': '41', 'sha': sha, 'short': sha[:7], 'pr': ''},
+        planned == {'kind': 'nightly', 'run': '41', 'sha': sha, 'short': sha[:7], 'pr': '', 'tag': ''},
         planned,
     )
     for event, why in (
         (push_run(sha, 'failure'), 'a failed run'),
         (push_run(sha, branch='dev'), 'another branch'),
+        (push_run(sha, branch='v9.9.9'), 'a branch named like a version, no tag'),
     ):
         done, planned = run('plan', event=event)
         check(f'{why} is not planned', not planned and done.returncode == 0, done.stdout + done.stderr)
@@ -460,6 +464,60 @@ with tempfile.TemporaryDirectory() as temporary:
         done.returncode == 0 and linked and linked['target_commitish'] == sha and linked['prerelease'],
         done.stdout + done.stderr,
     )
+
+    # ---- a version tag: the repository's release
+    first = {
+        'id': 50,
+        'tag_name': 'v0.1.0',
+        'name': 'ScarletNX v0.1.0',
+        'created_at': '2026-10-01',
+        'body': '',
+        'prerelease': False,
+        'assets': [],
+    }
+    save_state(with_releases(REPO, [*releases(REPO), first]))
+    done, planned = run('plan', event=push_run(sha, branch='v0.2.0', number=43))
+    check(
+        'a version tag pushed is planned as a release',
+        planned.get('kind') == 'release' and planned.get('tag') == 'v0.2.0',
+        done.stdout + done.stderr,
+    )
+    done = publish('release', '--tag', 'v0.2.0', *everything(sha), '--checkout', str(checkout))
+    version = find('v0.2.0', REPO)
+    check(
+        "the repository's release: the latest, on the commit, its files and their .zsync",
+        done.returncode == 0
+        and version
+        and version['make_latest'] == 'true'
+        and not version['prerelease']
+        and version['target_commitish'] == sha
+        and sorted(a['name'] for a in version['assets']) == sorted(FILES + ZSYNC),
+        done.stdout + done.stderr,
+    )
+    check(
+        'its notes: the changes since the previous version, its files',
+        version
+        and '### Changes since v0.1.0' in version['body']
+        and '- [ci] its title (#5)' in version['body']
+        and f'https://github.com/{REPO}/releases/download/v0.2.0/ScarletNX-windows-x86_64.zip' in version['body'],
+        version and version['body'],
+    )
+    sent = posted('releases')
+    check(
+        'one message on the releases channel',
+        len(sent) == 1 and sent[0]['body']['embeds'][0]['title'] == 'ScarletNX v0.2.0',
+        sent,
+    )
+    git('tag', 'v0.3.0-rc1')
+    done = publish('release', '--tag', 'v0.3.0-rc1', *everything(sha), '--checkout', str(checkout))
+    candidate = find('v0.3.0-rc1', REPO)
+    check(
+        'a tag with a "-" is a prerelease, never the latest',
+        candidate and candidate['prerelease'] and candidate['make_latest'] == 'false',
+        done.stdout + done.stderr,
+    )
+    done = publish('release', '--tag', 'main', *everything(sha))
+    check('--kind release refuses a tag that is no version', done.returncode == 2, done.stderr)
 
     # ---- a pull request of the repository
     def pull(number, head, fork=False, labels=()):

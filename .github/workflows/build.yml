@@ -5,6 +5,7 @@ name: Build
 on:
   push:
     branches: [main]
+    tags: ['v*'] # a version's release (publish.yml)
   pull_request:
   workflow_dispatch:
 

@@ -84,11 +84,11 @@ def source(tree):
     ]
 
 
-def notes(checkout, sha, previous, repo, files, download, kept):
-    """download: where the release's files are; kept: what becomes of the release"""
+def notes(checkout, sha, previous, repo, files, download, kept, since='the previous nightly'):
+    """download: where the release's files are; kept: what becomes of the release; since: what previous was"""
     url = f'{SERVER}/{repo}'
     date = git(checkout, 'log', '-1', '--format=%cs', sha).strip()
-    lines = [f'Built from [`{sha[:7]}`]({url}/commit/{sha}), committed {date}. {kept}', '']
+    lines = [f'Built from [`{sha[:7]}`]({url}/commit/{sha}), committed {date}.' + (f' {kept}' if kept else ''), '']
     lines += table(files, download)
     lines += [
         '',
@@ -99,7 +99,7 @@ def notes(checkout, sha, previous, repo, files, download, kept):
     if items is not None:
         lines += [
             '',
-            f'### Changes since the previous nightly ([`{previous[:7]}`]({url}/compare/{previous}...{sha}))',
+            f'### Changes since {since} ([`{previous[:7]}`]({url}/compare/{previous}...{sha}))',
             '',
         ]
         lines += [f'- {item}' for item in items[:MOST_CHANGES]] or ['None: the same commit, built again.']
