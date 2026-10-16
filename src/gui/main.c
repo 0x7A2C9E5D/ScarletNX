@@ -739,7 +739,7 @@ static void ask_box(const App* app, int* col, int* row, int* cols) {
     *row = SDL_max(0, (app->rows - 6) / 2);
 }
 #define SAY_LEFT_BY    " was left by an older version: this one keeps it in "
-#define SAY_LEFT_TITLE "An older version left these files: move each from - to +"
+#define SAY_LEFT_TITLE "An older version left these files: move each from - to ->"
 /* s at column x of row y, wrapped to width columns: first before its first row, as many spaces before the others. A
    NULL color only counts them. The rows it takes */
 static int wrapped(App* app, int x, int y, const char* first, const char* s, int width, const SDL_Color* color) {
@@ -763,11 +763,12 @@ static void left_paths(const char* line, char* old, char* now, size_t size) {
     by += strlen(SAY_LEFT_BY);
     snprintf(now, size, "%.*s", (int)strcspn(by, "\n"), by);
 }
-/* the box with what older builds left, as a diff: each file where it is (-) and where this one keeps it (+), whole
-   over as many rows as it needs, as many files as fit, and OK. Nothing is moved: the player does that */
+/* the box with what older builds left: each file where it is (-) and where this one would keep it (->, a proposal, so
+   not in a diff's added colour), whole over as many rows as it needs, as many files as fit, and OK. Nothing is moved:
+   the player does that */
 static void render_left(App* app) {
     const GuiTheme* t = &app->theme;
-    SDL_Color warning = rgb(t->warning), failure = rgb(t->failure), added = rgb(t->added), soft = rgb(t->soft);
+    SDL_Color warning = rgb(t->warning), failure = rgb(t->failure), ink = rgb(t->ink), soft = rgb(t->soft);
     int width = SDL_max(8, app->cols - 7), title, room, used = 0, shown, rows, row, y;
     float cw = 8.0f * (float)app->scale, ch = 16.0f * (float)app->scale, line = (float)app->scale;
     const char* at;
@@ -779,7 +780,7 @@ static void render_left(App* app) {
     for (shown = 0, at = app->left; shown < app->lefts; ++shown, at = strchr(at, '\n') + 1) {
         int need;
         left_paths(at, old, now, sizeof old);
-        need = wrapped(app, 0, 0, "- ", old, width, NULL) + wrapped(app, 0, 0, "+ ", now, width, NULL);
+        need = wrapped(app, 0, 0, "- ", old, width, NULL) + wrapped(app, 0, 0, "-> ", now, width, NULL);
         if (shown && used + need > room) break;
         used += need;
     }
@@ -793,7 +794,7 @@ static void render_left(App* app) {
     for (int i = 0; i < shown; ++i, at = strchr(at, '\n') + 1) {
         left_paths(at, old, now, sizeof old);
         y += wrapped(app, 4, y, "- ", old, width, &failure);
-        y += wrapped(app, 4, y, "+ ", now, width, &added);
+        y += wrapped(app, 4, y, "-> ", now, width, &ink);
     }
     if (shown < app->lefts) {
         snprintf(label, sizeof label, "and %d more, which Share log lists", app->lefts - shown);

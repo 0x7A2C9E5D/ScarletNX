@@ -44,7 +44,7 @@ const GuiThemeKey gui_theme_keys[] = {
     COLOUR("colors", "failure", failure, "warnings, the ESC line, a failed run"),
     COLOUR("colors", "dim", dim, "unused by the menus; [run] dim is the loading screen's"),
     COLOUR("colors", "warning", warning, "the abort question in the console layout"),
-    COLOUR("colors", "added", added, "where this version reads a file an older one left (failure: where it is)"),
+    COLOUR("colors", "added", added, "a diff's added lines, as failure its removed ones; no screen uses it yet"),
     WORD("head", "style", head, styles, "bar: the title on a band of ink; none: no title and no hints"),
     FLAG("head", "rule", head_rule, "a line under the head"),
     TEXT("head", "menu", title[GUI_SCREEN_MENU], "the menu's title"),

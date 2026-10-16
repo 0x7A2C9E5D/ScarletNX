@@ -87,8 +87,8 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
 - **Exit** closes the launcher. Closing its window during a run terminates the
   entire owned process tree, so let the game exit normally to preserve its saves.
 - On Linux, as it opens, the menu shows in a box what an older version left where this one no
-  longer looks, as a diff: each file where it is (`- `, in the failure colour) and where to move
-  it (`+ `, in `added`), a path too long for a row going on in the next. They are the menu's
+  longer looks: each file where it is (`- `, in the failure colour) and where to move it (`-> `),
+  a path too long for a row going on in the next. They are the menu's
   `recent.txt` and `last-run.log`, `work/`, and each game's settings, log, `threads.txt` and
   pipeline cache. Any key, click or tap closes it;
   nothing is moved, and it shows again at the next start for as long as they are there.
@@ -215,7 +215,7 @@ focus = #D8D4C4
 active = #C8A040
 failure = #D05040
 dim = #3E3E40
-; where this version reads a file an older one left (failure: where it is)
+; a diff's added lines, as failure its removed ones; no screen uses it yet
 added = #6A9A50
 [head]
 ; plain | bar | none; rule: a line under the head

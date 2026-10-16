@@ -1733,34 +1733,45 @@ int main(int argc, char** argv) {
                 free(now_path);
                 free(old_path);
             }
-            /* in a box over the menu as it opens, as a diff: each where it is (-) and where it goes (+), a path too long
-               for a row going on in the next, as many as fit */
+            /* in a box over the menu as it opens: each where it is (-) and where it would go (->, in ink: a proposal,
+               not a diff's added green), a path too long for a row going on in the next, as many as fit */
             {
                 int width = app.cols - 7, rows = 6, row, y, wraps = 0, selected = app.menu.selected;
-                SDL_Color page = rgb(app.theme.page), added = rgb(app.theme.added), green = {0x55, 0xFF, 0x55, 255};
+                SDL_Color page = rgb(app.theme.page), ink = rgb(app.theme.ink), added = rgb(app.theme.added);
                 static char paths[2][4200]; /* where each file is, and where it goes */
+                int window_w, window_h, text_size = app.menu.text_size;
                 app.left_shown = true;
                 app.clock = 1;
+                /* tall enough for all six, whatever the temporary folder's path, at the letters' size of now */
+                assert(SDL_GetWindowSize(app.window, &window_w, &window_h));
+                app.menu.text_size = app.scale;
+                assert(SDL_SetWindowSize(app.window, window_w, 30 * 16 * app.scale));
+                SDL_SyncWindow(app.window);
                 render(&app);
-                assert(app.rows >= 20 && width >= 57 && same_colour(added, green));
+                width = app.cols - 7;
+                assert(app.rows >= 28 && width >= 57 && !same_colour(added, ink));
                 for (at = app.left; *at; at = strchr(at, '\n') + 1) {
                     left_paths(at, paths[0], paths[1], sizeof paths[0]);
                     for (i = 0; i < 2; ++i) { /* each path's rows: the whole of it, in pieces */
-                        rows += path_rows(paths[i], width - 2);
-                        wraps += path_rows(paths[i], width - 2) > 1;
+                        rows += path_rows(paths[i], width - (i ? 3 : 2));
+                        wraps += path_rows(paths[i], width - (i ? 3 : 2)) > 1;
                     }
                 }
                 assert(wraps >= 4 && rows <= app.rows - 2); /* the long game's paths wrap, and all six files fit */
                 row = (app.rows - rows) / 2;
-                colored_text_on(&app, 4, row + 1, "An older version left these files: move each from - to +",
+                colored_text_on(&app, 4, row + 1, "An older version left these files: move each from - to ->",
                                 rgb(app.theme.warning), page);
                 for (y = row + 3, at = app.left; *at; at = strchr(at, '\n') + 1) {
                     left_paths(at, paths[0], paths[1], sizeof paths[0]);
                     for (i = 0; i < 2; ++i)
                         for (const char* rest = paths[i]; *rest; ++y) { /* the whole path, a piece a row */
-                            size_t n = gui_wrap(rest, width - 2);
-                            line = snx_format("%s%.*s", rest == paths[i] ? (i ? "+ " : "- ") : "  ", (int)n, rest);
-                            colored_text_on(&app, 4, y, line, i ? added : rgb(app.theme.failure), page);
+                            size_t n = gui_wrap(rest, width - (i ? 3 : 2));
+                            line = snx_format("%s%.*s",
+                                              rest == paths[i] ? (i ? "-> " : "- ")
+                                              : i              ? "   "
+                                                               : "  ",
+                                              (int)n, rest);
+                            colored_text_on(&app, 4, y, line, i ? ink : rgb(app.theme.failure), page);
                             free(line);
                             rest += n;
                         }
@@ -1774,7 +1785,7 @@ int main(int argc, char** argv) {
                     for (at = app.left; *at; at = strchr(at, '\n') + 1, ++shown) {
                         int need;
                         left_paths(at, paths[0], paths[1], sizeof paths[0]);
-                        need = path_rows(paths[0], width - 2) + path_rows(paths[1], width - 2);
+                        need = path_rows(paths[0], width - 2) + path_rows(paths[1], width - 3);
                         if (shown && used + need > app.rows - 2 - 6) break;
                         used += need;
                     }
@@ -1785,6 +1796,9 @@ int main(int argc, char** argv) {
                     colored_text_on(&app, 4, row + 3 + used, line, rgb(app.theme.soft), page);
                     free(line);
                     colored_text_on(&app, 4, row + 4 + used, "- OK, nothing is moved", rgb(app.theme.focus), page);
+                    app.menu.text_size = text_size;
+                    assert(SDL_SetWindowSize(app.window, window_w, window_h));
+                    SDL_SyncWindow(app.window);
                     layout(&app);
                 }
                 app.clock = 0;
