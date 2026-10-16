@@ -9,11 +9,10 @@ recompiles on the phone, then the game opens.
   drive it (see [GUI](GUI.md)). Its working folder is `/sdcard/ScarletNX`, which the user sees: `games/`, `work/`
   and the logs go there. `HOME` stays the app's own files (`/data/data/org.scarletnx/files`), for
   `.switch/prod.keys`.
-- **Loading** (a *Load* item, *Setup device keys*) opens the system's file picker. A file is read by its path,
+- **Loading** (a *Load* item, *Setup device keys*) opens the system's file picker. A game's file is read by its path,
   so the app asks for access to the files when it starts (all files from Android 11): the picker's path, or for a
-  document without one (Downloads' own list, Recent) the file its descriptor opens. A cloud's document has none
-  and is refused, its URI in the message. *Games* lists the games there and the dumps put there, to be
-  prepared.
+  document without one the file its descriptor opens. A cloud's document has none and is refused, its URI in the
+  message. *Games* lists the games there and the dumps put there, to be prepared.
 - **The driver** runs as a child of the menu, as on a desktop, from `libscarletnx-run.so`: an executable named so
   that Android installs it with the libraries, the only files of its own an app may execute. It loads the runtime,
   `libscarletnx.so`, beside it. It cannot open a window there, so it ends at `Ready <game>` and the menu opens it.
@@ -41,17 +40,14 @@ works beside them; the menu's *On-screen controls* item hides them.
 ## Keys
 
 *Setup device keys* copies `prod.keys` into the app's own files, as `.switch/prod.keys` in its `HOME`, and its screen
-names that path. The picked file must be named `prod.keys` exactly: a copy saved as `prod (1).keys` is
-refused. The menu installs no `title.keys`. It is optional, as an NSP's tickets give the title keys too.
-
-The menu reads the picked file by its path, so ScarletNX needs access to the device's files: *All files access* from
-Android 11, the storage permission before it. The app asks when it starts. If it was refused, turn it on in Android's
-settings for ScarletNX, then pick the file again from the device's storage (its own, or a memory card). A file the
-app cannot read by its path (a cloud's, or one from Downloads' own list without that access) is refused with its URI.
+names that path. Pick it from the device's storage: it is read through the picker, so it needs no access to the
+device's files. The picker gives no name to go by, so the file has to read as a prod.keys (`name = hex` lines),
+whatever it is called; any other is refused. The menu installs no `title.keys`. It is optional, as an NSP's tickets
+give the title keys too.
 
 The keys may also be copied by hand to `/sdcard/ScarletNX/`: `prod.keys`, and `title.keys` if you have one. That is
-the data folder once the app has the access, and the driver reads both there before the app's own files. The *Setup
-device keys* screen shows only the keys it installed, so it does not name these.
+the data folder once the app has *All files access* (it asks when it starts), and the driver reads both there before
+the app's own files. The *Setup device keys* screen shows only the keys it installed, so it does not name these.
 
 ## Building
 
