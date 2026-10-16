@@ -827,8 +827,8 @@ static void reset(void) {
     layout();
 }
 
-/* #222: input sections can hold more entries than the renderer opened. The
-   reply still has the opened counts, including at the revision-9 effect stride. */
+/* the reply has the counts the renderer opened with, as Eden sizes it, at the revision-9 effect stride too. An input
+   section with more entries is read up to those counts (#222's were revision 15's longer voices: update_voice_v2) */
 static void update_output_counts(void) {
     enum { voices = 128, effects = 68, sinks = 2, pools = effects + voices * 4 };
     const u32 counts[][4] = {{pools, voices, effects, sinks},
@@ -903,12 +903,87 @@ static void update_output_counts(void) {
     }
 }
 
+/* #222: from revision 15 a voice's input is 0x188 bytes (Eden's VoiceInParameterV2), its biquads in floats, 0x18
+   each, and what follows them 0x18 further on. Read at 0x170 a voice, Metroid Prime 4's 128 voices made 136, a
+   reply 128 bytes over its 21,456, and every voice's fields after the first biquad came from the wrong bytes */
+static void update_voice_v2(void) {
+    enum { voices = 128, effects = 68, sinks = 2, pools = effects + voices * 4, stride = 0x188 };
+    const u32 rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + 15) << 24), reply = 21456;
+    u32 params[13] = {48000, 240, 216, 0, voices, sinks, effects};
+    u32 h[16] = {rev, 0x10, pools * 0x20, voices * stride, voices * 0x70, effects * 0xC0, 0, sinks * 0x140};
+    u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[7], i;
+    ARState* state = audren_state_new((const u8*)params);
+    u8 *input = calloc(1, size + reply), *voices_in, *vi;
+    const ARVoice* v;
+    CHECK(state != NULL && input != NULL, "no state or buffers for revision 15 voices");
+    if (!state || !input) {
+        free(input);
+        audren_state_free(state);
+        return;
+    }
+    h[15] = size;
+    memcpy(input, h, sizeof h);
+    for (i = 0; i < pools; i++) w32(input, 0x40 + h[1] + i * 0x20 + 0x10, 4);
+    voices_in = input + 0x40 + h[1] + h[2] + h[4];
+    vi = voices_in + stride; /* voice 1: new, in use, every field set */
+    w8(vi, 8, 1);
+    w8(vi, 9, 1);
+    w8(vi, 0xB, 1);
+    w32(vi, 0xC, 32000);
+    w32(vi, 0x18, 2);
+    wf(vi, 0x1C, 1.5f);
+    wf(vi, 0x20, 0.75f);
+    w8(vi, 0x24, 1); /* biquad 0: enabled 0, b 4, a 0x10 */
+    wf(vi, 0x28, 0.5f);
+    wf(vi, 0x2C, -0.25f);
+    wf(vi, 0x30, 0.125f);
+    wf(vi, 0x34, 1.5f);
+    wf(vi, 0x38, -0.75f);
+    w32(vi, 0x54, 3);
+    w32(vi, 0x58, 2);
+    w64(vi, 0x60, 0x1234560);
+    w64(vi, 0x68, 0x40);
+    w32(vi, 0x70, 5);
+    w32(vi, 0x74, 7);
+    for (i = 0; i < 4; i++) w8(vi, 0x78 + i * 0x38 + 0x1A, 1); /* its wave buffers already sent */
+    w32(vi, 0x158, 1);
+    w32(vi, 0x15C, 2);
+    w8(vi, 0x174, 1);
+    w8(vi, 0x176, 1);
+    vi = voices_in + (voices - 1) * stride; /* the last voice */
+    w8(vi, 8, 1);
+    w8(vi, 9, 1);
+    w32(vi, 0xC, 22050);
+    w32(vi, 0x70, 6);
+    for (i = 0; i < 4; i++) w8(vi, 0x78 + i * 0x38 + 0x1A, 1);
+    CHECK(audren_state_update(state, input, size, input + size, reply) == 0, "revision 15 update refused");
+    CHECK(rd32(input + size + 12) == voices * 0x10 && rd32(input + size + 60) == reply, "revision 15 reply sizes");
+    v = &state->voice[1];
+    CHECK(v->in_use && v->format == 1 && v->rate == 32000 && v->channels == 2 && v->pitch == 1.5f && v->volume == 0.75f,
+          "revision 15 voice: rate %u, %u channels", v->rate, v->channels);
+    CHECK(v->bq_on[0] == 1 && v->bq_b[0][0] == 8192 && v->bq_b[0][1] == -4096 && v->bq_b[0][2] == 2048 &&
+              v->bq_a[0][0] == 24576 && v->bq_a[0][1] == -12288 && !v->bq_on[1],
+          "revision 15 float biquad in Q14: b %d %d %d, a %d %d", v->bq_b[0][0], v->bq_b[0][1], v->bq_b[0][2],
+          v->bq_a[0][0], v->bq_a[0][1]);
+    CHECK(v->wave_count == 3 && v->wave_index == 2 && v->data == 0x1234560 && v->data_size == 0x40 && v->mix_id == 5 &&
+              v->splitter_id == 7,
+          "revision 15 voice after its biquads: mix %u, splitter %u", v->mix_id, v->splitter_id);
+    CHECK(v->res[0] == 1 && v->res[1] == 2 && v->flags == 1 && v->quality == 1,
+          "revision 15 voice tail: resources %u %u, flags %u, quality %u", v->res[0], v->res[1], v->flags, v->quality);
+    v = &state->voice[voices - 1];
+    CHECK(v->in_use && v->rate == 22050 && v->mix_id == 6, "revision 15 last voice: rate %u, mix %u", v->rate,
+          v->mix_id);
+    free(input);
+    audren_state_free(state);
+}
+
 int main(void) {
     u32 nch;
     int set;
     g_mem = calloc(1, SNX_ART_G_ARENA);
     if (!g_mem) return 1;
     update_output_counts();
+    update_voice_v2();
 
     /* the resampler at a ratio of one: an 11 kHz voice keeps its level at default quality as at high */
     for (u8 q = 0; q < 2; q++) {

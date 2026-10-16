@@ -233,10 +233,18 @@ static void take_wave(ARWave* w, const u8* wb, u8 format) {
     w->sent = 0;
 }
 
+/* a float coefficient in Q14, clamped and truncated (Eden's ToQ14Clamped) */
+static i16 q14(float v) {
+    float x = v * 16384.0f;
+    return (i16)(x >= 32767.0f ? 32767.0f : x <= -32768.0f ? -32768.0f : x);
+}
+
 /* VoiceIn: id 0, is_new 8, in_use 9, play state 0xA, format 0xB, rate 0xC, channels 0x18, pitch 0x1C, volume 0x20,
    biquads 0x24, wave buffer count 0x3C and index 0x40, data 0x48 and size 0x50, mix 0x58, splitter 0x5C, wave
-   buffers 0x60 (0x38 each), channel resources 0x140, flush count 0x159, flags 0x15C, conversion quality 0x15E */
-static void update_voice(ARState* s, ARVoice* v, const u8* vi, u8* vo) {
+   buffers 0x60 (0x38 each), channel resources 0x140, flush count 0x159, flags 0x15C, conversion quality 0x15E.
+   From revision 15 (v2, Eden's VoiceInParameterV2) the biquads hold floats, 0x18 each, and what follows them is 0x18
+   further on: 0x188 a voice */
+static void update_voice(ARState* s, ARVoice* v, const u8* vi, u8* vo, int v2) {
     if (vi[8]) { /* is_new: its buffers start over, and the channels with the first frame */
         memset(v, 0, sizeof *v);
         v->fresh = 1;
@@ -254,19 +262,26 @@ static void update_voice(ARState* s, ARVoice* v, const u8* vi, u8* vo) {
                 break;
             case 2: v->play = SNX_AUDREN_PAUSED; break;
         }
-        if (vi[0x15E] <= 2) v->quality = vi[0x15E];
         v->format = vi[0xB];
         v->rate = rd32(vi + 0xC);
         u32 ch = rd32(vi + 0x18);
         v->channels = (u8)(ch < 1 ? 1 : ch > SNX_AUDREN_CHANNELS ? SNX_AUDREN_CHANNELS : ch);
         v->pitch = rdf(vi + 0x1C);
         v->volume = rdf(vi + 0x20);
-        for (f = 0; f < 2; f++) { /* enabled 0, b 2, a 8 */
-            const u8* bq = vi + 0x24 + f * 0xC;
+        for (f = 0; f < 2; f++) { /* enabled 0, b 2, a 8; v2's floats b 4, a 0x10, in Q14 as the biquad effect's */
+            const u8* bq = vi + 0x24 + f * (v2 ? 0x18 : 0xC);
+            int k;
             v->bq_on[f] = bq[0];
-            memcpy(v->bq_b[f], bq + 2, sizeof v->bq_b[f]);
-            memcpy(v->bq_a[f], bq + 8, sizeof v->bq_a[f]);
+            if (!v2) {
+                memcpy(v->bq_b[f], bq + 2, sizeof v->bq_b[f]);
+                memcpy(v->bq_a[f], bq + 8, sizeof v->bq_a[f]);
+            } else {
+                for (k = 0; k < 3; k++) v->bq_b[f][k] = q14(rdf(bq + 4 + k * 4));
+                for (k = 0; k < 2; k++) v->bq_a[f][k] = q14(rdf(bq + 0x10 + k * 4));
+            }
         }
+        vi += v2 ? 0x18 : 0; /* the rest at the offsets above */
+        if (vi[0x15E] <= 2) v->quality = vi[0x15E];
         v->wave_count = rd32(vi + 0x3C);
         v->wave_index = rd16(vi + 0x40) % SNX_AUDREN_WAVES;
         v->data = rd64(vi + 0x48);
@@ -395,8 +410,10 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
                    (unsigned long long)need, (unsigned long long)is);
         return -41;
     }
-    u32 npools = ih[2] / 0x20, nres = ih[4] / 0x70, nvoices = ih[3] / 0x170, neff = ih[5] / 0xC0, nmix = ih[6] / 0x930,
-        nsinks = ih[7] / 0x140;
+    int voice_v2 = revn >= 15; /* 0x188 a voice (update_voice) */
+    u32 voice_size = voice_v2 ? 0x188 : 0x170;
+    u32 npools = ih[2] / 0x20, nres = ih[4] / 0x70, nvoices = ih[3] / voice_size, neff = ih[5] / 0xC0,
+        nmix = ih[6] / 0x930, nsinks = ih[7] / 0x140;
     u32 pools_opened = s->neffects + s->nvoices * 4;
     int eff_v2 = revn >= 9;
     /* The opened renderer fixes the reply layout. Input section sizes only
@@ -455,7 +472,8 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
         c->in_use = r[0x64];
         if (c->in_use) memcpy(c->mix, r + 4, sizeof c->mix);
     }
-    for (u32 i = 0; i < nvoices && i < s->nvoices; i++) update_voice(s, &s->voice[i], voices + i * 0x170, q + i * 0x10);
+    for (u32 i = 0; i < nvoices && i < s->nvoices; i++)
+        update_voice(s, &s->voice[i], voices + i * voice_size, q + i * 0x10, voice_v2);
     q += o_vo;
     /* effects: type 0, is_new 1, enabled 2, mix 4, process order 0x18, the type's parameters from 0x20. Out:
        Used(3) while enabled, Removed(4) */
@@ -972,12 +990,6 @@ static void biquad(float* x, u32 n, const i16* b, const i16* a, ARBiquad* st, in
         st->s0 = st->s1 + b[1] * in + a[0] * y;
         st->s1 = b[2] * in + a[1] * y;
     }
-}
-
-/* a float coefficient in Q14, clamped and truncated (Eden's ToQ14Clamped) */
-static i16 q14(float v) {
-    float x = v * 16384.0f;
-    return (i16)(x >= 32767.0f ? 32767.0f : x <= -32768.0f ? -32768.0f : x);
 }
 
 /* Eden's BiquadFilterInfo: Q14 before revision 9, floats from it; updating clears the state before revision 6 */
