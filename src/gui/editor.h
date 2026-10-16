@@ -26,6 +26,8 @@ typedef struct {
     bool dirty, leaving; /* changed since it was saved; ESC pressed once over changes */
     int preview;         /* GUI_SCREEN_MENU or GUI_SCREEN_COMPILING */
     char note[160];      /* what the last key did, when it did not do what it was asked */
+    bool flat;           /* no section column: the form's rows are all of one */
+    int step;            /* the last GUI_EDITOR_ACTION's key: 0 Select, -1 Left, 1 Right */
 } GuiEditor;
 #define GUI_EDITOR_FOLDER 0 /* the theme editor's first row */
 int gui_editor_rows(const GuiEditor* editor);
@@ -37,10 +39,12 @@ void gui_editor_start(GuiEditor* editor, const GuiTheme* theme, GuiThemeFile* fi
    row that Select on returns GUI_EDITOR_SAVE for */
 void gui_editor_form(GuiEditor* editor, const GuiThemeKey* keys, int count, void* object, const char* action);
 void gui_editor_stop(GuiEditor* editor);
-/* what a key asks of the screen: nothing more, to leave it, to save (a form: to do its action) */
-typedef enum { GUI_EDITOR_STAY, GUI_EDITOR_LEAVE, GUI_EDITOR_SAVE } GuiEditorDo;
+/* what a key asks of the screen: nothing more, to leave it, to save (a form: to do its action), or the focused
+   GUI_KEY_ACTION row's (step says which key) */
+typedef enum { GUI_EDITOR_STAY, GUI_EDITOR_LEAVE, GUI_EDITOR_SAVE, GUI_EDITOR_ACTION } GuiEditorDo;
 /* Up/Down and the pages move; Left/Right change a word, a flag or a number; Select changes a word or a flag, starts
-   typing the others and takes what was typed; Cancel stops typing, or leaves (asking once over changes) */
+   typing the others and takes what was typed; Cancel stops typing, or leaves (asking once over changes). On an action
+   row Select, Left and Right are the caller's */
 GuiEditorDo gui_editor_key(GuiEditor* editor, GuiKey key);
 /* while typing: text added, or the last character taken off */
 void gui_editor_type(GuiEditor* editor, const char* text);

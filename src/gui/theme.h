@@ -73,7 +73,9 @@ typedef struct {
 
 /* A key of theme.ini: where a GuiTheme keeps it and what it takes. gui_theme_keys lists every one the GUI writes, by
    section, the editor's form and the file in the same order */
-typedef enum { GUI_KEY_TEXT, GUI_KEY_COLOUR, GUI_KEY_FLAG, GUI_KEY_NUMBER, GUI_KEY_WORD } GuiKeyType;
+/* GUI_KEY_ACTION: a row that does something rather than hold a value (a form's own, never theme.ini's); its value, when
+   size, the text at at */
+typedef enum { GUI_KEY_TEXT, GUI_KEY_COLOUR, GUI_KEY_FLAG, GUI_KEY_NUMBER, GUI_KEY_WORD, GUI_KEY_ACTION } GuiKeyType;
 typedef struct {
     const char* section;
     const char* key;

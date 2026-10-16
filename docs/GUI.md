@@ -53,15 +53,17 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   folder if needed. Existing keys trigger the bright-red warning
   **Keys already setup. This will overwrite the previous ones**. A successful
   drop replaces them and returns to the menu; ESC cancels without changing them.
-- **Settings** lists every setting of the game's `.ini` by its sections (Display, Graphics,
-  Performance, Input, Network, Debug), as `scarletnx --settings` prints them from the runtime's
-  own tables, after the launcher's two: a row each, its help above, Left/Right going round its
-  values, Enter typing one. A setting at `.ini` is the game's `.ini`'s; one picked goes to every
+- **Settings** opens on its groups, Enter opening one and ESC coming back: **App**, then
+  **Launch** (the launcher's two), then a group per section of the game's `.ini` (Display,
+  Graphics, Performance, Input, Network, Debug), as `scarletnx --settings` prints them from the
+  runtime's own tables. **App** holds **Theme** and **Text size**, which Left/Right or Enter go
+  round either way, and **Theme editor**, which comes back to App. A group of settings shows
+  a row each, its help above, Left/Right going round its values, Enter typing one. A setting at `.ini` is the game's `.ini`'s; one picked goes to every
   Switch run as `--key=value`, over the `.ini` ([USAGE](USAGE.md)), and is kept for every game:
   what was changed, by the `.ini`'s sections and keys, in `settings.ini` of the config folder on
   Linux (`~/.config/scarletnx/`), else beside `recent.txt`. A run takes a setting from what that
   run picks, then from the game's own picks (to come), then from these, and last from the game's
-  `.ini`. Del puts a setting back to its default, and the last row, **Reset all to the
+  `.ini`. Del puts a setting back to its default, and the groups' last row, **Reset all to the
   defaults**, every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
   and `fullscreen` puts the launcher itself on the whole screen too). The touch screen is the
   game's menu's, to turn off for a controller.

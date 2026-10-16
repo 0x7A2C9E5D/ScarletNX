@@ -44,6 +44,13 @@ typedef struct {
     uint64_t used;
     int done, stop;
 } GuiSpace;
+/* the editor's screens: the Settings' groups, a group's settings, the App's rows, the theme editor */
+enum { GUI_FORM_SETTINGS, GUI_FORM_GROUP, GUI_FORM_APP, GUI_FORM_THEME };
+#define GUI_GROUPS_MAX 32
+/* the App screen's values, as its rows show them */
+typedef struct {
+    char theme[64], text[16];
+} GuiAppForm;
 typedef struct {
     SDL_Window* window;
     SDL_Renderer* renderer;
@@ -96,8 +103,16 @@ typedef struct {
     SDL_Texture* splash;      /* the boot's splash, its icon, until splash_until */
     Uint64 splash_until;
     GuiRgb splash_page;
-    bool editing; /* the theme editor's screen instead of the menu's */
+    bool editing; /* the editor's screen (form says which) instead of the menu's */
     GuiEditor editor;
+    int form;            /* GUI_FORM_* */
+    int group;           /* the group open, or the one the Settings come back to */
+    bool theme_from_app; /* the theme editor goes back to the App's rows */
+    /* the Settings' groups: App, then a group per section of the settings, its first row and rows; a row each */
+    int groups, group_first[GUI_GROUPS_MAX], group_rows[GUI_GROUPS_MAX];
+    GuiThemeKey group_keys[GUI_GROUPS_MAX];
+    char group_about[GUI_GROUPS_MAX][128];
+    GuiAppForm app_form;
     SDL_Texture* preview;   /* the editor's: the menu or a run drawn in its theme, at 1x */
     GuiSteps preview_steps; /* the run it shows, over again every GUI_PREVIEW_MS */
     GuiConsole preview_console;
@@ -140,6 +155,8 @@ static const char* const load_labels[] = {"-> Select a file", "-> Select file fr
 #define SAY_LOG_FAILED "The log could not be saved: allow the app access to files."
 #define SAY_EDITOR     "Tap a key to change it or type it. Back: go back."
 #define SAY_SETTINGS   SAY_EDITOR
+#define SAY_GROUPS     "Tap a group to open it. Back: go back."
+#define SAY_APP        "Tap a row to change or open it. Back: go back."
 #else
 static const char* const load_labels[] = {"-> Select a file", "-> Select file from games/ instead"};
 #define SAY_MENU       "Arrows/mouse: move. Space/Enter/click: select."
@@ -158,6 +175,8 @@ static const char* const load_labels[] = {"-> Select a file", "-> Select file fr
 #define SAY_LOG_FAILED "The log could not be saved: check the folder's permissions."
 #define SAY_EDITOR     "Up/Down: key. Left/Right: change. Enter: type. Ctrl+S: save. ESC: back."
 #define SAY_SETTINGS   "Up/Down: setting. Left/Right: change. Enter: type. Del: default. ESC: back."
+#define SAY_GROUPS     "Up/Down: group. Enter: open. ESC: back."
+#define SAY_APP        "Up/Down: row. Left/Right: change. Enter: change or open. ESC: back."
 #endif
 static SDL_Color rgb(GuiRgb c) {
     SDL_Color out = {c.r, c.g, c.b, 255};
@@ -366,13 +385,15 @@ static GuiScreen screen(const App* app) {
         return app->native || gui_steps_last(&app->steps, "LAUNCH") ? GUI_SCREEN_LOADING : GUI_SCREEN_COMPILING;
     return menu_screen(app);
 }
-static void next_theme(App* app) {
+/* the theme step themes after or before the one shown, round the list */
+static void next_theme(App* app, int step) {
     size_t i;
     const char* const* dirs = (const char* const*)app->themes_dirs;
     gui_themes_scan(&app->themes, dirs, 2);
     i = 0;
     while (i < app->themes.count && strcmp(app->themes.ids[i], app->theme.id)) ++i;
-    if (app->themes.count) gui_theme_load(&app->theme, dirs, 2, app->themes.ids[(i + 1) % app->themes.count]);
+    if (app->themes.count)
+        gui_theme_load(&app->theme, dirs, 2, app->themes.ids[(i + app->themes.count + step) % app->themes.count]);
 }
 /* the recent games take a title row, a row each and a blank one above the items */
 static int recent_rows(const App* app) { return app->recent.count ? app->recent.count + 2 : 0; }
@@ -1168,15 +1189,28 @@ static void render_editor(App* app) {
     SDL_SetRenderDrawColor(app->renderer, theme->page.r, theme->page.g, theme->page.b, 255);
     SDL_RenderClear(app->renderer);
     preview_box(app, &col, &row, &cols, &rows);
-    width = e->object ? app->cols - 2 : col - 2; /* the rows' text, left of the theme's preview */
-    for (r = 0; r < e->count; ++r) {             /* the values' column, past the widest key's label */
+    width = app->form != GUI_FORM_THEME ? app->cols - 2 : col - 2; /* the rows' text, left of the theme's preview */
+    for (r = 0; r < e->count; ++r) {                               /* the values' column, past the widest key's label */
         gui_editor_label(e, r + !e->object, label, sizeof label);
         labels = SDL_max(labels, (int)strlen(label));
     }
-    snprintf(title, sizeof title, "%s%s", e->object ? "SETTINGS" : "THEME EDITOR  /  ", e->object ? "" : e->id);
+    if (app->form == GUI_FORM_THEME)
+        snprintf(title, sizeof title, "THEME EDITOR  /  %s", e->id);
+    else if (app->form == GUI_FORM_SETTINGS)
+        snprintf(title, sizeof title, "SETTINGS");
+    else {
+        char* c;
+        snprintf(title, sizeof title, "SETTINGS  /  %s", app->group_keys[app->group].key);
+        for (c = title; *c; ++c) *c = (char)SDL_toupper((unsigned char)*c);
+    }
     if (theme->head == GUI_STYLE_BAR) band(app, 0, 1, theme->ink);
     text(app, 1, 0, title, rgb(theme->head == GUI_STYLE_BAR ? theme->page : theme->ink));
-    text(app, 1, 1, e->object ? SAY_SETTINGS : SAY_EDITOR, rgb(theme->ink));
+    text(app, 1, 1,
+         app->form == GUI_FORM_THEME      ? SAY_EDITOR
+         : app->form == GUI_FORM_SETTINGS ? SAY_GROUPS
+         : app->form == GUI_FORM_APP      ? SAY_APP
+                                          : SAY_SETTINGS,
+         rgb(theme->ink));
     if (e->note[0])
         text(app, 1, 2, e->note, rgb(e->leaving ? theme->failure : theme->focus));
     else if (focused)
@@ -1191,7 +1225,7 @@ static void render_editor(App* app) {
             snprintf(value, sizeof value, "%s_", e->text);
         else
             gui_editor_value(e, r, value, sizeof value);
-        if (e->object && k && !value[0]) snprintf(value, sizeof value, ".ini"); /* a setting not typed */
+        if (app->form == GUI_FORM_GROUP && k && !value[0]) snprintf(value, sizeof value, ".ini"); /* not typed */
         snprintf(line, sizeof line, "%s%-*s %s", theme->marker, labels, label, value);
         {
             int n = 0; /* what fits left of the preview, a character at a time */
@@ -1214,12 +1248,13 @@ static void render_editor(App* app) {
     }
     more_marks(app, 4, 4 + SDL_min(editor_rows(app), gui_editor_rows(e) - e->top) - 1, e->top > 0,
                e->top + editor_rows(app) < gui_editor_rows(e));
-    if (e->object) {
+    if (app->form != GUI_FORM_THEME) {
         char used[32], left[32];
-        text(app, 1, app->rows - 2,
-             e->count > GUI_SETTINGS_OWN ? "For the next runs. .ini: as the game's .ini says"
-                                         : "The runtime listed no settings",
-             rgb(theme->soft));
+        if (app->form != GUI_FORM_APP)
+            text(app, 1, app->rows - 2,
+                 app->settings.count > GUI_SETTINGS_OWN ? "For the next runs. .ini: as the game's .ini says"
+                                                        : "The runtime listed no settings",
+                 rgb(theme->soft));
         gui_size_text(left, sizeof left, app->free_bytes);
         if (app->space && __atomic_load_n(&app->space->done, __ATOMIC_ACQUIRE)) {
             gui_size_text(used, sizeof used, app->space->used);
@@ -1245,6 +1280,7 @@ static void open_editor(App* app) {
     gui_editor_start(&app->editor, &app->theme, from_file ? &file : NULL, from_file ? app->theme.id : "mytheme");
     if (from_file) gui_theme_file_free(&file);
     app->editing = true;
+    app->form = GUI_FORM_THEME;
     app->preview_since = 0;
 }
 static int SDLCALL count_space(void* data) {
@@ -1307,16 +1343,119 @@ static void space_start(App* app) {
     if (app->space && !(app->counter = SDL_CreateThread(count_space, "space", app->space)))
         count_space(app->space); /* no thread to count it: here, then */
 }
-static void open_settings(App* app) {
+/* ---- the Settings: its groups, App then a group per section of the settings; a group's rows; the App's ---- */
+static const GuiThemeKey app_keys[] = {
+    {"", "Theme", GUI_KEY_ACTION, offsetof(GuiAppForm, theme), sizeof(((GuiAppForm*)0)->theme), NULL, 0,
+     "Built-in themes, then each themes/<name>/theme.ini"},
+    {"", "Text size", GUI_KEY_ACTION, offsetof(GuiAppForm, text), sizeof(((GuiAppForm*)0)->text), NULL, 0,
+     "Bigger letters scroll the menu. Auto fits the screen"},
+    {"", "Theme editor", GUI_KEY_ACTION, 0, 0, NULL, 0,
+     "This theme's keys with a preview, saved as themes/<name>/theme.ini"}};
+enum { GUI_APP_THEME, GUI_APP_TEXT, GUI_APP_EDITOR, GUI_APP_ROWS };
+static void app_values(App* app) {
+    GuiAppForm* f = &app->app_form;
+    snprintf(f->theme, sizeof f->theme, "%s", app->theme.name);
+    if (app->menu.text_size)
+        snprintf(f->text, sizeof f->text, "%dx", app->menu.text_size);
+    else
+        snprintf(f->text, sizeof f->text, "Auto");
+}
+/* a group's row of the Settings, its help the keys it holds */
+static void group_add(App* app, const char* name, int first, const char* about) {
+    int g = app->groups++;
+    GuiThemeKey* k = &app->group_keys[g];
+    memset(k, 0, sizeof *k);
+    k->section = "";
+    k->key = name;
+    k->type = GUI_KEY_ACTION;
+    k->about = app->group_about[g];
+    snprintf(app->group_about[g], sizeof app->group_about[g], "%s", about);
+    app->group_first[g] = first;
+    app->group_rows[g] = 0;
+}
+static void settings_groups(App* app) {
     GuiSettings* s = settings_of(app);
-    gui_editor_form(&app->editor, s->keys, s->count, s->values, "Reset all to the defaults");
+    int r;
+    app->groups = 0;
+    group_add(app, "App", 0, "The theme, the menu's letters and the theme editor");
+    for (r = 0; r < s->count; ++r) {
+        int g = app->groups - 1;
+        char* about = app->group_about[g];
+        size_t n = strlen(about);
+        /* past the most groups the rest go in the last one: every row is still reached */
+        if (g == 0 || (strcmp(s->keys[r].section, app->group_keys[g].key) && app->groups < GUI_GROUPS_MAX)) {
+            group_add(app, s->keys[r].section, r, "");
+            g = app->groups - 1;
+            about = app->group_about[g];
+            n = 0;
+        }
+        snprintf(about + n, sizeof app->group_about[g] - n, "%s%s", n ? ", " : "", s->keys[r].key);
+        ++app->group_rows[g];
+    }
+}
+/* the groups, row on the focus */
+static void settings_top(App* app, int row) {
+    settings_groups(app);
+    gui_editor_form(&app->editor, app->group_keys, app->groups, &app->app_form, "Reset all to the defaults");
+    app->editor.flat = true;
+    app->editor.row = SDL_min(row, gui_editor_rows(&app->editor) - 1);
+    app->form = GUI_FORM_SETTINGS;
     app->editing = true;
+}
+static void open_app(App* app, int row) {
+    app_values(app);
+    gui_editor_form(&app->editor, app_keys, GUI_APP_ROWS, &app->app_form, NULL);
+    app->editor.flat = true;
+    app->editor.row = row;
+    app->form = GUI_FORM_APP;
+    app->group = 0;
+    app->editing = true;
+}
+static void open_group(App* app, int g) {
+    if (!g) {
+        open_app(app, 0);
+        return;
+    }
+    gui_editor_form(&app->editor, app->settings.keys + app->group_first[g], app->group_rows[g], app->settings.values,
+                    NULL);
+    app->editor.flat = true;
+    app->form = GUI_FORM_GROUP;
+    app->group = g;
+}
+static void open_settings(App* app) {
+    app->group = 0;
+    settings_top(app, 0);
     space_start(app);
 }
 static void leave_editor(App* app) {
     gui_editor_stop(&app->editor);
     app->editing = false;
     SDL_StopTextInput(app->window);
+}
+/* ESC on a screen: a group's and the App's go back to the groups, the theme editor to where it was opened */
+static void leave_form(App* app) {
+    int back = app->form == GUI_FORM_GROUP || app->form == GUI_FORM_APP,
+        app_rows = app->form == GUI_FORM_THEME && app->theme_from_app;
+    leave_editor(app);
+    if (back)
+        settings_top(app, app->group);
+    else if (app_rows) {
+        app->theme_from_app = false;
+        open_app(app, GUI_APP_EDITOR);
+    }
+}
+/* the App's rows: the theme and the letters go round, either way, and the editor opens */
+static void app_action(App* app, int row, int step) {
+    if (row == GUI_APP_THEME)
+        next_theme(app, step < 0 ? -1 : 1);
+    else if (row == GUI_APP_TEXT)
+        app->menu.text_size = (app->menu.text_size + (step < 0 ? GUI_TEXT_MAX : 1)) % (GUI_TEXT_MAX + 1);
+    else if (row == GUI_APP_EDITOR && !step) {
+        app->theme_from_app = true;
+        open_editor(app);
+        return;
+    }
+    app_values(app);
 }
 /* saved in themes/ of the data folder, and the menu's theme from then on */
 static void save_editor(App* app) {
@@ -1327,25 +1466,33 @@ static void save_editor(App* app) {
 }
 /* a Settings pick, kept at once */
 static void keep_settings(App* app) {
-    if (!app->editor.object || !app->editor.dirty) return;
+    if ((app->form != GUI_FORM_GROUP && app->form != GUI_FORM_SETTINGS) || !app->editor.dirty) return;
     app->editor.dirty = false;
     if (app->settings_file && gui_settings_save(&app->settings, app->settings_file))
         snprintf(app->editor.note, sizeof app->editor.note, "Not saved: %s could not be written", app->settings_file);
 }
 static void editor_key(App* app, GuiKey key) {
     GuiEditorDo what = gui_editor_key(&app->editor, key);
-    if (what == GUI_EDITOR_SAVE && app->editor.object) { /* the Settings' last row */
+    if (what == GUI_EDITOR_ACTION && app->form == GUI_FORM_SETTINGS && !app->editor.step) {
+        open_group(app, app->editor.row);
+        return;
+    }
+    if (what == GUI_EDITOR_ACTION && app->form == GUI_FORM_APP) {
+        app_action(app, app->editor.row, app->editor.step);
+        return;
+    }
+    if (what == GUI_EDITOR_SAVE && app->form == GUI_FORM_SETTINGS) { /* the groups' last row */
         gui_settings_reset(&app->settings, -1);
         app->editor.dirty = true;
-    } else if (what == GUI_EDITOR_SAVE)
+    } else if (what == GUI_EDITOR_SAVE && app->form == GUI_FORM_THEME)
         save_editor(app);
     keep_settings(app);
     if (what == GUI_EDITOR_LEAVE) {
-        leave_editor(app);
+        leave_form(app);
         return;
     }
 #ifdef SDL_PLATFORM_ANDROID
-    if (app->editor.object) { /* the menu on the whole screen too, as the games, unless fullscreen is 0 */
+    if (app->form == GUI_FORM_GROUP) { /* the menu on the whole screen too, as the games, unless fullscreen is 0 */
         const char* fullscreen = gui_settings_value(&app->settings, "fullscreen");
         SDL_SetWindowFullscreen(app->window, !fullscreen || strcmp(fullscreen, "0"));
     }
@@ -1362,18 +1509,19 @@ static void editor_input(App* app, const SDL_Event* e) {
         gui_editor_type(&app->editor, e->text.text);
         return;
     }
-    if (!app->editor.object && e->key.key == SDLK_S && (e->key.mod & SDL_KMOD_CTRL) && !e->key.repeat) {
+    if (app->form == GUI_FORM_THEME && e->key.key == SDLK_S && (e->key.mod & SDL_KMOD_CTRL) && !e->key.repeat) {
         save_editor(app);
         return;
     }
     /* Del, or Backspace when nothing is typed: a setting back to its default */
-    if (app->editor.object && !app->editor.typing && (e->key.key == SDLK_DELETE || e->key.key == SDLK_BACKSPACE)) {
-        gui_settings_reset(&app->settings, app->editor.row);
+    if (app->form == GUI_FORM_GROUP && !app->editor.typing &&
+        (e->key.key == SDLK_DELETE || e->key.key == SDLK_BACKSPACE)) {
+        gui_settings_reset(&app->settings, app->group_first[app->group] + app->editor.row);
         app->editor.dirty = true;
         keep_settings(app);
         return;
     }
-    if (!app->editor.object && e->key.key == SDLK_TAB && !e->key.repeat) {
+    if (app->form == GUI_FORM_THEME && e->key.key == SDLK_TAB && !e->key.repeat) {
         app->editor.preview = app->editor.preview == GUI_SCREEN_MENU ? GUI_SCREEN_COMPILING : GUI_SCREEN_MENU;
         app->preview_since = 0;
         return;
@@ -1394,7 +1542,7 @@ static void editor_pointer(App* app, float x, float y, bool click) {
     int col, row, cols, rows, r = app->editor.top + (int)y - 4;
     preview_box(app, &col, &row, &cols, &rows);
     if (!click) return;
-    if (!app->editor.object && x >= col && x < col + cols && y >= row && y < row + rows + 1) {
+    if (app->form == GUI_FORM_THEME && x >= col && x < col + cols && y >= row && y < row + rows + 1) {
         app->editor.preview = app->editor.preview == GUI_SCREEN_MENU ? GUI_SCREEN_COMPILING : GUI_SCREEN_MENU;
         app->preview_since = 0;
         return;
@@ -1908,7 +2056,7 @@ static void menu_key(App* app, GuiKey key) {
             if (app->menu.recent_focus <= app->recent.count) open_recent(app, app->menu.recent_focus - 1);
             return;
         case GUI_MENU_SETTINGS: open_settings(app); break;
-        case GUI_MENU_THEME: next_theme(app); break;
+        case GUI_MENU_THEME: next_theme(app, 1); break;
         case GUI_MENU_EDITOR: open_editor(app); break;
         case GUI_MENU_LOG: share_log(app); break;
         default: break;

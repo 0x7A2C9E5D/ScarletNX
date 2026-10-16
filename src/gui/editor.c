@@ -107,10 +107,18 @@ GuiEditorDo gui_editor_key(GuiEditor* editor, GuiKey key) {
         case GUI_PAGE_DOWN: editor->row = editor->row + 10 < rows ? editor->row + 10 : rows - 1; break;
         case GUI_LEFT:
         case GUI_RIGHT:
+            if (k && k->type == GUI_KEY_ACTION) {
+                editor->step = key == GUI_RIGHT ? 1 : -1;
+                return GUI_EDITOR_ACTION;
+            }
             if (k) change(editor, k, key == GUI_RIGHT ? 1 : -1);
             break;
         case GUI_SELECT:
             if (is_save(editor, editor->row)) return GUI_EDITOR_SAVE;
+            if (k && k->type == GUI_KEY_ACTION) {
+                editor->step = 0;
+                return GUI_EDITOR_ACTION;
+            }
             if (k && (k->type == GUI_KEY_FLAG || k->type == GUI_KEY_WORD)) {
                 change(editor, k, 1);
                 break;
@@ -145,6 +153,8 @@ void gui_editor_label(const GuiEditor* editor, int row, char* out, size_t size) 
     int first = k && (!before || strcmp(before->section, k->section));
     if (!k)
         snprintf(out, size, "%s", editor->object ? editor->action : row == GUI_EDITOR_FOLDER ? "Folder" : "Save");
+    else if (editor->flat)
+        snprintf(out, size, "%s", k->key);
     else
         snprintf(out, size, "%-11s %s", first ? k->section : "", k->key);
 }

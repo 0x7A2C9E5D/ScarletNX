@@ -164,6 +164,7 @@ int gui_theme_set(void* object, const GuiThemeKey* key, const char* value) {
                     return 1;
                 }
             return 0;
+        case GUI_KEY_ACTION: return 0; /* nothing to set */
     }
     return 0;
 }
@@ -181,6 +182,7 @@ void gui_theme_get(const void* object, const GuiThemeKey* key, char* out, size_t
             for (n = 0; key->words[n]; ++n) {}
             snprintf(out, size, "%s", key->words[i >= 0 && i < n ? i : 0]);
             return;
+        case GUI_KEY_ACTION: snprintf(out, size, "%s", key->size ? field : ""); return;
     }
 }
 /* run_colors: an ErET loading theme's [colors] are its loading screen's, here the run's */

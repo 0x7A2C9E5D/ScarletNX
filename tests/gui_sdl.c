@@ -494,18 +494,35 @@ int main(int argc, char** argv) {
         free(bytes);
         free(big);
     }
+    /* the groups first: App, then a group per section the runtime lists, and the reset of them all */
     render(&app);
+    assert(app.form == GUI_FORM_SETTINGS && app.groups == 5 && gui_editor_rows(&app.editor) == 6);
     colored_text(&app, 0, "SETTINGS", normal);
+    colored_text(&app, 1, "Up/Down: group. Enter: open. ESC: back.", normal);
+    colored_text(&app, 2, "The theme, the menu's letters and the theme editor", rgb(app.theme.soft));
+    colored_text(&app, 4, "- App", yellow);
+    colored_text(&app, 5, "- Launch", normal);
+    colored_text(&app, 6, "- Display", normal);
+    colored_text(&app, 7, "- Graphics", normal);
+    colored_text(&app, 8, "- Input", normal);
+    colored_text(&app, 9, "- Reset all to the defaults", normal);
+    marks(&app, 4, 9, false, false); /* every row shows: no arrows */
+    key(&app, SDLK_DOWN);
+    render(&app);
+    colored_text(&app, 2, "libgccjit, gdbstub", rgb(app.theme.soft)); /* a group's help names its settings */
+    key(&app, SDLK_RIGHT);                                            /* a group opens with Enter only */
+    assert(app.form == GUI_FORM_SETTINGS);
+    key(&app, SDLK_RETURN);
+    /* a group's settings on a screen of their own, a row each with its help above */
+    assert(app.form == GUI_FORM_GROUP && app.group == 1 && app.editor.count == GUI_SETTINGS_OWN);
+    render(&app);
+    colored_text(&app, 0, "SETTINGS  /  LAUNCH", normal);
     colored_text(&app, 1, "Up/Down: setting. Left/Right: change. Enter: type. Del: default. ESC: back.", normal);
     colored_text(&app, 2,
                  SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
                                     : "Program was not compiled with libgccjit",
                  rgb(app.theme.soft));
-    colored_text(&app, 4, "- Launch      libgccjit    off", yellow);
-    colored_text(&app, 6, "- Display     fullscreen   0", normal); /* the launcher's choice wins */
-    colored_text(&app, 7, "- Graphics    resolution   .ini", normal);
-    colored_text(&app, 8, "- Input       controls     0", normal);
-    marks(&app, 4, 4 + gui_editor_rows(&app.editor) - 1, false, false); /* every row shows: no arrows */
+    colored_text(&app, 4, "- libgccjit                off", yellow);
     key(&app, SDLK_RIGHT);
     assert(setting_is(&app, "libgccjit", SNX_GUI_HAS_GCCJIT ? "on" : NULL));
     key(&app, SDLK_LEFT);
@@ -518,13 +535,29 @@ int main(int argc, char** argv) {
     assert(setting_is(&app, "gdbstub", "on"));
     key(&app, SDLK_RETURN);
     assert(!gui_settings_value(&app.settings, "gdbstub"));
+    key(&app, SDLK_RETURN);
+    assert(setting_is(&app, "gdbstub", "on"));
+    /* ESC goes back to the groups, on the one it came from */
+    key(&app, SDLK_ESCAPE);
+    assert(app.editing && app.form == GUI_FORM_SETTINGS && app.editor.row == 1);
     key(&app, SDLK_DOWN);
+    key(&app, SDLK_RETURN);
+    assert(app.form == GUI_FORM_GROUP && app.group == 2);
     key(&app, SDLK_RIGHT);
     assert(setting_is(&app, "fullscreen", "1"));
     render(&app);
-    colored_text(&app, 6, "- Display     fullscreen   1", yellow);
-    /* a number typed, and nothing typed for the .ini's again */
+    colored_text(&app, 0, "SETTINGS  /  DISPLAY", normal);
+    colored_text(&app, 4, "- fullscreen               1", yellow); /* the launcher's choice was 0 */
+    /* Del puts a setting back as it started */
+    key(&app, SDLK_DELETE);
+    assert(setting_is(&app, "fullscreen", "0"));
+    key(&app, SDLK_RIGHT);
+    key(&app, SDLK_ESCAPE);
     key(&app, SDLK_DOWN);
+    key(&app, SDLK_RETURN);
+    /* a number typed, and nothing typed for the .ini's again */
+    render(&app);
+    colored_text(&app, 4, "- resolution               .ini", yellow);
     key(&app, SDLK_RETURN);
     typed(&app, "0.5");
     key(&app, SDLK_RETURN);
@@ -533,21 +566,52 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 3; ++i) key(&app, SDLK_BACKSPACE);
     key(&app, SDLK_RETURN);
     assert(!gui_settings_value(&app.settings, "resolution"));
-    /* Del puts a setting back as it started, and the last row all of them */
-    key(&app, SDLK_UP);
-    key(&app, SDLK_DELETE);
-    assert(setting_is(&app, "fullscreen", "0"));
-    key(&app, SDLK_UP);
-    key(&app, SDLK_RETURN);
-    assert(setting_is(&app, "gdbstub", "on"));
+    key(&app, SDLK_ESCAPE);
+    /* the groups' last row puts every setting back as it started */
     app.editor.row = gui_editor_rows(&app.editor) - 1;
-    render(&app);
-    colored_text(&app, 4 + app.editor.row - app.editor.top, "- Reset all to the defaults", yellow);
     key(&app, SDLK_RETURN);
     assert(!gui_settings_value(&app.settings, "gdbstub") && setting_is(&app, "fullscreen", "0"));
     app.editor.row = 2; /* fullscreen 1 again, for the runs below */
+    key(&app, SDLK_RETURN);
     key(&app, SDLK_RIGHT);
     assert(setting_is(&app, "fullscreen", "1"));
+    key(&app, SDLK_ESCAPE);
+    /* App: the theme and the letters, either way round, and the theme editor, which comes back here */
+    app.editor.row = 0;
+    key(&app, SDLK_RETURN);
+    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME);
+    {
+        char first[64], line[96];
+        snprintf(first, sizeof first, "%s", app.theme.name);
+        render(&app);
+        colored_text(&app, 0, "SETTINGS  /  APP", normal);
+        colored_text(&app, 1, "Up/Down: row. Left/Right: change. Enter: change or open. ESC: back.", normal);
+        snprintf(line, sizeof line, "- %-24s %s", "Theme", first);
+        colored_text(&app, 4, line, yellow);
+        colored_text(&app, 5, "- Text size                Auto", normal);
+        colored_text(&app, 6, "- Theme editor", normal);
+        key(&app, SDLK_RIGHT);
+        assert(strcmp(app.theme.name, first) && !strcmp(app.app_form.theme, app.theme.name));
+        key(&app, SDLK_LEFT);
+        assert(!strcmp(app.theme.name, first));
+    }
+    key(&app, SDLK_DOWN);
+    key(&app, SDLK_RETURN);
+    assert(app.menu.text_size == 1 && !strcmp(app.app_form.text, "1x"));
+    key(&app, SDLK_LEFT);
+    assert(!app.menu.text_size && !strcmp(app.app_form.text, "Auto"));
+    key(&app, SDLK_LEFT);
+    assert(app.menu.text_size == GUI_TEXT_MAX);
+    key(&app, SDLK_RIGHT);
+    key(&app, SDLK_DOWN);
+    key(&app, SDLK_RIGHT); /* the editor opens with Enter only */
+    assert(app.form == GUI_FORM_APP);
+    key(&app, SDLK_RETURN);
+    assert(app.form == GUI_FORM_THEME && app.editing);
+    key(&app, SDLK_ESCAPE);
+    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_EDITOR);
+    key(&app, SDLK_ESCAPE);
+    assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 0);
     key(&app, SDLK_ESCAPE);
     assert(!app.editing && app.menu.selected == GUI_SETTINGS);
     /* kept in a file, the changed ones alone, they come back as the menu opens again; the runs below get them */

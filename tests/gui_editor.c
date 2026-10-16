@@ -227,6 +227,31 @@ int main(void) {
         assert(e.row == 2 && gui_editor_key(&e, GUI_SELECT) == GUI_EDITOR_SAVE && !e.typing);
         gui_editor_stop(&e);
     }
+    /* action rows: the screen's to do on Select, Left or Right (step says which), their value a text of the object's,
+       and a flat form's labels without the section */
+    {
+        struct {
+            char shown[16];
+        } object = {"Default"};
+        const GuiThemeKey rows[] = {{"", "Theme", GUI_KEY_ACTION, 0, sizeof object.shown, NULL, 0, "the theme"},
+                                    {"", "Theme editor", GUI_KEY_ACTION, 0, 0, NULL, 0, "the editor"}};
+        GuiEditor e;
+        char label[64], value[32];
+        gui_editor_form(&e, rows, 2, &object, NULL);
+        e.flat = true;
+        gui_editor_label(&e, 0, label, sizeof label);
+        gui_editor_value(&e, 0, value, sizeof value);
+        assert(!strcmp(label, "Theme") && !strcmp(value, "Default"));
+        gui_editor_value(&e, 1, value, sizeof value);
+        assert(!value[0]);
+        assert(gui_editor_key(&e, GUI_SELECT) == GUI_EDITOR_ACTION && e.step == 0 && !e.typing && !e.dirty);
+        assert(gui_editor_key(&e, GUI_LEFT) == GUI_EDITOR_ACTION && e.step == -1);
+        assert(gui_editor_key(&e, GUI_RIGHT) == GUI_EDITOR_ACTION && e.step == 1 && !strcmp(object.shown, "Default"));
+        gui_editor_key(&e, GUI_DOWN);
+        assert(e.row == 1 && gui_editor_key(&e, GUI_SELECT) == GUI_EDITOR_ACTION && e.step == 0);
+        assert(!gui_theme_set(&object, &rows[0], "x") && !strcmp(object.shown, "Default")); /* nothing to set */
+        gui_editor_stop(&e);
+    }
 
     puts("gui_editor passed");
     return 0;
