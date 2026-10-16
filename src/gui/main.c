@@ -2415,6 +2415,11 @@ static void open_pad(App* app, int row) {
     app->editor.note[0] = 0;
     pad_start(app);
     render(app); /* SDL looks for pads for most of a second: the page shows first, saying so */
+    /* two Joy-Cons one pad, or two, as the games take them (gamepad_joycon_pair, 1 when not picked) */
+    {
+        const char* pair = gui_settings_value(&app->settings, "gamepad_joycon_pair");
+        SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS, pair && !atoi(pair) ? "0" : "1");
+    }
     app->pads_read = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
     if (!app->pads_read)
         snprintf(app->editor.note, sizeof app->editor.note, "Controllers cannot be read: %s", SDL_GetError());

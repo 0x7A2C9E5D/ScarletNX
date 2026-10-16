@@ -330,6 +330,7 @@ static void button_map(App* app) {
     static const char list[] =
         "Controllers\tgamepad_buttons\t1\tint\t0\t2\tA B X Y\tA B X Y\t0=By position|1=By label|2=Custom\n"
         "Controllers\tgamepad_deadzone\t10\tint\t0\t90\tDead zone\tStick dead zone\t0=0%|10=10%\n"
+        "Controllers\tgamepad_joycon_pair\t1\tint\t0\t1\tJoy-Cons\tPair Joy-Cons\t0=Separate|1=Together\n"
         "Controllers/Button map\tgamepad_map\t\ttext\t\t\tgamepad_buttons=2's map\tButton map\t\n";
     SDL_VirtualJoystickDesc d;
     SDL_JoystickID id;
@@ -357,6 +358,8 @@ static void button_map(App* app) {
     /* no pad: the presets, the one in use focused, the game's own as nothing is picked */
     assert(app->form == GUI_FORM_PAD && app->pads_read && !app->gamepad && app->pad.presets == 4);
     assert(app->pad.in_use == 0 && app->pad.focus == 0 && !strcmp(app->pad.name[3], "Custom"));
+    /* two Joy-Cons one pad, as gamepad_joycon_pair has it when not picked */
+    assert(!strcmp(SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS), "1"));
     render(app);
     shows(app, "SETTINGS  /  CONTROLLERS  /  BUTTON MAP", normal);
     assert(drawn_text(app, "No controller") && drawn_text(app, "Each game's") && drawn_text(app, "By label"));
@@ -489,8 +492,11 @@ static void button_map(App* app) {
     assert(!app->pads_read && !SDL_WasInit(SDL_INIT_GAMEPAD));
     /* a map it cannot read is named, in the failure colour, and the page shows the labels' */
     assert(gui_settings_set(&app->settings, "gamepad_map", "south:Q"));
+    assert(gui_settings_set(&app->settings, "gamepad_joycon_pair", "0")); /* and the Joy-Cons apart */
     key(app, SDLK_RETURN);
     assert(app->form == GUI_FORM_PAD && strstr(app->editor.note, "\"south:Q\" is not a control"));
+    assert(!strcmp(SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS), "0"));
+    assert(gui_settings_set(&app->settings, "gamepad_joycon_pair", ".ini"));
     assert(app->pad.own.bit[SNX_PAD_SOUTH] == SNX_PAD_UNSET);
     render(app);
     {
