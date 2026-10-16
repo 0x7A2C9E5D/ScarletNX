@@ -22,4 +22,9 @@ int gui_android_play(const char* const* argv, char* message, size_t size);
 int gui_android_share(const char* path, char* message, size_t size);
 /* The app behind the others, as it is, for Back on the menu's first screen; 0 with message when it cannot */
 int gui_android_background(char* message, size_t size);
+/* A run's game, the step it shows and its percent (-1 while unknown) in a notification, which keeps the app running
+   behind others; the first call of a run starts it */
+void gui_android_running(const char* game, const char* step, int percent);
+/* The run is over: its notification goes, and one saying result stays when that is not NULL */
+void gui_android_ran(const char* result);
 #endif

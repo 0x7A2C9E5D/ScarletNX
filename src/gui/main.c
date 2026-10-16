@@ -86,6 +86,9 @@ typedef struct {
 #ifdef SDL_PLATFORM_ANDROID
     bool hidden;     /* behind other apps: nothing is drawn, a run is still read */
     bool play_later; /* a game made ready while hidden, which opens once the menu shows */
+    char told[340];  /* the run's notification: its step's line, its percent, when; 0 before its first */
+    int told_percent;
+    Uint64 told_ms;
 #endif
 } App;
 static const char* const items[] = {"Load Switch NSP/XCI/NRO",
@@ -1227,6 +1230,26 @@ static int ready(App* app) {
         }
     return 0;
 }
+/* the run in its notification: the game, the step on the screen and the percent, as they change, a second apart at
+   most (Android drops notifications that come faster) */
+static void tell(App* app) {
+    char name[96], runs[3][112], line[sizeof app->told];
+    size_t lengths[3];
+    int percent = gui_steps_percent(&app->steps);
+    Uint64 now = SDL_max(SDL_GetTicks(), 1);
+    line[0] = 0;
+    if (app->steps.count) {
+        step_runs(&app->steps.step[app->steps.count - 1], runs, lengths);
+        snprintf(line, sizeof line, "%s%s%s", runs[0], runs[1], runs[2]);
+    }
+    if (app->told_ms && (now - app->told_ms < 1000 || (percent == app->told_percent && !strcmp(line, app->told))))
+        return;
+    run_name(app, name, sizeof name);
+    gui_android_running(name, line, percent);
+    snprintf(app->told, sizeof app->told, "%s", line);
+    app->told_percent = percent;
+    app->told_ms = now;
+}
 #endif
 static void pump(App* app) {
     if (app->menu.running) {
@@ -1243,6 +1266,9 @@ static void pump(App* app) {
             app->has_output = true;
         }
         recent_name(app, "LAUNCH");
+#ifdef SDL_PLATFORM_ANDROID
+        tell(app);
+#endif
         int status;
         if (gui_process_finished(app->process, &status)) {
             app->menu.running = false;
@@ -1275,6 +1301,8 @@ static void pump(App* app) {
                 app->play_later = true;
             else if (!app->abnormal_exit && ready(app))
                 leave_run(app);
+            /* seen here, the end needs no word; behind other apps one stays until the menu shows */
+            gui_android_ran(!app->hidden ? NULL : app->abnormal_exit ? "Failed" : "Ready");
 #endif
         }
     }
@@ -1385,6 +1413,11 @@ static void launch(App* app, char* absolute, bool prepared) {
     gui_console_init(&app->console, app->cols - 2, app->rows - 8);
     app->has_output = true;
     layout(app);
+#ifdef SDL_PLATFORM_ANDROID
+    /* now, while the menu shows: Android 12 starts no notification's service for an app behind others */
+    app->told_ms = 0;
+    tell(app);
+#endif
 }
 /* a recent game, run as the menu would: its driver, the options the menu has now */
 static void open_recent(App* app, int index) {
@@ -2017,6 +2050,7 @@ static bool initialize(App* app) {
 static void cleanup(App* app) {
 #ifdef SDL_PLATFORM_ANDROID
     SDL_RemoveEventWatch(lifecycle, app);
+    gui_android_ran(NULL); /* the run goes with the menu */
 #endif
     gui_process_destroy(app->process);
     free(app->file);

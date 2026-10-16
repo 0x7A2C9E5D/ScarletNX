@@ -5,6 +5,7 @@ package org.scarletnx;
 import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Insets;
 import android.media.MediaScannerConnection;
@@ -17,11 +18,15 @@ import android.view.DisplayCutout;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import java.nio.charset.StandardCharsets;
 import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLSurface;
 
 /** The menu: scarletnx-gui, as libmain.so */
 public class MainActivity extends SDLActivity {
+    /** past the request codes SDL counts up from 0 */
+    private static final int ASKED_NOTIFICATIONS = 0x10000;
+
     @Override
     protected String[] getLibraries() {
         return new String[] {"main"};
@@ -48,6 +53,51 @@ public class MainActivity extends SDLActivity {
     /** src/gui/android.c: Back on the menu's first screen, as an app's first screen takes it: the app goes behind */
     public void toBack() {
         moveTaskToBack(true);
+    }
+
+    /** src/gui/android.c: a run's game, step and percent (-1 while unknown), the text as UTF-8, in the notification
+        that keeps it going behind other apps; a run's first asks for what that needs */
+    public void running(byte[] game, byte[] step, int percent) {
+        String title = new String(game, StandardCharsets.UTF_8), text = new String(step, StandardCharsets.UTF_8);
+        runOnUiThread(() -> {
+            if (RecompileService.show(this, title, text, percent)) askBackground();
+        });
+    }
+
+    /** src/gui/android.c: the run is over; result, UTF-8 when not null, stays in a notification */
+    public void ran(byte[] result) {
+        String text = result != null ? new String(result, StandardCharsets.UTF_8) : null;
+        runOnUiThread(() -> RecompileService.end(text));
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        RecompileService.seen(this);
+    }
+
+    /** what a run behind other apps needs, each asked once: its notification (Android 13) */
+    private void askBackground() {
+        SharedPreferences asked = getSharedPreferences("asked", MODE_PRIVATE);
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            once(asked, "notifications"))
+            requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, ASKED_NOTIFICATIONS);
+    }
+
+    /** true the first time, which it records */
+    private static boolean once(SharedPreferences asked, String what) {
+        if (asked.getBoolean(what, false)) return false;
+        asked.edit().putBoolean(what, true).apply();
+        return true;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+        if (code == ASKED_NOTIFICATIONS)
+            askBackground();
+        else
+            super.onRequestPermissionsResult(code, permissions, results);
     }
 
     /** src/gui/android.c: the saved log, as a file, to the app the user picks */
