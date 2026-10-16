@@ -308,7 +308,13 @@ snx_test_target(snx-test-vpad 11)
 target_link_libraries(snx-test-vpad PRIVATE scarletnx-common m)
 add_test(NAME vpad COMMAND snx-test-vpad)
 
+add_executable(snx-test-pad-map pad_map.c)
+snx_test_target(snx-test-pad-map 11)
+target_link_libraries(snx-test-pad-map PRIVATE scarletnx-common)
+add_test(NAME pad_map COMMAND snx-test-pad-map)
+
 add_executable(snx-test-gamepad gamepad.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/backend/gamepad.c"
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/backend/pad_sdl.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-gamepad 11)
 target_link_libraries(snx-test-gamepad PRIVATE scarletnx-common SDL3::SDL3 m)

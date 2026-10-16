@@ -199,6 +199,26 @@ int main(void) {
     CHECK(gamepad_button(SDL_GetJoystickID(xbox), SDL_GAMEPAD_BUTTON_SOUTH) == B);
     CHECK(gamepad_ini("gamepad_buttons", "1") && !gamepad_ini("gamepad", "1"));
 
+    /* gamepad_buttons=2: the player's map, each control what it names, the others as their labels say (a PlayStation
+       pad's too), a trigger as any button; held controls are told apart from what they send; a map it cannot read
+       leaves the one before */
+    CHECK(gamepad_ini("gamepad_buttons", "2") && gamepad_ini("gamepad_map", "south:B east:A lt:R start:None"));
+    CHECK(with(xbox, SDL_GAMEPAD_BUTTON_SOUTH) == B);
+    CHECK(with(xbox, SDL_GAMEPAD_BUTTON_EAST) == A);
+    CHECK(with(xbox, SDL_GAMEPAD_BUTTON_WEST) == X);
+    CHECK(with(sony, SDL_GAMEPAD_BUTTON_SOUTH) == B);
+    CHECK(with(sony, SDL_GAMEPAD_BUTTON_NORTH) == Y);
+    CHECK(with(xbox, SDL_GAMEPAD_BUTTON_START) == 0);
+    CHECK(gamepad_button(SDL_GetJoystickID(xbox), SDL_GAMEPAD_BUTTON_EAST) == A);
+    SDL_SetJoystickVirtualAxis(xbox, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, SDL_JOYSTICK_AXIS_MAX);
+    CHECK(buttons() == (1ull << 7) && (gamepad_held() & 1u << SNX_PAD_LT)); /* R */
+    SDL_SetJoystickVirtualAxis(xbox, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, SDL_JOYSTICK_AXIS_MIN);
+    CHECK(buttons() == 0 && !gamepad_held());
+    CHECK(gamepad_ini("gamepad_map", "south:Q"));
+    CHECK(with(xbox, SDL_GAMEPAD_BUTTON_SOUTH) == B);
+    CHECK(gamepad_ini("gamepad_buttons", "1"));
+    CHECK(with(xbox, SDL_GAMEPAD_BUTTON_SOUTH) == A);
+
     /* the game's vibration on every pad: each motor the stronger of the left and right devices' bands, as strong as
        gamepad_rumble says */
     gamepad_rumble(0x4000u | 0x1000u << 16, 0x2000u | 0x8000u << 16);

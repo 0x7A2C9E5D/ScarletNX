@@ -231,7 +231,8 @@ int main(int argc, char** argv) {
         int lines = 0;
         assert(!snx_run(run, NULL, NULL, &output) && output);
         for (c = output; *c; ++c) lines += *c == '\n';
-        assert(!gui_settings_read(&s, output) && s.count == GUI_SETTINGS_OWN + lines + 2);
+        assert(!gui_settings_read(&s, output) &&
+               s.count == GUI_SETTINGS_OWN + lines + 4); /* two pages: a row, an All */
         assert(!strcmp(s.keys[GUI_SETTINGS_OWN].section, "Display") && !strcmp(s.keys[s.count - 1].section, "Debug"));
         assert(words(key(&s, "fullscreen")) == 3 && words(key(&s, "touch")) == 4 && words(key(&s, "controls")) == 3);
         assert(!strcmp(key(&s, "controls")->key, "Show controls") && !strcmp(key(&s, "touch")->words[3], "Mouse too"));

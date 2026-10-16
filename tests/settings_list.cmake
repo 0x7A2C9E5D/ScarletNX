@@ -21,7 +21,8 @@ foreach(row "Display\tdocked\t0\tint\t0\t1\t1 = TV mode" "Display\tfullscreen\t0
             "\tScale\t0=50%|10=60%|20=70%|30=80%|40=90%|50=100%|60=110%|70=120%|80=130%|90=140%|100=150%\n"
             "On-screen controls\ttouch\t2\tint\t0\t2\t" "\tTouch screen\t0=Off|1=Fingers|2=Mouse too\n"
             "On-screen controls/Buttons\tcontrols_a_shown\t\tint\t0\t1\t" "\tA\t0=Hidden|1=Shown\n"
-            "Controllers\tgamepad_buttons\t1\tint\t0\t1\t" "\tA B X Y\t0=By position|1=By label\n"
+            "Controllers\tgamepad_buttons\t1\tint\t0\t2\t" "\tA B X Y\t0=By position|1=By label|2=Custom\n"
+            "Controllers/Button map\tgamepad_map\t\ttext\t"
             "\tStick dead zone\t0=0%|5=5%|10=10%|" "|90=90%\n" "\tVibration\t0=Off|10=10%|20=20%|"
             "Debug\tlog\t1\tint\t0\t2\t" "\t\t0=0|1=1|2=2\n"
             ", 2 French, 3 German, 4 Italian, 5 Spanish, 6 Chinese, 7 Korean,")
@@ -35,7 +36,7 @@ if(NOT at LESS 0)
     message(FATAL_ERROR "scarletnx --settings lists controls_a, the game's own")
 endif()
 if(NOT list MATCHES
-   "^Display\t.*\nGraphics\t.*\nPerformance\t.*\nOn-screen controls\t.*\nOn-screen controls/Buttons\t.*\nControllers\t.*\nNetwork\t.*\nDebug\t")
+   "^Display\t.*\nGraphics\t.*\nPerformance\t.*\nOn-screen controls\t.*\nOn-screen controls/Buttons\t.*\nControllers\t.*\nControllers/Button map\t.*\nNetwork\t.*\nDebug\t")
     message(FATAL_ERROR "scarletnx --settings lists the sections out of the .ini's order")
 endif()
 if(list MATCHES "\nOn-screen controls/Buttons\t[^\n]*\nOn-screen controls\t") # a page after its section's others

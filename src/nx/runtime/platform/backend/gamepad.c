@@ -6,13 +6,22 @@
 #include "runtime/options.h"
 #include "runtime/platform/log.h"
 #include "runtime/platform/ui.h"
+#include "pad_sdl.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
 
 static SDL_Gamepad* g_pads[SNX_GAMEPADS];
 static char g_names[SNX_GAMEPADS][64]; /* theirs, for the game's menu, which the renderer draws on its thread */
-static SnxGamepadConfig g_cfg = {1, 20, 100, 0};
+static int g_labels[SNX_GAMEPADS][4], g_symmetric[SNX_GAMEPADS]; /* and how its button map screen draws them */
+static unsigned g_held;                                          /* the controls held, a bit each, as last polled */
+#define UNSET SNX_PAD_UNSET
+static SnxGamepadConfig g_cfg = {
+    SNX_PAD_BY_LABEL,
+    20,
+    100,
+    0,
+    {{UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET}}};
 
 /* SDL drops a gamepad's presses while no window of the program has the focus, unless told otherwise; set before it
    starts its gamepads (the .ini is read first), and at once on a change */
@@ -21,10 +30,24 @@ static void background_set(const IniOpt* o, const char* v) {
     (void)v;
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, g_cfg.background ? "1" : "0");
 }
+/* the custom map: what it does not name goes as the labels say. One that cannot be read is said, and changes nothing */
+static void map_set(const IniOpt* o, const char* v) {
+    SnxPadMap map;
+    char word[64];
+    (void)o;
+    snx_pad_map_unset(&map);
+    if (snx_pad_map_read(&map, v, word, sizeof word))
+        WARN("settings: gamepad_map's \"%s\" is not a control and the button it sends (south:B), so the map stays as "
+             "it was\n",
+             word);
+    else
+        g_cfg.own = map;
+}
 const IniOpt g_gamepad_ini[] = {
     {"gamepad_buttons", "1",
-     "A controller's A, B, X and Y: 1 = as their labels say, 0 = by position, as on the console's", INI_INT, 0,
-     &g_cfg.labels, 0, 1, NULL, "A B X Y", "By position|By label", 0, 0},
+     "A controller's A, B, X and Y: 1 = as their labels say, 0 = by position, as on the console's, 2 = the map of\n"
+     ";   gamepad_map",
+     INI_INT, 0, &g_cfg.labels, 0, 2, NULL, "A B X Y", "By position|By label|Custom", 0, 0},
     {"gamepad_deadzone", "20", "The sticks' dead zone, in percent of their travel", INI_INT, 0, &g_cfg.deadzone, 0, 90,
      NULL, "Stick dead zone", "#%", 5, 0},
     {"gamepad_rumble", "100", "How strongly the controllers vibrate when the game asks, in percent: 0 = never", INI_INT,
@@ -32,8 +55,16 @@ const IniOpt g_gamepad_ini[] = {
     {"gamepad_background", "0", "1 = the controllers still play the game while its window is not focused", INI_INT, 0,
      &g_cfg.background, 0, 1, background_set, "Background input", "Off|On", 0, 0},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
+const IniOpt g_gamepad_map_ini[] = {
+    {"gamepad_map", NULL,
+     "gamepad_buttons=2's map: a control by where it sits and the console's button it sends, as south:B east:A.\n"
+     ";   Controls south east west north lb rb lt rt ls rs back start up down left right; buttons A B X Y L R ZL\n"
+     ";   ZR L3 R3 Plus Minus Up Down Left Right None. One left out goes as its label says",
+     INI_TEXT, 0, NULL, 0, 0, map_set, SNX_GAMEPAD_MAP, NULL, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 int gamepad_ini(const char* key, const char* value) {
     const IniOpt* o = ini_find(g_gamepad_ini, key);
+    if (!o) o = ini_find(g_gamepad_map_ini, key);
     if (o) ini_read(o, value);
     return o != NULL;
 }
@@ -48,6 +79,22 @@ void gamepad_store(const int* setting) {
             if (o->set) o->set(o, v);
         }
 }
+void gamepad_store_map(void) {
+    char text[SNX_PAD_MAP_TEXT];
+    snx_pad_map_write(&g_cfg.own, text, sizeof text);
+    ini_set("gamepad_map", text);
+}
+int gamepad_layout(int i, int labels[4], int* symmetric) {
+    int k, c;
+    for (k = 0; k < SNX_GAMEPADS; k++)
+        if (g_names[k][0] && !i--) {
+            for (c = 0; c < 4; c++) labels[c] = g_labels[k][c];
+            *symmetric = g_symmetric[k];
+            return 1;
+        }
+    return 0;
+}
+unsigned gamepad_held(void) { return __atomic_load_n(&g_held, __ATOMIC_RELAXED); }
 const char* gamepad_name(int i) {
     int k;
     for (k = 0; k < SNX_GAMEPADS; k++)
@@ -73,6 +120,8 @@ void gamepad_open(u32 id) {
             ui_lock();
             snprintf(g_names[i], sizeof g_names[i], "%s",
                      SDL_GetGamepadName(g_pads[i]) ? SDL_GetGamepadName(g_pads[i]) : "Gamepad");
+            snx_pad_labels(g_pads[i], g_labels[i]);
+            g_symmetric[i] = snx_pad_symmetric(g_pads[i]);
             ui_unlock();
             return;
         }
@@ -111,55 +160,47 @@ static void dz(i32* x, i32* y) {
 /* SDL's Y axes point down, the Switch's up */
 static i32 up(i32 v) { return v == -32768 ? 32767 : -v; }
 
-/* the console's controller's buttons (HidNpadButton bits) where they sit: A right, B bottom, X top, Y left */
-static const struct {
-    SDL_GamepadButton btn;
-    int bit;
-} MAP[] = {
-    {SDL_GAMEPAD_BUTTON_EAST, 0},          {SDL_GAMEPAD_BUTTON_SOUTH, 1},          {SDL_GAMEPAD_BUTTON_NORTH, 2},
-    {SDL_GAMEPAD_BUTTON_WEST, 3},          {SDL_GAMEPAD_BUTTON_LEFT_STICK, 4},     {SDL_GAMEPAD_BUTTON_RIGHT_STICK, 5},
-    {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, 6}, {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 7}, {SDL_GAMEPAD_BUTTON_START, 10},
-    {SDL_GAMEPAD_BUTTON_BACK, 11},         {SDL_GAMEPAD_BUTTON_DPAD_LEFT, 12},     {SDL_GAMEPAD_BUTTON_DPAD_UP, 13},
-    {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, 14},   {SDL_GAMEPAD_BUTTON_DPAD_DOWN, 15}};
-/* a button's HidNpadButton bit, -1 for none. A face button as its label says (SDL knows each pad's), the symbols as
-   the letters at their places on the most common layout: Cross is A, Circle B, Square X and Triangle Y */
-static int bit_of(SDL_Gamepad* g, SDL_GamepadButton b) {
-    size_t m;
-    if (g_cfg.labels) {
-        switch (SDL_GetGamepadButtonLabel(g, b)) {
-            case SDL_GAMEPAD_BUTTON_LABEL_A:
-            case SDL_GAMEPAD_BUTTON_LABEL_CROSS: return 0;
-            case SDL_GAMEPAD_BUTTON_LABEL_B:
-            case SDL_GAMEPAD_BUTTON_LABEL_CIRCLE: return 1;
-            case SDL_GAMEPAD_BUTTON_LABEL_X:
-            case SDL_GAMEPAD_BUTTON_LABEL_SQUARE: return 2;
-            case SDL_GAMEPAD_BUTTON_LABEL_Y:
-            case SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE: return 3;
-            default: break;
-        }
+/* what each control of g sends, as gamepad_buttons says */
+static void map_of(SDL_Gamepad* g, SnxPadMap* map) {
+    int labels[4];
+    SnxPadMap labeled;
+    if (g_cfg.labels == SNX_PAD_BY_POSITION) {
+        snx_pad_map_position(map);
+        return;
     }
-    for (m = 0; m < sizeof MAP / sizeof MAP[0]; m++)
-        if (MAP[m].btn == b) return MAP[m].bit;
-    return -1;
+    snx_pad_labels(g, labels);
+    snx_pad_map_labels(&labeled, labels);
+    *map = labeled;
+    if (g_cfg.labels == SNX_PAD_CUSTOM) {
+        *map = g_cfg.own;
+        snx_pad_map_fill(map, &labeled);
+    }
 }
 u64 gamepad_button(u32 id, int button) {
     SDL_Gamepad* g = SDL_GetGamepadFromID(id);
-    int bit = g ? bit_of(g, (SDL_GamepadButton)button) : -1;
-    return bit < 0 ? 0 : 1ull << bit;
+    int control = snx_pad_of_button(button);
+    SnxPadMap map;
+    if (!g || control < 0) return 0;
+    map_of(g, &map);
+    return map.bit[control] < 0 ? 0 : 1ull << map.bit[control];
 }
 
 void gamepad_state(u64* buttons, i32 sticks[4]) {
     u64 b = 0;
+    unsigned held = 0;
     int i;
-    size_t m;
     sticks[0] = sticks[1] = sticks[2] = sticks[3] = 0;
     for (i = 0; i < SNX_GAMEPADS; i++) {
         SDL_Gamepad* g = g_pads[i];
+        SnxPadMap map;
+        int c;
         if (!g) continue;
-        for (m = 0; m < sizeof MAP / sizeof MAP[0]; m++)
-            if (SDL_GetGamepadButton(g, MAP[m].btn)) b |= 1ull << bit_of(g, MAP[m].btn);
-        if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 8000) b |= 1ull << 8;
-        if (SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 8000) b |= 1ull << 9;
+        map_of(g, &map);
+        for (c = 0; c < SNX_PAD_CONTROLS; c++)
+            if (snx_pad_held(g, c)) {
+                held |= 1u << c;
+                if (map.bit[c] >= 0) b |= 1ull << map.bit[c];
+            }
         if (!sticks[0] && !sticks[1]) {
             sticks[0] = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX);
             sticks[1] = up(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY));
@@ -172,6 +213,7 @@ void gamepad_state(u64* buttons, i32 sticks[4]) {
         }
     }
     *buttons = b;
+    __atomic_store_n(&g_held, held, __ATOMIC_RELAXED); /* the renderer's thread draws them */
 }
 
 void gamepad_rumble(u32 left, u32 right) {

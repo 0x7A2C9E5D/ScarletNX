@@ -269,7 +269,9 @@ it for one run.
 Windows, Linux and supported Unix systems. Choose the output in your operating system's sound settings. The
 renderer does not render splitters, voice biquad filters, or the delay, reverb and biquad effects yet.
 
-SDL gamepads take A, B, X and Y as their labels say (`gamepad_buttons=0`: by Switch positions), with the sticks'
+SDL gamepads take A, B, X and Y as their labels say (`gamepad_buttons=0`: by Switch positions; `2`: the map in
+`gamepad_map`, a control by where it sits and the button it sends, as `south:B east:A lt:ZL`, the ones it leaves out
+as their labels say), with the sticks'
 dead zone in `gamepad_deadzone` and the game's vibration as strong as `gamepad_rumble` (both in percent), and with
 `gamepad_background=1` still play while the window is not focused; the game's menu (Home, F2) sets them under
 *Controllers*, which names the pads connected. Pads + keyboard share one guest controller. On Linux,

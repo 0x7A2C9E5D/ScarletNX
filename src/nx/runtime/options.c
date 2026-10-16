@@ -227,7 +227,7 @@ static const IniSec INI_SECS[] = {
     {"Performance", {{INI_PERF, NULL}}},
     {SNX_VPAD_PAGE,
      {{g_vpad_ini, backend_ini}, {g_backend_ini, backend_ini}, {g_vpad_shown_ini, backend_ini, SNX_VPAD_BUTTONS}}},
-    {SNX_GAMEPAD_PAGE, {{g_gamepad_ini, backend_ini}}},
+    {SNX_GAMEPAD_PAGE, {{g_gamepad_ini, backend_ini}, {g_gamepad_map_ini, backend_ini, SNX_GAMEPAD_MAP}}},
     {"Network", {{INI_NETWORK, NULL}}},
     {"Debug", {{INI_DBG, NULL}}},
     {NULL, {{NULL, NULL}}}};

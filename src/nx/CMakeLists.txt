@@ -54,7 +54,7 @@ snx_component(gpu gpu/gpu.c gpu/maxwell/engines.c gpu/maxwell/mme.c gpu/maxwell/
 include("${PROJECT_SOURCE_DIR}/cmake/controls_atlas.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
 set(platform runtime/platform/plat.c runtime/platform/unattended.c runtime/platform/backend/sdl3.c
-             runtime/platform/backend/gamepad.c
+             runtime/platform/backend/gamepad.c runtime/platform/backend/pad_sdl.c
              runtime/platform/overlay.c runtime/platform/touch.c runtime/platform/ui.c runtime/platform/vpad.c
              runtime/platform/fatal_screen.c "${CMAKE_BINARY_DIR}/generated/controls_png.c")
 if(WIN32)
