@@ -189,11 +189,14 @@ int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char*
     return 0;
 }
 
-/* rtlib.c as LLVM bitcode (CMakeLists.txt, snx-rtlib-gen embed) */
+/* rtlib.c and armlib.c as LLVM bitcode (CMakeLists.txt, snx-rtlib-gen embed) */
 extern const unsigned char snx_rtlib_bitcode[];
 extern const unsigned long snx_rtlib_bitcode_size;
+extern const unsigned char snx_armlib_bitcode[];
+extern const unsigned long snx_armlib_bitcode_size;
 
-int snx_ir_rtlib_object(char opt, unsigned char** data, size_t* size, char* error, size_t error_size) {
+static int library_object(const char* name, const unsigned char* bitcode, unsigned long bitcode_size, char opt,
+                          unsigned char** data, size_t* size, char* error, size_t error_size) {
     static const char* const target_attributes[] = {"target-cpu", "target-features", "tune-cpu"};
     SnxIr* ir;
     LLVMMemoryBufferRef buffer;
@@ -203,9 +206,9 @@ int snx_ir_rtlib_object(char opt, unsigned char** data, size_t* size, char* erro
     int rc;
     *data = NULL;
     *size = 0;
-    ir = snx_ir_new("rtlib", opt, error, error_size);
+    ir = snx_ir_new(name, opt, error, error_size);
     if (!ir) return -1;
-    buffer = LLVMCreateMemoryBufferWithMemoryRangeCopy((const char*)snx_rtlib_bitcode, snx_rtlib_bitcode_size, "rtlib");
+    buffer = LLVMCreateMemoryBufferWithMemoryRangeCopy((const char*)bitcode, bitcode_size, name);
     rc = LLVMParseBitcodeInContext2(ir->ctx, buffer, &library);
     LLVMDisposeMemoryBuffer(buffer);
     if (rc) {
@@ -227,6 +230,12 @@ int snx_ir_rtlib_object(char opt, unsigned char** data, size_t* size, char* erro
     rc = snx_ir_object(ir, '0', data, size, error, error_size);
     snx_ir_free(ir);
     return rc;
+}
+int snx_ir_rtlib_object(char opt, unsigned char** data, size_t* size, char* error, size_t error_size) {
+    return library_object("rtlib", snx_rtlib_bitcode, snx_rtlib_bitcode_size, opt, data, size, error, error_size);
+}
+int snx_ir_armlib_object(char opt, unsigned char** data, size_t* size, char* error, size_t error_size) {
+    return library_object("armlib", snx_armlib_bitcode, snx_armlib_bitcode_size, opt, data, size, error, error_size);
 }
 
 char* snx_ir_text(SnxIr* ir) { return LLVMPrintModuleToString(ir->mod); }

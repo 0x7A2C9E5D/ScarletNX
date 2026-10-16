@@ -102,7 +102,9 @@ static char* settings_path(const char* out, const char* title) {
     free(folder);
     return path;
 }
-static SnxU64* read_hints(const char* base, size_t* count) {
+/* the hints file: code addresses the runtime met that the recompiler hadn't found. A64 code is word aligned; an
+   AArch32 address has the Thumb bit (bit 0) for a Thumb block, and A32 ones are word aligned */
+static SnxU64* read_hints(const char* base, int is64, size_t* count) {
     char *path = snx_format("%s.hints", base), line[256], *s;
     FILE* f = snx_fopen(path, "r");
     SnxU64 *hints = NULL, value;
@@ -123,7 +125,7 @@ static SnxU64* read_hints(const char* base, size_t* count) {
                 value = (value << 4) | (SnxU64)(c <= '9' ? c - '0' : c - 'a' + 10);
             }
             while (isspace((unsigned char)*s)) ++s;
-            if (!invalid && digits && !*s && !(value & 3)) {
+            if (!invalid && digits && !*s && (is64 ? !(value & 3) : (value & 3) != 2 && !(value >> 32))) {
                 hints = (SnxU64*)snx_realloc(hints, (n + 1) * sizeof(*hints));
                 hints[n++] = value;
             }
@@ -329,8 +331,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     if (compile.target_win != host_win) return snx_error("--target: modules are built for this host only");
     gen.abi = snx_game_abi();
     if (snx_load_program(input, &program, error, sizeof(error))) return snx_error("%s", error);
-    if (!program.npdm.is64) {
-        snx_error("AArch32 programs are unsupported");
+    if (!program.npdm.is64 && backend != SNX_BACKEND_LLVM) {
+        snx_error("AArch32 programs are recompiled by the LLVM backend only (--backend=llvm)");
         goto done;
     }
     title = snx_game_shown(name, &program);
@@ -376,7 +378,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         goto done;
     }
     gen.title = title;
-    gen.hints = read_hints(base, &gen.hint_count);
+    gen.hints = read_hints(base, program.npdm.is64, &gen.hint_count);
     if (!compile.quiet) printf("Recompiling %s (%lu modules)\n", title, (unsigned long)program.module_count);
     if (copy_data(&program, data, compile.quiet)) {
         snx_error("cannot stage game data in %s", data);
@@ -418,8 +420,12 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         llvm.keep_ir = kept;
         i = kept && (snx_is_link(kept) || snx_mkdirs(kept));
         if (i) snx_error("cannot save the generated code in %s", kept);
-        if (!i && backend == SNX_BACKEND_LLVM) i = snx_build_module_llvm(&program, &gen, &llvm);
-        if (!i && backend == SNX_BACKEND_GCC) i = snx_build_module_gccjit(&program, &gen, &llvm);
+        if (!i && !program.npdm.is64)
+            i = snx_build_module_arm(&program, &gen, &llvm);
+        else if (!i && backend == SNX_BACKEND_LLVM)
+            i = snx_build_module_llvm(&program, &gen, &llvm);
+        else if (!i && backend == SNX_BACKEND_GCC)
+            i = snx_build_module_gccjit(&program, &gen, &llvm);
         free(kept);
         if (i) goto done;
     }

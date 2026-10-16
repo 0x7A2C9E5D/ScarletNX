@@ -2,11 +2,12 @@
 
 This is an initial ARMv8-A AArch32 **user-mode CPU backend**, not an AArch32 guest OS or a complete Cortex-A57 emulator. It emits native LLVM IR, not calls to an instruction interpreter. The `snx_arm_llvm` CMake target is built alongside, and linked by, the existing LLVM backend.
 
-The NX and GNU ABI loaders, module ABI, syscall handlers and thread dispatch currently remain A64-specific. They do **not** automatically run 32-bit applications with this change. Connecting those components to the A32 block ABI is a separate integration step. In particular, never pass an existing `CPU*` to an A32 block.
+The NX runtime runs 32-bit programs with it. The recompiler compiles a 32-bit program's blocks ahead of time into its game module (`src/nx/loader/module_arm.c`, an `SnxArmModule`), and the runtime's threads run them one after another (`src/nx/runtime/arm.c`), compiling a block it reaches that the recompiler didn't find and recording it in the hints file for the next recompile. Their SVCs go through the same handlers as 64-bit ones, with the registers moved into the 64-bit SVC ABI's places (`snx_svc32` in `src/nx/hle/svc/svc.c`). The GNU ABI runner (`src/gnuabi/runtime/arm_exec.c`) and the recompiler library (`snx_recompile32`) compile blocks on first use. Never pass an A64 `CPU*` to an A32 block.
 
 ## Files and API
 
-- `arm.h`: separate, versioned `SnxArmCPU` state and exit reasons, plus the Thumb decode model.
+- `arm.h`: separate, versioned `SnxArmCPU` state and exit reasons, the backend's `SnxArmRt`, plus the Thumb decode model.
+- `rt_helpers.c`: the runtime library's calls into the backend (`snx_arm_undefined`, `snx_arm_coproc`), with the defaults for no backend.
 - `a32.c`: validated A32 decoder and explicit libgccjit unsupported stub. No LLVM dependency.
 - `thumb_decode.c`: validated Thumb16/Thumb32 decoder to an explicit operand model.
 - `llvm.h`, `llvm.c`, `llvm_vector.inc`, `llvm_thumb.inc`: `snx_arm_llvm_block(module, name, words, count, pc, &consumed)` and `snx_thumb_llvm_block(module, name, halfwords, count, pc, &consumed)` emit `void name(SnxArmCPU*)` into a **host-target** LLVM module.
@@ -29,10 +30,23 @@ On return:
 
 Use bounded blocks for scheduling and polling. The caller owns instruction fetching, executable-page validation, block lookup, object loading, code-cache invalidation, syscall dispatch, and clearing monitors on context switches. For example, the existing `SnxIr` module/object utilities can host these functions, but its A64 function dispatcher cannot call them.
 
+## What the backend decides
+
+Generated code doesn't decide two things itself. It calls the runtime library, which asks the backend through `cpu->rt` (an `SnxArmRt`, `SNX_ARM_ABI` 3):
+
+- An instruction the block compiler doesn't implement, or can't with the block's memory model, calls `snx_arm_undefined(cpu, word, reason)`. The backend runs it and returns with `exit` clear, and the block goes on after it, or it sets `exit` and the block stops at it. Without a backend, `exit` is `reason` (`SNX_ARM_UNDEFINED`, `SNX_ARM_BACKEND_UNSUPPORTED`) and `syndrome` the word, as before.
+- MRC, MCR, MRRC and MCRR to coprocessors 14 and 15 call `snx_arm_coproc(cpu, word)`: which system registers user mode reaches, and what they hold, is the system's. The NX runtime gives the generic timer's CNTPCT, CNTVCT and CNTFRQ (the SDK's system tick) and the CP15 barriers. Without a backend, `snx_arm_coproc_user` gives TPIDRURW and TPIDRURO from the CPU's fields, and anything else is `SNX_ARM_UNDEFINED`.
+
+Programs linking blocks link `snx_arm_rt`; LLVM's JIT finds its functions through `snx_arm_exec_symbols` (`exec.h`).
+
+## Thumb32 instructions with A32 twins
+
+Many Thumb32 instructions are A32 ones with their fields elsewhere: coprocessor, VFP and Advanced SIMD (the same bits, or the top byte moved), LDM/STM and PUSH.W/POP.W, the exclusives and acquire/release, barriers, MRS/MSR, long multiplies and divides, REV/RBIT/CLZ and the extends with add. `thumb_decode.c` decodes them to `TH_A32`, the A32 word and its kind, and the A32 emitter runs them reading Thumb's PC. A doubleword exclusive's second register, which Thumb names freely, comes with it. LDRD/STRD (`TH_DUAL`) are Thumb's own, as their register pair and offset are.
+
 ## Opt-in ARM11 profile and checked memory
 
-The existing APIs still select **A57 + flat memory**; `SnxArmCPU`, `SNX_ARM_ABI=2`
-and its field offsets have not changed. No board-specific compile definition
+The existing APIs still select **A57 + flat memory**; `SnxArmCPU` (`SNX_ARM_ABI=3`,
+which added `rt` after the register file) and its field offsets are shared by both. No board-specific compile definition
 changes shared code generation. Other boards opt in through the `_ex` APIs:
 
 ```c

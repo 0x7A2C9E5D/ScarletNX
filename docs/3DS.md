@@ -65,8 +65,10 @@ Implemented:
   RAM range-validation operations do not partially change guest memory/mappings.
   No flat host pointer is exposed.
 - Initial 2b: shared A32 codegen has independent, explicitly selected ARM11 ISA
-  and checked-memory options. Existing A57 APIs/defaults and `SnxArmCPU` ABI 2
-  remain unchanged. No 3DS global compiler define affects other boards.
+  and checked-memory options. Existing A57 APIs/defaults are shared, and
+  `SnxArmCPU` ABI 3's `rt` lets the CTR adapter decide unsupported instructions
+  and CP15 itself (`cpu/arm/README.md`); NULL keeps the exits. No 3DS global
+  compiler define affects other boards.
 - `src/3ds/cpu/ctr_cpu.h`: versioned checked CPU state, USR initialization and
   callbacks connecting statically generated integer instructions to the page
   controller, including aliases, R/W/X, whole-range multiword RAM validation and

@@ -31,6 +31,7 @@ class CPU(C.Structure):
         ('tpidruro', C.c_uint32),
         ('fpscr', C.c_uint32),
         ('d', C.c_uint64 * 32),
+        ('rt', C.c_void_p),  # the backend's SnxArmRt: none, the runtime library's defaults
     ]
 
 
@@ -188,13 +189,13 @@ def state(words, seed=1, group='data'):
     return cpu, memory
 
 
-def compile_library(emitter, cc, directory, opt):
+def compile_library(emitter, cc, directory, opt, runtime):
     words = directory / 'words.txt'
     words.write_text(''.join(f'{pc:x} ' + ' '.join(f'{w:08x}' for w in p) + '\n' for pc, p in zip(PCS, PROGRAMS)))
     obj = directory / f'arm{opt}.o'
     lib = directory / f'arm{opt}.so'
     subprocess.run([emitter, str(words), str(obj), str(opt)], check=True)
-    subprocess.run([cc, '-shared', str(obj), '-o', str(lib)], check=True)
+    subprocess.run([cc, '-shared', str(obj), runtime, '-o', str(lib)], check=True)
     handle = C.CDLL(str(lib))
     functions = []
     for i in range(len(PROGRAMS)):
@@ -386,6 +387,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--emitter', required=True)
     parser.add_argument('--cc', default='clang')
+    parser.add_argument('--runtime', required=True, help='libsnx_arm_rt.a')
     parser.add_argument('--unicorn', action='store_true')
     parser.add_argument('--opt', choices=('0', '2'), action='append')
     args = parser.parse_args()
@@ -395,7 +397,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='snx-a32-') as directory:
         for opt in args.opt or ('0', '2'):
             print(f'A32 LLVM O{opt}', flush=True)
-            functions = compile_library(args.emitter, args.cc, pathlib.Path(directory), opt)
+            functions = compile_library(args.emitter, args.cc, pathlib.Path(directory), opt, args.runtime)
             run_witnesses(functions, tests)
             if args.unicorn:
                 differential(functions)

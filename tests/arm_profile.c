@@ -38,6 +38,8 @@ int main(void) {
     }
     assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM11, 0xe1631381) == SNX_A32_UNDEFINED); /* SMULBB, Rn not 0 */
     assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM11, 0xe14442c1) == SNX_A32_UNDEFINED); /* SMLAL RdHi == RdLo */
+    /* A57: a CP15 barrier is a coprocessor access, which the backend allows or refuses (SnxArmRt.coproc) */
+    assert(snx_a32_decode(0xee070fba) == SNX_A32_COPROC);
     assert(snx_a32_decode_profile((SnxArmProfile)99, 0xe1a00000) == SNX_A32_UNDEFINED);
     uint32_t state = 1234;
     for (unsigned i = 0; i < 100000; ++i) {

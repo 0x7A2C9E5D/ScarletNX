@@ -13,6 +13,9 @@ typedef struct {
     LLVMValueRef fn, cpu, mem;
     LLVMTypeRef i1, i8, i16, i32, i64, ptr;
     uint32_t pc, word;
+    uint32_t next; /* the next instruction's address */
+    int thumb;     /* a Thumb block: an A32 emitter running a Thumb32 instruction's A32 twin reads Thumb's PC */
+    unsigned pair; /* a Thumb32 doubleword exclusive's second register + 1 (TH_A32's .ra); 0: A32's first + 1 */
     SnxArmProfile profile;
     SnxArmMemoryMode memory;
     LLVMValueRef transfer_base, transfer_buffer;
@@ -54,14 +57,45 @@ static void put(ArmIR* a, size_t offset, LLVMValueRef v) { LLVMBuildStore(a->b, 
 #define GET(a, f)    get(a, offsetof(SnxArmCPU, f), (a)->i32)
 #define PUT(a, f, v) put(a, offsetof(SnxArmCPU, f), v)
 static LLVMValueRef reg(ArmIR* a, unsigned r) {
-    return r == 15 ? c32(a, a->pc + 8) : get(a, offsetof(SnxArmCPU, r) + r * 4, a->i32);
+    return r == 15 ? c32(a, a->thumb ? (a->pc + 4) & ~3u : a->pc + 8) : get(a, offsetof(SnxArmCPU, r) + r * 4, a->i32);
 }
 static void setreg(ArmIR* a, unsigned r, LLVMValueRef v) { put(a, offsetof(SnxArmCPU, r) + r * 4, v); }
 static LLVMValueRef flag(ArmIR* a, unsigned n) { return band(a, lsr(a, GET(a, cpsr), n), c32(a, 1)); }
 static LLVMBasicBlockRef block(ArmIR* a, const char* name) {
     return LLVMAppendBasicBlockInContext(a->ctx, a->fn, name);
 }
+/* void name(SnxArmCPU*, u32...): a call into the runtime library (rt_helpers.c), which may change any of the state */
+static void rt_call(ArmIR* a, const char* name, LLVMValueRef* args, unsigned count) {
+    LLVMTypeRef params[3] = {a->ptr, a->i32, a->i32};
+    LLVMTypeRef type = LLVMFunctionType(LLVMVoidTypeInContext(a->ctx), params, count + 1, 0);
+    LLVMValueRef fn = LLVMGetNamedFunction(a->mod, name), all[3];
+    unsigned i;
+    if (!fn) fn = LLVMAddFunction(a->mod, name, type);
+    all[0] = a->cpu;
+    for (i = 0; i < count; ++i) all[i + 1] = args[i];
+    LLVMBuildCall2(a->b, type, fn, all, count + 1, "");
+}
+/* after a runtime library call: the block ends here when it set an exit */
+static void stop_on_exit(ArmIR* a) {
+    LLVMBasicBlockRef go = block(a, "go"), stop = block(a, "stop");
+    LLVMBuildCondBr(a->b, LLVMBuildICmp(a->b, LLVMIntEQ, GET(a, exit), c32(a, SNX_ARM_OK), ""), go, stop);
+    LLVMPositionBuilderAtEnd(a->b, stop);
+    LLVMBuildRetVoid(a->b);
+    LLVMPositionBuilderAtEnd(a->b, go);
+}
+/* Ends the block with an exit. An instruction the block can't run (UNDEFINED, BACKEND_UNSUPPORTED) is the backend's
+   to decide instead (SnxArmRt.undefined): the block ends at it when it sets an exit, or after it when it ran it */
 static void trap(ArmIR* a, SnxArmExit code, LLVMValueRef syndrome) {
+    if (code == SNX_ARM_UNDEFINED || code == SNX_ARM_BACKEND_UNSUPPORTED) {
+        LLVMValueRef args[2];
+        args[0] = syndrome;
+        args[1] = c32(a, code);
+        rt_call(a, "snx_arm_undefined", args, 2);
+        stop_on_exit(a);
+        setreg(a, 15, c32(a, a->next));
+        LLVMBuildRetVoid(a->b);
+        return;
+    }
     PUT(a, exit, c32(a, code));
     PUT(a, syndrome, syndrome);
     LLVMBuildRetVoid(a->b);
@@ -490,7 +524,9 @@ static void exclusive(ArmIR* a) {
         PUT(a, exclusive_size, c32(a, bytes));
         PUT(a, exclusive_valid, c32(a, 1));
         setreg(a, d, LLVMBuildTrunc(a->b, value, a->i32, ""));
-        if (bytes == 8) setreg(a, d + 1, LLVMBuildTrunc(a->b, LLVMBuildLShr(a->b, value, c64(a, 32), ""), a->i32, ""));
+        if (bytes == 8)
+            setreg(a, a->pair ? a->pair - 1 : d + 1,
+                   LLVMBuildTrunc(a->b, LLVMBuildLShr(a->b, value, c64(a, 32), ""), a->i32, ""));
     } else {
         LLVMBasicBlockRef attempt = block(a, "exclusive.try"), fail = block(a, "exclusive.fail"),
                           join = block(a, "exclusive.end");
@@ -504,7 +540,8 @@ static void exclusive(ArmIR* a) {
         LLVMPositionBuilderAtEnd(a->b, attempt);
         value = reg(a, t);
         if (bytes == 8)
-            value = bor(a, z64(a, value), LLVMBuildShl(a->b, z64(a, reg(a, t + 1)), c64(a, 32), ""));
+            value = bor(a, z64(a, value),
+                        LLVMBuildShl(a->b, z64(a, reg(a, a->pair ? a->pair - 1 : t + 1)), c64(a, 32), ""));
         else if (bytes < 4)
             value = LLVMBuildTrunc(a->b, value, type, "");
         expected = get(a, offsetof(SnxArmCPU, exclusive_value), a->i64);
@@ -681,8 +718,8 @@ static void miscellaneous(ArmIR* a, SnxA32Kind kind) {
             r = band(a, lsr(a, x, lsb), c32(a, mask));
             if (!(w & (1u << 22)) && width < 32) r = LLVMBuildAShr(a->b, shl(a, r, 32 - width), c32(a, 32 - width), "");
         }
-    } else if (kind == SNX_A32_MRS)
-        r = GET(a, cpsr);
+    } else if (kind == SNX_A32_MRS) /* the execution state bits (IT, J, T) read as zero */
+        r = band(a, GET(a, cpsr), c32(a, ~(0x0600FC00u | (1u << 24) | SNX_ARM_T)));
     else if (kind == SNX_A32_MSR) {
         LLVMValueRef unused;
         uint32_t mask = (n & 8 ? 0xf8000000u : 0) | (n & 4 ? 0x000f0000u : 0);
@@ -692,6 +729,7 @@ static void miscellaneous(ArmIR* a, SnxA32Kind kind) {
     }
     setreg(a, d, r);
 }
+static int instruction(ArmIR* a, SnxA32Kind kind); /* Thumb32 runs A32 twins through it (TH_A32) */
 #include "common/cpu/arm/llvm_vector.inc"
 #include "common/cpu/arm/llvm_thumb.inc"
 
@@ -747,12 +785,12 @@ static int instruction(ArmIR* a, SnxA32Kind kind) {
             LLVMBuildFence(a->b, LLVMAtomicOrderingSequentiallyConsistent, 0, "");
             break;
         case SNX_A32_HINT: break; /* hints may complete without waiting */
-        case SNX_A32_TLS:
-            if (w & (1u << 20))
-                setreg(a, d, w & 0x20 ? GET(a, tpidruro) : GET(a, tpidrurw));
-            else
-                PUT(a, tpidrurw, reg(a, d));
+        case SNX_A32_COPROC: {    /* the backend's (SnxArmRt.coproc): it reads or writes the registers, or stops here */
+            LLVMValueRef word = c32(a, w);
+            rt_call(a, "snx_arm_coproc", &word, 1);
+            stop_on_exit(a);
             break;
+        }
         case SNX_A32_SVC:
         case SNX_A32_BKPT:
             setreg(a, 15, c32(a, a->pc + 4));
@@ -808,6 +846,7 @@ LLVMValueRef snx_arm_llvm_block_ex(LLVMModuleRef module, const char* name, const
         LLVMBasicBlockRef execute = block(&a, "execute"), skip = block(&a, "skip"), next = block(&a, "next");
         int stop;
         a.pc = pc + (uint32_t)i * 4;
+        a.next = a.pc + 4;
         a.word = words[i];
         setreg(&a, 15, c32(&a, a.pc));
         instruction_fetch(&a, a.word, 4);

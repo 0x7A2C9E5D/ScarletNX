@@ -37,16 +37,16 @@ if(NOT SNX_BUILD_NX AND NOT SNX_BUILD_GNUABI)
     add_test(NAME arm_decode COMMAND snx-test-arm-decode)
     if(Python3_Interpreter_FOUND AND UNIX)
         add_test(NAME arm_llvm_witnesses COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm_test.py"
-            --emitter $<TARGET_FILE:snx-test-arm-emit> --cc "${CMAKE_C_COMPILER}")
+            --emitter $<TARGET_FILE:snx-test-arm-emit> --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}")
         add_test(NAME arm_checked_matrix COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm_checked_matrix.py"
-            --emitter $<TARGET_FILE:snx-test-arm-emit> --cc "${CMAKE_C_COMPILER}")
+            --emitter $<TARGET_FILE:snx-test-arm-emit> --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}")
         set_tests_properties(arm_checked_matrix PROPERTIES TIMEOUT 300)
         option(SNX_TEST_ARM_DIFF "Compare A32 LLVM execution with Python unicorn 2.1.4" OFF)
         if(SNX_TEST_ARM_DIFF)
             add_test(NAME arm_llvm_differential COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm_test.py"
-                --emitter $<TARGET_FILE:snx-test-arm-emit> --cc "${CMAKE_C_COMPILER}" --unicorn)
+                --emitter $<TARGET_FILE:snx-test-arm-emit> --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}" --unicorn)
             add_test(NAME arm11_llvm_differential COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm11_test.py"
-                --emitter $<TARGET_FILE:snx-test-arm-emit> --cc "${CMAKE_C_COMPILER}")
+                --emitter $<TARGET_FILE:snx-test-arm-emit> --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}")
             set_tests_properties(arm_llvm_differential arm11_llvm_differential PROPERTIES TIMEOUT 900)
             get_filename_component(snx_llvm_config_real "${SNX_LLVM_CONFIG}" REALPATH)
             get_filename_component(snx_llvm_bin "${snx_llvm_config_real}" DIRECTORY)
@@ -60,7 +60,7 @@ if(NOT SNX_BUILD_NX AND NOT SNX_BUILD_GNUABI)
                     --emitter $<TARGET_FILE:snx-test-arm-emit> --runtime $<TARGET_FILE:snx_arm_rt>
                     --mc "${SNX_LLVM_MC}" --cc "${CMAKE_C_COMPILER}")
                 add_test(NAME thumb_llvm COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/thumb_test.py"
-                    --emitter $<TARGET_FILE:snx-test-thumb-emit> --mc "${SNX_LLVM_MC}" --cc "${CMAKE_C_COMPILER}")
+                    --emitter $<TARGET_FILE:snx-test-thumb-emit> --runtime $<TARGET_FILE:snx_arm_rt> --mc "${SNX_LLVM_MC}" --cc "${CMAKE_C_COMPILER}")
                 set_tests_properties(arm_llvm_vector thumb_llvm PROPERTIES TIMEOUT 1800)
             endif()
         endif()

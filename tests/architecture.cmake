@@ -15,6 +15,12 @@ if(Python3_Interpreter_FOUND) # tests/CMakeLists.txt looked it up
                 --runtime $<TARGET_FILE:scarletnx> --repo "${PROJECT_SOURCE_DIR}"
                 --artifact-dir "${PROJECT_BINARY_DIR}/nx-smoke-failures")
         set_tests_properties(nx_runtime_homebrew PROPERTIES TIMEOUT 90)
+        # a 32-bit program, A32 and Thumb, built by the project's Clang for AArch32 (no ARM linker needed)
+        add_test(NAME nx_runtime_arm32
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/nx_arm32_smoke.py"
+                --runtime $<TARGET_FILE:scarletnx> --cc "${CMAKE_C_COMPILER}" --repo "${PROJECT_SOURCE_DIR}"
+                --artifact-dir "${PROJECT_BINARY_DIR}/nx-arm32-failures")
+        set_tests_properties(nx_runtime_arm32 PROPERTIES TIMEOUT 300)
     endif()
     if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY AND UNIX AND NOT APPLE)
         add_test(NAME xdg_layout

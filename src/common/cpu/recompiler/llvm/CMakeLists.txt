@@ -50,7 +50,7 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib${CMAKE_C_OUTPUT_EXT
     COMMAND "${CMAKE_C_COMPILER}" ${snx_rtlib_flags} -I "${CMAKE_CURRENT_BINARY_DIR}"
         -I "${PROJECT_SOURCE_DIR}/src" -c "${CMAKE_CURRENT_SOURCE_DIR}/rtlib.c"
         -o "${CMAKE_CURRENT_BINARY_DIR}/rtlib${CMAKE_C_OUTPUT_EXTENSION}"
-    DEPENDS rtlib.c "${CMAKE_CURRENT_BINARY_DIR}/rtlib_interp.inc" ${snx_rtlib_sources} VERBATIM)
+    DEPENDS rtlib.c libc.inc "${CMAKE_CURRENT_BINARY_DIR}/rtlib_interp.inc" ${snx_rtlib_sources} VERBATIM)
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c"
     COMMAND "${snx_rtlib_gen}" embed "${CMAKE_CURRENT_BINARY_DIR}/rtlib${CMAKE_C_OUTPUT_EXTENSION}"
         "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c" snx_rtlib_object
@@ -91,13 +91,31 @@ else()
             -o "${CMAKE_CURRENT_BINARY_DIR}/rtlib.bc"
         DEPENDS rtlib.c "${CMAKE_CURRENT_BINARY_DIR}/rtlib_interp.inc" ${snx_rtlib_sources} VERBATIM)
 endif()
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib.bc"
+    COMMAND "${CMAKE_C_COMPILER}" ${snx_rtlib_flags} -emit-llvm -I "${CMAKE_CURRENT_BINARY_DIR}"
+        -I "${PROJECT_SOURCE_DIR}/src" -c "${CMAKE_CURRENT_SOURCE_DIR}/rtlib.c"
+        -o "${CMAKE_CURRENT_BINARY_DIR}/rtlib.bc"
+    DEPENDS rtlib.c libc.inc "${CMAKE_CURRENT_BINARY_DIR}/rtlib_interp.inc" ${snx_rtlib_sources} VERBATIM)
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c"
     COMMAND "${snx_rtlib_gen}" embed "${CMAKE_CURRENT_BINARY_DIR}/rtlib.bc"
         "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c" snx_rtlib_bitcode
     DEPENDS "${snx_rtlib_gen}" "${CMAKE_CURRENT_BINARY_DIR}/rtlib.bc" VERBATIM)
 
+# armlib.c: what a 32-bit module links instead (the AArch32 blocks' VFP, SIMD and crypto helpers)
+file(GLOB snx_armlib_sources CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/*.h"
+    "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/*_helpers.c")
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/armlib.bc"
+    COMMAND "${CMAKE_C_COMPILER}" ${snx_rtlib_flags} -emit-llvm -I "${PROJECT_SOURCE_DIR}/src"
+        -c "${CMAKE_CURRENT_SOURCE_DIR}/armlib.c" -o "${CMAKE_CURRENT_BINARY_DIR}/armlib.bc"
+    DEPENDS armlib.c libc.inc ${snx_armlib_sources} ${snx_rtlib_sources} VERBATIM)
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/armlib_bitcode.c"
+    COMMAND "${snx_rtlib_gen}" embed "${CMAKE_CURRENT_BINARY_DIR}/armlib.bc"
+        "${CMAKE_CURRENT_BINARY_DIR}/armlib_bitcode.c" snx_armlib_bitcode
+    DEPENDS "${snx_rtlib_gen}" "${CMAKE_CURRENT_BINARY_DIR}/armlib.bc" VERBATIM)
+
 add_library(snx_llvm STATIC ir.c ir_a64.c ir_simd.c ir_fp.c ir_codegen.c link.c link_elf.c link_coff.c
-    "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c" "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c")
+    "${CMAKE_CURRENT_BINARY_DIR}/rtlib_object.c" "${CMAKE_CURRENT_BINARY_DIR}/rtlib_bitcode.c"
+    "${CMAKE_CURRENT_BINARY_DIR}/armlib_bitcode.c")
 set_target_properties(snx_llvm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
 target_include_directories(snx_llvm SYSTEM PUBLIC "${SNX_LLVM_INCLUDE_DIR}")
 target_compile_options(snx_llvm PRIVATE -Wall -Wextra -Werror=missing-prototypes)

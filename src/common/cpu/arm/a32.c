@@ -31,8 +31,10 @@ SnxA32Kind snx_a32_decode(uint32_t w) {
     if ((w & 0x0ffffff0) == 0x012fff10 || (w & 0x0ffffff0) == 0x012fff30)
         return m != 15 ? SNX_A32_BX : SNX_A32_UNDEFINED;
     if ((w & 0x0ff000f0) == 0x01200070) return (w >> 28) == 14 ? SNX_A32_BKPT : SNX_A32_UNDEFINED;
-    if ((w & 0x0fff0fff) == 0x0e1d0f50 || (w & 0x0fff0fff) == 0x0e1d0f70 || (w & 0x0fff0fff) == 0x0e0d0f50)
-        return d != 15 ? SNX_A32_TLS : SNX_A32_UNDEFINED;
+    /* MRC/MCR and MRRC/MCRR to the system coprocessors: which registers exist, and what they hold, is the backend's
+       (SnxArmRt.coproc). Coprocessors 10 and 11 are VFP's, decoded above */
+    if (((w & 0x0f000010) == 0x0e000010 || (w & 0x0fe00000) == 0x0c400000) && (s == 14 || s == 15))
+        return SNX_A32_COPROC;
     if ((w & 0x0f000000) == 0x0f000000) return SNX_A32_SVC;
     if ((w & 0x0e000000) == 0x0a000000) return SNX_A32_BRANCH;
     if ((w & 0x0ffffff0) == 0x0320f000) return (w & 15) <= 5 ? SNX_A32_HINT : SNX_A32_UNDEFINED;
