@@ -76,6 +76,7 @@ SnxCtrProcess* snx_ctr_process_new(const SnxCtrImage* image, SnxCtrModel model) 
     SnxCtrProcess* p = calloc(1, sizeof *p + app_limit / 4096);
     if (!p) return NULL;
     p->app_limit = app_limit;
+    p->gsp.rights_thread = UINT32_MAX; /* no GPU right holder until an AcquireRight */
     p->physical_next = CTR_PHYS_BASE;
     p->physical_end = p->physical_next + p->app_limit;
     p->objects[1] = (CtrObject){.type = CTR_OBJ_PROCESS, .refs = 1};

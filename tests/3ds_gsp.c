@@ -87,9 +87,15 @@ int main(int argc, char** argv) {
         assert(!snx_ctr_session_create(p, SNX_CTR_SERVICE_GSP, &gsp));
         uint32_t event = 0;
         assert(!snx_ctr_object_create(p, CTR_OBJ_EVENT, &event));
+        /* libctru's gspInit takes the GPU right before it registers its relay queue, and keeps it */
+        assert(p->gsp.rights_thread == UINT32_MAX);
+        uint32_t acquire[] = {0x00160042, 0, 0, CTR_PROCESS_HANDLE};
+        request(p, gsp, acquire, 4, SNX_CTR_SVC_RETURN, 0);
+        assert(!get(p, 1));
         uint32_t register_relay[] = {0x00130042, 1, 0, event};
         request(p, gsp, register_relay, 4, SNX_CTR_SVC_RETURN, 0);
         assert(get(p, 0) == 0x00130082 && get(p, 1) == 0x2a07 && get(p, 2) == 0 && get(p, 3) == 0x10);
+        assert(p->gsp.rights_thread == snx_ctr_handle_object(p, gsp));
         uint32_t shared = get(p, 4);
         assert(snx_ctr_handle_object(p, shared) && !snx_ctr_handle_object(p, shared ^ 1u));
         /* A second registration reports success, not another first-init. */
@@ -109,7 +115,6 @@ int main(int argc, char** argv) {
         assert(snx_ctr_svc(p, 0x02) == SNX_CTR_SVC_RETURN && !p->cpu.state.cpu.r[0]);
         assert(at(p, 0x300000) == QUEUE && at(p, 0x300004) == 0x1000 && at(p, 0x300008) == 3 && at(p, 0x30000c) == 6);
         /* GPU right + process handle check. */
-        uint32_t acquire[] = {0x00160042, 0, 0, CTR_PROCESS_HANDLE};
         request(p, gsp, acquire, 4, SNX_CTR_SVC_RETURN, 0);
         assert(!get(p, 1));
         acquire[3] = 0x1234;

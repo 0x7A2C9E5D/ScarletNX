@@ -280,7 +280,6 @@ static void register_relay(SnxCtrIpc* c) {
         p->objects[id].data.shared.size = GSP_SHARED_SIZE;
         p->objects[id].data.shared.permissions = 3;
         p->gsp.shared_object = id;
-        p->gsp.rights_thread = UINT32_MAX;
         p->gsp.next_vblank_ns = (uint64_t)(snx_seconds() * 1e9) + GSP_VBLANK_NS;
         /* The block keeps its own reference while the process holds it. */
         ++p->objects[id].refs;
