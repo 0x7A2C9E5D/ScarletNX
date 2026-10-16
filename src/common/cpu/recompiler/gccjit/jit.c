@@ -160,12 +160,27 @@ const char* snx_jit_error(SnxJit* jit) { return gcc_jit_context_get_first_error(
 
 /* v fitted to the type: truncated, sign-extended for signed types; 128-bit types take v zero-extended (a long would
    sign-extend from bit 63) */
+/* libgccjit takes constants as a C long, 32 bits on Windows: a wider one is built from its halves, which GCC folds */
+static gcc_jit_rvalue* constant(SnxJit* jit, gcc_jit_type* type, SnxU64 v) {
+    gcc_jit_rvalue *high, *low;
+    if ((SnxU64)(long)v == v) return gcc_jit_context_new_rvalue_from_long(jit->ctx, type, (long)v);
+    high = gcc_jit_context_new_cast(jit->ctx, NULL,
+                                    gcc_jit_context_new_rvalue_from_long(jit->ctx, jit->t_u32, (long)(SnxU32)(v >> 32)),
+                                    jit->t_u64);
+    low = gcc_jit_context_new_cast(
+        jit->ctx, NULL, gcc_jit_context_new_rvalue_from_long(jit->ctx, jit->t_u32, (long)(SnxU32)v), jit->t_u64);
+    high = gcc_jit_context_new_binary_op(jit->ctx, NULL, GCC_JIT_BINARY_OP_LSHIFT, jit->t_u64, high,
+                                         gcc_jit_context_new_rvalue_from_int(jit->ctx, jit->t_u64, 32));
+    return gcc_jit_context_new_cast(
+        jit->ctx, NULL,
+        gcc_jit_context_new_binary_op(jit->ctx, NULL, GCC_JIT_BINARY_OP_BITWISE_OR, jit->t_u64, high, low), type);
+}
+
 gcc_jit_rvalue* jit_k(SnxJit* jit, gcc_jit_type* type, SnxU64 v) {
     unsigned bits = 64;
     int is_signed = 0;
     if (type == jit->t_u128 || type == jit->t_s128)
-        return gcc_jit_context_new_cast(jit->ctx, NULL,
-                                        gcc_jit_context_new_rvalue_from_long(jit->ctx, jit->t_u64, (long)v), type);
+        return gcc_jit_context_new_cast(jit->ctx, NULL, constant(jit, jit->t_u64, v), type);
     if (type == jit->t_u8 || type == jit->t_s8)
         bits = 8;
     else if (type == jit->t_u16 || type == jit->t_s16)
@@ -178,7 +193,7 @@ gcc_jit_rvalue* jit_k(SnxJit* jit, gcc_jit_type* type, SnxU64 v) {
         v &= mask;
         if (is_signed && (v >> (bits - 1))) v |= ~mask;
     }
-    return gcc_jit_context_new_rvalue_from_long(jit->ctx, type, (long)v);
+    return constant(jit, type, v);
 }
 gcc_jit_rvalue* jit_u64(SnxJit* jit, SnxU64 v) { return jit_k(jit, jit->t_u64, v); }
 gcc_jit_rvalue* jit_u32(SnxJit* jit, SnxU32 v) { return jit_k(jit, jit->t_u32, v); }
