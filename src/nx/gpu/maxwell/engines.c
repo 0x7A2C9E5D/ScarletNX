@@ -8,7 +8,6 @@
 
 /* ============================================================ Maxwell 3D */
 #define R3(i) (ch->r3d[i])
-static u32 g_instance_count;
 /* instancing comes in as N BEGIN/END pairs with the next-instance bit. we accumulate them and emit
    one draw of N instances once something else shows up */
 static struct {
@@ -71,21 +70,9 @@ void query_get(GpuChannel* ch, u32* r, int base, u32 v) {
             u64 q[2] = {seq, gpu_ticks()};
             gmem_write(addr, q, 16);
         }
-    } else if (op == 1) { /* acquire: COMPARISON (bit 16) is EQ (0) or GE (1) */
-        int ge = (v >> 16) & 1;
-        u64 end = plat_ns() + 1000000000ull;
-        for (;;) {
-            u32 cur = gmem_r32(addr);
-            if (ge ? (i32)(cur - seq) >= 0 : cur == seq) break;
-            if (plat_ns() >= end) {
-                /* every channel's stream runs on the one GPU thread: a release that has to come from another
-                   channel's submission can't happen while this waits */
-                WARN("gpu: channel %u waited 1 s for report semaphore %llx to %s %x (it has %x), and goes on\n", ch->id,
-                     (unsigned long long)addr, ge ? "reach" : "equal", seq, cur);
-                break;
-            }
-            plat_yield();
-        }
+    } else if (op == 1) {
+        /* acquire: COMPARISON (bit 16) is EQ (0) or GE (1). From a macro, the wait starts once the macro has run */
+        gpu_park(ch, GPU_PARK_REPORT, addr, seq, (v >> 16) & 1);
     } else if (op == 2) { /* counter */
         u32 sel = (v >> 23) & 31;
         u64 val = sel == 0 ? 0 : (sel == 1 ? g_draws * 3 : 1000);
@@ -137,7 +124,7 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
         if (ch->mme_nparams < 0x10000) ch->mme_params[ch->mme_nparams++] = v;
         if (last) {
             ch->mme_active = 0;
-            mme_run(ch, ch->mme_index, ch->mme_params, ch->mme_nparams);
+            mme_run(ch, ch->mme_index, ch->mme_nparams);
             ch->mme_nparams = 0;
         }
         return;
@@ -198,15 +185,15 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
                 bi = R3(0x50E);
             if (g_pd.on && g_pd.ch == ch && ((R3(0x586) >> 26) & 1) && g_pd.indexed == idx && g_pd.topo == topo &&
                 g_pd.first == first && g_pd.count == count && g_pd.bv == bv && g_pd.bi == bi) {
-                g_pd.inst = g_instance_count + 1;
+                g_pd.inst = ch->instance_count + 1;
             } /* one more instance */
             else {
-                if (g_instance_count) { /* a draw at instance N that doesn't merge is sent as instances 0..N */
+                if (ch->instance_count) { /* a draw at instance N that doesn't merge is sent as instances 0..N */
                     LOG_LIMIT(
                         4,
                         "gpu: draw at instance %u doesn't continue the one before (topology %x, first %u, count %u), "
                         "drawn as %u instances\n",
-                        g_instance_count, topo, first, count, g_instance_count + 1);
+                        ch->instance_count, topo, first, count, ch->instance_count + 1);
                 }
                 r3d_pending_flush();
                 g_pd.on = 1;
@@ -217,7 +204,7 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
                 g_pd.count = count;
                 g_pd.bv = bv;
                 g_pd.bi = bi;
-                g_pd.inst = g_instance_count + 1;
+                g_pd.inst = ch->instance_count + 1;
             }
             /* hw consumes the counts on each draw; if we don't, the next non-indexed draw picks up stale indices */
             R3(0x5F8) = 0;
@@ -229,17 +216,17 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
                          topology 28-31 */
             u32 first = v & 0xFFFF, count = (v >> 16) & 0xFFF, topo = (v >> 28) & 0xF, bi = R3(0x50E);
             if (m == 0x485)
-                g_instance_count = 0;
+                ch->instance_count = 0;
             else
-                g_instance_count++;
+                ch->instance_count++;
             if (m == 0x486 && g_pd.on && g_pd.ch == ch && !g_pd.indexed && g_pd.topo == topo && g_pd.first == first &&
                 g_pd.count == count && g_pd.bv == 0 && g_pd.bi == bi) {
-                g_pd.inst = g_instance_count + 1; /* one more instance */
+                g_pd.inst = ch->instance_count + 1; /* one more instance */
                 break;
             }
-            if (g_instance_count) /* like END: what doesn't continue the draw before is drawn as instances 0..N */
+            if (ch->instance_count) /* like END: what doesn't continue the draw before is drawn as instances 0..N */
                 LOG_LIMIT(4, "gpu: instanced array draw at instance %u doesn't continue the one before, drawn as %u\n",
-                          g_instance_count, g_instance_count + 1);
+                          ch->instance_count, ch->instance_count + 1);
             r3d_pending_flush();
             g_pd.on = 1;
             g_pd.ch = ch;
@@ -249,14 +236,14 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
             g_pd.count = count;
             g_pd.bv = 0;
             g_pd.bi = bi;
-            g_pd.inst = g_instance_count + 1;
+            g_pd.inst = ch->instance_count + 1;
             break;
         }
         case 0x586: /* BEGIN, bit 26 = next instance */
             if (v & (1u << 26))
-                g_instance_count++;
+                ch->instance_count++;
             else if (!(v & (1u << 27)))
-                g_instance_count = 0;
+                ch->instance_count = 0;
             break;
         case 0x8E4:
         case 0x8E5:
