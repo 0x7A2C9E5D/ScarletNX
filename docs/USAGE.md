@@ -286,6 +286,9 @@ F1 help; F2 the game's menu; F3 screenshot; F4 FPS limit off and on; F5 thread d
 Escape quit. A window shows at most one image per refresh and drops the rest unless images tear, and the game keeps
 the pace `fps_limit` sets.
 
+In the game's menu the arrows, Enter and Escape move, select and go back; a gamepad's D-pad or left stick, A and
+B do the same, the on-screen controls' too, and a direction held goes on after a moment.
+
 ### On-screen controls
 
 A pad drawn over the game, with rEden's buttons and sizes, laid out as the console's two controllers hold them:

@@ -605,20 +605,21 @@ static int menu_event(const SDL_Event* e) {
                 break;
             default: break;
         }
-    } else if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) { /* as the game reads the pad: A selects, B goes back */
-        switch (gamepad_button(e->gbutton.which, e->gbutton.button)) {
-            case 1ull << 13: overlay_move(-1); break; /* Up */
-            case 1ull << 15: overlay_move(1); break;  /* Down */
-            case 1ull << 12: overlay_side(-1); break; /* Left */
-            case 1ull << 14: overlay_side(1); break;  /* Right */
-            case 1ull << 0: overlay_do(overlay_select()); break;
-            case 1ull << 1: overlay_do(overlay_back()); break;
-            default: break;
-        }
+    } else if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        /* the pads' presses act on the menu from the poll, with their sticks and the on-screen controls' */
     } else if (e->type == SDL_EVENT_MOUSE_WHEEL) { /* a notch up is a row up, as the system turns the wheel */
         overlay_scroll(-e->wheel.integer_y);
-    } else if (e->type == SDL_EVENT_FINGER_DOWN) {
-        g_tap_finger = finger_id(&e->tfinger);
+    } else if (e->type == SDL_EVENT_FINGER_DOWN || e->type == SDL_EVENT_FINGER_MOTION) {
+        int safe[4];
+        backend_window_size(&w, &h);
+        backend_window_safe(&safe[0], &safe[1], &safe[2], &safe[3]);
+        /* a finger on an on-screen control stays the controls': their presses move the menu (menu_vpad) */
+        if (e->type == SDL_EVENT_FINGER_MOTION)
+            vpad_move(finger_id(&e->tfinger), e->tfinger.x * (float)w, e->tfinger.y * (float)h, safe);
+        else if (!vpad_down(finger_id(&e->tfinger), e->tfinger.x * (float)w, e->tfinger.y * (float)h, safe))
+            g_tap_finger = finger_id(&e->tfinger);
+    } else if (e->type == SDL_EVENT_FINGER_UP && vpad_up(finger_id(&e->tfinger))) {
+        /* the controls' finger lifted: no tap */
     } else if (e->type == SDL_EVENT_FINGER_UP) {
         if (g_tap_finger && finger_id(&e->tfinger) == g_tap_finger) {
             g_tap_finger = 0;
@@ -813,6 +814,8 @@ void video_poll(void) {
         vpad_state(&vb, vs);
         acts = vpad_actions();
         if (acts & SNX_VPAD_DO_MENU) menu_open(1);
+        /* with the menu open, the pads move it: the on-screen controls' and the connected ones', sticks too */
+        overlay_do(overlay_controls(vb | pb, vs[0] || vs[1] ? vs : pad, SDL_GetTicks()));
         ui_unlock();
         b |= vb;
         if (vs[0] || vs[1]) {

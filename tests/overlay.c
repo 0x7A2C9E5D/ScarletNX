@@ -179,6 +179,44 @@ int main(void) {
     assert(overlay_back() == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  MENU"));
+    /* a pad's buttons, as the game reads them: the D-pad and the left stick move, A selects, B goes back, the rest do
+       nothing */
+    {
+        static const i32 still[4], down[4] = {0, -20000, 0, 0}, left[4] = {-20000, 0, 0, 0};
+        assert(overlay_pad(1ull << 15) == OVERLAY_NONE && overlay_pad(1ull << 19) == OVERLAY_NONE);
+        assert(overlay_pad(1ull << 13) == OVERLAY_NONE && overlay_pad(1ull << 2) == OVERLAY_NONE); /* X */
+        assert(overlay_pad(1ull << 0) == OVERLAY_NONE);                                            /* Controllers */
+        draw();
+        assert(text_at(1, 0, "SCARLETNX  /  CONTROLLERS"));
+        assert(overlay_pad(1ull << 1) == OVERLAY_NONE);
+        draw();
+        assert(text_at(1, 0, "SCARLETNX  /  MENU"));
+        /* the pads each poll (the on-screen controls and the connected ones): a press acts once; a direction held, the
+           left stick past half way as one, goes on after a while, then on and on; with the menu closed, nothing, and
+           a press held as it opens does not act */
+        assert(overlay_controls(0, still, 1000) == OVERLAY_NONE); /* the focus back on Controllers */
+        assert(overlay_controls(0, down, 1000) == OVERLAY_NONE);  /* to Exit */
+        assert(overlay_controls(0, down, 1000 + SNX_OVERLAY_REPEAT_DELAY - 1) == OVERLAY_NONE);
+        assert(overlay_controls(1ull << 0, down, 1000 + SNX_OVERLAY_REPEAT_DELAY - 1) == OVERLAY_EXIT); /* not yet */
+        assert(overlay_controls(0, down, 1000 + SNX_OVERLAY_REPEAT_DELAY) == OVERLAY_NONE); /* round to the top */
+        assert(overlay_controls(1ull << 0, down, 1001 + SNX_OVERLAY_REPEAT_DELAY) == OVERLAY_NONE); /* a page */
+        draw();
+        assert(text_at(1, 0, "SCARLETNX  /  CONTROLS"));
+        assert(overlay_controls(1ull << 1, still, 2000) == OVERLAY_NONE);  /* B: back to the menu, on its first */
+        assert(overlay_controls(1ull << 15, still, 2001) == OVERLAY_NONE); /* the D-pad down: Controllers */
+        assert(overlay_controls(1ull << 15, still, 2001 + SNX_OVERLAY_REPEAT_DELAY) == OVERLAY_NONE); /* Exit */
+        assert(overlay_controls(1ull << 15, still, 2001 + SNX_OVERLAY_REPEAT_DELAY + SNX_OVERLAY_REPEAT_MS - 1) ==
+               OVERLAY_NONE);
+        assert(overlay_controls(1ull << 0, still, 3000) == OVERLAY_EXIT);
+        assert(overlay_controls(1ull << 13, still, 3001) == OVERLAY_NONE &&
+               overlay_controls(0, left, 3002) == OVERLAY_NONE);
+        assert(overlay_controls(1ull << 1, still, 3003) == OVERLAY_CLOSE);
+        overlay_toggle(); /* closed: the pads are the game's */
+        assert(!overlay_shown() && overlay_controls(1ull << 1, still, 3004) == OVERLAY_NONE);
+        overlay_toggle(); /* B still held as it opens */
+        assert(overlay_controls(1ull << 1, still, 3005) == OVERLAY_NONE);
+        assert(overlay_controls(0, still, 3006) == OVERLAY_NONE);
+    }
 
     /* the controllers' page: the ones connected, A B X Y by label or position, the dead zone by fives, the
        vibration by tens down to Off and the background input, each kept */

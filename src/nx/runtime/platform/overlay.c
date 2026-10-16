@@ -221,6 +221,40 @@ void overlay_scroll(int rows) {
 void overlay_side(int step) {
     if (page != PAGE_MAIN) act(focus, step);
 }
+int overlay_pad(u64 button) {
+    switch (button) {
+        case 1ull << 0: return overlay_select(); /* A */
+        case 1ull << 1: return overlay_back();   /* B */
+        case 1ull << 12:                         /* the D-pad's left and the left stick's */
+        case 1ull << 16: overlay_side(-1); break;
+        case 1ull << 13: /* up */
+        case 1ull << 17: overlay_move(-1); break;
+        case 1ull << 14: /* right */
+        case 1ull << 18: overlay_side(1); break;
+        case 1ull << 15: /* down */
+        case 1ull << 19: overlay_move(1); break;
+        default: break;
+    }
+    return OVERLAY_NONE;
+}
+int overlay_controls(u64 buttons, const i32 sticks[4], u64 ms) {
+    static u64 seen, next;       /* the buttons of the last call; when a held direction moves again */
+    const u64 dirs = 0xFF000ull; /* the D-pad's and the left stick's: bits 12 to 19 */
+    u64 now = buttons | (sticks[0] < -16384 ? 1ull << 16 : 0) | (sticks[1] > 16384 ? 1ull << 17 : 0) |
+              (sticks[0] > 16384 ? 1ull << 18 : 0) | (sticks[1] < -16384 ? 1ull << 19 : 0),
+        pressed = shown ? now & ~seen : 0;
+    int bit, did = OVERLAY_NONE;
+    if (pressed & dirs)
+        next = ms + SNX_OVERLAY_REPEAT_DELAY;
+    else if (shown && (now & dirs) && ms >= next) { /* held: the lowest direction again */
+        pressed |= now & dirs & (~(now & dirs) + 1);
+        next = ms + SNX_OVERLAY_REPEAT_MS;
+    }
+    seen = now;
+    for (bit = 0; bit < 20 && did == OVERLAY_NONE; ++bit)
+        if (pressed >> bit & 1) did = overlay_pad(1ull << bit);
+    return did;
+}
 int overlay_back(void) {
     int from = page;
     if (page == PAGE_MAIN) return OVERLAY_CLOSE;
