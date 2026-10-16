@@ -215,8 +215,8 @@ Windows, of `scarletnx.exe` and the DLLs next to it).
 X11 bypasses Wayland. [Licenses](CREDITS.md).
 
 On Linux an installed copy follows the [XDG Base Directory spec](https://specifications.freedesktop.org/basedir/latest/):
-the data folder keeps `games/` (each game's program, code, `Game_data/` with its saves, `captures/`) and `prod.keys`, and
-the rest goes in the folder of its kind. A relative `$XDG_*_HOME` is ignored, as the spec says.
+the data folder keeps `games/` (each game's program, code, `Game_data/` with its saves, `captures/`), `themes/` (the
+menu's, `<name>/theme.ini`) and `prod.keys`, and the rest goes in the folder of its kind. A relative `$XDG_*_HOME` is ignored, as the spec says.
 
 | Folder | Holds |
 | --- | --- |
