@@ -74,9 +74,11 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   **App** holds **Theme** and **Text size**, which Left/Right or Enter go round either way, **Theme editor**, which comes back to App, and **Game folders**: `games/`,
   always listed, then the player's own folders, whose games the `games/` browser lists after
   `games/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
-  or a path pasted with Ctrl+V is added too. Del, or Enter twice, takes one off the list (the
-  folder stays). They are kept in `folders.txt` beside `settings.ini`; one that cannot be read
-  is named when the games are listed. **Clean old settings**, Enter twice (the first says what it
+  or a path pasted with Ctrl+V is added too. A folder with folders in it asks first: *Only this
+  folder*, or *With subfolders*, whose games are listed too, four levels down, hidden folders
+  left alone (its row says *+ subfolders*). Del, or Enter twice, takes one off the list (the
+  folder stays). They are kept in `folders.txt` beside `settings.ini`, a line each, `/**` after
+  one kept with its subfolders; one that cannot be read is named when the games are listed. **Clean old settings**, Enter twice (the first says what it
   would do), takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
   gives a game's `.ini` for the keys it no longer uses (in the config folder's `games/`, in `games/`
   and in the player's folders), the keys of `settings.ini` that no setting of the runtime's takes

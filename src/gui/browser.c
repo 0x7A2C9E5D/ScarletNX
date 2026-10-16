@@ -126,15 +126,17 @@ static int before(const char* a, const char* b) {
     for (; *a && tolower((unsigned char)*a) == tolower((unsigned char)*b); ++a, ++b) {}
     return tolower((unsigned char)*a) < tolower((unsigned char)*b);
 }
-bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* error, size_t size) {
+/* directory's games into games, sorted from first on by what they are shown as; with depth, its folders' games too, down
+   that many levels, a folder that is a game or hidden left alone */
+static bool add_games(GuiGames* games, const char* directory, int kinds, size_t first, int depth, char* error,
+                      size_t size) {
     char **names = NULL, **more;
     size_t count = 0, i;
-    if (size) error[0] = 0;
     if (snx_list_dir(directory, &names, &count)) {
         snprintf(error, size, "Cannot open %s.", directory);
         return false;
     }
-    size_t first = games->count, j;
+    size_t j;
     more = (char**)realloc(games->names, (games->count + count + 1) * sizeof *more);
     if (more) games->names = more;
     more = more ? (char**)realloc(games->shown, (games->count + count + 1) * sizeof *more) : NULL;
@@ -150,6 +152,12 @@ bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* erro
         char* path = folder_game(directory, names[i], kinds);
         char* shown;
         if (!path && playable(directory, names[i], kinds)) path = snx_path_join(directory, names[i]);
+        if (!path && depth > 0 && names[i][0] != '.') { /* a folder of games, not one */
+            char* sub = snx_path_join(directory, names[i]);
+            if (sub && snx_is_dir(sub)) add_games(games, sub, kinds, first, depth - 1, error, 0);
+            free(sub);
+            continue;
+        }
         if (!path) continue;
         shown = shown_name(path, names[i]);
         if (!shown) {
@@ -170,6 +178,30 @@ bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* erro
     }
     snx_free_strings(names, count);
     return true;
+}
+bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* error, size_t size) {
+    return gui_games_add_deep(games, directory, kinds, 0, error, size);
+}
+bool gui_games_add_deep(GuiGames* games, const char* directory, int kinds, int depth, char* error, size_t size) {
+    if (size) error[0] = 0;
+    return add_games(games, directory, kinds, games->count, depth, error, size);
+}
+bool gui_has_folders(const char* directory, int kinds) {
+    char** names = NULL;
+    size_t count = 0, i;
+    bool found = false;
+    if (snx_list_dir(directory, &names, &count)) return false;
+    for (i = 0; i < count && !found; ++i) {
+        char *sub, *game;
+        if (names[i][0] == '.') continue;
+        sub = snx_path_join(directory, names[i]);
+        game = folder_game(directory, names[i], kinds);
+        found = sub && snx_is_dir(sub) && !game;
+        free(game);
+        free(sub);
+    }
+    snx_free_strings(names, count);
+    return found;
 }
 bool gui_games_scan(GuiGames* games, const char* directory, bool cia, char* error, size_t size) {
     gui_games_free(games);

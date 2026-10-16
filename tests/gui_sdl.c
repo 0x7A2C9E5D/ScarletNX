@@ -1390,6 +1390,76 @@ int main(int argc, char** argv) {
         assert(!app.folder_count && !strcmp(app.editor.note, "Taken off the list; the folder stays"));
         assert(snx_is_dir(more) && (kept = (char*)snx_read_file(app.folders_file, &size)) && !size);
         free(kept);
+        /* a folder with folders in it asks whether their games are listed too: Cancel adds nothing, Only this folder
+           its own games, With subfolders theirs as well, down GUI_FOLDER_DEPTH levels, a hidden one left alone; kept
+           with GUI_FOLDER_DEEP after its path, and its row says so */
+        {
+            static const char* const files[] = {"Top", "a/One", "a/b/c/d/Four", "a/b/c/d/e/Five", ".hid/Hidden"};
+            char *deep = snx_path_join(temporary, "deep games"), *deep_as;
+            GuiGames listed = {0};
+            char said[sizeof app.message];
+            size_t f, g;
+            int found = 0;
+            for (f = 0; f < sizeof files / sizeof files[0]; ++f) {
+                char *path = snx_path_join(deep, files[f]), *dir = snx_dirname(path);
+                assert(!snx_mkdirs(dir) && !snx_write_file(path, "fixture", 7) && !snx_make_executable(path));
+                free(dir);
+                free(path);
+            }
+            deep_as = snx_absolute(deep);
+            e.drop.data = deep;
+            event(&app, &e);
+            assert(app.folder_asked && !strcmp(app.folder_asked, deep_as) && app.confirm.shown && !app.folder_count);
+            render(&app);
+            shows(&app, "List the games in its subfolders too?", rgb(app.theme.warning));
+            key(&app, SDLK_ESCAPE);
+            assert(!app.folder_asked && !app.confirm.shown && !app.folder_count &&
+                   !strcmp(app.editor.note, "Not added"));
+            event(&app, &e);
+            key(&app, SDLK_RETURN); /* Only this folder */
+            assert(app.folder_count == 1 && !app.folders_deep[0] && !strcmp(app.editor.note, "Added"));
+            games_scan(&app, &listed, said, sizeof said);
+            for (g = 0; g < listed.count; ++g)
+                found |= !strcmp(listed.names[g], "Top") | !strcmp(listed.names[g], "One") << 1;
+            assert(found == 1);
+            gui_games_free(&listed);
+            folder_remove(&app, 0);
+            event(&app, &e);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN); /* With subfolders */
+            assert(app.folder_count == 1 && app.folders_deep[0] &&
+                   !strcmp(app.editor.note, "Added, with its subfolders"));
+            kept = (char*)snx_read_file(app.folders_file, &size);
+            snprintf(line, sizeof line, "%s" GUI_FOLDER_DEEP "\n", deep_as);
+            assert(kept && !strcmp(kept, line));
+            free(kept);
+            assert(!strcmp(app.app_form.folder[1], "+ subfolders"));
+            games_scan(&app, &listed, said, sizeof said);
+            found = 0;
+            for (g = 0; g < listed.count; ++g) {
+                found |= !strcmp(listed.names[g], "Top") | !strcmp(listed.names[g], "One") << 1;
+                found |= !strcmp(listed.names[g], "Four") << 2 | !strcmp(listed.names[g], "Five") << 3;
+                found |= !strcmp(listed.names[g], "Hidden") << 4;
+            }
+            assert(found == 7); /* Top, One and Four; not Five, past four levels, nor Hidden */
+            gui_games_free(&listed);
+            /* read back as it was kept; a change below it changes the stamp */
+            {
+                uint64_t stamp = games_stamp(&app);
+                char* more_deep = snx_path_join(deep, "a/b/Two");
+                assert(!snx_write_file(more_deep, "fixture", 7));
+                assert(games_stamp(&app) != stamp);
+                free(more_deep);
+            }
+            free(app.folders[0]);
+            app.folder_count = 0;
+            folders_load(&app);
+            assert(app.folder_count == 1 && app.folders_deep[0] && !strcmp(app.folders[0], deep_as));
+            folder_remove(&app, 0);
+            free(deep_as);
+            free(deep);
+        }
+        e.drop.data = more;
         event(&app, &e); /* back for the games below */
         key(&app, SDLK_ESCAPE);
         assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_FOLDERS);

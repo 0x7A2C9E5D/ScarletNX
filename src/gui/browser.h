@@ -16,6 +16,11 @@ enum { GUI_GAMES_RUN = 1, GUI_GAMES_CIA = 2 };
 /* A folder's games of kinds added after those listed: its own files, and each folder of it that holds its game
    (<name>/<name>), named by the folder; nothing deeper. False, error saying why, when it cannot be read */
 bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* error, size_t size);
+/* and with depth, the games of its other folders too, down that many levels; a hidden folder left alone. The folder's
+   own error alone is said */
+bool gui_games_add_deep(GuiGames* games, const char* directory, int kinds, int depth, char* error, size_t size);
+/* whether directory holds a folder that is no game and not hidden: one whose games a deep add would list */
+bool gui_has_folders(const char* directory, int kinds);
 /* games/'s alone: its executable files and game folders, or with cia CIA files (case-insensitive extension, no execute
    bit needed). Never recurse into data/save directories. */
 bool gui_games_scan(GuiGames* games, const char* directory, bool cia, char* error, size_t size);
