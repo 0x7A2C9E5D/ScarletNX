@@ -65,8 +65,8 @@ const char* gui_android_libraries(void) {
     return folder[0] ? folder : NULL;
 }
 
-/* MainActivity's method, with one argument (none for a "()V" one, which leaves it unread) */
-static int call(const char* method, const char* signature, jobject argument, char* message, size_t size) {
+/* MainActivity's method, with its arguments (none for a "()V" one, which leaves them unread) */
+static int call(const char* method, const char* signature, const jvalue* args, char* message, size_t size) {
     JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
     jobject activity = (jobject)SDL_GetAndroidActivity();
     jclass activity_class;
@@ -78,7 +78,7 @@ static int call(const char* method, const char* signature, jobject argument, cha
     }
     activity_class = (*env)->GetObjectClass(env, activity);
     id = (*env)->GetMethodID(env, activity_class, method, signature);
-    if (id) (*env)->CallVoidMethod(env, activity, id, argument);
+    if (id) (*env)->CallVoidMethodA(env, activity, id, args);
     ok = id && !(*env)->ExceptionCheck(env);
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
     (*env)->DeleteLocalRef(env, activity_class);
@@ -91,6 +91,7 @@ int gui_android_play(const char* const* argv, char* message, size_t size) {
     JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
     jclass string;
     jobjectArray args;
+    jvalue arg;
     int n = 0, i, ok;
     if (!env) return call("play", "", NULL, message, size);
     while (argv[n]) ++n;
@@ -101,7 +102,8 @@ int gui_android_play(const char* const* argv, char* message, size_t size) {
         (*env)->SetObjectArrayElement(env, args, i, s);
         (*env)->DeleteLocalRef(env, s);
     }
-    ok = call("play", "([Ljava/lang/String;)V", args, message, size);
+    arg.l = args;
+    ok = call("play", "([Ljava/lang/String;)V", &arg, message, size);
     (*env)->DeleteLocalRef(env, args);
     (*env)->DeleteLocalRef(env, string);
     return ok;
@@ -109,12 +111,49 @@ int gui_android_play(const char* const* argv, char* message, size_t size) {
 
 int gui_android_share(const char* path, char* message, size_t size) {
     JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
-    jstring s;
+    jvalue arg;
     int ok;
     if (!env) return call("share", "", NULL, message, size);
-    s = (*env)->NewStringUTF(env, path);
-    ok = call("share", "(Ljava/lang/String;)V", s, message, size);
-    (*env)->DeleteLocalRef(env, s);
+    arg.l = (*env)->NewStringUTF(env, path);
+    ok = call("share", "(Ljava/lang/String;)V", &arg, message, size);
+    (*env)->DeleteLocalRef(env, arg.l);
     return ok;
 }
 int gui_android_background(char* message, size_t size) { return call("toBack", "()V", NULL, message, size); }
+
+/* text as a byte[], which MainActivity reads as UTF-8: NewStringUTF aborts on anything else than modified UTF-8 */
+static jbyteArray bytes(JNIEnv* env, const char* text) {
+    jsize n = (jsize)strlen(text);
+    jbyteArray array = (*env)->NewByteArray(env, n);
+    if (array) (*env)->SetByteArrayRegion(env, array, 0, n, (const jbyte*)text);
+    return array;
+}
+
+void gui_android_running(const char* game, const char* step, int percent) {
+    JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+    char message[64];
+    jvalue args[3];
+    if (!env) return;
+    args[0].l = bytes(env, game);
+    args[1].l = bytes(env, step);
+    args[2].i = percent;
+    if (args[0].l && args[1].l)
+        call("running", "([B[BI)V", args, message, sizeof message);
+    else
+        (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, args[0].l);
+    (*env)->DeleteLocalRef(env, args[1].l);
+}
+
+void gui_android_ran(const char* result) {
+    JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+    char message[64];
+    jvalue arg;
+    if (!env) return;
+    arg.l = result ? bytes(env, result) : NULL;
+    if (arg.l || !result)
+        call("ran", "([B)V", &arg, message, sizeof message);
+    else
+        (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, arg.l);
+}

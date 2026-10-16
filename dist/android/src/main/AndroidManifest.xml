@@ -10,6 +10,12 @@
          storage before it, which Android 10 leaves whole only when asked (requestLegacyExternalStorage) -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <!-- a run keeps going behind other apps (RecompileService) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- back goes to SDL as a key (the menu's ESC), not to Android's predictive back. The menu is singleTop: its icon
          brings the task back with a game on top, where singleTask would clear the game away -->
     <application
@@ -39,5 +45,10 @@
             android:screenOrientation="sensorLandscape"
             android:preferMinimalPostProcessing="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode" />
+        <!-- dataSync covers local file processing: extracting a dump and compiling it -->
+        <service
+            android:name=".RecompileService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>
