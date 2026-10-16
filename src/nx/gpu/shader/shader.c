@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Shared Maxwell program length, dual vertex merge and control stack resolution. */
-#include "gpu/shader/translator.h"
+#include "nx/gpu/shader/translator.h"
 #include <stdlib.h>
 #include <string.h>
 

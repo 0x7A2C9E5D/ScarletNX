@@ -127,6 +127,58 @@ class ArchitectureTests(unittest.TestCase):
             self.assertIn('src/gui/process.h is on gui-test', errors[0])
             self.assertIn('hides the system <process.h>', errors[0])
 
+    def test_include_root_inside_src_is_rejected(self):
+        with tempfile.TemporaryDirectory(prefix='snx-arch-test-') as temporary:
+            repo = Path(temporary)
+            (repo / 'src/3ds/common').mkdir(parents=True)
+            reply = repo / 'build/.cmake/api/v1/reply'
+            reply.mkdir(parents=True)
+            documents = {
+                'index-test.json': {'reply': {'codemodel-v2': {'jsonFile': 'model.json'}}},
+                'model.json': {
+                    'configurations': [
+                        {'targets': [{'name': 'ctr', 'jsonFile': 'ctr.json'}, {'name': 'app', 'jsonFile': 'app.json'}]}
+                    ]
+                },
+                # src/ itself, a generated folder and the resource compiler's own folder pass
+                'app.json': {
+                    'compileGroups': [
+                        {'language': 'C', 'includes': [{'path': 'src'}, {'path': str(repo / 'build/generated')}]},
+                        {'language': 'RC', 'includes': [{'path': 'src/3ds/common'}]},
+                    ]
+                },
+                'ctr.json': {
+                    'compileGroups': [
+                        {'language': 'C', 'includes': [{'path': 'src'}, {'path': str(repo / 'src/3ds/common')}]},
+                        {'language': 'CXX', 'includes': [{'path': 'src/3ds/common'}]},
+                    ]
+                },
+            }
+            for name, content in documents.items():
+                (reply / name).write_text(json.dumps(content), encoding='utf-8')
+            errors = architecture.check_include_roots(repo, repo / 'build')
+            self.assertEqual(
+                errors, ["src/3ds/common is on ctr's include path: include its headers as paths from src/"]
+            )
+
+    def test_include_flag_to_a_folder_of_src_is_rejected(self):
+        with tempfile.TemporaryDirectory(prefix='snx-arch-test-') as temporary:
+            repo = Path(temporary)
+            (repo / '.github/workflows').mkdir(parents=True)
+            (repo / 'docs').mkdir()
+            (repo / '.github/workflows/build.yml').write_text(
+                'run: clang -I src src/a.c\nrun: clang -I src/common/cpu/aarch64 src/b.c\n', encoding='utf-8'
+            )
+            (repo / 'docs/DEVELOPMENT.md').write_text('clang -I"src/nx" x.c\nobjcopy -I binary\n', encoding='utf-8')
+            errors = architecture.check_include_flags(repo)
+            self.assertEqual(
+                errors,
+                [
+                    '.github/workflows/build.yml:2: -I to a folder of src/; use -I src',
+                    'docs/DEVELOPMENT.md:1: -I to a folder of src/; use -I src',
+                ],
+            )
+
 
 if __name__ == '__main__':
     unittest.main()

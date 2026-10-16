@@ -5,7 +5,7 @@
 /* Maxwell shader metadata and direct SPIR-V translation. */
 #ifndef SNX_SHADER_H
 #define SNX_SHADER_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "cpu/arm/arm.h"
-#include "cpu/arm/simd.h"
+#include "common/cpu/arm/arm.h"
+#include "common/cpu/arm/simd.h"
 #include <stdio.h>
 
 int main(void) {

@@ -84,9 +84,7 @@ def main():
             '-Wextra',
             '-Werror',
             '-I',
-            str(repo / 'src/nx'),
-            '-I',
-            str(repo / 'src/common'),
+            str(repo / 'src'),
         ]
         if os.name == 'nt':
             flags += ['-D_CRT_SECURE_NO_WARNINGS', '-D_CRT_NONSTDC_NO_DEPRECATE']

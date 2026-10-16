@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors
    Layout reference: Azahar src/core/hle/romfs.cpp, Copyright 2017 Citra
    Emulator Project, GPL-2.0-or-later (used under GPLv3). New bounded extractor. */
-#include "internal.h"
+#include "3ds/loader/internal.h"
 #include <stdlib.h>
 #include <string.h>
 #define NONE UINT32_MAX

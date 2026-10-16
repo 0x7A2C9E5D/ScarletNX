@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "hle/filesystem/fs_tree.h"
+#include "nx/hle/filesystem/fs_tree.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdlib.h>

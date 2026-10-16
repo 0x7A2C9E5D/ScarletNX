@@ -4,7 +4,7 @@
    Specification's ETC2 chapter, 4x4 blocks */
 #ifndef SNX_ETC2_H
 #define SNX_ETC2_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 
 enum {
     ETC2_RGB,     /* 8 bytes a block, opaque RGB */

@@ -5,7 +5,7 @@
 /* the nvhost devices (nvdrv.c): nvmap, the GPU address space, syncpoints */
 #ifndef SNX_NVDRV_H
 #define SNX_NVDRV_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 
 void nv_init(void);
 u64 nvmap_addr(u32 handle);

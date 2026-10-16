@@ -6,9 +6,9 @@
    to check synchronization too. See docs/ASTC.md for the standalone build. */
 #include <stdarg.h>
 #include <stdlib.h>
-#include "gpu/vk/vk.h"
-#include "gpu/texture/astc.h"
-#include "runtime/platform/log.h"
+#include "nx/gpu/vk/vk.h"
+#include "nx/gpu/texture/astc.h"
+#include "nx/runtime/platform/log.h"
 
 VkState g_vk;
 VkSemaphore g_vk_csem;

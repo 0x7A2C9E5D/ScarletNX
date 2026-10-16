@@ -5,8 +5,8 @@
 /* what a window backend (platform/backend/) provides: the window, input and presenting */
 #ifndef SNX_BACKEND_H
 #define SNX_BACKEND_H
-#include "cpu/aarch64/cpu.h"
-#include "runtime/ini.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/runtime/ini.h"
 
 void video_init(const char* title);
 void video_poll(void);

@@ -3,7 +3,7 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* synchronization: the kernel side of mutexes and condition variables, address arbitration, WaitSynchronization */
-#include "hle/kernel/kernel_int.h"
+#include "nx/hle/kernel/kernel_int.h"
 /* ============================================================ kernel mutex arbitration */
 static KThread* g_mwait; /* waiters on a mutex (wait_kind 2), condvar (3) or address (4) */
 static void wl_add(KThread* t) {

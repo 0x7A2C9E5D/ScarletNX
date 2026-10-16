@@ -4,7 +4,7 @@
    --backend=llvm is the one to use. module_llvm.c's structure: chunks of whole functions, each a context compiled
    to an object file (--jobs at a time, jit_units.c), then the module descriptor in a last context that GCC's driver
    links into the shared library with the chunks and the runtime library (rtlib.c). */
-#include "module_llvm.h"
+#include "nx/loader/module_llvm.h"
 
 #ifndef SNX_WITH_GCCJIT
 int snx_build_module_gccjit(SnxProgram* loaded, const SnxCodegenOptions* options, const SnxLlvmBuild* build) {
@@ -14,10 +14,10 @@ int snx_build_module_gccjit(SnxProgram* loaded, const SnxCodegenOptions* options
     return snx_error("this recompiler was built without libgccjit (SNX_GCCJIT); use --backend=llvm");
 }
 #else
-#include "codegen.h"
-#include "codegen_view.h"
-#include "jit.h"
-#include "module_abi.h"
+#include "common/cpu/recompiler/codegen.h"
+#include "nx/loader/codegen_view.h"
+#include "common/cpu/recompiler/gccjit/jit.h"
+#include "nx/loader/module_abi.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

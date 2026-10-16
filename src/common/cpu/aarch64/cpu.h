@@ -50,7 +50,7 @@ typedef union V128 {
     f64 df[2];
 } V128;
 
-#include "../../runtime/interface.h"
+#include "common/runtime/interface.h"
 typedef void (*GuestFn)(struct CPU* RESTRICT c, u64 entry);
 
 typedef struct CPU {

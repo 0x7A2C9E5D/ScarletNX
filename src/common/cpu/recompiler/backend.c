@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "backend.h"
+#include "common/cpu/recompiler/backend.h"
 #include <string.h>
 
 int snx_backend_parse(const char* name, SnxBackend* backend) {

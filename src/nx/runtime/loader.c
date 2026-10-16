@@ -3,12 +3,12 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* NSO/NRO loading. The code segment has to match what we recompiled byte for byte. */
-#include "runtime/loader.h"
-#include "runtime/main.h"
-#include "hle/filesystem/fs.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/runtime/loader.h"
+#include "nx/runtime/main.h"
+#include "nx/hle/filesystem/fs.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <lz4.h>
 #include <stdio.h>
 #include <string.h>

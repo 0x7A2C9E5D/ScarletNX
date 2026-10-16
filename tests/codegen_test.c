@@ -2,9 +2,9 @@
    Copyright 2026 the ScarletNX contributors */
 /* Synthetic ISA/CFG/module tests. The generated ABI fixture is compiled by the
    supplied host Clang, then checks static and interpreted architectural results. */
-#include "a64.h"
-#include "codegen.h"
-#include "codegen_view.h"
+#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/recompiler/codegen.h"
+#include "nx/loader/codegen_view.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -255,7 +255,7 @@ static void emit_semantic_fixture(FILE* out) {
 
 static void semantics_test(const char* compiler, const char* repo, const char* directory) {
     const char* args[16];
-    char *source, *binary, *include, *output;
+    char *source, *binary, *include, *root, *output;
     FILE* file;
     int n, status;
     source = snx_path_join(directory, "semantics.c");
@@ -265,6 +265,7 @@ static void semantics_test(const char* compiler, const char* repo, const char* d
     binary = snx_path_join(directory, "semantics");
 #endif
     include = snx_path_join(repo, "src/common/cpu/aarch64");
+    root = snx_path_join(repo, "src"); /* what cpu.h includes */
     output = NULL;
     file = snx_fopen(source, "wb");
     check(file != NULL, "open ISA semantics fixture");
@@ -282,6 +283,8 @@ static void semantics_test(const char* compiler, const char* repo, const char* d
     args[n++] = "-Wno-unused-label";
     args[n++] = "-I";
     args[n++] = include;
+    args[n++] = "-I";
+    args[n++] = root;
     args[n++] = source;
 #ifndef _WIN32
     args[n++] = "-lm";
@@ -305,6 +308,7 @@ done:
     free(source);
     free(binary);
     free(include);
+    free(root);
     free(output);
 }
 
@@ -322,7 +326,7 @@ static void poll_test(const char* compiler, const char* repo, const char* direct
     SnxFde range;
     const SnxFunction* function;
     const char* args[16];
-    char *source, *binary, *include, *output = NULL;
+    char *source, *binary, *include, *root, *output = NULL;
     FILE* file;
     size_t i;
     int n, status;
@@ -342,6 +346,7 @@ static void poll_test(const char* compiler, const char* repo, const char* direct
     binary = snx_path_join(directory, "poll");
 #endif
     include = snx_path_join(repo, "src/common/cpu/aarch64");
+    root = snx_path_join(repo, "src"); /* what cpu.h includes */
     file = function ? snx_fopen(source, "wb") : NULL;
     check(file != NULL, "open the poll fixture");
     if (!file) goto done;
@@ -383,6 +388,8 @@ static void poll_test(const char* compiler, const char* repo, const char* direct
     args[n++] = "-Wno-unused-label";
     args[n++] = "-I";
     args[n++] = include;
+    args[n++] = "-I";
+    args[n++] = root;
     args[n++] = source;
 #ifndef _WIN32
     args[n++] = "-lm";
@@ -407,6 +414,7 @@ done:
     free(source);
     free(binary);
     free(include);
+    free(root);
     free(output);
 }
 

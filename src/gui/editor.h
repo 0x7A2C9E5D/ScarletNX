@@ -8,8 +8,8 @@
 #define SNX_GUI_EDITOR_H
 #include <stdbool.h>
 #include <stddef.h>
-#include "model.h"
-#include "theme.h"
+#include "gui/model.h"
+#include "gui/theme.h"
 
 typedef struct {
     const GuiThemeKey* keys; /* a row each */

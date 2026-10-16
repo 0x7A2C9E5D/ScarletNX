@@ -3,7 +3,7 @@
 #ifndef SNX_FS_TREE_H
 #define SNX_FS_TREE_H
 
-#include "runtime/platform/plat.h"
+#include "nx/runtime/platform/plat.h"
 
 #define FS_TREE_PATH_MAX 4096
 

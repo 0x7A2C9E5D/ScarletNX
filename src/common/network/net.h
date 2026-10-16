@@ -19,25 +19,25 @@
 
 enum {
 #define SNX_NET_ERRNO(name, value) SNX_E##name = value,
-#include "network/abi/errno.inc"
+#include "common/network/abi/errno.inc"
 #define SNX_NET_DOMAIN(name, value, host) SNX_AF_##name = value,
-#include "network/abi/domain.inc"
+#include "common/network/abi/domain.inc"
 #define SNX_NET_SOCKTYPE(name, value, host) SNX_SOCK_##name = value,
-#include "network/abi/socktype.inc"
+#include "common/network/abi/socktype.inc"
 #define SNX_NET_LEVEL(name, value, host) SNX_SOL_##name = value,
-#include "network/abi/level.inc"
+#include "common/network/abi/level.inc"
 #define SNX_NET_SOCKOPT(level, name, value, kind) SNX_##name = value,
-#include "network/abi/sockopt.inc"
+#include "common/network/abi/sockopt.inc"
 #define SNX_NET_MSG(name, value, host) SNX_MSG_##name = value,
-#include "network/abi/msgflag.inc"
+#include "common/network/abi/msgflag.inc"
 #define SNX_NET_POLL(name, value, host, wsapoll) SNX_POLL##name = value,
-#include "network/abi/poll.inc"
+#include "common/network/abi/poll.inc"
 #define SNX_NET_GAI(name, value, host, text) SNX_EAI_##name = value,
-#include "network/abi/gai.inc"
+#include "common/network/abi/gai.inc"
 #define SNX_NET_AIFLAG(name, value, host) SNX_AI_##name = value,
-#include "network/abi/aiflag.inc"
+#include "common/network/abi/aiflag.inc"
 #define SNX_NET_NIFLAG(name, value, host) SNX_NI_##name = value,
-#include "network/abi/niflag.inc"
+#include "common/network/abi/niflag.inc"
     SNX_SHUT_RD = 0,
     SNX_SHUT_WR = 1,
     SNX_SHUT_RDWR = 2,

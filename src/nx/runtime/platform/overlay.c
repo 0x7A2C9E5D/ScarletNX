@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "runtime/platform/overlay.h"
-#include "runtime/platform/backend.h"
-#include "runtime/platform/fatal_screen.h"
-#include "runtime/platform/gamepad.h"
-#include "runtime/platform/vpad.h"
+#include "nx/runtime/platform/overlay.h"
+#include "nx/runtime/platform/backend.h"
+#include "nx/runtime/platform/fatal_screen.h"
+#include "nx/runtime/platform/gamepad.h"
+#include "nx/runtime/platform/vpad.h"
 #include "gui_theme_colors.h"
-#include "pad_screen.h"
+#include "common/utilities/pad_screen.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>

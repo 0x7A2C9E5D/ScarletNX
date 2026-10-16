@@ -4,16 +4,16 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* nvdrv: nvmap, nvhost-as-gpu, nvhost-ctrl, nvhost-ctrl-gpu, nvhost-gpu, and nvhost-nvdec and nvhost-vic (host1x
    channels, gpu/video/host1x.c). Enough for NVN and deko3d. */
-#include "hle/services/nvdrv.h"
-#include "gpu/gpu.h"
-#include "hle/kernel/ipc.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/gpu/gpu.h"
+#include "nx/hle/kernel/ipc.h"
 #include "hle/services/nvdrv.swipc.inc"
-#include "hle/kernel/kernel.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "gpu/video/host1x.h"
-#include "runtime/clock.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/gpu/video/host1x.h"
+#include "nx/runtime/clock.h"
 #include <stdlib.h>
 #include <string.h>
 static void nv_events_check(void);

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "internal.h"
+#include "3ds/loader/internal.h"
 #include <ctype.h>
 #include <inttypes.h>
 #include <stdarg.h>

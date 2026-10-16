@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Opt-in integration test: real renderer, no game data. Works with Mesa lavapipe and no display server. */
-#include "common.h"
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "gpu/renderer.h"
-#include "gpu/vk/vk.h"
-#include "memory/mem.h"
-#include "runtime/platform/backend.h"
+#include "common/utilities/common.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/gpu/renderer.h"
+#include "nx/gpu/vk/vk.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/backend.h"
 #include "spirv_emitter_fixture.h"
 #include <stdio.h>
 #include <stdlib.h>

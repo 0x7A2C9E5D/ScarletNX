@@ -3,9 +3,9 @@
 /* The gamepads (runtime/platform/backend/gamepad.c) on SDL's virtual ones, under its dummy video driver: what a press,
    a trigger or a stick gives the game and the game's menu, on the common layouts, with the window's focus or without,
    and a fifth pad taking the place of one that goes */
-#include "runtime/platform/gamepad.h"
-#include "runtime/options.h"
-#include "runtime/platform/plat.h"
+#include "nx/runtime/platform/gamepad.h"
+#include "nx/runtime/options.h"
+#include "nx/runtime/platform/plat.h"
 #include <SDL3/SDL.h>
 #include <string.h>
 #include <stdio.h>

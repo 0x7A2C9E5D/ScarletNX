@@ -5,8 +5,8 @@
 /* the game module (<Game>_code.so, its descriptor SnxModule is in abi/cpu.h) and loading it (loader.c) */
 #ifndef SNX_LOADER_H
 #define SNX_LOADER_H
-#include "cpu/aarch64/cpu.h"
-#include "loader/module_abi.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/loader/module_abi.h"
 
 extern const SnxModule* g_mod;
 extern GuestFn* g_disp;

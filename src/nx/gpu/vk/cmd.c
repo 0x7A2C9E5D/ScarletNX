@@ -5,8 +5,8 @@
    buffers), descriptor pools, and the resources to destroy once its work is done. Starting to record a frame waits
    for its previous use to finish. */
 #include <stdlib.h>
-#include "runtime/platform/log.h"
-#include "gpu/vk/vk.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/gpu/vk/vk.h"
 
 typedef struct {
     VkImage img;

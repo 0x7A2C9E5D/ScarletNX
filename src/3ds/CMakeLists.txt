@@ -2,16 +2,13 @@
 # Copyright 2026 the ScarletNX contributors
 # Extraction/memory do not need the NX runtime, LLVM, SDL or an Azahar build tree.
 add_library(snx_ctr_board STATIC board/board.c)
-target_include_directories(snx_ctr_board PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 set_target_properties(snx_ctr_board PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_ctr_board PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 add_library(snx_ctr_memory STATIC memory/memory.c)
 target_link_libraries(snx_ctr_memory PUBLIC snx_ctr_board)
 add_library(snx_ctr_cpu STATIC cpu/cpu.c)
-target_include_directories(snx_ctr_cpu PUBLIC "${PROJECT_SOURCE_DIR}/src/common")
 target_link_libraries(snx_ctr_cpu PUBLIC snx_ctr_memory)
 add_library(snx_ctr_loader STATIC loader/loader.c loader/cia.c loader/ncch.c loader/romfs.c loader/blz.c)
-target_include_directories(snx_ctr_loader PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(snx_ctr_loader PUBLIC scarletnx-common OpenSSL::Crypto)
 target_compile_definitions(snx_ctr_loader PRIVATE _FILE_OFFSET_BITS=64 _CRT_SECURE_NO_WARNINGS)
 foreach(target snx_ctr_memory snx_ctr_loader snx_ctr_cpu)

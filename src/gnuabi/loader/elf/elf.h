@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_GNU_ELF_H
 #define SNX_GNU_ELF_H
-#include "../../memory/memory.h"
+#include "gnuabi/memory/memory.h"
 typedef struct GnuElfRange {
     uint64_t address;
     const unsigned char* data;

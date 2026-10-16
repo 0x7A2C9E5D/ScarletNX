@@ -3,14 +3,14 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* pl: the shared fonts */
-#include "runtime/main.h"
-#include "hle/filesystem/fs.h"
-#include "hle/services/services.h"
-#include "hle/kernel/ipc.h"
+#include "nx/runtime/main.h"
+#include "nx/hle/filesystem/fs.h"
+#include "nx/hle/services/services.h"
+#include "nx/hle/kernel/ipc.h"
 #include "hle/services/pl.swipc.inc"
-#include "hle/kernel/kernel.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

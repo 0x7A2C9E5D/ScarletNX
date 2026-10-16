@@ -5,7 +5,7 @@
 /* VIC: the video image compositor. Here it copies each enabled slot's NV12 surface (the picture NVDEC wrote there)
    into the game's surface, converted to its format, without scaling: a picture larger than its target rectangle or
    the surface is cropped */
-#include "gpu/video/host1x_int.h"
+#include "nx/gpu/video/host1x_int.h"
 /* The config struct (its iova in register 0x708) as the game's TVMR and NvDdkVic libraries build it: 0x610 bytes,
    the output surface config at +0x20, 8 slots of 0xB0 bytes from +0x90.
    Surface config u64 (output at +0x20, a slot's at slot+0x40): 0-6 format (0x1F A8B8G8R8, 0x20 A8R8G8B8, 0x44 NV12),

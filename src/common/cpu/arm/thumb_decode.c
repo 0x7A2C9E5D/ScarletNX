@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "arm.h"
+#include "common/cpu/arm/arm.h"
 
 static unsigned thumb16(uint16_t h, SnxThumb* o) {
     unsigned g = h >> 11;

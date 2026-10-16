@@ -6,13 +6,13 @@
    thread, so calls block it as a host thread would block. */
 #ifndef SNX_GNU_NETWORK_H
 #define SNX_GNU_NETWORK_H
-#include "process/process.h"
-#include "network/net.h"
+#include "gnuabi/process/process.h"
+#include "common/network/net.h"
 #include <stdbool.h>
 
 enum {
 #define LINUX_NET_SYSCALL(number, name) GNU_NR_##name = number,
-#include "network/abi/linux_syscalls.inc"
+#include "gnuabi/network/abi/linux_syscalls.inc"
 };
 
 /* syscalls.c: true when number is one of abi/linux_syscalls.inc's */

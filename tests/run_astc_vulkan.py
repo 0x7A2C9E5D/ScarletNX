@@ -24,7 +24,7 @@ def main():
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     flags = ['-O1', '-g', '-ffunction-sections', '-fdata-sections', '-DVK_NO_PROTOTYPES']
-    for path in (repo / 'src/nx', repo / 'src/common', args.vulkan_include, args.volk, args.vma_include):
+    for path in (repo / 'src', args.vulkan_include, args.volk, args.vma_include):
         flags += ['-I', str(path.resolve())]
     with tempfile.TemporaryDirectory(prefix='snx-astc-') as temp:
         out = Path(temp)

@@ -12,10 +12,6 @@ function(snx_test_target target standard)
     set_target_properties(${target} PROPERTIES C_STANDARD ${standard} C_STANDARD_REQUIRED ON)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Werror)
     target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    target_include_directories(${target} PRIVATE "${PROJECT_SOURCE_DIR}/src/common/utilities" "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64"
-        "${PROJECT_SOURCE_DIR}/src/common/cpu/recompiler" "${PROJECT_SOURCE_DIR}/src/common"
-        "${PROJECT_SOURCE_DIR}/src/nx" "${PROJECT_SOURCE_DIR}/src/nx/loader"
-        "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver")
     if(standard EQUAL 90)
         set_target_properties(${target} PROPERTIES C_EXTENSIONS OFF)
         target_compile_options(${target} PRIVATE -pedantic-errors)
@@ -453,7 +449,6 @@ endif()
 
 add_executable(snx_recompiler_test recompiler_native.c)
 snx_test_target(snx_recompiler_test 23)
-target_include_directories(snx_recompiler_test PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
 target_link_libraries(snx_recompiler_test PRIVATE snx_driver ${CMAKE_DL_LIBS})
 
 # LLVM is always available to the recompiler.
@@ -468,7 +463,6 @@ set_tests_properties(llvm_differential PROPERTIES TIMEOUT 900)
 # not a test: timings of the generated code (llvm_bench SCARLETNX REPO CLANG)
 add_executable(snx-llvm-bench llvm_bench.c)
 snx_test_target(snx-llvm-bench 11)
-target_include_directories(snx-llvm-bench PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
 target_link_libraries(snx-llvm-bench PRIVATE snx_driver ${CMAKE_DL_LIBS})
 # A32 emits self-contained host objects, without the A64 interpreter or RtAPI.
 add_executable(snx-test-arm-emit arm_emit.c)
@@ -507,7 +501,6 @@ endif()
 
 add_executable(snx-test-llvm-module llvm_module.c)
 snx_test_target(snx-test-llvm-module 11)
-target_include_directories(snx-test-llvm-module PRIVATE "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64")
 target_link_libraries(snx-test-llvm-module PRIVATE snx_driver ${CMAKE_DL_LIBS})
 if(TARGET snx_jit)
     set(snx_extra_backends gcc)

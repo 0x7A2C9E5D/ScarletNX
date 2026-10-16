@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "signals.h"
-#include "../process/process.h"
-#include "../abi/errno/errno.h"
+#include "gnuabi/signals/signals.h"
+#include "gnuabi/process/process.h"
+#include "gnuabi/abi/errno/errno.h"
 int64_t gnu_sigaction(GnuProcess* p, const uint64_t a[6]) {
     if (a[0] < 1 || a[0] > 64 || (a[1] && (a[0] == 9 || a[0] == 19)) || a[3] != 8) return -GNU_EINVAL;
     GnuSignalAction action;

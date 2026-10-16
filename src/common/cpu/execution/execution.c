@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "execution.h"
-#include "codegen.h"
+#include "common/cpu/execution/execution.h"
+#include "common/cpu/recompiler/codegen.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -134,7 +134,7 @@ int snx_execution_compile(SnxExecution* e, const SnxExecRange* ranges, size_t co
     args[n++] = "-I";
     args[n++] = SNX_CPU_INCLUDE;
     args[n++] = "-I";
-    args[n++] = SNX_COMMON_INCLUDE;
+    args[n++] = SNX_SOURCE_INCLUDE;
     args[n++] = source;
     args[n++] = "-o";
     args[n++] = library;

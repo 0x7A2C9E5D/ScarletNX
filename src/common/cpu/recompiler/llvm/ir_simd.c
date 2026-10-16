@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* AdvSIMD: snx_a64_fast_simd's shortcuts (a64.c), emitted inline as the C it prints, and the SIMD patterns, whose
    template hands the word to snx_simd (cpu_helpers.c, in the runtime library) */
-#include "ir.h"
+#include "common/cpu/recompiler/llvm/ir.h"
 #include <string.h>
 
 typedef LLVMValueRef V;

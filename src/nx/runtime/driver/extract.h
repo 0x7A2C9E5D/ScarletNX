@@ -3,7 +3,7 @@
 #ifndef SNX_EXTRACT_H
 #define SNX_EXTRACT_H
 
-#include "common.h"
+#include "common/utilities/common.h"
 
 /* argv contains extraction arguments only, without a program name or --extract. */
 int snx_extract(int argc, char** argv, const SnxPaths* paths);

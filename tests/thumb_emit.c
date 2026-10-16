@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* thumb_emit HALFWORDS OUTPUT.o [OPT]: each input line is PC followed by up to
    64 hexadecimal halfwords. Exports block_0, block_1, ... (SnxArmBlock ABI). */
-#include "cpu/arm/llvm.h"
+#include "common/cpu/arm/llvm.h"
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>

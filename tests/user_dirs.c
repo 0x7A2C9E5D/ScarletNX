@@ -3,7 +3,7 @@
 /* snx_user_dir and snx_user_path: an installed build's config, state and cache folders (the XDG Base Directory spec),
    and where a file of its data folder goes in them. tests/data_dir.c has the data folder itself. */
 #define _POSIX_C_SOURCE 200809L
-#include "common.h"
+#include "common/utilities/common.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

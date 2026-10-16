@@ -5,9 +5,9 @@
 #define _GNU_SOURCE
 /* the platform layer on Linux and other POSIX systems: locks, threads, time, virtual memory and write tracking
    (userfaultfd), files, shared libraries, the crash handler */
-#include "runtime/main.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

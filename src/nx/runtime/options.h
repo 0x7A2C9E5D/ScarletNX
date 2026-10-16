@@ -7,7 +7,7 @@
 #define SNX_OPTIONS_H
 #include <stddef.h>
 
-#include "runtime/startup.h"
+#include "nx/runtime/startup.h"
 
 extern int g_opt_fullscreen; /* fullscreen: the .ini's, or the command line's for this run (startup.h) */
 

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Guest functions: the IR of what snx_codegen_emit (codegen.c) prints for a function, and of snx_a64_static_step */
-#include "ir.h"
+#include "common/cpu/recompiler/llvm/ir.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -3,14 +3,14 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* Unattended-run options for both windowed and headless execution through the SDL3 backend. */
-#include "runtime/platform/unattended.h"
-#include "runtime/ini.h"
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "runtime/rtapi.h"
-#include "gpu/renderer.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/runtime/platform/unattended.h"
+#include "nx/runtime/ini.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/runtime/rtapi.h"
+#include "nx/gpu/renderer.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>

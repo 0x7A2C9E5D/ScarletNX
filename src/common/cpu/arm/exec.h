@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_ARM_EXEC_H
 #define SNX_ARM_EXEC_H
-#include "arm.h"
+#include "common/cpu/arm/arm.h"
 #include <stddef.h>
 
 /* A runnable AArch32 (A32/Thumb) block image, shared by the GNU ABI and NX

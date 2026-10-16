@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Startup-only switches, parsed before loading game code or showing any fatal error box. */
-#include "runtime/startup.h"
-#include "runtime/cli.h"
+#include "nx/runtime/startup.h"
+#include "nx/runtime/cli.h"
 #include <stdio.h>
 
 int g_opt_headless, g_cli_fullscreen = -1;

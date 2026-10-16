@@ -6,7 +6,7 @@
    (present.c) */
 #ifndef SNX_MAIN_H
 #define SNX_MAIN_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 
 int snx_main(int argc, char** argv);
 /* the menu (src/gui), set by an executable that has one: started with nothing to run, the runtime opens it */

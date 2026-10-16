@@ -29,8 +29,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "cpu/aarch64/cpu.h"
-#include "cpu/arm/arm.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "common/cpu/arm/arm.h"
 
 /* the shared library's exported interface (SNX_RECOMPILER_EXPORTS while it is built); nothing for the static one */
 #if defined(SNX_RECOMPILER_EXPORTS) && defined(_WIN32)

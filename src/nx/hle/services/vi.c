@@ -5,19 +5,19 @@
 /* vi + the nvnflinger buffer queue. There's no compositor: QueueBuffer has the GPU thread show the frame once the work
    queued before it is done, and DequeueBuffer waits out the last frame's turn on the display (its swap interval) before
    handing the game a buffer for the next, as the console's compositor holds it (present_pace). */
-#include "hle/services/vi.h"
-#include "runtime/main.h"
-#include "runtime/options.h"
-#include "gpu/gpu.h"
-#include "hle/services/nvdrv.h"
-#include "hle/services/services.h"
-#include "hle/kernel/ipc.h"
-#include "hle/services/services_int.h"
+#include "nx/hle/services/vi.h"
+#include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
+#include "nx/gpu/gpu.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/hle/services/services.h"
+#include "nx/hle/kernel/ipc.h"
+#include "nx/hle/services/services_int.h"
 #include "hle/services/vi.swipc.inc"
-#include "hle/kernel/kernel.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdlib.h>
 #include <string.h>
 

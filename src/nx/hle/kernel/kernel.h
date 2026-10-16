@@ -6,8 +6,8 @@
    the dumps (debug.c). What only the kernel's own files use is in kernel_int.h */
 #ifndef SNX_KERNEL_H
 #define SNX_KERNEL_H
-#include "cpu/aarch64/cpu.h"
-#include "runtime/platform/plat.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/runtime/platform/plat.h"
 
 #define K_PROCESS_ID 0x51ull /* the single application process, also injected into IPC PID descriptors */
 #define NCORES       4       /* the console's CPU cores */

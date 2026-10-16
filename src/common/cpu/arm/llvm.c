@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "llvm.h"
-#include "simd.h"
+#include "common/cpu/arm/llvm.h"
+#include "common/cpu/arm/simd.h"
 #include <limits.h>
 
 /* All guest arithmetic is i32 without nsw/nuw. In particular address arithmetic
@@ -577,8 +577,8 @@ static void miscellaneous(ArmIR* a, SnxA32Kind kind) {
     }
     setreg(a, d, r);
 }
-#include "llvm_vector.inc"
-#include "llvm_thumb.inc"
+#include "common/cpu/arm/llvm_vector.inc"
+#include "common/cpu/arm/llvm_thumb.inc"
 
 /* Returns 1 for instructions which end the block, with the next PC stored. */
 static int instruction(ArmIR* a, SnxA32Kind kind) {

@@ -3,8 +3,8 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* time: clocks and the time zone */
-#include "hle/services/services_int.h"
-#include "runtime/clock.h"
+#include "nx/hle/services/services_int.h"
+#include "nx/runtime/clock.h"
 #include "hle/services/time.swipc.inc"
 /* ================================================================ time */
 /* The steady clock is the guest clock (guest_ns, the time base of the ticks the game reads) in seconds, with

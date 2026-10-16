@@ -4,7 +4,7 @@
    runs at the best priority among its waiters, up a chain of owners that wait on mutexes themselves, until the mutex
    is handed over. The rest of the kernel is stubbed: a wait returns at once with the thread still queued, so each
    step's priorities can be read */
-#include "hle/kernel/sync.c"
+#include "nx/hle/kernel/sync.c"
 #include <stdarg.h>
 #include <stdio.h>
 

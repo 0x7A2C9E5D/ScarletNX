@@ -5,13 +5,13 @@
 /* what the kernel's files share: result codes, the thread table, waiting and waking, and the SVCs svc.c dispatches to */
 #ifndef SNX_KERNEL_INT_H
 #define SNX_KERNEL_INT_H
-#include "hle/kernel/kernel.h"
-#include "runtime/loader.h"
-#include "hle/kernel/ipc.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
-#include "runtime/rtapi.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/runtime/loader.h"
+#include "nx/hle/kernel/ipc.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include "nx/runtime/rtapi.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

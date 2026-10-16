@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The window icon built in: dist/icons' 128 PNG byte for byte, decoded to the file's pixels, and a window takes it */
-#include "window_icon.h"
+#include "common/utilities/window_icon.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

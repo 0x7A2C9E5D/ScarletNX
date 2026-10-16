@@ -4,7 +4,7 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the smaller services, most of which answer success: apm, lm, pctl, friend, ns, prepo, psm, fatal, csrng, mm, nfp, caps, bcat, aoc, irs, mii, ldn, ectx, spl, btm, audin.
    Their interfaces are in misc.swipc */
-#include "hle/services/services_int.h"
+#include "nx/hle/services/services_int.h"
 #include "hle/services/misc.swipc.inc"
 #include <openssl/rand.h>
 /* ================================================================ apm and misc */

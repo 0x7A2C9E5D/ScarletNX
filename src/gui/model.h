@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "font.h" /* gui_glyph */
+#include "common/utilities/font.h" /* gui_glyph */
 
 /* the menu's items, in order: Games, the loads, the keys, Settings and Share log, Exit */
 enum {

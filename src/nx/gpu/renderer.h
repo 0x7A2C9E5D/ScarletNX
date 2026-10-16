@@ -4,8 +4,8 @@
    Vulkan renderer (gpu/vk/renderer.c). It works with a window or offscreen without a swapchain. */
 #ifndef SNX_RENDERER_H
 #define SNX_RENDERER_H
-#include "cpu/aarch64/cpu.h"
-#include "gpu/gpu.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/gpu/gpu.h"
 
 typedef struct Renderer {
     const char* name;

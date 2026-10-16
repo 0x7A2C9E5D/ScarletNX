@@ -5,8 +5,8 @@
    epoll is level-triggered poll over its interest list. Edge-triggered users read until EAGAIN anyway, so EPOLLET
    only costs them a spare wakeup. EPOLLONESHOT disarms an entry once it was reported. Signal masks are ignored:
    the runtime delivers no asynchronous signals. */
-#include "network/network.h"
-#include "filesystem/internal.h"
+#include "gnuabi/network/network.h"
+#include "gnuabi/filesystem/internal.h"
 #include <stdlib.h>
 #include <string.h>
 

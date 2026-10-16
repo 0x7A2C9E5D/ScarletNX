@@ -2,12 +2,12 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_GNU_PROCESS_H
 #define SNX_GNU_PROCESS_H
-#include "cpu/aarch64/cpu.h"
-#include "cpu/arm/arm.h"
-#include "../memory/memory.h"
-#include "../loader/elf/elf.h"
-#include "../filesystem/vfs.h"
-#include "../abi/structures/signal.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "common/cpu/arm/arm.h"
+#include "gnuabi/memory/memory.h"
+#include "gnuabi/loader/elf/elf.h"
+#include "gnuabi/filesystem/vfs.h"
+#include "gnuabi/abi/structures/signal.h"
 #include <setjmp.h>
 typedef struct GnuProcess {
     CPU cpu;

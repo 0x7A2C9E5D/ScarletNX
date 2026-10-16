@@ -4,11 +4,11 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the crash report. It runs in the crash handler: the log is in its crash mode by then (log_crash_mode), and the
    hints aren't saved here, the main loop saves them every few seconds */
-#include "runtime/loader.h"
-#include "runtime/main.h"
-#include "hle/kernel/kernel.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
+#include "nx/runtime/loader.h"
+#include "nx/runtime/main.h"
+#include "nx/hle/kernel/kernel.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
 #if defined(_WIN32)
 extern char __ImageBase; /* the linker's: where the executable is loaded */
 #else

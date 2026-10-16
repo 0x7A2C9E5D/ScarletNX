@@ -191,6 +191,56 @@ def check_include_shadows(repo, build):
     return errors
 
 
+# a compiler's -I to a folder of src/, in the CI, the docs or the scripts: src/ is the one include root
+SOURCE_FLAG = re.compile(r'-I\s*["\']?src/[^\s"\']')
+
+
+def check_include_flags(repo):
+    errors = []
+    places = [repo / '.github', repo / 'docs', repo / 'scripts']
+    for path in sorted(p for place in places if place.is_dir() for p in place.rglob('*') if p.is_file()):
+        try:
+            text = path.read_text(encoding='utf-8')
+        except UnicodeDecodeError:
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            if SOURCE_FLAG.search(line):
+                errors.append(f'{path.relative_to(repo).as_posix()}:{number}: -I to a folder of src/; use -I src')
+    return errors
+
+
+def check_include_roots(repo, build):
+    """Every C and C++ include root in src/ is src/ itself: a local include is a path from it"""
+    reply = build / '.cmake/api/v1/reply'
+    indexes = sorted(reply.glob('index-*.json'))
+    if not indexes:
+        return ['CMake file API did not produce a target/source snapshot']
+    index = json.loads(indexes[-1].read_text(encoding='utf-8'))
+    model = json.loads((reply / index['reply']['codemodel-v2']['jsonFile']).read_text(encoding='utf-8'))
+    repo = repo.resolve()
+    src = repo / 'src'
+    errors = []
+    for configuration in model['configurations']:
+        for entry in configuration['targets']:
+            target = json.loads((reply / entry['jsonFile']).read_text(encoding='utf-8'))
+            for group in target.get('compileGroups', ()):
+                if group.get('language') not in ('C', 'CXX'):
+                    continue  # the Windows resource compiler finds its files from a folder of its own
+                for include in group.get('includes', ()):
+                    directory = Path(include['path'])
+                    if not directory.is_absolute():
+                        directory = repo / directory
+                    directory = directory.resolve()
+                    if directory != src and directory.is_relative_to(src):
+                        error = (
+                            f"{directory.relative_to(repo).as_posix()} is on {entry['name']}'s include path: "
+                            'include its headers as paths from src/'
+                        )
+                        if error not in errors:
+                            errors.append(error)
+    return errors
+
+
 def check_target_sources(repo, build):
     reply = build / '.cmake/api/v1/reply'
     indexes = sorted(reply.glob('index-*.json'))
@@ -234,7 +284,7 @@ def main():
     )
     parser.add_argument('--cmake', default='cmake', help='CMake executable for --build')
     args = parser.parse_args()
-    errors = check_sources(args.repo.resolve())
+    errors = check_sources(args.repo.resolve()) + check_include_flags(args.repo.resolve())
     if args.build:
         graph = args.build.resolve() / 'architecture-targets.dot'
         query = args.build.resolve() / '.cmake/api/v1/query/codemodel-v2'
@@ -253,6 +303,7 @@ def main():
         errors.extend(check_graph(graph))
         errors.extend(check_target_sources(args.repo.resolve(), args.build.resolve()))
         errors.extend(check_include_shadows(args.repo.resolve(), args.build.resolve()))
+        errors.extend(check_include_roots(args.repo.resolve(), args.build.resolve()))
     if args.graph:
         errors.extend(check_graph(args.graph))
     if errors:

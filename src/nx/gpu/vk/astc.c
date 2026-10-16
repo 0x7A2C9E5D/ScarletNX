@@ -5,9 +5,9 @@
    transfer copies those bytes to the image (including sRGB images, without an
    unwanted gamma conversion). Chunking bounds scratch memory and SSBO ranges. */
 #include <string.h>
-#include "gpu/vk/vk.h"
-#include "gpu/texture/astc_spv.h"
-#include "runtime/platform/log.h"
+#include "nx/gpu/vk/vk.h"
+#include "nx/gpu/texture/astc_spv.h"
+#include "nx/runtime/platform/log.h"
 
 static VkDescriptorSetLayout g_astc_ds;
 static VkPipelineLayout g_astc_layout;

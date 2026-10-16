@@ -2,8 +2,8 @@
    Copyright 2026 the ScarletNX contributors */
 /* The theme editor's rows and keys (src/gui/editor.c): what each key does to the theme, typing a value, leaving over
    changes, and Save writing a theme.ini that reads back to the theme edited */
-#include "common.h"
-#include "editor.h"
+#include "common/utilities/common.h"
+#include "gui/editor.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

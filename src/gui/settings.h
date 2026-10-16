@@ -9,7 +9,7 @@
 #ifndef SNX_GUI_SETTINGS_H
 #define SNX_GUI_SETTINGS_H
 #include <stddef.h>
-#include "theme.h"
+#include "gui/theme.h"
 
 #ifndef SNX_GUI_HAS_GCCJIT
 #define SNX_GUI_HAS_GCCJIT 0

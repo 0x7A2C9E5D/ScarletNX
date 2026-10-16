@@ -3,8 +3,8 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the memory SVCs (heap, QueryMemory, MapMemory, physical, shared and transfer memory) and GetInfo */
-#include "hle/kernel/kernel_int.h"
-#include "runtime/clock.h"
+#include "nx/hle/kernel/kernel_int.h"
+#include "nx/runtime/clock.h"
 /* ============================================================ memory */
 u32 svc_query(u64 info, u64 addr) {
     MemBlock b;

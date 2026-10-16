@@ -3,7 +3,7 @@
 /* snx_data_dir, the folder the driver and the menu share: the checkout, else a portable copy's folder (a games/ beside
    the AppImage or the program), else the user's data folder. */
 #define _POSIX_C_SOURCE 200809L
-#include "common.h"
+#include "common/utilities/common.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

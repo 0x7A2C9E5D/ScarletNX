@@ -2,9 +2,9 @@
    Copyright 2026 the ScarletNX contributors */
 /* The menu's Settings (src/gui/settings.c): the runtime's list read into the form's rows, a setting's pick and the
    options a run gets. With a runtime's path, its own --settings list too */
-#include "common.h"
-#include "editor.h"
-#include "settings.h"
+#include "common/utilities/common.h"
+#include "gui/editor.h"
+#include "gui/settings.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

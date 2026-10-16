@@ -3,9 +3,9 @@
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
 #endif
-#include "process.h"
-#include "network/network.h"
-#include "../abi/errno/errno.h"
+#include "gnuabi/process/process.h"
+#include "gnuabi/network/network.h"
+#include "gnuabi/abi/errno/errno.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>

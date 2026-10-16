@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* ETC2 and EAC decoding, from the Khronos Data Format Specification's ETC2 chapter. A block is read as big-endian
    64 bit words; a pixel (x, y) of a 4x4 block is number x * 4 + y in the index bits (columns first). */
-#include "gpu/texture/etc2.h"
+#include "nx/gpu/texture/etc2.h"
 #include <string.h>
 
 /* the ETC1 intensity modifiers, per table codeword, for pixel indices 0 to 3 */

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "browser.h"
-#include "common.h"
+#include "gui/browser.h"
+#include "common/utilities/common.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>

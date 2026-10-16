@@ -5,7 +5,7 @@
    on-screen controls' options (vpad.h), the touch screen's, and Exit */
 #ifndef SNX_OVERLAY_H
 #define SNX_OVERLAY_H
-#include "runtime/platform/ui.h"
+#include "nx/runtime/platform/ui.h"
 
 #define OVERLAY_COLS 40 /* the panel, in cells of the 8x16 font */
 #define OVERLAY_ROWS 16 /* the tallest page's: the others are as tall as their items */

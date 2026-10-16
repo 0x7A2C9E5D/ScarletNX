@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "window_icon.h"
+#include "common/utilities/window_icon.h"
 
 extern const unsigned char snx_window_icon_png[];
 extern const size_t snx_window_icon_png_size;

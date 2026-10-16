@@ -3,7 +3,7 @@
 /* ARMv8-A pseudocode witnesses, independent of the differential emulator.
    FPRoundInt, FPProcessNaNs, FPMax/Min[Num], FPCompare and FPUnpack.
    All operands/results are IEEE encodings, never host NaN literals. */
-#include "cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 #include <fenv.h>
 #include <stdio.h>
 

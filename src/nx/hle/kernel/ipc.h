@@ -5,8 +5,8 @@
 /* IPC (ipc.c): service objects, sessions, the request and reply helpers, the service registry */
 #ifndef SNX_IPC_H
 #define SNX_IPC_H
-#include "cpu/aarch64/cpu.h"
-#include "hle/kernel/kernel.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/hle/kernel/kernel.h"
 #include <string.h>
 
 #define MAX_BUFS 8

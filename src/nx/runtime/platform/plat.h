@@ -6,7 +6,7 @@
    and fatal errors (plat.c) */
 #ifndef SNX_PLAT_H
 #define SNX_PLAT_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 #include <stddef.h>
 #include <stdio.h>
 

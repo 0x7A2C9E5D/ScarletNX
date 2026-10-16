@@ -10,7 +10,6 @@
 #   vk        the renderer                                            platform  the OS layer and a window backend
 
 add_library(snx_nx_flags INTERFACE)
-target_include_directories(snx_nx_flags INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(snx_nx_flags INTERFACE scarletnx-common scarletnx-net)
 # Every function and global used across files is declared once, in the header of the file that defines it, and
 # everything else is static: a declaration that disagrees with the definition is then a compile error instead of a

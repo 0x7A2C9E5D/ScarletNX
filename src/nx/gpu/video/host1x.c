@@ -7,7 +7,7 @@
    picture setup the game fills in) into the surface each job names, and VIC jobs convert their input slot's
    surface, unscaled, into the output surface.
    Struct layouts / method offsets come from NVIDIA's open-gpu-doc (nvdec_drv.h, clc5b0.h, VIC). */
-#include "gpu/video/host1x_int.h"
+#include "nx/gpu/video/host1x_int.h"
 
 /* ------------------------------------------------------------ IOVA (what the video engines see through the SMMU) */
 /* A mapping lives until nvmap frees its handle (host1x_forget_handle), not until UNMAP_BUFFER: NVDEC and VIC map the

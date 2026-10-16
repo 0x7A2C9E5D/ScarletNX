@@ -5,7 +5,7 @@
 /* the guest address space (mem.c) */
 #ifndef SNX_MEM_H
 #define SNX_MEM_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 #include <string.h>
 
 #define AS_SIZE    0x2000000000ull

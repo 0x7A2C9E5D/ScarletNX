@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "pad_sdl.h"
+#include "common/utilities/pad_sdl.h"
 
 /* each control's button; the triggers are axes */
 static const SDL_GamepadButton BUTTONS[SNX_PAD_CONTROLS] = {

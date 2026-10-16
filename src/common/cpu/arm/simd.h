@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_ARM_SIMD_H
 #define SNX_ARM_SIMD_H
-#include "arm.h"
+#include "common/cpu/arm/arm.h"
 
 /* Decoded operations, not guest encodings. Register operands are byte offsets
    into the shared D bank: S0..S31 alias D0..D15, Q0..Q15 alias D0..D31. */

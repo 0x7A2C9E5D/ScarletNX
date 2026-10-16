@@ -24,11 +24,11 @@
    land on whichever thread reads their memory first. */
 #ifndef SNX_VK_H
 #define SNX_VK_H
-#include "cpu/aarch64/cpu.h"
-#include "gpu/gpu.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/gpu/gpu.h"
 #include "volk.h"
 #include "vk_mem_alloc.h"
-#include "gpu/shader/shader.h"
+#include "nx/gpu/shader/shader.h"
 
 #define VK_FRAMES 2  /* frames in flight */
 #define VK_SC_MAX 16 /* swapchain images */

@@ -4,7 +4,7 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the 3D engine's methods: registers, macro calls, draws (merging instanced ones), constant buffer data, report
    semaphores. maxwell3d.c passes the work to the renderer */
-#include "gpu/maxwell/engines_int.h"
+#include "nx/gpu/maxwell/engines_int.h"
 
 /* ============================================================ Maxwell 3D */
 #define R3(i) (ch->r3d[i])

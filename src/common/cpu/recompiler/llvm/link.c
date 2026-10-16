@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "link.h"
+#include "common/cpu/recompiler/llvm/link.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

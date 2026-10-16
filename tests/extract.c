@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Compile with src/common/utilities/common.c + extract.c. This executable also acts as a synthetic hactool. */
 #define _POSIX_C_SOURCE 200809L
-#include "extract.h"
+#include "nx/runtime/driver/extract.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

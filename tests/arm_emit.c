@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* arm_emit WORDS OUTPUT.o [OPT [a57|arm11 [flat|checked]]]: PC followed by up to 64
    hexadecimal words. Exports block_0, block_1, ... with the SnxArmBlock ABI. */
-#include "cpu/arm/llvm.h"
+#include "common/cpu/arm/llvm.h"
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>

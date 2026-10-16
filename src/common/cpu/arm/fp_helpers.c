@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "simd.h"
+#include "common/cpu/arm/simd.h"
 /* Share the audited integer implementation of ARM's FP pseudocode, not the
    A64 register ABI. Namespace this copy so both runtime libraries can coexist.
    The included implementation retains its SwitchRecomp/Apache notices. */
@@ -15,8 +15,8 @@
 #define snx_fp_round    snx_arm_soft_round
 #define urecpe32        snx_arm_soft_urecpe32
 #define ursqrte32       snx_arm_soft_ursqrte32
-#include "../aarch64/cpu.h"
-#include "../aarch64/helpers/fp.c"
+#include "common/cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/helpers/fp.c"
 
 /* AArch32 FPRecipStep/FPRSqrtStep round the product BEFORE subtraction.
    A64's fused step helpers are not interchangeable with these operations. */

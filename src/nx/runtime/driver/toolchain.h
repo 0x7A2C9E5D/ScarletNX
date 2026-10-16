@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_TOOLCHAIN_H
 #define SNX_TOOLCHAIN_H
-#include "common.h"
+#include "common/utilities/common.h"
 typedef struct {
     const char* opt;
     unsigned jobs;

@@ -13,7 +13,7 @@
    InvalidOption, CertBufferTooSmall, AlreadyInUse); InternalError (999) is Eden's, for an error the console's list
    has no name for. Eden's ssl.cpp forces the verify option to 0 and swaps SetOption's arguments; neither is done
    here. */
-#include "hle/services/network/network.h"
+#include "nx/hle/services/network/network.h"
 #include "hle/services/network/ssl.swipc.inc"
 #include <limits.h>
 #ifdef _WIN32

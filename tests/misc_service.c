@@ -2,12 +2,12 @@
    Copyright 2026 the ScarletNX contributors */
 /* mm:u (misc.c) and hid's IHidServer (hid.c) through their generated dispatchers, with the kernel objects they hand
    out made here and the shared memory a host buffer */
-#include "hle/services/services_int.h"
+#include "nx/hle/services/services_int.h"
 #include <math.h>
 #include <stdarg.h>
 
-#include "hle/services/hid.c"
-#include "hle/services/misc.c"
+#include "nx/hle/services/hid.c"
+#include "nx/hle/services/misc.c"
 
 u8* g_mem;
 int g_verbose;

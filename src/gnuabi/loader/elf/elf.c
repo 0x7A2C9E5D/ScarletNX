@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Linux ELF64/AArch64 layout, independently decoded rather than host Elf headers. */
-#include "elf.h"
-#include "../../abi/errno/errno.h"
+#include "gnuabi/loader/elf/elf.h"
+#include "gnuabi/abi/errno/errno.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Exercise the production audout IPC commands with a deterministic clock and a copying PCM sink. */
-#include "hle/services/services_int.h"
+#include "nx/hle/services/services_int.h"
 #include <stdarg.h>
 
-#include "hle/services/audio.c"
+#include "nx/hle/services/audio.c"
 
 u8* g_mem;
 int g_verbose;

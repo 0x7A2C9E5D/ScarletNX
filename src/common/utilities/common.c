@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE   700
-#include "common.h"
+#include "common/utilities/common.h"
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>

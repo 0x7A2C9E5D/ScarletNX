@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "memory/ctr_memory.h"
+#include "3ds/memory/ctr_memory.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

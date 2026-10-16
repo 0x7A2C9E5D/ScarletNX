@@ -3,8 +3,8 @@
 /* Scalar floating point: the FP patterns of a64_templates.inc, as ir_fp.c builds them for LLVM. Their C calls the
    integer-only FP of cpu_helpers.c (snx_fp_*), in the runtime library; the fast paths use the host's IEEE arithmetic
    where it gives the helpers' exact result and flags (ir.h explains when). */
-#include "jit.h"
-#include "cpu.h"
+#include "common/cpu/recompiler/gccjit/jit.h"
+#include "common/cpu/aarch64/cpu.h"
 #include <string.h>
 
 typedef gcc_jit_rvalue* V;

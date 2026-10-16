@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "runtime/platform/fatal_screen.h"
-#include "font.h"
+#include "nx/runtime/platform/fatal_screen.h"
+#include "common/utilities/font.h"
 #include <string.h>
 
 const char* fatal_hint(const char* msg) {

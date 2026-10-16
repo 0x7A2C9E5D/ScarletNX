@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "gpu/shader/spirv_emit.h"
+#include "nx/gpu/shader/spirv_emit.h"
 #include "spirv_emitter_fixture.h"
 
 uint32_t* snx_test_spirv_compute(size_t* words) {

@@ -5,7 +5,7 @@
 #ifndef SNX_TOOL_A64_H
 #define SNX_TOOL_A64_H
 
-#include "common.h"
+#include "common/utilities/common.h"
 #include <stddef.h>
 #include <stdio.h>
 

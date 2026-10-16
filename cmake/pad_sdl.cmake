@@ -4,6 +4,5 @@
 # runtime maps a game's buttons with it and the launcher draws the same map, so both read a pad alike
 include_guard(GLOBAL)
 add_library(snx_pad_sdl STATIC "${PROJECT_SOURCE_DIR}/src/common/utilities/pad_sdl.c")
-target_include_directories(snx_pad_sdl PUBLIC "${PROJECT_SOURCE_DIR}/src/common/utilities")
 target_link_libraries(snx_pad_sdl PUBLIC scarletnx-common SDL3::SDL3)
 target_compile_options(snx_pad_sdl PRIVATE -Wall -Wextra -Werror=missing-prototypes)

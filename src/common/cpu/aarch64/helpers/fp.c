@@ -102,4 +102,4 @@ u64 snx_fp_round(CPU* c, u64 bits, int width, int rm, int exact) {
     return sign | result;
 }
 
-#include "fp_arithmetic.c"
+#include "common/cpu/aarch64/helpers/fp_arithmetic.c"

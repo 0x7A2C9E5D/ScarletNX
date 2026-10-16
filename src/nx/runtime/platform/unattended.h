@@ -6,7 +6,7 @@
    press_at, press_len, script. Also the stick handling the backends share */
 #ifndef SNX_UNATTENDED_H
 #define SNX_UNATTENDED_H
-#include "cpu/aarch64/cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 #include <stddef.h>
 
 int unattended_ini(const char* k, const char* v); /* 1 when k is one of the options */

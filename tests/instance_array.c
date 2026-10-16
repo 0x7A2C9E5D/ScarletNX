@@ -3,14 +3,14 @@
 /* VERTEX_ARRAY_INSTANCE_FIRST and _SUBSEQUENT (3D 0x485, 0x486): the 3D engine's methods run against a renderer that
    records the draws reaching it. FIRST draws its range as instance 0; each SUBSEQUENT of the same range is one more
    instance of that draw. */
-#include "gpu/gpu.h"
-#include "gpu/maxwell/engines_int.h"
-#include "gpu/renderer.h"
-#include "hle/services/nvdrv.h"
-#include "memory/mem.h"
-#include "runtime/clock.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/gpu/gpu.h"
+#include "nx/gpu/maxwell/engines_int.h"
+#include "nx/gpu/renderer.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/clock.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdio.h>
 #include <string.h>
 

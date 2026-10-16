@@ -4,7 +4,7 @@
 #ifndef SNX_PAD_SDL_H
 #define SNX_PAD_SDL_H
 #include <SDL3/SDL.h>
-#include "pad_map.h"
+#include "common/utilities/pad_map.h"
 
 #define SNX_PAD_TRIGGER 8000 /* how far a trigger goes before it is held */
 /* the control an SDL button is, -1 for none (Home, the extra ones) */

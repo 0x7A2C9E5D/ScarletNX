@@ -4,10 +4,10 @@
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* audio services: audout sends guest PCM to the host, audren renders the game's voices (audren.c, audren_dsp.c),
    and hwopus decodes the game's Opus packets with FFmpeg */
-#include "hle/services/services_int.h"
+#include "nx/hle/services/services_int.h"
 #include "hle/services/audio.swipc.inc"
 #ifndef SNX_NO_H264
-#include "gpu/video/host1x.h"
+#include "nx/gpu/video/host1x.h"
 #include <libavcodec/avcodec.h>
 #include <math.h>
 #endif

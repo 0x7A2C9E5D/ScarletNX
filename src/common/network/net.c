@@ -9,7 +9,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* POLLRDHUP, accept4 and SOCK_CLOEXEC on glibc */
 #endif
-#include "network/net_internal.h"
+#include "common/network/net_internal.h"
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -281,11 +281,11 @@ int snx_net_errno_from_host(int e) {
 #ifdef _WIN32
 #define SNX_NET_WSAERR(host, name)                                                                                     \
     if (e == host) return -SNX_E##name;
-#include "network/abi/errno_win32.inc"
+#include "common/network/abi/errno_win32.inc"
 #else
 #define SNX_NET_ERRNO(name, value)                                                                                     \
     if (e == E##name) return -SNX_E##name;
-#include "network/abi/errno.inc"
+#include "common/network/abi/errno.inc"
     if (e == EWOULDBLOCK) return -SNX_EAGAIN;
 #ifdef ENOTSUP
     if (e == ENOTSUP) return -SNX_EOPNOTSUPP;
@@ -306,38 +306,38 @@ int snx_net_host_error(void) {
 int snx_net_domain_to_host(int d) {
 #define SNX_NET_DOMAIN(name, value, host)                                                                              \
     if (d == value) return host;
-#include "network/abi/domain.inc"
+#include "common/network/abi/domain.inc"
     return -1;
 }
 int snx_net_domain_from_host(int d) {
 #define SNX_NET_DOMAIN(name, value, host)                                                                              \
     if (d == host) return value;
-#include "network/abi/domain.inc"
+#include "common/network/abi/domain.inc"
     return -1;
 }
 int snx_net_socktype_to_host(int t) {
 #define SNX_NET_SOCKTYPE(name, value, host)                                                                            \
     if (t == value) return host;
-#include "network/abi/socktype.inc"
+#include "common/network/abi/socktype.inc"
     return -1;
 }
 int snx_net_socktype_from_host(int t) {
 #define SNX_NET_SOCKTYPE(name, value, host)                                                                            \
     if (t == host) return value;
-#include "network/abi/socktype.inc"
+#include "common/network/abi/socktype.inc"
     return 0;
 }
 static int level_to_host(int l) {
 #define SNX_NET_LEVEL(name, value, host)                                                                               \
     if (l == value) return host;
-#include "network/abi/level.inc"
+#include "common/network/abi/level.inc"
     return -1;
 }
 static int msg_to_host(int f) {
     int h = 0;
 #define SNX_NET_MSG(name, value, host)                                                                                 \
     if (f & value) h |= host;
-#include "network/abi/msgflag.inc"
+#include "common/network/abi/msgflag.inc"
     return h;
 }
 #ifndef _WIN32 /* Winsock's recvfrom reports no flags */
@@ -345,7 +345,7 @@ static int msg_from_host(int h) {
     int f = 0;
 #define SNX_NET_MSG(name, value, host)                                                                                 \
     if ((host) && (h & (host))) f |= value;
-#include "network/abi/msgflag.inc"
+#include "common/network/abi/msgflag.inc"
     return f;
 }
 #endif
@@ -358,14 +358,14 @@ static short poll_to_host(unsigned e) {
 #define SNX_NET_POLL(name, value, host, wsapoll)                                                                       \
     if (e & value) h |= host;
 #endif
-#include "network/abi/poll.inc"
+#include "common/network/abi/poll.inc"
     return h;
 }
 static uint16_t poll_from_host(short h) {
     uint16_t e = 0;
 #define SNX_NET_POLL(name, value, host, wsapoll)                                                                       \
     if ((host) && (h & (host))) e |= value;
-#include "network/abi/poll.inc"
+#include "common/network/abi/poll.inc"
     return e;
 }
 
@@ -690,7 +690,7 @@ static int opt_lookup(int level, int name, int* hlevel, int* hname, OptKind* kin
         *kind = K_##kind_;                                                                                             \
         return 0;                                                                                                      \
     }
-#include "network/abi/sockopt.inc"
+#include "common/network/abi/sockopt.inc"
     return -SNX_ENOPROTOOPT;
 }
 int snx_net_sockopt_kept(int level, int name) {

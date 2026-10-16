@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "runtime/platform/touch.h"
+#include "nx/runtime/platform/touch.h"
 
 void touch_picture(int cx, int cy, int cw, int ch, int picture[4]) {
     int w = cw, h = (int)((i64)cw * SNX_HID_TOUCH_HEIGHT / SNX_HID_TOUCH_WIDTH);

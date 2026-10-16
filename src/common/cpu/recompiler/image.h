@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #ifndef SNX_CODE_IMAGE_H
 #define SNX_CODE_IMAGE_H
-#include "common.h"
+#include "common/utilities/common.h"
 typedef struct {
     SnxU64 start, size;
 } SnxFde;

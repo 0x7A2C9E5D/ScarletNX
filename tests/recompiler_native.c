@@ -2,9 +2,9 @@
    Copyright 2026 the ScarletNX contributors */
 /* Synthetic NRO -> CLI -> module -> AOT/interpreter execution. No game data.
    A fourth argument names the backend (llvm by default, gcc). */
-#include "common.h"
-#include "cpu.h"
-#include "loader/module_abi.h"
+#include "common/utilities/common.h"
+#include "common/cpu/aarch64/cpu.h"
+#include "nx/loader/module_abi.h"
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32

@@ -5,12 +5,12 @@
 /* what the host1x files share: the IOVA mapping the video engines see, and the engines' entry points */
 #ifndef SNX_HOST1X_INT_H
 #define SNX_HOST1X_INT_H
-#include "gpu/video/host1x.h"
-#include "gpu/gpu.h"
-#include "hle/services/nvdrv.h"
-#include "memory/mem.h"
-#include "runtime/platform/log.h"
-#include "runtime/platform/plat.h"
+#include "nx/gpu/video/host1x.h"
+#include "nx/gpu/gpu.h"
+#include "nx/hle/services/nvdrv.h"
+#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include <stdlib.h>
 #include <string.h>
 

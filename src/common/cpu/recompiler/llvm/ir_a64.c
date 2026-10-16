@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* The integer, branch, load/store and system instructions: each emitter builds the C of its a64_templates.inc case.
    Field values are the template's f_ declarations evaluated in C, as Clang folds them for a constant w. */
-#include "ir.h"
+#include "common/cpu/recompiler/llvm/ir.h"
 #include <string.h>
 
 typedef LLVMValueRef V;

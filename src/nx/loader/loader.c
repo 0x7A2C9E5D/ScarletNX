@@ -7,7 +7,7 @@
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE   700
 #endif
-#include "loader.h"
+#include "nx/loader/loader.h"
 #include <lz4.h>
 /* OpenSSL's bignum header (from evp.h) types BN_ULONG as unsigned long long where long is 32 bits (Windows), which
    C90 doesn't have: only its declarations use it here */

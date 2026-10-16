@@ -3,7 +3,7 @@
    any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
    This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
 /* the copy engine: DMA between linear and block-linear surfaces in guest memory */
-#include "gpu/maxwell/engines_int.h"
+#include "nx/gpu/maxwell/engines_int.h"
 /* ============================================================ DMA */
 /* host pointer to a whole bl surface (slice dz, block depth bd) if it's contiguous, so DMA can memcpy
    instead of translating + tracking every 16 bytes */

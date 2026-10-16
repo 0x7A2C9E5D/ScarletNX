@@ -5,8 +5,8 @@
    platform: on by default on Android, off elsewhere. Kept in the game's .ini (keys controls and controls_*) */
 #ifndef SNX_VPAD_H
 #define SNX_VPAD_H
-#include "runtime/platform/ui.h"
-#include "runtime/ini.h"
+#include "nx/runtime/platform/ui.h"
+#include "nx/runtime/ini.h"
 
 /* in the order they are drawn: a finger presses the last one drawn under it */
 enum {

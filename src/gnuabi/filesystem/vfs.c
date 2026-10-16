@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Guest filesystem only: paths never reach host open/stat/unlink APIs.
    ABI constants/layout follow Linux asm-generic UAPI; host errors are translated. */
-#include "filesystem/internal.h"
+#include "gnuabi/filesystem/internal.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>

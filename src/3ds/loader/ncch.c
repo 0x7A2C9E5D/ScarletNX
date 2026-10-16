@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors
    Format references: Azahar ncch_container.h/.cpp and loader/ncch.cpp,
    68202bc4ff7edf9d7280ec0dcd6572b7cd1ae26e, GPL-3.0-or-later. */
-#include "internal.h"
+#include "3ds/loader/internal.h"
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>

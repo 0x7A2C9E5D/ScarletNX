@@ -2,8 +2,8 @@
    Copyright 2026 the ScarletNX contributors */
 /* The game's touch screen: the frontend's fingers placed on the picture (runtime/platform/touch.c), then the samples
    HID writes from them (hle/services/hid_touch.c), as the console's driver reports a finger's start and end */
-#include "runtime/platform/touch.h"
-#include "hle/services/hid_layout.h"
+#include "nx/runtime/platform/touch.h"
+#include "nx/hle/services/hid_layout.h"
 #include <assert.h>
 #include <string.h>
 

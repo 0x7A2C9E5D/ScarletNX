@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "../process/process.h"
-#include "../abi/errno/errno.h"
+#include "gnuabi/process/process.h"
+#include "gnuabi/abi/errno/errno.h"
 #include <stdio.h>
 static void syscall_entry(CPU* c, u32 immediate) {
     GnuProcess* p = c->thread;

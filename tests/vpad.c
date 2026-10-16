@@ -1,15 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The on-screen controls (runtime/platform/vpad.c): what fingers on them press, edit mode, the .ini keys, the draw */
-#include "runtime/platform/vpad.h"
-#include "runtime/platform/controls_atlas.h"
+#include "nx/runtime/platform/vpad.h"
+#include "nx/runtime/platform/controls_atlas.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
 /* ui.c's lock, without the platform layer */
-#include "runtime/platform/plat.h"
+#include "nx/runtime/platform/plat.h"
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
 

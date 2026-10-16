@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Fixed witnesses from ARM DDI0487A.k shared FP pseudocode and A57 DDI0488H.
    No host floating-point literals or software-emulator dependency. */
-#include "cpu.h"
+#include "common/cpu/aarch64/cpu.h"
 #include <fenv.h>
 #include <stdio.h>
 

@@ -5,7 +5,7 @@
 /* registering the HLE services (each file registers its own) */
 #ifndef SNX_SERVICES_H
 #define SNX_SERVICES_H
-#include "hle/kernel/ipc.h"
+#include "nx/hle/kernel/ipc.h"
 
 void svc_core_init(void); /* services.c */
 void svc_fs_init(void);

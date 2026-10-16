@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "loader/ctr_loader.h"
+#include "3ds/loader/ctr_loader.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* A run's output as a loading screen's steps. */
-#include "steps.h"
+#include "gui/steps.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

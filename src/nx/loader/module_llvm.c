@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-#include "module_llvm.h"
-#include "codegen.h"
-#include "codegen_view.h"
-#include "ir.h"
-#include "link.h"
-#include "module_abi.h"
+#include "nx/loader/module_llvm.h"
+#include "common/cpu/recompiler/codegen.h"
+#include "nx/loader/codegen_view.h"
+#include "common/cpu/recompiler/llvm/ir.h"
+#include "common/cpu/recompiler/llvm/link.h"
+#include "nx/loader/module_abi.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

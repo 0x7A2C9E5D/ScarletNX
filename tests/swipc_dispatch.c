@@ -7,7 +7,7 @@
    what a failed request returns, @stub and the fallbacks. The handlers are static, as in a
    service's file, and the generated .inc files are included after the stand-ins for ipc.c, before the handlers they
    declare */
-#include "hle/kernel/ipc.h"
+#include "nx/hle/kernel/ipc.h"
 #include <stdio.h>
 #include <stdlib.h>
 

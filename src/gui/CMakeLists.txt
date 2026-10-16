@@ -19,7 +19,6 @@ if(TARGET snx_driver_gccjit)
 else()
     target_compile_definitions(snx_gui_support PUBLIC SNX_GUI_HAS_GCCJIT=0)
 endif()
-target_include_directories(snx_gui_support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 set_target_properties(snx_gui_support PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_gui_support PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 if(WIN32)
@@ -58,7 +57,9 @@ target_link_libraries(scarletnx-gui PUBLIC snx_gui_support PRIVATE scarletnx-com
 if(WIN32 AND NOT SNX_BUILD_NX)
     enable_language(RC)
     target_sources(scarletnx-gui PRIVATE ../nx/runtime/platform/runtime.rc)
-    target_include_directories(scarletnx-gui PRIVATE ../nx/runtime/platform)
+    # where the resource compiler finds the manifest and the icon; C includes from src/ alone
+    target_include_directories(scarletnx-gui PRIVATE
+                               "$<$<COMPILE_LANGUAGE:RC>:${CMAKE_CURRENT_SOURCE_DIR}/../nx/runtime/platform>")
     target_link_options(scarletnx-gui PRIVATE -mwindows -static)
 endif()
 if(SNX_SDL3_FROM_SOURCE AND NOT SNX_BUILD_NX)

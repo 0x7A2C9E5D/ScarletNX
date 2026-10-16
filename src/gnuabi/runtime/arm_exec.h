@@ -6,8 +6,8 @@
    The CPU state is SnxArmCPU, separate from the A64 CPU*. */
 #ifndef SNX_GNU_ARM_EXEC_H
 #define SNX_GNU_ARM_EXEC_H
-#include "../process/process.h"
-#include "cpu/arm/arm.h"
+#include "gnuabi/process/process.h"
+#include "common/cpu/arm/arm.h"
 typedef struct GnuArmExec GnuArmExec;
 /* Compiles blocks on demand and runs the guest until it exits or faults.
    Returns the process exit code. */
