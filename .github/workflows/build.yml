@@ -626,6 +626,7 @@ jobs:
           name: AppImage-${{ matrix.arch }}-${{ steps.commit.outputs.short }}
           path: dist
       # Artifacts drop the executable bit
+      # --backend=gcc runs the runner's as and ld: Ubuntu's binutils, beside a GCC other than the AppImage's libgccjit's
       - name: Run the AppImage as a user would
         run: |
           chmod +x dist/*.AppImage
@@ -655,8 +656,9 @@ jobs:
         with:
           name: scarletnx-windows-${{ steps.commit.outputs.short }}
           path: package
+      # Built without libgccjit (-DSNX_GCCJIT=OFF): --backend=gcc has to say so
       - name: Run the zip's scarletnx.exe as a user would
-        run: bash source/scripts/check-package.sh package/bin/scarletnx.exe
+        run: bash source/scripts/check-package.sh --without-gcc package/bin/scarletnx.exe
 
   # Every push to main that builds everywhere replaces the rolling "nightly" prerelease with Linux (x86-64 and
   # AArch64), Windows and Android builds.

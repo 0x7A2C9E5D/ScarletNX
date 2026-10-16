@@ -7,11 +7,19 @@
 # installed copy lacks.
 #
 #   scripts/check-package.sh dist/ScarletNX-x86_64.AppImage
-#   scripts/check-package.sh stage/bin/scarletnx.exe
+#   scripts/check-package.sh --without-gcc stage/bin/scarletnx.exe
+#
+# --backend=gcc must build and run the game with the system's as and ld, or with --without-gcc (a package built
+# without libgccjit) refuse, saying so.
 set -euo pipefail
 
+gcc=1
+if [ "${1-}" = --without-gcc ]; then
+    gcc=0
+    shift
+fi
 if [ $# -ne 1 ] || [ ! -f "$1" ]; then
-    echo "usage: $0 PACKAGED_SCARLETNX" >&2
+    echo "usage: $0 [--without-gcc] PACKAGED_SCARLETNX" >&2
     exit 2
 fi
 runtime=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
@@ -89,6 +97,31 @@ if [ -f "$data/games/Smoke$exe" ]; then
         pass "$data/games/Smoke$exe started the game (exit $status: $(tail -n 1 <<<"$out"))"
     else
         fail "$data/games/Smoke$exe exited $status before the game's banner" "$out"
+    fi
+fi
+
+# The gcc backend: libgccjit from the package, as and ld from the system, the only tools it runs. Its game must start
+# as the LLVM one does
+if [ "$gcc" -eq 1 ]; then
+    run "$runtime" -r smoke.nro GccSmoke --backend=gcc --jobs 2
+    if [ "$status" -eq 0 ] && [ -f "$data/games/GccSmoke$exe" ] && [ -f "$data/games/GccSmoke.abi" ]; then
+        pass "scarletnx -r smoke.nro --backend=gcc made $data/games/GccSmoke$exe"
+        run env -C "$data/games" "./GccSmoke$exe" -H
+        if grep -q '^ScarletNX - GccSmoke' <<<"$out"; then
+            pass "$data/games/GccSmoke$exe started the game (exit $status: $(tail -n 1 <<<"$out"))"
+        else
+            fail "$data/games/GccSmoke$exe exited $status before the game's banner" "$out"
+        fi
+    else
+        fail "scarletnx -r smoke.nro --backend=gcc exited $status, without $data/games/GccSmoke$exe and its .abi" \
+            "$out"
+    fi
+else
+    run "$runtime" -r smoke.nro GccSmoke --backend=gcc
+    if [ "$status" -ne 0 ] && grep -q 'built without libgccjit' <<<"$out"; then
+        pass "scarletnx -r smoke.nro --backend=gcc said the package has no libgccjit"
+    else
+        fail "scarletnx -r smoke.nro --backend=gcc exited $status without saying the package has no libgccjit" "$out"
     fi
 fi
 
