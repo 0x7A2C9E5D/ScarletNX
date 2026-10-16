@@ -24,8 +24,9 @@ bool gui_is_dump(const char* name) {
 }
 void gui_games_free(GuiGames* games) {
     snx_free_strings(games->names, games->count);
+    snx_free_strings(games->shown, games->count);
     snx_free_strings(games->paths, games->count);
-    games->names = games->paths = NULL;
+    games->names = games->shown = games->paths = NULL;
     games->count = 0;
 }
 uint64_t gui_tree_size(const char* path, const int* stop) {
@@ -105,6 +106,26 @@ static char* folder_game(const char* directory, const char* name, int kinds) {
     free(folder);
     return path;
 }
+/* what the game at path, named name, is shown as: the name in its <name>_data/control.nacp, which the recompile
+   copies there, else name */
+static char* shown_name(const char* path, const char* name) {
+    char *folder = snx_dirname(path), *stem = snx_strdup(name), *nacp = NULL, *shown = NULL, text[0x200];
+    unsigned char* bytes;
+    size_t size = 0;
+    if (stem && suffix(stem, ".exe")) stem[strlen(stem) - 4] = 0;
+    if (folder && stem) nacp = snx_format("%s/%s_data/control.nacp", folder, stem);
+    bytes = nacp && snx_is_file(nacp) ? (unsigned char*)snx_read_file(nacp, &size) : NULL;
+    if (bytes && snx_nacp_name(bytes, size, text, sizeof text)) shown = snx_strdup(text);
+    free(bytes);
+    free(nacp);
+    free(stem);
+    free(folder);
+    return shown ? shown : snx_strdup(name);
+}
+static int before(const char* a, const char* b) {
+    for (; *a && tolower((unsigned char)*a) == tolower((unsigned char)*b); ++a, ++b) {}
+    return tolower((unsigned char)*a) < tolower((unsigned char)*b);
+}
 bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* error, size_t size) {
     char **names = NULL, **more;
     size_t count = 0, i;
@@ -113,8 +134,11 @@ bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* erro
         snprintf(error, size, "Cannot open %s.", directory);
         return false;
     }
+    size_t first = games->count, j;
     more = (char**)realloc(games->names, (games->count + count + 1) * sizeof *more);
     if (more) games->names = more;
+    more = more ? (char**)realloc(games->shown, (games->count + count + 1) * sizeof *more) : NULL;
+    if (more) games->shown = more;
     more = more ? (char**)realloc(games->paths, (games->count + count + 1) * sizeof *more) : NULL;
     if (more) games->paths = more;
     if (!more) {
@@ -122,13 +146,26 @@ bool gui_games_add(GuiGames* games, const char* directory, int kinds, char* erro
         snprintf(error, size, "Not enough memory to list %s.", directory);
         return false;
     }
-    /* snx_list_dir already sorts names */
     for (i = 0; i < count; ++i) {
         char* path = folder_game(directory, names[i], kinds);
+        char* shown;
         if (!path && playable(directory, names[i], kinds)) path = snx_path_join(directory, names[i]);
         if (!path) continue;
-        games->names[games->count] = names[i];
-        games->paths[games->count++] = path;
+        shown = shown_name(path, names[i]);
+        if (!shown) {
+            free(path);
+            continue;
+        }
+        /* in among the folder's ones by what they are shown as, a game's folder being its title ID */
+        for (j = games->count; j > first && before(shown, games->shown[j - 1]); --j) {
+            games->names[j] = games->names[j - 1];
+            games->shown[j] = games->shown[j - 1];
+            games->paths[j] = games->paths[j - 1];
+        }
+        games->names[j] = names[i];
+        games->shown[j] = shown;
+        games->paths[j] = path;
+        games->count++;
         names[i] = NULL;
     }
     snx_free_strings(names, count);

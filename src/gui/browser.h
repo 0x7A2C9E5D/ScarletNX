@@ -6,7 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 typedef struct {
-    char** names; /* basenames, sorted in each folder, not display paths */
+    char** names; /* basenames: a game's folder, or an older version's file */
+    char** shown; /* what each is shown as, sorted in each folder: the name in its control.nacp, else names' */
     char** paths; /* where each is */
     size_t count;
 } GuiGames;

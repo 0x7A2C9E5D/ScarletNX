@@ -603,7 +603,7 @@ static void games_place(App* app, GuiPlace* p) {
     size_t i;
     int longest = (int)strlen("Recent games");
     char keys[256];
-    for (i = 0; i < app->games.count; ++i) longest = SDL_max(longest, (int)SDL_utf8strlen(app->games.names[i]));
+    for (i = 0; i < app->games.count; ++i) longest = SDL_max(longest, (int)SDL_utf8strlen(app->games.shown[i]));
     for (i = 0; i < (size_t)recent_shown(app); ++i)
         longest = SDL_max(longest, (int)SDL_utf8strlen(app->recent.game[i].name));
     place_screen(app, p, screen_keys(app, SAY_GAMES, keys, sizeof keys),
@@ -1602,13 +1602,13 @@ static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** ab
         return "...show more";
     }
     {
-        const char* name = app->games.names[g->start + selected - head];
+        const char* name = app->games.names[g->start + selected - head]; /* its file's: what kind it is */
         snprintf(kind, size, "%s",
                  gui_is_cia(name)    ? "3DS CIA, opened with scarletnx-3ds"
                  : gui_is_dump(name) ? "A dump, prepared when it runs"
                                      : "Ready to run");
         *about = app->games.paths[g->start + selected - head];
-        return name;
+        return app->games.shown[g->start + selected - head];
     }
 }
 static void draw_games(App* app) {
@@ -1631,7 +1631,7 @@ static void draw_games(App* app) {
             list_item(app, &g.list, e, label, app->browser.selected == (size_t)e, false);
         } else {
             i = (size_t)(e - g.lead);
-            snprintf(label, sizeof label, "%s%s", app->theme.marker, app->games.names[g.start + i]);
+            snprintf(label, sizeof label, "%s%s", app->theme.marker, app->games.shown[g.start + i]);
             list_item(app, &g.list, e, label, app->browser.selected == head + i,
                       app->browser.activated && app->browser.active == g.start + i);
         }

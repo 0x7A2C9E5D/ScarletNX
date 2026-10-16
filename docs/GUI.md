@@ -147,8 +147,8 @@ Status box. See [GNUABI](GNUABI.md) for supported Linux ELF applications.
 on Android, and CIA files, which go to the 3DS driver. It reads the `games/` of the
 folder the driver works in, which the menu passes it as `--repo`: the checkout of a build tree,
 else the folder of an AppImage (or of the GUI) that has a `games/` beside it, else the user's
-data folder (docs/USAGE.md), then each folder of Settings > App > Game folders. Each entry is
-displayed by basename, sorted alphabetically in each folder. Only immediate files are listed:
+data folder (docs/USAGE.md), then each folder of Settings > App > Game folders. Each game is shown by the name in its `control.nacp`, which the recompile copies into
+its data, else by its folder's or file's name, sorted by it in each folder. Only immediate files are listed:
 executables (execute permission on UNIX, `.exe` on Windows) and `.cia` files (case-insensitive,
 no execute permission needed), which run with the 3DS driver. Hidden files, shared libraries and
 directories are excluded. The folders are looked at once a second while the menu is open (their
