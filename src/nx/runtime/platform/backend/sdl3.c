@@ -986,8 +986,10 @@ void video_poll(void) {
         gamepad_state_slot(i, &one_buttons, one_sticks);
         gamepad_rumble_slot(i, __atomic_load_n(&player->rumble[0], __ATOMIC_RELAXED),
                             __atomic_load_n(&player->rumble[1], __ATOMIC_RELAXED));
-        __atomic_store_n(&player->connected, connected || i == 0, __ATOMIC_RELAXED);
-        __atomic_store_n(&player->kind, connected ? gamepad_kind(gamepad_slot_type(i)) : SNX_PAD_FULL_KEY,
+        /* each player as its settings say: seen or not, and the kind of controller the game sees */
+        __atomic_store_n(&player->connected, (connected && gamepad_player_seen(i)) || i == 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&player->kind,
+                         gamepad_player_kind(i, connected ? gamepad_kind(gamepad_slot_type(i)) : SNX_PAD_FULL_KEY),
                          __ATOMIC_RELAXED);
         player->source_id = id;
         player->buttons = one_buttons;

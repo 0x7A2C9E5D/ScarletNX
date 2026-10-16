@@ -49,6 +49,22 @@ extern const IniOpt g_gamepad_ini[];                 /* the settings, keys gamep
 #define SNX_GAMEPAD_PAGE "Controllers"               /* their page in the game's menu and the launcher's Settings */
 #define SNX_GAMEPAD_MAP  "Button map"                /* and the screen of what each button sends */
 extern const IniOpt g_gamepad_map_ini[];             /* gamepad_map, the player's map that screen sets */
+/* each player's own, as Eden has them, in the game's .ini as gamepad_p<N>_* (N from 1); one left at its default takes
+   the setting every player shares */
+typedef struct {
+    char device[48]; /* the controller it takes: "" the next to connect, else its SDL GUID, "/2" for the second alike */
+    int connected;   /* 0: the game never sees this player; player 1 it always does (the keyboard drives it) */
+    int type;        /* 0: as the controller is; else 1 + the PadKind the game sees */
+    int swap_ab;     /* -1: gamepad_swap_ab's */
+    int rumble;      /* -10: gamepad_rumble's */
+    int has_map;     /* 0: gamepad_map's */
+    SnxPadMap own;   /* its map, SNX_PAD_UNSET where a control sends the button in its place */
+} SnxPlayerConfig;
+SnxPlayerConfig* gamepad_player(int player); /* 0 to SNX_GAMEPADS - 1 */
+int gamepad_player_seen(int slot);           /* whether the game sees the player whose pad is in slot */
+int gamepad_player_kind(int slot, int kind); /* the PadKind it sees for that player: its type's, else kind */
+extern const IniOpt g_gamepad_players_ini[]; /* gamepad_p<N>_*: their page in the menus */
+#define SNX_GAMEPAD_PLAYERS "Player"
 int gamepad_ini(const char* key, const char* value); /* a key of the game's .ini: applied, 1; not one of these, 0 */
 
 #endif

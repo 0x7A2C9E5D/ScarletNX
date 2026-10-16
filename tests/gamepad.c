@@ -57,7 +57,7 @@ static void pump(void) {
             gamepad_close(e.gdevice.which);
 }
 /* what each pad's motors were last told: low (the heavy one) | high << 16 */
-static Uint32 motors[12];
+static Uint32 motors[16];
 static int pads;
 static bool SDLCALL rumble(void* pad, Uint16 low, Uint16 high) {
     *(Uint32*)pad = low | (Uint32)high << 16;
@@ -386,6 +386,55 @@ int main(void) {
         pump();
         CHECK(gamepad_slot_id(1) == SDL_GetJoystickID(extra[4]) && gamepad_slot_id(1) != old_id);
         CHECK(with(extra[4], SDL_GAMEPAD_BUTTON_SOUTH) == B);
+    }
+
+    /* each player its own, as Eden has them: A and B, the map, the vibration, seen or not and the kind the game sees,
+       each over every player's; and the controller it names, which it takes whenever it comes */
+    {
+        SDL_Joystick* first = SDL_GetJoystickFromID(gamepad_slot_id(0));
+        SDL_Joystick* second = SDL_GetJoystickFromID(gamepad_slot_id(1));
+        SDL_Joystick *named, *twin;
+        char guid[40];
+        CHECK(first && second);
+        CHECK(gamepad_ini("gamepad_p1_swap_ab", "1"));
+        CHECK(with(first, SDL_GAMEPAD_BUTTON_SOUTH) == A && with(second, SDL_GAMEPAD_BUTTON_SOUTH) == B);
+        CHECK(gamepad_ini("gamepad_swap_ab", "1") && with(second, SDL_GAMEPAD_BUTTON_SOUTH) == A); /* every player's */
+        CHECK(gamepad_ini("gamepad_p2_swap_ab", "0") && with(second, SDL_GAMEPAD_BUTTON_SOUTH) == B); /* its own */
+        CHECK(gamepad_ini("gamepad_swap_ab", "0") && gamepad_ini("gamepad_p1_swap_ab", "-1") &&
+              gamepad_ini("gamepad_p2_swap_ab", "-1"));
+        CHECK(gamepad_ini("gamepad_p2_map", "south:X"));
+        CHECK(with(second, SDL_GAMEPAD_BUTTON_SOUTH) == X && with(first, SDL_GAMEPAD_BUTTON_SOUTH) == B);
+        CHECK(gamepad_ini("gamepad_p2_map", "south:Q") && with(second, SDL_GAMEPAD_BUTTON_SOUTH) == X); /* kept */
+        CHECK(gamepad_ini("gamepad_p2_map", "") && with(second, SDL_GAMEPAD_BUTTON_SOUTH) == B); /* none: all's */
+        CHECK(gamepad_ini("gamepad_p1_rumble", "0"));
+        gamepad_rumble_slot(0, 0xFFFFu, 0);
+        CHECK(motors[0] == 0);
+        CHECK(gamepad_ini("gamepad_p1_rumble", "-10"));
+        gamepad_rumble_slot(0, 0xFFFFu, 0);
+        CHECK(motors[0] == 0xFFFFu);
+        CHECK(gamepad_player_seen(1) && gamepad_ini("gamepad_p2_connected", "0") && !gamepad_player_seen(1));
+        CHECK(gamepad_ini("gamepad_p1_connected", "0") && gamepad_player_seen(0)); /* player 1 always */
+        CHECK(gamepad_player_kind(1, SNX_PAD_FULL_KEY) == SNX_PAD_FULL_KEY);
+        CHECK(gamepad_ini("gamepad_p2_type", "3") && gamepad_player_kind(1, SNX_PAD_FULL_KEY) == SNX_PAD_JOY_LEFT);
+        CHECK(gamepad_ini("gamepad_p1_connected", "1") && gamepad_ini("gamepad_p2_connected", "1") &&
+              gamepad_ini("gamepad_p2_type", "0"));
+        /* players 1 and 3 free; player 3 names a PlayStation pad's GUID: one plugged in takes it, not 1; a second
+           alike (GUID/2) takes the first free player that names none */
+        SDL_DetachVirtualJoystick(gamepad_slot_id(0));
+        SDL_DetachVirtualJoystick(gamepad_slot_id(2));
+        pump();
+        CHECK(!gamepad_slot_connected(0) && !gamepad_slot_connected(2));
+        named = attach(SONY);
+        CHECK(gamepad_slot_id(0) == SDL_GetJoystickID(named)); /* nobody names it yet: player 1, the first free */
+        SDL_GUIDToString(SDL_GetJoystickGUID(named), guid, sizeof guid);
+        SDL_DetachVirtualJoystick(SDL_GetJoystickID(named));
+        pump();
+        CHECK(gamepad_ini("gamepad_p3_device", guid));
+        named = attach(SONY);
+        CHECK(gamepad_slot_id(2) == SDL_GetJoystickID(named) && !gamepad_slot_connected(0));
+        twin = attach(SONY);
+        CHECK(gamepad_slot_id(0) == SDL_GetJoystickID(twin));
+        CHECK(gamepad_ini("gamepad_p3_device", ""));
     }
 
     SDL_DestroyWindow(w);

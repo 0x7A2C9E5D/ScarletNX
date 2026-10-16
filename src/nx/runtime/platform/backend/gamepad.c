@@ -67,6 +67,107 @@ const IniOpt g_gamepad_ini[] = {
     {"gamepad_joycon_pair", "1", "1 = a left and right Joy-Con play together; restart the game after changing this",
      INI_INT, 0, &g_cfg.joycon_pair, 0, 1, joycon_pair_set, "Pair Joy-Cons", "Separate|Together", 0, 0},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
+/* the players' own (gamepad.h), from their keys gamepad_p<N>_...: which player a key is */
+#define PLAYER_DEFAULT                                                                                                 \
+    {                                                                                                                  \
+        "", 1, 0, -1, -10, 0, {                                                                                        \
+            {                                                                                                          \
+                UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET,      \
+                    UNSET, UNSET                                                                                       \
+            }                                                                                                          \
+        }                                                                                                              \
+    }
+static SnxPlayerConfig g_players[SNX_GAMEPADS] = {PLAYER_DEFAULT, PLAYER_DEFAULT, PLAYER_DEFAULT, PLAYER_DEFAULT,
+                                                  PLAYER_DEFAULT, PLAYER_DEFAULT, PLAYER_DEFAULT, PLAYER_DEFAULT};
+static int player_of(const IniOpt* o) { return o->key[sizeof "gamepad_p" - 1] - '1'; }
+static void device_set(const IniOpt* o, const char* v) {
+    SnxPlayerConfig* p = &g_players[player_of(o)];
+    snprintf(p->device, sizeof p->device, "%s", v ? v : "");
+}
+/* a player's map, as gamepad_map's: none ("") is gamepad_map's; one that cannot be read is said, and changes nothing */
+static void player_map_set(const IniOpt* o, const char* v) {
+    SnxPlayerConfig* p = &g_players[player_of(o)];
+    SnxPadMap map;
+    char word[64];
+    snx_pad_map_unset(&map);
+    if (!v || !*v) {
+        p->own = map;
+        p->has_map = 0;
+    } else if (snx_pad_map_read(&map, v, word, sizeof word))
+        WARN("settings: %s's \"%s\" is not a control and the button it sends (south:B), so the map stays as it was\n",
+             o->key, word);
+    else {
+        p->own = map;
+        p->has_map = 1;
+    }
+}
+#define PLAYER_OPTS(n, said_device, said_connected, said_type, said_swap, said_rumble, said_map)                       \
+    {"gamepad_p" #n "_device", "", said_device, INI_TEXT, 0, NULL, 0, 0, device_set, "Controller", NULL, 0, 0},        \
+        {"gamepad_p" #n "_connected",                                                                                  \
+         "1",                                                                                                          \
+         said_connected,                                                                                               \
+         INI_INT,                                                                                                      \
+         0,                                                                                                            \
+         &g_players[n - 1].connected,                                                                                  \
+         0,                                                                                                            \
+         1,                                                                                                            \
+         NULL,                                                                                                         \
+         "Connected",                                                                                                  \
+         "Off|On",                                                                                                     \
+         0,                                                                                                            \
+         0},                                                                                                           \
+        {"gamepad_p" #n "_type",                                                                                       \
+         "0",                                                                                                          \
+         said_type,                                                                                                    \
+         INI_INT,                                                                                                      \
+         0,                                                                                                            \
+         &g_players[n - 1].type,                                                                                       \
+         0,                                                                                                            \
+         4,                                                                                                            \
+         NULL,                                                                                                         \
+         "Type",                                                                                                       \
+         "As it is|Pro Controller|Two Joy-Cons|Left Joy-Con|Right Joy-Con",                                            \
+         0,                                                                                                            \
+         0},                                                                                                           \
+        {"gamepad_p" #n "_swap_ab", "-1", said_swap, INI_INT, 0, &g_players[n - 1].swap_ab, -1, 1, NULL, "Swap A/B",   \
+         "As All|Off|On",           0,    0},                                                                          \
+        {"gamepad_p" #n "_rumble",                                                                                     \
+         "-10",                                                                                                        \
+         said_rumble,                                                                                                  \
+         INI_INT,                                                                                                      \
+         0,                                                                                                            \
+         &g_players[n - 1].rumble,                                                                                     \
+         -10,                                                                                                          \
+         100,                                                                                                          \
+         NULL,                                                                                                         \
+         "Vibration",                                                                                                  \
+         "As All|Off|#%",                                                                                              \
+         10,                                                                                                           \
+         0},                                                                                                           \
+        {"gamepad_p" #n "_map", "", said_map, INI_TEXT, 0, NULL, 0, 0, player_map_set, "Button map", NULL, 0, 0}
+#define PLAYER_OPTS_SAID(n) PLAYER_OPTS(n, NULL, NULL, NULL, NULL, NULL, NULL)
+const IniOpt g_gamepad_players_ini[] = {
+    PLAYER_OPTS(1,
+                "Player N's controller (N from 1 to 8): empty = the next to connect, else its SDL GUID, as the log\n"
+                ";   names it, and /2 after it for the second of two alike",
+                "1 = the game sees player N (player 1 it always does: the keyboard drives it)",
+                "0 = the controller as it is; 1 Pro Controller, 2 two Joy-Cons, 3 a left Joy-Con, 4 a right one",
+                "-1 = as gamepad_swap_ab says; 0 or 1: player N's own",
+                "-10 = as gamepad_rumble says; 0 to 100: its own",
+                "Player N's map, as gamepad_map; empty = gamepad_map's"),
+    PLAYER_OPTS_SAID(2),
+    PLAYER_OPTS_SAID(3),
+    PLAYER_OPTS_SAID(4),
+    PLAYER_OPTS_SAID(5),
+    PLAYER_OPTS_SAID(6),
+    PLAYER_OPTS_SAID(7),
+    PLAYER_OPTS_SAID(8),
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
+SnxPlayerConfig* gamepad_player(int player) { return player >= 0 && player < SNX_GAMEPADS ? &g_players[player] : NULL; }
+int gamepad_player_seen(int slot) { return !slot || (slot > 0 && slot < SNX_GAMEPADS && g_players[slot].connected); }
+int gamepad_player_kind(int slot, int kind) {
+    return slot >= 0 && slot < SNX_GAMEPADS && g_players[slot].type ? g_players[slot].type - 1 : kind;
+}
 const IniOpt g_gamepad_map_ini[] = {
     {"gamepad_map", NULL,
      "A control by where it sits and the console's button it sends, as south:B east:A.\n"
@@ -77,6 +178,7 @@ const IniOpt g_gamepad_map_ini[] = {
 int gamepad_ini(const char* key, const char* value) {
     const IniOpt* o = ini_find(g_gamepad_ini, key);
     if (!o) o = ini_find(g_gamepad_map_ini, key);
+    if (!o) o = ini_find(g_gamepad_players_ini, key);
     if (o) ini_read(o, value);
     return o != NULL;
 }
@@ -198,40 +300,57 @@ void gamepad_scan(void) {
     for (i = 0; i < n; i++) gamepad_detect(ids[i]);
     SDL_free(ids);
 }
+/* the slot a pad takes: the player that names it its controller, else the first that takes the next one; -1 for none */
+static int slot_for(u32 id) {
+    char want[48], one[33];
+    int i, alike = 0;
+    SDL_GUIDToString(SDL_GetGamepadGUIDForID(id), want, 33);
+    for (i = 0; i < SNX_GAMEPADS; i++)
+        if (g_pads[i]) {
+            SDL_GUIDToString(SDL_GetJoystickGUIDForID(SDL_GetGamepadID(g_pads[i])), one, sizeof one);
+            alike += !SDL_strcasecmp(one, want);
+        }
+    if (alike) snprintf(want + strlen(want), sizeof want - strlen(want), "/%d", alike + 1);
+    for (i = 0; i < SNX_GAMEPADS; i++)
+        if (!g_pads[i] && !SDL_strcasecmp(g_players[i].device, want)) return i;
+    for (i = 0; i < SNX_GAMEPADS; i++)
+        if (!g_pads[i] && !g_players[i].device[0]) return i;
+    return -1;
+}
 void gamepad_open(u32 id) {
     int i;
     char guid[33];
     if (is_open(id)) return;
-    for (i = 0; i < SNX_GAMEPADS; i++)
-        if (!g_pads[i]) {
-            g_pads[i] = SDL_OpenGamepad(id);
-            if (!g_pads[i]) {
-                WARN("input: cannot open SDL gamepad %s (id %lu): %s\n",
-                     SDL_GetGamepadNameForID(id) ? SDL_GetGamepadNameForID(id) : "Unknown", (unsigned long)id,
-                     SDL_GetError());
-                return;
-            }
-            SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof guid);
-            LOG("input: gamepad %s (id %lu, GUID %s, %s)\n", SDL_GetGamepadName(g_pads[i]), (unsigned long)id, guid,
-                SDL_GetGamepadStringForType(SDL_GetGamepadType(g_pads[i])));
-            {
-                SDL_Joystick* stick = SDL_GetGamepadJoystick(g_pads[i]);
-                char* mapping = SDL_GetGamepadMapping(g_pads[i]);
-                LOG("input: device path %s, %d axes, %d buttons, mapping %s\n",
-                    SDL_GetGamepadPath(g_pads[i]) ? SDL_GetGamepadPath(g_pads[i]) : "unknown",
-                    stick ? SDL_GetNumJoystickAxes(stick) : 0, stick ? SDL_GetNumJoystickButtons(stick) : 0,
-                    mapping ? mapping : "unavailable");
-                SDL_free(mapping);
-            }
-            enable_motion(g_pads[i]);
-            ui_lock();
-            snprintf(g_names[i], sizeof g_names[i], "%s",
-                     SDL_GetGamepadName(g_pads[i]) ? SDL_GetGamepadName(g_pads[i]) : "Gamepad");
-            snx_pad_labels(g_pads[i], g_labels[i]);
-            g_symmetric[i] = snx_pad_symmetric(g_pads[i]);
-            ui_unlock();
-            return;
-        }
+    i = slot_for(id);
+    if (i < 0) {
+        LOG("input: %s takes no player: every free one names another controller\n", SDL_GetGamepadNameForID(id));
+        return;
+    }
+    g_pads[i] = SDL_OpenGamepad(id);
+    if (!g_pads[i]) {
+        WARN("input: cannot open SDL gamepad %s (id %lu): %s\n",
+             SDL_GetGamepadNameForID(id) ? SDL_GetGamepadNameForID(id) : "Unknown", (unsigned long)id, SDL_GetError());
+        return;
+    }
+    SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof guid);
+    LOG("input: gamepad %s (id %lu, GUID %s, %s)\n", SDL_GetGamepadName(g_pads[i]), (unsigned long)id, guid,
+        SDL_GetGamepadStringForType(SDL_GetGamepadType(g_pads[i])));
+    {
+        SDL_Joystick* stick = SDL_GetGamepadJoystick(g_pads[i]);
+        char* mapping = SDL_GetGamepadMapping(g_pads[i]);
+        LOG("input: device path %s, %d axes, %d buttons, mapping %s\n",
+            SDL_GetGamepadPath(g_pads[i]) ? SDL_GetGamepadPath(g_pads[i]) : "unknown",
+            stick ? SDL_GetNumJoystickAxes(stick) : 0, stick ? SDL_GetNumJoystickButtons(stick) : 0,
+            mapping ? mapping : "unavailable");
+        SDL_free(mapping);
+    }
+    enable_motion(g_pads[i]);
+    ui_lock();
+    snprintf(g_names[i], sizeof g_names[i], "%s",
+             SDL_GetGamepadName(g_pads[i]) ? SDL_GetGamepadName(g_pads[i]) : "Gamepad");
+    snx_pad_labels(g_pads[i], g_labels[i]);
+    g_symmetric[i] = snx_pad_symmetric(g_pads[i]);
+    ui_unlock();
 }
 void gamepad_close(u32 id) {
     SDL_JoystickID* ids;
@@ -267,14 +386,18 @@ static void dz(i32* x, i32* y) {
 /* SDL's Y axes point down, the Switch's up */
 static i32 up(i32 v) { return v == -32768 ? 32767 : -v; }
 
-/* what each control sends: the button in its place, the player's map over that, then A and B swapped when asked */
-static void map_of(SnxPadMap* map) {
+/* what each control of the pad in slot sends (-1: no player's): the button in its place, the map over that (its
+   player's, else every player's), then A and B swapped as its player says, else as every player's */
+static void map_of(int slot, SnxPadMap* map) {
+    const SnxPlayerConfig* p = slot >= 0 && slot < SNX_GAMEPADS ? &g_players[slot] : NULL;
     SnxPadMap placed;
     snx_pad_map_position(&placed);
-    *map = g_cfg.own;
+    *map = p && p->has_map ? p->own : g_cfg.own;
     snx_pad_map_fill(map, &placed);
-    if (g_cfg.swap_ab) snx_pad_map_swap_ab(map);
+    if (p && p->swap_ab >= 0 ? p->swap_ab : g_cfg.swap_ab) snx_pad_map_swap_ab(map);
 }
+/* how strongly the pad in slot vibrates, in percent: its player's, else every player's */
+static u32 strength(int slot) { return (u32)(g_players[slot].rumble >= 0 ? g_players[slot].rumble : g_cfg.rumble); }
 static int joycon_button_bit(int button, int right) {
     static const int LEFT_FACE[4] = {12, 15, 13, 14};
     static const int RIGHT_FACE[4] = {0, 2, 1, 3};
@@ -291,7 +414,7 @@ static int joycon_button_bit(int button, int right) {
 u64 gamepad_button(u32 id, int button) {
     SDL_Gamepad* g = SDL_GetGamepadFromID(id);
     int control = snx_pad_of_button(button);
-    int type, bit;
+    int type, bit, slot;
     SnxPadMap map;
     if (!g) return 0;
     type = SDL_GetGamepadType(g);
@@ -300,7 +423,8 @@ u64 gamepad_button(u32 id, int button) {
         return bit < 0 ? 0 : 1ull << bit;
     }
     if (control < 0) return 0;
-    map_of(&map);
+    for (slot = 0; slot < SNX_GAMEPADS && g_pads[slot] != g; slot++) {}
+    map_of(slot < SNX_GAMEPADS ? slot : -1, &map);
     return map.bit[control] < 0 ? 0 : 1ull << map.bit[control];
 }
 int gamepad_slot_type(int slot) {
@@ -334,7 +458,7 @@ void gamepad_state_slot(int slot, u64* buttons, i32 sticks[4]) {
         dz(&sticks[right ? 2 : 0], &sticks[right ? 3 : 1]);
         return;
     }
-    map_of(&map);
+    map_of(slot, &map);
     for (c = 0; c < SNX_PAD_CONTROLS; c++)
         if (snx_pad_held(g, c) && map.bit[c] >= 0) *buttons |= 1ull << map.bit[c];
     sticks[0] = SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX);
@@ -403,18 +527,17 @@ void gamepad_rumble(u32 left, u32 right) {
     u32 lo = (left & 0xFFFF) > (right & 0xFFFF) ? left & 0xFFFF : right & 0xFFFF;
     u32 hi = left >> 16 > right >> 16 ? left >> 16 : right >> 16;
     int i;
-    lo = lo * (u32)g_cfg.rumble / 100;
-    hi = hi * (u32)g_cfg.rumble / 100;
     /* SDL sends a pad only what changed, and stops it when the time runs out: the game's thread may stop sending */
     for (i = 0; i < SNX_GAMEPADS; i++)
-        if (g_pads[i]) SDL_RumbleGamepad(g_pads[i], (Uint16)lo, (Uint16)hi, 100);
+        if (g_pads[i])
+            SDL_RumbleGamepad(g_pads[i], (Uint16)(lo * strength(i) / 100), (Uint16)(hi * strength(i) / 100), 100);
 }
 void gamepad_rumble_slot(int slot, u32 left, u32 right) {
     u32 lo, hi;
     if (slot < 0 || slot >= SNX_GAMEPADS || !g_pads[slot]) return;
     lo = (left & 0xFFFF) > (right & 0xFFFF) ? left & 0xFFFF : right & 0xFFFF;
     hi = left >> 16 > right >> 16 ? left >> 16 : right >> 16;
-    lo = lo * (u32)g_cfg.rumble / 100;
-    hi = hi * (u32)g_cfg.rumble / 100;
+    lo = lo * strength(slot) / 100;
+    hi = hi * strength(slot) / 100;
     SDL_RumbleGamepad(g_pads[slot], (Uint16)lo, (Uint16)hi, 100);
 }

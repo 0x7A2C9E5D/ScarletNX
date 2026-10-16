@@ -266,7 +266,11 @@ int main(int argc, char** argv) {
         assert(!snx_run(run, NULL, NULL, &output) && output);
         for (c = output; *c; ++c) lines += *c == '\n';
         assert(!gui_settings_read(&s, output) &&
-               s.count == GUI_SETTINGS_OWN + lines + 4); /* two pages: a row, an All */
+               s.count == GUI_SETTINGS_OWN + lines + 6); /* three pages: a row, an All */
+        /* each player's own, on Controllers' Player page: a word row whose default is every player's */
+        assert(words(key(&s, "gamepad_p1_swap_ab")) == 4 && !strcmp(key(&s, "gamepad_p8_swap_ab")->words[1], "As All"));
+        assert(key(&s, "gamepad_p3_device")->type == GUI_KEY_TEXT &&
+               !strcmp(key(&s, "gamepad_p3_device")->section, "Controllers/Player"));
         assert(!strcmp(s.keys[GUI_SETTINGS_OWN].section, "Display") && !strcmp(s.keys[s.count - 1].section, "Debug"));
         assert(words(key(&s, "fullscreen")) == 3 && words(key(&s, "touch")) == 4 && words(key(&s, "controls")) == 3);
         assert(!strcmp(key(&s, "controls")->key, "Show controls") && !strcmp(key(&s, "touch")->words[3], "Mouse too"));
