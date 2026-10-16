@@ -514,6 +514,24 @@ static int texs_outputs(u64 w, u32 regs[4], u32 comps[4]) {
     }
     return n;
 }
+/* The registers TEXS and TLDS write: each component its own register (bit 59), or two halves to a register, the
+   first pair in Rd and the second in bits 28-35's register */
+static void texs_mark_outputs(u64 w, u8 used[255]) {
+    u32 regs[4], comps[4], d = B(w, 0, 8);
+    int outputs = texs_outputs(w, regs, comps);
+    if (B(w, 59, 1)) {
+        for (int k = 0; k < outputs; k++)
+            if (regs[k] < 255) used[regs[k]] = 1;
+        return;
+    }
+    if (outputs && d < 255) used[d] = 1;
+    if (outputs > 2) {
+        u32 second = B(w, 28, 8);
+        if (second == 255) second = d + 1;
+        if (second < 255) used[second] = 1;
+    }
+}
+
 static u32 direct_mask_count(u32 mask) {
     u32 count = 0;
     for (; mask; mask &= mask - 1) count++;
@@ -607,7 +625,8 @@ int shader_writes_reg(u64 w, int op, u32 reg) {
         case O_TLD4:
         case O_TLD4_B:
         case O_TMML:
-        case O_TMML_B: count = direct_mask_count(B(w, 31, 4) ? B(w, 31, 4) : 15); break;
+        /* a mask of 0 writes nothing, as Ryujinx reads it (NVN never emits one) */
+        case O_TMML_B: count = direct_mask_count(B(w, 31, 4)); break;
         case O_TXD:
         case O_TXD_B: count = direct_mask_count(B(w, 31, 4)); break;
         case O_TXQ:
@@ -1066,10 +1085,10 @@ static int supported(u64 w, int op) {
         /* TLD4's LOD clamp (bits 58 and 40) and TLD's (54) are refused as TEX's is */
         case O_TLD4:
             return !B(w, 58, 1) && (B(w, 28, 3) <= 3 || B(w, 28, 3) >= 6) &&
-                   (!B(w, 54, 2) || (B(w, 54, 2) <= 2 && (B(w, 28, 3) >> 1) == 1));
+                   (!B(w, 54, 2) || (B(w, 54, 2) <= 2 && (B(w, 28, 3) >> 1) <= 1));
         case O_TLD4_B:
             return !B(w, 40, 1) && (B(w, 28, 3) <= 3 || B(w, 28, 3) >= 6) &&
-                   (!B(w, 36, 2) || (B(w, 36, 2) <= 2 && (B(w, 28, 3) >> 1) == 1));
+                   (!B(w, 36, 2) || (B(w, 36, 2) <= 2 && (B(w, 28, 3) >> 1) <= 1));
         case O_I2I_R:
         case O_I2I_C:
         case O_I2I_I:
@@ -1178,19 +1197,13 @@ static int supported(u64 w, int op) {
         case O_MUFU: return B(w, 20, 4) <= 5 || B(w, 20, 4) == 8;
         case O_RRO_R:
         case O_RRO_C: return 1;
-        case O_TEXS:
-            return (B(w, 53, 4) == 0 || B(w, 53, 4) == 1 || B(w, 53, 4) == 2 || B(w, 53, 4) == 3 || B(w, 53, 4) == 4 ||
-                    B(w, 53, 4) == 7 || B(w, 53, 4) == 8 || B(w, 53, 4) == 10 || B(w, 53, 4) == 11 ||
-                    B(w, 53, 4) == 12 || B(w, 53, 4) == 13);
-        /* not 6, a multisample fetch: its sample index would be dropped */
+        case O_TEXS: return B(w, 53, 4) <= 13;
+        /* the encodings Eden lists: 3, 9, 10, 11 and 13 aren't TLDS's */
         case O_TLDS:
-            return (B(w, 53, 4) == 0 || B(w, 53, 4) == 1 || B(w, 53, 4) == 2 || B(w, 53, 4) == 4 || B(w, 53, 4) == 5 ||
-                    B(w, 53, 4) == 7 || B(w, 53, 4) == 8 || B(w, 53, 4) == 12) &&
-                   B(w, 59, 1);
-        case O_TLD: return !B(w, 54, 1) && B(w, 28, 3) <= 4 && !B(w, 50, 1) && (!B(w, 35, 1) || B(w, 28, 3) == 2);
-        case O_TLD_B:
-            return !B(w, 54, 1) && B(w, 28, 3) <= 4 && (!B(w, 50, 1) || B(w, 28, 3) == 2 || B(w, 28, 3) == 3) &&
-                   (!B(w, 35, 1) || (B(w, 28, 3) == 2 && !B(w, 50, 1)));
+            return B(w, 53, 4) <= 12 && B(w, 53, 4) != 3 && B(w, 53, 4) != 9 && B(w, 53, 4) != 10 && B(w, 53, 4) != 11;
+        /* every type up to 3D (a fetch can't address a cube), multisample only on 2D and 2D arrays */
+        case O_TLD:
+        case O_TLD_B: return !B(w, 54, 1) && B(w, 28, 3) <= 4 && (!B(w, 50, 1) || B(w, 28, 3) == 2 || B(w, 28, 3) == 3);
         /* 2D surfaces, and buffer images as storage texel buffers: their raw 32-bit loads and formatted stores */
         case O_SULD:
             return (B(w, 33, 3) == 3 && (!B(w, 52, 1) || B(w, 20, 4) == 4)) ||
@@ -1385,6 +1398,24 @@ static void direct_swap_element(DirectCtx* c, int slot) {
     c->swapped = (u32)slot + 1;
 }
 
+/* TEXS's encodings (bits 53-56): 0 1D.LZ, 1 2D, 2 2D.LZ, 3 2D.LL, 4 2D.DC, 5 2D.LL.DC, 6 2D.LZ.DC, 7 ARRAY_2D,
+   8 ARRAY_2D.LZ, 9 ARRAY_2D.LZ.DC, 10 3D, 11 3D.LZ, 12 CUBE, 13 CUBE.LL. The registers, as Eden reads them: x in Ra,
+   y in Ra + 1 (in Rb for 2D and 2D.LZ, and for an array, whose layer is in Ra and x in Ra + 1), a 3D or cube
+   texture's z in Rb, then the level and the depth reference in Rb or Rb + 1. */
+static int texs_type(u32 encoding) { return encoding >= 12 ? 3 : encoding >= 10 ? 2 : encoding == 0 ? 0 : 1; }
+static int texs_array(u32 encoding) { return encoding >= 7 && encoding <= 9; }
+static int texs_shadow(u32 encoding) { return encoding == 4 || encoding == 5 || encoding == 6 || encoding == 9; }
+static u32 texs_y(u32 encoding, u32 a, u32 b) {
+    return encoding == 1 || encoding == 2 || texs_array(encoding) ? b : a + 1;
+}
+/* whether the encoding takes an explicit level (LZ, LL), and the register of LL's level (255 for LZ's 0) */
+static int texs_explicit(u32 encoding) {
+    return encoding == 0 || encoding == 2 || encoding == 3 || encoding == 5 || encoding == 6 || encoding == 8 ||
+           encoding == 9 || encoding == 11 || encoding == 13;
+}
+static u32 texs_level(u32 encoding, u32 b) { return encoding == 3 || encoding == 5 ? b : encoding == 13 ? b + 1 : 255; }
+static u32 texs_dref(u32 encoding, u32 b) { return encoding == 5 || encoding == 9 ? b + 1 : b; }
+
 static int half_arithmetic(int op) {
     return op == O_HADD2_R || op == O_HADD2_C || op == O_HADD2_I || op == O_HADD2_32I || op == O_HMUL2_R ||
            op == O_HMUL2_C || op == O_HMUL2_I || op == O_HMUL2_32I || op == O_HFMA2_R || op == O_HFMA2_RC ||
@@ -1397,6 +1428,39 @@ static u32 sparse_predicate(u64 w, int op) {
                    op == O_TXD || op == O_TXD_B
                ? B(w, 51, 3)
                : 7;
+}
+
+/* TEXS's and TLDS's results: each component to its own register (bit 59), or as halves two to a register, the
+   first pair to Rd and the second to bits 28-35's. A depth compare's one result is x, y and z, with 1.0 in alpha. */
+static void texs_store(DirectCtx* c, u64 w, u32 sample, u32 scalar, int shadow, u32 i32_type, u32 vec2, u32 zero_f) {
+    u32 regs[4], comps[4], d = B(w, 0, 8);
+    int outputs = texs_outputs(w, regs, comps);
+    if (B(w, 59, 1)) {
+        for (int k = 0; k < outputs; k++) {
+            if (regs[k] >= 255) continue;
+            reg_write(
+                c, regs[k],
+                shadow ? spv_emit_bitcast(&c->emit, c->u32_type,
+                                          comps[k] == 3 ? spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f) : sample)
+                       : texture_component(c, sample, scalar, comps[k]));
+        }
+        return;
+    }
+    for (int k = 0; k < outputs; k += 2) {
+        u32 pair[2];
+        for (int lane = 0; lane < 2; lane++) {
+            u32 value = k + lane >= outputs ? zero_f
+                        : shadow ? (comps[k + lane] == 3 ? spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f) : sample)
+                                 : spv_emit_vec4_extract(&c->emit, scalar, sample, comps[k + lane]);
+            pair[lane] = scalar == c->f32_type || shadow || k + lane >= outputs ? value
+                         : scalar == i32_type ? spv_emit_convert_s_to_f(&c->emit, c->f32_type, value)
+                                              : spv_emit_convert_u_to_f(&c->emit, c->f32_type, value);
+        }
+        u32 packed = spv_emit_glsl_unary(&c->emit, c->u32_type, c->glsl, SPV_GLSL_PACK_HALF2X16,
+                                         spv_emit_vec2_construct(&c->emit, vec2, pair[0], pair[1]));
+        u32 target = k == 0 ? d : B(w, 28, 8) == 255 ? d + 1 : B(w, 28, 8);
+        if (target < 255) reg_write(c, target, packed);
+    }
 }
 
 static u32* direct_reject(ShaderInfo* si, const char* reason) {
@@ -1909,11 +1973,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         if (op->id == O_TEXS) {
             u32 off = B(insn[i], 36, 13);
             u32 encoding = B(insn[i], 53, 4);
-            int shadow = encoding == 4, type = encoding == 12 || encoding == 13   ? 3
-                                               : encoding == 10 || encoding == 11 ? 2
-                                               : encoding == 0                    ? 0
-                                                                                  : 1;
-            int array = encoding == 7 || encoding == 8;
+            int shadow = texs_shadow(encoding), type = texs_type(encoding), array = texs_array(encoding);
             int slot = 0;
             for (; slot < texture_count; slot++)
                 if (textures[slot].cbuf_off == off && textures[slot].shadow == shadow && textures[slot].type == type &&
@@ -1930,24 +1990,11 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if (!B(insn[i], 59, 1)) needs_glsl = 1;
             if (a < 255) used[a] = 1;
             if (b < 255) used[b] = 1;
-            if ((shadow || encoding == 3 || encoding == 10 || encoding == 11 || encoding == 12 || encoding == 13 ||
-                 array) &&
-                a + 1 < 255)
-                used[a + 1] = 1;
-            if (encoding == 13 && b + 1 < 255) used[b + 1] = 1;
-            u32 regs[4], comps[4];
-            int outputs = texs_outputs(insn[i], regs, comps);
-            if (B(insn[i], 59, 1)) {
-                for (int k = 0; k < outputs; k++)
-                    if (regs[k] < 255) used[regs[k]] = 1;
-            } else {
-                if (outputs && d < 255) used[d] = 1;
-                if (outputs > 2) {
-                    u32 second = B(insn[i], 28, 8);
-                    if (second == 255) second = d + 1;
-                    if (second < 255) used[second] = 1;
-                }
-            }
+            if ((encoding != 0 || array) && texs_y(encoding, a, b) == a + 1 && a + 1 < 255) used[a + 1] = 1;
+            if (array && a + 1 < 255) used[a + 1] = 1;
+            if (texs_level(encoding, b) < 255) used[texs_level(encoding, b)] = 1;
+            if (shadow && texs_dref(encoding, b) < 255) used[texs_dref(encoding, b)] = 1;
+            texs_mark_outputs(insn[i], used);
         }
         if (op->id == O_TLD || op->id == O_TLD_B) {
             u32 indexed = 0, ldc = 0;
@@ -1958,7 +2005,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 bindless ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
             if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, b, stage, &ldc);
             if (bindless && !handle_count) return direct_reject(si, "untracked texture handle");
-            int type = ty >> 1, array = ty & 1, multisample = op->id == O_TLD_B && B(insn[i], 50, 1), slot = 0;
+            int type = ty >> 1, array = ty & 1, multisample = (int)B(insn[i], 50, 1), slot = 0;
             while (slot < texture_count &&
                    (textures[slot].cbuf_off != off || textures[slot].type != type || textures[slot].array != array ||
                     textures[slot].shadow || textures[slot].bindless != bindless ||
@@ -1992,7 +2039,6 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if (B(insn[i], 35, 1) && meta < 255) used[meta++] = 1;
             if (multisample && meta < 255) used[meta] = 1;
             u32 target = d, mask = B(insn[i], 31, 4);
-            if (!mask) mask = 15;
             for (u32 k = 0; k < 4; k++)
                 if (mask & (1u << k)) {
                     if (target < 255) used[target] = 1;
@@ -2143,27 +2189,27 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         if (op->id == O_TLDS) {
             u32 off = B(insn[i], 36, 13);
             u32 enc = B(insn[i], 53, 4);
-            int array = enc == 8, type = enc == 0 || enc == 1 ? 0 : enc == 7 ? 2 : 1;
+            /* encoding 6 fetches a sample (Rb) of a multisample texture */
+            int array = enc == 8, type = enc == 0 || enc == 1 ? 0 : enc == 7 ? 2 : 1, multisample = enc == 6;
             int slot = 0;
             for (; slot < texture_count; slot++)
                 if (textures[slot].cbuf_off == off && textures[slot].type == type && textures[slot].array == array &&
-                    !textures[slot].shadow && !textures[slot].bindless && !textures[slot].flags)
+                    !textures[slot].shadow && !textures[slot].bindless && textures[slot].flags == (multisample ? 2 : 0))
                     break;
             if (slot == texture_count) {
                 if (texture_count >= 32) return direct_reject(si, "texture descriptor count");
                 textures[slot].cbuf_off = off;
                 textures[slot].type = (u8)type;
                 textures[slot].array = (u8)array;
+                textures[slot].flags = (u8)(multisample ? 2 : 0);
                 texture_count++;
             }
+            if (!B(insn[i], 59, 1)) needs_glsl = 1;
             if (a < 255) used[a] = 1;
-            if ((enc == 4 || enc == 5 || enc == 7 || enc == 12) && a + 1 < 255) used[a + 1] = 1;
+            if ((enc == 4 || enc == 5 || enc == 6 || enc == 7 || enc == 12) && a + 1 < 255) used[a + 1] = 1;
             if (b < 255) used[b] = 1;
             if ((enc == 12 || array) && b + 1 < 255) used[b + 1] = 1;
-            u32 regs[4], comps[4];
-            int outputs = texs_outputs(insn[i], regs, comps);
-            for (int k = 0; k < outputs; k++)
-                if (regs[k] < 255) used[regs[k]] = 1;
+            texs_mark_outputs(insn[i], used);
         }
         if (op->id == O_TEX || op->id == O_TEX_B) {
             int bindless = op->id == O_TEX_B;
@@ -2222,7 +2268,6 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if (offset_enabled && offset_source < 255) used[offset_source] = 1;
             if (shadow && offset_source + offset_enabled < 255) used[offset_source + offset_enabled] = 1;
             u32 mask = B(insn[i], 31, 4), dst = d;
-            if (!mask) mask = 15;
             for (u32 component = 0; component < 4; component++)
                 if (mask & (1u << component)) {
                     if (dst < 255) used[dst] = 1;
@@ -2245,7 +2290,6 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 if (a + k < 255) used[a + k] = 1;
             if (bindless && b < 255) used[b] = 1;
             u32 mask = B(insn[i], 31, 4), dst = d;
-            if (!mask) mask = 15;
             for (u32 component = 0; component < 4; component++)
                 if (mask & (1u << component) && dst < 255) used[dst++] = 1;
             needs_image_query = 1;
@@ -2380,7 +2424,6 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 }
                 if (shadow && extra < 255) used[extra] = 1;
                 u32 mask = B(insn[i], 31, 4), dst = d;
-                if (!mask) mask = 15;
                 for (u32 component = 0; component < 4; component++)
                     if (mask & (1u << component) && dst < 255) used[dst++] = 1;
             }
@@ -4946,7 +4989,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 op == O_TLD_B ? direct_track_image_handle_pair(insn, n, i, b, &bank, &off, &bank2, &off2, 0) : 0;
             if (handle_count == 1) indexed = direct_indexed_handle(insn, n, i, b, stage, &ldc);
             if (op == O_TLD_B && !handle_count) return direct_reject(si, "untracked texture handle");
-            int type = ty >> 1, array = ty & 1, multisample = op == O_TLD_B && B(w, 50, 1), slot = 0;
+            int type = ty >> 1, array = ty & 1, multisample = (int)B(w, 50, 1), slot = 0;
             while (slot < texture_count &&
                    (textures[slot].cbuf_off != off || textures[slot].type != type || textures[slot].array != array ||
                     textures[slot].shadow || textures[slot].bindless != (op == O_TLD_B) ||
@@ -4958,35 +5001,39 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             u32 x = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + array));
             u32 y = type == 0 ? spv_emit_constant_u32(&c->emit, i32_type, 0)
                               : spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + array + 1));
-            if (B(w, 35, 1)) {
-                u32 packed = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, b + (op == O_TLD_B) + B(w, 55, 1)));
+            /* Rb's operands, in order: TLD.B's handle, the level (bit 55), the offsets (bit 35) and the sample (bit 50) */
+            u32 meta = b + (op == O_TLD_B), level = B(w, 55, 1) ? meta++ : 255, packed_reg = B(w, 35, 1) ? meta++ : 255;
+            u32 z =
+                type <= 1 && !array ? 0
+                : type == 0 || array
+                    ? spv_emit_bitcast(&c->emit, i32_type,
+                                       spv_emit_bitwise_and_u32(&c->emit, c->u32_type, reg_read(c, a),
+                                                                spv_emit_constant_u32(&c->emit, c->u32_type, 0xffff)))
+                    : spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + 2));
+            if (packed_reg < 255) { /* 4-bit signed offsets: x, then y but for 1D, then z for 3D */
+                u32 packed = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, packed_reg));
                 u32 four = spv_emit_constant_u32(&c->emit, c->u32_type, 4);
-                u32 ox = spv_emit_bitfield_sextract(&c->emit, i32_type, packed, c->zero, four);
-                u32 oy = spv_emit_bitfield_sextract(&c->emit, i32_type, packed, four, four);
-                x = spv_emit_iadd_u32(&c->emit, i32_type, x, ox);
-                y = spv_emit_iadd_u32(&c->emit, i32_type, y, oy);
+                x = spv_emit_iadd_u32(&c->emit, i32_type, x,
+                                      spv_emit_bitfield_sextract(&c->emit, i32_type, packed, c->zero, four));
+                if (type >= 1)
+                    y = spv_emit_iadd_u32(&c->emit, i32_type, y,
+                                          spv_emit_bitfield_sextract(&c->emit, i32_type, packed, four, four));
+                if (type == 2)
+                    z = spv_emit_iadd_u32(&c->emit, i32_type, z,
+                                          spv_emit_bitfield_sextract(&c->emit, i32_type, packed,
+                                                                     spv_emit_constant_u32(&c->emit, c->u32_type, 8),
+                                                                     four));
             }
-            u32 coord;
-            if (type <= 1 && !array)
-                coord = spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
-            else {
-                u32 z = type == 0 || array ? spv_emit_bitcast(&c->emit, i32_type,
-                                                              spv_emit_bitwise_and_u32(
-                                                                  &c->emit, c->u32_type, reg_read(c, a),
-                                                                  spv_emit_constant_u32(&c->emit, c->u32_type, 0xffff)))
-                                           : spv_emit_bitcast(&c->emit, i32_type, reg_read(c, a + 2));
-                coord = spv_emit_vec3_construct(&c->emit, vec3_i32, x, y, z);
-            }
-            u32 sample = multisample
-                             ? spv_emit_image_fetch_sample(
-                                   &c->emit, texture_vec4[slot], c->sampled_type[slot], c->sampler[slot], coord,
-                                   spv_emit_bitcast(&c->emit, i32_type, reg_read(c, b + 1 + B(w, 55, 1) + B(w, 35, 1))))
-                             : spv_emit_image_fetch(
-                                   &c->emit, texture_vec4[slot], c->sampled_type[slot], c->sampler[slot], coord,
-                                   B(w, 55, 1) ? spv_emit_bitcast(&c->emit, i32_type, reg_read(c, b + (op == O_TLD_B)))
-                                               : spv_emit_constant_u32(&c->emit, i32_type, 0));
+            u32 coord = z ? spv_emit_vec3_construct(&c->emit, vec3_i32, x, y, z)
+                          : spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
+            u32 sample =
+                multisample
+                    ? spv_emit_image_fetch_sample(&c->emit, texture_vec4[slot], c->sampled_type[slot], c->sampler[slot],
+                                                  coord, spv_emit_bitcast(&c->emit, i32_type, reg_read(c, meta)))
+                    : spv_emit_image_fetch(&c->emit, texture_vec4[slot], c->sampled_type[slot], c->sampler[slot], coord,
+                                           level < 255 ? spv_emit_bitcast(&c->emit, i32_type, reg_read(c, level))
+                                                       : spv_emit_constant_u32(&c->emit, i32_type, 0));
             u32 mask = B(w, 31, 4), target = d;
-            if (!mask) mask = 15;
             for (u32 k = 0; k < 4; k++)
                 if (mask & (1u << k)) {
                     reg_write(c, target, texture_component(c, sample, texture_scalar[slot], k));
@@ -5059,21 +5106,22 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             u32 off = B(w, 36, 13);
             u32 encoding = B(w, 53, 4);
             int array = encoding == 8, type = encoding == 0 || encoding == 1 ? 0 : encoding == 7 ? 2 : 1;
-            int slot = 0;
+            int multisample = encoding == 6, slot = 0;
             u32 x;
             u32 y;
             while (slot < texture_count &&
                    (textures[slot].cbuf_off != off || textures[slot].type != type || textures[slot].array != array ||
-                    textures[slot].shadow || textures[slot].bindless || textures[slot].flags))
+                    textures[slot].shadow || textures[slot].bindless || textures[slot].flags != (multisample ? 2 : 0)))
                 slot++;
             /* the 2D array form takes x and y from Rb and Rb + 1, the layer from Ra's low 16 bits */
             x = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, array ? b : a));
             y = type == 0 ? spv_emit_constant_u32(&c->emit, i32_type, 0)
-                          : spv_emit_bitcast(
-                                &c->emit, i32_type,
-                                reg_read(c, array                                                               ? b + 1
-                                            : encoding == 4 || encoding == 5 || encoding == 7 || encoding == 12 ? a + 1
-                                                                                                                : b));
+                          : spv_emit_bitcast(&c->emit, i32_type,
+                                             reg_read(c, array ? b + 1
+                                                         : encoding == 4 || encoding == 5 || encoding == 6 ||
+                                                                 encoding == 7 || encoding == 12
+                                                             ? a + 1
+                                                             : b));
             if (encoding == 4 || encoding == 12) {
                 u32 packed = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, b + (encoding == 12)));
                 u32 four = spv_emit_constant_u32(&c->emit, c->u32_type, 4);
@@ -5092,45 +5140,34 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                                                              spv_emit_constant_u32(&c->emit, c->u32_type, 0xffff))))
                                   : spv_emit_vec2_construct(&c->emit, vec2_i32, x, y);
             u32 lod = encoding == 1 || encoding == 5 || encoding == 12 ? reg_read(c, b) : c->zero;
-            u32 sample =
-                spv_emit_image_fetch(&c->emit, texture_vec4[slot], c->sampled_type[slot], c->sampler[slot], coord, lod);
-            u32 regs[4], comps[4];
-            int outputs = texs_outputs(w, regs, comps);
-            for (int k = 0; k < outputs; k++)
-                if (regs[k] < 255) reg_write(c, regs[k], texture_component(c, sample, texture_scalar[slot], comps[k]));
+            u32 sample = multisample ? spv_emit_image_fetch_sample(&c->emit, texture_vec4[slot], c->sampled_type[slot],
+                                                                   c->sampler[slot], coord, reg_read(c, b))
+                                     : spv_emit_image_fetch(&c->emit, texture_vec4[slot], c->sampled_type[slot],
+                                                            c->sampler[slot], coord, lod);
+            texs_store(c, w, sample, texture_scalar[slot], 0, i32_type, vec2, zero_f);
         } else if (op == O_TEXS) {
             u32 off = B(w, 36, 13);
             u32 encoding = B(w, 53, 4);
-            int shadow = encoding == 4, type = encoding == 12 || encoding == 13   ? 3
-                                               : encoding == 10 || encoding == 11 ? 2
-                                               : encoding == 0                    ? 0
-                                                                                  : 1;
-            int array = encoding == 7 || encoding == 8;
+            int shadow = texs_shadow(encoding), type = texs_type(encoding), array = texs_array(encoding);
             int slot = 0;
             while (slot < texture_count &&
                    (textures[slot].cbuf_off != off || textures[slot].shadow != shadow || textures[slot].type != type ||
                     textures[slot].array != array || textures[slot].bindless || textures[slot].flags))
                 slot++;
             u32 x = spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, array ? a + 1 : a));
-            u32 yreg = shadow || encoding == 3 || encoding == 10 || encoding == 11 || encoding == 12 || encoding == 13
-                           ? a + 1
-                           : b;
             u32 y = encoding == 0 ? spv_emit_constant_f32(&c->emit, c->f32_type, 0.5f)
-                                  : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, yreg));
-            u32 uv = array ? spv_emit_vec3_construct(&c->emit, vec3, x, y, array_layer(c, a))
-                     : encoding == 10 || encoding == 11 || encoding == 12 || encoding == 13
-                         ? spv_emit_vec3_construct(&c->emit, vec3, x, y,
-                                                   spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b)))
-                         : spv_emit_vec2_construct(&c->emit, vec2, x, y);
-            u32 dref = shadow ? spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b)) : 0;
+                                  : spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, texs_y(encoding, a, b)));
+            u32 uv = array       ? spv_emit_vec3_construct(&c->emit, vec3, x, y, array_layer(c, a))
+                     : type >= 2 ? spv_emit_vec3_construct(&c->emit, vec3, x, y,
+                                                           spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b)))
+                                 : spv_emit_vec2_construct(&c->emit, vec2, x, y);
+            u32 dref = shadow ? spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, texs_dref(encoding, b))) : 0;
             u32 sample;
-            /* LZ (0, 2, 8, 11) and LL (3, 13) take an explicit level */
-            if (encoding == 0 || encoding == 2 || encoding == 3 || encoding == 8 || encoding == 11 || encoding == 13) {
-                u32 lod = encoding == 13  ? spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b + 1))
-                          : encoding == 3 ? spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, b))
-                                          : zero_f;
-                sample = spv_emit_sample2d_lod(&c->emit, texture_vec4[slot], c->sampled_type[slot], c->sampler[slot],
-                                               uv, 0, lod);
+            if (texs_explicit(encoding)) {
+                u32 level = texs_level(encoding, b);
+                u32 lod = level < 255 ? spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, level)) : zero_f;
+                sample = spv_emit_sample2d_lod(&c->emit, shadow ? c->f32_type : texture_vec4[slot],
+                                               c->sampled_type[slot], c->sampler[slot], uv, dref, lod);
             } else if (stage != ST_FS) {
                 sample = spv_emit_sample2d_lod(&c->emit, shadow ? c->f32_type : texture_vec4[slot],
                                                c->sampled_type[slot], c->sampler[slot], uv, dref, zero_f);
@@ -5138,40 +5175,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 sample = spv_emit_sample2d(&c->emit, shadow ? c->f32_type : texture_vec4[slot], c->sampled_type[slot],
                                            c->sampler[slot], uv, dref);
             }
-            u32 regs[4], comps[4];
-            int outputs = texs_outputs(w, regs, comps);
-            if (B(w, 59, 1)) {
-                for (int k = 0; k < outputs; k++) {
-                    u32 component;
-                    if (regs[k] >= 255) continue;
-                    /* a depth compare returns its result in x, y and z, and 1.0 in alpha */
-                    component =
-                        shadow ? spv_emit_bitcast(&c->emit, c->u32_type,
-                                                  comps[k] == 3 ? spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f)
-                                                                : sample)
-                               : texture_component(c, sample, texture_scalar[slot], comps[k]);
-                    reg_write(c, regs[k], component);
-                }
-            } else {
-                for (int k = 0; k < outputs; k += 2) {
-                    u32 pair[2];
-                    for (int lane = 0; lane < 2; lane++) {
-                        u32 value =
-                            k + lane >= outputs ? zero_f
-                            : shadow
-                                ? (comps[k + lane] == 3 ? spv_emit_constant_f32(&c->emit, c->f32_type, 1.0f) : sample)
-                                : spv_emit_vec4_extract(&c->emit, texture_scalar[slot], sample, comps[k + lane]);
-                        pair[lane] = texture_scalar[slot] == c->f32_type || shadow || k + lane >= outputs ? value
-                                     : texture_scalar[slot] == i32_type
-                                         ? spv_emit_convert_s_to_f(&c->emit, c->f32_type, value)
-                                         : spv_emit_convert_u_to_f(&c->emit, c->f32_type, value);
-                    }
-                    u32 packed = spv_emit_glsl_unary(&c->emit, c->u32_type, c->glsl, SPV_GLSL_PACK_HALF2X16,
-                                                     spv_emit_vec2_construct(&c->emit, vec2, pair[0], pair[1]));
-                    u32 target = k == 0 ? d : B(w, 28, 8) == 255 ? d + 1 : B(w, 28, 8);
-                    if (target < 255) reg_write(c, target, packed);
-                }
-            }
+            texs_store(c, w, sample, texture_scalar[slot], shadow, i32_type, vec2, zero_f);
         } else if (op == O_TEX || op == O_TEX_B) {
             int bindless = op == O_TEX_B;
             u32 mode = bindless ? B(w, 37, 3) : B(w, 55, 3);
@@ -5277,7 +5281,6 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 spv_emit_sample_image(&c->emit, shadow ? c->f32_type : texture_vec4[slot], c->sampled_type[slot],
                                       c->sampler[slot], coords, dref, sample_mode, level, offset, dynamic_offset);
             u32 mask = B(w, 31, 4), dst = d;
-            if (!mask) mask = 15;
             for (u32 component = 0; component < 4; component++)
                 if (mask & (1u << component)) {
                     u32 value =
@@ -5403,7 +5406,6 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                                                    spv_emit_bitcast(&c->emit, c->f32_type, reg_read(c, a + array + 2)));
             u32 lod = spv_emit_image_query_lod(&c->emit, vec2, c->sampled_type[slot], c->sampler[slot], coords);
             u32 mask = B(w, 31, 4), dst = d;
-            if (!mask) mask = 15;
             for (u32 component = 0; component < 4; component++) {
                 if (!(mask & (1u << component))) continue;
                 u32 value = c->zero;
@@ -5470,8 +5472,11 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     u32 raw = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, source++));
                     u32 width = spv_emit_constant_u32(&c->emit, c->u32_type, 6);
                     u32 ox = spv_emit_bitfield_sextract(&c->emit, i32_type, raw, c->zero, width);
-                    u32 oy = spv_emit_bitfield_sextract(&c->emit, i32_type, raw,
-                                                        spv_emit_constant_u32(&c->emit, c->u32_type, 8), width);
+                    /* a 1D texture is a 2D one a texel high, which doesn't move in y */
+                    u32 oy = type == 0
+                                 ? spv_emit_constant_u32(&c->emit, i32_type, 0)
+                                 : spv_emit_bitfield_sextract(&c->emit, i32_type, raw,
+                                                              spv_emit_constant_u32(&c->emit, c->u32_type, 8), width);
                     offset = spv_emit_vec2_construct(&c->emit, vec2_i32, ox, oy);
                 } else if (offset_mode == 2) {
                     per_tap_offset = 1;
@@ -5500,9 +5505,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     u32 raw = spv_emit_bitcast(&c->emit, i32_type, reg_read(c, ptp_source + tap / 2));
                     u32 xoff = spv_emit_bitfield_sextract(
                         &c->emit, i32_type, raw, spv_emit_constant_u32(&c->emit, c->u32_type, (tap & 1) * 16), width);
-                    u32 yoff = spv_emit_bitfield_sextract(
-                        &c->emit, i32_type, raw, spv_emit_constant_u32(&c->emit, c->u32_type, (tap & 1) * 16 + 8),
-                        width);
+                    u32 yoff = type == 0 ? spv_emit_constant_u32(&c->emit, i32_type, 0)
+                                         : spv_emit_bitfield_sextract(
+                                               &c->emit, i32_type, raw,
+                                               spv_emit_constant_u32(&c->emit, c->u32_type, (tap & 1) * 16 + 8), width);
                     u32 tap_offset = spv_emit_vec2_construct(&c->emit, vec2_i32, xoff, yoff);
                     u32 sampled = spv_emit_image_gather_ex(&c->emit, texture_vec4[slot], c->sampled_type[slot],
                                                            c->sampler[slot], coords, component, dref, tap_offset);
@@ -5532,7 +5538,6 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 }
             } else {
                 u32 mask = B(w, 31, 4), dst = d;
-                if (!mask) mask = 15;
                 for (u32 k = 0; k < 4; k++)
                     if (mask & (1u << k)) {
                         reg_write(c, dst, texture_component(c, gathered, texture_scalar[slot], k));

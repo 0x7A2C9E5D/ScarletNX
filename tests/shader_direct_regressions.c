@@ -23,6 +23,7 @@ static const char* stage_paths[3];
 static const char* query_paths[2];
 static const char* opcode_paths[4];
 static const char* gradient_paths[3];
+static const char* texture_paths[6];
 static void check(int condition, const char* what) {
     if (!condition) {
         fprintf(stderr, "FAIL: %s\n", what);
@@ -527,11 +528,11 @@ static void issue126_shader_modes(void) {
         free(code);
     }
     g_shader_texture_arrays = 0;
-    /* A TEX.B with all four results from R4 overwrites the handle in R6. */
+    /* A TEX.B with all four results (mask 15) from R4 overwrites the handle in R6. */
     const u64 clobbered_handle[] = {
         0x4c98078800070006ull,
-        0xdea0000000070004ull | (2ull << 28) | (1ull << 37) | (6ull << 20),
-        0xdea0000000070008ull | (2ull << 28) | (1ull << 37) | (6ull << 20),
+        0xdea0000000070004ull | (0xfull << 31) | (2ull << 28) | (1ull << 37) | (6ull << 20),
+        0xdea0000000070008ull | (0xfull << 31) | (2ull << 28) | (1ull << 37) | (6ull << 20),
     };
     ShaderInfo info;
     size_t words = 0;
@@ -895,6 +896,55 @@ static void gradients(void) {
     }
 }
 
+/* Texture forms compared with Eden's: TEXS's depth compares with a level (5, 6, 9), TLDS's multisample fetch with
+   half results, TLD's multisample fetch in the bound form and its offsets on a 3D texture, TLD4's offset on a 1D
+   texture, and TEX's LOD clamp, which is refused */
+static void texture_forms(void) {
+#define TEXS_W(fp32, encoding, a, b)                                                                                   \
+    (0xd000000000000000ull | (u64)(fp32) << 59 | (u64)(encoding) << 53 | 0x10ull << 36 | 0xffull << 28 |               \
+     (u64)(b) << 20 | 7ull << 16 | (u64)(a) << 8)
+    static const u64 texs_ll_dc[] = {TEXS_W(1, 5, 2, 4)};
+    static const u64 texs_lz_dc[] = {TEXS_W(1, 6, 2, 4)};
+    static const u64 texs_array_dc[] = {TEXS_W(1, 9, 2, 4)};
+    static const u64 tlds_ms_half[] = {(TEXS_W(0, 6, 2, 4) & ~(1ull << 59)) | 1ull << 57}; /* TLDS: bits 58-57 01 */
+    static const u64 tld_forms[] = {
+        0xdc00000000000000ull | 1ull << 50 | 0xfull << 31 | 2ull << 28 | 0x10ull << 36 | 4ull << 20 | 7ull << 16 |
+            2ull << 8, /* TLD.MS R0, R2, R4: the sample in Rb, as the bound form has no handle */
+        0xdc00000000000004ull | 1ull << 35 | 0xfull << 31 | 4ull << 28 | 0x11ull << 36 | 6ull << 20 | 7ull << 16 |
+            8ull << 8, /* TLD.AOFFI R4, R8, R6 on a 3D texture */
+    };
+    static const u64 tld4_1d[] = {0xc800000000000000ull | 1ull << 54 | 0xfull << 31 | 0x10ull << 36 | 4ull << 20 |
+                                  7ull << 16 | 2ull << 8}; /* TLD4.AOFFI R0, R2, R4 on a 1D texture */
+#undef TEXS_W
+    struct {
+        const u64* instructions;
+        int count;
+        const char* what;
+    } cases[] = {{texs_ll_dc, 1, "TEXS 2D.LL.DC translates"},
+                 {texs_lz_dc, 1, "TEXS 2D.LZ.DC translates"},
+                 {texs_array_dc, 1, "TEXS ARRAY_2D.LZ.DC translates"},
+                 {tlds_ms_half, 1, "TLDS 2D.LZ.MS with half results translates"},
+                 {tld_forms, 2, "TLD.MS and a 3D TLD.AOFFI translate"},
+                 {tld4_1d, 1, "TLD4.AOFFI on a 1D texture translates"}};
+    for (int i = 0; i < 6; i++) {
+        ShaderInfo info;
+        size_t words = 0;
+        u32* code = translate(cases[i].instructions, cases[i].count, ST_FS, &info, &words, 0);
+        check(code && !info.unsupported, cases[i].what);
+        if (code && texture_paths[i]) save_fixture(texture_paths[i], code, words);
+        free(code);
+    }
+    {
+        ShaderInfo info;
+        size_t words = 0;
+        u32* code = translate((const u64[]){0xc400000000000000ull | 0xfull << 31 | 2ull << 28 | 0x10ull << 36 |
+                                            4ull << 20 | 7ull << 16 | 2ull << 8},
+                              1, ST_FS, &info, &words, 0);
+        check(!code && info.unsupported, "TEX with the LOD clamp is refused");
+        free(code);
+    }
+}
+
 /* a rejected instruction is logged with its word */
 static void unsupported_names_word(void) {
     ShaderInfo info;
@@ -909,8 +959,8 @@ static void unsupported_names_word(void) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 1 && argc != 36) return 2;
-    if (argc == 36) {
+    if (argc != 1 && argc != 42) return 2;
+    if (argc == 42) {
         storage_paths[0] = argv[1];
         storage_paths[1] = argv[2];
         for (int i = 0; i < 4; i++) nro_paths[i] = argv[i + 3];
@@ -919,6 +969,7 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 2; i++) query_paths[i] = argv[i + 27];
         for (int i = 0; i < 4; i++) opcode_paths[i] = argv[i + 29];
         for (int i = 0; i < 3; i++) gradient_paths[i] = argv[i + 33];
+        for (int i = 0; i < 6; i++) texture_paths[i] = argv[i + 36];
     }
     brx_length();
     cbuf_integer_loads();
@@ -937,5 +988,6 @@ int main(int argc, char** argv) {
     fragment_queries();
     eden_forms();
     gradients();
+    texture_forms();
     return failures ? 1 : 0;
 }

@@ -32,6 +32,7 @@ def main():
         queries = tuple(Path(directory) / f'query_{i}.spv' for i in range(2))
         opcodes = tuple(Path(directory) / f'opcode_{i}.spv' for i in range(4))
         gradients = tuple(Path(directory) / f'gradient_{i}.spv' for i in range(3))
+        textures = tuple(Path(directory) / f'texture_{i}.spv' for i in range(6))
         subprocess.run(
             [args.generator, str(path), str(vertex), str(abs_fragment), str(stack_fragment), str(subgroup)], check=True
         )
@@ -52,6 +53,7 @@ def main():
             *queries,
             *opcodes,
             *gradients,
+            *textures,
         )
         subprocess.run([args.regressions, *(str(path) for path in fixtures)], check=True)
         for fixture in fixtures:
