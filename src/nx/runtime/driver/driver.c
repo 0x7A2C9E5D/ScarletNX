@@ -24,7 +24,8 @@ static void usage(void) {
     puts("  -f, --fullscreen       Start fullscreen for this run (--fullscreen=0: windowed)\n"
          "                         Without either, the game's .ini decides\n"
          "  --touch=0|1|2          The game's touch screen: off, fingers, or fingers and the mouse\n"
-         "  --controls=0|1         The on-screen controls: hidden or shown (the game's menu sets them)");
+         "  --controls=0|1         The on-screen controls: hidden or shown (the game's menu sets them)\n"
+         "  --KEY=VALUE            Any setting of the game's .ini, for this run (--settings lists them)");
     puts("  --backend=llvm|gcc     Select the recompiler backend for preparation\n"
          "  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game\n"
@@ -83,13 +84,13 @@ static int cached_abi(const char* base) {
     free(stamp);
     return expected && abi == expected;
 }
-static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* backend, const char* touch,
-                     const char* controls, int game_argc, char** game_argv) {
+static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* backend, int settings,
+                     char** setting, int game_argc, char** game_argv) {
     char *name = game_name(input), *dump = snx_absolute(input);
     char *work = snx_work_dir(paths->repo), *games = snx_path_join(paths->repo, "games");
     char *extracted = snx_path_join(work, name), *pending = snx_format("%s.extracting", extracted);
     char *game, *base = snx_path_join(games, name), *code;
-    const char** command = (const char**)snx_alloc((size_t)(game_argc + 16) * sizeof(*command));
+    const char** command = (const char**)snx_alloc((size_t)(game_argc + settings + 16) * sizeof(*command));
     int rc = 1, nro = is_nro_path(input), n, j;
 #ifdef _WIN32
     code = snx_format("%s_code.dll", base);
@@ -173,8 +174,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
     if (flags & SNX_HEADLESS) command[n++] = "-H";
     if (flags & SNX_FULLSCREEN) command[n++] = "-f";
     if (flags & SNX_WINDOWED) command[n++] = "--fullscreen=0";
-    if (touch) command[n++] = touch;
-    if (controls) command[n++] = controls;
+    for (j = 0; j < settings; ++j) command[n++] = setting[j];
     if (flags & SNX_STOP)
         command[n++] = "-s";
     else if (flags & SNX_GDB)
@@ -219,14 +219,14 @@ static int container_path(const char* path) {
 }
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
-    const char *repo = SNX_SOURCE_DIR, *build = SNX_BUILD_DIR, *input = NULL, *backend = NULL, *touch = NULL;
-    const char* controls = NULL;
-    char *r = NULL, *b = NULL, *exe = NULL, **rest, *checkout, *data = NULL;
+    const char *repo = SNX_SOURCE_DIR, *build = SNX_BUILD_DIR, *input = NULL, *backend = NULL;
+    char *r = NULL, *b = NULL, *exe = NULL, **rest, **setting, *checkout, *data = NULL;
     unsigned flags = 0;
     int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, backend_args = 0;
-    int repo_given = 0;
+    int repo_given = 0, settings = 0;
     if (argc <= 1) return -1;
-    rest = (char**)snx_alloc((size_t)(argc + 1) * sizeof(*rest));
+    rest = (char**)snx_alloc((size_t)(2 * argc + 1) * sizeof(*rest));
+    setting = rest + argc + 1;
     for (i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--")) {
             separator = i;
@@ -244,15 +244,6 @@ int snx_driver(int argc, char** argv) {
                 repo_given = 1;
             } else
                 build = argv[i];
-            continue;
-        }
-        /* the game's, as they are: its settings of the same names */
-        if (!strncmp(argv[i], "--touch=", 8)) {
-            touch = argv[i];
-            continue;
-        }
-        if (!strncmp(argv[i], "--controls=", 11)) {
-            controls = argv[i];
             continue;
         }
         parsed = snx_cli_flag(argv[i], &flags);
@@ -300,6 +291,13 @@ int snx_driver(int argc, char** argv) {
         goto done;
     }
     automatic = input && (!(flags & (SNX_EXTRACT | SNX_RECOMP)) || ((flags & SNX_RECOMP) && container_path(input)));
+    /* played, a --key=value that is not the driver's own is a setting of the game's .ini, passed on to it */
+    for (i = 0; automatic && i < n; ++i)
+        if (!strncmp(rest[i], "--", 2) && strchr(rest[i], '=') && strncmp(rest[i], "--backend=", 10))
+            setting[settings++] = rest[i];
+        else
+            rest[i - settings] = rest[i];
+    n -= settings;
     if (automatic && (n != 1 + backend_args || help)) {
         result = snx_error("automatic preparation accepts one dump file. Pass game arguments after --");
         goto done;
@@ -354,8 +352,9 @@ int snx_driver(int argc, char** argv) {
     paths.build = b;
     paths.executable = exe;
     if (automatic)
-        result = play_dump(input, &paths, flags, backend, touch, controls, separator < argc ? argc - separator - 1 : 0,
-                           argv + (separator < argc ? separator + 1 : argc));
+        result =
+            play_dump(input, &paths, flags, backend, settings, setting, separator < argc ? argc - separator - 1 : 0,
+                      argv + (separator < argc ? separator + 1 : argc));
     else
         result = (flags & SNX_RECOMP) ? snx_recompile(n, rest, &paths) : snx_extract(n, rest, &paths);
 done:
