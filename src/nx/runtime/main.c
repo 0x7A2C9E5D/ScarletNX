@@ -109,19 +109,19 @@ static void user_folder(char* dir, size_t size, const char* games, int kind) {
 /* the settings, the log and threads.txt, and the pipeline cache. What an older build left beside the game stays, a
    line in the log saying so each start */
 static void user_folders(void) {
-    /* the game's own name before those that start with a dot */
-    static const char* const what[] = {".log", "threads.txt", ".ini", "shader_cache/vk_pipelines.bin"};
-    const char* const dirs[] = {g_statedir, g_statedir, g_confdir, g_cachedir};
     char from[1400], to[1400];
     char* games = snx_absolute(g_exedir[0] ? g_exedir : ".");
     user_folder(g_confdir, sizeof g_confdir, games, SNX_USER_CONFIG);
     user_folder(g_statedir, sizeof g_statedir, games, SNX_USER_STATE);
     user_folder(g_cachedir, sizeof g_cachedir, games, SNX_USER_CACHE);
-    for (int i = 0; games && i < 4; i++) {
-        const char* game = what[i][0] == '.' ? g_exename : "";
-        if (!strcmp(dirs[i], g_exedir)) continue;
-        snprintf(from, sizeof from, "%s/%s%s", games, game, what[i]);
-        snprintf(to, sizeof to, "%s%s%s", dirs[i], game, what[i]);
+    for (int i = 0; games && i < SNX_GAME_FILES; i++) {
+        const char* name = snx_game_files[i].name;
+        const char* game = name[0] == '.' ? g_exename : "";
+        int kind = snx_game_files[i].kind;
+        const char* dir = kind == SNX_USER_CONFIG ? g_confdir : kind == SNX_USER_STATE ? g_statedir : g_cachedir;
+        if (!strcmp(dir, g_exedir)) continue;
+        snprintf(from, sizeof from, "%s/%s%s", games, game, name);
+        snprintf(to, sizeof to, "%s%s%s", dir, game, name);
         if (snx_left_behind(from, to)) WARN("%s was left by an older version: this one keeps it in %s\n", from, to);
     }
     free(games);

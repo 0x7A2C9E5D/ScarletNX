@@ -58,6 +58,15 @@ char* snx_user_path(const char* path, int kind);
 /* 1 while what an older build left at old is still there, for the caller to say each run where it is and that this
    build keeps it at now. Nothing is moved: the player does that */
 int snx_left_behind(const char* old, const char* now);
+/* A game's own files in its folder, where an older build kept them, and the kind of folder this one keeps each in: its
+   log and threads.txt, its settings, its pipeline cache. A name starting with '.' follows the game's name; the others
+   the folder has once, for all its games. The runtime says so for a game it runs, the menu for every game */
+#define SNX_GAME_FILES 4
+typedef struct {
+    const char* name;
+    int kind;
+} SnxGameFile;
+extern const SnxGameFile snx_game_files[SNX_GAME_FILES];
 /* work/ of a data folder, the drivers' extractions: an installed build's is in its cache folder. An older build's
    work/ in the data folder stays, a line on stdout saying so */
 char* snx_work_dir(const char* data_dir);
