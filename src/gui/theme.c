@@ -141,8 +141,8 @@ const GuiThemeKey* gui_theme_key(const char* section, const char* key) {
         if (!strcmp(k->section, section) && !strcmp(k->key, key)) return k;
     return NULL;
 }
-int gui_theme_set(GuiTheme* theme, const GuiThemeKey* key, const char* value) {
-    char* field = (char*)theme + key->at;
+int gui_theme_set(void* object, const GuiThemeKey* key, const char* value) {
+    char* field = (char*)object + key->at;
     uint32_t n;
     int i;
     switch (key->type) {
@@ -166,8 +166,8 @@ int gui_theme_set(GuiTheme* theme, const GuiThemeKey* key, const char* value) {
     }
     return 0;
 }
-void gui_theme_get(const GuiTheme* theme, const GuiThemeKey* key, char* out, size_t size) {
-    const char* field = (const char*)theme + key->at;
+void gui_theme_get(const void* object, const GuiThemeKey* key, char* out, size_t size) {
+    const char* field = (const char*)object + key->at;
     const GuiRgb* c = (const GuiRgb*)field;
     int i, n;
     switch (key->type) {

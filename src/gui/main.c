@@ -970,7 +970,7 @@ static int editor_rows(const App* app) { return SDL_max(1, app->rows - 7); }
 static void render_editor(App* app) {
     GuiEditor* e = &app->editor;
     const GuiTheme* theme = &app->theme;
-    const GuiThemeKey* focused = gui_editor_key_of(e->row);
+    const GuiThemeKey* focused = gui_editor_key_of(e, e->row);
     char label[64], value[96], title[96];
     int r, col, row, cols, rows, width;
     SDL_SetRenderDrawColor(app->renderer, theme->page.r, theme->page.g, theme->page.b, 255);
@@ -986,11 +986,11 @@ static void render_editor(App* app) {
     else if (focused)
         text(app, 1, 2, focused->about, rgb(theme->soft));
     gui_editor_scroll(e, editor_rows(app));
-    for (r = e->top; r < gui_editor_rows() && r - e->top < editor_rows(app); ++r) {
-        const GuiThemeKey* k = gui_editor_key_of(r);
+    for (r = e->top; r < gui_editor_rows(&app->editor) && r - e->top < editor_rows(app); ++r) {
+        const GuiThemeKey* k = gui_editor_key_of(e, r);
         int y = 4 + r - e->top, at = 1 + 25;
         char line[160];
-        gui_editor_label(r, label, sizeof label);
+        gui_editor_label(e, r, label, sizeof label);
         if (r == e->row && e->typing)
             snprintf(value, sizeof value, "%s_", e->text);
         else
@@ -1094,7 +1094,7 @@ static void editor_pointer(App* app, float x, float y, bool click) {
         app->preview_since = 0;
         return;
     }
-    if (y < 4 || r < 0 || r >= gui_editor_rows() || (int)y - 4 >= editor_rows(app)) return;
+    if (y < 4 || r < 0 || r >= gui_editor_rows(&app->editor) || (int)y - 4 >= editor_rows(app)) return;
     if (r == app->editor.row && !app->editor.typing)
         editor_key(app, GUI_SELECT);
     else if (r != app->editor.row) {

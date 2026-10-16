@@ -1083,7 +1083,8 @@ int main(int argc, char** argv) {
             colored_text_at(&app, 1, 0, "THEME EDITOR  /  mytheme", normal);
             preview_box(&app, &col, &prow, &cols, &rows);
             /* page = #102030, typed: the preview's page takes it, the editor's own stays the menu's */
-            for (r = 0; !gui_editor_key_of(r) || strcmp(gui_editor_key_of(r)->key, "page"); ++r) {}
+            for (r = 0; !gui_editor_key_of(&app.editor, r) || strcmp(gui_editor_key_of(&app.editor, r)->key, "page");
+                 ++r) {}
             app.editor.row = r;
             key(&app, SDLK_RETURN);
             assert(app.editor.typing && SDL_TextInputActive(app.window));

@@ -13,8 +13,8 @@ static GuiEditor e;
 /* the row of section/key */
 static int row_of(const char* section, const char* key) {
     int r;
-    for (r = 0; r < gui_editor_rows(); ++r) {
-        const GuiThemeKey* k = gui_editor_key_of(r);
+    for (r = 0; r < gui_editor_rows(&e); ++r) {
+        const GuiThemeKey* k = gui_editor_key_of(&e, r);
         if (k && !strcmp(k->section, section) && !strcmp(k->key, key)) return r;
     }
     assert(!"no such row");
@@ -39,13 +39,15 @@ int main(void) {
     while (gui_theme_keys[keys].section) ++keys;
 
     /* a row for the folder, one per key, and Save */
-    assert(gui_editor_rows() == keys + 2 && !gui_editor_key_of(GUI_EDITOR_FOLDER) && !gui_editor_key_of(keys + 1));
-    assert(gui_editor_key_of(1) == &gui_theme_keys[0] && gui_editor_key_of(keys) == &gui_theme_keys[keys - 1]);
-    gui_editor_label(row_of("colors", "page"), label, sizeof label);
+    gui_editor_start(&e, def, NULL, "mytheme");
+    assert(gui_editor_rows(&e) == keys + 2 && !gui_editor_key_of(&e, GUI_EDITOR_FOLDER) &&
+           !gui_editor_key_of(&e, keys + 1));
+    assert(gui_editor_key_of(&e, 1) == &gui_theme_keys[0] && gui_editor_key_of(&e, keys) == &gui_theme_keys[keys - 1]);
+    gui_editor_label(&e, row_of("colors", "page"), label, sizeof label);
     assert(!strncmp(label, "colors", 6) && strstr(label, "page"));
-    gui_editor_label(row_of("colors", "ink"), label, sizeof label);
+    gui_editor_label(&e, row_of("colors", "ink"), label, sizeof label);
     assert(label[0] == ' ' && strstr(label, "ink"));
-    gui_editor_label(keys + 1, label, sizeof label);
+    gui_editor_label(&e, keys + 1, label, sizeof label);
     assert(!strcmp(label, "Save"));
 
     /* a built-in is edited as a new theme that starts from it */
@@ -163,8 +165,8 @@ int main(void) {
     assert(text && gui_theme_parse(&back, "Night ink_2", text, size));
     for (r = 1; r <= keys; ++r) {
         char a[96], b[96];
-        gui_theme_get(&e.theme, gui_editor_key_of(r), a, sizeof a);
-        gui_theme_get(&back, gui_editor_key_of(r), b, sizeof b);
+        gui_theme_get(&e.theme, gui_editor_key_of(&e, r), a, sizeof a);
+        gui_theme_get(&back, gui_editor_key_of(&e, r), b, sizeof b);
         assert(!strcmp(a, b));
     }
     assert(strstr(text, "base = default"));
@@ -187,6 +189,37 @@ int main(void) {
     gui_editor_scroll(&e, 1000);
     assert(e.top == 0);
     gui_editor_stop(&e);
+    /* a form over another object: a row per key, the first of a section named, no folder or Save; a change is kept
+       as it is made, so ESC leaves at once */
+    {
+        static const char* const words[] = {".ini", "0", "1", NULL};
+        typedef struct {
+            int word;
+            char text[8];
+        } Values;
+        Values values = {0, ""};
+        const GuiThemeKey form[] = {
+            {"Display", "fullscreen", GUI_KEY_WORD, offsetof(Values, word), sizeof(int), words, 0, "1 = fullscreen"},
+            {"Display", "language", GUI_KEY_TEXT, offsetof(Values, text), 8, NULL, 0, "0 Japanese, 1 English"}};
+        gui_editor_form(&e, form, 2, &values);
+        assert(gui_editor_rows(&e) == 2 && gui_editor_key_of(&e, 0) == &form[0] && !gui_editor_key_of(&e, 2));
+        gui_editor_label(&e, 0, label, sizeof label);
+        assert(!strncmp(label, "Display", 7) && strstr(label, "fullscreen"));
+        gui_editor_label(&e, 1, label, sizeof label);
+        assert(label[0] == ' ' && strstr(label, "language"));
+        gui_editor_key(&e, GUI_RIGHT);
+        gui_editor_key(&e, GUI_RIGHT);
+        assert(values.word == 2 && !strcmp(value_of(0), "1"));
+        gui_editor_key(&e, GUI_DOWN);
+        gui_editor_key(&e, GUI_SELECT);
+        type("12");
+        gui_editor_key(&e, GUI_SELECT);
+        assert(!strcmp(values.text, "12") && e.dirty && gui_editor_key(&e, GUI_CANCEL) == GUI_EDITOR_LEAVE);
+        gui_editor_key(&e, GUI_DOWN);
+        assert(e.row == 1 && gui_editor_key(&e, GUI_SELECT) == GUI_EDITOR_STAY && e.typing); /* no Save to reach */
+        gui_editor_stop(&e);
+    }
+
     puts("gui_editor passed");
     return 0;
 }

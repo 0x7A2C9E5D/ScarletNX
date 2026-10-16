@@ -87,10 +87,11 @@ extern const GuiThemeKey gui_theme_keys[]; /* a NULL section ends it */
 /* what a section of the file holds, for the editor's and the file's heading */
 const char* gui_theme_section_about(const char* section);
 const GuiThemeKey* gui_theme_key(const char* section, const char* key);
-/* value into the key's field: 1 when the GUI takes it, 0 leaves the field as it was */
-int gui_theme_set(GuiTheme* theme, const GuiThemeKey* key, const char* value);
+/* value into the key's field of object, a theme or another object its offsets are in: 1 when the GUI takes it, 0
+   leaves the field as it was */
+int gui_theme_set(void* object, const GuiThemeKey* key, const char* value);
 /* the key's value as the file writes it */
-void gui_theme_get(const GuiTheme* theme, const GuiThemeKey* key, char* out, size_t size);
+void gui_theme_get(const void* object, const GuiThemeKey* key, char* out, size_t size);
 
 /* What a theme's file says beyond the theme, to be written back: its base and ErET's layout, ErET's places for the
    ring, the boot word and the texture (written again with the theme's values), and the keys the GUI does not read,
