@@ -24,23 +24,40 @@ PAD = 2  # transparent pixels around each sprite, so linear filtering never read
 ATLAS_W = 1024
 # id, drawable: the order of the header's enum
 SPRITES = [
-    ('A', 'facebutton_a'), ('A_PRESSED', 'facebutton_a_depressed'),
-    ('B', 'facebutton_b'), ('B_PRESSED', 'facebutton_b_depressed'),
-    ('X', 'facebutton_x'), ('X_PRESSED', 'facebutton_x_depressed'),
-    ('Y', 'facebutton_y'), ('Y_PRESSED', 'facebutton_y_depressed'),
-    ('PLUS', 'facebutton_plus'), ('PLUS_PRESSED', 'facebutton_plus_depressed'),
-    ('MINUS', 'facebutton_minus'), ('MINUS_PRESSED', 'facebutton_minus_depressed'),
-    ('HOME', 'facebutton_home'), ('HOME_PRESSED', 'facebutton_home_depressed'),
-    ('CAPTURE', 'facebutton_screenshot'), ('CAPTURE_PRESSED', 'facebutton_screenshot_depressed'),
-    ('L', 'l_shoulder'), ('L_PRESSED', 'l_shoulder_depressed'),
-    ('R', 'r_shoulder'), ('R_PRESSED', 'r_shoulder_depressed'),
-    ('ZL', 'zl_trigger'), ('ZL_PRESSED', 'zl_trigger_depressed'),
-    ('ZR', 'zr_trigger'), ('ZR_PRESSED', 'zr_trigger_depressed'),
-    ('L3', 'button_l3'), ('L3_PRESSED', 'button_l3_depressed'),
-    ('R3', 'button_r3'), ('R3_PRESSED', 'button_r3_depressed'),
-    ('DPAD', 'dpad_standard'), ('DPAD_UP', 'dpad_standard_cardinal_depressed'),
+    ('A', 'facebutton_a'),
+    ('A_PRESSED', 'facebutton_a_depressed'),
+    ('B', 'facebutton_b'),
+    ('B_PRESSED', 'facebutton_b_depressed'),
+    ('X', 'facebutton_x'),
+    ('X_PRESSED', 'facebutton_x_depressed'),
+    ('Y', 'facebutton_y'),
+    ('Y_PRESSED', 'facebutton_y_depressed'),
+    ('PLUS', 'facebutton_plus'),
+    ('PLUS_PRESSED', 'facebutton_plus_depressed'),
+    ('MINUS', 'facebutton_minus'),
+    ('MINUS_PRESSED', 'facebutton_minus_depressed'),
+    ('HOME', 'facebutton_home'),
+    ('HOME_PRESSED', 'facebutton_home_depressed'),
+    ('CAPTURE', 'facebutton_screenshot'),
+    ('CAPTURE_PRESSED', 'facebutton_screenshot_depressed'),
+    ('L', 'l_shoulder'),
+    ('L_PRESSED', 'l_shoulder_depressed'),
+    ('R', 'r_shoulder'),
+    ('R_PRESSED', 'r_shoulder_depressed'),
+    ('ZL', 'zl_trigger'),
+    ('ZL_PRESSED', 'zl_trigger_depressed'),
+    ('ZR', 'zr_trigger'),
+    ('ZR_PRESSED', 'zr_trigger_depressed'),
+    ('L3', 'button_l3'),
+    ('L3_PRESSED', 'button_l3_depressed'),
+    ('R3', 'button_r3'),
+    ('R3_PRESSED', 'button_r3_depressed'),
+    ('DPAD', 'dpad_standard'),
+    ('DPAD_UP', 'dpad_standard_cardinal_depressed'),
     ('DPAD_UP_LEFT', 'dpad_standard_diagonal_depressed'),
-    ('STICK', 'joystick'), ('STICK_PRESSED', 'joystick_depressed'), ('STICK_RANGE', 'joystick_range'),
+    ('STICK', 'joystick'),
+    ('STICK_PRESSED', 'joystick_depressed'),
+    ('STICK_RANGE', 'joystick_range'),
 ]
 
 
@@ -79,16 +96,23 @@ def svg(vector):
             ident = f'g{index}'
             stops = ''.join(
                 '<stop offset="{}" stop-color="{}" stop-opacity="{:.4f}"/>'.format(
-                    a(item, 'offset'), *colour(a(item, 'color'))) for item in gradient.findall('item'))
+                    a(item, 'offset'), *colour(a(item, 'color'))
+                )
+                for item in gradient.findall('item')
+            )
             kind = a(gradient, 'type', 'linear')
             if kind == 'radial':
-                defs.append(f'<radialGradient id="{ident}" gradientUnits="userSpaceOnUse" '
-                            f'cx="{a(gradient, "centerX")}" cy="{a(gradient, "centerY")}" '
-                            f'r="{a(gradient, "gradientRadius")}">{stops}</radialGradient>')
+                defs.append(
+                    f'<radialGradient id="{ident}" gradientUnits="userSpaceOnUse" '
+                    f'cx="{a(gradient, "centerX")}" cy="{a(gradient, "centerY")}" '
+                    f'r="{a(gradient, "gradientRadius")}">{stops}</radialGradient>'
+                )
             elif kind == 'linear':
-                defs.append(f'<linearGradient id="{ident}" gradientUnits="userSpaceOnUse" x1="{a(gradient, "startX")}" '
-                            f'y1="{a(gradient, "startY")}" x2="{a(gradient, "endX")}" y2="{a(gradient, "endY")}">'
-                            f'{stops}</linearGradient>')
+                defs.append(
+                    f'<linearGradient id="{ident}" gradientUnits="userSpaceOnUse" x1="{a(gradient, "startX")}" '
+                    f'y1="{a(gradient, "startY")}" x2="{a(gradient, "endX")}" y2="{a(gradient, "endY")}">'
+                    f'{stops}</linearGradient>'
+                )
             else:
                 raise SystemExit(f'unsupported gradient type {kind}')
             style['fill'] = f'url(#{ident})'
@@ -102,9 +126,14 @@ def svg(vector):
             style['fill-rule'] = 'evenodd'
         attrs = ' '.join(f'{k}="{v}"' for k, v in style.items())
         body.append(f'<path d="{a(path, "pathData")}" {attrs}/>')
-    return width, height, (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {view_w} {view_h}">'
-        f'<defs>{"".join(defs)}</defs><g opacity="{a(vector, "alpha", "1")}">{"".join(body)}</g></svg>')
+    return (
+        width,
+        height,
+        (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {view_w} {view_h}">'
+            f'<defs>{"".join(defs)}</defs><g opacity="{a(vector, "alpha", "1")}">{"".join(body)}</g></svg>'
+        ),
+    )
 
 
 def lf(path):
@@ -131,8 +160,9 @@ def main():
         text = header_path.read_text()
         png = hashlib.sha256(atlas_path.read_bytes()).hexdigest()
         if f'sources {digest}' not in text or f'atlas {png}' not in text:
-            raise SystemExit('controls_atlas.h or controls.png is not what dist/controls makes: run '
-                             'scripts/build-controls.py')
+            raise SystemExit(
+                'controls_atlas.h or controls.png is not what dist/controls makes: run scripts/build-controls.py'
+            )
         return
     from PIL import Image
 
@@ -156,11 +186,11 @@ def main():
         best = None
         for x in sorted({0} | {places[j][0] + pieces[j][0] + PAD for j in places}):
             if x + w <= ATLAS_W:
-                y = max(sky[x:x + w])
+                y = max(sky[x : x + w])
                 if best is None or y < best[1]:
                     best = (x, y)
         x, y = best
-        sky[x:x + w] = [y + h] * w
+        sky[x : x + w] = [y + h] * w
         places[i] = (x + PAD, y + PAD)
     height = (max(sky) + 3) & ~3
     font, white = places[len(images)], places[len(images) + 1]
@@ -179,7 +209,7 @@ def main():
         '#define SNX_CONTROLS_ATLAS_H',
         f'#define SNX_CONTROLS_ATLAS_WIDTH {ATLAS_W}',
         f'#define SNX_CONTROLS_ATLAS_HEIGHT {height}',
-        f'#define SNX_CONTROLS_FONT_X {font[0]} /* the menu\'s font: glyph c at x + c % 16 * 8, y + c / 16 * 16 */',
+        f"#define SNX_CONTROLS_FONT_X {font[0]} /* the menu's font: glyph c at x + c % 16 * 8, y + c / 16 * 16 */",
         f'#define SNX_CONTROLS_FONT_Y {font[1]}',
         f'#define SNX_CONTROLS_WHITE_X {white[0]} /* 4x4 white texels */',
         f'#define SNX_CONTROLS_WHITE_Y {white[1]}',
@@ -187,10 +217,16 @@ def main():
         'enum {',
     ]
     lines += [f'    SNX_SPRITE_{ident},' for ident, _ in SPRITES]
-    lines += ['    SNX_SPRITE_COUNT', '};', '/* x, y, width, height in the atlas */',
-              'static const unsigned short snx_controls_sprites[SNX_SPRITE_COUNT][4] = {']
-    lines += [f'    {{{places[i][0]}, {places[i][1]}, {image.width}, {image.height}}}, /* {ident} */'
-              for i, (ident, image) in enumerate(images)]
+    lines += [
+        '    SNX_SPRITE_COUNT',
+        '};',
+        '/* x, y, width, height in the atlas */',
+        'static const unsigned short snx_controls_sprites[SNX_SPRITE_COUNT][4] = {',
+    ]
+    lines += [
+        f'    {{{places[i][0]}, {places[i][1]}, {image.width}, {image.height}}}, /* {ident} */'
+        for i, (ident, image) in enumerate(images)
+    ]
     lines += ['};', '#endif', '']
     header_path.write_text('\n'.join(lines))
     print(f'{atlas_path.relative_to(root)}: {ATLAS_W}x{height}, {atlas_path.stat().st_size} bytes', file=sys.stderr)

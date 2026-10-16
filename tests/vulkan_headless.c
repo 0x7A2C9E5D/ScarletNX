@@ -47,6 +47,38 @@ static int check_viewport_orientation(void) {
     CHECK(vk_render_front_face(r) == VK_FRONT_FACE_COUNTER_CLOCKWISE);
     r[0x647] = 0x901;
     CHECK(vk_render_front_face(r) == VK_FRONT_FACE_CLOCKWISE);
+    transform[1] = 17;
+    memcpy(&r[0x280], transform, sizeof transform);
+    r[0x286] = 0x6420;
+    r[0x647] = 0x900;
+    r[0x3FE] = 100u << 16;
+    r[0x4EB] = 1; /* lower-left window origin is independent of triangle facing */
+    vp = vk_render_viewport(r);
+    CHECK(vp.y == 120 && vp.height == -34);
+    CHECK(vk_render_front_face(r) == VK_FRONT_FACE_CLOCKWISE);
+    return 0;
+}
+
+static int check_multisample_shader_gate(void) {
+    u64 guest[14] = {0};
+    ShaderInfo info = {0};
+    size_t words = 0;
+    guest[10] = 0x001f8000fc0007e0ull; /* scheduler */
+    guest[11] = 0xd000000000000000ull | 6ull << 53 | 1ull << 57 | 0x10ull << 36 | 0xffull << 28 | 4ull << 20 |
+                7ull << 16 | 2ull << 8; /* TLDS.MS */
+    guest[12] = 0xe30000000007000full;  /* EXIT */
+    u32* spirv = vk_translate_spirv((const u8*)guest, sizeof guest, ST_FS, &info, &words, NULL, NULL);
+    CHECK(!spirv && info.unsupported);
+    CHECK(strstr(info.first_unsupported, "multisample texture binding unavailable"));
+    free(spirv);
+    guest[11] = 0xdc00000000000000ull | 7ull << 51 | 1ull << 50 | 0xfull << 31 | 2ull << 28 | 0x10ull << 36 |
+                4ull << 20 | 7ull << 16 | 2ull << 8; /* bound TLD.MS */
+    memset(&info, 0, sizeof info);
+    words = 0;
+    spirv = vk_translate_spirv((const u8*)guest, sizeof guest, ST_FS, &info, &words, NULL, NULL);
+    CHECK(!spirv && info.unsupported);
+    CHECK(strstr(info.first_unsupported, "multisample texture binding unavailable"));
+    free(spirv);
     return 0;
 }
 
@@ -166,6 +198,7 @@ int main(int argc, char** argv) {
     video_init("Headless Vulkan fixture");
     CHECK(g_opt_headless && g_renderer_up && g_vk.dev && !g_vk.surface && !g_vk.swapchain && !g_vk.sc_count);
     CHECK(!check_viewport_orientation());
+    CHECK(!check_multisample_shader_gate());
     CHECK(!check_direct_spirv());
     printf("Headless Vulkan device: %s\n", g_vk.props.deviceName);
     /* Make any accidental WSI use during presents/recreation fail the test immediately. */

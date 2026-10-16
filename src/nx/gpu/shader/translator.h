@@ -179,7 +179,9 @@ enum {
     O_TXQ,
     O_TXQ_B,
     O_TMML,
+    O_TMML_B,
     O_TXD,
+    O_TXD_B,
     O_SULD,
     O_SUST,
     O_SURED,
@@ -253,6 +255,10 @@ enum {
     O_VMAD,
     O_VSETP,
     O_VADD,
+    O_VABSDIFF,
+    O_VSET,
+    O_VSHL,
+    O_VSHR,
     O_IDE,
     O_CCTL,
     O_CCTLL,
@@ -268,8 +274,8 @@ enum {
     O_GETCRSPTR,
     O__COUNT
 };
+/* an opcode: the bits its pattern fixes (mask) and their values (val), and how many it fixes */
 typedef struct {
-    const char* pat;
     int id;
     const char* name;
     u64 mask, val;
@@ -280,8 +286,9 @@ typedef struct {
     u8 leader[65536 / 8];
     u32* pop_tgt;
 } Ctx;
-#define IDX_OK(i)    ((i) >= 11 && ((i) - 10) % 4 != 0)
-#define CRS_KIND(id) ((id) == O_SSY || (id) == O_SYNC ? 0 : (id) == O_PBK || (id) == O_BRK ? 1 : 2)
+#define IDX_OK(i) ((i) >= 11 && ((i) - 10) % 4 != 0)
+#define CRS_KIND(id)                                                                                                   \
+    ((id) == O_SSY || (id) == O_SYNC ? 0 : (id) == O_PBK || (id) == O_BRK ? 1 : (id) == O_PEXIT ? 3 : 2)
 extern int ops_ready;
 void ops_init(void);
 const Op* decode(u64 w);

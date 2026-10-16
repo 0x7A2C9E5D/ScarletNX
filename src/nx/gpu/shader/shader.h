@@ -78,19 +78,22 @@ extern int g_shader_stage_point_size;
 /* set by the renderer: vertex and tessellation programs may write the layer (shaderOutputLayer, the ShaderLayer
    capability). Without it their layer writes are dropped (layer 0); 1 for the offline translator */
 extern int g_shader_output_layer;
-/* set by the renderer: the device has geometryShader, which the Geometry capability (a fragment program reading the
-   layer) needs; 1 for the offline translator */
+/* set by the renderer: Geometry capability for a fragment program reading Layer or PrimitiveId */
 extern int g_shader_geometry;
 /* set by the renderer: the device has shaderFloat16, which fp16 texture results need;
    1 for the offline translator */
 extern int g_shader_float16;
+/* Tessellation capability can also support a fragment PrimitiveId input when Geometry is unavailable. */
+extern int g_shader_tessellation;
+/* VK_KHR_shader_clock scopes available to direct shaders: bit 0 subgroup, bit 1 device. */
+extern int g_shader_clock_scopes;
 /* in clip_enable: a later stage before rasterization follows this one (tessellation or geometry), and the last one
    applies the depth mode and the clip distances */
 #define SNX_SH_NOT_LAST (1u << 31)
 int shader_vk_set(int stage);
 /* Direct SPIR-V translator. Returns NULL when the current opcode set cannot represent the program. */
 u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count, int can_flush,
-                     int can_preserve, int can_subgroup);
+                     int can_preserve, int can_preserve_f64, int can_subgroup);
 u32* shader_compute_to_spirv(const u8* code, u32 max_bytes, ShaderInfo* si, size_t* word_count, int can_flush,
                              int can_preserve);
 extern int (*g_shader_cb_read)(u32 idx, u32 off, u32* out);

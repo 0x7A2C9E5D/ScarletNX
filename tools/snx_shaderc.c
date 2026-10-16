@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
             continue;
         }
         size_t words = 0;
-        u32* spv = shader_to_spirv(code, max_bytes, stage, &info, &words, 1, 1, 1);
+        u32* spv = shader_to_spirv(code, max_bytes, stage, &info, &words, 1, 1, 1, 1);
         free(code);
         if (!spv) {
             unsupported++;

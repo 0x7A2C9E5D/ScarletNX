@@ -71,6 +71,29 @@ const char* vk_corpus_dir(void) {
     }
     return at;
 }
+
+const char* vk_spirv_unavailable(const u32* spv, size_t words) {
+    for (size_t at = 5; at < words;) { /* the capabilities come first */
+        u32 width = spv[at] >> 16;
+        if (!width || at + width > words || (spv[at] & 0xffffu) != 17) break;
+        if (width == 2 && spv[at + 1] == 10 && !g_vk.feat.shaderFloat64) return "shaderFloat64 is unavailable";
+        if (width == 2 && spv[at + 1] == 11 && !g_vk.feat.shaderInt64) return "shaderInt64 is unavailable";
+        if (width == 2 && spv[at + 1] == 9 && !g_shader_float16) return "shaderFloat16 is unavailable";
+        if (width == 2 && spv[at + 1] == 2 && !g_vk.feat.geometryShader) return "geometryShader is unavailable";
+        if (width == 2 && spv[at + 1] == 3 && !g_vk.feat.tessellationShader) return "tessellationShader is unavailable";
+        if (width == 2 && spv[at + 1] == 25 && !g_vk.feat.shaderImageGatherExtended)
+            return "shaderImageGatherExtended is unavailable";
+        if (width == 2 && spv[at + 1] == 32 && !g_vk.feat.shaderClipDistance)
+            return "shaderClipDistance is unavailable";
+        if (width == 2 && spv[at + 1] == 35 && !g_vk.feat.sampleRateShading) return "sampleRateShading is unavailable";
+        if (width == 2 && spv[at + 1] == 4427 && !g_vk.has_shader_draw_parameters)
+            return "shaderDrawParameters is unavailable";
+        if (width == 2 && spv[at + 1] == 5055 && !g_shader_clock_scopes) return "shaderClock is unavailable";
+        at += width;
+    }
+    return NULL;
+}
+
 u32* vk_translate_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* words, VkCbReader read,
                         VkCbReads* reads) {
     int (*old)(u32, u32, u32*) = g_shader_cb_read;
@@ -78,16 +101,33 @@ u32* vk_translate_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si
     g_rec = reads;
     g_rec_failed = 0;
     g_shader_cb_read = rec_read;
-    VkShaderStageFlagBits shader_stage = stage == ST_FS   ? VK_SHADER_STAGE_FRAGMENT_BIT
-                                         : stage == ST_CS ? VK_SHADER_STAGE_COMPUTE_BIT
-                                                          : VK_SHADER_STAGE_VERTEX_BIT;
+    const VkShaderStageFlagBits stages[] = {VK_SHADER_STAGE_VERTEX_BIT,
+                                            VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,
+                                            VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
+                                            VK_SHADER_STAGE_GEOMETRY_BIT,
+                                            VK_SHADER_STAGE_FRAGMENT_BIT,
+                                            VK_SHADER_STAGE_COMPUTE_BIT};
+    VkShaderStageFlagBits shader_stage = stages[stage];
     u32* result = shader_to_spirv(code, max_bytes, stage, si, words, g_vk_flush_denorm, g_vk_preserve_infnan,
-                                  (g_vk_subgroup_stages & shader_stage) != 0);
+                                  g_vk_preserve_infnan64, (g_vk_subgroup_stages & shader_stage) != 0);
     g_shader_cb_read = old;
     g_rec = NULL;
     if (g_rec_failed) {
         free(result);
         return NULL;
+    }
+    if (result) {
+        const char* reason = vk_spirv_unavailable(result, *words);
+        /* Texture uploads and render targets are single-sampled. Reject a shader whose descriptor needs MS before
+           the draw reaches vk_stage_set's null descriptor path. */
+        for (int i = 0; i < si->ntex && !reason; i++)
+            if (si->tex[i].flags & 2) reason = "multisample texture binding unavailable";
+        if (reason) {
+            snprintf(si->first_unsupported, sizeof si->first_unsupported, "%s", reason);
+            si->unsupported = 1;
+            free(result);
+            return NULL;
+        }
     }
     return result;
 }
@@ -201,7 +241,7 @@ void vk_pipeline_init(void) {
                  l->maxPerStageDescriptorUniformBuffers, l->maxPerStageDescriptorStorageBuffers,
                  l->maxPerStageDescriptorSamplers, l->maxPerStageDescriptorStorageImages);
     }
-    /* push constants: snx_vp (stages before rasterization) at 0, snx_at (fragment) at 16 */
+    /* push constants: viewport/depth pc[0..3] at 0, fragment alpha test pc[4..6] and sprite T flip pc[7] at 16 */
     VkPushConstantRange pc = {VK_PUSH_STAGES, 0, 32};
     VkPipelineLayoutCreateInfo pl = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                                      .setLayoutCount = g_vk_stage_sets,
@@ -249,18 +289,23 @@ typedef struct {
 } ShA;
 static ShA g_sha[4096];
 
-static u64 code_hash(u64 gva, u32 len) {
+static int code_hash(u64 gva, u32 len, u64* hash) {
     u8* p = gmem_ptr(gva, len);
-    if (p) return vk_hash(p, len);
+    if (p) {
+        *hash = vk_hash(p, len);
+        return 1;
+    }
     u8* t = malloc(len ? len : 1);
+    if (!t) return 0;
     gmem_read(gva, t, len);
-    u64 q = vk_hash(t, len);
+    *hash = vk_hash(t, len);
     free(t);
-    return q;
+    return 1;
 }
 static int code_same(const ShA* ca, u64 gva, u32 len, u64 qh) {
     if (!gpu_mem_dirty_since(ca->gw, gva, len) && vk_written_since(gmem_ptr(gva, len), len, ca->wseen) == 0) return 1;
-    return code_hash(gva, len) == qh;
+    u64 hash;
+    return code_hash(gva, len, &hash) && hash == qh;
 }
 
 VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask, u32 rt_int,
@@ -291,6 +336,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u32 int
     u32 wseen = vk_ww_now();
     u64 gw = gpu_mem_generation();
     u8* code = malloc(0x10000);
+    if (!code) return NULL;
     gmem_read_code(gva, code, 0x10000);
     u32 len, len_a = 0;
     u64 qh, qh_a = 0;
@@ -298,10 +344,19 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u32 int
     qh = vk_hash(code, len);
     if (gva_a) { /* VertexA + VertexB: one merged program */
         u8* a = malloc(0x10000);
+        if (!a) {
+            free(code);
+            return NULL;
+        }
         gmem_read_code(gva_a, a, 0x10000);
         vk_shader_hash(a, 0x10000, &len_a, sh_cb_read);
         qh_a = vk_hash(a, len_a);
         u8* m = malloc(0x10000);
+        if (!m) {
+            free(a);
+            free(code);
+            return NULL;
+        }
         /* the merge sizes A and B with shader_hash too */
         int (*old)(u32, u32, u32*) = g_shader_cb_read;
         g_shader_cb_read = sh_cb_read;
@@ -326,6 +381,10 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u32 int
             s = q;
     if (!s) {
         s = calloc(1, sizeof *s);
+        if (!s) {
+            free(code);
+            return NULL;
+        }
         s->hash = h;
         s->stage = stage;
         memcpy(s->mask, mask, sizeof mask);
@@ -347,23 +406,6 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u32 int
         if (vk_corpus_dir()) shader_corpus_save(vk_corpus_dir(), code, mlen, 0x10000, stage, &s->si, h ^ mix);
         size_t nw = 0;
         u32* spv = vk_translate_spirv(code, 0x10000, stage, &s->si, &nw, sh_cb_read, &s->cbr);
-        if (spv && (!g_vk.feat.shaderFloat64 || !g_shader_float16)) {
-            for (size_t at = 5; at < nw;) {
-                u32 width = spv[at] >> 16;
-                if (!width || at + width > nw || (spv[at] & 0xffffu) != 17) break;
-                if (width == 2 && (spv[at + 1] == 10 || spv[at + 1] == 9)) {
-                    int ok = spv[at + 1] == 10 ? g_vk.feat.shaderFloat64 : g_shader_float16;
-                    if (!ok) {
-                        free(spv);
-                        spv = NULL;
-                        snprintf(s->si.first_unsupported, sizeof s->si.first_unsupported,
-                                 spv[at + 1] == 10 ? "shaderFloat64 is unavailable" : "shaderFloat16 is unavailable");
-                        break;
-                    }
-                }
-                at += width;
-            }
-        }
         if (spv && s->si.nimg) {
             u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;
             if (image_slots > g_vk.props.limits.maxDescriptorSetStorageImages)

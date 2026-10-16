@@ -126,12 +126,14 @@ target_link_libraries(scarletnx PRIVATE SDL3::SDL3)
 
 if(BUILD_TESTING)
     add_executable(snx-test-shader-direct "${PROJECT_SOURCE_DIR}/tests/shader_direct.c")
+    snx_test_target(snx-test-shader-direct 11)
     target_link_libraries(snx-test-shader-direct PRIVATE snx_shader)
     if(NOT WIN32)
         target_link_libraries(snx-test-shader-direct PRIVATE Threads::Threads m)
     endif()
     add_test(NAME shader_direct_structure COMMAND $<TARGET_FILE:snx-test-shader-direct> --check-only)
     add_executable(snx-test-shader-direct-regressions "${PROJECT_SOURCE_DIR}/tests/shader_direct_regressions.c")
+    snx_test_target(snx-test-shader-direct-regressions 11)
     target_link_libraries(snx-test-shader-direct-regressions PRIVATE snx_shader)
     if(NOT WIN32)
         target_link_libraries(snx-test-shader-direct-regressions PRIVATE Threads::Threads m)
@@ -145,14 +147,16 @@ if(BUILD_TESTING)
         add_test(NAME runtime_game_copy COMMAND "${CMAKE_COMMAND}" -DRUNTIME=$<TARGET_FILE:scarletnx>
                  -P "${PROJECT_SOURCE_DIR}/tests/game_copy.cmake")
     endif()
-    find_program(SNX_SHADER_SPIRV_VAL spirv-val)
-    find_program(SNX_SHADER_SPIRV_DIS spirv-dis)
+    find_program(SNX_SPIRV_VAL spirv-val)
+    find_program(SNX_SPIRV_DIS spirv-dis)
     find_package(Python3 QUIET COMPONENTS Interpreter)
-    if(SNX_SHADER_SPIRV_VAL AND SNX_SHADER_SPIRV_DIS AND Python3_Interpreter_FOUND)
+    if(SNX_SPIRV_VAL AND SNX_SPIRV_DIS AND Python3_Interpreter_FOUND)
         add_test(NAME shader_direct COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/shader_direct_test.py"
-            --generator $<TARGET_FILE:snx-test-shader-direct> --validator "${SNX_SHADER_SPIRV_VAL}"
-            --disassembler "${SNX_SHADER_SPIRV_DIS}"
+            --generator $<TARGET_FILE:snx-test-shader-direct> --validator "${SNX_SPIRV_VAL}"
+            --disassembler "${SNX_SPIRV_DIS}"
             --regressions $<TARGET_FILE:snx-test-shader-direct-regressions>)
+    else()
+        message(STATUS "Skipping shader_direct: Python3, spirv-val, and spirv-dis are required")
     endif()
 endif()
 

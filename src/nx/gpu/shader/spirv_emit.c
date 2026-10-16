@@ -46,7 +46,10 @@ enum {
     OP_CONVERT_F_TO_S = 110,
     OP_CONVERT_S_TO_F = 111,
     OP_CONVERT_U_TO_F = 112,
+    OP_U_CONVERT = 113,
+    OP_S_CONVERT = 114,
     OP_FCONVERT = 115,
+    OP_F_CONVERT = OP_FCONVERT,
     OP_ISUB = 130,
     OP_FADD = 129,
     OP_FMUL = 133,
@@ -68,6 +71,7 @@ enum {
     OP_BIT_COUNT = 205,
     OP_BIT_REVERSE = 204,
     OP_ATOMIC_EXCHANGE = 229,
+    OP_MEMORY_BARRIER = 225,
     OP_ATOMIC_IADD = 234,
     OP_ATOMIC_UMIN = 237,
     OP_ATOMIC_UMAX = 239,
@@ -107,6 +111,9 @@ enum {
     OP_SWITCH = 251,
     OP_RETURN = 253,
     OP_KILL = 252,
+    OP_DEMOTE_TO_HELPER_INVOCATION = 5380,
+    OP_IS_HELPER_INVOCATION = 5381,
+    OP_READ_CLOCK_KHR = 5056,
 };
 
 static void reserve(SpvWords* s, size_t more) {
@@ -189,6 +196,17 @@ void spv_emit_float16_capability(SpvEmitter* e) {
     instruction(&e->capabilities, OP_CAPABILITY, 2);
     put(&e->capabilities, 9); /* Float16 */
 }
+void spv_emit_demote_extension(SpvEmitter* e) {
+    const char* name = "SPV_EXT_demote_to_helper_invocation";
+    instruction(&e->extensions, OP_EXTENSION, (uint32_t)(1 + string_words(name)));
+    put_str(&e->extensions, name);
+}
+void spv_emit_shader_clock_extension(SpvEmitter* e) {
+    const char* name = "SPV_KHR_shader_clock";
+    instruction(&e->extensions, OP_EXTENSION, (uint32_t)(1 + string_words(name)));
+    put_str(&e->extensions, name);
+    spv_emit_capability(e, 5055); /* ShaderClockKHR */
+}
 void spv_emit_float64_capability(SpvEmitter* e) {
     instruction(&e->capabilities, OP_CAPABILITY, 2);
     put(&e->capabilities, 10); /* Float64 */
@@ -256,8 +274,9 @@ void spv_emit_fragment_depth_replacing(SpvEmitter* e, uint32_t function) {
     put(&e->execution_modes, 12); /* DepthReplacing */
 }
 
-void spv_emit_float_controls(SpvEmitter* e, uint32_t function, int flush_denorms, int preserve_infnan) {
-    if (!flush_denorms && !preserve_infnan) return;
+void spv_emit_float_controls(SpvEmitter* e, uint32_t function, int flush_denorms, int preserve_infnan,
+                             int preserve_infnan64) {
+    if (!flush_denorms && !preserve_infnan && !preserve_infnan64) return;
     const char* name = "SPV_KHR_float_controls";
     instruction(&e->extensions, OP_EXTENSION, (uint32_t)(1 + string_words(name)));
     put_str(&e->extensions, name);
@@ -276,6 +295,16 @@ void spv_emit_float_controls(SpvEmitter* e, uint32_t function, int flush_denorms
         put(&e->execution_modes, function);
         put(&e->execution_modes, 4461); /* SignedZeroInfNanPreserve */
         put(&e->execution_modes, 32);
+    }
+    if (preserve_infnan64) {
+        if (!preserve_infnan) {
+            instruction(&e->capabilities, OP_CAPABILITY, 2);
+            put(&e->capabilities, 4466); /* SignedZeroInfNanPreserve */
+        }
+        instruction(&e->execution_modes, OP_EXECUTION_MODE, 4);
+        put(&e->execution_modes, function);
+        put(&e->execution_modes, 4461); /* SignedZeroInfNanPreserve */
+        put(&e->execution_modes, 64);
     }
 }
 
@@ -326,6 +355,33 @@ uint32_t spv_emit_type_i32(SpvEmitter* e) {
     put(&e->types, id);
     put(&e->types, 32);
     put(&e->types, 1);
+    return id;
+}
+
+uint32_t spv_emit_type_int64(SpvEmitter* e, int is_signed) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->types, OP_TYPE_INT, 4);
+    put(&e->types, id);
+    put(&e->types, 64);
+    put(&e->types, is_signed ? 1 : 0);
+    return id;
+}
+
+uint32_t spv_emit_int_convert(SpvEmitter* e, uint32_t type, uint32_t value, int is_signed) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, is_signed ? OP_S_CONVERT : OP_U_CONVERT, 4);
+    put(&e->functions, type);
+    put(&e->functions, id);
+    put(&e->functions, value);
+    return id;
+}
+
+uint32_t spv_emit_fconvert(SpvEmitter* e, uint32_t type, uint32_t value) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_F_CONVERT, 4);
+    put(&e->functions, type);
+    put(&e->functions, id);
+    put(&e->functions, value);
     return id;
 }
 
@@ -528,6 +584,16 @@ uint32_t spv_emit_constant_u32(SpvEmitter* e, uint32_t type, uint32_t value) {
     put(&e->types, type);
     put(&e->types, id);
     put(&e->types, value);
+    return id;
+}
+
+uint32_t spv_emit_constant64(SpvEmitter* e, uint32_t type, uint64_t value) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->types, OP_CONSTANT, 5);
+    put(&e->types, type);
+    put(&e->types, id);
+    put(&e->types, (uint32_t)value); /* the low word first */
+    put(&e->types, (uint32_t)(value >> 32));
     return id;
 }
 
@@ -775,7 +841,7 @@ uint32_t spv_emit_builtin_input_vec3(SpvEmitter* e, uint32_t vec3_type, uint32_t
 
 uint32_t spv_emit_builtin_input_u32(SpvEmitter* e, uint32_t u32_type, uint32_t builtin) {
     uint32_t id = input_vec4(e, u32_type, 11, builtin);
-    if (builtin == 9) spv_emit_flat(e, id); /* Layer is read in fragment shaders only */
+    if (builtin == 9 || builtin == 18) spv_emit_flat(e, id); /* Layer and SampleId are read in fragment shaders only */
     return id;
 }
 
@@ -1304,7 +1370,7 @@ void spv_emit_control_barrier(SpvEmitter* e, uint32_t u32_type) {
     put(&e->functions, spv_emit_constant_u32(e, u32_type, 0x108)); /* AcquireRelease | WorkgroupMemory */
 }
 void spv_emit_memory_barrier(SpvEmitter* e, uint32_t u32_type, uint32_t scope, uint32_t semantics) {
-    instruction(&e->functions, 225, 3); /* OpMemoryBarrier: scope and semantics, no result */
+    instruction(&e->functions, OP_MEMORY_BARRIER, 3);
     put(&e->functions, spv_emit_constant_u32(e, u32_type, scope));
     put(&e->functions, spv_emit_constant_u32(e, u32_type, semantics));
 }
@@ -1571,21 +1637,6 @@ uint32_t spv_emit_sample2d_lod(SpvEmitter* e, uint32_t result_type, uint32_t sam
     return id;
 }
 
-uint32_t spv_emit_sample_lod_offset(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
-                                    uint32_t coordinates, uint32_t lod, uint32_t offset, int dynamic_offset) {
-    uint32_t image = spv_emit_load(e, sampled_type, sampler);
-    uint32_t id = spv_emit_id(e);
-    instruction(&e->functions, OP_IMAGE_SAMPLE_EXPLICIT_LOD, 8);
-    put(&e->functions, result_type);
-    put(&e->functions, id);
-    put(&e->functions, image);
-    put(&e->functions, coordinates);
-    put(&e->functions, 2 | (dynamic_offset ? 16 : 8)); /* ImageOperands Lod | Offset/ConstOffset */
-    put(&e->functions, lod);
-    put(&e->functions, offset);
-    return id;
-}
-
 uint32_t spv_emit_image_query_size_lod(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
                                        uint32_t lod) {
     uint32_t image_type = 0;
@@ -1688,11 +1739,6 @@ uint32_t spv_emit_image_fetch_sample(SpvEmitter* e, uint32_t result_type, uint32
     return id;
 }
 
-uint32_t spv_emit_image_gather(SpvEmitter* e, uint32_t vec4_type, uint32_t sampled_type, uint32_t sampler,
-                               uint32_t coordinates, uint32_t component) {
-    return spv_emit_image_gather_ex(e, vec4_type, sampled_type, sampler, coordinates, component, 0, 0);
-}
-
 uint32_t spv_emit_image_gather_ex(SpvEmitter* e, uint32_t vec4_type, uint32_t sampled_type, uint32_t sampler,
                                   uint32_t coordinates, uint32_t component, uint32_t dref, uint32_t offset) {
     uint32_t image = spv_emit_load(e, sampled_type, sampler);
@@ -1707,34 +1753,6 @@ uint32_t spv_emit_image_gather_ex(SpvEmitter* e, uint32_t vec4_type, uint32_t sa
         put(&e->functions, 16); /* ImageOperands Offset */
         put(&e->functions, offset);
     }
-    return id;
-}
-
-uint32_t spv_emit_sample2d_offset(SpvEmitter* e, uint32_t vec4_type, uint32_t sampled_type, uint32_t sampler,
-                                  uint32_t coordinates, uint32_t offset, int dynamic_offset) {
-    uint32_t image = spv_emit_load(e, sampled_type, sampler);
-    uint32_t id = spv_emit_id(e);
-    instruction(&e->functions, OP_IMAGE_SAMPLE_IMPLICIT_LOD, 7);
-    put(&e->functions, vec4_type);
-    put(&e->functions, id);
-    put(&e->functions, image);
-    put(&e->functions, coordinates);
-    put(&e->functions, dynamic_offset ? 16 : 8); /* ImageOperands Offset/ConstOffset */
-    put(&e->functions, offset);
-    return id;
-}
-
-uint32_t spv_emit_sample2d_bias(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
-                                uint32_t coordinates, uint32_t bias) {
-    uint32_t image = spv_emit_load(e, sampled_type, sampler);
-    uint32_t id = spv_emit_id(e);
-    instruction(&e->functions, OP_IMAGE_SAMPLE_IMPLICIT_LOD, 7);
-    put(&e->functions, result_type);
-    put(&e->functions, id);
-    put(&e->functions, image);
-    put(&e->functions, coordinates);
-    put(&e->functions, 1); /* ImageOperands Bias */
-    put(&e->functions, bias);
     return id;
 }
 
@@ -1761,18 +1779,19 @@ uint32_t spv_emit_sample_image(SpvEmitter* e, uint32_t result_type, uint32_t sam
     return id;
 }
 
-uint32_t spv_emit_sample_image_grad(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
-                                    uint32_t coordinates, uint32_t dx, uint32_t dy) {
+uint32_t spv_emit_sample_grad(SpvEmitter* e, uint32_t result_type, uint32_t sampled_type, uint32_t sampler,
+                              uint32_t coordinates, uint32_t dx, uint32_t dy, uint32_t offset) {
     uint32_t image = spv_emit_load(e, sampled_type, sampler);
     uint32_t id = spv_emit_id(e);
-    instruction(&e->functions, OP_IMAGE_SAMPLE_EXPLICIT_LOD, 8);
+    instruction(&e->functions, OP_IMAGE_SAMPLE_EXPLICIT_LOD, 8 + !!offset);
     put(&e->functions, result_type);
     put(&e->functions, id);
     put(&e->functions, image);
     put(&e->functions, coordinates);
-    put(&e->functions, 4); /* ImageOperands Grad */
+    put(&e->functions, 4 | (offset ? 8 : 0)); /* ImageOperands Grad, ConstOffset */
     put(&e->functions, dx);
     put(&e->functions, dy);
+    if (offset) put(&e->functions, offset);
     return id;
 }
 
@@ -1836,6 +1855,22 @@ void spv_emit_store_u32(SpvEmitter* e, uint32_t pointer, uint32_t value) { spv_e
 
 void spv_emit_return(SpvEmitter* e) { instruction(&e->functions, OP_RETURN, 1); }
 void spv_emit_kill(SpvEmitter* e) { instruction(&e->functions, OP_KILL, 1); }
+void spv_emit_demote(SpvEmitter* e) { instruction(&e->functions, OP_DEMOTE_TO_HELPER_INVOCATION, 1); }
+uint32_t spv_emit_is_helper(SpvEmitter* e, uint32_t bool_type) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_IS_HELPER_INVOCATION, 3);
+    put(&e->functions, bool_type);
+    put(&e->functions, id);
+    return id;
+}
+uint32_t spv_emit_read_clock(SpvEmitter* e, uint32_t vec2_u32_type, uint32_t scope) {
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->functions, OP_READ_CLOCK_KHR, 4);
+    put(&e->functions, vec2_u32_type);
+    put(&e->functions, id);
+    put(&e->functions, scope);
+    return id;
+}
 void spv_emit_selection_merge(SpvEmitter* e, uint32_t merge_label) {
     instruction(&e->functions, OP_SELECTION_MERGE, 3);
     put(&e->functions, merge_label);

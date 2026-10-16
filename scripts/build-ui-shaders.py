@@ -45,14 +45,24 @@ def main():
     with tempfile.TemporaryDirectory() as temporary:
         for array, name, stage in SHADERS:
             spv = Path(temporary) / f'{name}.spv'
-            subprocess.run(['glslc', f'-fshader-stage={stage}', '--target-env=vulkan1.3', '-O', str(folder / name),
-                            '-o', str(spv)], check=True)
+            subprocess.run(
+                [
+                    'glslc',
+                    f'-fshader-stage={stage}',
+                    '--target-env=vulkan1.3',
+                    '-O',
+                    str(folder / name),
+                    '-o',
+                    str(spv),
+                ],
+                check=True,
+            )
             subprocess.run(['spirv-val', '--target-env', 'vulkan1.3', str(spv)], check=True)
             data = spv.read_bytes()
             words = struct.unpack(f'<{len(data) // 4}I', data)
             text += f'static const uint32_t {array}[] = {{\n'
             for i in range(0, len(words), 8):
-                text += '    ' + ', '.join(f'0x{value:08x}u' for value in words[i:i + 8]) + ',\n'
+                text += '    ' + ', '.join(f'0x{value:08x}u' for value in words[i : i + 8]) + ',\n'
             text += '};\n'
     text += '// clang-format on\n#endif\n'
     header.write_text(text)
