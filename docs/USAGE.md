@@ -249,7 +249,7 @@ list). A data folder that is not a checkout keeps each kind of file apart: on Li
 | its pipeline cache | `games/<id>/shader_cache/` | `~/.cache/scarletnx/games/<id>/shader_cache/` | `cache/games/<id>/shader_cache/` |
 | extractions (`3ds/` for the 3DS driver) | `work/` | `~/.cache/scarletnx/work/` | `cache/work/` |
 | the menu's themes, `<name>/theme.ini` | `themes/` | `~/.local/share/scarletnx/themes/` | `themes/` |
-| the menu's `settings.ini`, `app.ini`, `folders.txt` | the user's, as in the next columns | `~/.config/scarletnx/` | `config/` |
+| the menu's `settings.ini`, `app.ini`, `folders.txt`, `gamecontrollerdb.txt` | the user's, as in the next columns | `~/.config/scarletnx/` | `config/` |
 | the menu's `recent.txt`, `last-run.log` | the user's, as in the next columns | `~/.local/state/scarletnx/` | `state/` |
 | the menu's Share log, `scarletnx.log` | the working folder | `~/.local/state/scarletnx/` | `state/` |
 | `prod.keys`, read before `~/.switch` | the folder | `~/.local/share/scarletnx/` | the folder |
@@ -316,10 +316,11 @@ Keyboard and on-screen controls also drive player one.
 restart the game after changing it.
 
 For a joystick that SDL detects but does not recognize as a gamepad, put SDL mapping lines in
-`gamecontrollerdb.txt` beside the launcher's `settings.ini` in the user configuration folder. The game reads the
-same file. To use a file elsewhere, set `SDL_GAMECONTROLLERCONFIG_FILE` to its path before starting the
-launcher or game. A mapping line starts with the joystick GUID shown in the game log or the launcher's Controllers
-page, followed by a name and SDL button and axis bindings. For example:
+`gamecontrollerdb.txt` beside the launcher's `settings.ini` ([Folders](#folders)). A game in the launcher's
+`games/` reads the same file; any other game, the user's. To use a file elsewhere, set
+`SDL_GAMECONTROLLERCONFIG_FILE` to its path before starting the launcher or game. A mapping line starts with the
+joystick GUID shown in the game log or the launcher's Controllers page, followed by a name and SDL button and
+axis bindings. For example:
 
 ```text
 GUID,My Controller,a:b0,b:b1,x:b2,y:b3,leftx:a0,lefty:a1,rightx:a2,righty:a3

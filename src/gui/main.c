@@ -341,7 +341,7 @@ static char* menu_folder(const App* app, int kind, bool make) {
     folder = sdl ? snx_strdup(sdl) : NULL;
     SDL_free(sdl);
 #else
-    folder = app->data_dir && snx_app_dir(app->data_dir) ? snx_app_kind_dir(app->data_dir, kind) : snx_user_dir(kind);
+    folder = snx_menu_dir(app->data_dir, kind);
 #endif
     if (folder && make && snx_mkdirs(folder)) {
         free(folder);
@@ -3212,11 +3212,11 @@ static void left_behind(App* app) {
 #ifndef SDL_PLATFORM_ANDROID /* the app's own storage, as before */
     /* gui/: the menu's own, now in the config and state folders, each where it goes */
     for (i = 0; gui && i < 2; ++i) {
-        static const char* const files[2][3] = {{"settings.ini", "app.ini", "folders.txt"},
-                                                {"recent.txt", "last-run.log", ""}};
+        static const char* const files[2][4] = {{"settings.ini", "app.ini", "folders.txt", "gamecontrollerdb.txt"},
+                                                {"recent.txt", "last-run.log", "", ""}};
         const char* to = i ? state : config;
         int k, there = 0;
-        for (k = 0; k < 3 && files[i][k][0]; ++k) {
+        for (k = 0; k < 4 && files[i][k][0]; ++k) {
             char* file = snx_path_join(gui, files[i][k]);
             there |= file && snx_is_file(file);
             free(file);

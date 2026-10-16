@@ -1,10 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The gamepads (runtime/platform/backend/gamepad.c) on SDL's virtual ones, under its dummy video driver: per-slot and
-   legacy combined input, common layouts, focus behavior, motion sensors, and a waiting pad taking a freed slot */
+/* The gamepads (runtime/platform/backend/gamepad.c) on SDL's virtual ones, under its dummy video driver: the launcher's
+   SDL mappings, per-slot and legacy combined input, common layouts, focus behavior, motion sensors, and a waiting pad
+   taking a freed slot */
 #include "nx/runtime/platform/gamepad.h"
 #include "nx/runtime/options.h"
 #include "nx/runtime/platform/plat.h"
+#include "common/utilities/common.h"
 #include <SDL3/SDL.h>
 #include <string.h>
 #include <stdio.h>
@@ -12,7 +14,7 @@
 #include <math.h>
 
 int g_verbose;
-char g_confdir[1024];
+char g_confdir[1024], g_exedir[1024];
 void logf_(int lvl, const char* fmt, ...) {
     (void)lvl;
     (void)fmt;
@@ -141,6 +143,30 @@ int main(void) {
     CHECK(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD));
     w = SDL_CreateWindow("gamepad", 64, 64, 0);
     CHECK(w != NULL && SDL_GetKeyboardFocus() == w);
+
+    /* the SDL mappings of the launcher whose games/ the game is in, beside its settings.ini: a portable copy's
+       config/gamecontrollerdb.txt. SDL takes a line of a file only with its own platform */
+    {
+        char line[160];
+        char *root = snx_temp_dir(NULL), *copy = snx_path_join(root, ".scarletnx");
+        char *config = snx_path_join(copy, "config"), *game = snx_path_join(copy, "games/0100DA801624E000");
+        char *db = snx_path_join(config, "gamecontrollerdb.txt"), *mapping;
+        snprintf(line, sizeof line, "03000000341200007856000000000000,Odd Stick,a:b0,b:b1,x:b2,y:b3,platform:%s,\n",
+                 SDL_GetPlatform());
+        CHECK(root && !snx_mkdirs(config) && !snx_mkdirs(game) && !snx_write_file(db, line, strlen(line)));
+        snprintf(g_exedir, sizeof g_exedir, "%s/", game);
+        gamepad_scan();
+        mapping = SDL_GetGamepadMappingForGUID(SDL_StringToGUID("03000000341200007856000000000000"));
+        CHECK(mapping && strstr(mapping, "Odd Stick"));
+        SDL_free(mapping);
+        g_exedir[0] = 0;
+        CHECK(!snx_remove_tree(root));
+        free(db);
+        free(game);
+        free(config);
+        free(copy);
+        free(root);
+    }
 
     /* the face buttons as their labels say: A at the bottom on the most common layout */
     xbox = attach(XBOX);

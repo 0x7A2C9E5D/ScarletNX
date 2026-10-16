@@ -150,12 +150,12 @@ static void load_mappings(void) {
         LOG("input: SDL mappings from %s\n", override);
         return;
     }
-    /* The launcher keeps settings.ini at the user config root on XDG systems and in SDL's gui preference folder
-       elsewhere. Keep one mapping database for every game opened by that launcher. */
-#ifdef SNX_XDG
-    folder = snx_user_dir(SNX_USER_CONFIG);
-#else
+    /* the launcher's, beside its settings.ini: one mapping database for every game it opens. On Android its own
+       storage, SDL's */
+#ifdef SDL_PLATFORM_ANDROID
     folder = SDL_GetPrefPath("scarletnx", "gui");
+#else
+    folder = snx_menu_dir(g_exedir[0] ? g_exedir : ".", SNX_USER_CONFIG);
 #endif
     path = folder ? snx_path_join(folder, "gamecontrollerdb.txt") : NULL;
     if (!path) path = snx_path_join(g_confdir, "gamecontrollerdb.txt");
@@ -170,10 +170,10 @@ static void load_mappings(void) {
         LOG("input: loaded %d SDL mappings from %s\n", count, path);
     free(path);
 done:
-#ifdef SNX_XDG
-    free(folder);
-#else
+#ifdef SDL_PLATFORM_ANDROID
     SDL_free(folder);
+#else
+    free(folder);
 #endif
 }
 void gamepad_detect(u32 id) {

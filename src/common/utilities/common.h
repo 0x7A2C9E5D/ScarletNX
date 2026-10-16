@@ -68,6 +68,10 @@ char* snx_app_kind_dir(const char* app, int kind);
 /* A path in a data folder (snx_app_dir), moved to the same place in its folder of kind: games/X/X.ini of the data
    folder is games/X/X.ini of the config folder. Any other path (a checkout, an --outdir) is returned as it is */
 char* snx_user_path(const char* path, int kind);
+/* The folder of kind of the launcher's own files (settings.ini and gamecontrollerdb.txt in config, recent.txt in
+   state) for a program in folder: the data folder's (snx_app_dir) that folder is in, else the user's. The launcher
+   names its data folder, a game its own folder, so a game finds the files of the launcher whose games/ it is in */
+char* snx_menu_dir(const char* folder, int kind);
 /* 1 while what an older build left at old is still there, for the caller to say each run where it is and that this
    build keeps it at now. Nothing is moved: the player does that */
 int snx_left_behind(const char* old, const char* now);

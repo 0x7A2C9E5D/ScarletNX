@@ -3354,6 +3354,19 @@ int main(int argc, char** argv) {
                 free(lines[i][0]);
                 free(lines[i][1]);
             }
+            /* gui/'s gamecontrollerdb.txt, where #276 read it, goes to the config folder as settings.ini does */
+            {
+                char *db = snx_path_join(old, "gamecontrollerdb.txt"),
+                     *said = snx_format("%s" SAY_LEFT_BY "%s/scarletnx\n", old, config);
+                assert(!snx_write_file(db, "", 0));
+                left_behind(&app);
+                assert(app.lefts == 6 && strstr(app.left, said));
+                assert(!snx_remove_tree(db));
+                left_behind(&app);
+                assert(app.lefts == 5);
+                free(said);
+                free(db);
+            }
             /* in a box over the menu as it opens: each where it is (-) and where it would go (->, in ink: a proposal,
                not a diff's added green), a path too long for a row going on in the next, as many as fit */
             {
