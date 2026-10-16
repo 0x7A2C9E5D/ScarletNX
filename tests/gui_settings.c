@@ -119,6 +119,43 @@ int main(int argc, char** argv) {
                             assert(i == n);
                         }
     gui_settings_free(&s);
+
+    /* kept in a file of the game's sections and keys: what changed from where the rows started, read back over a
+       new start; a pick back at its start leaves it */
+    {
+        char *dir = snx_temp_dir(NULL), *path = snx_path_join(dir, "config/settings.ini"), *text;
+        size_t size;
+        assert(!gui_settings_read(&s, list) && gui_settings_set(&s, "fullscreen", "0"));
+        gui_settings_mark(&s); /* the launcher's own choice, fullscreen 0, is where it starts */
+        assert(gui_settings_set(&s, "gdbstub", "on") && gui_settings_set(&s, "touch", "2"));
+        assert(gui_settings_set(&s, "language", "3") && gui_settings_set(&s, "fullscreen", ".ini"));
+        assert(gui_settings_set(&s, "log", "2") && gui_settings_set(&s, "log", ".ini"));
+        assert(!gui_settings_save(&s, path));
+        text = (char*)snx_read_file(path, &size);
+        assert(text &&
+               strstr(text, "\n[Launch]\ngdbstub=on\n[Display]\nfullscreen=.ini\nlanguage=3\n[Input]\ntouch=2\n"));
+        assert(!strstr(text, "log=") && !strstr(text, "docked") && !strstr(text, "libgccjit"));
+        free(text);
+        gui_settings_free(&s);
+        assert(!gui_settings_read(&s, list) && gui_settings_set(&s, "fullscreen", "0"));
+        gui_settings_mark(&s);
+        gui_settings_load(&s, path);
+        assert(!strcmp(gui_settings_value(&s, "gdbstub"), "on") && !strcmp(gui_settings_value(&s, "language"), "3"));
+        assert(!gui_settings_value(&s, "fullscreen") && !strcmp(gui_settings_value(&s, "touch"), "2"));
+        assert(!gui_settings_value(&s, "log") && gui_settings_options(&s, 1, 0, options) == 4);
+        gui_settings_load(&s, "/nonexistent/settings.ini"); /* none: nothing changes */
+        assert(!strcmp(gui_settings_value(&s, "language"), "3"));
+        {
+            char *plain = snx_path_join(dir, "a file"), *under = snx_path_join(plain, "settings.ini");
+            assert(!snx_write_file(plain, "", 0) && gui_settings_save(&s, under)); /* a folder it cannot make */
+            free(under);
+            free(plain);
+        }
+        gui_settings_free(&s);
+        assert(!snx_remove_tree(dir));
+        free(path);
+        free(dir);
+    }
     assert(!gui_settings_read(&s, "") && s.count == GUI_SETTINGS_OWN); /* no runtime: the launcher's alone */
     assert(gui_settings_options(&s, 1, 0, options) == 0 && !gui_settings_set(&s, "touch", "1"));
     gui_settings_free(&s);

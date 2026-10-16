@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "settings.h"
+#include "common.h"
+#include "ini_lines.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,6 +64,43 @@ int gui_settings_read(GuiSettings* s, const char* list) {
 void gui_settings_free(GuiSettings* s) {
     free(s->keys);
     memset(s, 0, sizeof *s);
+}
+void gui_settings_mark(GuiSettings* s) {
+    int i;
+    for (i = 0; i < s->count; ++i) gui_theme_get(s->values, &s->keys[i], s->values[i].start, sizeof s->values[i].start);
+}
+void gui_settings_load(GuiSettings* s, const char* path) {
+    size_t size;
+    char *text = path ? (char*)snx_read_file(path, &size) : NULL, *key, *value;
+    SnxIni ini;
+    if (!text) return;
+    snx_ini_start(&ini, text); /* a key names one row whatever its section, as in the game's .ini */
+    while (snx_ini_next(&ini, &key, &value)) gui_settings_set(s, key, value);
+    free(text);
+}
+int gui_settings_save(const GuiSettings* s, const char* path) {
+    size_t room = 256 + (size_t)s->count * 200, at = 0; /* a row's section, key and value take less than 200 */
+    char *text = (char*)malloc(room), *folder = snx_dirname(path), *staged = snx_format("%s.new", path), value[64];
+    const char* section = "";
+    int i, failed;
+    if (text)
+        at = (size_t)snprintf(text, room,
+                              "; what the launcher's Settings changed, for every game it runs: over each "
+                              "game's .ini\n");
+    for (i = 0; text && i < s->count; ++i) {
+        gui_theme_get(s->values, &s->keys[i], value, sizeof value);
+        if (!strcmp(value, s->values[i].start)) continue;
+        if (strcmp(section, s->keys[i].section))
+            at += (size_t)snprintf(text + at, room - at, "[%s]\n", section = s->keys[i].section);
+        at += (size_t)snprintf(text + at, room - at, "%s=%s\n", s->keys[i].key, value);
+    }
+    /* staged beside it, then put in place: a crash mid-write leaves the old picks */
+    failed = !text || snx_mkdirs(folder) || snx_write_file(staged, text, at) || snx_replace(staged, path);
+    if (failed) remove(staged);
+    free(staged);
+    free(folder);
+    free(text);
+    return failed;
 }
 static int find(const GuiSettings* s, const char* key) {
     int i;

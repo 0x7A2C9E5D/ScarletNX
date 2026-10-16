@@ -312,6 +312,7 @@ int main(int argc, char** argv) {
 #endif
     free(app.games_dir);
     app.games_dir = snx_path_join(temporary, "games");
+    app.settings_file = snx_path_join(temporary, "config/settings.ini"); /* the Settings' picks, kept */
     render(&app);
     colored_text(&app, menu_row(&app, GUI_SWITCH), "- Load Switch NSP/XCI/NRO", yellow);
     assert(!app.menu.activated);
@@ -512,6 +513,16 @@ int main(int argc, char** argv) {
     assert(!gui_settings_value(&app.settings, "resolution"));
     key(&app, SDLK_ESCAPE);
     assert(!app.editing && app.menu.selected == GUI_SETTINGS);
+    /* kept in a file, the changed ones alone, they come back as the menu opens again; the runs below get them */
+    {
+        size_t size;
+        char* kept = (char*)snx_read_file(app.settings_file, &size);
+        assert(kept && strstr(kept, "[Display]\nfullscreen=1\n") && !strstr(kept, "controls=") &&
+               !strstr(kept, "gdbstub"));
+        free(kept);
+        gui_settings_free(&app.settings); /* as a new start has none read */
+        assert(setting_is(&app, "fullscreen", NULL) && settings_of(&app) && setting_is(&app, "fullscreen", "1"));
+    }
     key(&app, SDLK_UP);
     key(&app, SDLK_LEFT);
     key(&app, SDLK_LEFT);

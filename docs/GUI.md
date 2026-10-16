@@ -52,11 +52,14 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
 - **Settings** lists every setting of the game's `.ini` by its sections (Display, Graphics,
   Performance, Input, Network, Debug), as `scarletnx --settings` prints them from the runtime's
   own tables, after the launcher's two: a row each, its help above, Left/Right going round its
-  values, Enter typing one. A setting at `.ini` is the game's `.ini`'s; one picked goes to the
-  session's Switch runs as `--key=value`, over the `.ini` ([USAGE](USAGE.md)). The launcher's
-  own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1, and `fullscreen` puts
-  the launcher itself on the whole screen too). The touch screen is the game's menu's, to turn
-  off for a controller.
+  values, Enter typing one. A setting at `.ini` is the game's `.ini`'s; one picked goes to every
+  Switch run as `--key=value`, over the `.ini` ([USAGE](USAGE.md)), and is kept for every game:
+  what was changed, by the `.ini`'s sections and keys, in `settings.ini` of the config folder on
+  Linux (`~/.config/scarletnx/`), else beside `recent.txt`. A run takes a setting from what that
+  run picks, then from the game's own picks (to come), then from these, and last from the game's
+  `.ini`. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
+  and `fullscreen` puts the launcher itself on the whole screen too). The touch screen is the
+  game's menu's, to turn off for a controller.
   **libgccjit** passes `--backend=gcc` when preparing a dump (it stays off in a build without
   libgccjit; games in `games/` are not recompiled), **gdbstub** passes `-S` and `-s`, the
   runtime's stub on port 1234 waiting for the debugger at startup (UNIX only). None of them

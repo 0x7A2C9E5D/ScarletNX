@@ -59,6 +59,7 @@ typedef struct {
     GuiSteps steps;
     GuiRecent recent;
     GuiSettings settings; /* read the first time a run or the Settings need them */
+    char* settings_file;  /* the picks kept for every game (settings_path); NULL keeps none */
     GuiSpace* space;      /* the latest count, its thread counter until joined */
     SDL_Thread* counter;
     uint64_t free_bytes; /* on the data folder's disk, when the count started */
@@ -1010,6 +1011,8 @@ static GuiSettings* settings_of(App* app) {
     gui_settings_set(&app->settings, "fullscreen", "0");
     gui_settings_set(&app->settings, "controls", "0");
 #endif
+    gui_settings_mark(&app->settings);
+    gui_settings_load(&app->settings, app->settings_file);
     return &app->settings;
 }
 /* ---- the editor's forms (editor.c): the Settings, or the theme editor's rows on the left and the menu or a run in
@@ -1251,6 +1254,12 @@ static void save_editor(App* app) {
 static void editor_key(App* app, GuiKey key) {
     GuiEditorDo what = gui_editor_key(&app->editor, key);
     if (what == GUI_EDITOR_SAVE) save_editor(app);
+    if (app->editor.object && app->editor.dirty) { /* a Settings pick, kept at once */
+        app->editor.dirty = false;
+        if (app->settings_file && gui_settings_save(&app->settings, app->settings_file))
+            snprintf(app->editor.note, sizeof app->editor.note, "Not saved: %s could not be written",
+                     app->settings_file);
+    }
     if (what == GUI_EDITOR_LEAVE) {
         leave_editor(app);
         return;
@@ -2230,6 +2239,7 @@ static void cleanup(App* app) {
     gui_process_destroy(app->process);
     space_stop(app);
     gui_settings_free(&app->settings);
+    free(app->settings_file);
     free(app->left);
     free(app->self);
     free(app->drivers);
@@ -2266,6 +2276,21 @@ static char* state_folder(void) {
     return folder;
 }
 #endif
+/* the file of Settings picks: the global one, every game's (game NULL), in the config folder (XDG) or the menu's own;
+   a game's own, games/<game>.ini there, is to come. See settings.h for which a run takes first */
+static char* settings_path(const App* app, const char* game) {
+#ifdef SNX_XDG
+    char* folder = snx_user_dir(SNX_USER_CONFIG);
+#else
+    char* folder = app->recent_file ? snx_dirname(app->recent_file) : NULL;
+#endif
+    char* path = !folder ? NULL
+                 : game  ? snx_format("%s/games/%s.ini", folder, game)
+                         : snx_path_join(folder, "settings.ini");
+    (void)app;
+    free(folder);
+    return path;
+}
 int snx_gui_main(const char* self) {
     App app;
     char* prefs;
@@ -2287,6 +2312,7 @@ int snx_gui_main(const char* self) {
 #endif
     if (prefs) recent_open(&app, snx_path_join(prefs, "recent.txt"));
     if (prefs) app.run_log = snx_path_join(prefs, "last-run.log");
+    app.settings_file = settings_path(&app, NULL);
     free(prefs);
     left_behind(&app);
     app.left_shown = app.lefts > 0;
