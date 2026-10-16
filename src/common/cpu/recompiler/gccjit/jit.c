@@ -9,9 +9,10 @@
 
 /* ---- context ---- */
 
-/* -march=native is resolved by GCC's driver, which libgccjit's compiler proper doesn't run through: ask the driver
-   once what it means on this host (build == host == target) and pass the CPU by name, with what it says of the
-   instructions the FP fast paths need. Generic code for the target without a driver */
+/* -march=native is resolved by GCC's driver, which libgccjit's compiler proper doesn't run through: the CPU by name
+   (build == host == target), from libgccjit itself where it can tell (GCC 15), else from a GCC on PATH, with what it
+   supports of the instructions the FP fast paths need. Those are used only with the name passed: without it the code
+   is the target's generic one, which calls libm for them, and a module links no libm. Generic without either */
 typedef struct {
     char march[96];
     int fma, round;
@@ -35,8 +36,28 @@ static const HostTarget* host_target(void) {
     static int done;
     if (!done) {
         const char* args[5] = {"gcc", "-march=native", "-Q", "--help=target", NULL};
-        char *gcc = snx_find_tool("gcc"), *output = NULL, *p;
+        char *gcc = NULL, *output = NULL, *p;
         done = 1;
+#if defined(LIBGCCJIT_HAVE_TARGET_INFO_API) && (defined(__x86_64__) || defined(__i386__))
+        {
+            gcc_jit_context* ctx = gcc_jit_context_acquire();
+            gcc_jit_target_info* info = gcc_jit_context_get_target_info(ctx);
+            const char* arch = gcc_jit_target_info_arch(info);
+            if (arch && *arch && strlen(arch) < sizeof(host.march) - 8) sprintf(host.march, "-march=%s", arch);
+            gcc_jit_target_info_release(info);
+            gcc_jit_context_release(ctx);
+            if (host.march[0]) { /* what the CPU supports shows only in a context told its name */
+                ctx = gcc_jit_context_acquire();
+                gcc_jit_context_add_command_line_option(ctx, host.march);
+                info = gcc_jit_context_get_target_info(ctx);
+                host.fma = gcc_jit_target_info_cpu_supports(info, "fma");
+                host.round = gcc_jit_target_info_cpu_supports(info, "sse4.1");
+                gcc_jit_target_info_release(info);
+                gcc_jit_context_release(ctx);
+            }
+        }
+#endif
+        if (!host.march[0]) gcc = snx_find_tool("gcc");
         if (gcc) {
             args[0] = gcc;
             if (!snx_run(args, NULL, NULL, &output) && output && (p = strstr(output, "-march=")) != NULL) {
@@ -44,10 +65,11 @@ static const HostTarget* host_target(void) {
                 p += 7;
                 while (*p == ' ' || *p == '\t') ++p;
                 /* AArch64's GCC lists it empty: what follows is the next option */
-                if (*p != '\n' && *p != '\r' && sscanf(p, "%63s", name) == 1 && strcmp(name, "native"))
+                if (*p != '\n' && *p != '\r' && sscanf(p, "%63s", name) == 1 && strcmp(name, "native")) {
                     sprintf(host.march, "-march=%s", name);
-                host.fma = enabled(output, "-mfma");
-                host.round = enabled(output, "-msse4.1");
+                    host.fma = enabled(output, "-mfma");
+                    host.round = enabled(output, "-msse4.1");
+                }
             }
             free(output);
             free(gcc);
