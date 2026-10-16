@@ -44,7 +44,7 @@ syscalls, ELF execution, filesystem scope, and differential testing.
 ## Recompiler + module ABI
 
 NX tooling under `src/nx/runtime/driver/` and `src/nx/loader/`:
-`work/<Game>/{exefs,romfs}` -> `games/<Game>[.exe]`, `<Game>_code.{so,dll}`, `<Game>_data/`:
+`work/<Game>/{exefs,romfs}` -> `games/<id>/`: `<id>[.exe]`, `<id>_code.{so,dll}`, `<id>_data/`:
 
 - `driver.c`: CLI dispatch only; `extract.c` and `recompile.c` own their workflows.
 - `src/nx/loader/loader.c`: NSO/NRO, LZ4, SHA-256, NPDM, MOD0, symbols/relocs/FDEs.
