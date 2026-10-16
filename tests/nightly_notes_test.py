@@ -3,6 +3,9 @@
 # Copyright 2026 the ScarletNX contributors
 """scripts/nightly-notes.py on a history of its own: merged pull requests, direct commits, a branch never merged"""
 
+DOWNLOAD = 'https://github.com/owner/nightly/releases/download/t'
+
+
 import importlib.util
 import os
 from pathlib import Path
@@ -72,7 +75,7 @@ with tempfile.TemporaryDirectory() as repo:
     check('the title', nightly.title(repo, sha) == f'Nightly 2026-10-15 ({sha[:7]})')
 
     files = ['ScarletNX-android-universal.apk', 'ScarletNX-linux-aarch64.AppImage', 'ScarletNX-linux-x86_64.AppImage']
-    text = nightly.notes(repo, sha, previous, 'owner/repo', files)
+    text = nightly.notes(repo, sha, previous, 'owner/repo', files, DOWNLOAD, 'Kept.')
     check(
         'the built commit is the first one the notes name, where the next nightly looks',
         re.search(r'[0-9a-f]{40}', text).group(0) == sha,
@@ -84,7 +87,7 @@ with tempfile.TemporaryDirectory() as repo:
         == ['ScarletNX-linux-x86_64.AppImage', 'ScarletNX-linux-aarch64.AppImage', 'ScarletNX-android-universal.apk'],
     )
     try:
-        nightly.notes(repo, sha, previous, 'owner/repo', files + ['ScarletNX-windows-arm64.zip'])
+        nightly.notes(repo, sha, previous, 'owner/repo', files + ['ScarletNX-windows-arm64.zip'], DOWNLOAD, 'Kept.')
         check('a file with no system stops the notes', False)
     except SystemExit as stop:
         check(
@@ -95,26 +98,23 @@ with tempfile.TemporaryDirectory() as repo:
     check('the source named', f'https://github.com/owner/repo/tree/{sha}' in text)
     check(
         'no changes section without a previous nightly',
-        '### Changes' not in nightly.notes(repo, sha, '', 'owner/repo', files),
-    )
-    check('the same commit built again', 'None: the same commit' in nightly.notes(repo, sha, sha, 'owner/repo', files))
-    # the files of another repository's release, and what becomes of it
-    kept = nightly.notes(
-        repo, sha, previous, 'owner/repo', files, 'https://github.com/owner/nightly/releases/download/t', 'Kept.'
+        '### Changes' not in nightly.notes(repo, sha, '', 'owner/repo', files, DOWNLOAD, 'Kept.'),
     )
     check(
-        "another release's files and fate",
-        '[ScarletNX-android-universal.apk](https://github.com/owner/nightly/releases/download/t/ScarletNX-android-universal.apk)'
-        in kept
-        and 'committed 2026-10-15. Kept.' in kept
-        and 'replaces it' not in kept,
+        'the same commit built again',
+        'None: the same commit' in nightly.notes(repo, sha, sha, 'owner/repo', files, DOWNLOAD, 'Kept.'),
+    )
+    check(
+        'the files linked from the release they are in, and what becomes of it',
+        f'[ScarletNX-android-universal.apk]({DOWNLOAD}/ScarletNX-android-universal.apk)' in text
+        and 'committed 2026-10-15. Kept.' in text,
     )
 
     # two more than the list holds, on top of the two above
     git('switch', '-q', 'main')
     for n in range(nightly.MOST_CHANGES + 2):
         git('commit', '-q', '--allow-empty', '-m', f'commit {n}')
-    many = nightly.notes(repo, git('rev-parse', 'HEAD'), previous, 'owner/repo', files)
+    many = nightly.notes(repo, git('rev-parse', 'HEAD'), previous, 'owner/repo', files, DOWNLOAD, 'Kept.')
     listed = many.split('### Changes')[1].split('### Source')[0].count('\n- ')
     check('a long list cut, the rest counted', listed == nightly.MOST_CHANGES + 1 and '- and 4 more' in many)
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-"""Publish a Build run's packages as releases of the nightly repository, and say so on Discord.
+"""Publish a Build run's packages as releases, and say so on Discord.
 
     scripts/publish-builds.py plan --repo OWNER/REPO --to OWNER/NIGHTLY
     scripts/publish-builds.py publish --repo OWNER/REPO --to OWNER/NIGHTLY --kind nightly|pr --run ID --sha SHA
@@ -9,18 +9,19 @@
 
 plan follows the event GitHub Actions ran it for (GITHUB_EVENT_NAME, GITHUB_EVENT_PATH), and writes to GITHUB_OUTPUT
 the run whose artifacts publish takes (kind, run, sha, short, pr), when there is one to publish:
-- a Build run that ended (workflow_run): a push to main that built everywhere becomes the nightly release
-  nightly-<date>-<commit>, the latest, and only the newest N nightlies stay; a pull request's run becomes the
-  prerelease pr-<number>, its files and notes replaced at each push;
+- a Build run that ended (workflow_run): a push to main that built everywhere becomes NIGHTLY's release
+  nightly-<date>-<commit>, the latest there, only the newest N nightlies staying, and REPO's prerelease "nightly" a link
+  to it; a pull request's run becomes NIGHTLY's prerelease pr-<number>, its files and notes replaced at each push;
 - a pull request closed (pull_request_target): its prerelease and tag are deleted;
 - a fork's pull request is published only once someone of the team (write, maintain or admin) labels it LABEL after
   its last push, which a new push takes off (synchronize). The label put on a finished run publishes it at once.
 Nothing is built: the files come from the run's artifacts, which the workflow downloads into DIR between the two (one
-folder each, as actions/download-artifact puts them), and no code of the pull request runs.
+folder each, as actions/download-artifact puts them), and no code of the pull request runs. Each file is named
+ScarletNX-<system>-<arch> (scripts/nightly-notes.py), an AppImage with the .zsync AppImageUpdate reads beside it.
 
 Discord: each nightly gets a message on DISCORD_WEBHOOK_NIGHTLY's channel, each pull request one message on
 DISCORD_WEBHOOK_PRS's, edited at each push and when it closes (its id is kept in the prerelease's notes). Without a
-webhook nothing is posted, and the run says so. gh reads REPO with GH_TOKEN and writes NIGHTLY with NIGHTLY_TOKEN.
+webhook nothing is posted, and the run says so. gh reads and writes REPO with GH_TOKEN, and NIGHTLY with NIGHTLY_TOKEN.
 --dry-run reads and prints each write instead. .github/workflows/publish.yml runs this; tests/publish_builds_test.py
 runs it against a fake gh and a fake Discord.
 """
@@ -48,6 +49,7 @@ SERVER = nightly_notes.SERVER
 LABEL = 'publish builds'
 TEAM = {'admin', 'maintain', 'write'}
 DISCORD = re.compile(r'<!-- discord-message: (\d+) -->')
+ROLLING = 'nightly'
 # A run's artifacts, by the commit's first 7 digits: the release file each gives, ScarletNX-<system>-<arch>
 ARTIFACTS = {
     'ScarletNX-linux-x86_64-{short}.AppImage': 'ScarletNX-linux-x86_64.AppImage',
@@ -61,25 +63,28 @@ SCARLET = 0xB0102A
 class Publisher:
     def __init__(self, args):
         self.repo, self.to, self.dry = args.repo, args.to, args.dry_run
-        self.checkout, self.keep = getattr(args, 'checkout', '.'), getattr(args, 'keep', 30)
-        self.artifacts = Path(args.artifacts) if getattr(args, 'artifacts', None) else None
-        self.read_token = os.environ.get('GH_TOKEN', '')
-        self.write_token = os.environ.get('NIGHTLY_TOKEN', '')
+        self.checkout, self.keep = args.checkout, args.keep
+        self.artifacts = Path(args.artifacts) if args.artifacts else None
+        self.tokens = {self.repo: os.environ.get('GH_TOKEN', ''), self.to: os.environ.get('NIGHTLY_TOKEN', '')}
         self.work = Path(tempfile.mkdtemp(prefix='publish-builds-'))
         self.output = {}
 
-    # ---- GitHub, through gh: REPO read with GH_TOKEN, the nightly repository written with NIGHTLY_TOKEN
-    def gh(self, args, token, data=None, write=False):
+    # ---- GitHub, through gh: REPO with GH_TOKEN, the nightly repository with NIGHTLY_TOKEN
+    def token(self, repo):
+        if repo == self.to and not self.tokens[repo] and not self.dry:
+            raise RuntimeError(f'NIGHTLY_TOKEN is not set: nothing can be written in {self.to}')
+        return self.tokens[repo]
+
+    def gh(self, args, repo, data=None, write=False):
         if write and self.dry:
             print('would run: gh', ' '.join(args), json.dumps(data) if data is not None else '')
             return {}
-        env = dict(os.environ, GH_TOKEN=token)
         run = subprocess.run(
             ['gh', *args],
             input=json.dumps(data) if data is not None else None,
             capture_output=True,
             text=True,
-            env=env,
+            env=dict(os.environ, GH_TOKEN=self.token(repo)),
             check=False,
         )
         if run.returncode:
@@ -87,69 +92,54 @@ class Publisher:
         return json.loads(run.stdout) if run.stdout.strip() else {}
 
     def read(self, path):
-        return self.gh(['api', path], self.read_token)
+        return self.gh(['api', path], self.repo)
 
-    def pages(self, path, token):
+    def pages(self, path, repo):
         """every item of a listing, 100 a page"""
         items, page = [], 1
         while True:
             sep = '&' if '?' in path else '?'
-            got = self.gh(['api', f'{path}{sep}per_page=100&page={page}'], token)
+            got = self.gh(['api', f'{path}{sep}per_page=100&page={page}'], repo)
             got = got.get('artifacts', got.get('workflow_runs', got)) if isinstance(got, dict) else got
             items += got
             if len(got) < 100:
                 return items
             page += 1
 
-    def nightly_token(self):
-        if not self.write_token and not self.dry:
-            raise RuntimeError(f'NIGHTLY_TOKEN is not set: nothing can be written in {self.to}')
-        return self.write_token
+    def write(self, repo, method, path, data=None):
+        args = ['api', '-X', method, path, *(['--input', '-'] if data is not None else [])]
+        return self.gh(args, repo, data, write=True)
 
-    def write(self, method, path, data=None):
-        self.nightly_token()
-        return self.gh(
-            ['api', '-X', method, path, *(['--input', '-'] if data is not None else [])],
-            self.write_token,
-            data,
-            write=True,
-        )
+    # ---- releases, of REPO or of the nightly repository
+    def releases(self, repo):
+        return self.pages(f'repos/{repo}/releases', repo)
 
-    # ---- the nightly repository's releases
-    def releases(self):
-        return self.pages(f'repos/{self.to}/releases', self.nightly_token())
+    def release(self, repo, tag):
+        return next((r for r in self.releases(repo) if r['tag_name'] == tag), None)
 
-    def release(self, tag):
-        return next((r for r in self.releases() if r['tag_name'] == tag), None)
-
-    def put_release(self, tag, name, body, prerelease, files):
-        """the release of tag with these notes and exactly these files, made or replaced; it and whether it is new"""
-        existing = self.release(tag)
-        fields = {
-            'name': name,
-            'body': body,
-            'prerelease': prerelease,
-            'make_latest': 'false' if prerelease else 'true',
-        }
+    def put_release(self, repo, tag, name, body, prerelease, files):
+        """the release of tag with these notes and exactly these files (each name to its path), made or replaced; it
+        and whether it is new"""
+        existing = self.release(repo, tag)
+        fields = {'name': name, 'body': body, 'prerelease': prerelease, 'make_latest': str(not prerelease).lower()}
         if existing:
-            made = self.write('PATCH', f'repos/{self.to}/releases/{existing["id"]}', fields) or existing
+            made = self.write(repo, 'PATCH', f'repos/{repo}/releases/{existing["id"]}', fields) or existing
         else:
-            made = self.write('POST', f'repos/{self.to}/releases', dict(fields, tag_name=tag))
+            fields = dict(fields, tag_name=tag)
+            made = self.write(repo, 'POST', f'repos/{repo}/releases', fields)
         if files:
             self.gh(
-                ['release', 'upload', tag, *map(str, files.values()), '--repo', self.to, '--clobber'],
-                self.write_token,
-                write=True,
+                ['release', 'upload', tag, *map(str, files.values()), '--repo', repo, '--clobber'], repo, write=True
             )
         for asset in (existing or {}).get('assets', []):
             if asset['name'] not in files:  # a file this run did not build: the old one would pass for it
-                self.write('DELETE', f'repos/{self.to}/releases/assets/{asset["id"]}')
+                self.write(repo, 'DELETE', f'repos/{repo}/releases/assets/{asset["id"]}')
         return made, existing is None
 
-    def drop_release(self, release):
-        self.write('DELETE', f'repos/{self.to}/releases/{release["id"]}')
+    def drop_release(self, repo, release):
+        self.write(repo, 'DELETE', f'repos/{repo}/releases/{release["id"]}')
         try:
-            self.write('DELETE', f'repos/{self.to}/git/refs/tags/{release["tag_name"]}')
+            self.write(repo, 'DELETE', f'repos/{repo}/git/refs/tags/{release["tag_name"]}')
         except RuntimeError as error:
             if 'Reference does not exist' not in str(error):
                 raise
@@ -157,15 +147,16 @@ class Publisher:
 
     # ---- a run's packages
     def packages(self, sha):
-        """the release files the run's artifacts give, by name, and the systems it gave none for"""
-        files, missing = {}, []
+        """the release files the run's artifacts give, by name, the files to upload with them (an AppImage's .zsync),
+        and the systems it gave none for"""
+        files, uploads, missing = {}, {}, []
         for pattern, name in ARTIFACTS.items():
             folder = self.artifacts / pattern.format(short=sha[:7])
             if not folder.is_dir() or not any(folder.iterdir()):
                 missing.append(nightly_notes.SYSTEMS[name])
                 continue
-            if name.endswith('.zip'):  # the Windows build is a folder: zipped as the nightly zips it
-                path = self.work / name
+            path = self.work / name
+            if name.endswith('.zip'):  # the Windows build is a folder: zipped as it is
                 with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
                     for item in sorted(folder.rglob('*')):
                         if item.is_file():
@@ -174,10 +165,21 @@ class Publisher:
                 found = sorted(folder.rglob(name if name.endswith('.AppImage') else '*.apk'))
                 if len(found) != 1:
                     raise RuntimeError(f'{folder.name} holds {len(found)} of {name}, not one')
-                path = self.work / name
                 shutil.copyfile(found[0], path)
-            files[name] = path
-        return files, missing
+            files[name] = uploads[name] = path
+            if name.endswith('.AppImage'):
+                zsync = folder / f'{name}.zsync'
+                if not zsync.is_file():
+                    raise RuntimeError(f'{folder.name} has no {zsync.name}, which AppImageUpdate reads')
+                uploads[zsync.name] = self.work / zsync.name
+                shutil.copyfile(zsync, uploads[zsync.name])
+        return files, uploads, missing
+
+    def complete(self, run, sha):
+        files, uploads, missing = self.packages(sha)
+        if missing:
+            raise RuntimeError(f'run {run} built everywhere, yet has no package for {"; ".join(missing)}')
+        return files, uploads
 
     # ---- Discord
     def discord(self, kind, embed, message=None):
@@ -217,52 +219,74 @@ class Publisher:
                 return message
         return message
 
+    def changes(self, previous, sha):
+        """the first changes as Discord lines"""
+        items = nightly_notes.changes(self.checkout, previous, sha) or []
+        lines = [f'- {item}' for item in items[:10]] + ([f'- and {len(items) - 10} more'] if len(items) > 10 else [])
+        return '\n'.join(lines) or f'Built from {sha[:7]}.'
+
+    def older(self, sha, previous):
+        """sha is an ancestor of previous, a newer commit already published"""
+        if not previous or previous == sha:
+            return False
+        command = ['git', '-C', self.checkout, 'merge-base', '--is-ancestor', sha, previous]
+        return subprocess.run(command, capture_output=True, check=False).returncode == 0
+
     # ---- what each event publishes
     def nightly(self, run, sha):
-        files, missing = self.packages(sha)
-        if missing:
-            raise RuntimeError(f'run {run} built everywhere, yet has no package for {"; ".join(missing)}')
+        files, uploads = self.complete(run, sha)
         date = nightly_notes.git(self.checkout, 'log', '-1', '--format=%cs', sha).strip()
         tag = f'nightly-{date}-{sha[:7]}'
         older = sorted(
-            (r for r in self.releases() if r['tag_name'].startswith('nightly-') and r['tag_name'] != tag),
+            (r for r in self.releases(self.to) if r['tag_name'].startswith('nightly-') and r['tag_name'] != tag),
             key=lambda r: r['created_at'],
             reverse=True,
         )
         previous = next((m.group(0) for r in older[:1] for m in [re.search(r'[0-9a-f]{40}', r['body'] or '')] if m), '')
-        # a run that ended after a newer commit's: that one stays the latest
-        if previous and previous != sha:
-            command = ['git', '-C', self.checkout, 'merge-base', '--is-ancestor', sha, previous]
-            if subprocess.run(command, capture_output=True, check=False).returncode == 0:
-                print(f'{sha[:7]} is older than the newest nightly, {previous[:7]}: not published')
-                return
+        if self.older(sha, previous):  # a run that ended after a newer commit's: that one stays the latest
+            print(f'{sha[:7]} is older than the newest nightly, {previous[:7]}: not published')
+            return
         kept = (
             f'This repository keeps the newest {self.keep} nightlies; [the latest]({SERVER}/{self.to}/releases/'
             'latest) is always the newest one.'
         )
-        body = nightly_notes.notes(
-            self.checkout, sha, previous, self.repo, list(files), f'{SERVER}/{self.to}/releases/download/{tag}', kept
-        )
+        download = f'{SERVER}/{self.to}/releases/download/{tag}'
+        body = nightly_notes.notes(self.checkout, sha, previous, self.repo, list(files), download, kept)
         title = nightly_notes.title(self.checkout, sha)
-        made, new = self.put_release(tag, title, body, False, files)
+        made, new = self.put_release(self.to, tag, title, body, False, uploads)
         for old in older[self.keep - 1 :]:
-            self.drop_release(old)
+            self.drop_release(self.to, old)
             print(f'deleted {old["tag_name"]}: past the newest {self.keep}')
         print(f'{"published" if new else "replaced the files of"} {tag}')
+        url = made.get('html_url', f'{SERVER}/{self.to}/releases/tag/{tag}')
+        self.point_rolling(title, url, sha)
         if new:  # a run again of the same commit is no news
-            items = nightly_notes.changes(self.checkout, previous, sha) or []
-            lines = [f'- {item}' for item in items[:10]] + (
-                [f'- and {len(items) - 10} more'] if len(items) > 10 else []
-            )
             self.discord(
-                'nightly',
-                {
-                    'title': title,
-                    'url': made.get('html_url', f'{SERVER}/{self.to}/releases/tag/{tag}'),
-                    'description': '\n'.join(lines) or f'Built from {sha[:7]}.',
-                    'color': SCARLET,
-                },
+                'nightly', {'title': title, 'url': url, 'description': self.changes(previous, sha), 'color': SCARLET}
             )
+
+    def point_rolling(self, title, url, sha):
+        """REPO's rolling prerelease ROLLING: no files, the link to the latest nightly, its tag on that commit"""
+        rolling = self.release(self.repo, ROLLING)
+        fields = {
+            'name': f'{title}, in {self.to}',
+            'body': (
+                f'The nightlies are in [{self.to}]({SERVER}/{self.to}/releases), the newest {self.keep} kept. The '
+                f'latest is [{title}]({url}), and {SERVER}/{self.to}/releases/latest always leads to the newest one.\n'
+            ),
+            'prerelease': True,
+            'make_latest': 'false',
+        }
+        if not rolling:
+            self.write(
+                self.repo, 'POST', f'repos/{self.repo}/releases', dict(fields, tag_name=ROLLING, target_commitish=sha)
+            )
+        else:
+            self.write(self.repo, 'PATCH', f'repos/{self.repo}/git/refs/tags/{ROLLING}', {'sha': sha, 'force': True})
+            self.write(self.repo, 'PATCH', f'repos/{self.repo}/releases/{rolling["id"]}', fields)
+            for asset in rolling.get('assets', []):
+                self.write(self.repo, 'DELETE', f'repos/{self.repo}/releases/assets/{asset["id"]}')
+        print(f'{self.repo} "{ROLLING}" links {title}')
 
     def pull_notes(self, pr, sha, files, missing, message):
         url = f'{SERVER}/{self.repo}'
@@ -289,54 +313,45 @@ class Publisher:
         if pr['head']['sha'] != sha:
             print(f'#{number} is at {pr["head"]["sha"][:7]} now: the builds of {sha[:7]} are not published')
             return
-        files, missing = self.packages(sha)
+        files, uploads, missing = self.packages(sha)
         if not files:
             print(f'#{number}: nothing of {sha[:7]} was built, so its builds stay as they were')
             return
         tag = f'pr-{number}'
-        existing = self.release(tag)
+        existing = self.release(self.to, tag)
         message = next(iter(DISCORD.findall((existing or {}).get('body') or '')), None)
         title = f'PR #{number}: {pr["title"]}'
-        made, new = self.put_release(tag, title, self.pull_notes(pr, sha, files, missing, message), True, files)
+        body = self.pull_notes(pr, sha, files, missing, message)
+        made, new = self.put_release(self.to, tag, title, body, True, uploads)
         print(f'{"published" if new else "replaced"} {tag} with the builds of {sha[:7]}')
-        url = made.get('html_url', f'{SERVER}/{self.to}/releases/tag/{tag}')
         said = f'by {pr["user"]["login"]}, at [`{sha[:7]}`]({SERVER}/{self.repo}/pull/{number}/commits/{sha})'
-        posted = self.discord(
-            'prs',
-            {
-                'title': title[:256],
-                'url': url,
-                'description': said + (f'\nNot built: {"; ".join(missing)}' if missing else ''),
-                'color': SCARLET,
-            },
-            message,
-        )
+        embed = {
+            'title': title[:256],
+            'url': made.get('html_url', f'{SERVER}/{self.to}/releases/tag/{tag}'),
+            'description': said + (f'\nNot built: {"; ".join(missing)}' if missing else ''),
+            'color': SCARLET,
+        }
+        posted = self.discord('prs', embed, message)
         if posted and posted != message:  # kept for the next push to edit it
-            self.write(
-                'PATCH',
-                f'repos/{self.to}/releases/{made.get("id")}',
-                {'body': self.pull_notes(pr, sha, files, missing, posted)},
-            )
+            body = self.pull_notes(pr, sha, files, missing, posted)
+            self.write(self.to, 'PATCH', f'repos/{self.to}/releases/{made.get("id")}', {'body': body})
 
     def closed(self, pr):
         tag = f'pr-{pr["number"]}'
-        release = self.release(tag)
+        release = self.release(self.to, tag)
         if not release:
             print(f'#{pr["number"]} closed: it had no builds in {self.to}')
             return
         message = next(iter(DISCORD.findall(release.get('body') or '')), None)
-        self.drop_release(release)
+        self.drop_release(self.to, release)
         print(f'deleted {tag}: #{pr["number"]} closed')
         if message:
-            self.discord(
-                'prs',
-                {
-                    'title': f'PR #{pr["number"]}: {pr["title"]}'[:256],
-                    'url': pr['html_url'],
-                    'description': f'{"Merged" if pr.get("merged") else "Closed"}: its builds are gone.',
-                },
-                message,
-            )
+            embed = {
+                'title': f'PR #{pr["number"]}: {pr["title"]}'[:256],
+                'url': pr['html_url'],
+                'description': f'{"Merged" if pr.get("merged") else "Closed"}: its builds are gone.',
+            }
+            self.discord('prs', embed, message)
 
     # ---- who may publish a fork's pull request
     def fork(self, pr):
@@ -346,7 +361,7 @@ class Publisher:
         """labeled LABEL by the team after since (when the run of its head began), and still labeled"""
         if LABEL not in {label['name'] for label in pr.get('labels', [])}:
             return False
-        events = self.pages(f'repos/{self.repo}/issues/{pr["number"]}/events', self.read_token)
+        events = self.pages(f'repos/{self.repo}/issues/{pr["number"]}/events', self.repo)
         for event in reversed(events):
             if event.get('event') != 'labeled' or event.get('label', {}).get('name') != LABEL:
                 continue
@@ -364,7 +379,7 @@ class Publisher:
 
     def pull_of(self, sha):
         """the open pull request whose head is sha"""
-        pulls = self.pages(f'repos/{self.repo}/pulls?state=open', self.read_token)
+        pulls = self.pages(f'repos/{self.repo}/pulls?state=open', self.repo)
         return next((pr for pr in pulls if pr['head']['sha'] == sha), None)
 
     def take(self, kind, run, pr=None):
@@ -406,19 +421,13 @@ class Publisher:
             self.closed(pr)
         elif action == 'synchronize' and self.fork(pr) and LABEL in {lb['name'] for lb in pr.get('labels', [])}:
             # what was let through was the push before: this one waits for the label again
-            label_path = urllib.parse.quote(LABEL)
-            self.gh(
-                ['api', '-X', 'DELETE', f'repos/{self.repo}/issues/{pr["number"]}/labels/{label_path}'],
-                self.read_token,
-                write=True,
-            )
+            path = f'repos/{self.repo}/issues/{pr["number"]}/labels/{urllib.parse.quote(LABEL)}'
+            self.gh(['api', '-X', 'DELETE', path], self.repo, write=True)
             print(f'took "{LABEL}" off #{pr["number"]}: a new push')
         elif action == 'labeled' and label == LABEL and self.fork(pr):
-            runs = self.pages(
-                f'repos/{self.repo}/actions/workflows/build.yml/runs?head_sha={pr["head"]["sha"]}', self.read_token
-            )
+            path = f'repos/{self.repo}/actions/workflows/build.yml/runs?head_sha={pr["head"]["sha"]}'
             done = sorted(
-                (r for r in runs if r['status'] == 'completed' and r['event'] == 'pull_request'),
+                (r for r in self.pages(path, self.repo) if r['status'] == 'completed' and r['event'] == 'pull_request'),
                 key=lambda r: r['created_at'],
             )
             if not done:

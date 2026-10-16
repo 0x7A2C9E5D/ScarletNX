@@ -2,12 +2,14 @@
 # Copyright 2026 the ScarletNX contributors
 name: Publish builds
 
-# The builds as releases of scarletnx/nightly, each said on Discord (scripts/publish-builds.py): every push to main that
-# builds everywhere a nightly, the newest 30 kept; every pull request a prerelease, pr-<number>, replaced at each push
-# and deleted when it closes. A fork's pull request only once someone of the team labels it "publish builds" after its
-# last push. Nothing of a pull request runs here: the files are its Build run's artifacts, and the checkout is main's.
-# The secrets: NIGHTLY_TOKEN may write scarletnx/nightly's contents; DISCORD_WEBHOOK_NIGHTLY and DISCORD_WEBHOOK_PRS
-# are the channels' webhooks (without one, nothing is posted there and the run says so)
+# The builds as releases, each said on Discord (scripts/publish-builds.py): every push to main that builds everywhere
+# a nightly of scarletnx/nightly, the newest 30 kept, which this repository's "nightly" prerelease links; every pull
+# request a prerelease there,
+# pr-<number>, replaced at each push and deleted when it closes. A fork's pull request only once someone of the team
+# labels it "publish builds" after its last push. Nothing of a pull request runs here: the files are its Build run's
+# artifacts, and the checkout is main's. The secrets: NIGHTLY_TOKEN may write scarletnx/nightly's contents;
+# DISCORD_WEBHOOK_NIGHTLY and DISCORD_WEBHOOK_PRS are the channels' webhooks (without one, nothing is posted there and
+# the run says so)
 on:
   workflow_run:
     workflows: [Build]
@@ -17,16 +19,17 @@ on:
     types: [closed, labeled, synchronize]
 
 permissions:
-  contents: read
+  contents: write # the "nightly" prerelease's link
   actions: read # the Build run's artifacts
   pull-requests: write # a fork's label, taken off at its push
 
-# One at a time for each nightly and each pull request: the nightlies are counted, and a pull request's message is
-# edited from the id its prerelease keeps. A group holds one waiting run, which a newer one replaces: the newer build
-# is the one to publish (a fork's pull request, which its run cannot name, goes by its commit)
+# One at a time for main's nightlies and for each pull request: the nightlies are counted, and a pull
+# request's message is edited from the id its prerelease keeps. A group holds one waiting run, which a newer one
+# replaces: the newer build is the one to publish (a fork's pull request, which its run cannot name, goes by its commit)
 concurrency:
   group: >-
-    publish-${{ github.event.workflow_run.event == 'push' && 'nightly' || github.event.pull_request.number ||
+    publish-${{ github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch ||
+    github.event.pull_request.number ||
     github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
 
 jobs:

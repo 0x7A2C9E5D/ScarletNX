@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 """scripts/publish-builds.py against a fake gh (a small GitHub kept in a JSON file) and a fake Discord (a local HTTP
-server): the nightly made, kept to the newest N and never one older than the latest; a pull request's prerelease
+server): the nightly made in the nightly repository, kept to the newest N, never one older than the latest, and linked
+from the repository's rolling prerelease; a pull request's prerelease
 replaced at each push and gone when it closes, its one Discord message edited; a fork's only once the team labels it
 after its last push; and the writes to the nightly repository made with its own token. Offline."""
 
@@ -17,6 +18,13 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / 'scripts' / 'publish-builds.py'
 REPO, TO = 'owner/repo', 'owner/nightly'
+FILES = [
+    'ScarletNX-linux-x86_64.AppImage',
+    'ScarletNX-linux-aarch64.AppImage',
+    'ScarletNX-windows-x86_64.zip',
+    'ScarletNX-android-universal.apk',
+]
+ZSYNC = ['ScarletNX-linux-x86_64.AppImage.zsync', 'ScarletNX-linux-aarch64.AppImage.zsync']
 failures = []
 
 
@@ -25,6 +33,7 @@ def check(what, ok, detail=''):
         failures.append(f'{what}{": " + str(detail) if detail else ""}')
 
 
+# releases and tags of each repository, under its name
 FAKE_GH = r"""#!/usr/bin/env python3
 import json, os, re, sys
 path = os.environ['FAKE_GH_STATE']
@@ -43,7 +52,8 @@ def stop(text):
     sys.exit(1)
 if args[:2] == ['release', 'upload']:
     end = args.index('--repo')
-    release = next((r for r in s['releases'] if r['tag_name'] == args[2]), None) or stop('release not found')
+    repo = args[end + 1]
+    release = next((r for r in s['releases'][repo] if r['tag_name'] == args[2]), None) or stop('release not found')
     for file in args[3:end]:
         name = os.path.basename(file)
         release['assets'] = [a for a in release['assets'] if a['name'] != name]
@@ -63,59 +73,61 @@ def listing(items):
     out(items[(page - 1) * per:page * per])
 m = re.fullmatch(r'repos/([^/]+/[^/]+)/(.*)', route)
 repo, rest = m.group(1), m.group(2)
-if repo == s['to']:
-    if rest == 'releases' and method == 'GET':
-        listing(sorted(s['releases'], key=lambda r: r['created_at'], reverse=True))
-    elif rest == 'releases' and method == 'POST':
-        s['next'] += 1
-        s['clock'] += 1
-        release = dict(data, id=s['next'], created_at=f'2026-11-01T{s["clock"]:08d}', assets=[],
-                       html_url=f'https://github.com/{repo}/releases/tag/{data["tag_name"]}')
-        s['releases'].append(release)
-        s['tags'].append(data['tag_name'])
-        save()
+releases, tags = s['releases'].setdefault(repo, []), s['tags'].setdefault(repo, {})
+if rest == 'releases' and method == 'GET':
+    listing(sorted(releases, key=lambda r: r['created_at'], reverse=True))
+elif rest == 'releases' and method == 'POST':
+    s['next'] += 1
+    s['clock'] += 1
+    release = dict(data, id=s['next'], created_at=f'2026-11-01T{s["clock"]:08d}', assets=[],
+                   html_url=f'https://github.com/{repo}/releases/tag/{data["tag_name"]}')
+    releases.append(release)
+    tags.setdefault(data['tag_name'], data.get('target_commitish', 'default-branch'))
+    save()
+    out(release)
+elif rest.startswith('releases/assets/') and method == 'DELETE':
+    number = int(rest.split('/')[-1])
+    for release in releases:
+        release['assets'] = [a for a in release['assets'] if a['id'] != number]
+    save()
+elif rest.startswith('releases/') and method in ('PATCH', 'DELETE'):
+    number = int(rest.split('/')[-1])
+    release = next((r for r in releases if r['id'] == number), None) or stop('no such release')
+    if method == 'DELETE':
+        releases.remove(release)
+    else:
+        release.update(data)
         out(release)
-    elif rest.startswith('releases/assets/') and method == 'DELETE':
-        number = int(rest.split('/')[-1])
-        for release in s['releases']:
-            release['assets'] = [a for a in release['assets'] if a['id'] != number]
-        save()
-    elif rest.startswith('releases/') and method in ('PATCH', 'DELETE'):
-        number = int(rest.split('/')[-1])
-        release = next((r for r in s['releases'] if r['id'] == number), None) or stop('no such release')
-        if method == 'DELETE':
-            s['releases'].remove(release)
-        else:
-            release.update(data)
-            out(release)
-        save()
-    elif rest.startswith('git/refs/tags/') and method == 'DELETE':
-        if rest[len('git/refs/tags/'):] not in s['tags']:
-            stop('gh: Reference does not exist (HTTP 422)')
-        s['tags'].remove(rest[len('git/refs/tags/'):])
-        save()
+    save()
+elif rest.startswith('git/refs/tags/') and method in ('DELETE', 'PATCH'):
+    tag = rest[len('git/refs/tags/'):]
+    if tag not in tags:
+        stop('gh: Reference does not exist (HTTP 422)')
+    if method == 'DELETE':
+        del tags[tag]
     else:
-        stop(f'fake gh: {method} {target}')
-elif repo == s['repo']:
-    if rest == 'pulls' and method == 'GET':
-        listing([p for p in s['pulls'] if p['state'] == 'open'])
-    elif re.fullmatch(r'pulls/\d+', rest):
-        out(next(p for p in s['pulls'] if p['number'] == int(rest.split('/')[1])))
-    elif re.fullmatch(r'issues/\d+/events', rest):
-        listing(s['events'].get(rest.split('/')[1], []))
-    elif re.fullmatch(r'issues/\d+/labels/.+', rest) and method == 'DELETE':
-        number, label = int(rest.split('/')[1]), rest.split('/', 3)[3].replace('%20', ' ')
-        pull = next(p for p in s['pulls'] if p['number'] == number)
-        pull['labels'] = [l for l in pull['labels'] if l['name'] != label]
-        save()
-    elif re.fullmatch(r'collaborators/[^/]+/permission', rest):
-        out({'permission': s['permissions'].get(rest.split('/')[1], 'read')})
-    elif rest == 'actions/workflows/build.yml/runs':
-        out({'workflow_runs': [r for r in s['runs'] if r['head_sha'] == query.get('head_sha')]})
-    else:
-        stop(f'fake gh: {method} {target}')
+        tags[tag] = data['sha']
+    save()
+elif rest.startswith('git/ref/tags/'):
+    tag = rest[len('git/ref/tags/'):]
+    out({'ref': f'refs/tags/{tag}', 'object': {'sha': tags[tag]}}) if tag in tags else stop('gh: Not Found (HTTP 404)')
+elif rest == 'pulls' and method == 'GET':
+    listing([p for p in s['pulls'] if p['state'] == 'open'])
+elif re.fullmatch(r'pulls/\d+', rest):
+    out(next(p for p in s['pulls'] if p['number'] == int(rest.split('/')[1])))
+elif re.fullmatch(r'issues/\d+/events', rest):
+    listing(s['events'].get(rest.split('/')[1], []))
+elif re.fullmatch(r'issues/\d+/labels/.+', rest) and method == 'DELETE':
+    number, label = int(rest.split('/')[1]), rest.split('/', 3)[3].replace('%20', ' ')
+    pull = next(p for p in s['pulls'] if p['number'] == number)
+    pull['labels'] = [l for l in pull['labels'] if l['name'] != label]
+    save()
+elif re.fullmatch(r'collaborators/[^/]+/permission', rest):
+    out({'permission': s['permissions'].get(rest.split('/')[1], 'read')})
+elif rest == 'actions/workflows/build.yml/runs':
+    out({'workflow_runs': [r for r in s['runs'] if r['head_sha'] == query.get('head_sha')]})
 else:
-    stop(f'fake gh: {repo}')
+    stop(f'fake gh: {method} {target}')
 """
 
 
@@ -156,6 +168,10 @@ class Discord(http.server.BaseHTTPRequestHandler):
         self.handle_one('PATCH')
 
 
+def posted(channel):
+    return [r for r in Discord.requests if f'token-{channel}' in r['path']]
+
+
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Discord)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 HOOK = f'http://127.0.0.1:{server.server_address[1]}/api/webhooks/1/token'
@@ -171,20 +187,8 @@ with tempfile.TemporaryDirectory() as temporary:
     def git(*args):
         env = dict(os.environ, GIT_COMMITTER_DATE='2026-10-15T12:00:00Z', GIT_AUTHOR_DATE='2026-10-15T12:00:00Z')
         return subprocess.run(
-            [
-                'git',
-                '-C',
-                str(checkout),
-                '-c',
-                'user.name=t',
-                '-c',
-                'user.email=t@t',
-                '-c',
-                'commit.gpgsign=false',
-                '-c',
-                'core.hooksPath=' + os.devnull,
-                *args,
-            ],
+            ['git', '-C', str(checkout), '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false']
+            + ['-c', 'core.hooksPath=' + os.devnull, *args],
             check=True,
             capture_output=True,
             text=True,
@@ -209,6 +213,15 @@ with tempfile.TemporaryDirectory() as temporary:
     def state():
         return json.loads(state_file.read_text())
 
+    def releases(repo=TO, s=None):
+        return (s or state())['releases'].get(repo, [])
+
+    def find(tag, repo=TO, s=None):
+        return next((r for r in releases(repo, s) if r['tag_name'] == tag), None)
+
+    def with_releases(repo, items):
+        return dict(state(), releases=dict(state()['releases'], **{repo: items}))
+
     def calls():
         return [json.loads(line) for line in log_file.read_text().splitlines()] if log_file.exists() else []
 
@@ -218,17 +231,20 @@ with tempfile.TemporaryDirectory() as temporary:
         made = {
             f'ScarletNX-linux-x86_64-{short}.AppImage': {
                 'ScarletNX-linux-x86_64.AppImage': 'elf x86',
-                'ScarletNX-linux-x86_64.AppImage.zsync': 'z',
+                'ScarletNX-linux-x86_64.AppImage.zsync': 'zsync x86',
                 'appinfo': 'i',
             },
-            f'ScarletNX-linux-aarch64-{short}.AppImage': {'ScarletNX-linux-aarch64.AppImage': 'elf arm'},
+            f'ScarletNX-linux-aarch64-{short}.AppImage': {
+                'ScarletNX-linux-aarch64.AppImage': 'elf arm',
+                'ScarletNX-linux-aarch64.AppImage.zsync': 'zsync arm',
+            },
             f'ScarletNX-windows-x86_64-{short}': {'bin/scarletnx.exe': 'MZ', 'share/licenses/LICENSE': 'GPL'},
             f'ScarletNX-android-universal-{short}.apk': {f'ScarletNX-android-universal-{short}.apk': 'PK apk'},
         }
         for artifact, files in made.items():
-            if any(artifact.startswith(s) for s in skip):
-                continue
             for file, text in files.items():
+                if any(part in f'{artifact}/{file}' for part in skip):
+                    continue
                 (folder / artifact / file).parent.mkdir(parents=True, exist_ok=True)
                 (folder / artifact / file).write_text(text)
         return folder
@@ -242,16 +258,19 @@ with tempfile.TemporaryDirectory() as temporary:
             PATH=f'{bin_dir}{os.pathsep}{os.environ["PATH"]}',
             FAKE_GH_STATE=str(state_file),
             FAKE_GH_LOG=str(log_file),
-            GH_TOKEN='read-token',
-            NIGHTLY_TOKEN='write-token',
+            GH_TOKEN='repo-token',
+            NIGHTLY_TOKEN='nightly-token',
             GITHUB_EVENT_NAME=name,
             GITHUB_EVENT_PATH=str(event_file),
             GITHUB_OUTPUT=str(output),
         )
-        env.pop('DISCORD_WEBHOOK_NIGHTLY', None)
-        env.pop('DISCORD_WEBHOOK_PRS', None)
+        for kind in ('NIGHTLY', 'PRS'):
+            env.pop(f'DISCORD_WEBHOOK_{kind}', None)
         if hooks:
-            env.update(DISCORD_WEBHOOK_NIGHTLY=f'{HOOK}-nightly', DISCORD_WEBHOOK_PRS=f'{HOOK}-prs?thread_id=55')
+            env.update(
+                DISCORD_WEBHOOK_NIGHTLY=f'{HOOK}-nightly',
+                DISCORD_WEBHOOK_PRS=f'{HOOK}-prs?thread_id=55',
+            )
         env.update(env_extra or {})
         done = subprocess.run(
             [sys.executable, str(SCRIPT), step, '--repo', REPO, '--to', TO, *extra],
@@ -287,19 +306,38 @@ with tempfile.TemporaryDirectory() as temporary:
             'prerelease': False,
         }
 
-    # ---- nightlies
+    def everything(commit, run_id='41'):
+        return ['--run', run_id, '--sha', commit, '--artifacts', str(artifacts('full', commit))]
+
+    def publish(kind, *extra, **options):
+        return run('publish', '--kind', kind, *extra, **options)[0]
+
+    # ---- nightlies: in the nightly repository, linked from the rolling prerelease
+    rolling = {
+        'id': 9,
+        'tag_name': 'nightly',
+        'name': 'Nightly',
+        'created_at': '2026-09-01',
+        'body': 'old',
+        'prerelease': True,
+        'assets': [{'id': 7, 'name': 'ScarletNX-x86_64.AppImage', 'data': ''}],
+    }
     save_state(
         {
-            'repo': REPO,
-            'to': TO,
             'next': 100,
             'clock': 0,
             'pulls': [],
             'events': {},
             'permissions': {},
             'runs': [],
-            'tags': [f'nightly-2026-10-15-{oldest[:7]}', f'nightly-2026-10-15-{previous[:7]}'],
-            'releases': [nightly_release(oldest, '2026-10-01', 1), nightly_release(previous, '2026-10-02', 2)],
+            'tags': {
+                TO: {f'nightly-2026-10-15-{c[:7]}': 'x' for c in (oldest, previous)},
+                REPO: {'nightly': oldest},
+            },
+            'releases': {
+                TO: [nightly_release(oldest, '2026-10-01', 1), nightly_release(previous, '2026-10-02', 2)],
+                REPO: [rolling],
+            },
         }
     )
     done, planned = run('plan', event=push_run(sha, number=41))
@@ -308,47 +346,26 @@ with tempfile.TemporaryDirectory() as temporary:
         planned == {'kind': 'nightly', 'run': '41', 'sha': sha, 'short': sha[:7], 'pr': ''},
         planned,
     )
-    for event, why in ((push_run(sha, 'failure'), 'a failed run'), (push_run(sha, branch='dev'), 'another branch')):
+    for event, why in (
+        (push_run(sha, 'failure'), 'a failed run'),
+        (push_run(sha, branch='dev'), 'another branch'),
+    ):
         done, planned = run('plan', event=event)
         check(f'{why} is not planned', not planned and done.returncode == 0, done.stdout + done.stderr)
-    folder = artifacts('full', sha)
     log_file.unlink(missing_ok=True)
-    done, _ = run(
-        'publish',
-        '--kind',
-        'nightly',
-        '--run',
-        '41',
-        '--sha',
-        sha,
-        '--artifacts',
-        str(folder),
-        '--checkout',
-        str(checkout),
-        '--keep',
-        '2',
-    )
+    done = publish('nightly', *everything(sha), '--checkout', str(checkout), '--keep', '2')
     check('the nightly publishes', done.returncode == 0, done.stdout + done.stderr)
     s = state()
     tag = f'nightly-2026-10-15-{sha[:7]}'
-    made = next((r for r in s['releases'] if r['tag_name'] == tag), None)
+    made = find(tag, s=s)
     check(
         'the release made, the latest, not a prerelease',
         made and made['make_latest'] == 'true' and not made['prerelease'],
         made,
     )
     check(
-        'its four files',
-        made
-        and sorted(a['name'] for a in made['assets'])
-        == sorted(
-            [
-                'ScarletNX-linux-x86_64.AppImage',
-                'ScarletNX-linux-aarch64.AppImage',
-                'ScarletNX-windows-x86_64.zip',
-                'ScarletNX-android-universal.apk',
-            ]
-        ),
+        "its four files, and the AppImages' .zsync",
+        made and sorted(a['name'] for a in made['assets']) == sorted(FILES + ZSYNC),
         made and made['assets'],
     )
     check(
@@ -357,117 +374,90 @@ with tempfile.TemporaryDirectory() as temporary:
         and f'https://github.com/{TO}/releases/download/{tag}/ScarletNX-android-universal.apk' in made['body']
         and '- [ci] its title (#5)' in made['body']
         and f'https://github.com/{REPO}/tree/{sha}' in made['body']
-        and 'newest 2 nightlies' in made['body'],
+        and 'newest 2 nightlies' in made['body']
+        and 'zsync' not in made['body'],
         made and made['body'],
     )
+    archive = next((a['data'] for a in made['assets'] if a['name'].endswith('.zip')), '') if made else ''
+    check('the Windows build zipped from its folder', archive.startswith('PK') and 'bin/scarletnx.exe' in archive)
     check(
         'only the newest 2 kept, the oldest and its tag gone',
-        sorted(r['tag_name'] for r in s['releases']) == sorted([tag, f'nightly-2026-10-15-{previous[:7]}'])
-        and f'nightly-2026-10-15-{oldest[:7]}' not in s['tags'],
-        s['tags'],
+        sorted(r['tag_name'] for r in releases(s=s)) == sorted([tag, f'nightly-2026-10-15-{previous[:7]}'])
+        and f'nightly-2026-10-15-{oldest[:7]}' not in s['tags'][TO],
+        s['tags'][TO],
     )
-    writes = [c for c in calls() if '-X' in c['args'] or c['args'][:1] == ['release']]
+    linked = find('nightly', REPO, s)
     check(
-        'every write to the nightly repository with its token',
-        writes and all(c['token'] == 'write-token' for c in writes),
+        'the rolling prerelease: no files, a link to the latest, its tag moved there',
+        linked
+        and not linked['assets']
+        and linked['prerelease']
+        and f'https://github.com/{TO}/releases/tag/{tag}' in linked['body']
+        and s['tags'][REPO]['nightly'] == sha,
+        linked,
+    )
+    writes = [c for c in calls() if '-X' in c['args'] or c['args'][0] == 'release']
+    to_writes = [c for c in writes if TO in ' '.join(c['args'])]
+    repo_writes = [c for c in writes if REPO in ' '.join(c['args'])]
+    check(
+        'the nightly repository written with its token, the repository with its own',
+        to_writes
+        and repo_writes
+        and all(c['token'] == 'nightly-token' for c in to_writes)
+        and all(c['token'] == 'repo-token' for c in repo_writes),
         writes,
     )
-    posted = [r for r in Discord.requests if r['path'].startswith('/api/webhooks/1/token-nightly')]
+    sent = posted('nightly')
     check(
         'one Discord message on the nightly channel, its title and changes',
-        len(posted) == 1
-        and posted[0]['method'] == 'POST'
-        and posted[0]['path'].endswith('?wait=true')
-        and posted[0]['body']['embeds'][0]['title'] == f'Nightly 2026-10-15 ({sha[:7]})'
-        and '[ci] its title (#5)' in posted[0]['body']['embeds'][0]['description']
-        and posted[0]['agent'].startswith('DiscordBot'),
-        posted,
-    )
-    archive = next((a['data'] for a in made['assets'] if a['name'].endswith('.zip')), '') if made else ''
-    check(
-        'the Windows build zipped from its folder', archive.startswith('PK') and 'bin/scarletnx.exe' in archive, archive
+        len(sent) == 1
+        and sent[0]['method'] == 'POST'
+        and sent[0]['path'].endswith('?wait=true')
+        and sent[0]['body']['embeds'][0]['title'] == f'Nightly 2026-10-15 ({sha[:7]})'
+        and '[ci] its title (#5)' in sent[0]['body']['embeds'][0]['description']
+        and sent[0]['agent'].startswith('DiscordBot'),
+        sent,
     )
     # the run again: the files replaced, no news
-    done, _ = run(
-        'publish',
-        '--kind',
-        'nightly',
-        '--run',
-        '41',
-        '--sha',
-        sha,
-        '--artifacts',
-        str(folder),
-        '--checkout',
-        str(checkout),
-        '--keep',
-        '2',
-    )
+    done = publish('nightly', *everything(sha), '--checkout', str(checkout), '--keep', '2')
     check(
         'a run again replaces, posts nothing more',
-        done.returncode == 0
-        and len([r for r in Discord.requests if 'nightly' in r['path']]) == 1
-        and len(state()['releases']) == 2,
+        done.returncode == 0 and len(posted('nightly')) == 1 and len(releases()) == 2,
         done.stdout + done.stderr,
     )
     # a run of an older commit ending last: not published over the newest
-    done, _ = run(
-        'publish',
-        '--kind',
-        'nightly',
-        '--run',
-        '40',
-        '--sha',
-        oldest,
-        '--artifacts',
-        str(artifacts('old', oldest)),
-        '--checkout',
-        str(checkout),
-    )
+    older_files = ['--run', '40', '--sha', oldest, '--artifacts', str(artifacts('old', oldest))]
+    done = publish('nightly', *older_files, '--checkout', str(checkout))
     check(
         'an older commit is not published',
         done.returncode == 0
         and 'older than the newest nightly' in done.stdout
-        and all(oldest[:7] not in r['tag_name'] for r in state()['releases']),
+        and all(oldest[:7] not in r['tag_name'] for r in releases()),
         done.stdout + done.stderr,
     )
-    # a nightly without one of its packages stops, saying which
-    done, _ = run(
-        'publish',
-        '--kind',
-        'nightly',
-        '--run',
-        '42',
-        '--sha',
-        sha,
-        '--artifacts',
-        str(artifacts('part', sha, skip=('ScarletNX-windows',))),
-        '--checkout',
-        str(checkout),
-    )
-    check('a nightly missing a package stops', done.returncode != 0 and 'Windows, x86-64' in done.stderr, done.stderr)
+    # a nightly without one of its packages, or an AppImage without its .zsync, stops, saying which
+    for skip, said in (('ScarletNX-windows', 'Windows, x86-64'), ('AppImage.zsync', 'has no ScarletNX-linux')):
+        partial = ['--run', '42', '--sha', sha, '--artifacts', str(artifacts(f'part-{len(skip)}', sha, (skip,)))]
+        done = publish('nightly', *partial, '--checkout', str(checkout))
+        check(f'a nightly missing {skip} stops', done.returncode != 0 and said in done.stderr, done.stderr)
     # dry run: reads only
     log_file.unlink(missing_ok=True)
-    save_state(dict(state(), releases=[r for r in state()['releases'] if r['tag_name'] != tag]))
-    done, _ = run(
-        'publish',
-        '--kind',
-        'nightly',
-        '--run',
-        '41',
-        '--sha',
-        sha,
-        '--artifacts',
-        str(folder),
-        '--checkout',
-        str(checkout),
-        '--dry-run',
-    )
+    save_state(with_releases(TO, [r for r in releases() if r['tag_name'] != tag]))
+    done = publish('nightly', *everything(sha), '--checkout', str(checkout), '--dry-run')
     check(
         '--dry-run writes nothing',
         done.returncode == 0
         and not any('-X' in c['args'] or c['args'][0] == 'release' for c in calls())
         and 'would run: gh api -X POST' in done.stdout,
+        done.stdout + done.stderr,
+    )
+    # no rolling prerelease yet: made, on the commit
+    save_state(with_releases(REPO, []))
+    done = publish('nightly', *everything(sha), '--checkout', str(checkout))
+    linked = find('nightly', REPO)
+    check(
+        'a rolling prerelease made when there is none',
+        done.returncode == 0 and linked and linked['target_commitish'] == sha and linked['prerelease'],
         done.stdout + done.stderr,
     )
 
@@ -496,30 +486,26 @@ with tempfile.TemporaryDirectory() as temporary:
             'head_repository': {'full_name': REPO},
         }
 
+    def pr_files(head, name, run_id, skip=()):
+        return ['--run', run_id, '--sha', head, '--pr', '7', '--artifacts', str(artifacts(name, head, skip))]
+
     head1, head2 = 'a' * 40, 'b' * 40
     save_state(dict(state(), pulls=[pull(7, head1)]))
     done, planned = run('plan', event={'workflow_run': pr_run(head1)})
     check('a pull request run is planned', planned.get('kind') == 'pr' and planned.get('pr') == '7', planned)
-    done, _ = run(
-        'publish',
-        '--kind',
-        'pr',
-        '--run',
-        '50',
-        '--sha',
-        head1,
-        '--pr',
-        '7',
-        '--artifacts',
-        str(artifacts('pr1', head1, skip=('ScarletNX-windows',))),
-    )
-    s = state()
-    pre = next((r for r in s['releases'] if r['tag_name'] == 'pr-7'), None)
-    check('its prerelease, never the latest', pre and pre['prerelease'] and pre['make_latest'] == 'false', pre)
+    done = publish('pr', *pr_files(head1, 'pr1-part', '50', ('ScarletNX-windows',)))
+    pre = find('pr-7')
     check(
-        'what was not built said', pre and 'Not built: Windows, x86-64.' in pre['body'] and len(pre['assets']) == 3, pre
+        'its prerelease, never the latest, titled PR #N',
+        pre and pre['prerelease'] and pre['make_latest'] == 'false' and pre['name'] == 'PR #7: Fix it @everyone',
+        pre,
     )
-    prs = [r for r in Discord.requests if '-prs' in r['path']]
+    check(
+        'what was not built said',
+        pre and 'Not built: Windows, x86-64.' in pre['body'] and len(pre['assets']) == 5,
+        pre,
+    )
+    prs = posted('prs')
     check(
         'one message on the pull requests channel, in its thread, no one pinged',
         len(prs) == 1
@@ -532,24 +518,12 @@ with tempfile.TemporaryDirectory() as temporary:
     check("the message's id kept in the notes", pre and f'<!-- discord-message: {message} -->' in pre['body'], pre)
     # a push: the same prerelease, all four now, the message edited
     save_state(dict(state(), pulls=[pull(7, head2)]))
-    done, _ = run(
-        'publish',
-        '--kind',
-        'pr',
-        '--run',
-        '51',
-        '--sha',
-        head2,
-        '--pr',
-        '7',
-        '--artifacts',
-        str(artifacts('pr2', head2)),
-    )
-    pre = next((r for r in state()['releases'] if r['tag_name'] == 'pr-7'), None)
-    prs = [r for r in Discord.requests if '-prs' in r['path']]
+    done = publish('pr', *pr_files(head2, 'pr2', '51'))
+    pre = find('pr-7')
+    prs = posted('prs')
     check(
         'the push replaces it',
-        pre and len(pre['assets']) == 4 and head2[:7] in pre['body'] and 'Not built' not in pre['body'],
+        pre and len(pre['assets']) == 6 and head2[:7] in pre['body'] and 'Not built' not in pre['body'],
         pre,
     )
     check(
@@ -558,41 +532,16 @@ with tempfile.TemporaryDirectory() as temporary:
         prs,
     )
     # the run of the push before, ending last
-    done, _ = run(
-        'publish',
-        '--kind',
-        'pr',
-        '--run',
-        '50',
-        '--sha',
-        head1,
-        '--pr',
-        '7',
-        '--artifacts',
-        str(artifacts('pr1', head1)),
-    )
+    done = publish('pr', *pr_files(head1, 'pr1', '50'))
     check(
         "an older push's builds are not published",
-        'are not published' in done.stdout
-        and head2[:7] in next(r for r in state()['releases'] if r['tag_name'] == 'pr-7')['body'],
+        'are not published' in done.stdout and head2[:7] in find('pr-7')['body'],
         done.stdout,
     )
     # a message deleted on Discord: a new one, its id kept
     Discord.messages.pop(message)
-    done, _ = run(
-        'publish',
-        '--kind',
-        'pr',
-        '--run',
-        '51',
-        '--sha',
-        head2,
-        '--pr',
-        '7',
-        '--artifacts',
-        str(artifacts('pr2', head2)),
-    )
-    pre = next(r for r in state()['releases'] if r['tag_name'] == 'pr-7')
+    done = publish('pr', *pr_files(head2, 'pr2', '51'))
+    pre = find('pr-7')
     check(
         'a deleted message is posted again',
         f'<!-- discord-message: {Discord.next_id[0]} -->' in pre['body'] and str(Discord.next_id[0]) != message,
@@ -604,10 +553,10 @@ with tempfile.TemporaryDirectory() as temporary:
     s = state()
     check(
         'closed: its prerelease and tag gone',
-        'pr-7' not in s['tags'] and all(r['tag_name'] != 'pr-7' for r in s['releases']) and not planned,
+        'pr-7' not in s['tags'][TO] and not find('pr-7', s=s) and not planned,
         done.stdout + done.stderr,
     )
-    last = [r for r in Discord.requests if '-prs' in r['path']][-1]
+    last = posted('prs')[-1]
     check(
         'its message edited: merged',
         last['method'] == 'PATCH' and last['body']['embeds'][0]['description'].startswith('Merged'),
@@ -635,13 +584,8 @@ with tempfile.TemporaryDirectory() as temporary:
         save_state(dict(base, pulls=[pull(9, fork_head, True, ['publish builds'])], events={'9': [labeled(who, at)]}))
         done, planned = run('plan', event={'workflow_run': pr_run(fork_head, 60)})
         check(f'a label {why} lets nothing through', not planned, done.stdout)
-    save_state(
-        dict(
-            base,
-            pulls=[pull(9, fork_head, True, ['publish builds'])],
-            events={'9': [labeled('bob', '2026-10-16T11:00:00Z')]},
-        )
-    )
+    approved = [labeled('bob', '2026-10-16T11:00:00Z')]
+    save_state(dict(base, pulls=[pull(9, fork_head, True, ['publish builds'])], events={'9': approved}))
     done, planned = run('plan', event={'workflow_run': pr_run(fork_head, 60)})
     check("the team's label after the push lets it through", planned.get('pr') == '9', done.stdout + done.stderr)
     event = {
@@ -654,7 +598,9 @@ with tempfile.TemporaryDirectory() as temporary:
     save_state(dict(state(), runs=[]))
     done, planned = run('plan', name='pull_request_target', event=event)
     check(
-        'the label put while it builds waits for the run', not planned and 'has not ended' in done.stdout, done.stdout
+        'the label put while it builds waits for the run',
+        not planned and 'has not ended' in done.stdout,
+        done.stdout,
     )
     log_file.unlink(missing_ok=True)
     done, planned = run('plan', name='pull_request_target', event=dict(event, action='synchronize'))
@@ -662,7 +608,7 @@ with tempfile.TemporaryDirectory() as temporary:
     check(
         "a fork's push takes the label off, with the repository's token",
         took
-        and took[0]['token'] == 'read-token'
+        and took[0]['token'] == 'repo-token'
         and took[0]['args'][3].endswith('/labels/publish%20builds')
         and not state()['pulls'][0]['labels'],
         took,
@@ -683,25 +629,11 @@ with tempfile.TemporaryDirectory() as temporary:
 
     # ---- no webhook: published, and said
     save_state(dict(state(), pulls=[pull(8, head1)]))
-    done, _ = run(
-        'publish',
-        '--kind',
-        'pr',
-        '--run',
-        '52',
-        '--sha',
-        head1,
-        '--pr',
-        '8',
-        '--artifacts',
-        str(artifacts('pr1', head1)),
-        hooks=False,
-    )
+    unhooked = ['--run', '52', '--sha', head1, '--pr', '8', '--artifacts', str(artifacts('pr1', head1))]
+    done = publish('pr', *unhooked, hooks=False)
     check(
         'without a webhook it publishes and says nothing was posted',
-        done.returncode == 0
-        and '::notice::No DISCORD_WEBHOOK_PRS' in done.stdout
-        and any(r['tag_name'] == 'pr-8' for r in state()['releases']),
+        done.returncode == 0 and '::notice::No DISCORD_WEBHOOK_PRS' in done.stdout and find('pr-8'),
         done.stdout + done.stderr,
     )
 

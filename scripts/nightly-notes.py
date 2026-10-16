@@ -1,25 +1,20 @@
-#!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-"""Write the nightly release's title and notes: which file is for which system, what changed since the previous
-nightly, and where the source is, which the GPL asks for beside the binaries.
+"""A nightly's title and notes: which file is for which system, what changed since the previous nightly, and where the
+source is, which the GPL asks for beside the binaries. scripts/publish-builds.py takes them for the nightlies of the
+nightly repository, and the table and the source for a pull request's builds.
 
-    scripts/nightly-notes.py SHA [PREVIOUS] --repo OWNER/REPO --files NAME... [--checkout DIR]
-    scripts/nightly-notes.py SHA --title [--checkout DIR]
-
-SHA is the commit built and PREVIOUS the one the nightly it replaces was built from: the changes come from the
-checkout's history between them, and are left out without PREVIOUS or when it is not an ancestor of SHA. The notes
-link SHA first, which is where the next nightly finds it. .github/workflows/build.yml's release job runs this, and
-scripts/publish-builds.py takes its notes for the nightlies it keeps in another repository.
+The changes are the checkout's history from the commit the previous nightly was built from to the one built, left out
+without it or when it is not an ancestor. The notes link the built commit first, which is where the next nightly finds
+it.
 """
 
-import argparse
 import re
 import subprocess
 
 SERVER = 'https://github.com'
 # The release's files in the order the table lists them, with what each is for, named ScarletNX-<system>-<arch>. A
-# file the release job uploads that is missing here stops the notes (the files are out by then): add its line
+# file a release gets that is missing here stops the notes: add its line
 SYSTEMS = {
     'ScarletNX-linux-x86_64.AppImage': 'Linux, x86-64',
     'ScarletNX-linux-aarch64.AppImage': 'Linux, ARM64',
@@ -89,12 +84,12 @@ def source(tree):
     ]
 
 
-def notes(checkout, sha, previous, repo, files, download=None, kept='Each push to main replaces it.'):
-    """download: where the release's files are, this repository's nightly by default; kept: what becomes of it"""
+def notes(checkout, sha, previous, repo, files, download, kept):
+    """download: where the release's files are; kept: what becomes of the release"""
     url = f'{SERVER}/{repo}'
     date = git(checkout, 'log', '-1', '--format=%cs', sha).strip()
     lines = [f'Built from [`{sha[:7]}`]({url}/commit/{sha}), committed {date}. {kept}', '']
-    lines += table(files, download or f'{url}/releases/download/nightly')
+    lines += table(files, download)
     lines += [
         '',
         f'How to run them: [USAGE.md]({url}/blob/{sha}/docs/USAGE.md), and '
@@ -112,24 +107,3 @@ def notes(checkout, sha, previous, repo, files, download=None, kept='Each push t
             lines.append(f'- and {len(items) - MOST_CHANGES} more')
     lines += ['', *source(f'{url}/tree/{sha}')]
     return '\n'.join(lines) + '\n'
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    parser.add_argument('sha')
-    parser.add_argument('previous', nargs='?', default='')
-    parser.add_argument('--repo')
-    parser.add_argument('--files', nargs='+', default=[])
-    parser.add_argument('--checkout', default='.')
-    parser.add_argument('--title', action='store_true', help="print the release's title only")
-    args = parser.parse_args()
-    if args.title:
-        print(title(args.checkout, args.sha))
-    else:
-        if not args.repo:
-            parser.error('--repo is needed for the notes')
-        print(notes(args.checkout, args.sha, args.previous, args.repo, args.files), end='')
-
-
-if __name__ == '__main__':
-    main()

@@ -8,7 +8,8 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Jobs only read the repository; the release job asks for more on its own
+# Jobs only read the repository. A push to main that builds everywhere becomes a nightly, and a pull request's run a
+# prerelease, in scarletnx/nightly: publish.yml does it once this workflow ends
 permissions:
   contents: read
 
@@ -701,86 +702,3 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
         run: scripts/pr-builds.sh "$GITHUB_REPOSITORY" "$PR" "$GITHUB_RUN_ID" "$SHA"
-
-  # Every push to main that builds everywhere replaces the rolling "nightly" prerelease with Linux (x86-64 and
-  # AArch64), Windows and Android builds.
-  # A newer push cancels a release still running, so an older commit never publishes last
-  release:
-    name: Nightly release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [linux, appimage, windows, appimage-check, windows-check, android-apk]
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    concurrency:
-      group: nightly-release
-      cancel-in-progress: true
-    permissions:
-      contents: write
-    steps:
-      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
-      - name: Name the commit
-        id: commit
-        shell: bash
-        env:
-          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
-      # The history the notes list changes from, beside the files the release takes from the workspace
-      - uses: actions/checkout@v7
-        with:
-          path: source
-          fetch-depth: 0
-      # Read before the action below deletes that release: its notes link the commit it was built from first
-      - name: Find the commit of the nightly this one replaces
-        id: previous
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          body=$(gh release view nightly --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)
-          echo "sha=$(grep -o -m1 -E '[0-9a-f]{40}' <<<"$body" | head -n1)" >> "$GITHUB_OUTPUT"
-      # Both AppImages beside one appinfo (the same name and version), where the action takes *.AppImage*
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: ScarletNX-linux-*-${{ steps.commit.outputs.short }}.AppImage
-          merge-multiple: true
-      - name: Release the AppImages
-        uses: pkgforge-dev/make-nightly-appimage-release@17cbe90fc0796286e424619a54a82a3a880efe4c # v1.1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download the Windows build
-        uses: actions/download-artifact@v8
-        with:
-          name: ScarletNX-windows-x86_64-${{ steps.commit.outputs.short }}
-          path: windows
-      - name: Package the Windows nightly
-        run: |
-          cd windows
-          zip -r ../ScarletNX-windows-x86_64.zip .
-      - name: Publish the Windows nightly
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload nightly ScarletNX-windows-x86_64.zip --repo "$GITHUB_REPOSITORY" --clobber
-      # Under a fixed name in the release, as the zip, so a link to it keeps working
-      - name: Download the Android APK
-        uses: actions/download-artifact@v8
-        with:
-          name: ScarletNX-android-universal-${{ steps.commit.outputs.short }}.apk
-          path: android
-      - name: Publish the Android nightly
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          cp android/ScarletNX-android-universal-${{ steps.commit.outputs.short }}.apk ScarletNX-android-universal.apk
-          gh release upload nightly ScarletNX-android-universal.apk --repo "$GITHUB_REPOSITORY" --clobber
-      # The title the action gives the release, with a number for the time, is replaced by the commit's date and hash.
-      # The notes say which file is for which system, what changed since the previous nightly and where the source
-      # is, which the GPL asks for beside the binaries (scripts/nightly-notes.py). A new file in the release needs its
-      # line in that script's SYSTEMS, or this step stops and names it
-      - name: Write the title and the notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PREVIOUS: ${{ steps.previous.outputs.sha }}
-        run: |
-          python3 source/scripts/nightly-notes.py "$GITHUB_SHA" "$PREVIOUS" --checkout source --repo "$GITHUB_REPOSITORY" \
-            --files ScarletNX-*.AppImage ScarletNX-windows-x86_64.zip ScarletNX-android-universal.apk > notes.md
-          gh release edit nightly --repo "$GITHUB_REPOSITORY" --notes-file notes.md \
-            --title "$(python3 source/scripts/nightly-notes.py "$GITHUB_SHA" --checkout source --title)"
