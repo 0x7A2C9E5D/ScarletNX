@@ -290,21 +290,15 @@ void gui_process_terminate(GuiProcess* process) {
     if (!process) return;
     if (process->pid) {
         /* Freeze the session before killing it, so a compiler cannot fork a new
-           worker between enumeration and cleanup. Repeat for a concurrent fork. */
-        for (int pass = 0; pass < 3; ++pass) {
+           worker between enumeration and cleanup. Three passes for a concurrent fork, then the kill. */
+        for (int pass = 0; pass < 4; ++pass) {
             size_t count;
             Sample* samples = snapshot(&count);
             if (samples)
                 for (size_t i = 0; i < count; ++i)
-                    if (samples[i].session == process->pid) kill(samples[i].pid, SIGSTOP);
+                    if (samples[i].session == process->pid) kill(samples[i].pid, pass < 3 ? SIGSTOP : SIGKILL);
             free(samples);
         }
-        size_t count;
-        Sample* samples = snapshot(&count);
-        if (samples)
-            for (size_t i = 0; i < count; ++i)
-                if (samples[i].session == process->pid) kill(samples[i].pid, SIGKILL);
-        free(samples);
         if (!process->exited) kill(process->pid, SIGKILL);
     }
 }
