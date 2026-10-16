@@ -7,12 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int feed(GuiBanner* banner, const char* text) { return gui_banner_feed(banner, text, strlen(text)); }
-
 int main(void) {
     GuiMenu menu = {0};
     GuiMenu themed, ring;
-    GuiBanner banner;
     GuiConfirm confirm = {0};
     gui_menu_key(&menu, GUI_LEFT);
     assert(menu.selected == GUI_EXIT);
@@ -322,16 +319,6 @@ int main(void) {
     assert(!gui_confirm_key(&confirm, GUI_UP) && confirm.selected == GUI_CONFIRM_ABORT);
     assert(gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown);
     assert(!gui_confirm_key(&confirm, GUI_SELECT)); /* answered: nothing more to abort */
-
-    /* the runner's banner, at the start of a line, split across reads or not */
-    gui_banner_reset(&banner);
-    assert(!feed(&banner, "Recompiling x\nnot ScarletNX - x\nScarletNX"));
-    assert(feed(&banner, " - x\n") && banner.seen);
-    gui_banner_reset(&banner);
-    assert(feed(&banner, "ScarletNX - first line"));
-    gui_banner_reset(&banner);
-    assert(!feed(&banner, "ScarletNX -x\n\nScarletNX  - x") && !banner.seen);
-    assert(feed(&banner, "\n\nScarletNX - y"));
     puts("GUI menu, bounded console, UTF-8 and file drops passed");
     return 0;
 }

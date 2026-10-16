@@ -75,14 +75,6 @@ void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_byte
 /* how many columns a line over columns too many has slid at ms, a column every step_ms: it waits at each end */
 int gui_slide(int over, uint64_t ms, uint32_t step_ms);
 
-/* The runner's banner, "ScarletNX - <name>" at the start of a line: the recompile is over, the game is loading */
-typedef struct {
-    size_t matched;
-    int seen;
-} GuiBanner;
-void gui_banner_reset(GuiBanner* banner);
-int gui_banner_feed(GuiBanner* banner, const char* data, size_t size);
-
 typedef struct {
     size_t count, page, page_size, selected; /* focus: selected == 0 is Back on every page */
     size_t active;                           /* absolute file index, preserved across page changes and resizing */

@@ -38,6 +38,8 @@ void gui_steps_feed(GuiSteps* steps, const char* data, size_t size, uint64_t now
 void gui_steps_finish(GuiSteps* steps, int ok);
 /* how far the recompile is, 0 to 100; 100 once the game launches; -1 before anything says */
 int gui_steps_percent(const GuiSteps* steps);
+/* the latest step of label, NULL for none: LAUNCH, the runner's banner, says the game is loading */
+const GuiStep* gui_steps_last(const GuiSteps* steps, const char* label);
 /* the latest max notes of a step, oldest first, into out; their count */
 int gui_step_notes(const GuiSteps* steps, const GuiStep* step, const GuiNote** out, int max);
 #endif

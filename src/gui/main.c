@@ -47,7 +47,6 @@ typedef struct {
     GuiUsage usage;
     GuiTheme theme;
     GuiThemes themes;
-    GuiBanner banner;
     GuiSteps steps;
     GuiRecent recent;
     char* recent_file; /* where the recent games are kept; NULL keeps none */
@@ -312,7 +311,7 @@ static void entry(App* app, int x, int y, const char* label, int activated, int 
 }
 static GuiScreen screen(const App* app) {
     if (app->menu.running || app->finished)
-        return app->native || app->banner.seen ? GUI_SCREEN_LOADING : GUI_SCREEN_COMPILING;
+        return app->native || gui_steps_last(&app->steps, "LAUNCH") ? GUI_SCREEN_LOADING : GUI_SCREEN_COMPILING;
     return app->menu.view == GUI_LOAD_GAMES  ? GUI_SCREEN_GAMES
            : app->menu.view == GUI_LOAD_KEYS ? GUI_SCREEN_KEYS
                                              : GUI_SCREEN_MENU;
@@ -487,26 +486,18 @@ static const char* dots(const App* app) {
 }
 /* the game's name as the run knows it: the runner's banner, else the file's own, in capitals */
 static void run_name(const App* app, char* out, size_t size) {
-    int i;
     const char* q;
     size_t n;
     const char* dot;
-    const char* name = app->file ? app->file : "";
-    int from_file = 1;
-    for (i = 0; i < app->steps.count; ++i)
-        if (!strcmp(app->steps.step[i].label, "LAUNCH")) {
-            name = app->steps.step[i].detail;
-            from_file = false;
-        }
+    const GuiStep* launch = gui_steps_last(&app->steps, "LAUNCH");
+    const char* name = launch ? launch->detail : app->file ? app->file : "";
     for (q = name; *q; ++q)
         if (*q == '/' || *q == '\\') name = q + 1;
     n = 0;
-    dot = from_file ? strrchr(name, '.') : NULL;
+    dot = launch ? NULL : strrchr(name, '.');
     for (q = name; *q && q != dot && n + 1 < size; ++q) out[n++] = *q >= 'a' && *q <= 'z' ? (char)(*q - 32) : *q;
     out[n] = 0;
 }
-/* a run as a loading screen: the title, the name and the ring; the steps typed down the page, their status last;
-   the progress bar and its percentage */
 /* a step's line: its label, its detail in capitals and its status */
 static size_t step_runs(const GuiStep* s, char run[3][112], size_t length[3]) {
     char* q;
@@ -987,7 +978,7 @@ static void render_preview(App* app) {
     app->menu.view = GUI_LOAD_NONE;
     app->menu.running = run;
     app->finished = app->aborting = app->abnormal_exit = app->confirm.shown = false;
-    app->native = app->banner.seen = 0;
+    app->native = 0;
     app->entering_ms = app->leaving_ms = 0;
     app->fade_ms = run ? app->preview_since : 0; /* a run fades in from black, as after the menu */
     app->message[0] = 0;
@@ -1169,14 +1160,10 @@ static void render(App* app) {
 }
 /* the game's name as its run gave it, from the step that names it, for its recent game */
 static void recent_name(App* app, const char* label) {
-    int i;
-    if (!app->recent_file || app->recent_named || !app->file) return;
-    for (i = app->steps.count - 1; i >= 0; --i)
-        if (!strcmp(app->steps.step[i].label, label) && app->steps.step[i].detail[0]) {
-            app->recent_named = 1;
-            if (gui_recent_rename(&app->recent, app->file, app->steps.step[i].detail)) recent_changed(app);
-            return;
-        }
+    const GuiStep* named = gui_steps_last(&app->steps, label);
+    if (!app->recent_file || app->recent_named || !app->file || !named || !named->detail[0]) return;
+    app->recent_named = 1;
+    if (gui_recent_rename(&app->recent, app->file, named->detail)) recent_changed(app);
 }
 /* back to the menu from a finished run, which fades in */
 static void leave_run(App* app) {
@@ -1222,15 +1209,11 @@ static int play(App* app, const char* game) {
 }
 /* the game a run of the driver made ready: there the driver names it, as it cannot open it; whether it opened */
 static int ready(App* app) {
-    int i, ok;
-    for (i = app->steps.count - 1; i >= 0; --i)
-        if (!strcmp(app->steps.step[i].label, "READY")) {
-            char* game = snx_path_join(app->games_dir, app->steps.step[i].detail);
-            ok = play(app, game);
-            free(game);
-            return ok;
-        }
-    return 0;
+    const GuiStep* made = gui_steps_last(&app->steps, "READY");
+    char* game = made ? snx_path_join(app->games_dir, made->detail) : NULL;
+    int ok = game && play(app, game);
+    free(game);
+    return ok;
 }
 /* the run in its notification: the game, the step on the screen and the percent, as they change, a second apart at
    most (Android drops notifications that come faster) */
@@ -1263,7 +1246,6 @@ static void pump(App* app) {
             if (n <= 0) break;
             if (app->run_out) fwrite(buffer, 1, (size_t)n, app->run_out);
             gui_console_feed(&app->console, buffer, (size_t)n);
-            gui_banner_feed(&app->banner, buffer, (size_t)n);
             gui_steps_feed(&app->steps, buffer, (size_t)n, now_ms(app));
             app->has_output = true;
         }
@@ -1391,7 +1373,6 @@ static void launch(App* app, char* absolute, bool prepared) {
         for (k = 0; app->run_out && k < n; ++k) fprintf(app->run_out, "%s%s", k ? " " : "$ ", argv[k]);
         if (app->run_out) fputc('\n', app->run_out);
     }
-    gui_banner_reset(&app->banner);
     gui_steps_reset(&app->steps);
     app->native = native;
     /* the menu fades out, then the run fades in */

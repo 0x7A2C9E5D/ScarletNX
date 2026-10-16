@@ -525,7 +525,7 @@ int main(int argc, char** argv) {
     event(&app, &e);
     assert(app.menu.running && app.menu.selected == GUI_SWITCH);
     finish(&app, 0);
-    assert(!app.native && !app.banner.seen); /* a driver that started no game stayed compiling */
+    assert(!app.native && !gui_steps_last(&app.steps, "LAUNCH")); /* a driver that started no game stayed compiling */
     /* a menu that is no runtime's (a build without one) looks for scarletnx beside it, then on PATH */
     {
         char* own = app.self;
@@ -570,7 +570,7 @@ int main(int argc, char** argv) {
     app.menu.gdbstub = true;
     launch(&app, snx_strdup(flags_input), false);
     finish(&app, 0);
-    assert(!app.native && app.banner.seen);
+    assert(!app.native && gui_steps_last(&app.steps, "LAUNCH"));
     app.menu.gccjit = app.menu.gdbstub = false;
     app.menu.selected = GUI_LINUX;
     free(flags_input);

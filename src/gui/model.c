@@ -417,19 +417,3 @@ char* gui_document_path(const char* uri) {
     free(id);
     return path;
 }
-
-static const char banner_text[] = "\nScarletNX - ";
-void gui_banner_reset(GuiBanner* banner) {
-    banner->matched = 1; /* the output starts at the start of a line */
-    banner->seen = 0;
-}
-int gui_banner_feed(GuiBanner* banner, const char* data, size_t size) {
-    size_t i;
-    for (i = 0; i < size && !banner->seen; ++i) {
-        if (data[i] == banner_text[banner->matched]) {
-            if (++banner->matched == sizeof banner_text - 1) banner->seen = 1;
-        } else
-            banner->matched = data[i] == '\n' ? 1 : 0; /* only a newline starts the text again */
-    }
-    return banner->seen;
-}
