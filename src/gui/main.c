@@ -18,6 +18,7 @@
 #include "common/utilities/window_icon.h"
 #include "common/utilities/build_info.h"
 #include "gui/recent.h"
+#include "gui/clean.h"
 #include "gui/settings.h"
 #include "common/utilities/pad_sdl.h"
 #include "common/utilities/pad_screen.h"
@@ -128,6 +129,9 @@ typedef struct {
     GuiThemeKey group_keys[GUI_GROUPS_MAX];
     char group_about[GUI_GROUPS_MAX][128];
     GuiAppForm app_form;
+    bool clean_armed;   /* App's Clean old settings selected once, saying what it would do: again does it */
+    GuiCleaned cleaned; /* what it did, in a box over the screen while cleaned_shown, until a key closes it */
+    bool cleaned_shown;
     char* folders[GUI_FOLDERS_MAX]; /* the player's game folders, listed after games/ */
     int folder_count;
     char* folders_file; /* where they are kept; NULL keeps none */
@@ -408,11 +412,11 @@ static void next_theme(App* app, int step) {
         gui_theme_load(&app->theme, dirs, 2, app->themes.ids[(i + app->themes.count + step) % app->themes.count]);
 }
 /* Settings > App's picks, kept at once in app_file for the next start. The App's note, or the menu's message, says when
-   they could not be */
-static void app_save(App* app) {
+   they could not be; 0, else nonzero */
+static int app_save(App* app) {
     char text[256], *dir, *staged;
     int n, failed;
-    if (!app->app_file) return;
+    if (!app->app_file) return 0;
     n = snprintf(text, sizeof text, "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\n",
                  app->theme.id);
     if (app->menu.text_size)
@@ -433,18 +437,19 @@ static void app_save(App* app) {
                  app->app_file);
     free(dir);
     free(staged);
+    return failed;
 }
 static void layout(App* app);
-/* what app_save kept, as the menu opens. A value it does not know, or a theme no longer there, leaves what the menu has
-   and the message names it */
-static void app_load(App* app) {
-    size_t size = 0, i;
-    char *text = app->app_file ? (char*)snx_read_file(app->app_file, &size) : NULL, *key, *value, bad[384];
+/* what app_save kept, read: applied as the menu opens (apply), else only looked at. A value the menu does not know, or a
+   theme no longer there, leaves what the menu has, named in bad as key = value; how many */
+static int app_read(App* app, bool apply, char* bad, size_t size) {
+    size_t bytes = 0, i;
+    char *text = app->app_file ? (char*)snx_read_file(app->app_file, &bytes) : NULL, *key, *value;
     const char* const* dirs = (const char* const*)app->themes_dirs;
-    int scale = app->menu.text_size, n = 0;
+    int scale = app->menu.text_size, n = 0, count = 0;
     SnxIni ini;
-    if (!text) return;
-    bad[0] = 0;
+    if (size) bad[0] = 0;
+    if (!text) return 0;
     snx_ini_start(&ini, text);
     while (snx_ini_next(&ini, &key, &value)) {
         char* end = NULL;
@@ -453,7 +458,7 @@ static void app_load(App* app) {
             gui_themes_scan(&app->themes, dirs, 2);
             for (i = 0; i < app->themes.count && strcmp(app->themes.ids[i], value); ++i) {}
             if (i < app->themes.count) {
-                gui_theme_load(&app->theme, dirs, 2, value);
+                if (apply) gui_theme_load(&app->theme, dirs, 2, value);
                 continue;
             }
         } else if (!strcmp(ini.section, "app") && !strcmp(key, "text_size")) {
@@ -466,17 +471,24 @@ static void app_load(App* app) {
                 continue;
             }
         }
-        if (n) n += snprintf(bad + n, sizeof bad - (size_t)n, ", ");
-        if (n < (int)sizeof bad && strcmp(ini.section, "app")) /* a key outside [app] says where it is */
-            n += snprintf(bad + n, sizeof bad - (size_t)n, "[%s] ", ini.section);
-        if (n < (int)sizeof bad) n += snprintf(bad + n, sizeof bad - (size_t)n, "%s = %s", key, value);
-        if (n >= (int)sizeof bad) n = (int)sizeof bad - 1;
+        ++count;
+        if (n) n += snprintf(bad + n, size - (size_t)n, ", ");
+        if (n < (int)size && strcmp(ini.section, "app")) /* a key outside [app] says where it is */
+            n += snprintf(bad + n, size - (size_t)n, "[%s] ", ini.section);
+        if (n < (int)size) n += snprintf(bad + n, size - (size_t)n, "%s = %s", key, value);
+        if (n >= (int)size) n = (int)size - 1;
     }
     free(text);
-    if (scale != app->menu.text_size) {
+    if (apply && scale != app->menu.text_size) {
         app->menu.text_size = scale;
         layout(app);
     }
+    return count;
+}
+/* app.ini as the menu opens, what it does not take named in the message */
+static void app_load(App* app) {
+    char bad[384];
+    app_read(app, true, bad, sizeof bad);
     if (bad[0]) {
         size_t m = strlen(app->message);
         snprintf(app->message + m, sizeof app->message - m, "%sNot used from %s: %s", m ? " " : "", app->app_file, bad);
@@ -1013,42 +1025,69 @@ static int wrap_rows(const char* s, int width, int path) {
         for (s += wrap_at(s, width, path); *s == ' ';) ++s;
     return SDL_max(rows, 1);
 }
-/* the files an older version left, over the menu: each where it is (-) and where this one would keep it (->), as many
-   as fit, how many more, and OK, focused: any key closes it */
-static void render_left(App* app) {
-    char old[4200], now[4200], label[64];
-    const char* at;
-    int width, height, cols, room, used = 0, shown, i, y, s = app->scale, item = item_h(app), more;
+/* a box of files over the screen, two lines each, as many as fit, how many more, then OK, focused: the files an older
+   version left (report 0), each where it is (-) and where this one keeps it (->); or what Clean old settings did (1),
+   each file and what was done to it or why not. Any key closes it */
+/* the file at: its two lines, their colours, whether the second is a path; the next file, NULL after the last */
+static const char* files_entry(const App* app, int report, const char* at, char* a, char* b, size_t size, SDL_Color* ca,
+                               SDL_Color* cb, int* path) {
+    SDL_Color failure = rgb(app->theme.failure), ink = rgb(app->theme.ink);
+    const char* next;
+    bool ok;
+    if (!report) {
+        left_paths(at, a, b, size);
+        *ca = failure;
+        *cb = ink;
+        *path = 1;
+        next = strchr(at, '\n') + 1;
+        return *next ? next : NULL;
+    }
+    next = gui_cleaned_entry(at, &ok, a, b, size);
+    *ca = ok ? ink : failure;
+    *cb = ok ? rgb(app->theme.soft) : failure;
+    *path = 0;
+    return next;
+}
+static void render_files(App* app, int report) {
+    char a[4400], b[4400], label[96];
+    const char *first = report ? app->cleaned.text : app->left, *at = first;
+    int width, height, cols, room, used = 0, shown, i, y, path, s = app->scale, item = item_h(app);
+    int count = report ? app->cleaned.count : app->lefts, done = app->cleaned.done;
+    SDL_Color ca, cb;
     GuiRect r, text;
     GuiList ok;
-    SDL_Color failure = rgb(app->theme.failure), ink = rgb(app->theme.ink);
     area(app, &width, &height);
     cols = width / cell_w(app) - 6;
     room = (height - head_h(app) - item - 24 * s) / cell_h(app) - 2; /* the files' rows, and one for how many more */
-    for (shown = 0, at = app->left; shown < app->lefts; ++shown, at = strchr(at, '\n') + 1) {
+    for (shown = 0; at && shown < count; ++shown) {
         int need;
-        left_paths(at, old, now, sizeof old);
-        need = wrap_rows(old, cols - 2, 1) + wrap_rows(now, cols - 3, 1);
+        at = files_entry(app, report, at, a, b, sizeof a, &ca, &cb, &path);
+        need = wrap_rows(a, cols - 2, 1) + wrap_rows(b, cols - 3, path);
         if (shown && used + need > room) break;
         used += need;
     }
-    more = app->lefts - shown;
-    r = over_rect(app, cols, head_h(app) + (used + (more > 0)) * cell_h(app) + item + 16 * s);
-    y = over_box(app, r, SAY_LEFT_TITLE) + 2 * s;
+    r = over_rect(app, cols, head_h(app) + (used + (shown < count)) * cell_h(app) + item + 16 * s);
+    if (!report)
+        snprintf(label, sizeof label, "%s", SAY_LEFT_TITLE);
+    else if (count > done)
+        snprintf(label, sizeof label, "Clean old settings: %d done, %d not", done, count - done);
+    else
+        snprintf(label, sizeof label, "Clean old settings: %d done", done);
+    y = over_box(app, r, label) + 2 * s;
     text = inner(app, r);
-    for (i = 0, at = app->left; i < shown; ++i, at = strchr(at, '\n') + 1) {
-        left_paths(at, old, now, sizeof old);
-        text_in(app, text, text.x, y, "-", failure);
-        y += wrap_in(app, text, text.x + 2 * cell_w(app), y, old, 1, failure) * cell_h(app);
-        text_in(app, text, text.x, y, "->", ink);
-        y += wrap_in(app, text, text.x + 3 * cell_w(app), y, now, 1, ink) * cell_h(app);
+    for (i = 0, at = first; at && i < shown; ++i) {
+        at = files_entry(app, report, at, a, b, sizeof a, &ca, &cb, &path);
+        text_in(app, text, text.x, y, "-", ca);
+        y += wrap_in(app, text, text.x + 2 * cell_w(app), y, a, 1, ca) * cell_h(app);
+        text_in(app, text, text.x, y, report ? "" : "->", cb);
+        y += wrap_in(app, text, text.x + (report ? 2 : 3) * cell_w(app), y, b, path, cb) * cell_h(app);
     }
-    if (more > 0) {
-        snprintf(label, sizeof label, "and %d more, which Share log lists", more);
+    if (shown < count) {
+        snprintf(label, sizeof label, "and %d more, which Share log lists", count - shown);
         text_in(app, text, text.x, y, label, rgb(app->theme.soft));
     }
     list_place(app, &ok, gui_rect(text.x, r.y + r.h - item - 6 * s, SDL_min(text.w, 26 * cell_w(app)), item), 1, 0);
-    snprintf(label, sizeof label, "%sOK, nothing is moved", app->theme.marker);
+    snprintf(label, sizeof label, "%s%s", app->theme.marker, report ? "OK" : "OK, nothing is moved");
     list_item(app, &ok, 0, label, true, false);
 }
 /* the question over a run or the menu: the question, its two choices as boxes, the one kept focused */
@@ -1714,7 +1753,7 @@ static void draw_screen(App* app) {
     else
         draw_menu(app);
     if (app->confirm.shown && (app->menu.running || app->confirm.exit)) render_ask(app);
-    if (idle && app->left_shown && app->lefts) render_left(app);
+    if (idle && app->left_shown && app->lefts) render_files(app, 0);
     overlay(app);
 }
 static const char* driver_name(int item) {
@@ -1937,8 +1976,10 @@ static const GuiThemeKey app_keys[] = {
     {"", "Theme editor", GUI_KEY_ACTION, 0, 0, NULL, 0,
      "This theme's keys with a preview, saved as themes/<name>/theme.ini"},
     {"", "Game folders", GUI_KEY_ACTION, offsetof(GuiAppForm, folders), sizeof(((GuiAppForm*)0)->folders), NULL, 0,
-     "Folders of games listed with games/"}};
-enum { GUI_APP_THEME, GUI_APP_TEXT, GUI_APP_EDITOR, GUI_APP_FOLDERS, GUI_APP_ROWS };
+     "Folders of games listed with games/"},
+    {"", "Clean old settings", GUI_KEY_ACTION, 0, 0, NULL, 0,
+     "The settings the runtime and the launcher no longer read: Enter twice"}};
+enum { GUI_APP_THEME, GUI_APP_TEXT, GUI_APP_EDITOR, GUI_APP_FOLDERS, GUI_APP_CLEAN, GUI_APP_ROWS };
 static void app_values(App* app) {
     GuiAppForm* f = &app->app_form;
     snprintf(f->theme, sizeof f->theme, "%s", app->theme.name);
@@ -2190,6 +2231,7 @@ static void leave_form(App* app) {
         open_app(app, GUI_APP_EDITOR);
     }
 }
+static void clean_row(App* app);
 /* the App's rows: the theme and the letters go round, either way, and the editor opens */
 static void app_action(App* app, int row, int step) {
     if (row == GUI_APP_THEME)
@@ -2202,6 +2244,9 @@ static void app_action(App* app, int row, int step) {
         return;
     } else if (row == GUI_APP_FOLDERS && !step) {
         open_folders(app, 0);
+        return;
+    } else if (row == GUI_APP_CLEAN) {
+        if (!step) clean_row(app);
         return;
     }
     if (row == GUI_APP_THEME || row == GUI_APP_TEXT) app_save(app);
@@ -2493,6 +2538,9 @@ static void editor_key(App* app, GuiKey key) {
         }
         return;
     }
+    if (app->form == GUI_FORM_APP &&
+        !(what == GUI_EDITOR_ACTION && app->editor.row == GUI_APP_CLEAN && !app->editor.step))
+        app->clean_armed = false; /* another key between the two Enters */
     if (what == GUI_EDITOR_ACTION && app->form == GUI_FORM_APP) {
         app_action(app, app->editor.row, app->editor.step);
         return;
@@ -2929,6 +2977,7 @@ static void render(App* app) {
         draw_form(app);
     else
         draw_screen(app);
+    if (app->cleaned_shown) render_files(app, 1); /* over the menu, or the App's rows it was started from */
     SDL_RenderPresent(app->renderer);
 }
 /* the game's name as its run gave it, from the step that names it, for its recent game */
@@ -3072,6 +3121,83 @@ static void left_behind(App* app) {
     free(folder);
     free(data);
 #endif
+}
+/* ---- Clean old settings (clean.c): [Deprecated] out of each game's .ini the menu reaches, and the keys the menu's own
+   files hold that nothing reads ---- */
+/* the folders a game's .ini can be in: the config folder's games/ (an installed build's), games/, the player's; each
+   once. How many, each in out to free */
+static int ini_folders(const App* app, char** out) {
+    int n = 0, i, j, k;
+    char* config = app->games_dir ? snx_user_path(app->games_dir, SNX_USER_CONFIG) : NULL;
+    const char* listed[GUI_FOLDERS_MAX + 2];
+    listed[n++] = config;
+    listed[n++] = app->games_dir;
+    for (i = 0; i < app->folder_count; ++i) listed[n++] = app->folders[i];
+    for (i = 0, k = 0; i < n; ++i) {
+        int seen = !listed[i];
+        for (j = 0; j < k && !seen; ++j) seen = !strcmp(out[j], listed[i]);
+        if (!seen) out[k++] = snx_strdup(listed[i]);
+    }
+    free(config);
+    return k;
+}
+/* settings.ini's keys no row takes, while the runtime has listed its settings: without them every key of the
+   runtime's would look old */
+static int settings_unread(App* app, char* out, size_t size) {
+    GuiSettings* s;
+    if (size) out[0] = 0;
+    if (!app->settings_file || !snx_is_file(app->settings_file)) return 0;
+    s = settings_of(app);
+    return s->count > GUI_SETTINGS_OWN ? gui_settings_unread(s, app->settings_file, out, size) : 0;
+}
+/* the .ini files with a [Deprecated] section; with done, each written again without it */
+static int clean_inis(App* app, GuiCleaned* done) {
+    char* folders[GUI_FOLDERS_MAX + 2];
+    int n = ini_folders(app, folders), i, found = 0;
+    for (i = 0; i < n; ++i) {
+        found += gui_clean_inis(done, folders[i]);
+        free(folders[i]);
+    }
+    return found;
+}
+/* a file of the menu's own without the unread keys, written again by save (0, else nonzero), an entry */
+static void clean_keys(App* app, const char* file, const char* unread, int failed) {
+    char what[1100];
+    snprintf(what, sizeof what, "%s %s", failed ? "Not written without" : "Took out", unread);
+    gui_cleaned_add(&app->cleaned, !failed, file, what);
+}
+/* it done, each file an entry of app->cleaned, which shows over the screen */
+static void clean_old(App* app) {
+    char unread[1024];
+    gui_cleaned_free(&app->cleaned);
+    clean_inis(app, &app->cleaned);
+    if (settings_unread(app, unread, sizeof unread))
+        clean_keys(app, app->settings_file, unread, gui_settings_save(&app->settings, app->settings_file));
+    if (app_read(app, false, unread, sizeof unread)) /* the picks as the menu has them, nothing else */
+        clean_keys(app, app->app_file, unread, app_save(app));
+    app->cleaned_shown = app->cleaned.count > 0;
+}
+/* App's row: the first Enter says what it would do, the second does it */
+static void clean_row(App* app) {
+    char unread[16], *note = app->editor.note;
+    size_t size = sizeof app->editor.note;
+    int inis, keys, n;
+    if (app->clean_armed) {
+        app->clean_armed = false;
+        clean_old(app);
+        snprintf(note, size, "Cleaned: %d done, %d not", app->cleaned.done, app->cleaned.count - app->cleaned.done);
+        return;
+    }
+    inis = clean_inis(app, NULL);
+    keys = settings_unread(app, unread, sizeof unread) + app_read(app, false, unread, sizeof unread);
+    if (!inis && !keys) {
+        snprintf(note, size, "Nothing to clean: no [Deprecated] in a game's .ini, no old keys");
+        return;
+    }
+    app->clean_armed = true;
+    n = snprintf(note, size, "Enter again to clean:");
+    if (inis) n += snprintf(note + n, size - (size_t)n, " [Deprecated] in %d .ini%s", inis, keys ? "," : "");
+    if (keys && n < (int)size) snprintf(note + n, size - (size_t)n, " %d old key%s", keys, keys > 1 ? "s" : "");
 }
 static void pump(App* app) {
     if (app->menu.running) {
@@ -3378,8 +3504,9 @@ static void share_log(App* app) {
     game = newest_log(app);
     run = log_tail(app->run_log, 1 << 20);
     played = log_tail(game, 4 << 20);
-    text = snx_format("%s\nMessage: %s\n%s\n== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
-                      app->message, app->left ? app->left : "", app->run_log ? app->run_log : "", run,
+    text = snx_format("%s\nMessage: %s\n%s%s%s\n== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
+                      app->message, app->left ? app->left : "", app->cleaned.count ? "Clean old settings:\n" : "",
+                      app->cleaned.text ? app->cleaned.text : "", app->run_log ? app->run_log : "", run,
                       game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
     if (!saved || snx_write_file(saved, text, strlen(text)))
@@ -3796,6 +3923,12 @@ static void event(App* app, const SDL_Event* e) {
         app->menu.quit = true;
         return;
     }
+    /* what Clean old settings did takes the first key, button or finger, which closes it */
+    if (app->cleaned_shown &&
+        (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN || e->type == SDL_EVENT_FINGER_DOWN)) {
+        app->cleaned_shown = false;
+        return;
+    }
     /* the box of an older version's files takes the first key, button or finger, which closes it */
     if (app->left_shown && !app->splash &&
         (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN || e->type == SDL_EVENT_FINGER_DOWN)) {
@@ -4036,6 +4169,7 @@ static void cleanup(App* app) {
     for (int i = 0; i < app->folder_count; ++i) free(app->folders[i]);
     free(app->folders_file);
     free(app->app_file);
+    gui_cleaned_free(&app->cleaned);
     free(app->left);
     free(app->self);
     free(app->drivers);

@@ -977,16 +977,17 @@ int main(int argc, char** argv) {
     /* App: the theme and the letters, either way round, and the theme editor, which comes back here */
     app.editor.row = 0;
     key(&app, SDLK_RETURN);
-    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 4);
+    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 5);
     {
         char first[64], line[96];
         snprintf(first, sizeof first, "%s", app.theme.name);
         render(&app);
         shows(&app, "- App", pink); /* the group open */
-        snprintf(line, sizeof line, "- %-12s %s", "Theme", first);
+        snprintf(line, sizeof line, "- %-18s %s", "Theme", first);
         shows(&app, line, yellow);
-        shows(&app, "- Text size    Auto", normal);
+        shows(&app, "- Text size          Auto", normal);
         shows(&app, "- Theme editor", normal);
+        shows(&app, "- Clean old settings", normal);
         hides(&app, "- Layout", normal);
         key(&app, SDLK_RIGHT);
         assert(strcmp(app.theme.name, first) && !strcmp(app.app_form.theme, app.theme.name));
@@ -1063,6 +1064,78 @@ int main(int argc, char** argv) {
         free(blocker);
         app.editor.note[0] = 0;
     }
+    /* Clean old settings, Enter twice: the first says what it would do, another key in between starts again, the
+       second does it and shows what it did over the screen, until a key closes it; then there is nothing left */
+    {
+        char *old_ini = snx_path_join(app.games_dir, "Old game.ini"), *kept, unread[64], expected[512];
+        const char* game_ini =
+            "[Other]\nlanguage=en\n\n[Deprecated]\n; renderer: Vulkan is the only one\nrenderer=gl\n";
+        const char* gone = "[app]\ntheme = gone\n"; /* a theme taken away */
+        SDL_Color title = rgb(app.theme.panels == GUI_PANELS_FILL ? app.theme.page : app.theme.ink);
+        size_t size = 0;
+        int row = app.editor.row, had_games = snx_is_dir(app.games_dir); /* the tests after this count on its absence */
+        assert(!snx_mkdirs(app.games_dir) && !snx_write_file(old_ini, game_ini, strlen(game_ini)));
+        kept = (char*)snx_read_file(app.settings_file, &size);
+        {
+            char* more = snx_format("%s[Display]\nrenderer=opengl\n", kept ? kept : "");
+            assert(!snx_write_file(app.settings_file, more, strlen(more)));
+            free(more);
+        }
+        free(kept);
+        assert(settings_unread(&app, unread, sizeof unread) == 1 && !strcmp(unread, "renderer=opengl"));
+        assert(!snx_write_file(app.app_file, gone, strlen(gone)));
+        app.editor.row = GUI_APP_CLEAN;
+        key(&app, SDLK_RETURN);
+        assert(app.clean_armed && !app.cleaned_shown && snx_is_file(old_ini));
+        assert(!strcmp(app.editor.note, "Enter again to clean: [Deprecated] in 1 .ini, 2 old keys"));
+        render(&app);
+        shows(&app, "- Clean old settings", yellow);
+        shows(&app, "Enter again to clean:", yellow);
+        key(&app, SDLK_UP);
+        key(&app, SDLK_DOWN);
+        assert(!app.clean_armed && app.editor.row == GUI_APP_CLEAN);
+        key(&app, SDLK_RETURN);
+        key(&app, SDLK_RETURN);
+        assert(!app.clean_armed && app.cleaned_shown && app.cleaned.count == 3 && app.cleaned.done == 3);
+        assert(!strcmp(app.editor.note, "Cleaned: 3 done, 0 not"));
+        kept = (char*)snx_read_file(old_ini, &size);
+        assert(kept && !strcmp(kept, "[Other]\nlanguage=en\n"));
+        free(kept);
+        assert(!settings_unread(&app, unread, sizeof unread) && setting_is(&app, "fullscreen", "1"));
+        snprintf(expected, sizeof expected,
+                 "+\t%s\t[Deprecated] taken out\n+\t%s\tTook out renderer=opengl\n+\t%s\tTook out theme = gone\n",
+                 old_ini, app.settings_file, app.app_file);
+        assert(!strcmp(app.cleaned.text, expected));
+        kept = (char*)snx_read_file(app.app_file, &size); /* the picks as the menu has them */
+        snprintf(expected, sizeof expected, "\ntheme = %s\n", app.theme.id);
+        assert(kept && strstr(kept, expected) && !strstr(kept, "gone"));
+        free(kept);
+        render(&app);
+        shows(&app, "Clean old settings: 3 done", title);
+        shows(&app, "[Deprecated] taken out", rgb(app.theme.soft));
+        shows(&app, "- OK", yellow);
+        key(&app, SDLK_DOWN); /* closes it, and does nothing else */
+        assert(!app.cleaned_shown && app.editing && app.form == GUI_FORM_APP && app.editor.row == GUI_APP_CLEAN);
+        render(&app);
+        hides(&app, "Clean old settings: 3 done", title);
+        key(&app, SDLK_RETURN);
+        assert(!app.clean_armed && !strncmp(app.editor.note, "Nothing to clean", 16));
+        /* a runtime that listed no settings: every key of settings.ini would look old, and none is taken out */
+        {
+            GuiSettings listed = app.settings;
+            app.settings = (GuiSettings){0};
+            assert(!gui_settings_read(&app.settings, "") && app.settings.count == GUI_SETTINGS_OWN);
+            assert(!settings_unread(&app, unread, sizeof unread) && !unread[0]);
+            gui_settings_free(&app.settings);
+            app.settings = listed;
+            assert(setting_is(&app, "fullscreen", "1"));
+        }
+        remove(old_ini);
+        if (!had_games) assert(!snx_remove_tree(app.games_dir));
+        free(old_ini);
+        app.editor.row = row;
+        app.editor.note[0] = 0;
+    }
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RIGHT); /* the editor opens with Enter only */
     assert(app.form == GUI_FORM_APP);
@@ -1074,7 +1147,7 @@ int main(int argc, char** argv) {
        (SDL_FILE_DIALOG_DRIVER=none); Del or Enter twice takes one off, the folder staying */
     key(&app, SDLK_DOWN);
     render(&app);
-    shows(&app, "- Game folders games/", yellow);
+    shows(&app, "- Game folders       games/", yellow);
     key(&app, SDLK_RETURN);
     assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 2 && app.editor.row == 0);
     {
@@ -3154,6 +3227,13 @@ int main(int argc, char** argv) {
                 /* a key closes it and does nothing else; nothing was moved */
                 key(&app, SDLK_DOWN);
                 assert(!app.left_shown && app.menu.selected == selected && snx_is_file(ini));
+                /* Clean old settings cleans settings only: what an older version left stays where it is */
+                clean_old(&app);
+                assert(snx_is_file(ini) && snx_is_file(log) && snx_is_file(threads) && snx_is_dir(work));
+                left_behind(&app);
+                assert(app.lefts == 6);
+                gui_cleaned_free(&app.cleaned);
+                app.cleaned_shown = false;
                 /* gone while it shows, it closes */
                 app.left_shown = true;
                 assert(!snx_remove_tree(app.data_dir)); /* its gui/ too */

@@ -71,7 +71,13 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   `games/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
   or a path pasted with Ctrl+V is added too. Del, or Enter twice, takes one off the list (the
   folder stays). They are kept in `folders.txt` beside `settings.ini`; one that cannot be read
-  is named when the games are listed. A group of settings shows
+  is named when the games are listed. **Clean old settings**, Enter twice (the first says what it
+  would do), takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
+  gives a game's `.ini` for the keys it no longer uses (in the config folder's `games/`, in `games/`
+  and in the player's folders), the keys of `settings.ini` that no setting of the runtime's takes
+  (only while the runtime lists its settings) and those of `app.ini` the menu does not know. A box
+  over the screen then lists each file and what was done to it, or why not, until a key closes it;
+  Share log lists them too. A group of settings shows
   a row each, its help above, Left/Right going round its values, Enter typing one. A setting not picked shows the runtime's default and `[default]` (*By label [default]*):
   the run takes the game's `.ini`'s, which starts as that; one picked goes to every
   Switch run as `--key=value`, over the `.ini` ([USAGE](USAGE.md)), and is kept for every game:
