@@ -106,23 +106,20 @@ static void user_folder(char* dir, size_t size, const char* games, int kind) {
         snprintf(dir, size, "%s", g_exedir);
     free(moved);
 }
-/* the settings, the log and threads.txt, and the pipeline cache. What an older build left beside the game stays, a
-   line in the log saying so each start */
+/* the settings, the log and threads.txt, and the pipeline cache. A game an older version laid out beside the others
+   runs where it is, a line in the log saying where its folder goes each start */
 static void user_folders(void) {
-    char from[1400], to[1400];
     char* games = snx_absolute(g_exedir[0] ? g_exedir : ".");
+    const char* folder = games ? games + strlen(games) : NULL;
+    while (folder && folder > games && folder[-1] != '/' && folder[-1] != '\\') --folder; /* the folder's own name */
     user_folder(g_confdir, sizeof g_confdir, games, SNX_USER_CONFIG);
     user_folder(g_statedir, sizeof g_statedir, games, SNX_USER_STATE);
     user_folder(g_cachedir, sizeof g_cachedir, games, SNX_USER_CACHE);
-    for (int i = 0; games && i < SNX_GAME_FILES; i++) {
-        const char* name = snx_game_files[i].name;
-        const char* game = name[0] == '.' ? g_exename : "";
-        int kind = snx_game_files[i].kind;
-        const char* dir = kind == SNX_USER_CONFIG ? g_confdir : kind == SNX_USER_STATE ? g_statedir : g_cachedir;
-        if (!strcmp(dir, g_exedir)) continue;
-        snprintf(from, sizeof from, "%s/%s%s", games, game, name);
-        snprintf(to, sizeof to, "%s%s%s", dir, game, name);
-        if (snx_left_behind(from, to)) WARN("%s was left by an older version: this one keeps it in %s\n", from, to);
+    if (folder && strcmp(folder, g_exename)) { /* not in a folder of its own name */
+        char id[17];
+        WARN(
+            "%s/%s and its files were left by an older version: this one keeps them in %s/%s/ (docs/DEPRECATIONS.md)\n",
+            games, g_exename, games, snx_title_text(g_mod->title_id, id) ? id : g_exename);
     }
     free(games);
 }

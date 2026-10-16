@@ -3102,14 +3102,13 @@ static void tell(App* app) {
     app->told_ms = now;
 }
 #endif
-#ifdef SNX_XDG
-/* a line more while an older build's file is at old, which this one keeps at now */
-static void left_line(App* app, const char* old, const char* now) {
+/* a line more while what an older version left at old (a folder, or a game's files) is there; this one keeps it at now */
+static void left_line(App* app, const char* old, const char* now, bool there) {
     char *line, *grown;
     size_t n = app->left ? strlen(app->left) : 0;
-    if (!snx_left_behind(old, now)) return;
+    if (!there || !strcmp(old, now)) return;
     line = snx_format("%s" SAY_LEFT_BY "%s\n", old, now);
-    grown = (char*)realloc(app->left, n + strlen(line) + 1);
+    grown = line ? (char*)realloc(app->left, n + strlen(line) + 1) : NULL;
     if (grown) {
         strcpy(grown + n, line);
         app->left = grown;
@@ -3117,50 +3116,87 @@ static void left_line(App* app, const char* old, const char* now) {
     }
     free(line);
 }
-#endif
-/* what older builds left where this one no longer looks, for the menu to say while it is there: the menu's own files,
-   work/, each game's (common.h). An installed build's alone (XDG): elsewhere the folders are as they were */
+/* the games of folder an older version laid out beside each other (<name>, its code, <name>_data/): each one's folder
+   now, games/<title ID>/ or games/<name>/ for one without an ID of its own (main.npdm in its data) */
+static void left_games(App* app, const char* folder) {
+    char** names = NULL;
+    size_t count = 0, i, n;
+    if (!folder || snx_list_dir(folder, &names, &count)) return;
+    for (i = 0; i < count; ++i) {
+        char *data, *npdm, *name, *old, *now, id[17];
+        unsigned char* bytes;
+        size_t size = 0;
+        n = strlen(names[i]);
+        if (n <= 5 || strcmp(names[i] + n - 5, "_data")) continue;
+        data = snx_path_join(folder, names[i]);
+        name = snx_format("%.*s", (int)(n - 5), names[i]);
+        npdm = data ? snx_path_join(data, "exefs/main.npdm") : NULL;
+        bytes = npdm && snx_is_file(npdm) ? (unsigned char*)snx_read_file(npdm, &size) : NULL;
+        old = name ? snx_path_join(folder, name) : NULL;
+        now = name ? snx_format("%s/%s/", folder, snx_title_text(snx_npdm_title(bytes, size), id) ? id : name) : NULL;
+        if (old && now && data && snx_is_dir(data)) left_line(app, old, now, true);
+        free(bytes);
+        free(npdm);
+        free(now);
+        free(old);
+        free(name);
+        free(data);
+    }
+    snx_free_strings(names, count);
+}
+/* what older versions left where this one no longer looks, a folder at a time, for the menu to say while it is there:
+   the menu's own files' folder (gui/), work/, each game laid out beside the others, a portable copy's games/ beside
+   the program (its data in .scarletnx/ now). Nothing is moved: the player does that (docs/DEPRECATIONS.md) */
 static void left_behind(App* app) {
+    char *config = menu_folder(app, SNX_USER_CONFIG, false), *state = menu_folder(app, SNX_USER_STATE, false);
+    char *data = snx_user_data_dir(), *gui = data ? snx_path_join(data, "gui") : NULL, *kept = NULL;
+    char* work = app->data_dir ? snx_path_join(app->data_dir, "work") : NULL;
+    char *moved = work ? snx_user_path(work, SNX_USER_CACHE) : NULL, *old = NULL, *now = NULL;
+    int i;
     free(app->left);
     app->left = NULL;
     app->lefts = 0;
     app->left_at = SDL_GetTicks();
-#ifdef SNX_XDG
-    static const char* const mine[] = {"recent.txt", "last-run.log"};
-    char *data = snx_user_data_dir(), *folder = app->recent_file ? snx_dirname(app->recent_file) : NULL;
-    char *work = snx_path_join(app->data_dir, "work"), *moved = snx_user_path(work, SNX_USER_CACHE);
-    char** names = NULL;
-    size_t count = 0, i, j;
-    for (i = 0; data && folder && i < sizeof mine / sizeof *mine; ++i) {
-        char *old = snx_format("%s/gui/%s", data, mine[i]), *now = snx_path_join(folder, mine[i]);
-        left_line(app, old, now);
-        free(old);
-        free(now);
-    }
-    left_line(app, work, moved);
-    snx_list_dir(app->games_dir, &names, &count);
-    for (i = 0; i < SNX_GAME_FILES; ++i) {
-        const char* name = snx_game_files[i].name;
-        char* to = snx_user_path(app->games_dir, snx_game_files[i].kind);
-        for (j = 0; j < (name[0] == '.' ? count : 1); ++j) { /* a game's own, by its name, or the folder's */
-            const char* file = name[0] == '.' ? names[j] : name;
-            size_t n = strlen(file), k = strlen(name);
-            char *old, *now;
-            if (name[0] == '.' && (n <= k || strcmp(file + n - k, name))) continue;
-            old = snx_path_join(app->games_dir, file);
-            now = snx_path_join(to, file);
-            left_line(app, old, now);
-            free(old);
-            free(now);
+#ifndef SDL_PLATFORM_ANDROID /* the app's own storage, as before */
+    /* gui/: the menu's own, now in the config and state folders, each where it goes */
+    for (i = 0; gui && i < 2; ++i) {
+        static const char* const files[2][3] = {{"settings.ini", "app.ini", "folders.txt"},
+                                                {"recent.txt", "last-run.log", ""}};
+        const char* to = i ? state : config;
+        int k, there = 0;
+        for (k = 0; k < 3 && files[i][k][0]; ++k) {
+            char* file = snx_path_join(gui, files[i][k]);
+            there |= file && snx_is_file(file);
+            free(file);
         }
-        free(to);
+        if (to) left_line(app, gui, to, there);
     }
-    snx_free_strings(names, count);
+#ifdef SNX_XDG /* and the state folder's gui/ of the version just before */
+    kept = snx_user_dir(SNX_USER_STATE);
+    old = kept ? snx_path_join(kept, "gui") : NULL;
+    if (old && state) left_line(app, old, state, snx_is_dir(old));
+    free(old);
+    old = NULL;
+#endif
+#endif
+    if (work && moved) left_line(app, work, moved, snx_path_exists(work));
+    left_games(app, app->games_dir);
+    for (i = 0; i < app->folder_count; ++i) left_games(app, app->folders[i]);
+    /* a portable copy's games/ beside the program, which a .scarletnx/ there holds now */
+    if (app->drivers && app->data_dir) {
+        old = snx_path_join(app->drivers, "games");
+        now = snx_format("%s/" SNX_PORTABLE_DIR "/games", app->drivers);
+        if (old && now && app->games_dir && strcmp(old, app->games_dir)) left_line(app, old, now, snx_is_dir(old));
+    }
+    free(old);
+    free(now);
+    free(kept);
     free(moved);
     free(work);
-    free(folder);
+    free(gui);
     free(data);
-#endif
+    free(state);
+    free(config);
 }
 /* ---- Clean old settings (clean.c): [Deprecated] out of each game's .ini the menu reaches, and the keys the menu's own
    files hold that nothing reads ---- */

@@ -1173,3 +1173,21 @@ int snx_nacp_name(const unsigned char* nacp, size_t size, char* name, size_t nam
     }
     return name_size && name[0];
 }
+static SnxU64 le_get(const unsigned char* p, unsigned n) {
+    SnxU64 value = 0;
+    while (n--) value = value << 8 | p[n];
+    return value;
+}
+SnxU64 snx_npdm_title(const unsigned char* npdm, size_t size) {
+    SnxU64 aci;
+    if (!npdm || size < 0x80 || memcmp(npdm, "META", 4)) return SNX_NPDM_DEFAULT_TITLE;
+    aci = le_get(npdm + 0x70, 4);
+    if (!aci || aci > size || size - aci < 0x18 || memcmp(npdm + aci, "ACI0", 4)) return SNX_NPDM_DEFAULT_TITLE;
+    return le_get(npdm + aci + 0x10, 8);
+}
+int snx_title_text(SnxU64 id, char* out) {
+    out[0] = 0;
+    if (!id || id == SNX_NPDM_DEFAULT_TITLE) return 0;
+    sprintf(out, "%08lX%08lX", (unsigned long)(id >> 32), (unsigned long)(id & 0xFFFFFFFFUL));
+    return 1;
+}

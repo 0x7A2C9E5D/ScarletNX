@@ -116,4 +116,12 @@ FILE* snx_fopen(const char* path, const char* mode);
 /* The game's name in a control.nacp: American English's, else the first language's that has one, in UTF-8 without
    control characters. 1 when it has one, else 0 and "" */
 int snx_nacp_name(const unsigned char* nacp, size_t size, char* name, size_t name_size);
+/* The title ID of a program without an NPDM (an NRO, an ExeFS without main.npdm): none of its own */
+#define SNX_NPDM_DEFAULT_TITLE (((SnxU64)0x01000000UL << 32) | 0x1000)
+/* The title ID a main.npdm's ACI0 gives its program, as the loader reads it, for one not loaded; SNX_NPDM_DEFAULT_TITLE
+   for none */
+SnxU64 snx_npdm_title(const unsigned char* npdm, size_t size);
+/* id as a game's folder and files are named, 16 hex digits into out (17 bytes): 1, or 0 for an ID that is none of the
+   game's own (0, SNX_NPDM_DEFAULT_TITLE) */
+int snx_title_text(SnxU64 id, char* out);
 #endif

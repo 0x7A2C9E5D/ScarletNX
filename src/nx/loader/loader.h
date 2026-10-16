@@ -78,8 +78,6 @@ int snx_load_nso(const char* path, const char* name, SnxModuleImage* module, cha
 int snx_load_nro(const char* path, SnxModuleImage* module, char* error, size_t error_size);
 void snx_free_module(SnxModuleImage* module);
 int snx_parse_npdm(const unsigned char* data, size_t size, SnxNpdm* npdm, char* error, size_t error_size);
-/* The title ID of a program without an NPDM (an NRO, an ExeFS without main.npdm): none of its own */
-#define SNX_NPDM_DEFAULT_TITLE (((SnxU64)0x01000000UL << 32) | 0x1000)
 /* The NPDM snx_load_program would take for entry, without loading its modules: an NRO's, or a missing one's,
    defaults. 0, else -1 with a bounded error string */
 int snx_load_npdm(const char* entry, SnxNpdm* npdm, char* error, size_t error_size);

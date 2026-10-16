@@ -46,7 +46,6 @@ char* snx_game_shown(const char* name, const SnxProgram* program) {
 }
 char* snx_game_name(const char* name, const SnxNpdm* npdm, const char* input) {
     char id[17];
-    if (name || !npdm->title_id || npdm->title_id == SNX_NPDM_DEFAULT_TITLE) return snx_game_title(name, npdm, input);
-    sprintf(id, "%08lX%08lX", (unsigned long)(npdm->title_id >> 32), (unsigned long)(npdm->title_id & 0xFFFFFFFFUL));
+    if (name || !snx_title_text(npdm->title_id, id)) return snx_game_title(name, npdm, input);
     return snx_strdup(id);
 }

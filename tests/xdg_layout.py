@@ -96,14 +96,9 @@ def main():
                 f'the game did not log to {log} and stop before the GPU (exit {status}, {start} start)',
                 out,
             )
-            for older, now in (
-                (folder / 'Smoke.log', log),
-                (folder / 'threads.txt', threads),
-                (folder / 'Smoke.ini', ini),
-                (folder / 'shader_cache/vk_pipelines.bin', pipelines),
-            ):
-                told = f'{older} was left by an older version: this one keeps it in {now}'
-                check(told in text, f'the {start} start did not say where {older.name} is', text)
+            check(
+                'was left by an older version' not in text, f'the {start} start of a game in its folder said so', text
+            )
         check((folder / 'Smoke.log').read_text() == 'older log\n', 'the game wrote in the older Smoke.log', out)
         check((folder / 'threads.txt').read_text() == 'older threads\n', 'the older threads.txt was touched', out)
         check(
@@ -115,6 +110,19 @@ def main():
             all((folder / name).exists() for name in ('Smoke.abi', 'Smoke_code.so', 'Smoke_data')),
             'the game itself left its folder',
         )
+        check(
+            log.is_file() and threads.parent.is_dir() and not pipelines.exists(), 'the state folder was not used', text
+        )
+
+        # a game an older version laid out beside the others: it runs where it is, each start saying where its folder
+        # goes (an NRO has no title ID: by its name)
+        for name in ('Smoke', 'Smoke_code.so', 'Smoke.abi'):
+            shutil.copy2(folder / name, games / name.replace('Smoke', 'Loose'))
+        shutil.copytree(folder / 'Smoke_data', games / 'Loose_data')
+        status, out = run(['./Loose', '-H'], cwd=games)
+        told = f'{games}/Loose and its files were left by an older version: this one keeps them in {games}/Loose/'
+        check(told in out, 'the loose game did not say where its folder goes', out)
+        check((games / 'Loose').is_file() and not (games / 'Loose').is_dir(), 'the loose game was moved', out)
 
         # an extraction: the older build's work/ stays, and the driver says the cache folder's is used. hactool finds
         # no program in an empty PFS0
