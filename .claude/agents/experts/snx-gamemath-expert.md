@@ -74,8 +74,11 @@ edges, and cheap where it is hot.
 - **Where it lives**: the soft-FP and SIMD helpers (`src/common/cpu/aarch64/helpers/`), the texture decoders
   (`src/nx/gpu/texture/astc.c`, `etc2.c`, `depth.c`, and `src/nx/gpu/vk/astc.c` on the GPU), the audio renderer's
   DSP (`src/nx/hle/services/audren_dsp.c`: polyphase resampling, Q15 fixed point, biquads, volume ramps), the guest
-  clock (`src/nx/runtime/clock.c`), frame pacing (`src/nx/runtime/present.c`), and the instruction sequences the
-  shader translator emits.
+  clock (`src/nx/runtime/clock.c`), frame pacing (`src/nx/runtime/present.c`), motion sensors
+  (`src/nx/hle/services/hid_motion.c`: gyro integrated into a quaternion, HID's row-major 3x3 direction matrix),
+  VIC's color matrix (`src/nx/gpu/video/vic.c`, S12.8 fixed point), and the instruction sequences the shader
+  translator emits. Where the runtime models hardware (VIC's fixed point, the DSP's Q15), the hardware's arithmetic
+  is the reference, as the game's is.
 - **Reject**: double rounding (an operation computed in a wider type and rounded twice, which is exact for float
   add, multiply, divide and sqrt through double but not for fused multiply-add), `a * b / c` unit conversions that
   overflow 64 bits or drift when applied to deltas instead of absolute ticks, time kept as accumulated floating-point
@@ -87,6 +90,18 @@ edges, and cheap where it is hot.
   remainder or with a portable 64-by-64 multiply (strict C90 per RFC #142, LP64 and LLP64 alike), polynomials in
   Horner form with a stated error bound, compensated or pairwise sums where accumulation error matters, tables
   built once, and the known algorithm for the job named in a comment.
+- **Matrices and vectors**: reject a general inverse (cofactors, or elimination without pivoting) where the
+  structure gives a cheaper exact one: a rotation's inverse is its transpose, an affine transform's is the
+  transposed rotation with `-R^T t`, and a normal matrix is needed only under non-uniform scale. Reject inverting a
+  matrix to solve a system (factor with partial pivoting and solve), full 4x4 products for 3x4 affine data, Euler
+  angles for integrating orientation (gimbal lock), rotation matrices multiplied step after step without
+  reorthonormalizing, classical Gram-Schmidt where the modified form is stable, normalizing without a zero-length
+  guard, `acos` of a dot product without clamping to [-1, 1] (NaN past it, and imprecise near 0: `atan2` of the
+  cross product's length and the dot is not), `slerp` without the shortest-path sign flip or the near-parallel
+  fallback to `nlerp`, and products that are constant per frame recomputed per vertex, pixel or sample. Prefer
+  quaternions for orientation, integrated with the exponential map (exact for a constant rate over the step) or a
+  first-order step followed by renormalization, storage in the order its consumer reads so nothing is transposed
+  on the way, and structure-of-arrays layouts for batched vector work so the compiler vectorizes it.
 - **Justify a choice**: name its complexity and its error bound, check its edge cases (zero, denormals,
   infinities, NaN, the largest inputs the guest can give), and measure it with `snx-perf-expert` when it sits on a
   hot path.
