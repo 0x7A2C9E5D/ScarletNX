@@ -32,7 +32,7 @@ digits, UTF-8, spaces, hyphens and underscores.
 `--outdir DIR` puts the game's folder in DIR and `--out DIR` the dump's extraction at DIR, as `-r` and `-x` take
 them, in place of the data folder's `games/` and `work/<dump stem>`; an NRO has no extraction to name.
 `-H` (`--headless`) can precede or follow the dump and is passed to the game only.
-Omitting it starts the game with a window, unless the build has no window backend.
+Omitting it starts the game with a window.
 `-x` means `--extract`, and `-r` means `--recomp` (the old `--recompile` spelling was removed).
 On UNIX, short flags can be combined. Windows accepts separate short flags only.
 
@@ -223,8 +223,7 @@ Manifest names vary (for example `lvp_icd.json`). FreeBSD packages normally inst
 `LIBGL_ALWAYS_SOFTWARE` is an OpenGL setting and is not how this Vulkan renderer selects lavapipe.
 No display server is required. Check the `vulkan:` device line in the log to confirm the chosen ICD.
 
-For a build without an SDL3 dependency, see [headless build options](BUILD.md#build-variants).
-This does not impose a staging-memory cap or fix the allocation/flush issues identified separately.
+The NX runtime includes SDL3 even when running headless; headless mode skips video initialization.
 
 ## AppImage / display
 
@@ -296,7 +295,7 @@ type, range and help, tab-separated.
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `docked` | `0` | `1` is TV mode, `0` handheld mode (1280x720) |
+| `docked` | `1` | `1` is TV mode, `0` handheld mode (1280x720) |
 | `fullscreen` | `0` | `1` starts fullscreen, except in timed test runs (`--seconds`, `--frames`). `-f` or `--fullscreen=0` sets it for one run. F11 or Alt+Enter switches without changing it |
 | `language` | `1` | The game's language, English (US). The `.ini` lists the others, `0` to `17`. One the runtime doesn't know is English (US) |
 | `resolution` | `1` | Internal 3D scale, `0.25` to `4`: `1` native, `2` double, `0.75` and `0.5` faster |

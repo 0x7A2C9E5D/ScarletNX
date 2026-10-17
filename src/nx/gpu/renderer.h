@@ -18,6 +18,9 @@ typedef struct Renderer {
     void (*clear)(GpuChannel* ch, u32 v);
     void (*draw)(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex, u32 base_instance,
                  u32 instances);
+    /* Maxwell ordering methods: 0 texture barrier, 1 tiled barrier, 2 data-cache invalidate,
+       3 descriptor-cache invalidate, 4 wait for idle. */
+    void (*method_barrier)(int kind);
     /* DRAW_TEXTURE: a texture's rectangle onto color target 0. NULL: not drawn */
     void (*draw_texture)(GpuChannel* ch);
     /* the 2D engine: 1 when the renderer did the blit on the GPU, 0 to do it in guest memory */
@@ -34,6 +37,13 @@ typedef struct Renderer {
     void (*gfx_mem_need)(u64 a, u64 n);
     void (*before_syncwait)(void); /* the stream is about to wait on a syncpoint: flush everything in flight */
     void (*stream_incr)(u32 id);   /* a syncpoint increment in the stream, after everything before it is done */
+    /* a semaphore or report the game can poll: len bytes written at gva once everything before it is done (it may
+       happen later, in order with the other releases). NULL: written now, after landing everything */
+    void (*release_write)(u64 gva, const void* data, u32 len);
+    /* the stream reads or writes [a, a + n): a release still waiting to write there happens first */
+    void (*release_need)(u64 a, u64 n);
+    u32 (*release_value)(u32 id); /* completed and queued increments, read consistently */
+    void (*release_retire)(u32 id); /* finish this syncpoint's queued releases before its id is reused */
     /* presenting a guest framebuffer */
     /* crop: the part shown (left, top, right, bottom), all 0 for the whole buffer */
     /* transform: Android buffer flags, bit 0 horizontal flip and bit 1 vertical flip */

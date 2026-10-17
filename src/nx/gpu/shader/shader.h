@@ -51,7 +51,17 @@ typedef struct {
     /* FS key: integer textures / outputs. rt_int_mask keys the primitives of the other stages instead: the
        tessellation parameters (register 0xC8) for TES, and the input primitive's vertex count for GS */
     u32 tex_int_mask, tex_sint_mask, rt_int_mask, rt_sint_mask;
+    u32 gp_skip_mask[8]; /* GS key: POST_VTG_SHADER_ATTRIB_SKIP_MASK, one bit per scalar attribute */
+    /* FS key: depth-compare samples of a color texture (TEX.DC on a color format compares its first component, which
+       Vulkan's compare samplers don't do): the slots, and their compare functions 3 bits each in slot order */
+    u32 tex_dc_color_mask, tex_dc_color_funcs;
+    u32 out_mask; /* generic outputs 0..31 written (all of them after an attribute store at a register's offset) */
+    /* FS key: generic inputs the stage before rasterization doesn't write. They read as 0, 0, 0, 1 (yuzu's choice,
+       GPL-2.0-or-later, shader_recompiler emit_spirv_context_get_set.cpp): an input no output feeds is undefined in
+       Vulkan */
+    u32 in_unfed_mask;
 } ShaderInfo;
+#define SH_DC_COLOR_MAX  10 /* slots tex_dc_color_funcs holds */
 /* the shader flushes FP32 denormals everywhere: every FADD, FMUL and FFMA it has asks for it, as the console's
    compiler emits them (Eden declares DenormFlushToZero on the same condition) */
 /* One descriptor set per stage, with bindings grouped by resource kind. */
@@ -64,7 +74,9 @@ typedef struct {
 #define SNX_VKB_SMAP     76 /* graphics: storage-buffer page indices for aliased bindings */
 #define SNX_VKB_IMGBUF   77 /* 8 storage texel buffers: surface operations on buffer images (compute) */
 #define SNX_VKB_TEXARRAY 85 /* SNX_TEX_ARRAY textures: the handles an indexed LDC loads (graphics) */
-#define SNX_VKB_END      86 /* one past the last binding */
+#define SNX_VKB_TEXFUNCS 86 /* comparison functions for indexed depth samples */
+#define SNX_VKB_TEXDEPTH 87 /* depth counterparts for mixed indexed shadow tables */
+#define SNX_VKB_END      88 /* one past the last binding */
 /* An indexed texture's handle is loaded by an LDC whose address takes a register: the shader picks one of
    SNX_TEX_ARRAY handles, each (1 << shift) bytes after the one before, from cbuf_off on. ShTex.flags holds the shift
    in bits 4-7. */

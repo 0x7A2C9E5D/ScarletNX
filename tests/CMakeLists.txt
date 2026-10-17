@@ -817,7 +817,7 @@ if(UNIX)
 endif()
 
 add_executable(snx-test-render-enable render_enable.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c"
-    "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c")
+    "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/write_pages.c")
 snx_test_target(snx-test-render-enable 23)
 add_test(NAME render_enable COMMAND snx-test-render-enable)
 
@@ -826,12 +826,12 @@ snx_test_target(snx-test-clear-flags 23)
 add_test(NAME clear_flags COMMAND snx-test-clear-flags)
 
 add_executable(snx-test-instance-array instance_array.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c"
-    "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c")
+    "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/write_pages.c")
 snx_test_target(snx-test-instance-array 23)
 add_test(NAME instance_array COMMAND snx-test-instance-array)
 
 add_executable(snx-test-draw-texture draw_texture.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c"
-    "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c")
+    "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/write_pages.c")
 snx_test_target(snx-test-draw-texture 23)
 add_test(NAME draw_texture COMMAND snx-test-draw-texture)
 
@@ -839,8 +839,8 @@ add_test(NAME draw_texture COMMAND snx-test-draw-texture)
 # inside a macro lets the others run, and goes on where it stopped (its platform stand-ins are pthreads)
 if(UNIX)
     add_executable(snx-test-gpu-park gpu_park.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/gpu.c"
-        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c"
-        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme.c")
+        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/write_pages.c"
+        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/dma.c")
     snx_test_target(snx-test-gpu-park 23)
         add_test(NAME gpu_park COMMAND snx-test-gpu-park)
     set_tests_properties(gpu_park PROPERTIES TIMEOUT 30) # a deadlock in the queue would otherwise hang ctest
@@ -881,4 +881,30 @@ if(NOT WIN32)
         -DGUI=${SNX_BUILD_GUI} -DDIST=${PROJECT_SOURCE_DIR}/dist -P "${CMAKE_CURRENT_SOURCE_DIR}/dist_install.cmake")
 endif()
 include(architecture.cmake)
+
+add_executable(snx-test-depth-texel depth_texel.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/depth.c")
+snx_test_target(snx-test-depth-texel 23)
+add_test(NAME depth_texel COMMAND snx-test-depth-texel)
+add_executable(snx-test-write-pages write_pages.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/write_pages.c")
+snx_test_target(snx-test-write-pages 23)
+add_test(NAME write_pages COMMAND snx-test-write-pages)
+add_executable(snx-test-unattended-script unattended_script.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
+snx_test_target(snx-test-unattended-script 11)
+target_link_libraries(snx-test-unattended-script PRIVATE m)
+add_test(NAME unattended_script COMMAND snx-test-unattended-script)
+if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
+    add_executable(snx-test-shader-brx shader_brx.c)
+    snx_test_target(snx-test-shader-brx 23)
+    target_link_libraries(snx-test-shader-brx PRIVATE snx_shader)
+    if(NOT WIN32)
+        target_link_libraries(snx-test-shader-brx PRIVATE m)
+    endif()
+    add_test(NAME shader_brx COMMAND snx-test-shader-brx)
+    add_executable(snx-test-vulkan-release vulkan_release.c)
+    snx_test_target(snx-test-vulkan-release 11)
+    add_test(NAME vulkan_release COMMAND snx-test-vulkan-release)
+    add_executable(snx-test-vulkan-backing vulkan_backing.c)
+    snx_test_target(snx-test-vulkan-backing 11)
+    add_test(NAME vulkan_backing COMMAND snx-test-vulkan-backing)
+endif()
 snx_sanitizer_path()

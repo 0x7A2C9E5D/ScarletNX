@@ -240,6 +240,20 @@ static int is_dump(const char* path) {
     return 0;
 }
 
+void snx_save_before_exit(void) {
+    static PMutex lock = PMUTEX_INIT;
+    static int done;
+    pm_lock(&lock);
+    if (!done) {
+        done = 1;
+        save_hints();
+        /* the process ends without shutting the renderer down, so it saves what it keeps across runs (the pipeline
+           cache) here */
+        if (g_renderer && g_renderer->save) g_renderer->save();
+    }
+    pm_unlock(&lock);
+}
+
 int snx_main(int argc, char** argv) {
     int startup = snx_startup_options(argc, argv);
     if (startup) return startup;
@@ -383,10 +397,7 @@ int snx_main(int argc, char** argv) {
             next = now;
     }
     ini_poll(1); /* what changed in the game since the last poll (F4, the menu) is saved: it runs once a second */
-    save_hints();
-    /* the process ends without shutting the renderer down, so it saves what it keeps across runs (the pipeline cache)
-       here */
-    if (g_renderer && g_renderer->save) g_renderer->save();
+    snx_save_before_exit();
     LOG("Exit.\n");
     plat_exit_now(0); /* the guest threads are still running: they aren't joined */
 }
