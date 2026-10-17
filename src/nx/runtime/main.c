@@ -6,6 +6,7 @@
 /* startup: load GAME_code.dll/.so, set up memory + services + main thread, then run the frontend
    loop (window, input, vsync). */
 #include "nx/runtime/main.h"
+#include "nx/runtime/arm.h"
 #include "nx/runtime/clock.h"
 #include "nx/runtime/loader.h"
 #include "nx/runtime/options.h"
@@ -83,7 +84,14 @@ static int load_code(void) {
         return -1;
     }
     ModFn f = (ModFn)plat_dl_sym(h, "snx_module");
-    if (!f) {
+    if (!f) { /* a 32-bit game's (nx/runtime/arm.c), whose own version arm_module checks */
+        const SnxArmModule* (*arm)(void) = (const SnxArmModule* (*)(void))plat_dl_sym(h, "snx_module_arm");
+        if (arm) {
+            static SnxModule other; /* abi 0: from another version, which snx_main reports */
+            g_mod = arm_module(arm());
+            if (!g_mod) g_mod = &other;
+            return 0;
+        }
         WARN("%s is not a ScarletNX module\n", p);
         return -1;
     }
@@ -275,6 +283,8 @@ int snx_main(int argc, char** argv) {
     if (load_code()) fatal("Could not load the game's recompiled code.");
     user_folders(); /* before the log's first line */
     if (g_mod->abi != SNX_ABI) fatal("The recompiled code is from another ScarletNX version.");
+    /* a 32-bit game's address space is below 4 GiB, laid out as the console lays it out, before anything reads it */
+    if (g_arm_mod) mem_layout32(g_arm_mod->aspace);
     /* --key=value sets a setting for this run, over the .ini. The value is used where it is, so a long --script
        isn't cut */
     for (int i = 1; i < argc && strcmp(argv[i], "--"); i++) {
@@ -305,6 +315,7 @@ int snx_main(int argc, char** argv) {
     mem_init();
     kernel_init();
     build_dispatch();
+    if (g_arm_mod) arm_dispatch_init();
     load_hints();
     if (loader_load()) fatal("Could not load the game executables from %sexefs/", g_datadir);
     kernel_load_symbols();

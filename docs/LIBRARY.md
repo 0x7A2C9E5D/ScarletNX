@@ -130,7 +130,10 @@ The SVC hook is an `snx_svc_call32`: it sees `r7` as the number and `r0` to `r5`
 zero-extended, the console's 64-bit SVC surface, and returns non-zero to end the run.
 The bytes are read from `cpu->mem`, so the code must be there. Ranges are multiples of 2
 bytes (Thumb) and end at or below 4 GiB. `cpu->exit` is cleared when a run starts, so a
-run after an exit starts over from `r[15]`. libgccjit has no A32
+run after an exit starts over from `r[15]`. `cpu->rt` (an `SnxArmRt`, or NULL) decides
+what the blocks leave to the system: instructions they can't run, and the coprocessor
+registers (`cpu/arm/README.md`). With NULL, they stop with an exit, and the thread ID
+registers come from the CPU's fields. libgccjit has no A32
 backend, and a libgccjit recompiler refuses A32 code with a reason.
 
 ## Limits

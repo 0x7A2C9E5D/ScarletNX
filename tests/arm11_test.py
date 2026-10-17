@@ -26,6 +26,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--emitter', required=True)
     parser.add_argument('--cc', required=True)
+    parser.add_argument('--runtime', required=True, help='libsnx_arm_rt.a')
     args = parser.parse_args()
     A.catalogue()
     for condition in range(15):

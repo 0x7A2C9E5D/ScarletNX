@@ -260,6 +260,7 @@ if(SNX_BUILD_NX)
 endif()
 
 add_executable(snx-test-arm-decode arm_decode.c "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/a32.c"
+    "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/rt_helpers.c"
     "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/thumb_decode.c"
     "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/vector_decode.c")
 snx_test_target(snx-test-arm-decode 11)
@@ -694,10 +695,10 @@ option(SNX_TEST_ARM_DIFF "Compare A32 LLVM execution with Python unicorn 2.1.4" 
 if(UNIX AND NOT CMAKE_CROSSCOMPILING)
     if(Python3_Interpreter_FOUND)
         add_test(NAME arm_llvm_witnesses COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm_test.py"
-            --emitter $<TARGET_FILE:snx-test-arm-emit> --cc "${CMAKE_C_COMPILER}")
+            --emitter $<TARGET_FILE:snx-test-arm-emit> --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}")
         if(SNX_TEST_ARM_DIFF)
             add_test(NAME arm_llvm_differential COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/arm_test.py"
-                --emitter $<TARGET_FILE:snx-test-arm-emit> --cc "${CMAKE_C_COMPILER}" --unicorn)
+                --emitter $<TARGET_FILE:snx-test-arm-emit> --runtime $<TARGET_FILE:snx_arm_rt> --cc "${CMAKE_C_COMPILER}" --unicorn)
             set_tests_properties(arm_llvm_differential PROPERTIES TIMEOUT 900)
             # VFP/NEON uses the same emitter plus the raw-bit FP and crypto runtime library.
             get_filename_component(snx_llvm_bin "${SNX_LLVM_CONFIG}" DIRECTORY)
@@ -708,7 +709,7 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING)
                     --mc "${SNX_LLVM_MC}" --cc "${CMAKE_C_COMPILER}")
                 set_tests_properties(arm_llvm_vector PROPERTIES TIMEOUT 1800)
                 add_test(NAME thumb_llvm COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/thumb_test.py"
-                    --emitter $<TARGET_FILE:snx-test-thumb-emit> --mc "${SNX_LLVM_MC}"
+                    --emitter $<TARGET_FILE:snx-test-thumb-emit> --runtime $<TARGET_FILE:snx_arm_rt> --mc "${SNX_LLVM_MC}"
                     --cc "${CMAKE_C_COMPILER}")
                 set_tests_properties(thumb_llvm PROPERTIES TIMEOUT 900)
             endif()

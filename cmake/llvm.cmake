@@ -5,7 +5,7 @@
 if(ANDROID)
     # Android's LLVM (scripts/android-llvm.sh) has an llvm-config that only runs on the phone: its CMake package instead
     find_package(LLVM REQUIRED CONFIG)
-    llvm_map_components_to_libnames(SNX_LLVM_LIBS core native passes target analysis)
+    llvm_map_components_to_libnames(SNX_LLVM_LIBS core native passes target analysis mcjit)
     set(SNX_LLVM_VERSION "${LLVM_PACKAGE_VERSION}")
     set(SNX_LLVM_INCLUDE_DIR "${LLVM_INCLUDE_DIRS}")
     set(SNX_LLVM_LIBRARY_DIR "${LLVM_LIBRARY_DIRS}")
@@ -35,8 +35,8 @@ endfunction()
 snx_llvm_query(SNX_LLVM_VERSION --version)
 snx_llvm_query(SNX_LLVM_INCLUDE_DIR --includedir)
 snx_llvm_query(SNX_LLVM_LIBRARY_DIR --libdir)
-snx_llvm_query(SNX_LLVM_LIBS --libs core native passes target analysis)
-snx_llvm_query(SNX_LLVM_SYSTEM_LIBS --system-libs core native passes target analysis)
+snx_llvm_query(SNX_LLVM_LIBS --libs core native passes target analysis mcjit)
+snx_llvm_query(SNX_LLVM_SYSTEM_LIBS --system-libs core native passes target analysis mcjit)
 if(NOT SNX_LLVM_VERSION OR NOT EXISTS "${SNX_LLVM_INCLUDE_DIR}/llvm-c/Core.h" OR
    NOT IS_DIRECTORY "${SNX_LLVM_LIBRARY_DIR}" OR NOT SNX_LLVM_LIBS)
     message(FATAL_ERROR "LLVM's development files are required, but ${SNX_LLVM_CONFIG} reports an incomplete "

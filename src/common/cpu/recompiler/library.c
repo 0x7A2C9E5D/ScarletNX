@@ -1121,10 +1121,6 @@ struct snx_recompiled32* snx_recompile32_ranges(struct snx_recompiler* r, const 
         m->ranges[i].size = ranges[i].size;
     }
     m->count = range_count;
-    /* VFP and crypto blocks call these helpers (cpu/arm/simd.h), which the block compiler resolves in this process:
-       named here, so a program that doesn't export its symbols has them too */
-    LLVMAddSymbol("snx_arm_fp", (void*)(uintptr_t)snx_arm_fp);
-    LLVMAddSymbol("snx_arm_crypto", (void*)(uintptr_t)snx_arm_crypto);
     m->exec = snx_arm_exec_new(error, sizeof(error));
     if (!m->exec) {
         fail(r, "%s", error);

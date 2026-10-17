@@ -72,12 +72,13 @@ SnxA32Kind snx_a32_decode_profile(SnxArmProfile profile, uint32_t w) {
         case SNX_A32_DIV:
         case SNX_A32_BITFIELD:
         case SNX_A32_ACQUIRE_RELEASE:
-        case SNX_A32_BARRIER: return SNX_A32_UNDEFINED;
+        case SNX_A32_BARRIER:
+        case SNX_A32_CRC32: return SNX_A32_UNDEFINED;
         case SNX_A32_REV: return (w & 0x0fff0ff0) == 0x06ff0f30 ? SNX_A32_UNDEFINED : kind; /* RBIT */
         case SNX_A32_EXCLUSIVE: return ((w >> 8) & 15) == 15 ? kind : SNX_A32_UNDEFINED; /* no ARMv8 acquire/release */
         case SNX_A32_HINT:
             if ((w >> 28) == 15) return (w & 0xfd70f000) == 0xf550f000 ? kind : SNX_A32_UNDEFINED; /* PLD */
-            return (w & 15) <= 4 ? kind : SNX_A32_UNDEFINED;                                       /* no SEVL */
+            return kind; /* NOP, YIELD, WFE, WFI, SEV; the unallocated hints (SEVL among them) are NOP */
         case SNX_A32_VECTOR: return vfp2(w) ? kind : SNX_A32_UNDEFINED;
         default: return kind;
     }

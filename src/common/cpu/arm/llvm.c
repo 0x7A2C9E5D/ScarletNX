@@ -13,6 +13,9 @@ typedef struct {
     LLVMValueRef fn, cpu, mem;
     LLVMTypeRef i1, i8, i16, i32, i64, ptr;
     uint32_t pc, word;
+    uint32_t next; /* the next instruction's address */
+    int thumb;     /* a Thumb block: an A32 emitter running a Thumb32 instruction's A32 twin reads Thumb's PC */
+    unsigned pair; /* a Thumb32 doubleword exclusive's second register + 1 (TH_A32's .ra); 0: A32's first + 1 */
     SnxArmProfile profile;
     SnxArmMemoryMode memory;
     LLVMValueRef transfer_base, transfer_buffer;
@@ -54,14 +57,45 @@ static void put(ArmIR* a, size_t offset, LLVMValueRef v) { LLVMBuildStore(a->b, 
 #define GET(a, f)    get(a, offsetof(SnxArmCPU, f), (a)->i32)
 #define PUT(a, f, v) put(a, offsetof(SnxArmCPU, f), v)
 static LLVMValueRef reg(ArmIR* a, unsigned r) {
-    return r == 15 ? c32(a, a->pc + 8) : get(a, offsetof(SnxArmCPU, r) + r * 4, a->i32);
+    return r == 15 ? c32(a, a->thumb ? (a->pc + 4) & ~3u : a->pc + 8) : get(a, offsetof(SnxArmCPU, r) + r * 4, a->i32);
 }
 static void setreg(ArmIR* a, unsigned r, LLVMValueRef v) { put(a, offsetof(SnxArmCPU, r) + r * 4, v); }
 static LLVMValueRef flag(ArmIR* a, unsigned n) { return band(a, lsr(a, GET(a, cpsr), n), c32(a, 1)); }
 static LLVMBasicBlockRef block(ArmIR* a, const char* name) {
     return LLVMAppendBasicBlockInContext(a->ctx, a->fn, name);
 }
+/* void name(SnxArmCPU*, u32...): a call into the runtime library (rt_helpers.c), which may change any of the state */
+static void rt_call(ArmIR* a, const char* name, LLVMValueRef* args, unsigned count) {
+    LLVMTypeRef params[3] = {a->ptr, a->i32, a->i32};
+    LLVMTypeRef type = LLVMFunctionType(LLVMVoidTypeInContext(a->ctx), params, count + 1, 0);
+    LLVMValueRef fn = LLVMGetNamedFunction(a->mod, name), all[3];
+    unsigned i;
+    if (!fn) fn = LLVMAddFunction(a->mod, name, type);
+    all[0] = a->cpu;
+    for (i = 0; i < count; ++i) all[i + 1] = args[i];
+    LLVMBuildCall2(a->b, type, fn, all, count + 1, "");
+}
+/* after a runtime library call: the block ends here when it set an exit */
+static void stop_on_exit(ArmIR* a) {
+    LLVMBasicBlockRef go = block(a, "go"), stop = block(a, "stop");
+    LLVMBuildCondBr(a->b, LLVMBuildICmp(a->b, LLVMIntEQ, GET(a, exit), c32(a, SNX_ARM_OK), ""), go, stop);
+    LLVMPositionBuilderAtEnd(a->b, stop);
+    LLVMBuildRetVoid(a->b);
+    LLVMPositionBuilderAtEnd(a->b, go);
+}
+/* Ends the block with an exit. An instruction the block can't run (UNDEFINED, BACKEND_UNSUPPORTED) is the backend's
+   to decide instead (SnxArmRt.undefined): the block ends at it when it sets an exit, or after it when it ran it */
 static void trap(ArmIR* a, SnxArmExit code, LLVMValueRef syndrome) {
+    if (code == SNX_ARM_UNDEFINED || code == SNX_ARM_BACKEND_UNSUPPORTED) {
+        LLVMValueRef args[2];
+        args[0] = syndrome;
+        args[1] = c32(a, code);
+        rt_call(a, "snx_arm_undefined", args, 2);
+        stop_on_exit(a);
+        setreg(a, 15, c32(a, a->next));
+        LLVMBuildRetVoid(a->b);
+        return;
+    }
     PUT(a, exit, c32(a, code));
     PUT(a, syndrome, syndrome);
     LLVMBuildRetVoid(a->b);
@@ -490,7 +524,9 @@ static void exclusive(ArmIR* a) {
         PUT(a, exclusive_size, c32(a, bytes));
         PUT(a, exclusive_valid, c32(a, 1));
         setreg(a, d, LLVMBuildTrunc(a->b, value, a->i32, ""));
-        if (bytes == 8) setreg(a, d + 1, LLVMBuildTrunc(a->b, LLVMBuildLShr(a->b, value, c64(a, 32), ""), a->i32, ""));
+        if (bytes == 8)
+            setreg(a, a->pair ? a->pair - 1 : d + 1,
+                   LLVMBuildTrunc(a->b, LLVMBuildLShr(a->b, value, c64(a, 32), ""), a->i32, ""));
     } else {
         LLVMBasicBlockRef attempt = block(a, "exclusive.try"), fail = block(a, "exclusive.fail"),
                           join = block(a, "exclusive.end");
@@ -504,7 +540,8 @@ static void exclusive(ArmIR* a) {
         LLVMPositionBuilderAtEnd(a->b, attempt);
         value = reg(a, t);
         if (bytes == 8)
-            value = bor(a, z64(a, value), LLVMBuildShl(a->b, z64(a, reg(a, t + 1)), c64(a, 32), ""));
+            value = bor(a, z64(a, value),
+                        LLVMBuildShl(a->b, z64(a, reg(a, a->pair ? a->pair - 1 : t + 1)), c64(a, 32), ""));
         else if (bytes < 4)
             value = LLVMBuildTrunc(a->b, value, type, "");
         expected = get(a, offsetof(SnxArmCPU, exclusive_value), a->i64);
@@ -551,7 +588,11 @@ static void multiply(ArmIR* a, SnxA32Kind kind) {
     uint32_t w = a->word;
     unsigned n = (w >> 16) & 15, d = (w >> 12) & 15;
     LLVMValueRef x = reg(a, w & 15), y = reg(a, (w >> 8) & 15), r;
-    if (kind == SNX_A32_MULL) {
+    if (kind == SNX_A32_MULL && (w & 0x00e00000) == 0x00400000) { /* UMAAL: Rn * Rm + RdHi + RdLo, unsigned */
+        r = add(a, LLVMBuildMul(a->b, z64(a, x), z64(a, y), ""), add(a, z64(a, reg(a, d)), z64(a, reg(a, n))));
+        setreg(a, d, LLVMBuildTrunc(a->b, r, a->i32, ""));
+        setreg(a, n, LLVMBuildTrunc(a->b, LLVMBuildLShr(a->b, r, c64(a, 32), ""), a->i32, ""));
+    } else if (kind == SNX_A32_MULL) {
         if (w & (1u << 22)) {
             x = LLVMBuildSExt(a->b, x, a->i64, "");
             y = LLVMBuildSExt(a->b, y, a->i64, "");
@@ -617,6 +658,192 @@ static void halfword_multiply(ArmIR* a) {
     }
     setreg(a, d, r);
 }
+/* the bits lo..lo+bits-1 of x, sign- or zero-extended */
+static LLVMValueRef lane(ArmIR* a, LLVMValueRef x, unsigned lo, unsigned bits, int sign) {
+    if (sign) return LLVMBuildAShr(a->b, shl(a, x, 32 - lo - bits), c32(a, 32 - bits), "");
+    return band(a, lsr(a, x, lo), c32(a, (1u << bits) - 1));
+}
+static LLVMValueRef sext64(ArmIR* a, LLVMValueRef x) { return LLVMBuildSExt(a->b, x, a->i64, ""); }
+/* the signed v (i32 or i64) clamped to lo..hi, and whether it was outside */
+static LLVMValueRef clamp(ArmIR* a, LLVMValueRef v, int64_t lo, int64_t hi, LLVMValueRef* saturated) {
+    LLVMTypeRef t = LLVMTypeOf(v);
+    LLVMValueRef low = LLVMConstInt(t, (unsigned long long)lo, 1), high = LLVMConstInt(t, (unsigned long long)hi, 1);
+    LLVMValueRef under = cmp(a, LLVMIntSLT, v, low), over = cmp(a, LLVMIntSGT, v, high);
+    *saturated = LLVMBuildOr(a->b, under, over, "");
+    return choose(a, under, low, choose(a, over, high, v));
+}
+/* the i64 v as i32, and whether it didn't fit */
+static LLVMValueRef narrow(ArmIR* a, LLVMValueRef v, LLVMValueRef* overflow) {
+    LLVMValueRef r = LLVMBuildTrunc(a->b, v, a->i32, "");
+    *overflow = cmp(a, LLVMIntNE, sext64(a, r), v);
+    return r;
+}
+/* Q is sticky: an instruction that saturates or overflows sets it, none clears it but MSR */
+static void sticky_q(ArmIR* a, LLVMValueRef set) { PUT(a, cpsr, bor(a, GET(a, cpsr), shl(a, z32(a, set), 27))); }
+static LLVMValueRef rdhi_rdlo(ArmIR* a, unsigned hi, unsigned lo) {
+    return bor(a, z64(a, reg(a, lo)), LLVMBuildShl(a->b, z64(a, reg(a, hi)), c64(a, 32), ""));
+}
+static void set_rdhi_rdlo(ArmIR* a, unsigned hi, unsigned lo, LLVMValueRef v) {
+    setreg(a, lo, LLVMBuildTrunc(a->b, v, a->i32, ""));
+    setreg(a, hi, LLVMBuildTrunc(a->b, LLVMBuildLShr(a->b, v, c64(a, 32), ""), a->i32, ""));
+}
+
+/* {S,Q,SH,U,UQ,UH}{ADD16,ASX,SAX,SUB16,ADD8,SUB8}, lane by lane in i32, where no sum or difference overflows. The
+   modular forms set GE: a lane's sum or difference >= 0, an unsigned sum's carry out */
+static void parallel(ArmIR* a) {
+    uint32_t w = a->word;
+    unsigned form = (w >> 20) & 3, u = (w >> 22) & 1, op = (w >> 5) & 7, bits = op >= 4 ? 8 : 16, lanes = 32 / bits, i;
+    LLVMValueRef x = reg(a, (w >> 16) & 15), y = reg(a, w & 15), r = c32(a, 0), ge = c32(a, 0), unused;
+    for (i = 0; i < lanes; ++i) {
+        /* ASX: the low lane subtracts Rm's high halfword, the high lane adds its low one. SAX the other way */
+        unsigned from = op == 1 || op == 2 ? lanes - 1 - i : i;
+        int subtract = op == 3 || op == 7 || (op == 1 && i == 0) || (op == 2 && i == 1);
+        LLVMValueRef p = lane(a, x, i * bits, bits, !u), q = lane(a, y, from * bits, bits, !u), v;
+        v = subtract ? sub(a, p, q) : add(a, p, q);
+        if (form == 1) {
+            LLVMValueRef set = u && !subtract ? cmp(a, LLVMIntUGE, v, c32(a, 1u << bits))
+                                              : cmp(a, LLVMIntSGE, v, c32(a, 0));
+            ge = bor(a, ge, choose(a, set, c32(a, bits == 16 ? 3u << (2 * i) : 1u << i), c32(a, 0)));
+        } else if (form == 2)
+            v = u ? clamp(a, v, 0, (1 << bits) - 1, &unused)
+                  : clamp(a, v, -(1 << (bits - 1)), (1 << (bits - 1)) - 1, &unused);
+        else
+            v = LLVMBuildAShr(a->b, v, c32(a, 1), "");
+        r = bor(a, r, shl(a, band(a, v, c32(a, (1u << bits) - 1)), i * bits));
+    }
+    if (form == 1) PUT(a, cpsr, bor(a, band(a, GET(a, cpsr), c32(a, ~0x000f0000u)), shl(a, ge, 16)));
+    setreg(a, (w >> 12) & 15, r);
+}
+static void media(ArmIR* a, SnxA32Kind kind) {
+    uint32_t w = a->word;
+    unsigned n = (w >> 16) & 15, d = (w >> 12) & 15, s = (w >> 8) & 15, op, i;
+    LLVMValueRef x = reg(a, w & 15), r, v, saturated, unused;
+    switch (kind) {
+        case SNX_A32_SATURATE: {
+            int u = !!(w & (1u << 22));
+            int64_t lo, hi;
+            if ((w & 0x0fb00ff0) == 0x06a00f30) { /* SSAT16, USAT16: to 1..16 or 0..15 bits */
+                unsigned bits = ((w >> 16) & 15) + !u;
+                LLVMValueRef any = LLVMConstInt(a->i1, 0, 0);
+                lo = u ? 0 : -((int64_t)1 << (bits - 1));
+                hi = u ? ((int64_t)1 << bits) - 1 : ((int64_t)1 << (bits - 1)) - 1;
+                r = c32(a, 0);
+                for (i = 0; i < 2; ++i) {
+                    v = clamp(a, lane(a, x, i * 16, 16, 1), lo, hi, &saturated);
+                    any = LLVMBuildOr(a->b, any, saturated, "");
+                    r = bor(a, r, shl(a, band(a, v, c32(a, 0xffff)), i * 16));
+                }
+                saturated = any;
+            } else { /* SSAT, USAT: Rm LSL or ASR (ASR #32 encoded as 0), to 1..32 or 0..31 bits */
+                unsigned bits = ((w >> 16) & 31) + !u;
+                lo = u ? 0 : -((int64_t)1 << (bits - 1));
+                hi = u ? ((int64_t)1 << bits) - 1 : ((int64_t)1 << (bits - 1)) - 1;
+                v = shift(a, x, (w >> 5) & 2, NULL, 1, (w >> 7) & 31, &unused);
+                r = LLVMBuildTrunc(a->b, clamp(a, sext64(a, v), lo, hi, &saturated), a->i32, "");
+            }
+            sticky_q(a, saturated);
+            setreg(a, d, r);
+            return;
+        }
+        case SNX_A32_PACK: /* PKHBT: Rn's bottom, Rm LSL's top. PKHTB: Rn's top, Rm ASR's bottom */
+            v = shift(a, x, w & 0x40 ? 2 : 0, NULL, 1, (w >> 7) & 31, &unused);
+            r = w & 0x40 ? bor(a, band(a, reg(a, n), c32(a, 0xffff0000u)), band(a, v, c32(a, 0xffff)))
+                         : bor(a, band(a, reg(a, n), c32(a, 0xffff)), band(a, v, c32(a, 0xffff0000u)));
+            setreg(a, d, r);
+            return;
+        case SNX_A32_SELECT: { /* each byte from Rn where its GE bit is set, else from Rm */
+            LLVMValueRef ge = lsr(a, GET(a, cpsr), 16), mask = c32(a, 0);
+            for (i = 0; i < 4; ++i)
+                mask = bor(a, mask,
+                           choose(a, cmp(a, LLVMIntNE, band(a, ge, c32(a, 1u << i)), c32(a, 0)), c32(a, 0xffu << (8 * i)),
+                                  c32(a, 0)));
+            setreg(a, d, bor(a, band(a, reg(a, n), mask), band(a, x, LLVMBuildNot(a->b, mask, ""))));
+            return;
+        }
+        case SNX_A32_QARITH: { /* Rm + or - Rn, Rn doubled with saturation first for QDADD and QDSUB */
+            LLVMValueRef y = sext64(a, reg(a, n)), first = LLVMConstInt(a->i1, 0, 0);
+            op = (w >> 21) & 3;
+            if (op & 2) y = clamp(a, add(a, y, y), INT32_MIN, INT32_MAX, &first);
+            v = op & 1 ? sub(a, sext64(a, x), y) : add(a, sext64(a, x), y);
+            r = LLVMBuildTrunc(a->b, clamp(a, v, INT32_MIN, INT32_MAX, &saturated), a->i32, "");
+            sticky_q(a, LLVMBuildOr(a->b, first, saturated, ""));
+            setreg(a, d, r);
+            return;
+        }
+        case SNX_A32_HALF_MUL: { /* Rd (RdHi) n, Ra (RdLo) d, Rm s, Rn the low field: N picks Rn's half, M Rm's */
+            LLVMValueRef m = lane(a, reg(a, s), w & 0x40 ? 16 : 0, 16, 1);
+            op = (w >> 21) & 3;
+            if (op == 1) { /* SMLAW<y>, SMULW<y>: the top 32 bits of the 48-bit product */
+                v = LLVMBuildAShr(a->b, LLVMBuildMul(a->b, sext64(a, x), sext64(a, m), ""), c64(a, 16), "");
+                if (w & 0x20) {
+                    setreg(a, n, LLVMBuildTrunc(a->b, v, a->i32, ""));
+                    return;
+                }
+                r = narrow(a, add(a, sext64(a, LLVMBuildTrunc(a->b, v, a->i32, "")), sext64(a, reg(a, d))), &saturated);
+                sticky_q(a, saturated);
+                setreg(a, n, r);
+                return;
+            }
+            v = LLVMBuildMul(a->b, lane(a, x, w & 0x20 ? 16 : 0, 16, 1), m, ""); /* at most 2^30 */
+            if (op == 0) {                                                       /* SMLA<x><y>: Q on overflow */
+                r = narrow(a, add(a, sext64(a, v), sext64(a, reg(a, d))), &saturated);
+                sticky_q(a, saturated);
+                setreg(a, n, r);
+            } else if (op == 2) /* SMLAL<x><y> */
+                set_rdhi_rdlo(a, n, d, add(a, rdhi_rdlo(a, n, d), sext64(a, v)));
+            else
+                setreg(a, n, v);
+            return;
+        }
+        case SNX_A32_DUAL_MUL: { /* Rd (RdHi) n, Ra (RdLo) d, Rm s, Rn the low field */
+            LLVMValueRef m = reg(a, s);
+            op = (w >> 5) & 7;
+            if (((w >> 20) & 7) == 5) { /* SMMLA, SMMUL, SMMLS: the top 32 bits of (Ra << 32) +/- Rn * Rm, R rounds */
+                LLVMValueRef acc = d != 15 ? LLVMBuildShl(a->b, z64(a, reg(a, d)), c64(a, 32), "") : c64(a, 0);
+                v = LLVMBuildMul(a->b, sext64(a, x), sext64(a, m), "");
+                v = op >= 6 ? sub(a, acc, v) : add(a, acc, v);
+                if (w & 0x20) v = add(a, v, c64(a, 0x80000000u));
+                setreg(a, n, LLVMBuildTrunc(a->b, LLVMBuildLShr(a->b, v, c64(a, 32), ""), a->i32, ""));
+                return;
+            }
+            if (w & 0x20) m = ror(a, m, 16); /* X: exchange Rm's halves */
+            r = LLVMBuildMul(a->b, lane(a, x, 0, 16, 1), lane(a, m, 0, 16, 1), "");
+            v = LLVMBuildMul(a->b, lane(a, x, 16, 16, 1), lane(a, m, 16, 16, 1), "");
+            v = op & 2 ? sub(a, sext64(a, r), sext64(a, v)) : add(a, sext64(a, r), sext64(a, v));
+            if (((w >> 20) & 7) == 4) { /* SMLALD, SMLSLD */
+                set_rdhi_rdlo(a, n, d, add(a, rdhi_rdlo(a, n, d), v));
+                return;
+            }
+            if (d != 15) v = add(a, v, sext64(a, reg(a, d))); /* SMLAD, SMLSD; SMUAD and SMUSD without Ra */
+            r = narrow(a, v, &saturated);
+            sticky_q(a, saturated);
+            setreg(a, n, r);
+            return;
+        }
+        case SNX_A32_ABS_DIFF: { /* USAD8, USADA8: Rd n, Ra d, Rm s, Rn the low field */
+            LLVMValueRef m = reg(a, s);
+            r = d != 15 ? reg(a, d) : c32(a, 0);
+            for (i = 0; i < 4; ++i) {
+                v = sub(a, lane(a, x, i * 8, 8, 0), lane(a, m, i * 8, 8, 0));
+                r = add(a, r, choose(a, cmp(a, LLVMIntSLT, v, c32(a, 0)), sub(a, c32(a, 0), v), v));
+            }
+            setreg(a, n, r);
+            return;
+        }
+        case SNX_A32_CRC32: { /* the reflected CRC of Rm's low 1, 2 or 4 bytes onto Rn, without inversions */
+            unsigned bits = 8u << ((w >> 21) & 3);
+            LLVMValueRef poly = c32(a, w & 0x200 ? 0x82f63b78u : 0xedb88320u);
+            r = bxor(a, reg(a, n), bits == 32 ? x : band(a, x, c32(a, (1u << bits) - 1)));
+            for (i = 0; i < bits; ++i)
+                r = bxor(a, lsr(a, r, 1), band(a, poly, sub(a, c32(a, 0), band(a, r, c32(a, 1)))));
+            setreg(a, d, r);
+            return;
+        }
+        default: /* SETEND */
+            PUT(a, cpsr, bor(a, band(a, GET(a, cpsr), c32(a, ~SNX_ARM_E)), c32(a, w & SNX_ARM_E)));
+            return;
+    }
+}
 static void miscellaneous(ArmIR* a, SnxA32Kind kind) {
     uint32_t w = a->word;
     unsigned d = (w >> 12) & 15, n = (w >> 16) & 15;
@@ -647,6 +874,14 @@ static void miscellaneous(ArmIR* a, SnxA32Kind kind) {
             r = bor(a, band(a, lsr(a, x, 8), c32(a, 0x00ff00ff)), shl(a, band(a, x, c32(a, 0x00ff00ff)), 8));
             if (w & (1u << 22)) r = LLVMBuildSExt(a->b, LLVMBuildTrunc(a->b, r, a->i16, ""), a->i32, "");
         }
+    } else if (kind == SNX_A32_EXTEND && !(w & (3u << 20))) { /* SXTB16, UXTB16, with add: bytes 0 and 2 */
+        int sign = !(w & (1u << 22));
+        LLVMValueRef v = ror(a, x, ((w >> 10) & 3) * 8), lo = lane(a, v, 0, 8, sign), hi = lane(a, v, 16, 8, sign);
+        if (n != 15) {
+            lo = add(a, lo, reg(a, n));
+            hi = add(a, hi, lsr(a, reg(a, n), 16));
+        }
+        r = bor(a, band(a, lo, c32(a, 0xffff)), shl(a, hi, 16));
     } else if (kind == SNX_A32_EXTEND) {
         LLVMTypeRef type = w & (1u << 20) ? a->i16 : a->i8;
         r = LLVMBuildTrunc(a->b, ror(a, x, ((w >> 10) & 3) * 8), type, "");
@@ -681,17 +916,18 @@ static void miscellaneous(ArmIR* a, SnxA32Kind kind) {
             r = band(a, lsr(a, x, lsb), c32(a, mask));
             if (!(w & (1u << 22)) && width < 32) r = LLVMBuildAShr(a->b, shl(a, r, 32 - width), c32(a, 32 - width), "");
         }
-    } else if (kind == SNX_A32_MRS)
-        r = GET(a, cpsr);
+    } else if (kind == SNX_A32_MRS) /* the execution state bits (IT, J, T) read as zero */
+        r = band(a, GET(a, cpsr), c32(a, ~(0x0600FC00u | (1u << 24) | SNX_ARM_T)));
     else if (kind == SNX_A32_MSR) {
         LLVMValueRef unused;
-        uint32_t mask = (n & 8 ? 0xf8000000u : 0) | (n & 4 ? 0x000f0000u : 0);
+        uint32_t mask = (n & 8 ? 0xf8000000u : 0) | (n & 4 ? 0x000f0000u : 0) | (n & 2 ? SNX_ARM_E : 0);
         r = w & (1u << 25) ? operand2(a, w, &unused) : x;
         PUT(a, cpsr, bor(a, band(a, GET(a, cpsr), c32(a, ~mask)), band(a, r, c32(a, mask))));
         return;
     }
     setreg(a, d, r);
 }
+static int instruction(ArmIR* a, SnxA32Kind kind); /* Thumb32 runs A32 twins through it (TH_A32) */
 #include "common/cpu/arm/llvm_vector.inc"
 #include "common/cpu/arm/llvm_thumb.inc"
 
@@ -747,12 +983,31 @@ static int instruction(ArmIR* a, SnxA32Kind kind) {
             LLVMBuildFence(a->b, LLVMAtomicOrderingSequentiallyConsistent, 0, "");
             break;
         case SNX_A32_HINT: break; /* hints may complete without waiting */
-        case SNX_A32_TLS:
-            if (w & (1u << 20))
-                setreg(a, d, w & 0x20 ? GET(a, tpidruro) : GET(a, tpidrurw));
+        case SNX_A32_PARALLEL: parallel(a); break;
+        case SNX_A32_SATURATE:
+        case SNX_A32_PACK:
+        case SNX_A32_SELECT:
+        case SNX_A32_QARITH:
+        case SNX_A32_HALF_MUL:
+        case SNX_A32_DUAL_MUL:
+        case SNX_A32_ABS_DIFF:
+        case SNX_A32_CRC32: media(a, kind); break;
+        case SNX_A32_SETEND:
+        case SNX_A32_MSR:
+            /* A block checks E only on entry: one that may have changed it ends here */
+            if (kind == SNX_A32_SETEND)
+                media(a, kind);
             else
-                PUT(a, tpidrurw, reg(a, d));
+                miscellaneous(a, kind);
+            if (kind == SNX_A32_MSR && !(w & (1u << 17))) break;
+            setreg(a, 15, c32(a, a->next));
+            return 1;
+        case SNX_A32_COPROC: {    /* the backend's (SnxArmRt.coproc): it reads or writes the registers, or stops here */
+            LLVMValueRef word = c32(a, w);
+            rt_call(a, "snx_arm_coproc", &word, 1);
+            stop_on_exit(a);
             break;
+        }
         case SNX_A32_SVC:
         case SNX_A32_BKPT:
             setreg(a, 15, c32(a, a->pc + 4));
@@ -808,6 +1063,7 @@ LLVMValueRef snx_arm_llvm_block_ex(LLVMModuleRef module, const char* name, const
         LLVMBasicBlockRef execute = block(&a, "execute"), skip = block(&a, "skip"), next = block(&a, "next");
         int stop;
         a.pc = pc + (uint32_t)i * 4;
+        a.next = a.pc + 4;
         a.word = words[i];
         setreg(&a, 15, c32(&a, a.pc));
         instruction_fetch(&a, a.word, 4);
