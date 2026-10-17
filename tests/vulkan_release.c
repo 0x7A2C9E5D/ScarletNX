@@ -25,8 +25,9 @@ int vk_buf_pending_any(void);
 int vk_buf_pending_unsubmitted(void);
 void vk_submit(u64, u64, u64);
 u64 vk_last_submit(void);
+u64 vk_submit_number(void);
 void vk_rt_before_write(u64, u64);
-u64 vk_query_value(u64, u64);
+u64 vk_query_value(u32, u64, u64);
 #include "nx/gpu/vk/release.c"
 #include "nx/gpu/vk/writeback.c"
 
@@ -125,19 +126,22 @@ u64 vk_compute_put_aside(void) {
 }
 int vk_buf_pending_any(void) { return pending; }
 int vk_buf_pending_unsubmitted(void) { return 0; }
+/* a submit: what was recorded becomes the last submission */
 void vk_submit(u64 a, u64 b, u64 c) {
     (void)a;
     (void)b;
     (void)c;
     submits++;
+    next_graphics++;
 }
-/* a made-up count of query.c's segments, read under the lock when a report is performed */
-u64 vk_query_value(u64 first, u64 end) {
-    assert(lock_depth && !vk_result_landing());
+/* a made-up count of query.c's counter 3's segments, read under the lock when a report is performed */
+u64 vk_query_value(u32 counter, u64 first, u64 end) {
+    assert(lock_depth && !vk_result_landing() && counter == 3);
     query_reads++;
     return (end - first) * 100 + first;
 }
 u64 vk_last_submit(void) { return next_graphics; }
+u64 vk_submit_number(void) { return next_graphics + 1; }
 
 int main(void) {
     pending = 1;
@@ -165,17 +169,24 @@ int main(void) {
     vk_release_incr(5);
     vk_release_retire(5);
     assert(completed[5] == 1 && g_rhead == g_rtail);
-    /* a samples-passed report waits behind a submit of its own even with nothing pending, and its count is read when
-       it is performed: the count, then the ticks, or the count's low word alone */
+    /* a samples-passed report waits for the submit being recorded even with nothing pending, without submitting it:
+       whoever needs it submits, and its count is read when it is performed (the count, then the ticks) */
     pending = 0;
     unsigned before = submits;
-    vk_release_samples(0x10010, 16, 2, 5, 0x77);
-    assert(submits == before + 1 && g_rhead == g_rtail + 1 && query_reads == 0);
+    u64 recording = vk_submit_number();
+    vk_release_samples(0x10010, 16, 3, 2, 5, 0x77);
+    assert(submits == before && g_rhead == g_rtail + 1 && g_rq[g_rtail % RQ_N].gate == recording && !query_reads);
     vk_release_need(0x10010, 16);
     u64 report[2];
     memcpy(report, memory + 1 + 0x10, 16);
+    assert(submits == before + 1 && vk_last_submit() == recording);
     assert(query_reads == 1 && report[0] == 302 && report[1] == 0x77 && g_rhead == g_rtail);
-    vk_release_samples(0x10030, 4, 7, 9, 0x99);
+    /* the end of the GPFIFO submission submits it too, and a second stream end has nothing to submit; the count's low
+       word alone */
+    vk_release_samples(0x10030, 4, 3, 7, 9, 0x99);
+    vk_release_submit();
+    vk_release_submit();
+    assert(submits == before + 2);
     vk_release_drain();
     u32 word;
     memcpy(&word, memory + 1 + 0x30, 4);

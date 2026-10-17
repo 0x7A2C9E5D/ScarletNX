@@ -77,8 +77,8 @@ void query_get(GpuChannel* ch, u32* r, int base, u32 v) {
     } else if (op == 2) { /* counter */
         u32 sel = (v >> 23) & 31;
         /* samples passed is counted by the renderer once the game has reset it, and is a real value then */
-        if (sel == 0x15 && g_renderer_up && g_renderer->samples_report &&
-            g_renderer->samples_report(addr, ((v >> 28) & 1) ? 4 : 16, gpu_ticks())) {
+        if (sel == 0x15 && ch && g_renderer_up && g_renderer->samples_report &&
+            g_renderer->samples_report(ch, addr, ((v >> 28) & 1) ? 4 : 16, gpu_ticks())) {
             fake_report_mark(addr, 0);
             return;
         }
@@ -248,10 +248,11 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
         case 0x49: ch->r3d_shadow_mode = raw & 3; break;
         case 0x54C:
             counter_reset(ch, v);
-            if (v == 1 && g_renderer_up && g_renderer->samples_reset) g_renderer->samples_reset(); /* samples passed */
+            if (v == 1 && g_renderer_up && g_renderer->samples_reset)
+                g_renderer->samples_reset(ch); /* samples passed */
             break;
         case 0x545: /* SampleCounterEnable */
-            if (g_renderer_up && g_renderer->samples_enable) g_renderer->samples_enable(v & 1);
+            if (g_renderer_up && g_renderer->samples_enable) g_renderer->samples_enable(ch, v & 1);
             break;
         case 0x44: /* WAIT_FOR_IDLE */
             gpu_signal_point();

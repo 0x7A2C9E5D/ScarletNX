@@ -1833,7 +1833,7 @@ retry:
     }
     vkCmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
 
-    vk_query_draw(cb); /* counted by the samples-passed counter when it runs */
+    vk_query_draw(cb, ch->id, r[0x574]); /* counted by the channel's samples-passed counter when it runs */
     if (indexed) {
         vkCmdBindIndexBuffer(cb, ibuf, ioff, itype);
         /* quads made from guest indices keep the base vertex, quads made from vertex numbers have it in them */

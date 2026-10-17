@@ -678,10 +678,14 @@ static int gpu_job_run(GpuJob* j, u64* wake, int* ran) {
     r3d_const_flush(ch);
     r3d_pending_flush();
     pm_unlock(&g_gpulock);
-    if (parked) return 0;
+    if (parked) {
+        if (g_renderer->stream_end) g_renderer->stream_end();
+        return 0;
+    }
     dma_snap_finish(j->channel, j->id);
     /* the submission's own increments, after its work like the stream's (nothing else of a job's end is seen) */
     for (u32 i = 0; i < j->incs; i++) g_renderer->stream_incr(j->channel);
+    if (g_renderer->stream_end) g_renderer->stream_end();
     /* a stream that increments less than its fence promised leaves whoever waits for the fence waiting 2 s. Increments
        the renderer still holds count: they happen once the work before them lands */
     u32 value = g_renderer->release_value ? g_renderer->release_value(j->channel) : syncpt_read(j->channel);
