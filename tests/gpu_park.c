@@ -4,7 +4,8 @@
    (engines.c, maxwell3d.c, mme.c): another channel's submission queued after a waiting one runs and releases what it
    waits for; the waiting channel's later jobs, and the calls that name it, stay behind it while a call naming another
    channel doesn't; a release the CPU writes and a syncpoint incremented off the GPU thread end waits; a stream
-   resumes in the middle of a method batch, of a job's entries, and of a macro; and a wait nothing ends times out.
+   resumes in the middle of a method batch, of a job's entries, and of a macro; and a wait nothing ends times out. A
+   new channel's render enable override starts at USE_RENDER_ENABLE, as Eden's does.
    Each mark is a ClearBuffers value the stand-in renderer records; the platform's locks are pthreads */
 #include "nx/gpu/gpu.h"
 #include "nx/gpu/renderer.h"
@@ -247,6 +248,15 @@ int main(void) {
                "firmware call 4 signals completion and keeps its argument");
         free(fw);
     }
+
+    /* a new channel's render enable override is USE_RENDER_ENABLE (0), which deko3d never writes: the render enable
+       decides, FALSE skipping a clear until TRUE */
+    u32 cond[] = {inc(0x554, 3), 0, 0, 0, imm(CLEAR, 0x5A1), imm(0x556, 1), imm(CLEAR, 0x5A2)};
+    submit1(push(cond, sizeof cond / sizeof cond[0]), 19);
+    wait_marks(1);
+    nanosleep(&ms20, NULL);
+    expect(marks_are((u32[]){0x5A2}, 1), "a new channel's render enable FALSE skips, TRUE draws");
+    forget_marks();
 
     /* Executing an entry can change its backing memory. The fetched commands must stay intact, including for a
        contiguous mapping that could otherwise be read through a live guest pointer. */

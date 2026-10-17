@@ -480,7 +480,6 @@ static GpuChannel* chan_get(u32 id) {
     /* hw reset values that NVN/deko3d rely on and never write. sRGB writes default to on,
      otherwise sRGB targets are stored linear and come out too dark */
     c->r3d[0x56E] = 1;
-    c->r3d[0x651] = 1; /* render-enable override resets to AlwaysRender, including in shadow RAM */
     /* the color write masks default to enabled: games that never set them draw nothing at all
        (Eden defaults these for Sonic Mania; Unicorn Overlord and Fire Emblem need it too) */
     memset(&c->r3d[0x680], 0x11, 8 * sizeof c->r3d[0]);
