@@ -522,8 +522,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME trim_caches COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/trim_caches_test.py")
     # the nightly release's title and notes (scripts/nightly-notes.py)
     add_test(NAME nightly_notes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/nightly_notes_test.py")
-    # the builds published to the nightly repository and Discord (scripts/publish-builds.py), against fakes
-    add_test(NAME publish_builds COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/publish_builds_test.py")
+    # the builds published as releases and on Discord (scripts/publish-builds.py), against fakes. Where publish.yml
+    # runs it, Linux: the fake gh is a script Windows does not run by its name
+    if(NOT WIN32)
+        add_test(NAME publish_builds
+                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/publish_builds_test.py")
+    endif()
 endif()
 
 # a package patched in the build tree from the cache's copy as released (cmake/patched_copy.cmake)
