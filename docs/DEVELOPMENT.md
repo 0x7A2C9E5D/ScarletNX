@@ -25,8 +25,9 @@ and the Windows zip (each then run as installed) and the Android APK. `.github/w
 builds everywhere, each said on Discord (`scripts/publish-builds.py`): a version tag pushed (`v1.0.0`; `v1.0.0-rc1` a
 prerelease) as this repository's release of it, the latest, its notes listing the changes since the version before;
 each push to `main` as a release of [scarletnx/nightly](https://github.com/scarletnx/nightly/releases), the newest 30
-kept (this repository's `nightly` prerelease links the latest); each pull request as a prerelease there,
-`pr-<number>`. A fork's pull request is published once someone of the team labels it `publish builds`, after each
+kept (this repository's `nightly` prerelease shows the latest's notes); each pull request as a prerelease there,
+`pr-<number>`. The notes and the messages link each download with its size and list what changed (a pull request's
+commits). A fork's pull request is published once someone of the team labels it `publish builds`, after each
 push. Its secrets: `NIGHTLY_TOKEN` (writes that repository's contents), `DISCORD_WEBHOOK_RELEASES`,
 `DISCORD_WEBHOOK_NIGHTLY` and `DISCORD_WEBHOOK_PRS`. Formatting is checked locally (`scripts/format.sh --check`).
 Verify affected scenes manually, repeat intermittent failures, record evidence/scope.
