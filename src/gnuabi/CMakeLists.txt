@@ -31,7 +31,7 @@ if(WIN32)
 endif()
 add_executable(scarletnx-gnuabi-run runtime/main.c)
 target_link_libraries(scarletnx-gnuabi-run PRIVATE scarletnx-gnuabi)
-# the default sysroot is linux/ of the data folder games/ is in (snx_data_dir), as the 3DS runtime finds work/3ds
+# its checkout, where an older version kept the default sysroot, linux/ (snx_checkout)
 target_compile_definitions(scarletnx-gnuabi-run PRIVATE SNX_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     SNX_BUILD_DIR="${CMAKE_BINARY_DIR}")
 set_target_properties(scarletnx-gnuabi-run PROPERTIES OUTPUT_NAME scarletnx-gnuabi
