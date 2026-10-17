@@ -66,7 +66,7 @@ static unsigned checks, failures;
 
 #define HANDLES 0x100ull /* where the guest's handle array is */
 static void put_handles(const u32* h, int n) { memcpy(g_mem + HANDLES, h, 4 * (size_t)n); }
-static u32 wait(u32 n, i64 timeout, u32* idx) {
+static u32 kernel_timeouted_wait(u32 n, i64 timeout, u32* idx) {
     *idx = 77;
     return svc_wait_sync(&g_self, HANDLES, n, timeout, idx);
 }
@@ -106,7 +106,7 @@ int main(void) {
     CHECK(svc_wait_sync(&g_self, 0, 0, -1, &idx) == R_CANCELLED && !g_self.cancel);
 
     /* more than 64 handles, and handles that name nothing to wait on: the whole wait fails, no reference kept */
-    CHECK(wait(65, 0, &idx) == R_OUTOFRANGE);
+    CHECK(kernel_timeouted_wait(65, 0, &idx) == R_OUTOFRANGE);
     hw = h_new(&g_wevent);
     ht = h_new(&g_self.o);
     {
@@ -120,30 +120,30 @@ int main(void) {
             two[1] = bad[i];
             put_handles(two, 2);
             refs = g_ev[0]->o.refs;
-            CHECK(wait(2, 0, &idx) == R_BADHANDLE && g_ev[0]->o.refs == refs);
+            CHECK(kernel_timeouted_wait(2, 0, &idx) == R_BADHANDLE && g_ev[0]->o.refs == refs);
         }
     }
 
     /* the lowest signaled index wins; with none, a timeout of 0 times out ahead of a pending cancel */
     put_handles(h, 2);
     kevent_signal(g_ev[1]);
-    CHECK(wait(2, -1, &idx) == 0 && idx == 1);
+    CHECK(kernel_timeouted_wait(2, -1, &idx) == 0 && idx == 1);
     kevent_signal(g_ev[0]);
-    CHECK(wait(2, -1, &idx) == 0 && idx == 0);
+    CHECK(kernel_timeouted_wait(2, -1, &idx) == 0 && idx == 0);
     kevent_clear(g_ev[0]);
     kevent_clear(g_ev[1]);
     g_self.cancel = 1;
-    CHECK(wait(2, 0, &idx) == R_TIMEOUT && g_self.cancel == 1);
-    CHECK(wait(2, 1000, &idx) == R_CANCELLED && g_self.cancel == 0);
+    CHECK(kernel_timeouted_wait(2, 0, &idx) == R_TIMEOUT && g_self.cancel == 1);
+    CHECK(kernel_timeouted_wait(2, 1000, &idx) == R_CANCELLED && g_self.cancel == 0);
 
     /* signaled while waiting: the index of the object that ended the wait; references only for the wait */
     refs = g_ev[1]->o.refs;
     g_during = signal_second;
-    CHECK(wait(2, -1, &idx) == 0 && idx == 1 && g_ev[1]->o.refs == refs && !g_ev[1]->o.nwait && !g_ev[0]->o.nwait);
+    CHECK(kernel_timeouted_wait(2, -1, &idx) == 0 && idx == 1 && g_ev[1]->o.refs == refs && !g_ev[1]->o.nwait && !g_ev[0]->o.nwait);
     kevent_clear(g_ev[1]);
     g_during = cancel_it;
-    CHECK(wait(2, -1, &idx) == R_CANCELLED && idx == ~0u && !g_self.cancel);
-    CHECK(wait(2, 500, &idx) == R_TIMEOUT && idx == ~0u);
+    CHECK(kernel_timeouted_wait(2, -1, &idx) == R_CANCELLED && idx == ~0u && !g_self.cancel);
+    CHECK(kernel_timeouted_wait(2, 500, &idx) == R_TIMEOUT && idx == ~0u);
 
     /* a join: the thread first among the handles is named in the dump */
     {
@@ -151,9 +151,9 @@ int main(void) {
         two[0] = ht;
         two[1] = h[0];
         put_handles(two, 2);
-        CHECK(wait(2, 1000, &idx) == R_TIMEOUT && g_seen_tid == 0x60 && !g_self.wait_tid);
+        CHECK(kernel_timeouted_wait(2, 1000, &idx) == R_TIMEOUT && g_seen_tid == 0x60 && !g_self.wait_tid);
         g_self.state = 2; /* it has exited */
-        CHECK(wait(2, 1000, &idx) == 0 && idx == 0);
+        CHECK(kernel_timeouted_wait(2, 1000, &idx) == 0 && idx == 0);
         g_self.state = 0;
     }
 
@@ -172,7 +172,7 @@ int main(void) {
     kobj_ref(&g_ev[0]->o);
     CHECK(h_close(h[0]) == 0 && g_ev[0]->o.refs == 1 && h_close(h[0]) == R_BADHANDLE);
     put_handles(h, 1);
-    CHECK(wait(1, 0, &idx) == R_BADHANDLE);
+    CHECK(kernel_timeouted_wait(1, 0, &idx) == R_BADHANDLE);
     kobj_unref(&g_ev[0]->o);
 
     printf("kernel_wait: %u checks, %u failed\n", checks, failures);

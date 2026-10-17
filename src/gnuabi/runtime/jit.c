@@ -17,6 +17,11 @@
 #include <sys/mman.h>
 #endif
 
+/* For FreeBSD and other NIXes */
+#ifndef MAP_NORESERVE
+#define MAP_NORESERVE 0
+#endif
+
 /* instructions one just-in-time step compiles: the function execution reached and the functions it calls, breadth
    first. Each module carries its own copy of the runtime library, so steps are coarse */
 #define JIT_STEP_INSTRUCTIONS 65536
