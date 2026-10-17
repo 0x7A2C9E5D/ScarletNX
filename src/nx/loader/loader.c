@@ -592,8 +592,15 @@ static int parse_module(Parser* p) {
     fields[2] = &m->mod0.bss_end;
     fields[3] = &m->mod0.ehf_start;
     fields[4] = &m->mod0.ehf_end;
-    for (i = 0; i < 5; i++)
-        if (signed_relative(p, mod0, get32(m->image + mod0 + 4 + i * 4), fields[i])) return -1;
+    for (i = 0; i < 5; i++) {
+        SnxU32 displacement = get32(m->image + mod0 + 4 + i * 4);
+        /* Large BSS ranges can exceed signed 32-bit reach. */
+        if (i == 2 && (displacement & 0x80000000UL) && mod0 < (~displacement + 1)) {
+            *fields[i] = (SnxU64)mod0 + displacement;
+        } else if (signed_relative(p, mod0, displacement, fields[i])) {
+            return -1;
+        }
+    }
     if (m->mod0.bss_start > m->mod0.bss_end || m->mod0.bss_end > m->size)
         return fail(p, "MOD0: BSS range exceeds module");
     if (!span(m->image_size, m->mod0.dynamic, 16)) return fail(p, "MOD0: dynamic table exceeds image");
