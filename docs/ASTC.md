@@ -24,13 +24,11 @@ Eden's shader stores floats into a storage image. Here the conversion to 8 bits 
 
 - LDR channels and the void-extent color are UNORM16 values rounded to nearest, `(c * 255 + 32767) / 65535`.
   This is what storing `c / 65535` into an RGBA8 image gives.
-- HDR channels are clamped to [0, 1] and rounded to nearest (halfway cases up) from the half-float bits.
-- Invalid blocks are transparent black, Eden's error color. The specification's magenta is not used.
+- Invalid blocks are the LDR profile's error color, opaque magenta, where Eden's is transparent black.
 - SRGB images use the specification's sRGB decode mode (Khronos Data Format Specification, ASTC chapter,
   "Weight Application"), which Eden does not implement. For R, G and B, LDR endpoints expand to 16 bits as
   `(e << 8) | 0x80` instead of by bit replication (`e * 257`), and the decoded byte is the top 8 bits of the
-  interpolated value, which the specification hands to the sRGB conversion. Alpha decodes as in UNORM. HDR
-  endpoints are not affected (the sRGB profile is LDR only, and this decoder keeps decoding them as HDR). An LDR
+  interpolated value, which the specification hands to the sRGB conversion. Alpha decodes as in UNORM. An LDR
   void extent's R, G and B are the top 8 bits of its UNORM16 color, its alpha rounds as in UNORM. The bytes are
   still copied without a gamma step: the image's SRGB format applies the gamma when the texture is sampled.
   The two modes differ by at most one step, mostly in void extents and at rounding boundaries.
@@ -44,8 +42,9 @@ specification treats as errors. Both ports make the same choices, checked agains
   shader rounds `bits * 64 / (2^n - 1)` instead, which differs for 4 and 5 bit weights.
 - Bits past the color endpoint sequence's length read as zero, as Eden already does for the weights. Eden decodes
   the spare values of the last trit or quint block from them, which can change the values that are used.
-- HDR endpoint mode 11 (and the RGB of modes 14 and 15) sign-extends only the low bits of its two delta values.
-  Eden keeps the bits above them, which this mode shares with other fields.
+- Both decoders follow the LDR profile, as edenprobe's astc cases hold them to: an HDR void extent is an error,
+  and a partition with an HDR endpoint mode (2, 3, 7, 11, 14 or 15) is the error color on its own texels while
+  the block's other partitions decode. Eden decodes HDR endpoints. Its HDR endpoint decoding was left out.
 - The following are errors, as in the specification: a block whose weights and configuration leave no room for
   color data (Eden's CPU decoder decodes it anyway), more than 18 color values, color data too short for 6 levels,
   and a void extent whose coordinates are not all ones but have a minimum not below its maximum.
@@ -86,8 +85,9 @@ was not rebuilt fails the test.
 
 ## Tests
 
-- `astc_decode` (ctest) checks the CPU decoder on void-extent blocks: the color in both decode modes, the
-  reserved bits, HDR void extents and empty extents.
+- `astc_decode` (ctest) checks the CPU decoder on void-extent blocks (the color in both decode modes, the
+  reserved bits, HDR void extents and empty extents), and on edenprobe's illegal block and HDR partition block
+  against its reference decoder's texels.
 - `tests/run_astc_vulkan.py` builds `tests/astc_vulkan.c` with the production `vk/astc.c` and `vk/cmd.c`, volk and
   VMA, and compares raw image readbacks with the CPU decoder byte for byte. It covers all 14 footprints with UNORM
   and SRGB images, each against the CPU decoder in its decode mode, and decodes the same blocks in both modes
@@ -113,5 +113,8 @@ was not rebuilt fails the test.
 The CPU decoder was also compared with ARM's astcenc 5.7.0 (`astcenc -dl` and `-dH`, Apache-2.0, a release binary
 used only as a tool), on the same kind of random blocks for every footprint. Every texel agreed within one step of
 rounding (astcenc's 8 bit output rounds differently), and every block one rejects the other rejects too. In the LDR
-profile astcenc also rejects HDR endpoint modes, which this decoder decodes. The sRGB decode mode was checked
+profile astcenc also rejects HDR endpoint modes, which this decoder decoded then. After HDR endpoints became the
+error color, the CPU decoder was compared with edenprobe's LDR profile reference decoder (`source/astcref.c`, held
+to astcenc by edenprobe's reference suite) on 20,000 random blocks for each of the 14 footprints: every texel was
+one of the two bytes the reference allows, error blocks included. The sRGB decode mode was checked
 the same way against `astcenc -cs` and `-ds` on five footprints: every byte agreed, alpha included.

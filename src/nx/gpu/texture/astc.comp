@@ -491,143 +491,7 @@ bool IsHDRColorEndpointMode(uint cem) {
     return cem == 2u || cem == 3u || cem == 7u || cem == 11u || cem == 14u || cem == 15u;
 }
 
-/* the low nbits of value as a signed number: Eden keeps the bits above them, which mode 11 shares with x2 to x5 */
-int SignExtend(int value, uint nbits) {
-    int sign_bit = 1 << (nbits - 1u);
-    return ((value & ((1 << nbits) - 1)) ^ sign_bit) - sign_bit;
-}
-
-void DecodeHDREndpointMode7(uint v0, uint v1, uint v2, uint v3, out ivec3 e0, out ivec3 e1) {
-    uint modeval = ((v0 & 0xC0u) >> 6u) | ((v1 & 0x80u) >> 5u) | ((v2 & 0x80u) >> 4u);
-    uint majcomp;
-    uint mode;
-    if ((modeval & 0xCu) != 0xCu) {
-        majcomp = modeval >> 2u;
-        mode = modeval & 3u;
-    } else if (modeval != 0xFu) {
-        majcomp = modeval & 3u;
-        mode = 4u;
-    } else {
-        majcomp = 0u;
-        mode = 5u;
-    }
-    int red = int(v0 & 0x3Fu);
-    int green = int(v1 & 0x1Fu);
-    int blue = int(v2 & 0x1Fu);
-    int scale = int(v3 & 0x1Fu);
-    uint x0 = (v1 >> 6u) & 1u;
-    uint x1 = (v1 >> 5u) & 1u;
-    uint x2 = (v2 >> 6u) & 1u;
-    uint x3 = (v2 >> 5u) & 1u;
-    uint x4 = (v3 >> 7u) & 1u;
-    uint x5 = (v3 >> 6u) & 1u;
-    uint x6 = (v3 >> 5u) & 1u;
-    uint ohm = 1u << mode;
-    if ((ohm & 0x30u) != 0u) green |= int(x0 << 6u);
-    if ((ohm & 0x3Au) != 0u) green |= int(x1 << 5u);
-    if ((ohm & 0x30u) != 0u) blue |= int(x2 << 6u);
-    if ((ohm & 0x3Au) != 0u) blue |= int(x3 << 5u);
-    if ((ohm & 0x3Du) != 0u) scale |= int(x6 << 5u);
-    if ((ohm & 0x2Du) != 0u) scale |= int(x5 << 6u);
-    if ((ohm & 0x04u) != 0u) scale |= int(x4 << 7u);
-    if ((ohm & 0x3Bu) != 0u) red |= int(x4 << 6u);
-    if ((ohm & 0x04u) != 0u) red |= int(x3 << 6u);
-    if ((ohm & 0x10u) != 0u) red |= int(x5 << 7u);
-    if ((ohm & 0x0Fu) != 0u) red |= int(x2 << 7u);
-    if ((ohm & 0x05u) != 0u) red |= int(x1 << 8u);
-    if ((ohm & 0x0Au) != 0u) red |= int(x0 << 8u);
-    if ((ohm & 0x05u) != 0u) red |= int(x0 << 9u);
-    if ((ohm & 0x02u) != 0u) red |= int(x6 << 9u);
-    if ((ohm & 0x01u) != 0u) red |= int(x3 << 10u);
-    if ((ohm & 0x02u) != 0u) red |= int(x5 << 10u);
-    const int shamts[6] = int[](1, 1, 2, 3, 4, 5);
-    int shamt = shamts[mode];
-    red <<= shamt;
-    green <<= shamt;
-    blue <<= shamt;
-    scale <<= shamt;
-    if (mode != 5u) {
-        green = red - green;
-        blue = red - blue;
-    }
-    if (majcomp == 1u) {
-        int t = red;
-        red = green;
-        green = t;
-    }
-    if (majcomp == 2u) {
-        int t = red;
-        red = blue;
-        blue = t;
-    }
-    e1 = ivec3(clamp(red, 0, 0xFFF), clamp(green, 0, 0xFFF), clamp(blue, 0, 0xFFF));
-    e0 = ivec3(clamp(red - scale, 0, 0xFFF), clamp(green - scale, 0, 0xFFF), clamp(blue - scale, 0, 0xFFF));
-}
-
-void DecodeHDREndpointMode11(uint v0, uint v1, uint v2, uint v3, uint v4, uint v5, out ivec3 e0, out ivec3 e1) {
-    uint majcomp = ((v4 & 0x80u) >> 7u) | ((v5 & 0x80u) >> 6u);
-    if (majcomp == 3u) {
-        e0 = ivec3(int(v0 << 4u), int(v2 << 4u), int((v4 & 0x7Fu) << 5u));
-        e1 = ivec3(int(v1 << 4u), int(v3 << 4u), int((v5 & 0x7Fu) << 5u));
-        return;
-    }
-    uint mode = ((v1 & 0x80u) >> 7u) | ((v2 & 0x80u) >> 6u) | ((v3 & 0x80u) >> 5u);
-    int va = int(v0 | ((v1 & 0x40u) << 2u));
-    int vb0 = int(v2 & 0x3Fu);
-    int vb1 = int(v3 & 0x3Fu);
-    int vc = int(v1 & 0x3Fu);
-    int vd0 = int(v4 & 0x7Fu);
-    int vd1 = int(v5 & 0x7Fu);
-    const int dbitstab[8] = int[](7, 6, 7, 6, 5, 6, 5, 6);
-    vd0 = SignExtend(vd0, uint(dbitstab[mode]));
-    vd1 = SignExtend(vd1, uint(dbitstab[mode]));
-    uint x0 = (v2 >> 6u) & 1u;
-    uint x1 = (v3 >> 6u) & 1u;
-    uint x2 = (v4 >> 6u) & 1u;
-    uint x3 = (v5 >> 6u) & 1u;
-    uint x4 = (v4 >> 5u) & 1u;
-    uint x5 = (v5 >> 5u) & 1u;
-    uint ohm = 1u << mode;
-    if ((ohm & 0xA4u) != 0u) va |= int(x0 << 9u);
-    if ((ohm & 0x08u) != 0u) va |= int(x2 << 9u);
-    if ((ohm & 0x50u) != 0u) va |= int(x4 << 9u);
-    if ((ohm & 0x50u) != 0u) va |= int(x5 << 10u);
-    if ((ohm & 0xA0u) != 0u) va |= int(x1 << 10u);
-    if ((ohm & 0xC0u) != 0u) va |= int(x2 << 11u);
-    if ((ohm & 0x04u) != 0u) vc |= int(x1 << 6u);
-    if ((ohm & 0xE8u) != 0u) vc |= int(x3 << 6u);
-    if ((ohm & 0x20u) != 0u) vc |= int(x2 << 7u);
-    if ((ohm & 0x5Bu) != 0u) vb0 |= int(x0 << 6u);
-    if ((ohm & 0x5Bu) != 0u) vb1 |= int(x1 << 6u);
-    if ((ohm & 0x12u) != 0u) vb0 |= int(x2 << 7u);
-    if ((ohm & 0x12u) != 0u) vb1 |= int(x3 << 7u);
-    int shamt = (int(mode) >> 1) ^ 3;
-    va <<= shamt;
-    vb0 <<= shamt;
-    vb1 <<= shamt;
-    vc <<= shamt;
-    vd0 <<= shamt;
-    vd1 <<= shamt;
-    int r1 = clamp(va, 0, 0xFFF);
-    int g1 = clamp(va - vb0, 0, 0xFFF);
-    int b1 = clamp(va - vb1, 0, 0xFFF);
-    int r0 = clamp(va - vc, 0, 0xFFF);
-    int g0 = clamp(va - vb0 - vc - vd0, 0, 0xFFF);
-    int b0 = clamp(va - vb1 - vc - vd1, 0, 0xFFF);
-    if (majcomp == 1u) {
-        int t;
-        t = r0; r0 = g0; g0 = t;
-        t = r1; r1 = g1; g1 = t;
-    } else if (majcomp == 2u) {
-        int t;
-        t = r0; r0 = b0; b0 = t;
-        t = r1; r1 = b1; b1 = t;
-    }
-    e0 = ivec3(r0, g0, b0);
-    e1 = ivec3(r1, g1, b1);
-}
-
-/* the endpoints in A, R, G, B order: 8 bit for the LDR modes, 12 bit (or more for mode 15's alpha) for HDR */
+/* the 8 bit endpoints of an LDR partition, in A, R, G, B order */
 void ComputeEndpoints(out uvec4 ep1, out uvec4 ep2, uint color_endpoint_mode, uint color_values[32],
                       inout uint colvals_index) {
 #define READ_UINT_VALUES(N)                                \
@@ -750,85 +614,13 @@ void ComputeEndpoints(out uvec4 ep1, out uvec4 ep2, uint color_endpoint_mode, ui
         }
         break;
     }
-    case 2: {
-        READ_UINT_VALUES(2)
-        uint y0, y1;
-        if (V[0].y >= V[0].x) {
-            y0 = V[0].x << 4u;
-            y1 = V[0].y << 4u;
-        } else {
-            y0 = (V[0].y << 4u) + 8u;
-            y1 = (V[0].x << 4u) - 8u;
-        }
-        ep1 = uvec4(0x780u, y0, y0, y0);
-        ep2 = uvec4(0x780u, y1, y1, y1);
+    default:
+        /* HDR modes 2, 3, 7, 11, 14 and 15: the error color on the partition's texels, as in the LDR profile. Only
+           their values are skipped */
+        colvals_index += ((color_endpoint_mode >> 2) + 1) * 2;
+        ep1 = uvec4(0);
+        ep2 = uvec4(0);
         break;
-    }
-    case 3: {
-        READ_UINT_VALUES(2)
-        uint y0, d;
-        if ((V[0].x & 0x80u) != 0u) {
-            y0 = ((V[0].y & 0xE0u) << 4u) | ((V[0].x & 0x7Fu) << 2u);
-            d = (V[0].y & 0x1Fu) << 2u;
-        } else {
-            y0 = ((V[0].y & 0xF0u) << 4u) | ((V[0].x & 0x7Fu) << 1u);
-            d = (V[0].y & 0x0Fu) << 1u;
-        }
-        const uint y1 = min(y0 + d, 0xFFFu);
-        ep1 = uvec4(0x780u, y0, y0, y0);
-        ep2 = uvec4(0x780u, y1, y1, y1);
-        break;
-    }
-    case 7: {
-        READ_UINT_VALUES(4)
-        ivec3 e0, e1;
-        DecodeHDREndpointMode7(V[0].x, V[0].y, V[0].z, V[0].w, e0, e1);
-        ep1 = uvec4(0x780u, uvec3(e0));
-        ep2 = uvec4(0x780u, uvec3(e1));
-        break;
-    }
-    case 11: {
-        READ_UINT_VALUES(6)
-        ivec3 e0, e1;
-        DecodeHDREndpointMode11(V[0].x, V[0].y, V[0].z, V[0].w, V[1].x, V[1].y, e0, e1);
-        ep1 = uvec4(0x780u, uvec3(e0));
-        ep2 = uvec4(0x780u, uvec3(e1));
-        break;
-    }
-    case 14: {
-        READ_UINT_VALUES(8)
-        ivec3 e0, e1;
-        DecodeHDREndpointMode11(V[0].x, V[0].y, V[0].z, V[0].w, V[1].x, V[1].y, e0, e1);
-        ep1 = uvec4(V[1].z, uvec3(e0));
-        ep2 = uvec4(V[1].w, uvec3(e1));
-        break;
-    }
-    default: {
-        READ_UINT_VALUES(8)
-        ivec3 e0, e1;
-        DecodeHDREndpointMode11(V[0].x, V[0].y, V[0].z, V[0].w, V[1].x, V[1].y, e0, e1);
-        const uint mode = ((V[1].z >> 7u) & 1u) | ((V[1].w >> 6u) & 2u);
-        int a6 = int(V[1].z & 0x7Fu);
-        int a7 = int(V[1].w & 0x7Fu);
-        int alpha0, alpha1;
-        if (mode == 3u) {
-            alpha0 = a6 << 5;
-            alpha1 = a7 << 5;
-        } else {
-            a6 |= (a7 << int(mode + 1u)) & 0x780;
-            a7 &= int(0x3Fu >> mode);
-            a7 ^= int(0x20u >> mode);
-            a7 -= int(0x20u >> mode);
-            a6 <<= int(4u - mode);
-            a7 <<= int(4u - mode);
-            a7 += a6;
-            alpha0 = a6;
-            alpha1 = clamp(a7, 0, 0xFFF);
-        }
-        ep1 = uvec4(uint(alpha0), uvec3(e0));
-        ep2 = uvec4(uint(alpha1), uvec3(e1));
-        break;
-    }
     }
 #undef READ_UINT_VALUES
 #undef READ_INT_VALUES
@@ -962,17 +754,6 @@ uint Unorm16To8(uint c) {
     return (c * 255u + 32767u) / 65535u;
 }
 
-/* a non-negative half below infinity, clamped to [0, 1], to 8 bits rounded to nearest (half up) */
-uint HalfToByte(uint h) {
-    if (h >= 0x3C00u) {
-        return 255u;
-    }
-    const uint e = h >> 10u;
-    const uint sig = e == 0u ? h : (h & 0x3FFu) | 0x400u;
-    const uint shift = e == 0u ? 24u : 25u - e;
-    return (sig * 255u + (1u << (shift - 1u))) >> shift;
-}
-
 void StoreTexel(uvec2 origin, uint i, uint j, uint rgba) {
     const uint x = origin.x + i, y = origin.y + j;
     if (x < width && y < height) {
@@ -988,9 +769,12 @@ void FillBlock(uvec2 origin, uint rgba) {
     }
 }
 
-/* the error color is transparent black, as in Eden */
+/* the LDR profile's error color, opaque magenta (R in the low byte): illegal blocks, HDR void extents and the
+   texels of HDR partitions. Eden's is transparent black */
+const uint ERROR_COLOR = 0xFFFF00FFu;
+
 void FillError(uvec2 origin) {
-    FillBlock(origin, 0u);
+    FillBlock(origin, ERROR_COLOR);
 }
 
 void FillVoidExtentLDR(uvec2 origin) {
@@ -1206,23 +990,14 @@ void DecompressBlock(uvec2 origin) {
             const uvec4 weight_vec = GetUnquantizedWeightVector(j, i, size_params, plane_index, dual_plane);
             const uvec4 C0 = endpoints0[local_partition];
             const uvec4 C1 = endpoints1[local_partition];
+            if (IsHDRColorEndpointMode(local_cem)) {
+                StoreTexel(origin, i, j, ERROR_COLOR);
+                continue;
+            }
             uvec4 p; /* A, R, G, B */
             for (uint c = 0; c < 4; c++) {
                 const uint w = weight_vec[c];
-                if (IsHDRColorEndpointMode(local_cem) && !(local_cem == 14u && c == 0)) {
-                    const uint C = ((C0[c] << 4) * (64 - w) + (C1[c] << 4) * w + 32) / 64;
-                    const uint E = (C & 0xF800u) >> 11u;
-                    const uint M = C & 0x7FFu;
-                    uint Mt;
-                    if (M < 512u) {
-                        Mt = 3u * M;
-                    } else if (M >= 1536u) {
-                        Mt = 5u * M - 2048u;
-                    } else {
-                        Mt = 4u * M - 512u;
-                    }
-                    p[c] = HalfToByte(min((E << 10u) + (Mt >> 3u), 0x7BFFu));
-                } else if (srgb != 0u && c != 0) {
+                if (srgb != 0u && c != 0) {
                     /* sRGB decode mode: R, G and B expand as (e << 8) | 0x80 and keep the top 8 bits */
                     p[c] = ((((C0[c] << 8) | 0x80u) * (64 - w) + ((C1[c] << 8) | 0x80u) * w + 32) / 64) >> 8;
                 } else {

@@ -9,7 +9,9 @@
 /* ASTC decoding on the CPU, the reference for the compute shader astc.comp. It follows Eden's CPU decoder, and
    differs from it where Eden's shader and CPU decoder disagree, so that both give the same bytes: a block whose
    mode and weights leave no room for its color data is an error (as in the shader), and texels are converted to
-   8 bits the way astc.comp does it (as a UNORM16 or half value rounded to nearest), in integers. */
+   8 bits the way astc.comp does it (as a UNORM16 value rounded to nearest), in integers. Where Eden decodes HDR
+   endpoints and makes errors transparent black, this follows the LDR profile, as the hardware's decode is taken
+   to: errors and HDR partitions are opaque magenta. */
 #include "nx/gpu/texture/astc.h"
 #include <string.h>
 
@@ -508,136 +510,6 @@ static int is_hdr_mode(u32 cem) { return cem == 2 || cem == 3 || cem == 7 || cem
 
 static int clamp_i(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-/* the low bits of v as a signed number: Eden keeps the bits above them, which mode 11 shares with x2 to x5 */
-static int sign_extend(int v, u32 bits) {
-    int sign = 1 << (bits - 1);
-    return ((v & ((1 << bits) - 1)) ^ sign) - sign;
-}
-
-/* HDR endpoint mode 7 (RGB, base and scale): rgb[0..2] the first endpoint, rgb[3..5] the second */
-static void hdr_mode7(u32 v0, u32 v1, u32 v2, u32 v3, int rgb[6]) {
-    static const int shamts[6] = {1, 1, 2, 3, 4, 5};
-    u32 modeval = ((v0 & 0xC0) >> 6) | ((v1 & 0x80) >> 5) | ((v2 & 0x80) >> 4), majcomp, mode, ohm;
-    int red = (int)(v0 & 0x3F), green = (int)(v1 & 0x1F), blue = (int)(v2 & 0x1F), scale = (int)(v3 & 0x1F), t;
-    int x0 = (int)((v1 >> 6) & 1), x1 = (int)((v1 >> 5) & 1), x2 = (int)((v2 >> 6) & 1), x3 = (int)((v2 >> 5) & 1);
-    int x4 = (int)((v3 >> 7) & 1), x5 = (int)((v3 >> 6) & 1), x6 = (int)((v3 >> 5) & 1);
-    if ((modeval & 0xC) != 0xC) {
-        majcomp = modeval >> 2;
-        mode = modeval & 3;
-    } else if (modeval != 0xF) {
-        majcomp = modeval & 3;
-        mode = 4;
-    } else {
-        majcomp = 0;
-        mode = 5;
-    }
-    ohm = 1u << mode;
-    if (ohm & 0x30) green |= x0 << 6;
-    if (ohm & 0x3A) green |= x1 << 5;
-    if (ohm & 0x30) blue |= x2 << 6;
-    if (ohm & 0x3A) blue |= x3 << 5;
-    if (ohm & 0x3D) scale |= x6 << 5;
-    if (ohm & 0x2D) scale |= x5 << 6;
-    if (ohm & 0x04) scale |= x4 << 7;
-    if (ohm & 0x3B) red |= x4 << 6;
-    if (ohm & 0x04) red |= x3 << 6;
-    if (ohm & 0x10) red |= x5 << 7;
-    if (ohm & 0x0F) red |= x2 << 7;
-    if (ohm & 0x05) red |= x1 << 8;
-    if (ohm & 0x0A) red |= x0 << 8;
-    if (ohm & 0x05) red |= x0 << 9;
-    if (ohm & 0x02) red |= x6 << 9;
-    if (ohm & 0x01) red |= x3 << 10;
-    if (ohm & 0x02) red |= x5 << 10;
-    red <<= shamts[mode];
-    green <<= shamts[mode];
-    blue <<= shamts[mode];
-    scale <<= shamts[mode];
-    if (mode != 5) {
-        green = red - green;
-        blue = red - blue;
-    }
-    if (majcomp == 1) {
-        t = red;
-        red = green;
-        green = t;
-    }
-    if (majcomp == 2) {
-        t = red;
-        red = blue;
-        blue = t;
-    }
-    rgb[3] = clamp_i(red, 0, 0xFFF);
-    rgb[4] = clamp_i(green, 0, 0xFFF);
-    rgb[5] = clamp_i(blue, 0, 0xFFF);
-    rgb[0] = clamp_i(red - scale, 0, 0xFFF);
-    rgb[1] = clamp_i(green - scale, 0, 0xFFF);
-    rgb[2] = clamp_i(blue - scale, 0, 0xFFF);
-}
-
-/* HDR endpoint mode 11 (RGB, direct), also the RGB of modes 14 and 15 */
-static void hdr_mode11(const u32 v[6], int rgb[6]) {
-    static const u32 dbits[8] = {7, 6, 7, 6, 5, 6, 5, 6};
-    u32 majcomp = ((v[4] & 0x80) >> 7) | ((v[5] & 0x80) >> 6), mode, ohm, i;
-    int va, vb0, vb1, vc, vd0, vd1, x0, x1, x2, x3, x4, x5, shamt, t;
-    if (majcomp == 3) {
-        rgb[0] = (int)(v[0] << 4);
-        rgb[1] = (int)(v[2] << 4);
-        rgb[2] = (int)((v[4] & 0x7F) << 5);
-        rgb[3] = (int)(v[1] << 4);
-        rgb[4] = (int)(v[3] << 4);
-        rgb[5] = (int)((v[5] & 0x7F) << 5);
-        return;
-    }
-    mode = ((v[1] & 0x80) >> 7) | ((v[2] & 0x80) >> 6) | ((v[3] & 0x80) >> 5);
-    va = (int)(v[0] | ((v[1] & 0x40) << 2));
-    vb0 = (int)(v[2] & 0x3F);
-    vb1 = (int)(v[3] & 0x3F);
-    vc = (int)(v[1] & 0x3F);
-    vd0 = sign_extend((int)(v[4] & 0x7F), dbits[mode]);
-    vd1 = sign_extend((int)(v[5] & 0x7F), dbits[mode]);
-    x0 = (int)((v[2] >> 6) & 1);
-    x1 = (int)((v[3] >> 6) & 1);
-    x2 = (int)((v[4] >> 6) & 1);
-    x3 = (int)((v[5] >> 6) & 1);
-    x4 = (int)((v[4] >> 5) & 1);
-    x5 = (int)((v[5] >> 5) & 1);
-    ohm = 1u << mode;
-    if (ohm & 0xA4) va |= x0 << 9;
-    if (ohm & 0x08) va |= x2 << 9;
-    if (ohm & 0x50) va |= x4 << 9;
-    if (ohm & 0x50) va |= x5 << 10;
-    if (ohm & 0xA0) va |= x1 << 10;
-    if (ohm & 0xC0) va |= x2 << 11;
-    if (ohm & 0x04) vc |= x1 << 6;
-    if (ohm & 0xE8) vc |= x3 << 6;
-    if (ohm & 0x20) vc |= x2 << 7;
-    if (ohm & 0x5B) vb0 |= x0 << 6;
-    if (ohm & 0x5B) vb1 |= x1 << 6;
-    if (ohm & 0x12) vb0 |= x2 << 7;
-    if (ohm & 0x12) vb1 |= x3 << 7;
-    /* shifted as multiplications: vd0 and vd1 can be negative */
-    shamt = 1 << (((int)mode >> 1) ^ 3);
-    va *= shamt;
-    vb0 *= shamt;
-    vb1 *= shamt;
-    vc *= shamt;
-    vd0 *= shamt;
-    vd1 *= shamt;
-    rgb[3] = clamp_i(va, 0, 0xFFF);
-    rgb[4] = clamp_i(va - vb0, 0, 0xFFF);
-    rgb[5] = clamp_i(va - vb1, 0, 0xFFF);
-    rgb[0] = clamp_i(va - vc, 0, 0xFFF);
-    rgb[1] = clamp_i(va - vb0 - vc - vd0, 0, 0xFFF);
-    rgb[2] = clamp_i(va - vb1 - vc - vd1, 0, 0xFFF);
-    if (majcomp == 1 || majcomp == 2)
-        for (i = 0; i < 6; i += 3) {
-            t = rgb[i];
-            rgb[i] = rgb[i + majcomp];
-            rgb[i + majcomp] = t;
-        }
-}
-
 static void set4(int e[4], int a, int r, int g, int b) {
     e[0] = a;
     e[1] = r;
@@ -653,12 +525,12 @@ static void clamp_byte(int e[4]) {
     for (i = 0; i < 4; i++) e[i] = clamp_i(e[i], 0, 255);
 }
 
-/* the two endpoints of a partition, in A, R, G, B order: 8 bit for the LDR modes, 12 bit (more for mode 15's
-   alpha) for HDR. vals advances past the color values the mode takes */
+/* the two 8 bit endpoints of an LDR partition, in A, R, G, B order. vals advances past the color values the mode
+   takes, an HDR mode's too */
 static void compute_endpoints(int e0[4], int e1[4], const u32** vals, u32 cem) {
     static const u32 counts[16] = {2, 2, 2, 2, 4, 4, 4, 4, 6, 6, 6, 6, 8, 8, 8, 8};
     u32 u[8], i;
-    int v[8], rgb[6];
+    int v[8];
     for (i = 0; i < counts[cem]; i++) {
         u[i] = (*vals)[i];
         v[i] = (int)u[i];
@@ -743,97 +615,30 @@ static void compute_endpoints(int e0[4], int e1[4], const u32** vals, u32 cem) {
         clamp_byte(e0);
         clamp_byte(e1);
         break;
-    case 2: {
-        int y0, y1;
-        if (v[1] >= v[0]) {
-            y0 = v[0] << 4;
-            y1 = v[1] << 4;
-        } else {
-            y0 = (v[1] << 4) + 8;
-            y1 = (v[0] << 4) - 8;
-        }
-        set4(e0, 0x780, y0, y0, y0);
-        set4(e1, 0x780, y1, y1, y1);
+    default:
+        /* HDR modes 2, 3, 7, 11, 14 and 15: the error color on the partition's texels, as in the LDR profile */
         break;
-    }
-    case 3: {
-        int y0, d, y1;
-        if (u[0] & 0x80) {
-            y0 = (int)(((u[1] & 0xE0) << 4) | ((u[0] & 0x7F) << 2));
-            d = (int)((u[1] & 0x1F) << 2);
-        } else {
-            y0 = (int)(((u[1] & 0xF0) << 4) | ((u[0] & 0x7F) << 1));
-            d = (int)((u[1] & 0x0F) << 1);
-        }
-        y1 = y0 + d > 0xFFF ? 0xFFF : y0 + d;
-        set4(e0, 0x780, y0, y0, y0);
-        set4(e1, 0x780, y1, y1, y1);
-        break;
-    }
-    case 7:
-        hdr_mode7(u[0], u[1], u[2], u[3], rgb);
-        set4(e0, 0x780, rgb[0], rgb[1], rgb[2]);
-        set4(e1, 0x780, rgb[3], rgb[4], rgb[5]);
-        break;
-    case 11:
-        hdr_mode11(u, rgb);
-        set4(e0, 0x780, rgb[0], rgb[1], rgb[2]);
-        set4(e1, 0x780, rgb[3], rgb[4], rgb[5]);
-        break;
-    case 14:
-        hdr_mode11(u, rgb);
-        set4(e0, v[6], rgb[0], rgb[1], rgb[2]);
-        set4(e1, v[7], rgb[3], rgb[4], rgb[5]);
-        break;
-    default: { /* 15: HDR RGB with HDR alpha */
-        u32 mode = ((u[6] >> 7) & 1) | ((u[7] >> 6) & 2);
-        int a6 = (int)(u[6] & 0x7F), a7 = (int)(u[7] & 0x7F), alpha0, alpha1;
-        hdr_mode11(u, rgb);
-        if (mode == 3) {
-            alpha0 = a6 << 5;
-            alpha1 = a7 << 5;
-        } else {
-            a6 |= (a7 << (mode + 1)) & 0x780;
-            a7 &= 0x3F >> mode;
-            a7 ^= 0x20 >> mode;
-            a7 -= 0x20 >> mode;
-            /* as multiplications: a7 can be negative */
-            a6 *= 1 << (4 - mode);
-            a7 *= 1 << (4 - mode);
-            a7 += a6;
-            alpha0 = a6;
-            alpha1 = clamp_i(a7, 0, 0xFFF);
-        }
-        set4(e0, alpha0, rgb[0], rgb[1], rgb[2]);
-        set4(e1, alpha1, rgb[3], rgb[4], rgb[5]);
-        break;
-    }
     }
 }
 
 /* a UNORM16 value to 8 bits, rounded to nearest (astc.comp's Unorm16To8) */
 static u32 unorm16_to_8(u32 c) { return (c * 255 + 32767) / 65535; }
 
-/* a non-negative half below infinity, clamped to [0, 1], to 8 bits rounded to nearest (astc.comp's HalfToByte) */
-static u32 half_to_byte(u32 h) {
-    u32 e = h >> 10, sig, shift;
-    if (h >= 0x3C00) return 255;
-    sig = e == 0 ? h : (h & 0x3FF) | 0x400;
-    shift = e == 0 ? 24 : 25 - e;
-    return (sig * 255 + (1u << (shift - 1))) >> shift;
-}
-
 static u32 pack(u32 a, u32 r, u32 g, u32 b) { return r | g << 8 | b << 16 | a << 24; }
+
+/* the LDR profile's error color, opaque magenta: illegal blocks, HDR void extents and the texels of HDR
+   partitions */
+#define ERROR_COLOR 0xFFFF00FFu
 
 static void fill(u32 out[144], u32 n, u32 rgba) {
     u32 i;
     for (i = 0; i < n; i++) out[i] = rgba;
 }
 
-/* one block to bw x bh texels, packed as astc.comp packs them (R in the low byte); errors are transparent
-   black. srgb selects the specification's sRGB decode mode for R, G and B: the LDR endpoints expand to 16 bits as
+/* one block to bw x bh texels, packed as astc.comp packs them (R in the low byte); errors are ERROR_COLOR.
+   srgb selects the specification's sRGB decode mode for R, G and B: the LDR endpoints expand to 16 bits as
    (e << 8) | 0x80 instead of by bit replication, and the top 8 bits of the result are the decoded value (also
-   those of a void extent's color). Alpha and HDR endpoints decode the same in both modes */
+   those of a void extent's color). Alpha decodes the same in both modes */
 static void decompress_block(const u8 in[16], u32 bw, u32 bh, int srgb, u32 out[144]) {
     BitIn strm;
     WeightParams wp;
@@ -849,7 +654,7 @@ static void decompress_block(const u8 in[16], u32 bw, u32 bh, int srgb, u32 out[
     strm.pos = 0;
     wp = decode_block_info(&strm);
     if (wp.error || wp.void_extent_hdr) {
-        fill(out, bw * bh, 0);
+        fill(out, bw * bh, ERROR_COLOR);
         return;
     }
     if (wp.void_extent_ldr) {
@@ -862,7 +667,7 @@ static void decompress_block(const u8 in[16], u32 bw, u32 bh, int srgb, u32 out[
         t_min = bits_read(&strm, 13);
         t_max = bits_read(&strm, 13);
         if ((s_min & s_max & t_min & t_max) != 0x1FFF && (s_min >= s_max || t_min >= t_max)) {
-            fill(out, bw * bh, 0);
+            fill(out, bw * bh, ERROR_COLOR);
             return;
         }
         r = bits_read(&strm, 16);
@@ -882,12 +687,12 @@ static void decompress_block(const u8 in[16], u32 bw, u32 bh, int srgb, u32 out[
         return;
     }
     if (wp.width > bw || wp.height > bh || weight_count(&wp) > 64) {
-        fill(out, bw * bh, 0);
+        fill(out, bw * bh, ERROR_COLOR);
         return;
     }
     partitions = bits_read(&strm, 2) + 1;
     if (partitions == 4 && wp.dual_plane) {
-        fill(out, bw * bh, 0);
+        fill(out, bw * bh, ERROR_COLOR);
         return;
     }
     if (partitions == 1) {
@@ -899,7 +704,7 @@ static void decompress_block(const u8 in[16], u32 bw, u32 bh, int srgb, u32 out[
     base_mode = base_cem & 3;
     weight_bits = ise_bit_length(ise_encoding(wp.max_weight), weight_count(&wp));
     if (weight_bits < 24 || weight_bits > 96) {
-        fill(out, bw * bh, 0);
+        fill(out, bw * bh, ERROR_COLOR);
         return;
     }
     if (base_mode) extra_cem_bits = partitions * 3 - 4; /* 2, 5 or 8 */
@@ -907,7 +712,7 @@ static void decompress_block(const u8 in[16], u32 bw, u32 bh, int srgb, u32 out[
     remaining = 128 - (int)weight_bits - (int)strm.pos - (int)extra_cem_bits - (int)plane_bits;
     if (remaining < 0) {
         /* more weight and mode bits than the block holds: an error, as in astc.comp */
-        fill(out, bw * bh, 0);
+        fill(out, bw * bh, ERROR_COLOR);
         return;
     }
     color_bits = (u32)remaining;
@@ -930,7 +735,7 @@ static void decompress_block(const u8 in[16], u32 bw, u32 bh, int srgb, u32 out[
        for them to have at least 6 levels */
     for (i = 0, j = 0; i < partitions; i++) j += ((cem[i] >> 2) + 1) << 1;
     if (j > 18 || ise_bit_length(ise_encoding(5), j) > color_bits) {
-        fill(out, bw * bh, 0);
+        fill(out, bw * bh, ERROR_COLOR);
         return;
     }
     decode_color_values(color_values, color_data, cem, partitions, color_bits);
@@ -954,17 +759,15 @@ static void decompress_block(const u8 in[16], u32 bw, u32 bh, int srgb, u32 out[
     for (j = 0; j < bh; j++)
         for (i = 0; i < bw; i++) {
             u32 part = select_partition(partition_index, i, j, partitions, bw * bh < 32), px[4];
+            if (is_hdr_mode(cem[part])) {
+                out[j * bw + i] = ERROR_COLOR;
+                continue;
+            }
             for (c = 0; c < 4; c++) {
                 u32 plane = wp.dual_plane && ((plane_idx + 1) & 3) == c;
                 u32 w = weight_grid[plane][j * bw + i];
                 u32 C0 = (u32)endpoints[part][0][c], C1 = (u32)endpoints[part][1][c];
-                if (is_hdr_mode(cem[part]) && !(cem[part] == 14 && c == 0)) {
-                    u32 C = ((C0 << 4) * (64 - w) + (C1 << 4) * w + 32) / 64;
-                    u32 E = (C & 0xF800) >> 11, M = C & 0x7FF, Mt, Cf;
-                    Mt = M < 512 ? 3 * M : M >= 1536 ? 5 * M - 2048 : 4 * M - 512;
-                    Cf = (E << 10) + (Mt >> 3);
-                    px[c] = half_to_byte(Cf >= 0x7C00 ? 0x7BFF : Cf);
-                } else if (srgb && c != 0) {
+                if (srgb && c != 0) {
                     px[c] = (((C0 << 8) | 0x80) * (64 - w) + ((C1 << 8) | 0x80) * w + 32) / 64 >> 8;
                 } else {
                     px[c] = unorm16_to_8((C0 * 0x101 * (64 - w) + C1 * 0x101 * w + 32) / 64);

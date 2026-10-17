@@ -19,7 +19,7 @@ int main(void) {
        12..63) all ones. RGBA16 endpoints occupy the last eight bytes. The zero alpha masks the solid color. */
     u8 block[16] = {0xfc, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x80, 0xff, 0xff, 0x00, 0x00};
     const u8 transparent[4] = {0, 128, 255, 0};
-    const u8 invalid[4] = {0, 0, 0, 0}; /* the error color, transparent black */
+    const u8 invalid[4] = {255, 0, 255, 255}; /* the LDR profile's error color, opaque magenta */
     if (!check(block, transparent)) {
         fputs("ASTC LDR void extent did not preserve transparent color\n", stderr);
         return 1;
@@ -58,6 +58,34 @@ int main(void) {
             return 1;
         }
     }
-    puts("PASS ASTC void extent color and invalid modes, in both decode modes");
+    /* edenprobe's astc cases "error" (an illegal block) and "hdrfirst" (two partitions, the first with an HDR
+       endpoint mode, which is the error color on its own texels in the LDR profile). The texels are those of
+       edenprobe's reference decoder (source/astcref.c), as R, G, B, A */
+    {
+        static const u8 illegal[16] = {0x5f, 0x0f, 0x35, 0xcb, 0xe9, 0x15, 0x32, 0xa7,
+                                       0x3f, 0xdc, 0x63, 0xdb, 0x94, 0x74, 0x55, 0xe2};
+        static const u8 hdrfirst[16] = {0x2e, 0x4f, 0x2d, 0xfd, 0x10, 0xda, 0x68, 0xca,
+                                        0xb6, 0x76, 0x8c, 0x2b, 0xcc, 0xf2, 0x51, 0xeb};
+        static const u32 hdrfirst_texels[16] = {
+            0xff00ffffu, 0x74dbe5ffu, 0xff00ffffu, 0xff00ffffu, 0xff00ffffu, 0x73dbe0ffu, 0xff00ffffu, 0xff00ffffu,
+            0x73dbdfffu, 0x74dbe3ffu, 0xff00ffffu, 0xff00ffffu, 0x76dcebffu, 0xff00ffffu, 0xff00ffffu, 0xff00ffffu};
+        u8 pixels[4 * 4 * 4];
+        int i;
+        if (!check(illegal, invalid)) {
+            fputs("ASTC illegal block is not the error color\n", stderr);
+            return 1;
+        }
+        astc_decode_image(hdrfirst, 4, 4, 4, 4, pixels, 0);
+        for (i = 0; i < 16; i++) {
+            const u32 v = hdrfirst_texels[i];
+            const u8 rgba[4] = {(u8)(v >> 24), (u8)(v >> 16), (u8)(v >> 8), (u8)v};
+            if (memcmp(pixels + i * 4, rgba, 4)) {
+                fprintf(stderr, "ASTC HDR partition block: texel %d is %02x%02x%02x%02x, expected %08x\n", i,
+                        pixels[i * 4], pixels[i * 4 + 1], pixels[i * 4 + 2], pixels[i * 4 + 3], (unsigned)v);
+                return 1;
+            }
+        }
+    }
+    puts("PASS ASTC void extent color, invalid modes and HDR partitions, in both decode modes");
     return 0;
 }
