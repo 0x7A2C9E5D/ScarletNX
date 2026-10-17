@@ -120,15 +120,16 @@ if(BUILD_TESTING)
     add_executable(snx-test-gui-sdl "${PROJECT_SOURCE_DIR}/tests/gui_sdl.c")
     target_link_libraries(snx-test-gui-sdl PRIVATE snx_gui_support scarletnx-common SDL3::SDL3 snx_window_icon
                           snx_build_info snx_pad_sdl snx_splash)
-    foreach(test snx-test-gui-model snx-test-gui-cia-browser snx-test-gui-recent snx-test-gui-steps snx-test-gui-theme snx-test-gui-process
-                 snx-test-gui-sdl snx-test-gui-theme-write snx-test-gui-editor
-                 snx-test-gui-settings)
-        target_compile_options(${test} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
-    endforeach()
     add_test(NAME gui_sdl_events COMMAND snx-test-gui-sdl)
     # no file picker of the desktop's: the portal would open one on the screen, DBus being there without a display
     set_tests_properties(gui_sdl_events PROPERTIES TIMEOUT 30
                          ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_FILE_DIALOG_DRIVER=none")
+    # every test here, as snx_test_target does: warnings are errors, and the asserts stay in any build type
+    get_directory_property(gui_tests BUILDSYSTEM_TARGETS)
+    list(FILTER gui_tests INCLUDE REGEX "^snx-test-")
+    foreach(test IN LISTS gui_tests)
+        target_compile_options(${test} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    endforeach()
 endif()
 if(COMMAND snx_sanitizer_path) # tests/CMakeLists.txt: the library made here, and this folder's tests
     snx_test_sanitize(snx_gui_support snx_splash)
