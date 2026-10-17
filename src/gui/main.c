@@ -104,6 +104,9 @@ typedef struct {
     char* left;          /* what older builds left where this one no longer looks, a line each, lefts of them */
     int lefts;
     bool left_shown;   /* in a box as the menu opens, until a key, a button or a finger closes it */
+    bool left_clear;   /* the menu's own files of menu_old among them: the box says how they go (SAY_LEFT_CLEAR) */
+    char* menu_old;    /* Android: SDL's folder for the app, its own files, where an older version kept the menu's own
+                          files (menu_files); NULL elsewhere */
     Uint64 left_at;    /* when they were looked for */
     char* recent_file; /* where the recent games are kept; NULL keeps none */
     char* run_log;     /* where a run's output goes as it comes, the last run's; NULL keeps none */
@@ -417,19 +420,13 @@ static bool installed(const App* app) {
     return same;
 }
 #endif
-/* the folder of kind for the menu's own files (settings.ini, app.ini and folders.txt in config, recent.txt and
-   last-run.log in state), made: its data folder's (snx_app_dir: the user's, a portable copy's), else the user's. On
-   Android the app's own storage, which needs no permission. Made with make; NULL when none can be */
+/* the menu's own files: those of its config folder, then those of its state folder */
+static const char* const menu_files[2][4] = {{"settings.ini", "app.ini", "folders.txt", "gamecontrollerdb.txt"},
+                                             {"recent.txt", "last-run.log", "", ""}};
+/* the folder of kind for the menu's own files (menu_files), made: its data folder's (snx_app_dir: the user's, a
+   portable copy's, Android's in the app's own storage), else the user's. Made with make; NULL when none can be */
 static char* menu_folder(const App* app, int kind, bool make) {
-    char* folder;
-#ifdef SDL_PLATFORM_ANDROID
-    char* sdl = kind == SNX_USER_CACHE ? NULL : SDL_GetPrefPath("scarletnx", "gui");
-    (void)app;
-    folder = sdl ? snx_strdup(sdl) : NULL;
-    SDL_free(sdl);
-#else
-    folder = snx_menu_dir(app->home_dir ? app->home_dir : app->data_dir, kind);
-#endif
+    char* folder = snx_menu_dir(app->home_dir ? app->home_dir : app->data_dir, kind);
     if (folder && make && snx_mkdirs(folder)) {
         free(folder);
         folder = NULL;
@@ -1087,6 +1084,11 @@ static const char* ask_question(const App* app) {
 }
 #define SAY_LEFT_BY    " was left by an older version: this one keeps it in "
 #define SAY_LEFT_TITLE "Left by older versions"
+/* how the menu's own files an older Android version left go (left_clear): out of the player's reach, and the app in
+   testing, its whole storage is cleared */
+#define SAY_LEFT_CLEAR                                                                                                 \
+    "While the app is in testing, Android's Settings > Apps > ScarletNX > Storage > Clear storage takes the menu's "   \
+    "files above, with every game, save and key in the app"
 /* a line of app->left: the file where an older build left it, and where this one keeps it */
 static void left_paths(const char* line, char* old, char* now, size_t size) {
     const char* by = strstr(line, SAY_LEFT_BY);
@@ -1213,14 +1215,16 @@ static const char* files_entry(const App* app, int report, int i, const char* at
 static void render_files(App* app, int report) {
     char a[4400], b[4400], label[96];
     const char *first = report ? app->cleaned.text : app->left, *at = first;
-    int width, height, cols, room, used = 0, shown, i, y, path, s = app->scale, item = item_h(app);
+    int width, height, cols, room, used = 0, shown, i, y, path, s = app->scale, item = item_h(app), hint;
     int count = report ? app->cleaned.count : app->lefts, done = app->cleaned.done;
     SDL_Color ca, cb;
     GuiRect r, text;
     GuiList ok;
     area(app, &width, &height);
     cols = width / cell_w(app) - 6;
-    room = (height - head_h(app) - item - 24 * s) / cell_h(app) - 2; /* the files' rows, and one for how many more */
+    hint = !report && app->left_clear ? wrap_rows(app, SAY_LEFT_CLEAR, cols, 0) : 0; /* under them, before OK */
+    /* the files' rows, and one for how many more */
+    room = (height - head_h(app) - item - 24 * s) / cell_h(app) - 2 - hint;
     for (shown = 0; at && shown < count; ++shown) {
         int need;
         at = files_entry(app, report, shown, at, a, b, sizeof a, &ca, &cb, &path);
@@ -1228,7 +1232,7 @@ static void render_files(App* app, int report) {
         if (shown && used + need > room) break;
         used += need;
     }
-    r = over_rect(app, cols, head_h(app) + (used + (shown < count)) * cell_h(app) + item + 16 * s);
+    r = over_rect(app, cols, head_h(app) + (used + (shown < count) + hint) * cell_h(app) + item + 16 * s);
     if (!report)
         snprintf(label, sizeof label, "%s", SAY_LEFT_TITLE);
     else if (count > done)
@@ -1246,7 +1250,9 @@ static void render_files(App* app, int report) {
     if (shown < count) {
         snprintf(label, sizeof label, "and %d more, which Share log lists", count - shown);
         text_in(app, text, text.x, y, label, rgb(app->theme.soft));
+        y += cell_h(app);
     }
+    if (hint) wrap_in(app, text, text.x, y, SAY_LEFT_CLEAR, 0, rgb(app->theme.ink));
     list_place(app, &ok, gui_rect(text.x, r.y + r.h - item - 6 * s, SDL_min(text.w, 26 * cell_w(app)), item), 1, 0);
     snprintf(label, sizeof label, "%sOK", app->theme.marker);
     list_item(app, &ok, 0, label, true, false);
@@ -4066,15 +4072,13 @@ static void left_behind(App* app) {
     app->left = NULL;
     app->lefts = 0;
     app->left_at = SDL_GetTicks();
-#ifndef SDL_PLATFORM_ANDROID /* the app's own storage, as before */
+#ifndef SDL_PLATFORM_ANDROID /* there an older version's were in the app's own files: menu_old, below */
     /* gui/: the menu's own, now in the config and state folders, each where it goes */
     for (i = 0; gui && i < 2; ++i) {
-        static const char* const files[2][4] = {{"settings.ini", "app.ini", "folders.txt", "gamecontrollerdb.txt"},
-                                                {"recent.txt", "last-run.log", "", ""}};
         const char* to = i ? state : config;
         int k, there = 0;
-        for (k = 0; k < 4 && files[i][k][0]; ++k) {
-            char* file = snx_path_join(gui, files[i][k]);
+        for (k = 0; k < 4 && menu_files[i][k][0]; ++k) {
+            char* file = snx_path_join(gui, menu_files[i][k]);
             there |= file && snx_is_file(file);
             free(file);
         }
@@ -4088,6 +4092,21 @@ static void left_behind(App* app) {
     old = NULL;
 #endif
 #endif
+    /* the menu's own files in the app's own files on Android, a file at a time: that folder holds the data folder too.
+       Out of the player's reach, clearing the app's storage takes them while the app is in testing (left_clear) */
+    app->left_clear = false;
+    for (i = 0; app->menu_old && i < 2; ++i) {
+        const char* to = i ? state : config;
+        int k;
+        for (k = 0; to && k < 4 && menu_files[i][k][0]; ++k) {
+            char* file = snx_path_join(app->menu_old, menu_files[i][k]);
+            if (snx_is_file(file)) {
+                left_line(app, file, to, true);
+                app->left_clear = true;
+            }
+            free(file);
+        }
+    }
     if (work && moved) left_line(app, work, moved, snx_path_exists(work));
 #ifdef SDL_PLATFORM_ANDROID
     left_android(app);
@@ -4362,7 +4381,7 @@ static void launch(App* app, char* absolute, bool prepared) {
         argv[n++] = out;
     }
     argv[n] = NULL;
-#ifndef SDL_PLATFORM_ANDROID /* there the app's own storage, the one place both read */
+#ifndef SDL_PLATFORM_ANDROID /* there the data folder's config/, which every game reads (gamepad.c) */
     pad_mappings_share(app);
 #endif
     bool started = gui_process_start(app->process, argv, app->message, sizeof(app->message));
@@ -4655,10 +4674,10 @@ static void share_log(App* app) {
     game = newest_log(app);
     run = log_tail(app->run_log, 1 << 20);
     played = log_tail(game, 4 << 20);
-    text = snx_format("%s\nMessage: %s\n%s%s%s\n== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
-                      app->message, app->left ? app->left : "", app->cleaned.count ? "Clean old settings:\n" : "",
-                      app->cleaned.text ? app->cleaned.text : "", app->run_log ? app->run_log : "", run,
-                      game ? game : "no game log", played);
+    text = snx_format("%s\nMessage: %s\n%s%s%s%s\n== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
+                      app->message, app->left ? app->left : "", app->left_clear ? SAY_LEFT_CLEAR "\n" : "",
+                      app->cleaned.count ? "Clean old settings:\n" : "", app->cleaned.text ? app->cleaned.text : "",
+                      app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
     if (!saved || snx_write_file(saved, text, strlen(text)))
         snprintf(app->message, sizeof(app->message), SAY_LOG_FAILED);
@@ -5454,6 +5473,11 @@ static bool initialize(App* app, const char* self) {
     }
     app->data_dir = snx_strdup(app->cwd ? app->cwd : ".");
     app->own_dir = SDL_GetAndroidInternalStoragePath() ? snx_strdup(SDL_GetAndroidInternalStoragePath()) : NULL;
+    {
+        char* sdl = SDL_GetPrefPath("scarletnx", "gui"); /* the app's own files, whatever its names */
+        app->menu_old = sdl ? snx_strdup(sdl) : NULL;
+        SDL_free(sdl);
+    }
 #else
     app->drivers = self ? snx_dirname(self) : SDL_GetBasePath() ? snx_strdup(SDL_GetBasePath()) : NULL;
     app->data_dir = snx_data_dir(app->drivers);
@@ -5488,6 +5512,7 @@ static void cleanup(App* app) {
     for (int i = 0; i < app->folder_count; ++i) free(app->folders[i]);
     free(app->folder_asked);
     free(app->own_dir);
+    free(app->menu_old);
     free(app->outside_path);
     free(app->room_file);
     free(app->folders_file);
@@ -5523,31 +5548,33 @@ static void cleanup(App* app) {
 }
 /* the settings, its picks and its game folders in a file each */
 static char* settings_path(const char* config) { return config ? snx_path_join(config, "settings.ini") : NULL; }
+/* the menu's own files, in its folders of them (menu_folder) alone: an older version's elsewhere are listed by
+   left_behind, never read, and with none here the menu starts from its defaults */
+static void open_files(App* app) {
+    char *prefs = menu_folder(app, SNX_USER_STATE, true), *config = menu_folder(app, SNX_USER_CONFIG, true);
+    if (prefs) recent_open(app, snx_path_join(prefs, "recent.txt"));
+    if (prefs) app->run_log = snx_path_join(prefs, "last-run.log");
+    app->settings_file = settings_path(config);
+    if (app->settings_file) {
+        app->folders_file = snx_path_join(config, "folders.txt");
+        app->app_file = snx_path_join(config, "app.ini");
+        folders_load(app);
+        app_load(app);
+    }
+    free(config);
+    free(prefs);
+}
 int snx_gui_main(const char* self) {
     App app;
-    char *prefs, *config;
     if (!initialize(&app, self)) {
         fprintf(stderr, "scarletnx: %s\n", SDL_GetError());
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ScarletNX", SDL_GetError(), app.window);
         cleanup(&app);
         return 1;
     }
-    /* the menu's own files, opened here, not in initialize(), so the tests keep their own */
-    prefs = menu_folder(&app, SNX_USER_STATE, true);
-    config = menu_folder(&app, SNX_USER_CONFIG, true);
-    if (prefs) recent_open(&app, snx_path_join(prefs, "recent.txt"));
-    if (prefs) app.run_log = snx_path_join(prefs, "last-run.log");
-    app.settings_file = settings_path(config);
-    if (app.settings_file) {
-        app.folders_file = snx_path_join(config, "folders.txt");
-        app.app_file = snx_path_join(config, "app.ini");
-        folders_load(&app);
-        app_load(&app);
-    }
-    free(config);
+    open_files(&app); /* here, not in initialize(), so the tests keep their own */
     app.games_stamp = games_stamp(&app);
     space_start(&app); /* the footer's disk */
-    free(prefs);
     left_behind(&app);
     app.left_shown = app.lefts > 0;
     splash_start(&app);

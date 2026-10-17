@@ -123,7 +123,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   the run takes the game's `.ini`'s, which starts as that; one picked goes to every
   Switch run as `--key=value`, over the `.ini` ([USAGE](USAGE.md)), and is kept for every game:
   what was changed, by the `.ini`'s sections and keys, in `settings.ini` of the config folder on
-  Linux (`~/.config/scarletnx/`), else beside `recent.txt`. A run takes a setting from what that
+  Linux (`~/.config/scarletnx/`), else the data folder's `config/`. A run takes a setting from what that
   run picks, then from the game's own picks (to come), then from these, and last from the game's
   `.ini`. Del puts a setting back to its default, and the groups' last row, **Reset all to the
   defaults**, every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
@@ -170,7 +170,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   beside the program, and a build tree's `games/`, `work/` and keys in its checkout
   ([USAGE](USAGE.md#folders)). Any key, click or tap closes it; nothing is moved, and it shows again at the next
   start for as long as they are there.
-  **Share log** lists them all, each with where it goes now.
+  **Share log** lists them all, each with where it goes now. On Android the menu's own files an older version kept
+  in the app's own files, out of the Files app's reach, are listed a file at a time, and under them the box says how
+  they go while the app is in testing: Android's Settings > Apps > ScarletNX > Storage > Clear storage, which takes
+  every game, save and key in the app with them. The menu never reads them: it starts from its defaults.
 - **Recent games**, in Games under Add a folder, lists the last games run, newest first, three and a row that
   shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
   The focus moves between them, Add a folder and the page's games in one ring, and the tips show the focused
@@ -178,8 +181,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   loaded with and the options the menu has now; a game whose file is gone leaves the
   list instead. The list is kept in `recent.txt`, beside `last-run.log`, at the root of the menu's state
   folder ([USAGE](USAGE.md#folders)): `$XDG_STATE_HOME/scarletnx/` on Linux, by default
-  `~/.local/state/scarletnx/`, or `%APPDATA%\scarletnx\state\` on Windows. An older version's, in a `gui/`
-  folder, stay where they are. A line per
+  `~/.local/state/scarletnx/`, `%APPDATA%\scarletnx\state\` on Windows, or the data folder's `state/` on Android. An
+  older version's, in a `gui/` folder, stay where they are. A line per
   game: `switch`, `linux` or `3ds`, `file` or `games` (a program from games/, run as it is),
   the path and the name, separated by tabs. A list that cannot be written there is named in the
   message, after a run's end too, until it can be.
