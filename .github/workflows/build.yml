@@ -48,12 +48,13 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
       # llvm: llvm-config and LLVM-C for the recompiler (llvm-libs alone has no headers). libgccjit builds the
-      # optional --backend=gcc too, so its tests (gccjit_differential, native_recompiler_gcc) run here. Mirrors drop a
-      # connection now and then (pkgforge's for aarch64 most), so each pacman install is tried 3 times, 5 s apart
+      # optional --backend=gcc too, so its tests (gccjit_differential, native_recompiler_gcc) run here. gdb: the
+      # gdbserver gdbstub_native drives. Mirrors drop a connection now and then (pkgforge's for aarch64 most), so each
+      # pacman install is tried 3 times, 5 s apart
       - name: Install tools
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang llvm libgccjit pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache && break
+            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang llvm libgccjit pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache gdb && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
