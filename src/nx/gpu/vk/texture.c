@@ -105,6 +105,38 @@ static u64 level_out_size(const VkFmt* f, u32 lw, u32 lh, u32 ld, u32 rowb) {
     return (u64)rowb * th * ld;
 }
 
+/* one level of one layer as tightly packed rows, from its lsz guest bytes at src. A block-linear row's 16-byte pieces:
+   the row's place (bl_offset at x 0), then a block of GOBs per 64 bytes, and within a GOB's row 32-byte halves 256
+   bytes apart and 16-byte quarters 32 apart. A whole piece is one 16-byte move rather than a call to memcpy: a
+   texture rewritten every frame (a video's pictures) comes through here each time */
+static void level_rows(const Surf* t, const u8* src, u64 lsz, u32 rowb, u32 th, u32 ld, u32 lbh, u32 lbd, u8* out) {
+    if (!t->bl) {
+        for (u64 y = 0; y < (u64)th * ld; y++) memcpy(out + y * rowb, src + y * t->pitch, rowb);
+        return;
+    }
+    u64 bsz = 512ull << (lbh + lbd);
+    for (u32 z = 0; z < ld; z++)
+        for (u32 y = 0; y < th; y++) {
+            u8* dr = out + ((u64)z * th + y) * rowb;
+            u64 o0 = bl_offset(0, y, z, rowb, th, lbh, lbd);
+            u32 x = 0;
+            for (; x + 16 <= rowb; x += 16) {
+                u64 o = o0 + (u64)(x >> 6) * bsz + ((x & 63) >> 5) * 256 + ((x & 31) >> 4) * 32;
+                if (o + 16 <= lsz)
+                    memcpy(dr + x, src + o, 16);
+                else
+                    memset(dr + x, 0, 16);
+            }
+            if (x < rowb) {
+                u64 o = o0 + (u64)(x >> 6) * bsz + ((x & 63) >> 5) * 256 + ((x & 31) >> 4) * 32;
+                if (o + (rowb - x) <= lsz)
+                    memcpy(dr + x, src + o, rowb - x);
+                else
+                    memset(dr + x, 0, rowb - x);
+            }
+        }
+}
+
 static u32 g_tex_upload_gen;
 static void tex_upload(Surf* t) {
     const VkFmt* f = &t->f;
@@ -144,10 +176,13 @@ static void tex_upload(Surf* t) {
             u64 lsz = t->bl ? bl_level_size(t->w, t->h, d3, f, t->bh, t->bd, l, &lbh, &lbd) : (u64)t->pitch * th * ld;
             u8* src = gmem_ptr(t->gva + at, lsz);
             u8* tmp = NULL;
+            /* a format the GPU takes as it is goes from guest memory straight into the staging buffer; the others
+               are converted from packed rows */
+            int direct = f->conv == VKC_NONE;
             u64 lin_size = (u64)rowb * th * ld;
-            u8* lin = malloc(lin_size ? lin_size : 1);
+            u8* lin = direct ? NULL : malloc(lin_size ? lin_size : 1);
             if (!src) tmp = src = malloc(lsz ? lsz : 1);
-            if (!src || !lin) { /* up to 512 MB: a level that doesn't fit is left as it was */
+            if (!src || (!direct && !lin)) { /* up to 512 MB: a level that doesn't fit is left as it was */
                 LOG_LIMIT(1, "vulkan: out of memory uploading a %ux%u texture level (left out)\n", lw, lh);
                 free(tmp);
                 free(lin);
@@ -155,27 +190,9 @@ static void tex_upload(Surf* t) {
                 continue;
             }
             if (tmp) gmem_read(t->gva + at, tmp, lsz);
-            if (t->bl) {
-                /* a row's 16-byte pieces: the row's place (bl_offset at x 0), then a block of GOBs per 64 bytes, and
-                   within a GOB's row 32-byte halves 256 bytes apart and 16-byte quarters 32 apart */
-                u64 bsz = 512ull << (lbh + lbd);
-                for (u32 z = 0; z < ld; z++)
-                    for (u32 y = 0; y < th; y++) {
-                        u8* dr = lin + ((u64)z * th + y) * rowb;
-                        u64 o0 = bl_offset(0, y, z, rowb, th, lbh, lbd);
-                        for (u32 x = 0; x < rowb; x += 16) {
-                            u64 o = o0 + (u64)(x >> 6) * bsz + ((x & 63) >> 5) * 256 + ((x & 31) >> 4) * 32;
-                            u32 n = rowb - x < 16 ? rowb - x : 16;
-                            if (o + n <= lsz)
-                                memcpy(dr + x, src + o, n);
-                            else
-                                memset(dr + x, 0, n);
-                        }
-                    }
-            } else
-                for (u64 y = 0; y < (u64)th * ld; y++) memcpy(lin + y * rowb, src + y * t->pitch, rowb);
-            free(tmp);
+            if (!direct) level_rows(t, src, lsz, rowb, th, ld, lbh, lbd, lin);
             if (f->conv == VKC_ASTC) {
+                free(tmp);
                 vk_astc_upload(cb, t, lin, lw, lh, ld, l, layer);
                 free(lin);
                 at += lsz;
@@ -190,13 +207,17 @@ static void tex_upload(Surf* t) {
                     nreg = 0;
                 }
                 regbuf = buf;
-                level_convert(f, lin, lw, lh, ld, rowb, p);
+                if (direct)
+                    level_rows(t, src, lsz, rowb, th, ld, lbh, lbd, p);
+                else
+                    level_convert(f, lin, lw, lh, ld, rowb, p);
                 reg[nreg++] = (VkBufferImageCopy){
                     .bufferOffset = off,
                     .imageSubresource = {depth_raw ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, l, layer,
                                          1},
                     .imageExtent = {lw, lh, ld}};
             }
+            free(tmp);
             free(lin);
             at += lsz;
         }
