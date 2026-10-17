@@ -74,7 +74,7 @@ CHANNELS = {'pr': 'prs', 'issue': 'issues', 'nightly': 'nightly'}
 # a job's states before it runs
 WAITING = {'queued', 'waiting', 'pending', 'requested'}
 # a write to the cards' branch that another run's came before, tried again this many times in all
-CONFLICT, TRIES = re.compile(r'HTTP 409|is at [0-9a-f]+ but expected|sha wasn.t supplied|does not match'), 3
+CONFLICT, TRIES = re.compile(r'HTTP 409|is at [0-9a-f]+ but expected|"?sha"? wasn.t supplied|does not match'), 3
 # A card's file while the run that made it posts the card: CLAIM and when. Another run waits for the id, at most WAIT
 # seconds; a claim older than STALE seconds is a run that died, and taken over
 CLAIM, WAIT, STALE = 'posting', 60, 300

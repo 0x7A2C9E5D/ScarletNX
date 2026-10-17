@@ -145,7 +145,7 @@ elif rest.startswith('contents/'):
             save()
             stop(s.get('put_error', 'gh: is at 1a2b3c but expected 4d5e6f (HTTP 409)'))
         if key in files and data.get('sha') != files[key]['sha']:
-            stop('gh: sha wasn\'t supplied or does not match (HTTP 422)')
+            stop('gh: Invalid request.\n\n"sha" wasn\'t supplied. (HTTP 422)' if 'sha' not in data else 'gh: is at x but expected y (HTTP 409)')
         s['next'] += 1
         files[key] = {'content': data['content'], 'sha': f'blob{s["next"]}'}
         save()
