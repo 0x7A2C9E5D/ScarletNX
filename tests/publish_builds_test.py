@@ -171,7 +171,8 @@ with tempfile.TemporaryDirectory() as temporary:
             'id': number,
             'tag_name': f'nightly-2026-10-15-{commit[:7]}',
             'name': 'n',
-            'created_at': created,
+            'created_at': '2026-10-01T00:00:00Z',  # GitHub's: the tag's commit's date, which every nightly shares
+            'published_at': created,
             'body': f'Built from [`{commit[:7]}`](https://github.com/{REPO}/commit/{commit}).',
             'assets': [],
             'prerelease': False,
@@ -247,6 +248,7 @@ with tempfile.TemporaryDirectory() as temporary:
         and f'- \\[ci\\] its title ([#5](https://github.com/{REPO}/pull/5))' in made['body']
         and f'https://github.com/{REPO}/tree/{sha}' in made['body']
         and 'newest 2 nightlies' in made['body']
+        and f'[`{previous[:7]}...{sha[:7]}`]' in made['body']
         and '.AppImage.zsync' not in made['body'],
         made and made['body'],
     )
@@ -367,6 +369,7 @@ with tempfile.TemporaryDirectory() as temporary:
         'tag_name': 'v0.1.0',
         'name': 'ScarletNX v0.1.0',
         'created_at': '2026-10-01',
+        'published_at': '2026-10-01',
         'body': '',
         'prerelease': False,
         'assets': [],

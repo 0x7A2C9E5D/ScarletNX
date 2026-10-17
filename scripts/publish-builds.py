@@ -61,6 +61,12 @@ ARTIFACTS = {
 }
 
 
+def published(release):
+    """a release's order: when it was published. Its created_at is its tag's commit's date, which every nightly
+    shares (each is tagged on the nightly repository's one commit)"""
+    return release.get('published_at') or ''
+
+
 class Publisher(cards.Hub):
     def __init__(self, args):
         super().__init__(args.repo, args.to, args.dry_run)
@@ -165,7 +171,7 @@ class Publisher(cards.Hub):
         tag = f'nightly-{date}-{sha[:7]}'
         older = sorted(
             (r for r in self.releases(self.to) if r['tag_name'].startswith('nightly-') and r['tag_name'] != tag),
-            key=lambda r: r['created_at'],
+            key=published,
             reverse=True,
         )
         previous = next((m.group(0) for r in older[:1] for m in [re.search(r'[0-9a-f]{40}', r['body'] or '')] if m), '')
@@ -219,7 +225,7 @@ class Publisher(cards.Hub):
                 for r in self.releases(self.repo)
                 if VERSION.fullmatch(r['tag_name']) and r['tag_name'] != tag and not r.get('draft')
             ),
-            key=lambda r: r['created_at'],
+            key=published,
             reverse=True,
         )
         since = earlier[0]['tag_name'] if earlier else ''

@@ -55,7 +55,8 @@ if rest == 'releases' and method == 'GET':
 elif rest == 'releases' and method == 'POST':
     s['next'] += 1
     s['clock'] += 1
-    release = dict(data, id=s['next'], created_at=f'2026-11-01T{s["clock"]:08d}', published_at=f'2026-11-01T{s["clock"]:08d}', assets=[],
+    # created_at is the tag's commit's date, as GitHub has it: the nightly repository's releases all share one
+    release = dict(data, id=s['next'], created_at='2026-10-01T00:00:00Z', published_at=f'2026-11-01T{s["clock"]:08d}', assets=[],
                    html_url=f'https://github.com/{repo}/releases/tag/{data["tag_name"]}')
     releases.append(release)
     tags.setdefault(data['tag_name'], data.get('target_commitish', 'default-branch'))
