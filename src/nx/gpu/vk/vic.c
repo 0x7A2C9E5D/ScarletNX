@@ -7,13 +7,20 @@
    is what the CPU path in gpu/video/vic.c gives the callers too.
 
    The output planes are copied in as well as out: the shader writes whole words, one owning invocation each, and
-   the bytes it does not own (outside the slot rectangles, past the width) keep their guest values. */
+   the bytes it does not own (outside the slot rectangles, past the width) keep their guest values.
+
+   A job holds vk_lock only to make the pipeline and the buffer and to submit to the queue it shares with the
+   renderer: its buffer, descriptor set, command buffer and fence are its own, under g_vic_lock. The planes are
+   copied in and out of guest memory, and the fence waited for, without vk_lock, as the CPU composition writes them:
+   written under it, the renderer did not take the whole picture (parts of a 1920x1080 block linear one stayed
+   black) and stood still for the whole job. */
 #include <stdlib.h>
 #include <string.h>
 #include "nx/gpu/renderer.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/video/vic_spv.h"
 #include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 
 /* the shader's structs (gpu/video/vic.comp): only 32 bit members, so std430 packs them exactly as C does */
 typedef struct {
@@ -36,7 +43,10 @@ _Static_assert(sizeof(GpuPlane) == 24, "GpuPlane disagrees with the shader");
 _Static_assert(sizeof(GpuSlot) == 144, "GpuSlot disagrees with the shader");
 _Static_assert(sizeof(GpuParams) == 64 + 8 * 144, "GpuParams disagrees with the shader");
 
+static PMutex g_vic_lock = PMUTEX_INIT; /* a job at a time: the buffer and the objects below are the job's */
 static VkDescriptorSetLayout g_vic_ds;
+static VkDescriptorPool g_vic_pool;
+static VkDescriptorSet g_vic_set;
 static VkPipelineLayout g_vic_layout;
 static VkPipeline g_vic_pipe, g_vic_pipe_unaligned;
 static VkBuffer g_vic_buf;
@@ -51,8 +61,8 @@ static void vic_init(void) {
     if (g_vic_pipe) return;
     VkDescriptorSetLayoutBinding bindings[4];
     for (u32 i = 0; i < 4; i++)
-        bindings[i] = (VkDescriptorSetLayoutBinding){i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
-                                                     VK_SHADER_STAGE_COMPUTE_BIT, NULL};
+        bindings[i] =
+            (VkDescriptorSetLayoutBinding){i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL};
     VkDescriptorSetLayoutCreateInfo di = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 4, .pBindings = bindings};
     if (!VK_OK(vkCreateDescriptorSetLayout(g_vk.dev, &di, NULL, &g_vic_ds)))
@@ -72,8 +82,7 @@ static void vic_init(void) {
     const VkShaderModuleCreateInfo* mis[2] = {&mi, &mi_unaligned};
     for (int i = 0; i < 2; i++) {
         VkShaderModule module;
-        if (!VK_OK(vkCreateShaderModule(g_vk.dev, mis[i], NULL, &module)))
-            fatal("vulkan: cannot load the VIC shader");
+        if (!VK_OK(vkCreateShaderModule(g_vk.dev, mis[i], NULL, &module))) fatal("vulkan: cannot load the VIC shader");
         VkComputePipelineCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
                                           .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                                                     .stage = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -97,6 +106,18 @@ static void vic_init(void) {
         fatal("vulkan: cannot allocate the VIC command buffer");
     VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     if (!VK_OK(vkCreateFence(g_vk.dev, &fci, NULL, &g_vic_fence))) fatal("vulkan: cannot create the VIC fence");
+    /* the job's own set, not one of the frame's: those pools are reset when a frame starts, which a job no longer
+       holds back */
+    VkDescriptorPoolSize psz = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4};
+    VkDescriptorPoolCreateInfo pi = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &psz};
+    if (!VK_OK(vkCreateDescriptorPool(g_vk.dev, &pi, NULL, &g_vic_pool)))
+        fatal("vulkan: cannot create the VIC descriptor pool");
+    VkDescriptorSetAllocateInfo si = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                                      .descriptorPool = g_vic_pool,
+                                      .descriptorSetCount = 1,
+                                      .pSetLayouts = &g_vic_ds};
+    if (!VK_OK(vkAllocateDescriptorSets(g_vk.dev, &si, &g_vic_set))) fatal("vulkan: cannot allocate the VIC set");
 }
 
 /* one buffer for the job, grown as needed: every job waits for its fence before it returns, so the old buffer is
@@ -147,8 +168,10 @@ static int job_aligned(const VicJob* j) {
     return 1;
 }
 
-int vk_vic_compose(const VicJob* j) {
+static int compose(const VicJob* j) {
+    vk_lock();
     vic_init();
+    vk_unlock();
     u64 al = vk_stage_align();
     /* the buffer's layout: the parameters, every slot's input planes, then the two output planes */
     u64 params_off = 0, in_off = params_off + sizeof(GpuParams), at = in_off;
@@ -174,7 +197,10 @@ int vk_vic_compose(const VicJob* j) {
                   (unsigned long long)total);
         return 0;
     }
-    if (!buf_fit(total)) {
+    vk_lock();
+    int fits = buf_fit(total);
+    vk_unlock();
+    if (!fits) {
         LOG_LIMIT(4, "video: no GPU memory for a VIC job, composed in guest memory\n");
         return 0;
     }
@@ -215,17 +241,12 @@ int vk_vic_compose(const VicJob* j) {
     if (j->oc.p) memcpy(g_vic_ptr + oc_off, j->oc.p, j->oc.lim);
     vmaFlushAllocation(g_vk.vma, g_vic_mem, 0, VK_WHOLE_SIZE);
 
-    VkDescriptorSet set = vk_desc_alloc(g_vic_ds);
-    if (!set) {
-        LOG_LIMIT(4, "video: no GPU descriptors for a VIC job, composed in guest memory\n");
-        return 0;
-    }
-    VkDescriptorBufferInfo buffers[4] = {
-        {g_vic_buf, params_off, sizeof(GpuParams)},
-        /* from 0: in_offs count from the start of the buffer */
-        {g_vic_buf, 0, at},
-        {g_vic_buf, ol_off, ol_size},
-        {g_vic_buf, oc_off, oc_size}};
+    VkDescriptorSet set = g_vic_set;
+    VkDescriptorBufferInfo buffers[4] = {{g_vic_buf, params_off, sizeof(GpuParams)},
+                                         /* from 0: in_offs count from the start of the buffer */
+                                         {g_vic_buf, 0, at},
+                                         {g_vic_buf, ol_off, ol_size},
+                                         {g_vic_buf, oc_off, oc_size}};
     VkWriteDescriptorSet writes[4];
     for (u32 i = 0; i < 4; i++)
         writes[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -253,10 +274,11 @@ int vk_vic_compose(const VicJob* j) {
     vkCmdPipelineBarrier2(g_vic_cb, &di);
     VK_OK(vkEndCommandBuffer(g_vic_cb));
     VkCommandBufferSubmitInfo c = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = g_vic_cb};
-    VkSubmitInfo2 si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-                        .commandBufferInfoCount = 1,
-                        .pCommandBufferInfos = &c};
+    VkSubmitInfo2 si = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .commandBufferInfoCount = 1, .pCommandBufferInfos = &c};
+    vk_lock(); /* the queue is the renderer's compute queue too */
     VkResult r = vkQueueSubmit2(g_vk.compute, 1, &si, g_vic_fence);
+    vk_unlock();
     if (r == VK_ERROR_DEVICE_LOST) fatal("vulkan: the GPU device was lost (driver reset or crash)");
     if (r != VK_SUCCESS) return 0;
     VK_OK(vkWaitForFences(g_vk.dev, 1, &g_vic_fence, VK_TRUE, UINT64_MAX));
@@ -265,4 +287,10 @@ int vk_vic_compose(const VicJob* j) {
     memcpy(j->oy.p, g_vic_ptr + ol_off, j->oy.lim);
     if (j->oc.p) memcpy(j->oc.p, g_vic_ptr + oc_off, j->oc.lim);
     return 1;
+}
+int vk_vic_compose(const VicJob* j) {
+    pm_lock(&g_vic_lock);
+    int r = compose(j);
+    pm_unlock(&g_vic_lock);
+    return r;
 }

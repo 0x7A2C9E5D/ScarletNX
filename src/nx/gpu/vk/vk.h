@@ -261,7 +261,8 @@ int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, 
 void vk_astc_upload(VkCommandBuffer cb, Surf* t, const u8* blocks, u32 w, u32 h, u32 depth, u32 level, u32 layer);
 
 /* vic.c: the VIC composition as a compute shader, synchronously: 1 when it composed the picture into the job's
-   output planes, 0 when the job is too large for the GPU and the caller composes in guest memory */
+   output planes, 0 when the job is too large for the GPU and the caller composes in guest memory. Called without
+   vk_lock, which it takes only around what needs it */
 int vk_vic_compose(const VicJob* j);
 
 /* texture.c */

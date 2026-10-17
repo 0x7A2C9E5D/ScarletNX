@@ -106,10 +106,7 @@ static int vkr_vic_compose(const VicJob* j) {
     static int off = -1;
     if (off < 0) off = getenv("SNX_NO_VIC_GPU") != NULL;
     if (off) return 0;
-    vk_lock();
-    int r = vk_vic_compose(j);
-    vk_unlock();
-    return r; /* 0: the caller composes in guest memory */
+    return vk_vic_compose(j); /* 0: the caller composes in guest memory. It takes vk_lock where it needs it */
 }
 static void vkr_rt_flush(u64 gva) {
     vk_lock();
