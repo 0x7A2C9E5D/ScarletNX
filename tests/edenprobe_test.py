@@ -8,6 +8,7 @@ another build or mode or none, broken lines; then the baseline of several runs. 
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -217,7 +218,9 @@ with tempfile.TemporaryDirectory() as temporary:
         pass
 
     status, text, out, calls = run([{'lines': WHOLE, 'slow': 0.4}], extra=['--timeout', '1.5'])
-    check('a slow launch that keeps adding lines is not killed', status == 0 and 'launch 1: exit 0, 3 s' in text, text)
+    # past the 1.5 s of --timeout in all; the seconds themselves are the runner's (3 here, 4 on macOS)
+    took = re.search(r'launch 1: exit 0, (\d+) s', text)
+    check('a slow launch that keeps adding lines is not killed', status == 0 and took and int(took[1]) >= 2, text)
 
     status, text, out, calls = run([{'lines': crash, 'exit': 1}, {'lines': [], 'exit': 1}])
     check('a launch that adds no case ends the run', status == 1 and 'launch 2 (exit 1) added no case' in text, text)
