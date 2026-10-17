@@ -39,6 +39,11 @@ On UNIX, short flags can be combined. Windows accepts separate short flags only.
 To prepare a dump without playing, use `./build/scarletnx -r "Game.xci"`.
 This extracts when necessary and forces recompilation, even if a cached executable exists.
 `-rx` is equivalent on UNIX (`-r -x` on Windows). `-x` alone only extracts.
+
+A game made already plays the same way, named by its folder or its program: `./build/scarletnx games/<id>` (or
+`games/<id>/<id>`) runs it, recompiled first where it is when another build made it, from what its `<id>_data/`
+keeps (the ExeFS or the NRO: no dump, keys or extraction). `-r` recompiles it without playing. `--outdir` and `--out`
+name a dump's folders and are refused for it. `--game=games/<id>` runs it as it is, whichever build made it.
 Pass arguments to the game executable after `--`, for example:
 
 ```sh
