@@ -38,5 +38,5 @@ IPC requests allow 0x300-byte paths excluding NUL. Host limits also apply.
 - Handles retain node identity across rename; detached nodes live until last close. Removed directory handles return `FS_NOTFOUND`.
 - Live directory cursor: `strcmp` order, last visited name, latched EOF; counts reflect current children.
 - RomFS: prefer indexed `romfs.bin`; otherwise synthesize from `romfs/`.
-- Readonly RAM copies: missing system archives become valid empty images at `system/archives/<16-hex-id>.romfs`; OS fallback at
-  `fonts/SystemFallback.ttf`. No persistent host copy.
+- Readonly RAM copies: missing system archives become valid empty images at `system/archives/<16-hex-id>.romfs`. No
+  persistent host copy.

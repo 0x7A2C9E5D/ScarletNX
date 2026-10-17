@@ -753,6 +753,14 @@ add_executable(snx-test-astc astc_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/tex
 snx_test_target(snx-test-astc 23)
 add_test(NAME astc_decode COMMAND snx-test-astc)
 
+# the shared fonts pl.c hands out when a game folder has none: the stand-ins compiled in (cmake/shared_fonts.cmake)
+if(NOT SNX_TOOLS_ONLY)
+    add_executable(snx-test-pl-fonts pl_fonts.c "${CMAKE_BINARY_DIR}/generated/shared_fonts.c")
+    snx_test_target(snx-test-pl-fonts 23)
+    snx_service_swipc(snx-test-pl-fonts hle/services/pl.swipc)
+    add_test(NAME pl_fonts COMMAND snx-test-pl-fonts)
+endif()
+
 # audout and hwopus in a fixture, with FFmpeg's Opus decoder for the hwopus decoders that open. FFmpeg::avcodec comes
 # from cmake/dependencies.cmake, before this folder, in every build but a tools-only one, which checks the fixture
 # without it (SNX_NO_H264, which no runtime build defines)
