@@ -39,8 +39,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Back goes back, Tab to the next screen, Enter or Tap selects, Swipe across turns the page). A key of
   words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
   presses the key when its words all press one. `Arrows`, `mouse` and `pad` press nothing.
-- The menu, top to bottom: the three loads, **Setup device keys**, **Settings**, **Share log** and
-  **Exit**. The games, and the recent ones, are the Games tab's.
+- The menu, top to bottom: the three loads, **Setup device keys**, **Settings**, **Share log**, on
+  Android **Open data folder**, and **Exit**. The games, and the recent ones, are the Games tab's.
 - Space, Enter or a left click explicitly activates an item, marking it bright
   pink. Activation is tracked separately from hover/focus, so the activated item
   stays pink while another item is hovered in yellow. Mouse controls also work
@@ -52,7 +52,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF** and **Load 3DS CIA** open a screen as the
   keys': a click on its blinking **[ Pick or drop a file ]**, or Enter, opens the system's file
   picker (on Linux the desktop's, else zenity's). Dropping a file on the window and Ctrl+V with
-  a path work too. ESC returns to the menu. On Android the picker opens at once.
+  a path work too. ESC returns to the menu. On Android the picker opens at once. A dump not extracted yet takes
+  about its size for the extraction and, for a Switch game, as much again for the RomFS its folder gets; when its
+  disks have less free, the menu says how much it needs and *Run anyway* takes a second press.
 - **Load 3DS CIA** uses `scarletnx-3ds`. Its `games/` browser lists CIA inputs,
   not host executables. The driver extracts supported decrypted application CIAs.
   A native Linux build with `SNX_3DS_AOT=ON` then performs static ARM11 integer
@@ -67,8 +69,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   `blink_ms`) while no `prod.keys` is in use. It prompts you to
   pick `prod.keys` (a click on the blinking **[ Pick or drop prod.keys ]** in the middle of
   the screen, the theme's `[prompt]`, or Enter), drop it, or paste its path with Ctrl+V. It installs the file to `~/.switch/prod.keys`, or
-  `%USERPROFILE%\.switch\prod.keys` on Windows; an installed copy on Linux puts it in its
-  data folder instead (`~/.local/share/scarletnx/prod.keys`), which the driver reads before
+  `%USERPROFILE%\.switch\prod.keys` on Windows; on Linux, in the user's data folder, it puts it there
+  instead (`~/.local/share/scarletnx/prod.keys`), which the driver reads before
   `~/.switch`, and names the keys of `~/.switch` it would use until then. It creates the
   folder if needed. Existing keys trigger the bright-red warning
   **Keys already setup. This will overwrite the previous ones**. The screen then says what the try
@@ -100,7 +102,16 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   folder*, or *With subfolders*, whose games are listed too, four levels down, hidden folders
   left alone (its row says *+ subfolders*). Del, or Enter twice, takes one off the list (the
   folder stays). They are kept in `folders.txt` beside `settings.ini`, a line each, `/**` after
-  one kept with its subfolders; one that cannot be read is named when the games are listed. **Clean old settings**, Enter twice (the first says what it
+  one kept with its subfolders; one that cannot be read is named when the games are listed. **Folders** has a row for
+  the data folder (**Data**: `games/`, `themes/` and `prod.keys`), **Games** and **Extractions**, each its default or a
+  folder picked. Enter opens the folder picker, a folder dropped or pasted with Ctrl+V takes the focused row, Del puts
+  its default back and the last row, **All back to the defaults**, all three. A row says *default*, *picked* or why
+  its folder cannot be; the line under the rows names the folder in use, the one above its disk's free space. A folder
+  not there, not a folder, that cannot be written or, for the games, on a disk that runs no programs (`noexec`) is
+  refused, and a run whose picked folder no longer can be stops, naming it: the default never takes its place. On
+  Android a folder outside the app's own storage is asked about first, since Android checks every file access there
+  and games may run slower: *Use it* takes a second tap, and its row says *outside the app*.
+  Nothing is moved, the folder before keeps what it has. The menu's own files stay where they are. **Clean old settings**, Enter twice (the first says what it
   would do), takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
   gives a game's `.ini` for the keys it no longer uses (in the config folder's `games/`, in `games/`
   and in the player's folders), the keys of `settings.ini` that no setting of the runtime's takes
@@ -127,7 +138,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and YoRHa, then each folder of `themes/` (see [Themes](#themes)). The menu opens in YoRHa until one is picked.
   It is kept for the next start,
   as is Text size, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
-  name) and `text_size` (`auto` or 1 to 4). A value the
+  name) and `text_size` (`auto` or 1 to 4), and once one is picked `[folders]` with Folders' `data`, `games` and
+  `work` (a full path, nothing for the default). A value the
   menu does not know, or a theme no longer there, is named in the menu's message as it opens and
   left out; a file that cannot be written is named in App's note.
 - Settings > App's **Theme editor** edits the current theme: **Save** first, the folder it is saved in, a row
@@ -144,17 +156,20 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   sizes. Bigger letters scroll the menu. The foot's letters (its keys, and the tips when they are
   there) are a size under the rest's, 1x at the least.
 - **Share log** saves the last run's output and game log to `scarletnx.log`. On the
-  desktop it goes in the working folder with its path copied. On Android it goes to
-  `/sdcard/ScarletNX/` and is shared.
+  desktop it goes in the working folder with its path copied. On Android it goes to the
+  data folder's `state/` and is shared.
+- **Open data folder**, on Android, opens the data folder, the app's own storage, in the
+  system's Files app ([ANDROID](ANDROID.md)).
 - **Exit** closes the launcher. Closing its window during a run terminates the
   entire owned process tree, so let the game exit normally to preserve its saves.
 - As it opens, the menu shows in a box what an older version left where this one no longer looks, a
-  folder at a time: where it is (`- `, in the failure colour) and where it goes now (`-> `), a path
-  too long for a row going on in the next. They are the menu's `gui/`, `work/`, each game laid out
-  beside the others in `games/` or a game folder (`games/<id>/` now) and a portable copy's `games/`
-  beside the program ([USAGE](USAGE.md#folders)). Any key, click or tap closes it;
-  nothing is moved, and it shows again at the next start for as long as they are there.
-  **Share log** lists them all.
+  folder at a time: where it is (`- `, in the failure colour, a path too long for a row going on in the next) and
+  under it the space it takes, counted as the box shows (*counting* until then). They are the menu's `gui/`, `work/`, each game laid out
+  beside the others in `games/` or a game folder (`games/<id>/` now), a portable copy's `games/`
+  beside the program, and a build tree's `games/`, `work/` and keys in its checkout
+  ([USAGE](USAGE.md#folders)). Any key, click or tap closes it; nothing is moved, and it shows again at the next
+  start for as long as they are there.
+  **Share log** lists them all, each with where it goes now.
 - **Recent games**, in Games under Add a folder, lists the last games run, newest first, three and a row that
   shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
   The focus moves between them, Add a folder and the page's games in one ring, and the tips show the focused
@@ -179,9 +194,9 @@ Status box. See [GNUABI](GNUABI.md) for supported Linux ELF applications.
 
 **Games**, the tab, lists the games: the ones ready to run (a recompiled game runs directly), the dumps to prepare
 on Android, and CIA files, which go to the 3DS driver. It reads the `games/` of the
-folder the driver works in, which the menu passes it as `--repo`: the checkout of a build tree,
-else the folder of an AppImage (or of the GUI) that has a `games/` beside it, else the user's
-data folder (docs/USAGE.md), then each folder of Settings > App > Game folders. Each game is shown by the name in its `control.nacp`, which the recompile copies into
+folder the driver works in, which the menu passes it as `--repo`: a portable copy's `.scarletnx/` beside the
+AppImage (or the GUI), else the user's data folder, a build tree's menu's too ([USAGE](USAGE.md#folders)), then each
+folder of Settings > App > Game folders. Each game is shown by the name in its `control.nacp`, which the recompile copies into
 its data, else by its folder's or file's name, sorted by it in each folder. Only immediate files are listed:
 executables (execute permission on UNIX, `.exe` on Windows) and `.cia` files (case-insensitive,
 no execute permission needed), which run with the 3DS driver. Hidden files, shared libraries and

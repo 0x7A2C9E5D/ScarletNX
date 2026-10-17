@@ -100,12 +100,15 @@ static char** environment(char** changes, size_t change_count) {
 /* linux/ of the data folder games/ and work/ are in (snx_data_dir), as the 3DS runtime finds work/3ds */
 static char* default_sysroot(const char* argv0) {
     const char* named = getenv("SNX_LINUX_SYSROOT");
-    char *exe, *dir, *data, *root;
+    char *exe, *dir, *data, *root, *checkout;
     if (named && named[0]) return snx_absolute(named);
     exe = snx_executable(argv0);
     dir = exe ? snx_dirname(exe) : NULL;
-    data = snx_data_dir(SNX_SOURCE_DIR, SNX_BUILD_DIR, dir);
+    data = snx_data_dir(dir);
     root = data ? snx_path_join(data, "linux") : NULL;
+    checkout = snx_checkout(SNX_SOURCE_DIR, SNX_BUILD_DIR, dir);
+    if (checkout && data) snx_checkout_left(checkout, data);
+    free(checkout);
     free(exe);
     free(dir);
     free(data);

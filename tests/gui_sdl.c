@@ -4,6 +4,9 @@
 #define SNX_GUI_NO_MAIN
 #include "gui/main.c"
 #include <assert.h>
+#ifndef _WIN32
+#include <sys/statvfs.h> /* Folders on a disk mounted noexec */
+#endif
 /* the default theme's colours, as the checks below name them */
 static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, red = {255, 0, 0, 255},
                        pink = {255, 85, 255, 255}, black = {0, 0, 0, 255};
@@ -839,9 +842,33 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (argc > 1 && strstr(argv[0], "scarletnx-3ds")) {
-        assert(argc == 2 && snx_is_file(argv[1]) && strstr(argv[1], "3ds input.CIA"));
+        /* in the menu's data folder, as the Switch driver */
+        assert(argc == 4 && snx_is_file(argv[1]) && strstr(argv[1], "3ds input.CIA") && !strcmp(argv[2], "--repo") &&
+               argv[3][0]);
         fputs("CIA execution is not implemented (stage 2)\n", stderr);
         return 3;
+    }
+    if (argc > 1 && strstr(argv[1], "picked folders")) { /* Settings > App > Folders' games and extractions */
+        int i = 2;
+        bool nro = strstr(argv[1], ".nro") != NULL; /* runs without an extraction */
+        while (i < argc && strcmp(argv[i], "--repo")) ++i;
+        assert(i + (nro ? 4 : 6) == argc && argv[i + 1][0] && !strcmp(argv[i + 2], "--outdir") &&
+               strstr(argv[i + 3], "picked games"));
+        assert(nro || (!strcmp(argv[i + 4], "--out") && strstr(argv[i + 5], "picked work") &&
+                       !strcmp(argv[i + 5] + strlen(argv[i + 5]) - 15, "/picked folders")));
+        puts("Recompiling picked folders\nScarletNX - picked folders");
+        return 0;
+    }
+    if (argc > 1 && strstr(argv[1], "room dump")) { /* asked about its room first */
+        int i = 2;
+        char* folder = snx_dirname(argv[1]);
+        while (i < argc && strcmp(argv[i], "--repo")) ++i;
+        /* a dump from a folder of its own, the folders their defaults: the data folder alone, no --out or --outdir, so
+           the extraction goes to the data folder's work/ (on Android in the app's own storage), never beside it */
+        assert(i + 2 == argc && !snx_path_within(argv[i + 1], folder) && !snx_path_within(folder, argv[i + 1]));
+        free(folder);
+        puts("Recompiling room dump\nScarletNX - room dump");
+        return 0;
     }
     if (argc > 1 && strstr(argv[1], "option flags")) {
         int i = 2;
@@ -1364,7 +1391,7 @@ int main(int argc, char** argv) {
     /* App: the theme and the letters, either way round, and the theme editor, which comes back here */
     app.editor.row = 0;
     key(&app, SDLK_RETURN);
-    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 5);
+    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 6);
     {
         char first[64], line[96];
         snprintf(first, sizeof first, "%s", app.theme.name);
@@ -1374,6 +1401,7 @@ int main(int argc, char** argv) {
         shows(&app, line, yellow);
         shows(&app, "- Text size          Auto", normal);
         shows(&app, "- Theme editor", normal);
+        shows(&app, "- Folders            Defaults", normal);
         shows(&app, "- Clean old settings", normal);
         hides(&app, "- Layout", normal);
         key(&app, SDLK_RIGHT);
@@ -1709,6 +1737,190 @@ int main(int argc, char** argv) {
         free(kept_as);
         free(more);
     }
+    /* Folders: the data folder, games/ and the extractions, each its default or a folder picked, kept in app.ini's
+       [folders]. A folder that cannot take what goes there is refused, never swapped for the default */
+    {
+        char *data = snx_strdup(app.data_dir), *games = snx_strdup(app.games_dir), *work = snx_strdup(app.work_dir);
+        char* games_default = snx_path_join(data, "games"); /* the test's own games/ is elsewhere, set by hand */
+        char *keys = snx_strdup(app.keys_path), *themes = snx_strdup(app.themes_dirs[0]); /* so are these */
+        char *picked = snx_path_join(temporary, "picked games"), *file = snx_path_join(temporary, "not a folder.txt");
+        char *kept, line[512];
+        size_t size;
+        key(&app, SDLK_DOWN);
+        assert(app.editor.row == GUI_APP_PLACES && !strcmp(app.app_form.places, "Defaults"));
+        key(&app, SDLK_RETURN);
+        assert(app.form == GUI_FORM_PLACES && app.editor.row == GUI_PLACE_DATA && gui_editor_rows(&app.editor) == 4);
+        render(&app);
+        shows(&app, "Folders", normal);
+        shows(&app, "- Data", yellow);
+        shows(&app, "default", yellow);
+        /* under the rows, the folder in use: its start, as a long one wraps (Windows' %APPDATA% does) */
+        snprintf(line, sizeof line, "%.24s", data);
+        shows(&app, line, rgb(app.theme.soft));
+        shows(&app, "- Extractions", normal);
+        shows(&app, "- All back to the defaults", normal);
+        assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir) && !strcmp(app.app_form.place[1], "default"));
+        assert(strstr(app.place_about[GUI_PLACE_GAMES], "The recompiled games, ") &&
+               strstr(app.place_about[GUI_PLACE_GAMES], " free. Enter: pick another. Del: the default"));
+        /* refused: a folder not there, a file; nothing changes, nothing is kept */
+        key(&app, SDLK_DOWN);
+        place_set(&app, GUI_PLACE_GAMES, picked);
+        snprintf(line, sizeof line, "Not changed: %s is not there", picked);
+        assert(!app.place[GUI_PLACE_GAMES] && !strcmp(app.editor.note, line) && !strcmp(app.games_dir, games));
+        assert(!snx_write_file(file, "x", 1));
+        place_set(&app, GUI_PLACE_GAMES, file);
+        assert(!app.place[GUI_PLACE_GAMES] && strstr(app.editor.note, " is not a folder"));
+        kept = (char*)snx_read_file(app.app_file, &size);
+        assert(!kept || !strstr(kept, "[folders]"));
+        free(kept);
+        /* Enter opens the folder picker for the focused row; its answer is that row's folder at once, kept, and the
+           folder before keeps what it has */
+        assert(!snx_mkdirs(picked));
+        key(&app, SDLK_RETURN);
+        assert(app.place_row == GUI_PLACE_GAMES);
+        {
+            SDL_Event answer;
+            SDL_zero(answer);
+            answer.type = app.picked_folder;
+            answer.user.data1 = SDL_strdup(picked);
+            event(&app, &answer);
+        }
+        assert(app.place_row == -1 && app.place[GUI_PLACE_GAMES] && !strcmp(app.games_dir, app.place[GUI_PLACE_GAMES]));
+        assert(snx_path_within(app.games_dir, picked) && !strcmp(app.data_dir, data) && !strcmp(app.work_dir, work));
+        snprintf(line, sizeof line, "Games: %s. The folder before keeps what it has", app.games_dir);
+        assert(!strcmp(app.editor.note, line) && app.editor.row == GUI_PLACE_GAMES);
+        kept = (char*)snx_read_file(app.app_file, &size);
+        snprintf(line, sizeof line, "[folders]\ndata = \ngames = %s\nwork = \n", app.games_dir);
+        assert(kept && strstr(kept, "[app]\ntheme = ") && strstr(kept, line));
+        free(kept);
+        render(&app);
+        shows(&app, "- Games", yellow);
+        shows(&app, "picked", yellow);
+        assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir));
+        /* read back as the menu opens, a path not from the root left out and named */
+        free(app.place[GUI_PLACE_GAMES]);
+        app.place[GUI_PLACE_GAMES] = NULL;
+        places_apply(&app);
+        assert(!strcmp(app.games_dir, games_default));
+        kept = (char*)snx_read_file(app.app_file, &size);
+        {
+            char* more_text = snx_format("%s[folders]\nwork = relative/work\nshaders = /x\n", kept);
+            assert(!snx_write_file(app.app_file, more_text, strlen(more_text)));
+            free(more_text);
+        }
+        free(kept);
+        app.message[0] = 0;
+        app_load(&app);
+        snprintf(line, sizeof line, "Not used from %s: [folders] work = relative/work, [folders] shaders = /x",
+                 app.app_file);
+        assert(!strcmp(app.message, line) && app.place[GUI_PLACE_GAMES] && !strcmp(app.games_dir, app.place[1]));
+        assert(!app.place[GUI_PLACE_WORK] && !strcmp(app.work_dir, work));
+        app.message[0] = 0;
+        /* a folder picked once and gone since: its row says so, as a run would refuse it */
+        assert(!snx_remove_tree(picked));
+        open_places(&app, GUI_PLACE_GAMES);
+        snprintf(line, sizeof line, "%s is not there", app.games_dir);
+        assert(!strcmp(app.app_form.place[GUI_PLACE_GAMES], "is not there") &&
+               !strcmp(app.place_line[GUI_PLACE_GAMES], line));
+        assert(!places_fit(&app, line, sizeof line) && strstr(line, "Games folder ") &&
+               strstr(line, " is not there. "));
+        /* Del: the default again, kept */
+        key(&app, SDLK_DELETE);
+        assert(!app.place[GUI_PLACE_GAMES] && !strcmp(app.games_dir, games_default) &&
+               strstr(app.editor.note, ", the default"));
+        kept = (char*)snx_read_file(app.app_file, &size);
+        assert(kept && !strstr(kept, "[folders]"));
+        free(kept);
+        /* a disk that runs no programs takes the extractions, not the games */
+#if defined(ST_NOEXEC) && !defined(SDL_PLATFORM_ANDROID)
+        {
+            struct statvfs st;
+            if (!statvfs("/dev/shm", &st) && (st.f_flag & ST_NOEXEC)) {
+                char* shm = snx_temp_dir("/dev/shm");
+                assert(shm);
+                place_set(&app, GUI_PLACE_GAMES, shm);
+                assert(!app.place[GUI_PLACE_GAMES] && strstr(app.editor.note, "runs no programs (noexec)"));
+                place_set(&app, GUI_PLACE_WORK, shm);
+                assert(app.place[GUI_PLACE_WORK] && !strcmp(app.work_dir, app.place[GUI_PLACE_WORK]));
+                assert(!snx_remove_tree(shm));
+                free(shm);
+            }
+        }
+#endif
+        /* Android: a folder outside the app's own storage is asked about first, its Use it pressed twice; Back leaves
+           the one in use. One inside is taken at once */
+        {
+            char *own = snx_path_join(temporary, "own"), *inside = snx_path_join(own, "games");
+            int w, h;
+            GuiRect r;
+            GuiList l;
+            assert(!snx_mkdirs(inside));
+            app.own_dir = own;
+            app.editor.row = GUI_PLACE_WORK;
+            place_set(&app, GUI_PLACE_WORK, temporary);
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_OUTSIDE && !app.place[GUI_PLACE_WORK]);
+            /* the question wraps where it is wider than the screen, its choices under it */
+            SDL_GetWindowSize(app.window, &w, &h);
+            assert(SDL_SetWindowSize(app.window, 420, h));
+            render(&app);
+            shows(&app, "Outside the app,", rgb(app.theme.warning));
+            shows(&app, "games may run slower.", rgb(app.theme.warning));
+            ask_boxes(&app, &r, &l);
+            assert(list_box(&l, 0).y >= r.y + 2 * cell_h(&app));
+            assert(SDL_SetWindowSize(app.window, w, h));
+            render(&app);
+            shows(&app, "- Back", yellow);
+            shows(&app, "- Use it", normal);
+            key(&app, SDLK_ESCAPE);
+            assert(!app.confirm.shown && !app.place[GUI_PLACE_WORK] && !strcmp(app.editor.note, "Not changed"));
+            place_set(&app, GUI_PLACE_WORK, temporary);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN);
+            assert(app.confirm.shown && app.confirm.armed && !app.place[GUI_PLACE_WORK]);
+            render(&app);
+            shows(&app, "- Use it: press again", yellow);
+            key(&app, SDLK_RETURN);
+            assert(!app.confirm.shown && app.place[GUI_PLACE_WORK] && same_path(app.work_dir, temporary));
+            assert(!strcmp(app.app_form.place[GUI_PLACE_WORK], "outside the app"));
+            /* a finger: the first tap on Use it arms it, the second takes it */
+            key(&app, SDLK_DELETE);
+            assert(!app.place[GUI_PLACE_WORK]);
+            place_set(&app, GUI_PLACE_WORK, temporary);
+            ask_boxes(&app, &r, &l);
+            touch_box(&app, list_box(&l, 1));
+            assert(app.confirm.shown && app.confirm.armed && !app.place[GUI_PLACE_WORK]);
+            touch_box(&app, list_box(&l, 1));
+            assert(!app.confirm.shown && app.place[GUI_PLACE_WORK]);
+            key(&app, SDLK_DELETE);
+            place_set(&app, GUI_PLACE_GAMES, inside);
+            assert(!app.confirm.shown && app.place[GUI_PLACE_GAMES] &&
+                   !strcmp(app.app_form.place[GUI_PLACE_GAMES], "picked"));
+            app.own_dir = NULL;
+            free(inside);
+            free(own);
+        }
+        /* the last row: every one back to its default */
+        place_set(&app, GUI_PLACE_DATA, temporary);
+        assert(app.place[GUI_PLACE_DATA] && snx_path_within(app.data_dir, temporary) &&
+               snx_path_within(app.games_dir, app.data_dir));
+        app.editor.row = GUI_PLACES;
+        key(&app, SDLK_RETURN);
+        assert(!app.place[0] && !app.place[1] && !app.place[2] && !strcmp(app.data_dir, data));
+        assert(!strcmp(app.editor.note, "All back to the defaults. The folders before keep what they have"));
+        free(app.games_dir); /* the test's own games/ and the rest, as before */
+        app.games_dir = games;
+        free(app.keys_path);
+        app.keys_path = keys;
+        free(app.themes_dirs[0]);
+        app.themes_dirs[0] = themes;
+        key(&app, SDLK_ESCAPE);
+        assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_PLACES);
+        free(file);
+        free(picked);
+        free(work);
+        free(data);
+        free(games_default);
+    }
     key(&app, SDLK_ESCAPE);
     assert(app.form == GUI_FORM_SETTINGS && app.editor.row == 0);
     key(&app, SDLK_ESCAPE);
@@ -1830,6 +2042,109 @@ int main(int argc, char** argv) {
     launcher(&app, false);
     app.menu.selected = GUI_LINUX;
     free(flags_input);
+    /* the folders picked in Settings > App > Folders, passed to the driver: games/ for every input, the extraction for a
+       dump, under the picked folder as the driver names it; one gone since stops the run, naming it */
+    {
+        char *games = snx_path_join(temporary, "picked games"), *work = snx_path_join(temporary, "picked work");
+        char *dump = snx_path_join(temporary, "picked folders.nsp"),
+             *nro = snx_path_join(temporary, "picked folders.nro");
+        char *games_was = snx_strdup(app.games_dir), *keys_was = snx_strdup(app.keys_path), expected[512];
+        assert(!snx_mkdirs(games) && !snx_mkdirs(work) && !snx_write_file(dump, "fixture", 7) &&
+               !snx_write_file(nro, "fixture", 7));
+        place_set(&app, GUI_PLACE_GAMES, games);
+        place_set(&app, GUI_PLACE_WORK, work);
+        app.menu.selected = GUI_SWITCH;
+        launcher(&app, true);
+        launch(&app, snx_strdup(dump), false);
+        finish(&app, 0);
+        launch(&app, snx_strdup(nro), false);
+        finish(&app, 0);
+        assert(!snx_remove_tree(work));
+        launch(&app, snx_strdup(dump), false);
+        assert(!app.menu.running && strstr(app.message, "Extractions folder ") &&
+               strstr(app.message, " is not there. Settings > App > Folders picks another."));
+        launcher(&app, false);
+        app.menu.selected = GUI_LINUX;
+        places_reset(&app);
+        snprintf(expected, sizeof expected,
+                 "Folders: All back to the defaults. The folders before keep what they have");
+        assert(!app.place[GUI_PLACE_GAMES] && !app.place[GUI_PLACE_WORK] && !strcmp(app.message, expected));
+        app.message[0] = 0;
+        free(app.games_dir);
+        app.games_dir = games_was;
+        free(app.keys_path);
+        app.keys_path = keys_was;
+        free(nro);
+        free(dump);
+        free(work);
+        free(games);
+    }
+
+    /* a dump not extracted yet, with less room than its extraction and RomFS copy take: asked first, Run anyway
+       pressed twice; Back runs nothing. With room, extracted already or an NRO, it runs at once */
+    {
+        char *dump = snx_path_join(temporary, "room dump.nsp"), *nro = snx_path_join(temporary, "room dump.nro");
+        char *work_was = app.work_dir, *games_was = app.games_dir, *out;
+        GuiRect r;
+        GuiList l;
+        void* zeros = calloc(1, 3u << 20);
+        assert(zeros && !snx_write_file(dump, zeros, 3u << 20) && !snx_write_file(nro, zeros, 3u << 20));
+        free(zeros);
+        app.work_dir = snx_path_join(temporary, "room work"); /* one disk, as the defaults are */
+        app.games_dir = snx_path_join(temporary, "room games");
+        app.menu.selected = GUI_SWITCH;
+        launcher(&app, true);
+        app.room_free = 4u << 20; /* 6 MB to take */
+        launch(&app, snx_strdup(dump), false);
+        assert(!app.menu.running && app.confirm.shown && app.confirm.ask == GUI_ASK_ROOM && app.room_file);
+        render(&app);
+        shows(&app, "Needs about 6 MB, 4 MB free.", rgb(app.theme.warning));
+        shows(&app, "- Back", yellow);
+        shows(&app, "- Run anyway", normal);
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && !app.menu.running && !app.room_file);
+        launch(&app, snx_strdup(dump), false);
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RETURN);
+        assert(app.confirm.shown && app.confirm.armed && !app.menu.running);
+        render(&app);
+        shows(&app, "- Run anyway: press again", yellow);
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && app.menu.running && !app.room_ok && app.menu.selected == GUI_SWITCH);
+        finish(&app, 0);
+        /* a finger: the first tap arms Run anyway, the second runs it */
+        launch(&app, snx_strdup(dump), false);
+        ask_boxes(&app, &r, &l);
+        touch_box(&app, list_box(&l, 1));
+        assert(app.confirm.shown && app.confirm.armed && !app.menu.running);
+        touch_box(&app, list_box(&l, 1));
+        assert(!app.confirm.shown && app.menu.running);
+        finish(&app, 0);
+        app.room_free = 6u << 20;
+        launch(&app, snx_strdup(dump), false);
+        assert(!app.confirm.shown && app.menu.running);
+        finish(&app, 0);
+        app.room_free = 1;
+        launch(&app, snx_strdup(nro), false);
+        assert(!app.confirm.shown && app.menu.running);
+        finish(&app, 0);
+        out = dump_out(&app, dump, NULL);
+        assert(!snx_mkdirs(out));
+        launch(&app, snx_strdup(dump), false);
+        assert(!app.confirm.shown && app.menu.running);
+        finish(&app, 0);
+        assert(!snx_remove_tree(out));
+        free(out);
+        app.room_free = 0;
+        free(app.work_dir);
+        app.work_dir = work_was;
+        free(app.games_dir);
+        app.games_dir = games_was;
+        launcher(&app, false);
+        app.menu.selected = GUI_LINUX;
+        free(nro);
+        free(dump);
+    }
 
     /* recent games: what the GUI ran, newest first in Games under Add a folder and kept in a file, named as the run
        named it; one runs again with the options the menu has now, which the fake driver checks */
@@ -3347,7 +3662,7 @@ int main(int argc, char** argv) {
             menu_boxes(&app, &m);
             b = list_box(&m.list, m.list.focus);
             key(&app, SDLK_ESCAPE);
-            assert(app.confirm.shown && app.confirm.exit);
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
             render(&app);
             ask_boxes(&app, &r, &choices);
             text_px_is(&app, r.x + cw, r.y + 4 * s, "Exit ScarletNX?", rgb(app.theme.warning), black);
@@ -3364,6 +3679,11 @@ int main(int argc, char** argv) {
             mouse_px(&app, list_box(&choices, 1).x + 4, list_box(&choices, 1).y + 4, true);
             assert(!app.confirm.shown && app.menu.quit);
             app.menu.quit = false;
+            {
+                char* elsewhere[] = {"/elsewhere"}; /* a count for another list is not this one's */
+                space_count(&app.left_space, &app.left_counter, elsewhere, 1, true);
+                while (!__atomic_load_n(&app.left_space->done, __ATOMIC_ACQUIRE)) SDL_Delay(1);
+            }
             app.left = snx_format("/old/recent.txt" SAY_LEFT_BY "/new/recent.txt\n");
             app.lefts = 1;
             app.left_shown = true;
@@ -3373,9 +3693,11 @@ int main(int argc, char** argv) {
                 int width, height;
                 area(&app, &width, &height);
                 r = over_rect(&app, width / cw - 6, head_h(&app) + 2 * 16 * s + item_h(&app) + 16 * s);
-                text_px_is(&app, r.x + cw, r.y + 2 * s, "An older version left these files", normal, black);
+                text_px_is(&app, r.x + cw, r.y + 2 * s, "Left by older versions", normal, black);
                 text_px_is(&app, r.x + cw, r.y + head_h(&app) + 4 * s, "- /old/recent.txt", red, black);
-                text_px_is(&app, r.x + cw, r.y + head_h(&app) + 4 * s + 16 * s, "-> /new/recent.txt", normal, black);
+                /* its space, not counted: the menu counts what it looked for itself */
+                text_px_is(&app, r.x + cw + 2 * cw, r.y + head_h(&app) + 4 * s + 16 * s, "counting",
+                           rgb(app.theme.soft), black);
             }
             key(&app, SDLK_DOWN);
             assert(!app.left_shown && app.menu.selected == GUI_EXIT); /* the key closed it and did nothing else */
@@ -3466,7 +3788,7 @@ int main(int argc, char** argv) {
             /* the menu: ESC asks before closing, the pointer over it presses nothing; Arrows/mouse name no one key;
                select, the text of three words that all select, opens the Settings, where ESC comes back */
             press_key(&app, "ESC", 0, false, yellow);
-            assert(app.confirm.shown && app.confirm.exit);
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
             key(&app, SDLK_ESCAPE);
             assert(!app.confirm.shown && !app.menu.quit);
             {
@@ -3550,7 +3872,7 @@ int main(int argc, char** argv) {
             assert(hint_press(&app, "Swipe across", 0) && app.browser.page == 1);
             assert(!hint_press(&app, "Tap outside", 0));
             go_tab(&app, GUI_TAB_MENU);
-            assert(hint_press(&app, "Back", 0) && app.confirm.shown && app.confirm.exit);
+            assert(hint_press(&app, "Back", 0) && app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
             key(&app, SDLK_ESCAPE);
             app.menu.selected = GUI_KEYS;
             assert(hint_press(&app, "Tap", 0) && app.menu.view == GUI_LOAD_KEYS);
@@ -3618,7 +3940,7 @@ int main(int argc, char** argv) {
             app.theme = *gui_theme_builtin("yorha");
             app.theme.grid = false;
             press_key(&app, "ESC", 0, false, rgb(app.theme.page));
-            assert(app.confirm.shown && app.confirm.exit);
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
             key(&app, SDLK_ESCAPE);
             app.theme = *gui_theme_builtin("default");
             app.menu.selected = GUI_KEYS;
@@ -3814,7 +4136,8 @@ int main(int argc, char** argv) {
     /* ESC on the menu's first screen asks before the app closes: ESC again stays, Exit closes */
     assert(app.menu.view == GUI_LOAD_NONE && !app.menu.running && !app.finished && !app.confirm.shown);
     key(&app, SDLK_ESCAPE);
-    assert(app.confirm.shown && app.confirm.exit && app.confirm.selected == GUI_CONFIRM_KEEP && !app.menu.quit);
+    assert(app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT && app.confirm.selected == GUI_CONFIRM_KEEP &&
+           !app.menu.quit);
     render(&app);
     key(&app, SDLK_ESCAPE);
     assert(!app.confirm.shown && !app.menu.quit);
@@ -3970,6 +4293,13 @@ int main(int argc, char** argv) {
             for (i = 0; i < 8; ++i) meta[0x90 + i] = (unsigned char)(0x0100DA801624E000ull >> (8 * i));
             line = snx_dirname(npdm);
             assert(!snx_mkdirs(work) && !snx_mkdirs(loose_data) && !snx_mkdirs(line) && !snx_write_file(loose, "", 0));
+            {
+                char* big = snx_path_join(work, "big");
+                void* zeros = calloc(1, 3u << 20);
+                assert(zeros && !snx_write_file(big, zeros, 3u << 20));
+                free(zeros);
+                free(big);
+            }
             assert(!snx_write_file(named, "", 0) && !snx_write_file(npdm, meta, sizeof meta));
             free(line);
             lines[0][0] = snx_strdup(old); /* the menu's gui/, its recent games and last run in the state folder */
@@ -4005,12 +4335,47 @@ int main(int argc, char** argv) {
                 free(said);
                 free(db);
             }
-            /* in a box over the menu as it opens: each where it is (-) and where it would go (->, in ink: a proposal,
-               not a diff's added green), a path too long for a row going on in the next, as many as fit */
+            /* a build tree's menu: its checkout's games/, work/ and keys, where an older version kept them, each where
+               this one does */
+            {
+                char *checkout = snx_path_join(temporary, "checkout"), *old_games = snx_path_join(checkout, "games");
+                char *old_work = snx_path_join(checkout, "work"), *keys = snx_path_join(checkout, "prod.keys"),
+                     *said[3];
+                assert(!snx_mkdirs(old_games) && !snx_mkdirs(old_work) && !snx_write_file(keys, "", 0));
+                said[0] = snx_format("%s" SAY_LEFT_BY "%s\n", old_games, app.games_dir);
+                said[1] = snx_format("%s" SAY_LEFT_BY "%s/scarletnx/work\n", old_work, cache);
+                said[2] = snx_format("%s" SAY_LEFT_BY "%s/prod.keys\n", keys, app.data_dir);
+                app.checkout = checkout;
+                left_behind(&app);
+                assert(app.lefts == 8);
+                /* a list that changed is counted again */
+                while (!__atomic_load_n(&app.left_space->done, __ATOMIC_ACQUIRE)) SDL_Delay(1);
+                assert(app.left_space->count == 8 && !strcmp(app.left_space->dirs[7], keys));
+                for (i = 0; i < 3; ++i) {
+                    assert(strstr(app.left, said[i]));
+                    free(said[i]);
+                }
+                app.checkout = NULL;
+                left_behind(&app);
+                assert(app.lefts == 5);
+                assert(!snx_remove_tree(checkout));
+                free(keys);
+                free(old_work);
+                free(old_games);
+                free(checkout);
+            }
+            /* in a box over the menu as it opens: each where it is (-), a path too long for a row going on in the next,
+               and under it the space it takes, counted on a thread (a game laid out beside the others with its files
+               beside it), as many as fit */
             {
                 int width, wraps = 0, selected = app.menu.selected, more, n;
                 SDL_Color ink = rgb(app.theme.ink), added = rgb(app.theme.added), failure = rgb(app.theme.failure);
+                SDL_Color soft = rgb(app.theme.soft);
                 static char paths[2][4200]; /* where each file is, and where it goes */
+                while (!__atomic_load_n(&app.left_space->done, __ATOMIC_ACQUIRE)) SDL_Delay(1);
+                assert(app.left_space->count == 5 && app.left_space->bytes[0] == 9 &&
+                       app.left_space->bytes[1] == 3u << 20 && app.left_space->bytes[2] == 0 &&
+                       app.left_space->bytes[3] == sizeof meta);
                 int window_w, window_h, text_size = app.menu.text_size;
                 app.left_shown = true;
                 app.clock = 1;
@@ -4025,18 +4390,21 @@ int main(int argc, char** argv) {
                 shows(&app, SAY_LEFT_TITLE, ink);
                 for (at = app.left; *at; at = strchr(at, '\n') + 1) {
                     left_paths(at, paths[0], paths[1], sizeof paths[0]);
-                    for (i = 0; i < 2; ++i) /* the whole path, a piece a row */
-                        for (const char* rest = paths[i]; *rest;) {
-                            size_t cut = gui_wrap(rest, width - (i ? 3 : 2));
-                            line = snx_format("%.*s", (int)cut, rest);
-                            shows(&app, line, i ? ink : failure);
-                            wraps += rest != paths[i];
-                            free(line);
-                            rest += cut;
-                        }
+                    for (const char* rest = paths[0]; *rest;) { /* the whole path, a piece a row */
+                        size_t cut = gui_wrap(rest, width - 2);
+                        line = snx_format("%.*s", (int)cut, rest);
+                        shows(&app, line, failure);
+                        wraps += rest != paths[0];
+                        free(line);
+                        rest += cut;
+                    }
+                    hides(&app, paths[1], ink); /* where it goes is Share log's */
                 }
-                assert(wraps >= 2); /* the long game's paths wrap */
-                shows(&app, "- OK, nothing is moved", yellow);
+                assert(wraps >= 1); /* the long game's path wraps */
+                shows(&app, "1 KB", soft);
+                shows(&app, "3 MB", soft);
+                shows(&app, "0 MB", soft);
+                shows(&app, "- OK", yellow);
                 hides(&app, "which Share log lists", rgb(app.theme.soft));
                 /* a window too short for them all: as many as fit, then how many more */
                 assert(SDL_SetWindowSize(app.window, window_w, 14 * 16 * app.scale));
@@ -4049,7 +4417,7 @@ int main(int argc, char** argv) {
                     if (find_text(&app, said, rgb(app.theme.soft), 1, &x, &y)) more = n;
                 }
                 assert(more > 0);
-                shows(&app, "- OK, nothing is moved", yellow);
+                shows(&app, "- OK", yellow);
                 app.menu.text_size = text_size;
                 assert(SDL_SetWindowSize(app.window, window_w, window_h));
                 SDL_SyncWindow(app.window);

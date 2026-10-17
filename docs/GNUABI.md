@@ -71,18 +71,18 @@ sysroot's `/lib` rather than the host's, as under chroot. `/proc` and `/dev` are
 runtime's own (`/proc/self/exe` and `/proc/self/fd/N` lead to the host files they name),
 as are the resolver files the network layer provides under `/etc`.
 
-Without `-L`, the sysroot is `linux/` of the data folder `games/` and `work/` are in:
-the checkout for a build run from its tree, the portable folder beside an installed
-copy, the user's data folder otherwise. The guest path `/usr/lib/libc.a` is then
-`linux/usr/lib/libc.a`. Nothing in `linux/` is ever committed: it holds whatever
+Without `-L`, the sysroot is `linux/` of the data folder `games/` and `work/` are in
+([USAGE](USAGE.md#folders)): the portable folder beside a portable copy, the user's data
+folder otherwise (`~/.local/share/scarletnx` on Linux), from a build tree too. The guest
+path `/usr/lib/libc.a` is then `linux/usr/lib/libc.a`. Nothing in `linux/` is ever committed: it holds whatever
 sysroot and guest toolchains are put there (`.gitignore`). A glibc sysroot such as
 [gnu-cross](https://github.com/cross-tools/gnu-cross/releases)'s
 `aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sysroot`, copied to `linux/`, is
 enough to run dynamically linked programs and an AArch64-hosted GCC:
 
 ```sh
-cp -a aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sysroot linux
-build/scarletnx-gnuabi linux/opt/gcc/bin/aarch64-linux-gcc --sysroot=/ hello.c -o hello
+cp -a aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/sysroot ~/.local/share/scarletnx/linux
+build/scarletnx-gnuabi ~/.local/share/scarletnx/linux/opt/gcc/bin/aarch64-linux-gcc --sysroot=/ hello.c -o hello
 build/scarletnx-gnuabi ./hello
 ```
 

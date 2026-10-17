@@ -74,20 +74,40 @@ int main(void) {
         gui_usage_text(use, sizeof use, true, 1404ull << 20, 216, 8); /* a game compiling on 8 cores */
         assert(!strcmp(use, "GUI + children: RAM 1.4 GB  CPU 27% (2.2 cores)"));
         gui_usage_text(use, sizeof use, true, 1, 830, 8);
-        assert(!strcmp(use, "GUI + children: RAM 0 MB  CPU 100% (8.0 cores)"));
+        assert(!strcmp(use, "GUI + children: RAM 1 KB  CPU 100% (8.0 cores)"));
         gui_usage_text(use, sizeof use, true, 0, 150, 0); /* SDL knows no cores: one */
         assert(!strcmp(use, "GUI + children: RAM 0 MB  CPU 100% (1.0 cores)"));
         gui_usage_text(use, sizeof use, false, 1, 1, 1);
         assert(!strcmp(use, "GUI + children: resource usage unavailable"));
-        /* sizes, as the footer and the Settings' disk line write them: MB under a GB */
+        /* sizes, as the footer and the Settings' disk line write them: KB under a MB, rounded up, MB under a GB */
         gui_size_text(use, sizeof use, 0);
         assert(!strcmp(use, "0 MB"));
+        gui_size_text(use, sizeof use, 1);
+        assert(!strcmp(use, "1 KB"));
+        gui_size_text(use, sizeof use, 1025);
+        assert(!strcmp(use, "2 KB"));
+        gui_size_text(use, sizeof use, 1023ull << 10);
+        assert(!strcmp(use, "1023 KB"));
+        gui_size_text(use, sizeof use, (1ull << 20) - 1);
+        assert(!strcmp(use, "1 MB"));
         gui_size_text(use, sizeof use, 1023ull << 20);
         assert(!strcmp(use, "1023 MB"));
         gui_size_text(use, sizeof use, 1ull << 30);
         assert(!strcmp(use, "1.0 GB"));
         gui_size_text(use, sizeof use, 26ull << 30 | 400ull << 20);
         assert(!strcmp(use, "26.4 GB"));
+    }
+    /* a run's room: the extraction and a Switch game's RomFS copy each about the dump's size, both from one disk's free
+       space, or each from its own; a 3DS game has no copy */
+    {
+        uint64_t need, left;
+        assert(gui_room(10, true, 20, 0, true, &need, &left) && need == 20 && left == 20);
+        assert(!gui_room(10, true, 19, 99, true, &need, &left) && need == 20 && left == 19);
+        assert(gui_room(10, true, 10, 10, false, &need, &left));
+        assert(!gui_room(10, true, 9, 99, false, &need, &left) && need == 10 && left == 9);
+        assert(!gui_room(10, true, 99, 9, false, &need, &left) && need == 10 && left == 9); /* the games' disk */
+        assert(gui_room(10, false, 10, 0, true, &need, &left) && need == 10);
+        assert(!gui_room(10, false, 9, 99, true, &need, &left) && need == 10 && left == 9);
     }
     /* a line 5 columns too long, a column every 100 ms: rests 8 steps, slides, rests at its end, slides back */
     assert(!gui_slide(0, 900, 100) && !gui_slide(5, 900, 0) && !gui_slide(-3, 900, 100));
@@ -261,6 +281,31 @@ int main(void) {
     assert(!gui_confirm_key(&confirm, GUI_UP) && confirm.selected == GUI_CONFIRM_ABORT);
     assert(gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown);
     assert(!gui_confirm_key(&confirm, GUI_SELECT)); /* answered: nothing more to abort */
+    /* opened: the first choice in focus, nothing armed; a question asked once takes its second choice at once */
+    confirm.selected = GUI_CONFIRM_ABORT;
+    confirm.armed = true;
+    gui_confirm_open(&confirm, GUI_ASK_EXIT, false);
+    assert(confirm.shown && confirm.ask == GUI_ASK_EXIT && confirm.selected == GUI_CONFIRM_KEEP && !confirm.armed);
+    assert(!gui_confirm_key(&confirm, GUI_DOWN) && gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown);
+    /* asked twice: the first Select on the second choice arms it, the second takes it */
+    gui_confirm_open(&confirm, GUI_ASK_DEEP, true);
+    assert(!gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown); /* the first choice at one press */
+    gui_confirm_open(&confirm, GUI_ASK_DEEP, true);
+    assert(!gui_confirm_key(&confirm, GUI_DOWN) && !gui_confirm_key(&confirm, GUI_SELECT));
+    assert(confirm.shown && confirm.armed);
+    assert(gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown && confirm.ask == GUI_ASK_DEEP);
+    /* a move between choices, by key or pointer, undoes the first press; the pointer staying on it does not */
+    gui_confirm_open(&confirm, GUI_ASK_DEEP, true);
+    assert(!gui_confirm_key(&confirm, GUI_RIGHT) && !gui_confirm_key(&confirm, GUI_SELECT) && confirm.armed);
+    assert(!gui_confirm_key(&confirm, GUI_LEFT) && !confirm.armed && confirm.selected == GUI_CONFIRM_KEEP);
+    assert(!gui_confirm_key(&confirm, GUI_RIGHT) && !gui_confirm_key(&confirm, GUI_SELECT) && confirm.armed);
+    gui_confirm_focus(&confirm, GUI_CONFIRM_ABORT);
+    assert(confirm.armed);
+    gui_confirm_focus(&confirm, GUI_CONFIRM_KEEP);
+    assert(!confirm.armed && confirm.shown);
+    gui_confirm_focus(&confirm, GUI_CONFIRM_ABORT);
+    assert(!gui_confirm_key(&confirm, GUI_SELECT) && confirm.armed);
+    assert(!gui_confirm_key(&confirm, GUI_CANCEL) && !confirm.shown); /* Back while armed takes nothing */
     puts("GUI menu, bounded console, UTF-8 and file drops passed");
     return 0;
 }

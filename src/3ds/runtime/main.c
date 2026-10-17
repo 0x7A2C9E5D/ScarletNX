@@ -25,9 +25,8 @@ static void usage(FILE* out) {
           "  -x, --extract   Extract only\n"
           "  -r, --recomp    Recompile without playing\n"
           "  --model old|new The console to model (default old)\n"
-          "  --repo DIR      The data folder (default: the checkout, a portable copy's folder, else the\n"
-          "                  user's data folder, as scarletnx picks it; an installed build's work/ is in\n"
-          "                  its cache folder)\n"
+          "  --repo DIR      The data folder (default: a portable copy's folder, else the user's data\n"
+          "                  folder, as scarletnx picks it; the user's keeps work/ in its cache folder)\n"
           "  --output DIR    The extraction folder (default work/3ds/<the CIA's name>)\n"
           "  --max-blocks N  Stop after N native blocks (default: run until the game exits or its window\n"
           "                  closes)\n"
@@ -35,27 +34,6 @@ static void usage(FILE* out) {
           "again only when its module is missing or no longer matches the build or the extracted code.\n"
           "Encrypted content is not implemented.\n",
           out);
-}
-/* The extraction's folder name, from the CIA's file name in the Switch driver's alphabet */
-static char* dump_name(const char* input) {
-    const char *base = input, *end;
-    for (const char* p = input; *p; ++p)
-        if (*p == '/' || *p == '\\') base = p + 1;
-    end = strrchr(base, '.');
-    if (!end || end == base) end = base + strlen(base);
-    char* name = malloc((size_t)(end - base) + 1);
-    if (!name) return NULL;
-    size_t n = 0;
-    for (const char* p = base; p < end; ++p)
-        if ((unsigned char)*p >= 128 || isalnum((unsigned char)*p) || *p == '-' || *p == '_' || *p == ' ')
-            name[n++] = *p;
-    while (n && name[n - 1] == ' ') --n;
-    name[n] = 0;
-    if (!n) {
-        free(name);
-        return snx_strdup("Game");
-    }
-    return name;
 }
 static bool cia_path(const char* path) {
     size_t n = strlen(path);
@@ -67,13 +45,16 @@ static bool visible_path(const char* path) {
         if (*p < 32 || *p == 127) return false;
     return true;
 }
-/* work/3ds of the data folder the Switch driver works in (snx_data_dir), which an installed build keeps in its cache
-   folder (snx_work_dir); resolved, as the loader refuses a link on the way to its output */
+/* work/3ds of the data folder the Switch driver works in (snx_data_dir), which the user's keeps in its cache folder
+   (snx_work_dir); resolved, as the loader refuses a link on the way to its output */
 static char* work_folder(const char* repo, const char* argv0) {
     char *exe = repo ? NULL : snx_executable(argv0), *dir = exe ? snx_dirname(exe) : NULL;
-    char* data = repo ? snx_strdup(repo) : snx_data_dir(SNX_SOURCE_DIR, SNX_BUILD_DIR, dir);
+    char* data = repo ? snx_strdup(repo) : snx_data_dir(dir);
+    char* checkout = repo ? NULL : snx_checkout(SNX_SOURCE_DIR, SNX_BUILD_DIR, dir);
     char *work = data ? snx_work_dir(data) : snx_strdup("work"), *folder = snx_path_join(work, "3ds");
     char* resolved = snx_absolute(folder);
+    if (checkout && data) snx_checkout_left(checkout, data);
+    free(checkout);
     free(folder);
     free(work);
     free(data);
@@ -171,7 +152,7 @@ int main(int argc, char** argv) {
     if (output)
         extracted = snx_strdup(output); /* as given: the extractor refuses links on the way to it */
     else {
-        char *work = work_folder(repo, argv[0]), *name = dump_name(input);
+        char *work = work_folder(repo, argv[0]), *name = snx_dump_name(input);
         extracted = work && name ? snx_path_join(work, name) : NULL;
         free(work);
         free(name);

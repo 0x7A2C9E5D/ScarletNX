@@ -254,7 +254,7 @@ cmake --build build
 ```
 
 Default: Ninja + Clang, `RelWithDebInfo` (`-O2 -g`). Runtime relinks deploy `games/Game/Game[.exe]` beside
-matching `Game_code.so/.dll`; no-op builds skip deployment. Recompiler/ABI edits require [module rebuilds](DEVELOPMENT.md).
+matching `Game_code.so/.dll`, in the data folder's `games/` ([USAGE](USAGE.md#folders)); no-op builds skip deployment. Recompiler/ABI edits require [module rebuilds](DEVELOPMENT.md).
 
 CPM: [SHA-256-pinned sources](../cmake/dependencies.cmake), shared `.cache/cpm` cache, offline configure when populated.
 The cache holds each package as released, so one filled by hand (a Flatpak manifest's sources, a distribution's
@@ -281,7 +281,8 @@ cmake --preset default -B build -DSNX_FFMPEG_ASM=OFF && cmake --build build
 - `-DSNX_FFMPEG_ASM=OFF`: omit x86-64 NASM assembly; slower FFmpeg decoding.
 - `-DCPM_DOWNLOAD_SDL3=ON`: build the pinned SDL3 instead of using a system SDL3 development package.
 - `-DSNX_DEPLOY=OFF`: disable runtime deployment.
-- `-DSNX_GAMES_DIR=/path`: override deployment dir (default: `games/`).
+- `-DSNX_GAMES_DIR=/path`: override deployment dir (default: empty, the data folder's `games/` the build tree's
+  driver uses). A tree whose value is the checkout's `games/`, the default before, is set back to empty.
 - `-DCPM_SOURCE_CACHE=/path`: override source-download cache.
 - `-DSNX_DEPS_CACHE=/path`: reuse and publish finished FFmpeg and OpenSSL builds there (default: the environment's
   `SNX_DEPS_CACHE`, else none).
@@ -358,12 +359,12 @@ instructions (20000 on Android; `--chunk`), with a progress line per compiled un
 Debian, `libgccjit-devel` on Fedora; `-DSNX_GCCJIT_ROOT=` points at another GCC's prefix). It is meant for DEC Alpha EV67 hosts, which LLVM has no backend for; everywhere else use LLVM.
 Running it needs only GNU binutils (`as`, `ld`) on PATH besides libgccjit: the module links none of GCC's files.
 
-Extraction builds missing hactool separately. Recompilation deploys the running full runtime;
-the tools-only build creates one in `build/native-recomp`, or accepts `--runtime FILE`.
-`--repo DIR` and `--build-dir DIR` before the command override compiled-in checkout/tool paths; a program run outside
-its build tree (an installed copy) uses the user's data folder instead (`~/.local/share/scarletnx`,
-`%APPDATA%\scarletnx` on Windows), and on Linux the XDG config, state and cache folders hold its settings, logs and
-caches ([USAGE](USAGE.md#folders)).
+Extraction builds a missing hactool separately, in the checkout of a build tree's driver. Recompilation deploys the
+running full runtime; the tools-only build creates one in its checkout's `build/native-recomp`, or accepts
+`--runtime FILE`. A build tree's programs work in the same data folder as an installed copy's: the user's
+(`~/.local/share/scarletnx`, `%APPDATA%\scarletnx` on Windows), and on Linux the XDG config, state and cache folders
+hold its settings, logs and caches ([USAGE](USAGE.md#folders)). `--repo DIR` before the command names another data
+folder, `--build-dir DIR` another build tree.
 Python ≥3.12 is optional for `tools/*.py` diagnostics.
 
 ## Install / AppImage

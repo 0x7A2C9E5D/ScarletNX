@@ -34,6 +34,9 @@ GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
                 case GUI_KEYS: menu->view = GUI_LOAD_KEYS; break;
                 case GUI_SETTINGS: return GUI_MENU_SETTINGS;
                 case GUI_LOG: return GUI_MENU_LOG;
+#ifdef __ANDROID__
+                case GUI_DATA: return GUI_MENU_DATA;
+#endif
                 case GUI_EXIT: menu->quit = true; break;
                 default: break;
             }
@@ -42,24 +45,55 @@ GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
     }
     return GUI_MENU_STAY;
 }
+void gui_confirm_open(GuiConfirm* confirm, GuiAsk ask, bool twice) {
+    confirm->shown = true;
+    confirm->ask = ask;
+    confirm->selected = GUI_CONFIRM_KEEP;
+    confirm->twice = twice;
+    confirm->armed = false;
+}
 bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
     if (!confirm->shown) return false;
     switch (key) {
         case GUI_UP:
         case GUI_DOWN:
         case GUI_LEFT:
-        case GUI_RIGHT: confirm->selected ^= 1; return false;
-        case GUI_SELECT: confirm->shown = false; return confirm->selected == GUI_CONFIRM_ABORT;
+        case GUI_RIGHT: gui_confirm_focus(confirm, confirm->selected ^ 1); return false;
+        case GUI_SELECT:
+            if (confirm->twice && confirm->selected == GUI_CONFIRM_ABORT && !confirm->armed) {
+                confirm->armed = true;
+                return false;
+            }
+            confirm->shown = false;
+            return confirm->selected == GUI_CONFIRM_ABORT;
         case GUI_CANCEL: confirm->shown = false; return false;
         default: return false;
     }
 }
+void gui_confirm_focus(GuiConfirm* confirm, int choice) {
+    if (choice != confirm->selected) confirm->armed = false;
+    confirm->selected = choice;
+}
 void gui_size_text(char* out, size_t size, uint64_t bytes) {
     double mb = (double)bytes / 1048576;
-    if (mb < 1024)
+    uint64_t kb = (bytes + 1023) / 1024;
+    if (bytes && kb < 1024)
+        snprintf(out, size, "%u KB", (unsigned)kb);
+    else if (mb < 1024)
         snprintf(out, size, "%.0f MB", mb);
     else
         snprintf(out, size, "%.1f GB", mb / 1024);
+}
+bool gui_room(uint64_t dump, bool copy, uint64_t work_free, uint64_t games_free, bool shared, uint64_t* need,
+              uint64_t* left) {
+    *need = copy && shared ? 2 * dump : dump;
+    *left = work_free;
+    if (*need > work_free) return false;
+    if (copy && !shared && dump > games_free) {
+        *left = games_free;
+        return false;
+    }
+    return true;
 }
 void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_bytes, double cpu_percent, int cores) {
     double n = cores > 0 ? cores : 1, used = cpu_percent / 100;
@@ -77,12 +111,15 @@ const char* gui_setting_description(const GuiMenu* menu) {
         case GUI_SETTINGS: return "The game's .ini settings, the launcher's for the next runs, and its theme";
         case GUI_LOG:
 #ifdef __ANDROID__
-            return "Saves the last run's output and game log to /sdcard/ScarletNX/scarletnx.log, then shares it";
+            return "Saves the last run's output and game log to scarletnx.log in the data folder, then shares it";
 #elif defined(SNX_XDG)
             return "Saves the last run's output and game log to scarletnx.log in the working folder (an installed "
                    "copy's: its state folder), path copied";
 #else
             return "Saves the last run's output and game log to scarletnx.log in the working folder, path copied";
+#endif
+#ifdef __ANDROID__
+        case GUI_DATA: return "Opens the data folder, games/ and the keys among them, in the system's Files app";
 #endif
         default: return "";
     }
