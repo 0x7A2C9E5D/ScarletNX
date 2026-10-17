@@ -550,13 +550,17 @@ bool gnu_spawn_syscall(GnuProcess* p, uint64_t number, const uint64_t a[6], int6
 /* ---- the options a program's own copy of the runtime is started with (Windows' execve) ---- */
 
 static char** forwarded;
+#ifdef _WIN32
 static int forwarded_count;
+#endif
 void gnu_spawn_set_options(int count, const char* const* options) {
     int i;
     forwarded = (char**)calloc((size_t)count + 1, sizeof *forwarded);
     if (!forwarded) return;
     for (i = 0; i < count; ++i) forwarded[i] = snx_strdup(options[i]);
+#ifdef _WIN32
     forwarded_count = count;
+#endif
 }
 
 #ifdef _WIN32
