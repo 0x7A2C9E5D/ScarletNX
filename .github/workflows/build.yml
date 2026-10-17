@@ -930,7 +930,7 @@ jobs:
     container: archlinux:latest
     env:
       EDENPROBE_VERSION: v0.4.0
-      EDENPROBE_SHA256: ''
+      EDENPROBE_SHA256: 4e33a924db5eda09b28395982b3cd93e532dbecc5aefd24e386ad88e3674a88b
       # every family that needs no person or network: headless, the audio family's sound is never played
       EDENPROBE_MODE: quick notime fatal cpu graphics fs video display kernel audio
     outputs:
