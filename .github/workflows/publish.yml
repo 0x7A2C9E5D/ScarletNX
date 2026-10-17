@@ -24,15 +24,6 @@ permissions:
   actions: read # the Build run's artifacts
   pull-requests: write # a fork's label, taken off at its push
 
-# One at a time for main's nightlies, each version and each pull request: the nightlies are counted, and a pull
-# request's message is edited from the id its prerelease keeps. A group holds one waiting run, which a newer one
-# replaces: the newer build is the one to publish (a fork's pull request, which its run cannot name, goes by its commit)
-concurrency:
-  group: >-
-    publish-${{ github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch ||
-    github.event.pull_request.number ||
-    github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
-
 jobs:
   publish:
     name: Publish the builds
@@ -41,6 +32,15 @@ jobs:
       github.event_name == 'workflow_run' || github.event.action == 'closed' ||
       (github.event.action == 'labeled' && github.event.label.name == 'publish builds') ||
       (github.event.action == 'synchronize' && github.event.pull_request.head.repo.full_name != github.repository)
+    # One at a time for main's nightlies, each version and each pull request: the nightlies are counted. A group holds
+    # one waiting job, which a newer one replaces: the newer build is the one to publish (a fork's pull request, which
+    # its run cannot name, goes by its commit). On the job, not the workflow: an event the job skips never waits, so
+    # the pull request's checks show no run cancelled for it
+    concurrency:
+      group: >-
+        publish-${{ github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch ||
+        github.event.pull_request.number ||
+        github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.head_sha }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     env:

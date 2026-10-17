@@ -112,9 +112,14 @@ elif rest == '' and method == 'GET':
 elif rest.startswith('git/ref/heads/'):
     branch = rest[len('git/ref/heads/'):]
     heads = s.setdefault('heads', {}).setdefault(repo, {'main': 'c0ffee' * 6 + 'c0ff'})
+    if s.pop('hide_branch_once', None) == branch:  # another run makes it right after this look
+        save()
+        stop('gh: Not Found (HTTP 404)')
     out({'ref': f'refs/heads/{branch}', 'object': {'sha': heads[branch]}}) if branch in heads else stop('gh: Not Found (HTTP 404)')
 elif rest == 'git/refs' and method == 'POST':
     heads = s.setdefault('heads', {}).setdefault(repo, {'main': 'c0ffee' * 6 + 'c0ff'})
+    if data['ref'][len('refs/heads/'):] in heads:
+        stop('gh: Reference already exists (HTTP 422)')
     heads[data['ref'][len('refs/heads/'):]] = data['sha']
     save()
     out({'ref': data['ref']})
@@ -127,7 +132,18 @@ elif rest.startswith('contents/'):
     key = f'{branch}:{name}'
     if method == 'GET':
         out(files[key]) if key in files else stop('gh: Not Found (HTTP 404)')
+    elif method == 'DELETE':
+        if key not in files or data.get('sha') != files[key]['sha']:
+            stop('gh: sha does not match (HTTP 409)')
+        del files[key]
+        save()
     else:
+        if s.get('pass_puts'):  # the writes before the one that fails
+            s['pass_puts'] -= 1
+        elif s.get('fail_puts'):  # another run's write came first, or one that cannot be done
+            s['fail_puts'] -= 1
+            save()
+            stop(s.get('put_error', 'gh: is at 1a2b3c but expected 4d5e6f (HTTP 409)'))
         if key in files and data.get('sha') != files[key]['sha']:
             stop('gh: sha wasn\'t supplied or does not match (HTTP 422)')
         s['next'] += 1

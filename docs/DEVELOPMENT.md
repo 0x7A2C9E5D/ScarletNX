@@ -30,9 +30,9 @@ kept (this repository's `nightly` prerelease shows the latest's notes); each pul
 commits). A fork's pull request is published once someone of the team labels it `publish builds`, after each
 push. `.github/workflows/cards.yml` keeps a Discord card for each pull request, each issue and each push to `main`
 (`scripts/discord-cards.py`): posted when it comes, edited at each push, edit, label, review and comment (the latest
-shown) and as each package of its build ends, its id kept on scarletnx/nightly's `discord-cards` branch. The secrets:
-`NIGHTLY_TOKEN` (writes that repository's contents), `DISCORD_WEBHOOK_RELEASES`, `DISCORD_WEBHOOK_NIGHTLY`,
-`DISCORD_WEBHOOK_PRS` and `DISCORD_WEBHOOK_ISSUES`. Formatting is checked locally (`scripts/format.sh --check`).
+shown) and as each package of its build ends (`cards-watch.yml`), its id kept on scarletnx/nightly's `discord-cards`
+branch. The secrets: `NIGHTLY_TOKEN` (writes that repository's contents), `DISCORD_WEBHOOK_RELEASES`,
+`DISCORD_WEBHOOK_NIGHTLY`, `DISCORD_WEBHOOK_PRS` and `DISCORD_WEBHOOK_ISSUES`. Formatting is checked locally (`scripts/format.sh --check`).
 Verify affected scenes manually, repeat intermittent failures, record evidence/scope.
 Test guest semantics + malformed IPC with synthetic cases.
 
