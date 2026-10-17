@@ -2318,8 +2318,8 @@ static const GuiThemeKey app_keys[] = {
      "Bigger letters scroll the menu. Auto fits the screen"},
     {"", "Theme editor", GUI_KEY_ACTION, 0, 0, NULL, 0,
      "This theme's keys with a preview, saved as themes/<name>/theme.ini"},
-    {"", "Game folders", GUI_KEY_ACTION, offsetof(GuiAppForm, folders), sizeof(((GuiAppForm*)0)->folders), NULL, 0,
-     "Folders of games listed with games/"},
+    {"", "Library", GUI_KEY_ACTION, offsetof(GuiAppForm, folders), sizeof(((GuiAppForm*)0)->folders), NULL, 0,
+     "The folders Games lists, games/ first"},
     {"", "Folders", GUI_KEY_ACTION, offsetof(GuiAppForm, places), sizeof(((GuiAppForm*)0)->places), NULL, 0,
      "Where the data, the games and the extractions are"},
     {"", "Clean old settings", GUI_KEY_ACTION, 0, 0, NULL, 0,
@@ -2424,7 +2424,7 @@ static void folder_add(App* app, const char* path, bool deep) {
     if (here)
         snprintf(app->editor.note, sizeof app->editor.note, "%s", note);
     else
-        snprintf(app->message, sizeof app->message, "Game folders: %s", note);
+        snprintf(app->message, sizeof app->message, "Library: %s", note);
 }
 static void folder_remove(App* app, int folder) {
     char note[160];
@@ -2753,7 +2753,7 @@ static void open_folder_picker(App* app) {
         else if (app->editing)
             snprintf(app->editor.note, sizeof app->editor.note, "The folder picker could not open: %s", message);
         else /* Games' Add a folder */
-            snprintf(app->message, sizeof app->message, "Game folders: the folder picker could not open: %s", message);
+            snprintf(app->message, sizeof app->message, "Library: the folder picker could not open: %s", message);
     }
 #elif defined(SDL_PLATFORM_IOS)
     { /* nor there: the document picker (dist/apple) */
@@ -2763,7 +2763,7 @@ static void open_folder_picker(App* app) {
         else if (app->editing)
             snprintf(app->editor.note, sizeof app->editor.note, "The folder picker could not open: %s", message);
         else
-            snprintf(app->message, sizeof app->message, "Game folders: the folder picker could not open: %s", message);
+            snprintf(app->message, sizeof app->message, "Library: the folder picker could not open: %s", message);
     }
 #else
     SDL_ShowOpenFolderDialog(folder_picked, &app->picked_folder, app->window, NULL, false);
@@ -3679,7 +3679,7 @@ static void draw_form(App* app) {
     } else {
         int g = app->form == GUI_FORM_SETTINGS ? app->editor.row : app->group;
         pane(app, f.place.side,
-             app->form == GUI_FORM_FOLDERS                   ? "Game folders"
+             app->form == GUI_FORM_FOLDERS                   ? "Library"
              : app->form == GUI_FORM_PLACES                  ? "Folders"
              : app->form == GUI_FORM_GROUP && app->page >= 0 ? app->settings.keys[app->page].key
              : g < app->groups                               ? app->group_keys[g].key
@@ -4646,7 +4646,7 @@ static void games_scan(App* app, GuiGames* games, char* message, size_t size) {
         if (!gui_games_add_deep(games, app->folders[i], kinds, app->folders_deep[i] ? GUI_FOLDER_DEPTH : 0, error,
                                 sizeof error) &&
             !message[0])
-            snprintf(message, size, "%s It is in Settings > App > Game folders.", error);
+            snprintf(message, size, "%s It is in Settings > App > Library.", error);
 }
 /* the names dir holds into h, and with depth those of its folders, down that many levels, hidden ones left alone */
 static uint64_t stamp_dir(uint64_t h, const char* dir, int depth) {
@@ -5234,7 +5234,7 @@ static void event(App* app, const SDL_Event* e) {
             if (app->editing && (app->form == GUI_FORM_FOLDERS || app->form == GUI_FORM_PLACES))
                 snprintf(app->editor.note, sizeof app->editor.note, "%s", note);
             else
-                snprintf(app->message, sizeof app->message, "%s: %s", place >= 0 ? "Folders" : "Game folders", note);
+                snprintf(app->message, sizeof app->message, "%s: %s", place >= 0 ? "Folders" : "Library", note);
         }
         SDL_free(e->user.data1);
         SDL_free(error);

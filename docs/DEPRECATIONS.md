@@ -14,7 +14,7 @@ What an older version used that this one replaced, how a run tells you, and how 
   launcher's box for files an older version left. The line names what replaced it.
 - **You remove it**: a setting by hand or with the launcher's **Settings > App > Clean old settings**, which takes
   the `[Deprecated]` section out of every game's `.ini` the launcher reaches (the games' config folder, `games/` and
-  your game folders); a file an older version left, by moving it where the line says.
+  the folders of Settings > App > Library); a file an older version left, by moving it where the line says.
 - **It is listed below** until the code that reads it goes, which is a change of its own named in the table.
 
 A game's `.ini` keeps its deprecated keys last, under what became of each:

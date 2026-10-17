@@ -1576,7 +1576,7 @@ int main(int argc, char** argv) {
        (SDL_FILE_DIALOG_DRIVER=none); Del or Enter twice takes one off, the folder staying */
     key(&app, SDLK_DOWN);
     render(&app);
-    shows(&app, "- Game folders       games/", yellow);
+    shows(&app, "- Library            games/", yellow);
     key(&app, SDLK_RETURN);
     assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 2 && app.editor.row == 0);
     /* Back over the rows, for a click or a finger: it does what ESC does, back on the App's row; the groups' list has
@@ -1621,7 +1621,7 @@ int main(int argc, char** argv) {
         assert(!snx_mkdirs(more) && !snx_write_file(file, "fixture", 7));
         kept_as = snx_absolute(more); /* as the system writes the folder once it is there: backslashes on Windows */
         render(&app);
-        shows(&app, "Game folders", normal);
+        shows(&app, "Library", normal);
         shows(&app, "The data folder's", normal);
         snprintf(line, sizeof line, "- %.20s", app.games_dir);
         shows(&app, line, yellow);
@@ -2514,7 +2514,7 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "- Add a folder", yellow);
     shows(&app, "Pick a folder of games", normal); /* beside it, what it does */
-    /* it opens the folder picker of Settings > App > Game folders, whose answer (none here) the message says */
+    /* it opens the folder picker of Settings > App > Library, whose answer (none here) the message says */
     key(&app, SDLK_RETURN);
     {
         SDL_Event answer;
@@ -2523,8 +2523,8 @@ int main(int argc, char** argv) {
             while (SDL_PollEvent(&answer)) event(&app, &answer);
     }
     assert(app.menu.view == GUI_LOAD_GAMES && !app.editing &&
-           (!strcmp(app.message, "Game folders: No folder was picked.") ||
-            !strncmp(app.message, "Game folders: The folder picker could not open: ", 48)));
+           (!strcmp(app.message, "Library: No folder was picked.") ||
+            !strncmp(app.message, "Library: The folder picker could not open: ", 43)));
     app.message[0] = 0;
     for (int i = 0; i < 35; ++i) {
         char name[40];
@@ -2617,7 +2617,7 @@ int main(int argc, char** argv) {
         app.folder_count = 2;
         list_games(&app);
         assert(app.games.count == 36 && strstr(app.message, "/nonexistent/snx-games") &&
-               strstr(app.message, "Settings > App > Game folders"));
+               strstr(app.message, "Settings > App > Library"));
         free(app.folders[1]);
         app.folder_count = 1;
         assert(!snx_remove_tree(zed));
