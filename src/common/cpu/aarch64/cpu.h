@@ -33,9 +33,8 @@ typedef double f64;
 /* the version of the contract between a game module and the runtime (this header, cpu_helpers.c, RtAPI and the
    module descriptor). The recompiler stamps it into each module, the runtime refuses a module with another one */
 /* 7: CPU.poll and RtAPI.poll, checked on the backward branches of generated code.
-   8: the GPU pipeline branch's runtime JIT contract.
-   9: recompile game modules for the standalone FP/SIMD emitters and discovery changes. */
-#define SNX_ABI 9
+   8: recompile game modules for the FP/SIMD emitters and discovery changes. */
+#define SNX_ABI 8
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)
