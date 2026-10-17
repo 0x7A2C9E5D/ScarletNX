@@ -438,6 +438,12 @@ if(TARGET OpenSSL::Crypto)
     add_test(NAME misc_service COMMAND snx-test-misc-service)
 endif()
 
+# Inline software keyboard protocol and applet completion events.
+add_executable(snx-test-am-service am_service.c)
+snx_test_target(snx-test-am-service 23)
+snx_service_swipc(snx-test-am-service hle/services/am.swipc)
+add_test(NAME am_service COMMAND snx-test-am-service)
+
 # nvdrv's IPC side (nvdrv.c), with the GPU and host1x stand-ins in the test
 add_executable(snx-test-nvdrv-service nvdrv_service.c)
 snx_test_target(snx-test-nvdrv-service 23)

@@ -589,17 +589,15 @@ int vk_rt_drawn_fresh(Surf* s) {
 }
 int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max) {
     int n = 0;
-    for (int i = 0; i < g_ndrawn;) {
+    for (int i = 0; i < g_ndrawn; i++) {
         Surf* s = g_drawn[i];
-        if (g_vk_present - s->drawn_at > 1) { /* drawn again, it comes back */
-            g_drawn[i] = g_drawn[--g_ndrawn];
-            continue;
-        }
+        /* Generated textures may first be sampled several frames after their draw.
+           Age does not make guest memory authoritative: tex_take_drawn checks
+           vk_rt_drawn_fresh before copying, and surf_free removes evicted targets. */
         if (s->gva >= lo && s->gva < hi) {
             if (n < max) out[n] = s; /* a parked target's address is out of every range */
             n++;
         }
-        i++;
     }
     return n;
 }

@@ -463,7 +463,8 @@ void vk_compute_mem_need(u64 a, u64 n) {
    bound where the shader declares a float one has no view), and for its 2D storage images whose store kind is the
    other one than a bindless image's default, unsigned (ShaderInfo.rt_int_mask bits 8 and up). */
 typedef struct {
-    u32 tex_int, tex_sint, image;
+    u64 tex_int, tex_sint;
+    u32 image;
 } CsKey;
 static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm, CsKey k) {
     static CsPipe allocation_failed = {.failed = 1};
@@ -675,8 +676,8 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
             if (st->bindless && st->bl2 && cs_cb_read(st->bl2_cbuf & 7, st->bl2_off * 4, &h2)) h |= h2;
             gmem_read(tic_key_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
             f = vk_tic_format(tic[0], 0);
-            if (f.is_int || vk_tic_reads_stencil(tic)) ck.tex_int |= 1u << i;
-            if (f.is_int && f.sint) ck.tex_sint |= 1u << i;
+            if (f.is_int || vk_tic_reads_stencil(tic)) ck.tex_int |= 1ull << i;
+            if (f.is_int && f.sint) ck.tex_sint |= 1ull << i;
         }
     if (!p->failed)
         for (i = 0; i < p->si.nimg && i < 8; i++) {
@@ -812,9 +813,9 @@ rebind:
             if (!VK_OK(vkAllocateDescriptorSets(g_vk.dev, &dai, &set))) return;
         }
     }
-    VkWriteDescriptorSet w[80];
+    VkWriteDescriptorSet w[SNX_VKB_END];
     VkDescriptorBufferInfo bi[80];
-    VkDescriptorImageInfo ii[40];
+    VkDescriptorImageInfo ii[SH_MAXTEX + 8];
     Surf* images[8] = {0};
     u8* originals[8] = {0};
     VkBufferView bufimg_view[8] = {0};
