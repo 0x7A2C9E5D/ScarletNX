@@ -667,10 +667,14 @@ add_test(NAME native_recompiler COMMAND snx_recompiler_test
 add_executable(snx-test-llvm-differential llvm_differential.c)
 snx_test_target(snx-test-llvm-differential 11)
 target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
-add_test(NAME llvm_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
-    --quiet)
-# COST: started first. A tree with no times of its own (CI's) starts tests in their order, and this is the longest
-set_tests_properties(llvm_differential PROPERTIES TIMEOUT 900 COST 100)
+# In shards that run side by side, each a share of the words, all of them started first (COST): a tree with no times
+# of its own (CI's) starts tests in their order, and these are the longest. Fewer, and one runs alone at the end;
+# more, and each pays the compiles' start again
+foreach(shard RANGE 2)
+    add_test(NAME llvm_differential_${shard} COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}"
+        "${PROJECT_SOURCE_DIR}" --quiet --shard ${shard}/3)
+    set_tests_properties(llvm_differential_${shard} PROPERTIES TIMEOUT 900 COST 100)
+endforeach()
 # not a test: timings of the generated code (llvm_bench SCARLETNX REPO CLANG)
 add_executable(snx-llvm-bench llvm_bench.c)
 snx_test_target(snx-llvm-bench 11)
@@ -716,9 +720,11 @@ if(TARGET snx_jit)
     set(snx_extra_backends gcc)
     target_link_libraries(snx-test-llvm-differential PRIVATE snx_jit)
     target_compile_definitions(snx-test-llvm-differential PRIVATE SNX_TEST_GCCJIT)
-    add_test(NAME gccjit_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
-        --gccjit --quiet --per-case 2 --simd 100 --states 4)
-    set_tests_properties(gccjit_differential PROPERTIES TIMEOUT 900 COST 100)
+    foreach(shard RANGE 1) # as llvm_differential's
+        add_test(NAME gccjit_differential_${shard} COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}"
+            "${PROJECT_SOURCE_DIR}" --gccjit --quiet --per-case 2 --simd 100 --states 4 --shard ${shard}/2)
+        set_tests_properties(gccjit_differential_${shard} PROPERTIES TIMEOUT 900 COST 100)
+    endforeach()
     add_test(NAME native_recompiler_gcc COMMAND snx_recompiler_test
         $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}" gcc)
     # code units in this process and in processes of their own (gccjit/jit_units.c)

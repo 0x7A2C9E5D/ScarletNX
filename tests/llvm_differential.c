@@ -5,8 +5,10 @@
    backend's (snx_ir_static_step, compiled and linked by the backend itself) run from the same random CPU state and
    guest memory; registers, flags, FP state, the exclusive monitor, memory, the returned pc and the runtime callbacks
    must all match.
-     llvm_differential CLANG REPO [--match NAME] [--per-case N] [--simd N] [--states N] [--seed N] [--quiet]
-   --match keeps patterns whose name starts with NAME. */
+     llvm_differential CLANG REPO [--match NAME] [--shard I/N] [--per-case N] [--simd N] [--states N] [--seed N]
+                       [--quiet]
+   --match keeps patterns whose name starts with NAME. --shard keeps every Nth word from the Ith (from 0): the N runs
+   of a seed compare the words one run would. */
 #include "common/utilities/common.h"
 #include "common/cpu/aarch64/cpu.h"
 #include "common/cpu/aarch64/a64.h"
@@ -355,7 +357,7 @@ static int build_gccjit(const Word* words, size_t count, const char* dir, const 
 int main(int argc, char** argv) {
     const char *clang, *repo, *match = NULL;
     size_t per_case = 4, per_simd = 300, states = 6, count = 0, capacity = 0, npatterns, i, k, failures = 0,
-           compared = 0;
+           compared = 0, shard = 0, shards = 1;
     size_t pattern_failures[64] = {0};
     Word* words = NULL;
     const SnxA64Pattern* patterns = snx_a64_patterns(&npatterns);
@@ -381,7 +383,8 @@ int main(int argc, char** argv) {
     char* c_native;
     unsigned long fallbacks, gccjit_fallbacks = 0;
     if (argc < 3) {
-        fputs("usage: llvm_differential CLANG REPO [--match NAME] [--per-case N] [--simd N] [--states N] [--seed N]\n",
+        fputs("usage: llvm_differential CLANG REPO [--match NAME] [--shard I/N] [--per-case N] [--simd N] [--states N]"
+              " [--seed N]\n",
               stderr);
         return 2;
     }
@@ -394,7 +397,12 @@ int main(int argc, char** argv) {
             gccjit = 1;
         else if (a + 1 < argc && !strcmp(argv[a], "--match"))
             match = argv[++a];
-        else if (a + 1 < argc && !strcmp(argv[a], "--per-case"))
+        else if (a + 1 < argc && !strcmp(argv[a], "--shard")) {
+            char* end;
+            shard = strtoul(argv[++a], &end, 10);
+            shards = *end == '/' ? strtoul(end + 1, &end, 10) : 0;
+            if (*end || shard >= shards) return snx_error("--shard wants I/N with I below N, not %s", argv[a]);
+        } else if (a + 1 < argc && !strcmp(argv[a], "--per-case"))
             per_case = strtoul(argv[++a], NULL, 10);
         else if (a + 1 < argc && !strcmp(argv[a], "--simd"))
             per_simd = strtoul(argv[++a], NULL, 10);
@@ -421,6 +429,8 @@ int main(int argc, char** argv) {
     }
     words = (Word*)snx_realloc(words, (count + 20 * per_simd) * sizeof(*words));
     count += directed(match, per_simd, words + count);
+    for (i = shard, k = 0; i < count; i += shards) words[k++] = words[i];
+    count = k;
     if (!count) return snx_error("no words to test");
     dir = snx_temp_dir(NULL);
     c_path = snx_path_join(dir, "portable.c");
