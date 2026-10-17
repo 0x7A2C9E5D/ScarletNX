@@ -54,18 +54,17 @@ static int is_nro_path(const char* path) {
     return ext && strlen(ext) == 4 && tolower((unsigned char)ext[1]) == 'n' && tolower((unsigned char)ext[2]) == 'r' &&
            tolower((unsigned char)ext[3]) == 'o';
 }
-static int cached_abi(const char* base) {
-    char* stamp = snx_format("%s.abi", base);
-    FILE* f = snx_fopen(stamp, "r");
-    unsigned abi = 0, expected = snx_game_abi();
-    if (f) {
-        char newline, trailing;
-        /* A partial write or trailing garbage is not a completed build. */
-        if (fscanf(f, "%u%c%c", &abi, &newline, &trailing) != 2 || newline != '\n') abi = 0;
-        fclose(f);
-    }
+/* whether this build made the game at base: its stamp says what this build writes, a partial write or anything after
+   it being no completed build */
+static int stamped(const char* base) {
+    char *stamp = snx_format("%s.abi", base), *expected = snx_game_stamp();
+    size_t size = 0;
+    unsigned char* found = snx_read_file(stamp, &size);
+    int same = found && size == strlen(expected) && !memcmp(found, expected, size);
+    free(found);
+    free(expected);
     free(stamp);
-    return expected && abi == expected;
+    return same;
 }
 /* games/ and the extraction in work/ of the data folder, else the folder outdir names and the extraction out names */
 static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* backend, const char* outdir,
@@ -140,7 +139,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
 #endif
     /* Always restage an NRO: a same-named cached game may belong to another input or an older build. */
     /* An explicit backend must not silently reuse a game built by another compiler. */
-    if (backend || nro || (flags & SNX_RECOMP) || !snx_is_file(game) || !snx_is_file(code) || !cached_abi(base)) {
+    if (backend || nro || (flags & SNX_RECOMP) || !snx_is_file(game) || !snx_is_file(code) || !stamped(base)) {
         command[5] = "-r";
         command[6] = "--outdir";
         command[7] = games;

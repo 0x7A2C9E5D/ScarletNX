@@ -109,7 +109,9 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
         CHECK(!snx_remove_tree(argv[1]));
     return rc;
 }
-unsigned snx_game_abi(void) { return 4; }
+/* this build's stamp: ABI 4, made from commit abc1234 */
+#define SNX_WORKFLOW_STAMP "4\nabc1234\n"
+char* snx_game_stamp(void) { return snx_strdup(SNX_WORKFLOW_STAMP); }
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     char *game, *partial, *name, *folder;
     int rc;
@@ -167,7 +169,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
                                 "so"
 #endif
         );
-        CHECK(!snx_write_file(stamp, "4\n", 2));
+        CHECK(!snx_write_file(stamp, SNX_WORKFLOW_STAMP, strlen(SNX_WORKFLOW_STAMP)));
         CHECK(!snx_write_file(code, "synthetic", 9));
         free(stamp);
         free(code);
@@ -318,17 +320,19 @@ int main(int argc, char** argv) {
     set_env("SNX_WORKFLOW_FAIL", "");
     run(exe, repo, dump, log, 0, "G", NULL);
 
-    /* Missing/mismatched/malformed ABI stamps are never trusted. */
+    /* Missing/mismatched/malformed ABI stamps are never trusted, nor one another build wrote with the same ABI: an
+       older version's ABI alone, another commit's, or this one's cut short or with more after it */
     {
+        const char* const stale[] = {
+            "3\nabc1234\n",      "broken", "4", "4garbage\n", "4\n", "4\ndef5678\n", "4\nabc1234", "4\nabc1234\n\n",
+            "4\nabc1234-dirty\n"};
         char* stamp = snx_path_join(repo, "games/Test game/Test game.abi");
-        CHECK(!snx_write_file(stamp, "3\n", 2));
-        run(exe, repo, dump, log, 0, "RG", NULL);
-        CHECK(!snx_write_file(stamp, "broken", 6));
-        run(exe, repo, dump, log, 0, "RG", NULL);
-        CHECK(!snx_write_file(stamp, "4", 1));
-        run(exe, repo, dump, log, 0, "RG", NULL);
-        CHECK(!snx_write_file(stamp, "4garbage\n", 9));
-        run(exe, repo, dump, log, 0, "RG", NULL);
+        size_t j;
+        for (j = 0; j < sizeof stale / sizeof *stale; ++j) {
+            CHECK(!snx_write_file(stamp, stale[j], strlen(stale[j])));
+            run(exe, repo, dump, log, 0, "RG", NULL);
+            run(exe, repo, dump, log, 0, "G", NULL); /* the recompile stamped it as this build */
+        }
         CHECK(!snx_remove_tree(stamp));
         run(exe, repo, dump, log, 0, "RG", NULL);
         free(stamp);
