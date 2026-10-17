@@ -53,8 +53,9 @@ enum {
 };
 
 /* the update, laid out as edenprobe's source/audio.c lays it out */
-static u8 in[0x40 + 0x10 + 0x20 * SNX_ART_POOLS + 0x70 * SNX_ART_VOICES + 0x170 * SNX_ART_VOICES +
-             0xC0 * SNX_ART_EFFECTS + SNX_ART_SPLIT_BYTES + 0x930 * SNX_ART_MIXES + 0x140 * SNX_ART_SINKS + 0x10];
+static u8 in[0x40 + 0x10 + 0x20 * SNX_ART_POOLS + 0x70 * SNX_ART_VOICES + 0x188 * SNX_ART_VOICES +
+             0xC0 * SNX_ART_EFFECTS + SNX_ART_SPLIT_BYTES + 0x20 + 0x930 * SNX_ART_MIXES +
+             0x140 * SNX_ART_SINKS + 0x10];
 static u8 out[0x1000];
 static u8 *u_pool, *u_res, *u_voice, *u_eff, *u_split, *u_mix, *u_sink;
 static u32 split_counts[2]; /* the splitters and destinations reset() opens the renderer with */
@@ -65,7 +66,7 @@ static void w8(u8* p, u32 off, u8 v) { p[off] = v; }
 static void w32(u8* p, u32 off, u32 v) { memcpy(p + off, &v, 4); }
 static void w64(u8* p, u32 off, u64 v) { memcpy(p + off, &v, 8); }
 static void wf(u8* p, u32 off, float v) { memcpy(p + off, &v, 4); }
-static u8* voice(int i) { return u_voice + i * 0x170; }
+static u8* voice(int i) { return u_voice + i * (art_rev >= 15 ? 0x188 : 0x170); }
 static u8* res(int i) { return u_res + i * 0x70; }
 static u8* eff(int i) { return u_eff + i * 0xC0; }
 static u8* mix(int i) { return u_mix + i * 0x930; }
@@ -75,17 +76,19 @@ static void layout(void) {
     u32 rev;
     memset(in, 0, sizeof in);
     rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + art_rev) << 24);
+    u32 voice_stride = art_rev >= 15 ? 0x188 : 0x170;
+    u32 mix_header_size = art_rev >= 7 ? 0x20 : 0;
     u32 h[16] = {rev,
                  0x10,
                  0x20 * SNX_ART_POOLS,
-                 0x170 * SNX_ART_VOICES,
+                 voice_stride * SNX_ART_VOICES,
                  0x70 * SNX_ART_VOICES,
                  0xC0 * SNX_ART_EFFECTS,
-                 0x930 * SNX_ART_MIXES,
+                 mix_header_size + 0x930 * SNX_ART_MIXES,
                  0x140 * SNX_ART_SINKS,
                  0x10,
                  SNX_ART_SPLIT_BYTES};
-    h[15] = sizeof in;
+    h[15] = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[6] + h[7] + h[8] + h[9];
     memcpy(in, h, sizeof h);
     w32(in, 0x40, rev);
     u8* p = in + 0x50;
@@ -94,11 +97,15 @@ static void layout(void) {
     u_res = p;
     p += 0x70 * SNX_ART_VOICES;
     u_voice = p;
-    p += 0x170 * SNX_ART_VOICES;
+    p += voice_stride * SNX_ART_VOICES;
     u_eff = p;
     p += 0xC0 * SNX_ART_EFFECTS;
     u_split = p; /* all zero, no splitter, until a case writes one */
     p += SNX_ART_SPLIT_BYTES;
+    if (mix_header_size) {
+        w32(p, 4, SNX_ART_MIXES);
+        p += mix_header_size;
+    }
     u_mix = p;
     p += 0x930 * SNX_ART_MIXES;
     u_sink = p;
