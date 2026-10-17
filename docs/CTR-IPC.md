@@ -2,6 +2,13 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # CTR IPC and minimal startup services (3a/3b)
 
+## Index
+
+* [Wire and ownership](#wire-and-ownership)
+* [Generator subset](#generator-subset)
+* [Implemented services](#implemented-services)
+* [Tests and reference provenance](#tests-and-reference-provenance)
+
 This is **not** Switch HIPC/CMIF. It reuses the lexer/AST/output utilities of
 `tools/swipc/swipc.c`, with a separate `--ctr` validator/emitter in `ctr.inc`.
 The existing default emitter/output remains unchanged. See [NX IPC](IPC.md)

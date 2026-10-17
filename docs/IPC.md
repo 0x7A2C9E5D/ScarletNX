@@ -2,6 +2,12 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # IPC interfaces
 
+## Index
+
+* [The language](#the-language)
+* [The layout](#the-layout)
+* [The C side](#the-c-side)
+
 This page describes **NX HIPC/CMIF**. The independent `swipc --ctr` profile and
 3DS transport are documented in [CTR IPC](CTR-IPC.md); they do not use the NX
 wire layout or the successful stand-in described below.
