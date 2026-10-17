@@ -921,7 +921,8 @@ static void update_voice_v2(void) {
     enum { voices = 128, effects = 68, sinks = 2, pools = effects + voices * 4, stride = 0x188 };
     /* a 100 Hz low-pass at 48 kHz: its b are under Q14's step, which would leave a 200 Hz tone 21.1 dB down, not 12.3 */
     static const float lpb[3] = {4.24433674e-05f, 8.48867348e-05f, 4.24433674e-05f},
-                       lpa[2] = {1.98148847f, -0.98165828f};
+                       lpa[2] = {1.98148847f, -0.98165828f}, bq1b[3] = {0.25f, -0.5f, 0.125f},
+                       bq1a[2] = {0.375f, -0.0625f};
     const u32 rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + 15) << 24), reply = 21456;
     u32 params[13] = {48000, 240, 216, 0, voices, sinks, effects};
     u32 h[16] = {rev, 0x10, pools * 0x20, voices * stride, voices * 0x70, effects * 0xC0, 0, sinks * 0x140};
@@ -955,6 +956,9 @@ static void update_voice_v2(void) {
     w8(vi, 0x24, 1); /* biquad 0: enabled 0, b 4, a 0x10 */
     for (i = 0; i < 3; i++) wf(vi, 0x28 + i * 4, lpb[i]);
     for (i = 0; i < 2; i++) wf(vi, 0x34 + i * 4, lpa[i]);
+    w8(vi, 0x3C, 1); /* biquad 1, 0x18 on */
+    for (i = 0; i < 3; i++) wf(vi, 0x40 + i * 4, bq1b[i]);
+    for (i = 0; i < 2; i++) wf(vi, 0x4C + i * 4, bq1a[i]);
     w32(vi, 0x54, 3);
     w32(vi, 0x58, 2);
     w64(vi, 0x60, 0x1234560);
@@ -978,9 +982,13 @@ static void update_voice_v2(void) {
     CHECK(v->in_use && v->format == 1 && v->rate == 32000 && v->channels == 2 && v->pitch == 1.5f && v->volume == 0.75f,
           "revision 15 voice: rate %u, %u channels", v->rate, v->channels);
     CHECK(v->bq_on[0] == 1 && v->bq_b[0][0] == lpb[0] && v->bq_b[0][1] == lpb[1] && v->bq_b[0][2] == lpb[2] &&
-              v->bq_a[0][0] == lpa[0] && v->bq_a[0][1] == lpa[1] && !v->bq_on[1],
+              v->bq_a[0][0] == lpa[0] && v->bq_a[0][1] == lpa[1],
           "revision 15 float biquad: b %g %g %g, a %g %g", v->bq_b[0][0], v->bq_b[0][1], v->bq_b[0][2], v->bq_a[0][0],
           v->bq_a[0][1]);
+    CHECK(v->bq_on[1] == 1 && v->bq_b[1][0] == bq1b[0] && v->bq_b[1][1] == bq1b[1] && v->bq_b[1][2] == bq1b[2] &&
+              v->bq_a[1][0] == bq1a[0] && v->bq_a[1][1] == bq1a[1],
+          "revision 15 second biquad: on %u, b %g %g %g, a %g %g", v->bq_on[1], v->bq_b[1][0], v->bq_b[1][1],
+          v->bq_b[1][2], v->bq_a[1][0], v->bq_a[1][1]);
     /* through the voices' biquad, a half-scale 200 Hz tone comes out at the float filter's level */
     memset(&bq, 0, sizeof bq);
     for (f = 0; f < 20; f++) { /* the transient gone */
@@ -1008,6 +1016,45 @@ static void update_voice_v2(void) {
     audren_state_free(state);
 }
 
+/* revision 14 still writes 0x170 voices: the 0x188 ones start at 15, as Eden and Ryubing gate them */
+static void update_voice_rev14(void) {
+    enum { voices = 128, effects = 68, sinks = 2, pools = effects + voices * 4, stride = 0x170 };
+    const u32 rev = ('R' << 0) | ('E' << 8) | ('V' << 16), reply = 21456;
+    u32 params[13] = {48000, 240, 216, 0, voices, sinks, effects};
+    u32 h[16] = {rev | (u32)('0' + 14) << 24,
+                 0x10,
+                 pools * 0x20,
+                 voices * stride,
+                 voices * 0x70,
+                 effects * 0xC0,
+                 0,
+                 sinks * 0x140};
+    u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[7], i;
+    ARState* state = audren_state_new((const u8*)params);
+    u8 *input = calloc(1, size + reply), *vi;
+    CHECK(state != NULL && input != NULL, "no state or buffers for revision 14 voices");
+    if (!state || !input) {
+        free(input);
+        audren_state_free(state);
+        return;
+    }
+    h[15] = size;
+    memcpy(input, h, sizeof h);
+    vi = input + 0x40 + h[1] + h[2] + h[4] + stride; /* voice 1 */
+    w8(vi, 8, 1);
+    w8(vi, 9, 1);
+    w32(vi, 0xC, 32000);
+    w32(vi, 0x58, 5);
+    for (i = 0; i < 4; i++) w8(vi, 0x60 + i * 0x38 + 0x1A, 1);
+    CHECK(audren_state_update(state, input, size, input + size, reply) == 0, "revision 14 update refused");
+    CHECK(state->voice[1].rate == 32000 && state->voice[1].mix_id == 5, "revision 14 voice: rate %u, mix %u",
+          state->voice[1].rate, state->voice[1].mix_id);
+    w32(input, 0, rev | (u32)('0' + 15) << 24);
+    CHECK(audren_state_update(state, input, size, input + size, reply) == -41, "revision 15 took 0x170 voices");
+    free(input);
+    audren_state_free(state);
+}
+
 int main(void) {
     u32 nch;
     int set;
@@ -1015,6 +1062,7 @@ int main(void) {
     if (!g_mem) return 1;
     update_output_counts();
     update_voice_v2();
+    update_voice_rev14();
 
     /* the resampler at a ratio of one: an 11 kHz voice keeps its level at default quality as at high */
     for (u8 q = 0; q < 2; q++) {
