@@ -638,6 +638,37 @@ SnxU64 snx_free_space(const char* path) {
     return statvfs(path, &st) ? 0 : (SnxU64)st.f_bavail * st.f_frsize;
 #endif
 }
+/* path, or the nearest folder above it that is there */
+static char* existing_folder(const char* path) {
+    char *at = snx_absolute(path), *up;
+    while (at && !snx_is_dir(at)) {
+        up = snx_dirname(at);
+        if (!strcmp(up, at)) {
+            free(up);
+            break;
+        }
+        free(at);
+        at = up;
+    }
+    return at;
+}
+int snx_same_disk(const char* a, const char* b) {
+    char *x = existing_folder(a), *y = existing_folder(b);
+    int same = 0;
+#ifdef _WIN32
+    wchar_t *wx = x ? wide(x) : NULL, *wy = y ? wide(y) : NULL, vx[MAX_PATH + 1], vy[MAX_PATH + 1];
+    same = wx && wy && GetVolumePathNameW(wx, vx, MAX_PATH + 1) && GetVolumePathNameW(wy, vy, MAX_PATH + 1) &&
+           !_wcsicmp(vx, vy);
+    free(wx);
+    free(wy);
+#else
+    struct stat sx, sy;
+    same = x && y && !stat(x, &sx) && !stat(y, &sy) && sx.st_dev == sy.st_dev;
+#endif
+    free(x);
+    free(y);
+    return same;
+}
 /* The per-user data folder, an installed build's and a build tree's: $XDG_DATA_HOME/scarletnx or
    ~/.local/share/scarletnx, ~/Library/Application Support/scarletnx on macOS, %APPDATA%\scarletnx on Windows. These are
    the folders SDL_GetPrefPath("scarletnx", ...) gives the GUI; the app's Documents on iOS. NULL when the environment

@@ -41,10 +41,11 @@ GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key);
    stays first: it keeps things as they are), and whether its second choice takes a second press */
 enum { GUI_CONFIRM_KEEP, GUI_CONFIRM_ABORT };
 typedef enum {
-    GUI_ASK_ABORT,  /* a running run's, when ask_abort says to ask */
-    GUI_ASK_EXIT,   /* leaving the menu on a computer */
-    GUI_ASK_DEEP,   /* a folder picked with folders in it: are their games listed too */
-    GUI_ASK_OUTSIDE /* a folder picked in Folders outside the app's own storage, which Android slows */
+    GUI_ASK_ABORT,   /* a running run's, when ask_abort says to ask */
+    GUI_ASK_EXIT,    /* leaving the menu on a computer */
+    GUI_ASK_DEEP,    /* a folder picked with folders in it: are their games listed too */
+    GUI_ASK_OUTSIDE, /* a folder picked in Folders outside the app's own storage, which Android slows */
+    GUI_ASK_ROOM     /* a run whose extraction may not fit (gui_room) */
 } GuiAsk;
 typedef struct {
     bool shown;
@@ -63,6 +64,12 @@ void gui_confirm_focus(GuiConfirm* confirm, int choice);
 const char* gui_setting_description(const GuiMenu* menu);
 /* bytes in MB, or in GB from 1024 MB on */
 void gui_size_text(char* out, size_t size, uint64_t bytes);
+/* Whether a run's first time with a dump of dump bytes has room: its extraction, about its size, in a folder with
+   work_free bytes free and, for a Switch game (copy), its RomFS copied into its folder in games/, about its size
+   again, with games_free free; on one disk (shared) both from work_free. need and left say what it takes and what is
+   free, on the disk it does not fit on (else the extraction's) */
+bool gui_room(uint64_t dump, bool copy, uint64_t work_free, uint64_t games_free, bool shared, uint64_t* need,
+              uint64_t* left);
 /* the footer's line: RAM in MB or GB, the CPU as a share of all cores and the cores in use (cpu_percent counts one
    core as 100%) */
 void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_bytes, double cpu_percent, int cores);

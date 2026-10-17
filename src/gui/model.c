@@ -81,6 +81,17 @@ void gui_size_text(char* out, size_t size, uint64_t bytes) {
     else
         snprintf(out, size, "%.1f GB", mb / 1024);
 }
+bool gui_room(uint64_t dump, bool copy, uint64_t work_free, uint64_t games_free, bool shared, uint64_t* need,
+              uint64_t* left) {
+    *need = copy && shared ? 2 * dump : dump;
+    *left = work_free;
+    if (*need > work_free) return false;
+    if (copy && !shared && dump > games_free) {
+        *left = games_free;
+        return false;
+    }
+    return true;
+}
 void gui_usage_text(char* out, size_t size, bool available, uint64_t memory_bytes, double cpu_percent, int cores) {
     double n = cores > 0 ? cores : 1, used = cpu_percent / 100;
     char ram[32];

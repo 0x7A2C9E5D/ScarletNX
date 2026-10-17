@@ -859,6 +859,13 @@ int main(int argc, char** argv) {
         puts("Recompiling picked folders\nScarletNX - picked folders");
         return 0;
     }
+    if (argc > 1 && strstr(argv[1], "room dump")) { /* asked about its room first */
+        int i = 2;
+        while (i < argc && strcmp(argv[i], "--repo")) ++i;
+        assert(i + 2 == argc);
+        puts("Recompiling room dump\nScarletNX - room dump");
+        return 0;
+    }
     if (argc > 1 && strstr(argv[1], "option flags")) {
         int i = 2;
         assert(argc == 8 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "--fullscreen=1") &&
@@ -2067,6 +2074,72 @@ int main(int argc, char** argv) {
         free(dump);
         free(work);
         free(games);
+    }
+
+    /* a dump not extracted yet, with less room than its extraction and RomFS copy take: asked first, Run anyway
+       pressed twice; Back runs nothing. With room, extracted already or an NRO, it runs at once */
+    {
+        char *dump = snx_path_join(temporary, "room dump.nsp"), *nro = snx_path_join(temporary, "room dump.nro");
+        char *work_was = app.work_dir, *games_was = app.games_dir, *out;
+        GuiRect r;
+        GuiList l;
+        void* zeros = calloc(1, 3u << 20);
+        assert(zeros && !snx_write_file(dump, zeros, 3u << 20) && !snx_write_file(nro, zeros, 3u << 20));
+        free(zeros);
+        app.work_dir = snx_path_join(temporary, "room work"); /* one disk, as the defaults are */
+        app.games_dir = snx_path_join(temporary, "room games");
+        app.menu.selected = GUI_SWITCH;
+        launcher(&app, true);
+        app.room_free = 4u << 20; /* 6 MB to take */
+        launch(&app, snx_strdup(dump), false);
+        assert(!app.menu.running && app.confirm.shown && app.confirm.ask == GUI_ASK_ROOM && app.room_file);
+        render(&app);
+        shows(&app, "Needs about 6 MB, 4 MB free.", rgb(app.theme.warning));
+        shows(&app, "- Back", yellow);
+        shows(&app, "- Run anyway", normal);
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && !app.menu.running && !app.room_file);
+        launch(&app, snx_strdup(dump), false);
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RETURN);
+        assert(app.confirm.shown && app.confirm.armed && !app.menu.running);
+        render(&app);
+        shows(&app, "- Run anyway: press again", yellow);
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && app.menu.running && !app.room_ok && app.menu.selected == GUI_SWITCH);
+        finish(&app, 0);
+        /* a finger: the first tap arms Run anyway, the second runs it */
+        launch(&app, snx_strdup(dump), false);
+        ask_boxes(&app, &r, &l);
+        touch_box(&app, list_box(&l, 1));
+        assert(app.confirm.shown && app.confirm.armed && !app.menu.running);
+        touch_box(&app, list_box(&l, 1));
+        assert(!app.confirm.shown && app.menu.running);
+        finish(&app, 0);
+        app.room_free = 6u << 20;
+        launch(&app, snx_strdup(dump), false);
+        assert(!app.confirm.shown && app.menu.running);
+        finish(&app, 0);
+        app.room_free = 1;
+        launch(&app, snx_strdup(nro), false);
+        assert(!app.confirm.shown && app.menu.running);
+        finish(&app, 0);
+        out = dump_out(&app, dump, NULL);
+        assert(!snx_mkdirs(out));
+        launch(&app, snx_strdup(dump), false);
+        assert(!app.confirm.shown && app.menu.running);
+        finish(&app, 0);
+        assert(!snx_remove_tree(out));
+        free(out);
+        app.room_free = 0;
+        free(app.work_dir);
+        app.work_dir = work_was;
+        free(app.games_dir);
+        app.games_dir = games_was;
+        launcher(&app, false);
+        app.menu.selected = GUI_LINUX;
+        free(nro);
+        free(dump);
     }
 
     /* recent games: what the GUI ran, newest first in Games under Add a folder and kept in a file, named as the run

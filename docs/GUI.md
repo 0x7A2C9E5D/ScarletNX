@@ -52,7 +52,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF** and **Load 3DS CIA** open a screen as the
   keys': a click on its blinking **[ Pick or drop a file ]**, or Enter, opens the system's file
   picker (on Linux the desktop's, else zenity's). Dropping a file on the window and Ctrl+V with
-  a path work too. ESC returns to the menu. On Android the picker opens at once.
+  a path work too. ESC returns to the menu. On Android the picker opens at once. A dump not extracted yet takes
+  about its size for the extraction and, for a Switch game, as much again for the RomFS its folder gets; when its
+  disks have less free, the menu says how much it needs and *Run anyway* takes a second press.
 - **Load 3DS CIA** uses `scarletnx-3ds`. Its `games/` browser lists CIA inputs,
   not host executables. The driver extracts supported decrypted application CIAs.
   A native Linux build with `SNX_3DS_AOT=ON` then performs static ARM11 integer

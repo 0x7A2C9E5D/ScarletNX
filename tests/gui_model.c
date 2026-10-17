@@ -89,6 +89,18 @@ int main(void) {
         gui_size_text(use, sizeof use, 26ull << 30 | 400ull << 20);
         assert(!strcmp(use, "26.4 GB"));
     }
+    /* a run's room: the extraction and a Switch game's RomFS copy each about the dump's size, both from one disk's free
+       space, or each from its own; a 3DS game has no copy */
+    {
+        uint64_t need, left;
+        assert(gui_room(10, true, 20, 0, true, &need, &left) && need == 20 && left == 20);
+        assert(!gui_room(10, true, 19, 99, true, &need, &left) && need == 20 && left == 19);
+        assert(gui_room(10, true, 10, 10, false, &need, &left));
+        assert(!gui_room(10, true, 9, 99, false, &need, &left) && need == 10 && left == 9);
+        assert(!gui_room(10, true, 99, 9, false, &need, &left) && need == 10 && left == 9); /* the games' disk */
+        assert(gui_room(10, false, 10, 0, true, &need, &left) && need == 10);
+        assert(!gui_room(10, false, 9, 99, true, &need, &left) && need == 10 && left == 9);
+    }
     /* a line 5 columns too long, a column every 100 ms: rests 8 steps, slides, rests at its end, slides back */
     assert(!gui_slide(0, 900, 100) && !gui_slide(5, 900, 0) && !gui_slide(-3, 900, 100));
     assert(!gui_slide(5, 0, 100) && !gui_slide(5, 799, 100) && gui_slide(5, 900, 100) == 1);

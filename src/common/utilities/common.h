@@ -62,7 +62,7 @@ enum { SNX_USER_DATA, SNX_USER_CONFIG, SNX_USER_STATE, SNX_USER_CACHE };
 #endif
 #endif
 /* An older version's data folder on Android, the shared storage's: a game there still runs as one of a data folder */
-#define SNX_ANDROID_DIR  "/sdcard/ScarletNX"
+#define SNX_ANDROID_DIR "/sdcard/ScarletNX"
 /* The user's folder for one kind of file: $XDG_CONFIG_HOME/scarletnx (~/.config), $XDG_STATE_HOME/scarletnx
    (~/.local/state) or $XDG_CACHE_HOME/scarletnx (~/.cache), a relative path ignored. Without SNX_XDG config/, state/
    and cache/ of the data folder. NULL when the environment names no home */
@@ -120,6 +120,9 @@ char* snx_dump_name(const char* input);
    folder", "cannot be written" or "is on a disk that runs no programs (noexec)"; NULL when it can */
 const char* snx_folder_unfit(const char* folder, int run);
 SnxU64 snx_free_space(const char* path);
+/* 1 when a and b are on one disk (one file system), each a folder or one still to be made under the nearest folder
+   there: what goes into one takes the other's free space */
+int snx_same_disk(const char* a, const char* b);
 SnxU64 snx_file_size(const char* path);
 int snx_make_executable(const char* path);
 unsigned snx_cpu_count(void);

@@ -213,6 +213,15 @@ int main(void) {
             free(name);
         }
     }
+    /* one disk: two folders of the temporary one, and one still to be made there; another file system is another */
+    assert(snx_same_disk(checkout, program));
+    file = join(root, "not/made/yet");
+    assert(snx_same_disk(file, checkout));
+    free(file);
+#ifdef __linux__
+    assert(!snx_same_disk(root, "/proc"));
+#endif
+
     puts("snx_data_dir: .scarletnx beside the program or the AppImage, else the user's data folder, for a build "
          "tree's programs too; snx_checkout: a build tree's program's checkout, what an older version kept in it said");
     free(expected);

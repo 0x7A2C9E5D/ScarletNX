@@ -196,6 +196,12 @@ typedef struct {
     char* own_dir;      /* Android: the app's own storage; a folder outside it is asked about (GUI_ASK_OUTSIDE) */
     char* outside_path; /* the folder asked about, for the row outside_place */
     int outside_place;
+    char* room_file; /* a run asked about (GUI_ASK_ROOM): its file, its load and whether it was prepared */
+    int room_item;
+    bool room_prepared;
+    bool room_ok;       /* asked and answered: the run goes */
+    char room_line[96]; /* the question: what it takes, what is free */
+    uint64_t room_free; /* fixed free space for tests; 0 asks the disk */
 
     Uint64 preview_since;
 #ifdef SDL_PLATFORM_ANDROID
@@ -1063,6 +1069,7 @@ static const char* ask_question(const App* app) {
         case GUI_ASK_DEEP: return "List the games in its subfolders too?";
         case GUI_ASK_EXIT: return "Exit ScarletNX?";
         case GUI_ASK_OUTSIDE: return "Outside the app, Android checks every file access: games may run slower.";
+        case GUI_ASK_ROOM: return app->room_line;
         default:
             return screen(app) == GUI_SCREEN_COMPILING ? "Abort the recompile? Its work is lost." : "Abort the run?";
     }
@@ -1243,8 +1250,11 @@ static void ask_boxes(App* app, GuiRect* r, GuiList* choices) {
 #define SAY_AGAIN "press again"
 #endif
 static void render_ask(App* app) {
-    static const char* const choices[][2] = {
-        {"Keep going", "Abort"}, {"Stay", "Exit"}, {"Only this folder", "With subfolders"}, {"Back", "Use it"}};
+    static const char* const choices[][2] = {{"Keep going", "Abort"},
+                                             {"Stay", "Exit"},
+                                             {"Only this folder", "With subfolders"},
+                                             {"Back", "Use it"},
+                                             {"Back", "Run anyway"}};
     GuiRect r;
     GuiList l;
     char label[96];
@@ -2660,6 +2670,26 @@ static char* dump_out(const App* app, const char* file, const char* kind) {
     free(name);
     free(dir);
     return out;
+}
+/* room on the disks for file's run (gui_room), not extracted yet; else room_line says what it takes. The free space is
+   room_free in tests */
+static bool room_fits(App* app, const char* file) {
+    bool copy = app->menu.selected == GUI_SWITCH, fits = true;
+    char *out, need_text[32], left_text[32];
+    uint64_t need = 0, left = 0;
+    if (copy && nro_file(file)) return true; /* no extraction */
+    out = dump_out(app, file, copy ? NULL : "3ds");
+    if (!snx_is_dir(out)) /* else extracted already, and its game made with it */
+        fits = gui_room(snx_file_size(file), copy, app->room_free ? app->room_free : free_space(app->work_dir),
+                        app->room_free ? app->room_free : free_space(app->games_dir),
+                        snx_same_disk(app->work_dir, app->games_dir), &need, &left);
+    if (!fits) {
+        gui_size_text(need_text, sizeof need_text, need);
+        gui_size_text(left_text, sizeof left_text, left);
+        snprintf(app->room_line, sizeof app->room_line, "Needs about %s, %s free.", need_text, left_text);
+    }
+    free(out);
+    return fits;
 }
 static void open_folder_picker(App* app) {
     if (!app->picked_folder) app->picked_folder = SDL_RegisterEvents(1);
@@ -4209,6 +4239,16 @@ static void launch(App* app, char* absolute, bool prepared) {
         free(absolute);
         return;
     }
+    /* a dump not extracted yet may need more room than its disks have: asked first, Run anyway pressed twice */
+    if (folders && !app->room_ok && !room_fits(app, absolute)) {
+        free(app->room_file);
+        app->room_file = absolute;
+        app->room_item = app->menu.selected;
+        app->room_prepared = prepared;
+        gui_confirm_open(&app->confirm, GUI_ASK_ROOM, true);
+        free(driver);
+        return;
+    }
     /* the driver, the file, the settings, --repo and its folder, the picked games and extraction folders, NULL */
     GuiSettings* s = settings_of(app);
     const char** argv = (const char**)snx_alloc((size_t)(s->count + 10) * sizeof(*argv));
@@ -4275,6 +4315,21 @@ static void launch(App* app, char* absolute, bool prepared) {
     app->told_ms = 0;
     tell(app);
 #endif
+}
+/* the answer to a run's room: Run anyway, pressed twice, runs it as it was asked; Back runs nothing */
+static void room_answer(App* app, bool taken) {
+    char* file = app->room_file;
+    int item = app->menu.selected;
+    app->room_file = NULL;
+    if (!taken) {
+        free(file);
+        return;
+    }
+    app->room_ok = true;
+    app->menu.selected = app->room_item;
+    launch(app, file, app->room_prepared);
+    app->menu.selected = item;
+    app->room_ok = false;
 }
 /* a recent game, run as the menu would: its driver, the options the menu has now */
 static void open_recent(App* app, int index) {
@@ -4662,8 +4717,8 @@ static void abort_run(App* app) {
     gui_process_terminate(app->process);
     app->aborting = true;
 }
-/* a key on the question shown (gui_confirm_key); answered, what it asked about: the menu closed, the run aborted, a
-   folder added or used as the choice says */
+/* a key on the question shown (gui_confirm_key); answered, what it asked about: the menu closed, a run aborted or
+   started, a folder added or used as the choice says */
 static void ask_key(App* app, GuiKey key) {
     GuiAsk ask = app->confirm.ask;
     bool second = gui_confirm_key(&app->confirm, key);
@@ -4672,6 +4727,8 @@ static void ask_key(App* app, GuiKey key) {
         folder_answer(app, key == GUI_SELECT, second);
     else if (ask == GUI_ASK_OUTSIDE)
         outside_answer(app, second);
+    else if (ask == GUI_ASK_ROOM)
+        room_answer(app, second);
     else if (second && ask == GUI_ASK_EXIT)
         app->menu.quit = true;
     else if (second)
@@ -5311,6 +5368,7 @@ static void cleanup(App* app) {
     free(app->folder_asked);
     free(app->own_dir);
     free(app->outside_path);
+    free(app->room_file);
     free(app->folders_file);
     free(app->app_file);
     gui_cleaned_free(&app->cleaned);
