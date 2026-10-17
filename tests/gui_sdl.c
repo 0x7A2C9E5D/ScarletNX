@@ -304,6 +304,17 @@ static void press_key_at(int line, App* app, const char* key, int col, bool tap,
         mouse_px(app, x, y, true);
 }
 static void touch_box(App* app, GuiRect b) { tap_px(app, b.x + b.w / 2, b.y + b.h / 2); }
+/* a path the GUI keeps against one the test made: on Windows the system hands paths back with backslashes, where
+   snx_path_join put a '/' */
+static bool same_path(const char* a, const char* b) {
+#ifdef _WIN32
+    for (; *a && *b; ++a, ++b)
+        if (*a != *b && !(strchr("/\\", *a) && strchr("/\\", *b))) return false;
+    return *a == *b;
+#else
+    return !strcmp(a, b);
+#endif
+}
 /* the Settings' pick for key is value; NULL: the .ini's */
 static bool setting_is(App* app, const char* key, const char* value) {
     const char* v = gui_settings_value(&app->settings, key);
@@ -1211,7 +1222,7 @@ int main(int argc, char** argv) {
         render(&app);
         while (!__atomic_load_n(&app.space->done, __ATOMIC_ACQUIRE) && SDL_GetTicks() < until) SDL_Delay(5);
         for (int i = 0; i < GUI_SPACE_DIRS; ++i) total += gui_tree_size(app.space->dirs[i], &app.space->stop);
-        assert(app.space->done && app.space->used == total && !strcmp(app.space->dirs[0], app.games_dir));
+        assert(app.space->done && app.space->used == total && same_path(app.space->dirs[0], app.games_dir));
         gui_size_text(used, sizeof used, total);
         gui_size_text(left, sizeof left, app.free_bytes);
         /* in the Status box, after the RAM and the CPU */
@@ -1582,10 +1593,10 @@ int main(int argc, char** argv) {
         assert(app.folder_count == 0 && !strncmp(app.editor.note, "Not a folder: ", 14));
         e.drop.data = more;
         event(&app, &e);
-        if (app.folder_count != 1 || strcmp(app.folders[0], kept_as) || strcmp(app.editor.note, "Added"))
+        if (app.folder_count != 1 || !same_path(app.folders[0], kept_as) || strcmp(app.editor.note, "Added"))
             fprintf(stderr, "folders: %d, first \"%s\", expected \"%s\", note \"%s\"\n", app.folder_count,
                     app.folder_count ? app.folders[0] : "", kept_as, app.editor.note);
-        assert(app.folder_count == 1 && !strcmp(app.folders[0], kept_as) && !strcmp(app.editor.note, "Added"));
+        assert(app.folder_count == 1 && same_path(app.folders[0], kept_as) && !strcmp(app.editor.note, "Added"));
         assert(app.form == GUI_FORM_FOLDERS && app.editor.row == 1 && gui_editor_rows(&app.editor) == 3);
         kept = (char*)snx_read_file(app.folders_file, &size);
         snprintf(line, sizeof line, "%s\n", kept_as);
@@ -1638,7 +1649,7 @@ int main(int argc, char** argv) {
             deep_as = snx_absolute(deep);
             e.drop.data = deep;
             event(&app, &e);
-            assert(app.folder_asked && !strcmp(app.folder_asked, deep_as) && app.confirm.shown && !app.folder_count);
+            assert(app.folder_asked && same_path(app.folder_asked, deep_as) && app.confirm.shown && !app.folder_count);
             render(&app);
             shows(&app, "List the games in its subfolders too?", rgb(app.theme.warning));
             key(&app, SDLK_ESCAPE);
@@ -1683,7 +1694,7 @@ int main(int argc, char** argv) {
             free(app.folders[0]);
             app.folder_count = 0;
             folders_load(&app);
-            assert(app.folder_count == 1 && app.folders_deep[0] && !strcmp(app.folders[0], deep_as));
+            assert(app.folder_count == 1 && app.folders_deep[0] && same_path(app.folders[0], deep_as));
             folder_remove(&app, 0);
             free(deep_as);
             free(deep);

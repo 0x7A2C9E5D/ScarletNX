@@ -63,9 +63,10 @@ function(snx_service_swipc target)
     snx_swipc(${target} ROOT "${PROJECT_SOURCE_DIR}/src/nx" FILES hle/services/types.swipc ${ARGN})
 endfunction()
 
+# a test's checks are asserts too: -UNDEBUG keeps them in any build type
 function(snx_test_target target standard)
     set_target_properties(${target} PROPERTIES C_STANDARD ${standard} C_STANDARD_REQUIRED ON)
-    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
     target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     if(standard EQUAL 90)
         set_target_properties(${target} PROPERTIES C_EXTENSIONS OFF)
@@ -98,7 +99,6 @@ if(TARGET snx_ctr_board)
     endif()
     add_executable(snx-test-3ds-board 3ds_board.c)
     snx_test_target(snx-test-3ds-board 11)
-    target_compile_options(snx-test-3ds-board PRIVATE -UNDEBUG)
     target_link_libraries(snx-test-3ds-board PRIVATE snx_ctr_board)
     add_test(NAME 3ds_board COMMAND snx-test-3ds-board)
     add_executable(snx-test-3ds-memory 3ds_memory.c)
@@ -107,19 +107,16 @@ if(TARGET snx_ctr_board)
     add_test(NAME 3ds_memory COMMAND snx-test-3ds-memory)
     add_executable(snx-test-3ds-kernel 3ds_kernel.c)
     snx_test_target(snx-test-3ds-kernel 11)
-    target_compile_options(snx-test-3ds-kernel PRIVATE -UNDEBUG)
     target_link_libraries(snx-test-3ds-kernel PRIVATE snx_ctr_process)
     add_test(NAME 3ds_kernel COMMAND snx-test-3ds-kernel)
     foreach(test services threads)
         add_executable(snx-test-3ds-${test} 3ds_${test}.c)
         snx_test_target(snx-test-3ds-${test} 11)
-        target_compile_options(snx-test-3ds-${test} PRIVATE -UNDEBUG)
         target_link_libraries(snx-test-3ds-${test} PRIVATE snx_ctr_process)
         add_test(NAME 3ds_${test} COMMAND snx-test-3ds-${test})
     endforeach()
     add_executable(snx-test-3ds-ipc 3ds_ipc.c)
     snx_test_target(snx-test-3ds-ipc 11)
-    target_compile_options(snx-test-3ds-ipc PRIVATE -UNDEBUG)
     target_link_libraries(snx-test-3ds-ipc PRIVATE snx_ctr_process)
     add_test(NAME 3ds_ipc COMMAND snx-test-3ds-ipc)
     add_executable(snx-test-ctr-swipc ctr_swipc.c)
@@ -128,44 +125,35 @@ if(TARGET snx_ctr_board)
             else()
         snx_test_target(snx-test-ctr-swipc 11)
     endif()
-    target_compile_options(snx-test-ctr-swipc PRIVATE -UNDEBUG)
     snx_swipc(snx-test-ctr-swipc CTR ROOT "${PROJECT_SOURCE_DIR}" FILES tests/ctr_swipc.swipc)
     add_test(NAME ctr_swipc_dispatch COMMAND snx-test-ctr-swipc)
     add_executable(snx-test-3ds-process 3ds_process.c)
     snx_test_target(snx-test-3ds-process 11)
-    target_compile_options(snx-test-3ds-process PRIVATE -UNDEBUG)
     target_link_libraries(snx-test-3ds-process PRIVATE snx_ctr_process)
     add_test(NAME 3ds_process COMMAND snx-test-3ds-process)
     add_executable(snx-test-3ds-discover 3ds_discover.c "${PROJECT_SOURCE_DIR}/src/3ds/aot/discover.c"
         "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/a32.c" "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/thumb_decode.c"
         "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/vector_decode.c" "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/profile.c")
     snx_test_target(snx-test-3ds-discover 11)
-    target_compile_options(snx-test-3ds-discover PRIVATE -UNDEBUG)
     add_test(NAME 3ds_static_discovery COMMAND snx-test-3ds-discover)
     if(TARGET snx_ctr_native)
         add_executable(snx-test-3ds-native 3ds_native.c)
         snx_test_target(snx-test-3ds-native 11)
-        target_compile_options(snx-test-3ds-native PRIVATE -UNDEBUG)
         target_link_libraries(snx-test-3ds-native PRIVATE snx_ctr_native)
     endif()
     add_executable(snx-test-3ds-blz 3ds_blz.c)
     snx_test_target(snx-test-3ds-blz 11)
         target_link_libraries(snx-test-3ds-blz PRIVATE snx_ctr_loader)
     add_test(NAME 3ds_blz COMMAND snx-test-3ds-blz)
-    foreach(target snx-test-3ds-memory snx-test-3ds-blz)
-        target_compile_options(${target} PRIVATE -UNDEBUG)
-    endforeach()
 
     if(NOT WIN32)
         if(Python3_Interpreter_FOUND)
             add_executable(snx-test-3ds-fs 3ds_fs.c)
             snx_test_target(snx-test-3ds-fs 11)
-            target_compile_options(snx-test-3ds-fs PRIVATE -UNDEBUG)
             target_link_libraries(snx-test-3ds-fs PRIVATE snx_ctr_process)
             add_test(NAME 3ds_filesystem COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_fs.py" $<TARGET_FILE:snx-test-3ds-fs>)
             add_executable(snx-test-3ds-gsp 3ds_gsp.c)
             snx_test_target(snx-test-3ds-gsp 11)
-            target_compile_options(snx-test-3ds-gsp PRIVATE -UNDEBUG)
             target_link_libraries(snx-test-3ds-gsp PRIVATE snx_ctr_process)
             add_test(NAME 3ds_gsp_gpu COMMAND snx-test-3ds-gsp "${CMAKE_CURRENT_BINARY_DIR}/gsp-frames")
             # the transfer engine alone: fills, display transfers, texture copies against hand-written goldens
@@ -181,7 +169,6 @@ if(TARGET snx_ctr_board)
             # the HLE DSP and dsp::DSP: pipes, regions, sources, mixing, decoding, the service as ndsp drives it
             add_executable(snx-test-3ds-dsp 3ds_dsp.c)
             snx_test_target(snx-test-3ds-dsp 11)
-            target_compile_options(snx-test-3ds-dsp PRIVATE -UNDEBUG)
             target_link_libraries(snx-test-3ds-dsp PRIVATE snx_ctr_process)
             add_test(NAME 3ds_dsp COMMAND snx-test-3ds-dsp)
     # No Vulkan loader/ICD: presentation cannot run here; the probe skips, never fakes a frame.
@@ -219,7 +206,6 @@ add_executable(snx-test-arm-profile arm_profile.c "${PROJECT_SOURCE_DIR}/src/com
     "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/vector_decode.c"
     "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/profile.c")
 snx_test_target(snx-test-arm-profile 11)
-target_compile_options(snx-test-arm-profile PRIVATE -UNDEBUG)
 add_test(NAME arm_isa_profiles COMMAND snx-test-arm-profile)
 if(SNX_TEST_ARM_AOT)
     include(arm_checked.cmake)
@@ -249,7 +235,6 @@ add_test(NAME filesystem_raw COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-
 if(UNIX)
     add_executable(snx-test-data-dir data_dir.c)
     snx_test_target(snx-test-data-dir 90)
-    target_compile_options(snx-test-data-dir PRIVATE -UNDEBUG)
     target_link_libraries(snx-test-data-dir PRIVATE scarletnx-common)
     add_test(NAME data_dir COMMAND snx-test-data-dir)
 endif()
@@ -465,7 +450,6 @@ add_executable(snx-test-overlay overlay.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-overlay 11)
-target_compile_options(snx-test-overlay PRIVATE -UNDEBUG)
 target_link_libraries(snx-test-overlay PRIVATE scarletnx-common m)
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
 target_include_directories(snx-test-overlay PRIVATE "${CMAKE_BINARY_DIR}/generated")
@@ -474,7 +458,6 @@ add_test(NAME overlay COMMAND snx-test-overlay)
 add_executable(snx-test-vpad vpad.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-vpad 11)
-target_compile_options(snx-test-vpad PRIVATE -UNDEBUG)
 target_link_libraries(snx-test-vpad PRIVATE scarletnx-common m)
 add_test(NAME vpad COMMAND snx-test-vpad)
 
@@ -484,12 +467,10 @@ add_test(NAME ini_deprecated COMMAND snx-test-ini-deprecated)
 
 add_executable(snx-test-pad-map pad_map.c)
 snx_test_target(snx-test-pad-map 11)
-target_compile_options(snx-test-pad-map PRIVATE -UNDEBUG)  # its checks are asserts
 target_link_libraries(snx-test-pad-map PRIVATE scarletnx-common)
 add_test(NAME pad_map COMMAND snx-test-pad-map)
 add_executable(snx-test-pad-screen pad_screen.c)
 snx_test_target(snx-test-pad-screen 11)
-target_compile_options(snx-test-pad-screen PRIVATE -UNDEBUG)  # its checks are asserts
 target_link_libraries(snx-test-pad-screen PRIVATE scarletnx-common)
 add_test(NAME pad_screen COMMAND snx-test-pad-screen)
 
@@ -502,17 +483,14 @@ add_test(NAME gamepad COMMAND snx-test-gamepad)
 
 add_executable(snx-test-fatal-screen fatal_screen.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/fatal_screen.c")
 snx_test_target(snx-test-fatal-screen 11)
-target_compile_options(snx-test-fatal-screen PRIVATE -UNDEBUG)  # its checks are asserts
 target_link_libraries(snx-test-fatal-screen PRIVATE scarletnx-common)
 add_test(NAME fatal_screen COMMAND snx-test-fatal-screen)
 
 add_executable(snx-test-ini ini.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-ini 11)
-target_compile_options(snx-test-ini PRIVATE -UNDEBUG) # its checks are asserts
 add_test(NAME ini COMMAND snx-test-ini)
 add_executable(snx-test-ini-lines ini_lines.c "${PROJECT_SOURCE_DIR}/src/common/utilities/ini_lines.c")
 snx_test_target(snx-test-ini-lines 90)
-target_compile_options(snx-test-ini-lines PRIVATE -UNDEBUG) # its checks are asserts
 add_test(NAME ini_lines COMMAND snx-test-ini-lines)
 
 # generated and checked in (the controls' atlas, their shaders, the VIC's): their sources must still make them
@@ -552,13 +530,11 @@ add_test(NAME deps_cache COMMAND "${CMAKE_COMMAND}" "-DCC=${CMAKE_C_COMPILER}" "
 add_executable(snx-test-hid-touch hid_touch.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/touch.c"
     "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_touch.c")
 snx_test_target(snx-test-hid-touch 11)
-target_compile_options(snx-test-hid-touch PRIVATE -UNDEBUG)  # its checks are asserts
 target_link_libraries(snx-test-hid-touch PRIVATE scarletnx-common)
 add_test(NAME hid_touch COMMAND snx-test-hid-touch)
 
 add_executable(snx-test-hid-motion hid_motion.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_motion.c")
 snx_test_target(snx-test-hid-motion 11)
-target_compile_options(snx-test-hid-motion PRIVATE -UNDEBUG)
 target_link_libraries(snx-test-hid-motion PRIVATE scarletnx-common)
 if(NOT WIN32)
     target_link_libraries(snx-test-hid-motion PRIVATE m)
@@ -611,7 +587,7 @@ if(UNIX)
     if(Python3_Interpreter_FOUND)
         add_test(NAME gdbstub_native COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/gdbstub.py" $<TARGET_FILE:snx-test-gdbstub>)
-        set_tests_properties(gdbstub_native PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 RESOURCE_LOCK gdb_port_1234)
+        set_tests_properties(gdbstub_native PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
     endif()
 endif()
 
@@ -694,9 +670,14 @@ add_test(NAME native_recompiler COMMAND snx_recompiler_test
 add_executable(snx-test-llvm-differential llvm_differential.c)
 snx_test_target(snx-test-llvm-differential 11)
 target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
-add_test(NAME llvm_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
-    --quiet)
-set_tests_properties(llvm_differential PROPERTIES TIMEOUT 900)
+# In shards that run side by side, each a share of the words, all of them started first (COST): a tree with no times
+# of its own (CI's) starts tests in their order, and these are the longest. Fewer, and one runs alone at the end;
+# more, and each pays the compiles' start again
+foreach(shard RANGE 2)
+    add_test(NAME llvm_differential_${shard} COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}"
+        "${PROJECT_SOURCE_DIR}" --quiet --shard ${shard}/3)
+    set_tests_properties(llvm_differential_${shard} PROPERTIES TIMEOUT 900 COST 100)
+endforeach()
 # not a test: timings of the generated code (llvm_bench SCARLETNX REPO CLANG)
 add_executable(snx-llvm-bench llvm_bench.c)
 snx_test_target(snx-llvm-bench 11)
@@ -742,9 +723,11 @@ if(TARGET snx_jit)
     set(snx_extra_backends gcc)
     target_link_libraries(snx-test-llvm-differential PRIVATE snx_jit)
     target_compile_definitions(snx-test-llvm-differential PRIVATE SNX_TEST_GCCJIT)
-    add_test(NAME gccjit_differential COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}"
-        --gccjit --quiet --per-case 2 --simd 100 --states 4)
-    set_tests_properties(gccjit_differential PROPERTIES TIMEOUT 900)
+    foreach(shard RANGE 1) # as llvm_differential's
+        add_test(NAME gccjit_differential_${shard} COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}"
+            "${PROJECT_SOURCE_DIR}" --gccjit --quiet --per-case 2 --simd 100 --states 4 --shard ${shard}/2)
+        set_tests_properties(gccjit_differential_${shard} PROPERTIES TIMEOUT 900 COST 100)
+    endforeach()
     add_test(NAME native_recompiler_gcc COMMAND snx_recompiler_test
         $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}" gcc)
     # code units in this process and in processes of their own (gccjit/jit_units.c)
@@ -770,19 +753,19 @@ add_executable(snx-test-astc astc_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/tex
 snx_test_target(snx-test-astc 23)
 add_test(NAME astc_decode COMMAND snx-test-astc)
 
-add_executable(snx-test-audio-out audio_out.c)
-snx_test_target(snx-test-audio-out 11)
-snx_service_swipc(snx-test-audio-out hle/services/audio.swipc)
-# Isolate audout in this fixture without FFmpeg, also when testing a tools-only build.
-# Production NX targets always link FFmpeg and never define SNX_NO_H264.
-target_compile_definitions(snx-test-audio-out PRIVATE SNX_NO_H264)
-add_test(NAME audio_out COMMAND snx-test-audio-out)
-# the same fixture with FFmpeg's Opus decoder, for the hwopus decoders that open. FFmpeg::avcodec comes from
-# cmake/dependencies.cmake, before this folder, in every build but a tools-only one
-if(NOT SNX_TOOLS_ONLY)
+# audout and hwopus in a fixture, with FFmpeg's Opus decoder for the hwopus decoders that open. FFmpeg::avcodec comes
+# from cmake/dependencies.cmake, before this folder, in every build but a tools-only one, which checks the fixture
+# without it (SNX_NO_H264, which no runtime build defines)
+if(SNX_TOOLS_ONLY)
+    add_executable(snx-test-audio-out audio_out.c)
+    snx_test_target(snx-test-audio-out 11)
+    snx_service_swipc(snx-test-audio-out hle/services/audio.swipc)
+    target_compile_definitions(snx-test-audio-out PRIVATE SNX_NO_H264)
+    add_test(NAME audio_out COMMAND snx-test-audio-out)
+else()
     add_executable(snx-test-audio-opus audio_out.c)
     snx_test_target(snx-test-audio-opus 11)
-        snx_service_swipc(snx-test-audio-opus hle/services/audio.swipc)
+    snx_service_swipc(snx-test-audio-opus hle/services/audio.swipc)
     target_link_libraries(snx-test-audio-opus PRIVATE FFmpeg::avcodec)
     add_test(NAME audio_opus COMMAND snx-test-audio-opus)
 endif()
