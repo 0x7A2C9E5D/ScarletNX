@@ -1393,7 +1393,7 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RETURN);
     assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 6);
     {
-        char first[64], line[96];
+        char first[64], line[1024];
         snprintf(first, sizeof first, "%s", app.theme.name);
         render(&app);
         shows(&app, "- App", yellow); /* the group open, as focused while its rows have the focus */
@@ -1401,7 +1401,28 @@ int main(int argc, char** argv) {
         shows(&app, line, yellow);
         shows(&app, "- Text size          Auto", normal);
         shows(&app, "- Theme editor", normal);
+        /* under the rows, the three folders Folders moves, whole: the extractions too */
         shows(&app, "- Folders            Defaults", normal);
+        shows(&app, "Extractions:", rgb(app.theme.soft));
+        { /* out of the data folder, as XDG's cache has them: without XDG (Windows) they are in it and read work/ */
+            char *games = app.games_dir, *work = app.work_dir;
+            app.work_dir = snx_path_join(temporary, "extractions");
+            app_values(&app);
+            snprintf(line, sizeof line, "Data: %s  Games: %s  Extractions: %s", app.data_dir, app.games_dir,
+                     app.work_dir);
+            assert(!strcmp(app.places_note, line));
+            /* one in the data folder, from it: the note stays short on a phone, whose data folder is a long path */
+            app.games_dir = snx_path_join(app.data_dir, "games");
+            app_values(&app);
+            snprintf(line, sizeof line, "Data: %s  Games: games%c  Extractions: %s", app.data_dir,
+                     app.games_dir[strlen(app.data_dir)], app.work_dir);
+            assert(!strcmp(app.places_note, line));
+            free(app.games_dir);
+            free(app.work_dir);
+            app.games_dir = games;
+            app.work_dir = work;
+            app_values(&app);
+        }
         shows(&app, "- Clean old settings", normal);
         hides(&app, "- Layout", normal);
         key(&app, SDLK_RIGHT);
@@ -1562,7 +1583,7 @@ int main(int argc, char** argv) {
        (SDL_FILE_DIALOG_DRIVER=none); Del or Enter twice takes one off, the folder staying */
     key(&app, SDLK_DOWN);
     render(&app);
-    shows(&app, "- Game folders       games/", yellow);
+    shows(&app, "- Library            games/", yellow);
     key(&app, SDLK_RETURN);
     assert(app.form == GUI_FORM_FOLDERS && gui_editor_rows(&app.editor) == 2 && app.editor.row == 0);
     /* Back over the rows, for a click or a finger: it does what ESC does, back on the App's row; the groups' list has
@@ -1607,7 +1628,7 @@ int main(int argc, char** argv) {
         assert(!snx_mkdirs(more) && !snx_write_file(file, "fixture", 7));
         kept_as = snx_absolute(more); /* as the system writes the folder once it is there: backslashes on Windows */
         render(&app);
-        shows(&app, "Game folders", normal);
+        shows(&app, "Library", normal);
         shows(&app, "The data folder's", normal);
         snprintf(line, sizeof line, "- %.20s", app.games_dir);
         shows(&app, line, yellow);
@@ -1797,6 +1818,8 @@ int main(int argc, char** argv) {
         shows(&app, "- Games", yellow);
         shows(&app, "picked", yellow);
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir));
+        app_values(&app); /* App's note, the folder now */
+        assert(!strcmp(app.app_form.places, "1 picked") && strstr(app.places_note, app.games_dir));
         /* read back as the menu opens, a path not from the root left out and named */
         free(app.place[GUI_PLACE_GAMES]);
         app.place[GUI_PLACE_GAMES] = NULL;
@@ -2498,7 +2521,7 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "- Add a folder", yellow);
     shows(&app, "Pick a folder of games", normal); /* beside it, what it does */
-    /* it opens the folder picker of Settings > App > Game folders, whose answer (none here) the message says */
+    /* it opens the folder picker of Settings > App > Library, whose answer (none here) the message says */
     key(&app, SDLK_RETURN);
     {
         SDL_Event answer;
@@ -2507,8 +2530,8 @@ int main(int argc, char** argv) {
             while (SDL_PollEvent(&answer)) event(&app, &answer);
     }
     assert(app.menu.view == GUI_LOAD_GAMES && !app.editing &&
-           (!strcmp(app.message, "Game folders: No folder was picked.") ||
-            !strncmp(app.message, "Game folders: The folder picker could not open: ", 48)));
+           (!strcmp(app.message, "Library: No folder was picked.") ||
+            !strncmp(app.message, "Library: The folder picker could not open: ", 43)));
     app.message[0] = 0;
     for (int i = 0; i < 35; ++i) {
         char name[40];
@@ -2601,7 +2624,7 @@ int main(int argc, char** argv) {
         app.folder_count = 2;
         list_games(&app);
         assert(app.games.count == 36 && strstr(app.message, "/nonexistent/snx-games") &&
-               strstr(app.message, "Settings > App > Game folders"));
+               strstr(app.message, "Settings > App > Library"));
         free(app.folders[1]);
         app.folder_count = 1;
         assert(!snx_remove_tree(zed));

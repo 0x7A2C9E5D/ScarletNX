@@ -197,6 +197,7 @@ typedef struct {
     GuiThemeKey place_keys[GUI_PLACES];
     char place_about[GUI_PLACES][384];
     char place_line[GUI_PLACES][4200]; /* the folder in use, whole, under the rows */
+    char places_note[3 * 4200];        /* the three, under App's rows */
     int place_row;                     /* the row the folder picker was opened for, -1 none */
     char* own_dir;      /* Android: the app's own storage; a folder outside it is asked about (GUI_ASK_OUTSIDE) */
     char* outside_path; /* the folder asked about, for the row outside_place */
@@ -508,6 +509,7 @@ static void next_theme(App* app, int step) {
 }
 /* app.ini's [folders] keys, in the order of Settings > App > Folders' rows */
 static const char* const place_names[GUI_PLACES] = {"data", "games", "work"};
+static const char* const place_labels[GUI_PLACES] = {"Data", "Games", "Extractions"};
 /* a path from the root: '/' first, or on Windows a drive's (C:\ or C:/) or a share's (\\host) */
 static bool full_path(const char* path) {
 #ifdef _WIN32
@@ -2316,15 +2318,25 @@ static const GuiThemeKey app_keys[] = {
      "Bigger letters scroll the menu. Auto fits the screen"},
     {"", "Theme editor", GUI_KEY_ACTION, 0, 0, NULL, 0,
      "This theme's keys with a preview, saved as themes/<name>/theme.ini"},
-    {"", "Game folders", GUI_KEY_ACTION, offsetof(GuiAppForm, folders), sizeof(((GuiAppForm*)0)->folders), NULL, 0,
-     "Folders of games listed with games/"},
+    {"", "Library", GUI_KEY_ACTION, offsetof(GuiAppForm, folders), sizeof(((GuiAppForm*)0)->folders), NULL, 0,
+     "The folders Games lists, games/ first"},
     {"", "Folders", GUI_KEY_ACTION, offsetof(GuiAppForm, places), sizeof(((GuiAppForm*)0)->places), NULL, 0,
      "Where the data, the games and the extractions are"},
     {"", "Clean old settings", GUI_KEY_ACTION, 0, 0, NULL, 0,
      "The settings the runtime and the launcher no longer read: Enter twice"}};
 enum { GUI_APP_THEME, GUI_APP_TEXT, GUI_APP_EDITOR, GUI_APP_FOLDERS, GUI_APP_PLACES, GUI_APP_CLEAN, GUI_APP_ROWS };
+/* path as App's note says it: from the data folder when it is in it (games/), else whole */
+static void data_relative(const App* app, const char* path, char* out, size_t size) {
+    size_t n = app->data_dir ? strlen(app->data_dir) : 0;
+    while (n > 1 && (app->data_dir[n - 1] == '/' || app->data_dir[n - 1] == '\\')) --n;
+    if (path && n && !strncmp(path, app->data_dir, n) && (path[n] == '/' || path[n] == '\\') && path[n + 1])
+        snprintf(out, size, "%s%c", path + n + 1, path[n]);
+    else
+        snprintf(out, size, "%s", path ? path : "");
+}
 static void app_values(App* app) {
     GuiAppForm* f = &app->app_form;
+    char games[4200], work[4200];
     int moved;
     snprintf(f->theme, sizeof f->theme, "%s", app->theme.name);
     if (app->menu.text_size)
@@ -2341,6 +2353,11 @@ static void app_values(App* app) {
         snprintf(f->places, sizeof f->places, "%d picked", moved);
     else
         snprintf(f->places, sizeof f->places, "Defaults");
+    /* the three folders under the rows, as Folders' value has no room for them; one in the data folder from it */
+    data_relative(app, app->games_dir, games, sizeof games);
+    data_relative(app, app->work_dir, work, sizeof work);
+    snprintf(app->places_note, sizeof app->places_note, "%s: %s  %s: %s  %s: %s", place_labels[0],
+             app->data_dir ? app->data_dir : "", place_labels[1], games, place_labels[2], work);
 }
 /* ---- the player's game folders: listed after games/, kept a line each in folders_file ---- */
 static void folders_load(App* app) {
@@ -2407,7 +2424,7 @@ static void folder_add(App* app, const char* path, bool deep) {
     if (here)
         snprintf(app->editor.note, sizeof app->editor.note, "%s", note);
     else
-        snprintf(app->message, sizeof app->message, "Game folders: %s", note);
+        snprintf(app->message, sizeof app->message, "Library: %s", note);
 }
 static void folder_remove(App* app, int folder) {
     char note[160];
@@ -2535,7 +2552,6 @@ static void open_folders(App* app, int row) {
     app->editing = true;
 }
 /* ---- Settings > App > Folders: the data folder, games/ and the extractions, each picked or its default ---- */
-static const char* const place_labels[GUI_PLACES] = {"Data", "Games", "Extractions"};
 static const char* const place_holds[GUI_PLACES] = {"games/, themes/ and prod.keys", "The recompiled games",
                                                     "Each dump's extraction"};
 #ifdef SDL_PLATFORM_ANDROID
@@ -2737,7 +2753,7 @@ static void open_folder_picker(App* app) {
         else if (app->editing)
             snprintf(app->editor.note, sizeof app->editor.note, "The folder picker could not open: %s", message);
         else /* Games' Add a folder */
-            snprintf(app->message, sizeof app->message, "Game folders: the folder picker could not open: %s", message);
+            snprintf(app->message, sizeof app->message, "Library: the folder picker could not open: %s", message);
     }
 #elif defined(SDL_PLATFORM_IOS)
     { /* nor there: the document picker (dist/apple) */
@@ -2747,7 +2763,7 @@ static void open_folder_picker(App* app) {
         else if (app->editing)
             snprintf(app->editor.note, sizeof app->editor.note, "The folder picker could not open: %s", message);
         else
-            snprintf(app->message, sizeof app->message, "Game folders: the folder picker could not open: %s", message);
+            snprintf(app->message, sizeof app->message, "Library: the folder picker could not open: %s", message);
     }
 #else
     SDL_ShowOpenFolderDialog(folder_picked, &app->picked_folder, app->window, NULL, false);
@@ -3513,6 +3529,7 @@ static int form_labels(const GuiEditor* e) {
 }
 /* the line at the foot of a group's rows, about what they hold, NULL on the screens with none */
 static const char* form_note(const App* app) {
+    if (app->form == GUI_FORM_APP) return app->places_note;
     if (app->form == GUI_FORM_PLACES)
         return app->editor.row < GUI_PLACES ? app->place_line[app->editor.row] : "Data, games and extractions";
     if (app->form != GUI_FORM_SETTINGS && app->form != GUI_FORM_GROUP) return NULL;
@@ -3662,7 +3679,7 @@ static void draw_form(App* app) {
     } else {
         int g = app->form == GUI_FORM_SETTINGS ? app->editor.row : app->group;
         pane(app, f.place.side,
-             app->form == GUI_FORM_FOLDERS                   ? "Game folders"
+             app->form == GUI_FORM_FOLDERS                   ? "Library"
              : app->form == GUI_FORM_PLACES                  ? "Folders"
              : app->form == GUI_FORM_GROUP && app->page >= 0 ? app->settings.keys[app->page].key
              : g < app->groups                               ? app->group_keys[g].key
@@ -4629,7 +4646,7 @@ static void games_scan(App* app, GuiGames* games, char* message, size_t size) {
         if (!gui_games_add_deep(games, app->folders[i], kinds, app->folders_deep[i] ? GUI_FOLDER_DEPTH : 0, error,
                                 sizeof error) &&
             !message[0])
-            snprintf(message, size, "%s It is in Settings > App > Game folders.", error);
+            snprintf(message, size, "%s It is in Settings > App > Library.", error);
 }
 /* the names dir holds into h, and with depth those of its folders, down that many levels, hidden ones left alone */
 static uint64_t stamp_dir(uint64_t h, const char* dir, int depth) {
@@ -5217,7 +5234,7 @@ static void event(App* app, const SDL_Event* e) {
             if (app->editing && (app->form == GUI_FORM_FOLDERS || app->form == GUI_FORM_PLACES))
                 snprintf(app->editor.note, sizeof app->editor.note, "%s", note);
             else
-                snprintf(app->message, sizeof app->message, "%s: %s", place >= 0 ? "Folders" : "Game folders", note);
+                snprintf(app->message, sizeof app->message, "%s: %s", place >= 0 ? "Folders" : "Library", note);
         }
         SDL_free(e->user.data1);
         SDL_free(error);
