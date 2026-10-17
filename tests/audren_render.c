@@ -53,8 +53,8 @@ enum {
 };
 
 /* the update, laid out as edenprobe's source/audio.c lays it out */
-static u8 in[0x40 + 0x10 + 0x20 + 0x70 * SNX_ART_VOICES + 0x170 * SNX_ART_VOICES + 0xC0 * SNX_ART_EFFECTS +
-             SNX_ART_SPLIT_BYTES + 0x930 * SNX_ART_MIXES + 0x140 * SNX_ART_SINKS + 0x10];
+static u8 in[0x40 + 0x10 + 0x20 * SNX_ART_POOLS + 0x70 * SNX_ART_VOICES + 0x170 * SNX_ART_VOICES +
+             0xC0 * SNX_ART_EFFECTS + SNX_ART_SPLIT_BYTES + 0x930 * SNX_ART_MIXES + 0x140 * SNX_ART_SINKS + 0x10];
 static u8 out[0x1000];
 static u8 *u_pool, *u_res, *u_voice, *u_eff, *u_split, *u_mix, *u_sink;
 static u32 split_counts[2]; /* the splitters and destinations reset() opens the renderer with */
@@ -77,7 +77,7 @@ static void layout(void) {
     rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + art_rev) << 24);
     u32 h[16] = {rev,
                  0x10,
-                 0x20,
+                 0x20 * SNX_ART_POOLS,
                  0x170 * SNX_ART_VOICES,
                  0x70 * SNX_ART_VOICES,
                  0xC0 * SNX_ART_EFFECTS,
@@ -90,7 +90,7 @@ static void layout(void) {
     w32(in, 0x40, rev);
     u8* p = in + 0x50;
     u_pool = p;
-    p += 0x20;
+    p += 0x20 * SNX_ART_POOLS;
     u_res = p;
     p += 0x70 * SNX_ART_VOICES;
     u_voice = p;
@@ -827,17 +827,21 @@ static void reset(void) {
     layout();
 }
 
-/* the reply has the counts the renderer opened with, as Eden sizes it, at the revision-9 effect stride too. An input
-   section with more entries is read up to those counts (#222's were revision 15's longer voices: update_voice_v2) */
+/* the reply has the counts the renderer opened with, as Eden sizes it, at the revision-9 effect stride too. A section
+   with more or fewer entries is refused before anything is written, as Eden and Ryubing refuse it (#222's were
+   revision 15's longer voices: update_voice_v2) */
 static void update_output_counts(void) {
     enum { voices = 128, effects = 68, sinks = 2, pools = effects + voices * 4 };
-    const u32 counts[][4] = {{pools, voices, effects, sinks},
-                             {pools + 8, voices, effects, sinks},
-                             {pools, voices + 8, effects, sinks},
-                             {pools, voices, effects + 8, sinks},
-                             {pools, voices, effects, sinks + 8},
-                             {pools + 8, voices + 8, effects + 8, sinks + 8},
-                             {0, 0, 0, 0}};
+    const u32 counts[][5] = {/* pools, voices, voice channel resources, effects, sinks */
+                             {pools, voices, voices, effects, sinks},
+                             {pools + 8, voices, voices, effects, sinks},
+                             {pools, voices + 8, voices, effects, sinks},
+                             {pools, voices, voices + 8, effects, sinks},
+                             {pools, voices, voices, effects + 8, sinks},
+                             {pools, voices, voices, effects, sinks + 8},
+                             {pools + 8, voices + 8, voices + 8, effects + 8, sinks + 8},
+                             {pools, voices - 1, voices, effects, sinks},
+                             {0, 0, 0, 0, 0}};
     const u32 revisions[] = {4, 5, 9};
     size_t r, c;
     for (r = 0; r < sizeof revisions / sizeof *revisions; r++) {
@@ -853,10 +857,10 @@ static void update_output_counts(void) {
                          0x10,
                          counts[c][0] * 0x20,
                          counts[c][1] * 0x170,
-                         voices * 0x70,
-                         counts[c][2] * 0xC0,
+                         counts[c][2] * 0x70,
+                         counts[c][3] * 0xC0,
                          0,
-                         counts[c][3] * 0x140};
+                         counts[c][4] * 0x140};
             u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[7];
             u8 *input, *output;
             u32 i;
@@ -875,7 +879,14 @@ static void update_output_counts(void) {
                 for (i = 0; i < counts[c][0]; i++) w32(input, 0x40 + h[1] + i * 0x20 + 0x10, 4);
                 memset(output, 0xA5, reply + 32);
                 rc = audren_state_update(state, input, size, output, reply);
-                CHECK(rc == 0, "revision %u, count case %lu: update returned %d", revn, (unsigned long)c, rc);
+                if (c) {
+                    CHECK(rc == -41, "revision %u, count case %lu: update returned %d", revn, (unsigned long)c, rc);
+                    for (i = 0; i < reply + 32; i++) CHECK(output[i] == 0xA5, "refused update wrote byte %u", i);
+                    free(input);
+                    audren_state_free(state);
+                    continue;
+                }
+                CHECK(rc == 0, "revision %u: update returned %d", revn, rc);
                 if (!rc) {
                     u32 at = 0x40 + pools * 0x10 + voices * 0x10;
                     CHECK(rd32(output + 8) == pools * 0x10, "wrong pool output size");
@@ -883,13 +894,13 @@ static void update_output_counts(void) {
                     CHECK(rd32(output + 20) == effects * effect_stride, "wrong effect output size");
                     CHECK(rd32(output + 28) == sinks * 0x20, "wrong sink output size");
                     CHECK(rd32(output + 60) == reply, "wrong total output size");
-                    CHECK(rd32(output + 0x40 + (pools - 1) * 0x10) == (counts[c][0] ? 5u : 0u),
-                          "wrong last pool status");
-                    CHECK(output[at + (effects - 1) * effect_stride] == (counts[c][2] ? 4u : 0u),
-                          "wrong last effect status");
+                    CHECK(rd32(output + 0x40 + (pools - 1) * 0x10) == 5u, "wrong last pool status");
+                    CHECK(output[at + (effects - 1) * effect_stride] == 4u, "wrong last effect status");
                     at += effects * effect_stride;
-                    CHECK(rd32(output + at + 0x20) == (counts[c][3] ? 0x12345678u : 0u), "sink output was misplaced");
+                    CHECK(rd32(output + at + 0x20) == 0x12345678u, "sink output was misplaced");
                     if (revn >= 5) CHECK(rd64(output + reply - 0x10) == 42, "frame count was misplaced");
+                    for (i = 0; i < voices * 0x10; i++) /* no voice in use: nothing written there */
+                        CHECK(output[0x40 + pools * 0x10 + i] == 0, "voice output byte %u not cleared", i);
                 }
                 for (i = 0; i < 32; i++) CHECK(output[reply + i] == 0xA5, "output guard byte %u overwritten", i);
                 memset(output, 0xA5, reply + 32);

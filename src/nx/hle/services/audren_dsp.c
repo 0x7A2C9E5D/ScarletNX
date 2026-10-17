@@ -400,14 +400,19 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
         return -41;
     }
     int voice_v2 = revn >= 15; /* 0x188 a voice (update_voice) */
-    u32 voice_size = voice_v2 ? 0x188 : 0x170;
-    u32 npools = ih[2] / 0x20, nres = ih[4] / 0x70, nvoices = ih[3] / voice_size, neff = ih[5] / 0xC0,
-        nmix = ih[6] / 0x930, nsinks = ih[7] / 0x140;
-    u32 pools_opened = s->neffects + s->nvoices * 4;
+    u32 voice_size = voice_v2 ? 0x188 : 0x170, npools = s->neffects + s->nvoices * 4, nmix = ih[6] / 0x930;
     int eff_v2 = revn >= 9;
-    /* The opened renderer fixes the reply layout. Input section sizes only
-       locate the following sections and bound the entries read from each. */
-    u32 o_mp = pools_opened * 0x10, o_vo = s->nvoices * 0x10, o_ef = s->neffects * (eff_v2 ? 0x90 : 0x10),
+    /* the opened renderer's counts fix both layouts: Eden and Ryubing refuse a section of another size */
+    if (ih[2] != npools * 0x20 || ih[3] != s->nvoices * voice_size || ih[4] != s->nres * 0x70 ||
+        ih[5] != s->neffects * 0xC0 || ih[7] != s->nsinks * 0x140) {
+        WARN_LIMIT(4,
+                   "audren: update sections (pools %lu, voices %lu, resources %lu, effects %lu, sinks %lu bytes) "
+                   "differ from the opened renderer's\n",
+                   (unsigned long)ih[2], (unsigned long)ih[3], (unsigned long)ih[4], (unsigned long)ih[5],
+                   (unsigned long)ih[7]);
+        return -41;
+    }
+    u32 o_mp = npools * 0x10, o_vo = s->nvoices * 0x10, o_ef = s->neffects * (eff_v2 ? 0x90 : 0x10),
         o_sk = s->nsinks * 0x20, o_pf = 0x10, o_bh = 0xB0, o_ri = revn >= 5 ? 0x10 : 0;
     u64 total = 0x40 + (u64)o_mp + o_vo + o_ef + o_sk + o_pf + o_bh + o_ri;
     if (total > os) {
@@ -415,10 +420,7 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
                    (unsigned long long)os);
         return -4;
     }
-    if (npools > pools_opened || nvoices > s->nvoices || nres > s->nres || neff > s->neffects || nmix > s->nmix ||
-        nsinks > s->nsinks)
-        warn_once(s, SNX_AUDREN_WARN_COUNTS,
-                  "an update holds more pools, voices, effects, mixes or sinks than the renderer opened");
+    if (nmix > s->nmix) warn_once(s, SNX_AUDREN_WARN_COUNTS, "an update holds more mixes than the renderer opened");
     s->rev = rev;
     const u8* p = in + 0x40 + ih[1];
     const u8* pools = p;
@@ -449,24 +451,23 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
     memcpy(out, oh, 64);
     u8* q = out + 0x40;
     /* pools: RequestAttach(4)->Attached(5), RequestDetach(2)->Detached(3). Guest memory needs no mapping here */
-    for (u32 i = 0; i < npools && i < pools_opened; i++) {
+    for (u32 i = 0; i < npools; i++) {
         u32 st = rd32(pools + i * 0x20 + 0x10);
         wr32(q + i * 0x10, st == 4 ? 5 : st == 2 ? 3 : st);
     }
     q += o_mp;
     /* voice channel resources: id 0, send volumes 4, in_use 0x64 */
-    for (u32 i = 0; i < nres && i < s->nres; i++) {
+    for (u32 i = 0; i < s->nres; i++) {
         const u8* r = res + i * 0x70;
         ARChannel* c = &s->chan[i];
         c->in_use = r[0x64];
         if (c->in_use) memcpy(c->mix, r + 4, sizeof c->mix);
     }
-    for (u32 i = 0; i < nvoices && i < s->nvoices; i++)
-        update_voice(s, &s->voice[i], voices + i * voice_size, q + i * 0x10, voice_v2);
+    for (u32 i = 0; i < s->nvoices; i++) update_voice(s, &s->voice[i], voices + i * voice_size, q + i * 0x10, voice_v2);
     q += o_vo;
     /* effects: type 0, is_new 1, enabled 2, mix 4, process order 0x18, the type's parameters from 0x20. Out:
        Used(3) while enabled, Removed(4) */
-    for (u32 i = 0; i < neff && i < s->neffects; i++) {
+    for (u32 i = 0; i < s->neffects; i++) {
         const u8* ei = effects + i * 0xC0;
         AREffect* e = &s->effect[i];
         if (e->type != ei[0]) { /* another effect in the slot starts from nothing (Eden's ResetEffect) */
@@ -508,7 +509,7 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
     }
     /* sinks: type 0, in_use 1, the type's parameters from 0x20. Out: a circular buffer sink's write offset, two
        frames behind where it writes, as Eden's CircularBufferSinkInfo reports last_pos2 */
-    for (u32 i = 0; i < nsinks && i < s->nsinks; i++) {
+    for (u32 i = 0; i < s->nsinks; i++) {
         const u8* si = sinks + i * 0x140;
         ARSink* k = &s->sink[i];
         k->type = si[0];
