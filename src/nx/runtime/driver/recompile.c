@@ -230,7 +230,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     memset(&gen, 0, sizeof(gen));
     memset(&program, 0, sizeof(program));
     memset(&llvm, 0, sizeof(llvm));
-    compile.opt = "3";
+    compile.opt = "2";
     compile.jobs = snx_cpu_count();
     gen.chunk_instrs = SNX_CHUNK_INSTRUCTIONS;
 #ifdef _WIN32
