@@ -537,6 +537,8 @@ if(Python3_Interpreter_FOUND)
         # the Discord cards of pull requests, issues and pushes to main (scripts/discord-cards.py), against the same
         add_test(NAME discord_cards
                  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/discord_cards_test.py")
+        # edenprobe's runs held against a baseline (scripts/edenprobe.py), with a fake runtime and game
+        add_test(NAME edenprobe_script COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/edenprobe_test.py")
     endif()
 endif()
 

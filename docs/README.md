@@ -10,6 +10,7 @@ New here? Start with [Build](./BUILD.md), then [Usage](./USAGE.md).
 - **[Android](./ANDROID.md)**
 - **[macOS and iOS](./APPLE.md)**
 - **[Development](./DEVELOPMENT.md)** - tests and diagnostics
+  - **[edenprobe](./EDENPROBE.md)** - hardware probes CI runs against a baseline
 - **[Deprecations](./DEPRECATIONS.md)** - what an older version used, and how it goes away
 - **[Status and roadmap](./ROADMAP.md)**
 - **[Licenses and credits](./CREDITS.md)**
