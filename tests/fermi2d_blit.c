@@ -121,12 +121,12 @@ static void surface(GpuChannel* ch, int b, u64 addr, u32 w, u32 h) {
     r[b + 8] = (u32)(addr >> 32);
     r[b + 9] = (u32)addr;
 }
-/* dw x dh at dx, dy from the source scaled down by two (corner origin, no half texel) */
-static void blit(i32 dx, i32 dy, i32 dw, i32 dh) {
+/* dw x dh at dx, dy from a sw-wide source scaled down by two (corner origin, no half texel) */
+static void blit_from(u32 sw, i32 dx, i32 dy, i32 dw, i32 dh) {
     static GpuChannel ch;
     memset(&ch, 0, sizeof ch);
     surface(&ch, 0x80, DST, DW, DH);
-    surface(&ch, 0x8C, SRC, SW, SH);
+    surface(&ch, 0x8C, SRC, sw, SH);
     u32* r = ch.r2d;
     r[0x223] = 1;
     r[0x22C] = (u32)dx;
@@ -138,14 +138,16 @@ static void blit(i32 dx, i32 dy, i32 dw, i32 dh) {
     needs = before_writes = written = raw_runs = 0;
     fermi2d_method(&ch, 0x237, 0); /* src_y0 starts it */
 }
-static void fill(void) {
+static void blit(i32 dx, i32 dy, i32 dw, i32 dh) { blit_from(SW, dx, dy, dw, dh); }
+static void fill_from(u32 sw) {
     memset(mem, 0xEE, sizeof mem);
     for (u32 y = 0; y < SH; y++)
-        for (u32 x = 0; x < SW; x++) {
+        for (u32 x = 0; x < sw; x++) {
             u32 v = src_px(x, y);
-            memcpy(mem + SRC + bl_offset(x * 4, y, 0, SW * 4, SH, 1, 0), &v, 4);
+            memcpy(mem + SRC + bl_offset(x * 4, y, 0, sw * 4, SH, 1, 0), &v, 4);
         }
 }
+static void fill(void) { fill_from(SW); }
 static void whole(int direct) {
     contiguous = direct;
     fill();
@@ -168,11 +170,25 @@ static void window(int direct) {
     CHECK(before_writes == 1 && written == 1);
 }
 
+/* a source 37 pixels wide: its rows end 4 bytes into a 16 byte run */
+static void odd_source(int direct) {
+    contiguous = direct;
+    fill_from(37);
+    blit_from(37, 0, 0, 19, 16);
+    for (u32 y = 0; y < DH; y++)
+        for (u32 x = 0; x < DW; x++) {
+            u32 v = at(DST, x, y, DW, DH);
+            CHECK(x < 19 ? v == src_px(2 * x, 2 * y) : v == 0xEEEEEEEEu);
+        }
+}
+
 int main(void) {
     whole(0);
     whole(1);
     window(0);
     window(1);
+    odd_source(0);
+    odd_source(1);
     printf("fermi2d_blit: %u checks passed\n", checks);
     return 0;
 }
