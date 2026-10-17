@@ -159,7 +159,7 @@ static void run(NvdecCtx* d, const Event* script, unsigned n, int headers, int f
 #define RUN(d, script, headers, failed) run(d, script, sizeof(script) / sizeof *(script), headers, failed)
 const AVCodec* avcodec_find_decoder(int id) {
     static AVCodec codec;
-    CHECK(id == AV_CODEC_ID_H264);
+    CHECK(id == AV_CODEC_ID_H264 || id == AV_CODEC_ID_VP9);
     return &codec;
 }
 AVCodecContext* avcodec_alloc_context3(const AVCodec* codec) {
@@ -276,7 +276,7 @@ static void submission_tests(void) {
     fixture();
     NvdecCtx* d = nvdec_new();
     CHECK(d != NULL);
-    CHECK(dec_open(d));
+    CHECK(dec_open(d, 3));
     AVFrame f = {0};
     ref_fail = 1;
     CHECK(get_buf(d->dec, &f, 0) == AVERROR(ENOMEM));
@@ -389,9 +389,35 @@ static void submission_tests(void) {
     nvdec_free(d);
 }
 #endif
+/* A VP9 job opens a VP9 decoder whose opaque is the channel's context, which starts with what FFmpeg's patched VP9
+   decoder reads there (cmake/ffmpeg-vp9-nvdec.patch); one with no probability table fails without writing the
+   picture; a codec NVDEC jobs are not decoded for fails and leaves the decoder as it was */
+/* a job failed before its size was known: the status says failed, and the output surface keeps its bytes */
+static void failed_untouched(void) {
+    CHECK(rd32(memory, 0x3000) == 0 && rd32(memory, 0x300c) == 1);
+    for (unsigned i = 0x4000; i < sizeof memory; ++i) CHECK(memory[i] == 0xcc);
+}
+static void vp9_tests(void) {
+    fixture();
+    NvdecCtx* d = nvdec_new();
+    CHECK(d != NULL);
+    CHECK(((const u32*)d)[0] == 0x534e5856 && ((const u32*)d)[1] == 0);
+    regs[0x200 / 4] = 9;
+    regs[0x5C0 / 4] = 0;
+    nvdec_execute(d, regs);
+    failed_untouched();
+    CHECK(d->app == 9 && d->dec && d->dec->opaque == d && d->vp9);
+    regs[0x200 / 4] = 5;
+    memset(memory + 0x3000, 0, 16);
+    nvdec_execute(d, regs);
+    failed_untouched();
+    CHECK(d->app == 9 && d->dec);
+    nvdec_free(d);
+}
 int main(void) {
     packet_tests();
     submission_tests();
+    vp9_tests();
     printf("NVDEC packets: %u checks passed (%s)\n", checks, av_version_info());
     return 0;
 }

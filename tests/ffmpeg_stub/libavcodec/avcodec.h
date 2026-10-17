@@ -14,6 +14,7 @@
 #define AV_ERROR_MAX_STRING_SIZE     64
 #define AV_LOG_WARNING               24
 #define AV_CODEC_ID_H264             27
+#define AV_CODEC_ID_VP9              167
 #define AV_PIX_FMT_YUV420P           0
 #define AV_PIX_FMT_YUVJ420P          12
 typedef struct AVCodec {
