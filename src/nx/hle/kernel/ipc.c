@@ -23,7 +23,8 @@
 #define RC_DOMAINOBJNOTFOUND RC(11, 492)
 /* the server's message buffer, which the raw data and every reply fit in */
 #define SERVER_MSG 0x100u
-/* what QueryPointerBufferSize answers: the size of the server's pointer buffer for X and C descriptors */
+/* what QueryPointerBufferSize answers unless the service sets its own (SvcObj.ptrbuf): the size of the server's
+   pointer buffer for X and C descriptors */
 #define POINTER_BUFFER 0x8000u
 /* IpcCtx.is_domain: a request on a domain session outside a domain message (a control request, answered plainly), and
    one in a domain message (SendMessage), whose reply is a domain one */
@@ -62,6 +63,7 @@ SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t d
     o->name = name;
     o->dispatch = dispatch;
     o->refs = 1;
+    o->ptrbuf = POINTER_BUFFER;
     o->data = datasize ? (u8*)o + SVCOBJ_HEAD : NULL;
     return o;
 }
@@ -480,7 +482,7 @@ static u32 control(IpcCtx* c, KSession* s) {
             if (d) __atomic_add_fetch(&d->refs, 1, __ATOMIC_RELAXED);
             out_move_h(c, session_make(s->obj, d));
             return 0;
-        case 3: out32(c, POINTER_BUFFER); return 0;
+        case 3: out32(c, s->obj ? s->obj->ptrbuf : POINTER_BUFFER); return 0;
         default:
             if (ipc_warn_once("control", c->cmd))
                 WARN("ipc: %s: control request %u, UnknownCommandId\n", s->obj ? s->obj->name : "session", c->cmd);
