@@ -102,7 +102,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   folder*, or *With subfolders*, whose games are listed too, four levels down, hidden folders
   left alone (its row says *+ subfolders*). Del, or Enter twice, takes one off the list (the
   folder stays). They are kept in `folders.txt` beside `settings.ini`, a line each, `/**` after
-  one kept with its subfolders; one that cannot be read is named when the games are listed. **Folders** has a row for
+  one kept with its subfolders; one that cannot be read is named when the games are listed. Under App's rows, the
+  three folders in use: the data folder, the games' and the extractions'. **Folders** has a row for
   the data folder (**Data**: `games/`, `themes/` and `prod.keys`), **Games** and **Extractions**, each its default or a
   folder picked. Enter opens the folder picker, a folder dropped or pasted with Ctrl+V takes the focused row, Del puts
   its default back and the last row, **All back to the defaults**, all three. A row says *default*, *picked* or why

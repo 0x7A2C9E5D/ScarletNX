@@ -1393,7 +1393,7 @@ int main(int argc, char** argv) {
     key(&app, SDLK_RETURN);
     assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 6);
     {
-        char first[64], line[96];
+        char first[64], line[1024];
         snprintf(first, sizeof first, "%s", app.theme.name);
         render(&app);
         shows(&app, "- App", yellow); /* the group open, as focused while its rows have the focus */
@@ -1401,7 +1401,21 @@ int main(int argc, char** argv) {
         shows(&app, line, yellow);
         shows(&app, "- Text size          Auto", normal);
         shows(&app, "- Theme editor", normal);
+        /* under the rows, the three folders Folders moves, whole: the extractions too */
         shows(&app, "- Folders            Defaults", normal);
+        snprintf(line, sizeof line, "Data: %s  Games: %s  Extractions: %s", app.data_dir, app.games_dir, app.work_dir);
+        assert(!strcmp(app.places_note, line));
+        shows(&app, "Extractions:", rgb(app.theme.soft));
+        { /* one in the data folder, from it: the note stays short on a phone, whose data folder is a long path */
+            char* games = app.games_dir;
+            app.games_dir = snx_path_join(app.data_dir, "games");
+            app_values(&app);
+            snprintf(line, sizeof line, "Data: %s  Games: games/  Extractions: %s", app.data_dir, app.work_dir);
+            assert(!strcmp(app.places_note, line));
+            free(app.games_dir);
+            app.games_dir = games;
+            app_values(&app);
+        }
         shows(&app, "- Clean old settings", normal);
         hides(&app, "- Layout", normal);
         key(&app, SDLK_RIGHT);
@@ -1797,6 +1811,8 @@ int main(int argc, char** argv) {
         shows(&app, "- Games", yellow);
         shows(&app, "picked", yellow);
         assert(!strcmp(app.place_line[GUI_PLACE_GAMES], app.games_dir));
+        app_values(&app); /* App's note, the folder now */
+        assert(!strcmp(app.app_form.places, "1 picked") && strstr(app.places_note, app.games_dir));
         /* read back as the menu opens, a path not from the root left out and named */
         free(app.place[GUI_PLACE_GAMES]);
         app.place[GUI_PLACE_GAMES] = NULL;

@@ -197,6 +197,7 @@ typedef struct {
     GuiThemeKey place_keys[GUI_PLACES];
     char place_about[GUI_PLACES][384];
     char place_line[GUI_PLACES][4200]; /* the folder in use, whole, under the rows */
+    char places_note[3 * 4200];        /* the three, under App's rows */
     int place_row;                     /* the row the folder picker was opened for, -1 none */
     char* own_dir;      /* Android: the app's own storage; a folder outside it is asked about (GUI_ASK_OUTSIDE) */
     char* outside_path; /* the folder asked about, for the row outside_place */
@@ -508,6 +509,7 @@ static void next_theme(App* app, int step) {
 }
 /* app.ini's [folders] keys, in the order of Settings > App > Folders' rows */
 static const char* const place_names[GUI_PLACES] = {"data", "games", "work"};
+static const char* const place_labels[GUI_PLACES] = {"Data", "Games", "Extractions"};
 /* a path from the root: '/' first, or on Windows a drive's (C:\ or C:/) or a share's (\\host) */
 static bool full_path(const char* path) {
 #ifdef _WIN32
@@ -2323,8 +2325,18 @@ static const GuiThemeKey app_keys[] = {
     {"", "Clean old settings", GUI_KEY_ACTION, 0, 0, NULL, 0,
      "The settings the runtime and the launcher no longer read: Enter twice"}};
 enum { GUI_APP_THEME, GUI_APP_TEXT, GUI_APP_EDITOR, GUI_APP_FOLDERS, GUI_APP_PLACES, GUI_APP_CLEAN, GUI_APP_ROWS };
+/* path as App's note says it: from the data folder when it is in it (games/), else whole */
+static void data_relative(const App* app, const char* path, char* out, size_t size) {
+    size_t n = app->data_dir ? strlen(app->data_dir) : 0;
+    while (n > 1 && (app->data_dir[n - 1] == '/' || app->data_dir[n - 1] == '\\')) --n;
+    if (path && n && !strncmp(path, app->data_dir, n) && (path[n] == '/' || path[n] == '\\') && path[n + 1])
+        snprintf(out, size, "%s%c", path + n + 1, path[n]);
+    else
+        snprintf(out, size, "%s", path ? path : "");
+}
 static void app_values(App* app) {
     GuiAppForm* f = &app->app_form;
+    char games[4200], work[4200];
     int moved;
     snprintf(f->theme, sizeof f->theme, "%s", app->theme.name);
     if (app->menu.text_size)
@@ -2341,6 +2353,11 @@ static void app_values(App* app) {
         snprintf(f->places, sizeof f->places, "%d picked", moved);
     else
         snprintf(f->places, sizeof f->places, "Defaults");
+    /* the three folders under the rows, as Folders' value has no room for them; one in the data folder from it */
+    data_relative(app, app->games_dir, games, sizeof games);
+    data_relative(app, app->work_dir, work, sizeof work);
+    snprintf(app->places_note, sizeof app->places_note, "%s: %s  %s: %s  %s: %s", place_labels[0],
+             app->data_dir ? app->data_dir : "", place_labels[1], games, place_labels[2], work);
 }
 /* ---- the player's game folders: listed after games/, kept a line each in folders_file ---- */
 static void folders_load(App* app) {
@@ -2535,7 +2552,6 @@ static void open_folders(App* app, int row) {
     app->editing = true;
 }
 /* ---- Settings > App > Folders: the data folder, games/ and the extractions, each picked or its default ---- */
-static const char* const place_labels[GUI_PLACES] = {"Data", "Games", "Extractions"};
 static const char* const place_holds[GUI_PLACES] = {"games/, themes/ and prod.keys", "The recompiled games",
                                                     "Each dump's extraction"};
 #ifdef SDL_PLATFORM_ANDROID
@@ -3513,6 +3529,7 @@ static int form_labels(const GuiEditor* e) {
 }
 /* the line at the foot of a group's rows, about what they hold, NULL on the screens with none */
 static const char* form_note(const App* app) {
+    if (app->form == GUI_FORM_APP) return app->places_note;
     if (app->form == GUI_FORM_PLACES)
         return app->editor.row < GUI_PLACES ? app->place_line[app->editor.row] : "Data, games and extractions";
     if (app->form != GUI_FORM_SETTINGS && app->form != GUI_FORM_GROUP) return NULL;
