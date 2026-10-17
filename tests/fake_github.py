@@ -41,6 +41,13 @@ if args[:2] == ['release', 'upload']:
 assert args[0] == 'api', args
 method = args[args.index('-X') + 1] if '-X' in args else 'GET'
 target = [a for a in args[1:] if not a.startswith('-') and a not in ('GET', 'POST', 'PATCH', 'PUT', 'DELETE')][0]
+if target == 'graphql':  # the links of a pull request or an issue, as GitHub's GraphQL gives them
+    asked = next(a for a in args if a.startswith('query='))
+    number = re.search(r'number:(\d+)', asked).group(1)
+    field, refs = (('pullRequest', 'closingIssuesReferences') if 'pullRequest(' in asked
+                   else ('issue', 'closedByPullRequestsReferences'))
+    out({'data': {'repository': {field: {refs: {'nodes': s.get('links', {}).get(number, [])}}}}})
+    sys.exit(0)
 route, _, query = target.partition('?')
 query = dict(p.split('=', 1) for p in query.split('&') if p)
 data = json.load(sys.stdin) if '--input' in args else None

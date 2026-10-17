@@ -24,6 +24,7 @@ instead. .github/workflows/cards.yml runs it; tests/discord_cards_test.py runs i
 
 import argparse
 import base64
+import colorsys
 import datetime
 import importlib.util
 import json
@@ -52,16 +53,13 @@ JOBS = {
     'ScarletNX-windows-x86_64.zip': 'Windows (Clang + LLVM)',
     'ScarletNX-android-universal.apk': 'Android APK',
 }
-# the cards' colours: building, published, a package failed, merged, closed, an issue open, an issue done
-BUILDING, SCARLET, AMBER, MERGED, CLOSED, OPEN, DONE = (
-    0x1F6FEB,
-    0xB0102A,
-    0xD29922,
-    0x2EA043,
-    0x6E7681,
-    0x2EA043,
-    0x8957E5,
-)
+# a nightly's colours: building, published, a package failed, not published
+BUILDING, SCARLET, AMBER, CLOSED = 0x1F6FEB, 0xB0102A, 0xD29922, 0x6E7681
+# GitHub's own, for a pull request and an issue: open, draft, merged, closed; an issue done, or not planned
+OPEN, DRAFT, MERGED, REFUSED, DONE, NOT_PLANNED = 0x1F883D, 0x6E7781, 0x8250DF, 0xCF222E, 0x8250DF, 0x6E7781
+# Discord colours no text: a label is its name as GitHub's pill, after the square of its colour's hue (degrees)
+HUES = {0: '\U0001f7e5', 30: '\U0001f7e7', 50: '\U0001f7e8', 120: '\U0001f7e9', 210: '\U0001f7e6', 275: '\U0001f7ea'}
+BROWN, BLACK, WHITE = '\U0001f7eb', '\u2b1b', '\u2b1c'
 # the mascot beside each card
 WIMSY = 'https://raw.githubusercontent.com/{repo}/main/dist/icons/hicolor/128x128/apps/wimsy.png'
 # what a card lists, at most, before "and N more": a nightly's changes, a pull request's commits; a text's letters
@@ -110,6 +108,9 @@ class Hub:
 
     def read(self, path, repo=None):
         return self.gh(['api', path], repo or self.repo)
+
+    def graphql(self, query):
+        return self.gh(['api', 'graphql', '-f', f'query={query}'], self.repo)
 
     def missing(self, path, repo=None):
         """path read, or None when GitHub has nothing there (404)"""
@@ -294,6 +295,25 @@ def excerpt(text, most=MOST_TEXT):
     return '\n'.join(f'> {line}' if line else '>' for line in text.splitlines())
 
 
+def square(color):
+    """the coloured square nearest a colour (RRGGBB): a grey by its lightness, a dark orange brown, else by hue"""
+    hue, light, saturation = colorsys.rgb_to_hls(*(int(color[i : i + 2], 16) / 255 for i in (0, 2, 4)))
+    if light < 0.2 or light > 0.92 or saturation < 0.2:
+        return WHITE if light >= 0.5 else BLACK
+    hue *= 360
+    if 10 <= hue <= 45 and light < 0.3:
+        return BROWN
+    return HUES[min(HUES, key=lambda h: min(abs(hue - h), 360 - abs(hue - h)))]
+
+
+def chip(label):
+    """a label as a card shows it: the square of its colour, then its name as GitHub's pill"""
+    color = label.get('color') or ''
+    if not re.fullmatch(r'[0-9A-Fa-f]{6}', color):
+        return f'`{label["name"]}`'
+    return f'{square(color)} `{label["name"]}`'
+
+
 def plural(count, word):
     return f'{count} {word}{"" if count == 1 else "s"}'
 
@@ -346,6 +366,34 @@ class Cards:
             ]
             found += last_of(f'repos/{self.hub.repo}/pulls/{number}/comments', pr.get('review_comments', 0))
         return max(found, key=lambda c: c['created_at']) if found else None
+
+    def linked(self, number, pr):
+        """the issues a pull request closes, or the pull requests that close an issue: (number, url) each"""
+        field, refs = ('pullRequest', 'closingIssuesReferences') if pr else ('issue', 'closedByPullRequestsReferences')
+        owner, name = self.hub.repo.split('/')
+        query = (
+            f'query{{repository(owner:"{owner}",name:"{name}"){{{field}(number:{number})'
+            f'{{{refs}(first:10){{nodes{{number url}}}}}}}}}}'
+        )
+        nodes = self.hub.graphql(query)['data']['repository'][field][refs]['nodes']
+        return [(node['number'], node['url']) for node in nodes]
+
+    @staticmethod
+    def meta(item, kind='', links=(), word=''):
+        """what a card says of its item besides its state: its type, its labels, who it is assigned to, its milestone,
+        and the issues or pull requests it is linked to"""
+        parts = [f'**{kind}**'] if kind else []
+        labels = ' '.join(chip(label) for label in item.get('labels', []))
+        if labels:
+            parts.append(labels)
+        people = item.get('assignees') or []
+        if people:
+            parts.append('assigned to ' + ', '.join(f'[{p["login"]}]({p["html_url"]})' for p in people))
+        if item.get('milestone'):
+            parts.append(f'milestone [{item["milestone"]["title"]}]({item["milestone"]["html_url"]})')
+        if links:
+            parts.append(f'{word} ' + ', '.join(f'[#{n}]({url})' for n, url in links))
+        return ' | '.join(parts)
 
     def comment_lines(self, comment):
         if not comment:
@@ -455,7 +503,7 @@ class Cards:
         if pr['user'].get('avatar_url'):
             author['icon_url'] = pr['user']['avatar_url']
         title = f'PR #{number}: {pr["title"]}'
-        fields, color = [], CLOSED
+        fields, color = [], REFUSED
         if pr.get('merged'):
             merged = pr.get('merge_commit_sha') or ''
             said = f'**Merged** into main at [`{merged[:7]}`]({url}/commit/{merged}): the next nightly has it.'
@@ -498,8 +546,11 @@ class Cards:
             else:
                 files = 'None yet'
             fields.append({'name': 'Builds', 'value': files, 'inline': True})
-            color = AMBER if self.failed(jobs) else SCARLET if current else BUILDING
+            color = DRAFT if pr.get('draft') else OPEN
         lines = [said]
+        about = self.meta(pr, links=self.linked(number, True), word='closes')
+        if about:
+            lines.append(about)
         if subjects:
             lines += ['', f'**{plural(len(subjects), "commit")}**, the newest first']
             lines += self.listed(subjects, f'{pr["html_url"]}/commits', MOST_COMMITS)
@@ -517,9 +568,9 @@ class Cards:
         elif issue.get('state_reason') == 'completed':
             said, color = '**Closed** as done', DONE
         else:
-            said, color = f'**Closed** as {(issue.get("state_reason") or "closed").replace("_", " ")}', CLOSED
-        labels = ' '.join(f'`{label["name"]}`' for label in issue.get('labels', []))
-        lines = [said + (f'  {labels}' if labels else ''), '', excerpt(issue.get('body')) or '*No description.*']
+            said, color = f'**Closed** as {(issue.get("state_reason") or "closed").replace("_", " ")}', NOT_PLANNED
+        about = self.meta(issue, (issue.get('type') or {}).get('name', ''), self.linked(number, False), 'fixed by')
+        lines = [said, *([about] if about else []), '', excerpt(issue.get('body')) or '*No description.*']
         lines += self.comment_lines(self.latest_comment(number, issue.get('comments', 0)))
         author = {'name': issue['user']['login'], 'url': issue['user']['html_url']}
         if issue['user'].get('avatar_url'):

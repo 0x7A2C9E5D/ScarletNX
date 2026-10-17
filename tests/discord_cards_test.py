@@ -306,7 +306,14 @@ with tempfile.TemporaryDirectory() as temporary:
 
     head = 'a' * 40
     commits = [{'sha': f'{n:x}' * 40, 'commit': {'message': f'[gui] commit {n}\n\nIts body.'}} for n in range(3)]
-    s = dict(base, pulls=[pull(7, head)], commits={'7': commits}, merge_base=sha, runs=[])
+    s = dict(
+        base,
+        pulls=[pull(7, head, labels=['kind: bug'], assignees=[user('bob')])],
+        commits={'7': commits},
+        merge_base=sha,
+        runs=[],
+        links={'7': [{'number': 12, 'url': 'https://x/issues/12'}]},
+    )
     s['releases'] = {TO: [nightly_release(sha, '2026-10-02', FILES)], REPO: []}
     save_state(s)
     opened = {'action': 'opened', 'pull_request': {'number': 7}}
@@ -320,10 +327,12 @@ with tempfile.TemporaryDirectory() as temporary:
         and card['url'] == 'https://x/pull/7'
         and card['author'] == {'name': 'alice', 'url': 'https://x/alice', 'icon_url': 'https://x/alice.png'}
         and card['description'].startswith(f'**Open** at [`aaaaaaa`](https://github.com/{REPO}/pull/7/commits/{head})')
-        and f'([its nightly](https://github.com/{TO}/releases/tag/nightly-2026-10-15-{sha[:7]}))' in card['description']
+        and f'([its nightly](https://github.com/{TO}/releases/tag/nightly-2026-10-15-{sha[:7]})).\n'
+        '`kind: bug` | assigned to [bob](https://x/bob) | closes [#12](https://x/issues/12)\n'
+        in card['description']
         and '**3 commits**, the newest first\n- \\[gui\\] commit 2\n' in card['description']
         and [f['value'] for f in card['fields']] == ['Waiting'] * 4 + ['Not started', 'None yet']
-        and card['color'] == cards.BUILDING,
+        and card['color'] == cards.OPEN,
         card,
     )
     pr_message = sent[0].get('reply')
@@ -457,13 +466,17 @@ with tempfile.TemporaryDirectory() as temporary:
         'title': 'It crashes',
         'html_url': 'https://x/issues/12',
         'user': user('dave'),
-        'labels': [{'name': 'kind: bug'}, {'name': 'priority: high'}],
+        'labels': [{'name': 'kind: bug', 'color': 'd73a4a'}, {'name': 'priority: high', 'color': 'd93f0b'}],
+        'type': {'name': 'Bug'},
+        'assignees': [user('erin')],
+        'milestone': {'title': 'v0.1', 'html_url': 'https://x/milestone/1'},
         'comments': 0,
         'body': 'Steps:\n\n1. open it\n2. ' + 'word ' * 100,
     }
     s = state()
     s['issues'] = {'12': issue}
     s['comments'] = {}
+    s['links'] = {'12': [{'number': 267, 'url': 'https://x/pull/267'}]}
     save_state(s)
     done = run('event', event={'action': 'opened', 'issue': {'number': 12}}, name='issues')
     sent = posted('issues')
@@ -473,7 +486,10 @@ with tempfile.TemporaryDirectory() as temporary:
         done.returncode == 0
         and len(sent) == 1
         and card['title'] == '#12: It crashes'
-        and card['description'].startswith('**Open**  `kind: bug` `priority: high`\n\n> Steps:\n>\n> 1. open it')
+        and card['description'].startswith(
+            '**Open**\n**Bug** | \U0001f7e5 `kind: bug` \U0001f7e7 `priority: high` | assigned to [erin](https://x/erin) | milestone '
+            '[v0.1](https://x/milestone/1) | fixed by [#267](https://x/pull/267)\n\n> Steps:\n>\n> 1. open it'
+        )
         and card['description'].endswith('word...')
         and card['color'] == cards.OPEN
         and card['footer']['text'].startswith('0 comments'),
@@ -503,7 +519,7 @@ with tempfile.TemporaryDirectory() as temporary:
     card = posted('issues')[-1]['body']['embeds'][0]
     check(
         'closed as not planned: grey',
-        card['description'].startswith('**Closed** as not planned') and card['color'] == cards.CLOSED,
+        card['description'].startswith('**Closed** as not planned') and card['color'] == cards.NOT_PLANNED,
         card,
     )
     done = run('event', event={'action': 'edited', 'issue': {'number': 12}}, name='issues', hooks=('NIGHTLY', 'PRS'))
@@ -586,6 +602,21 @@ with tempfile.TemporaryDirectory() as temporary:
         and 'would post on Discord (issues)' in done.stdout
         and len(posted('issues')) == 6,
         done.stdout + done.stderr,
+    )
+
+    # ---- a label in GitHub's colour, as near as a square gets; GitHub's colour for each state
+    check(
+        "labels as GitHub's pills after their colour's square, a grey by its lightness, none without a colour",
+        [cards.chip({'name': n, 'color': c}) for n, c in (('a', 'b60205'), ('b', 'd93f0b'), ('c', 'fbca04'))]
+        == ['\U0001f7e5 `a`', '\U0001f7e7 `b`', '\U0001f7e8 `c`']
+        and [cards.square(c) for c in ('0e8a16', '0075ca', 'd4c5f9', 'ededed', '24292f', '5c3317')]
+        == ['\U0001f7e9', '\U0001f7e6', '\U0001f7ea', '\u2b1c', '\u2b1b', '\U0001f7eb']
+        and cards.chip({'name': 'x'}) == '`x`',
+    )
+    check(
+        "GitHub's colours: open, draft, merged, closed; an issue done or not planned",
+        (cards.OPEN, cards.DRAFT, cards.MERGED, cards.REFUSED, cards.DONE, cards.NOT_PLANNED)
+        == (0x1F883D, 0x6E7781, 0x8250DF, 0xCF222E, 0x8250DF, 0x6E7781),
     )
 
     # ---- what a card quotes, and Discord's limits
