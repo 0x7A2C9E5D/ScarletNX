@@ -36,7 +36,12 @@ bcn: every layer of a six-layer BC4 array keeps its own 2x2 and 1x1 levels
 bcn: graphics device opens with room for the arrays
 bcn: the 2x8 second level of a 4x16 BC4 texture reads both of its blocks
 bcn: the array fetching shader loads
+binder: a layer of its own opens and takes a window
+binder: a request for nought, before any frame
+binder: the history after ten frames comes newest first, eight at most
+binder: the history after three frames, eight asked for
 bindless: 256 one-texel textures, their descriptors and handles are in place
+bindless: a handle index below 128 samples its own texture
 bindless: a handle index from 128 to 255 samples its own texture
 bindless: graphics device opens with room for 256 textures
 bindless: the bindless sampling shader loads
@@ -267,9 +272,12 @@ fs: the card holds a 64 MiB file and 256 small ones to read
 fs: the memory card opens as a file system
 geometry: a geometry shader turns each of four points into its 8 by 8 square
 geometry: a geometry shader with no early return squares the shown points only
+geometry: a patch tessellated at level 4 covers its rectangle, and says 4
+geometry: a patch whose evaluation stage reads no level covers its rectangle at 4
 geometry: a point the geometry shader emits nothing for draws nothing
 geometry: graphics device opens
 geometry: the geometry and tessellation shaders load
+geometry: the same patch at level 7 covers the same rectangle, and says 7
 index: a limit on the last byte keeps the last index when the draw starts at 4
 index: a limit on the last byte of 16-bit indices keeps the last index
 index: a limit on the last byte of 3006 16-bit indices keeps the last index
@@ -332,9 +340,13 @@ intmath: unsigned remainder by a prime
 nvdec: the video decoder opens and maps its buffers
 nvdec: vp9_error_resilient: seven hidden frames in one superframe, error resilient
 nvdec: vp9_frame_parallel: a hidden frame, no adaptation
+nvdec: vp9_hidden_altref: a hidden frame, contexts that adapt, 66 by 66
+nvdec: vp9_hidden_lf_deltas: two hidden frames, loop filter deltas
+nvdec: vp9_show_existing: frames shown again, LastShowFrame both ways
 nvdec: vp9_two_frames: two frames, none hidden
 occlusion: 320 cells cleared one by one between reports are cleared
 occlusion: 320 quads counted one by one are all drawn
+occlusion: 320 quads counted one by one pass 64 samples each
 occlusion: graphics device opens with room for 320 reports
 occlusion: the drawing shaders load
 occlusion: the reports have somewhere to live
@@ -360,17 +372,24 @@ order: words the fragments stored before a wait for idle reach the next dispatch
 query: IF_EQUAL draws after two equal reports from a list that finished before
 query: IF_EQUAL draws after two reports of the same count in the same list
 query: IF_EQUAL draws over two equal values whose timestamps differ
+query: IF_EQUAL skips after 9600 and nought reported in a list before
+query: IF_EQUAL skips after a report of 9600 and one of nought
 query: IF_EQUAL skips values that differ in the low word
 query: IF_EQUAL skips values that differ only in the high word
 query: IF_NOT_EQUAL draws after 9600 and nought reported in a list before
 query: IF_NOT_EQUAL draws after a report of 9600 and one of nought
 query: IF_NOT_EQUAL draws over values that differ in the low word
 query: IF_NOT_EQUAL draws over values that differ only in the high word
+query: IF_NOT_EQUAL skips after two equal reports from a list before
+query: IF_NOT_EQUAL skips after two reports of the same count
 query: IF_NOT_EQUAL skips the same two values
+query: a 32 by 300 pixel quad passes 9600 samples
+query: a full target clear under IF_EQUAL after 9600 and nought is skipped too
 query: a full target clear under IF_EQUAL over two equal values happens
 query: a full target clear under IF_EQUAL over two values that differ is skipped
 query: a full target clear under IF_NOT_EQUAL after 9600 and nought happens
 query: a reset after a draw leaves a count of nought
+query: a second quad of 1600 pixels adds to the count, 11200
 query: graphics device opens with a 64 by 320 target
 query: render enable FALSE skips the draw
 query: render enable TRUE draws
@@ -886,6 +905,9 @@ texture: the texels reach the textures
 texture: the textures have somewhere to live
 vic: the video compositor opens and maps its buffers
 vic: vic_alpha_opaque: the opaque alpha fill over a planar alpha below the top
+vic: vic_background: with no slot the target rect takes the background colour
+vic: vic_background_ring: the background colour around a smaller destination rect
+vic: vic_chroma_order: format 67 reads its chroma pair against format 68
 vic: vic_clamp_nomatrix: the soft clamp without the matrix
 vic: vic_matrix_601: the BT.601 matrix turns six colours into RGB
 vic: vic_matrix_shift: the matrix shift and the constant column, in their order
