@@ -30,6 +30,10 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib_interp.inc"
 # first time a module entered the interpreter. Android's is the phone's ABI baseline, which Clang targets by default
 if(ANDROID)
     set(snx_rtlib_flags --target=${CMAKE_C_COMPILER_TARGET} --sysroot=${CMAKE_SYSROOT})
+elseif(APPLE) # the architecture, SDK and oldest system version (cmake/apple.cmake): iOS's are not this Mac's
+    # Apple's headers fortify an optimized compile on their own, which makes memcpy, memmove and memset macros for the
+    # __*_chk functions: libc.inc's definitions would not parse, and a module links no C library to have those
+    set(snx_rtlib_flags ${SNX_APPLE_FLAGS} -D_FORTIFY_SOURCE=0)
 else()
     set(snx_rtlib_flags "")
 endif()
@@ -62,8 +66,12 @@ if(snx_clang_major GREATER snx_llvm_major)
     # A newer Clang writes bitcode the target LLVM cannot read. Its textual IR,
     # emitted without debug metadata (whose field set moves faster than the
     # assembler), still assembles into the target's bitcode with that LLVM's
-    # llvm-as.
-    snx_llvm_query(SNX_LLVM_BINDIR --bindir)
+    # llvm-as. An LLVM found by its CMake package (cmake/llvm.cmake) has no llvm-config to ask: its tools' folder
+    if(SNX_LLVM_CONFIG)
+        snx_llvm_query(SNX_LLVM_BINDIR --bindir)
+    else()
+        set(SNX_LLVM_BINDIR "${LLVM_TOOLS_BINARY_DIR}")
+    endif()
     find_program(SNX_LLVM_AS NAMES llvm-as llvm-as-${snx_llvm_major} HINTS "${SNX_LLVM_BINDIR}" NO_DEFAULT_PATH)
     if(NOT SNX_LLVM_AS)
         message(FATAL_ERROR "Clang ${CMAKE_C_COMPILER_VERSION} writes the runtime library's bitcode, which LLVM "

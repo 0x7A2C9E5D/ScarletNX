@@ -305,7 +305,13 @@ int snx_ctr_aot_compile(const char* extracted, char* error, size_t error_size) {
     }
     command[0] = SNX_CTR_HOST_CC;
     command[1] = "-shared";
+#ifdef __APPLE__
+    /* ld64's: a dylib refuses undefined symbols, as -z defs does (its default, said); its stacks aren't executable and
+       its constant data is kept read-only without being asked, which noexecstack, relro and now ask GNU ld for */
+    command[2] = "-Wl,-undefined,error";
+#else
     command[2] = "-Wl,-z,defs,-z,noexecstack,-z,relro,-z,now";
+#endif
     for (unsigned i = 0; i < files; ++i) command[3 + i] = objects[i];
     command[3 + files] = runtime;
     command[4 + files] = "-o";

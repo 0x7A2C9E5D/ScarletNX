@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-# Builds the ScarletNX runtime for Linux or FreeBSD, or for Windows with llvm-mingw (natively, or cross-built). The
+# Builds the ScarletNX runtime for Linux or FreeBSD, for Windows with llvm-mingw (natively, or cross-built), or for
+# macOS and iOS with Xcode's Clang (the macos and ios presets, docs/APPLE.md). The
 # game module (<Game>_code.so or .dll) comes from `scarletnx -r`. The
 # third-party libraries are fetched and built with the runtime, see cmake/dependencies.cmake.
 #
@@ -20,10 +21,17 @@ if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED ENV{CXX})
     set(CMAKE_CXX_COMPILER clang++)
 endif()
 project(ScarletNX LANGUAGES C CXX)
-if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang" OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+# Xcode's Clang names itself AppleClang: the same compiler, with Apple's version numbers
+if(NOT CMAKE_C_COMPILER_ID MATCHES "^(Apple)?Clang$" OR NOT CMAKE_CXX_COMPILER_ID MATCHES "^(Apple)?Clang$")
     message(FATAL_ERROR "ScarletNX builds with Clang only, and this is ${CMAKE_C_COMPILER_ID} "
                         "(${CMAKE_C_COMPILER}). Use a preset, or -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ "
                         "in a new build folder.")
+endif()
+# the iOS and macOS apps' frontend (src/gui/apple.m and dist/apple's Swift, docs/APPLE.md), which the runtime links
+# with the menu: the languages are enabled where every target that links them is below
+if(APPLE AND (NOT DEFINED SNX_BUILD_GUI OR SNX_BUILD_GUI))
+    enable_language(OBJC)
+    enable_language(Swift)
 endif()
 
 # GNU dialects: the runtime uses GNU extensions (statement expressions, __atomic builtins)
@@ -33,6 +41,14 @@ set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
+# The strict ANSI C (RFC #142: the driver, swipc, the build info and their tests) builds as C90 with -pedantic-errors,
+# but as C11 on macOS and iOS: Apple's headers use long long where C90 has none (stdint.h's UINT64_C), which
+# -pedantic-errors refuses. Still ISO C, without extensions
+if(APPLE)
+    set(SNX_C90_STANDARD 11)
+else()
+    set(SNX_C90_STANDARD 90)
+endif()
 
 option(SNX_BUILD_NX "Build the Switch Horizon/Maxwell runtime" ON)
 option(SNX_BUILD_GNUABI "Build the CPU-only Linux AArch64 runtime" ON)
@@ -126,7 +142,9 @@ add_subdirectory(tools)
 # `cmake --install` puts the runtime, hactool, the desktop entry and the licenses under CMAKE_INSTALL_PREFIX, which is
 # what the AppImage and the CI artifacts are made from (.github/workflows/build.yml)
 include(GNUInstallDirs)
-if(NOT ANDROID) # src/nx puts Android's in the app's libraries
+if(IOS) # the app itself (dist/apple), which scripts/ios-app.sh packs
+    install(TARGETS scarletnx BUNDLE DESTINATION .)
+elseif(NOT ANDROID) # src/nx puts Android's in the app's libraries
     install(TARGETS scarletnx RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 if(TARGET hactool AND ANDROID)
