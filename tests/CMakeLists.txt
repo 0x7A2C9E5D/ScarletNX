@@ -587,7 +587,7 @@ if(UNIX)
     if(Python3_Interpreter_FOUND)
         add_test(NAME gdbstub_native COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/gdbstub.py" $<TARGET_FILE:snx-test-gdbstub>)
-        set_tests_properties(gdbstub_native PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 RESOURCE_LOCK gdb_port_1234)
+        set_tests_properties(gdbstub_native PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
     endif()
 endif()
 

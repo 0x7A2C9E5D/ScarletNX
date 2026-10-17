@@ -240,7 +240,7 @@ int snx_main(int argc, char** argv) {
         return 0;
     }
     /* Start the helper before creating any host threads. */
-    if (g_opt_gdb && snx_gdb_start(g_opt_gdb_stop)) return 2;
+    if (g_opt_gdb && snx_gdb_start(g_opt_gdb_stop, SNX_GDB_PORT)) return 2;
     /* In an AppImage argv[0] points into its mount (APPDIR). APPIMAGE is the file that was run, so a copy named after
        the game (games/Catherine or games/Catherine.AppImage) finds games/Catherine_code.so like the bare runtime does.
        Both variables are inherited, so they only count when this runtime is the one inside the mount */
