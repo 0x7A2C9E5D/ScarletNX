@@ -186,6 +186,15 @@ static void shows_at(int line, App* app, const char* text, SDL_Color color, int 
     }
     assert(!"the text drawn");
 }
+/* the same in the foot's letters, a size under the rest's (foot_scale) */
+#define shows_foot(app, text, color) foot_shows_at(__LINE__, app, text, color, 1)
+#define hides_foot(app, text, color) foot_shows_at(__LINE__, app, text, color, 0)
+static void foot_shows_at(int line, App* app, const char* text, SDL_Color color, int drawn) {
+    int scale = app->scale;
+    app->scale = foot_scale(app);
+    shows_at(line, app, text, color, 1, drawn);
+    app->scale = scale;
+}
 /* the boxes a pointer or a finger goes to: a menu's item, Games' rows (0 Add a folder, then the page's games; with
    recent a recent row), a form's row on the left or the right; a pointer at a box's middle */
 static GuiRect entry_box(App* app, int item) {
@@ -228,6 +237,23 @@ static void text_px_is_at(int line, App* app, int x0, int y0, const char* text, 
             }
     SDL_DestroySurface(image);
 }
+/* the same in the foot's letters */
+#define foot_px_is(app, x0, y0, text, color, back) foot_px_is_at(__LINE__, app, x0, y0, text, color, back)
+static void foot_px_is_at(int line, App* app, int x0, int y0, const char* text, SDL_Color color, SDL_Color back) {
+    int scale = app->scale;
+    app->scale = foot_scale(app);
+    text_px_is_at(line, app, x0, y0, text, color, back);
+    app->scale = scale;
+}
+/* where the text of a box of the foot goes, in its letters (foot_text) */
+static GuiRect foot_room(App* app, GuiRect r, int box) {
+    int scale = app->scale;
+    GuiRect out;
+    app->scale = foot_scale(app);
+    out = foot_text(app, r, box);
+    app->scale = scale;
+    return out;
+}
 /* the mouse at pixel x, y of the render, moved there or clicking */
 static void mouse_px(App* app, int x, int y, bool click) {
     SDL_Event e = {0};
@@ -262,6 +288,21 @@ static void tap_px(App* app, int x, int y) {
     event(app, &e);
 }
 static void point(App* app, GuiRect b, bool click) { mouse_px(app, b.x + b.w / 2, b.y + b.h / 2, click); }
+/* a click, or a tap, on column col of the key the foot draws in color, in its letters */
+#define press_key(app, key, col, tap, color) press_key_at(__LINE__, app, key, col, tap, color)
+static void press_key_at(int line, App* app, const char* key, int col, bool tap, SDL_Color color) {
+    int x, y, fs = foot_scale(app), scale = app->scale;
+    render(app);
+    app->scale = fs;
+    if (!find_text(app, key, color, 1, &x, &y)) shows_at(line, app, key, color, 1, 1); /* says which */
+    app->scale = scale;
+    x += col * 8 * fs + 4 * fs;
+    y += 8 * fs;
+    if (tap)
+        tap_px(app, x, y);
+    else
+        mouse_px(app, x, y, true);
+}
 static void touch_box(App* app, GuiRect b) { tap_px(app, b.x + b.w / 2, b.y + b.h / 2); }
 /* the Settings' pick for key is value; NULL: the .ini's */
 static bool setting_is(App* app, const char* key, const char* value) {
@@ -293,19 +334,19 @@ static void finish(App* app, int status) {
     snprintf(expected, sizeof(expected),
              status ? "Program ended abnormally (status %d)." : "Driver exited with status %d.", status);
     assert(!strcmp(app->message, expected) && app->abnormal_exit == (status != 0) && app->has_output);
-    shows(app, "Press [ESC] to return to menu", red);
+    shows_foot(app, "Press [ESC] to return to menu", red);   /* where the keys go, in their letters */
     if (status) shows(app, "Program ended abnormally", red); /* beside the output, how it ended */
     /* a theme can make that line a prompt: framed and placed, the done and the failed one apart */
     GuiPromptLine line = status ? GUI_PROMPT_FAILED : GUI_PROMPT_DONE;
     app->theme.prompt.lines[line] = true;
     app->theme.prompt.blink = false;
     render(app);
-    shows(app, "[ Press [ESC] to return to menu ]", red);
+    shows_foot(app, "[ Press [ESC] to return to menu ]", red);
     app->theme.prompt.lines[line] = false;
     app->theme.prompt.lines[status ? GUI_PROMPT_DONE : GUI_PROMPT_FAILED] = true;
     render(app);
-    hides(app, "[ Press [ESC] to return to menu ]", red);
-    shows(app, "Press [ESC] to return to menu", red);
+    hides_foot(app, "[ Press [ESC] to return to menu ]", red);
+    shows_foot(app, "Press [ESC] to return to menu", red);
     app->theme.prompt = gui_theme_builtin(app->theme.id)->prompt;
     for (int i = 0; i < 3; ++i) pump(app);
     mouse_px(app, 4, 4, true); /* A completed process still requires ESC acknowledgement. */
@@ -353,15 +394,143 @@ static bool picks_have(App* app, const char* line) {
     free(kept);
     return has;
 }
+/* Settings > Controllers by player, as Eden's tabs: its Player row goes round All (every player's rows) and 1 to 8
+   (the player's own and those no player has its own of); a player's Button map is the button map page on its keys,
+   its A and B as its own swap says, else every player's; ESC comes back to the player's rows */
+static void players_view(App* app) {
+    static const char list[] =
+        "Controllers\tgamepad_swap_ab\t0\tint\t0\t1\tSwap A/B\tSwap A/B\t0=Off|1=On\n"
+        "Controllers\tgamepad_deadzone\t10\tint\t0\t90\tDead zone\tStick dead zone\t0=0%|10=10%\n"
+        "Controllers\tgamepad_rumble\t100\tint\t0\t100\tVibration\tVibration\t0=Off|100=100%\n"
+        "Controllers/Button map\tgamepad_map\t\ttext\t\t\tEach control's button\tButton map\t\n"
+        "Controllers/Player\tgamepad_p1_device\t\ttext\t\t\tIts controller\tController\t\n"
+        "Controllers/Player\tgamepad_p1_swap_ab\t-1\tint\t-1\t1\tIts A and B\tSwap A/B\t-1=As All|0=Off|1=On\n"
+        "Controllers/Player\tgamepad_p1_map\t\ttext\t\t\tIts map\tButton map\t\n"
+        "Controllers/Player\tgamepad_p2_device\t\ttext\t\t\t\tController\t\n"
+        "Controllers/Player\tgamepad_p2_swap_ab\t-1\tint\t-1\t1\t\tSwap A/B\t-1=As All|0=Off|1=On\n"
+        "Controllers/Player\tgamepad_p2_map\t\ttext\t\t\t\tButton map\t\n";
+    int r;
+    gui_settings_free(&app->settings);
+    memset(&app->settings, 0, sizeof app->settings);
+    assert(!gui_settings_read(&app->settings, list));
+    gui_settings_mark(&app->settings);
+    app->player = 0;
+    open_settings(app);
+    key(app, SDLK_DOWN); /* past Launch, the launcher's own */
+    key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    /* All: the Player row, then every player's */
+    assert(app->form == GUI_FORM_GROUP && app->view_count == 5 && app->editor.row == 0);
+    assert(!strcmp(app->settings.values[setting_of(app, 0)].text, "< All >"));
+    assert(row_of(app, setting_row(app, "gamepad_swap_ab")) == 1 &&
+           row_of(app, setting_row(app, "gamepad_p1_map")) < 0);
+    render(app);
+    shows(app, "- Player", yellow); /* focused */
+    /* Right: player 1, its own rows and the dead zone; no every player's Swap A/B, Vibration or Button map */
+    key(app, SDLK_RIGHT);
+    assert(app->player == 1 && app->view_count == 5 && !strcmp(app->settings.values[setting_of(app, 0)].text, "< 1 >"));
+    assert(row_of(app, setting_row(app, "gamepad_p1_swap_ab")) > 0 &&
+           row_of(app, setting_row(app, "gamepad_swap_ab")) < 0);
+    assert(row_of(app, setting_row(app, "gamepad_deadzone")) > 0 &&
+           row_of(app, setting_row(app, "gamepad_p2_map")) < 0);
+    render(app);
+    shows(app, "As All [default]", normal);
+    shows(app, "As All >", normal); /* its Button map, every player's until it has its own */
+    /* its Controller: Any while it names none; Enter waits for a press, which gives it the controller pressed by its
+       GUID ("/2" for the second of two alike); ESC leaves it as it was */
+    {
+        SDL_VirtualJoystickDesc d;
+        SDL_JoystickID one, two;
+        SDL_Joystick *j1, *j2;
+        char guid[33], line[40];
+        shows(app, "Any [default]", normal);
+        app->editor.row = row_of(app, setting_row(app, "gamepad_p1_device"));
+        key(app, SDLK_RETURN);
+        assert(app->device_listen && strstr(app->editor.note, "Press a button on player 1's controller"));
+        key(app, SDLK_ESCAPE);
+        assert(!app->device_listen && !gui_settings_value(&app->settings, "gamepad_p1_device") &&
+               app->form == GUI_FORM_GROUP && !SDL_WasInit(SDL_INIT_GAMEPAD));
+        key(app, SDLK_RETURN);
+        assert(SDL_InitSubSystem(SDL_INIT_JOYSTICK)); /* the pads stay between the waits, as real ones do */
+        SDL_INIT_INTERFACE(&d);
+        d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        d.naxes = SDL_GAMEPAD_AXIS_COUNT;
+        d.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+        d.vendor_id = 0x045e;
+        d.product_id = 0x02ea;
+        d.name = "One Pad";
+        one = SDL_AttachVirtualJoystick(&d);
+        two = SDL_AttachVirtualJoystick(&d);
+        j1 = SDL_OpenJoystick(one);
+        j2 = SDL_OpenJoystick(two);
+        assert(j1 && j2);
+        pads(app);
+        SDL_GUIDToString(SDL_GetJoystickGUIDForID(one), guid, sizeof guid);
+        pad_press(app, j2, SDL_GAMEPAD_BUTTON_SOUTH);
+        snprintf(line, sizeof line, "%s/2", guid);
+        assert(!app->device_listen && !strcmp(gui_settings_value(&app->settings, "gamepad_p1_device"), line));
+        assert(!strcmp(app->editor.note, "Player 1: One Pad") && picks_have(app, "gamepad_p1_device="));
+        key(app, SDLK_RETURN);
+        pad_press(app, j1, SDL_GAMEPAD_BUTTON_SOUTH);
+        assert(!strcmp(gui_settings_value(&app->settings, "gamepad_p1_device"), guid));
+        key(app, SDLK_DELETE); /* the next to connect again */
+        assert(!gui_settings_value(&app->settings, "gamepad_p1_device"));
+        SDL_CloseJoystick(j1);
+        SDL_CloseJoystick(j2);
+        assert(SDL_DetachVirtualJoystick(one) && SDL_DetachVirtualJoystick(two));
+        SDL_QuitSubSystem(SDL_INIT_JOYSTICK);
+    }
+    /* round: Left twice is 8 (no rows of its own here), Right twice back to 1 */
+    app->editor.row = 0;
+    key(app, SDLK_LEFT);
+    key(app, SDLK_LEFT);
+    assert(app->player == 8 && app->view_count == 2);
+    key(app, SDLK_RIGHT);
+    key(app, SDLK_RIGHT);
+    assert(app->player == 1);
+    /* its Swap A/B and every player's: its own wins, As All takes every player's */
+    assert(gui_settings_set(&app->settings, "gamepad_swap_ab", "1"));
+    app->editor.row = row_of(app, setting_row(app, "gamepad_p1_map"));
+    key(app, SDLK_RETURN);
+    assert(app->form == GUI_FORM_PAD && app->pad_player == 1 && app->pad_map == setting_row(app, "gamepad_p1_map"));
+    assert(app->pad.swap_ab); /* As All: on */
+    render(app);
+    shows(app, "SETTINGS  /  CONTROLLERS  /  PLAYER 1  /  BUTTON MAP", normal);
+    /* a change keeps the player's map, every player's untouched */
+    app->pad.focus = SNX_PAD_LT;
+    key(app, SDLK_RIGHT);
+    assert(gui_settings_value(&app->settings, "gamepad_p1_map") && !gui_settings_value(&app->settings, "gamepad_map"));
+    assert(strstr(gui_settings_value(&app->settings, "gamepad_p1_map"), "lt:ZR"));
+    key(app, SDLK_ESCAPE);
+    assert(app->form == GUI_FORM_GROUP && app->player == 1 &&
+           setting_of(app, app->editor.row) == setting_row(app, "gamepad_p1_map"));
+    assert(gui_settings_set(&app->settings, "gamepad_p1_swap_ab", "0"));
+    key(app, SDLK_RETURN);
+    assert(app->form == GUI_FORM_PAD && !app->pad.swap_ab); /* its own: off */
+    key(app, SDLK_ESCAPE);
+    /* its map its own now; Del on a player's row: back to As All */
+    render(app);
+    shows(app, "Its own >", yellow); /* focused, as ESC came back to it */
+    app->editor.row = row_of(app, setting_row(app, "gamepad_p1_swap_ab"));
+    key(app, SDLK_DELETE);
+    assert(!gui_settings_value(&app->settings, "gamepad_p1_swap_ab"));
+    /* every row the view shows is a row of the settings, the Player row first */
+    for (r = 0; r < app->view_count; ++r) assert(setting_of(app, r) >= 0 && setting_of(app, r) < app->settings.count);
+    key(app, SDLK_ESCAPE);
+    assert(app->form == GUI_FORM_SETTINGS);
+    app->player = 0;
+    leave_editor(app);
+}
 /* Settings > Controllers > Button map: the pad drawn (pad_screen.h) with what each control sends, on SDL's virtual
-   Xbox pad. Its presets are gamepad_buttons' words after the game's own, its map gamepad_map; the keys, the pad's
-   presses, its triggers and stick, a click and the wheel act on it, each change kept in the picks at once, Del puts
-   both back, and ESC goes back to the page's row with the pads closed */
+   Xbox pad. No presets: each control the button in its place, gamepad_map over that, A and B as gamepad_swap_ab says;
+   the keys, the pad's presses, its triggers and stick, a click and the wheel act on it, each change kept in the picks
+   at once, Del puts the map back, and ESC goes back to the page's row with the pads closed */
 static void button_map(App* app) {
     static const char list[] =
-        "Controllers\tgamepad_buttons\t1\tint\t0\t2\tA B X Y\tA B X Y\t0=By position|1=By label|2=Custom\n"
+        "Controllers\tgamepad_swap_ab\t0\tint\t0\t1\tSwap A/B\tSwap A/B\t0=Off|1=On\n"
         "Controllers\tgamepad_deadzone\t10\tint\t0\t90\tDead zone\tStick dead zone\t0=0%|10=10%\n"
-        "Controllers/Button map\tgamepad_map\t\ttext\t\t\tgamepad_buttons=2's map\tButton map\t\n";
+        "Controllers\tgamepad_joycon_pair\t1\tint\t0\t1\tJoy-Cons\tPair Joy-Cons\t0=Separate|1=Together\n"
+        "Controllers/Button map\tgamepad_map\t\ttext\t\t\tEach control's button\tButton map\t\n";
     SDL_VirtualJoystickDesc d;
     SDL_JoystickID id;
     SDL_Joystick* j;
@@ -385,15 +554,16 @@ static void button_map(App* app) {
     key(app, SDLK_RETURN);
     /* drawn before SDL looks for pads, which takes it most of a second, saying so */
     shows(app, "Looking for controllers...", rgb(app->theme.soft));
-    /* no pad: the presets, the one in use focused, the game's own as nothing is picked */
-    assert(app->form == GUI_FORM_PAD && app->pads_read && !app->gamepad && app->pad.presets == 4);
-    assert(app->pad.in_use == 0 && app->pad.focus == 0 && !strcmp(app->pad.name[3], "Custom"));
+    /* no pad: no presets, the first control focused, A and B where the console's are */
+    assert(app->form == GUI_FORM_PAD && app->pads_read && !app->gamepad && app->pad.focus == SNX_PAD_LT &&
+           !app->pad.swap_ab);
+    /* two Joy-Cons one pad, as gamepad_joycon_pair has it when not picked */
+    assert(!strcmp(SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS), "1"));
     render(app);
     shows(app, "SETTINGS  /  CONTROLLERS  /  BUTTON MAP", normal);
-    assert(drawn_text(app, "No controller") && drawn_text(app, "Each game's") && drawn_text(app, "By label"));
-    assert(drawn(app, 0, SNX_PAD_SHAPE_BOX, SNX_PAD_STYLE_FOCUS));
-    /* its texts in the font's own glyphs, a byte each: the preset in use marked with a square */
-    assert(drawn_text(app, "\xFE Each game's"));
+    assert(drawn_text(app, "No controller") && !drawn_text(app, "By position") && !drawn_text(app, "By label"));
+    assert(drawn(app, SNX_PAD_LT, SNX_PAD_SHAPE_BOX, SNX_PAD_STYLE_FOCUS) && drawn_text(app, "LT sends ZL"));
+    /* its texts in the font's own glyphs, a byte each */
     {
         SnxPadShape shape = {SNX_PAD_SHAPE_TEXT,
                              SNX_PAD_STYLE_PLAIN,
@@ -408,10 +578,8 @@ static void button_map(App* app) {
         pad_text(app, &shape, app->theme.ink);
         colored_text_on(app, 2, 20, "\xFE \x82", rgb(app->theme.ink), black);
     }
-    key(app, SDLK_DOWN);
-    key(app, SDLK_DOWN);
-    key(app, SDLK_RETURN);
-    assert(app->pad.in_use == 2 && setting_is(app, "gamepad_buttons", "1") && picks_have(app, "gamepad_buttons=1"));
+    key(app, SDLK_RETURN); /* with no pad, nothing to wait for */
+    assert(!app->pad.listening && !gui_settings_value(&app->settings, "gamepad_map"));
     /* a pad plugged in is opened, named, and what it holds lit */
     SDL_INIT_INTERFACE(&d);
     d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
@@ -427,35 +595,33 @@ static void button_map(App* app) {
         SDL_SetJoystickVirtualAxis(j, a, a >= SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? SDL_JOYSTICK_AXIS_MIN : 0);
     pads(app);
     assert(app->gamepad && SDL_GetGamepadID(app->gamepad) == id);
-    SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, true);
+    SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_NORTH, true); /* X: no key of the page's */
     pads(app);
     render(app);
-    assert(!strcmp(app->pad.pad, "Man\x82 Pad") && !drawn_text(app, "No controller") && drawn_text(app, "Man\x82 Pad"));
-    assert(drawn(app, SNX_PAD_PRESETS + SNX_PAD_SOUTH, SNX_PAD_SHAPE_DISC, SNX_PAD_STYLE_LIT));
-    SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_SOUTH, false);
+    assert(!strcmp(app->pad.pad, "Man\x82 Pad"));
+    assert(!drawn_text(app, "No controller"));
+    assert(drawn_text(app, "Man\x82 Pad"));
+    assert(drawn(app, SNX_PAD_NORTH, SNX_PAD_SHAPE_DISC, SNX_PAD_STYLE_LIT) && app->form == GUI_FORM_PAD);
+    SDL_SetJoystickVirtualButton(j, SDL_GAMEPAD_BUTTON_NORTH, false);
     pads(app);
-    /* its presses as the game's menu takes them, by the button each sends: the D-pad moves, A selects */
-    pad_press(app, j, SDL_GAMEPAD_BUTTON_DPAD_UP);
-    assert(app->pad.focus == 1 && app->pad.in_use == 2);
-    pad_press(app, j, SDL_GAMEPAD_BUTTON_SOUTH);
-    assert(app->pad.in_use == 1 && setting_is(app, "gamepad_buttons", "0"));
-    /* by position the right one sends A, the bottom one B */
+    /* its presses as the game's menu takes them, by the button each sends: the D-pad moves; A, the right one as on
+       the console, waits for a press, which takes the focused control's button and gives its own */
+    app->pad.focus = SNX_PAD_SOUTH;
     pad_press(app, j, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    assert(app->pad.focus == SNX_PAD_RS);
+    pad_press(app, j, SDL_GAMEPAD_BUTTON_DPAD_UP);
+    assert(app->pad.focus == SNX_PAD_SOUTH && !app->pad.listening);
     pad_press(app, j, SDL_GAMEPAD_BUTTON_EAST);
-    assert(app->pad.in_use == 2 && app->form == GUI_FORM_PAD);
-    /* a control: A waits for a press, which takes its button and gives its own; Custom is then the one in use */
-    app->pad.focus = SNX_PAD_PRESETS + SNX_PAD_SOUTH;
-    pad_press(app, j, SDL_GAMEPAD_BUTTON_SOUTH);
     assert(app->pad.listening);
     pad_press(app, j, SDL_GAMEPAD_BUTTON_EAST);
-    assert(!app->pad.listening && app->pad.in_use == 3 && setting_is(app, "gamepad_buttons", "2"));
+    assert(!app->pad.listening && app->pad.focus == SNX_PAD_EAST && app->form == GUI_FORM_PAD);
     /* the whole map is the player's from then on, whatever pad comes next */
     assert(setting_is(app, "gamepad_map",
-                      "south:B east:A west:X north:Y lb:L rb:R lt:ZL rt:ZR ls:L3 rs:R3 back:Minus "
+                      "south:A east:B west:Y north:X lb:L rb:R lt:ZL rt:ZR ls:L3 rs:R3 back:Minus "
                       "start:Plus up:Up down:Down left:Left right:Right"));
-    assert(picks_have(app, "gamepad_map=south:B east:A west:X"));
+    assert(picks_have(app, "gamepad_map=south:A east:B west:Y"));
     /* a trigger is pressed once it is past SNX_PAD_TRIGGER */
-    app->pad.focus = SNX_PAD_PRESETS + SNX_PAD_LT;
+    app->pad.focus = SNX_PAD_LT;
     key(app, SDLK_RETURN);
     assert(app->pad.listening);
     /* a trigger's 0 to 32767 from its axis' whole range */
@@ -483,27 +649,40 @@ static void button_map(App* app) {
     assert(app->pad.focus != focus);
     SDL_SetJoystickVirtualAxis(j, SDL_GAMEPAD_AXIS_LEFTY, 0);
     pads(app);
-    /* the wheel moves as Up and Down; a click on a preset uses it */
+    /* the wheel moves as Up and Down; a click on a control's box focuses it, a second one waits for a press */
     focus = app->pad.focus;
     e.type = SDL_EVENT_MOUSE_WHEEL;
     e.wheel.integer_y = 1;
     event(app, &e);
     assert(app->pad.focus != focus);
     render(app);
-    box = drawn(app, 1, SNX_PAD_SHAPE_BOX, -1);
+    box = drawn(app, SNX_PAD_NORTH, SNX_PAD_SHAPE_BOX, -1);
     assert(box && SDL_RenderCoordinatesToWindow(app->renderer, box->x + box->w / 2, box->y + box->h / 2, &x, &y));
     e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
     e.button.button = SDL_BUTTON_LEFT;
     e.button.x = x;
     e.button.y = y;
     event(app, &e);
-    assert(app->pad.in_use == 1 && setting_is(app, "gamepad_buttons", "0"));
-    /* Del: the preset and the map the game's .ini's again */
+    assert(app->pad.focus == SNX_PAD_NORTH && !app->pad.listening);
+    event(app, &e);
+    assert(app->pad.listening);
+    key(app, SDLK_ESCAPE); /* stops waiting, stays */
+    assert(!app->pad.listening && app->form == GUI_FORM_PAD);
+    /* Del: the map the game's .ini's again; Swap A/B, its row's, over it when the page opens */
     key(app, SDLK_DELETE);
-    assert(app->pad.in_use == 0 && !gui_settings_value(&app->settings, "gamepad_buttons") &&
-           !gui_settings_value(&app->settings, "gamepad_map") && !picks_have(app, "gamepad_"));
+    assert(!gui_settings_value(&app->settings, "gamepad_map") && !picks_have(app, "gamepad_"));
+    {
+        SnxPadMap shown;
+        assert(gui_settings_set(&app->settings, "gamepad_swap_ab", "1"));
+        pad_start(app);
+        snx_pad_screen_map(&app->pad, &shown);
+        assert(app->pad.swap_ab && shown.bit[SNX_PAD_SOUTH] == 0 && shown.bit[SNX_PAD_EAST] == 1); /* A, B */
+        assert(gui_settings_set(&app->settings, "gamepad_swap_ab", ".ini"));
+        pad_start(app);
+        assert(!app->pad.swap_ab);
+    }
     /* the pad unplugged: none shown, nothing waited for */
-    app->pad.focus = SNX_PAD_PRESETS + SNX_PAD_NORTH;
+    app->pad.focus = SNX_PAD_NORTH;
     key(app, SDLK_RETURN);
     assert(app->pad.listening);
     SDL_CloseJoystick(j);
@@ -512,16 +691,50 @@ static void button_map(App* app) {
     assert(!app->gamepad && !app->pad.listening);
     render(app);
     assert(drawn_text(app, "No controller"));
-    /* ESC: to the presets, then back to the page's row, the pads closed */
-    key(app, SDLK_ESCAPE);
-    assert(app->form == GUI_FORM_PAD && app->pad.focus < SNX_PAD_PRESETS);
+    /* a joystick SDL has no gamepad mapping for, plugged in: named in the middle, with its GUID and the file its
+       mapping goes in, in the failure colour; gone once it is unplugged */
+    {
+        char *folder = snx_dirname(app->settings_file), *file = snx_path_join(folder, "gamecontrollerdb.txt");
+        SDL_VirtualJoystickDesc odd;
+        SDL_JoystickID stick;
+        assert(!app->editor.note[0] && !app->pad.note[0]);
+        SDL_INIT_INTERFACE(&odd);
+        odd.type = SDL_JOYSTICK_TYPE_UNKNOWN;
+        odd.naxes = 2;
+        odd.nbuttons = 4;
+        odd.vendor_id = 0x1234;
+        odd.product_id = 0x5678;
+        odd.name = "Odd Stick";
+        stick = SDL_AttachVirtualJoystick(&odd);
+        assert(stick);
+        pads(app);
+        assert(!app->gamepad && !strncmp(app->pad.note, "Odd Stick has no SDL mapping: add a line for GUID ",
+                                         sizeof "Odd Stick has no SDL mapping: add a line for GUID " - 1));
+        assert(strstr(app->pad.note, file) && !app->editor.note[0]);
+        render(app);
+        assert(drawn_text(app, "Odd Stick has no SDL"));
+        {
+            int i, noted = 0;
+            for (i = 0; i < app->pad_drawing.n; ++i) noted |= app->pad_drawing.shape[i].style == SNX_PAD_STYLE_NOTE;
+            assert(noted);
+        }
+        assert(SDL_DetachVirtualJoystick(stick));
+        pads(app);
+        assert(!app->pad.note[0]);
+        free(file);
+        free(folder);
+    }
+    /* ESC: back to the page's row, the pads closed */
     key(app, SDLK_ESCAPE);
     assert(app->form == GUI_FORM_GROUP && app->page < 0 && app->editor.row == page - app->first);
     assert(!app->pads_read && !SDL_WasInit(SDL_INIT_GAMEPAD));
     /* a map it cannot read is named, in the failure colour, and the page shows the labels' */
     assert(gui_settings_set(&app->settings, "gamepad_map", "south:Q"));
+    assert(gui_settings_set(&app->settings, "gamepad_joycon_pair", "0")); /* and the Joy-Cons apart */
     key(app, SDLK_RETURN);
     assert(app->form == GUI_FORM_PAD && strstr(app->editor.note, "\"south:Q\" is not a control"));
+    assert(!strcmp(SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS), "0"));
+    assert(gui_settings_set(&app->settings, "gamepad_joycon_pair", ".ini"));
     assert(app->pad.own.bit[SNX_PAD_SOUTH] == SNX_PAD_UNSET);
     render(app);
     {
@@ -529,9 +742,27 @@ static void button_map(App* app) {
         snprintf(start, sizeof start, "%s", app->editor.note);
         shows(app, start, rgb(app->theme.failure));
     }
-    key(app, SDLK_ESCAPE); /* on a preset: back at once */
-    assert(app->form == GUI_FORM_GROUP);
-    leave_editor(app);
+    key(app, SDLK_TAB); /* the next screen, as the foot says: the Menu, the pads closed */
+    assert(!app->editing && app->menu.view == GUI_LOAD_NONE && !app->pads_read && !SDL_WasInit(SDL_INIT_GAMEPAD));
+    /* the games it starts read the mappings file the page names, once it is there; one the player named stays */
+    {
+        char *folder = snx_dirname(app->settings_file), *db = snx_path_join(folder, "gamecontrollerdb.txt");
+        const char* named;
+        SDL_unsetenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE");
+        pad_mappings_share(app);
+        assert(!SDL_getenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE"));
+        assert(!snx_write_file(db, "", 0));
+        pad_mappings_share(app);
+        named = SDL_getenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE");
+        assert(named && !strcmp(named, db));
+        SDL_setenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE", "/elsewhere/mine.txt", 1);
+        pad_mappings_share(app);
+        assert(!strcmp(SDL_getenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE"), "/elsewhere/mine.txt"));
+        SDL_unsetenv_unsafe("SDL_GAMECONTROLLERCONFIG_FILE");
+        assert(!snx_remove_tree(db));
+        free(db);
+        free(folder);
+    }
 }
 /* a running step's line ends in its progress as the theme says, a done one in OK */
 static void step_line(void) {
@@ -559,6 +790,21 @@ static void step_line(void) {
 static int SDLCALL hang(void* unused) {
     (void)unused;
     for (;;) SDL_Delay(100);
+}
+/* the keys screen's outcome: installed or not, said on it, then the menu once it has shown long enough, not before */
+static void keys_outcome(App* app, bool ok) {
+    Uint64 at = app->keys_done, shown = ok ? GUI_KEYS_OK_MS : GUI_KEYS_FAILED_MS;
+    assert(app->menu.view == GUI_LOAD_KEYS && at && app->keys_ok == ok);
+    app->clock = at + shown - 1;
+    pump(app);
+    render(app);
+    shows(app, ok ? "Installed" : "Not installed", rgb(ok ? app->theme.focus : app->theme.failure));
+    shows(app, "Back to the menu in 1 s", rgb(app->theme.soft));
+    assert(app->menu.view == GUI_LOAD_KEYS);
+    app->clock = at + shown;
+    pump(app);
+    assert(app->menu.view == GUI_LOAD_NONE && !app->keys_done);
+    app->clock = 0;
 }
 int main(int argc, char** argv) {
     if (argc == 2 && !strcmp(argv[1], "--settings")) { /* as the runtime lists its settings */
@@ -631,6 +877,8 @@ int main(int argc, char** argv) {
     assert(initialize(&app, "/nonexistent/snx-gui-test/bin/scarletnx"));
     assert(!strcmp(app.self, "/nonexistent/snx-gui-test/bin/scarletnx"));
     assert(!strcmp(app.drivers, "/nonexistent/snx-gui-test/bin"));
+    assert(!strcmp(app.theme.id, "yorha"));    /* the menu opens in YoRHa everywhere */
+    app.theme = *gui_theme_builtin("default"); /* the checks below read Default's colours */
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(SDL_PLATFORM_ANDROID)
     /* no checkout and no games/ beside the test: games/ and themes/ come from the user's data folder */
     assert(!strcmp(app.data_dir, "/nonexistent/snx-gui-test/scarletnx"));
@@ -813,7 +1061,8 @@ int main(int argc, char** argv) {
     keys_event.type = SDL_EVENT_DROP_FILE;
     keys_event.drop.data = source_keys;
     event(&app, &keys_event);
-    assert(app.menu.view == GUI_LOAD_NONE && !app.menu.running);
+    assert(!app.menu.running && strstr(app.message, "installed"));
+    keys_outcome(&app, true);
     size_t keys_size;
     unsigned char* keys_data = snx_read_file(app.keys_path, &keys_size);
     assert(keys_data && keys_size == 10 && !memcmp(keys_data, "first keys", 10));
@@ -839,11 +1088,13 @@ int main(int argc, char** argv) {
     keys_data = snx_read_file(app.keys_path, &keys_size);
     assert(keys_data && keys_size == 11 && !memcmp(keys_data, "replacement", 11));
     free(keys_data);
+    keys_outcome(&app, true);
     key(&app, SDLK_RETURN);
     drop(&app, app.keys_path, false); /* Dropping the destination itself is safe. */
     keys_data = snx_read_file(app.keys_path, &keys_size);
     assert(keys_data && keys_size == 11 && !memcmp(keys_data, "replacement", 11));
     free(keys_data);
+    keys_outcome(&app, true);
     key(&app, SDLK_RETURN);
     assert(!snx_remove_tree(source_keys));
     drop(&app, source_keys, false);
@@ -853,9 +1104,16 @@ int main(int argc, char** argv) {
     assert(!snx_write_file(source_keys, "replacement", 11));
     drop(&app, source_keys, false);
     assert(app.menu.view == GUI_LOAD_KEYS && snx_is_dir(app.keys_path) && app.message[0]);
+    assert(app.keys_done && !app.keys_ok); /* not installed: said, then the menu after a while */
     assert(!snx_remove_tree(app.keys_path));
-    drop(&app, source_keys, false);
-    assert(app.menu.view == GUI_LOAD_NONE && snx_is_file(app.keys_path));
+    drop(&app, source_keys, false); /* a try that works says so in place of it */
+    assert(snx_is_file(app.keys_path));
+    keys_outcome(&app, true);
+    /* a try that fails, left alone, goes back to the menu too, its line saying why */
+    app.menu.view = GUI_LOAD_KEYS;
+    drop(&app, "file://remote/prod.keys", true);
+    keys_outcome(&app, false);
+    assert(strstr(app.message, "local file path"));
     /* a document of an app's (Android's picker): read through it, as a path to it may not be readable or there is none
        (Downloads by number, #280), and installed when its text is a prod.keys', whatever its name; refused when it is
        not one or is too big. The picker's message for a document with no path stays on the other screens */
@@ -866,7 +1124,7 @@ int main(int argc, char** argv) {
         app.menu.view = GUI_LOAD_KEYS;
         install_keys_document(&app, document);
         keys_data = snx_read_file(app.keys_path, &keys_size);
-        assert(app.menu.view == GUI_LOAD_NONE && keys_data && keys_size == sizeof keys_text - 1 &&
+        assert(app.menu.view == GUI_LOAD_KEYS && app.keys_ok && keys_data && keys_size == sizeof keys_text - 1 &&
                !memcmp(keys_data, keys_text, keys_size));
         free(keys_data);
         assert(!snx_write_file(document, "a game, not keys", 16));
@@ -1355,6 +1613,83 @@ int main(int argc, char** argv) {
         assert(!app.folder_count && !strcmp(app.editor.note, "Taken off the list; the folder stays"));
         assert(snx_is_dir(more) && (kept = (char*)snx_read_file(app.folders_file, &size)) && !size);
         free(kept);
+        /* a folder with folders in it asks whether their games are listed too: Cancel adds nothing, Only this folder
+           its own games, With subfolders theirs as well, down GUI_FOLDER_DEPTH levels, a hidden one left alone; kept
+           with GUI_FOLDER_DEEP after its path, and its row says so */
+        {
+#ifdef _WIN32
+#define GAME(name) name ".exe" /* a game there is an .exe, listed by its file's name */
+#else
+#define GAME(name) name
+#endif
+            static const char* const files[] = {GAME("Top"), "a/" GAME("One"), "a/b/c/d/" GAME("Four"),
+                                                "a/b/c/d/e/" GAME("Five"), ".hid/" GAME("Hidden")};
+            char *deep = snx_path_join(temporary, "deep games"), *deep_as;
+            GuiGames listed = {0};
+            char said[sizeof app.message];
+            size_t f, g;
+            int found = 0;
+            for (f = 0; f < sizeof files / sizeof files[0]; ++f) {
+                char *path = snx_path_join(deep, files[f]), *dir = snx_dirname(path);
+                assert(!snx_mkdirs(dir) && !snx_write_file(path, "fixture", 7) && !snx_make_executable(path));
+                free(dir);
+                free(path);
+            }
+            deep_as = snx_absolute(deep);
+            e.drop.data = deep;
+            event(&app, &e);
+            assert(app.folder_asked && !strcmp(app.folder_asked, deep_as) && app.confirm.shown && !app.folder_count);
+            render(&app);
+            shows(&app, "List the games in its subfolders too?", rgb(app.theme.warning));
+            key(&app, SDLK_ESCAPE);
+            assert(!app.folder_asked && !app.confirm.shown && !app.folder_count &&
+                   !strcmp(app.editor.note, "Not added"));
+            event(&app, &e);
+            key(&app, SDLK_RETURN); /* Only this folder */
+            assert(app.folder_count == 1 && !app.folders_deep[0] && !strcmp(app.editor.note, "Added"));
+            games_scan(&app, &listed, said, sizeof said);
+            for (g = 0; g < listed.count; ++g)
+                found |= !strcmp(listed.names[g], GAME("Top")) | !strcmp(listed.names[g], GAME("One")) << 1;
+            assert(found == 1);
+            gui_games_free(&listed);
+            folder_remove(&app, 0);
+            event(&app, &e);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN); /* With subfolders */
+            assert(app.folder_count == 1 && app.folders_deep[0] &&
+                   !strcmp(app.editor.note, "Added, with its subfolders"));
+            kept = (char*)snx_read_file(app.folders_file, &size);
+            snprintf(line, sizeof line, "%s" GUI_FOLDER_DEEP "\n", deep_as);
+            assert(kept && !strcmp(kept, line));
+            free(kept);
+            assert(!strcmp(app.app_form.folder[1], "+ subfolders"));
+            games_scan(&app, &listed, said, sizeof said);
+            found = 0;
+            for (g = 0; g < listed.count; ++g) {
+                found |= !strcmp(listed.names[g], GAME("Top")) | !strcmp(listed.names[g], GAME("One")) << 1;
+                found |= !strcmp(listed.names[g], GAME("Four")) << 2 | !strcmp(listed.names[g], GAME("Five")) << 3;
+                found |= !strcmp(listed.names[g], GAME("Hidden")) << 4;
+            }
+            assert(found == 7); /* Top, One and Four; not Five, past four levels, nor Hidden */
+            gui_games_free(&listed);
+            /* read back as it was kept; a change below it changes the stamp */
+            {
+                uint64_t stamp = games_stamp(&app);
+                char* more_deep = snx_path_join(deep, "a/b/Two");
+                assert(!snx_write_file(more_deep, "fixture", 7));
+                assert(games_stamp(&app) != stamp);
+                free(more_deep);
+            }
+            free(app.folders[0]);
+            app.folder_count = 0;
+            folders_load(&app);
+            assert(app.folder_count == 1 && app.folders_deep[0] && !strcmp(app.folders[0], deep_as));
+            folder_remove(&app, 0);
+            free(deep_as);
+            free(deep);
+#undef GAME
+        }
+        e.drop.data = more;
         event(&app, &e); /* back for the games below */
         key(&app, SDLK_ESCAPE);
         assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_FOLDERS);
@@ -1686,7 +2021,7 @@ int main(int argc, char** argv) {
     }
     assert(ready && app.menu.running);
     render(&app);
-    shows(&app, SAY_ABORT, red);
+    shows_foot(&app, SAY_ABORT, red);
     int selected = app.menu.selected;
     key(&app, SDLK_DOWN);
     key(&app, SDLK_RETURN);
@@ -1699,7 +2034,7 @@ int main(int argc, char** argv) {
     app.theme.prompt.lines[GUI_PROMPT_ABORTING] = true;
     app.theme.prompt.blink = false;
     render(&app);
-    shows(&app, "[ Aborting process tree... ]", red);
+    shows_foot(&app, "[ Aborting process tree... ]", red); /* where the keys go */
     app.theme.prompt = gui_theme_builtin(app.theme.id)->prompt;
     key(&app, SDLK_ESCAPE); /* Repeated ESC while reaping is harmless. */
     while (app.menu.running && SDL_GetTicks() - started < 2000) {
@@ -2187,13 +2522,14 @@ int main(int argc, char** argv) {
         shows(&app, "\xfe Exit", ink);
         shows(&app, "CWD: ", ink);
         {
-            GuiMenuBoxes m; /* the foot on a band of ink, the keys' box's bar in the page's colour */
+            GuiMenuBoxes
+                m; /* the foot on a band of ink, the keys' box's bar in the page's colour, in the foot's size */
             menu_boxes(&app, &m);
             assert(same_colour(pixel(&app, (float)(m.place.keys.x + m.place.keys.w - 2), (float)(m.place.keys.y + 1)),
                                ink));
-            assert(same_colour(
-                pixel(&app, (float)(m.place.keys.x + 3 * app.scale), (float)(m.place.keys.y + m.place.keys.h / 2)),
-                page));
+            assert(same_colour(pixel(&app, (float)(m.place.keys.x + 3 * foot_scale(&app)),
+                                     (float)(m.place.keys.y + m.place.keys.h / 2)),
+                               page));
         }
         app_select(&app, GUI_APP_THEME);
         assert(!strcmp(app.theme.id, "custom") && !strcmp(app.theme.name, "Custom test"));
@@ -2260,7 +2596,7 @@ int main(int argc, char** argv) {
                 int s = app.scale, w;
                 SDL_Color c;
                 render(&app);
-                shows(&app, "put back", normal); /* the picker's keys */
+                shows_foot(&app, "put back", normal); /* the picker's keys */
                 picker_place(&app, &pk);
                 assert(pk.box.x + pk.box.w <= f.place.list.x + f.place.list.w); /* over the keys: the preview shows */
                 /* each bar the colours its channel goes through, the red one's ends black and red */
@@ -2703,17 +3039,48 @@ int main(int argc, char** argv) {
         text_px_is(&app, r.x + cw, r.y + 2 * s, "Setup device keys", normal, black);
         text_px_is(&app, r.x + cw, r.y + head_h(&app) + 2 * s, "Installs prod.keys", normal, black);
         text_px_is(&app, m.place.status.x + cw, m.place.status.y + 2 * s, "Status", normal, black);
-        /* the foot: the tips under the list, what the focus is about; the keys beside them, against the right edge,
-           each key in the focus colour; the default's on the page, no box */
+        /* the tips on a row of their own under the head, what the focus is about or the screen's message, a failure's
+           in its colour; the keys alone at the foot, the whole width */
+        r = m.place.tips;
+        assert(app.theme.tips_place == GUI_TIPS_TOP && r.x == m.place.head.x && r.w == m.place.head.w);
+        assert(r.y > m.place.tabs.y + m.place.tabs.h && r.y + r.h < m.place.list.y);
+        assert(m.place.keys.x == m.place.head.x && m.place.keys.w == m.place.head.w && m.place.keys.y > r.y);
+        text_px_is(&app, r.x, r.y + 2 * s, "Installs prod.keys", normal, black);
+        snprintf(app.message, sizeof app.message, "Program ended abnormally (status 7).");
+        app.abnormal_exit = true;
+        render(&app);
+        text_px_is(&app, r.x, r.y + 2 * s, "Program ended abnormally", red, black);
+        app.message[0] = 0;
+        app.abnormal_exit = false;
+        /* in the foot with [tips] place = bottom: under the list, the keys beside them, against the right edge, each key
+           in the focus colour; the default's on the page, no box */
+        app.theme.tips_place = GUI_TIPS_BOTTOM;
+        render(&app);
+        menu_boxes(&app, &m);
         r = m.place.tips;
         assert(r.y == m.place.keys.y && r.x == m.place.list.x && r.w == m.place.list.w &&
                m.place.keys.x == m.place.side.x);
         assert(r.y > m.place.list.y + m.place.list.h && r.y + r.h <= 800 - 8 * s);
-        text_px_is(&app, r.x, r.y + 2 * s, "Installs prod.keys", normal, black);
-        r = m.place.keys;
-        shows(&app, "ESC", yellow);
-        shows(&app, "exit", normal);
-        text_px_is(&app, r.x + r.w - 10 * cw, r.y + 2 * s + 16 * s, "Tab", yellow, black);
+        { /* the tips and the keys in the foot's letters, a size under the rest's; Tab's the last key, against the right
+             edge of the keys' last row */
+            int fs = foot_scale(&app), rows;
+            assert(fs == s - 1);
+            foot_px_is(&app, r.x, r.y + 2 * fs, "Installs prod.keys", normal, black);
+            r = m.place.keys;
+            rows = (r.h - 4 * fs) / (16 * fs);
+            assert(rows >= 1 && r.h == rows * 16 * fs + 4 * fs);
+            shows_foot(&app, "ESC", yellow);
+            shows_foot(&app, "exit", normal);
+            hides(&app, "ESC", yellow);
+            foot_px_is(&app, r.x + r.w - 10 * 8 * fs, r.y + 2 * fs + (rows - 1) * 16 * fs, "Tab", yellow, black);
+            app.menu.text_size = 1; /* 1x: the foot's too, never under it */
+            render(&app);
+            assert(app.scale == 1 && foot_scale(&app) == 1);
+            shows(&app, "ESC", yellow);
+            app.menu.text_size = 0;
+            render(&app);
+            menu_boxes(&app, &m);
+        }
         /* the screens as tabs over it all, the one shown framed in the focus colour */
         r = m.place.tabs;
         assert(r.h && r.y + r.h <= m.place.list.y);
@@ -2742,7 +3109,7 @@ int main(int argc, char** argv) {
         snprintf(app.message, sizeof app.message, "Program ended abnormally (status 7).");
         app.abnormal_exit = true;
         render(&app);
-        text_px_is(&app, r.x, r.y + 2 * s, "Program ended abnormally", red, black);
+        foot_px_is(&app, r.x, r.y + 2 * foot_scale(&app), "Program ended abnormally", red, black);
         app.message[0] = 0;
         app.abnormal_exit = false;
         /* the pointer: over Exit's box it takes the focus, a click on Setup device keys opens its screen */
@@ -2780,7 +3147,7 @@ int main(int argc, char** argv) {
             {
                 char start[9]; /* its path, from a drive's letter on Windows */
                 snprintf(start, sizeof start, "%s", app.games.paths[0]);
-                text_px_is(&app, g.place.tips.x, g.place.tips.y + 2 * s, start, normal, black);
+                foot_px_is(&app, g.place.tips.x, g.place.tips.y + 2 * foot_scale(&app), start, normal, black);
             }
             key(&app, SDLK_RIGHT);
             assert(app.browser.page == 1);
@@ -2806,14 +3173,16 @@ int main(int argc, char** argv) {
             r = inner(&app, k.place.list);
             text_px_is(&app, r.x, k.place.list.y + 2 * s, "Setup device keys", normal, black);
             text_px_is(&app, r.x + (r.w - (int)strlen(waiting) * cw) / 2, k.prompt, waiting, yellow, black);
-            text_px_is(&app, k.place.tips.x, k.place.tips.y + 2 * s, "Setup device keys:", normal, black);
+            foot_px_is(&app, k.place.tips.x, k.place.tips.y + 2 * foot_scale(&app), "Setup device keys:", normal,
+                       black);
             app.clock = 0;
             mouse_px(&app, r.x + 10, k.prompt + 4, true);
             for (until = SDL_GetTicks() + 2000; !app.message[0] && SDL_GetTicks() < until;)
                 while (SDL_PollEvent(&answer)) event(&app, &answer);
             assert(app.menu.view == GUI_LOAD_KEYS && !strcmp(app.message, "No file was picked."));
             render(&app);
-            text_px_is(&app, k.place.tips.x, k.place.tips.y + 2 * s, "No file was picked.", yellow, black);
+            foot_px_is(&app, k.place.tips.x, k.place.tips.y + 2 * foot_scale(&app), "No file was picked.", yellow,
+                       black);
             b = list_box(&k.back, 0);
             mouse_px(&app, b.x + 4, b.y + 4, true);
             assert(app.menu.view == GUI_LOAD_NONE);
@@ -2877,9 +3246,9 @@ int main(int argc, char** argv) {
             b = list_box(&f.right, 0);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- libgccjit", yellow, black);
             {
-                char start[16]; /* in the tips, its first row */
+                char start[16]; /* in the tips, its first row: in the foot here, in its letters */
                 snprintf(start, sizeof start, "%s", app.settings.keys[0].about);
-                shows(&app, start, normal);
+                shows_foot(&app, start, normal);
             }
             /* a click on the second row focuses it, a second click changes it */
             launcher(&app, false);
@@ -3029,8 +3398,8 @@ int main(int argc, char** argv) {
             assert(app.console.cols == cols && app.console.rows == rows && !p.tabs.h);
             text_px_is(&app, p.list.x + cw, p.list.y + 2 * s, "Output", normal, black);
             text_px_is(&app, p.side.x + cw, p.side.y + 2 * s, "Load Linux ARM ELF", normal, black);
-            r = foot_text(&app, p.keys, app.theme.footer_box);
-            text_px_is(&app, r.x + r.w - (int)strlen(SAY_ABORT) * cw, r.y, SAY_ABORT, red, black);
+            r = foot_room(&app, p.keys, app.theme.footer_box);
+            foot_px_is(&app, r.x + r.w - (int)strlen(SAY_ABORT) * 8 * foot_scale(&app), r.y, SAY_ABORT, red, black);
             touch_box(&app, p.keys);
             assert(app.aborting);
             for (until = SDL_GetTicks() + 3000; app.menu.running && SDL_GetTicks() < until; SDL_Delay(5)) pump(&app);
@@ -3048,11 +3417,170 @@ int main(int argc, char** argv) {
                        p.side.y + head_h(&app) + 2 * s +
                            wrap_rows(&app, app.file, (p.side.w - 2 * cw) / cw, 1) * 16 * s + 8 * s,
                        "Driver exited with status 0.", yellow, black);
-            r = foot_text(&app, p.keys, app.theme.footer_box);
-            text_px_is(&app, r.x, r.y, SAY_DONE, red, black);
+            r = foot_room(&app, p.keys, app.theme.footer_box);
+            foot_px_is(&app, r.x, r.y, SAY_DONE, red, black);
             key(&app, SDLK_ESCAPE);
             assert(!app.finished && app.menu.view == GUI_LOAD_NONE);
             pump(&app);
+            app.menu.selected = GUI_KEYS;
+        }
+        /* each key the foot shows is a button: a click or a tap on its word presses it as the keyboard does, each word
+           between slashes its own; its text, when its words all press one key, that key. A word of every screen's keys
+           presses one, or is one that names none */
+        {
+            static const char* const says[] = {SAY_MENU_KEYS, SAY_GAMES,    SAY_KEYS_HOW,   SAY_EDITOR,
+                                               SAY_PICKER,    SAY_SETTINGS, SAY_GROUPS,     SAY_APP,
+                                               SAY_FOLDERS,   SAY_PAD,      " Tab: screen."};
+            static const char* const none[] = {"Arrows", "mouse", "pad"};
+            char key_of[128], what[128];
+            Uint8 was;
+            int launch;
+            for (size_t i = 0; i < SDL_arraysize(says); ++i)
+                for (const char* at = says[i]; hint_next(&at, key_of, what, sizeof key_of);)
+                    for (const char *word = key_of, *end; *word; word = *end ? end + 1 : end) {
+                        size_t n, k;
+                        end = strchr(word, '/');
+                        if (!end) end = word + strlen(word);
+                        n = (size_t)(end - word);
+                        for (k = 0; k < SDL_arraysize(none) && (strlen(none[k]) != n || strncmp(none[k], word, n));
+                             ++k) {}
+                        if (hint_word(word, n) < 0 && k == SDL_arraysize(none))
+                            fprintf(stderr, "gui_sdl.c: the foot's key \"%.*s\" presses nothing\n", (int)n, word);
+                        assert(hint_word(word, n) >= 0 || k < SDL_arraysize(none));
+                    }
+            app.theme = *gui_theme_builtin("default");
+            app.menu.view = GUI_LOAD_NONE;
+            app.menu.selected = GUI_SETTINGS;
+            app.message[0] = 0;
+            /* the menu: ESC asks before closing, the pointer over it presses nothing; Arrows/mouse name no one key;
+               select, the text of three words that all select, opens the Settings, where ESC comes back */
+            press_key(&app, "ESC", 0, false, yellow);
+            assert(app.confirm.shown && app.confirm.exit);
+            key(&app, SDLK_ESCAPE);
+            assert(!app.confirm.shown && !app.menu.quit);
+            {
+                int x, y, scale = app.scale;
+                render(&app);
+                app.scale = foot_scale(&app);
+                assert(find_text(&app, "ESC", yellow, 1, &x, &y));
+                app.scale = scale;
+                mouse_px(&app, x + 4, y + 4, false);
+                assert(!app.confirm.shown);
+            }
+            press_key(&app, "Arrows/mouse", 1, false, yellow);
+            assert(app.menu.selected == GUI_SETTINGS && !app.editing);
+            press_key(&app, "Space/Enter/click", 20, false, yellow);
+            assert(app.editing && app.form == GUI_FORM_SETTINGS);
+            press_key(&app, "ESC", 0, false, yellow);
+            assert(!app.editing && app.menu.view == GUI_LOAD_NONE);
+            { /* the keys' box's whole height is their rows': a click on its top edge, over Tab, opens Games */
+                GuiMenuBoxes mb;
+                int x, y, scale = app.scale;
+                render(&app);
+                menu_boxes(&app, &mb);
+                app.scale = foot_scale(&app);
+                assert(find_text(&app, "Tab", yellow, 1, &x, &y));
+                app.scale = scale;
+                assert(y > mb.place.keys.y);
+                mouse_px(&app, x + 4, mb.place.keys.y, true);
+                assert(app.menu.view == GUI_LOAD_GAMES);
+                go_tab(&app, GUI_TAB_MENU);
+            }
+            /* a tap on Tab opens Games, where each word of Left/Right/PgUp/PgDown turns the page its way, and its text,
+               of words two ways, none; Up/Down's each move the focus */
+            press_key(&app, "Tab", 0, true, yellow);
+            assert(app.menu.view == GUI_LOAD_GAMES && app.browser.page == 0 && gui_browser_pages(&app.browser) > 1);
+            press_key(&app, "Left/Right/PgUp/PgDown", 18, false, yellow); /* PgDown */
+            assert(app.browser.page == 1);
+            press_key(&app, "Left/Right/PgUp/PgDown", 24, false, yellow); /* page */
+            assert(app.browser.page == 1);
+            press_key(&app, "Left/Right/PgUp/PgDown", 12, false, yellow); /* PgUp */
+            assert(app.browser.page == 0);
+            press_key(&app, "Left/Right/PgUp/PgDown", 10, false, yellow); /* Right's slash */
+            assert(app.browser.page == 1);
+            press_key(&app, "Left/Right/PgUp/PgDown", -1, false, yellow); /* the margin before Left */
+            assert(app.browser.page == 0);
+            app.browser.selected = 0;
+            press_key(&app, "Up/Down", 3, false, yellow);
+            assert(app.browser.selected == 1);
+            press_key(&app, "Up/Down", 0, false, yellow);
+            assert(app.browser.selected == 0);
+            /* Android's words: a swipe across turns the page, Back goes back as ESC, a tap selects; Tap outside, the
+               picker's, presses nothing (a tap off the picker keeps the colour) */
+            assert(hint_press(&app, "Swipe across", 0) && app.browser.page == 1);
+            assert(!hint_press(&app, "Tap outside", 0));
+            go_tab(&app, GUI_TAB_MENU);
+            assert(hint_press(&app, "Back", 0) && app.confirm.shown && app.confirm.exit);
+            key(&app, SDLK_ESCAPE);
+            app.menu.selected = GUI_KEYS;
+            assert(hint_press(&app, "Tap", 0) && app.menu.view == GUI_LOAD_KEYS);
+            /* the keys' screen: ESC goes back */
+            press_key(&app, "ESC", 0, false, yellow);
+            assert(app.menu.view == GUI_LOAD_NONE && !app.confirm.shown);
+            /* a group's settings: Up/Down, Left/Right change the row, Del puts it back, ESC leaves the rows, then the
+               Settings */
+            open_settings(&app);
+            for (launch = 0; launch < app.groups && strcmp(app.group_keys[launch].key, "Launch"); ++launch) {}
+            assert(launch < app.groups);
+            app.editor.row = launch;
+            press_key(&app, "Enter", 0, false, yellow);
+            assert(app.form == GUI_FORM_GROUP && app.group == launch && !app.editor.row);
+            press_key(&app, "Up/Down", 5, false, yellow);
+            assert(app.editor.row == 1 && !strcmp(app.settings.keys[app.first + 1].key, "gdbstub"));
+            assert(gui_settings_set(&app.settings, "gdbstub", "off"));
+            press_key(&app, "Left/Right", 6, false, yellow);
+            assert(setting_is(&app, "gdbstub", "on"));
+            press_key(&app, "Del", 0, false, yellow);
+            assert(setting_is(&app, "gdbstub", NULL));
+            press_key(&app, "ESC", 0, false, yellow);
+            assert(app.editing && app.form == GUI_FORM_SETTINGS);
+            press_key(&app, "ESC", 0, false, yellow);
+            assert(!app.editing);
+            /* the colour picker, its keys over the foot as ever: Right steps the channel, ESC puts the colour back; a
+               finger on Enter keeps it as it goes down, its lift no tap that would open the picker again */
+            app_select(&app, GUI_APP_EDITOR);
+            assert(app.editing && app.form == GUI_FORM_THEME);
+            for (app.editor.row = 0; !gui_editor_key_of(&app.editor, app.editor.row) ||
+                                     strcmp(gui_editor_key_of(&app.editor, app.editor.row)->key, "page");
+                 ++app.editor.row) {}
+            key(&app, SDLK_RETURN);
+            assert(app.editor.picking && app.editor.channel == GUI_PICK_RED && app.editor.theme.page.r < 255);
+            was = app.editor.theme.page.r;
+            press_key(&app, "Left/Right", 6, false, yellow);
+            assert(app.editor.picking && app.editor.theme.page.r == was + 1);
+            press_key(&app, "ESC", 0, false, yellow);
+            assert(!app.editor.picking && app.editor.theme.page.r == was && app.form == GUI_FORM_THEME);
+            key(&app, SDLK_RETURN);
+            assert(app.editor.picking);
+            press_key(&app, "Enter", 0, true, yellow);
+            assert(!app.editor.picking && app.editing && app.form == GUI_FORM_THEME && !app.pick_press);
+            key(&app, SDLK_ESCAPE);
+            assert(app.editing && app.form == GUI_FORM_APP);
+            leave_editor(&app);
+            /* the game folders: Add a folder opens the folder picker, which answers none here */
+            app_select(&app, GUI_APP_FOLDERS);
+            assert(app.editing && app.form == GUI_FORM_FOLDERS && !app.editor.note[0]);
+            press_key(&app, "Add a folder", 0, false, yellow);
+            {
+                SDL_Event answer;
+                Uint64 until = SDL_GetTicks() + 2000;
+                while (!app.editor.note[0] && SDL_GetTicks() < until) /* its answer comes on the picker's thread */
+                    while (SDL_PollEvent(&answer)) event(&app, &answer);
+            }
+            assert(!strcmp(app.editor.note, "No folder was picked.") ||
+                   !strncmp(app.editor.note, "The folder picker could not open: ", 34));
+            leave_editor(&app);
+            /* with the tips beside them, and in YoRHa's box on the band, in its page colour */
+            app.theme.tips_place = GUI_TIPS_BOTTOM;
+            press_key(&app, "Tab", 0, false, yellow);
+            assert(app.menu.view == GUI_LOAD_GAMES);
+            go_tab(&app, GUI_TAB_MENU);
+            app.theme = *gui_theme_builtin("yorha");
+            app.theme.grid = false;
+            press_key(&app, "ESC", 0, false, rgb(app.theme.page));
+            assert(app.confirm.shown && app.confirm.exit);
+            key(&app, SDLK_ESCAPE);
+            app.theme = *gui_theme_builtin("default");
             app.menu.selected = GUI_KEYS;
         }
         /* YoRHa: the boxes on its dim colour, the focused one on its focus colour with the cursor in the margin, the
@@ -3081,19 +3609,31 @@ int main(int argc, char** argv) {
         text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "\xfe Exit", ink, dim = rgb(app.theme.dim));
         r = m.place.side;
         text_px_is(&app, r.x + cw, r.y + 2 * s, "Setup device keys", page, ink);
-        r = foot_text(&app, m.place.tips, app.theme.tips_box); /* the tips on the foot's band, in the page's colour */
-        text_px_is(&app, r.x, r.y, "Installs prod.keys", page, ink);
+        r = foot_text(&app, m.place.tips, app.theme.tips_box); /* the tips in their box under the head, off the band */
+        assert(m.place.tips.y < m.place.list.y);
+        text_px_is(&app, r.x, r.y, "Installs prod.keys", ink, page);
+        app.theme.tips_place = GUI_TIPS_BOTTOM; /* in the foot: on its band, in the page's colour */
+        render(&app);
+        menu_boxes(&app, &m);
+        r = foot_room(&app, m.place.tips, app.theme.tips_box);
+        foot_px_is(&app, r.x, r.y, "Installs prod.keys", page, ink);
         /* on one row of the foot, the rest of a long one out of it until it slides there; [tips] wrap puts the rest on
            the foot's next rows */
-        hides(&app, "extracted with", page);
+        snprintf(app.message, sizeof app.message,
+                 "The tips take a row of the foot: a long line slides, or wraps over its rows.");
+        assert((int)strlen(app.message) > r.w / (8 * foot_scale(&app)));
+        render(&app);
+        foot_px_is(&app, r.x, r.y, "The tips take", page, ink);
+        hides_foot(&app, "its rows.", page);
         for (app.clock = 1; gui_slide(1000, app.clock, app.theme.scroll_ms) != 2;) app.clock += app.theme.scroll_ms;
         render(&app);
-        text_px_is(&app, r.x, r.y, "stalls prod.keys", page, ink);
+        foot_px_is(&app, r.x, r.y, "e tips take", page, ink);
         app.clock = 1;
         app.theme.tips_wrap = true;
         render(&app);
-        shows(&app, "extracted with", page);
+        shows_foot(&app, "its rows.", page);
         app.theme.tips_wrap = false;
+        app.message[0] = 0;
         app.clock = 0;
         /* [body] text: a text too long for its box over its rows, or on one row that slides */
         {
@@ -3199,11 +3739,15 @@ int main(int argc, char** argv) {
             app.recent = kept;
             recent_changed(&app);
         }
-        /* letters too big for the screen: the list scrolls, the focus in view, an arrow where entries are hidden */
+        /* letters too big for the screen: the list scrolls, the focus in view, an arrow where entries are hidden. At
+           800 high the whole menu fits 3x, its foot's letters 2x: 768 keeps 3x and one entry fewer */
+        assert(SDL_SetWindowSize(app.window, 1280, 768));
+        SDL_SyncWindow(app.window);
         app.menu.text_size = GUI_TEXT_MAX;
         app.menu.selected = GUI_EXIT;
         render(&app);
         menu_boxes(&app, &m);
+        assert(app.scale == 3 && foot_scale(&app) == 2);
         assert(m.list.shown < m.list.count && m.list.first > 0 && m.list.focus < m.list.first + m.list.shown);
         assert(menu_scrolls(&app));
         b = list_box(&m.list, m.list.first);
@@ -3408,6 +3952,19 @@ int main(int argc, char** argv) {
                 free(lines[i][0]);
                 free(lines[i][1]);
             }
+            /* gui/'s gamecontrollerdb.txt, where #276 read it, goes to the config folder as settings.ini does */
+            {
+                char *db = snx_path_join(old, "gamecontrollerdb.txt"),
+                     *said = snx_format("%s" SAY_LEFT_BY "%s/scarletnx\n", old, config);
+                assert(!snx_write_file(db, "", 0));
+                left_behind(&app);
+                assert(app.lefts == 6 && strstr(app.left, said));
+                assert(!snx_remove_tree(db));
+                left_behind(&app);
+                assert(app.lefts == 5);
+                free(said);
+                free(db);
+            }
             /* in a box over the menu as it opens: each where it is (-) and where it would go (->, in ink: a proposal,
                not a diff's added green), a path too long for a row going on in the next, as many as fit */
             {
@@ -3576,6 +4133,7 @@ int main(int argc, char** argv) {
         assert(app.form == GUI_FORM_GROUP);
         leave_editor(&app);
     }
+    players_view(&app);
     step_line();
     /* YoRHa's Settings: its groups' column wide enough for the last row with its cursor; a page of a group open, its
        name over its rows */

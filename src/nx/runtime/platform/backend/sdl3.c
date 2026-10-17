@@ -324,7 +324,7 @@ int backend_vk_surface(VkInstance instance, VkSurfaceKHR* surface) {
     LOG("video: no Vulkan surface: %s\n", SDL_GetError());
     return 0;
 }
-static const char* HELP = "Controller: A, B, X and Y as their labels say (gamepad_buttons=0: by position). Home: "
+static const char* HELP = "Controller: A, B, X and Y where the console's are (gamepad_swap_ab=1 swaps A and B). Home: "
                           "the game's menu.\n\n"
                           "Keyboard (keys by position, as on a US layout):\n"
                           "  Arrows = D-Pad     W A S D = left stick    I J K L = right stick\n"
@@ -986,8 +986,10 @@ void video_poll(void) {
         gamepad_state_slot(i, &one_buttons, one_sticks);
         gamepad_rumble_slot(i, __atomic_load_n(&player->rumble[0], __ATOMIC_RELAXED),
                             __atomic_load_n(&player->rumble[1], __ATOMIC_RELAXED));
-        __atomic_store_n(&player->connected, connected || i == 0, __ATOMIC_RELAXED);
-        __atomic_store_n(&player->kind, connected ? gamepad_kind(gamepad_slot_type(i)) : SNX_PAD_FULL_KEY,
+        /* each player as its settings say: seen or not, and the kind of controller the game sees */
+        __atomic_store_n(&player->connected, (connected && gamepad_player_seen(i)) || i == 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&player->kind,
+                         gamepad_player_kind(i, connected ? gamepad_kind(gamepad_slot_type(i)) : SNX_PAD_FULL_KEY),
                          __ATOMIC_RELAXED);
         player->source_id = id;
         player->buttons = one_buttons;

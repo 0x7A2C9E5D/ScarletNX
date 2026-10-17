@@ -13,8 +13,8 @@
 
 enum { FIRST = 3, VISIBLE = OVERLAY_ROWS - FIRST - 1 }; /* the items' first row, and how many show at once */
 enum { PAGE_MAIN, PAGE_CONTROLS, PAGE_BUTTONS, PAGE_PADS, PAGE_MAP };
-enum { M_CONTROLS, M_PADS, M_EXIT, M_COUNT };                                  /* the first page's items */
-enum { P_LABELS, P_DEADZONE, P_RUMBLE, P_BACKGROUND, P_MAP, P_BACK, P_COUNT }; /* the gamepads' page's */
+enum { M_CONTROLS, M_PADS, M_EXIT, M_COUNT };                                          /* the first page's items */
+enum { P_PLAYER, P_SWAP, P_DEADZONE, P_RUMBLE, P_BACKGROUND, P_MAP, P_BACK, P_COUNT }; /* the gamepads' page's */
 /* the controls page's items */
 enum {
     C_SHOW,
@@ -45,9 +45,15 @@ static const char* const CONTROLS[C_COUNT] = {"controls",
                                               SNX_VPAD_BUTTONS,
                                               "Reset layout",
                                               "Back"};
-static const char* const PADS[P_COUNT] = {"gamepad_buttons",    "gamepad_deadzone", "gamepad_rumble",
-                                          "gamepad_background", SNX_GAMEPAD_MAP,    "Back"};
+static const char* const PADS[P_COUNT] = {SNX_GAMEPAD_PLAYERS,
+                                          "gamepad_swap_ab",
+                                          "gamepad_deadzone",
+                                          "gamepad_rumble",
+                                          "gamepad_background",
+                                          SNX_GAMEPAD_MAP,
+                                          "Back"};
 static int shown, page, focus, top; /* top: the first item showing */
+static int pad_player;              /* the player the gamepads' page shows: 0 every player's, 1 to SNX_GAMEPADS */
 /* the YoRHa menu's colours, from its theme.ini (gui_theme_colors.h), as R G B A bytes; the page lets the game show
    through a little */
 #define SNX_OVERLAY_RGBA(rgb, a) ((u32)(a) << 24 | ((rgb) & 0xFFu) << 16 | ((rgb) & 0xFF00u) | ((rgb) >> 16 & 0xFFu))
@@ -82,6 +88,12 @@ static int clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; 
 /* the setting an item is, NULL for an action */
 static const IniOpt* setting(int i) {
     if (page == PAGE_CONTROLS) return ini_find(i == C_TOUCH ? g_backend_ini : g_vpad_ini, CONTROLS[i]);
+    if (page == PAGE_PADS && i == P_PLAYER) return NULL;
+    if (page == PAGE_PADS && pad_player && (i == P_SWAP || i == P_RUMBLE)) { /* the player's own */
+        char key[32];
+        snprintf(key, sizeof key, "gamepad_p%d_%s", pad_player, i == P_SWAP ? "swap_ab" : "rumble");
+        return ini_find(g_gamepad_players_ini, key);
+    }
     if (page == PAGE_PADS) return ini_find(g_gamepad_ini, PADS[i]);
     return page == PAGE_BUTTONS && i > 0 && i <= SNX_VPAD_COUNT ? &g_vpad_shown_ini[i - 1] : NULL;
 }
@@ -109,6 +121,14 @@ static void label(int i, char* text, size_t size, char* value, size_t vsize) {
         if (i == 0) snprintf(value, vsize, "%s", all_shown() ? "Shown" : "Some hidden");
         return;
     }
+    if (page == PAGE_PADS && i == P_PLAYER) { /* as Eden's tabs: every player's, or one's own */
+        snprintf(text, size, "%s", SNX_GAMEPAD_PLAYERS);
+        if (pad_player)
+            snprintf(value, vsize, "< %d >", pad_player);
+        else
+            snprintf(value, vsize, "< All >");
+        return;
+    }
     snprintf(text, size, "%s", page == PAGE_PADS ? PADS[i] : CONTROLS[i]);
     if ((page == PAGE_CONTROLS && i == C_BUTTONS) || (page == PAGE_PADS && i == P_MAP)) snprintf(value, vsize, ">");
 }
@@ -116,8 +136,6 @@ static void label(int i, char* text, size_t size, char* value, size_t vsize) {
 static SnxPadScreen map;
 static SnxPadDrawing map_drawing; /* as last drawn: what a tap lands on */
 static int map_swallow;           /* the press the page took: no menu key */
-static const char* const MAP_NAMES[] = {"By position", "By label", "Custom"};
-static const int MAP_MODES[] = {SNX_PAD_BY_POSITION, SNX_PAD_BY_LABEL, SNX_PAD_CUSTOM};
 /* the first pad's name, its labels and what it holds */
 static void map_pad(void) {
     const char* name = gamepad_name(0);
@@ -130,8 +148,10 @@ static void map_pad(void) {
 }
 static void map_open(void) {
     SnxGamepadConfig* g = gamepad_config();
-    snx_pad_screen_start(&map, 3, MAP_NAMES, MAP_MODES, g->labels);
-    map.own = g->own;
+    const SnxPlayerConfig* p = pad_player ? gamepad_player(pad_player - 1) : NULL;
+    snx_pad_screen_start(&map);
+    map.own = p && p->has_map ? p->own : g->own;
+    map.swap_ab = p && p->swap_ab >= 0 ? p->swap_ab : g->swap_ab;
     map_pad();
     page = PAGE_MAP;
     focus = top = 0;
@@ -139,13 +159,14 @@ static void map_open(void) {
 /* what the page did, kept in the game's .ini as the menu's other settings */
 static int map_did(int did) {
     SnxGamepadConfig* g = gamepad_config();
-    if (did == SNX_PAD_DID_PRESET || did == SNX_PAD_DID_MAP) {
-        g->labels = map.mode[map.in_use];
-        if (did == SNX_PAD_DID_MAP) {
-            g->own = map.own;
-            gamepad_store_map();
-        }
-        gamepad_store(&g->labels);
+    if (did == SNX_PAD_DID_MAP && pad_player) { /* the player's own map from now on */
+        SnxPlayerConfig* p = gamepad_player(pad_player - 1);
+        p->own = map.own;
+        p->has_map = 1;
+        gamepad_store_player_map(pad_player - 1);
+    } else if (did == SNX_PAD_DID_MAP) {
+        g->own = map.own;
+        gamepad_store_map();
     } else if (did == SNX_PAD_DID_LEAVE) {
         page = PAGE_PADS;
         focus = P_MAP;
@@ -184,7 +205,12 @@ static void map_draw(SnxUiList* l, int sw, int sh) {
     map_pad();
     ui_fill(l, x, y, w, h, LIGHT); /* the whole picture: the game no longer shows through, as on the small pages */
     ui_fill(l, x, y, w, ch, INK);
-    ui_text(l, x + cw, y, s, "SCARLETNX  /  BUTTON MAP", LIGHT);
+    if (pad_player) { /* the player's own */
+        char title[48];
+        snprintf(title, sizeof title, "SCARLETNX  /  PLAYER %d  /  BUTTON MAP", pad_player);
+        ui_text(l, x + cw, y, s, title, LIGHT);
+    } else
+        ui_text(l, x + cw, y, s, "SCARLETNX  /  BUTTON MAP", LIGHT);
     snx_pad_screen_lay(&map, x, y + ch, w, h - ch, cw, ch, &map_drawing);
     for (i = 0; i < map_drawing.n; ++i) {
         const SnxPadShape* p = &map_drawing.shape[i];
@@ -193,6 +219,7 @@ static void map_draw(SnxUiList* l, int sw, int sh) {
             ui_text(l, p->x, p->y, s, p->text,
                     p->style == SNX_PAD_STYLE_FOCUS || p->style == SNX_PAD_STYLE_LIT ? LIGHT
                     : p->style == SNX_PAD_STYLE_SOFT                                 ? SOFT
+                    : p->style == SNX_PAD_STYLE_NOTE                                 ? FAILURE
                                                                                      : INK);
         else if (p->kind == SNX_PAD_SHAPE_DISC)
             disc(l, p->x, p->y, p->w, p->h, p->style == SNX_PAD_STYLE_PLAIN ? SOFT : fill);
@@ -219,6 +246,10 @@ static int act(int i, int step) {
             else
                 vpad_store(v);
         }
+        return OVERLAY_NONE;
+    }
+    if (page == PAGE_PADS && i == P_PLAYER) { /* round All and 1 to 8, a select stepping up */
+        pad_player = (pad_player + (step < 0 ? SNX_GAMEPADS : 1)) % (SNX_GAMEPADS + 1);
         return OVERLAY_NONE;
     }
     if (page == PAGE_MAIN) {

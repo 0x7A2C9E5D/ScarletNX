@@ -27,6 +27,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   editor) shows an arrow past the right edge of its boxes, up on its first row and down on its last, in
   the soft colour.
 - Moving the mouse over an item focuses it in yellow without activating it.
+- The keys at the foot are buttons: a click or a tap on one presses it, as the keyboard does (ESC or
+  Back goes back, Tab to the next screen, Enter or Tap selects, Swipe across turns the page). A key of
+  words between slashes presses the word clicked, `Left` or `Right` of `Left/Right`; the text after it
+  presses the key when its words all press one. `Arrows`, `mouse` and `pad` press nothing.
 - The menu, top to bottom: the three loads, **Setup device keys**, **Settings**, **Share log** and
   **Exit**. The games, and the recent ones, are the Games tab's.
 - Space, Enter or a left click explicitly activates an item, marking it bright
@@ -59,34 +63,43 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   data folder instead (`~/.local/share/scarletnx/prod.keys`), which the driver reads before
   `~/.switch`, and names the keys of `~/.switch` it would use until then. It creates the
   folder if needed. Existing keys trigger the bright-red warning
-  **Keys already setup. This will overwrite the previous ones**. A successful
-  drop replaces them and returns to the menu; ESC cancels without changing them.
+  **Keys already setup. This will overwrite the previous ones**. The screen then says what the try
+  did, *Installed* or *Not installed* and why, and goes back to the menu by itself after 3 seconds
+  (10 after a failure, while another file can still be picked); ESC cancels without changing them.
 - **Settings** opens on its groups, Enter opening one and ESC coming back: **App**, then
   **Launch** (the launcher's two), then a group per section of the game's `.ini` (Display,
   Graphics, Performance, On-screen controls, Controllers, Network, Debug), as `scarletnx --settings`
   prints them from the runtime's own tables. The game's menu's settings have its names and words
   (*Scale* 100%, *Touch screen* Fingers), and its **Buttons** page, whose **All** steps every row;
   *Edit layout* and *Reset layout* stay in the game's menu, as the layout is each game's own.
-  Controllers' **Button map** draws the pad as the game's menu does: the presets on the left (*Each
-  game's*, the `.ini`'s, then *By position*, *By label*, *Custom*), each control in a box with the
-  console button it sends, and what the focus does at the bottom. Enter (or the pad's A) uses a
-  preset and Right goes to the controls, where Left/Right change a control's button and Enter waits
-  for a press on the pad, which takes it. A change makes *Custom* the preset in use, kept as
-  `gamepad_buttons` and `gamepad_map`; Del puts both back to the `.ini`'s. The first pad plugged in
-  is shown, its held buttons lit; the launcher reads pads only on this page.
+  Controllers' **Button map** draws the pad as the game's menu does: each control in a box down either
+  side with the console button it sends (where the console's is, unless the player's map says otherwise, A and B
+  swapped when the group's **Swap A/B** is on), and what the focus does at the bottom. Up/Down move, Left/Right
+  change a control's button and Enter (or the pad's A) waits for a press on the pad, which takes it; a change keeps
+  the whole map as `gamepad_map`, and Del puts it back to the `.ini`'s. The first pad plugged in is shown, its held
+  buttons lit; with none, the middle says why (a joystick SDL has no mapping for is named, with its GUID and the
+  file its line goes in). The launcher reads pads only on this page.
+  Controllers' **Player** row, first, goes round *All* and 1 to 8, as Eden's tabs (Left/Right or Enter): *All*
+  shows the settings every player shares; a player its own, *Controller*, *Connected*, *Type*, *Swap A/B*,
+  *Vibration* and *Button map*, each *As All* until picked, then the rows no player has its own of (the
+  dead zone, background input, Joy-Cons). A player's *Controller* is *Any*, the next to connect, until Enter on it
+  and a press on a controller give it that one (ESC leaves it as it was, Del makes it *Any* again); its *Button
+  map* is the page above on its own keys, its A and B as its *Swap A/B* says.
   **App** holds **Theme** and **Text size**, which Left/Right or Enter go round either way, **Theme editor**, which comes back to App, and **Game folders**: `games/`,
   always listed, then the player's own folders, whose games the `games/` browser lists after
   `games/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
-  or a path pasted with Ctrl+V is added too. Del, or Enter twice, takes one off the list (the
-  folder stays). They are kept in `folders.txt` beside `settings.ini`; one that cannot be read
-  is named when the games are listed. **Clean old settings**, Enter twice (the first says what it
+  or a path pasted with Ctrl+V is added too. A folder with folders in it asks first: *Only this
+  folder*, or *With subfolders*, whose games are listed too, four levels down, hidden folders
+  left alone (its row says *+ subfolders*). Del, or Enter twice, takes one off the list (the
+  folder stays). They are kept in `folders.txt` beside `settings.ini`, a line each, `/**` after
+  one kept with its subfolders; one that cannot be read is named when the games are listed. **Clean old settings**, Enter twice (the first says what it
   would do), takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
   gives a game's `.ini` for the keys it no longer uses (in the config folder's `games/`, in `games/`
   and in the player's folders), the keys of `settings.ini` that no setting of the runtime's takes
   (only while the runtime lists its settings) and those of `app.ini` the menu does not know. A box
   over the screen then lists each file and what was done to it, or why not, until a key closes it;
   Share log lists them too. A group of settings shows
-  a row each, its help above, Left/Right going round its values, Enter typing one. A setting not picked shows the runtime's default and `[default]` (*By label [default]*):
+  a row each, its help above, Left/Right going round its values, Enter typing one. A setting not picked shows the runtime's default and `[default]` (*Off [default]*):
   the run takes the game's `.ini`'s, which starts as that; one picked goes to every
   Switch run as `--key=value`, over the `.ini` ([USAGE](USAGE.md)), and is kept for every game:
   what was changed, by the `.ini`'s sections and keys, in `settings.ini` of the config folder on
@@ -103,7 +116,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
   the menu's own) and what is left on that disk, counted as the menu opens and after each run.
 - Settings > App's **Theme** switches to the next theme, or the one before: the built-in Default
-  and YoRHa, then each folder of `themes/` (see [Themes](#themes)). It is kept for the next start,
+  and YoRHa, then each folder of `themes/` (see [Themes](#themes)). The menu opens in YoRHa until one is picked.
+  It is kept for the next start,
   as is Text size, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
   name) and `text_size` (`auto` or 1 to 4). A value the
   menu does not know, or a theme no longer there, is named in the menu's message as it opens and
@@ -119,7 +133,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
 - Settings > App's **Text size** steps the menu's letters through Auto (fit the screen) and four
-  sizes. Bigger letters scroll the menu.
+  sizes. Bigger letters scroll the menu. The foot's letters (its keys, and the tips when they are
+  there) are a size under the rest's, 1x at the least.
 - **Share log** saves the last run's output and game log to `scarletnx.log`. On the
   desktop it goes in the working folder with its path copied. On Android it goes to
   `/sdcard/ScarletNX/` and is shared.
@@ -211,8 +226,8 @@ and providing job-wide CPU accounting. No elevated privileges are needed.
 ## Themes
 
 A theme colours and dresses the screens: the head (the tabs and a title), the boxes (the list, the box
-beside it about the focus, the Status box: resource use, the disk and the working folder) and the foot (the
-tips, what the focus is about or the screen's message, and the screen's keys). It applies to the menu screens
+beside it about the focus, the Status box: resource use, the disk and the working folder), the tips (what the
+focus is about or the screen's message) and the foot (the screen's keys). It applies to the menu screens
 and to the run, which is **compiling** until the runner prints its `ScarletNX - <name>` banner and
 **loading** from then on.
 
@@ -221,10 +236,11 @@ filling them. At the top the tabs, Menu, Games and Settings, and the screen's ti
 right (`[head] place = tabs`) or on a row of its own under them (`below`). Under them the list, each entry a box
 of its own, the focused one framed in the focus colour or inverted, with the theme's cursor in the margin;
 beside it a box with what the focus is about (a recent game's path, Games' folders, the keys in use, the last
-run's output) and under that one the Status box. At the foot the tips, under the list's column, and the
-screen's keys, under the side box's, each in a box with a bar down its left (`[tips] box`, `[footer] box`) or on
-the page; the tips take one row of the foot, a long one sliding, or wrap over its rows with `[tips] wrap`, and go on
-a row of their own under the head with `[tips] place = top`. Games lists Add a folder, the recent games and a
+run's output) and under that one the Status box. The tips have a row of their own under the head (`[tips] place =
+top`, both built-ins'), or go to the foot under the list's column with `bottom`, where they take one row, a long one
+sliding, or wrap over its rows with `[tips] wrap`. At the foot the screen's keys, the whole width, or under the side
+box's column beside the tips, in letters a size under the rest's; the tips and the keys each in a box with a bar down
+its left (`[tips] box`, `[footer] box`) or on the page. Games lists Add a folder, the recent games and a
 page of the games, as many as the list's box holds, the focused one's path and kind beside them; the keys'
 screen, and a load's, is one box with where the keys go, the waiting line in its middle (a click in the box
 opens the picker) and Back at its foot. The Settings list their groups, and beside them the focused group's
@@ -238,8 +254,8 @@ go, which a tap aborts. The button map draws the pad in the box between the head
 the files an older version left, comes in a box over the screen darkened.
 
 The built-ins are `default`, the look above, and `yorha`: paper and ink, a title twice the text's size, a faint
-grid on the page, square markers, the focused box inverted, the tips and the keys in boxes on a band of ink at
-the foot, and a run drawn as a
+grid on the page, square markers, the focused box inverted, the tips in a box under the head, the keys in one on a
+band of ink at the foot, and a run drawn as a
 dark loading screen in its own colours (`[run]`): the title, the game's name with turning
 dots and a turning ring; each step the driver and the runner report (unpack, extract,
 recompile with its blocks, built, launch, GPU) typed down the page, with turning dots

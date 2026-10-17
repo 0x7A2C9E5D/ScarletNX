@@ -249,7 +249,7 @@ list). A data folder that is not a checkout keeps each kind of file apart: on Li
 | its pipeline cache | `games/<id>/shader_cache/` | `~/.cache/scarletnx/games/<id>/shader_cache/` | `cache/games/<id>/shader_cache/` |
 | extractions (`3ds/` for the 3DS driver) | `work/` | `~/.cache/scarletnx/work/` | `cache/work/` |
 | the menu's themes, `<name>/theme.ini` | `themes/` | `~/.local/share/scarletnx/themes/` | `themes/` |
-| the menu's `settings.ini`, `app.ini`, `folders.txt` | the user's, as in the next columns | `~/.config/scarletnx/` | `config/` |
+| the menu's `settings.ini`, `app.ini`, `folders.txt`, `gamecontrollerdb.txt` | the user's, as in the next columns | `~/.config/scarletnx/` | `config/` |
 | the menu's `recent.txt`, `last-run.log` | the user's, as in the next columns | `~/.local/state/scarletnx/` | `state/` |
 | the menu's Share log, `scarletnx.log` | the working folder | `~/.local/state/scarletnx/` | `state/` |
 | `prod.keys`, read before `~/.switch` | the folder | `~/.local/share/scarletnx/` | the folder |
@@ -287,12 +287,16 @@ type, range and help, tab-separated.
 | `touch` | `2` | The game's touch screen: `2` fingers and the mouse's left button, `1` fingers, `0` off |
 | `controls` | `1` on Android, else `0` | The [on-screen controls](#on-screen-controls) shown |
 | `controls_snap`, `controls_scale`, `controls_opacity`, `controls_rel_center`, `controls_dpad_slide`, `controls_haptics` | `0`, `50`, `100`, `1`, `1`, `1` | As [On-screen controls](#on-screen-controls) describes them. `controls_scale` runs from `0` to `100` for 50% to 150% |
-| `gamepad_buttons` | `1` | A gamepad's A, B, X and Y as their labels say. `0` and `2` are below |
-| `gamepad_map` | none | The map `gamepad_buttons=2` uses, below |
+| `gamepad_swap_ab` | `0` | `1` swaps a gamepad's A and B. `0` sends A, B, X and Y where the console's are |
+| `gamepad_map` | none | The player's map over that, below |
 | `gamepad_deadzone` | `20` | The sticks' dead zone, in percent of their travel (`0` to `90`) |
 | `gamepad_rumble` | `100` | How strongly gamepads vibrate when the game asks, in percent. `0` is never |
 | `gamepad_background` | `0` | `1` keeps gamepads playing while the window is not focused |
 | `gamepad_joycon_pair` | `1` | `1` plays a left and right Joy-Con together, `0` separately. Restart the game after changing it |
+| `gamepad_p<N>_device` (N from 1 to 8) | empty | Player N's controller: empty takes the next to connect, else its SDL GUID as the log names it, `/2` after it for the second of two alike |
+| `gamepad_p<N>_connected` | `1` | `0`: the game never sees player N. It always sees player 1, which the keyboard drives |
+| `gamepad_p<N>_type` | `0` | The controller the game sees for player N: `0` as it is, `1` Pro Controller, `2` two Joy-Cons, `3` a left Joy-Con, `4` a right one |
+| `gamepad_p<N>_swap_ab`, `gamepad_p<N>_rumble`, `gamepad_p<N>_map` | `-1`, `-10`, empty | Player N's own `gamepad_swap_ab`, `gamepad_rumble` and `gamepad_map`; at these values, every player's |
 | `log` | `1` | Log detail. `2` logs everything, which adds runtime overhead |
 | `auto_stub_ipc` | `1` | A service command the runtime doesn't know answers success, logged as `[undeclared]`, and a service it doesn't have answers every command that way. `0` answers them with the console's UnknownCommandId instead, which shows the gap where the game makes the call |
 | `diag` | `0` | `1` saves the data of each new compute shader to `captures/compute`, and each new shader's snx-shaderc corpus entry to `captures/shaders`, for debugging |
@@ -304,30 +308,32 @@ A gamepad's motion sensors, a Joy-Con's among them, go to the game when SDL expo
 Windows, Linux and supported Unix systems. Choose the output in your operating system's sound settings. The
 renderer does not render splitters, voice biquad filters, or the delay, reverb and biquad effects yet.
 
-SDL gamepads take A, B, X and Y as their labels say (`gamepad_buttons=0`: by Switch positions; `2`: the map in
-`gamepad_map`, a control by where it sits and the button it sends, as `south:B east:A lt:ZL`, the ones it leaves out
-as their labels say). A mapped pad without readable face labels uses the usual south:A, east:B, west:X, north:Y
-layout. The sticks'
+SDL gamepads send A, B, X and Y where the console's are (A right, B bottom, X top, Y left), as emulators do;
+`gamepad_swap_ab=1` swaps A and B. `gamepad_map` sets what any control sends, a control by where it sits and the
+button it sends, as `south:B east:A lt:ZL`; the ones it leaves out send the button in their place. The sticks'
 dead zone in `gamepad_deadzone` and the game's vibration as strong as `gamepad_rumble` (both in percent), and with
 `gamepad_background=1` still play while the window is not focused; the game's menu (Home, F2) sets them under
-*Controllers*, which names the pads connected. Each connected gamepad uses its own player slot, up to eight.
+*Controllers*, which names the pads connected; its *Player* row shows every player's settings (*All*) or one
+player's own Swap A/B, Vibration and Button map. Each connected gamepad uses its own player slot, up to eight.
 Keyboard and on-screen controls also drive player one.
 `gamepad_joycon_pair=1` makes SDL combine a left and right Joy-Con. Set it to `0` to expose them separately and
 restart the game after changing it.
 
 For a joystick that SDL detects but does not recognize as a gamepad, put SDL mapping lines in
-`gamecontrollerdb.txt` beside the launcher's `settings.ini` in the user configuration folder. The game reads the
-same file. To use a file elsewhere, set `SDL_GAMECONTROLLERCONFIG_FILE` to its path before starting the
-launcher or game. A mapping line starts with the joystick GUID shown in the game log or the launcher's Controllers
-page, followed by a name and SDL button and axis bindings. For example:
+`gamecontrollerdb.txt` beside the launcher's `settings.ini` ([Folders](#folders)). A game in the launcher's
+`games/` reads the same file; any other game, the user's. To use a file elsewhere, set
+`SDL_GAMECONTROLLERCONFIG_FILE` to its path before starting the launcher or game. A mapping line starts with the
+joystick GUID shown in the game log or the launcher's Controllers page, which names the file too, followed by a name
+and SDL button and axis bindings. For example:
 
 ```text
-GUID,My Controller,a:b0,b:b1,x:b2,y:b3,leftx:a0,lefty:a1,rightx:a2,righty:a3
+GUID,My Controller,a:b0,b:b1,x:b2,y:b3,leftx:a0,lefty:a1,rightx:a2,righty:a3,platform:Linux,
 ```
 
-Replace `GUID` and each binding with values for the device. This SDL mapping selects physical joystick controls;
-`gamepad_map` instead selects which Switch buttons the mapped controls send. The game log reports every detected
-joystick, whether it has an SDL mapping, and any gamepad open error. On Linux, installing
+Replace `GUID` and each binding with values for the device, and `Linux` with `Windows`, `FreeBSD` or `Android`
+where it runs: SDL takes a line of the file only with its own platform. This SDL mapping selects physical joystick
+controls; `gamepad_map` instead selects which Switch buttons the mapped controls send. The game log reports every
+detected joystick, whether it has an SDL mapping, and any gamepad open error. On Linux, installing
 `dist/72-scarletnx-input.rules` in `/etc/udev/rules.d/` grants desktop seat access to joystick event nodes and
 Nintendo hidraw nodes for Joy-Con features. Reload udev rules and reconnect the controller after installation.
 Other HIDAPI controllers may need their vendor's own hidraw rule.

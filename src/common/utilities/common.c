@@ -688,11 +688,9 @@ char* snx_app_kind_dir(const char* app, int kind) {
     if (own) return snx_user_dir(kind);
     return kind == SNX_USER_DATA ? snx_strdup(app) : snx_path_join(app, kind_names[kind]);
 }
-char* snx_user_path(const char* path, int kind) {
-    char *full = kind == SNX_USER_DATA ? NULL : snx_absolute(path), *app = full ? snx_strdup(full) : NULL;
-    char *up, *root = NULL, *moved = NULL;
-    const char* rest;
-    /* the data folder it is in, from its own folder up */
+/* the data folder (snx_app_dir) full, an absolute path, is in, from full itself up; NULL for none */
+static char* app_of(const char* full) {
+    char *app = snx_strdup(full), *up;
     while (app && !snx_app_dir(app)) {
         up = snx_dirname(app);
         if (!strcmp(up, app)) {
@@ -702,6 +700,12 @@ char* snx_user_path(const char* path, int kind) {
         free(app);
         app = up;
     }
+    return app;
+}
+char* snx_user_path(const char* path, int kind) {
+    char *full = kind == SNX_USER_DATA ? NULL : snx_absolute(path), *app = full ? app_of(full) : NULL;
+    char *root = NULL, *moved = NULL;
+    const char* rest;
     if (app) root = snx_app_kind_dir(app, kind);
     /* a config folder that is the data folder divides nothing */
     if (root && !same_folder(root, app)) {
@@ -713,6 +717,13 @@ char* snx_user_path(const char* path, int kind) {
     free(app);
     free(root);
     return moved ? moved : snx_strdup(path);
+}
+char* snx_menu_dir(const char* folder, int kind) {
+    char *full = folder ? snx_absolute(folder) : NULL, *app = full ? app_of(full) : NULL;
+    char* dir = app ? snx_app_kind_dir(app, kind) : snx_user_dir(kind);
+    free(app);
+    free(full);
+    return dir;
 }
 int snx_left_behind(const char* old, const char* now) { return strcmp(old, now) && snx_path_exists(old); }
 int snx_launcher_name(const char* name) {
