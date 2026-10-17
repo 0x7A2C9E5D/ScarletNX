@@ -61,6 +61,9 @@ ARTIFACTS = {
     'ScarletNX-macos-arm64-{short}.zip': 'ScarletNX-macos-arm64.zip',
     'ScarletNX-ios-arm64-{short}.ipa': 'ScarletNX-ios-arm64.ipa',
 }
+# The packages a run may lack and still have built everywhere: their jobs fail without failing the run
+# (continue-on-error in build.yml), so a release without them says they were not built
+OPTIONAL = {'ScarletNX-macos-arm64.zip', 'ScarletNX-ios-arm64.ipa'}
 
 
 def published(release):
@@ -147,11 +150,13 @@ class Publisher(cards.Hub):
         return files, uploads, missing
 
     def complete(self, run, sha):
+        """the run's packages, and the optional ones it has none for; a required one missing stops it"""
         files, uploads, missing = self.packages(sha)
-        if missing:
-            said = '; '.join(map(nightly_notes.system, missing))
+        required = [name for name in missing if name not in OPTIONAL]
+        if required:
+            said = '; '.join(map(nightly_notes.system, required))
             raise RuntimeError(f'run {run} built everywhere, yet has no package for {said}')
-        return files, uploads
+        return files, uploads, missing
 
     @staticmethod
     def fields(files, sizes, download):
@@ -172,7 +177,8 @@ class Publisher(cards.Hub):
 
     # ---- what each event publishes
     def nightly(self, run, sha):
-        files, uploads = self.complete(run, sha)
+        files, uploads, missing = self.complete(run, sha)
+        why = f'{SERVER}/{self.repo}/actions/runs/{run}'
         date = nightly_notes.git(self.checkout, 'log', '-1', '--format=%cs', sha).strip()
         tag = f'nightly-{date}-{sha[:7]}'
         older = sorted(
@@ -190,7 +196,9 @@ class Publisher(cards.Hub):
         )
         download = f'{SERVER}/{self.to}/releases/download/{tag}'
         sizes = {name: path.stat().st_size for name, path in files.items()}
-        body = nightly_notes.notes(self.checkout, sha, previous, self.repo, list(files), download, kept, sizes=sizes)
+        body = nightly_notes.notes(
+            self.checkout, sha, previous, self.repo, list(files), download, kept, sizes=sizes, missing=missing, why=why
+        )
         title = nightly_notes.title(self.checkout, sha)
         made, new = self.put_release(self.to, tag, title, body, False, uploads)
         for old in older[self.keep - 1 :]:
@@ -203,7 +211,17 @@ class Publisher(cards.Hub):
             f'{self.keep} are kept. Built from main at'
         )
         rolling = nightly_notes.notes(
-            self.checkout, sha, previous, self.repo, list(files), download, '', sizes=sizes, lead=lead
+            self.checkout,
+            sha,
+            previous,
+            self.repo,
+            list(files),
+            download,
+            '',
+            sizes=sizes,
+            lead=lead,
+            missing=missing,
+            why=why,
         )
         self.point_rolling(title, rolling, sha)
         self.cards_now().nightly(sha)
@@ -224,7 +242,8 @@ class Publisher(cards.Hub):
         print(f'{self.repo} "{ROLLING}" links {title}')
 
     def version(self, run, sha, tag):
-        files, uploads = self.complete(run, sha)
+        files, uploads, missing = self.complete(run, sha)
+        why = f'{SERVER}/{self.repo}/actions/runs/{run}'
         earlier = sorted(
             (
                 r
@@ -250,6 +269,8 @@ class Publisher(cards.Hub):
             sizes,
             f'ScarletNX {tag}, built from',
             'the newest version',
+            missing,
+            why,
         )
         title = f'ScarletNX {tag}'
         made, new = self.put_release(self.repo, tag, title, body, '-' in tag, uploads, sha)
