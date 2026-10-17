@@ -114,8 +114,11 @@ typedef struct {
     float finger_mark;        /* the height a drag last moved the focus at, a row at a time */
     bool pen_held;            /* a pen lifted: its hover leaves the focus where the lift put it until it moves away */
     float pen_x, pen_y;       /* where it lifted, 0 to 1 across the window */
-    Uint32 picked;            /* the event a file from the system's picker comes back as */
-    SDL_Texture* splash;      /* the boot's splash, its drawing splash_side pixels square, until splash_until */
+    bool hovering;            /* a mouse or a pen over the window, at hover_x, hover_y of the render: a key of the foot
+                                 under it that a click would press is drawn lit */
+    float hover_x, hover_y;
+    Uint32 picked;                    /* the event a file from the system's picker comes back as */
+    SDL_Texture* splash;              /* the boot's splash, its drawing splash_side pixels square, until splash_until */
     const SnxSplashSvg* splash_svg;   /* the boot's pick: Wimsy, or one of dist/splash's */
     SnxSplashDrawing* splash_drawing; /* it, read once; NULL: the icon shows */
     int splash_side;
@@ -820,6 +823,7 @@ static int type_rows(const GuiTheme* theme, int rows, int first, const size_t* t
     return typing;
 }
 static void foot(App* app, const GuiPlace* p, const char* tips, SDL_Color color, const char* keys);
+static int hint_pick(const char* key, int col);
 /* a run as a loading screen: the title, the name and the ring; the steps typed down the page, their status last;
    the progress bar and its percentage */
 static void render_steps(App* app) {
@@ -1371,7 +1375,7 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
     const GuiTheme* t = &app->theme;
     char key[128], what[128];
     const char* row = keys;
-    int rows = 0, s = app->scale;
+    int rows = 0, s = app->scale, lit;
     for (;;) {
         const char *at = row, *end = row, *u = row;
         int used = 0, x;
@@ -1389,10 +1393,23 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
                 snprintf(hit->key, sizeof hit->key, "%s", key);
                 hit->col = (int)SDL_floorf((hit->x - (float)x) / (float)cell_w(app));
             }
-            if (draw && k && t->focus_bar)
+            lit = draw && k && app->hovering && app->hover_y >= (float)cy && app->hover_y < (float)(cy + cell_h(app)) &&
+                  app->hover_x >= (float)(x - cell_w(app)) && app->hover_x < (float)(x + w + cell_w(app)) &&
+                  hint_pick(key, (int)SDL_floorf((app->hover_x - (float)x) / (float)cell_w(app))) >= 0;
+            if (lit) /* the whole sentence, as a button under the pointer: inverted */
+                fill_rect(app, gui_rect(x - s, cy, w + 2 * s, cell_h(app)), band ? t->page : t->focus);
+            else if (draw && k && t->focus_bar)
                 fill_rect(app, gui_rect(x - s, cy, k * cell_w(app) + 2 * s, cell_h(app)), band ? t->soft : t->focus);
-            if (draw && k) text_in(app, r, x, cy, key, rgb(t->focus_bar || band ? t->page : t->focus));
-            if (draw) text_in(app, r, x + (k + (k ? 1 : 0)) * cell_w(app), cy, what, rgb(band ? t->page : t->ink));
+            if (draw && k)
+                text_in(app, r, x, cy, key,
+                        rgb(lit                    ? (band ? t->ink : t->page)
+                            : t->focus_bar || band ? t->page
+                                                   : t->focus));
+            if (draw)
+                text_in(app, r, x + (k + (k ? 1 : 0)) * cell_w(app), cy, what,
+                        rgb(lit    ? (band ? t->ink : t->page)
+                            : band ? t->page
+                                   : t->ink));
             x += w + 2 * cell_w(app);
         }
         ++rows;
@@ -4386,13 +4403,12 @@ static int hint_word(const char* word, size_t n) {
         if (strlen(hint_keys[i].word) == n && !strncmp(hint_keys[i].word, word, n)) return i;
     return -1;
 }
-/* a click or a tap col columns into the foot's sentence of key (hints()): the word of key it is on, the slash after a
-   word its own and the margin before the first's, pressed as on the keyboard; the sentence's text, and the margin
-   after it, press what every word does when they all do one thing. Whether a key was pressed */
-static bool hint_press(App* app, const char* key, int col) {
+/* the hint_keys entry a click or a tap col columns into the foot's sentence of key (hints()) presses, -1 for none: the
+   word of key it is on, the slash after a word its own and the margin before the first's; the sentence's text, and the
+   margin after it, what every word does when they all do one thing */
+static int hint_pick(const char* key, int col) {
     const char *word = key, *end;
     int k = (int)strlen(key), pick = -1, first = 1, w;
-    SDL_Event e;
     for (;; word = end + 1) {
         end = strchr(word, '/');
         if (!end) end = word + strlen(word);
@@ -4409,6 +4425,12 @@ static bool hint_press(App* app, const char* key, int col) {
         first = 0;
         if (!*end) break;
     }
+    return pick;
+}
+/* the key it picks pressed, as on the keyboard; whether there was one */
+static bool hint_press(App* app, const char* key, int col) {
+    int pick = hint_pick(key, col);
+    SDL_Event e;
     if (pick < 0) return false;
     if (hint_keys[pick].key == SDLK_UNKNOWN) {
         open_folder_picker(app);
@@ -4468,9 +4490,15 @@ static bool foot_press(App* app, float x, float y) {
 static void pointer(App* app, float window_x, float window_y, bool click, bool touch) {
     float x, y;
     bool picking = app->editing && app->editor.picking;
-    if ((app->menu.running && !app->confirm.shown) || app->finished) return;
+    if ((app->menu.running && !app->confirm.shown) || app->finished) {
+        app->hovering = false; /* a run's foot presses nothing */
+        return;
+    }
     layout(app);
     if (!SDL_RenderCoordinatesFromWindow(app->renderer, window_x, window_y, &x, &y)) return;
+    app->hovering = !click && !touch; /* a finger hovers nowhere, and a click has done what it lit */
+    app->hover_x = x;
+    app->hover_y = y;
     /* under a question, the folder's too, a click is the question's */
     if (click && !app->confirm.shown && foot_press(app, x, y)) {
         if (touch && picking) app->pick_press = GUI_PICK_ROWS + 1; /* the picker's finger, pressed as it went down */
@@ -4753,6 +4781,10 @@ static void event(App* app, const SDL_Event* e) {
     }
     if (e->type == SDL_EVENT_MOUSE_MOTION) {
         pointer(app, e->motion.x, e->motion.y, false, false);
+        return;
+    }
+    if (e->type == SDL_EVENT_WINDOW_MOUSE_LEAVE) {
+        app->hovering = false;
         return;
     }
     /* a notch of the wheel is a row, as a finger's drag, the way the system turns it; not under a box */

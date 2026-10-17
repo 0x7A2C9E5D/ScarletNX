@@ -3486,6 +3486,35 @@ int main(int argc, char** argv) {
                 assert(app.menu.view == GUI_LOAD_GAMES);
                 go_tab(&app, GUI_TAB_MENU);
             }
+            { /* the mouse over a key of the foot lights its sentence, inverted, when a click there presses something;
+                 not over Arrows/mouse, which names no one key, and not once it leaves the window */
+                SDL_Event left = {0};
+                int x, y, scale = app.scale;
+                SDL_Color page = rgb(app.theme.page);
+                render(&app);
+                app.scale = foot_scale(&app);
+                assert(find_text(&app, "Tab", yellow, 1, &x, &y));
+                app.scale = scale;
+                shows_foot(&app, "screen", normal);
+                mouse_px(&app, x + 4, y + 4, false);
+                assert(app.menu.view == GUI_LOAD_NONE); /* a hover presses nothing */
+                render(&app);
+                shows_foot(&app, "Tab", page);
+                shows_foot(&app, "screen", page);
+                hides_foot(&app, "Tab", yellow);
+                render(&app);
+                app.scale = foot_scale(&app);
+                assert(find_text(&app, "Arrows/mouse", yellow, 1, &x, &y));
+                app.scale = scale;
+                mouse_px(&app, x + 4, y + 4, false);
+                render(&app);
+                shows_foot(&app, "Arrows/mouse", yellow);
+                shows_foot(&app, "Tab", yellow);
+                left.type = SDL_EVENT_WINDOW_MOUSE_LEAVE;
+                app.hovering = true;
+                event(&app, &left);
+                assert(!app.hovering);
+            }
             /* a tap on Tab opens Games, where each word of Left/Right/PgUp/PgDown turns the page its way, and its text,
                of words two ways, none; Up/Down's each move the focus */
             press_key(&app, "Tab", 0, true, yellow);
