@@ -59,7 +59,8 @@ def main():
         p = subprocess.run(
             [driver, '-x', '--output', str(output), str(source)], capture_output=True, text=True, timeout=20
         )
-        assert p.returncode == 1 and 'output already exists' in p.stderr
+        # A finished extraction is used again, untouched, as the Switch driver does
+        assert p.returncode == 0 and 'Using the extraction' in p.stdout and 'Extracting' not in p.stdout
         assert before == {p.relative_to(output): p.read_bytes() for p in output.rglob('*') if p.is_file()}
         # Signature-dependent body positions, absent content and optional metadata.
         for sig in [0x10000, 0x10001, 0x10002, 0x10003, 0x10004, 0x10005]:
@@ -102,9 +103,8 @@ def main():
 
         empty, _ = run(cia(application=ncch(patch_exefs=empty_icon)))
         assert (empty / 'exefs/icon').read_bytes() == b''
-        # Default path is content addressed, in the data folder's work/3ds; extraction succeeds but execution is not
-        # claimed.
-        name = f'{TITLE:016x}-{hashlib.sha256(plain).hexdigest()}'
+        # The default path is named after the CIA in the data folder's work/3ds, in the Switch driver's alphabet
+        name = 'input with spacesliteral'
         data = root / 'data'
         # AOT is always on: the same launch also compiles and runs the tiny witness.
         run_status = 0

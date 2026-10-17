@@ -167,7 +167,12 @@ def main():
     )
     with tempfile.TemporaryDirectory(prefix='snx-supertux-boot-') as temp:
         output = Path(temp) / 'title'
-        result = subprocess.run([driver, '--output', str(output), cia], text=True, capture_output=True, timeout=1500)
+        result = subprocess.run(
+            [driver, '--max-blocks', '100000', '--output', str(output), cia],
+            text=True,
+            capture_output=True,
+            timeout=1500,
+        )
         text = result.stdout + result.stderr
         print(text)
         assert result.returncode == 3 and 'syndrome=0x00000032' in result.stderr

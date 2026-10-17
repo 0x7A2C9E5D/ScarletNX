@@ -19,18 +19,43 @@
 #endif
 
 static void usage(FILE* out) {
-    fputs("Usage: scarletnx-3ds [--model old|new] [-x] [--output NEW_DIRECTORY] [--repo DIR] [--] game.cia\n"
+    fputs("Usage: scarletnx-3ds [OPTIONS] game.cia\n"
           "       scarletnx-3ds [--model old|new] --board-info\n"
-          "Stage 2a extraction + experimental opt-in ARM11 static AOT.\n"
-          "  -x, --extract   extract only (no guest execution)\n"
-          "  --repo DIR      the data folder (default: the checkout, a portable copy's folder, else the\n"
+          "  game.cia        Extract, recompile if needed, then play a decrypted application CIA\n"
+          "  -x, --extract   Extract only\n"
+          "  -r, --recomp    Recompile without playing\n"
+          "  --model old|new The console to model (default old)\n"
+          "  --repo DIR      The data folder (default: the checkout, a portable copy's folder, else the\n"
           "                  user's data folder, as scarletnx picks it; an installed build's work/ is in\n"
           "                  its cache folder)\n"
-          "  --output DIR    new output directory; default work/3ds/<title>-<sha256>\n"
-          "  --max-blocks N  execution budget, 1..10000000 (default 100000)\n"
-          "Static ARM11 AOT enabled: bounded integer CFG; no full HLE/devices.\n"
+          "  --output DIR    The extraction folder (default work/3ds/<the CIA's name>)\n"
+          "  --max-blocks N  Stop after N native blocks (default: run until the game exits or its window\n"
+          "                  closes)\n"
+          "An extraction and a compiled module already there are used as they are: the ARM11 code is compiled\n"
+          "again only when its module is missing or no longer matches the build or the extracted code.\n"
           "Encrypted content is not implemented.\n",
           out);
+}
+/* The extraction's folder name, from the CIA's file name in the Switch driver's alphabet */
+static char* dump_name(const char* input) {
+    const char *base = input, *end;
+    for (const char* p = input; *p; ++p)
+        if (*p == '/' || *p == '\\') base = p + 1;
+    end = strrchr(base, '.');
+    if (!end || end == base) end = base + strlen(base);
+    char* name = malloc((size_t)(end - base) + 1);
+    if (!name) return NULL;
+    size_t n = 0;
+    for (const char* p = base; p < end; ++p)
+        if ((unsigned char)*p >= 128 || isalnum((unsigned char)*p) || *p == '-' || *p == '_' || *p == ' ')
+            name[n++] = *p;
+    while (n && name[n - 1] == ' ') --n;
+    name[n] = 0;
+    if (!n) {
+        free(name);
+        return snx_strdup("Game");
+    }
+    return name;
 }
 static bool cia_path(const char* path) {
     size_t n = strlen(path);
@@ -59,8 +84,8 @@ static char* work_folder(const char* repo, const char* argv0) {
 int main(int argc, char** argv) {
     SnxCtrModel model = SNX_CTR_OLD;
     const char *input = NULL, *output = NULL, *repo = NULL;
-    bool info = false, positional = false, extract_only = false, budget_set = false;
-    uint64_t max_blocks = 100000;
+    bool info = false, positional = false, extract_only = false, recompile = false, budget_set = false;
+    uint64_t max_blocks = 0; /* no budget */
     SnxCtrBoard board;
     snx_tool_console();
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -75,6 +100,8 @@ int main(int argc, char** argv) {
             info = true;
         else if (!positional && (!strcmp(arg, "-x") || !strcmp(arg, "--extract")))
             extract_only = true;
+        else if (!positional && (!strcmp(arg, "-r") || !strcmp(arg, "--recomp")))
+            recompile = true;
         else if (!positional && !strcmp(arg, "--output")) {
             if (++i == argc || !*argv[i]) {
                 fputs("scarletnx-3ds: --output requires a directory\n", stderr);
@@ -90,13 +117,13 @@ int main(int argc, char** argv) {
         } else if (!positional && !strcmp(arg, "--max-blocks")) {
             char* end = NULL;
             if (++i == argc || argv[i][0] < '0' || argv[i][0] > '9') {
-                fputs("scarletnx-3ds: --max-blocks requires 1..10000000\n", stderr);
+                fputs("scarletnx-3ds: --max-blocks requires a positive number\n", stderr);
                 return 2;
             }
             errno = 0;
             unsigned long long n = strtoull(argv[i], &end, 10);
-            if (errno || *end || !n || n > 10000000) {
-                fputs("scarletnx-3ds: --max-blocks requires 1..10000000\n", stderr);
+            if (errno || *end || !n) {
+                fputs("scarletnx-3ds: --max-blocks requires a positive number\n", stderr);
                 return 2;
             }
             max_blocks = (uint64_t)n;
@@ -114,7 +141,8 @@ int main(int argc, char** argv) {
         } else
             input = arg;
     }
-    if ((!input && !info) || (info && (input || extract_only || output || budget_set)) || (extract_only && budget_set)) {
+    if ((!input && !info) || (info && (input || extract_only || recompile || output || budget_set)) ||
+        (extract_only && (budget_set || recompile)) || (recompile && budget_set)) {
         usage(stderr);
         return 2;
     }
@@ -139,25 +167,41 @@ int main(int argc, char** argv) {
         fputs("scarletnx-3ds: expected a readable .cia file\n", stderr);
         return 2;
     }
-    char error[512], *published = NULL, *work = output ? NULL : work_folder(repo, argv[0]);
-    if (!output && !work) {
-        fputs("scarletnx-3ds: cannot resolve the work folder\n", stderr);
+    char error[512], *extracted = NULL;
+    if (output)
+        extracted = snx_strdup(output); /* as given: the extractor refuses links on the way to it */
+    else {
+        char *work = work_folder(repo, argv[0]), *name = dump_name(input);
+        extracted = work && name ? snx_path_join(work, name) : NULL;
+        free(work);
+        free(name);
+    }
+    if (!extracted) {
+        fputs("scarletnx-3ds: cannot resolve the extraction folder\n", stderr);
         return 1;
     }
-    printf("Extracting %s\n", input);
-    SnxCtrExtractResult result = snx_ctr_extract(input, output, work, &published, error, sizeof error);
-    free(work);
-    if (result != SNX_CTR_EXTRACT_OK) {
-        fprintf(stderr, "scarletnx-3ds: %s\n", error);
-        return result == SNX_CTR_EXTRACT_UNSUPPORTED ? 3 : 1;
+    /* like the Switch driver: a finished extraction is used again, the extractor publishes only complete ones */
+    if (snx_is_dir(extracted))
+        printf("Using the extraction in %s\n", extracted);
+    else {
+        printf("Extracting %s\n", input);
+        char* published = NULL;
+        SnxCtrExtractResult result = snx_ctr_extract(input, extracted, NULL, &published, error, sizeof error);
+        free(extracted);
+        if (result != SNX_CTR_EXTRACT_OK) {
+            fprintf(stderr, "scarletnx-3ds: %s\n", error);
+            return result == SNX_CTR_EXTRACT_UNSUPPORTED ? 3 : 1;
+        }
+        extracted = published;
+        printf("Extracted %s\n", extracted);
     }
-    printf("Extracted %s\n", published);
     if (extract_only) {
-        free(published);
+        free(extracted);
         return 0;
     }
-    int status = snx_ctr_aot_run(argv[0], published, model, max_blocks, error, sizeof error);
-    free(published);
+    int status = snx_ctr_aot_run(extracted, model, max_blocks, recompile ? SNX_CTR_RECOMPILE | SNX_CTR_COMPILE_ONLY : 0,
+                                 error, sizeof error);
+    free(extracted);
     if (status) fprintf(stderr, "scarletnx-3ds: %s\n", error);
     return status;
 }

@@ -24,11 +24,11 @@ Source map: [CLAUDE.md](../CLAUDE.md).
 
 The experimental `src/3ds/` / `scarletnx-3ds` target supplies board profiles,
 decrypted CIA/NCCH/ExeFS/RomFS extraction and an independent checked page-memory
-controller. `SNX_3DS_AOT=ON` adds a native Linux static-AOT pipeline: fresh
-extraction -> separate offline `scarletnx-3ds-aot` LLVM compiler/host linker ->
+controller. `SNX_3DS_AOT=ON` adds a native Linux static-AOT pipeline:
+extraction -> the driver's offline LLVM compiler/host linker (only when the module is missing or stale) ->
 native ELF -> checked process/ARM/Thumb dispatch. `snx_ctr_process` maps raw
 ExHeader segments/BSS/stack/TLS; `snx_ctr_native` validates/loads module ABI 1.
-Only the offline compiler links LLVM. The runtime uses neither MCJIT nor NX/GNU
+The driver links LLVM for its compiler, the modules do not. The runtime uses neither MCJIT nor NX/GNU
 ABI code. `common/filesystem/` / `scarletnx-filesystem` owns NX and CTR's shared
 indexed host tree, immutable file mappings and on-demand opens. CTR uses its own
 level-3 RomFS serializer/file objects and wire protocol, not Switch FS IPC.

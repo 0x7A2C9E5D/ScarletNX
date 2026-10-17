@@ -27,7 +27,7 @@ typedef struct {
     VkSemaphore acquire_sem, present_sem;
     const char* frame_dir;
     unsigned dumps;
-    int up, windowed;
+    int up, windowed, closed;
     SDL_Window* window;
     VkSurfaceKHR surface;
     VkSwapchainKHR swapchain;
@@ -284,9 +284,19 @@ static void write_ppm(unsigned screen, unsigned width, unsigned height, const un
     ++v.dumps;
 }
 /* Live presentation of the landscape frame to the window's swapchain. */
-static bool window_show(const unsigned char* rgba, unsigned width, unsigned height) {
+static void pump(void) {
     SDL_Event event;
-    while (SDL_PollEvent(&event)) {}
+    while (SDL_PollEvent(&event))
+        if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) v.closed = 1;
+}
+/* SDL turns SIGINT and SIGTERM into a quit event too, so this is also how Ctrl+C ends a run, with or without a window
+   (the audio output initializes SDL's events) */
+bool snx_ctr_present_closed(void) {
+    if (SDL_WasInit(SDL_INIT_EVENTS)) pump();
+    return v.closed;
+}
+static bool window_show(const unsigned char* rgba, unsigned width, unsigned height) {
+    pump();
     if (!v.windowed) return false;
     unsigned landscape_w = height, landscape_h = width;
     if (!v.rotated || v.rot_w != landscape_w || v.rot_h != landscape_h) {
