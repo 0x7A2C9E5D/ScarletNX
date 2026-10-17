@@ -50,8 +50,8 @@ to save direct SPIR-V modules for disassembly or comparison between builds. A co
 under `games/` or in the scratchpad, never in a tracked folder of the repo. `SNX_VK_VALIDATION=1`
 turns on the Khronos validation layer when it is installed (Arch: `vulkan-validation-layers`, which the user
 installs). A screenshot (`--shot`) reads back the frame Vulkan presented, and its hash is in the
-log: compare a change against the build before it at the same frame (Catherine's Atlus logo, `--seconds 4 --script
-""`), on a quiet machine, since the logo animates per frame. The first run after a translator change compiles every shader to SPIR-V and starts slower, which can make the New Game
+log: compare a change against the build before it at the same frame (a boot logo, `--seconds 4 --script
+""`), on a quiet machine, since logos animate per frame. The first run after a translator change compiles every shader to SPIR-V and starts slower, which can make a
 script's timed presses miss; run again with the cache warm before suspecting the renderer.
 
 ## Windows
@@ -88,11 +88,11 @@ Only when generated code or its contract changes: `src/common/cpu/recompiler/`, 
 the files under `src/common/cpu/aarch64/helpers/`. Other runtime changes normally need a runtime rebuild only. The runtime
 only checks `SNX_ABI`: a module built before an ABI change that kept it still loads and runs the old code, and a
 bump makes the runtime refuse every module built before it. A recompile of
-Catherine takes several minutes. A successful recompile removes its temporary objects. `--keep-ir` keeps the
+a large game takes several minutes. A successful recompile removes its temporary objects. `--keep-ir` keeps the
 generated code (LLVM IR, libgccjit dumps) in `<outdir>/<id>/<id>_build/` for inspection.
 
 ```bash
-build/scarletnx -r work/Catherine          # runtime and game module, both with Clang, into games/<id>/
+build/scarletnx -r work/<Game>             # runtime and game module, both with Clang, into games/<id>/
 ```
 
 `scarletnx -r` uses the LLVM backend (`--backend=gcc`, libgccjit, is for DEC Alpha EV67 hosts). Its objects aren't

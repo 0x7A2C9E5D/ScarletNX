@@ -8,7 +8,7 @@ description: "Run a recompiled game unattended and judge the result: scripted bu
 ## One command
 
 ```bash
-tools/run_game.py <id> --dump work/<Game>                 # 60 s, Catherine boot to the New Game cutscene
+tools/run_game.py <id> --dump work/<Game>                 # 60 s with the default script
 tools/run_game.py <id> --runs 5 --dump work/<Game>        # crash rate
 tools/run_game.py <id> --seconds 20 --script "" --out "$SCRATCH/boot"  # boot only, no input
 ```
@@ -48,8 +48,8 @@ Down 8000. Combine by adding. The values are 64-bit, and bits 40 to 47 push the 
 left (`10000000000`), 41 up, 42 right, 43 down, then 44 to 47 the same for the right stick (`800000000000` is right
 stick down).
 
-Catherine's New Game script (`run_game.py`'s default): Plus at 15 s skips the intro movie, A at 16 s, Plus at 18 s,
-then A at 21, 31, 36, 40 and 44 s through the menus and prompts. With save data from earlier runs the screens come
+`run_game.py`'s default script was written for one game's boot to its first cutscene: Plus at 15 s, A at 16 s, Plus
+at 18 s, then A at 21, 31, 36, 40 and 44 s. Any other game needs its own `--script`. With save data from earlier runs the screens come
 in a different order, so check the screenshots before trusting a script.
 
 ## Reading the log

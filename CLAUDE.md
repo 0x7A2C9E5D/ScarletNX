@@ -3,11 +3,9 @@
 A Linux-first fork of SwitchRecomp by MZ Labs, a static recompiler for Switch games: ARM64 code is translated to LLVM
 IR (libgccjit on DEC Alpha) and compiled into a game module (`games/<id>/<id>_code.so`, by title ID), and the runtime
 in `src/nx/` emulates the OS (kernel, IPC, services) and the GPU (Maxwell command buffers and shaders, drawn with
-Vulkan). Catherine: Full Body (USA release, 0100BF00112C0000, with its v2.0 update) is the game every change is
-checked against. Until 2026-10-11 it was the Asian release (0100BC4010896000), so earlier game addresses in Git
-history refer to that release. `README.md` has setup and commands, `docs/ROADMAP.md` the plan and current state,
-`docs/ARCHITECTURE.md` how the parts fit together. This file holds the rules sessions get wrong and points to the
-skills that carry the procedures.
+Vulkan). A change is checked against the games it affects. `README.md` has setup and commands, `docs/ROADMAP.md`
+the plan and current state, `docs/ARCHITECTURE.md` how the parts fit together. This file holds the rules sessions
+get wrong and points to the skills that carry the procedures.
 
 ## Rules
 
@@ -58,7 +56,7 @@ skills that carry the procedures.
 | Extract a dump | `build/scarletnx -x "Game.xci" --name Game [--update u.nsp]` |
 | Recompile a game (into `games/<id>/`, named by its title ID, or by a name given after the folder) | `build/scarletnx -r work/Game` |
 | Run with scripted input and a screenshot | `cd games/<id> && ./<id> --seconds=60 --shot=/path/out --script=ms:hexbuttons,...` |
-| Name addresses / disassemble game code | `tools/symbols.py work/Catherine ADDR...` / `tools/disasm.py work/Catherine FUNC` |
+| Name addresses / disassemble game code | `tools/symbols.py work/Game ADDR...` / `tools/disasm.py work/Game FUNC` |
 | Run the tests | `ctest --test-dir build` (`-R swipc` for the IPC generator) |
 | Format / check | `scripts/format.sh` / `scripts/format.sh --check` |
 
@@ -154,9 +152,9 @@ comments and developer docs under `.claude/` are out of scope.
 - The recompiler's old runtime build dropped the H.264 decoder (then OpenH264) silently when the library was missing,
   and movies stayed black. The runtime is only built by CMake now, which fetches FFmpeg with the other libraries.
 - SPIR-V lets the driver assume a shader has no infinities or NaNs unless it declares SignedZeroInfNanPreserve, and
-  Maxwell shaders rely on them (NVIDIA's compiler makes -inf with `MUFU.LG2` of zero). Without it, Tears of the
-  Kingdom's lighting came out as NaN blocks. The direct SPIR-V emitter declares the float controls requested by
-  `spirv_translate.c` for supported shader modules.
+  Maxwell shaders rely on them (NVIDIA's compiler makes -inf with `MUFU.LG2` of zero). Without it, lighting came out
+  as NaN blocks. The direct SPIR-V emitter declares the float controls requested by `spirv_translate.c` for
+  supported shader modules.
 - Nothing in a draw's setup may submit or wait for the GPU (`vk_finish`, a readback like `vk_rt_flush`): the frame's
   descriptor pools and staging reset after it, and the draw's sets already allocated turn to garbage. Copy on the GPU
   instead.

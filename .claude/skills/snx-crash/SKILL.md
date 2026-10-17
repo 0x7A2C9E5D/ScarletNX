@@ -34,9 +34,9 @@ that real hardware wouldn't. A fix without that is a guess.
 ## 2. Name and disassemble
 
 ```bash
-tools/symbols.py work/Catherine cf195f0 cf34380 cf1aacc
-tools/disasm.py work/Catherine NvRmStreamFlushSync           # a whole function
-tools/disasm.py work/Catherine cf195f0 cf19720               # a range
+tools/symbols.py work/<Game> ADDR...                         # the crash report's game addresses
+tools/disasm.py work/<Game> NvRmStreamFlushSync              # a whole function
+tools/disasm.py work/<Game> START END                        # a range
 ```
 
 Find the faulting instruction (the load or store whose address is the game address) and walk back to where its

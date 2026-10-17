@@ -22,8 +22,8 @@ math to the runtime difference behind it.
   polynomial code inside the game module, not host libm, and a game's determinism depends on them staying that way.
 - GPU math is the shader translator (`src/nx/gpu/shader/spirv_translate.c`): `MUFU` (RCP, RSQ, LG2, EX2, SIN and COS
   after `RRO` range reduction), FMZ multiplies where a zero factor gives zero even against an infinity or NaN, the
-  float controls in CLAUDE.md's lessons (Maxwell relies on infinities and NaNs, and TotK's lighting turned into NaN
-  blocks without SignedZeroInfNanPreserve). Projection, depth range and viewport flips meet Vulkan in
+  float controls in CLAUDE.md's lessons (Maxwell relies on infinities and NaNs, and a game's lighting turned into
+  NaN blocks without SignedZeroInfNanPreserve). Projection, depth range and viewport flips meet Vulkan in
   `src/nx/gpu/vk/` (`snx-vulkan-expert`'s area).
 - Time drives simulation. Guest time comes from `src/nx/runtime/clock.c` (`CNTVCT_EL0` at 19.2 MHz, the SDK's tick
   conversions) and frame pacing from `src/nx/runtime/present.c`. A game with a fixed step and accumulator, a
