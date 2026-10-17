@@ -104,6 +104,13 @@ typedef struct VicJob {
     VicSlot slots[8];
 } VicJob;
 int gmem_read(u64 gva, void* dst, u64 size);
+/* gmem_read and gmem_write in halves, for a copy of many small runs (a block linear row's 16 byte runs): the
+   renderer's hooks once over the span the runs fall in (gmem_need before reading it, gmem_before_write before writing
+   it and gpu_mem_written after), then the runs themselves without them. The hooks look through every render target */
+void gmem_need(u64 gva, u64 size);
+void gmem_read_raw(u64 gva, void* dst, u64 size);
+void gmem_before_write(u64 gva, u64 size);
+void gmem_write_raw(u64 gva, const void* src, u64 size);
 void gmem_read_code(u64 gva, void* dst, u64 size); /* a shader program: stops where guest memory does */
 int gmem_write(u64 gva, const void* src, u64 size);
 u8* gmem_ptr(u64 gva, u64 size);
