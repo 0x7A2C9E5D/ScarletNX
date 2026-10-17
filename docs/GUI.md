@@ -207,6 +207,9 @@ cannot be read is named and the others still listed.
 - **Add a folder** is the first row on every page, a wider gap under it: it opens the folder picker of Settings >
   App > Game folders. Under it the recent games, then the page's games. ESC returns to the menu.
 - Up/Down go round Add a folder, the recent games and the page's files. Enter/Space opens one.
+- **R** (on Android a tap on *Recompile* at the foot) recompiles the Switch game in focus, recent or on the page,
+  where it is, or prepares its dump again: `scarletnx -r`, with libgccjit when **libgccjit** is on. It plays nothing;
+  Enter then does. On another row, or a 3DS game, it says why it does nothing.
 - Left/Right and PgUp/PgDown go to the previous/next page. The page number and
   total file count are shown. Paging stops at the first and last pages.
 - Resizing adjusts the page size while keeping the selected file visible.
@@ -477,7 +480,7 @@ accounting. See [BUILD](BUILD.md) for SDL3's desktop dependencies.
 The tests cover menu transitions, bounded console scrolling, split UTF-8/ANSI
 sequences, path parsing, argument quoting, inherited grandchild output, resource
 accounting and process-tree cleanup. Browser tests cover filtering, missing/empty
-directories, pagination, resizing, Back/ESC and launching selected files.
+directories, pagination, resizing, Back/ESC, launching selected files and R's recompile.
 Key setup tests cover installation, replacement, invalid drops, failed writes,
 self-copy safety, cancellation, and the bright-red overwrite warning.
 Settings tests cover the runtime's list read into rows, picks, the options each combination

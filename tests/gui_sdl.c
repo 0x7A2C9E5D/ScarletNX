@@ -334,6 +334,16 @@ static void launcher(App* app, bool on) {
     assert(gui_settings_set(&app->settings, "libgccjit", on && SNX_GUI_HAS_GCCJIT ? "on" : "off"));
     assert(gui_settings_set(&app->settings, "gdbstub", on ? "on" : "off"));
 }
+/* the focus on the game of Games named name, its page shown */
+static void focus_game(App* app, const char* name) {
+    size_t i = 0;
+    list_games(app);
+    layout(app);
+    while (i < app->games.count && strcmp(app->games.names[i], name)) ++i;
+    assert(i < app->games.count && app->browser.page_size);
+    app->browser.page = i / app->browser.page_size;
+    app->browser.selected = app->browser.head + i % app->browser.page_size;
+}
 static void finish(App* app, int status) {
     assert(app->menu.running && !app->finished && !app->aborting && !app->abnormal_exit);
     int selected = app->menu.selected;
@@ -859,6 +869,13 @@ int main(int argc, char** argv) {
         puts("Recompiling picked folders\nScarletNX - picked folders");
         return 0;
     }
+    if (argc > 2 && !strcmp(argv[1], "-r") && strstr(argv[2], "room dump")) { /* R's, its room asked: not played */
+        int i = 3;
+        if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
+        assert(i + 2 == argc && !strcmp(argv[i], "--repo") && argv[i + 1][0]);
+        puts("Recompiling room dump");
+        return 0;
+    }
     if (argc > 1 && strstr(argv[1], "room dump")) { /* asked about its room first */
         int i = 2;
         char* folder = snx_dirname(argv[1]);
@@ -878,6 +895,14 @@ int main(int argc, char** argv) {
         assert(!strcmp(argv[i++], "-S") && !strcmp(argv[i++], "-s"));
         assert(!strcmp(argv[i++], "--repo") && argv[i++][0] && i == argc);
         puts("Recompiling option flags\nScarletNX - option flags"); /* the runner's banner: now loading */
+        return 0;
+    }
+    if (argc > 2 && !strcmp(argv[1], "-r") && strstr(argv[2], "folder game")) { /* R on it: recompiled, not played */
+        int i = 3;
+        assert(strstr(argv[0], "runtime") && snx_is_file(argv[2]));
+        if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
+        assert(i + 2 == argc && !strcmp(argv[i], "--repo") && argv[i + 1][0]);
+        puts("Recompiling folder game (1 modules)\nBuilt folder game");
         return 0;
     }
     if (argc > 1 && strstr(argv[1], "folder game")) { /* a game in a folder of its own, through the menu's driver */
@@ -2118,6 +2143,17 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RETURN);
         assert(!app.confirm.shown && app.menu.running && !app.room_ok && app.menu.selected == GUI_SWITCH);
         finish(&app, 0);
+        /* R's recompile of a dump is asked about too, and Run anyway prepares it again, playing nothing */
+        app.recompile = true;
+        launch(&app, snx_strdup(dump), false);
+        app.recompile = false;
+        assert(app.confirm.shown && app.confirm.ask == GUI_ASK_ROOM && !app.menu.running);
+        key(&app, SDLK_DOWN);
+        key(&app, SDLK_RETURN);
+        key(&app, SDLK_RETURN);
+        assert(!app.confirm.shown && app.menu.running && !app.recompile);
+        finish(&app, 0);
+        assert(gui_steps_last(&app.steps, "RECOMPILE") && !gui_steps_last(&app.steps, "LAUNCH"));
         /* a finger: the first tap arms Run anyway, the second runs it */
         launch(&app, snx_strdup(dump), false);
         ask_boxes(&app, &r, &l);
@@ -2696,6 +2732,35 @@ int main(int argc, char** argv) {
         finish(&app, 0);
         assert(gui_steps_last(&app.steps, "RECOMPILE") && gui_steps_last(&app.steps, "LAUNCH"));
         app.menu.selected = item;
+        /* R on it recompiles it through the driver with the backend picked and no option of a run (-S -s, the
+           settings), playing nothing; R on Add a folder or a CIA says why it does nothing. The foot says so, and its
+           word presses R as the key does */
+        {
+            char* cia = snx_path_join(app.games_dir, "r test.cia");
+            assert(!snx_write_file(cia, "fixture", 7));
+            go_tab(&app, GUI_TAB_GAMES);
+            render(&app);
+            shows_foot(&app, "R", yellow); /* its key, then what it does */
+            shows_foot(&app, "recompile", normal);
+            assert(hint_keys[hint_pick("R", 0)].key == SDLK_R && hint_keys[hint_pick("R", 5)].key == SDLK_R);
+            assert(hint_keys[hint_pick("Recompile", 3)].key == SDLK_R); /* Android's: no R to name */
+            app.browser.selected = 0;
+            key(&app, SDLK_R);
+            assert(!app.menu.running && !strcmp(app.message, "No game in focus to recompile."));
+            focus_game(&app, "r test.cia");
+            key(&app, SDLK_R);
+            assert(!app.menu.running && !strcmp(app.message, "R recompiles Switch games only."));
+            focus_game(&app, "folder game");
+            launcher(&app, true);
+            key(&app, SDLK_R);
+            assert(app.menu.running && app.native && !app.recompile);
+            finish(&app, 0);
+            assert(gui_steps_last(&app.steps, "BUILT") && !gui_steps_last(&app.steps, "LAUNCH"));
+            launcher(&app, false);
+            app.menu.selected = item;
+            assert(!snx_remove_tree(cia));
+            free(cia);
+        }
         assert(!snx_remove_tree(folder));
         free(program);
         free(data);
