@@ -362,6 +362,13 @@ static u64 bl_size(u32 pitch, u32 h, u32 bh) {
     u32 gy = 8u << bh;
     return (u64)((pitch + 63) & ~63u) * ((h + gy - 1) / gy * gy);
 }
+/* one row of a plane, n bytes from s: bl_offset(x, y) is bl_offset(x, 0) + bl_offset(0, y), so the row's 16-byte
+   runs land at base plus the plane's column table, a whole run in one 16-byte move */
+static void row_out(u8* p, const u64* col, u64 base, const u8* s, u32 n) {
+    u32 k = 0;
+    for (; (k + 1) * 16 <= n; k++) memcpy(p + base + col[k], s + k * 16, 16);
+    if (k * 16 < n) memcpy(p + base + col[k], s + k * 16, n - k * 16);
+}
 /* The picture into its surface as NVDEC writes it: a luma plane and one interleaved chroma plane (NV12), from
    FFmpeg's planar 4:2:0. 1 when written */
 static int write_pic(const AVFrame* f, const PicOut* t) {
@@ -386,14 +393,14 @@ static int write_pic(const AVFrame* f, const PicOut* t) {
                   (unsigned long long)t->luma, (unsigned long long)t->chroma);
         return 0;
     }
-    for (u32 y = 0; y < h; y++) {
-        const u8* s = pl[0] + (u64)y * sy;
-        for (u32 x = 0; x < w; x += 16)
-            memcpy(py + bl_offset(x, y, 0, t->pitch_y, t->h, t->bh, 0), s + x, w - x < 16 ? w - x : 16);
-    }
     /* 4:2:0 chroma covers pixel pairs: an odd width or height has a last pair, or row, of one pixel */
-    u8 row[4096];
     u32 cw = (w + 1) / 2 * 2;
+    /* a column's offset depends on the block height alone: the two planes' rows share one table */
+    u64 col[256]; /* a row's runs: 4096 bytes at most */
+    for (u32 k = 0; k * 16 < cw; k++) col[k] = bl_offset(k * 16, 0, 0, t->pitch_y, t->h, t->bh, 0);
+    for (u32 y = 0; y < h; y++)
+        row_out(py, col, bl_offset(0, y, 0, t->pitch_y, t->h, t->bh, 0), pl[0] + (u64)y * sy, w);
+    u8 row[4096];
     for (u32 y = 0; y < (h + 1) / 2; y++) {
         const u8* u = pl[1] + (u64)y * sc;
         const u8* v = pl[2] + (u64)y * sv;
@@ -401,8 +408,7 @@ static int write_pic(const AVFrame* f, const PicOut* t) {
             row[2 * x] = u[x];
             row[2 * x + 1] = v[x];
         }
-        for (u32 x = 0; x < cw; x += 16)
-            memcpy(pc + bl_offset(x, y, 0, t->pitch_c, ch, t->bh, 0), row + x, cw - x < 16 ? cw - x : 16);
+        row_out(pc, col, bl_offset(0, y, 0, t->pitch_c, ch, t->bh, 0), row, cw);
     }
     g_vframes++;
     return 1;
