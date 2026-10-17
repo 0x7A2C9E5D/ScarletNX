@@ -261,12 +261,19 @@ int main(int argc, char** argv) {
     if (argc > 1) {
         const char* run[] = {argv[1], "--settings", NULL};
         char* output = NULL;
-        const char* c;
-        int lines = 0;
+        const char *c, *next, *last = NULL;
+        int lines = 0, pages = 0;
         assert(!snx_run(run, NULL, NULL, &output) && output);
-        for (c = output; *c; ++c) lines += *c == '\n';
-        assert(!gui_settings_read(&s, output) &&
-               s.count == GUI_SETTINGS_OWN + lines + 6); /* three pages: a row, an All */
+        for (c = output; *c; c = next, ++lines) {
+            size_t section = strcspn(c, "\t\n");
+            /* a page: a run of lines whose section has a '/', a row and an All more */
+            if (memchr(c, '/', section) && !(last && strcspn(last, "\t") == section && !strncmp(c, last, section)))
+                ++pages;
+            last = c;
+            next = c + strcspn(c, "\n");
+            if (*next) ++next;
+        }
+        assert(pages > 0 && !gui_settings_read(&s, output) && s.count == GUI_SETTINGS_OWN + lines + 2 * pages);
         /* each player's own, on Controllers' Player page: a word row whose default is every player's */
         assert(words(key(&s, "gamepad_p1_swap_ab")) == 4 && !strcmp(key(&s, "gamepad_p8_swap_ab")->words[1], "As All"));
         assert(key(&s, "gamepad_p3_device")->type == GUI_KEY_TEXT &&
