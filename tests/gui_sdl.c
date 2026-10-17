@@ -1403,17 +1403,24 @@ int main(int argc, char** argv) {
         shows(&app, "- Theme editor", normal);
         /* under the rows, the three folders Folders moves, whole: the extractions too */
         shows(&app, "- Folders            Defaults", normal);
-        snprintf(line, sizeof line, "Data: %s  Games: %s  Extractions: %s", app.data_dir, app.games_dir, app.work_dir);
-        assert(!strcmp(app.places_note, line));
         shows(&app, "Extractions:", rgb(app.theme.soft));
-        { /* one in the data folder, from it: the note stays short on a phone, whose data folder is a long path */
-            char* games = app.games_dir;
+        { /* out of the data folder, as XDG's cache has them: without XDG (Windows) they are in it and read work/ */
+            char *games = app.games_dir, *work = app.work_dir;
+            app.work_dir = snx_path_join(temporary, "extractions");
+            app_values(&app);
+            snprintf(line, sizeof line, "Data: %s  Games: %s  Extractions: %s", app.data_dir, app.games_dir,
+                     app.work_dir);
+            assert(!strcmp(app.places_note, line));
+            /* one in the data folder, from it: the note stays short on a phone, whose data folder is a long path */
             app.games_dir = snx_path_join(app.data_dir, "games");
             app_values(&app);
-            snprintf(line, sizeof line, "Data: %s  Games: games/  Extractions: %s", app.data_dir, app.work_dir);
+            snprintf(line, sizeof line, "Data: %s  Games: games%c  Extractions: %s", app.data_dir,
+                     app.games_dir[strlen(app.data_dir)], app.work_dir);
             assert(!strcmp(app.places_note, line));
             free(app.games_dir);
+            free(app.work_dir);
             app.games_dir = games;
+            app.work_dir = work;
             app_values(&app);
         }
         shows(&app, "- Clean old settings", normal);
