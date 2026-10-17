@@ -518,6 +518,7 @@ with tempfile.TemporaryDirectory() as temporary:
     s = state()
     s['issues']['14'] = dict(issue, number=14)
     s['hide_branch_once'], s['fail_puts'] = 'discord-cards', 1
+    s['put_error'] = 'gh: Invalid request.\n\n"sha" wasn\'t supplied. (HTTP 422)'  # GitHub's, the file made first
     save_state(s)
     done = run('event', event={'action': 'opened', 'issue': {'number': 14}}, name='issues')
     writes = [c['args'][3] for c in calls() if c['args'][:2] == ['api', '-X']]
