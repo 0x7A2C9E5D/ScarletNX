@@ -3675,6 +3675,11 @@ int main(int argc, char** argv) {
             mouse_px(&app, list_box(&choices, 1).x + 4, list_box(&choices, 1).y + 4, true);
             assert(!app.confirm.shown && app.menu.quit);
             app.menu.quit = false;
+            {
+                char* elsewhere[] = {"/elsewhere"}; /* a count for another list is not this one's */
+                space_count(&app.left_space, &app.left_counter, elsewhere, 1, true);
+                while (!__atomic_load_n(&app.left_space->done, __ATOMIC_ACQUIRE)) SDL_Delay(1);
+            }
             app.left = snx_format("/old/recent.txt" SAY_LEFT_BY "/new/recent.txt\n");
             app.lefts = 1;
             app.left_shown = true;
@@ -3684,9 +3689,11 @@ int main(int argc, char** argv) {
                 int width, height;
                 area(&app, &width, &height);
                 r = over_rect(&app, width / cw - 6, head_h(&app) + 2 * 16 * s + item_h(&app) + 16 * s);
-                text_px_is(&app, r.x + cw, r.y + 2 * s, "An older version left these files", normal, black);
+                text_px_is(&app, r.x + cw, r.y + 2 * s, "Left by older versions", normal, black);
                 text_px_is(&app, r.x + cw, r.y + head_h(&app) + 4 * s, "- /old/recent.txt", red, black);
-                text_px_is(&app, r.x + cw, r.y + head_h(&app) + 4 * s + 16 * s, "-> /new/recent.txt", normal, black);
+                /* its space, not counted: the menu counts what it looked for itself */
+                text_px_is(&app, r.x + cw + 2 * cw, r.y + head_h(&app) + 4 * s + 16 * s, "counting",
+                           rgb(app.theme.soft), black);
             }
             key(&app, SDLK_DOWN);
             assert(!app.left_shown && app.menu.selected == GUI_EXIT); /* the key closed it and did nothing else */
@@ -4282,6 +4289,13 @@ int main(int argc, char** argv) {
             for (i = 0; i < 8; ++i) meta[0x90 + i] = (unsigned char)(0x0100DA801624E000ull >> (8 * i));
             line = snx_dirname(npdm);
             assert(!snx_mkdirs(work) && !snx_mkdirs(loose_data) && !snx_mkdirs(line) && !snx_write_file(loose, "", 0));
+            {
+                char* big = snx_path_join(work, "big");
+                void* zeros = calloc(1, 3u << 20);
+                assert(zeros && !snx_write_file(big, zeros, 3u << 20));
+                free(zeros);
+                free(big);
+            }
             assert(!snx_write_file(named, "", 0) && !snx_write_file(npdm, meta, sizeof meta));
             free(line);
             lines[0][0] = snx_strdup(old); /* the menu's gui/, its recent games and last run in the state folder */
@@ -4330,6 +4344,9 @@ int main(int argc, char** argv) {
                 app.checkout = checkout;
                 left_behind(&app);
                 assert(app.lefts == 8);
+                /* a list that changed is counted again */
+                while (!__atomic_load_n(&app.left_space->done, __ATOMIC_ACQUIRE)) SDL_Delay(1);
+                assert(app.left_space->count == 8 && !strcmp(app.left_space->dirs[7], keys));
                 for (i = 0; i < 3; ++i) {
                     assert(strstr(app.left, said[i]));
                     free(said[i]);
@@ -4343,12 +4360,18 @@ int main(int argc, char** argv) {
                 free(old_games);
                 free(checkout);
             }
-            /* in a box over the menu as it opens: each where it is (-) and where it would go (->, in ink: a proposal,
-               not a diff's added green), a path too long for a row going on in the next, as many as fit */
+            /* in a box over the menu as it opens: each where it is (-), a path too long for a row going on in the next,
+               and under it the space it takes, counted on a thread (a game laid out beside the others with its files
+               beside it), as many as fit */
             {
                 int width, wraps = 0, selected = app.menu.selected, more, n;
                 SDL_Color ink = rgb(app.theme.ink), added = rgb(app.theme.added), failure = rgb(app.theme.failure);
+                SDL_Color soft = rgb(app.theme.soft);
                 static char paths[2][4200]; /* where each file is, and where it goes */
+                while (!__atomic_load_n(&app.left_space->done, __ATOMIC_ACQUIRE)) SDL_Delay(1);
+                assert(app.left_space->count == 5 && app.left_space->bytes[0] == 9 &&
+                       app.left_space->bytes[1] == 3u << 20 && app.left_space->bytes[2] == 0 &&
+                       app.left_space->bytes[3] == sizeof meta);
                 int window_w, window_h, text_size = app.menu.text_size;
                 app.left_shown = true;
                 app.clock = 1;
@@ -4363,18 +4386,21 @@ int main(int argc, char** argv) {
                 shows(&app, SAY_LEFT_TITLE, ink);
                 for (at = app.left; *at; at = strchr(at, '\n') + 1) {
                     left_paths(at, paths[0], paths[1], sizeof paths[0]);
-                    for (i = 0; i < 2; ++i) /* the whole path, a piece a row */
-                        for (const char* rest = paths[i]; *rest;) {
-                            size_t cut = gui_wrap(rest, width - (i ? 3 : 2));
-                            line = snx_format("%.*s", (int)cut, rest);
-                            shows(&app, line, i ? ink : failure);
-                            wraps += rest != paths[i];
-                            free(line);
-                            rest += cut;
-                        }
+                    for (const char* rest = paths[0]; *rest;) { /* the whole path, a piece a row */
+                        size_t cut = gui_wrap(rest, width - 2);
+                        line = snx_format("%.*s", (int)cut, rest);
+                        shows(&app, line, failure);
+                        wraps += rest != paths[0];
+                        free(line);
+                        rest += cut;
+                    }
+                    hides(&app, paths[1], ink); /* where it goes is Share log's */
                 }
-                assert(wraps >= 2); /* the long game's paths wrap */
-                shows(&app, "- OK, nothing is moved", yellow);
+                assert(wraps >= 1); /* the long game's path wraps */
+                shows(&app, "1 KB", soft);
+                shows(&app, "3 MB", soft);
+                shows(&app, "0 MB", soft);
+                shows(&app, "- OK", yellow);
                 hides(&app, "which Share log lists", rgb(app.theme.soft));
                 /* a window too short for them all: as many as fit, then how many more */
                 assert(SDL_SetWindowSize(app.window, window_w, 14 * 16 * app.scale));
@@ -4387,7 +4413,7 @@ int main(int argc, char** argv) {
                     if (find_text(&app, said, rgb(app.theme.soft), 1, &x, &y)) more = n;
                 }
                 assert(more > 0);
-                shows(&app, "- OK, nothing is moved", yellow);
+                shows(&app, "- OK", yellow);
                 app.menu.text_size = text_size;
                 assert(SDL_SetWindowSize(app.window, window_w, window_h));
                 SDL_SyncWindow(app.window);

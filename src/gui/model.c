@@ -76,7 +76,10 @@ void gui_confirm_focus(GuiConfirm* confirm, int choice) {
 }
 void gui_size_text(char* out, size_t size, uint64_t bytes) {
     double mb = (double)bytes / 1048576;
-    if (mb < 1024)
+    uint64_t kb = (bytes + 1023) / 1024;
+    if (bytes && kb < 1024)
+        snprintf(out, size, "%u KB", (unsigned)kb);
+    else if (mb < 1024)
         snprintf(out, size, "%.0f MB", mb);
     else
         snprintf(out, size, "%.1f GB", mb / 1024);

@@ -62,7 +62,7 @@ bool gui_confirm_key(GuiConfirm* confirm, GuiKey key);
 /* the pointer on a choice: it takes the focus, a press armed on the other undone */
 void gui_confirm_focus(GuiConfirm* confirm, int choice);
 const char* gui_setting_description(const GuiMenu* menu);
-/* bytes in MB, or in GB from 1024 MB on */
+/* bytes in KB under a MB (a byte is 1 KB, nothing is 0 MB), in MB, or in GB from 1024 MB on */
 void gui_size_text(char* out, size_t size, uint64_t bytes);
 /* Whether a run's first time with a dump of dump bytes has room: its extraction, about its size, in a folder with
    work_free bytes free and, for a Switch game (copy), its RomFS copied into its folder in games/, about its size

@@ -15,7 +15,7 @@ recompiles on the phone, then the game opens.
   games may run slower there, and takes the folder at a second tap.
   `HOME` stays the app's own files, for `.switch/prod.keys`. An older version kept the data in `/sdcard/ScarletNX`
   (or, without *All files access*, in the app's files themselves): as long as its `games/` or keys are there, the
-  menu lists them as it opens, with where they go now; nothing is moved.
+  menu lists them as it opens, with the space each takes; nothing is moved.
 - **Loading** (a *Load* item, *Setup device keys*) opens its screen, a box the whole width, and a tap in the box
   opens the system's file picker. A game's file is read by its path, so the app asks for access to the files when
   it starts (all files from Android 11): the picker's path, or for a document without one the file its descriptor

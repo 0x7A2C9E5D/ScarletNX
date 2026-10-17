@@ -74,14 +74,22 @@ int main(void) {
         gui_usage_text(use, sizeof use, true, 1404ull << 20, 216, 8); /* a game compiling on 8 cores */
         assert(!strcmp(use, "GUI + children: RAM 1.4 GB  CPU 27% (2.2 cores)"));
         gui_usage_text(use, sizeof use, true, 1, 830, 8);
-        assert(!strcmp(use, "GUI + children: RAM 0 MB  CPU 100% (8.0 cores)"));
+        assert(!strcmp(use, "GUI + children: RAM 1 KB  CPU 100% (8.0 cores)"));
         gui_usage_text(use, sizeof use, true, 0, 150, 0); /* SDL knows no cores: one */
         assert(!strcmp(use, "GUI + children: RAM 0 MB  CPU 100% (1.0 cores)"));
         gui_usage_text(use, sizeof use, false, 1, 1, 1);
         assert(!strcmp(use, "GUI + children: resource usage unavailable"));
-        /* sizes, as the footer and the Settings' disk line write them: MB under a GB */
+        /* sizes, as the footer and the Settings' disk line write them: KB under a MB, rounded up, MB under a GB */
         gui_size_text(use, sizeof use, 0);
         assert(!strcmp(use, "0 MB"));
+        gui_size_text(use, sizeof use, 1);
+        assert(!strcmp(use, "1 KB"));
+        gui_size_text(use, sizeof use, 1025);
+        assert(!strcmp(use, "2 KB"));
+        gui_size_text(use, sizeof use, 1023ull << 10);
+        assert(!strcmp(use, "1023 KB"));
+        gui_size_text(use, sizeof use, (1ull << 20) - 1);
+        assert(!strcmp(use, "1 MB"));
         gui_size_text(use, sizeof use, 1023ull << 20);
         assert(!strcmp(use, "1023 MB"));
         gui_size_text(use, sizeof use, 1ull << 30);

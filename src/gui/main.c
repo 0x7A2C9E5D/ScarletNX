@@ -43,13 +43,16 @@
 #define GUI_CHECKOUT NULL
 #define GUI_BUILD    NULL
 #endif
-/* the space ScarletNX takes, counted on a thread of its own when the Settings open: its folders may hold many files,
-   on a slow card. The thread's until done is set; one block with the folders' paths */
+/* the space folders take, counted on a thread of its own: they may hold many files, on a slow card. The thread's until
+   done is set; counted says how many have their bytes. One block: this, each one's bytes, its path's pointer, the
+   paths */
 #define GUI_SPACE_DIRS 7 /* the data folder's games/, work/, themes/; the XDG folders or the menu's; a picked work/ */
 typedef struct {
-    char* dirs[GUI_SPACE_DIRS];
-    uint64_t used;
-    int done, stop;
+    int count, counted, done, stop;
+    bool games;    /* a file is a game an older version laid out beside the others: its _code.so, _data/... count */
+    uint64_t used; /* all of them */
+    uint64_t* bytes;
+    char** dirs; /* "" none */
 } GuiSpace;
 /* the editor's screens: the Settings' groups, a group's settings, the App's rows, its game folders, the theme editor,
    the Controllers' button map, the pad drawn (pad_screen.h), and the App's folders of data, games and extractions */
@@ -93,8 +96,10 @@ typedef struct {
     GuiSettings settings; /* read the first time a run or the Settings need them */
     char* settings_file;  /* the picks kept for every game (settings_path); NULL keeps none */
     char* app_file;       /* Settings > App's picks (app.ini), beside it; NULL keeps none */
-    GuiSpace* space;      /* the latest count, its thread counter until joined */
+    GuiSpace* space;      /* ScarletNX's folders, counted when the Settings open; its thread counter until joined */
     SDL_Thread* counter;
+    GuiSpace* left_space; /* what older builds left, each one's, for their box */
+    SDL_Thread* left_counter;
     uint64_t free_bytes; /* on the data folder's disk, when the count started */
     char* left;          /* what older builds left where this one no longer looks, a line each, lefts of them */
     int lefts;
@@ -1075,7 +1080,7 @@ static const char* ask_question(const App* app) {
     }
 }
 #define SAY_LEFT_BY    " was left by an older version: this one keeps it in "
-#define SAY_LEFT_TITLE "An older version left these files: move each from - to ->"
+#define SAY_LEFT_TITLE "Left by older versions"
 /* a line of app->left: the file where an older build left it, and where this one keeps it */
 static void left_paths(const char* line, char* old, char* now, size_t size) {
     const char* by = strstr(line, SAY_LEFT_BY);
@@ -1167,20 +1172,29 @@ static int wrap_rows(const App* app, const char* s, int width, int path) {
         for (s += wrap_at(s, width, path); *s == ' ';) ++s;
     return SDL_max(rows, 1);
 }
-/* a box of files over the screen, two lines each, as many as fit, how many more, then OK, focused: the files an older
-   version left (report 0), each where it is (-) and where this one keeps it (->); or what Clean old settings did (1),
-   each file and what was done to it or why not. Any key closes it */
-/* the file at: its two lines, their colours, whether the second is a path; the next file, NULL after the last */
-static const char* files_entry(const App* app, int report, const char* at, char* a, char* b, size_t size, SDL_Color* ca,
-                               SDL_Color* cb, int* path) {
+/* a box of files over the screen, two lines each, as many as fit, how many more, then OK, focused: the folders and
+   files an older version left (report 0), each where it is (-) and the space it takes; or what Clean old settings did
+   (1), each file and what was done to it or why not. Any key closes it */
+/* the space the older version's i-th folder, old, takes, or that it is still counted */
+static void left_size(const App* app, int i, const char* old, char* out, size_t size) {
+    const GuiSpace* space = app->left_space;
+    if (space && i < __atomic_load_n(&space->counted, __ATOMIC_ACQUIRE) && !strcmp(space->dirs[i], old))
+        gui_size_text(out, size, space->bytes[i]);
+    else
+        snprintf(out, size, "counting");
+}
+/* the i-th file, at: its two lines, their colours, whether the second is a path; the next file, NULL after the last */
+static const char* files_entry(const App* app, int report, int i, const char* at, char* a, char* b, size_t size,
+                               SDL_Color* ca, SDL_Color* cb, int* path) {
     SDL_Color failure = rgb(app->theme.failure), ink = rgb(app->theme.ink);
     const char* next;
     bool ok;
     if (!report) {
         left_paths(at, a, b, size);
+        left_size(app, i, a, b, size);
         *ca = failure;
-        *cb = ink;
-        *path = 1;
+        *cb = rgb(app->theme.soft);
+        *path = 0;
         next = strchr(at, '\n') + 1;
         return *next ? next : NULL;
     }
@@ -1203,8 +1217,8 @@ static void render_files(App* app, int report) {
     room = (height - head_h(app) - item - 24 * s) / cell_h(app) - 2; /* the files' rows, and one for how many more */
     for (shown = 0; at && shown < count; ++shown) {
         int need;
-        at = files_entry(app, report, at, a, b, sizeof a, &ca, &cb, &path);
-        need = wrap_rows(app, a, cols - 2, 1) + wrap_rows(app, b, cols - 3, path);
+        at = files_entry(app, report, shown, at, a, b, sizeof a, &ca, &cb, &path);
+        need = wrap_rows(app, a, cols - 2, 1) + wrap_rows(app, b, cols - 2, path);
         if (shown && used + need > room) break;
         used += need;
     }
@@ -1218,18 +1232,17 @@ static void render_files(App* app, int report) {
     y = over_box(app, r, label) + 2 * s;
     text = inner(app, r);
     for (i = 0, at = first; at && i < shown; ++i) {
-        at = files_entry(app, report, at, a, b, sizeof a, &ca, &cb, &path);
+        at = files_entry(app, report, i, at, a, b, sizeof a, &ca, &cb, &path);
         text_in(app, text, text.x, y, "-", ca);
         y += wrap_in(app, text, text.x + 2 * cell_w(app), y, a, 1, ca) * cell_h(app);
-        text_in(app, text, text.x, y, report ? "" : "->", cb);
-        y += wrap_in(app, text, text.x + (report ? 2 : 3) * cell_w(app), y, b, path, cb) * cell_h(app);
+        y += wrap_in(app, text, text.x + 2 * cell_w(app), y, b, path, cb) * cell_h(app);
     }
     if (shown < count) {
         snprintf(label, sizeof label, "and %d more, which Share log lists", count - shown);
         text_in(app, text, text.x, y, label, rgb(app->theme.soft));
     }
     list_place(app, &ok, gui_rect(text.x, r.y + r.h - item - 6 * s, SDL_min(text.w, 26 * cell_w(app)), item), 1, 0);
-    snprintf(label, sizeof label, "%s%s", app->theme.marker, report ? "OK" : "OK, nothing is moved");
+    snprintf(label, sizeof label, "%sOK", app->theme.marker);
     list_item(app, &ok, 0, label, true, false);
 }
 /* the question over a run, the menu or a form: the question, wrapped to the screen, its two choices as boxes, the one
@@ -2218,24 +2231,54 @@ static void open_editor(App* app) {
     app->form = GUI_FORM_THEME;
     app->preview_since = 0;
 }
+/* the bytes of path, a folder or a file; for a game laid out beside the others its files beside it too */
+static uint64_t space_of(const char* path, bool games, const int* stop) {
+    static const char* const beside[] = {"_code.so", "_code.dll", ".exe", ".abi", ".hints", ".ini", ".log", "_data"};
+    uint64_t bytes = snx_is_dir(path) ? gui_tree_size(path, stop) : snx_file_size(path);
+    size_t i;
+    for (i = 0; games && path[0] && !snx_is_dir(path) && i < sizeof beside / sizeof beside[0]; ++i) {
+        char* file = snx_format("%s%s", path, beside[i]);
+        bytes += snx_is_dir(file) ? gui_tree_size(file, stop) : snx_file_size(file);
+        free(file);
+    }
+    return bytes;
+}
 static int SDLCALL count_space(void* data) {
     GuiSpace* space = (GuiSpace*)data;
-    uint64_t used = 0;
-    for (int i = 0; i < GUI_SPACE_DIRS; ++i)
-        used += space->dirs[i][0] ? gui_tree_size(space->dirs[i], &space->stop) : 0;
-    space->used = used;
+    for (int i = 0; i < space->count; ++i) {
+        space->bytes[i] = space->dirs[i][0] ? space_of(space->dirs[i], space->games, &space->stop) : 0;
+        space->used += space->bytes[i];
+        __atomic_store_n(&space->counted, i + 1, __ATOMIC_RELEASE);
+    }
     __atomic_store_n(&space->done, 1, __ATOMIC_RELEASE);
     return 0;
 }
-static void space_stop(App* app) {
-    if (app->counter) {
-        __atomic_store_n(&app->space->stop, 1, __ATOMIC_RELAXED);
-        SDL_WaitThread(app->counter, NULL);
-        app->counter = NULL;
+static void space_end(GuiSpace** space, SDL_Thread** counter) {
+    if (*counter) {
+        __atomic_store_n(&(*space)->stop, 1, __ATOMIC_RELAXED);
+        SDL_WaitThread(*counter, NULL);
+        *counter = NULL;
     }
-    free(app->space);
-    app->space = NULL;
+    free(*space);
+    *space = NULL;
 }
+/* count folders' space (NULL or "" none) in place of the count before, on a thread; here if none can start */
+static void space_count(GuiSpace** space, SDL_Thread** counter, char* const* dirs, int count, bool games) {
+    size_t size = sizeof **space + (size_t)count * (sizeof(uint64_t) + sizeof(char*));
+    char* at;
+    int i;
+    space_end(space, counter);
+    for (i = 0; i < count; ++i) size += (dirs[i] ? strlen(dirs[i]) : 0) + 1;
+    if (!(*space = (GuiSpace*)calloc(1, size))) return;
+    (*space)->count = count;
+    (*space)->games = games;
+    (*space)->bytes = (uint64_t*)(*space + 1);
+    (*space)->dirs = (char**)((*space)->bytes + count);
+    for (i = 0, at = (char*)((*space)->dirs + count); i < count; at += strlen(at) + 1, ++i)
+        (*space)->dirs[i] = strcpy(at, dirs[i] ? dirs[i] : "");
+    if (!(*counter = SDL_CreateThread(count_space, "space", *space))) count_space(*space);
+}
+static void space_stop(App* app) { space_end(&app->space, &app->counter); }
 /* the space left on the disk of path, or of the folder it will be made in */
 static uint64_t free_space(const char* path) {
     char* at = snx_strdup(path);
@@ -2260,18 +2303,10 @@ static void space_start(App* app) {
                                   menu_folder(app, SNX_USER_STATE, false),
                                   menu_folder(app, SNX_USER_CACHE, false),
                                   app->place[GUI_PLACE_WORK] ? snx_strdup(app->place[GUI_PLACE_WORK]) : NULL};
-    size_t size = sizeof *app->space;
-    char* at;
     int i;
-    space_stop(app);
-    for (i = 0; i < GUI_SPACE_DIRS; ++i) size += (dirs[i] ? strlen(dirs[i]) : 0) + 1;
-    app->space = (GuiSpace*)calloc(1, size);
-    for (i = 0, at = (char*)(app->space + 1); app->space && i < GUI_SPACE_DIRS; at += strlen(at) + 1, ++i)
-        app->space->dirs[i] = strcpy(at, dirs[i] ? dirs[i] : ""); /* "": none */
-    for (i = 0; i < GUI_SPACE_DIRS; ++i) free(dirs[i]);
     app->free_bytes = free_space(app->data_dir);
-    if (app->space && !(app->counter = SDL_CreateThread(count_space, "space", app->space)))
-        count_space(app->space); /* no thread to count it: here, then */
+    space_count(&app->space, &app->counter, dirs, GUI_SPACE_DIRS, false);
+    for (i = 0; i < GUI_SPACE_DIRS; ++i) free(dirs[i]);
 }
 /* ---- the Settings: its groups, App then a group per section of the settings; a group's rows; the App's ---- */
 static const GuiThemeKey app_keys[] = {
@@ -3977,6 +4012,22 @@ static void left_android(App* app) {
     free(old);
 }
 #endif
+/* the space each folder app->left names takes, counted again only when they change */
+static void left_count(App* app) {
+    char** olds = (char**)calloc((size_t)app->lefts + 1, sizeof *olds);
+    const char* at = app->left;
+    int i, same = app->left_space && app->left_space->count == app->lefts;
+    for (i = 0; olds && i < app->lefts; ++i, at = strchr(at, '\n') + 1) {
+        olds[i] = snx_format("%.*s", (int)(strstr(at, SAY_LEFT_BY) - at), at);
+        same = same && olds[i] && !strcmp(olds[i], app->left_space->dirs[i]);
+    }
+    if (!olds || !app->lefts)
+        space_end(&app->left_space, &app->left_counter);
+    else if (!same)
+        space_count(&app->left_space, &app->left_counter, olds, app->lefts, true);
+    for (i = 0; olds && i < app->lefts; ++i) free(olds[i]);
+    free(olds);
+}
 /* what older versions left where this one no longer looks, a folder at a time, for the menu to say while it is there:
    the menu's own files' folder (gui/), work/, each game laid out beside the others, a portable copy's games/ beside
    the program (its data in .scarletnx/ now), a build tree's games/, work/ and keys in its checkout. Nothing is moved:
@@ -4035,6 +4086,7 @@ static void left_behind(App* app) {
         free(old);
         free(now);
     }
+    left_count(app);
     free(kept);
     free(moved);
     free(work);
@@ -5362,6 +5414,7 @@ static void cleanup(App* app) {
 #endif
     gui_process_destroy(app->process);
     space_stop(app);
+    space_end(&app->left_space, &app->left_counter);
     gui_settings_free(&app->settings);
     free(app->settings_file);
     for (int i = 0; i < app->folder_count; ++i) free(app->folders[i]);

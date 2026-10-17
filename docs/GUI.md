@@ -163,13 +163,13 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - **Exit** closes the launcher. Closing its window during a run terminates the
   entire owned process tree, so let the game exit normally to preserve its saves.
 - As it opens, the menu shows in a box what an older version left where this one no longer looks, a
-  folder at a time: where it is (`- `, in the failure colour) and where it goes now (`-> `), a path
-  too long for a row going on in the next. They are the menu's `gui/`, `work/`, each game laid out
+  folder at a time: where it is (`- `, in the failure colour, a path too long for a row going on in the next) and
+  under it the space it takes, counted as the box shows (*counting* until then). They are the menu's `gui/`, `work/`, each game laid out
   beside the others in `games/` or a game folder (`games/<id>/` now), a portable copy's `games/`
   beside the program, and a build tree's `games/`, `work/` and keys in its checkout
   ([USAGE](USAGE.md#folders)). Any key, click or tap closes it; nothing is moved, and it shows again at the next
   start for as long as they are there.
-  **Share log** lists them all.
+  **Share log** lists them all, each with where it goes now.
 - **Recent games**, in Games under Add a folder, lists the last games run, newest first, three and a row that
   shows the rest, by the name their run gave (the runner's `ScarletNX - <name>` line), else their file's.
   The focus moves between them, Add a folder and the page's games in one ring, and the tips show the focused
