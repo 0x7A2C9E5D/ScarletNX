@@ -511,10 +511,10 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     shown = prs[0]['body']['embeds'][0] if prs else {}
     check(
-        'the card: its author, the failed system amber and linking its log, the first commits and the rest counted',
+        "the card: its author, GitHub's open colour, the failed system linking its log, the first commits and the rest",
         shown.get('author') == {'name': 'alice', 'url': 'https://x/alice', 'icon_url': 'https://x/alice.png'}
         and shown['url'] == 'https://x/pull/7'
-        and shown['color'] == 0xD29922
+        and shown['color'] == 0x1F883D  # GitHub's open; the failed system says so in its field
         and shown['fields'][2]
         == {'name': 'Windows x86-64', 'value': 'Failed\n[log](https://x/runs/50/Windo)', 'inline': True}
         and shown['fields'][0]['value'].startswith(f'[AppImage](https://github.com/{TO}/releases/download/pr-7/')
@@ -559,11 +559,11 @@ with tempfile.TemporaryDirectory() as temporary:
         pre,
     )
     check(
-        'and edits the one message, every system built now, scarlet',
+        'and edits the one message, every system built now',
         len(prs) == 2
         and prs[1]['method'] == 'PATCH'
         and prs[1]['path'].endswith(f'/messages/{message}?thread_id=55')
-        and prs[1]['body']['embeds'][0]['color'] == 0xB0102A
+        and prs[1]['body']['embeds'][0]['color'] == 0x1F883D
         and not any('Failed' in f['value'] for f in prs[1]['body']['embeds'][0]['fields']),
         prs,
     )
