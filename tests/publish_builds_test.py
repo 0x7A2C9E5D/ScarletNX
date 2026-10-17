@@ -112,7 +112,8 @@ with tempfile.TemporaryDirectory() as temporary:
             },
             f'ScarletNX-windows-x86_64-{short}': {'bin/scarletnx.exe': 'MZ', 'share/licenses/LICENSE': 'GPL'},
             f'ScarletNX-android-universal-{short}.apk': {f'ScarletNX-android-universal-{short}.apk': 'PK apk'},
-            f'ScarletNX-macos-arm64-{short}.zip': {f'ScarletNX-macos-arm64-{short}.zip': 'PK app'},
+            # skip-decompress: the macOS zip lands at the artifact's own path, the IPA inside its folder
+            f'ScarletNX-macos-arm64-{short}.zip': {'': 'PK app'},
             f'ScarletNX-ios-arm64-{short}.ipa': {f'ScarletNX-ios-arm64-{short}.ipa': 'PK ipa'},
         }
         for artifact, files in made.items():

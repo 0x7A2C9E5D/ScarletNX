@@ -105,6 +105,7 @@ jobs:
         with:
           name: ScarletNX-macos-arm64-${{ steps.plan.outputs.short }}.zip
           path: artifacts/ScarletNX-macos-arm64-${{ steps.plan.outputs.short }}.zip
+          skip-decompress: true # a zip itself (the app, the IPA): kept as the job made it, not unpacked
           run-id: ${{ steps.plan.outputs.run }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download the iOS IPA
@@ -114,6 +115,7 @@ jobs:
         with:
           name: ScarletNX-ios-arm64-${{ steps.plan.outputs.short }}.ipa
           path: artifacts/ScarletNX-ios-arm64-${{ steps.plan.outputs.short }}.ipa
+          skip-decompress: true # a zip itself (the app, the IPA): kept as the job made it, not unpacked
           run-id: ${{ steps.plan.outputs.run }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish them
