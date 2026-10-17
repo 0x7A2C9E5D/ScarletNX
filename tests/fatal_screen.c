@@ -86,8 +86,9 @@ int main(void) {
         assert(!snx_write_file(log, big, BIG));
         assert(!fatal_share_log(root, "build", "message", log, saved, sizeof saved));
         text = (char*)snx_read_file(saved, &n);
+        /* the log's own part, after its header: the header names the log's path, which may hold a 'b' */
         assert(text && n < (size_t)(4 << 20) + 1000 && n >= (size_t)(4 << 20) && strstr(text, "end\n") &&
-               !strchr(text + 40, 'b'));
+               strstr(text, " ==\n") && !strchr(strstr(text, " ==\n"), 'b'));
         free(text);
         free(big);
         free(log);
