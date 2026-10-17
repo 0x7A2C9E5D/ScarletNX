@@ -5,9 +5,9 @@
 /* the copy engine: DMA between linear and block-linear surfaces in guest memory */
 #include "nx/gpu/maxwell/engines_int.h"
 /* ============================================================ DMA */
-/* host pointer to a whole bl surface (slice dz, block depth bd) if it's contiguous, so DMA can memcpy
-   instead of translating + tracking every 16 bytes */
-static u8* bl_span_ptr(u64 base, u32 wbytes, u32 h, u32 bh, u32 z, u32 bd, u64* span) {
+/* host pointer to a whole bl surface (slice dz, block depth bd) if it's contiguous, so DMA and the 2D engine can
+   memcpy instead of translating + tracking every 16 bytes (SNX_DMA_SLOW turns it off for both) */
+u8* bl_span_ptr(u64 base, u32 wbytes, u32 h, u32 bh, u32 z, u32 bd, u64* span) {
     static int off = -1;
     if (off < 0) off = getenv("SNX_DMA_SLOW") != NULL;
     if (off) return NULL;

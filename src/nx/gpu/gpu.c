@@ -20,10 +20,12 @@ static PMutex g_gpulock; /* the channels and the engines' state: the GPU thread 
                             gpu_channel_close takes it. The queue has its own lock (g_qlock) */
 
 /* ============================================================ GPU memory */
-int gmem_read(u64 gva, void* dst, u64 size) {
-    u8* d = dst;
+void gmem_need(u64 gva, u64 size) {
     if (g_cs_any) g_renderer->cs_mem_need(gva, size);
     if (g_gfx_any || g_gfx_img_any) g_renderer->gfx_mem_need(gva, size);
+}
+void gmem_read_raw(u64 gva, void* dst, u64 size) {
+    u8* d = dst;
     while (size) {
         u64 cpu = gmmu_translate(gva);
         u64 n = 0x1000 - (gva & 0xFFF);
@@ -36,6 +38,10 @@ int gmem_read(u64 gva, void* dst, u64 size) {
         gva += n;
         size -= n;
     }
+}
+int gmem_read(u64 gva, void* dst, u64 size) {
+    gmem_need(gva, size);
+    gmem_read_raw(gva, dst, size);
     return 0;
 }
 void (*g_gpu_mem_changed)(u64 cpu_addr, u64 len);
@@ -75,8 +81,11 @@ void (*g_gpu_mapping_end)(void);
 void gpu_signal_point(void) {
     if (g_gpu_before_write) g_gpu_before_write(0, 0);
 }
+void gmem_before_write(u64 gva, u64 size) {
+    if (g_gpu_before_write && size) g_gpu_before_write(gva, size);
+}
 /* the bytes into guest memory, without landing pending shader results first or logging the write */
-static void gmem_store(u64 gva, const void* src, u64 size) {
+void gmem_write_raw(u64 gva, const void* src, u64 size) {
     const u8* s = src;
     while (size) {
         u64 cpu = gmmu_translate(gva);
@@ -89,8 +98,8 @@ static void gmem_store(u64 gva, const void* src, u64 size) {
     }
 }
 int gmem_write(u64 gva, const void* src, u64 size) {
-    if (g_gpu_before_write && size) g_gpu_before_write(gva, size);
-    gmem_store(gva, src, size);
+    gmem_before_write(gva, size);
+    gmem_write_raw(gva, src, size);
     gpu_mem_written(gva, size);
     return 0;
 }
@@ -272,7 +281,7 @@ void i2m_data(GpuChannel* ch, u32 v) {
                         if (n > w - x) n = w - x;
                         u64 o = bl_offset(xb, ch->i2m_y + y, ch->i2m_z, wb, hh, ch->i2m_bh, ch->i2m_bd);
                         if (pass)
-                            gmem_store(ch->i2m_addr + o, ch->i2m_buf + (u64)y * w + x, n);
+                            gmem_write_raw(ch->i2m_addr + o, ch->i2m_buf + (u64)y * w + x, n);
                         else if (o + n > hi)
                             hi = o + n;
                         x += n;

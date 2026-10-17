@@ -515,12 +515,14 @@ snx_test_target(snx-test-ini-lines 90)
 target_compile_options(snx-test-ini-lines PRIVATE -UNDEBUG) # its checks are asserts
 add_test(NAME ini_lines COMMAND snx-test-ini-lines)
 
-# the controls' atlas and their shaders are generated and checked in: their sources must still make them
+# generated and checked in (the controls' atlas, their shaders, the VIC's): their sources must still make them
 if(Python3_Interpreter_FOUND)
     add_test(NAME controls_atlas_current
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-controls.py" --check)
     add_test(NAME ui_shaders_current
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-ui-shaders.py" --check)
+    add_test(NAME vic_shader_current
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-vic-shader.py" --check)
     add_test(NAME generators_crlf COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/generators_crlf.py")
     # which GitHub Actions caches the cleanup workflow deletes (scripts/trim-caches.py)
     add_test(NAME trim_caches COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/trim_caches_test.py")
@@ -654,6 +656,33 @@ if(NOT WIN32)
     add_test(NAME ldr_service COMMAND snx-test-ldr-service)
     set_tests_properties(ldr_service PROPERTIES TIMEOUT 60)
 endif()
+
+# Deterministic FFmpeg API double: no decoder dependency in tools-only builds.
+add_executable(snx-test-nvdec-packets nvdec_packets.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp")
+snx_test_target(snx-test-nvdec-packets 11)
+target_include_directories(snx-test-nvdec-packets BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg_stub")
+add_test(NAME nvdec_packets COMMAND snx-test-nvdec-packets)
+if(NOT SNX_TOOLS_ONLY)
+    add_executable(snx-test-nvdec-decode nvdec_packets.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp")
+    snx_test_target(snx-test-nvdec-decode 11)
+    target_compile_definitions(snx-test-nvdec-decode PRIVATE SNX_TEST_REAL_FFMPEG)
+    target_link_libraries(snx-test-nvdec-decode PRIVATE FFmpeg::avcodec)
+    add_test(NAME nvdec_decode COMMAND snx-test-nvdec-decode)
+endif()
+# VP9 packets rebuilt from NVDEC jobs (gpu/video/vp9_rebuild.cpp): the destination of the frame each emits, and
+# setups with invalid tile layouts refused before a header is built
+add_executable(snx-test-vp9-rebuild vp9_rebuild.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp")
+snx_test_target(snx-test-vp9-rebuild 23)
+add_test(NAME vp9_rebuild COMMAND snx-test-vp9-rebuild)
+# the 2D engine's blit in guest memory (fermi2d.c, dma.c's bl_span_ptr): block linear scaling, an odd window, the
+# renderer's hooks once a blit
+add_executable(snx-test-fermi2d-blit fermi2d_blit.c)
+snx_test_target(snx-test-fermi2d-blit 23)
+add_test(NAME fermi2d_blit COMMAND snx-test-fermi2d-blit)
+# vic.c's CPU composition, through vic_execute, with a renderer that declines the GPU
+add_executable(snx-test-vic-compose vic_compose.c)
+snx_test_target(snx-test-vic-compose 23)
+add_test(NAME vic_compose COMMAND snx-test-vic-compose)
 
 add_executable(snx_recompiler_test recompiler_native.c)
 snx_test_target(snx_recompiler_test 23)
