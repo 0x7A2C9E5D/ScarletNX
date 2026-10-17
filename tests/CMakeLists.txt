@@ -726,19 +726,19 @@ add_executable(snx-test-astc astc_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/tex
 snx_test_target(snx-test-astc 23)
 add_test(NAME astc_decode COMMAND snx-test-astc)
 
-add_executable(snx-test-audio-out audio_out.c)
-snx_test_target(snx-test-audio-out 11)
-snx_service_swipc(snx-test-audio-out hle/services/audio.swipc)
-# Isolate audout in this fixture without FFmpeg, also when testing a tools-only build.
-# Production NX targets always link FFmpeg and never define SNX_NO_H264.
-target_compile_definitions(snx-test-audio-out PRIVATE SNX_NO_H264)
-add_test(NAME audio_out COMMAND snx-test-audio-out)
-# the same fixture with FFmpeg's Opus decoder, for the hwopus decoders that open. FFmpeg::avcodec comes from
-# cmake/dependencies.cmake, before this folder, in every build but a tools-only one
-if(NOT SNX_TOOLS_ONLY)
+# audout and hwopus in a fixture, with FFmpeg's Opus decoder for the hwopus decoders that open. FFmpeg::avcodec comes
+# from cmake/dependencies.cmake, before this folder, in every build but a tools-only one, which checks the fixture
+# without it (SNX_NO_H264, which no runtime build defines)
+if(SNX_TOOLS_ONLY)
+    add_executable(snx-test-audio-out audio_out.c)
+    snx_test_target(snx-test-audio-out 11)
+    snx_service_swipc(snx-test-audio-out hle/services/audio.swipc)
+    target_compile_definitions(snx-test-audio-out PRIVATE SNX_NO_H264)
+    add_test(NAME audio_out COMMAND snx-test-audio-out)
+else()
     add_executable(snx-test-audio-opus audio_out.c)
     snx_test_target(snx-test-audio-opus 11)
-        snx_service_swipc(snx-test-audio-opus hle/services/audio.swipc)
+    snx_service_swipc(snx-test-audio-opus hle/services/audio.swipc)
     target_link_libraries(snx-test-audio-opus PRIVATE FFmpeg::avcodec)
     add_test(NAME audio_opus COMMAND snx-test-audio-opus)
 endif()
