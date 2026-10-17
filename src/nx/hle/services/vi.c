@@ -52,6 +52,11 @@ enum {
 #define VI_WIDTH    1280
 #define VI_HEIGHT   720
 #define VI_STRAY_ID 0x10000u /* vi's own layer ids, apart from am's managed ones */
+/* the layer the display shows. There's no compositor: only the first layer, the one a game opens for its window (and
+   opens again into the same place after closing it), is shown and paced. Another layer's frames come free once their
+   fences are reached, unseen, where the console would compose them (edenprobe's binder suite opens one beside its
+   window, whose frames were shown as the program's) */
+#define VI_SHOWN    0
 
 enum { SLOT_FREE, SLOT_DEQUEUED, SLOT_QUEUED };
 
@@ -67,6 +72,7 @@ typedef struct {
     int connected;
     u32 width, height, format; /* the default size and format, from the preallocated buffers */
     u32 interval;              /* the swap interval of the last frame queued */
+    u32 gen;                   /* bumped when the layer closes (vi_key) */
     KEvent* event;             /* signaled when a buffer comes free (GetNativeHandle) */
     ViSlot slot[VI_SLOTS];
 } ViLayer;
@@ -97,6 +103,25 @@ static int vi_layer_open(u64 layer_id) {
     vi.layer[free_i].height = VI_HEIGHT;
     vi.layer[free_i].format = 1; /* RGBA8888 */
     return free_i + 1;
+}
+/* CloseLayer and DestroyStrayLayer: the layer's buffer queue goes, and its place is free for the next layer opened.
+   Its frames still waiting for their fences are dropped (vi_present), and a DEQUEUE waiting for a buffer answers
+   NO_INIT. Under the lock */
+static void vi_layer_close(u64 layer_id) {
+    int i;
+    for (i = 0; i < VI_LAYERS; i++) {
+        ViLayer* l = &vi.layer[i];
+        if (l->layer_id != layer_id) continue;
+        l->layer_id = 0;
+        l->connected = 0;
+        l->interval = 0;
+        l->gen++;
+        memset(l->slot, 0, sizeof l->slot);
+        kevent_signal(l->event); /* as when a buffer comes free: the waiter finds the queue gone */
+        pc_broadcast(&vi.freed);
+        return;
+    }
+    LOG_LIMIT(4, "vi: closing layer %llx, which isn't open\n", (unsigned long long)layer_id);
 }
 static ViLayer* vi_binder(i32 binder_id) {
     return binder_id >= 1 && binder_id <= VI_LAYERS && vi.layer[binder_id - 1].layer_id ? &vi.layer[binder_id - 1]
@@ -195,14 +220,24 @@ static u32 gb32(const ViSlot* s, u32 off) {
     memcpy(&v, s->gbuf + off, 4);
     return v;
 }
-/* on the GPU thread once the frame's fences are reached: shown, then free for the game */
+/* on the GPU thread once the frame's fences are reached: shown if its layer is the display's, then free for the game.
+   key is the layer's generation, its index and the slot (vi_key): a frame of a layer closed meanwhile is dropped, as
+   its queue is gone */
+static uintptr_t vi_key(int li, int slot) {
+    return (uintptr_t)(vi.layer[li].gen & 0xFFFF) << 16 | (uintptr_t)li << 8 | (uintptr_t)slot;
+}
 static void vi_present(void* arg) {
     uintptr_t key = (uintptr_t)arg;
-    ViLayer* l = &vi.layer[key >> 8];
+    int li = (int)(key >> 8 & 0xff);
+    ViLayer* l = &vi.layer[li];
     ViSlot* s = &l->slot[key & 0xff];
     u32 nvmap, offset, w, h, pitch, layout, bhl, fmt, transform;
     i32 crop[4];
     pm_lock(&vi.lock);
+    if (vi_key(li, (int)(key & 0xff)) != key || s->state != SLOT_QUEUED) {
+        pm_unlock(&vi.lock);
+        return;
+    }
     /* the NvGraphicBuffer: its nvmap id, format and size, and the first plane's layout (libnx's NvSurface) */
     nvmap = gb32(s, 0x2c);
     fmt = gb32(s, 0x10);
@@ -214,11 +249,12 @@ static void vi_present(void* arg) {
     bhl = gb32(s, 0x80);
     memcpy(crop, s->crop, sizeof crop);
     transform = s->transform;
-    pm_unlock(&vi.lock);
     if (!pitch) pitch = gb32(s, 0x0c) * ((fmt >= 4 && fmt <= 7 && fmt != 5) ? 2 : 4);
-    vi_show_buffer(nvmap, offset, w, h, pitch, layout, bhl, fmt, crop, transform & 3); /* the flips; no rotation */
+    pm_unlock(&vi.lock);
+    if (li == VI_SHOWN)
+        vi_show_buffer(nvmap, offset, w, h, pitch, layout, bhl, fmt, crop, transform & 3); /* the flips; no rotation */
     pm_lock(&vi.lock);
-    if (s->state == SLOT_QUEUED) {
+    if (vi_key(li, (int)(key & 0xff)) == key && s->state == SLOT_QUEUED) {
         s->state = SLOT_FREE;
         s->freed = ++vi.frees;
     }
@@ -264,15 +300,18 @@ static void vi_transact(ViLayer* l, u32 code, IpcBuf parcel, IpcBuf reply) {
     ParcelIn in;
     ParcelOut out;
     i32 status = BQ_OK, slot;
-    u32 v, interval = 0, fence_none[9];
+    u32 v, interval = 0, gen, fence_none[9];
     int qslot = -1, li = (int)(l - vi.layer), dequeued = 0;
+    uintptr_t qkey = 0;
     u8 qbi[VI_QBI];
     parcel_open(&in, GP(parcel.addr), (u32)(parcel.size < 0x10000 ? parcel.size : 0x10000));
     out.n = 0;
     memset(fence_none, 0xff, sizeof fence_none);
     fence_none[0] = 0;
     pm_lock(&vi.lock);
-    switch (code) {
+    /* 0: the layer closed after vi_binder_call found it, and its queue is gone */
+    switch (l->layer_id ? code : 0) {
+        case 0: status = BQ_NO_INIT; break;
         case BQ_REQUEST_BUFFER:
             slot = (i32)parcel_u32(&in);
             if (slot < 0 || slot >= VI_SLOTS)
@@ -284,7 +323,12 @@ static void vi_transact(ViLayer* l, u32 code, IpcBuf parcel, IpcBuf reply) {
             break;
         case BQ_DEQUEUE_BUFFER:
             /* async, width, height, format, usage: the buffers are the game's own, whatever it asks */
-            while ((slot = vi_free_slot(l)) < 0) pc_wait(&vi.freed, &vi.lock, -1);
+            gen = l->gen;
+            while ((slot = vi_free_slot(l)) < 0 && l->gen == gen) pc_wait(&vi.freed, &vi.lock, -1);
+            if (l->gen != gen) { /* the layer closed while it waited */
+                status = BQ_NO_INIT;
+                break;
+            }
             l->slot[slot].state = SLOT_DEQUEUED;
             if (!l->slot[slot].has_buffer) status = BQ_NEEDS_REALLOC;
             parcel_w32(&out, (u32)slot);
@@ -302,6 +346,7 @@ static void vi_transact(ViLayer* l, u32 code, IpcBuf parcel, IpcBuf reply) {
             else {
                 vi_queue(l, slot, qbi, &out);
                 qslot = slot;
+                qkey = vi_key(li, slot);
             }
             break;
         case BQ_CANCEL_BUFFER:
@@ -385,9 +430,9 @@ static void vi_transact(ViLayer* l, u32 code, IpcBuf parcel, IpcBuf reply) {
             memcpy(&vals[n], qbi + 56 + 8 * i, 4);
             if (ids[n] != ~0u) n++;
         }
-        nv_gpu_call_after(n, ids, vals, vi_present, (void*)(uintptr_t)((u32)li << 8 | (u32)qslot));
+        nv_gpu_call_after(n, ids, vals, vi_present, (void*)qkey);
     }
-    if (dequeued) present_pace(interval);
+    if (dequeued && li == VI_SHOWN) present_pace(interval); /* only the display's frames wait for it */
 }
 
 /* ============================================================ IHOSBinderDriver */
@@ -543,6 +588,20 @@ static int nn_visrv_sf_IApplicationDisplayService_OpenLayer(SvcObj* self, const 
     binder = vi_layer_open(layer_id);
     pm_unlock(&vi.lock);
     return vi_native_window(native_window, binder, native_window_size);
+}
+static int nn_visrv_sf_IApplicationDisplayService_CloseLayer(SvcObj* self, u64 layer_id) {
+    (void)self;
+    pm_lock(&vi.lock);
+    vi_layer_close(layer_id);
+    pm_unlock(&vi.lock);
+    return 0;
+}
+static int nn_visrv_sf_IApplicationDisplayService_DestroyStrayLayer(SvcObj* self, u64 layer_id) {
+    (void)self;
+    pm_lock(&vi.lock);
+    vi_layer_close(layer_id);
+    pm_unlock(&vi.lock);
+    return 0;
 }
 static int nn_visrv_sf_IApplicationDisplayService_CreateStrayLayer(SvcObj* self, u32 layer_flags, u64 display_id,
                                                                    IpcBuf native_window, u64* layer_id,
