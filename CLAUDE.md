@@ -122,6 +122,8 @@ whether the agent may build and run: only one at a time can):
 - `snx-emu-expert`: how Ryujinx, the yuzu family, Citra, Cemu and others solved a problem, with the license of the code.
 - `snx-vulkan-expert`: Vulkan 1.3 and SPIR-V, synchronization, lifetimes, Maxwell state onto Vulkan.
 - `snx-perf-expert`: profiling and judging optimizations with perf, bpftrace, heaptrack and llvm-mca.
+- `snx-gamemath-expert`: game math, algorithms and physics, and what a CPU or shader numerical difference does to
+  them (jitter, drift, NaN objects, wrong simulation speed, desyncs).
 
 ## Git
 
