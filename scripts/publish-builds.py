@@ -119,10 +119,14 @@ class Publisher(cards.Hub):
         files, uploads, missing = {}, {}, []
         for pattern, name in ARTIFACTS.items():
             folder = self.artifacts / pattern.format(short=sha[:7])
+            path = self.work / name
+            if folder.is_file():  # a single-file package downloaded as it is, at the artifact's own path
+                shutil.copyfile(folder, path)
+                files[name] = uploads[name] = path
+                continue
             if not folder.is_dir() or not any(folder.iterdir()):
                 missing.append(name)
                 continue
-            path = self.work / name
             if not Path(pattern).suffix:  # the Windows build is a folder: zipped as it is
                 with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
                     for item in sorted(folder.rglob('*')):
