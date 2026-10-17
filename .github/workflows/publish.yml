@@ -2,7 +2,8 @@
 # Copyright 2026 the ScarletNX contributors
 name: Publish builds
 
-# The builds as releases, each said on Discord (scripts/publish-builds.py): a version tag (v...) pushed that builds
+# The builds as releases (scripts/publish-builds.py), a version said on Discord, a nightly's or a pull request's card
+# drawn again (scripts/discord-cards.py, .github/workflows/cards.yml): a version tag (v...) pushed that builds
 # everywhere a release of this repository; every push to main that builds everywhere a nightly of scarletnx/nightly,
 # the newest 30 kept, which this repository's "nightly" prerelease links; every pull request a prerelease there,
 # pr-<number>, replaced at each push and deleted when it closes. A fork's pull request only once someone of the team

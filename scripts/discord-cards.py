@@ -1,0 +1,599 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 the ScarletNX contributors
+"""Discord cards: one message for each pull request, each issue and each push to main, posted when it comes and edited
+as it changes, so each channel shows them as they are now.
+
+    scripts/discord-cards.py event --repo OWNER/REPO --to OWNER/NIGHTLY [--checkout DIR] [--every SECONDS]
+    scripts/discord-cards.py refresh --repo OWNER/REPO --to OWNER/NIGHTLY {pr N | issue N | nightly SHA}
+
+event follows the event GitHub Actions ran it for (GITHUB_EVENT_NAME, GITHUB_EVENT_PATH): a push to main posts that
+commit's card on DISCORD_WEBHOOK_NIGHTLY's channel; a pull request opened, pushed to, edited, reviewed, commented on or
+closed, its card on DISCORD_WEBHOOK_PRS's; an issue opened, edited, labeled, commented on or closed, its card on
+DISCORD_WEBHOOK_ISSUES's. A Build run requested (workflow_run) is followed while it builds: its pull request's or
+nightly's card is edited as each package's job ends. scripts/publish-builds.py redraws a card once its files are
+published.
+
+A card is drawn from what GitHub says now, never from the event alone, so any event draws it whole: its state, the
+commits or the changes, the latest comment (bots' left out), and each package: waiting, building, built, failed, or
+published with its link and size. Its message id is kept in NIGHTLY's discord-cards branch, cards/<key> (pr-N, issue-N,
+nightly-SHA), written with NIGHTLY_TOKEN. Following a build only edits a card, never posts one, so it never posts a card
+another run is posting. Without a webhook nothing is posted, and the run says so. --dry-run reads, and prints each write
+instead. .github/workflows/cards.yml runs it; tests/discord_cards_test.py runs it against a fake gh and a fake Discord.
+"""
+
+import argparse
+import base64
+import datetime
+import importlib.util
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location('nightly_notes', Path(__file__).with_name('nightly-notes.py'))
+notes = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(notes)
+
+SERVER = notes.SERVER
+BRANCH = 'discord-cards'
+LABEL = 'publish builds'  # what lets a fork's pull request be published (scripts/publish-builds.py)
+# The job of .github/workflows/build.yml that makes each release file
+JOBS = {
+    'ScarletNX-linux-x86_64.AppImage': 'Linux AppImage (x86_64)',
+    'ScarletNX-linux-aarch64.AppImage': 'Linux AppImage (aarch64)',
+    'ScarletNX-windows-x86_64.zip': 'Windows (Clang + LLVM)',
+    'ScarletNX-android-universal.apk': 'Android APK',
+}
+# the cards' colours: building, published, a package failed, merged, closed, an issue open, an issue done
+BUILDING, SCARLET, AMBER, MERGED, CLOSED, OPEN, DONE = (
+    0x1F6FEB,
+    0xB0102A,
+    0xD29922,
+    0x2EA043,
+    0x6E7681,
+    0x2EA043,
+    0x8957E5,
+)
+# the mascot beside each card
+WIMSY = 'https://raw.githubusercontent.com/{repo}/main/dist/icons/hicolor/128x128/apps/wimsy.png'
+# what a card lists, at most, before "and N more": a nightly's changes, a pull request's commits; a text's letters
+MOST_LINES, MOST_COMMITS, MOST_TEXT = 10, 6, 300
+# Discord's limits: an embed's description, and its whole text
+DESCRIPTION, EMBED = 4096, 6000
+# where scripts/publish-builds.py kept a pull request's message id before the cards
+MARKER = re.compile(r'<!-- discord-message: (\d+) -->')
+CHANNELS = {'pr': 'prs', 'issue': 'issues', 'nightly': 'nightly'}
+# a job's states before it runs
+WAITING = {'queued', 'waiting', 'pending', 'requested'}
+
+
+class Hub:
+    """GitHub through gh (REPO with GH_TOKEN, the nightly repository with NIGHTLY_TOKEN), and Discord's webhooks"""
+
+    def __init__(self, repo, to, dry):
+        self.repo, self.to, self.dry = repo, to, dry
+        self.tokens = {repo: os.environ.get('GH_TOKEN', ''), to: os.environ.get('NIGHTLY_TOKEN', '')}
+
+    def token(self, repo):
+        if repo == self.to and not self.tokens[repo] and not self.dry:
+            raise RuntimeError(f'NIGHTLY_TOKEN is not set: nothing can be written in {self.to}')
+        return self.tokens[repo]
+
+    def gh(self, args, repo, data=None, write=False):
+        if write and self.dry:
+            print('would run: gh', ' '.join(args), json.dumps(data) if data is not None else '')
+            return {}
+        run = subprocess.run(
+            ['gh', *args],
+            input=json.dumps(data) if data is not None else None,
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, GH_TOKEN=self.token(repo)),
+            check=False,
+        )
+        if run.returncode:
+            raise RuntimeError(f'gh {" ".join(args)}: {run.stderr.strip() or run.stdout.strip()}')
+        return json.loads(run.stdout) if run.stdout.strip() else {}
+
+    def read(self, path, repo=None):
+        return self.gh(['api', path], repo or self.repo)
+
+    def missing(self, path, repo=None):
+        """path read, or None when GitHub has nothing there (404)"""
+        try:
+            return self.read(path, repo)
+        except RuntimeError as error:
+            if 'HTTP 404' in str(error) or 'Not Found' in str(error):
+                return None
+            raise
+
+    def pages(self, path, repo=None):
+        """every item of a listing, 100 a page"""
+        items, page = [], 1
+        while True:
+            sep = '&' if '?' in path else '?'
+            got = self.gh(['api', f'{path}{sep}per_page=100&page={page}'], repo or self.repo)
+            if isinstance(got, dict):
+                got = next((got[key] for key in ('artifacts', 'workflow_runs', 'jobs') if key in got), got)
+            items += got
+            if len(got) < 100:
+                return items
+            page += 1
+
+    def write(self, repo, method, path, data=None):
+        args = ['api', '-X', method, path, *(['--input', '-'] if data is not None else [])]
+        return self.gh(args, repo, data, write=True)
+
+    def releases(self, repo):
+        return self.pages(f'repos/{repo}/releases', repo)
+
+    def webhook(self, channel):
+        return os.environ.get(f'DISCORD_WEBHOOK_{channel.upper()}', '')
+
+    def post(self, channel, embed, message=None, create=True):
+        """the message of channel (releases, nightly, prs or issues) edited when message names it, else posted when
+        create: its id, or None when there is none"""
+        hook = self.webhook(channel)
+        if not hook:
+            print(f'::notice::No DISCORD_WEBHOOK_{channel.upper()}: nothing posted on Discord')
+            return message
+        body = {'embeds': [embed], 'allowed_mentions': {'parse': []}}
+        if self.dry:
+            print(f'would {"edit" if message else "post"} on Discord ({channel}):', json.dumps(body))
+            return message
+        # a webhook of a forum channel or a thread names it in its query (thread_id=...), which both requests keep
+        base, _, query = hook.partition('?')
+        edit = f'{base}/messages/{message}' + (f'?{query}' if query else '')
+        post = f'{base}?' + (f'{query}&' if query else '') + 'wait=true'
+        for method, url in (('PATCH', edit), ('POST', post)):
+            if (method == 'PATCH' and not message) or (method == 'POST' and not create):
+                continue
+            request = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode(),
+                method=method,
+                # Discord refuses urllib's own agent
+                headers={'Content-Type': 'application/json', 'User-Agent': f'DiscordBot ({SERVER}/{self.repo}, 1)'},
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=30) as reply:
+                    return json.loads(reply.read() or b'{}').get('id', message)
+            except urllib.error.HTTPError as error:
+                if method == 'PATCH' and error.code == 404:  # deleted on Discord: a new one, when it may post
+                    continue
+                print(f'::warning::Discord answered {error.code} to the {channel} message: {error.read()[:200]!r}')
+                return message
+            except (urllib.error.URLError, OSError) as error:
+                print(f'::warning::Discord could not be reached for the {channel} message: {error}')
+                return message
+        return None
+
+    def embed(self, title, url, description, fields=(), color=SCARLET, footer='', author=None):
+        """a message's embed, its description cut by whole lines, the last first, to what Discord takes: what it lists
+        gives way, the fields stay"""
+        title = title[:256]
+        room = EMBED - len(title) - len(footer) - len((author or {}).get('name', ''))
+        room = max(0, min(DESCRIPTION, room - sum(len(f['name']) + len(f['value']) for f in fields)))
+        while len(description) > room:
+            description = description.rsplit('\n', 1)[0] if '\n' in description else description[:room]
+        made = {
+            'title': title,
+            'url': url,
+            'description': description,
+            'color': color,
+            'thumbnail': {'url': WIMSY.format(repo=self.repo)},
+            'timestamp': datetime.datetime.now(datetime.UTC).isoformat(timespec='seconds'),
+        }
+        if fields:
+            made['fields'] = list(fields)
+        if footer:
+            made['footer'] = {'text': footer}
+        if author:
+            made['author'] = author
+        return made
+
+
+class Store:
+    """each card's message id, a file of the nightly repository's BRANCH: cards/<key>"""
+
+    def __init__(self, hub):
+        self.hub = hub
+
+    def get(self, key):
+        found = self.hub.missing(f'repos/{self.hub.to}/contents/cards/{key}?ref={BRANCH}', self.hub.to)
+        if found and found.get('content'):
+            return base64.b64decode(found['content']).decode().strip(), found['sha']
+        return None, None
+
+    def put(self, key, message, sha=None):
+        to = self.hub.to
+        if not self.hub.missing(f'repos/{to}/git/ref/heads/{BRANCH}', to):  # the branch made from the default one
+            default = self.hub.read(f'repos/{to}', to)['default_branch']
+            head = self.hub.read(f'repos/{to}/git/ref/heads/{default}', to)['object']['sha']
+            self.hub.write(to, 'POST', f'repos/{to}/git/refs', {'ref': f'refs/heads/{BRANCH}', 'sha': head})
+        data = {
+            'message': f'The Discord message of {key}',
+            'content': base64.b64encode(f'{message}\n'.encode()).decode(),
+            'branch': BRANCH,
+        }
+        if sha:
+            data['sha'] = sha
+        self.hub.write(to, 'PUT', f'repos/{to}/contents/cards/{key}', data)
+
+
+def excerpt(text, most=MOST_TEXT):
+    """a comment or a description as a card quotes it: no hidden comments, an image as [image], cut by a word"""
+    text = re.sub(r'<!--.*?-->', '', text or '', flags=re.DOTALL)
+    text = re.sub(r'!\[[^\]]*\]\([^)]*\)|<img\b[^>]*>', '[image]', text)
+    text = re.sub(r'<details>.*?</details>', '[details]', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'\n{3,}', '\n\n', text.replace('\r', '')).strip()
+    if len(text) > most:
+        text = text[:most].rsplit(' ', 1)[0].rstrip() + '...'
+    if text.count('```') % 2:  # a code block cut open: kept closed
+        text += '\n```'
+    return '\n'.join(f'> {line}' if line else '>' for line in text.splitlines())
+
+
+def plural(count, word):
+    return f'{count} {word}{"" if count == 1 else "s"}'
+
+
+class Cards:
+    def __init__(self, hub, checkout='.', keep=30):
+        self.hub, self.checkout, self.keep = hub, checkout, keep
+        self.store = Store(hub)
+        self.url = f'{SERVER}/{hub.repo}'
+        self._releases = None
+
+    # ---- what GitHub says now
+    def nightly_releases(self):
+        """the nightly repository's releases, the newest published first: their created_at is their tag's commit's
+        date, which every nightly there shares"""
+        if self._releases is None:
+            published = sorted(self.hub.releases(self.hub.to), key=lambda r: r.get('published_at') or '', reverse=True)
+            self._releases = published
+        return self._releases
+
+    def build_of(self, sha):
+        """the newest Build run of sha"""
+        path = f'repos/{self.hub.repo}/actions/workflows/build.yml/runs?head_sha={sha}'
+        runs = [r for r in self.hub.pages(path) if r['event'] in ('push', 'pull_request')]
+        return max(runs, key=lambda r: r['created_at']) if runs else None
+
+    def jobs_of(self, run):
+        return self.hub.pages(f'repos/{self.hub.repo}/actions/runs/{run["id"]}/jobs') if run else []
+
+    def latest_comment(self, number, count, pr=None):
+        """the newest comment of an issue or a pull request (its reviews and review comments too) a person wrote"""
+        found = []
+
+        def last_of(path, total):
+            for page in range(math.ceil(total / 100), 0, -1):  # from the last page back, to the first a person wrote on
+                got = [c for c in self.hub.read(f'{path}?per_page=100&page={page}') if not bot(c)]
+                if got:
+                    return got
+            return []
+
+        def bot(item):
+            return (item.get('user') or {}).get('type') == 'Bot' or not (item.get('body') or '').strip()
+
+        found += last_of(f'repos/{self.hub.repo}/issues/{number}/comments', count)
+        if pr:
+            found += [
+                dict(r, created_at=r['submitted_at'])
+                for r in self.hub.pages(f'repos/{self.hub.repo}/pulls/{number}/reviews')
+                if r.get('submitted_at') and not bot(r)
+            ]
+            found += last_of(f'repos/{self.hub.repo}/pulls/{number}/comments', pr.get('review_comments', 0))
+        return max(found, key=lambda c: c['created_at']) if found else None
+
+    def comment_lines(self, comment):
+        if not comment:
+            return []
+        who = comment['user']['login']
+        return ['', f'**Latest comment**, by **{who}** ([on GitHub]({comment["html_url"]}))', excerpt(comment['body'])]
+
+    def packages(self, jobs, release, built):
+        """a field per release file: published, its link and size; else what its job does; built: what a built one
+        waits for"""
+        assets = {a['name']: a for a in (release or {}).get('assets', [])}
+        by_name = {j['name']: j for j in jobs}
+        fields = []
+        for name in notes.ordered(list(JOBS)):
+            system, arch, kind = notes.SYSTEMS[name]
+            job, asset = by_name.get(JOBS[name]), assets.get(name)
+            if asset:
+                value = f'[{kind}]({asset["browser_download_url"]})\n{notes.size(asset["size"])}'
+            elif not job or job['status'] in WAITING:
+                value = 'Waiting'
+            elif job['status'] != 'completed':
+                value = f'Building\n[log]({job["html_url"]})'
+            elif job['conclusion'] == 'success':
+                value = f'Built\n{built}' if built else 'Built'
+            elif job['conclusion'] in ('cancelled', 'skipped'):
+                value = job['conclusion'].capitalize()
+            else:
+                value = f'Failed\n[log]({job["html_url"]})'
+            fields.append({'name': system if ',' in arch else f'{system} {arch}', 'value': value, 'inline': True})
+        return fields
+
+    @staticmethod
+    def failed(jobs):
+        return any(
+            j['name'] in JOBS.values() and j['status'] == 'completed' and j['conclusion'] not in ('success', 'skipped')
+            for j in jobs
+        )
+
+    @staticmethod
+    def listed(lines, more_url, most):
+        shown = [f'- {line}' for line in lines[:most]]
+        if len(lines) > most:
+            shown.append(f'- and [{len(lines) - most} more]({more_url})')
+        return shown
+
+    def show(self, key, embed_of, create=True):
+        """key's card drawn by embed_of() and posted, or its message edited; nothing drawn when it cannot be shown"""
+        channel = CHANNELS[key.split('-')[0]]
+        if not self.hub.webhook(channel):
+            print(f'::notice::No DISCORD_WEBHOOK_{channel.upper()}: no card for {key}')
+            return None
+        message, sha = self.store.get(key)
+        if not message and key.startswith('pr-'):  # kept in its prerelease's notes before the cards
+            release = next((r for r in self.nightly_releases() if r['tag_name'] == key), None)
+            message = next(iter(MARKER.findall((release or {}).get('body') or '')), None)
+        if not message and not create:
+            print(f'{key} has no card yet: a run that may post it will')
+            return None
+        posted = self.hub.post(channel, embed_of(), message, create)
+        if posted and (posted != message or not sha):  # a new message, or one not kept here yet
+            self.store.put(key, posted, sha)
+        print(f'{key}: card {"posted" if posted and posted != message else "edited" if posted else "not shown"}')
+        return posted
+
+    # ---- the cards
+    def pr(self, number, create=True, run=None, jobs=None):
+        return self.show(f'pr-{number}', lambda: self.pr_embed(number, run, jobs), create)
+
+    def pr_embed(self, number, run=None, jobs=None):
+        repo, url = self.hub.repo, self.url
+        pr = self.hub.read(f'repos/{repo}/pulls/{number}')
+        head = pr['head']['sha']
+        commit = f'{url}/pull/{number}/commits/{head}'
+        commits = list(reversed(self.hub.pages(f'repos/{repo}/pulls/{number}/commits')))
+        subjects = [
+            notes.escape((c['commit']['message'] or '').splitlines()[0] if c['commit']['message'] else '')
+            for c in commits
+        ]
+        comment = self.latest_comment(number, pr.get('comments', 0), pr)
+        author = {'name': pr['user']['login'], 'url': pr['user']['html_url']}
+        if pr['user'].get('avatar_url'):
+            author['icon_url'] = pr['user']['avatar_url']
+        title = f'PR #{number}: {pr["title"]}'
+        fields, color = [], CLOSED
+        if pr.get('merged'):
+            merged = pr.get('merge_commit_sha') or ''
+            said = f'**Merged** into main at [`{merged[:7]}`]({url}/commit/{merged}): the next nightly has it.'
+            color = MERGED
+        elif pr['state'] == 'closed':
+            said = '**Closed** without a merge.'
+        else:
+            base = self.hub.read(f'repos/{repo}/compare/{pr["base"]["sha"]}...{head}')['merge_base_commit']['sha']
+            nightly = next(
+                (
+                    r['html_url']
+                    for r in self.nightly_releases()
+                    if r['tag_name'].startswith('nightly-') and r['tag_name'].endswith(f'-{base[:7]}')
+                ),
+                '',
+            )
+            said = (
+                f'**{"Draft" if pr.get("draft") else "Open"}** at [`{head[:7]}`]({commit}), on main at '
+                f'[`{base[:7]}`]({url}/commit/{base})' + (f' ([its nightly]({nightly}))' if nightly else '') + '.'
+            )
+            run = run or self.build_of(head)
+            jobs = self.jobs_of(run) if jobs is None else jobs
+            release = next((r for r in self.nightly_releases() if r['tag_name'] == f'pr-{number}'), None)
+            current = release if release and f'/commits/{head}' in (release.get('body') or '') else None
+            fork = (pr['head'].get('repo') or {}).get('full_name') != repo
+            labeled = LABEL in {label['name'] for label in pr.get('labels', [])}
+            built = "waits for the team's label" if fork and not labeled else 'being published'
+            fields = self.packages(jobs, current, built)
+            if not run:
+                state = 'Not started'
+            elif run['status'] != 'completed':
+                state = f'[Running]({run["html_url"]})'
+            else:
+                state = f'[{"Passed" if run["conclusion"] == "success" else run["conclusion"].capitalize()}]({run["html_url"]})'
+            fields.append({'name': 'Build', 'value': state, 'inline': True})
+            if current:
+                files = f'[All files]({current["html_url"]})'
+            elif release:
+                files = f'[The push before]({release["html_url"]})'
+            else:
+                files = 'None yet'
+            fields.append({'name': 'Builds', 'value': files, 'inline': True})
+            color = AMBER if self.failed(jobs) else SCARLET if current else BUILDING
+        lines = [said]
+        if subjects:
+            lines += ['', f'**{plural(len(subjects), "commit")}**, the newest first']
+            lines += self.listed(subjects, f'{pr["html_url"]}/commits', MOST_COMMITS)
+        lines += self.comment_lines(comment)
+        footer = 'Edited at each push, comment and build'
+        return self.hub.embed(title, pr['html_url'], '\n'.join(lines), fields, color, footer, author)
+
+    def issue(self, number, create=True):
+        return self.show(f'issue-{number}', lambda: self.issue_embed(number), create)
+
+    def issue_embed(self, number):
+        issue = self.hub.read(f'repos/{self.hub.repo}/issues/{number}')
+        if issue['state'] == 'open':
+            said, color = '**Open**', OPEN
+        elif issue.get('state_reason') == 'completed':
+            said, color = '**Closed** as done', DONE
+        else:
+            said, color = f'**Closed** as {(issue.get("state_reason") or "closed").replace("_", " ")}', CLOSED
+        labels = ' '.join(f'`{label["name"]}`' for label in issue.get('labels', []))
+        lines = [said + (f'  {labels}' if labels else ''), '', excerpt(issue.get('body')) or '*No description.*']
+        lines += self.comment_lines(self.latest_comment(number, issue.get('comments', 0)))
+        author = {'name': issue['user']['login'], 'url': issue['user']['html_url']}
+        if issue['user'].get('avatar_url'):
+            author['icon_url'] = issue['user']['avatar_url']
+        footer = f'{plural(issue.get("comments", 0), "comment")}, edited at each change and comment'
+        title = f'#{number}: {issue["title"]}'
+        return self.hub.embed(title, issue['html_url'], '\n'.join(lines), (), color, footer, author)
+
+    def nightly(self, sha, create=True, run=None, jobs=None):
+        return self.show(f'nightly-{sha}', lambda: self.nightly_embed(sha, run, jobs), create)
+
+    def nightly_embed(self, sha, run=None, jobs=None):
+        url, commit = self.url, f'{self.url}/commit/{sha}'
+        date = notes.git(self.checkout, 'log', '-1', '--format=%cs', sha).strip()
+        nightlies = [r for r in self.nightly_releases() if r['tag_name'].startswith('nightly-')]
+        own = next((r for r in nightlies if r['tag_name'].endswith(f'-{sha[:7]}')), None)
+        older = nightlies[nightlies.index(own) + 1 :] if own else nightlies
+        built_from = [m.group(0) for r in older for m in [re.search(r'[0-9a-f]{40}', r.get('body') or '')] if m]
+        previous = next((c for c in built_from if c != sha), '')
+        run = run or self.build_of(sha)
+        jobs = self.jobs_of(run) if jobs is None else jobs
+        link, color, built = commit, BUILDING, ''
+        if own:
+            said, link, color = (
+                f'Built from main at [`{sha[:7]}`]({commit}), committed {date}.',
+                own['html_url'],
+                SCARLET,
+            )
+        elif not run or run['status'] != 'completed':
+            said = f'Building main at [`{sha[:7]}`]({commit}), committed {date}.'
+        elif run['conclusion'] != 'success':
+            said, color = (
+                f'Not published: the build of [`{sha[:7]}`]({commit}) failed ([run]({run["html_url"]})).',
+                AMBER,
+            )
+            built = 'not published'
+        elif previous and self.ancestor(sha, previous):
+            newer = older[0]
+            said, color = (
+                f'Not published: [{newer["name"]}]({newer["html_url"]}), of a newer commit, came first.',
+                CLOSED,
+            )
+            built = 'not published'
+        else:
+            said, built = (
+                f'Built from main at [`{sha[:7]}`]({commit}), committed {date}: being published.',
+                'being published',
+            )
+        lines = [said]
+        items = notes.changes(self.checkout, previous, sha)
+        if items:
+            compare = f'{url}/compare/{previous}...{sha}'
+            lines += ['', f'**Changes** ([`{previous[:7]}...{sha[:7]}`]({compare}))']
+            lines += self.listed([notes.change_line(item, url) for item in items], compare, MOST_LINES)
+        fields = self.packages(jobs, own, built)
+        fields += [
+            {'name': 'Source', 'value': f'[`{sha[:7]}`]({commit})', 'inline': True},
+            {'name': 'Every nightly', 'value': f'[{self.hub.to}]({SERVER}/{self.hub.to}/releases)', 'inline': True},
+        ]
+        color = AMBER if self.failed(jobs) and not own else color
+        title = notes.title(self.checkout, sha)
+        return self.hub.embed(
+            title, link, '\n'.join(lines), fields, color, f'The newest {self.keep} nightlies are kept'
+        )
+
+    def ancestor(self, sha, newer):
+        command = ['git', '-C', self.checkout, 'merge-base', '--is-ancestor', sha, newer]
+        return sha != newer and subprocess.run(command, capture_output=True, check=False).returncode == 0
+
+    # ---- following a build
+    def target(self, run):
+        """the card a Build run's packages go on: ('pr', N), ('nightly', SHA), or None"""
+        if (
+            run['event'] == 'push'
+            and run['head_branch'] == 'main'
+            and run['head_repository']['full_name'] == self.hub.repo
+        ):
+            return 'nightly', run['head_sha']
+        if run['event'] == 'pull_request':
+            if run.get('pull_requests'):
+                return 'pr', run['pull_requests'][0]['number']
+            pulls = self.hub.pages(f'repos/{self.hub.repo}/pulls?state=open')  # a fork's run names none
+            found = next((p['number'] for p in pulls if p['head']['sha'] == run['head_sha']), None)
+            return ('pr', found) if found else None
+        return None
+
+    def watch(self, run_id, every=20, limit=3600):
+        """the run's card edited each time one of its jobs changes, until the run ends or limit seconds pass"""
+        start, seen, aim = time.monotonic(), None, None
+        while True:
+            run = self.hub.read(f'repos/{self.hub.repo}/actions/runs/{run_id}')
+            aim = aim or self.target(run)
+            if not aim:
+                print(f'run {run_id} ({run["event"]} of {run["head_branch"]}) has no card')
+                return
+            jobs = self.jobs_of(run)
+            now = json.dumps(sorted((j['name'], j['status'], j.get('conclusion')) for j in jobs) + [run['status']])
+            if now != seen:
+                self._releases = None
+                kind, ident = aim
+                getattr(self, kind)(ident, create=False, run=run, jobs=jobs)
+                seen = now
+            if run['status'] == 'completed' or time.monotonic() - start > limit:
+                return
+            time.sleep(every)
+
+    # ---- what an event shows
+    def on_event(self, name, event, every):
+        if name == 'push':
+            if event.get('ref') == f'refs/heads/{event["repository"]["default_branch"]}' and not event.get('deleted'):
+                self.nightly(event['after'])
+            else:
+                print(f'a push to {event.get("ref")}: no card')
+        elif name in ('pull_request_target', 'pull_request', 'pull_request_review', 'pull_request_review_comment'):
+            self.pr(event['pull_request']['number'])
+        elif name == 'issues':
+            self.issue(event['issue']['number'])
+        elif name == 'issue_comment':
+            if event['issue'].get('pull_request'):
+                self.pr(event['issue']['number'])
+            else:
+                self.issue(event['issue']['number'])
+        elif name == 'workflow_run':
+            self.watch(event['workflow_run']['id'], every)
+        else:
+            print(f'{name}: no card')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    parser.add_argument('step', choices=['event', 'refresh'])
+    parser.add_argument('kind', nargs='?', choices=['pr', 'issue', 'nightly'])
+    parser.add_argument('ident', nargs='?', help="the pull request's or the issue's number, or the nightly's commit")
+    parser.add_argument('--repo', required=True)
+    parser.add_argument('--to', required=True, help='the nightly repository, which keeps the cards')
+    parser.add_argument('--checkout', default='.', help="REPO's history, for a nightly's changes")
+    parser.add_argument('--keep', type=int, default=30, help='the nightlies kept')
+    parser.add_argument('--every', type=float, default=20, help='seconds between two looks at a build')
+    parser.add_argument('--dry-run', action='store_true', help='read, and print each write instead')
+    args = parser.parse_args()
+    if args.step == 'refresh' and not (args.kind and args.ident):
+        parser.error('refresh takes pr N, issue N or nightly SHA')
+    cards = Cards(Hub(args.repo, args.to, args.dry_run), args.checkout, args.keep)
+    if args.step == 'refresh':
+        getattr(cards, args.kind)(args.ident if args.kind == 'nightly' else int(args.ident))
+        return
+    with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as file:
+        cards.on_event(os.environ['GITHUB_EVENT_NAME'], json.load(file), args.every)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except RuntimeError as error:
+        sys.exit(f'discord-cards: {error}')

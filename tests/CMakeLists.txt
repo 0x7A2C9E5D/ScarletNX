@@ -533,6 +533,9 @@ if(Python3_Interpreter_FOUND)
     if(NOT WIN32)
         add_test(NAME publish_builds
                  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/publish_builds_test.py")
+        # the Discord cards of pull requests, issues and pushes to main (scripts/discord-cards.py), against the same
+        add_test(NAME discord_cards
+                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/discord_cards_test.py")
     endif()
 endif()
 
