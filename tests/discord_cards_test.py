@@ -8,6 +8,7 @@ its latest comment and how it was closed; a message id kept before the cards tak
 limits; and the Build jobs the cards name being build.yml's. Offline."""
 
 import base64
+import datetime
 import importlib.util
 import json
 import os
@@ -205,8 +206,8 @@ with tempfile.TemporaryDirectory() as temporary:
     check('its id kept in the nightly repository', card_id(f'nightly-{sha}') == message, state().get('files'))
     stored = [c for c in calls() if c['args'][:3] in (['api', '-X', 'PUT'], ['api', '-X', 'POST'])]
     check(
-        'kept on a branch of its own, made once, written with the nightly token',
-        [c['args'][3] for c in stored] == [f'repos/{TO}/git/refs', f'repos/{TO}/contents/cards/nightly-{sha}']
+        'claimed, then kept, on a branch of its own made once, written with the nightly token',
+        [c['args'][3] for c in stored] == [f'repos/{TO}/git/refs'] + [f'repos/{TO}/contents/cards/nightly-{sha}'] * 2
         and all(c['token'] == 'nightly-token' for c in stored),
         stored,
     )
@@ -521,15 +522,16 @@ with tempfile.TemporaryDirectory() as temporary:
     done = run('event', event={'action': 'opened', 'issue': {'number': 14}}, name='issues')
     writes = [c['args'][3] for c in calls() if c['args'][:2] == ['api', '-X']]
     check(
-        "a branch another run made first, and a write another run's came before: the card kept all the same",
+        "a branch another run made first, and a claim another run's came before: the card kept all the same",
         done.returncode == 0
         and card_id('issue-14') == posted('issues')[-1].get('reply')
-        and writes == [f'repos/{TO}/git/refs'] + [f'repos/{TO}/contents/cards/issue-14'] * 2,
+        and writes == [f'repos/{TO}/git/refs'] + [f'repos/{TO}/contents/cards/issue-14'] * 3,
         done.stdout + done.stderr + str(writes),
     )
     s = state()
     s['issues']['15'] = dict(issue, number=15)
-    s['fail_puts'], s['put_error'] = 1, 'gh: Resource not accessible by integration (HTTP 403)'
+    s['pass_puts'], s['fail_puts'] = 1, 1  # claimed, then its id cannot be written
+    s['put_error'] = 'gh: Resource not accessible by integration (HTTP 403)'
     save_state(s)
     done = run('event', event={'action': 'opened', 'issue': {'number': 15}}, name='issues')
     check(
@@ -539,6 +541,36 @@ with tempfile.TemporaryDirectory() as temporary:
         in done.stderr
         and 'HTTP 403' in done.stderr,
         done.stderr,
+    )
+
+    # a card another run is posting: waited for, never posted twice; one a run that died claimed: taken over
+    def claim_of(key, when):
+        s = state()
+        s['issues'][key.split('-')[1]] = dict(issue, number=int(key.split('-')[1]))
+        content = base64.b64encode(f'posting {when}\n'.encode()).decode()
+        s['files'][TO][f'discord-cards:cards/{key}'] = {'content': content, 'sha': f'claim-{key}'}
+        save_state(s)
+
+    now = datetime.datetime.now(datetime.UTC).isoformat(timespec='seconds')
+    claim_of('issue-16', now)
+    before = len(posted('issues'))
+    done = run('event', event={'action': 'labeled', 'issue': {'number': 16}}, name='issues')
+    check(
+        'a card another run is posting is waited for, and not posted again',
+        done.returncode == 0
+        and 'issue-16 is being posted by another run' in done.stdout
+        and len(posted('issues')) == before
+        and state()['files'][TO]['discord-cards:cards/issue-16']['sha'] == 'claim-issue-16',
+        done.stdout + done.stderr,
+    )
+    claim_of('issue-17', '2026-01-01T00:00:00+00:00')
+    done = run('event', event={'action': 'opened', 'issue': {'number': 17}}, name='issues')
+    check(
+        'a claim a run that died left is taken over: the card posted, its id kept',
+        done.returncode == 0
+        and card_id('issue-17') == posted('issues')[-1].get('reply')
+        and len(posted('issues')) == before + 1,
+        done.stdout + done.stderr,
     )
     # dry run: reads only
     log_file.unlink(missing_ok=True)
@@ -551,7 +583,7 @@ with tempfile.TemporaryDirectory() as temporary:
         done.returncode == 0
         and not any('-X' in c['args'] for c in calls())
         and 'would post on Discord (issues)' in done.stdout
-        and len(posted('issues')) == 5,
+        and len(posted('issues')) == 6,
         done.stdout + done.stderr,
     )
 

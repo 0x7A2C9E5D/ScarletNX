@@ -75,6 +75,9 @@ CHANNELS = {'pr': 'prs', 'issue': 'issues', 'nightly': 'nightly'}
 WAITING = {'queued', 'waiting', 'pending', 'requested'}
 # a write to the cards' branch that another run's came before, tried again this many times in all
 CONFLICT, TRIES = re.compile(r'HTTP 409|is at [0-9a-f]+ but expected|sha wasn.t supplied|does not match'), 3
+# A card's file while the run that made it posts the card: CLAIM and when. Another run waits for the id, at most WAIT
+# seconds; a claim older than STALE seconds is a run that died, and taken over
+CLAIM, WAIT, STALE = 'posting', 60, 300
 
 
 class Hub:
@@ -215,12 +218,10 @@ class Store:
             return base64.b64decode(found['content']).decode().strip(), found['sha']
         return None, None
 
-    def put(self, key, message, sha=None):
-        """message kept as key's. Runs of other cards write the branch too, at the same moment when one event starts
-        several: one that made the branch first has made it, and a write that lost to another's is tried again on
-        what it left. A message that still cannot be kept is named, so it can be found on Discord"""
+    def branch(self):
+        """the branch made from the default one when there is none; one another run made first has been made"""
         to = self.hub.to
-        if not self.hub.missing(f'repos/{to}/git/ref/heads/{BRANCH}', to):  # the branch made from the default one
+        if not self.hub.missing(f'repos/{to}/git/ref/heads/{BRANCH}', to):
             default = self.hub.read(f'repos/{to}', to)['default_branch']
             head = self.hub.read(f'repos/{to}/git/ref/heads/{default}', to)['object']['sha']
             try:
@@ -228,6 +229,38 @@ class Store:
             except RuntimeError as error:
                 if 'Reference already exists' not in str(error):
                     raise
+
+    def claim(self, key, sha=None):
+        """key's file made, saying this run posts the card: its sha, or None when another run's came first. GitHub
+        makes a file only once without its sha, so two runs never both claim one; sha: a dead run's claim, replaced"""
+        self.branch()
+        now = datetime.datetime.now(datetime.UTC).isoformat(timespec='seconds')
+        data = {
+            'message': f'The Discord message of {key}, being posted',
+            'content': base64.b64encode(f'{CLAIM} {now}\n'.encode()).decode(),
+            'branch': BRANCH,
+        }
+        if sha:
+            data['sha'] = sha
+        try:
+            made = self.hub.write(self.hub.to, 'PUT', f'repos/{self.hub.to}/contents/cards/{key}', data)
+        except RuntimeError as error:
+            if CONFLICT.search(str(error)):
+                return None
+            raise
+        return (made.get('content') or {}).get('sha', 'dry run')
+
+    def release(self, key, sha):
+        """a claim given back, its card not posted"""
+        data = {'message': f'The Discord message of {key}, not posted', 'sha': sha, 'branch': BRANCH}
+        self.hub.write(self.hub.to, 'DELETE', f'repos/{self.hub.to}/contents/cards/{key}', data)
+
+    def put(self, key, message, sha=None):
+        """message kept as key's. Runs of other cards write the branch too, at the same moment when one event starts
+        several, so a write that lost to another's is tried again on what it left. A message that still cannot be kept
+        is named, so it can be found on Discord"""
+        to = self.hub.to
+        self.branch()
         for attempt in range(TRIES):
             data = {
                 'message': f'The Discord message of {key}',
@@ -266,8 +299,8 @@ def plural(count, word):
 
 
 class Cards:
-    def __init__(self, hub, checkout='.', keep=30):
-        self.hub, self.checkout, self.keep = hub, checkout, keep
+    def __init__(self, hub, checkout='.', keep=30, every=20):
+        self.hub, self.checkout, self.keep, self.every = hub, checkout, keep, every
         self.store = Store(hub)
         self.url = f'{SERVER}/{hub.repo}'
         self._releases = None
@@ -358,24 +391,50 @@ class Cards:
             shown.append(f'- and [{len(lines) - most} more]({more_url})')
         return shown
 
-    def show(self, key, embed_of, create=True):
+    def show(self, key, embed_of, create=True, tries=TRIES):
         """key's card drawn by embed_of() and posted, or its message edited; nothing drawn when it cannot be shown"""
         channel = CHANNELS[key.split('-')[0]]
         if not self.hub.webhook(channel):
             print(f'::notice::No DISCORD_WEBHOOK_{channel.upper()}: no card for {key}')
             return None
-        message, sha = self.store.get(key)
+        message, sha = self.claimed(key)
+        if message is False:
+            print(f'::notice::{key} is being posted by another run, which has not kept its id yet')
+            return None
         if not message and key.startswith('pr-'):  # kept in its prerelease's notes before the cards
             release = next((r for r in self.nightly_releases() if r['tag_name'] == key), None)
             message = next(iter(MARKER.findall((release or {}).get('body') or '')), None)
         if not message and not create:
             print(f'{key} has no card yet: a run that may post it will')
             return None
+        claim = None
+        if not message:  # this run posts it, once it has claimed it; one that claimed it first posts it instead
+            claim = self.store.claim(key, sha)
+            if not claim and tries > 1:
+                return self.show(key, embed_of, create, tries - 1)
+            if not claim:
+                raise RuntimeError(f'{key} could not be claimed: other runs kept making its file first')
+            sha = claim
         posted = self.hub.post(channel, embed_of(), message, create)
-        if posted and (posted != message or not sha):  # a new message, or one not kept here yet
+        if posted and (posted != message or not sha or claim):  # a new message, or one not kept here yet
             self.store.put(key, posted, sha)
+        elif claim and claim != 'dry run':
+            self.store.release(key, claim)
         print(f'{key}: card {"posted" if posted and posted != message else "edited" if posted else "not shown"}')
         return posted
+
+    def claimed(self, key):
+        """key's message id and its file's sha, waiting while another run posts the card: (None, sha) for a claim
+        STALE seconds old, a run that died, to be taken over; (False, None) when the wait ends first"""
+        for _ in range(max(1, int(WAIT / max(self.every, 1)))):
+            message, sha = self.store.get(key)
+            if not (message or '').startswith(CLAIM):
+                return message, sha
+            made = datetime.datetime.fromisoformat(message.split()[1])
+            if (datetime.datetime.now(datetime.UTC) - made).total_seconds() > STALE:
+                return None, sha
+            time.sleep(self.every)
+        return False, None
 
     # ---- the cards
     def pr(self, number, create=True, run=None, jobs=None):
@@ -598,12 +657,14 @@ def main():
     parser.add_argument('--to', required=True, help='the nightly repository, which keeps the cards')
     parser.add_argument('--checkout', default='.', help="REPO's history, for a nightly's changes")
     parser.add_argument('--keep', type=int, default=30, help='the nightlies kept')
-    parser.add_argument('--every', type=float, default=20, help='seconds between two looks at a build')
+    parser.add_argument(
+        '--every', type=float, default=20, help="seconds between two looks at a build or another run's card"
+    )
     parser.add_argument('--dry-run', action='store_true', help='read, and print each write instead')
     args = parser.parse_args()
     if args.step == 'refresh' and not (args.kind and args.ident):
         parser.error('refresh takes pr N, issue N or nightly SHA')
-    cards = Cards(Hub(args.repo, args.to, args.dry_run), args.checkout, args.keep)
+    cards = Cards(Hub(args.repo, args.to, args.dry_run), args.checkout, args.keep, args.every)
     if args.step == 'refresh':
         getattr(cards, args.kind)(args.ident if args.kind == 'nightly' else int(args.ident))
         return

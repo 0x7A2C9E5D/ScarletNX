@@ -132,8 +132,15 @@ elif rest.startswith('contents/'):
     key = f'{branch}:{name}'
     if method == 'GET':
         out(files[key]) if key in files else stop('gh: Not Found (HTTP 404)')
+    elif method == 'DELETE':
+        if key not in files or data.get('sha') != files[key]['sha']:
+            stop('gh: sha does not match (HTTP 409)')
+        del files[key]
+        save()
     else:
-        if s.get('fail_puts'):  # another run's write came first, or one that cannot be done
+        if s.get('pass_puts'):  # the writes before the one that fails
+            s['pass_puts'] -= 1
+        elif s.get('fail_puts'):  # another run's write came first, or one that cannot be done
             s['fail_puts'] -= 1
             save()
             stop(s.get('put_error', 'gh: is at 1a2b3c but expected 4d5e6f (HTTP 409)'))

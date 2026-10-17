@@ -8,7 +8,9 @@ name: Discord cards
 # request runs here: the checkout is main's, and its build is only read. A review of a fork's pull request runs without
 # the secrets, so its card waits for the next event. The secrets: NIGHTLY_TOKEN may write scarletnx/nightly's contents,
 # where each card's message id is kept (branch discord-cards); DISCORD_WEBHOOK_NIGHTLY, DISCORD_WEBHOOK_PRS and
-# DISCORD_WEBHOOK_ISSUES are the channels' webhooks (without one, nothing is posted there and the run says so)
+# DISCORD_WEBHOOK_ISSUES are the channels' webhooks (without one, nothing is posted there and the run says so). The
+# first run of a card claims it before posting it, so the runs one event starts never post it twice; with no
+# concurrency group, none of them is cancelled. cards-watch.yml follows each build
 on:
   push:
     branches: [main]
@@ -22,10 +24,6 @@ on:
     types: [opened, edited, closed, reopened, labeled, unlabeled]
   issue_comment:
     types: [created, edited, deleted]
-  # a build starting: followed until it ends
-  workflow_run:
-    workflows: [Build]
-    types: [requested]
 
 permissions:
   contents: read
@@ -35,7 +33,7 @@ permissions:
 
 env:
   NIGHTLY_REPO: scarletnx/nightly
-  PYTHONUNBUFFERED: '1' # a build followed for minutes says each step as it happens
+  PYTHONUNBUFFERED: '1' # each line in the log as it happens
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   NIGHTLY_TOKEN: ${{ secrets.NIGHTLY_TOKEN }}
   DISCORD_WEBHOOK_NIGHTLY: ${{ secrets.DISCORD_WEBHOOK_NIGHTLY }}
@@ -45,34 +43,13 @@ env:
 jobs:
   card:
     name: Draw the card
-    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
-    # One at a time for each card, so two events never post it twice; a newer event's run replaces one that waits,
-    # each drawing the card whole
-    concurrency:
-      group: >-
-        card-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) ||
-        github.event.issue.number && format('{0}-{1}', github.event.issue.pull_request && 'pr' || 'issue',
-        github.event.issue.number) || format('nightly-{0}', github.sha) }}
     steps:
       # main's scripts, and for a push its history, which a nightly's changes come from
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
-          sparse-checkout: scripts
-      - run: python3 scripts/discord-cards.py event --repo "$GITHUB_REPOSITORY" --to "$NIGHTLY_REPO" --checkout .
-
-  watch:
-    name: Follow the build
-    if: github.event_name == 'workflow_run'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          fetch-depth: 0
           sparse-checkout: scripts
       - run: python3 scripts/discord-cards.py event --repo "$GITHUB_REPOSITORY" --to "$NIGHTLY_REPO" --checkout .
