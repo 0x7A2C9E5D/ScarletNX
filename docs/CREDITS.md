@@ -17,6 +17,7 @@ Generated modules include runtime ABI code. Game assets, keys and firmware are e
 | Vulkan-Headers | Apache 2.0 |
 | volk / Vulkan Memory Allocator | MIT |
 | SDL3 | zlib |
+| lunasvg / plutovg (the splash's SVGs) | MIT / MIT, with FreeType's rasterizer and stroker (FreeType License) and stb (MIT or public domain) |
 | GUI VGA BIOS font (SeaBIOS `vgafont16`, originally Joseph Gil's font collection) | Public domain |
 
 The GUI font's original notice and pinned source are preserved in
@@ -27,4 +28,6 @@ and package manifest: `share/licenses/`. Component license files contain the ful
 
 Community credits: [README](../README.md#special-thanks).
 
-Wimsy ([SVG metadata](../dist/wimsy.svg)): Madeline_Dev, copyright 2025 Eden Emulator Project, GPL-3.0.
+Wimsy ([SVG metadata](../dist/wimsy.svg)): drawn by Liz, GPL-3.0-or-later.
+The splash's Fuddles ([SVG metadata](../dist/splash/wimsy-fuddles.svg)): Wimsy with Fuddles' tails, circuits and
+colours, by AO55 after Liz's Wimsy, GPL-3.0-or-later.
