@@ -299,7 +299,7 @@ Build, run the tests (`ctest --test-dir build`: the generator, the services' and
 cmake --preset default -B build && cmake --build build
 ctest --test-dir build
 scripts/format.sh --check
-tools/run_game.py <id> --runs 3 --dump work/Catherine
+tools/run_game.py <id> --runs 3 --dump work/<Game>
 ```
 
 - The runtime builds with Clang's default warnings, and only `missing-prototypes` and `missing-variable-declarations` fail the build (the tests build with `-Wall -Wextra -Werror`), so a clean-looking runtime build says little. Build a changed file once with more warnings on (its line from `build/compile_commands.json`, with `-Wall -Wextra -fsyntax-only`) and check none come from the change.

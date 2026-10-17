@@ -20,10 +20,10 @@ frame.
   frame's descriptor pools and staging reset after it and the draw's sets already allocated turn to garbage. Copy
   on the GPU instead.
 - Agreed work (October 2026): compute dispatches and graphics storage writes currently land in guest memory with a
-  `vk_finish` each, about 30 to 40 percent of the GPU thread's time in TotK. They should land lazily, batched, at
-  the points where the guest can observe the memory.
-- Shaders must declare `SignedZeroInfNanPreserve`: Maxwell code relies on infinities and NaNs (TotK's lighting
-  became NaN blocks without it).
+  `vk_finish` each, about 30 to 40 percent of the GPU thread's time in a heavy game. They should land lazily,
+  batched, at the points where the guest can observe the memory.
+- Shaders must declare `SignedZeroInfNanPreserve`: Maxwell code relies on infinities and NaNs (lighting became
+  NaN blocks without it).
 
 ## Validation layers
 Every renderer change is run under the Khronos validation layer before it is called done, and its messages are
