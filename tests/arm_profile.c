@@ -19,7 +19,7 @@ int main(void) {
                                      0xee070fba, 0xee070f9a, 0xee070f95, 0xee300a01, 0xe320f005, 0xe320f014};
     for (size_t i = 0; i < sizeof valid / sizeof *valid; ++i)
         assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM11, valid[i]) != SNX_A32_UNDEFINED);
-    assert(snx_a32_decode(0xee070fba) == SNX_A32_UNDEFINED);
+    for (size_t i = 10; i < 13; ++i) assert(snx_a32_decode(valid[i]) == SNX_A32_COPROC); /* CP15 DMB, DSB, ISB */
     const uint32_t packed[] = {0xe6510f92, 0xe6810fb2};
     for (unsigned i = 0; i < 2; ++i) {
         assert(snx_a32_decode_profile(SNX_ARM_PROFILE_ARM11, packed[i]) == (i ? SNX_A32_SEL : SNX_A32_UADD8));
