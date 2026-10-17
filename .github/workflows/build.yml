@@ -58,7 +58,10 @@ jobs:
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
+      # two commits: a pull request's merge commit and the base it is diffed against below
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
       - uses: actions/cache@v5
         with:
           path: .cache/cpm
@@ -96,7 +99,21 @@ jobs:
           cmake --preset default -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build --preset default
           cmake --install build/default --prefix stage
+      # The fallback is CMake's (cmake/dependencies.cmake pins SDL3) and the Windows job builds the same SDL3 from
+      # source: a pull request that changes no CMake file and not this workflow skips it, a push always builds it
+      - name: Look for CMake changes
+        id: cmake-changed
+        if: github.event_name == 'pull_request'
+        run: |
+          # safe.directory for this command only: the container's git refuses the checkout, and the build
+          # (cmake/commit.cmake) and build_info_commit after it must see it the same way
+          changed=$(git -c safe.directory="$GITHUB_WORKSPACE" diff --name-only HEAD^1 HEAD)
+          printf '%s\n' "$changed"
+          if grep -qE '(^|/)CMakeLists\.txt$|\.cmake$|^CMakePresets\.json$|^\.github/workflows/build\.yml$' <<<"$changed"; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build the SDL3 fallback without a system package
+        if: github.event_name != 'pull_request' || steps.cmake-changed.outputs.yes == 'true'
         run: |
           cmake --preset default -B build/sdl-fallback -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON \
             -DSNX_DEPLOY=OFF -DBUILD_TESTING=OFF -DSDL_WAYLAND=OFF \
