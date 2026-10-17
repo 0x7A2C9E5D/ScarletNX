@@ -5,11 +5,15 @@
 server): a version tag's release in the repository; the nightly made in the nightly repository, kept to the newest N,
 never one older than the latest, and linked from the repository's rolling prerelease; a pull request's prerelease
 replaced at each push and gone when it closes, its one Discord message edited; a fork's only once the team labels it
-after its last push; and the writes to the nightly repository made with its own token. Offline."""
+after its last push; and the writes to the nightly repository made with its own token. Each release's notes and each
+message link every download with its size and say what changed: the changes since the last one, a pull request's
+commits and the main commit it stands on. Offline."""
 
 import http.server
+import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -113,6 +117,10 @@ elif rest.startswith('git/ref/tags/'):
     out({'ref': f'refs/tags/{tag}', 'object': {'sha': tags[tag]}}) if tag in tags else stop('gh: Not Found (HTTP 404)')
 elif rest == 'pulls' and method == 'GET':
     listing([p for p in s['pulls'] if p['state'] == 'open'])
+elif re.fullmatch(r'pulls/\d+/commits', rest):
+    listing(s.get('commits', {}).get(rest.split('/')[1], []))
+elif re.fullmatch(r'compare/[0-9a-f]+\.\.\.[0-9a-f]+', rest):
+    out({'merge_base_commit': {'sha': s['merge_base']}})
 elif re.fullmatch(r'pulls/\d+', rest):
     out(next(p for p in s['pulls'] if p['number'] == int(rest.split('/')[1])))
 elif re.fullmatch(r'issues/\d+/events', rest):
@@ -376,10 +384,10 @@ with tempfile.TemporaryDirectory() as temporary:
         'its notes: the files linked from this release, the changes, the source',
         made
         and f'https://github.com/{TO}/releases/download/{tag}/ScarletNX-android-universal.apk' in made['body']
-        and '- [ci] its title (#5)' in made['body']
+        and f'- \\[ci\\] its title ([#5](https://github.com/{REPO}/pull/5))' in made['body']
         and f'https://github.com/{REPO}/tree/{sha}' in made['body']
         and 'newest 2 nightlies' in made['body']
-        and 'zsync' not in made['body'],
+        and '.AppImage.zsync' not in made['body'],
         made and made['body'],
     )
     archive = next((a['data'] for a in made['assets'] if a['name'].endswith('.zip')), '') if made else ''
@@ -390,13 +398,24 @@ with tempfile.TemporaryDirectory() as temporary:
         and f'nightly-2026-10-15-{oldest[:7]}' not in s['tags'][TO],
         s['tags'][TO],
     )
+    check(
+        'its downloads by system, each with its size (bytes as megabytes)',
+        made
+        and f'| **Windows** | x86-64 | [zip](https://github.com/{TO}/releases/download/{tag}/ScarletNX-windows-x86_64.zip) |'
+        in made['body']
+        and '| **Linux** | x86-64 | [AppImage](' in made['body']
+        and ' | 0.0 MB |' in made['body'],
+        made and made['body'],
+    )
     linked = find('nightly', REPO, s)
     check(
-        'the rolling prerelease: no files, a link to the latest, its tag moved there',
+        "the rolling prerelease: no files, a link to the latest, its tag moved there, the latest's downloads and changes",
         linked
         and not linked['assets']
         and linked['prerelease']
         and f'https://github.com/{TO}/releases/tag/{tag}' in linked['body']
+        and f'[APK](https://github.com/{TO}/releases/download/{tag}/ScarletNX-android-universal.apk)' in linked['body']
+        and f'([#5](https://github.com/{REPO}/pull/5))' in linked['body']
         and s['tags'][REPO]['nightly'] == sha,
         linked,
     )
@@ -418,9 +437,23 @@ with tempfile.TemporaryDirectory() as temporary:
         and sent[0]['method'] == 'POST'
         and sent[0]['path'].endswith('?wait=true')
         and sent[0]['body']['embeds'][0]['title'] == f'Nightly 2026-10-15 ({sha[:7]})'
-        and '[ci] its title (#5)' in sent[0]['body']['embeds'][0]['description']
+        and f'\\[ci\\] its title ([#5](https://github.com/{REPO}/pull/5))'
+        in sent[0]['body']['embeds'][0]['description']
         and sent[0]['agent'].startswith('DiscordBot'),
         sent,
+    )
+    shown = sent[0]['body']['embeds'][0] if sent else {}
+    check(
+        'the message links each download with its size, then the source and every nightly',
+        [f['name'] for f in shown.get('fields', [])]
+        == ['Linux x86-64', 'Linux ARM64', 'Windows x86-64', 'Android', 'Source', 'Every nightly']
+        and shown['fields'][2]['value']
+        == f'[zip](https://github.com/{TO}/releases/download/{tag}/ScarletNX-windows-x86_64.zip)\n0.0 MB'
+        and all(f['inline'] for f in shown['fields'])
+        and shown['url'] == f'https://github.com/{TO}/releases/tag/{tag}'
+        and shown['thumbnail']['url'].endswith('/dist/icons/hicolor/128x128/apps/wimsy.png')
+        and shown['timestamp'].endswith('+00:00'),
+        shown,
     )
     # the run again: the files replaced, no news
     done = publish('nightly', *everything(sha), '--checkout', str(checkout), '--keep', '2')
@@ -497,15 +530,20 @@ with tempfile.TemporaryDirectory() as temporary:
     check(
         'its notes: the changes since the previous version, its files',
         version
-        and '### Changes since v0.1.0' in version['body']
-        and '- [ci] its title (#5)' in version['body']
+        and '## Changes since v0.1.0' in version['body']
+        and version['body'].startswith('ScarletNX v0.2.0, built from [`')
+        and 'AppImageUpdate takes it to the newest version.' in version['body']
+        and f'- \\[ci\\] its title ([#5](https://github.com/{REPO}/pull/5))' in version['body']
         and f'https://github.com/{REPO}/releases/download/v0.2.0/ScarletNX-windows-x86_64.zip' in version['body'],
         version and version['body'],
     )
     sent = posted('releases')
     check(
-        'one message on the releases channel',
-        len(sent) == 1 and sent[0]['body']['embeds'][0]['title'] == 'ScarletNX v0.2.0',
+        'one message on the releases channel, its downloads, the source, and since which version',
+        len(sent) == 1
+        and sent[0]['body']['embeds'][0]['title'] == 'ScarletNX v0.2.0'
+        and [f['name'] for f in sent[0]['body']['embeds'][0]['fields']][4:] == ['Source', 'Since']
+        and '/compare/v0.1.0...v0.2.0' in sent[0]['body']['embeds'][0]['fields'][5]['value'],
         sent,
     )
     git('tag', 'v0.3.0-rc1')
@@ -526,9 +564,10 @@ with tempfile.TemporaryDirectory() as temporary:
             'state': 'open',
             'title': 'Fix it @everyone',
             'html_url': f'https://x/pull/{number}',
-            'user': {'login': 'alice'},
+            'user': {'login': 'alice', 'html_url': 'https://x/alice', 'avatar_url': 'https://x/alice.png'},
             'labels': [{'name': n} for n in labels],
             'merged': False,
+            'base': {'sha': 'f' * 40},
             'head': {'sha': head, 'repo': {'full_name': 'alice/fork' if fork else REPO}},
         }
 
@@ -548,7 +587,11 @@ with tempfile.TemporaryDirectory() as temporary:
         return ['--run', run_id, '--sha', head, '--pr', '7', '--artifacts', str(artifacts(name, head, skip))]
 
     head1, head2 = 'a' * 40, 'b' * 40
-    save_state(dict(state(), pulls=[pull(7, head1)]))
+    base_sha = 'e' * 40
+    commits = [
+        {'sha': f'{n:x}' * 40, 'commit': {'message': f'[gui] commit {n} [x](http://e)\n\nIts body.'}} for n in range(12)
+    ]
+    save_state(dict(state(), pulls=[pull(7, head1)], commits={'7': commits}, merge_base=base_sha))
     done, planned = run('plan', event={'workflow_run': pr_run(head1)})
     check('a pull request run is planned', planned.get('kind') == 'pr' and planned.get('pr') == '7', planned)
     done = publish('pr', *pr_files(head1, 'pr1-part', '50', ('ScarletNX-windows',)))
@@ -559,9 +602,26 @@ with tempfile.TemporaryDirectory() as temporary:
         pre,
     )
     check(
-        'what was not built said',
-        pre and 'Not built: Windows, x86-64.' in pre['body'] and len(pre['assets']) == 5,
+        'what was not built said in its row, linking the run',
+        pre
+        and '| **Windows** | x86-64 | not built, [see the run](https://github.com/owner/repo/actions/runs/50) |  |'
+        in pre['body']
+        and '- **Windows**' not in pre['body']
+        and len(pre['assets']) == 5,
         pre,
+    )
+    check(
+        'its notes: the pull request, its author, its commit and the main commit it stands on, its commits by subject',
+        pre
+        and pre['body'].startswith('Test builds of [#7](https://x/pull/7) by [@alice](https://x/alice), at [`aaaaaaa`]')
+        and f'on main at [`eeeeeee`](https://github.com/{REPO}/commit/{base_sha}).' in pre['body']
+        and '12 commits, the newest first:' in pre['body']
+        and "takes it to the newest nightly, not this pull request's next builds." in pre['body']
+        and pre['body'].index('commit 11 ') < pre['body'].index('commit 0 ')
+        and f'- \\[gui\\] commit 0 \\[x\\](http://e) ([`0000000`](https://github.com/{REPO}/pull/7/commits/{"0" * 40}))'
+        in pre['body']
+        and 'Its body' not in pre['body'],
+        pre and pre['body'],
     )
     prs = posted('prs')
     check(
@@ -572,21 +632,56 @@ with tempfile.TemporaryDirectory() as temporary:
         and prs[0]['body']['embeds'][0]['title'] == 'PR #7: Fix it @everyone',
         prs,
     )
+    shown = prs[0]['body']['embeds'][0] if prs else {}
+    check(
+        'the message: its author, the missing system amber and linking the run, the first commits and the rest counted',
+        shown.get('author') == {'name': 'alice', 'url': 'https://x/alice', 'icon_url': 'https://x/alice.png'}
+        and shown['color'] == 0xD29922
+        and shown['fields'][2]
+        == {
+            'name': 'Windows x86-64',
+            'value': 'Not built\n[see the run](https://github.com/owner/repo/actions/runs/50)',
+            'inline': True,
+        }
+        and [f['name'] for f in shown['fields']][4:] == ['Pull request', 'Build']
+        and '**12 commits**, the newest first' in shown['description']
+        and shown['description'].count('\n- ') == 7
+        and '- \\[gui\\] commit 11 \\[x\\](http://e)\n' in shown['description']
+        and 'commit 5 ' not in shown['description']
+        and '/commits/' not in shown['description'].split('**12 commits**')[1]
+        and '- and [6 more](https://x/pull/7/commits)' in shown['description']
+        and 'deleted when the pull request closes' in shown['footer']['text'],
+        shown,
+    )
     message = str(Discord.next_id[0])
     check("the message's id kept in the notes", pre and f'<!-- discord-message: {message} -->' in pre['body'], pre)
-    # a push: the same prerelease, all four now, the message edited
-    save_state(dict(state(), pulls=[pull(7, head2)]))
+    # a push: the same prerelease, all four now, the message edited; it stands on a commit a nightly was built from
+    save_state(dict(state(), pulls=[pull(7, head2)], merge_base=sha))
     done = publish('pr', *pr_files(head2, 'pr2', '51'))
     pre = find('pr-7')
     prs = posted('prs')
     check(
+        'the main commit it stands on links its nightly, to set the two side by side',
+        pre
+        and f'on main at [`{sha[:7]}`](https://github.com/{REPO}/commit/{sha}) '
+        f'([its nightly](https://github.com/{TO}/releases/tag/nightly-2026-10-15-{sha[:7]})).'
+        in pre['body']
+        and f'([its nightly](https://github.com/{TO}/releases/tag/nightly-2026-10-15-{sha[:7]}))'
+        in prs[-1]['body']['embeds'][0]['description'],
+        pre and pre['body'],
+    )
+    check(
         'the push replaces it',
-        pre and len(pre['assets']) == 6 and head2[:7] in pre['body'] and 'Not built' not in pre['body'],
+        pre and len(pre['assets']) == 6 and head2[:7] in pre['body'] and 'not built' not in pre['body'],
         pre,
     )
     check(
-        'and edits the one message',
-        len(prs) == 2 and prs[1]['method'] == 'PATCH' and prs[1]['path'].endswith(f'/messages/{message}?thread_id=55'),
+        'and edits the one message, every system built now, scarlet',
+        len(prs) == 2
+        and prs[1]['method'] == 'PATCH'
+        and prs[1]['path'].endswith(f'/messages/{message}?thread_id=55')
+        and prs[1]['body']['embeds'][0]['color'] == 0xB0102A
+        and not any('Not built' in f['value'] for f in prs[1]['body']['embeds'][0]['fields']),
         prs,
     )
     # the run of the push before, ending last
@@ -616,8 +711,11 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     last = posted('prs')[-1]
     check(
-        'its message edited: merged',
-        last['method'] == 'PATCH' and last['body']['embeds'][0]['description'].startswith('Merged'),
+        'its message edited: merged, green, no downloads left',
+        last['method'] == 'PATCH'
+        and last['body']['embeds'][0]['description'].startswith('Merged')
+        and last['body']['embeds'][0]['color'] == 0x2EA043
+        and 'fields' not in last['body']['embeds'][0],
         last,
     )
 
@@ -694,6 +792,32 @@ with tempfile.TemporaryDirectory() as temporary:
         done.returncode == 0 and '::notice::No DISCORD_WEBHOOK_PRS' in done.stdout and find('pr-8'),
         done.stdout + done.stderr,
     )
+
+    # ---- a message too long for Discord: its list cut by whole lines, the downloads kept
+    spec = importlib.util.spec_from_file_location('publish_builds', SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    options = {'repo': REPO, 'to': TO, 'dry_run': True, 'checkout': '.', 'keep': 30, 'artifacts': None}
+    publisher = module.Publisher(type('Args', (), options)())
+    lines = '\n'.join(f'- change {n} ([#{n}](https://x/pull/{n}))' for n in range(400))
+    field = {'name': 'Linux x86-64', 'value': '[AppImage](https://x/a)\n94.6 MB', 'inline': True}
+    cut = publisher.embed('Nightly', 'https://x', lines, [field] * 6)
+    check(
+        'a long description cut to what Discord takes, by whole lines, the fields kept',
+        len(cut['description']) <= module.DESCRIPTION
+        and lines.startswith(cut['description'])
+        and lines[len(cut['description'])] == '\n'
+        and len(cut['fields']) == 6,
+        len(cut['description']),
+    )
+    big = {'name': 'x' * 256, 'value': 'y' * 1024, 'inline': True}
+    cut = publisher.embed('Nightly', 'https://x', lines, [big] * 6)
+    check(
+        'fields over the whole limit leave no description, and it ends',
+        cut['description'] == '',
+        cut['description'][:80],
+    )
+    shutil.rmtree(publisher.work, ignore_errors=True)
 
 server.shutdown()
 for failure in failures:

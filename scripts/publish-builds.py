@@ -23,12 +23,14 @@ ScarletNX-<system>-<arch> (scripts/nightly-notes.py), an AppImage with the .zsyn
 
 Discord: each release and each nightly gets a message on DISCORD_WEBHOOK_RELEASES's and DISCORD_WEBHOOK_NIGHTLY's
 channels, each pull request one message on DISCORD_WEBHOOK_PRS's, edited at each push and when it closes (its id is
-kept in the prerelease's notes). Without a webhook nothing is posted, and the run says so. gh reads and writes REPO
+kept in the prerelease's notes). A message links each download with its size, and says what changed: a nightly's or a
+release's changes, a pull request's commits. Without a webhook nothing is posted, and the run says so. gh reads and writes REPO
 with GH_TOKEN, and NIGHTLY with NIGHTLY_TOKEN. --dry-run reads and prints each write instead.
 .github/workflows/publish.yml runs this; tests/publish_builds_test.py runs it against a fake gh and a fake Discord.
 """
 
 import argparse
+import datetime
 import importlib.util
 import json
 import os
@@ -60,7 +62,14 @@ ARTIFACTS = {
     'ScarletNX-windows-x86_64-{short}': 'ScarletNX-windows-x86_64.zip',
     'ScarletNX-android-universal-{short}.apk': 'ScarletNX-android-universal.apk',
 }
-SCARLET = 0xB0102A
+# the messages' colours: built, a pull request's build that missed a system, merged, closed
+SCARLET, AMBER, MERGED, CLOSED = 0xB0102A, 0xD29922, 0x2EA043, 0x6E7681
+# the mascot beside each message
+WIMSY = 'https://raw.githubusercontent.com/{repo}/{branch}/dist/icons/hicolor/128x128/apps/wimsy.png'
+# what a message lists, at most, before "and N more": a nightly's or a release's changes, a pull request's commits
+MOST_LINES, MOST_COMMITS = 10, 6
+# Discord's limits: an embed's description, and its whole text
+DESCRIPTION, EMBED = 4096, 6000
 
 
 class Publisher:
@@ -151,12 +160,12 @@ class Publisher:
     # ---- a run's packages
     def packages(self, sha):
         """the release files the run's artifacts give, by name, the files to upload with them (an AppImage's .zsync),
-        and the systems it gave none for"""
+        and the release files it gave none for"""
         files, uploads, missing = {}, {}, []
         for pattern, name in ARTIFACTS.items():
             folder = self.artifacts / pattern.format(short=sha[:7])
             if not folder.is_dir() or not any(folder.iterdir()):
-                missing.append(nightly_notes.SYSTEMS[name])
+                missing.append(name)
                 continue
             path = self.work / name
             if name.endswith('.zip'):  # the Windows build is a folder: zipped as it is
@@ -181,7 +190,8 @@ class Publisher:
     def complete(self, run, sha):
         files, uploads, missing = self.packages(sha)
         if missing:
-            raise RuntimeError(f'run {run} built everywhere, yet has no package for {"; ".join(missing)}')
+            said = '; '.join(map(nightly_notes.system, missing))
+            raise RuntimeError(f'run {run} built everywhere, yet has no package for {said}')
         return files, uploads
 
     # ---- Discord
@@ -222,11 +232,61 @@ class Publisher:
                 return message
         return message
 
+    @staticmethod
+    def listed(lines, more_url, most=MOST_LINES):
+        """the first most lines, the rest counted and linked"""
+        shown = [f'- {line}' for line in lines[:most]]
+        if len(lines) > most:
+            shown.append(f'- and [{len(lines) - most} more]({more_url})')
+        return shown
+
     def changes(self, previous, sha):
-        """the first changes as Discord lines"""
-        items = nightly_notes.changes(self.checkout, previous, sha) or []
-        lines = [f'- {item}' for item in items[:10]] + ([f'- and {len(items) - 10} more'] if len(items) > 10 else [])
-        return '\n'.join(lines) or f'Built from {sha[:7]}.'
+        """what changed since previous, as a message says it"""
+        url = f'{SERVER}/{self.repo}'
+        items = nightly_notes.changes(self.checkout, previous, sha)
+        if not items:
+            return f'Built from [`{sha[:7]}`]({url}/commit/{sha}).'
+        compare = f'{url}/compare/{previous}...{sha}'
+        lines = [nightly_notes.change_line(item, url) for item in items]
+        return '\n'.join([f'**Changes** ([`{previous[:7]}...{sha[:7]}`]({compare}))', *self.listed(lines, compare)])
+
+    @staticmethod
+    def fields(files, sizes, download, missing=(), why=''):
+        """a field for each system's download, with its size, in the order of the notes' table"""
+        out = []
+        for name in nightly_notes.ordered([*files, *missing]):
+            system, arch, kind = nightly_notes.SYSTEMS[name]
+            named = system if ',' in arch else f'{system} {arch}'  # one file for every architecture: the system says it
+            if name in files:
+                value = f'[{kind}]({download}/{name})\n{nightly_notes.size(sizes[name])}'
+            else:
+                value = f'Not built\n[see the run]({why})' if why else 'Not built'
+            out.append({'name': named, 'value': value, 'inline': True})
+        return out
+
+    def embed(self, title, url, description, fields=(), color=SCARLET, footer='', author=None):
+        """a message's embed, its description cut by whole lines, the last first, to what Discord takes: what it lists
+        gives way, the downloads stay"""
+        title = title[:256]
+        room = EMBED - len(title) - len(footer) - len((author or {}).get('name', ''))
+        room = max(0, min(DESCRIPTION, room - sum(len(f['name']) + len(f['value']) for f in fields)))
+        while len(description) > room:
+            description = description.rsplit('\n', 1)[0] if '\n' in description else description[: max(room, 0)]
+        made = {
+            'title': title,
+            'url': url,
+            'description': description,
+            'color': color,
+            'thumbnail': {'url': WIMSY.format(repo=self.repo, branch='main')},
+            'timestamp': datetime.datetime.now(datetime.UTC).isoformat(timespec='seconds'),
+        }
+        if fields:
+            made['fields'] = list(fields)
+        if footer:
+            made['footer'] = {'text': footer}
+        if author:
+            made['author'] = author
+        return made
 
     def older(self, sha, previous):
         """sha is an ancestor of previous, a newer commit already published"""
@@ -249,12 +309,13 @@ class Publisher:
         if self.older(sha, previous):  # a run that ended after a newer commit's: that one stays the latest
             print(f'{sha[:7]} is older than the newest nightly, {previous[:7]}: not published')
             return
+        latest = f'{SERVER}/{self.to}/releases/latest'
         kept = (
-            f'This repository keeps the newest {self.keep} nightlies; [the latest]({SERVER}/{self.to}/releases/'
-            'latest) is always the newest one.'
+            f'This repository keeps the newest {self.keep} nightlies; [the latest]({latest}) is always the newest one.'
         )
         download = f'{SERVER}/{self.to}/releases/download/{tag}'
-        body = nightly_notes.notes(self.checkout, sha, previous, self.repo, list(files), download, kept)
+        sizes = {name: path.stat().st_size for name, path in files.items()}
+        body = nightly_notes.notes(self.checkout, sha, previous, self.repo, list(files), download, kept, sizes=sizes)
         title = nightly_notes.title(self.checkout, sha)
         made, new = self.put_release(self.to, tag, title, body, False, uploads)
         for old in older[self.keep - 1 :]:
@@ -262,24 +323,35 @@ class Publisher:
             print(f'deleted {old["tag_name"]}: past the newest {self.keep}')
         print(f'{"published" if new else "replaced the files of"} {tag}')
         url = made.get('html_url', f'{SERVER}/{self.to}/releases/tag/{tag}')
-        self.point_rolling(title, url, sha)
+        lead = (
+            f'The newest nightly, [{title}]({url}), from [{self.to}]({SERVER}/{self.to}/releases) where the newest '
+            f'{self.keep} are kept. Built from main at'
+        )
+        rolling = nightly_notes.notes(
+            self.checkout, sha, previous, self.repo, list(files), download, '', sizes=sizes, lead=lead
+        )
+        self.point_rolling(title, rolling, sha)
         if new:  # a run again of the same commit is no news
+            commit = f'{SERVER}/{self.repo}/commit/{sha}'
+            more = [
+                {'name': 'Source', 'value': f'[`{sha[:7]}`]({commit})', 'inline': True},
+                {'name': 'Every nightly', 'value': f'[{self.to}]({SERVER}/{self.to}/releases)', 'inline': True},
+            ]
             self.discord(
-                'nightly', {'title': title, 'url': url, 'description': self.changes(previous, sha), 'color': SCARLET}
+                'nightly',
+                self.embed(
+                    title,
+                    url,
+                    self.changes(previous, sha),
+                    self.fields(files, sizes, download) + more,
+                    footer=f'The newest {self.keep} nightlies are kept',
+                ),
             )
 
-    def point_rolling(self, title, url, sha):
-        """REPO's rolling prerelease ROLLING: no files, the link to the latest nightly, its tag on that commit"""
+    def point_rolling(self, title, body, sha):
+        """REPO's rolling prerelease ROLLING: no files, the latest nightly's notes, its tag on that commit"""
         rolling = self.release(self.repo, ROLLING)
-        fields = {
-            'name': f'{title}, in {self.to}',
-            'body': (
-                f'The nightlies are in [{self.to}]({SERVER}/{self.to}/releases), the newest {self.keep} kept. The '
-                f'latest is [{title}]({url}), and {SERVER}/{self.to}/releases/latest always leads to the newest one.\n'
-            ),
-            'prerelease': True,
-            'make_latest': 'false',
-        }
+        fields = {'name': f'{title}, in {self.to}', 'body': body, 'prerelease': True, 'make_latest': 'false'}
         if not rolling:
             self.write(
                 self.repo, 'POST', f'repos/{self.repo}/releases', dict(fields, tag_name=ROLLING, target_commitish=sha)
@@ -305,37 +377,106 @@ class Publisher:
         since = earlier[0]['tag_name'] if earlier else ''
         previous = nightly_notes.git(self.checkout, 'rev-list', '-n', '1', since).strip() if since else ''
         download = f'{SERVER}/{self.repo}/releases/download/{tag}'
-        body = nightly_notes.notes(self.checkout, sha, previous, self.repo, list(files), download, '', since)
+        sizes = {name: path.stat().st_size for name, path in files.items()}
+        body = nightly_notes.notes(
+            self.checkout,
+            sha,
+            previous,
+            self.repo,
+            list(files),
+            download,
+            '',
+            since,
+            sizes,
+            f'ScarletNX {tag}, built from',
+            'the newest version',
+        )
         title = f'ScarletNX {tag}'
         made, new = self.put_release(self.repo, tag, title, body, '-' in tag, uploads, sha)
         print(f'{"published" if new else "replaced the files of"} {self.repo} {tag}')
         if new:
             url = made.get('html_url', f'{SERVER}/{self.repo}/releases/tag/{tag}')
+            commit = f'{SERVER}/{self.repo}/commit/{sha}'
+            more = [{'name': 'Source', 'value': f'[`{sha[:7]}`]({commit})', 'inline': True}]
+            if since:
+                compare = f'{SERVER}/{self.repo}/compare/{since}...{tag}'
+                more.append({'name': 'Since', 'value': f'[{since}]({compare})', 'inline': True})
             self.discord(
-                'releases', {'title': title, 'url': url, 'description': self.changes(previous, sha), 'color': SCARLET}
+                'releases',
+                self.embed(title, url, self.changes(previous, sha), self.fields(files, sizes, download) + more),
             )
 
-    def pull_notes(self, pr, sha, files, missing, message):
+    def pull_facts(self, pr, sha, run):
+        """what a pull request's notes and message say of it besides the files: its link, its commit's, the main commit
+        it stands on and the nightly of that commit when there is one, to set the two side by side, its commits as lines
+        and as subjects alone, for a message (the newest first, as a nightly's changes), the run's link"""
         url = f'{SERVER}/{self.repo}'
-        commit = f'{url}/pull/{pr["number"]}/commits/{sha}'
+        number = pr['number']
+        base = self.read(f'repos/{self.repo}/compare/{pr["base"]["sha"]}...{sha}')['merge_base_commit']['sha']
+        commits = self.pages(f'repos/{self.repo}/pulls/{number}/commits', self.repo)
+        subjects = [
+            nightly_notes.escape(c['commit']['message'].splitlines()[0] if c['commit']['message'] else '')
+            for c in reversed(commits)
+        ]
         lines = [
+            f'{subject} ([`{c["sha"][:7]}`]({url}/pull/{number}/commits/{c["sha"]}))'
+            for subject, c in zip(subjects, reversed(commits))
+        ]
+        nightly = next(
             (
-                f'Builds of [#{pr["number"]}]({pr["html_url"]}), {pr["title"]}, by @{pr["user"]["login"]}, at '
-                f"[`{sha[:7]}`]({commit}). A pull request's builds, not a release: each push to it replaces them, "
-                'and they go when it closes.'
+                r['html_url']
+                for r in self.releases(self.to)
+                if r['tag_name'].startswith('nightly-') and r['tag_name'].endswith(f'-{base[:7]}')
             ),
             '',
+        )
+        return {
+            'pr': pr['html_url'],
+            'commit': f'{url}/pull/{number}/commits/{sha}',
+            'base': base,
+            'base_said': f'[`{base[:7]}`]({url}/commit/{base})' + (f' ([its nightly]({nightly}))' if nightly else ''),
+            'commits': lines,
+            'subjects': subjects,
+            'all_commits': f'{pr["html_url"]}/commits',
+            'run': f'{url}/actions/runs/{run}',
+            'author': pr['user']['login'],
+            'author_url': pr['user'].get('html_url', f'{SERVER}/{pr["user"]["login"]}'),
+        }
+
+    def pull_notes(self, pr, sha, files, sizes, missing, facts, message):
+        number = pr['number']
+        download = f'{SERVER}/{self.to}/releases/download/pr-{number}'
+        lines = [
+            (
+                f'Test builds of [#{number}]({facts["pr"]}) by [@{facts["author"]}]({facts["author_url"]}), at '
+                f'[`{sha[:7]}`]({facts["commit"]}), on main at {facts["base_said"]}.'
+            ),
+            '',
+            "A pull request's builds, not a release: each push to it replaces them, and they are deleted when it closes.",
+            '',
+            *nightly_notes.downloads(
+                list(files),
+                download,
+                f'{SERVER}/{self.repo}',
+                sha,
+                sizes,
+                missing,
+                facts['run'],
+                "the newest nightly, not this pull request's next builds",
+            ),
         ]
-        if files:
-            lines += nightly_notes.table(list(files), f'{SERVER}/{self.to}/releases/download/pr-{pr["number"]}')
-        if missing:
-            lines += ['', f'Not built: {"; ".join(missing)}.']
-        lines += ['', *nightly_notes.source(commit)]
+        if facts['commits']:
+            count = len(facts['commits'])
+            lines += ['', '## Commits', '', f'{count} commit{"" if count == 1 else "s"}, the newest first:', '']
+            lines += [f'- {line}' for line in facts['commits'][: nightly_notes.MOST_CHANGES]]
+            if count > nightly_notes.MOST_CHANGES:
+                lines.append(f'- and [{count - nightly_notes.MOST_CHANGES} more]({facts["all_commits"]})')
+        lines += ['', *nightly_notes.source(facts['commit'])]
         if message:
             lines += ['', f'<!-- discord-message: {message} -->']
         return '\n'.join(lines) + '\n'
 
-    def pull(self, pr, sha):
+    def pull(self, pr, sha, run):
         number = pr['number']
         if pr['head']['sha'] != sha:
             print(f'#{number} is at {pr["head"]["sha"][:7]} now: the builds of {sha[:7]} are not published')
@@ -348,19 +489,39 @@ class Publisher:
         existing = self.release(self.to, tag)
         message = next(iter(DISCORD.findall((existing or {}).get('body') or '')), None)
         title = f'PR #{number}: {pr["title"]}'
-        body = self.pull_notes(pr, sha, files, missing, message)
+        sizes = {name: path.stat().st_size for name, path in files.items()}
+        facts = self.pull_facts(pr, sha, run)
+        body = self.pull_notes(pr, sha, files, sizes, missing, facts, message)
         made, new = self.put_release(self.to, tag, title, body, True, uploads)
         print(f'{"published" if new else "replaced"} {tag} with the builds of {sha[:7]}')
-        said = f'by {pr["user"]["login"]}, at [`{sha[:7]}`]({SERVER}/{self.repo}/pull/{number}/commits/{sha})'
-        embed = {
-            'title': title[:256],
-            'url': made.get('html_url', f'{SERVER}/{self.to}/releases/tag/{tag}'),
-            'description': said + (f'\nNot built: {"; ".join(missing)}' if missing else ''),
-            'color': SCARLET,
-        }
+        download = f'{SERVER}/{self.to}/releases/download/{tag}'
+        said = (
+            f'Test builds of [#{number}]({facts["pr"]}) at [`{sha[:7]}`]({facts["commit"]}), on main at '
+            f'{facts["base_said"]}.'
+        )
+        if facts['commits']:
+            count = len(facts['commits'])
+            said += f'\n\n**{count} commit{"" if count == 1 else "s"}**, the newest first\n'
+            said += '\n'.join(self.listed(facts['subjects'], facts['all_commits'], MOST_COMMITS))
+        more = [
+            {'name': 'Pull request', 'value': f'[#{number}]({facts["pr"]})', 'inline': True},
+            {'name': 'Build', 'value': f'[Actions run]({facts["run"]})', 'inline': True},
+        ]
+        author = {'name': facts['author'], 'url': facts['author_url']}
+        if pr['user'].get('avatar_url'):
+            author['icon_url'] = pr['user']['avatar_url']
+        embed = self.embed(
+            title,
+            made.get('html_url', f'{SERVER}/{self.to}/releases/tag/{tag}'),
+            said,
+            self.fields(files, sizes, download, missing, facts['run']) + more,
+            AMBER if missing else SCARLET,
+            'Replaced at each push, deleted when the pull request closes',
+            author,
+        )
         posted = self.discord('prs', embed, message)
         if posted and posted != message:  # kept for the next push to edit it
-            body = self.pull_notes(pr, sha, files, missing, posted)
+            body = self.pull_notes(pr, sha, files, sizes, missing, facts, posted)
             self.write(self.to, 'PATCH', f'repos/{self.to}/releases/{made.get("id")}', {'body': body})
 
     def closed(self, pr):
@@ -373,11 +534,13 @@ class Publisher:
         self.drop_release(self.to, release)
         print(f'deleted {tag}: #{pr["number"]} closed')
         if message:
-            embed = {
-                'title': f'PR #{pr["number"]}: {pr["title"]}'[:256],
-                'url': pr['html_url'],
-                'description': f'{"Merged" if pr.get("merged") else "Closed"}: its builds are gone.',
-            }
+            if pr.get('merged'):
+                said = f'Merged into main: [the next nightly]({SERVER}/{self.to}/releases) has it. Its test builds are gone.'
+            else:
+                said = 'Closed without a merge: its test builds are gone.'
+            embed = self.embed(
+                f'PR #{pr["number"]}: {pr["title"]}', pr['html_url'], said, color=MERGED if pr.get('merged') else CLOSED
+            )
             self.discord('prs', embed, message)
 
     # ---- who may publish a fork's pull request
@@ -509,7 +672,7 @@ def main():
             elif args.kind == 'release':
                 publisher.version(args.run, args.sha, args.tag)
             else:
-                publisher.pull(publisher.read(f'repos/{args.repo}/pulls/{args.pr}'), args.sha)
+                publisher.pull(publisher.read(f'repos/{args.repo}/pulls/{args.pr}'), args.sha, args.run)
             return
         name = os.environ['GITHUB_EVENT_NAME']
         with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as file:
