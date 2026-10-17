@@ -35,8 +35,8 @@ typedef struct {
 struct GuiProcess {
     pid_t pid;
     int output, status;
-    bool exited, eof, measured;
-    double previous_time, previous_cpu;
+    bool exited, eof;
+    GuiCpuBase cpu_base;
 };
 static double seconds(void) {
     struct timespec now;
@@ -278,11 +278,7 @@ GuiUsage gui_process_usage(GuiProcess* process) {
                then into the GUI's counters when the driver is reaped. */
             cpu += samples[i].cpu;
         }
-    if (process->measured && now > process->previous_time && cpu >= process->previous_cpu)
-        usage.cpu_percent = 100 * (cpu - process->previous_cpu) / (now - process->previous_time);
-    process->previous_cpu = cpu;
-    process->previous_time = now;
-    process->measured = true;
+    usage.cpu_percent = gui_cpu_percent(&process->cpu_base, cpu, now);
     free(samples);
     return usage;
 }
