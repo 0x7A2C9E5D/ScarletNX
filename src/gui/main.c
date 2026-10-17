@@ -193,6 +193,9 @@ typedef struct {
     char place_about[GUI_PLACES][384];
     char place_line[GUI_PLACES][4200]; /* the folder in use, whole, under the rows */
     int place_row;                     /* the row the folder picker was opened for, -1 none */
+    char* own_dir;      /* Android: the app's own storage; a folder outside it is asked about (GUI_ASK_OUTSIDE) */
+    char* outside_path; /* the folder asked about, for the row outside_place */
+    int outside_place;
 
     Uint64 preview_since;
 #ifdef SDL_PLATFORM_ANDROID
@@ -1059,6 +1062,7 @@ static const char* ask_question(const App* app) {
     switch (app->confirm.ask) {
         case GUI_ASK_DEEP: return "List the games in its subfolders too?";
         case GUI_ASK_EXIT: return "Exit ScarletNX?";
+        case GUI_ASK_OUTSIDE: return "Outside the app, Android checks every file access: games may run slower.";
         default:
             return screen(app) == GUI_SCREEN_COMPILING ? "Abort the recompile? Its work is lost." : "Abort the run?";
     }
@@ -1240,7 +1244,7 @@ static void ask_boxes(App* app, GuiRect* r, GuiList* choices) {
 #endif
 static void render_ask(App* app) {
     static const char* const choices[][2] = {
-        {"Keep going", "Abort"}, {"Stay", "Exit"}, {"Only this folder", "With subfolders"}};
+        {"Keep going", "Abort"}, {"Stay", "Exit"}, {"Only this folder", "With subfolders"}, {"Back", "Use it"}};
     GuiRect r;
     GuiList l;
     char label[96];
@@ -2519,6 +2523,10 @@ static void places_apply(App* app) {
 static const char* place_path(const App* app, int place) {
     return place == GUI_PLACE_DATA ? app->data_dir : place == GUI_PLACE_GAMES ? app->games_dir : app->work_dir;
 }
+/* a folder outside the app's own storage on Android, where every file access goes through its checks (FUSE) */
+static bool outside_app(const App* app, const char* path) {
+    return app->own_dir && !snx_path_within(path, app->own_dir);
+}
 /* the three rows: default or picked, or why the picked one cannot be; above, what it holds and its disk's space, and
    under the rows the folder in use */
 static void open_places(App* app, int row) {
@@ -2537,9 +2545,10 @@ static void open_places(App* app, int row) {
         k->about = app->place_about[i];
         gui_size_text(left, sizeof left, path ? free_space(path) : 0);
         snprintf(app->app_form.place[i], sizeof app->app_form.place[i], "%s",
-                 why             ? why
-                 : app->place[i] ? "picked"
-                                 : "default");
+                 why                                       ? why
+                 : app->place[i] && outside_app(app, path) ? "outside the app"
+                 : app->place[i]                           ? "picked"
+                                                           : "default");
         snprintf(app->place_about[i], sizeof app->place_about[i], "%s, %s free. %s", place_holds[i], left, PLACE_HOW);
         snprintf(app->place_line[i], sizeof app->place_line[i], "%s%s%s", path ? path : "(none)", why ? " " : "",
                  why ? why : "");
@@ -2557,17 +2566,9 @@ static void place_note(App* app, const char* note) {
     else
         snprintf(app->message, sizeof app->message, "Folders: %s", note);
 }
-/* a place picked (path), or its default (NULL), kept in app.ini. Only where the folders are changes: nothing in them is
-   moved. A folder that cannot take what goes there is refused, never replaced by the default */
-static void place_set(App* app, int place, const char* path) {
-    char *absolute = path ? snx_absolute(path) : NULL, note[sizeof app->editor.note];
-    const char* why = path ? (absolute ? snx_folder_unfit(absolute, place == GUI_PLACE_GAMES) : "is not there") : NULL;
-    if (why) {
-        snprintf(note, sizeof note, "Not changed: %s %s", path, why);
-        free(absolute);
-        place_note(app, note);
-        return;
-    }
+/* a place picked, absolute, or its default (NULL), kept in app.ini */
+static void place_use(App* app, int place, char* absolute) {
+    char note[sizeof app->editor.note];
     free(app->place[place]);
     app->place[place] = absolute;
     places_apply(app);
@@ -2579,6 +2580,37 @@ static void place_set(App* app, int place, const char* path) {
         snprintf(note, sizeof note, "%s: %s%s", place_labels[place], place_path(app, place),
                  absolute ? ". The folder before keeps what it has" : ", the default");
     place_note(app, note);
+}
+/* a place picked (path), or its default (NULL). Only where the folders are changes: nothing in them is moved. A folder
+   that cannot take what goes there is refused, never replaced by the default; one outside the app is asked about */
+static void place_set(App* app, int place, const char* path) {
+    char *absolute = path ? snx_absolute(path) : NULL, note[sizeof app->editor.note];
+    const char* why = path ? (absolute ? snx_folder_unfit(absolute, place == GUI_PLACE_GAMES) : "is not there") : NULL;
+    if (why) {
+        snprintf(note, sizeof note, "Not changed: %s %s", path, why);
+        free(absolute);
+        place_note(app, note);
+        return;
+    }
+    if (absolute && outside_app(app, absolute)) {
+        free(app->outside_path);
+        app->outside_path = absolute;
+        app->outside_place = place;
+        gui_confirm_open(&app->confirm, GUI_ASK_OUTSIDE, true);
+        return;
+    }
+    place_use(app, place, absolute);
+}
+/* its answer: Use it, pressed twice, takes the folder; Back keeps the one in use */
+static void outside_answer(App* app, bool taken) {
+    char* path = app->outside_path;
+    app->outside_path = NULL;
+    if (taken)
+        place_use(app, app->outside_place, path);
+    else {
+        free(path);
+        place_note(app, "Not changed");
+    }
 }
 /* the form's last row: every place back to its default */
 static void places_reset(App* app) {
@@ -4630,14 +4662,16 @@ static void abort_run(App* app) {
     gui_process_terminate(app->process);
     app->aborting = true;
 }
-/* a key on the question shown (gui_confirm_key); answered, what it asked about: the menu closed, the run aborted, the
-   folder added as the choice says */
+/* a key on the question shown (gui_confirm_key); answered, what it asked about: the menu closed, the run aborted, a
+   folder added or used as the choice says */
 static void ask_key(App* app, GuiKey key) {
     GuiAsk ask = app->confirm.ask;
     bool second = gui_confirm_key(&app->confirm, key);
     if (app->confirm.shown) return;
     if (ask == GUI_ASK_DEEP)
         folder_answer(app, key == GUI_SELECT, second);
+    else if (ask == GUI_ASK_OUTSIDE)
+        outside_answer(app, second);
     else if (second && ask == GUI_ASK_EXIT)
         app->menu.quit = true;
     else if (second)
@@ -5242,6 +5276,7 @@ static bool initialize(App* app, const char* self) {
         app->cwd = SDL_GetCurrentDirectory();
     }
     app->data_dir = snx_strdup(app->cwd ? app->cwd : ".");
+    app->own_dir = SDL_GetAndroidInternalStoragePath() ? snx_strdup(SDL_GetAndroidInternalStoragePath()) : NULL;
 #else
     app->drivers = self ? snx_dirname(self) : SDL_GetBasePath() ? snx_strdup(SDL_GetBasePath()) : NULL;
     app->data_dir = snx_data_dir(app->drivers);
@@ -5274,6 +5309,8 @@ static void cleanup(App* app) {
     free(app->settings_file);
     for (int i = 0; i < app->folder_count; ++i) free(app->folders[i]);
     free(app->folder_asked);
+    free(app->own_dir);
+    free(app->outside_path);
     free(app->folders_file);
     free(app->app_file);
     gui_cleaned_free(&app->cleaned);

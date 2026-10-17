@@ -41,9 +41,10 @@ GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key);
    stays first: it keeps things as they are), and whether its second choice takes a second press */
 enum { GUI_CONFIRM_KEEP, GUI_CONFIRM_ABORT };
 typedef enum {
-    GUI_ASK_ABORT, /* a running run's, when ask_abort says to ask */
-    GUI_ASK_EXIT,  /* leaving the menu on a computer */
-    GUI_ASK_DEEP   /* a folder picked with folders in it: are their games listed too */
+    GUI_ASK_ABORT,  /* a running run's, when ask_abort says to ask */
+    GUI_ASK_EXIT,   /* leaving the menu on a computer */
+    GUI_ASK_DEEP,   /* a folder picked with folders in it: are their games listed too */
+    GUI_ASK_OUTSIDE /* a folder picked in Folders outside the app's own storage, which Android slows */
 } GuiAsk;
 typedef struct {
     bool shown;

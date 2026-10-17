@@ -106,7 +106,9 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   its default back and the last row, **All back to the defaults**, all three. A row says *default*, *picked* or why
   its folder cannot be; the line under the rows names the folder in use, the one above its disk's free space. A folder
   not there, not a folder, that cannot be written or, for the games, on a disk that runs no programs (`noexec`) is
-  refused, and a run whose picked folder no longer can be stops, naming it: the default never takes its place.
+  refused, and a run whose picked folder no longer can be stops, naming it: the default never takes its place. On
+  Android a folder outside the app's own storage is asked about first, since Android checks every file access there
+  and games may run slower: *Use it* takes a second tap, and its row says *outside the app*.
   Nothing is moved, the folder before keeps what it has. The menu's own files stay where they are. **Clean old settings**, Enter twice (the first says what it
   would do), takes out the settings nothing reads any more: the `[Deprecated]` section the runtime
   gives a game's `.ini` for the keys it no longer uses (in the config folder's `games/`, in `games/`

@@ -1836,6 +1836,58 @@ int main(int argc, char** argv) {
             }
         }
 #endif
+        /* Android: a folder outside the app's own storage is asked about first, its Use it pressed twice; Back leaves
+           the one in use. One inside is taken at once */
+        {
+            char *own = snx_path_join(temporary, "own"), *inside = snx_path_join(own, "games");
+            int w, h;
+            GuiRect r;
+            GuiList l;
+            assert(!snx_mkdirs(inside));
+            app.own_dir = own;
+            app.editor.row = GUI_PLACE_WORK;
+            place_set(&app, GUI_PLACE_WORK, temporary);
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_OUTSIDE && !app.place[GUI_PLACE_WORK]);
+            /* the question wraps where it is wider than the screen, its choices under it */
+            SDL_GetWindowSize(app.window, &w, &h);
+            assert(SDL_SetWindowSize(app.window, 420, h));
+            render(&app);
+            shows(&app, "Outside the app,", rgb(app.theme.warning));
+            shows(&app, "games may run slower.", rgb(app.theme.warning));
+            ask_boxes(&app, &r, &l);
+            assert(list_box(&l, 0).y >= r.y + 2 * cell_h(&app));
+            assert(SDL_SetWindowSize(app.window, w, h));
+            render(&app);
+            shows(&app, "- Back", yellow);
+            shows(&app, "- Use it", normal);
+            key(&app, SDLK_ESCAPE);
+            assert(!app.confirm.shown && !app.place[GUI_PLACE_WORK] && !strcmp(app.editor.note, "Not changed"));
+            place_set(&app, GUI_PLACE_WORK, temporary);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN);
+            assert(app.confirm.shown && app.confirm.armed && !app.place[GUI_PLACE_WORK]);
+            render(&app);
+            shows(&app, "- Use it: press again", yellow);
+            key(&app, SDLK_RETURN);
+            assert(!app.confirm.shown && app.place[GUI_PLACE_WORK] && same_path(app.work_dir, temporary));
+            assert(!strcmp(app.app_form.place[GUI_PLACE_WORK], "outside the app"));
+            /* a finger: the first tap on Use it arms it, the second takes it */
+            key(&app, SDLK_DELETE);
+            assert(!app.place[GUI_PLACE_WORK]);
+            place_set(&app, GUI_PLACE_WORK, temporary);
+            ask_boxes(&app, &r, &l);
+            touch_box(&app, list_box(&l, 1));
+            assert(app.confirm.shown && app.confirm.armed && !app.place[GUI_PLACE_WORK]);
+            touch_box(&app, list_box(&l, 1));
+            assert(!app.confirm.shown && app.place[GUI_PLACE_WORK]);
+            key(&app, SDLK_DELETE);
+            place_set(&app, GUI_PLACE_GAMES, inside);
+            assert(!app.confirm.shown && app.place[GUI_PLACE_GAMES] &&
+                   !strcmp(app.app_form.place[GUI_PLACE_GAMES], "picked"));
+            app.own_dir = NULL;
+            free(inside);
+            free(own);
+        }
         /* the last row: every one back to its default */
         place_set(&app, GUI_PLACE_DATA, temporary);
         assert(app.place[GUI_PLACE_DATA] && snx_path_within(app.data_dir, temporary) &&
