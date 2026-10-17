@@ -76,6 +76,13 @@ static u32 header_size(u32 off) {
     return bswap32_(h1 ^ key);
 }
 static int truetype(u32 off) { return !memcmp(shm + off, "\0\1\0\0", 4); }
+/* memmem is a GNU extension, which Windows' C library lacks */
+static int contains(const u8* data, size_t size, const char* text) {
+    size_t n = strlen(text);
+    for (size_t i = 0; i + n <= size; i++)
+        if (!memcmp(data + i, text, n)) return 1;
+    return 0;
+}
 
 int main(void) {
     fonts_fill(shm, sizeof shm);
@@ -86,7 +93,7 @@ int main(void) {
     CHECK(header_size(pl.font_off[0]) == ((snx_font_standard_size + 3) & ~3u));
     CHECK(header_size(pl.font_off[5]) == ((snx_font_extended_size + 3) & ~3u));
     /* Open Sans, as the font's name table says it */
-    CHECK(memmem(snx_font_standard, snx_font_standard_size, "OpenSans-Regular", 16) != NULL);
+    CHECK(contains(snx_font_standard, snx_font_standard_size, "OpenSans-Regular"));
 
     memset(shm, 0, sizeof shm);
     memset(&pl, 0, sizeof pl);
