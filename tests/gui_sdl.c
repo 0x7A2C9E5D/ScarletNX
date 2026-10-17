@@ -1563,23 +1563,23 @@ int main(int argc, char** argv) {
            its own games, With subfolders theirs as well, down GUI_FOLDER_DEPTH levels, a hidden one left alone; kept
            with GUI_FOLDER_DEEP after its path, and its row says so */
         {
-            static const char* const files[] = {"Top", "a/One", "a/b/c/d/Four", "a/b/c/d/e/Five", ".hid/Hidden"};
+#ifdef _WIN32
+#define GAME(name) name ".exe" /* a game there is an .exe, listed by its file's name */
+#else
+#define GAME(name) name
+#endif
+            static const char* const files[] = {GAME("Top"), "a/" GAME("One"), "a/b/c/d/" GAME("Four"),
+                                                "a/b/c/d/e/" GAME("Five"), ".hid/" GAME("Hidden")};
             char *deep = snx_path_join(temporary, "deep games"), *deep_as;
             GuiGames listed = {0};
             char said[sizeof app.message];
             size_t f, g;
             int found = 0;
             for (f = 0; f < sizeof files / sizeof files[0]; ++f) {
-#ifdef _WIN32
-                char* name = snx_format("%s.exe", files[f]); /* a game there is an .exe */
-#else
-                char* name = snx_strdup(files[f]);
-#endif
-                char *path = snx_path_join(deep, name), *dir = snx_dirname(path);
+                char *path = snx_path_join(deep, files[f]), *dir = snx_dirname(path);
                 assert(!snx_mkdirs(dir) && !snx_write_file(path, "fixture", 7) && !snx_make_executable(path));
                 free(dir);
                 free(path);
-                free(name);
             }
             deep_as = snx_absolute(deep);
             e.drop.data = deep;
@@ -1595,7 +1595,7 @@ int main(int argc, char** argv) {
             assert(app.folder_count == 1 && !app.folders_deep[0] && !strcmp(app.editor.note, "Added"));
             games_scan(&app, &listed, said, sizeof said);
             for (g = 0; g < listed.count; ++g)
-                found |= !strcmp(listed.names[g], "Top") | !strcmp(listed.names[g], "One") << 1;
+                found |= !strcmp(listed.names[g], GAME("Top")) | !strcmp(listed.names[g], GAME("One")) << 1;
             assert(found == 1);
             gui_games_free(&listed);
             folder_remove(&app, 0);
@@ -1612,9 +1612,9 @@ int main(int argc, char** argv) {
             games_scan(&app, &listed, said, sizeof said);
             found = 0;
             for (g = 0; g < listed.count; ++g) {
-                found |= !strcmp(listed.names[g], "Top") | !strcmp(listed.names[g], "One") << 1;
-                found |= !strcmp(listed.names[g], "Four") << 2 | !strcmp(listed.names[g], "Five") << 3;
-                found |= !strcmp(listed.names[g], "Hidden") << 4;
+                found |= !strcmp(listed.names[g], GAME("Top")) | !strcmp(listed.names[g], GAME("One")) << 1;
+                found |= !strcmp(listed.names[g], GAME("Four")) << 2 | !strcmp(listed.names[g], GAME("Five")) << 3;
+                found |= !strcmp(listed.names[g], GAME("Hidden")) << 4;
             }
             assert(found == 7); /* Top, One and Four; not Five, past four levels, nor Hidden */
             gui_games_free(&listed);
@@ -1633,6 +1633,7 @@ int main(int argc, char** argv) {
             folder_remove(&app, 0);
             free(deep_as);
             free(deep);
+#undef GAME
         }
         e.drop.data = more;
         event(&app, &e); /* back for the games below */
