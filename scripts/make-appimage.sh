@@ -28,7 +28,7 @@ else
     export UPINFO="gh-releases-zsync|${REPOSITORY%/*}|nightly|latest|*$ARCH.AppImage.zsync"
 fi
 # The runtime exits at once without a game module, so tracing it for dlopened libraries finds nothing: name them
-export STRACE_MODE=0 DEPLOY_SDL=1 DEPLOY_VULKAN=1
+export STRACE_MODE=0 DEPLOY_SDL=1 DEPLOY_VULKAN=1 DEPLOY_OPENGL=1
 
 # The runtime stays the AppImage's program (the desktop entry's Exec), so a copy named after a game runs that game.
 # Started bare it opens its launcher, which runs Switch games with it and the other drivers from beside it
