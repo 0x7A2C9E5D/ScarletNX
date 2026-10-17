@@ -123,6 +123,18 @@ there records the fault for the caller to act on, or longjmps out of the generat
 as the Switch runtime does with a fatal error. `snx_recompiled_lookup` gives the host
 function for an address, for callers with a run loop of their own.
 
+A just-in-time compiler is built from three more calls. `snx_recompile_from` compiles
+only the functions at its hints and the functions they call, breadth first, until about
+a given number of instructions, skipping call targets a callback says are compiled
+already, and splits a function longer than 4096 instructions into pieces. Its module's
+table covers just what it found. `snx_recompiled_function` gives the function a module
+has for an address (NULL for any other), for the caller's own dispatch table, and
+`snx_recompiled_set_fallback` replaces the interpreter the module's lookups fall back to
+with the caller's handler, which compiles the code at that address and runs it. The Linux
+runtime (`src/gnuabi/runtime/jit.c`) works this way. `snx_recompiler_set_cache` names a
+folder that keeps linked modules (LLVM) by a hash of everything they are made from, and
+the compiled runtime library: a module found there is loaded instead of compiled.
+
 For A32 and Thumb, `snx_recompile32` prepares an address range whose blocks are compiled
 on first use by the LLVM block compiler (`src/common/cpu/arm/`), and
 `snx_recompiled32_run` runs an `SnxArmCPU` (`cpu/arm/arm.h`) from `r[15]` until an exit.
