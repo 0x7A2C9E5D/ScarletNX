@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define SNX_CTR_RUN_SLICE 1000000u
+
 int snx_ctr_aot_run(const char* directory, SnxCtrModel model, uint64_t limit, unsigned flags, char* error,
                     size_t error_size) {
     SnxCtrImage image = {0};
@@ -55,12 +57,26 @@ int snx_ctr_aot_run(const char* directory, SnxCtrModel model, uint64_t limit, un
     /* the DSP's output plays on the default device, and its first two minutes go to <output>/audio.wav */
     wav = snx_path_join(directory, "audio.wav");
     if (!snx_ctr_audio_init(wav)) printf("No audio output: the DSP's frames will not be heard or saved\n");
-    uint64_t executed;
+    /* Runs until the game exits or its window is closed, as a Switch game does, or for the --max-blocks budget. The
+       dispatch goes in slices so the window's events are seen between them */
+    uint64_t executed = 0;
+    bool closed = false;
+    SnxCtrRunResult state;
     printf("Running ARM11 static AOT\n");
-    SnxCtrRunResult state = snx_ctr_dispatch(native.module, process, limit, &executed);
+    for (;;) {
+        uint64_t slice = SNX_CTR_RUN_SLICE, n = 0;
+        if (limit && limit - executed < slice) slice = limit - executed;
+        state = snx_ctr_dispatch(native.module, process, slice, &n);
+        executed += n;
+        if (state != SNX_CTR_RUN_BUDGET || (limit && executed >= limit)) break;
+        if ((closed = snx_ctr_present_closed())) break;
+    }
     SnxArmCPU* cpu = snx_ctr_process_cpu(process);
     if (state == SNX_CTR_RUN_EXIT) {
         printf("Guest ExitProcess: r0=%" PRIu32 " blocks=%" PRIu64 "\n", cpu->r[0], executed);
+        result = 0;
+    } else if (closed) {
+        printf("Closed: blocks=%" PRIu64 "\n", executed);
         result = 0;
     } else {
         snprintf(error, error_size,

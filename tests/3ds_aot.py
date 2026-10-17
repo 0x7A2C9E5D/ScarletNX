@@ -328,6 +328,8 @@ def main():
         legacy = struct.pack('<II6H', 0xE28F0001, 0xE12FFF10, 0xF000, 0xF802, 0xDF03, 0x46C0, 0x202C, 0x4770)
         run(application(raw=legacy), message='Guest ExitProcess: r0=44 blocks=7')
         run(application([0xEAFFFFFE]), 3, 'block budget exhausted', extra=('--max-blocks', '3'))
+        # a budget across the run's dispatch slices (a million blocks each) is still exact
+        run(application([0xEAFFFFFE]), 3, 'blocks=2500001', extra=('--max-blocks', '2500001'))
         run(application([0xEF00007F]), 3, 'unsupported guest operation')
         run(application([0xE1900F9F]), 1, 'guest fault')  # checked LDREX on unmapped VA, no flat fallback
         run(application([0xEF000021, 0xE1A00001, 0xEF000023, 0xEF000003]), message='Guest ExitProcess: r0=0 blocks=4')

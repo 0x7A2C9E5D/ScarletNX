@@ -29,7 +29,8 @@ static void usage(FILE* out) {
           "                  user's data folder, as scarletnx picks it; an installed build's work/ is in\n"
           "                  its cache folder)\n"
           "  --output DIR    The extraction folder (default work/3ds/<the CIA's name>)\n"
-          "  --max-blocks N  Execution budget, 1..10000000 (default 100000)\n"
+          "  --max-blocks N  Stop after N native blocks (default: run until the game exits or its window\n"
+          "                  closes)\n"
           "An extraction and a compiled module already there are used as they are: the ARM11 code is compiled\n"
           "again only when its module is missing or no longer matches the build or the extracted code.\n"
           "Encrypted content is not implemented.\n",
@@ -84,7 +85,7 @@ int main(int argc, char** argv) {
     SnxCtrModel model = SNX_CTR_OLD;
     const char *input = NULL, *output = NULL, *repo = NULL;
     bool info = false, positional = false, extract_only = false, recompile = false, budget_set = false;
-    uint64_t max_blocks = 100000;
+    uint64_t max_blocks = 0; /* no budget */
     SnxCtrBoard board;
     snx_tool_console();
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -116,13 +117,13 @@ int main(int argc, char** argv) {
         } else if (!positional && !strcmp(arg, "--max-blocks")) {
             char* end = NULL;
             if (++i == argc || argv[i][0] < '0' || argv[i][0] > '9') {
-                fputs("scarletnx-3ds: --max-blocks requires 1..10000000\n", stderr);
+                fputs("scarletnx-3ds: --max-blocks requires a positive number\n", stderr);
                 return 2;
             }
             errno = 0;
             unsigned long long n = strtoull(argv[i], &end, 10);
-            if (errno || *end || !n || n > 10000000) {
-                fputs("scarletnx-3ds: --max-blocks requires 1..10000000\n", stderr);
+            if (errno || *end || !n) {
+                fputs("scarletnx-3ds: --max-blocks requires a positive number\n", stderr);
                 return 2;
             }
             max_blocks = (uint64_t)n;

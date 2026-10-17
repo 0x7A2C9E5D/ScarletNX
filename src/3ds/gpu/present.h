@@ -21,5 +21,7 @@ bool snx_ctr_present_windowed(void);
    others with the transfer engine's codecs on the host. */
 bool snx_ctr_present_frame(unsigned screen, unsigned width, unsigned height, unsigned format, unsigned pitch,
                            const unsigned char* pixels, uint64_t* hash);
+/* Pumps SDL's events: true once the player closed the window, or SIGINT or SIGTERM came */
+bool snx_ctr_present_closed(void);
 void snx_ctr_present_free(void);
 #endif

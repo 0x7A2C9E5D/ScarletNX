@@ -48,7 +48,8 @@ bool snx_ctr_native_open(const char* path, const SnxCtrImage* image, SnxCtrNativ
                          size_t error_size);
 void snx_ctr_native_close(SnxCtrNative* native);
 /* The extracted title's module is compiled when it is missing, when it no longer loads or matches the image (an older
-   build, a changed .code), or when SNX_CTR_RECOMPILE asks, then run unless SNX_CTR_COMPILE_ONLY. The module is
+   build, a changed .code), or when SNX_CTR_RECOMPILE asks, then run unless SNX_CTR_COMPILE_ONLY: until the game exits
+   or its window closes, or for limit blocks when limit is not 0. The module is
    trusted as code the driver compiled itself, never as a sandbox. */
 enum { SNX_CTR_RECOMPILE = 1, SNX_CTR_COMPILE_ONLY = 2 };
 int snx_ctr_aot_run(const char* directory, SnxCtrModel model, uint64_t limit, unsigned flags, char* error,

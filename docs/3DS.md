@@ -243,8 +243,8 @@ for review. There is no compilation during dispatch. A failed compile removes
 private native staging; the extracted tree remains. The GUI uses this same
 driver path, not a separate engine.
 
-`--max-blocks N` selects a 1..10000000 native-block budget (default 100000).
-A larger-image block may execute up to 32 instructions; this is not a cycle or
+A launch runs until the game exits or its window is closed, as a Switch game does.
+`--max-blocks N` stops it after N native blocks instead. A larger-image block may execute up to 32 instructions; this is not a cycle or
 exact instruction budget. Each instruction still checks fetch/identity/permissions.
 `--model old|new` selects RAM backing (default Old), not a different ISA or
 compiler. `--board-info` prints physical regions without allocating RAM.
