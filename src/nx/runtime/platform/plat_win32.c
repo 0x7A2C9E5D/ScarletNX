@@ -286,6 +286,7 @@ void* plat_dl_sym(void* h, const char* name) {
     memcpy(&p, &f, sizeof p);
     return p;
 }
+int plat_setenv(const char* name, const char* value) { return _putenv_s(name, value) ? -1 : 0; }
 const char* plat_dl_error(void) {
     static __thread char msg[512];
     DWORD e = GetLastError(), n;
