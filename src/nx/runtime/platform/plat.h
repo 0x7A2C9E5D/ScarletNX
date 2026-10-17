@@ -40,6 +40,10 @@ typedef void (*PThreadFn)(void* arg);
    could not be started */
 int plat_thread(PThreadFn fn, void* arg, size_t stack);
 void plat_thread_exit(void); /* ends the calling thread (one plat_thread started) */
+/* the host CPUs the process may run on, at most max of them, into ids; 0 where the runtime doesn't choose them */
+int plat_cpus(int* ids, int max);
+/* the calling thread runs only on the n host CPUs in ids */
+void plat_thread_cpus(const int* ids, int n);
 void plat_yield(void);
 void plat_sleep_ns(i64 ns); /* 0 or less yields */
 /* Ends the process with code at once: stdio is flushed, but atexit handlers don't run and other threads are left

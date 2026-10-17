@@ -61,6 +61,7 @@ struct KThread {
     int ideal_core; /* as set, -1 for none */
     u32 yields;     /* consecutive yields, of which only some reach the host */
     int on_core;    /* the core it holds, -2 while waiting for one, -1 for none */
+    int pinned;     /* the core whose host CPUs its host thread runs on (core_pin), -1 before it first ran */
     KThread* core_next; /* the core's wait list */
     u64 core_ticket;    /* arrival order there, which breaks priority ties */
     u64 affinity;
