@@ -2,6 +2,22 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # Build
 
+## Index
+
+* [Prerequisites](#prerequisites)
+* [Linux / FreeBSD](#linux--freebsd)
+  * [Debian / Ubuntu](#debian--ubuntu)
+  * [Fedora](#fedora)
+  * [Arch Linux](#arch-linux)
+  * [FreeBSD](#freebsd)
+  * [Configure and build](#configure-and-build)
+  * [SDL3 troubleshooting](#sdl3-troubleshooting)
+* [Windows / PowerShell](#windows--powershell)
+* [Windows / MSYS2 CLANG64](#windows--msys2-clang64)
+* [Rebuild, deploy, cache](#rebuild-deploy-cache)
+* [Build variants](#build-variants)
+* [Install / AppImage](#install--appimage)
+
 Run from checkout root. [Extract/AOT/run](USAGE.md) · [Tests/diagnostics](DEVELOPMENT.md).
 
 ## Prerequisites

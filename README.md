@@ -103,7 +103,7 @@ build still stops after extraction.
 See the [staged 3DS port](docs/3DS.md) for limits, build instructions and remaining work.
 
 For more detailed information please see: [Build + run](./docs/BUILD.md). For the Android app (arm64 and x86_64),
-see [Android](./docs/ANDROID.md).
+see [Android](./docs/ANDROID.md). Every document: [docs](./docs/README.md).
 
 # Special thanks
 

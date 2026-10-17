@@ -2,6 +2,13 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # SuperTux integration target
 
+## Index
+
+* [Pinned input (not distributed)](#pinned-input-not-distributed)
+* [Reproduce](#reproduce)
+* [Observed startup](#observed-startup)
+* [Validation boundaries and next work](#validation-boundaries-and-next-work)
+
 The supplied SuperTux CIA now **reaches and executes `main`**, at `0x00167d88`
 after **50,489 native blocks**. Its SelfNCCH RomFS open succeeds using NX's
 shared indexed host filesystem. It executes scalar VFPv2 in `gettimeofday`
