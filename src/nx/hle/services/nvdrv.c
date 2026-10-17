@@ -323,13 +323,24 @@ void syncpt_add(u32 id, u32 n) {
     if (id >= SYNCPT_IDS || !n) return;
     pm_lock(&nv.sync_lk);
     u32 v = __atomic_add_fetch(&nv.syncpt[id], n, __ATOMIC_SEQ_CST);
-    if ((i32)(v - nv.syncpt_max[id]) > 0) nv.syncpt_max[id] = v; /* host1x and the CPU promise nothing first */
+    if ((i32)(v - nv.syncpt_max[id]) > 0) nv.syncpt_max[id] = v; /* the CPU promises nothing first */
     pc_broadcast(&nv.sync_cv);
     pm_unlock(&nv.sync_lk);
     nv_events_check();
     gpu_kick(); /* a GPU channel's stream may wait for it */
 }
 void syncpt_incr(u32 id) { syncpt_add(id, 1); }
+u32 syncpt_promise(u32 id, u32 n) {
+    u32 cur, v;
+    if (id >= SYNCPT_IDS) return 0;
+    pm_lock(&nv.sync_lk);
+    cur = syncpt_read(id);
+    if ((i32)(cur - nv.syncpt_max[id]) > 0) nv.syncpt_max[id] = cur;
+    nv.syncpt_max[id] += n;
+    v = nv.syncpt_max[id];
+    pm_unlock(&nv.sync_lk);
+    return v;
+}
 /* whether syncpoint id has reached thresh, counting across the 32-bit wrap */
 static int syncpt_reached(u32 id, u32 thresh) { return (i32)(syncpt_read(id) - thresh) >= 0; }
 /* 1 once id reaches thresh, 0 when the time runs out first. timeout_ns 0 looks once, negative waits for good. The
@@ -960,7 +971,7 @@ static u32 gpu_submit_gpfifo(NvFile* f, u32 cmd, u8* d, u32 n, const u8* extra, 
     u32 num = rd32(d, 8), flags = rd32(d, 12), fid = rd32(d, 16), fval = rd32(d, 20);
     u32 room = (cmd & 0xFF) == 0x1B ? (extra ? nextra / 8 : 0) : (n > 24 ? (n - 24) / 8 : 0);
     const u8* entries = (cmd & 0xFF) == 0x1B ? extra : d + 24;
-    u32 sp, incs = 0, wait_id = ~0u, cur, promised;
+    u32 sp, incs = 0, wait_id = ~0u, promised;
     if (num > room) {
         WARN_LIMIT(8, "nvdrv: SUBMIT_GPFIFO of %u entries in a buffer of %u\n", num, room);
         num = room;
@@ -971,12 +982,7 @@ static u32 gpu_submit_gpfifo(NvFile* f, u32 cmd, u8* d, u32 n, const u8* extra, 
     sp = gpu_channel_syncpt(f);
     /* the promise and the queueing in one hold, so promises reach the GPU thread in order */
     pm_lock(&nv.submit_lk);
-    pm_lock(&nv.sync_lk);
-    cur = syncpt_read(sp);
-    if ((i32)(cur - nv.syncpt_max[sp]) > 0) nv.syncpt_max[sp] = cur;
-    nv.syncpt_max[sp] += incs;
-    promised = nv.syncpt_max[sp];
-    pm_unlock(&nv.sync_lk);
+    promised = syncpt_promise(sp, incs);
     gpu_submit(entries, num, sp, incs, wait_id, fval, promised);
     pm_unlock(&nv.submit_lk);
     wr32(d, 16, sp);
