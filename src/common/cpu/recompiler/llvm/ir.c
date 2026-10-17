@@ -258,10 +258,6 @@ static void ppc_tail_calls(SnxIr* ir) {
 }
 
 int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char* error, size_t error_size) {
-    char pipeline[16], *message = NULL;
-    LLVMPassBuilderOptionsRef options;
-    LLVMErrorRef failure;
-    LLVMMemoryBufferRef buffer;
     *data = NULL;
     *size = 0;
     if (ir->fallbacks) {
@@ -272,7 +268,18 @@ int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char*
                  ir->fallbacks, ir->fallbacks == 1 ? "" : "s");
         return -1;
     }
-    if (LLVMVerifyModule(ir->mod, LLVMReturnStatusAction, &message)) {
+    return snx_ir_module_object(ir, ir->mod, opt, data, size, error, error_size);
+}
+
+int snx_ir_module_object(SnxIr* ir, LLVMModuleRef module, char opt, unsigned char** data, size_t* size, char* error,
+                         size_t error_size) {
+    char pipeline[16], *message = NULL;
+    LLVMPassBuilderOptionsRef options;
+    LLVMErrorRef failure;
+    LLVMMemoryBufferRef buffer;
+    *data = NULL;
+    *size = 0;
+    if (LLVMVerifyModule(module, LLVMReturnStatusAction, &message)) {
         snprintf(error, error_size, "invalid IR: %.900s", message ? message : "");
         LLVMDisposeMessage(message);
         return -1;
@@ -280,7 +287,7 @@ int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char*
     LLVMDisposeMessage(message);
     sprintf(pipeline, "default<O%c>", opt == 's' ? 's' : opt == 'z' ? 'z' : opt);
     options = LLVMCreatePassBuilderOptions();
-    failure = LLVMRunPasses(ir->mod, pipeline, ir->tm, options);
+    failure = LLVMRunPasses(module, pipeline, ir->tm, options);
     LLVMDisposePassBuilderOptions(options);
     if (failure) {
         message = LLVMGetErrorMessage(failure);
@@ -302,7 +309,7 @@ int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char*
         }
     }
     message = NULL;
-    if (LLVMTargetMachineEmitToMemoryBuffer(ir->tm, ir->mod, LLVMObjectFile, &message, &buffer)) {
+    if (LLVMTargetMachineEmitToMemoryBuffer(ir->tm, module, LLVMObjectFile, &message, &buffer)) {
         snprintf(error, error_size, "LLVM code generation: %s", message ? message : "");
         LLVMDisposeMessage(message);
         return -1;
