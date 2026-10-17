@@ -79,8 +79,12 @@ void pc_init(PCond* c) { pthread_cond_init(&c->c, NULL); }
 void pc_signal(PCond* c) { pthread_cond_signal(&c->c); }
 void pc_broadcast(PCond* c) { pthread_cond_broadcast(&c->c); }
 int pc_wait(PCond* c, PMutex* m, i64 ns) {
+    int r;
     (void)ns; /* the core model only waits without a timeout */
-    return pthread_cond_wait(&c->c, &m->l);
+    /* a failed wait (EINVAL on macOS for a condition variable never initialized) returns at once without
+       releasing the lock, and the caller's loop would spin holding it */
+    if ((r = pthread_cond_wait(&c->c, &m->l)) != 0) fatal("pthread_cond_wait: %d\n", r);
+    return r;
 }
 
 static unsigned checks, failures;
@@ -101,6 +105,9 @@ static KThread snx_kct_thread[SNX_KCT_THREADS];
 static KThread* thread(int i, int prio, int core, u64 mask) {
     KThread* t = &snx_kct_thread[i];
     memset(t, 0, sizeof *t);
+    /* a thread waits for its core on its own cv, as kthread_create sets it up: all zeros is a valid condition
+       variable on glibc but not on macOS */
+    pc_init(&t->cv);
     t->prio = t->base_prio = prio;
     t->core = core;
     t->affinity = mask;
