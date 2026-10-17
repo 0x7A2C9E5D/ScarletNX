@@ -363,6 +363,133 @@ static bool picks_have(App* app, const char* line) {
     free(kept);
     return has;
 }
+/* Settings > Controllers by player, as Eden's tabs: its Player row goes round All (every player's rows) and 1 to 8
+   (the player's own and those no player has its own of); a player's Button map is the button map page on its keys,
+   its A and B as its own swap says, else every player's; ESC comes back to the player's rows */
+static void players_view(App* app) {
+    static const char list[] =
+        "Controllers\tgamepad_swap_ab\t0\tint\t0\t1\tSwap A/B\tSwap A/B\t0=Off|1=On\n"
+        "Controllers\tgamepad_deadzone\t10\tint\t0\t90\tDead zone\tStick dead zone\t0=0%|10=10%\n"
+        "Controllers\tgamepad_rumble\t100\tint\t0\t100\tVibration\tVibration\t0=Off|100=100%\n"
+        "Controllers/Button map\tgamepad_map\t\ttext\t\t\tEach control's button\tButton map\t\n"
+        "Controllers/Player\tgamepad_p1_device\t\ttext\t\t\tIts controller\tController\t\n"
+        "Controllers/Player\tgamepad_p1_swap_ab\t-1\tint\t-1\t1\tIts A and B\tSwap A/B\t-1=As All|0=Off|1=On\n"
+        "Controllers/Player\tgamepad_p1_map\t\ttext\t\t\tIts map\tButton map\t\n"
+        "Controllers/Player\tgamepad_p2_device\t\ttext\t\t\t\tController\t\n"
+        "Controllers/Player\tgamepad_p2_swap_ab\t-1\tint\t-1\t1\t\tSwap A/B\t-1=As All|0=Off|1=On\n"
+        "Controllers/Player\tgamepad_p2_map\t\ttext\t\t\t\tButton map\t\n";
+    int r;
+    gui_settings_free(&app->settings);
+    memset(&app->settings, 0, sizeof app->settings);
+    assert(!gui_settings_read(&app->settings, list));
+    gui_settings_mark(&app->settings);
+    app->player = 0;
+    open_settings(app);
+    key(app, SDLK_DOWN); /* past Launch, the launcher's own */
+    key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    /* All: the Player row, then every player's */
+    assert(app->form == GUI_FORM_GROUP && app->view_count == 5 && app->editor.row == 0);
+    assert(!strcmp(app->settings.values[setting_of(app, 0)].text, "< All >"));
+    assert(row_of(app, setting_row(app, "gamepad_swap_ab")) == 1 &&
+           row_of(app, setting_row(app, "gamepad_p1_map")) < 0);
+    render(app);
+    shows(app, "- Player", yellow); /* focused */
+    /* Right: player 1, its own rows and the dead zone; no every player's Swap A/B, Vibration or Button map */
+    key(app, SDLK_RIGHT);
+    assert(app->player == 1 && app->view_count == 5 && !strcmp(app->settings.values[setting_of(app, 0)].text, "< 1 >"));
+    assert(row_of(app, setting_row(app, "gamepad_p1_swap_ab")) > 0 &&
+           row_of(app, setting_row(app, "gamepad_swap_ab")) < 0);
+    assert(row_of(app, setting_row(app, "gamepad_deadzone")) > 0 &&
+           row_of(app, setting_row(app, "gamepad_p2_map")) < 0);
+    render(app);
+    shows(app, "As All [default]", normal);
+    shows(app, "As All >", normal); /* its Button map, every player's until it has its own */
+    /* its Controller: Any while it names none; Enter waits for a press, which gives it the controller pressed by its
+       GUID ("/2" for the second of two alike); ESC leaves it as it was */
+    {
+        SDL_VirtualJoystickDesc d;
+        SDL_JoystickID one, two;
+        SDL_Joystick *j1, *j2;
+        char guid[33], line[40];
+        shows(app, "Any [default]", normal);
+        app->editor.row = row_of(app, setting_row(app, "gamepad_p1_device"));
+        key(app, SDLK_RETURN);
+        assert(app->device_listen && strstr(app->editor.note, "Press a button on player 1's controller"));
+        key(app, SDLK_ESCAPE);
+        assert(!app->device_listen && !gui_settings_value(&app->settings, "gamepad_p1_device") &&
+               app->form == GUI_FORM_GROUP && !SDL_WasInit(SDL_INIT_GAMEPAD));
+        key(app, SDLK_RETURN);
+        assert(SDL_InitSubSystem(SDL_INIT_JOYSTICK)); /* the pads stay between the waits, as real ones do */
+        SDL_INIT_INTERFACE(&d);
+        d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        d.naxes = SDL_GAMEPAD_AXIS_COUNT;
+        d.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+        d.vendor_id = 0x045e;
+        d.product_id = 0x02ea;
+        d.name = "One Pad";
+        one = SDL_AttachVirtualJoystick(&d);
+        two = SDL_AttachVirtualJoystick(&d);
+        j1 = SDL_OpenJoystick(one);
+        j2 = SDL_OpenJoystick(two);
+        assert(j1 && j2);
+        pads(app);
+        SDL_GUIDToString(SDL_GetJoystickGUIDForID(one), guid, sizeof guid);
+        pad_press(app, j2, SDL_GAMEPAD_BUTTON_SOUTH);
+        snprintf(line, sizeof line, "%s/2", guid);
+        assert(!app->device_listen && !strcmp(gui_settings_value(&app->settings, "gamepad_p1_device"), line));
+        assert(!strcmp(app->editor.note, "Player 1: One Pad") && picks_have(app, "gamepad_p1_device="));
+        key(app, SDLK_RETURN);
+        pad_press(app, j1, SDL_GAMEPAD_BUTTON_SOUTH);
+        assert(!strcmp(gui_settings_value(&app->settings, "gamepad_p1_device"), guid));
+        key(app, SDLK_DELETE); /* the next to connect again */
+        assert(!gui_settings_value(&app->settings, "gamepad_p1_device"));
+        SDL_CloseJoystick(j1);
+        SDL_CloseJoystick(j2);
+        assert(SDL_DetachVirtualJoystick(one) && SDL_DetachVirtualJoystick(two));
+        SDL_QuitSubSystem(SDL_INIT_JOYSTICK);
+    }
+    /* round: Left twice is 8 (no rows of its own here), Right twice back to 1 */
+    app->editor.row = 0;
+    key(app, SDLK_LEFT);
+    key(app, SDLK_LEFT);
+    assert(app->player == 8 && app->view_count == 2);
+    key(app, SDLK_RIGHT);
+    key(app, SDLK_RIGHT);
+    assert(app->player == 1);
+    /* its Swap A/B and every player's: its own wins, As All takes every player's */
+    assert(gui_settings_set(&app->settings, "gamepad_swap_ab", "1"));
+    app->editor.row = row_of(app, setting_row(app, "gamepad_p1_map"));
+    key(app, SDLK_RETURN);
+    assert(app->form == GUI_FORM_PAD && app->pad_player == 1 && app->pad_map == setting_row(app, "gamepad_p1_map"));
+    assert(app->pad.swap_ab); /* As All: on */
+    render(app);
+    shows(app, "SETTINGS  /  CONTROLLERS  /  PLAYER 1  /  BUTTON MAP", normal);
+    /* a change keeps the player's map, every player's untouched */
+    app->pad.focus = SNX_PAD_LT;
+    key(app, SDLK_RIGHT);
+    assert(gui_settings_value(&app->settings, "gamepad_p1_map") && !gui_settings_value(&app->settings, "gamepad_map"));
+    assert(strstr(gui_settings_value(&app->settings, "gamepad_p1_map"), "lt:ZR"));
+    key(app, SDLK_ESCAPE);
+    assert(app->form == GUI_FORM_GROUP && app->player == 1 &&
+           setting_of(app, app->editor.row) == setting_row(app, "gamepad_p1_map"));
+    assert(gui_settings_set(&app->settings, "gamepad_p1_swap_ab", "0"));
+    key(app, SDLK_RETURN);
+    assert(app->form == GUI_FORM_PAD && !app->pad.swap_ab); /* its own: off */
+    key(app, SDLK_ESCAPE);
+    /* its map its own now; Del on a player's row: back to As All */
+    render(app);
+    shows(app, "Its own >", yellow); /* focused, as ESC came back to it */
+    app->editor.row = row_of(app, setting_row(app, "gamepad_p1_swap_ab"));
+    key(app, SDLK_DELETE);
+    assert(!gui_settings_value(&app->settings, "gamepad_p1_swap_ab"));
+    /* every row the view shows is a row of the settings, the Player row first */
+    for (r = 0; r < app->view_count; ++r) assert(setting_of(app, r) >= 0 && setting_of(app, r) < app->settings.count);
+    key(app, SDLK_ESCAPE);
+    assert(app->form == GUI_FORM_SETTINGS);
+    app->player = 0;
+    leave_editor(app);
+}
 /* Settings > Controllers > Button map: the pad drawn (pad_screen.h) with what each control sends, on SDL's virtual
    Xbox pad. No presets: each control the button in its place, gamepad_map over that, A and B as gamepad_swap_ab says;
    the keys, the pad's presses, its triggers and stick, a click and the wheel act on it, each change kept in the picks
@@ -3944,6 +4071,7 @@ int main(int argc, char** argv) {
         assert(app.form == GUI_FORM_GROUP);
         leave_editor(&app);
     }
+    players_view(&app);
     step_line();
     /* YoRHa's Settings: its groups' column wide enough for the last row with its cursor; a page of a group open, its
        name over its rows */

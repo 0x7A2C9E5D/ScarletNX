@@ -75,6 +75,12 @@ build of a detached checkout outside CI says `detached`, and both read `unknown`
   the whole map as `gamepad_map`, and Del puts it back to the `.ini`'s. The first pad plugged in is shown, its held
   buttons lit; with none, the middle says why (a joystick SDL has no mapping for is named, with its GUID and the
   file its line goes in). The launcher reads pads only on this page.
+  Controllers' **Player** row, first, goes round *All* and 1 to 8, as Eden's tabs (Left/Right or Enter): *All*
+  shows the settings every player shares; a player its own, *Controller*, *Connected*, *Type*, *Swap A/B*,
+  *Vibration* and *Button map*, each *As All* until picked, then the rows no player has its own of (the
+  dead zone, background input, Joy-Cons). A player's *Controller* is *Any*, the next to connect, until Enter on it
+  and a press on a controller give it that one (ESC leaves it as it was, Del makes it *Any* again); its *Button
+  map* is the page above on its own keys, its A and B as its *Swap A/B* says.
   **App** holds **Theme** and **Text size**, which Left/Right or Enter go round either way, **Theme editor**, which comes back to App, and **Game folders**: `games/`,
   always listed, then the player's own folders, whose games the `games/` browser lists after
   `games/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window

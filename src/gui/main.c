@@ -54,6 +54,8 @@ enum { GUI_FORM_SETTINGS, GUI_FORM_GROUP, GUI_FORM_APP, GUI_FORM_FOLDERS, GUI_FO
 #define GUI_FOLDERS_MAX  16    /* the player's game folders, past games/ */
 #define GUI_FOLDER_DEPTH 4     /* how deep the games of a folder kept with its subfolders are looked for */
 #define GUI_FOLDER_DEEP  "/**" /* after such a folder's path, in the file of folders */
+#define GUI_VIEW_ROWS    24    /* a group's rows shown as a view of them */
+#define SNX_GUI_PLAYERS  8     /* Controllers' players, as the runtime's gamepad_p<N>_ keys */
 /* the App screen's values, as its rows show them, and the game folders' (games/ first) */
 typedef struct {
     char theme[64], text[16], folders[32];
@@ -119,11 +121,21 @@ typedef struct {
     GuiEditor editor;
     /* a press the colour picker took, until it lifts: its bar's channel + 1, or GUI_PICK_ROWS + 1 off the bars */
     int pick_press;
-    int form;            /* GUI_FORM_* */
-    int group;           /* the group open, or the one the Settings come back to */
-    int first, page;     /* a group's: the settings' row of its first, and of the page's row it opened (-1 none) */
-    bool theme_from_app; /* the theme editor goes back to the App's rows */
-    SnxPadScreen pad;    /* the button map's, on the row gamepad_map, A and B as gamepad_swap_ab says */
+    int form;        /* GUI_FORM_* */
+    int group;       /* the group open, or the one the Settings come back to */
+    int first, page; /* a group's: the settings' row of its first, and of the page's row it opened (-1 none) */
+    /* a group shown as a view of its rows, Controllers by player: each row's setting, and the player shown (0 every
+       player's, 1 to SNX_GUI_PLAYERS) */
+    GuiThemeKey view_keys[GUI_VIEW_ROWS];
+    int view_rows[GUI_VIEW_ROWS], view_count, player;
+    GuiThemeKey peek_keys[GUI_VIEW_ROWS]; /* and the focused group's, in the groups' screen */
+    int peek_rows[GUI_VIEW_ROWS];
+    int pad_map, pad_swap, pad_player; /* the button map's settings: its map's row and its swap's, for which player */
+    int device_listen; /* a player's Controller row waiting for a press on the controller it takes, + 1; 0 for none */
+    SDL_Gamepad* listened[16]; /* the controllers open meanwhile: a press comes only from an open one */
+    int listened_count;
+    bool theme_from_app;       /* the theme editor goes back to the App's rows */
+    SnxPadScreen pad;          /* the button map's, on the row gamepad_map, A and B as gamepad_swap_ab says */
     SnxPadDrawing pad_drawing; /* as last drawn: what a click or a tap lands on */
     SDL_Gamepad* gamepad;      /* the pad it shows, the first one plugged in, while it is open */
     bool pads_read;            /* SDL's gamepads started for it */
@@ -1397,8 +1409,12 @@ static const char* screen_title(const App* app, char* out, size_t size) {
     if (app->form == GUI_FORM_THEME)
         snprintf(out, size, "THEME EDITOR  /  %s", app->editor.id);
     else if (app->form == GUI_FORM_PAD) {
-        snprintf(out, size, "SETTINGS  /  %s  /  %s", app->group_keys[app->group].key,
-                 app->settings.keys[app->page].key);
+        if (app->pad_player) /* a player's own */
+            snprintf(out, size, "SETTINGS  /  %s  /  PLAYER %d  /  %s", app->group_keys[app->group].key,
+                     app->pad_player, app->settings.keys[app->page].key);
+        else
+            snprintf(out, size, "SETTINGS  /  %s  /  %s", app->group_keys[app->group].key,
+                     app->settings.keys[app->page].key);
         for (c = out; *c; ++c) *c = (char)SDL_toupper((unsigned char)*c);
     } else
         snprintf(out, size, "SETTINGS");
@@ -2324,11 +2340,74 @@ static void folder_select(App* app, int row) {
         snprintf(app->editor.note, sizeof app->editor.note, "Enter again takes it off the list");
     }
 }
+/* the setting a row of the open group or page is, and the row a setting is (-1: none) */
+static int setting_of(const App* app, int row) { return app->view_count ? app->view_rows[row] : app->first + row; }
+static int row_of(const App* app, int setting) {
+    int r;
+    if (!app->view_count) return setting - app->first;
+    for (r = 0; r < app->view_count && app->view_rows[r] != setting; ++r) {}
+    return r < app->view_count ? r : -1;
+}
+/* a player's key, gamepad_p<N>_name: N, else 0 */
+static int player_key(const char* key, const char* name) {
+    int n = 0, at = 0;
+    if (!key || sscanf(key, "gamepad_p%d_%n", &n, &at) != 1 || !at || (name && strcmp(key + at, name))) return 0;
+    return n >= 1 && n <= SNX_GUI_PLAYERS ? n : 0;
+}
+/* group g's rows, wherever they are: its section's own, and its pages' rows (a second page's comes after the first
+   page's rows) */
+static int in_group(const App* app, int g, int r) {
+    return !strcmp(app->settings.keys[r].section, app->group_keys[g].key);
+}
+/* group g's page row of the players (the runtime's "Player" page), -1 for none */
+static int players_row(const App* app, int g) {
+    int r;
+    for (r = 0; g > 0 && g < app->groups && r < app->settings.count; ++r)
+        if (in_group(app, g, r) && app->settings.values[r].kind == GUI_SETTING_PAGE &&
+            !strcmp(app->settings.keys[r].key, "Player"))
+            return r;
+    return -1;
+}
+/* Controllers by player, as Eden's tabs, into rows: its Player row first; every player's rows for player 0, player
+   N's own for N with the rows no player has its own of. How many, 0 for a group without players */
+static int player_rows(App* app, int g, int p, int* rows) {
+    int players = players_row(app, g), r, n = 0;
+    GuiSetting* row;
+    if (players < 0) return 0;
+    row = &app->settings.values[players];
+    rows[n++] = players;
+    for (r = row->first; p && r < row->first + row->count && n < GUI_VIEW_ROWS; ++r)
+        if (player_key(app->settings.values[r].key, NULL) == p) rows[n++] = r; /* the player's, its page's */
+    for (r = 0; r < app->settings.count && n < GUI_VIEW_ROWS; ++r) {
+        const char* key = app->settings.values[r].key ? app->settings.values[r].key : "";
+        if (r == players || !in_group(app, g, r)) continue;
+        if (p && (app->settings.values[r].kind == GUI_SETTING_PAGE || !strcmp(key, "gamepad_swap_ab") ||
+                  !strcmp(key, "gamepad_rumble")))
+            continue; /* each player has its own of these */
+        rows[n++] = r;
+    }
+    return n;
+}
+/* the open group as a view of its rows by player, its Player row saying which (< All > or < N >) */
+static void group_view(App* app, int g) {
+    int r, players = players_row(app, g);
+    app->view_count = player_rows(app, g, app->player, app->view_rows);
+    if (!app->view_count) return;
+    if (app->player)
+        snprintf(app->settings.values[players].text, sizeof app->settings.values[players].text, "< %d >", app->player);
+    else
+        snprintf(app->settings.values[players].text, sizeof app->settings.values[players].text, "< All >");
+    for (r = 0; r < app->view_count; ++r) app->view_keys[r] = app->settings.keys[app->view_rows[r]];
+    app->view_keys[0].about = "Each player's own, as Eden's tabs: Left/Right go round All and players 1 to 8";
+    gui_editor_form(&app->editor, app->view_keys, app->view_count, app->settings.values, NULL);
+    app->editor.flat = true;
+}
 static void open_group(App* app, int g) {
     if (!g) {
         open_app(app, 0);
         return;
     }
+    app->view_count = 0;
     gui_editor_form(&app->editor, app->settings.keys + app->group_first[g], app->group_rows[g], app->settings.values,
                     NULL);
     app->editor.flat = true;
@@ -2336,6 +2415,7 @@ static void open_group(App* app, int g) {
     app->group = g;
     app->first = app->group_first[g];
     app->page = -1;
+    group_view(app, g);
 }
 static void open_pad(App* app, int row);
 static bool pad_page(const App* app, int row);
@@ -2348,6 +2428,7 @@ static void open_page(App* app, int row) {
     }
     gui_editor_form(&app->editor, app->settings.keys + page->first, page->count, app->settings.values, NULL);
     app->editor.flat = true;
+    app->view_count = 0;
     app->first = page->first;
     app->page = row;
 }
@@ -2363,14 +2444,16 @@ static void leave_editor(App* app) {
 }
 static void pad_close(App* app);
 /* ESC on a screen: a group's and the App's go back to the groups, the theme editor to where it was opened */
+static void device_stop(App* app);
 static void leave_form(App* app) {
     int form = app->form;
+    device_stop(app);
     leave_editor(app);
     if (form == GUI_FORM_PAD) pad_close(app);
     if ((form == GUI_FORM_GROUP || form == GUI_FORM_PAD) && app->page >= 0) { /* a page: back to its row */
         int row = app->page;
         open_group(app, app->group);
-        app->editor.row = row - app->first;
+        app->editor.row = SDL_max(row_of(app, row), 0);
         app->editing = true;
     } else if (form == GUI_FORM_GROUP || form == GUI_FORM_APP)
         settings_top(app, app->group);
@@ -2457,13 +2540,17 @@ static void pad_sync(App* app) {
    no pad stays */
 static void pad_start(App* app) {
     const GuiSettings* s = &app->settings;
-    const char* swap = gui_settings_value(s, "gamepad_swap_ab");
-    int map = setting_row(app, "gamepad_map");
+    const char* swap = app->pad_swap >= 0 ? gui_settings_value(s, s->values[app->pad_swap].key) : NULL;
+    int map = app->pad_map, on = swap ? atoi(swap) : -1;
     char error[64], note[sizeof app->pad.note];
     snprintf(note, sizeof note, "%s", app->pad.note);
     snx_pad_screen_start(&app->pad);
     snprintf(app->pad.note, sizeof app->pad.note, "%s", note);
-    app->pad.swap_ab = swap && atoi(swap);
+    if (on < 0) { /* a player's "As All": every player's */
+        swap = gui_settings_value(s, "gamepad_swap_ab");
+        on = swap && atoi(swap);
+    }
+    app->pad.swap_ab = on;
     if (snx_pad_map_read(&app->pad.own, s->values[map].text, error, sizeof error))
         snprintf(app->editor.note, sizeof app->editor.note,
                  "gamepad_map's \"%s\" is not a control and the button it sends (south:B)", error);
@@ -2530,11 +2617,15 @@ static void pad_load_mappings(App* app) {
     free(path);
 }
 static void render(App* app);
-static void open_pad(App* app, int row) {
+/* the button map of map's row (row: what to come back to), A and B as swap's row says, for player (0: every one) */
+static void open_pad_on(App* app, int row, int map, int swap, int player) {
     leave_editor(app);
     app->editing = true;
     app->form = GUI_FORM_PAD;
     app->page = row;
+    app->pad_map = map;
+    app->pad_swap = swap;
+    app->pad_player = player;
     app->editor.note[0] = 0;
     app->pad.note[0] = 0;
     pad_start(app);
@@ -2551,6 +2642,17 @@ static void open_pad(App* app, int row) {
         pad_load_mappings(app);
     pad_attach(app);
 }
+/* the Button map page's: every player's map */
+static void open_pad(App* app, int row) {
+    open_pad_on(app, row, setting_row(app, "gamepad_map"), setting_row(app, "gamepad_swap_ab"), 0);
+}
+/* player N's map row's, its A and B as its own swap says */
+static void open_player_pad(App* app, int map) {
+    char key[32];
+    int p = player_key(app->settings.values[map].key, "map");
+    snprintf(key, sizeof key, "gamepad_p%d_swap_ab", p);
+    open_pad_on(app, map, map, setting_row(app, key), p);
+}
 static void pad_close(App* app) {
     if (app->gamepad) SDL_CloseGamepad(app->gamepad);
     app->gamepad = NULL;
@@ -2560,7 +2662,7 @@ static void pad_close(App* app) {
 /* what the page did: the map kept at once, as the Settings' other picks */
 static void pad_did(App* app, int did) {
     GuiSettings* s = &app->settings;
-    int map = setting_row(app, "gamepad_map");
+    int map = app->pad_map;
     if (did == SNX_PAD_DID_LEAVE) {
         leave_form(app);
         return;
@@ -2615,7 +2717,7 @@ static void pad_keyboard(App* app, const SDL_KeyboardEvent* k) {
     GuiKey key;
     if (k->key == SDLK_DELETE || k->key == SDLK_BACKSPACE) {
         int focus = app->pad.focus;
-        gui_settings_reset(&app->settings, setting_row(app, "gamepad_map"));
+        gui_settings_reset(&app->settings, app->pad_map);
         app->editor.note[0] = 0;
         pad_start(app);
         app->pad.focus = focus;
@@ -2635,6 +2737,76 @@ static void pad_keyboard(App* app, const SDL_KeyboardEvent* k) {
     }
 }
 /* the page's events: keys, its pad's presses, pads plugged in and out; false for what the rest takes */
+/* every controller there, open while a Controller row waits: one already open stays as it is */
+static void device_open(App* app) {
+    SDL_JoystickID* ids;
+    int i, k, n = 0;
+    ids = SDL_GetGamepads(&n);
+    for (i = 0; ids && i < n && app->listened_count < (int)SDL_arraysize(app->listened); ++i) {
+        for (k = 0; k < app->listened_count && SDL_GetGamepadID(app->listened[k]) != ids[i]; ++k) {}
+        if (k == app->listened_count && (app->listened[k] = SDL_OpenGamepad(ids[i])) != NULL) ++app->listened_count;
+    }
+    SDL_free(ids);
+}
+/* a player's Controller row: Enter waits for a press on a controller, which the player then takes, by its GUID ("/2"
+   after it for the second of two alike), as Eden's Input Device. ESC leaves it as it was */
+static void device_listen(App* app, int row) {
+    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+        snprintf(app->editor.note, sizeof app->editor.note, "Controllers cannot be read: %s", SDL_GetError());
+        return;
+    }
+    pad_load_mappings(app);
+    app->device_listen = row + 1;
+    device_open(app);
+    snprintf(app->editor.note, sizeof app->editor.note, "Press a button on player %d's controller. ESC: as it was",
+             player_key(app->settings.values[row].key, "device"));
+}
+static void device_stop(App* app) {
+    if (!app->device_listen) return;
+    app->device_listen = 0;
+    while (app->listened_count) SDL_CloseGamepad(app->listened[--app->listened_count]);
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+}
+/* the controller pressed, the player's from now on */
+static void device_take(App* app, SDL_JoystickID id) {
+    GuiSetting* v = &app->settings.values[app->device_listen - 1];
+    SDL_JoystickID* ids;
+    char guid[33], one[33];
+    const char* name = SDL_GetGamepadNameForID(id);
+    int i, n = 0, alike = 0;
+    SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof guid);
+    ids = SDL_GetGamepads(&n);
+    for (i = 0; ids && i < n && ids[i] != id; ++i) { /* the ones alike before it */
+        SDL_GUIDToString(SDL_GetJoystickGUIDForID(ids[i]), one, sizeof one);
+        alike += !SDL_strcasecmp(one, guid);
+    }
+    SDL_free(ids);
+    if (alike)
+        snprintf(v->text, sizeof v->text, "%s/%d", guid, alike + 1);
+    else
+        snprintf(v->text, sizeof v->text, "%s", guid);
+    snprintf(app->editor.note, sizeof app->editor.note, "Player %d: %s", player_key(v->key, "device"),
+             name ? name : "the controller pressed");
+    device_stop(app);
+    app->editor.dirty = true;
+    keep_settings(app);
+}
+/* while a Controller row waits: a press takes its controller, ESC stops; every other event waits too */
+static bool device_event(App* app, const SDL_Event* e) {
+    GuiKey key;
+    if (!app->device_listen) return false;
+    if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
+        device_take(app, e->gbutton.which);
+    else if (e->type == SDL_EVENT_GAMEPAD_ADDED) /* plugged in while it waits: its press counts too */
+        device_open(app);
+    else if (e->type == SDL_EVENT_KEY_DOWN && menu_key_of(&e->key, &key) && key == GUI_CANCEL) {
+        device_stop(app);
+        snprintf(app->editor.note, sizeof app->editor.note, "As it was");
+    } else
+        return e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT ||
+               e->type == SDL_EVENT_MOUSE_BUTTON_DOWN || e->type == SDL_EVENT_FINGER_DOWN;
+    return true;
+}
 static bool pad_event(App* app, const SDL_Event* e) {
     SDL_JoystickID ours = app->gamepad ? SDL_GetGamepadID(app->gamepad) : 0;
     switch (e->type) {
@@ -2727,13 +2899,32 @@ static void render_pad(App* app) {
          rgb(app->editor.note[0] ? theme->failure : theme->soft), keys);
 }
 static void editor_key(App* app, GuiKey key) {
-    GuiEditorDo what = gui_editor_key(&app->editor, key);
+    GuiEditorDo what;
+    /* a player's map row opens its button map, as every player's Button map page does; its Controller row waits for
+       a press on the controller it takes */
+    if (app->form == GUI_FORM_GROUP && key == GUI_SELECT && !app->editor.typing &&
+        player_key(app->settings.values[setting_of(app, app->editor.row)].key, "map")) {
+        open_player_pad(app, setting_of(app, app->editor.row));
+        return;
+    }
+    if (app->form == GUI_FORM_GROUP && key == GUI_SELECT && !app->editor.typing &&
+        player_key(app->settings.values[setting_of(app, app->editor.row)].key, "device")) {
+        device_listen(app, setting_of(app, app->editor.row));
+        return;
+    }
+    what = gui_editor_key(&app->editor, key);
     if (what == GUI_EDITOR_ACTION && app->form == GUI_FORM_SETTINGS && !app->editor.step) {
         open_group(app, app->editor.row);
         return;
     }
     if (what == GUI_EDITOR_ACTION && app->form == GUI_FORM_GROUP) { /* a page's row opens it, an All steps its rows */
-        int row = app->first + app->editor.row;
+        int row = setting_of(app, app->editor.row);
+        if (app->settings.values[row].kind == GUI_SETTING_PAGE && !strcmp(app->settings.keys[row].key, "Player")) {
+            /* the player shown, round All and 1 to 8 */
+            app->player = (app->player + (app->editor.step < 0 ? SNX_GUI_PLAYERS : 1)) % (SNX_GUI_PLAYERS + 1);
+            group_view(app, app->group);
+            return;
+        }
         if (app->settings.values[row].kind == GUI_SETTING_PAGE && !app->editor.step)
             open_page(app, row);
         else if (gui_settings_step_all(&app->settings, row, app->editor.step)) {
@@ -2792,7 +2983,7 @@ static void editor_input(App* app, const SDL_Event* e) {
     /* Del, or Backspace when nothing is typed: a setting back to its default */
     if (app->form == GUI_FORM_GROUP && !app->editor.typing &&
         (e->key.key == SDLK_DELETE || e->key.key == SDLK_BACKSPACE)) {
-        gui_settings_reset(&app->settings, app->first + app->editor.row);
+        gui_settings_reset(&app->settings, setting_of(app, app->editor.row));
         app->editor.dirty = true;
         keep_settings(app);
         return;
@@ -2885,10 +3076,15 @@ static void form_boxes(App* app, GuiFormBoxes* f) {
         if (g == 0) {
             app_values(app);
             gui_editor_form(&f->peek, app_keys, GUI_APP_ROWS, &app->app_form, NULL);
-        } else if (g < app->groups)
-            gui_editor_form(&f->peek, app->settings.keys + app->group_first[g], app->group_rows[g],
-                            app->settings.values, NULL);
-        else /* Reset all: a form of no rows, where an editor of none would be a theme's (its folder and Save) */
+        } else if (g < app->groups) {
+            int n = player_rows(app, g, 0, app->peek_rows), r; /* Controllers: every player's */
+            for (r = 0; r < n; ++r) app->peek_keys[r] = app->settings.keys[app->peek_rows[r]];
+            if (n)
+                gui_editor_form(&f->peek, app->peek_keys, n, app->settings.values, NULL);
+            else
+                gui_editor_form(&f->peek, app->settings.keys + app->group_first[g], app->group_rows[g],
+                                app->settings.values, NULL);
+        } else /* Reset all: a form of no rows, where an editor of none would be a theme's (its folder and Save) */
             gui_editor_form(&f->peek, NULL, 0, &app->app_form, NULL);
         f->peek.flat = true;
         f->peek.row = -1;
@@ -2922,9 +3118,16 @@ static void form_row(App* app, const GuiList* l, const GuiEditor* e, int r, int 
     gui_editor_label(e, r, label, sizeof label);
     if (typing)
         snprintf(value, sizeof value, "%s_", e->text);
-    else if (k && e->object == (char*)app->settings.values) /* a setting: a pick, else its default and [default] */
-        gui_settings_shown(&app->settings, (int)(k - app->settings.keys), value, sizeof value);
-    else
+    else if (k && e->object == (char*)app->settings.values) { /* a setting: a pick, else its default and [default] */
+        int row = e->keys == app->view_keys   ? app->view_rows[k - app->view_keys]
+                  : e->keys == app->peek_keys ? app->peek_rows[k - app->peek_keys]
+                                              : (int)(k - app->settings.keys);
+        gui_settings_shown(&app->settings, row, value, sizeof value);
+        if (player_key(app->settings.values[row].key, "device") && !app->settings.values[row].text[0])
+            snprintf(value, sizeof value, "Any [default]");        /* the next to connect */
+        else if (player_key(app->settings.values[row].key, "map")) /* it opens the button map, as All's page does */
+            snprintf(value, sizeof value, "%s", app->settings.values[row].text[0] ? "Its own >" : "As All >");
+    } else
         gui_editor_value(e, r, value, sizeof value);
     if (value[0])
         snprintf(line, sizeof line, "%s%-*s %s", app->theme.marker, labels, label, value);
@@ -3923,6 +4126,7 @@ static void go_tab(App* app, int tab) {
         }
         keep_settings(app);
         if (app->form == GUI_FORM_PAD) pad_close(app);
+        device_stop(app);
         leave_editor(app);
         app->theme_from_app = false;
     }
@@ -4400,6 +4604,7 @@ static void event(App* app, const SDL_Event* e) {
         return;
     }
     if (app->editing && app->form == GUI_FORM_PAD && pad_event(app, e)) return;
+    if (app->editing && device_event(app, e)) return;
     if (app->editing && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
         editor_input(app, e);
         return;
