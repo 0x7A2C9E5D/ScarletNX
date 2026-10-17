@@ -400,7 +400,7 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
         return -41;
     }
     int voice_v2 = revn >= 15; /* 0x188 a voice (update_voice) */
-    u32 voice_size = voice_v2 ? 0x188 : 0x170, npools = s->neffects + s->nvoices * 4, nmix = ih[6] / 0x930;
+    u32 voice_size = voice_v2 ? 0x188 : 0x170, npools = s->neffects + s->nvoices * 4, nmix;
     int eff_v2 = revn >= 9;
     /* the opened renderer's counts fix both layouts: Eden and Ryubing refuse a section of another size */
     if (ih[2] != npools * 0x20 || ih[3] != s->nvoices * voice_size || ih[4] != s->nres * 0x70 ||
@@ -420,7 +420,6 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
                    (unsigned long long)os);
         return -4;
     }
-    if (nmix > s->nmix) warn_once(s, SNX_AUDREN_WARN_COUNTS, "an update holds more mixes than the renderer opened");
     s->rev = rev;
     const u8* p = in + 0x40 + ih[1];
     const u8* pools = p;
@@ -436,6 +435,20 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
     const u8* mixes = p;
     p += ih[6];
     const u8* sinks = p;
+
+    if (revn >= 7 && ih[6]) {
+        /* REV7 adds a 32-byte header before dirty-only mix entries. A zero-sized section means no mix changed. */
+        if (ih[6] < 0x20) return -41;
+        nmix = rd32(mixes + 4);
+        if ((u64)ih[6] != 0x20 + (u64)nmix * 0x930) {
+            WARN_LIMIT(4, "audren: REV7 mix section size does not match its entry count\n");
+            return -41;
+        }
+        mixes += 0x20;
+    } else {
+        nmix = revn >= 7 ? 0 : ih[6] / 0x930;
+    }
+    if (nmix > s->nmix) warn_once(s, SNX_AUDREN_WARN_COUNTS, "an update holds more mixes than the renderer opened");
 
     memset(out, 0, total);
     u32 oh[16] = {0};
