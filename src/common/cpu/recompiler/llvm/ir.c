@@ -92,14 +92,18 @@ SnxIr* snx_ir_new_target(const char* name, char opt, const char* target_triple, 
         return NULL;
     }
     /* -march=native -mtune=native, -fPIC (toolchain.c). Another triple gets its architecture's baseline: x86-64 with
-       cmpxchg16b, POWER8 on PowerPC64 */
+       CMPXCHG16B as rtlib is built, POWER8 on PowerPC64, anything else (AArch64) the generic CPU, since an x86 CPU
+       name crashes another target's instruction selection */
     ppc = !strncmp(triple, "powerpc64", 9) || !strncmp(triple, "ppc64", 5);
-    if (target_triple) {
-        cpu = LLVMCreateMessage(ppc ? "pwr8" : "x86-64");
-        features = LLVMCreateMessage(ppc ? "" : "+cx16");
-    } else {
+    if (!target_triple) {
         cpu = LLVMGetHostCPUName();
         features = LLVMGetHostCPUFeatures();
+    } else if (!strncmp(triple, "x86_64", 6)) {
+        cpu = LLVMCreateMessage("x86-64");
+        features = LLVMCreateMessage("+cx16");
+    } else {
+        cpu = LLVMCreateMessage(ppc ? "pwr8" : "generic");
+        features = LLVMCreateMessage("");
     }
     /* POWER8 at least, as cmake/cross.cmake builds the runtime library: before it there is no lqarx/stqcx., and the
        128-bit cmpxchg becomes a libatomic call no module links. The host's name is "generic" where /proc/cpuinfo has

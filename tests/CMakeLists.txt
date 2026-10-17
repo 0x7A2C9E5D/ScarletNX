@@ -834,6 +834,19 @@ foreach(shard RANGE 2)
         "${PROJECT_SOURCE_DIR}" --quiet --shard ${shard}/3)
     set_tests_properties(llvm_differential_${shard} PROPERTIES TIMEOUT 900 COST 100)
 endforeach()
+# longjmp across the loader's code, which on Windows unwinds through its registered function table
+add_executable(snx-test-code-loader-unwind code_loader_unwind.c)
+snx_test_target(snx-test-code-loader-unwind 11)
+target_link_libraries(snx-test-code-loader-unwind PRIVATE snx_llvm)
+add_test(NAME code_loader_unwind COMMAND snx-test-code-loader-unwind)
+if(NOT WIN32 AND NOT APPLE)
+    # the relocations both ELF paths share (elf_object.c), AArch64's included, checked on any ELF host
+    add_executable(snx-test-elf-relocate elf_relocate.c)
+    snx_test_target(snx-test-elf-relocate 11)
+    target_link_libraries(snx-test-elf-relocate PRIVATE snx_llvm)
+    add_test(NAME elf_relocate COMMAND snx-test-elf-relocate)
+    set_tests_properties(elf_relocate PROPERTIES TIMEOUT 120)
+endif()
 # not a test: timings of the generated code (llvm_bench SCARLETNX REPO CLANG)
 add_executable(snx-llvm-bench llvm_bench.c)
 snx_test_target(snx-llvm-bench 11)
@@ -884,9 +897,10 @@ target_link_libraries(snx-test-recompiler-library PRIVATE scarletnx-recompiler)
 add_test(NAME recompiler_library COMMAND snx-test-recompiler-library)
 if(APPLE)
     # these build a game module and load it, which needs a Mach-O module the recompiler can't link yet
-    # (src/common/cpu/recompiler/llvm/link.c, docs/APPLE.md), and 4 KiB host pages to run it: not run there
+    # (src/common/cpu/recompiler/llvm/link.c, docs/APPLE.md), and 4 KiB host pages to run it: not run there. The
+    # in-process loader takes ELF objects, which Darwin can't load either (code_loader.c)
     set_tests_properties(native_recompiler llvm_module recompiler_library llvm_differential_0 llvm_differential_1
-                         llvm_differential_2 PROPERTIES DISABLED TRUE)
+                         llvm_differential_2 code_loader_unwind PROPERTIES DISABLED TRUE)
 endif()
 
 add_executable(snx_codegen_test codegen_test.c)

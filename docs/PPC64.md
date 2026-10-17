@@ -81,8 +81,12 @@ and CI check these paths on 4 KiB hosts (`ldr_service_64k_pages`, `gnuabi_memory
   function it can't see shares the caller's TOC: another unit's function, or a pointer. A module has one TOC, so the
   jump is safe, and `ppc_tail_calls` in `src/common/cpu/recompiler/llvm/ir.c` sends those calls to a naked stub of the
   same module that branches on.
-- **The linker** (`src/common/cpu/recompiler/llvm/link_elf.c`) handles the TOC relocations, ELFv2's local entry
-  points, ELFv1's `.opd` descriptors, and 16-byte stubs for a call past `bl`'s 32 MiB.
+- **The linker** (`src/common/cpu/recompiler/llvm/link_elf.c`, with the relocations in `elf_object.c`) handles the
+  TOC relocations, ELFv2's local entry points, ELFv1's `.opd` descriptors, and 16-byte stubs for a call past `bl`'s
+  32 MiB.
+- **No runtime JIT.** The JIT's loader (`code_loader.c`) doesn't load PowerPC64 objects: code loaded beside the
+  runtime would call its functions, which have a TOC of their own, and each such call would need a stub that saves
+  and restores r2.
 - **Rounding stays on the slow path.** LLVM 19 lowers `llvm.roundeven` to a libm call on POWER8, and fails on its
   vector form, so FRINTN and the rounding conversions use the software path. Fused multiply-add is a fast path, as
   POWER always has it.
