@@ -33,11 +33,13 @@ under `src/gnuabi/` and builds without the Switch graphics or media dependencies
 ```sh
 cmake -S . -B build/gnuabi -DSNX_BUILD_NX=OFF
 cmake --build build/gnuabi
-build/gnuabi/scarletnx-gnuabi ./test_aarch64
+build/gnuabi/scarletnx-gnuabi -L /path/to/aarch64-sysroot ./test_aarch64
 ```
 
-See [Linux ABI execution and QEMU validation](docs/GNUABI.md) for supported syscalls,
-virtual filesystems, static ELF execution, and current limits. The NX executable also
+It runs static and dynamically linked programs, which start other processes, talk
+through pipes and read and write files through a sysroot, as QEMU's `-L` gives one
+(`linux/` of the data folder by default). See [Linux ABI execution and QEMU validation](docs/GNUABI.md)
+for the sysroot, the JIT and AOT modes, supported syscalls, and current limits. The NX executable also
 has `scarletnx-erista`, `scarletnx-mariko`, and `scarletnx-aula` aliases.
 
 The recompiler is also a library on its own, `libscarletnx-recompiler`: a program hands

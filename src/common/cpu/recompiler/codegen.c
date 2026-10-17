@@ -420,6 +420,86 @@ int snx_codegen_analyze(SnxCodegen* codegen, const SnxCodeImage* modules, size_t
     return 0;
 }
 
+/* instructions of one function of a just-in-time step: the backends' time grows faster than a function's size, and a
+   program's largest (a compiler's generated recognizers) would take minutes */
+#define SNX_JIT_FUNCTION_INSTRUCTIONS 4096
+
+/* A just-in-time compiler's discovery: functions from the hints only, and then the functions they call, breadth
+   first (the callees closest to where execution is come first), until the functions hold limit instructions. A
+   target compiled already (skip) is not explored again: the call to it goes through the dispatch table */
+int snx_codegen_analyze_from(SnxCodegen* codegen, const SnxCodeImage* modules, size_t module_count, const SnxU64* hints,
+                             size_t hint_count, size_t limit, int (*skip)(void* context, SnxU64 address),
+                             void* context) {
+    Addresses work, found, calls;
+    AddressSet known, seen, extra, hint_set;
+    size_t i, j, next, total;
+    SnxU64 a;
+    memset(codegen, 0, sizeof(*codegen));
+    codegen->modules = (SnxCodeImage*)snx_alloc(module_count * sizeof(*modules));
+    memcpy(codegen->modules, modules, module_count * sizeof(*modules));
+    codegen->module_count = module_count;
+    memset(&work, 0, sizeof(work));
+    memset(&known, 0, sizeof(known));
+    memset(&seen, 0, sizeof(seen));
+    memset(&extra, 0, sizeof(extra));
+    memset(&hint_set, 0, sizeof(hint_set));
+    for (i = 0; i < hint_count; ++i) {
+        set_add(&hint_set, hints[i]);
+        push(&work, hints[i]);
+    }
+    total = 0;
+    for (next = 0; next < work.count && total < limit; ++next) {
+        a = work.values[next];
+        if ((a & 3) || !set_add(&seen, a) || set_has(&known, a) || !snx_codegen_module(codegen, a)) continue;
+        if (next >= hint_count && skip && skip(context, a)) continue;
+        memset(&calls, 0, sizeof(calls));
+        found = explore(codegen, a, &known, &calls);
+        if (found.count) {
+            total += found.count;
+            set_add(&known, a);
+            if (found.count <= SNX_JIT_FUNCTION_INSTRUCTIONS)
+                add_function(codegen, a, 0, &found);
+            else
+                /* pieces of consecutive instructions: a branch from one into another goes through the dispatch table
+                   (a leader there, below), and a piece's last instruction runs on into the next piece's first */
+                for (i = 0; i < found.count; i += SNX_JIT_FUNCTION_INSTRUCTIONS) {
+                    Addresses piece;
+                    size_t n = found.count - i < SNX_JIT_FUNCTION_INSTRUCTIONS ? found.count - i
+                                                                               : SNX_JIT_FUNCTION_INSTRUCTIONS;
+                    memset(&piece, 0, sizeof(piece));
+                    for (j = 0; j < n; ++j) push(&piece, found.values[i + j]);
+                    set_add(&known, piece.values[0]);
+                    add_function(codegen, piece.values[0], 0, &piece);
+                }
+        }
+        for (i = 0; i < calls.count; ++i) push(&work, calls.values[i]);
+        free(calls.values);
+        free(found.values);
+    }
+    if (codegen->function_count)
+        qsort(codegen->functions, codegen->function_count, sizeof(*codegen->functions), compare_function);
+    /* a branch into another function (a piece of the same one) is an entry of that function */
+    for (i = 0; i < codegen->function_count; ++i) {
+        const SnxFunction* f = &codegen->functions[i];
+        for (j = 0; j < f->count; ++j) {
+            SnxU32 word;
+            enum SnxFlow kind;
+            a = snx_function_address(f, j);
+            if (!snx_codegen_word(codegen, a, &word)) continue;
+            kind = snx_a64_decode(word)->kind;
+            if ((kind == SNX_FLOW_B || kind == SNX_FLOW_BC) && !snx_function_contains(f, snx_a64_target(word, a)))
+                set_add(&extra, snx_a64_target(word, a));
+        }
+    }
+    leaders(codegen, &extra, &hint_set);
+    free(work.values);
+    set_free(&known);
+    set_free(&seen);
+    set_free(&extra);
+    set_free(&hint_set);
+    return codegen->function_count ? 0 : -1;
+}
+
 void snx_codegen_free(SnxCodegen* codegen) {
     size_t i;
     for (i = 0; i < codegen->function_count; ++i) {
