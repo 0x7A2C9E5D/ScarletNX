@@ -266,9 +266,11 @@ static int dec_open(NvdecCtx* d, u32 app) {
     d->cur = av_frame_alloc();
     if (app == 9) d->vp9 = snx_vp9_new();
     if (d->dec) {
-        /* One thread: after send + receive have consumed this job, its captured buffer is complete.
-           Frame threading could still be decoding it when the surface is written. */
-        d->dec->thread_count = 1;
+        /* After send + receive have consumed this job, its captured buffer is complete: frame threading could still
+           be decoding it when the surface is written. Slice threads end inside the packet: VP9's tile columns, up to
+           four at 1080p, decode side by side. An H.264 picture of the videos games carry is one slice */
+        d->dec->thread_type = FF_THREAD_SLICE;
+        d->dec->thread_count = app == 9 ? 4 : 1;
         d->dec->opaque = d;
         d->dec->get_buffer2 = get_buf;
     }

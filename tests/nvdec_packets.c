@@ -169,7 +169,7 @@ AVCodecContext* avcodec_alloc_context3(const AVCodec* codec) {
 int avcodec_open2(AVCodecContext* c, const AVCodec* codec, void* options) {
     (void)codec;
     (void)options;
-    CHECK(c->thread_count == 1);
+    CHECK(c->thread_type == FF_THREAD_SLICE && (c->thread_count == 1 || c->thread_count == 4));
     return 0;
 }
 void avcodec_free_context(AVCodecContext** c) {
@@ -407,6 +407,7 @@ static void vp9_tests(void) {
     nvdec_execute(d, regs);
     failed_untouched();
     CHECK(d->app == 9 && d->dec && d->dec->opaque == d && d->vp9);
+    CHECK(d->dec->thread_type == FF_THREAD_SLICE && d->dec->thread_count == 4);
     regs[0x200 / 4] = 5;
     memset(memory + 0x3000, 0, 16);
     nvdec_execute(d, regs);

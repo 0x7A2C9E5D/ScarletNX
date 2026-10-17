@@ -15,6 +15,7 @@
 #define AV_LOG_WARNING               24
 #define AV_CODEC_ID_H264             27
 #define AV_CODEC_ID_VP9              167
+#define FF_THREAD_SLICE              2
 #define AV_PIX_FMT_YUV420P           0
 #define AV_PIX_FMT_YUVJ420P          12
 typedef struct AVCodec {
@@ -33,7 +34,7 @@ typedef struct AVFrame {
 } AVFrame;
 typedef struct AVCodecContext {
     void* opaque;
-    int thread_count;
+    int thread_count, thread_type;
     int (*get_buffer2)(struct AVCodecContext*, AVFrame*, int);
 } AVCodecContext;
 const AVCodec* avcodec_find_decoder(int id);
