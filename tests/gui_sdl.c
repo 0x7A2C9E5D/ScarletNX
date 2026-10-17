@@ -711,9 +711,8 @@ static void button_map(App* app) {
         snprintf(start, sizeof start, "%s", app->editor.note);
         shows(app, start, rgb(app->theme.failure));
     }
-    key(app, SDLK_ESCAPE);
-    assert(app->form == GUI_FORM_GROUP);
-    leave_editor(app);
+    key(app, SDLK_TAB); /* the next screen, as the foot says: the Menu, the pads closed */
+    assert(!app->editing && app->menu.view == GUI_LOAD_NONE && !app->pads_read && !SDL_WasInit(SDL_INIT_GAMEPAD));
     /* the games it starts read the mappings file the page names, once it is there; one the player named stays */
     {
         char *folder = snx_dirname(app->settings_file), *db = snx_path_join(folder, "gamecontrollerdb.txt");

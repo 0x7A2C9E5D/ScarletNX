@@ -2715,6 +2715,10 @@ static bool menu_key_of(const SDL_KeyboardEvent* k, GuiKey* key);
 /* the page's keys; Del puts the map back to the .ini's */
 static void pad_keyboard(App* app, const SDL_KeyboardEvent* k) {
     GuiKey key;
+    if (k->key == SDLK_TAB && !k->repeat) { /* the next screen, as the foot says, the pads closed */
+        screen_tab(app, k->mod & SDL_KMOD_SHIFT ? -1 : 1);
+        return;
+    }
     if (k->key == SDLK_DELETE || k->key == SDLK_BACKSPACE) {
         int focus = app->pad.focus;
         gui_settings_reset(&app->settings, app->pad_map);
