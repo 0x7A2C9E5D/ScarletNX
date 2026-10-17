@@ -131,7 +131,7 @@ u64 nvmap_addr_by_id(u32 id) {
 #define GPAGE_BITS 12 /* 4K GPU pages */
 #define GL2_BITS   12 /* gmmu_l2's tables: 4096 entries */
 /* first-level entries: 16 bits of page number above the 12 a second-level table covers, for 40 bits in all */
-#define GL1 (1u << (40 - GPAGE_BITS - GL2_BITS))
+#define GL1        (1u << (40 - GPAGE_BITS - GL2_BITS))
 static u32 gmmu_l1_index(u64 page) { return (u32)(page >> GL2_BITS) & (GL1 - 1); }
 /* the guest address of a GPU address, 0 when its page isn't mapped. On the GPU thread, while ioctl_as maps and unmaps
    on others. Bits past the 40 the table covers are dropped, as the GPU's MMU does */
@@ -603,8 +603,8 @@ static u32 ioctl_nvmap(u32 cmd, u8* d, u32 n) {
                 switch (rd32(d, 4)) {
                     case 1: v = m->size; break;
                     case 2: v = m->align ? m->align : 0x1000; break;
-                    case 3: v = (u32)m->addr; break;                       /* as Ryujinx answers Base */
-                    case 4: v = m->allocated ? 0x40000000u : 0; break;     /* Eden's heap */
+                    case 3: v = (u32)m->addr; break;                   /* as Ryujinx answers Base */
+                    case 4: v = m->allocated ? 0x40000000u : 0; break; /* Eden's heap */
                     case 5: v = m->kind; break;
                     case 6: v = 0; break; /* not compressed */
                     default: r = 1; break;
@@ -619,9 +619,7 @@ static u32 ioctl_nvmap(u32 cmd, u8* d, u32 n) {
             if (m) wr32(d, 0, m->id);
             pm_unlock(&nv.lock);
             return m ? 0 : 1;
-        default:
-            WARN_LIMIT(16, "nvdrv: nvmap ioctl %08x not implemented\n", cmd);
-            return 0;
+        default: WARN_LIMIT(16, "nvdrv: nvmap ioctl %08x not implemented\n", cmd); return 0;
     }
 }
 
@@ -791,9 +789,7 @@ static u32 ioctl_as(u32 cmd, u8* d, u32 n, u8* extra, u32 nextra) {
             return 0;
         }
         case 0x14: return as_remap(d, n);
-        default:
-            WARN_LIMIT(16, "nvdrv: nvhost-as-gpu ioctl %08x not implemented\n", cmd);
-            return 0;
+        default: WARN_LIMIT(16, "nvdrv: nvhost-as-gpu ioctl %08x not implemented\n", cmd); return 0;
     }
 }
 
@@ -891,26 +887,24 @@ static u32 ioctl_ctrl(u32 fd, u32 cmd, u8* d, u32 n) {
             nvev_unlock();
             return 0;
         }
-        default:
-            WARN_LIMIT(16, "nvdrv: nvhost-ctrl ioctl %08x not implemented\n", cmd);
-            return 0;
+        default: WARN_LIMIT(16, "nvdrv: nvhost-ctrl ioctl %08x not implemented\n", cmd); return 0;
     }
 }
 
 /* /dev/nvhost-ctrl-gpu: what a Tegra X1's GM20B reports, values from Eden's nvhost_ctrl_gpu */
 static void gpu_characteristics(u8* c) { /* 0xA0 bytes */
     static const u32 words[] = {
-        0x120, 0xB, 0xA1, 1,         /* arch GM200, impl GM20B, rev A1, GPCs */
-        0x40000, 0, 0, 0,            /* L2 cache size, on-board video memory (u64s) */
-        2, 0x20, 0x20000, 0x20000,   /* TPCs per GPC, bus AXI, big page size, compression page size */
-        0x1B, 0x30000, 1, 0x503,     /* PDE coverage bits, available big page sizes, GPC mask, SM version */
-        0x503, 0x80, 0x28, 0,        /* SPA version, warp count, GPU VA bits, reserved */
-        0x55, 0,                     /* flags (u64) */
-        0x902D, 0xB197, 0xB1C0, 0xB06F, 0xA140, 0xB0B5, /* 2D, 3D, compute, GPFIFO, I2M and DMA classes */
-        1, 0, 2, 1,                  /* FBPs, FBP enable mask, LTCs per FBP, LTSs per LTC */
-        0, 1, 0x21D70, 0,            /* textures per TPC, GPCs, ROP L2 enable masks */
-        0x30326D67, 0x62,            /* the chip's name, "gm20b" (u64) */
-        0, 0                         /* compression bit store base (u64) */
+        0x120,      0xB,     0xA1,    1,       /* arch GM200, impl GM20B, rev A1, GPCs */
+        0x40000,    0,       0,       0,       /* L2 cache size, on-board video memory (u64s) */
+        2,          0x20,    0x20000, 0x20000, /* TPCs per GPC, bus AXI, big page size, compression page size */
+        0x1B,       0x30000, 1,       0x503,   /* PDE coverage bits, available big page sizes, GPC mask, SM version */
+        0x503,      0x80,    0x28,    0,       /* SPA version, warp count, GPU VA bits, reserved */
+        0x55,       0,                         /* flags (u64) */
+        0x902D,     0xB197,  0xB1C0,  0xB06F,  0xA140, 0xB0B5, /* 2D, 3D, compute, GPFIFO, I2M and DMA classes */
+        1,          0,       2,       1,                       /* FBPs, FBP enable mask, LTCs per FBP, LTSs per LTC */
+        0,          1,       0x21D70, 0,                       /* textures per TPC, GPCs, ROP L2 enable masks */
+        0x30326D67, 0x62,                                      /* the chip's name, "gm20b" (u64) */
+        0,          0                                          /* compression bit store base (u64) */
     };
     memcpy(c, words, 0xA0);
 }
@@ -925,8 +919,7 @@ static u32 ioctl_ctrlgpu(u32 cmd, u8* d, u32 n, u8* extra, u32 nextra) {
             return 0;
         }
         case 0x03: /* ZBC_SET_TABLE */
-        case 0x04: /* ZBC_QUERY_TABLE */
-            return 0;
+        case 0x04: /* ZBC_QUERY_TABLE */ return 0;
         case 0x05: { /* GET_CHARACTERISTICS {u64 buf_size, u64 buf_addr (left alone); 0xA0 bytes at 16} */
             u8 c[0xA0];
             gpu_characteristics(c);
@@ -957,9 +950,7 @@ static u32 ioctl_ctrlgpu(u32 cmd, u8* d, u32 n, u8* extra, u32 nextra) {
             return 0;
         case 0x15: wr32(d, 0, 100); return 0;        /* PMU_GET_GPU_LOAD, as Eden answers */
         case 0x1C: wr64(d, 0, guest_ns()); return 0; /* GET_GPU_TIME, the system tick's timebase */
-        default:
-            WARN_LIMIT(16, "nvdrv: nvhost-ctrl-gpu ioctl %08x not implemented\n", cmd);
-            return 0;
+        default: WARN_LIMIT(16, "nvdrv: nvhost-ctrl-gpu ioctl %08x not implemented\n", cmd); return 0;
     }
 }
 
@@ -998,8 +989,7 @@ static u32 ioctl_gpu(NvFile* f, u32 cmd, u8* d, u32 n, u8* extra, u32 nextra) {
         case 0x0C: /* GET_ERROR_INFO (nothing went wrong) */
         case 0x0D: /* ZCULL_BIND */
         case 0x17: /* SET_ERROR_NOTIFIER */
-        case 0x1D: /* SET_TIMEOUT_EX */
-            return 0;
+        case 0x1D: /* SET_TIMEOUT_EX */ return 0;
         case 0x08:
         case 0x1B: return gpu_submit_gpfifo(f, cmd, d, n, extra, nextra);
         case 0x09: /* ALLOC_OBJ_CTX {u32 class_num, u32 flags; out u64 obj_id}: the class names the object */
@@ -1022,9 +1012,7 @@ static u32 ioctl_gpu(NvFile* f, u32 cmd, u8* d, u32 n, u8* extra, u32 nextra) {
             wr32(d, 16, syncpt_read(sp));
             return 0;
         }
-        default:
-            WARN_LIMIT(16, "nvdrv: nvhost-gpu ioctl %08x not implemented\n", cmd);
-            return 0;
+        default: WARN_LIMIT(16, "nvdrv: nvhost-gpu ioctl %08x not implemented\n", cmd); return 0;
     }
 }
 
@@ -1032,9 +1020,9 @@ static int nns_nvdrv_INvDrvServices_Open(SvcObj* self, IpcBuf path, u32* fd, u32
     static const struct {
         const char* path;
         int dev;
-    } devices[] = {{"/dev/nvmap", DEV_NVMAP},          {"/dev/nvhost-as-gpu", DEV_AS},
-                   {"/dev/nvhost-ctrl", DEV_CTRL},     {"/dev/nvhost-ctrl-gpu", DEV_CTRLGPU},
-                   {"/dev/nvhost-gpu", DEV_GPU},       {"/dev/nvhost-nvdec", DEV_NVDEC},
+    } devices[] = {{"/dev/nvmap", DEV_NVMAP},      {"/dev/nvhost-as-gpu", DEV_AS},
+                   {"/dev/nvhost-ctrl", DEV_CTRL}, {"/dev/nvhost-ctrl-gpu", DEV_CTRLGPU},
+                   {"/dev/nvhost-gpu", DEV_GPU},   {"/dev/nvhost-nvdec", DEV_NVDEC},
                    {"/dev/nvhost-vic", DEV_VIC}};
     char name[64];
     int dev = DEV_OTHER; /* opens all the same; its ioctls warn */
