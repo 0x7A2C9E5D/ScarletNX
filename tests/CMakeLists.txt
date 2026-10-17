@@ -667,6 +667,14 @@ add_test(NAME fermi2d_blit COMMAND snx-test-fermi2d-blit)
 add_executable(snx-test-vic-compose vic_compose.c)
 snx_test_target(snx-test-vic-compose 23)
 add_test(NAME vic_compose COMMAND snx-test-vic-compose)
+if(NOT SNX_TOOLS_ONLY)
+    # tex_upload (gpu/vk/texture.c) into the staging buffer: block-linear rows against the layout, mip levels, 3D,
+    # pitch linear, a converted format; a format uploaded as it is needs no level-sized buffer
+    add_executable(snx-test-tex-upload-rows tex_upload_rows.c)
+    snx_test_target(snx-test-tex-upload-rows 23)
+    target_link_libraries(snx-test-tex-upload-rows PRIVATE snx_nx_flags)
+    add_test(NAME tex_upload_rows COMMAND snx-test-tex-upload-rows)
+endif()
 
 add_executable(snx_recompiler_test recompiler_native.c)
 snx_test_target(snx_recompiler_test 23)

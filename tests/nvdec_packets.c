@@ -22,16 +22,28 @@ void logf_(int level, const char* fmt, ...) {
     (void)level;
     (void)fmt;
 }
+/* block_linear_test's surfaces, from iova BIG on */
+#define BIG    0x1000000u
+#define BIGMEM (4u << 20)
+static u8 big[BIGMEM];
 u8* iova_ptr(u64 addr, u64 size) {
+    if (addr >= BIG) return addr - BIG <= BIGMEM && size <= BIGMEM - (addr - BIG) ? big + (addr - BIG) : NULL;
     return addr && addr <= sizeof memory && size <= sizeof memory - addr ? memory + addr : NULL;
 }
-/* Surface addressing is deliberately linear in this test; the production NV12 interleave/write path runs. */
+/* Surface addressing is deliberately linear in this test, so the production NV12 interleave/write path runs, except
+   in block_linear_test: the block linear layout, GOBs of 64 bytes by 8 rows in blocks of 1 << bh GOBs, the GOB's 16
+   byte groups in their order. Each walk of it is counted */
+static int bl_layout;
+static unsigned bl_walks;
 u64 bl_offset(u32 x, u32 y, u32 z, u32 pitch, u32 height, u32 bh, u32 bd) {
-    (void)z;
-    (void)height;
-    (void)bh;
-    (void)bd;
-    return (u64)y * pitch + x;
+    bl_walks++;
+    if (!bl_layout) return (u64)y * pitch + x;
+    u32 gob_w = (pitch + 63) / 64, bhn = 1u << bh, bdn = 1u << bd;
+    u32 blocks_h = ((height + 7) / 8 + bhn - 1) / bhn, gy = y / 8, xb = x % 64, yb = y % 8;
+    u64 block = 512ull * bhn * bdn;
+    u64 o = ((u64)(z / bdn) * blocks_h * gob_w + (u64)(gy / bhn) * gob_w + x / 64) * block +
+            ((u64)(z % bdn) * bhn + gy % bhn) * 512;
+    return o + (xb / 32) * 256 + (yb / 2) * 64 + ((xb % 32) / 16) * 32 + (yb % 2) * 16 + xb % 16;
 }
 static void put32(u32 off, u32 value) { memcpy(setup + off, &value, 4); }
 static void fixture(void) {
@@ -436,9 +448,52 @@ static void odd_size_test(void) {
     CHECK(memory[0x5000 + 7 * 64 + 14] == 60 && memory[0x5000 + 7 * 64 + 15] == 70);
     CHECK(memory[0x5000 + 7 * 64 + 16] == 0xcc && memory[0x5000 + 8 * 64] == 0xcc);
 }
+/* write_pic into the block linear layout, read back byte by byte through it: a 1920x1080 picture in blocks of 16
+   GOBs, as videos come, and a 33x17 one, whose rows end inside a 16-byte run and whose chroma has a last pair and
+   row of one pixel, in a wider plane; nothing written past the picture. The layout is walked once a column of runs
+   and once a row */
+static u8 bl_y[1920 * 1080], bl_u[960 * 540], bl_v[960 * 540], bl_want[BIGMEM];
+static void block_linear_picture(u32 w, u32 h, u32 pitch, u32 pitch_c, u32 sh, u32 bh) {
+    u32 cw = (w + 1) / 2 * 2, ch = (sh + 1) / 2, ys = BIG + 0x10000, cs = BIG + 0x280000;
+    for (u32 i = 0; i < w * h; i++) bl_y[i] = (u8)(i * 7 + i / w);
+    for (u32 i = 0; i < cw / 2 * ((h + 1) / 2); i++) {
+        bl_u[i] = (u8)(i * 3 + 1);
+        bl_v[i] = (u8)(i * 5 + 2);
+    }
+    AVFrame f = {0};
+    f.width = (int)w;
+    f.height = (int)h;
+    f.format = AV_PIX_FMT_YUV420P;
+    f.data[0] = bl_y;
+    f.data[1] = bl_u;
+    f.data[2] = bl_v;
+    f.linesize[0] = (int)w;
+    f.linesize[1] = f.linesize[2] = (int)(cw / 2);
+    PicOut t = {ys, cs, pitch, pitch_c, bh, w, sh};
+    memset(big, 0xEE, sizeof big);
+    bl_layout = 1;
+    bl_walks = 0;
+    CHECK(write_pic(&f, &t));
+    CHECK(bl_walks <= (cw + 15) / 16 + h + (h + 1) / 2);
+    memset(bl_want, 0xEE, sizeof bl_want);
+    for (u32 y = 0; y < h; y++)
+        for (u32 x = 0; x < w; x++) bl_want[ys - BIG + bl_offset(x, y, 0, pitch, sh, bh, 0)] = bl_y[y * w + x];
+    for (u32 y = 0; y < (h + 1) / 2; y++)
+        for (u32 x = 0; x < cw / 2; x++) {
+            bl_want[cs - BIG + bl_offset(2 * x, y, 0, pitch_c, ch, bh, 0)] = bl_u[y * (cw / 2) + x];
+            bl_want[cs - BIG + bl_offset(2 * x + 1, y, 0, pitch_c, ch, bh, 0)] = bl_v[y * (cw / 2) + x];
+        }
+    bl_layout = 0;
+    CHECK(memcmp(big, bl_want, sizeof big) == 0);
+}
+static void block_linear_test(void) {
+    block_linear_picture(1920, 1080, 1920, 1920, 1080, 4);
+    block_linear_picture(33, 17, 64, 128, 32, 0); /* one GOB a block: rows cross blocks; a wider chroma plane */
+}
 int main(void) {
     packet_tests();
     odd_size_test();
+    block_linear_test();
     submission_tests();
     vp9_tests();
     printf("NVDEC packets: %u checks passed (%s)\n", checks, av_version_info());

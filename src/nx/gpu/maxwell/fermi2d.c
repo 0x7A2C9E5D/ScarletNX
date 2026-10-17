@@ -154,7 +154,10 @@ void fermi2d_method(GpuChannel* ch, u32 m, u32 v) {
                     for (u32 k = 0; k < nsrun; k++) {
                         u32 n = swb - k * 16 < 16 ? swb - k * 16 : 16;
                         u64 o = sbase + scol[k];
-                        if (spp && o + n <= sspan)
+                        /* a whole run is one 16-byte move rather than a call: the game's blits come every frame */
+                        if (spp && o + n <= sspan && n == 16)
+                            memcpy(srow + k * 16, spp + o, 16);
+                        else if (spp && o + n <= sspan)
                             memcpy(srow + k * 16, spp + o, n);
                         else
                             gmem_read_raw(src.addr + sl + o, srow + k * 16, n);
@@ -171,7 +174,9 @@ void fermi2d_method(GpuChannel* ch, u32 m, u32 v) {
                         u32 n = 16 - (xb & 15);
                         if (n > xb1 - xb) n = xb1 - xb;
                         u64 o = dbase + dcol[k];
-                        if (dpp && o + n <= dspan)
+                        if (dpp && o + n <= dspan && n == 16)
+                            memcpy(dpp + o, drow + (xb - xb0), 16);
+                        else if (dpp && o + n <= dspan)
                             memcpy(dpp + o, drow + (xb - xb0), n);
                         else
                             gmem_write_raw(dst.addr + dl + o, drow + (xb - xb0), n);
