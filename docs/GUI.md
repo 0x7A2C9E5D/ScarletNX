@@ -128,7 +128,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   defaults**, every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
   and `fullscreen` puts the launcher itself on the whole screen too).
   **libgccjit** passes `--backend=gcc` when preparing a dump (it stays off in a build without
-  libgccjit; games in `games/` are not recompiled), **gdbstub** passes `-S` and `-s`, the
+  libgccjit; a game of `games/` another build made is recompiled with LLVM), **gdbstub** passes `-S` and `-s`, the
   runtime's stub on port 1234 waiting for the debugger at startup (UNIX only). None of them
   reaches the Linux or the 3DS driver.
 - The Status box, after the RAM and the CPU, says what ScarletNX's folders take (games/,
@@ -212,10 +212,12 @@ cannot be read is named and the others still listed.
 - Resizing adjusts the page size while keeping the selected file visible.
 - Empty or missing directories show a diagnostic and still provide Add a folder.
 
-A recompiled game is an already-prepared native launcher, so selecting one runs it directly with
-the Settings rather than trying to extract it as a dump. A CIA goes to `scarletnx-3ds`, which is
-never executed on it directly. Output capture, resource accounting and the return to the main menu
-work as for a file picked by a load.
+A recompiled game, in a folder of its own (`games/<id>/<id>`), runs with the Settings through the menu's own
+`scarletnx` and is never extracted as a dump: it plays as it is when this build made it, and is recompiled first,
+where it is, when another build did ([USAGE](USAGE.md#extract--aot--run)), the run showing the recompile before the
+game loads. A game an older version laid out beside the others runs directly, as every game does on iOS. A CIA goes
+to `scarletnx-3ds`, which is never executed on it directly. Output capture, resource accounting and the return to
+the main menu work as for a file picked by a load.
 
 ## Output and resource use
 

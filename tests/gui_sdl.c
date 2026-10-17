@@ -880,6 +880,12 @@ int main(int argc, char** argv) {
         puts("Recompiling option flags\nScarletNX - option flags"); /* the runner's banner: now loading */
         return 0;
     }
+    if (argc > 1 && strstr(argv[1], "folder game")) { /* a game in a folder of its own, through the menu's driver */
+        assert(strstr(argv[0], "runtime") && argc == 6 && snx_is_file(argv[1]) && !strcmp(argv[2], "--fullscreen=1") &&
+               !strcmp(argv[3], "--controls=0") && !strcmp(argv[4], "--repo") && argv[5][0]);
+        puts("Recompiling folder game (1 modules)\nBuilt folder game\nScarletNX - folder game");
+        return 0;
+    }
     if (argc > 1) {
         assert(argc == 2 || argc == 6);
         assert(snx_is_file(argv[1]));
@@ -2660,6 +2666,41 @@ int main(int argc, char** argv) {
     point(&app, game_box(&app, 1, false), true); /* native prepared game, not another extraction */
     assert(app.menu.running && app.native && screen(&app) == GUI_SCREEN_LOADING);
     finish(&app, 0);
+    /* a game in a folder of its own beside its data goes through the menu's driver with the settings and the data
+       folder (Game00 above, an older version's beside the others, runs as it is): the driver plays it, recompiled
+       first when another build made it, which the run shows as compiling until the game loads */
+    {
+        char *folder = snx_path_join(app.games_dir, "folder game"), *data = snx_path_join(folder, "folder game_data");
+#ifdef _WIN32
+        char* program = snx_path_join(folder, "folder game.exe");
+#else
+        char* program = snx_path_join(folder, "folder game");
+#endif
+        int item = app.menu.selected;
+        assert(!snx_mkdirs(data) && !snx_copy_file(self, program) && !snx_make_executable(program));
+        leave_run(&app);
+        app.menu.selected = GUI_SWITCH;
+        launch(&app, snx_strdup(program), true);
+        assert(app.menu.running && app.native && screen(&app) == GUI_SCREEN_LOADING);
+        {
+            char name[64];
+            run_name(&app, name, sizeof name);
+            assert(!strcmp(name, "FOLDER GAME")); /* its file's, until its recompile names it */
+            gui_steps_feed(&app.steps, "Recompiling Folder Quest 2.0 (1 modules)\n", 41, 0);
+            run_name(&app, name, sizeof name);
+            assert(!strcmp(name, "FOLDER QUEST 2.0") && screen(&app) == GUI_SCREEN_COMPILING);
+        }
+        gui_steps_feed(&app.steps, "ScarletNX - folder game\n", 24, 0);
+        assert(screen(&app) == GUI_SCREEN_LOADING);
+        gui_steps_reset(&app.steps);
+        finish(&app, 0);
+        assert(gui_steps_last(&app.steps, "RECOMPILE") && gui_steps_last(&app.steps, "LAUNCH"));
+        app.menu.selected = item;
+        assert(!snx_remove_tree(folder));
+        free(program);
+        free(data);
+        free(folder);
+    }
     go_tab(&app, GUI_TAB_GAMES); /* back from the run on the menu */
     key(&app, SDLK_DOWN);
     char* removed = snx_path_join(app.games_dir, app.games.names[0]);

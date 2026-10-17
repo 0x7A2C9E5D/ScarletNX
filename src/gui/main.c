@@ -493,7 +493,9 @@ static GuiScreen menu_screen(const App* app) {
 }
 static GuiScreen screen(const App* app) {
     if (app->menu.running || app->finished)
-        return app->native || gui_steps_last(&app->steps, "LAUNCH") ? GUI_SCREEN_LOADING : GUI_SCREEN_COMPILING;
+        return (app->native && !gui_steps_last(&app->steps, "RECOMPILE")) || gui_steps_last(&app->steps, "LAUNCH")
+                   ? GUI_SCREEN_LOADING
+                   : GUI_SCREEN_COMPILING;
     return menu_screen(app);
 }
 /* the theme step themes after or before the one shown, round the list */
@@ -836,12 +838,13 @@ static void run_name(const App* app, char* out, size_t size) {
     const char* q;
     size_t n;
     const char* dot;
-    const GuiStep* launch = gui_steps_last(&app->steps, "LAUNCH");
-    const char* name = launch ? launch->detail : app->file ? app->file : "";
+    const GuiStep *launch = gui_steps_last(&app->steps, "LAUNCH"), *made = gui_steps_last(&app->steps, "RECOMPILE");
+    /* a game made already is named by its title ID: its recompile's line says what it is shown as */
+    const char* name = launch ? launch->detail : app->native && made ? made->detail : app->file ? app->file : "";
     for (q = name; *q; ++q)
         if (*q == '/' || *q == '\\') name = q + 1;
     n = 0;
-    dot = launch ? NULL : strrchr(name, '.');
+    dot = launch || (app->native && made) ? NULL : strrchr(name, '.');
     for (q = name; *q && q != dot && n + 1 < size; ++q) out[n++] = *q >= 'a' && *q <= 'z' ? (char)(*q - 32) : *q;
     out[n] = 0;
 }
@@ -3893,12 +3896,15 @@ static int play(App* app, const char* game) {
     free(option);
     return ok;
 }
-/* the game a run of the driver made ready, in its folder of games/: there the driver names it, as it cannot open it;
-   whether it opened */
+/* the game a run of the driver made ready: the one it ran, when it was a game already, else in its folder of games/,
+   where the driver names it, as it cannot open it; whether it opened */
 static int ready(App* app) {
     const GuiStep* made = gui_steps_last(&app->steps, "READY");
-    char* folder = made ? snx_path_join(app->games_dir, made->detail) : NULL;
-    char* game = folder ? snx_path_join(folder, made->detail) : NULL;
+    char* folder = made && !app->native ? snx_path_join(app->games_dir, made->detail) : NULL;
+    char* game = !made         ? NULL
+                 : app->native ? snx_strdup(app->file)
+                 : folder      ? snx_path_join(folder, made->detail)
+                               : NULL;
     int ok = game && play(app, game);
     free(game);
     free(folder);
@@ -4269,15 +4275,22 @@ static void launch(App* app, char* absolute, bool prepared) {
     /* The 3DS browser lists CIA inputs, not prepared host executables. */
     if (app->menu.selected == GUI_3DS) prepared = false;
     bool native = prepared && app->menu.selected == GUI_SWITCH;
-    char* driver = native ? NULL : find_driver(app, app->menu.selected);
-    if (!native && !driver) {
+    /* a game in a folder of its own goes through the driver, which recompiles it first when another build made it; one
+       an older version laid out beside the others runs as it is, as every game on iOS, which runs no other program */
+#ifdef SDL_PLATFORM_IOS
+    bool direct = native;
+#else
+    bool direct = native && !gui_game_folder(absolute);
+#endif
+    char* driver = direct ? NULL : find_driver(app, app->menu.selected);
+    if (!direct && !driver) {
         snprintf(app->message, sizeof(app->message), "Cannot find %s beside the GUI or on PATH.",
                  driver_name(app->menu.selected) ? driver_name(app->menu.selected) : "the selected driver");
         free(absolute);
         return;
     }
 #if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
-    if (native) {
+    if (direct) {
         if (play(app, absolute) && app->recent_file && !gui_recent_add(&app->recent, absolute, GUI_SWITCH, true))
             recent_changed(app);
         free(absolute);
@@ -4306,12 +4319,12 @@ static void launch(App* app, char* absolute, bool prepared) {
     const char** argv = (const char**)snx_alloc((size_t)(s->count + 10) * sizeof(*argv));
     char* out = NULL; /* a dump's extraction in the picked extractions folder */
     size_t n = 1;
-    argv[0] = native ? absolute : driver;
-    if (!native) argv[n++] = absolute;
+    argv[0] = direct ? absolute : driver;
+    if (!direct) argv[n++] = absolute;
     /* Switch options only, never guest argv for the CPU-only Linux driver or the 3DS one. The drivers work in the
        menu's data folder, so they list the same games */
     if (app->menu.selected == GUI_SWITCH) n += gui_settings_options(s, 1, native, argv + n);
-    if (folders) {
+    if (folders || (native && !direct)) {
         argv[n++] = "--repo";
         argv[n++] = app->data_dir;
     }
