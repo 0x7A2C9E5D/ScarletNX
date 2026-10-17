@@ -186,12 +186,21 @@ SnxGamepadConfig* gamepad_config(void) { return &g_cfg; }
 void gamepad_store(const int* setting) {
     const IniOpt* o;
     char v[16];
-    for (o = g_gamepad_ini; o->key; o++)
-        if (o->var == setting) {
-            ini_format(o, v, sizeof v);
-            ini_set(o->key, v);
-            if (o->set) o->set(o, v);
-        }
+    int t;
+    for (t = 0; t < 2; t++) /* every player's, then each player's own */
+        for (o = t ? g_gamepad_players_ini : g_gamepad_ini; o->key; o++)
+            if (o->var == setting) {
+                ini_format(o, v, sizeof v);
+                ini_set(o->key, v);
+                if (o->set) o->set(o, v);
+            }
+}
+void gamepad_store_player_map(int player) {
+    char key[32], text[SNX_PAD_MAP_TEXT];
+    if (player < 0 || player >= SNX_GAMEPADS) return;
+    snprintf(key, sizeof key, "gamepad_p%d_map", player + 1);
+    snx_pad_map_write(&g_players[player].own, text, sizeof text);
+    ini_set(key, text);
 }
 void gamepad_store_map(void) {
     char text[SNX_PAD_MAP_TEXT];

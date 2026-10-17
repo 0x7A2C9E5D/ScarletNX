@@ -313,7 +313,8 @@ SDL gamepads send A, B, X and Y where the console's are (A right, B bottom, X to
 button it sends, as `south:B east:A lt:ZL`; the ones it leaves out send the button in their place. The sticks'
 dead zone in `gamepad_deadzone` and the game's vibration as strong as `gamepad_rumble` (both in percent), and with
 `gamepad_background=1` still play while the window is not focused; the game's menu (Home, F2) sets them under
-*Controllers*, which names the pads connected. Each connected gamepad uses its own player slot, up to eight.
+*Controllers*, which names the pads connected; its *Player* row shows every player's settings (*All*) or one
+player's own Swap A/B, Vibration and Button map. Each connected gamepad uses its own player slot, up to eight.
 Keyboard and on-screen controls also drive player one.
 `gamepad_joycon_pair=1` makes SDL combine a left and right Joy-Con. Set it to `0` to expose them separately and
 restart the game after changing it.

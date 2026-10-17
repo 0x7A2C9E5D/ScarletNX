@@ -46,6 +46,19 @@ const char* gamepad_name(int i) { return i >= 0 && i < 3 ? pad_names[i] : NULL; 
 const IniOpt g_backend_ini[] = {
     {"touch", "2", NULL, INI_INT, 0, &touch, 0, 2, NULL, "Touch screen", "Off|Fingers|Mouse too", 0, 0},
     {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
+/* each player's own, two of them here: swap and vibration, every player's until picked, and a map */
+static SnxPlayerConfig players[2] = {{"", 1, 0, -1, -10, 0, {{0}}}, {"", 1, 0, -1, -10, 0, {{0}}}};
+static int player_maps_stored;
+SnxPlayerConfig* gamepad_player(int p) { return p >= 0 && p < 2 ? &players[p] : NULL; }
+void gamepad_store_player_map(int p) {
+    (void)p;
+    ++player_maps_stored;
+}
+const IniOpt g_gamepad_players_ini[] = {
+    {"gamepad_p1_swap_ab", "-1", NULL, INI_INT, 0, &players[0].swap_ab, -1, 1, NULL, "Swap A/B", "As All|Off|On", 0, 0},
+    {"gamepad_p1_rumble", "-10", NULL, INI_INT, 0, &players[0].rumble, -10, 100, NULL, "Vibration", "As All|Off|#%", 10,
+     0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 const IniOpt g_gamepad_ini[] = {
     {"gamepad_swap_ab", "0", NULL, INI_INT, 0, &pads.swap_ab, 0, 1, NULL, "Swap A/B", "Off|On", 0, 0},
     {"gamepad_deadzone", "20", NULL, INI_INT, 0, &pads.deadzone, 0, 90, NULL, "Stick dead zone", "#%", 5, 0},
@@ -135,6 +148,7 @@ int main(void) {
     int x, y, sc;
     vpad_set_store(store);
     snx_pad_map_unset(&pads.own); /* as gamepad.c starts it: every control the button in its place */
+    snx_pad_map_unset(&players[0].own);
     assert(!overlay_shown());
     overlay_toggle();
     assert(overlay_shown());
@@ -324,44 +338,45 @@ int main(void) {
         }
     }
 
-    /* the controllers' page: the ones connected, Swap A/B, the dead zone by fives, the vibration by tens down to Off
-       and the background input, each kept */
+    /* the controllers' page: the ones connected, the Player row (every player's, or one's own), Swap A/B, the dead
+       zone by fives, the vibration by tens down to Off and the background input, each kept */
     assert(tap(1, 3) == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  CONTROLLERS") && text_at(1, 1, "None connected."));
-    assert(list.q[0].h == 10 * 32 && text_at(1, 3, "\xFE Swap A/B") && text_at(C - 4, 3, "Off"));
-    tap(0, 3);
+    assert(list.q[0].h == 11 * 32 && text_at(1, 3, "\xFE Player") && shows("< All >"));
+    assert(text_at(1, 4, "\xFE Swap A/B") && text_at(C - 4, 4, "Off"));
+    tap(1, 3);
     assert(pads.swap_ab && pad_stored == &pads.swap_ab);
     draw();
-    assert(text_at(C - 3, 3, "On"));
-    tap(0, 3);
+    assert(text_at(C - 3, 4, "On"));
+    tap(1, 3);
     assert(!pads.swap_ab);
     overlay_side(1);
     assert(pads.swap_ab);
     pads.swap_ab = 0;
     draw();
-    assert(text_at(C - 8, 4, "< 20% >"));
-    tap(1, C - 2);
+    assert(text_at(C - 8, 5, "< 20% >"));
+    tap(2, C - 2);
     assert(pads.deadzone == 25 && pad_stored == &pads.deadzone);
-    tap(1, C - 9);
-    tap(1, C - 9);
+    tap(2, C - 9);
+    tap(2, C - 9);
     assert(pads.deadzone == 15);
-    for (x = 0; x < 20; ++x) tap(1, C - 2);
+    for (x = 0; x < 20; ++x) tap(2, C - 2);
     assert(pads.deadzone == 90);
     pads.deadzone = 20;
-    for (x = 0; x < 10; ++x) tap(2, C - 9);
+    for (x = 0; x < 10; ++x) tap(3, C - 9);
     assert(pads.rumble == 0 && pad_stored == &pads.rumble);
     draw();
-    assert(text_at(C - 8, 5, "< Off >"));
+    assert(text_at(C - 8, 6, "< Off >"));
     assert(overlay_select() == OVERLAY_NONE && pads.rumble == 10); /* the focus is on it: a select steps up */
     pads.rumble = 100;
     draw();
-    assert(text_at(1, 6, "\xFE Background input") && text_at(C - 4, 6, "Off"));
-    tap(3, 3);
+    assert(text_at(1, 7, "\xFE Background input") && text_at(C - 4, 7, "Off"));
+    tap(4, 3);
     assert(pads.background && pad_stored == &pads.background);
     draw();
-    assert(text_at(C - 3, 6, "On"));
-    tap(3, 3);
+    assert(text_at(C - 3, 7, "On"));
+    tap(4, 3);
     assert(!pads.background);
     pad_names[0] = "Xbox Wireless Controller";
     draw();
@@ -379,8 +394,8 @@ int main(void) {
     pad_names[0] = "Xbox Wireless Controller";
     pad_names[1] = pad_names[2] = NULL;
     draw();
-    assert(text_at(1, 7, "\xFE Button map") && text_at(C - 2, 7, ">"));
-    assert(tap(4, 3) == OVERLAY_NONE);
+    assert(text_at(1, 8, "\xFE Button map") && text_at(C - 2, 8, ">"));
+    assert(tap(5, 3) == OVERLAY_NONE);
     pads_held = 1u << SNX_PAD_RT;
     draw();
     assert(shows("SCARLETNX  /  BUTTON MAP") && !shows("By label") && shows("Xbox Wireless Controller"));
@@ -401,10 +416,27 @@ int main(void) {
     }
     assert(overlay_back() == OVERLAY_NONE); /* no presets to go back to: up to its item at once */
     draw();
-    assert(text_at(1, 0, "SCARLETNX  /  CONTROLLERS") && text_at(1, 7, "\xFE Button map"));
+    assert(text_at(1, 0, "SCARLETNX  /  CONTROLLERS") && text_at(1, 8, "\xFE Button map"));
     pads_held = 0;
+    /* the Player row steps to player 1: its Swap A/B and Vibration its own, As All until picked; its Button map
+       its own map, kept as its key; round the eight back to All */
+    tap(0, 3);
+    draw();
+    assert(shows("< 1 >") && text_at(1, 4, "\xFE Swap A/B") && shows("As All"));
+    tap(1, 3);
+    assert(players[0].swap_ab == 0 && pad_stored == &players[0].swap_ab && !pads.swap_ab);
+    tap(5, 3);
+    draw();
+    assert(shows("SCARLETNX  /  PLAYER 1  /  BUTTON MAP"));
+    overlay_side(1); /* from every player's map, where LT sends B now: up one, X; every player's stays */
+    assert(players[0].has_map && players[0].own.bit[SNX_PAD_LT] == 2 && pads.own.bit[SNX_PAD_LT] == 1 &&
+           player_maps_stored == 1 && maps_stored == 2);
+    assert(overlay_back() == OVERLAY_NONE);
+    for (x = 0; x < 8; ++x) tap(0, 3);
+    draw();
+    assert(shows("< All >"));
     /* Back, on its item or the key, comes up to the controllers' item */
-    assert(tap(5, 3) == OVERLAY_NONE);
+    assert(tap(6, 3) == OVERLAY_NONE);
     draw();
     assert(text_at(1, 0, "SCARLETNX  /  MENU") && overlay_select() == OVERLAY_NONE);
     draw();
