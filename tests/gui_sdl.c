@@ -1570,10 +1570,16 @@ int main(int argc, char** argv) {
             size_t f, g;
             int found = 0;
             for (f = 0; f < sizeof files / sizeof files[0]; ++f) {
-                char *path = snx_path_join(deep, files[f]), *dir = snx_dirname(path);
+#ifdef _WIN32
+                char* name = snx_format("%s.exe", files[f]); /* a game there is an .exe */
+#else
+                char* name = snx_strdup(files[f]);
+#endif
+                char *path = snx_path_join(deep, name), *dir = snx_dirname(path);
                 assert(!snx_mkdirs(dir) && !snx_write_file(path, "fixture", 7) && !snx_make_executable(path));
                 free(dir);
                 free(path);
+                free(name);
             }
             deep_as = snx_absolute(deep);
             e.drop.data = deep;
