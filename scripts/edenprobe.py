@@ -4,8 +4,9 @@
 """edenprobe (https://github.com/scarletnx/edenprobe), a homebrew program of hardware probes, recompiled and run
 headless, its report held against a baseline: the cases that passed before. docs/EDENPROBE.md has the how and why.
 
-    scripts/edenprobe.py run --runtime SCARLETNX --nro edenprobe.nro --mode WORDS --out DIR [--baseline FILE]
-                             [--summary FILE] [--timeout SECONDS] [--launches N] [--jobs N]
+    scripts/edenprobe.py run --runtime SCARLETNX --nro edenprobe.nro --mode WORDS --out DIR
+                             [--baseline FILE | --advisory REPORT] [--summary FILE] [--timeout SECONDS]
+                             [--launches N] [--jobs N]
     scripts/edenprobe.py baseline BASELINE... -o FILE
 
 run recompiles the NRO into DIR/work, writes WORDS to its sdmc:/edenprobe/mode, and runs it with -H and its XDG
@@ -16,6 +17,10 @@ failures' images/, the recompile's and each launch's log, baseline.txt (this run
 which --summary FILE also appends to (CI: $GITHUB_STEP_SUMMARY). With --baseline, a case of it that does not pass is a
 regression: run exits 1 and names it; a passing case it lacks is listed, to be added. A run that never reached its
 summary exits 1 too.
+
+With --advisory REPORT, the pinned release's report.jsonl, the NRO is another build (edenprobe's main) and the run never
+fails: its cases REPORT lacks that do not pass, REPORT's passing cases that it does not pass, and what would have failed
+the run are warnings (GitHub's ::warning:: lines).
 
 baseline writes the cases that pass in every BASELINE given (baseline.txt of runs of one build and one mode): a case
 that passes only now and then stays out.
@@ -158,6 +163,29 @@ def compare(report, baseline, mode):
     return problems, lines
 
 
+def failing(result):
+    return result != 'pass' and not result.startswith('skip')
+
+
+def beside(report, known):
+    """the warnings of a run of another build beside the pinned release's report, and the summary's lines"""
+    own = [key for key in sorted(report.cases) if key not in known.cases]
+    new = [f'{key}: {report.cases[key]}' for key in own if failing(report.cases[key])]
+    lost = [f'{key}: {report.cases[key]}' for key in known.passed() if failing(report.cases.get(key, 'pass'))]
+    lines = [f'{len(own)} cases not in {known.build}, {len(own) - len(new)} of them passing or skipped.']
+    lines += listed(f'Not in {known.build}, not passing', new)
+    lines += listed(f'Passing in {known.build}, not here', lost)
+    warnings = [f'not in {known.build}: {case}' for case in new]
+    warnings += [f'passing in {known.build}: {case}' for case in lost]
+    return warnings, lines
+
+
+def warn(text):
+    """a GitHub annotation: one line, its % and line ends escaped"""
+    text = text.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+    print(f'::warning title=edenprobe main::{text}')
+
+
 def report_of(sdmc):
     """the report the latest launch writes, which sdmc:/edenprobe/last-run names, or None"""
     last = sdmc / 'last-run'
@@ -292,6 +320,12 @@ def run(args):
                 problems += found
             except Failed as error:
                 problems.append(str(error))
+    warnings = []
+    if report and report.summary and args.advisory:
+        try:
+            warnings, lines = beside(report, Report(args.advisory))
+        except (Failed, OSError) as error:
+            problems.append(f'{args.advisory}: {error}')
 
     title = f'edenprobe {report.build if report else "(no report)"}'
     if report and report.summary:
@@ -300,6 +334,8 @@ def run(args):
         )
     else:
         title += ', no summary'
+    if args.advisory:
+        title += " (edenprobe's main: warnings only)"
     text = [
         f'### {title}',
         '',
@@ -313,6 +349,10 @@ def run(args):
     if args.summary:
         with open(args.summary, 'a', encoding='utf-8') as file:
             file.write(summary)
+    if args.advisory:
+        for line in (problems + warnings)[:MOST]:
+            warn(line)
+        return 0
     return 1 if problems else 0
 
 
@@ -342,7 +382,9 @@ def main():
     runs.add_argument('--nro', type=Path, required=True)
     runs.add_argument('--mode', required=True, help='the mode file\'s words, "quick" among them')
     runs.add_argument('--out', type=Path, required=True, help="emptied, then the run's files")
-    runs.add_argument('--baseline', type=Path)
+    against = runs.add_mutually_exclusive_group()
+    against.add_argument('--baseline', type=Path)
+    against.add_argument('--advisory', type=Path, metavar='REPORT', help="the pinned release's report.jsonl")
     runs.add_argument('--summary', type=Path)
     runs.add_argument(
         '--timeout', type=float, default=600, help='seconds a launch may go without a new report line (default 600)'

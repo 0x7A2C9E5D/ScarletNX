@@ -222,6 +222,59 @@ with tempfile.TemporaryDirectory() as temporary:
     took = re.search(r'launch 1: exit 0, (\d+) s', text)
     check('a slow launch that keeps adding lines is not killed', status == 0 and took and int(took[1]) >= 2, text)
 
+    # --advisory: edenprobe's main beside the pinned release's report, warnings only, never a failure
+    known = root / 'release.jsonl'
+    known.write_text(
+        '\n'.join(
+            [
+                note('edenprobe 0.4.0 (v0.4.0) starting'),
+                case('cpu', 'adds'),
+                case('cpu', 'multiplies'),
+                case('cpu', 'divides', 'fail'),
+                summary(2, 1),
+            ]
+        )
+        + '\n'
+    )
+    main = START + [
+        case('cpu', 'adds'),
+        case('cpu', 'multiplies', 'fail', detail='got 5'),
+        case('cpu', 'divides', 'fail'),
+        case('cpu', 'shifts', 'fail', detail='got 0%\nwanted 1'),
+        case('cpu', 'rotates'),
+        case('cpu', 'reads the counter', 'skip', reason='may crash'),
+        summary(2, 3, 1),
+    ]
+    status, text, out, calls = run([main], baseline=None, extra=['--advisory', str(known)])
+    warned = [line for line in text.splitlines() if line.startswith('::warning title=edenprobe main::')]
+    check('a run beside the release never fails', status == 0, text)
+    check(
+        'a case the release lacks that fails is a warning, on one line',
+        '::warning title=edenprobe main::not in v0.4.0: cpu: shifts: fail: got 0%25%0Awanted 1' in warned,
+        text,
+    )
+    check(
+        'a case the release passes that fails here is a warning',
+        '::warning title=edenprobe main::passing in v0.4.0: cpu: multiplies: fail: got 5' in warned,
+        text,
+    )
+    check('a case the release fails too, one passing or skipped, warns nothing', len(warned) == 2, warned)
+    check(
+        'the summary counts the cases the release lacks, and says it only warns',
+        "(edenprobe's main: warnings only)" in text and '3 cases not in v0.4.0, 2 of them passing or skipped.' in text,
+        text,
+    )
+    status, text, out, calls = run([START + CASES[:1]], baseline=None, extra=['--advisory', str(known)])
+    check(
+        'beside the release, a run with no summary is a warning too',
+        status == 0 and '::warning title=edenprobe main::launch 2 (exit 3) added no case' in text,
+        text,
+    )
+    status, text, out, calls = run([WHOLE], baseline=None, extra=['--advisory', str(root / MISSING)])
+    check('no release report to compare with is a warning', status == 0 and '::warning title=' in text, text)
+    status, text, out, calls = run([WHOLE], extra=['--advisory', str(known)])
+    check('--baseline and --advisory are one or the other', status == 2, text)
+
     status, text, out, calls = run([{'lines': crash, 'exit': 1}, {'lines': [], 'exit': 1}])
     check('a launch that adds no case ends the run', status == 1 and 'launch 2 (exit 1) added no case' in text, text)
     check('no baseline.txt from a run with no summary', not (out / 'baseline.txt').exists())

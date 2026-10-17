@@ -51,6 +51,14 @@ The `edenprobe` job of `.github/workflows/build.yml` takes the Linux x86-64 inst
 `tests/edenprobe/linux-x86_64.txt`. The result goes in the run's summary and in the pull request's comment of builds;
 the artifact `edenprobe-<commit>-<attempt>` holds the report, pictures, logs and `baseline.txt`.
 
+A regression there fails the Build run, and a run that failed publishes nothing: neither the nightly nor a version.
+
+Then the job runs edenprobe's main, its `nightly` release (checked by its `.sha256`), with
+`scripts/edenprobe.py run --advisory edenprobe/report.jsonl`: beside the pinned release's report it never fails. A case
+the release has not got that does not pass, a case the release passes that does not pass here, a run that ends early, or
+a nightly that cannot be fetched is a warning on the run, and the summary has a section of its own. A case new in main
+becomes binding when a release that has it is pinned and the baseline written again.
+
 ## The baseline
 
 `tests/edenprobe/<platform>.txt` names the edenprobe build and the mode words it was written with, then one passing
