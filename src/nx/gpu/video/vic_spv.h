@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors
-   Generated from vic.comp by scripts/build-vic-shader.py (glslang 16.6.0).
+   Generated from vic.comp by scripts/build-vic-shader.py (glslang 16.3.0).
+   sources c17c50ec90fd3c0dcc2a88b8b728e53b87276f076ff08ff962a067ec56bc479e
    Derived from SwitchRecomp by MZ Labs, Copyright 2026, Apache-2.0.
    See LICENSE.apache and NOTICE. Do not edit. */
 // clang-format off

@@ -5,11 +5,13 @@
 Requires glslangValidator on PATH (spirv-val is used when it is there).
 
 The checked-in header is the compiled shader, so normal and cross builds do not
-need a host shader compiler. --check verifies that it matches the GLSL source.
+need a host shader compiler. --check needs none either: it compares the sources'
+hash (this script and vic.comp) with the one the header holds.
 --spv PATH also saves the standalone binary of the aligned build.
 """
 
 import argparse
+import hashlib
 from pathlib import Path
 import shutil
 import struct
@@ -25,6 +27,13 @@ def main():
     root = Path(__file__).resolve().parents[1]
     source = root / 'src/nx/gpu/video/vic.comp'
     header = source.with_name('vic_spv.h')
+    # the bytes as the repository holds them: a Windows checkout turns the line ends into CR LF
+    lf = lambda path: path.read_bytes().replace(b'\r\n', b'\n')
+    digest = hashlib.sha256(lf(Path(__file__)) + lf(source)).hexdigest()
+    if args.check:
+        if f'sources {digest}' not in header.read_text():
+            raise SystemExit('vic_spv.h is not what vic.comp makes: run scripts/build-vic-shader.py')
+        return
     version = (
         subprocess.check_output(['glslangValidator', '--version'], text=True).splitlines()[0].rsplit(':', 1)[-1].strip()
     )
@@ -46,11 +55,12 @@ def main():
     text = """/* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors
    Generated from vic.comp by scripts/build-vic-shader.py (glslang @VERSION@).
+   sources @DIGEST@
    Derived from SwitchRecomp by MZ Labs, Copyright 2026, Apache-2.0.
    See LICENSE.apache and NOTICE. Do not edit. */
 // clang-format off
 """
-    text = text.replace('@VERSION@', version)
+    text = text.replace('@VERSION@', version).replace('@DIGEST@', digest)
     for _, name in builds:
         words = words_by_name[name]
         text += f'static const u32 {name}[] = {{\n'
@@ -58,11 +68,7 @@ def main():
             text += '    ' + ', '.join(f'0x{v:08x}' for v in words[i : i + 8]) + ',\n'
         text += '};\n'
     text += '// clang-format on\n'
-    if args.check:
-        if header.read_text() != text:
-            raise SystemExit('vic_spv.h differs: regenerate with the glslang the header names, or review the compiler upgrade')
-    else:
-        header.write_text(text)
+    header.write_text(text)
 
 
 if __name__ == '__main__':

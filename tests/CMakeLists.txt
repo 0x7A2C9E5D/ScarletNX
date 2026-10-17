@@ -515,12 +515,14 @@ snx_test_target(snx-test-ini-lines 90)
 target_compile_options(snx-test-ini-lines PRIVATE -UNDEBUG) # its checks are asserts
 add_test(NAME ini_lines COMMAND snx-test-ini-lines)
 
-# the controls' atlas and their shaders are generated and checked in: their sources must still make them
+# generated and checked in (the controls' atlas, their shaders, the VIC's): their sources must still make them
 if(Python3_Interpreter_FOUND)
     add_test(NAME controls_atlas_current
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-controls.py" --check)
     add_test(NAME ui_shaders_current
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-ui-shaders.py" --check)
+    add_test(NAME vic_shader_current
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-vic-shader.py" --check)
     add_test(NAME generators_crlf COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/generators_crlf.py")
     # which GitHub Actions caches the cleanup workflow deletes (scripts/trim-caches.py)
     add_test(NAME trim_caches COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/trim_caches_test.py")
