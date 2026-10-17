@@ -197,9 +197,11 @@ int main(void) {
     expect_path(path, SNX_USER_STATE, path);
     free(path);
     expect_path("games", SNX_USER_CONFIG, "games");
+#ifdef SNX_XDG /* elsewhere the config folder is always the data folder's config/ */
     /* a config folder that is the data folder divides nothing */
     setenv("XDG_CONFIG_HOME", getenv("XDG_DATA_HOME"), 1);
     expect_path(games, SNX_USER_CONFIG, games);
+#endif
 
     puts("snx_user_dir: the XDG variables, their defaults, a relative path ignored; snx_user_path: the installed "
          "and a portable copy's games/ divided, any other folder kept; snx_menu_dir: the launcher's for its games");

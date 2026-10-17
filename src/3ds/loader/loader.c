@@ -132,14 +132,15 @@ bool ctr_name(const char* name) {
     return true;
 }
 /* Check before snx_absolute: canonicalization must not hide existing links. */
-/* a link root made, which no user can have planted: the system's own, as macOS's /var and /tmp are into /private */
+/* a link at the top of the file system, where only root makes entries: the system's own, as macOS's /var, /tmp and
+   /etc are into /private. Any deeper one may be planted, even one root owns (a test run as root plants that) */
 static bool system_link(const char* path) {
 #ifdef _WIN32
     (void)path;
     return false;
 #else
     struct stat st;
-    return !lstat(path, &st) && st.st_uid == 0;
+    return path[0] == '/' && !strchr(path + 1, '/') && !lstat(path, &st) && st.st_uid == 0;
 #endif
 }
 static bool no_links(const char* path) {
