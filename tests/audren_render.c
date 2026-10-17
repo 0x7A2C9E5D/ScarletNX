@@ -1028,6 +1028,43 @@ static void update_voice_v2(void) {
     audren_state_free(state);
 }
 
+/* from REV7 the mixes are dirty-only: an entry names its mix, and one past the opened mixes is no other mix */
+static void update_mix_dirty_only(void) {
+    enum { voices = 128, effects = 68, sinks = 2, pools = effects + voices * 4, entries = 2 };
+    const u32 rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + 9) << 24), reply = 21456;
+    u32 params[13] = {48000, 240, 216, 2, voices, sinks, effects}; /* two submixes: mixes 0 to 2 */
+    u32 h[16] = {rev,           0x10,           pools * 0x20,           voices * 0x170,
+                 voices * 0x70, effects * 0xC0, 0x20 + entries * 0x930, sinks * 0x140};
+    u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[6] + h[7], i;
+    ARState* state = audren_state_new((const u8*)params);
+    u8 *input = calloc(1, size + reply), *mixes;
+    CHECK(state != NULL && input != NULL, "no state or buffers for dirty-only mixes");
+    if (!state || !input) {
+        free(input);
+        audren_state_free(state);
+        return;
+    }
+    h[15] = size;
+    memcpy(input, h, sizeof h);
+    for (i = 0; i < pools; i++) w32(input, 0x40 + h[1] + i * 0x20 + 0x10, 4);
+    mixes = input + 0x40 + h[1] + h[2] + h[4] + h[3] + h[5];
+    w32(mixes, 4, entries);
+    mixes += 0x20;
+    wf(mixes, 0, 0.25f); /* entry 0: mix 2 */
+    w8(mixes, 0xC, 1);
+    w32(mixes, 0x10, 2);
+    wf(mixes + 0x930, 0, 0.5f); /* entry 1: a mix not opened */
+    w8(mixes + 0x930, 0xC, 1);
+    w32(mixes + 0x930, 0x10, 99);
+    CHECK(audren_state_update(state, input, size, input + size, reply) == 0, "dirty-only mix update refused");
+    CHECK(state->mix[2].in_use && state->mix[2].volume == 0.25f, "entry 0 did not reach mix 2: in use %u",
+          state->mix[2].in_use);
+    CHECK(!state->mix[1].in_use && state->mix[1].volume != 0.5f, "an entry for mix 99 was written over mix 1");
+    CHECK(state->warned & SNX_AUDREN_WARN_MIX_ID, "the entry for mix 99 was skipped without a word");
+    free(input);
+    audren_state_free(state);
+}
+
 /* revision 14 still writes 0x170 voices: the 0x188 ones start at 15, as Eden and Ryubing gate them */
 static void update_voice_rev14(void) {
     enum { voices = 128, effects = 68, sinks = 2, pools = effects + voices * 4, stride = 0x170 };
@@ -1075,6 +1112,7 @@ int main(void) {
     update_output_counts();
     update_voice_v2();
     update_voice_rev14();
+    update_mix_dirty_only();
 
     /* the resampler at a ratio of one: an 11 kHz voice keeps its level at default quality as at high */
     for (u8 q = 0; q < 2; q++) {

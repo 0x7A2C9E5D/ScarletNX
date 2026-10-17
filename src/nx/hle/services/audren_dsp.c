@@ -46,7 +46,8 @@ enum {
     SNX_AUDREN_WARN_EFFECT = 4,
     SNX_AUDREN_WARN_FORMAT = 8,
     SNX_AUDREN_WARN_COUNTS = 16,
-    SNX_AUDREN_WARN_RANGE = 32
+    SNX_AUDREN_WARN_RANGE = 32,
+    SNX_AUDREN_WARN_MIX_ID = 64
 };
 static void warn_once(ARState* s, u32 bit, const char* what) {
     if (s->warned & bit) return;
@@ -510,6 +511,11 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
     for (u32 i = 0; i < nmix; i++) {
         const u8* mi = mixes + i * 0x930;
         u32 id = rd32(mi + 0x10);
+        /* from REV7 an entry is not mix i: one naming a mix the renderer did not open is skipped */
+        if (id >= s->nmix && revn >= 7) {
+            warn_once(s, SNX_AUDREN_WARN_MIX_ID, "a mix update names a mix the renderer did not open");
+            continue;
+        }
         if (id >= s->nmix) id = i;
         if (id >= s->nmix) continue;
         ARMix* m = &s->mix[id];
