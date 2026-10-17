@@ -42,12 +42,14 @@ renderer=opengl
 | A game laid out beside the others: `games/<Game>`, `<Game>_code.so`, `<Game>.abi`, `<Game>_data/`, `<Game>.ini`, `<Game>.log` | [driver, runtime, gui] Keep each game in a folder of its own | `games/<id>/`, its settings, log and caches in their folders ([USAGE](USAGE.md#folders)) | it runs where it is, each run naming its folder now; the launcher lists it as it opens |
 | The menu's `gui/` in the data folder (`~/.local/share/scarletnx/gui/`, `%APPDATA%\scarletnx\gui\`) and in Linux's state folder | [runtime, driver, gui] Split config, state and cache off Linux too | `settings.ini`, `app.ini`, `folders.txt`, `gamecontrollerdb.txt` in the config folder; `recent.txt`, `last-run.log` in the state folder | the launcher lists the folder as it opens |
 | A portable copy's `games/` beside the program, and outside Linux `work/` in the data folder | the same | `.scarletnx/` beside the program; `cache/work/` | the launcher lists each folder as it opens |
+| Android: the menu's `settings.ini`, `app.ini`, `folders.txt`, `gamecontrollerdb.txt`, `recent.txt`, `last-run.log` in the app's own files, outside its data folder, where the Files app does not reach | [gui, runtime] Keep the menu's files in the data folder on Android | the data folder's `config/` and `state/` | the launcher lists each as it opens, with its size; nothing reads them. Out of the player's reach, the box says that while the app is in testing clearing its storage takes them (Settings > Apps > ScarletNX > Storage > Clear storage), with all else of the app's. The check goes in a change of its own once the app is out of testing |
 | A build tree's checkout as its data folder: `games/`, `work/`, `prod.keys`, `title.keys`, `linux/`; `SNX_GAMES_DIR`'s default, the checkout's `games/` | #318 | the user's data folder, as an installed copy's ([USAGE](USAGE.md#folders)); `--repo DIR` keeps a run's files in DIR | the drivers on stderr each run and the launcher as it opens, each with where it goes; CMake's configure for `SNX_GAMES_DIR`, set back to empty |
 
 To move a game an older version laid out beside the others: run it from its dump once, which makes `games/<id>/`;
 move its saves, `<Game>_data/save/` and `<Game>_data/sdmc/`, into `games/<id>/<id>_data/`, and its settings,
 `<Game>.ini`, to `<id>.ini` where the table in [USAGE](USAGE.md#folders) says; then delete the older files. The
-menu's files, and a checkout's `work/`, keys and `linux/`, move as they are, each to the folder the line names. A checkout's
+menu's files, and a checkout's `work/`, keys and `linux/`, move as they are, each to the folder the line names (on
+Android the menu's files are out of reach: the line says how they go). A checkout's
 `games/` does too, then each game's `<id>.ini` to where the table says (the game's run names it).
 
 A `.ini` key the runtime does not know at all (a newer version's, or a typo) is not deprecated: it stays under

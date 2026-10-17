@@ -283,7 +283,7 @@ list). The user's data folder and a portable copy's keep each kind of file apart
 The menu works in the user's data folder or a portable copy's, unless its Settings > App > Folders picks a data
 folder, a games folder or an extractions folder ([GUI](GUI.md)): it passes them to the driver as `--repo`, `--outdir`
 and `--out` (to the 3DS driver as `--repo` and `--output`), and its own files stay where they are. On Android they
-stay in the app's own storage, which needs no permission. `~/.local/share`, `~/.config`, `~/.local/state` and `~/.cache` are the
+are in its data folder's `config/` and `state/`, in the app's own storage, which needs no permission. `~/.local/share`, `~/.config`, `~/.local/state` and `~/.cache` are the
 defaults of `$XDG_DATA_HOME`, `$XDG_CONFIG_HOME`, `$XDG_STATE_HOME` and `$XDG_CACHE_HOME` (a relative one is ignored).
 
 An older version kept a game's files side by side in `games/` (`games/Game`, `Game_code.so`, `Game_data/`,
@@ -350,7 +350,8 @@ restart the game after changing it.
 
 For a joystick that SDL detects but does not recognize as a gamepad, put SDL mapping lines in
 `gamecontrollerdb.txt` beside the launcher's `settings.ini` ([Folders](#folders)). A game in the launcher's
-`games/` reads the same file; any other game, the user's. To use a file elsewhere, set
+`games/` reads the same file; any other game, the user's (on Android every game, the launcher's). To use a file
+elsewhere, set
 `SDL_GAMECONTROLLERCONFIG_FILE` to its path before starting the launcher or game. A mapping line starts with the
 joystick GUID shown in the game log or the launcher's Controllers page, which names the file too, followed by a name
 and SDL button and axis bindings. For example:

@@ -7,15 +7,18 @@ recompiles on the phone, then the game opens.
 
 - **The menu** (`MainActivity`) is `scarletnx-gui` as `libmain.so`, in the YoRHa theme. Taps and the back button
   drive it (see [GUI](GUI.md)). Its data folder is in the app's own storage, `.scarletnx/` in its files
-  (`/data/data/org.scarletnx/files`): `games/` goes there, the extractions in its `cache/work/` and the games' logs in
-  its `state/` ([USAGE](USAGE.md#folders)). It needs no permission and nothing slows it down as the shared storage's
+  (`/data/data/org.scarletnx/files`): `games/` goes there, the extractions in its `cache/work/`, the games' logs in
+  its `state/` and the menu's own files in its `config/` and `state/` ([USAGE](USAGE.md#folders)). It needs no permission and nothing slows it down as the shared storage's
   FUSE does; it goes with the app, which Android 10 and later ask about before uninstalling it. The system's Files app
   shows it as *ScarletNX*, to copy dumps, keys and saves in and out, and the menu's *Open data folder* opens it there.
   Settings > App > Folders may move the data, the games or the extractions to the shared storage; it asks first, as
   games may run slower there, and takes the folder at a second tap.
   `HOME` stays the app's own files, for `.switch/prod.keys`. An older version kept the data in `/sdcard/ScarletNX`
   (or, without *All files access*, in the app's files themselves): as long as its `games/` or keys are there, the
-  menu lists them as it opens, with the space each takes; nothing is moved.
+  menu lists them as it opens, with the space each takes; nothing is moved. So are the menu's own files an older
+  version kept in the app's files themselves, out of the Files app's reach, which the menu no longer reads: while the
+  app is in testing, *Clear storage* in its Android settings takes them, with everything else of the app's
+  ([DEPRECATIONS](DEPRECATIONS.md)).
 - **Loading** (a *Load* item, *Setup device keys*) opens its screen, a box the whole width, and a tap in the box
   opens the system's file picker. A game's file is read by its path, so the app asks for access to the files when
   it starts (all files from Android 11): the picker's path, or for a document without one the file its descriptor

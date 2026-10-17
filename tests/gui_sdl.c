@@ -4377,6 +4377,123 @@ int main(int argc, char** argv) {
         free(portable);
         free(saved);
     }
+    /* Android's menu: its own files in its data folder's config/ and state/ (.scarletnx/ in the app's own files, which
+       the Files app shows). An older version's, in the app's own files, are neither moved nor read: the menu starts
+       from its defaults, and the box of what older versions left names each file with its size, then how they go while
+       the app is in testing; Share log too */
+    {
+        static const char* const olds[6][2] = {{"settings.ini", "[Display]\nfullscreen = 0\n"},
+                                               {"app.ini", "[app]\ntheme = yorha\ntext_size = 2\n"},
+                                               {"folders.txt", "/nonexistent/older folder\n"},
+                                               {"gamecontrollerdb.txt", "older mappings\n"},
+                                               {"recent.txt", ""},
+                                               {"last-run.log", "$ an older run\n"}};
+        char *old = snx_path_join(temporary, "own files"), *data = snx_path_join(old, SNX_PORTABLE_DIR);
+        char *home = app.home_dir, *data_dir = app.data_dir, *full, *config, *state, *path, *text, *expected;
+        char *settings_file = app.settings_file, *folders_file = app.folders_file, *app_file = app.app_file;
+        char *recent_file = app.recent_file, *run_log = app.run_log;
+        GuiRecent recent = app.recent;
+        size_t head = app.browser.head, size;
+        int i, j, text_size = app.menu.text_size, folder_count = app.folder_count;
+        assert(!snx_mkdirs(data) && (full = snx_absolute(data)) != NULL);
+        for (i = 0; i < 6; ++i) {
+            path = snx_path_join(old, olds[i][0]);
+            if (i == 4) /* a recent game whose file is there, which a read list would keep */
+                text = snx_format("switch\tfile\t%s/app.ini\tolder game\n", old);
+            else
+                text = snx_strdup(olds[i][1]);
+            assert(!snx_write_file(path, text, strlen(text)));
+            free(text);
+            free(path);
+        }
+        path = snx_path_join(old, "other.txt"); /* not the menu's */
+        assert(!snx_write_file(path, "other", 5));
+        free(path);
+        /* the menu opens in its own folders alone: nothing read from the older ones, nothing written */
+        app.home_dir = data;
+        app.data_dir = full;
+        app.menu_old = old;
+        open_files(&app);
+        config = menu_folder(&app, SNX_USER_CONFIG, false);
+        state = menu_folder(&app, SNX_USER_STATE, false);
+        expected = snx_path_join(full, "config");
+        assert(config && !strcmp(config, expected) && snx_is_dir(config));
+        free(expected);
+        expected = snx_path_join(config, "app.ini");
+        assert(!strcmp(app.app_file, expected) && !snx_path_exists(expected));
+        free(expected);
+        expected = snx_path_join(full, "state");
+        assert(state && !strcmp(state, expected) && snx_is_dir(state));
+        free(expected);
+        expected = snx_path_join(state, "recent.txt");
+        assert(!strcmp(app.recent_file, expected) && !snx_path_exists(expected));
+        free(expected);
+        assert(!strcmp(app.theme.id, "default") && app.menu.text_size == text_size && !app.recent.count &&
+               app.folder_count == folder_count);
+        /* the box: each file with its size, where this one keeps it for Share log, then how they go */
+        left_behind(&app);
+        assert(app.left_clear);
+        for (i = 0; i < 6; ++i) {
+            path = snx_path_join(old, olds[i][0]);
+            expected = snx_format("%s" SAY_LEFT_BY "%s\n", path, i < 4 ? config : state);
+            assert(strstr(app.left, expected));
+            free(expected);
+            free(path);
+        }
+        assert(!strstr(app.left, "other.txt"));
+        while (!__atomic_load_n(&app.left_space->done, __ATOMIC_ACQUIRE)) SDL_Delay(1);
+        for (i = 0; i < 6; ++i) {
+            path = snx_path_join(old, olds[i][0]);
+            for (j = 0; j < app.left_space->count && strcmp(app.left_space->dirs[j], path); ++j) {}
+            assert(j < app.left_space->count && app.left_space->bytes[j] == snx_file_size(path));
+            free(path);
+        }
+        app.left_shown = true;
+        render(&app);
+        shows(&app, SAY_LEFT_TITLE, rgb(app.theme.ink));
+        shows(&app, "While the app is in testing,", rgb(app.theme.ink));
+        app.left_shown = false;
+        share_log(&app);
+        path = snx_path_join(state, "scarletnx.log");
+        text = (char*)snx_read_file(path, &size);
+        assert(text && strstr(text, SAY_LEFT_CLEAR "\n"));
+        free(text);
+        free(path);
+        /* every older file where it was, as it was */
+        for (i = 0; i < 6; ++i) {
+            path = snx_path_join(old, olds[i][0]);
+            text = (char*)snx_read_file(path, &size);
+            assert(text && (i == 4 ? strstr(text, "older game") != NULL : !strcmp(text, olds[i][1])));
+            free(text);
+            free(path);
+        }
+        /* elsewhere none are looked for */
+        app.menu_old = NULL;
+        left_behind(&app);
+        assert(!app.left_clear && (!app.left || !strstr(app.left, old)));
+        free(app.settings_file);
+        free(app.folders_file);
+        free(app.app_file);
+        free(app.recent_file);
+        free(app.run_log);
+        app.settings_file = settings_file;
+        app.folders_file = folders_file;
+        app.app_file = app_file;
+        app.recent_file = recent_file;
+        app.run_log = run_log;
+        app.recent = recent;
+        app.browser.head = head;
+        app.message[0] = 0;
+        app.home_dir = home;
+        app.data_dir = data_dir;
+        left_behind(&app);
+        assert(!snx_remove_tree(old));
+        free(state);
+        free(config);
+        free(full);
+        free(data);
+        free(old);
+    }
 #ifdef SNX_XDG
     /* the menu's recent.txt and last-run.log in the state folder; an older build's in the data folder's gui/ stay */
     {
