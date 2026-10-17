@@ -643,7 +643,7 @@ if(NOT WIN32)
     target_link_libraries(snx-test-ldr-service PRIVATE OpenSSL::Crypto m)
     snx_cpu_helpers_flags(snx-test-ldr-service)
     add_test(NAME ldr_service COMMAND snx-test-ldr-service)
-    set_tests_properties(ldr_service PROPERTIES TIMEOUT 60)
+    set_tests_properties(ldr_service PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77) # 77: a host without 4 KiB pages
 endif()
 
 # Deterministic FFmpeg API double: no decoder dependency in tools-only builds.
@@ -764,6 +764,12 @@ add_executable(snx-test-recompiler-library recompiler_library.c)
 snx_test_target(snx-test-recompiler-library 11)
 target_link_libraries(snx-test-recompiler-library PRIVATE scarletnx-recompiler)
 add_test(NAME recompiler_library COMMAND snx-test-recompiler-library)
+if(APPLE)
+    # these build a game module and load it, which needs a Mach-O module the recompiler can't link yet
+    # (src/common/cpu/recompiler/llvm/link.c, docs/APPLE.md), and 4 KiB host pages to run it: not run there
+    set_tests_properties(native_recompiler llvm_module recompiler_library llvm_differential_0 llvm_differential_1
+                         llvm_differential_2 PROPERTIES DISABLED TRUE)
+endif()
 
 add_executable(snx_codegen_test codegen_test.c)
 snx_test_target(snx_codegen_test 90)
@@ -855,7 +861,7 @@ if(UNIX)
         "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c" "${PROJECT_SOURCE_DIR}/src/nx/hle/svc/svc_mem.c")
     snx_test_target(snx-test-memory 11)
         add_test(NAME memory_accounting COMMAND snx-test-memory)
-    set_tests_properties(memory_accounting PROPERTIES TIMEOUT 60)
+    set_tests_properties(memory_accounting PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77) # as ldr_service
 endif()
 
 endif() # SNX_BUILD_NX

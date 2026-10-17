@@ -35,7 +35,7 @@ int snx_ir_init(char* error, size_t error_size) {
        (cpu.h), so its plain accesses need no ordering of their own from the host */
     triple = LLVMGetDefaultTargetTriple();
     x86 = !strncmp(triple, "x86_64", 6);
-    arm = !strncmp(triple, "aarch64", 7);
+    arm = !strncmp(triple, "aarch64", 7) || !strncmp(triple, "arm64", 5); /* Apple names AArch64 arm64 */
     if (!x86 && !arm)
         snprintf(error, error_size, "the LLVM backend targets x86-64 and AArch64 hosts, this one is %s", triple);
     LLVMDisposeMessage(triple);

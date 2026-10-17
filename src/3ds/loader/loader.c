@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
+#include <sys/stat.h>
 #include <sys/types.h>
 #endif
 
@@ -131,6 +132,16 @@ bool ctr_name(const char* name) {
     return true;
 }
 /* Check before snx_absolute: canonicalization must not hide existing links. */
+/* a link root made, which no user can have planted: the system's own, as macOS's /var and /tmp are into /private */
+static bool system_link(const char* path) {
+#ifdef _WIN32
+    (void)path;
+    return false;
+#else
+    struct stat st;
+    return !lstat(path, &st) && st.st_uid == 0;
+#endif
+}
 static bool no_links(const char* path) {
     char* part = snx_strdup(path);
     bool ok = true;
@@ -138,7 +149,7 @@ static bool no_links(const char* path) {
         if (!part[i] || part[i] == '/' || part[i] == '\\') {
             char saved = part[i];
             part[i] = 0;
-            if (*part && snx_is_link(part)) ok = false;
+            if (*part && snx_is_link(part) && !system_link(part)) ok = false;
             part[i] = saved;
             if (!saved) break;
         }

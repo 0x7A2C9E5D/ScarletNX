@@ -3,6 +3,7 @@
 /* snx_data_dir, the folder the driver and the menu share: the checkout, else a portable copy's (.scarletnx beside the
    AppImage or the program), else the user's data folder. */
 #define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE   700 /* realpath */
 #include "common/utilities/common.h"
 #include <assert.h>
 #include <stdio.h>
@@ -19,6 +20,14 @@ int main(void) {
     char *root = snx_temp_dir(NULL), *checkout, *build, *built, *program, *mount, *copy, *data, *xdg, *expected, *file;
     char *portable, *beside;
     assert(root);
+    /* the folder as the functions name it, links resolved: macOS's temporary folder is under /var, a link to
+       /private/var */
+    {
+        char* real = realpath(root, NULL);
+        assert(real);
+        free(root);
+        root = real;
+    }
     checkout = join(root, "checkout");
     build = join(root, "build");
     built = join(build, "src/gui");
@@ -34,7 +43,16 @@ int main(void) {
     unsetenv("APPIMAGE");
     unsetenv("APPDIR");
     setenv("XDG_DATA_HOME", xdg, 1);
+#ifdef SNX_XDG
     expected = join(xdg, "scarletnx");
+#else
+    /* no XDG spec (macOS): the user's data folder of its own, under a HOME of the test's (tests/user_dirs.c has it) */
+    file = join(root, "home");
+    setenv("HOME", file, 1);
+    free(file);
+    expected = snx_user_data_dir();
+    assert(expected);
+#endif
 
     /* a build tree's checkout wins, for a program of that build tree */
     data = snx_data_dir(checkout, build, built);

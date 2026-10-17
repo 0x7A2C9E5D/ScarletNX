@@ -4,6 +4,7 @@
    a portable copy's (config/, state/ and cache/ of its .scarletnx), and where a file of a data folder goes in them;
    snx_menu_dir: the launcher's own, for it and for a game of its. tests/data_dir.c has the data folder itself. */
 #define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE   700 /* realpath */
 #include "common/utilities/common.h"
 #include <assert.h>
 #include <stdio.h>
@@ -37,6 +38,14 @@ int main(void) {
     char *root = snx_temp_dir(NULL), *home, *dir[4], *base, *games, *path;
     int kind;
     assert(root);
+    /* the folder as the functions name it, links resolved: macOS's temporary folder is under /var, a link to
+       /private/var */
+    {
+        char* real = realpath(root, NULL);
+        assert(real);
+        free(root);
+        root = real;
+    }
     home = join(root, "home");
     setenv("HOME", home, 1);
     for (kind = SNX_USER_DATA; kind <= SNX_USER_CACHE; ++kind) unsetenv(vars[kind]);
