@@ -908,6 +908,9 @@ static void update_output_counts(void) {
    reply 128 bytes over its 21,456, and every voice's fields after the first biquad came from the wrong bytes */
 static void update_voice_v2(void) {
     enum { voices = 128, effects = 68, sinks = 2, pools = effects + voices * 4, stride = 0x188 };
+    /* a 100 Hz low-pass at 48 kHz: its b are under Q14's step, which would leave a 200 Hz tone 21.1 dB down, not 12.3 */
+    static const float lpb[3] = {4.24433674e-05f, 8.48867348e-05f, 4.24433674e-05f},
+                       lpa[2] = {1.98148847f, -0.98165828f};
     const u32 rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + 15) << 24), reply = 21456;
     u32 params[13] = {48000, 240, 216, 0, voices, sinks, effects};
     u32 h[16] = {rev, 0x10, pools * 0x20, voices * stride, voices * 0x70, effects * 0xC0, 0, sinks * 0x140};
@@ -915,6 +918,11 @@ static void update_voice_v2(void) {
     ARState* state = audren_state_new((const u8*)params);
     u8 *input = calloc(1, size + reply), *voices_in, *vi;
     const ARVoice* v;
+    float x[SNX_ART_FRAME];
+    i32 last[SNX_ART_FRAME];
+    ARBiquad bq;
+    int f;
+    double w = 2.0 * M_PI * 200.0 / SNX_ART_RATE, nr, ni, dr, di, got, want;
     CHECK(state != NULL && input != NULL, "no state or buffers for revision 15 voices");
     if (!state || !input) {
         free(input);
@@ -934,11 +942,8 @@ static void update_voice_v2(void) {
     wf(vi, 0x1C, 1.5f);
     wf(vi, 0x20, 0.75f);
     w8(vi, 0x24, 1); /* biquad 0: enabled 0, b 4, a 0x10 */
-    wf(vi, 0x28, 0.5f);
-    wf(vi, 0x2C, -0.25f);
-    wf(vi, 0x30, 0.125f);
-    wf(vi, 0x34, 1.5f);
-    wf(vi, 0x38, -0.75f);
+    for (i = 0; i < 3; i++) wf(vi, 0x28 + i * 4, lpb[i]);
+    for (i = 0; i < 2; i++) wf(vi, 0x34 + i * 4, lpa[i]);
     w32(vi, 0x54, 3);
     w32(vi, 0x58, 2);
     w64(vi, 0x60, 0x1234560);
@@ -961,10 +966,25 @@ static void update_voice_v2(void) {
     v = &state->voice[1];
     CHECK(v->in_use && v->format == 1 && v->rate == 32000 && v->channels == 2 && v->pitch == 1.5f && v->volume == 0.75f,
           "revision 15 voice: rate %u, %u channels", v->rate, v->channels);
-    CHECK(v->bq_on[0] == 1 && v->bq_b[0][0] == 8192 && v->bq_b[0][1] == -4096 && v->bq_b[0][2] == 2048 &&
-              v->bq_a[0][0] == 24576 && v->bq_a[0][1] == -12288 && !v->bq_on[1],
-          "revision 15 float biquad in Q14: b %d %d %d, a %d %d", v->bq_b[0][0], v->bq_b[0][1], v->bq_b[0][2],
-          v->bq_a[0][0], v->bq_a[0][1]);
+    CHECK(v->bq_on[0] == 1 && v->bq_b[0][0] == lpb[0] && v->bq_b[0][1] == lpb[1] && v->bq_b[0][2] == lpb[2] &&
+              v->bq_a[0][0] == lpa[0] && v->bq_a[0][1] == lpa[1] && !v->bq_on[1],
+          "revision 15 float biquad: b %g %g %g, a %g %g", v->bq_b[0][0], v->bq_b[0][1], v->bq_b[0][2], v->bq_a[0][0],
+          v->bq_a[0][1]);
+    /* through the voices' biquad, a half-scale 200 Hz tone comes out at the float filter's level */
+    memset(&bq, 0, sizeof bq);
+    for (f = 0; f < 20; f++) { /* the transient gone */
+        for (i = 0; i < SNX_ART_FRAME; i++) x[i] = (float)lrint(16384.0 * sin(w * i));
+        biquad(x, SNX_ART_FRAME, v->bq_b[0], v->bq_a[0], &bq, 1);
+    }
+    for (i = 0; i < SNX_ART_FRAME; i++) last[i] = (i32)x[i];
+    nr = lpb[0] + lpb[1] * cos(w) + lpb[2] * cos(2 * w);
+    ni = -lpb[1] * sin(w) - lpb[2] * sin(2 * w);
+    dr = 1.0 - lpa[0] * cos(w) - lpa[1] * cos(2 * w);
+    di = lpa[0] * sin(w) + lpa[1] * sin(2 * w);
+    want = 0.5 * sqrt((nr * nr + ni * ni) / (dr * dr + di * di));
+    got = level_i32(last, SNX_ART_FRAME, 200.0);
+    CHECK(fabs(20.0 * log10(got / want)) < 0.05, "revision 15 low-pass at 200 Hz: %.2f dB, want %.2f dB",
+          20.0 * log10(got / 0.5), 20.0 * log10(want / 0.5));
     CHECK(v->wave_count == 3 && v->wave_index == 2 && v->data == 0x1234560 && v->data_size == 0x40 && v->mix_id == 5 &&
               v->splitter_id == 7,
           "revision 15 voice after its biquads: mix %u, splitter %u", v->mix_id, v->splitter_id);

@@ -233,12 +233,6 @@ static void take_wave(ARWave* w, const u8* wb, u8 format) {
     w->sent = 0;
 }
 
-/* a float coefficient in Q14, clamped and truncated (Eden's ToQ14Clamped) */
-static i16 q14(float v) {
-    float x = v * 16384.0f;
-    return (i16)(x >= 32767.0f ? 32767.0f : x <= -32768.0f ? -32768.0f : x);
-}
-
 /* VoiceIn: id 0, is_new 8, in_use 9, play state 0xA, format 0xB, rate 0xC, channels 0x18, pitch 0x1C, volume 0x20,
    biquads 0x24, wave buffer count 0x3C and index 0x40, data 0x48 and size 0x50, mix 0x58, splitter 0x5C, wave
    buffers 0x60 (0x38 each), channel resources 0x140, flush count 0x159, flags 0x15C, conversion quality 0x15E.
@@ -268,17 +262,12 @@ static void update_voice(ARState* s, ARVoice* v, const u8* vi, u8* vo, int v2) {
         v->channels = (u8)(ch < 1 ? 1 : ch > SNX_AUDREN_CHANNELS ? SNX_AUDREN_CHANNELS : ch);
         v->pitch = rdf(vi + 0x1C);
         v->volume = rdf(vi + 0x20);
-        for (f = 0; f < 2; f++) { /* enabled 0, b 2, a 8; v2's floats b 4, a 0x10, in Q14 as the biquad effect's */
+        for (f = 0; f < 2; f++) { /* enabled 0, Q14 b 2 and a 8; v2's floats b 4 and a 0x10, never in Q14 */
             const u8* bq = vi + 0x24 + f * (v2 ? 0x18 : 0xC);
             int k;
             v->bq_on[f] = bq[0];
-            if (!v2) {
-                memcpy(v->bq_b[f], bq + 2, sizeof v->bq_b[f]);
-                memcpy(v->bq_a[f], bq + 8, sizeof v->bq_a[f]);
-            } else {
-                for (k = 0; k < 3; k++) v->bq_b[f][k] = q14(rdf(bq + 4 + k * 4));
-                for (k = 0; k < 2; k++) v->bq_a[f][k] = q14(rdf(bq + 0x10 + k * 4));
-            }
+            for (k = 0; k < 3; k++) v->bq_b[f][k] = v2 ? rdf(bq + 4 + k * 4) : (i16)rd16(bq + 2 + k * 2) / 16384.0f;
+            for (k = 0; k < 2; k++) v->bq_a[f][k] = v2 ? rdf(bq + 0x10 + k * 4) : (i16)rd16(bq + 8 + k * 2) / 16384.0f;
         }
         vi += v2 ? 0x18 : 0; /* the rest at the offsets above */
         if (vi[0x15E] <= 2) v->quality = vi[0x15E];
@@ -968,11 +957,13 @@ static void effect_mix(ARState* s, ARMix* m, AREffect* e) {
     }
 }
 
-/* Eden's BiquadFilterCommand: doubles from revision 7, integers rounded at bit 14 before */
-static void biquad(float* x, u32 n, const i16* b, const i16* a, ARBiquad* st, int float_processing) {
+/* Eden's BiquadFilterCommand: doubles from revision 7, integers rounded at bit 14 before, when every coefficient
+   came in Q14 and goes back to it exactly */
+static void biquad(float* x, u32 n, const float* b, const float* a, ARBiquad* st, int float_processing) {
     u32 i;
+    i64 qb0, qb1, qb2, qa0, qa1;
     if (float_processing) {
-        double b0 = b[0] / 16384.0, b1 = b[1] / 16384.0, b2 = b[2] / 16384.0, a0 = a[0] / 16384.0, a1 = a[1] / 16384.0;
+        double b0 = b[0], b1 = b[1], b2 = b[2], a0 = a[0], a1 = a[1];
         for (i = 0; i < n; i++) {
             double in = x[i], y = in * b0 + st->x1 * b1 + st->x2 * b2 + st->y1 * a0 + st->y2 * a1;
             x[i] = (float)(i32)(y >= 2147483647.0 ? 2147483647.0 : y <= -2147483648.0 ? -2147483648.0 : y);
@@ -983,33 +974,35 @@ static void biquad(float* x, u32 n, const i16* b, const i16* a, ARBiquad* st, in
         }
         return;
     }
+    qb0 = (i64)(b[0] * 16384.0f), qb1 = (i64)(b[1] * 16384.0f), qb2 = (i64)(b[2] * 16384.0f);
+    qa0 = (i64)(a[0] * 16384.0f), qa1 = (i64)(a[1] * 16384.0f);
     for (i = 0; i < n; i++) {
-        i64 in = sat32(x[i]), acc = in * b[0] + st->s0, y = (acc + (1 << 13)) >> 14;
+        i64 in = sat32(x[i]), acc = in * qb0 + st->s0, y = (acc + (1 << 13)) >> 14;
         y = y > 2147483647 ? 2147483647 : y < -2147483647 - 1 ? -2147483647 - 1 : y;
         x[i] = (float)y;
-        st->s0 = st->s1 + b[1] * in + a[0] * y;
-        st->s1 = b[2] * in + a[1] * y;
+        st->s0 = st->s1 + qb1 * in + qa0 * y;
+        st->s1 = qb2 * in + qa1 * y;
     }
+}
+
+/* a float coefficient in Q14, clamped and truncated (Eden's ToQ14Clamped) */
+static i16 q14(float v) {
+    float x = v * 16384.0f;
+    return (i16)(x >= 32767.0f ? 32767.0f : x <= -32768.0f ? -32768.0f : x);
 }
 
 /* Eden's BiquadFilterInfo: Q14 before revision 9, floats from it; updating clears the state before revision 6 */
 static u32 biquad_state_at(const ARState* s) { return rev_number(s->rev) >= 9 ? 0x25 : 0x17; }
 static void effect_biquad(ARState* s, ARMix* m, AREffect* e) {
-    int clear, ch;
+    int clear, ch, k;
     const u8* p = e->p;
     int revn = rev_number(s->rev), v2 = revn >= 9;
     i8 channels = (i8)p[v2 ? 0x24 : 0x16];
     u8 state = p[biquad_state_at(s)];
     u32 n = s->frame;
-    i16 b[3], a[2];
-    if (v2) {
-        int k;
-        for (k = 0; k < 3; k++) b[k] = q14(rdf(p + 0x10 + k * 4));
-        for (k = 0; k < 2; k++) a[k] = q14(rdf(p + 0x1C + k * 4));
-    } else {
-        memcpy(b, p + 0xC, sizeof b);
-        memcpy(a, p + 0x12, sizeof a);
-    }
+    float b[3], a[2]; /* in Q14 over 16384: Eden's effect takes its floats to Q14 */
+    for (k = 0; k < 3; k++) b[k] = (v2 ? q14(rdf(p + 0x10 + k * 4)) : (i16)rd16(p + 0xC + k * 2)) / 16384.0f;
+    for (k = 0; k < 2; k++) a[k] = (v2 ? q14(rdf(p + 0x1C + k * 4)) : (i16)rd16(p + 0x12 + k * 2)) / 16384.0f;
     if (channels <= 0 || state > SNX_AUDREN_PARAM_UPDATED) return;
     if (channels > SNX_AUDREN_CHANNELS) channels = SNX_AUDREN_CHANNELS;
     clear = state == SNX_AUDREN_PARAM_INITIALIZED || (state == SNX_AUDREN_PARAM_UPDATING && revn < 6);
