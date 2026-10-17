@@ -73,6 +73,8 @@ MARKER = re.compile(r'<!-- discord-message: (\d+) -->')
 CHANNELS = {'pr': 'prs', 'issue': 'issues', 'nightly': 'nightly'}
 # a job's states before it runs
 WAITING = {'queued', 'waiting', 'pending', 'requested'}
+# a write to the cards' branch that another run's came before, tried again this many times in all
+CONFLICT, TRIES = re.compile(r'HTTP 409|is at [0-9a-f]+ but expected|sha wasn.t supplied|does not match'), 3
 
 
 class Hub:
@@ -214,19 +216,36 @@ class Store:
         return None, None
 
     def put(self, key, message, sha=None):
+        """message kept as key's. Runs of other cards write the branch too, at the same moment when one event starts
+        several: one that made the branch first has made it, and a write that lost to another's is tried again on
+        what it left. A message that still cannot be kept is named, so it can be found on Discord"""
         to = self.hub.to
         if not self.hub.missing(f'repos/{to}/git/ref/heads/{BRANCH}', to):  # the branch made from the default one
             default = self.hub.read(f'repos/{to}', to)['default_branch']
             head = self.hub.read(f'repos/{to}/git/ref/heads/{default}', to)['object']['sha']
-            self.hub.write(to, 'POST', f'repos/{to}/git/refs', {'ref': f'refs/heads/{BRANCH}', 'sha': head})
-        data = {
-            'message': f'The Discord message of {key}',
-            'content': base64.b64encode(f'{message}\n'.encode()).decode(),
-            'branch': BRANCH,
-        }
-        if sha:
-            data['sha'] = sha
-        self.hub.write(to, 'PUT', f'repos/{to}/contents/cards/{key}', data)
+            try:
+                self.hub.write(to, 'POST', f'repos/{to}/git/refs', {'ref': f'refs/heads/{BRANCH}', 'sha': head})
+            except RuntimeError as error:
+                if 'Reference already exists' not in str(error):
+                    raise
+        for attempt in range(TRIES):
+            data = {
+                'message': f'The Discord message of {key}',
+                'content': base64.b64encode(f'{message}\n'.encode()).decode(),
+                'branch': BRANCH,
+            }
+            if sha:
+                data['sha'] = sha
+            try:
+                self.hub.write(to, 'PUT', f'repos/{to}/contents/cards/{key}', data)
+                return
+            except RuntimeError as error:
+                if attempt == TRIES - 1 or not CONFLICT.search(str(error)):
+                    raise RuntimeError(
+                        f'{key} is message {message} on Discord, but it could not be kept: {error}'
+                    ) from error
+                time.sleep(attempt + 1)
+                sha = self.get(key)[1]
 
 
 def excerpt(text, most=MOST_TEXT):

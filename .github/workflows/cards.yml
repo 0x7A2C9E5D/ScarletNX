@@ -35,6 +35,7 @@ permissions:
 
 env:
   NIGHTLY_REPO: scarletnx/nightly
+  PYTHONUNBUFFERED: '1' # a build followed for minutes says each step as it happens
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   NIGHTLY_TOKEN: ${{ secrets.NIGHTLY_TOKEN }}
   DISCORD_WEBHOOK_NIGHTLY: ${{ secrets.DISCORD_WEBHOOK_NIGHTLY }}

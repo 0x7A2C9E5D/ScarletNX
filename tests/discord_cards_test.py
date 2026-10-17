@@ -511,6 +511,35 @@ with tempfile.TemporaryDirectory() as temporary:
         '::notice::No DISCORD_WEBHOOK_ISSUES' in done.stdout and len(posted('issues')) == 3,
         done.stdout,
     )
+    # one event starts several runs at once: one makes the cards' branch while another looked, and one's write comes
+    # before another's; the card is kept all the same
+    log_file.unlink(missing_ok=True)
+    s = state()
+    s['issues']['14'] = dict(issue, number=14)
+    s['hide_branch_once'], s['fail_puts'] = 'discord-cards', 1
+    save_state(s)
+    done = run('event', event={'action': 'opened', 'issue': {'number': 14}}, name='issues')
+    writes = [c['args'][3] for c in calls() if c['args'][:2] == ['api', '-X']]
+    check(
+        "a branch another run made first, and a write another run's came before: the card kept all the same",
+        done.returncode == 0
+        and card_id('issue-14') == posted('issues')[-1].get('reply')
+        and writes == [f'repos/{TO}/git/refs'] + [f'repos/{TO}/contents/cards/issue-14'] * 2,
+        done.stdout + done.stderr + str(writes),
+    )
+    s = state()
+    s['issues']['15'] = dict(issue, number=15)
+    s['fail_puts'], s['put_error'] = 1, 'gh: Resource not accessible by integration (HTTP 403)'
+    save_state(s)
+    done = run('event', event={'action': 'opened', 'issue': {'number': 15}}, name='issues')
+    check(
+        'a card that cannot be kept stops the run, naming its message',
+        done.returncode != 0
+        and f'issue-15 is message {posted("issues")[-1].get("reply")} on Discord, but it could not be kept'
+        in done.stderr
+        and 'HTTP 403' in done.stderr,
+        done.stderr,
+    )
     # dry run: reads only
     log_file.unlink(missing_ok=True)
     s = state()
@@ -522,7 +551,7 @@ with tempfile.TemporaryDirectory() as temporary:
         done.returncode == 0
         and not any('-X' in c['args'] for c in calls())
         and 'would post on Discord (issues)' in done.stdout
-        and len(posted('issues')) == 3,
+        and len(posted('issues')) == 5,
         done.stdout + done.stderr,
     )
 
