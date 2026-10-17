@@ -261,6 +261,31 @@ int main(void) {
     assert(!gui_confirm_key(&confirm, GUI_UP) && confirm.selected == GUI_CONFIRM_ABORT);
     assert(gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown);
     assert(!gui_confirm_key(&confirm, GUI_SELECT)); /* answered: nothing more to abort */
+    /* opened: the first choice in focus, nothing armed; a question asked once takes its second choice at once */
+    confirm.selected = GUI_CONFIRM_ABORT;
+    confirm.armed = true;
+    gui_confirm_open(&confirm, GUI_ASK_EXIT, false);
+    assert(confirm.shown && confirm.ask == GUI_ASK_EXIT && confirm.selected == GUI_CONFIRM_KEEP && !confirm.armed);
+    assert(!gui_confirm_key(&confirm, GUI_DOWN) && gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown);
+    /* asked twice: the first Select on the second choice arms it, the second takes it */
+    gui_confirm_open(&confirm, GUI_ASK_DEEP, true);
+    assert(!gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown); /* the first choice at one press */
+    gui_confirm_open(&confirm, GUI_ASK_DEEP, true);
+    assert(!gui_confirm_key(&confirm, GUI_DOWN) && !gui_confirm_key(&confirm, GUI_SELECT));
+    assert(confirm.shown && confirm.armed);
+    assert(gui_confirm_key(&confirm, GUI_SELECT) && !confirm.shown && confirm.ask == GUI_ASK_DEEP);
+    /* a move between choices, by key or pointer, undoes the first press; the pointer staying on it does not */
+    gui_confirm_open(&confirm, GUI_ASK_DEEP, true);
+    assert(!gui_confirm_key(&confirm, GUI_RIGHT) && !gui_confirm_key(&confirm, GUI_SELECT) && confirm.armed);
+    assert(!gui_confirm_key(&confirm, GUI_LEFT) && !confirm.armed && confirm.selected == GUI_CONFIRM_KEEP);
+    assert(!gui_confirm_key(&confirm, GUI_RIGHT) && !gui_confirm_key(&confirm, GUI_SELECT) && confirm.armed);
+    gui_confirm_focus(&confirm, GUI_CONFIRM_ABORT);
+    assert(confirm.armed);
+    gui_confirm_focus(&confirm, GUI_CONFIRM_KEEP);
+    assert(!confirm.armed && confirm.shown);
+    gui_confirm_focus(&confirm, GUI_CONFIRM_ABORT);
+    assert(!gui_confirm_key(&confirm, GUI_SELECT) && confirm.armed);
+    assert(!gui_confirm_key(&confirm, GUI_CANCEL) && !confirm.shown); /* Back while armed takes nothing */
     puts("GUI menu, bounded console, UTF-8 and file drops passed");
     return 0;
 }

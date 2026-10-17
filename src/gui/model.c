@@ -45,17 +45,34 @@ GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key) {
     }
     return GUI_MENU_STAY;
 }
+void gui_confirm_open(GuiConfirm* confirm, GuiAsk ask, bool twice) {
+    confirm->shown = true;
+    confirm->ask = ask;
+    confirm->selected = GUI_CONFIRM_KEEP;
+    confirm->twice = twice;
+    confirm->armed = false;
+}
 bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
     if (!confirm->shown) return false;
     switch (key) {
         case GUI_UP:
         case GUI_DOWN:
         case GUI_LEFT:
-        case GUI_RIGHT: confirm->selected ^= 1; return false;
-        case GUI_SELECT: confirm->shown = false; return confirm->selected == GUI_CONFIRM_ABORT;
+        case GUI_RIGHT: gui_confirm_focus(confirm, confirm->selected ^ 1); return false;
+        case GUI_SELECT:
+            if (confirm->twice && confirm->selected == GUI_CONFIRM_ABORT && !confirm->armed) {
+                confirm->armed = true;
+                return false;
+            }
+            confirm->shown = false;
+            return confirm->selected == GUI_CONFIRM_ABORT;
         case GUI_CANCEL: confirm->shown = false; return false;
         default: return false;
     }
+}
+void gui_confirm_focus(GuiConfirm* confirm, int choice) {
+    if (choice != confirm->selected) confirm->armed = false;
+    confirm->selected = choice;
 }
 void gui_size_text(char* out, size_t size, uint64_t bytes) {
     double mb = (double)bytes / 1048576;

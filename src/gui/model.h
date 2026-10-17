@@ -37,17 +37,28 @@ typedef struct {
 /* what a key on the menu asks of the GUI: nothing more, the Settings or the logs shared */
 typedef enum { GUI_MENU_STAY, GUI_MENU_SETTINGS, GUI_MENU_LOG, GUI_MENU_DATA } GuiMenuDo;
 GuiMenuDo gui_menu_key(GuiMenu* menu, GuiKey key);
-/* The question a running run's abort asks first, or leaving the menu on a computer: shown or not, which one, and the
-   choice in focus, the one that stays first */
+/* The menu's questions, one box for all (main.c's render_ask): shown or not, which one, the choice in focus (the first
+   stays first: it keeps things as they are), and whether its second choice takes a second press */
 enum { GUI_CONFIRM_KEEP, GUI_CONFIRM_ABORT };
+typedef enum {
+    GUI_ASK_ABORT, /* a running run's, when ask_abort says to ask */
+    GUI_ASK_EXIT,  /* leaving the menu on a computer */
+    GUI_ASK_DEEP   /* a folder picked with folders in it: are their games listed too */
+} GuiAsk;
 typedef struct {
     bool shown;
-    bool exit; /* leaving the app, not aborting a run */
+    GuiAsk ask;
     int selected;
+    bool twice; /* the second choice is pressed twice: the first press only arms it */
+    bool armed; /* pressed once, its focus kept */
 } GuiConfirm;
+void gui_confirm_open(GuiConfirm* confirm, GuiAsk ask, bool twice);
 /* A key on the question: the arrows move between its choices, Select takes the one in focus and Cancel keeps going,
-   both closing it. True when the run is to be aborted */
+   both closing it; a question asked twice takes its second choice at the second Select, a move between choices
+   undoing the first. True when the second choice is taken */
 bool gui_confirm_key(GuiConfirm* confirm, GuiKey key);
+/* the pointer on a choice: it takes the focus, a press armed on the other undone */
+void gui_confirm_focus(GuiConfirm* confirm, int choice);
 const char* gui_setting_description(const GuiMenu* menu);
 /* bytes in MB, or in GB from 1024 MB on */
 void gui_size_text(char* out, size_t size, uint64_t bytes);

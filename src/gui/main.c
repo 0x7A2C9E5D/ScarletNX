@@ -1056,9 +1056,12 @@ static void overlay(App* app) {
     if (a > 0) shade(app, (Uint8)(a * 255));
 }
 static const char* ask_question(const App* app) {
-    if (app->folder_asked) return "List the games in its subfolders too?";
-    if (app->confirm.exit) return "Exit ScarletNX?";
-    return screen(app) == GUI_SCREEN_COMPILING ? "Abort the recompile? Its work is lost." : "Abort the run?";
+    switch (app->confirm.ask) {
+        case GUI_ASK_DEEP: return "List the games in its subfolders too?";
+        case GUI_ASK_EXIT: return "Exit ScarletNX?";
+        default:
+            return screen(app) == GUI_SCREEN_COMPILING ? "Abort the recompile? Its work is lost." : "Abort the run?";
+    }
 }
 #define SAY_LEFT_BY    " was left by an older version: this one keeps it in "
 #define SAY_LEFT_TITLE "An older version left these files: move each from - to ->"
@@ -1218,26 +1221,37 @@ static void render_files(App* app, int report) {
     snprintf(label, sizeof label, "%s%s", app->theme.marker, report ? "OK" : "OK, nothing is moved");
     list_item(app, &ok, 0, label, true, false);
 }
-/* the question over a run or the menu: the question, its two choices as boxes, the one kept focused */
+/* the question over a run, the menu or a form: the question, wrapped to the screen, its two choices as boxes, the one
+   kept focused */
 static void ask_boxes(App* app, GuiRect* r, GuiList* choices) {
-    int s = app->scale, item = item_h(app);
-    *r = over_rect(app, SDL_max((int)SDL_utf8strlen(ask_question(app)), 16), cell_h(app) + 2 * (item + 6 * s) + 12 * s);
+    int s = app->scale, item = item_h(app), choices_h = 2 * (item + 6 * s), rows;
+    const char* question = ask_question(app);
+    *r = over_rect(app, SDL_max((int)SDL_utf8strlen(question), 16), 0);
+    rows = wrap_rows(app, question, inner(app, *r).w / cell_w(app), 0);
+    *r = over_rect(app, SDL_max((int)SDL_utf8strlen(question), 16), rows * cell_h(app) + choices_h + 12 * s);
     list_place(app, choices,
-               gui_rect(r->x + cell_w(app), r->y + cell_h(app) + 10 * s, r->w - 2 * cell_w(app), 2 * (item + 6 * s)), 2,
+               gui_rect(r->x + cell_w(app), r->y + rows * cell_h(app) + 10 * s, r->w - 2 * cell_w(app), choices_h), 2,
                app->confirm.selected);
 }
+#if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
+#define SAY_AGAIN "tap again"
+#else
+#define SAY_AGAIN "press again"
+#endif
 static void render_ask(App* app) {
-    static const char* const choices[3][2] = {
+    static const char* const choices[][2] = {
         {"Keep going", "Abort"}, {"Stay", "Exit"}, {"Only this folder", "With subfolders"}};
     GuiRect r;
     GuiList l;
-    char label[64];
+    char label[96];
     int i;
     ask_boxes(app, &r, &l);
     over_box(app, r, NULL);
-    text_in(app, inner(app, r), r.x + cell_w(app), r.y + 4 * app->scale, ask_question(app), rgb(app->theme.warning));
+    wrap_in(app, inner(app, r), r.x + cell_w(app), r.y + 4 * app->scale, ask_question(app), 0, rgb(app->theme.warning));
     for (i = 0; i < 2; ++i) {
-        snprintf(label, sizeof label, "%s%s", app->theme.marker, choices[app->folder_asked ? 2 : app->confirm.exit][i]);
+        /* a choice asked twice says so once pressed */
+        snprintf(label, sizeof label, "%s%s%s", app->theme.marker, choices[app->confirm.ask][i],
+                 i == GUI_CONFIRM_ABORT && app->confirm.armed ? ": " SAY_AGAIN : "");
         list_item(app, &l, i, label, app->confirm.selected == i, false);
     }
 }
@@ -2031,7 +2045,7 @@ static void draw_screen(App* app) {
         draw_pick(app);
     else
         draw_menu(app);
-    if (app->confirm.shown && (app->menu.running || app->confirm.exit || app->folder_asked)) render_ask(app);
+    if (app->confirm.shown) render_ask(app);
     if (idle && app->left_shown && app->lefts) render_files(app, 0);
     overlay(app);
 }
@@ -2365,22 +2379,18 @@ static void folder_ask(App* app, const char* path) {
     if (absolute && snx_is_dir(absolute) && gui_has_folders(absolute, GUI_GAMES_RUN | GUI_GAMES_CIA)) {
         free(app->folder_asked);
         app->folder_asked = absolute;
-        app->confirm.shown = true;
-        app->confirm.exit = false;
-        app->confirm.selected = 0;
+        gui_confirm_open(&app->confirm, GUI_ASK_DEEP, false);
         return;
     }
     free(absolute);
     folder_add(app, path, false);
 }
-/* a key on that question: the arrows move, Select adds the folder as the choice says, Cancel adds nothing */
-static void folder_answer(App* app, GuiKey key) {
+/* its answer: a choice taken adds the folder as it says, with its subfolders (deep) or not; Back adds nothing */
+static void folder_answer(App* app, bool taken, bool deep) {
     char* path = app->folder_asked;
-    gui_confirm_key(&app->confirm, key);
-    if (app->confirm.shown) return;
     app->folder_asked = NULL;
-    if (key == GUI_SELECT)
-        folder_add(app, path, app->confirm.selected == 1);
+    if (taken)
+        folder_add(app, path, deep);
     else if (app->editing && app->form == GUI_FORM_FOLDERS)
         snprintf(app->editor.note, sizeof app->editor.note, "Not added");
     free(path);
@@ -3746,7 +3756,7 @@ static void render(App* app) {
         render_pad(app);
     else if (app->editing) {
         draw_form(app);
-        if (app->folder_asked) render_ask(app); /* a folder picked on the folders' screen */
+        if (app->confirm.shown) render_ask(app); /* a folder picked on the folders' screen */
     } else
         draw_screen(app);
     if (app->cleaned_shown) render_files(app, 1); /* over the menu, or the App's rows it was started from */
@@ -4609,9 +4619,7 @@ static void menu_key(App* app, GuiKey key) {
 #ifdef SDL_PLATFORM_ANDROID
         gui_android_background(app->message, sizeof(app->message));
 #else
-        app->confirm.shown = true;
-        app->confirm.exit = true;
-        app->confirm.selected = GUI_CONFIRM_KEEP;
+        gui_confirm_open(&app->confirm, GUI_ASK_EXIT, false);
 #endif
     }
 }
@@ -4622,33 +4630,31 @@ static void abort_run(App* app) {
     gui_process_terminate(app->process);
     app->aborting = true;
 }
-/* the question's second choice taken: the app closes, or the run is aborted */
-static void confirmed(App* app) {
-    if (app->confirm.exit)
+/* a key on the question shown (gui_confirm_key); answered, what it asked about: the menu closed, the run aborted, the
+   folder added as the choice says */
+static void ask_key(App* app, GuiKey key) {
+    GuiAsk ask = app->confirm.ask;
+    bool second = gui_confirm_key(&app->confirm, key);
+    if (app->confirm.shown) return;
+    if (ask == GUI_ASK_DEEP)
+        folder_answer(app, key == GUI_SELECT, second);
+    else if (second && ask == GUI_ASK_EXIT)
         app->menu.quit = true;
-    else
+    else if (second)
         abort_run(app);
 }
-/* the pointer on the question, at pixel x, y: a choice under it takes the focus, a click takes it; a click
-   off the box keeps going */
+/* the pointer on the question, at pixel x, y: a choice under it takes the focus, a click presses it; a click off the
+   box is Back */
 static void ask_pointer(App* app, float x, float y, bool click) {
     GuiRect r;
     GuiList l;
     int i;
     ask_boxes(app, &r, &l);
-    if (app->folder_asked) { /* the folder's question: a choice takes it, a click off the box adds nothing */
-        if ((i = list_hit(&l, x, y, true)) >= 0) {
-            app->confirm.selected = i;
-            if (click) folder_answer(app, GUI_SELECT);
-        } else if (click && (x < (float)r.x || x >= (float)(r.x + r.w) || y < (float)r.y || y >= (float)(r.y + r.h)))
-            folder_answer(app, GUI_CANCEL);
-        return;
-    }
     if ((i = list_hit(&l, x, y, true)) >= 0) {
-        app->confirm.selected = i;
-        if (click && gui_confirm_key(&app->confirm, GUI_SELECT)) confirmed(app);
+        gui_confirm_focus(&app->confirm, i);
+        if (click) ask_key(app, GUI_SELECT);
     } else if (click && (x < (float)r.x || x >= (float)(r.x + r.w) || y < (float)r.y || y >= (float)(r.y + r.h)))
-        gui_confirm_key(&app->confirm, GUI_CANCEL);
+        ask_key(app, GUI_CANCEL);
 }
 /* the tab at pixel x, y, -1 for none */
 static int tab_hit(App* app, float x, float y) {
@@ -4831,7 +4837,7 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
         if (touch && picking) app->pick_press = GUI_PICK_ROWS + 1; /* the picker's finger, pressed as it went down */
         return;
     }
-    if (app->folder_asked) /* over the folders' screen or Games */
+    if (app->confirm.shown) /* over a run, the menu, Games or a form */
         ask_pointer(app, x, y, click);
     else if (app->editing && app->form == GUI_FORM_PAD) {
         if (click) pad_did(app, snx_pad_screen_tap(&app->pad, snx_pad_screen_hit(&app->pad_drawing, x, y)));
@@ -4839,9 +4845,7 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
         picker_pointer(app, x, y, click);
     else if (app->editing) {
         if (click) form_pointer(app, x, y, touch);
-    } else if (app->confirm.shown)
-        ask_pointer(app, x, y, click);
-    else
+    } else
         screen_pointer(app, x, y, click, touch);
 }
 /* the file the system's picker chose, as a dropped one; none (cancelled) stays on the screen and says so */
@@ -4868,11 +4872,9 @@ static void picked(App* app, const char* uri) {
 static void cancel(App* app) {
     if (!app->menu.running)
         menu_key(app, GUI_CANCEL);
-    else if (app->ask_abort && !app->aborting) {
-        app->confirm.shown = true;
-        app->confirm.exit = false;
-        app->confirm.selected = GUI_CONFIRM_KEEP;
-    } else
+    else if (app->ask_abort && !app->aborting)
+        gui_confirm_open(&app->confirm, GUI_ASK_ABORT, false);
+    else
         abort_run(app);
 }
 /* a finger's id, the pen's apart: SDL gives a pen's touch the id 1 on every platform, the id Android and Wayland
@@ -5015,9 +5017,11 @@ static void event(App* app, const SDL_Event* e) {
         app->splash_until = 0;
         return;
     }
-    /* the folder's question takes every key while it shows, over the folders' screen or Games */
-    if (app->folder_asked && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
-        if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && menu_key_of(&e->key, &key)) folder_answer(app, key);
+    /* a question takes every key while it shows, over the menu, Games or a form (a run's is the run's, below); a held
+       key answers nothing */
+    if (app->confirm.shown && !app->menu.running &&
+        (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
+        if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && menu_key_of(&e->key, &key)) ask_key(app, key);
         return;
     }
     if (app->editing && app->form == GUI_FORM_PAD && pad_event(app, e)) return;
@@ -5166,15 +5170,10 @@ static void event(App* app, const SDL_Event* e) {
     /* a running run takes ESC, and the question, while it shows, every key; a held key asks and answers nothing */
     if (app->menu.running) {
         if (e->key.repeat || !menu_key_of(&e->key, &key)) return;
-        if (app->confirm.shown) {
-            if (gui_confirm_key(&app->confirm, key)) confirmed(app);
-        } else if (key == GUI_CANCEL)
+        if (app->confirm.shown)
+            ask_key(app, key);
+        else if (key == GUI_CANCEL)
             cancel(app);
-        return;
-    }
-    /* the exit question takes every key while it shows */
-    if (app->confirm.shown) {
-        if (!e->key.repeat && menu_key_of(&e->key, &key) && gui_confirm_key(&app->confirm, key)) confirmed(app);
         return;
     }
     if (e->key.key == SDLK_V && (e->key.mod & SDL_KMOD_CTRL) &&

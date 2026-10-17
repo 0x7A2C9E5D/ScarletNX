@@ -3533,7 +3533,7 @@ int main(int argc, char** argv) {
             menu_boxes(&app, &m);
             b = list_box(&m.list, m.list.focus);
             key(&app, SDLK_ESCAPE);
-            assert(app.confirm.shown && app.confirm.exit);
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
             render(&app);
             ask_boxes(&app, &r, &choices);
             text_px_is(&app, r.x + cw, r.y + 4 * s, "Exit ScarletNX?", rgb(app.theme.warning), black);
@@ -3652,7 +3652,7 @@ int main(int argc, char** argv) {
             /* the menu: ESC asks before closing, the pointer over it presses nothing; Arrows/mouse name no one key;
                select, the text of three words that all select, opens the Settings, where ESC comes back */
             press_key(&app, "ESC", 0, false, yellow);
-            assert(app.confirm.shown && app.confirm.exit);
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
             key(&app, SDLK_ESCAPE);
             assert(!app.confirm.shown && !app.menu.quit);
             {
@@ -3736,7 +3736,7 @@ int main(int argc, char** argv) {
             assert(hint_press(&app, "Swipe across", 0) && app.browser.page == 1);
             assert(!hint_press(&app, "Tap outside", 0));
             go_tab(&app, GUI_TAB_MENU);
-            assert(hint_press(&app, "Back", 0) && app.confirm.shown && app.confirm.exit);
+            assert(hint_press(&app, "Back", 0) && app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
             key(&app, SDLK_ESCAPE);
             app.menu.selected = GUI_KEYS;
             assert(hint_press(&app, "Tap", 0) && app.menu.view == GUI_LOAD_KEYS);
@@ -3804,7 +3804,7 @@ int main(int argc, char** argv) {
             app.theme = *gui_theme_builtin("yorha");
             app.theme.grid = false;
             press_key(&app, "ESC", 0, false, rgb(app.theme.page));
-            assert(app.confirm.shown && app.confirm.exit);
+            assert(app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT);
             key(&app, SDLK_ESCAPE);
             app.theme = *gui_theme_builtin("default");
             app.menu.selected = GUI_KEYS;
@@ -4000,7 +4000,8 @@ int main(int argc, char** argv) {
     /* ESC on the menu's first screen asks before the app closes: ESC again stays, Exit closes */
     assert(app.menu.view == GUI_LOAD_NONE && !app.menu.running && !app.finished && !app.confirm.shown);
     key(&app, SDLK_ESCAPE);
-    assert(app.confirm.shown && app.confirm.exit && app.confirm.selected == GUI_CONFIRM_KEEP && !app.menu.quit);
+    assert(app.confirm.shown && app.confirm.ask == GUI_ASK_EXIT && app.confirm.selected == GUI_CONFIRM_KEEP &&
+           !app.menu.quit);
     render(&app);
     key(&app, SDLK_ESCAPE);
     assert(!app.confirm.shown && !app.menu.quit);
