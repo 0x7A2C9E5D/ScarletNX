@@ -6,6 +6,7 @@
 #include "nx/runtime/main.h"
 #include "common/utilities/common.h"
 #include "nx/gpu/gpu.h"
+#include "nx/gpu/nvn_trace.h"
 #include "nx/gpu/renderer.h"
 #include "nx/hle/filesystem/fs.h"
 #include "nx/hle/kernel/kernel.h"
@@ -243,6 +244,7 @@ static void read_npdm(void) {
         caps = rd32le(d + aci + 0x30);
         caps_size = rd32le(d + aci + 0x34);
         for (i = 0; caps < aci_size && caps_size <= aci_size - caps && i + 4 <= caps_size; i += 4) {
+        nvn_trace_report();
             u32 cap = rd32le(d + aci + caps + i), lowest, highest, min_core, max_core;
             if ((cap & 0xF) != 0x7) continue; /* ThreadInfo: three ones, then a zero */
             lowest = cap >> 4 & 63;
@@ -408,6 +410,7 @@ int snx_main(int argc, char** argv) {
     load_hints();
     if (loader_load()) fatal("Could not load the game executables. See the .log for details.");
     kernel_load_symbols();
+    nvn_trace_init();
     read_npdm();
     svc_core_init();
     svc_fs_init();

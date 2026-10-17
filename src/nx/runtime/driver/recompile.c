@@ -30,6 +30,7 @@ static void usage(void) {
          "  --tmpfs                Leave the RomFS in the extraction (in tmpfs), which the game reads it from");
     puts("  --interp-only          Generate fallback interpreter only\n"
          "  --runtime FILE         Deploy this runtime instead of building one\n"
+         "  --hook-direct-calls    Route calls and branches between functions through dispatch (SNX_NVN_TRACE)\n"
          "  --keep-ir              Save the generated code (LLVM IR) in <NAME>/<NAME>_build\n"
          "  -q, --quiet            Suppress progress");
     puts("Each game is a folder of <outdir>, <NAME>/: its program <NAME>, <NAME>_code and <NAME>_data/.\n"
@@ -261,6 +262,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
             tmpfs = 1;
         else if (!strcmp(arg, "--interp-only"))
             gen.interp_only = 1;
+        else if (!strcmp(arg, "--hook-direct-calls"))
+            gen.hook_direct_calls = 1;
         else if (!strcmp(arg, "--keep-ir") || !strcmp(arg, "--keep-c")) {
             if (!strcmp(arg, "--keep-c"))
                 fprintf(stderr, "scarletnx: --keep-c is deprecated: use --keep-ir (docs/DEPRECATIONS.md)\n");
