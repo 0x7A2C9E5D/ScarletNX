@@ -436,8 +436,8 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
     p += ih[6];
     const u8* sinks = p;
 
-    if (revn >= 7) {
-        /* REV7 adds a 32-byte header before the dirty-only mix entries. */
+    if (revn >= 7 && ih[6]) {
+        /* REV7 adds a 32-byte header before dirty-only mix entries. A zero-sized section means no mix changed. */
         if (ih[6] < 0x20) return -41;
         nmix = rd32(mixes + 4);
         if ((u64)ih[6] != 0x20 + (u64)nmix * 0x930) {
@@ -446,7 +446,7 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
         }
         mixes += 0x20;
     } else {
-        nmix = ih[6] / 0x930;
+        nmix = revn >= 7 ? 0 : ih[6] / 0x930;
     }
     if (nmix > s->nmix) warn_once(s, SNX_AUDREN_WARN_COUNTS, "an update holds more mixes than the renderer opened");
 
