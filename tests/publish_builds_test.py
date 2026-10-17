@@ -4,21 +4,21 @@
 """scripts/publish-builds.py against a fake gh (a small GitHub kept in a JSON file) and a fake Discord (a local HTTP
 server): a version tag's release in the repository; the nightly made in the nightly repository, kept to the newest N,
 never one older than the latest, and linked from the repository's rolling prerelease; a pull request's prerelease
-replaced at each push and gone when it closes, its one Discord message edited; a fork's only once the team labels it
-after its last push; and the writes to the nightly repository made with its own token. Each release's notes and each
-message link every download with its size and say what changed: the changes since the last one, a pull request's
-commits and the main commit it stands on. Offline."""
+replaced at each push and gone when it closes, its Discord card drawn again; a fork's only once the team labels it
+after its last push; and the writes to the nightly repository made with its own token. Each release's notes link every
+download with its size and say what changed: the changes since the last one, a pull request's commits and the main
+commit it stands on; a version's message and a card, each download. The fake GitHub and Discord are
+tests/fake_github.py's. Offline."""
 
-import http.server
-import importlib.util
+import base64
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
-import threading
 from pathlib import Path
+
+from fake_github import FAKE_GH, Discord, posted, serve
 
 SCRIPT = Path(__file__).resolve().parent.parent / 'scripts' / 'publish-builds.py'
 REPO, TO = 'owner/repo', 'owner/nightly'
@@ -37,152 +37,7 @@ def check(what, ok, detail=''):
         failures.append(f'{what}{": " + str(detail) if detail else ""}')
 
 
-# releases and tags of each repository, under its name
-FAKE_GH = r"""#!/usr/bin/env python3
-import json, os, re, sys
-path = os.environ['FAKE_GH_STATE']
-with open(path) as f:
-    s = json.load(f)
-args = sys.argv[1:]
-with open(os.environ['FAKE_GH_LOG'], 'a') as log:
-    log.write(json.dumps({'args': args, 'token': os.environ.get('GH_TOKEN')}) + '\n')
-def save():
-    with open(path, 'w') as f:
-        json.dump(s, f)
-def out(value):
-    print(json.dumps(value))
-def stop(text):
-    sys.stderr.write(text + '\n')
-    sys.exit(1)
-if args[:2] == ['release', 'upload']:
-    end = args.index('--repo')
-    repo = args[end + 1]
-    release = next((r for r in s['releases'][repo] if r['tag_name'] == args[2]), None) or stop('release not found')
-    for file in args[3:end]:
-        name = os.path.basename(file)
-        release['assets'] = [a for a in release['assets'] if a['name'] != name]
-        s['next'] += 1
-        with open(file, 'rb') as f:
-            release['assets'].append({'id': s['next'], 'name': name, 'data': f.read()[:64].decode('latin-1')})
-    save()
-    sys.exit(0)
-assert args[0] == 'api', args
-method = args[args.index('-X') + 1] if '-X' in args else 'GET'
-target = [a for a in args[1:] if not a.startswith('-') and a not in ('GET', 'POST', 'PATCH', 'DELETE')][0]
-route, _, query = target.partition('?')
-query = dict(p.split('=', 1) for p in query.split('&') if p)
-data = json.load(sys.stdin) if '--input' in args else None
-page, per = int(query.get('page', 1)), int(query.get('per_page', 30))
-def listing(items):
-    out(items[(page - 1) * per:page * per])
-m = re.fullmatch(r'repos/([^/]+/[^/]+)/(.*)', route)
-repo, rest = m.group(1), m.group(2)
-releases, tags = s['releases'].setdefault(repo, []), s['tags'].setdefault(repo, {})
-if rest == 'releases' and method == 'GET':
-    listing(sorted(releases, key=lambda r: r['created_at'], reverse=True))
-elif rest == 'releases' and method == 'POST':
-    s['next'] += 1
-    s['clock'] += 1
-    release = dict(data, id=s['next'], created_at=f'2026-11-01T{s["clock"]:08d}', assets=[],
-                   html_url=f'https://github.com/{repo}/releases/tag/{data["tag_name"]}')
-    releases.append(release)
-    tags.setdefault(data['tag_name'], data.get('target_commitish', 'default-branch'))
-    save()
-    out(release)
-elif rest.startswith('releases/assets/') and method == 'DELETE':
-    number = int(rest.split('/')[-1])
-    for release in releases:
-        release['assets'] = [a for a in release['assets'] if a['id'] != number]
-    save()
-elif rest.startswith('releases/') and method in ('PATCH', 'DELETE'):
-    number = int(rest.split('/')[-1])
-    release = next((r for r in releases if r['id'] == number), None) or stop('no such release')
-    if method == 'DELETE':
-        releases.remove(release)
-    else:
-        release.update(data)
-        out(release)
-    save()
-elif rest.startswith('git/refs/tags/') and method in ('DELETE', 'PATCH'):
-    tag = rest[len('git/refs/tags/'):]
-    if tag not in tags:
-        stop('gh: Reference does not exist (HTTP 422)')
-    if method == 'DELETE':
-        del tags[tag]
-    else:
-        tags[tag] = data['sha']
-    save()
-elif rest.startswith('git/ref/tags/'):
-    tag = rest[len('git/ref/tags/'):]
-    out({'ref': f'refs/tags/{tag}', 'object': {'sha': tags[tag]}}) if tag in tags else stop('gh: Not Found (HTTP 404)')
-elif rest == 'pulls' and method == 'GET':
-    listing([p for p in s['pulls'] if p['state'] == 'open'])
-elif re.fullmatch(r'pulls/\d+/commits', rest):
-    listing(s.get('commits', {}).get(rest.split('/')[1], []))
-elif re.fullmatch(r'compare/[0-9a-f]+\.\.\.[0-9a-f]+', rest):
-    out({'merge_base_commit': {'sha': s['merge_base']}})
-elif re.fullmatch(r'pulls/\d+', rest):
-    out(next(p for p in s['pulls'] if p['number'] == int(rest.split('/')[1])))
-elif re.fullmatch(r'issues/\d+/events', rest):
-    listing(s['events'].get(rest.split('/')[1], []))
-elif re.fullmatch(r'issues/\d+/labels/.+', rest) and method == 'DELETE':
-    number, label = int(rest.split('/')[1]), rest.split('/', 3)[3].replace('%20', ' ')
-    pull = next(p for p in s['pulls'] if p['number'] == number)
-    pull['labels'] = [l for l in pull['labels'] if l['name'] != label]
-    save()
-elif re.fullmatch(r'collaborators/[^/]+/permission', rest):
-    out({'permission': s['permissions'].get(rest.split('/')[1], 'read')})
-elif rest == 'actions/workflows/build.yml/runs':
-    out({'workflow_runs': [r for r in s['runs'] if r['head_sha'] == query.get('head_sha')]})
-else:
-    stop(f'fake gh: {method} {target}')
-"""
-
-
-class Discord(http.server.BaseHTTPRequestHandler):
-    requests, messages, next_id = [], {}, [1000]
-
-    def log_message(self, *args):
-        pass
-
-    def reply(self, code, body):
-        data = json.dumps(body).encode()
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def handle_one(self, method):
-        body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-        Discord.requests.append(
-            {'method': method, 'path': self.path, 'body': body, 'agent': self.headers['User-Agent']}
-        )
-        path = self.path.split('?')[0]
-        if method == 'POST':
-            Discord.next_id[0] += 1
-            Discord.messages[str(Discord.next_id[0])] = body
-            self.reply(200, {'id': str(Discord.next_id[0])})
-        elif path.split('/')[-1] in Discord.messages:
-            Discord.messages[path.split('/')[-1]] = body
-            self.reply(200, {'id': path.split('/')[-1]})
-        else:
-            self.reply(404, {'message': 'Unknown Message'})
-
-    def do_POST(self):
-        self.handle_one('POST')
-
-    def do_PATCH(self):
-        self.handle_one('PATCH')
-
-
-def posted(channel):
-    return [r for r in Discord.requests if f'token-{channel}' in r['path']]
-
-
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Discord)
-threading.Thread(target=server.serve_forever, daemon=True).start()
-HOOK = f'http://127.0.0.1:{server.server_address[1]}/api/webhooks/1/token'
+server, HOOK = serve()
 
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
@@ -231,6 +86,11 @@ with tempfile.TemporaryDirectory() as temporary:
 
     def with_releases(repo, items):
         return dict(state(), releases=dict(state()['releases'], **{repo: items}))
+
+    def card_id(key, s=None):
+        """the message id the nightly repository keeps for a card"""
+        entry = (s or state()).get('files', {}).get(TO, {}).get(f'discord-cards:cards/{key}')
+        return base64.b64decode(entry['content']).decode().strip() if entry else None
 
     def calls():
         return [json.loads(line) for line in log_file.read_text().splitlines()] if log_file.exists() else []
@@ -458,8 +318,11 @@ with tempfile.TemporaryDirectory() as temporary:
     # the run again: the files replaced, no news
     done = publish('nightly', *everything(sha), '--checkout', str(checkout), '--keep', '2')
     check(
-        'a run again replaces, posts nothing more',
-        done.returncode == 0 and len(posted('nightly')) == 1 and len(releases()) == 2,
+        'a run again replaces, and edits its card, posting none',
+        done.returncode == 0
+        and [r['method'] for r in posted('nightly')] == ['POST', 'PATCH']
+        and card_id(f'nightly-{sha}') == posted('nightly')[0]['reply']
+        and len(releases()) == 2,
         done.stdout + done.stderr,
     )
     # a run of an older commit ending last: not published over the newest
@@ -571,16 +434,27 @@ with tempfile.TemporaryDirectory() as temporary:
             'head': {'sha': head, 'repo': {'full_name': 'alice/fork' if fork else REPO}},
         }
 
-    def pr_run(head, number=50, created='2026-10-16T10:00:00Z'):
+    def pr_run(head, number=50, created='2026-10-16T10:00:00Z', failed=('Windows (Clang + LLVM)',)):
+        jobs = ['Linux AppImage (x86_64)', 'Linux AppImage (aarch64)', 'Windows (Clang + LLVM)', 'Android APK']
         return {
             'id': number,
             'event': 'pull_request',
             'head_branch': 'x',
             'head_sha': head,
-            'conclusion': 'failure',
+            'conclusion': 'failure' if failed else 'success',
             'status': 'completed',
             'created_at': created,
+            'html_url': f'https://x/runs/{number}',
             'head_repository': {'full_name': REPO},
+            'jobs': [
+                {
+                    'name': job,
+                    'status': 'completed',
+                    'conclusion': 'failure' if job in failed else 'success',
+                    'html_url': f'https://x/runs/{number}/{job[:5]}',
+                }
+                for job in jobs
+            ],
         }
 
     def pr_files(head, name, run_id, skip=()):
@@ -591,7 +465,7 @@ with tempfile.TemporaryDirectory() as temporary:
     commits = [
         {'sha': f'{n:x}' * 40, 'commit': {'message': f'[gui] commit {n} [x](http://e)\n\nIts body.'}} for n in range(12)
     ]
-    save_state(dict(state(), pulls=[pull(7, head1)], commits={'7': commits}, merge_base=base_sha))
+    save_state(dict(state(), pulls=[pull(7, head1)], commits={'7': commits}, merge_base=base_sha, runs=[pr_run(head1)]))
     done, planned = run('plan', event={'workflow_run': pr_run(head1)})
     check('a pull request run is planned', planned.get('kind') == 'pr' and planned.get('pr') == '7', planned)
     done = publish('pr', *pr_files(head1, 'pr1-part', '50', ('ScarletNX-windows',)))
@@ -634,29 +508,35 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     shown = prs[0]['body']['embeds'][0] if prs else {}
     check(
-        'the message: its author, the missing system amber and linking the run, the first commits and the rest counted',
+        'the card: its author, the failed system amber and linking its log, the first commits and the rest counted',
         shown.get('author') == {'name': 'alice', 'url': 'https://x/alice', 'icon_url': 'https://x/alice.png'}
+        and shown['url'] == 'https://x/pull/7'
         and shown['color'] == 0xD29922
         and shown['fields'][2]
-        == {
-            'name': 'Windows x86-64',
-            'value': 'Not built\n[see the run](https://github.com/owner/repo/actions/runs/50)',
-            'inline': True,
-        }
-        and [f['name'] for f in shown['fields']][4:] == ['Pull request', 'Build']
+        == {'name': 'Windows x86-64', 'value': 'Failed\n[log](https://x/runs/50/Windo)', 'inline': True}
+        and shown['fields'][0]['value'].startswith(f'[AppImage](https://github.com/{TO}/releases/download/pr-7/')
+        and shown['fields'][4:]
+        == [
+            {'name': 'Build', 'value': '[Failure](https://x/runs/50)', 'inline': True},
+            {'name': 'Builds', 'value': f'[All files](https://github.com/{TO}/releases/tag/pr-7)', 'inline': True},
+        ]
         and '**12 commits**, the newest first' in shown['description']
         and shown['description'].count('\n- ') == 7
         and '- \\[gui\\] commit 11 \\[x\\](http://e)\n' in shown['description']
         and 'commit 5 ' not in shown['description']
         and '/commits/' not in shown['description'].split('**12 commits**')[1]
         and '- and [6 more](https://x/pull/7/commits)' in shown['description']
-        and 'deleted when the pull request closes' in shown['footer']['text'],
+        and shown['footer']['text'] == 'Edited at each push, comment and build',
         shown,
     )
     message = str(Discord.next_id[0])
-    check("the message's id kept in the notes", pre and f'<!-- discord-message: {message} -->' in pre['body'], pre)
+    check(
+        "the card's id kept in the nightly repository, not in the notes",
+        card_id('pr-7') == message and 'discord-message' not in pre['body'],
+        state().get('files'),
+    )
     # a push: the same prerelease, all four now, the message edited; it stands on a commit a nightly was built from
-    save_state(dict(state(), pulls=[pull(7, head2)], merge_base=sha))
+    save_state(dict(state(), pulls=[pull(7, head2)], merge_base=sha, runs=[pr_run(head2, 51, failed=())]))
     done = publish('pr', *pr_files(head2, 'pr2', '51'))
     pre = find('pr-7')
     prs = posted('prs')
@@ -681,7 +561,7 @@ with tempfile.TemporaryDirectory() as temporary:
         and prs[1]['method'] == 'PATCH'
         and prs[1]['path'].endswith(f'/messages/{message}?thread_id=55')
         and prs[1]['body']['embeds'][0]['color'] == 0xB0102A
-        and not any('Not built' in f['value'] for f in prs[1]['body']['embeds'][0]['fields']),
+        and not any('Failed' in f['value'] for f in prs[1]['body']['embeds'][0]['fields']),
         prs,
     )
     # the run of the push before, ending last
@@ -696,12 +576,13 @@ with tempfile.TemporaryDirectory() as temporary:
     done = publish('pr', *pr_files(head2, 'pr2', '51'))
     pre = find('pr-7')
     check(
-        'a deleted message is posted again',
-        f'<!-- discord-message: {Discord.next_id[0]} -->' in pre['body'] and str(Discord.next_id[0]) != message,
-        pre['body'],
+        'a deleted message is posted again, its new id kept',
+        card_id('pr-7') == str(Discord.next_id[0]) and str(Discord.next_id[0]) != message,
+        card_id('pr-7'),
     )
-    # closed, merged: gone, the message says so
+    # closed, merged: gone; its card is the cards workflow's (tests/discord_cards_test.py)
     closed = dict(pull(7, head2), state='closed', merged=True)
+    before = len(posted('prs'))
     done, planned = run('plan', name='pull_request_target', event={'action': 'closed', 'pull_request': closed})
     s = state()
     check(
@@ -709,15 +590,7 @@ with tempfile.TemporaryDirectory() as temporary:
         'pr-7' not in s['tags'][TO] and not find('pr-7', s=s) and not planned,
         done.stdout + done.stderr,
     )
-    last = posted('prs')[-1]
-    check(
-        'its message edited: merged, green, no downloads left',
-        last['method'] == 'PATCH'
-        and last['body']['embeds'][0]['description'].startswith('Merged')
-        and last['body']['embeds'][0]['color'] == 0x2EA043
-        and 'fields' not in last['body']['embeds'][0],
-        last,
-    )
+    check('closing it posts nothing here', len(posted('prs')) == before, posted('prs')[before:])
 
     # ---- a fork's pull request
     def labeled(login, at):
@@ -792,32 +665,6 @@ with tempfile.TemporaryDirectory() as temporary:
         done.returncode == 0 and '::notice::No DISCORD_WEBHOOK_PRS' in done.stdout and find('pr-8'),
         done.stdout + done.stderr,
     )
-
-    # ---- a message too long for Discord: its list cut by whole lines, the downloads kept
-    spec = importlib.util.spec_from_file_location('publish_builds', SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    options = {'repo': REPO, 'to': TO, 'dry_run': True, 'checkout': '.', 'keep': 30, 'artifacts': None}
-    publisher = module.Publisher(type('Args', (), options)())
-    lines = '\n'.join(f'- change {n} ([#{n}](https://x/pull/{n}))' for n in range(400))
-    field = {'name': 'Linux x86-64', 'value': '[AppImage](https://x/a)\n94.6 MB', 'inline': True}
-    cut = publisher.embed('Nightly', 'https://x', lines, [field] * 6)
-    check(
-        'a long description cut to what Discord takes, by whole lines, the fields kept',
-        len(cut['description']) <= module.DESCRIPTION
-        and lines.startswith(cut['description'])
-        and lines[len(cut['description'])] == '\n'
-        and len(cut['fields']) == 6,
-        len(cut['description']),
-    )
-    big = {'name': 'x' * 256, 'value': 'y' * 1024, 'inline': True}
-    cut = publisher.embed('Nightly', 'https://x', lines, [big] * 6)
-    check(
-        'fields over the whole limit leave no description, and it ends',
-        cut['description'] == '',
-        cut['description'][:80],
-    )
-    shutil.rmtree(publisher.work, ignore_errors=True)
 
 server.shutdown()
 for failure in failures:
