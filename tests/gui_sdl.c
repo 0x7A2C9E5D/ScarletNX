@@ -846,6 +846,8 @@ int main(int argc, char** argv) {
     assert(initialize(&app, "/nonexistent/snx-gui-test/bin/scarletnx"));
     assert(!strcmp(app.self, "/nonexistent/snx-gui-test/bin/scarletnx"));
     assert(!strcmp(app.drivers, "/nonexistent/snx-gui-test/bin"));
+    assert(!strcmp(app.theme.id, "yorha"));    /* the menu opens in YoRHa everywhere */
+    app.theme = *gui_theme_builtin("default"); /* the checks below read Default's colours */
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(SDL_PLATFORM_ANDROID)
     /* no checkout and no games/ beside the test: games/ and themes/ come from the user's data folder */
     assert(!strcmp(app.data_dir, "/nonexistent/snx-gui-test/scarletnx"));

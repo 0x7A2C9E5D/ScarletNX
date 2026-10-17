@@ -4770,16 +4770,14 @@ static bool initialize(App* app, const char* self) {
     memset(app, 0, sizeof(*app));
     app->menu.selected = GUI_SWITCH; /* the first item until Games shows */
     if (self) app->self = snx_strdup(self);
+    app->theme = *gui_theme_builtin("yorha"); /* every platform's look until Settings > App picks another */
 #ifdef SDL_PLATFORM_ANDROID
-    app->theme = *gui_theme_builtin("yorha");
     app->ask_abort = true;
     gui_android_start();
     /* back is ESC here: without this it would close the app */
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     /* a run goes on behind other apps: its output is read, or it stops once the pipe is full */
     SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
-#else
-    app->theme = *gui_theme_builtin("default");
 #endif
     /* touch() takes the fingers, and a finger and the mouse each arrive once: SDL would also send each as the other,
        and a pen as both (it stays a finger), so one tap would select twice */
