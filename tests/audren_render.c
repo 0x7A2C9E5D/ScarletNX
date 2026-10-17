@@ -54,8 +54,8 @@ enum {
 
 /* the update, laid out as edenprobe's source/audio.c lays it out */
 static u8 in[0x40 + 0x10 + 0x20 * SNX_ART_POOLS + 0x70 * SNX_ART_VOICES + 0x188 * SNX_ART_VOICES +
-             0xC0 * SNX_ART_EFFECTS + SNX_ART_SPLIT_BYTES + 0x20 + 0x930 * SNX_ART_MIXES +
-             0x140 * SNX_ART_SINKS + 0x10];
+             0xC0 * SNX_ART_EFFECTS + SNX_ART_SPLIT_BYTES + 0x20 + 0x930 * SNX_ART_MIXES + 0x140 * SNX_ART_SINKS +
+             0x10];
 static u8 out[0x1000];
 static u8 *u_pool, *u_res, *u_voice, *u_eff, *u_split, *u_mix, *u_sink;
 static u32 split_counts[2]; /* the splitters and destinations reset() opens the renderer with */
@@ -866,9 +866,9 @@ static void update_output_counts(void) {
                          counts[c][1] * 0x170,
                          counts[c][2] * 0x70,
                          counts[c][3] * 0xC0,
-                         0,
+                         revn >= 7 ? 0x20 : 0, /* REV7's mixes: their header, counting none */
                          counts[c][4] * 0x140};
-            u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[7];
+            u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[6] + h[7];
             u8 *input, *output;
             u32 i;
             CHECK(state != NULL, "no state for output counts");
@@ -913,6 +913,11 @@ static void update_output_counts(void) {
                 memset(output, 0xA5, reply + 32);
                 CHECK(audren_state_update(state, input, size, output, reply - 1) == -4, "short output accepted");
                 CHECK(audren_state_update(state, input, size - 1, output, reply) == -41, "short input accepted");
+                if (revn >= 7) { /* REV7's mixes without their header, even with none: Eden and Ryubing refuse it */
+                    w32(input, 6 * 4, 0);
+                    CHECK(audren_state_update(state, input, size - 0x20, output, reply) == -41,
+                          "revision %u took mixes without their header", revn);
+                }
                 for (i = 0; i < reply + 32; i++) CHECK(output[i] == 0xA5, "rejected update wrote output byte %u", i);
             }
             free(input);
@@ -932,8 +937,8 @@ static void update_voice_v2(void) {
                        bq1a[2] = {0.375f, -0.0625f};
     const u32 rev = ('R' << 0) | ('E' << 8) | ('V' << 16) | ((u32)('0' + 15) << 24), reply = 21456;
     u32 params[13] = {48000, 240, 216, 0, voices, sinks, effects};
-    u32 h[16] = {rev, 0x10, pools * 0x20, voices * stride, voices * 0x70, effects * 0xC0, 0, sinks * 0x140};
-    u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[7], i;
+    u32 h[16] = {rev, 0x10, pools * 0x20, voices * stride, voices * 0x70, effects * 0xC0, 0x20, sinks * 0x140};
+    u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[6] + h[7], i;
     ARState* state = audren_state_new((const u8*)params);
     u8 *input = calloc(1, size + reply), *voices_in, *vi;
     const ARVoice* v;
@@ -1034,9 +1039,9 @@ static void update_voice_rev14(void) {
                  voices * stride,
                  voices * 0x70,
                  effects * 0xC0,
-                 0,
+                 0x20,
                  sinks * 0x140};
-    u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[7], i;
+    u32 size = 0x40 + h[1] + h[2] + h[3] + h[4] + h[5] + h[6] + h[7], i;
     ARState* state = audren_state_new((const u8*)params);
     u8 *input = calloc(1, size + reply), *vi;
     CHECK(state != NULL && input != NULL, "no state or buffers for revision 14 voices");
