@@ -27,7 +27,7 @@ function(snx_component name)
 endfunction()
 
 snx_component(core runtime/main.c runtime/arm.c runtime/loader.c runtime/rtapi.c runtime/clock.c runtime/crash.c runtime/options.c
-              runtime/ini.c runtime/startup.c runtime/gdbstub.c runtime/present.c
+              runtime/ini.c runtime/startup.c runtime/gdbstub.c runtime/present.c runtime/guest_jit.c
               runtime/cheats.c)
 target_link_libraries(snx_core PRIVATE snx_driver snx_lz4)
 if(APPLE)

@@ -1,12 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* A whole program through the LLVM backend: a synthetic NRO with a loop, BL/RET, an indirect branch inside its function
-   (the D_ dispatch), a tail call into another function, SVC, exclusives, FP and SIMD, recompiled by the CLI in small
-   chunks (calls cross units). The module runs it from the same state, AOT and through its interpreter; every register,
-   the flags, FP state, stack memory and the SVC calls must match between the two.
+/* A whole program through the LLVM backend: a synthetic NRO with a loop, BL/RET, an indirect branch inside its
+   function (the D_ dispatch), a tail call into another function, SVC, exclusives, FP and SIMD, recompiled by the CLI
+   in small chunks (calls cross units). The module runs it AOT and through the reference interpreter of the templates'
+   C (snx_a64_interp, built here: modules carry none since the runtime JIT replaced it), which also takes the run's
+   misses, from the same state; every register, the flags, FP state, stack memory and the SVC calls must match.
    CPU.poll is set when each run starts: the AOT code must call rt->poll at the loop's backward branch, resuming at
-   its head (the interpreter polls on any taken branch).
+   its head (the interpreter polls on any taken branch). A second LLVM module built with --hook-direct-calls must run
+   the same, with main's BL to func reaching func through CPU.disp, where a wrapper counts it.
      llvm_module SCARLETNX REPO CLANG */
+#include "common/cpu/aarch64/a64.h"
 #include "common/utilities/common.h"
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/loader/module_abi.h"
@@ -66,15 +69,81 @@ typedef struct {
     Calls calls;
     int polls; /* rt->poll calls, and c->pc at the first */
     u64 poll_pc;
+    int watched; /* calls through the dispatch entry run() wrapped */
 } Run;
 static Run* current;
+static GuestFn watched_entry;
+static void watch(CPU* c, u64 e) {
+    ++current->watched;
+    watched_entry(c, e);
+}
 /* the runtime takes the thread off its core here, then gives it back: once, the flag cleared */
 static void on_poll(CPU* c) {
     if (!current->polls++) current->poll_pc = c->pc;
     c->poll = 0;
 }
 
-static int run(const char* path, const unsigned char* image, int interp, Run* out) {
+static GuestFn reference; /* the templates' interpreter, built by build_reference */
+#ifdef _WIN32
+static HMODULE reference_library; /* unloaded before the fixture goes: Windows deletes no loaded library */
+#else
+static void* reference_library;
+#endif
+
+/* the interpreter of a64_templates.inc's C, compiled into a library of its own with compiler and loaded: 0, or -1 */
+static int build_reference(const char* root, const char* repo, const char* compiler) {
+    char *source = snx_path_join(root, "reference.c"), *include = snx_path_join(repo, "src"),
+         *output = NULL;
+#ifdef _WIN32
+    char* library = snx_path_join(root, "reference.dll");
+#else
+    char* library = snx_path_join(root, "reference.so");
+#endif
+    const char* args[16];
+    FILE* file = snx_fopen(source, "wb");
+    int n = 0, status;
+    if (!file) return -1;
+    fputs("#include \"common/cpu/aarch64/cpu.h\"\n#include \"common/cpu/aarch64/cpu_helpers.c\"\n", file);
+    snx_a64_interp(file, 0);
+    fputs("SNX_EXPORT void snx_reference(CPU* c, u64 e) { snx_interp(c, e); }\n", file);
+    if (fclose(file)) return -1;
+    args[n++] = compiler;
+    args[n++] = "-O1";
+    args[n++] = "-shared";
+#ifndef _WIN32
+    args[n++] = "-fPIC";
+#endif
+    args[n++] = "-fno-strict-aliasing";
+    args[n++] = "-fwrapv";
+#if defined(__x86_64__) || defined(_M_X64)
+    args[n++] = "-mcx16";
+#endif
+    args[n++] = "-w";
+    args[n++] = "-I";
+    args[n++] = include;
+    args[n++] = source;
+    args[n++] = "-o";
+    args[n++] = library;
+    args[n] = NULL;
+    status = snx_run(args, root, NULL, &output);
+    if (status && output) fputs(output, stderr);
+    free(output);
+    if (status) return -1;
+#ifdef _WIN32
+    reference_library = LoadLibraryA(library);
+    reference = reference_library ? (GuestFn)(void*)GetProcAddress(reference_library, "snx_reference") : NULL;
+#else
+    reference_library = dlopen(library, RTLD_NOW | RTLD_LOCAL);
+    reference = reference_library ? (GuestFn)dlsym(reference_library, "snx_reference") : NULL;
+#endif
+    free(source);
+    free(include);
+    free(library);
+    return reference ? 0 : -1;
+}
+
+/* watch_at: an offset in the image whose dispatch entry counts its calls (0: none) */
+static int run(const char* path, const unsigned char* image, int interp, u64 watch_at, Run* out) {
     typedef const SnxModule* (*ModuleFn)(void);
     ModuleFn get;
     const SnxModule* mod;
@@ -96,12 +165,18 @@ static int run(const char* path, const unsigned char* image, int interp, Run* ou
     rt.svc = svc;
     rt.undef = undefined;
     rt.poll = on_poll;
+    rt.miss = reference; /* a pc a module has no function for */
     calls = &out->calls;
     current = out;
     memory = (unsigned char*)calloc(1, (size_t)mod->mods[0].base + MEMORY);
     out->cpu.disp = (GuestFn*)calloc((size_t)(mod->code_hi - mod->code_lo) / 4, sizeof(GuestFn));
     memcpy(memory + mod->mods[0].base, image, IMAGE);
     for (i = 0; i < mod->nentries; ++i) out->cpu.disp[(mod->entry_addr[i] - mod->code_lo) / 4] = mod->entry_fn[i];
+    if (watch_at) {
+        GuestFn* slot = &out->cpu.disp[(mod->mods[0].base + watch_at - mod->code_lo) / 4];
+        watched_entry = *slot;
+        if (watched_entry) *slot = watch;
+    }
     out->cpu.mem = memory;
     out->cpu.rt = &rt;
     out->cpu.code_lo = mod->code_lo;
@@ -110,7 +185,7 @@ static int run(const char* path, const unsigned char* image, int interp, Run* ou
     out->cpu.x[30] = 0xDEAD0000;
     out->cpu.poll = 1;
     if (interp)
-        mod->interp(&out->cpu, mod->mods[0].base);
+        reference(&out->cpu, mod->mods[0].base);
     else if (out->cpu.disp[0])
         out->cpu.disp[0](&out->cpu, mod->mods[0].base);
     memcpy(out->memory, memory + mod->mods[0].base, MEMORY);
@@ -159,11 +234,11 @@ static void differences(const Run* a, const Run* b, const char* what) {
 }
 
 int main(int argc, char** argv) {
-    static Run runs[2];
+    static Run runs[2], hooked, unhooked;
     unsigned char image[IMAGE];
-    char *root, *input, *self, *out, *module, *text = NULL;
+    char *root, *input, *self, *out[2], *module[2], *text = NULL;
     const char* args[24];
-    int k, interp;
+    int b, k, interp;
     size_t i;
     if (argc != 4) return 2;
     root = snx_temp_dir(NULL);
@@ -182,38 +257,54 @@ int main(int argc, char** argv) {
     input = snx_path_join(root, "program.nro");
     self = snx_executable(argv[0]);
     check(!snx_write_file(input, image, sizeof(image)), "write NRO");
-    out = snx_path_join(root, "llvm");
-#ifdef _WIN32
-    module = snx_path_join(out, "Program/Program_code.dll");
-#else
-    module = snx_path_join(out, "Program/Program_code.so");
-#endif
-    k = 0;
-    args[k++] = argv[1];
-    args[k++] = "--repo";
-    args[k++] = argv[2];
-    args[k++] = "-r";
-    args[k++] = input;
-    args[k++] = "Program";
-    args[k++] = "--outdir";
-    args[k++] = out;
-    args[k++] = "--runtime";
-    args[k++] = self;
-    args[k++] = "--chunk";
-    args[k++] = "4";
-    args[k++] = "-q";
-    args[k] = NULL;
-    if (snx_run(args, root, NULL, &text)) {
-        fprintf(stderr, "%s\n", text ? text : "");
-        check(0, "build");
+    if (build_reference(root, argv[2], argv[3])) {
+        check(0, "build the reference interpreter");
+        return 1;
     }
-    free(text);
-    for (interp = 0; interp < 2; ++interp)
-        check(!run(module, image, interp, &runs[interp]), interp ? "interpreter run" : "AOT run");
+    for (b = 0; b < 2; ++b) { /* the second: with --hook-direct-calls */
+        out[b] = snx_path_join(root, b ? "llvm-hooked" : "llvm");
+#ifdef _WIN32
+        module[b] = snx_path_join(out[b], "Program/Program_code.dll");
+#else
+        module[b] = snx_path_join(out[b], "Program/Program_code.so");
+#endif
+        k = 0;
+        args[k++] = argv[1];
+        args[k++] = "--repo";
+        args[k++] = argv[2];
+        args[k++] = "-r";
+        args[k++] = input;
+        args[k++] = "Program";
+        args[k++] = "--outdir";
+        args[k++] = out[b];
+        args[k++] = "--runtime";
+        args[k++] = self;
+        args[k++] = "--chunk";
+        args[k++] = "4";
+        if (b) args[k++] = "--hook-direct-calls";
+        args[k++] = "-q";
+        args[k] = NULL;
+        if (snx_run(args, root, NULL, &text)) {
+            fprintf(stderr, "%s\n", text ? text : "");
+            fprintf(stderr, "%s build failed\n", b ? "hooked llvm" : "llvm");
+            check(0, "build");
+        }
+        free(text);
+        text = NULL;
+        if (b) break;
+        for (interp = 0; interp < 2; ++interp)
+            check(!run(module[0], image, interp, 0, &runs[interp]), interp ? "interpreter run" : "AOT run");
+    }
+    /* func, which main's BL at 0x90 calls on each pass of the loop */
+    check(!run(module[0], image, 0, 0xE8, &unhooked) && !run(module[1], image, 0, 0xE8, &hooked),
+          "hooked and unhooked runs");
+    check(same(&runs[0], &hooked), "the --hook-direct-calls module runs the same");
+    check(!unhooked.watched && hooked.watched > 0,
+          "a direct BL reaches its function through CPU.disp only with --hook-direct-calls");
     check(runs[0].cpu.pc == 0 && runs[0].calls.count == 1 && runs[0].calls.imm[0] == 7 && !runs[0].calls.undefined,
           "the program returns to 0 after one SVC #7");
     if (!same(&runs[0], &runs[1])) differences(&runs[0], &runs[1], "interpreter");
-    check(same(&runs[0], &runs[1]), "LLVM AOT and interpreter agree");
+    check(same(&runs[0], &runs[1]), "LLVM AOT and the reference interpreter agree");
     /* the loop: b.ne back to main+0x10 */
     if (runs[0].polls != 1 || runs[0].poll_pc != runs[0].cpu.code_lo + 0x90)
         fprintf(stderr, "%d polls, the first at %llx\n", runs[0].polls, (unsigned long long)runs[0].poll_pc);
@@ -223,6 +314,11 @@ int main(int argc, char** argv) {
     printf("x0=%llx x9=%llx d0=%llx v2=%llx:%llx\n", (unsigned long long)runs[0].cpu.x[0],
            (unsigned long long)runs[0].cpu.x[9], (unsigned long long)runs[0].cpu.v[0].d[0],
            (unsigned long long)runs[0].cpu.v[2].d[1], (unsigned long long)runs[0].cpu.v[2].d[0]);
+#ifdef _WIN32
+    if (reference_library) FreeLibrary(reference_library);
+#else
+    if (reference_library) dlclose(reference_library);
+#endif
     check(!snx_remove_tree(root), "fixture cleanup");
     printf("LLVM module: %s\n", failures ? "FAILED" : "passed");
     return failures != 0;

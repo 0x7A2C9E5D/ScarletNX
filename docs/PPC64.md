@@ -86,7 +86,7 @@ and CI check these paths on 4 KiB hosts (`ldr_service_64k_pages`, `gnuabi_memory
   32 MiB.
 - **No runtime JIT.** The JIT's loader (`code_loader.c`) doesn't load PowerPC64 objects: code loaded beside the
   runtime would call its functions, which have a TOC of their own, and each such call would need a stub that saves
-  and restores r2.
+  and restores r2. The JIT replaced the interpreter, so there only the code the recompiler found can run.
 - **Rounding stays on the slow path.** LLVM 19 lowers `llvm.roundeven` to a libm call on POWER8, and fails on its
   vector form, so FRINTN and the rounding conversions use the software path. Fused multiply-add is a fast path, as
   POWER always has it.

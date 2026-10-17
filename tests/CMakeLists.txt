@@ -828,12 +828,21 @@ snx_test_target(snx-test-llvm-differential 11)
 target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
 # In shards that run side by side, each a share of the words, all of them started first (COST): a tree with no times
 # of its own (CI's) starts tests in their order, and these are the longest. Fewer, and one runs alone at the end;
-# more, and each pays the compiles' start again
+# more, and each pays the compiles' start again. The _jit shards run the same steps through the JIT's loader
+# (code_loader.c: ELF objects, code_loader_coff.c: Windows' COFF ones)
 foreach(shard RANGE 2)
     add_test(NAME llvm_differential_${shard} COMMAND snx-test-llvm-differential "${SNX_TARGET_C_COMPILER}"
         "${PROJECT_SOURCE_DIR}" --quiet --shard ${shard}/3)
-    set_tests_properties(llvm_differential_${shard} PROPERTIES TIMEOUT 900 COST 100)
+    add_test(NAME llvm_differential_jit_${shard} COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}"
+        "${PROJECT_SOURCE_DIR}" --quiet --jit --shard ${shard}/3)
+    set_tests_properties(llvm_differential_${shard} llvm_differential_jit_${shard} PROPERTIES TIMEOUT 900 COST 100)
 endforeach()
+# the runtime JIT (jit_service.c): misses compiled, published and shared between threads, on that loader
+add_executable(snx-test-jit-service jit_service.c)
+snx_test_target(snx-test-jit-service 11)
+target_link_libraries(snx-test-jit-service PRIVATE snx_llvm Threads::Threads)
+add_test(NAME jit_service COMMAND snx-test-jit-service)
+set_tests_properties(jit_service PROPERTIES TIMEOUT 120)
 # longjmp across the loader's code, which on Windows unwinds through its registered function table
 add_executable(snx-test-code-loader-unwind code_loader_unwind.c)
 snx_test_target(snx-test-code-loader-unwind 11)
@@ -900,7 +909,8 @@ if(APPLE)
     # (src/common/cpu/recompiler/llvm/link.c, docs/APPLE.md), and 4 KiB host pages to run it: not run there. The
     # in-process loader takes ELF objects, which Darwin can't load either (code_loader.c)
     set_tests_properties(native_recompiler llvm_module recompiler_library llvm_differential_0 llvm_differential_1
-                         llvm_differential_2 code_loader_unwind PROPERTIES DISABLED TRUE)
+                         llvm_differential_2 llvm_differential_jit_0 llvm_differential_jit_1 llvm_differential_jit_2
+                         jit_service code_loader_unwind PROPERTIES DISABLED TRUE)
 endif()
 
 add_executable(snx_codegen_test codegen_test.c)

@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The recompiler as a library (snx_recompiler.h, issue #171). The pieces are the ones the scarletnx command uses
-   for a game: function discovery (codegen.c), the LLVM backend (llvm/ir*.c), and the runtime library every
-   module carries (llvm/rtlib.c, prebuilt). What differs from the game workflow (nx/loader/module_llvm.c): the input is a buffer at a guest address instead of NSO files, the module
+   for a game: function discovery (codegen.c), the LLVM backend (llvm/ir*.c), and the runtime library every module
+   carries (llvm/rtlib.c, prebuilt). What differs from the game workflow (nx/loader/module_llvm.c): the input is a buffer at a guest address instead of NSO files, the module
    descriptor is the small one below instead of the Switch loader's SnxModule, and the result is loaded into this
    process straight from memory (or a temporary file the OS requires) instead of being written beside the game. */
 #if defined(__linux__) && !defined(_GNU_SOURCE)
@@ -17,6 +17,7 @@
 #include "common/cpu/arm/exec.h"
 #include "common/cpu/arm/simd.h"
 #include "common/cpu/recompiler/llvm/ir.h"
+#include "common/cpu/recompiler/llvm/jit_service.h"
 #include "common/cpu/recompiler/llvm/link.h"
 #include <llvm-c/Support.h>
 #include <llvm-c/TargetMachine.h>
@@ -52,7 +53,7 @@ extern const unsigned long snx_rtlib_bitcode_size;
 #define MAX_CODE_SPAN ((uint64_t)1 << 30)
 
 /* ---- the descriptor the generated module exports, read back by load_descriptor ----
-   Written by the backend field by field at these offsets, into a byte array of this size, so it doesn't have to
+   Written by the LLVM backend field by field at these offsets, into a byte array of this size, so it doesn't have to
    describe the struct's layout. abi comes first: a module of another contract is recognized before anything else */
 typedef struct {
     uint32_t abi;
@@ -60,8 +61,7 @@ typedef struct {
     uint64_t count;            /* entries: every leader of every function, by address */
     const uint64_t* addresses; /* ascending */
     const GuestFn* functions;  /* the function each leader belongs to (its F_, which dispatches on the entry) */
-    GuestFn interp;            /* the module's interpreter (rtlib.c's snx_interp), for every other pc */
-    GuestFn* interp_entry;     /* rtlib.c's snx_interp_entry, which the module's lookups fall back to */
+    GuestFn interp;            /* NULL: there is no interpreter, the module's JIT compiles what it lacks */
 } Descriptor;
 #define DESCRIPTOR_SYMBOL "snx_lib_module"
 typedef const Descriptor* (*DescriptorFn)(void);
@@ -79,12 +79,25 @@ struct snx_recompiled {
     void* image;       /* dlopen/LoadLibrary handle */
     char* image_file;  /* Windows: the DLL's file, deleted after FreeLibrary */
     int image_fd;      /* Linux: the memfd the module was loaded from, kept open while it is (see load_image) */
-    GuestFn* dispatch; /* (pc - code_lo) >> 2 -> function, NULL for the interpreter */
-    GuestFn interp;    /* the module's interpreter entry */
-    GuestFn* fallback; /* the module's snx_interp_entry (snx_recompiled_set_fallback) */
+    GuestFn* dispatch; /* (pc - code_lo) >> 2 -> function, NULL for one the JIT compiles when reached */
+    /* snx_recompiled_set_fallback's: what a miss runs instead of the module's JIT, NULL for the JIT */
+    GuestFn fallback;
     uint64_t code_lo, code_hi;
-    size_t functions, fallbacks;
+    size_t functions;
+    /* the code ranges, views and bytes in one block (keep_code), which the JIT reads for as long as the module lives:
+       the caller's may go once snx_recompile returns */
+    SnxCodeImage* views;
+    size_t view_count;
+    /* the descriptor's entries, which the JIT's code calls directly */
+    const uint64_t* entry_addresses;
+    const GuestFn* entry_functions;
+    size_t entry_count;
+    char opt;
+    /* made by the first miss (module_jit), JIT_NONE when it can't start */
+    SnxJitService* jit;
 };
+static char jit_none;
+#define JIT_NONE ((SnxJitService*)(void*)&jit_none)
 
 static void fail(struct snx_recompiler* r, const char* fmt, ...) {
     va_list ap;
@@ -205,8 +218,60 @@ static void default_sev(void) {}
 static void default_wfe(CPU* c) { (void)c; }
 static void default_poll(CPU* c) { (void)c; }
 
+/* The module's JIT, made by the first miss of any thread (the first to publish it keeps its own): NULL when it can't
+   start (a host without the JIT loader) */
+static SnxJitService* module_jit(struct snx_recompiled* m) {
+    SnxJitService *s = __atomic_load_n(&m->jit, __ATOMIC_ACQUIRE), *expected = NULL;
+    SnxJitConfig config;
+    char error[512];
+    if (s) return s == JIT_NONE ? NULL : s;
+    if (!m->view_count) return NULL; /* snx_recompile_from's: the caller compiles what the module lacks */
+    memset(&config, 0, sizeof(config));
+    config.images = m->views;
+    config.image_count = m->view_count;
+    config.dispatch = m->dispatch;
+    config.code_lo = m->code_lo;
+    config.code_hi = m->code_hi;
+    config.aot_addresses = m->entry_addresses;
+    config.aot_functions = m->entry_functions;
+    config.aot_count = m->entry_count;
+    config.opt = m->opt;
+    s = snx_jit_service_new(&config, error, sizeof(error));
+    if (!__atomic_compare_exchange_n(&m->jit, &expected, s ? s : JIT_NONE, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        snx_jit_service_free(s);
+        s = expected;
+    }
+    return s == JIT_NONE ? NULL : s;
+}
+
+/* the code for pc of the module: its table's, or the JIT's, waiting for the compile; NULL when it can't be compiled */
+static GuestFn module_code(struct snx_recompiled* m, uint64_t pc) {
+    uint64_t o = pc - m->code_lo;
+    SnxJitService* s;
+    GuestFn f = NULL;
+    if (o < m->code_hi - m->code_lo && !(pc & 3)) f = __atomic_load_n(&m->dispatch[o >> 2], __ATOMIC_ACQUIRE);
+    if (!f) f = __atomic_load_n(&m->fallback, __ATOMIC_ACQUIRE);
+    if (!f && (s = module_jit(m)) != NULL) f = snx_jit_wait(s, pc);
+    return f;
+}
+
+/* RtAPI.miss, generated code's fallback for a pc its table leaves empty (SNX_ABI 8): the JIT's code for it, in the
+   module the CPU is bound to, which load_descriptor keeps in front of the dispatch table. A pc that can't be compiled
+   (outside the code ranges, a host without the JIT) is an undefined instruction there */
+static void default_miss(CPU* c, uint64_t pc) {
+    struct snx_recompiled* m = (struct snx_recompiled*)((void* const*)c->disp)[-1];
+    GuestFn f = module_code(m, pc);
+    if (f) {
+        f(c, pc);
+        return;
+    }
+    c->pc = pc;
+    c->rt->undef(c, pc, 0);
+}
+
 void snx_runtime_defaults(RtAPI* rt) {
     memset(rt, 0, sizeof(*rt));
+    rt->miss = default_miss;
     rt->note_hint = default_note_hint;
     rt->ticks = default_ticks;
     rt->fpcr_changed = default_fpcr_changed;
@@ -435,27 +500,29 @@ static void unload_image(struct snx_recompiled* m) {
 /* the dispatch table from the descriptor; the interpreter entry comes from a lookup of a pc the table leaves empty */
 static int load_descriptor(struct snx_recompiler* r, struct snx_recompiled* m, const Descriptor* d) {
     size_t i, slots;
+    void** block;
     if (!d || d->abi != SNX_ABI) {
         fail(r, "the recompiled module's descriptor is missing or of another ABI");
         return -1;
     }
     slots = (size_t)((m->code_hi - m->code_lo + 3) / 4);
-    m->dispatch = (GuestFn*)calloc(slots ? slots : 1, sizeof(*m->dispatch));
-    if (!m->dispatch) {
+    /* one slot more, in front of the table: the module, for default_miss to find from cpu->disp. Generated code only
+       indexes the table from its start */
+    block = (void**)calloc(slots + 1, sizeof(void*));
+    if (!block) {
         fail(r, "out of memory for the dispatch table (%lu entries)", (unsigned long)slots);
         return -1;
     }
+    block[0] = m;
+    m->dispatch = (GuestFn*)(block + 1);
     for (i = 0; i < d->count; ++i) {
         uint64_t a = d->addresses[i];
         if (a < m->code_lo || a >= m->code_hi || (a & 3)) continue;
         m->dispatch[(a - m->code_lo) >> 2] = d->functions[i];
     }
-    m->interp = d->interp;
-    m->fallback = d->interp_entry;
-    if (!m->interp || !m->fallback) {
-        fail(r, "the recompiled module has no interpreter");
-        return -1;
-    }
+    m->entry_addresses = d->addresses;
+    m->entry_functions = d->functions;
+    m->entry_count = (size_t)d->count;
     return 0;
 }
 
@@ -465,7 +532,6 @@ typedef struct {
     size_t first, last; /* functions */
     unsigned char* object;
     size_t size;
-    unsigned long fallbacks;
 } Unit;
 
 typedef struct {
@@ -517,7 +583,6 @@ static int llvm_unit(Queue* q, size_t index, char* error, size_t error_size) {
     ir = snx_ir_new(name, q->r->opt, error, error_size);
     if (!ir) return -1;
     for (i = u->first; i < u->last; ++i) snx_ir_emit(ir, q->codegen, &q->codegen->functions[i]);
-    u->fallbacks = ir->fallbacks;
     if (q->r->keep_ir && save_ir(ir, q->r->keep_ir, name)) {
         snprintf(error, error_size, "cannot save the IR of %s in %s", name, q->r->keep_ir);
         rc = -1;
@@ -608,12 +673,12 @@ static void run_queue(Queue* q, unsigned jobs) {
     free(threads);
 }
 
-/* the descriptor as IR: constant tables, and DESCRIPTOR_SYMBOL filling the Descriptor and pointing the runtime
-   library's snx_interp_entry at its interpreter */
+/* the descriptor as IR: constant tables, and DESCRIPTOR_SYMBOL filling the Descriptor (generated code's misses go to
+   RtAPI.miss since SNX_ABI 8, and default_miss's to the module's JIT) */
 static int llvm_descriptor(SnxIr* ir, const SnxCodegen* codegen, char* error, size_t error_size) {
     Entry* e;
     size_t count, n, i;
-    LLVMValueRef *values, addresses, functions, desc, interp, entry, fn;
+    LLVMValueRef *values, addresses, functions, desc, fn;
     LLVMTypeRef t_addresses, t_functions;
     LLVMBasicBlockRef block;
     e = entries(codegen, &count);
@@ -649,16 +714,11 @@ static int llvm_descriptor(SnxIr* ir, const SnxCodegen* codegen, char* error, si
     LLVMSetLinkage(desc, LLVMInternalLinkage);
     LLVMSetInitializer(desc, LLVMConstNull(LLVMArrayType(ir->t_i8, sizeof(Descriptor))));
     LLVMSetAlignment(desc, 8);
-    interp = LLVMAddFunction(ir->mod, "snx_interp", ir->t_guest); /* rtlib.c */
-    LLVMSetVisibility(interp, LLVMHiddenVisibility);
-    entry = LLVMAddGlobal(ir->mod, ir->t_ptr, "snx_interp_entry"); /* rtlib.c */
-    LLVMSetVisibility(entry, LLVMHiddenVisibility);
     fn = LLVMAddFunction(ir->mod, DESCRIPTOR_SYMBOL, LLVMFunctionType(ir->t_ptr, NULL, 0, 0));
     if (ir->windows) LLVMSetDLLStorageClass(fn, LLVMDLLExportStorageClass);
     ir->fn = fn;
     block = LLVMAppendBasicBlockInContext(ir->ctx, fn, "entry");
     LLVMPositionBuilderAtEnd(ir->b, block);
-    ir_store(ir, interp, entry);
 #define FIELD(member, value)                                                                                           \
     do {                                                                                                               \
         LLVMValueRef index__ = ir_i64(ir, offsetof(Descriptor, member));                                               \
@@ -668,8 +728,7 @@ static int llvm_descriptor(SnxIr* ir, const SnxCodegen* codegen, char* error, si
     FIELD(count, ir_i64(ir, count));
     FIELD(addresses, addresses);
     FIELD(functions, functions);
-    FIELD(interp, interp);
-    FIELD(interp_entry, entry);
+    FIELD(interp, LLVMConstNull(ir->t_ptr));
 #undef FIELD
     LLVMBuildRet(ir->b, desc);
     return 0;
@@ -677,7 +736,7 @@ static int llvm_descriptor(SnxIr* ir, const SnxCodegen* codegen, char* error, si
 
 /* ---- the module cache ----
    A linked module is a function of the code it was made from, the addresses it sits at, where it may be entered (the
-   leaders), the backend's settings, the contract with the runtime (SNX_ABI) and the CPU it was made for (the backend
+   leaders), the optimization level, the contract with the runtime (SNX_ABI) and the CPU it was made for (the backend
    and rtlib.c use every extension the host has). Two 64-bit FNV-1a hashes of all that, with different offsets, name
    it in the cache folder */
 typedef struct {
@@ -879,7 +938,6 @@ static int recompile_llvm(struct snx_recompiler* r, struct snx_recompiled* m, Sn
         fail(r, "LLVM backend: %s", q.error);
         goto done;
     }
-    for (i = 0; i < count; ++i) m->fallbacks += q.units[i].fallbacks;
     ir = snx_ir_new("module", r->opt, error, sizeof(error));
     if (!ir || llvm_descriptor(ir, codegen, error, sizeof(error)) ||
         (r->keep_ir && save_ir(ir, r->keep_ir, "module")) ||
@@ -943,6 +1001,40 @@ done:
 
 /* ---- A64 ---- */
 
+/* the module's own copy of the code ranges, for its JIT: the views and the bytes in one block. 0, or -1 */
+static int keep_code(struct snx_recompiler* r, struct snx_recompiled* m, const struct snx_code_range* ranges,
+                     size_t count) {
+    size_t i, total = 0, at;
+    unsigned char* bytes;
+    for (i = 0; i < count; ++i) {
+        if (ranges[i].size > ((size_t)-1) / 2 - total) {
+            fail(r, "the code ranges are too large");
+            return -1;
+        }
+        total += ranges[i].size;
+    }
+    if (count > (((size_t)-1) / 2 - total) / sizeof(SnxCodeImage)) {
+        fail(r, "the code ranges are too large");
+        return -1;
+    }
+    m->views = (SnxCodeImage*)calloc(1, count * sizeof(SnxCodeImage) + total);
+    if (!m->views) {
+        fail(r, "out of memory for a copy of the code");
+        return -1;
+    }
+    bytes = (unsigned char*)(m->views + count);
+    for (i = 0, at = 0; i < count; ++i) {
+        memcpy(bytes + at, ranges[i].code, ranges[i].size);
+        m->views[i].image = bytes + at;
+        m->views[i].image_size = ranges[i].size;
+        m->views[i].base = ranges[i].address;
+        m->views[i].text_size = ranges[i].size;
+        at += ranges[i].size;
+    }
+    m->view_count = count;
+    return 0;
+}
+
 /* the backend's half of snx_recompile_ranges and snx_recompile_from, for the functions codegen found; frees codegen */
 static struct snx_recompiled* recompile(struct snx_recompiler* r, struct snx_recompiled* m, SnxCodegen* codegen) {
     int rc;
@@ -953,7 +1045,6 @@ static struct snx_recompiled* recompile(struct snx_recompiler* r, struct snx_rec
         snx_recompiled_free(m);
         return NULL;
     }
-    if (m->fallbacks) report(r, "%lu instructions run through the interpreter step\n", (unsigned long)m->fallbacks);
     return m;
 }
 
@@ -983,10 +1074,17 @@ struct snx_recompiled* snx_recompile_ranges(struct snx_recompiler* r, const stru
     m->code_lo = lo;
     m->code_hi = hi;
     m->image_fd = -1;
+    m->opt = r->opt;
+    if (keep_code(r, m, ranges, range_count)) {
+        free(views);
+        free(m);
+        return NULL;
+    }
     memset(&codegen, 0, sizeof(codegen));
     if (snx_codegen_analyze(&codegen, views, range_count, hints, hint_count, !r->verbose)) {
         fail(r, "function discovery failed");
         free(views);
+        free(m->views);
         free(m);
         return NULL;
     }
@@ -1021,6 +1119,7 @@ struct snx_recompiled* snx_recompile_from(struct snx_recompiler* r, const struct
         return NULL;
     }
     m->image_fd = -1;
+    m->opt = r->opt;
     /* the table covers what was found, not the ranges: they may be a whole program's code */
     m->code_lo = ~(uint64_t)0;
     m->code_hi = 0;
@@ -1035,7 +1134,10 @@ struct snx_recompiled* snx_recompile_from(struct snx_recompiler* r, const struct
 
 void snx_recompiled_free(struct snx_recompiled* m) {
     if (!m) return;
-    free(m->dispatch);
+    if (m->jit && m->jit != JIT_NONE)
+        snx_jit_service_free(m->jit); /* its threads stop before the code they read goes */
+    free(m->views);
+    if (m->dispatch) free((void**)m->dispatch - 1); /* load_descriptor's block, with the module in front */
     unload_image(m);
     free(m);
 }
@@ -1046,33 +1148,40 @@ void snx_recompiled_range(const struct snx_recompiled* m, uint64_t* code_lo, uin
 }
 
 size_t snx_recompiled_functions(const struct snx_recompiled* m) { return m->functions; }
-size_t snx_recompiled_fallbacks(const struct snx_recompiled* m) { return m->fallbacks; }
+size_t snx_recompiled_fallbacks(const struct snx_recompiled* m) {
+    (void)m;
+    return 0;
+}
 
 int snx_recompiled_bind(struct snx_recompiled* m, CPU* cpu) {
-    if (!cpu->rt || !cpu->rt->svc || !cpu->rt->undef || !cpu->rt->brk) return -1;
+    if (!cpu->rt || !cpu->rt->svc || !cpu->rt->undef || !cpu->rt->brk || !cpu->rt->miss) return -1;
     cpu->disp = m->dispatch;
     cpu->code_lo = m->code_lo;
     cpu->code_hi = m->code_hi;
     return 0;
 }
 
-/* cpu.h's snx_lookup, over the module's table: generated code does the same with the CPU's copy of it */
-GuestFn snx_recompiled_lookup(const struct snx_recompiled* m, uint64_t pc) {
-    uint64_t o = pc - m->code_lo;
-    if (o < m->code_hi - m->code_lo && !(pc & 3) && m->dispatch[o >> 2]) return m->dispatch[o >> 2];
-    return m->interp;
-}
+/* cpu.h's snx_lookup over the module's table, and the JIT's code for a pc the table lacks */
+GuestFn snx_recompiled_lookup(struct snx_recompiled* m, uint64_t pc) { return module_code(m, pc); }
 
 GuestFn snx_recompiled_function(const struct snx_recompiled* m, uint64_t pc) {
     uint64_t o = pc - m->code_lo;
-    return o < m->code_hi - m->code_lo && !(pc & 3) ? m->dispatch[o >> 2] : NULL;
+    return o < m->code_hi - m->code_lo && !(pc & 3) ? __atomic_load_n(&m->dispatch[o >> 2], __ATOMIC_ACQUIRE) : NULL;
 }
 
 void snx_recompiled_set_fallback(struct snx_recompiled* m, GuestFn fallback) {
-    *m->fallback = fallback ? fallback : m->interp;
+    __atomic_store_n(&m->fallback, fallback, __ATOMIC_RELEASE);
 }
 
-void snx_recompiled_call(struct snx_recompiled* m, CPU* cpu, uint64_t pc) { snx_recompiled_lookup(m, pc)(cpu, pc); }
+void snx_recompiled_call(struct snx_recompiled* m, CPU* cpu, uint64_t pc) {
+    GuestFn f = module_code(m, pc);
+    if (f)
+        f(cpu, pc);
+    else { /* nothing can run there: an undefined instruction, as default_miss's */
+        cpu->pc = pc;
+        cpu->rt->undef(cpu, pc, 0);
+    }
+}
 
 void snx_recompiled_run(struct snx_recompiled* m, CPU* cpu, uint64_t pc, uint64_t stop) {
     cpu->pc = pc;
