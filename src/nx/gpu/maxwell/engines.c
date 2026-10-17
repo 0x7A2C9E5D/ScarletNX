@@ -182,12 +182,13 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
     }
     m &= 0xFFF;
     u32 raw = v;
-    /* Puller/macro-control methods below 0x80 and WINDOW_ORIGIN (0x4EB) bypass shadow replay. */
+    /* Puller/macro-control methods below 0x80 and WINDOW_ORIGIN (0x4EB) bypass shadow replay.
+       Reset values are valid shadow state too: NVN temporarily forces rendering in passthrough mode, then
+       replays the default override to restore conditional target clears without ever tracking a write to it. */
     if (m >= 0x80) {
-        if (ch->r3d_shadow_mode <= 1) {
+        if (ch->r3d_shadow_mode <= 1)
             ch->r3d_shadow[m] = v;
-            ch->r3d_shadow_valid[m] = 1;
-        } else if (ch->r3d_shadow_mode == 3 && ch->r3d_shadow_valid[m] && m != 0x4EB)
+        else if (ch->r3d_shadow_mode == 3 && m != 0x4EB)
             v = ch->r3d_shadow[m];
     }
     if (g_pd.on) { /* keep accumulating only for BEGIN(next instance), END, ranges, or writes that don't change a reg */

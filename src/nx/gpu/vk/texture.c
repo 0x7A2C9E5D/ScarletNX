@@ -944,9 +944,8 @@ static void copy_layers(VkCommandBuffer cb, Surf* s, Surf* t, u32 l, u32 dst, u3
 
 /* a texture whose layers, levels or 3D slices were drawn as render targets of their own is copied from those targets
    on the GPU: they are never written back to its memory. Only a target matching one subresource (or, layered, the
-   layers from one), drawn this frame or the last: an older one may share memory the game has reused since (Catherine
-   draws a target where its copyright text later goes). Targets are never block compressed: such a texture can't take
-   their texels */
+   layers from one), whose backing memory has not been overwritten since its draw. Generated textures can be first
+   sampled several frames later. Targets are never block compressed: such a texture can't take their texels */
 static void tex_take_drawn(Surf* t) {
     if (!t || t->is_rt || t->f.conv || t->f.stencil || t->f.bw != 1) return;
     Surf* small[32];

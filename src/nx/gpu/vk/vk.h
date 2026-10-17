@@ -379,7 +379,7 @@ const char* vk_corpus_dir(void);
 int vk_cb_reads_hold(const VkCbReads* reads, VkCbReader read);
 typedef struct VkSh {
     u64 hash;
-    u32 mask[16]; /* vk_shader_get's masks, including the geometry passthrough skip mask */
+    u32 mask[20]; /* vk_shader_get's masks, including the geometry passthrough skip mask */
     int stage;
     VkCbReads cbr;
     ShaderInfo si;
@@ -408,8 +408,8 @@ void vk_pipeline_init(void);
    tessellation evaluation and geometry stages (ShaderInfo.rt_int_mask). clip: the clip distances the 3D engine
    enables, and SNX_SH_NOT_LAST (the stages before rasterization). The translator reads ch's bound constant buffers
    (ch->cbind) to resolve indirect branches */
-VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask, u32 rt_int,
-                    u32 rt_sint, u32 clip, u32 dc_color, u32 dc_funcs, u32 unfed);
+VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int_mask, u64 sint_mask, u32 rt_int,
+                    u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed);
 typedef struct {
     VkShaderModule vs, fs;
     VkShaderModule tcs, tes, gs; /* tessellation control and evaluation, geometry: VK_NULL_HANDLE when off */

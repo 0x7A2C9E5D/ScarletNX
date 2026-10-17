@@ -157,7 +157,7 @@ u32 g_vk_buffer_image_slots;
 static VkDescriptorType binding_type(u32 i) {
     if (i == SNX_VKB_SMAP) return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     if (i == SNX_VKB_TEXARRAY || i == SNX_VKB_TEXDEPTH) return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    if (i == SNX_VKB_TEXFUNCS) return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    if (i == SNX_VKB_TEXFUNCS || i == SNX_VKB_TEXMAP) return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     if (i >= SNX_VKB_IMGBUF) return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
     return i < SNX_VKB_SSBO  ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
            : i < SNX_VKB_TEX ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
@@ -202,17 +202,16 @@ void vk_pipeline_init(void) {
         buffer_slots -= image_slots;
         if (buffer_slots > SNX_VKB_TEXARRAY - SNX_VKB_IMGBUF) buffer_slots = SNX_VKB_TEXARRAY - SNX_VKB_IMGBUF;
         g_vk_buffer_image_slots = buffer_slots;
-        /* Plain and depth arrays each take SNX_TEX_ARRAY samplers beside the 32 single textures. */
-        if (g_vk.props.limits.maxPerStageDescriptorSamplers < SNX_VKB_IMG - SNX_VKB_TEX + 2 * SNX_TEX_ARRAY ||
-            g_vk.props.limits.maxPerStageDescriptorSampledImages < SNX_VKB_IMG - SNX_VKB_TEX + 2 * SNX_TEX_ARRAY ||
-            g_vk.props.limits.maxDescriptorSetSamplers < 5 * (SNX_VKB_IMG - SNX_VKB_TEX + 2 * SNX_TEX_ARRAY) ||
-            g_vk.props.limits.maxDescriptorSetSampledImages < 5 * (SNX_VKB_IMG - SNX_VKB_TEX + 2 * SNX_TEX_ARRAY))
+        /* A compact array holds the unique handles selected by all indexed tables. */
+        if (g_vk.props.limits.maxPerStageDescriptorSamplers < SH_MAXTEX + 2 * SNX_TEX_ARRAY ||
+            g_vk.props.limits.maxPerStageDescriptorSampledImages < SH_MAXTEX + 2 * SNX_TEX_ARRAY ||
+            g_vk.props.limits.maxDescriptorSetSamplers < 5 * (SH_MAXTEX + 2 * SNX_TEX_ARRAY) ||
+            g_vk.props.limits.maxDescriptorSetSampledImages < 5 * (SH_MAXTEX + 2 * SNX_TEX_ARRAY))
             g_shader_texture_arrays = 0;
         for (i = 0; i < SNX_VKB_END; i++) {
             int image = i >= SNX_VKB_IMG && i < SNX_VKB_RS;
             if (image && (s >= 2 || i - SNX_VKB_IMG >= image_slots)) continue; /* compute and fragment */
-            if ((i == SNX_VKB_TEXARRAY || i == SNX_VKB_TEXDEPTH || i == SNX_VKB_TEXFUNCS) &&
-                !g_shader_texture_arrays) continue;
+            if (i >= SNX_VKB_TEXARRAY && !g_shader_texture_arrays) continue;
             if (i >= SNX_VKB_IMGBUF && i < SNX_VKB_TEXARRAY && (s != 0 || i - SNX_VKB_IMGBUF >= buffer_slots)) continue;
             if (i >= SNX_VKB_IMGBUF && i < SNX_VKB_TEXARRAY) image = 1;
             b[count++] = (VkDescriptorSetLayoutBinding){
@@ -285,7 +284,7 @@ static VkSh* g_shh[1024];
    by write tracking since then, or else by the hash of its code */
 typedef struct {
     u64 gva, gva_a, gw;
-    u32 mask[16], epoch, wseen;
+    u32 mask[20], epoch, wseen;
     int stage;
     VkSh* s;
 } ShA;
@@ -310,15 +309,24 @@ static int code_same(const ShA* ca, u64 gva, u32 len, u64 qh) {
     return code_hash(gva, len, &hash) && hash == qh;
 }
 
-VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u32 int_mask, u32 sint_mask,
-                    u32 rt_int, u32 rt_sint, u32 clip, u32 dc_color, u32 dc_funcs, u32 unfed) {
+VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int_mask, u64 sint_mask, u32 rt_int,
+                    u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed) {
     g_sh_ch = ch;
     g_sh_bind = stage <= ST_FS ? stage : 0;
-    u32 mask[16] = {int_mask, sint_mask, rt_int, rt_sint, clip, dc_color, dc_funcs, unfed};
-    if (stage == ST_GS && ch) memcpy(mask + 8, ch->r3d + 0x490, 8 * sizeof(u32));
-    u32 mix = int_mask * 0x9E3779B1u ^ sint_mask * 0x85EBCA6Bu ^ rt_int * 0x27D4EB2Fu ^ rt_sint * 0x165667B1u ^
-              clip * 0x61C88647u ^ dc_color * 0x2545F491u ^ dc_funcs * 0x9E3779B9u ^ unfed * 0x3C6EF372u;
-    if (stage == ST_GS) mix ^= (u32)vk_hash(mask + 8, 8 * sizeof(u32));
+    u32 mask[20] = {(u32)int_mask,
+                    (u32)(int_mask >> 32),
+                    (u32)sint_mask,
+                    (u32)(sint_mask >> 32),
+                    rt_int,
+                    rt_sint,
+                    clip,
+                    (u32)dc_color,
+                    (u32)(dc_color >> 32),
+                    dc_funcs,
+                    unfed};
+    if (stage == ST_GS && ch) memcpy(mask + 12, ch->r3d + 0x490, 8 * sizeof(u32));
+    u32 mix = (u32)vk_hash(mask, 12 * sizeof(u32));
+    if (stage == ST_GS) mix ^= (u32)vk_hash(mask + 12, 8 * sizeof(u32));
     ShA* set = &g_sha[(u32)((gva >> 6) ^ (gva >> 18) ^ (gva_a >> 4) ^ mix ^ ((u32)stage << 11)) & 4094];
     ShA* ca = NULL;
     for (int w = 0; w < 2 && !ca; w++)
@@ -409,7 +417,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u32 int
             s->si.attr_sint_mask = sint_mask;
             s->si.rt_int_mask = rt_int; /* the tessellation or geometry primitive */
             s->si.clip_enable = clip;
-            memcpy(s->si.gp_skip_mask, mask + 8, sizeof s->si.gp_skip_mask);
+            memcpy(s->si.gp_skip_mask, mask + 12, sizeof s->si.gp_skip_mask);
         }
         if (vk_corpus_dir()) shader_corpus_save(vk_corpus_dir(), code, mlen, 0x10000, stage, &s->si, h ^ mix);
         size_t nw = 0;

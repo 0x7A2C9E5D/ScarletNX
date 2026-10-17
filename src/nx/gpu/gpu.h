@@ -29,7 +29,6 @@ typedef struct GpuChannel {
     u32 puller[0x40];
     u32 r3d[0x1000]; /* 3D engine regs, 0xE00+ are MME macro calls */
     u32 r3d_shadow[0xE00]; /* SET_MME_SHADOW_RAM_CONTROL track/replay state */
-    u8 r3d_shadow_valid[0xE00]; /* methods observed in track mode, for replay after incomplete guest setup */
     u32 r3d_shadow_mode;
     u64 r3d_counter_base[32]; /* draw-count baselines for estimated Maxwell counter reports */
     u32 r3d_counter_reset_mask;

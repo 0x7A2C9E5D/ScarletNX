@@ -480,6 +480,9 @@ static GpuChannel* chan_get(u32 id) {
     /* hw reset values that NVN/deko3d rely on and never write. sRGB writes default to on,
      otherwise sRGB targets are stored linear and come out too dark */
     c->r3d[0x56E] = 1;
+    c->r3d[0x556] = 1; /* rendering starts enabled, until SetRenderEnable supplies a condition */
+    /* Leave render-enable override at UseRenderEnable (0). NVN's conditional target initialization clears
+       must stop once their metadata matches; AlwaysRender would erase a target again after drawing it. */
     /* the color write masks default to enabled: games that never set them draw nothing at all
        (Eden defaults these for Sonic Mania; Unicorn Overlord and Fire Emblem need it too) */
     memset(&c->r3d[0x680], 0x11, 8 * sizeof c->r3d[0]);

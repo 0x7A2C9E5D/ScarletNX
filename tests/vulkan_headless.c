@@ -129,6 +129,9 @@ static int check_depth_array(void) {
     Surf* target = vk_rt_find(r[0x3F9]);
     CHECK(target && target->layers == 3 && target->layer_size == 4096);
     Surf* drawn[4];
+    /* A generated texture may be sampled for the first time after a loading step.
+       Its pixels still live in the render target, regardless of presentation age. */
+    g_vk_present += 5;
     CHECK(vk_rt_drawn_in(target->gva, target->gva + target->layer_size * target->layers, drawn, 4) >= 1);
     CHECK(drawn[0] == target && vk_rt_drawn_fresh(target));
     VkBuffer buffer;
@@ -151,6 +154,8 @@ static int check_depth_array(void) {
         memcpy(&depth, data + layer * 4, 4);
         CHECK(depth == 0.25f * (layer + 1));
     }
+    gpu_mem_written_shader(target->gva, 4);
+    CHECK(!vk_rt_drawn_fresh(target)); /* reused guest memory must still win */
     r[0x3F9] = 0x200000;
     r[0x48C] = 3 | (1u << 16);
     vk_render_clear(ch, 1);

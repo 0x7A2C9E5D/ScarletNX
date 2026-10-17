@@ -239,6 +239,34 @@ int main(void) {
     struct timespec ms20 = {0, 20000000};
     gpu_init();
 
+    /* NVN temporarily forces rendering in passthrough mode, then replays the default override without ever
+       tracking a write to it. Conditional clears must then initialize targets only when their metadata differs. */
+    {
+        u32 channel = 32;
+        u32 commands[] = {imm(0x49, 2),     imm(0x651, 1),
+                          imm(0x49, 3),     imm(0x651, 1),
+                          imm(0x49, 2),     imm(CLEAR, 0x80),
+                          inc(0x554, 3),    0,
+                          SEM + 96,         4,
+                          imm(CLEAR, 0x81), imm(0x556, 1),
+                          imm(CLEAR, 0x82)};
+        cpu_store(SEM + 96, 7);
+        cpu_store(SEM + 112, 7);
+        submit1(push(commands, sizeof commands / sizeof commands[0]), channel);
+        gpu_call(called, (void*)(uintptr_t)0x83, &channel, 1);
+        wait_marks(3);
+        const u32 equal[] = {0x80, 0x82, 0x83};
+        expect(marks_are(equal, 3), "restored defaults render until a false condition suppresses a clear");
+        forget_marks();
+        cpu_store(SEM + 112, 8);
+        submit1(push(commands, sizeof commands / sizeof commands[0]), channel);
+        gpu_call(called, (void*)(uintptr_t)0x83, &channel, 1);
+        wait_marks(4);
+        const u32 different[] = {0x80, 0x81, 0x82, 0x83};
+        expect(marks_are(different, 4), "restored defaults execute a conditional clear when the values differ");
+        forget_marks();
+    }
+
     /* Falcon firmware call 4 signals a waiting MME macro through shadow scratch 0. */
     GpuChannel* fw = calloc(1, sizeof *fw);
     expect(fw != NULL, "firmware test channel allocated");
