@@ -100,7 +100,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download the macOS app
         if: steps.plan.outputs.run
-        continue-on-error: ${{ steps.plan.outputs.kind == 'pr' }}
+        continue-on-error: true # its job may fail without failing the run: the notes say not built
         uses: actions/download-artifact@v8
         with:
           name: ScarletNX-macos-arm64-${{ steps.plan.outputs.short }}.zip
@@ -110,7 +110,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download the iOS IPA
         if: steps.plan.outputs.run
-        continue-on-error: ${{ steps.plan.outputs.kind == 'pr' }}
+        continue-on-error: true # its job may fail without failing the run: the notes say not built
         uses: actions/download-artifact@v8
         with:
           name: ScarletNX-ios-arm64-${{ steps.plan.outputs.short }}.ipa

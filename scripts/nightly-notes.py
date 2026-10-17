@@ -175,13 +175,16 @@ def notes(
     sizes=None,
     lead='Built from main at',
     updates='the newest nightly',
+    missing=(),
+    why='',
 ):
     """download: where the release's files are; kept: what becomes of the release; since: what previous was; sizes:
-    each file's bytes; lead: what the first line calls the build; updates: the release AppImageUpdate takes it to"""
+    each file's bytes; lead: what the first line calls the build; updates: the release AppImageUpdate takes it to;
+    missing: the files the run did not build, a row each linking why"""
     url = f'{SERVER}/{repo}'
     date = git(checkout, 'log', '-1', '--format=%cs', sha).strip()
     lines = [f'{lead} [`{sha[:7]}`]({url}/commit/{sha}), committed {date}.' + (f' {kept}' if kept else ''), '']
-    lines += downloads(files, download, url, sha, sizes, updates=updates)
+    lines += downloads(files, download, url, sha, sizes, missing, why, updates=updates)
     items = changes(checkout, previous, sha)
     if items is not None:
         compare = f'{url}/compare/{previous}...{sha}'

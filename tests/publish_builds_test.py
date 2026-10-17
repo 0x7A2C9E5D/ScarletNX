@@ -362,6 +362,27 @@ with tempfile.TemporaryDirectory() as temporary:
         partial = ['--run', '42', '--sha', sha, '--artifacts', str(artifacts(f'part-{len(skip)}', sha, (skip,)))]
         done = publish('nightly', *partial, '--checkout', str(checkout))
         check(f'a nightly missing {skip} stops', done.returncode != 0 and said in done.stderr, done.stderr)
+    # macOS and iOS may fail without failing the run (continue-on-error): the nightly goes out without them and says so
+    apple = [
+        '--run',
+        '43',
+        '--sha',
+        sha,
+        '--artifacts',
+        str(artifacts('part-apple', sha, ('ScarletNX-macos', 'ScarletNX-ios'))),
+    ]
+    done = publish('nightly', *apple, '--checkout', str(checkout))
+    made = find(tag)
+    check(
+        'a nightly without the macOS and iOS packages publishes the rest, saying those were not built',
+        done.returncode == 0
+        and made
+        and not any(a['name'].startswith(('ScarletNX-macos', 'ScarletNX-ios')) for a in made['assets'])
+        and '| **macOS** | ARM64 | not built, [see the run](https://github.com/owner/repo/actions/runs/43) |  |'
+        in made['body']
+        and '| **iOS** | ARM64 | not built' in made['body'],
+        done.stderr + (made['body'] if made else ''),
+    )
     # dry run: reads only
     log_file.unlink(missing_ok=True)
     save_state(with_releases(TO, [r for r in releases() if r['tag_name'] != tag]))
