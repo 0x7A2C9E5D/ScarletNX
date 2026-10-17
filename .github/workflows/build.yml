@@ -919,6 +919,66 @@ jobs:
       - name: Run the zip's scarletnx.exe as a user would
         run: bash source/scripts/check-package.sh package/bin/scarletnx.exe
 
+  # edenprobe's probes (docs/EDENPROBE.md), a release of scarletnx/edenprobe pinned by its sha256, recompiled by the
+  # Linux install and run on lavapipe: a case of tests/edenprobe/linux-x86_64.txt, the ones that passed before, that no
+  # longer passes fails the job. Another release or other mode words want that file written again
+  edenprobe:
+    name: edenprobe (Linux x86_64, lavapipe)
+    needs: linux
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    container: archlinux:latest
+    env:
+      EDENPROBE_VERSION: v0.4.0
+      EDENPROBE_SHA256: ''
+      # every family that needs no person or network: headless, the audio family's sound is never played
+      EDENPROBE_MODE: quick notime fatal cpu graphics fs video display kernel audio
+    steps:
+      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+      # The libraries the install links, and lavapipe; each pacman install tried 3 times, as in the Linux job
+      - name: Install the runtime's libraries and lavapipe
+        run: |
+          for try in 1 2 3; do
+            pacman -Syu --noconfirm --needed python llvm-libs libgccjit sdl3 vulkan-icd-loader vulkan-swrast && break
+            [ "$try" = 3 ] && exit 1
+            sleep 5
+          done
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: ScarletNX-linux-x86_64-${{ steps.commit.outputs.short }}-install
+          path: stage
+      - name: Fetch edenprobe
+        run: |
+          if [ -z "$EDENPROBE_SHA256" ]; then
+            echo "EDENPROBE_SHA256 is empty: pin the sha256 of edenprobe $EDENPROBE_VERSION" >&2
+            exit 1
+          fi
+          curl -fsSL --retry 3 -o edenprobe.nro \
+            "https://github.com/scarletnx/edenprobe/releases/download/$EDENPROBE_VERSION/edenprobe.nro"
+          echo "$EDENPROBE_SHA256  edenprobe.nro" | sha256sum -c -
+      # Artifacts drop the executable bit
+      - name: Run edenprobe
+        run: |
+          chmod +x stage/bin/*
+          python3 scripts/edenprobe.py run --runtime stage/bin/scarletnx --nro edenprobe.nro --mode "$EDENPROBE_MODE" \
+            --out edenprobe --baseline tests/edenprobe/linux-x86_64.txt --summary "$GITHUB_STEP_SUMMARY"
+      # The report, the failures' pictures, the logs and this run's baseline.txt; not the recompiled game. Each attempt
+      # its own: a run takes one artifact of a name, and a job run again keeps the earlier attempt's to compare
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: edenprobe-${{ steps.commit.outputs.short }}-${{ github.run_attempt }}
+          path: |
+            edenprobe
+            !edenprobe/work
+
   # A pull request's builds, linked from a comment on it that each run rewrites, as soon as they are built
   # (scripts/pr-builds.sh). A pull request from a fork gets a token that may not write, so it gets none
   links:
