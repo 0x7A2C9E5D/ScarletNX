@@ -19,8 +19,9 @@ recompiles on the phone, then the game opens.
 - **Loading** (a *Load* item, *Setup device keys*) opens its screen, a box the whole width, and a tap in the box
   opens the system's file picker. A game's file is read by its path, so the app asks for access to the files when
   it starts (all files from Android 11): the picker's path, or for a document without one the file its descriptor
-  opens. A cloud's document has none and is refused, its URI in the message. *Games* lists the games there and the
-  dumps put there, to be prepared.
+  opens. A cloud's document has none and is refused, its URI in the message. Wherever the dump is, its extraction
+  goes to the data folder's `cache/work/`, in the app's storage. *Games* lists the games there and the dumps put
+  there, to be prepared.
 - **The driver** runs as a child of the menu, as on a desktop, from `libscarletnx-run.so`: an executable named so
   that Android installs it with the libraries, the only files of its own an app may execute. It loads the runtime,
   `libscarletnx.so`, beside it. It cannot open a window there, so it ends at `Ready <game>` and the menu opens it.

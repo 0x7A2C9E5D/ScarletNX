@@ -861,8 +861,12 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && strstr(argv[1], "room dump")) { /* asked about its room first */
         int i = 2;
+        char* folder = snx_dirname(argv[1]);
         while (i < argc && strcmp(argv[i], "--repo")) ++i;
-        assert(i + 2 == argc);
+        /* a dump from a folder of its own, the folders their defaults: the data folder alone, no --out or --outdir, so
+           the extraction goes to the data folder's work/ (on Android in the app's own storage), never beside it */
+        assert(i + 2 == argc && !snx_path_within(argv[i + 1], folder) && !snx_path_within(folder, argv[i + 1]));
+        free(folder);
         puts("Recompiling room dump\nScarletNX - room dump");
         return 0;
     }
