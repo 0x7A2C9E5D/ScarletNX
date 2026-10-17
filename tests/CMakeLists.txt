@@ -667,6 +667,10 @@ if(NOT SNX_TOOLS_ONLY)
     target_link_libraries(snx-test-nvdec-decode PRIVATE FFmpeg::avcodec)
     add_test(NAME nvdec_decode COMMAND snx-test-nvdec-decode)
 endif()
+# vic.c's CPU composition, through vic_execute, with a renderer that declines the GPU
+add_executable(snx-test-vic-compose vic_compose.c)
+snx_test_target(snx-test-vic-compose 23)
+add_test(NAME vic_compose COMMAND snx-test-vic-compose)
 
 add_executable(snx_recompiler_test recompiler_native.c)
 snx_test_target(snx_recompiler_test 23)

@@ -360,7 +360,7 @@ void vic_execute(const u32* r) {
         LOG_LIMIT(4, "video: VIC job with no slot it could compose\n");
         return;
     }
-    if (g_renderer->vic_compose(&job)) return; /* the compute shader composed the picture */
+    if (g_renderer_up && g_renderer->vic_compose(&job)) return; /* the compute shader composed the picture */
     for (int s = 0; s < VIC_NUM_SLOTS; s++)
         if (job.slots[s].on) compose_cpu(&job.slots[s], fmt, &job.oy, &job.oc);
 }
