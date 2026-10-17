@@ -49,12 +49,12 @@ jobs:
         run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
       # llvm: llvm-config and LLVM-C for the recompiler (llvm-libs alone has no headers). libgccjit builds the
       # optional --backend=gcc too, so its tests (gccjit_differential, native_recompiler_gcc) run here. gdb: the
-      # gdbserver gdbstub_native drives. Mirrors drop a connection now and then (pkgforge's for aarch64 most), so each
-      # pacman install is tried 3 times, 5 s apart
+      # gdbserver gdbstub_native drives. jq: scripts/pr-builds.sh, which pr_builds tests. Mirrors drop a connection now
+      # and then (pkgforge's for aarch64 most), so each pacman install is tried 3 times, 5 s apart
       - name: Install tools
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang llvm libgccjit pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache gdb && break
+            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang llvm libgccjit pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache gdb jq && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
@@ -919,6 +919,97 @@ jobs:
       - name: Run the zip's scarletnx.exe as a user would
         run: bash source/scripts/check-package.sh package/bin/scarletnx.exe
 
+  # edenprobe's probes (docs/EDENPROBE.md), a release of scarletnx/edenprobe pinned by its sha256, recompiled by the
+  # Linux install and run on lavapipe: a case of tests/edenprobe/linux-x86_64.txt, the ones that passed before, that no
+  # longer passes fails the job. Another release or other mode words want that file written again
+  edenprobe:
+    name: edenprobe (Linux x86_64, lavapipe)
+    needs: linux
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    container: archlinux:latest
+    env:
+      EDENPROBE_VERSION: v0.4.0
+      EDENPROBE_SHA256: 4e33a924db5eda09b28395982b3cd93e532dbecc5aefd24e386ad88e3674a88b
+      # every family that needs no person or network: headless, the audio family's sound is never played
+      EDENPROBE_MODE: quick notime fatal cpu graphics fs video display kernel audio
+    outputs:
+      result: ${{ steps.probe.outputs.result }}
+    steps:
+      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+      # The libraries the install links, and lavapipe; each pacman install tried 3 times, as in the Linux job
+      - name: Install the runtime's libraries and lavapipe
+        run: |
+          for try in 1 2 3; do
+            pacman -Syu --noconfirm --needed python llvm-libs libgccjit sdl3 vulkan-icd-loader vulkan-swrast && break
+            [ "$try" = 3 ] && exit 1
+            sleep 5
+          done
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: ScarletNX-linux-x86_64-${{ steps.commit.outputs.short }}-install
+          path: stage
+      - name: Fetch edenprobe
+        run: |
+          if [ -z "$EDENPROBE_SHA256" ]; then
+            echo "EDENPROBE_SHA256 is empty: pin the sha256 of edenprobe $EDENPROBE_VERSION" >&2
+            exit 1
+          fi
+          curl -fsSL --retry 3 -o edenprobe.nro \
+            "https://github.com/scarletnx/edenprobe/releases/download/$EDENPROBE_VERSION/edenprobe.nro"
+          echo "$EDENPROBE_SHA256  edenprobe.nro" | sha256sum -c -
+      # Artifacts drop the executable bit. The summary's title is the line of the pull request's comment (links)
+      - name: Run edenprobe
+        id: probe
+        run: |
+          chmod +x stage/bin/*
+          status=0
+          python3 scripts/edenprobe.py run --runtime stage/bin/scarletnx --nro edenprobe.nro --mode "$EDENPROBE_MODE" \
+            --out edenprobe --baseline tests/edenprobe/linux-x86_64.txt --summary "$GITHUB_STEP_SUMMARY" || status=$?
+          if [ -f edenprobe/summary.md ]; then
+            echo "result=$(head -n 1 edenprobe/summary.md | cut -c5-)" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
+      # edenprobe's main, cases the release has not got yet: beside the release's report it only warns, and a nightly
+      # that cannot be fetched is a warning too (docs/EDENPROBE.md)
+      - name: Fetch edenprobe's main
+        id: main
+        if: ${{ !cancelled() }}
+        run: |
+          url=https://github.com/scarletnx/edenprobe/releases/download/nightly
+          if curl -fsSL --retry 3 -o edenprobe-main.nro "$url/edenprobe.nro" &&
+            curl -fsSL --retry 3 -o edenprobe-main.nro.sha256 "$url/edenprobe.nro.sha256" &&
+            echo "$(cut -d ' ' -f 1 edenprobe-main.nro.sha256)  edenprobe-main.nro" | sha256sum -c -; then
+            echo "nro=edenprobe-main.nro" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=edenprobe main::edenprobe's nightly could not be fetched or checked"
+          fi
+      - name: Run edenprobe's main, warnings only
+        if: ${{ !cancelled() && steps.main.outputs.nro }}
+        run: |
+          chmod +x stage/bin/*
+          python3 scripts/edenprobe.py run --runtime stage/bin/scarletnx --nro edenprobe-main.nro \
+            --mode "$EDENPROBE_MODE" --out edenprobe-main --advisory edenprobe/report.jsonl \
+            --summary "$GITHUB_STEP_SUMMARY"
+      # The report, the failures' pictures, the logs and this run's baseline.txt; not the recompiled game. Each attempt
+      # its own: a run takes one artifact of a name, and a job run again keeps the earlier attempt's to compare
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: edenprobe-${{ steps.commit.outputs.short }}-${{ github.run_attempt }}
+          path: |
+            edenprobe
+            !edenprobe/work
+            edenprobe-main
+            !edenprobe-main/work
+
   # A pull request's builds, linked from a comment on it that each run rewrites, as soon as they are built
   # (scripts/pr-builds.sh). A pull request from a fork gets a token that may not write, so it gets none
   links:
@@ -926,7 +1017,7 @@ jobs:
     if: >-
       !cancelled() && github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    needs: [linux, appimage, windows, android-apk, macos, ios]
+    needs: [linux, appimage, windows, android-apk, macos, ios, edenprobe]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
