@@ -414,8 +414,30 @@ static void vp9_tests(void) {
     CHECK(d->app == 9 && d->dec);
     nvdec_free(d);
 }
+/* a 15x15 picture into a 16x16 surface: its last chroma pair and row, of one pixel each, are written too */
+static void odd_size_test(void) {
+    static u8 y[15 * 15], u[8 * 8], v[8 * 8];
+    memset(y, 50, sizeof y);
+    memset(u, 60, sizeof u);
+    memset(v, 70, sizeof v);
+    AVFrame f = {0};
+    f.width = f.height = 15;
+    f.format = AV_PIX_FMT_YUV420P;
+    f.data[0] = y;
+    f.data[1] = u;
+    f.data[2] = v;
+    f.linesize[0] = 15;
+    f.linesize[1] = f.linesize[2] = 8;
+    PicOut t = {0x4000, 0x5000, 64, 64, 1, 16, 16};
+    memset(memory + 0x4000, 0xcc, 0x2000);
+    CHECK(write_pic(&f, &t));
+    CHECK(memory[0x4000 + 14 * 64 + 14] == 50 && memory[0x4000 + 14 * 64 + 15] == 0xcc);
+    CHECK(memory[0x5000 + 7 * 64 + 14] == 60 && memory[0x5000 + 7 * 64 + 15] == 70);
+    CHECK(memory[0x5000 + 7 * 64 + 16] == 0xcc && memory[0x5000 + 8 * 64] == 0xcc);
+}
 int main(void) {
     packet_tests();
+    odd_size_test();
     submission_tests();
     vp9_tests();
     printf("NVDEC packets: %u checks passed (%s)\n", checks, av_version_info());

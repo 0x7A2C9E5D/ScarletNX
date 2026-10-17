@@ -374,7 +374,7 @@ static int write_pic(const AVFrame* f, const PicOut* t) {
     if (w > t->w) w = t->w;
     if (h > t->h) h = t->h;
     if (w > t->pitch_y) w = t->pitch_y;
-    if (w > t->pitch_c) w = t->pitch_c & ~1u;
+    if ((w + 1) / 2 * 2 > t->pitch_c) w = t->pitch_c & ~1u;
     if (w > 4096) w = 4096;
     u32 ch = (t->h + 1) / 2;
     u8* py = iova_ptr(t->luma, bl_size(t->pitch_y, t->h, t->bh));
@@ -389,16 +389,18 @@ static int write_pic(const AVFrame* f, const PicOut* t) {
         for (u32 x = 0; x < w; x += 16)
             memcpy(py + bl_offset(x, y, 0, t->pitch_y, t->h, t->bh, 0), s + x, w - x < 16 ? w - x : 16);
     }
+    /* 4:2:0 chroma covers pixel pairs: an odd width or height has a last pair, or row, of one pixel */
     u8 row[4096];
-    for (u32 y = 0; y < h / 2; y++) {
+    u32 cw = (w + 1) / 2 * 2;
+    for (u32 y = 0; y < (h + 1) / 2; y++) {
         const u8* u = pl[1] + (u64)y * sc;
         const u8* v = pl[2] + (u64)y * sv;
-        for (u32 x = 0; x < w / 2; x++) {
+        for (u32 x = 0; x < cw / 2; x++) {
             row[2 * x] = u[x];
             row[2 * x + 1] = v[x];
         }
-        for (u32 x = 0; x < w; x += 16)
-            memcpy(pc + bl_offset(x, y, 0, t->pitch_c, ch, t->bh, 0), row + x, w - x < 16 ? w - x : 16);
+        for (u32 x = 0; x < cw; x += 16)
+            memcpy(pc + bl_offset(x, y, 0, t->pitch_c, ch, t->bh, 0), row + x, cw - x < 16 ? cw - x : 16);
     }
     g_vframes++;
     return 1;
