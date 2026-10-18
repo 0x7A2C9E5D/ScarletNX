@@ -4327,12 +4327,12 @@ int main(int argc, char** argv) {
                    !wrap_in(&app, gui_rect(0, 0, 10 * cw, 8), 0, 0, many, 0, ink));
             app.theme.text = GUI_TEXT_WRAP;
         }
-        /* the users of the app's users/: Ada and Bee. The head shows Settings' user, 1, in a box at its right */
+        /* the users of the app's users/: Aogo and Xuji. The head shows Settings' user, 1, in a box at its right */
         {
             char* users = snx_path_join(temporary, "users");
             char* ini = snx_path_join(users, "users.ini");
             static const char text[] =
-                "[user1]\nnickname=Ada\n[user2]\nuid=5f3c0d9e8a7b41c2963e0f1a2b3c4d5e\nnickname=Bee\n";
+                "[user1]\nnickname=Aogo\n[user2]\nuid=5f3c0d9e8a7b41c2963e0f1a2b3c4d5e\nnickname=Xuji\n";
             assert(!snx_mkdirs(users) && !snx_write_file(ini, text, sizeof text - 1));
             free(app.users_dir);
             app.users_dir = users;
@@ -4344,7 +4344,7 @@ int main(int argc, char** argv) {
         /* its title twice the text's size, in the row of tabs against its right, or two columns before the user
            there; with its shadow, in the dim colour a big pixel down and right */
         r = m.place.title;
-        assert(app.user == 1 && !strcmp(app.user_name, "Ada") && m.place.badge.h == r.h);
+        assert(app.user == 1 && !strcmp(app.user_name, "Aogo") && m.place.badge.h == r.h);
         assert(m.place.badge.x + m.place.badge.w == m.place.head.x + m.place.head.w);
         assert(r.h == 2 * 16 * s && r.x + r.w == m.place.badge.x - 2 * cw && r.y < m.place.tabs.y);
         { /* the box framed in the dim colour and filled with the page's, as YoRHa's boxes; the nickname a column in, in
@@ -4352,31 +4352,31 @@ int main(int argc, char** argv) {
             GuiRect b = m.place.badge;
             int nx, ny, side = b.h - 4 * s;
             render(&app);
-            assert(find_text(&app, "Ada", rgb(app.theme.ink), 1, &nx, &ny) && nx == b.x + cw && ny > b.y &&
+            assert(find_text(&app, "Aogo", rgb(app.theme.ink), 1, &nx, &ny) && nx == b.x + cw && ny > b.y &&
                    ny + 16 * s < b.y + b.h);
             assert(same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), rgb(app.theme.dim)));
             assert(same_colour(pixel(&app, (float)(b.x + b.w - 1), (float)(b.y + b.h / 2)), rgb(app.theme.dim)));
             assert(same_colour(pixel(&app, (float)(b.x + b.w - 1 - s), (float)(b.y + b.h / 2)), rgb(app.theme.page)));
             assert(!same_colour(pixel(&app, (float)(b.x + b.w - 2 * s - side / 2), (float)(b.y + 2 * s + side / 2)),
                                 rgb(app.theme.page)));
-            /* a click on it opens the box of users, the one shown in focus; Down and Return pick Bee, kept as
+            /* a click on it opens the box of users, the one shown in focus; Down and Return pick Xuji, kept as
                Settings' user in settings.ini, and the head shows them */
             swipe_px(&app, b.x + b.w / 2, b.y + b.h / 2, b.x + b.w / 2, b.y + b.h / 2);
             assert(app.users_shown && app.users_focus == 0);
             render(&app);
-            assert(find_text(&app, "Bee", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "Xuji", rgb(app.theme.ink), 1, &nx, &ny));
             assert(find_text(&app, "Who plays the games", rgb(app.theme.page), 1, &nx, &ny)); /* whole: none cut */
             key(&app, SDLK_DOWN);
             assert(app.users_shown && app.users_focus == 1);
             key(&app, SDLK_RETURN);
-            assert(!app.users_shown && app.user == 2 && !strcmp(app.user_name, "Bee"));
+            assert(!app.users_shown && app.user == 2 && !strcmp(app.user_name, "Xuji"));
             {
                 size_t size;
                 char* kept = (char*)snx_read_file(app.settings_file, &size);
                 assert(kept && strstr(kept, "[User]\nuser=2\n"));
                 free(kept);
             }
-            /* ESC closes it, as does a click off it, the user kept; Up and Return pick Ada again, kept as picked */
+            /* ESC closes it, as does a click off it, the user kept; Up and Return pick Aogo again, kept as picked */
             render(&app);
             menu_boxes(&app, &m);
             b = m.place.badge;
@@ -4391,7 +4391,7 @@ int main(int argc, char** argv) {
             swipe_px(&app, b.x + b.w / 2, b.y + b.h / 2, b.x + b.w / 2, b.y + b.h / 2);
             key(&app, SDLK_UP);
             key(&app, SDLK_RETURN);
-            assert(!app.users_shown && app.user == 1 && !strcmp(app.user_name, "Ada"));
+            assert(!app.users_shown && app.user == 1 && !strcmp(app.user_name, "Aogo"));
             {
                 size_t size;
                 char* kept = (char*)snx_read_file(app.settings_file, &size);
@@ -4410,7 +4410,7 @@ int main(int argc, char** argv) {
             render(&app);
             menu_boxes(&app, &m);
             assert(!m.place.badge.h && m.place.title.x + m.place.title.w == m.place.head.x + m.place.head.w);
-            assert(!find_text(&app, "Ada", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(!find_text(&app, "Aogo", rgb(app.theme.ink), 1, &nx, &ny));
             app.theme.picture = GUI_PICTURE_SQUARE;
             render(&app);
             menu_boxes(&app, &m);

@@ -190,7 +190,7 @@ static void test_picture(void) {
 #define UID1   "0123456789abcdeffedcba9876543210"
 #define UID2   "00000000000000020000000000000002"
 #define UID3   "0000000000000003000000000000000a"
-#define NICK32 "abcdefghijklmnopqrstuvwxyz012345"
+#define NICK20 "Ab9 x.y_z-0123456789" /* the longest a room takes, with every kind of character */
 static const unsigned char jpeg[] = {0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 0xFF, 0xD9};
 
 static void put(const char* name, const void* data, size_t size) {
@@ -266,16 +266,16 @@ static void test_users(void) {
     g_mem = memory;
     put_ini("; the console's users\n"
             "[user1]\n"
-            "nickname=Ada\n"
+            "nickname=Aogo\n"
             "[user2]\n"
             "uid=" UID2 "\n"
-            "nickname=" NICK32 "\n"
+            "nickname=" NICK20 "\n"
             "[user3]\n"
             "uid=" UID3 "\n"
-            "nickname=Cee\n");
+            "nickname=Afugo\n");
     put(UID2 ".jpg", jpeg, sizeof jpeg);
     CHECK(snx_users_load(DIR, 2, why, sizeof why) == 0);
-    CHECK(g_user_count == 3 && !strcmp(g_users[0].nickname, "Ada") && !strcmp(g_users[2].nickname, "Cee"));
+    CHECK(g_user_count == 3 && !strcmp(g_users[0].nickname, "Aogo") && !strcmp(g_users[2].nickname, "Afugo"));
     CHECK(nn_account_IAccountServiceForApplication_GetUserCount(NULL, &count) == 0 && count == 3);
     /* every user in the console's order */
     memset(memory, 0xAA, sizeof memory);
@@ -306,12 +306,12 @@ static void test_users(void) {
     CHECK(nn_account_IAccountServiceForApplication_TrySelectUserWithoutInteraction(NULL, 1, &got) == 0);
     for (count = 0; count < 16; count++) CHECK(got.v[count] == 0);
     CHECK(nn_account_IAccountServiceForApplication_GetUserExistence(NULL, &uid, &exists) == 0 && exists);
-    /* user 2's profile: its nickname filling the 32 bytes, its picture */
+    /* user 2's profile: its nickname, the longest there is, its picture */
     profile = NULL;
     CHECK(nn_account_IAccountServiceForApplication_GetProfile(NULL, &uid, &profile) == 0 && profile);
     memset(&base, 0xAA, sizeof base);
     CHECK(nn_account_profile_IProfile_GetBase(profile, &base) == 0);
-    CHECK(!memcmp(base.uid.v, uid.v, 16) && !memcmp(base.nickname, NICK32, 32));
+    CHECK(!memcmp(base.uid.v, uid.v, 16) && !memcmp(base.nickname, NICK20, 20) && base.nickname[20] == 0);
     CHECK(nn_account_profile_IProfile_GetImageSize(profile, &size) == 0 && size == sizeof jpeg);
     memset(memory, 0xAA, sizeof memory);
     image.addr = 0x200;
@@ -329,7 +329,7 @@ static void test_users(void) {
     CHECK(nn_account_IAccountServiceForApplication_GetProfile(NULL, &uid, &profile) == 0);
     memset(&base, 0xAA, sizeof base);
     CHECK(nn_account_profile_IProfile_GetBase(profile, &base) == 0);
-    CHECK(!memcmp(base.nickname, "Cee", 4) && base.nickname[31] == 0);
+    CHECK(!memcmp(base.nickname, "Afugo", 6) && base.nickname[31] == 0);
     CHECK(nn_account_profile_IProfile_GetImageSize(profile, &size) == 0 && size == acc_picture() && size > sizeof jpeg);
     svcobj_unref(profile);
     /* a uid that is no user's has no profile */
@@ -341,23 +341,28 @@ static void test_users(void) {
 
 static void test_refused(void) {
     char why[512];
-    refused("[user1]\nnickname=Ada\ncolour=red\n", 1, "colour is not a setting");
+    refused("[user1]\nnickname=Aogo\ncolour=red\n", 1, "colour is not a setting");
     refused("[user1]\nuid=" UID2 "\n", 1, "[user1] is always uid " UID1);
-    refused("[user1]\n[user3]\nuid=" UID3 "\nnickname=Cee\n", 1, "in order");
-    refused("[user1]\n[user2]\nuid=" UID2 "\nnickname=Bee\n[user2]\nuid=" UID3 "\nnickname=Cee\n", 1, "in order");
-    refused("[user1]\n[user2]\nnickname=Bee\n", 1, "[user2] has no uid");
+    refused("[user1]\n[user3]\nuid=" UID3 "\nnickname=Afugo\n", 1, "in order");
+    refused("[user1]\n[user2]\nuid=" UID2 "\nnickname=Xuji\n[user2]\nuid=" UID3 "\nnickname=Afugo\n", 1, "in order");
+    refused("[user1]\n[user2]\nnickname=Xuji\n", 1, "[user2] has no uid");
     refused("[user1]\n[user2]\nuid=" UID2 "\n", 1, "[user2] has no nickname");
-    refused("[user1]\n[user2]\nuid=" UID2 "\nnickname=Bee\n[user3]\nuid=" UID2 "\nnickname=Cee\n", 1,
+    refused("[user1]\n[user2]\nuid=" UID2 "\nnickname=Xuji\n[user3]\nuid=" UID2 "\nnickname=Afugo\n", 1,
             "[user3] has the uid of [user2]");
-    refused("[user1]\n[user2]\nuid=00000000000000000000000000000000\nnickname=Bee\n", 1, "nor zero");
-    refused("[user1]\n[user2]\nuid=0123\nnickname=Bee\n", 1, "not 32 hex digits");
-    refused("[user1]\nnickname=" NICK32 "x\n", 1, "1 to 32 bytes");
-    refused("[user1]\nnickname=\n", 1, "1 to 32 bytes");
+    refused("[user1]\n[user2]\nuid=00000000000000000000000000000000\nnickname=Xuji\n", 1, "nor zero");
+    refused("[user1]\n[user2]\nuid=0123\nnickname=Xuji\n", 1, "not 32 hex digits");
+    /* a nickname a room wouldn't take: too long, too short, empty, a letter outside ASCII, a sign, a tab */
+    refused("[user1]\nnickname=" NICK20 "x\n", 1, "nickname=" NICK20 "x is not 4 to 20 letters");
+    refused("[user1]\nnickname=Ada\n", 1, "nickname=Ada is not 4 to 20 letters");
+    refused("[user1]\nnickname=\n", 1, "nickname= is not 4 to 20 letters");
+    refused("[user1]\nnickname=Jo\xc3\xa3o\n", 1, "is not 4 to 20 letters");
+    refused("[user1]\nnickname=Ada/Bob\n", 1, "is not 4 to 20 letters");
+    refused("[user1]\nnickname=Ada\tBob\n", 1, "is not 4 to 20 letters");
     refused("[user1]\npassword=hunter2\n", 1, "is not a setting: uid, nickname");
-    refused("[user1]\n[user2]\nuid=" UID2 "\nnickname=Bee\n", 3, "user=3");
-    refused("nickname=Ada\n[user1]\n", 1, "before [user1]");
-    refused("[players]\nnickname=Ada\n", 1, "[user1] to [user8]");
-    refused("[user1]\nnickname Ada\n", 1, "neither");
+    refused("[user1]\n[user2]\nuid=" UID2 "\nnickname=Xuji\n", 3, "user=3");
+    refused("nickname=Aogo\n[user1]\n", 1, "before [user1]");
+    refused("[players]\nnickname=Aogo\n", 1, "[user1] to [user8]");
+    refused("[user1]\nnickname Aogo\n", 1, "neither");
     refused("; nothing\n", 1, "no [user1]");
     refused("[user1\n", 1, "no ]");
     /* a picture that is no JPEG, or too big */

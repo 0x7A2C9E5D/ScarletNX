@@ -49,6 +49,18 @@ const unsigned char* snx_users_picture(const SnxUser* user, uint32_t* size) {
     return user->picture_size ? g_user_pictures + user->picture_at : NULL;
 }
 
+int snx_users_nickname_valid(const char* nickname) {
+    size_t n = strlen(nickname), i;
+    if (n < SNX_USERS_NICKNAME_MIN || n > SNX_USERS_NICKNAME_MAX) return 0;
+    for (i = 0; i < n; i++) {
+        char c = nickname[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '.' ||
+              c == '_' || c == '-'))
+            return 0;
+    }
+    return 1;
+}
+
 /* the [userN] of section, 1 to 8, or 0 */
 static int users_section(const char* section, size_t n) {
     if (n != 5 || strncmp(section, "user", 4) || section[4] < '1' || section[4] > '0' + SNX_USERS_MAX) return 0;
@@ -163,17 +175,14 @@ int snx_users_load(const char* dir, int selected, char* why, size_t why_size) {
                 u->uid[0] = uid[0];
                 u->uid[1] = uid[1];
             } else if (!strcmp(key, "nickname")) {
-                size_t k = strlen(value);
-                if (!k || k > SNX_USERS_NICKNAME) {
-                    snprintf(why, why_size, "%s: [user%d] nickname takes 1 to %d bytes", path, n, SNX_USERS_NICKNAME);
+                if (!snx_users_nickname_valid(value)) {
+                    snprintf(why, why_size,
+                             "%s: [user%d] nickname=%.40s is not %d to %d letters, digits, spaces, '.', '_' or '-', "
+                             "as Eden's rooms take it",
+                             path, n, value, SNX_USERS_NICKNAME_MIN, SNX_USERS_NICKNAME_MAX);
                     goto done;
                 }
-                for (i = 0; value[i]; i++)
-                    if ((unsigned char)value[i] < 0x20) {
-                        snprintf(why, why_size, "%s: [user%d] nickname has a control character", path, n);
-                        goto done;
-                    }
-                memcpy(u->nickname, value, k + 1);
+                memcpy(u->nickname, value, strlen(value) + 1);
             } else {
                 snprintf(why, why_size, "%s: [user%d] %s is not a setting: uid, nickname", path, n, key);
                 goto done;
