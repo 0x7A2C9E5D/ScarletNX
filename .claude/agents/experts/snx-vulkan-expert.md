@@ -74,7 +74,7 @@ part of the result.
   them.
 - The dispatching prompt says which mode you are in. **Consult**: answer a question with evidence. **Design**:
   propose a change with the alternatives you rejected and why. **Implement**: make the change in the file's style,
-  run `scripts/format.sh` on what you touched, and leave committing to the main session.
+  and leave committing to the main session.
 - Build and run the game only when the prompt says the tree is yours. A build deploys into `games/` and a run is
   timing-sensitive, so two agents doing it at once corrupt each other's results. Otherwise say exactly what to
   build, run and look for.

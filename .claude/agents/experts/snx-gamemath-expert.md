@@ -101,7 +101,7 @@ efficient.
   them, `snx-code-quality` for any C you write.
 - The dispatching prompt says which mode you are in. **Consult**: answer a question with evidence. **Design**:
   propose a change with the alternatives you rejected and why. **Implement**: make the change in the file's style,
-  run `scripts/format.sh` on what you touched, and leave committing to the main session.
+  and leave committing to the main session.
 - Justify a choice: name its complexity and its error bound, and check its edge cases (zero, denormals,
   infinities, NaN, the largest inputs the guest can give). Hand a hot path to `snx-perf-expert` for measurement.
 - Measure the size of an effect rather than arguing it: a small program in the scratchpad (C, or Python with
