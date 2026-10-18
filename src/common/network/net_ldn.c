@@ -192,9 +192,15 @@ static void notify(SnxLdn* l) {
 static int listen_socket(SnxSocket** out, const uint8_t ip[4]) {
     SnxSocket* s;
     SnxSockAddr a;
-    int one = 1, r = snx_socket_open(&s, SNX_AF_INET, SNX_SOCK_STREAM, 0);
+    int r = snx_socket_open(&s, SNX_AF_INET, SNX_SOCK_STREAM, 0);
     if (r) return r;
-    snx_socket_setsockopt(s, SNX_SOL_SOCKET, SNX_SO_REUSEADDR, &one, sizeof one);
+#ifndef _WIN32
+    { /* to listen again on a port a closed session left in TIME_WAIT. Windows' SO_REUSEADDR lets a second socket take
+         a port in use, so the second console would never be told to look for another address */
+        int one = 1;
+        snx_socket_setsockopt(s, SNX_SOL_SOCKET, SNX_SO_REUSEADDR, &one, sizeof one);
+    }
+#endif
     addr_of(&a, ip, SNX_LDN_PORT);
     r = snx_socket_bind(s, &a);
     if (!r) r = snx_socket_listen(s, SNX_LDN_STATIONS);
