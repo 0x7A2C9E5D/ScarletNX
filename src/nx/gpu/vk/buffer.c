@@ -28,7 +28,9 @@ typedef struct Vb {
     u64 off;
     struct Vb* next;
 } Vb;
-#define VBH 4096
+/* buckets of the cache of guest ranges as buffers. Entries live 600 presents after their last use, and draws make new
+   ranges all the time: at 4096 buckets the chain walk was most of buf_get's time in TotK */
+#define VBH (1u << 16)
 static Vb* g_vbh[VBH];
 /* Optional copy telemetry. Counters are updated under vk_lock. */
 static u64 g_copy_stage, g_copy_owned, g_copy_uncached, g_copy_zero, g_copy_calls, g_copy_peak, g_read_bound;
@@ -1073,10 +1075,17 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     if (g_cs_any) vk_compute_mem_need(gva, len);
     /* every bit of the range, mixed by multiplying: constant buffers are 256-byte aligned and buffers often 4K, which
        a shift and xor of the address spread over a fraction of the buckets */
-    u32 k = (u32)((((gva ^ (len << 40)) * 0x9E3779B97F4A7C15ull) >> 52) & (VBH - 1));
-    Vb* e = g_vbh[k];
-    for (; e; e = e->next)
-        if (e->start == gva && e->len == len) break;
+    u32 k = (u32)((((gva ^ (len << 40)) * 0x9E3779B97F4A7C15ull) >> 48) & (VBH - 1));
+    Vb* e;
+    for (Vb** pp = &g_vbh[k]; (e = *pp); pp = &e->next)
+        if (e->start == gva && e->len == len) {
+            if (pp != &g_vbh[k]) { /* to the front: a range used every draw is found first */
+                *pp = e->next;
+                e->next = g_vbh[k];
+                g_vbh[k] = e;
+            }
+            break;
+        }
     /* valid: the data is where draws can read it this frame */
     int valid = e && e->buf && (e->own || e->frame == vk_submit_number());
     if (valid && !gpu_mem_dirty_since(e->gw, gva, len)) {
@@ -1188,7 +1197,9 @@ void vk_buf_frame(void) {
         memset(g_wb_reason_ns, 0, sizeof g_wb_reason_ns);
         memset(g_wb_draw_miss, 0, sizeof g_wb_draw_miss);
     }
-    for (int k = 0; k < VBH; k++)
+    /* a sixteenth of the buckets each present: an entry goes at most 16 presents after its 600 */
+    static u32 sweep;
+    for (u32 k = (sweep++ & 15) * (VBH / 16), kend = k + VBH / 16; k < kend; k++)
         for (Vb** pp = &g_vbh[k]; *pp;) {
             Vb* e = *pp;
             if ((i32)(e->used - (g_vk_present - 600)) >= 0) {
