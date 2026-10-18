@@ -801,13 +801,22 @@ VkSampler vk_tex_bind_sampler(const u32* tsc, const ShTex* st, int num, const Su
 /* a constant buffer's bytes for this draw, reused while the guest can't have changed them */
 static int cb_get(const GpuChannel* ch, int stage, int i, u32 sz, VkBuffer* buf, u64* off) {
     static struct {
-        u64 a, gw, frame;
+        u64 a, gw, frame, cs_adds, gfx_adds;
         u32 sz, epoch;
         VkBuffer buf;
         u64 off;
     } c[5][18];
     u64 a = ch->cbind[stage][i];
     int pending;
+    /* checked as it is cached, with no compute or graphics result added since: none can cover it, and only a write of
+       its memory leaves the copy stale. The pending checks were the most of cb_get's time in TotK */
+    if (a && c[stage][i].a == a && c[stage][i].epoch == g_vk_epoch && c[stage][i].frame == vk_submit_number() &&
+        c[stage][i].sz >= sz && c[stage][i].cs_adds == vk_compute_adds() && c[stage][i].gfx_adds == vk_buf_adds() &&
+        !gpu_mem_dirty_since(c[stage][i].gw, a, sz)) {
+        *buf = c[stage][i].buf;
+        *off = c[stage][i].off;
+        return 1;
+    }
     /* Pending compute results there land first. A pending graphics result is newer than the guest memory the checks
        below see: the buffer then comes from vk_buf_get_strict, which reads it on the GPU, and isn't cached */
     if (g_cs_any && a) vk_compute_mem_need(a, sz);
@@ -825,6 +834,8 @@ static int cb_get(const GpuChannel* ch, int stage, int i, u32 sz, VkBuffer* buf,
         return 1;
     }
     c[stage][i].a = a;
+    c[stage][i].cs_adds = vk_compute_adds();
+    c[stage][i].gfx_adds = vk_buf_adds();
     c[stage][i].gw = gpu_mem_generation();
     c[stage][i].frame = vk_submit_number();
     c[stage][i].sz = sz;

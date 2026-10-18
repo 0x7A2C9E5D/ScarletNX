@@ -15,6 +15,7 @@ typedef struct PendLeaf PendLeaf;
 typedef struct {
     PendLeaf* leaf[1u << 16];
     u64 total; /* every page's count added up */
+    u64 adds;  /* results added so far: unchanged, no result covers what was checked without a hit since */
     u64 overflow; /* pages past 2^40 results cover, read as covering every page */
 } PendPages;
 /* the guest pages behind [gva, gva + size) (a GPU range, translated through the GMMU now) gain a result (delta 1) or

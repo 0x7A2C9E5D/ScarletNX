@@ -462,6 +462,7 @@ void vk_compute_mem_need(u64 a, u64 n) {
     if (pend_hit(&g_pages, a, n)) cs_mem_need(a, n);
     vk_unlock();
 }
+u64 vk_compute_adds(void) { return g_pages.adds; }
 int vk_compute_pending(u64 a, u64 n) {
     int hit;
     vk_lock();

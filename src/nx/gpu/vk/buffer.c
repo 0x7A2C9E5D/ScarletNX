@@ -20,6 +20,7 @@ typedef struct Vb {
     u64 start, len, hash, shash;
     u32 epoch, strict_epoch, chk_epoch, schk, stable, used;
     u64 gw;    /* GPU-side write generation at the last check */
+    u64 cs_adds, gfx_adds; /* vk_compute_adds and vk_buf_adds when pending results were last checked for */
     u64 frame; /* the staging frame buf/off point into, when not own */
     int own;   /* buf is this entry's own buffer */
     u32 wseen; /* write-tracking clock when it last matched memory */
@@ -378,6 +379,7 @@ static void mem_need_reason(u64 gva, u64 len, int reason) {
 }
 void vk_buf_mem_need(u64 gva, u64 len) { mem_need_reason(gva, len, WB_READ); }
 int vk_buf_pending_any(void) { return g_gfx_any; }
+u64 vk_buf_adds(void) { return g_out_pages.adds; }
 int vk_buf_pending_unsubmitted(void) {
     for (GfxOut* o = g_out; o; o = o->next)
         if (o->frame == vk_submit_number()) return 1;
@@ -1066,13 +1068,6 @@ static int make_own(Vb* e, const u8* src) {
 static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     int pending;
     if (!len) return 0;
-    pending = gfx_gpu_src(gva, len, buf, off, 0);
-    if (pending == 1) return 1;
-    if (pending == 2) return gfx_composed(gva, len, buf, off); /* newer than any cached copy */
-    if (vk_compute_gpu_src(gva, len, buf, off)) return 1;      /* a compute result that hasn't landed yet */
-    /* one that covers the range only in part lands first (its write shows in gpu_mem_dirty_since below): the cached
-       copy would otherwise be used without it */
-    if (g_cs_any) vk_compute_mem_need(gva, len);
     /* every bit of the range, mixed by multiplying: constant buffers are 256-byte aligned and buffers often 4K, which
        a shift and xor of the address spread over a fraction of the buckets */
     u32 k = (u32)((((gva ^ (len << 40)) * 0x9E3779B97F4A7C15ull) >> 48) & (VBH - 1));
@@ -1086,6 +1081,21 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
             }
             break;
         }
+    /* Pending results over the range, unless none was added since they were last checked for here (only the sweep in
+       vk_buf_frame frees entries, so e stays good meanwhile) */
+    if (!e || e->cs_adds != vk_compute_adds() || e->gfx_adds != vk_buf_adds()) {
+        pending = gfx_gpu_src(gva, len, buf, off, 0);
+        if (pending == 1) return 1;
+        if (pending == 2) return gfx_composed(gva, len, buf, off); /* newer than any cached copy */
+        if (vk_compute_gpu_src(gva, len, buf, off)) return 1;      /* a compute result that hasn't landed yet */
+        /* one that covers the range only in part lands first (its write shows in gpu_mem_dirty_since below): the
+           cached copy would otherwise be used without it */
+        if (g_cs_any) vk_compute_mem_need(gva, len);
+        if (e) {
+            e->cs_adds = vk_compute_adds();
+            e->gfx_adds = vk_buf_adds();
+        }
+    }
     /* valid: the data is where draws can read it this frame */
     int valid = e && e->buf && (e->own || e->frame == vk_submit_number());
     if (valid && !gpu_mem_dirty_since(e->gw, gva, len)) {
@@ -1134,6 +1144,8 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
         e->start = gva;
         e->len = len;
         e->hash = h ^ 1;
+        e->cs_adds = vk_compute_adds(); /* checked for pending results above */
+        e->gfx_adds = vk_buf_adds();
         e->next = g_vbh[k];
         g_vbh[k] = e;
     }

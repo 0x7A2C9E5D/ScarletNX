@@ -355,6 +355,7 @@ void vk_buf_writable_abort(void);
 void vk_buf_writable_commit(void);
 void vk_buf_mem_need(u64 gva, u64 len);
 int vk_buf_pending(u64 gva, u64 len); /* a pending graphics result overlaps the range */
+u64 vk_buf_adds(void);                /* graphics results committed so far: as vk_compute_adds */
 int vk_buf_pending_any(void);         /* any graphics result is pending */
 int vk_buf_pending_unsubmitted(void); /* one is in the commands recorded since the last submit */
 /* renderdoc.c: with SNX_RENDERDOC set, RenderDoc loaded before the instance exists (load) and the frames
@@ -502,6 +503,8 @@ void vk_compute_before_write(u64 gva, u64 size); /* gpu.c's g_gpu_before_write *
 void vk_compute_mem_need(u64 a, u64 n);          /* a read of [a, a + n): land results there first */
 void vk_compute_mem_need_map(u64 a, u64 n);      /* the GMMU changes [a, a + n): land results there first */
 int vk_compute_pending(u64 a, u64 n);            /* a pending result covers a guest page of [a, a + n) */
+/* compute results recorded so far (pending_pages adds): a check without a hit holds while this is unchanged */
+u64 vk_compute_adds(void);
 /* a pending compute result covering [gva, gva + len): the arena buffer and offset to read it from on the GPU */
 int vk_compute_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off);
 extern VkSemaphore g_vk_csem;  /* timeline semaphore the compute queue signals */

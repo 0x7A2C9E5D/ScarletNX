@@ -51,7 +51,10 @@ static int each_run(u64 gva, u64 size, int (*fn)(void* t, u64 first, u64 last, i
     }
     return 0;
 }
-void pend_add(PendPages* t, u64 gva, u64 size, int delta) { each_run(gva, size, add_pages, t, delta); }
+void pend_add(PendPages* t, u64 gva, u64 size, int delta) {
+    if (delta > 0) t->adds++;
+    each_run(gva, size, add_pages, t, delta);
+}
 /* whether a page of [first, last] has a count, skipping leaves and groups that have none */
 static int hit_pages(void* table, u64 first, u64 last, int delta) {
     const PendPages* t = table;
@@ -79,8 +82,12 @@ int pend_hit(const PendPages* t, u64 gva, u64 size) {
     if (t->overflow) return 1;
     return each_run(gva, size, hit_pages, (void*)t, 0);
 }
-void pend_add_page(PendPages* t, u64 page, int delta) { add_pages(t, page, page, delta); }
+void pend_add_page(PendPages* t, u64 page, int delta) {
+    if (delta > 0) t->adds++;
+    add_pages(t, page, page, delta);
+}
 void pend_add_va(PendPages* t, u64 gva, u64 size, int delta) {
+    if (delta > 0) t->adds++;
     if (size) add_pages(t, gva >> 12, (gva + size - 1 < gva ? ~0ull : gva + size - 1) >> 12, delta);
 }
 int pend_hit_va(const PendPages* t, u64 gva, u64 size) {
