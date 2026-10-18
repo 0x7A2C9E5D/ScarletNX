@@ -38,7 +38,7 @@ void vk_render_end(void) {
     g_rp.open = 0;
     VkCommandBuffer cb = vk_cmd();
     vk_query_pass_end(cb); /* a query begun in the pass ends in it */
-    vkCmdEndRendering(cb);
+    rec_CmdEndRendering(cb);
 }
 
 /* the targets the registers name, without opening anything */
@@ -153,7 +153,7 @@ static int render_begin(Surf** rt, Surf* zt, u32 n, int zt_ro, int srgb_write, u
                           .pColorAttachments = ca,
                           .pDepthAttachment = zt ? &za : NULL,
                           .pStencilAttachment = zt && zt->f.stencil ? &za : NULL};
-    vkCmdBeginRendering(cb, &ri);
+    rec_CmdBeginRendering(cb, &ri);
     memcpy(g_rp.rt, rt, sizeof g_rp.rt);
     g_rp.zt = zt;
     g_rp.n = n;
@@ -217,7 +217,7 @@ static int feedback_order(u32 read, u32 write) {
                            .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT | VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT,
                            .memoryBarrierCount = 1,
                            .pMemoryBarriers = &mb};
-    vkCmdPipelineBarrier2(vk_cmd(), &di);
+    rec_CmdPipelineBarrier2(vk_cmd(), &di);
     g_rp.fb_written = g_rp.fb_read = 0;
     g_vk_fb_barriers++;
     return 1;
@@ -232,30 +232,30 @@ static void feedback_done(u32 read, u32 write) {
 static void plain_state(VkCommandBuffer cb, VkRect2D sc) {
     vk_render_forget_state(); /* every state set here, differently from a draw */
     VkViewport vp = {0, 0, (float)g_rp.ext.width, (float)g_rp.ext.height, 0, 1};
-    vkCmdSetViewportWithCount(cb, 1, &vp);
-    vkCmdSetScissorWithCount(cb, 1, &sc);
-    vkCmdSetCullMode(cb, VK_CULL_MODE_NONE);
-    vkCmdSetFrontFace(cb, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-    vkCmdSetPrimitiveTopology(cb, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-    vkCmdSetPrimitiveRestartEnable(cb, VK_FALSE);
-    vkCmdSetRasterizerDiscardEnable(cb, VK_FALSE);
-    vkCmdSetLineWidth(cb, 1.0f);
-    vkCmdSetDepthBiasEnable(cb, VK_FALSE);
-    vkCmdSetDepthBias(cb, 0, 0, 0);
+    rec_CmdSetViewportWithCount(cb, 1, &vp);
+    rec_CmdSetScissorWithCount(cb, 1, &sc);
+    rec_CmdSetCullMode(cb, VK_CULL_MODE_NONE);
+    rec_CmdSetFrontFace(cb, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    rec_CmdSetPrimitiveTopology(cb, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    rec_CmdSetPrimitiveRestartEnable(cb, VK_FALSE);
+    rec_CmdSetRasterizerDiscardEnable(cb, VK_FALSE);
+    rec_CmdSetLineWidth(cb, 1.0f);
+    rec_CmdSetDepthBiasEnable(cb, VK_FALSE);
+    rec_CmdSetDepthBias(cb, 0, 0, 0);
     float bc[4] = {0, 0, 0, 0};
-    vkCmdSetBlendConstants(cb, bc);
-    vkCmdSetDepthTestEnable(cb, VK_FALSE);
-    vkCmdSetDepthWriteEnable(cb, VK_FALSE);
-    vkCmdSetDepthCompareOp(cb, VK_COMPARE_OP_ALWAYS);
-    vkCmdSetDepthBoundsTestEnable(cb, VK_FALSE);
-    vkCmdSetDepthBounds(cb, 0.0f, 1.0f);
-    vkCmdSetStencilTestEnable(cb, VK_FALSE);
-    vkCmdSetStencilOp(cb, VK_STENCIL_FACE_FRONT_AND_BACK, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP,
+    rec_CmdSetBlendConstants(cb, bc);
+    rec_CmdSetDepthTestEnable(cb, VK_FALSE);
+    rec_CmdSetDepthWriteEnable(cb, VK_FALSE);
+    rec_CmdSetDepthCompareOp(cb, VK_COMPARE_OP_ALWAYS);
+    rec_CmdSetDepthBoundsTestEnable(cb, VK_FALSE);
+    rec_CmdSetDepthBounds(cb, 0.0f, 1.0f);
+    rec_CmdSetStencilTestEnable(cb, VK_FALSE);
+    rec_CmdSetStencilOp(cb, VK_STENCIL_FACE_FRONT_AND_BACK, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP,
                       VK_COMPARE_OP_ALWAYS);
-    vkCmdSetStencilReference(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
-    vkCmdSetStencilCompareMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
-    vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
-    if (g_vk.has_feedback_dynamic) vkCmdSetAttachmentFeedbackLoopEnableEXT(cb, VK_IMAGE_ASPECT_NONE);
+    rec_CmdSetStencilReference(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+    rec_CmdSetStencilCompareMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+    rec_CmdSetStencilWriteMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+    if (g_vk.has_feedback_dynamic) rec_CmdSetAttachmentFeedbackLoopEnableEXT(cb, VK_IMAGE_ASPECT_NONE);
 }
 
 /* a clear of some color components only: a full-screen triangle with that write mask, whose fragment shader writes
@@ -292,14 +292,14 @@ static int clear_masked(u32 slot, u32 mask, const float* cc, VkRect2D rect, u32 
     VkPipeline p = vk_pipeline_get(&k);
     if (!p) return 0;
     VkCommandBuffer cb = vk_cmd();
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    rec_CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
     plain_state(cb, rect);
     u32 pc[8] = {0};
     pc[0] = layer;
     memcpy(&pc[4], cc, 16); /* the register bits, read as the shader's vec4, uvec4 or ivec4 */
-    vkCmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
+    rec_CmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
     vk_query_pass_end(cb); /* a clear passes no samples on the console: its draw here isn't counted */
-    vkCmdDraw(cb, 3, 1, 0, 0);
+    rec_CmdDraw(cb, 3, 1, 0, 0);
     return 1;
 }
 
@@ -410,7 +410,7 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
     }
     if (na) {
         int color_clear = mask == 15 && slot < g_rp.n && g_rp.rt[slot];
-        vkCmdClearAttachments(vk_cmd(), na, at, 1, &rect);
+        rec_CmdClearAttachments(vk_cmd(), na, at, 1, &rect);
         if (color_clear) {
             Surf* s = g_rp.rt[slot];
             s->wgen++;
@@ -1217,7 +1217,7 @@ static VkDescriptorSet desc_set_cached(VkDescriptorSetLayout layout, DescWrites*
     VkDescriptorSet set = vk_desc_alloc(layout);
     if (!set) return VK_NULL_HANDLE;
     for (u32 i = 0; i < d->n; i++) d->w[i].dstSet = set;
-    if (d->n) vkUpdateDescriptorSets(g_vk.dev, d->n, d->w, 0, NULL);
+    if (d->n) vk_rec_update_sets(d->n, d->w); /* written on the recording thread, before the commands binding it */
     g_vk_dset_new++;
     *e = (typeof(cache[0])){h1, h2, frame, set};
     return set;
@@ -1625,7 +1625,7 @@ retry:
                                                      (zt->f.stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0)};
                 a.clearValue.depthStencil = (VkClearDepthStencilValue){1.0f, 0};
                 VkClearRect cr = {{{0, 0}, g_rp.ext}, 0, 1};
-                vkCmdClearAttachments(vk_cmd(), 1, &a, 1, &cr);
+                rec_CmdClearAttachments(vk_cmd(), 1, &a, 1, &cr);
                 target_written(zt);
             }
         }
@@ -1985,11 +1985,11 @@ retry:
     }
     if (fresh || g_dyn.pipe != pipe) {
         g_dyn.pipe = pipe;
-        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+        rec_CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
     }
     if (g_vk.has_feedback_dynamic)
         DYN(fb, fb ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_NONE,
-            vkCmdSetAttachmentFeedbackLoopEnableEXT(cb, fb ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_NONE));
+            rec_CmdSetAttachmentFeedbackLoopEnableEXT(cb, fb ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_NONE));
     VkDescriptorSet sets[2] = {vset, fset};
     VkPipelineLayout layout = vk_playout(k.arrays);
     if (g_dyn.layout != layout) { /* the sets bound through another layout are bound again */
@@ -1999,21 +1999,21 @@ retry:
     if (fresh || g_dyn.sets[0] != vset || (fs && g_dyn.sets[1] != fset)) {
         g_dyn.sets[0] = vset;
         g_dyn.sets[1] = fs ? fset : VK_NULL_HANDLE;
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, fs ? 2 : 1, sets, 0, NULL);
+        rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, fs ? 2 : 1, sets, 0, NULL);
     }
     for (b = 0; b < 3; b++)
         if (bset[b] && (fresh || g_dyn.sets[2 + b] != bset[b])) {
             g_dyn.sets[2 + b] = bset[b];
-            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, (u32)b + 2, 1, &bset[b], 0, NULL);
+            rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, (u32)b + 2, 1, &bset[b], 0, NULL);
         }
-    if (k.nbind) vkCmdBindVertexBuffers2(cb, 0, k.nbind, vbuf, voff, NULL, vstride);
+    if (k.nbind) rec_CmdBindVertexBuffers2(cb, 0, k.nbind, vbuf, voff, NULL, vstride);
 
     VkViewport vp = vk_render_viewport(r);
     if (!(vp.width > 0) || !(vp.height != 0)) {
         draw_images_discard(&images);
         return; /* no area: nothing is drawn (and Vulkan takes none) */
     }
-    DYNV(vp, vp, vkCmdSetViewportWithCount(cb, 1, &vp));
+    DYNV(vp, vp, rec_CmdSetViewportWithCount(cb, 1, &vp));
     VkRect2D sc = {{0, 0}, g_rp.ext};
     if (r[0x380] & 1) {
         u32 xs = r[0x381], ys = r[0x382];
@@ -2031,7 +2031,7 @@ retry:
         if (y1 > (i32)g_rp.ext.height) y1 = (i32)g_rp.ext.height;
         sc = x1 > x0 && y1 > y0 ? (VkRect2D){{x0, y0}, {(u32)(x1 - x0), (u32)(y1 - y0)}} : (VkRect2D){{0, 0}, {0, 0}};
     }
-    DYNV(sc, sc, vkCmdSetScissorWithCount(cb, 1, &sc));
+    DYNV(sc, sc, rec_CmdSetScissorWithCount(cb, 1, &sc));
     /* Triangle facing has its own window-origin control, independent of viewport scale and swizzle. */
     {
         VkCullModeFlags cull = !r[0x646]           ? VK_CULL_MODE_NONE
@@ -2040,17 +2040,17 @@ retry:
                                                    : VK_CULL_MODE_BACK_BIT;
         VkFrontFace front = front_face_at_viewport(r, vp.height);
         u32 prim_restart = restart && (indexed == 1 || indexed == 3);
-        DYN(cull, cull, vkCmdSetCullMode(cb, cull));
-        DYN(front, front, vkCmdSetFrontFace(cb, front));
-        DYN(topo, topo, vkCmdSetPrimitiveTopology(cb, topo));
-        DYN(restart, prim_restart, vkCmdSetPrimitiveRestartEnable(cb, prim_restart));
-        DYN(discard, 1, vkCmdSetRasterizerDiscardEnable(cb, VK_FALSE));
+        DYN(cull, cull, rec_CmdSetCullMode(cb, cull));
+        DYN(front, front, rec_CmdSetFrontFace(cb, front));
+        DYN(topo, topo, rec_CmdSetPrimitiveTopology(cb, topo));
+        DYN(restart, prim_restart, rec_CmdSetPrimitiveRestartEnable(cb, prim_restart));
+        DYN(discard, 1, rec_CmdSetRasterizerDiscardEnable(cb, VK_FALSE));
     }
     {
         float lw; /* smooth lines (0x55C) have a width of their own */
         memcpy(&lw, &r[r[0x55C] ? 0x4EC : 0x4ED], 4);
         lw = g_vk.feat.wideLines && lw > 0 && lw < 64 ? lw : 1.0f;
-        DYNV(lw, lw, vkCmdSetLineWidth(cb, lw));
+        DYNV(lw, lw, rec_CmdSetLineWidth(cb, lw));
     }
     /* depth bias: enabled per polygon mode (0x370 points, 0x371 lines, 0x372 filled), clamped by 0x61F. The units
        are passed as they are (Ryujinx halves them: a run decides) */
@@ -2058,7 +2058,7 @@ retry:
         u32 bias_on = r[k.polygon == VK_POLYGON_MODE_POINT  ? 0x370
                         : k.polygon == VK_POLYGON_MODE_LINE ? 0x371
                                                             : 0x372] != 0;
-        DYN(bias_on, bias_on, vkCmdSetDepthBiasEnable(cb, bias_on));
+        DYN(bias_on, bias_on, rec_CmdSetDepthBiasEnable(cb, bias_on));
     }
     {
         float fac, un, clamp;
@@ -2066,26 +2066,26 @@ retry:
         memcpy(&un, &r[0x56F], 4);
         memcpy(&clamp, &r[0x61F], 4);
         float bias[3] = {un, g_vk.feat.depthBiasClamp ? clamp : 0.0f, fac};
-        DYNV(bias, bias, vkCmdSetDepthBias(cb, bias[0], bias[1], bias[2]));
+        DYNV(bias, bias, rec_CmdSetDepthBias(cb, bias[0], bias[1], bias[2]));
     }
     if (!g_vk.feat.depthClamp && vk_render_depth_clamp(r))
         LOG_LIMIT(1, "vulkan: depth clamp requested but unavailable on this device\n");
     {
         float bc[4];
         memcpy(bc, &r[0x4C7], 16);
-        DYNV(bc, bc, vkCmdSetBlendConstants(cb, bc));
+        DYNV(bc, bc, rec_CmdSetBlendConstants(cb, bc));
     }
     /* depth and stencil */
     {
         u32 dt = zt && r[0x4B3], dw = zt && r[0x4BA];
         VkCompareOp dcmp = cmp_op(r[0x4C3]);
-        DYN(dt, dt, vkCmdSetDepthTestEnable(cb, dt));
-        DYN(dw, dw, vkCmdSetDepthWriteEnable(cb, dw));
-        DYN(dcmp, dcmp, vkCmdSetDepthCompareOp(cb, dcmp));
-        DYN(dbounds, 1, (vkCmdSetDepthBoundsTestEnable(cb, VK_FALSE), vkCmdSetDepthBounds(cb, 0.0f, 1.0f)));
+        DYN(dt, dt, rec_CmdSetDepthTestEnable(cb, dt));
+        DYN(dw, dw, rec_CmdSetDepthWriteEnable(cb, dw));
+        DYN(dcmp, dcmp, rec_CmdSetDepthCompareOp(cb, dcmp));
+        DYN(dbounds, 1, (rec_CmdSetDepthBoundsTestEnable(cb, VK_FALSE), rec_CmdSetDepthBounds(cb, 0.0f, 1.0f)));
     }
     int stencil = zt && zt->f.stencil && r[0x4E0];
-    DYN(st, (u32)stencil, vkCmdSetStencilTestEnable(cb, stencil));
+    DYN(st, (u32)stencil, rec_CmdSetStencilTestEnable(cb, stencil));
     /* GL order in the registers: fail, depth fail, pass */
     int two = r[0x565] != 0;
     {
@@ -2105,15 +2105,15 @@ retry:
                      r[two ? 0x3D7 : 0x4E6],
                      r[two ? 0x3D6 : 0x4E7]};
         DYNV(sfront, sf,
-             (vkCmdSetStencilOp(cb, VK_STENCIL_FACE_FRONT_BIT, sf[0], sf[1], sf[2], sf[3]),
-              vkCmdSetStencilReference(cb, VK_STENCIL_FACE_FRONT_BIT, sf[4]),
-              vkCmdSetStencilCompareMask(cb, VK_STENCIL_FACE_FRONT_BIT, sf[5]),
-              vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_FRONT_BIT, sf[6])));
+             (rec_CmdSetStencilOp(cb, VK_STENCIL_FACE_FRONT_BIT, sf[0], sf[1], sf[2], sf[3]),
+              rec_CmdSetStencilReference(cb, VK_STENCIL_FACE_FRONT_BIT, sf[4]),
+              rec_CmdSetStencilCompareMask(cb, VK_STENCIL_FACE_FRONT_BIT, sf[5]),
+              rec_CmdSetStencilWriteMask(cb, VK_STENCIL_FACE_FRONT_BIT, sf[6])));
         DYNV(sback, sb,
-             (vkCmdSetStencilOp(cb, VK_STENCIL_FACE_BACK_BIT, sb[0], sb[1], sb[2], sb[3]),
-              vkCmdSetStencilReference(cb, VK_STENCIL_FACE_BACK_BIT, sb[4]),
-              vkCmdSetStencilCompareMask(cb, VK_STENCIL_FACE_BACK_BIT, sb[5]),
-              vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_BACK_BIT, sb[6])));
+             (rec_CmdSetStencilOp(cb, VK_STENCIL_FACE_BACK_BIT, sb[0], sb[1], sb[2], sb[3]),
+              rec_CmdSetStencilReference(cb, VK_STENCIL_FACE_BACK_BIT, sb[4]),
+              rec_CmdSetStencilCompareMask(cb, VK_STENCIL_FACE_BACK_BIT, sb[5]),
+              rec_CmdSetStencilWriteMask(cb, VK_STENCIL_FACE_BACK_BIT, sb[6])));
     }
     /* push constants: the depth mode (snx_vp.y) for the vertex stage, the alpha test (0x4BB on, 0x4C4 reference,
        0x4C5 function) and the point sprite's T flip for the fragment stage. PointCoord's T is 0 at row 0, which is a
@@ -2129,16 +2129,16 @@ retry:
         memcpy(&pc[6], &r[0x4C4], 4);
         pc[7] = ((r[0x581] >> 2) & 1) == (r[0x4EB] & 1) ? 1.0f : 0.0f;
     }
-    vkCmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
+    rec_CmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
 
     vk_query_draw(cb, ch->id, r[0x574]); /* counted by the channel's samples-passed counter when it runs */
     if (indexed) {
-        vkCmdBindIndexBuffer(cb, ibuf, ioff, itype);
+        rec_CmdBindIndexBuffer(cb, ibuf, ioff, itype);
         /* quads made from guest indices keep the base vertex, quads made from vertex numbers have it in them */
-        vkCmdDrawIndexed(cb, icount, instances, 0, indexed == 2 && !quads_indexed ? 0 : (i32)base_vertex,
+        rec_CmdDrawIndexed(cb, icount, instances, 0, indexed == 2 && !quads_indexed ? 0 : (i32)base_vertex,
                          base_instance);
     } else
-        vkCmdDraw(cb, count, instances, first, base_instance);
+        rec_CmdDraw(cb, count, instances, first, base_instance);
     vk_buf_writable_commit();
     draw_images_commit(&images);
     feedback_done(fb, writes);
@@ -2201,7 +2201,7 @@ void vk_render_draw_texture(GpuChannel* ch) {
                 VK_ACCESS_2_TRANSFER_READ_BIT);
     vk_surf_use(cb, d, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
-    vkCmdBlitImage(cb, t->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, d->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+    rec_CmdBlitImage(cb, t->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, d->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                    &b, linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
     d->wgen++;
     vk_rt_drawn(d);

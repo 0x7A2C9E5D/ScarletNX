@@ -210,6 +210,7 @@ static void cs_submit(void) {
                         .pCommandBufferInfos = &c,
                         .signalSemaphoreInfoCount = 1,
                         .pSignalSemaphoreInfos = &sig};
+    vk_rec_queue(g_vk.compute); /* after the graphics submissions before it, when the queue is theirs too */
     VkResult r = vkQueueSubmit2(g_vk.compute, 1, &si, VK_NULL_HANDLE);
     if (r == VK_ERROR_DEVICE_LOST) fatal("vulkan: the GPU device was lost (driver reset or crash)");
     g_recording = 0;
@@ -1158,11 +1159,11 @@ rebind:
                                 .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT};
         VkDependencyInfo cdi = {
             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &cmb};
-        vkCmdPipelineBarrier2(cb, &cdi);
+        rec_CmdPipelineBarrier2(cb, &cdi);
     }
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, p->p);
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, g_vk_playout, 0, 1, &set, 0, NULL);
-    vkCmdDispatch(cb, gx, gy, gz);
+    rec_CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, p->p);
+    rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, g_vk_playout, 0, 1, &set, 0, NULL);
+    rec_CmdDispatch(cb, gx, gy, gz);
     if (deferred) {
         /* pending from here: the submit copies them where the host reads them (vk_buf_host_barrier) */
         vk_buf_writable_commit();
@@ -1178,7 +1179,7 @@ rebind:
                            .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
                            .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT};
     VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
-    vkCmdPipelineBarrier2(cb, &di);
+    rec_CmdPipelineBarrier2(cb, &di);
     g_vk_dispatches++;
     if (gfx) {
         /* everything before it on the graphics queue runs first; then its results land at once */

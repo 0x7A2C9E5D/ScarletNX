@@ -148,7 +148,7 @@ static int check_depth_array(void) {
         copies[layer].imageSubresource = (VkImageSubresourceLayers){VK_IMAGE_ASPECT_DEPTH_BIT, 0, layer, 1};
         copies[layer].imageExtent = (VkExtent3D){1, 1, 1};
     }
-    vkCmdCopyImageToBuffer(cb, target->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 3, copies);
+    rec_CmdCopyImageToBuffer(cb, target->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 3, copies);
     vk_finish();
     vk_readback_ready();
     for (u32 layer = 0; layer < 3; layer++) {
@@ -216,7 +216,7 @@ static int check_srgb_write(void) {
         copies[i].imageSubresource = (VkImageSubresourceLayers){VK_IMAGE_ASPECT_COLOR_BIT, 0, i, 1};
         copies[i].imageExtent = (VkExtent3D){1, 1, 1};
     }
-    vkCmdCopyImageToBuffer(cb, target->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 2, copies);
+    rec_CmdCopyImageToBuffer(cb, target->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 2, copies);
     vk_finish();
     vk_readback_ready();
     const u8 expected[8] = {128, 137, 137, 255, 188, 64, 64, 255};

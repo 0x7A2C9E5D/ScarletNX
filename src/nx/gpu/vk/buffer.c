@@ -278,7 +278,7 @@ void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame) {
                           .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
                           .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT};
     VkDependencyInfo d = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &b};
-    vkCmdPipelineBarrier2(cb, &d);
+    rec_CmdPipelineBarrier2(cb, &d);
     /* consecutive results usually share both buffers: one copy command each run */
     VkBufferCopy regions[64];
     u32 n = 0;
@@ -291,7 +291,7 @@ void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame) {
         u8* p = vk_stage_back(o->size, &back, &at, &mem);
         if (!p) break; /* out of memory: this result and the rest stay where the shader wrote them */
         if (n && (n == sizeof regions / sizeof *regions || o->buf != src || back != dst)) {
-            vkCmdCopyBuffer(cb, src, dst, n, regions);
+            rec_CmdCopyBuffer(cb, src, dst, n, regions);
             n = 0;
         }
         src = o->buf;
@@ -300,12 +300,12 @@ void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame) {
         o->ptr = p;
         o->mem = mem;
     }
-    if (n) vkCmdCopyBuffer(cb, src, dst, n, regions);
+    if (n) rec_CmdCopyBuffer(cb, src, dst, n, regions);
     b.srcStageMask |= VK_PIPELINE_STAGE_2_COPY_BIT;
     b.srcAccessMask |= VK_ACCESS_2_TRANSFER_WRITE_BIT;
     b.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
     b.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
-    vkCmdPipelineBarrier2(cb, &d);
+    rec_CmdPipelineBarrier2(cb, &d);
 }
 static void wait_finish(int reason) {
     u64 t = copy_stats_on() ? plat_ns() : 0;
@@ -437,10 +437,10 @@ static void copy_barrier(VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_acc
                           .dstStageMask = dst_stage,
                           .dstAccessMask = dst_access};
     VkDependencyInfo d = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &b};
-    vkCmdPipelineBarrier2(vk_cmd(), &d);
+    rec_CmdPipelineBarrier2(vk_cmd(), &d);
 }
 static void copy_flush(CopyBatch* c) {
-    if (c->n) vkCmdCopyBuffer(vk_cmd(), c->src, c->dst, c->n, c->regions);
+    if (c->n) rec_CmdCopyBuffer(vk_cmd(), c->src, c->dst, c->n, c->regions);
     c->n = 0;
 }
 static void copy_add(CopyBatch* c, VkBuffer src, u64 src_off, u64 dst_off, u64 size) {

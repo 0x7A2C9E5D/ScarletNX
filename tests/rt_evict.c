@@ -82,22 +82,30 @@ int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* me
     *mem = (VmaAllocation)(uintptr_t)1;
     return 1;
 }
-static void VKAPI_CALL copy_image_to_buffer(VkCommandBuffer cb, VkImage img, VkImageLayout l, VkBuffer b, uint32_t n,
-                                            const VkBufferImageCopy* r) {
+/* surface.c records through the recording thread's wrappers (gpu/vk/record.c) */
+void rec_CmdCopyImageToBuffer(VkCommandBuffer cb, VkImage img, VkImageLayout l, VkBuffer b, u32 n,
+                              const VkBufferImageCopy* r) {
     (void)cb, (void)l, (void)b;
     for (u32 i = 0; i < n; i++)
         memset(g_readback + r[i].bufferOffset, (int)(u8)(uintptr_t)img,
                (size_t)r[i].imageExtent.width * r[i].imageExtent.height * 4);
     g_readbacks++;
 }
-static void VKAPI_CALL pipeline_barrier2(VkCommandBuffer cb, const VkDependencyInfo* d) { (void)cb, (void)d; }
-static void VKAPI_CALL copy_buffer_to_image(VkCommandBuffer cb, VkBuffer b, VkImage img, VkImageLayout l, uint32_t n,
-                                            const VkBufferImageCopy* r) {
+void rec_CmdPipelineBarrier2(VkCommandBuffer cb, const VkDependencyInfo* d) { (void)cb, (void)d; }
+void rec_CmdCopyBufferToImage(VkCommandBuffer cb, VkBuffer b, VkImage img, VkImageLayout l, u32 n,
+                              const VkBufferImageCopy* r) {
     (void)cb, (void)b, (void)img, (void)l, (void)n, (void)r;
 }
-PFN_vkCmdCopyImageToBuffer vkCmdCopyImageToBuffer = copy_image_to_buffer;
-PFN_vkCmdPipelineBarrier2 vkCmdPipelineBarrier2 = pipeline_barrier2;
-PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage = copy_buffer_to_image;
+void rec_CmdBlitImage(VkCommandBuffer cb, VkImage src, VkImageLayout sl, VkImage dst, VkImageLayout dl, u32 n,
+                      const VkImageBlit* r, VkFilter filter) {
+    (void)cb, (void)src, (void)sl, (void)dst, (void)dl, (void)n, (void)r, (void)filter;
+}
+/* the drawn-targets page filter: every range may hold one, so vk_rt_drawn_in walks the list */
+void pend_add_va(PendPages* t, u64 gva, u64 size, int delta) { (void)t, (void)gva, (void)size, (void)delta; }
+int pend_hit_va(const PendPages* t, u64 gva, u64 size) {
+    (void)t, (void)gva, (void)size;
+    return 1;
+}
 static VkResult VKAPI_CALL create_image_view(VkDevice d, const VkImageViewCreateInfo* ci,
                                              const VkAllocationCallbacks* a, VkImageView* v) {
     (void)d, (void)ci, (void)a;
@@ -107,13 +115,6 @@ static VkResult VKAPI_CALL create_image_view(VkDevice d, const VkImageViewCreate
 static void VKAPI_CALL format_properties(VkPhysicalDevice p, VkFormat f, VkFormatProperties* props) {
     (void)p, (void)f;
     memset(props, 0, sizeof *props);
-}
-PFN_vkCmdBlitImage vkCmdBlitImage;
-/* the drawn-targets page filter: every range may hold one, so vk_rt_drawn_in walks the list */
-void pend_add_va(PendPages* t, u64 gva, u64 size, int delta) { (void)t, (void)gva, (void)size, (void)delta; }
-int pend_hit_va(const PendPages* t, u64 gva, u64 size) {
-    (void)t, (void)gva, (void)size;
-    return 1;
 }
 PFN_vkCreateImageView vkCreateImageView = create_image_view;
 PFN_vkGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties = format_properties;

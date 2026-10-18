@@ -82,7 +82,7 @@ snx_component(shader gpu/shader/shader.c gpu/shader/decode.c gpu/shader/corpus.c
 # the opcode enum and decoder, generated from gpu/shader/maxwell_opcodes.def
 include("${PROJECT_SOURCE_DIR}/cmake/shaderdec.cmake")
 snx_shaderdec(snx_shader)
-snx_component(vk gpu/vk/renderer.c gpu/vk/device.c gpu/vk/cmd.c gpu/vk/format.c gpu/vk/surface.c gpu/vk/texture.c
+snx_component(vk gpu/vk/renderer.c gpu/vk/device.c gpu/vk/cmd.c gpu/vk/record.c gpu/vk/format.c gpu/vk/surface.c gpu/vk/texture.c
                  gpu/vk/buffer.c gpu/vk/writeback.c gpu/vk/pipeline.c gpu/vk/render.c gpu/vk/release.c gpu/vk/query.c gpu/vk/compute.c
                  gpu/vk/pending_pages.c gpu/vk/memory.c gpu/vk/renderdoc.c gpu/vk/astc.c gpu/vk/ui.c gpu/texture/etc2.c gpu/texture/depth.c gpu/vk/vic.c gpu/vk/vma.cpp
                  "${volk_SOURCE_DIR}/volk.c")
@@ -212,8 +212,15 @@ if(BUILD_TESTING AND SNX_TEST_VULKAN)
     # the ASTC upload against the CPU decoder, with the backend's own frames, staging and allocations and the SPIR-V
     # the build makes (the file snx_glsl_spirv generated for snx_vk above). Again under a 4 MiB allocation cap, so
     # images in pieces are tested too. `snx-test-astc-vulkan --large` decodes two 512 MiB textures (minutes on lavapipe)
+    # cmd.c records the frame's commands through record.c's thread, with the platform's threads and locks
+    if(WIN32)
+        set(snx_astc_plat runtime/platform/plat_win32.c)
+    else()
+        set(snx_astc_plat runtime/platform/plat_posix.c)
+    endif()
     add_executable(snx-test-astc-vulkan "${PROJECT_SOURCE_DIR}/tests/astc_vulkan.c" gpu/texture/astc.c gpu/vk/astc.c
-        gpu/vk/cmd.c gpu/vk/memory.c gpu/vk/vma.cpp "${volk_SOURCE_DIR}/volk.c"
+        gpu/vk/cmd.c gpu/vk/memory.c gpu/vk/record.c gpu/vk/vma.cpp ${snx_astc_plat}
+        "${PROJECT_SOURCE_DIR}/src/common/filesystem/host.c" "${volk_SOURCE_DIR}/volk.c"
         "${CMAKE_BINARY_DIR}/generated/spirv/astc_spv.c")
     target_link_libraries(snx-test-astc-vulkan PRIVATE snx_nx_flags Threads::Threads ${CMAKE_DL_LIBS})
     set_target_properties(snx-test-astc-vulkan PROPERTIES LINKER_LANGUAGE CXX)

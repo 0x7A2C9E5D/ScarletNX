@@ -505,6 +505,7 @@ static void swapchain_retire(void) {
 /* the window's surface made anew, its swapchain to follow: Android destroys a window's surface while the app is in
    the background, and the Vulkan surface on it is lost for good */
 int vk_surface_recreate(void) {
+    vk_rec_sync(); /* the device wait covers only what was submitted */
     vkDeviceWaitIdle(g_vk.dev);
     if (g_vk.swapchain) swapchain_retire();
     vkDestroySurfaceKHR(g_vk.instance, g_vk.surface, NULL);
@@ -528,6 +529,7 @@ int vk_window_release(void) {
         if (++waited == 200) return 0;
         plat_sleep_ns(10000000);
     }
+    vk_rec_sync();
     vkDeviceWaitIdle(g_vk.dev); /* a lost device answers at once */
     if (g_vk.swapchain) swapchain_retire();
     if (g_vk.surface) vkDestroySurfaceKHR(g_vk.instance, g_vk.surface, NULL);
@@ -613,7 +615,10 @@ int vk_swapchain_create(int srgb) {
                                                   ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
                                                   : caps.currentTransform;
     VkSwapchainKHR old = g_vk.swapchain;
-    if (old) vkDeviceWaitIdle(g_vk.dev);
+    if (old) {
+        vk_rec_sync();
+        vkDeviceWaitIdle(g_vk.dev);
+    }
     VkSwapchainCreateInfoKHR ci = {.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
                                    .surface = g_vk.surface,
                                    .minImageCount = count,

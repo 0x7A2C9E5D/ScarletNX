@@ -7,6 +7,7 @@
    device.c    instance, device, queues, swapchain, memory allocator (VMA)
    memory.c    the cap on one allocation, and images bigger than it bound in pieces (sparse binding)
    cmd.c       frames in flight: the command buffer being recorded, staging and readback rings, deferred destruction
+   record.c    recording the frame's command buffer on a thread of its own
    format.c    guest render target and texture formats -> Vulkan formats
    surface.c   render targets by guest address (a table textures share), loads from and write-backs to guest memory
    writeback.c landing compute and graphics storage results in guest memory
@@ -149,6 +150,78 @@ u64 vk_hash(const void* p, u64 size);
 u64 vk_sample_hash(u64 gva, u64 len);
 /* guest submits processed so far, and frames presented: what the caches check memory against */
 extern u32 g_vk_epoch, g_vk_present;
+
+/* record.c: the frame's command buffer is recorded on a thread of its own. rec_Cmd* take vkCmd*'s arguments and
+   record into that command buffer from the ring, or into any other one at once */
+void vk_rec_init(void);
+void vk_rec_begin(VkCommandBuffer cb); /* begins cb, the frame's command buffer from now on */
+/* ends and submits cb with those semaphores (s[0] the graphics timeline's) */
+void vk_rec_submit(VkCommandBuffer cb, const VkSemaphoreSubmitInfo* w, u32 nw, const VkSemaphoreSubmitInfo* s,
+                   u32 ns);
+void vk_rec_sync(void);        /* until everything queued is recorded and submitted */
+void vk_rec_queue(VkQueue q);  /* before submitting to or presenting on q outside the ring (vk_lock) */
+/* vkUpdateDescriptorSets of new sets that only commands recorded after this bind (vk_lock) */
+void vk_rec_update_sets(u32 n, const VkWriteDescriptorSet* w);
+void rec_CmdBindPipeline(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipeline pipe);
+void rec_CmdBindIndexBuffer(VkCommandBuffer cb, VkBuffer buf, VkDeviceSize off, VkIndexType type);
+void rec_CmdDraw(VkCommandBuffer cb, u32 count, u32 instances, u32 first, u32 first_instance);
+void rec_CmdDrawIndexed(VkCommandBuffer cb, u32 count, u32 instances, u32 first, i32 vertex_offset,
+                        u32 first_instance);
+void rec_CmdDispatch(VkCommandBuffer cb, u32 x, u32 y, u32 z);
+void rec_CmdEndRendering(VkCommandBuffer cb);
+void rec_CmdSetCullMode(VkCommandBuffer cb, VkCullModeFlags mode);
+void rec_CmdSetFrontFace(VkCommandBuffer cb, VkFrontFace face);
+void rec_CmdSetPrimitiveTopology(VkCommandBuffer cb, VkPrimitiveTopology topo);
+void rec_CmdSetPrimitiveRestartEnable(VkCommandBuffer cb, VkBool32 on);
+void rec_CmdSetRasterizerDiscardEnable(VkCommandBuffer cb, VkBool32 on);
+void rec_CmdSetLineWidth(VkCommandBuffer cb, float width);
+void rec_CmdSetDepthBiasEnable(VkCommandBuffer cb, VkBool32 on);
+void rec_CmdSetDepthBias(VkCommandBuffer cb, float constant, float clamp, float slope);
+void rec_CmdSetDepthTestEnable(VkCommandBuffer cb, VkBool32 on);
+void rec_CmdSetDepthWriteEnable(VkCommandBuffer cb, VkBool32 on);
+void rec_CmdSetDepthCompareOp(VkCommandBuffer cb, VkCompareOp op);
+void rec_CmdSetDepthBoundsTestEnable(VkCommandBuffer cb, VkBool32 on);
+void rec_CmdSetDepthBounds(VkCommandBuffer cb, float lo, float hi);
+void rec_CmdSetStencilTestEnable(VkCommandBuffer cb, VkBool32 on);
+void rec_CmdSetStencilOp(VkCommandBuffer cb, VkStencilFaceFlags face, VkStencilOp fail, VkStencilOp pass,
+                         VkStencilOp depth_fail, VkCompareOp op);
+void rec_CmdSetStencilReference(VkCommandBuffer cb, VkStencilFaceFlags face, u32 v);
+void rec_CmdSetStencilCompareMask(VkCommandBuffer cb, VkStencilFaceFlags face, u32 v);
+void rec_CmdSetStencilWriteMask(VkCommandBuffer cb, VkStencilFaceFlags face, u32 v);
+void rec_CmdSetAttachmentFeedbackLoopEnableEXT(VkCommandBuffer cb, VkImageAspectFlags aspect);
+void rec_CmdResetQueryPool(VkCommandBuffer cb, VkQueryPool pool, u32 first, u32 count);
+void rec_CmdBeginQuery(VkCommandBuffer cb, VkQueryPool pool, u32 query, VkQueryControlFlags flags);
+void rec_CmdEndQuery(VkCommandBuffer cb, VkQueryPool pool, u32 query);
+void rec_CmdCopyQueryPoolResults(VkCommandBuffer cb, VkQueryPool pool, u32 first, u32 count, VkBuffer dst,
+                                 VkDeviceSize off, VkDeviceSize stride, VkQueryResultFlags flags);
+void rec_CmdSetBlendConstants(VkCommandBuffer cb, const float c[4]);
+void rec_CmdPushConstants(VkCommandBuffer cb, VkPipelineLayout layout, VkShaderStageFlags stages, u32 offset, u32 size,
+                          const void* data);
+void rec_CmdBindDescriptorSets(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipelineLayout layout, u32 first, u32 n,
+                               const VkDescriptorSet* sets, u32 ndyn, const u32* dyn);
+void rec_CmdBindVertexBuffers2(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* bufs, const VkDeviceSize* offs,
+                               const VkDeviceSize* sizes, const VkDeviceSize* strides);
+void rec_CmdBindVertexBuffers(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* bufs, const VkDeviceSize* offs);
+void rec_CmdSetViewportWithCount(VkCommandBuffer cb, u32 n, const VkViewport* v);
+void rec_CmdSetViewport(VkCommandBuffer cb, u32 first, u32 n, const VkViewport* v);
+void rec_CmdSetScissorWithCount(VkCommandBuffer cb, u32 n, const VkRect2D* r);
+void rec_CmdSetScissor(VkCommandBuffer cb, u32 first, u32 n, const VkRect2D* r);
+void rec_CmdCopyBuffer(VkCommandBuffer cb, VkBuffer src, VkBuffer dst, u32 n, const VkBufferCopy* r);
+void rec_CmdCopyImage(VkCommandBuffer cb, VkImage src, VkImageLayout sl, VkImage dst, VkImageLayout dl, u32 n,
+                      const VkImageCopy* r);
+void rec_CmdBlitImage(VkCommandBuffer cb, VkImage src, VkImageLayout sl, VkImage dst, VkImageLayout dl, u32 n,
+                      const VkImageBlit* r, VkFilter filter);
+void rec_CmdCopyBufferToImage(VkCommandBuffer cb, VkBuffer src, VkImage dst, VkImageLayout dl, u32 n,
+                              const VkBufferImageCopy* r);
+void rec_CmdCopyImageToBuffer(VkCommandBuffer cb, VkImage src, VkImageLayout sl, VkBuffer dst, u32 n,
+                              const VkBufferImageCopy* r);
+void rec_CmdClearColorImage(VkCommandBuffer cb, VkImage img, VkImageLayout l, const VkClearColorValue* c, u32 n,
+                            const VkImageSubresourceRange* r);
+void rec_CmdClearDepthStencilImage(VkCommandBuffer cb, VkImage img, VkImageLayout l, const VkClearDepthStencilValue* c,
+                                   u32 n, const VkImageSubresourceRange* r);
+void rec_CmdClearAttachments(VkCommandBuffer cb, u32 na, const VkClearAttachment* a, u32 nr, const VkClearRect* r);
+void rec_CmdPipelineBarrier2(VkCommandBuffer cb, const VkDependencyInfo* d);
+void rec_CmdBeginRendering(VkCommandBuffer cb, const VkRenderingInfo* ri);
 
 /* format.c */
 typedef struct {

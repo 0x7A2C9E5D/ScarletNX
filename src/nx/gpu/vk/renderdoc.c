@@ -83,6 +83,7 @@ void vk_renderdoc_present(u64 present) {
     void* dev;
     if (!g_rd || !g_vk.instance) return;
     dev = RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(g_vk.instance);
+    if (g_rd_open || rd_wanted(present)) vk_rec_sync(); /* the frame's commands are recorded within the capture */
     if (g_rd_open) {
         g_rd_open = 0;
         if (g_rd->EndFrameCapture(dev, NULL)) {

@@ -69,6 +69,27 @@ PFN_vkCmdCopyImage vkCmdCopyImage;
 PFN_vkCreateImageView vkCreateImageView;
 PFN_vkCreateSampler vkCreateSampler;
 PFN_vkGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties;
+/* record.c's wrappers, which the frame's command buffer goes through: made at once here */
+void rec_CmdCopyBufferToImage(VkCommandBuffer cb, VkBuffer src, VkImage dst, VkImageLayout dl, u32 n,
+                              const VkBufferImageCopy* r) {
+    vkCmdCopyBufferToImage(cb, src, dst, dl, n, r);
+}
+void rec_CmdCopyImage(VkCommandBuffer cb, VkImage src, VkImageLayout sl, VkImage dst, VkImageLayout dl, u32 n,
+                      const VkImageCopy* r) {
+    vkCmdCopyImage(cb, src, sl, dst, dl, n, r);
+}
+void rec_CmdBlitImage(VkCommandBuffer cb, VkImage src, VkImageLayout sl, VkImage dst, VkImageLayout dl, u32 n,
+                      const VkImageBlit* r, VkFilter filter) {
+    vkCmdBlitImage(cb, src, sl, dst, dl, n, r, filter);
+}
+void rec_CmdClearColorImage(VkCommandBuffer cb, VkImage img, VkImageLayout l, const VkClearColorValue* c, u32 n,
+                            const VkImageSubresourceRange* r) {
+    vkCmdClearColorImage(cb, img, l, c, n, r);
+}
+void rec_CmdClearDepthStencilImage(VkCommandBuffer cb, VkImage img, VkImageLayout l, const VkClearDepthStencilValue* c,
+                                   u32 n, const VkImageSubresourceRange* r) {
+    vkCmdClearDepthStencilImage(cb, img, l, c, n, r);
+}
 
 /* ------------------------------------------------ what texture.c reaches otherwise, unused here */
 VkState g_vk;
