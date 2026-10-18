@@ -3,7 +3,7 @@
 
     check.py [PATH...]     (files or folders; default src/; .c and .h)
 
-It prints one line per candidate, file:line: rule: what it saw. Three rules can be seen in the text:
+It prints one line per candidate, file:line: rule: what it saw. Four rules can be seen in the text:
   flag    a presence flag beside the pointer it describes (has_X / X_present / X_valid beside a pointer X,
           or is_present / present / valid in a struct with one pointer): NULL already says it
   allocs  one function filling two or more members of one object from separate allocations: one block
@@ -12,6 +12,8 @@ It prints one line per candidate, file:line: rule: what it saw. Three rules can 
           file scope in one file: they may share a cache line, and two threads writing them slow each other
           down. An atomic is declared _Atomic, or reached through an __atomic_* builtin in the struct's own file
           or in a file read that includes it
+  globals two or more variables of static duration in one file (at file scope, or static in a function) that
+          aren't const: one struct holds the file's state, in one global
 Exit status 0 whatever it finds; 2 when a path cannot be read.
 """
 import os, re, sys
@@ -136,6 +138,12 @@ def check_functions(path, text, report):
                        f"{len(hits)} separate allocations into members of '{owner}'")
 
 
+def const_object(head):
+    """The definition's object is itself const (a const after the last *): a table, not state."""
+    consts = [m.start() for m in re.finditer(r"\bconst\b", head)]
+    return bool(consts) and consts[-1] > head.rfind("*")
+
+
 def check_globals(path, text, report, used):
     """Atomics defined at file scope: the compiler lays a file's definitions out together."""
     depth, start, found = 0, 0, []
@@ -164,6 +172,47 @@ def check_globals(path, text, report, used):
             report(path, line_of(text, found[0][2]), "atomics",
                    f"{len(found)} atomics at file scope ({', '.join(n for n, _, _ in found)}), "
                    f"nothing keeps {', '.join(bare)} off the one before")
+
+
+def check_state(path, text, report):
+    """A file's variables of static duration, at file scope or static in a function, when two or more aren't const."""
+    variables, depth, start, brace = [], 0, 0, -1
+    for i, c in enumerate(text):
+        if c == "{":
+            if depth == 0:
+                brace = i
+            depth += 1
+        elif c == "}":
+            depth = max(0, depth - 1)
+            if depth == 0 and text[start:brace].rstrip().endswith(")"):
+                start = i + 1  # a function's body ends its statement
+        elif c == ";" and depth == 0:
+            stmt = re.sub(r"^[ \t]*#.*$", lambda m: " " * len(m.group(0)), text[start:i], flags=re.M)
+            lead = len(stmt) - len(stmt.lstrip())
+            decl = stmt.strip()
+            while re.search(r"\{[^{}]*\}", decl):
+                decl = re.sub(r"\{[^{}]*\}", "", decl)
+            head = decl.split("=")[0]
+            if decl and "(" not in head and not re.match(r"(?:extern|typedef)\b", decl) and \
+                    not re.fullmatch(r"(?:struct|union|enum)\b\s*\w*\s*", head.strip()) and not const_object(head):
+                for part in head.split(","):
+                    names = re.findall(r"(\w+)\s*(?:\[[^\]]*\]\s*)*$", part.strip())
+                    if names:
+                        variables.append((names[0], start + lead))
+            start = i + 1
+    for open_at in bodies(text):
+        body = text[open_at + 1:closing(text, open_at)]
+        while re.search(r"\b(?:struct|union)\s*\w*\s*\{[^{}]*\}", body):  # a static struct's members are its own
+            body = re.sub(r"\b(?:struct|union)\s*\w*\s*\{[^{}]*\}", lambda m: "struct" + " " * (len(m.group(0)) - 6),
+                          body)
+        for m in re.finditer(r"\bstatic\b([^;(]*?)(\w+)\s*(?:\[[^\]]*\]\s*)*(?:=[^;]*)?;", body):
+            if not const_object(m.group(1)):
+                variables.append((m.group(2), open_at + 1 + m.start()))
+    if len(variables) > 1:
+        variables.sort(key=lambda v: v[1])
+        report(path, line_of(text, variables[0][1]), "globals",
+               f"{len(variables)} variables of static duration ({', '.join(n for n, _ in variables)}): one struct "
+               f"holds a file's state")
 
 
 def files(paths):
@@ -217,6 +266,7 @@ def main(argv):
         check_structs(path, text, report, used)
         check_functions(path, text, report)
         check_globals(path, text, report, used)
+        check_state(path, text, report)
     for line in found:
         print(line)
     print(f"{len(found)} candidate(s)", file=sys.stderr)

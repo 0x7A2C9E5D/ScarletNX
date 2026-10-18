@@ -151,4 +151,5 @@ static void rt_wfe(CPU* c) {
 }
 static void rt_poll(CPU* c) { core_poll((KThread*)c->thread); }
 
-const RtAPI g_rtapi = {snx_svc, rt_undef, rt_note_hint, guest_ticks, rt_brk, snx_fpcr_apply, rt_sev, rt_wfe, rt_poll};
+const RtAPI g_rtapi = {snx_svc,        rt_undef, rt_note_hint, guest_ticks, rt_brk,
+                       snx_fpcr_apply, rt_sev,   rt_wfe,       rt_poll,     g_svc64};

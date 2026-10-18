@@ -127,10 +127,17 @@ static u32 start_thread(u32 h) {
     R_SUCCEED();
 }
 /* svcSleepThread: a sleep off the core, or one of the three yields (0 on its core, -1 and -2 to any core) */
-static void sleep_thread(KThread* t, CPU* c, i64 ns) {
+static void sleep_thread(KThread* t, i64 ns) {
+    int i;
     t->sleep_n++;
-    t->sleep_lr = g_arm_mod ? t->arm.r[14] : c->x[30];
-    memcpy(t->sleep_x, c->x, sizeof t->sleep_x);
+    if (g_arm_mod) {
+        t->sleep_lr = t->arm.r[14];
+        memset(t->sleep_x, 0, sizeof t->sleep_x);
+        for (i = 0; i < 15; i++) t->sleep_x[i] = t->arm.r[i];
+    } else {
+        t->sleep_lr = t->cpu.x[30];
+        memcpy(t->sleep_x, t->cpu.x, sizeof t->sleep_x);
+    }
     if (ns > 0) {
         pm_lock(&g_klock);
         t->woken = 0;
@@ -362,9 +369,9 @@ static u32 connect_port(u64 name_addr, u32* out) {
     return *out ? 0 : R_OUTOFHANDLES;
 }
 /* the request is served on the calling thread, which lets go of its core meanwhile, as it would wait for the server */
-static void send_request(KThread* t, u32 h, u64 msg, u64 size) {
+static u32 send_request(KThread* t, u32 h, u64 msg, u64 size) {
     core_leave(t);
-    ipc_handle(t, h, msg, size);
+    return ipc_handle(h, msg, size);
 }
 static u32 get_process_id(u32 h, u64* out) {
     KObj* o = h_get_ref(h, 0);
@@ -440,366 +447,250 @@ static u32 get_info(u32 id0, u32 h, u64 id1, u64* out) {
 }
 
 /* ============================================================ the dispatch */
-/* the SVCs whose x0 out isn't a result (or that have no out), which the invalid-handle warning skips. The first three
-   are left out of the crash report's ring too: a polling loop would fill it */
-static int svc_quiet(u32 imm) { return imm == 0x0B || imm == 0x10 || imm == 0x1E; }
-static int svc_no_result(u32 imm) {
-    return svc_quiet(imm) || imm == 0x07 || imm == 0x0A || imm == 0x16 || imm == 0x1D || imm == 0x26 || imm == 0x2A ||
-           imm == 0x36 || imm == 0x3C || imm == 0x3D;
-}
+/* Each SVC's registers in both ABIs come from svcgen (hos.svc): g_svc64[imm] takes them from a 64-bit thread's x
+   registers, which the NX modules call by number through RtAPI.svcs, and g_svc32[imm] from a 32-bit one's r registers.
+   Both call the SVC's handler below, svc_<Name>, with the declaration's arguments, between svc_begin and svc_end */
+#define SVC_QUIET  1 /* left out of the crash report's ring: a polling loop would fill it */
+#define SVC_NOWARN 2 /* x0 out isn't a result, or InvalidHandle is the SVC's usual answer (CloseHandle) */
 
-#define W(i) ((u32)c->x[i])
-#define I(i) ((i32)(u32)c->x[i])
-void snx_svc(CPU* c, u32 imm) {
-    KThread* t = (KThread*)c->thread;
-    SvcRec in;
-    u32 n = 0, h = 0;
-    u64 v = 0;
-    in.imm = imm;
-    in.res = 0;
-    in.o1 = 0;
-    in.lr = g_arm_mod ? t->arm.r[14] : c->x[30];
-    memcpy(in.a, c->x, sizeof in.a);
-    if (!svc_quiet(imm)) {
+/* the SVC's record in the ring and its entry: the record's number */
+static u32 svc_begin(KThread* t, SvcRec* in, u32 imm, int flags) {
+    u32 n = 0;
+    in->imm = imm;
+    in->res = 0;
+    in->o1 = 0;
+    if (!(flags & SVC_QUIET)) {
         n = __atomic_fetch_add(&g_svc_ring_n, 1, __ATOMIC_RELAXED);
-        g_svc_ring[n & 63] = in;
+        g_svc_ring[n & 63] = *in;
     }
     svc_enter(t);
-    switch (imm) {
-        case 0x01:
-            c->x[0] = svc_set_heap_size(c->x[1]);
-            if (!c->x[0]) c->x[1] = HEAP_BASE;
-            break;
-        case 0x02: c->x[0] = svc_set_mem_perm(c->x[0], c->x[1], W(2)); break;
-        case 0x03: c->x[0] = svc_set_mem_attr(c->x[0], c->x[1], W(2), W(3)); break;
-        case 0x04: c->x[0] = svc_map_memory(c->x[0], c->x[1], c->x[2]); break;
-        case 0x05: c->x[0] = svc_unmap_memory(c->x[0], c->x[1], c->x[2]); break;
-        case 0x06:
-            c->x[0] = svc_query(c->x[0], c->x[2]);
-            c->x[1] = 0; /* PageInfo: no flags */
-            break;
-        case 0x07: process_exit(0); break;
-        case 0x08:
-            c->x[0] = create_thread(c->x[1], c->x[2], c->x[3], I(4), I(5), &h);
-            c->x[1] = h;
-            break;
-        case 0x09: c->x[0] = start_thread(W(0)); break;
-        case 0x0A: svc_exit_thread(t); break;
-        case 0x0B: sleep_thread(t, c, (i64)c->x[0]); break;
-        case 0x0C: {
-            KThread* o = thread_of(W(1));
-            c->x[0] = o ? 0 : R_BADHANDLE;
-            c->x[1] = o ? (u64)o->prio : 0;
-            break;
-        }
-        case 0x0D: c->x[0] = set_thread_priority(W(0), I(1)); break;
-        case 0x0E: {
-            KThread* o = thread_of(W(2));
-            c->x[0] = o ? 0 : R_BADHANDLE;
-            c->x[1] = o ? (u32)o->ideal_core : 0;
-            c->x[2] = o ? o->affinity : 0;
-            break;
-        }
-        case 0x0F: c->x[0] = set_thread_core_mask(t, W(0), I(1), c->x[2]); break;
-        case 0x10: c->x[0] = (u64)t->core; break;
-        case 0x11: c->x[0] = signal_event(W(0)); break;
-        case 0x12: c->x[0] = clear_event(W(0), 0); break;
-        case 0x13: c->x[0] = svc_map_shm(W(0), c->x[1], c->x[2], W(3)); break;
-        case 0x14: c->x[0] = svc_unmap_shm(W(0), c->x[1], c->x[2]); break;
-        case 0x15: {
-            KTmem* m = NULL;
-            u32 r = svc_tmem_new(c->x[1], c->x[2], W(3), &m);
-            if (!r) r = give_handle(&m->o, &h);
-            c->x[0] = r;
-            c->x[1] = h;
-            break;
-        }
-        case 0x16: c->x[0] = (u32)h_close(W(0)); break;
-        case 0x17: c->x[0] = clear_event(W(0), 1); break;
-        case 0x18: {
-            u32 idx = ~0u;
-            c->x[0] = svc_wait_sync(t, c->x[1], W(2), (i64)c->x[3], &idx);
-            c->x[1] = idx;
-            break;
-        }
-        case 0x19: c->x[0] = cancel_sync(W(0)); break;
-        case 0x1A: c->x[0] = svc_arbitrate_lock(t, W(0), c->x[1], W(2)); break;
-        case 0x1B: c->x[0] = svc_arbitrate_unlock(c->x[0]); break;
-        case 0x1C: c->x[0] = svc_wait_cv(t, c->x[0], c->x[1], W(2), (i64)c->x[3]); break;
-        case 0x1D: svc_signal_cv(c->x[0], I(1)); break; /* no result */
-        case 0x1E: c->x[0] = guest_ticks(); break;
-        case 0x1F:
-            c->x[0] = connect_port(c->x[1], &h);
-            c->x[1] = h;
-            break;
-        case 0x21: send_request(t, W(0), t->tls, 0x100); break;
-        case 0x22: {
-            u32 r = ipc_user_buffer(c->x[0], c->x[1]);
-            if (r)
-                c->x[0] = r;
-            else
-                send_request(t, W(2), c->x[0], c->x[1]);
-            break;
-        }
-        case 0x24:
-            c->x[0] = get_process_id(W(1), &v);
-            c->x[1] = v;
-            break;
-        case 0x25: {
-            KThread* o = thread_of(W(1));
-            c->x[0] = o ? 0 : R_BADHANDLE;
-            c->x[1] = o ? o->id : 0;
-            break;
-        }
-        case 0x26: svc_break(c, W(0), c->x[1], c->x[2]); break;
-        case 0x27:
-            output_debug_string(c->x[0], c->x[1]);
-            c->x[0] = 0;
-            break;
-        case 0x28: /* ReturnFromException with no exception handler: the console ends the process */
-            WARN("\n*** The game returned from an exception it had no handler for (%x) ***\n", W(0));
-            kernel_dump_regs(c);
-            save_hints();
-            fatal("The game stopped (ReturnFromException %x). See the .log for details.", W(0));
-            break;
-        case 0x29:
-            c->x[0] = get_info(W(1), W(2), c->x[3], &v);
-            c->x[1] = v;
-            break;
-        case 0x2A: break;                    /* FlushEntireDataCache */
-        case 0x2B: c->x[0] = 0; break;       /* FlushDataCache: guest memory is the host's, coherent */
-        case 0x2C: c->x[0] = svc_map_physical(c->x[0], c->x[1]); break;
-        case 0x2D: c->x[0] = svc_unmap_physical(c->x[0], c->x[1]); break;
-        case 0x30:
-        case 0x31:
-        case 0x37:
-            c->x[0] = resource_limit(W(1), W(2), imm == 0x30 ? 0 : imm == 0x31 ? 1 : 2, &v);
-            c->x[1] = v;
-            break;
-        case 0x32: c->x[0] = set_thread_activity(t, W(0), W(1)); break;
-        case 0x33: c->x[0] = get_thread_context(t, c->x[0], W(1)); break;
-        case 0x34: c->x[0] = svc_wait_addr(t, c->x[0], W(1), I(2), (i64)c->x[3]); break;
-        case 0x35: c->x[0] = svc_signal_addr(c->x[0], W(1), I(2), I(3)); break;
-        case 0x36: break; /* SynchronizePreemptionState */
-        case 0x3C: break; /* KernelDebug */
-        case 0x3D: break; /* ChangeKernelTraceState */
-        case 0x45: {
-            u32 rh = 0;
-            c->x[0] = create_event(&h, &rh);
-            c->x[1] = h;
-            c->x[2] = rh;
-            break;
-        }
-        case 0x4B: {
-            KObj* o = NULL;
-            u32 r = svc_codemem_new(c->x[1], c->x[2], &o);
-            if (!r) r = give_handle(o, &h);
-            c->x[0] = r;
-            c->x[1] = h;
-            break;
-        }
-        case 0x4C: {
-            KObj* o = h_get_ref(W(0), KO_CODEMEM);
-            c->x[0] = o ? svc_codemem_control(o, W(1), c->x[2], c->x[3], W(4)) : R_BADHANDLE;
-            kobj_unref(o);
-            break;
-        }
-        case 0x5D:
-        case 0x5E:
-        case 0x5F: c->x[0] = 0; break; /* the process data cache operations */
-        default:
-            WARN_LIMIT(8, "svc %02x: not implemented (x0=%llx x1=%llx x2=%llx), NotImplemented\n", imm,
-                       (unsigned long long)c->x[0], (unsigned long long)c->x[1], (unsigned long long)c->x[2]);
-            c->x[0] = R_NOTIMPL;
-            break;
-    }
+    return n;
+}
+static u32 svc_begin64(KThread* t, SvcRec* in, u32 imm, const CPU* c, int flags) {
+    in->lr = c->x[30];
+    memcpy(in->a, c->x, sizeof in->a);
+    return svc_begin(t, in, imm, flags);
+}
+static u32 svc_begin32(KThread* t, SvcRec* in, u32 imm, const SnxArmCPU* a, int flags) {
+    int i;
+    in->lr = a->r[14];
+    for (i = 0; i < 4; i++) in->a[i] = a->r[i];
+    return svc_begin(t, in, imm, flags);
+}
+/* the SVC's exit, with its first two output registers: the invalid-handle warning, and the result in its record */
+static void svc_end(KThread* t, const SvcRec* in, u32 n, int flags, u64 res, u64 o1) {
     svc_leave(t);
-    if (!svc_no_result(imm) && (u32)c->x[0] == R_BADHANDLE)
-        WARN_LIMIT(20, "svc %02x with an invalid handle (x0=%llx x1=%llx x2=%llx x3=%llx), lr %llx\n", imm,
-                   (unsigned long long)in.a[0], (unsigned long long)in.a[1], (unsigned long long)in.a[2],
-                   (unsigned long long)in.a[3], (unsigned long long)in.lr);
-    if (!svc_quiet(imm) && __atomic_load_n(&g_svc_ring_n, __ATOMIC_RELAXED) - n < 64) { /* not another SVC's yet */
-        g_svc_ring[n & 63].res = (u32)c->x[0];
-        g_svc_ring[n & 63].o1 = c->x[1];
+    if (!(flags & SVC_NOWARN) && (u32)res == R_BADHANDLE)
+        WARN_LIMIT(20, "svc %02x with an invalid handle (x0=%llx x1=%llx x2=%llx x3=%llx), lr %llx\n", in->imm,
+                   (unsigned long long)in->a[0], (unsigned long long)in->a[1], (unsigned long long)in->a[2],
+                   (unsigned long long)in->a[3], (unsigned long long)in->lr);
+    if (!(flags & SVC_QUIET) && __atomic_load_n(&g_svc_ring_n, __ATOMIC_RELAXED) - n < 64) { /* not another SVC's yet */
+        g_svc_ring[n & 63].res = (u32)res;
+        g_svc_ring[n & 63].o1 = o1;
     }
 }
 
-/* ============================================================ 32-bit threads */
-/* Each SVC's registers in the 32-bit ABI, from Eden's svc.cpp wrappers (SvcWrap_*64From32 against SvcWrap_*64), as
-   "inputs>outputs": x:r is the 64-bit ABI's register x and the 32-bit one's r, x:lo+hi a 64-bit value in two. NULL:
-   r0 to r7 are x0 to x7 */
-static const char* const g_svc32[0x80] = {
-    NULL,
-    "1:1>0:0 1:1", /* 01 SetHeapSize */
-    "0:0 1:1 2:2>0:0", /* 02 SetMemoryPermission */
-    "0:0 1:1 2:2 3:3>0:0", /* 03 SetMemoryAttribute */
-    "0:0 1:1 2:2>0:0", /* 04 MapMemory */
-    "0:0 1:1 2:2>0:0", /* 05 UnmapMemory */
-    "0:0 2:2>0:0 1:1", /* 06 QueryMemory */
-    ">", /* 07 ExitProcess */
-    "1:1 2:2 3:3 4:0 5:4>0:0 1:1", /* 08 CreateThread */
-    "0:0>0:0", /* 09 StartThread */
-    ">", /* 0a ExitThread */
-    "0:0+1>", /* 0b SleepThread */
-    "1:1>0:0 1:1", /* 0c GetThreadPriority */
-    "0:0 1:1>0:0", /* 0d SetThreadPriority */
-    "2:2>0:0 1:1 2:2+3", /* 0e GetThreadCoreMask */
-    "0:0 1:1 2:2+3>0:0", /* 0f SetThreadCoreMask */
-    ">0:0", /* 10 GetCurrentProcessorNumber */
-    "0:0>0:0", /* 11 SignalEvent */
-    "0:0>0:0", /* 12 ClearEvent */
-    "0:0 1:1 2:2 3:3>0:0", /* 13 MapSharedMemory */
-    "0:0 1:1 2:2>0:0", /* 14 UnmapSharedMemory */
-    "1:1 2:2 3:3>0:0 1:1", /* 15 CreateTransferMemory */
-    "0:0>0:0", /* 16 CloseHandle */
-    "0:0>0:0", /* 17 ResetSignal */
-    "1:1 2:2 3:0+3>0:0 1:1", /* 18 WaitSynchronization */
-    "0:0>0:0", /* 19 CancelSynchronization */
-    "0:0 1:1 2:2>0:0", /* 1a ArbitrateLock */
-    "0:0>0:0", /* 1b ArbitrateUnlock */
-    "0:0 1:1 2:2 3:3+4>0:0", /* 1c WaitProcessWideKeyAtomic */
-    "0:0 1:1>", /* 1d SignalProcessWideKey */
-    ">0:0+1", /* 1e GetSystemTick */
-    "1:1>0:0 1:1", /* 1f ConnectToNamedPort */
-    NULL,
-    "0:0>0:0", /* 21 SendSyncRequest */
-    "0:0 1:1 2:2>0:0", /* 22 SendSyncRequestWithUserBuffer */
-    "1:1 2:2 3:3>0:0 1:1", /* 23 SendAsyncRequestWithUserBuffer */
-    "1:1>0:0 1:1+2", /* 24 GetProcessId */
-    "1:1>0:0 1:1+2", /* 25 GetThreadId */
-    "0:0 1:1 2:2>", /* 26 Break */
-    "0:0 1:1>0:0", /* 27 OutputDebugString */
-    "0:0>", /* 28 ReturnFromException */
-    "1:1 2:2 3:0+3>0:0 1:1+2", /* 29 GetInfo */
-    ">", /* 2a FlushEntireDataCache */
-    "0:0 1:1>0:0", /* 2b FlushDataCache */
-    "0:0 1:1>0:0", /* 2c MapPhysicalMemory */
-    "0:0 1:1>0:0", /* 2d UnmapPhysicalMemory */
-    NULL,
-    NULL,
-    "1:1 2:2>0:0 1:1+2", /* 30 GetResourceLimitLimitValue */
-    "1:1 2:2>0:0 1:1+2", /* 31 GetResourceLimitCurrentValue */
-    "0:0 1:1>0:0", /* 32 SetThreadActivity */
-    "0:0 1:1>0:0", /* 33 GetThreadContext3 */
-    "0:0 1:1 2:2 3:3+4>0:0", /* 34 WaitForAddress */
-    "0:0 1:1 2:2 3:3>0:0", /* 35 SignalToAddress */
-    ">", /* 36 SynchronizePreemptionState */
-    "1:1 2:2>0:0 1:1+2", /* 37 GetResourceLimitPeakValue */
-    NULL,
-    "1:1>0:0 1:1", /* 39 CreateIoPool */
-    "1:1 2:2+3 3:0 4:4 5:5>0:0 1:1", /* 3a CreateIoRegion */
-    NULL,
-    "0:0 1:2+3 2:1+4 3:5+6>", /* 3c KernelDebug */
-    "0:0>", /* 3d ChangeKernelTraceState */
-    NULL,
-    NULL,
-    "2:2 3:3>0:0 1:1 2:2", /* 40 CreateSession */
-    "1:1>0:0 1:1", /* 41 AcceptSession */
-    NULL,
-    "1:1 2:2 3:3 4:0+4>0:0 1:1", /* 43 ReplyAndReceive */
-    "1:1 2:2 3:3 4:0 5:4 6:5+6>0:0 1:1", /* 44 ReplyAndReceiveWithUserBuffer */
-    ">0:0 1:1 2:2", /* 45 CreateEvent */
-    "0:0 1:1 2:2 3:3>0:0", /* 46 MapIoRegion */
-    "0:0 1:1 2:2>0:0", /* 47 UnmapIoRegion */
-    "0:0 1:1>0:0", /* 48 MapPhysicalMemoryUnsafe */
-    "0:0 1:1>0:0", /* 49 UnmapPhysicalMemoryUnsafe */
-    "0:0>0:0", /* 4a SetUnsafeLimit */
-    "1:1 2:2>0:0 1:1", /* 4b CreateCodeMemory */
-    "0:0 1:1 2:2+3 3:4+5 4:6>0:0", /* 4c ControlCodeMemory */
-    ">", /* 4d SleepSystem */
-    "1:2+3 2:0 3:1>0:0 1:1", /* 4e ReadWriteRegister */
-    "0:0 1:1>0:0", /* 4f SetProcessActivity */
-    "1:1 2:2 3:3>0:0 1:1", /* 50 CreateSharedMemory */
-    "0:0 1:1 2:2 3:3>0:0", /* 51 MapTransferMemory */
-    "0:0 1:1 2:2>0:0", /* 52 UnmapTransferMemory */
-    "1:1 2:2>0:0 1:1", /* 53 CreateInterruptEvent */
-    NULL,
-    "2:2+3 3:0>0:0 1:1 2:2", /* 55 QueryIoMapping */
-    "1:2+3 2:0+1>0:0 1:1", /* 56 CreateDeviceAddressSpace */
-    "0:0 1:1>0:0", /* 57 AttachDeviceAddressSpace */
-    "0:0 1:1>0:0", /* 58 DetachDeviceAddressSpace */
-    "0:0 1:1 2:2+3 3:4 4:5+6 5:7>0:0", /* 59 MapDeviceAddressSpaceByForce */
-    "0:0 1:1 2:2+3 3:4 4:5+6 5:7>0:0", /* 5a MapDeviceAddressSpaceAligned */
-    NULL,
-    "0:0 1:1 2:2+3 3:4 4:5+6>0:0", /* 5c UnmapDeviceAddressSpace */
-    "0:0 1:2+3 2:1+4>0:0", /* 5d InvalidateProcessDataCache */
-    "0:0 1:2+3 2:1+4>0:0", /* 5e StoreProcessDataCache */
-    "0:0 1:2+3 2:1+4>0:0", /* 5f FlushProcessDataCache */
-    "1:2+3>0:0 1:1", /* 60 DebugActiveProcess */
-    "0:0>0:0", /* 61 BreakDebugProcess */
-    "0:0>0:0", /* 62 TerminateDebugProcess */
-    "0:0 1:1>0:0", /* 63 GetDebugEvent */
-    "0:0 1:1 2:2 3:3>0:0", /* 64 ContinueDebugEvent */
-    "1:1 2:2>0:0 1:1", /* 65 GetProcessList */
-    "1:1 2:2 3:3>0:0 1:1", /* 66 GetThreadList */
-    "0:0 1:1 2:2+3 3:4>0:0", /* 67 GetDebugThreadContext */
-    "0:0 1:2+3 2:1 3:4>0:0", /* 68 SetDebugThreadContext */
-    "0:0 2:2 3:3>0:0 1:1", /* 69 QueryDebugProcessMemory */
-    "0:0 1:1 2:2 3:3>0:0", /* 6a ReadDebugProcessMemory */
-    "0:0 1:1 2:2 3:3>0:0", /* 6b WriteDebugProcessMemory */
-    "0:0 1:2+3 2:1+4>0:0", /* 6c SetHardwareBreakPoint */
-    "2:2 3:0+1 4:3>0:0 1:1+2 2:3", /* 6d GetDebugThreadParam */
-    NULL,
-    "1:1 2:2 3:0+3>0:0 1:1+2", /* 6f GetSystemInfo */
-    "2:2 3:3 4:0>0:0 1:1 2:2", /* 70 CreatePort */
-    "1:1 2:2>0:0 1:1", /* 71 ManageNamedPort */
-    "1:1>0:0 1:1", /* 72 ConnectToPort */
-    "0:0 1:2+3 2:1+4 3:5>0:0", /* 73 SetProcessMemoryPermission */
-    "0:0 1:1 2:2+3 3:4>0:0", /* 74 MapProcessMemory */
-    "0:0 1:1 2:2+3 3:4>0:0", /* 75 UnmapProcessMemory */
-    "0:0 2:2 3:1+3>0:0 1:1", /* 76 QueryProcessMemory */
-    "0:0 1:2+3 2:1+4 3:5+6>0:0", /* 77 MapProcessCodeMemory */
-    "0:0 1:2+3 2:1+4 3:5+6>0:0", /* 78 UnmapProcessCodeMemory */
-    "1:1 2:2 3:3>0:0 1:1", /* 79 CreateProcess */
-    "0:0 1:1 2:2 3:3+4>0:0", /* 7a StartProcess */
-    "0:0>0:0", /* 7b TerminateProcess */
-    "1:1 2:2>0:0 1:1+2", /* 7c GetProcessInfo */
-    ">0:0 1:1", /* 7d CreateResourceLimit */
-    "0:0 1:1 2:2+3>0:0", /* 7e SetResourceLimitLimitValue */
-    NULL,
-};
-static int digit(const char** p) {
-    int d = **p - '0';
-    (*p)++;
-    return d;
+#include "hle/svc/hos.svc.inc"
+
+/* every SVC svcgen has no handler for, a stub's or an unknown number's: NotImplemented, logged */
+static void not_implemented(u32 imm, u64 a0, u64 a1, u64 a2) {
+    const char* name = imm < SNX_SVC_COUNT && g_svc_name[imm] ? g_svc_name[imm] : "unknown";
+    WARN_LIMIT(8, "svc %02x (%s): not implemented (x0=%llx x1=%llx x2=%llx), NotImplemented\n", imm, name,
+               (unsigned long long)a0, (unsigned long long)a1, (unsigned long long)a2);
 }
-void snx_svc32(SnxArmCPU* a, u32 imm) {
+static void svc64_unknown(CPU* c, u32 imm) {
+    KThread* t = (KThread*)c->thread;
+    SvcRec in;
+    u32 n = svc_begin64(t, &in, imm, c, 0);
+    not_implemented(imm, c->x[0], c->x[1], c->x[2]);
+    c->x[0] = R_NOTIMPL;
+    svc_end(t, &in, n, 0, c->x[0], c->x[1]);
+}
+static void svc32_unknown(SnxArmCPU* a, u32 imm) {
     KThread* t = kthread_cur();
-    CPU* c = &t->cpu;
-    const char* m = imm < 0x80 ? g_svc32[imm] : NULL;
-    const char* p;
-    int i;
-    c->x[30] = a->r[14]; /* for the SVC log and GetThreadContext3: the return address, and pc past the svc */
-    c->pc = a->r[15];
-    if (!m) {
-        for (i = 0; i < 8; i++) c->x[i] = a->r[i];
-        snx_svc(c, imm);
-        for (i = 0; i < 8; i++) a->r[i] = (u32)c->x[i];
-        return;
-    }
-    for (p = m; *p && *p != '>';) {
-        int x = digit(&p), lo, hi = -1;
-        p++; /* ':' */
-        lo = digit(&p);
-        if (*p == '+') {
-            p++;
-            hi = digit(&p);
-        }
-        c->x[x] = a->r[lo] | (hi >= 0 ? (u64)a->r[hi] << 32 : 0);
-        if (*p == ' ') p++;
-    }
-    snx_svc(c, imm);
-    if (*p == '>') p++;
-    while (*p) {
-        int x = digit(&p), lo, hi = -1;
-        p++;
-        lo = digit(&p);
-        if (*p == '+') {
-            p++;
-            hi = digit(&p);
-        }
-        a->r[lo] = (u32)c->x[x];
-        if (hi >= 0) a->r[hi] = (u32)(c->x[x] >> 32);
-        if (*p == ' ') p++;
-    }
+    SvcRec in;
+    u32 n = svc_begin32(t, &in, imm, a, 0);
+    not_implemented(imm, a->r[0], a->r[1], a->r[2]);
+    a->r[0] = R_NOTIMPL;
+    svc_end(t, &in, n, 0, a->r[0], a->r[1]);
+}
+
+void snx_svc(CPU* c, u32 imm) { (imm < SNX_SVC_COUNT ? g_svc64[imm] : svc64_unknown)(c, imm); }
+void snx_svc32(SnxArmCPU* a, u32 imm) { (imm < SNX_SVC_COUNT ? g_svc32[imm] : svc32_unknown)(a, imm); }
+
+/* ============================================================ the handlers, in hos.svc's order */
+static u32 svc_SetHeapSize(u64* out_address, u64 size) {
+    u32 r = svc_set_heap_size(size);
+    if (!r) *out_address = HEAP_BASE;
+    return r;
+}
+static u32 svc_SetMemoryPermission(u64 address, u64 size, u32 perm) { return svc_set_mem_perm(address, size, perm); }
+static u32 svc_SetMemoryAttribute(u64 address, u64 size, u32 mask, u32 attr) {
+    return svc_set_mem_attr(address, size, mask, attr);
+}
+static u32 svc_MapMemory(u64 dst_address, u64 src_address, u64 size) {
+    return svc_map_memory(dst_address, src_address, size);
+}
+static u32 svc_UnmapMemory(u64 dst_address, u64 src_address, u64 size) {
+    return svc_unmap_memory(dst_address, src_address, size);
+}
+static u32 svc_QueryMemory(u64 out_memory_info, u32* out_page_info, u64 address) {
+    *out_page_info = 0; /* no flags */
+    return svc_query(out_memory_info, address);
+}
+static void svc_ExitProcess(void) { process_exit(0); }
+static u32 svc_CreateThread(u32* out_handle, u64 func, u64 arg, u64 stack_bottom, i32 priority, i32 core_id) {
+    return create_thread(func, arg, stack_bottom, priority, core_id, out_handle);
+}
+static u32 svc_StartThread(u32 thread_handle) { return start_thread(thread_handle); }
+static void svc_ExitThread(void) { svc_exit_thread(kthread_cur()); }
+static void svc_SleepThread(i64 ns) { sleep_thread(kthread_cur(), ns); }
+static u32 svc_GetThreadPriority(i32* out_priority, u32 thread_handle) {
+    KThread* o = thread_of(thread_handle);
+    R_UNLESS(o, R_BADHANDLE);
+    *out_priority = o->prio;
+    R_SUCCEED();
+}
+static u32 svc_SetThreadPriority(u32 thread_handle, i32 priority) {
+    return set_thread_priority(thread_handle, priority);
+}
+static u32 svc_GetThreadCoreMask(i32* out_core_id, u64* out_affinity_mask, u32 thread_handle) {
+    KThread* o = thread_of(thread_handle);
+    R_UNLESS(o, R_BADHANDLE);
+    *out_core_id = o->ideal_core;
+    *out_affinity_mask = o->affinity;
+    R_SUCCEED();
+}
+static u32 svc_SetThreadCoreMask(u32 thread_handle, i32 core_id, u64 affinity_mask) {
+    return set_thread_core_mask(kthread_cur(), thread_handle, core_id, affinity_mask);
+}
+static i32 svc_GetCurrentProcessorNumber(void) { return kthread_cur()->core; }
+static u32 svc_SignalEvent(u32 event_handle) { return signal_event(event_handle); }
+static u32 svc_ClearEvent(u32 event_handle) { return clear_event(event_handle, 0); }
+static u32 svc_MapSharedMemory(u32 shmem_handle, u64 address, u64 size, u32 map_perm) {
+    return svc_map_shm(shmem_handle, address, size, map_perm);
+}
+static u32 svc_UnmapSharedMemory(u32 shmem_handle, u64 address, u64 size) {
+    return svc_unmap_shm(shmem_handle, address, size);
+}
+static u32 svc_CreateTransferMemory(u32* out_handle, u64 address, u64 size, u32 map_perm) {
+    KTmem* m = NULL;
+    R_TRY(svc_tmem_new(address, size, map_perm, &m));
+    return give_handle(&m->o, out_handle);
+}
+static u32 svc_CloseHandle(u32 handle) { return (u32)h_close(handle); }
+static u32 svc_ResetSignal(u32 handle) { return clear_event(handle, 1); }
+static u32 svc_WaitSynchronization(i32* out_index, u64 handles, i32 num_handles, i64 timeout_ns) {
+    u32 idx = ~0u, r = svc_wait_sync(kthread_cur(), handles, (u32)num_handles, timeout_ns, &idx);
+    *out_index = (i32)idx;
+    return r;
+}
+static u32 svc_CancelSynchronization(u32 handle) { return cancel_sync(handle); }
+static u32 svc_ArbitrateLock(u32 thread_handle, u64 address, u32 tag) {
+    return svc_arbitrate_lock(kthread_cur(), thread_handle, address, tag);
+}
+static u32 svc_ArbitrateUnlock(u64 address) { return svc_arbitrate_unlock(address); }
+static u32 svc_WaitProcessWideKeyAtomic(u64 address, u64 cv_key, u32 tag, i64 timeout_ns) {
+    return svc_wait_cv(kthread_cur(), address, cv_key, tag, timeout_ns);
+}
+static void svc_SignalProcessWideKey(u64 cv_key, i32 count) { svc_signal_cv(cv_key, count); }
+static i64 svc_GetSystemTick(void) { return (i64)guest_ticks(); }
+static u32 svc_ConnectToNamedPort(u32* out_handle, u64 name) { return connect_port(name, out_handle); }
+/* the request in the thread's TLS, its 0x100 bytes */
+static u32 svc_SendSyncRequest(u32 session_handle) {
+    KThread* t = kthread_cur();
+    return send_request(t, session_handle, t->tls, 0x100);
+}
+static u32 svc_SendSyncRequestWithUserBuffer(u64 message_buffer, u64 message_buffer_size, u32 session_handle) {
+    R_TRY(ipc_user_buffer(message_buffer, message_buffer_size));
+    return send_request(kthread_cur(), session_handle, message_buffer, message_buffer_size);
+}
+static u32 svc_GetProcessId(u64* out_process_id, u32 process_handle) {
+    return get_process_id(process_handle, out_process_id);
+}
+static u32 svc_GetThreadId(u64* out_thread_id, u32 thread_handle) {
+    KThread* o = thread_of(thread_handle);
+    R_UNLESS(o, R_BADHANDLE);
+    *out_thread_id = o->id;
+    R_SUCCEED();
+}
+static void svc_Break(u32 break_reason, u64 arg, u64 size) { svc_break(&kthread_cur()->cpu, break_reason, arg, size); }
+static u32 svc_OutputDebugString(u64 debug_str, u64 len) {
+    output_debug_string(debug_str, len);
+    R_SUCCEED();
+}
+/* with no exception handler, the console ends the process */
+static void svc_ReturnFromException(u32 result) {
+    WARN("\n*** The game returned from an exception it had no handler for (%x) ***\n", result);
+    kernel_dump_regs(&kthread_cur()->cpu);
+    save_hints();
+    fatal("The game stopped (ReturnFromException %x). See the .log for details.", result);
+}
+static u32 svc_GetInfo(u64* out, u32 info_type, u32 handle, u64 info_subtype) {
+    return get_info(info_type, handle, info_subtype, out);
+}
+static void svc_FlushEntireDataCache(void) {}
+/* guest memory is the host's, coherent */
+static u32 svc_FlushDataCache(u64 address, u64 size) {
+    (void)address;
+    (void)size;
+    R_SUCCEED();
+}
+static u32 svc_MapPhysicalMemory(u64 address, u64 size) { return svc_map_physical(address, size); }
+static u32 svc_UnmapPhysicalMemory(u64 address, u64 size) { return svc_unmap_physical(address, size); }
+static u32 svc_GetResourceLimitLimitValue(i64* out_limit_value, u32 resource_limit_handle, u32 which) {
+    return resource_limit(resource_limit_handle, which, 0, (u64*)out_limit_value);
+}
+static u32 svc_GetResourceLimitCurrentValue(i64* out_current_value, u32 resource_limit_handle, u32 which) {
+    return resource_limit(resource_limit_handle, which, 1, (u64*)out_current_value);
+}
+static u32 svc_SetThreadActivity(u32 thread_handle, u32 thread_activity) {
+    return set_thread_activity(kthread_cur(), thread_handle, thread_activity);
+}
+static u32 svc_GetThreadContext3(u64 out_context, u32 thread_handle) {
+    return get_thread_context(kthread_cur(), out_context, thread_handle);
+}
+static u32 svc_WaitForAddress(u64 address, u32 arb_type, i32 value, i64 timeout_ns) {
+    return svc_wait_addr(kthread_cur(), address, arb_type, value, timeout_ns);
+}
+static u32 svc_SignalToAddress(u64 address, u32 signal_type, i32 value, i32 count) {
+    return svc_signal_addr(address, signal_type, value, count);
+}
+static void svc_SynchronizePreemptionState(void) {}
+static u32 svc_GetResourceLimitPeakValue(i64* out_peak_value, u32 resource_limit_handle, u32 which) {
+    return resource_limit(resource_limit_handle, which, 2, (u64*)out_peak_value);
+}
+static void svc_KernelDebug(u32 kern_debug_type, u64 arg0, u64 arg1, u64 arg2) {
+    (void)kern_debug_type;
+    (void)arg0;
+    (void)arg1;
+    (void)arg2;
+}
+static void svc_ChangeKernelTraceState(u32 kern_trace_state) { (void)kern_trace_state; }
+static u32 svc_CreateEvent(u32* out_write_handle, u32* out_read_handle) {
+    return create_event(out_write_handle, out_read_handle);
+}
+static u32 svc_CreateCodeMemory(u32* out_handle, u64 address, u64 size) {
+    KObj* o = NULL;
+    R_TRY(svc_codemem_new(address, size, &o));
+    return give_handle(o, out_handle);
+}
+static u32 svc_ControlCodeMemory(u32 code_memory_handle, u32 operation, u64 address, u64 size, u32 perm) {
+    KObj* o = h_get_ref(code_memory_handle, KO_CODEMEM);
+    u32 r = o ? svc_codemem_control(o, operation, address, size, perm) : R_BADHANDLE;
+    kobj_unref(o);
+    return r;
+}
+/* the process data cache operations: guest memory is the host's, coherent */
+static u32 svc_InvalidateProcessDataCache(u32 process_handle, u64 address, u64 size) {
+    (void)process_handle;
+    (void)address;
+    (void)size;
+    R_SUCCEED();
+}
+static u32 svc_StoreProcessDataCache(u32 process_handle, u64 address, u64 size) {
+    return svc_InvalidateProcessDataCache(process_handle, address, size);
+}
+static u32 svc_FlushProcessDataCache(u32 process_handle, u64 address, u64 size) {
+    return svc_InvalidateProcessDataCache(process_handle, address, size);
 }

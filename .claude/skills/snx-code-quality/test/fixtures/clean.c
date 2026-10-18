@@ -29,7 +29,7 @@ typedef struct {
 extern u32 g_elsewhere_1;
 extern u32 g_elsewhere_2;
 static u32 g_alone;
-int g_plain;
+static const u32 g_table[2] = {1, 2}; /* a table, not state */
 typedef struct {
     u32* in;
 } One;

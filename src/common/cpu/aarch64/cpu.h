@@ -39,8 +39,9 @@ typedef double f64;
    numbers), the helpers in cpu_helpers.c, RtAPI and the module descriptor. The recompiler writes it into each
    module and the runtime refuses any other. Bump it for any change of layout or of a helper's results.
    7: CPU.poll and RtAPI.poll, read on the backward branches of generated code.
-   8: the FP/SIMD emitters and discovery changes. */
-#define SNX_ABI 8
+   8: the FP/SIMD emitters and discovery changes.
+   9: RtAPI.svcs, which the NX modules call each SVC through by its number. */
+#define SNX_ABI 9
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)

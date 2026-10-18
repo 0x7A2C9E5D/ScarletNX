@@ -67,8 +67,8 @@ if(SNX_GAMES_DIR STREQUAL "${CMAKE_SOURCE_DIR}/games")
     set_property(CACHE SNX_GAMES_DIR PROPERTY VALUE "")
 endif()
 
-# RelWithDebInfo builds with -O2 and adds symbols for crash reports. It leaves out -DNDEBUG: the runtime has no
-# assert(), so this keeps VMA's assertions on.
+# RelWithDebInfo builds with -O2 and adds symbols for crash reports. It leaves out -DNDEBUG, which keeps the runtime's
+# few assert()s (hle/kernel/ipc.c's full pools) and VMA's assertions on.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()

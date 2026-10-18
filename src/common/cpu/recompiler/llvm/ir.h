@@ -262,7 +262,11 @@ LLVMValueRef ir_extern(SnxIr* ir, const char* name, LLVMTypeRef ret, LLVMTypeRef
 /* c->rt-><field>(args...) */
 LLVMValueRef ir_rt_call(SnxIr* ir, size_t offset, LLVMTypeRef ret, LLVMTypeRef* params, LLVMValueRef* args,
                         unsigned count);
+/* c->rt-><table field>[entry](args...) */
+LLVMValueRef ir_rt_table_call(SnxIr* ir, size_t offset, unsigned entry, LLVMTypeRef ret, LLVMTypeRef* params,
+                              LLVMValueRef* args, unsigned count);
 size_t ir_rt_svc(void);
+size_t ir_rt_svcs(void);
 size_t ir_rt_undef(void);
 size_t ir_rt_note_hint(void);
 size_t ir_rt_brk(void);

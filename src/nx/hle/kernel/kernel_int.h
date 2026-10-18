@@ -63,6 +63,7 @@ int sleep_nl(KThread* t, i64 timeout);
 
 /* ---- thread.c: threads and the guest cores */
 #define THREAD_MAX 96 /* the application's ThreadCountMax: creating one more answers R_LIMIT */
+#define H_MAX      1024 /* handles: the most the console's handle table holds */
 extern KThread* g_threads[256];
 extern int g_nthreads;
 int kthread_live_count(void);

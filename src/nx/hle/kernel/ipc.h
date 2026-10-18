@@ -77,10 +77,13 @@ typedef struct KSession {
     int closed; /* the server closed it: requests answer R_SESSIONCLOSED */
 } KSession;
 
+/* A domain's objects, numbered from 1 (id = index + 1): a closed one leaves a hole the next object takes, as sf
+   numbers them. The sessions sharing it (clones) count in refs. ipc.c's pool lock guards obj and n */
+#define DOMAIN_OBJECTS 1024
 typedef struct Domain {
-    SvcObj** obj;
-    int n, cap, refs;
-    PMutex lk;
+    SvcObj* obj[DOMAIN_OBJECTS];
+    int n; /* the slots ever taken: obj[n] and those after it are free */
+    int refs;
 } Domain;
 
 typedef SvcObj* (*SvcCtor)(void);
@@ -91,7 +94,8 @@ void svcobj_unref(SvcObj* o);
 u32 session_new(SvcObj* obj);
 /* SendSyncRequestWithUserBuffer's buffer checked as the kernel locks it: 0, or the SVC's result */
 u32 ipc_user_buffer(u64 addr, u64 size);
-void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size);
+/* SendSyncRequest(WithUserBuffer)'s request on handle, served on t: the SVC's result */
+u32 ipc_handle(u32 handle, u64 msg_addr, u64 msg_size);
 void ipc_out_overflow(IpcCtx* c); /* a reply that didn't fit: logged once */
 void out_copy_h(IpcCtx* c, u32 h);
 void out_move_h(IpcCtx* c, u32 h);
@@ -164,7 +168,7 @@ static inline int ipc_counts(const IpcCtx* c, int pid, int na, int nb, int nx, i
 /* a domain request carries exactly the objects the command declares */
 static inline int ipc_objects(const IpcCtx* c, int nobj) { return !c->is_domain || c->nin_objs == nobj; }
 
-/* the last 32 requests, for crash reports */
-extern char g_ipc_ring[32][160];
-extern u32 g_ipc_ring_n;
+/* the last 32 requests, for crash reports: how many there have been, and request seq's entry (seq & 31) */
+u32 ipc_ring_count(void);
+const char* ipc_ring_entry(u32 seq);
 #endif

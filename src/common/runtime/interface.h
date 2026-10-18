@@ -18,11 +18,16 @@ typedef struct RtAPI {
     void (*wfe)(struct CPU* c);                            /* WFE */
     /* CPU.poll was set: a loop that makes no SVC lets the runtime take the thread off its core here (SNX_ABI 7) */
     void (*poll)(struct CPU* c);
+    /* SVC #imm for imm below SNX_SVC_COUNT, by number, each with svc's arguments: the NX game modules call the
+       SVC's own entry, which their code names by its constant imm (SNX_ABI 9). NULL for a runtime whose modules call
+       svc for every SVC (SnxCodegen.direct_svc off) */
+    void (*const* svcs)(struct CPU* c, uint32_t imm);
 } RtAPI;
+#define SNX_SVC_COUNT 0x100
 
-/* the layout modules were built with: nine function pointers in this order, nothing between them */
+/* the layout modules were built with: ten pointers in this order, nothing between them */
 #define SNX_RTAPI_SLOT sizeof(void (*)(void))
-typedef char snx_check_rtapi_size[sizeof(RtAPI) == 9 * SNX_RTAPI_SLOT ? 1 : -1];
+typedef char snx_check_rtapi_size[sizeof(RtAPI) == 10 * SNX_RTAPI_SLOT ? 1 : -1];
 typedef char snx_check_rtapi_head[offsetof(RtAPI, svc) == 0 && offsetof(RtAPI, undef) == SNX_RTAPI_SLOT &&
                                           offsetof(RtAPI, note_hint) == 2 * SNX_RTAPI_SLOT &&
                                           offsetof(RtAPI, ticks) == 3 * SNX_RTAPI_SLOT
@@ -32,7 +37,8 @@ typedef char snx_check_rtapi_tail[offsetof(RtAPI, brk) == 4 * SNX_RTAPI_SLOT &&
                                           offsetof(RtAPI, fpcr_changed) == 5 * SNX_RTAPI_SLOT &&
                                           offsetof(RtAPI, sev) == 6 * SNX_RTAPI_SLOT &&
                                           offsetof(RtAPI, wfe) == 7 * SNX_RTAPI_SLOT &&
-                                          offsetof(RtAPI, poll) == 8 * SNX_RTAPI_SLOT
+                                          offsetof(RtAPI, poll) == 8 * SNX_RTAPI_SLOT &&
+                                          offsetof(RtAPI, svcs) == 9 * SNX_RTAPI_SLOT
                                       ? 1
                                       : -1];
 #undef SNX_RTAPI_SLOT

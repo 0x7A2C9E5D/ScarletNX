@@ -7,6 +7,7 @@
    framework do (Switchbrew's IPC_Marshalling page for the wire format), domains, and the service registry */
 #include "nx/hle/kernel/kernel_int.h"
 #include "nx/runtime/options.h"
+#include <assert.h>
 #include <stdarg.h>
 
 #define SFCI                 0x49434653u /* the CmifInHeader's magic */
@@ -37,34 +38,93 @@ static u32 rd32(const u8* p) {
 }
 static void wr32(u8* p, u32 v) { memcpy(p, &v, 4); }
 
+/* ============================================================ the state */
+/* Service objects, sessions and domains each live in a static array with a bound (a pool). An all-zero slot is free (a
+   live object never is: its refs, or a session's type, are set), a new object takes the first free slot from the one
+   after the last taken, wrapping around, and a freed one is zeroed. A full pool is a bound below what a game uses,
+   asserted */
+#define SVCOBJ_MAX  8192 /* sessions' objects, domains', and those services keep (am's storages) */
+#define SESSION_MAX (H_MAX + THREAD_MAX + 1) /* each is made with a handle, and only a request in flight outlives it */
+#define DOMAIN_MAX  64 /* one per session that called ConvertCurrentObjectToDomain, shared by its clones */
+#define WARN_PAIRS  512 /* the (service, command) pairs ipc_warn_once counts */
+
+/* the names sm hands out, each with the constructor of a new object for every session */
+typedef struct {
+    const char* name;
+    SvcCtor ctor;
+} SvcReg;
+
+/* lk guards the pools (taking and freeing, and every domain's objects), the warned pairs and the registry: a
+   PMUTEX_INIT can only start the initializer, and none of them is held long */
+static struct {
+    PMutex lk;
+    SvcObj svcobjs[SVCOBJ_MAX];
+    KSession sessions[SESSION_MAX];
+    Domain domains[DOMAIN_MAX];
+    u32 svcobj_next, session_next, domain_next;
+    /* ipc_warn_once's (service, command) pairs */
+    struct {
+        char name[128];
+        u32 cmd;
+        int n;
+    } seen[WARN_PAIRS];
+    int nseen;
+    /* the service registry */
+    SvcReg* reg;
+    int nreg, capreg;
+    /* the crash report's ring of the last 32 requests: ring_n counts every request, on every thread */
+    char ring[32][160];
+    char apart[64];
+    u32 ring_n;
+} g_ipc = {PMUTEX_INIT, {{0}}, {{0}}, {{0}}, 0, 0, 0, {{0}}, 0, NULL, 0, 0, {{0}}, {0}, 0};
+
 /* ============================================================ the crash report's ring */
-char g_ipc_ring[32][160];
-u32 g_ipc_ring_n;
+u32 ipc_ring_count(void) { return __atomic_load_n(&g_ipc.ring_n, __ATOMIC_RELAXED); }
+const char* ipc_ring_entry(u32 seq) { return g_ipc.ring[seq & 31]; }
 /* each request takes the next entry, served or not; the number it returns names it */
-static u32 ring_claim(void) { return __atomic_fetch_add(&g_ipc_ring_n, 1, __ATOMIC_RELAXED); }
+static u32 ring_claim(void) { return __atomic_fetch_add(&g_ipc.ring_n, 1, __ATOMIC_RELAXED); }
 /* rewrites entry seq, unless 32 later requests have taken its slot meanwhile (a service that ran long) */
 static void ring_set(u32 seq, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 static void ring_set(u32 seq, const char* fmt, ...) {
     va_list a;
-    if (__atomic_load_n(&g_ipc_ring_n, __ATOMIC_RELAXED) - seq > 32) return;
+    if (__atomic_load_n(&g_ipc.ring_n, __ATOMIC_RELAXED) - seq > 32) return;
     va_start(a, fmt);
-    vsnprintf(g_ipc_ring[seq & 31], sizeof g_ipc_ring[0], fmt, a);
+    vsnprintf(g_ipc.ring[seq & 31], sizeof g_ipc.ring[0], fmt, a);
     va_end(a);
 }
 
+/* ============================================================ the pools */
+static int slot_free(const void* slot, size_t size) {
+    const u8* p = (const u8*)slot;
+    return !p[0] && !memcmp(p, p + 1, size - 1);
+}
+/* a free slot of the count at base, each size bytes, searched from *next on and wrapping: its index, *next past it */
+static u32 pool_take(void* base, size_t size, u32 count, u32* next, const char* what) {
+    u32 i = *next, k;
+    for (k = 0; k < count; k++, i = i + 1 == count ? 0 : i + 1)
+        if (slot_free((u8*)base + (size_t)i * size, size)) {
+            *next = i + 1 == count ? 0 : i + 1;
+            return i;
+        }
+    assert(!"an IPC pool is full");
+    fatal("More than %u %s at once", (unsigned)count, what); /* NDEBUG builds */
+    return 0;
+}
+
 /* ============================================================ service objects */
-/* the object and its data in one allocation, the data 16-aligned */
-#define SVCOBJ_HEAD ((sizeof(SvcObj) + 15) & ~(size_t)15)
+/* the object from the pool, its data (when it has some) in an allocation of its own */
 SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t datasize) {
+    void* data = NULL;
     SvcObj* o;
-    if (datasize > (size_t)-1 - SVCOBJ_HEAD) fatal("Service object %s too large", name);
-    o = calloc(1, SVCOBJ_HEAD + datasize);
-    if (!o) fatal("Out of memory for the service object %s", name);
+    if (datasize && !(data = calloc(1, datasize))) fatal("Out of memory for the service object %s", name);
+    pm_lock(&g_ipc.lk);
+    o = &g_ipc.svcobjs[pool_take(g_ipc.svcobjs, sizeof *o, SVCOBJ_MAX, &g_ipc.svcobj_next, "service objects")];
     o->name = name;
     o->dispatch = dispatch;
     o->refs = 1;
     o->ptrbuf = POINTER_BUFFER;
-    o->data = datasize ? (u8*)o + SVCOBJ_HEAD : NULL;
+    o->data = data;
+    pm_unlock(&g_ipc.lk);
     return o;
 }
 void svcobj_ref(SvcObj* o) {
@@ -72,67 +132,65 @@ void svcobj_ref(SvcObj* o) {
 }
 void svcobj_unref(SvcObj* o) {
     if (!o || __atomic_sub_fetch(&o->refs, 1, __ATOMIC_ACQ_REL)) return;
-    if (o->destroy) o->destroy(o);
-    free(o);
+    if (o->destroy) o->destroy(o); /* outside the lock: it may let go of other objects */
+    free(o->data);
+    pm_lock(&g_ipc.lk);
+    memset(o, 0, sizeof *o);
+    pm_unlock(&g_ipc.lk);
 }
 
 /* ============================================================ domains */
-/* A domain's objects are numbered from 1 (id = index + 1); a closed one leaves a hole the next object takes. The
-   sessions sharing it (clones) count in refs */
 static Domain* domain_new(SvcObj* root) {
-    Domain* d = calloc(1, sizeof *d);
-    if (!d || !(d->obj = calloc(8, sizeof *d->obj))) fatal("Out of memory for a domain");
-    d->cap = 8;
+    Domain* d;
+    pm_lock(&g_ipc.lk);
+    d = &g_ipc.domains[pool_take(g_ipc.domains, sizeof *d, DOMAIN_MAX, &g_ipc.domain_next, "domains")];
     d->obj[0] = root;
     d->n = 1;
     d->refs = 1;
-    pm_init(&d->lk);
+    pm_unlock(&g_ipc.lk);
     return d;
 }
 static void domain_unref(Domain* d) {
     int i;
     if (!d || __atomic_sub_fetch(&d->refs, 1, __ATOMIC_ACQ_REL)) return;
-    for (i = 0; i < d->n; i++) svcobj_unref(d->obj[i]);
-    free(d->obj);
-    free(d);
+    for (i = 0; i < d->n; i++) svcobj_unref(d->obj[i]); /* nothing else reaches the domain now */
+    pm_lock(&g_ipc.lk);
+    memset(d, 0, sizeof *d);
+    pm_unlock(&g_ipc.lk);
 }
 /* object id, with a reference to drop, or NULL */
 static SvcObj* domain_get(Domain* d, u32 id) {
     SvcObj* o = NULL;
     if (!d) return NULL;
-    pm_lock(&d->lk);
+    pm_lock(&g_ipc.lk);
     if (id && id <= (u32)d->n) {
         o = d->obj[id - 1];
         svcobj_ref(o);
     }
-    pm_unlock(&d->lk);
+    pm_unlock(&g_ipc.lk);
     return o;
 }
 /* o joins the domain with its reference: its id */
 static u32 domain_add(Domain* d, SvcObj* o) {
     int i;
-    pm_lock(&d->lk);
+    pm_lock(&g_ipc.lk);
     for (i = 0; i < d->n && d->obj[i]; i++) {}
-    if (i == d->cap) {
-        SvcObj** n = realloc(d->obj, sizeof *n * (size_t)d->cap * 2);
-        if (!n) fatal("Out of memory for a domain's objects");
-        d->obj = n;
-        d->cap *= 2;
-    }
+    assert(i < DOMAIN_OBJECTS);
+    if (i == DOMAIN_OBJECTS) fatal("More than %d objects in a domain", DOMAIN_OBJECTS); /* NDEBUG builds */
     if (i == d->n) d->n++;
     d->obj[i] = o;
-    pm_unlock(&d->lk);
+    pm_unlock(&g_ipc.lk);
     return (u32)i + 1;
 }
 /* object id leaves the domain: its reference, for the caller to drop outside the lock, or NULL */
 static SvcObj* domain_take(Domain* d, u32 id) {
     SvcObj* o = NULL;
-    pm_lock(&d->lk);
+    pm_lock(&g_ipc.lk);
     if (id && id <= (u32)d->n) {
         o = d->obj[id - 1];
         d->obj[id - 1] = NULL;
     }
-    pm_unlock(&d->lk);
+    pm_unlock(&g_ipc.lk);
     return o;
 }
 
@@ -142,18 +200,22 @@ static void session_destroy(KObj* o) {
     svcobj_unref(s->obj);
     domain_unref(s->domain);
     free(o->waiters);
-    free(s);
+    pm_lock(&g_ipc.lk);
+    memset(s, 0, sizeof *s);
+    pm_unlock(&g_ipc.lk);
 }
 /* a session to obj and domain, whose references it takes: its handle (0 when the table is full) */
 static u32 session_make(SvcObj* obj, Domain* d) {
-    KSession* s = calloc(1, sizeof *s);
+    KSession* s;
     u32 h;
-    if (!s) fatal("Out of memory for a session");
+    pm_lock(&g_ipc.lk);
+    s = &g_ipc.sessions[pool_take(g_ipc.sessions, sizeof *s, SESSION_MAX, &g_ipc.session_next, "sessions")];
     s->o.type = KO_SESSION;
     s->o.destroy = session_destroy;
     s->o.name = obj ? obj->name : "session";
     s->obj = obj;
     s->domain = d;
+    pm_unlock(&g_ipc.lk);
     kobj_ref(&s->o); /* so a full handle table destroys it here */
     h = h_new(&s->o);
     kobj_unref(&s->o);
@@ -515,26 +577,24 @@ static void serve_domain(IpcCtx* c, Domain* d, u32 seq, const char* name) {
 /* svcSendSyncRequest(WithUserBuffer): the request in the client's message buffer, served on the calling thread, which
    waits for its reply as it would on the console. The kernel's refusals return their result with the message
    untouched; a message type sf doesn't serve, a Close among them, closes the session */
-void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size) {
+u32 ipc_handle(u32 handle, u64 msg_addr, u64 msg_size) {
     IpcCtx c;
     Hipc h;
     u32 seq = ring_claim();
     KSession* s = (KSession*)h_get_ref(handle, KO_SESSION);
     Domain* d;
     const char* name;
+    u32 rc = 0;
     if (!s) {
         ring_set(seq, "handle %x -> E401 (not a session)", handle);
         WARN_LIMIT(8, "ipc: a request on handle %x, which isn't a session: InvalidHandle\n", handle);
-        t->cpu.x[0] = R_BADHANDLE;
-        return;
+        return R_BADHANDLE;
     }
     name = s->obj ? s->obj->name : "session";
-    t->cpu.x[0] = 0;
     if (__atomic_load_n(&s->closed, __ATOMIC_ACQUIRE)) {
         ring_set(seq, "%s -> F601 (session closed)", name);
-        t->cpu.x[0] = R_SESSIONCLOSED;
         kobj_unref(&s->o);
-        return;
+        return R_SESSIONCLOSED;
     }
     memset(&c, 0, sizeof c);
     c.msg = GP(msg_addr);
@@ -544,7 +604,7 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size) {
         ring_set(seq, "%s type %u -> %x (not served: the kernel refused it)", name, c.type, c.kernel_rc);
         WARN_LIMIT(8, "ipc: %s: the kernel refuses a request (%x): %s\n", name, c.kernel_rc,
                    kernel_refusal(c.kernel_rc));
-        t->cpu.x[0] = c.kernel_rc;
+        rc = c.kernel_rc;
     } else if (c.type >= 16) { /* TIPC: the command in the type, the raw data right after the headers */
         c.tipc = 1;
         c.cmd = c.type - 16;
@@ -559,7 +619,7 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size) {
         ring_set(seq, "%s type %u -> F601 (not served, the session is closed)", name, c.type);
         if (c.type != 2 && c.type != 15)
             WARN_LIMIT(4, "ipc: %s: message type %u, which sf doesn't serve: the session is closed\n", name, c.type);
-        t->cpu.x[0] = R_SESSIONCLOSED;
+        rc = R_SESSIONCLOSED;
     } else {
         int ctl = c.type == 5 || c.type == 7;
         d = __atomic_load_n(&s->domain, __ATOMIC_ACQUIRE);
@@ -577,33 +637,27 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size) {
             answer(&c, RC_UNKNOWNCOMMAND, seq, name, "command");
     }
     kobj_unref(&s->o);
+    return rc;
 }
 
 /* ============================================================ what dispatchers answer */
 /* the count stops at 4, past the three warnings; once the table is full a new pair is never warned of, which is said
    once */
 int ipc_warn_once(const char* name, u32 cmd) {
-    static struct {
-        char name[128];
-        u32 cmd;
-        int n;
-    } seen[512];
-    static int nseen;
-    static PMutex lk = PMUTEX_INIT;
     int i, r = 0;
-    pm_lock(&lk);
-    for (i = 0; i < nseen && (seen[i].cmd != cmd || strncmp(seen[i].name, name, 127)); i++) {}
-    if (i == nseen && nseen < 512) {
-        strncpy(seen[i].name, name, 127);
-        seen[i].cmd = cmd;
-        nseen++;
+    pm_lock(&g_ipc.lk);
+    for (i = 0; i < g_ipc.nseen && (g_ipc.seen[i].cmd != cmd || strncmp(g_ipc.seen[i].name, name, 127)); i++) {}
+    if (i == g_ipc.nseen && g_ipc.nseen < WARN_PAIRS) {
+        strncpy(g_ipc.seen[i].name, name, 127);
+        g_ipc.seen[i].cmd = cmd;
+        g_ipc.nseen++;
     }
-    if (i < nseen) {
-        r = seen[i].n < 3;
-        if (seen[i].n < 4) seen[i].n++;
+    if (i < g_ipc.nseen) {
+        r = g_ipc.seen[i].n < 3;
+        if (g_ipc.seen[i].n < 4) g_ipc.seen[i].n++;
     }
-    pm_unlock(&lk);
-    if (i == 512) WARN_LIMIT(1, "ipc: 512 service commands warned of, no more are\n");
+    pm_unlock(&g_ipc.lk);
+    if (i == WARN_PAIRS) WARN_LIMIT(1, "ipc: %d service commands warned of, no more are\n", WARN_PAIRS);
     return r;
 }
 /* "undeclared", not "stub": a success carrying none of the command's outputs. The SDK still reads them from the reply,
@@ -641,51 +695,44 @@ SvcObj* ipc_in_obj(IpcCtx* c, int i) {
 }
 
 /* ============================================================ the service registry */
-/* the names sm hands out, each with the constructor of a new object for every session */
-typedef struct {
-    const char* name;
-    SvcCtor ctor;
-} SvcReg;
-static SvcReg* g_reg;
-static int g_nreg, g_capreg;
-static PMutex g_reg_lk = PMUTEX_INIT;
+/* g_ipc.reg, under g_ipc.lk. A constructor runs outside it: it makes a service object, which takes it */
 static int reg_find_nl(const char* name) {
     int i;
-    for (i = 0; i < g_nreg; i++)
-        if (!strcmp(g_reg[i].name, name)) return i;
+    for (i = 0; i < g_ipc.nreg; i++)
+        if (!strcmp(g_ipc.reg[i].name, name)) return i;
     return -1;
 }
 void svc_register(const char* name, SvcCtor ctor) {
     int i;
-    pm_lock(&g_reg_lk);
+    pm_lock(&g_ipc.lk);
     i = reg_find_nl(name);
     if (i < 0) {
-        if (g_nreg == g_capreg) {
-            int cap = g_capreg ? g_capreg * 2 : 64;
-            SvcReg* n = realloc(g_reg, sizeof *n * (size_t)cap);
+        if (g_ipc.nreg == g_ipc.capreg) {
+            int cap = g_ipc.capreg ? g_ipc.capreg * 2 : 64;
+            SvcReg* n = realloc(g_ipc.reg, sizeof *n * (size_t)cap);
             if (!n) fatal("Out of memory for the service registry");
-            g_reg = n;
-            g_capreg = cap;
+            g_ipc.reg = n;
+            g_ipc.capreg = cap;
         }
-        i = g_nreg++;
-        g_reg[i].name = name;
+        i = g_ipc.nreg++;
+        g_ipc.reg[i].name = name;
     }
-    g_reg[i].ctor = ctor;
-    pm_unlock(&g_reg_lk);
+    g_ipc.reg[i].ctor = ctor;
+    pm_unlock(&g_ipc.lk);
 }
 SvcObj* svc_open(const char* name) {
     SvcCtor ctor = NULL;
     int i;
-    pm_lock(&g_reg_lk);
+    pm_lock(&g_ipc.lk);
     i = reg_find_nl(name);
-    if (i >= 0) ctor = g_reg[i].ctor;
-    pm_unlock(&g_reg_lk);
+    if (i >= 0) ctor = g_ipc.reg[i].ctor;
+    pm_unlock(&g_ipc.lk);
     return ctor ? ctor() : NULL;
 }
 int svc_registered(const char* name) {
     int r;
-    pm_lock(&g_reg_lk);
+    pm_lock(&g_ipc.lk);
     r = reg_find_nl(name) >= 0;
-    pm_unlock(&g_reg_lk);
+    pm_unlock(&g_ipc.lk);
     return r;
 }

@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Guest functions: the IR of what snx_codegen_emit (codegen.c) prints for a function, and of snx_a64_static_step */
 #include "common/cpu/recompiler/llvm/ir.h"
+#include "common/runtime/interface.h" /* SNX_SVC_COUNT */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -130,15 +131,21 @@ static void check_return(SnxIr* ir, SnxU64 next) {
     LLVMPositionBuilderAtEnd(B, stay);
 }
 
-static void svc(SnxIr* ir, SnxU64 pc, LLVMValueRef imm) {
+/* SVC #imm: c->rt->svcs[imm](c, imm), the SVC's own entry, in an NX module (codegen->direct_svc), else
+   c->rt->svc(c, imm) */
+static void svc(SnxIr* ir, const SnxCodegen* codegen, SnxU64 pc, SnxU32 word, LLVMValueRef imm) {
     LLVMTypeRef params[2];
     LLVMValueRef args[2];
+    unsigned n = (word >> 5) & 0xFFFF;
     ir_set_pc(ir, ir_i64(ir, pc + 4));
     params[0] = ir->t_ptr;
     params[1] = ir->t_i32;
     args[0] = ir->c;
     args[1] = imm;
-    ir_rt_call(ir, ir_rt_svc(), ir->t_void, params, args, 2);
+    if (codegen && codegen->direct_svc && n < SNX_SVC_COUNT)
+        ir_rt_table_call(ir, ir_rt_svcs(), n, ir->t_void, params, args, 2);
+    else
+        ir_rt_call(ir, ir_rt_svc(), ir->t_void, params, args, 2);
 }
 
 static void brk(SnxIr* ir, SnxU64 pc, LLVMValueRef imm) {
@@ -261,7 +268,7 @@ void snx_ir_emit(SnxIr* ir, SnxCodegen* codegen, const SnxFunction* function) {
                 ret(ir);
                 terminal = 1;
                 break;
-            case SNX_FLOW_SVC: svc(ir, address, snx_ir_flow_operand(ir, word, address, c)); break;
+            case SNX_FLOW_SVC: svc(ir, codegen, address, word, snx_ir_flow_operand(ir, word, address, c)); break;
             case SNX_FLOW_BRK:
                 ir_set_pc(ir, ir_i64(ir, address));
                 brk(ir, address, snx_ir_flow_operand(ir, word, address, c));
@@ -326,7 +333,7 @@ LLVMValueRef snx_ir_static_step(SnxIr* ir, SnxU32 word, SnxU64 pc, const char* n
             LLVMBuildRet(B, operand);
             break;
         case SNX_FLOW_SVC:
-            svc(ir, pc, snx_ir_flow_operand(ir, word, pc, c));
+            svc(ir, NULL, pc, word, snx_ir_flow_operand(ir, word, pc, c));
             LLVMBuildRet(B, ir_i64(ir, pc + 4));
             break;
         case SNX_FLOW_BRK:
