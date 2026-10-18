@@ -289,15 +289,21 @@ KThread* kthread_create(u64 entry, u64 arg, u64 stack_top, int prio, int core) {
 /* the host thread's stack: the recompiled code makes each guest call a host call, so it has to hold as many frames as
    the guest's stack does, and more bytes for each */
 #define HOST_STACK ((size_t)32 << 20)
+/* A guest RET sets the pc and returns, and a call whose return address isn't that pc returns too (codegen.c checks
+   c->pc against pc + 4 after each BL), so a return past the host frames, like libnx's exit resetting the stack and
+   returning to the LR crt0 saved, comes back here with the pc where the guest goes on. Only 0, the entry's own return
+   address, means the entry function returned */
 static void thread_main(void* p) {
     KThread* t = (KThread*)p;
+    u64 pc = t->entry;
     tls_thread = t;
     core_enter(t);
     snx_fpcr_apply(&t->cpu);
     if (g_arm_mod)
         arm_thread_run(t);
     else
-        snx_lookup(&t->cpu, t->entry)(&t->cpu, t->entry);
+        do snx_lookup(&t->cpu, pc)(&t->cpu, pc);
+        while ((pc = t->cpu.pc) != 0);
     svc_exit_thread(t); /* its entry function returned: there is nothing to return to */
 }
 void kthread_start(KThread* t) {
