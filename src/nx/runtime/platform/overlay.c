@@ -7,6 +7,7 @@
 #include "nx/runtime/platform/vpad.h"
 #include "gui_theme_colors.h"
 #include "common/utilities/pad_screen.h"
+#include "common/utilities/users.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -192,6 +193,7 @@ static void disc(SnxUiList* l, float x, float y, float w, float h, u32 rgba) {
         ui_fill(l, cx - half, y0, 2 * half, 2 * r / n, rgba);
     }
 }
+static void user_draw(SnxUiList* l, float left, float right, float y, int s);
 static void map_draw(SnxUiList* l, int sw, int sh) {
     const u32 box = SNX_OVERLAY_RGBA(SNX_GUI_THEME_YORHA_SOFT, 0x40u); /* a panel: the page a little darker */
     int px, py, s, i;
@@ -206,12 +208,15 @@ static void map_draw(SnxUiList* l, int sw, int sh) {
     map_pad();
     ui_fill(l, x, y, w, h, LIGHT); /* the whole picture */
     ui_fill(l, x, y, w, ch, INK);
-    if (pad_player) { /* the player's own */
+    {
         char title[48];
-        snprintf(title, sizeof title, "SCARLETNX  /  PLAYER %d  /  BUTTON MAP", pad_player);
+        if (pad_player) /* the player's own */
+            snprintf(title, sizeof title, "SCARLETNX  /  PLAYER %d  /  BUTTON MAP", pad_player);
+        else
+            snprintf(title, sizeof title, "SCARLETNX  /  BUTTON MAP");
         ui_text(l, x + cw, y, s, title, LIGHT);
-    } else
-        ui_text(l, x + cw, y, s, "SCARLETNX  /  BUTTON MAP", LIGHT);
+        user_draw(l, x + cw * (float)(strlen(title) + 2), x + w - cw, y, s);
+    }
     snx_pad_screen_lay(&map, x, y + ch, w, h - ch, cw, ch, &map_drawing);
     for (i = 0; i < map_drawing.n; ++i) {
         const SnxPadShape* p = &map_drawing.shape[i];
@@ -320,6 +325,7 @@ typedef struct {
 } DialogPara;
 typedef struct {
     const char* title;
+    int user; /* the user playing at the head's right, by their nickname: the menu's pages */
     DialogPara para[DIALOG_PARAS];
     int paras;
     const char* label[VISIBLE];   /* the items showing, from top on */
@@ -330,6 +336,27 @@ typedef struct {
     SnxOverlayRect box, link, item[VISIBLE];
     int cols, scale;
 } DialogDrawn;
+/* the user playing on the head's band, against right, past left: a box framed as the launcher's are, in the band's
+   colours swapped, holding their nickname and their picture at its right, two of the box's pixels in. Without room
+   for the nickname, the picture alone; without room for that, nothing. None when the theme shows no picture */
+static void user_draw(SnxUiList* l, float left, float right, float y, int s) {
+    const char* name = g_user_count ? snx_users_selected()->nickname : "";
+    float cw = 8.0f * (float)s, ch = 16.0f * (float)s, edge = (float)s, side = ch - 4 * edge;
+    float box = cw + cw * (float)strlen(name) + cw + side + 2 * edge, x = right - box;
+    if (!g_user_count || !SNX_GUI_THEME_YORHA_PICTURE) return;
+    if (x < left) { /* the picture alone */
+        box = side + 4 * edge;
+        x = right - box;
+        name = "";
+    }
+    if (x < left) return;
+    ui_picture(l, right - 2 * edge - side, y + 2 * edge, side);
+    if (*name) ui_text(l, x + cw, y, s, name, LIGHT);
+    ui_fill(l, x, y, box, edge, LIGHT);
+    ui_fill(l, x, y + ch - edge, box, edge, LIGHT);
+    ui_fill(l, x, y, edge, ch, LIGHT);
+    ui_fill(l, x + box - edge, y, edge, ch, LIGHT);
+}
 /* the rows paragraphs wrap into: each thread that lays a dialog out has its own */
 typedef char DialogRows[DIALOG_PARAS][DIALOG_LINES][FATAL_ROW];
 /* d on a picture sw x sh, into l (NULL: only where it all goes, in out): the head, each paragraph after a blank row,
@@ -373,6 +400,7 @@ static void dialog_draw(SnxUiList* l, int sw, int sh, const Dialog* d, DialogRow
         ui_fill(l, x, y, w, ch * (float)total, LIGHT);
         ui_fill(l, x, y, w, ch, INK);
         ui_text(l, x + cw, y, s, d->title, LIGHT);
+        if (d->user) user_draw(l, x + cw * (float)(strlen(d->title) + 2), x + w - cw, y, s);
     }
     row = 1;
     for (k = 0, last = -1; k < d->paras; ++k) {
@@ -501,6 +529,7 @@ static void menu_dialog(Dialog* d, char (*text)[OVERLAY_COLS_MAX + 1], char (*va
     int r, n = items();
     memset(d, 0, sizeof *d);
     d->title = titles[page];
+    d->user = 1;
     d->para[0].text = page == PAGE_PADS ? pads_hint(pads, size) : hints[page];
     d->para[0].rgba = SOFT;
     d->paras = 1;

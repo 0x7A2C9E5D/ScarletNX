@@ -316,7 +316,9 @@ other key, a section out of order or twice, or a line that is no key stops the g
 Wimsy. The game plays as the user its `.ini`'s `user` names (`--user=N` for one run): with one user, the game picks it
 on its own; with more, the game's user selector gets that user. Each user's Account saves are `save/user.<uid>` in the
 game's `<id>_data/`; the first user's that an older version left in `save/user` are played there until you move them
-([DEPRECATIONS](DEPRECATIONS.md)).
+([DEPRECATIONS](DEPRECATIONS.md)). The game's menu (Home, F2) shows the user playing in a box at its head's right, their
+nickname and picture, and the launcher the one its Settings' `user` names, where a click picks another
+([GUI](GUI.md)); a users.ini that lists no users is said in the launcher's foot.
 
 ## Settings / input
 

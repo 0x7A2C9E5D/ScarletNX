@@ -12,6 +12,12 @@
 #include "nx/runtime/platform/plat.h"
 #include "common/utilities/font.h"
 #include "gui_theme_colors.h"
+#include "common/utilities/users.h"
+#include "gui/splash.h"
+/* the menu's page colour, its letters on the head's band, as R G B A bytes */
+#define LIGHT_RGBA                                                                                                     \
+    (0xFFu << 24 | (SNX_GUI_THEME_YORHA_PAGE & 0xFFu) << 16 | (SNX_GUI_THEME_YORHA_PAGE & 0xFF00u) |                   \
+     (SNX_GUI_THEME_YORHA_PAGE >> 16 & 0xFFu))
 /* the menu's colour of a held control, as R G B A bytes */
 #define FAILURE                                                                                                        \
     (0xFFu << 24 | (SNX_GUI_THEME_YORHA_FAILURE & 0xFFu) << 16 | (SNX_GUI_THEME_YORHA_FAILURE & 0xFF00u) |             \
@@ -83,6 +89,11 @@ static int tap(int row, int col) {
     overlay_place(SW, SH, &px, &py, &s);
     C = overlay_cols(SW, s);
     return overlay_tap((float)(px + col * 8 * s + 2), (float)(py + (3 + row) * 16 * s + 5), SW, SH);
+}
+/* ui.c's warning for a picture that does not draw */
+void logf_(int lvl, const char* fmt, ...) {
+    (void)lvl;
+    (void)fmt;
 }
 static SnxUiQuad quads[2048];
 static SnxUiList list;
@@ -499,7 +510,10 @@ int main(void) {
         assert(!ui_atlas(&w, &h, &version));
         ui_atlas_set(sprites, SNX_CONTROLS_ATLAS_WIDTH, SNX_CONTROLS_ATLAS_HEIGHT);
         a = ui_atlas(&w, &h, &version);
-        assert(a && version == 1 && w == SNX_CONTROLS_ATLAS_WIDTH);
+        assert(a && version == 1 && w == SNX_CONTROLS_ATLAS_WIDTH && h == SNX_CONTROLS_ATLAS_HEIGHT + SNX_UI_PICTURE);
+        /* no user read yet: the picture's rows are transparent */
+        for (y = 0; y < SNX_UI_PICTURE; ++y)
+            for (x = 0; x < SNX_UI_PICTURE; ++x) assert(!a[(SNX_CONTROLS_ATLAS_HEIGHT + y) * w + x]);
         assert(a[0] == 0x80804020u);
         /* every glyph, white where its bit is: 'A' has both */
         for (sc = 0; sc < 256; ++sc)
@@ -673,6 +687,77 @@ int main(void) {
         assert(!fatal_log_url("", url, sizeof url) && !*url);
         assert(!fatal_log_url("/tmp/a.log", NULL, 0));
     }
-    puts("overlay: placing, pages, taps, keys, values, scrolling, look, the error's panel and the atlas passed");
+    /* the user playing on the head's band: Player, without users.ini, and Wimsy, as the YoRHa theme has it (square),
+       in the atlas under the sprites; on the right of the band, its frame in the page colour and the nickname before
+       it; none on a stopped game's panel */
+    {
+        char why[256];
+        u32* sprites = calloc((size_t)SNX_CONTROLS_ATLAS_WIDTH * SNX_CONTROLS_ATLAS_HEIGHT, 4);
+        const u32* a;
+        int w, h, i, pictures = 0, frames = 0, white = 0;
+        u32 version;
+        float right, band;
+        SnxOverlayError e = panel_of("Game", "It stopped", "Look at the log", NULL, NULL);
+        assert(sprites && !snx_users_load("/nonexistent/users", 1, why, sizeof why));
+        assert(g_user_count == 1 && !strcmp(snx_users_selected()->nickname, "Player"));
+        assert(SNX_GUI_THEME_YORHA_PICTURE == 1); /* square: the frame is the fills' */
+        ui_atlas_set(sprites, SNX_CONTROLS_ATLAS_WIDTH, SNX_CONTROLS_ATLAS_HEIGHT);
+        a = ui_atlas(&w, &h, &version);
+        assert(a && h == SNX_CONTROLS_ATLAS_HEIGHT + SNX_UI_PICTURE);
+        for (y = 0; y < SNX_UI_PICTURE; ++y)
+            for (x = 0; x < SNX_UI_PICTURE; ++x) {
+                u32 p = a[(SNX_CONTROLS_ATLAS_HEIGHT + y) * w + x];
+                assert(p >> 24 == 0xFF); /* square: every texel opaque */
+                white += p == 0xFFFFFFFFu;
+            }
+        assert(a[SNX_CONTROLS_ATLAS_HEIGHT * w] == 0xFFFFFFFFu && white < SNX_UI_PICTURE * SNX_UI_PICTURE * 9 / 10);
+        { /* texel for texel the picture drawn ARGB, R G B A from the low byte: Wimsy has texels whose red and blue
+             differ, which the order would swap */
+            static u32 argb[SNX_UI_PICTURE * SNX_UI_PICTURE];
+            int unlike = 0;
+            assert(!snx_splash_picture(NULL, 0, SNX_UI_PICTURE, SNX_GUI_THEME_YORHA_PICTURE == 2, argb,
+                                       SNX_UI_PICTURE * 4));
+            for (y = 0; y < SNX_UI_PICTURE; ++y)
+                for (x = 0; x < SNX_UI_PICTURE; ++x) {
+                    u32 p = argb[y * SNX_UI_PICTURE + x];
+                    unlike += (p >> 16 & 0xFFu) != (p & 0xFFu);
+                    assert(a[(SNX_CONTROLS_ATLAS_HEIGHT + y) * w + x] ==
+                           ((p & 0xFF00FF00u) | (p >> 16 & 0xFFu) | (p & 0xFFu) << 16));
+                }
+            assert(unlike > 0);
+        }
+        ui_atlas_done();
+        free(sprites);
+        if (!overlay_shown()) overlay_toggle();
+        while (overlay_back() != OVERLAY_CLOSE) {} /* the first page */
+        assert(overlay_shown());
+        draw();
+        band = (float)py;
+        right = (float)(px + C * 8 * s) - 8.0f * (float)s; /* a column in from the panel's right */
+        {
+            float edge = (float)s, side = 12.0f * (float)s, boxw = 8.0f * 8.0f * (float)s + side + 2 * edge;
+            float boxx = right - boxw;
+            for (i = 0; i < list.n; ++i) {
+                const SnxUiQuad* q = &list.q[i];
+                if (q->v == SNX_CONTROLS_ATLAS_HEIGHT && q->uw == SNX_UI_PICTURE && q->vh == SNX_UI_PICTURE) {
+                    ++pictures;
+                    assert(q->y == band + 2 * edge && q->h == side && q->w == side && !q->sharp);
+                    assert(q->x + q->w == right - 2 * edge);
+                }
+                frames += q->rgba == LIGHT_RGBA && q->sharp && (q->w == edge || q->h == edge) && q->x >= boxx &&
+                          q->x < right && q->y >= band && q->y < band + 16.0f * (float)s;
+                if (q->u == SNX_CONTROLS_FONT_X + 'P' % 16 * 8 && q->v == SNX_CONTROLS_FONT_Y + 'P' / 16 * 16 &&
+                    q->y == band && q->x > boxx)
+                    assert(q->x == boxx + 8.0f * (float)s); /* the nickname a column into the box */
+            }
+        }
+        assert(pictures == 1 && frames == 4 && shows("Player"));
+        list.n = 0;
+        overlay_error_draw(&list, SW, SH, &e);
+        for (i = 0, pictures = 0; i < list.n; ++i) pictures += list.q[i].v == SNX_CONTROLS_ATLAS_HEIGHT;
+        assert(!pictures && !shows("Player"));
+    }
+    puts("overlay: placing, pages, taps, keys, values, scrolling, look, the error's panel, the atlas and the user "
+         "passed");
     return 0;
 }

@@ -514,7 +514,7 @@ add_executable(snx-test-overlay overlay.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-overlay 11)
-target_link_libraries(snx-test-overlay PRIVATE scarletnx-common m)
+target_link_libraries(snx-test-overlay PRIVATE scarletnx-common snx_splash m)
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
 target_include_directories(snx-test-overlay PRIVATE "${CMAKE_BINARY_DIR}/generated")
 add_test(NAME overlay COMMAND snx-test-overlay)
@@ -522,7 +522,8 @@ add_test(NAME overlay COMMAND snx-test-overlay)
 add_executable(snx-test-vpad vpad.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-vpad 11)
-target_link_libraries(snx-test-vpad PRIVATE scarletnx-common m)
+target_link_libraries(snx-test-vpad PRIVATE scarletnx-common snx_splash m)
+target_include_directories(snx-test-vpad PRIVATE "${CMAKE_BINARY_DIR}/generated") # ui.c's theme
 add_test(NAME vpad COMMAND snx-test-vpad)
 
 add_executable(snx-test-ini-deprecated ini_deprecated.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
@@ -542,7 +543,8 @@ include("${PROJECT_SOURCE_DIR}/cmake/pad_sdl.cmake")
 add_executable(snx-test-gamepad gamepad.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/backend/gamepad.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-gamepad 11)
-target_link_libraries(snx-test-gamepad PRIVATE scarletnx-common snx_pad_sdl m)
+target_link_libraries(snx-test-gamepad PRIVATE scarletnx-common snx_pad_sdl snx_splash m)
+target_include_directories(snx-test-gamepad PRIVATE "${CMAKE_BINARY_DIR}/generated") # ui.c's theme
 add_test(NAME gamepad COMMAND snx-test-gamepad)
 
 add_executable(snx-test-fatal-screen fatal_screen.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/fatal_screen.c")
