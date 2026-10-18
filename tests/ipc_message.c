@@ -390,20 +390,17 @@ static int test_dispatch(SvcObj* self, IpcCtx* c) {
 /* ============================================================ the cases */
 #define MSG  0x1000ull /* the thread's TLS message buffer */
 #define UBUF 0x2000ull /* a SendSyncRequestWithUserBuffer buffer, 0x1000 bytes */
-static KThread thread;
 static u8* msg(void) { return GP(MSG); }
 static void clear(void) {
     memset(GP(MSG), 0, 0x100);
     memset(&got, 0, sizeof got);
 }
-/* svcSendSyncRequest(WithUserBuffer): what the client's x0 gets */
+/* svcSendSyncRequest(WithUserBuffer): its result, what the client's x0 gets */
 static u32 send_to(u32 h, u64 addr, u64 size) {
-    thread.cpu.x[0] = 0xDEADBEEF;
-    ipc_handle(&thread, h, addr, size);
-    return (u32)thread.cpu.x[0];
+    return ipc_handle(h, addr, size);
 }
 static u32 send(u32 h) { return send_to(h, MSG, 0x100); }
-static const char* last_ring(void) { return g_ipc_ring[(g_ipc_ring_n - 1) & 31]; }
+static const char* last_ring(void) { return g_ipc.ring[(g_ipc.ring_n - 1) & 31]; }
 
 /* a plain request with its CmifInHeader, raw data, the reply's words, and the ring entry */
 static void plain_requests(u32 h, SvcObj* root) {
@@ -412,7 +409,7 @@ static void plain_requests(u32 h, SvcObj* root) {
     put32(r.data, 0x11223344);
     put32(r.data + 4, 0x01020304);
     CHECK(get32(msg()) == 4 && get32(msg() + 4) == 10); /* 16 padding + 16 header + 8 data */
-    u32 ring = g_ipc_ring_n;
+    u32 ring = g_ipc.ring_n;
     CHECK(send(h) == 0);
     CHECK(got.calls == 1 && got.self == root && got.type == 4 && got.cmd == 1 && got.token == 0);
     CHECK(got.raw_size == 8 && got.raw_off == 32 && get32(got.raw) == 0x11223344 && get32(got.raw + 4) == 0x01020304);
@@ -424,7 +421,7 @@ static void plain_requests(u32 h, SvcObj* root) {
           get32(msg() + 28) == 0);
     CHECK(get32(msg() + 32) == 0x12243648 && get64(msg() + 36) == 0x1122334455667788ull);
     /* the crash report's ring holds the object, the command, the first raw words and the result */
-    CHECK(g_ipc_ring_n == ring + 1);
+    CHECK(g_ipc.ring_n == ring + 1);
     CHECK(!strcmp(last_ring(), "test:p cmd 1 (in 11223344 1020304) -> 0"));
 
     /* with a context (type 6, version 1, the token answered back), the pid, a copy handle and each kind of buffer:
@@ -728,14 +725,14 @@ static void failed_command(u32 h, int domain) {
     int events = events_live, objects = objects_live;
     clear();
     cmif_make_request(msg(), (CmifRequestFormat){.object_id = domain ? 1 : 0, .request_id = 2});
-    u32 ring = g_ipc_ring_n;
+    u32 ring = g_ipc.ring_n;
     CHECK(send(h) == 0 && got.calls == 1 && got.cmd == 2);
     CHECK(events_live == events && objects_live == objects);
     for (u32 i = 0; i < 64; i++) CHECK(!handles[i] || handles[i]->type == KO_SESSION);
     CHECK(get32(msg() + 4) == (domain ? 12u : 8u)); /* no special header, the padding's 16, the headers, no data */
     CmifResponse resp = cmif_parse_response(msg(), domain, 0);
     CHECK(resp.result == RC_FAIL && !resp.num_out_objects && !get32(resp.data));
-    CHECK(g_ipc_ring_n == ring + 1 && !strcmp(last_ring(), "test:p cmd 2 (in 0 0) -> e05"));
+    CHECK(g_ipc.ring_n == ring + 1 && !strcmp(last_ring(), "test:p cmd 2 (in 0 0) -> e05"));
 }
 
 /* a domain request's header (sf_cmif_domain_service_object.cpp): InvalidHeaderSize before the target is looked up,
@@ -901,19 +898,19 @@ static void reply_sizes(void) {
 /* the crash report's ring: one entry a request, served or not, and a request whose service runs long leaves alone the
    entry that took its slot meanwhile */
 static void ring_entries(u32 h) {
-    u32 ring = g_ipc_ring_n;
-    CHECK(send(0x55) == 0xE401 && g_ipc_ring_n == ring + 1 && strstr(last_ring(), "not a session"));
+    u32 ring = g_ipc.ring_n;
+    CHECK(send(0x55) == 0xE401 && g_ipc.ring_n == ring + 1 && strstr(last_ring(), "not a session"));
     clear();
     hipc_make_request(msg(), (HipcMetadata){.type = 4, .num_data_words = 0x3FF}); /* the kernel refuses it */
-    CHECK(send(h) == 0xE801 && g_ipc_ring_n == ring + 2 && strstr(last_ring(), "not served"));
+    CHECK(send(h) == 0xE801 && g_ipc.ring_n == ring + 2 && strstr(last_ring(), "not served"));
     clear();
     cmif_make_control_request(msg(), 3, 0);
-    CHECK(send(h) == 0 && g_ipc_ring_n == ring + 3 && strstr(last_ring(), "not served"));
+    CHECK(send(h) == 0 && g_ipc.ring_n == ring + 3 && strstr(last_ring(), "not served"));
     clear();
     cmif_make_request(msg(), (CmifRequestFormat){.request_id = 8});
-    u32 slot = g_ipc_ring_n & 31;
-    CHECK(send(h) == 0 && g_ipc_ring_n == ring + 3 + 33);
-    CHECK(strstr(g_ipc_ring[slot], "cmd 8") && strstr(g_ipc_ring[slot], "-> running")); /* not rewritten */
+    u32 slot = g_ipc.ring_n & 31;
+    CHECK(send(h) == 0 && g_ipc.ring_n == ring + 3 + 33);
+    CHECK(strstr(g_ipc.ring[slot], "cmd 8") && strstr(g_ipc.ring[slot], "-> running")); /* not rewritten */
 }
 
 /* auto_stub_ipc: a command no interface declares answers success, or the console's UnknownCommandId when it's off */
@@ -1011,15 +1008,15 @@ static void session_closes(void) {
         clear();
         hipc_make_request(msg(), (HipcMetadata){.type = type, .num_data_words = 8});
         memcpy(before, msg(), 0x100);
-        u32 ring = g_ipc_ring_n;
+        u32 ring = g_ipc.ring_n;
         CHECK(send(h) == 0xF601 && !got.calls && ((KSession*)handle_object(h))->closed);
         CHECK(!memcmp(before, msg(), 0x100)); /* no reply */
-        CHECK(g_ipc_ring_n == ring + 1 && strstr(last_ring(), "not served"));
+        CHECK(g_ipc.ring_n == ring + 1 && strstr(last_ring(), "not served"));
         clear();
         cmif_make_request(msg(), (CmifRequestFormat){.request_id = 1, .data_size = 8});
         memcpy(before, msg(), 0x100);
         CHECK(send(h) == 0xF601 && !got.calls && !memcmp(before, msg(), 0x100));
-        CHECK(g_ipc_ring_n == ring + 2 && strstr(last_ring(), "session closed"));
+        CHECK(g_ipc.ring_n == ring + 2 && strstr(last_ring(), "session closed"));
         CHECK(h_close(h) == 0 && objects_live == objects);
     }
 }

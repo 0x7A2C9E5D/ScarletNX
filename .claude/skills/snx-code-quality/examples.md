@@ -231,3 +231,44 @@ const char* table_name(const NodeTable* t, u32 i) {
 - The structure is never copied, written out or shared, and a pointer is plainly simpler. The RFC's
   words are "unless absolutely necessary", so say why in a comment.
 - The access is hot enough that an add per access shows up in a measurement. Measure first.
+
+## 6. One global per file
+
+**Do:** keep a file's mutable state in one struct and define one global of it, `g_<file>` (static unless
+another file needs it). Function-local `static`s are globals too and go in it. What another file reads is
+declared once in the header next to the file: the struct's type with the global, or a function that
+answers it. Atomics that different threads write still get a cache line each (rule 4), padded inside it.
+
+**Why:** loose globals scatter one subsystem's state over a file, each with its own name, initialization and
+lock, so nothing shows what belongs together or what a lock guards. One struct is one place to read, reset in
+a test, dump in a crash report or move into a context later.
+
+<!-- snippet: globals-wrong -->
+```c
+static Session g_sessions[SESSION_MAX];
+static u32 g_session_next;
+static PMutex g_pool_lk = PMUTEX_INIT;
+u32 g_ring_n; /* read by debug.c through an extern of its own */
+static int warn_once(u32 cmd) {
+    static u32 seen[512]; /* a global no one sees */
+    ...
+}
+```
+
+<!-- snippet: globals-right -->
+```c
+static struct {
+    PMutex lk; /* guards sessions and next */
+    Session sessions[SESSION_MAX];
+    u32 next;
+    u32 seen[512]; /* warn_once's */
+    char apart[SNX_CACHE_LINE];
+    u32 ring_n; /* every thread's, through __atomic_* */
+} g_ipc = {PMUTEX_INIT};
+u32 ipc_ring_count(void) { return __atomic_load_n(&g_ipc.ring_n, __ATOMIC_RELAXED); } /* debug.c's */
+```
+
+**Does not apply when:**
+- The object is `const`: a table is data, not state.
+- The variable is `_Thread_local`: each thread has its own, so it can't live in a shared struct.
+- A third-party file (`.cache/cpm`), which is never edited.

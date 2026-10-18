@@ -1,6 +1,6 @@
 ---
 name: snx-code-quality
-description: "RFC #142's C rules: strict ANSI C, no redundant state, indices not pointer chains, one allocation per owner, atomics apart, no stored pointers. Use when writing or reviewing C in src/."
+description: "RFC #142's C rules: strict ANSI C, no redundant state, indices not pointer chains, one allocation per owner, atomics apart, no stored pointers, one global struct per file. Use when writing or reviewing C in src/."
 ---
 
 # Code quality (#142)
@@ -21,8 +21,12 @@ padding array, `n > ((size_t)-1) / size`. A file's build flags plus `-std=c90 -p
    Not when one thread writes them all, or for many per-object atomics.
 5. **No stored pointers in data.** Data refers to its parts by index or offset, so a copy or a file
    holds together. Handles (`FILE*`, SDL, Vulkan) stay in a runtime struct beside it.
+6. **One global per file.** A file's mutable state (every variable of static duration, function-local
+   `static`s included) is the members of one struct in one global, `g_<file>`, not loose globals. What
+   other files read is declared once, in the header beside it, through the struct or a function. Not
+   for `const` tables (they are data, not state), or for `_Thread_local`.
 
-Review: `python3 .claude/skills/snx-code-quality/check.py FILES` lists candidates for 1, 3 and 4 (a
+Review: `python3 .claude/skills/snx-code-quality/check.py FILES` lists candidates for 1, 3, 4 and 6 (a
 candidate is not a finding until the code is read); read the diff for 2 and 5. Report `file:line`, the
 rule and the fix. A rule that does not apply is not a finding. Wrong and right C for each rule:
 [examples.md](examples.md).

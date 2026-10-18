@@ -84,6 +84,17 @@ that one is tried first. A new opcode is a row there (its `O_` name then exists 
 PowerShell: `$env:SNX_SHADER_CORPUS='corpus'`. Where the game gets no environment (Android), its INI's `[Debug]
 diag=1` keeps each shader's entry in `captures/shaders` beside the game, for the same `snx-shaderc`.
 
+## SVCs
+
+`src/nx/hle/svc/hos.svc` declares the kernel's SVCs as Eden's SVC generator does, and `tools/svcgen/svcgen.c`
+(strict C90, built for the build machine in a cross build, as swipc is) lays out each SVC's registers in the
+64-bit and 32-bit ABIs from the declaration. It writes `hle/svc/hos.svc.inc` into the build folder: the handlers'
+prototypes, a wrapper per SVC and ABI, and the tables by number that both kinds of thread dispatch through. A new
+SVC is implemented by dropping its `stub` mark in `hos.svc` and defining `svc_<Name>` in `svc.c`, with the
+declaration's arguments. `build/snx-svcgen --layout src/nx/hle/svc/hos.svc` prints the registers, and
+`ctest -R svcgen_layout` checks them against `tests/svcgen_layout.txt`. The NX modules call an SVC through
+`RtAPI.svcs`, so a change to the tables' size or signature is an `SNX_ABI` change.
+
 ## Provenance
 
 Code ported from another project keeps its copyright lines and gets a row in [credits](CREDITS.md), with its

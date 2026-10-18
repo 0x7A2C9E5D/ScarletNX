@@ -1009,6 +1009,14 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
         target_link_libraries(snx-test-shader-program PRIVATE m)
     endif()
     add_test(NAME shader_program COMMAND snx-test-shader-program "${CMAKE_CURRENT_BINARY_DIR}")
+    if(NOT CMAKE_CROSSCOMPILING)
+        # the SVC registers tools/svcgen lays out from src/nx/hle/svc/hos.svc, in both ABIs
+        include("${PROJECT_SOURCE_DIR}/cmake/svcgen.cmake")
+        add_test(NAME svcgen_layout COMMAND "${CMAKE_COMMAND}" "-DSVCGEN=$<TARGET_FILE:snx-svcgen>"
+                 "-DSPEC=${PROJECT_SOURCE_DIR}/src/nx/hle/svc/hos.svc"
+                 "-DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/svcgen_layout.txt"
+                 -P "${CMAKE_CURRENT_SOURCE_DIR}/svcgen_layout.cmake")
+    endif()
     if(Python3_Interpreter_FOUND AND NOT CMAKE_CROSSCOMPILING)
         include("${PROJECT_SOURCE_DIR}/cmake/shaderdec.cmake")
         add_test(NAME shaderdec_spec COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/shaderdec_test.py"

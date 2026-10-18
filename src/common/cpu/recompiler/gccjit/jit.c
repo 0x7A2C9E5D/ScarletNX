@@ -641,15 +641,29 @@ static void check_return(SnxJit* jit, SnxU64 next) {
     jit_enter(jit, stay);
 }
 
-static void svc(SnxJit* jit, SnxU64 pc, gcc_jit_rvalue* imm) {
+/* SVC #imm: c->rt->svcs[imm](c, imm), the SVC's own entry, in an NX module (codegen->direct_svc), else
+   c->rt->svc(c, imm), as the LLVM backend's svc */
+static void svc(SnxJit* jit, const SnxCodegen* codegen, SnxU64 pc, SnxU32 word, gcc_jit_rvalue* imm) {
     gcc_jit_type* params[2];
-    gcc_jit_rvalue* args[2];
+    gcc_jit_rvalue *args[2], *table, *callee;
+    unsigned n = (word >> 5) & 0xFFFF;
     jit_st(jit, offsetof(CPU, pc), jit->t_u64, jit_u64(jit, pc + 4));
     params[0] = jit->t_ptr;
     params[1] = jit->t_u32;
     args[0] = jit->c;
     args[1] = imm;
-    jit_rt_call(jit, offsetof(RtAPI, svc), jit->t_void, 2, params, args);
+    if (!codegen || !codegen->direct_svc || n >= SNX_SVC_COUNT) {
+        jit_rt_call(jit, offsetof(RtAPI, svc), jit->t_void, 2, params, args);
+        return;
+    }
+    table = jit_val(jit, gcc_jit_lvalue_as_rvalue(jit_at(jit, jit_ld(jit, offsetof(CPU, rt), jit->t_ptr),
+                                                           offsetof(RtAPI, svcs), jit->t_ptr)));
+    callee = jit_val(jit, gcc_jit_lvalue_as_rvalue(jit_at(
+                              jit, table, n * sizeof(void (*)(void)),
+                              gcc_jit_context_new_function_ptr_type(jit->ctx, NULL, jit->t_void, 2, params, 0))));
+    args[0] = jit_cast(jit, args[0], params[0]);
+    args[1] = jit_cast(jit, args[1], params[1]);
+    gcc_jit_block_add_eval(jit->block, NULL, gcc_jit_context_new_call_through_ptr(jit->ctx, NULL, callee, 2, args));
 }
 
 static void brk(SnxJit* jit, SnxU64 pc, gcc_jit_rvalue* imm) {
@@ -777,7 +791,7 @@ void snx_jit_emit(SnxJit* jit, SnxCodegen* codegen, const SnxFunction* function)
                 ret(jit);
                 terminal = 1;
                 break;
-            case SNX_FLOW_SVC: svc(jit, address, snx_jit_flow_operand(jit, word, address, c)); break;
+            case SNX_FLOW_SVC: svc(jit, codegen, address, word, snx_jit_flow_operand(jit, word, address, c)); break;
             case SNX_FLOW_BRK:
                 jit_st(jit, offsetof(CPU, pc), jit->t_u64, jit_u64(jit, address));
                 brk(jit, address, snx_jit_flow_operand(jit, word, address, c));
@@ -846,7 +860,7 @@ gcc_jit_function* snx_jit_static_step(SnxJit* jit, SnxU32 word, SnxU64 pc, const
             result = operand;
             break;
         case SNX_FLOW_SVC:
-            svc(jit, pc, snx_jit_flow_operand(jit, word, pc, c));
+            svc(jit, NULL, pc, word, snx_jit_flow_operand(jit, word, pc, c));
             result = jit_u64(jit, pc + 4);
             break;
         case SNX_FLOW_BRK:

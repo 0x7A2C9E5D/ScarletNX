@@ -39,6 +39,7 @@ a source keep that source's copyright lines and license, most with the revision 
 | `src/nx/gpu/video/` (`host1x.c`, `nvdec.c`, `vic.c`) | Eden and yuzu (`video_core/host1x/`, the nvdrv host1x devices), with Ryujinx's CDMA pusher as Eden carries it | GPL-3.0-or-later, GPL-2.0-or-later, MIT |
 | `src/nx/loader/loader.c` (the defaults for a program without an NPDM) | Eden and yuzu (`file_sys/program_metadata.cpp`) | GPL-3.0-or-later, GPL-2.0-or-later |
 | `src/nx/hle/kernel/`, `src/nx/hle/svc/`, `src/nx/memory/`, `src/nx/hle/services/`, `src/nx/hle/filesystem/` | Eden and yuzu | GPL-3.0-or-later, GPL-2.0-or-later |
+| `src/nx/hle/svc/hos.svc` (the SVC declarations and type sizes) and `tools/svcgen/svcgen.c` (their parsing and register allocation) | Eden and yuzu (`tools/svc_generator.py`) | GPL-3.0-or-later, GPL-2.0-or-later |
 | `src/nx/hle/services/misc.c` (the six default Miis, from Eden's `mii/types/raw_data.cpp`) | Ryujinx, as Eden carries it | MIT ([text](../dist/licenses/Ryujinx/LICENSE.txt)) |
 | `src/common/network/`, `src/nx/hle/services/network/` | Eden and yuzu | GPL-3.0-or-later, GPL-2.0-or-later |
 | `src/nx/gpu/video/vp9_rebuild.cpp`, `src/nx/gpu/video/vic.comp` (compiled into `vic_spv.h`) | Eden and yuzu | GPL-3.0-or-later, GPL-2.0-or-later |

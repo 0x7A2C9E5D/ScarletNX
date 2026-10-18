@@ -194,10 +194,10 @@ static void dump_rings(int lvl) {
               (unsigned long long)r->a[1], (unsigned long long)r->a[2], (unsigned long long)r->a[3], r->res,
               (unsigned long long)r->o1, (unsigned long long)r->lr);
     }
-    n = __atomic_load_n(&g_ipc_ring_n, __ATOMIC_RELAXED);
+    n = ipc_ring_count();
     first = n > 32 ? n - 32 : 0;
     logf_(lvl, "  last IPC requests:\n");
-    for (i = first; i < n; i++) logf_(lvl, "    %.160s\n", g_ipc_ring[i & 31]);
+    for (i = first; i < n; i++) logf_(lvl, "    %.160s\n", ipc_ring_entry(i));
 }
 static void dump_regs32(const KThread* t) {
     const SnxArmCPU* a = &t->arm;

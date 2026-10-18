@@ -120,8 +120,12 @@ void core_enter(KThread* t);
 void core_leave(KThread* t);
 void core_poll(KThread* t);
 void kernel_run_main(u64 entry, u64 stack_size, int prio, int core);
+/* SVC #imm of a 64-bit thread (RtAPI.svc) and of a 32-bit one: g_svc64[imm] and svc.c's g_svc32[imm], each SVC's
+   own entry, which takes its registers in that ABI (svcgen, hle/svc/hos.svc). The NX modules call g_svc64 by number
+   through RtAPI.svcs */
 void snx_svc(CPU* c, u32 imm);
-void snx_svc32(SnxArmCPU* a, u32 imm); /* moves the 32-bit SVC ABI's registers into snx_svc's */
+void snx_svc32(SnxArmCPU* a, u32 imm);
+extern void (*const g_svc64[SNX_SVC_COUNT])(CPU* c, u32 imm);
 
 KShmem* kshmem_new(u64 size, const char* name);
 u8* kshmem_ptr(KShmem* s);

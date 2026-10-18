@@ -406,6 +406,7 @@ LLVMValueRef ir_extern(SnxIr* ir, const char* name, LLVMTypeRef ret, LLVMTypeRef
 
 static LLVMValueRef rt_pointer(SnxIr* ir) { return ir_cpu_load(ir, ir->t_ptr, offsetof(CPU, rt)); }
 size_t ir_rt_svc(void) { return offsetof(RtAPI, svc); }
+size_t ir_rt_svcs(void) { return offsetof(RtAPI, svcs); }
 size_t ir_rt_undef(void) { return offsetof(RtAPI, undef); }
 size_t ir_rt_note_hint(void) { return offsetof(RtAPI, note_hint); }
 size_t ir_rt_brk(void) { return offsetof(RtAPI, brk); }
@@ -419,6 +420,15 @@ LLVMValueRef ir_rt_call(SnxIr* ir, size_t offset, LLVMTypeRef ret, LLVMTypeRef* 
     LLVMValueRef index = ir_i64(ir, offset), slot, callee;
     slot = LLVMBuildInBoundsGEP2(ir->b, ir->t_i8, rt_pointer(ir), &index, 1, "");
     callee = ir_load(ir, ir->t_ptr, slot);
+    return LLVMBuildCall2(ir->b, LLVMFunctionType(ret, params, count, 0), callee, args, count, "");
+}
+
+LLVMValueRef ir_rt_table_call(SnxIr* ir, size_t offset, unsigned entry, LLVMTypeRef ret, LLVMTypeRef* params,
+                              LLVMValueRef* args, unsigned count) {
+    LLVMValueRef index = ir_i64(ir, offset), table, callee;
+    table = ir_load(ir, ir->t_ptr, LLVMBuildInBoundsGEP2(ir->b, ir->t_i8, rt_pointer(ir), &index, 1, ""));
+    index = ir_i64(ir, (SnxU64)entry);
+    callee = ir_load(ir, ir->t_ptr, LLVMBuildInBoundsGEP2(ir->b, ir->t_ptr, table, &index, 1, ""));
     return LLVMBuildCall2(ir->b, LLVMFunctionType(ret, params, count, 0), callee, args, count, "");
 }
 

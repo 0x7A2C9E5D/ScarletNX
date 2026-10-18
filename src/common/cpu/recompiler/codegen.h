@@ -18,6 +18,8 @@ typedef struct {
     SnxCodeImage* modules;
     size_t module_count;
     int check_fetch;
+    /* SVC #imm below SNX_SVC_COUNT calls RtAPI.svcs[imm], the SVC's own entry, instead of RtAPI.svc (the NX modules) */
+    int direct_svc;
     SnxFunction* functions;
     size_t function_count, function_capacity, instruction_count;
     SnxCodeImage* last_module;
