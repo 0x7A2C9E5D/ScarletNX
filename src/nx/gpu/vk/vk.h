@@ -128,6 +128,7 @@ void vk_defer_buffer_view(VkBufferView v);
 /* the submission being recorded (a number that grows at every submit: what a submit may have changed, results landed,
    is checked against it), and the frame (grows at vk_frame_next: frame f's work is done once f + VK_FRAMES started) */
 u64 vk_submit_number(void);
+u32 vk_cb_begun(void); /* command buffers begun so far: changes when a new one starts recording */
 u64 vk_frame_id(void);
 u64 vk_last_submit(void);        /* the last submission's number, which its completion signals */
 void vk_wait_submit(u64 value);  /* until the GPU has done that submission (any thread, without vk_lock) */
@@ -314,6 +315,7 @@ int vk_astc_upload(VkCommandBuffer cb, Surf* t, u32 w, u32 h, u32 depth, u32 lev
 int vk_vic_compose(const VicJob* j);
 
 /* texture.c */
+void vk_render_forget_state(void); /* the next draw sets all its state again (another pipeline or state was set) */
 Surf* vk_tex_from_tic(const u32* tic);
 Surf* vk_tex_from_tic_raw(const u32* tic); /* UINT view of raw RGBA8 texel bytes */
 /* a view of s as the shader declares it, sRGB or linear (color formats that have both), with a component mapping;

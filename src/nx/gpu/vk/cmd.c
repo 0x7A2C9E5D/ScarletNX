@@ -46,6 +46,7 @@ typedef struct {
 
 static Frame g_fr[VK_FRAMES];
 static u32 g_cur;
+static u32 g_cb_begun = 1; /* command buffers begun, so a command buffer's state is told from an earlier one's */
 static u64 g_frame_id;
 static VkSemaphore g_gsem; /* graphics timeline: submission n signals n */
 static u64 g_gval;         /* the last submission */
@@ -191,6 +192,7 @@ VkCommandBuffer vk_cmd(void) {
                                        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
         VK_OK(vkBeginCommandBuffer(f->cbs[f->icb], &bi));
         f->recording = 1;
+        g_cb_begun++;
     }
     return f->cbs[f->icb];
 }
@@ -332,6 +334,7 @@ void vk_frame_check(void) {
 }
 
 u64 vk_submit_number(void) { return g_gval + 1; }
+u32 vk_cb_begun(void) { return g_cb_begun; }
 u64 vk_last_submit(void) { return g_gval; }
 void vk_wait_submit(u64 value) { timeline_wait(value); }
 void vk_land_through(u64 value) { land_through(value < g_gval ? value : g_gval); }

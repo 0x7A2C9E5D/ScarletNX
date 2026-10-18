@@ -230,6 +230,7 @@ static void feedback_done(u32 read, u32 write) {
 
 /* every dynamic state at a neutral value, for draws of our own */
 static void plain_state(VkCommandBuffer cb, VkRect2D sc) {
+    vk_render_forget_state(); /* every state set here, differently from a draw */
     VkViewport vp = {0, 0, (float)g_rp.ext.width, (float)g_rp.ext.height, 0, 1};
     vkCmdSetViewportWithCount(cb, 1, &vp);
     vkCmdSetScissorWithCount(cb, 1, &sc);
@@ -1396,6 +1397,35 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
 }
 
 /* ------------------------------------------------------------ draws */
+/* The dynamic state, pipeline and descriptor sets the previous draw recorded in the command buffer g_dyn.cb names
+   (vk_cb_begun): a draw records only what differs, where every draw set about 30 states again (TotK: 6,700 draws a
+   frame). Every draw pipeline has these states dynamic, so binding another one keeps them. The clear path and the
+   on-screen controls set or bind otherwise and forget them (vk_render_forget_state) */
+static struct {
+    u32 cb;
+    VkPipeline pipe;
+    VkDescriptorSet sets[5];
+    u32 fb, cull, front, topo, restart, discard, bias_on, dt, dw, dcmp, dbounds, st;
+    VkViewport vp;
+    VkRect2D sc;
+    float lw, bias[3], bc[4];
+    u32 sfront[7], sback[7];
+} g_dyn;
+#define DYN(field, value, call)                                                                                        \
+    do {                                                                                                               \
+        if (fresh || g_dyn.field != (value)) {                                                                         \
+            g_dyn.field = (value);                                                                                     \
+            call;                                                                                                      \
+        }                                                                                                              \
+    } while (0)
+#define DYNV(field, value, call)                                                                                       \
+    do {                                                                                                               \
+        if (fresh || memcmp(&g_dyn.field, &(value), sizeof g_dyn.field)) {                                             \
+            memcpy(&g_dyn.field, &(value), sizeof g_dyn.field);                                                        \
+            call;                                                                                                      \
+        }                                                                                                              \
+    } while (0)
+void vk_render_forget_state(void) { g_dyn.cb = 0; }
 u64 g_vk_drawn, g_vk_skipped;
 
 /* NVB197_SET_VIEWPORT_COORDINATE_SWIZZLE (0x0A18) can negate Y before the scale and offset. A negative Vulkan
@@ -1929,15 +1959,31 @@ retry:
         return;
     }
     VkCommandBuffer cb = vk_cmd();
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    /* only what differs from the previous draw's in this command buffer (g_dyn) */
+    int fresh = g_dyn.cb != vk_cb_begun();
+    if (fresh) {
+        memset(&g_dyn, 0, sizeof g_dyn);
+        g_dyn.cb = vk_cb_begun();
+    }
+    if (fresh || g_dyn.pipe != pipe) {
+        g_dyn.pipe = pipe;
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    }
     if (g_vk.has_feedback_dynamic)
-        vkCmdSetAttachmentFeedbackLoopEnableEXT(cb, fb ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_NONE);
+        DYN(fb, fb ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_NONE,
+            vkCmdSetAttachmentFeedbackLoopEnableEXT(cb, fb ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_NONE));
     VkDescriptorSet sets[2] = {vset, fset};
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_vk_playout, 0, fs ? 2 : 1, sets, 0, NULL);
+    if (fresh || g_dyn.sets[0] != vset || (fs && g_dyn.sets[1] != fset)) {
+        g_dyn.sets[0] = vset;
+        g_dyn.sets[1] = fs ? fset : VK_NULL_HANDLE;
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_vk_playout, 0, fs ? 2 : 1, sets, 0, NULL);
+    }
     for (b = 0; b < 3; b++)
-        if (bset[b])
+        if (bset[b] && (fresh || g_dyn.sets[2 + b] != bset[b])) {
+            g_dyn.sets[2 + b] = bset[b];
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_vk_playout, (u32)b + 2, 1, &bset[b], 0,
                                     NULL);
+        }
     if (k.nbind) vkCmdBindVertexBuffers2(cb, 0, k.nbind, vbuf, voff, NULL, vstride);
 
     VkViewport vp = vk_render_viewport(r);
@@ -1945,7 +1991,7 @@ retry:
         draw_images_discard(&images);
         return; /* no area: nothing is drawn (and Vulkan takes none) */
     }
-    vkCmdSetViewportWithCount(cb, 1, &vp);
+    DYNV(vp, vp, vkCmdSetViewportWithCount(cb, 1, &vp));
     VkRect2D sc = {{0, 0}, g_rp.ext};
     if (r[0x380] & 1) {
         u32 xs = r[0x381], ys = r[0x382];
@@ -1963,61 +2009,90 @@ retry:
         if (y1 > (i32)g_rp.ext.height) y1 = (i32)g_rp.ext.height;
         sc = x1 > x0 && y1 > y0 ? (VkRect2D){{x0, y0}, {(u32)(x1 - x0), (u32)(y1 - y0)}} : (VkRect2D){{0, 0}, {0, 0}};
     }
-    vkCmdSetScissorWithCount(cb, 1, &sc);
+    DYNV(sc, sc, vkCmdSetScissorWithCount(cb, 1, &sc));
     /* Triangle facing has its own window-origin control, independent of viewport scale and swizzle. */
-    vkCmdSetCullMode(cb, !r[0x646]           ? VK_CULL_MODE_NONE
-                         : r[0x648] == 0x404 ? VK_CULL_MODE_FRONT_BIT
-                         : r[0x648] == 0x408 ? VK_CULL_MODE_FRONT_AND_BACK
-                                             : VK_CULL_MODE_BACK_BIT);
-    vkCmdSetFrontFace(cb, front_face_at_viewport(r, vp.height));
-    vkCmdSetPrimitiveTopology(cb, topo);
-    vkCmdSetPrimitiveRestartEnable(cb, restart && (indexed == 1 || indexed == 3));
-    vkCmdSetRasterizerDiscardEnable(cb, VK_FALSE);
+    {
+        VkCullModeFlags cull = !r[0x646]           ? VK_CULL_MODE_NONE
+                               : r[0x648] == 0x404 ? VK_CULL_MODE_FRONT_BIT
+                               : r[0x648] == 0x408 ? VK_CULL_MODE_FRONT_AND_BACK
+                                                   : VK_CULL_MODE_BACK_BIT;
+        VkFrontFace front = front_face_at_viewport(r, vp.height);
+        u32 prim_restart = restart && (indexed == 1 || indexed == 3);
+        DYN(cull, cull, vkCmdSetCullMode(cb, cull));
+        DYN(front, front, vkCmdSetFrontFace(cb, front));
+        DYN(topo, topo, vkCmdSetPrimitiveTopology(cb, topo));
+        DYN(restart, prim_restart, vkCmdSetPrimitiveRestartEnable(cb, prim_restart));
+        DYN(discard, 1, vkCmdSetRasterizerDiscardEnable(cb, VK_FALSE));
+    }
     {
         float lw; /* smooth lines (0x55C) have a width of their own */
         memcpy(&lw, &r[r[0x55C] ? 0x4EC : 0x4ED], 4);
-        vkCmdSetLineWidth(cb, g_vk.feat.wideLines && lw > 0 && lw < 64 ? lw : 1.0f);
+        lw = g_vk.feat.wideLines && lw > 0 && lw < 64 ? lw : 1.0f;
+        DYNV(lw, lw, vkCmdSetLineWidth(cb, lw));
     }
     /* depth bias: enabled per polygon mode (0x370 points, 0x371 lines, 0x372 filled), clamped by 0x61F. The units
        are passed as they are (Ryujinx halves them: a run decides) */
-    vkCmdSetDepthBiasEnable(cb, r[k.polygon == VK_POLYGON_MODE_POINT  ? 0x370
-                                  : k.polygon == VK_POLYGON_MODE_LINE ? 0x371
-                                                                      : 0x372] != 0);
+    {
+        u32 bias_on = r[k.polygon == VK_POLYGON_MODE_POINT  ? 0x370
+                        : k.polygon == VK_POLYGON_MODE_LINE ? 0x371
+                                                            : 0x372] != 0;
+        DYN(bias_on, bias_on, vkCmdSetDepthBiasEnable(cb, bias_on));
+    }
     {
         float fac, un, clamp;
         memcpy(&fac, &r[0x55B], 4);
         memcpy(&un, &r[0x56F], 4);
         memcpy(&clamp, &r[0x61F], 4);
-        vkCmdSetDepthBias(cb, un, g_vk.feat.depthBiasClamp ? clamp : 0.0f, fac);
+        float bias[3] = {un, g_vk.feat.depthBiasClamp ? clamp : 0.0f, fac};
+        DYNV(bias, bias, vkCmdSetDepthBias(cb, bias[0], bias[1], bias[2]));
     }
     if (!g_vk.feat.depthClamp && vk_render_depth_clamp(r))
         LOG_LIMIT(1, "vulkan: depth clamp requested but unavailable on this device\n");
     {
         float bc[4];
         memcpy(bc, &r[0x4C7], 16);
-        vkCmdSetBlendConstants(cb, bc);
+        DYNV(bc, bc, vkCmdSetBlendConstants(cb, bc));
     }
     /* depth and stencil */
-    vkCmdSetDepthTestEnable(cb, zt && r[0x4B3]);
-    vkCmdSetDepthWriteEnable(cb, zt && r[0x4BA]);
-    vkCmdSetDepthCompareOp(cb, cmp_op(r[0x4C3]));
-    vkCmdSetDepthBoundsTestEnable(cb, VK_FALSE);
-    vkCmdSetDepthBounds(cb, 0.0f, 1.0f);
+    {
+        u32 dt = zt && r[0x4B3], dw = zt && r[0x4BA];
+        VkCompareOp dcmp = cmp_op(r[0x4C3]);
+        DYN(dt, dt, vkCmdSetDepthTestEnable(cb, dt));
+        DYN(dw, dw, vkCmdSetDepthWriteEnable(cb, dw));
+        DYN(dcmp, dcmp, vkCmdSetDepthCompareOp(cb, dcmp));
+        DYN(dbounds, 1, (vkCmdSetDepthBoundsTestEnable(cb, VK_FALSE), vkCmdSetDepthBounds(cb, 0.0f, 1.0f)));
+    }
     int stencil = zt && zt->f.stencil && r[0x4E0];
-    vkCmdSetStencilTestEnable(cb, stencil);
+    DYN(st, (u32)stencil, vkCmdSetStencilTestEnable(cb, stencil));
     /* GL order in the registers: fail, depth fail, pass */
     int two = r[0x565] != 0;
-    vkCmdSetStencilOp(cb, VK_STENCIL_FACE_FRONT_BIT, stencil_op(r[0x4E1]), stencil_op(r[0x4E3]), stencil_op(r[0x4E2]),
-                      cmp_op(r[0x4E4]));
-    vkCmdSetStencilReference(cb, VK_STENCIL_FACE_FRONT_BIT, r[0x4E5]);
-    vkCmdSetStencilCompareMask(cb, VK_STENCIL_FACE_FRONT_BIT, r[0x4E6]);
-    vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_FRONT_BIT, r[0x4E7]);
-    vkCmdSetStencilOp(cb, VK_STENCIL_FACE_BACK_BIT, stencil_op(r[two ? 0x566 : 0x4E1]),
-                      stencil_op(r[two ? 0x568 : 0x4E3]), stencil_op(r[two ? 0x567 : 0x4E2]),
-                      cmp_op(r[two ? 0x569 : 0x4E4]));
-    vkCmdSetStencilReference(cb, VK_STENCIL_FACE_BACK_BIT, r[two ? 0x3D5 : 0x4E5]);
-    vkCmdSetStencilCompareMask(cb, VK_STENCIL_FACE_BACK_BIT, r[two ? 0x3D7 : 0x4E6]);
-    vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_BACK_BIT, r[two ? 0x3D6 : 0x4E7]);
+    {
+        /* per face: fail, depth fail and pass operations, the compare op, reference, compare and write masks */
+        u32 sf[7] = {stencil_op(r[0x4E1]),
+                     stencil_op(r[0x4E3]),
+                     stencil_op(r[0x4E2]),
+                     cmp_op(r[0x4E4]),
+                     r[0x4E5],
+                     r[0x4E6],
+                     r[0x4E7]};
+        u32 sb[7] = {stencil_op(r[two ? 0x566 : 0x4E1]),
+                     stencil_op(r[two ? 0x568 : 0x4E3]),
+                     stencil_op(r[two ? 0x567 : 0x4E2]),
+                     cmp_op(r[two ? 0x569 : 0x4E4]),
+                     r[two ? 0x3D5 : 0x4E5],
+                     r[two ? 0x3D7 : 0x4E6],
+                     r[two ? 0x3D6 : 0x4E7]};
+        DYNV(sfront, sf,
+             (vkCmdSetStencilOp(cb, VK_STENCIL_FACE_FRONT_BIT, sf[0], sf[1], sf[2], sf[3]),
+              vkCmdSetStencilReference(cb, VK_STENCIL_FACE_FRONT_BIT, sf[4]),
+              vkCmdSetStencilCompareMask(cb, VK_STENCIL_FACE_FRONT_BIT, sf[5]),
+              vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_FRONT_BIT, sf[6])));
+        DYNV(sback, sb,
+             (vkCmdSetStencilOp(cb, VK_STENCIL_FACE_BACK_BIT, sb[0], sb[1], sb[2], sb[3]),
+              vkCmdSetStencilReference(cb, VK_STENCIL_FACE_BACK_BIT, sb[4]),
+              vkCmdSetStencilCompareMask(cb, VK_STENCIL_FACE_BACK_BIT, sb[5]),
+              vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_BACK_BIT, sb[6])));
+    }
     /* push constants: the depth mode (snx_vp.y) for the vertex stage, the alpha test (0x4BB on, 0x4C4 reference,
        0x4C5 function) and the point sprite's T flip for the fragment stage. PointCoord's T is 0 at row 0, which is a
        lower-left window's bottom (0x4EB bit 0): it flips when the sprite's origin (0x581 bit 2, 1 the top) is the

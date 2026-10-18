@@ -307,6 +307,7 @@ void vk_ui_draw(VkCommandBuffer cb, VkImage sc, const int safe[4]) {
         VkRect2D sci = {{0, 0}, g_vk.sc_extent};
         VkDeviceSize vo = off;
         vkCmdBeginRendering(cb, &ri);
+        vk_render_forget_state(); /* another pipeline and layout: a draw after it sets everything again */
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipe);
         vkCmdSetViewport(cb, 0, 1, &vp);
         vkCmdSetScissor(cb, 0, 1, &sci);
