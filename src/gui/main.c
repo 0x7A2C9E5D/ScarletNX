@@ -254,8 +254,11 @@ static const char* const items[] = {"Load Switch NSP/XCI/NRO",
 #define SAY_GROUPS     "Tap a group to open it. Back: go back."
 #define SAY_APP        "Tap a row to change or open it. Back: go back."
 #define SAY_FOLDERS    "Add a folder: tap it. Tap a folder twice to take it off. Back: go back."
-#define SAY_PLACES     "Tap a folder to pick another. Back: go back."
-#define SAY_PAD        "Tap a control; tap it again for a press. Back: go back."
+#define SAY_FOLDERS_GAMES                                                                                              \
+    "Tap: pick where games go. Add a folder: tap it. ~Tap a folder twice to take it off. Back: go back."
+#define SAY_FOLDERS_PICKED SAY_FOLDERS_GAMES
+#define SAY_PLACES         "Tap a folder to pick another. Back: go back."
+#define SAY_PAD            "Tap a control; tap it again for a press. Back: go back."
 #else
 #define SAY_MENU       "Arrows/mouse: move. Space/Enter/click: select."
 #define SAY_GAMES      "Up/Down: select. Enter/Space: open. R: recompile. Left/Right/PgUp/PgDown: page."
@@ -274,8 +277,12 @@ static const char* const items[] = {"Load Switch NSP/XCI/NRO",
 #define SAY_GROUPS     "Up/Down: group. Enter: open. ESC: back."
 #define SAY_APP        "Up/Down: row. Left/Right: change. Enter: change or open. ESC: back."
 #define SAY_FOLDERS    "Add a folder: pick, drop or paste one. Del: take one off. ESC: back."
-#define SAY_PLACES     "Up/Down: folder. Enter: pick another. Del: the default. ESC: back."
-#define SAY_PAD        "Arrows/pad: move, change. Enter/A: select. Del: the .ini's. ESC: back."
+#define SAY_FOLDERS_GAMES                                                                                              \
+    "Enter: pick where games go. Add a folder: pick, drop or paste one. ~Del: take one off. ESC: back."
+#define SAY_FOLDERS_PICKED                                                                                             \
+    "Enter: pick where games go. Del: back to the default. Add a folder: pick, drop or paste one. ESC: back."
+#define SAY_PLACES "Up/Down: folder. Enter: pick another. Del: the default. ESC: back."
+#define SAY_PAD    "Arrows/pad: move, change. Enter/A: select. Del: the .ini's. ESC: back."
 #endif
 static SDL_Color rgb(GuiRgb c) {
     SDL_Color out = {c.r, c.g, c.b, 255};
@@ -1397,9 +1404,11 @@ static const char* shown_keys(const App* app, char* out, size_t size) {
                : app->form == GUI_FORM_THEME    ? SAY_EDITOR
                : app->form == GUI_FORM_SETTINGS ? SAY_GROUPS
                : app->form == GUI_FORM_APP      ? SAY_APP
-               : app->form == GUI_FORM_FOLDERS  ? SAY_FOLDERS
-               : app->form == GUI_FORM_PLACES   ? SAY_PLACES
-                                                : SAY_SETTINGS;
+               : app->form == GUI_FORM_FOLDERS && !app->editor.row
+                   ? (app->place[GUI_PLACE_GAMES] ? SAY_FOLDERS_PICKED : SAY_FOLDERS_GAMES)
+               : app->form == GUI_FORM_FOLDERS ? SAY_FOLDERS
+               : app->form == GUI_FORM_PLACES  ? SAY_PLACES
+                                               : SAY_SETTINGS;
     else if (app->menu.view == GUI_LOAD_GAMES)
         keys = SAY_GAMES;
     else if (pick_screen(app))
@@ -1471,6 +1480,7 @@ static int hint_next(const char** s, char* key, char* what, size_t size) {
     size_t n;
     while (*p == ' ') ++p;
     if (!*p) return 0;
+    if (*p == '~') ++p; /* a sentence its screen cannot do now: drawn greyed, pressed by nothing (hint_off) */
     end = strstr(p, ". ");
     if (!end) end = p + strlen(p) - (p[strlen(p) - 1] == '.');
     colon = strstr(p, ": ");
@@ -1481,6 +1491,10 @@ static int hint_next(const char** s, char* key, char* what, size_t size) {
     snprintf(what, size, "%.*s", (int)(end - p), p);
     *s = *end ? end + 1 : end;
     return 1;
+}
+static int hint_off(const char* s) {
+    while (*s == ' ') ++s;
+    return *s == '~';
 }
 static int hint_width(const char* key, const char* what) {
     return (int)SDL_utf8strlen(key) + (key[0] ? 1 : 0) + (int)SDL_utf8strlen(what);
@@ -1498,7 +1512,7 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
     const GuiTheme* t = &app->theme;
     char key[128], what[128];
     const char* row = keys;
-    int rows = 0, s = app->scale, lit;
+    int rows = 0, s = app->scale, lit, off;
     for (;;) {
         const char *at = row, *end = row, *u = row;
         int used = 0, x;
@@ -1509,28 +1523,32 @@ static int hints(App* app, const char* keys, int width, GuiRect r, int y, int dr
             end = at;
         }
         if (end == row) break;
-        for (x = r.x + r.w - used * cell_w(app); (draw || hit) && u != end && hint_next(&u, key, what, sizeof key);) {
+        for (x = r.x + r.w - used * cell_w(app);
+             (draw || hit) && u != end && (off = hint_off(u), hint_next(&u, key, what, sizeof key));) {
             int cy = y + rows * cell_h(app), k = (int)SDL_utf8strlen(key), w = hint_width(key, what) * cell_w(app);
-            if (hit && k && hit->y >= (float)cy && hit->y < (float)(cy + cell_h(app)) &&
+            if (hit && k && !off && hit->y >= (float)cy && hit->y < (float)(cy + cell_h(app)) &&
                 hit->x >= (float)(x - cell_w(app)) && hit->x < (float)(x + w + cell_w(app))) {
                 snprintf(hit->key, sizeof hit->key, "%s", key);
                 hit->col = (int)SDL_floorf((hit->x - (float)x) / (float)cell_w(app));
             }
-            lit = draw && k && app->hovering && app->hover_y >= (float)cy && app->hover_y < (float)(cy + cell_h(app)) &&
-                  app->hover_x >= (float)(x - cell_w(app)) && app->hover_x < (float)(x + w + cell_w(app)) &&
+            lit = draw && k && !off && app->hovering && app->hover_y >= (float)cy &&
+                  app->hover_y < (float)(cy + cell_h(app)) && app->hover_x >= (float)(x - cell_w(app)) &&
+                  app->hover_x < (float)(x + w + cell_w(app)) &&
                   hint_pick(key, (int)SDL_floorf((app->hover_x - (float)x) / (float)cell_w(app))) >= 0;
             if (lit) /* the whole sentence, as a button under the pointer: inverted */
                 fill_rect(app, gui_rect(x - s, cy, w + 2 * s, cell_h(app)), band ? t->page : t->focus);
-            else if (draw && k && t->focus_bar)
+            else if (draw && k && !off && t->focus_bar)
                 fill_rect(app, gui_rect(x - s, cy, k * cell_w(app) + 2 * s, cell_h(app)), band ? t->soft : t->focus);
             if (draw && k)
                 text_in(app, r, x, cy, key,
-                        rgb(lit                    ? (band ? t->ink : t->page)
+                        rgb(off                    ? t->soft
+                            : lit                  ? (band ? t->ink : t->page)
                             : t->focus_bar || band ? t->page
                                                    : t->focus));
             if (draw)
                 text_in(app, r, x + (k + (k ? 1 : 0)) * cell_w(app), cy, what,
-                        rgb(lit    ? (band ? t->ink : t->page)
+                        rgb(off    ? t->soft
+                            : lit  ? (band ? t->ink : t->page)
                             : band ? t->page
                                    : t->ink));
             x += w + 2 * cell_w(app);
@@ -2405,6 +2423,15 @@ static int folders_save(App* app) {
     return failed;
 }
 static void open_folders(App* app, int row);
+/* the Library's games/ row, Folders > Games' folder: its default stays on the list, a picked one goes back to it */
+#ifdef SDL_PLATFORM_ANDROID
+static const char games_row[] = "Where recompiled games go: tap to pick another. It stays on the list";
+static const char games_row_picked[] = "Where recompiled games go: tap to pick another. Folders puts back the default";
+#else
+static const char games_row[] = "Where recompiled games go: Enter picks another. It stays on the list";
+static const char games_row_picked[] =
+    "Where recompiled games go: Enter picks another, Del twice puts back the default";
+#endif
 /* a folder the player picked, dropped or pasted: a folder that is there, once. What happened goes on the folders'
    screen, or in the menu's message when the picker answered after the player left it */
 static void folder_add(App* app, const char* path, bool deep) {
@@ -2413,9 +2440,7 @@ static void folder_add(App* app, const char* path, bool deep) {
     for (i = 0; absolute && i < app->folder_count && strcmp(app->folders[i], absolute); ++i) {}
     if (!absolute || !snx_is_dir(absolute))
         snprintf(note, sizeof note, "Not a folder: %s", path ? path : "(none)");
-    else if (app->games_dir && !strcmp(absolute, app->games_dir))
-        snprintf(note, sizeof note, "games/ is always listed");
-    else if (i < app->folder_count)
+    else if (i < app->folder_count || (app->games_dir && !strcmp(absolute, app->games_dir)))
         snprintf(note, sizeof note, "Already listed: %s", absolute);
     else if (app->folder_count == GUI_FOLDERS_MAX)
         snprintf(note, sizeof note, "At most %d folders", GUI_FOLDERS_MAX);
@@ -2546,9 +2571,9 @@ static void open_folders(App* app, int row) {
         k->type = GUI_KEY_ACTION;
         k->at = offsetof(GuiAppForm, folder) + (size_t)i * sizeof app->app_form.folder[0];
         k->size = sizeof app->app_form.folder[0];
-        k->about = i ? "Del, or Enter twice: take it off the list; the folder stays"
-                     : "The data folder's games/, always "
-                       "listed";
+        k->about = i                             ? "Del, or Enter twice: take it off the list; the folder stays"
+                   : app->place[GUI_PLACE_GAMES] ? games_row_picked
+                                                 : games_row;
         snprintf(app->app_form.folder[i], sizeof app->app_form.folder[i], "%s",
                  !path || !snx_is_dir(path)      ? "not found"
                  : i && app->folders_deep[i - 1] ? "+ subfolders"
@@ -2632,7 +2657,7 @@ static void open_places(App* app, int row) {
 }
 /* a place's note: on the form while it shows, else in the menu's message */
 static void place_note(App* app, const char* note) {
-    if (app->editing && app->form == GUI_FORM_PLACES)
+    if (app->editing && (app->form == GUI_FORM_PLACES || app->form == GUI_FORM_FOLDERS))
         snprintf(app->editor.note, sizeof app->editor.note, "%s", note);
     else
         snprintf(app->message, sizeof app->message, "Folders: %s", note);
@@ -2645,6 +2670,8 @@ static void place_use(App* app, int place, char* absolute) {
     places_apply(app);
     space_start(app);
     if (app->editing && app->form == GUI_FORM_PLACES) open_places(app, place);
+    if (app->editing && app->form == GUI_FORM_FOLDERS)
+        open_folders(app, 0); /* the Library's games/ row, picked there */
     if (app->app_file && app_save(app))
         snprintf(note, sizeof note, "Used, not kept for the next start: %s could not be written", app->app_file);
     else
@@ -2779,16 +2806,37 @@ static void open_folder_picker(App* app) {
     SDL_ShowOpenFolderDialog(folder_picked, &app->picked_folder, app->window, NULL, false);
 #endif
 }
-/* Select on a folder's row: once arms it, twice takes it off; games/ stays */
+/* Select on a folder's row: once arms it, twice takes it off; on games/ it picks where games go, as Folders > Games */
 static void folder_select(App* app, int row) {
-    if (!row)
-        snprintf(app->editor.note, sizeof app->editor.note, "games/ is always listed");
-    else if (app->folder_armed == row)
+    if (!row) {
+        app->place_row = GUI_PLACE_GAMES;
+        open_folder_picker(app);
+    } else if (app->folder_armed == row)
         folder_remove(app, row - 1);
     else {
         app->folder_armed = row;
         snprintf(app->editor.note, sizeof app->editor.note, "Enter again takes it off the list");
     }
+}
+/* Del on games/: a folder picked in Folders > Games goes back to the default, Del pressed twice, only the setting
+   changing; the default itself stays on the list */
+static void games_row_del(App* app) {
+    char* fallback;
+    if (!app->place[GUI_PLACE_GAMES]) {
+        snprintf(app->editor.note, sizeof app->editor.note, "%s", games_row);
+        return;
+    }
+    if (app->folder_armed != -1) { /* -1: games/ armed, as a row's number arms that row */
+        app->folder_armed = -1;
+        fallback = app->data_dir ? snx_path_join(app->data_dir, "games") : NULL;
+        snprintf(app->editor.note, sizeof app->editor.note,
+                 "Del again: Games goes back to the default, %s. The folder keeps what it has",
+                 fallback ? fallback : "games/");
+        free(fallback);
+        return;
+    }
+    app->folder_armed = 0;
+    place_use(app, GUI_PLACE_GAMES, NULL);
 }
 /* the setting a row of the open group or page is, and the row a setting is (-1: none) */
 static int setting_of(const App* app, int row) { return app->view_count ? app->view_rows[row] : app->first + row; }
@@ -3460,7 +3508,7 @@ static void editor_input(App* app, const SDL_Event* e) {
         if (app->editor.row && app->editor.row <= app->folder_count)
             folder_remove(app, app->editor.row - 1);
         else if (!app->editor.row)
-            snprintf(app->editor.note, sizeof app->editor.note, "games/ is always listed");
+            games_row_del(app);
         return;
     }
     /* a place: Del puts back its default, Ctrl+V picks the folder pasted */

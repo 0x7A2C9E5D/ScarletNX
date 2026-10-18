@@ -95,8 +95,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   dead zone, background input, Joy-Cons). A player's *Controller* is *Any*, the next to connect, until Enter on it
   and a press on a controller give it that one (ESC leaves it as it was, Del makes it *Any* again); its *Button
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
-  **App** holds **Theme** and **Text size**, which Left/Right or Enter go round either way, **Theme editor**, which comes back to App, and **Library**: `games/`,
-  always listed, then the player's own folders, whose games the `games/` browser lists after
+  **App** holds **Theme** and **Text size**, which Left/Right or Enter go round either way, **Theme editor**, which comes back to App, and **Library**: first `games/`,
+  where recompiled games go: Enter there picks another, as **Folders > Games** does; at its default it stays on the
+  list (the foot's Del greyed), and a folder picked goes back to the default with Del pressed twice, only the setting
+  changing. Then the player's own folders, whose games the `games/` browser lists after
   `games/`'s. **Add a folder** opens the system's folder picker; a folder dropped on the window
   or a path pasted with Ctrl+V is added too. A folder with folders in it asks first: *Only this
   folder*, or *With subfolders*, whose games are listed too, four levels down, hidden folders
