@@ -76,14 +76,14 @@ static void frames(void) {
 }
 
 /* ---- two consoles */
-static int changes_a, changes_b;
+static int changes_a, changes_b, gone_b; /* gone_b: the station's callbacks that found it out of the network */
 static void changed_a(void* arg) {
     (void)arg;
     changes_a++;
 }
-static void changed_b(void* arg) {
-    (void)arg;
+static void changed_b(void* arg) { /* arg: the station's SnxLdn*, set before anything can change */
     changes_b++;
+    if (!snx_ldn_connected(*(SnxLdn* const*)arg)) gone_b++;
 }
 static const uint8_t lo_mask[4] = {255, 0, 0, 0};
 static const uint8_t ip_a[4] = {127, 0, 0, 1}, ip_b[4] = {127, 0, 0, 2};
@@ -132,7 +132,7 @@ static void two_consoles(void) {
     int r, n;
     r = snx_ldn_open(&a, ip_a, lo_mask, changed_a, NULL);
     CHECK(r == 0);
-    r = snx_ldn_open(&b, ip_b, lo_mask, changed_b, NULL);
+    r = snx_ldn_open(&b, ip_b, lo_mask, changed_b, &b);
     if (r == -SNX_EADDRNOTAVAIL) { /* a host whose loopback has 127.0.0.1 alone (macOS) */
         printf("ldn_lan: skipped the two consoles: this host has no 127.0.0.2\n");
         snx_ldn_close(a);
@@ -185,12 +185,13 @@ static void two_consoles(void) {
     /* the host doesn't find itself */
     CHECK(snx_ldn_scan(a, NULL, found, 4, 300) == 0);
 
-    /* joining: the host gets node 1, both sides see two nodes, the station's event fires on the sync */
+    /* joining: the host gets node 1, both sides see two nodes, the station's event fires on the sync (on its
+       transport's thread, which may run it after the connect returns) */
     name_of(name, "Station");
     changes_a = changes_b = 0;
     CHECK(snx_ldn_connect(b, &net, name, 4, 2000) == 0);
     CHECK(snx_ldn_connected(b));
-    CHECK(wait_for(&changes_a, 1, 2000) && changes_b >= 1);
+    CHECK(wait_for(&changes_a, 1, 2000) && wait_for(&changes_b, 1, 2000));
     CHECK(snx_ldn_network_info(a, &info, updates) == 1);
     CHECK(info.node_count == 2 && info.nodes[1].is_connected && info.nodes[1].node_id == 1);
     CHECK(!strcmp((char*)info.nodes[1].user_name, "Station") && info.nodes[1].version == 4);
@@ -219,10 +220,10 @@ static void two_consoles(void) {
 
     /* it joins again, and the host goes away: the station is told, with the reason */
     CHECK(snx_ldn_connect(b, &net, name, 4, 2000) == 0);
-    changes_b = 0;
+    gone_b = 0; /* a late callback of the join counts only if it finds the station out, as checked below */
     snx_ldn_destroy_network(a);
     CHECK(!snx_ldn_connected(a));
-    CHECK(wait_for(&changes_b, 1, 2000));
+    CHECK(wait_for(&gone_b, 1, 2000));
     CHECK(!snx_ldn_connected(b) && snx_ldn_disconnect_reason(b) == SNX_LDN_REASON_DESTROYED_BY_USER);
     CHECK(snx_ldn_network_info(b, &info, NULL) == 0);
     /* no network there now: the host's port takes the connection and closes it, and a network with no nodes is
