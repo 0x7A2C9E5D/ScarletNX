@@ -33,6 +33,7 @@
 #define AM_APPLET_CONTROLLER     0x0c
 #define AM_APPLET_PROFILE_SELECT 0x10
 #define AM_APPLET_SWKBD          0x11
+#define AM_APPLET_MII_EDIT       0x12
 #define AM_APPLET_WEB            0x13
 #define AM_APPLET_SHOP           0x14
 #define AM_APPLET_OFFLINE_WEB    0x17
@@ -48,13 +49,17 @@ u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
 
 /* the application's message queue: a message stays queued until ReceiveMessage takes it, and the event is signaled
    while one is */
-#define AM_MESSAGES 16
+#define AM_MESSAGES     16
+#define AM_USER_CHANNEL 8
 static struct {
     PMutex lock;
     KEvent* msg_event;
     KEvent* sleep_lock_event; /* the sleep lock is granted at once, so this is signaled from the first request on */
     KEvent* launchable_event; /* library applets can be launched from the start */
     KEvent* resolution_event; /* the default display resolution and HDCP state never change while running */
+    SvcObj* user_channel[AM_USER_CHANNEL]; /* copies of the storages unpopped, the last one on top */
+    u32 user_count;
+    u8 vr_mode; /* as the game turned it: the screen is not split for it */
     u32 msgs[AM_MESSAGES];
     u32 head, count;
     int preselected_popped; /* the preselected user launch parameter is given once */
@@ -166,12 +171,12 @@ static int nn_am_service_IStorageAccessor_Write(SvcObj* self, i64 offset, IpcBuf
     memcpy(am_storage_bytes(st) + offset, GP(data.addr), (size_t)data.size);
     R_SUCCEED();
 }
+/* the whole buffer, as Eden checks a read: one that runs past the end is refused, not cut */
 static int nn_am_service_IStorageAccessor_Read(SvcObj* self, i64 offset, IpcBuf data) {
     SvcObj* st = ((AmAccessor*)self->data)->storage;
-    u64 size = ((StorageData*)st->data)->size, n;
-    R_UNLESS(offset >= 0 && (u64)offset <= size, AM_INVALID_OFFSET);
-    n = data.size < size - (u64)offset ? data.size : size - (u64)offset;
-    memcpy(GP(data.addr), am_storage_bytes(st) + offset, (size_t)n);
+    u64 size = ((StorageData*)st->data)->size;
+    R_UNLESS(offset >= 0 && (u64)offset <= size && data.size <= size - (u64)offset, AM_INVALID_OFFSET);
+    memcpy(GP(data.addr), am_storage_bytes(st) + offset, (size_t)data.size);
     R_SUCCEED();
 }
 
@@ -207,9 +212,18 @@ static int nn_am_service_IApplicationProxy_GetWindowController(SvcObj* self, Svc
     *controller = nn_am_service_IWindowController_new(0);
     R_SUCCEED();
 }
+/* IAudioController's volumes, kept on each controller as Eden keeps them, from 0 to 1: what the game expects itself
+   and a library applet to play at */
+typedef struct {
+    float main_volume, library_volume;
+} AmVolumes;
 static int nn_am_service_IApplicationProxy_GetAudioController(SvcObj* self, SvcObj** controller) {
+    AmVolumes* v;
     (void)self;
-    *controller = nn_am_service_IAudioController_new(0);
+    *controller = nn_am_service_IAudioController_new(sizeof(AmVolumes));
+    v = (AmVolumes*)(*controller)->data;
+    v->main_volume = 1.0f;
+    v->library_volume = 1.0f;
     R_SUCCEED();
 }
 static int nn_am_service_IApplicationProxy_GetDisplayController(SvcObj* self, SvcObj** controller) {
@@ -343,6 +357,32 @@ static int nn_am_service_ILockAccessor_IsLocked(SvcObj* self, u8* is_locked) {
     R_SUCCEED();
 }
 
+static int am_set_vr_mode(u8 on) {
+    pm_lock(&am.lock);
+    am.vr_mode = on;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+static int nn_am_service_ICommonStateGetter_IsVrModeEnabled(SvcObj* self, u8* enabled) {
+    (void)self;
+    pm_lock(&am.lock);
+    *enabled = am.vr_mode;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+static int nn_am_service_ICommonStateGetter_SetVrModeEnabled(SvcObj* self, u8 enabled) {
+    (void)self;
+    return am_set_vr_mode(enabled != 0);
+}
+static int nn_am_service_ICommonStateGetter_BeginVrModeEx(SvcObj* self) {
+    (void)self;
+    return am_set_vr_mode(1);
+}
+static int nn_am_service_ICommonStateGetter_EndVrModeEx(SvcObj* self) {
+    (void)self;
+    return am_set_vr_mode(0);
+}
+
 static int nn_am_service_ICommonStateGetter_GetDefaultDisplayResolution(SvcObj* self, i32* width, i32* height) {
     (void)self;
     *width = g_opt_docked ? 1920 : 1280;
@@ -406,14 +446,34 @@ static int nn_am_service_IWindowController_GetAppletResourceUserId(SvcObj* self,
     R_SUCCEED();
 }
 
+static float am_volume(float v) { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; }
+static int nn_am_service_IAudioController_SetExpectedMasterVolume(SvcObj* self, float main_volume,
+                                                                  float library_volume) {
+    AmVolumes* v = (AmVolumes*)self->data;
+    pm_lock(&am.lock);
+    v->main_volume = am_volume(main_volume);
+    v->library_volume = am_volume(library_volume);
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
 static int nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(SvcObj* self, float* volume) {
-    (void)self;
-    *volume = 1.0f;
+    pm_lock(&am.lock);
+    *volume = ((AmVolumes*)self->data)->main_volume;
+    pm_unlock(&am.lock);
     R_SUCCEED();
 }
 static int nn_am_service_IAudioController_GetLibraryAppletExpectedMasterVolume(SvcObj* self, float* volume) {
-    (void)self;
-    *volume = 1.0f;
+    pm_lock(&am.lock);
+    *volume = ((AmVolumes*)self->data)->library_volume;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+/* the fade is not played: nothing here plays the game at its expected volume */
+static int nn_am_service_IAudioController_ChangeMainAppletMasterVolume(SvcObj* self, float volume, i64 fade_time_ns) {
+    (void)fade_time_ns;
+    pm_lock(&am.lock);
+    ((AmVolumes*)self->data)->main_volume = am_volume(volume);
+    pm_unlock(&am.lock);
     R_SUCCEED();
 }
 
@@ -422,7 +482,14 @@ static int nn_am_service_IApplicationFunctions_PopLaunchParameter(SvcObj* self, 
     u8* d;
     u32 v;
     (void)self;
-    R_UNLESS(kind == 2, AM_NO_DATA); /* UserChannel: nothing was left there by a previous program */
+    if (kind == 1) { /* UserChannel: the last storage unpopped, which the channel's reference goes with */
+        pm_lock(&am.lock);
+        *storage = am.user_count ? am.user_channel[--am.user_count] : NULL;
+        pm_unlock(&am.lock);
+        R_UNLESS(*storage, AM_NO_DATA);
+        R_SUCCEED();
+    }
+    R_UNLESS(kind == 2, AM_NO_DATA); /* PreselectedUser (2) is the only other kind with data */
     pm_lock(&am.lock);
     v = (u32)am.preselected_popped;
     am.preselected_popped = 1;
@@ -436,6 +503,44 @@ static int nn_am_service_IApplicationFunctions_PopLaunchParameter(SvcObj* self, 
     v = 1;
     memcpy(d + 4, &v, 4);
     memcpy(d + 8, g_user_id, 16);
+    R_SUCCEED();
+}
+
+static int nn_am_service_IApplicationFunctions_ClearUserChannel(SvcObj* self) {
+    SvcObj* drop[AM_USER_CHANNEL];
+    u32 i, n;
+    (void)self;
+    pm_lock(&am.lock);
+    n = am.user_count;
+    memcpy(drop, am.user_channel, n * sizeof drop[0]);
+    am.user_count = 0;
+    pm_unlock(&am.lock);
+    for (i = 0; i < n; i++) svcobj_unref(drop[i]);
+    R_SUCCEED();
+}
+/* a copy, as Eden keeps one: the game may write its storage again after */
+static int nn_am_service_IApplicationFunctions_UnpopToUserChannel(SvcObj* self, SvcObj* storage) {
+    SvcObj* copy;
+    (void)self;
+    if (!storage) R_SUCCEED();
+    copy = am_storage_new(((StorageData*)storage->data)->size, am_storage_bytes(storage));
+    if (!copy) R_THROW(AM_OUT_OF_MEMORY);
+    pm_lock(&am.lock);
+    if (am.user_count < AM_USER_CHANNEL) {
+        am.user_channel[am.user_count++] = copy;
+        copy = NULL;
+    }
+    pm_unlock(&am.lock);
+    if (!copy) R_SUCCEED();
+    svcobj_unref(copy);
+    WARN_LIMIT(4, "am: the user channel holds %d storages, no more\n", AM_USER_CHANNEL);
+    R_THROW(AM_OUT_OF_MEMORY);
+}
+
+/* -1: the game was launched by the system, not by another of its programs (ExecuteProgram is not followed here) */
+static int nn_am_service_IApplicationFunctions_GetPreviousProgramIndex(SvcObj* self, i32* index) {
+    (void)self;
+    *index = -1;
     R_SUCCEED();
 }
 
@@ -1021,6 +1126,41 @@ static int nn_am_service_ILibraryAppletAccessor_PushInteractiveInData(SvcObj* se
     R_SUCCEED();
 }
 
+/* the Mii editor (nn::mii::AppletInput, 0x100 bytes: version, mode, then a v4's special key code and CharInfo), with
+   no editor and no database to add to: an edit gives the Mii back unchanged, the modes that only show something
+   succeed, and adding or creating a Mii is cancelled, as when the player backs out of the editor. The answer is
+   nn::mii::AppletOutput {result, index} or, for create and edit, AppletOutputForCharInfoEditing {result, CharInfo} */
+#define MII_EDIT_SHOW         0
+#define MII_EDIT_APPEND       1
+#define MII_EDIT_CREATE       4
+#define MII_EDIT_EDIT         5
+#define MII_EDIT_SUCCESS      0
+#define MII_EDIT_CANCEL       1
+#define MII_EDIT_INPUT_SIZE   0x100
+#define MII_EDIT_CHARINFO     0xc /* the v4 input's CharInfo, after the version, the mode and the special key code */
+#define MII_EDIT_CHARINFO_LEN 0x58
+static SvcObj* am_mii_edit(LibApplet* a) {
+    const u8* in = NULL;
+    u32 mode = MII_EDIT_APPEND, result;
+    SvcObj* out;
+    int i;
+    for (i = 0; i < a->nin && !in; i++)
+        if (((StorageData*)a->in[i]->data)->size >= MII_EDIT_INPUT_SIZE) in = am_storage_bytes(a->in[i]);
+    if (in) memcpy(&mode, in + 4, 4);
+    if (mode == MII_EDIT_CREATE || mode == MII_EDIT_EDIT) {
+        result = mode == MII_EDIT_EDIT && in ? MII_EDIT_SUCCESS : MII_EDIT_CANCEL;
+        out = am_storage_new(0x80, NULL);
+        memcpy(am_storage_bytes(out), &result, 4);
+        if (result == MII_EDIT_SUCCESS)
+            memcpy(am_storage_bytes(out) + 4, in + MII_EDIT_CHARINFO, MII_EDIT_CHARINFO_LEN);
+        return out;
+    }
+    result = mode == MII_EDIT_APPEND || mode > MII_EDIT_EDIT ? MII_EDIT_CANCEL : MII_EDIT_SUCCESS;
+    out = am_storage_new(0x20, NULL);
+    memcpy(am_storage_bytes(out), &result, 4);
+    LOG("am: Mii editor mode %u answered %s\n", mode, result == MII_EDIT_SUCCESS ? "success" : "cancel");
+    return out;
+}
 static int nn_am_service_ILibraryAppletAccessor_PopOutData(SvcObj* self, SvcObj** storage) {
     LibApplet* a = (LibApplet*)self->data;
     u8* d;
@@ -1051,6 +1191,7 @@ static int nn_am_service_ILibraryAppletAccessor_PopOutData(SvcObj* self, SvcObj*
         memcpy(am_storage_bytes(*storage) + 8, g_user_id, 16);
         break;
     case AM_APPLET_SWKBD: *storage = am_swkbd(a); break;
+    case AM_APPLET_MII_EDIT: *storage = am_mii_edit(a); break;
     case AM_APPLET_WEB:
     case AM_APPLET_SHOP:
     case AM_APPLET_OFFLINE_WEB:

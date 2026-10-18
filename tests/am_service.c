@@ -212,6 +212,93 @@ static SvcObj* reply(SvcObj* a, u32 state, u32 type, u32 size) {
     CHECK(get32(data->d + 4) == type);
     return storage;
 }
+/* IAudioController: the expected master volumes read back as the game set them, from 0 to 1, on the controller it set
+   them on */
+static void test_audio_controller(void) {
+    SvcObj *c, *other;
+    float main_volume = -1.0f, library_volume = -1.0f;
+    CHECK(nn_am_service_IApplicationProxy_GetAudioController(NULL, &c) == 0);
+    CHECK(nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(c, &main_volume) == 0 &&
+          main_volume == 1.0f);
+    CHECK(nn_am_service_IAudioController_SetExpectedMasterVolume(c, 0.5f, 0.25f) == 0);
+    CHECK(nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(c, &main_volume) == 0 &&
+          main_volume == 0.5f);
+    CHECK(nn_am_service_IAudioController_GetLibraryAppletExpectedMasterVolume(c, &library_volume) == 0 &&
+          library_volume == 0.25f);
+    CHECK(nn_am_service_IAudioController_ChangeMainAppletMasterVolume(c, 0.75f, 0) == 0);
+    CHECK(nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(c, &main_volume) == 0 &&
+          main_volume == 0.75f);
+    CHECK(nn_am_service_IAudioController_SetExpectedMasterVolume(c, 1.5f, -1.0f) == 0);
+    CHECK(nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(c, &main_volume) == 0 &&
+          main_volume == 1.0f);
+    CHECK(nn_am_service_IAudioController_GetLibraryAppletExpectedMasterVolume(c, &library_volume) == 0 &&
+          library_volume == 0.0f);
+    CHECK(nn_am_service_IApplicationProxy_GetAudioController(NULL, &other) == 0);
+    CHECK(nn_am_service_IAudioController_GetLibraryAppletExpectedMasterVolume(other, &library_volume) == 0 &&
+          library_volume == 1.0f);
+    svcobj_unref(other);
+    svcobj_unref(c);
+    CHECK(test_objects == 0);
+}
+/* the user channel: a copy of each storage unpopped, the last one popped first, and ClearUserChannel empties it */
+static void test_user_channel(void) {
+    SvcObj *a = am_storage_new(4, "abc"), *b = am_storage_new(4, "xyz"), *s = NULL;
+    int i;
+    CHECK(nn_am_service_IApplicationFunctions_PopLaunchParameter(NULL, 1, &s) == AM_NO_DATA);
+    CHECK(nn_am_service_IApplicationFunctions_UnpopToUserChannel(NULL, a) == 0);
+    CHECK(nn_am_service_IApplicationFunctions_UnpopToUserChannel(NULL, b) == 0);
+    memcpy(am_storage_bytes(a), "zzz", 4);
+    CHECK(nn_am_service_IApplicationFunctions_PopLaunchParameter(NULL, 1, &s) == 0);
+    CHECK(((StorageData*)s->data)->size == 4 && memcmp(am_storage_bytes(s), "xyz", 4) == 0);
+    svcobj_unref(s);
+    CHECK(nn_am_service_IApplicationFunctions_PopLaunchParameter(NULL, 1, &s) == 0);
+    CHECK(memcmp(am_storage_bytes(s), "abc", 4) == 0);
+    svcobj_unref(s);
+    CHECK(nn_am_service_IApplicationFunctions_PopLaunchParameter(NULL, 1, &s) == AM_NO_DATA);
+    for (i = 0; i < AM_USER_CHANNEL; i++) CHECK(nn_am_service_IApplicationFunctions_UnpopToUserChannel(NULL, a) == 0);
+    CHECK(nn_am_service_IApplicationFunctions_UnpopToUserChannel(NULL, a) == AM_OUT_OF_MEMORY);
+    CHECK(nn_am_service_IApplicationFunctions_ClearUserChannel(NULL) == 0);
+    CHECK(nn_am_service_IApplicationFunctions_PopLaunchParameter(NULL, 1, &s) == AM_NO_DATA);
+    svcobj_unref(a);
+    svcobj_unref(b);
+    CHECK(test_objects == 0);
+}
+static void test_previous_program(void) {
+    i32 index = 0;
+    CHECK(nn_am_service_IApplicationFunctions_GetPreviousProgramIndex(NULL, &index) == 0 && index == -1);
+}
+/* IStorageAccessor's Read: the whole buffer within the storage, or InvalidOffset */
+static void test_storage_read(void) {
+    static u8 guest[32];
+    SvcObj *s = am_storage_new(8, "abcdefg"), *acc = NULL;
+    IpcBuf buf = {0, 8, 0};
+    g_mem = guest;
+    CHECK(nn_am_service_IStorage_Open(s, &acc) == 0);
+    CHECK(nn_am_service_IStorageAccessor_Read(acc, 0, buf) == 0 && memcmp(guest, "abcdefg", 8) == 0);
+    buf.size = 16;
+    CHECK(nn_am_service_IStorageAccessor_Read(acc, 0, buf) == AM_INVALID_OFFSET);
+    buf.size = 4;
+    CHECK(nn_am_service_IStorageAccessor_Read(acc, 6, buf) == AM_INVALID_OFFSET);
+    CHECK(nn_am_service_IStorageAccessor_Read(acc, 4, buf) == 0 && memcmp(guest, "efg", 4) == 0);
+    CHECK(nn_am_service_IStorageAccessor_Read(acc, -1, buf) == AM_INVALID_OFFSET);
+    g_mem = NULL;
+    svcobj_unref(acc);
+    svcobj_unref(s);
+    CHECK(test_objects == 0);
+}
+/* VR mode: on and off as the game turns it, by SetVrModeEnabled or by BeginVrModeEx and EndVrModeEx */
+static void test_vr_mode(void) {
+    u8 on = 0xee;
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled(NULL, &on) == 0 && on == 0);
+    CHECK(nn_am_service_ICommonStateGetter_BeginVrModeEx(NULL) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled(NULL, &on) == 0 && on == 1);
+    CHECK(nn_am_service_ICommonStateGetter_EndVrModeEx(NULL) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled(NULL, &on) == 0 && on == 0);
+    CHECK(nn_am_service_ICommonStateGetter_SetVrModeEnabled(NULL, 2) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled(NULL, &on) == 0 && on == 1);
+    CHECK(nn_am_service_ICommonStateGetter_SetVrModeEnabled(NULL, 0) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled(NULL, &on) == 0 && on == 0);
+}
 static void test_inline(void) {
     SvcObj* a;
     SvcObj* s;
@@ -380,7 +467,55 @@ static void test_messages(void) {
     CHECK(test_handles[h - 0x100] == &am.launchable_event->o && am.launchable_event->signaled);
     close_handles();
 }
+/* the Mii editor (0x12), which Mario Kart 8 Deluxe opens with nn::mii::AppendMii: with no editor here, appending is
+   cancelled as when the player backs out, an edit hands the Mii back, and each answer is the size the SDK reads */
+static SvcObj* mii_edit(u32 mode, const u8* charinfo, u32 out_size) {
+    u8 input[0x100] = {0};
+    SvcObj* a;
+    SvcObj* storage;
+    put32(input, 4); /* version 4 */
+    put32(input + 4, mode);
+    if (charinfo) memcpy(input + 0xc, charinfo, 0x58);
+    CHECK(nn_am_service_ILibraryAppletCreator_CreateLibraryApplet(NULL, 0x12, 0, &a) == 0);
+    storage = am_storage_new(sizeof input, input);
+    CHECK(nn_am_service_ILibraryAppletAccessor_PushInData(a, storage) == 0);
+    svcobj_unref(storage);
+    storage = NULL;
+    CHECK(nn_am_service_ILibraryAppletAccessor_PopOutData(a, &storage) == 0 && storage);
+    CHECK(((StorageData*)storage->data)->size == out_size);
+    svcobj_unref(a);
+    return storage;
+}
+static void test_mii_edit(void) {
+    u8 charinfo[0x58];
+    SvcObj* out;
+    StorageData* d;
+    int i;
+    for (i = 0; i < 0x58; i++) charinfo[i] = (u8)(i + 1);
+    out = mii_edit(1, NULL, 0x20); /* AppendMii: cancelled */
+    d = out->data;
+    CHECK(get32(d->d) == 1 && get32(d->d + 4) == 0);
+    svcobj_unref(out);
+    out = mii_edit(0, NULL, 0x20); /* ShowMiiEdit: shown */
+    CHECK(get32(((StorageData*)out->data)->d) == 0);
+    svcobj_unref(out);
+    out = mii_edit(5, charinfo, 0x80); /* EditMii: the same Mii back */
+    d = out->data;
+    CHECK(get32(d->d) == 0 && !memcmp(d->d + 4, charinfo, 0x58));
+    svcobj_unref(out);
+    out = mii_edit(4, NULL, 0x80); /* CreateMii: cancelled */
+    CHECK(get32(((StorageData*)out->data)->d) == 1);
+    svcobj_unref(out);
+    close_handles();
+    CHECK(test_objects == 0 && test_kobjs == 0);
+}
 int main(void) {
+    test_mii_edit();
+    test_audio_controller();
+    test_user_channel();
+    test_previous_program();
+    test_storage_read();
+    test_vr_mode();
     test_inline();
     modern_packet = 1;
     test_inline();

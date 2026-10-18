@@ -67,7 +67,8 @@ typedef struct AudOut {
 typedef struct {
     nn_audio_detail_AudioRendererParameterInternal params;
     u32 limit;
-    u32 manual; /* OpenAudioRendererForManualExecution: no system event */
+    float voice_drop; /* as the game set it, read back: no voice is dropped here */
+    u32 manual;       /* OpenAudioRendererForManualExecution: no system event */
 } AudRen;
 
 static struct {
@@ -458,6 +459,14 @@ static int nn_audio_detail_IAudioRenderer_GetRenderingTimeLimit(SvcObj* self, u3
     *percent = __atomic_load_n(&((AudRen*)self->data)->limit, __ATOMIC_RELAXED);
     R_SUCCEED();
 }
+static int nn_audio_detail_IAudioRenderer_SetVoiceDropParameter(SvcObj* self, float parameter) {
+    __atomic_store(&((AudRen*)self->data)->voice_drop, &parameter, __ATOMIC_RELAXED);
+    R_SUCCEED();
+}
+static int nn_audio_detail_IAudioRenderer_GetVoiceDropParameter(SvcObj* self, float* parameter) {
+    __atomic_load(&((AudRen*)self->data)->voice_drop, parameter, __ATOMIC_RELAXED);
+    R_SUCCEED();
+}
 
 /* ------------------------------------------------------------ audren:u */
 static u64 align_up(u64 v, u64 a) { return (v + a - 1) & ~(a - 1); }
@@ -510,6 +519,7 @@ static int open_renderer(const nn_audio_detail_AudioRendererParameterInternal* p
     r = o->data;
     r->params = *params;
     r->limit = 100;
+    r->voice_drop = 1.0f;
     r->manual = (u32)manual;
     o->u[0] = SNX_AUDREN_STOPPED;
     if (!audren_open(o, (const u8*)params)) {

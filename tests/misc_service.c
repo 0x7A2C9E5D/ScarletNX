@@ -177,7 +177,7 @@ KEvent* owned_event(const char* name) {
 
 typedef struct {
     IpcCtx c;
-    u8 raw[32];
+    u8 raw[0x60];
 } Request;
 static IpcCtx* request(Request* r, u32 cmd) {
     memset(r, 0, sizeof *r);
@@ -661,6 +661,56 @@ static void test_mii_default(void) {
     request(&r, 7);
     argument32(&r, 0, 6);
     CHECK(db->dispatch(db, &r.c) == RC(126, 1));
+    /* the six defaults counted and given by Get, each BuildDefault's build past its random create id */
+    request(&r, 2);
+    argument32(&r, 0, 2);
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 6);
+    request(&r, 2);
+    argument32(&r, 0, 1);
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 0);
+    memset(g_mem + 0x4000, 0xee, 8 * 0x5c);
+    request(&r, 3);
+    argument32(&r, 0, 3);
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x4000;
+    r.c.b[0].size = 8 * 0x5c;
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 6);
+    for (u32 i = 0; i < 6; i++) {
+        u8 built[0x58];
+        u32 source;
+        request(&r, 7);
+        argument32(&r, 0, i);
+        call(db, &r);
+        memcpy(built, r.c.out, sizeof built);
+        CHECK(memcmp(g_mem + 0x4000 + i * 0x5c + 0x10, built + 0x10, 0x48) == 0);
+        memcpy(&source, g_mem + 0x4000 + i * 0x5c + 0x58, 4);
+        CHECK(source == 1);
+    }
+    CHECK(g_mem[0x4000 + 6 * 0x5c] == 0xee);
+    request(&r, 4);
+    argument32(&r, 0, 2);
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x5000;
+    r.c.b[0].size = 6 * 0x58;
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 6 && memcmp(g_mem + 0x5000 + 0x58 + 0x10, g_mem + 0x4000 + 0x5c + 0x10, 0x48) == 0);
+    request(&r, 3);
+    argument32(&r, 0, 2);
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x4000;
+    r.c.b[0].size = 5 * 0x5c;
+    CHECK(db->dispatch(db, &r.c) == RC(126, 2));
+    request(&r, 1);
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 0);
+    /* the bytes BuildDefault does not set are nought, whatever the CharInfo held */
+    nn_mii_CharInfo poisoned;
+    memset(&poisoned, 0xee, sizeof poisoned);
+    CHECK(nn_mii_detail_IDatabaseService_BuildDefault(NULL, 0, &poisoned) == 0);
+    CHECK(poisoned.v[0x11] == 0 && poisoned.v[0x1e] == 0 && poisoned.v[0x25] == 0);
     svcobj_unref(db);
     svcobj_unref(service);
 }
@@ -851,6 +901,109 @@ static void test_aoc_content(void) {
     aoc_scanned = aoc_count = 0;
 }
 
+/* nn::mii::detail::CharInfoRaw::Verify as the SDK checks a CharInfo (Mario Kart 8 Deluxe's sdk, 9c068c8): a create id
+   not all zeros with the RFC 4122 variant, a nickname of 1 to 10 characters ending in zeros, and each field in its
+   range. A game builds no Mii from a CharInfo that fails it */
+static int mii_valid(const u8* c) {
+    static const u8 max[49] = {3, 11, 1,  0x7f, 0x7f, 1,  3,  11, 9,  11, 11, 131, 99, 1,  59, 99, 7,
+                               6, 7,  12, 18,   23,   99, 8,  6,  11, 12, 15, 17,  8,  18, 35, 99, 8,
+                               6, 18, 99, 5,    5,    8,  16, 19, 99, 7,  20, 1,   8,  16, 31};
+    int i, zero = 1, end = 0;
+    for (i = 0; i < 16; i++)
+        if (c[i]) zero = 0;
+    if (zero || (c[8] & 0xc0) != 0x80) return 0;
+    if (!c[0x10] && !c[0x11]) return 0;
+    for (i = 0; i < 11; i++) {
+        int ch = c[0x10 + 2 * i] | c[0x11 + 2 * i] << 8;
+        if (!ch)
+            end = 1;
+        else if (end || i == 10)
+            return 0;
+    }
+    for (i = 0; i < 49; i++)
+        if (c[0x26 + i] > max[i]) return 0;
+    return 1;
+}
+
+/* BuildRandom (6): a valid Mii every time, of the age, gender and race asked (or any for All, 3, 2, 3), laid out as
+   Eden's CoreData::BuildRandom and CharInfo::SetFromStoreData make it. Mario Kart 8 Deluxe asks for 13 at its title,
+   and builds its Mii racers from them */
+static void test_mii_random(void) {
+    SvcObj* service = new_mii();
+    Request r;
+    u8 last[16] = {0};
+    int differ = 0, female = 0, male = 0;
+    request(&r, 0);
+    call(service, &r);
+    SvcObj* db = r.c.out_objs[0];
+    for (u32 age = 0; age <= 3; age++)
+        for (u32 gender = 0; gender <= 2; gender++)
+            for (u32 race = 0; race <= 3; race++)
+                for (int n = 0; n < 40; n++) {
+                    request(&r, 6);
+                    argument32(&r, 0, age);
+                    argument32(&r, 4, gender);
+                    argument32(&r, 8, race);
+                    call(db, &r);
+                    const u8* c = r.c.out;
+                    CHECK(r.c.out_size == 0x58 && mii_valid(c));
+                    if (gender < 2) CHECK(c[0x28] == gender);
+                    female += c[0x28] == 1, male += c[0x28] == 0;
+                    u32 axis = c[0x3a] - 12u; /* the eyes' height is the face's offset plus 12 */
+                    CHECK(axis <= 3 && (axis == 0 || (c[0x28] == 1 && age != 1 && age != 2)));
+                    if (race < 3) CHECK(c[0x41] == axis + (race == 2 ? 6 : 7) + 3); /* eyebrows: CoreData's + 3 */
+                    CHECK(c[0x43] == (c[0x28] ? 3 : 4) && c[0x44] == axis + 9);     /* the nose */
+                    CHECK(c[0x3c] == c[0x32] && c[0x4a] == c[0x32]); /* eyebrows and beard the hair's color */
+                    CHECK(c[0x50] == 8 && c[0x56] == 20 && c[0x29] == 64 && c[0x2a] == 64);
+                    if (c[0x28] == 1) CHECK(c[0x4b] == 0 && c[0x4c] == 0); /* no beard nor mustache */
+                    if (memcmp(last, c, 16)) differ++;
+                    memcpy(last, c, 16);
+                }
+    CHECK(differ == 4 * 3 * 4 * 40 && female > 300 && male > 300);
+    /* an age, gender or race past All is InvalidArgument */
+    request(&r, 6);
+    argument32(&r, 0, 4);
+    CHECK(db->dispatch(db, &r.c) == RC(126, 1));
+    argument32(&r, 0, 0);
+    argument32(&r, 4, 3);
+    CHECK(db->dispatch(db, &r.c) == RC(126, 1));
+    argument32(&r, 4, 0);
+    argument32(&r, 8, 4);
+    CHECK(db->dispatch(db, &r.c) == RC(126, 1));
+    svcobj_unref(db);
+    svcobj_unref(service);
+}
+
+/* UpdateLatest (5) and GetIndex (21) of a Mii: NotFound, whatever the source, as the empty database holds none. Mario
+   Kart 8 Deluxe asks UpdateLatest for the Mii its save holds at boot; a success there gave it an empty CharInfo, which
+   it built no Mii from, and crashed */
+static void test_mii_latest(void) {
+    SvcObj* service = new_mii();
+    Request r;
+    u8 mii[0x58];
+    request(&r, 0);
+    call(service, &r);
+    SvcObj* db = r.c.out_objs[0];
+    request(&r, 7);
+    argument32(&r, 0, 0);
+    call(db, &r);
+    memcpy(mii, r.c.out, sizeof mii);
+    CHECK(mii_valid(mii));
+    for (u32 source = 0; source <= 3; source++) {
+        request(&r, 5);
+        memcpy(r.raw, mii, sizeof mii);
+        argument32(&r, 0x58, source);
+        CHECK(db->dispatch(db, &r.c) == RC(126, 4));
+        CHECK(r.c.out_size == 0);
+    }
+    request(&r, 21);
+    memcpy(r.raw, mii, sizeof mii);
+    CHECK(db->dispatch(db, &r.c) == RC(126, 4));
+    CHECK(r.c.out_size == 0);
+    svcobj_unref(db);
+    svcobj_unref(service);
+}
+
 int main(void) {
     g_mem = calloc(1, 0x10000);
     CHECK(g_mem != NULL);
@@ -864,6 +1017,8 @@ int main(void) {
     test_nfp_filter();
     test_aoc_list();
     test_aoc_content();
+    test_mii_random();
+    test_mii_latest();
     CHECK(test_objects == 0 && test_kobjs == 0);
     free(g_mem);
     printf("misc_service: %u checks passed\n", test_checks);

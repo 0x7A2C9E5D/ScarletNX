@@ -484,6 +484,17 @@ static void test_renderer(void) {
     u32 limit = 75;
     c = request(8, &limit, sizeof limit);
     CHECK(r->dispatch(r, &c) == 0 && query32(r, 9) == 75);
+    /* the voice drop parameter starts at 1 and reads back as set */
+    float drop;
+    u32 bits = query32(r, 13);
+    memcpy(&drop, &bits, sizeof drop);
+    CHECK(drop == 1.0f);
+    drop = 0.5f;
+    c = request(12, &drop, sizeof drop);
+    CHECK(r->dispatch(r, &c) == 0);
+    bits = query32(r, 13);
+    memcpy(&drop, &bits, sizeof drop);
+    CHECK(drop == 0.5f);
     /* RequestUpdate (4): the input in A, the output in B0 and the performance buffer in B1, which audren.c doesn't
        take. Its result is the command's */
     c = request(4, NULL, 0);

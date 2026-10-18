@@ -89,6 +89,8 @@ interface nn::audio::detail::IAudioRenderer {
     [9] GetRenderingTimeLimit() -> u32 percent;
     [10] RequestUpdateAuto(buffer<u8, 0x21> input, buffer<u8, 0x22> output, buffer<u8, 0x22> performance);
     @stub [11] ExecuteAudioRendererRendering();
+    [12] SetVoiceDropParameter(f32 parameter);
+    [13] GetVoiceDropParameter() -> f32 parameter;
 }
 
 interface nn::audio::detail::IAudioDevice {

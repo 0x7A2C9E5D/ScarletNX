@@ -154,7 +154,8 @@ static int addr_in(u64 a, u64 n, SnxSockAddr* out) {
     }
     return -SNX_EAFNOSUPPORT;
 }
-/* writes what fits of the address, and returns its whole size (the addrlen the guest gets back) */
+/* writes what fits of the address, and returns the length written (the addrlen the guest gets back), as a BSD stack
+   answers getsockname, getpeername, accept and recvfrom */
 static u32 addr_out(const SnxSockAddr* a, u64 dst, u64 cap) {
     u8 p[BSD_SOCKADDR_IN6];
     u32 n = a->family == SNX_AF_INET6 ? BSD_SOCKADDR_IN6 : BSD_SOCKADDR_IN;
@@ -168,7 +169,9 @@ static u32 addr_out(const SnxSockAddr* a, u64 dst, u64 cap) {
         memcpy(p + 24, &a->scope_id, 4);
     } else
         memcpy(p + 4, a->addr, 4);
-    if (dst) memcpy(GP(dst), p, cap < n ? cap : n);
+    if (!dst) return 0;
+    if (cap < n) n = (u32)cap;
+    memcpy(GP(dst), p, n);
     return n;
 }
 
@@ -545,9 +548,15 @@ static int nn_socket_sf_IClient_SetSockOpt(SvcObj* self, i32 fd, i32 level_in, i
     int level, name, k = sockopt_in(glevel, gname, &level, &name), r = 0;
     if (k > 0) {
         u8 v[32];
+        i64 sec;
         memset(v, 0, sizeof v);
         if (a) memcpy(v, GP(a), n < sizeof v ? n : sizeof v);
-        r = snx_socket_setsockopt(s, level, name, v, n);
+        memcpy(&sec, v, sizeof sec);
+        /* FreeBSD's sosetopt: a timeout before zero is out of range, where Linux (and the stack) take it as expired */
+        if (level == SNX_SOL_SOCKET && (name == SNX_SO_RCVTIMEO || name == SNX_SO_SNDTIMEO) && n >= 16 && sec < 0)
+            r = -SNX_EDOM;
+        else
+            r = snx_socket_setsockopt(s, level, name, v, n);
         /* the host refusing an option the console has (a buffer size out of its range, SO_DEBUG without
            privileges) isn't the game's fault: it gets what the console would answer */
         if (r == -SNX_ENOPROTOOPT || r == -SNX_EPERM || r == -SNX_EACCES) {

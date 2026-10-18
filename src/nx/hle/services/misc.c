@@ -4,10 +4,12 @@
    nfc/nfc_result.h, nfc/nfc_types.h, nfc/common/device_manager.cpp, nfc/nfc_interface.cpp, bcat/bcat_types.h,
    bcat/bcat_result.h, bcat/backend/backend.cpp, bcat/delivery_cache_file_service.cpp,
    aoc/purchase_event_manager.cpp, src/core/file_sys/common_funcs.h, mii/mii_result.h, mii/types/store_data.cpp,
-   mii/types/char_info.h, mii/types/char_info.cpp, ptm/psm.cpp, lm/lm.cpp, audio/errors.h):
+   mii/types/char_info.h, mii/types/char_info.cpp, mii/types/core_data.cpp, mii/mii.cpp, mii/mii_manager.cpp,
+   ptm/psm.cpp, lm/lm.cpp, audio/errors.h):
    SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
    SPDX-FileCopyrightText: Copyright 2018, 2019, 2020, 2022, 2023 yuzu Emulator Project (GPL-2.0-or-later)
-   and the default Miis from Eden's src/core/hle/service/mii/types/raw_data.cpp:
+   and the default Miis and the random Miis' tables (mii_random.inc) from Eden's
+   src/core/hle/service/mii/types/raw_data.cpp:
    SPDX-FileCopyrightText: Ryujinx Team and Contributors (MIT) */
 /* The smaller services: apm, lm, pctl, friend, ns, prepo, caps, ectx, psm, fatal, csrng, spl, mm, nfp, nfc, bcat,
    aoc, irs, mii, ldn, btm and audin, each as a console offline, with no NFC device or microphone, and the add-on
@@ -862,7 +864,10 @@ static int nn_irsensor_IIrSensorServer_GetIrsensorSharedMemoryHandle(SvcObj* sel
 }
 
 /* ============================================================ mii: the six default Miis */
-#define MII_INVALID_ARGUMENT RC(126, 1)
+#define MII_INVALID_ARGUMENT      RC(126, 1)
+#define MII_INVALID_ARGUMENT_SIZE RC(126, 2)
+#define MII_SOURCE_DEFAULT        2 /* nn::mii::SourceFlag::Default */
+#define MII_NOT_FOUND             RC(126, 4)
 
 /* nn::mii's DefaultMii, the fields in this order (colors in the 3DS's numbering): face type, color, wrinkle, makeup;
    hair type, color, flip; eye type, color, scale, aspect, rotate, x, y; eyebrow type, color, scale, aspect, rotate,
@@ -920,6 +925,7 @@ static int nn_mii_detail_IDatabaseService_BuildDefault(SvcObj* self, u32 index, 
     int i;
     (void)self;
     R_UNLESS(index < 6, MII_INVALID_ARGUMENT);
+    memset(c, 0, sizeof info->v); /* what is not built is nought: Get builds over the last one, not a zeroed reply */
     /* a new random create id (a version 4 UUID); never zero in its first byte, so no check of it reads it as the
        invalid all-zero id */
     do {
@@ -929,6 +935,156 @@ static int nn_mii_detail_IDatabaseService_BuildDefault(SvcObj* self, u32 index, 
     c[8] = (u8)(0x80 | (c[8] & 0x3f));
     for (i = 0; name[i]; i++) c[0x10 + 2 * i] = (u8)name[i]; /* UTF-16 */
     for (i = 0; i < MII_FIELDS; i++) c[mii_char_offset[i]] = mii_color(mii_color_kind[i], mii_defaults[index][i]);
+    R_SUCCEED();
+}
+static int nn_mii_detail_IDatabaseService_GetCount(SvcObj* self, i32 source_flag, i32* count) {
+    (void)self;
+    *count = source_flag & MII_SOURCE_DEFAULT ? 6 : 0;
+    R_SUCCEED();
+}
+/* the six default Miis in index order, each built anew as Eden gives them, into elements of size bytes: the CharInfo,
+   then for Get its source (1, Default). A buffer with no room for the next one is InvalidArgumentSize */
+static int mii_give_defaults(i32 source_flag, IpcBuf out, u32 size, i32* count) {
+    nn_mii_CharInfo info;
+    u32 i, source = 1;
+    *count = 0;
+    if (!(source_flag & MII_SOURCE_DEFAULT)) R_SUCCEED();
+    for (i = 0; i < 6; i++) {
+        if (out.size < (u64)(i + 1) * size) R_THROW(MII_INVALID_ARGUMENT_SIZE);
+        nn_mii_detail_IDatabaseService_BuildDefault(NULL, i, &info);
+        memcpy(GP(out.addr + (u64)i * size), info.v, sizeof info.v);
+        if (size > sizeof info.v) memcpy(GP(out.addr + (u64)i * size + sizeof info.v), &source, 4);
+        (*count)++;
+    }
+    R_SUCCEED();
+}
+static int nn_mii_detail_IDatabaseService_Get(SvcObj* self, i32 source_flag, IpcBuf elements, i32* count) {
+    (void)self;
+    return mii_give_defaults(source_flag, elements, 0x5c, count);
+}
+static int nn_mii_detail_IDatabaseService_Get1(SvcObj* self, i32 source_flag, IpcBuf infos, i32* count) {
+    (void)self;
+    return mii_give_defaults(source_flag, infos, 0x58, count);
+}
+/* a Mii's newest version and its place in the database, which has no Miis: NotFound, and the game keeps the Mii it has
+   (Mario Kart 8 Deluxe asks both for the Mii its save holds, and takes a successful UpdateLatest's as that Mii) */
+static int nn_mii_detail_IDatabaseService_UpdateLatest(SvcObj* self, const nn_mii_CharInfo* info, i32 source_flag,
+                                                       nn_mii_CharInfo* latest) {
+    (void)self, (void)info, (void)source_flag, (void)latest;
+    R_THROW(MII_NOT_FOUND);
+}
+static int nn_mii_detail_IDatabaseService_GetIndex(SvcObj* self, const nn_mii_CharInfo* info, i32* index) {
+    (void)self, (void)info, (void)index;
+    R_THROW(MII_NOT_FOUND);
+}
+/* ------------------------------------------------------------ BuildRandom */
+#include "nx/hle/services/mii_random.inc"
+#define MII_AGE_ALL    3 /* Young, Normal, Old, All */
+#define MII_GENDER_ALL 2 /* Male, Female, All */
+#define MII_RACE_ALL   3 /* Black, White, Asian, All */
+/* the Ver3 to Switch colors of CoreData's hair (eyebrows, beard), eyes, mouth and glasses */
+static const u8 mii_ver3_hair[8] = {0x8, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7};
+static const u8 mii_ver3_eye[6] = {0x8, 0x9, 0xa, 0xb, 0xc, 0xd};
+static const u8 mii_ver3_mouth[5] = {0x13, 0x14, 0x15, 0x16, 0x17};
+static const u8 mii_eye_rotate[62] = {3, 4, 4, 4, 3, 4, 4, 4, 3, 4, 4, 4, 4, 3, 3, 4, 4, 4, 3, 3, 4,
+                                      3, 4, 3, 3, 4, 3, 4, 4, 3, 4, 4, 4, 3, 3, 3, 4, 4, 3, 3, 3, 4,
+                                      4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 3, 4, 4, 3, 4, 4};
+static const u8 mii_eyebrow_rotate[24] = {6, 6, 5, 7, 6, 7, 6, 7, 4, 7, 6, 8, 5, 5, 6, 6, 7, 7, 6, 6, 5, 6, 7, 5};
+/* 0 to max, both included, as nn::mii's random values (MiiUtil::GetRandomValue) */
+static u32 mii_random(u32 max) {
+    u32 v;
+    if (RAND_bytes((u8*)&v, sizeof v) != 1) fatal("The host's random number generator failed");
+    return (u32)((u64)v * ((u64)max + 1) >> 32);
+}
+/* one of a table row's values. Eden draws the index from 0 to the count, both included, so one draw in count + 1
+   reads the zero past the row's values; here it is one of them */
+static u8 mii_pick(const u8* row) { return row[1 + mii_random(row[0] - 1u)]; }
+/* a random Mii of that age, gender and race (any where it says All), as Eden's CoreData::BuildRandom makes one and
+   CharInfo::SetFromStoreData lays it out */
+static int nn_mii_detail_IDatabaseService_BuildRandom(SvcObj* self, u32 age, u32 gender, u32 race,
+                                                      nn_mii_CharInfo* info) {
+    static const char name[] = "no name";
+    u8 f[MII_FIELDS], *c = info->v;
+    u32 axis_y = 0, index, r, eyebrow_y, flag;
+    int i;
+    (void)self;
+    if (age > MII_AGE_ALL || gender > MII_GENDER_ALL || race > MII_RACE_ALL) R_THROW(MII_INVALID_ARGUMENT);
+    if (gender == MII_GENDER_ALL) gender = mii_random(1);
+    if (age == MII_AGE_ALL) {
+        r = mii_random(10);
+        age = r >= 8 ? 2 : r >= 4 ? 1 : 0;
+    }
+    if (race == MII_RACE_ALL) {
+        r = mii_random(10);
+        race = r >= 8 ? 0 : r >= 4 ? 1 : 2;
+    }
+    memset(f, 0, sizeof f);
+    if (gender == 1 && age == 0) axis_y = mii_random(3);
+    index = 3 * age + 9 * gender + race;
+    f[0] = mii_pick(mii_faceline[index]);
+    f[1] = mii_pick(mii_faceline_color[3 * gender + race]);
+    f[2] = mii_pick(mii_faceline_wrinkle[index]);
+    f[3] = mii_pick(mii_faceline_makeup[index]);
+    f[4] = mii_pick(mii_hair_type[index]);
+    f[5] = mii_ver3_hair[mii_pick(mii_hair_color[3 * race + age]) & 7];
+    f[6] = (u8)mii_random(1);
+    f[7] = mii_pick(mii_eye_type[index]);
+    f[8] = mii_ver3_eye[mii_pick(mii_eye_color[race]) % 6];
+    f[9] = 4;
+    f[10] = 3;
+    f[11] = (u8)((32 - mii_eye_rotate[gender ? 4 : 2] + (gender ? 3 : 4)) - (32 - mii_eye_rotate[f[7] % 62]));
+    f[12] = 2;
+    f[13] = (u8)(axis_y + 12);
+    f[14] = mii_pick(mii_eyebrow_type[index]);
+    f[15] = f[5];
+    f[16] = 4;
+    f[17] = 3;
+    f[18] = (u8)((32 - mii_eyebrow_rotate[race == 2 ? 6 : 0] + 6) - (32 - mii_eyebrow_rotate[f[14] % 24]));
+    f[19] = 2;
+    eyebrow_y = race == 2 ? 6 : 7;
+    f[20] = (u8)(axis_y + eyebrow_y + 3); /* CharInfo's eyebrow height is the CoreData's plus 3 */
+    f[21] = mii_pick(mii_nose_type[index]);
+    f[22] = gender ? 3 : 4;
+    f[23] = (u8)(axis_y + 9);
+    f[24] = mii_pick(mii_mouth_type[index]);
+    f[25] = mii_ver3_mouth[gender ? mii_random(4) : 0];
+    f[26] = 4;
+    f[27] = 3;
+    f[28] = (u8)(axis_y + 13);
+    f[31] = f[5]; /* the beard's color is the hair's */
+    f[32] = 4;
+    if (!gender && age && mii_random(10) < 2) {
+        flag = mii_random(3); /* beard 1, mustache 2 */
+        f[30] = flag & 1 ? (u8)(1 + mii_random(4)) : 0;
+        f[29] = flag & 2 ? (u8)(1 + mii_random(4)) : 0;
+        f[33] = 10;
+    } else
+        f[33] = (u8)(axis_y + 10);
+    r = mii_random(100);
+    for (i = 0; r < mii_glass_type[age][1 + i];)
+        if (++i >= mii_glass_type[age][0]) {
+            i = 0;
+            break;
+        }
+    f[34] = (u8)i;
+    f[35] = 8; /* the Ver3 glasses color 0 */
+    f[36] = 4;
+    f[37] = (u8)(axis_y + 10);
+    f[39] = 4;
+    f[40] = 2;
+    f[41] = 20;
+    f[42] = 64;
+    f[43] = 64;
+    f[44] = (u8)gender;
+    f[45] = (u8)mii_random(11);
+    memset(c, 0, sizeof info->v);
+    do {
+        if (RAND_bytes(c, 16) != 1) fatal("The host's random number generator failed");
+    } while (!c[0]);
+    c[6] = (u8)(0x40 | (c[6] & 0x0f));
+    c[8] = (u8)(0x80 | (c[8] & 0x3f));
+    for (i = 0; name[i]; i++) c[0x10 + 2 * i] = (u8)name[i];
+    for (i = 0; i < MII_FIELDS; i++) c[mii_char_offset[i]] = f[i];
     R_SUCCEED();
 }
 static int nn_mii_detail_IDatabaseService_SetInterfaceVersion(SvcObj* self, u32 version) {

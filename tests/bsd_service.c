@@ -149,6 +149,10 @@ int main(void) {
     u16 port;
     memcpy(&port, name + 2, 2);
     CHECK(name[0] == 16 && name[1] == 2 && port && name[4] == 127);
+    memset(GP(OUT0), 0xEE, 16);
+    request(16, (u32)l, 0, 0); /* GetSockName into 8 bytes: the address cut, and the length cut */
+    out(OUT0, 8);
+    CHECK(call(&e) == 0 && word(2) == 8 && name[4] == 127 && name[8] == 0xEE);
 
     request(2, 2, 1 | 0x20000000, 0); /* a SOCK_NONBLOCK client */
     i32 c = call(&e);
@@ -230,6 +234,17 @@ int main(void) {
     request(8, (u32)s, 0, 0); /* a blocking Recv gives up after it */
     out(OUT0, BUFSIZE);
     CHECK(call(&e) == -1 && e == SNX_EAGAIN);
+    u64 range[2] = {0, 1000000}; /* a tv_usec of a second, then a tv_sec before zero: EDOM, as a BSD stack answers */
+    memcpy(GP(IN0), range, 16);
+    request(21, (u32)s, 0xFFFF, 0x1006);
+    in(IN0, 16);
+    CHECK(call(&e) == -1 && e == SNX_EDOM);
+    range[0] = (u64)-1;
+    range[1] = 0;
+    memcpy(GP(IN0), range, 16);
+    request(21, (u32)s, 0xFFFF, 0x1005); /* SO_SNDTIMEO */
+    in(IN0, 16);
+    CHECK(call(&e) == -1 && e == SNX_EDOM);
 
     /* the AutoSelect buffers through the pointer buffer, which the SDK picks for small ones: Send's message in X,
        Recv's in C, GetSockName's address in C, each beside an empty mapped descriptor */
