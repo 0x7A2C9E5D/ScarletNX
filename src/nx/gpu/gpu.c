@@ -624,7 +624,10 @@ static void job_end(const GpuItem* j, GpuChannel* ch) {
     u32 i, v;
     r3d_const_flush(ch);
     r3d_pending_flush();
-    gpu_signal_point();
+    /* without a renderer that queues the increments, the work's results land before the game can see its fence. A
+       renderer's queue lands them itself before each increment (release.c), so landing every pending result here
+       was a full GPU wait at the end of each submission, about 2 ms a frame in TotK */
+    if (!g_renderer->stream_incr) gpu_signal_point();
     dma_snap_finish(j->chan, j->id);
     for (i = 0; i < j->incs; i++) stream_incr(j->chan);
     if (g_renderer->stream_end) g_renderer->stream_end();
