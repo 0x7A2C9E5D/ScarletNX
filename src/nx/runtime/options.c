@@ -26,7 +26,7 @@ int g_opt_fullscreen, g_opt_docked = 1, g_opt_lang = 1, g_opt_fps = SNX_FPS_GAME
 int g_opt_prof, g_opt_auto_stub_ipc = 1, g_opt_network, g_opt_vsync = 1, g_opt_aniso;
 float g_opt_resf = 1;
 int g_opt_user = 1;
-int g_opt_jit_threads;
+int g_opt_jit_threads, g_opt_async_pipes = 0;
 
 /* ---- the runtime's own settings ---- */
 
@@ -130,6 +130,10 @@ static const IniOpt g_graphics[] = {
      INI_INT, 0, &g_opt_vsync, 0, 1, NULL, "VSync", "Off|On", 0, 0},
     {"anisotropy", "0", "0 = textures filtered as the game asks, 2 to 16 = sharper surfaces seen at an angle", INI_INT,
      INI_STARTUP, &g_opt_aniso, 0, 16, NULL, "Anisotropic filtering", "Game's|#x", 0, 0},
+    {"async_pipelines", "0",
+     "1 = a draw whose shaders the GPU driver is still compiling is skipped until they are ready (the thing shows a\n"
+     "moment late); 0 = the game waits for them, and stutters the first time it shows something new",
+     INI_INT, 0, &g_opt_async_pipes, 0, 1, NULL, "Asynchronous shaders", "Off|On", 0, 0},
     END_ROW};
 static const IniOpt g_performance[] = {
     {"fps_limit", "game",

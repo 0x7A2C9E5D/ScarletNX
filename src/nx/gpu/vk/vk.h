@@ -567,7 +567,11 @@ typedef struct {
     u32 feedback; /* VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT, without the dynamic state for it */
     u32 arrays;   /* the sets with texture arrays: its layout, vk_playout(arrays) */
 } PipeKey;
+/* the pipeline for k, made on a worker thread when new: NULL while it is still being made (the draw is skipped), and
+   always once ready. vk_pipeline_get_now waits for it, for what can't be skipped (clears) */
 VkPipeline vk_pipeline_get(const PipeKey* k);
+VkPipeline vk_pipeline_get_now(const PipeKey* k);
+u64 vk_pipelines_skipped(void); /* draws skipped so far for a pipeline still being made */
 VkPipelineCache vk_pipeline_cache(void); /* for pipelines made elsewhere (compute) */
 void vk_pipeline_save(void);
 VkShaderModule vk_module_spv(const u32* words, size_t count);

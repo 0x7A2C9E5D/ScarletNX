@@ -45,6 +45,7 @@ extern int g_opt_airplane;   /* airplane_mode: 1 = the console in airplane mode,
 extern char g_opt_room[256]; /* room: the Eden room's host[:port], empty for none */
 extern int g_opt_user;       /* user: the console's user the game plays as, 1 to 8 (hle/services/users.c) */
 extern int g_opt_jit_threads; /* jit_threads: the runtime JIT's compile threads, 0 by the CPUs. Startup only */
+extern int g_opt_async_pipes; /* async_pipelines: 1 = draws skip pipelines still compiling (gpu/vk/pipeline.c) */
 extern float g_opt_resf;     /* resolution: the scale of render targets */
 extern int g_opt_vsync;      /* vsync: 1 = presents wait for the display's refresh (FIFO) */
 extern int g_opt_aniso;      /* anisotropy: 0 = the game's, else at least that much for mipmapped 2D textures */

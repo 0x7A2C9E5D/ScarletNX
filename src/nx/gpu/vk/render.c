@@ -289,7 +289,7 @@ static int clear_masked(u32 slot, u32 mask, const float* cc, VkRect2D rect, u32 
         k.depth = g_rp.zt->f.vk;
         k.stencil = g_rp.zt->f.stencil ? g_rp.zt->f.vk : VK_FORMAT_UNDEFINED;
     }
-    VkPipeline p = vk_pipeline_get(&k);
+    VkPipeline p = vk_pipeline_get_now(&k); /* a clear is never skipped */
     if (!p) return 0;
     VkCommandBuffer cb = vk_cmd();
     rec_CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);

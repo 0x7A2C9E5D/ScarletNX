@@ -513,16 +513,28 @@ static VkShaderModule null_fs(void) {
 }
 
 /* ------------------------------------------------------------ pipelines */
+/* With async_pipelines=1 a pipeline the cache doesn't have is made on a worker thread: the driver's compile of a big
+   shader takes up to seconds, which stalled the GPU thread whenever Tears of the Kingdom showed something new (1.5 s
+   for two pipelines once). A draw waits a little for its new pipeline, and is skipped until it is ready past that, as
+   Eden's asynchronous shaders do. It is off by default, as Eden's is: a skipped draw is missing from its frame, which
+   a test that draws once and reads the result back sees as wrong (edenprobe failed 190 cases with it on). Off, a new
+   pipeline is made on the GPU thread, and the shader file's pipelines are still made on the workers at startup
+   (pf_merge). What a worker needs that is made lazily, the layout and the empty fragment shader, is made on the GPU
+   thread first */
 typedef struct Pipe {
     PipeKey k;
     u64 h;
-    VkPipeline p;
-    struct Pipe* next;
+    VkPipeline p;      /* once ready */
+    int ready;         /* set by the worker after p, with release order */
+    VkPipelineLayout layout;
+    VkShaderModule fs; /* k.fs, or the empty fragment shader */
+    struct Pipe *next, *job;
 } Pipe;
 #define PIPEH 4096
 static Pipe* g_pipeh[PIPEH];
 
-static VkPipeline pipe_create(const PipeKey* k) {
+static VkPipeline pipe_create(const Pipe* e) {
+    const PipeKey* k = &e->k;
     VkPipelineShaderStageCreateInfo st[5];
     VkShaderModule modules[5];
     static const VkShaderStageFlagBits bits[5] = {VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,
@@ -534,7 +546,7 @@ static VkPipeline pipe_create(const PipeKey* k) {
     modules[1] = k->tcs;
     modules[2] = k->tes;
     modules[3] = k->gs;
-    modules[4] = k->fs ? k->fs : null_fs();
+    modules[4] = e->fs;
     for (s = 0; s < 5; s++) {
         if (!modules[s]) continue;
         memset(&st[nst], 0, sizeof st[nst]);
@@ -672,26 +684,110 @@ static VkPipeline pipe_create(const PipeKey* k) {
                                        .pDepthStencilState = &ds,
                                        .pColorBlendState = &cb,
                                        .pDynamicState = &dy,
-                                       .layout = vk_playout(k->arrays)};
+                                       .layout = e->layout};
     VkPipeline p = VK_NULL_HANDLE;
     VK_OK(vkCreateGraphicsPipelines(g_vk.dev, g_pcache, 1, &gi, NULL, &p));
     return p;
 }
 
-VkPipeline vk_pipeline_get(const PipeKey* k) {
+/* the workers' queue, and the wait for one pipeline to be ready */
+static PMutex g_pj_lock = PMUTEX_INIT;
+static PCond g_pj_work, g_pj_done;
+static Pipe *g_pj_head, *g_pj_tail;
+static int g_pj_started, g_pj_threads;
+static void pipe_worker(void* arg) {
+    (void)arg;
+    for (;;) {
+        Pipe* e;
+        VkPipeline p;
+        pm_lock(&g_pj_lock);
+        while (!g_pj_head) pc_wait(&g_pj_work, &g_pj_lock, -1);
+        e = g_pj_head;
+        g_pj_head = e->job;
+        if (!g_pj_head) g_pj_tail = NULL;
+        pm_unlock(&g_pj_lock);
+        p = pipe_create(e);
+        __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);
+        pm_lock(&g_pj_lock);
+        e->p = p;
+        __atomic_store_n(&e->ready, 1, __ATOMIC_RELEASE);
+        pc_broadcast(&g_pj_done);
+        pm_unlock(&g_pj_lock);
+    }
+}
+/* e's pipeline once ready, waiting at most ns for it (a negative ns: until it is) */
+static VkPipeline pipe_wait(Pipe* e, i64 ns) {
+    u64 until = ns < 0 ? 0 : plat_ns() + (u64)ns;
+    pm_lock(&g_pj_lock);
+    while (!e->ready) {
+        u64 now = plat_ns();
+        if (ns >= 0 && now >= until) break;
+        pc_wait(&g_pj_done, &g_pj_lock, ns < 0 ? -1 : (i64)(until - now));
+    }
+    pm_unlock(&g_pj_lock);
+    return __atomic_load_n(&e->ready, __ATOMIC_ACQUIRE) ? e->p : VK_NULL_HANDLE;
+}
+static u64 g_pipes_skipped;
+/* wait: how long a draw waits for a pipeline that is new (a negative one: until it is ready). One already being made
+   is waited for only that long too when wait is negative, else not at all */
+static VkPipeline pipeline_get(const PipeKey* k, i64 wait) {
     u64 h = vk_hash(k, sizeof *k);
     u32 b = (u32)(h ^ (h >> 32)) & (PIPEH - 1);
+    VkPipeline got;
     for (Pipe* p = g_pipeh[b]; p; p = p->next)
-        if (p->h == h && !memcmp(&p->k, k, sizeof *k)) return p->p;
+        if (p->h == h && !memcmp(&p->k, k, sizeof *k)) {
+            if (__atomic_load_n(&p->ready, __ATOMIC_ACQUIRE)) return p->p;
+            got = pipe_wait(p, wait < 0 ? -1 : 0);
+            if (!got) g_pipes_skipped++;
+            return got;
+        }
     Pipe* p = calloc(1, sizeof *p);
+    if (!p) return VK_NULL_HANDLE;
     p->k = *k;
     p->h = h;
-    p->p = pipe_create(k);
-    __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);
+    p->layout = vk_playout(k->arrays);
+    p->fs = k->fs ? k->fs : null_fs();
     p->next = g_pipeh[b];
     g_pipeh[b] = p;
-    return p->p;
+    if (!g_opt_async_pipes) {
+        p->p = pipe_create(p);
+        __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);
+        __atomic_store_n(&p->ready, 1, __ATOMIC_RELEASE);
+        return p->p;
+    }
+    pm_lock(&g_pj_lock);
+    if (!g_pj_started) { /* two: the driver's compile is the CPU's work, which the game's threads need too */
+        g_pj_started = 1;
+        pc_init(&g_pj_work);
+        pc_init(&g_pj_done);
+        for (int i = 0; i < 2; i++)
+            if (!plat_thread(pipe_worker, NULL, (size_t)1 << 20)) g_pj_threads++;
+    }
+    if (!g_pj_threads) { /* no worker: made here */
+        pm_unlock(&g_pj_lock);
+        p->p = pipe_create(p);
+        __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);
+        __atomic_store_n(&p->ready, 1, __ATOMIC_RELEASE);
+        return p->p;
+    }
+    if (g_pj_tail)
+        g_pj_tail->job = p;
+    else
+        g_pj_head = p;
+    g_pj_tail = p;
+    pc_signal(&g_pj_work);
+    pm_unlock(&g_pj_lock);
+    got = pipe_wait(p, wait);
+    if (!got) {
+        g_pipes_skipped++;
+        LOG_LIMIT(8, "vulkan: a draw's pipeline is still being made: the draw is skipped until it is ready\n");
+    }
+    return got;
 }
+/* a new pipeline is waited for up to 3 ms: one the driver finds in its cache takes less */
+VkPipeline vk_pipeline_get(const PipeKey* k) { return pipeline_get(k, 3000000); }
+VkPipeline vk_pipeline_get_now(const PipeKey* k) { return pipeline_get(k, -1); }
+u64 vk_pipelines_skipped(void) { return g_pipes_skipped; }
 
 VkPipelineCache vk_pipeline_cache(void) {
     __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);
