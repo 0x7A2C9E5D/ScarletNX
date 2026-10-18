@@ -690,24 +690,26 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         for (i = 0; i < p->si.ntex && i < SH_MAXTEX; i++) {
             ShTex* st = &p->si.tex[i];
             u32 h = 0, h2 = 0, tic[8];
-            VkFmt f;
+            int num;
             if (st->shadow || st->flags) continue; /* raw and multisample textures are declared on their own */
             if (!cs_cb_read(st->bindless ? (st->bl_cbuf & 7) : tcb_key, st->cbuf_off * 4, &h)) continue;
             if (st->bindless && st->bl2 && cs_cb_read(st->bl2_cbuf & 7, st->bl2_off * 4, &h2)) h |= h2;
             gmem_read(tic_key_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
-            f = vk_tic_format(tic[0], 0);
-            if (f.is_int || vk_tic_reads_stencil(tic)) ck.tex_int |= 1ull << i;
-            if (f.is_int && f.sint) ck.tex_sint |= 1ull << i;
+            /* by the header alone: textures are resolved only when bound, a color texture's surface has its header's
+               number type, and depth isn't sampled here */
+            num = vk_tex_num(tic, NULL);
+            if (num) ck.tex_int |= 1ull << i;
+            if (num == 2) ck.tex_sint |= 1ull << i;
         }
     if (!p->failed)
         for (i = 0; i < p->si.nimg && i < 8; i++) {
             u32 h = 0, tic[8];
-            if (p->si.img[i].type != 3 || p->si.img[i].kind == 1) continue;
+            if (!vk_image_keyable(&p->si, i)) continue;
             if (!cs_cb_read(p->si.img[i].bindless ? (p->si.img[i].bl_cbuf & 7) : tcb_key, p->si.img[i].cbuf_off * 4,
                             &h))
                 continue;
             gmem_read(tic_key_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
-            if (!!vk_tic_format(tic[0], 0).is_int != !!p->si.img[i].bindless) ck.image |= 1u << i;
+            if (vk_image_key(&p->si, i, tic)) ck.image |= 1u << i;
         }
     if (ck.tex_int || ck.image) {
         if (!p->keyed || (p->keyed->si.rt_int_mask >> 8) != ck.image || p->keyed->si.tex_int_mask != ck.tex_int ||
@@ -740,10 +742,7 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
         cs_cb_read(0, p->si.gbuf_cbuf_off[i], &v[0]);
         cs_cb_read(0, p->si.gbuf_cbuf_off[i] + 4, &v[1]);
         cs_cb_read(0, p->si.gbuf_cbuf_off[i] + 8, &v[2]);
-        sa[i] = ((u64)v[1] << 32) | v[0];
-        ss[i] = v[2] ? v[2] : 16;
-        if (ss[i] > (16u << 20)) ss[i] = 16u << 20;
-        ss[i] = (ss[i] + 3) & ~3u;
+        ss[i] = vk_gbuf_desc(ST_CS, p->si.gbuf_cbuf_off[i], v, &sa[i]);
         need += ss[i] + vk_stage_align();
     }
     for (int i = 0; i < 8; i++)
@@ -915,9 +914,8 @@ rebind:
     }
     VkCommandBuffer cb;
     if (gfx) {
-        /* textures from the compute engine's headers; texture handles from its texture constant buffer bank. Compute
-           shaders declare every texture as float (they aren't keyed on integer textures), and depth textures aren't
-           sampled here */
+        /* textures from the compute engine's headers; texture handles from its texture constant buffer bank. Their
+           number types are what the program was keyed on (vk_tex_num), and depth textures aren't sampled here */
         u64 tic_base = ((u64)rc[0x55D] << 32) | rc[0x55E], tsc_base = ((u64)rc[0x557] << 32) | rc[0x558];
         u32 tcb = rc[0x982] & 7;
         int fmt_used = 0;
@@ -993,15 +991,8 @@ rebind:
             }
             gmem_read(tic_base + (h & 0xFFFFF) * 32ull, tic, sizeof tic);
             Surf* t = vk_tex_from_tic(tic);
-            u64 image_bytes = vk_surf_guest_size(t);
-            VkComponentMapping identity = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
-                                           VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
-            VkImageView view = t && vk_surf_can_writeback(t) && t->storage_capable && t->f.raw && !t->f.depth &&
-                                       (p->si.img[i].kind ? t->f.vk == VK_FORMAT_R32_UINT : !t->f.is_int) &&
-                                       t->levels == 1 && t->depth3d == 1 && p->si.img[i].type == 3 && image_bytes &&
-                                       image_bytes <= UINT32_MAX
-                                   ? vk_tex_view(t, VK_IMAGE_VIEW_TYPE_2D, 0, &identity, 0)
-                                   : VK_NULL_HANDLE;
+            u64 image_bytes;
+            VkImageView view = vk_storage_image_view(t, &p->si, i, &image_bytes);
             if (!view) {
                 LOG_LIMIT(4, "vulkan: unsupported compute storage image (header word 0 %08x, kind %d, skipped)\n",
                           tic[0], p->si.img[i].kind);
@@ -1024,9 +1015,8 @@ rebind:
                 }
                 gmem_read(t->gva, originals[i], image_bytes);
             }
-            /* atomics read the image too: the barrier makes earlier writes visible to those reads */
             vk_surf_use(vk_cmd(), t, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                        VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+                        VK_STORAGE_IMAGE_ACCESS);
             images[i] = t;
             ii[p->si.ntex + i] = (VkDescriptorImageInfo){VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL};
             w[nw++] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,

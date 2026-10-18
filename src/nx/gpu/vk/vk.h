@@ -519,6 +519,33 @@ void vk_render_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 co
 VkImageViewType vk_tex_view_type(const ShTex* st);
 VkImageView vk_tex_bind_view(Surf* t, VkImageViewType want, const u32* tic, const u32* tsc, int num);
 VkSampler vk_tex_bind_sampler(const u32* tsc, const ShTex* st, int num, const Surf* t, VkImageViewType want);
+/* Draws and compute key, read and bind their programs' resources alike, here, so that the two don't drift apart.
+   vk_tex_num: the number type num a texture is declared with (ShaderInfo.tex_int_mask and tex_sint_mask, 0 float,
+   1 unsigned, 2 signed) for its header tic, matching what vk_tex_bind_view binds. t is the surface the header resolves
+   to, which can be a depth target of another type than the header's; NULL takes the type a surface made from the
+   header has (tex_from_tic copies a target of another color format into the header's).
+   Storage image stores are translated unsigned when bindless and float when bound (spirv_translate.c's image kinds).
+   vk_image_keyable: whether slot i of an unkeyed program is one whose declaration follows its image, a 2D store.
+   Atomics need an unsigned image whatever the header says, and buffer images (bound by compute only) take a view in
+   the format the unkeyed kind needs instead (cs_buffer_image). vk_image_key: whether such a slot's header names an
+   image of the other class, so that the program is translated again with bit 8 + i of rt_int_mask set. The header
+   has the class of the surface vk_storage_image_view checks (tex_from_tic keeps it).
+   vk_storage_image_view: the view storage image slot i of the keyed program si binds t through, or VK_NULL_HANDLE when
+   it can't: one 2D level that lands back in guest memory as it is, R32_UINT for unsigned stores and atomics (which
+   declare that format) and a float format for float stores (which declare none). *bytes is set to the guest bytes t
+   covers. A draw also refuses its own attachments, which a dispatch, outside any rendering pass, can write.
+   vk_gbuf_desc: a storage buffer's address (*addr) and size from its descriptor's words {address low, address high,
+   size} in constant buffer 0 at off, where gbuf_tag (spirv_translate.c) found it for stage (ST_VS, ST_FS or ST_CS).
+   No size takes 16 bytes, and sizes are capped at 16 MiB and rounded up to words. The vertex stage's 0xb0 holds a
+   bare 64-bit pointer with no size after it, 16 bytes (gbuf_tag tags it for the vertex stage alone). */
+int vk_tex_num(const u32* tic, const Surf* t);
+int vk_image_keyable(const ShaderInfo* si, int i);
+int vk_image_key(const ShaderInfo* si, int i, const u32* tic);
+VkImageView vk_storage_image_view(Surf* t, const ShaderInfo* si, int i, u64* bytes);
+u32 vk_gbuf_desc(int stage, u32 off, const u32* v, u64* addr);
+/* the access a storage image is moved to GENERAL with: image atomics read it as well as write it, and only the
+   accesses a barrier names see the writes before it */
+#define VK_STORAGE_IMAGE_ACCESS (VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT)
 extern u64 g_vk_drawn, g_vk_skipped; /* draws recorded, and draws skipped (unsupported topology, failed shader) */
 
 #endif
