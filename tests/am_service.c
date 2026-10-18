@@ -286,6 +286,19 @@ static void test_storage_read(void) {
     svcobj_unref(s);
     CHECK(test_objects == 0);
 }
+/* VR mode: on and off as the game turns it, by SetVrModeEnabled or by BeginVrModeEx and EndVrModeEx */
+static void test_vr_mode(void) {
+    u8 on = 0xee;
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled(NULL, &on) == 0 && on == 0);
+    CHECK(nn_am_service_ICommonStateGetter_BeginVrModeEx(NULL) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled(NULL, &on) == 0 && on == 1);
+    CHECK(nn_am_service_ICommonStateGetter_EndVrModeEx(NULL) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled(NULL, &on) == 0 && on == 0);
+    CHECK(nn_am_service_ICommonStateGetter_SetVrModeEnabled(NULL, 2) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled(NULL, &on) == 0 && on == 1);
+    CHECK(nn_am_service_ICommonStateGetter_SetVrModeEnabled(NULL, 0) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled(NULL, &on) == 0 && on == 0);
+}
 static void test_inline(void) {
     SvcObj* a;
     SvcObj* s;
@@ -459,6 +472,7 @@ int main(void) {
     test_user_channel();
     test_previous_program();
     test_storage_read();
+    test_vr_mode();
     test_inline();
     modern_packet = 1;
     test_inline();

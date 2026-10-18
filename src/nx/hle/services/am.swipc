@@ -49,11 +49,12 @@ interface nn::am::service::ICommonStateGetter {
     [30] GetHomeButtonReaderLockAccessor() -> object<nn::am::service::ILockAccessor> accessor;
     [31] GetReaderLockAccessorEx(u32 button_type) -> object<nn::am::service::ILockAccessor> accessor;
     [32] GetWriterLockAccessorEx(u32 button_type) -> object<nn::am::service::ILockAccessor> accessor;
-    @stub [50] IsVrModeEnabled() -> b8 enabled;
-    @stub [51] SetVrModeEnabled(b8 enabled);
+    [50] IsVrModeEnabled() -> b8 enabled;
+    [51] SetVrModeEnabled(b8 enabled);
     @stub [52] SetLcdBacklighOffEnabled(b8 enabled);
-    @stub [53] BeginVrModeEx();
-    @stub [54] EndVrModeEx();
+    # 7.0.0+, what libnx turns VR mode with from then
+    [53] BeginVrModeEx();
+    [54] EndVrModeEx();
     @stub [55] IsInControllerFirmwareUpdateSection() -> b8 in_section;
     @stub [59] SetVrPositionForDebug(i32 x, i32 y, i32 width, i32 height);
     [60] GetDefaultDisplayResolution() -> (i32 width, i32 height);

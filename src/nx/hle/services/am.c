@@ -58,6 +58,7 @@ static struct {
     KEvent* resolution_event; /* the default display resolution and HDCP state never change while running */
     SvcObj* user_channel[AM_USER_CHANNEL]; /* copies of the storages unpopped, the last one on top */
     u32 user_count;
+    u8 vr_mode; /* as the game turned it: the screen is not split for it */
     u32 msgs[AM_MESSAGES];
     u32 head, count;
     int preselected_popped; /* the preselected user launch parameter is given once */
@@ -353,6 +354,32 @@ static int nn_am_service_ILockAccessor_IsLocked(SvcObj* self, u8* is_locked) {
     *is_locked = (u8)l->locked;
     pm_unlock(&am.lock);
     R_SUCCEED();
+}
+
+static int am_set_vr_mode(u8 on) {
+    pm_lock(&am.lock);
+    am.vr_mode = on;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+static int nn_am_service_ICommonStateGetter_IsVrModeEnabled(SvcObj* self, u8* enabled) {
+    (void)self;
+    pm_lock(&am.lock);
+    *enabled = am.vr_mode;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+static int nn_am_service_ICommonStateGetter_SetVrModeEnabled(SvcObj* self, u8 enabled) {
+    (void)self;
+    return am_set_vr_mode(enabled != 0);
+}
+static int nn_am_service_ICommonStateGetter_BeginVrModeEx(SvcObj* self) {
+    (void)self;
+    return am_set_vr_mode(1);
+}
+static int nn_am_service_ICommonStateGetter_EndVrModeEx(SvcObj* self) {
+    (void)self;
+    return am_set_vr_mode(0);
 }
 
 static int nn_am_service_ICommonStateGetter_GetDefaultDisplayResolution(SvcObj* self, i32* width, i32* height) {
