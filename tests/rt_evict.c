@@ -76,12 +76,11 @@ u32 g_vk_present;
 static uintptr_t g_next_image = 0x40;
 static u8 g_readback[GUEST];
 static u32 g_readbacks;
-VkResult vmaCreateImage(VmaAllocator a, const VkImageCreateInfo* ii, const VmaAllocationCreateInfo* ai, VkImage* img,
-                        VmaAllocation* mem, VmaAllocationInfo* info) {
-    (void)a, (void)ii, (void)ai, (void)info;
+int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem) {
+    (void)ii;
     *img = (VkImage)g_next_image++;
     *mem = (VmaAllocation)(uintptr_t)1;
-    return VK_SUCCESS;
+    return 1;
 }
 static void VKAPI_CALL copy_image_to_buffer(VkCommandBuffer cb, VkImage img, VkImageLayout l, VkBuffer b, uint32_t n,
                                             const VkBufferImageCopy* r) {
