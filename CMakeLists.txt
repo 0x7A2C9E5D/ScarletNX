@@ -188,6 +188,10 @@ install(FILES "${OpenSSL_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/OpenSS
 # lib/LICENSE is the library's BSD-2-Clause. The top-level LICENSE covers the rest of LZ4 (GPL-2.0-or-later), none
 # of which is built here
 install(FILES "${lz4_SOURCE_DIR}/lib/LICENSE" DESTINATION ${licenses}/lz4)
+if(TARGET snx_enet)
+    install(FILES "${enet_SOURCE_DIR}/LICENSE" DESTINATION ${licenses}/enet)
+    install(FILES "${zstd_SOURCE_DIR}/LICENSE" DESTINATION ${licenses}/zstd)
+endif()
 if(SNX_SDL3_FROM_SOURCE)
     install(FILES "${SDL3_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/SDL3)
 endif()

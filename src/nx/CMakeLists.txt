@@ -10,7 +10,7 @@
 #   vk        the renderer                                            platform  the OS layer and a window backend
 
 add_library(snx_nx_flags INTERFACE)
-target_link_libraries(snx_nx_flags INTERFACE scarletnx-common scarletnx-net scarletnx-filesystem)
+target_link_libraries(snx_nx_flags INTERFACE scarletnx-common scarletnx-net scarletnx-ldn scarletnx-filesystem)
 # Every function and global used across files is declared once, in the header of the file that defines it, and
 # everything else is static: a declaration that disagrees with the definition is then a compile error instead of a
 # miscompile. Third-party sources keep their own warnings off.

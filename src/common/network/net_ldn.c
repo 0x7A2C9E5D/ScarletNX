@@ -9,8 +9,15 @@
    replies arrive and from which everything is sent, so the datagrams carry this console's address and the others
    can tell them from their own. On a host that refuses a bind to the broadcast address (Windows does) the unicast
    socket alone does both. One thread per console polls them, the listening socket and every session, and makes the
-   changes under the lock; the guest's calls take the same lock and wait, unlocked, on an eventfd the thread writes */
+   changes under the lock; the guest's calls take the same lock and wait, unlocked, on an eventfd the thread writes.
+
+   Through an Eden room (snx_ldn_open_room) the same calls travel as the room's ldn messages, as Eden's
+   lan_discovery.cpp sends them: a Scan to every member, answered with the host's NetworkInfo, a Connect with the
+   station's node to the host, a SyncNetwork to every station whenever the network changes, a Disconnect from a
+   station that leaves, a DestroyNetwork to each when the host closes it. The room's thread delivers them; there is
+   no thread here then */
 #include "common/network/net_ldn.h"
+#include "common/network/net_room.h"
 #include "common/network/net_internal.h"
 #include <stdlib.h>
 #include <string.h>
@@ -21,8 +28,9 @@
 #define LDN_SCAN_SETTLE_MS  100     /* after the first reply, for the others */
 
 typedef struct LdnStation {
-    SnxSocket* s;
-    int node; /* 1 to 7 while a Connect has arrived, 0 before */
+    SnxSocket* s;  /* on the LAN */
+    uint8_t ip[4]; /* in a room: the station's address there */
+    int node;      /* 1 to 7 while a Connect has arrived, 0 before */
     uint8_t rx[SNX_LDN_FRAME_MAX];
     size_t rxn;
 } LdnStation;
@@ -31,6 +39,7 @@ enum { ROLE_NONE, ROLE_HOST, ROLE_STATION };
 
 struct SnxLdn {
     SnxLock lk;
+    SnxRoom* room; /* through an Eden room, else on the LAN */
     uint8_t ip[4], mask[4], bcast[4];
     SnxSocket *ub, *uu;    /* the scan sockets: broadcast bound (may be NULL), unicast bound */
     SnxSocket* wake;       /* the thread's eventfd: written to make it look again, or stop */
@@ -48,6 +57,8 @@ struct SnxLdn {
     LdnStation st[SNX_LDN_STATIONS];
     /* the station's */
     SnxSocket* client;
+    uint8_t host_ip[4]; /* in a room */
+    SnxLdnNodeInfo me;
     uint8_t client_rx[SNX_LDN_FRAME_MAX];
     size_t client_rxn;
     int connected, reason;
@@ -253,16 +264,21 @@ static void note_changes(SnxLdn* l, const SnxLdnNetworkInfo* before, const SnxLd
 static void close_station(LdnStation* st) {
     snx_socket_unref(st->s);
     st->s = NULL;
+    memset(st->ip, 0, 4);
     st->node = 0;
     st->rxn = 0;
 }
 /* the host's network to every connected station */
 static void sync_stations(SnxLdn* l) {
-    int i;
-    for (i = 0; i < SNX_LDN_STATIONS; i++)
-        if (l->st[i].s && l->st[i].node)
-            if (send_frame_tcp(l->st[i].s, SNX_LDN_SYNC_NETWORK, &l->info, sizeof l->info))
-                snx_net_log("ldn: SyncNetwork to node %d failed", l->st[i].node);
+    int i, r;
+    for (i = 0; i < SNX_LDN_STATIONS; i++) {
+        if (!l->st[i].node) continue;
+        if (l->room)
+            r = snx_room_send_ldn(l->room, SNX_ROOM_LDN_SYNC_NETWORK, l->st[i].ip, 0, &l->info, sizeof l->info);
+        else
+            r = l->st[i].s ? send_frame_tcp(l->st[i].s, SNX_LDN_SYNC_NETWORK, &l->info, sizeof l->info) : 0;
+        if (r) snx_net_log("ldn: SyncNetwork to node %d failed (errno %d)", l->st[i].node, -r);
+    }
 }
 static void drop_client(SnxLdn* l) {
     snx_socket_unref(l->client);
@@ -271,6 +287,29 @@ static void drop_client(SnxLdn* l) {
 }
 
 /* ============================================================ what arrives */
+/* the host's network, at the station */
+static void station_sync(SnxLdn* l, const uint8_t* payload) {
+    SnxLdnNetworkInfo before = l->info;
+    memcpy(&l->info, payload, sizeof l->info);
+    note_changes(l, &before, &l->info);
+    if (!l->connected)
+        snx_net_log("ldn: joined %s's network, %u of %u nodes", l->info.nodes[0].user_name, l->info.node_count,
+                    l->info.node_count_max);
+    else if (before.node_count != l->info.node_count)
+        snx_net_log("ldn: the network has %u nodes now", l->info.node_count);
+    l->connected = 1;
+    l->reason = SNX_LDN_REASON_NONE;
+}
+/* a network a scan found (a NetworkInfo), kept once per bssid: 2 for the waiting Scan, 0 when there's no room */
+static int scan_reply(SnxLdn* l, const uint8_t* payload) {
+    int i;
+    for (i = 0; i < l->nscan; i++)
+        if (!memcmp(l->scan[i].bssid, payload + 0x20, 6)) break; /* bssid, at CommonNetworkInfo's start */
+    if (i == LDN_SCAN_RESULTS) return 0;
+    memcpy(&l->scan[i], payload, sizeof l->scan[i]);
+    if (i == l->nscan) l->nscan++;
+    return 2;
+}
 /* the frames a session's stream holds, with l locked. 1 when the network changed, 0 when nothing did, -1 when the
    other side is gone or sent what it shouldn't */
 static int frames_in(SnxLdn* l, uint8_t* rx, size_t* rxn, SnxSocket* s, int station) {
@@ -296,16 +335,7 @@ static int frames_in(SnxLdn* l, uint8_t* rx, size_t* rxn, SnxSocket* s, int stat
             *rxn -= used;
             if (station < 0) { /* I am the station: the host's network */
                 if (type == SNX_LDN_SYNC_NETWORK && n == sizeof l->info) {
-                    SnxLdnNetworkInfo before = l->info;
-                    memcpy(&l->info, payload, sizeof l->info);
-                    note_changes(l, &before, &l->info);
-                    if (!l->connected)
-                        snx_net_log("ldn: joined %s's network, %u of %u nodes", l->info.nodes[0].user_name,
-                                    l->info.node_count, l->info.node_count_max);
-                    else if (before.node_count != l->info.node_count)
-                        snx_net_log("ldn: the network has %u nodes now", l->info.node_count);
-                    l->connected = 1;
-                    l->reason = SNX_LDN_REASON_NONE;
+                    station_sync(l, payload);
                     changed = 1;
                 }
             } else if (type == SNX_LDN_CONNECT && n == sizeof(SnxLdnNodeInfo)) { /* a station's node */
@@ -345,15 +375,7 @@ static int datagram_in(SnxLdn* l, SnxSocket* s) {
         send_frame_udp(l, SNX_LDN_SCAN_RESPONSE, &l->info, sizeof l->info, &from);
         return 0;
     }
-    if (type == SNX_LDN_SCAN_RESPONSE && l->scanning && n == sizeof(SnxLdnNetworkInfo)) {
-        int i;
-        for (i = 0; i < l->nscan; i++)
-            if (!memcmp(l->scan[i].bssid, payload + 0x20, 6)) break; /* bssid, at CommonNetworkInfo's start */
-        if (i == LDN_SCAN_RESULTS) return 0;
-        memcpy(&l->scan[i], payload, sizeof l->scan[i]);
-        if (i == l->nscan) l->nscan++;
-        return 2;
-    }
+    if (type == SNX_LDN_SCAN_RESPONSE && l->scanning && n == sizeof(SnxLdnNetworkInfo)) return scan_reply(l, payload);
     return 0;
 }
 static void accept_station(SnxLdn* l) {
@@ -385,6 +407,107 @@ static void station_gone(SnxLdn* l, LdnStation* st) {
     }
     close_station(st);
     sync_stations(l);
+}
+
+/* ============================================================ through a room */
+/* the station at ip whose node data is joins, or joins again: 1 when the network changed */
+static int room_station_in(SnxLdn* l, const uint8_t ip[4], const uint8_t* data) {
+    LdnStation* st = NULL;
+    int i, j, fresh = 0;
+    for (j = 0; j < SNX_LDN_STATIONS && !st; j++)
+        if (l->st[j].node && !memcmp(l->st[j].ip, ip, 4)) st = &l->st[j];
+    if (!st) {
+        for (j = 0; j < SNX_LDN_STATIONS && l->st[j].node; j++) {}
+        for (i = 1; i < SNX_LDN_NODES && l->info.nodes[i].is_connected; i++) {}
+        if (j == SNX_LDN_STATIONS || i == SNX_LDN_NODES || l->info.node_count >= l->info.node_count_max) {
+            snx_net_log("ldn: %u.%u.%u.%u asked to join a full network", ip[0], ip[1], ip[2], ip[3]);
+            return 0;
+        }
+        st = &l->st[j];
+        memcpy(st->ip, ip, 4);
+        st->node = i;
+        l->info.node_count = (uint8_t)(l->info.node_count + 1);
+        fresh = 1;
+    }
+    i = st->node;
+    memcpy(&l->info.nodes[i], data, sizeof(SnxLdnNodeInfo));
+    l->info.nodes[i].node_id = (int8_t)i;
+    l->info.nodes[i].is_connected = 1;
+    if (fresh) {
+        l->updates[i] |= SNX_LDN_NODE_CONNECT;
+        snx_net_log("ldn: %s joined as node %d from %u.%u.%u.%u, %u of %u nodes", l->info.nodes[i].user_name, i, ip[0],
+                    ip[1], ip[2], ip[3], l->info.node_count, l->info.node_count_max);
+    }
+    sync_stations(l);
+    return 1;
+}
+/* the station's host is gone (its DestroyNetwork, or it left the room) */
+static void room_host_gone(SnxLdn* l) {
+    if (l->connected) {
+        snx_net_log("ldn: the host went away");
+        l->reason = SNX_LDN_REASON_DESTROYED_BY_USER;
+    }
+    l->connected = 0;
+    l->role = ROLE_NONE;
+}
+/* the room's thread: an ldn message, or (p NULL) the members changed or the room went away. A station that left
+   the room without its Disconnect leaves the network too, and so does a station whose host did */
+static void room_in(void* arg, const SnxRoomLdn* p) {
+    SnxLdn* l = arg;
+    int changed = 0, replies = 0, i, in;
+    snx_lock(&l->lk);
+    if (!p) {
+        in = snx_room_state(l->room) == SNX_ROOM_IN;
+        if (l->role == ROLE_HOST)
+            for (i = 0; i < SNX_LDN_STATIONS; i++)
+                if (l->st[i].node && (!in || !snx_room_has_member(l->room, l->st[i].ip))) {
+                    station_gone(l, &l->st[i]);
+                    changed = 1;
+                }
+        if (l->role == ROLE_STATION && (!in || !snx_room_has_member(l->room, l->host_ip))) {
+            room_host_gone(l);
+            changed = 1;
+        }
+    } else
+        switch (p->type) {
+            case SNX_ROOM_LDN_SCAN:
+                if (l->role == ROLE_HOST)
+                    snx_room_send_ldn(l->room, SNX_ROOM_LDN_SCAN_RESPONSE, p->local_ip, 0, &l->info, sizeof l->info);
+                break;
+            case SNX_ROOM_LDN_SCAN_RESPONSE:
+                if (l->scanning && p->size == sizeof(SnxLdnNetworkInfo)) replies = scan_reply(l, p->data);
+                break;
+            case SNX_ROOM_LDN_CONNECT:
+                if (l->role == ROLE_HOST && p->size == sizeof(SnxLdnNodeInfo))
+                    changed = room_station_in(l, p->local_ip, p->data);
+                break;
+            case SNX_ROOM_LDN_DISCONNECT:
+                if (l->role == ROLE_HOST)
+                    for (i = 0; i < SNX_LDN_STATIONS; i++)
+                        if (l->st[i].node && !memcmp(l->st[i].ip, p->local_ip, 4)) {
+                            station_gone(l, &l->st[i]);
+                            changed = 1;
+                        }
+                break;
+            case SNX_ROOM_LDN_DESTROY_NETWORK:
+                if (l->role == ROLE_STATION && !memcmp(p->local_ip, l->host_ip, 4)) {
+                    room_host_gone(l);
+                    changed = 1;
+                }
+                break;
+            case SNX_ROOM_LDN_SYNC_NETWORK:
+                if (l->role == ROLE_STATION && !memcmp(p->local_ip, l->host_ip, 4) && p->size == sizeof l->info) {
+                    station_sync(l, p->data);
+                    changed = 1;
+                }
+                break;
+            default: break;
+        }
+    snx_unlock(&l->lk);
+    if (changed)
+        notify(l);
+    else if (replies)
+        signal_event(l->changed_ev);
 }
 
 /* ============================================================ the thread */
@@ -492,9 +615,41 @@ int snx_ldn_open(SnxLdn** out, const uint8_t ip[4], const uint8_t mask[4], void 
     *out = l;
     return 0;
 }
+int snx_ldn_open_room(SnxLdn** out, SnxRoom* room, void (*changed)(void*), void* arg) {
+    static const uint8_t mask[4] = {255, 255, 255, 0}; /* the room's addresses are 192.168.x.y */
+    SnxLdn* l;
+    int i, r = snx_net_init();
+    if (r) return r;
+    l = calloc(1, sizeof *l);
+    if (!l) return -SNX_ENOMEM;
+    snx_lock_init(&l->lk);
+    l->room = room;
+    snx_room_fake_ip(room, l->ip);
+    memcpy(l->mask, mask, 4);
+    for (i = 0; i < 4; i++) l->bcast[i] = (uint8_t)(l->ip[i] | ~mask[i]);
+    l->changed = changed;
+    l->arg = arg;
+    r = snx_socket_eventfd(&l->changed_ev, 0, 0);
+    if (r) {
+        snx_lock_destroy(&l->lk);
+        free(l);
+        return r;
+    }
+    snx_socket_set_nonblocking(l->changed_ev, 1);
+    snx_room_ref(room);
+    snx_room_set_ldn(room, room_in, l);
+    *out = l;
+    return 0;
+}
 void snx_ldn_close(SnxLdn* l) {
     int i;
     if (!l) return;
+    if (l->room) { /* no more messages for l, then the goodbyes Eden's Finalize sends */
+        snx_room_set_ldn(l->room, NULL, NULL);
+        snx_ldn_destroy_network(l);
+        snx_ldn_disconnect(l);
+        snx_room_unref(l->room);
+    }
     if (l->running) {
         snx_lock(&l->lk);
         l->stop = 1;
@@ -554,8 +709,11 @@ void snx_ldn_destroy_network(SnxLdn* l) {
     int i;
     snx_lock(&l->lk);
     if (l->role == ROLE_HOST) {
-        for (i = 0; i < SNX_LDN_STATIONS; i++)
-            if (l->st[i].s) close_station(&l->st[i]);
+        for (i = 0; i < SNX_LDN_STATIONS; i++) {
+            if (l->room && l->st[i].node)
+                snx_room_send_ldn(l->room, SNX_ROOM_LDN_DESTROY_NETWORK, l->st[i].ip, 0, NULL, 0);
+            if (l->st[i].s || l->st[i].node) close_station(&l->st[i]);
+        }
         l->role = ROLE_NONE;
     }
     snx_unlock(&l->lk);
@@ -598,7 +756,10 @@ int snx_ldn_scan(SnxLdn* l, const SnxLdnScanFilter* filter, SnxLdnNetworkInfo* o
     l->scanning = 1;
     l->nscan = 0;
     drain_event(l->changed_ev);
-    send_frame_udp(l, SNX_LDN_SCAN, NULL, 0, &to);
+    if (l->room)
+        snx_room_send_ldn(l->room, SNX_ROOM_LDN_SCAN, NULL, 1, NULL, 0);
+    else
+        send_frame_udp(l, SNX_LDN_SCAN, NULL, 0, &to);
     snx_unlock(&l->lk);
     for (;;) {
         int64_t now = snx_net_now_us(), until = deadline, ms;
@@ -620,6 +781,39 @@ int snx_ldn_scan(SnxLdn* l, const SnxLdnScanFilter* filter, SnxLdnNetworkInfo* o
     return n;
 }
 
+/* the station's side through a room: the Connect to the host, then the wait for its SyncNetwork */
+static int room_connect(SnxLdn* l, const SnxLdnNodeInfo* me, const uint8_t host[4], int wait_ms) {
+    int64_t deadline;
+    int r;
+    snx_lock(&l->lk);
+    memset(&l->info, 0, sizeof l->info);
+    memset(l->updates, 0, sizeof l->updates);
+    memcpy(l->host_ip, host, 4);
+    l->me = *me;
+    l->connected = 0;
+    l->reason = SNX_LDN_REASON_NONE;
+    l->role = ROLE_STATION;
+    drain_event(l->changed_ev);
+    r = snx_room_send_ldn(l->room, SNX_ROOM_LDN_CONNECT, host, 0, me, sizeof *me);
+    if (r) l->role = ROLE_NONE;
+    snx_unlock(&l->lk);
+    if (r) return r;
+    deadline = snx_net_now_us() + (int64_t)wait_ms * 1000;
+    for (;;) {
+        int64_t now = snx_net_now_us();
+        int connected, gone;
+        snx_lock(&l->lk);
+        connected = l->connected;
+        gone = l->role != ROLE_STATION;
+        snx_unlock(&l->lk);
+        if (connected) return 0;
+        if (gone) return -SNX_ECONNRESET; /* the host destroyed the network, or left the room */
+        if (now >= deadline) break;
+        wait_event(l->changed_ev, (int)((deadline - now + 999) / 1000));
+    }
+    snx_ldn_disconnect(l); /* a host that adds the node late takes it out again */
+    return -SNX_ETIMEDOUT;
+}
 int snx_ldn_connect(SnxLdn* l, const SnxLdnNetworkInfo* info, const uint8_t user_name[SNX_LDN_USER_NAME],
                     int16_t version, int wait_ms) {
     SnxLdnNodeInfo me;
@@ -638,6 +832,7 @@ int snx_ldn_connect(SnxLdn* l, const SnxLdnNetworkInfo* info, const uint8_t user
     snx_ldn_node_init(l, &me, user_name, version);
     snx_unlock(&l->lk);
     for (i = 0; i < 4; i++) host[i] = info->nodes[0].ipv4[3 - i];
+    if (l->room) return room_connect(l, &me, host, wait_ms);
     r = snx_socket_open(&s, SNX_AF_INET, SNX_SOCK_STREAM, 0);
     if (r) return r;
     tv.sec = wait_ms / 1000;
@@ -684,6 +879,7 @@ int snx_ldn_connect(SnxLdn* l, const SnxLdnNetworkInfo* info, const uint8_t user
 void snx_ldn_disconnect(SnxLdn* l) {
     snx_lock(&l->lk);
     if (l->role == ROLE_STATION) {
+        if (l->room) snx_room_send_ldn(l->room, SNX_ROOM_LDN_DISCONNECT, l->host_ip, 0, &l->me, sizeof l->me);
         if (l->client) drop_client(l);
         l->connected = 0;
         l->reason = SNX_LDN_REASON_DISCONNECTED_BY_USER;

@@ -424,9 +424,17 @@ set_tests_properties(network_service PROPERTIES TIMEOUT 60)
 # local wireless over the LAN (common/network/net_ldn.c): the frames, and two consoles on the loopback
 add_executable(snx-test-ldn-lan ldn_lan.c)
 snx_test_target(snx-test-ldn-lan 23)
-target_link_libraries(snx-test-ldn-lan PRIVATE scarletnx-net)
+target_link_libraries(snx-test-ldn-lan PRIVATE scarletnx-ldn)
 add_test(NAME ldn_lan COMMAND snx-test-ldn-lan)
 set_tests_properties(ldn_lan PROPERTIES TIMEOUT 60)
+
+# an Eden room (common/network/net_room.c) against a room server in the test: the messages, joining, ldn's networks
+# and the game's datagram sockets through it
+add_executable(snx-test-ldn-room ldn_room.c)
+snx_test_target(snx-test-ldn-room 23)
+target_link_libraries(snx-test-ldn-room PRIVATE scarletnx-ldn snx_enet)
+add_test(NAME ldn_room COMMAND snx-test-ldn-room)
+set_tests_properties(ldn_room PROPERTIES TIMEOUT 120)
 
 # ldn:u (ldn.c): two consoles in one process, one creating a network and the other joining, with bsd.c beside for
 # the address a game socket binds meanwhile; the session id comes from OpenSSL's generator
@@ -434,7 +442,7 @@ if(TARGET OpenSSL::Crypto)
     add_executable(snx-test-ldn-service ldn_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
     snx_test_target(snx-test-ldn-service 23)
     snx_service_swipc(snx-test-ldn-service hle/services/network/bsd.swipc hle/services/network/ldn.swipc)
-    target_link_libraries(snx-test-ldn-service PRIVATE scarletnx-net OpenSSL::Crypto)
+    target_link_libraries(snx-test-ldn-service PRIVATE scarletnx-ldn OpenSSL::Crypto)
     add_test(NAME ldn_service COMMAND snx-test-ldn-service)
     set_tests_properties(ldn_service PROPERTIES TIMEOUT 60)
     # both tests take 127.0.0.1 and 127.0.0.2 on the ldn port: never at the same time
