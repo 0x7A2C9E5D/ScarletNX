@@ -66,6 +66,12 @@ typedef struct GpuChannel {
        parameters of (0xE00 up): a call runs at its batch's last word */
     u32 mme_code[0x2000];
     u32 mme_start[0x80];
+    /* a macro's native implementation is chosen by the hash of its code from its start to the end of the upload batch
+       that wrote it (mme.c): the batch each code word came in (0 never uploaded; batches count 0x45 writes), and per
+       slot 0 when not chosen since the code or the starts changed, 1 for the interpreter, else a native one's index + 2 */
+    u32 mme_batch;
+    u32 mme_code_batch[0x2000];
+    u8 mme_choice[0x80];
     u32 mme_upload, mme_start_ptr;
     u32 mme_params[0x10000];
     u32 mme_nparams;

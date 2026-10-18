@@ -90,6 +90,9 @@ void pm_unlock(PMutex* m) { (void)m; }
 void i2m_launch(GpuChannel* ch, u32* regs, int base) { (void)ch, (void)regs, (void)base; }
 void i2m_data(GpuChannel* ch, u32 v) { (void)ch, (void)v; }
 void mme_run(GpuChannel* ch, u32 idx, u32 np) { (void)ch, (void)idx, (void)np; }
+void mme_upload_ptr(GpuChannel* ch, u32 v) { (void)ch, (void)v; }
+void mme_upload(GpuChannel* ch, u32 v) { (void)ch, (void)v; }
+void mme_bind(GpuChannel* ch, u32 v) { (void)ch, (void)v; }
 void logf_(int lvl, const char* fmt, ...) { (void)lvl, (void)fmt; }
 
 /* ------------------------------------------------ the cases */

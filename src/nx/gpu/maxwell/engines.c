@@ -353,10 +353,10 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
                result at each of them cost TotK several vk_finish waits a frame */
             barrier(4);
             break;
-        case 0x45: ch->mme_upload = v; break; /* the macro code's upload address */
-        case 0x46: ch->mme_code[ch->mme_upload++ & 0x1FFF] = v; break;
+        case 0x45: mme_upload_ptr(ch, v); break; /* the macro code's upload address, beginning an upload batch */
+        case 0x46: mme_upload(ch, v); break;
         case 0x47: ch->mme_start_ptr = v; break; /* the macro start table's upload index */
-        case 0x48: ch->mme_start[ch->mme_start_ptr++ & 0x7F] = v; break;
+        case 0x48: mme_bind(ch, v); break;
         case 0x49: ch->shadow_mode = v & 3; break; /* SET_MME_SHADOW_RAM_CONTROL */
         case 0x6C: i2m_launch(ch, r, 0x60); break;
         case 0x6D: i2m_data(ch, v); break;

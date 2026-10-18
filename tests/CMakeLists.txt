@@ -1020,11 +1020,17 @@ add_test(NAME draw_texture COMMAND snx-test-draw-texture)
 if(UNIX)
     add_executable(snx-test-gpu-park gpu_park.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/gpu.c"
         "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/write_pages.c"
-        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/dma.c")
+        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme_hle.c"
+        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/dma.c")
     snx_test_target(snx-test-gpu-park 23)
         add_test(NAME gpu_park COMMAND snx-test-gpu-park)
     set_tests_properties(gpu_park PROPERTIES TIMEOUT 30) # a deadlock in the queue would otherwise hang ctest
 endif()
+
+# mme.c's native macros chosen by the hash of their code, the interpreter for unknown code, and the verify mode
+add_executable(snx-test-mme-native mme_native.c)
+snx_test_target(snx-test-mme-native 23)
+add_test(NAME mme_native COMMAND snx-test-mme-native)
 
 add_executable(snx-test-etc2 etc2_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
 snx_test_target(snx-test-etc2 23)

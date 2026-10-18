@@ -24,9 +24,14 @@ disassembly study of the command-buffer functions found how little each call wri
 
 Replacing command-buffer calls with host code therefore saves almost no guest CPU time. The hot path worth replacing
 is the MME. A native implementation of a known macro would be chosen by a hash of the macro's uploaded code (slot
-numbers are assigned by the SDK's macro upload, so a slot number alone identifies nothing), and an unknown hash would
-keep the interpreter. None exists yet. `nvn_control.c` decodes the arguments of two macros and `nvn_command_gap.c`
-classifies what methods write, both checked against packets captured in their tests.
+numbers are assigned by the SDK's macro upload, so a slot number alone identifies nothing), and an unknown hash keeps
+the interpreter. `maxwell/mme.c` hashes a macro's code from its start to the end of the upload batch that wrote it
+(NVN uploads each macro on its own), with Eden's hash, so Eden's table of macro hashes names the same code, and
+`maxwell/mme_hle.c` has native versions of the ten macros TotK runs most (its slots 7, 8, 9, 12, 16, 27, 30, 35, 37
+and 38). They send the same methods as the interpreter. `SNX_MME_VERIFY=1` runs both for every call of a known
+macro and logs where they differ, `SNX_MME_HLE=0` interprets everything, and the log names each macro's hash when it
+is first called and counts native and interpreted calls every million. `nvn_control.c` decodes the arguments of two
+macros and `nvn_command_gap.c` classifies what methods write, both checked against packets captured in their tests.
 
 ### Why semantic replay was abandoned
 
@@ -234,10 +239,15 @@ Method numbers are 3D engine (subchannel 0) word offsets, and macro calls are me
 
 | Macro | Method | Observed meaning |
 | --- | --- | --- |
-| 7 | `0xe0e` | IMMD call with the shader stage, at the start of `BindTexture` |
+| 7 | `0xe0e` | IMMD call with the shader stage, at the start of `BindTexture`: selects the stage's constant buffer (size from scratch `0xd2f + stage`, address from `0xd2a + stage`) for the handle written next |
+| 8 | `0xe10` | blend enables of the eight render targets from bits 8-15 of its argument, after a zero to `0x671` |
+| 9 | `0xe12` | the eight render targets' color masks (`0x680`-`0x687`), two 13-bit halves per argument |
 | 12 | `0xe18` | program bind, five arguments. Selector 1 writes VertexB's code offset, 5 the fragment's, and the third argument is the offset (TotK MME trace) |
 | 16 | `0xe20` | sets a constant buffer write offset in words: `0x154` before a storage descriptor upload of three `0x8e4` words landed at bank 0 + `0x550`. In TotK it began at word `0xfe` of the uploaded MME program |
 | 25 | `0xe32` | `DrawArrays` (mode, first, count) |
+| 27, 37 | `0xe36`, `0xe4a` | instanced draw: topology, vertex count, instance count (masked by scratch `0xd1b`), first vertex, base instance. 37 also writes the base instance into the bound constant buffer at `0x644` |
+| 30 | `0xe3c` | instanced indexed draw, TotK's busiest macro: topology, index count, instance count (masked by `0xd1b`), first index, base vertex, base instance |
+| 35 | `0xe46` | writes scratch `0xd38`-`0xd39`, then `0x0d8`-`0x0d9`, from two arguments and scratch `0xd3a` |
 | 28 | `0xe38` | `DrawElements` (mode, index address high and low, index type, count) |
 | 38 | `0xe4c` | the 12-word indexed draw in TotK secondary lists: IMMD `0xe20` (value `0x190`, the base vertex word), index type, index address, then six arguments. Packet word 10 (the fifth argument) is the base vertex |
 
