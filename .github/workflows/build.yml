@@ -346,7 +346,7 @@ jobs:
             patch
             perl
             patchutils
-            glslang
+            mingw-w64-clang-x86_64-glslang
             mingw-w64-clang-x86_64-clang
             mingw-w64-clang-x86_64-llvm
             mingw-w64-clang-x86_64-lld
