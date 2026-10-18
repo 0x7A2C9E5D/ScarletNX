@@ -8,10 +8,9 @@
 
 #include "hle/services/sm.swipc.inc"
 
-#define SM_ALREADY_REGISTERED   RC(21, 4)
 #define SM_INVALID_SERVICE_NAME RC(21, 6)
 #define SM_NOT_REGISTERED       RC(21, 7)
-#define SM_NOT_IMPLEMENTED      0x4201 /* the kernel's NotImplemented */
+#define SM_NOT_ALLOWED          RC(21, 8)
 #define SM_OUT_OF_HANDLES       0xD201 /* the kernel's OutOfHandles */
 
 /* a name as sm reads it: 1 to 8 characters, NUL-padded, with nothing after the first NUL. Returns the length, or 0
@@ -40,7 +39,7 @@ static int nn_sm_detail_IUserInterface_GetServiceHandle(SvcObj* self, const nn_s
     char s[9];
     SvcObj* o;
     (void)self;
-    if (!sm_name(name, s)) return SM_INVALID_SERVICE_NAME;
+    R_UNLESS(sm_name(name, s), SM_INVALID_SERVICE_NAME);
     o = svc_open(s);
     if (!o) {
         WARN("sm: %s is not implemented, its commands answer without doing anything\n", s);
@@ -51,27 +50,26 @@ static int nn_sm_detail_IUserInterface_GetServiceHandle(SvcObj* self, const nn_s
     return *session ? 0 : SM_OUT_OF_HANDLES;
 }
 
-/* the runtime has no server ports for the game to accept sessions on, so a service of the game's own can't be
-   served: the name is refused if it is taken, and otherwise the request fails */
+/* an application's access control lets it host no service, and sm checks it before it looks the name up, so a game
+   registering a service of its own is refused whatever the name (the runtime has no server ports to give it anyway) */
 static int nn_sm_detail_IUserInterface_RegisterService(SvcObj* self, const nn_sm_ServiceName* name, u8 is_light,
                                                        i32 max_sessions, u32* port) {
     char s[9];
     (void)self, (void)port;
-    if (!sm_name(name, s)) return SM_INVALID_SERVICE_NAME;
-    if (svc_registered(s)) return SM_ALREADY_REGISTERED;
-    WARN("sm: the game registers a service of its own, %s (%d sessions%s), which isn't supported\n", s, max_sessions,
+    R_UNLESS(sm_name(name, s), SM_INVALID_SERVICE_NAME);
+    WARN("sm: the game registers a service of its own, %s (%d sessions%s): NotAllowed\n", s, max_sessions,
          is_light ? ", light" : "");
-    return SM_NOT_IMPLEMENTED;
+    R_THROW(SM_NOT_ALLOWED);
 }
 
-/* the runtime's own services stay: only the game's could be unregistered, and it has none */
+/* only a service's owner may unregister it, and the runtime's services belong to the system */
 static int nn_sm_detail_IUserInterface_UnregisterService(SvcObj* self, const nn_sm_ServiceName* name) {
     char s[9];
     (void)self;
-    if (!sm_name(name, s)) return SM_INVALID_SERVICE_NAME;
-    if (!svc_registered(s)) return SM_NOT_REGISTERED;
-    WARN("sm: the game unregisters %s, which the runtime serves: it stays\n", s);
-    return 0;
+    R_UNLESS(sm_name(name, s), SM_INVALID_SERVICE_NAME);
+    R_UNLESS(svc_registered(s), SM_NOT_REGISTERED);
+    WARN("sm: the game unregisters %s, which the runtime serves: NotAllowed\n", s);
+    R_THROW(SM_NOT_ALLOWED);
 }
 
 SvcObj* new_sm(void) { return nn_sm_detail_IUserInterface_new(0); }

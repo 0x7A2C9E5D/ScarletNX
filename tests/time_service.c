@@ -181,6 +181,16 @@ int main(void) {
     CHECK(nn_timesrv_detail_service_IStaticService_CalculateMonotonicSystemClockBaseTimePoint(NULL, &ctx, &t) == 0);
     CHECK(t == ctx.offset + (1000000000000ll + (i64)test_ns) / 1000000000ll - (i64)(test_ns / 1000000000ull));
 
+    /* what the 12.1.0 firmware set:sys reports has: its time zone data's version, its initial year */
+    {
+        nn_time_TimeZoneRuleVersion version;
+        i32 year;
+        CHECK(nn_timesrv_detail_service_ITimeZoneService_GetTimeZoneRuleVersion(NULL, &version) == 0 &&
+              !strcmp((char*)version.v, "2021a"));
+        CHECK(nn_timesrv_detail_service_IStaticService_GetStandardUserSystemClockInitialYear(NULL, &year) == 0 &&
+              year == 2019);
+    }
+
     free(g_mem);
     printf("time_service: %u checks passed\n", checks);
     return 0;

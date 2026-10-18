@@ -1,8 +1,6 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* what the host1x files share: the IOVA mapping the video engines see, and the engines' entry points */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* Shared by host1x.c, nvdec.c and vic.c: the engines' view of memory through IOVAs, and their entry points */
 #ifndef SNX_HOST1X_INT_H
 #define SNX_HOST1X_INT_H
 #include "nx/gpu/video/host1x.h"
@@ -14,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* little-endian u32 at p + off, unaligned */
+/* The little-endian u32 or u64 at byte off of p, at any alignment */
 static inline u32 rd32(const u8* p, u32 off) {
     u32 v;
     memcpy(&v, p + off, 4);
@@ -26,16 +24,18 @@ static inline u64 rd64(const u8* p, u32 off) {
     return v;
 }
 
-/* host1x.c: the guest memory len bytes at an iova cover, NULL when one mapping doesn't (or len is 0). Any thread */
+/* host1x.c: the guest memory behind [iova, iova + len), or NULL unless one mapping holds all of it (len 0 is NULL
+   too). Callable from any thread */
 u8* iova_ptr(u64 iova, u64 len);
 
-/* nvdec.c: a decoder per NVDEC channel. nvdec_execute and nvdec_free run with the engines' lock held */
+/* nvdec.c: one decoder per NVDEC channel. The channel's worker calls nvdec_execute with the engines' lock held, and
+   the channel's close calls nvdec_free the same way */
 typedef struct NvdecCtx NvdecCtx;
 NvdecCtx* nvdec_new(void); /* NULL when out of memory */
 void nvdec_free(NvdecCtx* d);
-void nvdec_execute(NvdecCtx* d, const u32* r);
+void nvdec_execute(NvdecCtx* d, const u32* r); /* r: the channel's 0x400 method registers */
 
-/* vic.c */
+/* vic.c: one composition from the channel's method registers */
 void vic_execute(const u32* r);
 
 #endif

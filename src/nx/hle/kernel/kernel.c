@@ -120,7 +120,7 @@ int h_close(u32 h) {
     i = h_index_nl(h);
     if (i < 0) {
         pm_unlock(&g_klock);
-        return R_BADHANDLE;
+        R_THROW(R_BADHANDLE);
     }
     o = g_htab[i].obj;
     g_htab[i].obj = NULL;
@@ -128,7 +128,7 @@ int h_close(u32 h) {
     g_hfree = i;
     pm_unlock(&g_klock);
     kobj_unref(o);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ waiting and waking */

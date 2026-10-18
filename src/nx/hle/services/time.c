@@ -22,7 +22,7 @@
 #define TIME_ZONE_OUT_OF_RANGE   RC(116, 902)
 #define TIME_ZONE_NOT_FOUND      RC(116, 989)
 #define TIME_NS                  1000000000ll
-#define TIME_INITIAL_YEAR        2023 /* set:sys's time!standard_user_clock_initial_year, as Eden has it */
+#define TIME_INITIAL_YEAR        2019 /* set:sys's time!standard_user_clock_initial_year on the 12.1.0 set reports */
 #define TIME_AUTOMATIC_CORRECTION 1   /* the console's default: the clock is set from the network */
 
 /* a time zone rule as this file writes it into the game's nn::time::TimeZoneRule */
@@ -73,7 +73,7 @@ static int time_to_calendar(i64 posix, const TimeRule* r, nn_time_CalendarTime* 
     i64 t = posix + r->utc_offset, days = floor_div(t, 86400), secs = t - days * 86400, y;
     int m, d;
     civil_from_days(days, &y, &m, &d);
-    if (y < -32768 || y > 32767) return TIME_ZONE_OUT_OF_RANGE;
+    R_UNLESS(y >= -32768 && y <= 32767, TIME_ZONE_OUT_OF_RANGE);
     cal->year = (i16)y;
     cal->month = (i8)m;
     cal->day = (i8)d;
@@ -85,15 +85,15 @@ static int time_to_calendar(i64 posix, const TimeRule* r, nn_time_CalendarTime* 
     memcpy(info->time_zone_name, r->abbreviation, 8);
     info->is_dst = 0;
     info->utc_offset = r->utc_offset;
-    return 0;
+    R_SUCCEED();
 }
 static int calendar_to_time(const nn_time_CalendarTime* cal, const TimeRule* r, i64* posix) {
     if (cal->month < 1 || cal->month > 12 || cal->day < 1 || cal->day > 31 || cal->hour < 0 || cal->hour > 23 ||
         cal->minute < 0 || cal->minute > 59 || cal->second < 0 || cal->second > 59)
-        return TIME_INVALID_ARGUMENT;
+        R_THROW(TIME_INVALID_ARGUMENT);
     *posix = days_from_civil(cal->year, cal->month, cal->day) * 86400 + cal->hour * 3600 + cal->minute * 60 +
              cal->second - r->utc_offset;
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ time zones */
@@ -124,23 +124,23 @@ static int find_rule(const char* name, TimeRule* r) {
     char z[0x24];
     if (!strncmp(name, tm.location, sizeof tm.location)) {
         *r = tm.rule;
-        return 0;
+        R_SUCCEED();
     }
     if (!strcmp(name, "Etc/UTC") || !strcmp(name, "GMT") || !strcmp(name, "Etc/GMT") || !strcmp(name, "UTC")) {
         make_rule(0, r);
-        return 0;
+        R_SUCCEED();
     }
     for (i = 1; i < TIME_ZONES; i++) {
         zone_name(i, z);
         if (!strcmp(name, z)) {
             make_rule((i32)(i - 13) * 3600, r);
-            return 0;
+            R_SUCCEED();
         }
     }
-    return TIME_ZONE_NOT_FOUND;
+    R_THROW(TIME_ZONE_NOT_FOUND);
 }
 static int read_rule(IpcBuf b, TimeRule* r) {
-    if (b.size < sizeof *r) return TIME_INVALID_ARGUMENT;
+    R_UNLESS(b.size >= sizeof *r, TIME_INVALID_ARGUMENT);
     memcpy(r, GP(b.addr), sizeof *r);
     return memcmp(r->magic, "SNXZ", 4) ? TIME_INVALID_ARGUMENT : 0;
 }
@@ -153,9 +153,9 @@ static void steady_point(nn_time_SteadyClockTimePoint* p) {
 }
 /* a system clock's time from its context and the steady clock now, when they count from the same source */
 static int context_time(const nn_time_SystemClockContext* c, const nn_time_SteadyClockTimePoint* now, i64* t) {
-    if (memcmp(c->timestamp.source_id.v, now->source_id.v, 16)) return TIME_CLOCK_MISMATCH;
+    R_UNLESS(!memcmp(c->timestamp.source_id.v, now->source_id.v, 16), TIME_CLOCK_MISMATCH);
     *t = c->offset + now->value;
-    return 0;
+    R_SUCCEED();
 }
 
 /* one of the shared memory's values the SDK reads without locks: a counter, and two copies the counter's parity
@@ -231,7 +231,7 @@ static int nn_timesrv_detail_service_ISystemClock_GetSystemClockContext(SvcObj* 
                                                                         nn_time_SystemClockContext* context) {
     (void)self;
     *context = tm.context;
-    return 0;
+    R_SUCCEED();
 }
 /* the clock is never set: the event never signals */
 static int nn_timesrv_detail_service_ISystemClock_GetOperationEventReadableHandle(SvcObj* self, u32* event) {
@@ -244,25 +244,25 @@ static int nn_timesrv_detail_service_ISteadyClock_GetCurrentTimePoint(SvcObj* se
                                                                       nn_time_SteadyClockTimePoint* time_point) {
     (void)self;
     steady_point(time_point);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ ITimeZoneService */
 static int nn_timesrv_detail_service_ITimeZoneService_GetDeviceLocationName(SvcObj* self, nn_time_LocationName* name) {
     (void)self;
     memcpy(name->v, tm.location, sizeof name->v);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_ITimeZoneService_GetTotalLocationNameCount(SvcObj* self, i32* count) {
     (void)self;
     *count = TIME_ZONES;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_ITimeZoneService_LoadLocationNameList(SvcObj* self, i32 index, IpcBuf names,
                                                                           i32* count) {
     i32 n = 0;
     (void)self;
-    if (index < 0) return TIME_INVALID_ARGUMENT;
+    R_UNLESS(index >= 0, TIME_INVALID_ARGUMENT);
     while (index + n < TIME_ZONES && (u64)(n + 1) * 0x24 <= names.size) {
         char z[0x24];
         zone_name(index + n, z);
@@ -270,28 +270,26 @@ static int nn_timesrv_detail_service_ITimeZoneService_LoadLocationNameList(SvcOb
         n++;
     }
     *count = n;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_ITimeZoneService_LoadTimeZoneRule(SvcObj* self, const nn_time_LocationName* name,
                                                                       IpcBuf rule) {
     char z[0x25];
     TimeRule r;
-    int rc;
     (void)self;
     memcpy(z, name->v, 0x24);
     z[0x24] = 0;
-    rc = find_rule(z, &r);
-    if (rc) return rc;
-    if (rule.size < sizeof r) return TIME_INVALID_ARGUMENT;
+    R_TRY(find_rule(z, &r));
+    R_UNLESS(rule.size >= sizeof r, TIME_INVALID_ARGUMENT);
     memset(GP(rule.addr), 0, (size_t)rule.size);
     memcpy(GP(rule.addr), &r, sizeof r);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_ITimeZoneService_GetTimeZoneRuleVersion(SvcObj* self,
                                                                             nn_time_TimeZoneRuleVersion* version) {
     (void)self;
-    memcpy(version->v, "2024a", 6);
-    return 0;
+    memcpy(version->v, "2021a", 6); /* the time zone data of firmware 12.1.0, the one set:sys reports */
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_ITimeZoneService_GetDeviceLocationNameOperationEventReadableHandle(SvcObj* self,
                                                                                                       u32* event) {
@@ -302,9 +300,9 @@ static int nn_timesrv_detail_service_ITimeZoneService_ToCalendarTime(SvcObj* sel
                                                                     nn_time_CalendarTime* calendar,
                                                                     nn_time_sf_CalendarAdditionalInfo* info) {
     TimeRule r;
-    int rc = read_rule(rule, &r);
     (void)self;
-    return rc ? rc : time_to_calendar(time, &r, calendar, info);
+    R_TRY(read_rule(rule, &r));
+    return time_to_calendar(time, &r, calendar, info);
 }
 static int nn_timesrv_detail_service_ITimeZoneService_ToCalendarTimeWithMyRule(
     SvcObj* self, nn_time_PosixTime time, nn_time_CalendarTime* calendar, nn_time_sf_CalendarAdditionalInfo* info) {
@@ -314,19 +312,18 @@ static int nn_timesrv_detail_service_ITimeZoneService_ToCalendarTimeWithMyRule(
 /* a local time is one posix time in a zone without daylight saving */
 static int to_posix(const nn_time_CalendarTime* calendar, const TimeRule* r, IpcBuf times, i32* count) {
     i64 t;
-    int rc = calendar_to_time(calendar, r, &t);
-    if (rc) return rc;
-    if (times.size < 8) return TIME_INVALID_ARGUMENT;
+    R_TRY(calendar_to_time(calendar, r, &t));
+    R_UNLESS(times.size >= 8, TIME_INVALID_ARGUMENT);
     memcpy(GP(times.addr), &t, 8);
     *count = 1;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_ITimeZoneService_ToPosixTime(SvcObj* self, const nn_time_CalendarTime* calendar,
                                                                  IpcBuf rule, IpcBuf times, i32* count) {
     TimeRule r;
-    int rc = read_rule(rule, &r);
     (void)self;
-    return rc ? rc : to_posix(calendar, &r, times, count);
+    R_TRY(read_rule(rule, &r));
+    return to_posix(calendar, &r, times, count);
 }
 static int nn_timesrv_detail_service_ITimeZoneService_ToPosixTimeWithMyRule(SvcObj* self,
                                                                            const nn_time_CalendarTime* calendar,
@@ -341,37 +338,37 @@ static SvcObj* new_clock(void) { return nn_timesrv_detail_service_ISystemClock_n
 static int nn_timesrv_detail_service_IStaticService_GetStandardUserSystemClock(SvcObj* self, SvcObj** clock) {
     (void)self;
     *clock = new_clock();
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetStandardNetworkSystemClock(SvcObj* self, SvcObj** clock) {
     (void)self;
     *clock = new_clock();
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetStandardSteadyClock(SvcObj* self, SvcObj** clock) {
     (void)self;
     *clock = nn_timesrv_detail_service_ISteadyClock_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetTimeZoneService(SvcObj* self, SvcObj** service) {
     (void)self;
     *service = nn_timesrv_detail_service_ITimeZoneService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetStandardLocalSystemClock(SvcObj* self, SvcObj** clock) {
     (void)self;
     *clock = new_clock();
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetEphemeralNetworkSystemClock(SvcObj* self, SvcObj** clock) {
     (void)self;
     *clock = new_clock();
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetSharedMemoryNativeHandle(SvcObj* self, u32* shared_memory) {
     (void)self;
     *shared_memory = h_new(&tm.shm->o);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetStandardNetworkClockOperationEventReadableHandle(SvcObj* self,
                                                                                                        u32* event) {
@@ -387,19 +384,19 @@ static int nn_timesrv_detail_service_IStaticService_IsStandardUserSystemClockAut
                                                                                                        u8* enabled) {
     (void)self;
     *enabled = TIME_AUTOMATIC_CORRECTION;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetStandardUserSystemClockInitialYear(SvcObj* self, i32* year) {
     (void)self;
     *year = TIME_INITIAL_YEAR;
-    return 0;
+    R_SUCCEED();
 }
 /* the network clock was set when the runtime started, well within the accuracy the console asks of it (30 days) */
 static int nn_timesrv_detail_service_IStaticService_IsStandardNetworkSystemClockAccuracySufficient(SvcObj* self,
                                                                                                   u8* sufficient) {
     (void)self;
     *sufficient = 1;
-    return 0;
+    R_SUCCEED();
 }
 /* the context's time when the steady clock started counting */
 static int nn_timesrv_detail_service_IStaticService_CalculateMonotonicSystemClockBaseTimePoint(
@@ -407,9 +404,9 @@ static int nn_timesrv_detail_service_IStaticService_CalculateMonotonicSystemCloc
     nn_time_SteadyClockTimePoint now;
     (void)self;
     steady_point(&now);
-    if (memcmp(now.source_id.v, context->timestamp.source_id.v, 16)) return TIME_CLOCK_MISMATCH;
+    R_UNLESS(!memcmp(now.source_id.v, context->timestamp.source_id.v, 16), TIME_CLOCK_MISMATCH);
     *time = context->offset + now.value - (i64)(guest_ns() / TIME_NS);
-    return 0;
+    R_SUCCEED();
 }
 
 /* nn::time::sf::ClockSnapshot's fields (time.swipc) */
@@ -433,7 +430,6 @@ static int snapshot(u8 type, const nn_time_SystemClockContext* user, const nn_ti
     nn_time_CalendarTime cal;
     nn_time_sf_CalendarAdditionalInfo info;
     i64 user_time, network_time;
-    int rc;
     memset(s, 0, sizeof s);
     memcpy(s + SNAP_USER_CONTEXT, user, sizeof *user);
     memcpy(s + SNAP_NETWORK_CONTEXT, network, sizeof *network);
@@ -441,26 +437,23 @@ static int snapshot(u8 type, const nn_time_SystemClockContext* user, const nn_ti
     memcpy(s + SNAP_STEADY, &now, sizeof now);
     s[SNAP_AUTOMATIC] = TIME_AUTOMATIC_CORRECTION;
     memcpy(s + SNAP_LOCATION, tm.location, sizeof tm.location);
-    rc = context_time(user, &now, &user_time);
-    if (rc) return rc;
+    R_TRY(context_time(user, &now, &user_time));
     memcpy(s + SNAP_USER_TIME, &user_time, 8);
     memset(&cal, 0, sizeof cal);
     memset(&info, 0, sizeof info);
-    rc = time_to_calendar(user_time, &tm.rule, &cal, &info);
-    if (rc) return rc;
+    R_TRY(time_to_calendar(user_time, &tm.rule, &cal, &info));
     memcpy(s + SNAP_USER_CALENDAR, &cal, sizeof cal);
     memcpy(s + SNAP_USER_INFO, &info, sizeof info);
-    if (context_time(network, &now, &network_time)) network_time = 0;
+    if (R_FAILED(context_time(network, &now, &network_time))) network_time = 0;
     memcpy(s + SNAP_NETWORK_TIME, &network_time, 8);
     memset(&cal, 0, sizeof cal);
     memset(&info, 0, sizeof info);
-    rc = time_to_calendar(network_time, &tm.rule, &cal, &info);
-    if (rc) return rc;
+    R_TRY(time_to_calendar(network_time, &tm.rule, &cal, &info));
     memcpy(s + SNAP_NETWORK_CALENDAR, &cal, sizeof cal);
     memcpy(s + SNAP_NETWORK_INFO, &info, sizeof info);
     s[SNAP_TYPE] = type;
     memcpy(GP(out.addr), s, (size_t)(out.size < sizeof s ? out.size : sizeof s));
-    return 0;
+    R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetClockSnapshot(SvcObj* self, u8 type, IpcBuf out) {
     (void)self;
@@ -499,7 +492,7 @@ static int nn_timesrv_detail_service_IStaticService_CalculateStandardUserSystemC
         *difference = 0;
     else
         *difference = (ob - oa) * TIME_NS;
-    return 0;
+    R_SUCCEED();
 }
 /* the time between two snapshots, by the steady clock when it counted both, else by the network clock */
 static int nn_timesrv_detail_service_IStaticService_CalculateSpanBetween(SvcObj* self, IpcBuf a, IpcBuf b,
@@ -513,16 +506,16 @@ static int nn_timesrv_detail_service_IStaticService_CalculateSpanBetween(SvcObj*
         memcpy(&ta, sa + SNAP_STEADY, 8);
         memcpy(&tb, sb + SNAP_STEADY, 8);
         if ((tb > 0 && ta < tb - 0x7fffffffffffffffll) || (tb < 0 && ta > tb + 0x7fffffffffffffffll))
-            return TIME_OVERFLOW;
+            R_THROW(TIME_OVERFLOW);
     } else {
         memcpy(&ta, sa + SNAP_NETWORK_TIME, 8);
         memcpy(&tb, sb + SNAP_NETWORK_TIME, 8);
-        if (!ta || !tb) return TIME_NOT_FOUND;
+        R_UNLESS(ta && tb, TIME_NOT_FOUND);
     }
     s = tb - ta;
-    if (s > 0x7fffffffffffffffll / TIME_NS || s < -0x7fffffffffffffffll / TIME_NS) return TIME_OVERFLOW;
+    R_UNLESS(s <= 0x7fffffffffffffffll / TIME_NS && s >= -0x7fffffffffffffffll / TIME_NS, TIME_OVERFLOW);
     *span = s * TIME_NS;
-    return 0;
+    R_SUCCEED();
 }
 
 SvcObj* new_time(void) { return nn_timesrv_detail_service_IStaticService_new(0); }

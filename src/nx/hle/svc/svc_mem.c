@@ -70,10 +70,10 @@ static void set_perm(u64 a, u64 size, u32 perm) {
 /* the argument checks every mapping SVC makes first: InvalidAddress, InvalidSize, then InvalidCurrentMemory for a
    range that wraps around */
 static u32 check_range(u64 a, u64 size) {
-    if (a & 0xFFF) return R_BADADDR;
-    if (!size || (size & 0xFFF)) return R_BADSIZE;
-    if (a + size <= a) return R_BADMEMSTATE;
-    return 0;
+    R_UNLESS(!(a & 0xFFF), R_BADADDR);
+    R_UNLESS(size && !(size & 0xFFF), R_BADSIZE);
+    R_UNLESS(a + size > a, R_BADMEMSTATE);
+    R_SUCCEED();
 }
 /* guest memory the kernel writes for the game (QueryMemory's info, a thread context): mapped and writable */
 static int user_writable(u64 a, u64 size) {
@@ -131,90 +131,91 @@ u32 svc_set_heap_size(u64 size) {
         r = R_OUTOFMEM;
     else
         r = mem_result(mem_heap_set(size, heap_budget()));
-    LOG("heap: %llu MB requested%s (result %x)\n", (unsigned long long)(size >> 20), r ? ", refused" : "", r);
+    LOG("heap: %llu MB requested%s (result %x)\n", (unsigned long long)(size >> 20), R_FAILED(r) ? ", refused" : "",
+        r);
     return r;
 }
 /* svcMapPhysicalMemory and svcUnmapPhysicalMemory: page-aligned (InvalidAddress), whole pages (InvalidSize), no wrap
    (InvalidMemoryRegion), a process with a system resource (InvalidState), inside the alias region
    (InvalidMemoryRegion) */
 static u32 check_physical(u64 addr, u64 size) {
-    if (addr & 0xFFF) return R_BADADDR;
-    if (!size || (size & 0xFFF)) return R_BADSIZE;
-    if (addr + size <= addr) return R_BADREGION;
-    if (!g_sysres_size) return R_BADSTATE;
-    if (!in_region(addr, size, ALIAS_BASE, ALIAS_SIZE)) return R_BADREGION;
-    return 0;
+    R_UNLESS(!(addr & 0xFFF), R_BADADDR);
+    R_UNLESS(size && !(size & 0xFFF), R_BADSIZE);
+    R_UNLESS(addr + size > addr, R_BADREGION);
+    R_UNLESS(g_sysres_size, R_BADSTATE);
+    R_UNLESS(in_region(addr, size, ALIAS_BASE, ALIAS_SIZE), R_BADREGION);
+    R_SUCCEED();
 }
 u32 svc_map_physical(u64 addr, u64 size) {
-    u32 r = check_physical(addr, size);
-    return r ? r : mem_result(mem_map_physical(addr, size, heap_budget()));
+    R_TRY(check_physical(addr, size));
+    return mem_result(mem_map_physical(addr, size, heap_budget()));
 }
 u32 svc_unmap_physical(u64 addr, u64 size) {
-    u32 r = check_physical(addr, size);
-    return r ? r : mem_result(mem_unmap_physical(addr, size));
+    R_TRY(check_physical(addr, size));
+    return mem_result(mem_unmap_physical(addr, size));
 }
 
 /* ============================================================ permissions, attributes, MapMemory */
 /* svcSetMemoryPermission: none, read or read-write, on memory whose state may be reprotected and has no attribute */
 u32 svc_set_mem_perm(u64 addr, u64 size, u32 perm) {
-    u32 r = check_range(addr, size);
-    if (r) return r;
-    if (perm != PERM_NONE && perm != PERM_R && perm != PERM_RW) return R_BADPERM;
+    R_TRY(check_range(addr, size));
+    if (perm != PERM_NONE && perm != PERM_R && perm != PERM_RW) R_THROW(R_BADPERM);
     if (!in_region(addr, size, 0, AS_END) || !range_ok(addr, size, 0, MSF_CAN_REPROTECT, ANY, ~0u, 0))
-        return R_BADMEMSTATE;
+        R_THROW(R_BADMEMSTATE);
     set_perm(addr, size, perm);
-    return 0;
+    R_SUCCEED();
 }
 /* svcSetMemoryAttribute: mask names the attributes that change (a superset of attr), only Uncached and
    PermissionLocked; the memory's state must allow it and it must be neither locked nor shared with a device */
 u32 svc_set_mem_attr(u64 addr, u64 size, u32 mask, u32 attr) {
-    u32 r = check_range(addr, size);
-    if (r) return r;
-    if ((mask | attr) != mask || (mask | attr | MA_SET_MASK) != MA_SET_MASK) return R_BADCOMBO;
+    R_TRY(check_range(addr, size));
+    R_UNLESS((mask | attr) == mask && (mask | attr | MA_SET_MASK) == MA_SET_MASK, R_BADCOMBO);
     if (!in_region(addr, size, 0, AS_END) || !range_ok(addr, size, 0, MSF_CAN_CHANGE_ATTR, ANY, ~MA_SET_MASK, 0))
-        return R_BADMEMSTATE;
+        R_THROW(R_BADMEMSTATE);
     mem_set_attr(addr, size, mask, attr);
-    return 0;
+    R_SUCCEED();
 }
 /* svcMapMemory: a view of src at dst, in the stack region (in the stack state) or, as the first firmwares had it,
-   the alias region (as normal memory). The view is a copy, src locked meanwhile (no permission, locked), and
-   svcUnmapMemory copies it back: the host reservation maps each guest page once */
+   the alias region (as normal memory), src locked meanwhile (no permission, locked). The view and src are the same
+   pages with the alias pool (mem_alias_begin); without it the view is a copy that svcUnmapMemory copies back */
 static u32 check_map_memory(u64 dst, u64 src, u64 size, u32* state) {
-    if ((dst | src) & 0xFFF) return R_BADADDR;
-    if (!size || (size & 0xFFF)) return R_BADSIZE;
-    if (dst + size <= dst || src + size <= src) return R_BADMEMSTATE;
-    if (!in_region(src, size, 0, AS_END)) return R_BADMEMSTATE;
+    R_UNLESS(!((dst | src) & 0xFFF), R_BADADDR);
+    R_UNLESS(size && !(size & 0xFFF), R_BADSIZE);
+    R_UNLESS(dst + size > dst && src + size > src, R_BADMEMSTATE);
+    R_UNLESS(in_region(src, size, 0, AS_END), R_BADMEMSTATE);
     if (can_contain(dst, size, MS_STACK))
         *state = MS_STACK;
     else if (ALIAS_SIZE && in_region(dst, size, ALIAS_BASE, ALIAS_SIZE))
         *state = MS_NORMAL;
     else
-        return R_BADREGION;
-    return 0;
+        R_THROW(R_BADREGION);
+    R_SUCCEED();
 }
 u32 svc_map_memory(u64 dst, u64 src, u64 size) {
-    u32 state, r = check_map_memory(dst, src, size, &state);
-    int m;
-    if (r) return r;
-    if (!range_ok(src, size, 0, MSF_CAN_ALIAS, PERM_RW, ~0u, 0)) return R_BADMEMSTATE;
-    m = mem_map(dst, size, state, PERM_RW);
-    if (m) return m == -2 ? R_OUTOFMEM : R_BADMEMSTATE;
-    memcpy(GP(dst), GP(src), size);
+    u32 state, r;
+    R_TRY(check_map_memory(dst, src, size, &state));
+    R_UNLESS(range_ok(src, size, 0, MSF_CAN_ALIAS, PERM_RW, ~0u, 0), R_BADMEMSTATE);
+    R_TRY(mem_result(mem_alias_begin(src, size)));
+    r = mem_result(mem_alias_map(dst, src, size, state, PERM_RW));
+    if (R_FAILED(r)) {
+        mem_alias_end(src, size);
+        R_THROW(r);
+    }
     set_perm(src, size, PERM_NONE);
     mem_set_attr(src, size, MA_LOCKED, MA_LOCKED);
-    return 0;
+    R_SUCCEED();
 }
 u32 svc_unmap_memory(u64 dst, u64 src, u64 size) {
-    u32 state, r = check_map_memory(dst, src, size, &state);
-    if (r) return r;
+    u32 state;
+    R_TRY(check_map_memory(dst, src, size, &state));
     if (!range_ok(src, size, 0, MSF_CAN_ALIAS, PERM_NONE, ~0u, MA_LOCKED) ||
         !range_ok(dst, size, state, 0, ANY, MA_LOCKED, 0))
-        return R_BADMEMSTATE;
-    memcpy(GP(src), GP(dst), size);
-    mem_unmap(dst, size);
+        R_THROW(R_BADMEMSTATE);
+    mem_alias_unmap(dst, size, src);
+    mem_alias_end(src, size);
     mem_set_attr(src, size, MA_LOCKED, 0);
     set_perm(src, size, PERM_RW);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ QueryMemory */
@@ -223,7 +224,7 @@ u32 svc_unmap_memory(u64 dst, u64 src, u64 size) {
 u32 svc_query(u64 info, u64 addr) {
     MemBlock b;
     u32 w[6];
-    if (!user_writable(info, 0x28)) return R_BADPOINTER;
+    R_UNLESS(user_writable(info, 0x28), R_BADPOINTER);
     mem_query(addr, &b);
     w[0] = b.state & 0xFF;
     w[1] = b.attr;
@@ -234,50 +235,74 @@ u32 svc_query(u64 info, u64 addr) {
     gw64(info, b.addr);
     gw64(info + 8, b.size);
     memcpy(GP(info + 16), w, sizeof w);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ shared memory */
-/* A service's shared memory lives in host memory of its own until the game maps it; a mapping is a copy, and while
-   it lasts kshmem_ptr gives the service the guest's pages, so both sides see the same bytes. Unmapping copies the
-   guest's pages back */
+/* A service's shared memory is pages of the alias pool from its creation: the service writes them through host, and
+   each guest mapping maps the same pages, as many at once as the game makes, each holding a reference to the object
+   until it is unmapped (as the console's process does). Without the pool (Windows) host is memory of its own until
+   the game maps it, once: the mapping is a copy, kshmem_ptr gives the service the guest's pages while it lasts, and
+   unmapping copies them back */
+static u64 shm_whole(const KShmem* s) { return (s->size + 0xFFF) & ~0xFFFull; }
 static void shm_destroy(KObj* o) {
     KShmem* s = (KShmem*)o;
-    free(s->host);
+    if (s->pool)
+        mem_pool_host_free(s->host, s->pool - 1, shm_whole(s));
+    else
+        free(s->host);
     free(o->waiters);
     free(s);
 }
 /* with no reference: the first handle takes one, or the service that keeps it */
 KShmem* kshmem_new(u64 size, const char* name) {
     KShmem* s = (KShmem*)calloc(1, sizeof *s);
-    if (!s || !(s->host = (u8*)calloc(1, (size_t)((size + 0xFFF) & ~0xFFFull))))
+    u64 off;
+    if (!s) fatal("Out of memory for the shared memory %s", name);
+    s->size = size;
+    if ((s->host = mem_pool_host(shm_whole(s), &off)) != NULL)
+        s->pool = off + 1;
+    else if (!(s->host = (u8*)calloc(1, (size_t)shm_whole(s))))
         fatal("Out of memory for the shared memory %s", name);
     s->o.type = KO_SHMEM;
     s->o.destroy = shm_destroy;
     s->o.name = name;
-    s->size = size;
     s->perm = PERM_RW;
     return s;
 }
 u8* kshmem_ptr(KShmem* s) {
-    u64 a = __atomic_load_n(&s->gaddr, __ATOMIC_ACQUIRE);
+    u64 a;
+    if (s->pool) return s->host;
+    a = __atomic_load_n(&s->gaddr, __ATOMIC_ACQUIRE);
     return a ? GP(a) : s->host;
+}
+/* a mapping of the pool's pages, and of plain shared pages past the object for a larger size; the reference it
+   holds is the one h_get_ref took */
+static u32 shm_map_pool(KShmem* s, u64 addr, u64 size, u32 perm) {
+    u64 whole = shm_whole(s);
+    int m;
+    R_TRY(mem_result(mem_map_pool(addr, s->pool - 1, whole, MS_SHARED, perm)));
+    if (size > whole && (m = mem_map(addr + whole, size - whole, MS_SHARED, perm)) != 0) {
+        mem_unmap(addr, whole);
+        R_THROW(mem_result(m));
+    }
+    R_SUCCEED();
 }
 /* svcMapSharedMemory: read or read-write within what its owner allows (InvalidNewMemoryPermission), where shared
    memory may go (InvalidMemoryRegion), on free pages. The console wants the object's own size (InvalidSize); the
    runtime's sizes are its own guesses at the services', so another size is logged and the mapping covers at least the
-   whole object. One mapping at a time (InvalidState for a second): the game maps each once. The services' side moves
-   from the host copy to the guest's pages under g_klock, where they are published */
+   whole object. Without the pool, one mapping at a time (InvalidState for a second): the game maps each once. The
+   services' side moves from the host copy to the guest's pages under g_klock, where they are published */
 u32 svc_map_shm(u32 h, u64 addr, u64 size, u32 perm) {
     u32 r = check_range(addr, size);
     KShmem* s;
     u64 none = 0, whole;
     int m;
     if (r) return r;
-    if (perm != PERM_R && perm != PERM_RW) return R_BADPERM;
+    if (perm != PERM_R && perm != PERM_RW) R_THROW(R_BADPERM);
     s = (KShmem*)h_get_ref(h, KO_SHMEM);
-    if (!s) return R_BADHANDLE;
-    whole = (s->size + 0xFFF) & ~0xFFFull;
+    R_UNLESS(s, R_BADHANDLE);
+    whole = shm_whole(s);
     if (size != whole) {
         WARN_LIMIT(4, "kernel: the game maps the shared memory %s as 0x%llx bytes, which is 0x%llx: mapping 0x%llx\n",
                    s->o.name, (unsigned long long)size, (unsigned long long)whole,
@@ -288,7 +313,10 @@ u32 svc_map_shm(u32 h, u64 addr, u64 size, u32 perm) {
         r = R_BADREGION;
     else if ((perm & ~s->perm) != 0)
         r = R_BADPERM;
-    else if (!__atomic_compare_exchange_n(&s->gsize, &none, size, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+    else if (s->pool) {
+        r = shm_map_pool(s, addr, size, perm);
+        if (R_SUCCEEDED(r)) return r; /* the mapping keeps the reference */
+    } else if (!__atomic_compare_exchange_n(&s->gsize, &none, size, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
         r = R_BADSTATE;
     else if ((m = mem_map(addr, size, MS_SHARED, perm)) != 0) {
         r = m == -2 ? R_OUTOFMEM : R_BADMEMSTATE;
@@ -302,16 +330,28 @@ u32 svc_map_shm(u32 h, u64 addr, u64 size, u32 perm) {
     kobj_unref(&s->o);
     return r;
 }
-/* svcUnmapSharedMemory: only where the object is mapped (InvalidCurrentMemory elsewhere), all of what was mapped */
+/* svcUnmapSharedMemory: only where the object is mapped (InvalidCurrentMemory elsewhere), all of what was mapped.
+   With the pool, a mapping larger than the object goes with the size the game gives (at least the object's) */
 u32 svc_unmap_shm(u32 h, u64 addr, u64 size) {
     u32 r = check_range(addr, size);
     KShmem* s;
     if (r) return r;
     s = (KShmem*)h_get_ref(h, KO_SHMEM);
-    if (!s) return R_BADHANDLE;
+    R_UNLESS(s, R_BADHANDLE);
     if (!can_contain(addr, size, MS_SHARED))
         r = R_BADREGION;
-    else if (__atomic_load_n(&s->gaddr, __ATOMIC_ACQUIRE) != addr)
+    else if (s->pool) {
+        u64 whole = shm_whole(s), n = size > whole ? size : whole;
+        /* the object's pages are checked and unmapped at once, so two threads can't both drop the mapping's
+           reference */
+        if ((n > whole && !range_ok(addr + whole, n - whole, MS_SHARED, 0, ANY, 0, 0)) ||
+            mem_unmap_pool(addr, s->pool - 1, whole, MS_SHARED))
+            r = R_BADMEMSTATE;
+        else {
+            if (n > whole) mem_unmap(addr + whole, n - whole);
+            kobj_unref(&s->o); /* the mapping's */
+        }
+    } else if (__atomic_load_n(&s->gaddr, __ATOMIC_ACQUIRE) != addr)
         r = R_BADMEMSTATE;
     else {
         pm_lock(&g_klock);
@@ -329,12 +369,11 @@ u32 svc_unmap_shm(u32 h, u64 addr, u64 size) {
 /* svcCreateTransferMemory: the source stays where it is, its permission lowered to perm and locked, until the
    object goes (tmem_destroy). A service reads it in place */
 u32 svc_tmem_new(u64 addr, u64 size, u32 perm, KTmem** out) {
-    u32 r = check_range(addr, size);
     KTmem* m;
-    if (r) return r;
-    if (perm != PERM_NONE && perm != PERM_R && perm != PERM_RW) return R_BADPERM;
+    R_TRY(check_range(addr, size));
+    if (perm != PERM_NONE && perm != PERM_R && perm != PERM_RW) R_THROW(R_BADPERM);
     if (!in_region(addr, size, 0, AS_END) || !range_ok(addr, size, 0, MSF_CAN_TRANSFER, PERM_RW, ~0u, 0))
-        return R_BADMEMSTATE;
+        R_THROW(R_BADMEMSTATE);
     m = (KTmem*)calloc(1, sizeof *m);
     if (!m) fatal("Out of memory for a transfer memory");
     m->o.type = KO_TMEM;
@@ -346,7 +385,7 @@ u32 svc_tmem_new(u64 addr, u64 size, u32 perm, KTmem** out) {
     set_perm(addr, size, perm);
     mem_set_attr(addr, size, MA_LOCKED, MA_LOCKED);
     *out = m;
-    return 0;
+    R_SUCCEED();
 }
 void tmem_destroy(KObj* o) {
     KTmem* m = (KTmem*)o;
@@ -358,30 +397,29 @@ void tmem_destroy(KObj* o) {
 
 /* ============================================================ code memory */
 /* svcCreateCodeMemory and svcControlCodeMemory, for games with a JIT: the source is locked, and the owner (read-write)
-   and slave (executable) mappings are copies of it, as MapMemory's view is. Code the game writes into the owner
-   mapping after the slave is mapped doesn't reach the slave */
+   and slave (executable) mappings are views of it, as MapMemory's is: with the alias pool all three are the same
+   pages, so code the game writes through the owner is in the slave at once. Without the pool they are copies, the
+   slave of the owner when it is mapped, and code written after the slave is mapped doesn't reach it */
 typedef struct {
     KObj o;
     u64 addr, size, owner, slave;
 } KCodeMem;
 static void codemem_destroy(KObj* o) {
     KCodeMem* c = (KCodeMem*)o;
-    if (c->owner) {
-        memcpy(GP(c->addr), GP(c->owner), c->size);
-        mem_unmap(c->owner, c->size);
-    }
-    if (c->slave) mem_unmap(c->slave, c->size);
+    if (c->owner) mem_alias_unmap(c->owner, c->size, c->addr);
+    if (c->slave) mem_alias_unmap(c->slave, c->size, 0);
+    mem_alias_end(c->addr, c->size);
     mem_set_attr(c->addr, c->size, MA_LOCKED, 0);
     set_perm(c->addr, c->size, PERM_RW);
     free(o->waiters);
     free(c);
 }
 u32 svc_codemem_new(u64 addr, u64 size, KObj** out) {
-    u32 r = check_range(addr, size);
     KCodeMem* c;
-    if (r) return r;
+    R_TRY(check_range(addr, size));
     if (!in_region(addr, size, 0, AS_END) || !range_ok(addr, size, 0, MSF_CAN_CODE_MEMORY, PERM_RW, ~0u, 0))
-        return R_BADMEMSTATE;
+        R_THROW(R_BADMEMSTATE);
+    R_TRY(mem_result(mem_alias_begin(addr, size)));
     c = (KCodeMem*)calloc(1, sizeof *c);
     if (!c) fatal("Out of memory for a code memory");
     c->o.type = KO_CODEMEM;
@@ -392,34 +430,31 @@ u32 svc_codemem_new(u64 addr, u64 size, KObj** out) {
     set_perm(addr, size, PERM_NONE);
     mem_set_attr(addr, size, MA_LOCKED, MA_LOCKED);
     *out = &c->o;
-    return 0;
+    R_SUCCEED();
 }
 /* op 0 MapOwner (read-write), 1 MapSlave (read or read-execute), 2 UnmapOwner, 3 UnmapSlave */
 u32 svc_codemem_control(KObj* o, u32 op, u64 addr, u64 size, u32 perm) {
     KCodeMem* c = (KCodeMem*)o;
     u64* at;
-    u32 r = check_range(addr, size), state;
-    int m;
-    if (r) return r;
-    if (op > 3) return R_BADENUM;
+    u32 state;
+    R_TRY(check_range(addr, size));
+    R_UNLESS(op <= 3, R_BADENUM);
     state = op & 1 ? MS_CODEOUT : MS_GENCODE;
     at = op & 1 ? &c->slave : &c->owner;
-    if (op == 0 && perm != PERM_RW) return R_BADPERM;
-    if (op == 1 && perm != PERM_R && perm != PERM_RX) return R_BADPERM;
-    if (!can_contain(addr, size, state)) return R_BADREGION;
-    if (size != c->size) return R_BADSIZE;
+    if (op == 0 && perm != PERM_RW) R_THROW(R_BADPERM);
+    if (op == 1 && perm != PERM_R && perm != PERM_RX) R_THROW(R_BADPERM);
+    R_UNLESS(can_contain(addr, size, state), R_BADREGION);
+    R_UNLESS(size == c->size, R_BADSIZE);
     if (op < 2) {
-        if (*at) return R_BADSTATE;
-        if ((m = mem_map(addr, size, state, perm)) != 0) return m == -2 ? R_OUTOFMEM : R_BADMEMSTATE;
-        memcpy(GP(addr), GP(op == 1 && c->owner ? c->owner : c->addr), size);
+        R_UNLESS(!*at, R_BADSTATE);
+        R_TRY(mem_result(mem_alias_map(addr, op == 1 && c->owner ? c->owner : c->addr, size, state, perm)));
         *at = addr;
-        return 0;
+        R_SUCCEED();
     }
-    if (*at != addr) return R_BADMEMSTATE;
-    if (op == 2) memcpy(GP(c->addr), GP(addr), size);
-    mem_unmap(addr, size);
+    R_UNLESS(*at == addr, R_BADMEMSTATE);
+    mem_alias_unmap(addr, size, op == 2 ? c->addr : 0);
     *at = 0;
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ GetInfo */
@@ -461,37 +496,37 @@ static u64 process_local_region(void) {
    the process's handle (InvalidHandle) */
 static u32 process_info(u32 id, u64* out) {
     switch (id) {
-        case 0: *out = g_core_mask; return 0;
-        case 1: *out = g_prio_mask; return 0;
-        case 2: *out = ALIAS_BASE; return 0;
-        case 3: *out = ALIAS_SIZE; return 0;
-        case 4: *out = HEAP_BASE; return 0;
-        case 5: *out = HEAP_SIZE; return 0;
-        case 6: *out = mem_total(); return 0;
-        case 7: *out = used_memory(); return 0;
-        case 12: *out = AS_BASE; return 0;
-        case 13: *out = AS_END - AS_BASE; return 0;
-        case 14: *out = STACK_BASE; return 0;
-        case 15: *out = STACK_SIZE; return 0;
-        case 16: *out = g_sysres_size; return 0;
+        case 0: *out = g_core_mask; R_SUCCEED();
+        case 1: *out = g_prio_mask; R_SUCCEED();
+        case 2: *out = ALIAS_BASE; R_SUCCEED();
+        case 3: *out = ALIAS_SIZE; R_SUCCEED();
+        case 4: *out = HEAP_BASE; R_SUCCEED();
+        case 5: *out = HEAP_SIZE; R_SUCCEED();
+        case 6: *out = mem_total(); R_SUCCEED();
+        case 7: *out = used_memory(); R_SUCCEED();
+        case 12: *out = AS_BASE; R_SUCCEED();
+        case 13: *out = AS_END - AS_BASE; R_SUCCEED();
+        case 14: *out = STACK_BASE; R_SUCCEED();
+        case 15: *out = STACK_SIZE; R_SUCCEED();
+        case 16: *out = g_sysres_size; R_SUCCEED();
         case 17: { /* no slab allocator here: the page tables the mapped memory would take, within the resource */
             u64 used = (used_memory() - g_sysres_size) / 512;
             used = (used + 0xFFFF) & ~0xFFFFull;
             *out = used < g_sysres_size ? used : g_sysres_size;
-            return 0;
+            R_SUCCEED();
         }
-        case 18: *out = g_title_id; return 0;
-        case 20: *out = process_local_region(); return 0;
-        case 21: *out = mem_total() - g_sysres_size; return 0;
-        case 22: *out = used_memory() - g_sysres_size; return 0;
-        case 23: *out = 1; return 0; /* IsApplication */
+        case 18: *out = g_title_id; R_SUCCEED();
+        case 20: *out = process_local_region(); R_SUCCEED();
+        case 21: *out = mem_total() - g_sysres_size; R_SUCCEED();
+        case 22: *out = used_memory() - g_sysres_size; R_SUCCEED();
+        case 23: *out = 1; R_SUCCEED(); /* IsApplication */
         case 24: {                   /* FreeThreadCount */
             int live = kthread_live_count();
             *out = live < THREAD_MAX ? (u64)(THREAD_MAX - live) : 0;
-            return 0;
+            R_SUCCEED();
         }
-        case 28: *out = 0; return 0; /* AliasRegionExtraSize: no extra alias region */
-        default: return R_BADENUM;
+        case 28: *out = 0; R_SUCCEED(); /* AliasRegionExtraSize: no extra alias region */
+        default: R_THROW(R_BADENUM);
     }
 }
 /* The rest of svcGetInfo; ResourceLimit (9), which makes a handle, is svc.c's */
@@ -500,43 +535,43 @@ u32 svc_get_info(u32 id0, u32 h, u64 id1, u64* out) {
         case 0: case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 12: case 13: case 14: case 15: case 16:
         case 17: case 18: case 20: case 21: case 22: case 23: case 24: case 28: {
             KObj* p;
-            if (id1) return R_BADENUM;
+            R_UNLESS(!id1, R_BADENUM);
             if (h != H_CUR_PROC) {
                 p = h_get_ref(h, KO_PROCESS);
-                if (!p) return R_BADHANDLE;
+                R_UNLESS(p, R_BADHANDLE);
                 kobj_unref(p);
             }
             return process_info(id0, out);
         }
-        case 8: *out = 0; return 0; /* DebuggerAttached */
+        case 8: *out = 0; R_SUCCEED(); /* DebuggerAttached */
         case 10:                    /* IdleTickCount: a core, or -1 for all of them */
-            if (id1 != ~0ull && id1 >= NCORES) return R_BADCOMBO;
-            if (h) return R_BADHANDLE;
+            if (id1 != ~0ull && id1 >= NCORES) R_THROW(R_BADCOMBO);
+            R_UNLESS(!h, R_BADHANDLE);
             *out = 0;
-            return 0;
+            R_SUCCEED();
         case 11: /* RandomEntropy */
-            if (h) return R_BADHANDLE;
-            if (id1 >= 4) return R_BADCOMBO;
+            R_UNLESS(!h, R_BADHANDLE);
+            R_UNLESS(id1 < 4, R_BADCOMBO);
             *out = entropy((u32)id1);
-            return 0;
+            R_SUCCEED();
         case 19: /* InitialProcessIdRange: the kernel's own processes */
-            if (h) return R_BADHANDLE;
-            if (id1 > 1) return R_BADCOMBO;
+            R_UNLESS(!h, R_BADHANDLE);
+            R_UNLESS(id1 <= 1, R_BADCOMBO);
             *out = id1 ? 0x50 : 1;
-            return 0;
+            R_SUCCEED();
         case 25:
         case 0xF0000002: { /* ThreadTickCount (0xF0000002 before 13.0.0): -1 for the thread's total, or a core's */
             KObj* t;
-            if (id1 != ~0ull && id1 >= NCORES) return R_BADCOMBO;
+            if (id1 != ~0ull && id1 >= NCORES) R_THROW(R_BADCOMBO);
             t = h_get_ref(h, KO_THREAD);
-            if (!t) return R_BADHANDLE;
+            R_UNLESS(t, R_BADHANDLE);
             kobj_unref(t);
             /* no per-thread CPU time is kept: the system tick stands in for it, the total and each core's */
             *out = guest_ticks();
-            return 0;
+            R_SUCCEED();
         }
         default:
             WARN_LIMIT(16, "svcGetInfo %x (sub-id %llx): unknown, InvalidEnumValue\n", id0, (unsigned long long)id1);
-            return R_BADENUM;
+            R_THROW(R_BADENUM);
     }
 }

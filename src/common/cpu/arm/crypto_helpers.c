@@ -6,11 +6,10 @@
    Copyright (c) 2005-2007 CodeSourcery
    Copyright (c) 2007 OpenedHand, Ltd.
    Copyright (c) 2018 Linaro
-   Copyright (C) 2013 - 2018 Linaro Ltd <ard.biesheuvel@linaro.org> */
+   Copyright (C) 2013 - 2018 Linaro Ltd <ard.biesheuvel@linaro.org>
+   The included aarch64/helpers/crypto.c carries its own notice (QEMU's crypto_helper.c). */
 #include "common/cpu/arm/simd.h"
-/* The shared reference rounds retain their original notices. No AES-NI,
-   CLMUL or host feature dispatch in this initial A32 implementation. */
-#define SNX_CRYPTO_PORTABLE
+/* The A64 crypto rounds (aarch64/helpers/crypto.c, portable C), namespaced so both runtime libraries can coexist */
 #define v_aes    snx_arm_reference_aes
 #define v_aesmc  snx_arm_reference_aesmc
 #define v_sha1   snx_arm_reference_sha1

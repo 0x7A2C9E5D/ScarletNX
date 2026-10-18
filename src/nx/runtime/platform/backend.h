@@ -1,42 +1,43 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* what a window backend (platform/backend/) provides: the window, input and presenting */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The window backend's side of the runtime (backend/sdl3.c, windowed or headless): window, input, presenting, and
+   the window half of the Vulkan renderer. */
 #ifndef SNX_BACKEND_H
 #define SNX_BACKEND_H
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/runtime/ini.h"
 
 void video_init(const char* title);
-void video_poll(void);
-extern const IniOpt g_backend_ini[]; /* the backend's settings (touch) */
-/* a key of the .ini or the command line for the backend, the on-screen controls or the unattended-run options:
-   applied, 1; none of theirs, 0 */
+void video_poll(void);     /* events and input, once per main loop pass */
+void frontend_frame(void); /* screenshots and the unattended limits, after each pass */
+
+/* the backend's .ini settings (the touch screen's mode) */
+extern const IniOpt g_backend_ini[];
+/* Offers a .ini or command line setting to the backend, the on-screen controls and the unattended options: 1 when
+   one of them took it */
 int backend_ini(const char* k, const char* v);
-/* the game's touch screen set from the in-game menu (touch's row of g_backend_ini: 0 off, 1 the fingers, 2 the mouse
-   too), and saved to the .ini */
+/* the touch screen's mode chosen in the game's menu, saved to the .ini: 0 off, 1 fingers, 2 fingers and the mouse */
 void backend_touch_set(int mode);
-void frontend_frame(void);
-/* the window's size in pixels for the Vulkan swapchain, or 0 x 0 when headless */
+
+/* The window in pixels, for the swapchain; 0 x 0 when headless */
 void backend_window_size(int* w, int* h);
-/* the part of the window the system's bars and the camera's cutout leave clear, in pixels: all of it when
-   fullscreen, where the bars are hidden */
+/* The part of the window not under system bars or a camera cutout, in pixels (the whole window when fullscreen) */
 void backend_window_safe(int* x, int* y, int* w, int* h);
-/* whether presenting can show anything now: not while Android has taken the window's surface away (the app in the
-   background), nor while the window is minimized or covered. And a count that moves each time the surface comes back
-   made anew, its Vulkan surface to be made anew too */
+/* 0 while nothing presented can be seen: the window minimized or covered, or its surface taken away (Android in the
+   background) */
 int backend_window_shown(void);
+/* changes whenever the surface comes back, so the renderer knows to make a new Vulkan surface */
 u32 backend_window_generation(void);
-/* fatal's error box, on every platform despite the name (a no-op where the backend has none), from any thread */
+
+/* fatal's message box. Called on every platform and from any thread; does nothing where there is no box */
 void win_fatal_box(const char* msg);
 
-/* The Vulkan renderer's window side, unused when headless. The handles as vulkan_core.h defines them on
-   64-bit hosts (C allows the same typedef twice), so including this needs no Vulkan header. */
+/* Vulkan, unused when headless. The two handle types are declared here as vulkan_core.h declares them for 64-bit
+   hosts (a repeated identical typedef is valid), so callers need no Vulkan header */
 typedef struct VkInstance_T* VkInstance;
 typedef struct VkSurfaceKHR_T* VkSurfaceKHR;
-void* backend_vk_loader(void); /* vkGetInstanceProcAddr */
-const char* const* backend_vk_extensions(u32* n);
+void* backend_vk_loader(void); /* the address of vkGetInstanceProcAddr */
+const char* const* backend_vk_extensions(u32* n); /* the instance extensions the window needs */
 int backend_vk_surface(VkInstance instance, VkSurfaceKHR* surface);
 
 #endif

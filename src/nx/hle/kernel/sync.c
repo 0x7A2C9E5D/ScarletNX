@@ -49,9 +49,9 @@ static KThread* list_best(KThread* l, int by_key, u64 key) {
    console checks an address before it touches it: InvalidCurrentMemory outside the address space (its kernel address
    check, and the user access that would fail), InvalidAddress when it isn't word-aligned */
 static u32 check_word(u64 addr) {
-    if (addr > AS_SIZE - 4) return R_BADMEMSTATE;
-    if (addr & 3) return R_BADADDR;
-    return 0;
+    R_UNLESS(addr <= AS_SIZE - 4, R_BADMEMSTATE);
+    R_UNLESS(!(addr & 3), R_BADADDR);
+    R_SUCCEED();
 }
 static u32* uword(u64 addr) { return (u32*)(void*)GP(addr); }
 
@@ -124,17 +124,17 @@ static u32 mutex_tag(const KThread* n, int more) { return n ? n->wait_tag | (mor
    asks to wait for owner. If the word changed meanwhile (it was unlocked) the game tries again itself */
 u32 svc_arbitrate_lock(KThread* t, u32 owner, u64 addr, u32 tag) {
     KObj* o;
-    u32 r = check_word(addr);
-    if (r) return r;
+    u32 r;
+    R_TRY(check_word(addr));
     pm_lock(&g_klock);
     if (__atomic_load_n(uword(addr), __ATOMIC_SEQ_CST) != (owner | HANDLE_WAIT)) {
         pm_unlock(&g_klock);
-        return 0;
+        R_SUCCEED();
     }
     o = h_get_nl(owner);
     if (!o || o->type != KO_THREAD) {
         pm_unlock(&g_klock);
-        return R_BADHANDLE;
+        R_THROW(R_BADHANDLE);
     }
     t->woken = 0;
     t->wait_addr = addr;
@@ -150,14 +150,13 @@ u32 svc_arbitrate_lock(KThread* t, u32 owner, u64 addr, u32 tag) {
 u32 svc_arbitrate_unlock(u64 addr) {
     KThread* n;
     int more;
-    u32 r = check_word(addr);
-    if (r) return r;
+    R_TRY(check_word(addr));
     pm_lock(&g_klock);
     n = mutex_next_nl(addr, &more);
     __atomic_store_n(uword(addr), mutex_tag(n, more), __ATOMIC_SEQ_CST);
     if (n) wake(n, 0);
     pm_unlock(&g_klock);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ condition variables */
@@ -185,10 +184,10 @@ static void cv_take_mutex_nl(KThread* w) {
 u32 svc_wait_cv(KThread* t, u64 maddr, u64 key, u32 tag, i64 timeout) {
     KThread* n;
     int more;
-    u32 r = check_word(maddr);
-    if (r) return r;
+    u32 r;
+    R_TRY(check_word(maddr));
     key &= ~3ull;
-    if (key > AS_SIZE - 4) return R_BADMEMSTATE;
+    R_UNLESS(key <= AS_SIZE - 4, R_BADMEMSTATE);
     pm_lock(&g_klock);
     n = mutex_next_nl(maddr, &more);
     __atomic_store_n(uword(key), 1u, __ATOMIC_SEQ_CST);
@@ -196,7 +195,7 @@ u32 svc_wait_cv(KThread* t, u64 maddr, u64 key, u32 tag, i64 timeout) {
     if (n) wake(n, 0);
     if (!timeout) {
         pm_unlock(&g_klock);
-        return R_TIMEOUT;
+        R_THROW(R_TIMEOUT);
     }
     t->woken = 0;
     t->wait_kind = 3;
@@ -232,7 +231,7 @@ u32 svc_signal_cv(u64 key, i32 count) {
     }
     if (!list_best(g_cvwait, 1, key) && key <= AS_SIZE - 4) __atomic_store_n(uword(key), 0u, __ATOMIC_SEQ_CST);
     pm_unlock(&g_klock);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ address arbitration */
@@ -241,9 +240,9 @@ u32 svc_signal_cv(u64 key, i32 count) {
 u32 svc_wait_addr(KThread* t, u64 addr, u32 type, i32 value, i64 timeout) {
     u32* p;
     u32 cur;
-    u32 r = check_word(addr);
-    if (r) return r;
-    if (type > 2) return R_BADENUM;
+    u32 r;
+    R_TRY(check_word(addr));
+    R_UNLESS(type <= 2, R_BADENUM);
     p = uword(addr);
     pm_lock(&g_klock);
     cur = __atomic_load_n(p, __ATOMIC_SEQ_CST);
@@ -253,11 +252,11 @@ u32 svc_wait_addr(KThread* t, u64 addr, u32 type, i32 value, i64 timeout) {
         }
     if (type == 2 ? (i32)cur != value : (i32)cur >= value) {
         pm_unlock(&g_klock);
-        return R_BADSTATE;
+        R_THROW(R_BADSTATE);
     }
     if (!timeout) {
         pm_unlock(&g_klock);
-        return R_TIMEOUT;
+        R_THROW(R_TIMEOUT);
     }
     t->woken = 0;
     t->wait_kind = 4;
@@ -283,9 +282,8 @@ u32 svc_signal_addr(u64 addr, u32 type, i32 value, i32 count) {
     KThread* w;
     i32 n = 0;
     u32* p;
-    u32 r = check_word(addr);
-    if (r) return r;
-    if (type > 2) return R_BADENUM;
+    R_TRY(check_word(addr));
+    R_UNLESS(type <= 2, R_BADENUM);
     p = uword(addr);
     pm_lock(&g_klock);
     if (type) {
@@ -307,7 +305,7 @@ u32 svc_signal_addr(u64 addr, u32 type, i32 value, i32 count) {
             cur = __atomic_load_n(p, __ATOMIC_SEQ_CST);
         if (cur != (u32)value) {
             pm_unlock(&g_klock);
-            return R_BADSTATE;
+            R_THROW(R_BADSTATE);
         }
     }
     while ((count <= 0 || n < count) && (w = list_best(g_arbwait, 0, addr)) != NULL) {
@@ -317,7 +315,7 @@ u32 svc_signal_addr(u64 addr, u32 type, i32 value, i32 count) {
         n++;
     }
     pm_unlock(&g_klock);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ WaitSynchronization */
@@ -333,8 +331,8 @@ u32 svc_wait_sync(KThread* t, u64 hptr, u32 n, i64 timeout, u32* out_idx) {
     u32 hs[64];
     KObj* objs[64];
     u32 i, r = 0;
-    if (n > 64) return R_OUTOFRANGE;
-    if (n && (hptr > AS_SIZE || AS_SIZE - hptr < 4ull * n)) return R_BADPOINTER;
+    R_UNLESS(n <= 64, R_OUTOFRANGE);
+    if (n && (hptr > AS_SIZE || AS_SIZE - hptr < 4ull * n)) R_THROW(R_BADPOINTER);
     if (n) memcpy(hs, GP(hptr), 4 * (size_t)n);
     pm_lock(&g_klock);
     for (i = 0; i < n; i++) {
@@ -347,7 +345,7 @@ u32 svc_wait_sync(KThread* t, u64 hptr, u32 n, i64 timeout, u32* out_idx) {
                 WARN("kernel: WaitSynchronization on %x, which names nothing that can be waited on: InvalidHandle "
                      "(%u times)\n",
                      bad, k + 1);
-            return R_BADHANDLE;
+            R_THROW(R_BADHANDLE);
         }
         kobj_ref(objs[i]);
     }
@@ -379,7 +377,7 @@ u32 svc_wait_sync(KThread* t, u64 hptr, u32 n, i64 timeout, u32* out_idx) {
             if (r == R_CANCELLED) t->cancel = 0; /* CancelSynchronization latches it too, for a thread not waiting */
         }
         i = n;
-        if (!r) {
+        if (R_SUCCEEDED(r)) {
             for (i = 0; i < n && (u64)(size_t)objs[i] != t->wait_key; i++) {
             }
             if (i == n) /* woken without being told by which object */

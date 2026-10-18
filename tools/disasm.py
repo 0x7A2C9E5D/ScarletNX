@@ -6,8 +6,10 @@
     tools/disasm.py work/Game cf34240 cf343c0     # an address range (hex, as crash reports print them)
     tools/disasm.py work/Game NvDdkVicExecuteSync  # a whole function, by symbol name (substring match)
 
-The game folder is the extracted dump (exefs/ + romfs/), laid out at the same bases the runtime uses. Needs
-llvm-objcopy and llvm-objdump.
+The game folder is the extracted dump (exefs/ + romfs/) or an NRO, laid out at the same bases the runtime uses. Its
+modules are read by the recompiler's loader through `scarletnx --dump-modules` (build/scarletnx, or the program
+SNX_SCARLETNX names), cached per game folder (tools/moduledump.py). A 32-bit program's code is shown as A32, or as
+Thumb when the symbol it starts in is a Thumb function. Needs llvm-objcopy and llvm-objdump.
 """
 
 import os
@@ -17,17 +19,18 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, '..')]
-import nxloader  # noqa: E402
+import moduledump  # noqa: E402
 
 from symbols import Symbols  # noqa: E402
 
 
-def disassemble(mods, syms, start, end):
+def disassemble(mods, syms, start, end, is64=True):
     mod = next((m for m in mods if m.base <= start < m.base + m.size), None)
     if mod is None:
         raise SystemExit('%x is not inside any module' % start)
     off = start - mod.base
     code = bytes(mod.image[off : off + (end - start)])
+    triple = 'aarch64' if is64 else 'thumbv8a' if syms.is_thumb(start) else 'armv8a'
     with tempfile.TemporaryDirectory() as tmp:
         raw = os.path.join(tmp, 'code.bin')
         elf = os.path.join(tmp, 'code.elf')
@@ -39,7 +42,7 @@ def disassemble(mods, syms, start, end):
                 '-I',
                 'binary',
                 '-O',
-                'elf64-littleaarch64',
+                'elf64-littleaarch64' if is64 else 'elf32-littlearm',
                 '--rename-section',
                 '.data=.text,alloc,load,readonly,code',
                 raw,
@@ -48,7 +51,7 @@ def disassemble(mods, syms, start, end):
             check=True,
         )
         out = subprocess.run(
-            ['llvm-objdump', '-d', '--no-show-raw-insn', '--triple=aarch64', '--adjust-vma=%#x' % start, elf],
+            ['llvm-objdump', '-d', '--no-show-raw-insn', '--triple=' + triple, '--adjust-vma=%#x' % start, elf],
             check=True,
             capture_output=True,
             text=True,
@@ -76,13 +79,14 @@ def disassemble(mods, syms, start, end):
 def main():
     if len(sys.argv) not in (3, 4):
         raise SystemExit(__doc__)
-    mods, _, _ = nxloader.load_program(sys.argv[1])
-    syms = Symbols(mods)
+    mods, is64 = moduledump.load_program(sys.argv[1])
+    syms = Symbols(mods, is64)
     if len(sys.argv) == 4:
         start, end = int(sys.argv[2], 16), int(sys.argv[3], 16)
     else:
         start, end = syms.function_range(sys.argv[2])
-    disassemble(mods, syms, start & ~3, (end + 3) & ~3)
+    align = 3 if is64 or not syms.is_thumb(start) else 1
+    disassemble(mods, syms, start & ~align, (end + align) & ~align, is64)
 
 
 if __name__ == '__main__':

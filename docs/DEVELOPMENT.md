@@ -61,6 +61,9 @@ python3 tools/disasm.py "$work/Game" cf34240 cf343c0
   `--out DIR` → `runN.log` + PNG (PPM without Pillow); default fresh temp dir.
   Summary: exit, PC/symbol (`--dump`), frames/FPS. Unknown args pass through, e.g. `--fps_limit=0`.
 - Guest VAs: hex; disasm function queries: substrings. Disasm requires `llvm-objcopy` + `llvm-objdump`.
+  `symbols.py` and `disasm.py` read the modules with the recompiler's loader, through
+  `build/scarletnx --dump-modules PROGRAM DIR` (`SNX_SCARLETNX` names another binary), cached per game folder in
+  `~/.cache/scarletnx/module-dumps`. The dump's format is described in `src/nx/loader/loader.h`.
   `--log=2`: verbose; Windows `--profile=1`: `profile.txt` every 10 s.
 
 ## Shaders
@@ -71,15 +74,18 @@ build/snx-shaderc corpus --validate --out translated
 ```
 
 `--validate` needs `spirv-val`. `--out` writes SPIR-V modules for build comparisons.
+
+The instruction decoder is generated at build time. `src/nx/gpu/shader/maxwell_opcodes.def` lists each encoding
+(opcode name, display name, 16-bit pattern), and `tools/shaderdec/shaderdec.c` (strict C90, built for the build
+machine in a cross build, as swipc is) checks it and writes the opcode enum and a table-driven matcher into the
+build folder, so nothing is set up at run time. Two patterns may overlap only when one is strictly narrower, and
+that one is tried first. A new opcode is a row there (its `O_` name then exists for the translator), and
+`ctest -R 'shaderdec|shader_decode'` checks the spec and decodes every row back to itself.
 PowerShell: `$env:SNX_SHADER_CORPUS='corpus'`. Where the game gets no environment (Android), its INI's `[Debug]
 diag=1` keeps each shader's entry in `captures/shaders` beside the game, for the same `snx-shaderc`.
 
-## Upstream / provenance
+## Provenance
 
-```sh
-scripts/import-upstream.sh SwitchRecomp_v143.zip v143
-```
-
-`upstream`: MZ Labs releases + formatted copies; `upstream-vN`: original imports; fork base: `upstream-v142`.
-Port to `main` manually (different layouts). Exclude dumps/keys/generated modules/dependency builds from Git.
-Preserve headers + [credits/install notices](CREDITS.md).
+Code ported from another project keeps its copyright lines and gets a row in [credits](CREDITS.md), with its
+license text installed when the binaries carry it (`CMakeLists.txt`). Exclude dumps/keys/generated
+modules/dependency builds from Git.

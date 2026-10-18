@@ -607,17 +607,17 @@ static void set_recv_list_offset(u8* base, u32 word) {
    lock (memory that allows IPC user buffers, read-write, no attribute) */
 static void user_buffers(void) {
     static const MemBlock blocks[] = {
-        {0x10000, 0x4000, MS_NORMAL, PERM_RW, 0, 0, 0}, /* heap */
-        {0x14000, 0x1000, MS_CODE, PERM_RW, 0, 0, 0},   /* code, mapped RW as the loader first does: no user buffers */
-        {0x15000, 0x1000, MS_NORMAL, PERM_R, 0, 0, 0},  /* read-only */
-        {0x16000, 0x1000, MS_NORMAL, PERM_RW, 1, 0, 0}, /* locked */
-        {0x17000, 0x1000, MS_NORMAL, PERM_RW, 0, 0, 0}, /* heap, then module data: both take user buffers, not as one */
-        {0x18000, 0x1000, MS_CODEDATA, PERM_RW, 0, 0, 0},
-        {0x19000, 0x1000, MS_NORMAL, PERM_RW, 0, 0, 0}, /* read-write, then read-only: not one permission */
-        {0x1A000, 0x1000, MS_NORMAL, PERM_R, 0, 0, 0},
-        {0x1B000, 0x1000, MS_NORMAL, PERM_RW, 0, 0, 0}, /* then a locked block */
-        {0x1C000, 0x1000, MS_NORMAL, PERM_RW, 1, 0, 0},
-        {0x1D000, 0x1000, MS_NORMAL, PERM_RW | PERM_DONTCARE, 0, 0, 0}, /* read-write with more bits: not read-write */
+        {0x10000, 0x4000, MS_NORMAL, PERM_RW, 0, 0, 0, 0}, /* heap */
+        {0x14000, 0x1000, MS_CODE, PERM_RW, 0, 0, 0, 0},   /* code, RW as the loader first maps it: no user buffers */
+        {0x15000, 0x1000, MS_NORMAL, PERM_R, 0, 0, 0, 0},  /* read-only */
+        {0x16000, 0x1000, MS_NORMAL, PERM_RW, 1, 0, 0, 0}, /* locked */
+        {0x17000, 0x1000, MS_NORMAL, PERM_RW, 0, 0, 0, 0}, /* heap, then module data: each takes them, not as one */
+        {0x18000, 0x1000, MS_CODEDATA, PERM_RW, 0, 0, 0, 0},
+        {0x19000, 0x1000, MS_NORMAL, PERM_RW, 0, 0, 0, 0}, /* read-write, then read-only: not one permission */
+        {0x1A000, 0x1000, MS_NORMAL, PERM_R, 0, 0, 0, 0},
+        {0x1B000, 0x1000, MS_NORMAL, PERM_RW, 0, 0, 0, 0}, /* then a locked block */
+        {0x1C000, 0x1000, MS_NORMAL, PERM_RW, 1, 0, 0, 0},
+        {0x1D000, 0x1000, MS_NORMAL, PERM_RW | PERM_DONTCARE, 0, 0, 0, 0}, /* RW with more bits: not read-write */
     };
     memcpy(test_blocks, blocks, sizeof blocks);
     test_nblocks = 11;

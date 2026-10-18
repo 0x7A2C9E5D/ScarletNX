@@ -35,7 +35,7 @@ renderer=opengl
 | `.ini` key `audio_device` | [gpu/audio] Fix viewport flips and audio playback | playback follows the system's default | the same |
 | `.ini` key `forced_vsync` | Remove the OpenGL renderer | `vsync` | the same |
 | `.ini` keys `touch_controls`, `touch_controls_opacity` | [runtime] Isolate shared core and NX runtime | `controls`, `controls_opacity` | the same |
-| `.ini` keys `modo_tv`, `idioma`, `resolucion`, `sombras`, `perfil` (SwitchRecomp's) | #185 | `docked`, `language`, `resolution`, `shadows`, `profile` | the same |
+| `.ini` keys `modo_tv`, `idioma`, `resolucion`, `sombras`, `perfil` (the settings' first, Spanish names) | #185 | `docked`, `language`, `resolution`, `shadows`, `profile` | the same |
 | `.ini` key `gamepad_buttons` (A B X Y by position, by label or the map) | Swap A/B in place of the A B X Y presets | `gamepad_swap_ab`; `gamepad_map` always applies | the same |
 | `--keep-c` | Replace Python pipeline with a C90 driver | `--keep-ir` | still taken, said on stderr each time |
 | An installed copy's files in `~/.local/share/scarletnx` on Linux: `gui/last-run.log`, `gui/recent.txt`, `games/<Game>.ini`, `games/<Game>.log`, `games/threads.txt`, `games/shader_cache/vk_pipelines.bin`, `work/` | #212 | the config, state and cache folders ([USAGE](USAGE.md#folders)) | the launcher lists their folders as it opens |

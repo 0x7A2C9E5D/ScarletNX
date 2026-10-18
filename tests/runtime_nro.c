@@ -9,9 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-static u8 file[0x3040], guest[0x5000];
+static u8 file[0x4000], guest[0x5000];
 static size_t file_size;
-static int root_file, maps, unmaps, permissions;
+static int root_file, nso, maps, unmaps, permissions;
 static unsigned checks;
 static SnxModInfo info;
 static SnxModule module;
@@ -34,9 +34,13 @@ void logf_(int level, const char* fmt, ...) {
     (void)fmt;
 }
 int fs_map_file(const char* path, PFileMap* map) {
-    /* A stale NSO named main must not shadow main.nro. */
-    CHECK(strcmp(path, "exefs/main") && strcmp(path, "main"));
-    if (strcmp(path, root_file ? "main.nro" : "exefs/main.nro")) return -1;
+    if (nso) {
+        if (strcmp(path, "exefs/main")) return -1;
+    } else {
+        /* A stale NSO named main must not shadow main.nro. */
+        CHECK(strcmp(path, "exefs/main") && strcmp(path, "main"));
+        if (strcmp(path, root_file ? "main.nro" : "exefs/main.nro")) return -1;
+    }
     u8* bytes = malloc(file_size ? file_size : 1);
     CHECK(bytes != NULL);
     memcpy(bytes, file, file_size);
@@ -98,6 +102,34 @@ static void fixture(void) {
     maps = unmaps = permissions = 0;
     g_code_memory = 0;
 }
+/* An NSO laid out as the NRO above: its text LZ4-compressed (one block of literals), rodata and data stored */
+static void nso_fixture(void) {
+    size_t at = 0x100, i, rest;
+    fixture();
+    nso = 1;
+    memset(file, 0, sizeof file);
+    memcpy(file, "NSO0", 4);
+    put32(0x0c, 1);
+    memset(file + 0x40, 0x42, 32);
+    put32(0x3c, 0x1000);
+    put32(0x10, (u32)at);
+    put32(0x18, 0x1000);
+    file[at++] = 0xf0;
+    for (rest = 0x1000 - 15; rest >= 255; rest -= 255) file[at++] = 255;
+    file[at++] = (u8)rest;
+    for (i = 0; i < 0x1000; ++i) file[at + i] = (u8)(i * 7);
+    put32(0x60, (u32)(at + 0x1000 - 0x100));
+    at += 0x1000;
+    for (i = 1; i < 3; ++i) {
+        put32(0x10 + i * 0x10, (u32)at);
+        put32(0x14 + i * 0x10, (u32)i * 0x1000);
+        put32(0x18 + i * 0x10, 0x1000);
+        memset(file + at, 0x70 + (int)i, 0x1000);
+        at += 0x1000;
+    }
+    file_size = at;
+    info.is_nro = 0;
+}
 static void rejected(void) {
     CHECK(loader_load() == -1);
     CHECK(maps == 1 && unmaps == 1 && !permissions && !g_code_memory);
@@ -141,6 +173,24 @@ int main(void) {
     fixture();
     info.bss_size = 0;
     rejected();
-    printf("Runtime NRO: %u checks passed\n", checks);
+    nso_fixture();
+    CHECK(!loader_load());
+    CHECK(maps == 1 && unmaps == 1 && permissions == 3 && g_code_memory == info.size);
+    for (size_t i = 0; i < 0x1000; ++i) CHECK(guest[info.base + i] == (u8)(i * 7));
+    CHECK(guest[info.base + 0x1000] == 0x71 && guest[info.base + 0x2fff] == 0x72);
+    for (size_t i = 0x3000; i < info.size; ++i) CHECK(guest[info.base + i] == 0);
+    nso_fixture();
+    file[0x40] ^= 1; /* another build */
+    rejected();
+    nso_fixture();
+    put32(0x38, 0x4000); /* data past the mapping */
+    rejected();
+    nso_fixture();
+    file_size -= 1; /* data past the file */
+    rejected();
+    nso_fixture();
+    put32(0x60, 0x100); /* a block cut short */
+    CHECK(loader_load() == -1 && unmaps == 1 && !permissions && !g_code_memory);
+    printf("Runtime NRO and NSO: %u checks passed\n", checks);
     return 0;
 }

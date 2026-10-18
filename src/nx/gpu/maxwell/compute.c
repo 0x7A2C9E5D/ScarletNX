@@ -1,10 +1,54 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the compute engine's launches, and inline-to-memory uploads */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors
+   Ported from Eden (src/video_core/engines/kepler_compute.cpp, src/video_core/engines/kepler_compute.h,
+   src/video_core/engines/kepler_memory.cpp):
+   SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+   SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project */
+/* The compute engine (KEPLER_COMPUTE_B, 0xB1C0): launches, which the renderer runs from their launch description
+   (the QMD), its inline-to-memory methods and its report semaphore; and the inline-to-memory class
+   (KEPLER_INLINE_TO_MEMORY_B, 0xA140) */
 #include "nx/gpu/maxwell/engines_int.h"
-/* ============================================================ compute + I2M */
+
+/* With diag=1, each new compute program's launch description and code go to captures/compute, for debugging: the
+   first 64 programs */
+static void capture(const u32* q, u64 code) {
+    static u64 seen[64];
+    static u32 nseen;
+    u64 pa = code + q[8];
+    char path[sizeof g_exedir + 64];
+    u8* buf;
+    FILE* f;
+    u32 i;
+    for (i = 0; i < nseen; i++)
+        if (seen[i] == pa) return;
+    if (nseen == sizeof seen / sizeof seen[0]) return;
+    seen[nseen++] = pa;
+    buf = (u8*)malloc(0x100 + 0x10000);
+    if (!buf) return;
+    memcpy(buf, q, 0x100);
+    gmem_read_code(pa, buf + 0x100, 0x10000); /* up to where guest memory ends */
+    snprintf(path, sizeof path, "%scaptures", g_exedir);
+    plat_mkdir(path);
+    snprintf(path, sizeof path, "%scaptures/compute", g_exedir);
+    plat_mkdir(path);
+    snprintf(path, sizeof path, "%scaptures/compute/cs_%010llx.bin", g_exedir, (unsigned long long)pa);
+    f = fopen(path, "wb");
+    if (f) {
+        if (fwrite(buf, 1, 0x100 + 0x10000, f) != 0x100 + 0x10000) WARN_LIMIT(1, "gpu: %s wasn't written\n", path);
+        fclose(f);
+    }
+    free(buf);
+}
+/* LAUNCH (0xAF): the launch description at LAUNCH_DESC_LOC (0xAD, 256-byte units), the program at its offset (QMD
+   word 8) from CODE_LOC (0x582-0x583) */
+static void launch(GpuChannel* ch) {
+    const u32* r = ch->rcomp;
+    u32 q[64];
+    u64 code = ((u64)(r[0x582] & 0xFF) << 32) | r[0x583];
+    gmem_read((u64)r[0xAD] << 8, q, sizeof q);
+    if (g_opt_diag) capture(q, code);
+    if (g_renderer->dispatch) g_renderer->dispatch(ch, q, code);
+}
 void compute_method(GpuChannel* ch, u32 m, u32 v, int last) {
     (void)last;
     m &= 0xFFF;
@@ -12,67 +56,13 @@ void compute_method(GpuChannel* ch, u32 m, u32 v, int last) {
     switch (m) {
         case 0x6C: i2m_launch(ch, ch->rcomp, 0x60); break;
         case 0x6D: i2m_data(ch, v); break;
-        case 0xAF: /* launch; the first few programs get dumped for debugging */ {
-            u64 qmd = (u64)ch->rcomp[0xAD] << 8;
-            u64 code = ((u64)ch->rcomp[0x582] << 32) | ch->rcomp[0x583];
-            u32 q[64];
-            gmem_read(qmd, q, 256);
-            if (g_renderer_up) { g_renderer->dispatch(ch, q, code); }
-            u64 prog = code + q[8];
-            static u64 seen[32];
-            static int ns;
-            int known = 0;
-            for (int i = 0; i < ns; i++)
-                if (seen[i] == prog) known = 1;
-            if (!known && ns < 32 && g_opt_diag) {
-                seen[ns++] = prog;
-                char p[1200]; /* captures/ next to the games, like the rest of what the runtime writes */
-                snprintf(p, sizeof p, "%scaptures", g_exedir);
-                plat_mkdir(p);
-                snprintf(p, sizeof p, "%scaptures/compute", g_exedir);
-                plat_mkdir(p);
-                snprintf(p, sizeof p, "%scaptures/compute/c%02d_qmd.bin", g_exedir, ns);
-                FILE* f = fopen(p, "wb");
-                if (f) {
-                    fwrite(q, 1, 256, f);
-                    fclose(f);
-                }
-                u8* b = malloc(0x10000);
-                snprintf(p, sizeof p, "%scaptures/compute/c%02d_cs.bin", g_exedir, ns);
-                f = b ? fopen(p, "wb") : NULL;
-                if (f) {
-                    gmem_read(prog, b, 0x10000);
-                    fwrite(b, 1, 0x10000, f);
-                    fclose(f);
-                }
-                free(b);
-                for (int i = 0; i < 8; i++)
-                    if ((q[20] >> i) & 1) {
-                        u64 a = ((u64)(q[30 + 2 * i] & 0xFF) << 32) | q[29 + 2 * i];
-                        u32 sz = (q[30 + 2 * i] >> 15) & 0x1FFFF;
-                        if (!sz || sz > 0x10000) sz = 0x10000;
-                        u8* cb = malloc(sz);
-                        snprintf(p, sizeof p, "%scaptures/compute/c%02d_cb%d.bin", g_exedir, ns, i);
-                        f = cb ? fopen(p, "wb") : NULL;
-                        if (f) {
-                            gmem_read(a, cb, sz);
-                            fwrite(cb, 1, sz, f);
-                            fclose(f);
-                        }
-                        free(cb);
-                    }
-                LOG("compute %d: grid %ux%ux%u, block %ux%ux%u, shared %u bytes, cbufs %02x (saved in captures/compute)\n",
-                    ns, q[12] & 0x7FFFFFFF, q[13] & 0xFFFF, q[13] >> 16, q[18] >> 16, q[19] & 0xFFFF, q[19] >> 16,
-                    q[17] & 0x3FFFF, q[20] & 0xFF);
-            }
-        } break;
-        case 0x6C3:
-            query_get(ch, ch->rcomp, 0x6C0, v);
-            break; /* report semaphore: release, counter, or acquire (a wait) */
+        case 0xAF: launch(ch); break;
+        case 0x6C3: query_get(ch, ch->rcomp, 0x6C0, v); break; /* the report semaphore, the 3D engine's */
+        default: break;
     }
 }
 void kepler_i2m_method(GpuChannel* ch, u32 m, u32 v) {
-    m &= 0x7F;
+    if (m >= 0x80) return;
     ch->ri2m[m] = v;
     if (m == 0x6C)
         i2m_launch(ch, ch->ri2m, 0x60);

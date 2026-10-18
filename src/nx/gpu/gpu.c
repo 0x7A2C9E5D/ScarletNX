@@ -1,131 +1,97 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* GM20B front end: guest memory through the GPU page table, GPFIFO, the puller (semaphores, syncpoints), I2M, the
-   method dispatch to the engines (engines.c, maxwell3d.c, compute.c, fermi2d.c, dma.c), and the GPU thread's job
-   queue, which keeps each channel's jobs in order and lets a channel whose stream waits (gpu_park) stand aside while
-   the others run. Drawing is the renderer's job. */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors
+   Ported from Eden (src/video_core/dma_pusher.cpp, src/video_core/engines/puller.cpp,
+   src/video_core/engines/engine_upload.cpp, src/video_core/textures/decoders.cpp,
+   src/video_core/engines/maxwell_3d.cpp):
+   SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+   SPDX-FileCopyrightText: Copyright 2025 Eden Emulator Project
+   SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
+   SPDX-FileCopyrightText: 2022 yuzu Emulator Project
+   SPDX-FileCopyrightText: Copyright 2019 yuzu Emulator Project
+   SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project */
+/* The GPU's host side: guest memory as the GPU sees it, the channels, the pushbuffer and its puller methods, the
+   inline-to-memory engine, and the queue of GPFIFO submissions the GPU thread runs.
+
+   A submission (gpu_submit, from nvdrv's ioctl) only queues a job: the ioctl never waits for the GPU. The GPU thread
+   runs the jobs of each channel in order. A stream that has to wait (a semaphore acquire, a syncpoint wait, a fence:
+   gpu_park) stops after the method that asked, and the thread runs other channels meanwhile, as the console's PFIFO
+   switches channels on an acquire that fails. Calls (gpu_call) run on the GPU thread between jobs, in order. */
+#include <stdlib.h>
+#include <string.h>
+#include "nx/gpu/gpu.h"
+#include "nx/gpu/maxwell/engines_int.h"
 #include "nx/gpu/renderer.h"
 #include "nx/hle/services/nvdrv.h"
 #include "nx/memory/mem.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
-#include <stdlib.h>
-#include <string.h>
-#include "nx/gpu/gpu.h"
 
 GpuState g_gpu;
-static PMutex g_gpulock; /* the channels and the engines' state: the GPU thread holds it around each job, and
-                            gpu_channel_close takes it. The queue has its own lock (g_qlock) */
-
-/* ============================================================ GPU memory */
+volatile u64 g_gpu_submits;
+void (*g_gpu_mem_changed)(u64 cpu_addr, u64 len);
+void (*g_gpu_before_write)(u64 gva, u64 size);
 int g_gpu_releases;
-void gmem_need(u64 gva, u64 size) {
-    if (__atomic_load_n(&g_gpu_releases, __ATOMIC_ACQUIRE)) g_renderer->release_need(gva, size);
-    if (g_cs_any) g_renderer->cs_mem_need(gva, size);
-    if (g_gfx_any || g_gfx_img_any) g_renderer->gfx_mem_need(gva, size);
-}
-void gmem_read_raw(u64 gva, void* dst, u64 size) {
-    u8* d = dst;
+void (*g_gpu_mapping_begin)(u64 gva, u64 size, int full);
+void (*g_gpu_mapping_end)(void);
+
+/* ------------------------------------------------------------ guest memory through the GPU's address space */
+/* the runs of guest memory behind [gva, gva + size), copied in or out: 1 when every page was mapped. An unmapped
+   page reads as zero and takes no write */
+static int copy_runs(u64 gva, u8* in, const u8* out, u64 size) {
+    int all = 1;
     while (size) {
-        u64 cpu = gmmu_translate(gva);
-        u64 n = 0x1000 - (gva & 0xFFF);
-        if (n > size) n = size;
-        if (!cpu) {
-            memset(d, 0, n);
-        } else
-            memcpy(d, GP(cpu), n);
-        d += n;
+        u64 cpu = 0, n = gmmu_run(gva, size, &cpu);
+        if (!n) {
+            n = 0x1000 - (gva & 0xFFF);
+            if (n > size) n = size;
+            if (in) memset(in, 0, (size_t)n);
+            all = 0;
+        } else if (in)
+            memcpy(in, GP(cpu), (size_t)n);
+        else
+            memcpy(GP(cpu), out, (size_t)n);
+        if (in)
+            in += n;
+        else
+            out += n;
         gva += n;
         size -= n;
     }
+    return all;
+}
+void gmem_read_raw(u64 gva, void* dst, u64 size) { copy_runs(gva, (u8*)dst, NULL, size); }
+void gmem_write_raw(u64 gva, const void* src, u64 size) { copy_runs(gva, NULL, (const u8*)src, size); }
+void gmem_need(u64 gva, u64 size) {
+    if (!size) return;
+    if (g_cs_any && g_renderer->cs_mem_need) g_renderer->cs_mem_need(gva, size);
+    if ((g_gfx_any || g_gfx_img_any) && g_renderer->gfx_mem_need) g_renderer->gfx_mem_need(gva, size);
+    if (__atomic_load_n(&g_gpu_releases, __ATOMIC_ACQUIRE) && g_renderer->release_need)
+        g_renderer->release_need(gva, size);
+}
+void gmem_before_write(u64 gva, u64 size) {
+    if (size && g_gpu_before_write) g_gpu_before_write(gva, size);
 }
 int gmem_read(u64 gva, void* dst, u64 size) {
     gmem_need(gva, size);
-    gmem_read_raw(gva, dst, size);
-    return 0;
-}
-void (*g_gpu_mem_changed)(u64 cpu_addr, u64 len);
-void gpu_mem_changed(u64 cpu_addr, u64 len) {
-    if (g_gpu_mem_changed && len) g_gpu_mem_changed(cpu_addr, len);
-}
-/* a shader program, read up to size bytes: the hardware fetches instructions only up to the program's end, but its
-   length isn't known before reading it. A program near the end of guest memory the game committed (Tears of the
-   Kingdom's compute programs end close to an uncommitted alias page) would fault a fixed-size read, so the read stops
-   at the first page with no guest memory behind it and the rest is zeros */
-void gmem_read_code(u64 gva, void* dst, u64 size) {
-    u64 n = 0, lo = 0, hi = 0; /* [lo, hi): the committed block the last page was in */
-    while (n < size) {
-        u64 cpu = gmmu_translate(gva + n);
-        if (!cpu) break;
-        if (cpu < lo || cpu >= hi) {
-            MemBlock b;
-            mem_query(cpu, &b);
-            if (b.state == MS_FREE || b.state == MS_INACCESSIBLE) break;
-            lo = b.addr;
-            hi = b.addr + b.size;
-        }
-        u64 run = hi - cpu; /* committed from here */
-        u64 page = 0x1000 - ((gva + n) & 0xFFF);
-        n += run < page ? run : page;
-    }
-    if (n > size) n = size;
-    gmem_read(gva, dst, n);
-    memset((u8*)dst + n, 0, size - n);
-}
-/* the renderer lands pending shader results before the stream goes on past them: before a write of
-   memory those results overlap (size > 0), and before anything the game can observe, like a semaphore release or a
-   syncpoint (gpu_signal_point, size 0) */
-void (*g_gpu_before_write)(u64 gva, u64 size);
-void (*g_gpu_mapping_begin)(u64 gva, u64 size, int full);
-void (*g_gpu_mapping_end)(void);
-void gpu_signal_point(void) {
-    if (g_gpu_before_write) g_gpu_before_write(0, 0);
-}
-void gmem_before_write(u64 gva, u64 size) {
-    if (size && __atomic_load_n(&g_gpu_releases, __ATOMIC_ACQUIRE)) g_renderer->release_need(gva, size);
-    if (g_gpu_before_write && size) g_gpu_before_write(gva, size);
-}
-void gpu_release_write(u64 gva, const void* data, u32 len) {
-    if (g_renderer_up && g_renderer->release_write)
-        g_renderer->release_write(gva, data, len);
-    else {
-        gpu_signal_point();
-        gmem_write(gva, data, len);
-    }
-}
-/* the bytes into guest memory, without landing pending shader results first or logging the write */
-void gmem_write_raw(u64 gva, const void* src, u64 size) {
-    const u8* s = src;
-    while (size) {
-        u64 cpu = gmmu_translate(gva);
-        u64 n = 0x1000 - (gva & 0xFFF);
-        if (n > size) n = size;
-        if (cpu) memcpy(GP(cpu), s, n);
-        s += n;
-        gva += n;
-        size -= n;
-    }
+    return copy_runs(gva, (u8*)dst, NULL, size) ? 0 : -1;
 }
 int gmem_write(u64 gva, const void* src, u64 size) {
+    int all;
+    if (!size) return 0;
     gmem_before_write(gva, size);
-    gmem_write_raw(gva, src, size);
+    all = copy_runs(gva, NULL, (const u8*)src, size);
     gpu_mem_written(gva, size);
-    return 0;
-}
-u8* gmem_ptr(u64 gva, u64 size) {
-    /* host pointer, only if the whole range is contiguous */
-    gmem_need(gva, size);
-    return gmem_ptr_untracked(gva, size);
+    return all ? 0 : -1;
 }
 u8* gmem_ptr_untracked(u64 gva, u64 size) {
-    u64 c0 = gmmu_translate(gva);
-    if (!c0) return NULL;
-    for (u64 o = (0x1000 - (gva & 0xFFF)); o < size; o += 0x1000) {
-        if (gmmu_translate(gva + o) != c0 + o) return NULL;
-    }
-    return GP(c0);
+    u64 cpu = 0;
+    if (!size) size = 1;
+    return gmmu_run(gva, size, &cpu) == size ? GP(cpu) : NULL;
+}
+u8* gmem_ptr(u64 gva, u64 size) {
+    u8* p = gmem_ptr_untracked(gva, size);
+    if (p) gmem_need(gva, size ? size : 1);
+    return p;
 }
 u32 gmem_r32(u64 gva) {
     u32 v = 0;
@@ -133,721 +99,838 @@ u32 gmem_r32(u64 gva) {
     return v;
 }
 void gmem_w32(u64 gva, u32 v) { gmem_write(gva, &v, 4); }
-
-/* bytes per pixel of a color format. The 3D engine's render target formats and the 2D engine's surface formats are
-   one list (Mesa's nv50 surface formats). These are the guest's bytes: gpu/vk/format.c may store a format wider */
-u32 gpu_color_bpp(u32 f) {
-    if (f >= 0xC0 && f <= 0xC5) return 16;             /* RGBA32, RGBX32 */
-    if (f >= 0xC6 && f <= 0xCE) return 8;              /* RGBA16, RG32, RGBX16 */
-    if (f >= 0xE8 && f <= 0xF2) return 2;              /* B5G6R5, BGR5A1, RG8, R16 */
-    if (f >= 0xF3 && f <= 0xF7) return 1;              /* R8, A8 */
-    if (f == 0xF8 || f == 0xFB || f == 0xFC) return 2; /* BGR5X1 */
-    return 4; /* BGRA8, RGBA8, RGB10A2, RG16, R11G11B10, R32, BGRX8, RGBX8, and what isn't known */
+/* Hardware fetches a program only up to its end, and TotK has compute programs ending next to an uncommitted page:
+   the read stops at the first page that has no GPU mapping or no guest memory behind it */
+void gmem_read_code(u64 gva, void* dst, u64 size) {
+    MemBlock b;
+    int have = 0;
+    u64 done = 0;
+    memset(&b, 0, sizeof b);
+    while (done < size) {
+        u64 a = gva + done, n = 0x1000 - (a & 0xFFF), cpu = gmmu_translate(a);
+        u32 state;
+        if (!cpu) break;
+        if (!have || cpu < b.addr || cpu - b.addr >= b.size) { /* a block's pages share its state */
+            mem_query(cpu, &b);
+            have = 1;
+        }
+        state = b.state & 0xFF;
+        if (!b.size || state == (MS_FREE & 0xFF) || state == (MS_INACCESSIBLE & 0xFF)) break;
+        done += n < size - done ? n : size - done;
+    }
+    if (done) {
+        gmem_need(gva, done);
+        gmem_read_raw(gva, dst, done);
+    }
+    memset((u8*)dst + done, 0, (size_t)(size - done));
 }
 
-/* ============================================================ block linear */
+/* ------------------------------------------------------------ block linear layout (Eden's decoders.cpp) */
+/* A GOB is 64 bytes by 8 rows, 512 bytes: two 32 byte halves of 256 bytes, each four pairs of rows of two 16 byte
+   runs. Blocks are 2^bh GOBs high and 2^bd deep, laid out row by row, and a slice of them after another. The x, y
+   and z parts of an offset add up, so a row's base and a column's offset can be computed apart */
+static u64 bl_x(u32 x, u32 bh, u32 bd) {
+    return ((u64)(x >> 6) << (9 + bh + bd)) + ((x & 32) << 3) + ((x & 16) << 1) + (x & 15);
+}
+static u64 bl_yz(u32 y, u32 z, u32 wb, u32 h, u32 bh, u32 bd) {
+    u64 gobs_x = (wb + 63) >> 6, gy = y >> 3;
+    u64 rows = ((((u64)h + 7) >> 3) + (1u << bh) - 1) >> bh; /* block rows in a slice of blocks */
+    u64 block = (u64)512 << (bh + bd);
+    u64 in_block = ((((u64)z & ((1u << bd) - 1)) << bh) + (gy & ((1u << bh) - 1))) << 9;
+    return (((u64)(z >> bd) * rows + (gy >> bh)) * gobs_x) * block + in_block + (((y & 7) >> 1) << 6) +
+           ((y & 1) << 4);
+}
 u64 bl_offset(u32 x_bytes, u32 y, u32 z, u32 width_bytes, u32 height, u32 bh_log2, u32 bd_log2) {
-    u32 gob_w = (width_bytes + 63) / 64;
-    u32 bh = 1u << bh_log2, bd = 1u << bd_log2;
-    u32 blocks_h = ((height + 7) / 8 + bh - 1) / bh;
-    u32 gx = x_bytes / 64, gy = y / 8;
-    u32 block_y = gy / bh, gob_in = gy % bh;
-    u32 block_z = z / bd, z_in = z % bd;
-    u64 block_size = 512ull * bh * bd;
-    u64 off =
-        ((u64)block_z * blocks_h * gob_w + (u64)block_y * gob_w + gx) * block_size + ((u64)z_in * bh + gob_in) * 512;
-    u32 xb = x_bytes % 64, yb = y % 8;
-    off += ((xb % 64) / 32) * 256 + (yb / 2) * 64 + ((xb % 32) / 16) * 32 + (yb % 2) * 16 + (xb % 16);
-    return off;
+    return bl_x(x_bytes, bh_log2, bd_log2) + bl_yz(y, z, width_bytes, height, bh_log2, bd_log2);
 }
-
 void deswizzle(u8* dst, u32 dst_pitch, const u8* src, u32 w_bytes, u32 h, u32 bh_log2) {
-    for (u32 y = 0; y < h; y++) {
+    u32 x, y;
+    for (y = 0; y < h; y++) {
+        u64 row = bl_yz(y, 0, w_bytes, h, bh_log2, 0);
         u8* d = dst + (u64)y * dst_pitch;
-        for (u32 x = 0; x < w_bytes; x += 16) {
-            u64 o = bl_offset(x, y, 0, w_bytes, h, bh_log2, 0);
+        for (x = 0; x < w_bytes; x += 16) {
             u32 n = w_bytes - x < 16 ? w_bytes - x : 16;
-            memcpy(d + x, src + o, n);
+            memcpy(d + x, src + row + bl_x(x, bh_log2, 0), n);
         }
     }
 }
 void swizzle(u8* dst, const u8* src, u32 src_pitch, u32 w_bytes, u32 h, u32 bh_log2) {
-    for (u32 y = 0; y < h; y++) {
+    u32 x, y;
+    for (y = 0; y < h; y++) {
+        u64 row = bl_yz(y, 0, w_bytes, h, bh_log2, 0);
         const u8* s = src + (u64)y * src_pitch;
-        for (u32 x = 0; x < w_bytes; x += 16) {
-            u64 o = bl_offset(x, y, 0, w_bytes, h, bh_log2, 0);
+        for (x = 0; x < w_bytes; x += 16) {
             u32 n = w_bytes - x < 16 ? w_bytes - x : 16;
-            memcpy(dst + o, s + x, n);
+            memcpy(dst + row + bl_x(x, bh_log2, 0), s + x, n);
         }
     }
 }
+/* the guest bytes of a pixel of a color format, for render targets and 2D surfaces alike (nv50's surface formats) */
+u32 gpu_color_bpp(u32 format) {
+    if (format >= 0xC0 && format <= 0xC5) return 16; /* RGBA32 and RGBX32 */
+    if (format >= 0xC6 && format <= 0xCE) return 8;  /* RGBA16, RG32, RGBX16 */
+    if (format >= 0xE8 && format <= 0xF2) return 2;  /* B5G6R5, BGR5A1, RG8, R16 */
+    if (format >= 0xF3 && format <= 0xF7) return 1;  /* R8, A8 */
+    if (format == 0xF8 || format == 0xFB || format == 0xFC) return 2;
+    return 4;
+}
 
-/* ============================================================ puller */
-static void puller_method(GpuChannel* ch, u32 m, u32 v) {
-    u32* r = ch->puller;
-    r[m] = v;
+/* ------------------------------------------------------------ what the game can observe */
+void gpu_signal_point(void) {
+    if (g_gpu_before_write) g_gpu_before_write(0, 0);
+}
+void gpu_release_write(u64 gva, const void* data, u32 len) {
+    if (g_renderer->release_write) {
+        g_renderer->release_write(gva, data, len);
+        return;
+    }
+    gpu_signal_point();
+    gmem_write(gva, data, len);
+}
+void gpu_mem_changed(u64 cpu_addr, u64 len) {
+    if (g_gpu_mem_changed) g_gpu_mem_changed(cpu_addr, len);
+}
+static void may_have_changed(void) {
+    if (g_renderer->mem_may_have_changed) g_renderer->mem_may_have_changed();
+}
+/* a syncpoint increment of the stream, after the work before it */
+static void stream_incr(u32 id) {
+    if (g_renderer->stream_incr) {
+        g_renderer->stream_incr(id);
+        return;
+    }
+    gpu_signal_point();
+    syncpt_incr(id);
+}
+
+/* ------------------------------------------------------------ inline to memory (Eden's engine_upload.cpp) */
+#define I2M_MAX (64u << 20)
+void i2m_launch(GpuChannel* ch, u32* regs, int base) {
+    GpuI2m* t = &ch->i2m;
+    const u32* r = regs + base;
+    u64 len = (u64)r[0] * r[1];
+    t->len = t->pos = 0;
+    if (len > I2M_MAX) {
+        WARN_LIMIT(4, "gpu: an inline-to-memory launch of %u lines of %u bytes is ignored\n", r[1], r[0]);
+        return;
+    }
+    if (len > t->cap) {
+        u8* b = (u8*)realloc(t->buf, (size_t)len);
+        if (!b) {
+            WARN_LIMIT(4, "gpu: no memory for an inline-to-memory launch of %llu bytes\n", (unsigned long long)len);
+            return;
+        }
+        t->buf = b;
+        t->cap = (u32)len;
+    }
+    t->line = r[0];
+    t->lines = r[1];
+    t->addr = ((u64)(r[2] & 0xFF) << 32) | r[3];
+    t->pitch = r[4];
+    t->bh = (r[5] >> 4) & 15;
+    t->bd = (r[5] >> 8) & 15;
+    if (t->bh > 5 || t->bd > 5) {
+        WARN_LIMIT(4, "gpu: an inline-to-memory block of 2^%u x 2^%u GOBs is cut to 32\n", t->bh, t->bd);
+        if (t->bh > 5) t->bh = 5;
+        if (t->bd > 5) t->bd = 5;
+    }
+    t->w = r[6];
+    t->h = r[7];
+    t->z = r[9];
+    t->x = r[10];
+    t->y = r[11];
+    t->linear = r[12] & 1;
+    t->len = (u32)len;
+}
+static void i2m_store(const GpuI2m* t) {
+    u32 y, x;
+    if (t->linear) {
+        if (t->pitch == t->line || t->lines == 1) {
+            gmem_write(t->addr, t->buf, (u64)t->line * (t->pitch == t->line ? t->lines : 1));
+            return;
+        }
+        for (y = 0; y < t->lines; y++) gmem_write(t->addr + (u64)y * t->pitch, t->buf + (u64)y * t->line, t->line);
+    } else {
+        /* the block rows the lines fall in: the hooks once over them, then the 16 byte runs, then one record */
+        u64 gobs_x = ((u64)t->w + 63) >> 6, block = (u64)512 << (t->bh + t->bd);
+        u64 rows = ((((u64)t->h + 7) >> 3) + (1u << t->bh) - 1) >> t->bh;
+        u64 slice = (u64)(t->z >> t->bd) * rows * gobs_x * block;
+        u64 lo = slice + ((u64)(t->y >> 3) >> t->bh) * gobs_x * block;
+        u64 hi = slice + ((((u64)(t->y + t->lines - 1) >> 3) >> t->bh) + 1) * gobs_x * block;
+        gmem_before_write(t->addr + lo, hi - lo);
+        for (y = 0; y < t->lines; y++) {
+            u64 row = bl_yz(t->y + y, t->z, t->w, t->h, t->bh, t->bd);
+            for (x = 0; x < t->line;) {
+                u32 at = t->x + x, n = 16 - (at & 15);
+                if (n > t->line - x) n = t->line - x;
+                gmem_write_raw(t->addr + row + bl_x(at, t->bh, t->bd), t->buf + (u64)y * t->line + x, n);
+                x += n;
+            }
+        }
+        gpu_mem_written(t->addr + lo, hi - lo);
+    }
+}
+void i2m_data(GpuChannel* ch, u32 v) {
+    GpuI2m* t = &ch->i2m;
+    u32 n;
+    if (t->pos >= t->len) return;
+    n = t->len - t->pos < 4 ? t->len - t->pos : 4;
+    memcpy(t->buf + t->pos, &v, n);
+    t->pos += n;
+    if (t->pos == t->len) i2m_store(t);
+}
+
+/* ------------------------------------------------------------ channels */
+/* the 3D state a channel starts from: zero, but for what games expect without setting it (Eden's
+   InitializeRegisterDefaults), and ScarletNX's own: color masks enabled (Fire Emblem Three Houses and Unicorn
+   Overlord never write them), sRGB writes on (0x56E, else sRGB targets come out too dark), the render enable TRUE
+   (0x556) and its override USE_RENDER_ENABLE (0x651, as deko3d never writes it) */
+static void reset_3d(u32* r) {
+    static const float one = 1.0f;
+    u32 i, f1;
+    memcpy(&f1, &one, 4);
+    for (i = 0; i < 16; i++) {
+        r[0x300 + i * 4 + 3] = f1;     /* each viewport's depth range far */
+        r[0x280 + i * 8 + 6] = 0x6420; /* each viewport's swizzle: +x +y +z +w */
+    }
+    r[0x4D0] = 1; /* blend: add, one, zero (D3D's enums), color and alpha */
+    r[0x4D1] = 2;
+    r[0x4D2] = 1;
+    r[0x4D3] = 1;
+    r[0x4D4] = 2;
+    r[0x4D6] = 1;
+    for (i = 0; i < 8; i++) {
+        u32* b = &r[0x780 + i * 8];
+        b[1] = 1, b[2] = 2, b[3] = 1, b[4] = 1, b[5] = 2, b[6] = 1;
+    }
+    r[0x4E1] = r[0x4E2] = r[0x4E3] = 1; /* stencil: keep, always, all bits */
+    r[0x4E4] = 0x207;
+    r[0x4E6] = r[0x4E7] = 0xFFFFFFFF;
+    r[0x565] = 1; /* two sided, the back the same */
+    r[0x566] = r[0x567] = r[0x568] = 1;
+    r[0x569] = 0x207;
+    r[0x3D6] = r[0x3D7] = 0xFFFFFFFF;
+    r[0x4C3] = 0x207; /* depth test always */
+    r[0x647] = 0x900; /* front face clockwise, NVN's */
+    r[0x648] = 0x405; /* cull the back */
+    r[0x546] = f1;    /* point size */
+    for (i = 0; i < 32; i++) r[0x458 + i] = 1u << 6; /* vertex attributes constant until set */
+    r[0xDF] = 1;                                      /* rasterize */
+    r[0x3EB] = 1;                                     /* color target MRT */
+    r[0x4EC] = r[0x4ED] = f1;                         /* line widths */
+    r[0x36B] = r[0x36C] = 0x1B02;                     /* polygons filled */
+    for (i = 0; i < 8; i++) r[0x680 + i] = 0x11111111;
+    r[0x56E] = 1;
+    r[0x556] = 1;
+    r[0x651] = 0;
+}
+static void channel_reset(GpuChannel* ch) {
+    static const u32 classes[8] = {0xB197, 0xB1C0, 0xA140, 0x902D, 0xB0B5, 0, 0, 0};
+    memcpy(ch->sub_class, classes, sizeof classes);
+    reset_3d(ch->r3d);
+    memcpy(ch->r3d_shadow, ch->r3d, sizeof ch->r3d_shadow); /* the reset values count as tracked */
+    ch->r2d[0x83] = ch->r2d[0x8F] = 1; /* the 2D surfaces' depth, as NVIDIA's driver assumes */
+}
+/* the channel of syncpoint id, made at its first submission. The queue's lock held */
+static GpuChannel* channel_get(u32 id) {
+    GpuChannel* ch;
+    if (id >= 128) fatal("gpu: channel %u is past the 128 the GPU has\n", id);
+    if (g_gpu.chan[id]) return g_gpu.chan[id];
+    ch = (GpuChannel*)calloc(1, sizeof *ch);
+    if (!ch) fatal("gpu: out of memory for GPU channel %u\n", id);
+    ch->id = id;
+    channel_reset(ch);
+    g_gpu.chan[id] = ch;
+    g_gpu.nchan++;
+    return ch;
+}
+
+/* ------------------------------------------------------------ the pushbuffer (Eden's dma_pusher.cpp) */
+/* a word of the stream: 1 when it is a method call (*sub, *m, *v, *last) */
+static int pb_decode(PbBatch* b, u32 w, u32* sub, u32* m, u32* v, int* last) {
+    u32 mode, cnt;
+    if (b->cnt) {
+        *sub = b->sub;
+        *m = b->m;
+        *v = w;
+        *last = b->cnt == 1;
+        b->cnt--;
+        if (b->mode == 1)
+            b->m++;
+        else if (b->mode == 5) { /* incrementing once: the first word, then the next method for the rest */
+            b->m++;
+            b->mode = 3;
+        }
+        return 1;
+    }
+    /* a header: the method is 12 bits (open-gpu-doc's NVA16F_DMA_METHOD_ADDRESS 11:0), the subchannel 15:13, the
+       count 28:16 and the mode 31:29 */
+    mode = w >> 29;
+    cnt = (w >> 16) & 0x1FFF;
+    *sub = (w >> 13) & 7;
+    *m = w & 0xFFF;
+    switch (mode) {
+        case 1:
+        case 3:
+        case 5:
+            b->mode = mode;
+            b->sub = *sub;
+            b->m = *m;
+            b->cnt = cnt;
+            return 0;
+        case 4: /* immediate: the count is the data */
+            *v = cnt;
+            *last = 1;
+            return 1;
+        default: /* the old modes carry no data words here: a stray one would otherwise eat the methods after it */
+            if (w) LOG_LIMIT(8, "gpu: pushbuffer header %08x of mode %u is skipped\n", w, mode);
+            return 0;
+    }
+}
+enum { ENG_NONE, ENG_3D, ENG_COMPUTE, ENG_I2M, ENG_2D, ENG_DMA };
+static int engine_of(u32 cls) {
+    switch (cls & 0xFF) {
+        case 0x97: return ENG_3D;      /* MAXWELL_B 0xB197 */
+        case 0xC0: return ENG_COMPUTE; /* KEPLER_COMPUTE_B 0xB1C0 */
+        case 0x40: return ENG_I2M;     /* KEPLER_INLINE_TO_MEMORY_B 0xA140 */
+        case 0x2D: return ENG_2D;      /* FERMI_TWOD_A 0x902D */
+        case 0xB5: return ENG_DMA;     /* MAXWELL_DMA_COPY_A 0xB0B5 */
+        default: return ENG_NONE;
+    }
+}
+/* the puller's methods (open-gpu-doc's cla16f.h): semaphores, syncpoints, the subchannels' classes */
+static void puller_method(GpuChannel* ch, u32 sub, u32 m, u32 v) {
+    ch->puller[m] = v;
     switch (m) {
-        case 0x00: break;
-        case 0x07: { /* SemaphoreOperation */
-            u64 addr = ((u64)(r[4] & 0xFF) << 32) | r[5];
-            u32 op = v & 0x1F;
-            if (op == 2) { /* release */
-                if (v & (1u << 24)) {
-                    gpu_release_write(addr, &r[6], 4);
-                } /* 4 bytes only */
-                else {
-                    u32 q[4] = {r[6], 0, 0, 0};
-                    u64 t = gpu_ticks();
-                    memcpy(&q[2], &t, 8);
-                    gpu_release_write(addr, q, 16);
-                }
-            } else if (op == 1 || op == 4) { /* acquire (equal) or AcqGeq */
-                gpu_park(ch, GPU_PARK_SEMAPHORE, addr, r[6], op == 4);
-            } else if (op == 8 || op == 16) { /* AcqAnd and Reduction aren't done: the stream goes on as if they were */
-                WARN_LIMIT(4, "gpu: semaphore operation %x at %llx not done\n", op, (unsigned long long)addr);
+        case 0x00: /* SET_OBJECT */ ch->sub_class[sub] = v & 0xFFFF; break;
+        case 0x07: { /* SEMAPHORED: the operation on the semaphore at 4/5 with the payload at 6 */
+            u64 a = ((u64)(ch->puller[4] & 0xFF) << 32) | ch->puller[5];
+            u32 payload = ch->puller[6];
+            switch (v & 0x1F) {
+                case 1: gpu_park(ch, GPU_PARK_SEMAPHORE, a, payload, 0); break;
+                case 4: gpu_park(ch, GPU_PARK_SEMAPHORE, a, payload, 1); break;
+                case 2:
+                    if (v & (1u << 24)) /* RELEASE_SIZE 4 bytes */
+                        gpu_release_write(a, &payload, 4);
+                    else { /* 16 bytes: the payload, 0, and the timestamp */
+                        u32 rel[4];
+                        u64 t = gpu_ticks();
+                        rel[0] = payload;
+                        rel[1] = 0;
+                        memcpy(&rel[2], &t, 8);
+                        gpu_release_write(a, rel, 16);
+                    }
+                    break;
+                case 8:
+                case 16:
+                    /* ACQ_AND and REDUCTION aren't performed: the stream goes on as if they were */
+                    WARN_LIMIT(4, "gpu: semaphore operation %x at %llx is not performed\n", v & 0x1F,
+                               (unsigned long long)a);
+                    break;
+                default: LOG_LIMIT(4, "gpu: semaphore operation %08x is unknown\n", v); break;
             }
             break;
         }
-        case 0x1D: { /* Syncpoint */
+        case 0x1D: { /* SYNCPOINTB: increment, or wait for the threshold at 0x1C */
             u32 id = (v >> 8) & 0xFFF;
-            if (v & 1) {
-                g_renderer->stream_incr(id);
-            } else {
-                g_renderer->before_syncwait();
-                gpu_park(ch, GPU_PARK_SYNCPOINT, id, r[0x1C], 1);
+            if (v & 1)
+                stream_incr(id);
+            else {
+                if (g_renderer->before_syncwait) g_renderer->before_syncwait();
+                gpu_park(ch, GPU_PARK_SYNCPOINT, id, ch->puller[0x1C], 1);
             }
             break;
         }
         default: break;
     }
 }
-
-/* ============================================================ inline to memory */
-void i2m_launch(GpuChannel* ch, u32* regs, int base) {
-    u32 line_len = regs[base + 0], lines = regs[base + 1];
-    u64 addr = ((u64)regs[base + 2] << 32) | regs[base + 3];
-    u64 len = (u64)line_len * (lines ? lines : 1);
-    if (len > (64u << 20)) { /* the data comes inline in the pushbuffer, so this is a bad register value */
-        WARN("gpu: inline-to-memory of %llx bytes (%u lines of %u) ignored\n", (unsigned long long)len, lines,
-             line_len);
-        len = 0;
-    }
-    ch->i2m_len = (u32)len;
-    ch->i2m_pos = 0;
-    ch->i2m_addr = addr;
-    ch->i2m_linear = (regs[base + 0xC] & 1);
-    ch->i2m_pitch = regs[base + 4];
-    ch->i2m_w = line_len;
-    ch->i2m_lines = lines;
-    /* block linear dst. 0x65 = block dims (w 3:0, h 7:4, d 11:8), 0x66..0x68 size, 0x69 z, 0x6A x, 0x6B y.
-     note the width field is bits 3:0, height is 7:4 */
-    ch->i2m_bh = (regs[base + 5] >> 4) & 0xF;
-    ch->i2m_bd = (regs[base + 5] >> 8) & 0xF;
-    if (ch->i2m_bh > 5 || ch->i2m_bd > 5) { /* blocks are at most 32 GOBs (log2 5) high and deep */
-        WARN_LIMIT(4, "gpu: inline-to-memory block height %u and depth %u (log2) taken as at most 5\n", ch->i2m_bh,
-                   ch->i2m_bd);
-        if (ch->i2m_bh > 5) ch->i2m_bh = 5;
-        if (ch->i2m_bd > 5) ch->i2m_bd = 5;
-    }
-    ch->i2m_dw = regs[base + 6];
-    ch->i2m_dh = regs[base + 7];
-    ch->i2m_z = regs[base + 9];
-    ch->i2m_x = regs[base + 0xA];
-    ch->i2m_y = regs[base + 0xB];
-    if (ch->i2m_buf_cap < ch->i2m_len) {
-        u8* b = realloc(ch->i2m_buf, (size_t)ch->i2m_len + 4);
-        if (!b) {
-            WARN("gpu: no memory for %u bytes of inline-to-memory data, ignored\n", ch->i2m_len);
-            ch->i2m_len = 0;
-            return;
-        }
-        ch->i2m_buf = b;
-        ch->i2m_buf_cap = ch->i2m_len;
-    }
-}
-void i2m_data(GpuChannel* ch, u32 v) {
-    if (ch->i2m_pos >= ch->i2m_len) return;
-    u32 n = ch->i2m_len - ch->i2m_pos;
-    if (n > 4) n = 4;
-    memcpy(ch->i2m_buf + ch->i2m_pos, &v, n);
-    ch->i2m_pos += n;
-    if (ch->i2m_pos >= ch->i2m_len) {
-        if (ch->i2m_linear || (ch->i2m_lines <= 1 && !ch->i2m_dw)) { /* single line, no surface: plain copy */
-            if (ch->i2m_lines <= 1 || !ch->i2m_pitch || ch->i2m_pitch == ch->i2m_w)
-                gmem_write(ch->i2m_addr, ch->i2m_buf, ch->i2m_len);
-            else
-                for (u32 y = 0; y < ch->i2m_lines; y++)
-                    gmem_write(ch->i2m_addr + (u64)y * ch->i2m_pitch, ch->i2m_buf + (u64)y * ch->i2m_w, ch->i2m_w);
-        } else { /* bl dst: written 16 bytes at a time, results landed and the write logged once for the range */
-            u32 w = ch->i2m_w, h = ch->i2m_lines ? ch->i2m_lines : 1;
-            u32 wb = ch->i2m_dw ? ch->i2m_dw : w, hh = ch->i2m_dh ? ch->i2m_dh : h;
-            u64 hi = 0;
-            for (int pass = 0; pass < 2; pass++) {
-                if (pass && hi) {
-                    gmem_need(ch->i2m_addr, hi);
-                    if (g_gpu_before_write) g_gpu_before_write(ch->i2m_addr, hi);
-                }
-                for (u32 y = 0; y < h; y++)
-                    for (u32 x = 0; x < w;) {
-                        u32 xb = ch->i2m_x + x, n = 16 - (xb & 15);
-                        if (n > w - x) n = w - x;
-                        u64 o = bl_offset(xb, ch->i2m_y + y, ch->i2m_z, wb, hh, ch->i2m_bh, ch->i2m_bd);
-                        if (pass)
-                            gmem_write_raw(ch->i2m_addr + o, ch->i2m_buf + (u64)y * w + x, n);
-                        else if (o + n > hi)
-                            hi = o + n;
-                        x += n;
-                    }
-            }
-            gpu_mem_written(ch->i2m_addr, hi);
-        }
-    }
-}
-
-/* ============================================================ dispatch */
-static void call_method(GpuChannel* ch, u32 sub, u32 m, u32 v, int last) {
-    if (m < 0x40) {
+static void method_call(GpuChannel* ch, u32 sub, u32 m, u32 v, int last) {
+    int eng = m < 0x40 ? ENG_NONE : engine_of(ch->sub_class[sub]);
+    if (eng != ENG_3D) { /* the 3D engine's batched constants and merged draw come before what follows */
         r3d_const_flush(ch);
-        if (r3d_pending_on()) r3d_pending_flush();
-        puller_method(ch, m, v);
-        if (m == 0) { ch->sub_class[sub] = v & 0xFFFF; }
+        r3d_pending_flush();
+    }
+    if (m < 0x40) {
+        puller_method(ch, sub, m, v);
         return;
     }
-    u32 cls = ch->sub_class[sub];
-    if (r3d_pending_on() &&
-        !(cls == 0xB197 || (sub == 0 && cls != 0xB1C0 && cls != 0xA140 && cls != 0x902D && cls != 0xB0B5)))
-        r3d_pending_flush(); /* switching engines: flush pending draws */
-    if (ch->cb_n && !(cls == 0xB197 || (sub == 0 && cls != 0xB1C0 && cls != 0xA140 && cls != 0x902D && cls != 0xB0B5)))
-        r3d_const_flush(ch); /* and the constant buffer data the 3D engine holds */
-    switch (cls) {
-        case 0xB197: maxwell3d_method(ch, m, v, last); break;
-        case 0xB1C0: compute_method(ch, m, v, last); break;
-        case 0xA140: kepler_i2m_method(ch, m, v); break;
-        case 0x902D: fermi2d_method(ch, m, v); break;
-        case 0xB0B5: dma_method(ch, m, v); break;
+    switch (eng) {
+        case ENG_3D: maxwell3d_method(ch, m, v, last); break;
+        case ENG_COMPUTE: compute_method(ch, m, v, last); break;
+        case ENG_I2M: kepler_i2m_method(ch, m, v); break;
+        case ENG_2D: fermi2d_method(ch, m, v); break;
+        case ENG_DMA: dma_method(ch, m, v); break;
         default:
-            if (sub == 0)
-                maxwell3d_method(ch, m, v, last);
-            else if (sub == 1)
-                compute_method(ch, m, v, last);
-            else if (sub == 2)
-                kepler_i2m_method(ch, m, v);
-            else if (sub == 3)
-                fermi2d_method(ch, m, v);
-            else if (sub == 4)
-                dma_method(ch, m, v);
+            LOG_LIMIT(8, "gpu: method %x for class %x on subchannel %u is ignored\n", m, ch->sub_class[sub], sub);
             break;
     }
 }
 
-typedef int PbMethod(void* ctx, u32 sub, u32 m, u32 v, int last);
-/* calls fn for each method of the pushbuffer words w[0, n) of channel chan (for the log), log: say what looks wrong.
-   Method batches can spill over into the next GPFIFO entry (hw does this, so does yuzu's DmaPusher): b keeps the
-   batch state across entries or the leftover data gets parsed as headers */
-static inline u32 pb_walk(PbBatch* b, const u32* w, u32 i, u32 n, u32 chan, int log, PbMethod* fn, void* ctx) {
-    for (;;) {
-        if (b->k < b->cnt) {
-            u32 mode = b->mode, sub = b->sub, m = b->m;
-            while (b->k < b->cnt && i < n) {
-                u32 k = b->k++;
-                u32 mm = mode == 1 ? m + k : mode == 5 ? (k == 0 ? m : m + 1) : m;
-                if (fn(ctx, sub, mm, w[i++], b->k == b->cnt)) return i;
-            }
-            if (b->k < b->cnt) {
-                if (log)
-                    LOG_LIMIT(
-                        6,
-                        "gpu: method batch continues in the next GPFIFO entry (sub %u method %x mode %u, %u of %u "
-                        "words done)\n",
-                        b->sub, b->m, b->mode, b->k, b->cnt);
-                return i;
-            } /* rest comes in the next entry */
-        }
-        if (i >= n) return i;
-        u32 h = w[i++];
-        u32 mode = h >> 29, sub = (h >> 13) & 7, m = h & 0xFFF, cnt = (h >> 16) & 0x1FFF;
-        if (log && h && (mode == 0 || mode == 2 || mode >= 6)) { /* shouldn't happen in a sane stream, log it */
-            static int said;
-            if (said < 6) {
-                said++;
-                LOG("gpu: odd command header %08x (mode %u) at word %u of %u in channel %u; words around:", h, mode,
-                    i - 1, n, chan);
-                for (u32 j = i > 5 ? i - 5 : 0; j < i + 6 && j < n; j++) LOG(" %s%08x", j == i - 1 ? "*" : "", w[j]);
-                LOG("\n");
-            }
-        }
-        switch (mode) {
-            case 1:
-            case 3:
-            case 5:
-                b->mode = mode;
-                b->sub = sub;
-                b->m = m;
-                b->cnt = cnt;
-                b->k = 0;
-                break;
-            /* modes 0/2 (old Fermi), 6, 7 carry no data words (same as DmaPusher). don't treat them as batches,
-         a stray one would eat the following methods incl. syncpoint incrs */
-            case 4:
-                if (fn(ctx, sub, m, cnt, 1)) return i;
-                break;
-            default: break;
-        }
-    }
-}
-static int run_method(void* ctx, u32 sub, u32 m, u32 v, int last) {
-    GpuChannel* ch = ctx;
-    call_method(ch, sub, m, v, last);
-    return ch->park != 0;
-}
-static u32 run_pushbuffer(GpuChannel* ch, const u32* w, u32 i, u32 n) {
-    return pb_walk(&ch->pb, w, i, n, ch->id, 1, run_method, ch);
-}
-
-/* Each channel's stream as submissions are queued, in nvdrv's submit order (the GPU queue's), followed only as far as
-   the copy engine: its launches with a linear source have the source read now (dma_snap_launch, which says why). A
-   stream that waits first, on a semaphore acquire or a syncpoint, gets none for the rest of that submission: the CPU
-   may write the source after the submit and then release the wait */
-typedef struct {
-    PbBatch pb;
-    u32 id, sub_class[8];
-    int waits;
-    u32 rdma[0x200];
-    u64 job_id;
-    u32 launch_index;
-} SubmitScan;
-static SubmitScan* g_scan[128]; /* by channel (syncpoint id), made at its first submission */
-static int scan_method(void* ctx, u32 sub, u32 m, u32 v, int last) {
-    SubmitScan* s = ctx;
-    u32 cls;
-    (void)last;
-    if (m < 0x40) { /* puller methods, as puller_method and call_method read them */
-        if (m == 0)
-            s->sub_class[sub] = v & 0xFFFF;
-        else if ((m == 0x07 && ((v & 0x1F) == 1 || (v & 0x1F) == 4 || (v & 0x1F) == 8)) || (m == 0x1D && !(v & 1)))
-            s->waits = 1;
-        return s->waits;
-    }
-    cls = s->sub_class[sub];
-    if ((cls == 0xB197 && m >= 0xE00) || ((cls == 0xB197 || cls == 0xB1C0) && m == 0x6C3)) {
-        s->waits = 1; /* macros and report acquires can wait before later DMA reads */
-        return 1;
-    }
-    if (cls != 0xB0B5 && (sub != 4 || cls == 0xB197 || cls == 0xB1C0 || cls == 0xA140 || cls == 0x902D)) return 0;
-    s->rdma[m & 0x1FF] = v; /* dma_method's registers */
-    if ((m & 0x1FF) == 0xC0) dma_snap_launch(s->id, s->job_id, s->launch_index++, s->rdma, v);
-    return 0;
-}
-static void scan_submission(const void* entries, u32 n, u32 channel, u64 job_id, const u32* prefetched, int deferred) {
-    SubmitScan* s = g_scan[channel & 127];
-    u32 k;
-    if (!s) {
-        s = calloc(1, sizeof *s);
-        if (!s) fatal("gpu: out of memory for a channel\n");
-        s->id = channel;
-        s->sub_class[0] = 0xB197; /* chan_get's */
-        s->sub_class[1] = 0xB1C0;
-        s->sub_class[2] = 0xA140;
-        s->sub_class[3] = 0x902D;
-        s->sub_class[4] = 0xB0B5;
-        g_scan[channel & 127] = s;
-    }
-    s->job_id = job_id;
-    s->launch_index = 0;
-    u64 at = 0;
-    for (k = 0; k < n; k++) {
-        u64 entry;
-        memcpy(&entry, (const u8*)entries + (u64)k * 8, 8);
-        u32 words = (u32)((entry >> 42) & 0x1FFFFF);
-        if (s->waits || !prefetched || (entry >> 63)) break;
-        pb_walk(&s->pb, prefetched + at, 0, words, channel, 0, scan_method, s);
-        at += words;
-    }
-    if (k < n || deferred) s->waits = 1;
-}
-
-static GpuChannel* chan_get(u32 id) {
-    for (int i = 0; i < g_gpu.nchan; i++)
-        if (g_gpu.chan[i]->id == id) return g_gpu.chan[i];
-    if (g_gpu.nchan == (int)(sizeof g_gpu.chan / sizeof g_gpu.chan[0])) fatal("gpu: too many channels\n");
-    GpuChannel* c = calloc(1, sizeof *c);
-    if (!c) fatal("gpu: out of memory for a channel\n");
-    c->id = id;
-    c->sub_class[0] = 0xB197;
-    c->sub_class[1] = 0xB1C0;
-    c->sub_class[2] = 0xA140;
-    c->sub_class[3] = 0x902D;
-    c->sub_class[4] = 0xB0B5;
-    /* hw reset values that NVN/deko3d rely on and never write. sRGB writes default to on,
-     otherwise sRGB targets are stored linear and come out too dark */
-    c->r3d[0x56E] = 1;
-    c->r3d[0x556] = 1; /* rendering starts enabled, until SetRenderEnable supplies a condition */
-    /* Leave render-enable override at UseRenderEnable (0). NVN's conditional target initialization clears
-       must stop once their metadata matches; AlwaysRender would erase a target again after drawing it. */
-    /* the color write masks default to enabled: games that never set them draw nothing at all
-       (Eden defaults these for Sonic Mania; Unicorn Overlord and Fire Emblem need it too) */
-    memset(&c->r3d[0x680], 0x11, 8 * sizeof c->r3d[0]);
-    memcpy(c->r3d_shadow, c->r3d, sizeof c->r3d_shadow);
-    g_gpu.chan[g_gpu.nchan++] = c;
-    return c;
-}
-
-void gpu_channel_close(u32 channel) {
-    pm_lock(&g_gpulock);
-    for (int i = 0; i < g_gpu.nchan; i++)
-        if (g_gpu.chan[i]->id == channel) {
-            GpuChannel* c = g_gpu.chan[i];
-            g_gpu.chan[i] = g_gpu.chan[--g_gpu.nchan];
-            free(c->i2m_buf);
-            free(c->inline_indices);
-            free(c);
-            break;
-        }
-    /* the channel's id comes back only after this (gpu_channel_retire frees the syncpoint next), so no submission
-       of a new channel was scanned yet */
-    free(g_scan[channel & 127]);
-    g_scan[channel & 127] = NULL;
-    dma_snap_reset(channel);
-    pm_unlock(&g_gpulock);
-}
-void gpu_release_retire(u32 channel) {
-    if (g_renderer_up && g_renderer->release_retire) g_renderer->release_retire(channel);
-}
-
-/* ============================================================ waits */
-/* how long a stream waits before it goes on anyway, so a bad value can't stop its channel for good (the console
-   raises an interrupt) */
-static u64 park_timeout(u32 kind) { return kind == GPU_PARK_REPORT ? 1000000000ull : 2000000000ull; }
-/* how soon a semaphore wait reads memory again when nothing woke the GPU thread. A release from another channel's
-   stream, a syncpoint increment or a new submission makes it look again at once, but a release the game's CPU code
-   writes comes with no wake: it is polled, as Host polls a failed acquire every ACQUIRE_RETRY cycles (on Windows the
-   wait rounds up to the timer's millisecond) */
-#define GPU_ACQUIRE_RETRY_NS 500000ull
-static int park_on_syncpt(const GpuChannel* ch) { return ch->park == GPU_PARK_SYNCPOINT || ch->park == GPU_PARK_FENCE; }
+/* ------------------------------------------------------------ waits */
+#define WAIT_POLL_NS 500000ull /* a release the CPU writes has no wake: semaphore waits look again this often */
 static int park_met(const GpuChannel* ch) {
-    if (park_on_syncpt(ch)) return (i32)(syncpt_read((u32)ch->park_addr) - ch->park_val) >= 0;
-    u32 cur = gmem_r32(ch->park_addr);
-    return ch->park_geq ? (i32)(cur - ch->park_val) >= 0 : cur == ch->park_val;
+    if (ch->park == GPU_PARK_SYNCPOINT || ch->park == GPU_PARK_FENCE)
+        return (i32)(syncpt_read((u32)ch->park_addr) - ch->park_val) >= 0;
+    {
+        u32 cur = gmem_r32(ch->park_addr);
+        return ch->park_geq ? (i32)(cur - ch->park_val) >= 0 : cur == ch->park_val;
+    }
 }
 void gpu_park(GpuChannel* ch, u32 kind, u64 addr, u32 val, int geq) {
-    /* the stream reads past a release: what the CPU or host1x wrote before releasing is the stream's to see, even
-       when the release came before the stream got here */
-    g_renderer->mem_may_have_changed();
     if ((kind == GPU_PARK_SYNCPOINT || kind == GPU_PARK_FENCE) && addr >= SYNCPT_IDS) {
-        WARN_LIMIT(4, "gpu: channel %u's stream waits for syncpoint %llu, past the %u there are, and goes on\n", ch->id,
-                   (unsigned long long)addr, SYNCPT_IDS);
+        WARN_LIMIT(8, "gpu: a wait for syncpoint %llu, past the %u there are, doesn't wait\n", (unsigned long long)addr,
+                   SYNCPT_IDS);
         return;
     }
     ch->park = kind;
     ch->park_addr = addr;
     ch->park_val = val;
     ch->park_geq = geq;
+    /* what the CPU wrote before releasing the wait is for the stream to see, met already or not */
     if (park_met(ch))
         ch->park = 0;
-    else
-        ch->park_end = plat_ns() + park_timeout(kind);
+    else /* the console raises an interrupt for a wait nothing ends; here the stream goes on after a while */
+        ch->park_end = plat_ns() + (kind == GPU_PARK_REPORT ? 1000000000ull : 2000000000ull);
+    may_have_changed();
 }
-/* 1 when the channel can go on: it waits for nothing, what it waits for came, or it waited past its time. Otherwise
-   *wake moves up to when to look again */
-static int park_over(GpuChannel* ch, u64* wake) {
-    if (!ch->park) return 1;
-    if (!park_met(ch)) {
-        u64 now = plat_ns();
-        if (now < ch->park_end) {
-            u64 t = ch->park_end;
-            if (!park_on_syncpt(ch) && now + GPU_ACQUIRE_RETRY_NS < t) t = now + GPU_ACQUIRE_RETRY_NS;
-            if (t < *wake) *wake = t;
-            return 0;
-        }
-        u32 ms = (u32)(park_timeout(ch->park) / 1000000);
-        if (ch->park == GPU_PARK_FENCE)
-            WARN_LIMIT(16,
-                       "gpu: a submission on channel %u waited %u ms for its fence, syncpoint %u to reach %u (it is at "
-                       "%u), and runs anyway\n",
-                       ch->id, ms, (u32)ch->park_addr, ch->park_val, syncpt_read((u32)ch->park_addr));
-        else if (ch->park == GPU_PARK_SYNCPOINT)
-            WARN_LIMIT(16, "gpu: channel %u waited %u ms for syncpoint %u to reach %u (it is at %u), and goes on\n",
-                       ch->id, ms, (u32)ch->park_addr, ch->park_val, syncpt_read((u32)ch->park_addr));
-        else
-            WARN_LIMIT(16, "gpu: channel %u waited %u ms for %s %llx to %s %x (it has %x), and goes on\n", ch->id, ms,
-                       ch->park == GPU_PARK_REPORT ? "report semaphore" : "semaphore",
-                       (unsigned long long)ch->park_addr, ch->park_geq ? "reach" : "equal", ch->park_val,
-                       gmem_r32(ch->park_addr));
+static const char* park_name(u32 kind) {
+    switch (kind) {
+        case GPU_PARK_SEMAPHORE: return "semaphore";
+        case GPU_PARK_REPORT: return "report semaphore";
+        case GPU_PARK_SYNCPOINT: return "syncpoint";
+        default: return "fence";
     }
-    ch->park = 0;
-    /* what ended the wait may be the game's CPU code, which can have written the data the stream reads next */
-    g_renderer->mem_may_have_changed();
-    return 1;
 }
-
-/* Submissions run on a thread of their own, as on the console: the ioctl only queues them, and the fence
-   it returns (the channel's syncpoint, incremented once the job is done) tells the game when the work is complete.
-   Processed inside the ioctl, the work held the game's submit lock for most of each frame: Tears of the Kingdom's
-   main thread waited on it nearly all the time and loading took minutes.
-   Each channel's jobs run in order. A channel whose stream waits (gpu_park) holds up only its own later jobs and the
-   calls (gpu_call) that wait for it, and the GPU thread goes on with the others', which may be what it waits for:
-   NVN and deko3d wait on one queue for a semaphore another queue's stream releases, and the waiting queue can be
-   flushed first. The jobs are a list, oldest first: game threads add at the end, the GPU thread removes any job that
-   is done, and reads only the jobs that were there when it last looked under the lock. A list of nodes, not an
-   array with index links: the GPU thread reads a job without the lock while game threads add, so a job must never
-   move, and jobs held behind a wait have no bound to size an array by */
-typedef struct GpuJob {
-    struct GpuJob* next;
-    u32 channel, incs;
-    u32 wait_id, wait_val; /* a fence to wait for first (wait_id ~0: none, or the wait is asked for) */
-    u32 expect;            /* the syncpoint value the job's fence promised */
-    void (*fn)(void*);     /* or a call (gpu_call), made once the jobs before it on chans[0..nchans) are done */
-    void* arg;
-    u32 chans[4], nchans;
-    u32 k, i; /* where the job goes on: word i of entry k */
-    u64 id;
-    u32 dma_launch_index;
-    u32 n; /* GPFIFO entries */
-    u32* prefetched;
-    u32* current; /* fetched commands up to the next SYNC entry, retained while parked */
-    struct {
-        u64 value;
-        const u32* words;
-    } e[];
-} GpuJob;
-/* how many jobs that can run may wait in the queue before a submission waits for room. Jobs held behind a wait
-   don't count: the submission that releases it must get in */
-#define GPU_QUEUE 256
-static GpuJob *g_qfirst, *g_qlast;
-static u32 g_qn;    /* jobs queued and not done */
-static u32 g_qheld; /* of those, the jobs the GPU thread's last look couldn't run */
-static u32 g_qgen;  /* bumped by every job queued and every gpu_kick: the GPU thread sleeps only on the latest */
-static PMutex g_qlock = PMUTEX_INIT; /* gpu_kick may come before gpu_init */
-static PCond g_qcv;
-static int g_qthread;
-static u64 g_job_id;
-
-/* runs a job as far as it goes, and returns 1 when it's done. *ran is set when any of it ran */
-static int gpu_job_run(GpuJob* j, u64* wake, int* ran) {
-    pm_lock(&g_gpulock);
-    GpuChannel* ch = chan_get(j->channel);
-    ch->dma_job_id = j->id;
-    ch->dma_launch_index = j->dma_launch_index;
-    if (j->wait_id != ~0u) { /* the fence is the stream's first wait */
-        gpu_park(ch, GPU_PARK_FENCE, j->wait_id, j->wait_val, 1);
-        j->wait_id = ~0u;
+/* 1 when the channel's wait is over (met, or timed out); otherwise the ns to look again in, or -1 for a wake */
+static int park_over(GpuChannel* ch, i64* again) {
+    u64 now;
+    if (park_met(ch)) {
+        ch->park = 0;
+        may_have_changed();
+        return 1;
     }
-    if (!park_over(ch, wake)) {
-        pm_unlock(&g_gpulock);
-        return 0;
+    now = plat_ns();
+    if (now >= ch->park_end) {
+        WARN_LIMIT(16, "gpu: channel %u waited %s s for %s %llx to %s %u (it is %u), and goes on\n", ch->id,
+                   ch->park == GPU_PARK_REPORT ? "1" : "2", park_name(ch->park), (unsigned long long)ch->park_addr,
+                   ch->park_geq ? "reach" : "be", ch->park_val,
+                   ch->park == GPU_PARK_SYNCPOINT || ch->park == GPU_PARK_FENCE ? syncpt_read((u32)ch->park_addr)
+                                                                               : gmem_r32(ch->park_addr));
+        ch->park = 0;
+        may_have_changed();
+        return 1;
     }
-    *ran = 1;
-    if (ch->mme.running) mme_resume(ch); /* a macro a wait stopped goes on before the stream's next word */
-    while (j->k < j->n && !ch->park) {
-        u64 ent = j->e[j->k].value;
-        u32 words = (u32)((ent >> 42) & 0x1FFFFF);
-        if (j->i < words) {
-            const u32* buf = j->e[j->k].words;
-            if (!buf) {
-                /* SYNC stops command prefetch until the preceding work has executed. Once reached, fetch
-                   this region through (but not including) the next SYNC before any of its commands can release
-                   memory back to the CPU. Fetching one entry at a time lets those releases invalidate later
-                   control commands in the same region. A parked stream keeps the fetched region intact. */
-                u32 end = j->k + 1;
-                u64 total = words;
-                while (end < j->n && !(j->e[end].value >> 63)) {
-                    total += (j->e[end].value >> 42) & 0x1fffff;
-                    end++;
-                }
-                free(j->current);
-                j->current = malloc(total * 4);
-                if (!j->current) fatal("Out of memory fetching GPU commands");
-                u64 at = 0;
-                for (u32 k = j->k; k < end; k++) {
-                    u64 entry = j->e[k].value;
-                    u32 nw = (entry >> 42) & 0x1fffff;
-                    j->e[k].words = j->current + at;
-                    gmem_read(entry & 0xfffffffffcull, j->current + at, (u64)nw * 4);
-                    at += nw;
-                }
-                buf = j->e[j->k].words;
-            }
-            j->i = run_pushbuffer(ch, buf, j->i, words);
-            if (ch->park) break;
-        }
-        j->k++;
-        j->i = 0;
-    }
-    int parked = ch->park != 0;
-    j->dma_launch_index = ch->dma_launch_index;
-    r3d_const_flush(ch);
-    r3d_pending_flush();
-    pm_unlock(&g_gpulock);
-    if (parked) {
-        if (g_renderer->stream_end) g_renderer->stream_end();
-        return 0;
-    }
-    dma_snap_finish(j->channel, j->id);
-    /* the submission's own increments, after its work like the stream's (nothing else of a job's end is seen) */
-    for (u32 i = 0; i < j->incs; i++) g_renderer->stream_incr(j->channel);
-    if (g_renderer->stream_end) g_renderer->stream_end();
-    /* a stream that increments less than its fence promised leaves whoever waits for the fence waiting 2 s. Increments
-       the renderer still holds count: they happen once the work before them lands */
-    u32 value = g_renderer->release_value ? g_renderer->release_value(j->channel) : syncpt_read(j->channel);
-    if ((i32)(value - j->expect) < 0)
-        WARN_LIMIT(16, "gpu: channel %u's submission left its syncpoint at %u, short of the %u its fence promised\n",
-                   j->channel, syncpt_read(j->channel), j->expect);
-    return 1;
-}
-static int chan_in(const u32* set, u32 n, u32 c) {
-    for (u32 i = 0; i < n; i++)
-        if (set[i] == c) return 1;
+    *again = (i64)(ch->park_end - now);
+    if ((ch->park == GPU_PARK_SEMAPHORE || ch->park == GPU_PARK_REPORT) && *again > (i64)WAIT_POLL_NS)
+        *again = (i64)WAIT_POLL_NS;
     return 0;
 }
-/* one look at the queue, oldest first: a job goes on unless an older job of its channel isn't done, and a call once
-   no older job of the channels it names is left and no older call is. Returns 1 when anything ran */
-static int gpu_pass(u64* wake) {
-    u32 held[sizeof g_gpu.chan / sizeof g_gpu.chan[0]]; /* the channels with a job not done so far: their later jobs
-                                                          wait behind it */
-    u32 nheld = 0, skipped = 0;
-    int ran = 0, call_held = 0;
-    pm_lock(&g_qlock);
-    GpuJob* last = g_qlast; /* the jobs after it were added since: their links aren't read */
-    GpuJob *prev = NULL, *j = g_qfirst;
-    pm_unlock(&g_qlock);
-    while (j) {
-        int is_last = j == last, done = 0;
-        if (j->fn) {
-            u32 c = 0;
-            while (c < j->nchans && !chan_in(held, nheld, j->chans[c])) c++;
-            if (!call_held && c == j->nchans) {
-                j->fn(j->arg);
-                done = ran = 1;
-            } else
-                call_held = 1; /* calls stay in order */
-        } else if (!chan_in(held, nheld, j->channel)) {
-            done = gpu_job_run(j, wake, &ran);
-            if (!done && nheld < sizeof held / sizeof held[0]) held[nheld++] = j->channel;
+
+/* ------------------------------------------------------------ the queue */
+/* An item of the GPU thread's queue: a job (a submission's entries) or a call. Items are linked in queue order; the
+   GPU thread alone takes them out, and reads them unlocked while it runs one, so an item never moves. A job's
+   entries, their word offsets and the words fetched at submission are one allocation with it */
+typedef struct GpuItem GpuItem;
+struct GpuItem {
+    GpuItem* next;
+    void (*fn)(void*); /* set for a call */
+    void* arg;
+    u32 chans[4], nchans;
+    u64 id; /* a job's */
+    u32 chan, incs, wait_id, wait_val, expect;
+    u32 n, pf;        /* the entries, and those before the first SYNC entry, fetched at submission into words */
+    u32 entry, word;  /* where the stream goes on */
+    int started;
+    u32* late;        /* the entries the GPU thread fetched: [late_first, late_end) */
+    u32 late_cap, late_first, late_end;
+};
+#define QUEUE_ROOM 256 /* runnable jobs at most: jobs of a waiting channel don't count */
+static PMutex g_qlk = PMUTEX_INIT;
+static PCond g_qcv;
+static int g_qcv_ready, g_qthread;
+static GpuItem *g_qhead, *g_qtail;
+static u64 g_qgen;           /* bumped by each new item and kick: a pass that saw an older one looks again */
+static u32 g_qjobs[128];     /* each channel's queued jobs */
+static u32 g_qtotal;
+static u8 g_qparked[128];    /* the channel's oldest job waits (gpu_park) */
+static u8 g_scan_stale[128]; /* the channel closed: its submission scan starts again from reset */
+static u64 g_job_ids;
+
+/* a job's block after the item: its entries, each fetched entry's first word (in the words fetched at submission,
+   or in late), then the words */
+static u64* job_ent(const GpuItem* j) { return (u64*)(void*)(j + 1); }
+static u32* job_off(const GpuItem* j) { return (u32*)(void*)(job_ent(j) + j->n); }
+static u32* job_prefetched(const GpuItem* j) { return job_off(j) + j->n; }
+static u32 entry_words(u64 e) { return (u32)((e >> 42) & 0x1FFFFF); }
+static u64 entry_addr(u64 e) { return e & 0xFFFFFFFFFCull; }
+static const u32* job_words(const GpuItem* j, u32 e) {
+    return (e < j->pf ? job_prefetched(j) : j->late) + job_off(j)[e];
+}
+/* the entry e the GPU thread reached was not fetched at submission: it and those after it up to the next SYNC entry
+   are fetched now, before any of their methods can hand memory back to the CPU */
+static int fetch_late(GpuItem* j, u32 e) {
+    u32 end = e + 1, k;
+    u64 total = entry_words(job_ent(j)[e]);
+    while (end < j->n && !(job_ent(j)[end] >> 63)) total += entry_words(job_ent(j)[end++]);
+    if (total > j->late_cap) {
+        u32* b;
+        if (total > ((size_t)-1) / 4 || !(b = (u32*)realloc(j->late, (size_t)total * 4))) {
+            WARN_LIMIT(4, "gpu: no memory to fetch %llu pushbuffer words\n", (unsigned long long)total);
+            return 0;
         }
-        GpuJob* next = is_last ? NULL : j->next;
-        if (done) {
-            pm_lock(&g_qlock);
+        j->late = b;
+        j->late_cap = (u32)total;
+    }
+    total = 0;
+    for (k = e; k < end; k++) {
+        u32 n = entry_words(job_ent(j)[k]);
+        job_off(j)[k] = (u32)total;
+        gmem_read(entry_addr(job_ent(j)[k]), j->late + total, (u64)n * 4);
+        total += n;
+    }
+    j->late_first = e;
+    j->late_end = end;
+    return 1;
+}
+/* what the stream leaves for the renderer when it stops, at its end or at a wait */
+static void stream_stop(GpuChannel* ch) {
+    r3d_const_flush(ch);
+    r3d_pending_flush();
+    if (g_renderer->stream_end) g_renderer->stream_end();
+}
+static void job_end(const GpuItem* j, GpuChannel* ch) {
+    u32 i, v;
+    r3d_const_flush(ch);
+    r3d_pending_flush();
+    gpu_signal_point();
+    dma_snap_finish(j->chan, j->id);
+    for (i = 0; i < j->incs; i++) stream_incr(j->chan);
+    if (g_renderer->stream_end) g_renderer->stream_end();
+    v = g_renderer->release_value ? g_renderer->release_value(j->chan) : syncpt_read(j->chan);
+    if ((i32)(v - j->expect) < 0)
+        WARN_LIMIT(8, "gpu: channel %u ended a submission at syncpoint value %u, short of the %u it promised\n",
+                   j->chan, v, j->expect);
+}
+/* runs a job on the GPU thread, the queue unlocked: 1 when it ran to its end, 0 when it waits */
+static int run_job(GpuItem* j) {
+    GpuChannel* ch = g_gpu.chan[j->chan];
+    ch->dma_job_id = j->id;
+    if (!j->started) {
+        j->started = 1;
+        ch->dma_launch_index = 0;
+        if (j->wait_id != ~0u) { /* the fence is the stream's first wait, as nvgpu puts a syncpoint wait first */
+            if (g_renderer->before_syncwait) g_renderer->before_syncwait();
+            gpu_park(ch, GPU_PARK_FENCE, j->wait_id, j->wait_val, 1);
+            if (ch->park) {
+                stream_stop(ch);
+                return 0;
+            }
+        }
+    }
+    if (ch->mme.running) {
+        mme_resume(ch);
+        if (ch->park) {
+            stream_stop(ch);
+            return 0;
+        }
+    }
+    while (j->entry < j->n) {
+        u32 e = j->entry, len = entry_words(job_ent(j)[e]);
+        const u32* w;
+        if (e >= j->pf && (e < j->late_first || e >= j->late_end) && !fetch_late(j, e)) len = 0;
+        w = len ? job_words(j, e) : NULL;
+        while (j->word < len) {
+            u32 sub, m, v;
+            int last;
+            if (pb_decode(&ch->pb, w[j->word++], &sub, &m, &v, &last)) {
+                method_call(ch, sub, m, v, last);
+                if (ch->park) {
+                    stream_stop(ch);
+                    return 0;
+                }
+            }
+        }
+        j->entry++;
+        j->word = 0;
+    }
+    job_end(j, ch);
+    return 1;
+}
+static void item_free(GpuItem* it) {
+    free(it->late);
+    free(it);
+}
+/* the jobs the GPU thread can run now, for the queue's room. The queue's lock held */
+static u32 runnable(void) {
+    u32 n = g_qtotal, c;
+    for (c = 0; c < 128; c++)
+        if (g_qparked[c]) n -= g_qjobs[c];
+    return n;
+}
+/* one pass over the queue, its lock held (dropped while an item runs): 1 when something ran. *wake is the time to
+   look again at the waits */
+static int run_pass(i64* wake) {
+    u8 blocked[128]; /* an older job of the channel is still queued */
+    int calls_blocked = 0;
+    GpuItem *it, *prev = NULL;
+    memset(blocked, 0, sizeof blocked);
+    for (it = g_qhead; it; prev = it, it = it->next) {
+        GpuChannel* ch;
+        int done;
+        if (it->fn) {
+            u32 k;
+            int ok = !calls_blocked;
+            for (k = 0; k < it->nchans; k++)
+                if (it->chans[k] < 128 && blocked[it->chans[k]]) ok = 0;
+            if (!ok) { /* calls keep their order */
+                calls_blocked = 1;
+                continue;
+            }
             if (prev)
-                prev->next = j->next;
+                prev->next = it->next;
             else
-                g_qfirst = j->next;
-            if (g_qlast == j) g_qlast = prev;
-            g_qn--;
-            pc_broadcast(&g_qcv); /* room for a gpu_queue waiting */
-            pm_unlock(&g_qlock);
-            free(j->prefetched);
-            free(j->current);
-            free(j);
-        } else {
-            skipped++;
-            prev = j;
+                g_qhead = it->next;
+            if (g_qtail == it) g_qtail = prev;
+            pm_unlock(&g_qlk);
+            it->fn(it->arg);
+            item_free(it);
+            pm_lock(&g_qlk);
+            return 1;
         }
-        j = next;
+        if (blocked[it->chan]) continue;
+        blocked[it->chan] = 1;
+        ch = g_gpu.chan[it->chan];
+        if (g_qparked[it->chan]) {
+            i64 again = -1;
+            int over;
+            pm_unlock(&g_qlk);
+            over = park_over(ch, &again);
+            pm_lock(&g_qlk);
+            if (!over) {
+                if (again >= 0 && (*wake < 0 || again < *wake)) *wake = again;
+                continue;
+            }
+            g_qparked[it->chan] = 0;
+        }
+        pm_unlock(&g_qlk);
+        done = run_job(it);
+        pm_lock(&g_qlk);
+        if (!done)
+            g_qparked[it->chan] = 1; /* its jobs make room for others */
+        else {
+            if (prev)
+                prev->next = it->next;
+            else
+                g_qhead = it->next;
+            if (g_qtail == it) g_qtail = prev;
+            g_qjobs[it->chan]--;
+            g_qtotal--;
+            item_free(it);
+        }
+        pc_broadcast(&g_qcv);
+        return 1;
     }
-    pm_lock(&g_qlock);
-    g_qheld = skipped;
-    pc_broadcast(&g_qcv);
-    pm_unlock(&g_qlock);
-    return ran;
+    return 0;
 }
-static void gpu_thread(void* p) {
-    (void)p;
+static void gpu_thread(void* arg) {
+    (void)arg;
+    pm_lock(&g_qlk);
     for (;;) {
-        pm_lock(&g_qlock);
-        while (!g_qn) pc_wait(&g_qcv, &g_qlock, -1);
-        u32 gen = g_qgen;
-        pm_unlock(&g_qlock);
-        u64 wake = ~0ull;
-        if (gpu_pass(&wake)) continue;
-        /* every job waits: until a job is queued, a kick, or a semaphore wait is due to read memory again. A wake that
-           is already past (wake <= now) looks again at once */
-        pm_lock(&g_qlock);
-        if (g_qgen == gen) {
-            u64 now = plat_ns();
-            if (wake == ~0ull)
-                pc_wait(&g_qcv, &g_qlock, -1);
-            else if (wake > now)
-                pc_wait(&g_qcv, &g_qlock, (i64)(wake - now));
-        }
-        pm_unlock(&g_qlock);
+        u64 gen = g_qgen;
+        i64 wake = -1;
+        if (run_pass(&wake)) continue;
+        /* a whole pass ran nothing: sleep until a new item, a kick, or the next look at a wait */
+        if (gen == g_qgen) pc_wait(&g_qcv, &g_qlk, wake);
     }
 }
-void gpu_kick(void) {
-    pm_lock(&g_qlock);
+static void queue_init(void) {
+    if (!g_qcv_ready) {
+        pc_init(&g_qcv);
+        g_qcv_ready = 1;
+    }
+}
+/* the queue's lock held */
+static void queue_append(GpuItem* it) {
+    it->next = NULL;
+    if (g_qtail)
+        g_qtail->next = it;
+    else
+        g_qhead = it;
+    g_qtail = it;
     g_qgen++;
-    if (g_qthread) pc_broadcast(&g_qcv);
-    pm_unlock(&g_qlock);
-}
-
-void gpu_init(void) {
-    pm_init(&g_gpulock);
-    pc_init(&g_qcv);
-}
-
-static void gpu_queue(GpuJob* j) {
-    pm_lock(&g_qlock);
     if (!g_qthread) {
         g_qthread = 1;
-        if (plat_thread(gpu_thread, NULL, (size_t)16 << 20)) fatal("could not start the GPU thread");
+        if (plat_thread(gpu_thread, NULL, (size_t)16 << 20)) fatal("gpu: could not start the GPU thread\n");
     }
-    /* signed: a pass removing jobs the last one held leaves g_qn below g_qheld until it ends */
-    while ((i64)g_qn - (i64)g_qheld >= GPU_QUEUE) pc_wait(&g_qcv, &g_qlock, -1);
-    j->next = NULL;
-    if (g_qlast)
-        g_qlast->next = j;
-    else
-        g_qfirst = j;
-    g_qlast = j;
-    g_qn++;
-    g_qgen++;
     pc_broadcast(&g_qcv);
-    pm_unlock(&g_qlock);
 }
-volatile u64 g_gpu_submits;
-void gpu_submit(const void* e, u32 n, u32 channel, u32 incs, u32 wait_id, u32 wait_val, u32 expect) {
-    g_gpu_submits++;
-    g_renderer->mem_may_have_changed();
-    GpuJob* j = calloc(1, sizeof *j + (u64)n * sizeof j->e[0]);
-    if (!j) fatal("Out of memory queueing a GPU submission");
+void gpu_init(void) {
+    pm_lock(&g_qlk);
+    queue_init();
+    pm_unlock(&g_qlk);
+}
+void gpu_kick(void) {
+    pm_lock(&g_qlk);
+    g_qgen++;
+    if (g_qcv_ready) pc_broadcast(&g_qcv);
+    pm_unlock(&g_qlk);
+}
+void gpu_call(void (*fn)(void*), void* arg, const u32* chans, u32 nchans) {
+    GpuItem* it = (GpuItem*)calloc(1, sizeof *it);
+    if (!it) fatal("gpu: out of memory queueing a call\n");
+    it->fn = fn;
+    it->arg = arg;
+    if (nchans > 4) nchans = 4;
+    if (nchans) memcpy(it->chans, chans, nchans * sizeof *chans);
+    it->nchans = nchans;
+    pm_lock(&g_qlk);
+    queue_init();
+    queue_append(it);
+    pm_unlock(&g_qlk);
+}
+
+/* ------------------------------------------------------------ the submission scan */
+/* Each launch of the copy engine with a linear source has its source read at submission (dma.c's dma_snap_launch),
+   since games free a copy's source right after submitting it and the GPU thread may run the copy frames later. The
+   scan follows each channel's stream only as far as the copy engine needs, with its own subchannel classes and copy
+   registers, and stops for good at anything after which the CPU may write the source first: a wait, a macro (which
+   can wait), a report operation, a SYNC entry or a fence. A channel the GPU thread has caught up with starts again
+   from the channel's own state */
+typedef struct {
+    u32 sub_class[8];
+    PbBatch pb;
+    u32 rdma[0x200];
+    int stopped;
+} GpuScan;
+static GpuScan g_scan[128];
+static PMutex g_submit_lk = PMUTEX_INIT; /* the scans in queue order */
+/* 0 when the scan stops at this method */
+static int scan_method(GpuScan* s, u32 chan, u64 job, u32* launches, u32 sub, u32 m, u32 v) {
+    int eng;
+    if (m < 0x40) {
+        if (m == 0) s->sub_class[sub] = v & 0xFFFF;
+        if (m == 7 && ((v & 0x1F) == 1 || (v & 0x1F) == 4 || (v & 0x1F) == 8)) return 0;
+        if (m == 0x1D && !(v & 1)) return 0;
+        return 1;
+    }
+    eng = engine_of(s->sub_class[sub]);
+    if (eng == ENG_3D && (m >= 0xE00 || m == 0x6C3)) return 0;
+    if (eng == ENG_COMPUTE && m == 0x6C3) return 0;
+    if (eng == ENG_DMA && m < 0x200) {
+        s->rdma[m] = v;
+        if (m == 0xC0) dma_snap_launch(chan, job, (*launches)++, s->rdma, v);
+    }
+    return 1;
+}
+static void scan_job(GpuScan* s, const GpuItem* j) {
+    u32 e, i, launches = 0;
+    if (j->wait_id != ~0u) { /* nothing was fetched: the CPU may write sources before the fence */
+        s->stopped = 1;
+        return;
+    }
+    for (e = 0; e < j->pf && !s->stopped; e++) {
+        const u32* w = job_prefetched(j) + job_off(j)[e];
+        u32 len = entry_words(job_ent(j)[e]);
+        for (i = 0; i < len; i++) {
+            u32 sub, m, v;
+            int last;
+            if (pb_decode(&s->pb, w[i], &sub, &m, &v, &last) &&
+                !scan_method(s, j->chan, j->id, &launches, sub, m, v)) {
+                s->stopped = 1;
+                break;
+            }
+        }
+    }
+    if (j->pf < j->n) s->stopped = 1; /* a SYNC entry: the rest is fetched when the stream gets there */
+}
+/* a job for the entries, with those before the first SYNC entry fetched now (none when a fence comes first): the
+   guest may reuse its command ring once the ioctl returns */
+static GpuItem* job_new(const void* entries, u32 n, u32 wait_id) {
+    u64 words = 0, size;
+    u32 e, pf = 0;
+    GpuItem* j;
+    const u8* src = (const u8*)entries;
+    if (wait_id == ~0u)
+        for (pf = 0; pf < n; pf++) {
+            u64 en;
+            memcpy(&en, src + (size_t)pf * 8, 8);
+            if (en >> 63) break; /* SYNC: this entry and the rest wait until the stream gets there */
+            if (words + entry_words(en) > (64u << 20) / 4) break; /* the rest is fetched when reached */
+            words += entry_words(en);
+        }
+    /* the item, the entries (8-byte aligned after it), their offsets, the words */
+    size = sizeof(GpuItem) + (u64)n * 8 + (u64)n * 4 + words * 4;
+    if (size > (size_t)-1 || !(j = (GpuItem*)calloc(1, (size_t)size)))
+        fatal("gpu: out of memory queueing %u entries\n", n);
     j->n = n;
-    j->channel = channel;
+    if (n) memcpy(job_ent(j), entries, (size_t)n * 8);
+    j->pf = pf;
+    words = 0;
+    for (e = 0; e < pf; e++) {
+        u32 k = entry_words(job_ent(j)[e]);
+        job_off(j)[e] = (u32)words;
+        gmem_read_raw(entry_addr(job_ent(j)[e]), job_prefetched(j) + words, (u64)k * 4);
+        words += k;
+    }
+    return j;
+}
+void gpu_submit(const void* entries, u32 n, u32 channel, u32 incs, u32 wait_id, u32 wait_val, u32 expect) {
+    GpuItem* j;
+    GpuScan* s;
+    GpuChannel* ch;
+    int idle, stale;
+    if (channel >= 128) fatal("gpu: a submission on channel %u, past the 128 the GPU has\n", channel);
+    pm_lock(&g_submit_lk);
+    j = job_new(entries, n, wait_id);
+    j->chan = channel;
     j->incs = incs;
     j->wait_id = wait_id;
     j->wait_val = wait_val;
     j->expect = expect;
-    j->id = __atomic_add_fetch(&g_job_id, 1, __ATOMIC_RELAXED);
-    /* SYNC (bit 63) postpones prefetch until the GPU reaches that entry. A submission fence also postpones reads.
-       Copy the earlier commands before returning to the guest, which may reuse its command ring. */
-    u64 total = 0;
-    u32 prefetch_end = n;
-    for (u32 k = 0; k < n; k++) {
-        memcpy(&j->e[k].value, (const u8*)e + (u64)k * 8, 8);
-        if (k < prefetch_end && (wait_id != ~0u || (j->e[k].value >> 63))) prefetch_end = k;
-        if (k < prefetch_end) total += (j->e[k].value >> 42) & 0x1fffff;
+    pm_lock(&g_qlk);
+    queue_init();
+    stale = !g_gpu.chan[channel] || g_scan_stale[channel];
+    ch = channel_get(channel);
+    g_scan_stale[channel] = 0;
+    idle = !g_qjobs[channel]; /* nothing of the channel is queued or running: its state stands still */
+    j->id = ++g_job_ids;
+    pm_unlock(&g_qlk);
+    s = &g_scan[channel];
+    if (stale || idle) {
+        memcpy(s->sub_class, ch->sub_class, sizeof s->sub_class);
+        s->pb = ch->pb;
+        memcpy(s->rdma, ch->rdma, sizeof s->rdma);
+        s->stopped = 0;
     }
-    if (total) {
-        j->prefetched = malloc(total * 4);
-        if (!j->prefetched) fatal("Out of memory prefetching GPU commands");
-        u64 at = 0;
-        for (u32 k = 0; k < prefetch_end; k++) {
-            u64 entry = j->e[k].value;
-            u32 words = (entry >> 42) & 0x1fffff;
-            j->e[k].words = j->prefetched + at;
-            gmem_read_raw(entry & 0xfffffffffcull, j->prefetched + at, (u64)words * 4);
-            at += words;
-        }
-    }
-    scan_submission(e, prefetch_end, channel, j->id, j->prefetched, prefetch_end != n);
-    gpu_queue(j);
+    if (!s->stopped) scan_job(s, j);
+    may_have_changed(); /* before the job can run: what the CPU wrote is for it to see */
+    pm_lock(&g_qlk);
+    while (runnable() >= QUEUE_ROOM) pc_wait(&g_qcv, &g_qlk, -1);
+    g_qjobs[channel]++;
+    g_qtotal++;
+    queue_append(j);
+    pm_unlock(&g_qlk);
+    g_gpu_submits++;
+    pm_unlock(&g_submit_lk);
 }
-void gpu_call(void (*fn)(void*), void* arg, const u32* chans, u32 nchans) {
-    GpuJob* j = calloc(1, sizeof *j);
-    if (!j) fatal("Out of memory queueing a GPU call");
-    if (nchans > 4) fatal("gpu_call: %u channels, 4 at most", nchans);
-    j->fn = fn;
-    j->arg = arg;
-    j->wait_id = ~0u;
-    if (nchans) memcpy(j->chans, chans, nchans * sizeof *chans);
-    j->nchans = nchans;
-    gpu_queue(j);
+void gpu_channel_close(u32 channel) {
+    GpuChannel* ch;
+    if (channel >= 128) return;
+    r3d_pending_flush(); /* a draw it merged goes first */
+    pm_lock(&g_qlk);
+    ch = g_gpu.chan[channel];
+    g_gpu.chan[channel] = NULL;
+    if (ch) g_gpu.nchan--;
+    g_qparked[channel] = 0;
+    g_scan_stale[channel] = 1;
+    pm_unlock(&g_qlk);
+    dma_snap_reset(channel);
+    if (ch) {
+        free(ch->inline_indices);
+        free(ch->i2m.buf);
+        free(ch);
+    }
+}
+void gpu_release_retire(u32 channel) {
+    if (g_renderer->release_retire) g_renderer->release_retire(channel);
 }

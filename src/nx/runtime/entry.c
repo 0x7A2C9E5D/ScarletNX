@@ -1,39 +1,44 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* executable entry point */
-#include "nx/runtime/main.h"
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The program's entry: the host driver's commands (extract, recompile) first, and anything else is a game to run */
+#include <stdio.h>
+
 #include "nx/runtime/driver/driver.h"
+#include "nx/runtime/main.h"
 #ifdef SNX_WITH_GUI
 #include "gui/gui.h"
-#endif
-#include <stdio.h>
-#ifdef __APPLE__
+#if defined(__APPLE__)
 #include <TargetConditionals.h>
-#endif
-#if defined(__APPLE__) && TARGET_OS_IPHONE && defined(SNX_WITH_GUI)
-/* iOS: SDL's main starts UIKit and calls this one as SDL_main; the menu's game runs here after it (src/gui/apple.m) */
+#if TARGET_OS_IOS
 #include "gui/apple.h"
-#include <SDL3/SDL_main.h>
-#define SNX_PLAY_AFTER_MENU 1
+#define SNX_MENU_THEN_GAME 1
 #endif
+#endif
+#endif
+
+/* Android's game activity finds it by name in libscarletnx.so (platform/android_run.c does the same) */
+__attribute__((visibility("default"))) int main(int argc, char** argv);
+
 int main(int argc, char** argv) {
+    int result;
+    /* a launcher reads our progress through pipes: lines as they end, errors at once */
+    setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
+    setvbuf(stderr, NULL, _IONBF, 0);
 #ifdef SNX_WITH_GUI
     snx_menu = snx_gui_main;
 #endif
-    /* Keep progress visible when a GUI or another supervisor captures our pipes. */
-    setvbuf(stdout, NULL, _IOLBF, 0);
-    setvbuf(stderr, NULL, _IONBF, 0);
-    int result = snx_driver(argc, argv);
-    result = result >= 0 ? result : snx_main(argc, argv);
-#ifdef SNX_PLAY_AFTER_MENU
-    {
-        int played_argc;
-        char** played = gui_apple_played(&played_argc);
-        /* the menu only opened (main.c's open_menu): the runtime has not started, and starts once for this game */
-        if (played) result = snx_main(played_argc, played);
+    result = snx_driver(argc, argv);
+    if (result >= 0) return result;
+#ifdef SNX_MENU_THEN_GAME
+    /* iOS has one process: the menu runs first, then the game it picked, here */
+    if (argc <= 1) {
+        char** played;
+        int played_argc = 0;
+        result = snx_gui_main(argv[0]);
+        played = gui_apple_played(&played_argc);
+        if (!played) return result;
+        return snx_main(played_argc, played);
     }
 #endif
-    return result;
+    return snx_main(argc, argv);
 }

@@ -6,11 +6,12 @@
    Copyright (c) 2005-2007 CodeSourcery
    Copyright (c) 2007 OpenedHand, Ltd.
    Copyright (c) 2018 Linaro
-   Copyright (C) 2013 - 2018 Linaro Ltd <ard.biesheuvel@linaro.org> */
+   Copyright (C) 2013 - 2018 Linaro Ltd <ard.biesheuvel@linaro.org>
+   The included aarch64/helpers/fp.c and fp_arithmetic.c carry their own notices (QEMU's softfloat and
+   target/arm, LGPL-2.1-or-later and the SoftFloat-2a, BSD and GPL-2.0-or-later portions of softfloat). */
 #include "common/cpu/arm/simd.h"
-/* Share the audited integer implementation of ARM's FP pseudocode, not the
-   A64 register ABI. Namespace this copy so both runtime libraries can coexist.
-   The included implementation retains its SwitchRecomp/Apache notices. */
+/* Share the integer implementation of ARM's FP pseudocode, not the A64 register ABI. Namespace this copy so both
+   runtime libraries can coexist. */
 #define snx_fp_binary   snx_arm_soft_binary
 #define snx_fp_fma      snx_arm_soft_fma
 #define snx_fp_unary    snx_arm_soft_unary

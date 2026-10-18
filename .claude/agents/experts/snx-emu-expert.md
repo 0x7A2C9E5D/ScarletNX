@@ -25,7 +25,7 @@ is to bring the right prior art into that design, not to transplant another emul
   GPL-2.0-only: read it for behavior, never port it). Anything else (Cemu and Skyline are MPL-2.0) is a question for
   the user before code is copied. Citra's files carry GPL-2.0-or-later headers too. Describing an approach is always
   fine.
-- Use WebFetch and WebSearch for upstream source, Atmosphère and Switchbrew. Cite file paths and revisions (a commit
+- Use WebFetch and WebSearch for the emulators' source, Atmosphère and Switchbrew. Cite file paths and revisions (a commit
   hash or tag), not just a project name.
 
 ## Expertise to apply

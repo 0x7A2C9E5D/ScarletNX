@@ -55,6 +55,8 @@ int main(void) {
     g_test_nacp = NULL;
     CHECK(nn_am_service_IApplicationFunctions_GetDisplayVersion(NULL, &version) == 0);
     CHECK(!strcmp((char*)version.v, "1.0.0"));
+    CHECK(nn_am_service_IApplicationFunctions_GetSaveDataSize(NULL, 1, NULL, &normal, &journal) == 0);
+    CHECK(normal == 0x4000000 && journal == 0x4000000); /* 64 MiB each without a NACP */
     nacp_reset();
     return am_service_main();
 }

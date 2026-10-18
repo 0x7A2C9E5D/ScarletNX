@@ -8,7 +8,7 @@ Discord: https://discord.gg/tRTRXXbyjp (my god why don't we just use IRC like go
 
 A GPLv3 static ARM64 to x86 recompiler with a Switch translation layer for Linux, Windows, FreeBSD and Android.
 
-Forked from MZLab's SwitchRecomp. SwitchRecomp is based off Nexium.
+ScarletNX started as a fork of MZ Labs' SwitchRecomp, which is based on Nexium.
 
 ## Quick start
 
@@ -120,3 +120,7 @@ see [Android](./docs/ANDROID.md). macOS and iOS build in CI, but no game runs on
 - [Azahar](https://github.com/azahar-emu/azahar) and Citra, for all of the 3DS emulation.
 
 Wimsy, the mascot and the runtime's icon (`dist/wimsy.svg`) was drawn by Liz.
+
+# Thanks
+
+Thanks to MZ Labs for SwitchRecomp, which ScarletNX started from. Its code has since been replaced by ScarletNX's own.

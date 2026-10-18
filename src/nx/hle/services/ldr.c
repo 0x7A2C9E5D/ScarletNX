@@ -32,9 +32,9 @@ static RoState* ro_owner;
 static u32 ro_u32(const u8* p) { return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; }
 static u64 ro_u64(const u8* p) { return ro_u32(p) | (u64)ro_u32(p + 4) << 32; }
 static int ro_range(u64 a, u64 size, int nonzero) {
-    if (a & 0xFFF) return RO_ERROR(1025);
-    if ((nonzero && !size) || (size & 0xFFF) || size > ~a) return RO_ERROR(1026);
-    return 0;
+    R_UNLESS(!(a & 0xFFF), RO_ERROR(1025));
+    if ((nonzero && !size) || (size & 0xFFF) || size > ~a) R_THROW(RO_ERROR(1026));
+    R_SUCCEED();
 }
 static int ro_readable(u64 a, u64 size) {
     if (a < AS_BASE || a >= AS_SIZE || size > AS_SIZE - a) return 0;
@@ -57,38 +57,37 @@ static int ro_process_handle(u32 h) {
 }
 /* kind: the NRR kind RegisterProcessModuleInfo asks for (the session's), 0 for RegisterModuleInfo */
 static int ro_register_nrr(RoState* s, u64 a, u64 size, int kind) {
-    int r = ro_range(a, size, 1);
-    if (r) return r;
+    R_TRY(ro_range(a, size, 1));
     RoNrr* slot = NULL;
     for (int i = 0; i < RO_LIMIT; i++) {
         if (!s->nrr[i].address && !slot) slot = &s->nrr[i];
     }
-    if (!slot) return RO_ERROR(8);
-    if (size < 0x350 || size > 0xFFFFFFFFull || !ro_readable(a, size)) return RO_ERROR(6);
+    R_UNLESS(slot, RO_ERROR(8));
+    R_UNLESS(size >= 0x350 && size <= 0xFFFFFFFFull && ro_readable(a, size), RO_ERROR(6));
     u8 header[0x350];
     memcpy(header, GP(a), sizeof header);
     u32 off = ro_u32(header + 0x340), count = ro_u32(header + 0x344);
     if (memcmp(header, "NRR0", 4) || ro_u32(header + 0x338) != size || ro_u64(header + 0x330) != g_title_id ||
         off < sizeof header || off > size || count > (size - off) / 32)
-        return RO_ERROR(6);
-    if (header[0x33c] != kind) return RO_ERROR(10);
+        R_THROW(RO_ERROR(6));
+    R_UNLESS(header[0x33c] == kind, RO_ERROR(10));
     /* Like Eden, no RSA trust-chain verification. Snapshot the hashes, not pointers to mutable guest storage. */
     u8* hashes = malloc(count ? (size_t)count * 32 : 1);
-    if (!hashes) return RO_ERROR(1023);
+    R_UNLESS(hashes, RO_ERROR(1023));
     memcpy(hashes, GP(a + off), (size_t)count * 32);
     *slot = (RoNrr){a, count, hashes};
-    return 0;
+    R_SUCCEED();
 }
 static int ro_unregister_nrr(RoState* s, u64 a) {
-    if (a & 0xFFF) return RO_ERROR(1025);
+    R_UNLESS(!(a & 0xFFF), RO_ERROR(1025));
     for (int i = 0; i < RO_LIMIT; i++) {
         RoNrr* n = &s->nrr[i];
         if (!n->address || n->address != a) continue;
         free(n->hashes);
         memset(n, 0, sizeof *n);
-        return 0;
+        R_SUCCEED();
     }
-    return RO_ERROR(1029);
+    R_THROW(RO_ERROR(1029));
 }
 static int ro_validate_nro(RoState* s, const MemCodeMap* m, u32* text, u32* ro, u32* data) {
     const u8* h = GP(m->base);
@@ -98,7 +97,7 @@ static int ro_validate_nro(RoState* s, const MemCodeMap* m, u32* text, u32* ro, 
     if (memcmp(h + 0x10, "NRO0", 4) || (ro_u32(h + 0x1c) & 2) || ro_u32(h + 0x18) != m->size ||
         ro_u32(h + 0x38) != m->bss_size || ((*text | *ro | *data) & 0xFFF) || *text < 0x1000 || ro_u32(h + 0x20) ||
         ro_u32(h + 0x28) != *text || ro_u32(h + 0x30) != (u64)*text + *ro || (u64)*text + *ro + *data != m->size)
-        return RO_ERROR(4);
+        R_THROW(RO_ERROR(4));
     u8 hash[32];
     if (!EVP_Digest(h, (size_t)m->size, hash, NULL, EVP_sha256(), NULL)) fatal("ldr: SHA-256 failed (out of memory)\n");
     int authorized = 0;
@@ -108,36 +107,36 @@ static int ro_validate_nro(RoState* s, const MemCodeMap* m, u32* text, u32* ro, 
                 authorized = 1;
                 break;
             }
-    if (!authorized) return RO_ERROR(9);
+    R_UNLESS(authorized, RO_ERROR(9));
     for (int i = 0; i < RO_LIMIT; i++)
-        if (s->nro[i].map.base && !memcmp(s->nro[i].id, h + 0x40, 32)) return RO_ERROR(3);
-    return 0;
+        if (s->nro[i].map.base && !memcmp(s->nro[i].id, h + 0x40, 32)) R_THROW(RO_ERROR(3));
+    R_SUCCEED();
 }
 static int ro_load_nro(RoState* s, u64 source, u64 size, u64 bss, u64 bss_size, u64* address) {
     MemCodeMap m = {0, source, size, bss, bss_size};
-    int r = ro_range(m.source, m.size, 1);
-    if (!r) r = ro_range(m.bss, m.bss_size, 0);
-    if (r) return r;
-    if (m.bss_size > ~m.size) return RO_ERROR(1026);
+    int r;
+    R_TRY(ro_range(m.source, m.size, 1));
+    R_TRY(ro_range(m.bss, m.bss_size, 0));
+    R_UNLESS(m.bss_size <= ~m.size, RO_ERROR(1026));
     RoNro* slot = NULL;
     for (int i = 0; i < RO_LIMIT; i++)
         if (!s->nro[i].map.base) {
             slot = &s->nro[i];
             break;
         }
-    if (!slot) return RO_ERROR(7);
+    R_UNLESS(slot, RO_ERROR(7));
     r = mem_map_code(&m);
-    if (r) return r == MEM_LIMIT ? RO_ERROR(2) : r == MEM_BADSTATE ? RO_ERROR(1027) : RO_ERROR(1023);
+    if (r) R_THROW(r == MEM_LIMIT ? RO_ERROR(2) : r == MEM_BADSTATE ? RO_ERROR(1027) : RO_ERROR(1023));
     u32 text, ro, data;
     r = ro_validate_nro(s, &m, &text, &ro, &data);
-    if (!r) {
+    if (R_SUCCEEDED(r)) {
         if (mem_set_state(m.base, text, MS_ALIASCODE, PERM_RX) ||
             (ro && mem_set_state(m.base + text, ro, MS_ALIASCODE, PERM_R)) ||
             ((data || m.bss_size) &&
              mem_set_state(m.base + text + ro, (u64)data + m.bss_size, MS_ALIASCODEDATA, PERM_RW)))
             r = RO_ERROR(1023);
     }
-    if (r) {
+    if (R_FAILED(r)) {
         if (mem_unmap_code(&m)) {
             /* Keep an exceptional failed rollback tracked so session destruction can retry it. */
             slot->map = m;
@@ -150,56 +149,55 @@ static int ro_load_nro(RoState* s, u64 source, u64 size, u64 bss, u64 bss_size, 
     *address = m.base;
     LOG("ldr:ro: mapped NRO at %llx (%llu bytes, interpreter)\n", (unsigned long long)m.base,
         (unsigned long long)(m.size + m.bss_size));
-    return 0;
+    R_SUCCEED();
 }
 static int ro_unload_nro(RoState* s, u64 base) {
-    if (base & 0xFFF) return RO_ERROR(1025);
+    R_UNLESS(!(base & 0xFFF), RO_ERROR(1025));
     for (int i = 0; i < RO_LIMIT; i++) {
         RoNro* n = &s->nro[i];
         if (!n->map.base || n->map.base != base) continue;
-        if (mem_unmap_code(&n->map)) return RO_ERROR(1027);
+        R_UNLESS(!mem_unmap_code(&n->map), RO_ERROR(1027));
         memset(n, 0, sizeof *n);
-        return 0;
+        R_SUCCEED();
     }
-    return RO_ERROR(1028);
+    R_THROW(RO_ERROR(1028));
 }
 /* every command but RegisterProcessHandle needs the session initialized, and all of them the client's process id */
 static int ro_session(SvcObj* self, u64 pid) {
     RoState* s = self->data;
-    if (pid != K_PROCESS_ID || !s->initialized) return RO_ERROR(1031);
-    return 0;
+    R_UNLESS(pid == K_PROCESS_ID && s->initialized, RO_ERROR(1031));
+    R_SUCCEED();
 }
 static int nn_ro_detail_IRoInterface_MapManualLoadModuleMemory(SvcObj* self, u64 pid, u64 nro_address, u64 nro_size,
                                                                u64 bss_address, u64 bss_size, u64* address) {
-    int r = ro_session(self, pid);
-    return r ? r : ro_load_nro(self->data, nro_address, nro_size, bss_address, bss_size, address);
+    R_TRY(ro_session(self, pid));
+    return ro_load_nro(self->data, nro_address, nro_size, bss_address, bss_size, address);
 }
 static int nn_ro_detail_IRoInterface_UnmapManualLoadModuleMemory(SvcObj* self, u64 pid, u64 nro_address) {
-    int r = ro_session(self, pid);
-    return r ? r : ro_unload_nro(self->data, nro_address);
+    R_TRY(ro_session(self, pid));
+    return ro_unload_nro(self->data, nro_address);
 }
 static int nn_ro_detail_IRoInterface_RegisterModuleInfo(SvcObj* self, u64 pid, u64 nrr_address, u64 nrr_size) {
-    int r = ro_session(self, pid);
-    return r ? r : ro_register_nrr(self->data, nrr_address, nrr_size, 0);
+    R_TRY(ro_session(self, pid));
+    return ro_register_nrr(self->data, nrr_address, nrr_size, 0);
 }
 static int nn_ro_detail_IRoInterface_UnregisterModuleInfo(SvcObj* self, u64 pid, u64 nrr_address) {
-    int r = ro_session(self, pid);
-    return r ? r : ro_unregister_nrr(self->data, nrr_address);
+    R_TRY(ro_session(self, pid));
+    return ro_unregister_nrr(self->data, nrr_address);
 }
 static int nn_ro_detail_IRoInterface_RegisterProcessHandle(SvcObj* self, u64 pid, u32 process) {
     RoState* s = self->data;
-    if (pid != K_PROCESS_ID || !ro_process_handle(process)) return RO_ERROR(1031);
-    if (s->initialized || ro_owner) return RO_ERROR(1030);
+    R_UNLESS(pid == K_PROCESS_ID && ro_process_handle(process), RO_ERROR(1031));
+    R_UNLESS(!s->initialized && !ro_owner, RO_ERROR(1030));
     s->initialized = 1;
     ro_owner = s;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ro_detail_IRoInterface_RegisterProcessModuleInfo(SvcObj* self, u64 pid, u64 nrr_address, u64 nrr_size,
                                                                u32 process) {
     RoState* s = self->data;
-    int r = ro_session(self, pid);
-    if (r) return r;
-    if (!ro_process_handle(process)) return RO_ERROR(1031);
+    R_TRY(ro_session(self, pid));
+    R_UNLESS(ro_process_handle(process), RO_ERROR(1031));
     return ro_register_nrr(s, nrr_address, nrr_size, s->kind);
 }
 static int ro_dispatch(SvcObj* o, IpcCtx* c) {

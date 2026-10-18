@@ -1,103 +1,203 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the 3D engine's side of the renderer: clears, draws, constant buffers and blits go to it, with clears done in guest
-   memory before the renderer starts. Also the record of where the GPU wrote to memory */
-#include <stdlib.h>
-#include <string.h>
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors
+   Ported from Eden (src/video_core/engines/maxwell_3d.cpp, src/video_core/engines/draw_manager.cpp):
+   SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+   SPDX-FileCopyrightText: Copyright 2022 yuzu Emulator Project
+   SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project */
+/* The 3D engine's side of the renderer: draws and clears (gated by the render enable), DRAW_TEXTURE, the constant
+   buffers' data and bindings, the 2D engine's blit, a clear in memory before the renderer runs, and the record of
+   GPU-side writes the renderer's caches check */
+#include "nx/gpu/maxwell/engines_int.h"
 #include "nx/gpu/maxwell/write_pages.h"
-#include "nx/gpu/renderer.h"
 #include "nx/hle/services/nvdrv.h"
-#include "nx/memory/mem.h"
-#include "nx/runtime/platform/log.h"
-#include "nx/runtime/platform/plat.h"
-#include "nx/gpu/gpu.h"
-void r3d_clear(GpuChannel* ch, u32 v) {
-    if (ch->render_off) return; /* SetRenderEnable says no */
-    if (g_renderer_up) {
-        g_renderer->clear(ch, v);
-        return;
-    }
-    u32* r = ch->r3d;
-    u32 rt = (v >> 6) & 15;
-    if (!(v & 0x3C)) return;
-    u32* t = &r[0x200 + rt * 0x10];
-    u64 addr = ((u64)t[0] << 32) | t[1];
-    u32 w = t[2], h = t[3], fmt = t[4], tm = t[5];
-    if (!addr || !w || !h) return;
-    float cc[4];
-    memcpy(cc, &r[0x360], 16);
-    u32 bpp = gpu_color_bpp(fmt);
-    u8 px[16];
-    if (bpp == 4) {
-        u32 c = 0;
-        for (int i = 0; i < 4; i++) {
-            float f = cc[i] < 0 ? 0 : cc[i] > 1 ? 1 : cc[i];
-            c |= (u32)(f * 255.f + 0.5f) << (i * 8);
+
+/* ------------------------------------------------------------ the record of GPU-side writes */
+/* Each write stamps a new generation on every 4 KiB page it covers, by GPU address and by the guest pages behind
+   them, since other GPU addresses can map the same guest memory. Exact per page: a texture is dirty only when a write
+   touched one of its own pages. Writers and readers take the lock; the generation is published with release order
+   for gpu_mem_generation's lock-free read */
+static PMutex g_wlk = PMUTEX_INIT;
+static WritePages g_wgpu, g_wcpu;
+static u64 g_wgen;
+/* calls fn on each run of guest memory behind [gva, gva + size), page by page */
+static void guest_runs(u64 gva, u64 size, int (*fn)(u64 cpu, u64 n, void* ctx), void* ctx) {
+    u64 run_cpu = 0, run_n = 0, end = gva + size;
+    if (end < gva) end = ~(u64)0;
+    while (gva < end) {
+        u64 n = 0x1000 - (gva & 0xFFF), cpu = gmmu_translate(gva);
+        if (n > end - gva) n = end - gva;
+        if (cpu && run_n && run_cpu + run_n == cpu)
+            run_n += n;
+        else {
+            if (run_n && fn(run_cpu, run_n, ctx)) return;
+            run_cpu = cpu;
+            run_n = cpu ? n : 0;
         }
-        if (fmt == 0xCF || fmt == 0xD0) c = (c & 0xFF00FF00u) | ((c & 0xFF) << 16) | ((c >> 16) & 0xFF);
-        memcpy(px, &c, 4);
-    } else
-        memset(px, 0, 16);
-    int linear = (tm >> 12) & 1;
-    u32 bh = (tm >> 4) & 15;
-    /* a pitch-linear target holds its row pitch in bytes where the width is (as gpu/vk/render.c reads it) */
-    u32 pitch = linear ? w : w * bpp, wb = linear ? w / bpp * bpp : w * bpp;
-    if (!wb) return;
-    u8* row = malloc(wb);
-    if (!row) {
-        WARN("gpu: no memory to clear a %ux%u target\n", w, h);
-        return;
+        if (gva + n < gva) break;
+        gva += n;
     }
-    for (u32 x = 0; x < wb; x += bpp) memcpy(row + x, px, bpp);
-    if (linear) {
-        for (u32 y = 0; y < h; y++) gmem_write(addr + (u64)y * pitch, row, wb);
-    } else { /* 16 bytes at a time, logged once as the whole range */
-        u64 hi = 0;
-        for (u32 y = 0; y < h; y++)
-            for (u32 x = 0; x < wb; x += 16) {
-                u64 o = bl_offset(x, y, 0, wb, h, bh, 0), cpu = gmmu_translate(addr + o);
-                u32 n = wb - x < 16 ? wb - x : 16;
-                if (cpu) memcpy(GP(cpu), row + x, n);
-                if (o + n > hi) hi = o + n;
-            }
-        gpu_mem_written(addr, hi);
+    if (run_n) fn(run_cpu, run_n, ctx);
+}
+static int stamp_run(u64 cpu, u64 n, void* ctx) {
+    write_pages_stamp(&g_wcpu, cpu, n, *(const u64*)ctx);
+    return 0;
+}
+void gpu_mem_written(u64 gva, u64 size) {
+    u64 gen;
+    if (!size) return;
+    pm_lock(&g_wlk);
+    gen = g_wgen + 1;
+    write_pages_stamp(&g_wgpu, gva, size, gen);
+    guest_runs(gva, size, stamp_run, &gen);
+    __atomic_store_n(&g_wgen, gen, __ATOMIC_RELEASE);
+    pm_unlock(&g_wlk);
+}
+void gpu_mem_written_shader(u64 gva, u64 size) { gpu_mem_written(gva, size); }
+u64 gpu_mem_generation(void) { return __atomic_load_n(&g_wgen, __ATOMIC_ACQUIRE); }
+typedef struct {
+    u64 since;
+    int dirty;
+} DirtyAsk;
+static int dirty_run(u64 cpu, u64 n, void* ctx) {
+    DirtyAsk* q = (DirtyAsk*)ctx;
+    q->dirty = write_pages_since(&g_wcpu, q->since, cpu, n);
+    return q->dirty;
+}
+int gpu_mem_dirty_since(u64 since, u64 a, u64 sz) {
+    DirtyAsk q;
+    if (!sz) return 0;
+    q.since = since;
+    q.dirty = 0;
+    pm_lock(&g_wlk);
+    if (g_wgen > since) {
+        q.dirty = write_pages_since(&g_wgpu, since, a, sz);
+        if (!q.dirty) guest_runs(a, sz, dirty_run, &q);
     }
-    free(row);
+    pm_unlock(&g_wlk);
+    return q.dirty;
 }
-void r3d_draw_texture(GpuChannel* ch) {
-    if (g_renderer_up && g_renderer->draw_texture) g_renderer->draw_texture(ch);
+
+/* ------------------------------------------------------------ draws and clears */
+/* the separate topology (0x652 bit 0, PrimitiveTopologyControl UseSeparateState) and its override enum (0x65C) as
+   the draw's topology: points and lines are numbered one past the draw's enum, the legacy values by name */
+static u32 topology_of(const u32* r, u32 topology) {
+    u32 o = r[0x65C];
+    if (!(r[0x652] & 1) || !o) return topology;
+    switch (o) {
+        case 0x1: return 0; /* points */
+        case 0x2: return 1; /* lines */
+        case 0x1001: return 0;
+        case 0x1002:
+        case 0x100F: return 1;
+        case 0x1003:
+        case 0x1012: return 4;
+        case 0x1010:
+        case 0x1011: return 3;
+        case 0x1013:
+        case 0x1014: return 5;
+        case 0x1015: return 6;
+        default: return o & 15;
+    }
 }
+
 void r3d_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 base_vertex, u32 base_instance,
               u32 instances) {
-    if (ch->render_off) return; /* SetRenderEnable says no */
-    /* SET_PRIMITIVE_TOPOLOGY_CONTROL selects the separate topology register for every draw path. */
-    if ((ch->r3d[0x652] & 1) && ch->r3d[0x65C]) {
-        /* The override register has a different enum for points and lines than BEGIN. */
-        u32 override = ch->r3d[0x65C] & 0xF;
-        topology = override == 1 ? 0 : override == 2 ? 1 : override;
+    if (ch->render_off || !g_renderer->draw) return;
+    g_renderer->draw(ch, indexed, topology_of(ch->r3d, topology), first, count, base_vertex, base_instance, instances);
+}
+/* guest memory without the renderer's hooks: only for the clear below, made while no renderer runs */
+static void raw_write(u64 gva, const u8* src, u32 n) {
+    while (n) {
+        u32 k = 0x1000 - (u32)(gva & 0xFFF);
+        u64 cpu = gmmu_translate(gva);
+        if (k > n) k = n;
+        if (cpu) memcpy(GP(cpu), src, k);
+        gva += k;
+        src += k;
+        n -= k;
     }
-    if (g_renderer_up) {
-        g_renderer->draw(ch, indexed, topology, first, count, base_vertex, base_instance, instances);
+}
+static u8 unorm8(const u32* r, int c) {
+    float f;
+    memcpy(&f, &r[0x360 + c], 4);
+    if (!(f > 0)) return 0;
+    return f >= 1 ? 255 : (u8)(f * 255.0f + 0.5f);
+}
+/* a full color clear of one target in guest memory, for a clear before the renderer runs. A pitch linear target
+   holds its row pitch in bytes in the width register, as the renderer reads it */
+static void clear_in_memory(GpuChannel* ch, u32 v) {
+    const u32* r = ch->r3d;
+    u32 t = (v >> 6) & 15, b = 0x200 + t * 16, fmt, bpp, linear, w, h, pitch, x, y, bh;
+    u8 px[16], row[256];
+    u64 a, span;
+    if (t >= 8 || ((v >> 2) & 15) != 15 || !(fmt = r[b + 4])) return;
+    a = ((u64)(r[b] & 0xFF) << 32) | r[b + 1];
+    bpp = gpu_color_bpp(fmt);
+    linear = (r[b + 5] >> 12) & 1;
+    bh = (r[b + 5] >> 4) & 15;
+    pitch = linear ? r[b + 2] : r[b + 2] * bpp;
+    w = linear ? r[b + 2] / bpp : r[b + 2];
+    h = r[b + 3];
+    memset(px, 0, sizeof px);
+    if (fmt == 0xCF || fmt == 0xD0) /* A8R8G8B8: B, G, R, A in memory */
+        px[0] = unorm8(r, 2), px[1] = unorm8(r, 1), px[2] = unorm8(r, 0), px[3] = unorm8(r, 3);
+    else if (bpp == 4) /* A8B8G8R8 and the other 4-byte formats taken as it */
+        px[0] = unorm8(r, 0), px[1] = unorm8(r, 1), px[2] = unorm8(r, 2), px[3] = unorm8(r, 3);
+    else if (bpp == 16)
+        memcpy(px, &r[0x360], 16);
+    else
+        LOG_LIMIT(2, "gpu: a clear of format %x before the renderer runs writes zeros\n", fmt);
+    for (x = 0; x < sizeof row; x += bpp) memcpy(row + x, px, bpp);
+    if (!a || !w || !h) return;
+    if (linear) {
+        for (y = 0; y < h; y++)
+            for (x = 0; x < w * bpp; x += sizeof row)
+                raw_write(a + (u64)y * pitch + x, row, w * bpp - x < sizeof row ? w * bpp - x : (u32)sizeof row);
+        gpu_mem_written(a, (u64)pitch * (h - 1) + (u64)w * bpp);
         return;
     }
-    (void)ch;
-    (void)indexed;
-    (void)topology;
-    (void)first;
-    (void)count;
-    (void)base_vertex;
-    (void)base_instance;
-    (void)instances;
-    g_draws++;
+    for (y = 0; y < h; y++) /* 16 byte runs in the layout, recorded once */
+        for (x = 0; x < w * bpp; x += 16)
+            raw_write(a + bl_offset(x, y, 0, w * bpp, h, bh, 0), row, w * bpp - x < 16 ? w * bpp - x : 16);
+    span = (u64)((w * bpp + 63) / 64) * 64 * ((((u64)h + 7) / 8 + (1u << bh) - 1) >> bh << bh) * 8;
+    gpu_mem_written(a, span);
 }
-/* constant buffer data comes a word per method: the words of a method batch are collected and written at once, when
-   the batch ends or before any other method (maxwell3d_method, call_method) and at the end of a submission */
+void r3d_clear(GpuChannel* ch, u32 v) {
+    if (ch->render_off) return;
+    if (!g_renderer_up)
+        clear_in_memory(ch, v);
+    else if (g_renderer->clear)
+        g_renderer->clear(ch, v);
+}
+/* DRAW_TEXTURE: not gated by the render enable here, the renderer reads its registers as Eden does */
+void r3d_draw_texture(GpuChannel* ch) {
+    if (g_renderer->draw_texture) g_renderer->draw_texture(ch);
+}
+int r3d_blit(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
+             double sdy) {
+    return g_renderer->blit ? g_renderer->blit(s, d, dx, dy, dw, dh, sx, sy, sdx, sdy) : 0;
+}
+
+/* ------------------------------------------------------------ constant buffers */
+static u64 cb_address(const u32* r) { return ((u64)(r[0x8E1] & 0xFF) << 32) | r[0x8E2]; }
+/* BIND_GROUP (0x904 + 8 * stage): bit 0 valid, bits 4-8 the slot, of the buffer at 0x8E1-0x8E2 of size 0x8E0 */
+void r3d_cb_bind(GpuChannel* ch, int stage, u32 v) {
+    u32 slot = (v >> 4) & 31;
+    if (stage < 0 || stage >= 5 || slot >= 18) {
+        LOG_LIMIT(4, "gpu: constant buffer bind %08x of stage %d is past the slots\n", v, stage);
+        return;
+    }
+    ch->cbind[stage][slot] = (v & 1) ? cb_address(ch->r3d) : 0;
+    ch->cbind_size[stage][slot] = (v & 1) ? ch->r3d[0x8E0] : 0;
+}
+/* LOAD_CONSTANT_BUFFER (0x8E4-0x8F3): a word at the buffer's address plus its offset (0x8E3), which moves on by 4.
+   A batch's words are held and written in one go at its last, or before anything else */
 void r3d_const_upload(GpuChannel* ch, u32 v, int last) {
     u32* r = ch->r3d;
-    if (ch->cb_n == sizeof ch->cb_words / sizeof ch->cb_words[0]) r3d_const_flush(ch);
-    if (!ch->cb_n) ch->cb_addr = (((u64)r[0x8E1] << 32) | r[0x8E2]) + r[0x8E3];
+    u64 a = cb_address(r) + r[0x8E3];
+    if (ch->cb_n && (a != ch->cb_addr + (u64)ch->cb_n * 4 || ch->cb_n == sizeof ch->cb_words / 4))
+        r3d_const_flush(ch);
+    if (!ch->cb_n) ch->cb_addr = a;
     ch->cb_words[ch->cb_n++] = v;
     r[0x8E3] += 4;
     if (last) r3d_const_flush(ch);
@@ -106,72 +206,4 @@ void r3d_const_flush(GpuChannel* ch) {
     if (!ch->cb_n) return;
     gmem_write(ch->cb_addr, ch->cb_words, (u64)ch->cb_n * 4);
     ch->cb_n = 0;
-}
-/* a constant buffer bound to a stage: v bit 0 valid, bits 4-8 the slot; address and size from 0x8E0-0x8E2. The
-   binding is the channel's 3D state, which the renderer reads at each draw: another channel's binds, run while this
-   one's stream waits (gpu_park), don't change it */
-void r3d_cb_bind(GpuChannel* ch, int stage, u32 v) {
-    u32* r = ch->r3d;
-    u32 idx = (v >> 4) & 31;
-    if (stage > 4 || idx >= 18) return;
-    ch->cbind[stage][idx] = (v & 1) ? ((u64)r[0x8E1] << 32) | r[0x8E2] : 0;
-    ch->cbind_size[stage][idx] = (v & 1) ? r[0x8E0] : 0;
-}
-int r3d_blit(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
-             double sdy) {
-    if (g_renderer_up) return g_renderer->blit(s, d, dx, dy, dw, dh, sx, sy, sdx, sdy);
-    return 0;
-}
-
-/* last write gen of each 4K page for GPU-side writes (cb_data, I2M, DMA, 2D, reports and shader writeback), so we can
-   tell a range changed without rehashing it. Exact per page: the table this replaced hashed pages 256 MiB apart into
-   one slot and handed ranges over 1 MiB to a 1024-entry log that constant buffer updates wrap every frame, so most
-   large textures read as written at every use (TotK hashed ~200 GB of textures again in two minutes for 13 that had
-   changed) */
-static u64 g_gw_gen;      /* published after each complete update */
-static u64 g_gw_phys_gen; /* latest GPU write to a guest CPU page */
-static PMutex g_gwlock = PMUTEX_INIT;
-static WritePages g_gw_va, g_gw_phys; /* by GPU address and by guest backing page */
-static void mem_written(u64 gva, u64 size) {
-    if (!size) return;
-    pm_lock(&g_gwlock);
-    u64 gen = g_gw_gen + 1;
-    write_pages_stamp(&g_gw_va, gva, size, gen);
-    for (u64 b = gva >> 12, e = (gva + size - 1) >> 12; b <= e; b++) {
-        u64 cpu = gmmu_translate(b << 12);
-        if (cpu) write_pages_stamp(&g_gw_phys, cpu & ~0xFFFull, 1, gen);
-    }
-    g_gw_phys_gen = gen;
-    __atomic_store_n(&g_gw_gen, gen, __ATOMIC_RELEASE);
-    pm_unlock(&g_gwlock);
-}
-void gpu_mem_written(u64 gva, u64 size) { mem_written(gva, size); }
-void gpu_mem_written_shader(u64 gva, u64 size) { mem_written(gva, size); }
-u64 gpu_mem_generation(void) { return __atomic_load_n(&g_gw_gen, __ATOMIC_ACQUIRE); }
-static int phys_dirty_since(u64 since, u64 a, u64 sz) {
-    if (!sz || since >= g_gw_phys_gen) return 0;
-    u64 run = 0, pages = 0;
-    for (u64 b = a >> 12, e = (a + sz - 1) >> 12; b <= e; b++) {
-        u64 cpu = gmmu_translate(b << 12);
-        cpu &= ~0xfffull;
-        if (cpu && pages && cpu == run + pages * 0x1000) {
-            pages++;
-            continue;
-        }
-        if (pages && write_pages_since(&g_gw_phys, since, run, pages * 0x1000)) return 1;
-        run = cpu;
-        pages = cpu ? 1 : 0;
-    }
-    return pages && write_pages_since(&g_gw_phys, since, run, pages * 0x1000);
-}
-/* nonzero if [a,a+sz) may have been written after gen 'since' */
-static int dirty_since_locked(u64 since, u64 a, u64 sz) {
-    if (!sz || since >= g_gw_gen) return 0;
-    return write_pages_since(&g_gw_va, since, a, sz) || phys_dirty_since(since, a, sz);
-}
-int gpu_mem_dirty_since(u64 since, u64 a, u64 sz) {
-    pm_lock(&g_gwlock);
-    int dirty = dirty_since_locked(since, a, sz);
-    pm_unlock(&g_gwlock);
-    return dirty;
 }

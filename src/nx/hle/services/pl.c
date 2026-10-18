@@ -70,7 +70,12 @@ static u8* pl_game_font(int i, u64* size) {
         free(d);
     }
     sprintf(path, "fonts/%s.ttf", pl_names[i]);
-    return fs_read_file(path, size);
+    d = fs_read_file(path, size);
+    if (d && !*size) { /* an empty file is no font: the stand-in */
+        free(d);
+        d = NULL;
+    }
+    return d;
 }
 
 /* a font at *at with its header: the magic and the size, padded to words, XORed with the key, both big-endian, as
@@ -128,28 +133,28 @@ void svc_pl_init(void) {
 /* every font is loaded from the start */
 static int nn_pl_detail_IPlatformServiceManager_RequestLoad(SvcObj* self, u32 font_type) {
     (void)self, (void)font_type;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_pl_detail_IPlatformServiceManager_GetLoadState(SvcObj* self, u32 font_type, u32* state) {
     (void)self, (void)font_type;
     *state = PL_LOADED;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_pl_detail_IPlatformServiceManager_GetSize(SvcObj* self, u32 font_type, u32* size) {
     (void)self;
     *size = font_type < PL_FONTS ? pl.font_size[font_type] : 0;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_pl_detail_IPlatformServiceManager_GetSharedMemoryAddressOffset(SvcObj* self, u32 font_type,
                                                                               u32* offset) {
     (void)self;
     *offset = font_type < PL_FONTS ? pl.font_off[font_type] : 0;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_pl_detail_IPlatformServiceManager_GetSharedMemoryNativeHandle(SvcObj* self, u32* shared_memory) {
     (void)self;
     *shared_memory = h_new(&pl.shm->o);
-    return 0;
+    R_SUCCEED();
 }
 /* every font, in the order of their types whatever the language, as Eden does: up to 6, or as many as the buffers
    hold */
@@ -166,7 +171,7 @@ static int pl_in_order(IpcBuf codes, IpcBuf offsets, IpcBuf sizes, u8* loaded, u
     }
     *loaded = 1;
     *count = (u32)n;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_pl_detail_IPlatformServiceManager_GetSharedFontInOrderOfPriority(
     SvcObj* self, const nn_settings_LanguageCode* language_code, IpcBuf font_codes, IpcBuf offsets, IpcBuf sizes,

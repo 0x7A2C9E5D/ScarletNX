@@ -1,18 +1,18 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the HLE kernel: objects and handles, events (kernel.c), threads (thread.c), shared memory and GetInfo (svc_mem.c),
-   the dumps (debug.c). What only the kernel's own files use is in kernel_int.h */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The emulated Horizon kernel as the rest of the runtime sees it: kernel objects and their handles, threads and the
+   guest cores they run on, events, shared memory. The kernel's own files share kernel_int.h */
 #ifndef SNX_KERNEL_H
 #define SNX_KERNEL_H
 #include "common/cpu/aarch64/cpu.h"
 #include "common/cpu/arm/arm.h"
 #include "nx/runtime/platform/plat.h"
 
-#define K_PROCESS_ID 0x51ull /* the single application process, also injected into IPC PID descriptors */
-#define NCORES       4       /* the console's CPU cores */
+/* the one application process's id, which IPC PID descriptors carry too */
+#define K_PROCESS_ID 0x51ull
+#define NCORES       4 /* guest CPU cores */
 
+/* what a kernel object is (KObj.type) */
 enum {
     KO_NONE,
     KO_EVENT,
@@ -25,14 +25,18 @@ enum {
     KO_RESLIMIT,
     KO_CODEMEM,
     KO_SERVER,
-    KO_WEVENT /* the writable end of an svcCreateEvent pair (svc.c) */
+    KO_WEVENT /* the writable end of an svcCreateEvent pair */
 };
+
 typedef struct KThread KThread;
+
+/* Every kernel object starts with a KObj, as its first member: code holding a KObj* casts it to the object its type
+   names (KEvent, KThread, KShmem, KTmem, KSession), so the KObj must sit at offset 0 of each */
 typedef struct KObj {
     int type;
-    int refs;
+    int refs; /* changed with __atomic operations; destroy, when set, runs as it reaches 0 */
     void (*destroy)(struct KObj*);
-    int (*is_signaled)(struct KObj*);
+    int (*is_signaled)(struct KObj*); /* NULL for an object that can't be waited on */
     KThread** waiters;
     int nwait, capwait;
     const char* name;
@@ -40,53 +44,58 @@ typedef struct KObj {
 
 typedef struct KEvent {
     KObj o;
-    int signaled;
+    int signaled; /* stays set until cleared: Horizon's events don't clear themselves */
 } KEvent;
 
+/* A guest thread. It holds a guest core while it runs game code and lets go of it only where a console thread would
+   be off the CPU (a blocking SVC, a sleep or yield, an IPC call, WFE). It takes the core back on its way out of the
+   SVC, never while holding g_klock */
 struct KThread {
     KObj o;
     CPU cpu;
-    SnxArmCPU arm; /* a 32-bit game's thread runs this instead (nx/runtime/arm.c); its SVCs pass through cpu.x */
+    SnxArmCPU arm; /* a 32-bit game's threads run here, their SVCs passing through cpu's registers */
     u64 id;
-    int prio;           /* the priority it runs at: base_prio raised by the mutex waiters it owns (sync.c) */
-    int base_prio;      /* as the game set it */
-    int core;           /* the core it is scheduled on (0 to NCORES - 1), where it runs when it next takes a core */
-    int ideal_core;     /* as svcSetThreadCoreMask set it: -1 when the game doesn't care */
-    u32 yields;         /* svcSleepThread yields, every 64th of which is a host one */
-    int on_core;        /* the core it holds while it runs (core_enter), -2 while it waits for it, -1 otherwise */
-    KThread* core_next; /* core_enter's waiting list, under its lock */
-    u64 core_ticket;    /* arrival order there */
+    int prio;       /* effective: base_prio raised by the waiters on the mutexes it owns */
+    int base_prio;  /* as the game set it */
+    int core;       /* the core it is scheduled on, 0 to NCORES - 1 */
+    int ideal_core; /* as set, -1 for none */
+    u32 yields;     /* consecutive yields, of which only some reach the host */
+    int on_core;    /* the core it holds, -2 while waiting for one, -1 for none */
+    KThread* core_next; /* the core's wait list */
+    u64 core_ticket;    /* arrival order there, which breaks priority ties */
     u64 affinity;
     u64 tls;
     u64 entry, arg, stack_top;
     int state; /* 0 created, 1 running, 2 exited */
     PCond cv;
     int woken, cancel;
-    /* svcSetThreadActivity (svc.c): suspended = it is paused, in_svc = it runs no game code because it is inside an
-       SVC (both atomic: every SVC reads them without the lock), pause_at = where it waits while paused (0 nowhere or
-       blocked inside the SVC, 1 before the SVC, 2 after it) */
+    /* svcSetThreadActivity: suspended and in_svc (inside an SVC, running no game code) are read with __atomic loads
+       without the lock. pause_at is where a paused thread waits: 0 blocked inside the SVC or not paused, 1 before
+       the SVC, 2 after it */
     int suspended, in_svc, pause_at;
-    /* what it's blocked on */
-    int wait_kind; /* 0 none 1 objects 2 mutex 3 condvar 4 address 5 a thread being paused (svc.c) */
+    int wait_kind; /* 0 none, 1 objects, 2 mutex, 3 condition variable, 4 address, 5 being paused */
     u64 wait_addr, wait_key;
     u32 wait_tag;
-    KThread* lock_owner; /* while it waits on a mutex (wait_kind 2): the mutex's owner, who inherits its priority */
+    KThread* lock_owner; /* the mutex's owner while it waits on one (kind 2) */
     int wait_result;
     KThread* next_waiter;
     char name[32];
     const char* wait_name;
     u64 wait_tid; /* the thread a join waits for, for the thread dump */
     i64 wait_timeout;
-    u64 sleep_lr, sleep_n, sleep_x[31]; /* for threads.txt: catches SleepThread polling loops */
+    u64 sleep_lr, sleep_n, sleep_x[31]; /* where a sleep loop sleeps from, for diagnostics */
 };
 
 typedef struct KShmem {
     KObj o;
     u64 size;
     u8* host;
-    u64 gaddr, gsize; /* where the game mapped it, 0 when it isn't (atomic), and the size it mapped */
+    u64 pool;         /* the alias pool's offset of its pages plus 1 (host maps them), 0 when host is a copy */
+    u64 gaddr, gsize; /* without the pool: where the game mapped it and how much; gaddr is 0 when unmapped and read
+                         atomically */
     u32 perm;
 } KShmem;
+
 typedef struct KTmem {
     KObj o;
     u64 addr, size;
@@ -94,32 +103,38 @@ typedef struct KTmem {
 } KTmem;
 
 void kernel_init(void);
-u32 h_new(KObj* o); /* new handle, takes a ref */
+u32 h_new(KObj* o); /* a new handle to o, which takes a reference */
 void kobj_ref(KObj* o);
 void kobj_unref(KObj* o);
-KObj* h_get_ref(u32 h, int t); /* takes a ref the caller drops with kobj_unref. t 0 = any type */
+/* the object h names, of type t (0 for any), with a reference the caller drops with kobj_unref. NULL when none */
+KObj* h_get_ref(u32 h, int t);
+
 KEvent* kevent_new(const char* name);
 void kevent_signal(KEvent* e);
 void kevent_clear(KEvent* e);
+
 KThread* kthread_cur(void);
-void core_enter(KThread* t); /* waits for its core to be free, then holds it */
-void core_leave(KThread* t); /* lets another thread on its core run */
-void core_poll(KThread* t);  /* RtAPI.poll: a loop met CPU.poll, the runtime may take its core */
+/* Taking and releasing the thread's core. core_poll is where RtAPI's poll gives it up to a waiting thread, when
+   generated code finds CPU.poll set at a backward branch (a loop with no SVC) */
+void core_enter(KThread* t);
+void core_leave(KThread* t);
+void core_poll(KThread* t);
 void kernel_run_main(u64 entry, u64 stack_size, int prio, int core);
 void snx_svc(CPU* c, u32 imm);
-/* a 32-bit thread's SVC: its registers in the 32-bit SVC ABI's places, through snx_svc in the 64-bit one's */
-void snx_svc32(SnxArmCPU* a, u32 imm);
-extern PMutex g_klock;
-extern u64 g_title_id;
-extern u64 g_sysres_size;
-extern int g_opt_mem_gb;
-/* the cores and priorities the npdm's kernel capabilities give the process (svcGetInfo 0 and 1) */
-extern u64 g_core_mask, g_prio_mask;
+void snx_svc32(SnxArmCPU* a, u32 imm); /* moves the 32-bit SVC ABI's registers into snx_svc's */
+
 KShmem* kshmem_new(u64 size, const char* name);
 u8* kshmem_ptr(KShmem* s);
-void kernel_load_symbols(void); /* the game's exported symbols, for the dumps: call once its modules are loaded */
+
+void kernel_load_symbols(void); /* once the game's modules are loaded, for the dumps */
 void kernel_dump_regs(CPU* c);
 void kernel_dump_threads(void);
 void mem_report(char* out, int n);
 
+extern PMutex g_klock;
+extern u64 g_title_id;
+extern u64 g_sysres_size;
+extern int g_opt_mem_gb;
+/* the cores and priorities the npdm's kernel capabilities allow (svcGetInfo 0 and 1) */
+extern u64 g_core_mask, g_prio_mask;
 #endif

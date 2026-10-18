@@ -26,7 +26,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-# Upstream's AI context, left to its owners; this file names what it looks for
+# The agents' instructions mention key names by design, and this file names what it looks for
 SKIP = ('.claude/', 'CLAUDE.md', 'tests/tracked_material.py')
 BINARY_HOME = 'dist/'
 KEY_LINE = re.compile(

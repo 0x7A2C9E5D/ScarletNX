@@ -1,413 +1,429 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* nvhost-nvdec / nvhost-vic (host1x channels).
-   We parse the host1x stream, decode NVDEC H.264 and VP9 jobs with FFmpeg (the codec's headers get rebuilt from the
-   picture setup the game fills in) into the surface each job names, and VIC jobs convert each enabled input slot's
-   surface, unscaled and cropped, into the output surface's format, a later slot over an earlier one.
-   Struct layouts / method offsets come from NVIDIA's open-gpu-doc (nvdec_drv.h, clc5b0.h, VIC). */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors
+   Ported from Eden (src/core/hle/service/nvdrv/devices/nvhost_nvdec_common.cpp, nvhost_nvdec.cpp, nvhost_vic.cpp,
+   src/video_core/cdma_pusher.cpp, src/video_core/host1x/control.cpp):
+   SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+   SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
+   SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
+   SPDX-FileCopyrightText: 2021 yuzu Emulator Project
+   SPDX-FileCopyrightText: Ryujinx Team and Contributors (cdma_pusher.cpp, MIT) */
+/* host1x: the channels of /dev/nvhost-nvdec and /dev/nvhost-vic. Their ioctls, the IOVA space the engines address
+   guest memory through, and a worker per channel that runs the submitted command streams in order.
+
+   A SUBMIT returns at once with the fences its syncpoint increments will reach, as on the console, and the job runs
+   later on the channel's worker: decoding inside the ioctl held the game's submitting thread, and whatever it had
+   locked, for a whole picture. Every syncpoint comes from nvdrv's syncpt_alloc, which keeps the ids below the 128
+   NVIDIA's stream library sizes its tables at.
+
+   Locks, taken in this order: a channel's lk or the engines' lock, then the IOVA table's, then nvdrv's. A job's
+   command buffers run under the engines' lock (the decoders and VIC are not reentrant); a host class wait lets go
+   of it, since the job waited for may be another channel's */
 #include "nx/gpu/video/host1x_int.h"
 
-/* ------------------------------------------------------------ IOVA (what the video engines see through the SMMU) */
-/* A mapping lives until nvmap frees its handle (host1x_forget_handle), not until UNMAP_BUFFER: NVDEC and VIC map the
-   same handles around every job, and players allocate fresh handles for each movie, so a table that only grew filled
-   up after a few movies and every later job saw unmapped memory. g_iom is kept sorted by iova so that freed ranges
-   are found again first-fit. */
-typedef struct {
-    u32 iova, size;
-    u64 addr;
-    u32 h;
-} IoMap;
+enum { NV_OK = 0, NV_BAD_PARAMETER = 4, NV_INSUFFICIENT_MEMORY = 6 };
+
+#define H1_REGS       0x400u /* method registers: 0x1000 bytes */
+#define H1_SYNCPTS    16u    /* NVHOST_MODULE_MAX_SYNCPTS */
+#define H1_QUEUE      64u    /* jobs a channel holds before a SUBMIT waits for room */
+#define H1_JOB_WORDS  (1u << 24)
+#define H1_CB_WORDS   0x100000u
+#define H1_STACK      (1u << 20)
+#define CLASS_HOST    0x01u
+#define CLASS_VIC     0x5Du
+#define CLASS_NVDEC   0xF0u
+#define METHOD_EXEC   (0x300u / 4)
+#define HOST_WAIT_NS  2000000000
+
+/* The IOVAs handed out: [IOVA_BASE, IOVA_END), so each fits the u32 MAP_BUFFER returns. A mapping spans its size in
+   64 KiB pages plus a free 64 KiB page, so an engine running past a buffer reaches nothing mapped */
 #define IOVA_BASE  0x10000000ull
-#define IOVA_END   0x100000000ull /* MAP_BUFFER hands the iova back as a u32 */
-#define IOVA_GUARD 0x10000ull
-static IoMap g_iom[1024];
-static int g_niom;
-/* PMUTEX_INIT, not pm_init: nvmap's FREE can get here before any channel opens, from any thread. g_iomlk keeps the
-   table, held only to look it up or change it, so a FREE doesn't wait for a decode; g_hlk keeps the engines, held
-   around a job's commands on its channel's worker, but not across a syncpoint wait in them (a VIC job waits there
-   for the NVDEC job before it). The order: a channel's lock or g_hlk, then g_iomlk, then nvdrv's locks */
-static PMutex g_iomlk = PMUTEX_INIT;
-static PMutex g_hlk = PMUTEX_INIT;
-static u64 iova_span(u32 size) { return (((u64)size + 0xFFFFu) & ~0xFFFFull) + IOVA_GUARD; }
-/* the iova handle h is mapped at, mapped now if it isn't. 0 with *err the NvError when it can't be: a handle that
-   isn't alive or has no size (BadParameter), or no room (InsufficientMemory). nvmap's ids are its handle numbers, so
-   h names the handle either way */
-static u32 iova_map(u32 h, u32* err) {
-    u64 a;
-    u32 sz;
-    /* the handle is read with the table held: nvmap's FREE drops a mapping (host1x_forget_handle) after it marks the
-       handle dead, so it either finds this mapping in the table or this read finds the handle dead */
-    pm_lock(&g_iomlk);
-    if (!nvmap_get(h, &a, &sz) || !a || !sz) { /* a made-up size would let iova_ptr hand out memory past the buffer */
-        pm_unlock(&g_iomlk);
-        WARN_LIMIT(4, "video: nvmap handle %u has no memory or no size, not mapped for NVDEC/VIC\n", h);
-        *err = 4;
-        return 0;
-    }
-    for (int i = 0; i < g_niom; i++)
-        if (g_iom[i].h == h && g_iom[i].addr == a) {
-            u32 io = g_iom[i].iova;
-            pm_unlock(&g_iomlk);
-            return io;
-        }
-    u64 need = iova_span(sz), base = IOVA_BASE;
-    int at = 0;
-    for (; at < g_niom; at++) {
-        if (base + need <= g_iom[at].iova) break;
-        u64 e = g_iom[at].iova + iova_span(g_iom[at].size);
-        if (e > base) base = e;
-    }
-    if (g_niom >= 1024 || base + need > IOVA_END) {
-        int nm = g_niom;
-        pm_unlock(&g_iomlk);
-        WARN_LIMIT(8,
-                   "video: no room to map nvmap handle %u (%u bytes, %d mappings): NVDEC and VIC see unmapped memory\n",
-                   h, sz, nm);
-        *err = 6;
-        return 0;
-    }
-    memmove(&g_iom[at + 1], &g_iom[at], (size_t)(g_niom - at) * sizeof g_iom[0]);
-    g_iom[at].iova = (u32)base;
-    g_iom[at].size = sz;
-    g_iom[at].addr = a;
-    g_iom[at].h = h;
-    g_niom++;
-    pm_unlock(&g_iomlk);
-    return (u32)base;
-}
-void host1x_forget_handle(u32 h) {
-    pm_lock(&g_iomlk);
-    int k = 0;
-    for (int i = 0; i < g_niom; i++)
-        if (g_iom[i].h != h) g_iom[k++] = g_iom[i];
-    g_niom = k;
-    pm_unlock(&g_iomlk);
-}
-/* 40-bit iova (engines get it >>8) -> host pointer, for len bytes there inside one mapping (none for len 0: a size
-   that wrapped to 0 must not pass). The memory is guest memory, so the pointer stays usable if nvmap frees the handle
-   meanwhile */
+#define IOVA_END   0x100000000ull
+#define IOVA_PAGE  0x10000ull
+#define IOVA_SLOTS 1024u
+
+typedef struct {
+    u64 iova, span, addr; /* span: the IOVA range taken, guard page included */
+    u32 size, handle;
+} IovaMap;
+
+/* Statically initialized: nvmap's FREE can call host1x_forget_handle on any thread before a channel opens */
+static PMutex g_iova_lk = PMUTEX_INIT;
+static IovaMap g_iova[IOVA_SLOTS]; /* sorted by iova */
+static u32 g_niova;
+static PMutex g_engine_lk = PMUTEX_INIT;
+
+/* A job is one block of words: the command buffer count, the increment count, each command buffer as its length and
+   words (length 0 for one that was refused), then each increment as (syncpoint id, count) */
+struct H1Ch {
+    PMutex lk; /* the queue, the flags below it and syncpt[] */
+    PCond cv;  /* the queue changed, or the worker ended */
+    u32* queue[H1_QUEUE];
+    u32 head, count;
+    int started, closing, exited;
+    u32 syncpt[H1_SYNCPTS]; /* 0: not handed out yet (syncpt_alloc never returns 0) */
+    /* the worker's alone, then the close's */
+    int is_vic;
+    u32 cls, method, payload; /* the class the stream addresses, the engine method selected, LOAD_SYNCPT_PAYLOAD_32 */
+    NvdecCtx* dec;
+    u32 regs[H1_REGS];
+};
+
+static void wr32(u8* p, u32 off, u32 v) { memcpy(p + off, &v, 4); }
+
+/* ---- the IOVA table */
 u8* iova_ptr(u64 iova, u64 len) {
     u8* p = NULL;
-    pm_lock(&g_iomlk);
-    for (int i = 0; i < g_niom && !p; i++) {
-        IoMap* m = &g_iom[i];
-        if (len && len <= m->size && iova >= m->iova && iova - m->iova <= m->size - len)
-            p = GP(m->addr + (iova - m->iova));
+    u32 lo = 0, hi;
+    if (!len) return NULL;
+    pm_lock(&g_iova_lk);
+    hi = g_niova;
+    while (lo < hi) { /* the last mapping starting at or below iova */
+        u32 mid = lo + (hi - lo) / 2;
+        if (g_iova[mid].iova <= iova)
+            lo = mid + 1;
+        else
+            hi = mid;
     }
-    pm_unlock(&g_iomlk);
+    if (lo) {
+        const IovaMap* m = &g_iova[lo - 1];
+        u64 off = iova - m->iova;
+        if (off < m->size && len <= m->size - off) p = GP(m->addr + off);
+    }
+    pm_unlock(&g_iova_lk);
     return p;
 }
-
-/* ------------------------------------------------------------ host1x command stream */
-/* A channel is one nvdrv fd, as on the console: the game opens two NVDEC and two VIC fds per movie and sends a
-   stream's jobs through one of them, so the registers and the decoder (its reference pictures and headers) stay with
-   their stream. The engines only meet in guest memory: NVDEC writes each picture into the surface its job names, and
-   VIC reads its input slot from there.
-   As on the console, SUBMIT returns before the engine runs the job: the fences it hands back are the values its
-   syncpoint increments are promised to reach, and the channel's worker thread runs its jobs in order and makes the
-   increments after each. A VIC job's stream waits for the NVDEC picture it composes with the host class's syncpoint
-   wait. Run inside the ioctl, a job held the game's submitting thread for the whole decode or composition, and with
-   it whatever lock the game held around the submit */
-#define H1_NSYNCPT 16 /* the syncpoint indexes GET_SYNCPOINT takes, nvhost's NVHOST_MODULE_MAX_SYNCPTS */
-#define H1_QUEUE   64 /* jobs submitted and not run yet, at most: a submit past them waits for room */
-/* a submitted job, one allocation: w holds ncb command buffer lengths, nsp {syncpoint id, increments} pairs, then the
-   command buffers' words, copied at the submit */
-typedef struct {
-    u32 ncb, nsp;
-    u32 w[];
-} H1Job;
-struct H1Ch {
-    int is_vic;
-    u32 syncpt[H1_NSYNCPT]; /* 0 until GET_SYNCPOINT asks for it */
-    NvdecCtx* dec;          /* NVDEC channels only */
-    /* lk: the ioctls' state above and the queue. The worker alone touches the engine state below it */
-    PMutex lk;
-    PCond cv; /* a job queued, a job done, the worker gone */
-    H1Job* q[H1_QUEUE];
-    u32 head, tail; /* jobs queued, jobs done */
-    int worker;     /* the worker thread runs */
-    int closing;    /* the fd closed: the worker ends once the queue is empty */
-    u32 regs[0x1000 / 4];
-    u32 method;
-    u32 payload; /* the host class's LOAD_SYNCPT_PAYLOAD_32, the threshold of its WAIT_SYNCPT_32 */
-};
-static void dev_method(H1Ch* ch, u32 m, u32 v) {
-    if (m >= 0x1000 / 4) return; /* past the register file: m << 2 would wrap onto a real register, even 0x300 */
-    u32 off = m << 2;
-    ch->regs[off / 4] = v;
-    if (off == 0x300) {
-        if (ch->is_vic)
-            vic_execute(ch->regs);
+static void iova_remove(u32 i) {
+    memmove(&g_iova[i], &g_iova[i + 1], (g_niova - i - 1) * sizeof g_iova[0]);
+    g_niova--;
+}
+/* nvmap handle h at an IOVA: the one it has while its buffer stays where it is, or the first free range. The handle's
+   liveness is read under the table's lock, so a FREE racing this either is seen or forgets the new mapping */
+static u32 iova_map(u32 h, u32* out) {
+    u64 addr, span, at = IOVA_BASE;
+    u32 size, i, r = NV_OK;
+    pm_lock(&g_iova_lk);
+    if (!nvmap_get(h, &addr, &size) || !addr || !size) {
+        r = NV_BAD_PARAMETER;
+        goto done;
+    }
+    for (i = 0; i < g_niova; i++)
+        if (g_iova[i].handle == h) {
+            if (g_iova[i].addr == addr && g_iova[i].size == size) {
+                *out = (u32)g_iova[i].iova;
+                goto done;
+            }
+            iova_remove(i); /* the handle names another buffer now */
+            break;
+        }
+    if (g_niova == IOVA_SLOTS) {
+        r = NV_INSUFFICIENT_MEMORY;
+        goto done;
+    }
+    span = ((u64)size + IOVA_PAGE - 1) / IOVA_PAGE * IOVA_PAGE + IOVA_PAGE;
+    for (i = 0; i < g_niova; i++) {
+        if (g_iova[i].iova - at >= span) break;
+        at = g_iova[i].iova + g_iova[i].span;
+    }
+    if (at > IOVA_END || IOVA_END - at < span) {
+        r = NV_INSUFFICIENT_MEMORY;
+        goto done;
+    }
+    memmove(&g_iova[i + 1], &g_iova[i], (g_niova - i) * sizeof g_iova[0]);
+    g_iova[i].iova = at;
+    g_iova[i].span = span;
+    g_iova[i].addr = addr;
+    g_iova[i].size = size;
+    g_iova[i].handle = h;
+    g_niova++;
+    *out = (u32)at;
+done:
+    pm_unlock(&g_iova_lk);
+    return r;
+}
+void host1x_forget_handle(u32 h) {
+    u32 i = 0;
+    pm_lock(&g_iova_lk);
+    while (i < g_niova)
+        if (g_iova[i].handle == h)
+            iova_remove(i);
         else
-            nvdec_execute(ch->dec, ch->regs);
+            i++;
+    pm_unlock(&g_iova_lk);
+}
+
+/* ---- running a job on the worker */
+/* a host class wait: syncpoint id reaching thresh. The engines' lock is let go meanwhile */
+static void host_wait(u32 id, u32 thresh) {
+    pm_unlock(&g_engine_lk);
+    if (!syncpt_wait(id, thresh, HOST_WAIT_NS))
+        WARN_LIMIT(8, "host1x: a job waited 2 s for syncpoint %u to reach %u (it is at %u), and goes on\n", id, thresh,
+                   syncpt_read(id));
+    pm_lock(&g_engine_lk);
+}
+static void host_method(H1Ch* ch, u32 off, u32 v) {
+    switch (off) {
+        case 0x08: { /* WAIT_SYNCPT: index in bits 24-31, a 24 bit threshold, taken next to the syncpoint's value */
+            u32 id = v >> 24, cur = syncpt_read(id), t = (cur & ~0xFFFFFFu) | (v & 0xFFFFFFu);
+            if ((i32)(t - cur) < -(i32)0x800000) t += 0x1000000u;
+            host_wait(id, t);
+            break;
+        }
+        case 0x4E: ch->payload = v; break; /* LOAD_SYNCPT_PAYLOAD_32 */
+        case 0x50: host_wait(v, ch->payload); break; /* WAIT_SYNCPT_32 */
+        default: break; /* increments come from the submit's list */
     }
 }
-/* the host class's syncpoint wait, without the engines' lock: the job it waits for may be another channel's. The
-   console waits as long as it takes. Here a wait gives up after two seconds, as the GPU's stream waits do (gpu_park),
-   so a fence nothing reaches can't stop the channel for good */
-static void wait_syncpt(H1Ch* ch, u32 id, u32 thresh) {
-    pm_unlock(&g_hlk);
-    if (!syncpt_wait(id, thresh, 2000000000))
-        WARN_LIMIT(8, "video: %s job waited 2 s for syncpoint %u to reach %u (it is at %u), and goes on\n",
-                   ch->is_vic ? "vic" : "nvdec", id, thresh, syncpt_read(id));
-    pm_lock(&g_hlk);
-}
-static void reg_write(H1Ch* ch, u32 cls, u32 off, u32 v) {
-    /* the host class: its waits are honored (host1x's WAIT_SYNCPT, LOAD_SYNCPT_PAYLOAD_32 and WAIT_SYNCPT_32), and
-       its increments come from the submit's list once the job has run */
-    if (cls == 0x1) {
-        if (off == 0x08)
-            wait_syncpt(ch, v >> 24, v & 0xFFFFFF);
-        else if (off == 0x4E)
-            ch->payload = v;
-        else if (off == 0x50)
-            wait_syncpt(ch, v, ch->payload);
+static void engine_method(H1Ch* ch, u32 off, u32 v) {
+    if (ch->cls == CLASS_HOST) {
+        host_method(ch, off, v);
         return;
     }
-    if (off == 0x10)
+    if (off == 0x10) /* the method a write at 0x11 goes to, as a word index */
         ch->method = v;
-    else if (off == 0x11)
-        dev_method(ch, ch->method, v);
-}
-static void run_words(H1Ch* ch, const u32* w, u32 n) {
-    u32 cls = ch->is_vic ? 0x5D : 0xF0;
-    for (u32 i = 0; i < n;) {
-        u32 x = w[i++], op = x >> 28;
-        switch (op) {
-            case 0: {
-                cls = (x >> 6) & 0x3FF;
-                u32 off = (x >> 16) & 0xFFF, mask = x & 0x3F;
-                for (int b = 0; b < 6; b++)
-                    if (mask & (1u << b)) {
-                        if (i >= n) return;
-                        reg_write(ch, cls, off + b, w[i++]);
-                    }
-                break;
-            }
-            case 1: {
-                u32 off = (x >> 16) & 0xFFF, c = x & 0xFFFF;
-                for (u32 k = 0; k < c && i < n; k++) reg_write(ch, cls, off + k, w[i++]);
-                break;
-            }
-            case 2: {
-                u32 off = (x >> 16) & 0xFFF, c = x & 0xFFFF;
-                for (u32 k = 0; k < c && i < n; k++) reg_write(ch, cls, off, w[i++]);
-                break;
-            }
-            case 3: {
-                u32 off = (x >> 16) & 0xFFF, mask = x & 0xFFFF;
-                for (int b = 0; b < 16; b++)
-                    if (mask & (1u << b)) {
-                        if (i >= n) return;
-                        reg_write(ch, cls, off + b, w[i++]);
-                    }
-                break;
-            }
-            case 4: reg_write(ch, cls, (x >> 16) & 0xFFF, x & 0xFFFF); break;
-            default: {
-                LOG_LIMIT(6, "video: host1x opcode %u not handled (word %08x)\n", op, x);
-                return;
-            }
+    else if (off == 0x11 && ch->method < H1_REGS) {
+        ch->regs[ch->method] = v;
+        if (ch->method == METHOD_EXEC) {
+            if (ch->is_vic)
+                vic_execute(ch->regs);
+            else
+                nvdec_execute(ch->dec, ch->regs);
         }
     }
 }
+/* one command buffer's words: SETCLASS, INCR, NONINCR, MASK and IMM. Anything else, or a buffer ending inside a
+   command, stops it */
+static void run_words(H1Ch* ch, const u32* w, u32 n) {
+    u32 i = 0;
+    while (i < n) {
+        u32 c = w[i++], op = c >> 28, off = (c >> 16) & 0xFFF, k, cnt;
+        switch (op) {
+            case 0: /* SETCLASS: class in bits 6-15, then a word for each of 6 mask bits */
+                ch->cls = (c >> 6) & 0x3FF;
+                for (k = 0; k < 6; k++)
+                    if (c & (1u << k)) {
+                        if (i >= n) return;
+                        engine_method(ch, off + k, w[i++]);
+                    }
+                break;
+            case 1: /* INCR */
+            case 2: /* NONINCR */
+                cnt = c & 0xFFFF;
+                if (cnt > n - i) return;
+                for (k = 0; k < cnt; k++) engine_method(ch, op == 1 ? off + k : off, w[i++]);
+                break;
+            case 3: /* MASK: a word for each of 16 mask bits */
+                for (k = 0; k < 16; k++)
+                    if (c & (1u << k)) {
+                        if (i >= n) return;
+                        engine_method(ch, off + k, w[i++]);
+                    }
+                break;
+            case 4: engine_method(ch, off, c & 0xFFFF); break; /* IMM */
+            default: WARN_LIMIT(8, "host1x: command %08x (opcode %u) ends its buffer\n", c, op); return;
+        }
+    }
+}
+static void run_job(H1Ch* ch, const u32* job) {
+    u32 ncb = job[0], ninc = job[1], k = 2, c;
+    pm_lock(&g_engine_lk);
+    for (c = 0; c < ncb; c++) {
+        u32 len = job[k++];
+        run_words(ch, job + k, len);
+        k += len;
+    }
+    pm_unlock(&g_engine_lk);
+    for (c = 0; c < ninc; c++, k += 2) syncpt_add(job[k], job[k + 1]);
+}
+static void worker(void* arg) {
+    H1Ch* ch = arg;
+    pm_lock(&ch->lk);
+    for (;;) {
+        u32* job;
+        while (!ch->count && !ch->closing) pc_wait(&ch->cv, &ch->lk, -1);
+        if (!ch->count) break; /* closing, and every queued job ran */
+        job = ch->queue[ch->head];
+        pm_unlock(&ch->lk);
+        run_job(ch, job);
+        free(job);
+        pm_lock(&ch->lk);
+        ch->head = (ch->head + 1) % H1_QUEUE;
+        ch->count--;
+        pc_broadcast(&ch->cv); /* room for a waiting SUBMIT */
+    }
+    ch->exited = 1;
+    pc_broadcast(&ch->cv);
+    pm_unlock(&ch->lk);
+}
 
-/* ------------------------------------------------------------ channel ioctls */
+/* ---- the ioctls */
+static int owns_syncpt(const H1Ch* ch, u32 id) {
+    u32 i;
+    for (i = 0; i < H1_SYNCPTS; i++)
+        if (ch->syncpt[i] && ch->syncpt[i] == id) return 1;
+    return 0;
+}
+/* SUBMIT {u32 cmdbufs, relocs, increments, fences}, then the cmdbufs {memid, offset, words}, the relocs (16 bytes) and
+   their shifts (4), the increments {id, count, 3 unused} and the fences, u32s written back */
+static u32 submit(H1Ch* ch, u8* d, u32 n) {
+    u32 ncb, nrel, ninc, nfe, i, k, *job;
+    u64 o_cb = 16, o_inc, o_fe, total, *addr;
+    int foreign = 0;
+    if (n < 16) return NV_BAD_PARAMETER;
+    ncb = rd32(d, 0);
+    nrel = rd32(d, 4);
+    ninc = rd32(d, 8);
+    nfe = rd32(d, 12);
+    o_inc = o_cb + 12ull * ncb + 20ull * nrel; /* the relocs and their shifts between */
+    o_fe = o_inc + 20ull * ninc;
+    if (o_fe > n) return NV_BAD_PARAMETER;
+    if (nrel) WARN_LIMIT(1, "host1x: a submit's %u relocations are not applied\n", nrel);
+    /* an increment of a syncpoint the channel was not given refuses the whole job, before anything runs */
+    pm_lock(&ch->lk);
+    for (i = 0; i < ninc && !foreign; i++) foreign = !owns_syncpt(ch, rd32(d, (u32)(o_inc + 20ull * i)));
+    pm_unlock(&ch->lk);
+    if (foreign) {
+        WARN_LIMIT(8, "host1x: a submit increments syncpoint %u, which isn't the channel's\n",
+                   rd32(d, (u32)(o_inc + 20ull * (i - 1))));
+        return NV_BAD_PARAMETER;
+    }
+    /* each command buffer's handle looked up once: a refused one runs as empty, its job's increments still happen
+       so the game doesn't wait for good */
+    addr = malloc(ncb ? ncb * sizeof *addr : 1);
+    if (!addr) return NV_INSUFFICIENT_MEMORY;
+    total = 2 + ncb + 2ull * ninc;
+    for (i = 0; i < ncb; i++) {
+        u32 at = (u32)(o_cb + 12ull * i), memid = rd32(d, at), off = rd32(d, at + 4), words = rd32(d, at + 8), size;
+        u64 a;
+        addr[i] = 0;
+        if (!nvmap_get(memid, &a, &size) || !a || !words || words > H1_CB_WORDS || (off & 3) ||
+            (u64)off + 4ull * words > size) {
+            WARN_LIMIT(8, "host1x: command buffer %u of a submit skipped (handle %u, offset %u, %u words)\n", i, memid,
+                       off, words);
+            continue;
+        }
+        addr[i] = a + off;
+        total += words;
+    }
+    if (total - 2 > H1_JOB_WORDS) {
+        free(addr);
+        return NV_BAD_PARAMETER;
+    }
+    job = malloc((size_t)total * 4);
+    if (!job) {
+        free(addr);
+        return NV_INSUFFICIENT_MEMORY;
+    }
+    job[0] = ncb;
+    job[1] = ninc;
+    k = 2;
+    for (i = 0; i < ncb; i++) {
+        u32 words = addr[i] ? rd32(d, (u32)(o_cb + 12ull * i + 8)) : 0;
+        job[k++] = words;
+        if (words) memcpy(job + k, GP(addr[i]), (size_t)words * 4);
+        k += words;
+    }
+    free(addr);
+    for (i = 0; i < ninc; i++, k += 2) {
+        job[k] = rd32(d, (u32)(o_inc + 20ull * i));
+        job[k + 1] = rd32(d, (u32)(o_inc + 20ull * i + 4));
+    }
+    /* the fences are promised in queue order, under the lock the job is queued in */
+    pm_lock(&ch->lk);
+    while (ch->count == H1_QUEUE) pc_wait(&ch->cv, &ch->lk, -1);
+    for (i = 0; i < ninc; i++) {
+        u32 v = syncpt_promise(job[k - 2 * ninc + 2 * i], job[k - 2 * ninc + 2 * i + 1]);
+        if (i < nfe && o_fe + 4ull * i + 4 <= n) wr32(d, (u32)(o_fe + 4ull * i), v);
+    }
+    ch->queue[(ch->head + ch->count) % H1_QUEUE] = job;
+    ch->count++;
+    pc_broadcast(&ch->cv);
+    if (!ch->started) {
+        ch->started = 1;
+        if (plat_thread(worker, ch, H1_STACK)) fatal("host1x: cannot start a channel's worker thread\n");
+    }
+    pm_unlock(&ch->lk);
+    return NV_OK;
+}
+/* GET_SYNCPOINT {u32 index; out u32 id}: the channel's syncpoint at that index, allocated when first asked for */
+static u32 get_syncpt(H1Ch* ch, u8* d, u32 n) {
+    u32 idx, id;
+    if (n < 8) return NV_BAD_PARAMETER;
+    idx = rd32(d, 0);
+    if (idx >= H1_SYNCPTS) return NV_BAD_PARAMETER;
+    pm_lock(&ch->lk);
+    if (!ch->syncpt[idx]) ch->syncpt[idx] = syncpt_alloc();
+    id = ch->syncpt[idx];
+    pm_unlock(&ch->lk);
+    wr32(d, 4, id);
+    return NV_OK;
+}
+/* MAP_BUFFER {u32 count, 2 unused; then {u32 handle; out u32 iova} each}: every entry that fits the buffer is mapped,
+   and the first failure is the result (the SDK reads only that) */
+static u32 map_buffer(u8* d, u32 n) {
+    u32 count, i, r = NV_OK;
+    if (n < 12) return NV_BAD_PARAMETER;
+    count = rd32(d, 0);
+    if (count > (n - 12) / 8) count = (n - 12) / 8;
+    for (i = 0; i < count; i++) {
+        u32 iova = 0, e = iova_map(rd32(d, 12 + 8 * i), &iova);
+        wr32(d, 16 + 8 * i, iova);
+        if (e && r == NV_OK) r = e;
+    }
+    return r;
+}
+
 H1Ch* host1x_open(int is_vic) {
     H1Ch* ch = calloc(1, sizeof *ch);
     if (!ch) return NULL;
-    ch->is_vic = is_vic;
     if (!is_vic && !(ch->dec = nvdec_new())) {
         free(ch);
         return NULL;
     }
+    ch->is_vic = is_vic;
+    ch->cls = is_vic ? CLASS_VIC : CLASS_NVDEC;
     pm_init(&ch->lk);
     pc_init(&ch->cv);
     return ch;
 }
-/* a job's command buffers, then the syncpoint increments that say it is done */
-static void job_run(H1Ch* ch, const H1Job* j) {
-    const u32* inc = j->w + j->ncb;
-    const u32* words = inc + (u64)j->nsp * 2;
-    pm_lock(&g_hlk);
-    for (u32 i = 0; i < j->ncb; i++) {
-        run_words(ch, words, j->w[i]);
-        words += j->w[i];
-    }
-    pm_unlock(&g_hlk);
-    for (u32 i = 0; i < j->nsp; i++) syncpt_add(inc[i * 2], inc[i * 2 + 1]);
-}
-/* the channel's worker: its jobs in order, until the fd closes and the queue is empty */
-static void ch_worker(void* p) {
-    H1Ch* ch = p;
-    pm_lock(&ch->lk);
-    for (;;) {
-        while (ch->head == ch->tail && !ch->closing) pc_wait(&ch->cv, &ch->lk, -1);
-        if (ch->head == ch->tail) break;
-        H1Job* j = ch->q[ch->tail % H1_QUEUE];
-        pm_unlock(&ch->lk);
-        job_run(ch, j);
-        free(j);
-        pm_lock(&ch->lk);
-        ch->tail++;
-        pc_broadcast(&ch->cv); /* room for a submit, or the close waiting for the queue */
-    }
-    ch->worker = 0;
-    pc_broadcast(&ch->cv);
-    pm_unlock(&ch->lk);
-}
 void host1x_close(H1Ch* ch) {
+    u32 i;
     if (!ch) return;
-    /* the jobs queued run first: the game may still wait for their increments, and the syncpoints go back below */
-    pm_lock(&ch->lk);
+    pm_lock(&ch->lk); /* the game may still wait for what it queued: the worker runs it first */
     ch->closing = 1;
     pc_broadcast(&ch->cv);
-    while (ch->worker) pc_wait(&ch->cv, &ch->lk, -1);
+    while (ch->started && !ch->exited) pc_wait(&ch->cv, &ch->lk, -1);
     pm_unlock(&ch->lk);
-    pm_lock(&g_hlk);
-    for (int i = 0; i < H1_NSYNCPT; i++)
-        if (ch->syncpt[i]) syncpt_free(ch->syncpt[i]);
+    pm_lock(&g_engine_lk);
     nvdec_free(ch->dec);
-    pm_unlock(&g_hlk);
+    pm_unlock(&g_engine_lk);
+    for (i = 0; i < H1_SYNCPTS; i++)
+        if (ch->syncpt[i]) syncpt_free(ch->syncpt[i]);
+    pm_destroy(&ch->lk);
     free(ch);
 }
-/* syncpoints come from nvdrv's allocator: NvRmStream indexes a 128-entry table by syncpoint id, and an id past it
-   (upstream used 200) writes beyond the table into the game's heap. A channel's go back when its fd closes: four
-   channels per movie would otherwise use up the ids after a few dozen movies */
-static u32 ch_syncpt(H1Ch* ch, u32 i) {
-    if (!ch->syncpt[i]) ch->syncpt[i] = syncpt_alloc();
-    return ch->syncpt[i];
-}
-/* whether the channel owns syncpoint id (GET_SYNCPOINT handed it out): the only ones its submits may increment */
-static int ch_owns(const H1Ch* ch, u32 id) {
-    for (int i = 0; id && i < H1_NSYNCPT; i++)
-        if (ch->syncpt[i] == id) return 1;
-    return 0;
-}
-/* SUBMIT: counts, cmdbufs {memid, offset, words}, relocs, reloc shifts, syncpt incrs {id, n, ?x3}, fence thresholds
-   (u32 each, written back). The job is copied and queued for the channel's worker, with ch->lk held */
-static u32 ch_submit(H1Ch* ch, u8* d, u32 n) {
-    const char* eng = ch->is_vic ? "vic" : "nvdec";
-    u32 ncb = rd32(d, 0), nrel = rd32(d, 4), nsp = rd32(d, 8), nfe = rd32(d, 12);
-    /* in 64 bits: counts from the game can wrap a u32 sum back under n */
-    u64 cbo = 16, spo = cbo + (u64)ncb * 12 + (u64)nrel * 16 + (u64)nrel * 4, feo = spo + (u64)nsp * 20;
-    if (feo > n) return 4; /* BadParameter */
-    /* an increment of a syncpoint the channel doesn't own refuses the whole submit, before it runs */
-    u32 k = 0;
-    while (k < nsp && ch_owns(ch, rd32(d, (u32)(spo + (u64)k * 20)))) k++;
-    if (k < nsp) {
-        WARN_LIMIT(4, "video: %s submit increments syncpoint %u, not one of its channel's, refused\n", eng,
-                   rd32(d, (u32)(spo + (u64)k * 20)));
-        return 4;
-    }
-    if (nrel) LOG_LIMIT(1, "video: %s submit has %u relocations, which aren't applied\n", eng, nrel);
-    /* the command buffers' words: a buffer that can't be read is left out (length 0), and the job's increments still
-       happen so the game doesn't wait forever on them. src keeps where each lies in guest memory (0 left out): a second
-       nvmap_get could find the handle freed or changed by another thread meanwhile. The memory stays guest memory */
-    u64* src = malloc((ncb ? ncb : 1) * sizeof *src);
-    if (!src) return 6; /* InsufficientMemory */
-    u64 words = 0;
-    for (u32 i = 0; i < ncb; i++) {
-        u32 cb = (u32)(cbo + (u64)i * 12);
-        u32 mem = rd32(d, cb), off = rd32(d, cb + 4), wc = rd32(d, cb + 8);
-        u64 a;
-        u32 msz;
-        nvmap_get(mem, &a, &msz);
-        /* host1x gathers words: an offset that isn't one would read u32s at a misaligned address */
-        if (!a || !wc || wc > 0x100000 || (off & 3) || (u64)off + (u64)wc * 4 > msz) {
-            LOG_LIMIT(4, "video: %s command buffer skipped (nvmap %u, offset %x, %u words, buffer %u bytes)\n", eng,
-                      mem, off, wc, msz);
-            src[i] = 0;
-            continue;
-        }
-        src[i] = a + off;
-        words += wc;
-    }
-    u64 nw = (u64)ncb + (u64)nsp * 2 + words;
-    H1Job* j = nw > (1u << 24) ? NULL : malloc(sizeof *j + nw * sizeof j->w[0]); /* 64 MB of commands is no job */
-    if (!j) {
-        WARN_LIMIT(4, "video: %s submit of %llu words refused\n", eng, (unsigned long long)nw);
-        free(src);
-        return nw > (1u << 24) ? 4 : 6;
-    }
-    j->ncb = ncb;
-    j->nsp = nsp;
-    u32* inc = j->w + ncb;
-    u32* w = inc + (u64)nsp * 2;
-    for (u32 i = 0; i < ncb; i++) {
-        u32 wc = src[i] ? rd32(d, (u32)(cbo + (u64)i * 12) + 8) : 0;
-        if (wc) memcpy(w, GP(src[i]), (size_t)wc * 4);
-        j->w[i] = wc;
-        w += wc;
-    }
-    free(src);
-    while (ch->head - ch->tail == H1_QUEUE) pc_wait(&ch->cv, &ch->lk, -1);
-    /* each fence is the value its syncpoint reaches with this job's increments, promised in the order the jobs run */
-    for (u32 i = 0; i < nsp; i++) {
-        u32 sp = (u32)(spo + (u64)i * 20);
-        u32 id = rd32(d, sp), v = syncpt_promise(id, rd32(d, sp + 4));
-        inc[i * 2] = id;
-        inc[i * 2 + 1] = rd32(d, sp + 4);
-        if (i < nfe && feo + (u64)i * 4 + 4 <= n) memcpy(d + feo + (u64)i * 4, &v, 4);
-    }
-    ch->q[ch->head % H1_QUEUE] = j;
-    ch->head++;
-    if (!ch->worker) {
-        ch->worker = 1;
-        if (plat_thread(ch_worker, ch, (size_t)1 << 20)) fatal("could not start a video engine's thread");
-    }
-    pc_broadcast(&ch->cv);
-    LOG_LIMIT(3, "video: %s submit: %u command buffers, %u relocs, %u syncpoint increments, %u fences (%u bytes)\n",
-              eng, ncb, nrel, nsp, nfe, n);
-    return 0;
-}
 u32 host1x_ioctl(H1Ch* ch, u32 cmd, u8* d, u32 n) {
-    int is_vic = ch->is_vic;
-    pm_lock(&ch->lk);
-    u32 r = 0, grp = (cmd >> 8) & 0xFF, nr = cmd & 0xFF;
-    if (grp == 0x48) {
-        if (nr != 0x01) /* SET_NVMAP_FD: nvmap is one device here */
-            LOG_LIMIT(8, "video: %s ioctl %08x not handled\n", is_vic ? "vic" : "nvdec", cmd);
-    } else if (grp == 0)
-        switch (nr) {
-            case 0x01: r = ch_submit(ch, d, n); break;
-            case 0x02: { /* GET_SYNCPOINT: {u32 index, u32 id} */
-                u32 i = rd32(d, 0);
-                if (i >= H1_NSYNCPT) {
-                    r = 4; /* BadParameter */
-                    break;
+    u32 group = (cmd >> 8) & 0xFF, nr = cmd & 0xFF;
+    if (!ch) return NV_BAD_PARAMETER;
+    if (group == 0x00) switch (nr) {
+            case 0x01: return submit(ch, d, n);
+            case 0x02: return get_syncpt(ch, d, n);
+            case 0x03: /* GET_WAITBASE {u32; out u32 base} */
+                if (n >= 8) wr32(d, 4, 0);
+                return NV_OK;
+            case 0x07: return NV_OK; /* SET_SUBMIT_TIMEOUT */
+            case 0x09: return map_buffer(d, n);
+            case 0x0A: return NV_OK; /* UNMAP_BUFFER: NVDEC and VIC map the same handles around every job, so the
+                                        mapping lives until nvmap frees the handle */
+            case 0x23: /* GET_CLK_RATE {out u32 rate, u32 module}: the engine clock Eden reports */
+                if (n >= 8) {
+                    wr32(d, 0, 614400000);
+                    wr32(d, 4, 0);
                 }
-                u32 v = ch_syncpt(ch, i);
-                memcpy(d + 4, &v, 4);
-                break;
-            }
-            case 0x03: {
-                u32 v = 0;
-                memcpy(d + 4, &v, 4);
-                break;
-            } /* GET_WAITBASE */
-            case 0x07: break; /* SET_SUBMIT_TIMEOUT */
-            case 0x09: {      /* MAP_BUFFER: the SDK reads only the result, which a handle that can't be mapped fails */
-                u32 ne = rd32(d, 0);
-                for (u32 i = 0; i < ne && 12 + (u64)i * 8 + 8 <= n; i++) {
-                    u32 h = rd32(d, 12 + i * 8), err = 0;
-                    u32 io = iova_map(h, &err);
-                    memcpy(d + 12 + i * 8 + 4, &io, 4);
-                    if (err && !r) r = err;
-                }
-                break;
-            }
-            /* UNMAP_BUFFER: the mapping stays until nvmap frees the handle (host1x_forget_handle). NVDEC and VIC map
-               the same handles and unmap them after every job, so dropping it here would take it from the other */
-            case 0x0A: break;
-            default: {
-                LOG_LIMIT(8, "video: %s ioctl %08x not handled\n", is_vic ? "vic" : "nvdec", cmd);
-                break;
-            }
+                return NV_OK;
+            default: break;
         }
-    else { LOG_LIMIT(8, "video: %s ioctl %08x not handled\n", is_vic ? "vic" : "nvdec", cmd); }
-    pm_unlock(&ch->lk);
-    return r;
+    else if (group == 0x48 && nr == 0x01) /* SET_NVMAP_FD */
+        return NV_OK;
+    WARN_LIMIT(16, "host1x: ioctl %08x not handled\n", cmd);
+    return NV_OK;
 }

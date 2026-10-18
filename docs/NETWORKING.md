@@ -15,8 +15,8 @@ This ports the networking design and service behavior from Eden's
 `lizzie/refactor-networking-12`, revision
 `2014a5778273eef450bf3a48530d703750487a18`, principally
 `src/core/internal_network/` and the sockets/NIFM services. Source files retain
-Eden/yuzu notices where adapted; existing SwitchRecomp/MZ Labs notices remain on
-modified files. This is a C adaptation, not a vendored copy of Eden's C++ runtime.
+Eden/yuzu notices where adapted. This is a C adaptation, not a vendored copy of
+Eden's C++ runtime.
 
 ## Layout and translation tables
 

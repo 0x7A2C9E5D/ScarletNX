@@ -22,36 +22,38 @@
 static int nn_apm_IManager_OpenSession(SvcObj* self, SvcObj** session) {
     (void)self;
     *session = nn_apm_ISession_new(0);
-    return 0;
+    R_SUCCEED();
 }
 /* Boost when docked, Normal in handheld mode */
 static int nn_apm_IManager_GetPerformanceMode(SvcObj* self, nn_apm_PerformanceMode* mode) {
     (void)self;
     *mode = g_opt_docked ? 1 : 0;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_apm_ISession_GetPerformanceConfiguration(SvcObj* self, nn_apm_PerformanceMode mode,
                                                        nn_apm_PerformanceConfiguration* config) {
     (void)self, (void)mode;
     *config = APM_CONFIGURATION;
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ lm */
 static int nn_lm_ILogService_OpenLogger(SvcObj* self, u64 pid, SvcObj** logger) {
     (void)self, (void)pid;
     *logger = nn_lm_ILogger_new(0);
-    return 0;
+    R_SUCCEED();
 }
 /* a log packet: a 0x18 byte header (its payload's size at 0x14), then fields of a type byte, a ULEB128 size and
-   the data (nn::lm's LogDataChunkKey). The text (2), with the file (4) and line (3) when there are some, goes to
-   the log */
+   the data (nn::lm's LogDataChunkKey). The text (2, every such field in order, up to LM_TEXT bytes), with the file
+   (4) and line (3) when there are some, goes to the log */
+#define LM_TEXT 1000
 static int nn_lm_ILogger_Log(SvcObj* self, IpcBuf message) {
     const u8 *p = GP(message.addr), *end;
-    const u8 *text = NULL, *file = NULL;
+    const u8* file = NULL;
+    char text[LM_TEXT];
     u32 payload, text_n = 0, file_n = 0, line = 0;
     (void)self;
-    if (message.size < 0x18) return 0;
+    if (message.size < 0x18) R_SUCCEED();
     memcpy(&payload, p + 0x14, 4);
     end = p + 0x18 + (payload < message.size - 0x18 ? payload : message.size - 0x18);
     p += 0x18;
@@ -66,8 +68,9 @@ static int nn_lm_ILogger_Log(SvcObj* self, IpcBuf message) {
         }
         if (n > (u64)(end - p)) break;
         if (type == 2) {
-            text = p;
-            text_n = (u32)n;
+            u32 k = n < (u64)(LM_TEXT - text_n) ? (u32)n : LM_TEXT - text_n;
+            memcpy(text + text_n, p, k);
+            text_n += k;
         } else if (type == 4) {
             file = p;
             file_n = (u32)n;
@@ -78,18 +81,18 @@ static int nn_lm_ILogger_Log(SvcObj* self, IpcBuf message) {
     while (text_n && (text[text_n - 1] == '\n' || !text[text_n - 1])) text_n--;
     if (text_n) {
         if (file_n)
-            LOG("[lm] %.*s (%.*s:%u)\n", (int)text_n, (const char*)text, (int)file_n, (const char*)file, line);
+            LOG("[lm] %.*s (%.*s:%u)\n", (int)text_n, text, (int)file_n, (const char*)file, line);
         else
-            LOG("[lm] %.*s\n", (int)text_n, (const char*)text);
+            LOG("[lm] %.*s\n", (int)text_n, text);
     }
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ pctl: no restrictions set */
 static int nn_pctl_detail_ipc_IParentalControlServiceFactory_CreateService(SvcObj* self, u64 pid, SvcObj** service) {
     (void)self, (void)pid;
     *service = nn_pctl_detail_ipc_IParentalControlService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_pctl_detail_ipc_IParentalControlServiceFactory_CreateServiceWithoutInitialize(SvcObj* self, u64 pid,
                                                                                          SvcObj** service) {
@@ -98,7 +101,7 @@ static int nn_pctl_detail_ipc_IParentalControlServiceFactory_CreateServiceWithou
 static int nn_pctl_detail_ipc_IParentalControlService_IsStereoVisionPermitted(SvcObj* self, u8* permitted) {
     (void)self;
     *permitted = 1;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_pctl_detail_ipc_IParentalControlService_GetSynchronizationEvent(SvcObj* self, u32* event) {
     (void)self;
@@ -119,18 +122,18 @@ static int nn_pctl_detail_ipc_IParentalControlService_GetUnlinkedEvent(SvcObj* s
 static int nn_friends_detail_ipc_IServiceCreator_CreateFriendService(SvcObj* self, SvcObj** service) {
     (void)self;
     *service = nn_friends_detail_ipc_IFriendService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_friends_detail_ipc_IServiceCreator_CreateNotificationService(SvcObj* self, const nn_account_Uid* uid,
                                                                          SvcObj** service) {
     (void)self, (void)uid;
     *service = nn_friends_detail_ipc_INotificationService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_friends_detail_ipc_IServiceCreator_CreateDaemonSuspendSessionService(SvcObj* self, SvcObj** service) {
     (void)self;
     *service = nn_friends_detail_ipc_IDaemonSuspendSessionService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_friends_detail_ipc_IFriendService_GetCompletionEvent(SvcObj* self, u32* event) {
     (void)self;
@@ -143,89 +146,89 @@ static int nn_friends_detail_ipc_INotificationService_GetEvent(SvcObj* self, u32
 static int nn_friends_detail_ipc_INotificationService_Pop(SvcObj* self,
                                                          nn_friends_detail_ipc_SizedNotificationInfo* info) {
     (void)self, (void)info;
-    return FRIEND_NO_NOTIFICATIONS;
+    R_THROW(FRIEND_NO_NOTIFICATIONS);
 }
 
 /* ============================================================ ns */
 static int nn_ns_detail_IServiceGetterInterface_GetDynamicRightsInterface(SvcObj* self, SvcObj** iface) {
     (void)self;
     *iface = nn_ns_detail_IDynamicRightsInterface_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ns_detail_IServiceGetterInterface_GetReadOnlyApplicationControlDataInterface(SvcObj* self,
                                                                                           SvcObj** iface) {
     (void)self;
     *iface = nn_ns_detail_IReadOnlyApplicationControlDataInterface_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ns_detail_IServiceGetterInterface_GetReadOnlyApplicationRecordInterface(SvcObj* self, SvcObj** iface) {
     (void)self;
     *iface = nn_ns_detail_IReadOnlyApplicationRecordInterface_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ns_detail_IServiceGetterInterface_GetECommerceInterface(SvcObj* self, SvcObj** iface) {
     (void)self;
     *iface = nn_ns_detail_IECommerceInterface_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ns_detail_IServiceGetterInterface_GetApplicationVersionInterface(SvcObj* self, SvcObj** iface) {
     (void)self;
     *iface = nn_ns_detail_IApplicationVersionInterface_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ns_detail_IServiceGetterInterface_GetFactoryResetInterface(SvcObj* self, SvcObj** iface) {
     (void)self;
     *iface = nn_ns_detail_IFactoryResetInterface_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ns_detail_IServiceGetterInterface_GetAccountProxyInterface(SvcObj* self, SvcObj** iface) {
     (void)self;
     *iface = nn_ns_detail_IAccountProxyInterface_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ns_detail_IServiceGetterInterface_GetApplicationManagerInterface(SvcObj* self, SvcObj** iface) {
     (void)self;
     *iface = nn_ns_detail_IApplicationManagerInterface_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ns_detail_IServiceGetterInterface_GetDownloadTaskInterface(SvcObj* self, SvcObj** iface) {
     (void)self;
     *iface = nn_ns_detail_IDownloadTaskInterface_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ns_detail_IServiceGetterInterface_GetContentManagementInterface(SvcObj* self, SvcObj** iface) {
     (void)self;
     *iface = nn_ns_detail_IContentManagementInterface_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ns_detail_IServiceGetterInterface_GetDocumentInterface(SvcObj* self, SvcObj** iface) {
     (void)self;
     *iface = nn_ns_detail_IDocumentInterface_new(0);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ ectx */
 static int nn_err_context_IWriterForApplication_CreateContextRegistrar(SvcObj* self, SvcObj** registrar) {
     (void)self;
     *registrar = nn_err_context_IContextRegistrar_new(0);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ psm: a full battery, on the charger */
 static int nn_psm_IPsmServer_GetBatteryChargePercentage(SvcObj* self, u32* percentage) {
     (void)self;
     *percentage = 100;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_psm_IPsmServer_GetChargerType(SvcObj* self, nn_psm_ChargerType* charger_type) {
     (void)self;
     *charger_type = 1; /* RegularCharger */
-    return 0;
+    R_SUCCEED();
 }
 static int nn_psm_IPsmServer_OpenSession(SvcObj* self, SvcObj** session) {
     (void)self;
     *session = nn_psm_IPsmSession_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_psm_IPsmSession_BindStateChangeEvent(SvcObj* self, u32* event) {
     (void)self;
@@ -241,12 +244,12 @@ static void throw_fatal(u32 result, u32 policy, const char* how) {
 static int nn_fatalsrv_IService_ThrowFatal(SvcObj* self, u32 result, u64 pid) {
     (void)self, (void)pid;
     throw_fatal(result, 0, "");
-    return 0;
+    R_SUCCEED();
 }
 static int nn_fatalsrv_IService_ThrowFatalWithPolicy(SvcObj* self, u32 result, u32 policy, u64 pid) {
     (void)self, (void)pid;
     throw_fatal(result, policy, "");
-    return 0;
+    R_SUCCEED();
 }
 /* the game's registers when it gave up, into the log first: an AArch64 context has x0 to x28, fp, lr, sp and pc */
 static int nn_fatalsrv_IService_ThrowFatalWithCpuContext(SvcObj* self, u32 result, u32 policy, u64 pid,
@@ -259,7 +262,7 @@ static int nn_fatalsrv_IService_ThrowFatalWithCpuContext(SvcObj* self, u32 resul
              (unsigned long long)r[1], (unsigned long long)r[2], (unsigned long long)r[3]);
     }
     throw_fatal(result, policy, ", with its registers in the log");
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ csrng, spl */
@@ -276,12 +279,12 @@ static void random_bytes(IpcBuf data) {
 static int nn_spl_detail_IRandomInterface_GenerateRandomBytes(SvcObj* self, IpcBuf data) {
     (void)self;
     random_bytes(data);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_spl_detail_IGeneralInterface_GenerateRandomBytes(SvcObj* self, IpcBuf data) {
     (void)self;
     random_bytes(data);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ mm:u */
@@ -306,19 +309,19 @@ static MmRequest* mm_find(SvcObj* self, int by_module, u32 key) {
 }
 static u32 mm_initialize(SvcObj* self, u32 module) {
     Mm* mm = (Mm*)self->data;
-    u32 id = 0;
+    u32 id;
     int i;
     pm_lock(&mm_lock);
+    id = ++mm->next_id; /* the client gets its id even when the request can't be kept: it reads back 0 */
     for (i = 0; i < MM_REQUESTS && mm->req[i].used; i++) {
     }
     if (i < MM_REQUESTS) {
-        id = ++mm->next_id;
         mm->req[i].used = 1;
         mm->req[i].id = id;
         mm->req[i].module = module;
         mm->req[i].current = 0;
     } else
-        WARN_LIMIT(4, "mm:u: more than %d clock requests, one is dropped\n", MM_REQUESTS);
+        WARN_LIMIT(4, "mm:u: more than %d clock requests, request %u isn't kept\n", MM_REQUESTS, id);
     pm_unlock(&mm_lock);
     return id;
 }
@@ -349,40 +352,40 @@ static int nn_mmnv_IRequest_InitializeOld(SvcObj* self, nn_mmnv_Module module, n
                                          u32 event_clear_mode) {
     (void)priority, (void)event_clear_mode;
     mm_initialize(self, module);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_mmnv_IRequest_FinalizeOld(SvcObj* self, nn_mmnv_Module module) {
     mm_finalize(self, 1, module);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_mmnv_IRequest_SetAndWaitOld(SvcObj* self, nn_mmnv_Module module, nn_mmnv_Setting min,
                                          nn_mmnv_Setting max) {
     (void)max;
     mm_set(self, 1, module, min);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_mmnv_IRequest_GetOld(SvcObj* self, nn_mmnv_Module module, nn_mmnv_Setting* current) {
     *current = mm_get(self, 1, module);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_mmnv_IRequest_Initialize(SvcObj* self, nn_mmnv_Module module, nn_mmnv_Priority priority,
                                       u32 event_clear_mode, u32* request_id) {
     (void)priority, (void)event_clear_mode;
     *request_id = mm_initialize(self, module);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_mmnv_IRequest_Finalize(SvcObj* self, u32 request_id) {
     mm_finalize(self, 0, request_id);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_mmnv_IRequest_SetAndWait(SvcObj* self, u32 request_id, nn_mmnv_Setting min, nn_mmnv_Setting max) {
     (void)max;
     mm_set(self, 0, request_id, min);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_mmnv_IRequest_Get(SvcObj* self, u32 request_id, nn_mmnv_Setting* current) {
     *current = mm_get(self, 0, request_id);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ nfp, nfc: no device */
@@ -392,33 +395,46 @@ static int nn_mmnv_IRequest_Get(SvcObj* self, u32 request_id, nn_mmnv_Setting* c
 #define NFC_NOT_INITIALIZED  RC(127, 77)
 #define NFC_FINALIZED        6 /* nn::nfp::DeviceState of a device that isn't there */
 
-/* an IUser's nn::nfc::State in its data: 0 not initialized, 1 initialized */
-static u32 nfc_state(SvcObj* self) { return __atomic_load_n((u32*)self->data, __ATOMIC_ACQUIRE); }
-static void nfc_set_state(SvcObj* self, u32 state) { __atomic_store_n((u32*)self->data, state, __ATOMIC_RELEASE); }
+/* an IUser: its nn::nfc::State (0 not initialized, 1 initialized), and the one availability-change event it hands
+   out every time, never signaled since no device comes or goes */
+typedef struct {
+    u32 state;
+    KEvent* availability;
+} NfcUser;
+static u32 nfc_state(SvcObj* self) { return __atomic_load_n(&((NfcUser*)self->data)->state, __ATOMIC_ACQUIRE); }
+static void nfc_set_state(SvcObj* self, u32 state) {
+    __atomic_store_n(&((NfcUser*)self->data)->state, state, __ATOMIC_RELEASE);
+}
+static void nfc_user_destroy(SvcObj* o) { kobj_unref(&((NfcUser*)o->data)->availability->o); }
+static SvcObj* nfc_user(SvcObj* o, const char* name) {
+    ((NfcUser*)o->data)->availability = owned_event(name);
+    o->destroy = nfc_user_destroy;
+    return o;
+}
 /* what a command on a device answers: there is none */
 static int nfp_device(SvcObj* self) { return nfc_state(self) ? NFP_DEVICE_NOT_FOUND : NFP_NFC_DISABLED; }
 static int nfc_device(SvcObj* self) { return nfc_state(self) ? NFC_DEVICE_NOT_FOUND : NFC_NOT_INITIALIZED; }
 
 static int nn_nfp_detail_IUserManager_CreateUserInterface(SvcObj* self, SvcObj** user) {
     (void)self;
-    *user = nn_nfp_detail_IUser_new(sizeof(u32));
-    return 0;
+    *user = nfc_user(nn_nfp_detail_IUser_new(sizeof(NfcUser)), "nfp availability change");
+    R_SUCCEED();
 }
 static int nn_nfc_detail_IUserManager_CreateUserInterface(SvcObj* self, SvcObj** user) {
     (void)self;
-    *user = nn_nfc_detail_IUser_new(sizeof(u32));
-    return 0;
+    *user = nfc_user(nn_nfc_detail_IUser_new(sizeof(NfcUser)), "nfc availability change");
+    R_SUCCEED();
 }
 
 static int nn_nfp_detail_IUser_Initialize(SvcObj* self, u64 applet_resource_user_id, u64 pid,
                                          IpcBuf mcu_version_data) {
     (void)applet_resource_user_id, (void)pid, (void)mcu_version_data;
     nfc_set_state(self, 1);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nfp_detail_IUser_Finalize(SvcObj* self) {
     nfc_set_state(self, 0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nfp_detail_IUser_ListDevices(SvcObj* self, IpcBuf devices, i32* count) {
     (void)devices, (void)count;
@@ -497,12 +513,12 @@ static int nn_nfp_detail_IUser_AttachDeactivateEvent(SvcObj* self, const nn_nfc_
 }
 static int nn_nfp_detail_IUser_GetState(SvcObj* self, u32* state) {
     *state = nfc_state(self);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nfp_detail_IUser_GetDeviceState(SvcObj* self, const nn_nfc_DeviceHandle* device_handle, u32* state) {
     (void)self, (void)device_handle;
     *state = NFC_FINALIZED;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nfp_detail_IUser_GetNpadId(SvcObj* self, const nn_nfc_DeviceHandle* device_handle, u32* npad_id) {
     (void)device_handle, (void)npad_id;
@@ -513,10 +529,9 @@ static int nn_nfp_detail_IUser_GetApplicationAreaSize(SvcObj* self, const nn_nfc
     (void)device_handle, (void)size;
     return nfp_device(self);
 }
-/* no device comes or goes */
 static int nn_nfp_detail_IUser_AttachAvailabilityChangeEvent(SvcObj* self, u32* event) {
-    (void)self;
-    return new_event(event, "nfp availability change", 0);
+    *event = ev_handle(((NfcUser*)self->data)->availability);
+    R_SUCCEED();
 }
 static int nn_nfp_detail_IUser_RecreateApplicationArea(SvcObj* self, const nn_nfc_DeviceHandle* device_handle,
                                                       u32 access_id, IpcBuf data) {
@@ -528,21 +543,21 @@ static int nn_nfc_detail_IUser_Initialize(SvcObj* self, u64 applet_resource_user
                                          IpcBuf mcu_version_data) {
     (void)applet_resource_user_id, (void)pid, (void)mcu_version_data;
     nfc_set_state(self, 1);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nfc_detail_IUser_Finalize(SvcObj* self) {
     nfc_set_state(self, 0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nfc_detail_IUser_GetState(SvcObj* self, u32* state) {
     *state = nfc_state(self);
-    return 0;
+    R_SUCCEED();
 }
 /* NFC is switched on in the settings; there is just nothing to read with */
 static int nn_nfc_detail_IUser_IsNfcEnabled(SvcObj* self, u8* enabled) {
     (void)self;
     *enabled = 1;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nfc_detail_IUser_InitializeOld(SvcObj* self, u64 applet_resource_user_id, u64 pid,
                                             IpcBuf mcu_version_data) {
@@ -560,15 +575,15 @@ static int nn_nfc_detail_IUser_ListDevices(SvcObj* self, IpcBuf devices, i32* co
 static int nn_nfc_detail_IUser_GetDeviceState(SvcObj* self, const nn_nfc_DeviceHandle* device_handle, u32* state) {
     (void)self, (void)device_handle;
     *state = NFC_FINALIZED;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nfc_detail_IUser_GetNpadId(SvcObj* self, const nn_nfc_DeviceHandle* device_handle, u32* npad_id) {
     (void)device_handle, (void)npad_id;
     return nfc_device(self);
 }
 static int nn_nfc_detail_IUser_AttachAvailabilityChangeEvent(SvcObj* self, u32* event) {
-    (void)self;
-    return new_event(event, "nfc availability change", 0);
+    *event = ev_handle(((NfcUser*)self->data)->availability);
+    R_SUCCEED();
 }
 static int nn_nfc_detail_IUser_StartDetection(SvcObj* self, const nn_nfc_DeviceHandle* device_handle, u32 protocol) {
     (void)device_handle, (void)protocol;
@@ -600,23 +615,23 @@ static int nn_nfc_detail_IUser_AttachDeactivateEvent(SvcObj* self, const nn_nfc_
 static int nn_bcat_detail_ipc_IServiceCreator_CreateBcatService(SvcObj* self, u64 pid, SvcObj** service) {
     (void)self, (void)pid;
     *service = nn_bcat_detail_ipc_IBcatService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_bcat_detail_ipc_IServiceCreator_CreateDeliveryCacheStorageService(SvcObj* self, u64 pid,
                                                                                SvcObj** service) {
     (void)self, (void)pid;
     *service = nn_bcat_detail_ipc_IDeliveryCacheStorageService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_bcat_detail_ipc_IServiceCreator_CreateDeliveryCacheStorageServiceWithApplicationId(
     SvcObj* self, nn_ApplicationId application_id, SvcObj** service) {
     (void)self, (void)application_id;
     *service = nn_bcat_detail_ipc_IDeliveryCacheStorageService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int bcat_progress(SvcObj** progress) {
     *progress = nn_bcat_detail_ipc_IDeliveryCacheProgressService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_bcat_detail_ipc_IBcatService_RequestSyncDeliveryCache(SvcObj* self, SvcObj** progress) {
     (void)self;
@@ -644,13 +659,13 @@ static int nn_bcat_detail_ipc_IBcatService_GetDeliveryCacheStorageUpdateNotifier
                                                                                SvcObj** notifier) {
     (void)self, (void)application_id;
     *notifier = nn_bcat_detail_ipc_INotifierService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_bcat_detail_ipc_IBcatService_RequestSuspendDeliveryTask(SvcObj* self, nn_ApplicationId application_id,
                                                                     SvcObj** suspension) {
     (void)self, (void)application_id;
     *suspension = nn_bcat_detail_ipc_IDeliveryTaskSuspensionService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 /* the sync is done before the game looks */
 static int nn_bcat_detail_ipc_IDeliveryCacheProgressService_GetEvent(SvcObj* self, u32* event) {
@@ -663,22 +678,22 @@ static int nn_bcat_detail_ipc_IDeliveryCacheProgressService_GetImpl(SvcObj* self
     (void)self;
     memset(GP(impl.addr), 0, (size_t)impl.size);
     if (impl.size >= 4) memcpy(GP(impl.addr), &status, 4);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_bcat_detail_ipc_IDeliveryCacheStorageService_CreateFileService(SvcObj* self, SvcObj** file) {
     (void)self;
     *file = nn_bcat_detail_ipc_IDeliveryCacheFileService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_bcat_detail_ipc_IDeliveryCacheStorageService_CreateDirectoryService(SvcObj* self, SvcObj** directory) {
     (void)self;
     *directory = nn_bcat_detail_ipc_IDeliveryCacheDirectoryService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_bcat_detail_ipc_IDeliveryCacheFileService_Open(SvcObj* self, const nn_bcat_DirectoryName* directory_name,
                                                             const nn_bcat_FileName* file_name) {
     (void)self, (void)directory_name, (void)file_name;
-    return BCAT_FAILED_OPEN_ENTITY;
+    R_THROW(BCAT_FAILED_OPEN_ENTITY);
 }
 static int nn_bcat_detail_ipc_INotifierService_GetEvent(SvcObj* self, u32* event) {
     (void)self;
@@ -695,12 +710,12 @@ static int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentBaseIdByApplicat
     SvcObj* self, nn_ncm_ApplicationId application_id, u64* base_id) {
     (void)self;
     *base_id = aoc_base_id(application_id);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentBaseId(SvcObj* self, u64 pid, u64* base_id) {
     (void)self, (void)pid;
     *base_id = aoc_base_id(g_title_id);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentListChangedEvent(SvcObj* self, u32* event) {
     (void)self;
@@ -714,7 +729,7 @@ static int nn_aocsrv_detail_IAddOnContentManager_GetAddOnContentListChangedEvent
 static int nn_aocsrv_detail_IAddOnContentManager_CreateEcPurchasedEventManager(SvcObj* self, SvcObj** manager) {
     (void)self;
     *manager = nn_ec_IPurchaseEventManager_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_aocsrv_detail_IAddOnContentManager_CreatePermanentEcPurchasedEventManager(SvcObj* self, u64 pid,
                                                                                        SvcObj** manager) {
@@ -724,12 +739,12 @@ static int nn_aocsrv_detail_IAddOnContentManager_CreatePermanentEcPurchasedEvent
 static int nn_aocsrv_detail_IAddOnContentManager_CreateContentsServiceManager(SvcObj* self, SvcObj** manager) {
     (void)self;
     *manager = nn_ec_IContentsServiceManager_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ec_IContentsServiceManager_RequestContentsAuthorizationToken(SvcObj* self, const u8* nonce, u64 pid,
                                                                           IpcBuf data, u32* event, SvcObj** async) {
     (void)self, (void)nonce, (void)pid, (void)data, (void)event, (void)async;
-    return AOC_NOT_CONNECTED;
+    R_THROW(AOC_NOT_CONNECTED);
 }
 static int nn_ec_IPurchaseEventManager_GetPurchasedEventReadableHandle(SvcObj* self, u32* event) {
     (void)self;
@@ -738,12 +753,12 @@ static int nn_ec_IPurchaseEventManager_GetPurchasedEventReadableHandle(SvcObj* s
 static int nn_ec_IPurchaseEventManager_PopPurchasedProductInfo(SvcObj* self,
                                                               nn_ec_srv_detail_PurchasedProductInfo* info) {
     (void)self, (void)info;
-    return AOC_NO_PURCHASED_PRODUCT;
+    R_THROW(AOC_NO_PURCHASED_PRODUCT);
 }
 static int nn_ec_IPurchaseEventManager_PopPurchasedProductInfoWithUid(SvcObj* self, const nn_account_Uid* uid,
                                                                      nn_ec_srv_detail_PurchasedProductInfo* info) {
     (void)self, (void)uid, (void)info;
-    return AOC_NO_PURCHASED_PRODUCT;
+    R_THROW(AOC_NO_PURCHASED_PRODUCT);
 }
 
 /* ============================================================ irs: a shared memory no camera writes to */
@@ -759,7 +774,7 @@ static int nn_irsensor_IIrSensorServer_GetIrsensorSharedMemoryHandle(SvcObj* sel
     }
     pm_unlock(&lock);
     *shared_memory = h_new(&shm->o);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ mii: the six default Miis */
@@ -813,14 +828,14 @@ static u8 mii_color(int kind, u8 v) {
 static int nn_mii_detail_IStaticService_GetDatabaseService(SvcObj* self, i32 key_code, SvcObj** database) {
     (void)self, (void)key_code;
     *database = nn_mii_detail_IDatabaseService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_mii_detail_IDatabaseService_BuildDefault(SvcObj* self, u32 index, nn_mii_CharInfo* info) {
     static const char name[] = "no name";
     u8* c = info->v;
     int i;
     (void)self;
-    if (index >= 6) return MII_INVALID_ARGUMENT;
+    R_UNLESS(index < 6, MII_INVALID_ARGUMENT);
     /* a new random create id (a version 4 UUID); never zero in its first byte, so no check of it reads it as the
        invalid all-zero id */
     do {
@@ -830,23 +845,23 @@ static int nn_mii_detail_IDatabaseService_BuildDefault(SvcObj* self, u32 index, 
     c[8] = (u8)(0x80 | (c[8] & 0x3f));
     for (i = 0; name[i]; i++) c[0x10 + 2 * i] = (u8)name[i]; /* UTF-16 */
     for (i = 0; i < MII_FIELDS; i++) c[mii_char_offset[i]] = mii_color(mii_color_kind[i], mii_defaults[index][i]);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_mii_detail_IDatabaseService_SetInterfaceVersion(SvcObj* self, u32 version) {
     (void)self, (void)version;
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ ldn */
 static int nn_ldn_detail_IUserServiceCreator_CreateUserLocalCommunicationService(SvcObj* self, SvcObj** service) {
     (void)self;
     *service = nn_ldn_detail_IUserLocalCommunicationService_new(sizeof(u32));
-    return 0;
+    R_SUCCEED();
 }
 /* nn::ldn::State: 0 none, 1 initialized */
 static int nn_ldn_detail_IUserLocalCommunicationService_GetState(SvcObj* self, u32* state) {
     *state = __atomic_load_n((u32*)self->data, __ATOMIC_ACQUIRE);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ldn_detail_IUserLocalCommunicationService_AttachStateChangeEvent(SvcObj* self, u32* event) {
     (void)self;
@@ -855,11 +870,11 @@ static int nn_ldn_detail_IUserLocalCommunicationService_AttachStateChangeEvent(S
 static int nn_ldn_detail_IUserLocalCommunicationService_Initialize(SvcObj* self, u64 pid) {
     (void)pid;
     __atomic_store_n((u32*)self->data, 1u, __ATOMIC_RELEASE);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ldn_detail_IUserLocalCommunicationService_Finalize(SvcObj* self) {
     __atomic_store_n((u32*)self->data, 0u, __ATOMIC_RELEASE);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ldn_detail_IUserLocalCommunicationService_InitializeWithVersion(SvcObj* self, i32 version, u64 pid) {
     (void)version;
@@ -870,7 +885,7 @@ static int nn_ldn_detail_IUserLocalCommunicationService_InitializeWithVersion(Sv
 static int nn_btm_IBtmUser_GetCore(SvcObj* self, SvcObj** core) {
     (void)self;
     *core = nn_btm_IBtmUserCore_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int btm_event(u8* success, u32* event, const char* name) {
     *success = 1;
@@ -905,7 +920,7 @@ static int nn_audio_detail_IAudioInManager_OpenAudioIn(SvcObj* self, const nn_au
                                                       u32* state, SvcObj** in) {
     (void)self, (void)params, (void)aruid, (void)process, (void)name, (void)name_out;
     (void)sample_rate, (void)channel_count, (void)sample_format, (void)state, (void)in;
-    return AUDIO_NOT_FOUND;
+    R_THROW(AUDIO_NOT_FOUND);
 }
 static int nn_audio_detail_IAudioInManager_OpenAudioInAuto(SvcObj* self, const nn_audio_AudioInParameter* params,
                                                           u64 aruid, u32 process, IpcBuf name, IpcBuf name_out,

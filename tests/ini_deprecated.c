@@ -17,7 +17,7 @@ int main(void) {
     char text[1024], small[40];
     size_t n;
     FILE* f;
-    /* the keys: the OpenGL renderer's, the touch controls' old names, SwitchRecomp's Spanish ones; a setting is none */
+    /* the keys: the OpenGL renderer's, the touch controls' old names, the first Spanish ones; a setting is none */
     assert(!strcmp(ini_deprecated("renderer"), "Vulkan is the only renderer"));
     assert(!strcmp(ini_deprecated("lsfg_flow"), "LSFG went with the OpenGL renderer"));
     assert(!strcmp(ini_deprecated("touch_controls"), "now controls") &&

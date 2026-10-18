@@ -479,6 +479,107 @@ static void test_npdm_of(const char* root, const char* exefs) {
     free(nro);
 }
 
+/* MOD0's BSS end of a module of several GiB is more than 2 GiB past MOD0: read unsigned where the signed reading would
+   land before the module, for that field only */
+static void test_large_bss(void) {
+    SnxModuleImage m;
+    char error[256], *path;
+    size_t size;
+    rich_image();
+    put32(image_bytes + 0x8c, 0x80000000UL);
+    size = build_nso(0x100, 0x100, 0x280, 0x380, 0x80, 0);
+    put32(file_bytes + 0x3c, 0x80000000UL);
+    path = fixture("large.nso", file_bytes, size);
+    CHECK(!snx_load_nso(path, NULL, &m, error, sizeof error));
+    CHECK(m.mod0.bss_start == 0x400 && m.mod0.bss_end == 0x80000080UL && m.size == 0x80001000UL);
+    CHECK(!strcmp(m.name, "large.nso"));
+    snx_free_module(&m);
+    put32(file_bytes + 0x3c, 0x40); /* the BSS end past the module */
+    CHECK(!snx_write_file(path, file_bytes, size));
+    CHECK(snx_load_nso(path, NULL, &m, error, sizeof error) == -1 && strstr(error, "BSS") && !m.image);
+    put32(file_bytes + 0x3c, 0x80000000UL);
+    put32(file_bytes + 0x100 + 0x94, 0x80000000UL); /* any other field stays signed */
+    CHECK(!snx_write_file(path, file_bytes, size));
+    CHECK(snx_load_nso(path, NULL, &m, error, sizeof error) == -1 && strstr(error, "MOD0"));
+    free(path);
+    puts("PASS MOD0's BSS end on a module of several GiB");
+}
+
+/* A 32-bit program's module: an ELF32 dynamic table without a hash table, 16-byte symbols and REL relocations, code
+   addresses keeping their Thumb bit and those ending in binary 10 refused */
+static void test_elf32(void) {
+    SnxModuleImage m;
+    char error[256], *path;
+    size_t size;
+    unsigned i;
+    static const SnxU32 tags[8][2] = {{6, 0x160}, {5, 0x1a0}, {10, 0x10}, {11, 16},
+                                      {17, 0x1c0}, {18, 16}, {19, 8}, {0, 0}};
+    memset(image_bytes, 0, sizeof image_bytes);
+    put32(image_bytes + 4, 0x100);
+    memcpy(image_bytes + 0x100, "MOD0", 4);
+    put32(image_bytes + 0x104, 0x20);
+    put32(image_bytes + 0x108, 0x180);
+    put32(image_bytes + 0x10c, 0x180);
+    for (i = 0; i < 8; i++) {
+        put32(image_bytes + 0x120 + i * 8, tags[i][0]);
+        put32(image_bytes + 0x124 + i * 8, tags[i][1]);
+    }
+    for (i = 1; i < 4; i++) {
+        static const SnxU32 names[4] = {0, 1, 7, 11}, values[4] = {0, 0x41, 0x20, 0x22};
+        put32(image_bytes + 0x160 + i * 16, names[i]);
+        put32(image_bytes + 0x164 + i * 16, values[i]);
+        image_bytes[0x16c + i * 16] = i == 1 ? 0x12 : 2;
+        image_bytes[0x16e + i * 16] = 1;
+    }
+    memcpy(image_bytes + 0x1a0, "\0thumb\0arm\0bad\0", 15);
+    put32(image_bytes + 0x1c0, 0x200);
+    put32(image_bytes + 0x1c4, 23);
+    put32(image_bytes + 0x1c8, 0x204);
+    put32(image_bytes + 0x1cc, 23);
+    put32(image_bytes + 0x200, 0x81);
+    put32(image_bytes + 0x204, 0x62);
+    size = build_nso(0x100, 0x100, 0x100, 0x200, 0x80, 0);
+    path = fixture("arm.nso", file_bytes, size);
+    CHECK(!snx_load_nso32(path, "main", &m, error, sizeof error));
+    CHECK(m.symbol_count == 3 && m.symbols[0].value == 0x20 && !strcmp(m.symbols[0].name, "arm"));
+    CHECK(m.function_count == 2 && m.functions[0] == 0x20 && m.functions[1] == 0x41);
+    CHECK(m.relptr_count == 1 && m.relptrs[0] == 0x81 && !m.fde_count && !m.eh_error);
+    snx_free_module(&m);
+    put32(file_bytes + 0x100 + 0x1c8, 0x2000); /* a target past the module */
+    CHECK(!snx_write_file(path, file_bytes, size));
+    CHECK(snx_load_nso32(path, "main", &m, error, sizeof error) == -1 && strstr(error, "exceeds module") && !m.image);
+    put32(file_bytes + 0x100 + 0x1c8, 0x204);
+    put32(file_bytes + 0x100 + 0x13c, 24); /* DT_SYMENT of ELF64 */
+    CHECK(!snx_write_file(path, file_bytes, size));
+    CHECK(snx_load_nso32(path, "main", &m, error, sizeof error) == -1 && strstr(error, "symbol entry"));
+    free(path);
+    puts("PASS ELF32 symbols, REL relocations and Thumb code addresses");
+}
+
+/* --dump-modules: the images and the index tools/moduledump.py reads */
+static void test_dump(const char* root) {
+    static const char expected[] = "program 1 1\nmodule rtld 8000000 1000 400\nsymbol 20 10 2 entry\n"
+                                   "module main 8002000 1000 400\n";
+    char error[256], *out, *path;
+    unsigned char* text;
+    size_t size;
+    out = snx_path_join(scratch, "dump");
+    CHECK(!snx_dump_program(root, out, error, sizeof error));
+    path = snx_path_join(out, "modules.txt");
+    text = snx_read_file(path, &size);
+    CHECK(text && size > strlen(expected) && !strncmp((const char*)text, expected, strlen(expected)));
+    free(text);
+    free(path);
+    path = snx_path_join(out, "subsdk2.bin");
+    text = snx_read_file(path, &size);
+    CHECK(text && size == 1024 && !memcmp(text, image_bytes, 1024));
+    free(text);
+    free(path);
+    CHECK(snx_dump_program(scratch, out, error, sizeof error) == -1 && strstr(error, "exefs/main"));
+    free(out);
+    puts("PASS the module dump for tools");
+}
+
 static void test_program(void) {
     static const char* names[4] = {"rtld", "main", "subsdk2", "sdk"};
     SnxProgram program;
@@ -518,6 +619,7 @@ static void test_program(void) {
     CHECK(!snx_load_program(exefs, &program, error, sizeof error));
     CHECK(program.module_count == 4 && program.root_path != NULL);
     snx_free_program(&program);
+    test_dump(root);
     test_nacp(root, exefs);
     test_npdm_of(root, exefs);
     free(root);
@@ -563,6 +665,8 @@ int main(void) {
     test_hash_lz4();
     test_nro_npdm();
     test_program();
+    test_large_bss();
+    test_elf32();
     test_mutations();
     CHECK(!snx_remove_tree(scratch));
     free(scratch);

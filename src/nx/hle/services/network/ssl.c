@@ -366,8 +366,8 @@ enum { OP_HANDSHAKE, OP_READ, OP_PEEK, OP_WRITE };
 static int conn_io(SslConn* c, int op, void* data, size_t size, size_t* done) {
     u64 start = plat_ns();
     *done = 0;
-    if (!c->s) return SSLSRV_RC(SSLSRV_NO_SOCKET);
-    if (op != OP_HANDSHAKE && !size) return 0;
+    R_UNLESS(c->s, SSLSRV_RC(SSLSRV_NO_SOCKET));
+    if (op != OP_HANDSHAKE && !size) R_SUCCEED();
     if (SSL_in_before(c->ssl)) conn_prepare(c);
     for (;;) {
         SnxPollEntry e;
@@ -382,13 +382,13 @@ static int conn_io(SslConn* c, int op, void* data, size_t size, size_t* done) {
             case OP_PEEK: r = SSL_peek_ex(c->ssl, data, size, done); break;
             default: r = SSL_write_ex(c->ssl, data, size, done); break;
         }
-        if (r == 1) return 0;
+        if (r == 1) R_SUCCEED();
         err = SSL_get_error(c->ssl, r);
-        if (err == SSL_ERROR_ZERO_RETURN && op != OP_HANDSHAKE) return 0;
+        if (err == SSL_ERROR_ZERO_RETURN && op != OP_HANDSHAKE) R_SUCCEED();
         if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) return conn_error(c, err);
-        if (c->io_mode != IO_BLOCKING) return SSLSRV_RC(SSLSRV_WOULD_BLOCK);
+        R_UNLESS(c->io_mode == IO_BLOCKING, SSLSRV_RC(SSLSRV_WOULD_BLOCK));
         elapsed = (plat_ns() - start) / 1000000;
-        if (elapsed >= BLOCKING_MS) return SSLSRV_RC(SSLSRV_TIMEOUT);
+        R_UNLESS(elapsed < BLOCKING_MS, SSLSRV_RC(SSLSRV_TIMEOUT));
         e.socket = c->s;
         e.host_fd = -1;
         e.events = err == SSL_ERROR_WANT_READ ? SNX_POLLIN : SNX_POLLOUT;
@@ -450,18 +450,18 @@ static int nn_ssl_sf_ISslConnection_SetSocketDescriptor(SvcObj* self, i32 fd, i3
     SnxSockAddr peer;
     SnxSocket* s;
     BIO* bio;
-    if (c->s) return SSLSRV_RC(SSLSRV_ALREADY_IN_USE);
+    R_UNLESS(!c->s, SSLSRV_RC(SSLSRV_ALREADY_IN_USE));
     s = bsd_client_socket(x->pid, fd);
-    if (!s) return SSLSRV_RC(SSLSRV_INVALID_SOCKET);
+    R_UNLESS(s, SSLSRV_RC(SSLSRV_INVALID_SOCKET));
     /* the console asks the duplicate for its peer, and fails without one */
     if (snx_socket_peer(s, &peer)) {
         snx_socket_unref(s);
-        return SSLSRV_RC(SSLSRV_NO_CONNECTION);
+        R_THROW(SSLSRV_RC(SSLSRV_NO_CONNECTION));
     }
     bio = BIO_new(g_bio);
     if (!bio) {
         snx_socket_unref(s);
-        return SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY);
+        R_THROW(SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY));
     }
     BIO_set_data(bio, c);
     SSL_set_bio(c->ssl, bio, bio);
@@ -469,7 +469,7 @@ static int nn_ssl_sf_ISslConnection_SetSocketDescriptor(SvcObj* self, i32 fd, i3
     c->fd = fd;
     *out_fd = c->option[OPT_DO_NOT_CLOSE_SOCKET] ? -1 : fd;
     LOGV("ssl: SetSocketDescriptor(%d)\n", fd);
-    return 0;
+    R_SUCCEED();
 }
 /* up to HOST_MAX characters, to the first NUL */
 static int nn_ssl_sf_ISslConnection_SetHostName(SvcObj* self, IpcBuf name) {
@@ -482,25 +482,25 @@ static int nn_ssl_sf_ISslConnection_SetHostName(SvcObj* self, IpcBuf name) {
     memcpy(c->host, p, n);
     c->host[n] = 0;
     LOGV("ssl: SetHostName(%s)\n", c->host);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_SetVerifyOption(SvcObj* self, nn_ssl_sf_VerifyOption option) {
     SslConn* c = self->data;
     c->verify = option;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_SetIoMode(SvcObj* self, nn_ssl_sf_IoMode mode) {
     SslConn* c = self->data;
-    if (!c->s) return SSLSRV_RC(SSLSRV_NO_SOCKET);
-    if (mode != IO_BLOCKING && mode != IO_NONBLOCKING) return SSLSRV_RC(SSLSRV_INVALID_OPTION);
+    R_UNLESS(c->s, SSLSRV_RC(SSLSRV_NO_SOCKET));
+    if (mode != IO_BLOCKING && mode != IO_NONBLOCKING) R_THROW(SSLSRV_RC(SSLSRV_INVALID_OPTION));
     c->io_mode = mode;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_GetSocketDescriptor(SvcObj* self, i32* fd) {
     SslConn* c = self->data;
-    if (!c->s) return SSLSRV_RC(SSLSRV_NO_SOCKET);
+    R_UNLESS(c->s, SSLSRV_RC(SSLSRV_NO_SOCKET));
     *fd = c->fd;
-    return 0;
+    R_SUCCEED();
 }
 /* what fits of the name and its NUL, and the name's length */
 static int nn_ssl_sf_ISslConnection_GetHostName(SvcObj* self, IpcBuf name, u32* size) {
@@ -512,15 +512,15 @@ static int nn_ssl_sf_ISslConnection_GetHostName(SvcObj* self, IpcBuf name, u32* 
         ((u8*)GP(name.addr))[k] = 0;
     }
     *size = (u32)n;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_GetVerifyOption(SvcObj* self, nn_ssl_sf_VerifyOption* option) {
     *option = ((SslConn*)self->data)->verify;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_GetIoMode(SvcObj* self, nn_ssl_sf_IoMode* mode) {
     *mode = ((SslConn*)self->data)->io_mode;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_DoHandshake(SvcObj* self) {
     SslConn* c = self->data;
@@ -532,13 +532,12 @@ static int nn_ssl_sf_ISslConnection_DoHandshake(SvcObj* self) {
 static int nn_ssl_sf_ISslConnection_DoHandshakeGetServerCert(SvcObj* self, IpcBuf certificates, u32* size, u32* count) {
     SslConn* c = self->data;
     u32 n;
-    int r = nn_ssl_sf_ISslConnection_DoHandshake(self);
-    if (r) return r;
+    R_TRY(nn_ssl_sf_ISslConnection_DoHandshake(self));
     n = server_certs(c, NULL, count);
-    if (n > (certificates.addr ? certificates.size : 0)) return SSLSRV_RC(SSLSRV_CERT_BUFFER_TOO_SMALL);
+    R_UNLESS(n <= (certificates.addr ? certificates.size : 0), SSLSRV_RC(SSLSRV_CERT_BUFFER_TOO_SMALL));
     if (n) server_certs(c, GP(certificates.addr), count);
     *size = n;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_Read(SvcObj* self, IpcBuf data, u32* size) {
     size_t n;
@@ -557,13 +556,13 @@ static int nn_ssl_sf_ISslConnection_Write(SvcObj* self, IpcBuf data, u32* size) 
     } while (!r && total < want && c->io_mode == IO_BLOCKING);
     if (r && !total) return r;
     *size = (u32)total;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_Pending(SvcObj* self, i32* size) {
     SslConn* c = self->data;
-    if (!c->s) return SSLSRV_RC(SSLSRV_NO_SOCKET);
+    R_UNLESS(c->s, SSLSRV_RC(SSLSRV_NO_SOCKET));
     *size = SSL_pending(c->ssl);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_Peek(SvcObj* self, IpcBuf data, u32* size) {
     size_t n;
@@ -578,7 +577,7 @@ static int nn_ssl_sf_ISslConnection_Poll(SvcObj* self, nn_ssl_sf_PollEvent event
     SslConn* c = self->data;
     SnxPollEntry e;
     int pending, r;
-    if (!c->s) return SSLSRV_RC(SSLSRV_NO_SOCKET);
+    R_UNLESS(c->s, SSLSRV_RC(SSLSRV_NO_SOCKET));
     pending = (events & PEV_READ) && SSL_pending(c->ssl) > 0;
     e.socket = c->s;
     e.host_fd = -1;
@@ -591,7 +590,7 @@ static int nn_ssl_sf_ISslConnection_Poll(SvcObj* self, nn_ssl_sf_PollEvent event
         *revents |= PEV_READ;
     if ((events & PEV_WRITE) && (e.revents & (SNX_POLLOUT | SNX_POLLERR))) *revents |= PEV_WRITE;
     if ((events & PEV_EXCEPT) && (e.revents & (SNX_POLLPRI | SNX_POLLERR | SNX_POLLHUP))) *revents |= PEV_EXCEPT;
-    return 0;
+    R_SUCCEED();
 }
 /* the failed certificate check's result, once */
 static int nn_ssl_sf_ISslConnection_GetVerifyCertError(SvcObj* self) {
@@ -603,43 +602,43 @@ static int nn_ssl_sf_ISslConnection_GetVerifyCertError(SvcObj* self) {
 static int nn_ssl_sf_ISslConnection_GetNeededServerCertBufferSize(SvcObj* self, u32* size) {
     u32 count;
     *size = server_certs(self->data, NULL, &count);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_SetSessionCacheMode(SvcObj* self, nn_ssl_sf_SessionCacheMode mode) {
     ((SslConn*)self->data)->cache_mode = mode;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_GetSessionCacheMode(SvcObj* self, nn_ssl_sf_SessionCacheMode* mode) {
     *mode = ((SslConn*)self->data)->cache_mode;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_SetRenegotiationMode(SvcObj* self, nn_ssl_sf_RenegotiationMode mode) {
     ((SslConn*)self->data)->renegotiation = mode;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_GetRenegotiationMode(SvcObj* self, nn_ssl_sf_RenegotiationMode* mode) {
     *mode = ((SslConn*)self->data)->renegotiation;
-    return 0;
+    R_SUCCEED();
 }
 /* DoNotCloseSocket only before SetSocketDescriptor (Switchbrew) */
 static int nn_ssl_sf_ISslConnection_SetOption(SvcObj* self, u8 value, nn_ssl_sf_OptionType option) {
     SslConn* c = self->data;
-    if (option >= OPT_COUNT || (option == OPT_DO_NOT_CLOSE_SOCKET && c->s)) return SSLSRV_RC(SSLSRV_INVALID_OPTION);
+    if (option >= OPT_COUNT || (option == OPT_DO_NOT_CLOSE_SOCKET && c->s)) R_THROW(SSLSRV_RC(SSLSRV_INVALID_OPTION));
     c->option[option] = value != 0;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslConnection_GetOption(SvcObj* self, nn_ssl_sf_OptionType option, u8* value) {
     SslConn* c = self->data;
-    if (option >= OPT_COUNT) return SSLSRV_RC(SSLSRV_INVALID_OPTION);
+    R_UNLESS(option < OPT_COUNT, SSLSRV_RC(SSLSRV_INVALID_OPTION));
     *value = c->option[option];
-    return 0;
+    R_SUCCEED();
 }
 /* the cipher's IANA name, as NSS names them, and OpenSSL's name for the version ("TLSv1.3") */
 static int nn_ssl_sf_ISslConnection_GetCipherInfo(SvcObj* self, u32 version, IpcBuf info) {
     SslConn* c = self->data;
     const SSL_CIPHER* cipher = SSL_get_current_cipher(c->ssl);
     char out[CIPHER_INFO_SIZE];
-    if (!c->s) return SSLSRV_RC(SSLSRV_NO_SOCKET);
+    R_UNLESS(c->s, SSLSRV_RC(SSLSRV_NO_SOCKET));
     memset(out, 0, sizeof out);
     if (cipher) {
         const char* name = SSL_CIPHER_standard_name(cipher);
@@ -647,17 +646,17 @@ static int nn_ssl_sf_ISslConnection_GetCipherInfo(SvcObj* self, u32 version, Ipc
         strncpy(out + CIPHER_NAME_SIZE, SSL_get_version(c->ssl), CIPHER_INFO_SIZE - CIPHER_NAME_SIZE - 1);
     }
     if (info.addr) memcpy(GP(info.addr), out, info.size < sizeof out ? (size_t)info.size : sizeof out);
-    return 0;
+    R_SUCCEED();
 }
 /* {u8 size, the name} each, TLS's own format: used when EnableAlpn is set at the handshake */
 static int nn_ssl_sf_ISslConnection_SetNextAlpnProto(SvcObj* self, IpcBuf protocols) {
     SslConn* c = self->data;
     const u8* p = protocols.addr ? GP(protocols.addr) : NULL;
     u64 at = 0, n = protocols.addr ? protocols.size : 0;
-    if (!c->s) return SSLSRV_RC(SSLSRV_NO_SOCKET);
-    if (n < 2 || n > UINT_MAX) return SSLSRV_RC(SSLSRV_INVALID_OPTION);
+    R_UNLESS(c->s, SSLSRV_RC(SSLSRV_NO_SOCKET));
+    R_UNLESS(n >= 2 && n <= UINT_MAX, SSLSRV_RC(SSLSRV_INVALID_OPTION));
     while (at < n) {
-        if (!p[at] || p[at] > n - at - 1) return SSLSRV_RC(SSLSRV_INVALID_OPTION);
+        R_UNLESS(p[at] && p[at] <= n - at - 1, SSLSRV_RC(SSLSRV_INVALID_OPTION));
         at += 1 + (u64)p[at];
     }
     return SSL_set_alpn_protos(c->ssl, p, (unsigned)n) ? SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY) : 0;
@@ -667,7 +666,7 @@ static int nn_ssl_sf_ISslConnection_GetNextAlpnProto(SvcObj* self, IpcBuf protoc
     SslConn* c = self->data;
     const unsigned char* p = NULL;
     unsigned n = 0;
-    if (!c->s) return SSLSRV_RC(SSLSRV_NO_SOCKET);
+    R_UNLESS(c->s, SSLSRV_RC(SSLSRV_NO_SOCKET));
     SSL_get0_alpn_selected(c->ssl, &p, &n);
     if (n) {
         *state = ALPN_NEGOTIATED;
@@ -679,7 +678,7 @@ static int nn_ssl_sf_ISslConnection_GetNextAlpnProto(SvcObj* self, IpcBuf protoc
     } else
         *state = c->option[OPT_ENABLE_ALPN] && SSL_is_init_finished(c->ssl) ? ALPN_NO_OVERLAP : ALPN_NO_SUPPORT;
     *size = n;
-    return 0;
+    R_SUCCEED();
 }
 
 static int conn_disp(SvcObj* o, IpcCtx* ipc) {
@@ -707,15 +706,15 @@ static void conn_destroy(SvcObj* o) {
 /* ============================================================ ISslContext */
 static int nn_ssl_sf_ISslContext_SetOption(SvcObj* self, nn_ssl_sf_ContextOption option, i32 value) {
     SslContext* x = self->data;
-    if (option != CONTEXT_CRL_IMPORT_DATE_CHECK) return SSLSRV_RC(SSLSRV_INVALID_OPTION);
+    R_UNLESS(option == CONTEXT_CRL_IMPORT_DATE_CHECK, SSLSRV_RC(SSLSRV_INVALID_OPTION));
     x->crl_date_check = value;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslContext_GetOption(SvcObj* self, nn_ssl_sf_ContextOption option, i32* value) {
     SslContext* x = self->data;
-    if (option != CONTEXT_CRL_IMPORT_DATE_CHECK) return SSLSRV_RC(SSLSRV_INVALID_OPTION);
+    R_UNLESS(option == CONTEXT_CRL_IMPORT_DATE_CHECK, SSLSRV_RC(SSLSRV_INVALID_OPTION));
     *value = x->crl_date_check;
-    return 0;
+    R_SUCCEED();
 }
 /* The limit's result is not known: the console's list of results has none for it, InsufficientMemory is the nearest */
 static int nn_ssl_sf_ISslContext_CreateConnection(SvcObj* self, SvcObj** connection) {
@@ -723,9 +722,9 @@ static int nn_ssl_sf_ISslContext_CreateConnection(SvcObj* self, SvcObj** connect
     SvcObj* o;
     SslConn* c;
     SSL* ssl;
-    if (x->connections >= MAX_CONNECTIONS) return SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY);
+    R_UNLESS(x->connections < MAX_CONNECTIONS, SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY));
     ssl = SSL_new(x->ctx);
-    if (!ssl) return SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY);
+    R_UNLESS(ssl, SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY));
     o = svcobj_new("nn::ssl::sf::ISslConnection", conn_disp, sizeof(SslConn));
     c = o->data;
     pm_init(&c->lk);
@@ -743,11 +742,11 @@ static int nn_ssl_sf_ISslContext_CreateConnection(SvcObj* self, SvcObj** connect
     x->connections++;
     o->destroy = conn_destroy;
     *connection = o;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslContext_GetConnectionCount(SvcObj* self, u32* count) {
     *count = ((SslContext*)self->data)->connections;
-    return 0;
+    R_SUCCEED();
 }
 /* PEM or DER, one certificate or more: the console checks the format and reads either (Switchbrew) */
 static STACK_OF(X509) * read_certs(const u8* p, size_t n) {
@@ -779,20 +778,20 @@ static int nn_ssl_sf_ISslContext_ImportServerPki(SvcObj* self, nn_ssl_sf_Certifi
     SslContext* x = self->data;
     STACK_OF(X509) * certs;
     int i, n;
-    if (format != CERT_PEM && format != CERT_DER) return SSLSRV_RC(SSLSRV_INVALID_OPTION);
+    if (format != CERT_PEM && format != CERT_DER) R_THROW(SSLSRV_RC(SSLSRV_INVALID_OPTION));
     certs = read_certs(certificates.addr ? GP(certificates.addr) : NULL, certificates.addr ? certificates.size : 0);
-    if (!certs) return SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY);
+    R_UNLESS(certs, SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY));
     n = sk_X509_num(certs);
     if (!n || n > MAX_SERVER_CERTS) {
         sk_X509_pop_free(certs, X509_free);
-        return SSLSRV_RC(n ? SSLSRV_MAX_SERVER_PKI_REGISTERED : SSLSRV_BAD_CERTIFICATE);
+        R_THROW(SSLSRV_RC(n ? SSLSRV_MAX_SERVER_PKI_REGISTERED : SSLSRV_BAD_CERTIFICATE));
     }
     for (i = 0; i < n; i++) X509_STORE_add_cert(x->store, sk_X509_value(certs, i));
     sk_X509_pop_free(certs, X509_free);
     ERR_clear_error();
     *id = ++x->last_id;
     LOG("ssl: ImportServerPki: %d certificates, id %llu\n", n, (unsigned long long)*id);
-    return 0;
+    R_SUCCEED();
 }
 /* PKCS#12, with an optional password */
 static int nn_ssl_sf_ISslContext_ImportClientPki(SvcObj* self, IpcBuf pkcs12, IpcBuf password, u64* id) {
@@ -802,12 +801,12 @@ static int nn_ssl_sf_ISslContext_ImportClientPki(SvcObj* self, IpcBuf pkcs12, Ip
     char* pass;
     PKCS12* p12;
     int ok;
-    if (x->client_id) return SSLSRV_RC(SSLSRV_CLIENT_PKI_ALREADY_REGISTERED);
+    R_UNLESS(!x->client_id, SSLSRV_RC(SSLSRV_CLIENT_PKI_ALREADY_REGISTERED));
     p12 = p ? d2i_PKCS12(NULL, &p, pkcs12.size > LONG_MAX ? LONG_MAX : (long)pkcs12.size) : NULL;
     pass = malloc(pn + 1);
     if (!pass) {
         PKCS12_free(p12);
-        return SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY);
+        R_THROW(SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY));
     }
     if (pn) memcpy(pass, GP(password.addr), pn);
     pass[pn] = 0;
@@ -823,19 +822,19 @@ static int nn_ssl_sf_ISslContext_ImportClientPki(SvcObj* self, IpcBuf pkcs12, Ip
         x->client_key = NULL;
         x->client_cert = NULL;
         x->client_chain = NULL;
-        return SSLSRV_RC(SSLSRV_BAD_CERTIFICATE);
+        R_THROW(SSLSRV_RC(SSLSRV_BAD_CERTIFICATE));
     }
     *id = x->client_id = ++x->last_id;
-    return 0;
+    R_SUCCEED();
 }
 /* the console's device certificate, which the runtime doesn't have: the slot is taken, with no certificate in it */
 static int nn_ssl_sf_ISslContext_RegisterInternalPki(SvcObj* self, nn_ssl_sf_InternalPki pki, u64* id) {
     SslContext* x = self->data;
-    if (pki != INTERNAL_PKI_DEVICE_CLIENT_CERT) return SSLSRV_RC(SSLSRV_INVALID_OPTION);
-    if (x->client_id) return SSLSRV_RC(SSLSRV_CLIENT_PKI_ALREADY_REGISTERED);
+    R_UNLESS(pki == INTERNAL_PKI_DEVICE_CLIENT_CERT, SSLSRV_RC(SSLSRV_INVALID_OPTION));
+    R_UNLESS(!x->client_id, SSLSRV_RC(SSLSRV_CLIENT_PKI_ALREADY_REGISTERED));
     LOG("ssl: RegisterInternalPki: no device certificate, connections go without a client certificate\n");
     *id = x->client_id = ++x->last_id;
-    return 0;
+    R_SUCCEED();
 }
 static int ctx_disp(SvcObj* o, IpcCtx* ipc) {
     SslContext* x = o->data;
@@ -887,7 +886,7 @@ static int nn_ssl_sf_ISslService_CreateContext(SvcObj* self, nn_ssl_sf_SslVersio
         SSL_CTX_free(ctx);
         X509_STORE_free(store);
         ERR_clear_error();
-        return SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY);
+        R_THROW(SSLSRV_RC(SSLSRV_INSUFFICIENT_MEMORY));
     }
     SSL_CTX_set_mode(ctx, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
     SSL_CTX_set_options(ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
@@ -904,22 +903,22 @@ static int nn_ssl_sf_ISslService_CreateContext(SvcObj* self, nn_ssl_sf_SslVersio
     __atomic_add_fetch(&g_contexts, 1, __ATOMIC_RELAXED);
     LOG("ssl: CreateContext(version %#x)\n", (unsigned)ssl_version);
     *context = o;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslService_GetContextCount(SvcObj* self, u32* count) {
     *count = (u32)__atomic_load_n(&g_contexts, __ATOMIC_RELAXED);
-    return 0;
+    R_SUCCEED();
 }
 /* No system archive, so no built-in certificates: the buffer holds just the terminating entry {-1, -1, 0, 0} */
 static int nn_ssl_sf_ISslService_GetCertificates(SvcObj* self, IpcBuf certificates, IpcBuf ids, u32* count) {
     u32 end[6] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0, 0, 0, 0};
-    if (!certificates.addr || certificates.size < CERT_INFO_SIZE) return SSLSRV_RC(SSLSRV_CERT_BUFFER_TOO_SMALL);
+    R_UNLESS(certificates.addr && certificates.size >= CERT_INFO_SIZE, SSLSRV_RC(SSLSRV_CERT_BUFFER_TOO_SMALL));
     memcpy(GP(certificates.addr), end, CERT_INFO_SIZE);
     *count = 0;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_ssl_sf_ISslService_GetCertificateBufSize(SvcObj* self, IpcBuf ids, u32* size) {
     *size = CERT_INFO_SIZE;
-    return 0;
+    R_SUCCEED();
 }
 SvcObj* new_ssl(void) { return nn_ssl_sf_ISslService_new(0); }

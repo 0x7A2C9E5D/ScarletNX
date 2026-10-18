@@ -35,10 +35,10 @@ static u32 give_handle(KObj* o, u32* out) {
     u32 h = h_new(o);
     if (!h) {
         if (o->destroy) o->destroy(o);
-        return R_OUTOFHANDLES;
+        R_THROW(R_OUTOFHANDLES);
     }
     *out = h;
-    return 0;
+    R_SUCCEED();
 }
 static KThread* thread_of(u32 h) { return (KThread*)h_get_type(h, KO_THREAD); }
 static int valid_prio(i32 p) { return p >= 0 && p < 64 && ((g_prio_mask >> p) & 1); }
@@ -109,8 +109,8 @@ static void svc_leave(KThread* t) {
 static u32 create_thread(u64 entry, u64 arg, u64 stack_top, i32 prio, i32 core, u32* out) {
     KThread* t;
     if (core == -2) core = g_default_core;
-    if (core < 0 || core >= NCORES || !((g_core_mask >> core) & 1)) return R_BADCORE;
-    if (!valid_prio(prio)) return R_BADPRIO;
+    R_UNLESS(core >= 0 && core < NCORES && ((g_core_mask >> core) & 1), R_BADCORE);
+    R_UNLESS(valid_prio(prio), R_BADPRIO);
     t = kthread_create(entry, arg, stack_top, prio, core);
     *out = h_new(&t->o);
     return *out ? 0 : R_OUTOFHANDLES;
@@ -118,13 +118,13 @@ static u32 create_thread(u64 entry, u64 arg, u64 stack_top, i32 prio, i32 core, 
 static u32 start_thread(u32 h) {
     KThread* t = thread_of(h);
     int st;
-    if (!t) return R_BADHANDLE;
+    R_UNLESS(t, R_BADHANDLE);
     pm_lock(&g_klock);
     st = t->state;
     pm_unlock(&g_klock);
-    if (st != 0) return R_BADSTATE;
+    R_UNLESS(st == 0, R_BADSTATE);
     kthread_start(t);
-    return 0;
+    R_SUCCEED();
 }
 /* svcSleepThread: a sleep off the core, or one of the three yields (0 on its core, -1 and -2 to any core) */
 static void sleep_thread(KThread* t, CPU* c, i64 ns) {
@@ -145,13 +145,13 @@ static void sleep_thread(KThread* t, CPU* c, i64 ns) {
 }
 static u32 set_thread_priority(u32 h, i32 prio) {
     KThread* t;
-    if (!valid_prio(prio)) return R_BADPRIO;
+    R_UNLESS(valid_prio(prio), R_BADPRIO);
     t = thread_of(h);
-    if (!t) return R_BADHANDLE;
+    R_UNLESS(t, R_BADHANDLE);
     pm_lock(&g_klock);
     prio_set_base_nl(t, prio);
     pm_unlock(&g_klock);
-    return 0;
+    R_SUCCEED();
 }
 /* svcSetThreadCoreMask (Eden's svc_thread.cpp): core -2 is the process's default core alone, -3 keeps the ideal core,
    -1 has none. The thread moves when its core leaves the mask (the calling thread at once, another at its next SVC) */
@@ -161,21 +161,21 @@ static u32 set_thread_core_mask(KThread* cur, u32 h, i32 core, u64 mask) {
         core = g_default_core;
         mask = 1ull << core;
     } else {
-        if ((mask | g_core_mask) != g_core_mask) return R_BADCORE;
-        if (!mask) return R_BADCOMBO;
+        R_UNLESS((mask | g_core_mask) == g_core_mask, R_BADCORE);
+        R_UNLESS(mask, R_BADCOMBO);
         if (core >= 0 && core < NCORES) {
-            if (!((mask >> core) & 1)) return R_BADCOMBO;
+            if (!((mask >> core) & 1)) R_THROW(R_BADCOMBO);
         } else if (core != -3 && core != -1)
-            return R_BADCORE;
+            R_THROW(R_BADCORE);
     }
     t = thread_of(h);
-    if (!t) return R_BADHANDLE;
+    R_UNLESS(t, R_BADHANDLE);
     pm_lock(&g_klock);
     if (core == -3) {
         core = t->ideal_core;
         if (core >= 0 && !((mask >> core) & 1)) {
             pm_unlock(&g_klock);
-            return R_BADCOMBO;
+            R_THROW(R_BADCOMBO);
         }
     }
     __atomic_store_n(&t->ideal_core, core, __ATOMIC_RELAXED);
@@ -190,17 +190,17 @@ static u32 set_thread_core_mask(KThread* cur, u32 h, i32 core, u64 mask) {
             core_enter(t);
         }
     }
-    return 0;
+    R_SUCCEED();
 }
 /* svcSetThreadActivity: 0 runs a paused thread again, 1 pauses it, and returns once it runs no game code (InvalidState
    when it already is in that state, or hasn't started, or has exited). Not the calling thread (Busy) */
 static u32 set_thread_activity(KThread* cur, u32 h, u32 act) {
     KThread* t;
     u32 r = 0;
-    if (act > 1) return R_BADENUM;
+    R_UNLESS(act <= 1, R_BADENUM);
     t = thread_of(h);
-    if (!t) return R_BADHANDLE;
-    if (t == cur) return R_BUSY;
+    R_UNLESS(t, R_BADHANDLE);
+    R_UNLESS(t != cur, R_BUSY);
     pm_lock(&g_klock);
     if (t->state != 1 || t->suspended == (int)act)
         r = R_BADSTATE;
@@ -229,14 +229,14 @@ static u32 get_thread_context(KThread* cur, u64 out, u32 h) {
     u8 ctx[0x320];
     u32 w[2];
     int i, inside, at_svc;
-    if (!t) return R_BADHANDLE;
-    if (t == cur) return R_BUSY;
-    if (out >= AS_END || sizeof ctx > AS_END - out) return R_BADPOINTER;
+    R_UNLESS(t, R_BADHANDLE);
+    R_UNLESS(t != cur, R_BUSY);
+    R_UNLESS(out < AS_END && sizeof ctx <= AS_END - out, R_BADPOINTER);
     pm_lock(&g_klock);
     pause_settle_nl(cur, t);
     if (t->state != 2 && (t->state != 1 || !t->suspended)) {
         pm_unlock(&g_klock);
-        return R_BADSTATE;
+        R_THROW(R_BADSTATE);
     }
     memset(ctx, 0, sizeof ctx);
     inside = !t->pause_at;
@@ -283,61 +283,59 @@ static u32 get_thread_context(KThread* cur, u64 out, u32 h) {
     }
     pm_unlock(&g_klock);
     memcpy(GP(out), ctx, sizeof ctx);
-    return 0;
+    R_SUCCEED();
 }
 /* svcCancelSynchronization: ends the thread's WaitSynchronization with Cancelled, or the next one it makes */
 static u32 cancel_sync(u32 h) {
     KThread* t = thread_of(h);
-    if (!t) return R_BADHANDLE;
+    R_UNLESS(t, R_BADHANDLE);
     pm_lock(&g_klock);
     if (t->wait_kind == 1 && !t->woken)
         wake(t, R_CANCELLED);
     else
         t->cancel = 1;
     pm_unlock(&g_klock);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ events */
 static u32 create_event(u32* wh, u32* rh) {
     KEvent* r = kevent_new("event");
     KWEvent* w = (KWEvent*)calloc(1, sizeof *w);
-    u32 res;
     if (!w) fatal("Out of memory for an event");
     w->o.type = KO_WEVENT;
     w->o.destroy = wevent_destroy;
     w->o.name = "writable event";
     w->r = r;
     kobj_ref(&r->o);
-    res = give_handle(&w->o, wh);
-    if (res) return res;
+    R_TRY(give_handle(&w->o, wh));
     *rh = h_new(&r->o);
     if (!*rh) {
         h_close(*wh);
-        return R_OUTOFHANDLES;
+        R_THROW(R_OUTOFHANDLES);
     }
-    return 0;
+    R_SUCCEED();
 }
 static u32 signal_event(u32 h) {
     KWEvent* w = (KWEvent*)h_get_ref(h, KO_WEVENT);
-    if (!w) return R_BADHANDLE;
+    R_UNLESS(w, R_BADHANDLE);
     kevent_signal(w->r);
     kobj_unref(&w->o);
-    return 0;
+    R_SUCCEED();
 }
 /* ClearEvent takes either end; ResetSignal the readable end (or the process), and fails on one that isn't signaled */
 static u32 clear_event(u32 h, int reset) {
     KObj* o = h_get_ref(h, 0);
     KEvent* e = NULL;
     u32 r = 0;
-    if (!o) return R_BADHANDLE;
+    R_UNLESS(o, R_BADHANDLE);
     if (o->type == KO_WEVENT && !reset)
         e = ((KWEvent*)o)->r;
     else if (o->type == KO_EVENT)
         e = (KEvent*)o;
     else if (o->type != KO_PROCESS || !reset)
         r = R_BADHANDLE;
-    if (!r) {
+    if (R_SUCCEEDED(r)) {
         pm_lock(&g_klock);
         if (reset && (!e || !e->signaled))
             r = R_BADSTATE;
@@ -355,11 +353,11 @@ static u32 clear_event(u32 h, int reset) {
 static u32 connect_port(u64 name_addr, u32* out) {
     char name[12];
     SvcObj* s;
-    if (name_addr >= AS_END || sizeof name > AS_END - name_addr) return R_BADPOINTER;
+    R_UNLESS(name_addr < AS_END && sizeof name <= AS_END - name_addr, R_BADPOINTER);
     memcpy(name, GP(name_addr), sizeof name);
-    if (memchr(name, 0, sizeof name) == NULL) return R_OUTOFRANGE;
+    R_UNLESS(memchr(name, 0, sizeof name) != NULL, R_OUTOFRANGE);
     s = svc_open(name);
-    if (!s) return R_NOTFOUND;
+    R_UNLESS(s, R_NOTFOUND);
     *out = session_new(s);
     return *out ? 0 : R_OUTOFHANDLES;
 }
@@ -372,9 +370,9 @@ static u32 get_process_id(u32 h, u64* out) {
     KObj* o = h_get_ref(h, 0);
     int ok = o && (o->type == KO_PROCESS || o->type == KO_THREAD);
     kobj_unref(o);
-    if (!ok) return R_BADHANDLE;
+    R_UNLESS(ok, R_BADHANDLE);
     *out = K_PROCESS_ID;
-    return 0;
+    R_SUCCEED();
 }
 /* how many of the n bytes at a the kernel can read for a dump: up to the first page that is free or inaccessible */
 static u64 readable_len(u64 a, u64 n) {
@@ -423,22 +421,22 @@ static void svc_break(CPU* c, u32 reason, u64 info, u64 size) {
    peak reads as the limit; the counts the runtime doesn't keep are 0 */
 static u32 resource_limit(u32 h, u32 which, int kind, u64* out) {
     static const u64 limit[5] = {0, THREAD_MAX, 800, 256, 64};
-    if (which > 4) return R_BADENUM;
-    if (!h_get_type(h, KO_RESLIMIT)) return R_BADHANDLE;
+    R_UNLESS(which <= 4, R_BADENUM);
+    R_UNLESS(h_get_type(h, KO_RESLIMIT), R_BADHANDLE);
     if (kind == 0)
         *out = which ? limit[which] : mem_total();
     else if (which == 0)
         *out = used_memory();
     else
         *out = which == 1 ? (u64)kthread_live_count() : 0;
-    return 0;
+    R_SUCCEED();
 }
 static u32 get_info(u32 id0, u32 h, u64 id1, u64* out) {
     if (id0 != 9) return svc_get_info(id0, h, id1, out);
-    if (h) return R_BADHANDLE; /* ResourceLimit: always succeeds after its checks */
-    if (id1) return R_BADCOMBO;
+    R_UNLESS(!h, R_BADHANDLE); /* ResourceLimit: always succeeds after its checks */
+    R_UNLESS(!id1, R_BADCOMBO);
     *out = h_new(&g_reslimit);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ the dispatch */

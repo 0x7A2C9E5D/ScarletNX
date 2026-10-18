@@ -5,7 +5,10 @@
 
     tools/symbols.py work/Game cf34380 82f161c ...
 
-Crash reports and thread dumps print runtime addresses: the modules are laid out at the same bases here.
+Crash reports and thread dumps print runtime addresses: the modules are laid out at the same bases here. The game
+folder is the extracted dump (exefs/ + romfs/) or an NRO. The modules are read by the recompiler's loader through
+`scarletnx --dump-modules` (build/scarletnx, or the program SNX_SCARLETNX names), and the dump is cached per game
+folder (tools/moduledump.py).
 """
 
 import bisect
@@ -15,23 +18,26 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, '..')]
-import nxloader  # noqa: E402
+import moduledump  # noqa: E402
 
 # A symbol further away than this is not taken as the enclosing function
 MAX_DISTANCE = 0x4000
 
 
 class Symbols:
-    def __init__(self, mods):
+    def __init__(self, mods, is64=True):
         self.mods = mods
         table = []
         for m in mods:
-            for value, name in getattr(m, 'syms', {}).items():
-                if value:
-                    table.append((m.base + value, name))
+            for value, name in m.syms.items():
+                # a 32-bit program's Thumb functions have bit 0 set: the code starts at the even address
+                address = m.base + (value if is64 else value & ~1)
+                table.append((address, name, m.sizes.get(value, 0), not is64 and value & 1))
         table.sort()
-        self.addrs = [a for a, _ in table]
-        self.names = self._demangle([n for _, n in table])
+        self.addrs = [a for a, _, _, _ in table]
+        self.sizes = [s for _, _, s, _ in table]
+        self.thumb = [t for _, _, _, t in table]
+        self.names = self._demangle([n for _, n, _, _ in table])
 
     @staticmethod
     def _demangle(names):
@@ -54,6 +60,11 @@ class Symbols:
             return self.names[i], addr - self.addrs[i]
         return None
 
+    def is_thumb(self, addr):
+        """Whether the symbol at or before addr is Thumb code (a 32-bit program's, whose symbols say so)"""
+        i = bisect.bisect_right(self.addrs, addr) - 1
+        return bool(i >= 0 and self.thumb[i])
+
     def exact(self, addr):
         i = bisect.bisect_left(self.addrs, addr)
         return self.names[i] if i < len(self.addrs) and self.addrs[i] == addr else None
@@ -69,7 +80,8 @@ class Symbols:
 
     def function_range(self, name):
         """Start and end of the symbol named `name` (a demangled name without its parameters counts), or else of the
-        one symbol whose name contains it. The end is the next symbol, at most MAX_DISTANCE further."""
+        one symbol whose name contains it. The end is the symbol's own size, or else the next symbol, at most
+        MAX_DISTANCE further."""
         exact = {i for i, n in enumerate(self.names) if n == name or n.split('(')[0] == name}
         found = exact or {i for i, n in enumerate(self.names) if name in n}
         starts = sorted({self.addrs[i] for i in found})
@@ -82,6 +94,9 @@ class Symbols:
         start = starts[0]
         j = bisect.bisect_right(self.addrs, start)  # the next symbol at a higher address
         end = self.addrs[j] if j < len(self.addrs) else start + 0x400
+        sized = max(self.sizes[i] for i in found)
+        if sized:
+            end = start + sized
         if end - start > MAX_DISTANCE:
             print(
                 '(no symbol follows %s for %#x bytes: showing the first %#x, pass an address range for more)'
@@ -95,8 +110,8 @@ class Symbols:
 def main():
     if len(sys.argv) < 3:
         raise SystemExit(__doc__)
-    mods, _, _ = nxloader.load_program(sys.argv[1])
-    syms = Symbols(mods)
+    mods, is64 = moduledump.load_program(sys.argv[1])
+    syms = Symbols(mods, is64)
     for arg in sys.argv[2:]:
         print(syms.describe(int(arg, 16)))
 

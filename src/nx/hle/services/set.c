@@ -60,57 +60,59 @@ static void set_key_code_map(IpcBuf map) {
 static int nn_settings_ISettingsServer_GetLanguageCode(SvcObj* self, nn_settings_LanguageCode* code) {
     (void)self;
     set_language_code(g_opt_lang, code->v);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_settings_ISettingsServer_GetAvailableLanguageCodes(SvcObj* self, IpcBuf codes, i32* count) {
     (void)self;
     *count = set_list_languages(codes, SET_LANGUAGES_V1);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_settings_ISettingsServer_MakeLanguageCode(SvcObj* self, u32 language, nn_settings_LanguageCode* code) {
     (void)self;
-    if (language >= (u32)SET_LANGUAGES) return SET_INVALID_LANGUAGE;
+    R_UNLESS(language < (u32)SET_LANGUAGES, SET_INVALID_LANGUAGE);
     memcpy(code->v, set_languages[language].code, 8);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_settings_ISettingsServer_GetAvailableLanguageCodeCount(SvcObj* self, i32* count) {
     (void)self;
     *count = SET_LANGUAGES < SET_LANGUAGES_V1 ? SET_LANGUAGES : SET_LANGUAGES_V1;
-    return 0;
+    R_SUCCEED();
 }
 /* the region a console sold with that language comes from */
 static int nn_settings_ISettingsServer_GetRegionCode(SvcObj* self, i32* region) {
     (void)self;
     *region = set_languages[set_language(g_opt_lang)].region;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_settings_ISettingsServer_GetAvailableLanguageCodes2(SvcObj* self, IpcBuf codes, i32* count) {
     (void)self;
     *count = set_list_languages(codes, SET_LANGUAGES);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_settings_ISettingsServer_GetAvailableLanguageCodeCount2(SvcObj* self, i32* count) {
     (void)self;
     *count = SET_LANGUAGES;
-    return 0;
+    R_SUCCEED();
 }
 /* the keyboard layout of the language */
 static int nn_settings_ISettingsServer_GetKeyCodeMap(SvcObj* self, IpcBuf map) {
     (void)self;
     set_key_code_map(map);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_settings_ISettingsServer_GetKeyCodeMap2(SvcObj* self, IpcBuf map) {
     (void)self;
     set_key_code_map(map);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_settings_ISettingsServer_GetDeviceNickName(SvcObj* self, IpcBuf name) {
     static const char nick[] = "ScarletNX";
     (void)self;
+    if (!name.size) R_SUCCEED();
+    /* cut to leave room for the NUL */
     memset(GP(name.addr), 0, (size_t)name.size);
-    memcpy(GP(name.addr), nick, name.size < sizeof nick ? (size_t)name.size : sizeof nick);
-    return 0;
+    memcpy(GP(name.addr), nick, name.size <= sizeof nick - 1 ? (size_t)name.size - 1 : sizeof nick - 1);
+    R_SUCCEED();
 }
 
 /* ============================================================ set:sys */
@@ -134,25 +136,26 @@ static void set_firmware_version(IpcBuf out) {
 static int nn_settings_ISystemSettingsServer_GetFirmwareVersion(SvcObj* self, IpcBuf version) {
     (void)self;
     set_firmware_version(version);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_GetFirmwareVersion2(SvcObj* self, IpcBuf version) {
     (void)self;
     set_firmware_version(version);
-    return 0;
+    R_SUCCEED();
 }
 /* no setting is kept: the value is empty, as GetSettingsItemValueSize says */
 static int nn_settings_ISystemSettingsServer_GetSettingsItemValue(SvcObj* self, IpcBuf name, IpcBuf key, IpcBuf value,
                                                                   u64* size) {
     char n[0x49], k[0x49];
-    (void)self, (void)value;
+    (void)self;
+    memset(GP(value.addr), 0, (size_t)value.size);
     memset(n, 0, sizeof n);
     memset(k, 0, sizeof k);
     memcpy(n, GP(name.addr), (size_t)(name.size < 0x48 ? name.size : 0x48));
     memcpy(k, GP(key.addr), (size_t)(key.size < 0x48 ? key.size : 0x48));
     LOG_LIMIT(16, "set:sys: GetSettingsItemValue(%s!%s): no such setting here\n", n, k);
     *size = 0;
-    return 0;
+    R_SUCCEED();
 }
 
 SvcObj* new_set(void) { return nn_settings_ISettingsServer_new(0); }

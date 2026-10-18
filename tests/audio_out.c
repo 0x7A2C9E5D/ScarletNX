@@ -350,6 +350,37 @@ static void test_open_audio_out(SvcObj* manager) {
     CHECK(!strcmp((char*)GP(0x1100), "DeviceOut") && GP(0x1100)[0x100] == 0xCC);
 }
 
+/* the channels an out opens with: 1, 2, 4 or 6 as asked, two for anything else; an AudioOutBuffer of the SDK's first
+   0x20 bytes (no data_offset), and one whose samples overrun its capacity, which isn't played on the host */
+static void test_audout_layouts(SvcObj* manager) {
+    static const u16 asked[5] = {1, 4, 3, 0, 6}, given[5] = {1, 4, 2, 2, 6};
+    for (u32 i = 0; i < 5; i++) {
+        nn_audio_AudioOutParameter params = {48000, asked[i], 0};
+        u32 rate, channels, format, state;
+        SvcObj* o = NULL;
+        CHECK(nn_audio_detail_IAudioOutManager_OpenAudioOut(NULL, &params, 0, 1, buffer(0, 0), buffer(0, 0), &rate,
+                                                            &channels, &format, &state, &o) == 0);
+        CHECK(channels == given[i] && ((AudOut*)o->data)->channels == given[i]);
+        CHECK(((AudOut*)o->data)->output->channels == given[i]);
+        svcobj_unref(o);
+    }
+    SvcObj* o = open_output(manager);
+    AudOut* q = o->data;
+    PAudio* host = q->output;
+    u64 old[4] = {0, 0x2000, 96, 96};
+    memcpy(GP(0x100), old, sizeof old);
+    CHECK(nn_audio_detail_IAudioOut_AppendAudioOutBuffer(o, 0x31, buffer(0x100, sizeof old)) == 0);
+    CHECK(q->nqueued == 1 && q->frames[(q->first + q->nreleased) % AUDOUT_BUFFERS] == 24 && host->bytes == 96);
+    CHECK(nn_audio_detail_IAudioOut_AppendAudioOutBuffer(o, 0x32, buffer(0x100, 0x18)) == 0); /* holds nothing */
+    CHECK(q->nqueued == 2 && host->bytes == 96);
+    unsigned before = host->queued;
+    CHECK(append(o, 3, 0x33, 0x2000, 64, 96, 0) == 0); /* 96 bytes in a 64 byte buffer: timed, not played */
+    CHECK(q->nqueued == 3 && host->queued == before);
+    CHECK(append(o, 3, 0x34, 0x2000, 96, 64, 64) == 0); /* past the capacity from its offset */
+    CHECK(q->nqueued == 4 && host->queued == before);
+    svcobj_unref(o);
+}
+
 /* the Auto commands' AutoSelect buffers, sent through the pointer buffer: X for an input, C for an output. A mapped
    descriptor without an address leaves the pointer one in charge, and one with an address wins */
 static void test_auto_pointer_buffers(SvcObj* manager) {
@@ -493,6 +524,10 @@ static void test_device(void) {
     IpcCtx c = request(2, &aruid, sizeof aruid);
     CHECK(manager->dispatch(manager, &c) == 0 && c.nout_objs == 1);
     SvcObj* d = c.out_objs[0];
+    /* its system, input and output events: three, each signaled from the start */
+    AudDevice* dev = d->data;
+    CHECK(dev->ev[0] != dev->ev[1] && dev->ev[1] != dev->ev[2] && dev->ev[0] != dev->ev[2]);
+    CHECK(dev->ev[0]->signaled && dev->ev[1]->signaled && dev->ev[2]->signaled);
     /* ListAudioDeviceName (0): AudioDeviceName entries of 0x100 bytes in B */
     sentinel(0x1000, 0x220);
     c = request(0, NULL, 0);
@@ -606,6 +641,16 @@ static void test_hwopus(void) {
     u32 params[2] = {48000, 2};
     IpcCtx c = request(1, params, sizeof params);
     CHECK(manager->dispatch(manager, &c) == 0 && c.out_size == 4 && reply32(&c, 0) == 0x10000);
+    /* multistream: 32 KiB, and 32 KiB a stream; parameters too short to read are one stream's */
+    u32 multi[4] = {48000, 6, 4, 2}, size = 0;
+    memset(GP(0x3000), 0, 0x110);
+    memcpy(GP(0x3000), multi, sizeof multi);
+    CHECK(nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeForMultiStream(NULL, buffer(0x3000, 0x110),
+                                                                                     &size) == 0 &&
+          size == 0x28000);
+    CHECK(nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeForMultiStream(NULL, buffer(0x3000, 0x10),
+                                                                                     &size) == 0 &&
+          size == 0x10000);
     unsigned objects = test_objects;
     SvcObj* decoder;
     CHECK(open_opus(manager, 48000, 3, &decoder) == RC(111, 385));
@@ -701,6 +746,7 @@ int main(void) {
     test_no_device = 0;
     test_audout_queries(manager);
     test_open_audio_out(manager);
+    test_audout_layouts(manager);
     test_auto_pointer_buffers(manager);
     svcobj_unref(manager);
     test_renderer();

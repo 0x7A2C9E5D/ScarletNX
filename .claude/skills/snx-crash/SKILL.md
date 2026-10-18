@@ -39,6 +39,9 @@ tools/disasm.py work/<Game> NvRmStreamFlushSync              # a whole function
 tools/disasm.py work/<Game> START END                        # a range
 ```
 
+Both read the modules through the recompiler's own loader (`build/scarletnx --dump-modules`, or the binary
+`SNX_SCARLETNX` names), so the build must exist. The dump is cached per game folder in `~/.cache/scarletnx/module-dumps`.
+
 Find the faulting instruction (the load or store whose address is the game address) and walk back to where its
 base register came from. Every value is either loaded from memory (from where, written by whom), passed in, or
 computed. Keep going until you reach something the runtime provided: an IPC answer, an ioctl result, shared memory

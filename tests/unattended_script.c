@@ -63,6 +63,52 @@ int main(void) {
     CHECK(at(9010, 402) == 1, "changed script starts its new press");
     CHECK(at(9310, 403) == 0, "new press ends normally");
 
+
+    /* a malformed item ends the script there, the items before it kept */
+    unattended_ini("script", "500f:8,oops,600f:10");
+    CHECK(at(9500, 500) == 8, "the item before a malformed one still presses");
+    CHECK(at(9900, 600) == 0, "an item after a malformed one pressed");
+    CHECK(unattended_known("shot_every") && !unattended_known("touch"), "unattended_known");
+
+    /* the limits, and numbered shots by bucket even when frames go by two */
+    CHECK(!unattended_active(), "active without seconds or frames");
+    unattended_ini("frames", "700");
+    unattended_ini("shot", "out/run");
+    unattended_ini("shot_every", "10");
+    CHECK(unattended_active() && !unattended_done(), "frames=700 not active, or done too early");
+    {
+        char path[64];
+        g_frames = 605;
+        CHECK(unattended_periodic_shot(path, sizeof path) && !strcmp(path, "out/run_0000"), "first numbered shot");
+        g_frames = 609;
+        CHECK(!unattended_periodic_shot(path, sizeof path), "the same bucket shot twice");
+        g_frames = 611; /* 610 went by between two looks */
+        CHECK(unattended_periodic_shot(path, sizeof path) && !strcmp(path, "out/run_0001"), "a bucket skipped over");
+        g_frames = 621;
+        CHECK(unattended_periodic_shot(path, sizeof path) && !strcmp(path, "out/run_0002"), "third numbered shot");
+    }
+    g_frames = 700;
+    CHECK(unattended_done(), "frames=700 not done at 700");
+    unattended_ini("shot", "");
+    CHECK(!unattended_shot(), "an empty shot does not clear it");
+
+    /* the stick keys, and the clamp into the circle */
+    {
+        i32 st[4], x = 32767, y = 32767;
+        input_key_sticks(1ull << 40 | 1ull << 41 | 1ull << 46 | 1ull << 44, st);
+        CHECK(st[0] == -32767 && st[1] == 32767 && st[2] == 0 && st[3] == 0, "stick keys %d %d %d %d", st[0], st[1],
+              st[2], st[3]);
+        input_key_sticks(1ull << 47, st);
+        CHECK(st[2] == 0 && st[3] == -32767, "right stick down %d %d", st[2], st[3]);
+        input_stick_clamp(&x, &y);
+        CHECK(x == y && x > 23000 && x < 23171 && (double)x * x + (double)y * y <= 32767.0 * 32767.0,
+              "diagonal clamp %d %d", x, y);
+        x = -40000;
+        y = 0;
+        input_stick_clamp(&x, &y);
+        CHECK(x == -32767 && y == 0, "axis clamp %d %d", x, y);
+    }
+
     printf("%u checks, %u failed\n", checks, failures);
     return failures != 0;
 }
