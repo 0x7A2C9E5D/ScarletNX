@@ -742,6 +742,21 @@ static void test_apm(void) {
     svcobj_unref(apm);
 }
 
+/* StoreSaveDataThumbnail (110) {uid}: a thumbnail of 0x24000 bytes for the user is taken; one of another size is
+   InvalidArrayLength, one for a user id of nought InvalidUserId */
+static void test_acc_thumbnail(void) {
+    static const u8 nobody[16];
+    nn_account_Uid uid;
+    IpcBuf image = {0x1000, 0x24000, 0};
+    memcpy(uid.v, g_user_id, 16);
+    CHECK(nn_account_IAccountServiceForApplication_StoreSaveDataThumbnail(NULL, &uid, image) == 0);
+    image.size = 0x1000;
+    CHECK(nn_account_IAccountServiceForApplication_StoreSaveDataThumbnail(NULL, &uid, image) == RC(124, 32));
+    image.size = 0x24000;
+    memcpy(uid.v, nobody, 16);
+    CHECK(nn_account_IAccountServiceForApplication_StoreSaveDataThumbnail(NULL, &uid, image) == RC(124, 20));
+}
+
 static void test_mii_default(void) {
     SvcObj* service = new_mii();
     Request r;
@@ -1117,6 +1132,7 @@ int main(void) {
     test_mm();
     test_hid();
     test_mii_default();
+    test_acc_thumbnail();
     test_apm();
     test_ngc();
     test_mm_full();

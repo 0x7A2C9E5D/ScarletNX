@@ -25,7 +25,7 @@ interface nn::account::IAccountServiceForApplication is acc:u0, acc:u1, acc:su {
     @stub [100] InitializeApplicationInfoV0(pid);
     [101] GetBaasAccountManagerForApplication(nn::account::Uid uid)
         -> object<nn::account::baas::IManagerForApplication> manager;
-    @stub [110] StoreSaveDataThumbnail(nn::account::Uid uid, buffer<u8, 5> image);
+    [110] StoreSaveDataThumbnail(nn::account::Uid uid, buffer<u8, 5> image);
     @stub [111] ClearSaveDataThumbnail(nn::account::Uid uid);
     [130] LoadOpenContext(nn::account::Uid uid) -> object<nn::account::baas::IManagerForApplication> manager;
     [131] ListOpenContextStoredUsers(array<nn::account::Uid, 0xa> users);
