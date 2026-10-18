@@ -207,7 +207,9 @@ i64 plat_tz_offset(void) {
    belongs to a mapping: a range mapped again with MAP_FIXED (the alias pool's, below) is registered again, or a scan
    over it fails. g_pagemap goes back to -1 when that fails, so every scan says -1 and the caches compare contents */
 static int g_pagemap = -1;
+#if defined(__linux__) && defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC) && defined(UFFD_USER_MODE_ONLY)
 static int g_uffd = -1;
+#endif
 
 static int ww_register(u8* p, u64 size) {
 #if defined(__linux__) && defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC) && defined(UFFD_USER_MODE_ONLY)
