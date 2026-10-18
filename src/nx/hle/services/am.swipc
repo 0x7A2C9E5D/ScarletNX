@@ -65,7 +65,15 @@ interface nn::am::service::ICommonStateGetter {
     @stub [67] CancelCpuBoostMode();
     @stub [68] GetBuiltInDisplayType() -> i32 type;
     [91] GetCurrentPerformanceConfiguration() -> u32 configuration;
+    # 21.0.0+
+    [130] EnableStartupLogoDisappearedMessage();
+    # 9.0.0+, a nn::settings::system::PlatformRegion
+    [300] GetSettingsPlatformRegion() -> u32 region;
     @stub [900] SetRequestExitToLibraryAppletAtExecuteNextProgramEnabled();
+    # 19.0.0+
+    [1000] BeginVrMode3d();
+    [1001] EndVrMode3d();
+    [1002] IsVrModeEnabled3d() -> b8 enabled;
 }
 
 # a lock on a system button (the home button's): no home menu here waits for it, so a lock is always granted, and

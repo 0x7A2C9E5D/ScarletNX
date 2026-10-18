@@ -509,6 +509,26 @@ static void test_mii_edit(void) {
     close_handles();
     CHECK(test_objects == 0 && test_kobjs == 0);
 }
+/* ICommonStateGetter: 130 queues the start-up logo's message, 95, behind the focus and performance ones at startup;
+   1000 to 1002 keep 3D VR mode; 300 says the platform region is Global */
+static void test_state_getter(void) {
+    u32 message = 0, region = 0;
+    u8 vr = 0xee;
+    int logo = 0, received = 0;
+    am_init();
+    CHECK(nn_am_service_ICommonStateGetter_EnableStartupLogoDisappearedMessage(NULL) == 0 && am.msg_event->signaled);
+    while (received < AM_MESSAGES && nn_am_service_ICommonStateGetter_ReceiveMessage(NULL, &message) == 0) {
+        logo += message == AM_MSG_STARTUP_LOGO_GONE;
+        received++;
+    }
+    CHECK(received == 3 && logo == 1 && !am.msg_event->signaled);
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled3d(NULL, &vr) == 0 && vr == 0);
+    CHECK(nn_am_service_ICommonStateGetter_BeginVrMode3d(NULL) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled3d(NULL, &vr) == 0 && vr == 1);
+    CHECK(nn_am_service_ICommonStateGetter_EndVrMode3d(NULL) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled3d(NULL, &vr) == 0 && vr == 0);
+    CHECK(nn_am_service_ICommonStateGetter_GetSettingsPlatformRegion(NULL, &region) == 0 && region == 1);
+}
 int main(void) {
     test_mii_edit();
     test_audio_controller();
@@ -523,6 +543,7 @@ int main(void) {
     test_applets();
     CHECK(test_objects == 0 && test_kobjs == 0);
     test_messages();
+    test_state_getter();
     printf("am_service: %u checks passed\n", test_checks);
     return 0;
 }
