@@ -534,7 +534,7 @@ static int nn_fssrv_sf_IStorage_Read(SvcObj* self, i64 offset, IpcBuf buffer, i6
     if (off > data->node->size || sz > data->node->size - off)
         rc = FS_OUT_OF_RANGE;
     else if (node_in_memory(data->node)) {
-        memcpy(GP(a), node_memory(data->node) + off, (size_t)sz);
+        if (sz) memcpy(GP(a), node_memory(data->node) + off, (size_t)sz);
     } else if (file_seek(data->f, off) || fread(GP(a), 1, (size_t)sz, data->f) != sz) {
         rc = FS_OUT_OF_RANGE;
     }
