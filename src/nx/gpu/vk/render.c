@@ -1566,8 +1566,9 @@ retry:
         g_vk_skipped++;
         return;
     }
+    /* filled by fs_get_keyed for the fragment program's textures (each resolved, have set), and read only for them: a
+       clear of all SH_MAXTEX (10 KiB) and a check of all of them against each target were per draw */
     TexRes fres[SH_MAXTEX];
-    for (int i = 0; i < SH_MAXTEX; i++) fres[i].have = 0;
     VkSh* last = gs ? gs : tes ? tes : vs;
     VkSh* fs = (r[0x850] & 1) ? fs_get_keyed(ch, code + r[0x851], fres, last ? last->si.out_mask : ~0u) : NULL;
     if (!vs || vs->failed || (fs && fs->failed)) {
@@ -1595,7 +1596,7 @@ retry:
         for (u32 j = 0; j < n; j++) {
             u32 cm = r[0x3E4] ? r[0x680] : r[0x680 + j];
             if (!rt[j] || (((fs->si.sph[18] >> (j * 4)) & 15) && (cm & 0xFFFF))) continue;
-            for (int i = 0; i < SH_MAXTEX; i++)
+            for (int i = 0; i < (fs->si.ntex > SH_MAXTEX ? SH_MAXTEX : fs->si.ntex); i++)
                 if (fres[i].have && fres[i].t == rt[j]) {
                     rt[j] = NULL;
                     break;

@@ -40,13 +40,30 @@ static u64 bl_level_size(u32 w, u32 h, u32 d, const VkFmt* f, u32 bh, u32 bd, u3
 /* bytes from one layer of a block-linear texture to the next: all its levels, aligned to a block of GOBs that is
    shrunk for a small base level (Ryujinx's AlignLayerSize) */
 static u64 bl_layer_size(u32 w, u32 h, u32 d, const VkFmt* f, u32 bh, u32 bd, u32 levels) {
+    /* the sizes asked last, by shape: every lookup of a texture asks this, and it costs divisions by the block size
+       over each level, the levels' block sizes each a loop of its own */
+    static struct {
+        u32 w, h, d, bh, bd, levels, fbw, fbh, fbpp;
+        u64 sz;
+    } memo[256];
+    u32 m = (u32)(((((u64)w * 0x9E3779B1u) ^ h) * 0x85EBCA77u ^ ((u64)d << 20 | (u64)levels << 14 | bh << 8 | bd << 4) ^
+                   (u64)f->bpp << 24 ^ (u64)f->bw << 28 ^ (u64)f->bh << 32) *
+                      0x9E3779B97F4A7C15ull >>
+                  56);
+    if (memo[m].w == w && memo[m].h == h && memo[m].d == d && memo[m].bh == bh && memo[m].bd == bd &&
+        memo[m].levels == levels && memo[m].fbw == f->bw && memo[m].fbh == f->bh && memo[m].fbpp == f->bpp && w)
+        return memo[m].sz;
+    u32 w0 = w, h0 = h, d0 = d, bh0 = bh, bd0 = bd;
     u64 sz = 0;
     for (u32 l = 0; l < levels; l++) sz += bl_level_size(w, h, d, f, bh, bd, l, NULL, NULL);
     u32 gy = ((h + f->bh - 1) / f->bh + 7) / 8;
     while (bh > 0 && gy <= (1u << (bh - 1))) bh--;
     while (bd > 0 && d <= (1u << (bd - 1))) bd--;
     u64 al = 512ull << (bh + bd);
-    return (sz + al - 1) / al * al;
+    sz = (sz + al - 1) / al * al;
+    memo[m].w = w0, memo[m].h = h0, memo[m].d = d0, memo[m].bh = bh0, memo[m].bd = bd0, memo[m].levels = levels;
+    memo[m].fbw = f->bw, memo[m].fbh = f->bh, memo[m].fbpp = f->bpp, memo[m].sz = sz;
+    return sz;
 }
 
 /* one level of one layer, from guest bytes to tightly packed rows, converted when the format needs it */
