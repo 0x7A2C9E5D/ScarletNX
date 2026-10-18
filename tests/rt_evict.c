@@ -109,6 +109,12 @@ static void VKAPI_CALL format_properties(VkPhysicalDevice p, VkFormat f, VkForma
     memset(props, 0, sizeof *props);
 }
 PFN_vkCmdBlitImage vkCmdBlitImage;
+/* the drawn-targets page filter: every range may hold one, so vk_rt_drawn_in walks the list */
+void pend_add_va(PendPages* t, u64 gva, u64 size, int delta) { (void)t, (void)gva, (void)size, (void)delta; }
+int pend_hit_va(const PendPages* t, u64 gva, u64 size) {
+    (void)t, (void)gva, (void)size;
+    return 1;
+}
 PFN_vkCreateImageView vkCreateImageView = create_image_view;
 PFN_vkGetPhysicalDeviceFormatProperties vkGetPhysicalDeviceFormatProperties = format_properties;
 u8* vk_readback_buffer(u64 size, VkBuffer* buf) {

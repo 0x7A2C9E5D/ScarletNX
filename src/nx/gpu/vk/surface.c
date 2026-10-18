@@ -562,6 +562,10 @@ Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h) {
 static Surf** g_drawn;
 static int g_ndrawn, g_capdrawn;
 static u32 g_drawn_seq;
+/* the GPU pages they started at when listed, so a texture over none of them (most) skips the list: TotK looked at each
+   of about 30 for each of 13,000 textures a frame. A target parked since still counts its old page, which only lets
+   the walk run */
+static PendPages g_drawn_pages;
 /* Read backing memory directly: asking gmem_read to land pending output here could submit a draw mid-setup. A run of
    pages contiguous in host memory is hashed at once, eight bytes at a time (vk_hash) */
 static u64 rt_mem_hash(const Surf* s) {
@@ -592,8 +596,7 @@ void vk_rt_drawn(Surf* s) {
     }
     s->drawn_at = g_vk_present;
     s->drawn_seq = ++g_drawn_seq;
-    for (int i = 0; i < g_ndrawn; i++)
-        if (g_drawn[i] == s) return;
+    if (s->in_drawn) return;
     if (g_ndrawn == g_capdrawn) {
         int cap = g_capdrawn ? g_capdrawn * 2 : 64;
         Surf** n = realloc(g_drawn, (size_t)cap * sizeof *n);
@@ -602,6 +605,9 @@ void vk_rt_drawn(Surf* s) {
         g_capdrawn = cap;
     }
     g_drawn[g_ndrawn++] = s;
+    s->in_drawn = 1;
+    s->drawn_from = s->gva;
+    pend_add_va(&g_drawn_pages, s->drawn_from, 1, 1);
 }
 void vk_rt_drawn_full(Surf* s) {
     s->draw_wseen = 0; /* every pixel was replaced, so earlier memory writes no longer matter */
@@ -623,6 +629,7 @@ int vk_rt_drawn_fresh(Surf* s) {
 }
 int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max) {
     int n = 0;
+    if (hi <= lo || !pend_hit_va(&g_drawn_pages, lo, hi - lo)) return 0;
     for (int i = 0; i < g_ndrawn; i++) {
         Surf* s = g_drawn[i];
         /* Generated textures may first be sampled several frames after their draw.
@@ -646,11 +653,14 @@ static void surf_free(Surf* s) {
                 break;
             }
     }
-    for (int i = 0; i < g_ndrawn; i++)
-        if (g_drawn[i] == s) {
-            g_drawn[i] = g_drawn[--g_ndrawn];
-            break;
-        }
+    if (s->in_drawn) {
+        for (int i = 0; i < g_ndrawn; i++)
+            if (g_drawn[i] == s) {
+                g_drawn[i] = g_drawn[--g_ndrawn];
+                break;
+            }
+        pend_add_va(&g_drawn_pages, s->drawn_from, 1, -1);
+    }
     for (int i = 0; i < s->nsv; i++) vk_defer_image(VK_NULL_HANDLE, VK_NULL_HANDLE, s->sv[i].v, VK_NULL_HANDLE);
     vk_defer_image(s->img, s->mem, s->att, s->att_linear);
     free(s);
