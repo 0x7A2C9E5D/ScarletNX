@@ -231,7 +231,9 @@ static void two_consoles(void) {
     r = snx_ldn_connect(b, &net, name, 4, 2000);
     CHECK(r == -SNX_ECONNRESET);
     snx_ldn_close(a);
-    r = snx_ldn_connect(b, &net, name, 4, 2000); /* nobody at all: refused by the host */
+    /* nobody at all: refused by the host. Windows tells it only after trying the SYN again, about two seconds, so
+       the wait is the service's (LDN_CONNECT_MS) */
+    r = snx_ldn_connect(b, &net, name, 4, 4000);
     CHECK(r == -SNX_ECONNREFUSED);
     net.node_count = 0;
     CHECK(snx_ldn_connect(b, &net, name, 4, 100) == -SNX_EINVAL);
