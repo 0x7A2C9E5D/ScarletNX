@@ -314,7 +314,8 @@ nickname=Bee
 other key, a section out of order or twice, or a line that is no key stops the game and says why. A user's picture is
 `users/<uid>.jpg`, a JPEG of at most 128 KiB (256x256 as the console's), read when the game starts; without one it is
 Wimsy. The game plays as the user its `.ini`'s `user` names (`--user=N` for one run): with one user, the game picks it
-on its own; with more, the game's user selector gets that user.
+on its own; with more, the game's user selector gets that user. Each user's Account saves are `save/user.<uid>` in the
+game's `<id>_data/`.
 
 ## Settings / input
 

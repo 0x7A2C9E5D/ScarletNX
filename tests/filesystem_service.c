@@ -5,6 +5,7 @@
 #include "nx/hle/kernel/ipc.h"
 #include "nx/memory/mem.h"
 #include "nx/runtime/platform/log.h"
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -24,6 +25,10 @@
 u8* g_mem;
 char g_datadir[1024], g_exename[256], g_exedir[1024];
 int g_verbose;
+int g_opt_user = 1;
+u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull}; /* am.c's: the first user */
+static jmp_buf* test_fatal_jump;                                   /* a fatal() the test waits for comes back here */
+static char test_fatal_text[1024];
 static unsigned test_checks, test_scans, test_objects;
 static int test_scans_allowed = 1;
 
@@ -156,6 +161,11 @@ void logf_(int level, const char* format, ...) {
 void fatal(const char* format, ...) {
     va_list args;
     va_start(args, format);
+    if (test_fatal_jump) {
+        vsnprintf(test_fatal_text, sizeof test_fatal_text, format, args);
+        va_end(args);
+        longjmp(*test_fatal_jump, 1);
+    }
     vfprintf(stderr, format, args);
     va_end(args);
     exit(1);
@@ -879,17 +889,32 @@ static void test_raw_romfs(SvcObj* proxy) {
 /* OpenSaveDataFileSystem (51): the SaveDataSpaceId (u8) at 0 and the 0x40 byte SaveDataAttribute at 8, whose
    SaveDataType is at 0x20 in it, 0x28 in the request. The other bytes are filled with types that would pick another
    folder if they were read instead */
+static void save_request(Request* r, u32 command, u8 type, const u64* uid) {
+    request(r, command);
+    r->raw[0] = 1;                           /* User */
+    memset(r->raw + 8, 4, 0x20);             /* program id, uid and system save data id: Temporary */
+    memset(r->raw + 0x29, 2, 0x48 - 0x29);   /* rank, index and reserved: Bcat */
+    if (uid) memcpy(r->raw + 0x10, uid, 16); /* the attribute's user */
+    r->raw[0x28] = type;
+}
 static SvcObj* open_save_data(SvcObj* proxy, u32 command, u8 type) {
     Request r;
-    request(&r, command);
-    r.raw[0] = 1;                         /* User */
-    memset(r.raw + 8, 4, 0x20);           /* program id, uid and system save data id: Temporary */
-    memset(r.raw + 0x29, 2, 0x48 - 0x29); /* rank, index and reserved: Bcat */
-    r.raw[0x28] = type;
+    save_request(&r, command, type, NULL);
     dispatch(proxy, &r, 0);
     CHECK(r.c.nout_objs == 1 && r.c.out_size == 0);
     return r.c.out_objs[0];
 }
+/* an Account save (51) of the user uid */
+static SvcObj* open_user_save(SvcObj* proxy, const u64* uid) {
+    Request r;
+    save_request(&r, 51, 1, uid);
+    dispatch(proxy, &r, 0);
+    CHECK(r.c.nout_objs == 1 && r.c.out_size == 0);
+    return r.c.out_objs[0];
+}
+#define FIRST_SAVE "save/user.0123456789abcdeffedcba9876543210"
+#define OTHER_SAVE "save/user.04040404040404040404040404040404"
+static const u64 test_other_user[2] = {0x0404040404040404ull, 0x0404040404040404ull};
 static int tree_has(const char* path) {
     FsNode* node;
     pm_lock(&fsp.tree.lock);
@@ -951,30 +976,77 @@ static void test_save_data(SvcObj* proxy) {
     svcobj_unref(bcat);
     svcobj_unref(device);
 
-    /* an Account save with save/system empty: nothing to move, save/user is made beside it */
-    SvcObj* user = open_save_data(proxy, 51, 1);
-    CHECK(tree_has("save/user") && tree_has("save/system"));
+    /* an Account save is its user's folder, save/user.<uid>: another user's has nothing to do with the first's */
+    SvcObj* user = open_user_save(proxy, test_other_user);
+    CHECK(tree_has(OTHER_SAVE) && !tree_has(FIRST_SAVE) && !tree_has("save/user") && tree_has("save/system"));
+    fs_command(user, 0, "/other-user.bin", 4, 0);
+    svcobj_unref(user);
+    /* the first user's with save/system empty: nothing to move, its folder is made beside it */
+    user = open_user_save(proxy, g_user_id);
+    CHECK(tree_has(FIRST_SAVE) && tree_has("save/system"));
+    fs_command(user, 7, "/other-user.bin", 0, FS_NOTFOUND);
     svcobj_unref(user);
     pm_lock(&fsp.tree.lock);
-    CHECK(!fs_tree_remove(&fsp.tree, NULL, "save/user", 1, 1, 0));
+    CHECK(!fs_tree_remove(&fsp.tree, NULL, FIRST_SAVE, 1, 1, 0));
     pm_unlock(&fsp.tree.lock);
-    /* saves an earlier version put in save/system (it read the type from a byte that is always 0) move to save/user
-       the first time an Account save is opened, if there is no save/user yet */
+    /* saves an earlier version put in save/system (it read the type from a byte that is always 0) go to the first
+       user's folder the first time its save is opened, if it has none yet */
     fs_command(system, 0, "/slot.bin", 4, 0);
     svcobj_unref(system);
-    user = open_save_data(proxy, 51, 1);
-    CHECK(tree_has("save/user/slot.bin") && !tree_has("save/system"));
+    user = open_user_save(proxy, g_user_id);
+    CHECK(tree_has(FIRST_SAVE "/slot.bin") && !tree_has("save/system"));
     fs_command(user, 7, "/slot.bin", 0, 0);
     svcobj_unref(user);
-    /* save/system starts again empty, and save/user, which exists now, keeps what it has */
+    /* save/system starts again empty, and the first user's folder, which exists now, keeps what it has */
     system = open_save_data(proxy, 51, 0);
     fs_command(system, 7, "/slot.bin", 0, FS_NOTFOUND);
     fs_command(system, 0, "/other.bin", 4, 0);
-    user = open_save_data(proxy, 51, 1);
+    user = open_user_save(proxy, g_user_id);
     fs_command(user, 7, "/slot.bin", 0, 0);
     fs_command(user, 7, "/other.bin", 0, FS_NOTFOUND);
     CHECK(tree_has("save/system/other.bin"));
     svcobj_unref(user);
+    /* save/user, the one save of the versions before there were users, becomes the first user's, with its files,
+       once: another user's save leaves it where it is */
+    pm_lock(&fsp.tree.lock);
+    CHECK(!fs_tree_remove(&fsp.tree, NULL, FIRST_SAVE, 1, 1, 0));
+    u32 rc;
+    SvcObj* old = hostfs_new("save/user", &rc);
+    pm_unlock(&fsp.tree.lock);
+    CHECK(old && !rc);
+    fs_command(old, 0, "/progress.bin", 4, 0);
+    svcobj_unref(old);
+    user = open_user_save(proxy, test_other_user);
+    svcobj_unref(user);
+    CHECK(tree_has("save/user/progress.bin") && !tree_has(FIRST_SAVE));
+    user = open_user_save(proxy, g_user_id);
+    CHECK(tree_has(FIRST_SAVE "/progress.bin") && !tree_has("save/user"));
+    fs_command(user, 7, "/progress.bin", 0, 0);
+    svcobj_unref(user);
+    /* a save/user beside the first user's folder (an older version run again) is two saves of one user: the game
+       stops, and both stay as they were, for the player to choose */
+    pm_lock(&fsp.tree.lock);
+    old = hostfs_new("save/user", &rc);
+    pm_unlock(&fsp.tree.lock);
+    CHECK(old && !rc);
+    fs_command(old, 0, "/newer.bin", 4, 0);
+    svcobj_unref(old);
+    {
+        jmp_buf jump;
+        Request r;
+        save_request(&r, 51, 1, g_user_id);
+        test_fatal_text[0] = 0;
+        test_fatal_jump = &jump;
+        if (!setjmp(jump)) {
+            dispatch(proxy, &r, 0);
+            CHECK(!"opening the first user's save with two of them did not stop the game");
+        }
+        test_fatal_jump = NULL;
+        CHECK(strstr(test_fatal_text, "Two saves of the first user") && strstr(test_fatal_text, FIRST_SAVE));
+    }
+    /* tree_has takes the tree's lock: fatal() came after open_save let it go, or this would wait forever */
+    CHECK(tree_has("save/user/newer.bin") && tree_has(FIRST_SAVE "/progress.bin") &&
+          !tree_has(FIRST_SAVE "/newer.bin"));
     /* a type past the known ones is a System save, and so is one opened by its system save data id (52) */
     SvcObj* unknown = open_save_data(proxy, 51, 0x7F);
     fs_command(unknown, 7, "/other.bin", 0, 0);
@@ -1001,7 +1073,9 @@ static void test_save_data(SvcObj* proxy) {
     CHECK(v == 0);
     memcpy(&v, r.c.out + 4, 4);
     CHECK(v == 1);
-    puts("PASS SaveDataType folders, the save/system migration, IsSdCardAccessible and the access log's program index");
+    puts(
+        "PASS SaveDataType folders, a folder per user, the save/user and save/system migrations, two saves of one user "
+        "refused, IsSdCardAccessible and the access log's program index");
 }
 
 static void cleanup_service(void) {
