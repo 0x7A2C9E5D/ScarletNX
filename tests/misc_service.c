@@ -177,7 +177,7 @@ KEvent* owned_event(const char* name) {
 
 typedef struct {
     IpcCtx c;
-    u8 raw[32];
+    u8 raw[0x60];
 } Request;
 static IpcCtx* request(Request* r, u32 cmd) {
     memset(r, 0, sizeof *r);
@@ -974,6 +974,36 @@ static void test_mii_random(void) {
     svcobj_unref(service);
 }
 
+/* UpdateLatest (5) and GetIndex (21) of a Mii: NotFound, whatever the source, as the empty database holds none. Mario
+   Kart 8 Deluxe asks UpdateLatest for the Mii its save holds at boot; a success there gave it an empty CharInfo, which
+   it built no Mii from, and crashed */
+static void test_mii_latest(void) {
+    SvcObj* service = new_mii();
+    Request r;
+    u8 mii[0x58];
+    request(&r, 0);
+    call(service, &r);
+    SvcObj* db = r.c.out_objs[0];
+    request(&r, 7);
+    argument32(&r, 0, 0);
+    call(db, &r);
+    memcpy(mii, r.c.out, sizeof mii);
+    CHECK(mii_valid(mii));
+    for (u32 source = 0; source <= 3; source++) {
+        request(&r, 5);
+        memcpy(r.raw, mii, sizeof mii);
+        argument32(&r, 0x58, source);
+        CHECK(db->dispatch(db, &r.c) == RC(126, 4));
+        CHECK(r.c.out_size == 0);
+    }
+    request(&r, 21);
+    memcpy(r.raw, mii, sizeof mii);
+    CHECK(db->dispatch(db, &r.c) == RC(126, 4));
+    CHECK(r.c.out_size == 0);
+    svcobj_unref(db);
+    svcobj_unref(service);
+}
+
 int main(void) {
     g_mem = calloc(1, 0x10000);
     CHECK(g_mem != NULL);
@@ -988,6 +1018,7 @@ int main(void) {
     test_aoc_list();
     test_aoc_content();
     test_mii_random();
+    test_mii_latest();
     CHECK(test_objects == 0 && test_kobjs == 0);
     free(g_mem);
     printf("misc_service: %u checks passed\n", test_checks);

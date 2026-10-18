@@ -4,8 +4,8 @@
    nfc/nfc_result.h, nfc/nfc_types.h, nfc/common/device_manager.cpp, nfc/nfc_interface.cpp, bcat/bcat_types.h,
    bcat/bcat_result.h, bcat/backend/backend.cpp, bcat/delivery_cache_file_service.cpp,
    aoc/purchase_event_manager.cpp, src/core/file_sys/common_funcs.h, mii/mii_result.h, mii/types/store_data.cpp,
-   mii/types/char_info.h, mii/types/char_info.cpp, mii/types/core_data.cpp, mii/mii.cpp, ptm/psm.cpp, lm/lm.cpp,
-   audio/errors.h):
+   mii/types/char_info.h, mii/types/char_info.cpp, mii/types/core_data.cpp, mii/mii.cpp, mii/mii_manager.cpp,
+   ptm/psm.cpp, lm/lm.cpp, audio/errors.h):
    SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
    SPDX-FileCopyrightText: Copyright 2018, 2019, 2020, 2022, 2023 yuzu Emulator Project (GPL-2.0-or-later)
    and the default Miis and the random Miis' tables (mii_random.inc) from Eden's
@@ -867,6 +867,7 @@ static int nn_irsensor_IIrSensorServer_GetIrsensorSharedMemoryHandle(SvcObj* sel
 #define MII_INVALID_ARGUMENT      RC(126, 1)
 #define MII_INVALID_ARGUMENT_SIZE RC(126, 2)
 #define MII_SOURCE_DEFAULT        2 /* nn::mii::SourceFlag::Default */
+#define MII_NOT_FOUND             RC(126, 4)
 
 /* nn::mii's DefaultMii, the fields in this order (colors in the 3DS's numbering): face type, color, wrinkle, makeup;
    hair type, color, flip; eye type, color, scale, aspect, rotate, x, y; eyebrow type, color, scale, aspect, rotate,
@@ -964,6 +965,17 @@ static int nn_mii_detail_IDatabaseService_Get(SvcObj* self, i32 source_flag, Ipc
 static int nn_mii_detail_IDatabaseService_Get1(SvcObj* self, i32 source_flag, IpcBuf infos, i32* count) {
     (void)self;
     return mii_give_defaults(source_flag, infos, 0x58, count);
+}
+/* a Mii's newest version and its place in the database, which has no Miis: NotFound, and the game keeps the Mii it has
+   (Mario Kart 8 Deluxe asks both for the Mii its save holds, and takes a successful UpdateLatest's as that Mii) */
+static int nn_mii_detail_IDatabaseService_UpdateLatest(SvcObj* self, const nn_mii_CharInfo* info, i32 source_flag,
+                                                       nn_mii_CharInfo* latest) {
+    (void)self, (void)info, (void)source_flag, (void)latest;
+    R_THROW(MII_NOT_FOUND);
+}
+static int nn_mii_detail_IDatabaseService_GetIndex(SvcObj* self, const nn_mii_CharInfo* info, i32* index) {
+    (void)self, (void)info, (void)index;
+    R_THROW(MII_NOT_FOUND);
 }
 /* ------------------------------------------------------------ BuildRandom */
 #include "nx/hle/services/mii_random.inc"

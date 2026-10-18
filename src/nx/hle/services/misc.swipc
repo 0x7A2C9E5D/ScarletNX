@@ -364,8 +364,10 @@ interface nn::mii::detail::IDatabaseService {
     [2] GetCount(i32 source_flag) -> i32 count;
     [3] Get(i32 source_flag, array<nn::mii::CharInfoElement, 6> elements) -> i32 count;
     [4] Get1(i32 source_flag, array<nn::mii::CharInfo, 6> infos) -> i32 count;
+    [5] UpdateLatest(nn::mii::CharInfo info, i32 source_flag) -> nn::mii::CharInfo latest;
     [6] BuildRandom(u32 age, u32 gender, u32 race) -> nn::mii::CharInfo info;
     [7] BuildDefault(u32 index) -> nn::mii::CharInfo info;
+    [21] GetIndex(nn::mii::CharInfo info) -> i32 index;
     [22] SetInterfaceVersion(u32 version);
 }
 
