@@ -312,12 +312,13 @@ u8* plat_vm_reserve(u64 size) {
 }
 int plat_vm_commit(u8* p, u64 size) { return mprotect(p, (size_t)size, PROT_READ | PROT_WRITE) ? -1 : 0; }
 void plat_vm_decommit(u8* p, u64 size) {
-#if defined(__APPLE__)
-    /* Darwin's MADV_DONTNEED may keep the contents: fresh pages over the range are certain to read zero */
-    mmap(p, (size_t)size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-#else
+#if defined(__linux__)
     madvise(p, (size_t)size, MADV_DONTNEED);
     mprotect(p, (size_t)size, PROT_NONE);
+#else
+    /* only Linux's MADV_DONTNEED drops the contents (Darwin's may keep them, FreeBSD's does): fresh pages over the
+       range are certain to read zero */
+    mmap(p, (size_t)size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 #endif
 }
 
