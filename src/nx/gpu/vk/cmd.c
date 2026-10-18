@@ -181,6 +181,7 @@ static void frame_recycle(Frame* f) {
     memset(f->spare, 0, sizeof f->spare);
     ring_reset(&f->stage);
     ring_reset(&f->back);
+    vk_rec_frame_reset((u32)(f - g_fr)); /* the slot's sets made on the recording thread too */
     f->icb = 0;
     f->fresh = 0;
 }
@@ -329,7 +330,7 @@ void vk_frame_next(void) {
    many submissions or descriptor pools ends here, at the start of a draw or dispatch, before anything is set up */
 void vk_frame_check(void) {
     const Frame* f = &g_fr[g_cur];
-    if (f->icb >= 64 || f->ipool >= 32) vk_frame_next();
+    if (f->icb >= 64 || f->ipool >= 32 || vk_rec_frame_sets(g_cur) >= 32 * 1024) vk_frame_next();
 }
 
 u64 vk_submit_number(void) { return g_gval + 1; }
@@ -338,8 +339,9 @@ u64 vk_last_submit(void) { return g_gval; }
 void vk_wait_submit(u64 value) { timeline_wait(value); }
 void vk_land_through(u64 value) { land_through(value < g_gval ? value : g_gval); }
 u64 vk_frame_id(void) { return g_frame_id; }
+u32 vk_frame_slot(void) { return g_cur; }
 
-static VkDescriptorPool desc_pool_new(void) {
+VkDescriptorPool vk_desc_pool_new(void) {
     /* a thousand sets of the stage layout (gpu/vk/pipeline.c), each with all its descriptors: a frame chains more
        pools when it needs them */
     VkDescriptorPoolSize sz[VK_POOL_TYPES];
@@ -365,7 +367,7 @@ static u32 desc_alloc_n(Frame* f, VkDescriptorSetLayout layout, VkDescriptorSet*
                 LOG_LIMIT(1, "vulkan: a frame used all its descriptor pools (draws skipped)\n");
                 return 0;
             }
-            VkDescriptorPool p = desc_pool_new();
+            VkDescriptorPool p = vk_desc_pool_new();
             if (!p) return 0;
             f->pool_d[f->npool++] = p;
         }

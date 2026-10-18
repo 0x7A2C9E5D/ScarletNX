@@ -335,11 +335,15 @@ typedef struct {
     VkPipelineLayout layout;
     u32 first, n, ndyn;
 } SetsArgs;
+static VkDescriptorSet rec_set_real(VkDescriptorSet s);
 static void sets_run(const void* p) {
     const SetsArgs* x = p;
     const VkDescriptorSet* sets = (const void*)((const u8*)p + REC_AL(sizeof *x));
     const u32* dyn = (const void*)((const u8*)sets + REC_AL(x->n * sizeof *sets));
-    vkCmdBindDescriptorSets(x->cb, x->bp, x->layout, x->first, x->n, sets, x->ndyn, x->ndyn ? dyn : NULL);
+    VkDescriptorSet real[8];
+    for (u32 i = 0; i < x->n && i < 8; i++)
+        if (!(real[i] = rec_set_real(sets[i]))) return; /* a set the pools had no room for: not bound */
+    vkCmdBindDescriptorSets(x->cb, x->bp, x->layout, x->first, x->n, real, x->ndyn, x->ndyn ? dyn : NULL);
 }
 void rec_CmdBindDescriptorSets(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipelineLayout layout, u32 first, u32 n,
                                const VkDescriptorSet* sets, u32 ndyn, const u32* dyn) {
@@ -668,10 +672,82 @@ void rec_CmdBeginRendering(VkCommandBuffer cb, const VkRenderingInfo* ri) {
     rec_commit();
 }
 
-/* ------------------------------------------------------------ descriptor set updates */
-/* A draw's new descriptor set is written on the recording thread too, before the commands that bind it: the set is
-   the recording thread's from then on (vkUpdateDescriptorSets needs only the set itself held, not its pool). Each
-   write's descriptors follow the writes, of the kind its type takes */
+/* ------------------------------------------------------------ descriptor sets */
+/* A draw's new descriptor set is allocated and written on the recording thread too, ahead of the commands that bind
+   it: the GPU thread gets a stand-in handle at once (an odd number, which a driver's handle, a pointer or an offset
+   aligned to more, never is), and the recording thread keeps which set it stands for until the commands binding it
+   are recorded. The sets come from the recording thread's own pools for each frame slot, reset in order with the
+   commands when the slot is reused (vk_rec_frame_reset). Stand-ins count up and are reused after REC_SETS, more sets
+   than two frames ever make before vk_frame_check ends one */
+#define REC_SETS        (1u << 17)
+#define REC_SPARE_SETS  32
+#define REC_SPARE_KINDS 16
+static VkDescriptorSet g_rset[REC_SETS];
+static u32 g_rset_next;
+typedef struct {
+    VkDescriptorPool pool[64];
+    int npool, ipool;
+    struct {
+        VkDescriptorSetLayout layout;
+        VkDescriptorSet set[REC_SPARE_SETS];
+        u32 n;
+    } spare[REC_SPARE_KINDS];
+} RecPools;
+static RecPools g_rpools[VK_FRAMES];
+static u32 g_frame_sets[VK_FRAMES]; /* stand-ins handed out in each slot since its reset (the GPU thread's count) */
+
+static int rec_set_standin(VkDescriptorSet s) { return ((u64)(uintptr_t)s & 1) != 0; }
+static VkDescriptorSet rec_set_real(VkDescriptorSet s) {
+    return rec_set_standin(s) ? g_rset[((u64)(uintptr_t)s >> 1) & (REC_SETS - 1)] : s;
+}
+/* count sets of layout from slot f's pools into sets: count, or 1 when a fresh pool can't hold that many, 0 when none */
+static u32 rec_alloc_n(RecPools* f, VkDescriptorSetLayout layout, VkDescriptorSet* sets, u32 count) {
+    VkDescriptorSetLayout layouts[REC_SPARE_SETS];
+    for (u32 i = 0; i < count; i++) layouts[i] = layout;
+    for (int tries = 0; tries < 3; tries++) {
+        if (tries) f->ipool++;
+        if (tries == 2) count = 1;
+        if (f->ipool == f->npool) {
+            if (f->npool == (int)(sizeof f->pool / sizeof f->pool[0])) return 0;
+            if (!(f->pool[f->npool] = vk_desc_pool_new())) return 0;
+            f->npool++;
+        }
+        VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                                          .descriptorPool = f->pool[f->ipool],
+                                          .descriptorSetCount = count,
+                                          .pSetLayouts = layouts};
+        VkResult r = vkAllocateDescriptorSets(g_vk.dev, &ai, sets);
+        if (r == VK_SUCCESS) return count;
+        if (r != VK_ERROR_OUT_OF_POOL_MEMORY && r != VK_ERROR_FRAGMENTED_POOL) {
+            VK_OK(r);
+            return 0;
+        }
+    }
+    return 0;
+}
+static VkDescriptorSet rec_alloc(RecPools* f, VkDescriptorSetLayout layout) {
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    int i = 0;
+    while (i < REC_SPARE_KINDS && f->spare[i].layout && f->spare[i].layout != layout) i++;
+    if (i == REC_SPARE_KINDS) return rec_alloc_n(f, layout, &set, 1) ? set : VK_NULL_HANDLE;
+    f->spare[i].layout = layout;
+    if (!f->spare[i].n) f->spare[i].n = rec_alloc_n(f, layout, f->spare[i].set, REC_SPARE_SETS);
+    return f->spare[i].n ? f->spare[i].set[--f->spare[i].n] : VK_NULL_HANDLE;
+}
+static void frame_reset_run(const void* p) {
+    RecPools* f = &g_rpools[*(const u32*)p];
+    for (int i = 0; i < f->npool; i++) vkResetDescriptorPool(g_vk.dev, f->pool[i], 0);
+    f->ipool = 0;
+    memset(f->spare, 0, sizeof f->spare);
+}
+void vk_rec_frame_reset(u32 slot) {
+    g_frame_sets[slot] = 0;
+    if (g_rec <= 0) return;
+    *(u32*)rec_push(frame_reset_run, sizeof slot) = slot;
+    rec_commit();
+}
+u32 vk_rec_frame_sets(u32 slot) { return g_frame_sets[slot]; }
+
 static u64 write_info_size(const VkWriteDescriptorSet* w) {
     switch (w->descriptorType) {
         case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
@@ -695,42 +771,59 @@ static const void* write_info(const VkWriteDescriptorSet* w) {
     }
 }
 typedef struct {
-    u32 n;
-} UpdateArgs;
-static void update_run(const void* p) {
-    const UpdateArgs* x = p;
+    u32 n, slot, id;
+    VkDescriptorSetLayout layout;
+} NewSetArgs;
+static void new_set_run(const void* p) {
+    const NewSetArgs* x = p;
     /* the packet is the recording thread's now: the copied writes are pointed at their copied descriptors in place */
     VkWriteDescriptorSet* w = (VkWriteDescriptorSet*)((u8*)p + REC_AL(sizeof *x));
     u8* info = (u8*)w + REC_AL(x->n * sizeof *w);
+    VkDescriptorSet set = rec_alloc(&g_rpools[x->slot], x->layout);
+    g_rset[x->id] = set;
+    if (!set) {
+        LOG_LIMIT(1, "vulkan: a frame used all its descriptor pools (draws are drawn without their resources)\n");
+        return;
+    }
     for (u32 i = 0; i < x->n; i++) {
+        w[i].dstSet = set;
         w[i].pBufferInfo = (const void*)info;
         w[i].pImageInfo = (const void*)info;
         w[i].pTexelBufferView = (const void*)info;
         info += REC_AL(write_info_size(&w[i]));
     }
-    vkUpdateDescriptorSets(g_vk.dev, x->n, w, 0, NULL);
+    if (x->n) vkUpdateDescriptorSets(g_vk.dev, x->n, w, 0, NULL);
 }
-void vk_rec_update_sets(u32 n, const VkWriteDescriptorSet* w) {
-    u64 size = REC_AL(sizeof(UpdateArgs)) + REC_AL(n * sizeof *w);
+VkDescriptorSet vk_rec_new_set(VkDescriptorSetLayout layout, u32 n, const VkWriteDescriptorSet* w) {
+    u64 size = REC_AL(sizeof(NewSetArgs)) + REC_AL(n * sizeof *w);
     int chained = 0;
+    u32 slot = vk_frame_slot();
     for (u32 i = 0; i < n; i++) {
         size += REC_AL(write_info_size(&w[i]));
         chained |= w[i].pNext != NULL;
     }
-    if (g_rec <= 0 || chained) {
+    if (g_rec <= 0 || chained) { /* allocated and written here, from the frame's own pools */
+        VkDescriptorSet set = vk_desc_alloc(layout);
+        VkWriteDescriptorSet c[SNX_VKB_END];
+        if (!set || n > SNX_VKB_END) return VK_NULL_HANDLE;
+        memcpy(c, w, n * sizeof *w);
+        for (u32 i = 0; i < n; i++) c[i].dstSet = set;
         vk_rec_sync();
-        vkUpdateDescriptorSets(g_vk.dev, n, w, 0, NULL);
-        return;
+        if (n) vkUpdateDescriptorSets(g_vk.dev, n, c, 0, NULL);
+        return set;
     }
-    UpdateArgs* x = rec_push(update_run, size);
+    NewSetArgs* x = rec_push(new_set_run, size);
     VkWriteDescriptorSet* c = (VkWriteDescriptorSet*)((u8*)x + REC_AL(sizeof *x));
     u8* info = (u8*)c + REC_AL(n * sizeof *c);
-    x->n = n;
+    u32 id = g_rset_next++ & (REC_SETS - 1);
+    *x = (NewSetArgs){n, slot, id, layout};
     memcpy(c, w, n * sizeof *w);
     for (u32 i = 0; i < n; i++) {
         u64 s = write_info_size(&w[i]);
         memcpy(info, write_info(&w[i]), s);
         info += REC_AL(s);
     }
+    g_frame_sets[slot]++;
     rec_commit();
+    return (VkDescriptorSet)(uintptr_t)(((u64)id << 1) | 1);
 }

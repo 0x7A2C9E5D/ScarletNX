@@ -1214,10 +1214,8 @@ static VkDescriptorSet desc_set_cached(VkDescriptorSetLayout layout, DescWrites*
         g_vk_dset_reused++;
         return e->set;
     }
-    VkDescriptorSet set = vk_desc_alloc(layout);
+    VkDescriptorSet set = vk_rec_new_set(layout, d->n, d->w); /* made on the recording thread, before it is bound */
     if (!set) return VK_NULL_HANDLE;
-    for (u32 i = 0; i < d->n; i++) d->w[i].dstSet = set;
-    if (d->n) vk_rec_update_sets(d->n, d->w); /* written on the recording thread, before the commands binding it */
     g_vk_dset_new++;
     *e = (typeof(cache[0])){h1, h2, frame, set};
     return set;

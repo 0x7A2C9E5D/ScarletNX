@@ -139,6 +139,8 @@ void vk_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, VkPi
                 VkAccessFlags2 dst_access, VkImageLayout to);
 /* a descriptor set from the current frame's pools, freed when the frame is reused */
 VkDescriptorSet vk_desc_alloc(VkDescriptorSetLayout layout);
+VkDescriptorPool vk_desc_pool_new(void); /* a pool for 1024 sets of the stage layouts */
+u32 vk_frame_slot(void);                 /* the frame slot being recorded */
 /* a descriptor pool's sizes (VK_POOL_TYPES entries) for `sets` sets of the stage layouts (gpu/vk/pipeline.c) */
 #define VK_POOL_TYPES 5 /* descriptor types in a set: uniform, storage buffers, textures, images, texel buffers */
 void vk_pool_sizes(VkDescriptorPoolSize* sz, u32 sets);
@@ -160,8 +162,11 @@ void vk_rec_submit(VkCommandBuffer cb, const VkSemaphoreSubmitInfo* w, u32 nw, c
                    u32 ns);
 void vk_rec_sync(void);        /* until everything queued is recorded and submitted */
 void vk_rec_queue(VkQueue q);  /* before submitting to or presenting on q outside the ring (vk_lock) */
-/* vkUpdateDescriptorSets of new sets that only commands recorded after this bind (vk_lock) */
-void vk_rec_update_sets(u32 n, const VkWriteDescriptorSet* w);
+/* a new descriptor set of layout with those writes, for commands of the frame's command buffer only: allocated and
+   written on the recording thread, a stand-in handle until then (vk_lock) */
+VkDescriptorSet vk_rec_new_set(VkDescriptorSetLayout layout, u32 n, const VkWriteDescriptorSet* w);
+void vk_rec_frame_reset(u32 slot); /* the slot's new sets are done with: its pools are reset in order */
+u32 vk_rec_frame_sets(u32 slot);   /* new sets made in the slot since its reset */
 void rec_CmdBindPipeline(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipeline pipe);
 void rec_CmdBindIndexBuffer(VkCommandBuffer cb, VkBuffer buf, VkDeviceSize off, VkIndexType type);
 void rec_CmdDraw(VkCommandBuffer cb, u32 count, u32 instances, u32 first, u32 first_instance);
