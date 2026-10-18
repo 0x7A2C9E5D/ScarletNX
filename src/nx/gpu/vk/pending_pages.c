@@ -5,6 +5,7 @@
 #include "nx/hle/services/nvdrv.h"
 #include "nx/runtime/platform/log.h"
 
+PendPages g_pend_any;
 #define LEAF_PAGES 4096u
 struct PendLeaf {
     u32 count[LEAF_PAGES];      /* the results covering each page */
@@ -15,6 +16,7 @@ struct PendLeaf {
 /* the guest pages [first, last] gain or lose a result */
 static int add_pages(void* table, u64 first, u64 last, int delta) {
     PendPages* t = table;
+    if (t->also) add_pages(t->also, first, last, delta);
     for (u64 p = first; p <= last; p++) {
         u64 li = p / LEAF_PAGES;
         PendLeaf* l;
@@ -92,7 +94,7 @@ void pend_add_va(PendPages* t, u64 gva, u64 size, int delta) {
 }
 int pend_hit_va(const PendPages* t, u64 gva, u64 size) {
     if (!t->total) return 0;
-    if (t->far) return 1;
+    if (t->overflow) return 1;
     return size && hit_pages((void*)t, gva >> 12, (gva + size - 1 < gva ? ~0ull : gva + size - 1) >> 12, 0);
 }
 int pend_empty(const PendPages* t) { return !t->total; }

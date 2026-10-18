@@ -73,7 +73,7 @@ static GfxOut *g_prep, *g_prep_tail, *g_out, *g_out_tail;
    them: each adds its own translated pages when it is committed and removes them when it lands. A range that meets a
    result only at the same GPU address through an unmapped page skips it too: nothing is read or written there. A GMMU
    change (WB_MAP) still checks every result, so one over a page about to be mapped lands first */
-static PendPages g_out_pages;
+static PendPages g_out_pages = {.also = &g_pend_any};
 static void out_pages(const GfxOut* o, int delta) {
     for (u32 i = 0; i < o->npages && o->pages[i] != ~0ull; i++) pend_add_page(&g_out_pages, o->pages[i], delta);
 }

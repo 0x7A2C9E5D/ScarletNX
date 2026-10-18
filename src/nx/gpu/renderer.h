@@ -34,6 +34,8 @@ typedef struct Renderer {
     void (*dispatch)(GpuChannel* ch, const u32* q, u64 code); /* a compute launch (q: its QMD) */
     /* gmem_read and gmem_ptr land pending compute or graphics storage writes before reading memory */
     void (*cs_mem_need)(u64 a, u64 n);
+    /* 0 when no pending result or queued release covers [a, a + n): a read needs none of the mem_need hooks */
+    int (*mem_pending)(u64 a, u64 n);
     void (*gfx_mem_need)(u64 a, u64 n);
     void (*before_syncwait)(void); /* the stream is about to wait on a syncpoint: flush everything in flight */
     void (*stream_incr)(u32 id);   /* a syncpoint increment in the stream, after everything before it is done */

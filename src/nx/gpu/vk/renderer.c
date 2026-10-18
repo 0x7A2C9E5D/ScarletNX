@@ -19,6 +19,7 @@
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 #include "nx/gpu/vk/vk.h"
+#include "nx/gpu/vk/pending_pages.h"
 #include "nx/gpu/renderer.h"
 
 static VkSemaphore g_acquired[VK_FRAMES];
@@ -36,6 +37,16 @@ static void vkr_before_write(u64 gva, u64 size) {
         vk_gfx_image_land();
     vk_compute_before_write(gva, size);
     vk_rt_before_write(gva, size);
+}
+/* pending compute and graphics results and queued releases all count their pages in g_pend_any (pending_pages.h);
+   storage images don't, so any of them pending answers yes */
+static int vkr_mem_pending(u64 gva, u64 size) {
+    int hit;
+    if (g_gfx_img_any) return 1;
+    vk_lock();
+    hit = pend_hit(&g_pend_any, gva, size);
+    vk_unlock();
+    return hit;
 }
 static void vkr_gfx_mem_need(u64 gva, u64 size) {
     vk_buf_mem_need(gva, size);
@@ -550,6 +561,7 @@ const Renderer vk_renderer = {
     .rt_reload = vkr_rt_reload,
     .dispatch = vkr_dispatch,
     .cs_mem_need = vk_compute_mem_need,
+    .mem_pending = vkr_mem_pending,
     .gfx_mem_need = vkr_gfx_mem_need,
     .before_syncwait = vkr_before_syncwait,
     .stream_incr = vkr_stream_incr,
