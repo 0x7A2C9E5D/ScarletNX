@@ -245,7 +245,7 @@ jobs:
       - name: Install the build tools and the debloated Mesa
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl clang llvm libgccjit sdl3 libx11 mesa vulkan-icd-loader ccache glslang s&& break
+            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl clang llvm libgccjit sdl3 libx11 mesa vulkan-icd-loader ccache glslang && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
@@ -346,6 +346,7 @@ jobs:
             patch
             perl
             patchutils
+            glslang
             mingw-w64-clang-x86_64-clang
             mingw-w64-clang-x86_64-llvm
             mingw-w64-clang-x86_64-lld
@@ -355,7 +356,6 @@ jobs:
             mingw-w64-clang-x86_64-pkgconf
             mingw-w64-clang-x86_64-python
             mingw-w64-clang-x86_64-spirv-tools
-            mingw-w64-clang-x86_64-glslang
             mingw-w64-clang-x86_64-ccache
             mingw-w64-ucrt-x86_64-libgccjit
             mingw-w64-ucrt-x86_64-binutils
