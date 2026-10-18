@@ -5,6 +5,7 @@
    against a Vulkan library.
 
    device.c    instance, device, queues, swapchain, memory allocator (VMA)
+   memory.c    the cap on one allocation, and images bigger than it bound in pieces (sparse binding)
    cmd.c       frames in flight: the command buffer being recorded, staging and readback rings, deferred destruction
    format.c    guest render target and texture formats -> Vulkan formats
    surface.c   render targets by guest address (a table textures share), loads from and write-backs to guest memory
@@ -64,6 +65,8 @@ typedef struct {
     u32 border_color_max; /* maxCustomBorderColorSamplers: past it, samplers take the nearest built-in color */
     int has_mirror_clamp; /* samplerMirrorClampToEdge: VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE */
     int has_shader_draw_parameters;
+    u64 alloc_cap; /* the most one device memory allocation may be (memory.c) */
+    int sparse;    /* sparseBinding on the graphics queue: images bigger than alloc_cap are bound in pieces */
 } VkState;
 extern VkState g_vk;
 
@@ -83,11 +86,19 @@ void vk_lock(void);
 void vk_unlock(void);
 int vk_trylock(void); /* vk_lock unless another thread holds it: 1 when taken */
 
+/* memory.c. vk_mem_init once the device exists, before the allocator (VMA's blocks are kept within the cap):
+   sparse_queue is whether the graphics queue's family can bind sparse memory */
+void vk_mem_init(int sparse_queue);
+/* an image with its memory: one VMA allocation in mem, or, past g_vk.alloc_cap, pieces (mem stays VK_NULL_HANDLE).
+   0 on failure. Destroyed with vk_image_destroy (vk_defer_image does that), never vmaDestroyImage */
+int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem);
+void vk_image_destroy(VkImage img, VmaAllocation mem);
+
 /* cmd.c */
 void vk_cmd_init(void);
 VkCommandBuffer vk_cmd(void); /* the current frame's command buffer, begun on first use */
 /* size bytes of the current frame's staging memory (host visible, flushed when the frame is submitted), valid until
-   that frame's work is done */
+   that frame's work is done. NULL past g_vk.alloc_cap: a big upload stages in parts */
 u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off);
 /* As vk_stage, with the allocation for GPU-written data that must be invalidated after its frame fence. */
 u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem);
@@ -278,9 +289,13 @@ void vk_surf_evict(u32 before); /* textures and render targets last used before 
 int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
               double sdy);
 
-/* astc.c: decode tightly packed ASTC blocks and copy to a level/layer of t.
-   Caller ends rendering and transitions t to TRANSFER_DST_OPTIMAL first. */
-void vk_astc_upload(VkCommandBuffer cb, Surf* t, const u8* blocks, u32 w, u32 h, u32 depth, u32 level, u32 layer);
+/* astc.c: decode a level of one layer of t, w x h x depth texels, into it. The blocks come from rows(ctx, z, y, n,
+   out): block rows y to y + n of slice z, tightly packed, 16 bytes a block, written to out (staging memory). They are
+   asked for a strip at a time, so a level is never all in memory at once. 0 when staging ran out (the level is left
+   out, and the caller tries again later). The caller ends rendering and moves t to TRANSFER_DST_OPTIMAL first */
+typedef void (*VkAstcRows)(void* ctx, u32 z, u32 y, u32 n, u8* out);
+int vk_astc_upload(VkCommandBuffer cb, Surf* t, u32 w, u32 h, u32 depth, u32 level, u32 layer, VkAstcRows rows,
+                   void* ctx);
 
 /* vic.c: the VIC composition as a compute shader, synchronously: 1 when it composed the picture into the job's
    output planes, 0 when the job is too large for the GPU and the caller composes in guest memory. Called without

@@ -621,7 +621,7 @@ static void compute_endpoints(int e0[4], int e1[4], const u32** vals, u32 cem) {
     }
 }
 
-/* a UNORM16 value to 8 bits, rounded to nearest (astc.comp's Unorm16To8) */
+/* a UNORM16 value to 8 bits, rounded to nearest (astc_decode.glsl's Unorm16To8, which has no division) */
 static u32 unorm16_to_8(u32 c) { return (c * 255 + 32767) / 65535; }
 
 static u32 pack(u32 a, u32 r, u32 g, u32 b) { return r | g << 8 | b << 16 | a << 24; }

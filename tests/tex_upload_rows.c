@@ -4,7 +4,9 @@
    the block-linear layout byte by byte (bl_offset below): a level whose rows are whole 16-byte pieces, one whose rows
    end inside a piece, a 3D level with blocks of slices, mip levels, a level read through gmem_read, a pitch-linear
    level, and a converted format, which still goes through its packed rows. A format the GPU takes as it
-   is goes into the staging buffer without a buffer of the level's size of its own */
+   is goes into the staging buffer without a buffer of the level's size of its own. Levels past the allocation cap go
+   in bands of rows of a slice, each region checked where it lands, and an ASTC level's block rows reach
+   vk_astc_upload strip by strip as the layout has them */
 #include <stdlib.h>
 #include <string.h>
 static size_t g_watch, g_big; /* allocations of g_watch bytes or more, while watched */
@@ -52,12 +54,12 @@ u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off) {
     *off = at;
     return stage + at;
 }
-static VkBufferImageCopy regs[64];
+static VkBufferImageCopy regs[1024];
 static u32 nregs;
 static void VKAPI_CALL copy_to_image(VkCommandBuffer cb, VkBuffer b, VkImage img, VkImageLayout l, uint32_t n,
                                      const VkBufferImageCopy* r) {
     (void)cb, (void)b, (void)img, (void)l;
-    for (u32 i = 0; i < n && nregs < 64; i++) regs[nregs++] = r[i];
+    for (u32 i = 0; i < n && nregs < 1024; i++) regs[nregs++] = r[i];
 }
 PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage = copy_to_image;
 PFN_vkCmdBlitImage vkCmdBlitImage;
@@ -86,8 +88,15 @@ void vk_surf_use(VkCommandBuffer cb, Surf* s, VkImageLayout layout, VkPipelineSt
 VkImageAspectFlags vk_aspect(const VkFmt* f) {
     return f->depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 }
-void vk_astc_upload(VkCommandBuffer cb, Surf* t, const u8* blocks, u32 w, u32 h, u32 depth, u32 level, u32 layer) {
-    (void)cb, (void)t, (void)blocks, (void)w, (void)h, (void)depth, (void)level, (void)layer;
+/* the ASTC upload asks for its block rows in strips of 3: they land in astc_out, slice after slice */
+static u8 astc_out[64 << 10];
+int vk_astc_upload(VkCommandBuffer cb, Surf* t, u32 w, u32 h, u32 depth, u32 level, u32 layer, VkAstcRows rows,
+                   void* ctx) {
+    (void)cb, (void)level, (void)layer;
+    u32 nx = (w + t->f.bw - 1) / t->f.bw, ny = (h + t->f.bh - 1) / t->f.bh;
+    for (u32 z = 0; z < depth; z++)
+        for (u32 y = 0; y < ny; y += 3) rows(ctx, z, y, ny - y < 3 ? ny - y : 3, astc_out + ((u64)z * ny + y) * nx * 16);
+    return 1;
 }
 void vk_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, VkPipelineStageFlags2 src_stage,
                 VkAccessFlags2 src_access, VkImageLayout from, VkPipelineStageFlags2 dst_stage,
@@ -165,6 +174,10 @@ VkResult vmaCreateImage(VmaAllocator a, const VkImageCreateInfo* ii, const VmaAl
     (void)a, (void)ii, (void)ai, (void)img, (void)mem, (void)info;
     return VK_ERROR_OUT_OF_DEVICE_MEMORY;
 }
+int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem) {
+    (void)ii, (void)img, (void)mem;
+    return 0;
+}
 /* the block linear layout: GOBs of 64 bytes by 8 rows in blocks of 1 << bh by 1 << bd GOBs, the GOB's 16 byte groups
    in their order */
 u64 bl_offset(u32 x, u32 y, u32 z, u32 wb, u32 h, u32 bh_log2, u32 bd_log2) {
@@ -198,54 +211,63 @@ static Surf tex(u32 w, u32 h, u32 d3, u32 levels, u32 bpp, u32 bh, u32 bd, int b
     t.img = (VkImage)(uintptr_t)0x1A6;
     return t;
 }
-/* the upload, then every region against the layout walked byte by byte: level l's bytes start after the levels
-   before it, as tex_upload lays them out */
-static void upload_and_check(Surf* t, u64 limit) {
+/* the upload, then every region against the layout walked byte by byte where it lands: level l's bytes start after
+   the levels before it, as tex_upload lays them out, and its regions cover each of its rows once. bands: the regions
+   the base level takes, more than one when it goes in bands */
+static void upload_and_check(Surf* t, u64 limit, u32 bands) {
     guest_end = GVA + limit;
     stage_used = 0;
     nregs = 0;
     g_watch = 0;
-    tex_upload(t);
+    CHECK(tex_upload(t));
     guest_end = GVA + GUEST;
-    CHECK(nregs == t->levels);
     u32 d3 = t->type == VK_IMAGE_VIEW_TYPE_3D ? t->depth3d : 1;
     u64 at = 0;
+    u32 first = 0;
     for (u32 l = 0; l < t->levels; l++) {
-        const VkBufferImageCopy* r = &regs[l];
         u32 lw = t->w >> l ? t->w >> l : 1, lh = t->h >> l ? t->h >> l : 1, ld = d3 >> l ? d3 >> l : 1;
-        u32 rowb = lw * t->f.bpp, lbh = 0, lbd = 0;
+        u32 rowb = lw * t->f.bpp, lbh = 0, lbd = 0, covered = 0, n = 0;
         u64 lsz = t->bl ? bl_level_size(t->w, t->h, d3, &t->f, t->bh, t->bd, l, &lbh, &lbd) : (u64)t->pitch * lh * ld;
-        CHECK(r->imageSubresource.mipLevel == l && r->imageExtent.width == lw && r->imageExtent.height == lh &&
-              r->imageExtent.depth == ld);
-        const u8* s = stage + r->bufferOffset;
-        for (u32 z = 0; z < ld; z++)
-            for (u32 y = 0; y < lh; y++)
-                for (u32 x = 0; x < rowb; x++) {
-                    u64 o = t->bl ? bl_offset(x, y, z, rowb, lh, lbh, lbd) : (u64)(z * lh + y) * t->pitch + x;
-                    u8 want = at + o < limit ? guest[at + o] : 0;
-                    CHECK(s[((u64)z * lh + y) * rowb + x] == want);
-                }
+        for (; first + n < nregs && regs[first + n].imageSubresource.mipLevel == l; n++) {
+            const VkBufferImageCopy* r = &regs[first + n];
+            u32 y0 = (u32)r->imageOffset.y, z0 = (u32)r->imageOffset.z, rows = r->imageExtent.height;
+            CHECK(r->imageOffset.x == 0 && r->imageExtent.width == lw && y0 + rows <= lh &&
+                  z0 + r->imageExtent.depth <= ld);
+            covered += rows * r->imageExtent.depth;
+            const u8* s = stage + r->bufferOffset;
+            for (u32 z = z0; z < z0 + r->imageExtent.depth; z++)
+                for (u32 y = y0; y < y0 + rows; y++)
+                    for (u32 x = 0; x < rowb; x++) {
+                        u64 o = t->bl ? bl_offset(x, y, z, rowb, lh, lbh, lbd) : (u64)(z * lh + y) * t->pitch + x;
+                        u8 want = at + o < limit ? guest[at + o] : 0;
+                        CHECK(s[((u64)(z - z0) * rows + (y - y0)) * rowb + x] == want);
+                    }
+        }
+        CHECK(covered == lh * ld && (l || n == bands));
+        first += n;
         at += lsz;
     }
+    CHECK(first == nregs);
 }
 
 int main(void) {
     fill();
+    g_vk.alloc_cap = 256ull << 20;
     /* the video's picture: 1920 wide in 4 byte pixels, rows of whole pieces, 16 GOBs a block */
     Surf a = tex(1920, 136, 1, 1, 4, 4, 0, 1);
-    upload_and_check(&a, GUEST);
+    upload_and_check(&a, GUEST, 1);
     /* rows that end inside a piece (27 pixels of 4 bytes, 108 bytes), and its mip levels with their shrunk blocks */
     Surf b = tex(27, 50, 1, 3, 4, 3, 0, 1);
-    upload_and_check(&b, GUEST);
+    upload_and_check(&b, GUEST, 1);
     /* a 3D level with blocks of two slices, 2 byte texels: rows of 70 bytes */
     Surf c = tex(35, 20, 4, 1, 2, 1, 1, 1);
-    upload_and_check(&c, GUEST);
+    upload_and_check(&c, GUEST, 1);
     /* a level gmem_ptr can't hand out in one piece: read through gmem_read, which gives zeros past the mapping */
     Surf d = tex(64, 64, 1, 1, 4, 2, 0, 1);
-    upload_and_check(&d, 3 * 4096 + 100);
+    upload_and_check(&d, 3 * 4096 + 100, 1);
     /* pitch linear */
     Surf e = tex(33, 9, 1, 1, 4, 0, 0, 0);
-    upload_and_check(&e, GUEST);
+    upload_and_check(&e, GUEST, 1);
     /* no level-sized buffer of its own for a format the GPU takes as it is */
     stage_used = nregs = 0;
     g_big = 0;
@@ -266,6 +288,43 @@ int main(void) {
             memcpy(&got, stage + regs[0].bufferOffset + (y * 16 + x) * 4, 4);
             CHECK(got == want);
         }
+    /* past a 16 KiB allocation cap, bands of rows of one slice: the picture (7680 byte rows) in 68 bands of 2 rows,
+       the pitch-linear level in bands of 13 rows (its second level fits whole), and under a 4 KiB cap the 3D level
+       (5600 bytes) slice by slice */
+    g_vk.alloc_cap = 16 << 10;
+    upload_and_check(&a, GUEST, 68);
+    Surf g = tex(300, 40, 1, 2, 4, 0, 0, 0);
+    upload_and_check(&g, GUEST, 4);
+    g_vk.alloc_cap = 4 << 10;
+    upload_and_check(&c, GUEST, 4);
+    g_vk.alloc_cap = 16 << 10;
+    /* a converted format is converted band by band: 64 rows of 256 converted bytes a band */
+    stage_used = nregs = 0;
+    Surf h = tex(64, 300, 1, 1, 2, 2, 0, 1);
+    h.f.conv = VKC_RGBA4;
+    CHECK(tex_upload(&h) && nregs == 5);
+    for (u32 i = 0; i < nregs; i++)
+        for (u32 y = 0; y < regs[i].imageExtent.height; y++)
+            for (u32 x = 0; x < 64; x++) {
+                u32 gy = (u32)regs[i].imageOffset.y + y;
+                u32 v = guest[bl_offset(x * 2, gy, 0, 128, 300, 2, 0)] | guest[bl_offset(x * 2 + 1, gy, 0, 128, 300, 2, 0)]
+                                                                            << 8;
+                u32 want = (v & 15) * 17 | ((v >> 4) & 15) * 17 << 8 | ((v >> 8) & 15) * 17 << 16 | (v >> 12) * 17 << 24;
+                u32 got;
+                memcpy(&got, stage + regs[i].bufferOffset + (y * 64 + x) * 4, 4);
+                CHECK(got == want);
+            }
+    g_vk.alloc_cap = 256ull << 20;
+    /* an ASTC level (4x4 blocks of 16 bytes) of 3 slices: its block rows as vk_astc_upload receives them */
+    Surf k = tex(60, 37, 3, 1, 16, 1, 1, 1);
+    k.f.bw = k.f.bh = 4;
+    k.f.conv = VKC_ASTC;
+    stage_used = nregs = 0;
+    CHECK(tex_upload(&k) && nregs == 0);
+    for (u32 z = 0; z < 3; z++)
+        for (u32 y = 0; y < 10; y++)
+            for (u32 x = 0; x < 15 * 16; x++)
+                CHECK(astc_out[((z * 10 + y) * 15) * 16 + x] == guest[bl_offset(x, y, z, 15 * 16, 10, 1, 1)]);
     printf("tex_upload_rows: %u checks passed\n", checks);
     return 0;
 }

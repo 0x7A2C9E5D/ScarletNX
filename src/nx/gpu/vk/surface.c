@@ -114,8 +114,8 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     VkViewFormats vf; /* sRGB and linear views */
     vk_view_formats(&ii, &vf);
-    VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
-    if (!VK_OK(vmaCreateImage(g_vk.vma, &ii, &aci, &s->img, &s->mem, NULL))) {
+    /* a scaled target can pass the allocation cap (4x of 4K is 506 MiB in RGBA8) */
+    if (!vk_image_create(&ii, &s->img, &s->mem)) {
         free(s);
         return NULL;
     }
@@ -177,9 +177,8 @@ VkImage vk_unscaled_image(const Surf* s, u32 layers, VmaAllocation* mem) {
                             .tiling = VK_IMAGE_TILING_OPTIMAL,
                             .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                             .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
-    VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
     VkImage img = VK_NULL_HANDLE;
-    if (!VK_OK(vmaCreateImage(g_vk.vma, &ii, &aci, &img, mem, NULL))) return VK_NULL_HANDLE;
+    if (!vk_image_create(&ii, &img, mem)) return VK_NULL_HANDLE;
     return img;
 }
 static int blit_ok(VkFormat f, VkFormatFeatureFlags need) {

@@ -54,7 +54,7 @@ jobs:
       - name: Install tools
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang llvm libgccjit pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache gdb jq && break
+            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang llvm libgccjit pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache gdb jq glslang && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
@@ -245,7 +245,7 @@ jobs:
       - name: Install the build tools and the debloated Mesa
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl clang llvm libgccjit sdl3 libx11 mesa vulkan-icd-loader ccache && break
+            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl clang llvm libgccjit sdl3 libx11 mesa vulkan-icd-loader ccache glslang && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
@@ -346,6 +346,7 @@ jobs:
             patch
             perl
             patchutils
+            mingw-w64-clang-x86_64-glslang
             mingw-w64-clang-x86_64-clang
             mingw-w64-clang-x86_64-llvm
             mingw-w64-clang-x86_64-lld
@@ -514,7 +515,7 @@ jobs:
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
-          sudo apt-get update && sudo apt-get install -y nasm ccache
+          sudo apt-get update && sudo apt-get install -y nasm ccache spirv-tools
       - name: Build LLVM's libraries
         if: steps.llvm.outputs.cache-hit != 'true'
         run: scripts/android-llvm.sh ${{ matrix.abi }} "$PWD/android-llvm/${{ matrix.abi }}"
@@ -947,7 +948,7 @@ jobs:
       - name: Install the runtime's libraries and lavapipe
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed python llvm-libs libgccjit sdl3 vulkan-icd-loader vulkan-swrast && break
+            pacman -Syu --noconfirm --needed python llvm-libs libgccjit sdl3 vulkan-icd-loader vulkan-swrast spirv-tools && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
