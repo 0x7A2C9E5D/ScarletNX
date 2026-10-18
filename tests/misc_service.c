@@ -7,12 +7,15 @@
 #include <stdarg.h>
 
 #include "nx/hle/services/acc.c"
+#include "nx/hle/services/users.c"
 #include "nx/hle/services/hid.c"
 #include "nx/hle/services/misc.c"
 
 u8* g_mem;
 u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
 int g_verbose;
+int g_opt_user = 1;
+char g_exedir[1024];
 int g_opt_docked, g_opt_lang = 1;
 u64 g_title_id = 0x0100BF00112C0000ull;
 PMutex g_klock;
@@ -887,10 +890,12 @@ static void test_nfp(void) {
 }
 
 /* acc's TrySelectUserWithoutInteraction: 51, and 52, which a game built for 19.0.0 sends instead, both pick the one
-   user {is_network_service_account_required} */
+   user, as users.c has it without users.ini {is_network_service_account_required} */
 static void test_acc_select(void) {
     SvcObj* acc = new_acc();
     Request r;
+    char why[256];
+    CHECK(snx_users_load("no-users-here", 1, why, sizeof why) == 0 && g_user_count == 1);
     for (u32 cmd = 51; cmd <= 52; cmd++) {
         request(&r, cmd);
         call(acc, &r);

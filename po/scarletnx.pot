@@ -518,6 +518,24 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
+msgid "No user shown: %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s's picture could not be drawn: Wimsy shows"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Who plays the games"
+msgstr ""
+
+#: src/gui/main.c
+msgid "No user picked: the Settings have no user"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
 msgid "THEME EDITOR  /  %s"
 msgstr ""
 
@@ -1364,6 +1382,10 @@ msgstr ""
 msgid "Cannot initialize GUI resources"
 msgstr ""
 
+#: src/gui/main.c
+msgid "No user shown: out of memory"
+msgstr ""
+
 #: src/gui/model.c
 msgid "GUI + children: resource usage unavailable"
 msgstr ""
@@ -1551,6 +1573,10 @@ msgstr ""
 
 #: src/gui/theme.c
 msgid "a shadow under the title's letters, in the dim colour"
+msgstr ""
+
+#: src/gui/theme.c
+msgid "the user at the head's right, their nickname and picture in a box: none, square or round"
 msgstr ""
 
 #: src/gui/theme.c

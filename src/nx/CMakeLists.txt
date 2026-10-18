@@ -39,7 +39,7 @@ snx_component(kernel hle/kernel/kernel.c hle/kernel/thread.c hle/kernel/sync.c h
 # the SVC dispatch, generated from hle/svc/hos.svc
 include("${PROJECT_SOURCE_DIR}/cmake/svcgen.cmake")
 snx_svcgen(snx_kernel)
-snx_component(hle hle/services/services.c hle/services/audren.c hle/services/audren_dsp.c hle/services/pl.c hle/services/sm.c hle/services/am.c hle/services/set.c hle/services/time.c hle/services/acc.c hle/services/audio.c
+snx_component(hle hle/services/services.c hle/services/audren.c hle/services/audren_dsp.c hle/services/pl.c hle/services/sm.c hle/services/am.c hle/services/set.c hle/services/time.c hle/services/acc.c hle/services/users.c hle/services/audio.c
               hle/services/misc.c hle/services/ldr.c hle/services/network/bsd.c hle/services/network/dns.c
               hle/services/network/nifm.c hle/services/network/ssl.c hle/filesystem/fs.c hle/services/hid.c hle/services/hid_motion.c hle/services/hid_touch.c hle/services/vi.c hle/services/nvdrv.c)
 # the shared fonts' stand-ins (cmake/shared_fonts.cmake), which hle/services/pl.c hands out
@@ -146,7 +146,7 @@ endif()
 include("${PROJECT_SOURCE_DIR}/cmake/window_icon.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/build_info.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/pad_sdl.cmake")
-target_link_libraries(snx_platform PRIVATE SDL3::SDL3 snx_window_icon snx_build_info snx_pad_sdl)
+target_link_libraries(snx_platform PRIVATE SDL3::SDL3 snx_window_icon snx_build_info snx_pad_sdl snx_splash)
 # the game's menu in YoRHa's colours, from src/gui/themes/yorha/theme.ini (cmake/gui_themes.cmake)
 target_include_directories(snx_platform PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(scarletnx PRIVATE SDL3::SDL3)

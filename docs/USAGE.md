@@ -10,6 +10,7 @@
 * [Headless Vulkan / lavapipe](#headless-vulkan--lavapipe)
 * [AppImage / display](#appimage--display)
 * [Folders](#folders)
+* [Users](#users)
 * [Settings / input](#settings--input)
   * [On-screen controls](#on-screen-controls)
 
@@ -279,6 +280,7 @@ list). The user's data folder and a portable copy's keep each kind of file apart
 | the menu's `recent.txt`, `last-run.log` | - | `~/.local/state/scarletnx/` | `state/` |
 | the menu's Share log, `scarletnx.log` | - | `~/.local/state/scarletnx/` | `state/` |
 | `prod.keys`, read before `~/.switch` | the folder | `~/.local/share/scarletnx/` | the folder |
+| the console's users, `users.ini` and `<uid>.jpg` ([Users](#users)) | `users/` of the user's data folder | `~/.local/share/scarletnx/users/` | `users/` |
 
 The menu works in the user's data folder or a portable copy's, unless its Settings > App > Folders picks a data
 folder, a games folder or an extractions folder ([GUI](GUI.md)): it passes them to the driver as `--repo`, `--outdir`
@@ -292,6 +294,31 @@ copy's in a `games/` beside the program, and a build tree's `games/`, `work/` an
 none of it: as long as it is there, the menu lists each folder and where it goes now, the driver says so on each run,
 and an older game runs where it is, its run saying where its folder goes.
 [DEPRECATIONS](DEPRECATIONS.md) says how to move them.
+
+## Users
+
+The console's users are in `users/users.ini` of the data folder ([Folders](#folders)), every game's: up to 8, each a
+section in the console's order. Without the file there is one, `Player`. User 1 is always that first user, by the uid it
+has always had, so its saves stay its own; each other one needs a uid of 32 hex digits of its own (not zero) and a
+nickname of 1 to 32 bytes:
+
+```ini
+[user1]
+nickname=Ada
+[user2]
+uid=5f3c0d9e8a7b41c2963e0f1a2b3c4d5e
+nickname=Bee
+```
+
+`uid` (user 1's, if written, is `0123456789abcdeffedcba9876543210`) and `nickname` are the keys; any
+other key, a section out of order or twice, or a line that is no key stops the game and says why. A user's picture is
+`users/<uid>.jpg`, a JPEG of at most 128 KiB (256x256 as the console's), read when the game starts; without one it is
+Wimsy. The game plays as the user its `.ini`'s `user` names (`--user=N` for one run): with one user, the game picks it
+on its own; with more, the game's user selector gets that user. Each user's Account saves are `save/user.<uid>` in the
+game's `<id>_data/`; the first user's that an older version left in `save/user` are played there until you move them
+([DEPRECATIONS](DEPRECATIONS.md)). The game's menu (Home, F2) shows the user playing in a box at its head's right, their
+nickname and picture, and the launcher the one its Settings' `user` names, where a click picks another
+([GUI](GUI.md)); a users.ini that lists no users is said in the launcher's foot.
 
 ## Settings / input
 
@@ -313,6 +340,7 @@ type, range and help, tab-separated.
 | `memory_gb` | `0` | Memory the game sees. Below `6` it is the console's 3.2 GB, `6` gives 4.8 GB and `8` gives 6.8 GB. Games that run out of memory on 3.2 GB, like Tears of the Kingdom, need `6` |
 | `heap_max_mb` | `0` | The most heap the game can allocate, in MB. `0` is as much as the memory allows |
 | `network` | `0` | `0` reports offline and lets the game reach only loopback, which is not a network sandbox. `1` uses the computer's connection, and the resolver blocks known console service domains |
+| `user` | `1` | The console's user the game plays as, `1` to `8`, as [Users](#users) lists them. A number with no user stops the game |
 | `touch` | `2` | The game's touch screen: `2` fingers and the mouse's left button, `1` fingers, `0` off |
 | `controls` | `1` on Android, else `0` | The [on-screen controls](#on-screen-controls) shown |
 | `controls_snap`, `controls_scale`, `controls_opacity`, `controls_rel_center`, `controls_dpad_slide`, `controls_haptics` | `0`, `50`, `100`, `1`, `1`, `1` | As [On-screen controls](#on-screen-controls) describes them. `controls_scale` runs from `0` to `100` for 50% to 150% |

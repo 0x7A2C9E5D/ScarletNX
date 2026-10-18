@@ -857,7 +857,8 @@ int main(int argc, char** argv) {
               "Graphics\tresolution\t1\tfloat\t0.25\t4\tInternal 3D resolution\t\t\n"
               "On-screen controls\tcontrols\t0\tint\t0\t1\tThe on-screen controls\tShow controls\t0=Off|1=On\n"
               "On-screen controls/Buttons\tcontrols_a_shown\t\tint\t0\t1\tA control drawn\tA\t0=Hidden|1=Shown\n"
-              "On-screen controls/Buttons\tcontrols_b_shown\t\tint\t0\t1\tA control drawn\tB\t0=Hidden|1=Shown\n",
+              "On-screen controls/Buttons\tcontrols_b_shown\t\tint\t0\t1\tA control drawn\tB\t0=Hidden|1=Shown\n"
+              "User\tuser\t1\tint\t1\t8\tThe console's user the game plays as\t\t\n",
               stdout);
         return 0;
     }
@@ -1281,7 +1282,7 @@ int main(int argc, char** argv) {
     /* Settings: the launcher's own, then each setting the runtime lists, a row each with its help above; what the
        menu's items used to set is in them */
     key(&app, SDLK_SPACE);
-    assert(app.editing && app.editor.object && app.editor.count == GUI_SETTINGS_OWN + 3);
+    assert(app.editing && app.editor.object && app.editor.count == GUI_SETTINGS_OWN + 4); /* User the last */
     /* and the disk: what ScarletNX's folders take, counted on a thread, and what is left */
     {
         char line[256], used[32], left[32];
@@ -1323,7 +1324,7 @@ int main(int argc, char** argv) {
     /* the groups first: App, then a group per section the runtime lists, and the reset of them all; beside them the
        focused group's rows, in the tips what it holds */
     render(&app);
-    assert(app.form == GUI_FORM_SETTINGS && app.groups == 5 && gui_editor_rows(&app.editor) == 6);
+    assert(app.form == GUI_FORM_SETTINGS && app.groups == 6 && gui_editor_rows(&app.editor) == 7);
     shows(&app, "SETTINGS", normal);
     shows(&app, "The theme, the menu's", normal);
     shows(&app, "- App", yellow);
@@ -1331,6 +1332,7 @@ int main(int argc, char** argv) {
     shows(&app, "- Display", normal);
     shows(&app, "- Graphics", normal);
     shows(&app, "- On-screen controls", normal);
+    shows(&app, "- User", normal);
     shows(&app, "- Reset all to the defaults", normal);
     hides(&app, "\x1e", rgb(app.theme.soft)); /* every row shows: no arrows */
     hides(&app, "\x1f", rgb(app.theme.soft));
@@ -4325,10 +4327,95 @@ int main(int argc, char** argv) {
                    !wrap_in(&app, gui_rect(0, 0, 10 * cw, 8), 0, 0, many, 0, ink));
             app.theme.text = GUI_TEXT_WRAP;
         }
-        /* its title twice the text's size, in the row of tabs against its right; with its shadow, in the dim colour a big
-           pixel down and right */
+        /* the users of the app's users/: Ada and Bee. The head shows Settings' user, 1, in a box at its right */
+        {
+            char* users = snx_path_join(temporary, "users");
+            char* ini = snx_path_join(users, "users.ini");
+            static const char text[] =
+                "[user1]\nnickname=Ada\n[user2]\nuid=5f3c0d9e8a7b41c2963e0f1a2b3c4d5e\nnickname=Bee\n";
+            assert(!snx_mkdirs(users) && !snx_write_file(ini, text, sizeof text - 1));
+            free(app.users_dir);
+            app.users_dir = users;
+            users_read(&app);
+            free(ini);
+            render(&app);
+            menu_boxes(&app, &m);
+        }
+        /* its title twice the text's size, in the row of tabs against its right, or two columns before the user
+           there; with its shadow, in the dim colour a big pixel down and right */
         r = m.place.title;
-        assert(r.h == 2 * 16 * s && r.x + r.w == m.place.head.x + m.place.head.w && r.y < m.place.tabs.y);
+        assert(app.user == 1 && !strcmp(app.user_name, "Ada") && m.place.badge.h == r.h);
+        assert(m.place.badge.x + m.place.badge.w == m.place.head.x + m.place.head.w);
+        assert(r.h == 2 * 16 * s && r.x + r.w == m.place.badge.x - 2 * cw && r.y < m.place.tabs.y);
+        { /* the box framed in the dim colour and filled with the page's, as YoRHa's boxes; the nickname a column in, in
+             ink; Wimsy (no users/<uid>.jpg) against its right, two pixels in */
+            GuiRect b = m.place.badge;
+            int nx, ny, side = b.h - 4 * s;
+            render(&app);
+            assert(find_text(&app, "Ada", rgb(app.theme.ink), 1, &nx, &ny) && nx == b.x + cw && ny > b.y &&
+                   ny + 16 * s < b.y + b.h);
+            assert(same_colour(pixel(&app, (float)b.x, (float)(b.y + b.h / 2)), rgb(app.theme.dim)));
+            assert(same_colour(pixel(&app, (float)(b.x + b.w - 1), (float)(b.y + b.h / 2)), rgb(app.theme.dim)));
+            assert(same_colour(pixel(&app, (float)(b.x + b.w - 1 - s), (float)(b.y + b.h / 2)), rgb(app.theme.page)));
+            assert(!same_colour(pixel(&app, (float)(b.x + b.w - 2 * s - side / 2), (float)(b.y + 2 * s + side / 2)),
+                                rgb(app.theme.page)));
+            /* a click on it opens the box of users, the one shown in focus; Down and Return pick Bee, kept as
+               Settings' user in settings.ini, and the head shows them */
+            swipe_px(&app, b.x + b.w / 2, b.y + b.h / 2, b.x + b.w / 2, b.y + b.h / 2);
+            assert(app.users_shown && app.users_focus == 0);
+            render(&app);
+            assert(find_text(&app, "Bee", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "Who plays the games", rgb(app.theme.page), 1, &nx, &ny)); /* whole: none cut */
+            key(&app, SDLK_DOWN);
+            assert(app.users_shown && app.users_focus == 1);
+            key(&app, SDLK_RETURN);
+            assert(!app.users_shown && app.user == 2 && !strcmp(app.user_name, "Bee"));
+            {
+                size_t size;
+                char* kept = (char*)snx_read_file(app.settings_file, &size);
+                assert(kept && strstr(kept, "[User]\nuser=2\n"));
+                free(kept);
+            }
+            /* ESC closes it, as does a click off it, the user kept; Up and Return pick Ada again, kept as picked */
+            render(&app);
+            menu_boxes(&app, &m);
+            b = m.place.badge;
+            swipe_px(&app, b.x + b.w / 2, b.y + b.h / 2, b.x + b.w / 2, b.y + b.h / 2);
+            assert(app.users_shown && app.users_focus == 1);
+            key(&app, SDLK_ESCAPE);
+            assert(!app.users_shown && app.user == 2);
+            swipe_px(&app, b.x + b.w / 2, b.y + b.h / 2, b.x + b.w / 2, b.y + b.h / 2);
+            assert(app.users_shown);
+            swipe_px(&app, 1, 1, 1, 1);
+            assert(!app.users_shown && app.user == 2);
+            swipe_px(&app, b.x + b.w / 2, b.y + b.h / 2, b.x + b.w / 2, b.y + b.h / 2);
+            key(&app, SDLK_UP);
+            key(&app, SDLK_RETURN);
+            assert(!app.users_shown && app.user == 1 && !strcmp(app.user_name, "Ada"));
+            {
+                size_t size;
+                char* kept = (char*)snx_read_file(app.settings_file, &size);
+                assert(kept && strstr(kept, "[User]\nuser=1\n"));
+                free(kept);
+                /* back to no pick, as the runs below were written for: theirs has no --user */
+                gui_settings_reset(&app.settings, setting_row(&app, "user"));
+                gui_settings_sync(&app.settings);
+                assert(!gui_settings_save(&app.settings, app.settings_file));
+                kept = (char*)snx_read_file(app.settings_file, &size);
+                assert(!kept || !strstr(kept, "user="));
+                free(kept);
+            }
+            /* none: neither the box nor the nickname, and the title against the right again */
+            app.theme.picture = GUI_PICTURE_NONE;
+            render(&app);
+            menu_boxes(&app, &m);
+            assert(!m.place.badge.h && m.place.title.x + m.place.title.w == m.place.head.x + m.place.head.w);
+            assert(!find_text(&app, "Ada", rgb(app.theme.ink), 1, &nx, &ny));
+            app.theme.picture = GUI_PICTURE_SQUARE;
+            render(&app);
+            menu_boxes(&app, &m);
+            r = m.place.title;
+        }
         assert(m.place.tabs.y + m.place.tabs.h == r.y + r.h && r.y + r.h <= m.place.list.y);
         for (int pass = 0; pass < 2; ++pass) {
             const unsigned char* g = &gui_vga_font['S' * 16];

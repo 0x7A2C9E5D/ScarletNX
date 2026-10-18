@@ -238,6 +238,7 @@ foreach(suite tree service)
 endforeach()
 target_compile_options(snx-test-fs-service PRIVATE -Wno-unused-parameter)
 snx_swipc(snx-test-fs-service ROOT "${PROJECT_SOURCE_DIR}/src/nx" FILES hle/services/types.swipc hle/filesystem/fs.swipc)
+target_link_libraries(snx-test-fs-service PRIVATE scarletnx-common)
 add_test(NAME filesystem_raw COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> raw)
 
 if(UNIX)
@@ -429,7 +430,7 @@ if(TARGET OpenSSL::Crypto AND TARGET snx_splash)
         "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_motion.c")
     snx_test_target(snx-test-misc-service 23)
         snx_service_swipc(snx-test-misc-service hle/services/hid.swipc hle/services/misc.swipc hle/services/acc.swipc)
-    target_link_libraries(snx-test-misc-service PRIVATE OpenSSL::Crypto snx_splash)
+    target_link_libraries(snx-test-misc-service PRIVATE OpenSSL::Crypto snx_splash scarletnx-common)
     if(NOT WIN32)
         target_link_libraries(snx-test-misc-service PRIVATE m)
     endif()
@@ -455,13 +456,13 @@ snx_test_target(snx-test-am-nacp 23)
 snx_service_swipc(snx-test-am-nacp hle/services/am.swipc)
 add_test(NAME am_nacp COMMAND snx-test-am-nacp)
 
-# acc's profile through its dispatchers: the user's picture, Wimsy as a 256x256 JPEG of the size GetImageSize tells
-# (acc.c, the splash's drawing), decoded by plutovg
+# acc.c and users.c: the console's users from users/users.ini, as acc lists them, every file that lists none refused,
+# and the picture of a user with none of its own, Wimsy as a 256x256 JPEG (the splash's drawing), decoded by plutovg
 if(NOT SNX_TOOLS_ONLY AND NOT SNX_HACTOOL_ONLY)
     add_executable(snx-test-acc-service acc_service.c)
     snx_test_target(snx-test-acc-service 23)
     snx_service_swipc(snx-test-acc-service hle/services/acc.swipc)
-    target_link_libraries(snx-test-acc-service PRIVATE snx_splash)
+    target_link_libraries(snx-test-acc-service PRIVATE snx_splash scarletnx-common)
     target_include_directories(snx-test-acc-service SYSTEM PRIVATE "${plutovg_SOURCE_DIR}/include")
     target_compile_definitions(snx-test-acc-service PRIVATE PLUTOVG_BUILD_STATIC)
     set_target_properties(snx-test-acc-service PROPERTIES LINKER_LANGUAGE CXX)
@@ -513,7 +514,7 @@ add_executable(snx-test-overlay overlay.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-overlay 11)
-target_link_libraries(snx-test-overlay PRIVATE scarletnx-common m)
+target_link_libraries(snx-test-overlay PRIVATE scarletnx-common snx_splash m)
 include("${PROJECT_SOURCE_DIR}/cmake/gui_themes.cmake")
 target_include_directories(snx-test-overlay PRIVATE "${CMAKE_BINARY_DIR}/generated")
 add_test(NAME overlay COMMAND snx-test-overlay)
@@ -521,7 +522,8 @@ add_test(NAME overlay COMMAND snx-test-overlay)
 add_executable(snx-test-vpad vpad.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/vpad.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-vpad 11)
-target_link_libraries(snx-test-vpad PRIVATE scarletnx-common m)
+target_link_libraries(snx-test-vpad PRIVATE scarletnx-common snx_splash m)
+target_include_directories(snx-test-vpad PRIVATE "${CMAKE_BINARY_DIR}/generated") # ui.c's theme
 add_test(NAME vpad COMMAND snx-test-vpad)
 
 add_executable(snx-test-ini-deprecated ini_deprecated.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
@@ -541,7 +543,8 @@ include("${PROJECT_SOURCE_DIR}/cmake/pad_sdl.cmake")
 add_executable(snx-test-gamepad gamepad.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/backend/gamepad.c"
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/ui.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/ini.c")
 snx_test_target(snx-test-gamepad 11)
-target_link_libraries(snx-test-gamepad PRIVATE scarletnx-common snx_pad_sdl m)
+target_link_libraries(snx-test-gamepad PRIVATE scarletnx-common snx_pad_sdl snx_splash m)
+target_include_directories(snx-test-gamepad PRIVATE "${CMAKE_BINARY_DIR}/generated") # ui.c's theme
 add_test(NAME gamepad COMMAND snx-test-gamepad)
 
 add_executable(snx-test-fatal-screen fatal_screen.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/fatal_screen.c")

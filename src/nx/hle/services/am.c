@@ -43,9 +43,9 @@
 
 #define AM_PRESELECTED_USER_MAGIC 0xc79497cau /* LaunchParameterAccountPreselectedUser */
 
-/* the console's one user (acc.c). Fixed: a game may keep it in its saves, and the saves of existing installs
+/* the console's first user (users.c). Fixed: a game may keep it in its saves, and the saves of existing installs
    belong to this one */
-u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
+u64 g_user_id[2] = {SNX_USERS_FIRST_UID0, SNX_USERS_FIRST_UID1};
 
 /* the application's message queue: a message stays queued until ReceiveMessage takes it, and the event is signaled
    while one is */
@@ -571,14 +571,14 @@ static int nn_am_service_IApplicationFunctions_PopLaunchParameter(SvcObj* self, 
     am.preselected_popped = 1;
     pm_unlock(&am.lock);
     R_UNLESS(!v, AM_NO_DATA);
-    /* AccountPreselectedUser: the console's user, selected */
+    /* AccountPreselectedUser: the user the game plays as, selected */
     *storage = am_storage_new(0x88, NULL);
     d = am_storage_bytes(*storage);
     v = AM_PRESELECTED_USER_MAGIC;
     memcpy(d, &v, 4);
     v = 1;
     memcpy(d + 4, &v, 4);
-    memcpy(d + 8, g_user_id, 16);
+    memcpy(d + 8, snx_users_selected()->uid, 16);
     R_SUCCEED();
 }
 
@@ -1262,9 +1262,9 @@ static int nn_am_service_ILibraryAppletAccessor_PopOutData(SvcObj* self, SvcObj*
         }
         break;
     }
-    case AM_APPLET_PROFILE_SELECT: /* UiReturnArg: success, the console's user */
+    case AM_APPLET_PROFILE_SELECT: /* UiReturnArg: success, the user the game plays as */
         *storage = am_storage_new(0x18, NULL);
-        memcpy(am_storage_bytes(*storage) + 8, g_user_id, 16);
+        memcpy(am_storage_bytes(*storage) + 8, snx_users_selected()->uid, 16);
         break;
     case AM_APPLET_SWKBD: *storage = am_swkbd(a); break;
     case AM_APPLET_MII_EDIT: *storage = am_mii_edit(a); break;

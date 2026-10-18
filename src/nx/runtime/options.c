@@ -25,6 +25,7 @@
 int g_opt_fullscreen, g_opt_docked = 1, g_opt_lang = 1, g_opt_fps = SNX_FPS_GAME, g_opt_diag, g_opt_shadows = 1;
 int g_opt_prof, g_opt_auto_stub_ipc = 1, g_opt_network, g_opt_vsync = 1, g_opt_aniso;
 float g_opt_resf = 1;
+int g_opt_user = 1;
 
 /* ---- the runtime's own settings ---- */
 
@@ -125,6 +126,12 @@ static const IniOpt g_network[] = {
      "with loopback only (not a sandbox)",
      INI_INT, 0, &g_opt_network, 0, 1, NULL, "Network", "Offline|Online", 0, 0},
     END_ROW};
+static const IniOpt g_user[] = {
+    {"user", "1",
+     "The console's user the game plays as: 1 to 8, as users/users.ini of the data folder lists them (1, \"Player\",\n"
+     "without one). A number with no user stops the game",
+     INI_INT, INI_STARTUP, &g_opt_user, 1, SNX_USERS_MAX, NULL, NULL, NULL, 0, 0},
+    END_ROW};
 static const IniOpt g_debug[] = {
     {"log", "1", "The log's detail, 0 to 2: 2 logs everything, which slows the game down", INI_INT, 0, &g_verbose, 0,
      2, NULL, NULL, NULL, 0, 0},
@@ -159,6 +166,7 @@ static const Section g_sections[] = {
      {g_gamepad_ini, g_gamepad_map_ini, g_gamepad_players_ini},
      {NULL, SNX_GAMEPAD_MAP, SNX_GAMEPAD_PLAYERS}},
     {"Network", 1, {g_network, NULL, NULL}, {NULL, NULL, NULL}},
+    {"User", 1, {g_user, NULL, NULL}, {NULL, NULL, NULL}},
     {"Debug", 1, {g_debug, NULL, NULL}, {NULL, NULL, NULL}}};
 #define SECTIONS ((int)(sizeof g_sections / sizeof *g_sections))
 

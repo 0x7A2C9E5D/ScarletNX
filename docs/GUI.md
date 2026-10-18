@@ -277,7 +277,11 @@ and to the run, which is **compiling** until the runner prints its `ScarletNX - 
 
 The screens are boxes side by side, nothing over another, the default framing them in thin lines and YoRHa
 filling them. At the top the tabs, Menu, Games and Settings, and the screen's title after them against the
-right (`[head] place = tabs`) or on a row of its own under them (`below`). Under them the list, each entry a box
+right (`[head] place = tabs`) or on a row of its own under them (`below`), and at its right the user games play as
+(Settings > User): a box framed as the others are holding their nickname and their picture, `users/<uid>.jpg` or Wimsy
+without one ([USAGE](USAGE.md#users)), square or round (`[head] picture`; `none` for no box). A click on it opens
+the users over the screen, each with their picture; the one picked is Settings' user from then on, and ESC or a click
+off them leaves it as it was. Under them the list, each entry a box
 of its own, the focused one framed in the focus colour or inverted, with the theme's cursor in the margin;
 beside it a box with what the focus is about (a recent game's path, Games' folders, the keys in use, the last
 run's output) and under that one the Status box. The tips have a row of their own under the head (`[tips] place =
@@ -352,6 +356,8 @@ place = tabs
 ; the title's letters, times the text's (1 to 3), and a shadow under them in the dim colour
 size = 2
 shadow = true
+; the user at the head's right, their nickname and picture in a box: none | square | round
+picture = round
 ; the title per screen: menu, games, keys, compiling, loading
 menu = NIGHT  /  MENU
 [body]

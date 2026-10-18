@@ -30,6 +30,9 @@ void am_init(void); /* the applet events, and the messages queued at startup */
 SvcObj* new_appletoe(void);
 SvcObj* new_appletae(void);
 
+/* ---- users.c: the console's users (common/utilities/users.h) */
+void snx_users_init(void); /* snx_users_load of the data folder's users/, the game stopped if it says no */
+
 /* ---- set.c */
 void set_language_code(int lang, u8 code[8]); /* the 8-byte LanguageCode, en-US for an index out of range */
 SvcObj* new_set(void);

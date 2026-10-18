@@ -13,4 +13,5 @@ void svc_vi_init(void);
 void svc_pl_init(void);
 /* how many nn::settings::Language values set knows, to check the language the settings file names */
 int set_language_count(void);
+#include "common/utilities/users.h" /* SNX_USERS_MAX, the .ini's user at most */
 #endif

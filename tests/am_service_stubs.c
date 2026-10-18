@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* the game's data folder for am.c's tests: a control.nacp only when a test gives one */
+/* the game's data folder for am.c's tests: a control.nacp only when a test gives one; and the first user alone, as
+   users.c has it without users.ini */
 #include "nx/hle/filesystem/fs.h"
+#include "nx/hle/services/services_int.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -29,4 +31,10 @@ u8* fs_read_file(const char* path, u64* size) {
     memcpy(d, g_test_nacp, (size_t)g_test_nacp_size);
     if (size) *size = g_test_nacp_size;
     return d;
+}
+
+const SnxUser* snx_users_selected(void) {
+    static SnxUser first;
+    memcpy(first.uid, g_user_id, 16);
+    return &first;
 }

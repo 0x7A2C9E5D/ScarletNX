@@ -18,7 +18,8 @@ typedef char snx_gui_id_slot[sizeof(((GuiThemes*)0)->ids[0]) == sizeof(((GuiThem
 typedef char snx_gui_word_int[sizeof(GuiStyle) == sizeof(int) && sizeof(GuiRunLayout) == sizeof(int) &&
                                       sizeof(GuiRing) == sizeof(int) && sizeof(GuiLineIn) == sizeof(int) &&
                                       sizeof(GuiAlign) == sizeof(int) && sizeof(GuiPanels) == sizeof(int) &&
-                                      sizeof(GuiHeadPlace) == sizeof(int) && sizeof(GuiTipsPlace) == sizeof(int)
+                                      sizeof(GuiHeadPlace) == sizeof(int) && sizeof(GuiTipsPlace) == sizeof(int) &&
+                                      sizeof(GuiPicture) == sizeof(int)
                                   ? 1
                                   : -1];
 
@@ -35,6 +36,7 @@ static const char* const panel_words[] = {"outline", "fill", NULL};
 static const char* const sizings[] = {"fixed", "adaptive", NULL};
 static const char* const flows[] = {"wrap", "slide", NULL};
 static const char* const head_places[] = {"tabs", "below", NULL};
+static const char* const pictures[] = {"none", "square", "round", NULL}; /* GuiPicture's order */
 static const char* const tips_places[] = {"bottom", "top", NULL};
 #define FIELD(f)                    offsetof(GuiTheme, f), sizeof(((GuiTheme*)0)->f)
 #define TEXT(s, k, f, about)        {s, k, GUI_KEY_TEXT, FIELD(f), NULL, 0, about}
@@ -61,6 +63,8 @@ const GuiThemeKey gui_theme_keys[] = {
          SNX_TR_NOOP("the title after the tabs, or on a row of its own under them")),
     NUMBER("head", "size", title_size, 3, SNX_TR_NOOP("the title's letters, times the text's, 1 to 3")),
     FLAG("head", "shadow", title_shadow, SNX_TR_NOOP("a shadow under the title's letters, in the dim colour")),
+    WORD("head", "picture", picture, pictures,
+         SNX_TR_NOOP("the user at the head's right, their nickname and picture in a box: none, square or round")),
     TEXT("head", "menu", title[GUI_SCREEN_MENU], SNX_TR_NOOP("the menu's title")),
     TEXT("head", "games", title[GUI_SCREEN_GAMES], SNX_TR_NOOP("the games/ list's title")),
     TEXT("head", "keys", title[GUI_SCREEN_KEYS], SNX_TR_NOOP("the keys screen's title")),

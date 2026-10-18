@@ -910,19 +910,38 @@ static void emptyrom_init(void) {
 }
 /* save data folders, by SaveDataType */
 static const char* const g_save_kinds[] = {"system", "user", "bcat", "device", "temp", "cache", "sysbcat"};
-/* Earlier versions read the save type from the wrong byte, which is always 0, so every save went to save/system.
-   An Account save (save/user) that doesn't exist yet takes over that folder, once */
-static u32 save_migrate(void) { /* tree.lock held */
-    FsNode* src;
-    FsNode* dst;
-    if (!fs_tree_lookup(&fsp.tree, NULL, "save/user", &dst)) R_SUCCEED();
-    if (fs_tree_lookup(&fsp.tree, NULL, "save/system", &src) || !src->is_dir || !src->children) R_SUCCEED();
-    FsTreeResult r = fs_tree_rename(&fsp.tree, NULL, "save/system", "save/user", 1);
-    if (r)
-        WARN("fs: could not move save/system to save/user\n");
-    else
-        LOG("fs: moved save/system to save/user\n");
-    return tree_result(r);
+/* An Account save is save/user.<uid>, the folder of its user (users.c). The first user's, while it has none, is the one
+   an older version left, played where it is and said once a run (docs/DEPRECATIONS.md): save/user, from before there
+   were other users, else a nonempty save/system (earlier versions read the save type from a byte that is always 0).
+   save/user and save/user.<uid> both there is two saves of one user: the game stops and leaves both, for the player to
+   keep one. Puts the folder in p, and 1 in *both for that */
+static u32 save_user(const nn_fs_SaveDataAttribute* attribute, char* p, size_t n, int* both) { /* tree.lock held */
+    FsNode* node;
+    const char* old = NULL;
+    u64 uid[2];
+    char text[33];
+    int mine;
+    memcpy(uid, attribute->uid.v, 16);
+    snx_users_uid_text(uid, text);
+    snprintf(p, n, "save/user.%s", text);
+    *both = 0;
+    if (uid[0] != g_user_id[0] || uid[1] != g_user_id[1]) R_SUCCEED();
+    mine = !fs_tree_lookup(&fsp.tree, NULL, p, &node);
+    if (!fs_tree_lookup(&fsp.tree, NULL, "save/user", &node))
+        old = "save/user";
+    else if (!mine && !fs_tree_lookup(&fsp.tree, NULL, "save/system", &node) && node->is_dir && node->children)
+        old = "save/system";
+    if (!old) R_SUCCEED();
+    if (mine) {
+        *both = 1;
+        R_THROW(FS_EXISTS);
+    }
+    WARN_LIMIT(1,
+               "fs: %s%s, the first user's saves, was left by an older version: this one keeps them in %s%s. The game "
+               "plays them where they are until you move the folder there (docs/DEPRECATIONS.md)\n",
+               g_datadir, old, g_datadir, p);
+    snprintf(p, n, "%s", old);
+    R_SUCCEED();
 }
 /* the filesystems there are not here */
 static int nn_fssrv_sf_IFileSystemProxy_OpenDataFileSystemByCurrentProcess(SvcObj* self, SvcObj** filesystem) {
@@ -1008,16 +1027,22 @@ static int nn_fssrv_sf_IFileSystemProxy_GetProgramIndexForAccessLog(SvcObj* self
     *program_count = 1;
     R_SUCCEED();
 }
-/* save/<kind>, by the attribute's SaveDataType */
+/* save/<kind>, by the attribute's SaveDataType, and an Account save its user's (save_user) */
 static int open_save(const nn_fs_SaveDataAttribute* attribute, SvcObj** filesystem) {
     char p[64];
     u8 type = attribute->type;
     const char* kind = type < sizeof g_save_kinds / sizeof g_save_kinds[0] ? g_save_kinds[type] : "system";
+    int both = 0;
+    u32 rc = 0;
     snprintf(p, sizeof p, "save/%s", kind);
     pm_lock(&fsp.tree.lock);
-    u32 rc = type == 1 ? save_migrate() : 0;
+    if (type == 1) rc = save_user(attribute, p, sizeof p, &both);
     *filesystem = R_FAILED(rc) ? NULL : hostfs_new(p, &rc);
     pm_unlock(&fsp.tree.lock);
+    if (both)
+        fatal("Two saves of the first user: %ssave/user, from before there were other users, and %s%s. Keep the one "
+              "you play and move the other out of %ssave/, then start the game again",
+              g_datadir, g_datadir, p, g_datadir);
     return (int)rc;
 }
 static int nn_fssrv_sf_IFileSystemProxy_OpenSaveDataFileSystem(SvcObj* self, nn_fs_SaveDataSpaceId space_id,
