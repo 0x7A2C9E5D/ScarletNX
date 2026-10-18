@@ -529,6 +529,21 @@ static void test_state_getter(void) {
     CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled3d(NULL, &vr) == 0 && vr == 0);
     CHECK(nn_am_service_ICommonStateGetter_GetSettingsPlatformRegion(NULL, &region) == 0 && region == 1);
 }
+/* ISelfController: the idle time detection extension and auto sleep read back as the game set them */
+static void test_self_settings(void) {
+    u32 extension = 0xee;
+    u8 disabled = 0xee;
+    CHECK(nn_am_service_ISelfController_GetIdleTimeDetectionExtension(NULL, &extension) == 0 && extension == 0);
+    CHECK(nn_am_service_ISelfController_SetIdleTimeDetectionExtension(NULL, 1) == 0);
+    CHECK(nn_am_service_ISelfController_GetIdleTimeDetectionExtension(NULL, &extension) == 0 && extension == 1);
+    CHECK(nn_am_service_ISelfController_SetIdleTimeDetectionExtension(NULL, 0) == 0);
+    CHECK(nn_am_service_ISelfController_GetIdleTimeDetectionExtension(NULL, &extension) == 0 && extension == 0);
+    CHECK(nn_am_service_ISelfController_IsAutoSleepDisabled(NULL, &disabled) == 0 && disabled == 0);
+    CHECK(nn_am_service_ISelfController_SetAutoSleepDisabled(NULL, 1) == 0);
+    CHECK(nn_am_service_ISelfController_IsAutoSleepDisabled(NULL, &disabled) == 0 && disabled == 1);
+    CHECK(nn_am_service_ISelfController_SetAutoSleepDisabled(NULL, 0) == 0);
+    CHECK(nn_am_service_ISelfController_IsAutoSleepDisabled(NULL, &disabled) == 0 && disabled == 0);
+}
 int main(void) {
     test_mii_edit();
     test_audio_controller();
@@ -544,6 +559,7 @@ int main(void) {
     CHECK(test_objects == 0 && test_kobjs == 0);
     test_messages();
     test_state_getter();
+    test_self_settings();
     printf("am_service: %u checks passed\n", test_checks);
     return 0;
 }

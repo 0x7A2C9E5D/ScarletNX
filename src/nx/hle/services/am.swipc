@@ -101,9 +101,11 @@ interface nn::am::service::ISelfController {
     [40] CreateManagedDisplayLayer() -> u64 layer_id;
     @stub [41] IsSystemBufferSharingEnabled();
     [44] CreateManagedDisplaySeparableLayer() -> (u64 layer_id, u64 recording_layer_id);
-    @stub [62] SetIdleTimeDetectionExtension(u32 extension);
-    @stub [63] GetIdleTimeDetectionExtension() -> u32 extension;
-    @stub [69] IsAutoSleepDisabled() -> b8 disabled;
+    [62] SetIdleTimeDetectionExtension(u32 extension);
+    [63] GetIdleTimeDetectionExtension() -> u32 extension;
+    # 5.0.0+
+    [68] SetAutoSleepDisabled(b8 disabled);
+    [69] IsAutoSleepDisabled() -> b8 disabled;
     @stub [90] GetAccumulatedSuspendedTickValue() -> u64 tick;
     [91] GetAccumulatedSuspendedTickChangedEvent() -> handle<copy, event> event;
     @stub [100] SetAlbumImageTakenNotificationEnabled(b8 enabled);

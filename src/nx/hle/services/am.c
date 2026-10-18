@@ -65,6 +65,8 @@ static struct {
     u32 head, count;
     int preselected_popped; /* the preselected user launch parameter is given once */
     u64 next_layer;         /* CreateManagedDisplayLayer's ids, from 1 */
+    u32 idle_extension;     /* ISelfController's two settings a game reads back, as it made them */
+    u8 auto_sleep_disabled;
     u8 vr_mode_3d;          /* on between BeginVrMode3d and EndVrMode3d */
     u8* nacp;               /* the game's control.nacp in its data folder, read on first use; NULL with none */
     u64 nacp_size;
@@ -475,6 +477,34 @@ static int nn_am_service_ISelfController_CreateManagedDisplaySeparableLayer(SvcO
 static int nn_am_service_ISelfController_GetAccumulatedSuspendedTickChangedEvent(SvcObj* self, u32* event) {
     (void)self;
     return new_event(event, "am:suspended tick changed", 1);
+}
+static int nn_am_service_ISelfController_SetIdleTimeDetectionExtension(SvcObj* self, u32 extension) {
+    (void)self;
+    pm_lock(&am.lock);
+    am.idle_extension = extension;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+static int nn_am_service_ISelfController_GetIdleTimeDetectionExtension(SvcObj* self, u32* extension) {
+    (void)self;
+    pm_lock(&am.lock);
+    *extension = am.idle_extension;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+static int nn_am_service_ISelfController_SetAutoSleepDisabled(SvcObj* self, u8 disabled) {
+    (void)self;
+    pm_lock(&am.lock);
+    am.auto_sleep_disabled = disabled;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+static int nn_am_service_ISelfController_IsAutoSleepDisabled(SvcObj* self, u8* disabled) {
+    (void)self;
+    pm_lock(&am.lock);
+    *disabled = am.auto_sleep_disabled;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
 }
 
 static int nn_am_service_IWindowController_GetAppletResourceUserId(SvcObj* self,
