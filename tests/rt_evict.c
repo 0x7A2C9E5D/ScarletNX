@@ -248,25 +248,27 @@ int main(void) {
     Surf* old = drawn(GVA + 0x40000, 8, 8);
     Surf* now = drawn(GVA + 0x40000, W, H);
     CHECK(old != now && (old->gva >> 63) && vk_rt_find(GVA + 0x40000) == now);
+    px = (u8)(uintptr_t)now->img; /* taken before the sweep frees the targets */
     ten_seconds();
-    CHECK(filled(GVA + 0x40000, W * H * 4, (u8)(uintptr_t)now->img) && g_readbacks == 3 && g_went == 1);
+    CHECK(filled(GVA + 0x40000, W * H * 4, px) && g_readbacks == 3 && g_went == 1);
     /* two that overlap, the one at the lower address drawn last: its pixels are what memory keeps where they meet,
        whichever the table holds first (its bucket comes first here, so the sweep meets it first) */
     g_vk_present = 0;
     Surf* upper = drawn(GVA + 0x50200, W, H);
     Surf* lower = drawn(GVA + 0x50000, W, H);
     CHECK(hkey(lower->gva) < hkey(upper->gva));
+    u8 lower_px = (u8)(uintptr_t)lower->img, upper_px = (u8)(uintptr_t)upper->img;
     ten_seconds();
-    CHECK(filled(GVA + 0x50000, W * H * 4, (u8)(uintptr_t)lower->img));
-    CHECK(filled(GVA + 0x50400, 0x200, (u8)(uintptr_t)upper->img) && g_went == 2);
+    CHECK(filled(GVA + 0x50000, W * H * 4, lower_px));
+    CHECK(filled(GVA + 0x50400, 0x200, upper_px) && g_went == 2);
     /* three that go in one sweep: read back behind one wait for the GPU, each into its own memory */
     g_vk_present = 0;
-    Surf* three[3];
-    for (int i = 0; i < 3; i++) three[i] = drawn(GVA + 0x60000 + (u64)i * 0x1000, W, H);
+    u8 three[3];
+    for (int i = 0; i < 3; i++) three[i] = (u8)(uintptr_t)drawn(GVA + 0x60000 + (u64)i * 0x1000, W, H)->img;
     u32 finishes = g_finishes, readbacks = g_readbacks;
     ten_seconds();
     CHECK(g_finishes == finishes + 1 && g_readbacks == readbacks + 3 && g_went == 3);
-    for (int i = 0; i < 3; i++) CHECK(filled(GVA + 0x60000 + (u64)i * 0x1000, W * H * 4, (u8)(uintptr_t)three[i]->img));
+    for (int i = 0; i < 3; i++) CHECK(filled(GVA + 0x60000 + (u64)i * 0x1000, W * H * 4, three[i]));
     free(g_mem);
     printf("rt_evict: %u checks passed\n", checks);
     return 0;
