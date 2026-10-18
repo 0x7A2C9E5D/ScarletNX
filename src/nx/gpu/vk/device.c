@@ -229,8 +229,7 @@ static int create_device(void) {
                         p12.denormBehaviorIndependence != VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE;
     if (!g_vk_flush_denorm)
         WARN("vulkan: FP32 denormal flush mode unavailable; graphics shaders use per-instruction FTZ fallback\n");
-    if (!g_vk_preserve_infnan)
-        WARN("vulkan: FP32 signed-zero/Inf/NaN preservation unavailable on this GPU\n");
+    if (!g_vk_preserve_infnan) WARN("vulkan: FP32 signed-zero/Inf/NaN preservation unavailable on this GPU\n");
 
     /* compute gets a queue of its own: of a compute-only family, or else a second one of the graphics family */
     int second = g_vk.compute_family == g_vk.gfx_family && gfx_queues >= 2;
@@ -262,6 +261,7 @@ static int create_device(void) {
     WANT(wideLines);
     WANT(largePoints);
     WANT(samplerAnisotropy);
+    WANT(occlusionQueryPrecise); /* samples-passed counts (query.c) are exact */
     WANT(sampleRateShading);
     WANT(textureCompressionBC);
     WANT(vertexPipelineStoresAndAtomics);

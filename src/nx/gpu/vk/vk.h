@@ -199,9 +199,9 @@ typedef struct Surf {
     VkImageViewType type; /* what it was created as */
     VkImage img;
     VmaAllocation mem;
-    VkImageView att;      /* level 0: the attachment */
+    VkImageView att;        /* level 0: the attachment */
     VkImageView att_linear; /* same storage without sRGB conversion */
-    VkImageLayout layout; /* the whole image is kept in one layout */
+    VkImageLayout layout;   /* the whole image is kept in one layout */
     VkPipelineStageFlags2 stage;
     VkAccessFlags2 access;
     u64 last_used;
@@ -219,7 +219,7 @@ typedef struct Surf {
         u32 wgen, tgen;
     } copied[2];
     u32 mem_wgen; /* render targets: wgen when guest memory last held the same (written back or loaded) */
-    u64 gw; /* gpu_mem_generation() when it last matched guest memory or its unchanged range was checked */
+    u64 gw;       /* gpu_mem_generation() when it last matched guest memory or its unchanged range was checked */
     /* textures: views by type and swizzle, and the change check (gpu/vk/texture.c) */
     SurfView sv[6];
     int nsv;
@@ -227,7 +227,7 @@ typedef struct Surf {
     int upload_valid; /* textures: every subresource was uploaded (a failed upload is retried) */
     u32 checked, next_check, stable, tfull;
     u32 tex_inval_gen; /* explicit Maxwell texture-cache invalidations since this texture was checked */
-    u32 wseen; /* write-tracking clock when it last matched memory */
+    u32 wseen;         /* write-tracking clock when it last matched memory */
     /* copies of regions of this render target for texture headers or feedback draws, one per size, linked through next
        (gpu/vk/texture.c rt_crop) */
     struct Surf* crop;
@@ -256,8 +256,7 @@ VkImage vk_unscaled_image(const Surf* s, u32 layers, VmaAllocation* mem);
 void vk_surf_use(VkCommandBuffer cb, Surf* s, VkImageLayout layout, VkPipelineStageFlags2 stage, VkAccessFlags2 access);
 /* the stages a texture moved to SHADER_READ_ONLY_OPTIMAL is made visible to: all that sample, since a later read in
    the same layout gets no barrier of its own */
-#define VK_SAMPLED_STAGES                                                                                              \
-    (VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)
+#define VK_SAMPLED_STAGES (VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT)
 VkImageView vk_rt_attachment(Surf* s, int srgb_write);
 void vk_rt_flush(u64 gva);
 void vk_gfx_image_mem_need(u64 gva, u64 size);
@@ -334,10 +333,25 @@ int vk_buf_pending_unsubmitted(void); /* one is in the commands recorded since t
 /* release.c: releases the game can observe, once the results before them land (renderer.h release_write) */
 void vk_release_write(u64 gva, const void* data, u32 len);
 void vk_release_incr(u32 id);
+/* a samples-passed report: len bytes at gva (4, or 16 with ticks after the count), the count of query.c's counter's
+   segments [first, end), once the GPU has done the submit being recorded */
+void vk_release_samples(u64 gva, u32 len, u32 counter, u64 first, u64 end, u64 ticks);
+void vk_release_submit(void); /* the GPFIFO submission ended or waits: a release gated on the recording submits */
 void vk_release_need(u64 gva, u64 len);
 u32 vk_release_value(u32 id);
 void vk_release_retire(u32 id);
 void vk_release_drain(void);
+/* query.c: the samples-passed counter with occlusion queries (renderer.h samples_*), under vk_lock. vk_query_draw before
+   a game's draw in a rendering pass, vk_query_pass_end before the pass ends or a draw of the renderer's own in it
+   (render.c), vk_query_flush outside a pass before a submit (cmd.c) */
+void vk_query_draw(VkCommandBuffer cb, u32 chan, u32 msaa_mode); /* msaa_mode: 3D 0x574 */
+void vk_query_pass_end(VkCommandBuffer cb);
+void vk_query_flush(VkCommandBuffer cb);
+void vk_query_reset(u32 chan);
+void vk_query_enable(u32 chan, int on);
+int vk_query_report(u32 chan, u64 gva, u32 len, u64 ticks);
+/* a report performed (release.c): the count of counter's segments [first, end) */
+u64 vk_query_value(u32 counter, u64 first, u64 end);
 void vk_buf_mem_need_map(u64 gva, u64 len);
 void vk_buf_before_write(u64 gva, u64 len);
 void vk_buf_land(void);

@@ -32,7 +32,9 @@ static struct {
 void vk_render_end(void) {
     if (!g_rp.open) return;
     g_rp.open = 0;
-    vkCmdEndRendering(vk_cmd());
+    VkCommandBuffer cb = vk_cmd();
+    vk_query_pass_end(cb); /* a query begun in the pass ends in it */
+    vkCmdEndRendering(cb);
 }
 
 /* the targets the registers name, without opening anything */
@@ -216,6 +218,7 @@ static int clear_masked(u32 slot, u32 mask, const float* cc, VkRect2D rect, u32 
     pc[0] = layer;
     memcpy(&pc[4], cc, 16); /* the register bits, read as the shader's vec4, uvec4 or ivec4 */
     vkCmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
+    vk_query_pass_end(cb); /* a clear passes no samples on the console: its draw here isn't counted */
     vkCmdDraw(cb, 3, 1, 0, 0);
     return 1;
 }
@@ -898,16 +901,20 @@ static int tex_tables_set(GpuChannel* ch, int stage, const VkSh* s, const int* f
     u32 handles[SNX_TEX_ARRAY] = {0};
     u32 null_tsc[8] = {0};
     u32 funcs[SNX_TEX_ARRAY] = {0};
+    /* each element's entry, NO_ENTRY for one past its constant buffer: the null texture, given an entry only when an
+       element needs it, so a table of SNX_TEX_ARRAY real handles fits (edenprobe's bindless suite samples 256) */
+    enum { NO_ENTRY = 0xFFFFFFFFu };
     u32 map[SH_INDEXED_TABLES * SNX_TEX_ARRAY] = {0};
-    u32 used = 1;
+    u32 used = 0;
+    int need_null = 0;
+    VkDescriptorImageInfo null_info, null_depth = {0};
     VkSampler null_sampler = vk_tex_bind_sampler(null_tsc, &plain, num, NULL, want);
     if (!null_sampler) return 0;
-    d->table[0] = (VkDescriptorImageInfo){null_sampler, none, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    null_info = (VkDescriptorImageInfo){null_sampler, none, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     if (kind->shadow) {
         VkSampler null_compare = vk_tex_bind_sampler(null_tsc, kind, 0, NULL, want);
         if (!null_compare) return 0;
-        d->depth_table[0] = (VkDescriptorImageInfo){null_compare, far, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        funcs[0] = 11; /* LEQUAL and null depth */
+        null_depth = (VkDescriptorImageInfo){null_compare, far, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     }
     for (int table = 0; table < count; table++) {
         const ShTex* st = &s->si.tex[first[table]];
@@ -917,9 +924,15 @@ static int tex_tables_set(GpuChannel* ch, int stage, const VkSh* s, const int* f
         if (size > 65536 || !size) size = 65536;
         for (u32 k = 0; k < SNX_TEX_ARRAY; k++) {
             u32 at = st->cbuf_off * 4 + (k << shift);
-            u32 handle = cba && at + 4 <= size ? gmem_r32(cba + at) : 0;
-            if (!handle) continue;
-            u32 id = 1;
+            /* past the constant buffer: the null texture. A handle of 0 is header 0 with sampler 0, a texture like any
+               other (edenprobe's bindless case samples it) */
+            if (!cba || at + 4 > size) {
+                map[table * SNX_TEX_ARRAY + k] = NO_ENTRY;
+                need_null = 1;
+                continue;
+            }
+            u32 handle = gmem_r32(cba + at);
+            u32 id = 0;
             while (id < used && handles[id] != handle) id++;
             if (id == used) {
                 if (used == SNX_TEX_ARRAY) {
@@ -942,8 +955,10 @@ static int tex_tables_set(GpuChannel* ch, int stage, const VkSh* s, const int* f
                     vk_surf_use(vk_cmd(), x.t, layout, VK_SAMPLED_STAGES, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
                 else {
                     view = none;
-                    LOG_LIMIT(4, "vulkan: indexed texture reads the null texture (bank %u handle %08x)\n", bank,
-                              handle);
+                    /* an unused entry holds 0: a handle that names nothing else is the black-texture signal */
+                    if (handle)
+                        LOG_LIMIT(4, "vulkan: indexed texture reads the null texture (bank %u handle %08x)\n", bank,
+                                  handle);
                 }
                 VkImageView color_view = depth ? none : view;
                 VkSampler smp = vk_tex_bind_sampler(x.tsc, &plain, num, color_view != none ? x.t : NULL, want);
@@ -961,9 +976,21 @@ static int tex_tables_set(GpuChannel* ch, int stage, const VkSh* s, const int* f
             map[table * SNX_TEX_ARRAY + k] = id;
         }
     }
+    if (need_null) {
+        if (used == SNX_TEX_ARRAY) {
+            LOG_LIMIT(4, "vulkan: indexed texture tables exceed %u unique handles\n", SNX_TEX_ARRAY);
+            return 0;
+        }
+        for (u32 e = 0; e < (u32)count * SNX_TEX_ARRAY; e++)
+            if (map[e] == NO_ENTRY) map[e] = used;
+    }
+    /* the null texture in every entry left, its own included: the binding is read whole */
     for (u32 k = used; k < SNX_TEX_ARRAY; k++) {
-        d->table[k] = d->table[0];
-        if (kind->shadow) d->depth_table[k] = d->depth_table[0];
+        d->table[k] = null_info;
+        if (kind->shadow) {
+            d->depth_table[k] = null_depth;
+            funcs[k] = 11; /* LEQUAL and null depth */
+        }
     }
     VkWriteDescriptorSet* w = &d->w[d->n++];
     *w = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -1317,14 +1344,14 @@ retry:
     /* SetUserClipEnable (0x544): a clip distance the program writes clips only when its bit is set, in the last
        stage before rasterization */
     clip = r[0x544] & 0xFF;
-    VkSh* vs = vk_shader_get(ch, code + r[0x811], (r[0x800] & 1) ? code + r[0x801] : 0, ST_VS, attr_int, attr_sint, 0, 0,
-                             tes_on || gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0);
+    VkSh* vs = vk_shader_get(ch, code + r[0x811], (r[0x800] & 1) ? code + r[0x801] : 0, ST_VS, attr_int, attr_sint, 0,
+                             0, tes_on || gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0);
     tcs = tcs_on ? vk_shader_get(ch, code + r[0x821], 0, ST_TCS, 0, 0, 0, 0, SNX_SH_NOT_LAST, 0, 0, 0) : NULL;
-    tes = tes_on ? vk_shader_get(ch, code + r[0x831], 0, ST_TES, 0, 0, r[0xC8] & 0x333, 0, gs_on ? SNX_SH_NOT_LAST : clip,
-                                 0, 0, 0)
+    tes = tes_on ? vk_shader_get(ch, code + r[0x831], 0, ST_TES, 0, 0, r[0xC8] & 0x333, 0,
+                                 gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0)
                  : NULL;
-    gs = gs_on ? vk_shader_get(ch, code + r[0x841], 0, ST_GS, 0, 0, gs_input_vertices(topology, tes_on, r[0xC8]), 0, clip,
-                               0, 0, 0)
+    gs = gs_on ? vk_shader_get(ch, code + r[0x841], 0, ST_GS, 0, 0, gs_input_vertices(topology, tes_on, r[0xC8]), 0,
+                               clip, 0, 0, 0)
                : NULL;
     if ((tcs_on && (!tcs || tcs->failed)) || (tes_on && (!tes || tes->failed)) || (gs_on && (!gs || gs->failed))) {
         g_vk_skipped++;
@@ -1830,6 +1857,7 @@ retry:
     }
     vkCmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
 
+    vk_query_draw(cb, ch->id, r[0x574]); /* counted by the channel's samples-passed counter when it runs */
     if (indexed) {
         vkCmdBindIndexBuffer(cb, ibuf, ioff, itype);
         /* quads made from guest indices keep the base vertex, quads made from vertex numbers have it in them */
@@ -1842,7 +1870,8 @@ retry:
     if (fs)
         for (u32 i = 0; i < n; i++)
             if (g_rp.rt[i] && (k.blend[i].mask & ((fs->si.sph[18] >> (i * 4)) & 15))) target_written(g_rp.rt[i]);
-    if (zt && !zt_ro && (r[0x4BA] || (r[0x4E0] && ((r[0x4E7] & 0xFF) || (r[0x565] && (r[0x3D6] & 0xFF)))))) target_written(zt);
+    if (zt && !zt_ro && (r[0x4BA] || (r[0x4E0] && ((r[0x4E7] & 0xFF) || (r[0x565] && (r[0x3D6] & 0xFF))))))
+        target_written(zt);
     g_vk_drawn++;
 }
 

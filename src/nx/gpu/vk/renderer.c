@@ -97,6 +97,22 @@ static void vkr_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 c
     vk_render_draw(ch, indexed, topology, first, count, bv, bi, instances);
     vk_unlock();
 }
+static void vkr_samples_reset(GpuChannel* ch) {
+    vk_lock();
+    vk_query_reset(ch->id);
+    vk_unlock();
+}
+static void vkr_samples_enable(GpuChannel* ch, int on) {
+    vk_lock();
+    vk_query_enable(ch->id, on);
+    vk_unlock();
+}
+static int vkr_samples_report(GpuChannel* ch, u64 gva, u32 len, u64 ticks) {
+    vk_lock();
+    int r = vk_query_report(ch->id, gva, len, ticks);
+    vk_unlock();
+    return r;
+}
 static void vkr_method_barrier(int kind) {
     vk_lock();
     if (kind == 3) {
@@ -343,7 +359,8 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
             LOG("vulkan: %llu draws, %llu skipped; %llu dispatches in %llu batches (%llu ms waiting), %llu skipped; "
                 "%llu finishes (%llu ms)\n",
                 (unsigned long long)g_vk_drawn, (unsigned long long)g_vk_skipped, (unsigned long long)g_vk_dispatches,
-                (unsigned long long)g_vk_cs_batches, (unsigned long long)(__atomic_load_n(&g_vk_cs_wait_ns, __ATOMIC_RELAXED) / 1000000),
+                (unsigned long long)g_vk_cs_batches,
+                (unsigned long long)(__atomic_load_n(&g_vk_cs_wait_ns, __ATOMIC_RELAXED) / 1000000),
                 (unsigned long long)g_vk_cs_skipped, (unsigned long long)g_vk_finishes,
                 (unsigned long long)(g_vk_finish_ns / 1000000));
         }
@@ -536,6 +553,10 @@ const Renderer vk_renderer = {
     .release_need = vk_release_need,
     .release_value = vk_release_value,
     .release_retire = vk_release_retire,
+    .samples_reset = vkr_samples_reset,
+    .samples_enable = vkr_samples_enable,
+    .samples_report = vkr_samples_report,
+    .stream_end = vk_release_submit,
     .present_buffer = vkr_present_buffer,
     .screenshot = vkr_screenshot,
     .refresh = vkr_refresh,

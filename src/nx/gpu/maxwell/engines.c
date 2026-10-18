@@ -18,8 +18,8 @@ static struct {
 void r3d_pending_flush(void) {
     if (!g_pd.on) return;
     g_pd.on = 0;
-    r3d_draw(g_pd.ch, g_pd.indexed, g_pd.topo, g_pd.first, g_pd.count, g_pd.bv,
-             g_pd.bi + g_pd.first_instance, g_pd.inst);
+    r3d_draw(g_pd.ch, g_pd.indexed, g_pd.topo, g_pd.first, g_pd.count, g_pd.bv, g_pd.bi + g_pd.first_instance,
+             g_pd.inst);
     if (g_pd.indexed == 3) g_pd.ch->inline_n = 0;
 }
 int r3d_pending_on(void) { return g_pd.on; }
@@ -76,6 +76,12 @@ void query_get(GpuChannel* ch, u32* r, int base, u32 v) {
         gpu_park(ch, GPU_PARK_REPORT, addr, seq, (v >> 16) & 1);
     } else if (op == 2) { /* counter */
         u32 sel = (v >> 23) & 31;
+        /* samples passed is counted by the renderer once the game has reset it, and is a real value then */
+        if (sel == 0x15 && ch && g_renderer_up && g_renderer->samples_report &&
+            g_renderer->samples_report(ch, addr, ((v >> 28) & 1) ? 4 : 16, gpu_ticks())) {
+            fake_report_mark(addr, 0);
+            return;
+        }
         u64 val = sel == 0 ? 0 : (sel == 1 ? g_draws * 3 : 1000);
         if (ch && (ch->r3d_counter_reset_mask & (1u << sel))) {
             u64 draws = g_draws - ch->r3d_counter_base[sel];
@@ -222,6 +228,7 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
             case 0x509:
             case 0x50A:
             case 0x54C:
+            case 0x545: /* SampleCounterEnable: the draw is counted as it was before */
             case 0x42B: /* DRAW_TEXTURE acts even when its argument repeats. */
             case 0x556: /* A repeated condition still rereads guest memory. */
             case 0x651:
@@ -239,7 +246,14 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
     R3(m) = v;
     switch (m) {
         case 0x49: ch->r3d_shadow_mode = raw & 3; break;
-        case 0x54C: counter_reset(ch, v); break;
+        case 0x54C:
+            counter_reset(ch, v);
+            if (v == 1 && g_renderer_up && g_renderer->samples_reset)
+                g_renderer->samples_reset(ch); /* samples passed */
+            break;
+        case 0x545: /* SampleCounterEnable */
+            if (g_renderer_up && g_renderer->samples_enable) g_renderer->samples_enable(ch, v & 1);
+            break;
         case 0x44: /* WAIT_FOR_IDLE */
             gpu_signal_point();
             if (g_renderer_up && g_renderer->method_barrier) g_renderer->method_barrier(4);
@@ -258,9 +272,7 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
         case 0x46: ch->mme_code[ch->mme_upload_ptr++ & 0x1FFF] = v; break;
         case 0x47: ch->mme_start_ptr = v; break;
         case 0x48: ch->mme_start[ch->mme_start_ptr++ & 0xFF] = v; break;
-        case 0x8C4: /* Falcon firmware call 4 signals completion through shadow scratch 0. */
-            R3(0xD00) = 1;
-            break;
+        case 0x8C4: /* Falcon firmware call 4 signals completion through shadow scratch 0. */ R3(0xD00) = 1; break;
         case 0x6C: i2m_launch(ch, ch->r3d, 0x60); break;
         case 0x6D: i2m_data(ch, v); break;
         case 0xB2: /* SyncInfo */

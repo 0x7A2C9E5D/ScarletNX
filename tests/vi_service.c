@@ -106,14 +106,21 @@ KEvent* owned_event(const char* name) {
     return e;
 }
 
-/* the GPU thread runs the present at once; the renderer keeps what it was asked to show */
+/* the GPU thread runs the present at once, or keeps it for later while hold is set (a frame whose fences are still
+   ahead); the renderer keeps what it was asked to show */
 static u32 shown_n, shown_nvmap, shown_w, shown_h, shown_pitch, shown_layout, shown_bhl, shown_fmt, fence_n, fence_id;
 static u32 paced;
+static int hold;
+static void (*held_fn)(void*);
+static void* held_arg;
 void nv_gpu_call_after(u32 n, u32* id, const u32* val, void (*fn)(void*), void* arg) {
     fence_n = n;
     fence_id = n ? id[0] : 0;
     CHECK(!n || val[0] == 10);
-    fn(arg);
+    if (hold)
+        held_fn = fn, held_arg = arg;
+    else
+        fn(arg);
 }
 void vi_show_buffer(u32 nvmap_id, u32 offset, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, const i32 crop[4],
                     u32 transform) {
@@ -145,10 +152,11 @@ static IpcBuf parcel(const void* payload, u32 n) {
     b.addr = 0x2000, b.size = 16 + data, b.flags = 0;
     return b;
 }
+static i32 binder = 1; /* the layer transact talks to */
 static u32 transact(u32 code, const void* payload, u32 n) {
     IpcBuf reply = {0x4000, 0x400, 0};
     memset(g_mem + 0x4000, 0xcc, 0x400);
-    CHECK(nns_hosbinder_IHOSBinderDriver_TransactParcel(NULL, 1, code, parcel(payload, n), reply, 0) == 0);
+    CHECK(nns_hosbinder_IHOSBinderDriver_TransactParcel(NULL, binder, code, parcel(payload, n), reply, 0) == 0);
     CHECK(rd32(0x4004) == 16 && rd32(0x4008) == 0 && rd32(0x400c) == 16 + rd32(0x4000));
     return rd32(0x4000); /* the data's size; it starts at 0x4010 and ends with the status */
 }
@@ -223,6 +231,41 @@ int main(void) {
     /* a slot out of range, and a binder that doesn't exist */
     CHECK(transact(BQ_REQUEST_BUFFER, "\x40\0\0\0", 4) == 4 && (i32)rd32(0x4010) == BQ_BAD_VALUE);
     CHECK(nns_hosbinder_IHOSBinderDriver_TransactParcel(NULL, 9, 1, parcel("", 0), window, 0) == RC(114, 7));
+
+    /* the stray layer's queue is its own: its frame isn't shown and doesn't wait for the display, and its slot comes
+       free once the fences are reached */
+    binder = 2;
+    CHECK(transact(BQ_SET_PREALLOCATED_BUFFER, req, sizeof req) == 4 && rd32(0x4010) == 0);
+    CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 56);
+    CHECK(rd32(0x4010) == 0 && rd32(0x4044) == 0);
+    paced = 0;
+    v = shown_n;
+    CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20);
+    CHECK(shown_n == v && vi.layer[1].slot[0].state == SLOT_FREE);
+    CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 56 && paced == 0);
+
+    /* DestroyStrayLayer: its binder is gone */
+    CHECK(nn_visrv_sf_IApplicationDisplayService_DestroyStrayLayer(NULL, layer) == 0);
+    CHECK(nns_hosbinder_IHOSBinderDriver_TransactParcel(NULL, 2, 1, parcel("", 0), window, 0) == RC(114, 7));
+
+    /* CloseLayer with a frame still waiting for its fences: dropped, and the layer opened next takes its place with a
+       queue of its own, empty, and is shown */
+    binder = 1; /* its buffer was dequeued above */
+    hold = 1;
+    CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20 && held_fn);
+    hold = 0;
+    CHECK(nn_visrv_sf_IApplicationDisplayService_CloseLayer(NULL, 1) == 0);
+    CHECK(nns_hosbinder_IHOSBinderDriver_TransactParcel(NULL, 1, 1, parcel("", 0), window, 0) == RC(114, 7));
+    memcpy(name.v, "Default", 8);
+    CHECK(nn_visrv_sf_IApplicationDisplayService_OpenLayer(NULL, &name, 2, 0x51, window, &size) == 0);
+    CHECK(rd32(0x1018) == 1);
+    v = shown_n;
+    held_fn(held_arg);
+    CHECK(shown_n == v && vi.layer[0].slot[0].state == SLOT_FREE && !vi.layer[0].slot[0].has_buffer);
+    CHECK(transact(BQ_REQUEST_BUFFER, "\0\0\0\0", 4) == 8 && rd32(0x4010) == 0);
+    CHECK(transact(BQ_SET_PREALLOCATED_BUFFER, req, sizeof req) == 4 && rd32(0x4010) == 0);
+    CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 56);
+    CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20 && shown_n == v + 1);
 
     printf("vi_service: %u checks passed\n", test_checks);
     (void)test_objects, (void)test_kobjs;

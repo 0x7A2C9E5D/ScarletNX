@@ -25,12 +25,14 @@ int vk_buf_pending_any(void);
 int vk_buf_pending_unsubmitted(void);
 void vk_submit(u64, u64, u64);
 u64 vk_last_submit(void);
+u64 vk_submit_number(void);
 void vk_rt_before_write(u64, u64);
+u64 vk_query_value(u32, u64, u64);
 #include "nx/gpu/vk/release.c"
 #include "nx/gpu/vk/writeback.c"
 
 int g_gpu_releases;
-static unsigned lock_depth, landing_calls, payload_writes;
+static unsigned lock_depth, landing_calls, payload_writes, submits, query_reads;
 static u64 next_compute, next_graphics = 1, waited_compute, waited_graphics;
 static int pending, landing_probe;
 static u32 completed[128];
@@ -40,18 +42,37 @@ void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
 void pc_init(PCond* c) { (void)c; }
 void pc_broadcast(PCond* c) { (void)c; }
-int pc_wait(PCond* c, PMutex* m, i64 n) { (void)c; (void)m; (void)n; abort(); }
-int plat_thread(PThreadFn fn, void* arg, size_t stack) { (void)fn; (void)arg; (void)stack; return 0; }
-void fatal(const char* fmt, ...) { (void)fmt; abort(); }
+int pc_wait(PCond* c, PMutex* m, i64 n) {
+    (void)c;
+    (void)m;
+    (void)n;
+    abort();
+}
+int plat_thread(PThreadFn fn, void* arg, size_t stack) {
+    (void)fn;
+    (void)arg;
+    (void)stack;
+    return 0;
+}
+void fatal(const char* fmt, ...) {
+    (void)fmt;
+    abort();
+}
 void vk_lock(void) { lock_depth++; }
-void vk_unlock(void) { assert(lock_depth); lock_depth--; }
+void vk_unlock(void) {
+    assert(lock_depth);
+    lock_depth--;
+}
 u64 gmmu_translate(u64 address) {
     if (address >= 0x10000 && address < 0x11000) return mapping + (address & 4095);
     if (address >= 0x20000 && address < 0x21000) return 4096 + (address & 4095);
     return 0;
 }
 u32 syncpt_read(u32 id) { return id < 128 ? completed[id] : 0; }
-void syncpt_incr(u32 id) { assert(lock_depth && vk_result_landing()); completed[id]++; }
+void syncpt_incr(u32 id) {
+    assert(lock_depth && vk_result_landing());
+    completed[id]++;
+}
 int gmem_write(u64 address, const void* data, u64 size) {
     assert(lock_depth && vk_result_landing());
     vk_release_need(address, size); /* the real memory layer reenters here */
@@ -61,14 +82,24 @@ int gmem_write(u64 address, const void* data, u64 size) {
     payload_writes++;
     return 1;
 }
-u8* gmem_ptr(u64 address, u64 size) { (void)address; (void)size; return NULL; }
+u8* gmem_ptr(u64 address, u64 size) {
+    (void)address;
+    (void)size;
+    return NULL;
+}
 int gmem_read(u64 address, void* data, u64 size) {
     vk_release_need(address, size);
     memcpy(data, memory + gmmu_translate(address), size);
     return 1;
 }
-void gpu_mem_written_shader(u64 address, u64 size) { (void)address; (void)size; }
-void vk_rt_before_write(u64 address, u64 size) { (void)address; (void)size; }
+void gpu_mem_written_shader(u64 address, u64 size) {
+    (void)address;
+    (void)size;
+}
+void vk_rt_before_write(u64 address, u64 size) {
+    (void)address;
+    (void)size;
+}
 void vk_compute_land_through(u64 gate) {
     assert(lock_depth && vk_result_landing());
     assert(waited_compute >= gate);
@@ -81,14 +112,36 @@ void vk_compute_land_through(u64 gate) {
     }
 }
 void vk_land_through(u64 gate) { assert(waited_graphics >= gate); }
-void vk_wait_submit(u64 gate) { if (gate > waited_graphics) waited_graphics = gate; }
-void vk_compute_wait(u64 gate) { if (gate > waited_compute) waited_compute = gate; }
+void vk_wait_submit(u64 gate) {
+    if (gate > waited_graphics) waited_graphics = gate;
+}
+void vk_compute_wait(u64 gate) {
+    if (gate > waited_compute) waited_compute = gate;
+}
 void vk_gfx_image_land(void) {}
-u64 vk_compute_put_aside(void) { u64 value = next_compute; next_compute = 0; return value; }
+u64 vk_compute_put_aside(void) {
+    u64 value = next_compute;
+    next_compute = 0;
+    return value;
+}
 int vk_buf_pending_any(void) { return pending; }
 int vk_buf_pending_unsubmitted(void) { return 0; }
-void vk_submit(u64 a, u64 b, u64 c) { (void)a; (void)b; (void)c; }
+/* a submit: what was recorded becomes the last submission */
+void vk_submit(u64 a, u64 b, u64 c) {
+    (void)a;
+    (void)b;
+    (void)c;
+    submits++;
+    next_graphics++;
+}
+/* a made-up count of query.c's counter 3's segments, read under the lock when a report is performed */
+u64 vk_query_value(u32 counter, u64 first, u64 end) {
+    assert(lock_depth && !vk_result_landing() && counter == 3);
+    query_reads++;
+    return (end - first) * 100 + first;
+}
 u64 vk_last_submit(void) { return next_graphics; }
+u64 vk_submit_number(void) { return next_graphics + 1; }
 
 int main(void) {
     pending = 1;
@@ -116,6 +169,28 @@ int main(void) {
     vk_release_incr(5);
     vk_release_retire(5);
     assert(completed[5] == 1 && g_rhead == g_rtail);
+    /* a samples-passed report waits for the submit being recorded even with nothing pending, without submitting it:
+       whoever needs it submits, and its count is read when it is performed (the count, then the ticks) */
+    pending = 0;
+    unsigned before = submits;
+    u64 recording = vk_submit_number();
+    vk_release_samples(0x10010, 16, 3, 2, 5, 0x77);
+    assert(submits == before && g_rhead == g_rtail + 1 && g_rq[g_rtail % RQ_N].gate == recording && !query_reads);
+    vk_release_need(0x10010, 16);
+    u64 report[2];
+    memcpy(report, memory + 1 + 0x10, 16);
+    assert(submits == before + 1 && vk_last_submit() == recording);
+    assert(query_reads == 1 && report[0] == 302 && report[1] == 0x77 && g_rhead == g_rtail);
+    /* the end of the GPFIFO submission submits it too, and a second stream end has nothing to submit; the count's low
+       word alone */
+    vk_release_samples(0x10030, 4, 3, 7, 9, 0x99);
+    vk_release_submit();
+    vk_release_submit();
+    assert(submits == before + 2);
+    vk_release_drain();
+    u32 word;
+    memcpy(&word, memory + 1 + 0x30, 4);
+    assert(query_reads == 2 && word == 207 && memory[1 + 0x34] == 0);
     assert(lock_depth == 0);
     return 0;
 }

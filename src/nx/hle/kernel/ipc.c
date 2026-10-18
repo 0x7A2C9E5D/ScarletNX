@@ -9,22 +9,23 @@
 #include "nx/runtime/options.h"
 #include <stdarg.h>
 
-#define SFCI 0x49434653u /* the CmifInHeader's magic */
-#define SFCO 0x4F434653u /* the CmifOutHeader's */
+#define SFCI                 0x49434653u /* the CmifInHeader's magic */
+#define SFCO                 0x4F434653u /* the CmifOutHeader's */
 /* sf's results (module 10, cmif) and hipc's (module 11) */
-#define RC_NOTSUPPORTED     RC(10, 1)
-#define RC_BADHEADERSIZE    RC(10, 202)
-#define RC_BADINHEADER      RC(10, 211)
-#define RC_UNKNOWNCOMMAND   RC(10, 221)
-#define RC_BADNUMINOBJECTS  RC(10, 235)
-#define RC_TARGETNOTFOUND   RC(10, 261)
-#define RC_BADCMIFREQUEST   RC(11, 420)
-#define RC_TARGETNOTDOMAIN  RC(11, 491)
+#define RC_NOTSUPPORTED      RC(10, 1)
+#define RC_BADHEADERSIZE     RC(10, 202)
+#define RC_BADINHEADER       RC(10, 211)
+#define RC_UNKNOWNCOMMAND    RC(10, 221)
+#define RC_BADNUMINOBJECTS   RC(10, 235)
+#define RC_TARGETNOTFOUND    RC(10, 261)
+#define RC_BADCMIFREQUEST    RC(11, 420)
+#define RC_TARGETNOTDOMAIN   RC(11, 491)
 #define RC_DOMAINOBJNOTFOUND RC(11, 492)
 /* the server's message buffer, which the raw data and every reply fit in */
-#define SERVER_MSG 0x100u
-/* what QueryPointerBufferSize answers: the size of the server's pointer buffer for X and C descriptors */
-#define POINTER_BUFFER 0x8000u
+#define SERVER_MSG           0x100u
+/* what QueryPointerBufferSize answers unless the service sets its own (SvcObj.ptrbuf): the size of the server's
+   pointer buffer for X and C descriptors */
+#define POINTER_BUFFER       0x8000u
 /* IpcCtx.is_domain: a request on a domain session outside a domain message (a control request, answered plainly), and
    one in a domain message (SendMessage), whose reply is a domain one */
 enum { IPC_DOMAIN_SESSION = 1, IPC_DOMAIN_MESSAGE = 2 };
@@ -62,6 +63,7 @@ SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t d
     o->name = name;
     o->dispatch = dispatch;
     o->refs = 1;
+    o->ptrbuf = POINTER_BUFFER;
     o->data = datasize ? (u8*)o + SVCOBJ_HEAD : NULL;
     return o;
 }
@@ -110,8 +112,7 @@ static SvcObj* domain_get(Domain* d, u32 id) {
 static u32 domain_add(Domain* d, SvcObj* o) {
     int i;
     pm_lock(&d->lk);
-    for (i = 0; i < d->n && d->obj[i]; i++) {
-    }
+    for (i = 0; i < d->n && d->obj[i]; i++) {}
     if (i == d->cap) {
         SvcObj** n = realloc(d->obj, sizeof *n * (size_t)d->cap * 2);
         if (!n) fatal("Out of memory for a domain's objects");
@@ -480,7 +481,7 @@ static u32 control(IpcCtx* c, KSession* s) {
             if (d) __atomic_add_fetch(&d->refs, 1, __ATOMIC_RELAXED);
             out_move_h(c, session_make(s->obj, d));
             return 0;
-        case 3: out32(c, POINTER_BUFFER); return 0;
+        case 3: out32(c, s->obj ? s->obj->ptrbuf : POINTER_BUFFER); return 0;
         default:
             if (ipc_warn_once("control", c->cmd))
                 WARN("ipc: %s: control request %u, UnknownCommandId\n", s->obj ? s->obj->name : "session", c->cmd);
@@ -541,7 +542,8 @@ void ipc_handle(KThread* t, u32 handle, u64 msg_addr, u64 msg_size) {
     c.sess = s;
     if (parse_hipc(&c, &h)) {
         ring_set(seq, "%s type %u -> %x (not served: the kernel refused it)", name, c.type, c.kernel_rc);
-        WARN_LIMIT(8, "ipc: %s: the kernel refuses a request (%x): %s\n", name, c.kernel_rc, kernel_refusal(c.kernel_rc));
+        WARN_LIMIT(8, "ipc: %s: the kernel refuses a request (%x): %s\n", name, c.kernel_rc,
+                   kernel_refusal(c.kernel_rc));
         t->cpu.x[0] = c.kernel_rc;
     } else if (c.type >= 16) { /* TIPC: the command in the type, the raw data right after the headers */
         c.tipc = 1;
@@ -590,8 +592,7 @@ int ipc_warn_once(const char* name, u32 cmd) {
     static PMutex lk = PMUTEX_INIT;
     int i, r = 0;
     pm_lock(&lk);
-    for (i = 0; i < nseen && (seen[i].cmd != cmd || strncmp(seen[i].name, name, 127)); i++) {
-    }
+    for (i = 0; i < nseen && (seen[i].cmd != cmd || strncmp(seen[i].name, name, 127)); i++) {}
     if (i == nseen && nseen < 512) {
         strncpy(seen[i].name, name, 127);
         seen[i].cmd = cmd;

@@ -22,6 +22,12 @@ typedef struct {
     u64 gva;   /* the payload's address, or 0 for a syncpoint increment */
     u32 id, len;
     u8 data[16];
+    /* samples: a samples-passed report of query.c's counter qch, whose value is the count of its segments [qfirst,
+       qend), known once the gate is done. data holds the timestamp after it. Its gate is the submit being recorded when
+       it came, which whoever needs the release submits (submit_through), and the end of the GPFIFO submission */
+    int samples;
+    u32 qch;
+    u64 qfirst, qend;
 } Release;
 #define RQ_N   1024 /* queued releases at most: a full queue performs its oldest at once */
 #define SYNC_N 128  /* nvdrv's syncpoint ids */
@@ -33,7 +39,15 @@ static PMutex g_rlock = PMUTEX_INIT;
 static PCond g_rcv;
 static int g_rthread;
 
-static void perform(const Release* r) {
+static void perform(Release* r) {
+    if (r->samples) { /* the count, as the report's structure size says: one word, or the value and the timestamp */
+        u64 v = vk_query_value(r->qch, r->qfirst, r->qend);
+        u32 w = (u32)v;
+        if (r->len == 4)
+            memcpy(r->data, &w, 4);
+        else
+            memcpy(r->data, &v, 8);
+    }
     vk_result_begin();
     if (r->gva)
         gmem_write(r->gva, r->data, r->len);
@@ -84,6 +98,10 @@ static void release_thread(void* p) {
     }
 }
 
+/* the submit gate names, recorded still: submitted now, so waiting for it ends (vk_lock) */
+static void submit_through(u64 gate) {
+    if (gate > vk_last_submit()) vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
+}
 /* r once everything recorded before it has landed: now, when nothing is pending or queued */
 static void release(Release* r) {
     int queued;
@@ -93,18 +111,22 @@ static void release(Release* r) {
     pm_lock(&g_rlock);
     queued = g_rtail != g_rhead;
     pm_unlock(&g_rlock);
-    if (!vk_buf_pending_any() && !r->cgate && !queued) {
+    /* a samples-passed report always waits for the GPU: its count is the draws' */
+    if (!r->samples && !vk_buf_pending_any() && !r->cgate && !queued) {
         perform(r);
         vk_unlock();
         return;
     }
-    /* the work before it, submitted so its completion can be waited for; results of earlier submits are older */
+    /* the work before it, submitted so its completion can be waited for; results of earlier submits are older. A
+       samples-passed report waits for the submit being recorded, which holds its counts, without submitting it now */
+    u64 recording = vk_submit_number();
     if (vk_buf_pending_unsubmitted()) vk_submit(VK_NULL_HANDLE, 0, VK_NULL_HANDLE);
-    r->gate = vk_last_submit();
+    r->gate = r->samples ? recording : vk_last_submit();
     pm_lock(&g_rlock);
     if (g_rhead - g_rtail == RQ_N) { /* full: the oldest goes now */
         u64 oldest = g_rq[g_rtail % RQ_N].gate, coldest = g_rq[g_rtail % RQ_N].cgate;
         pm_unlock(&g_rlock);
+        submit_through(oldest);
         vk_wait_submit(oldest);
         vk_compute_wait(coldest);
         release_through(oldest, coldest);
@@ -137,6 +159,28 @@ void vk_release_write(u64 gva, const void* data, u32 len) {
     r.gva = gva;
     r.len = len < sizeof r.data ? len : (u32)sizeof r.data;
     memcpy(r.data, data, r.len);
+    release(&r);
+}
+/* the GPFIFO submission ended or waits: a release still gated on the submit being recorded goes to the GPU, as the
+   guest may look at it now */
+void vk_release_submit(void) {
+    vk_lock();
+    pm_lock(&g_rlock);
+    u64 gate = g_rhead != g_rtail ? g_rq[(g_rhead - 1) % RQ_N].gate : 0; /* the gates only grow */
+    pm_unlock(&g_rlock);
+    submit_through(gate);
+    vk_unlock();
+}
+void vk_release_samples(u64 gva, u32 len, u32 counter, u64 first, u64 end, u64 ticks) {
+    Release r;
+    memset(&r, 0, sizeof r);
+    r.gva = gva;
+    r.len = len == 4 ? 4 : 16;
+    r.samples = 1;
+    r.qch = counter;
+    r.qfirst = first;
+    r.qend = end;
+    memcpy(r.data + 8, &ticks, 8);
     release(&r);
 }
 void vk_release_incr(u32 id) {
@@ -181,6 +225,7 @@ static void release_match(u64 gva, u64 len, u32 id, int all) {
     }
     pm_unlock(&g_rlock);
     if (found) {
+        submit_through(gate);
         vk_wait_submit(gate);
         vk_compute_wait(cgate);
         release_through(gate, cgate);

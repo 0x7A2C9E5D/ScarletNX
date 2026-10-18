@@ -22,7 +22,7 @@ set(snx_ffmpeg_patch "${CMAKE_SOURCE_DIR}/cmake/ffmpeg-vp9-nvdec.patch")
 file(SHA256 "${snx_ffmpeg_patch}" snx_ffmpeg_patch_sha256)
 include("${CMAKE_SOURCE_DIR}/cmake/patched_copy.cmake")
 snx_patched_copy(SOURCE "${FFmpeg_SOURCE_DIR}" DEST "${snx_ffmpeg_src}" PATCHES "${snx_ffmpeg_patch}"
-                 FILES libavcodec/vp9.c 69bcc226b8d240fb21ea5cfa071c101ed451409bf80368ec26d5664c9fc2ab6c)
+                 FILES libavcodec/vp9.c 459e8ca79e45680c98ba70ac574172e2389b177c6d19e5466fa63c3f0ff652e1)
 # sh before bash: on Windows a bash.exe in System32 is WSL's launcher, and w64devkit's sh is the one to use
 find_program(SNX_FFMPEG_SH NAMES sh bash)
 find_program(SNX_FFMPEG_MAKE NAMES gmake make)
@@ -138,8 +138,12 @@ else()
         INSTALL_DIR "${snx_ffmpeg_prefix}"
         CONFIGURE_COMMAND "${SNX_FFMPEG_SH}" "${snx_ffmpeg_src}/configure" --prefix=${snx_ffmpeg_prefix}
                           ${snx_ffmpeg_args}
+        # make install is part of the build step: the libraries below are its byproducts, which Ninja checks again as
+        # soon as the step ends. Installed by a later step, a rebuilt FFmpeg still looked unchanged then, and the
+        # runtime kept its link to the old one until the next build
         BUILD_COMMAND "${SNX_FFMPEG_MAKE}" -j${snx_ffmpeg_jobs} ${snx_ffmpeg_make_cc}
-        INSTALL_COMMAND "${SNX_FFMPEG_MAKE}" install
+        COMMAND "${SNX_FFMPEG_MAKE}" install
+        INSTALL_COMMAND ""
         BUILD_BYPRODUCTS "${snx_ffmpeg_prefix}/lib/libavcodec.a" "${snx_ffmpeg_prefix}/lib/libswresample.a"
                          "${snx_ffmpeg_prefix}/lib/libavutil.a"
         # configure and make print a lot: keep it in log files, shown when a step fails
@@ -147,6 +151,9 @@ else()
         LOG_BUILD ON
         LOG_INSTALL ON
         LOG_OUTPUT_ON_FAILURE ON)
+    # a changed patch rewrites the patched file at configure time, which the build step doesn't see on its own: an
+    # existing tree kept linking the FFmpeg built from the old one
+    ExternalProject_Add_StepDependencies(ffmpeg_build build "${snx_ffmpeg_src}/libavcodec/vp9.c")
     snx_deps_publish(ffmpeg_build ffmpeg "${snx_ffmpeg_prefix}" "${snx_ffmpeg_cache_DIR}")
 endif()
 
