@@ -67,6 +67,26 @@ void fps_limit_text(int fps, char* out, size_t n) {
         snprintf(out, n, "%d", fps);
 }
 
+int g_opt_ldn = SNX_LDN_LAN, g_opt_airplane;
+char g_opt_room[256];
+/* lan, room or off; another word is said and leaves it as it was */
+static void ldn_set(const IniOpt* o, const char* v) {
+    static const char* const words[] = {"lan", "room", "off"};
+    size_t n = strcspn(v, " \t\r");
+    int i;
+    (void)o;
+    for (i = 0; i < 3; i++)
+        if (n == strlen(words[i]) && !strncmp(v, words[i], n)) {
+            g_opt_ldn = i;
+            return;
+        }
+    WARN("settings: ldn=%s is not lan, room or off; ldn stays %s\n", v, words[g_opt_ldn]);
+}
+static void room_set(const IniOpt* o, const char* v) {
+    (void)o;
+    snprintf(g_opt_room, sizeof g_opt_room, "%.*s", (int)strcspn(v, " \t\r"), v);
+}
+
 /* MB: below 1 no cap but the heap region's own, which also caps a larger one */
 static void heap_max_set(const IniOpt* o, const char* v) {
     char* end;
@@ -125,6 +145,18 @@ static const IniOpt g_network[] = {
      "1 = the game uses the computer's connection (known console service domains stay blocked); 0 = offline,\n"
      "with loopback only (not a sandbox)",
      INI_INT, 0, &g_opt_network, 0, 1, NULL, "Network", "Offline|Online", 0, 0},
+    {"airplane_mode", "0",
+     "1 = the console is in airplane mode: no network, whatever network says, and no local wireless (the game hears\n"
+     "both are off)",
+     INI_INT, INI_STARTUP, &g_opt_airplane, 0, 1, NULL, "Airplane mode", "Off|On", 0, 0},
+    {"ldn", "lan",
+     "Local wireless: lan = over the LAN with ldn_mitm's protocol (another ScarletNX, Ryujinx, a console running\n"
+     "ldn_mitm); room = through the Eden room that room names (Eden, another ScarletNX); off = the game hears it is off",
+     INI_TEXT, INI_STARTUP, NULL, 0, 0, ldn_set, "Local wireless", "lan=LAN|room=Eden room|off=Off", 0, 0},
+    {"room", "",
+     "The Eden room ldn=room joins: host or host:port (port 24872 without one). The nickname there is the user's,\n"
+     "and a room's password is room_password in users/online.ini",
+     INI_TEXT, INI_STARTUP, NULL, 0, 0, room_set, "Eden room", NULL, 0, 0},
     END_ROW};
 static const IniOpt g_user[] = {
     {"user", "1",
@@ -545,6 +577,10 @@ static void list_help(const char* help) {
 static void list_values(const IniOpt* o) {
     int step = o->step > 0 ? o->step : 1, v, first = 1;
     char word[64];
+    if (o->type == INI_TEXT && o->words) { /* value=word already */
+        printf("%s", o->words);
+        return;
+    }
     if (o->type != INI_INT) return;
     if (!o->words && (o->lo < 0 || (o->hi - o->lo) / step + 1 > 16)) return; /* typed */
     for (v = (int)o->lo; v <= (int)o->hi; v += step) {

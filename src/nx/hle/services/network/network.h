@@ -6,13 +6,17 @@
 #define SNX_HLE_NETWORK_H
 #include "nx/hle/services/services_int.h"
 #include "common/network/net.h"
+#include "common/network/net_room.h"
 
 /* bsd.c */
 void network_init(void); /* the stack, with its messages in the log */
 SvcObj* new_bsd_u(void);
 SvcObj* new_bsd_s(void);
 SvcObj* new_bsdcfg(void);
-/* the connection the game is told about: the host's, unless the network option is off */
+/* the Eden room the console is in (ldn=room), or NULL: its datagram sockets are the game's */
+void network_set_room(SnxRoom* room);
+SnxRoom* network_room(void);
+/* the connection the game is told about: the host's, unless the network option is off or airplane mode on */
 int network_online(void);
 int network_interface(SnxNetInterface* out); /* 0 and the host's interface when online */
 /* whether a guest may reach addr: with the network option off, loopback only */
@@ -36,5 +40,10 @@ SvcObj* new_ssl(void);
 
 /* ldn.c */
 SvcObj* new_ldn(void);
+
+/* room.c: joins the Eden room room= names when ldn=room, as the user playing (a refusal stops the game), and leaves
+   it at exit */
+void network_room_init(void);
+void network_room_leave(void);
 
 #endif

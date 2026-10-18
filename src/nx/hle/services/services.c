@@ -38,12 +38,14 @@ KEvent* owned_event(const char* name) {
 }
 
 /* ============================================================ registration */
+void svc_core_exit(void) { network_room_leave(); }
 void svc_core_init(void) {
     snx_users_init(); /* before am: its launch parameter names the user */
     am_init();
     audio_init();
     time_init();
     network_init();
+    network_room_init(); /* after the users: the room knows this console by the nickname of the one playing */
 
     nn_sm_detail_IUserInterface_register(new_sm);
     nn_am_service_IApplicationProxyService_register(new_appletoe);

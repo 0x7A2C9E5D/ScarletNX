@@ -26,7 +26,7 @@ static void test_ipc_in(IpcCtx* c, u32 off, void* dst, u32 n) {
 
 u8* g_mem;
 int g_verbose;
-int g_opt_network;
+int g_opt_network, g_opt_airplane;
 static unsigned test_checks, test_objects, test_kobjs;
 
 static void test_fail(const char* expression, int line) {
@@ -327,6 +327,17 @@ int main(void) {
     network_init();
     snx_net_set_log(NULL);
     CHECK(!network_online());
+    /* airplane mode is offline with the network option on too: no connection, only the loopback reachable */
+    {
+        SnxSockAddr out = {SNX_AF_INET, 0, 0, {8, 8, 8, 8}, 0}, lo = {SNX_AF_INET, 0, 0, {127, 0, 0, 1}, 0};
+        g_opt_network = 1;
+        g_opt_airplane = 1;
+        CHECK(!network_online() && !network_reachable(&out) && network_reachable(&lo));
+        test_nifm();
+        g_opt_airplane = 0;
+        CHECK(network_reachable(&out));
+        g_opt_network = 0;
+    }
     SvcObj* r = new_sfdnsres();
     test_host_by_name(r);
     test_host_by_addr(r);

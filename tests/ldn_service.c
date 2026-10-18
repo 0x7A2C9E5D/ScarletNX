@@ -16,7 +16,7 @@
 
 u8* g_mem;
 int g_verbose;
-int g_opt_network;
+int g_opt_network, g_opt_airplane, g_opt_ldn;
 static unsigned test_checks, test_objects, test_kobjs;
 static u32 test_next_handle = 0x100;
 
@@ -292,6 +292,25 @@ int main(void) {
     request(&r, 100);
     CHECK(call(b, &r) == 0);
     ev_b = handle_event(r.c.out_copy[0]);
+
+    /* ldn=off is a console with local wireless disabled, airplane_mode one in airplane mode, and ldn=room one out of
+       its room: none initializes, each with its result */
+    g_opt_ldn = SNX_LDN_OFF;
+    request(&r, 400);
+    r.c.has_pid = 1;
+    CHECK(call(a, &r) == LDN_RC(22) && get_state(a) == 0);
+    g_opt_ldn = SNX_LDN_LAN;
+    g_opt_airplane = 1;
+    request(&r, 400);
+    r.c.has_pid = 1;
+    CHECK(call(a, &r) == LDN_RC(23) && get_state(a) == 0);
+    g_opt_airplane = 0;
+    g_opt_ldn = SNX_LDN_ROOM;
+    request(&r, 400);
+    r.c.has_pid = 1;
+    CHECK(call(a, &r) == LDN_RC(33) && get_state(a) == 0);
+    g_opt_ldn = SNX_LDN_LAN;
+    CHECK(!ev_a->signaled);
 
     /* Initialize: each console gets a loopback address of its own, offline */
     g_opt_network = 0;

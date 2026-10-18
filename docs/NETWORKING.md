@@ -40,10 +40,17 @@ serialized records have their own wire encoding.
 Host sockets stay nonblocking. Guest blocking is implemented by waiting for
 readiness with receive/send deadlines. The cancellation API wakes blocked waits;
 callers retaining a socket reference can safely finish I/O after a descriptor is
-closed. This library does not provide an Ethernet/IP virtual machine or Eden's
-multiplayer proxy. Local wireless (`net_ldn.c`) is the one virtual LAN: the
-protocol of the ldn_mitm sysmodule, which Ryujinx's LdnMitm client speaks,
-over UDP and TCP 11452 on the console's interface.
+closed. This library does not provide an Ethernet/IP virtual machine. Local
+wireless (`net_ldn.c`) travels two ways. On the LAN it speaks the protocol of
+the ldn_mitm sysmodule, which Ryujinx's LdnMitm client speaks too, over UDP and
+TCP 11452 on the console's interface. Through an Eden room (`net_room.c`, the
+protocol of Eden's room server) one ENet connection carries ldn's messages and
+the game's UDP datagrams, as zstd frames, to the room, which relays them to the
+other members; the console's address is the one the room gives it, and the
+game's datagram sockets are the room's (TCP stays the host's, as in Eden). A
+datagram carries Eden's protocol number for its socket (1 for a socket opened
+with protocol 0, 4 for UDP) and reaches only a socket of the same one, so an
+Eden and a ScarletNX of one game meet.
 
 ## Runtime behavior
 

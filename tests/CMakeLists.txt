@@ -408,7 +408,7 @@ endforeach()
 add_executable(snx-test-bsd-service bsd_service.c)
 snx_test_target(snx-test-bsd-service 23)
 snx_service_swipc(snx-test-bsd-service hle/services/network/bsd.swipc)
-target_link_libraries(snx-test-bsd-service PRIVATE scarletnx-net)
+target_link_libraries(snx-test-bsd-service PRIVATE scarletnx-ldn)
 add_test(NAME bsd_service COMMAND snx-test-bsd-service)
 set_tests_properties(bsd_service PROPERTIES TIMEOUT 60)
 
@@ -417,7 +417,7 @@ add_executable(snx-test-network-service network_service.c "${PROJECT_SOURCE_DIR}
 snx_test_target(snx-test-network-service 23)
 snx_service_swipc(snx-test-network-service hle/services/network/bsd.swipc hle/services/network/dns.swipc
                   hle/services/network/nifm.swipc)
-target_link_libraries(snx-test-network-service PRIVATE scarletnx-net)
+target_link_libraries(snx-test-network-service PRIVATE scarletnx-ldn)
 add_test(NAME network_service COMMAND snx-test-network-service)
 set_tests_properties(network_service PROPERTIES TIMEOUT 60)
 
@@ -449,13 +449,19 @@ if(TARGET OpenSSL::Crypto)
     set_tests_properties(ldn_lan ldn_service PROPERTIES RESOURCE_LOCK ldn_port)
 endif()
 
+# the Eden room of ldn=room (room.c): room='s address, users/online.ini's password, what stops the game before joining
+add_executable(snx-test-room-service room_service.c)
+snx_test_target(snx-test-room-service 23)
+target_link_libraries(snx-test-room-service PRIVATE scarletnx-ldn scarletnx-common)
+add_test(NAME room_service COMMAND snx-test-room-service)
+
 # ssl (ssl.c) against a TLS server in the test, on the game's bsd sockets (bsd.c, built beside). OpenSSL comes with
 # the NX, 3DS and hactool builds (cmake/dependencies.cmake), not with a GNU ABI-only one
 if(TARGET OpenSSL::SSL)
     add_executable(snx-test-ssl-service ssl_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
     snx_test_target(snx-test-ssl-service 23)
         snx_service_swipc(snx-test-ssl-service hle/services/network/bsd.swipc hle/services/network/ssl.swipc)
-    target_link_libraries(snx-test-ssl-service PRIVATE scarletnx-net OpenSSL::SSL)
+    target_link_libraries(snx-test-ssl-service PRIVATE scarletnx-ldn OpenSSL::SSL)
     add_test(NAME ssl_service COMMAND snx-test-ssl-service)
     set_tests_properties(ssl_service PROPERTIES TIMEOUT 60)
 endif()

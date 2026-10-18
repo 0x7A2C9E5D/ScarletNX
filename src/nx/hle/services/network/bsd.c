@@ -54,7 +54,7 @@ int network_interface(SnxNetInterface* out) {
     static time_t when;
     static int have;
     static SnxNetInterface cached;
-    if (!g_opt_network) return -SNX_ENETDOWN;
+    if (!g_opt_network || g_opt_airplane) return -SNX_ENETDOWN;
     pm_lock(&lk);
     time_t now = time(NULL);
     if (!when || now - when >= 2 || now < when) {
@@ -68,11 +68,17 @@ int network_interface(SnxNetInterface* out) {
 }
 int network_online(void) { return !network_interface(NULL); }
 int network_reachable(const SnxSockAddr* a) {
-    if (g_opt_network || a->family == SNX_AF_UNSPEC) return 1;
+    if ((g_opt_network && !g_opt_airplane) || a->family == SNX_AF_UNSPEC) return 1;
     if (a->family == SNX_AF_INET) return a->addr[0] == 127;
     static const uint8_t lo6[16] = {[15] = 1};
     return a->family == SNX_AF_INET6 && !memcmp(a->addr, lo6, 16);
 }
+/* the Eden room the console joined with ldn=room (room.c): the game's datagram sockets are the room's, and reach
+   the members' addresses whatever the network option says */
+static SnxRoom* g_room;
+void network_set_room(SnxRoom* room) { g_room = room; }
+SnxRoom* network_room(void) { return g_room; }
+static int reachable(SnxSocket* s, const SnxSockAddr* a) { return snx_room_socket(s) || network_reachable(a); }
 /* the address a bind to INADDR_ANY binds instead, while ldn gives this console one of its own on the LAN (ldn.c),
    and its subnet's broadcast address: two consoles on one host then keep their ports apart, and each still hears
    the broadcasts a game sends to the subnet (a Pia session's first messages). NULL clears it */
@@ -348,7 +354,9 @@ static int bsd_socket(Bsd* b, i32 gdom_in, i32 gtype_in, i32 proto_in, int exemp
         !(type == SNX_SOCK_RAW && dom == SNX_AF_INET && proto == SNX_IPPROTO_ICMP))
         return reply(-SNX_EINVAL, ret, bsd_errno);
     SnxSocket* s;
-    int r = snx_socket_open(&s, dom, type, (int)proto);
+    int r = g_room && dom == SNX_AF_INET && type == SNX_SOCK_DGRAM && (proto == 0 || proto == SNX_IPPROTO_UDP)
+                ? snx_room_socket_open(g_room, &s, dom, type, (int)proto)
+                : snx_socket_open(&s, dom, type, (int)proto);
     if (r) {
         LOG("bsd: Socket(%u, %u, %u) failed: errno %d\n", gdom, gtype, proto, -r);
         return reply(r, ret, bsd_errno);
@@ -575,7 +583,7 @@ static int64_t do_send(Bsd* b, IpcBuf message, i32 fd, u32 gflags, const SnxSock
     SnxSocket* s = fd_get(b, fd, NULL);
     if (!s) return -SNX_EBADF;
     int64_t r;
-    if (to && !network_reachable(to))
+    if (to && !reachable(s, to))
         r = -SNX_ENETUNREACH;
     else if (!a && n)
         r = -SNX_EFAULT;
@@ -653,7 +661,7 @@ static int bind_connect(Bsd* b, i32 fd, IpcBuf addr, int connect, i32* ret, u32*
             pm_unlock(&b->lk);
             snx_socket_unref(c);
         }
-    } else if (!network_reachable(&sa))
+    } else if (!reachable(s, &sa))
         r = -SNX_ENETUNREACH;
     else {
         r = snx_socket_connect(s, &sa);

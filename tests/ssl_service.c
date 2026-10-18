@@ -19,7 +19,7 @@
 
 u8* g_mem;
 int g_verbose;
-int g_opt_network;
+int g_opt_network, g_opt_airplane;
 static unsigned test_objects;
 static void test_fail(const char* expression, int line) {
     fprintf(stderr, "ssl_service.c:%d: check failed: %s\n", line, expression);
