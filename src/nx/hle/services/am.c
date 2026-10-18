@@ -48,13 +48,16 @@ u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
 
 /* the application's message queue: a message stays queued until ReceiveMessage takes it, and the event is signaled
    while one is */
-#define AM_MESSAGES 16
+#define AM_MESSAGES     16
+#define AM_USER_CHANNEL 8
 static struct {
     PMutex lock;
     KEvent* msg_event;
     KEvent* sleep_lock_event; /* the sleep lock is granted at once, so this is signaled from the first request on */
     KEvent* launchable_event; /* library applets can be launched from the start */
     KEvent* resolution_event; /* the default display resolution and HDCP state never change while running */
+    SvcObj* user_channel[AM_USER_CHANNEL]; /* copies of the storages unpopped, the last one on top */
+    u32 user_count;
     u32 msgs[AM_MESSAGES];
     u32 head, count;
     int preselected_popped; /* the preselected user launch parameter is given once */
@@ -451,7 +454,14 @@ static int nn_am_service_IApplicationFunctions_PopLaunchParameter(SvcObj* self, 
     u8* d;
     u32 v;
     (void)self;
-    R_UNLESS(kind == 2, AM_NO_DATA); /* UserChannel: nothing was left there by a previous program */
+    if (kind == 1) { /* UserChannel: the last storage unpopped, which the channel's reference goes with */
+        pm_lock(&am.lock);
+        *storage = am.user_count ? am.user_channel[--am.user_count] : NULL;
+        pm_unlock(&am.lock);
+        R_UNLESS(*storage, AM_NO_DATA);
+        R_SUCCEED();
+    }
+    R_UNLESS(kind == 2, AM_NO_DATA); /* PreselectedUser (2) is the only other kind with data */
     pm_lock(&am.lock);
     v = (u32)am.preselected_popped;
     am.preselected_popped = 1;
@@ -466,6 +476,37 @@ static int nn_am_service_IApplicationFunctions_PopLaunchParameter(SvcObj* self, 
     memcpy(d + 4, &v, 4);
     memcpy(d + 8, g_user_id, 16);
     R_SUCCEED();
+}
+
+static int nn_am_service_IApplicationFunctions_ClearUserChannel(SvcObj* self) {
+    SvcObj* drop[AM_USER_CHANNEL];
+    u32 i, n;
+    (void)self;
+    pm_lock(&am.lock);
+    n = am.user_count;
+    memcpy(drop, am.user_channel, n * sizeof drop[0]);
+    am.user_count = 0;
+    pm_unlock(&am.lock);
+    for (i = 0; i < n; i++) svcobj_unref(drop[i]);
+    R_SUCCEED();
+}
+/* a copy, as Eden keeps one: the game may write its storage again after */
+static int nn_am_service_IApplicationFunctions_UnpopToUserChannel(SvcObj* self, SvcObj* storage) {
+    SvcObj* copy;
+    (void)self;
+    if (!storage) R_SUCCEED();
+    copy = am_storage_new(((StorageData*)storage->data)->size, am_storage_bytes(storage));
+    if (!copy) R_THROW(AM_OUT_OF_MEMORY);
+    pm_lock(&am.lock);
+    if (am.user_count < AM_USER_CHANNEL) {
+        am.user_channel[am.user_count++] = copy;
+        copy = NULL;
+    }
+    pm_unlock(&am.lock);
+    if (!copy) R_SUCCEED();
+    svcobj_unref(copy);
+    WARN_LIMIT(4, "am: the user channel holds %d storages, no more\n", AM_USER_CHANNEL);
+    R_THROW(AM_OUT_OF_MEMORY);
 }
 
 /* the game's control.nacp (nn::ns::ApplicationControlProperty), as the recompiler staged it beside the game's data:

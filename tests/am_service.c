@@ -240,6 +240,29 @@ static void test_audio_controller(void) {
     svcobj_unref(c);
     CHECK(test_objects == 0);
 }
+/* the user channel: a copy of each storage unpopped, the last one popped first, and ClearUserChannel empties it */
+static void test_user_channel(void) {
+    SvcObj *a = am_storage_new(4, "abc"), *b = am_storage_new(4, "xyz"), *s = NULL;
+    int i;
+    CHECK(nn_am_service_IApplicationFunctions_PopLaunchParameter(NULL, 1, &s) == AM_NO_DATA);
+    CHECK(nn_am_service_IApplicationFunctions_UnpopToUserChannel(NULL, a) == 0);
+    CHECK(nn_am_service_IApplicationFunctions_UnpopToUserChannel(NULL, b) == 0);
+    memcpy(am_storage_bytes(a), "zzz", 4);
+    CHECK(nn_am_service_IApplicationFunctions_PopLaunchParameter(NULL, 1, &s) == 0);
+    CHECK(((StorageData*)s->data)->size == 4 && memcmp(am_storage_bytes(s), "xyz", 4) == 0);
+    svcobj_unref(s);
+    CHECK(nn_am_service_IApplicationFunctions_PopLaunchParameter(NULL, 1, &s) == 0);
+    CHECK(memcmp(am_storage_bytes(s), "abc", 4) == 0);
+    svcobj_unref(s);
+    CHECK(nn_am_service_IApplicationFunctions_PopLaunchParameter(NULL, 1, &s) == AM_NO_DATA);
+    for (i = 0; i < AM_USER_CHANNEL; i++) CHECK(nn_am_service_IApplicationFunctions_UnpopToUserChannel(NULL, a) == 0);
+    CHECK(nn_am_service_IApplicationFunctions_UnpopToUserChannel(NULL, a) == AM_OUT_OF_MEMORY);
+    CHECK(nn_am_service_IApplicationFunctions_ClearUserChannel(NULL) == 0);
+    CHECK(nn_am_service_IApplicationFunctions_PopLaunchParameter(NULL, 1, &s) == AM_NO_DATA);
+    svcobj_unref(a);
+    svcobj_unref(b);
+    CHECK(test_objects == 0);
+}
 static void test_inline(void) {
     SvcObj* a;
     SvcObj* s;
@@ -410,6 +433,7 @@ static void test_messages(void) {
 }
 int main(void) {
     test_audio_controller();
+    test_user_channel();
     test_inline();
     modern_packet = 1;
     test_inline();
