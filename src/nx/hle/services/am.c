@@ -307,6 +307,8 @@ static void am_lock_destroy(SvcObj* o) { kobj_unref(&((AmLock*)o->data)->event->
 static SvcObj* am_lock_new(void) {
     SvcObj* o = nn_am_service_ILockAccessor_new(sizeof(AmLock));
     ((AmLock*)o->data)->event = owned_event("am:lock accessor");
+    /* the lock is free: libnx's TryLock and Lock wait on the event before they ask for it */
+    kevent_signal(((AmLock*)o->data)->event);
     o->destroy = am_lock_destroy;
     return o;
 }

@@ -388,6 +388,22 @@ static void test_cpu_boost(void) {
     g_opt_docked = 0;
 }
 
+/* a lock accessor from GetHomeButtonReaderLockAccessor (30) and GetReaderLockAccessorEx (31): its event signaled
+   while the lock is free, before anyone took it, and taken by TryLock (1) */
+static void test_lock_event(void) {
+    SvcObj* accessors[2];
+    u8 locked = 0;
+    u32 event = 0, i;
+    CHECK(nn_am_service_ICommonStateGetter_GetHomeButtonReaderLockAccessor(NULL, &accessors[0]) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_GetReaderLockAccessorEx(NULL, 0, &accessors[1]) == 0);
+    for (i = 0; i < 2; i++) {
+        CHECK(((AmLock*)accessors[i]->data)->event->signaled);
+        CHECK(nn_am_service_ILockAccessor_TryLock(accessors[i], 0, &locked, &event) == 0 && locked == 1);
+        CHECK(nn_am_service_ILockAccessor_Unlock(accessors[i]) == 0);
+        svcobj_unref(accessors[i]);
+    }
+}
+
 static void test_swkbd(void) {
     SvcObj* out;
     u8* d;
@@ -533,6 +549,7 @@ int main(void) {
     modern_packet = 1;
     test_inline();
     test_swkbd();
+    test_lock_event();
     test_cpu_boost();
     test_applets();
     CHECK(test_objects == 0 && test_kobjs == 0);
