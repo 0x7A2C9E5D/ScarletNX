@@ -1660,13 +1660,64 @@ int main(int argc, char** argv) {
         kept_as = snx_absolute(more); /* as the system writes the folder once it is there: backslashes on Windows */
         render(&app);
         shows(&app, "Library", normal);
-        shows(&app, "The data folder's", normal);
+        shows(&app, "Where recompiled games go", normal);
         snprintf(line, sizeof line, "- %.20s", app.games_dir);
         shows(&app, line, yellow);
         shows(&app, "- Add a folder", normal);
         assert(!strcmp(app.app_form.folder[0], "not found")); /* games/ was taken away above */
+        /* games/ at its default: the foot's Del greyed, and Del says what the row is */
+        shows_foot(&app, "take one off", rgb(app.theme.soft));
         key(&app, SDLK_DELETE);
-        assert(!strcmp(app.editor.note, "games/ is always listed"));
+        assert(!strcmp(app.editor.note, games_row) && !app.folder_count && !app.place[GUI_PLACE_GAMES]);
+        /* Enter on it picks where games go, as Folders > Games: the picker's own answer first (none here), then a
+           folder; that folder is the row, and Del twice puts back the default, only the setting changing */
+        key(&app, SDLK_RETURN);
+        assert(app.place_row == GUI_PLACE_GAMES);
+        {
+            SDL_Event answer;
+            Uint64 until = SDL_GetTicks() + 2000;
+            while (app.place_row >= 0 && SDL_GetTicks() < until)
+                while (SDL_PollEvent(&answer)) event(&app, &answer);
+            assert(app.place_row == -1 && !app.place[GUI_PLACE_GAMES]);
+        }
+        { /* the folders as the tests before set them, put back after: Folders' default is not theirs */
+            char *data = app.data_dir, *games = app.games_dir, *themes = app.themes_dirs[0], *work = app.work_dir;
+            char *keys_path = app.keys_path, *elsewhere = snx_path_join(temporary, "games elsewhere"), *fallback;
+            char keys[512];
+            app.data_dir = snx_strdup(data);
+            app.games_dir = snx_strdup(games);
+            app.themes_dirs[0] = snx_strdup(themes);
+            app.work_dir = snx_strdup(work);
+            app.keys_path = keys_path ? snx_strdup(keys_path) : NULL;
+            SDL_Event answer;
+            assert(!snx_mkdirs(elsewhere));
+            app.place_row = GUI_PLACE_GAMES;
+            SDL_zero(answer);
+            answer.type = app.picked_folder;
+            answer.user.data1 = SDL_strdup(elsewhere);
+            event(&app, &answer);
+            assert(app.place[GUI_PLACE_GAMES] && same_path(app.games_dir, elsewhere) &&
+                   !strncmp(app.editor.note, "Games: ", 7));
+            assert(app.form == GUI_FORM_FOLDERS && !app.editor.row && same_path(app.folder_keys[0].key, elsewhere));
+            assert(app.folder_keys[0].about == games_row_picked);
+            assert(strstr(shown_keys(&app, keys, sizeof keys), "Del: back to the default"));
+            render(&app);
+            hides_foot(&app, "take one off", rgb(app.theme.soft));
+            key(&app, SDLK_DELETE);
+            assert(app.place[GUI_PLACE_GAMES] &&
+                   !strncmp(app.editor.note, "Del again: Games goes back to the default, ", 43));
+            fallback = snx_path_join(app.data_dir, "games");
+            key(&app, SDLK_DELETE);
+            assert(!app.place[GUI_PLACE_GAMES] && same_path(app.games_dir, fallback) &&
+                   strstr(app.editor.note, ", the default"));
+            assert(snx_is_dir(elsewhere) && same_path(app.folder_keys[0].key, fallback));
+            free(elsewhere);
+            free(fallback);
+            free(app.data_dir), free(app.games_dir), free(app.themes_dirs[0]), free(app.work_dir), free(app.keys_path);
+            app.data_dir = data, app.games_dir = games, app.themes_dirs[0] = themes, app.work_dir = work;
+            app.keys_path = keys_path;
+            open_folders(&app, 0);
+        }
         e.type = SDL_EVENT_DROP_FILE;
         e.drop.data = file;
         event(&app, &e);
@@ -3890,9 +3941,10 @@ int main(int argc, char** argv) {
            between slashes its own; its text, when its words all press one key, that key. A word of every screen's keys
            presses one, or is one that names none */
         {
-            static const char* const says[] = {SAY_MENU_KEYS, SAY_GAMES,    SAY_KEYS_HOW,   SAY_EDITOR,
-                                               SAY_PICKER,    SAY_SETTINGS, SAY_GROUPS,     SAY_APP,
-                                               SAY_FOLDERS,   SAY_PAD,      " Tab: screen."};
+            static const char* const says[] = {SAY_MENU_KEYS,  SAY_GAMES,         SAY_KEYS_HOW,       SAY_EDITOR,
+                                               SAY_PICKER,     SAY_SETTINGS,      SAY_GROUPS,         SAY_APP,
+                                               SAY_FOLDERS,    SAY_FOLDERS_GAMES, SAY_FOLDERS_PICKED, SAY_PAD,
+                                               " Tab: screen."};
             static const char* const none[] = {"Arrows", "mouse", "pad"};
             char key_of[128], what[128];
             Uint8 was;
