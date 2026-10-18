@@ -37,8 +37,11 @@
 #include <sys/sysctl.h>
 #endif
 #ifdef __APPLE__
-#include <libproc.h>
+#include <TargetConditionals.h>
 #include <mach-o/dyld.h>
+#if !TARGET_OS_IPHONE /* the iOS SDK has no libproc, and an app there runs no tools */
+#include <libproc.h>
+#endif
 #endif
 
 void* snx_alloc(size_t size) {
@@ -1126,7 +1129,7 @@ static SnxU64 child_written(pid_t child) {
     for (at += 6; *at == ' '; at++) {}
     for (n = 0; *at >= '0' && *at <= '9'; at++) n = n * 10 + (SnxU64)(*at - '0');
     return n;
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && !TARGET_OS_IPHONE
     struct rusage_info_v2 info;
     return proc_pid_rusage(child, RUSAGE_INFO_V2, (rusage_info_t*)&info) ? SNX_RUN_UNCOUNTED
                                                                          : (SnxU64)info.ri_diskio_byteswritten;
