@@ -130,11 +130,13 @@ static void splash_drawn(App* app, const SDL_Rect* view, const SnxSplashSvg* svg
     free(drawing);
     SDL_DestroySurface(image);
 }
-/* text in color anywhere on the render, glyph by glyph in the font's own bytes: its ink pixels in color, the others
-   not (a box's frame may cross the font's last row, which is empty); 1 and where it starts, else 0 */
-static int find_text(App* app, const char* text, SDL_Color color, int size, int* at_x, int* at_y) {
+/* the 16 rows of the menu font's glyph c: CP437's, then the Latin letters past it (gui_menu_glyph) */
+static const uint8_t* font_rows(int c) { return c < 256 ? gui_vga_font + c * 16 : gui_latin_font + (c - 256) * 16; }
+/* n glyphs in color anywhere on the render: their ink pixels in color, the others not (a box's frame may cross the
+   font's last row, which is empty); 1 and where they start, else 0 */
+static int find_glyphs(App* app, const int* text, int n, SDL_Color color, int size, int* at_x, int* at_y) {
     SDL_Surface *read = SDL_RenderReadPixels(app->renderer, NULL), *image;
-    int s = app->scale * size, n = (int)strlen(text), first = -1, fx = 0, fy = 0, found = 0, x, y;
+    int s = app->scale * size, first = -1, fx = 0, fy = 0, found = 0, x, y;
     assert(read);
     image = SDL_ConvertSurface(read, SDL_PIXELFORMAT_RGBA32);
     SDL_DestroySurface(read);
@@ -144,7 +146,7 @@ static int find_text(App* app, const char* text, SDL_Color color, int size, int*
     for (int i = 0; i < n && first < 0; ++i) /* the first ink, to look for */
         for (int gy = 0; gy < 15 && first < 0; ++gy)
             for (int gx = 0; gx < 8 && first < 0; ++gx)
-                if (gui_vga_font[(unsigned char)text[i] * 16 + gy] & (0x80 >> gx)) {
+                if (font_rows(text[i])[gy] & (0x80 >> gx)) {
                     first = i;
                     fx = (i * 8 + gx) * s;
                     fy = gy * s;
@@ -157,7 +159,7 @@ static int find_text(App* app, const char* text, SDL_Color color, int size, int*
             for (int i = 0; found && i < n; ++i)
                 for (int gy = 0; found && gy < 15; ++gy)
                     for (int gx = 0; found && gx < 8; ++gx) {
-                        int ink = (gui_vga_font[(unsigned char)text[i] * 16 + gy] & (0x80 >> gx)) != 0;
+                        int ink = (font_rows(text[i])[gy] & (0x80 >> gx)) != 0;
                         found = ink == SNX_IS(SNX_AT(x + (i * 8 + gx) * s, y + gy * s));
                     }
             if (found) {
@@ -169,6 +171,25 @@ static int find_text(App* app, const char* text, SDL_Color color, int size, int*
 #undef SNX_AT
     SDL_DestroySurface(image);
     return found;
+}
+/* text in color, glyph by glyph in the font's own bytes (CP437) */
+static int find_text(App* app, const char* text, SDL_Color color, int size, int* at_x, int* at_y) {
+    int glyphs[256], n = 0;
+    while (text[n]) {
+        assert(n < 256);
+        glyphs[n] = (unsigned char)text[n];
+        ++n;
+    }
+    return find_glyphs(app, glyphs, n, color, size, at_x, at_y);
+}
+/* UTF-8 text in color, a glyph each letter as the menu draws it (gui_menu_glyph), size times the text's letters */
+static int find_letters(App* app, const char* text, SDL_Color color, int size, int* at_x, int* at_y) {
+    int glyphs[256], n = 0;
+    while (*text) {
+        assert(n < 256);
+        glyphs[n++] = gui_menu_glyph(SDL_StepUTF8(&text, NULL));
+    }
+    return find_glyphs(app, glyphs, n, color, size, at_x, at_y);
 }
 /* the text drawn, or not, in color, its letters size times the text's: a check that fails names its line */
 #define shows(app, text, color)           shows_at(__LINE__, app, text, color, 1, 1)
@@ -1422,7 +1443,7 @@ int main(int argc, char** argv) {
     /* App: the theme and the letters, either way round, and the theme editor, which comes back here */
     app.editor.row = 0;
     key(&app, SDLK_RETURN);
-    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 6);
+    assert(app.form == GUI_FORM_APP && app.editor.row == GUI_APP_THEME && GUI_APP_ROWS == 7);
     {
         char first[64], line[1024];
         snprintf(first, sizeof first, "%s", app.theme.name);
@@ -1431,6 +1452,7 @@ int main(int argc, char** argv) {
         snprintf(line, sizeof line, "- %-18s %s", "Theme", first);
         shows(&app, line, yellow);
         shows(&app, "- Text size          Auto", normal);
+        shows(&app, "- Language           Auto: English", normal); /* SDL_PREFERRED_LOCALES, the test's */
         shows(&app, "- Theme editor", normal);
         /* under the rows, the three folders Folders moves, whole: the extractions too */
         shows(&app, "- Folders            Defaults", normal);
@@ -1484,8 +1506,10 @@ int main(int argc, char** argv) {
         key(&app, SDLK_RIGHT); /* the next theme */
         snprintf(id, sizeof id, "%s", app.theme.id);
         assert(strcmp(id, first_id));
-        snprintf(expected, sizeof expected,
-                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = 1\n", id);
+        snprintf(
+            expected, sizeof expected,
+            "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = 1\nlanguage = auto\n",
+            id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
         free(kept);
@@ -1501,7 +1525,8 @@ int main(int argc, char** argv) {
         key(&app, SDLK_LEFT);
         assert(!strcmp(app.theme.id, first_id) && !app.menu.text_size && !app.editor.note[0]);
         snprintf(expected, sizeof expected,
-                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = auto\n",
+                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = auto\n"
+                 "language = auto\n",
                  first_id);
         kept = (char*)snx_read_file(app.app_file, &size);
         assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
@@ -1530,6 +1555,88 @@ int main(int argc, char** argv) {
         remove(blocker);
         free(blocker);
         app.editor.note[0] = 0;
+    }
+    /* Language: Auto (the system's: English here, SDL_PREFERRED_LOCALES), English, then the test's xx (tests/po), round
+       either way; kept in app.ini and read back; its words on the screens, a key of the foot found by its own */
+    {
+        size_t size = 0;
+        char *kept, expected[512], line[128];
+        const char* other = "[app]\nlanguage = xx\n";
+        const char* unknown = "[app]\nlanguage = tlh\n";
+        open_app(&app, GUI_APP_LANGUAGE);
+        assert(!app.language && snx_tr_language() == 0 && !strcmp(app.app_form.language, "Auto: English"));
+        key(&app, SDLK_RIGHT);
+        assert(app.language == 1 && snx_tr_language() == 0 && !strcmp(app.app_form.language, "English"));
+        key(&app, SDLK_RETURN); /* Enter goes round too */
+        assert(app.language == 2 && snx_tr_language() == 1 && !strcmp(app.app_form.language, "Test\303\252s"));
+        snprintf(expected, sizeof expected,
+                 "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = auto\n"
+                 "language = xx\n",
+                 app.theme.id);
+        kept = (char*)snx_read_file(app.app_file, &size);
+        assert(kept && size == strlen(expected) && !memcmp(kept, expected, size));
+        free(kept);
+        render(&app);
+        /* the labels' columns as they read: xx's Language, its i accented, is 6 of them in 7 bytes (the font's one) */
+        snprintf(line, sizeof line, "- L\241ngua%12s Test", "");
+        shows(&app, line, yellow);
+        shows(&app, "- Text size", normal); /* not translated in xx: English */
+        shows(&app, "Ajustes", yellow);     /* the tab */
+        shows_foot(&app, "linha", normal);
+        shows_foot(&app, "tela", normal);
+        hides_foot(&app, "change or open", normal);
+        key(&app, SDLK_RIGHT);
+        assert(!app.language && snx_tr_language() == 0); /* Auto again: English */
+        key(&app, SDLK_LEFT);
+        assert(app.language == 2 && snx_tr_language() == 1);
+        /* a start with them: xx as it was left, a language the menu does not have named and left out */
+        app.language = 0;
+        language_apply(&app);
+        assert(!snx_write_file(app.app_file, other, strlen(other)));
+        app.message[0] = 0;
+        app_load(&app);
+        assert(app.language == 2 && snx_tr_language() == 1 && !app.message[0]);
+        assert(!snx_write_file(app.app_file, unknown, strlen(unknown)));
+        app_load(&app);
+        assert(app.language == 2 && snx_tr_language() == 1);
+        snprintf(expected, sizeof expected, "Fora de uso em %s: language = tlh", app.app_file); /* in xx: its words */
+        assert(!strcmp(app.message, expected));
+        app.message[0] = 0;
+        /* the foot's Back, as xx says it, presses Back: the App's rows left for the groups */
+        assert(hint_press(&app, "Volta", 0) && app.editing && app.form == GUI_FORM_SETTINGS);
+        assert(hint_press(&app, "Back", 0) && !app.editing); /* and as English does */
+        /* Auto: the first of the system's languages the menu has, for its country or another; English for none. Over
+           the test's SDL_PREFERRED_LOCALES, which a hint of normal priority does not override */
+        SDL_SetHintWithPriority(SDL_HINT_PREFERRED_LOCALES, "ja_JP,xx_YY,en_US", SDL_HINT_OVERRIDE);
+        assert(language_auto() == 1);
+        SDL_SetHintWithPriority(SDL_HINT_PREFERRED_LOCALES, "ja_JP,en_US,xx", SDL_HINT_OVERRIDE);
+        assert(language_auto() == 0);
+        SDL_SetHintWithPriority(SDL_HINT_PREFERRED_LOCALES, "ja_JP", SDL_HINT_OVERRIDE);
+        assert(language_auto() == 0);
+        SDL_ResetHint(SDL_HINT_PREFERRED_LOCALES); /* the test's own again, en_US */
+        assert(language_auto() == 0);
+        /* English for what follows, kept so, on App as the next part opens it */
+        open_app(&app, GUI_APP_LANGUAGE);
+        key(&app, SDLK_RIGHT);
+        assert(!app.language && snx_tr_language() == 0);
+    }
+    /* the Latin letters past CP437 drawn from Unifont's glyphs (latin.h), the a and the o with a tilde beside CP437's
+       c with a cedilla, by each way the menu draws a line: at a cell, in a box, and in the title's bigger letters */
+    {
+        static const char words[] = "n\303\243o a\303\247\303\265es";
+        SDL_Color white = {255, 255, 255, 255};
+        int x, y, w = cell_w(&app), h = cell_h(&app);
+        SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
+        SDL_RenderClear(app.renderer);
+        text(&app, 2, 1, words, white);
+        assert(find_letters(&app, words, white, 1, &x, &y) && x == 2 * w && y == h);
+        assert(!find_text(&app, "n?o a\207?es", white, 1, &x, &y)); /* not CP437's question marks */
+        SDL_RenderClear(app.renderer);
+        text_in(&app, gui_rect(0, 0, 40 * w, 4 * h), 3 * w, 2 * h, words, white);
+        assert(find_letters(&app, words, white, 1, &x, &y) && x == 3 * w && y == 2 * h);
+        SDL_RenderClear(app.renderer);
+        big_text(&app, gui_rect(0, 0, 60 * w, 6 * h), w, h, words, 2, white);
+        assert(find_letters(&app, words, white, 2, &x, &y) && x == w && y == h);
     }
     /* Clean old settings, Enter twice: the first says what it would do, another key in between starts again, the
        second does it and shows what it did over the screen, until a key closes it; then there is nothing left */
