@@ -193,14 +193,17 @@ static int nn_audio_detail_IAudioOut_GetAudioOutState(SvcObj* self, u32* state) 
     R_SUCCEED();
 }
 
+/* an out already started is refused, as Eden's and Ryujinx's are */
 static int nn_audio_detail_IAudioOut_Start(SvcObj* self) {
     AudOut* q = audout_lock(self);
-    if (!q->started) {
-        q->started = 1;
-        q->t0 = plat_ns();
-        q->t0_frames = 0;
-        plat_audio_start(q->output, 1);
+    if (q->started) {
+        pm_unlock(&audio.lk);
+        R_THROW(AUDIO_OPERATION_FAILED);
     }
+    q->started = 1;
+    q->t0 = plat_ns();
+    q->t0_frames = 0;
+    plat_audio_start(q->output, 1);
     pm_unlock(&audio.lk);
     R_SUCCEED();
 }
@@ -316,13 +319,16 @@ static int nn_audio_detail_IAudioOut_GetAudioOutPlayedSampleCount(SvcObj* self, 
     R_SUCCEED();
 }
 
+/* a stopped out keeps what was appended until it starts: only a started one is flushed, and says so */
 static int nn_audio_detail_IAudioOut_FlushAudioOutBuffers(SvcObj* self, u8* flushed) {
     AudOut* q = audout_lock(self);
-    if (audout_release_all(q)) kevent_signal(q->ev);
-    q->t0 = plat_ns();
-    q->t0_frames = 0;
+    *flushed = (u8)q->started;
+    if (q->started) {
+        if (audout_release_all(q)) kevent_signal(q->ev);
+        q->t0 = plat_ns();
+        q->t0_frames = 0;
+    }
     pm_unlock(&audio.lk);
-    *flushed = 1;
     R_SUCCEED();
 }
 

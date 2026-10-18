@@ -750,13 +750,25 @@ int main(void) {
     unsigned before = host->queued;
     CHECK(append(o, 7, 1, 0x7FF0, 192, 192, 0) == 0); /* spans an unreadable allocation */
     CHECK(host->queued == before);
-    command(o, 11);
+    /* a stopped out keeps what was appended: Flush says it flushed nothing, and a Start of a started out is
+       refused */
+    {
+        IpcCtx f = request(11, NULL, 0);
+        CHECK(o->dispatch(o, &f) == 0 && f.out_size == 4 && reply32(&f, 0) == 0);
+        CHECK(released(o, 8) == 0 && query32(o, 9) == 1);
+        command(o, 1);
+        f = request(1, NULL, 0);
+        CHECK(o->dispatch(o, &f) == RC(153, 2));
+        f = request(11, NULL, 0);
+        CHECK(o->dispatch(o, &f) == 0 && f.out_size == 4 && reply32(&f, 0) == 1);
+    }
     CHECK(released(o, 8) == 1);
     for (u32 i = 0; i < 64; i++) CHECK(append(o, 7, 100 + i, 0x400, 196, 192, 0) == 0);
     CHECK(append(o, 7, 999, 0x400, 196, 192, 0) == RC(153, 8));
     CHECK(host->queued == before + 64); /* A full ring must reject the host copy too. */
     command(o, 11);
     CHECK(released(o, 8) == 64 && gr64(0x200) == 100 && gr64(0x3F8) == 163);
+    command(o, 2);
     svcobj_unref(o);
     CHECK(audio.outs == NULL);
 
