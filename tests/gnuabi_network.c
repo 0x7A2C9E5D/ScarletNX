@@ -117,7 +117,8 @@ int main(void) {
     unsigned char ev[16] = {1, 0, 0, 0, 0, 0, 0, 0, 0xEF, 0xBE, 0xAD, 0xDE};
     put(DATA, ev, 16);
     CHECK(sys(GNU_NR_epoll_ctl, (uint64_t)ep, 1, (uint64_t)c, DATA, 0, 0) == 0);
-    CHECK(sys(GNU_NR_epoll_pwait, (uint64_t)ep, DATA + 64, 4, 0, 0, 0) == 1); /* the byte sent through d */
+    /* the byte sent through d: FreeBSD's loopback hands it over microseconds after sendto, so the wait has a timeout */
+    CHECK(sys(GNU_NR_epoll_pwait, (uint64_t)ep, DATA + 64, 4, 1000, 0, 0) == 1);
     CHECK(get32(DATA + 64) & 1 && get32(DATA + 72) == 0xDEADBEEF);
     CHECK(sys(GNU_NR_epoll_ctl, (uint64_t)ep, 1, (uint64_t)c, DATA, 0, 0) == -GNU_EEXIST);
     CHECK(sys(GNU_NR_recvfrom, (uint64_t)c, DATA, 16, 0, 0, 0) == 1);
