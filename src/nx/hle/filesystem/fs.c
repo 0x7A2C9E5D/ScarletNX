@@ -800,6 +800,23 @@ static int nn_fssrv_sf_IFileSystem_GetEntryType(SvcObj* self, IpcBuf path, u32* 
     *type = node->is_dir ? 0 : 1;
     R_SUCCEED();
 }
+/* nn::fs::FileTimeStampRaw: the created, modified and accessed times in seconds since 1970, then 1 when they are set.
+   The host tree keeps one time, the host file's modification, which stands for all three */
+static int nn_fssrv_sf_IFileSystem_GetFileTimeStampRaw(SvcObj* self, IpcBuf path, nn_fs_FileTimeStampRaw* timestamp) {
+    char p[0x301];
+    FsNode* node;
+    u64 ms, s;
+    R_TRY(read_path(path, p));
+    R_TRY(tree_result(fs_tree_lookup(&fsp.tree, fs_root(self), p, &node)));
+    R_TRY(tree_result(fs_tree_mtime(&fsp.tree, node, &ms)));
+    s = ms / 1000;
+    memset(timestamp->v, 0, sizeof timestamp->v);
+    memcpy(timestamp->v, &s, 8);
+    memcpy(timestamp->v + 8, &s, 8);
+    memcpy(timestamp->v + 16, &s, 8);
+    timestamp->v[24] = 1;
+    R_SUCCEED();
+}
 static int nn_fssrv_sf_IFileSystem_OpenFile(SvcObj* self, IpcBuf path, u32 mode, SvcObj** file) {
     char p[0x301];
     u32 rc;

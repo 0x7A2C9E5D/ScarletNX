@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <time.h>
 #if defined(_WIN32)
 #include <direct.h>
 #define test_chdir _chdir
@@ -396,6 +397,21 @@ static void test_file_services(SvcObj* fs) {
     svcobj_unref(writer);
     rename_object(fs, 5, "/work.bin", "/renamed.bin", 0);
     fs_command(fs, 7, "/work.bin", 0, FS_NOTFOUND);
+    /* GetFileTimeStampRaw (14): the host file's time for created, modified and accessed, and the flag that says so;
+       nothing for a name that isn't there */
+    {
+        Request r;
+        u64 now = (u64)time(NULL), t[3];
+        request(&r, 14);
+        argument_path(&r, 0, "/renamed.bin");
+        dispatch(fs, &r, 0);
+        CHECK(r.c.out_size == 0x20);
+        memcpy(t, r.c.out, sizeof t);
+        CHECK(t[0] == t[1] && t[1] == t[2] && t[0] + 60 >= now && t[0] <= now + 60 && r.c.out[0x18] == 1);
+        request(&r, 14);
+        argument_path(&r, 0, "/work.bin");
+        dispatch(fs, &r, FS_NOTFOUND);
+    }
     reader = open_object(fs, 8, "/renamed.bin", 1);
     CHECK(get_size(reader) == 8192);
     svcobj_unref(reader);
