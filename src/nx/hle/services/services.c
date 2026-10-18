@@ -49,6 +49,7 @@ void svc_core_init(void) {
     nn_settings_ISettingsServer_register(new_set);
     nn_settings_ISystemSettingsServer_register(new_setsys);
     nn_timesrv_detail_service_IStaticService_register(new_time);
+    svc_register("time:u", new_time_user);
     nn_account_IAccountServiceForApplication_register(new_acc);
     /* one interface, two kinds of session (ldr.c) */
     svc_register("ldr:ro", new_ldr);
@@ -89,6 +90,8 @@ void svc_core_init(void) {
     nn_ldn_detail_IUserServiceCreator_register(new_ldn);
     nn_btm_IBtmUser_register(new_btmu);
     nn_audio_detail_IAudioInManager_register(new_audin);
+    nn_ngc_detail_IService_register(new_ngc);
+    nn_ngct_detail_IService_register(new_ngct);
 
     /* the audio renderer's 5 ms frames and the audio outs' buffers (audio.c), from the start as on the console */
     if (plat_thread(audio_clock, NULL, (size_t)8 << 20)) fatal("Could not start the audio clock's thread");

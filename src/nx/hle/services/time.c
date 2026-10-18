@@ -15,6 +15,7 @@
 
 #include "hle/services/time.swipc.inc"
 
+#define TIME_PERMISSION_DENIED    RC(116, 1)
 #define TIME_CLOCK_MISMATCH      RC(116, 102)
 #define TIME_NOT_FOUND           RC(116, 200)
 #define TIME_OVERFLOW            RC(116, 201)
@@ -220,12 +221,37 @@ void time_init(void) {
     LOG("time: the time zone is %s (UTC%s)\n", tm.location, tm.rule.abbreviation);
 }
 
+/* ============================================================ writes */
+/* each session's object, and the clocks and time zone service it hands out, carry one byte: 1 for time:u, an
+   application's, which may write no clock, no setting and no location (Eden's time:u has every write permission off) */
+static int time_read_only(const SvcObj* self) { return ((const u8*)self->data)[0]; }
+static SvcObj* time_child(SvcObj* o, const SvcObj* parent) {
+    ((u8*)o->data)[0] = (u8)time_read_only(parent);
+    return o;
+}
+/* a write time:a or time:s may make: refused to time:u, and not kept for the others, the clocks and the time zone
+   being the host's */
+static int time_write(SvcObj* self, const char* what) {
+    R_UNLESS(!time_read_only(self), TIME_PERMISSION_DENIED);
+    WARN_LIMIT(8, "time: %s is not kept: the clocks and the time zone are the host's\n", what);
+    R_SUCCEED();
+}
+
 /* ============================================================ ISystemClock */
 static int nn_timesrv_detail_service_ISystemClock_GetCurrentTime(SvcObj* self, nn_time_PosixTime* time) {
     nn_time_SteadyClockTimePoint now;
     (void)self;
     steady_point(&now);
     return context_time(&tm.context, &now, time);
+}
+static int nn_timesrv_detail_service_ISystemClock_SetCurrentTime(SvcObj* self, nn_time_PosixTime time) {
+    (void)time;
+    return time_write(self, "SetCurrentTime");
+}
+static int nn_timesrv_detail_service_ISystemClock_SetSystemClockContext(SvcObj* self,
+                                                                        const nn_time_SystemClockContext* context) {
+    (void)context;
+    return time_write(self, "SetSystemClockContext");
 }
 static int nn_timesrv_detail_service_ISystemClock_GetSystemClockContext(SvcObj* self,
                                                                         nn_time_SystemClockContext* context) {
@@ -247,11 +273,21 @@ static int nn_timesrv_detail_service_ISteadyClock_GetCurrentTimePoint(SvcObj* se
     R_SUCCEED();
 }
 
+static int nn_timesrv_detail_service_ISteadyClock_SetTestOffset(SvcObj* self, nn_TimeSpanType offset) {
+    (void)offset;
+    return time_write(self, "SetTestOffset");
+}
+
 /* ============================================================ ITimeZoneService */
 static int nn_timesrv_detail_service_ITimeZoneService_GetDeviceLocationName(SvcObj* self, nn_time_LocationName* name) {
     (void)self;
     memcpy(name->v, tm.location, sizeof name->v);
     R_SUCCEED();
+}
+static int nn_timesrv_detail_service_ITimeZoneService_SetDeviceLocationName(SvcObj* self,
+                                                                            const nn_time_LocationName* name) {
+    (void)name;
+    return time_write(self, "SetDeviceLocationName");
 }
 static int nn_timesrv_detail_service_ITimeZoneService_GetTotalLocationNameCount(SvcObj* self, i32* count) {
     (void)self;
@@ -289,6 +325,14 @@ static int nn_timesrv_detail_service_ITimeZoneService_GetTimeZoneRuleVersion(Svc
                                                                             nn_time_TimeZoneRuleVersion* version) {
     (void)self;
     memcpy(version->v, "2021a", 6); /* the time zone data of firmware 12.1.0, the one set:sys reports */
+    R_SUCCEED();
+}
+/* the location was set when the runtime started, at the steady clock time the user clock's context was taken */
+static int nn_timesrv_detail_service_ITimeZoneService_GetDeviceLocationNameAndUpdatedTime(
+    SvcObj* self, nn_time_LocationName* name, nn_time_SteadyClockTimePoint* time_point) {
+    (void)self;
+    memcpy(name->v, tm.location, sizeof name->v);
+    *time_point = tm.context.timestamp;
     R_SUCCEED();
 }
 static int nn_timesrv_detail_service_ITimeZoneService_GetDeviceLocationNameOperationEventReadableHandle(SvcObj* self,
@@ -334,35 +378,29 @@ static int nn_timesrv_detail_service_ITimeZoneService_ToPosixTimeWithMyRule(SvcO
 
 /* ============================================================ IStaticService */
 /* the user's, network, local and ephemeral network clocks are one context here */
-static SvcObj* new_clock(void) { return nn_timesrv_detail_service_ISystemClock_new(0); }
+static SvcObj* new_clock(const SvcObj* self) { return time_child(nn_timesrv_detail_service_ISystemClock_new(1), self); }
 static int nn_timesrv_detail_service_IStaticService_GetStandardUserSystemClock(SvcObj* self, SvcObj** clock) {
-    (void)self;
-    *clock = new_clock();
+    *clock = new_clock(self);
     R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetStandardNetworkSystemClock(SvcObj* self, SvcObj** clock) {
-    (void)self;
-    *clock = new_clock();
+    *clock = new_clock(self);
     R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetStandardSteadyClock(SvcObj* self, SvcObj** clock) {
-    (void)self;
-    *clock = nn_timesrv_detail_service_ISteadyClock_new(0);
+    *clock = time_child(nn_timesrv_detail_service_ISteadyClock_new(1), self);
     R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetTimeZoneService(SvcObj* self, SvcObj** service) {
-    (void)self;
-    *service = nn_timesrv_detail_service_ITimeZoneService_new(0);
+    *service = time_child(nn_timesrv_detail_service_ITimeZoneService_new(1), self);
     R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetStandardLocalSystemClock(SvcObj* self, SvcObj** clock) {
-    (void)self;
-    *clock = new_clock();
+    *clock = new_clock(self);
     R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetEphemeralNetworkSystemClock(SvcObj* self, SvcObj** clock) {
-    (void)self;
-    *clock = new_clock();
+    *clock = new_clock(self);
     R_SUCCEED();
 }
 static int nn_timesrv_detail_service_IStaticService_GetSharedMemoryNativeHandle(SvcObj* self, u32* shared_memory) {
@@ -385,6 +423,16 @@ static int nn_timesrv_detail_service_IStaticService_IsStandardUserSystemClockAut
     (void)self;
     *enabled = TIME_AUTOMATIC_CORRECTION;
     R_SUCCEED();
+}
+static int nn_timesrv_detail_service_IStaticService_SetStandardSteadyClockInternalOffset(SvcObj* self,
+                                                                                         nn_TimeSpanType offset) {
+    (void)offset;
+    return time_write(self, "SetStandardSteadyClockInternalOffset");
+}
+static int nn_timesrv_detail_service_IStaticService_SetStandardUserSystemClockAutomaticCorrectionEnabled(SvcObj* self,
+                                                                                                         u8 enabled) {
+    (void)enabled;
+    return time_write(self, "SetStandardUserSystemClockAutomaticCorrectionEnabled");
 }
 static int nn_timesrv_detail_service_IStaticService_GetStandardUserSystemClockInitialYear(SvcObj* self, i32* year) {
     (void)self;
@@ -518,4 +566,9 @@ static int nn_timesrv_detail_service_IStaticService_CalculateSpanBetween(SvcObj*
     R_SUCCEED();
 }
 
-SvcObj* new_time(void) { return nn_timesrv_detail_service_IStaticService_new(0); }
+SvcObj* new_time(void) { return nn_timesrv_detail_service_IStaticService_new(1); }
+SvcObj* new_time_user(void) {
+    SvcObj* o = nn_timesrv_detail_service_IStaticService_new(1);
+    ((u8*)o->data)[0] = 1;
+    return o;
+}

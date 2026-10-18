@@ -61,7 +61,7 @@ interface nn::am::service::ICommonStateGetter {
     [61] GetDefaultDisplayResolutionChangeEvent() -> handle<copy, event> event;
     @stub [62] GetHdcpAuthenticationState() -> i32 state;
     [63] GetHdcpAuthenticationStateChangeEvent() -> handle<copy, event> event;
-    @stub [66] SetCpuBoostMode(u32 mode);
+    [66] SetCpuBoostMode(u32 mode);
     @stub [67] CancelCpuBoostMode();
     @stub [68] GetBuiltInDisplayType() -> i32 type;
     [91] GetCurrentPerformanceConfiguration() -> u32 configuration;
@@ -77,7 +77,7 @@ interface nn::am::service::ICommonStateGetter {
 }
 
 # a lock on a system button (the home button's): no home menu here waits for it, so a lock is always granted, and
-# the event is signaled when it is released
+# the event is signaled from the start and when it is released
 interface nn::am::service::ILockAccessor {
     [1] TryLock(b8 return_handle) -> (b8 is_locked, handle<copy, event> event);
     [2] Unlock();

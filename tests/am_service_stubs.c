@@ -10,6 +10,16 @@ extern u64 g_test_nacp_size;
 const u8* g_test_nacp;
 u64 g_test_nacp_size;
 
+/* apm's side of the state getter's performance commands (misc.c): what SetCpuBoostMode last handed it */
+extern u32 g_test_apm_boost;
+u32 g_test_apm_boost = 0xEEEEu;
+u32 apm_configuration(u32 mode) { return mode ? 0x92220009u : 0x00020003u; }
+void apm_set_configuration(u32 mode, u32 config) {
+    (void)mode;
+    (void)config;
+}
+void apm_cpu_boost(u32 boost) { g_test_apm_boost = boost; }
+
 u8* fs_read_file(const char* path, u64* size) {
     u8* d;
     if (size) *size = 0;

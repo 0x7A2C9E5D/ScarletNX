@@ -375,6 +375,35 @@ static SvcObj* swkbd(u32 max, u32 min, int utf8) {
     CHECK(((StorageData*)out->data)->size == 0x7d8);
     return out;
 }
+/* SetCpuBoostMode hands its mode to apm, and GetCurrentPerformanceConfiguration is apm's for the console's mode */
+extern u32 g_test_apm_boost;
+static void test_cpu_boost(void) {
+    u32 config = 0;
+    CHECK(nn_am_service_ICommonStateGetter_SetCpuBoostMode(NULL, 1) == 0 && g_test_apm_boost == 1);
+    CHECK(nn_am_service_ICommonStateGetter_GetCurrentPerformanceConfiguration(NULL, &config) == 0 &&
+          config == 0x00020003u);
+    g_opt_docked = 1;
+    CHECK(nn_am_service_ICommonStateGetter_GetCurrentPerformanceConfiguration(NULL, &config) == 0 &&
+          config == 0x92220009u);
+    g_opt_docked = 0;
+}
+
+/* a lock accessor from GetHomeButtonReaderLockAccessor (30) and GetReaderLockAccessorEx (31): its event signaled
+   while the lock is free, before anyone took it, and taken by TryLock (1) */
+static void test_lock_event(void) {
+    SvcObj* accessors[2];
+    u8 locked = 0;
+    u32 event = 0, i;
+    CHECK(nn_am_service_ICommonStateGetter_GetHomeButtonReaderLockAccessor(NULL, &accessors[0]) == 0);
+    CHECK(nn_am_service_ICommonStateGetter_GetReaderLockAccessorEx(NULL, 0, &accessors[1]) == 0);
+    for (i = 0; i < 2; i++) {
+        CHECK(((AmLock*)accessors[i]->data)->event->signaled);
+        CHECK(nn_am_service_ILockAccessor_TryLock(accessors[i], 0, &locked, &event) == 0 && locked == 1);
+        CHECK(nn_am_service_ILockAccessor_Unlock(accessors[i]) == 0);
+        svcobj_unref(accessors[i]);
+    }
+}
+
 static void test_swkbd(void) {
     SvcObj* out;
     u8* d;
@@ -555,6 +584,8 @@ int main(void) {
     modern_packet = 1;
     test_inline();
     test_swkbd();
+    test_lock_event();
+    test_cpu_boost();
     test_applets();
     CHECK(test_objects == 0 && test_kobjs == 0);
     test_messages();

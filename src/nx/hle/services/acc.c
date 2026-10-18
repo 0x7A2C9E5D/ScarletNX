@@ -10,6 +10,8 @@
 #include "hle/services/acc.swipc.inc"
 
 #define ACC_INVALID_USER_ID RC(124, 20)
+#define ACC_INVALID_LENGTH  RC(124, 32)
+#define ACC_THUMBNAIL_SIZE  0x24000      /* a save's thumbnail: 256x144 RGBA */
 #define ACC_NOT_CONNECTED   RC(110, 300) /* nifm's: there is no network to reach the account server */
 #define ACC_NICKNAME        "Player"
 #define ACC_LAST_EDIT       1546300800 /* the user's profile was last changed on the first day of 2019 */
@@ -98,6 +100,17 @@ static int nn_account_IAccountServiceForApplication_ListQualifiedUsers(SvcObj* s
 }
 
 /* ============================================================ IProfile */
+/* the thumbnail a game stores with a save: for a user, at its size. None is kept here, the saves have no screen to
+   show it on */
+static int nn_account_IAccountServiceForApplication_StoreSaveDataThumbnail(SvcObj* self, const nn_account_Uid* uid,
+                                                                           IpcBuf image) {
+    static const nn_account_Uid none;
+    (void)self;
+    R_UNLESS(memcmp(uid->v, none.v, sizeof none.v), ACC_INVALID_USER_ID);
+    R_UNLESS(image.size == ACC_THUMBNAIL_SIZE, ACC_INVALID_LENGTH);
+    R_SUCCEED();
+}
+
 static void acc_profile_base(SvcObj* self, nn_account_profile_ProfileBase* base) {
     memcpy(base->uid.v, self->data, 16);
     base->last_edit_timestamp = ACC_LAST_EDIT;

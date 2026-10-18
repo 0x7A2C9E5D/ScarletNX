@@ -37,7 +37,8 @@ SvcObj* new_setsys(void);
 
 /* ---- time.c */
 void time_init(void);
-SvcObj* new_time(void);
+SvcObj* new_time(void);      /* time:a and time:s */
+SvcObj* new_time_user(void); /* time:u, an application's: no write */
 
 /* ---- acc.c */
 SvcObj* new_acc(void);
@@ -76,6 +77,11 @@ SvcObj* new_ectx(void);
 SvcObj* new_spl(void);
 SvcObj* new_btmu(void);
 SvcObj* new_audin(void);
+u32 apm_configuration(u32 mode); /* apm's performance configuration of a mode, Normal (0) or Boost */
+void apm_set_configuration(u32 mode, u32 config);
+void apm_cpu_boost(u32 boost); /* am's SetCpuBoostMode: Boost mode's configuration for it */
+SvcObj* new_ngc(void);
+SvcObj* new_ngct(void);
 
 /* ---- audren.c: the audio renderer */
 int audren_update(SvcObj* o, IpcBuf in, IpcBuf out); /* RequestUpdate, on its input and output buffers */
