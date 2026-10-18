@@ -68,7 +68,9 @@ foreach(case_said "stale;does not apply" "other;is not what the patches make")
     list(GET case_said 1 said)
     execute_process(COMMAND "${CMAKE_COMMAND}" "-DSRC=${SRC}" "-DWORK=${WORK}" "-DCASE=${case}" -P "${CMAKE_CURRENT_LIST_FILE}"
                     RESULT_VARIABLE failed OUTPUT_VARIABLE out ERROR_VARIABLE out)
-    string(FIND "${out}" "${said}" at)
+    # CMake wraps a message to its width, so where its lines break depends on the paths in it
+    string(REGEX REPLACE "[ \t\r\n]+" " " flat "${out}")
+    string(FIND "${flat}" "${said}" at)
     if(NOT failed OR at LESS 0)
         fail("${case}.patch: the configure went on, or said otherwise:\n${out}")
     endif()
