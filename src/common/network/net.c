@@ -720,7 +720,7 @@ int snx_net_host_setsockopt(SnxSocket* s, int level, int name, const void* v, si
             SnxTimeval t;
             if (size < sizeof t) return -SNX_EINVAL;
             memcpy(&t, v, sizeof t);
-            if (t.usec < 0 || t.usec >= 1000000) return -SNX_EINVAL;
+            if (t.usec < 0 || t.usec >= 1000000) return -SNX_EDOM;
             *(k == K_RCVTIMEO ? &s->rcvtimeo_us : &s->sndtimeo_us) = timeval_us(&t);
             return 0;
         }

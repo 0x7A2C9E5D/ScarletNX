@@ -545,9 +545,15 @@ static int nn_socket_sf_IClient_SetSockOpt(SvcObj* self, i32 fd, i32 level_in, i
     int level, name, k = sockopt_in(glevel, gname, &level, &name), r = 0;
     if (k > 0) {
         u8 v[32];
+        i64 sec;
         memset(v, 0, sizeof v);
         if (a) memcpy(v, GP(a), n < sizeof v ? n : sizeof v);
-        r = snx_socket_setsockopt(s, level, name, v, n);
+        memcpy(&sec, v, sizeof sec);
+        /* FreeBSD's sosetopt: a timeout before zero is out of range, where Linux (and the stack) take it as expired */
+        if (level == SNX_SOL_SOCKET && (name == SNX_SO_RCVTIMEO || name == SNX_SO_SNDTIMEO) && n >= 16 && sec < 0)
+            r = -SNX_EDOM;
+        else
+            r = snx_socket_setsockopt(s, level, name, v, n);
         /* the host refusing an option the console has (a buffer size out of its range, SO_DEBUG without
            privileges) isn't the game's fault: it gets what the console would answer */
         if (r == -SNX_ENOPROTOOPT || r == -SNX_EPERM || r == -SNX_EACCES) {
