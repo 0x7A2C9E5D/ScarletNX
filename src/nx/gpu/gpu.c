@@ -68,6 +68,8 @@ void gmem_need(u64 gva, u64 size) {
     if (__atomic_load_n(&g_gpu_releases, __ATOMIC_ACQUIRE) && g_renderer->release_need)
         g_renderer->release_need(gva, size);
 }
+/* the renderer's hook (vkr_before_write) makes a release queued over the bytes happen first, with everything else
+   pending there: dma.c and the inline-to-memory path call it directly */
 void gmem_before_write(u64 gva, u64 size) {
     if (size && g_gpu_before_write) g_gpu_before_write(gva, size);
 }

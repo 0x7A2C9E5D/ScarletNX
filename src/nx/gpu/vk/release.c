@@ -285,7 +285,7 @@ int vk_release_read(u64 gva, void* dst, u64 len) {
     return r;
 }
 void vk_release_need(u64 gva, u64 len) {
-    if (len) release_match(gva, len, 0, 0);
+    if (len && __atomic_load_n(&g_gpu_releases, __ATOMIC_ACQUIRE)) release_match(gva, len, 0, 0);
 }
 void vk_release_drain(void) { release_match(0, 0, 0, 1); }
 void vk_release_retire(u32 id) { release_match(0, 0, id, 0); }

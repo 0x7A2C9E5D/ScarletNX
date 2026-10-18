@@ -214,7 +214,9 @@ static u64 rt_layer_bytes(const Surf* s) {
     u64 row = (u64)s->w * s->f.bpp;
     return s->bl ? bl_size((u32)row, s->h, s->bh) : (u64)s->pitch * (s->h - 1) + row;
 }
+/* a target's guest bytes, all layers: kept in rt_size once rt_create has made it, as its shape doesn't change */
 static u64 rt_bytes(const Surf* s) {
+    if (s->rt_size) return s->rt_size;
     if (s->volume && s->bl) {
         u64 slice = rt_layer_bytes(s);
         u32 depth = (s->layers + (1u << s->bd) - 1) & ~((1u << s->bd) - 1);
@@ -448,7 +450,7 @@ void vk_rt_before_write(u64 gva, u64 size) {
     g_rt_flushing = 1;
     if (pend_hit_va(&g_rt_pages, gva, size))
         for (Surf* s = g_rt_first; s; s = s->rt_next)
-            if (!(s->gva >> 63) && gva < s->gva + s->rt_size && s->gva < gva + size) vk_surf_flush(s, NULL);
+            if (!(s->gva >> 63) && gva < s->gva + rt_bytes(s) && s->gva < gva + size) vk_surf_flush(s, NULL);
     g_rt_flushing = 0;
     vk_unlock();
 }

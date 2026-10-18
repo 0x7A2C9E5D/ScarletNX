@@ -47,7 +47,6 @@ typedef struct {
 } CsOut;
 static CsOut g_out[256];
 static int g_nout;
-static u64 g_out_lo = ~0ull, g_out_hi;
 /* the guest pages every pending result covers, the current batch's and those put aside: a read or write of memory no
    result covers (most of them) is answered without checking each result, through the GMMU page by page */
 static PendPages g_pages;
@@ -72,7 +71,7 @@ typedef struct {
     VmaAllocation ar_mem;
     u8* ar_ptr;
     u8* org;
-    u64 ar_cap, org_cap, cval, lo, hi;
+    u64 ar_cap, org_cap, cval;
     CsOut out[256];
     int nout, gfx;
 } CsBatch;
@@ -313,8 +312,6 @@ static void cs_put_aside(void) {
     b->gfx = g_ar_gfx;
     memcpy(b->out, g_out, (size_t)g_nout * sizeof g_out[0]);
     b->nout = g_nout;
-    b->lo = g_out_lo;
-    b->hi = g_out_hi;
     g_phead++;
     g_ccb = cb;
     g_dpool = dp;
@@ -323,8 +320,6 @@ static void cs_put_aside(void) {
     g_ar = VK_NULL_HANDLE; /* arena_fit gives the next batch one */
     g_ar_cap = g_ar_used = 0;
     g_nout = 0;
-    g_out_lo = ~0ull;
-    g_out_hi = 0;
     g_ar_gfx = 0;
     g_inflight = 0;
     cs_any_update();
@@ -343,8 +338,6 @@ static void cs_land(void) {
     /* only now: until the results are in memory, readers on other threads wait for this landing in
        vk_compute_mem_need */
     g_nout = 0;
-    g_out_lo = ~0ull;
-    g_out_hi = 0;
     g_ar_used = 0;
     vkResetDescriptorPool(g_vk.dev, g_dpool, 0);
     if (g_ar_gfx) { /* draws read this arena: it waits until their frame is done, the next batch gets another */
@@ -1137,8 +1130,6 @@ rebind:
             memcpy(g_org + so[i], g_ar_ptr + so[i], ss[i]);
             g_out[g_nout++] = (CsOut){sa[i], so[i], ss[i]};
             pend_add(&g_pages, sa[i], ss[i], 1);
-            if (sa[i] < g_out_lo) g_out_lo = sa[i];
-            if (sa[i] + ss[i] > g_out_hi) g_out_hi = sa[i] + ss[i];
         }
     /* buffer images land like storage buffers: only the bytes the dispatch changed are written back */
     for (i = 0; i < p->si.nimg && i < 8 && !deferred; i++) {
@@ -1152,8 +1143,6 @@ rebind:
             g_out[g_nout].size = bimg[i].bytes;
             g_nout++;
             pend_add(&g_pages, bimg[i].gva, bimg[i].bytes, 1);
-            if (bimg[i].gva < g_out_lo) g_out_lo = bimg[i].gva;
-            if (bimg[i].gva + bimg[i].bytes > g_out_hi) g_out_hi = bimg[i].gva + bimg[i].bytes;
         }
     }
     if (gfx) {
@@ -1224,8 +1213,6 @@ rebind:
         }
         for (int i = 0; i < p->si.nimg; i++) free(originals[i]);
         g_nout = 0;
-        g_out_lo = ~0ull;
-        g_out_hi = 0;
         g_ar_used = 0;
         vkResetDescriptorPool(g_vk.dev, g_dpool, 0);
         g_landing = 0;
