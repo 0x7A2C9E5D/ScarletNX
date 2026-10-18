@@ -38,6 +38,19 @@ static const struct {
     {"pt-BR", 1, KeyCodeMapPortuguese},
 };
 #define SET_LANGUAGES ((int)(sizeof set_languages / sizeof set_languages[0]))
+/* each language's nn::settings::KeyboardLayout, set:sys's default for it: 0 Japanese, 1 EnglishUs, 2
+   EnglishUsInternational, 3 EnglishUk, 4 French, 5 FrenchCa, 6 Spanish, 7 SpanishLatin, 8 German, 9 Italian, 10
+   Portuguese, 11 Russian, 12 Korean, 13 ChineseSimplified, 14 ChineseTraditional */
+static const u8 set_layouts[SET_LANGUAGES] = {0, 1, 4, 8, 9, 6, 13, 12, 2, 10, 11, 14, 3, 5, 7, 13, 14, 10};
+
+/* the system settings set:sys keeps for the run, each at first as on a console fresh from the factory (Eden's
+   DefaultSystemSettings), the keyboard layout the language's */
+static struct {
+    i32 color_set; /* nn::settings::system::ColorSet: 0 BasicWhite, 1 BasicBlack */
+    float vibration;
+    u32 keyboard_layout;
+    u8 lock_screen, quest, battery_percentage, speaker_auto_mute, layout_set;
+} set_sys = {0, 1.0f, 0, 0, 0, 1, 0, 0};
 /* GetAvailableLanguageCodes, from before 4.0.0, lists 15 at most */
 #define SET_LANGUAGES_V1 15
 
@@ -105,6 +118,12 @@ static int nn_settings_ISettingsServer_GetKeyCodeMap2(SvcObj* self, IpcBuf map) 
     set_key_code_map(map);
     R_SUCCEED();
 }
+/* the kiosk flag, set:sys's */
+static int nn_settings_ISettingsServer_GetQuestFlag(SvcObj* self, u8* quest) {
+    (void)self;
+    *quest = set_sys.quest;
+    R_SUCCEED();
+}
 static int nn_settings_ISettingsServer_GetDeviceNickName(SvcObj* self, IpcBuf name) {
     static const char nick[] = "ScarletNX";
     (void)self;
@@ -143,6 +162,78 @@ static int nn_settings_ISystemSettingsServer_GetFirmwareVersion2(SvcObj* self, I
     set_firmware_version(version);
     R_SUCCEED();
 }
+static int nn_settings_ISystemSettingsServer_GetLockScreenFlag(SvcObj* self, u8* flag) {
+    (void)self;
+    *flag = set_sys.lock_screen;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_SetLockScreenFlag(SvcObj* self, u8 flag) {
+    (void)self;
+    set_sys.lock_screen = flag != 0;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_GetColorSetId(SvcObj* self, i32* id) {
+    (void)self;
+    *id = set_sys.color_set;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_SetColorSetId(SvcObj* self, i32 id) {
+    (void)self;
+    set_sys.color_set = id;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_GetVibrationMasterVolume(SvcObj* self, float* volume) {
+    (void)self;
+    *volume = set_sys.vibration;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_SetVibrationMasterVolume(SvcObj* self, float volume) {
+    (void)self;
+    set_sys.vibration = volume;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_GetSpeakerAutoMuteFlag(SvcObj* self, u8* flag) {
+    (void)self;
+    *flag = set_sys.speaker_auto_mute;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_SetSpeakerAutoMuteFlag(SvcObj* self, u8 flag) {
+    (void)self;
+    set_sys.speaker_auto_mute = flag != 0;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_GetQuestFlag(SvcObj* self, u8* flag) {
+    (void)self;
+    *flag = set_sys.quest;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_SetQuestFlag(SvcObj* self, u8 flag) {
+    (void)self;
+    set_sys.quest = flag != 0;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_GetBatteryPercentageFlag(SvcObj* self, u8* flag) {
+    (void)self;
+    *flag = set_sys.battery_percentage;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_SetBatteryPercentageFlag(SvcObj* self, u8 flag) {
+    (void)self;
+    set_sys.battery_percentage = flag != 0;
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_GetKeyboardLayout(SvcObj* self, u32* layout) {
+    (void)self;
+    *layout = set_sys.layout_set ? set_sys.keyboard_layout : set_layouts[set_language(g_opt_lang)];
+    R_SUCCEED();
+}
+static int nn_settings_ISystemSettingsServer_SetKeyboardLayout(SvcObj* self, u32 layout) {
+    (void)self;
+    set_sys.keyboard_layout = layout;
+    set_sys.layout_set = 1;
+    R_SUCCEED();
+}
+
 /* no setting is kept: the value is empty, as GetSettingsItemValueSize says */
 static int nn_settings_ISystemSettingsServer_GetSettingsItemValue(SvcObj* self, IpcBuf name, IpcBuf key, IpcBuf value,
                                                                   u64* size) {
