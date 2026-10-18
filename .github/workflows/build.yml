@@ -355,6 +355,7 @@ jobs:
             mingw-w64-clang-x86_64-pkgconf
             mingw-w64-clang-x86_64-python
             mingw-w64-clang-x86_64-spirv-tools
+            mingw-w64-clang-x86_64-glslang
             mingw-w64-clang-x86_64-ccache
             mingw-w64-ucrt-x86_64-libgccjit
             mingw-w64-ucrt-x86_64-binutils
