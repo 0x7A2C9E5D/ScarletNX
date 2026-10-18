@@ -59,6 +59,8 @@ interface nn::timesrv::detail::service::ITimeZoneService {
     [3] LoadLocationNameList(i32 index, array<nn::time::LocationName, 6> names) -> i32 count;
     [4] LoadTimeZoneRule(nn::time::LocationName name, buffer<nn::time::TimeZoneRule, 0x16> rule);
     [5] GetTimeZoneRuleVersion() -> nn::time::TimeZoneRuleVersion version;
+    [6] GetDeviceLocationNameAndUpdatedTime() -> (nn::time::LocationName name,
+                                                  nn::time::SteadyClockTimePoint time_point);
     [20] GetDeviceLocationNameOperationEventReadableHandle() -> handle<copy, event> event;
     [100] ToCalendarTime(nn::time::PosixTime time, buffer<nn::time::TimeZoneRule, 0x15> rule)
         -> (nn::time::CalendarTime calendar, nn::time::sf::CalendarAdditionalInfo info);

@@ -139,6 +139,12 @@ int main(void) {
     memcpy(z, name.v, 0x24);
     z[0x24] = 0;
     CHECK(!strncmp(z, "UTC", 3) || !strncmp(z, "Etc/GMT", 7));
+    /* the same location, set at the steady clock time of the user clock's context */
+    memset(&name, 0, sizeof name);
+    memset(&tp, 0, sizeof tp);
+    CHECK(nn_timesrv_detail_service_ITimeZoneService_GetDeviceLocationNameAndUpdatedTime(NULL, &name, &tp) == 0);
+    CHECK(!memcmp(name.v, z, 0x24) && tp.value == ctx.timestamp.value &&
+          !memcmp(tp.source_id.v, ctx.timestamp.source_id.v, 16));
 
     /* Tokyo's offset: 2024-02-29 15:04:05 UTC is 2024-03-01 00:04:05 there, a Friday, day 60 of a leap year */
     memset(&name, 0, sizeof name);

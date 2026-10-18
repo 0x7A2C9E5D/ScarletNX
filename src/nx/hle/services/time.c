@@ -291,6 +291,14 @@ static int nn_timesrv_detail_service_ITimeZoneService_GetTimeZoneRuleVersion(Svc
     memcpy(version->v, "2021a", 6); /* the time zone data of firmware 12.1.0, the one set:sys reports */
     R_SUCCEED();
 }
+/* the location was set when the runtime started, at the steady clock time the user clock's context was taken */
+static int nn_timesrv_detail_service_ITimeZoneService_GetDeviceLocationNameAndUpdatedTime(
+    SvcObj* self, nn_time_LocationName* name, nn_time_SteadyClockTimePoint* time_point) {
+    (void)self;
+    memcpy(name->v, tm.location, sizeof name->v);
+    *time_point = tm.context.timestamp;
+    R_SUCCEED();
+}
 static int nn_timesrv_detail_service_ITimeZoneService_GetDeviceLocationNameOperationEventReadableHandle(SvcObj* self,
                                                                                                       u32* event) {
     (void)self;
