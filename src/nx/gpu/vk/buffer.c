@@ -186,10 +186,29 @@ typedef struct {
     const GfxOut* e;
     GfxOut* o;
 } Rebase;
+/* Eight bytes at a time: a result is mostly the bytes it read, and a byte loop here was 84% of the release thread's time
+   in TotK, all of it under vk_lock, where the GPU thread waited for it */
 static void rebase_span(void* user, u64 at, u64 from, u64 n) {
     const Rebase* r = user;
-    for (u64 k = 0; k < n; k++)
-        if (r->e->ptr[from + k] != r->e->org[from + k]) r->o->org[at + k] = r->e->ptr[from + k];
+    const u8 *res = r->e->ptr + from, *org = r->e->org + from;
+    u8* dst = r->o->org + at;
+    u64 k = 0;
+    for (; k + 8 <= n; k += 8) {
+        u64 a, b, d, m;
+        memcpy(&a, res + k, 8);
+        memcpy(&b, org + k, 8);
+        if (a == b) continue;
+        memcpy(&d, dst + k, 8);
+        m = a ^ b; /* the low bit of each byte becomes the OR of its byte's bits, then the byte becomes 0 or 0xFF */
+        m |= m >> 4;
+        m |= m >> 2;
+        m |= m >> 1;
+        m = (m & 0x0101010101010101ull) * 0xFF;
+        d = (d & ~m) | (a & m);
+        memcpy(dst + k, &d, 8);
+    }
+    for (; k < n; k++)
+        if (res[k] != org[k]) dst[k] = res[k];
 }
 static void out_rebase(const GfxOut* e, GfxOut* o) {
     Rebase r = {e, o};
