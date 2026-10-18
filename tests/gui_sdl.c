@@ -4365,6 +4365,7 @@ int main(int argc, char** argv) {
             assert(app.users_shown && app.users_focus == 0);
             render(&app);
             assert(find_text(&app, "Bee", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "Who plays the games", rgb(app.theme.page), 1, &nx, &ny)); /* whole: none cut */
             key(&app, SDLK_DOWN);
             assert(app.users_shown && app.users_focus == 1);
             key(&app, SDLK_RETURN);

@@ -1812,9 +1812,12 @@ static void users_open(App* app) {
     app->users_shown = true;
     app->users_focus = app->user - 1;
 }
-/* the box over the screen, as wide as the longest nickname with its picture; a row each, the focused one */
+/* the box over the screen, as wide as its title or the longest nickname with its picture; a row each, the focused
+   one */
+#define SAY_USERS_TITLE SNX_TR_NOOP("Who plays the games")
 static void users_boxes(App* app, GuiRect* r, GuiList* rows) {
-    int i, longest = 16, s = app->scale, item = item_h(app), h = g_user_count * (item + 6 * s);
+    int i, s = app->scale, item = item_h(app), h = g_user_count * (item + 6 * s);
+    int longest = SDL_max(16, (int)SDL_utf8strlen(snx_tr(SAY_USERS_TITLE)) + 2);
     for (i = 0; i < g_user_count; ++i)
         longest =
             SDL_max(longest, (int)SDL_utf8strlen(g_users[i].nickname) + (int)SDL_utf8strlen(app->theme.marker) + 4);
@@ -1828,7 +1831,7 @@ static void render_users(App* app) {
     char label[SNX_USERS_NICKNAME + 24];
     int i, s = app->scale;
     users_boxes(app, &r, &rows);
-    over_box(app, r, snx_tr("Who plays the games"));
+    over_box(app, r, snx_tr(SAY_USERS_TITLE));
     for (i = rows.first; i < rows.first + rows.shown; ++i) {
         GuiRect b = list_box(&rows, i);
         int side = b.h - 4 * s;
