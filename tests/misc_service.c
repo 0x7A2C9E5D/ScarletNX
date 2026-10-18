@@ -1,15 +1,17 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* mm:u (misc.c) and hid's IHidServer (hid.c) through their generated dispatchers, with the kernel objects they hand
-   out made here and the shared memory a host buffer */
+/* mm:u and the smaller services (misc.c), hid's IHidServer (hid.c) and acc (acc.c) through their generated
+   dispatchers, with the kernel objects they hand out made here and the shared memory a host buffer */
 #include "nx/hle/services/services_int.h"
 #include <math.h>
 #include <stdarg.h>
 
+#include "nx/hle/services/acc.c"
 #include "nx/hle/services/hid.c"
 #include "nx/hle/services/misc.c"
 
 u8* g_mem;
+u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
 int g_verbose;
 int g_opt_docked, g_opt_lang = 1;
 u64 g_title_id = 0x0100BF00112C0000ull;
@@ -34,6 +36,19 @@ static void test_fail(const char* expression, int line) {
 void pm_init(PMutex* m) { (void)m; }
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
+/* the data folder: only the add-on images in test_aoc_installed, ids of system/archives/<id>.romfs */
+static u64 test_aoc_installed[4];
+FILE* fs_open_read(const char* path, u64* size) {
+    char want[64];
+    for (size_t i = 0; i < 4 && test_aoc_installed[i]; i++) {
+        snprintf(want, sizeof want, "system/archives/%016llx.romfs", (unsigned long long)test_aoc_installed[i]);
+        if (!strcmp(path, want)) {
+            if (size) *size = 0;
+            return tmpfile(); /* any open file, which /dev/null is not on Windows: the scan only closes it */
+        }
+    }
+    return NULL;
+}
 void logf_(int level, const char* format, ...) {
     (void)level;
     (void)format;
@@ -699,6 +714,143 @@ static void test_nfp(void) {
     svcobj_unref(manager);
 }
 
+/* acc's TrySelectUserWithoutInteraction: 51, and 52, which a game built for 19.0.0 sends instead, both pick the one
+   user {is_network_service_account_required} */
+static void test_acc_select(void) {
+    SvcObj* acc = new_acc();
+    Request r;
+    for (u32 cmd = 51; cmd <= 52; cmd++) {
+        request(&r, cmd);
+        call(acc, &r);
+        CHECK(r.c.out_size == 16 && !memcmp(r.c.out, g_user_id, 16));
+    }
+    svcobj_unref(acc);
+}
+
+/* ldn:u's CreateClientProcessMonitor (1, 18.0.0+) gives the monitor libnx's ldnInitialize registers its process
+   with: RegisterClient (0), the pid and its word in the raw data, nothing else */
+static void test_ldn_monitor(void) {
+    SvcObj* ldn = new_ldn();
+    Request r;
+    request(&r, 1);
+    call(ldn, &r);
+    CHECK(r.c.nout_objs == 1 && r.c.out_objs[0] != NULL);
+    SvcObj* monitor = r.c.out_objs[0];
+    request(&r, 0);
+    r.c.raw_size = 8;
+    r.c.pid = 0x51;
+    r.c.has_pid = 1;
+    call(monitor, &r);
+    CHECK(r.c.out_size == 0);
+    svcobj_unref(monitor);
+    svcobj_unref(ldn);
+}
+
+/* nfp's StartDetectionWithFilter (25, 23.0.0+) answers what StartDetection (3) does for the same device, before and
+   after Initialize {aruid, pid, buffer}; the filter word after the device is not read */
+static void test_nfp_filter(void) {
+    SvcObj* manager = new_nfp();
+    Request r;
+    request(&r, 0);
+    call(manager, &r);
+    CHECK(r.c.nout_objs == 1);
+    SvcObj* user = r.c.out_objs[0];
+    for (int initialized = 0; initialized < 2; initialized++) {
+        if (initialized) {
+            request(&r, 0);
+            r.c.has_pid = 1;
+            r.c.na = 1;
+            call(user, &r);
+        }
+        int answers[2];
+        for (int i = 0; i < 2; i++) {
+            request(&r, i ? 25 : 3);
+            argument32(&r, 0, 0x20);
+            argument32(&r, 8, 0xFFFFFFFFu);
+            answers[i] = user->dispatch(user, &r.c);
+        }
+        CHECK(answers[0] == answers[1] && answers[0] == (initialized ? NFP_DEVICE_NOT_FOUND : NFP_NFC_DISABLED));
+    }
+    svcobj_unref(user);
+    svcobj_unref(manager);
+}
+
+/* aoc:u's ListAddOnContent (3) {offset, count, pid} with no add-on content: from the end (0) nothing, from past it
+   (1, or a negative offset, which the console reads unsigned) am's ApplicationRecordNotFound */
+static void test_aoc_list(void) {
+    static const u32 offsets[] = {0, 1, 0xFFFFFFFFu};
+    SvcObj* aoc = new_aoc();
+    Request r;
+    for (u32 i = 0; i < 3; i++) {
+        request(&r, 3);
+        argument32(&r, 0, offsets[i]);
+        argument32(&r, 4, 16);
+        r.c.has_pid = 1;
+        r.c.nb = 1;
+        if (i) {
+            CHECK(aoc->dispatch(aoc, &r.c) == RC(128, 37));
+            continue;
+        }
+        call(aoc, &r);
+        CHECK(r.c.out_size == 4 && reply32(&r, 0) == 0);
+    }
+    svcobj_unref(aoc);
+}
+
+/* aoc:u with the add-on images 1 and 3 in the data folder: CountAddOnContent (2) and the game's own
+   CountAddOnContentByApplicationId (0) say 2, another application's 0; ListAddOnContent (3) and
+   ListAddOnContentByApplicationId (1) {offset, count, ...} give the indices from offset, as many as count and the
+   buffer hold, nothing from the end and ApplicationRecordNotFound past it; PrepareAddOnContent (7) succeeds */
+static void test_aoc_content(void) {
+    static const struct {
+        u32 cmd, offset, count, room, rc, n, first;
+    } lists[] = {
+        {3, 0, 16, 16, 0, 2, 1}, {3, 1, 16, 16, 0, 1, 3},           {3, 0, 1, 16, 0, 1, 1},
+        {3, 0, 16, 1, 0, 1, 1},  {3, 2, 16, 16, 0, 0, 0},           {3, 3, 16, 16, RC(128, 37), 0, 0},
+        {1, 0, 16, 16, 0, 2, 1}, {1, 3, 16, 16, RC(128, 37), 0, 0},
+    };
+    const u64 base = aoc_base_id(g_title_id), other = 0x0100000000020000ull;
+    SvcObj* aoc = new_aoc();
+    Request r;
+    u32 v;
+    test_aoc_installed[0] = base + 1;
+    test_aoc_installed[1] = base + 3;
+    aoc_scanned = aoc_count = 0; /* test_aoc_list scanned an empty folder */
+    request(&r, 2);
+    r.c.has_pid = 1;
+    call(aoc, &r);
+    CHECK(reply32(&r, 0) == 2);
+    for (u32 i = 0; i < 2; i++) {
+        request(&r, 0);
+        argument64(&r, 0, i ? other : g_title_id);
+        call(aoc, &r);
+        CHECK(reply32(&r, 0) == (i ? 0u : 2u));
+    }
+    for (u32 i = 0; i < sizeof lists / sizeof lists[0]; i++) {
+        request(&r, lists[i].cmd);
+        argument32(&r, 0, lists[i].offset);
+        argument32(&r, 4, lists[i].count);
+        if (lists[i].cmd == 1) argument64(&r, 8, g_title_id);
+        r.c.has_pid = lists[i].cmd == 3;
+        r.c.nb = 1;
+        r.c.b[0].addr = 0x4000;
+        r.c.b[0].size = lists[i].room * 4;
+        memset(g_mem + 0x4000, 0xAA, 64);
+        CHECK((u32)aoc->dispatch(aoc, &r.c) == lists[i].rc);
+        if (lists[i].rc) continue;
+        CHECK(reply32(&r, 0) == lists[i].n);
+        memcpy(&v, g_mem + 0x4000, 4);
+        CHECK(!lists[i].n || v == lists[i].first);
+    }
+    request(&r, 7);
+    argument32(&r, 0, 1);
+    r.c.has_pid = 1;
+    call(aoc, &r);
+    svcobj_unref(aoc);
+    memset(test_aoc_installed, 0, sizeof test_aoc_installed);
+    aoc_scanned = aoc_count = 0;
+}
+
 int main(void) {
     g_mem = calloc(1, 0x10000);
     CHECK(g_mem != NULL);
@@ -707,6 +859,11 @@ int main(void) {
     test_mii_default();
     test_mm_full();
     test_nfp();
+    test_acc_select();
+    test_ldn_monitor();
+    test_nfp_filter();
+    test_aoc_list();
+    test_aoc_content();
     CHECK(test_objects == 0 && test_kobjs == 0);
     free(g_mem);
     printf("misc_service: %u checks passed\n", test_checks);

@@ -213,6 +213,8 @@ interface nn::nfp::detail::IUser {
     [22] GetApplicationAreaSize(nn::nfc::DeviceHandle device_handle) -> u32 size;
     [23] AttachAvailabilityChangeEvent() -> handle<copy, event> event;
     [24] RecreateApplicationArea(nn::nfc::DeviceHandle device_handle, u32 access_id, buffer<u8, 5> data);
+    # 23.0.0+, which a game built for it sends instead of 3; the filter after the device is not read
+    [25] StartDetectionWithFilter(nn::nfc::DeviceHandle device_handle);
 }
 # nfc's own IUser: the commands before 400 are the old numbers of 400 to 403. The Mifare and pass-through commands
 # need a device, and there is none
@@ -296,19 +298,19 @@ interface nn::bcat::detail::ipc::INotifierService {
 interface nn::bcat::detail::ipc::IDeliveryTaskSuspensionService {
 }
 
-# ================================================================ aoc:u: no add-on content
+# ================================================================ aoc:u: the add-on content in system/archives
 type nn::ec::srv::detail::PurchasedProductInfo = bytes<0x80, 8>;
 
 interface nn::aocsrv::detail::IAddOnContentManager is aoc:u {
-    @stub [0] CountAddOnContentByApplicationId(nn::ncm::ApplicationId application_id) -> i32 count;
-    @stub [1] ListAddOnContentByApplicationId(i32 offset, i32 count, nn::ncm::ApplicationId application_id,
-                                              array<i32, 6> indices) -> i32 out_count;
-    @stub [2] CountAddOnContent(pid) -> i32 count;
-    @stub [3] ListAddOnContent(i32 offset, i32 count, pid, array<i32, 6> indices) -> i32 out_count;
+    [0] CountAddOnContentByApplicationId(nn::ncm::ApplicationId application_id) -> i32 count;
+    [1] ListAddOnContentByApplicationId(i32 offset, i32 count, nn::ncm::ApplicationId application_id,
+                                        array<i32, 6> indices) -> i32 out_count;
+    [2] CountAddOnContent(pid) -> i32 count;
+    [3] ListAddOnContent(i32 offset, i32 count, pid, array<i32, 6> indices) -> i32 out_count;
     [4] GetAddOnContentBaseIdByApplicationId(nn::ncm::ApplicationId application_id) -> u64 base_id;
     [5] GetAddOnContentBaseId(pid) -> u64 base_id;
-    @stub [6] PrepareAddOnContentByApplicationId(i32 index, nn::ncm::ApplicationId application_id);
-    @stub [7] PrepareAddOnContent(i32 index, pid);
+    [6] PrepareAddOnContentByApplicationId(i32 index, nn::ncm::ApplicationId application_id);
+    [7] PrepareAddOnContent(i32 index, pid);
     [8] GetAddOnContentListChangedEvent() -> handle<copy, event> event;
     # 9 and 11 to 50: answered with nothing (as Eden does), declared as the SDK's client sends them
     @stub [9] GetAddOnContentLostErrorCode(array<i32, 5> indices, pid) -> bytes<8, 4> error_code;
@@ -367,6 +369,11 @@ interface nn::mii::detail::IDatabaseService {
 # station, scanning and connecting are not implemented and log
 interface nn::ldn::detail::IUserServiceCreator is ldn:u {
     [0] CreateUserLocalCommunicationService() -> object<nn::ldn::detail::IUserLocalCommunicationService> service;
+    # 18.0.0+: libnx's ldnInitialize asks for it and registers its process before anything else
+    [1] CreateClientProcessMonitor() -> object<nn::ldn::detail::IClientProcessMonitor> monitor;
+}
+interface nn::ldn::detail::IClientProcessMonitor {
+    @stub [0] RegisterClient(pid);
 }
 interface nn::ldn::detail::IUserLocalCommunicationService {
     [0] GetState() -> u32 state;
