@@ -14,8 +14,8 @@
 /* ------------------------------------------------------------ the record of GPU-side writes */
 /* Each write stamps a new generation on every 4 KiB page it covers, by GPU address and by the guest pages behind
    them, since other GPU addresses can map the same guest memory. Exact per page: a texture is dirty only when a write
-   touched one of its own pages. Writers and readers take the lock; the generation is published with release order
-   for gpu_mem_generation's lock-free read */
+   touched one of its own pages. Writers take the lock, readers don't (gpu_mem_dirty_since); the generation is
+   published with release order for those reads */
 static PMutex g_wlk = PMUTEX_INIT;
 static WritePages g_wgpu, g_wcpu;
 static u64 g_wgen;
@@ -59,17 +59,16 @@ static int dirty_run(u64 cpu, u64 n, void* ctx) {
     q->dirty = write_pages_since(&g_wcpu, q->since, cpu, n);
     return q->dirty;
 }
+/* Without g_wlk, which only orders the writers: a stamp is stored after the memory it is for is written, so a reader
+   holding the lock could already see new bytes under an old stamp, and reading the tables lock-free (write_pages.c)
+   tells no less. Every draw asks this of each buffer, texture and target, and the lock was 2% of the GPU thread in
+   TotK */
 int gpu_mem_dirty_since(u64 since, u64 a, u64 sz) {
     DirtyAsk q;
-    if (!sz) return 0;
+    if (!sz || since >= __atomic_load_n(&g_wgen, __ATOMIC_ACQUIRE)) return 0;
     q.since = since;
-    q.dirty = 0;
-    pm_lock(&g_wlk);
-    if (g_wgen > since) {
-        q.dirty = write_pages_since(&g_wgpu, since, a, sz);
-        if (!q.dirty) guest_runs(a, sz, dirty_run, &q);
-    }
-    pm_unlock(&g_wlk);
+    q.dirty = write_pages_since(&g_wgpu, since, a, sz);
+    if (!q.dirty) guest_runs(a, sz, dirty_run, &q);
     return q.dirty;
 }
 
