@@ -1058,7 +1058,9 @@ static int buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off, int strict) {
     /* one that covers the range only in part lands first (its write shows in gpu_mem_dirty_since below): the cached
        copy would otherwise be used without it */
     if (g_cs_any) vk_compute_mem_need(gva, len);
-    u32 k = (u32)((gva >> 6) ^ (gva >> 20) ^ len) & (VBH - 1);
+    /* every bit of the range, mixed by multiplying: constant buffers are 256-byte aligned and buffers often 4K, which
+       a shift and xor of the address spread over a fraction of the buckets */
+    u32 k = (u32)((((gva ^ (len << 40)) * 0x9E3779B97F4A7C15ull) >> 52) & (VBH - 1));
     Vb* e = g_vbh[k];
     for (; e; e = e->next)
         if (e->start == gva && e->len == len) break;
