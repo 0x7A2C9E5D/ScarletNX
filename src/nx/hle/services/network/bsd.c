@@ -154,7 +154,8 @@ static int addr_in(u64 a, u64 n, SnxSockAddr* out) {
     }
     return -SNX_EAFNOSUPPORT;
 }
-/* writes what fits of the address, and returns its whole size (the addrlen the guest gets back) */
+/* writes what fits of the address, and returns the length written (the addrlen the guest gets back), as a BSD stack
+   answers getsockname, getpeername, accept and recvfrom */
 static u32 addr_out(const SnxSockAddr* a, u64 dst, u64 cap) {
     u8 p[BSD_SOCKADDR_IN6];
     u32 n = a->family == SNX_AF_INET6 ? BSD_SOCKADDR_IN6 : BSD_SOCKADDR_IN;
@@ -168,7 +169,9 @@ static u32 addr_out(const SnxSockAddr* a, u64 dst, u64 cap) {
         memcpy(p + 24, &a->scope_id, 4);
     } else
         memcpy(p + 4, a->addr, 4);
-    if (dst) memcpy(GP(dst), p, cap < n ? cap : n);
+    if (!dst) return 0;
+    if (cap < n) n = (u32)cap;
+    memcpy(GP(dst), p, n);
     return n;
 }
 

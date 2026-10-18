@@ -149,6 +149,10 @@ int main(void) {
     u16 port;
     memcpy(&port, name + 2, 2);
     CHECK(name[0] == 16 && name[1] == 2 && port && name[4] == 127);
+    memset(GP(OUT0), 0xEE, 16);
+    request(16, (u32)l, 0, 0); /* GetSockName into 8 bytes: the address cut, and the length cut */
+    out(OUT0, 8);
+    CHECK(call(&e) == 0 && word(2) == 8 && name[4] == 127 && name[8] == 0xEE);
 
     request(2, 2, 1 | 0x20000000, 0); /* a SOCK_NONBLOCK client */
     i32 c = call(&e);
