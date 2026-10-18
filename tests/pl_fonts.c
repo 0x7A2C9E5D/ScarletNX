@@ -72,7 +72,7 @@ static u32 header_size(u32 off) {
     u32 h0, h1, key = bswap32_(0x7f9a0218u ^ 0x36f81a1eu);
     memcpy(&h0, shm + off - 8, 4);
     memcpy(&h1, shm + off - 4, 4);
-    CHECK(h0 == bswap32_(0x36f81a1eu));
+    CHECK(h0 == bswap32_(0x7f9a0218u)); /* the decrypted magic, not the .bfttf's own */
     return bswap32_(h1 ^ key);
 }
 static int truetype(u32 off) { return !memcmp(shm + off, "\0\1\0\0", 4); }

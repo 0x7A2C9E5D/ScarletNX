@@ -84,7 +84,7 @@ static int pl_place(u8* shm, u32 shm_size, u32* at, const u8* font, u64 size, in
     u32 padded, key = PL_MAGIC ^ PL_DECRYPTED;
     if (size > shm_size || (size + 3) / 4 * 4 + 8 > shm_size - *at) return 0;
     padded = (u32)((size + 3) & ~3ull);
-    wr_be32(shm + *at, PL_MAGIC);
+    wr_be32(shm + *at, PL_MAGIC ^ key);
     wr_be32(shm + *at + 4, padded ^ key);
     memcpy(shm + *at + 8, font, (size_t)size);
     memset(shm + *at + 8 + size, 0, padded - (u32)size);
