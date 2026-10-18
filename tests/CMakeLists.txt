@@ -429,7 +429,7 @@ if(TARGET OpenSSL::Crypto AND TARGET snx_splash)
         "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_motion.c")
     snx_test_target(snx-test-misc-service 23)
         snx_service_swipc(snx-test-misc-service hle/services/hid.swipc hle/services/misc.swipc hle/services/acc.swipc)
-    target_link_libraries(snx-test-misc-service PRIVATE OpenSSL::Crypto snx_splash)
+    target_link_libraries(snx-test-misc-service PRIVATE OpenSSL::Crypto snx_splash scarletnx-common)
     if(NOT WIN32)
         target_link_libraries(snx-test-misc-service PRIVATE m)
     endif()
@@ -455,13 +455,13 @@ snx_test_target(snx-test-am-nacp 23)
 snx_service_swipc(snx-test-am-nacp hle/services/am.swipc)
 add_test(NAME am_nacp COMMAND snx-test-am-nacp)
 
-# acc's profile through its dispatchers: the user's picture, Wimsy as a 256x256 JPEG of the size GetImageSize tells
-# (acc.c, the splash's drawing), decoded by plutovg
+# acc.c and users.c: the console's users from users/users.ini, as acc lists them, every file that lists none refused,
+# and the picture of a user with none of its own, Wimsy as a 256x256 JPEG (the splash's drawing), decoded by plutovg
 if(NOT SNX_TOOLS_ONLY AND NOT SNX_HACTOOL_ONLY)
     add_executable(snx-test-acc-service acc_service.c)
     snx_test_target(snx-test-acc-service 23)
     snx_service_swipc(snx-test-acc-service hle/services/acc.swipc)
-    target_link_libraries(snx-test-acc-service PRIVATE snx_splash)
+    target_link_libraries(snx-test-acc-service PRIVATE snx_splash scarletnx-common)
     target_include_directories(snx-test-acc-service SYSTEM PRIVATE "${plutovg_SOURCE_DIR}/include")
     target_compile_definitions(snx-test-acc-service PRIVATE PLUTOVG_BUILD_STATIC)
     set_target_properties(snx-test-acc-service PROPERTIES LINKER_LANGUAGE CXX)

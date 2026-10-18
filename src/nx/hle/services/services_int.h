@@ -30,6 +30,24 @@ void am_init(void); /* the applet events, and the messages queued at startup */
 SvcObj* new_appletoe(void);
 SvcObj* new_appletae(void);
 
+/* ---- users.c: the console's users (users/users.ini) */
+#define SNX_USERS_NICKNAME 32 /* nn::account::Nickname's bytes before its NUL */
+typedef struct {
+    u64 uid[2]; /* nn::account::Uid's two halves */
+    char nickname[SNX_USERS_NICKNAME + 1];
+    u32 picture_at, picture_size; /* users/<uid>.jpg, in users.c's one block of pictures */
+} SnxUser;
+extern SnxUser g_users[SNX_USERS_MAX]; /* user 1 first, g_user_count of them */
+extern int g_user_count;
+/* the users of users.ini in dir (one, user 1, without it), the game playing as user selected (1-based): 0, or -1 with
+   why the file or selected is no list of users, and user 1 alone */
+int snx_users_load(const char* dir, int selected, char* why, size_t why_size);
+void snx_users_init(void); /* snx_users_load of the data folder's users/, the game stopped if it says no */
+const SnxUser* snx_users_find(const u64 uid[2]); /* NULL for no user */
+const SnxUser* snx_users_selected(void);         /* the user the game plays as (the .ini's user) */
+const unsigned char* snx_users_picture(const SnxUser* user, u32* size); /* the JPEG, or NULL and 0 */
+void snx_users_uid_text(const u64 uid[2], char text[33]); /* 32 hex digits, uid[0] first: users.ini's and the saves' */
+
 /* ---- set.c */
 void set_language_code(int lang, u8 code[8]); /* the 8-byte LanguageCode, en-US for an index out of range */
 SvcObj* new_set(void);

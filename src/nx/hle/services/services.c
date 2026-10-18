@@ -38,6 +38,7 @@ KEvent* owned_event(const char* name) {
 
 /* ============================================================ registration */
 void svc_core_init(void) {
+    snx_users_init(); /* before am: its launch parameter names the user */
     am_init();
     audio_init();
     time_init();

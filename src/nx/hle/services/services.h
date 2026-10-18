@@ -13,4 +13,5 @@ void svc_vi_init(void);
 void svc_pl_init(void);
 /* how many nn::settings::Language values set knows, to check the language the settings file names */
 int set_language_count(void);
+#define SNX_USERS_MAX 8 /* users.c: the console's users, at most (its limit) */
 #endif
