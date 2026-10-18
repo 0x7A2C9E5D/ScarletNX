@@ -52,19 +52,12 @@ static u64 scan(void) {
 static int g_ran; /* the sum of what the threads read: both must finish before main returns, since they read its arg */
 static void thread_fn(void* arg) { __atomic_fetch_add(&g_ran, *(int*)arg, __ATOMIC_RELEASE); }
 
-int main(int argc, char** argv) {
-    const char* dir = argc > 1 ? argv[1] : ".";
-    char path[1200], tmp[1200], sub[1200];
-    u8 buf[64];
+/* written-page tracking and decommit, in a reservation of guest memory */
+static void test_guest_memory(const char* dir) {
+    char path[1200];
     FILE* f;
-    PFileMap m;
-    PDir d;
-    PCond c;
-    PMutex mu = PMUTEX_INIT;
-    int i, fd, seen, arg = 7;
-    u64 t;
+    int fd;
 
-    setvbuf(stdout, NULL, _IONBF, 0); /* each section says it started, so a crash shows where it happened */
     printf("written-page tracking\n");
     g_base = plat_vm_reserve((u64)1 << 30);
     CHECK(g_base != NULL, "no reservation");
@@ -96,6 +89,25 @@ int main(int argc, char** argv) {
     g_base[9 * 4096] = 9;
     plat_vm_decommit(g_base, 64 * 4096);
     CHECK(!plat_vm_commit(g_base, 64 * 4096) && g_base[9 * 4096] == 0, "memory not zero after decommit");
+}
+
+int main(int argc, char** argv) {
+    const char* dir = argc > 1 ? argv[1] : ".";
+    char path[1200], tmp[1200], sub[1200];
+    u8 buf[64];
+    FILE* f;
+    PFileMap m;
+    PDir d;
+    PCond c;
+    PMutex mu = PMUTEX_INIT;
+    int i, seen, arg = 7;
+    u64 t;
+
+    setvbuf(stdout, NULL, _IONBF, 0); /* each section says it started, so a crash shows where it happened */
+    if (sysconf(_SC_PAGESIZE) == 4096)
+        test_guest_memory(dir);
+    else /* plat_vm_reserve refuses the host: guest memory needs 4 KiB pages, and Apple silicon's are 16 KiB */
+        printf("guest memory skipped: this host's pages are %ld bytes\n", sysconf(_SC_PAGESIZE));
 
     printf("pread and file maps\n");
     /* pread: a short count at the end, the position untouched */
