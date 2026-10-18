@@ -33,6 +33,7 @@
 #define AM_APPLET_CONTROLLER     0x0c
 #define AM_APPLET_PROFILE_SELECT 0x10
 #define AM_APPLET_SWKBD          0x11
+#define AM_APPLET_MII_EDIT       0x12
 #define AM_APPLET_WEB            0x13
 #define AM_APPLET_SHOP           0x14
 #define AM_APPLET_OFFLINE_WEB    0x17
@@ -1125,6 +1126,41 @@ static int nn_am_service_ILibraryAppletAccessor_PushInteractiveInData(SvcObj* se
     R_SUCCEED();
 }
 
+/* the Mii editor (nn::mii::AppletInput, 0x100 bytes: version, mode, then a v4's special key code and CharInfo), with
+   no editor and no database to add to: an edit gives the Mii back unchanged, the modes that only show something
+   succeed, and adding or creating a Mii is cancelled, as when the player backs out of the editor. The answer is
+   nn::mii::AppletOutput {result, index} or, for create and edit, AppletOutputForCharInfoEditing {result, CharInfo} */
+#define MII_EDIT_SHOW         0
+#define MII_EDIT_APPEND       1
+#define MII_EDIT_CREATE       4
+#define MII_EDIT_EDIT         5
+#define MII_EDIT_SUCCESS      0
+#define MII_EDIT_CANCEL       1
+#define MII_EDIT_INPUT_SIZE   0x100
+#define MII_EDIT_CHARINFO     0xc /* the v4 input's CharInfo, after the version, the mode and the special key code */
+#define MII_EDIT_CHARINFO_LEN 0x58
+static SvcObj* am_mii_edit(LibApplet* a) {
+    const u8* in = NULL;
+    u32 mode = MII_EDIT_APPEND, result;
+    SvcObj* out;
+    int i;
+    for (i = 0; i < a->nin && !in; i++)
+        if (((StorageData*)a->in[i]->data)->size >= MII_EDIT_INPUT_SIZE) in = am_storage_bytes(a->in[i]);
+    if (in) memcpy(&mode, in + 4, 4);
+    if (mode == MII_EDIT_CREATE || mode == MII_EDIT_EDIT) {
+        result = mode == MII_EDIT_EDIT && in ? MII_EDIT_SUCCESS : MII_EDIT_CANCEL;
+        out = am_storage_new(0x80, NULL);
+        memcpy(am_storage_bytes(out), &result, 4);
+        if (result == MII_EDIT_SUCCESS)
+            memcpy(am_storage_bytes(out) + 4, in + MII_EDIT_CHARINFO, MII_EDIT_CHARINFO_LEN);
+        return out;
+    }
+    result = mode == MII_EDIT_APPEND || mode > MII_EDIT_EDIT ? MII_EDIT_CANCEL : MII_EDIT_SUCCESS;
+    out = am_storage_new(0x20, NULL);
+    memcpy(am_storage_bytes(out), &result, 4);
+    LOG("am: Mii editor mode %u answered %s\n", mode, result == MII_EDIT_SUCCESS ? "success" : "cancel");
+    return out;
+}
 static int nn_am_service_ILibraryAppletAccessor_PopOutData(SvcObj* self, SvcObj** storage) {
     LibApplet* a = (LibApplet*)self->data;
     u8* d;
@@ -1155,6 +1191,7 @@ static int nn_am_service_ILibraryAppletAccessor_PopOutData(SvcObj* self, SvcObj*
         memcpy(am_storage_bytes(*storage) + 8, g_user_id, 16);
         break;
     case AM_APPLET_SWKBD: *storage = am_swkbd(a); break;
+    case AM_APPLET_MII_EDIT: *storage = am_mii_edit(a); break;
     case AM_APPLET_WEB:
     case AM_APPLET_SHOP:
     case AM_APPLET_OFFLINE_WEB:

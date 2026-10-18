@@ -467,7 +467,50 @@ static void test_messages(void) {
     CHECK(test_handles[h - 0x100] == &am.launchable_event->o && am.launchable_event->signaled);
     close_handles();
 }
+/* the Mii editor (0x12), which Mario Kart 8 Deluxe opens with nn::mii::AppendMii: with no editor here, appending is
+   cancelled as when the player backs out, an edit hands the Mii back, and each answer is the size the SDK reads */
+static SvcObj* mii_edit(u32 mode, const u8* charinfo, u32 out_size) {
+    u8 input[0x100] = {0};
+    SvcObj* a;
+    SvcObj* storage;
+    put32(input, 4); /* version 4 */
+    put32(input + 4, mode);
+    if (charinfo) memcpy(input + 0xc, charinfo, 0x58);
+    CHECK(nn_am_service_ILibraryAppletCreator_CreateLibraryApplet(NULL, 0x12, 0, &a) == 0);
+    storage = am_storage_new(sizeof input, input);
+    CHECK(nn_am_service_ILibraryAppletAccessor_PushInData(a, storage) == 0);
+    svcobj_unref(storage);
+    storage = NULL;
+    CHECK(nn_am_service_ILibraryAppletAccessor_PopOutData(a, &storage) == 0 && storage);
+    CHECK(((StorageData*)storage->data)->size == out_size);
+    svcobj_unref(a);
+    return storage;
+}
+static void test_mii_edit(void) {
+    u8 charinfo[0x58];
+    SvcObj* out;
+    StorageData* d;
+    int i;
+    for (i = 0; i < 0x58; i++) charinfo[i] = (u8)(i + 1);
+    out = mii_edit(1, NULL, 0x20); /* AppendMii: cancelled */
+    d = out->data;
+    CHECK(get32(d->d) == 1 && get32(d->d + 4) == 0);
+    svcobj_unref(out);
+    out = mii_edit(0, NULL, 0x20); /* ShowMiiEdit: shown */
+    CHECK(get32(((StorageData*)out->data)->d) == 0);
+    svcobj_unref(out);
+    out = mii_edit(5, charinfo, 0x80); /* EditMii: the same Mii back */
+    d = out->data;
+    CHECK(get32(d->d) == 0 && !memcmp(d->d + 4, charinfo, 0x58));
+    svcobj_unref(out);
+    out = mii_edit(4, NULL, 0x80); /* CreateMii: cancelled */
+    CHECK(get32(((StorageData*)out->data)->d) == 1);
+    svcobj_unref(out);
+    close_handles();
+    CHECK(test_objects == 0 && test_kobjs == 0);
+}
 int main(void) {
+    test_mii_edit();
     test_audio_controller();
     test_user_channel();
     test_previous_program();
