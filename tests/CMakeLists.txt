@@ -1144,7 +1144,7 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
         add_test(NAME shaderdec_spec COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/shaderdec_test.py"
             $<TARGET_FILE:snx-shaderdec> "${PROJECT_SOURCE_DIR}/src/nx/gpu/shader/maxwell_opcodes.def")
     endif()
-    add_executable(snx-test-vulkan-release vulkan_release.c)
+    add_executable(snx-test-vulkan-release vulkan_release.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/vk/pending_pages.c")
     snx_test_target(snx-test-vulkan-release 11)
     add_test(NAME vulkan_release COMMAND snx-test-vulkan-release)
     add_executable(snx-test-vulkan-backing vulkan_backing.c)

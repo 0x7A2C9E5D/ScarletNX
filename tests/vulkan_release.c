@@ -71,6 +71,15 @@ u64 gmmu_translate(u64 address) {
     if (address >= 0x20000 && address < 0x21000) return 4096 + (address & 4095);
     return 0;
 }
+/* the queued payloads' page index (pending_pages.c) translates runs of contiguous pages */
+u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
+    u64 n, first = gmmu_translate(gva);
+    if (!max || !first) return 0;
+    *cpu = first;
+    n = 0x1000 - (gva & 0xFFF);
+    while (n < max && gmmu_translate(gva + n) == first + n) n += 0x1000;
+    return n < max ? n : max;
+}
 u32 syncpt_read(u32 id) { return id < 128 ? completed[id] : 0; }
 void syncpt_incr(u32 id) {
     assert(lock_depth && vk_result_landing());

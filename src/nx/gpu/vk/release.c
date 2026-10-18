@@ -12,6 +12,7 @@
 #include <string.h>
 #include "nx/gpu/gpu.h"
 #include "nx/gpu/vk/vk.h"
+#include "nx/gpu/vk/pending_pages.h"
 #include "nx/hle/services/nvdrv.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
@@ -38,6 +39,10 @@ static u32 g_rincr[SYNC_N];  /* increments queued per syncpoint */
 static PMutex g_rlock = PMUTEX_INIT;
 static PCond g_rcv;
 static int g_rthread;
+/* the guest pages queued payloads cover, so a read or write that meets none (almost all) skips the queue: added when a
+   payload is queued, removed when it is written, both under vk_lock, and a mapping change drains the queue before any
+   translation changes (vkr_mapping_begin), so a payload loses the pages it gained */
+static PendPages g_rpages;
 u64 g_vk_release_forwards;
 
 static void perform(Release* r) {
@@ -73,6 +78,7 @@ static void release_through(u64 gate, u64 cgate) {
         }
         r = g_rq[g_rtail % RQ_N];
         g_rtail++;
+        if (r.gva) pend_add(&g_rpages, r.gva, r.len, -1);
         if (!r.gva) {
             /* release_value sees the transfer from queued to completed atomically. */
             perform(&r);
@@ -142,6 +148,7 @@ static void release(Release* r) {
     }
     g_rq[g_rhead % RQ_N] = *r;
     g_rhead++;
+    if (r->gva) pend_add(&g_rpages, r->gva, r->len, 1);
     if (!r->gva && r->id < SYNC_N) g_rincr[r->id]++;
     __atomic_store_n(&g_gpu_releases, 1, __ATOMIC_RELEASE);
     if (!g_rthread) {
@@ -215,6 +222,10 @@ static void release_match(u64 gva, u64 len, u32 id, int all) {
     int found = 0;
     if (vk_result_landing()) return;
     vk_lock();
+    if (len && !all && !pend_hit(&g_rpages, gva, len)) { /* no queued payload there */
+        vk_unlock();
+        return;
+    }
     pm_lock(&g_rlock);
     for (u64 i = g_rtail; i < g_rhead; i++) {
         const Release* r = &g_rq[i % RQ_N];
@@ -243,6 +254,10 @@ int vk_release_read(u64 gva, void* dst, u64 len) {
     int r = 0;
     if (!len || vk_result_landing()) return len ? -1 : 0;
     vk_lock();
+    if (!pend_hit(&g_rpages, gva, len)) {
+        vk_unlock();
+        return 0;
+    }
     pm_lock(&g_rlock);
     for (u64 i = g_rtail; i < g_rhead && r >= 0; i++) {
         const Release* q = &g_rq[i % RQ_N];
