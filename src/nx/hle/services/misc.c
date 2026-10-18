@@ -862,7 +862,9 @@ static int nn_irsensor_IIrSensorServer_GetIrsensorSharedMemoryHandle(SvcObj* sel
 }
 
 /* ============================================================ mii: the six default Miis */
-#define MII_INVALID_ARGUMENT RC(126, 1)
+#define MII_INVALID_ARGUMENT      RC(126, 1)
+#define MII_INVALID_ARGUMENT_SIZE RC(126, 2)
+#define MII_SOURCE_DEFAULT        2 /* nn::mii::SourceFlag::Default */
 
 /* nn::mii's DefaultMii, the fields in this order (colors in the 3DS's numbering): face type, color, wrinkle, makeup;
    hair type, color, flip; eye type, color, scale, aspect, rotate, x, y; eyebrow type, color, scale, aspect, rotate,
@@ -920,6 +922,7 @@ static int nn_mii_detail_IDatabaseService_BuildDefault(SvcObj* self, u32 index, 
     int i;
     (void)self;
     R_UNLESS(index < 6, MII_INVALID_ARGUMENT);
+    memset(c, 0, sizeof info->v); /* what is not built is nought: Get builds over the last one, not a zeroed reply */
     /* a new random create id (a version 4 UUID); never zero in its first byte, so no check of it reads it as the
        invalid all-zero id */
     do {
@@ -930,6 +933,35 @@ static int nn_mii_detail_IDatabaseService_BuildDefault(SvcObj* self, u32 index, 
     for (i = 0; name[i]; i++) c[0x10 + 2 * i] = (u8)name[i]; /* UTF-16 */
     for (i = 0; i < MII_FIELDS; i++) c[mii_char_offset[i]] = mii_color(mii_color_kind[i], mii_defaults[index][i]);
     R_SUCCEED();
+}
+static int nn_mii_detail_IDatabaseService_GetCount(SvcObj* self, i32 source_flag, i32* count) {
+    (void)self;
+    *count = source_flag & MII_SOURCE_DEFAULT ? 6 : 0;
+    R_SUCCEED();
+}
+/* the six default Miis in index order, each built anew as Eden gives them, into elements of size bytes: the CharInfo,
+   then for Get its source (1, Default). A buffer with no room for the next one is InvalidArgumentSize */
+static int mii_give_defaults(i32 source_flag, IpcBuf out, u32 size, i32* count) {
+    nn_mii_CharInfo info;
+    u32 i, source = 1;
+    *count = 0;
+    if (!(source_flag & MII_SOURCE_DEFAULT)) R_SUCCEED();
+    for (i = 0; i < 6; i++) {
+        if (out.size < (u64)(i + 1) * size) R_THROW(MII_INVALID_ARGUMENT_SIZE);
+        nn_mii_detail_IDatabaseService_BuildDefault(NULL, i, &info);
+        memcpy(GP(out.addr + (u64)i * size), info.v, sizeof info.v);
+        if (size > sizeof info.v) memcpy(GP(out.addr + (u64)i * size + sizeof info.v), &source, 4);
+        (*count)++;
+    }
+    R_SUCCEED();
+}
+static int nn_mii_detail_IDatabaseService_Get(SvcObj* self, i32 source_flag, IpcBuf elements, i32* count) {
+    (void)self;
+    return mii_give_defaults(source_flag, elements, 0x5c, count);
+}
+static int nn_mii_detail_IDatabaseService_Get1(SvcObj* self, i32 source_flag, IpcBuf infos, i32* count) {
+    (void)self;
+    return mii_give_defaults(source_flag, infos, 0x58, count);
 }
 static int nn_mii_detail_IDatabaseService_SetInterfaceVersion(SvcObj* self, u32 version) {
     (void)self, (void)version;

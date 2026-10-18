@@ -357,10 +357,13 @@ type nn::mii::CharInfo = bytes<0x58, 4>;
 interface nn::mii::detail::IStaticService is mii:e, mii:u {
     [0] GetDatabaseService(i32 key_code) -> object<nn::mii::detail::IDatabaseService> database;
 }
+# the database (source 1) holds no Mii here: what is counted and given are the six defaults (source 2)
 interface nn::mii::detail::IDatabaseService {
     @stub [0] IsUpdated(i32 source_flag) -> b8 updated;
-    @stub [2] GetCount(i32 source_flag) -> i32 count;
-    @stub [3] Get(i32 source_flag, array<nn::mii::CharInfoElement, 6> elements) -> i32 count;
+    @stub [1] IsFullDatabase() -> b8 full;
+    [2] GetCount(i32 source_flag) -> i32 count;
+    [3] Get(i32 source_flag, array<nn::mii::CharInfoElement, 6> elements) -> i32 count;
+    [4] Get1(i32 source_flag, array<nn::mii::CharInfo, 6> infos) -> i32 count;
     [7] BuildDefault(u32 index) -> nn::mii::CharInfo info;
     [22] SetInterfaceVersion(u32 version);
 }

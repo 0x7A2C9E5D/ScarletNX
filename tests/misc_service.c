@@ -661,6 +661,56 @@ static void test_mii_default(void) {
     request(&r, 7);
     argument32(&r, 0, 6);
     CHECK(db->dispatch(db, &r.c) == RC(126, 1));
+    /* the six defaults counted and given by Get, each BuildDefault's build past its random create id */
+    request(&r, 2);
+    argument32(&r, 0, 2);
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 6);
+    request(&r, 2);
+    argument32(&r, 0, 1);
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 0);
+    memset(g_mem + 0x4000, 0xee, 8 * 0x5c);
+    request(&r, 3);
+    argument32(&r, 0, 3);
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x4000;
+    r.c.b[0].size = 8 * 0x5c;
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 6);
+    for (u32 i = 0; i < 6; i++) {
+        u8 built[0x58];
+        u32 source;
+        request(&r, 7);
+        argument32(&r, 0, i);
+        call(db, &r);
+        memcpy(built, r.c.out, sizeof built);
+        CHECK(memcmp(g_mem + 0x4000 + i * 0x5c + 0x10, built + 0x10, 0x48) == 0);
+        memcpy(&source, g_mem + 0x4000 + i * 0x5c + 0x58, 4);
+        CHECK(source == 1);
+    }
+    CHECK(g_mem[0x4000 + 6 * 0x5c] == 0xee);
+    request(&r, 4);
+    argument32(&r, 0, 2);
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x5000;
+    r.c.b[0].size = 6 * 0x58;
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 6 && memcmp(g_mem + 0x5000 + 0x58 + 0x10, g_mem + 0x4000 + 0x5c + 0x10, 0x48) == 0);
+    request(&r, 3);
+    argument32(&r, 0, 2);
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x4000;
+    r.c.b[0].size = 5 * 0x5c;
+    CHECK(db->dispatch(db, &r.c) == RC(126, 2));
+    request(&r, 1);
+    call(db, &r);
+    CHECK(reply32(&r, 0) == 0);
+    /* the bytes BuildDefault does not set are nought, whatever the CharInfo held */
+    nn_mii_CharInfo poisoned;
+    memset(&poisoned, 0xee, sizeof poisoned);
+    CHECK(nn_mii_detail_IDatabaseService_BuildDefault(NULL, 0, &poisoned) == 0);
+    CHECK(poisoned.v[0x11] == 0 && poisoned.v[0x1e] == 0 && poisoned.v[0x25] == 0);
     svcobj_unref(db);
     svcobj_unref(service);
 }
