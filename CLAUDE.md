@@ -100,6 +100,8 @@ Skills in `.claude/skills/`:
 - `snx-crash`: from a crash report or `svcBreak` to the mechanism, with the symbol and disassembly tools.
 - `snx-service`: implementing or fixing an HLE service against what the game's SDK code expects.
 - `snx-code-quality`: RFC #142's C rules (strict ANSI C, no redundant state, one allocation per owner) for C in `src/`.
+- `snx-gpu-shader`: writing and optimizing our compute shaders (constant tables, bit twiddling, uniform branches,
+  fewer fetches, workgroup structure) and proving they give the CPU reference's bytes.
 - `record-lesson`: where a lesson goes so the next session finds it.
 - `code-audit`: the multi-pass audit-and-fix loop, with the `snx-*-reviewer` agents in `.claude/agents/review/`.
 

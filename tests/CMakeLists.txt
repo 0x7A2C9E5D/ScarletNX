@@ -560,14 +560,12 @@ add_executable(snx-test-result-macros result_macros.c)
 snx_test_target(snx-test-result-macros 90)
 add_test(NAME result_macros COMMAND snx-test-result-macros)
 
-# generated and checked in (the controls' atlas, their shaders, the VIC's): their sources must still make them
+# generated and checked in (the controls' atlas, their shaders): their sources must still make them
 if(Python3_Interpreter_FOUND)
     add_test(NAME controls_atlas_current
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-controls.py" --check)
     add_test(NAME ui_shaders_current
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-ui-shaders.py" --check)
-    add_test(NAME vic_shader_current
-        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-vic-shader.py" --check)
     add_test(NAME generators_crlf COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/generators_crlf.py")
     # no keys, dumps, stray binaries, piracy sites or the console maker's name in prose among the tracked files: the
     # checks on planted ones (self test), then on the checkout. Skipped (77) without git or outside a checkout
@@ -858,6 +856,12 @@ snx_test_target(snx-test-astc-glsl 23)
 target_compile_options(snx-test-astc-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-astc-glsl PRIVATE glsl)
 add_test(NAME astc_glsl COMMAND snx-test-astc-glsl)
+# the VIC shader's GLSL, both builds, run on the CPU against vic.c's composition of random jobs: no GPU needed
+add_executable(snx-test-vic-glsl glsl/vic_jobs.c glsl/vic_glsl.cpp)
+snx_test_target(snx-test-vic-glsl 23)
+target_compile_options(snx-test-vic-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-vic-glsl PRIVATE glsl)
+add_test(NAME vic_glsl COMMAND snx-test-vic-glsl)
 
 # the shared fonts pl.c hands out when a game folder has none: the stand-ins compiled in (cmake/shared_fonts.cmake)
 if(NOT SNX_TOOLS_ONLY)

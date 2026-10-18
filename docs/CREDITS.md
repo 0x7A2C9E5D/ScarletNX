@@ -42,7 +42,7 @@ a source keep that source's copyright lines and license, most with the revision 
 | `src/nx/hle/svc/hos.svc` (the SVC declarations and type sizes) and `tools/svcgen/svcgen.c` (their parsing and register allocation) | Eden and yuzu (`tools/svc_generator.py`) | GPL-3.0-or-later, GPL-2.0-or-later |
 | `src/nx/hle/services/misc.c` (the six default Miis, from Eden's `mii/types/raw_data.cpp`) | Ryujinx, as Eden carries it | MIT ([text](../dist/licenses/Ryujinx/LICENSE.txt)) |
 | `src/common/network/`, `src/nx/hle/services/network/` | Eden and yuzu | GPL-3.0-or-later, GPL-2.0-or-later |
-| `src/nx/gpu/video/vp9_rebuild.cpp`, `src/nx/gpu/video/vic.comp` (compiled into `vic_spv.h`) | Eden and yuzu | GPL-3.0-or-later, GPL-2.0-or-later |
+| `src/nx/gpu/video/vp9_rebuild.cpp`, `src/nx/gpu/video/vic.comp` and `vic_compose.glsl` (compiled into SPIR-V at build time) | Eden and yuzu | GPL-3.0-or-later, GPL-2.0-or-later |
 | `src/nx/gpu/texture/astc.comp` (the ASTC decoder shader, compiled into `astc_spv.h`) | Eden and yuzu (`astc_decoder.comp`) | GPL-3.0-or-later, GPL-2.0-or-later |
 | `src/nx/gpu/texture/astc.c` and `astc.h` (the CPU ASTC decoder the tests check the shader against) | Eden and yuzu (`textures/astc.cpp`), with the University of North Carolina at Chapel Hill's FasTC decoder in it | GPL-3.0-or-later, GPL-2.0-or-later, Apache 2.0 |
 | `tests/ipc_message.c` (the HIPC, CMIF and TIPC request builders) | libnx | ISC |
