@@ -278,6 +278,17 @@ static int create_device(void) {
     WANT(geometryShader);
     WANT(tessellationShader);
     WANT(shaderTessellationAndGeometryPointSize);
+    /* images bigger than one allocation may be are bound in pieces, on the graphics queue (memory.c) */
+    int sparse_queue = 0;
+    {
+        u32 nq = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(g_vk.phys, &nq, NULL);
+        VkQueueFamilyProperties* q = calloc(nq ? nq : 1, sizeof *q);
+        vkGetPhysicalDeviceQueueFamilyProperties(g_vk.phys, &nq, q);
+        sparse_queue = g_vk.gfx_family < nq && (q[g_vk.gfx_family].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT);
+        free(q);
+    }
+    if (sparse_queue) WANT(sparseBinding);
 #undef WANT
     /* points out of tessellation and geometry programs take the size those write, as the vertex program's do */
     g_shader_stage_point_size = want->shaderTessellationAndGeometryPointSize != 0;
@@ -397,9 +408,12 @@ static int create_device(void) {
     vkGetDeviceQueue(g_vk.dev, g_vk.compute_family, second ? 1 : 0, &g_vk.compute);
     VmaVulkanFunctions vf = {.vkGetInstanceProcAddr = vkGetInstanceProcAddr,
                              .vkGetDeviceProcAddr = vkGetDeviceProcAddr};
+    vk_mem_init(sparse_queue);
+    /* VMA's blocks are 256 MiB at most already, and kept within a smaller cap */
     VmaAllocatorCreateInfo vai = {.physicalDevice = g_vk.phys,
                                   .device = g_vk.dev,
                                   .instance = g_vk.instance,
+                                  .preferredLargeHeapBlockSize = g_vk.alloc_cap < (256ull << 20) ? g_vk.alloc_cap : 0,
                                   .vulkanApiVersion = VK_API_VERSION_1_3,
                                   .pVulkanFunctions = &vf};
     if (!VK_OK(vmaCreateAllocator(&vai, &g_vk.vma))) return 0;

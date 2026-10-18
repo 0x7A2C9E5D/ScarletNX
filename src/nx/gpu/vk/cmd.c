@@ -111,7 +111,7 @@ static void dead_free(Frame* f) {
         if (d->v1) vkDestroyImageView(g_vk.dev, d->v1, NULL);
         if (d->v2) vkDestroyImageView(g_vk.dev, d->v2, NULL);
         if (d->view) vkDestroyBufferView(g_vk.dev, d->view, NULL);
-        if (d->img) vmaDestroyImage(g_vk.vma, d->img, d->mem);
+        if (d->img) vk_image_destroy(d->img, d->mem);
         if (d->buf) vmaDestroyBuffer(g_vk.vma, d->buf, d->mem);
     }
     f->ndead = 0;
@@ -199,6 +199,7 @@ static u8* ring_alloc(Frame* f, Ring* r, u64 size, u64 align, VkBufferUsageFlags
                       VmaMemoryUsage where, VkBuffer* buf, u64* off, VmaAllocation* mem) {
     if (align < 16) align = 16;
     u64 at = (r->used + align - 1) & ~(align - 1);
+    if (size > g_vk.alloc_cap) return NULL; /* no allocation is bigger (memory.c) */
     if (!r->buf || at + size > r->cap) {
         /* a bigger buffer; the old one stays alive until this frame's work is done */
         if (r->buf) {
@@ -209,6 +210,8 @@ static u8* ring_alloc(Frame* f, Ring* r, u64 size, u64 align, VkBufferUsageFlags
         }
         u64 cap = r->cap ? r->cap * 2 : STAGE_MIN;
         while (cap < size) cap *= 2;
+        /* at the cap a full ring is followed by another of the same size: a frame's big uploads take several */
+        if (cap > g_vk.alloc_cap) cap = g_vk.alloc_cap;
         VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                   .size = cap,
                                   .usage = usage,
@@ -421,12 +424,14 @@ static u64 g_rb_cap;
 static u32 g_rb_small; /* readbacks in a row of an eighth of it or less */
 u8* vk_readback_buffer(u64 size, VkBuffer* buf) {
     /* it grows to the biggest readback, and shrinks back after many small ones */
+    if (size > g_vk.alloc_cap) return NULL; /* read back in parts (memory.c) */
     g_rb_small = g_rb_cap > STAGE_MIN && size <= g_rb_cap / 8 ? g_rb_small + 1 : 0;
     if (size > g_rb_cap || g_rb_small >= 64) {
         if (g_rb) vk_defer_buffer(g_rb, g_rb_mem);
         u64 cap = size > g_rb_cap ? (g_rb_cap ? g_rb_cap : STAGE_MIN) : STAGE_MIN;
         g_rb_small = 0;
         while (cap < size) cap *= 2;
+        if (cap > g_vk.alloc_cap) cap = g_vk.alloc_cap;
         VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                   .size = cap,
                                   .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,

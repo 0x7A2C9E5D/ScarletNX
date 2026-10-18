@@ -1,9 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* Headless differential test of the actual Vulkan ASTC upload and frame/staging
-   code. No game assets. Run with VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
-   and VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT
-   to check synchronization too. See docs/ASTC.md for the standalone build. */
+/* Headless differential test of the actual Vulkan ASTC upload, frame/staging and
+   allocation code (vk/astc.c, vk/cmd.c, vk/memory.c) with the SPIR-V the build
+   compiles from astc.comp. No game assets. Run with
+   VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation and
+   VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT
+   to check synchronization too (docs/ASTC.md). SNX_VK_MAX_ALLOCATION_MB lowers
+   the allocation cap, so images in pieces are tested at small sizes; --large
+   decodes a 2D and a 3D texture of 512 MiB each. */
 #include <stdarg.h>
 #include <stdlib.h>
 #include "nx/gpu/vk/vk.h"
@@ -45,6 +49,13 @@ void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame) {
     (void)frame;
 }
 VkPipelineCache vk_pipeline_cache(void) { return VK_NULL_HANDLE; }
+/* no occlusion queries, and no guest memory for cmd.c's sampled hashes */
+void vk_query_flush(VkCommandBuffer cb) { (void)cb; }
+int gmem_read(u64 gva, void* dst, u64 size) {
+    (void)gva;
+    memset(dst, 0, size);
+    return 0;
+}
 /* cmd.c times its waits */
 u64 plat_ns(void) {
     struct timespec ts;
@@ -95,8 +106,12 @@ static void init(void) {
     vkGetPhysicalDeviceQueueFamilyProperties(g_vk.phys, &n, families);
     u32 family = 0;
     while (family < n && !(families[family].queueFlags & VK_QUEUE_COMPUTE_BIT)) family++;
-    free(families);
     if (family == n) fatal("no compute queue\n");
+    int sparse_queue = (families[family].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) != 0;
+    free(families);
+    VkPhysicalDeviceFeatures have;
+    vkGetPhysicalDeviceFeatures(g_vk.phys, &have);
+    g_vk.feat.sparseBinding = sparse_queue && have.sparseBinding;
     g_vk.gfx_family = family;
     float priority = 1;
     VkDeviceQueueCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
@@ -108,15 +123,18 @@ static void init(void) {
     VkDeviceCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
                              .pNext = &f13,
                              .queueCreateInfoCount = 1,
-                             .pQueueCreateInfos = &qi};
+                             .pQueueCreateInfos = &qi,
+                             .pEnabledFeatures = &g_vk.feat};
     VK_OK(vkCreateDevice(g_vk.phys, &ci, NULL, &g_vk.dev));
     volkLoadDevice(g_vk.dev);
     vkGetDeviceQueue(g_vk.dev, family, 0, &g_vk.gfx);
     VmaVulkanFunctions funcs = {.vkGetInstanceProcAddr = vkGetInstanceProcAddr,
                                 .vkGetDeviceProcAddr = vkGetDeviceProcAddr};
+    vk_mem_init(sparse_queue);
     VmaAllocatorCreateInfo ai = {.physicalDevice = g_vk.phys,
                                  .device = g_vk.dev,
                                  .instance = g_vk.instance,
+                                 .preferredLargeHeapBlockSize = g_vk.alloc_cap < (256ull << 20) ? g_vk.alloc_cap : 0,
                                  .vulkanApiVersion = VK_API_VERSION_1_3,
                                  .pVulkanFunctions = &funcs};
     VK_OK(vmaCreateAllocator(&ai, &g_vk.vma));
@@ -147,8 +165,55 @@ static u8* blocks_new(u32 w, u32 h, u32 depth, u32 bw, u32 bh) {
     return (u8*)blocks;
 }
 
+/* a level's blocks in memory, handed to vk_astc_upload as texture.c hands it guest memory */
+typedef struct {
+    const u8* blocks;
+    u32 nx, ny;
+} Level;
+static void level_rows(void* ctx, u32 z, u32 y, u32 n, u8* out) {
+    const Level* l = ctx;
+    memcpy(out, l->blocks + ((size_t)z * l->ny + y) * l->nx * 16, (size_t)n * l->nx * 16);
+}
+
+static void barrier(VkImage img, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src, VkImageLayout from,
+                    VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst, VkImageLayout to) {
+    vk_barrier(vk_cmd(), img, VK_IMAGE_ASPECT_COLOR_BIT, src_stage, src, from, dst_stage, dst, to);
+}
+
+/* reads a level of one layer back in bands of block rows of a slice that the readback buffer takes, comparing each
+   with the CPU decoder's bytes for the band's blocks. keep, when given, receives the level's bytes */
+static void compare(VkImage img, u32 bw, u32 bh, int srgb, u32 w, u32 h, u32 depth, u32 level, u32 layer,
+                    const u8* blocks, u8* keep) {
+    u32 nx = (w + bw - 1) / bw, ny = (h + bh - 1) / bh;
+    u64 limit = g_vk.alloc_cap < (32ull << 20) ? g_vk.alloc_cap : 32ull << 20, row = (u64)w * bh * 4;
+    u32 nb = limit / row ? (u32)(limit / row) : 1;
+    u8* expected = malloc((size_t)row * nb);
+    for (u32 z = 0; z < depth; z++)
+        for (u32 y = 0; y < ny; y += nb) {
+            u32 n = ny - y < nb ? ny - y : nb, rows = h - y * bh < n * bh ? h - y * bh : n * bh;
+            u64 size = (u64)w * rows * 4;
+            VkBuffer readback;
+            u8* actual = vk_readback_buffer(size, &readback);
+            if (!actual) fatal("no readback buffer of %llu bytes\n", (unsigned long long)size);
+            VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, layer, 1},
+                                      .imageOffset = {0, (i32)(y * bh), (i32)z},
+                                      .imageExtent = {w, rows, 1}};
+            vkCmdCopyImageToBuffer(vk_cmd(), img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback, 1, &copy);
+            vk_finish();
+            vk_readback_ready();
+            astc_decode_image(blocks + ((size_t)z * ny + y) * nx * 16, w, rows, bw, bh, expected, srgb);
+            for (u64 i = 0; i < size; i++)
+                if (actual[i] != expected[i])
+                    fatal("%ux%u srgb=%d %ux%ux%u level %u layer %u: byte %llu of slice %u, block row %u: expected %u "
+                          "got %u\n",
+                          bw, bh, srgb, w, h, depth, level, layer, (unsigned long long)i, z, y, expected[i], actual[i]);
+            if (keep) memcpy(keep + ((size_t)z * h + y * bh) * w * 4, actual, size);
+        }
+    free(expected);
+}
+
 /* uploads random blocks into a UNORM or SRGB image and compares the readback with the CPU decoder in the same
-   decode mode. keep, when given, receives the checked bytes (the caller frees them) */
+   decode mode. keep, when given, receives the checked bytes of the first level and layer (the caller frees them) */
 static void run(u32 bw, u32 bh, int srgb, u32 w, u32 h, u32 depth, u32 layers, u32 levels, int grow, u8** keep,
                 size_t* kept) {
     Surf t = {.w = w,
@@ -166,65 +231,50 @@ static void run(u32 bw, u32 bh, int srgb, u32 w, u32 h, u32 depth, u32 layers, u
                             .samples = VK_SAMPLE_COUNT_1_BIT,
                             .tiling = VK_IMAGE_TILING_OPTIMAL,
                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT};
-    VmaAllocationCreateInfo ai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
-    VK_OK(vmaCreateImage(g_vk.vma, &ii, &ai, &t.img, &t.mem, NULL));
-    VkCommandBuffer cb = vk_cmd();
-    vk_barrier(cb, t.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_NONE, 0, VK_IMAGE_LAYOUT_UNDEFINED,
-               VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    size_t capacity = (size_t)w * h * depth * layers * 8;
-    u8* expected = malloc(capacity);
-    VkBufferImageCopy* copies = calloc((size_t)layers * levels, sizeof *copies);
-    size_t offset = 0;
-    u32 nr = 0;
+    if (!vk_image_create(&ii, &t.img, &t.mem)) fatal("cannot create a %ux%ux%u image\n", w, h, depth);
+    int pieces = !t.mem;
+    barrier(t.img, VK_PIPELINE_STAGE_2_NONE, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_2_COPY_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    u8** blocks = calloc((size_t)layers * levels, sizeof *blocks);
+    size_t bytes = 0;
     for (u32 layer = 0; layer < layers; layer++)
         for (u32 l = 0; l < levels; l++) {
             u32 lw = w >> l ? w >> l : 1, lh = h >> l ? h >> l : 1, ld = depth >> l ? depth >> l : 1;
-            u8* blocks = blocks_new(lw, lh, ld, bw, bh);
-            size_t slice = (size_t)((lw + bw - 1) / bw) * ((lh + bh - 1) / bh) * 16;
-            for (u32 z = 0; z < ld; z++)
-                astc_decode_image(blocks + z * slice, lw, lh, bw, bh, expected + offset + (size_t)z * lw * lh * 4,
-                                  srgb);
-            vk_astc_upload(cb, &t, blocks, lw, lh, ld, l, layer);
-            free(blocks);
-            copies[nr++] = (VkBufferImageCopy){.bufferOffset = offset,
-                                               .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, layer, 1},
-                                               .imageExtent = {lw, lh, ld}};
-            offset += (size_t)lw * lh * ld * 4;
+            u8* b = blocks[layer * levels + l] = blocks_new(lw, lh, ld, bw, bh);
+            Level lv = {b, (lw + bw - 1) / bw, (lh + bh - 1) / bh};
+            if (!vk_astc_upload(vk_cmd(), &t, lw, lh, ld, l, layer, level_rows, &lv)) fatal("upload failed\n");
+            bytes += (size_t)lw * lh * ld * 4;
         }
     if (grow) {
         VkBuffer ignored;
         u64 off;
-        if (!vk_stage(40ull << 20, 16, &ignored, &off)) fatal("stage growth failed\n");
+        if (!vk_stage(40ull << 20 < g_vk.alloc_cap ? 40ull << 20 : g_vk.alloc_cap, 16, &ignored, &off))
+            fatal("stage growth failed\n");
     }
-    vk_barrier(cb, t.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
-               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    VkBuffer readback;
-    u8* actual = vk_readback_buffer(offset, &readback);
-    vkCmdCopyImageToBuffer(cb, t.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback, nr, copies);
-    vk_finish();
-    vk_readback_ready();
-    if (memcmp(actual, expected, offset)) {
-        for (size_t i = 0; i < offset; i++)
-            if (actual[i] != expected[i])
-                fatal("%ux%u srgb=%d: byte %zu expected %u got %u\n", bw, bh, srgb, i, expected[i], actual[i]);
-    }
+    barrier(t.img, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     if (keep) {
-        *keep = expected;
-        *kept = offset;
-    } else {
-        free(expected);
+        *kept = (size_t)w * h * depth * 4;
+        *keep = malloc(*kept);
     }
-    free(copies);
-    vmaDestroyImage(g_vk.vma, t.img, t.mem);
-    printf("PASS %ux%u srgb=%d image=%ux%ux%u layers=%u mips=%u (%zu bytes)\n", bw, bh, srgb, w, h, depth, layers,
-           levels, offset);
+    for (u32 layer = 0; layer < layers; layer++)
+        for (u32 l = 0; l < levels; l++) {
+            u32 lw = w >> l ? w >> l : 1, lh = h >> l ? h >> l : 1, ld = depth >> l ? depth >> l : 1;
+            compare(t.img, bw, bh, srgb, lw, lh, ld, l, layer, blocks[layer * levels + l],
+                    keep && !layer && !l ? *keep : NULL);
+            free(blocks[layer * levels + l]);
+        }
+    free(blocks);
+    vk_image_destroy(t.img, t.mem);
+    printf("PASS %ux%u srgb=%d image=%ux%ux%u layers=%u mips=%u (%zu bytes%s)\n", bw, bh, srgb, w, h, depth, layers,
+           levels, bytes, pieces ? ", memory in pieces" : "");
     fflush(stdout);
 }
 
 /* The same blocks in both decode modes: each matches the CPU decoder in its own mode (run checks that), alpha
-   is the same in both, and R, G and B differ by at most one step (the sRGB mode's endpoints sit half a step
-   higher, and it truncates where UNORM rounds), in some texels and not all. */
+   is the same in both, and R, G and B differ by at most one step, in some texels and not all. Only void extents
+   differ: the sRGB mode takes the top 8 bits of their color where UNORM rounds, while for interpolated texels its
+   higher endpoints and truncation give the same byte as UNORM's rounding. */
 static void both_modes(u32 bw, u32 bh) {
     u8 *unorm, *srgb;
     size_t n, n2, differ = 0;
@@ -245,8 +295,18 @@ static void both_modes(u32 bw, u32 bh) {
     free(srgb);
 }
 
-int main(void) {
+int main(int argc, char** argv) {
     init();
+    if (argc > 1 && !strcmp(argv[1], "--large")) {
+        /* 512 MiB each once decoded, as some games' textures are: a square 2D one (11584 is a multiple of 4 and 8)
+           and a cube of slices, both past the 256 MiB allocation cap, so their memory is in pieces where the device
+           has sparse binding, and strips go through scratch, staging rings and readbacks of at most the cap */
+        run(4, 4, 0, 11584, 11584, 1, 1, 1, 0, NULL, NULL);
+        run(8, 8, 1, 512, 512, 512, 1, 1, 0, NULL, NULL);
+        if (errors) fatal("%u validation errors\n", errors);
+        puts("The 512 MiB ASTC textures decode as the CPU reference does");
+        return 0;
+    }
     /* Known solid color, independent of the CPU reference, catches its old
        11-bit header bug. The GPU is compared to this reference below. */
     const u8 solid[16] = {0xfc, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0x12, 0, 0x34, 0, 0x56, 0, 0x78};
@@ -266,6 +326,10 @@ int main(void) {
     /* Multiple scratch chunks, staging-ring retirement, and frame reuse. */
     run(4, 4, 0, 2051, 1055, 1, 1, 1, 1, NULL, NULL);
     run(12, 12, 1, 2051, 1055, 1, 1, 1, 0, NULL, NULL);
+    /* a 3D texture whose slices share strips, and one past the cap (8.6 MiB: in pieces under ctest's
+       SNX_VK_MAX_ALLOCATION_MB=4) */
+    run(6, 6, 0, 301, 97, 37, 1, 1, 0, NULL, NULL);
+    run(4, 4, 1, 2051, 1101, 1, 1, 1, 0, NULL, NULL);
     if (errors) fatal("%u validation errors\n", errors);
     puts("All ASTC Vulkan comparisons passed (zero validation errors).");
     /* The backend's internal pipelines/rings have device lifetime, as in the
