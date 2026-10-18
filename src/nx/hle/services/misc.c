@@ -1183,6 +1183,55 @@ static int nn_audio_detail_IAudioInManager_OpenAudioInProtocolSpecified(
                                                        channel_count, sample_format, state, in);
 }
 
+/* ============================================================ ngc:u and ngct:u: no word lists */
+/* the lists' version: there are none here, and reden answers 1 for its own empty ones */
+#define NGC_CONTENT_VERSION 1u
+/* a text back as it was sent, as much of it as the buffer for it holds */
+static void ngc_back(IpcBuf text, IpcBuf out) {
+    u64 n = text.size < out.size ? text.size : out.size;
+    if (n) memmove(GP(out.addr), GP(text.addr), (size_t)n);
+}
+static int nn_ngc_detail_IService_GetContentVersion(SvcObj* self, u32* version) {
+    (void)self;
+    *version = NGC_CONTENT_VERSION;
+    R_SUCCEED();
+}
+static int nn_ngc_detail_IService_Check(SvcObj* self, u32 languages, const nn_ngc_detail_ProfanityFilterOption* option,
+                                        IpcBuf text, u32* found) {
+    (void)self, (void)languages, (void)option, (void)text;
+    *found = 0;
+    R_SUCCEED();
+}
+static int nn_ngc_detail_IService_Mask(SvcObj* self, u32 languages, const nn_ngc_detail_ProfanityFilterOption* option,
+                                       IpcBuf text, IpcBuf masked, u32* count) {
+    (void)self, (void)languages, (void)option;
+    ngc_back(text, masked);
+    *count = 0;
+    R_SUCCEED();
+}
+static int nn_ngc_detail_IService_Reload(SvcObj* self) {
+    (void)self;
+    R_SUCCEED();
+}
+static int nn_ngc_detail_IService_Check2(SvcObj* self, u32 languages, const nn_ngc_detail_ProfanityFilterOption* option,
+                                         IpcBuf text, u32* found) {
+    return nn_ngc_detail_IService_Check(self, languages, option, text, found);
+}
+static int nn_ngc_detail_IService_Mask2(SvcObj* self, u32 languages, const nn_ngc_detail_ProfanityFilterOption* option,
+                                        IpcBuf text, IpcBuf masked, u32* count) {
+    return nn_ngc_detail_IService_Mask(self, languages, option, text, masked, count);
+}
+static int nn_ngct_detail_IService_Match(SvcObj* self, IpcBuf text, u8* matched) {
+    (void)self, (void)text;
+    *matched = 0;
+    R_SUCCEED();
+}
+static int nn_ngct_detail_IService_Filter(SvcObj* self, IpcBuf text, IpcBuf filtered) {
+    (void)self;
+    ngc_back(text, filtered);
+    R_SUCCEED();
+}
+
 /* ============================================================ the services' objects */
 SvcObj* new_apm(void) { return nn_apm_IManager_new(0); }
 SvcObj* new_lm(void) { return nn_lm_ILogService_new(0); }
@@ -1206,3 +1255,5 @@ SvcObj* new_ectx(void) { return nn_err_context_IWriterForApplication_new(0); }
 SvcObj* new_spl(void) { return nn_spl_detail_IGeneralInterface_new(0); }
 SvcObj* new_btmu(void) { return nn_btm_IBtmUser_new(0); }
 SvcObj* new_audin(void) { return nn_audio_detail_IAudioInManager_new(0); }
+SvcObj* new_ngc(void) { return nn_ngc_detail_IService_new(0); }
+SvcObj* new_ngct(void) { return nn_ngct_detail_IService_new(0); }

@@ -76,6 +76,8 @@ SvcObj* new_ectx(void);
 SvcObj* new_spl(void);
 SvcObj* new_btmu(void);
 SvcObj* new_audin(void);
+SvcObj* new_ngc(void);
+SvcObj* new_ngct(void);
 
 /* ---- audren.c: the audio renderer */
 int audren_update(SvcObj* o, IpcBuf in, IpcBuf out); /* RequestUpdate, on its input and output buffers */
