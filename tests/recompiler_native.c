@@ -298,10 +298,10 @@ int main(int argc, char** argv) {
         free(text);
         text = NULL;
     }
-    { /* the help names the level a recompile takes without -O */
+    { /* the help names the level a recompile takes without -O (its line ends in \r\n on Windows) */
         const char* help[] = {argv[1], "--repo", argv[2], "-r", "--help", NULL};
         check(!snx_run(help, root, NULL, &text) &&
-                  strstr(text, "-O LEVEL               Optimization: 0,1,2,3,s,z (default: 2)\n"),
+                  strstr(text, "-O LEVEL               Optimization: 0,1,2,3,s,z (default: 2)"),
               "-O's default in the help");
         free(text);
         text = NULL;
