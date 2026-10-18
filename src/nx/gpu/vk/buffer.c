@@ -1058,24 +1058,36 @@ static void drop_own(Vb* e) {
     e->own = 0;
     e->buf = VK_NULL_HANDLE;
 }
+/* An own buffer is device memory the GPU reads at full speed, filled by a copy from this frame's staging ring. Mapped
+   memory for it is the BAR's window on most GPUs (256 MB, which VMA prefers for host writes), and thousands of own
+   buffers there crowded out the staging rings: TotK's rings, made again in the window as they grew after loading,
+   took writes at a twentieth of their speed for minutes (18 to 25 fps against 43) */
 static int make_own(Vb* e, const u8* src) {
+    u64 len = e->len;
     VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                              .size = e->len,
+                              .size = len,
                               .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                        VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
-                                       VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT,
+                                       VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                               .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
-    VmaAllocationCreateInfo aci = {.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                                            VMA_ALLOCATION_CREATE_MAPPED_BIT,
-                                   .usage = VMA_MEMORY_USAGE_AUTO};
-    VmaAllocationInfo info;
-    VkBuffer b;
+    VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+    VkBuffer b, sb;
     VmaAllocation m;
-    if (vmaCreateBuffer(g_vk.vma, &bci, &aci, &b, &m, &info) != VK_SUCCESS) return 0;
-    memcpy(info.pMappedData, src, e->len);
-    if (copy_stats_on()) g_copy_owned += e->len;
-    vmaFlushAllocation(g_vk.vma, m, 0, VK_WHOLE_SIZE);
+    u64 so;
+    if (vmaCreateBuffer(g_vk.vma, &bci, &aci, &b, &m, NULL) != VK_SUCCESS) return 0;
+    u8* p = vk_stage(len, vk_stage_align(), &sb, &so);
+    if (!p) {
+        vmaDestroyBuffer(g_vk.vma, b, m);
+        return 0;
+    }
+    memcpy(p, src, len);
+    if (copy_stats_on()) g_copy_owned += len;
+    vk_render_end(); /* copies happen outside rendering passes */
+    VkBufferCopy r = {so, 0, len};
+    rec_CmdCopyBuffer(vk_cmd(), sb, b, 1, &r);
+    copy_barrier(VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                 VK_ACCESS_2_MEMORY_READ_BIT);
     drop_own(e);
     e->own = 1;
     e->buf = b;
