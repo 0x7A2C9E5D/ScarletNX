@@ -647,9 +647,15 @@ jobs:
           EXPECTED: ${{ vars.ANDROID_CERT_SHA256 }}
         run: |
           set -euo pipefail
+          apk=ScarletNX-android-universal-${{ steps.commit.outputs.short }}.apk
           apksigner=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner
-          cert=$("$apksigner" verify --print-certs ScarletNX-android-universal-${{ steps.commit.outputs.short }}.apk |
-                 sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          "$apksigner" verify --print-certs "$apk" | tee "$RUNNER_TEMP/certs.txt"
+          # "Signer #1 ..." or, for a signer of some SDK versions, "Signer (minSdkVersion=...) ..."
+          cert=$(sed -n 's/^Signer[^:]* certificate SHA-256 digest: //p' "$RUNNER_TEMP/certs.txt" | sort -u)
+          if [ -z "$cert" ] || [ "$(wc -l <<< "$cert")" != 1 ]; then
+            echo "::error::apksigner names no one certificate of $apk"
+            exit 1
+          fi
           echo "signed by the certificate of SHA-256 $cert"
           if [ -n "${SNX_ANDROID_KEYSTORE:-}" ] && [ -n "$EXPECTED" ] && [ "$cert" != "$EXPECTED" ]; then
             echo "::error::signed by $cert, not the repository's key ($EXPECTED)"
