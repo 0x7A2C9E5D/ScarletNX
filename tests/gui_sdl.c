@@ -1688,7 +1688,9 @@ int main(int argc, char** argv) {
         shows(&app, "Clean old settings: 3 done", title);
         shows(&app, "[Deprecated] taken out", rgb(app.theme.soft));
         shows(&app, "- OK", yellow);
-        key(&app, SDLK_DOWN); /* closes it, and does nothing else */
+        key(&app, SDLK_DOWN); /* the three show: nothing to go to */
+        assert(app.cleaned_shown && !app.files_top && app.editor.row == GUI_APP_CLEAN);
+        key(&app, SDLK_LEFT); /* closes it, and does nothing else */
         assert(!app.cleaned_shown && app.editing && app.form == GUI_FORM_APP && app.editor.row == GUI_APP_CLEAN);
         render(&app);
         hides(&app, "Clean old settings: 3 done", title);
@@ -3986,8 +3988,10 @@ int main(int argc, char** argv) {
                 text_px_is(&app, r.x + cw + 2 * cw, r.y + head_h(&app) + 4 * s + 16 * s, "counting",
                            rgb(app.theme.soft), black);
             }
-            key(&app, SDLK_DOWN);
-            assert(!app.left_shown && app.menu.selected == GUI_EXIT); /* the key closed it and did nothing else */
+            key(&app, SDLK_DOWN); /* one file: nothing to go to */
+            assert(app.left_shown && app.menu.selected == GUI_EXIT);
+            key(&app, SDLK_RETURN);
+            assert(!app.left_shown && app.menu.selected == GUI_EXIT && !app.confirm.shown); /* closed, nothing else */
             free(app.left);
             app.left = NULL;
             app.lefts = 0;
@@ -4282,6 +4286,29 @@ int main(int argc, char** argv) {
         app.theme.tips_wrap = true;
         render(&app);
         shows_foot(&app, "its rows.", page);
+        /* longer than the foot's rows: its last row slides what is left, which nothing else would show */
+        {
+            int fs = foot_scale(&app), cols = r.w / (8 * fs), n = 0, x, y, found, scale = app.scale, over;
+            const char* rest = app.message;
+            while (n < 6 * cols) n += snprintf(app.message + n, sizeof app.message - (size_t)n, "a row of words ");
+            snprintf(app.message + n, sizeof app.message - (size_t)n, "and its end.");
+            render(&app);
+            menu_boxes(&app, &m);
+            r = foot_room(&app, m.place.tips, app.theme.tips_box);
+            hides_foot(&app, "its end.", page);
+            for (int row = 1; row < r.h / (16 * fs); ++row) /* the rows over the last, as they wrap */
+                for (rest += wrap_at(rest, cols, 0); *rest == ' ';) ++rest;
+            over = (int)SDL_utf8strlen(rest) - cols;
+            assert(r.h >= 2 * 16 * fs && over > 0);
+            for (app.clock = 1; gui_slide(over, app.clock, app.theme.scroll_ms) != over;)
+                app.clock += app.theme.scroll_ms;
+            render(&app);
+            app.scale = fs;
+            found = find_text(&app, "and its end.", page, 1, &x, &y);
+            app.scale = scale;
+            assert(found && x + 12 * 8 * fs == r.x + cols * 8 * fs && y == r.y + r.h / (16 * fs) * 16 * fs - 16 * fs);
+            app.clock = 1;
+        }
         app.theme.tips_wrap = false;
         app.message[0] = 0;
         app.clock = 0;
@@ -4823,6 +4850,54 @@ int main(int argc, char** argv) {
                 }
                 assert(more > 0);
                 shows(&app, "- OK", yellow);
+                hides(&app, "\x1e", rgb(app.theme.soft));
+                /* Up/Down go over them, a file at a time, an arrow beside the first saying some are above it; down
+                   only while some are under; PgUp/PgDn as many as show, the wheel a file a notch */
+                {
+                    int top;
+                    const char* last = strrchr(app.left, '\n');
+                    while (last > app.left && last[-1] != '\n') --last; /* the last file's line */
+                    left_paths(last, paths[0], paths[1], sizeof paths[0]);
+                    line = snx_format("%.*s", (int)gui_wrap(paths[0], width - 2), paths[0]);
+                    assert(app.files_top == 0 && app.files_shown == app.lefts - more);
+                    key(&app, SDLK_UP);
+                    assert(app.left_shown && app.files_top == 0);
+                    key(&app, SDLK_DOWN);
+                    assert(app.left_shown && app.files_top == 1 && app.menu.selected == selected);
+                    render(&app);
+                    shows(&app, "\x1e", rgb(app.theme.soft));
+                    for (n = 0; n < 10 && app.files_top + app.files_shown < app.lefts; ++n) {
+                        key(&app, SDLK_DOWN);
+                        render(&app);
+                    }
+                    assert(app.files_top + app.files_shown == app.lefts && app.files_top > 0);
+                    hides(&app, "which Share log lists", rgb(app.theme.soft));
+                    shows(&app, line, failure);
+                    free(line);
+                    top = app.files_top;
+                    key(&app, SDLK_DOWN);
+                    render(&app);
+                    assert(app.files_top == top);
+                    key(&app, SDLK_PAGEUP);
+                    assert(app.files_top == SDL_max(0, top - app.files_shown));
+                    key(&app, SDLK_PAGEDOWN);
+                    assert(app.files_top == SDL_max(0, top - app.files_shown) + app.files_shown);
+                    key(&app, SDLK_HOME); /* another key closes it, and does nothing else */
+                    assert(!app.left_shown && app.menu.selected == selected);
+                    app.left_shown = true;
+                    app.files_top = 0;
+                    render(&app);
+                    {
+                        SDL_Event wheel = {0};
+                        wheel.type = SDL_EVENT_MOUSE_WHEEL;
+                        wheel.wheel.integer_y = -1;
+                        event(&app, &wheel);
+                        assert(app.left_shown && app.files_top == 1 && app.menu.selected == selected);
+                        wheel.wheel.integer_y = 3;
+                        event(&app, &wheel);
+                        assert(app.files_top == 0);
+                    }
+                }
                 app.menu.text_size = text_size;
                 assert(SDL_SetWindowSize(app.window, window_w, window_h));
                 SDL_SyncWindow(app.window);
@@ -4836,8 +4911,8 @@ int main(int argc, char** argv) {
                     event(&app, &wheel);
                     assert(app.left_shown && app.menu.selected == selected);
                 }
-                /* a key closes it and does nothing else; nothing was moved */
-                key(&app, SDLK_DOWN);
+                /* another key closes it and does nothing else; nothing was moved */
+                key(&app, SDLK_RIGHT);
                 assert(!app.left_shown && app.menu.selected == selected && snx_is_file(loose));
                 /* Clean old settings cleans settings only: what an older version left stays where it is */
                 clean_old(&app);
