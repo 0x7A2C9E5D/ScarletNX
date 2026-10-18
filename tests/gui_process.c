@@ -11,6 +11,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
 #endif
@@ -30,6 +31,30 @@ static void delay(unsigned ms) {
     struct timespec t = {ms / 1000, (long)(ms % 1000) * 1000000};
     nanosleep(&t, NULL);
 #endif
+}
+/* threads that wait until their process ends */
+#ifdef _WIN32
+static DWORD WINAPI idle(LPVOID unused) {
+    (void)unused;
+    for (;;) Sleep(1000);
+}
+#else
+static void* idle(void* unused) {
+    (void)unused;
+    for (;;) delay(1000);
+}
+#endif
+static void idle_threads(int n) {
+    for (int i = 0; i < n; ++i) {
+#ifdef _WIN32
+        HANDLE thread = CreateThread(NULL, 0, idle, NULL, 0, NULL);
+        assert(thread);
+        CloseHandle(thread);
+#else
+        pthread_t thread;
+        assert(!pthread_create(&thread, NULL, idle, NULL) && !pthread_detach(thread));
+#endif
+    }
 }
 static void grandchild(const char* self, const char* mode, const char* marker) {
 #ifdef _WIN32
@@ -71,6 +96,7 @@ int main(int argc, char** argv) {
         return 7; /* Grandchild outlives the immediate child. */
     }
     if (argc > 1 && !strcmp(argv[1], "--grandchild")) {
+        idle_threads(7); /* its memory counts once, not once per thread */
         unsigned char* memory = malloc(32 * 1024 * 1024);
         assert(memory);
         memset(memory, 42, 32 * 1024 * 1024);
@@ -114,8 +140,9 @@ int main(int argc, char** argv) {
         }
         assert(top > 50 && top < 200);
     }
-    GuiProcess* process = gui_process_create();
-    assert(process);
+    GuiProcess *process = gui_process_create(),
+               *alone = gui_process_create(); /* alone runs nothing: the test's usage */
+    assert(process && alone);
     char* self = snx_executable(argv[0]);
     char error[512];
     const char* missing[] = {"/nonexistent/scarletnx-gui-driver", NULL};
@@ -127,6 +154,7 @@ int main(int argc, char** argv) {
     unsigned found = 0;
     size_t bytes = 0;
     bool saw_cpu = false, saw_memory = false;
+    uint64_t run_top = 0;
     double end = now() + 10;
     char buffer[8192] = {0};
     size_t carry = 0;
@@ -144,16 +172,24 @@ int main(int argc, char** argv) {
             carry = length < 64 ? length : 64;
             memmove(buffer, buffer + length - carry, carry);
         }
-        GuiUsage usage = gui_process_usage(process);
+        GuiUsage usage = gui_process_usage(process), own = gui_process_usage(alone);
         saw_cpu |= usage.cpu_percent > 0;
         saw_memory |= usage.memory_bytes > baseline.memory_bytes + 16 * 1024 * 1024;
+        /* the run's own: the test's grows apart from it, ASan keeping what it frees */
+        if (usage.memory_bytes > own.memory_bytes && usage.memory_bytes - own.memory_bytes > run_top)
+            run_top = usage.memory_bytes - own.memory_bytes;
         if (gui_process_finished(process, &status)) break;
         delay(2);
     }
-    if (!(status == 7 && found == 15 && bytes > 409600 && saw_cpu && saw_memory))
-        fprintf(stderr, "gui_process: status %d, found %u of 15, %lu bytes, CPU seen %d, memory seen %d\n", status,
-                found, (unsigned long)bytes, saw_cpu, saw_memory);
-    assert(status == 7 && found == 15 && bytes > 409600 && saw_cpu && saw_memory);
+    /* the child and the grandchild with its 32 MiB, each the test's size at most besides: one count of each */
+    bool once = run_top < 2 * baseline.memory_bytes + 64 * 1024 * 1024;
+    if (!(status == 7 && found == 15 && bytes > 409600 && saw_cpu && saw_memory && once))
+        fprintf(stderr,
+                "gui_process: status %d, found %u of 15, %lu bytes, CPU seen %d, memory seen %d, the run %lu MiB at "
+                "most (the test %lu MiB)\n",
+                status, found, (unsigned long)bytes, saw_cpu, saw_memory, (unsigned long)(run_top >> 20),
+                (unsigned long)(baseline.memory_bytes >> 20));
+    assert(status == 7 && found == 15 && bytes > 409600 && saw_cpu && saw_memory && once);
     char* temporary = snx_temp_dir(NULL);
     char* marker = snx_path_join(temporary, "must not exist");
     /* Force termination covers a hung parent, an exited parent with surviving
@@ -194,6 +230,7 @@ int main(int argc, char** argv) {
         assert(!snx_is_file(marker));
     }
     snx_remove_tree(temporary);
+    gui_process_destroy(alone);
     free(marker);
     free(temporary);
     free(self);
