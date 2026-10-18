@@ -37,7 +37,8 @@ SvcObj* new_setsys(void);
 
 /* ---- time.c */
 void time_init(void);
-SvcObj* new_time(void);
+SvcObj* new_time(void);      /* time:a and time:s */
+SvcObj* new_time_user(void); /* time:u, an application's: no write */
 
 /* ---- acc.c */
 SvcObj* new_acc(void);
