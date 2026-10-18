@@ -51,8 +51,14 @@ static void table_clear(GnuJit* jit, uint64_t first, uint64_t count) {
     }
     memset(begin, 0, (size_t)(low - begin));
     memset(high, 0, (size_t)(end - high));
-    /* whole pages go back to the zero page: a program's worth of slots costs nothing once it is gone */
+    /* whole pages go back to the zero page: a program's worth of slots costs nothing once it is gone. Only Linux's
+       MADV_DONTNEED drops the contents (FreeBSD's keeps them, and an exec would call the old program's functions) */
+#if defined(__linux__)
     (void)madvise(low, (size_t)(high - low), MADV_DONTNEED);
+#else
+    (void)mmap(low, (size_t)(high - low), PROT_READ | PROT_WRITE,
+               MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+#endif
 #endif
 }
 

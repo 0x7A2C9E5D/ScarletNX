@@ -54,6 +54,9 @@ extern char** environ;
 #define ALT_STACK_SIZE 32768
 /* below this a thread is a small helper that gets no alternate signal stack */
 #define ALT_STACK_MIN_THREAD ((size_t)256 << 10)
+/* the least stack a thread gets: FreeBSD's PTHREAD_STACK_MIN (2 KiB on amd64) is less than its dynamic linker takes
+   to bind the thread's first call, so never under glibc's 16 KiB */
+#define THREAD_STACK_FLOOR   ((size_t)PTHREAD_STACK_MIN > 16384 ? (size_t)PTHREAD_STACK_MIN : (size_t)16384)
 
 /* ================================================================ condition variables */
 void pc_init(PCond* c) {
@@ -147,7 +150,7 @@ int plat_thread(PThreadFn fn, void* arg, size_t stack) {
     pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
     if (stack) {
         /* smaller than the minimum, setstacksize fails and the default would be used silently */
-        if (stack < (size_t)PTHREAD_STACK_MIN) stack = (size_t)PTHREAD_STACK_MIN;
+        if (stack < THREAD_STACK_FLOOR) stack = THREAD_STACK_FLOOR;
 #if defined(__APPLE__)
         {
             size_t page = (size_t)sysconf(_SC_PAGESIZE); /* 16 KiB on Apple silicon; Darwin wants whole pages */
@@ -312,12 +315,13 @@ u8* plat_vm_reserve(u64 size) {
 }
 int plat_vm_commit(u8* p, u64 size) { return mprotect(p, (size_t)size, PROT_READ | PROT_WRITE) ? -1 : 0; }
 void plat_vm_decommit(u8* p, u64 size) {
-#if defined(__APPLE__)
-    /* Darwin's MADV_DONTNEED may keep the contents: fresh pages over the range are certain to read zero */
-    mmap(p, (size_t)size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-#else
+#if defined(__linux__)
     madvise(p, (size_t)size, MADV_DONTNEED);
     mprotect(p, (size_t)size, PROT_NONE);
+#else
+    /* only Linux's MADV_DONTNEED drops the contents (Darwin's may keep them, FreeBSD's does): fresh pages over the
+       range are certain to read zero */
+    mmap(p, (size_t)size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 #endif
 }
 

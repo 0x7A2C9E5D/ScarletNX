@@ -40,7 +40,8 @@ function(snx_patched_copy)
     file(REMOVE_RECURSE "${arg_DEST}")
     file(COPY "${arg_SOURCE}/" DESTINATION "${arg_DEST}")
     foreach(patch IN LISTS arg_PATCHES)
-        execute_process(COMMAND "${PATCH_EXECUTABLE}" -p1 -i "${patch}" WORKING_DIRECTORY "${arg_DEST}"
+        # -F0: with its default fuzz, FreeBSD's patch applies a hunk whose removed lines differ
+        execute_process(COMMAND "${PATCH_EXECUTABLE}" -p1 -F0 -i "${patch}" WORKING_DIRECTORY "${arg_DEST}"
                         RESULT_VARIABLE failed OUTPUT_VARIABLE said ERROR_VARIABLE said)
         if(failed)
             message(FATAL_ERROR "${patch} does not apply to ${arg_SOURCE}:\n${said}")
