@@ -422,13 +422,14 @@ if(TARGET OpenSSL::SSL)
     set_tests_properties(ssl_service PROPERTIES TIMEOUT 60)
 endif()
 
-# mm:u and the smaller services, hid's IHidServer and acc (misc.c, hid.c, acc.c), with the kernel objects stubbed
-if(TARGET OpenSSL::Crypto)
+# mm:u and the smaller services, hid's IHidServer and acc (misc.c, hid.c, acc.c, whose user picture snx_splash draws),
+# with the kernel objects stubbed
+if(TARGET OpenSSL::Crypto AND TARGET snx_splash)
     add_executable(snx-test-misc-service misc_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_touch.c"
         "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_motion.c")
     snx_test_target(snx-test-misc-service 23)
         snx_service_swipc(snx-test-misc-service hle/services/hid.swipc hle/services/misc.swipc hle/services/acc.swipc)
-    target_link_libraries(snx-test-misc-service PRIVATE OpenSSL::Crypto)
+    target_link_libraries(snx-test-misc-service PRIVATE OpenSSL::Crypto snx_splash)
     if(NOT WIN32)
         target_link_libraries(snx-test-misc-service PRIVATE m)
     endif()
@@ -453,6 +454,19 @@ add_executable(snx-test-am-nacp am_nacp.c am_service_stubs.c)
 snx_test_target(snx-test-am-nacp 23)
 snx_service_swipc(snx-test-am-nacp hle/services/am.swipc)
 add_test(NAME am_nacp COMMAND snx-test-am-nacp)
+
+# acc's profile through its dispatchers: the user's picture, Wimsy as a 256x256 JPEG of the size GetImageSize tells
+# (acc.c, the splash's drawing), decoded by plutovg
+if(NOT SNX_TOOLS_ONLY AND NOT SNX_HACTOOL_ONLY)
+    add_executable(snx-test-acc-service acc_service.c)
+    snx_test_target(snx-test-acc-service 23)
+    snx_service_swipc(snx-test-acc-service hle/services/acc.swipc)
+    target_link_libraries(snx-test-acc-service PRIVATE snx_splash)
+    target_include_directories(snx-test-acc-service SYSTEM PRIVATE "${plutovg_SOURCE_DIR}/include")
+    target_compile_definitions(snx-test-acc-service PRIVATE PLUTOVG_BUILD_STATIC)
+    set_target_properties(snx-test-acc-service PROPERTIES LINKER_LANGUAGE CXX)
+    add_test(NAME acc_service COMMAND snx-test-acc-service)
+endif()
 
 # set and set:sys: the firmware version's layout and the language codes (set.c)
 add_executable(snx-test-set-service set_service.c)
@@ -882,6 +896,11 @@ if(UNIX)
         target_link_libraries(snx-test-audren PRIVATE m)
     add_test(NAME audren_render COMMAND snx-test-audren)
 endif()
+
+# audren.c's host side with the DSP stubbed: the output device's volume on every renderer's host stream
+add_executable(snx-test-audren-host audren_host.c)
+snx_test_target(snx-test-audren-host 23)
+add_test(NAME audren_host COMMAND snx-test-audren-host)
 
 add_executable(snx-test-render-enable render_enable.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c"
     "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/write_pages.c")

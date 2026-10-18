@@ -81,4 +81,6 @@ SvcObj* new_audin(void);
 int audren_update(SvcObj* o, IpcBuf in, IpcBuf out); /* RequestUpdate, on its input and output buffers */
 int audren_open(SvcObj* o, const u8* params);        /* 0 when the renderer can't be made */
 void audren_tick(void);                              /* one frame of every started renderer */
+void audren_volume(float gain); /* the output device's volume (audio.c), on every renderer's host output */
+
 #endif

@@ -25,8 +25,9 @@
 #define AM_OUT_OF_MEMORY   RC(128, 600)
 
 /* nn::am::AppletMessage */
-#define AM_MSG_FOCUS_STATE_CHANGED       15
-#define AM_MSG_PERFORMANCE_MODE_CHANGED  31
+#define AM_MSG_FOCUS_STATE_CHANGED      15
+#define AM_MSG_PERFORMANCE_MODE_CHANGED 31
+#define AM_MSG_STARTUP_LOGO_GONE        95 /* StartupLogoDisappeared, after EnableStartupLogoDisappearedMessage */
 #define AM_FOCUS_IN                1 /* nn::am::service::FocusState::InFocus */
 
 /* the AppletIds of the library applets that answer with data */
@@ -64,6 +65,9 @@ static struct {
     u32 head, count;
     int preselected_popped; /* the preselected user launch parameter is given once */
     u64 next_layer;         /* CreateManagedDisplayLayer's ids, from 1 */
+    u32 idle_extension;     /* ISelfController's two settings a game reads back, as it made them */
+    u8 auto_sleep_disabled;
+    u8 vr_mode_3d;          /* on between BeginVrMode3d and EndVrMode3d */
     u8* nacp;               /* the game's control.nacp in its data folder, read on first use; NULL with none */
     u64 nacp_size;
     int nacp_read;
@@ -404,6 +408,42 @@ static int nn_am_service_ICommonStateGetter_GetCurrentPerformanceConfiguration(S
     *configuration = AM_PERFORMANCE_CONFIG;
     R_SUCCEED();
 }
+/* there is no start-up logo here, so it is gone as soon as a game asks to be told */
+static int nn_am_service_ICommonStateGetter_EnableStartupLogoDisappearedMessage(SvcObj* self) {
+    (void)self;
+    pm_lock(&am.lock);
+    if (am.count < AM_MESSAGES) am.msgs[(am.head + am.count++) % AM_MESSAGES] = AM_MSG_STARTUP_LOGO_GONE;
+    kevent_signal(am.msg_event);
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+static int nn_am_service_ICommonStateGetter_GetSettingsPlatformRegion(SvcObj* self, u32* region) {
+    (void)self;
+    *region = 1; /* Global */
+    R_SUCCEED();
+}
+static void am_set_vr_mode_3d(u8 on) {
+    pm_lock(&am.lock);
+    am.vr_mode_3d = on;
+    pm_unlock(&am.lock);
+}
+static int nn_am_service_ICommonStateGetter_BeginVrMode3d(SvcObj* self) {
+    (void)self;
+    am_set_vr_mode_3d(1);
+    R_SUCCEED();
+}
+static int nn_am_service_ICommonStateGetter_EndVrMode3d(SvcObj* self) {
+    (void)self;
+    am_set_vr_mode_3d(0);
+    R_SUCCEED();
+}
+static int nn_am_service_ICommonStateGetter_IsVrModeEnabled3d(SvcObj* self, u8* enabled) {
+    (void)self;
+    pm_lock(&am.lock);
+    *enabled = am.vr_mode_3d;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
 
 /* ============================================================ ISelfController */
 static int nn_am_service_ISelfController_Exit(SvcObj* self) {
@@ -437,6 +477,34 @@ static int nn_am_service_ISelfController_CreateManagedDisplaySeparableLayer(SvcO
 static int nn_am_service_ISelfController_GetAccumulatedSuspendedTickChangedEvent(SvcObj* self, u32* event) {
     (void)self;
     return new_event(event, "am:suspended tick changed", 1);
+}
+static int nn_am_service_ISelfController_SetIdleTimeDetectionExtension(SvcObj* self, u32 extension) {
+    (void)self;
+    pm_lock(&am.lock);
+    am.idle_extension = extension;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+static int nn_am_service_ISelfController_GetIdleTimeDetectionExtension(SvcObj* self, u32* extension) {
+    (void)self;
+    pm_lock(&am.lock);
+    *extension = am.idle_extension;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+static int nn_am_service_ISelfController_SetAutoSleepDisabled(SvcObj* self, u8 disabled) {
+    (void)self;
+    pm_lock(&am.lock);
+    am.auto_sleep_disabled = disabled;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+static int nn_am_service_ISelfController_IsAutoSleepDisabled(SvcObj* self, u8* disabled) {
+    (void)self;
+    pm_lock(&am.lock);
+    *disabled = am.auto_sleep_disabled;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
 }
 
 static int nn_am_service_IWindowController_GetAppletResourceUserId(SvcObj* self,
