@@ -545,7 +545,22 @@ jobs:
             echo "SNX_DEPS_CACHE=$ws/.cache/deps"
             echo "SNX_CCACHE_START=$(date +%s)"
           } >> "$GITHUB_ENV"
+      # One key signs every APK, so each installs over the one before (docs/ANDROID.md): the ANDROID_KEYSTORE secret, a
+      # keystore in base64. A fork's pull request has no secrets: its APKs carry the runner's own debug key, said here
+      - name: The signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          if [ -n "$KEYSTORE" ]; then
+            printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/scarletnx.keystore"
+            echo "SNX_ANDROID_KEYSTORE=$RUNNER_TEMP/scarletnx.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No ANDROID_KEYSTORE secret: the runner's own debug key signs this APK, so it does not" \
+              "install over one the repository's key signed"
+          fi
       - name: Build the native libraries and the APK
+        env:
+          SNX_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           JAVA_HOME=$JAVA_HOME_21_X64 scripts/android-apk.sh "$PWD/build/android" "$PWD/android-llvm" \
             ${{ matrix.abi }} -- \
@@ -606,10 +621,40 @@ jobs:
           pattern: ScarletNX-android-*-${{ steps.commit.outputs.short }}-stage
           merge-multiple: true
           path: stage
-      - name: Pack the APK of both ABIs
+      # One key signs every APK, so each installs over the one before (docs/ANDROID.md): the ANDROID_KEYSTORE secret, a
+      # keystore in base64. A fork's pull request has no secrets: its APKs carry the runner's own debug key, said here
+      - name: The signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
         run: |
-          JAVA_HOME=$JAVA_HOME_21_X64 gradle -p dist/android assembleDebug -Pscarletnx.stage="$PWD/stage"
+          if [ -n "$KEYSTORE" ]; then
+            printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/scarletnx.keystore"
+            echo "SNX_ANDROID_KEYSTORE=$RUNNER_TEMP/scarletnx.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No ANDROID_KEYSTORE secret: the runner's own debug key signs this APK, so it does not" \
+              "install over one the repository's key signed"
+          fi
+      - name: Pack the APK of both ABIs
+        env:
+          SNX_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          JAVA_HOME=$JAVA_HOME_21_X64 gradle -p dist/android assembleDebug -Pscarletnx.stage="$PWD/stage" \
+            ${SNX_ANDROID_KEYSTORE:+"-Pscarletnx.keystore=$SNX_ANDROID_KEYSTORE"}
           cp stage/gradle/outputs/apk/debug/ScarletNX-debug.apk ScarletNX-android-universal-${{ steps.commit.outputs.short }}.apk
+      # the certificate it carries, in the log; with the repository's key, the one ANDROID_CERT_SHA256 (a variable) names
+      - name: Check the APK's signer
+        env:
+          EXPECTED: ${{ vars.ANDROID_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner
+          cert=$("$apksigner" verify --print-certs ScarletNX-android-universal-${{ steps.commit.outputs.short }}.apk |
+                 sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          echo "signed by the certificate of SHA-256 $cert"
+          if [ -n "${SNX_ANDROID_KEYSTORE:-}" ] && [ -n "$EXPECTED" ] && [ "$cert" != "$EXPECTED" ]; then
+            echo "::error::signed by $cert, not the repository's key ($EXPECTED)"
+            exit 1
+          fi
       # A library that needs one Android 5.0 lacks fails to load there, and the app with it
       - name: Check the APK's libraries
         run: |
