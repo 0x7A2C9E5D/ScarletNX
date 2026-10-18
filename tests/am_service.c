@@ -267,6 +267,25 @@ static void test_previous_program(void) {
     i32 index = 0;
     CHECK(nn_am_service_IApplicationFunctions_GetPreviousProgramIndex(NULL, &index) == 0 && index == -1);
 }
+/* IStorageAccessor's Read: the whole buffer within the storage, or InvalidOffset */
+static void test_storage_read(void) {
+    static u8 guest[32];
+    SvcObj *s = am_storage_new(8, "abcdefg"), *acc = NULL;
+    IpcBuf buf = {0, 8, 0};
+    g_mem = guest;
+    CHECK(nn_am_service_IStorage_Open(s, &acc) == 0);
+    CHECK(nn_am_service_IStorageAccessor_Read(acc, 0, buf) == 0 && memcmp(guest, "abcdefg", 8) == 0);
+    buf.size = 16;
+    CHECK(nn_am_service_IStorageAccessor_Read(acc, 0, buf) == AM_INVALID_OFFSET);
+    buf.size = 4;
+    CHECK(nn_am_service_IStorageAccessor_Read(acc, 6, buf) == AM_INVALID_OFFSET);
+    CHECK(nn_am_service_IStorageAccessor_Read(acc, 4, buf) == 0 && memcmp(guest, "efg", 4) == 0);
+    CHECK(nn_am_service_IStorageAccessor_Read(acc, -1, buf) == AM_INVALID_OFFSET);
+    g_mem = NULL;
+    svcobj_unref(acc);
+    svcobj_unref(s);
+    CHECK(test_objects == 0);
+}
 static void test_inline(void) {
     SvcObj* a;
     SvcObj* s;
@@ -439,6 +458,7 @@ int main(void) {
     test_audio_controller();
     test_user_channel();
     test_previous_program();
+    test_storage_read();
     test_inline();
     modern_packet = 1;
     test_inline();

@@ -169,12 +169,12 @@ static int nn_am_service_IStorageAccessor_Write(SvcObj* self, i64 offset, IpcBuf
     memcpy(am_storage_bytes(st) + offset, GP(data.addr), (size_t)data.size);
     R_SUCCEED();
 }
+/* the whole buffer, as Eden checks a read: one that runs past the end is refused, not cut */
 static int nn_am_service_IStorageAccessor_Read(SvcObj* self, i64 offset, IpcBuf data) {
     SvcObj* st = ((AmAccessor*)self->data)->storage;
-    u64 size = ((StorageData*)st->data)->size, n;
-    R_UNLESS(offset >= 0 && (u64)offset <= size, AM_INVALID_OFFSET);
-    n = data.size < size - (u64)offset ? data.size : size - (u64)offset;
-    memcpy(GP(data.addr), am_storage_bytes(st) + offset, (size_t)n);
+    u64 size = ((StorageData*)st->data)->size;
+    R_UNLESS(offset >= 0 && (u64)offset <= size && data.size <= size - (u64)offset, AM_INVALID_OFFSET);
+    memcpy(GP(data.addr), am_storage_bytes(st) + offset, (size_t)data.size);
     R_SUCCEED();
 }
 
