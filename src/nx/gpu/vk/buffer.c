@@ -585,6 +585,14 @@ static int gfx_composed(u64 gva, u64 len, VkBuffer* buf, u64* off) {
 #define WW_LEAF_SHIFT 22
 static u32* g_wleaf[AS_SIZE >> WW_LEAF_SHIFT];
 static u32 g_wleaf_max[AS_SIZE >> WW_LEAF_SHIFT];
+/* The CPU writes a GPU stream may see come before its submission or the end of one of its waits: each of those starts
+   a write epoch (vk_ww_new_epoch). A leaf scanned whole in the current epoch isn't scanned again in it, and a scan
+   covers whole leaves, so the textures and buffers checked in one epoch share a few scans: TotK made 5,600 of them a
+   frame. g_wleaf_seen holds the epoch + 1 a leaf was last scanned in */
+static u32 g_wleaf_seen[AS_SIZE >> WW_LEAF_SHIFT];
+static u32 g_ww_epoch;
+void vk_ww_new_epoch(void) { __atomic_add_fetch(&g_ww_epoch, 1, __ATOMIC_RELAXED); }
+u32 vk_ww_epoch(void) { return __atomic_load_n(&g_ww_epoch, __ATOMIC_RELAXED); }
 static u32 g_wclock = 1;
 static int g_ww = -1; /* -1 not tried yet, 0 not available, 1 on */
 static void ww_mark(u8* p, u64 n) {
@@ -671,12 +679,17 @@ int vk_written_since(const u8* host, u64 len, u32 since) {
     }
     g_wclock++;
     ww_take_changed();
-    if (plat_ww_scan((u8*)host, len, ww_mark) < 0) {
-        g_ww = 0;
-        LOG("vulkan: write tracking failed, caches check contents\n");
-        return -1;
+    u64 o = (u64)(host - g_mem), lo = o >> WW_LEAF_SHIFT, hi = (o + len - 1) >> WW_LEAF_SHIFT, l;
+    u32 seen = __atomic_load_n(&g_ww_epoch, __ATOMIC_RELAXED) + 1;
+    for (l = lo; l <= hi && g_wleaf_seen[l] == seen; l++) {}
+    if (l <= hi) {
+        if (plat_ww_scan(g_mem + (lo << WW_LEAF_SHIFT), (hi - lo + 1) << WW_LEAF_SHIFT, ww_mark) < 0) {
+            g_ww = 0;
+            LOG("vulkan: write tracking failed, caches check contents\n");
+            return -1;
+        }
+        for (l = lo; l <= hi; l++) g_wleaf_seen[l] = seen;
     }
-    u64 o = (u64)(host - g_mem);
     for (u64 pg = o >> 12, e = (o + len - 1) >> 12; pg <= e;) {
         u64 l = pg >> (WW_LEAF_SHIFT - 12), lend = (l + 1) << (WW_LEAF_SHIFT - 12);
         if (g_wleaf_max[l] > since) {

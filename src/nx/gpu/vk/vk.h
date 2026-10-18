@@ -397,6 +397,8 @@ void vk_write_changed(u64 addr, const u8* res, const u8* org, u32 size);
    can't tell (no host pointer, or not available): then check the contents */
 int vk_written_since(const u8* host, u64 len, u32 since);
 u32 vk_ww_now(void);
+void vk_ww_new_epoch(void); /* the CPU may have written what a GPU stream reads next: write tracking scans again */
+u32 vk_ww_epoch(void);
 void vk_mem_changed(u64 cpu, u64 len); /* gpu.c's g_gpu_mem_changed: the range counts as written */
 
 /* pipeline.c */

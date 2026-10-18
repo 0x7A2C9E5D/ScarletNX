@@ -80,7 +80,10 @@ static int vkr_start(void) {
 
 /* ------------------------------------------------------------ the front end's calls */
 /* a new epoch: the caches that trust what they checked in this one (buffers, constant buffers, shaders) check again */
-static void vkr_mem_may_have_changed(void) { __atomic_add_fetch(&g_vk_epoch, 1, __ATOMIC_RELAXED); }
+static void vkr_mem_may_have_changed(void) {
+    __atomic_add_fetch(&g_vk_epoch, 1, __ATOMIC_RELAXED);
+    vk_ww_new_epoch();
+}
 static void vkr_draw_texture(GpuChannel* ch) {
     vk_lock();
     vk_render_draw_texture(ch);
