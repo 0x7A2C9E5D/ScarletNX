@@ -14,6 +14,7 @@
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 #include "nx/gpu/vk/vk.h"
+#include "nx/gpu/vk/pending_pages.h"
 
 typedef struct Vb {
     u64 start, len, hash, shash;
@@ -65,6 +66,14 @@ typedef struct GfxOut {
     struct GfxOut* next;
 } GfxOut;
 static GfxOut *g_prep, *g_prep_tail, *g_out, *g_out_tail;
+/* the guest pages the results in g_out cover, so a read or write that meets none (almost all) skips the walk over
+   them: each adds its own translated pages when it is committed and removes them when it lands. A range that meets a
+   result only at the same GPU address through an unmapped page skips it too: nothing is read or written there. A GMMU
+   change (WB_MAP) still checks every result, so one over a page about to be mapped lands first */
+static PendPages g_out_pages;
+static void out_pages(const GfxOut* o, int delta) {
+    for (u32 i = 0; i < o->npages && o->pages[i] != ~0ull; i++) pend_add_page(&g_out_pages, o->pages[i], delta);
+}
 /* an output with its page lists and its original bytes after it, in one block */
 static GfxOut* gfx_out_new(u32 npages, u32 len) {
     GfxOut* o = calloc(1, sizeof *o + 2 * (size_t)npages * sizeof *o->pages + len);
@@ -142,6 +151,7 @@ void vk_buf_writable_abort(void) {
 }
 void vk_buf_writable_commit(void) {
     if (!g_prep) return;
+    for (GfxOut* o = g_prep; o; o = o->next) out_pages(o, 1);
     if (g_out_tail)
         g_out_tail->next = g_prep;
     else
@@ -221,6 +231,7 @@ void vk_buf_frame_done(u64 frame) {
             invalidated = o->mem;
         }
         vk_write_changed(o->addr, o->ptr, o->org, o->size);
+        out_pages(o, -1);
         out_rebase_later(o, done);
         if (copy_stats_on()) {
             g_wb_outputs++;
@@ -351,6 +362,10 @@ static void mem_need_reason(u64 gva, u64 len, int reason) {
     RangePages q;
     if (!g_gfx_any || g_out_landing || !len) return;
     vk_lock();
+    if (reason != WB_MAP && !pend_hit(&g_out_pages, gva, len)) {
+        vk_unlock();
+        return;
+    }
     range_pages(gva, len, &q);
     for (GfxOut* o = g_out; o; o = o->next)
         if ((gva < o->addr + o->size && o->addr < gva + len) || backing_overlap(&q, o)) {
@@ -368,7 +383,7 @@ int vk_buf_pending_unsubmitted(void) {
 }
 int vk_buf_pending(u64 gva, u64 len) {
     RangePages q;
-    if (!g_gfx_any || !len) return 0;
+    if (!g_gfx_any || !len || !pend_hit(&g_out_pages, gva, len)) return 0;
     range_pages(gva, len, &q);
     for (GfxOut* o = g_out; o; o = o->next)
         if ((gva < o->addr + o->size && o->addr < gva + len) || backing_overlap(&q, o)) return 1;
@@ -510,6 +525,7 @@ static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable) 
     u64 local[16], *rmap = NULL;
     if (!g_gfx_any || g_out_landing || !gva || !len) return 0;
     if (g_cs_any) vk_compute_mem_need(gva, len);
+    if (!pend_hit(&g_out_pages, gva, len)) return 0;
     range_pages(gva, len, &q);
     for (GfxOut* o = g_out; o; o = o->next) {
         u64 lo = gva > o->addr ? gva : o->addr, hi = gva + len < o->addr + o->size ? gva + len : o->addr + o->size;

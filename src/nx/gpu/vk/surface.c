@@ -13,6 +13,7 @@
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 #include "nx/gpu/vk/vk.h"
+#include "nx/gpu/vk/pending_pages.h"
 
 #define SURFH 4096
 static Surf* g_surfh[SURFH];
@@ -222,6 +223,13 @@ static u64 rt_bytes(const Surf* s) {
     return s->layer_size * (s->layers - 1) + rt_layer_bytes(s);
 }
 u64 vk_surf_guest_size(const Surf* s) { return s ? rt_bytes(s) : 0; }
+/* the GPU pages the render targets not parked cover, so a write that meets none (almost all) skips the walk over every
+   target in vk_rt_before_write: a target adds its pages when it is made or taken out of parking, and removes them when it
+   is parked or freed */
+static PendPages g_rt_pages;
+static void rt_pages(const Surf* s, int delta) {
+    if (!(s->gva >> 63)) pend_add_va(&g_rt_pages, s->gva, s->rt_size, delta);
+}
 int vk_surf_can_writeback(const Surf* s) { return s && s->f.raw && !s->f.depth && moves_scaled(s); }
 
 void vk_rt_reload(u64 gva) {
@@ -438,9 +446,9 @@ void vk_rt_before_write(u64 gva, u64 size) {
     if (!size || g_rt_flushing) return;
     vk_lock();
     g_rt_flushing = 1;
-    for (Surf* s = g_rt_first; s; s = s->rt_next)
-        if (!(s->gva >> 63) && gva < s->gva + rt_bytes(s) && s->gva < gva + size)
-            vk_surf_flush(s, NULL);
+    if (pend_hit_va(&g_rt_pages, gva, size))
+        for (Surf* s = g_rt_first; s; s = s->rt_next)
+            if (!(s->gva >> 63) && gva < s->gva + s->rt_size && s->gva < gva + size) vk_surf_flush(s, NULL);
     g_rt_flushing = 0;
     vk_unlock();
 }
@@ -475,9 +483,13 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
             s->volume == volume && !parked)
             parked = s;
     for (Surf* s = g_surfh[hkey(gva)]; s; s = s->next)
-        if (s->gva == gva && s->is_rt) s->gva = gva | 1ull << 63;
+        if (s->gva == gva && s->is_rt) {
+            rt_pages(s, -1);
+            s->gva = gva | 1ull << 63;
+        }
     if (parked) {
         parked->gva = gva;
+        rt_pages(parked, 1);
         parked->last_used = g_vk_present;
         vk_rt_note_read(parked);
         return parked;
@@ -488,6 +500,8 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
     s->layer_size = layer_size;
     s->bd = bd;
     s->volume = volume;
+    s->rt_size = rt_bytes(s);
+    rt_pages(s, 1);
     s->last_used = g_vk_present;
     s->gw = gpu_mem_generation();
     /* the CPU may have written the memory already (a cleared or decoded frame): start from it */
@@ -623,6 +637,7 @@ int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max) {
 /* a surface's image and views go when the frame being recorded is done (descriptors in it may name them) */
 static void surf_free(Surf* s) {
     if (s->is_rt) {
+        rt_pages(s, -1);
         for (Surf** pp = &g_rt_first; *pp; pp = &(*pp)->rt_next)
             if (*pp == s) {
                 *pp = s->rt_next;

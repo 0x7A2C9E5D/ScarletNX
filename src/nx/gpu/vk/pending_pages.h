@@ -23,6 +23,11 @@ typedef struct {
 void pend_add(PendPages* t, u64 gva, u64 size, int delta);
 /* nonzero when a result covers a guest page behind [gva, gva + size) */
 int pend_hit(const PendPages* t, u64 gva, u64 size);
+/* one guest page (an address >> 12) gains or loses a result: for results that keep their own translated pages */
+void pend_add_page(PendPages* t, u64 page, int delta);
+/* the same for pages counted by their GPU address, with no translation: for what is compared by GPU address */
+void pend_add_va(PendPages* t, u64 gva, u64 size, int delta);
+int pend_hit_va(const PendPages* t, u64 gva, u64 size);
 /* nonzero when no result covers any page: once every result is removed, each with the mappings it was added with */
 int pend_empty(const PendPages* t);
 

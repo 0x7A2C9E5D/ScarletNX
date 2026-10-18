@@ -205,6 +205,7 @@ typedef struct Surf {
     VkFmt f;
     u32 bl, bh, bd, pitch; /* guest layout: block linear with block height 2^bh GOBs, or pitch linear */
     u64 layer_size;        /* bytes from one layer to the next in guest memory */
+    u64 rt_size;           /* a render target's guest bytes, all layers (its shape is fixed when it is made) */
     int is_rt;
     int storage_capable;  /* image was created with VK_IMAGE_USAGE_STORAGE_BIT */
     int volume;           /* render target layers use 3D block-linear memory rather than array strides */

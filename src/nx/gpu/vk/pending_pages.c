@@ -79,4 +79,13 @@ int pend_hit(const PendPages* t, u64 gva, u64 size) {
     if (t->overflow) return 1;
     return each_run(gva, size, hit_pages, (void*)t, 0);
 }
+void pend_add_page(PendPages* t, u64 page, int delta) { add_pages(t, page, page, delta); }
+void pend_add_va(PendPages* t, u64 gva, u64 size, int delta) {
+    if (size) add_pages(t, gva >> 12, (gva + size - 1 < gva ? ~0ull : gva + size - 1) >> 12, delta);
+}
+int pend_hit_va(const PendPages* t, u64 gva, u64 size) {
+    if (!t->total) return 0;
+    if (t->far) return 1;
+    return size && hit_pages((void*)t, gva >> 12, (gva + size - 1 < gva ? ~0ull : gva + size - 1) >> 12, 0);
+}
 int pend_empty(const PendPages* t) { return !t->total; }

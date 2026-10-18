@@ -90,6 +90,13 @@ int main(void) {
     pend_add(t, 0x200000, 0x1000, -1);
     check(pend_empty(t) && !pend_hit(t, 0x600000, 0x1000), "until it is removed");
 
+    /* by GPU address, no translation: the alias above doesn't meet it, the page itself does */
+    pend_add_va(t, 0x104000, 0x2000, 1);
+    check(pend_hit_va(t, 0x105FFF, 1) && !pend_hit_va(t, 0x106000, 0x1000) && !pend_hit_va(t, 0x400000, 0x2000),
+          "pages by GPU address");
+    pend_add_va(t, 0x104000, 0x2000, -1);
+    check(pend_empty(t), "and their removal");
+
     /* a range to the top of the address space ends there */
     check(!pend_hit(t, ~0ull - 0xFFF, ~0ull), "a range that would wrap");
     if (failures) return 1;
