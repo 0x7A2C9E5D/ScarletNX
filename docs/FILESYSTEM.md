@@ -39,7 +39,9 @@ IPC requests allow 0x300-byte paths excluding NUL. Host limits also apply.
 - Live directory cursor: `strcmp` order, last visited name, latched EOF; counts reflect current children.
 - RomFS: prefer indexed `romfs.bin`; otherwise synthesize from `romfs/`.
 - Readonly RAM copies: missing system archives become valid empty images at `system/archives/<16-hex-id>.romfs`. No
-  persistent host copy.
+  persistent host copy. One there in the data directory is served instead: a game that draws Miis (Mario Kart 8
+  Deluxe) needs the console's Mii models, system data `0100000000000802`, whose RomFS goes there from your own
+  firmware; on the empty stand-in it stops in its graphics code.
 
 ## Shared fonts
 
