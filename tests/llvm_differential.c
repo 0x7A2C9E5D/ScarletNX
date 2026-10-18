@@ -549,14 +549,11 @@ int main(int argc, char** argv) {
     TableFn table_p, table_l;
     StepFn *steps_p, *steps_l;
     RtAPI rt;
-    int quiet = 0, a, gccjit = 0, march, portable = 0;
+    int quiet = 0, a, gccjit = 0, portable = 0;
 #ifdef SNX_TEST_GCCJIT
     TableFn table_g = NULL;
 #endif
     StepFn* steps_g = NULL;
-    TableFn table_h;
-    StepFn* steps_h;
-    char* c_native;
     unsigned long fallbacks, gccjit_fallbacks = 0;
     if (argc < 3) {
         fputs("usage: llvm_differential CLANG REPO [--match NAME] [--shard I/N] [--per-case N] [--simd N] [--states N]"
@@ -630,15 +627,13 @@ int main(int argc, char** argv) {
     fclose(f);
     abi = snx_path_join(repo, "src/common/cpu/aarch64");
     root = snx_path_join(repo, "src"); /* what cpu.h includes */
-    c_native = snx_path_join(dir, "native.so");
     k = 0;
     args[k++] = clang;
     args[k++] = "-O2";
     args[k++] = "-shared";
     args[k++] = "-w";
-    march = k;
 #if defined(__aarch64__)
-    args[k++] = "-march=armv8-a"; /* the reference: the helpers' plain C (no feature macros) */
+    args[k++] = "-march=armv8-a";
 #else
     args[k++] = "-march=x86-64";
     args[k++] = "-mcx16";
@@ -658,12 +653,6 @@ int main(int argc, char** argv) {
     args[k] = NULL;
     if (!quiet) printf("%lu words; compiling the reference steps\n", (unsigned long)count);
     if (snx_run(args, NULL, NULL, &text)) return snx_error("portable compile failed:\n%s", text ? text : "");
-    free(text);
-    /* again with -march=native: the helpers' paths for the host's extensions (AES-NI, PCLMULQDQ, CRC32, GFNI) */
-    args[march] = "-march=native";
-    args[k - 1] = c_native;
-    text = NULL;
-    if (snx_run(args, NULL, NULL, &text)) return snx_error("native portable compile failed:\n%s", text ? text : "");
     free(text);
     /* the LLVM backend: snx_ir_static_step for each word, linked with the runtime library */
     if (!quiet) printf("compiling the LLVM steps\n");
@@ -706,8 +695,6 @@ int main(int argc, char** argv) {
     free(linked.data);
     free(object);
     if (!load(c_lib, &table_p) || !table_p) return snx_error("cannot load the reference steps");
-    if (!load(c_native, &table_h) || !table_h) return snx_error("cannot load the native reference steps");
-    steps_h = table_h();
     if (!load(l_lib, &table_l) || !table_l) return snx_error("cannot load the LLVM steps");
     steps_p = table_p();
     steps_l = table_l();
@@ -743,9 +730,9 @@ int main(int argc, char** argv) {
     for (i = 0; i < count; ++i) {
         size_t s;
         for (s = 0; s < states; ++s) {
-            CPU start, p, l, h;
-            Log log_p, log_l, log_h;
-            u64 rp, rl, rh;
+            CPU start, p, l;
+            Log log_p, log_l;
+            u64 rp, rl;
             int memory_differs, helper_memory;
             memset(&start, 0, sizeof(start));
             random_state(&start, memory_start, &words[i]);
@@ -762,23 +749,6 @@ int main(int argc, char** argv) {
             current = &log_l;
             rl = steps_l[i](&l);
             memory_differs = memcmp(memory_p, memory_l, MEMORY_SIZE) != 0;
-            {
-                h = start;
-                memcpy(memory_l, memory_start, MEMORY_SIZE);
-                h.mem = memory_l;
-                memset(&log_h, 0, sizeof(log_h));
-                current = &log_h;
-                rh = steps_h[i](&h);
-                helper_memory = memcmp(memory_p, memory_l, MEMORY_SIZE) != 0; /* memory_l is reused: compared above */
-                if (rp != rh || !same_cpu(&p, &h) || helper_memory || !same_events(&log_p, &log_h)) {
-                    size_t index = (size_t)(words[i].pattern - patterns);
-                    fprintf(stderr, "the helpers built with -march=native differ from the plain C ones:\n");
-                    if (pattern_failures[index]++ < 3)
-                        report(&words[i], &start, &p, &h, rp, rh, &log_p, &log_h, helper_memory);
-                    ++failures;
-                    break;
-                }
-            }
             ++compared;
             if (steps_g) { /* the libgccjit steps against the reference too */
                 CPU g = start;

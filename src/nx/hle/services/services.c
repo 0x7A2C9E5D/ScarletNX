@@ -27,7 +27,7 @@ int new_event(u32* event, const char* name, int signaled) {
     kobj_ref(&e->o);
     *event = h_new(&e->o);
     kobj_unref(&e->o);
-    return 0;
+    R_SUCCEED();
 }
 
 KEvent* owned_event(const char* name) {

@@ -14,7 +14,10 @@ int snx_startup_options(int argc, char** argv) {
     for (i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--")) break;
         result = snx_cli_flag(argv[i], &flags);
-        if (result < 0 || (!result && argv[i][0] == '-' && argv[i][1] != '-' && strcmp(argv[i], "-v"))) {
+        /* -x, -r and their long forms are the driver's: a game's runtime refuses them like any other it doesn't
+           take, as a game is never extracted or recompiled from its own copy */
+        if (result < 0 || (flags & (SNX_EXTRACT | SNX_RECOMP)) ||
+            (!result && argv[i][0] == '-' && argv[i][1] != '-' && strcmp(argv[i], "-v"))) {
             fprintf(stderr, "scarletnx: unknown startup option: %s\n", argv[i]);
             return 2;
         }

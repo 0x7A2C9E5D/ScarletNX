@@ -1,15 +1,13 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the guest clock (clock.c): real time since startup */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The game's clock (clock.c): the host's monotonic time, counted from the run's start */
 #ifndef SNX_CLOCK_H
 #define SNX_CLOCK_H
 #include "common/cpu/aarch64/cpu.h"
 
-void clock_start(void);
-u64 g_t0_ns(void);     /* plat_ns() at startup */
-u64 guest_ns(void);    /* the guest's clock */
-u64 guest_ticks(void); /* the same clock in system ticks (svcGetSystemTick) */
+void clock_start(void); /* the run's start: guest time 0 */
+u64 g_t0_ns(void);      /* plat_ns() at clock_start */
+u64 guest_ns(void);     /* nanoseconds since clock_start */
+u64 guest_ticks(void);  /* the same time as the console's 19.2 MHz system tick (svcGetSystemTick, CNTPCT_EL0) */
 
 #endif

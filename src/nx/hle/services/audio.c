@@ -12,6 +12,7 @@
    waits for its buffers back), so it follows the clock whether or not the host has an audio device */
 #include "nx/hle/services/services_int.h"
 #include "nx/hle/services/audren_dsp.h"
+#include <math.h>
 #ifndef SNX_NO_H264
 #include "nx/gpu/video/host1x.h"
 #include <libavcodec/avcodec.h>
@@ -28,7 +29,6 @@
 #define AUDIO_NOT_FOUND           RC(AUDIO_MOD, 1)
 #define AUDIO_OPERATION_FAILED    RC(AUDIO_MOD, 2)
 #define AUDIO_BUFFER_COUNT_FULL   RC(AUDIO_MOD, 8)
-#define AUDIO_INVALID_CHANNELS    RC(AUDIO_MOD, 10)
 #define AUDIO_NOT_SUPPORTED       RC(AUDIO_MOD, 513)
 #define AUDIO_INVALID_HANDLE      RC(AUDIO_MOD, 1536)
 #define AUDIO_INVALID_REVISION    RC(AUDIO_MOD, 1537)
@@ -189,7 +189,7 @@ static int nn_audio_detail_IAudioOut_GetAudioOutState(SvcObj* self, u32* state) 
     AudOut* q = audout_lock(self);
     *state = q->started ? 0 : 1;
     pm_unlock(&audio.lk);
-    return 0;
+    R_SUCCEED();
 }
 
 static int nn_audio_detail_IAudioOut_Start(SvcObj* self) {
@@ -201,7 +201,7 @@ static int nn_audio_detail_IAudioOut_Start(SvcObj* self) {
         plat_audio_start(q->output, 1);
     }
     pm_unlock(&audio.lk);
-    return 0;
+    R_SUCCEED();
 }
 
 /* what wasn't played comes back released, the host's copy dropped (Eden's System::Stop) */
@@ -214,7 +214,7 @@ static int nn_audio_detail_IAudioOut_Stop(SvcObj* self) {
         kevent_signal(q->ev);
     }
     pm_unlock(&audio.lk);
-    return 0;
+    R_SUCCEED();
 }
 
 /* the AudioOutBuffer's samples copied to the host now, so the guest owns its memory again once the buffer is
@@ -222,13 +222,16 @@ static int nn_audio_detail_IAudioOut_Stop(SvcObj* self) {
 static int audout_append(SvcObj* self, u64 tag, IpcBuf b) {
     nn_audio_AudioOutBuffer d;
     AudOut* q;
+    u64 n = b.size < sizeof d ? b.size : sizeof d;
     u32 i;
-    if (!b.addr || b.size < sizeof d || !guest_ok(b.addr, sizeof d, PERM_R)) return AUDIO_OPERATION_FAILED;
-    memcpy(&d, GP(b.addr), sizeof d);
+    /* the SDK's first AudioOutBuffer had no data_offset (0x20 bytes): it is 0. Shorter than that, it holds nothing */
+    memset(&d, 0, sizeof d);
+    R_UNLESS(b.addr && (!n || guest_ok(b.addr, n, PERM_R)), AUDIO_OPERATION_FAILED);
+    if (n >= 0x20) memcpy(&d, GP(b.addr), (size_t)n);
     q = audout_lock(self);
     if (q->nreleased + q->nqueued >= AUDOUT_BUFFERS) {
         pm_unlock(&audio.lk);
-        return AUDIO_BUFFER_COUNT_FULL;
+        R_THROW(AUDIO_BUFFER_COUNT_FULL);
     }
     if (q->started && !q->nqueued) { /* idle until now */
         q->t0 = plat_ns();
@@ -236,10 +239,11 @@ static int audout_append(SvcObj* self, u64 tag, IpcBuf b) {
     }
     i = (q->first + q->nreleased + q->nqueued) % AUDOUT_BUFFERS;
     q->tag[i] = tag;
-    q->frames[i] = (u32)(d.data_size / (q->channels * 2u));
+    q->frames[i] = (u32)((d.data_size < 0xFFFFFFFFu ? d.data_size : 0xFFFFFFFFu) / (q->channels * 2u));
     q->nqueued++;
     if (!q->output || !d.data_size) { /* without a host device it is played on the clock alone */
-    } else if (d.data_size <= 0xFFFFFFFFu && d.buffer + d.data_offset >= d.buffer &&
+    } else if (d.data_size <= 0xFFFFFFFFu && d.data_offset <= d.buffer_capacity &&
+               d.data_size <= d.buffer_capacity - d.data_offset && d.buffer + d.data_offset >= d.buffer &&
                guest_ok(d.buffer + d.data_offset, d.data_size, PERM_R))
         plat_audio_queue(q->output, GP(d.buffer + d.data_offset), (u32)d.data_size);
     else
@@ -247,7 +251,7 @@ static int audout_append(SvcObj* self, u64 tag, IpcBuf b) {
                    (unsigned long long)d.buffer, (unsigned long long)d.data_size,
                    (unsigned long long)d.data_offset);
     pm_unlock(&audio.lk);
-    return 0;
+    R_SUCCEED();
 }
 
 static int nn_audio_detail_IAudioOut_AppendAudioOutBuffer(SvcObj* self, u64 tag, IpcBuf buffer) {
@@ -259,14 +263,14 @@ static int nn_audio_detail_IAudioOut_AppendAudioOutBufferAuto(SvcObj* self, u64 
 
 static int nn_audio_detail_IAudioOut_RegisterBufferEvent(SvcObj* self, u32* event) {
     *event = ev_handle(((AudOut*)self->data)->ev);
-    return 0;
+    R_SUCCEED();
 }
 
 /* the released tags, oldest first. The SDK reads every slot of its array, so the rest is zeroed */
 static int audout_released(SvcObj* self, IpcBuf b, u32* count) {
     AudOut* q;
     u32 n = 0, max;
-    if (!b.addr || !guest_ok(b.addr, b.size, PERM_W)) return 0;
+    if (!b.addr || !guest_ok(b.addr, b.size, PERM_W)) R_SUCCEED();
     max = (u32)(b.size / 8 < AUDOUT_BUFFERS ? b.size / 8 : AUDOUT_BUFFERS);
     memset(GP(b.addr), 0, (size_t)(b.size / 8 * 8));
     q = audout_lock(self);
@@ -277,7 +281,7 @@ static int audout_released(SvcObj* self, IpcBuf b, u32* count) {
     }
     pm_unlock(&audio.lk);
     *count = n;
-    return 0;
+    R_SUCCEED();
 }
 
 static int nn_audio_detail_IAudioOut_GetReleasedAudioOutBuffers(SvcObj* self, IpcBuf tags, u32* count) {
@@ -294,21 +298,21 @@ static int nn_audio_detail_IAudioOut_ContainsAudioOutBuffer(SvcObj* self, u64 ta
     for (i = 0; i < q->nreleased + q->nqueued; i++)
         if (q->tag[(q->first + i) % AUDOUT_BUFFERS] == tag) *contains = 1;
     pm_unlock(&audio.lk);
-    return 0;
+    R_SUCCEED();
 }
 
 static int nn_audio_detail_IAudioOut_GetAudioOutBufferCount(SvcObj* self, u32* count) {
     AudOut* q = audout_lock(self);
     *count = q->nqueued;
     pm_unlock(&audio.lk);
-    return 0;
+    R_SUCCEED();
 }
 
 static int nn_audio_detail_IAudioOut_GetAudioOutPlayedSampleCount(SvcObj* self, u64* count) {
     AudOut* q = audout_lock(self);
     *count = q->played;
     pm_unlock(&audio.lk);
-    return 0;
+    R_SUCCEED();
 }
 
 static int nn_audio_detail_IAudioOut_FlushAudioOutBuffers(SvcObj* self, u8* flushed) {
@@ -318,7 +322,7 @@ static int nn_audio_detail_IAudioOut_FlushAudioOutBuffers(SvcObj* self, u8* flus
     q->t0_frames = 0;
     pm_unlock(&audio.lk);
     *flushed = 1;
-    return 0;
+    R_SUCCEED();
 }
 
 static int nn_audio_detail_IAudioOut_SetAudioOutVolume(SvcObj* self, float volume) {
@@ -327,7 +331,7 @@ static int nn_audio_detail_IAudioOut_SetAudioOutVolume(SvcObj* self, float volum
     q->volume = volume;
     plat_audio_volume(q->output, volume);
     pm_unlock(&audio.lk);
-    return 0;
+    R_SUCCEED();
 }
 
 static int nn_audio_detail_IAudioOut_GetAudioOutVolume(SvcObj* self, float* volume) {
@@ -335,21 +339,22 @@ static int nn_audio_detail_IAudioOut_GetAudioOutVolume(SvcObj* self, float* volu
     pm_lock(&audio.lk);
     *volume = q->volume;
     pm_unlock(&audio.lk);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ------------------------------------------------------------ audout:u */
 static int nn_audio_detail_IAudioOutManager_ListAudioOuts(SvcObj* self, IpcBuf names, u32* count) {
     (void)self;
     *count = list_names(names, audout_name);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioOutManager_ListAudioOutsAuto(SvcObj* self, IpcBuf names, u32* count) {
     return nn_audio_detail_IAudioOutManager_ListAudioOuts(self, names, count);
 }
 
-/* the default device or "DeviceOut", two or six channels; the out plays at 48 kHz, 16-bit, whatever rate was asked
-   for (Eden's IsConfigValid refuses another rate, the runtime has always answered with its own) */
+/* the default device or "DeviceOut", with the channels asked for when they are 1, 2, 4 or 6 and two otherwise, on the
+   host too (a mono out's buffers are half a stereo one's: frames counted for two channels played them twice as fast);
+   the out plays at 48 kHz, 16-bit, whatever rate was asked for */
 static int open_out(const nn_audio_AudioOutParameter* params, IpcBuf name, IpcBuf name_out, u32* sample_rate,
                     u32* channel_count, u32* sample_format, u32* state, SvcObj** out) {
     char want[AUDIO_NAME_SIZE];
@@ -361,12 +366,16 @@ static int open_out(const nn_audio_AudioOutParameter* params, IpcBuf name, IpcBu
         n = (u32)(name.size < sizeof want - 1 ? name.size : sizeof want - 1);
         if (guest_ok(name.addr, n, PERM_R)) memcpy(want, GP(name.addr), n);
     }
-    if (want[0] && strcmp(want, audout_name)) return AUDIO_NOT_FOUND;
-    if (params->channel_count != 0 && params->channel_count != 2 && params->channel_count != 6)
-        return AUDIO_INVALID_CHANNELS;
+    if (want[0] && strcmp(want, audout_name)) R_THROW(AUDIO_NOT_FOUND);
     o = nn_audio_detail_IAudioOut_new(sizeof(AudOut));
     q = o->data;
-    q->channels = params->channel_count == 6 ? 6 : 2;
+    switch (params->channel_count) {
+        case 1:
+        case 2:
+        case 4:
+        case 6: q->channels = params->channel_count; break;
+        default: q->channels = 2; break;
+    }
     q->volume = 1.0f;
     q->ev = owned_event("IAudioOut");
     q->output = plat_audio_open(AUDIO_RATE, q->channels);
@@ -381,7 +390,7 @@ static int open_out(const nn_audio_AudioOutParameter* params, IpcBuf name, IpcBu
     *sample_format = 2; /* PcmInt16 */
     *state = 1;         /* stopped */
     *out = o;
-    return 0;
+    R_SUCCEED();
 }
 
 static int nn_audio_detail_IAudioOutManager_OpenAudioOut(SvcObj* self, const nn_audio_AudioOutParameter* params,
@@ -404,19 +413,19 @@ SvcObj* new_audout(void) { return nn_audio_detail_IAudioOutManager_new(0); }
 /* ============================================================ the audio renderer */
 static int nn_audio_detail_IAudioRenderer_GetSampleRate(SvcObj* self, u32* sample_rate) {
     *sample_rate = ((AudRen*)self->data)->params.sample_rate;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioRenderer_GetSampleCount(SvcObj* self, u32* sample_count) {
     *sample_count = ((AudRen*)self->data)->params.sample_count;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioRenderer_GetMixBufferCount(SvcObj* self, u32* mix_buffer_count) {
     *mix_buffer_count = ((AudRen*)self->data)->params.mix_buffer_count;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioRenderer_GetState(SvcObj* self, u32* state) {
     *state = (u32)__atomic_load_n(&self->u[0], __ATOMIC_ACQUIRE);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioRenderer_RequestUpdate(SvcObj* self, IpcBuf input, IpcBuf output,
                                                         IpcBuf performance) {
@@ -429,25 +438,25 @@ static int nn_audio_detail_IAudioRenderer_RequestUpdateAuto(SvcObj* self, IpcBuf
 }
 static int nn_audio_detail_IAudioRenderer_Start(SvcObj* self) {
     __atomic_store_n(&self->u[0], SNX_AUDREN_STARTED, __ATOMIC_RELEASE);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioRenderer_Stop(SvcObj* self) {
     __atomic_store_n(&self->u[0], SNX_AUDREN_STOPPED, __ATOMIC_RELEASE);
-    return 0;
+    R_SUCCEED();
 }
 /* the event the clock signals after each frame; a renderer the game executes by itself has none */
 static int nn_audio_detail_IAudioRenderer_QuerySystemEvent(SvcObj* self, u32* event) {
-    if (((AudRen*)self->data)->manual) return AUDIO_NOT_SUPPORTED;
+    R_UNLESS(!((AudRen*)self->data)->manual, AUDIO_NOT_SUPPORTED);
     *event = ev_handle(audio.ev);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioRenderer_SetRenderingTimeLimit(SvcObj* self, u32 percent) {
     __atomic_store_n(&((AudRen*)self->data)->limit, percent, __ATOMIC_RELAXED);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioRenderer_GetRenderingTimeLimit(SvcObj* self, u32* percent) {
     *percent = __atomic_load_n(&((AudRen*)self->data)->limit, __ATOMIC_RELAXED);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ------------------------------------------------------------ audren:u */
@@ -495,8 +504,8 @@ static int open_renderer(const nn_audio_detail_AudioRendererParameterInternal* p
                          SvcObj** renderer) {
     SvcObj* o;
     AudRen* r;
-    if (revision_number(params->revision) > AUDIO_REVISION) return AUDIO_INVALID_REVISION;
-    if (!process) return AUDIO_INVALID_HANDLE;
+    R_UNLESS(revision_number(params->revision) <= AUDIO_REVISION, AUDIO_INVALID_REVISION);
+    R_UNLESS(process, AUDIO_INVALID_HANDLE);
     o = nn_audio_detail_IAudioRenderer_new(sizeof(AudRen));
     r = o->data;
     r->params = *params;
@@ -509,10 +518,10 @@ static int open_renderer(const nn_audio_detail_AudioRendererParameterInternal* p
              (unsigned long)params->effect_count, (unsigned long)params->sink_count,
              (unsigned long)params->sample_rate);
         svcobj_unref(o);
-        return AUDIO_OPERATION_FAILED;
+        R_THROW(AUDIO_OPERATION_FAILED);
     }
     *renderer = o;
-    return 0;
+    R_SUCCEED();
 }
 
 static int nn_audio_detail_IAudioRendererManager_OpenAudioRenderer(
@@ -530,19 +539,29 @@ static int nn_audio_detail_IAudioRendererManager_OpenAudioRendererForManualExecu
 static int nn_audio_detail_IAudioRendererManager_GetWorkBufferSize(
     SvcObj* self, const nn_audio_detail_AudioRendererParameterInternal* params, u64* size) {
     (void)self;
-    if (revision_number(params->revision) > AUDIO_REVISION) return AUDIO_INVALID_REVISION;
+    R_UNLESS(revision_number(params->revision) <= AUDIO_REVISION, AUDIO_INVALID_REVISION);
     *size = work_buffer_size(params);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ------------------------------------------------------------ IAudioDevice: the TV output, two channels */
-static void device_destroy(SvcObj* o) { kobj_unref(&((KEvent*)(size_t)o->u[0])->o); }
+/* its system, input and output events, signaled when the device is made (the game reads the device then) */
+typedef struct {
+    KEvent* ev[3];
+} AudDevice;
+static void device_destroy(SvcObj* o) {
+    int i;
+    for (i = 0; i < 3; i++) kobj_unref(&((AudDevice*)o->data)->ev[i]->o);
+}
 
 static SvcObj* new_device(void) {
-    SvcObj* o = nn_audio_detail_IAudioDevice_new(0);
-    KEvent* e = owned_event("IAudioDevice");
-    kevent_signal(e); /* Eden signals it when the device is made */
-    o->u[0] = (u64)(size_t)e;
+    static const char* const names[3] = {"IAudioDevice system", "IAudioDevice input", "IAudioDevice output"};
+    SvcObj* o = nn_audio_detail_IAudioDevice_new(sizeof(AudDevice));
+    int i;
+    for (i = 0; i < 3; i++) {
+        ((AudDevice*)o->data)->ev[i] = owned_event(names[i]);
+        kevent_signal(((AudDevice*)o->data)->ev[i]);
+    }
     o->destroy = device_destroy;
     return o;
 }
@@ -551,19 +570,19 @@ static int nn_audio_detail_IAudioRendererManager_GetAudioDeviceService(SvcObj* s
                                                                        SvcObj** device) {
     (void)self, (void)aruid;
     *device = new_device();
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioRendererManager_GetAudioDeviceServiceWithRevisionInfo(
     SvcObj* self, nn_applet_AppletResourceUserId aruid, u32 revision, SvcObj** device) {
     (void)self, (void)aruid, (void)revision;
     *device = new_device();
-    return 0;
+    R_SUCCEED();
 }
 
 static int nn_audio_detail_IAudioDevice_ListAudioDeviceName(SvcObj* self, IpcBuf names, i32* count) {
     (void)self;
     *count = (i32)list_names(names, device_name);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioDevice_ListAudioDeviceNameAuto(SvcObj* self, IpcBuf names, i32* count) {
     return nn_audio_detail_IAudioDevice_ListAudioDeviceName(self, names, count);
@@ -571,7 +590,7 @@ static int nn_audio_detail_IAudioDevice_ListAudioDeviceNameAuto(SvcObj* self, Ip
 static int nn_audio_detail_IAudioDevice_GetAudioDeviceOutputVolume(SvcObj* self, IpcBuf name, float* volume) {
     (void)self, (void)name;
     *volume = 1.0f;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioDevice_GetAudioDeviceOutputVolumeAuto(SvcObj* self, IpcBuf name, float* volume) {
     return nn_audio_detail_IAudioDevice_GetAudioDeviceOutputVolume(self, name, volume);
@@ -579,7 +598,7 @@ static int nn_audio_detail_IAudioDevice_GetAudioDeviceOutputVolumeAuto(SvcObj* s
 static int nn_audio_detail_IAudioDevice_GetActiveAudioDeviceName(SvcObj* self, IpcBuf name) {
     (void)self;
     write_name(name, device_name);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioDevice_GetActiveAudioDeviceNameAuto(SvcObj* self, IpcBuf name) {
     return nn_audio_detail_IAudioDevice_GetActiveAudioDeviceName(self, name);
@@ -594,22 +613,22 @@ static int nn_audio_detail_IAudioDevice_ListAudioOutputDeviceName(SvcObj* self, 
 static int nn_audio_detail_IAudioDevice_GetActiveChannelCount(SvcObj* self, u32* count) {
     (void)self;
     *count = 2;
-    return 0;
+    R_SUCCEED();
 }
-/* one event for the three, as in Eden; the system one is signaled again when it is asked for */
+/* the system event is signaled again when it is asked for, as Eden does */
 static int nn_audio_detail_IAudioDevice_QueryAudioDeviceSystemEvent(SvcObj* self, u32* event) {
-    KEvent* e = (KEvent*)(size_t)self->u[0];
+    KEvent* e = ((AudDevice*)self->data)->ev[0];
     kevent_signal(e);
     *event = ev_handle(e);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioDevice_QueryAudioDeviceInputEvent(SvcObj* self, u32* event) {
-    *event = ev_handle((KEvent*)(size_t)self->u[0]);
-    return 0;
+    *event = ev_handle(((AudDevice*)self->data)->ev[1]);
+    R_SUCCEED();
 }
 static int nn_audio_detail_IAudioDevice_QueryAudioDeviceOutputEvent(SvcObj* self, u32* event) {
-    *event = ev_handle((KEvent*)(size_t)self->u[0]);
-    return 0;
+    *event = ev_handle(((AudDevice*)self->data)->ev[2]);
+    R_SUCCEED();
 }
 
 SvcObj* new_audren(void) { return nn_audio_detail_IAudioRendererManager_new(0); }
@@ -634,8 +653,8 @@ void audio_clock(void* arg) {
 }
 
 /* ============================================================ hwopus */
-/* a decoder: FFmpeg's, at 48 kHz, its output brought down to the decoder's rate by averaging step samples, and kept
-   in a queue so that every reply is exactly the packet's duration */
+/* a decoder: FFmpeg's, at 48 kHz, its output brought down to the decoder's rate through a low-pass filter keeping
+   every step-th sample, and kept in a queue so that every reply is exactly the packet's duration */
 typedef struct {
     u32 rate, channels, step;
     PMutex lk;
@@ -644,10 +663,14 @@ typedef struct {
     AVPacket* pkt;
     AVFrame* frame;
 #endif
-    i16* queue;  /* channels * cap samples, interleaved, at the decoder's rate */
-    float* acc;  /* a sum per channel of the samples averaged so far */
-    u32 queued, cap, phase;
+    i16* queue;   /* channels * cap samples, interleaved, at the decoder's rate */
+    float* taps;  /* the filter's ntaps coefficients (none at 48 kHz) */
+    float* hist;  /* the last ntaps samples of each channel at 48 kHz, a ring at hpos */
+    u32 queued, cap, phase, ntaps, hpos;
 } HwOpus;
+/* the queue starts with this much silence at 48 kHz: what FFmpeg's resampler may hold back of the first packets
+   (libswresample's most), so that later replies come from the queue instead of silence put in front */
+#define HWOPUS_LEAD 24
 
 static int opus_rate_ok(u32 rate) {
     return rate == 8000 || rate == 12000 || rate == 16000 || rate == 24000 || rate == 48000;
@@ -681,10 +704,35 @@ static void hwopus_free(HwOpus* h) {
 #endif
     free(h->queue);
     h->queue = NULL;
-    h->acc = NULL;
+    h->taps = h->hist = NULL;
+}
+
+#ifndef SNX_NO_H264
+/* the decoder as it starts: the filter's history zero and the queue's lead of silence */
+static void hwopus_restart(HwOpus* h) {
+    h->phase = h->hpos = 0;
+    if (h->ntaps) memset(h->hist, 0, (size_t)h->ntaps * h->channels * sizeof *h->hist);
+    h->queued = HWOPUS_LEAD / h->step;
+    memset(h->queue, 0, (size_t)h->queued * h->channels * sizeof *h->queue);
+}
+
+/* a Blackman-windowed sinc low-pass of 24 * step + 1 taps cutting at 0.45 of the lower rate's half, its gain one */
+static void hwopus_filter(HwOpus* h) {
+    const double pi = 3.14159265358979323846, fc = 0.45 / h->step;
+    double sum = 0.0, m = (double)(h->ntaps - 1), x, w, v;
+    u32 i;
+    for (i = 0; i < h->ntaps; i++) {
+        x = (double)i - m / 2.0;
+        w = 0.42 - 0.5 * cos(2.0 * pi * i / m) + 0.08 * cos(4.0 * pi * i / m);
+        v = x == 0.0 ? 2.0 * fc : sin(2.0 * pi * fc * x) / (pi * x);
+        h->taps[i] = (float)(v * w);
+        sum += v * w;
+    }
+    for (i = 0; i < h->ntaps; i++) h->taps[i] = (float)(h->taps[i] / sum);
 }
 
 static void hwopus_destroy(SvcObj* o) { hwopus_free(o->data); }
+#endif
 
 /* opens h for rate and channels: one stream (mapping NULL), or streams of them with stereo_streams coupled and
    mapping placing their channels. 0 when it can't be */
@@ -692,10 +740,9 @@ static int hwopus_open(HwOpus* h, u32 rate, u32 channels, u32 streams, u32 stere
 #ifndef SNX_NO_H264
     const AVCodec* codec;
     u8* extra;
-    size_t qsize;
+    size_t qsize, fsize;
     if (!opus_rate_ok(rate) || !channels || channels > 255) return 0;
-    if (!mapping ? channels > 2 : !streams || stereo_streams > streams || streams + stereo_streams > channels)
-        return 0;
+    if (!mapping ? channels > 2 : !streams || stereo_streams > streams || streams + stereo_streams > 255) return 0;
     ffmpeg_log_init();
     codec = avcodec_find_decoder(AV_CODEC_ID_OPUS);
     if (!codec) return 0;
@@ -703,8 +750,10 @@ static int hwopus_open(HwOpus* h, u32 rate, u32 channels, u32 streams, u32 stere
     h->channels = channels;
     h->step = AUDIO_RATE / rate;
     h->cap = 3 * 5760 / h->step; /* a packet, and what FFmpeg's resampler may give back with the next */
-    qsize = (size_t)h->cap * channels * sizeof *h->queue;
-    h->queue = malloc(qsize + channels * sizeof *h->acc);
+    h->ntaps = h->step > 1 ? 24 * h->step + 1 : 0;
+    qsize = (size_t)h->cap * channels * sizeof *h->queue; /* even: the floats after it are aligned */
+    fsize = (size_t)h->ntaps * (channels + 1) * sizeof *h->taps;
+    h->queue = malloc(qsize + fsize + 1);
     h->dec = avcodec_alloc_context3(codec);
     h->pkt = av_packet_alloc();
     h->frame = av_frame_alloc();
@@ -715,8 +764,10 @@ static int hwopus_open(HwOpus* h, u32 rate, u32 channels, u32 streams, u32 stere
         hwopus_free(h);
         return 0;
     }
-    h->acc = (float*)((u8*)h->queue + qsize);
-    memset(h->acc, 0, channels * sizeof *h->acc);
+    h->taps = (float*)((u8*)h->queue + qsize);
+    h->hist = h->taps + h->ntaps;
+    if (h->ntaps) hwopus_filter(h);
+    hwopus_restart(h);
     memcpy(extra, "OpusHead", 8);
     extra[8] = 1;
     extra[9] = (u8)channels;
@@ -754,11 +805,20 @@ static float sample_at(const AVFrame* f, u32 ch, u32 channels, u32 i) {
     }
 }
 
-/* a decoded frame into the queue, step samples averaged into one; the oldest go when it is full */
+/* a sample as s16: rounded, and clipped */
+static i16 to_s16(float v) {
+    v = (float)floor(v + 0.5f);
+    return v >= 32767.0f ? 32767 : v <= -32768.0f ? -32768 : (i16)v;
+}
+/* a decoded frame into the queue, filtered down to every step-th sample; the oldest go when it is full */
 static void hwopus_take(HwOpus* h, const AVFrame* f) {
-    u32 i, ch, n = (u32)f->nb_samples, fch = (u32)f->ch_layout.nb_channels;
+    u32 i, ch, k, n = (u32)f->nb_samples, fch = (u32)f->ch_layout.nb_channels;
     for (i = 0; i < n; i++) {
-        for (ch = 0; ch < h->channels; ch++) h->acc[ch] += ch < fch ? sample_at(f, ch, fch, i) : 0.0f;
+        if (h->ntaps) {
+            for (ch = 0; ch < h->channels; ch++)
+                h->hist[ch * h->ntaps + h->hpos] = ch < fch ? sample_at(f, ch, fch, i) : 0.0f;
+            h->hpos = (h->hpos + 1) % h->ntaps;
+        }
         if (++h->phase < h->step) continue;
         h->phase = 0;
         if (h->queued == h->cap) {
@@ -766,9 +826,13 @@ static void hwopus_take(HwOpus* h, const AVFrame* f) {
             h->queued--;
         }
         for (ch = 0; ch < h->channels; ch++) {
-            float v = h->acc[ch] / (float)h->step;
-            h->queue[h->queued * h->channels + ch] = v >= 32767.0f ? 32767 : v <= -32768.0f ? -32768 : (i16)v;
-            h->acc[ch] = 0.0f;
+            float v = 0.0f;
+            if (!h->ntaps)
+                v = ch < fch ? sample_at(f, ch, fch, i) : 0.0f;
+            else /* the newest sample is the one before hpos */
+                for (k = 0; k < h->ntaps; k++)
+                    v += h->taps[k] * h->hist[ch * h->ntaps + (h->hpos + h->ntaps - 1 - k) % h->ntaps];
+            h->queue[h->queued * h->channels + ch] = to_s16(v);
         }
         h->queued++;
     }
@@ -780,25 +844,24 @@ static void hwopus_take(HwOpus* h, const AVFrame* f) {
 static int hwopus_decode(HwOpus* h, const u8* in, u64 in_size, i16* out, u64 out_size, int reset, u32* consumed,
                          u32* samples) {
     u32 size, want;
-    if (in_size < 8) return OPUS_INVALID_PACKET;
+    R_UNLESS(in_size >= 8, OPUS_INVALID_PACKET);
     size = (u32)in[0] << 24 | (u32)in[1] << 16 | (u32)in[2] << 8 | in[3];
-    if (!size || size > in_size - 8) return OPUS_INVALID_PACKET;
+    R_UNLESS(size && size <= in_size - 8, OPUS_INVALID_PACKET);
     want = opus_packet_48k(in + 8, size) / h->step;
-    if (!want || (u64)want * h->channels * 2 > out_size) return OPUS_INVALID_PACKET;
+    R_UNLESS(want && (u64)want * h->channels * 2 <= out_size, OPUS_INVALID_PACKET);
 #ifndef SNX_NO_H264
     {
         u32 pad;
         int err;
         if (reset) {
             avcodec_flush_buffers(h->dec);
-            h->queued = h->phase = 0;
-            memset(h->acc, 0, h->channels * sizeof *h->acc);
+            hwopus_restart(h);
         }
-        if (av_new_packet(h->pkt, (int)size) < 0) return OPUS_INVALID_PACKET;
+        R_UNLESS(av_new_packet(h->pkt, (int)size) >= 0, OPUS_INVALID_PACKET);
         memcpy(h->pkt->data, in + 8, size);
         err = avcodec_send_packet(h->dec, h->pkt);
         av_packet_unref(h->pkt);
-        if (err < 0) return OPUS_INVALID_PACKET;
+        R_UNLESS(err >= 0, OPUS_INVALID_PACKET);
         while (avcodec_receive_frame(h->dec, h->frame) >= 0) {
             hwopus_take(h, h->frame);
             av_frame_unref(h->frame);
@@ -815,7 +878,7 @@ static int hwopus_decode(HwOpus* h, const u8* in, u64 in_size, i16* out, u64 out
 #endif
     *consumed = 8 + size;
     *samples = want;
-    return 0;
+    R_SUCCEED();
 }
 
 /* a decode command: the guest's buffers checked, the time it took in microseconds */
@@ -824,7 +887,7 @@ static int decode(SvcObj* self, int reset, IpcBuf input, IpcBuf output, u32* con
     u64 t = plat_ns();
     int rc;
     if (!guest_ok(input.addr, input.size, PERM_R) || !guest_ok(output.addr, output.size, PERM_W))
-        return OPUS_INVALID_PACKET;
+        R_THROW(OPUS_INVALID_PACKET);
     pm_lock(&h->lk);
     rc = hwopus_decode(h, GP(input.addr), input.size, (i16*)GP(output.addr), output.size, reset, consumed, samples);
     pm_unlock(&h->lk);
@@ -873,14 +936,15 @@ static int nn_codec_detail_IHardwareOpusDecoder_DecodeInterleavedForMultiStream(
 }
 
 /* ------------------------------------------------------------ hwopus */
-/* the work buffer: the runtime decodes in host memory and never touches it, so any plausible size will do */
+/* the work buffer: the runtime decodes in host memory and never touches it, so any plausible size will do: 32 KiB,
+   and 32 KiB a stream */
 static int work_size(u32 rate, u32 channels, u32 streams, u32 stereo_streams, int multi, u32* size) {
-    if (multi ? !channels || channels > 255 : channels != 1 && channels != 2) return OPUS_INVALID_CHANNEL_COUNT;
-    if (!opus_rate_ok(rate)) return OPUS_INVALID_SAMPLE_RATE;
-    if (multi && (!streams || stereo_streams > streams || streams + stereo_streams > channels))
-        return OPUS_INVALID_SAMPLE_RATE; /* Eden's answer for a bad stream count */
-    *size = 0x10000u * (multi ? streams : 1);
-    return 0;
+    if (multi ? !channels || channels > 255 : channels != 1 && channels != 2) R_THROW(OPUS_INVALID_CHANNEL_COUNT);
+    R_UNLESS(opus_rate_ok(rate), OPUS_INVALID_SAMPLE_RATE);
+    if (multi && (!streams || stereo_streams > streams || streams + stereo_streams > 255))
+        R_THROW(OPUS_INVALID_SAMPLE_RATE); /* Eden's answer for a bad stream count */
+    *size = 0x8000u + 0x8000u * (multi ? streams : 1);
+    R_SUCCEED();
 }
 
 static int open_decoder(u32 rate, u32 channels, u32 streams, u32 stereo_streams, const u8* mapping,
@@ -890,11 +954,11 @@ static int open_decoder(u32 rate, u32 channels, u32 streams, u32 stereo_streams,
         WARN_LIMIT(4, "hwopus: can't open a decoder of %lu channels at %lu Hz\n", (unsigned long)channels,
                    (unsigned long)rate);
         svcobj_unref(o);
-        return OPUS_OUT_OF_DECODERS;
+        R_THROW(OPUS_OUT_OF_DECODERS);
     }
     o->destroy = hwopus_destroy;
     *decoder = o;
-    return 0;
+    R_SUCCEED();
 }
 
 /* a multistream parameter buffer: rate, channels, streams, coupled streams, then flags and a reserved word in the Ex
@@ -922,10 +986,14 @@ static int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeExEx(
     (void)self;
     return work_size(params->sample_rate, params->channel_count, 1, 0, 0, size);
 }
+/* parameters too short to read: the size of one stream */
 static int multi_size(IpcBuf params, int ex, u32* size) {
     u32 v[4];
     const u8* mapping;
-    if (!multi_params(params, ex, v, &mapping)) return OPUS_INVALID_CHANNEL_COUNT;
+    if (!multi_params(params, ex, v, &mapping)) {
+        *size = 0x8000u + 0x8000u;
+        R_SUCCEED();
+    }
     return work_size(v[0], v[1], v[2], v[3], 1, size);
 }
 static int nn_codec_detail_IHardwareOpusDecoderManager_GetWorkBufferSizeForMultiStream(SvcObj* self, IpcBuf params,
@@ -960,7 +1028,7 @@ static int nn_codec_detail_IHardwareOpusDecoderManager_OpenHardwareOpusDecoderEx
 static int open_multi(IpcBuf params, int ex, SvcObj** decoder) {
     u32 v[4];
     const u8* mapping;
-    if (!multi_params(params, ex, v, &mapping)) return OPUS_OUT_OF_DECODERS;
+    R_UNLESS(multi_params(params, ex, v, &mapping), OPUS_OUT_OF_DECODERS);
     return open_decoder(v[0], v[1], v[2], v[3], mapping, decoder);
 }
 static int nn_codec_detail_IHardwareOpusDecoderManager_OpenHardwareOpusDecoderForMultiStream(

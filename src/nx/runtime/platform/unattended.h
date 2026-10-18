@@ -1,34 +1,38 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the unattended-run options both window backends take (unattended.c): seconds, frames, shot, shot_every, press,
-   press_at, press_len, script. Also the stick handling the backends share */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* Runs with nobody at the screen (unattended.c), the same for the windowed and the headless backend: a time or frame
+   limit, screenshots, scripted button presses. The options are seconds, frames, shot, shot_every, press_len and
+   script, given as --key=value or in the .ini's [Other] section, and never written back. Also the
+   stick handling the backends share. */
 #ifndef SNX_UNATTENDED_H
 #define SNX_UNATTENDED_H
 #include "common/cpu/aarch64/cpu.h"
 #include <stddef.h>
 
-int unattended_ini(const char* k, const char* v); /* 1 when k is one of the options */
-int unattended_known(const char* k);              /* the same, nothing set */
-void unattended_start(void);                      /* time zero for seconds, press_at and the script */
-int unattended_active(void);                      /* seconds or frames is set: nobody is at the screen */
-/* the buttons the options hold now: HidNpadButton bits, and 40..47 for the stick directions (as keys, see
+/* Takes k = v when k is one of the options above: 1, else 0 */
+int unattended_ini(const char* k, const char* v);
+/* 1 when k is one of the options, changing nothing */
+int unattended_known(const char* k);
+/* the moment seconds and the millisecond presses of script count from */
+void unattended_start(void);
+/* 1 when seconds or frames limits the run */
+int unattended_active(void);
+/* The buttons the options press now, as HidNpadButton bits, plus bits 40 to 47 for stick directions (see
    input_key_sticks) */
 u64 unattended_buttons(void);
-const char* unattended_shot(void); /* the shot path, NULL when unset */
-/* shot_every: 1 when a numbered screenshot is due, with its path (no extension) in path */
+const char* unattended_shot(void); /* the shot path without its extension, or NULL */
+/* 1 when shot_every asks for a numbered screenshot now, its path (no extension) written into path */
 int unattended_periodic_shot(char* path, size_t n);
-int unattended_done(void); /* the frames or seconds are reached */
-/* the result line on stderr (w and h: the image's size, 0 when unknown), then the hints, the renderer's save (its
-   pipeline cache: the process ends without shutting the renderer down) and the exit */
+int unattended_done(void); /* 1 once the frame count or the time is reached */
+/* Ends the run: prints the frame count, the last image's hash and its size (w and h 0 when not known) on stderr, saves
+   what a clean exit saves, and exits with 0 */
 __attribute__((noreturn)) void unattended_exit(u64 hash, int w, int h);
 
-/* stick directions held as keys (bits 40..47: left stick left, up, right, down, then the right stick) as axes:
-   st = {lx, ly, rx, ry} */
+/* Stick directions held like keys, bits 40 to 47 of k (left, up, right, down of the left stick, then of the right),
+   as full deflections in st = {lx, ly, rx, ry}; opposite directions cancel */
 void input_key_sticks(u64 k, i32 st[4]);
-/* a stick as the console reports it: each axis within -32767..32767, and the pair within the circle of that radius
-   (a keyboard diagonal or a square gate goes past it) */
+/* Limits a stick to what a console reports: each axis in -32767..32767, and the point inside the circle of radius
+   32767, pulled in along its direction */
 void input_stick_clamp(i32* x, i32* y);
 
 #endif

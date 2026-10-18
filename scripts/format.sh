@@ -5,11 +5,9 @@
 #
 #   scripts/format.sh            format the repository
 #   scripts/format.sh --check    list what is not formatted, exit 1 if anything is
-#   scripts/format.sh DIR        format another tree with this repository's settings (import-upstream.sh does this)
 #
-# Formatted: the C and C++ files under src/, tools/ and tests/ (plus old upstream scarletnx/ and runtime/ trees), and the Python files up to two folders deep plus the Claude
-# Code hooks. Left alone: third-party code (.cache/cpm), and in upstream trees the font bitmap in overlay_font.h and
-# the GL function list in glfn.h, an X-macro list clang-format can't lay out stably.
+# Formatted: the C and C++ files under src/, tools/ and tests/, and the Python files up to two folders deep plus the
+# Claude Code hooks. Left alone: third-party code (.cache/cpm).
 set -euo pipefail
 
 CLANG_FORMAT_MAJOR=23
@@ -17,12 +15,10 @@ RUFF=ruff@0.17.0
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 check=0
-root=$repo
 for arg in "$@"; do
     case $arg in
         --check) check=1 ;;
-        -*) echo "usage: $0 [--check] [DIR]" >&2; exit 2 ;;
-        *) root=$(cd "$arg" && pwd) ;;
+        *) echo "usage: $0 [--check]" >&2; exit 2 ;;
     esac
 done
 
@@ -36,19 +32,10 @@ if [ "$version" != "$CLANG_FORMAT_MAJOR" ]; then
     exit 1
 fi
 
-cd "$root"
-# An upstream tree has no tools/ or .claude/hooks/
-c_dirs=()
-for d in src scarletnx runtime tools tests; do [ -d "$d" ] && c_dirs+=("$d"); done
-py_extra=()
-[ -d .claude/hooks ] && py_extra+=(.claude/hooks)
-c_files=()
-if [ ${#c_dirs[@]} -gt 0 ]; then
-    mapfile -t c_files < <(find "${c_dirs[@]}" -type f \( -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.hpp' \) \
-        -not -name 'overlay_font.h' -not -name 'glfn.h' | sort)
-fi
+cd "$repo"
+mapfile -t c_files < <(find src tools tests -type f \( -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.hpp' \) | sort)
 mapfile -t py_files < <( (find . -maxdepth 2 -name '*.py' -not -path './third_party/*' -not -path './.cache/*' \
-    -not -path './build*' -not -path './python/*'; [ ${#py_extra[@]} -eq 0 ] || find "${py_extra[@]}" -name '*.py') | sort)
+    -not -path './build*'; find .claude/hooks -name '*.py') | sort)
 
 # cksum is POSIX (sha1sum is missing on FreeBSD); it only has to tell whether a pass changed anything
 digest() { cat "${c_files[@]}" | cksum; }

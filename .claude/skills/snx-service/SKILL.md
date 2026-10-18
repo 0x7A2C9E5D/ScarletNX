@@ -62,8 +62,9 @@ description: "Implement or fix a high-level-emulated Switch service or device (I
 ## References and licensing
 
 Switchbrew documents commands and structures. Ryujinx (MIT) is the best behavioral reference and can be ported
-from with its notice. yuzu and its forks (GPL-2.0-or-later or GPL-3.0) can be ported too since the fork became
-GPL-3.0-or-later: keep their copyright lines and say where the code came from. GPL-2.0-only code can't be.
+from with its notice. yuzu and its forks (GPL-2.0-or-later or GPL-3.0) can be ported too, ScarletNX being
+GPL-3.0-or-later: keep their copyright lines and say where the code came from. GPL-2.0-only code can't be
+(Atmosphère is read, never ported).
 
 ## Known traps
 

@@ -1,380 +1,418 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* Shared Maxwell program length, dual vertex merge and control stack resolution. */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors
+   Ported from Eden (src/shader_recompiler/frontend/maxwell/control_flow.cpp, indirect_branch_table_track.cpp,
+   translate_program.cpp):
+   SPDX-FileCopyrightText: Copyright 2025 Eden Emulator Project
+   SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+   SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project */
+/* Maxwell program structure: length and hash, branch targets and jump tables, the CRS stack resolved statically,
+   and VertexA + VertexB merged into one program. */
 #include "nx/gpu/shader/translator.h"
-#include <stdlib.h>
-#include <string.h>
 
-/* a set per stage, as each binds its own constant buffers: vertex (and compute), fragment, then tessellation control,
-   tessellation evaluation and geometry */
-int shader_vk_set(int stage) {
-    return stage == ST_FS ? 1 : stage == ST_TCS ? 2 : stage == ST_TES ? 3 : stage == ST_GS ? 4 : 0;
-}
-u32 bra_target(u64 w, u32 idx) {
-    i32 off = (i32)(B(w, 20, 24) << 8) >> 8;
-    u32 t = (u32)((i32)idx + 1 + off / 8);
-    if (t >= 10 && (t - 10) % 4 == 0) t++;
-    return t;
-}
-int flow_always(u64 w) { return B(w, 16, 3) == 7 && !B(w, 19, 1) && B(w, 0, 5) == 15; }
-static int is_term(int id) {
-    return id == O_BRA || id == O_BRX || id == O_SYNC || id == O_BRK || id == O_CONT || id == O_EXIT || id == O_RET ||
-           id == O_JMP;
-}
-static void mark(Ctx* c, u32 i) {
-    if (i < 65536) c->leader[i >> 3] |= 1 << (i & 7);
-}
-static int is_leader(Ctx* c, u32 i) { return i < 65536 && (c->leader[i >> 3] >> (i & 7)) & 1; }
+/* Instruction words are 64-bit. Words 0-9 hold the 80-byte SPH, word 10 is the first scheduling word, and every
+   fourth word after it is another one (IDX_OK). */
+#define SH_SCAN_WORDS 16384 /* the length scan never looks further */
+#define CRS_DEPTH     16    /* static resolution gives up on a deeper stack */
 
 int (*g_shader_cb_read)(u32 idx, u32 off, u32* out);
-u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
-    ops_init();
-    const u64* w = (const u64*)code;
-    u32 n = max_bytes / 8;
-    u32 i = 11, last = 11;
-    /* linear scan until an unconditional EXIT past every branch target */
-    u32 maxt = 0;
-    int unresolved_brx = 0, has_cal = 0;
-    u32 last_code = 11;
-    for (u32 j = n; j-- > 11;)
-        if (IDX_OK(j) && w[j]) {
-            last_code = j;
+
+/* each stage binds its own constant buffers in its own descriptor set; compute runs alone and shares the vertex
+   stage's number */
+int shader_vk_set(int stage) {
+    switch (stage) {
+        case ST_FS: return 1;
+        case ST_TCS: return 2;
+        case ST_TES: return 3;
+        case ST_GS: return 4;
+        default: return 0;
+    }
+}
+
+static i32 sext(u32 value, int bits) {
+    return (i32)(value & ((1u << (bits - 1)) - 1)) - (i32)(value & (1u << (bits - 1)));
+}
+
+/* the code word after i */
+static u32 next_code(u32 i) {
+    i++;
+    if (i >= 10 && (i - 10) % 4 == 0) i++;
+    return i;
+}
+
+/* a relative branch: a signed 24-bit byte offset from the next instruction. A target on a scheduling word means the
+   instruction after it, as the hardware fetches bundles */
+u32 bra_target(u64 w, u32 idx) {
+    i32 t = (i32)idx + 1 + sext(B(w, 20, 24), 24) / 8;
+    if (t >= 10 && (t - 10) % 4 == 0) t++;
+    return (u32)t;
+}
+
+/* predicate PT, not negated, and flow condition T (15): the instruction always takes effect */
+int flow_always(u64 w) { return B(w, 16, 4) == 7 && B(w, 0, 5) == 15; }
+
+/* instructions that move control elsewhere, where a backward search for a register's writer has to stop */
+static int moves_control(int id) {
+    return id == O_BRA || id == O_BRX || id == O_JMP || id == O_CAL || id == O_RET || id == O_EXIT || id == O_KIL ||
+           id == O_SYNC || id == O_BRK || id == O_CONT;
+}
+
+/* The nearest instruction before from that writes reg, within limit instructions (0 for no limit), or -1. With
+   stop_at_flow the search ends at a flow instruction. An undecodable word ends it too. */
+static int find_writer(const u64* words, u32 from, u32 reg, u32 limit, int stop_at_flow) {
+    u32 j, seen = 0;
+    if (reg == 255) return -1;
+    for (j = from; j-- > 11;) {
+        const Op* op;
+        if (!IDX_OK(j)) continue;
+        if (limit && seen++ == limit) return -1;
+        op = decode(words[j]);
+        if (!op || (stop_at_flow && moves_control(op->id))) return -1;
+        if (shader_writes_reg(words[j], op->id, reg)) return (int)j;
+    }
+    return -1;
+}
+
+/* The compiler bounds a switch index before it loads the jump table: IMNMX Ri, Rx, max; SHL Rj, Ri, 2;
+   LDC.B32 Rk, c[bank][Rj + offset]. Gives the table's entry count, or 0 when the load isn't that idiom (as Eden's
+   TrackIndirectBranchTable finds it). */
+static int clamped_entries(const u64* words, u32 load) {
+    u64 w;
+    int at = find_writer(words, load, B(words[load], 8, 8), 32, 0);
+    if (at < 0) return 0;
+    w = words[at];
+    if (decode(w)->id != O_SHL_I || B(w, 16, 4) != 7 || B(w, 20, 19) != 2 || B(w, 56, 1)) return 0;
+    at = find_writer(words, (u32)at, B(w, 8, 8), 32, 0);
+    if (at < 0) return 0;
+    w = words[at];
+    if (decode(w)->id != O_IMNMX_I || B(w, 16, 4) != 7 || B(w, 56, 1)) return 0;
+    return (int)B(w, 20, 19) + 1;
+}
+
+/* The targets of the BRX at index, read from its jump table through g_shader_cb_read: up to max_targets, or -1 when
+   the table can't be found or read. The table address comes from the 32-bit LDC that last wrote the BRX's register
+   in its block, with no other way into the code between the two. With the clamp idiom every entry it allows has to
+   be a valid target; without it the valid entries up to the first invalid one are taken. */
+int shader_brx_targets(const u64* words, u32 index, u32 count, u32* targets, int max_targets) {
+    u64 brx, load;
+    u32 bank, j;
+    i32 offset, imm;
+    int at, exact, limit, k, n = 0;
+    if (!g_shader_cb_read || index >= count || !IDX_OK(index) || max_targets <= 0) return -1;
+    brx = words[index];
+    at = find_writer(words, index, B(brx, 8, 8), 0, 1);
+    if (at < 0) return -1;
+    load = words[at];
+    /* entries are word offsets: a load of another size reads them wrong. Mode 0 is the plain c[bank][reg + offset] */
+    if (decode(load)->id != O_LDC || B(load, 0, 8) != B(brx, 8, 8) || B(load, 16, 4) != 7 || B(load, 48, 3) != 4 ||
+        B(load, 44, 2) != 0)
+        return -1;
+    for (j = 11; j < count; j++) {
+        const Op* op;
+        u32 t;
+        if (!IDX_OK(j)) continue;
+        op = decode(words[j]);
+        if (!op || (op->id != O_BRA && op->id != O_SSY && op->id != O_PBK && op->id != O_PCNT && op->id != O_CAL))
+            continue;
+        t = bra_target(words[j], j);
+        if (t > (u32)at && t <= index) return -1;
+    }
+    exact = clamped_entries(words, (u32)at);
+    if (exact > max_targets) return -1;
+    limit = exact ? exact : max_targets < 64 ? max_targets : 64;
+    bank = B(load, 36, 5);
+    offset = sext(B(load, 20, 16), 16);
+    imm = sext(B(brx, 20, 24), 24);
+    for (k = 0; k < limit; k++) {
+        long long addr = (long long)offset + 4LL * k, rel;
+        u32 value;
+        long long t = 0;
+        int ok = addr >= 0 && g_shader_cb_read(bank, (u32)addr, &value);
+        if (ok) {
+            rel = (long long)value + imm;
+            ok = rel >= 0 && rel % 8 == 0;
+            if (ok) {
+                t = (long long)index + 1 + rel / 8;
+                if ((t - 10) % 4 == 0) t++;
+                ok = t >= 11 && t < (long long)count;
+            }
+        }
+        if (!ok) {
+            if (exact) return -1;
             break;
         }
-    for (; i < n; i++) {
-        if (!IDX_OK(i)) continue;
-        const Op* op = decode(w[i]);
-        last = i;
-        if (!op) continue;
-        if (op->id == O_BRA || op->id == O_CAL || op->id == O_PRET || op->id == O_PEXIT || op->id == O_SSY ||
-            op->id == O_PBK || op->id == O_PCNT) {
-            u32 t = bra_target(w[i], i);
-            if (t > maxt) maxt = t;
-            if (op->id == O_CAL || op->id == O_PRET) has_cal = 1;
-        }
-        if (op->id == O_BRX) { /* its jump table's targets count too */
-            u32 tg[64];
-            int nt = shader_brx_targets(w, i, n, tg, 64);
-            if (nt < 0) unresolved_brx = 1;
-            for (int q = 0; q < nt; q++)
-                if (tg[q] > maxt) maxt = tg[q];
-        }
-        if (!unresolved_brx && op->id == O_EXIT && flow_always(w[i]) && i >= maxt) break;
-        /* An unknown BRX can reach later code, but it cannot reach instructions past an all-zero tail. */
-        if (unresolved_brx && op->id == O_EXIT && flow_always(w[i]) && i >= maxt && i >= last_code) break;
-        if (!unresolved_brx && has_cal && op->id == O_RET && flow_always(w[i]) && i >= maxt) break;
-        if (!unresolved_brx && op->id == O_BRA && flow_always(w[i]) && i >= maxt && bra_target(w[i], i) <= i) break;
-        if (i > 16384) break;
+        targets[n++] = (u32)t;
     }
-    u32 len = (last + 1) * 8;
-    if (len > max_bytes) len = max_bytes;
-    if (out_len) *out_len = len;
+    return n ? n : -1;
+}
+
+/* the last nonzero code word below n, or 10 */
+static u32 last_nonzero(const u64* words, u32 n) {
+    u32 i;
+    for (i = n; i-- > 11;)
+        if (IDX_OK(i) && words[i]) return i;
+    return 10;
+}
+
+/* The program's length in bytes (out_len) and a 64-bit FNV-1a hash of that many bytes. The scan follows every
+   branch target forward and ends at an EXIT that always runs once no target lies past it, at an unconditional
+   backward BRA past every target, or at an unconditional RET past every target when the program has calls. A jump
+   table that can't be read leaves targets unknown: then only an EXIT past every known target and past the last
+   nonzero code word ends it, since the zero tail of the window can't be reached. */
+u64 shader_hash(const u8* code, u32 max_bytes, u32* out_len) {
+    const u64* words = (const u64*)code;
+    u32 n = max_bytes / 8, i, last = 10, furthest = 0, tail = 0, len;
+    int resolved = 1, calls = 0;
     u64 h = 1469598103934665603ull;
-    for (u32 k = 0; k < len; k++) {
-        h ^= code[k];
+    if (n > SH_SCAN_WORDS) n = SH_SCAN_WORDS;
+    for (i = 11; i < n; i++) {
+        const Op* op;
+        u64 w;
+        u32 t;
+        if (!IDX_OK(i)) continue;
+        w = words[i];
+        last = i;
+        op = decode(w);
+        if (!op) continue;
+        switch (op->id) {
+            case O_CAL:
+            case O_PRET: calls = 1; /* fall through */
+            case O_BRA:
+            case O_PEXIT:
+            case O_SSY:
+            case O_PBK:
+            case O_PCNT:
+                t = bra_target(w, i);
+                if (t < n && t > furthest) furthest = t;
+                if (op->id == O_BRA && resolved && flow_always(w) && t <= i && i >= furthest) goto done;
+                break;
+            case O_BRX: {
+                u32 targets[64];
+                int k, count = shader_brx_targets(words, i, n, targets, 64);
+                if (count < 0 && resolved) {
+                    resolved = 0;
+                    tail = last_nonzero(words, n);
+                }
+                for (k = 0; k < count; k++)
+                    if (targets[k] > furthest) furthest = targets[k];
+                break;
+            }
+            case O_EXIT:
+                if (flow_always(w) && i >= furthest && (resolved || i >= tail)) goto done;
+                break;
+            case O_RET:
+                if (calls && resolved && flow_always(w) && i >= furthest) goto done;
+                break;
+            default: break;
+        }
+    }
+done:
+    len = (last + 1) * 8;
+    if (len > max_bytes) len = max_bytes;
+    for (i = 0; i < len; i++) {
+        h ^= code[i];
         h *= 1099511628211ull;
     }
+    if (out_len) *out_len = len;
     return h;
 }
 
-/* VertexA + VertexB (NVN dual vertex programs, slot 0 + slot 1): one program that runs A then B like the hardware.
-   A's bundles go first and its EXITs become branches to B's first bundle; branches are relative so both keep working.
-   B's header is used (declarations come from what the code touches). 0 if it doesn't fit in max_bytes */
-int shader_merge_dual(const u8* a, const u8* b, u8* out, u32 max_bytes) {
-    ops_init();
-    u32 la, lb;
-    shader_hash(a, max_bytes, &la);
-    shader_hash(b, max_bytes, &lb);
-    u32 bstart = 10 + ((la / 8 - 10 + 3) / 4) * 4; /* first bundle after A's last one */
-    if ((size_t)bstart * 8 + (lb - 80) > max_bytes) return 0;
-    memset(out, 0, max_bytes);
-    memcpy(out, b, 80);
-    memcpy(out + 80, a + 80, (size_t)bstart * 8 - 80);
-    memcpy(out + (size_t)bstart * 8, b + 80, lb - 80);
-    u64* w = (u64*)out;
-    for (u32 i = 11; i < bstart; i++) {
-        if (!IDX_OK(i)) continue;
-        const Op* op = decode(w[i]);
-        if (!op || op->id != O_EXIT) continue;
-        i32 off = ((i32)(bstart + 1) - (i32)(i + 1)) * 8; /* BRA keeps the EXIT's predicate and flow test */
-        w[i] = 0xE240000000000000ull | ((u64)((u32)off & 0xFFFFFF) << 20) | (w[i] & (0xFull << 16)) | (w[i] & 31);
-    }
-    return 1;
+/* One CRS stack entry: target << 2 | kind (CRS_KIND) */
+typedef struct {
+    u32 depth; /* CRS_DEPTH + 1 marks a block not reached yet */
+    u32 entry[CRS_DEPTH];
+} CrsStack;
+
+typedef struct {
+    const u64* words;
+    u32 count, blocks;
+    u8 leader[65536 / 8];
+    u32* start;      /* each block's first word, ascending */
+    u32* work;       /* blocks to walk */
+    CrsStack* stack; /* the stack each block starts with */
+    u32 nwork;
+} CrsWalk;
+
+static int is_leader(const CrsWalk* c, u32 i) { return i < c->count && (c->leader[i >> 3] >> (i & 7) & 1); }
+static void mark_leader(CrsWalk* c, u32 i) {
+    if (i < c->count) c->leader[i >> 3] |= (u8)(1u << (i & 7));
 }
 
-/* A compiler-generated BRX table uses IMNMX to clamp the index, SHL to turn it into a byte offset, then LDC. */
-static int brx_table_count(const u64* w, u32 ldc, u32* count) {
-    if (B(w[ldc], 48, 3) != 4) return 0; /* LDC.B32 */
-    u32 address = B(w[ldc], 8, 8);
-    if (address == 255) return 0;
-    for (u32 k = 1; k <= 32 && k < ldc; k++) {
-        u32 j = ldc - k;
-        if (!IDX_OK(j)) continue;
-        const Op* op = decode(w[j]);
-        if (!op || op->id == O_BRA || op->id == O_BRX || op->id == O_EXIT) break;
-        if (B(w[j], 0, 8) != address) continue;
-        if (op->id != O_SHL_I || B(w[j], 20, 5) != 2 || B(w[j], 16, 3) != 7 || B(w[j], 19, 1)) return 0;
-        u32 index = B(w[j], 8, 8);
-        for (u32 m = 1; m <= 32 && m < j; m++) {
-            u32 p = j - m;
-            if (!IDX_OK(p)) continue;
-            const Op* prior = decode(w[p]);
-            if (!prior || prior->id == O_BRA || prior->id == O_BRX || prior->id == O_EXIT) break;
-            if (B(w[p], 0, 8) != index) continue;
-            if (prior->id != O_IMNMX_I || B(w[p], 56, 1) || B(w[p], 16, 3) != 7 || B(w[p], 19, 1)) return 0;
-            *count = B(w[p], 20, 19) + 1;
-            return 1;
-        }
-        return 0;
+/* control arrives at target with stack s: the block's first arrival sets its stack, a later one must agree */
+static int crs_arrive(CrsWalk* c, u32 target, const CrsStack* s) {
+    u32 lo = 0, hi = c->blocks;
+    CrsStack* at;
+    if (!is_leader(c, target)) return 0;
+    while (lo < hi) {
+        u32 mid = (lo + hi) / 2;
+        if (c->start[mid] < target)
+            lo = mid + 1;
+        else
+            hi = mid;
     }
-    return 0;
+    at = &c->stack[lo];
+    if (at->depth > CRS_DEPTH) {
+        *at = *s;
+        c->work[c->nwork++] = lo;
+        return 1;
+    }
+    return at->depth == s->depth && !memcmp(at->entry, s->entry, s->depth * sizeof *s->entry);
 }
 
-/* The LDC that loads the BRX at i its jump target: the last write of ra before the BRX, in the BRX's basic block,
-   however far back the compiler scheduled it. -1 when that write is something else. */
-static int brx_table_load(const u64* w, u32 i, u32 n, u32 ra) {
-    u32 j;
-    for (j = i; j-- > 11;) {
+/* Walks one block from its stack. 0 when the stack can't be known statically. */
+static int crs_block(CrsWalk* c, u32 b, u32* pop_targets) {
+    CrsStack s = c->stack[b];
+    u32 i = c->start[b];
+    for (; i < c->count; i = next_code(i)) {
+        u64 w = c->words[i];
         const Op* op;
-        u32 k;
-        if (!IDX_OK(j)) continue;
-        op = decode(w[j]);
-        if (!op || op->id == O_BRA || op->id == O_BRX || op->id == O_JMP || op->id == O_CAL || op->id == O_RET ||
-            op->id == O_EXIT || op->id == O_KIL || op->id == O_SYNC || op->id == O_BRK || op->id == O_CONT)
-            return -1;
-        if (!shader_writes_reg(w[j], op->id, ra)) continue;
-        /* a 32-bit load (size 4): the table holds word offsets, and another size would read them wrongly */
-        if (op->id != O_LDC || B(w[j], 0, 8) != ra || B(w[j], 48, 3) != 4 || B(w[j], 16, 3) != 7 || B(w[j], 19, 1))
-            return -1;
-        for (k = 11; k < n; k++) { /* no other path enters between the load and the jump */
-            const Op* flow;
-            u32 t;
-            if (!IDX_OK(k)) continue;
-            flow = decode(w[k]);
-            if (!flow || (flow->id != O_BRA && flow->id != O_SSY && flow->id != O_PBK && flow->id != O_PCNT &&
-                          flow->id != O_CAL))
-                continue;
-            t = bra_target(w[k], k);
-            if (t > j && t <= i) return -1;
+        u32 t, k, kind, targets[64];
+        int count, n;
+        if (i != c->start[b] && is_leader(c, i)) return crs_arrive(c, i, &s);
+        op = decode(w);
+        if (!op || B(w, 16, 4) == 15) continue; /* predicated never */
+        switch (op->id) {
+            case O_SSY:
+            case O_PBK:
+            case O_PCNT:
+                /* a push happens whatever its predicate says */
+                if (s.depth == CRS_DEPTH) return 0;
+                s.entry[s.depth++] = bra_target(w, i) << 2 | (u32)CRS_KIND(op->id);
+                break;
+            case O_SYNC:
+            case O_BRK:
+            case O_CONT: {
+                CrsStack popped = s;
+                kind = (u32)CRS_KIND(op->id);
+                for (k = s.depth; k > 0 && (s.entry[k - 1] & 3) != kind; k--) {
+                }
+                if (!k) return 0;
+                /* the pop takes the nearest entry of its kind and drops the ones pushed after it */
+                t = s.entry[k - 1] >> 2;
+                if (pop_targets[i] && pop_targets[i] != t) return 0;
+                pop_targets[i] = t;
+                popped.depth = k - 1;
+                if (!crs_arrive(c, t, &popped)) return 0;
+                if (flow_always(w)) return 1;
+                break;
+            }
+            case O_BRA:
+                if (!crs_arrive(c, bra_target(w, i), &s)) return 0;
+                if (flow_always(w)) return 1;
+                break;
+            case O_BRX:
+                count = shader_brx_targets(c->words, i, c->count, targets, 64);
+                if (count < 0) return 0;
+                for (n = 0; n < count; n++)
+                    if (!crs_arrive(c, targets[n], &s)) return 0;
+                if (flow_always(w)) return 1;
+                break;
+            case O_EXIT:
+            case O_RET: /* without calls a RET ends the program */
+                if (flow_always(w)) return 1;
+                break;
+            default: break;
         }
-        return (int)j;
     }
-    return -1;
-}
-
-/* BRX targets from its jump table (an LDC of a constant buffer). -1 if the table can't be resolved. */
-int shader_brx_targets(const u64* w, u32 i, u32 n, u32* out, int max) {
-    if (!g_shader_cb_read) return -1;
-    u32 ra = B(w[i], 8, 8);
-    i32 imm = (i32)(B(w[i], 20, 24) << 8) >> 8;
-    int load = ra == 255 ? -1 : brx_table_load(w, i, n, ra);
-    if (load >= 0) {
-        u32 j = (u32)load;
-        u32 cidx = B(w[j], 36, 5);
-        i32 coff = (i32)(B(w[j], 20, 16) << 16) >> 16;
-        u32 table_count = 0;
-        int exact = brx_table_count(w, j, &table_count);
-        if (exact && table_count > (u32)max) return -1;
-        int cnt = 0;
-        for (u32 e = 0; e < (exact ? table_count : 64u) && cnt < max; e++) {
-            u32 v;
-            if (!g_shader_cb_read(cidx, (u32)(coff + (i32)e * 4), &v)) {
-                if (exact) return -1;
-                break;
-            }
-            i64 bb = (i64)(i32)v + imm;
-            if (bb < 0 || (bb & 7)) {
-                if (exact) return -1;
-                break;
-            }
-            u64 t = (u64)i + 1 + (u64)(bb / 8);
-            if (t >= 10 && ((t - 10) & 3) == 0) t++;
-            if (t < 11) {
-                if (exact) return -1;
-                break;
-            }
-            /* Without an index clamp, an out-of-range word ends the table's valid prefix. */
-            if (t >= n) {
-                if (exact) return -1;
-                break;
-            }
-            out[cnt++] = (u32)t;
-        }
-        return cnt ? cnt : -1;
-    }
-    return -1;
-}
-/* ---- static SSY/PBK/PCNT resolution ----
-   The hardware has one CRS stack: SSY/PBK/PCNT push a token of their kind with the target, SYNC/BRK/CONT pop the
-   entries down to the nearest token of theirs (a BRK out of an SSY region drops the SSY entry). Walk the CFG carrying
-   it. If every reachable block sees the same stack on all incoming paths, each SYNC/BRK/CONT has a fixed target and
-   we can drop the stack. Any conflict (or no entry to pop, or depth > 16) falls back to the dynamic version. */
-typedef struct {
-    u8 n;
-    u8 kind[16]; /* CRS_KIND */
-    u32 s[16];
-} Stk;
-static int stk_eq(const Stk* a, const Stk* b) {
-    return a->n == b->n && !memcmp(a->kind, b->kind, a->n) && !memcmp(a->s, b->s, a->n * 4);
-}
-typedef struct {
-    Ctx* c;
-    u32 n;
-    int* lid;
-    Stk* st;
-    u8* has;
-    int* wl;
-    int nwl;
-} StkA;
-/* edge i -> tg, 0 on conflict */
-static int stk_succ(StkA* A, u32 tg, const Stk* s) {
-    if (tg >= A->n || !is_leader(A->c, tg)) return 1; /* no block -> return */
-    int L = A->lid[tg];
-    if (A->has[L]) return stk_eq(&A->st[L], s);
-    A->st[L] = *s;
-    A->has[L] = 1;
-    A->wl[A->nwl++] = L;
     return 1;
 }
-static int stk_resolve(Ctx* c, u32 n) {
-    int nl = 0;
-    for (u32 i = 11; i < n; i++)
-        if (IDX_OK(i) && is_leader(c, i)) nl++;
-    StkA A = {.c = c, .n = n};
-    /* one block, by alignment: the stacks, the 4-byte arrays, then the flags */
-    u8* block = calloc(1, (sizeof(Stk) + sizeof(u32) + sizeof(int) + 1) * (nl + 1) + sizeof(int) * (n + 1));
-    if (!block) return 0;
-    A.st = (Stk*)block;
-    u32* ldr = (u32*)(A.st + nl + 1);
-    A.wl = (int*)(ldr + nl + 1);
-    A.lid = A.wl + nl + 1;
-    A.has = (u8*)(A.lid + n + 1);
-    int k = 0;
-    for (u32 i = 11; i < n; i++)
-        if (IDX_OK(i) && is_leader(c, i)) {
-            A.lid[i] = k;
-            ldr[k++] = i;
+
+/* The single CRS stack resolved at translation time: SSY, PBK and PCNT push a token and its target, and SYNC, BRK
+   and CONT pop down to the nearest token of their kind (Eden's control_flow.cpp Stack). Walks the control flow from
+   the entry with an empty stack and gives each pop its one target in pop_targets. Returns 0 when that can't be done
+   statically (calls, PEXIT, JMP, an unreadable jump table, a pop with no token, a block or pop reached with two
+   stacks, a deep stack, no memory): the translator then keeps the stack at run time. */
+int shader_resolve_crs(const u64* words, u32 count, u32* pop_targets) {
+    CrsWalk* c;
+    u32 i, b, targets[64];
+    int ok = 1, k, n;
+    size_t bytes;
+    if (count < 12 || count > 65536 || !words || !pop_targets) return 0;
+    c = calloc(1, sizeof *c);
+    if (!c) return 0;
+    c->words = words;
+    c->count = count;
+    mark_leader(c, 11);
+    for (i = 11; i < count && ok; i = next_code(i)) {
+        u64 w = words[i];
+        const Op* op = decode(w);
+        if (!op) continue;
+        switch (op->id) {
+            case O_CAL:
+            case O_PRET:
+            case O_PEXIT:
+            case O_JMP: ok = 0; break;
+            case O_BRA:
+            case O_SSY:
+            case O_PBK:
+            case O_PCNT: {
+                u32 t = bra_target(w, i);
+                if (t >= count || !IDX_OK(t)) ok = 0;
+                mark_leader(c, t);
+                break;
+            }
+            case O_BRX:
+                n = shader_brx_targets(words, i, count, targets, 64);
+                if (n < 0) ok = 0;
+                for (k = 0; k < n; k++) mark_leader(c, targets[k]);
+                break;
+            default: break;
         }
-    c->pop_tgt = calloc(n + 1, sizeof(u32));
-    if (!c->pop_tgt) {
-        free(block);
+        if (op->id == O_BRA || op->id == O_BRX || op->id == O_SYNC || op->id == O_BRK || op->id == O_CONT ||
+            op->id == O_EXIT || op->id == O_RET)
+            mark_leader(c, next_code(i));
+    }
+    for (i = 0; i < count && ok; i++) c->blocks += is_leader(c, i);
+    bytes = (size_t)c->blocks * (2 * sizeof(u32) + sizeof(CrsStack));
+    if (ok) c->stack = malloc(bytes);
+    if (!c->stack) {
+        free(c);
         return 0;
     }
-    int ok = 1;
-    Stk s0;
-    memset(&s0, 0, sizeof s0);
-    A.st[0] = s0;
-    A.has[0] = 1;
-    A.wl[A.nwl++] = 0;
-    while (ok && A.nwl) {
-        int L = A.wl[--A.nwl];
-        Stk s = A.st[L];
-        for (u32 i = ldr[L]; i < n && ok; i++) {
-            if (!IDX_OK(i)) continue;
-            if (i != ldr[L] && is_leader(c, i)) {
-                ok = stk_succ(&A, i, &s);
-                break;
-            } /* fall through */
-            const Op* op = decode(c->w[i]);
-            if (!op) continue;
-            u64 w = c->w[i];
-            int id = op->id;
-            u32 pg = B(w, 16, 3), pn = B(w, 19, 1);
-            int always = flow_always(w);
-            int kk = CRS_KIND(id);
-            if (id == O_SSY || id == O_PBK || id == O_PCNT) {
-                if (s.n >= 16) {
-                    ok = 0;
-                    break;
-                }
-                s.kind[s.n] = (u8)kk;
-                s.s[s.n++] = bra_target(w, i);
-                continue;
-            } /* unpredicated */
-            if (pg == 7 && pn) continue; /* never runs */
-            if (id == O_SYNC || id == O_BRK || id == O_CONT) {
-                int j = s.n;
-                while (j > 0 && s.kind[j - 1] != kk) j--;
-                if (!j) {
-                    ok = 0;
-                    break;
-                }
-                u32 tg = s.s[j - 1];
-                if (c->pop_tgt[i] && c->pop_tgt[i] != tg) {
-                    ok = 0;
-                    break;
-                }
-                c->pop_tgt[i] = tg;
-                Stk s2 = s;
-                s2.n = (u8)(j - 1);
-                ok = stk_succ(&A, tg, &s2);
-                if (always) break;
-                continue;
-            }
-            if (id == O_BRA) {
-                ok = stk_succ(&A, bra_target(w, i), &s);
-                if (always) break;
-                continue;
-            }
-            if (id == O_BRX) {
-                u32 targets[64];
-                int nt = shader_brx_targets(c->w, i, n, targets, 64);
-                if (nt < 0) {
-                    ok = 0;
-                    break;
-                }
-                for (int q = 0; q < nt && ok; q++) ok = stk_succ(&A, targets[q], &s);
-                if (always) break;
-                continue;
-            }
-            if (id == O_EXIT && always) break;
+    c->start = (u32*)(c->stack + c->blocks);
+    c->work = c->start + c->blocks;
+    for (i = 0, b = 0; i < count; i++)
+        if (is_leader(c, i)) {
+            c->start[b] = i;
+            c->stack[b++].depth = CRS_DEPTH + 1;
         }
+    memset(pop_targets, 0, count * sizeof *pop_targets);
+    {
+        CrsStack empty;
+        memset(&empty, 0, sizeof empty);
+        crs_arrive(c, 11, &empty);
     }
-    free(block);
-    return ok;
-}
-
-int shader_resolve_crs(const u64* words, u32 count, u32* pop_targets) {
-    if (!words || !pop_targets || count < 12 || count > 65536) return 0;
-    Ctx* c = calloc(1, sizeof *c);
-    if (!c) return 0;
-    c->w = words;
-    int unresolved = 0;
-    mark(c, 11);
-    for (u32 i = 11; i < count; i++) {
-        if (!IDX_OK(i)) continue;
-        const Op* op = decode(words[i]);
-        if (!op) continue;
-        int id = op->id;
-        /* The static walk does not follow calls. A callee can consume a caller's CRS token. */
-        if (id == O_CAL || id == O_PRET) {
-            unresolved = 1;
-            break;
-        }
-        if (id == O_BRA || id == O_SSY || id == O_PBK || id == O_PCNT) mark(c, bra_target(words[i], i));
-        if (id == O_BRX) {
-            u32 targets[64];
-            int n = shader_brx_targets(words, i, count, targets, 64);
-            if (n < 0) {
-                unresolved = 1;
-                break;
-            }
-            for (int j = 0; j < n; j++) {
-                u32 target = targets[j];
-                mark(c, target);
-            }
-        }
-        if (is_term(id)) {
-            u32 next = i + 1;
-            while (next < count && !IDX_OK(next)) next++;
-            mark(c, next);
-        }
-    }
-    int ok = !unresolved && stk_resolve(c, count);
-    if (ok) memcpy(pop_targets, c->pop_tgt, (size_t)count * sizeof *pop_targets);
-    free(c->pop_tgt);
+    while (ok && c->nwork) ok = crs_block(c, c->work[--c->nwork], pop_targets);
+    free(c->stack);
     free(c);
     return ok;
+}
+
+/* NVN splits some vertex programs in two: VertexA (slot 0) runs first and usually writes the position, VertexB
+   (slot 1) the varyings. They become one program with B's header: A's code from word 10, then B's from the next
+   whole bundle on, where A's EXITs now branch, under the same predicate and flow condition. Branches are relative,
+   so both halves keep working where they land. Returns 0 when the result doesn't fit in max_bytes. */
+int shader_merge_dual(const u8* a, const u8* b, u8* out, u32 max_bytes) {
+    u32 len_a, len_b, words_a, start, i;
+    u64* code = (u64*)out;
+    if (!a || !b || !out || max_bytes < 96) return 0;
+    shader_hash(a, max_bytes, &len_a);
+    shader_hash(b, max_bytes, &len_b);
+    if (len_a < 88 || len_b < 88) return 0;
+    words_a = len_a / 8;
+    start = 10 + ((words_a - 10 + 3) & ~3u);
+    if ((unsigned long long)start * 8 + (len_b - 80) > max_bytes) return 0;
+    memset(out, 0, max_bytes);
+    memcpy(out, b, 80);
+    memcpy(out + 80, a + 80, len_a - 80);
+    memcpy(out + (size_t)start * 8, b + 80, len_b - 80);
+    for (i = 11; i < words_a; i++) {
+        u64 w = code[i];
+        const Op* op;
+        if (!IDX_OK(i)) continue;
+        op = decode(w);
+        if (!op || op->id != O_EXIT) continue;
+        /* BRA (opcode 0xE24) to B's first instruction, keeping the EXIT's predicate (16-19) and condition (0-4) */
+        code[i] = 0xE24ull << 52 | (u64)((start - i) * 8 & 0xFFFFFF) << 20 | (w & 0xF001Full);
+    }
+    return 1;
 }

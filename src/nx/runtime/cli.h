@@ -13,8 +13,9 @@ enum {
     SNX_FULLSCREEN = 32,
     SNX_WINDOWED = 64 /* --fullscreen=0: windowed over the .ini's fullscreen=1 */
 };
-/* Shared by the driver and standalone game runtime. Windows accepts individual
-   short options, but deliberately not POSIX-style clusters. */
+/* Shared by the driver and standalone game runtime (startup.c), which refuses SNX_EXTRACT and SNX_RECOMP: only the
+   driver extracts and recompiles. Windows accepts individual short options, but deliberately not POSIX-style
+   clusters. */
 static int snx_cli_flag(const char* arg, unsigned* flags) {
     unsigned bits = 0;
     const char* p;

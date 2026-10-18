@@ -55,6 +55,7 @@ static struct {
     u64 last_ns; /* when they were taken */
     u32 supported_styles, supported_ids; /* the game's: styles, and Npads by entry index */
     i64 hold, handheld_mode, comm_mode;
+    i64 header_hold; /* the hold type the single Joy-Cons' headers were written for */
     PadState pad[HID_PADS]; /* the frontend's players, as the last update saw them */
     int split[HID_PADS];    /* a combined pair split: 1 + the Npad its other half is, 0 when it isn't */
     int keep_right[HID_PADS];
@@ -134,6 +135,7 @@ static void hid_write_header(int e, u32 style) {
     u8* n = hid_npad(e);
     u64 props = 0;
     u32 device = 0, footer = 0, i;
+    int vertical = hid.hold != 1; /* NpadJoyHoldType: Vertical 0, Horizontal 1 */
     static const u32 body = 0xff323232u, buttons = 0xffe6e6e6u;
     w32(n + HO_HidNpadInternalState_style_set, style);
     w32(n + HO_HidNpadInternalState_joy_assignment_mode, (style & (STYLE_JOY_LEFT | STYLE_JOY_RIGHT)) ? 1 : 0);
@@ -166,15 +168,15 @@ static void hid_write_header(int e, u32 style) {
         props = 1u << 11 | 1u << 13 | 1u << 14 | 1u << 15;
         footer = 5;
         break;
-    case STYLE_JOY_LEFT:
+    case STYLE_JOY_LEFT: /* held as the game holds a single Joy-Con, as the sticks are turned (hid_npad_state) */
         device = 1u << 4;
-        props = 1u << 12 | 1u << 14;
-        footer = 8; /* JoyLeftHorizontal */
+        props = (vertical ? 1u << 11 : 1u << 12) | 1u << 14;
+        footer = vertical ? 9 : 8; /* JoyLeftVertical, JoyLeftHorizontal */
         break;
     case STYLE_JOY_RIGHT:
         device = 1u << 5;
-        props = 1u << 12 | 1u << 13;
-        footer = 10;
+        props = (vertical ? 1u << 11 : 1u << 12) | 1u << 13;
+        footer = vertical ? 11 : 10;
         break;
     default: break;
     }
@@ -211,11 +213,17 @@ static void hid_layout(void) {
     HidSource src[HID_ENTRIES];
     int e;
     u32 style;
+    int rehold = hid.hold != hid.header_hold;
     hid_validate();
     hid_sources(src);
+    hid.header_hold = hid.hold;
     for (e = 0; e < HID_ENTRIES; e++) {
         style = hid_style_of(e, &src[e]);
-        if (style == hid.style[e]) continue;
+        if (style == hid.style[e]) {
+            /* a single Joy-Con's header follows the hold type; its style stays, and the game isn't told */
+            if (rehold && (style & (STYLE_JOY_LEFT | STYLE_JOY_RIGHT))) hid_write_header(e, style);
+            continue;
+        }
         hid.style[e] = style;
         hid_write_header(e, style);
         kevent_signal(hid.style_ev[e]);
@@ -224,7 +232,9 @@ static void hid_layout(void) {
 
 /* ============================================================ LIFOs */
 /* the next state of a LIFO of entries of size n (the sampling stamp, then the state): the stamp is odd while the
-   entry is written and twice the sampling number once it is whole, so a reader can tell a torn copy */
+   entry is written and twice the sampling number once it is whole, so a reader can tell a torn copy. The fence after
+   the odd stamp keeps the state's bytes from showing before it, and the full one keeps the header's update after the
+   whole entry */
 static void hid_lifo_push(u8* lifo, u32 n, const void* state, u32 state_size) {
     u64 tail, count, stamp;
     u8* entry;
@@ -233,9 +243,11 @@ static void hid_lifo_push(u8* lifo, u32 n, const void* state, u32 state_size) {
     tail = (tail + 1) % HID_LIFO_N;
     entry = lifo + 0x20 + tail * n;
     stamp = hid.samp << 1 | 1;
-    __atomic_store_n((u64*)entry, stamp, __ATOMIC_RELEASE);
+    __atomic_store_n((u64*)entry, stamp, __ATOMIC_SEQ_CST);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
     memcpy(entry + 8, state, state_size);
     __atomic_store_n((u64*)entry, hid.samp << 1, __ATOMIC_RELEASE);
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
     stamp = HID_LIFO_N;
     memcpy(lifo + HO_HidCommonLifoHeader_buffer_count, &stamp, 8);
     if (count < HID_LIFO_N - 1) count++;
@@ -400,8 +412,10 @@ void hid_update(void) {
         hid_npad_state(&src[e], style, state);
         memset(none, 0, sizeof none);
         memcpy(none, &hid.samp, 8);
+        /* the handheld Npad's full-key LIFO carries its state too, for a game reading it as a full-key one */
         for (i = 0; i < 5; i++)
-            hid_lifo_push(n + lifos[i], HS_HidNpadCommonStateAtomicStorage, style == 1u << i ? state : none,
+            hid_lifo_push(n + lifos[i], HS_HidNpadCommonStateAtomicStorage,
+                          style == 1u << i || (i == 0 && style == STYLE_HANDHELD) ? state : none,
                           HS_HidNpadCommonState);
         hid_lifo_push(n + HO_HidNpadInternalState_palma_lifo, HS_HidNpadCommonStateAtomicStorage, none,
                       HS_HidNpadCommonState);
@@ -459,12 +473,12 @@ int hid_connected_players(u32* first_id) {
 static int nn_hid_IHidServer_CreateAppletResource(SvcObj* self, u64 aruid, SvcObj** resource) {
     (void)self, (void)aruid;
     *resource = nn_hid_IAppletResource_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IAppletResource_GetSharedMemoryHandle(SvcObj* self, u32* shared_memory) {
     (void)self;
     *shared_memory = h_new(&hid.shm->o);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_AcquireXpadIdEventHandle(SvcObj* self, u64 unknown, u32* event) {
     (void)self, (void)unknown;
@@ -473,23 +487,23 @@ static int nn_hid_IHidServer_AcquireXpadIdEventHandle(SvcObj* self, u64 unknown,
 static int nn_hid_IHidServer_GetJoyXpadLifoHandle(SvcObj* self, nn_hid_JoyXpadId id, u32* lifo) {
     (void)self, (void)id;
     *lifo = h_new(&hid.xpad_shm->o);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_GetSixAxisSensorLifoHandle(SvcObj* self, nn_hid_BasicXpadId id, u32* lifo) {
     (void)self, (void)id;
     *lifo = h_new(&hid.six_shm->o);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_GetJoySixAxisSensorLifoHandle(SvcObj* self, nn_hid_JoyXpadId id, u32* lifo) {
     (void)self, (void)id;
     *lifo = h_new(&hid.joysix_shm->o);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_IsSixAxisSensorFusionEnabled(SvcObj* self, nn_hid_SixAxisSensorHandle handle, u64 aruid,
                                                           u8* enabled) {
     (void)self, (void)handle, (void)aruid;
     *enabled = 1;
-    return 0;
+    R_SUCCEED();
 }
 /* a device handle (SixAxisSensorHandle, VibrationDeviceHandle): the style index, the Npad id, the device */
 static int hid_handle_device(u32 handle, int* p, int* sensor) {
@@ -509,13 +523,13 @@ static int nn_hid_IHidServer_IsSixAxisSensorAtRest(SvcObj* self, nn_hid_SixAxisS
     pm_unlock(&hid.lock);
     if (!found) {
         *at_rest = 1;
-        return 0;
+        R_SUCCEED();
     }
     pm_lock(&g_pad_input_lock);
     m = (p ? g_pad_extra[p - 1] : g_pad).motion[sensor];
     pm_unlock(&g_pad_input_lock);
     *at_rest = (u8)hid_motion_at_rest(&m);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_SetSupportedNpadStyleSet(SvcObj* self, nn_hid_NpadStyleSet style_set, u64 aruid) {
     (void)self, (void)aruid;
@@ -523,14 +537,14 @@ static int nn_hid_IHidServer_SetSupportedNpadStyleSet(SvcObj* self, nn_hid_NpadS
     hid.supported_styles = style_set & STYLE_ALL;
     hid_layout();
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_GetSupportedNpadStyleSet(SvcObj* self, u64 aruid, nn_hid_NpadStyleSet* style_set) {
     (void)self, (void)aruid;
     pm_lock(&hid.lock);
     *style_set = hid.supported_styles;
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_SetSupportedNpadIdType(SvcObj* self, u64 aruid, IpcBuf ids) {
     u32 id, mask = 0;
@@ -545,36 +559,37 @@ static int nn_hid_IHidServer_SetSupportedNpadIdType(SvcObj* self, u64 aruid, Ipc
     hid.supported_ids = mask;
     hid_layout();
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_AcquireNpadStyleSetUpdateEventHandle(SvcObj* self, nn_hid_NpadIdType id, u64 aruid,
                                                                   u64 event_ptr, u32* event) {
     int e = hid_entry(id);
     (void)self, (void)aruid, (void)event_ptr;
-    if (e < 0) return HID_INVALID_NPAD_ID;
+    R_UNLESS(e >= 0, HID_INVALID_NPAD_ID);
     *event = ev_handle(hid.style_ev[e]);
-    return 0;
+    R_SUCCEED();
 }
 /* the player lights: one more from the left for No1 to No4, then the console's patterns for No5 to No8 */
 static int nn_hid_IHidServer_GetPlayerLedPattern(SvcObj* self, nn_hid_NpadIdType id, u64* pattern) {
     static const u8 leds[8] = {0x1, 0x3, 0x7, 0xf, 0x9, 0x5, 0xd, 0x6};
     (void)self;
     *pattern = id < 8 ? leds[id] : 0;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_SetNpadJoyHoldType(SvcObj* self, u64 aruid, nn_hid_NpadJoyHoldType hold_type) {
     (void)self, (void)aruid;
     pm_lock(&hid.lock);
     hid.hold = hold_type;
+    hid_layout();
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_GetNpadJoyHoldType(SvcObj* self, u64 aruid, nn_hid_NpadJoyHoldType* hold_type) {
     (void)self, (void)aruid;
     pm_lock(&hid.lock);
     *hold_type = hid.hold;
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 
 /* an Npad on its own: a merged pair goes back to its two players, a combined pair splits onto the first Npad the
@@ -611,7 +626,7 @@ static int nn_hid_IHidServer_SetNpadJoyAssignmentModeSingleByDefault(SvcObj* sel
     hid_assign_single(hid_entry(id), 0);
     hid_layout();
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_SetNpadJoyAssignmentModeSingle(SvcObj* self, nn_hid_NpadIdType id, u64 aruid,
                                                             nn_hid_NpadJoyDeviceType type) {
@@ -620,7 +635,7 @@ static int nn_hid_IHidServer_SetNpadJoyAssignmentModeSingle(SvcObj* self, nn_hid
     hid_assign_single(hid_entry(id), type == 1);
     hid_layout();
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_SetNpadJoyAssignmentModeSingleWithDestination(SvcObj* self, nn_hid_NpadIdType id,
                                                                            u64 aruid, nn_hid_NpadJoyDeviceType type,
@@ -634,7 +649,7 @@ static int nn_hid_IHidServer_SetNpadJoyAssignmentModeSingleWithDestination(SvcOb
     pm_unlock(&hid.lock);
     *is_reassigned = d >= 0;
     *new_id = d >= 0 ? (u32)d : id;
-    return 0;
+    R_SUCCEED();
 }
 /* a split pair whole again, on the Npad its controller is */
 static int nn_hid_IHidServer_SetNpadJoyAssignmentModeDual(SvcObj* self, nn_hid_NpadIdType id, u64 aruid) {
@@ -646,14 +661,14 @@ static int nn_hid_IHidServer_SetNpadJoyAssignmentModeDual(SvcObj* self, nn_hid_N
     if (e >= 0 && (src[e].kind == SRC_LEFT_HALF || src[e].kind == SRC_RIGHT_HALF)) hid.split[src[e].p] = 0;
     hid_layout();
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 /* two single Joy-Cons, a left and a right, as one dual Npad on the first one's; any pair either was in ends */
 static int nn_hid_IHidServer_MergeSingleJoyAsDualJoy(SvcObj* self, nn_hid_NpadIdType id1, nn_hid_NpadIdType id2,
                                                      u64 aruid) {
     int a = hid_entry(id1), b = hid_entry(id2), i, q;
     (void)self, (void)aruid;
-    if (a < 0 || b < 0) return HID_INVALID_NPAD_ID;
+    R_UNLESS(a >= 0 && b >= 0, HID_INVALID_NPAD_ID);
     pm_lock(&hid.lock);
     if (a < HID_PADS && b < HID_PADS && a != b) {
         for (i = 0; i < 2; i++) {
@@ -667,7 +682,7 @@ static int nn_hid_IHidServer_MergeSingleJoyAsDualJoy(SvcObj* self, nn_hid_NpadId
     }
     hid_layout();
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_SetNpadHandheldActivationMode(SvcObj* self, u64 aruid,
                                                            nn_hid_NpadHandheldActivationMode mode) {
@@ -675,7 +690,7 @@ static int nn_hid_IHidServer_SetNpadHandheldActivationMode(SvcObj* self, u64 aru
     pm_lock(&hid.lock);
     hid.handheld_mode = mode;
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_GetNpadHandheldActivationMode(SvcObj* self, u64 aruid,
                                                            nn_hid_NpadHandheldActivationMode* mode) {
@@ -683,7 +698,7 @@ static int nn_hid_IHidServer_GetNpadHandheldActivationMode(SvcObj* self, u64 aru
     pm_lock(&hid.lock);
     *mode = hid.handheld_mode;
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ vibration */
@@ -693,7 +708,7 @@ static int nn_hid_IHidServer_GetVibrationDeviceInfo(SvcObj* self, nn_hid_Vibrati
     (void)self;
     info->type = 1;
     info->position = 1 + (handle >> 16 & 1);
-    return 0;
+    R_SUCCEED();
 }
 static u32 hid_amplitude(float a) {
     if (!(a > 0.0f)) return 0; /* a NaN too */
@@ -715,7 +730,7 @@ static int nn_hid_IHidServer_SendVibrationValue(SvcObj* self, nn_hid_VibrationDe
     pm_lock(&hid.lock);
     hid_vibrate(handle, value);
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_GetActualVibrationValue(SvcObj* self, nn_hid_VibrationDeviceHandle handle, u64 aruid,
                                                      nn_hid_VibrationValue* value) {
@@ -727,17 +742,17 @@ static int nn_hid_IHidServer_GetActualVibrationValue(SvcObj* self, nn_hid_Vibrat
     else
         value->freq_low = 160.0f, value->freq_high = 320.0f;
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_CreateActiveVibrationDeviceList(SvcObj* self, SvcObj** list) {
     (void)self;
     *list = nn_hid_IActiveVibrationDeviceList_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_IsVibrationPermitted(SvcObj* self, u8* permitted) {
     (void)self;
     *permitted = 1;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_SendVibrationValues(SvcObj* self, nn_applet_AppletResourceUserId aruid, IpcBuf handles,
                                                  IpcBuf values) {
@@ -752,7 +767,7 @@ static int nn_hid_IHidServer_SendVibrationValues(SvcObj* self, nn_applet_AppletR
         hid_vibrate(h, &v);
     }
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_IsVibrationDeviceMounted(SvcObj* self, nn_hid_VibrationDeviceHandle handle, u64 aruid,
                                                       u8* mounted) {
@@ -761,21 +776,21 @@ static int nn_hid_IHidServer_IsVibrationDeviceMounted(SvcObj* self, nn_hid_Vibra
     pm_lock(&hid.lock);
     *mounted = (u8)hid_handle_device(handle, &p, &motor);
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_SetNpadCommunicationMode(SvcObj* self, u64 aruid, nn_hid_NpadCommunicationMode mode) {
     (void)self, (void)aruid;
     pm_lock(&hid.lock);
     hid.comm_mode = mode;
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_hid_IHidServer_GetNpadCommunicationMode(SvcObj* self, nn_hid_NpadCommunicationMode* mode) {
     (void)self;
     pm_lock(&hid.lock);
     *mode = hid.comm_mode;
     pm_unlock(&hid.lock);
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ init */
@@ -809,6 +824,9 @@ void svc_hid_init(void) {
     pm_lock(&hid.lock);
     hid_layout();
     pm_unlock(&hid.lock);
+    /* the LIFOs hold states before the game's first look, as the console's have been sampling since boot */
+    hid_update();
+    hid_update();
     nn_hid_IHidServer_register(new_hid);
     nn_hid_IHidSystemServer_register(new_hid_sys);
 }

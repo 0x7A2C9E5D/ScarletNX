@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* SDL3 backend, the window backend on Linux, Windows and Android: the window and its Vulkan surface, keyboard, gamepads
    and touch. Runs natively on Wayland and on X11 (SDL_VIDEO_DRIVER=x11 picks X11), and takes the unattended-run
-   options (seconds, frames, shot, shot_every, press, press_at, press_len, script: platform/unattended.c). */
+   options (seconds, frames, shot, shot_every, press_len, script: platform/unattended.c). */
 #include "nx/runtime/main.h"
 #include "nx/runtime/options.h"
 #include "nx/hle/services/hid.h"

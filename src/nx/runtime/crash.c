@@ -1,88 +1,130 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the crash report. It runs in the crash handler: the log is in its crash mode by then (log_crash_mode), and the
-   hints aren't saved here, the main loop saves them every few seconds */
-#include "nx/runtime/arm.h"
-#include "nx/runtime/loader.h"
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The crash report: what failed, where (the game's recompiled code or the runtime itself), on which thread and with
+   which registers, then the end of the run. The crash handler calls it with the log in crash mode */
 #include "nx/runtime/main.h"
 #include "nx/hle/kernel/kernel.h"
 #include "nx/memory/mem.h"
+#include "nx/runtime/arm.h"
+#include "nx/runtime/loader.h"
 #include "nx/runtime/platform/log.h"
-#if defined(_WIN32)
-extern char __ImageBase; /* the linker's: where the executable is loaded */
-#else
+#include "nx/runtime/platform/plat.h"
+#if !defined(_WIN32)
 #include <signal.h>
 #endif
-/* fault: the address a memory fault touched, NULL for any other kind of crash. sig: the signal, or on Windows the
-   exception code */
-void crash_report(void* host_pc, void* fault, int sig) {
-    KThread* t = kthread_cur();
+
+#if defined(__ELF__)
+/* the start of the runtime's own image, for addr2line: the linker defines it for an executable and a library alike */
+extern const char __ehdr_start[] __attribute__((weak, visibility("hidden")));
+#endif
+
+#define NEAR_FUNCTION ((u64)1 << 20)   /* a host pc this far past a recompiled function's start is still in it */
+#define RUNTIME_WINDOW ((u64)256 << 20) /* the runtime's image is smaller than this */
+
+static const char* crash_kind(void* fault, int sig) {
 #if defined(_WIN32)
-    const char* kind = fault ? "invalid memory access" : "exception";
-    logf_(0, "\n*** Crash (exception %x) at host pc=%p", (unsigned)sig, host_pc);
+    switch ((unsigned long)sig) {
+        case 0xC0000005ul: /* EXCEPTION_ACCESS_VIOLATION */
+        case 0xC0000006ul: return "invalid memory access"; /* EXCEPTION_IN_PAGE_ERROR */
+        case 0xC000001Dul: return "illegal instruction";
+        case 0xC000008Eul: /* the float exceptions, then integer division by zero and overflow */
+        case 0xC0000090ul:
+        case 0xC0000091ul:
+        case 0xC0000094ul:
+        case 0xC0000095ul: return "arithmetic error";
+        default: return "exception";
+    }
 #else
-    const char* kind = fault           ? "invalid memory access"
-                       : sig == SIGILL ? "illegal instruction"
-                       : sig == SIGFPE ? "arithmetic error"
-                                       : "crash";
-    logf_(0, "\n*** Crash (signal %d) at host pc=%p", sig, host_pc);
+    if (fault || sig == SIGSEGV || sig == SIGBUS) return "invalid memory access";
+    return sig == SIGILL ? "illegal instruction" : sig == SIGFPE ? "arithmetic error" : "crash";
 #endif
-    /* the game address only for an access inside the guest's address space */
-    u8* f = (u8*)fault;
-    int in_guest = f && g_mem && f >= g_mem && f < g_mem + AS_SIZE;
-    u64 ga = in_guest ? (u64)(f - g_mem) : 0;
-    if (in_guest)
-        logf_(0, ", access to %p (game address %llx) ***\n", fault, (unsigned long long)ga);
-    else if (fault)
-        logf_(0, ", access to %p ***\n", fault);
-    else
-        logf_(0, " (%s) ***\n", kind);
-    if (g_mem) {
-        char mr[200];
-        mem_report(mr, sizeof mr);
-        logf_(0, "  memory: %s\n", mr);
-    }
-#ifdef _WIN32
-    {
-        u64 b = (u64)(size_t)&__ImageBase, p = (u64)(size_t)host_pc;
-        if (p >= b && p < b + 0x10000000ull)
-            logf_(0, "  in the runtime itself (exe offset +%llx), thread %s\n", (unsigned long long)(p - b),
-                  t ? "of the game" : "of the runtime (GPU, audio or window)");
-    }
-#endif
-    if (in_guest && ga < 0x1000000ull) {
-        if (g_opt_mem_gb < 6)
-            logf_(0,
-                  "  the address is a null pointer plus an offset: the game probably got NULL from its allocator (out "
-                  "of memory?). Try memory_gb=6 in the .ini\n");
-        else
-            logf_(0, "  the address is a null pointer plus an offset\n");
-    }
-    if (g_mod) { /* closest recompiled fn below host pc */
-        u64 best = 0, ga2 = 0;
-        for (u32 i = 0; i < g_mod->nentries; i++) {
-            u64 fn = (u64)(size_t)g_mod->entry_fn[i];
-            if (fn <= (u64)(size_t)host_pc && fn > best) {
-                best = fn;
-                ga2 = g_mod->entry_addr[i];
-            }
+}
+
+/* the recompiled function whose host code starts closest below pc: 1 with its guest address and pc's offset in it */
+static int game_function_at(u64 pc, u64* guest, u64* offset) {
+    u64 best = 0;
+    u32 i;
+    if (!g_mod || !g_mod->entry_fn) return 0;
+    for (i = 0; i < g_mod->nentries; i++) {
+        u64 fn = (u64)(size_t)g_mod->entry_fn[i];
+        if (fn <= pc && fn > best) {
+            best = fn;
+            *guest = g_mod->entry_addr[i];
         }
-        if (best && (u64)(size_t)host_pc - best < 0x100000)
-            logf_(0, "  inside the recompiled code of game function %llx (+%llx on the host)\n",
-                  (unsigned long long)ga2, (unsigned long long)((u64)(size_t)host_pc - best));
     }
-    if (g_arm_mod) {
-        u64 offset = 0;
-        u32 block = arm_block_at(host_pc, &offset);
-        if (block)
-            logf_(0, "  inside the recompiled code of the game's %s block %x (+%llx on the host)\n",
-                  block & 1 ? "Thumb" : "A32", block & ~1u, (unsigned long long)offset);
+    if (!best || pc - best >= NEAR_FUNCTION) return 0;
+    *offset = pc - best;
+    return 1;
+}
+
+/* where host_pc is: the game's code, or the runtime's own with its offset for addr2line */
+static void report_place(void* host_pc) {
+    u64 pc = (u64)(size_t)host_pc, guest = 0, offset = 0;
+    u32 block;
+    if (game_function_at(pc, &guest, &offset)) {
+        WARN("  inside the recompiled code of game function %llx (+%llx on the host)\n", (unsigned long long)guest,
+             (unsigned long long)offset);
+        return;
     }
+    block = arm_block_at(host_pc, &offset);
+    if (block) {
+        WARN("  inside the recompiled %s block %x (+%llx on the host)\n", block & 1 ? "Thumb" : "A32", block & ~1u,
+             (unsigned long long)offset);
+        return;
+    }
+#if defined(_WIN32)
+    {
+        u64 base = (u64)(size_t)GetModuleHandleW(NULL);
+        if (pc >= base && pc - base < RUNTIME_WINDOW) {
+            WARN("  in the runtime itself (exe offset +%llx), on %s\n", (unsigned long long)(pc - base),
+                 kthread_cur() ? "a game thread" : "one of the runtime's threads");
+            return;
+        }
+    }
+#elif defined(__ELF__)
+    if (__ehdr_start) {
+        u64 base = (u64)(size_t)__ehdr_start;
+        if (pc >= base && pc - base < RUNTIME_WINDOW) {
+            WARN("  in the runtime itself (exe offset +%llx)\n", (unsigned long long)(pc - base));
+            return;
+        }
+    }
+#endif
+    WARN("  outside the game's code and the runtime (a library's)\n");
+}
+
+void crash_report(void* host_pc, void* fault, int sig) {
+    const char* kind = crash_kind(fault, sig);
+    u8* f = (u8*)fault;
+    KThread* t = kthread_cur();
+    char memory[256];
+    int in_guest = g_mem && f >= g_mem && (u64)(f - g_mem) < AS_SIZE;
+    u64 guest = in_guest ? (u64)(f - g_mem) : 0;
+#if defined(_WIN32)
+    WARN("\n*** Crash (exception 0x%08lx) at host pc=%p", (unsigned long)sig, host_pc);
+#else
+    WARN("\n*** Crash (signal %d) at host pc=%p", sig, host_pc);
+#endif
+    if (fault && in_guest)
+        WARN(", access to %p (game address %llx) ***\n", fault, (unsigned long long)guest);
+    else if (fault)
+        WARN(", access to %p ***\n", fault);
+    else
+        WARN(" ***\n");
+    WARN("  %s\n", kind);
+    report_place(host_pc);
+    /* the low pages are never mapped: a pointer the game failed to get (an allocation it ran out of memory for) plus
+       a field's offset lands there */
+    if (fault && in_guest && guest < ((u64)16 << 20) && g_opt_mem_gb < 6)
+        WARN("  a null pointer plus an offset: a game short of memory does this, memory_gb=6 in its .ini may help\n");
     if (t) {
-        logf_(0, "  thread %llu (%s)\n", (unsigned long long)t->id, t->name);
+        WARN("  thread %llu (%s)\n", (unsigned long long)t->id, t->name);
         kernel_dump_regs(&t->cpu);
+    } else
+        WARN("  on one of the runtime's threads, not the game's\n");
+    if (g_mem) {
+        mem_report(memory, sizeof memory);
+        WARN("  memory: %s\n", memory);
     }
-    fatal("The game crashed (%s). See the .log.", kind);
+    fatal("The game crashed (%s). See the .log for details.", kind);
 }

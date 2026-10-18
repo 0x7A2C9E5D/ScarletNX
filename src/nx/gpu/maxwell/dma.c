@@ -1,379 +1,376 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the copy engine: DMA between linear and block-linear surfaces in guest memory */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors
+   Ported from Eden (src/video_core/engines/maxwell_dma.cpp, src/video_core/engines/maxwell_dma.h,
+   src/video_core/textures/decoders.cpp):
+   SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+   SPDX-FileCopyrightText: Copyright 2025 Eden Emulator Project
+   SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project */
+/* The copy engine (MAXWELL_DMA_COPY_A, 0xB0B5; open-gpu-doc's clb0b5.h): one-dimensional copies, and multi-line
+   copies between pitch linear and block linear surfaces, with the remap of components and its constant fills, and
+   the completion semaphore. Also the copies of linear sources read at submission (dma_snap_*), and the block linear
+   span helpers the 2D engine shares */
 #include "nx/gpu/maxwell/engines_int.h"
-/* ============================================================ DMA */
-/* host pointer to a whole bl surface (slice dz, block depth bd) if it's contiguous, so DMA and the 2D engine can
-   memcpy instead of translating + tracking every 16 bytes (SNX_DMA_SLOW turns it off for both) */
+
+#define DMA_MAX_BYTES (256u << 20) /* a launch past this is a bad register value */
+
+/* ------------------------------------------------------------ block linear spans */
+u64 bl_span_size(u32 wbytes, u32 h, u32 bh, u32 z, u32 bd) {
+    u64 gobs_x = ((u64)wbytes + 63) >> 6, rows = ((((u64)h + 7) >> 3) + (1u << bh) - 1) >> bh;
+    return gobs_x * rows * ((u64)512 << (bh + bd)) * ((u64)(z >> bd) + 1);
+}
 u8* bl_span_ptr(u64 base, u32 wbytes, u32 h, u32 bh, u32 z, u32 bd, u64* span) {
-    static int off = -1;
-    if (off < 0) off = getenv("SNX_DMA_SLOW") != NULL;
-    if (off) return NULL;
-    u64 gh = 8ull << bh, gd = 1ull << bd;
-    u64 sz = (((u64)wbytes + 63) & ~63ull) * ((h + gh - 1) / gh * gh) * ((z / gd + 1) * gd);
-    if (!sz || sz > (256ull << 20)) return NULL;
-    u8* p = gmem_ptr(base, sz);
-    if (p) *span = sz;
-    return p;
-}
-/* a line's buffer; NULL (said once) when there is no memory, and the copy is left out */
-static u8* dma_buf(u32 len) {
-    u8* b = malloc(len ? len : 1);
-    if (!b) WARN_LIMIT(1, "dma: no memory for a line of %u bytes, copy left out\n", len);
-    return b;
-}
-/* a line of a remap fill: each component, size bytes, the constant's low bytes */
-static void dma_fill(u8* b, u32 len, u32 size, u32 value) {
-    u32 i;
-    for (i = 0; i < len; i++) b[i] = (u8)(value >> (8 * (i % size)));
-}
-/* what a LAUNCH_DMA (v) does with the registers r it was given */
-typedef struct {
-    u64 src, dst;
-    u32 pitch_in, pitch_out, line_len, lines; /* line_len in bytes, lines 1 for a single line */
-    int src_linear, dst_linear, multi, remap, fill;
-    u32 bpp, comp; /* bytes per element and components when remapping */
-} DmaLaunch;
-static void dma_decode(const u32* r, u32 v, DmaLaunch* d) {
-    d->src = ((u64)r[0x100] << 32) | r[0x101];
-    d->dst = ((u64)r[0x102] << 32) | r[0x103];
-    d->pitch_in = r[0x104];
-    d->pitch_out = r[0x105];
-    d->line_len = r[0x106];
-    d->lines = r[0x107];
-    d->src_linear = (v >> 7) & 1;
-    d->dst_linear = (v >> 8) & 1;
-    d->multi = (v >> 9) & 1;
-    d->remap = (v >> 10) & 1;
-    if (!d->multi) d->lines = 1;
-    d->bpp = 1;
-    d->comp = 1;
-    /* every destination component CONST_A: a fill of that constant, the source unread. Games clear buffers this way
-       (Eden fills them too) */
-    d->fill = d->remap && (r[0x1C2] & 0x7777) == 0x4444;
-    if (d->remap) {
-        u32 rc = r[0x1C2];
-        u32 csz = ((rc >> 20) & 3) + 1;
-        d->comp = ((rc >> 16) & 3) + 1;
-        d->bpp = d->comp * (d->fill ? ((rc >> 24) & 3) + 1 : csz);
-        d->line_len *= d->bpp;
-    }
-    if (d->fill) d->src_linear = 1; /* the constant stands for a linear source */
-}
-/* the bytes a launch reads from a linear source, [*src, *src + *len): 0 for a fill, a block linear source or nothing */
-static int dma_linear_source(const DmaLaunch* d, u64* src, u64* len) {
-    if (!d->src_linear || d->fill || !d->lines || !d->line_len) return 0;
-    *src = d->src;
-    *len = (u64)d->pitch_in * (d->lines - 1) + d->line_len;
-    return 1;
+    u64 n = bl_span_size(wbytes, h, bh, z, bd);
+    *span = n;
+    return n && n <= DMA_MAX_BYTES ? gmem_ptr(base, n) : NULL;
 }
 
-/* Linear sources read when their submission is queued (gpu.c's scan, in each channel's submit order): the console's
-   copy engine reads a source microseconds after the submit, the GPU thread may do it frames later, and games free a
-   copy's source right after submitting it without waiting. Catherine frees the staging of its texture uploads at the
-   start of the next frame (830ad48), and with the GPU thread two frames behind, its copies read the next uploads'
-   data and the piano keys reflected garbage. Every launch that reads a linear source has an entry, in order: the
-   bytes, or none (data NULL) when the stream waits for something first (the CPU may write the source after the submit
-   and then release it) or too much is held. The copy uses the bytes unless the GPU wrote the source since they were
-   read: then the source is GPU work queued before the copy, and guest memory has it */
+/* ------------------------------------------------------------ a launch's geometry */
+/* a surface operand: pitch linear rows, or a block linear surface (the DMA Parameters at 0x1C3 and 0x1CA) */
 typedef struct {
-    u64 src, len, gen;
-    u64 job_id;
-    u32 launch_index;
+    u64 addr;
+    int bl;
+    u32 pitch;           /* pitch linear */
+    u32 wb, h, z, bh, bd; /* block linear: width in bytes, height, the slice (layer), block height and depth */
+    u32 ox, oy;          /* the origin, x in bytes */
+} DmaSide;
+typedef struct {
+    int multi, remap, fill, shuffle, keep;
+    u32 cs, ns, nd, sel[4]; /* the remap: component size, source and destination components, each one's source */
+    u32 width, lines;       /* elements in a line, lines */
+    u32 line_in, line_out;  /* bytes of a line on each side */
+    DmaSide src, dst;
+} DmaOp;
+static void dma_side(DmaSide* s, const u32* r, u64 addr, int bl, u32 pitch, u32 params, u32 elem) {
+    const u32* p = r + params;
+    s->addr = addr;
+    s->bl = bl;
+    s->pitch = pitch;
+    s->bh = (p[0] >> 4) & 15;
+    s->bd = (p[0] >> 8) & 15;
+    s->wb = p[1] * elem;
+    s->h = p[2];
+    s->z = p[4];
+    s->ox = (p[5] & 0xFFFF) * elem;
+    s->oy = p[5] >> 16;
+}
+static void dma_geometry(const u32* r, u32 v, DmaOp* o) {
+    u32 k, elem_in = 1, elem_out = 1, c = r[0x1C2];
+    memset(o, 0, sizeof *o);
+    o->multi = (v >> 9) & 1;
+    o->remap = (v >> 10) & 1;
+    o->width = r[0x106];
+    o->lines = o->multi ? r[0x107] : 1;
+    if (o->remap) {
+        o->cs = ((c >> 16) & 3) + 1;
+        o->ns = ((c >> 20) & 3) + 1;
+        o->nd = ((c >> 24) & 3) + 1;
+        elem_in = o->cs * o->ns;
+        elem_out = o->cs * o->nd;
+        o->fill = 1;
+        for (k = 0; k < o->nd; k++) {
+            o->sel[k] = (c >> (4 * k)) & 7;
+            if (o->sel[k] < 4 || o->sel[k] > 5) o->fill = 0; /* CONST_A and CONST_B only: nothing is read */
+            if (o->sel[k] != k) o->shuffle = 1;
+            if (o->sel[k] >= 6) o->keep = 1; /* NO_WRITE: the destination's own bytes stay */
+        }
+        if (o->ns != o->nd) o->shuffle = 1;
+    }
+    o->line_in = o->width * elem_in;
+    o->line_out = o->width * elem_out;
+    /* a single line is one-dimensional, as Eden and Ryujinx copy it, whatever the layouts */
+    dma_side(&o->src, r, ((u64)(r[0x100] & 0xFF) << 32) | r[0x101], o->multi && !((v >> 7) & 1), r[0x104], 0x1CA,
+             elem_in);
+    dma_side(&o->dst, r, ((u64)(r[0x102] & 0xFF) << 32) | r[0x103], o->multi && !((v >> 8) & 1), r[0x105], 0x1C3,
+             elem_out);
+}
+/* the bytes of a pitch linear operand's lines */
+static u64 dma_pitch_span(const DmaSide* s, u32 lines, u32 line) { return (u64)s->pitch * (lines - 1) + line; }
+static u64 dma_span(const DmaSide* s, u32 lines, u32 line) {
+    return s->bl ? bl_span_size(s->wb, s->h, s->bh, s->z, s->bd) : dma_pitch_span(s, lines, line);
+}
+
+/* ------------------------------------------------------------ copies of linear sources made at submission */
+/* The console's copy engine reads a source microseconds after the submission, while the GPU thread may run the copy
+   frames later, and games free a copy's source right after submitting it (Catherine frees its texture uploads'
+   staging at the start of the next frame, and the piano's keys reflected garbage). So a launch with a linear source
+   has its source read at submission, in the channel's order; the copy uses it unless the GPU has written the source
+   since (guest memory then has the newer data) */
+#define SNAP_RING 64
+#define SNAP_TOTAL (256u << 20) /* bytes held at most across the channels: past it copies read memory */
+typedef struct {
+    u64 job, src, len, gen;
+    u32 launch;
     u8* data;
 } DmaSnap;
 typedef struct {
-    DmaSnap* q; /* a ring of cap entries: head queued, tail taken */
-    u32 cap, head, tail;
+    DmaSnap e[SNAP_RING];
+    u32 head, tail;
 } DmaSnapRing;
-#define SNAP_BYTES ((u64)256 << 20) /* bytes held, all channels: past it, a copy reads guest memory when it runs */
-static DmaSnapRing g_snap[128];     /* by channel (syncpoint id) */
+static DmaSnapRing* g_snaps[128];
 static u64 g_snap_bytes;
-static PMutex g_snap_lock = PMUTEX_INIT;
-
-void dma_snap_launch(u32 channel, u64 job_id, u32 launch_index, const u32* r, u32 v) {
-    DmaLaunch d;
-    DmaSnap e;
-    DmaSnapRing* g = &g_snap[channel & 127];
-    dma_decode(r, v, &d);
-    if (!dma_linear_source(&d, &e.src, &e.len)) return;
-    e.data = NULL;
-    e.job_id = job_id;
-    e.launch_index = launch_index;
-    e.gen = gpu_mem_generation(); /* before the read: a GPU write landing during it counts as after */
-    pm_lock(&g_snap_lock);
-    if (g_snap_bytes + e.len <= SNAP_BYTES) {
-        g_snap_bytes += e.len;
-        pm_unlock(&g_snap_lock);
-        e.data = malloc(e.len);
-        if (e.data) gmem_read_raw(e.src, e.data, e.len);
-        pm_lock(&g_snap_lock);
-        if (!e.data) g_snap_bytes -= e.len;
-    }
-    if (g->head - g->tail == g->cap) { /* full: twice the room, the entries kept in order */
-        u32 cap = g->cap ? g->cap * 2 : 64, i;
-        DmaSnap* q = malloc(sizeof *q * cap);
-        if (!q) fatal("dma: out of memory for the copies queued on channel %u\n", channel & 127);
-        for (i = 0; i < g->head - g->tail; i++) q[i] = g->q[(g->tail + i) % g->cap];
-        free(g->q);
-        g->q = q;
-        g->head -= g->tail;
-        g->tail = 0;
-        g->cap = cap;
-    }
-    g->q[g->head++ % g->cap] = e;
-    pm_unlock(&g_snap_lock);
+static PMutex g_snap_lk = PMUTEX_INIT;
+static void snap_drop(DmaSnapRing* q) { /* the oldest, the lock held */
+    DmaSnap* e = &q->e[q->tail++ % SNAP_RING];
+    g_snap_bytes -= e->len;
+    free(e->data);
+    e->data = NULL;
 }
-/* the queued bytes of this launch's source, or NULL to read guest memory. The caller frees them */
-static u8* dma_snap_take(u32 channel, u64 job_id, u32 launch_index, u64 src, u64 len) {
-    DmaSnapRing* g = &g_snap[channel & 127];
-    DmaSnap e;
-    pm_lock(&g_snap_lock);
-    while (g->tail != g->head && g->q[g->tail % g->cap].job_id < job_id) {
-        DmaSnap* stale = &g->q[g->tail++ % g->cap];
-        if (stale->data) g_snap_bytes -= stale->len;
-        free(stale->data);
+static int dma_linear_source(const DmaOp* o) { return !o->fill && !o->src.bl && o->width && o->lines; }
+void dma_snap_launch(u32 channel, u64 job_id, u32 launch_index, const u32* r, u32 v) {
+    DmaOp o;
+    DmaSnapRing* q;
+    DmaSnap* e;
+    u64 len, gen;
+    u8* data;
+    if (channel >= 128) return;
+    dma_geometry(r, v, &o);
+    if (!dma_linear_source(&o)) return;
+    len = dma_pitch_span(&o.src, o.lines, o.line_in);
+    pm_lock(&g_snap_lk);
+    if (!g_snaps[channel]) g_snaps[channel] = (DmaSnapRing*)calloc(1, sizeof(DmaSnapRing));
+    q = g_snaps[channel];
+    if (!q || q->head - q->tail == SNAP_RING || len > SNAP_TOTAL - g_snap_bytes) {
+        pm_unlock(&g_snap_lk);
+        return;
     }
-    if (g->tail == g->head || g->q[g->tail % g->cap].job_id != job_id ||
-        g->q[g->tail % g->cap].launch_index != launch_index) {
-        pm_unlock(&g_snap_lock);
-        return NULL;
+    g_snap_bytes += len;
+    pm_unlock(&g_snap_lk);
+    gen = gpu_mem_generation(); /* before the read: a GPU write after it shows */
+    data = (u8*)malloc((size_t)len);
+    if (data) gmem_read_raw(o.src.addr, data, len);
+    pm_lock(&g_snap_lk);
+    if (!data) {
+        g_snap_bytes -= len;
+        pm_unlock(&g_snap_lk);
+        return;
     }
-    e = g->q[g->tail++ % g->cap];
-    if (e.data) g_snap_bytes -= e.len;
-    pm_unlock(&g_snap_lock);
-    if (e.src != src || e.len != len) { /* the scan and the stream disagree: a bug, said once */
-        WARN_LIMIT(1, "dma: channel %u's copy reads %llx+%llx, its submit read %llx+%llx\n", channel & 127,
-                   (unsigned long long)src, (unsigned long long)len, (unsigned long long)e.src,
-                   (unsigned long long)e.len);
-        free(e.data);
-        return NULL;
-    }
-    if (e.data) {
-        gmem_need(src, len); /* pending GPU results over the source land now, and count as GPU writes */
-        if (gpu_mem_dirty_since(e.gen, src, len)) {
-            free(e.data);
-            return NULL;
+    e = &q->e[q->head++ % SNAP_RING];
+    e->job = job_id;
+    e->launch = launch_index;
+    e->src = o.src.addr;
+    e->len = len;
+    e->gen = gen;
+    e->data = data;
+    pm_unlock(&g_snap_lk);
+}
+/* the copy of launch (job, launch) when there is one for this source, taken over by the caller; older ones go */
+static u8* snap_take(u32 channel, u64 job, u32 launch, u64 src, u64 len, u64* gen) {
+    DmaSnapRing* q;
+    u8* data = NULL;
+    if (channel >= 128) return NULL;
+    pm_lock(&g_snap_lk);
+    q = g_snaps[channel];
+    while (q && q->tail != q->head) {
+        DmaSnap* e = &q->e[q->tail % SNAP_RING];
+        if (e->job < job || (e->job == job && e->launch < launch)) { /* stale */
+            snap_drop(q);
+            continue;
         }
+        if (e->job == job && e->launch == launch) {
+            if (e->src != src || e->len != len) {
+                WARN_LIMIT(4, "gpu: the copy of DMA source %llx (%llu bytes) doesn't match its launch (%llx, %llu)\n",
+                           (unsigned long long)e->src, (unsigned long long)e->len, (unsigned long long)src,
+                           (unsigned long long)len);
+                snap_drop(q);
+                break;
+            }
+            data = e->data;
+            *gen = e->gen;
+            e->data = NULL;
+            g_snap_bytes -= e->len;
+            q->tail++;
+        }
+        break;
     }
-    return e.data;
+    pm_unlock(&g_snap_lk);
+    return data;
 }
 void dma_snap_finish(u32 channel, u64 job_id) {
-    DmaSnapRing* g = &g_snap[channel & 127];
-    pm_lock(&g_snap_lock);
-    while (g->tail != g->head && g->q[g->tail % g->cap].job_id <= job_id) {
-        DmaSnap* stale = &g->q[g->tail++ % g->cap];
-        if (stale->data) g_snap_bytes -= stale->len;
-        free(stale->data);
-    }
-    pm_unlock(&g_snap_lock);
+    DmaSnapRing* q;
+    if (channel >= 128) return;
+    pm_lock(&g_snap_lk);
+    q = g_snaps[channel];
+    while (q && q->tail != q->head && q->e[q->tail % SNAP_RING].job <= job_id) snap_drop(q);
+    pm_unlock(&g_snap_lk);
 }
 void dma_snap_reset(u32 channel) {
-    DmaSnapRing* g = &g_snap[channel & 127];
-    pm_lock(&g_snap_lock);
-    while (g->tail != g->head) {
-        DmaSnap* e = &g->q[g->tail++ % g->cap];
-        if (e->data) g_snap_bytes -= e->len;
-        free(e->data);
-    }
-    pm_unlock(&g_snap_lock);
-}
-/* bytes [off, off + n) of a linear source: from its queued copy, or guest memory */
-static void src_read(const u8* snap, u64 src, u64 off, u8* dst, u32 n) {
-    if (snap)
-        memcpy(dst, snap + off, n);
-    else
-        gmem_read(src + off, dst, n);
+    DmaSnapRing* q;
+    if (channel >= 128) return;
+    pm_lock(&g_snap_lk);
+    q = g_snaps[channel];
+    g_snaps[channel] = NULL;
+    while (q && q->tail != q->head) snap_drop(q);
+    pm_unlock(&g_snap_lk);
+    free(q);
 }
 
-void dma_method(GpuChannel* ch, u32 m, u32 v) {
-    m &= 0x1FF;
-    ch->rdma[m] = v;
-    if (m != 0xC0) return; /* launch_dma */
-    u32* r = ch->rdma;
-    DmaLaunch d;
-    dma_decode(r, v, &d);
-    u64 src = d.src, dst = d.dst;
-    u32 pitch_in = d.pitch_in, pitch_out = d.pitch_out, line_len = d.line_len, lines = d.lines;
-    int src_linear = d.src_linear, dst_linear = d.dst_linear, multi = d.multi, remap = d.remap, fill = d.fill;
-    u32 bpp = d.bpp, comp = d.comp;
-    /* bl params: dst 0x1C3.., src 0x1CA.. */
-    u32 dbh = (r[0x1C3] >> 4) & 15, dw = r[0x1C4], dh = r[0x1C5], dd = r[0x1C6];
-    (void)dd;
-    u32 sbh = (r[0x1CA] >> 4) & 15, sw = r[0x1CB], sh = r[0x1CC];
-    u32 sx = r[0x1CF] & 0xFFFF, sy = r[0x1CF] >> 16;
-    u32 dx = r[0x1C8] & 0xFFFF, dy = r[0x1C8] >> 16;
-    /* array layer = whole 2D bl surface stride */
-    /* 3D (depth>1): layer reg is the z slice inside the volume, block depth at 11:8 */
-    u32 dz = 0, sz_ = 0, dbd = 0, sbd = 0;
-    if (!dst_linear && r[0x1C6] > 1) {
-        dz = r[0x1C7];
-        dbd = (r[0x1C3] >> 8) & 15;
+/* ------------------------------------------------------------ the copy */
+/* lines of line bytes of an operand into buf (line bytes apart). from: a host copy of a pitch linear operand */
+static void dma_read(const DmaSide* s, u32 lines, u32 line, const u8* from, u8* buf) {
+    u64 span = dma_span(s, lines, line);
+    u32 y, x;
+    if (from) {
+        for (y = 0; y < lines; y++) memcpy(buf + (u64)y * line, from + (u64)y * s->pitch, line);
+        return;
     }
-    if (!src_linear && r[0x1CD] > 1) {
-        sz_ = r[0x1CE];
-        sbd = (r[0x1CA] >> 8) & 15;
+    if (!s->bl) {
+        const u8* p = gmem_ptr(s->addr, span);
+        if (!p) gmem_need(s->addr, span);
+        for (y = 0; y < lines; y++) {
+            if (p)
+                memcpy(buf + (u64)y * line, p + (u64)y * s->pitch, line);
+            else
+                gmem_read_raw(s->addr + (u64)y * s->pitch, buf + (u64)y * line, line);
+        }
+        return;
     }
     {
-        u32 dl = dz ? 0 : r[0x1C7], sl = sz_ ? 0 : r[0x1CE];
-        if (r[0x1C6] > 1) dl = 0;
-        if (r[0x1CD] > 1) sl = 0;
-        if (!dst_linear && dl) {
-            u32 wbb = dw * (remap ? bpp : 1);
-            u64 gh = 8u << dbh;
-            u64 lsz = (((u64)wbb + 63) & ~63ull) * ((dh + gh - 1) / gh * gh);
-            dst += lsz * dl;
-        }
-        if (!src_linear && sl) {
-            u32 wbb = sw * (remap ? bpp : 1);
-            u64 gh = 8u << sbh;
-            u64 lsz = (((u64)wbb + 63) & ~63ull) * ((sh + gh - 1) / gh * gh);
-            src += lsz * sl;
-        }
-    }
-    if (!multi && (!src_linear || !dst_linear)) { /* Ryujinx copies line_len bytes flat without MULTI_LINE_ENABLE */
-        LOG_LIMIT(4, "dma: single-line copy with a block linear %s (launch %x), copied through the layout\n",
-                  src_linear ? "destination" : "source", v);
-    }
-    LOG_LIMIT(
-        6,
-        "dma: %s->%s src=%llx dst=%llx pitch %u/%u len=%u lines=%u multi=%d remap=%d(%x) dst[bh=%u w=%u h=%u d=%u l=%u o=%x] src[bh=%u w=%u h=%u o=%x] launch=%x\n",
-        src_linear ? "lin" : "bl", dst_linear ? "lin" : "bl", (unsigned long long)src, (unsigned long long)dst,
-        pitch_in, pitch_out, line_len, lines, multi, remap, r[0x1C2], dbh, dw, dh, r[0x1C6], r[0x1C7], r[0x1C8], sbh,
-        sw, sh, r[0x1CF], v);
-    if (g_renderer_up) {
-        g_renderer->rt_flush(src);
-        g_renderer->rt_flush(dst);
-    }
-    u8* snap = NULL;
-    {
-        u64 ssrc, slen;
-        if (dma_linear_source(&d, &ssrc, &slen))
-            snap = dma_snap_take(ch->id, ch->dma_job_id, ch->dma_launch_index, ssrc, slen);
-        ch->dma_launch_index++;
-    }
-    u8* dpp = NULL;
-    u8* spp = NULL;
-    u64 dspan = 0, sspan = 0;
-    (void)spp;
-    (void)sspan;
-    if (src_linear && dst_linear) {
-        u8* tmp = dma_buf(line_len);
-        if (tmp && fill) dma_fill(tmp, line_len, comp, r[0x1C0]);
-        if (tmp && !multi) {
-            if (!fill) src_read(snap, src, 0, tmp, line_len);
-            gmem_write(dst, tmp, line_len);
-        } else if (tmp) {
-            for (u32 y = 0; y < lines; y++) {
-                if (!fill) src_read(snap, src, (u64)y * pitch_in, tmp, line_len);
-                gmem_write(dst + (u64)y * pitch_out, tmp, line_len);
+        u64 n;
+        const u8* p = bl_span_ptr(s->addr, s->wb, s->h, s->bh, s->z, s->bd, &n);
+        if (!p) gmem_need(s->addr, span);
+        for (y = 0; y < lines; y++) {
+            u8* d = buf + (u64)y * line;
+            u64 row;
+            if (s->oy + y >= s->h) { /* past the surface */
+                memset(d, 0, line);
+                continue;
             }
-        }
-        free(tmp);
-    } else if (src_linear && !dst_linear &&
-               (dpp = bl_span_ptr(dst, dw * (remap ? bpp : 1), dh, dbh, dz, dbd, &dspan))) {
-        /* contiguous dst: copy directly, one write record at the end. Pending shader results over it land first */
-        u32 wb = dw * (remap ? bpp : 1);
-        u8* buf = dma_buf(line_len);
-        if (g_gpu_before_write) g_gpu_before_write(dst, dspan);
-        if (buf && fill) dma_fill(buf, line_len, comp, r[0x1C0]);
-        for (u32 y = 0; buf && y < lines; y++) {
-            if (!fill) src_read(snap, src, (u64)y * pitch_in, buf, line_len);
-            for (u32 x = 0; x < line_len;) {
-                u32 xb = dx * (remap ? bpp : 1) + x, n = 16 - (xb & 15);
-                if (n > line_len - x) n = line_len - x;
-                u64 o = bl_offset(xb, dy + y, dz, wb, dh, dbh, dbd);
-                if (o + n <= dspan)
-                    memcpy(dpp + o, buf + x, n);
+            row = bl_offset(0, s->oy + y, s->z, s->wb, s->h, s->bh, s->bd);
+            for (x = 0; x < line;) {
+                u32 at = s->ox + x, k = 16 - (at & 15);
+                u64 off;
+                if (k > line - x) k = line - x;
+                off = row + bl_offset(at, 0, 0, s->wb, s->h, s->bh, s->bd);
+                if (p)
+                    memcpy(d + x, p + off, k);
                 else
-                    gmem_write(dst + o, buf + x, n);
-                x += n;
+                    gmem_read_raw(s->addr + off, d + x, k);
+                x += k;
             }
         }
-        free(buf);
-        gpu_mem_written(dst, dspan);
-    } else if (src_linear && !dst_linear) {
-        u32 wb = dw * (remap ? bpp : 1);
-        u8* buf = dma_buf(line_len);
-        if (buf && fill) dma_fill(buf, line_len, comp, r[0x1C0]);
-        for (u32 y = 0; buf && y < lines; y++) {
-            if (!fill) src_read(snap, src, (u64)y * pitch_in, buf, line_len);
-            /* bl keeps 16 byte groups contiguous, so copy per group not per byte (was ~11% in profiles) */
-            for (u32 x = 0; x < line_len;) {
-                u32 xb = dx * (remap ? bpp : 1) + x, n = 16 - (xb & 15);
-                if (n > line_len - x) n = line_len - x;
-                u64 o = bl_offset(xb, dy + y, dz, wb, dh, dbh, dbd);
-                gmem_write(dst + o, buf + x, n);
-                x += n;
+    }
+}
+/* buf's lines into an operand: the hooks once over its span, the runs, one record of the write */
+static void dma_write(const DmaSide* s, u32 lines, u32 line, const u8* buf) {
+    u64 span = dma_span(s, lines, line), n;
+    u8* p = s->bl ? bl_span_ptr(s->addr, s->wb, s->h, s->bh, s->z, s->bd, &n) : gmem_ptr(s->addr, span);
+    u32 y, x;
+    gmem_before_write(s->addr, span);
+    for (y = 0; y < lines; y++) {
+        const u8* src = buf + (u64)y * line;
+        u64 row;
+        if (!s->bl) {
+            if (p)
+                memcpy(p + (u64)y * s->pitch, src, line);
+            else
+                gmem_write_raw(s->addr + (u64)y * s->pitch, src, line);
+            continue;
+        }
+        if (s->oy + y >= s->h) break;
+        row = bl_offset(0, s->oy + y, s->z, s->wb, s->h, s->bh, s->bd);
+        for (x = 0; x < line;) {
+            u32 at = s->ox + x, k = 16 - (at & 15);
+            u64 off;
+            if (k > line - x) k = line - x;
+            off = row + bl_offset(at, 0, 0, s->wb, s->h, s->bh, s->bd);
+            if (p)
+                memcpy(p + off, src + x, k);
+            else
+                gmem_write_raw(s->addr + off, src + x, k);
+            x += k;
+        }
+    }
+    gpu_mem_written(s->addr, span);
+}
+/* the remap: each destination component from a source component, constant A or B, or left as it is */
+static void dma_remap(const DmaOp* o, const u32* r, const u8* in, u8* out) {
+    u64 i, n = (u64)o->width * o->lines;
+    u32 k;
+    for (i = 0; i < n; i++) {
+        const u8* s = in ? in + i * o->cs * o->ns : NULL;
+        u8* d = out + i * o->cs * o->nd;
+        for (k = 0; k < o->nd; k++) {
+            u32 sel = o->sel[k];
+            if (sel == 4 || sel == 5)
+                memcpy(d + k * o->cs, &r[0x1C0 + sel - 4], o->cs); /* the constant's low bytes */
+            else if (sel < 4) {
+                if (s && sel < o->ns)
+                    memcpy(d + k * o->cs, s + sel * o->cs, o->cs);
+                else
+                    memset(d + k * o->cs, 0, o->cs);
             }
         }
-        free(buf);
-    } else if (!src_linear && dst_linear) {
-        u32 wb = sw * (remap ? bpp : 1);
-        u8* buf = dma_buf(line_len);
-        for (u32 y = 0; buf && y < lines; y++) {
-            for (u32 x = 0; x < line_len;) {
-                u32 xb = sx * (remap ? bpp : 1) + x, n = 16 - (xb & 15);
-                if (n > line_len - x) n = line_len - x;
-                u64 o = bl_offset(xb, sy + y, sz_, wb, sh, sbh, sbd);
-                gmem_read(src + o, buf + x, n);
-                x += n;
-            }
-            gmem_write(dst + (u64)y * pitch_out, buf, line_len);
-        }
-        free(buf);
-    } else if (!src_linear && !dst_linear &&
-               (dpp = bl_span_ptr(dst, dw * (remap ? bpp : 1), dh, dbh, dz, dbd, &dspan)) &&
-               (spp = bl_span_ptr(src, sw * (remap ? bpp : 1), sh, sbh, sz_, sbd, &sspan))) {
-        u32 swb = sw * (remap ? bpp : 1), dwb = dw * (remap ? bpp : 1);
-        if (g_gpu_before_write) g_gpu_before_write(dst, dspan); /* pending shader results over dst land first */
-        for (u32 y = 0; y < lines; y++)
-            for (u32 x = 0; x < line_len;) {
-                u32 xs = sx * (remap ? bpp : 1) + x, xd = dx * (remap ? bpp : 1) + x, n = 16 - (xs & 15),
-                    m = 16 - (xd & 15);
-                if (m < n) n = m;
-                if (n > line_len - x) n = line_len - x;
-                u64 so = bl_offset(xs, sy + y, sz_, swb, sh, sbh, sbd),
-                    dof = bl_offset(xd, dy + y, dz, dwb, dh, dbh, dbd);
-                if (so + n <= sspan && dof + n <= dspan)
-                    memmove(dpp + dof, spp + so, n);
-                else {
-                    u8 b[16];
-                    gmem_read(src + so, b, n);
-                    gmem_write(dst + dof, b, n);
+    }
+}
+static void dma_copy(GpuChannel* ch, const DmaOp* o, const u8* from) {
+    const u32* r = ch->rdma;
+    u64 in_bytes = o->fill ? 0 : (u64)o->line_in * o->lines;
+    u64 out_bytes = o->remap && (o->fill || o->shuffle) ? (u64)o->line_out * o->lines : 0;
+    u8 *buf, *out;
+    if (in_bytes > DMA_MAX_BYTES || out_bytes > DMA_MAX_BYTES) {
+        WARN_LIMIT(4, "gpu: a DMA copy of %u lines of %u elements is ignored\n", o->lines, o->width);
+        return;
+    }
+    buf = (u8*)malloc((size_t)(in_bytes + out_bytes) + 1);
+    if (!buf) {
+        WARN_LIMIT(1, "gpu: no memory for a DMA copy of %llu bytes: skipped\n",
+                   (unsigned long long)(in_bytes + out_bytes));
+        return;
+    }
+    if (!o->fill) {
+        if (!from && g_renderer_up && g_renderer->rt_flush) g_renderer->rt_flush(o->src.addr);
+        dma_read(&o->src, o->lines, o->line_in, from, buf);
+    }
+    out = buf;
+    if (out_bytes) {
+        out = buf + in_bytes;
+        if (o->keep)
+            dma_read(&o->dst, o->lines, o->line_out, NULL, out);
+        else
+            memset(out, 0, (size_t)out_bytes);
+        dma_remap(o, r, o->fill ? NULL : buf, out);
+    }
+    dma_write(&o->dst, o->lines, o->line_out, out);
+    if (g_renderer_up && g_renderer->rt_reload) g_renderer->rt_reload(o->dst.addr);
+    free(buf);
+}
+/* LAUNCH_DMA (0xC0) */
+static void dma_launch(GpuChannel* ch, u32 v) {
+    const u32* r = ch->rdma;
+    u32 launch = ch->dma_launch_index++, sem = (v >> 3) & 3;
+    DmaOp o;
+    dma_geometry(r, v, &o);
+    if (o.width && o.lines) {
+        u8* snap = NULL;
+        u64 gen = 0, len = dma_pitch_span(&o.src, o.lines, o.line_in);
+        if (dma_linear_source(&o)) {
+            snap = snap_take(ch->id, ch->dma_job_id, launch, o.src.addr, len, &gen);
+            if (snap) {
+                gmem_need(o.src.addr, len); /* pending GPU results over the source land, and count as writes */
+                if (gpu_mem_dirty_since(gen, o.src.addr, len)) {
+                    free(snap);
+                    snap = NULL;
                 }
-                x += n;
             }
-        gpu_mem_written(dst, dspan);
-    } else {
-        u32 swb = sw * (remap ? bpp : 1), dwb = dw * (remap ? bpp : 1);
-        for (u32 y = 0; y < lines; y++)
-            for (u32 x = 0; x < line_len;) {
-                u32 xs = sx * (remap ? bpp : 1) + x, xd = dx * (remap ? bpp : 1) + x, n = 16 - (xs & 15),
-                    m = 16 - (xd & 15);
-                if (m < n) n = m;
-                if (n > line_len - x) n = line_len - x;
-                u8 b[16];
-                gmem_read(src + bl_offset(xs, sy + y, sz_, swb, sh, sbh, sbd), b, n);
-                gmem_write(dst + bl_offset(xd, dy + y, dz, dwb, dh, dbh, dbd), b, n);
-                x += n;
-            }
-    }
-    free(snap);
-    if (g_renderer_up) g_renderer->rt_reload(dst);
-    /* completion semaphore: one word (1), or four (2): the payload, 0, and the timestamp */
-    u32 sem = (v >> 3) & 3;
-    if (sem) {
-        u64 sa = ((u64)r[0x90] << 32) | r[0x91];
-        /* the game can see this: it happens once the work before it is in memory */
-        if (sem == 1) gpu_release_write(sa, &r[0x92], 4);
-        if (sem == 2) {
-            u32 q[4] = {r[0x92], 0, 0, 0};
-            u64 t = gpu_ticks();
-            memcpy(&q[2], &t, 8);
-            gpu_release_write(sa, q, 16);
         }
+        dma_copy(ch, &o, snap);
+        free(snap);
     }
+    /* the completion semaphore, after the copy: one word, or four (the payload, 0, and the timestamp) */
+    if (sem == 1 || sem == 2) {
+        u64 a = ((u64)(r[0x90] & 0xFF) << 32) | r[0x91];
+        u32 w[4];
+        w[0] = r[0x92];
+        w[1] = 0;
+        if (sem == 2) {
+            u64 t = gpu_ticks();
+            memcpy(&w[2], &t, 8);
+        }
+        gpu_release_write(a, w, sem == 1 ? 4 : 16);
+    }
+}
+void dma_method(GpuChannel* ch, u32 m, u32 v) {
+    if (m >= 0x200) return;
+    ch->rdma[m] = v;
+    if (m == 0xC0) dma_launch(ch, v);
 }

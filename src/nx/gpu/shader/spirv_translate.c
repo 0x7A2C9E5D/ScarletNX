@@ -1869,7 +1869,6 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         *si = original;
         if (!si->cs_local[0] || !si->cs_local[1] || !si->cs_local[2]) return direct_reject(si, "compute local size");
     }
-    ops_init();
     u32 len;
     shader_hash(code, max_bytes, &len);
     u32 n = len / 8;

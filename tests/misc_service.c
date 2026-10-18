@@ -426,6 +426,7 @@ static void test_npad_players(SvcObj* h) {
     static const u32 no2_only[] = {1};
     u8* e1 = kshmem_ptr(hid.shm) + HO_HidSharedMemory_npad + HS_HidNpadSharedMemoryEntry;
     u32 assignment, selected_id;
+    u64 props;
     i32 sticks[4];
     KEvent* no2 = style_event(h, 1);
     KEvent* no3 = style_event(h, 2);
@@ -471,11 +472,19 @@ static void test_npad_players(SvcObj* h) {
     hid_update();
     CHECK(fabsf(npad_latest_direction(1, HO_HidNpadInternalState_joy_left_six_axis_sensor_lifo, 28)) < 0.0005f);
     g_pad_extra[0].motion[0].valid = 0;
+    /* upright, a single Joy-Con's header says so (footer JoyLeftVertical, ABXY oriented); held sideways, the other */
+    CHECK(e1[HO_HidNpadInternalState_applet_footer_ui_type] == 9);
+    memcpy(&props, e1 + HO_HidNpadInternalState_system_properties, 8);
+    CHECK((props & (3u << 11)) == 1u << 11 && (props & (1u << 14)));
     joy_hold(h, 1);
     hid_update();
     npad_latest_sticks(1, HO_HidNpadInternalState_joy_left_lifo, sticks);
     CHECK(sticks[0] == 1000 && sticks[1] == 0);
+    CHECK(e1[HO_HidNpadInternalState_applet_footer_ui_type] == 8);
+    memcpy(&props, e1 + HO_HidNpadInternalState_system_properties, 8);
+    CHECK((props & (3u << 11)) == 1u << 12);
     joy_hold(h, 0);
+    CHECK(e1[HO_HidNpadInternalState_applet_footer_ui_type] == 9);
     memcpy(&assignment, e1 + HO_HidNpadInternalState_joy_assignment_mode, 4);
     CHECK(assignment == 1);
     set_ids(h, fewer_ids, 4);
@@ -569,6 +578,12 @@ static void test_hid(void) {
     g_opt_docked = 0;
     hid_update();
     CHECK(npad_style_at(8) == 1u << 1);
+    /* the handheld Npad's full-key LIFO carries No1's state too */
+    g_pad.buttons = 1ull << 3;
+    hid_update();
+    CHECK(npad_latest_buttons(8, HO_HidNpadInternalState_handheld_lifo) == 1ull << 3);
+    CHECK(npad_latest_buttons(8, HO_HidNpadInternalState_full_key_lifo) == 1ull << 3);
+    g_pad.buttons = 0;
     CHECK(get_styles(h) == 0x7F); /* every style until the game says which it takes */
     CHECK(no1_style() == 1);      /* No1 is a Pro Controller */
     KEvent* no1 = style_event(h, 0);
@@ -635,12 +650,63 @@ static void test_mii_default(void) {
     svcobj_unref(service);
 }
 
+/* mm:u past its 32 requests: the id is still the client's, and reads back no clock */
+static void test_mm_full(void) {
+    SvcObj* mm = new_mm();
+    u32 ids[33], i;
+    for (i = 0; i < 33; i++) ids[i] = mm_init(mm, 5);
+    CHECK(ids[32] && ids[32] != ids[31]);
+    mm_set_and_wait(mm, 6, ids[32], 1, 2);
+    CHECK(mm_get_setting(mm, 7, ids[32]) == 0);
+    mm_set_and_wait(mm, 6, ids[31], 3, 4);
+    CHECK(mm_get_setting(mm, 7, ids[31]) == 3);
+    svcobj_unref(mm);
+}
+
+/* nfp and nfc with no NFC device: the state follows Initialize and Finalize, the availability event is one per
+   IUser, and the device commands fail */
+static void test_nfp(void) {
+    SvcObj *manager = new_nfp(), *user = NULL, *nfc_manager = new_nfc(), *nfc = NULL;
+    IpcBuf none = {0, 0, 0};
+    nn_nfc_DeviceHandle device;
+    u32 state = 9, a, b;
+    i32 count;
+    memset(&device, 0, sizeof device);
+    CHECK(nn_nfp_detail_IUserManager_CreateUserInterface(manager, &user) == 0 && user);
+    CHECK(nn_nfp_detail_IUser_GetState(user, &state) == 0 && state == 0);
+    CHECK(nn_nfp_detail_IUser_ListDevices(user, none, &count) == RC(115, 80));
+    CHECK(nn_nfp_detail_IUser_Initialize(user, 0, 0, none) == 0);
+    CHECK(nn_nfp_detail_IUser_GetState(user, &state) == 0 && state == 1);
+    CHECK(nn_nfp_detail_IUser_ListDevices(user, none, &count) == RC(115, 64));
+    CHECK(nn_nfp_detail_IUser_StartDetection(user, &device) == RC(115, 64));
+    CHECK(nn_nfp_detail_IUser_GetDeviceState(user, &device, &state) == 0 && state == 6);
+    CHECK(nn_nfp_detail_IUser_AttachAvailabilityChangeEvent(user, &a) == 0);
+    CHECK(nn_nfp_detail_IUser_AttachAvailabilityChangeEvent(user, &b) == 0);
+    CHECK(handle_object(a) == handle_object(b) && !((KEvent*)handle_object(a))->signaled);
+    CHECK(nn_nfp_detail_IUser_Finalize(user) == 0);
+    CHECK(nn_nfp_detail_IUser_GetState(user, &state) == 0 && state == 0);
+    CHECK(nn_nfc_detail_IUserManager_CreateUserInterface(nfc_manager, &nfc) == 0 && nfc);
+    CHECK(nn_nfc_detail_IUser_ListDevices(nfc, none, &count) == RC(127, 77));
+    CHECK(nn_nfc_detail_IUser_InitializeOld(nfc, 0, 0, none) == 0);
+    CHECK(nn_nfc_detail_IUser_GetState(nfc, &state) == 0 && state == 1);
+    CHECK(nn_nfc_detail_IUser_ListDevices(nfc, none, &count) == RC(127, 64));
+    CHECK(nn_nfc_detail_IUser_AttachAvailabilityChangeEvent(nfc, &a) == 0);
+    CHECK(nn_nfc_detail_IUser_AttachAvailabilityChangeEvent(nfc, &b) == 0 && handle_object(a) == handle_object(b));
+    close_handles();
+    svcobj_unref(nfc);
+    svcobj_unref(nfc_manager);
+    svcobj_unref(user);
+    svcobj_unref(manager);
+}
+
 int main(void) {
     g_mem = calloc(1, 0x10000);
     CHECK(g_mem != NULL);
     test_mm();
     test_hid();
     test_mii_default();
+    test_mm_full();
+    test_nfp();
     CHECK(test_objects == 0 && test_kobjs == 0);
     free(g_mem);
     printf("misc_service: %u checks passed\n", test_checks);

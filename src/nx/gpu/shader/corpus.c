@@ -1,60 +1,87 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the shader corpus (SNX_SHADER_CORPUS): saving and loading translator inputs for tools/snx_shaderc.c */
-#include "nx/gpu/shader/translator.h"
-/* ============================================================ shader corpus */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The shader corpus (SNX_SHADER_CORPUS): one file per translated program, <dir>/<key>_<stage>.snxs, holding a header,
+   the ShaderInfo the translation started from and the program's code, for tools/snx_shaderc.c. */
+#include "nx/gpu/shader/shader.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define CORPUS_VERSION 1u
+#define CORPUS_MAX     (1u << 20) /* the largest program window a file may claim */
+
 typedef struct {
-    char magic[4]; /* SNXS */
-    u32 version, si_size, stage, len, max_bytes;
+    char magic[4]; /* "SNXS" */
+    u32 version, info_size, stage, len, max_bytes;
 } CorpusHeader;
-int shader_corpus_save(const char* dir, const u8* code, u32 len, u32 max_bytes, int stage, const ShaderInfo* si,
-                       u64 key) {
-    char path[1024];
-    snprintf(path, sizeof path, "%s/%016llx_%d.snxs", dir, (unsigned long long)key, stage);
+
+static void corpus_header(CorpusHeader* h, u32 len, u32 max_bytes, int stage) {
+    memset(h, 0, sizeof *h);
+    memcpy(h->magic, "SNXS", 4);
+    h->version = CORPUS_VERSION;
+    h->info_size = (u32)sizeof(ShaderInfo);
+    h->stage = (u32)stage;
+    h->len = len;
+    h->max_bytes = max_bytes;
+}
+
+/* whether path already holds this program whole: a process that died while writing leaves a short file */
+static int corpus_complete(const char* path, const CorpusHeader* want) {
+    CorpusHeader have;
+    long size;
+    int ok;
     FILE* f = fopen(path, "rb");
-    if (f) { /* A previous process may have stopped while writing this entry. */
-        CorpusHeader old;
-        int complete = fread(&old, sizeof old, 1, f) == 1 && !memcmp(old.magic, "SNXS", 4) && old.version == 1 &&
-                       old.si_size == sizeof(ShaderInfo) && old.stage == (u32)stage && old.len == len &&
-                       old.max_bytes == max_bytes;
-        if (complete) {
-            if (fseek(f, 0, SEEK_END) != 0)
-                complete = 0;
-            else
-                complete = ftell(f) == (long)(sizeof old + sizeof *si + len);
-        }
-        fclose(f);
-        if (complete) return 1;
-    }
-    f = fopen(path, "wb");
     if (!f) return 0;
-    CorpusHeader h = {{'S', 'N', 'X', 'S'}, 1, (u32)sizeof(ShaderInfo), (u32)stage, len, max_bytes};
-    int ok = fwrite(&h, sizeof h, 1, f) == 1 && fwrite(si, sizeof *si, 1, f) == 1 && fwrite(code, 1, len, f) == len;
-    ok = fclose(f) == 0 && ok;
-    if (!ok) remove(path); /* a cut-off file would stay and stop the next save */
+    ok = fread(&have, 1, sizeof have, f) == sizeof have && !memcmp(&have, want, sizeof have) &&
+         !fseek(f, 0, SEEK_END) && (size = ftell(f)) >= 0 &&
+         (unsigned long)size == sizeof have + sizeof(ShaderInfo) + want->len;
+    fclose(f);
     return ok;
 }
-u8* shader_corpus_load(const char* path, u32* max_bytes, int* stage, ShaderInfo* si) {
-    FILE* f = fopen(path, "rb");
-    if (!f) return NULL;
+
+int shader_corpus_save(const char* dir, const u8* code, u32 len, u32 max_bytes, int stage, const ShaderInfo* si,
+                       u64 key) {
     CorpusHeader h;
+    char path[1024];
+    FILE* f;
+    int ok;
+    if (!dir || !code || !si || len > max_bytes || stage < ST_VS || stage > ST_CS) return 0;
+    corpus_header(&h, len, max_bytes, stage);
+    if (snprintf(path, sizeof path, "%s/%016llx_%d.snxs", dir, (unsigned long long)key, stage) >= (int)sizeof path)
+        return 0;
+    if (corpus_complete(path, &h)) return 1;
+    f = fopen(path, "wb");
+    if (!f) return 0;
+    ok = fwrite(&h, 1, sizeof h, f) == sizeof h && fwrite(si, 1, sizeof *si, f) == sizeof *si &&
+         fwrite(code, 1, len, f) == len;
+    if (fclose(f)) ok = 0;
+    if (!ok) remove(path); /* a cut-off file would only be rejected later */
+    return ok;
+}
+
+/* The capture holds the length the runtime found, with the jump tables of its constant buffers, which can't be read
+   offline: *max_bytes is that length, so a scan there doesn't run past it. */
+u8* shader_corpus_load(const char* path, u32* max_bytes, int* stage, ShaderInfo* si) {
+    CorpusHeader h;
+    ShaderInfo info;
     u8* code = NULL;
-    if (fread(&h, sizeof h, 1, f) == 1 && !memcmp(h.magic, "SNXS", 4) && h.version == 1 &&
-        h.si_size == sizeof(ShaderInfo) && h.stage <= ST_CS && h.len <= h.max_bytes && h.max_bytes <= (1u << 20) &&
-        fread(si, sizeof *si, 1, f) == 1) {
-        code = calloc(1, h.max_bytes);
-        if (!code || fread(code, 1, h.len, f) != h.len) {
+    FILE* f;
+    if (!path || !max_bytes || !stage || !si) return NULL;
+    f = fopen(path, "rb");
+    if (!f) return NULL;
+    if (fread(&h, 1, sizeof h, f) == sizeof h && !memcmp(h.magic, "SNXS", 4) && h.version == CORPUS_VERSION &&
+        h.info_size == sizeof(ShaderInfo) && h.stage <= ST_CS && h.len <= h.max_bytes && h.max_bytes <= CORPUS_MAX &&
+        fread(&info, 1, sizeof info, f) == sizeof info) {
+        code = (u8*)calloc(h.max_bytes ? h.max_bytes : 1, 1);
+        if (code && fread(code, 1, h.len, f) != h.len) {
             free(code);
             code = NULL;
-        } else {
-            /* The capture already records the complete runtime-discovered program length. Limit offline scans
-               to that length when its BRX table cannot be read from the original constant buffer. */
-            *max_bytes = h.len;
-            *stage = (int)h.stage;
         }
     }
     fclose(f);
+    if (!code) return NULL;
+    *si = info;
+    *max_bytes = h.len;
+    *stage = (int)h.stage;
     return code;
 }

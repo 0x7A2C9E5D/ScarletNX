@@ -225,7 +225,7 @@ static void bsd_destroy(SvcObj* o) {
 static int reply(int64_t r, i32* ret, u32* bsd_errno) {
     *ret = r < 0 ? -1 : (i32)r;
     *bsd_errno = r < 0 ? (u32)-r : 0;
-    return 0;
+    R_SUCCEED();
 }
 /* and an address's or an option's length, 0 on failure */
 static int reply_len(int64_t r, u32 len, i32* ret, u32* bsd_errno, u32* out_len) {
@@ -237,7 +237,7 @@ static int bsd_unknown(SvcObj* self, IpcCtx* c) {
     if (ipc_warn_once(self->name, c->cmd)) WARN("  [not implemented] %s cmd %u -> EOPNOTSUPP\n", self->name, c->cmd);
     out32(c, (u32)-1);
     out32(c, SNX_EOPNOTSUPP);
-    return 0;
+    R_SUCCEED();
 }
 #define WITH_SOCKET(fdarg)                                                                                             \
     BsdFd d;                                                                                                           \
@@ -253,7 +253,7 @@ static int bsd_register(SvcObj* self, u64 pid) {
     g_client = self;
     g_client_pid = pid;
     pm_unlock(&g_client_lk);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_socket_sf_IClient_RegisterClient(SvcObj* self, const nn_socket_sf_LibraryConfigData* config, u64 pid,
                                                u64 transfer_memory_size, u32 transfer_memory, u32* bsd_errno) {
@@ -364,7 +364,7 @@ static int nn_socket_sf_IClient_Poll(SvcObj* self, i32 nfds, i32 timeout, IpcBuf
     /* Eden: no entries is -1 with errno 0 */
     if (!nfds) {
         *ret = -1;
-        return 0;
+        R_SUCCEED();
     }
     if (nfds < 0) return reply(-SNX_EINVAL, ret, bsd_errno);
     if (nfds > 4096 || !ia || is < (u64)nfds * 8 || (oa && os < (u64)nfds * 8))

@@ -34,6 +34,15 @@ u64 gmmu_translate(u64 gva) {
     if (gva >= 0xA000 && gva < 0xC000) return (gva < 0xB000 ? 0x3000 : 0x5000) + (gva & 0xFFF);
     return gva < sizeof guest ? gva : 0;
 }
+/* the run of gva's guest memory, as nvdrv's walks its table */
+u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
+    u64 n, want;
+    *cpu = gmmu_translate(gva);
+    if (!max || !*cpu) return 0;
+    n = 0x1000 - (gva & 0xFFF);
+    for (want = *cpu + n; n < max && gmmu_translate(gva + n) == want; want += 0x1000) n += 0x1000;
+    return n < max ? n : max;
+}
 void mem_query(u64 addr, MemBlock* out) {
     memset(out, 0, sizeof *out);
     out->size = sizeof guest;

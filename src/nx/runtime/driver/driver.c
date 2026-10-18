@@ -42,7 +42,10 @@ static void usage(void) {
 #else
          "                         ~/.local/share/scarletnx)");
 #endif
-    puts("  --build-dir DIR        Override this build's build directory");
+    puts("  --build-dir DIR        Override this build's build directory\n"
+         "  --dump-modules PROGRAM DIR\n"
+         "                         Write an extracted program's (or an NRO's) modules as laid out\n"
+         "                         in guest memory into DIR, for tools/symbols.py and tools/disasm.py");
 #ifndef _WIN32
     puts("  -S                     Enable the native GDB stub on localhost:1234\n"
          "  -s                     Enable the stub and stop at startup\n"
@@ -318,6 +321,14 @@ static int container_path(const char* path) {
     for (i = 0; i <= size; ++i) lower[i] = (char)tolower((unsigned char)ext[i]);
     return !strcmp(lower, ".xci") || !strcmp(lower, ".nsp") || !strcmp(lower, ".dxci") || !strcmp(lower, ".dnsp");
 }
+/* --dump-modules PROGRAM DIR: each module's image and symbols, at the bases the runtime gives them (loader.h's
+   snx_dump_program has the format). Tools read game code through it */
+static int dump_modules(int argc, char** argv) {
+    char error[1024];
+    if (argc != 4) return snx_error("--dump-modules takes a program (an extracted game or an NRO) and a folder");
+    if (snx_dump_program(argv[2], argv[3], error, sizeof error)) return snx_error("%s", error);
+    return 0;
+}
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
     const char *repo = NULL, *build = SNX_BUILD_DIR, *input = NULL, *backend = NULL, *outdir = NULL, *out = NULL;
@@ -326,6 +337,7 @@ int snx_driver(int argc, char** argv) {
     int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, backend_args = 0;
     int repo_given = 0, settings = 0;
     if (argc <= 1) return -1;
+    if (!strcmp(argv[1], "--dump-modules")) return dump_modules(argc, argv);
     rest = (char**)snx_alloc((size_t)(2 * argc + 1) * sizeof(*rest));
     setting = rest + argc + 1;
     for (i = 1; i < argc; ++i) {

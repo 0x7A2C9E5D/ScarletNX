@@ -96,7 +96,6 @@ u32* shader_compute_to_spirv(const u8* code, u32 max_bytes, ShaderInfo* si, size
                              int can_preserve) {
     if (!code || !si || !word_count || max_bytes < 96 || !si->cs_local[0] || !si->cs_local[1] || !si->cs_local[2])
         return NULL;
-    ops_init();
     u32 len;
     shader_hash(code, max_bytes, &len);
     u32 n = len / 8;

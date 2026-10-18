@@ -7,6 +7,7 @@
 * [The language](#the-language)
 * [The layout](#the-layout)
 * [The C side](#the-c-side)
+* [Results](#results)
 
 This page describes **NX HIPC/CMIF**. The independent `swipc --ctr` profile and
 3DS transport are documented in [CTR IPC](CTR-IPC.md); they do not use the NX
@@ -178,3 +179,23 @@ refuse, each with its line and message. What `ipc.c` itself does with a reply (t
 handles, domain ids, a NULL object) is not covered by these tests, nor by the services' own, which give the
 dispatchers stand-ins too: only the homebrew smoke test (nx_runtime_homebrew, with SNX_TEST_VULKAN) and the games go
 through it.
+
+## Results
+
+A result is a 32-bit value: 0 for success, otherwise a module in bits 0 to 8 and a description from bit 9, built with
+`RC(module, description)` (`RC(1, 123)` is the kernel's SessionClosed, 0xF601). `hle/result.h`, which `ipc.h`
+includes, holds `RC` and `RC_OK` with helpers in the style of Atmosphère's, written anew in C90:
+
+| Macro | What it does |
+| --- | --- |
+| `R_SUCCEEDED(rc)`, `R_FAILED(rc)` | whether `rc` is 0, or not |
+| `R_SUCCEED()` | returns success |
+| `R_THROW(rc)` | returns `rc` |
+| `R_UNLESS(cond, rc)` | returns `rc` when `cond` is false, evaluating `rc` only then |
+| `R_TRY(expr)` | evaluates `expr` once and returns its result when it isn't 0 |
+
+Each statement macro is a single statement (`do { } while (0)`), so it is safe as the body of an `if` or `else`
+without braces, and evaluates each argument at most once. `R_TRY` keeps the result in a 32-bit `unsigned int` in a
+block of its own, which converts back to the function's return type, `int` for a handler or `u32` for the kernel's
+`svc_` functions. The header includes nothing, so strict C90 code can use it. `tests/result_macros.c`
+(`ctest -R result_macros`) builds them with `-std=c90 -pedantic-errors`.

@@ -267,6 +267,41 @@ int main(void) {
     CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 56);
     CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20 && shown_n == v + 1);
 
+    /* the swap interval queued is the next dequeue's pace: 0 to 4, a negative one 1, past 4 capped */
+    memcpy(q + 12 + 44, &(u32){9}, 4);
+    CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 56);
+    CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20 && vi.layer[0].interval == 4);
+    memcpy(q + 12 + 44, &(u32){~0u}, 4);
+    CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 56);
+    CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20 && vi.layer[0].interval == 1);
+    memcpy(q + 12 + 44, &(u32){0}, 4);
+    CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 56);
+    CHECK(transact(BQ_QUEUE_BUFFER, q, sizeof q) == 20 && vi.layer[0].interval == 0);
+    /* a QueueBufferInput cut short: the whole buffer at interval 1 */
+    CHECK(transact(BQ_DEQUEUE_BUFFER, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 20) == 56);
+    CHECK(transact(BQ_QUEUE_BUFFER, q, 12 + 40) == 20 && vi.layer[0].interval == 1);
+
+    /* a transaction without a parcel header fails; a graphic buffer short of its first plane clears the slot */
+    {
+        IpcBuf tiny = {0x2000, 8, 0}, reply = {0x4000, 0x400, 0};
+        u8 short_req[16 + 0x40];
+        CHECK(nns_hosbinder_IHOSBinderDriver_TransactParcel(NULL, 1, BQ_QUERY, tiny, reply, 0) == RC(114, 1));
+        memset(short_req, 0, sizeof short_req);
+        memcpy(short_req + 4, &(u32){1}, 4);
+        memcpy(short_req + 8, &(u32){0x40}, 4);
+        memcpy(short_req + 16, gbuf, 0x40);
+        CHECK(transact(BQ_SET_PREALLOCATED_BUFFER, short_req, sizeof short_req) == 4 && rd32(0x4010) == 0);
+        CHECK(!vi.layer[0].slot[0].has_buffer);
+    }
+
+    /* a native window buffer too small for the parcel: its size still, nothing written */
+    {
+        IpcBuf small = {0x1000, 0x20, 0};
+        memset(g_mem + 0x1000, 0xcc, 0x100);
+        CHECK(nn_visrv_sf_IApplicationDisplayService_CreateStrayLayer(NULL, 0, 0, small, &layer, &size) == 0);
+        CHECK(size == 0x3c && g_mem[0x1000] == 0xcc);
+    }
+
     printf("vi_service: %u checks passed\n", test_checks);
     (void)test_objects, (void)test_kobjs;
     free(g_mem);

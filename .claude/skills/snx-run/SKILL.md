@@ -33,8 +33,7 @@ The runtime options behind it, for a run by hand from `games/<id>/` (`./<id> --s
 | `--frames=N` | Exit after N presented frames |
 | `--shot=PATH` | Screenshot to `PATH.ppm` at exit |
 | `--shot_every=N` | Also a numbered screenshot every N frames (`PATH_0000.ppm`, ...), needs `--shot` |
-| `--script=ms:hex,...` | Press buttons at those times, each held 300 ms (`--press_len=ms` changes it) |
-| `--press=hex --press_at=ms` | One press, held `--press_len` ms too |
+| `--script=ms:hex,...` | Press buttons at those times, each held 300 ms (`--press_len=ms` changes it). `Nf:hex` presses at the Nth presented frame instead. One press is a script of one entry: `--script=5000:1` |
 | `-v` | Log every IPC call (`IPC <interface> cmd N`, `nn::audio::detail::IAudioOut` for an audout): huge, grep it |
 | `--fps_limit=0` | Unlimited frame rate |
 | `--game=PATH` | Run the game PATH names (`games/<id>`, the folder, runs `games/<id>/<id>_code.so`) instead of the one the runtime is named after. Its log, caches and captures still go to that game's folders |

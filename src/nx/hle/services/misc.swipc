@@ -30,7 +30,6 @@ interface nn::lm::ILogger {
 }
 
 # ================================================================ pctl
-@fallback(quiet_ok)
 interface nn::pctl::detail::ipc::IParentalControlServiceFactory is pctl, pctl:a, pctl:s, pctl:r {
     [0] CreateService(pid) -> object<nn::pctl::detail::ipc::IParentalControlService> service;
     [1] CreateServiceWithoutInitialize(pid) -> object<nn::pctl::detail::ipc::IParentalControlService> service;
@@ -57,7 +56,6 @@ type nn::friends::detail::ipc::SizedFriendFilter = bytes<0x10, 8>;
 type nn::friends::detail::ipc::SizedNotificationInfo = bytes<0x10, 8>;
 type nn::friends::detail::FriendImpl = bytes<0x200>;
 
-@fallback(quiet_ok)
 interface nn::friends::detail::ipc::IServiceCreator is friend:u, friend:v, friend:a {
     [0] CreateFriendService() -> object<nn::friends::detail::ipc::IFriendService> service;
     [1] CreateNotificationService(nn::account::Uid uid)
@@ -79,7 +77,6 @@ interface nn::friends::detail::ipc::INotificationService {
     [0] GetEvent() -> handle<copy, event> event;
     [2] Pop() -> nn::friends::detail::ipc::SizedNotificationInfo info;
 }
-@fallback(quiet_ok)
 interface nn::friends::detail::ipc::IDaemonSuspendSessionService {
 }
 

@@ -1,131 +1,168 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-#define _GNU_SOURCE
-/* what every platform shares: the guest thread pointer, logging and fatal errors. The rest of the platform layer is
-   plat_posix.c or plat_win32.c (with profiler_win32.c) */
-#include "nx/runtime/platform/plat.h"
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The log (<game>.log in the state folder, and stderr) and fatal errors */
+#include "nx/runtime/platform/log.h"
 #include "nx/runtime/loader.h"
 #include "nx/runtime/main.h"
 #include "nx/runtime/platform/backend.h"
-#include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdarg.h>
 #if !defined(_WIN32)
 #include <unistd.h>
 #endif
 
-__thread void* tls_thread;
 int g_verbose = 1;
-static FILE* g_logf;
-static int g_logf_failed; /* the log couldn't be created: said once on stderr instead of retried every line */
-/* the lines logged before the log is created, written at its top when it is. Only the first ones when they don't all
-   fit: a gap in the middle would mislead more than a short start */
-static char g_logpend[4096];
-static size_t g_logpend_n;
-static int g_logpend_cut;
-static void logpend(const char* s) {
-    size_t L = strlen(s);
-    if (g_logpend_cut || L > sizeof g_logpend - g_logpend_n) {
-        g_logpend_cut = 1;
-        return;
-    }
-    memcpy(g_logpend + g_logpend_n, s, L);
-    g_logpend_n += L;
-}
-/* initialized statically: logf_ runs on several threads from the start, and a lazy pm_init could race */
-static PMutex g_logm = PMUTEX_INIT;
-static volatile int g_log_crash; /* log_crash_mode */
+__thread FILE* tls_log_redirect;
+__thread void* tls_thread;
 
-__thread FILE* tls_log_redirect; /* log.h */
+#define LINE_MAX_ 2048
+#define EARLY_MAX 4096
+
+/* Initialised statically: threads log from the first moments of the run, and a lazy init would race */
+static PMutex g_log_lock = PMUTEX_INIT;
+/* Everything below is written under g_log_lock. The few fields crash mode reads without it are accessed atomically */
+static FILE* g_log;        /* atomic for crash mode's reads */
+#if !defined(_WIN32)
+static int g_log_fd = -1; /* g_log's descriptor, for crash mode's write() */
+#endif
+static int g_log_gave_up;  /* the log could not be created: the console has it all */
+static char g_early[EARLY_MAX]; /* lines from before the log exists, written at its top */
+static size_t g_early_len;
+static int g_early_full; /* a line did not fit: no more are kept, so the saved part has no gap */
+static u64 g_log_t0;     /* plat_ns() of the first line, atomic */
+/* written by every line, apart from the flag every line reads */
+static int g_mid_line __attribute__((aligned(64))); /* the last text written did not end its line, atomic */
+static int g_crashing __attribute__((aligned(64))); /* log_crash_mode was called, atomic */
+
 void log_crash_mode(void) {
-    g_log_crash = 1;
+    __atomic_store_n(&g_crashing, 1, __ATOMIC_SEQ_CST);
     tls_log_redirect = NULL;
 }
-/* a crash report line, written straight to the log and stderr (the log is flushed after every line, so the order
-   holds). On Windows the report runs in an exception filter, not a signal handler, and stdio's locks are recursive */
-static void log_raw(const char* buf) {
-#if defined(_WIN32)
-    if (g_logf) {
-        fputs(buf, g_logf);
-        fflush(g_logf);
+
+/* The log is made once the game's code module is loaded (g_mod), so a run that never gets that far (a mistyped
+   --game, a dump given instead of a game) leaves no log behind */
+static void log_create_nl(void) {
+    char path[1400];
+    FILE* file;
+    if (g_log || g_log_gave_up || !g_mod) return;
+    snprintf(path, sizeof path, "%s%s.log", g_statedir, g_exename);
+    file = fopen(path, "w");
+    if (!file) {
+        g_log_gave_up = 1;
+        fprintf(stderr, "Could not create the log %s, so it only goes to the console.\n", path);
+    } else {
+        if (g_early_len) fwrite(g_early, 1, g_early_len, file);
+        fflush(file);
+#if !defined(_WIN32)
+        __atomic_store_n(&g_log_fd, fileno(file), __ATOMIC_RELEASE);
+#endif
+        __atomic_store_n(&g_log, file, __ATOMIC_RELEASE);
     }
-    fputs(buf, stderr);
+    g_early_full = 1; /* either way nothing more is kept */
+}
+
+/* the "[seconds] " stamp when text starts a line, then the text, into out */
+static size_t log_compose(char* out, size_t cap, const char* text) {
+    size_t n = 0, len = strlen(text);
+    u64 t0 = __atomic_load_n(&g_log_t0, __ATOMIC_RELAXED);
+    if (!__atomic_load_n(&g_mid_line, __ATOMIC_RELAXED)) {
+        int w;
+        if (!t0) {
+            t0 = plat_ns();
+            __atomic_store_n(&g_log_t0, t0 ? t0 : 1, __ATOMIC_RELAXED);
+        }
+        w = snprintf(out, cap, "[%7.2f] ", (double)(plat_ns() - t0) / 1e9);
+        n = w > 0 && (size_t)w < cap ? (size_t)w : 0;
+    }
+    if (len > cap - 1 - n) len = cap - 1 - n;
+    memcpy(out + n, text, len);
+    n += len;
+    out[n] = 0;
+    if (len) __atomic_store_n(&g_mid_line, text[len - 1] != '\n', __ATOMIC_RELAXED);
+    return n;
+}
+
+/* Crash mode: no lock and no stdio buffers (the crashed thread may own either), straight to the descriptors */
+static void log_crash_write(const char* text) {
+    char out[LINE_MAX_ + 32];
+    size_t n = log_compose(out, sizeof out, text);
+#if defined(_WIN32)
+    /* the report runs in an exception filter, on the thread that crashed; stdio's locks are recursive */
+    FILE* file = __atomic_load_n(&g_log, __ATOMIC_ACQUIRE);
+    (void)n;
+    if (file) {
+        fputs(out, file);
+        fflush(file);
+    }
+    fputs(text, stderr);
+    fflush(stderr);
 #else
-    size_t L = strlen(buf);
-    if (g_logf && write(fileno(g_logf), buf, L) < 0) {}
-    if (write(2, buf, L) < 0) {}
+    int fd = __atomic_load_n(&g_log_fd, __ATOMIC_ACQUIRE);
+    ssize_t r;
+    if (fd >= 0) r = write(fd, out, n);
+    r = write(2, text, strlen(text));
+    (void)r;
 #endif
 }
+
 void logf_(int lvl, const char* fmt, ...) {
-    char buf[2048];
+    char text[LINE_MAX_], out[LINE_MAX_ + 32];
     va_list ap;
+    int w;
+    size_t n;
     va_start(ap, fmt);
-    int n = vsnprintf(buf, sizeof buf, fmt, ap);
+    w = vsnprintf(text, sizeof text, fmt, ap);
     va_end(ap);
-    /* a cut line keeps its newline, or the next line would be glued to it */
-    if (n >= (int)sizeof buf) buf[sizeof buf - 2] = '\n';
-    if (g_log_crash) {
-        log_raw(buf);
+    if (w < 0) return;
+    /* a cut line still ends with its newline, so the next one starts on its own */
+    if ((size_t)w >= sizeof text) text[sizeof text - 2] = '\n';
+    if (tls_log_redirect) {
+        fputs(text, tls_log_redirect);
         return;
     }
-    {
-        FILE* rf = tls_log_redirect;
-        if (rf) {
-            fputs(buf, rf);
-            return;
+    if (__atomic_load_n(&g_crashing, __ATOMIC_SEQ_CST)) {
+        log_crash_write(text);
+        return;
+    }
+    pm_lock(&g_log_lock);
+    log_create_nl();
+    n = log_compose(out, sizeof out, text);
+    if (g_log) {
+        fputs(out, g_log);
+        fflush(g_log);
+        if (lvl <= 1 || g_verbose >= 2) {
+            fputs(text, stderr); /* the console gets the line without its time stamp, which only the log file keeps */
+            fflush(stderr);
+        }
+    } else {
+        fputs(text, stderr);
+        fflush(stderr);
+        if (!g_early_full && !g_log_gave_up) {
+            if (n <= sizeof g_early - g_early_len) {
+                memcpy(g_early + g_early_len, out, n);
+                g_early_len += n;
+            } else
+                g_early_full = 1;
         }
     }
-    static u64 t0;
-    u64 now = plat_ns();
-    if (!t0) t0 = now;
-    char tb[24];
-    snprintf(tb, sizeof tb, "[%7.2f] ", (double)(now - t0) / 1e9);
-    pm_lock(&g_logm);
-    /* the log is created once the game's code has loaded (g_mod): a mistyped --game, or a dump named instead of a
-       game, leaves no stray <name>.log. Until then the lines go to stderr, and are kept for the log's top */
-    if (!g_logf && !g_logf_failed && g_mod) {
-        char p[1200];
-        snprintf(p, sizeof p, "%s%s.log", g_statedir, g_exename);
-        g_logf = fopen(p, "w");
-        if (!g_logf) {
-            g_logf_failed = 1;
-            fprintf(stderr, "Could not create the log %s, so it only goes to the console.\n", p);
-        } else if (g_logpend_n)
-            fwrite(g_logpend, 1, g_logpend_n, g_logf);
-    }
-    {
-        static int bol = 1;
-        if (g_logf) {
-            if (bol) fputs(tb, g_logf);
-            fputs(buf, g_logf);
-            fflush(g_logf);
-        } else if (!g_logf_failed) {
-            if (bol) logpend(tb);
-            logpend(buf);
-        }
-        size_t L = strlen(buf);
-        bol = L && buf[L - 1] == '\n';
-    }
-    if (lvl <= 1 || g_verbose >= 2) { fputs(buf, stderr); }
-    pm_unlock(&g_logm);
+    pm_unlock(&g_log_lock);
 }
+
 void fatal(const char* fmt, ...) {
-    char buf[4096];
+    char msg[LINE_MAX_];
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(buf, sizeof buf, fmt, ap);
+    vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
-    tls_log_redirect = NULL; /* a failure during the threads.txt dump belongs in the log */
-    logf_(0, "FATAL: %s\n", buf);
+    tls_log_redirect = NULL; /* a failure while writing threads.txt belongs in the log */
+    logf_(0, "FATAL: %s\n", msg);
 #if !defined(_WIN32)
-    /* from the crash handler, neither a box nor fflush: they could wait on a lock (malloc's, stdio's) the crashed code
-       holds. The log is written already */
-    if (g_log_crash) _exit(1);
+    /* from the crash handler: a box or a flush could wait on a lock the crashed code holds */
+    if (__atomic_load_n(&g_crashing, __ATOMIC_SEQ_CST)) _exit(1);
 #endif
-    /* the box on every platform: started from a desktop entry, a player sees neither the console nor the log */
-    win_fatal_box(buf);
+    /* everywhere, since a player started from a desktop entry sees no console and no log */
+    win_fatal_box(msg);
     plat_exit_now(1);
 }

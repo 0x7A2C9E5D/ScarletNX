@@ -689,11 +689,6 @@ VkSampler vk_tex_bind_sampler(const u32* tsc, const ShTex* st, int num, const Su
 
 /* a constant buffer's bytes for this draw, reused while the guest can't have changed them */
 static int cb_get(const GpuChannel* ch, int stage, int i, u32 sz, VkBuffer* buf, u64* off) {
-    static int cache = -1;
-    if (cache < 0) {
-        const char* opt = getenv("SNX_VK_CB_CACHE");
-        cache = !opt || strcmp(opt, "0") != 0; /* 0 restores the original staging-copy path */
-    }
     static struct {
         u64 a, gw, frame;
         u32 sz, epoch;
@@ -713,7 +708,7 @@ static int cb_get(const GpuChannel* ch, int stage, int i, u32 sz, VkBuffer* buf,
         *off = c[stage][i].off;
         return 1;
     }
-    if (!(cache && a ? vk_buf_get_strict(a, sz, buf, off) : vk_buf_copy(a, sz, buf, off))) return 0;
+    if (!(a ? vk_buf_get_strict(a, sz, buf, off) : vk_buf_copy(a, sz, buf, off))) return 0;
     if (pending) {
         c[stage][i].a = 0;
         return 1;

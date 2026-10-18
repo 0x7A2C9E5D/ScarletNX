@@ -1,237 +1,185 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the sampling profiler (profile=1, Windows): about every millisecond it suspends each thread, reads its instruction
-   pointer and maps it to a game function, the runtime or another module. profile.txt is rewritten every 10 s */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The profile option on Windows: samples the program counter of the runtime's threads every millisecond, and writes
+   the functions they spent their time in to profile.txt beside the game every 10 seconds */
+#include "nx/loader/module_abi.h"
 #include "nx/runtime/loader.h"
 #include "nx/runtime/main.h"
-#include "nx/memory/mem.h"
+#include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <process.h>
-/* the sampled threads. A slot is freed by prof_thread when its thread has ended, and taken again by a new thread:
-   guest threads come and go, and 256 slots filled up for good */
-static HANDLE volatile g_pth[256];
-static volatile LONG g_npth; /* slots in use or used before: the ones prof_thread looks at */
-void plat_prof_add_thread(HANDLE h) {
-    HANDLE d = NULL;
-    if (!DuplicateHandle(GetCurrentProcess(), h, GetCurrentProcess(), &d, 0, FALSE, DUPLICATE_SAME_ACCESS)) return;
-    for (LONG i = 0; i < 256; i++)
-        if (!InterlockedCompareExchangePointer((PVOID volatile*)&g_pth[i], d, NULL)) {
-            LONG n;
-            while ((n = g_npth) <= i && InterlockedCompareExchange(&g_npth, i + 1, n) != n) {}
-            return;
-        }
-    CloseHandle(d);
-}
+
+#define PROF_THREADS 256
+#define PROF_BUCKETS 16384 /* a power of two */
+#define PROF_SHOWN 200
+#define PROF_PERIOD_MS 10000
+
+extern char __ImageBase; /* the linker's: the executable's load address */
+
+/* A slot is free when NULL. Threads take one with a compare-exchange; the sampler frees it once the thread ended */
+static HANDLE g_threads[PROF_THREADS];
+static int g_threads_used; /* slots ever taken: only grows */
+
+/* the sampler's own (no other thread touches these) */
+typedef struct {
+    u64 key; /* a game function's host address, or a runtime address rounded to 16 bytes; 0 for a free bucket */
+    u32 count;
+} ProfBucket;
+static ProfBucket g_buckets[PROF_BUCKETS];
+static u64 g_samples, g_unplaced;
 typedef struct {
     u64 host;
-    u32 idx;
-} PEnt;
-static PEnt* g_pe;
-static u32 g_npe;
-static u64 g_plo, g_phi;
-static u32* g_pcnt;
-#define PMOD 32
-static struct {
-    u64 base;
-    char name[64];
-    u32 n;
-} g_pmod[PMOD];
-static int g_npmod;
-#define PEXE 4096
-static struct {
-    u32 off;
-    u32 n;
-} g_pexe[PEXE];
-static u64 g_ptot, g_pguest, g_pexe_n;
-static int pe_cmp(const void* a, const void* b) {
-    u64 x = ((const PEnt*)a)->host, y = ((const PEnt*)b)->host;
+    u64 guest;
+} ProfFn;
+static ProfFn* g_fns; /* the game module's functions by host address */
+static u32 g_nfns;
+
+void plat_prof_add_thread(HANDLE h) {
+    HANDLE own;
+    int i, used;
+    if (!DuplicateHandle(GetCurrentProcess(), h, GetCurrentProcess(), &own,
+                         THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+                         FALSE, 0))
+        return;
+    for (i = 0; i < PROF_THREADS; i++) {
+        HANDLE none = NULL;
+        if (__atomic_compare_exchange_n(&g_threads[i], &none, own, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            used = __atomic_load_n(&g_threads_used, __ATOMIC_ACQUIRE);
+            while (used < i + 1 &&
+                   !__atomic_compare_exchange_n(&g_threads_used, &used, i + 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            }
+            return;
+        }
+    }
+    CloseHandle(own); /* all taken: this one goes unsampled */
+}
+
+static int fn_cmp(const void* a, const void* b) {
+    u64 x = ((const ProfFn*)a)->host, y = ((const ProfFn*)b)->host;
     return x < y ? -1 : x > y;
 }
-static void prof_note(u64 rip) {
-    g_ptot++;
-    if (rip >= g_plo && rip < g_phi + 0x4000) {
-        u32 lo = 0, hi = g_npe;
-        while (hi - lo > 1) {
-            u32 m = (lo + hi) / 2;
-            if (g_pe[m].host <= rip)
-                lo = m;
-            else
-                hi = m;
-        }
-        g_pcnt[lo]++;
-        g_pguest++;
-        return;
+static void fns_index(void) {
+    u32 i;
+    if (!g_mod || !g_mod->nentries || !g_mod->entry_fn) return;
+    g_fns = malloc((size_t)g_mod->nentries * sizeof *g_fns);
+    if (!g_fns) return;
+    for (i = 0; i < g_mod->nentries; i++) {
+        g_fns[i].host = (u64)(size_t)g_mod->entry_fn[i];
+        g_fns[i].guest = g_mod->entry_addr[i];
     }
-    HMODULE hm = NULL;
-    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                            (LPCSTR)(uintptr_t)rip, &hm) ||
-        !hm) {
-        hm = NULL;
-    }
-    u64 base = (u64)(uintptr_t)hm;
-    if (hm == GetModuleHandleA(NULL)) {
-        u32 off = (u32)((rip - base) & ~0x3Full);
-        u32 k = (off * 2654435761u) >> 20;
-        for (int t = 0; t < PEXE; t++) {
-            u32 s = (k + t) & (PEXE - 1);
-            if (!g_pexe[s].n || g_pexe[s].off == off) {
-                g_pexe[s].off = off;
-                g_pexe[s].n++;
-                break;
-            }
-        }
-        g_pexe_n++;
-    }
-    int i;
-    for (i = 0; i < g_npmod; i++)
-        if (g_pmod[i].base == base) break;
-    if (i == g_npmod && g_npmod < PMOD) {
-        g_pmod[i].base = base;
-        g_pmod[i].n = 0;
-        if (!hm)
-            strcpy(g_pmod[i].name, "(no module: generated/JIT code)");
-        else {
-            char pth[MAX_PATH];
-            GetModuleFileNameA(hm, pth, MAX_PATH);
-            const char* s = strrchr(pth, '\\');
-            snprintf(g_pmod[i].name, 64, "%s", s ? s + 1 : pth);
-        }
-        g_npmod++;
-    }
-    if (i < g_npmod) g_pmod[i].n++;
+    qsort(g_fns, g_mod->nentries, sizeof *g_fns, fn_cmp);
+    g_nfns = g_mod->nentries;
 }
-static void prof_write(void) {
-    char pth[1200]; /* next to the game like its log, not in whatever folder it was started from */
-    snprintf(pth, sizeof pth, "%sprofile.txt", g_exedir);
-    FILE* f = fopen(pth, "w");
-    if (!f) return;
-    /* idle threads sit in ntdll/kernelbase/win32u, so percentages are of non-idle samples */
-    u64 idle = 0;
-    for (int i = 0; i < g_npmod; i++) {
-        const char* n = g_pmod[i].name;
-        if (!_stricmp(n, "ntdll.dll") || !_stricmp(n, "kernelbase.dll") || !_stricmp(n, "win32u.dll") ||
-            !_stricmp(n, "kernel32.dll"))
-            idle += g_pmod[i].n;
-    }
-    u64 act = g_ptot > idle ? g_ptot - idle : 1;
-    fprintf(f, "ScarletNX profile: %llu samples, %llu active (excluding waits). %% of active time\n\n",
-            (unsigned long long)g_ptot, (unsigned long long)act);
-    fprintf(f, "modules:\n");
-    for (int i = 0; i < g_npmod; i++) {
-        const char* n = g_pmod[i].name;
-        int w = !_stricmp(n, "ntdll.dll") || !_stricmp(n, "kernelbase.dll") || !_stricmp(n, "win32u.dll") ||
-                !_stricmp(n, "kernel32.dll");
-        if (w)
-            fprintf(f, "   (waits) %s: %llu samples\n", n, (unsigned long long)g_pmod[i].n);
+/* the game function pc is in: the closest start at or below it, within 1 MiB */
+static const ProfFn* fn_at(u64 pc) {
+    u32 lo = 0, hi = g_nfns;
+    while (lo < hi) {
+        u32 mid = lo + (hi - lo) / 2;
+        if (g_fns[mid].host <= pc)
+            lo = mid + 1;
         else
-            fprintf(f, "  %6.2f%%  %s\n", 100.0 * g_pmod[i].n / act, n);
+            hi = mid;
     }
-    fprintf(f, "  %6.2f%%  game code (functions below)\n", 100.0 * g_pguest / act);
-    fprintf(f, "\ngame functions (guest address):\n");
-    u64 top[6];
-    int ntop = 0;
-    for (int r = 0; r < 60; r++) {
-        u32 best = ~0u, bn = 0;
-        for (u32 i = 0; i < g_npe; i++)
-            if (!(g_pcnt[i] & 0x80000000u) && g_pcnt[i] > bn) {
-                bn = g_pcnt[i];
-                best = i;
-            }
-        if (best == ~0u || !bn || bn * 2000ull < act) break;
-        fprintf(f, "  %6.2f%%  %llx\n", 100.0 * bn / act, (unsigned long long)g_mod->entry_addr[g_pe[best].idx]);
-        if (r < 6) top[ntop++] = g_mod->entry_addr[g_pe[best].idx];
-        g_pcnt[best] |= 0x80000000u;
-    }
-    for (u32 i = 0; i < g_npe; i++) g_pcnt[i] &= 0x7FFFFFFFu;
-    /* raw A64 words of the top functions, for disassembling later */
-    fprintf(f, "\ncode of the hottest game functions (first 96 instructions):\n");
-    for (int t = 0; t < ntop; t++) {
-        fprintf(f, "  %llx:", (unsigned long long)top[t]);
-        const u32* w = (const u32*)GP(top[t]);
-        for (int k = 0; k < 96; k++) {
-            if (k % 16 == 0) fprintf(f, "\n   ");
-            fprintf(f, " %08x", w[k]);
+    return lo && pc - g_fns[lo - 1].host < (1u << 20) ? &g_fns[lo - 1] : NULL;
+}
+
+static void record(u64 pc) {
+    const ProfFn* f = fn_at(pc);
+    u64 key = f ? f->host : pc & ~(u64)15;
+    u32 i, probe;
+    g_samples++;
+    if (!key) key = 16; /* 0 marks a free bucket */
+    i = (u32)((key >> 4) * 0x9E3779B1u) & (PROF_BUCKETS - 1);
+    for (probe = 0; probe < 64; probe++, i = (i + 1) & (PROF_BUCKETS - 1)) {
+        if (g_buckets[i].key == key || !g_buckets[i].key) {
+            g_buckets[i].key = key;
+            g_buckets[i].count++;
+            return;
         }
-        fprintf(f, "\n");
     }
-    fprintf(f, "\nruntime (offset in the exe):\n");
-    for (int r = 0; r < 40; r++) {
-        int best = -1;
-        u32 bn = 0;
-        for (int s = 0; s < PEXE; s++)
-            if (g_pexe[s].n > bn && !(g_pexe[s].n & 0x80000000u)) {
-                bn = g_pexe[s].n;
-                best = s;
-            }
-        if (best < 0 || bn * 2000ull < act) break;
-        fprintf(f, "  %6.2f%%  +%x\n", 100.0 * bn / act, g_pexe[best].off);
-        g_pexe[best].n |= 0x80000000u;
+    g_unplaced++;
+}
+
+static int bucket_cmp(const void* a, const void* b) {
+    u32 x = ((const ProfBucket*)a)->count, y = ((const ProfBucket*)b)->count;
+    return x > y ? -1 : x < y;
+}
+static void write_profile(u64 started) {
+    static ProfBucket sorted[PROF_BUCKETS];
+    char path[1200];
+    u64 image = (u64)(size_t)&__ImageBase;
+    FILE* f;
+    int i, n = 0;
+    snprintf(path, sizeof path, "%sprofile.txt", g_exedir);
+    f = fopen(path, "w");
+    if (!f) return;
+    for (i = 0; i < PROF_BUCKETS; i++)
+        if (g_buckets[i].key) sorted[n++] = g_buckets[i];
+    qsort(sorted, (size_t)n, sizeof *sorted, bucket_cmp);
+    fprintf(f, "ScarletNX profile: %llu samples in %.0f s, %d thread slots used, %llu not placed\n",
+            (unsigned long long)g_samples, (double)(plat_ns() - started) / 1e9,
+            __atomic_load_n(&g_threads_used, __ATOMIC_ACQUIRE), (unsigned long long)g_unplaced);
+    for (i = 0; i < n && i < PROF_SHOWN; i++) {
+        const ProfFn* fn = fn_at(sorted[i].key);
+        double pct = g_samples ? 100.0 * sorted[i].count / (double)g_samples : 0;
+        if (fn && fn->host == sorted[i].key)
+            fprintf(f, "%6.2f%% %8u  game function %llx\n", pct, sorted[i].count, (unsigned long long)fn->guest);
+        else if (sorted[i].key >= image && sorted[i].key - image < 0x10000000u)
+            fprintf(f, "%6.2f%% %8u  runtime +%llx\n", pct, sorted[i].count,
+                    (unsigned long long)(sorted[i].key - image));
+        else
+            fprintf(f, "%6.2f%% %8u  host %llx\n", pct, sorted[i].count, (unsigned long long)sorted[i].key);
     }
-    for (int s = 0; s < PEXE; s++) g_pexe[s].n &= 0x7FFFFFFFu;
     fclose(f);
 }
-static unsigned __stdcall prof_thread(void* a) {
-    (void)a;
-    u64 last = GetTickCount64();
-    DWORD me = GetCurrentThreadId();
+
+static DWORD WINAPI sampler(LPVOID unused) {
+    u64 started = plat_ns(), next_write = started + (u64)PROF_PERIOD_MS * 1000000u;
+    (void)unused;
+    fns_index();
     for (;;) {
+        int i, used = __atomic_load_n(&g_threads_used, __ATOMIC_ACQUIRE);
         Sleep(1);
-        LONG n = g_npth;
-        if (n > 256) n = 256;
-        for (LONG i = 0; i < n; i++) {
-            HANDLE h = g_pth[i];
-            if (!h || GetThreadId(h) == me) continue;
-            if (WaitForSingleObject(h, 0) == WAIT_OBJECT_0) { /* the thread has ended: free its slot */
-                g_pth[i] = NULL;
+        for (i = 0; i < used; i++) {
+            HANDLE h = __atomic_load_n(&g_threads[i], __ATOMIC_ACQUIRE);
+            CONTEXT c;
+            if (!h) continue;
+            if (WaitForSingleObject(h, 0) == WAIT_OBJECT_0) { /* the thread ended: its slot is free again */
+                __atomic_store_n(&g_threads[i], NULL, __ATOMIC_RELEASE);
                 CloseHandle(h);
                 continue;
             }
             if (SuspendThread(h) == (DWORD)-1) continue;
-            CONTEXT cx;
-            memset(&cx, 0, sizeof cx);
-            cx.ContextFlags = CONTEXT_CONTROL;
-            if (GetThreadContext(h, &cx)) {
-                ResumeThread(h);
-                prof_note(cx.Rip);
-            } else
-                ResumeThread(h);
+            /* nothing here may allocate or lock: the stopped thread could hold the heap's lock */
+            memset(&c, 0, sizeof c);
+            c.ContextFlags = CONTEXT_CONTROL;
+            if (GetThreadContext(h, &c)) {
+#if defined(_M_ARM64) || defined(__aarch64__)
+                record((u64)c.Pc);
+#else
+                record((u64)c.Rip);
+#endif
+            }
+            ResumeThread(h);
         }
-        if (GetTickCount64() - last >= 10000u) {
-            last = GetTickCount64();
-            prof_write();
+        if (plat_ns() >= next_write) {
+            write_profile(started);
+            next_write += (u64)PROF_PERIOD_MS * 1000000u;
         }
     }
-    return 0;
 }
+
 void plat_prof_start(void) {
-    if (!g_mod || !g_mod->nentries) return;
-    g_npe = g_mod->nentries;
-    g_pe = malloc(sizeof(PEnt) * g_npe);
-    g_pcnt = calloc(g_npe, 4);
-    g_plo = ~0ull;
-    g_phi = 0;
-    for (u32 i = 0; i < g_npe; i++) {
-        g_pe[i].host = (u64)(uintptr_t)g_mod->entry_fn[i];
-        g_pe[i].idx = i;
-        if (g_pe[i].host < g_plo) g_plo = g_pe[i].host;
-        if (g_pe[i].host > g_phi) g_phi = g_pe[i].host;
+    HANDLE h;
+    plat_prof_add_thread(GetCurrentThread()); /* the main thread (the window and the frame loop) */
+    h = CreateThread(NULL, 0, sampler, NULL, 0, NULL);
+    if (!h) {
+        WARN("profile: the sampling thread could not start\n");
+        return;
     }
-    qsort(g_pe, g_npe, sizeof(PEnt), pe_cmp);
-    {
-        HANDLE d = NULL;
-        DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &d, 0, FALSE,
-                        DUPLICATE_SAME_ACCESS);
-        plat_prof_add_thread(d);
-        CloseHandle(d);
-    }
-    uintptr_t h = _beginthreadex(NULL, 0, prof_thread, NULL, 0, NULL);
-    if (h) {
-        SetThreadPriority((HANDLE)h, THREAD_PRIORITY_TIME_CRITICAL);
-        CloseHandle((HANDLE)h);
-    }
+    SetThreadPriority(h, THREAD_PRIORITY_HIGHEST);
+    CloseHandle(h);
 }

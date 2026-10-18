@@ -237,7 +237,7 @@ static u32 parse_hipc(IpcCtx* c, Hipc* h) {
         if (i < MAX_BUFS) c->c[c->nc++] = b;
     }
     if (nc && rloff && rl < h->raw_end) return c->kernel_rc = R_BADCOMBO;
-    return 0;
+    R_SUCCEED();
 }
 /* why the kernel refused a request, for the log */
 static const char* kernel_refusal(u32 rc) {
@@ -258,9 +258,9 @@ u32 ipc_user_buffer(u64 addr, u64 size) {
     MemBlock b;
     u64 a = addr;
     u32 state = 0, perm = 0;
-    if (addr & 0xFFF) return R_BADADDR;
-    if (!size || (size & 0xFFF)) return R_BADSIZE;
-    if (addr >= AS_SIZE || size > AS_SIZE - addr) return R_BADMEMSTATE;
+    R_UNLESS(!(addr & 0xFFF), R_BADADDR);
+    R_UNLESS(size && !(size & 0xFFF), R_BADSIZE);
+    R_UNLESS(addr < AS_SIZE && size <= AS_SIZE - addr, R_BADMEMSTATE);
     while (a < addr + size) {
         mem_query(a, &b);
         if (a == addr) {
@@ -269,10 +269,10 @@ u32 ipc_user_buffer(u64 addr, u64 size) {
         }
         if (b.state != state || b.perm != perm || b.attr || !(b.state & MS_FLAG_IPC_USER_BUFFER) || b.perm != PERM_RW ||
             !b.size)
-            return R_BADMEMSTATE;
+            R_THROW(R_BADMEMSTATE);
         a = b.addr + b.size;
     }
-    return 0;
+    R_SUCCEED();
 }
 
 /* ============================================================ requests: sf's part */
@@ -465,27 +465,27 @@ static u32 control(IpcCtx* c, KSession* s) {
                     domain_unref(n); /* another thread converted it first */
             }
             out32(c, 1); /* the session's object is the domain's first */
-            return 0;
+            R_SUCCEED();
         case 1: {
             SvcObj* o;
-            if (!d) return RC_TARGETNOTDOMAIN;
+            R_UNLESS(d, RC_TARGETNOTDOMAIN);
             ipc_in(c, 0, &id, 4);
             o = domain_get(d, id);
-            if (!o) return RC_DOMAINOBJNOTFOUND;
+            R_UNLESS(o, RC_DOMAINOBJNOTFOUND);
             out_move_h(c, session_new(o));
-            return 0;
+            R_SUCCEED();
         }
         case 2:
         case 4:
             svcobj_ref(s->obj);
             if (d) __atomic_add_fetch(&d->refs, 1, __ATOMIC_RELAXED);
             out_move_h(c, session_make(s->obj, d));
-            return 0;
-        case 3: out32(c, s->obj ? s->obj->ptrbuf : POINTER_BUFFER); return 0;
+            R_SUCCEED();
+        case 3: out32(c, s->obj ? s->obj->ptrbuf : POINTER_BUFFER); R_SUCCEED();
         default:
             if (ipc_warn_once("control", c->cmd))
                 WARN("ipc: %s: control request %u, UnknownCommandId\n", s->obj ? s->obj->name : "session", c->cmd);
-            return RC_UNKNOWNCOMMAND;
+            R_THROW(RC_UNKNOWNCOMMAND);
     }
 }
 /* a request in a domain message: Close, or the target object's command */
@@ -614,21 +614,21 @@ int stub_ok(SvcObj* o, IpcCtx* c) {
     if (!g_opt_auto_stub_ipc) return ipc_unknown(o, c);
     if (ipc_warn_once(o->name, c->cmd)) WARN("  [undeclared] %s cmd %u -> ok\n", o->name, c->cmd);
     memset(c->msg, 0, c->msg_size < SERVER_MSG ? (size_t)c->msg_size : SERVER_MSG);
-    return 0;
+    R_SUCCEED();
 }
 int quiet_ok(SvcObj* o, IpcCtx* c) {
     (void)o;
     (void)c;
-    return 0;
+    R_SUCCEED();
 }
 int ipc_unknown(SvcObj* o, IpcCtx* c) {
     if (ipc_warn_once(o->name, c->cmd)) WARN("  [unknown] %s cmd %u -> UnknownCommandId\n", o->name, c->cmd);
-    return (int)RC_UNKNOWNCOMMAND;
+    R_THROW((int)RC_UNKNOWNCOMMAND);
 }
 int ipc_bad_request(SvcObj* o, IpcCtx* c) {
     WARN("  [bad request] %s cmd %u: pid %d, A %d, B %d, X %d, W %d, copy handles %d, raw 0x%x bytes%s\n", o->name,
          c->cmd, c->has_pid, c->na, c->nb, c->nx, c->nw, c->ncopy, c->raw_size, c->tipc ? " (TIPC)" : "");
-    return (int)RC_BADCMIFREQUEST;
+    R_THROW((int)RC_BADCMIFREQUEST);
 }
 int ipc_bad_objects(SvcObj* o, IpcCtx* c) {
     WARN("  [bad request] %s cmd %u: %d objects%s\n", o->name, c->cmd, c->nin_objs,

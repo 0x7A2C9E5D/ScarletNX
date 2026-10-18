@@ -28,7 +28,7 @@ description: "Build the ScarletNX runtime and recompile games correctly, avoidin
 
 | What happens | Why | What to do |
 | --- | --- | --- |
-| Movies stay black, the log says no H.264 decoder | A runtime built some other way than CMake (upstream's recompiler had its own build) drops the H.264 decoder without a word | Build the runtime with CMake (`build/scarletnx -r` also does), which includes FFmpeg. |
+| Movies stay black, the log says no H.264 decoder | A runtime built some other way than CMake (the recompiler once had its own build) drops the H.264 decoder without a word | Build the runtime with CMake (`build/scarletnx -r` also does), which includes FFmpeg. |
 | The configure stops with "NASM was not found" | FFmpeg's x86-64 assembly needs NASM, and a build without it decodes movies several times slower, so it is never dropped silently | Install `nasm`. `-DSNX_FFMPEG_ASM=OFF` builds FFmpeg without its assembly on purpose (slower movies). |
 | A fix has no effect | The game ran an old runtime: the build didn't deploy (no `_code.so` in `games/` yet), or the game was already running | Check the deploy lines. On Linux a running game keeps its old copy (the deploy renames over it). On Windows a running `.exe` can't be replaced, so stop the game before building. |
 | Two build folders disagree on what is deployed | Every build folder with `SNX_DEPLOY` on deploys to the same `games/` | The last build wins. Configure extra folders with `-DSNX_DEPLOY=OFF`. The recompiler builds its runtime in `build/native-recomp` or `build/win64-recomp` with deployment off (`src/nx/runtime/driver/toolchain.c`). |
@@ -67,7 +67,7 @@ The runtime builds with Clang's default warnings plus two errors: `-Werror=missi
 `-Werror=missing-variable-declarations`. A function or global another file uses
 goes in the header next to the file that defines it, which that file includes too, so the compiler checks the two
 agree. Anything else is static. An `extern` inside a function, or a prototype copied into another `.c` file, is the
-pattern this replaced: upstream had 237 of them, and some disagreed with the definition.
+pattern this replaced: there were once 237 of them, and some disagreed with the definition.
 
 The Windows runtime is the SDL3 backend with the Vulkan renderer, as on Linux: `cmake --preset windows-cross &&
 cmake --build --preset windows-cross` (SDL3 is then a CPM package, linked statically).
@@ -122,8 +122,9 @@ bundles the full Mesa, so the AppImage comes out several times bigger than CI's,
 packages. Inside an AppImage argv[0] points into its mount: anything that finds files next to the runtime goes
 through `g_exedir`, which `main.c` takes from `$APPIMAGE`.
 
-`cmake --install` puts the license files in `share/licenses/scarletnx`: `LICENSE`, `LICENSE.apache` and `NOTICE`,
-then a folder per library built into the runtime or hactool. The AppImage copies that folder and adds the licenses of
+`cmake --install` puts the license files in `share/licenses/scarletnx`: `LICENSE`, then a folder per library or
+ported code built into the runtime or hactool (those with no license file of their own, like Open Sans and
+Ryujinx's default Miis, from `dist/licenses/`). The AppImage copies that folder and adds the licenses of
 the Arch packages it bundles, with their list in `share/licenses/bundled-packages.txt`, and the CI artifacts are the
 install tree. A new package means a new `install(...)` line for its license in `CMakeLists.txt`.
 

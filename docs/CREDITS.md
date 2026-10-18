@@ -2,9 +2,7 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # Licenses and credits
 
-**SwitchRecomp by MZ Labs**, copyright 2026 MZ Labs, is ScarletNX's upstream.
-Fork: [GPL-3.0-or-later](../LICENSE). MZ Labs code retains its
-[Apache-2.0](../LICENSE.apache) headers and [NOTICE](../NOTICE).
+ScarletNX is [GPL-3.0-or-later](../LICENSE).
 Generated modules include runtime ABI code. Game assets, keys and firmware are excluded.
 
 | Component | License |
@@ -13,6 +11,8 @@ Generated modules include runtime ABI code. Game assets, keys and firmware are e
 | hactool / cJSON / ConvertUTF | ISC / MIT / Unicode license |
 | LibHac storage code, ported into hactool by `cmake/hactool-libhac.patch` | MIT |
 | OpenSSL | Apache 2.0 |
+| Open Sans 1.101 (the shared fonts' stand-in, `cmake/shared_fonts.cmake`) | Apache 2.0 ([text](../dist/licenses/OpenSans/LICENSE)) |
+| yuzu's controller button glyphs (`font_nintendo_extended.cpp`, as Eden carries it) | GPL-2.0-or-later |
 | LZ4 (the library, `lib/`) | BSD-2-Clause |
 | Vulkan-Headers | Apache 2.0 |
 | volk / Vulkan Memory Allocator | MIT |
@@ -33,9 +33,15 @@ a source keep that source's copyright lines and license, most with the revision 
 | `src/3ds/gpu/`, `src/3ds/audio/`, `src/3ds/services/dsp.c` | Azahar (Citra) | GPL-2.0-or-later |
 | `src/3ds/gpu/shader.c` and `shader.h` (the instruction fields) | nihstro | BSD-3-Clause |
 | `src/common/cpu/` (the recompiler's instruction semantics: `a64.c`, `a64_templates.inc`, the LLVM emitters and the libgccjit emitters derived from them, the A32/T32 block compiler) | QEMU's `target/arm/tcg/` | LGPL-2.1-or-later |
-| `src/nx/hle/kernel/` (`kernel.c`, `sync.c`, `debug.c`) | Eden and yuzu | GPL-3.0-or-later, GPL-2.0-or-later |
+| `src/common/cpu/aarch64/` (`cpu.h`, `cpu_helpers.c` and `helpers/`, the generated code's FP, SIMD, integer and crypto helpers) | QEMU's `target/arm/` and its softfloat, with the SoftFloat-2a notice | LGPL-2.1-or-later, SoftFloat-2a, BSD |
+| `src/nx/gpu/gpu.c`, `src/nx/gpu/maxwell/` (the DMA pusher and puller, the 3D, macro, DMA, 2D and compute engines) | Eden and yuzu (`video_core/`) | GPL-3.0-or-later, GPL-2.0-or-later |
+| `src/nx/gpu/shader/` (`shader.c`, `decode.c`, and `maxwell_opcodes.def`, the encodings `tools/shaderdec` generates the decoder from) | Eden and yuzu (`shader_recompiler/frontend/maxwell/`) | GPL-3.0-or-later, GPL-2.0-or-later |
+| `src/nx/gpu/video/` (`host1x.c`, `nvdec.c`, `vic.c`) | Eden and yuzu (`video_core/host1x/`, the nvdrv host1x devices), with Ryujinx's CDMA pusher as Eden carries it | GPL-3.0-or-later, GPL-2.0-or-later, MIT |
+| `src/nx/loader/loader.c` (the defaults for a program without an NPDM) | Eden and yuzu (`file_sys/program_metadata.cpp`) | GPL-3.0-or-later, GPL-2.0-or-later |
+| `src/nx/hle/kernel/`, `src/nx/hle/svc/`, `src/nx/memory/`, `src/nx/hle/services/`, `src/nx/hle/filesystem/` | Eden and yuzu | GPL-3.0-or-later, GPL-2.0-or-later |
+| `src/nx/hle/services/misc.c` (the six default Miis, from Eden's `mii/types/raw_data.cpp`) | Ryujinx, as Eden carries it | MIT ([text](../dist/licenses/Ryujinx/LICENSE.txt)) |
 | `src/common/network/`, `src/nx/hle/services/network/` | Eden and yuzu | GPL-3.0-or-later, GPL-2.0-or-later |
-| `src/nx/gpu/video/vp9_rebuild.cpp` | Eden and yuzu | GPL-3.0-or-later, GPL-2.0-or-later |
+| `src/nx/gpu/video/vp9_rebuild.cpp`, `src/nx/gpu/video/vic.comp` (compiled into `vic_spv.h`) | Eden and yuzu | GPL-3.0-or-later, GPL-2.0-or-later |
 | `src/nx/gpu/texture/astc.comp` (the ASTC decoder shader, compiled into `astc_spv.h`) | Eden and yuzu (`astc_decoder.comp`) | GPL-3.0-or-later, GPL-2.0-or-later |
 | `src/nx/gpu/texture/astc.c` and `astc.h` (the CPU ASTC decoder the tests check the shader against) | Eden and yuzu (`textures/astc.cpp`), with the University of North Carolina at Chapel Hill's FasTC decoder in it | GPL-3.0-or-later, GPL-2.0-or-later, Apache 2.0 |
 | `tests/ipc_message.c` (the HIPC, CMIF and TIPC request builders) | libnx | ISC |
@@ -43,6 +49,9 @@ a source keep that source's copyright lines and license, most with the revision 
 
 Dynarmic (0BSD) and its GPL-3.0-or-later fork were consulted for the recompiler's instruction semantics. No code was
 ported from them.
+
+[Nexium](https://nexium-emu.org/) (MIT) is credited for its research and development, which SwitchRecomp, the
+project ScarletNX started from, took as its basis.
 
 Installed license texts: `share/licenses/scarletnx/`. AppImage system-library licenses
 and package manifest: `share/licenses/`. Component license files contain the full terms.

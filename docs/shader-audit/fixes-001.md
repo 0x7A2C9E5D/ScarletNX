@@ -116,5 +116,5 @@ All paths below are under Eden's
 The referenced visitor files and opcode table credit the 2021 yuzu Emulator
 Project under GPL-2.0-or-later. Eden support files also retain their Eden
 copyright and GPL-3.0-or-later notices. They are compiled from the user's
-unchanged checkout, not copied into this patch. ScarletNX's original MZ Labs
-Apache-2.0 notices and fork GPL-3.0-or-later notices are preserved.
+unchanged checkout, not copied into this patch. ScarletNX's GPL-3.0-or-later
+notices are preserved.

@@ -1074,7 +1074,7 @@ static int nns_nvdrv_INvDrvServices_Open(SvcObj* self, IpcBuf path, u32* fd, u32
     LOG("nvdrv: open %s -> %d\n", name, slot);
     *fd = (u32)slot;
     *error = slot < 0 ? 0x30003u : 0; /* FileOperationFailed when every fd is taken (or no memory) */
-    return 0;
+    R_SUCCEED();
 }
 /* what goes with a closed fd: the channel and its syncpoint once the GPU thread has run the jobs queued on it (freed
    now, the id could go to a new channel those jobs would then increment), an NVDEC or VIC channel with its decoder
@@ -1184,17 +1184,17 @@ static u32 nv_ioctl(u32 fd, u32 cmd, IpcBuf in, IpcBuf out, IpcBuf extra, int ex
 static int nns_nvdrv_INvDrvServices_Ioctl(SvcObj* self, u32 fd, u32 request, IpcBuf in, IpcBuf out, u32* error) {
     IpcBuf none = {0, 0, 0};
     *error = nv_ioctl(fd, request, in, out, none, 0, 1);
-    return 0;
+    R_SUCCEED();
 }
 static int nns_nvdrv_INvDrvServices_Ioctl2(SvcObj* self, u32 fd, u32 request, IpcBuf in, IpcBuf inline_in, IpcBuf out,
                                            u32* error) {
     *error = nv_ioctl(fd, request, in, out, inline_in, 0, 11);
-    return 0;
+    R_SUCCEED();
 }
 static int nns_nvdrv_INvDrvServices_Ioctl3(SvcObj* self, u32 fd, u32 request, IpcBuf in, IpcBuf out, IpcBuf inline_out,
                                            u32* error) {
     *error = nv_ioctl(fd, request, in, out, inline_out, 1, 12);
-    return 0;
+    R_SUCCEED();
 }
 static int nns_nvdrv_INvDrvServices_Close(SvcObj* self, u32 fd, u32* error) {
     NvFile old;
@@ -1215,7 +1215,7 @@ static int nns_nvdrv_INvDrvServices_Close(SvcObj* self, u32 fd, u32* error) {
     pm_unlock(&nv.lock);
     if (release) nv_release(&old, slots);
     *error = open ? 0 : 8; /* an fd that isn't open, or closed already: the NvError the ioctls answer for it */
-    return 0;
+    R_SUCCEED();
 }
 /* the ctrl fd's ids name event slots, a channel's ids its own events */
 static int nns_nvdrv_INvDrvServices_QueryEvent(SvcObj* self, u32 fd, u32 event_id, u32* error, u32* event) {
@@ -1246,13 +1246,13 @@ static int nns_nvdrv_INvDrvServices_QueryEvent(SvcObj* self, u32 fd, u32 event_i
     if (dev == DEV_NONE) { /* an fd that isn't open: the NvError the ioctls answer for it, and no handle to leak */
         *event = 0;
         *error = 8;
-        return 0;
+        R_SUCCEED();
     }
     if (!e) e = kevent_new("nv query");
     *event = h_new(&e->o);
     if (held) kobj_unref(&e->o);
     *error = 0;
-    return 0;
+    R_SUCCEED();
 }
 static SvcObj* new_nvdrv(void) { return nns_nvdrv_INvDrvServices_new(0); }
 

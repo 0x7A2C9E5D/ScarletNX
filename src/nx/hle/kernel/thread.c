@@ -3,9 +3,9 @@
 /* guest threads (each on a host thread of its own), the thread table, process exit, and the four cores the threads
    take turns on */
 #include "nx/hle/kernel/kernel_int.h"
-#include "nx/gpu/renderer.h"
 #include "nx/runtime/arm.h"
 #include "nx/runtime/loader.h"
+#include "nx/runtime/main.h"
 
 KThread* g_threads[256];
 int g_nthreads;
@@ -360,10 +360,10 @@ void kernel_run_main(u64 entry, u64 stack_size, int prio, int core) {
 }
 
 /* svcExitProcess, and the game's end however it comes: what the runtime keeps across runs is saved first, as the
-   process ends without joining anything */
+   process ends without joining anything. Through snx_save_before_exit, so an unattended limit reached meanwhile doesn't
+   write the same files at once */
 void process_exit(int code) {
     LOG("The game exited (code %d)\n", code);
-    save_hints();
-    if (g_renderer && g_renderer->save) g_renderer->save();
+    snx_save_before_exit();
     plat_exit_now(code);
 }

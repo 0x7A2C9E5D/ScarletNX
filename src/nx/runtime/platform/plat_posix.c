@@ -1,48 +1,572 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-#define _GNU_SOURCE
-/* the platform layer on Linux and other POSIX systems: locks, threads, time, virtual memory and write tracking
-   (userfaultfd), files, shared libraries, the crash handler */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The platform layer on Linux, Android, FreeBSD and Apple systems: threads, time, the guest's address space with
+   written-page tracking, files, libraries, the text entry dialog and the crash handler */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE /* REG_RIP, pipe2 */
+#endif
+#include "nx/runtime/platform/plat.h"
 #include "nx/runtime/main.h"
 #include "nx/runtime/platform/log.h"
-#include "nx/runtime/platform/plat.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <limits.h>
-#include <sys/mman.h>
-#include <sys/resource.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <sys/syscall.h>
-#include <sys/wait.h>
-#include <spawn.h>
-#include <fcntl.h>
-#include <unistd.h>
-#if defined(__linux__)
-#include <linux/fs.h>
-#include <linux/userfaultfd.h>
-#endif
 #include <dirent.h>
 #include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <sched.h>
 #include <signal.h>
-#ifdef __APPLE__
-/* Darwin's <ucontext.h> stops the build unless _XOPEN_SOURCE asks for the deprecated context functions; the type the
-   signal handler reads is in this one */
+#include <spawn.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
 #include <sys/ucontext.h>
 #else
 #include <ucontext.h>
 #endif
-#include <sched.h>
-#include <errno.h>
-#ifdef __APPLE__
-#include <TargetConditionals.h>
+#if defined(__linux__)
+#include <linux/falloc.h>
+#include <linux/fs.h>
+#include <linux/userfaultfd.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
 #endif
+#if defined(__ANDROID__)
+#include <SDL3/SDL_system.h>
+#endif
+
+#ifndef MAP_NORESERVE
+#define MAP_NORESERVE 0 /* FreeBSD never reserves swap for a mapping */
+#endif
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+
 extern char** environ;
+
+/* the crash report needs about 12 KiB of stack; a thread whose own stack overflowed has none left */
+#define ALT_STACK_SIZE 32768
+/* below this a thread is a small helper that gets no alternate signal stack */
+#define ALT_STACK_MIN_THREAD ((size_t)256 << 10)
+
+/* ================================================================ condition variables */
+void pc_init(PCond* c) {
+#if defined(__APPLE__)
+    pthread_cond_init(&c->c, NULL); /* Darwin has no clock attribute: timed waits are relative there */
+#else
+    pthread_condattr_t a;
+    pthread_condattr_init(&a);
+    pthread_condattr_setclock(&a, CLOCK_MONOTONIC); /* deadlines don't move when the wall clock is set */
+    pthread_cond_init(&c->c, &a);
+    pthread_condattr_destroy(&a);
+#endif
+}
+void pc_signal(PCond* c) { pthread_cond_signal(&c->c); }
+void pc_broadcast(PCond* c) { pthread_cond_broadcast(&c->c); }
+int pc_wait(PCond* c, PMutex* m, i64 timeout_ns) {
+    struct timespec ts;
+    int r;
+    if (timeout_ns < 0) {
+        pthread_cond_wait(&c->c, &m->l);
+        return 0;
+    }
+#if defined(__APPLE__)
+    ts.tv_sec = (time_t)(timeout_ns / 1000000000);
+    ts.tv_nsec = (long)(timeout_ns % 1000000000);
+    r = pthread_cond_timedwait_relative_np(&c->c, &m->l, &ts);
+#else
+    {
+        u64 sec;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        sec = (u64)timeout_ns / 1000000000u;
+        ts.tv_nsec += (long)((u64)timeout_ns % 1000000000u);
+        if (ts.tv_nsec >= 1000000000L) {
+            ts.tv_nsec -= 1000000000L;
+            sec++;
+        }
+        ts.tv_sec = (time_t)((u64)ts.tv_sec + sec);
+    }
+    r = pthread_cond_timedwait(&c->c, &m->l, &ts);
+#endif
+    return r == ETIMEDOUT;
+}
+
+/* ================================================================ threads */
+typedef struct {
+    PThreadFn fn;
+    void* arg;
+    int alt_stack;
+} ThreadStart;
+
+static void alt_stack_off(void) {
+    stack_t ss;
+    memset(&ss, 0, sizeof ss);
+    ss.ss_flags = SS_DISABLE;
+    sigaltstack(&ss, NULL);
+}
+
+/* the alternate stack lives in this frame for as long as fn runs, and is switched off before the frame goes. Not
+   inlined: in thread_start's frame the array would take its room on every thread, the small ones too */
+__attribute__((noinline)) static void run_with_alt_stack(PThreadFn fn, void* arg) {
+    char stack[ALT_STACK_SIZE];
+    stack_t ss;
+    memset(&ss, 0, sizeof ss);
+    ss.ss_sp = stack;
+    ss.ss_size = sizeof stack;
+    sigaltstack(&ss, NULL);
+    fn(arg);
+    alt_stack_off();
+}
+
+static void* thread_start(void* p) {
+    ThreadStart s = *(ThreadStart*)p;
+    free(p);
+    if (s.alt_stack)
+        run_with_alt_stack(s.fn, s.arg);
+    else
+        s.fn(s.arg);
+    return NULL;
+}
+
+int plat_thread(PThreadFn fn, void* arg, size_t stack) {
+    ThreadStart* s = malloc(sizeof *s);
+    pthread_attr_t a;
+    pthread_t t;
+    int r;
+    if (!s) return -1;
+    s->fn = fn;
+    s->arg = arg;
+    s->alt_stack = stack == 0 || stack >= ALT_STACK_MIN_THREAD;
+    pthread_attr_init(&a);
+    pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+    if (stack) {
+        /* smaller than the minimum, setstacksize fails and the default would be used silently */
+        if (stack < (size_t)PTHREAD_STACK_MIN) stack = (size_t)PTHREAD_STACK_MIN;
+#if defined(__APPLE__)
+        {
+            size_t page = (size_t)sysconf(_SC_PAGESIZE); /* 16 KiB on Apple silicon; Darwin wants whole pages */
+            stack = (stack + page - 1) / page * page;
+        }
+#endif
+        pthread_attr_setstacksize(&a, stack);
+    }
+    r = pthread_create(&t, &a, thread_start, s);
+    pthread_attr_destroy(&a);
+    if (r) {
+        free(s);
+        return -1;
+    }
+    return 0;
+}
+void plat_thread_exit(void) {
+    /* pthread_exit leaves run_with_alt_stack's frame without returning through it */
+    alt_stack_off();
+    pthread_exit(NULL);
+}
+void plat_yield(void) { sched_yield(); }
+void plat_sleep_ns(i64 ns) {
+    struct timespec ts;
+    if (ns <= 0) {
+        sched_yield();
+        return;
+    }
+    ts.tv_sec = (time_t)(ns / 1000000000);
+    ts.tv_nsec = (long)(ns % 1000000000);
+    while (nanosleep(&ts, &ts) && errno == EINTR) {
+    }
+}
+void plat_exit_now(int code) {
+    fflush(NULL);
+    _exit(code);
+}
+
+/* ================================================================ time */
+u64 plat_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (u64)ts.tv_sec * 1000000000u + (u64)ts.tv_nsec;
+}
+i64 plat_unix_time(void) { return (i64)time(NULL); }
+i64 plat_tz_offset(void) {
+    time_t now = time(NULL);
+    struct tm t;
+    if (!localtime_r(&now, &t)) return 0;
+    return (i64)t.tm_gmtoff;
+}
+
+/* ================================================================ the guest's address space */
+/* Written-page tracking (Linux 6.7 and later): the reservation is registered with a userfaultfd in asynchronous
+   write-protect mode, so the kernel unprotects a page on its first write (the guest's, or a read() into guest memory)
+   with no handler thread, and PAGEMAP_SCAN lists the written pages and protects them again in one call. The
+   userfaultfd is kept open for the whole run; only the ranges a cache scans are ever protected again. Registration
+   belongs to a mapping: a range mapped again with MAP_FIXED (the alias pool's, below) is registered again, or a scan
+   over it fails. g_pagemap goes back to -1 when that fails, so every scan says -1 and the caches compare contents */
+static int g_pagemap = -1;
+#if defined(__linux__) && defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC) && defined(UFFD_USER_MODE_ONLY)
+static int g_uffd = -1;
+#endif
+
+static int ww_register(u8* p, u64 size) {
+#if defined(__linux__) && defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC) && defined(UFFD_USER_MODE_ONLY)
+    struct uffdio_register reg;
+    if (g_uffd < 0) return 0;
+    memset(&reg, 0, sizeof reg);
+    reg.range.start = (u64)(uintptr_t)p;
+    reg.range.len = size;
+    reg.mode = UFFDIO_REGISTER_MODE_WP;
+    return ioctl(g_uffd, UFFDIO_REGISTER, &reg) ? -1 : 0;
+#else
+    (void)p;
+    (void)size;
+    return 0;
+#endif
+}
+
+static void ww_init(u8* p, u64 size) {
+#if defined(__linux__) && defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC) && defined(UFFD_USER_MODE_ONLY)
+    struct uffdio_api api;
+    long fd;
+    int pm;
+    if (getenv("SNX_NO_WW")) return;
+    fd = syscall(SYS_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY);
+    if (fd < 0) return;
+    memset(&api, 0, sizeof api);
+    api.api = UFFD_API;
+    api.features = UFFD_FEATURE_WP_ASYNC | UFFD_FEATURE_WP_UNPOPULATED;
+    g_uffd = (int)fd;
+    if (ioctl((int)fd, UFFDIO_API, &api) || ww_register(p, size)) {
+        close((int)fd);
+        g_uffd = -1;
+        return;
+    }
+    pm = open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC);
+    if (pm < 0) {
+        close((int)fd);
+        g_uffd = -1;
+        return;
+    }
+    g_pagemap = pm; /* before any other thread exists: mem_init runs on the main thread at startup */
+#else
+    (void)p;
+    (void)size;
+#endif
+}
+/* a range mapped again: registered again, or tracking off for the run (the pagemap stays open, as a scan on another
+   thread may be using it) */
+static void ww_remapped(u8* p, u64 size) {
+    if (__atomic_load_n(&g_pagemap, __ATOMIC_ACQUIRE) < 0 || !ww_register(p, size)) return;
+    __atomic_store_n(&g_pagemap, -1, __ATOMIC_RELEASE);
+    WARN("memory: could not watch remapped guest memory for writes (error %d): caches compare contents now\n", errno);
+}
+
+int plat_ww_scan(u8* p, u64 size, void (*cb)(u8* p, u64 size)) {
+#if defined(__linux__) && defined(PAGEMAP_SCAN)
+    struct page_region regions[64];
+    struct pm_scan_arg arg;
+    u64 start = (u64)(uintptr_t)p & ~(u64)4095, end = ((u64)(uintptr_t)p + size + 4095) & ~(u64)4095;
+    int pm = __atomic_load_n(&g_pagemap, __ATOMIC_ACQUIRE);
+    if (pm < 0) return -1;
+    while (start < end) {
+        int i, n;
+        memset(&arg, 0, sizeof arg);
+        arg.size = sizeof arg;
+        arg.flags = PM_SCAN_WP_MATCHING | PM_SCAN_CHECK_WPASYNC;
+        arg.start = start;
+        arg.end = end;
+        arg.vec = (u64)(uintptr_t)regions;
+        arg.vec_len = sizeof regions / sizeof *regions;
+        arg.category_mask = PAGE_IS_WRITTEN;
+        arg.return_mask = PAGE_IS_WRITTEN;
+        n = ioctl(pm, PAGEMAP_SCAN, &arg);
+        if (n < 0) return -1;
+        for (i = 0; i < n; i++) cb((u8*)(uintptr_t)regions[i].start, regions[i].end - regions[i].start);
+        /* a full vector may have stopped the walk early: go on from where it stopped */
+        if ((u64)n < arg.vec_len || !arg.walk_end || arg.walk_end >= end) break;
+        start = arg.walk_end;
+    }
+    return 0;
+#else
+    (void)p;
+    (void)size;
+    (void)cb;
+    return -1;
+#endif
+}
+
+u8* plat_vm_reserve(u64 size) {
+    long page = sysconf(_SC_PAGESIZE);
+    void* p;
+    /* the guest's memory is protected in the Switch's 4 KiB pages, which mprotect can't do with larger host pages */
+    if (page != 4096)
+        fatal("This system uses %ld KiB memory pages. ScarletNX only runs on systems with 4 KiB pages.", page / 1024);
+    p = mmap(NULL, (size_t)size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (p == MAP_FAILED) return NULL;
+    ww_init((u8*)p, size);
+    return (u8*)p;
+}
+int plat_vm_commit(u8* p, u64 size) { return mprotect(p, (size_t)size, PROT_READ | PROT_WRITE) ? -1 : 0; }
+void plat_vm_decommit(u8* p, u64 size) {
+#if defined(__APPLE__)
+    /* Darwin's MADV_DONTNEED may keep the contents: fresh pages over the range are certain to read zero */
+    mmap(p, (size_t)size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+#else
+    madvise(p, (size_t)size, MADV_DONTNEED);
+    mprotect(p, (size_t)size, PROT_NONE);
+#endif
+}
+
+/* The alias pool (Linux and Android): one memfd, as large as asked and sparse, whose pages mem.c maps at guest
+   addresses with MAP_SHARED, so two addresses of the reservation (and a service's mapping outside it) are the same
+   pages, and a freed range is punched out so it reads zero when handed out again. The other systems here keep mem.c's
+   copies: the pool is untested there (FreeBSD has memfd_create and, from 14, fspacectl to free a range; Apple has
+   shm_open, whose descriptors can't be read or written, and no way to free part of one) */
+static int g_alias = -1;
+
+int plat_alias_init(u64 size) {
+#if defined(__linux__) && defined(SYS_memfd_create) && defined(FALLOC_FL_PUNCH_HOLE)
+    long fd = syscall(SYS_memfd_create, "snx-alias", 1u /* MFD_CLOEXEC */);
+    if (fd < 0) return -1;
+    if (ftruncate((int)fd, (off_t)size)) {
+        close((int)fd);
+        return -1;
+    }
+    g_alias = (int)fd; /* mem_init, before any other thread */
+    return 0;
+#else
+    (void)size;
+    return -1;
+#endif
+}
+int plat_alias_map(u8* p, u64 off, u64 size) {
+    if (g_alias < 0 ||
+        mmap(p, (size_t)size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, g_alias, (off_t)off) == MAP_FAILED)
+        return -1;
+    ww_remapped(p, size);
+    return 0;
+}
+int plat_alias_unmap(u8* p, u64 size) {
+    if (mmap(p, (size_t)size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0) == MAP_FAILED)
+        return -1;
+    ww_remapped(p, size); /* the anonymous mapping is a new one too */
+    return 0;
+}
+int plat_alias_write(u64 off, const void* src, u64 size) {
+    const u8* s = (const u8*)src;
+    while (size) {
+        ssize_t n = pwrite(g_alias, s, (size_t)size, (off_t)off);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) continue;
+            return -1;
+        }
+        s += n, off += (u64)n, size -= (u64)n;
+    }
+    return 0;
+}
+int plat_alias_read(u64 off, void* dst, u64 size) {
+    u8* d = (u8*)dst;
+    while (size) {
+        ssize_t n = pread(g_alias, d, (size_t)size, (off_t)off);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) continue;
+            return -1;
+        }
+        d += n, off += (u64)n, size -= (u64)n;
+    }
+    return 0;
+}
+void plat_alias_free(u64 off, u64 size) {
+#if defined(__linux__) && defined(FALLOC_FL_PUNCH_HOLE)
+    if (g_alias >= 0 && fallocate(g_alias, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, (off_t)off, (off_t)size))
+        fatal("Could not free %llu KiB of the alias pool (error %d)", (unsigned long long)(size >> 10), errno);
+#else
+    (void)off;
+    (void)size;
+#endif
+}
+u8* plat_alias_host(u64 off, u64 size) {
+    void* p;
+    if (g_alias < 0) return NULL;
+    p = mmap(NULL, (size_t)size, PROT_READ | PROT_WRITE, MAP_SHARED, g_alias, (off_t)off);
+    return p == MAP_FAILED ? NULL : (u8*)p;
+}
+void plat_alias_host_free(u8* p, u64 size) { munmap(p, (size_t)size); }
+
+/* ================================================================ libraries */
+#if defined(__ANDROID__)
+/* Shared storage (/sdcard) is mounted noexec: a module there loads from a copy in the app's cache folder */
+static void* dl_open_from_cache(const char* path) {
+    const char* cache = SDL_GetAndroidCachePath();
+    const char* base = strrchr(path, '/');
+    char copy[1400], buf[65536];
+    FILE *in, *out;
+    size_t n;
+    int ok = 1;
+    if (!cache) return NULL;
+    base = base ? base + 1 : path;
+    if ((size_t)snprintf(copy, sizeof copy, "%s/%s", cache, base) >= sizeof copy) return NULL;
+    in = fopen(path, "rb");
+    if (!in) return NULL;
+    out = fopen(copy, "wb");
+    if (!out) {
+        fclose(in);
+        return NULL;
+    }
+    while (ok && (n = fread(buf, 1, sizeof buf, in)) > 0) ok = fwrite(buf, 1, n, out) == n;
+    ok = ok && !ferror(in);
+    fclose(in);
+    if (fclose(out) || !ok) return NULL;
+    return dlopen(copy, RTLD_NOW | RTLD_LOCAL);
+}
+#endif
+void* plat_dl_open(const char* path) {
+    void* h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#if defined(__ANDROID__)
+    if (!h) h = dl_open_from_cache(path);
+#endif
+    return h;
+}
+void* plat_dl_sym(void* h, const char* name) { return dlsym(h, name); }
+const char* plat_dl_error(void) {
+    const char* e = dlerror();
+    return e ? e : "no error reported";
+}
+
+/* ================================================================ files and folders */
+int plat_is_dir(const char* path) {
+    struct stat st;
+    return !stat(path, &st) && S_ISDIR(st.st_mode);
+}
+u64 plat_file_size(const char* path) {
+    struct stat st;
+    return stat(path, &st) || st.st_size < 0 ? 0 : (u64)st.st_size;
+}
+
+typedef struct {
+    DIR* dir;
+    char path[1024]; /* the folder, to stat its entries */
+} DirState;
+int plat_dir_open(PDir* d, const char* path) {
+    size_t len = strlen(path);
+    DirState* s;
+    memset(d, 0, sizeof *d);
+    /* a longer path would be cut, and the entries stat'ed in some other folder */
+    if (len >= sizeof s->path) return -1;
+    s = malloc(sizeof *s);
+    if (!s) return -1;
+    memcpy(s->path, path, len + 1);
+    s->dir = opendir(path);
+    if (!s->dir) {
+        free(s);
+        return -1;
+    }
+    d->h = s;
+    d->first = 1;
+    return 0;
+}
+int plat_dir_next(PDir* d) {
+    DirState* s = (DirState*)d->h;
+    struct dirent* e;
+    if (!s) return 0;
+    d->first = 0;
+    while ((e = readdir(s->dir)) != NULL) {
+        char full[1600];
+        struct stat st;
+        size_t n = strlen(e->d_name);
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..") || n >= sizeof d->name) continue;
+        memcpy(d->name, e->d_name, n + 1);
+        snprintf(full, sizeof full, "%s/%s", s->path, e->d_name);
+        d->is_dir = 0;
+        d->size = 0;
+        if (!stat(full, &st)) {
+            d->is_dir = S_ISDIR(st.st_mode) != 0;
+            d->size = st.st_size > 0 ? (u64)st.st_size : 0;
+        }
+        return 1;
+    }
+    return 0;
+}
+void plat_dir_close(PDir* d) {
+    DirState* s = (DirState*)d->h;
+    if (s) {
+        closedir(s->dir);
+        free(s);
+    }
+    d->h = NULL;
+}
+
+i64 plat_pread(FILE* f, void* buf, u64 size, u64 off) {
+    int fd = fileno(f);
+    u64 got = 0;
+    if (fd < 0 || size > (u64)INT64_MAX || off > (u64)INT64_MAX - size) return -1;
+    /* pread may return less than asked (past 2 GiB on Linux, or interrupted): go on until done or at the end */
+    while (got < size) {
+        ssize_t r = pread(fd, (u8*)buf + got, (size_t)(size - got), (off_t)(off + got));
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (r == 0) break;
+        got += (u64)r;
+    }
+    return (i64)got;
+}
+
+static void file_map_clear(PFileMap* m) {
+    m->data = NULL;
+    m->size = 0;
+    m->borrowed = 0;
+}
+/* stat_it: the size comes from fstat, and the file must be a regular one; else known is trusted */
+static int file_map(PFileMap* m, const char* path, int stat_it, u64 known) {
+    int fd;
+    u64 size = known;
+    void* p;
+    file_map_clear(m);
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    if (stat_it) {
+        struct stat st;
+        if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size < 0) {
+            close(fd);
+            return -1;
+        }
+        size = (u64)st.st_size;
+    }
+    if (size > (u64)SIZE_MAX || size > (u64)INT64_MAX) {
+        close(fd);
+        return -1;
+    }
+    if (!size) {
+        close(fd);
+        return 0;
+    }
+    p = mmap(NULL, (size_t)size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd); /* the mapping keeps the file */
+    if (p == MAP_FAILED) return -1;
+    m->data = (const u8*)p;
+    m->size = size;
+    return 0;
+}
+int plat_file_map(PFileMap* m, const char* path) { return file_map(m, path, 1, 0); }
+int plat_file_map_sized(PFileMap* m, const char* path, u64 size) { return file_map(m, path, 0, size); }
+void plat_file_unmap(PFileMap* m) {
+    if (m->data && !m->borrowed) munmap((void*)m->data, (size_t)m->size);
+    file_map_clear(m);
+}
+int plat_replace_file(const char* tmp, const char* dst) {
+    if (!rename(tmp, dst)) return 0;
+    remove(tmp);
+    return -1;
+}
+
+/* ================================================================ text entry */
 #if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
-/* zenity and kdialog are a desktop's: Android has no dialog to ask for text yet, and an iOS app runs no program */
 int plat_text_input(char* out, size_t cap, const char* initial) {
     (void)out;
     (void)cap;
@@ -50,467 +574,158 @@ int plat_text_input(char* out, size_t cap, const char* initial) {
     return -1;
 }
 #else
-/* Run a host text dialog without a shell: the initial text is game data, not a command. */
-static int text_dialog_run(char* out, size_t cap, char* const argv[]) {
-    int fd[2];
-    if (pipe(fd)) return -1;
-    posix_spawn_file_actions_t actions;
-    if (posix_spawn_file_actions_init(&actions)) {
-        close(fd[0]);
-        close(fd[1]);
-        return -1;
+enum { DIALOG_OK = 0, DIALOG_CANCELLED = 1, DIALOG_FAILED = -1, DIALOG_MISSING = -2 };
+
+/* Runs a dialog program (no shell: the initial text is the game's data) and takes the first line it prints */
+static int run_dialog(char* const argv[], char* out, size_t cap) {
+    posix_spawn_file_actions_t fa;
+    pid_t pid;
+    int pipefd[2], r, status, len_ok = 1;
+    size_t len = 0;
+    int line_done = 0;
+    char buf[512];
+    if (pipe(pipefd)) return DIALOG_FAILED;
+    fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
+    fcntl(pipefd[1], F_SETFD, FD_CLOEXEC); /* dup2 onto stdout clears it for the child's copy */
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, pipefd[1], 1);
+    r = posix_spawnp(&pid, argv[0], &fa, NULL, argv, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    close(pipefd[1]);
+    if (r) {
+        close(pipefd[0]);
+        return r == ENOENT ? DIALOG_MISSING : DIALOG_FAILED;
     }
-    int err = posix_spawn_file_actions_addclose(&actions, fd[0]);
-    if (!err) err = posix_spawn_file_actions_adddup2(&actions, fd[1], STDOUT_FILENO);
-    if (!err) err = posix_spawn_file_actions_addclose(&actions, fd[1]);
-    pid_t pid = 0;
-    if (!err) err = posix_spawnp(&pid, argv[0], &actions, NULL, argv, environ);
-    posix_spawn_file_actions_destroy(&actions);
-    close(fd[1]);
-    if (err) {
-        close(fd[0]);
-        return err == ENOENT ? -2 : -1;
-    }
-    size_t n = 0;
-    char c;
-    int read_error = 0;
     for (;;) {
-        ssize_t got = read(fd[0], &c, 1);
-        if (got < 0 && errno == EINTR) continue;
-        if (got < 0) read_error = 1;
-        if (got != 1) break;
-        if (c == '\n') break;
-        if (n + 1 < cap)
-            out[n++] = c;
-        else
-            read_error = 1;
-    }
-    close(fd[0]);
-    out[n] = 0;
-    int status;
-    while (waitpid(pid, &status, 0) < 0) {
-        if (errno != EINTR) return -1;
-    }
-    if (!WIFEXITED(status)) return -1;
-    if (WEXITSTATUS(status) == 127) return -2;
-    return read_error ? -1 : WEXITSTATUS(status) == 0 ? 0 : WEXITSTATUS(status) == 1 ? 1 : -1;
-}
-int plat_text_input(char* out, size_t cap, const char* initial) {
-    if (!cap) return -1;
-    if (!initial) initial = "";
-#ifdef __APPLE__
-    /* macOS's own dialog, through AppleScript. The text is the script's argument, never part of it: it is game data.
-       Cancel exits with 1, as zenity's does */
-    char* osascript[] = {"osascript",
-                         "-e",
-                         "on run argv",
-                         "-e",
-                         "text returned of (display dialog \"Enter text\" default answer (item 1 of argv) with title "
-                         "\"ScarletNX\")",
-                         "-e",
-                         "end run",
-                         "--",
-                         (char*)initial,
-                         NULL};
-    int apple = text_dialog_run(out, cap, osascript);
-    return apple == -2 ? -1 : apple;
-#endif
-    char* zenity[] = {"zenity",       "--entry", "--title=ScarletNX", "--text=Enter text", "--entry-text",
-                      (char*)initial, NULL};
-    char* kdialog[] = {"kdialog", "--title", "ScarletNX", "--inputbox", "Enter text", (char*)initial, NULL};
-    const char* desktop = getenv("XDG_CURRENT_DESKTOP");
-    int kde = desktop && (strstr(desktop, "KDE") || strstr(desktop, "Plasma"));
-    int result = text_dialog_run(out, cap, kde ? kdialog : zenity);
-    if (result == -2) result = text_dialog_run(out, cap, kde ? zenity : kdialog);
-    return result == -2 ? -1 : result;
-}
-#endif
-/* FreeBSD has no MAP_NORESERVE: it never reserves swap for a mapping up front, so there is nothing to opt out of */
-#ifndef MAP_NORESERVE
-#define MAP_NORESERVE 0
-#endif
-void pc_init(PCond* c) {
-    pthread_condattr_t a;
-    pthread_condattr_init(&a);
-#ifndef __APPLE__ /* Darwin has no clock to choose: pc_wait waits a relative time there */
-    pthread_condattr_setclock(&a, CLOCK_MONOTONIC);
-#endif
-    pthread_cond_init(&c->c, &a);
-}
-void pc_signal(PCond* c) { pthread_cond_signal(&c->c); }
-void pc_broadcast(PCond* c) { pthread_cond_broadcast(&c->c); }
-int pc_wait(PCond* c, PMutex* m, i64 ns) {
-    if (ns < 0) {
-        pthread_cond_wait(&c->c, &m->l);
-        return 0;
-    }
-    struct timespec ts;
-#ifdef __APPLE__
-    ts.tv_sec = ns / 1000000000;
-    ts.tv_nsec = ns % 1000000000;
-    return pthread_cond_timedwait_relative_np(&c->c, &m->l, &ts) == ETIMEDOUT;
-#endif
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    u64 t = (u64)ts.tv_sec * 1000000000ull + ts.tv_nsec + (u64)ns;
-    ts.tv_sec = t / 1000000000ull;
-    ts.tv_nsec = t % 1000000000ull;
-    return pthread_cond_timedwait(&c->c, &m->l, &ts) == ETIMEDOUT;
-}
-typedef struct {
-    PThreadFn fn;
-    void* arg;
-    size_t stack;
-} TArg;
-/* The signal stack is per thread, and only the main thread had one (plat_install_crash_handler): a guest thread that
-   overflowed its stack died without a crash report, the handler having no stack to run on. A thread with a big stack
-   now gets one in its own first frame. Small stacks (the 64 KiB audio clock) do without, it would take half of it */
-#define ALTSTACK_MIN_STACK (256u << 10)
-static void altstack_off(void) {
-    stack_t ss;
-    memset(&ss, 0, sizeof ss);
-    ss.ss_flags = SS_DISABLE;
-    sigaltstack(&ss, NULL);
-}
-__attribute__((noinline)) static void run_with_altstack(TArg a) {
-    char alt[32768]; /* the crash report needs about 12 KiB */
-    stack_t ss;
-    memset(&ss, 0, sizeof ss);
-    ss.ss_sp = alt;
-    ss.ss_size = sizeof alt;
-    sigaltstack(&ss, NULL);
-    a.fn(a.arg);
-    altstack_off(); /* alt goes out of scope, and the thread's exit code reuses that stack */
-}
-static void* tstart(void* p) {
-    TArg a = *(TArg*)p;
-    free(p);
-    if (!a.stack || a.stack >= ALTSTACK_MIN_STACK)
-        run_with_altstack(a);
-    else
-        a.fn(a.arg);
-    return NULL;
-}
-int plat_thread(PThreadFn fn, void* arg, size_t stack) {
-    TArg* a = malloc(sizeof *a);
-    if (!a) return -1;
-    a->fn = fn;
-    a->arg = arg;
-    a->stack = stack;
-    pthread_attr_t at;
-    pthread_attr_init(&at);
-    /* below the minimum, pthread_attr_setstacksize fails and the thread would get the default size instead */
-    if (stack && stack < (size_t)PTHREAD_STACK_MIN) stack = (size_t)PTHREAD_STACK_MIN;
-#ifdef __APPLE__
-    /* and Darwin's takes only whole pages (16 KiB on Apple silicon) */
-    if (stack) stack = (stack + (size_t)sysconf(_SC_PAGESIZE) - 1) & ~((size_t)sysconf(_SC_PAGESIZE) - 1);
-#endif
-    if (stack) pthread_attr_setstacksize(&at, stack);
-    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
-    pthread_t t;
-    int r = pthread_create(&t, &at, tstart, a);
-    pthread_attr_destroy(&at);
-    if (r) free(a);
-    return r ? -1 : 0;
-}
-void plat_thread_exit(void) {
-    altstack_off(); /* pthread_exit unwinds through run_with_altstack's frame, which holds the signal stack */
-    pthread_exit(NULL);
-}
-void plat_exit_now(int code) {
-    fflush(NULL);
-    _exit(code);
-}
-void plat_sleep_ns(i64 ns) {
-    if (ns <= 0) {
-        sched_yield();
-        return;
-    }
-    struct timespec ts = {ns / 1000000000, ns % 1000000000};
-    while (nanosleep(&ts, &ts) == -1 && errno == EINTR);
-}
-void plat_yield(void) { sched_yield(); }
-u64 plat_ns(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (u64)ts.tv_sec * 1000000000ull + ts.tv_nsec;
-}
-i64 plat_unix_time(void) { return (i64)time(NULL); }
-i64 plat_tz_offset(void) {
-    time_t t = time(NULL);
-    struct tm lt;
-    localtime_r(&t, &lt);
-    return (i64)lt.tm_gmtoff;
-}
-/* Written-page tracking for the GPU caches (plat_ww_scan): the reserved guest memory is registered with a
-   userfaultfd in asynchronous write-protect mode, which needs no handler thread: a write to a protected page just
-   unprotects it in the kernel, writes from the kernel (read() into guest memory) included. PAGEMAP_SCAN then lists
-   the written pages of a range and protects them again. Only ranges a cache scans are ever protected, so the rest of
-   guest memory costs nothing. Needs Linux 6.7; without it, the caches check contents as before */
-static int g_uffd_pagemap = -1;
-#if defined(__linux__) && defined(PAGEMAP_SCAN)
-static void ww_init(u8* p, u64 size) {
-    if (getenv("SNX_NO_WW")) return;
-    int u = (int)syscall(SYS_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY);
-    if (u < 0) return;
-    struct uffdio_api api = {.api = UFFD_API, .features = UFFD_FEATURE_WP_ASYNC | UFFD_FEATURE_WP_UNPOPULATED};
-    struct uffdio_register reg = {.range = {(u64)(uintptr_t)p, size}, .mode = UFFDIO_REGISTER_MODE_WP};
-    int pm = open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC);
-    if (pm < 0 || ioctl(u, UFFDIO_API, &api) || ioctl(u, UFFDIO_REGISTER, &reg)) {
-        if (pm >= 0) close(pm);
-        close(u);
-        return;
-    }
-    g_uffd_pagemap = pm; /* the userfaultfd stays open for the registration to last */
-}
-int plat_ww_scan(u8* p, u64 size, void (*cb)(u8* p, u64 size)) {
-    if (g_uffd_pagemap < 0) return -1;
-    struct page_region r[64];
-    u64 start = (u64)(uintptr_t)p & ~4095ull, end = ((u64)(uintptr_t)p + size + 4095) & ~4095ull;
-    while (start < end) {
-        struct pm_scan_arg a = {.size = sizeof a,
-                                .flags = PM_SCAN_WP_MATCHING,
-                                .start = start,
-                                .end = end,
-                                .vec = (u64)(uintptr_t)r,
-                                .vec_len = 64,
-                                .category_mask = PAGE_IS_WRITTEN,
-                                .return_mask = PAGE_IS_WRITTEN};
-        long n = ioctl(g_uffd_pagemap, PAGEMAP_SCAN, &a);
-        if (n < 0) return -1;
-        for (long i = 0; i < n; i++) cb((u8*)(uintptr_t)r[i].start, r[i].end - r[i].start);
-        if (a.walk_end >= end || !a.walk_end) break; /* walk_end: where a full vec stopped the scan */
-        start = a.walk_end;
-    }
-    return 0;
-}
-#else
-static void ww_init(u8* p, u64 size) {
-    (void)p;
-    (void)size;
-}
-int plat_ww_scan(u8* p, u64 size, void (*cb)(u8* p, u64 size)) {
-    (void)p;
-    (void)size;
-    (void)cb;
-    return -1;
-}
-#endif
-u8* plat_vm_reserve(u64 size) {
-    /* guest memory is mapped and protected in the Switch's 4 KiB pages: with bigger host pages (16 KiB or 64 KiB on
-       some arm64 systems) mprotect fails on most of them */
-    long pg = sysconf(_SC_PAGESIZE);
-    if (pg != 4096)
-        fatal("This system uses %ld KiB memory pages. ScarletNX only runs on systems with 4 KiB pages.", pg / 1024);
-    void* p = mmap(NULL, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    if (p == MAP_FAILED) return NULL;
-    ww_init(p, size);
-    return (u8*)p;
-}
-int plat_vm_commit(u8* p, u64 size) { return mprotect(p, size, PROT_READ | PROT_WRITE); }
-void plat_vm_decommit(u8* p, u64 size) {
-#ifdef __APPLE__
-    /* Darwin's MADV_DONTNEED keeps the pages' contents: a new mapping in their place is what gives zeroes back */
-    mmap(p, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
-#else
-    madvise(p, size, MADV_DONTNEED);
-    mprotect(p, size, PROT_NONE);
-#endif
-}
-#ifdef __ANDROID__
-#include <SDL3/SDL_system.h>
-/* Android's shared storage (/sdcard, where the app keeps games/) maps nothing executable: a module there runs from a
-   copy in the app's cache */
-void* plat_dl_open(const char* path) {
-    void* h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-    const char *cache = SDL_GetAndroidCachePath(), *name = strrchr(path, '/');
-    char copy[1200];
-    FILE *in, *out;
-    char buffer[1 << 16];
-    size_t n;
-    int ok;
-    if (h || !cache) return h;
-    snprintf(copy, sizeof copy, "%s/%s", cache, name ? name + 1 : path);
-    in = fopen(path, "rb");
-    out = in ? fopen(copy, "wb") : NULL;
-    ok = in && out;
-    while (ok && (n = fread(buffer, 1, sizeof buffer, in)) > 0) ok = fwrite(buffer, 1, n, out) == n;
-    ok = ok && !ferror(in);
-    if (in) fclose(in);
-    if (out && fclose(out)) ok = 0;
-    return ok ? dlopen(copy, RTLD_NOW | RTLD_LOCAL) : NULL;
-}
-#else
-void* plat_dl_open(const char* path) { return dlopen(path, RTLD_NOW | RTLD_LOCAL); }
-#endif
-void* plat_dl_sym(void* h, const char* n) { return dlsym(h, n); }
-const char* plat_dl_error(void) {
-    const char* e = dlerror();
-    return e ? e : "no error reported";
-}
-int plat_is_dir(const char* p) {
-    struct stat s;
-    return !stat(p, &s) && S_ISDIR(s.st_mode);
-}
-typedef struct {
-    DIR* d;
-    char path[1024];
-} PD_;
-int plat_dir_open(PDir* d, const char* path) {
-    if (strlen(path) >= sizeof((PD_*)0)->path) return -1; /* cut, plat_dir_next would stat files of another folder */
-    PD_* p = malloc(sizeof *p);
-    if (!p) return -1;
-    p->d = opendir(path);
-    if (!p->d) {
-        free(p);
-        return -1;
-    }
-    strncpy(p->path, path, 1023);
-    p->path[1023] = 0;
-    d->h = p;
-    return 0;
-}
-int plat_dir_next(PDir* d) {
-    PD_* p = d->h;
-    struct dirent* e;
-    while ((e = readdir(p->d))) {
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-        strncpy(d->name, e->d_name, 511);
-        d->name[511] = 0;
-        char f[1600];
-        snprintf(f, sizeof f, "%s/%s", p->path, e->d_name);
-        struct stat s;
-        if (stat(f, &s)) continue;
-        d->is_dir = S_ISDIR(s.st_mode);
-        d->size = (u64)s.st_size;
-        return 1;
-    }
-    return 0;
-}
-void plat_dir_close(PDir* d) {
-    PD_* p = d->h;
-    closedir(p->d);
-    free(p);
-}
-u64 plat_file_size(const char* p) {
-    struct stat s;
-    if (stat(p, &s)) return 0;
-    return (u64)s.st_size;
-}
-/* pread returns less than asked when interrupted or past 2 GiB in one call: loop to the end of the file */
-i64 plat_pread(FILE* f, void* buf, u64 size, u64 off) {
-    int fd = fileno(f);
-    u64 got = 0;
-    while (got < size) {
-        ssize_t n = pread(fd, (u8*)buf + got, size - got, (off_t)(off + got));
+        ssize_t n = read(pipefd[0], buf, sizeof buf);
+        ssize_t i;
         if (n < 0 && errno == EINTR) continue;
-        if (n < 0) return -1;
-        if (!n) break;
-        got += (u64)n;
-    }
-    return (i64)got;
-}
-static int file_map(PFileMap* m, const char* path, const u64* indexed_size) {
-    m->data = NULL;
-    m->size = 0;
-    if (indexed_size && (*indexed_size > SIZE_MAX || *indexed_size > INT64_MAX)) return -1;
-    int fd = open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return -1;
-    u64 size;
-    if (indexed_size) {
-        size = *indexed_size;
-    } else {
-        struct stat s;
-        if (fstat(fd, &s) || !S_ISREG(s.st_mode) || s.st_size < 0) {
-            close(fd);
-            return -1;
+        if (n < 0) len_ok = 0;
+        if (n <= 0) break;
+        for (i = 0; i < n && !line_done; i++) {
+            if (buf[i] == '\n')
+                line_done = 1;
+            else if (len + 1 < cap)
+                out[len++] = buf[i];
+            else
+                len_ok = 0; /* longer than the game's buffer */
         }
-        size = (u64)s.st_size;
     }
-    if (size > SIZE_MAX) {
-        close(fd);
-        return -1;
+    close(pipefd[0]);
+    while (waitpid(pid, &status, 0) < 0)
+        if (errno != EINTR) return DIALOG_FAILED;
+    if (!WIFEXITED(status)) return DIALOG_FAILED;
+    switch (WEXITSTATUS(status)) {
+        case 0:
+            if (!len_ok || !cap) return DIALOG_FAILED;
+            out[len] = 0;
+            return DIALOG_OK;
+        case 1: return DIALOG_CANCELLED;
+        case 127: return DIALOG_MISSING; /* posix_spawnp may report a missing program this way */
+        default: return DIALOG_FAILED;
     }
-    if (size) { /* mmap of length 0 fails */
-        void* p = mmap(NULL, (size_t)size, PROT_READ, MAP_PRIVATE, fd, 0);
-        if (p == MAP_FAILED) {
-            close(fd);
-            return -1;
-        }
-        m->data = p;
-        m->size = size;
-    }
-    close(fd); /* the mapping keeps the file */
-    return 0;
 }
-int plat_file_map(PFileMap* m, const char* path) { return file_map(m, path, NULL); }
-int plat_file_map_sized(PFileMap* m, const char* path, u64 size) { return file_map(m, path, &size); }
-void plat_file_unmap(PFileMap* m) {
-    if (m->data && !m->borrowed) munmap((void*)m->data, (size_t)m->size);
-    m->data = NULL;
-    m->size = 0;
-    m->borrowed = 0;
+
+int plat_text_input(char* out, size_t cap, const char* initial) {
+    int r;
+#if defined(__APPLE__)
+    /* the text goes in as an argument of the script, never spliced into its source */
+    char* argv[] = {"osascript",
+                    "-e",
+                    "on run argv",
+                    "-e",
+                    "return text returned of (display dialog \"Enter text\" default answer (item 1 of argv) with title "
+                    "\"ScarletNX\")",
+                    "-e",
+                    "end run",
+                    "--",
+                    NULL,
+                    NULL};
+    argv[8] = (char*)initial;
+    r = run_dialog(argv, out, cap);
+#else
+    char entry[1100];
+    const char* desk = getenv("XDG_CURRENT_DESKTOP");
+    int kde_first = desk && (strstr(desk, "KDE") || strstr(desk, "Plasma"));
+    char* zenity[] = {"zenity", "--entry", "--title=ScarletNX", "--text=Enter text", NULL, NULL};
+    char* kdialog[] = {"kdialog", "--title", "ScarletNX", "--inputbox", "Enter text", NULL, NULL};
+    if ((size_t)snprintf(entry, sizeof entry, "--entry-text=%s", initial) >= sizeof entry) return -1;
+    zenity[4] = entry;
+    kdialog[5] = (char*)initial;
+    r = run_dialog(kde_first ? kdialog : zenity, out, cap);
+    if (r == DIALOG_MISSING) r = run_dialog(kde_first ? zenity : kdialog, out, cap);
+#endif
+    return r < 0 ? -1 : r;
 }
-int plat_replace_file(const char* tmp, const char* dst) {
-    if (!rename(tmp, dst)) return 0;
-    remove(tmp);
-    return -1;
-}
-static void sighandler(int sig, siginfo_t* si, void* uc_) {
-    /* A second fault while reporting the first ends the process. Another thread crashing meanwhile waits: the first
-       report ends with _exit */
-    static __thread volatile sig_atomic_t reporting;
-    static int crashed;
-    if (reporting) _exit(1);
-    reporting = 1;
-    if (__atomic_exchange_n(&crashed, 1, __ATOMIC_ACQ_REL))
-        for (;;) pause();
-    log_crash_mode(); /* the handler can't take the log's lock: the faulting code may hold it */
-    void* pc = NULL;
-    ucontext_t* uc = (ucontext_t*)uc_;
-#if defined(__FreeBSD__) && defined(__x86_64__)
-    pc = (void*)uc->uc_mcontext.mc_rip;
+#endif
+
+/* ================================================================ the crash handler */
+static int g_crash_reporting; /* a thread is reporting a crash */
+static __thread int t_crashed; /* this thread faulted already */
+static char g_main_alt_stack[ALT_STACK_SIZE];
+
+static void* context_pc(void* ctx) {
+    ucontext_t* uc = (ucontext_t*)ctx;
+#if defined(__linux__) && defined(__x86_64__)
+    return (void*)(uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
+#elif defined(__linux__) && defined(__aarch64__)
+    return (void*)(uintptr_t)uc->uc_mcontext.pc;
+#elif defined(__FreeBSD__) && defined(__x86_64__)
+    return (void*)(uintptr_t)uc->uc_mcontext.mc_rip;
 #elif defined(__FreeBSD__) && defined(__aarch64__)
-    pc = (void*)uc->uc_mcontext.mc_gpregs.gp_elr;
+    return (void*)(uintptr_t)uc->uc_mcontext.mc_gpregs.gp_elr;
 #elif defined(__APPLE__) && defined(__aarch64__)
-    pc = (void*)__darwin_arm_thread_state64_get_pc(uc->uc_mcontext->__ss);
+    return (void*)(uintptr_t)__darwin_arm_thread_state64_get_pc(uc->uc_mcontext->__ss);
 #elif defined(__APPLE__) && defined(__x86_64__)
-    pc = (void*)uc->uc_mcontext->__ss.__rip;
-#elif defined(__x86_64__)
-    pc = (void*)uc->uc_mcontext.gregs[REG_RIP];
-#elif defined(__aarch64__)
-    pc = (void*)uc->uc_mcontext.pc;
+    return (void*)(uintptr_t)uc->uc_mcontext->__ss.__rip;
 #else
     (void)uc;
+    return NULL;
 #endif
-    /* si_addr is the faulting address only for SIGSEGV and SIGBUS: for SIGILL and SIGFPE it's the instruction's */
-    crash_report(pc, sig == SIGSEGV || sig == SIGBUS ? si->si_addr : NULL, sig);
+}
+
+static void crash_signal(int sig, siginfo_t* si, void* ctx) {
+    int idle = 0;
+    void* fault;
+    /* a fault inside the report itself */
+    if (t_crashed) _exit(1);
+    t_crashed = 1;
+    /* one report at a time: it ends the process, so a second crashing thread just waits for that */
+    if (!__atomic_compare_exchange_n(&g_crash_reporting, &idle, 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+        for (;;) pause();
+    log_crash_mode();
+    /* for SIGILL and SIGFPE si_addr is the instruction, not an address it touched */
+    fault = sig == SIGSEGV || sig == SIGBUS ? si->si_addr : NULL;
+    crash_report(context_pc(ctx), fault, sig);
     _exit(1);
 }
-/* abort() from a library (the video driver, or out of memory): say so in the log, as on Windows. Returning lets abort
-   go on and end the process */
-static void on_abort(int s) {
+
+/* abort() (a driver's assert, a failed allocation in a library): say so, then let it go on to end the process */
+static void abort_signal(int sig) {
     log_crash_mode();
-    logf_(0, "\n*** Shutdown: abort() (signal %d), probably the video driver or out of memory ***\n", s);
+    logf_(0, "*** Shutdown: abort() (signal %d), probably the video driver or out of memory ***\n", sig);
 }
+
 void plat_install_crash_handler(void) {
+    static const int sigs[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE};
     struct sigaction sa;
-    memset(&sa, 0, sizeof sa);
-    sa.sa_sigaction = sighandler;
-    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
-    static char altstack[65536];
     stack_t ss;
-    ss.ss_sp = altstack;
-    ss.ss_size = sizeof altstack;
-    ss.ss_flags = 0;
+    size_t i;
+    memset(&ss, 0, sizeof ss);
+    ss.ss_sp = g_main_alt_stack;
+    ss.ss_size = sizeof g_main_alt_stack;
     sigaltstack(&ss, NULL);
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
-    sigaction(SIGILL, &sa, NULL);
-    sigaction(SIGFPE, &sa, NULL);
-    struct sigaction ab;
-    memset(&ab, 0, sizeof ab);
-    ab.sa_handler = on_abort;
-    ab.sa_flags = SA_ONSTACK | SA_RESETHAND;
-    sigaction(SIGABRT, &ab, NULL);
+    memset(&sa, 0, sizeof sa);
+    sigemptyset(&sa.sa_mask);
+    sa.sa_sigaction = crash_signal;
+    /* NODEFER: a fault during the report re-enters the handler, which ends the process, instead of hanging */
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
+    for (i = 0; i < sizeof sigs / sizeof *sigs; i++) sigaction(sigs[i], &sa, NULL);
+    memset(&sa, 0, sizeof sa);
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = abort_signal;
+    sa.sa_flags = SA_RESETHAND | SA_ONSTACK;
+    sigaction(SIGABRT, &sa, NULL);
 }
-void plat_prof_start(void) {} /* the sampling profiler is Windows only */
+
+void plat_prof_start(void) {}

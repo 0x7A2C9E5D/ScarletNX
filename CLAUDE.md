@@ -1,6 +1,6 @@
-# ScarletNX (Linux fork)
+# ScarletNX
 
-A Linux-first fork of SwitchRecomp by MZ Labs, a static recompiler for Switch games: ARM64 code is translated to LLVM
+ScarletNX is a Linux-first static recompiler for Switch games: ARM64 code is translated to LLVM
 IR (libgccjit on DEC Alpha) and compiled into a game module (`games/<id>/<id>_code.so`, by title ID), and the runtime
 in `src/nx/` emulates the OS (kernel, IPC, services) and the GPU (Maxwell command buffers and shaders, drawn with
 Vulkan). A change is checked against the games it affects. `README.md` has setup and commands, `docs/ROADMAP.md`
@@ -19,17 +19,13 @@ get wrong and points to the skills that carry the procedures.
 - **Find the mechanism.** A fix explains why the game does what it does: what the game or SDK code expects
   (`tools/disasm.py`), and what the runtime gave it instead. No timing tweaks, retries or special cases for a
   title ID. Syncpoints above 127 "worked" for a whole session while overwriting the game's heap.
-- **Upstream code is ours to change, carefully.** `main` is MZ Labs' code plus our commits. Keep changes small and
-  in the file's style, with a comment saying why. The `upstream` branch is only ever written by
-  `scripts/import-upstream.sh`.
-- **Licensing.** The fork is GPL-3.0-or-later (`LICENSE`, since 2026-10-11). MZ Labs' files keep their Apache-2.0
-  header, with the line saying the fork's changes are GPL, and every copy keeps NOTICE (`LICENSE.apache` is their
-  license). A new file starts with `SPDX-License-Identifier: GPL-3.0-or-later` and the fork's copyright line. Code
-  under GPL-3.0, GPL-2.0-or-later (yuzu, suyu, sudachi, Citron, Eden), LGPL, MIT, BSD, ISC, zlib or Apache 2.0 can
-  be ported, keeping its copyright lines and naming where it came from (Ryujinx is MIT). GPL-2.0-only code can't be.
-  Switchbrew and the SDK's own behavior, read from the disassembly, are the primary references, with Atmosphère
-  (Mesosphère's kernel, Stratosphère's services) as the reference for how Horizon behaves. It is GPL-2.0-only, so
-  it is read, never ported.
+- **Licensing.** ScarletNX is GPL-3.0-or-later (`LICENSE`). A new file starts with
+  `SPDX-License-Identifier: GPL-3.0-or-later` and the project's copyright line. Code under GPL-3.0,
+  GPL-2.0-or-later (yuzu, suyu, sudachi, Citron, Eden), LGPL, MIT, BSD, ISC, zlib or Apache 2.0 can be ported,
+  keeping its copyright lines and naming where it came from (Ryujinx is MIT), and is listed in `docs/CREDITS.md`.
+  GPL-2.0-only code can't be. Switchbrew and the SDK's own behavior, read from the disassembly, are the primary
+  references, with Atmosphère (Mesosphère's kernel, Stratosphère's services) as the reference for how Horizon
+  behaves. It is GPL-2.0-only, so it is read, never ported.
 - **Formatting:** `scripts/format.sh` before committing (clang-format 23, ruff). It only changes whitespace, and
   the whole history is formatted, so an unformatted file shows up as noise in every diff. Third-party code
   (the packages in `.cache/cpm`) is never formatted.
@@ -84,7 +80,7 @@ silently. Bumping `SNX_ABI` makes the runtime refuse every module built before i
 | Kernel and memory | `src/nx/hle/kernel/`: `kernel.c` (handles, waits, events), `thread.c` (threads, the per-core lock), `sync.c` (mutexes, condition variables, address arbitration, WaitSynchronization), `debug.c` (backtraces, dumps), `ipc.c` (HIPC/CMIF parsing and replies, sessions, domains, the service registry); `src/nx/hle/svc/`: `svc.c` (the SVC dispatch), `svc_mem.c` (memory SVCs, GetInfo); `src/nx/memory/mem.c` |
 | IPC interfaces | Every service interface is declared in a `.swipc` file beside its C file (SwIPC's language, `docs/IPC.md`). `tools/swipc/swipc.c` (C90) generates the dispatchers into the build folder (`snx_swipc` in `cmake/swipc.cmake`, the list in `src/nx/CMakeLists.txt`). A service's C file includes its generated `.swipc.inc` and defines one static handler per command that isn't a `@stub`, `nn_ns_IFoo_Command(SvcObj* self, args..., outs...)`. A new command goes in the `.swipc` file first |
 | Services | `src/nx/hle/services/`: one file per service family (`sm.c`, `am.c`, `set.c`, `time.c`, `acc.c`, `audio.c` (hwopus decodes with FFmpeg), `misc.c` for the small ones, `services.c` registers them), `audren.c` (the audio renderer's update), `pl.c` (shared fonts), `hid.c`, `vi.c`, `ldr.c`, `network/` (bsd, nifm, dns), `nvdrv.c` (nvhost devices, syncpoints); `src/nx/hle/filesystem/` (`fs.c`, `fs_tree.c`) |
-| GPU | `src/nx/gpu/`: `gpu.c` (GPFIFO, the GPU thread), `maxwell/` (`engines.c` 3D engine methods, `mme.c` macros, `compute.c`, `fermi2d.c`, `dma.c`, `maxwell3d.c`), `renderer.h` (the `Renderer` table for Vulkan, `g_renderer`), `renderer.c` (shared renderer state), `shader/` (Maxwell to SPIR-V: `shader.c` handles program hashing and flow, `decode.c` the instruction table, `spirv_translate.c` and `spirv_compute.c` emit stages through `spirv_emit.c`, `corpus.c` records shaders), `texture/` (`astc.c` CPU reference for tests, `etc2.c`) |
+| GPU | `src/nx/gpu/`: `gpu.c` (GPFIFO, the GPU thread), `maxwell/` (`engines.c` 3D engine methods, `mme.c` macros, `compute.c`, `fermi2d.c`, `dma.c`, `maxwell3d.c`), `renderer.h` (the `Renderer` table for Vulkan, `g_renderer`), `renderer.c` (shared renderer state), `shader/` (Maxwell to SPIR-V: `shader.c` handles program hashing and flow, `decode.c` the decoder, its matcher generated from `maxwell_opcodes.def` by `tools/shaderdec`, `spirv_translate.c` and `spirv_compute.c` emit stages through `spirv_emit.c`, `corpus.c` records shaders), `texture/` (`astc.c` CPU reference for tests, `etc2.c`) |
 | Vulkan renderer | `src/nx/gpu/vk/`: `vk.h` (lists the parts), `device.c` (instance, device, queues, swapchain, VMA), `cmd.c` (frames in flight, staging), `surface.c` and `format.c` (render targets, formats), `texture.c` (textures, samplers), `astc.c` (ASTC compute uploads), `buffer.c` (guest memory as buffers), `pipeline.c` (shader modules, pipelines), `render.c` (rendering passes, clears, draws), `compute.c` (compute on the compute queue, results landing in guest memory), `renderer.c` (its side of the renderer interface, presenting), `vma.cpp` (VMA's implementation); Vulkan-Headers, volk and VMA are CPM packages (`cmake/dependencies.cmake`) |
 | Shader corpus | `SNX_SHADER_CORPUS=dir` records each translated shader; `build/snx-shaderc dir --validate` translates it directly to SPIR-V and validates it with `spirv-val`, which must be on PATH (`--out DIR` from two builds, diffed, shows a translator change kept the output) |
 | Video | `src/nx/gpu/video/`: `host1x.c` (IOVA, ioctls, a channel per nvdrv NVDEC or VIC fd, each NVDEC one with its own decoder), `nvdec.c` (H.264 with FFmpeg's libavcodec, the picture written into the surface its job names), `vic.c` (composes from those surfaces in guest memory) |
@@ -104,7 +100,6 @@ Skills in `.claude/skills/`:
 - `snx-crash`: from a crash report or `svcBreak` to the mechanism, with the symbol and disassembly tools.
 - `snx-service`: implementing or fixing an HLE service against what the game's SDK code expects.
 - `snx-code-quality`: RFC #142's C rules (strict ANSI C, no redundant state, one allocation per owner) for C in `src/`.
-- `import-upstream`: bringing a new MZ Labs release into `main`.
 - `record-lesson`: where a lesson goes so the next session finds it.
 - `code-audit`: the multi-pass audit-and-fix loop, with the `snx-*-reviewer` agents in `.claude/agents/review/`.
 

@@ -1,33 +1,40 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the nvhost devices (nvdrv.c): nvmap, the GPU address space, syncpoints */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* What nvdrv shares with the GPU, host1x and vi: nvmap handles, the GPU's address space, and the syncpoints */
 #ifndef SNX_NVDRV_H
 #define SNX_NVDRV_H
 #include "common/cpu/aarch64/cpu.h"
 
-void nv_init(void);
-/* a live handle's address and size, read together: 0 for a handle that isn't alive (host1x, any thread) */
-int nvmap_get(u32 h, u64* addr, u32* size);
-u64 nvmap_addr_by_id(u32 id);
-u64 gmmu_translate(u64 gva);
-u64 gmmu_run(u64 gva, u64 max, u64* cpu);
-u32 syncpt_alloc(void);   /* fatal past the 128 ids NVIDIA's stream library has room for */
-void syncpt_free(u32 id); /* the id can be handed out again */
-/* the ids the syncpoint table covers. A larger one would land on a smaller id's entry, so the functions below leave it
-   alone (syncpt_read answers 0, syncpt_wait doesn't wait) and the ioctls refuse it */
+/* The syncpoint ids the table holds. An id at or past it would alias a smaller one: it reads 0, never counts as
+   reached, and the ioctls refuse it. syncpt_alloc hands out fewer (NVIDIA's stream library has room for 128) */
 #define SYNCPT_IDS 256
+
+void nv_init(void);
+
+/* A live, allocated handle's address and size, read together under nvdrv's lock from any thread. 1, or 0 (both
+   outputs 0) for a dead handle */
+int nvmap_get(u32 h, u64* addr, u32* size);
+u64 nvmap_addr_by_id(u32 id); /* 0 when no live handle has that id */
+
+/* The guest address a GPU address maps to, 0 when its page isn't mapped */
+u64 gmmu_translate(u64 gva);
+/* The bytes from gva on, at most max, that stay contiguous in guest memory, with gva's guest address in *cpu. 0 when
+   gva's page isn't mapped */
+u64 gmmu_run(u64 gva, u64 max, u64* cpu);
+
+/* Every syncpoint user allocates its ids here, so they stay below the 128 the stream library sizes its tables at.
+   Running out is fatal. A freed id can be handed out again */
+u32 syncpt_alloc(void);
+void syncpt_free(u32 id);
 u32 syncpt_read(u32 id);
 void syncpt_incr(u32 id);
-void syncpt_add(u32 id, u32 n); /* n increments at once, with one wake of whoever waits */
-/* n increments a channel will make (a GPU submission's, a host1x job's), promised in the order it makes them: the
-   value they bring the syncpoint to, which the ioctl hands back as the fence and nvhost-ctrl's max reads */
+void syncpt_add(u32 id, u32 n); /* n increments, one wakeup */
+/* A channel promises the next n increments it will make, in order. Returns the value they reach: the fence the ioctl
+   hands back, and what nvhost-ctrl reads as the maximum */
 u32 syncpt_promise(u32 id, u32 n);
+/* 1 once id reaches thresh (across the 32-bit wrap), 0 when the time runs out. 0 looks once, negative waits for good */
 int syncpt_wait(u32 id, u32 thresh, i64 timeout_ns);
-/* queues fn(arg) on the GPU thread for vi's presents, after the submissions that promised the fences id[0..n) (n at
-   most 4): a GPU channel's promised fence is reached by then unless a stream fell short (fn checks it). Any other
-   fence is waited for here, 1 s at most, and its id set to ~0 (none) so fn doesn't wait for it again */
+/* Runs fn(arg) on the GPU thread after the submissions that promised the fences (id[i], val[i]), i < n <= 4. A fence
+   nothing queued has promised is waited for here instead, for at most 1 s, and its id[i] is set to ~0 */
 void nv_gpu_call_after(u32 n, u32* id, const u32* val, void (*fn)(void*), void* arg);
-
 #endif

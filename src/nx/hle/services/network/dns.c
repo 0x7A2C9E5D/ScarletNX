@@ -195,13 +195,13 @@ static int host_by_name_reply(IpcBuf name, IpcBuf hostent, u32* size, u32* netdb
     *size = host_by_name(name, hostent, &gai);
     *netdb_error = (u32)gai_netdb(gai);
     *bsd_errno = (u32)gai_errno(gai);
-    return 0;
+    R_SUCCEED();
 }
 static int host_by_addr_reply(IpcBuf addr, IpcBuf hostent, u32* size, u32* netdb_error) {
     int netdb;
     *size = host_by_addr(addr, hostent, &netdb);
     *netdb_error = (u32)netdb;
-    return 0;
+    R_SUCCEED();
 }
 static int addr_info_reply(IpcBuf host, IpcBuf service, IpcBuf hints, IpcBuf response, u32* size, i32* gai_error,
                            u32* bsd_errno) {
@@ -209,7 +209,7 @@ static int addr_info_reply(IpcBuf host, IpcBuf service, IpcBuf hints, IpcBuf res
     *size = addr_info(host, service, hints, response, &gai);
     *gai_error = gai;
     *bsd_errno = (u32)gai_errno(gai);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_socket_resolver_IResolver_GetHostByNameRequest(SvcObj* self, u8 use_nsd_resolve, u32 cancel_handle,
                                                              u64 pid, IpcBuf name, IpcBuf hostent, u32* netdb_error,
@@ -251,12 +251,12 @@ static int nn_socket_resolver_IResolver_GetAddrInfoRequestWithOptions(SvcObj* se
                                                                       u32* netdb_error, u32* bsd_errno) {
     addr_info_reply(host, service, hints, response, size, gai_error, bsd_errno);
     *netdb_error = (u32)gai_netdb(*gai_error);
-    return 0;
+    R_SUCCEED();
 }
 /* requests finish before a cancel could come */
 static int nn_socket_resolver_IResolver_GetCancelHandleRequest(SvcObj* self, u64 pid, u32* cancel_handle) {
     *cancel_handle = 1;
-    return 0;
+    R_SUCCEED();
 }
 SvcObj* new_sfdnsres(void) { return nn_socket_resolver_IResolver_new(0); }
 
@@ -281,7 +281,7 @@ static int resolve(IpcBuf fqdn_in, IpcBuf fqdn_out) {
         memset(GP(fqdn_out.addr), 0, s < sizeof fqdn ? s : sizeof fqdn);
         memcpy(GP(fqdn_out.addr), fqdn, strlen(fqdn) + 1 <= s ? strlen(fqdn) + 1 : s);
     }
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nsd_detail_IManager_Resolve(SvcObj* self, IpcBuf fqdn_in, IpcBuf fqdn_out) {
     return resolve(fqdn_in, fqdn_out);
@@ -294,11 +294,11 @@ static int nn_nsd_detail_IManager_GetEnvironmentIdentifier(SvcObj* self, IpcBuf 
         memset(GP(identifier.addr), 0, 8);
         memcpy(GP(identifier.addr), NSD_ENVIRONMENT, sizeof NSD_ENVIRONMENT);
     }
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nsd_detail_IManager_GetApplicationServerEnvironmentType(SvcObj* self, u8* type) {
     *type = 1; /* Lp (nn::oe's Dd is 0) */
-    return 0;
+    R_SUCCEED();
 }
 /* nsd's server has no pointer buffer to speak of: a libnx client sending its buffers AutoSelect, edenprobe's, gets its
    8 byte environment identifier through B and a 0x100 byte name through A on the console, as the SDK's client sends

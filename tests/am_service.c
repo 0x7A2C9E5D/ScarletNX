@@ -171,16 +171,18 @@ void set_language_code(int lang, u8 code[8]) {
     (void)lang;
     memcpy(code, "en-US", 6);
 }
+static int test_players = 1;
 int hid_connected_players(u32* selected_id) {
     *selected_id = 0;
-    return 1;
+    return test_players;
 }
 static const char* dialog_text = "Aé😀";
-static int dialog_cancel;
+static const char* dialog_then; /* what the dialog answers from its second time on, when set */
+static int dialog_cancel, dialog_calls;
 static int modern_packet;
 int plat_text_input(char* out, size_t cap, const char* initial) {
     (void)initial;
-    snprintf(out, cap, "%s", dialog_text);
+    snprintf(out, cap, "%s", dialog_calls++ && dialog_then ? dialog_then : dialog_text);
     return dialog_cancel;
 }
 static void put32(u8* dst, u32 v) { memcpy(dst, &v, 4); }
@@ -258,10 +260,134 @@ static void test_inline(void) {
     close_handles();
     CHECK(test_objects == 0 && test_kobjs == 0);
 }
+/* a library applet run to its end: its pushed storages, then what PopOutData gives */
+static SvcObj* run_applet(u32 id, SvcObj* const* in, int nin) {
+    SvcObj *a, *out = NULL;
+    int i;
+    CHECK(nn_am_service_ILibraryAppletCreator_CreateLibraryApplet(NULL, id, 0, &a) == 0);
+    for (i = 0; i < nin; i++) CHECK(nn_am_service_ILibraryAppletAccessor_PushInData(a, in[i]) == 0);
+    CHECK(nn_am_service_ILibraryAppletAccessor_PopOutData(a, &out) == 0 && out);
+    CHECK(nn_am_service_ILibraryAppletAccessor_PopOutData(a, &out) == RC(128, 2)); /* given once */
+    svcobj_unref(a);
+    return out;
+}
+/* the standard keyboard: SwkbdConfigCommon's limits (max at 0x3ac, min at 0x3b0) and UTF-8 flag (0x3bd), the dialog
+   asked again until the text is long enough, and the reply's SwkbdResult and text */
+static SvcObj* swkbd(u32 max, u32 min, int utf8) {
+    u8 config[0x3e0] = {0};
+    SvcObj *in[2], *out;
+    memcpy(config + 0x3ac, &max, 4);
+    memcpy(config + 0x3b0, &min, 4);
+    config[0x3bd] = (u8)utf8;
+    in[0] = am_storage_new(0x20, NULL);
+    in[1] = am_storage_new(sizeof config, config);
+    dialog_calls = 0;
+    out = run_applet(0x11, in, 2);
+    svcobj_unref(in[0]);
+    svcobj_unref(in[1]);
+    CHECK(((StorageData*)out->data)->size == 0x7d8);
+    return out;
+}
+static void test_swkbd(void) {
+    SvcObj* out;
+    u8* d;
+    u16 units[4];
+    dialog_cancel = 0;
+    dialog_then = NULL;
+    /* "Aé😀" is four UTF-16 units: three at most keeps the pair whole, cut before it */
+    out = swkbd(3, 0, 0);
+    d = ((StorageData*)out->data)->d;
+    CHECK(get32(d) == 0 && d[4] == 'A' && d[6] == 0xE9 && d[7] == 0 && d[8] == 0 && d[9] == 0);
+    svcobj_unref(out);
+    out = swkbd(0, 0, 1);
+    CHECK(!strcmp((char*)((StorageData*)out->data)->d + 4, "Aé😀"));
+    svcobj_unref(out);
+    /* too short for the minimum: asked again, and the second answer is taken */
+    dialog_then = "hello";
+    out = swkbd(0, 5, 1);
+    CHECK(dialog_calls == 2 && get32(((StorageData*)out->data)->d) == 0);
+    CHECK(!strcmp((char*)((StorageData*)out->data)->d + 4, "hello"));
+    svcobj_unref(out);
+    dialog_then = NULL;
+    /* a minimum above the maximum is the maximum */
+    out = swkbd(2, 9, 0);
+    d = ((StorageData*)out->data)->d;
+    CHECK(dialog_calls == 1 && get32(d) == 0 && d[4] == 'A' && d[6] == 0xE9 && d[8] == 0);
+    svcobj_unref(out);
+    /* cancelled */
+    dialog_cancel = 1;
+    out = swkbd(0, 0, 0);
+    CHECK(get32(((StorageData*)out->data)->d) == 1 && ((StorageData*)out->data)->d[4] == 0);
+    svcobj_unref(out);
+    dialog_cancel = 0;
+    /* malformed UTF-8 from the host: an overlong form, a surrogate and a cut sequence, each part U+FFFD */
+    CHECK(am_utf8_to_16("\xC0\xAF", units, 4) == 2 && units[0] == 0xFFFD && units[1] == 0xFFFD);
+    CHECK(am_utf8_to_16("\xED\xA0\x80", units, 4) == 3 && units[2] == 0xFFFD);
+    CHECK(am_utf8_to_16("a\xE2\x82", units, 4) == 2 && units[0] == 'a' && units[1] == 0xFFFD);
+    CHECK(am_utf8_to_16("\xF4\x90\x80\x80", units, 4) == 4); /* past U+10FFFF */
+    CHECK(am_utf8_to_16("\xF0\x9F\x98\x80", units, 4) == 2 && units[0] == 0xD83D && units[1] == 0xDE00);
+#ifndef _WIN32
+    /* a scripted run's text, cancelled when it is shorter than the minimum */
+    setenv("SNX_SWKBD_TEXT", "hi", 1);
+    out = swkbd(0, 0, 1);
+    CHECK(dialog_calls == 0 && get32(((StorageData*)out->data)->d) == 0);
+    CHECK(!strcmp((char*)((StorageData*)out->data)->d + 4, "hi"));
+    svcobj_unref(out);
+    out = swkbd(0, 3, 1);
+    CHECK(get32(((StorageData*)out->data)->d) == 1);
+    svcobj_unref(out);
+    unsetenv("SNX_SWKBD_TEXT");
+#endif
+}
+/* the other applets' outputs: the controller applet's players against the game's minimum, a web applet's return
+   value, and zeros from the rest */
+static void test_applets(void) {
+    u8 arg[0x40] = {2};
+    SvcObj *in[2], *out;
+    in[0] = am_storage_new(0x20, NULL);
+    in[1] = am_storage_new(sizeof arg, arg);
+    test_players = 1;
+    out = run_applet(0x0c, in, 2);
+    CHECK(((StorageData*)out->data)->size == 0xc && ((StorageData*)out->data)->d[0] == 1);
+    CHECK(get32(((StorageData*)out->data)->d + 8) == 2); /* fewer than two: cancelled */
+    svcobj_unref(out);
+    test_players = 2;
+    out = run_applet(0x0c, in, 2);
+    CHECK(((StorageData*)out->data)->d[0] == 2 && get32(((StorageData*)out->data)->d + 8) == 0);
+    svcobj_unref(out);
+    test_players = 1;
+    out = run_applet(0x14, in, 0); /* Shop */
+    CHECK(((StorageData*)out->data)->size == 0x1010);
+    svcobj_unref(out);
+    out = run_applet(0x0e, in, 0); /* the error applet */
+    CHECK(((StorageData*)out->data)->size == 0x10 && get32(((StorageData*)out->data)->d) == 0);
+    svcobj_unref(out);
+    svcobj_unref(in[0]);
+    svcobj_unref(in[1]);
+    close_handles();
+}
+/* am_init: the focus message, then the performance mode's, and the launchable event signaled */
+static void test_messages(void) {
+    nn_am_AppletMessage m = 0;
+    u32 h;
+    am_init();
+    CHECK(nn_am_service_ICommonStateGetter_ReceiveMessage(NULL, &m) == 0 && m == 15);
+    CHECK(am.msg_event->signaled);
+    CHECK(nn_am_service_ICommonStateGetter_ReceiveMessage(NULL, &m) == 0 && m == 31);
+    CHECK(!am.msg_event->signaled);
+    CHECK(nn_am_service_ICommonStateGetter_ReceiveMessage(NULL, &m) == RC(128, 3));
+    CHECK(nn_am_service_ISelfController_GetLibraryAppletLaunchableEvent(NULL, &h) == 0);
+    CHECK(test_handles[h - 0x100] == &am.launchable_event->o && am.launchable_event->signaled);
+    close_handles();
+}
 int main(void) {
     test_inline();
     modern_packet = 1;
     test_inline();
+    test_swkbd();
+    test_applets();
+    CHECK(test_objects == 0 && test_kobjs == 0);
+    test_messages();
     printf("am_service: %u checks passed\n", test_checks);
     return 0;
 }

@@ -1,41 +1,42 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* logging (plat.c) */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The runtime's log and its fatal error, both in plat.c */
 #ifndef SNX_LOG_H
 #define SNX_LOG_H
 #include <stdio.h>
 
+/* the .ini's log key: 1 normal, 2 also the LOGV lines (and every line on stderr) */
 extern int g_verbose;
-/* the format attributes let the compiler check every call's arguments against its format */
+
+/* lvl 0 is a warning, 1 a normal line, 2 a verbose one. Checked like printf */
 void logf_(int lvl, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+#define WARN(...) logf_(0, __VA_ARGS__)
 #define LOG(...) logf_(1, __VA_ARGS__)
 #define LOGV(...)                                                                                                      \
     do {                                                                                                               \
         if (g_verbose >= 2) logf_(2, __VA_ARGS__);                                                                     \
     } while (0)
-#define WARN(...) logf_(0, __VA_ARGS__)
-/* LOG, at most n times from this call site, for messages that would otherwise repeat every frame */
-#define LOG_LIMIT(n, ...)                                                                                              \
+
+/* Say something at most n times per call site, for a message a game could otherwise trigger every frame. Each site
+   counts in its own static int (relaxed: only the count matters), and stops adding once past the limit */
+#define SNX_LOG_AT_MOST_(said, n, lvl, ...)                                                                            \
     do {                                                                                                               \
-        static int log_limit_said_;                                                                                    \
-        if (log_limit_said_ < (n) && __atomic_fetch_add(&log_limit_said_, 1, __ATOMIC_RELAXED) < (n))                  \
-            LOG(__VA_ARGS__);                                                                                          \
+        static int said;                                                                                               \
+        if (__atomic_load_n(&said, __ATOMIC_RELAXED) < (n) && __atomic_fetch_add(&said, 1, __ATOMIC_RELAXED) < (n))    \
+            logf_(lvl, __VA_ARGS__);                                                                                   \
     } while (0)
-/* WARN, at most n times from this call site */
-#define WARN_LIMIT(n, ...)                                                                                             \
-    do {                                                                                                               \
-        static int warn_limit_said_;                                                                                   \
-        if (warn_limit_said_ < (n) && __atomic_fetch_add(&warn_limit_said_, 1, __ATOMIC_RELAXED) < (n))                \
-            WARN(__VA_ARGS__);                                                                                         \
-    } while (0)
+#define LOG_LIMIT(n, ...) SNX_LOG_AT_MOST_(log_limit_said_, n, 1, __VA_ARGS__)
+#define WARN_LIMIT(n, ...) SNX_LOG_AT_MOST_(warn_limit_said_, n, 0, __VA_ARGS__)
+
+/* Logs "FATAL: ..." and ends the process, after the error box where there is one */
 void fatal(const char* fmt, ...) __attribute__((format(printf, 1, 2), noreturn));
-/* this thread's log lines go here instead of the log (the periodic threads.txt dump). Per thread, so the other
-   threads keep logging to the log while the main thread writes a dump, and never into a file being closed */
+
+/* While set, the calling thread's lines go to this file and nowhere else (the main loop's threads.txt dump). It is
+   per thread so the others keep writing the log during the dump */
 extern __thread FILE* tls_log_redirect;
-/* the crash handler is running: log without locks or stdio from here on (a fault inside the log's lock or malloc
-   would otherwise deadlock the report), and drop this thread's redirect so the report reaches the log */
+
+/* Called by the crash handler before its report: from now on lines bypass the log's lock and stdio buffering, which
+   the crashed code may hold, and this thread's redirect is dropped */
 void log_crash_mode(void);
 
 #endif

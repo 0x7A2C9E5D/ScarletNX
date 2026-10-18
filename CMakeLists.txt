@@ -67,8 +67,8 @@ if(SNX_GAMES_DIR STREQUAL "${CMAKE_SOURCE_DIR}/games")
     set_property(CACHE SNX_GAMES_DIR PROPERTY VALUE "")
 endif()
 
-# Upstream builds with -O2. RelWithDebInfo keeps that and adds symbols for crash reports. It leaves out -DNDEBUG, as
-# upstream does: the runtime has no assert(), so this keeps VMA's assertions on.
+# RelWithDebInfo builds with -O2 and adds symbols for crash reports. It leaves out -DNDEBUG: the runtime has no
+# assert(), so this keeps VMA's assertions on.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
@@ -110,7 +110,7 @@ endif()
 if(SNX_TOOLS_ONLY AND SNX_BUILD_NX)
     include(GNUInstallDirs)
     install(TARGETS scarletnx RUNTIME DESTINATION bin)
-    install(FILES LICENSE LICENSE.apache NOTICE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/scarletnx)
+    install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/scarletnx)
     return()
 endif()
 if(SNX_BUILD_GNUABI)
@@ -127,7 +127,7 @@ if(NOT WIN32)
 endif()
 if(NOT SNX_BUILD_NX)
     include(GNUInstallDirs)
-    install(FILES LICENSE LICENSE.apache NOTICE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/scarletnx)
+    install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/scarletnx)
     return()
 endif()
 if(BUILD_TESTING AND TARGET hactool_lib)
@@ -165,14 +165,15 @@ if(ANDROID) # the app's launcher icon (dist/android)
     install(FILES dist/icons/hicolor/256x256/apps/wimsy.png DESTINATION res/mipmap-xxxhdpi RENAME ic_launcher.png)
 endif()
 
-# The licenses go with the binaries: the fork's (GPL-3.0), MZ Labs' (Apache 2.0, with its NOTICE), and those of the
-# libraries built into the runtime and hactool, each in a folder named after it
+# The licenses go with the binaries: ScarletNX's (GPL-3.0), and those of the libraries and code built into the runtime
+# and hactool, each in a folder named after it
 set(licenses "${CMAKE_INSTALL_DATADIR}/licenses/scarletnx")
-install(FILES LICENSE LICENSE.apache NOTICE DESTINATION ${licenses})
+install(FILES LICENSE DESTINATION ${licenses})
 # FFmpeg's with the change made to it (cmake/ffmpeg-vp9-nvdec.patch), which its LGPL wants carried with the binaries
 install(FILES "${FFmpeg_SOURCE_DIR}/COPYING.LGPLv2.1" "${FFmpeg_SOURCE_DIR}/LICENSE.md" cmake/ffmpeg-vp9-nvdec.patch
         DESTINATION ${licenses}/FFmpeg)
-install(FILES LICENSE.apache DESTINATION ${licenses}/OpenSans RENAME LICENSE) # the shared fonts' stand-in (pl.c)
+install(FILES dist/licenses/OpenSans/LICENSE DESTINATION ${licenses}/OpenSans) # the shared fonts' stand-in (pl.c)
+install(FILES dist/licenses/Ryujinx/LICENSE.txt DESTINATION ${licenses}/Ryujinx) # the default Miis (misc.c)
 install(FILES "${Vulkan-Headers_SOURCE_DIR}/LICENSE.md" DESTINATION ${licenses}/Vulkan-Headers)
 install(DIRECTORY "${Vulkan-Headers_SOURCE_DIR}/LICENSES" DESTINATION ${licenses}/Vulkan-Headers)
 install(FILES "${volk_SOURCE_DIR}/LICENSE.md" DESTINATION ${licenses}/volk)

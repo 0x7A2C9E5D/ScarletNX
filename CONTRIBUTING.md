@@ -66,14 +66,15 @@ another value already says, indices instead of pointer chains, one allocation pe
 
 ## License
 
-ScarletNX is GPL-3.0-or-later (`LICENSE`). A new file starts with the SPDX line and the fork's copyright line, in
-the file's comment syntax:
+ScarletNX is GPL-3.0-or-later (`LICENSE`). A new file starts with the SPDX line and the project's copyright line,
+in the file's comment syntax:
 
 ```c
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 ```
 
-MZ Labs' files keep their Apache-2.0 header, with the line saying the fork's changes are GPL, and every copy keeps
-`NOTICE`. Code ported from another project keeps its copyright lines and names where it came from. The licenses that
-can be ported are listed in [CLAUDE.md](CLAUDE.md).
+Code ported from another project keeps its copyright lines, names where it came from and gets a row in
+[docs/CREDITS.md](docs/CREDITS.md). Code under GPL-3.0, GPL-2.0-or-later (yuzu, suyu, sudachi, Citron, Eden), LGPL,
+MIT (Ryujinx, LibHac), BSD, ISC, zlib or Apache 2.0 can be ported. GPL-2.0-only code can't be. Atmosphère is
+GPL-2.0-only, so it is read as a reference for how Horizon behaves and never ported.

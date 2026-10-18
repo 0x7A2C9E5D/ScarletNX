@@ -1,22 +1,22 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* host1x (host1x.c): NVDEC and VIC, reached through nvdrv */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* host1x (host1x.c): the NVDEC and VIC engines behind nvdrv's /dev/nvhost-nvdec and /dev/nvhost-vic */
 #ifndef SNX_HOST1X_H
 #define SNX_HOST1X_H
 #include "common/cpu/aarch64/cpu.h"
 
-/* one channel per nvdrv fd of /dev/nvhost-nvdec or /dev/nvhost-vic: its registers, syncpoints and (NVDEC) decoder */
+/* A channel: what one open fd of either device owns (method registers, syncpoints, job queue and, for NVDEC, a
+   decoder). Channels only meet through guest memory and syncpoints */
 typedef struct H1Ch H1Ch;
 H1Ch* host1x_open(int is_vic); /* NULL when out of memory */
-/* the fd closed: drops the decoder with its pending pictures and gives the syncpoints back. NULL does nothing */
+/* The fd closed: its queued jobs run first, then the decoder and the syncpoints go. NULL is ignored */
 void host1x_close(H1Ch* ch);
+/* An ioctl on the channel's fd, with its buffer d of n bytes. Returns the NvError */
 u32 host1x_ioctl(H1Ch* ch, u32 cmd, u8* d, u32 n);
-/* nvmap freed handle h: drops its NVDEC/VIC mapping so the IOVA range can be used again */
+/* nvmap freed handle h: whatever the engines mapped of it is unmapped, its IOVA range free again */
 void host1x_forget_handle(u32 h);
-/* FFmpeg's messages into the game log, warnings and above, a limited number (nvdec.c, in builds with FFmpeg). Every
-   user of libavcodec calls it before opening a decoder */
+/* Routes FFmpeg's log (warnings and worse, a limited number) into the game log. nvdec.c defines it; every user of
+   libavcodec calls it before opening a decoder */
 void ffmpeg_log_init(void);
 
 #endif

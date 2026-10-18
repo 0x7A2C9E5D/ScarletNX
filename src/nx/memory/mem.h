@@ -1,39 +1,54 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the guest address space (mem.c) */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The guest's address space: one host reservation that guest addresses index, its regions, and the memory blocks
+   with the states and permissions QueryMemory reports */
 #ifndef SNX_MEM_H
 #define SNX_MEM_H
 #include "common/cpu/aarch64/cpu.h"
 #include <string.h>
 
-/* the host reservation: every guest address of either process width is an offset below it */
+/* The host reservation (128 GiB). A guest address of either width is an offset below it */
 #define AS_SIZE 0x2000000000ull
-/* The regions of the process's address space. A 64-bit process has the 39-bit layout (the default, so it holds before
-   mem_layout too); a 32-bit one has the console's 32-bit layout below 4 GiB (mem_layout) */
-typedef struct {
-    u64 base, end; /* the address space: [base, end) */
-    u64 heap, heap_size, alias, alias_size, stack, stack_size;
-    u64 kern, kern_end; /* TLS, kernel stacks, our own shmem */
-} MemLayout;
-extern MemLayout g_layout;
-#define AS_BASE        (g_layout.base)
-#define AS_END         (g_layout.end)
-#define HEAP_BASE      (g_layout.heap)
-#define HEAP_SIZE      (g_layout.heap_size)
-#define ALIAS_BASE     (g_layout.alias)
-#define ALIAS_SIZE     (g_layout.alias_size)
-#define STACK_BASE     (g_layout.stack)
-#define STACK_SIZE     (g_layout.stack_size)
-#define KERN_BASE      (g_layout.kern)
-#define KERN_END       (g_layout.kern_end)
-/* the code base of a 32-bit process, where Loader puts its first module */
-#define AS32_CODE_BASE 0x200000ull
-/* the layout of a 32-bit process (the NPDM's address space type: 0 with an alias region, 2 without one), before
-   anything is mapped */
-void mem_layout32(unsigned aspace);
 
+/* The regions of the address space. The 64-bit layout is g_layout's static value, so it holds before mem_layout32 */
+typedef struct {
+    u64 base, end; /* what the game may map in */
+    u64 heap, heap_size;
+    u64 alias, alias_size;
+    u64 stack, stack_size;
+    u64 kern, kern_end; /* the kernel's own pages (TLS) */
+} MemLayout;
+#define AS_BASE    (g_layout.base)
+#define AS_END     (g_layout.end)
+#define HEAP_BASE  (g_layout.heap)
+#define HEAP_SIZE  (g_layout.heap_size)
+#define ALIAS_BASE (g_layout.alias)
+#define ALIAS_SIZE (g_layout.alias_size)
+#define STACK_BASE (g_layout.stack)
+#define STACK_SIZE (g_layout.stack_size)
+#define KERN_BASE  (g_layout.kern)
+#define KERN_END   (g_layout.kern_end)
+/* where a 32-bit process's first module goes */
+#define AS32_CODE_BASE 0x200000ull
+
+/* the host address of guest address a */
+#define GP(a) (g_mem + (u64)(a))
+
+/* a run of pages with one state, permission and attribute (QueryMemory's MemoryInfo, less the address width) */
+typedef struct {
+    u64 addr, size;
+    u32 state, perm, attr, ipc, dev; /* ipc and dev: IPC and device reference counts */
+    u64 pool; /* the alias pool's offset of addr plus 1 when the pages are the pool's, 0 when the reservation's own */
+} MemBlock;
+
+/* ldr:ro's code view at base: size bytes of heap at source, then bss_size bytes at bss, the same pages as the sources
+   with the alias pool (a copy without, written back by mem_unmap_code). The sources stay locked until then, and the
+   view isn't charged again (it is heap memory) */
+typedef struct {
+    u64 base, source, size, bss, bss_size;
+} MemCodeMap;
+
+/* Memory states (MemoryState with its attribute bits, as QueryMemory returns them to the game) */
 enum {
     MS_FREE = 0x00000000,
     MS_IO = 0x00182001,
@@ -55,48 +70,70 @@ enum {
     MS_GENCODE = 0x04402214,
     MS_CODEOUT = 0x04402015
 };
+/* MemoryPermission */
 enum { PERM_NONE = 0, PERM_R = 1, PERM_W = 2, PERM_RW = 3, PERM_X = 4, PERM_RX = 5, PERM_DONTCARE = 0x10000000 };
-
-extern u8* g_mem;
-typedef struct {
-    u64 addr, size;
-    u32 state, perm, attr, ipc, dev;
-} MemBlock;
-void mem_init(void);
-int mem_map(u64 addr, u64 size, u32 state, u32 perm); /* 0 ok, -1 not free, -2 no host memory */
-/* Heap and physical-memory changes share the memory lock and a combined byte budget. */
+/* what the calls below return besides 0 */
 enum { MEM_BADSTATE = -1, MEM_NOMEM = -2, MEM_LIMIT = -3 };
+
+/* the console's layout below 4 GiB for a 32-bit process, by the NPDM's address space type: 0 with the alias region, 2
+   without */
+void mem_layout32(unsigned aspace);
+void mem_init(void);
+int mem_map(u64 addr, u64 size, u32 state, u32 perm); /* 0, MEM_BADSTATE when it isn't free, MEM_NOMEM */
+int mem_unmap(u64 addr, u64 size);
+/* Physical memory in the alias region, and the heap, under the memory lock against one combined budget in bytes.
+   0 or a MEM_ value. A heap change that fails leaves the heap as it was */
 int mem_map_physical(u64 addr, u64 size, u64 budget);
 int mem_unmap_physical(u64 addr, u64 size);
-int mem_unmap(u64 addr, u64 size);
-/* ldr:ro's contiguous code view of two heap ranges. Like MapMemory, backed by copies: sources stay locked
-   until unload copies back. These views do not charge the process's already-accounted heap twice. */
-typedef struct {
-    u64 base, source, size, bss, bss_size;
-} MemCodeMap;
-int mem_map_code(MemCodeMap* m); /* selects a free base; MEM_LIMIT if no code address space remains */
+int mem_heap_set(u64 size, u64 budget);
+/* maps m's view at a free base it fills in, MEM_LIMIT when no code space is left */
+int mem_map_code(MemCodeMap* m);
 int mem_unmap_code(const MemCodeMap* m);
 void mem_query(u64 addr, MemBlock* out);
 int mem_set_state(u64 addr, u64 size, u32 state, u32 perm);
 int mem_set_attr(u64 addr, u64 size, u32 mask, u32 attr);
 u64 mem_find_free(u64 lo, u64 hi, u64 size, u64 align);
-u64 kmem_alloc(u64 size, u32 state, u32 perm); /* reserved for the kernel */
-int mem_heap_set(u64 size, u64 budget);        /* 0 or MEM_*; failed changes leave the heap intact */
-extern u64 g_heap_size, g_phys_mapped;         /* atomic snapshots; mutations hold the memory lock */
-extern u64 g_heap_max;                         /* heap_max_mb's cap, 0 = none */
-extern u64 g_code_memory, g_main_stack_size;   /* charged once, before starting guest threads */
-#define GP(a) (g_mem + (u64)(a))
+u64 kmem_alloc(u64 size, u32 state, u32 perm); /* in the kernel region */
+
+/* Views: a second mapping of mapped memory (MapMemory, code memory's owner and slave). With the alias pool the view
+   and its source are the same pages: mem_alias_begin moves the source into the pool, mem_alias_end back into the
+   reservation's own memory once no view of it is left. Without the pool (Windows, or a host without memfd) begin and
+   end do nothing, a view is a copy, and mem_alias_unmap copies it back into back (0: not at all). 0 or a MEM_ value */
+int mem_alias_begin(u64 src, u64 size);
+int mem_alias_map(u64 dst, u64 src, u64 size, u32 state, u32 perm);
+int mem_alias_unmap(u64 dst, u64 size, u64 back);
+void mem_alias_end(u64 src, u64 size);
+/* Pool pages of their own (shared memory): size bytes mapped outside the reservation at the pointer returned, with
+   their pool offset in off; NULL without a pool or when it is full */
+u8* mem_pool_host(u64 size, u64* off);
+void mem_pool_host_free(u8* p, u64 off, u64 size);
+/* those pages at free guest pages, as mem_map maps; mem_unmap unmaps them */
+int mem_map_pool(u64 addr, u64 off, u64 size, u32 state, u32 perm);
+/* unmaps the range only when it is in state with the pages from off: 0, or MEM_BADSTATE with nothing changed */
+int mem_unmap_pool(u64 addr, u64 off, u64 size, u32 state);
+u64 mem_pool_used(void); /* bytes of the pool handed out */
+
+extern MemLayout g_layout;
+extern u8* g_mem;
+/* changed under the memory lock, read with __atomic loads without it */
+extern u64 g_heap_size, g_phys_mapped;
+extern u64 g_heap_max; /* the heap's cap in bytes, 0 for none */
+/* the alias pool's size in bytes, read by mem_init; a test lowers it after to fill the pool */
+extern u64 g_pool_size;
+/* charged once, before guest threads start */
+extern u64 g_code_memory, g_main_stack_size;
+
+/* Guest memory is byte-addressed, so these go through memcpy */
 static inline u32 gr32(u64 a) {
     u32 v;
-    memcpy(&v, GP(a), 4);
+    memcpy(&v, GP(a), sizeof v);
     return v;
 }
 static inline u64 gr64(u64 a) {
     u64 v;
-    memcpy(&v, GP(a), 8);
+    memcpy(&v, GP(a), sizeof v);
     return v;
 }
-static inline void gw32(u64 a, u32 v) { memcpy(GP(a), &v, 4); }
-static inline void gw64(u64 a, u64 v) { memcpy(GP(a), &v, 8); }
-
+static inline void gw32(u64 a, u32 v) { memcpy(GP(a), &v, sizeof v); }
+static inline void gw64(u64 a, u64 v) { memcpy(GP(a), &v, sizeof v); }
 #endif

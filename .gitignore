@@ -39,6 +39,7 @@ vkshader_*.glsl
 __pycache__/
 *.o
 *.so
+*.exe
 /AppDir/
 /dist/*.AppImage
 /dist/*.zsync
@@ -46,15 +47,6 @@ __pycache__/
 
 # What patch or git apply --reject leaves behind when a hunk does not apply
 *.rej
-
-# The Windows toolchains and prebuilt binaries bundled in the MZ Labs zip, in case one is unpacked over the checkout
-# (scripts/import-upstream.sh leaves them out of the upstream branch)
-/python/
-/tcc/
-/gcc/
-/w64devkit/
-/bin/
-*.exe
 
 # Gradle's state and the SDK's path when dist/android is built in place (its output goes to the stage folder)
 /dist/android/.gradle/

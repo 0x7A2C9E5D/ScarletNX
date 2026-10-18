@@ -1,17 +1,18 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the guest clock: real time since startup */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The game's clock: real time since the run started, in nanoseconds and in the console's system ticks */
 #include "nx/runtime/clock.h"
 #include "nx/runtime/platform/plat.h"
 
-static u64 g_t0;
-void clock_start(void) { g_t0 = plat_ns(); }
-u64 g_t0_ns(void) { return g_t0; }
-u64 guest_ns(void) { return plat_ns() - g_t0; }
-/* the system tick runs at 19.2 MHz */
+static u64 g_start; /* written once at startup, before any other thread */
+
+void clock_start(void) { g_start = plat_ns(); }
+u64 g_t0_ns(void) { return g_start; }
+u64 guest_ns(void) { return plat_ns() - g_start; }
+
+/* 19.2 MHz is 192 ticks every 10 us: whole 10 us steps, then the rest, so neither part overflows or rounds the way
+   a double would after a few hours */
 u64 guest_ticks(void) {
     u64 ns = guest_ns();
-    return ns / 10000 * 192 + ns % 10000 * 192 / 10000;
+    return ns / 10000u * 192u + ns % 10000u * 192u / 10000u;
 }

@@ -47,6 +47,33 @@ void plat_vm_decommit(u8* p, u64 size) {
     decommit_calls++;
     if (madvise(p, size, MADV_DONTNEED) || mprotect(p, size, PROT_NONE)) abort();
 }
+/* no alias pool here: views are copies (memory_alias tests the pool) */
+int plat_alias_init(u64 size) {
+    (void)size;
+    return -1;
+}
+int plat_alias_map(u8* p, u64 off, u64 size) {
+    (void)p, (void)off, (void)size;
+    return -1;
+}
+int plat_alias_unmap(u8* p, u64 size) {
+    (void)p, (void)size;
+    return -1;
+}
+int plat_alias_write(u64 off, const void* src, u64 size) {
+    (void)off, (void)src, (void)size;
+    return -1;
+}
+int plat_alias_read(u64 off, void* dst, u64 size) {
+    (void)off, (void)dst, (void)size;
+    return -1;
+}
+void plat_alias_free(u64 off, u64 size) { (void)off, (void)size; }
+u8* plat_alias_host(u64 off, u64 size) {
+    (void)off, (void)size;
+    return NULL;
+}
+void plat_alias_host_free(u8* p, u64 size) { (void)p, (void)size; }
 void gpu_mem_changed(u64 a, u64 size) {
     (void)a;
     (void)size;
@@ -85,6 +112,7 @@ static KObj* test_handle; /* what handle 0x1234 names, for the shared memory tes
 KObj* h_get_ref(u32 h, int type) {
     return h == 0x1234 && test_handle && test_handle->type == type ? test_handle : NULL;
 }
+void kobj_ref(KObj* o) { (void)o; }
 void kobj_unref(KObj* o) { (void)o; }
 
 static u64 info(u32 id) {

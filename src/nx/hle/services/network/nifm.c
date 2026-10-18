@@ -23,7 +23,7 @@ static void nifm_req_destroy(SvcObj* o) {
 }
 static int nn_nifm_detail_IRequest_GetRequestState(SvcObj* self, i32* state) {
     *state = network_online() ? (i32)__atomic_load_n(&self->u[0], __ATOMIC_RELAXED) : REQ_INVALID;
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IRequest_GetResult(SvcObj* self) {
     return network_online() && __atomic_load_n(&self->u[0], __ATOMIC_RELAXED) != REQ_INVALID ? 0 : NIFM_NOT_CONNECTED;
@@ -32,18 +32,18 @@ static int nn_nifm_detail_IRequest_GetSystemEventReadableHandles(SvcObj* self, u
     NifmRequest* r = self->data;
     *state_event = ev_handle(r->ev[0]);
     *other_event = ev_handle(r->ev[1]);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IRequest_Cancel(SvcObj* self) {
     __atomic_store_n(&self->u[0], REQ_INVALID, __ATOMIC_RELAXED);
-    return 0;
+    R_SUCCEED();
 }
 /* the host is connected already, so it is accepted at once. Offline it is refused at once, and the state event says
    so either way, as it does when the network went down after the request was made */
 static int nn_nifm_detail_IRequest_Submit(SvcObj* self) {
     __atomic_store_n(&self->u[0], network_online() ? REQ_ACCEPTED : REQ_INVALID, __ATOMIC_RELAXED);
     kevent_signal(((NifmRequest*)self->data)->ev[0]);
-    return 0;
+    R_SUCCEED();
 }
 static SvcObj* nifm_req_new(void) {
     SvcObj* o = nn_nifm_detail_IRequest_new(sizeof(NifmRequest));
@@ -105,69 +105,69 @@ static void network_profile(const SnxNetInterface* i, u8* p) {
 
 static int nn_nifm_detail_IGeneralService_GetClientId(SvcObj* self, IpcBuf client_id) {
     if (client_id.addr && client_id.size >= 4) gw32(client_id.addr, 1);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IGeneralService_CreateScanRequest(SvcObj* self, SvcObj** request) {
     *request = nn_nifm_detail_IScanRequest_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IGeneralService_CreateRequest(SvcObj* self, i32 requirement_preset, SvcObj** request) {
     *request = nifm_req_new();
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IGeneralService_GetCurrentNetworkProfile(SvcObj* self, IpcBuf profile) {
     SnxNetInterface i;
     u8 p[0x17C];
-    if (network_interface(&i)) return NIFM_NOT_CONNECTED;
+    R_UNLESS(!network_interface(&i), NIFM_NOT_CONNECTED);
     network_profile(&i, p);
     if (profile.addr) memcpy(GP(profile.addr), p, profile.size < sizeof p ? profile.size : sizeof p);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IGeneralService_GetCurrentIpAddress(SvcObj* self, nn_nifm_IpV4Address* address) {
     SnxNetInterface i;
-    if (network_interface(&i)) return NIFM_NOT_CONNECTED;
+    R_UNLESS(!network_interface(&i), NIFM_NOT_CONNECTED);
     memcpy(address->v, i.ip, 4);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IGeneralService_GetCurrentIpConfigInfo(SvcObj* self, nn_nifm_IpAddressSetting* ip_setting,
                                                                  nn_nifm_DnsSetting* dns_setting) {
     SnxNetInterface i;
     u8 cfg[0x16];
-    if (network_interface(&i)) return NIFM_NOT_CONNECTED;
+    R_UNLESS(!network_interface(&i), NIFM_NOT_CONNECTED);
     ip_config(&i, cfg);
     memcpy(ip_setting->v, cfg, 0xD);
     memcpy(dns_setting->v, cfg + 0xD, 9);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IGeneralService_IsWirelessCommunicationEnabled(SvcObj* self, u8* enabled) {
     *enabled = (u8)network_online();
-    return 0;
+    R_SUCCEED();
 }
 /* the interface's type, the signal bars and the state */
 static int nn_nifm_detail_IGeneralService_GetInternetConnectionStatus(SvcObj* self, u8* interface_type,
                                                                       u8* wifi_strength, u8* status) {
     SnxNetInterface i;
-    if (network_interface(&i)) return NIFM_NOT_CONNECTED;
+    R_UNLESS(!network_interface(&i), NIFM_NOT_CONNECTED);
     *interface_type = i.wireless ? 1 : 2;
     *wifi_strength = 3;
     *status = 4; /* connected */
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IGeneralService_IsEthernetCommunicationEnabled(SvcObj* self, u8* enabled) {
     *enabled = (u8)network_online();
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IGeneralService_IsAnyInternetRequestAccepted(SvcObj* self, IpcBuf client_id, u8* accepted) {
     *accepted = (u8)network_online();
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IGeneralService_IsAnyForegroundRequestAccepted(SvcObj* self, u8* accepted) {
     *accepted = (u8)network_online();
-    return 0;
+    R_SUCCEED();
 }
 static int general_service(SvcObj** service) {
     *service = nn_nifm_detail_IGeneralService_new(0);
-    return 0;
+    R_SUCCEED();
 }
 static int nn_nifm_detail_IStaticService_CreateGeneralServiceOld(SvcObj* self, SvcObj** service) {
     return general_service(service);

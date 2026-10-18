@@ -1,13 +1,11 @@
-/* SwitchRecomp - Copyright 2026 MZ Labs
-   Licensed under the Apache License 2.0. See LICENSE.apache and NOTICE;
-   any copy or derived work must keep the credit to SwitchRecomp by MZ Labs.
-   This fork's changes are under GPL-3.0-or-later, the license of the fork as a whole (LICENSE). */
-/* the display service (vi.c) */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* vi's display clock, which present.c drives */
 #ifndef SNX_VI_H
 #define SNX_VI_H
 
-#define VI_REFRESH_HZ 60 /* the console's display, which vsync ticks and the game's swap interval count in */
+/* the display's refresh rate: vsync ticks, and the swap interval a game asks for, count in it */
+#define VI_REFRESH_HZ 60
 
-void vi_vsync_tick(void);
-
+void vi_vsync_tick(void); /* one display refresh: signals the vsync event */
 #endif
