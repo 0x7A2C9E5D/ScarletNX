@@ -178,15 +178,18 @@ static void dump_code(int lvl, const char* what, u64 lo, u64 hi, u64 mark) {
         logf_(lvl, "  %s %llx:%s\n", what, (unsigned long long)a, line);
     }
 }
-/* words 32-bit words at what each register that points into mapped memory (aligned, above 0x10000) points at */
+/* words 32-bit words at what each register that points into mapped memory (aligned, above 0x10000) points at. The
+   registers can be a running thread's (a sleep's saved ones are rewritten at its next sleep): each is read once, and
+   the value checked is the one used. Reading r[i] again after the check let a thread dump read guest address 0x1c */
 static void dump_pointees(int lvl, const char* reg, const u64* r, int nr, int words) {
     int i, k;
     for (i = 0; i < nr; i++) {
         char line[8 * 9 + 1];
         size_t l = 0;
-        if (r[i] < 0x10000 || (r[i] & 3) || !readable(r[i], 4 * (u64)words)) continue;
-        for (k = 0; k < words && k < 8; k++) l += (size_t)sprintf(line + l, " %08x", gr32(r[i] + 4 * (u64)k));
-        logf_(lvl, "  mem %s%d %llx:%s\n", reg, i, (unsigned long long)r[i], line);
+        u64 a = __atomic_load_n(&r[i], __ATOMIC_RELAXED);
+        if (a < 0x10000 || (a & 3) || !readable(a, 4 * (u64)words)) continue;
+        for (k = 0; k < words && k < 8; k++) l += (size_t)sprintf(line + l, " %08x", gr32(a + 4 * (u64)k));
+        logf_(lvl, "  mem %s%d %llx:%s\n", reg, i, (unsigned long long)a, line);
     }
 }
 /* the last 40 SVCs (the ring svc.c's dispatch fills) and 32 IPC requests, oldest first. Each ring's count is read
