@@ -315,7 +315,8 @@ other key, a section out of order or twice, or a line that is no key stops the g
 `users/<uid>.jpg`, a JPEG of at most 128 KiB (256x256 as the console's), read when the game starts; without one it is
 Wimsy. The game plays as the user its `.ini`'s `user` names (`--user=N` for one run): with one user, the game picks it
 on its own; with more, the game's user selector gets that user. Each user's Account saves are `save/user.<uid>` in the
-game's `<id>_data/`.
+game's `<id>_data/`; the first user's that an older version left in `save/user` are played there until you move them
+([DEPRECATIONS](DEPRECATIONS.md)).
 
 ## Settings / input
 

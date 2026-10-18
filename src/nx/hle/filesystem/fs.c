@@ -910,39 +910,38 @@ static void emptyrom_init(void) {
 }
 /* save data folders, by SaveDataType */
 static const char* const g_save_kinds[] = {"system", "user", "bcat", "device", "temp", "cache", "sysbcat"};
-/* An Account save is save/user.<uid>, the folder of its user (users.c). The first user's was save/user while there were
-   no others, and before that save/system (earlier versions read the save type from a byte that is always 0): the
-   first time it is opened, the older folder becomes save/user.<uid>, once. save/user and save/user.<uid> both there is
-   two saves of one user: the game stops and leaves both, for the player to keep one. Puts the folder in p, and 1 in
-   *both for that */
+/* An Account save is save/user.<uid>, the folder of its user (users.c). The first user's, while it has none, is the one
+   an older version left, played where it is and said once a run (docs/DEPRECATIONS.md): save/user, from before there
+   were other users, else a nonempty save/system (earlier versions read the save type from a byte that is always 0).
+   save/user and save/user.<uid> both there is two saves of one user: the game stops and leaves both, for the player to
+   keep one. Puts the folder in p, and 1 in *both for that */
 static u32 save_user(const nn_fs_SaveDataAttribute* attribute, char* p, size_t n, int* both) { /* tree.lock held */
     FsNode* node;
     const char* old = NULL;
     u64 uid[2];
     char text[33];
-    FsTreeResult r;
+    int mine;
     memcpy(uid, attribute->uid.v, 16);
     snx_users_uid_text(uid, text);
     snprintf(p, n, "save/user.%s", text);
     *both = 0;
     if (uid[0] != g_user_id[0] || uid[1] != g_user_id[1]) R_SUCCEED();
+    mine = !fs_tree_lookup(&fsp.tree, NULL, p, &node);
     if (!fs_tree_lookup(&fsp.tree, NULL, "save/user", &node))
         old = "save/user";
-    else if (!fs_tree_lookup(&fsp.tree, NULL, p, &node))
-        R_SUCCEED();
-    else if (!fs_tree_lookup(&fsp.tree, NULL, "save/system", &node) && node->is_dir && node->children)
+    else if (!mine && !fs_tree_lookup(&fsp.tree, NULL, "save/system", &node) && node->is_dir && node->children)
         old = "save/system";
     if (!old) R_SUCCEED();
-    if (!fs_tree_lookup(&fsp.tree, NULL, p, &node)) {
+    if (mine) {
         *both = 1;
         R_THROW(FS_EXISTS);
     }
-    r = fs_tree_rename(&fsp.tree, NULL, old, p, 1);
-    if (r)
-        WARN("fs: could not move %s to %s\n", old, p);
-    else
-        LOG("fs: moved %s to %s, the first user's saves\n", old, p);
-    return tree_result(r);
+    WARN_LIMIT(1,
+               "fs: %s%s, the first user's saves, was left by an older version: this one keeps them in %s%s. The game "
+               "plays them where they are until you move the folder there (docs/DEPRECATIONS.md)\n",
+               g_datadir, old, g_datadir, p);
+    snprintf(p, n, "%s", old);
+    R_SUCCEED();
 }
 /* the filesystems there are not here */
 static int nn_fssrv_sf_IFileSystemProxy_OpenDataFileSystemByCurrentProcess(SvcObj* self, SvcObj** filesystem) {

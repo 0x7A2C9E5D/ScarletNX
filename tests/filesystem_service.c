@@ -154,9 +154,18 @@ void plat_file_unshare(int fd, const u8* data, u64 size) {
     test_shared--;
     free((void*)data);
 }
+static int test_left_said; /* the warnings that a folder was left by an older version, the last in test_left_text */
+static char test_left_text[1024];
 void logf_(int level, const char* format, ...) {
-    (void)level;
-    (void)format;
+    char text[1024];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(text, sizeof text, format, args);
+    va_end(args);
+    if (!level && strstr(text, "was left by an older version")) {
+        test_left_said++;
+        snprintf(test_left_text, sizeof test_left_text, "%s", text);
+    }
 }
 void fatal(const char* format, ...) {
     va_list args;
@@ -981,33 +990,12 @@ static void test_save_data(SvcObj* proxy) {
     CHECK(tree_has(OTHER_SAVE) && !tree_has(FIRST_SAVE) && !tree_has("save/user") && tree_has("save/system"));
     fs_command(user, 0, "/other-user.bin", 4, 0);
     svcobj_unref(user);
-    /* the first user's with save/system empty: nothing to move, its folder is made beside it */
+    /* the first user's, with no save/user and save/system empty, is its folder, made then */
     user = open_user_save(proxy, g_user_id);
     CHECK(tree_has(FIRST_SAVE) && tree_has("save/system"));
     fs_command(user, 7, "/other-user.bin", 0, FS_NOTFOUND);
     svcobj_unref(user);
-    pm_lock(&fsp.tree.lock);
-    CHECK(!fs_tree_remove(&fsp.tree, NULL, FIRST_SAVE, 1, 1, 0));
-    pm_unlock(&fsp.tree.lock);
-    /* saves an earlier version put in save/system (it read the type from a byte that is always 0) go to the first
-       user's folder the first time its save is opened, if it has none yet */
-    fs_command(system, 0, "/slot.bin", 4, 0);
-    svcobj_unref(system);
-    user = open_user_save(proxy, g_user_id);
-    CHECK(tree_has(FIRST_SAVE "/slot.bin") && !tree_has("save/system"));
-    fs_command(user, 7, "/slot.bin", 0, 0);
-    svcobj_unref(user);
-    /* save/system starts again empty, and the first user's folder, which exists now, keeps what it has */
-    system = open_save_data(proxy, 51, 0);
-    fs_command(system, 7, "/slot.bin", 0, FS_NOTFOUND);
-    fs_command(system, 0, "/other.bin", 4, 0);
-    user = open_user_save(proxy, g_user_id);
-    fs_command(user, 7, "/slot.bin", 0, 0);
-    fs_command(user, 7, "/other.bin", 0, FS_NOTFOUND);
-    CHECK(tree_has("save/system/other.bin"));
-    svcobj_unref(user);
-    /* save/user, the one save of the versions before there were users, becomes the first user's, with its files,
-       once: another user's save leaves it where it is */
+    CHECK(test_left_said == 0);
     pm_lock(&fsp.tree.lock);
     CHECK(!fs_tree_remove(&fsp.tree, NULL, FIRST_SAVE, 1, 1, 0));
     u32 rc;
@@ -1016,13 +1004,53 @@ static void test_save_data(SvcObj* proxy) {
     CHECK(old && !rc);
     fs_command(old, 0, "/progress.bin", 4, 0);
     svcobj_unref(old);
+    /* save/user, the one Account save of the versions before there were other users, is the first user's while it
+       has no folder: played where it is, nothing moved, and said once a run with where it goes. Another user's save
+       leaves it alone */
     user = open_user_save(proxy, test_other_user);
     svcobj_unref(user);
-    CHECK(tree_has("save/user/progress.bin") && !tree_has(FIRST_SAVE));
+    CHECK(test_left_said == 0);
     user = open_user_save(proxy, g_user_id);
-    CHECK(tree_has(FIRST_SAVE "/progress.bin") && !tree_has("save/user"));
     fs_command(user, 7, "/progress.bin", 0, 0);
+    fs_command(user, 0, "/played.bin", 4, 0);
     svcobj_unref(user);
+    CHECK(tree_has("save/user/progress.bin") && tree_has("save/user/played.bin") && !tree_has(FIRST_SAVE));
+    CHECK(test_left_said == 1 && strstr(test_left_text, "save/user, the first user's saves") &&
+          strstr(test_left_text, FIRST_SAVE) && strstr(test_left_text, "DEPRECATIONS.md"));
+    user = open_user_save(proxy, g_user_id);
+    svcobj_unref(user);
+    CHECK(test_left_said == 1);
+    /* the player moves it to the first user's folder, which the save is from then */
+    pm_lock(&fsp.tree.lock);
+    CHECK(!fs_tree_rename(&fsp.tree, NULL, "save/user", FIRST_SAVE, 1));
+    pm_unlock(&fsp.tree.lock);
+    user = open_user_save(proxy, g_user_id);
+    fs_command(user, 7, "/played.bin", 0, 0);
+    svcobj_unref(user);
+    CHECK(!tree_has("save/user"));
+    /* saves an earlier version put in save/system (it read the type from a byte that is always 0) are the first
+       user's while it has no folder and no save/user, played where they are */
+    pm_lock(&fsp.tree.lock);
+    CHECK(!fs_tree_remove(&fsp.tree, NULL, FIRST_SAVE, 1, 1, 0));
+    pm_unlock(&fsp.tree.lock);
+    fs_command(system, 0, "/slot.bin", 4, 0);
+    user = open_user_save(proxy, g_user_id);
+    fs_command(user, 7, "/slot.bin", 0, 0);
+    svcobj_unref(user);
+    CHECK(tree_has("save/system/slot.bin") && !tree_has(FIRST_SAVE) && test_left_said == 1);
+    /* with its folder there, save/system is the System saves' alone */
+    pm_lock(&fsp.tree.lock);
+    old = hostfs_new(FIRST_SAVE, &rc);
+    pm_unlock(&fsp.tree.lock);
+    CHECK(old && !rc);
+    svcobj_unref(old);
+    fs_command(system, 1, "/slot.bin", 0, 0);
+    fs_command(system, 0, "/other.bin", 4, 0);
+    user = open_user_save(proxy, g_user_id);
+    fs_command(user, 7, "/other.bin", 0, FS_NOTFOUND);
+    fs_command(user, 0, "/progress.bin", 4, 0);
+    svcobj_unref(user);
+    CHECK(tree_has("save/system/other.bin") && tree_has(FIRST_SAVE "/progress.bin"));
     /* a save/user beside the first user's folder (an older version run again) is two saves of one user: the game
        stops, and both stay as they were, for the player to choose */
     pm_lock(&fsp.tree.lock);
@@ -1074,7 +1102,8 @@ static void test_save_data(SvcObj* proxy) {
     memcpy(&v, r.c.out + 4, 4);
     CHECK(v == 1);
     puts(
-        "PASS SaveDataType folders, a folder per user, the save/user and save/system migrations, two saves of one user "
+        "PASS SaveDataType folders, a folder per user, save/user and save/system played where they are, two saves of one "
+        "user "
         "refused, IsSdCardAccessible and the access log's program index");
 }
 
