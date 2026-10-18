@@ -36,6 +36,19 @@ static void test_fail(const char* expression, int line) {
 void pm_init(PMutex* m) { (void)m; }
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
+/* the data folder: only the add-on images in test_aoc_installed, ids of system/archives/<id>.romfs */
+static u64 test_aoc_installed[4];
+FILE* fs_open_read(const char* path, u64* size) {
+    char want[64];
+    for (size_t i = 0; i < 4 && test_aoc_installed[i]; i++) {
+        snprintf(want, sizeof want, "system/archives/%016llx.romfs", (unsigned long long)test_aoc_installed[i]);
+        if (!strcmp(path, want)) {
+            if (size) *size = 0;
+            return fopen("/dev/null", "rb");
+        }
+    }
+    return NULL;
+}
 void logf_(int level, const char* format, ...) {
     (void)level;
     (void)format;
@@ -784,6 +797,60 @@ static void test_aoc_list(void) {
     svcobj_unref(aoc);
 }
 
+/* aoc:u with the add-on images 1 and 3 in the data folder: CountAddOnContent (2) and the game's own
+   CountAddOnContentByApplicationId (0) say 2, another application's 0; ListAddOnContent (3) and
+   ListAddOnContentByApplicationId (1) {offset, count, ...} give the indices from offset, as many as count and the
+   buffer hold, nothing from the end and ApplicationRecordNotFound past it; PrepareAddOnContent (7) succeeds */
+static void test_aoc_content(void) {
+    static const struct {
+        u32 cmd, offset, count, room, rc, n, first;
+    } lists[] = {
+        {3, 0, 16, 16, 0, 2, 1}, {3, 1, 16, 16, 0, 1, 3},           {3, 0, 1, 16, 0, 1, 1},
+        {3, 0, 16, 1, 0, 1, 1},  {3, 2, 16, 16, 0, 0, 0},           {3, 3, 16, 16, RC(128, 37), 0, 0},
+        {1, 0, 16, 16, 0, 2, 1}, {1, 3, 16, 16, RC(128, 37), 0, 0},
+    };
+    const u64 base = aoc_base_id(g_title_id), other = 0x0100000000020000ull;
+    SvcObj* aoc = new_aoc();
+    Request r;
+    u32 v;
+    test_aoc_installed[0] = base + 1;
+    test_aoc_installed[1] = base + 3;
+    aoc_scanned = aoc_count = 0; /* test_aoc_list scanned an empty folder */
+    request(&r, 2);
+    r.c.has_pid = 1;
+    call(aoc, &r);
+    CHECK(reply32(&r, 0) == 2);
+    for (u32 i = 0; i < 2; i++) {
+        request(&r, 0);
+        argument64(&r, 0, i ? other : g_title_id);
+        call(aoc, &r);
+        CHECK(reply32(&r, 0) == (i ? 0u : 2u));
+    }
+    for (u32 i = 0; i < sizeof lists / sizeof lists[0]; i++) {
+        request(&r, lists[i].cmd);
+        argument32(&r, 0, lists[i].offset);
+        argument32(&r, 4, lists[i].count);
+        if (lists[i].cmd == 1) argument64(&r, 8, g_title_id);
+        r.c.has_pid = lists[i].cmd == 3;
+        r.c.nb = 1;
+        r.c.b[0].addr = 0x4000;
+        r.c.b[0].size = lists[i].room * 4;
+        memset(g_mem + 0x4000, 0xAA, 64);
+        CHECK((u32)aoc->dispatch(aoc, &r.c) == lists[i].rc);
+        if (lists[i].rc) continue;
+        CHECK(reply32(&r, 0) == lists[i].n);
+        memcpy(&v, g_mem + 0x4000, 4);
+        CHECK(!lists[i].n || v == lists[i].first);
+    }
+    request(&r, 7);
+    argument32(&r, 0, 1);
+    r.c.has_pid = 1;
+    call(aoc, &r);
+    svcobj_unref(aoc);
+    memset(test_aoc_installed, 0, sizeof test_aoc_installed);
+    aoc_scanned = aoc_count = 0;
+}
+
 int main(void) {
     g_mem = calloc(1, 0x10000);
     CHECK(g_mem != NULL);
@@ -796,6 +863,7 @@ int main(void) {
     test_ldn_monitor();
     test_nfp_filter();
     test_aoc_list();
+    test_aoc_content();
     CHECK(test_objects == 0 && test_kobjs == 0);
     free(g_mem);
     printf("misc_service: %u checks passed\n", test_checks);
