@@ -1158,11 +1158,63 @@ static void draw_storage_read(const GpuChannel* ch, VkDrawStorage* draw, VkSh* v
    target, which the pass then binds read-only. *fb gathers the color slots it samples in place, which the pass then
    binds in the feedback-loop layout (feedback_order): the fragment stage's, NULL for the others, which sample a copy.
    res: textures fs_get_keyed resolved for this stage, or NULL */
+/* A stage's descriptor set by its contents: the same writes (buffers, offsets, ranges, views, samplers, layouts) in
+   the same layout reuse the set made for them earlier in the frame, which still holds them (its pool is reset when the
+   frame slot comes round again, and what it names is destroyed no earlier: vk_defer_*). TotK allocated and wrote
+   13,400 sets a frame, two a draw, much of it the same textures again. Two independent 64-bit hashes stand for the
+   contents */
+u64 g_vk_dset_new, g_vk_dset_reused;
+static u64 dset_mix(u64 h, u64 v, u64 m) {
+    h = (h ^ v) * m;
+    return h ^ (h >> 29);
+}
+static VkDescriptorSet desc_set_cached(VkDescriptorSetLayout layout, DescWrites* d) {
+    static struct {
+        u64 h1, h2, frame;
+        VkDescriptorSet set;
+    } cache[1u << 14];
+    const u64 m1 = 0x9E3779B97F4A7C15ull, m2 = 0xC2B2AE3D27D4EB4Full;
+    u64 h1 = dset_mix(0x243F6A8885A308D3ull, (u64)(uintptr_t)layout, m1),
+        h2 = dset_mix(0x13198A2E03707344ull, (u64)(uintptr_t)layout, m2);
+    for (u32 i = 0; i < d->n; i++) {
+        const VkWriteDescriptorSet* w = &d->w[i];
+        u64 head = (u64)w->dstBinding | (u64)w->descriptorType << 20 | (u64)w->descriptorCount << 40 |
+                   (u64)w->dstArrayElement << 56;
+        h1 = dset_mix(h1, head, m1);
+        h2 = dset_mix(h2, head, m2);
+        for (u32 j = 0; j < w->descriptorCount; j++) {
+            u64 a, b, c;
+            if (w->pBufferInfo) {
+                a = (u64)(uintptr_t)w->pBufferInfo[j].buffer, b = w->pBufferInfo[j].offset, c = w->pBufferInfo[j].range;
+            } else if (w->pImageInfo) {
+                a = (u64)(uintptr_t)w->pImageInfo[j].imageView, b = (u64)(uintptr_t)w->pImageInfo[j].sampler;
+                c = (u64)w->pImageInfo[j].imageLayout;
+            } else {
+                a = (u64)(uintptr_t)(w->pTexelBufferView ? w->pTexelBufferView[j] : VK_NULL_HANDLE), b = c = 0;
+            }
+            h1 = dset_mix(dset_mix(dset_mix(h1, a, m1), b, m1), c, m1);
+            h2 = dset_mix(dset_mix(dset_mix(h2, a, m2), b, m2), c, m2);
+        }
+    }
+    u64 frame = vk_frame_id() + 1; /* 0 for an unused slot */
+    typeof(cache[0])* e = &cache[h1 >> 50];
+    if (e->frame == frame && e->h1 == h1 && e->h2 == h2) {
+        g_vk_dset_reused++;
+        return e->set;
+    }
+    VkDescriptorSet set = vk_desc_alloc(layout);
+    if (!set) return VK_NULL_HANDLE;
+    for (u32 i = 0; i < d->n; i++) d->w[i].dstSet = set;
+    if (d->n) vkUpdateDescriptorSets(g_vk.dev, d->n, d->w, 0, NULL);
+    g_vk_dset_new++;
+    *e = (typeof(cache[0])){h1, h2, frame, set};
+    return set;
+}
 static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro, u32* fb,
                                  TexRes* res, const VkDrawStorage* draw, DrawImages* images) {
     u32* r = ch->r3d;
-    VkDescriptorSet set = vk_desc_alloc(g_vk_dslayout[shader_vk_set(stage)]);
-    if (!set) return VK_NULL_HANDLE;
+    VkDescriptorSetLayout layout = g_vk_dslayout[shader_vk_set(stage)];
+    VkDescriptorSet set = VK_NULL_HANDLE; /* the writes take it once their contents are known (desc_set_cached) */
     DescWrites d;
     d.n = 0;
     for (int i = 0; i < 18; i++) {
@@ -1340,8 +1392,7 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
                                             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                                             .pImageInfo = &d.ii[binding]};
     }
-    if (d.n) vkUpdateDescriptorSets(g_vk.dev, d.n, d.w, 0, NULL);
-    return set;
+    return desc_set_cached(layout, &d);
 }
 
 /* ------------------------------------------------------------ draws */

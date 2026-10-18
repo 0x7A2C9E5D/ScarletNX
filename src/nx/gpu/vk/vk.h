@@ -369,7 +369,8 @@ void vk_release_samples(u64 gva, u32 len, u32 counter, u64 first, u64 end, u64 t
 void vk_release_submit(void); /* the GPFIFO submission ended or waits: a release gated on the recording submits */
 void vk_release_need(u64 gva, u64 len);
 int vk_release_read(u64 gva, void* dst, u64 len);
-extern u64 g_vk_release_forwards; /* statistics: reads vk_release_read answered */
+extern u64 g_vk_release_forwards;           /* statistics: reads vk_release_read answered */
+extern u64 g_vk_dset_new, g_vk_dset_reused; /* statistics: descriptor sets written, reused for the same contents */
 u32 vk_release_value(u32 id);
 void vk_release_retire(u32 id);
 void vk_release_drain(void);

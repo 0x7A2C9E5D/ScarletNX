@@ -354,13 +354,14 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
         vk_buf_frame();
         if (g_vk_present % 600 == 0) {
             LOG("vulkan: %llu draws, %llu skipped; %llu dispatches in %llu batches (%llu ms waiting), %llu skipped; "
-                "%llu finishes (%llu ms); %llu reads past queued releases\n",
+                "%llu finishes (%llu ms); %llu reads past queued releases; %llu descriptor sets written, %llu reused\n",
                 (unsigned long long)g_vk_drawn, (unsigned long long)g_vk_skipped, (unsigned long long)g_vk_dispatches,
                 (unsigned long long)g_vk_cs_batches,
                 (unsigned long long)(__atomic_load_n(&g_vk_cs_wait_ns, __ATOMIC_RELAXED) / 1000000),
                 (unsigned long long)g_vk_cs_skipped, (unsigned long long)g_vk_finishes,
                 (unsigned long long)(g_vk_finish_ns / 1000000),
-                (unsigned long long)__atomic_load_n(&g_vk_release_forwards, __ATOMIC_RELAXED));
+                (unsigned long long)__atomic_load_n(&g_vk_release_forwards, __ATOMIC_RELAXED),
+                (unsigned long long)g_vk_dset_new, (unsigned long long)g_vk_dset_reused);
             LOG("vulkan: %llu draws sampled a target they render to in place (%llu barriers in passes, %llu passes "
                 "begun again), %llu through a copy\n",
                 (unsigned long long)g_vk_fb_draws, (unsigned long long)g_vk_fb_barriers,
