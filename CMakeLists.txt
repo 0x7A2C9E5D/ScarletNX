@@ -27,6 +27,9 @@ if(NOT CMAKE_C_COMPILER_ID MATCHES "^(Apple)?Clang$" OR NOT CMAKE_CXX_COMPILER_I
                         "(${CMAKE_C_COMPILER}). Use a preset, or -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ "
                         "in a new build folder.")
 endif()
+# the CPU baseline (POWER8 on PowerPC64) and a Linux cross build's target and sysroot, for FFmpeg, OpenSSL and the
+# recompiler's runtime library
+include(cmake/cross.cmake)
 # the iOS and macOS apps' frontend (src/gui/apple.m and dist/apple's Swift, docs/APPLE.md), which the runtime links
 # with the menu: the languages are enabled where every target that links them is below
 if(APPLE AND (NOT DEFINED SNX_BUILD_GUI OR SNX_BUILD_GUI))
@@ -72,8 +75,11 @@ endif()
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
-set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O2 -g")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
+# CI's cross builds, which no one debugs, set -O2 -g0: compiles, links and the compiler cache are smaller without
+# the symbols
+set(SNX_OPT_FLAGS "-O2 -g" CACHE STRING "Optimization and debug flags of a RelWithDebInfo build")
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "${SNX_OPT_FLAGS}")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${SNX_OPT_FLAGS}")
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)

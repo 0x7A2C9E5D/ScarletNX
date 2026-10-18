@@ -396,7 +396,7 @@ SNX_INLINE void dc_zva(u8* M, u64 a) { memset(MP(a & ~(u64)63), 0, 64); }
    (LDACQ, STREL), so no later access moves above an acquire load and no earlier one below a release store, which
    plain or volatile accesses don't guarantee once the compiler reorders them. Every DMB, DSB and ISB is a seq_cst
    fence (SNX_FENCE in a64_templates.inc's BARRIER). Nothing else orders guest memory, so plain guest loads and
-   stores stay plain host ones, on x86-64 and AArch64 hosts alike.
+   stores stay plain host ones, on x86-64, AArch64 and PowerPC64 hosts alike.
    The monitor is value based: a store-exclusive succeeds when the monitor is armed for the same address and size
    and a compare-and-swap from the value the load read succeeds. It is cleared after each store-exclusive. Status
    0 is success. Unlike hardware it sees no ABA and ordinary stores don't clear it (docs/DIVERGENCES.md). */
@@ -412,7 +412,8 @@ SNX_INLINE u32 snx_cas16(u16* p, u16 expected, u16 desired) {
 SNX_INLINE u32 snx_cas8(u8* p, u8 expected, u8 desired) {
     return __atomic_compare_exchange_n(p, &expected, desired, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 }
-/* one atomic 16-byte compare-and-swap of both halves (p[0] the low one): cmpxchg16b on x86-64 */
+/* one atomic 16-byte compare-and-swap of both halves (p[0] the low one): cmpxchg16b on x86-64, lqarx/stqcx. on
+   POWER8 */
 u32 snx_cas128(u64* p, u64 o0, u64 o1, u64 n0, u64 n1);
 #define SNX_FENCE()    __atomic_thread_fence(__ATOMIC_SEQ_CST)
 /* ABI 3 made these and snx_cas128 atomic, so modules from before are refused */
@@ -520,13 +521,16 @@ void snx_msr(CPU* c, u32 sysreg, u64 v);
 #define CBAR()      __asm__ __volatile__("" ::: "memory")
 /* YIELD marks spin-wait loops. The compiler barrier makes such a loop reload guest memory (a loop with no call
    could otherwise keep it in registers), and x86's pause tells the CPU the loop spins, which frees the sibling
-   hyperthread and avoids a pipeline flush when the loop ends */
+   hyperthread and avoids a pipeline flush when the loop ends. POWER's yield hint (or 27,27,27) lowers the hardware
+   thread's priority the same way */
 #if defined(__x86_64__)
 #define YIELD()                                                                                                        \
     do {                                                                                                               \
         __builtin_ia32_pause();                                                                                        \
         CBAR();                                                                                                        \
     } while (0)
+#elif defined(__powerpc64__)
+#define YIELD() __asm__ __volatile__("or 27,27,27" ::: "memory")
 #else
 #define YIELD() CBAR()
 #endif

@@ -166,6 +166,16 @@ i64 plat_tz_offset(void) {
 static u8* g_ww_base;
 static u64 g_ww_size;
 
+u64 plat_vm_page(void) {
+    u64 page = 4096; /* VirtualAlloc commits and protects 4 KiB pages on every Windows system */
+    const char* forced = getenv("SNX_HOST_PAGE");
+    if (forced) { /* a larger power of two only: the host's pages can't be split */
+        u64 v = strtoull(forced, NULL, 0);
+        if (v > page && v <= (1u << 20) && !(v & (v - 1))) page = v;
+    }
+    return page;
+}
+/* VirtualAlloc places a reservation at its 64 KiB allocation granularity, which covers SNX_HOST_PAGE up to that */
 u8* plat_vm_reserve(u64 size) {
     void* p = NULL;
     if (!getenv("SNX_NO_WW")) p = VirtualAlloc(NULL, (SIZE_T)size, MEM_RESERVE | MEM_WRITE_WATCH, PAGE_NOACCESS);

@@ -634,6 +634,8 @@ int main(int argc, char** argv) {
     args[k++] = "-w";
 #if defined(__aarch64__)
     args[k++] = "-march=armv8-a";
+#elif defined(__powerpc64__)
+    args[k++] = "-mcpu=power8"; /* the 128-bit CAS's lqarx/stqcx., as cmake/cross.cmake builds for */
 #else
     args[k++] = "-march=x86-64";
     args[k++] = "-mcx16";

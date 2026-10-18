@@ -272,7 +272,8 @@ int plat_ww_scan(u8* p, u64 size, void (*cb)(u8* p, u64 size)) {
 #if defined(__linux__) && defined(PAGEMAP_SCAN)
     struct page_region regions[64];
     struct pm_scan_arg arg;
-    u64 start = (u64)(uintptr_t)p & ~(u64)4095, end = ((u64)(uintptr_t)p + size + 4095) & ~(u64)4095;
+    u64 mask = (u64)sysconf(_SC_PAGESIZE) - 1; /* the kernel's pages: PAGEMAP_SCAN wants its bounds on them */
+    u64 start = (u64)(uintptr_t)p & ~mask, end = ((u64)(uintptr_t)p + size + mask) & ~mask;
     int pm = __atomic_load_n(&g_pagemap, __ATOMIC_ACQUIRE);
     if (pm < 0) return -1;
     while (start < end) {
@@ -302,16 +303,28 @@ int plat_ww_scan(u8* p, u64 size, void (*cb)(u8* p, u64 size)) {
 #endif
 }
 
+u64 plat_vm_page(void) {
+    long host = sysconf(_SC_PAGESIZE);
+    u64 page = host > 0 ? (u64)host : 4096;
+    const char* forced = getenv("SNX_HOST_PAGE");
+    if (forced) { /* a larger power of two only: the host's pages can't be split */
+        u64 v = strtoull(forced, NULL, 0);
+        if (v > page && v <= (1u << 20) && !(v & (v - 1))) page = v;
+    }
+    return page;
+}
+/* mmap aligns to the host's own page: a larger plat_vm_page (SNX_HOST_PAGE) takes a page more and trims the rest, so
+   guest addresses sit at the same place in a page as their host addresses */
 u8* plat_vm_reserve(u64 size) {
-    long page = sysconf(_SC_PAGESIZE);
-    void* p;
-    /* the guest's memory is protected in the Switch's 4 KiB pages, which mprotect can't do with larger host pages */
-    if (page != 4096)
-        fatal("This system uses %ld KiB memory pages. ScarletNX only runs on systems with 4 KiB pages.", page / 1024);
-    p = mmap(NULL, (size_t)size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    if (p == MAP_FAILED) return NULL;
-    ww_init((u8*)p, size);
-    return (u8*)p;
+    u64 page = plat_vm_page(), extra = page - (u64)sysconf(_SC_PAGESIZE), head;
+    u8* p = (u8*)mmap(NULL, (size_t)(size + extra), PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (p == (u8*)MAP_FAILED) return NULL;
+    head = (page - (u64)(uintptr_t)p % page) % page;
+    if (head) munmap(p, (size_t)head);
+    if (extra > head) munmap(p + head + size, (size_t)(extra - head));
+    p += head;
+    ww_init(p, size);
+    return p;
 }
 int plat_vm_commit(u8* p, u64 size) { return mprotect(p, (size_t)size, PROT_READ | PROT_WRITE) ? -1 : 0; }
 void plat_vm_decommit(u8* p, u64 size) {
@@ -674,6 +687,8 @@ static void* context_pc(void* ctx) {
     return (void*)(uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
 #elif defined(__linux__) && defined(__aarch64__)
     return (void*)(uintptr_t)uc->uc_mcontext.pc;
+#elif defined(__linux__) && defined(__powerpc64__)
+    return (void*)(uintptr_t)uc->uc_mcontext.gp_regs[32]; /* PT_NIP (asm/ptrace.h), glibc's and musl's alike */
 #elif defined(__FreeBSD__) && defined(__x86_64__)
     return (void*)(uintptr_t)uc->uc_mcontext.mc_rip;
 #elif defined(__FreeBSD__) && defined(__aarch64__)

@@ -208,6 +208,15 @@ if(TARGET snx_ctr_board)
         endif()
     endif()
 endif()
+# Under a cross build's emulator, the 3DS AOT links its module with the compiler built into the driver (its path on the
+# build machine, the target's own when installed there), whose linker doesn't take the target's objects
+if(CMAKE_CROSSCOMPILING_EMULATOR)
+    foreach(snx_test 3ds_static_pipeline 3ds_extract)
+        if(TEST ${snx_test})
+            set_tests_properties(${snx_test} PROPERTIES DISABLED TRUE)
+        endif()
+    endforeach()
+endif()
 
 add_executable(snx-test-arm-profile arm_profile.c "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/a32.c"
     "${PROJECT_SOURCE_DIR}/src/common/cpu/arm/thumb_decode.c"
@@ -318,7 +327,7 @@ if(SNX_TEST_A64_FP_DIFF)
     endif()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_test(NAME a64_fp_differential COMMAND "${Python3_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/a64_fp_diff.py" --cc "${CMAKE_C_COMPILER}")
+        "${CMAKE_CURRENT_SOURCE_DIR}/a64_fp_diff.py" --cc "${SNX_TARGET_C_COMPILER}")
     set_tests_properties(a64_fp_differential PROPERTIES TIMEOUT 900)
 endif()
 
@@ -760,7 +769,7 @@ target_link_libraries(snx_recompiler_test PRIVATE snx_driver ${CMAKE_DL_LIBS})
 
 # LLVM is always available to the recompiler.
 add_test(NAME native_recompiler COMMAND snx_recompiler_test
-    $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}")
+    $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${SNX_TARGET_C_COMPILER}")
 add_executable(snx-test-llvm-differential llvm_differential.c)
 snx_test_target(snx-test-llvm-differential 11)
 target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
@@ -768,7 +777,7 @@ target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${C
 # of its own (CI's) starts tests in their order, and these are the longest. Fewer, and one runs alone at the end;
 # more, and each pays the compiles' start again
 foreach(shard RANGE 2)
-    add_test(NAME llvm_differential_${shard} COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}"
+    add_test(NAME llvm_differential_${shard} COMMAND snx-test-llvm-differential "${SNX_TARGET_C_COMPILER}"
         "${PROJECT_SOURCE_DIR}" --quiet --shard ${shard}/3)
     set_tests_properties(llvm_differential_${shard} PROPERTIES TIMEOUT 900 COST 100)
 endforeach()
@@ -818,7 +827,7 @@ if(TARGET snx_jit)
     target_link_libraries(snx-test-llvm-differential PRIVATE snx_jit)
     target_compile_definitions(snx-test-llvm-differential PRIVATE SNX_TEST_GCCJIT)
     foreach(shard RANGE 1) # as llvm_differential's
-        add_test(NAME gccjit_differential_${shard} COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}"
+        add_test(NAME gccjit_differential_${shard} COMMAND snx-test-llvm-differential "${SNX_TARGET_C_COMPILER}"
             "${PROJECT_SOURCE_DIR}" --gccjit --quiet --per-case 2 --simd 100 --states 4 --shard ${shard}/2)
         set_tests_properties(gccjit_differential_${shard} PROPERTIES TIMEOUT 900 COST 100)
     endforeach()
@@ -847,7 +856,7 @@ endif()
 add_executable(snx_codegen_test codegen_test.c)
 snx_test_target(snx_codegen_test 90)
 target_link_libraries(snx_codegen_test PRIVATE snx_driver)
-add_test(NAME native_codegen COMMAND snx_codegen_test "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}")
+add_test(NAME native_codegen COMMAND snx_codegen_test "${SNX_TARGET_C_COMPILER}" "${PROJECT_SOURCE_DIR}")
 
 add_executable(snx-test-astc astc_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/astc.c")
 snx_test_target(snx-test-astc 23)

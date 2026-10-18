@@ -131,6 +131,8 @@ int snx_execution_compile(SnxExecution* e, const SnxExecRange* ranges, size_t co
     args[n++] = "-foptimize-sibling-calls";
 #if defined(__x86_64__) || defined(_M_X64)
     args[n++] = "-mcx16";
+#elif defined(__powerpc64__)
+    args[n++] = "-mcpu=power8"; /* lqarx/stqcx. for the 128-bit CAS, as cmake/cross.cmake builds the runtime */
 #endif
     args[n++] = "-w";
     args[n++] = "-I";
