@@ -389,6 +389,10 @@ static void demote_nl(u64 a, u64 size) {
     hi = lo + size;
     for (i = 0; i < g_nblk; i++) {
         const MemBlock* b = &g_blk[i];
+        /* a's own pages, in a block merged with a neighbour that is the source of another view: two stacks mapped
+           one after the other get neighbouring pool pages and become one block, and keeping them here left pool
+           pages in the heap that a later stack's view then overlapped (svcMapMemory failed, and nn::os aborted) */
+        if (b->pool && b->addr + lo == a + (b->pool - 1)) continue;
         if (b->pool && (b->addr < a || blk_end(b) > a + size) && b->pool - 1 < hi && lo < b->pool - 1 + b->size)
             return; /* another mapping of them, or a block reaching past a's range (a view of part of a view) */
     }
