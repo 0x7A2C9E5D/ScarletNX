@@ -44,7 +44,7 @@ FILE* fs_open_read(const char* path, u64* size) {
         snprintf(want, sizeof want, "system/archives/%016llx.romfs", (unsigned long long)test_aoc_installed[i]);
         if (!strcmp(path, want)) {
             if (size) *size = 0;
-            return fopen("/dev/null", "rb");
+            return tmpfile(); /* any open file, which /dev/null is not on Windows: the scan only closes it */
         }
     }
     return NULL;
