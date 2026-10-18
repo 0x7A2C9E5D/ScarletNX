@@ -144,6 +144,28 @@ u64 gmmu_translate(u64 gva) {
     if (!(e & 1)) return 0;
     return (e & ~(u64)0xFFF) | (gva & 0xFFF);
 }
+/* the bytes from gva on, at most max, whose pages map to consecutive guest pages, and in *cpu the guest address of gva:
+   0 when gva's page isn't mapped. One walk of the table for a range, where gmmu_translate per page walks it again */
+u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
+    u64 page = gva >> GPAGE_BITS, n, e, want;
+    u64* t = __atomic_load_n(&nv.gmmu[gmmu_l1_index(page)], __ATOMIC_ACQUIRE);
+    if (!max || !t) return 0;
+    e = __atomic_load_n(&t[page & ((1u << GL2_BITS) - 1)], __ATOMIC_RELAXED);
+    if (!(e & 1)) return 0;
+    *cpu = (e & ~(u64)0xFFF) | (gva & 0xFFF);
+    n = 0x1000 - (gva & 0xFFF);
+    want = (e & ~(u64)0xFFF) + 0x1000;
+    while (n < max) {
+        page++;
+        if (!(page & ((1u << GL2_BITS) - 1))) t = __atomic_load_n(&nv.gmmu[gmmu_l1_index(page)], __ATOMIC_ACQUIRE);
+        if (!t) break;
+        e = __atomic_load_n(&t[page & ((1u << GL2_BITS) - 1)], __ATOMIC_RELAXED);
+        if (!(e & 1) || (e & ~(u64)0xFFF) != want) break;
+        n += 0x1000;
+        want += 0x1000;
+    }
+    return n < max ? n : max;
+}
 static u64* gmmu_l2(u32 i) {
     u64* t = __atomic_load_n(&nv.gmmu[i], __ATOMIC_ACQUIRE);
     if (t) return t;
@@ -962,19 +984,22 @@ static u32 gpu_submit_gpfifo(NvFile* f, u32 cmd, u8* d, u32 n, const u8* extra, 
     u32 num = rd32(d, 8), flags = rd32(d, 12), fid = rd32(d, 16), fval = rd32(d, 20);
     u32 room = (cmd & 0xFF) == 0x1B ? (extra ? nextra / 8 : 0) : (n > 24 ? (n - 24) / 8 : 0);
     const u8* entries = (cmd & 0xFF) == 0x1B ? extra : d + 24;
-    u32 sp, incs = 0, wait_id = ~0u, promised;
+    u32 sp, host = 0, incs, wait_id = ~0u, promised;
     if (num > room) {
         WARN_LIMIT(8, "nvdrv: SUBMIT_GPFIFO of %u entries in a buffer of %u\n", num, room);
         num = room;
     }
     if ((flags & 1) && fid != ~0u) wait_id = fid;
-    if (flags & 2) incs += 2;
-    if (flags & 0x100) incs += fval;
+    if (flags & 2) host = 2;
+    /* the fence promises every increment: with 0x100 the entries make fval of them themselves, and the job adds only
+       the host's after them, as Ryujinx's SubmitGpfifo does. Adding fval there too ran the syncpoint ahead of every
+       later fence, so NVN's waits returned at once and TotK's main thread spun on the semaphores behind them */
+    incs = host + ((flags & 0x100) ? fval : 0);
     sp = gpu_channel_syncpt(f);
     /* the promise and the queueing in one hold, so promises reach the GPU thread in order */
     pm_lock(&nv.submit_lk);
     promised = syncpt_promise(sp, incs);
-    gpu_submit(entries, num, sp, incs, wait_id, fval, promised);
+    gpu_submit(entries, num, sp, host, wait_id, fval, promised);
     pm_unlock(&nv.submit_lk);
     wr32(d, 16, sp);
     wr32(d, 20, promised);
