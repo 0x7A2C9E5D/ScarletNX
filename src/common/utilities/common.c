@@ -37,7 +37,11 @@
 #include <sys/sysctl.h>
 #endif
 #ifdef __APPLE__
+#include <TargetConditionals.h>
 #include <mach-o/dyld.h>
+#if !TARGET_OS_IPHONE /* the iOS SDK has no libproc, and an app there runs no tools */
+#include <libproc.h>
+#endif
 #endif
 
 void* snx_alloc(size_t size) {
@@ -1097,17 +1101,60 @@ static wchar_t* child_environment(const char* home) {
     return out;
 }
 #endif
-/* tick(data) once a second has gone by since the last one */
-static void tick_due(double* ticked, void (*tick)(void*), void* data) {
+/* what a child has written so far, from the system's count: one call however many files it wrote. Listing them
+   instead cost more each second as Tomodachi Life's RomFS (66,000 files) came out, the tool waiting on its full pipe
+   (4 KiB on Windows) while the list was made, and a Windows extraction crawled at 94% */
+#ifdef _WIN32
+static SnxU64 child_written(HANDLE child) {
+    IO_COUNTERS io;
+    return GetProcessIoCounters(child, &io) ? (SnxU64)io.WriteTransferCount : SNX_RUN_UNCOUNTED;
+}
+#else
+static SnxU64 child_written(pid_t child) {
+#if defined(__linux__)
+    /* /proc/PID/io's wchar, the bytes its write calls passed */
+    char path[48], text[512];
+    const char* at;
+    SnxU64 n;
+    size_t got;
+    FILE* file;
+    snprintf(path, sizeof path, "/proc/%ld/io", (long)child);
+    file = fopen(path, "r");
+    if (!file) return SNX_RUN_UNCOUNTED;
+    got = fread(text, 1, sizeof text - 1, file);
+    fclose(file);
+    text[got] = 0;
+    at = strstr(text, "wchar:");
+    if (!at) return SNX_RUN_UNCOUNTED;
+    for (at += 6; *at == ' '; at++) {}
+    for (n = 0; *at >= '0' && *at <= '9'; at++) n = n * 10 + (SnxU64)(*at - '0');
+    return n;
+#elif defined(__APPLE__) && !TARGET_OS_IPHONE
+    struct rusage_info_v2 info;
+    return proc_pid_rusage(child, RUSAGE_INFO_V2, (rusage_info_t*)&info) ? SNX_RUN_UNCOUNTED
+                                                                         : (SnxU64)info.ri_diskio_byteswritten;
+#else
+    (void)child;
+    return SNX_RUN_UNCOUNTED;
+#endif
+}
+#endif
+/* tick(data, written) once a second has gone by since the last one ended: a tick slower than a second still leaves
+   the child a second to write, where timing from its start ran the ticks back to back */
+#ifdef _WIN32
+static void tick_due(double* ticked, void (*tick)(void*, SnxU64), void* data, HANDLE child) {
+#else
+static void tick_due(double* ticked, void (*tick)(void*, SnxU64), void* data, pid_t child) {
+#endif
     if (snx_seconds() - *ticked < 1) return;
+    tick(data, child_written(child));
     *ticked = snx_seconds();
-    tick(data);
 }
 int snx_run(const char* const* argv, const char* cwd, const char* home, char** output) {
     return snx_run_ticking(argv, cwd, home, output, NULL, NULL);
 }
-int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, char** output, void (*tick)(void*),
-                    void* data) {
+int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, char** output,
+                    void (*tick)(void*, SnxU64), void* data) {
     char buf[8192];
     size_t used = 0;
     double ticked = snx_seconds();
@@ -1199,7 +1246,7 @@ int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, 
         for (;;) {
             DWORD ready = 0;
             if (tick) { /* a read waits only for what is there, so the tick keeps its second */
-                tick_due(&ticked, tick, data);
+                tick_due(&ticked, tick, data, pi.hProcess);
                 if (!PeekNamedPipe(rd, NULL, 0, NULL, &ready, NULL)) break; /* every writer gone */
                 if (!ready) {
                     Sleep(50);
@@ -1254,7 +1301,7 @@ int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, 
                 ready.events = POLLIN;
                 ready.revents = 0;
                 any = poll(&ready, 1, ms > 0 ? ms : 0);
-                tick_due(&ticked, tick, data);
+                tick_due(&ticked, tick, data, pid);
                 if (!any || (any < 0 && errno == EINTR)) continue;
             }
             got = read(fds[0], buf, sizeof(buf));
@@ -1270,7 +1317,7 @@ int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, 
         if (waited < 0 && errno == EINTR) continue;
         if (waited) break;
         poll(NULL, 0, 50); /* no output to wait on: the child's end is looked for, the tick kept */
-        tick_due(&ticked, tick, data);
+        tick_due(&ticked, tick, data, pid);
     }
     return waited < 0 ? 1 : WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
 #endif
