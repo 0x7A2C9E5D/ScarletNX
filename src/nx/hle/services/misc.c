@@ -23,6 +23,37 @@
 
 /* ============================================================ apm */
 #define APM_CONFIGURATION 0x00020003u /* Config7, the default of both modes */
+#define APM_MODES         2           /* nn::apm::PerformanceMode: Normal, Boost */
+/* nn::apm's sixteen performance configurations, Config1 to Config16: a clock setting for the CPU, GPU and memory */
+static const u32 apm_known[] = {0x00010000u, 0x00010001u, 0x00010002u, 0x00020000u, 0x00020001u, 0x00020002u,
+                                0x00020003u, 0x00020004u, 0x00020005u, 0x00020006u, 0x92220007u, 0x92220008u,
+                                0x92220009u, 0x9222000Au, 0x9222000Bu, 0x9222000Cu};
+/* each mode's configuration, as a session or SetCpuBoostMode last set it */
+static u32 apm_config[APM_MODES] = {APM_CONFIGURATION, APM_CONFIGURATION};
+
+u32 apm_configuration(u32 mode) { return mode < APM_MODES ? apm_config[mode] : APM_CONFIGURATION; }
+/* a configuration nn::apm doesn't have, or a mode, is not kept: the clocks stay as they were */
+void apm_set_configuration(u32 mode, u32 config) {
+    size_t i;
+    for (i = 0; i < sizeof apm_known / sizeof apm_known[0]; i++)
+        if (apm_known[i] == config) break;
+    if (mode >= APM_MODES || i == sizeof apm_known / sizeof apm_known[0]) {
+        WARN("apm: performance configuration 0x%08x for mode %u is not one, kept 0x%08x\n", config, mode,
+             apm_configuration(mode));
+        return;
+    }
+    apm_config[mode] = config;
+}
+/* nn::oe::CpuBoostMode (am's SetCpuBoostMode): Normal, FastLoad and its third mode give Boost mode Config7, Config13
+   and Config15 */
+void apm_cpu_boost(u32 boost) {
+    static const u32 boosted[] = {0x00020003u, 0x92220009u, 0x9222000Bu};
+    if (boost >= sizeof boosted / sizeof boosted[0]) {
+        WARN("apm: CPU boost mode %u is not one, Boost mode kept at 0x%08x\n", boost, apm_configuration(1));
+        return;
+    }
+    apm_set_configuration(1, boosted[boost]);
+}
 
 static int nn_apm_IManager_OpenSession(SvcObj* self, SvcObj** session) {
     (void)self;
@@ -35,10 +66,16 @@ static int nn_apm_IManager_GetPerformanceMode(SvcObj* self, nn_apm_PerformanceMo
     *mode = g_opt_docked ? 1 : 0;
     R_SUCCEED();
 }
+static int nn_apm_ISession_SetPerformanceConfiguration(SvcObj* self, nn_apm_PerformanceMode mode,
+                                                       nn_apm_PerformanceConfiguration config) {
+    (void)self;
+    apm_set_configuration(mode, config);
+    R_SUCCEED();
+}
 static int nn_apm_ISession_GetPerformanceConfiguration(SvcObj* self, nn_apm_PerformanceMode mode,
                                                        nn_apm_PerformanceConfiguration* config) {
-    (void)self, (void)mode;
-    *config = APM_CONFIGURATION;
+    (void)self;
+    *config = apm_configuration(mode);
     R_SUCCEED();
 }
 

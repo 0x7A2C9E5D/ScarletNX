@@ -698,6 +698,50 @@ static void test_ngc(void) {
     svcobj_unref(ngc);
 }
 
+/* apm: Get (1) and Set (0) {mode, configuration} on a session, one configuration per mode, Config7 for both at
+   first; one that is not a configuration, or a mode past Boost, kept out; SetCpuBoostMode's modes for Boost */
+static u32 apm_get(SvcObj* s, u32 mode) {
+    Request r;
+    request(&r, 1);
+    argument32(&r, 0, mode);
+    call(s, &r);
+    CHECK(r.c.out_size == 4);
+    return reply32(&r, 0);
+}
+static void apm_set(SvcObj* s, u32 mode, u32 config) {
+    Request r;
+    request(&r, 0);
+    argument32(&r, 0, mode);
+    argument32(&r, 4, config);
+    call(s, &r);
+    CHECK(r.c.out_size == 0);
+}
+static void test_apm(void) {
+    SvcObj* apm = new_apm();
+    Request r;
+    request(&r, 0);
+    call(apm, &r);
+    CHECK(r.c.nout_objs == 1);
+    SvcObj* s = r.c.out_objs[0];
+    CHECK(apm_get(s, 0) == 0x00020003u && apm_get(s, 1) == 0x00020003u);
+    apm_set(s, 0, 0x00010000u);
+    CHECK(apm_get(s, 0) == 0x00010000u && apm_get(s, 1) == 0x00020003u);
+    apm_set(s, 0, 0x12345678u);
+    apm_set(s, 2, 0x00010001u);
+    CHECK(apm_get(s, 0) == 0x00010000u && apm_get(s, 1) == 0x00020003u);
+    apm_cpu_boost(1);
+    CHECK(apm_get(s, 1) == 0x92220009u && apm_get(s, 0) == 0x00010000u);
+    apm_cpu_boost(2);
+    CHECK(apm_get(s, 1) == 0x9222000Bu);
+    apm_cpu_boost(3);
+    CHECK(apm_get(s, 1) == 0x9222000Bu);
+    apm_cpu_boost(0);
+    apm_set(s, 0, 0x00020003u);
+    CHECK(apm_get(s, 1) == 0x00020003u && apm_get(s, 0) == 0x00020003u);
+    svcobj_unref(s);
+    svcobj_unref(apm);
+}
+
 static void test_mii_default(void) {
     SvcObj* service = new_mii();
     Request r;
@@ -1073,6 +1117,7 @@ int main(void) {
     test_mm();
     test_hid();
     test_mii_default();
+    test_apm();
     test_ngc();
     test_mm_full();
     test_nfp();

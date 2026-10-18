@@ -76,6 +76,9 @@ SvcObj* new_ectx(void);
 SvcObj* new_spl(void);
 SvcObj* new_btmu(void);
 SvcObj* new_audin(void);
+u32 apm_configuration(u32 mode); /* apm's performance configuration of a mode, Normal (0) or Boost */
+void apm_set_configuration(u32 mode, u32 config);
+void apm_cpu_boost(u32 boost); /* am's SetCpuBoostMode: Boost mode's configuration for it */
 SvcObj* new_ngc(void);
 SvcObj* new_ngct(void);
 

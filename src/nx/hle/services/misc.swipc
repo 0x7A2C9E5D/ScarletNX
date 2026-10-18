@@ -15,7 +15,7 @@ interface nn::apm::IManager is apm, apm:p, apm:am {
 }
 @fallback(quiet_ok)
 interface nn::apm::ISession {
-    @stub [0] SetPerformanceConfiguration(nn::apm::PerformanceMode mode, nn::apm::PerformanceConfiguration config);
+    [0] SetPerformanceConfiguration(nn::apm::PerformanceMode mode, nn::apm::PerformanceConfiguration config);
     [1] GetPerformanceConfiguration(nn::apm::PerformanceMode mode) -> nn::apm::PerformanceConfiguration config;
 }
 

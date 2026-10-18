@@ -41,7 +41,6 @@
 #define AM_APPLET_WEB_AUTH       0x19
 
 #define AM_PRESELECTED_USER_MAGIC 0xc79497cau /* LaunchParameterAccountPreselectedUser */
-#define AM_PERFORMANCE_CONFIG     0x00020003u /* apm's Config7, as misc.c answers it */
 
 /* the console's one user (acc.c). Fixed: a game may keep it in its saves, and the saves of existing installs
    belong to this one */
@@ -399,9 +398,16 @@ static int nn_am_service_ICommonStateGetter_GetHdcpAuthenticationStateChangeEven
     *event = ev_handle(am.resolution_event);
     R_SUCCEED();
 }
+/* apm's configuration of the mode the console runs in */
 static int nn_am_service_ICommonStateGetter_GetCurrentPerformanceConfiguration(SvcObj* self, u32* configuration) {
     (void)self;
-    *configuration = AM_PERFORMANCE_CONFIG;
+    *configuration = apm_configuration(g_opt_docked ? 1 : 0);
+    R_SUCCEED();
+}
+/* the clocks a game asks for around its loading screens, which apm keeps as Boost mode's configuration */
+static int nn_am_service_ICommonStateGetter_SetCpuBoostMode(SvcObj* self, u32 mode) {
+    (void)self;
+    apm_cpu_boost(mode);
     R_SUCCEED();
 }
 

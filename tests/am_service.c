@@ -375,6 +375,19 @@ static SvcObj* swkbd(u32 max, u32 min, int utf8) {
     CHECK(((StorageData*)out->data)->size == 0x7d8);
     return out;
 }
+/* SetCpuBoostMode hands its mode to apm, and GetCurrentPerformanceConfiguration is apm's for the console's mode */
+extern u32 g_test_apm_boost;
+static void test_cpu_boost(void) {
+    u32 config = 0;
+    CHECK(nn_am_service_ICommonStateGetter_SetCpuBoostMode(NULL, 1) == 0 && g_test_apm_boost == 1);
+    CHECK(nn_am_service_ICommonStateGetter_GetCurrentPerformanceConfiguration(NULL, &config) == 0 &&
+          config == 0x00020003u);
+    g_opt_docked = 1;
+    CHECK(nn_am_service_ICommonStateGetter_GetCurrentPerformanceConfiguration(NULL, &config) == 0 &&
+          config == 0x92220009u);
+    g_opt_docked = 0;
+}
+
 static void test_swkbd(void) {
     SvcObj* out;
     u8* d;
@@ -520,6 +533,7 @@ int main(void) {
     modern_packet = 1;
     test_inline();
     test_swkbd();
+    test_cpu_boost();
     test_applets();
     CHECK(test_objects == 0 && test_kobjs == 0);
     test_messages();
