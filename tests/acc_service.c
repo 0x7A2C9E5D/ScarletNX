@@ -214,8 +214,11 @@ static void refused(const char* text, int selected, const char* why_has) {
     CHECK(g_user_count == 1 && !strcmp(g_users[0].nickname, "Player"));
 }
 static void uid_of(const char* text, nn_account_Uid* uid) {
+    unsigned long long hi = 0, lo = 0;
     u64 v[2];
-    CHECK(!users_uid_parse(text, v));
+    CHECK(strlen(text) == 32 && sscanf(text, "%16llx%16llx", &hi, &lo) == 2);
+    v[0] = hi;
+    v[1] = lo;
     memcpy(uid->v, v, 16);
 }
 

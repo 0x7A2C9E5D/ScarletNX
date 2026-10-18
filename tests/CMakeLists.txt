@@ -238,8 +238,6 @@ foreach(suite tree service)
 endforeach()
 target_compile_options(snx-test-fs-service PRIVATE -Wno-unused-parameter)
 snx_swipc(snx-test-fs-service ROOT "${PROJECT_SOURCE_DIR}/src/nx" FILES hle/services/types.swipc hle/filesystem/fs.swipc)
-# an Account save is its user's folder (users.c names it)
-target_sources(snx-test-fs-service PRIVATE "${PROJECT_SOURCE_DIR}/src/nx/hle/services/users.c")
 target_link_libraries(snx-test-fs-service PRIVATE scarletnx-common)
 add_test(NAME filesystem_raw COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> raw)
 

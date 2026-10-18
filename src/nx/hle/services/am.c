@@ -45,7 +45,7 @@
 
 /* the console's first user (users.c). Fixed: a game may keep it in its saves, and the saves of existing installs
    belong to this one */
-u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
+u64 g_user_id[2] = {SNX_USERS_FIRST_UID0, SNX_USERS_FIRST_UID1};
 
 /* the application's message queue: a message stays queued until ReceiveMessage takes it, and the event is signaled
    while one is */
