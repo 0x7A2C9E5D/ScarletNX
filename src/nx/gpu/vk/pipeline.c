@@ -604,32 +604,35 @@ static VkPipeline pipe_create(const PipeKey* k) {
     VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
                                               .attachmentCount = k->ncolor,
                                               .pAttachments = cba};
-    VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
-                            VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
-                            VK_DYNAMIC_STATE_CULL_MODE,
-                            VK_DYNAMIC_STATE_FRONT_FACE,
-                            VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
-                            VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
-                            VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
-                            VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
-                            VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE,
-                            VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE,
-                            VK_DYNAMIC_STATE_STENCIL_OP,
-                            VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE,
-                            VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE,
-                            VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE,
-                            VK_DYNAMIC_STATE_LINE_WIDTH,
-                            VK_DYNAMIC_STATE_DEPTH_BIAS,
-                            VK_DYNAMIC_STATE_BLEND_CONSTANTS,
-                            VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
-                            VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
-                            VK_DYNAMIC_STATE_STENCIL_REFERENCE,
-                            VK_DYNAMIC_STATE_DEPTH_BOUNDS,
-                            VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE};
+    VkDynamicState dyn[21 + 2] = {VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
+                                  VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
+                                  VK_DYNAMIC_STATE_CULL_MODE,
+                                  VK_DYNAMIC_STATE_FRONT_FACE,
+                                  VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
+                                  VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
+                                  VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
+                                  VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
+                                  VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE,
+                                  VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE,
+                                  VK_DYNAMIC_STATE_STENCIL_OP,
+                                  VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE,
+                                  VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE,
+                                  VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE,
+                                  VK_DYNAMIC_STATE_LINE_WIDTH,
+                                  VK_DYNAMIC_STATE_DEPTH_BIAS,
+                                  VK_DYNAMIC_STATE_BLEND_CONSTANTS,
+                                  VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
+                                  VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
+                                  VK_DYNAMIC_STATE_STENCIL_REFERENCE,
+                                  VK_DYNAMIC_STATE_DEPTH_BOUNDS};
+    u32 ndyn = 21; /* the states above, which every pipeline has */
+    /* without the feedback loop's dynamic state, a pipeline enables the loop with a flag (k->feedback) instead */
+    if (g_vk.has_feedback_dynamic) dyn[ndyn++] = VK_DYNAMIC_STATE_ATTACHMENT_FEEDBACK_LOOP_ENABLE_EXT;
     /* the stride is set by vkCmdBindVertexBuffers2, which a draw without vertex buffers never calls: a pipeline without
-       bindings leaves it out (it is last) */
+       bindings leaves it out */
+    if (k->nbind) dyn[ndyn++] = VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE;
     VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-                                           .dynamicStateCount = sizeof dyn / sizeof dyn[0] - (k->nbind ? 0 : 1),
+                                           .dynamicStateCount = ndyn,
                                            .pDynamicStates = dyn};
     VkFormat cf[8];
     for (u32 i = 0; i < k->ncolor; i++) cf[i] = (VkFormat)k->color[i];
@@ -640,6 +643,8 @@ static VkPipeline pipe_create(const PipeKey* k) {
                                         .stencilAttachmentFormat = (VkFormat)k->stencil};
     VkGraphicsPipelineCreateInfo gi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
                                        .pNext = &ri,
+                                       .flags =
+                                           k->feedback ? VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT : 0,
                                        .stageCount = nst,
                                        .pStages = st,
                                        .pVertexInputState = &vi,

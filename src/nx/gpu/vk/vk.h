@@ -68,6 +68,11 @@ typedef struct {
     int has_shader_draw_parameters;
     u64 alloc_cap; /* the most one device memory allocation may be (memory.c) */
     int sparse;    /* sparseBinding on the graphics queue: images bigger than alloc_cap are bound in pieces */
+    /* VK_EXT_attachment_feedback_loop_layout: a draw samples a color target it renders to in place (gpu/vk/render.c),
+       with the loop enabled per draw by dynamic state (VK_EXT_attachment_feedback_loop_dynamic_state) or else by a
+       pipeline flag, and ordered within the pass by a barrier there (dynamicRenderingLocalRead) or else by beginning
+       the pass again */
+    int has_feedback, has_feedback_dynamic, has_local_read;
 } VkState;
 extern VkState g_vk;
 
@@ -475,6 +480,7 @@ typedef struct {
     struct {
         u32 en, sc, dc, cop, sa, da, aop, mask;
     } blend[8];
+    u32 feedback; /* VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT, without the dynamic state for it */
 } PipeKey;
 VkPipeline vk_pipeline_get(const PipeKey* k);
 VkPipelineCache vk_pipeline_cache(void); /* for pipelines made elsewhere (compute) */
@@ -547,5 +553,9 @@ u32 vk_gbuf_desc(int stage, u32 off, const u32* v, u64* addr);
    accesses a barrier names see the writes before it */
 #define VK_STORAGE_IMAGE_ACCESS (VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT)
 extern u64 g_vk_drawn, g_vk_skipped; /* draws recorded, and draws skipped (unsupported topology, failed shader) */
+/* draws that sampled a color target they render to in place, the barriers ordering them within a pass, the passes
+   begun again for them (a target's layout, or ordering without those barriers), and draws that sampled a target
+   through a copy instead (gpu/vk/render.c) */
+extern u64 g_vk_fb_draws, g_vk_fb_barriers, g_vk_fb_restarts, g_vk_rt_copies;
 
 #endif

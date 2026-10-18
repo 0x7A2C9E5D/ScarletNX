@@ -361,6 +361,10 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                 (unsigned long long)g_vk_cs_skipped, (unsigned long long)g_vk_finishes,
                 (unsigned long long)(g_vk_finish_ns / 1000000),
                 (unsigned long long)__atomic_load_n(&g_vk_release_forwards, __ATOMIC_RELAXED));
+            LOG("vulkan: %llu draws sampled a target they render to in place (%llu barriers in passes, %llu passes "
+                "begun again), %llu through a copy\n",
+                (unsigned long long)g_vk_fb_draws, (unsigned long long)g_vk_fb_barriers,
+                (unsigned long long)g_vk_fb_restarts, (unsigned long long)g_vk_rt_copies);
         }
     }
     /* Offscreen frames still submit and advance the frame ring. g_last remains available for readback. */

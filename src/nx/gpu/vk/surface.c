@@ -96,6 +96,8 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
     VkImageUsageFlags usage =
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (is_rt) usage |= f.depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    /* the draws rendering to a color target can sample it, in ATTACHMENT_FEEDBACK_LOOP_OPTIMAL (gpu/vk/render.c) */
+    if (is_rt && !f.depth && g_vk.has_feedback) usage |= VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
     VkFormatProperties format_props;
     vkGetPhysicalDeviceFormatProperties(g_vk.phys, f.vk, &format_props);
     if (format_props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) {
@@ -142,8 +144,13 @@ VkImageView vk_rt_attachment(Surf* s, int srgb_write) {
     VkFormat linear = vk_srgb_as(s->f.vk, 0);
     if (srgb_write || linear == s->f.vk) return s->att;
     if (!s->att_linear) {
-        VkImageViewUsageCreateInfo usage = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
-                                            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT};
+        /* an attachment in the feedback-loop layout needs the loop's usage on its view, and sampling
+           (VUID-VkRenderingAttachmentInfo-imageView-10780) */
+        VkImageViewUsageCreateInfo usage = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
+            .usage =
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                (g_vk.has_feedback ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT : 0)};
         VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                                     .pNext = &usage,
                                     .image = s->img,

@@ -27,7 +27,11 @@ static struct {
     int open;
     int srgb_write;
     int zt_ro; /* the depth target is read-only in this pass: draws also sample it */
+    /* feedback loops (feedback_order): the color slots in ATTACHMENT_FEEDBACK_LOOP_OPTIMAL, those of them written
+       since the pass began or its last barrier, and those sampled since then */
+    u32 fb, fb_written, fb_read;
 } g_rp;
+u64 g_vk_fb_draws, g_vk_fb_barriers, g_vk_fb_restarts, g_vk_rt_copies;
 
 void vk_render_end(void) {
     if (!g_rp.open) return;
@@ -74,16 +78,19 @@ static void read_targets(GpuChannel* ch, Surf** rt, Surf** zt, u32* n) {
 }
 
 /* opens a rendering pass on these targets, or keeps the open one if it is the same set. zt_ro: the depth target is
-   bound read-only, so draws can sample it too (soft particles test against depth they also read) */
-static int render_begin(Surf** rt, Surf* zt, u32 n, int zt_ro, int srgb_write) {
+   bound read-only, so draws can sample it too (soft particles test against depth they also read). fb: color slots the
+   draw samples, which the pass needs in ATTACHMENT_FEEDBACK_LOOP_OPTIMAL (feedback_order) */
+static int render_begin(Surf** rt, Surf* zt, u32 n, int zt_ro, int srgb_write, u32 fb) {
     srgb_write = !!srgb_write;
     if (!n && !zt) return 0;
     if (!zt) zt_ro = 0;
-    if (g_rp.open && g_rp.n == n && g_rp.zt == zt && g_rp.zt_ro == zt_ro && g_rp.srgb_write == srgb_write &&
-        !memcmp(g_rp.rt, rt, sizeof g_rp.rt))
-        return 1;
+    int same = g_rp.open && g_rp.n == n && g_rp.zt == zt && g_rp.zt_ro == zt_ro && g_rp.srgb_write == srgb_write &&
+               !memcmp(g_rp.rt, rt, sizeof g_rp.rt);
+    if (same && !(fb & ~g_rp.fb)) return 1;
+    if (same) g_vk_fb_restarts++; /* only a target's layout changes */
     vk_render_end();
     VkCommandBuffer cb = vk_cmd();
+    u32 loops = 0;
     VkRenderingAttachmentInfo ca[8];
     VkExtent2D ext = {~0u, ~0u};
     for (u32 i = 0; i < n; i++) {
@@ -91,12 +98,23 @@ static int render_begin(Surf** rt, Surf* zt, u32 n, int zt_ro, int srgb_write) {
                                             .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                                             .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
         if (!rt[i]) continue;
-        vk_surf_use(cb, rt[i], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+        /* a target left in the feedback-loop layout stays in it: draws keep sampling the same targets pass after pass,
+           and moving it back would end the next such pass at its first feedback draw */
+        int loop = g_vk.has_feedback &&
+                   ((fb >> i & 1) || rt[i]->layout == VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT);
+        VkImageLayout layout =
+            loop ? VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        /* the fragment shader's reads are in the barrier's second scope, so the pass begins with every earlier write
+           visible to them */
+        vk_surf_use(cb, rt[i], layout,
+                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
+                        (loop ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT : 0),
+                    VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+                        (loop ? VK_ACCESS_2_SHADER_SAMPLED_READ_BIT : 0));
         ca[i].imageView = vk_rt_attachment(rt[i], srgb_write);
         if (!ca[i].imageView) return 0;
-        ca[i].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        ca[i].imageLayout = layout;
+        if (loop) loops |= 1u << i;
         if (rt[i]->sw < ext.width) ext.width = rt[i]->sw;
         if (rt[i]->sh < ext.height) ext.height = rt[i]->sh;
     }
@@ -142,12 +160,72 @@ static int render_begin(Surf** rt, Surf* zt, u32 n, int zt_ro, int srgb_write) {
     g_rp.ext = ext;
     g_rp.zt_ro = zt_ro;
     g_rp.srgb_write = srgb_write;
+    g_rp.fb = loops;
+    g_rp.fb_written = g_rp.fb_read = 0;
     g_rp.open = 1;
     return 1;
 }
 static void target_written(Surf* s) {
     s->wgen++;
     vk_rt_drawn(s);
+}
+
+/* Feedback loops. A Maxwell draw may sample a color target it renders to: Tears of the Kingdom blends in its shaders,
+   reading the pixel under the fragment and writing it back, in hundreds of draws a frame. With
+   VK_EXT_attachment_feedback_loop_layout the target stays the pass's attachment, in ATTACHMENT_FEEDBACK_LOOP_OPTIMAL,
+   which the draw's descriptor names too, and the draw enables the loop for color (dynamic state, or a pipeline flag).
+   Each draw still sees the target as all earlier draws left it: before a draw samples a slot written since the last
+   barrier, or writes a slot sampled since then, a barrier orders the color attachment writes and fragment shader
+   reads before it against those after it, both ways.
+
+   Within a vkCmdBeginRendering pass a barrier is allowed only with dynamicRenderingLocalRead
+   (VUID-vkCmdPipelineBarrier2-None-09553), with framebuffer-space stages only (-srcStageMask-09556), by region
+   (-dependencyFlags-07891), and with no image barrier on an attachment outside RENDERING_LOCAL_READ or GENERAL
+   (-image-09555): so it is a memory barrier, and the layout stays. By region, the specification orders a write at
+   (x, y, layer) only before reads by fragments at the same (x, y, layer) ("Framebuffer Region Dependencies"). That is
+   all a fragment reading the pixel it covers needs, which is what blending in a shader does. A fragment reading other
+   pixels (a blur of the target) isn't ordered by it in the specification: an immediate-mode desktop GPU drains and
+   flushes for the barrier as a whole and orders those reads too in practice, while a tiler may order only within its
+   tile. Without dynamicRenderingLocalRead, the pass ends and begins again instead, and render_begin's image barrier,
+   outside the pass, orders every pixel.
+
+   Eden ends its render pass for each such draw and samples the image in GENERAL (TextureCache::CheckFeedbackLoop,
+   BarrierFeedbackLoop). Before this, the target was copied for each draw (vk_rt_snapshot), which stays for devices
+   without the extension, for stages before the fragment shader, and for a depth target the draw writes.
+
+   Orders a command of the open pass that samples the color slots in read and writes those in write. 0 when the pass
+   could not be begun again */
+static int feedback_order(u32 read, u32 write) {
+    read &= g_rp.fb;
+    write &= g_rp.fb;
+    if (!(read & g_rp.fb_written) && !(write & g_rp.fb_read)) return 1;
+    if (!g_vk.has_local_read) {
+        Surf* rt[8];
+        memcpy(rt, g_rp.rt, sizeof rt);
+        vk_render_end();
+        g_vk_fb_restarts++;
+        return render_begin(rt, g_rp.zt, g_rp.n, g_rp.zt_ro, g_rp.srgb_write, g_rp.fb);
+    }
+    VkMemoryBarrier2 mb = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT};
+    /* FEEDBACK_LOOP says what the barrier is for, to drivers that flush differently for it */
+    VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                           .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT | VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT,
+                           .memoryBarrierCount = 1,
+                           .pMemoryBarriers = &mb};
+    vkCmdPipelineBarrier2(vk_cmd(), &di);
+    g_rp.fb_written = g_rp.fb_read = 0;
+    g_vk_fb_barriers++;
+    return 1;
+}
+/* a command of the open pass sampled the color slots in read and wrote those in write */
+static void feedback_done(u32 read, u32 write) {
+    g_rp.fb_read |= read & g_rp.fb;
+    g_rp.fb_written |= write & g_rp.fb;
 }
 
 /* every dynamic state at a neutral value, for draws of our own */
@@ -176,6 +254,7 @@ static void plain_state(VkCommandBuffer cb, VkRect2D sc) {
     vkCmdSetStencilReference(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
     vkCmdSetStencilCompareMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
     vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+    if (g_vk.has_feedback_dynamic) vkCmdSetAttachmentFeedbackLoopEnableEXT(cb, VK_IMAGE_ASPECT_NONE);
 }
 
 /* a clear of some color components only: a full-screen triangle with that write mask, whose fragment shader writes
@@ -274,7 +353,7 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
         if (slot >= (ctl & 15) || ((ctl >> (4 + slot * 3)) & 7) != slot)
             LOG_LIMIT(1, "vulkan: a clear of color slot %u under RT_CONTROL %08x\n", slot, ctl);
     }
-    if (!render_begin(rt, zt, n, 0, r[0x56E] & 1)) return;
+    if (!render_begin(rt, zt, n, 0, r[0x56E] & 1, 0)) return;
     u32 layers = ~0u;
     for (u32 i = 0; i < g_rp.n; i++)
         if (g_rp.rt[i] && g_rp.rt[i]->layers < layers) layers = g_rp.rt[i]->layers;
@@ -298,6 +377,10 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
         if (x1 <= x0 || y1 <= y0) return;
         rect.rect = (VkRect2D){{x0, y0}, {(u32)(x1 - x0), (u32)(y1 - y0)}};
     }
+    /* the color slot it writes, after the pass's draws that sampled it */
+    u32 written = mask && slot < g_rp.n && g_rp.rt[slot] ? 1u << slot : 0;
+    if (!feedback_order(0, written)) return;
+    feedback_done(0, written);
     VkClearAttachment at[2];
     u32 na = 0;
     if (mask && slot < g_rp.n && g_rp.rt[slot]) {
@@ -1072,8 +1155,10 @@ static void draw_storage_read(const GpuChannel* ch, VkDrawStorage* draw, VkSh* v
 }
 
 /* a stage's descriptor set: constant buffers, storage buffers, textures. *zt_ro is set when it samples the depth
-   target, which the pass then binds read-only. res: textures fs_get_keyed resolved for this stage, or NULL */
-static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro,
+   target, which the pass then binds read-only. *fb gathers the color slots it samples in place, which the pass then
+   binds in the feedback-loop layout (feedback_order): the fragment stage's, NULL for the others, which sample a copy.
+   res: textures fs_get_keyed resolved for this stage, or NULL */
+static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro, u32* fb,
                                  TexRes* res, const VkDrawStorage* draw, DrawImages* images) {
     u32* r = ch->r3d;
     VkDescriptorSet set = vk_desc_alloc(g_vk_dslayout[shader_vk_set(stage)]);
@@ -1161,13 +1246,24 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         /* sampling the depth target needs it read-only: no depth writes, and no stencil writes on either face */
         int sten_w = zt && zt->f.stencil && r[0x4E0] && ((r[0x4E7] & 0xFF) || (r[0x565] && (r[0x3D6] & 0xFF)));
         int depth_ro = t && t == zt && !r[0x4BA] && !sten_w;
-        if (t && is_target(t, rt, zt, n) && !depth_ro) {
-            /* The guest reads the target's previous contents during a draw that writes it. Vulkan can't bind one
-               image for both uses here, so copy it before the draw starts and sample that copy. */
+        u32 slots = 0; /* the color slots t is bound to, when the fragment shader may sample it in place */
+        if (t && fb && g_vk.has_feedback && t->layout != VK_IMAGE_LAYOUT_UNDEFINED)
+            for (u32 j = 0; j < n; j++)
+                if (rt[j] == t) slots |= 1u << j;
+        if (slots) {
+            /* the guest reads the target's previous contents during a draw that writes it: in place, in a feedback
+               loop */
+            view = vk_tex_bind_view(t, want, x->tic, x->tsc, num);
+            if (view) *fb |= slots;
+        } else if (t && is_target(t, rt, zt, n) && !depth_ro) {
+            /* The guest reads the target's previous contents during a draw that writes it. Without a feedback loop
+               Vulkan can't bind one image for both uses here, so copy it before the draw starts and sample that
+               copy. */
             Surf* snap = vk_rt_snapshot(t);
             if (snap != t) {
                 t = snap;
                 view = vk_tex_bind_view(t, want, x->tic, x->tsc, num);
+                g_vk_rt_copies++;
             } else
                 LOG_LIMIT(1, "vulkan: a draw samples a target it renders to (read as empty)\n");
         } else
@@ -1176,7 +1272,9 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
         if (view && depth_ro) {
             *zt_ro = 1; /* render_begin moves it to the read-only layout */
             layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-        } else if (view)
+        } else if (view && slots)
+            layout = VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT; /* render_begin moves it there */
+        else if (view)
             vk_surf_use(vk_cmd(), t, layout, VK_SAMPLED_STAGES, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
         else {
             view = vk_null_view(want, st->shadow ? 3 : num);
@@ -1428,7 +1526,7 @@ retry:
         if (cleared_frame != g_vk_present || cleared != zt) {
             cleared_frame = g_vk_present;
             cleared = zt;
-            if (render_begin(rt, zt, 0, 0, r[0x56E] & 1)) {
+            if (render_begin(rt, zt, 0, 0, r[0x56E] & 1, 0)) {
                 VkClearAttachment a = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT |
                                                      (zt->f.stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0)};
                 a.clearValue.depthStencil = (VkClearDepthStencilValue){1.0f, 0};
@@ -1621,9 +1719,10 @@ retry:
         return;
     }
     int zt_ro = 0;
+    u32 fb = 0;
     DrawImages images = {0};
-    VkDescriptorSet vset = stage_set(ch, 0, vs, rt, zt, n, &zt_ro, NULL, &storage, NULL);
-    VkDescriptorSet fset = fs ? stage_set(ch, 4, fs, rt, zt, n, &zt_ro, fres, &storage, &images) : VK_NULL_HANDLE;
+    VkDescriptorSet vset = stage_set(ch, 0, vs, rt, zt, n, &zt_ro, NULL, NULL, &storage, NULL);
+    VkDescriptorSet fset = fs ? stage_set(ch, 4, fs, rt, zt, n, &zt_ro, &fb, fres, &storage, &images) : VK_NULL_HANDLE;
     /* the sets of the stages between, at their stage's index (shader_vk_set) */
     between[0] = tcs;
     between[1] = tes;
@@ -1637,7 +1736,7 @@ retry:
             bset_ok = 0;
             break;
         }
-        bset[b] = stage_set(ch, b + 1, between[b], rt, zt, n, &zt_ro, NULL, &storage, NULL);
+        bset[b] = stage_set(ch, b + 1, between[b], rt, zt, n, &zt_ro, NULL, NULL, &storage, NULL);
         if (!bset[b]) bset_ok = 0;
     }
     if (!vset || (fs && !fset) || !bset_ok) {
@@ -1754,6 +1853,7 @@ retry:
         }
     }
 
+    k.feedback = fb && !g_vk.has_feedback_dynamic;
     VkPipeline pipe = vk_pipeline_get(&k);
     if (!pipe) {
         draw_images_discard(&images);
@@ -1768,12 +1868,19 @@ retry:
         g_vk_skipped++;
         return;
     }
-    if (!render_begin(rt, zt, n, zt_ro, r[0x56E] & 1)) {
+    /* the color slots the draw writes */
+    u32 writes = 0;
+    if (fs)
+        for (u32 i = 0; i < n; i++)
+            if (rt[i] && (k.blend[i].mask & ((fs->si.sph[18] >> (i * 4)) & 15))) writes |= 1u << i;
+    if (!render_begin(rt, zt, n, zt_ro, r[0x56E] & 1, fb) || !feedback_order(fb, writes)) {
         draw_images_discard(&images);
         return;
     }
     VkCommandBuffer cb = vk_cmd();
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    if (g_vk.has_feedback_dynamic)
+        vkCmdSetAttachmentFeedbackLoopEnableEXT(cb, fb ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_NONE);
     VkDescriptorSet sets[2] = {vset, fset};
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_vk_playout, 0, fs ? 2 : 1, sets, 0, NULL);
     for (b = 0; b < 3; b++)
@@ -1886,9 +1993,10 @@ retry:
         vkCmdDraw(cb, count, instances, first, base_instance);
     vk_buf_writable_commit();
     draw_images_commit(&images);
-    if (fs)
-        for (u32 i = 0; i < n; i++)
-            if (g_rp.rt[i] && (k.blend[i].mask & ((fs->si.sph[18] >> (i * 4)) & 15))) target_written(g_rp.rt[i]);
+    feedback_done(fb, writes);
+    if (fb) g_vk_fb_draws++;
+    for (u32 i = 0; i < n; i++)
+        if (writes >> i & 1) target_written(g_rp.rt[i]);
     if (zt && !zt_ro && (r[0x4BA] || (r[0x4E0] && ((r[0x4E7] & 0xFF) || (r[0x565] && (r[0x3D6] & 0xFF))))))
         target_written(zt);
     g_vk_drawn++;
