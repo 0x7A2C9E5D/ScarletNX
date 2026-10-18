@@ -72,6 +72,18 @@ void gmem_before_write(u64 gva, u64 size) {
     if (size && g_gpu_before_write) g_gpu_before_write(gva, size);
 }
 int gmem_read(u64 gva, void* dst, u64 size) {
+    /* a queued release's payload is known: the stream reads it without waiting for the work before it, as the console's
+       GPU, in order, would find it there (TotK's conditional rendering read report pairs this way, waiting for the GPU
+       60 times a second) */
+    if (__atomic_load_n(&g_gpu_releases, __ATOMIC_ACQUIRE) && g_renderer->release_read) {
+        int r = g_renderer->release_read(gva, dst, size);
+        if (r > 0) return 0;
+        if (r < 0) g_renderer->release_need(gva, size);
+        if (g_cs_any) g_renderer->cs_mem_need(gva, size);
+        if (g_gfx_any || g_gfx_img_any) g_renderer->gfx_mem_need(gva, size);
+        gmem_read_raw(gva, dst, size);
+        return 0;
+    }
     gmem_need(gva, size);
     return copy_runs(gva, (u8*)dst, NULL, size) ? 0 : -1;
 }

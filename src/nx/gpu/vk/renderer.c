@@ -357,12 +357,13 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
         vk_buf_frame();
         if (g_vk_present % 600 == 0) {
             LOG("vulkan: %llu draws, %llu skipped; %llu dispatches in %llu batches (%llu ms waiting), %llu skipped; "
-                "%llu finishes (%llu ms)\n",
+                "%llu finishes (%llu ms); %llu reads past queued releases\n",
                 (unsigned long long)g_vk_drawn, (unsigned long long)g_vk_skipped, (unsigned long long)g_vk_dispatches,
                 (unsigned long long)g_vk_cs_batches,
                 (unsigned long long)(__atomic_load_n(&g_vk_cs_wait_ns, __ATOMIC_RELAXED) / 1000000),
                 (unsigned long long)g_vk_cs_skipped, (unsigned long long)g_vk_finishes,
-                (unsigned long long)(g_vk_finish_ns / 1000000));
+                (unsigned long long)(g_vk_finish_ns / 1000000),
+                (unsigned long long)__atomic_load_n(&g_vk_release_forwards, __ATOMIC_RELAXED));
         }
     }
     /* Offscreen frames still submit and advance the frame ring. g_last remains available for readback. */
@@ -552,6 +553,7 @@ const Renderer vk_renderer = {
     .stream_incr = vkr_stream_incr,
     .release_write = vk_release_write,
     .release_need = vk_release_need,
+    .release_read = vk_release_read,
     .release_value = vk_release_value,
     .release_retire = vk_release_retire,
     .samples_reset = vkr_samples_reset,

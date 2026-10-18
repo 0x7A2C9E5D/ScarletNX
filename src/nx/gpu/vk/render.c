@@ -832,6 +832,14 @@ void vk_gfx_image_mem_need(u64 gva, u64 size) {
     g_img_landing = 0;
     vk_unlock();
 }
+int vk_gfx_image_pending(u64 gva, u64 size) {
+    int hit = 0;
+    if (!g_gfx_img_any || !size) return 0;
+    vk_lock();
+    for (size_t i = 0; i < g_img_count && !hit; i++) hit = image_overlaps(&g_img_out[i], gva, size);
+    vk_unlock();
+    return hit;
+}
 void vk_gfx_image_land(void) {
     if (!g_gfx_img_any || g_img_landing) return;
     vk_lock();

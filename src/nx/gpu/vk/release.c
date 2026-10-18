@@ -38,6 +38,7 @@ static u32 g_rincr[SYNC_N];  /* increments queued per syncpoint */
 static PMutex g_rlock = PMUTEX_INIT;
 static PCond g_rcv;
 static int g_rthread;
+u64 g_vk_release_forwards;
 
 static void perform(Release* r) {
     if (r->samples) { /* the count, as the report's structure size says: one word, or the value and the timestamp */
@@ -231,6 +232,42 @@ static void release_match(u64 gva, u64 len, u32 id, int all) {
         release_through(gate, cgate);
     }
     vk_unlock();
+}
+/* [gva, gva + len) as the stream sees it: memory, then the payloads of the releases queued over it in their order (1),
+   or 0 when none is queued there, or -1 when one there can't be read past now. Under vk_lock, which release_through
+   holds while it takes releases from the queue and writes them, so a release is either still queued or in memory.
+   Storage results still pending there may be newer than the releases (a release lands storage images and puts the
+   compute batch aside before it is queued), so they are waited for instead. The queue is looked at first: almost no
+   read meets a release, and those go on at once */
+int vk_release_read(u64 gva, void* dst, u64 len) {
+    int r = 0;
+    if (!len || vk_result_landing()) return len ? -1 : 0;
+    vk_lock();
+    pm_lock(&g_rlock);
+    for (u64 i = g_rtail; i < g_rhead && r >= 0; i++) {
+        const Release* q = &g_rq[i % RQ_N];
+        if (!release_overlaps(q, gva, len)) continue;
+        /* a count the GPU hasn't given yet, or the same memory through another address: not known here */
+        r = !q->samples && gva < q->gva + q->len && q->gva < gva + len && len <= 0x10000 ? 1 : -1;
+    }
+    pm_unlock(&g_rlock);
+    if (r > 0 && (vk_compute_pending(gva, len) || vk_buf_pending(gva, len) || vk_gfx_image_pending(gva, len))) r = -1;
+    if (r > 0) {
+        pm_lock(&g_rlock);
+        gmem_read_raw(gva, dst, len);
+        for (u64 i = g_rtail; i < g_rhead; i++) {
+            const Release* q = &g_rq[i % RQ_N];
+            u64 lo, hi;
+            if (!q->gva || gva >= q->gva + q->len || q->gva >= gva + len) continue;
+            lo = q->gva > gva ? q->gva : gva;
+            hi = q->gva + q->len < gva + len ? q->gva + q->len : gva + len;
+            memcpy((u8*)dst + (lo - gva), q->data + (lo - q->gva), (size_t)(hi - lo));
+        }
+        pm_unlock(&g_rlock);
+        __atomic_add_fetch(&g_vk_release_forwards, 1, __ATOMIC_RELAXED);
+    }
+    vk_unlock();
+    return r;
 }
 void vk_release_need(u64 gva, u64 len) {
     if (len) release_match(gva, len, 0, 0);

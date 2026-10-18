@@ -273,6 +273,7 @@ void vk_surf_use(VkCommandBuffer cb, Surf* s, VkImageLayout layout, VkPipelineSt
 VkImageView vk_rt_attachment(Surf* s, int srgb_write);
 void vk_rt_flush(u64 gva);
 void vk_gfx_image_mem_need(u64 gva, u64 size);
+int vk_gfx_image_pending(u64 gva, u64 size);
 void vk_gfx_image_land(void);
 u64 vk_surf_guest_size(const Surf* s);
 int vk_surf_can_writeback(const Surf* s);
@@ -360,6 +361,8 @@ void vk_release_incr(u32 id);
 void vk_release_samples(u64 gva, u32 len, u32 counter, u64 first, u64 end, u64 ticks);
 void vk_release_submit(void); /* the GPFIFO submission ended or waits: a release gated on the recording submits */
 void vk_release_need(u64 gva, u64 len);
+int vk_release_read(u64 gva, void* dst, u64 len);
+extern u64 g_vk_release_forwards; /* statistics: reads vk_release_read answered */
 u32 vk_release_value(u32 id);
 void vk_release_retire(u32 id);
 void vk_release_drain(void);
@@ -485,6 +488,7 @@ void vk_compute_land_through(u64 value);         /* the batches up to it, done, 
 void vk_compute_before_write(u64 gva, u64 size); /* gpu.c's g_gpu_before_write */
 void vk_compute_mem_need(u64 a, u64 n);          /* a read of [a, a + n): land results there first */
 void vk_compute_mem_need_map(u64 a, u64 n);      /* the GMMU changes [a, a + n): land results there first */
+int vk_compute_pending(u64 a, u64 n);            /* a pending result covers a guest page of [a, a + n) */
 /* a pending compute result covering [gva, gva + len): the arena buffer and offset to read it from on the GPU */
 int vk_compute_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off);
 extern VkSemaphore g_vk_csem;  /* timeline semaphore the compute queue signals */

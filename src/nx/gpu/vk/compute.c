@@ -469,6 +469,13 @@ void vk_compute_mem_need(u64 a, u64 n) {
     if (pend_hit(&g_pages, a, n)) cs_mem_need(a, n);
     vk_unlock();
 }
+int vk_compute_pending(u64 a, u64 n) {
+    int hit;
+    vk_lock();
+    hit = pend_hit(&g_pages, a, n);
+    vk_unlock();
+    return hit;
+}
 /* the GMMU is about to change [a, a + n): every result there lands with the mappings it covered its pages through,
    including one that overlaps it only on GPU pages that weren't mapped, which covered no page */
 void vk_compute_mem_need_map(u64 a, u64 n) {
