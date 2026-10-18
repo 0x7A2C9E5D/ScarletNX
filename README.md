@@ -8,8 +8,6 @@ Discord: https://discord.gg/tRTRXXbyjp (my god why don't we just use IRC like go
 
 A GPLv3 static ARM64 to x86 recompiler with a Switch translation layer for Linux, Windows, FreeBSD and Android.
 
-ScarletNX started as a fork of MZ Labs' SwitchRecomp, which is based on Nexium.
-
 ## Quick start
 
 Each push to `main` that builds everywhere becomes a nightly in [scarletnx/nightly](https://github.com/scarletnx/nightly/releases), the newest 30
@@ -115,12 +113,9 @@ see [Android](./docs/ANDROID.md). macOS and iOS build in CI, but no game runs on
 - yuzu, Suyu, Torzu, Ryujinx, [Ryubing](https://git.ryujinx.app/ryubing/ryujinx) (Ryujinx's continuation), [Citron](https://git.citron-emu.org/citron/emulator) and [Eden](https://git.eden-emu.dev/eden-emu/eden).
 - [Atmosphère](https://github.com/Atmosphere-NX/Atmosphere)
 - LibHac.
+- MZ Labs for SwitchRecomp, which we started from. Its code has since been replaced by our own.
 - [Nexium](https://nexium-emu.org/) for research and development.
 - [Switchbrew](https://switchbrew.org) for research.
 - [Azahar](https://github.com/azahar-emu/azahar) and Citra, for all of the 3DS emulation.
 
 Wimsy, the mascot and the runtime's icon (`dist/wimsy.svg`) was drawn by Liz.
-
-# Thanks
-
-Thanks to MZ Labs for SwitchRecomp, which ScarletNX started from. Its code has since been replaced by ScarletNX's own.

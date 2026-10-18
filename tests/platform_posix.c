@@ -49,8 +49,8 @@ static u64 scan(void) {
     return plat_ww_scan(g_base, 64 * 4096, on_written) ? ~0ull : g_written;
 }
 
-static int g_ran;
-static void thread_fn(void* arg) { __atomic_store_n(&g_ran, *(int*)arg, __ATOMIC_RELEASE); }
+static int g_ran; /* the sum of what the threads read: both must finish before main returns, since they read its arg */
+static void thread_fn(void* arg) { __atomic_fetch_add(&g_ran, *(int*)arg, __ATOMIC_RELEASE); }
 
 int main(int argc, char** argv) {
     const char* dir = argc > 1 ? argv[1] : ".";
@@ -151,8 +151,8 @@ int main(int argc, char** argv) {
     pm_unlock(&mu);
 
     CHECK(!plat_thread(thread_fn, &arg, 0) && !plat_thread(thread_fn, &arg, 1024), "threads did not start");
-    for (i = 0; i < 1000 && !__atomic_load_n(&g_ran, __ATOMIC_ACQUIRE); i++) plat_sleep_ns(1000000);
-    CHECK(__atomic_load_n(&g_ran, __ATOMIC_ACQUIRE) == 7, "a thread did not run");
+    for (i = 0; i < 5000 && __atomic_load_n(&g_ran, __ATOMIC_ACQUIRE) != 14; i++) plat_sleep_ns(1000000);
+    CHECK(__atomic_load_n(&g_ran, __ATOMIC_ACQUIRE) == 14, "a thread did not run");
 
     printf("%u checks, %u failed\n", checks, failures);
     return failures != 0;

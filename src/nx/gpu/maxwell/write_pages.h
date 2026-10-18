@@ -11,7 +11,7 @@
 typedef struct WritePageLeaf WritePageLeaf;
 typedef struct {
     WritePageLeaf* leaf[1u << 16];
-    u64 far; /* the latest write the table couldn't hold (out of range, no memory), read as covering every page */
+    u64 overflow; /* the latest write the table couldn't hold (out of range, no memory), read as covering every page */
 } WritePages;
 void write_pages_stamp(WritePages* t, u64 a, u64 size, u64 gen);
 /* nonzero if a page of [a,a+size) was stamped with a generation after since */

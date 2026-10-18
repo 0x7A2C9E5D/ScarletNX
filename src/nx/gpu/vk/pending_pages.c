@@ -21,7 +21,7 @@ static int add_pages(void* table, u64 first, u64 last, int delta) {
         u32 i = (u32)(p % LEAF_PAGES), before;
         t->total += (u64)(i64)delta;
         if (li >= sizeof t->leaf / sizeof *t->leaf) {
-            t->far += (u64)(i64)delta;
+            t->overflow += (u64)(i64)delta;
             continue;
         }
         l = t->leaf[li];
@@ -76,7 +76,7 @@ static int hit_pages(void* table, u64 first, u64 last, int delta) {
 }
 int pend_hit(const PendPages* t, u64 gva, u64 size) {
     if (!t->total) return 0;
-    if (t->far) return 1;
+    if (t->overflow) return 1;
     return each_run(gva, size, hit_pages, (void*)t, 0);
 }
 int pend_empty(const PendPages* t) { return !t->total; }
