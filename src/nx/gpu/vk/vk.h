@@ -436,17 +436,24 @@ typedef struct VkSh {
     VkCbReads cbr;
     ShaderInfo si;
     VkShaderModule mod;
+    int indexed; /* it reads indexed textures: its set needs the texture array bindings (vk_playout) */
     int failed;
     u32 clen, clen_a;
     u64 qh, qh_a;
     struct VkSh* next;
 } VkSh;
+/* the pipeline layout whose sets have no texture array bindings: compute's, and the one push constants go through
+   (every layout has the same push constant range) */
 extern VkPipelineLayout g_vk_playout;
+VkPipelineLayout vk_playout(u32 arrays); /* arrays: a bit per set (shader_vk_set) that has them */
 extern int g_vk_preserve_infnan;
 extern int g_vk_preserve_infnan64;
 extern int g_vk_flush_denorm;
 extern VkShaderStageFlags g_vk_subgroup_stages;
-extern VkDescriptorSetLayout g_vk_dslayout[5]; /* by set: shader_vk_set(stage) */
+/* by set, shader_vk_set(stage): [0] without the indexed texture arrays, [1] with them. A set holding 512 array
+   descriptors cost the driver twice the time to bind (TotK's 6,700 draws a frame), so only an indexed shader's has
+   them */
+extern VkDescriptorSetLayout g_vk_dslayout[2][5];
 extern u32 g_vk_stage_sets; /* sets in the pipeline layout: 5, or 2 without the tessellation and geometry stages */
 /* the stages that read the push constants: every graphics stage reads the viewport/depth parameters in pc[0..3]
    (the last one before rasterization applies them); fragment reads the alpha test in pc[4..6] and sprite T flip
@@ -485,6 +492,7 @@ typedef struct {
         u32 en, sc, dc, cop, sa, da, aop, mask;
     } blend[8];
     u32 feedback; /* VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT, without the dynamic state for it */
+    u32 arrays;   /* the sets with texture arrays: its layout, vk_playout(arrays) */
 } PipeKey;
 VkPipeline vk_pipeline_get(const PipeKey* k);
 VkPipelineCache vk_pipeline_cache(void); /* for pipelines made elsewhere (compute) */

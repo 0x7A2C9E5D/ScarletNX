@@ -24,7 +24,8 @@ static char g_cache_dir[1100], g_pcache_path[1200], g_pcache_tmp[1230];
 static int g_pcache_dirty; /* pipelines made since the cache was last written (atomic: it is saved outside vk_lock) */
 
 VkPipelineLayout g_vk_playout;
-VkDescriptorSetLayout g_vk_dslayout[5];
+VkDescriptorSetLayout g_vk_dslayout[2][5];
+static VkPipelineLayout g_playouts[1u << 5]; /* by the sets with texture arrays, made when first used */
 u32 g_vk_stage_sets;
 static VkPipelineCache g_pcache;
 /* the channel and stage whose bound constant buffers the translator reads, for the vk_shader_get call running */
@@ -179,6 +180,23 @@ void vk_pool_sizes(VkDescriptorPoolSize* sz, u32 sets) {
     }
 }
 
+VkPipelineLayout vk_playout(u32 arrays) {
+    VkPipelineLayout* l = &g_playouts[arrays & ((1u << 5) - 1)];
+    if (!*l) {
+        VkDescriptorSetLayout sets[5];
+        for (u32 s = 0; s < g_vk_stage_sets; s++) sets[s] = g_vk_dslayout[(arrays >> s) & 1][s];
+        /* push constants: viewport/depth pc[0..3] at 0, fragment alpha test pc[4..6] and sprite T flip pc[7] at 16 */
+        VkPushConstantRange pc = {VK_PUSH_STAGES, 0, 32};
+        VkPipelineLayoutCreateInfo pl = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                         .setLayoutCount = g_vk_stage_sets,
+                                         .pSetLayouts = sets,
+                                         .pushConstantRangeCount = 1,
+                                         .pPushConstantRanges = &pc};
+        if (!VK_OK(vkCreatePipelineLayout(g_vk.dev, &pl, NULL, l))) *l = VK_NULL_HANDLE;
+    }
+    return *l;
+}
+
 void vk_pipeline_init(void) {
     /* a layout per set, the same bindings, each visible to the stage that uses the set (shader_vk_set): within the
        per-stage limits a device has, which all stages seeing every set would multiply by five */
@@ -220,10 +238,14 @@ void vk_pipeline_init(void) {
                 .descriptorCount = (i == SNX_VKB_TEXARRAY || i == SNX_VKB_TEXDEPTH) ? SNX_TEX_ARRAY : 1,
                 .stageFlags = image ? (s == 0 ? VK_SHADER_STAGE_COMPUTE_BIT : VK_SHADER_STAGE_FRAGMENT_BIT) : vis[s]};
         }
-        VkDescriptorSetLayoutCreateInfo dl = {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = count, .pBindings = b};
-        if (!VK_OK(vkCreateDescriptorSetLayout(g_vk.dev, &dl, NULL, &g_vk_dslayout[s])))
-            fatal("vulkan: cannot create shader descriptor layout");
+        for (int arrays = 0; arrays < 2; arrays++) {
+            u32 n = count;
+            while (!arrays && n && b[n - 1].binding >= SNX_VKB_TEXARRAY) n--; /* the arrays are the last bindings */
+            VkDescriptorSetLayoutCreateInfo dl = {
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = n, .pBindings = b};
+            if (!VK_OK(vkCreateDescriptorSetLayout(g_vk.dev, &dl, NULL, &g_vk_dslayout[arrays][s])))
+                fatal("vulkan: cannot create shader descriptor layout");
+        }
     }
     {
         VkDescriptorPoolSize n[VK_POOL_TYPES];
@@ -242,15 +264,8 @@ void vk_pipeline_init(void) {
                  l->maxPerStageDescriptorUniformBuffers, l->maxPerStageDescriptorStorageBuffers,
                  l->maxPerStageDescriptorSamplers, l->maxPerStageDescriptorStorageImages);
     }
-    /* push constants: viewport/depth pc[0..3] at 0, fragment alpha test pc[4..6] and sprite T flip pc[7] at 16 */
-    VkPushConstantRange pc = {VK_PUSH_STAGES, 0, 32};
-    VkPipelineLayoutCreateInfo pl = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                                     .setLayoutCount = g_vk_stage_sets,
-                                     .pSetLayouts = g_vk_dslayout,
-                                     .pushConstantRangeCount = 1,
-                                     .pPushConstantRanges = &pc};
-    if (!VK_OK(vkCreatePipelineLayout(g_vk.dev, &pl, NULL, &g_vk_playout)))
-        fatal("vulkan: cannot create shader pipeline layout");
+    g_vk_playout = vk_playout(0);
+    if (!g_vk_playout) fatal("vulkan: cannot create shader pipeline layout");
     snprintf(g_cache_dir, sizeof g_cache_dir, "%sshader_cache", g_cachedir);
     plat_mkdir(g_cache_dir);
     snprintf(g_pcache_path, sizeof g_pcache_path, "%s/vk_pipelines.bin", g_cache_dir);
@@ -425,6 +440,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
         if (vk_corpus_dir()) shader_corpus_save(vk_corpus_dir(), code, mlen, 0x10000, stage, &s->si, h ^ mix);
         size_t nw = 0;
         u32* spv = vk_translate_spirv(code, 0x10000, stage, &s->si, &nw, sh_cb_read, &s->cbr);
+        for (int i = 0; i < s->si.ntex; i++) s->indexed |= (s->si.tex[i].flags & SNX_TEX_INDEXED) != 0;
         if (spv && s->si.nimg) {
             u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;
             if (image_slots > g_vk.props.limits.maxDescriptorSetStorageImages)
@@ -656,7 +672,7 @@ static VkPipeline pipe_create(const PipeKey* k) {
                                        .pDepthStencilState = &ds,
                                        .pColorBlendState = &cb,
                                        .pDynamicState = &dy,
-                                       .layout = g_vk_playout};
+                                       .layout = vk_playout(k->arrays)};
     VkPipeline p = VK_NULL_HANDLE;
     VK_OK(vkCreateGraphicsPipelines(g_vk.dev, g_pcache, 1, &gi, NULL, &p));
     return p;

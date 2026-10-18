@@ -819,7 +819,7 @@ rebind:
     setup_sub = vk_submit_number();
     if (deferred) {
         vk_buf_writable_abort();
-        set = vk_desc_alloc(g_vk_dslayout[shader_vk_set(ST_CS)]);
+        set = vk_desc_alloc(g_vk_dslayout[0][shader_vk_set(ST_CS)]);
         if (!set) {
             g_vk_cs_skipped++;
             return;
@@ -828,7 +828,7 @@ rebind:
         VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                                            .descriptorPool = g_dpool,
                                            .descriptorSetCount = 1,
-                                           .pSetLayouts = &g_vk_dslayout[shader_vk_set(ST_CS)]};
+                                           .pSetLayouts = &g_vk_dslayout[0][shader_vk_set(ST_CS)]};
         if (vkAllocateDescriptorSets(g_vk.dev, &dai, &set) != VK_SUCCESS) {
             cs_land();
             if (!VK_OK(vkAllocateDescriptorSets(g_vk.dev, &dai, &set))) return;

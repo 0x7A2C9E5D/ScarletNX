@@ -1225,7 +1225,7 @@ static VkDescriptorSet desc_set_cached(VkDescriptorSetLayout layout, DescWrites*
 static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, Surf* zt, u32 n, int* zt_ro, u32* fb,
                                  TexRes* res, const VkDrawStorage* draw, DrawImages* images) {
     u32* r = ch->r3d;
-    VkDescriptorSetLayout layout = g_vk_dslayout[shader_vk_set(stage)];
+    VkDescriptorSetLayout layout = g_vk_dslayout[s->indexed][shader_vk_set(stage)];
     VkDescriptorSet set = VK_NULL_HANDLE; /* the writes take it once their contents are known (desc_set_cached) */
     DescWrites d;
     d.n = 0;
@@ -1415,6 +1415,7 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
 static struct {
     u32 cb;
     VkPipeline pipe;
+    VkPipelineLayout layout; /* the one sets were bound through: another may disturb them */
     VkDescriptorSet sets[5];
     u32 fb, cull, front, topo, restart, discard, bias_on, dt, dw, dcmp, dbounds, st;
     VkViewport vp;
@@ -1664,6 +1665,11 @@ retry:
     k.tcs = tcs ? tcs->mod : VK_NULL_HANDLE;
     k.tes = tes ? tes->mod : VK_NULL_HANDLE;
     k.gs = gs ? gs->mod : VK_NULL_HANDLE;
+    {
+        const VkSh* stages[5] = {vs, fs, tcs, tes, gs};
+        for (int i = 0; i < 5; i++)
+            if (stages[i] && stages[i]->indexed) k.arrays |= 1u << shader_vk_set(stages[i]->stage);
+    }
     if (tes) { /* 0x373: the control points of a patch */
         k.patch = r[0x373] ? r[0x373] : 1;
         if (k.patch > g_vk.props.limits.maxTessellationPatchSize) k.patch = g_vk.props.limits.maxTessellationPatchSize;
@@ -1985,16 +1991,20 @@ retry:
         DYN(fb, fb ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_NONE,
             vkCmdSetAttachmentFeedbackLoopEnableEXT(cb, fb ? VK_IMAGE_ASPECT_COLOR_BIT : VK_IMAGE_ASPECT_NONE));
     VkDescriptorSet sets[2] = {vset, fset};
+    VkPipelineLayout layout = vk_playout(k.arrays);
+    if (g_dyn.layout != layout) { /* the sets bound through another layout are bound again */
+        memset(g_dyn.sets, 0, sizeof g_dyn.sets);
+        g_dyn.layout = layout;
+    }
     if (fresh || g_dyn.sets[0] != vset || (fs && g_dyn.sets[1] != fset)) {
         g_dyn.sets[0] = vset;
         g_dyn.sets[1] = fs ? fset : VK_NULL_HANDLE;
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_vk_playout, 0, fs ? 2 : 1, sets, 0, NULL);
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, fs ? 2 : 1, sets, 0, NULL);
     }
     for (b = 0; b < 3; b++)
         if (bset[b] && (fresh || g_dyn.sets[2 + b] != bset[b])) {
             g_dyn.sets[2 + b] = bset[b];
-            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_vk_playout, (u32)b + 2, 1, &bset[b], 0,
-                                    NULL);
+            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, (u32)b + 2, 1, &bset[b], 0, NULL);
         }
     if (k.nbind) vkCmdBindVertexBuffers2(cb, 0, k.nbind, vbuf, voff, NULL, vstride);
 
