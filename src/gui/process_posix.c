@@ -116,16 +116,18 @@ static Sample* snapshot(size_t* count) {
     closedir(dir);
     return samples;
 #elif defined(__FreeBSD__)
-    int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    /* one entry per process: KERN_PROC_ALL has one per thread, each repeating its memory and its children's times */
+    int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PROC};
+    const u_int names = sizeof mib / sizeof *mib;
     size_t size = 0;
     struct kinfo_proc* entries = NULL;
     /* The process list can grow between the size query and the actual read. */
     for (int attempt = 0; attempt < 4; ++attempt) {
-        if (sysctl(mib, 4, NULL, &size, NULL, 0)) return NULL;
+        if (sysctl(mib, names, NULL, &size, NULL, 0)) return NULL;
         size += 16 * sizeof(*entries);
         entries = malloc(size);
         if (!entries) return NULL;
-        if (!sysctl(mib, 4, entries, &size, NULL, 0)) break;
+        if (!sysctl(mib, names, entries, &size, NULL, 0)) break;
         free(entries);
         entries = NULL;
         if (errno != ENOMEM) return NULL;
