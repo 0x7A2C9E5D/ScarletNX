@@ -133,9 +133,12 @@ char* snx_find_tool(const char* name);
 /* argv is NULL terminated. No shell. Captured output is heap-owned by caller.
    home isolates HOME/USERPROFILE and removes XDG_CONFIG_HOME in the child. */
 int snx_run(const char* const* argv, const char* cwd, const char* home, char** output);
-/* snx_run calling tick(data) about once a second while the child runs: a long tool can say how far it is */
-int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, char** output, void (*tick)(void*),
-                    void* data);
+/* snx_run calling tick(data, written) about once a second while the child runs: a long tool can say how far it is.
+   written is what the child has written so far, files and pipes alike, as the system counts it (SNX_RUN_UNCOUNTED
+   where it doesn't), so nothing has to list what the tool writes */
+#define SNX_RUN_UNCOUNTED (~(SnxU64)0)
+int snx_run_ticking(const char* const* argv, const char* cwd, const char* home, char** output,
+                    void (*tick)(void*, SnxU64), void* data);
 /* Foreground workflow stage with inherited stdio, interruption forwarding and diagnostics.
    A stopped POSIX child is aborted so a rerun can restart that stage. Not thread safe. */
 int snx_run_stage(const char* const* argv, const char* cwd, const char* stage);

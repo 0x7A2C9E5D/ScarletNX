@@ -459,42 +459,29 @@ static int write_title_keys(const char* path, const TitleKey* list) {
 
 /* what hactool writes in a run of minutes, said once a second on one row: how far it is, never its own output */
 typedef struct {
-    const char* verb;    /* "unpacked", "extracted" */
-    const char* dirs[2]; /* where it writes, NULL for none */
-    SnxU64 total;        /* what it will have written */
-    int said;            /* a row went out, which the last one ends */
+    const char* verb; /* "unpacked", "extracted" */
+    SnxU64 total;     /* what it will have written */
+    SnxU64 done;      /* what it had written at the last tick, from the system's count (snx_run_ticking) */
+    int said;         /* a row went out, which the last one ends */
 } Progress;
-
-static SnxU64 tree_bytes(const char* path, unsigned depth) {
-    char** names;
-    char* child;
-    size_t count, i;
-    SnxU64 sum;
-    if (!path || depth > 16) return 0;
-    if (!snx_is_dir(path)) return snx_is_file(path) ? snx_file_size(path) : 0;
-    if (snx_list_dir(path, &names, &count)) return 0;
-    sum = 0;
-    for (i = 0; i < count; i++) {
-        child = snx_path_join(path, names[i]);
-        if (child) sum += tree_bytes(child, depth + 1);
-        free(child);
-    }
-    snx_free_strings(names, count);
-    return sum;
-}
 
 /* "  unpacked 1229 of 4096 MB (30%)", ending in a carriage return while hactool runs: a terminal and the launcher's
    console write the next over it, the last one ends the row */
 static void progress_say(Progress* progress, int last) {
-    SnxU64 done = tree_bytes(progress->dirs[0], 0) + tree_bytes(progress->dirs[1], 0);
-    if (done > progress->total) done = progress->total;
+    SnxU64 done = progress->done < progress->total ? progress->done : progress->total;
     printf("  %s %lu of %lu MB (%d%%)%s", progress->verb, (unsigned long)(done >> 20),
            (unsigned long)(progress->total >> 20), progress->total ? (int)(done * 100 / progress->total) : 100,
            last ? "\n" : "\r");
     fflush(stdout);
     progress->said = 1;
 }
-static void progress_tick(void* progress) { progress_say((Progress*)progress, 0); }
+/* hactool's own count, never a walk of what it wrote: Tomodachi Life's RomFS is 66,000 files */
+static void progress_tick(void* data, SnxU64 written) {
+    Progress* progress = (Progress*)data;
+    if (written == SNX_RUN_UNCOUNTED) return; /* no row where the system keeps no count */
+    if (written > progress->done) progress->done = written;
+    progress_say(progress, 0);
+}
 
 /* what -txci or -tpfs0 writes of a container: an XCI's secure partition, as its root HFS0 (the header at 0x130 says
    where) lists it, its padding and other partitions left; an NSP whole. The file's size when it cannot be read */
@@ -541,7 +528,10 @@ static int run_hactool(const ExtractState* state, const char* const* args, size_
     output = NULL;
     result = progress ? snx_run_ticking(command, NULL, state->home, &output, progress_tick, progress)
                       : snx_run(command, NULL, state->home, &output);
-    if (progress && progress->said) progress_say(progress, 1);
+    if (progress && progress->said) {
+        if (!result) progress->done = progress->total; /* the last count can be a tick before the end */
+        progress_say(progress, 1);
+    }
     if (result) {
         if (output) secret_free(output, strlen(output));
         return snx_error(
@@ -567,9 +557,8 @@ static int unpack(const ExtractState* state, const char* container, const char* 
     printf("Unpacking %s\n", container);
     fflush(stdout);
     progress.verb = "unpacked";
-    progress.dirs[0] = directory;
-    progress.dirs[1] = NULL;
     progress.total = container_payload(container, xci);
+    progress.done = 0;
     progress.said = 0;
     result = run_hactool(state, command, 3, NULL, &progress);
     free(output_option);
@@ -945,9 +934,8 @@ static int extract_files(ExtractState* state) {
     }
     /* the base's program NCA: its RomFS is most of it, and an update's RomFS is about as big */
     progress.verb = "extracted";
-    progress.dirs[0] = state->exefs;
-    progress.dirs[1] = state->romfs;
     progress.total = snx_file_size(state->program);
+    progress.done = 0;
     progress.said = 0;
     if (state->patch) {
         base_arg = option_arg("--basenca=", state->program);

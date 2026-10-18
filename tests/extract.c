@@ -650,8 +650,9 @@ int main(int argc, char** argv) {
         if (!strncmp(modes[i], "slow", 4)) {
             CHECK(strstr(output, "%)\r  unpacked ") && (strstr(output, "  unpacked 3 of 3 MB (100%)\n") ||
                                                         strstr(output, "  unpacked 3 of 3 MB (100%)\r\n")));
-            /* the program NCA is its content and its headers: 99% of it */
-            CHECK(strstr(output, "%)\r  extracted ") && strstr(output, "  extracted 3 of 3 MB (99%)"));
+            /* a step that succeeded ends whole, though hactool writes the program NCA's content without its headers */
+            CHECK(strstr(output, "%)\r  extracted ") && (strstr(output, "  extracted 3 of 3 MB (100%)\n") ||
+                                                         strstr(output, "  extracted 3 of 3 MB (100%)\r\n")));
         } else
             CHECK(!strstr(output, "  unpacked ") && !strstr(output, "  extracted ")); /* a quick one says nothing */
         printf("PASS extraction scenario %s\n", modes[i]);
