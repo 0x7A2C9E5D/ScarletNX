@@ -27,8 +27,10 @@ static unsigned checks, failures;
     } while (0)
 
 static char g_text[65536];
+/* read back in text mode, as the log, the console and the redirect are written: on Windows each "\n" is "\r\n" on
+   disk */
 static const char* slurp(const char* path) {
-    FILE* f = fopen(path, "rb");
+    FILE* f = fopen(path, "r");
     size_t n = 0;
     g_text[0] = 0;
     if (f) {

@@ -96,13 +96,13 @@ static void log_crash_write(const char* text) {
         fputs(out, file);
         fflush(file);
     }
-    fputs(out, stderr);
+    fputs(text, stderr);
     fflush(stderr);
 #else
     int fd = __atomic_load_n(&g_log_fd, __ATOMIC_ACQUIRE);
     ssize_t r;
     if (fd >= 0) r = write(fd, out, n);
-    r = write(2, out, n);
+    r = write(2, text, strlen(text));
     (void)r;
 #endif
 }
@@ -133,11 +133,11 @@ void logf_(int lvl, const char* fmt, ...) {
         fputs(out, g_log);
         fflush(g_log);
         if (lvl <= 1 || g_verbose >= 2) {
-            fputs(out, stderr);
+            fputs(text, stderr); /* the console gets the line without its time stamp, which only the log file keeps */
             fflush(stderr);
         }
     } else {
-        fputs(out, stderr);
+        fputs(text, stderr);
         fflush(stderr);
         if (!g_early_full && !g_log_gave_up) {
             if (n <= sizeof g_early - g_early_len) {

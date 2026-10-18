@@ -608,8 +608,9 @@ static void test_program(void) {
     free(path);
     CHECK(!snx_load_program(root, &program, error, sizeof error));
     CHECK(program.module_count == 4 && program.npdm.prio == 37 && program.romfs_path != NULL);
+    /* either spelling: on a case-insensitive file system (Windows, macOS) the lower-case one asked first exists */
     CHECK((strstr(program.exefs_path, "ExeFS") || strstr(program.exefs_path, "exefs")) &&
-          strstr(program.romfs_path, "RomFS"));
+          (strstr(program.romfs_path, "RomFS") || strstr(program.romfs_path, "romfs")));
     for (i = 0; i < 4; i++) {
         CHECK(!strcmp(program.modules[i].name, names[i]));
         CHECK(program.modules[i].base == SNX_CODE_BASE + i * 0x2000);

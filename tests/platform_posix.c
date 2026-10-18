@@ -64,6 +64,8 @@ int main(int argc, char** argv) {
     int i, fd, seen, arg = 7;
     u64 t;
 
+    setvbuf(stdout, NULL, _IONBF, 0); /* each section says it started, so a crash shows where it happened */
+    printf("written-page tracking\n");
     g_base = plat_vm_reserve((u64)1 << 30);
     CHECK(g_base != NULL, "no reservation");
     CHECK(!plat_vm_commit(g_base, 64 * 4096), "commit failed");
@@ -90,10 +92,12 @@ int main(int argc, char** argv) {
         close(fd);
         CHECK(scan() == 1ull << 7, "a read() into page 7 was not reported");
     }
+    printf("decommit\n");
     g_base[9 * 4096] = 9;
     plat_vm_decommit(g_base, 64 * 4096);
     CHECK(!plat_vm_commit(g_base, 64 * 4096) && g_base[9 * 4096] == 0, "memory not zero after decommit");
 
+    printf("pread and file maps\n");
     /* pread: a short count at the end, the position untouched */
     snprintf(path, sizeof path, "%s/platform_posix.bin", dir);
     f = fopen(path, "wb");
@@ -116,12 +120,14 @@ int main(int argc, char** argv) {
     CHECK(!plat_file_map(&m, tmp) && !m.data && !m.size, "an empty file did not map to nothing");
     plat_file_unmap(&m);
 
+    printf("replace\n");
     /* replace: dst gets tmp's contents; a failing replace removes tmp */
     CHECK(!plat_replace_file(tmp, path) && plat_file_size(path) == 0 && !fopen(tmp, "rb"), "replace");
     fclose(fopen(tmp, "wb"));
     snprintf(sub, sizeof sub, "%s/platform_posix.none/x", dir);
     CHECK(plat_replace_file(tmp, sub) == -1 && !fopen(tmp, "rb"), "a failed replace kept tmp");
 
+    printf("folders\n");
     /* folders: a path too long for the iteration's buffer is refused */
     snprintf(sub, sizeof sub, "%s/platform_posix.dir", dir);
     plat_mkdir(sub);
@@ -142,6 +148,7 @@ int main(int argc, char** argv) {
         CHECK(plat_dir_open(&d, longpath) == -1 && !d.h, "a path too long was opened");
     }
 
+    printf("timed waits and threads\n");
     /* a timed wait times out, roughly on time */
     pc_init(&c);
     pm_lock(&mu);
