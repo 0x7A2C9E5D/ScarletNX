@@ -110,8 +110,11 @@ interface nn::am::service::IWindowController {
 }
 
 interface nn::am::service::IAudioController {
+    [0] SetExpectedMasterVolume(f32 main_volume, f32 library_volume);
     [1] GetMainAppletExpectedMasterVolume() -> f32 volume;
     [2] GetLibraryAppletExpectedMasterVolume() -> f32 volume;
+    [3] ChangeMainAppletMasterVolume(f32 volume, i64 fade_time_ns);
+    @stub [4] SetTransparentVolumeRate(f32 rate);
 }
 
 interface nn::am::service::IDisplayController {

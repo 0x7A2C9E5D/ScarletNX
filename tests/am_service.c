@@ -212,6 +212,34 @@ static SvcObj* reply(SvcObj* a, u32 state, u32 type, u32 size) {
     CHECK(get32(data->d + 4) == type);
     return storage;
 }
+/* IAudioController: the expected master volumes read back as the game set them, from 0 to 1, on the controller it set
+   them on */
+static void test_audio_controller(void) {
+    SvcObj *c, *other;
+    float main_volume = -1.0f, library_volume = -1.0f;
+    CHECK(nn_am_service_IApplicationProxy_GetAudioController(NULL, &c) == 0);
+    CHECK(nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(c, &main_volume) == 0 &&
+          main_volume == 1.0f);
+    CHECK(nn_am_service_IAudioController_SetExpectedMasterVolume(c, 0.5f, 0.25f) == 0);
+    CHECK(nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(c, &main_volume) == 0 &&
+          main_volume == 0.5f);
+    CHECK(nn_am_service_IAudioController_GetLibraryAppletExpectedMasterVolume(c, &library_volume) == 0 &&
+          library_volume == 0.25f);
+    CHECK(nn_am_service_IAudioController_ChangeMainAppletMasterVolume(c, 0.75f, 0) == 0);
+    CHECK(nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(c, &main_volume) == 0 &&
+          main_volume == 0.75f);
+    CHECK(nn_am_service_IAudioController_SetExpectedMasterVolume(c, 1.5f, -1.0f) == 0);
+    CHECK(nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(c, &main_volume) == 0 &&
+          main_volume == 1.0f);
+    CHECK(nn_am_service_IAudioController_GetLibraryAppletExpectedMasterVolume(c, &library_volume) == 0 &&
+          library_volume == 0.0f);
+    CHECK(nn_am_service_IApplicationProxy_GetAudioController(NULL, &other) == 0);
+    CHECK(nn_am_service_IAudioController_GetLibraryAppletExpectedMasterVolume(other, &library_volume) == 0 &&
+          library_volume == 1.0f);
+    svcobj_unref(other);
+    svcobj_unref(c);
+    CHECK(test_objects == 0);
+}
 static void test_inline(void) {
     SvcObj* a;
     SvcObj* s;
@@ -381,6 +409,7 @@ static void test_messages(void) {
     close_handles();
 }
 int main(void) {
+    test_audio_controller();
     test_inline();
     modern_packet = 1;
     test_inline();

@@ -207,9 +207,18 @@ static int nn_am_service_IApplicationProxy_GetWindowController(SvcObj* self, Svc
     *controller = nn_am_service_IWindowController_new(0);
     R_SUCCEED();
 }
+/* IAudioController's volumes, kept on each controller as Eden keeps them, from 0 to 1: what the game expects itself
+   and a library applet to play at */
+typedef struct {
+    float main_volume, library_volume;
+} AmVolumes;
 static int nn_am_service_IApplicationProxy_GetAudioController(SvcObj* self, SvcObj** controller) {
+    AmVolumes* v;
     (void)self;
-    *controller = nn_am_service_IAudioController_new(0);
+    *controller = nn_am_service_IAudioController_new(sizeof(AmVolumes));
+    v = (AmVolumes*)(*controller)->data;
+    v->main_volume = 1.0f;
+    v->library_volume = 1.0f;
     R_SUCCEED();
 }
 static int nn_am_service_IApplicationProxy_GetDisplayController(SvcObj* self, SvcObj** controller) {
@@ -406,14 +415,34 @@ static int nn_am_service_IWindowController_GetAppletResourceUserId(SvcObj* self,
     R_SUCCEED();
 }
 
+static float am_volume(float v) { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; }
+static int nn_am_service_IAudioController_SetExpectedMasterVolume(SvcObj* self, float main_volume,
+                                                                  float library_volume) {
+    AmVolumes* v = (AmVolumes*)self->data;
+    pm_lock(&am.lock);
+    v->main_volume = am_volume(main_volume);
+    v->library_volume = am_volume(library_volume);
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
 static int nn_am_service_IAudioController_GetMainAppletExpectedMasterVolume(SvcObj* self, float* volume) {
-    (void)self;
-    *volume = 1.0f;
+    pm_lock(&am.lock);
+    *volume = ((AmVolumes*)self->data)->main_volume;
+    pm_unlock(&am.lock);
     R_SUCCEED();
 }
 static int nn_am_service_IAudioController_GetLibraryAppletExpectedMasterVolume(SvcObj* self, float* volume) {
-    (void)self;
-    *volume = 1.0f;
+    pm_lock(&am.lock);
+    *volume = ((AmVolumes*)self->data)->library_volume;
+    pm_unlock(&am.lock);
+    R_SUCCEED();
+}
+/* the fade is not played: nothing here plays the game at its expected volume */
+static int nn_am_service_IAudioController_ChangeMainAppletMasterVolume(SvcObj* self, float volume, i64 fade_time_ns) {
+    (void)fade_time_ns;
+    pm_lock(&am.lock);
+    ((AmVolumes*)self->data)->main_volume = am_volume(volume);
+    pm_unlock(&am.lock);
     R_SUCCEED();
 }
 
