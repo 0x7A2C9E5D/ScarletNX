@@ -468,7 +468,7 @@ int main(int argc, char** argv) {
     u32 epoch = g_vk_epoch;
     u64 finishes = g_vk_finishes;
     for (int kind = 0; kind <= 4; kind++) g_renderer->method_barrier(kind);
-    CHECK(g_vk_epoch == epoch + 2);   /* data and descriptor invalidation each expire cached reads */
+    CHECK(g_vk_epoch == epoch);       /* no barrier expires cached reads: their checks see writes (vkr_method_barrier) */
     CHECK(g_vk_finishes == finishes); /* method barriers order GPU work without forcing a host wait */
     printf("Headless Vulkan device: %s\n", g_vk.props.deviceName);
     /* Make any accidental WSI use during presents/recreation fail the test immediately. */

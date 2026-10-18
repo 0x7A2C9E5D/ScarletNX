@@ -150,8 +150,6 @@ static void astc_rows(void* ctx, u32 z, u32 y, u32 n, u8* out) {
 }
 
 static u32 g_tex_upload_gen;
-static u32 g_tex_inval_gen;
-void vk_tex_invalidate_all(void) { g_tex_inval_gen++; }
 /* the most staging one piece of a level takes: a bigger level is staged in bands of block rows of a slice, as no
    allocation may be bigger than g_vk.alloc_cap (memory.c) and its converted rows needn't all be in memory at once */
 #define TEX_BAND (64ull << 20)
@@ -596,28 +594,21 @@ texture_from_memory:
            below says, as writes within a frame have to show in the same frame. Not written: it still matches as of
            now, so the next check asks only about later writes */
         int fresh = 0;
-        int invalidated = t->tex_inval_gen != g_tex_inval_gen;
         if (gpu_mem_dirty_since(t->gw, gva, t->size)) {
             fresh = 1;
             if (tex_rehash(t)) t->stable = 0;
         } else
             t->gw = gpu_mem_generation();
-        /* Invalidation also checks CPU writes within this frame. It does not imply every texture changed:
-           write tracking can prove its memory is unchanged without hashing all its texels. */
-        if (invalidated || t->checked != g_vk_present) {
+        /* the CPU's writes, once a frame and again after each submission or stream wait that can make new ones the
+           stream's to see (vk_ww_epoch): write tracking proves the memory unchanged without hashing its texels */
+        if (t->checked != g_vk_present || t->ww_epoch != vk_ww_epoch()) {
             u32 wnow = vk_ww_now();
             int wr = vk_written_since(gmem_ptr(gva, t->size), t->size, t->wseen);
-            t->tex_inval_gen = g_tex_inval_gen;
+            t->ww_epoch = vk_ww_epoch();
             if (wr >= 0) {
                 t->checked = g_vk_present;
                 if (wr && !fresh) tex_rehash(t);
                 t->wseen = wnow + 1; /* this scan's marks are stamped with the clock after wnow */
-                return t->upload_valid ? t : NULL;
-            }
-            /* Without write tracking an explicit invalidation must bypass the normal backoff. */
-            if (invalidated) {
-                if (!fresh && tex_rehash(t)) t->stable = 0;
-                t->checked = g_vk_present;
                 return t->upload_valid ? t : NULL;
             }
         }
@@ -654,7 +645,6 @@ texture_from_memory:
     if (!format_samples(f.vk)) return NULL;
     Surf* t = tex_create(gva, w, h, layers, d3, levels, vt, f, fkey, bl, bh, bd, pitch, stride);
     if (!t) return NULL;
-    t->tex_inval_gen = g_tex_inval_gen;
     /* this texture's levels in one layer; the layers before the last one take their whole stride */
     u64 sz = 0;
     for (u32 l = 0; l < levels; l++) sz += bl ? bl_level_size(w, h, d3, &f, bh, bd, l, NULL, NULL) : stride;

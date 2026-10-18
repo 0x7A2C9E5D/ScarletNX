@@ -242,8 +242,8 @@ typedef struct Surf {
     u64 size, hash, shash;
     int upload_valid; /* textures: every subresource was uploaded (a failed upload is retried) */
     u32 checked, next_check, stable, tfull;
-    u32 tex_inval_gen; /* explicit Maxwell texture-cache invalidations since this texture was checked */
-    u32 wseen;         /* write-tracking clock when it last matched memory */
+    u32 wseen;    /* write-tracking clock when it last matched memory */
+    u32 ww_epoch; /* the write epoch (vk_ww_epoch) of its last check for CPU writes */
     /* copies of regions of this render target for texture headers or feedback draws, one per size, linked through next
        (gpu/vk/texture.c rt_crop) */
     struct Surf* crop;
@@ -311,7 +311,6 @@ int vk_vic_compose(const VicJob* j);
 /* texture.c */
 Surf* vk_tex_from_tic(const u32* tic);
 Surf* vk_tex_from_tic_raw(const u32* tic); /* UINT view of raw RGBA8 texel bytes */
-void vk_tex_invalidate_all(void);          /* force the next sampled-texture lookup to check guest bytes */
 /* a view of s as the shader declares it, sRGB or linear (color formats that have both), with a component mapping;
    VK_NULL_HANDLE when the image can't be viewed that way */
 /* stencil: a depth/stencil surface's stencil aspect instead of its depth */
