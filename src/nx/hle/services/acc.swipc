@@ -37,8 +37,8 @@ interface nn::account::IAccountServiceForApplication is acc:u0, acc:u1, acc:su {
 interface nn::account::profile::IProfile {
     [0] Get(buffer<nn::account::profile::UserData, 0x1a> user_data) -> nn::account::profile::ProfileBase base;
     [1] GetBase() -> nn::account::profile::ProfileBase base;
-    @stub [10] GetImageSize() -> u32 size;
-    @stub [11] LoadImage(buffer<u8, 6> image) -> u32 size;
+    [10] GetImageSize() -> u32 size;
+    [11] LoadImage(buffer<u8, 6> image) -> u32 size;
 }
 
 # the user's network service account: there, but its id token never arrives

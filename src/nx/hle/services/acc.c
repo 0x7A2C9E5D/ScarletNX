@@ -5,6 +5,7 @@
    SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project (GPL-2.0-or-later) */
 /* acc: the console's one user (g_user_id, am.c), open since the game started, with no network service account */
 #include "nx/hle/services/services_int.h"
+#include "gui/splash.h"
 
 #include "hle/services/acc.swipc.inc"
 
@@ -110,6 +111,56 @@ static int nn_account_profile_IProfile_Get(SvcObj* self, IpcBuf user_data, nn_ac
 }
 static int nn_account_profile_IProfile_GetBase(SvcObj* self, nn_account_profile_ProfileBase* base) {
     acc_profile_base(self, base);
+    R_SUCCEED();
+}
+
+/* the user's picture: Wimsy in Fuddles' colours (dist/splash/wimsy-fuddles.svg, the splash's drawing) at 256x256 over
+   white, a JPEG as the console's pictures are, drawn at the first ask and kept */
+#define SNX_ACC_PICTURE_SIDE    256
+#define SNX_ACC_PICTURE_QUALITY 90
+#define SNX_ACC_PICTURE_MAX     0x20000 /* the most a game takes */
+static struct {
+    PMutex lk;
+    u32 size;
+    int made, overflow; /* made: drawn or tried; overflow: more than SNX_ACC_PICTURE_MAX came */
+    u8 d[SNX_ACC_PICTURE_MAX];
+} acc_pic = {PMUTEX_INIT, 0, 0, 0, {0}};
+
+static void acc_picture_write(void* closure, void* data, int size) {
+    (void)closure;
+    if (size < 0 || (u32)size > SNX_ACC_PICTURE_MAX - acc_pic.size) {
+        acc_pic.overflow = 1;
+        return;
+    }
+    memcpy(acc_pic.d + acc_pic.size, data, (size_t)size);
+    acc_pic.size += (u32)size;
+}
+/* the picture's size, drawing it the first time; 0, said once, when it cannot be drawn */
+static u32 acc_picture(void) {
+    u32 size;
+    pm_lock(&acc_pic.lk);
+    if (!acc_pic.made) {
+        acc_pic.made = 1;
+        if (snx_splash_jpeg("wimsy-fuddles", SNX_ACC_PICTURE_SIDE, SNX_ACC_PICTURE_QUALITY, acc_picture_write, NULL) ||
+            acc_pic.overflow) {
+            WARN("acc: the user's picture was not drawn, games get none\n");
+            acc_pic.size = 0;
+        }
+    }
+    size = acc_pic.size;
+    pm_unlock(&acc_pic.lk);
+    return size;
+}
+/* GetImageSize tells the size LoadImage writes, so a game reserves what it gets */
+static int nn_account_profile_IProfile_GetImageSize(SvcObj* self, u32* size) {
+    (void)self;
+    *size = acc_picture();
+    R_SUCCEED();
+}
+static int nn_account_profile_IProfile_LoadImage(SvcObj* self, IpcBuf image, u32* size) {
+    (void)self;
+    *size = acc_picture();
+    memcpy(GP(image.addr), acc_pic.d, (size_t)(image.size < *size ? image.size : *size));
     R_SUCCEED();
 }
 

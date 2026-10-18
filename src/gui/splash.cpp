@@ -2,7 +2,9 @@
    Copyright 2026 the ScarletNX contributors */
 #include "gui/splash.h"
 #include <lunasvg.h>
+#include <plutovg.h>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <new>
 
@@ -28,3 +30,22 @@ int snx_splash_draw(const SnxSplashDrawing* drawing, int side, void* pixels, int
 }
 
 void snx_splash_close(SnxSplashDrawing* drawing) { delete drawing; }
+
+int snx_splash_jpeg(const char* name, int side, int quality, SnxSplashWrite write, void* closure) {
+    const SnxSplashSvg* svg = nullptr;
+    for (int i = 0; name && i < snx_splash_svg_count; i++)
+        if (!std::strcmp(snx_splash_svgs[i].name, name)) svg = &snx_splash_svgs[i];
+    std::unique_ptr<SnxSplashDrawing> drawing(snx_splash_open(svg));
+    if (!drawing || side <= 0 || !write) return 1;
+    plutovg_surface_t* surface = plutovg_surface_create(side, side);
+    if (!surface) return 1;
+    /* a JPEG has no alpha: over white, as a picture with none is shown */
+    const plutovg_color_t white = {1, 1, 1, 1};
+    plutovg_surface_clear(surface, &white);
+    const lunasvg::Document& document = *drawing->document;
+    lunasvg::Bitmap bitmap(plutovg_surface_get_data(surface), side, side, plutovg_surface_get_stride(surface));
+    document.render(bitmap, lunasvg::Matrix(side / document.width(), 0, 0, side / document.height(), 0, 0));
+    const bool written = plutovg_surface_write_to_jpg_stream(surface, write, closure, quality);
+    plutovg_surface_destroy(surface);
+    return written ? 0 : 1;
+}

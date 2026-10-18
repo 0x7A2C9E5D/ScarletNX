@@ -25,6 +25,11 @@ SnxSplashDrawing* snx_splash_open(const SnxSplashSvg* svg);
 int snx_splash_draw(const SnxSplashDrawing* drawing, int side, void* pixels, int stride);
 void snx_splash_close(SnxSplashDrawing* drawing);
 
+/* the drawing named name (its file's, without .svg) filling a side x side square over white, as a JPEG of the
+   quality given (1 to 100), handed out through write in pieces; 0 when written */
+typedef void (*SnxSplashWrite)(void* closure, void* data, int size);
+int snx_splash_jpeg(const char* name, int side, int quality, SnxSplashWrite write, void* closure);
+
 #ifdef __cplusplus
 }
 #endif
