@@ -55,6 +55,15 @@ u32 gmem_r32(u64 gva) {
 }
 void gmem_w32(u64 gva, u32 v) { gmem_write(gva, &v, 4); }
 u64 gmmu_translate(u64 gva) { return gva; }
+/* maxwell3d.c's runs of contiguous pages, from the translation above */
+u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
+    u64 n, first = gmmu_translate(gva);
+    if (!max || !first) return 0;
+    *cpu = first;
+    n = 0x1000 - (gva & 0xFFF);
+    while (n < max && gmmu_translate(gva + n) == first + n) n += 0x1000;
+    return n < max ? n : max;
+}
 u32 gpu_color_bpp(u32 format) {
     (void)format;
     return 4;

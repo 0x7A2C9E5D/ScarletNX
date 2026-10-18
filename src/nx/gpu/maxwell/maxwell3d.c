@@ -19,24 +19,20 @@
 static PMutex g_wlk = PMUTEX_INIT;
 static WritePages g_wgpu, g_wcpu;
 static u64 g_wgen;
-/* calls fn on each run of guest memory behind [gva, gva + size), page by page */
+/* calls fn on each run of contiguous guest memory behind [gva, gva + size), from gmmu_run: every draw asks this of
+   each render target, texture and buffer it binds, megabytes each, and a translation per page was the GPU thread's
+   largest cost in TotK */
 static void guest_runs(u64 gva, u64 size, int (*fn)(u64 cpu, u64 n, void* ctx), void* ctx) {
-    u64 run_cpu = 0, run_n = 0, end = gva + size;
-    if (end < gva) end = ~(u64)0;
-    while (gva < end) {
-        u64 n = 0x1000 - (gva & 0xFFF), cpu = gmmu_translate(gva);
-        if (n > end - gva) n = end - gva;
-        if (cpu && run_n && run_cpu + run_n == cpu)
-            run_n += n;
-        else {
-            if (run_n && fn(run_cpu, run_n, ctx)) return;
-            run_cpu = cpu;
-            run_n = cpu ? n : 0;
-        }
-        if (gva + n < gva) break;
+    u64 left = gva + size < gva ? ~(u64)0 - gva : size;
+    while (left) {
+        u64 cpu = 0, n = gmmu_run(gva, left, &cpu);
+        if (n) {
+            if (fn(cpu, n, ctx)) return;
+        } else if ((n = 0x1000 - (gva & 0xFFF)) >= left)
+            break;
         gva += n;
+        left -= n;
     }
-    if (run_n) fn(run_cpu, run_n, ctx);
 }
 static int stamp_run(u64 cpu, u64 n, void* ctx) {
     write_pages_stamp(&g_wcpu, cpu, n, *(const u64*)ctx);
