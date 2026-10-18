@@ -263,6 +263,10 @@ static void test_user_channel(void) {
     svcobj_unref(b);
     CHECK(test_objects == 0);
 }
+static void test_previous_program(void) {
+    i32 index = 0;
+    CHECK(nn_am_service_IApplicationFunctions_GetPreviousProgramIndex(NULL, &index) == 0 && index == -1);
+}
 static void test_inline(void) {
     SvcObj* a;
     SvcObj* s;
@@ -434,6 +438,7 @@ static void test_messages(void) {
 int main(void) {
     test_audio_controller();
     test_user_channel();
+    test_previous_program();
     test_inline();
     modern_packet = 1;
     test_inline();

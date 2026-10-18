@@ -509,6 +509,13 @@ static int nn_am_service_IApplicationFunctions_UnpopToUserChannel(SvcObj* self, 
     R_THROW(AM_OUT_OF_MEMORY);
 }
 
+/* -1: the game was launched by the system, not by another of its programs (ExecuteProgram is not followed here) */
+static int nn_am_service_IApplicationFunctions_GetPreviousProgramIndex(SvcObj* self, i32* index) {
+    (void)self;
+    *index = -1;
+    R_SUCCEED();
+}
+
 /* the game's control.nacp (nn::ns::ApplicationControlProperty), as the recompiler staged it beside the game's data:
    n bytes at off, NULL past its end or without one */
 static const u8* am_nacp(u64 off, u64 n) {

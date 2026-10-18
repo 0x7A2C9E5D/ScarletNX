@@ -160,6 +160,8 @@ interface nn::am::service::IApplicationFunctions {
     # 6.0.0+: what a program hands the next one it launches, popped as LaunchParameterKind UserChannel
     [121] ClearUserChannel();
     [122] UnpopToUserChannel(object<nn::am::service::IStorage> storage);
+    # 5.0.0+
+    [123] GetPreviousProgramIndex() -> i32 index;
     @stub [124] EnableApplicationAllThreadDumpOnCrash(b8 enabled);
     [130] GetGpuErrorDetectedSystemEvent() -> handle<copy, event> event;
     [140] GetFriendInvitationStorageChannelEvent() -> handle<copy, event> event;
