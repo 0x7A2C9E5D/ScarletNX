@@ -20,9 +20,11 @@ typedef struct ARRen {
     int out_started;
 } ARRen;
 
-/* the renderers, and every renderer's state: an update and a frame never run at once */
+/* the renderers, and every renderer's state: an update and a frame never run at once; and the output device's volume
+   (audio.c) on each renderer's host output */
 static PMutex audren_lk = PMUTEX_INIT;
 static ARRen* audren_list;
+static float audren_gain = 1.0f;
 
 /* a frame is dropped while the host holds more than this many ms, so the latency stays bounded when the host plays a
    little slower than the clock renders */
@@ -61,6 +63,15 @@ int audren_open(SvcObj* o, const u8* params) {
     return 1;
 }
 
+void audren_volume(float gain) {
+    ARRen* r;
+    pm_lock(&audren_lk);
+    audren_gain = gain;
+    for (r = audren_list; r; r = r->next)
+        if (r->out) plat_audio_volume(r->out, gain);
+    pm_unlock(&audren_lk);
+}
+
 /* RequestUpdate: the input read into the state and the output written by audren_state_update, whose failures are
    the renderer's result descriptions (InvalidUpdateInfo 41, InsufficientBuffer 4) */
 int audren_update(SvcObj* o, IpcBuf in, IpcBuf out) {
@@ -90,6 +101,7 @@ void audren_tick(void) {
         if (!r->out && !r->out_failed) { /* the device sink's first frame: stereo at the renderer's rate */
             r->out = plat_audio_open(r->s->rate, 2);
             r->out_failed = !r->out;
+            if (r->out) plat_audio_volume(r->out, audren_gain); /* the device's volume, set before it opened */
         }
         if (!r->out) continue;
         bytes = r->s->frame * 4;

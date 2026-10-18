@@ -156,6 +156,8 @@ int audren_open(SvcObj* o, const u8* params) {
     return !test_audren.refuse;
 }
 void audren_tick(void) {}
+static float test_renderer_gain = 1.0f;
+void audren_volume(float gain) { test_renderer_gain = gain; }
 KEvent* kevent_new(const char* name) {
     KEvent* e = calloc(1, sizeof *e);
     CHECK(e != NULL);
@@ -582,8 +584,78 @@ static void test_device(void) {
     CHECK(query32(d, 5) == 2); /* GetActiveChannelCount */
     c = request(4, NULL, 0);   /* QueryAudioDeviceSystemEvent */
     CHECK(d->dispatch(d, &c) == 0 && c.nout_copy == 1 && c.out_copy[0] == 7);
+    /* SetAudioDeviceOutputVolume (1) and GetAudioDeviceOutputVolume (2), the name in A: the device keeps the volume set
+       on it, and another name has 1 and keeps nothing; the Auto ones (7, 8) through X */
+    float half = 0.5f, quarter = 0.25f, got = 0.0f;
+    memset(GP(0x1000), 0, 0x200);
+    strcpy((char*)GP(0x1000), "AudioTvOutput");
+    strcpy((char*)GP(0x1100), "AudioBuiltInSpeakerOutput");
+    c = request(1, &half, sizeof half);
+    c.na = 1;
+    c.a[0] = buffer(0x1000, 0x100);
+    CHECK(d->dispatch(d, &c) == 0 && c.out_size == 0);
+    c = request(1, &quarter, sizeof quarter);
+    c.na = 1;
+    c.a[0] = buffer(0x1100, 0x100);
+    CHECK(d->dispatch(d, &c) == 0);
+    c = request(2, NULL, 0);
+    c.na = 1;
+    c.a[0] = buffer(0x1000, 0x100);
+    CHECK(d->dispatch(d, &c) == 0 && c.out_size == 4 && (memcpy(&got, c.out, 4), got == 0.5f));
+    c.a[0] = buffer(0x1100, 0x100);
+    CHECK(d->dispatch(d, &c) == 0 && (memcpy(&got, c.out, 4), got == 1.0f));
+    c = request(7, &quarter, sizeof quarter);
+    auto_descriptors(&c, 1, 0);
+    c.x[0] = buffer(0x1000, 0x100);
+    CHECK(d->dispatch(d, &c) == 0);
+    c = request(8, NULL, 0);
+    auto_descriptors(&c, 1, 0);
+    c.x[0] = buffer(0x1000, 0x100);
+    CHECK(d->dispatch(d, &c) == 0 && (memcpy(&got, c.out, 4), got == 0.25f));
     svcobj_unref(d);
     svcobj_unref(manager);
+}
+
+/* the output device's volume on what plays: every audio out's host stream at its own volume times the device's, the
+   ones opened later too, and the renderers' (audren.c) at the device's */
+static void set_device_volume(SvcObj* d, float volume) {
+    IpcCtx c = request(1, &volume, sizeof volume);
+    c.na = 1;
+    c.a[0] = buffer(0x1000, 0x100);
+    CHECK(d->dispatch(d, &c) == 0);
+}
+static void test_device_gain(void) {
+    SvcObj* renderers = new_audren();
+    u64 aruid = 0;
+    IpcCtx c = request(2, &aruid, sizeof aruid);
+    CHECK(renderers->dispatch(renderers, &c) == 0 && c.nout_objs == 1);
+    SvcObj* d = c.out_objs[0];
+    memset(GP(0x1000), 0, 0x100);
+    strcpy((char*)GP(0x1000), "AudioTvOutput");
+    set_device_volume(d, 1.0f);
+    SvcObj* manager = new_audout();
+    SvcObj* first = open_output(manager);
+    PAudio* host = ((AudOut*)first->data)->output;
+    float half = 0.5f;
+    c = request(12, &half, sizeof half); /* SetAudioOutVolume */
+    CHECK(first->dispatch(first, &c) == 0 && host->volume == 0.5f);
+    set_device_volume(d, 0.5f);
+    CHECK(host->volume == 0.25f && test_renderer_gain == 0.5f);
+    float full = 1.0f;
+    c = request(12, &full, sizeof full); /* the out's own volume, under the device's */
+    CHECK(first->dispatch(first, &c) == 0 && host->volume == 0.5f);
+    c = request(12, &half, sizeof half);
+    CHECK(first->dispatch(first, &c) == 0 && host->volume == 0.25f);
+    SvcObj* second = open_output(manager);
+    PAudio* later = ((AudOut*)second->data)->output;
+    CHECK(later->volume == 0.5f);
+    set_device_volume(d, 1.0f);
+    CHECK(host->volume == 0.5f && later->volume == 1.0f && test_renderer_gain == 1.0f);
+    svcobj_unref(second);
+    svcobj_unref(first);
+    svcobj_unref(manager);
+    svcobj_unref(d);
+    svcobj_unref(renderers);
 }
 
 /* hwopus: GetWorkBufferSize (1) and OpenHardwareOpusDecoder (0), the parameters {sample rate, channels} at 0 and the
@@ -776,6 +848,7 @@ int main(void) {
     svcobj_unref(manager);
     test_renderer();
     test_device();
+    test_device_gain();
     test_hwopus();
     CHECK(test_objects == 0 && test_events == 0 && audio.outs == NULL);
     free(g_mem);

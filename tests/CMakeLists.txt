@@ -897,6 +897,11 @@ if(UNIX)
     add_test(NAME audren_render COMMAND snx-test-audren)
 endif()
 
+# audren.c's host side with the DSP stubbed: the output device's volume on every renderer's host stream
+add_executable(snx-test-audren-host audren_host.c)
+snx_test_target(snx-test-audren-host 23)
+add_test(NAME audren_host COMMAND snx-test-audren-host)
+
 add_executable(snx-test-render-enable render_enable.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c"
     "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/write_pages.c")
 snx_test_target(snx-test-render-enable 23)

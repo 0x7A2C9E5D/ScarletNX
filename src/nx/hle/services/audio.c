@@ -72,10 +72,11 @@ typedef struct {
 } AudRen;
 
 static struct {
-    PMutex lk;    /* the audio outs */
-    KEvent* ev;   /* the renderers' system event, every frame */
-    AudOut* outs; /* every open audio out, for the clock */
-} audio = {PMUTEX_INIT, NULL, NULL};
+    PMutex lk;           /* the audio outs, and the device's volume */
+    KEvent* ev;          /* the renderers' system event, every frame */
+    AudOut* outs;        /* every open audio out, for the clock */
+    float device_volume; /* the output device's, as SetAudioDeviceOutputVolume set it */
+} audio = {PMUTEX_INIT, NULL, NULL, 1.0f};
 
 /* ============================================================ helpers */
 /* whether [addr, addr + size) is guest memory with perm, block by block */
@@ -330,7 +331,7 @@ static int nn_audio_detail_IAudioOut_SetAudioOutVolume(SvcObj* self, float volum
     AudOut* q = self->data;
     pm_lock(&audio.lk);
     q->volume = volume;
-    plat_audio_volume(q->output, volume);
+    plat_audio_volume(q->output, volume * audio.device_volume);
     pm_unlock(&audio.lk);
     R_SUCCEED();
 }
@@ -384,6 +385,7 @@ static int open_out(const nn_audio_AudioOutParameter* params, IpcBuf name, IpcBu
     pm_lock(&audio.lk);
     q->next = audio.outs;
     audio.outs = q;
+    plat_audio_volume(q->output, q->volume * audio.device_volume);
     pm_unlock(&audio.lk);
     write_name(name_out, audout_name);
     *sample_rate = AUDIO_RATE;
@@ -597,9 +599,33 @@ static int nn_audio_detail_IAudioDevice_ListAudioDeviceName(SvcObj* self, IpcBuf
 static int nn_audio_detail_IAudioDevice_ListAudioDeviceNameAuto(SvcObj* self, IpcBuf names, i32* count) {
     return nn_audio_detail_IAudioDevice_ListAudioDeviceName(self, names, count);
 }
+/* whether a device name a game sends is the output device's */
+static int is_device(IpcBuf name) {
+    u64 n = name.size < AUDIO_NAME_SIZE ? name.size : AUDIO_NAME_SIZE;
+    if (!name.addr || n < sizeof device_name || !guest_ok(name.addr, n, PERM_R)) return 0;
+    return !memcmp(GP(name.addr), device_name, sizeof device_name);
+}
+/* the output device keeps the volume a game sets, and plays every audio out and renderer that much louder or softer;
+   any other name has 1 */
+static int nn_audio_detail_IAudioDevice_SetAudioDeviceOutputVolume(SvcObj* self, IpcBuf name, float volume) {
+    AudOut* q;
+    (void)self;
+    if (!is_device(name)) R_SUCCEED();
+    pm_lock(&audio.lk);
+    audio.device_volume = volume;
+    for (q = audio.outs; q; q = q->next) plat_audio_volume(q->output, q->volume * volume);
+    audren_volume(volume);
+    pm_unlock(&audio.lk);
+    R_SUCCEED();
+}
+static int nn_audio_detail_IAudioDevice_SetAudioDeviceOutputVolumeAuto(SvcObj* self, IpcBuf name, float volume) {
+    return nn_audio_detail_IAudioDevice_SetAudioDeviceOutputVolume(self, name, volume);
+}
 static int nn_audio_detail_IAudioDevice_GetAudioDeviceOutputVolume(SvcObj* self, IpcBuf name, float* volume) {
-    (void)self, (void)name;
-    *volume = 1.0f;
+    (void)self;
+    pm_lock(&audio.lk);
+    *volume = is_device(name) ? audio.device_volume : 1.0f;
+    pm_unlock(&audio.lk);
     R_SUCCEED();
 }
 static int nn_audio_detail_IAudioDevice_GetAudioDeviceOutputVolumeAuto(SvcObj* self, IpcBuf name, float* volume) {
