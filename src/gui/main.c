@@ -25,6 +25,7 @@
 #include "gui/splash.h"
 #include "common/utilities/pad_sdl.h"
 #include "common/utilities/pad_screen.h"
+#include "common/utilities/users.h"
 #ifdef SDL_PLATFORM_ANDROID
 #include "gui/android.h"
 #endif
@@ -148,6 +149,20 @@ typedef struct {
     const SnxSplashSvg* splash_svg;   /* the boot's pick: Wimsy, or one of dist/splash's */
     SnxSplashDrawing* splash_drawing; /* it, read once; NULL: the icon shows */
     int splash_side;
+    /* the user at the head's right (place's badge), the one Settings' user names (users_read): 0 for none */
+    char* users_dir; /* the data folder's users/ (open_files'); NULL shows none */
+    int user;
+    char user_name[SNX_USERS_NICKNAME + 1];
+    unsigned char* user_jpeg; /* users/<uid>.jpg, user_jpeg_size bytes; NULL for Wimsy */
+    size_t user_jpeg_size;
+    SDL_Texture* user_picture; /* drawn user_side pixels square, in the shape it was drawn for */
+    int user_side, user_shape;
+    /* the box a click on the user opens (users_open): each user of users.ini, the focused one picked as Settings' user */
+    bool users_shown;
+    int users_focus;
+    SDL_Texture* users_pictures[SNX_USERS_MAX]; /* theirs, users_side pixels square, made as the box is drawn */
+    int users_side;
+    bool previewing; /* drawing the theme editor's preview, on a copy of the app put back after it */
     Uint64 splash_until;
     GuiRgb splash_page;
     bool editing; /* the editor's screen (form says which) instead of the menu's */
@@ -1666,6 +1681,212 @@ static void screen_foot(App* app, const GuiPlace* p, const char* about, const ch
     foot(app, p, app->message[0] ? app->message : about,
          rgb(app->message[0] ? (app->abnormal_exit ? t->failure : t->focus) : t->ink), keys);
 }
+/* ---- the user at the head's right: the one Settings' user names, its nickname and its picture in a box ---- */
+/* Settings' user: the pick, or its default, 1; read from settings.ini until the Settings are */
+static int settings_user(const App* app) {
+    const char* value = NULL;
+    char *text = NULL, *key, *at;
+    size_t size;
+    int user = 1;
+    if (app->settings.keys)
+        value = gui_settings_value(&app->settings, "user");
+    else if (app->settings_file && snx_is_file(app->settings_file)) {
+        SnxIni ini;
+        text = (char*)snx_read_file(app->settings_file, &size);
+        if (text) snx_ini_start(&ini, text);
+        while (text && snx_ini_next(&ini, &key, &at))
+            if (!strcmp(key, "user")) value = at;
+    }
+    if (value) user = SDL_atoi(value);
+    free(text);
+    return user;
+}
+/* the users of users_dir, for the head: the one games play as, or none with why in the message */
+static void users_read(App* app) {
+    char why[512];
+    const SnxUser* u;
+    const unsigned char* jpeg;
+    uint32_t size;
+    app->user = 0;
+    free(app->user_jpeg);
+    app->user_jpeg = NULL;
+    app->user_jpeg_size = 0;
+    SDL_DestroyTexture(app->user_picture);
+    app->user_picture = NULL;
+    if (!app->users_dir) return;
+    if (snx_users_load(app->users_dir, settings_user(app), why, sizeof why)) {
+        snprintf(app->message, sizeof app->message, snx_tr("No user shown: %s"), why);
+        return;
+    }
+    u = snx_users_selected();
+    jpeg = snx_users_picture(u, &size);
+    if (jpeg && (app->user_jpeg = malloc(size)) != NULL) {
+        memcpy(app->user_jpeg, jpeg, size);
+        app->user_jpeg_size = size;
+    }
+    snprintf(app->user_name, sizeof app->user_name, "%s", u->nickname);
+    app->user = snx_users_selected_number();
+}
+/* jpeg (size bytes; NULL for Wimsy) side pixels square in the theme's shape, a texture of its own; a JPEG that does
+   not draw is Wimsy, and *failed says so */
+static SDL_Texture* picture_texture(App* app, const unsigned char* jpeg, size_t size, int side, bool* failed) {
+    int round = app->theme.picture == GUI_PICTURE_ROUND;
+    SDL_Texture* texture;
+    void* pixels = side > 0 ? malloc((size_t)side * (size_t)side * 4) : NULL;
+    *failed = false;
+    if (!pixels) return NULL;
+    if (snx_splash_picture(jpeg, size, side, round, pixels, side * 4)) {
+        *failed = jpeg != NULL;
+        snx_splash_picture(NULL, 0, side, round, pixels, side * 4);
+    }
+    texture = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, side, side);
+    if (texture && (!SDL_UpdateTexture(texture, NULL, pixels, side * 4) ||
+                    !SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND_PREMULTIPLIED))) {
+        SDL_DestroyTexture(texture);
+        texture = NULL;
+    }
+    free(pixels);
+    return texture;
+}
+/* the head's user's picture, side pixels square, kept while its size and the theme's shape are the same. A JPEG that
+   does not draw shows Wimsy, said. The preview's, at its own size and theme, is a texture of its own that the caller
+   destroys: the app it draws on is put back after it, so nothing the app keeps is touched */
+static SDL_Texture* user_texture(App* app, int side) {
+    SDL_Texture* texture;
+    bool failed;
+    if (!app->previewing && app->user_picture && app->user_side == side && app->user_shape == (int)app->theme.picture)
+        return app->user_picture;
+    texture = picture_texture(app, app->user_jpeg, app->user_jpeg_size, side, &failed);
+    if (app->previewing) return texture;
+    if (failed) {
+        snprintf(app->message, sizeof app->message, snx_tr("%s's picture could not be drawn: Wimsy shows"),
+                 app->user_name);
+        free(app->user_jpeg);
+        app->user_jpeg = NULL;
+        app->user_jpeg_size = 0;
+    }
+    SDL_DestroyTexture(app->user_picture);
+    app->user_picture = texture;
+    app->user_side = side;
+    app->user_shape = (int)app->theme.picture;
+    return texture;
+}
+/* a box of the user's, r, h pixels high: framed as the boxes are (filled with the page's colour too, a theme's filled
+   ones), on the head's band in its colours swapped; the nickname a column in, the picture against its right two pixels
+   in, the box's frame round both */
+static int user_side(const App* app, int h) { return h - 4 * app->scale; }
+static void draw_user(App* app, GuiRect r, int band) {
+    const GuiTheme* t = &app->theme;
+    int s = app->scale, side = user_side(app, r.h);
+    SDL_Texture* picture;
+    if (!r.h || side <= 0) return;
+    if (!band && t->panels == GUI_PANELS_FILL) fill_rect(app, r, t->page);
+    outline(app, r, band ? t->page : t->dim);
+    text_in(app, gui_rect(r.x, r.y, r.w - side - 2 * s - cell_w(app), r.h), r.x + cell_w(app),
+            r.y + (r.h - cell_h(app)) / 2, app->user_name, rgb(band ? t->page : t->ink));
+    picture = user_texture(app, side);
+    if (picture) {
+        SDL_FRect at = {(float)(r.x + r.w - 2 * s - side), (float)(r.y + 2 * s), (float)side, (float)side};
+        SDL_RenderTexture(app->renderer, picture, NULL, &at);
+        if (app->previewing) SDL_DestroyTexture(picture);
+    }
+}
+/* the box's width h pixels high: a column, the nickname, a column, the picture and its two pixels; 0 with no user to
+   show */
+static int user_width(const App* app, int h) {
+    if (!app->user || app->theme.picture == GUI_PICTURE_NONE || user_side(app, h) <= 0) return 0;
+    return ((int)SDL_utf8strlen(app->user_name) + 2) * cell_w(app) + user_side(app, h) + 2 * app->scale;
+}
+/* ---- the box of users a click on the head's opens: each user of users.ini, the one picked games' user ---- */
+static void users_close(App* app) {
+    int i;
+    for (i = 0; i < SNX_USERS_MAX; ++i) {
+        SDL_DestroyTexture(app->users_pictures[i]);
+        app->users_pictures[i] = NULL;
+    }
+    app->users_shown = false;
+}
+static void users_open(App* app) {
+    if (!app->user) return;
+    users_close(app);
+    app->users_shown = true;
+    app->users_focus = app->user - 1;
+}
+/* the box over the screen, as wide as the longest nickname with its picture; a row each, the focused one */
+static void users_boxes(App* app, GuiRect* r, GuiList* rows) {
+    int i, longest = 16, s = app->scale, item = item_h(app), h = g_user_count * (item + 6 * s);
+    for (i = 0; i < g_user_count; ++i)
+        longest =
+            SDL_max(longest, (int)SDL_utf8strlen(g_users[i].nickname) + (int)SDL_utf8strlen(app->theme.marker) + 4);
+    *r = over_rect(app, longest, head_h(app) + h + 12 * s);
+    list_place(app, rows, gui_rect(r->x + cell_w(app), r->y + head_h(app) + 6 * s, r->w - 2 * cell_w(app), h),
+               g_user_count, app->users_focus);
+}
+static void render_users(App* app) {
+    GuiRect r;
+    GuiList rows;
+    char label[SNX_USERS_NICKNAME + 24];
+    int i, s = app->scale;
+    users_boxes(app, &r, &rows);
+    over_box(app, r, snx_tr("Who plays the games"));
+    for (i = rows.first; i < rows.first + rows.shown; ++i) {
+        GuiRect b = list_box(&rows, i);
+        int side = b.h - 4 * s;
+        snprintf(label, sizeof label, "%s%s", app->theme.marker, g_users[i].nickname);
+        list_item(app, &rows, i, label, app->users_focus == i, i == app->user - 1);
+        if (side <= 0) continue;
+        if (!app->users_pictures[i] || app->users_side != side) {
+            uint32_t size;
+            const unsigned char* jpeg = snx_users_picture(&g_users[i], &size);
+            bool failed;
+            SDL_DestroyTexture(app->users_pictures[i]);
+            app->users_pictures[i] = picture_texture(app, jpeg, size, side, &failed);
+        }
+        if (app->users_pictures[i]) {
+            SDL_FRect at = {(float)(b.x + b.w - 2 * s - side), (float)(b.y + 2 * s), (float)side, (float)side};
+            SDL_RenderTexture(app->renderer, app->users_pictures[i], NULL, &at);
+        }
+    }
+    app->users_side = rows.shown ? list_box(&rows, rows.first).h - 4 * s : 0;
+}
+/* user n (1-based) picked: Settings' user, kept in settings.ini at once, and the head shows them */
+static GuiSettings* settings_of(App* app);
+static void users_pick(App* app, int n) {
+    char value[8];
+    GuiSettings* settings = settings_of(app);
+    snprintf(value, sizeof value, "%d", n);
+    if (!gui_settings_set(settings, "user", value))
+        snprintf(app->message, sizeof app->message, "%s", snx_tr("No user picked: the Settings have no user"));
+    else {
+        gui_settings_sync(settings);
+        if (app->settings_file && gui_settings_save(settings, app->settings_file))
+            snprintf(app->message, sizeof app->message, snx_tr("Not saved: %s could not be written"),
+                     app->settings_file);
+    }
+    users_close(app);
+    users_read(app);
+}
+/* a key on the box: Up and Down move, Select picks, Back closes it */
+static void users_key(App* app, GuiKey key) {
+    if (key == GUI_UP || key == GUI_DOWN)
+        app->users_focus = (app->users_focus + (key == GUI_UP ? g_user_count - 1 : 1)) % g_user_count;
+    else if (key == GUI_SELECT)
+        users_pick(app, app->users_focus + 1);
+    else if (key == GUI_CANCEL)
+        users_close(app);
+}
+/* the pointer on it: the row under it takes the focus, a click picks it; a click off the box closes it */
+static void users_pointer(App* app, float x, float y, bool click, bool touch) {
+    GuiRect r;
+    GuiList rows;
+    int i;
+    users_boxes(app, &r, &rows);
+    if ((i = list_hit(&rows, x, y, touch)) >= 0) {
+        app->users_focus = i;
+        if (click) users_pick(app, i + 1);
+    } else if (click && (x < (float)r.x || x >= (float)(r.x + r.w) || y < (float)r.y || y >= (float)(r.y + r.h)))
+        users_close(app);
+}
 /* ---- the head: the tabs, and the title after them or under them ---- */
 static int title_size(const App* app) { return (int)SDL_clamp(app->theme.title_size, 1, 3); }
 /* value from pixel x, y in letters size times the text's, cut at the right edge of r */
@@ -1774,6 +1995,7 @@ static void chrome(App* app, const GuiPlace* p) {
     if (t->head_rule)
         fill_rect(app, gui_rect(p->head.x, p->head.y + p->head.h + cell_h(app) / 4 - s / 2, p->head.w, s), t->dim);
     draw_tabs(app, p->tabs, band);
+    draw_user(app, p->badge, band);
     if (!p->title.h) return;
     if (t->title_shadow)
         big_text(app, p->title, p->title.x + size * s, p->title.y + size * s, title, size, rgb(t->dim));
@@ -1803,6 +2025,10 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols,
         in.title_w = (int)SDL_utf8strlen(title) * size * cell_w(app) + shadow;
         in.title_beside = t->head_place == GUI_HEAD_TABS;
     }
+    /* the user as high as the head's row: the title's, or the tabs' with none */
+    in.badge = in.title ? SDL_max(in.title, in.title_beside ? in.tabs : 0) : in.tabs;
+    in.badge_w = user_width(app, in.badge);
+    if (!in.badge_w) in.badge = 0;
     if (t->tips_place == GUI_TIPS_TOP) in.tips = cell_h(app) + 4 * s;
     in.list_cols = list_cols ? SDL_min(SDL_max(list_cols, 20), SDL_max(20, (width / cell_w(app) - 2) * 3 / 5)) : 0;
     in.fixed = t->sizing == GUI_SIZING_FIXED && list_cols && list_cols < width / cell_w(app); /* a list, not a run */
@@ -2167,6 +2393,7 @@ static void draw_screen(App* app) {
     else
         draw_menu(app);
     if (app->confirm.shown) render_ask(app);
+    if (idle && app->users_shown && !app->confirm.shown) render_users(app);
     if (idle && app->left_shown && app->lefts) render_files(app, 0);
     overlay(app);
 }
@@ -2282,6 +2509,7 @@ static bool preview_texture(App* app) {
         gui_console_feed(&app->preview_console, preview_run, sizeof preview_run - 1);
     }
     saved = *app;
+    app->previewing = true;
     app->theme = app->editor.theme;
     app->scale = 1;
     app->cols = 80;
@@ -2311,6 +2539,7 @@ static bool preview_texture(App* app) {
 }
 static void screen_tab(App* app, int step);
 static int tab_hit(App* app, float x, float y);
+static bool user_hit(App* app, float x, float y);
 /* the editor on the theme the menu shows: a folder of themes/ keeps its file's extras and its name, a built-in is
    saved as a new theme */
 static void open_editor(App* app) {
@@ -3113,6 +3342,7 @@ static void keep_settings(App* app) {
     if (app->settings_file && gui_settings_save(&app->settings, app->settings_file))
         snprintf(app->editor.note, sizeof app->editor.note, snx_tr("Not saved: %s could not be written"),
                  app->settings_file);
+    if (app->user != settings_user(app)) users_read(app); /* the head shows the user picked */
 }
 static int setting_row(const App* app, const char* key) {
     int i;
@@ -4007,6 +4237,10 @@ static void form_pointer(App* app, float x, float y, bool touch) {
         go_tab(app, i);
         return;
     }
+    if (user_hit(app, x, y)) {
+        users_open(app);
+        return;
+    }
     form_boxes(app, &f);
     if (app->form == GUI_FORM_THEME && x >= (float)f.place.side.x && x < (float)(f.place.side.x + f.place.side.w) &&
         y >= (float)f.place.side.y && y < (float)(f.place.side.y + f.place.side.h)) {
@@ -4417,6 +4651,7 @@ static void pump(App* app) {
                an abort, so return straight to the menu after nonblocking reaping. */
             app->finished = !app->aborting;
             app->abnormal_exit = app->aborting || status != 0;
+            users_read(app); /* users.ini may have changed while it ran */
             gui_steps_finish(&app->steps, !app->abnormal_exit);
             if (app->run_out) {
                 fprintf(app->run_out, "\n[%s, status %d]\n", app->aborting ? "aborted" : "ended", status);
@@ -5060,6 +5295,13 @@ static void ask_pointer(App* app, float x, float y, bool click) {
     } else if (click && (x < (float)r.x || x >= (float)(r.x + r.w) || y < (float)r.y || y >= (float)(r.y + r.h)))
         ask_key(app, GUI_CANCEL);
 }
+/* whether pixel x, y is on the head's user */
+static bool user_hit(App* app, float x, float y) {
+    GuiPlace p;
+    place_screen(app, &p, "", 0, GUI_SHOWS_TABS);
+    return p.badge.h && x >= (float)p.badge.x && x < (float)(p.badge.x + p.badge.w) && y >= (float)p.badge.y &&
+           y < (float)(p.badge.y + p.badge.h);
+}
 /* the tab at pixel x, y, -1 for none */
 static int tab_hit(App* app, float x, float y) {
     GuiPlace p;
@@ -5078,6 +5320,10 @@ static void screen_pointer(App* app, float x, float y, bool click, bool touch) {
     int i;
     if ((i = tab_hit(app, x, y)) >= 0) {
         if (click) go_tab(app, i);
+        return;
+    }
+    if (user_hit(app, x, y)) {
+        if (click) users_open(app);
         return;
     }
     if (app->menu.view == GUI_LOAD_GAMES) {
@@ -5260,6 +5506,8 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
     }
     if (app->confirm.shown) /* over a run, the menu, Games or a form */
         ask_pointer(app, x, y, click);
+    else if (app->users_shown)
+        users_pointer(app, x, y, click, touch);
     else if (app->editing && app->form == GUI_FORM_PAD) {
         if (click) pad_did(app, snx_pad_screen_tap(&app->pad, snx_pad_screen_hit(&app->pad_drawing, x, y)));
     } else if (app->editing && app->editor.picking)
@@ -5460,6 +5708,11 @@ static void event(App* app, const SDL_Event* e) {
         app->splash_until = 0;
         return;
     }
+    /* the box of users takes every key while it shows, as a question does */
+    if (app->users_shown && !app->confirm.shown && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
+        if (e->type == SDL_EVENT_KEY_DOWN && menu_key_of(&e->key, &key)) users_key(app, key);
+        return;
+    }
     /* a question takes every key while it shows, over the menu, Games or a form (a run's is the run's, below); a held
        key answers nothing */
     if (app->confirm.shown && !app->menu.running &&
@@ -5580,7 +5833,7 @@ static void event(App* app, const SDL_Event* e) {
     if (e->type == SDL_EVENT_MOUSE_WHEEL) {
         int rows = e->wheel.integer_y;
         if (app->splash || app->menu.running || app->finished || app->confirm.shown || app->left_shown ||
-            (app->editing && app->editor.picking))
+            app->users_shown || (app->editing && app->editor.picking))
             return;
         for (; rows > 0; --rows) scroll(app, GUI_UP);
         for (; rows < 0; ++rows) scroll(app, GUI_DOWN);
@@ -5765,6 +6018,10 @@ static void cleanup(App* app) {
     SDL_DestroyTexture(app->preview);
     SDL_DestroyTexture(app->splash);
     snx_splash_close(app->splash_drawing);
+    SDL_DestroyTexture(app->user_picture);
+    users_close(app);
+    free(app->user_jpeg);
+    free(app->users_dir);
     SDL_DestroyTexture(app->font);
     SDL_DestroyRenderer(app->renderer);
     SDL_DestroyWindow(app->window);
@@ -5785,6 +6042,9 @@ static void open_files(App* app) {
         folders_load(app);
         app_load(app);
     }
+    app->users_dir = snx_users_dir(app->home_dir ? app->home_dir : app->data_dir);
+    if (!app->users_dir) snprintf(app->message, sizeof app->message, "%s", snx_tr("No user shown: out of memory"));
+    users_read(app);
     free(config);
     free(prefs);
 }
