@@ -383,6 +383,7 @@ def main():
                 str(ROOT / 'src'),
                 str(ROOT / 'tests/a64_audit_emit.c'),
                 str(A64 / 'a64.c'),
+                str(A64 / 'a64_emit.c'),
                 '-o',
                 str(emitter),
             ],

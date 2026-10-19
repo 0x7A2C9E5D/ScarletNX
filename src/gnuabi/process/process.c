@@ -310,17 +310,6 @@ int gnu_process_load(GnuProcess* p, const char* path, const unsigned char* image
     r = gnu_vfs_set_process(&p->vfs, p->pid, path, argc, argv);
     /* the isolated namespace has no host files: the program is imported as /program */
     if (!r && !strcmp(path, "/program")) r = gnu_vfs_set_executable(&p->vfs, image, size);
-    if (!r && p->elf.bits == 64 && p->jit.mode == GNU_AOT) {
-        SnxExecRange* ranges = calloc(p->elf.code_count ? p->elf.code_count : 1, sizeof *ranges);
-        if (!ranges) return -GNU_ENOMEM;
-        for (size_t i = 0; i < p->elf.code_count; i++) {
-            ranges[i].address = p->elf.code[i].address;
-            ranges[i].data = p->elf.code[i].data;
-            ranges[i].size = p->elf.code[i].size;
-        }
-        r = gnu_jit_prepare(&p->jit, ranges, p->elf.code_count, p->elf.entry, error, cap);
-        free(ranges);
-    }
     return r;
 }
 

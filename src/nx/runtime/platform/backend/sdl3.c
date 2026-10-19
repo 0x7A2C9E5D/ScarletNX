@@ -527,7 +527,7 @@ static int fatal_screen(const char* msg) {
     panel.how = what;
     panel.focus = SNX_OVERLAY_ERROR_CLOSE;
     /* the log plat.c writes, in the state folder. Beside the game that is argv[0]'s folder, which may be relative (./
-       for ./Catherine): Share log and a file URI need an absolute path */
+       for ./MyGame): Share log and a file URI need an absolute path */
     snprintf(log_path, sizeof log_path, "%s%s.log", g_statedir, g_exename);
     full = snx_absolute(log_path);
     if (full && strlen(full) < sizeof log_path) memcpy(log_path, full, strlen(full) + 1);

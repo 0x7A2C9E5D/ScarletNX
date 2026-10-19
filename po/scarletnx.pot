@@ -1462,6 +1462,14 @@ msgid "Extract a dump's ExeFS and RomFS into its game's folder. Off, the game re
 msgstr ""
 
 #: src/gui/settings.c
+msgid "Optimization level"
+msgstr ""
+
+#: src/gui/settings.c
+msgid "LLVM's optimization of the game's code when it is recompiled: 0 none, 3 the most, z the smallest. A game made already keeps its code until it is recompiled"
+msgstr ""
+
+#: src/gui/settings.c
 msgid "Its own page, as in the game's menu"
 msgstr ""
 

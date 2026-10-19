@@ -168,7 +168,7 @@ int main(void) {
     CHECK(p->exited && p->exit_code == 42);
     p->cpu.mem = p->memory.base;
     p->exited = 0;
-    CHECK(gnu_jit_init(&p->jit, GNU_JIT, NULL, NULL, error, sizeof error) == 0);
+    CHECK(gnu_jit_init(&p->jit, NULL, error, sizeof error) == 0);
     gnu_jit_bind(&p->jit, &p->cpu);
     gnu_jit_install(&p->jit, 0x400100, faulting_guest);
     p->cpu.pc = 0x400100;

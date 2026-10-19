@@ -1203,7 +1203,7 @@ static void cbuf_integer_loads(void) {
 }
 
 /* TMML.B with its handle in Rb, on a cube array (the layer before the three coordinates), and IPA reading the point
-   sprite's S and T (a[0x2e0] and a[0x2e4]), both as Super Mario Odyssey's fragment programs use them */
+   sprite's S and T (a[0x2e0] and a[0x2e4]), both as a game's fragment programs use them */
 static void fragment_queries(void) {
     static const u64 tmml[] = {
         HANDLE_CBUF_R4, /* MOV R4, c[2][0x168]: the handle */
@@ -1847,7 +1847,7 @@ static void beyond_eden(void) {
 
 /* AL2P keeps byte offsets, including bit 10, and adds the register before an attribute access. */
 static void attribute_pointer(void) {
-    const u64 base = 0xefa070010607ff01ull; /* Mario Golf: AL2P R1, RZ + 0x60, PT */
+    const u64 base = 0xefa070010607ff01ull; /* a game's: AL2P R1, RZ + 0x60, PT */
     const u64 instructions[] = {mov32i(4, 0x1234),
                                 (base & ~((0xffull << 8) | (0x7ffull << 20))) | (4ull << 8) | (0x460ull << 20)};
     ShaderInfo info;

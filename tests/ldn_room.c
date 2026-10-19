@@ -31,7 +31,7 @@ static void warned(const char* m) { snprintf(g_warned, sizeof g_warned, "%s", m)
 /* ============================================================ the room */
 static FakeRoom* g_room;
 static int join(SnxRoom** out, const char* nickname, const char* password, int* why) {
-    return snx_room_join(out, "127.0.0.1", fake_room_port(g_room), nickname, password, "mk8d", 0x0100152000022000ull,
+    return snx_room_join(out, "127.0.0.1", fake_room_port(g_room), nickname, password, "game", 0x0100ABCD12345000ull,
                          "", why);
 }
 
@@ -89,7 +89,7 @@ static void joining(void) {
         char game[64];
         uint64_t id;
         fake_room_last_game(g_room, game, sizeof game, &id);
-        CHECK(!strcmp(game, "mk8d") && id == 0x0100152000022000ull);
+        CHECK(!strcmp(game, "game") && id == 0x0100ABCD12345000ull);
     }
     /* each refusal, as the room says it */
     CHECK(join(&b, "Xuji", "wrong", &why) == -SNX_ECONNREFUSED && why == SNX_ROOM_WRONG_PASSWORD && !b);
@@ -105,10 +105,10 @@ static void joining(void) {
     for (r = 0; r < 200 && !snx_room_has_member(a, ip); r++) sleep_ms(5);
     CHECK(snx_room_has_member(a, ip));
     /* nobody at that port: given up after the connect's time out */
-    CHECK(snx_room_join(&c, "127.0.0.1", 9, "Afugo", "secret", "mk8d", 1, "", &why) == -SNX_ETIMEDOUT);
+    CHECK(snx_room_join(&c, "127.0.0.1", 9, "Afugo", "secret", "game", 1, "", &why) == -SNX_ETIMEDOUT);
     CHECK(why == SNX_ROOM_UNREACHABLE);
     /* a name with no address is said so, not as a room that didn't answer */
-    CHECK(snx_room_join(&c, "no-such-room.invalid", 24872, "Afugo", "secret", "mk8d", 1, "", &why) ==
+    CHECK(snx_room_join(&c, "no-such-room.invalid", 24872, "Afugo", "secret", "game", 1, "", &why) ==
           -SNX_EHOSTUNREACH);
     CHECK(why == SNX_ROOM_NO_ADDRESS && strstr(snx_room_why_text(why), "no address"));
     /* kicked by the room's host: out of the room, and the player is told */
@@ -163,7 +163,7 @@ static void network_of(SnxLdn* host, SnxLdnNetworkInfo* n) {
     uint8_t ip[4], mask[4], name[SNX_LDN_USER_NAME];
     int i;
     memset(n, 0, sizeof *n);
-    n->local_communication_id = 0x0100152000022000ull;
+    n->local_communication_id = 0x0100ABCD12345000ull;
     n->session_id[0] = 0x1122334455667788ull;
     snx_ldn_address(host, ip, mask);
     snx_ldn_fake_mac(ip, n->bssid);

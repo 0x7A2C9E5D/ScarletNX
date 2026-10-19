@@ -7,8 +7,8 @@
 # into /usr (.github/workflows/build.yml), and quick-sharun has to be on PATH (pkgforge-dev/anylinux-setup-action puts
 # it there).
 #
-# A copy named after a game works like the bare runtime: games/Catherine.AppImage (or games/Catherine) loads
-# games/Catherine_code.so, since the runtime takes its name and folder from $APPIMAGE.
+# A copy named after a game works like the bare runtime: games/MyGame.AppImage (or games/MyGame) loads
+# games/MyGame_code.so, since the runtime takes its name and folder from $APPIMAGE.
 set -euo pipefail
 
 ARCH=$(uname -m)

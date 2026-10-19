@@ -174,7 +174,7 @@ static void rt_poll(CPU* c) { core_poll((KThread*)c->thread); }
    meanwhile. It is noted as a hint, so the next recompile has the function in the module: not code the game mapped,
    which the module never holds and which lands elsewhere next time */
 static void rt_miss(CPU* c, u64 pc) {
-    GuestFn f = jit_resolve(pc);
+    GuestFn f = jit_resolve_or_add(pc);
     if (!f) {
         KThread* t = kthread_cur();
         if (t) core_leave(t);

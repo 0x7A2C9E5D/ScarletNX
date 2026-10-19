@@ -1,17 +1,18 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The menu's Settings: the launcher's own three (gdbstub, Extract to tmpfs, Extract game container), then every setting
-   of the game's .ini as the runtime lists them (scarletnx --settings, its tables), each a row of the form (editor.h),
-   named and its values worded as the game's menu shows them. A setting is the .ini's, passed to no run, until one is
-   picked. The picks are kept in a file, an .ini of the game's sections and keys, and go to every run as --key=value. A
-   run takes a setting from what that run picks, then from the game's own file of picks (to come: today there is only
-   the global one, every game's), then from the global file, and last from the game's .ini */
+/* The menu's Settings: the launcher's own four (gdbstub, Extract to tmpfs, Extract game container, the optimization
+   level), then every setting of the game's .ini as the runtime lists them (scarletnx --settings, its tables), each a
+   row of the form (editor.h), named and its values worded as the game's menu shows them. A setting is the .ini's,
+   passed to no run, until one is picked. The picks are kept in a file, an .ini of the game's sections and keys, and go
+   to every run as --key=value. A run takes a setting from what that run picks, then from the game's own file of picks
+   (to come: today there is only the global one, every game's), then from the global file, and last from the game's
+   .ini */
 #ifndef SNX_GUI_SETTINGS_H
 #define SNX_GUI_SETTINGS_H
 #include <stddef.h>
 #include "gui/theme.h"
 
-#define GUI_SETTINGS_OWN 3 /* the launcher's own rows, first: gdbstub, tmpfs and extract */
+#define GUI_SETTINGS_OWN 4 /* the launcher's own rows, first: gdbstub, tmpfs, extract and opt */
 /* a row that is no setting: a page's, which opens the section/page rows listed after it, and its All, first on that
    page, which steps them together */
 enum { GUI_SETTING_PAGE = 1, GUI_SETTING_ALL };
@@ -69,4 +70,7 @@ const char* gui_settings_tmpfs(const GuiSettings* settings);
 /* Extract game container: --extract-container while it is on, else NULL (a dump read in place, nothing extracted).
    Both drivers take it */
 const char* gui_settings_extract(const GuiSettings* settings);
+/* the optimization level: -O0, -O1, -O3 or -Oz for the recompile, else NULL (the driver's default, 2). The Switch
+   driver takes it, for a run (which recompiles when it must) and for R's recompile */
+const char* gui_settings_opt(const GuiSettings* settings);
 #endif

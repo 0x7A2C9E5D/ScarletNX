@@ -30,7 +30,7 @@ typedef struct Vb {
     struct Vb* next;
 } Vb;
 /* buckets of the cache of guest ranges as buffers. Entries live 600 presents after their last use, and draws make new
-   ranges all the time: at 4096 buckets the chain walk was most of buf_get's time in TotK */
+   ranges all the time: at 4096 buckets the chain walk was most of buf_get's time in one game */
 #define VBH (1u << 16)
 static Vb* g_vbh[VBH];
 /* Optional copy telemetry. Counters are updated under vk_lock. */
@@ -187,7 +187,7 @@ typedef struct {
     GfxOut* o;
 } Rebase;
 /* Eight bytes at a time: a result is mostly the bytes it read, and a byte loop here was 84% of the release thread's time
-   in TotK, all of it under vk_lock, where the GPU thread waited for it */
+   in one game, all of it under vk_lock, where the GPU thread waited for it */
 static void rebase_span(void* user, u64 at, u64 from, u64 n) {
     const Rebase* r = user;
     const u8 *res = r->e->ptr + from, *org = r->e->org + from;
@@ -610,8 +610,8 @@ static u32* g_wleaf[AS_SIZE >> WW_LEAF_SHIFT];
 static u32 g_wleaf_max[AS_SIZE >> WW_LEAF_SHIFT];
 /* The CPU writes a GPU stream may see come before its submission or the end of one of its waits: each of those starts
    a write epoch (vk_ww_new_epoch). A leaf scanned whole in the current epoch isn't scanned again in it, and a scan
-   covers whole leaves, so the textures and buffers checked in one epoch share a few scans: TotK made 5,600 of them a
-   frame. g_wleaf_seen holds the epoch + 1 a leaf was last scanned in */
+   covers whole leaves, so the textures and buffers checked in one epoch share a few scans: one game made 5,600 of them
+   a frame. g_wleaf_seen holds the epoch + 1 a leaf was last scanned in */
 static u32 g_wleaf_seen[AS_SIZE >> WW_LEAF_SHIFT];
 static u32 g_ww_epoch;
 void vk_ww_new_epoch(void) { __atomic_add_fetch(&g_ww_epoch, 1, __ATOMIC_RELAXED); }
@@ -895,7 +895,7 @@ static int draw_output_page(const DrawPage* p, u8* ptr, VkBuffer buf, u64 off, V
     if (!o) return 0;
     /* the original bytes from guest memory, which the atlas page was filled from: staging can be device-local
        memory behind the BAR, where a CPU read crosses PCIe uncached (this copy was most of the GPU thread's memcpy
-       time in TotK) */
+       time in one game) */
     page = gmem_ptr_untracked(p->gva, 4096);
     if (page)
         memcpy(o->org, page, 4096);
@@ -920,7 +920,7 @@ static int draw_output_page(const DrawPage* p, u8* ptr, VkBuffer buf, u64 off, V
 }
 /* An atlas page starts from guest memory, and the pending results over it are copied in on the GPU in the order they
    were recorded, after the shaders that wrote them: an aliased draw doesn't wait for earlier results to land in guest
-   memory (TotK drew about four a frame, each landing everything with a vk_finish). Its outputs keep guest memory as
+   memory (one game drew about four a frame, each landing everything with a vk_finish). Its outputs keep guest memory as
    their original bytes until those results land (out_rebase). Compute results that haven't landed land for the
    atlas's pages alone. A result whose original bytes the guest has written since can't be copied whole: it lands
    first, as in gfx_gpu_src, which submits, and the draw starts its setup over. 1 when a result was copied in */
@@ -1060,7 +1060,7 @@ static void drop_own(Vb* e) {
 }
 /* An own buffer is device memory the GPU reads at full speed, filled by a copy from this frame's staging ring. Mapped
    memory for it is the BAR's window on most GPUs (256 MB, which VMA prefers for host writes), and thousands of own
-   buffers there crowded out the staging rings: TotK's rings, made again in the window as they grew after loading,
+   buffers there crowded out the staging rings: one game's rings, made again in the window as they grew after loading,
    took writes at a twentieth of their speed for minutes (18 to 25 fps against 43) */
 static int make_own(Vb* e, const u8* src) {
     u64 len = e->len;

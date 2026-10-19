@@ -17,7 +17,7 @@ static void capture(u32 sub, u32 method, u32 value, void* context) {
 }
 
 int main(void) {
-    /* Observed TotK cursor gap: two state packets followed by its 1,656-index MME draw. */
+    /* An observed cursor gap: two state packets followed by its 1,656-index MME draw. */
     const u32 packet[] = {0x20020701, 6, 0x22ad0000, 0x200207c0, 6, 0x22ad0d8b, 0xa0050e38, 4, 6, 0x22ad0d90, 1, 1656};
     NvnGapIndexedDraw draw = {0};
     assert(nvn_command_gap_indexed_draw(packet, 12, &draw));
@@ -181,7 +181,7 @@ int main(void) {
     assert(!nvn_command_gap_indexed_draw(packet, 11, &draw));
     assert(!nvn_command_gap_indexed_draw(NULL, 12, &draw));
 
-    /* TotK's descriptor upload: the MME argument is a word offset, but that interpretation belongs
+    /* A game's descriptor upload: the MME argument is a word offset, but that interpretation belongs
        to its uploaded macro program and is not inferred by this packet parser. */
     const u32 descriptor_packet[] = {
         0x60010e0e, 4,          0x6001068b, 0,          0x600108e3, 0xa8, 0x600108e4,

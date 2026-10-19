@@ -68,13 +68,38 @@ static V lane_exponent_in(SnxIr* ir, const Shape* s, V bits, unsigned lo, unsign
 static V exponent_in(SnxIr* ir, const Shape* s, V bits, unsigned lo, unsigned hi) {
     return all(ir, s, lane_exponent_in(ir, s, bits, lo, hi));
 }
+void ir_fp_guards_invalidate(SnxIr* ir) {
+    ir->state.fp_guards.block = NULL;
+    ir->state.fp_guards.nearest = NULL;
+    ir->state.fp_guards.ixc = NULL;
+}
+
+/* FPCR and FPSR are guest state, not host control registers. A guard belongs
+   to one basic block; stores and calls invalidate it before another use. */
+static SnxIrFpGuards* fp_guards(SnxIr* ir) {
+    SnxIrFpGuards* guards = &ir->state.fp_guards;
+    LLVMBasicBlockRef block = LLVMGetInsertBlock(B);
+    if (guards->block != block) {
+        ir_fp_guards_invalidate(ir);
+        guards->block = block;
+    }
+    return guards;
+}
 static V rounds_to_nearest(SnxIr* ir) {
-    V fpcr = ir_cpu_load(ir, ir->t_i32, ir_off_fpcr());
-    return LLVMBuildICmp(B, LLVMIntEQ, LLVMBuildAnd(B, fpcr, i32c(ir, 3u << 22), ""), i32c(ir, 0), "");
+    SnxIrFpGuards* guards = fp_guards(ir);
+    if (!guards->nearest) {
+        V fpcr = ir_cpu_load(ir, ir->t_i32, ir_off_fpcr());
+        guards->nearest = LLVMBuildICmp(B, LLVMIntEQ, LLVMBuildAnd(B, fpcr, i32c(ir, 3u << 22), ""), i32c(ir, 0), "");
+    }
+    return guards->nearest;
 }
 static V ixc_set(SnxIr* ir) {
-    V fpsr = ir_cpu_load(ir, ir->t_i32, ir_off_fpcr() + 4);
-    return LLVMBuildICmp(B, LLVMIntNE, LLVMBuildAnd(B, fpsr, i32c(ir, 1u << 4), ""), i32c(ir, 0), "");
+    SnxIrFpGuards* guards = fp_guards(ir);
+    if (!guards->ixc) {
+        V fpsr = ir_cpu_load(ir, ir->t_i32, ir_off_fpcr() + 4);
+        guards->ixc = LLVMBuildICmp(B, LLVMIntNE, LLVMBuildAnd(B, fpsr, i32c(ir, 1u << 4), ""), i32c(ir, 0), "");
+    }
+    return guards->ixc;
 }
 /* the host fuses multiply-add in hardware (x86 FMA3 from CPUID; AArch64 and PowerPC64 always): llvm.fma is then one
    instruction, never a call into a C library the module doesn't link */
@@ -124,13 +149,27 @@ void ir_fp_fast(SnxIr* ir, unsigned op, unsigned width, unsigned lanes, V a, V b
     switch (op) {
         case SNX_IR_FP_ADD:
         case SNX_IR_FP_SUB: {
-            /* TwoSum: the rounding error of a sum is a float, and exactly da+db */
-            V y = op == SNX_IR_FP_SUB ? LLVMBuildFNeg(B, fb, "") : fb, bp, ap;
+            /* Once IXC is sticky, TwoSum cannot change guest state. Keep
+               its residual math cold, not in every native ADD/SUB path. */
+            V y = op == SNX_IR_FP_SUB ? LLVMBuildFNeg(B, fb, "") : fb;
+            LLVMBasicBlockRef residual = ir_block(ir, "fp_residual");
+            LLVMBasicBlockRef sticky = ir_block(ir, "fp_ixc_set");
+            LLVMBasicBlockRef done = ir_block(ir, "fp_residual_done");
             r = LLVMBuildFAdd(B, fa, y, "");
-            bp = LLVMBuildFSub(B, r, fa, "");
-            ap = LLVMBuildFSub(B, r, bp, "");
-            out->inexact =
+            LLVMBuildCondBr(B, ixc, sticky, residual);
+            LLVMPositionBuilderAtEnd(B, residual);
+            V bp = LLVMBuildFSub(B, r, fa, "");
+            V ap = LLVMBuildFSub(B, r, bp, "");
+            V changed =
                 nonzero(ir, &s, LLVMBuildFAdd(B, LLVMBuildFSub(B, fa, ap, ""), LLVMBuildFSub(B, y, bp, ""), ""));
+            LLVMBuildBr(B, done);
+            LLVMPositionBuilderAtEnd(B, sticky);
+            LLVMBuildBr(B, done);
+            LLVMPositionBuilderAtEnd(B, done);
+            out->inexact = LLVMBuildPhi(B, ir->t_i1, "");
+            V values[2] = {changed, LLVMConstInt(ir->t_i1, 0, 0)};
+            LLVMBasicBlockRef blocks[2] = {residual, sticky};
+            LLVMAddIncoming(out->inexact, values, blocks, 2);
             exact_ok = LLVMConstInt(ir->t_i1, 1, 0);
             break;
         }
@@ -299,6 +338,12 @@ static V fprm(SnxIr* ir) {
 V ir_fp_narrow(SnxIr* ir, V bits, unsigned from, unsigned odd) {
     return convert(ir, bits, from, from / 2, odd ? i32c(ir, 5) : fprm(ir));
 }
+/* simd_2misc's FCVTL lane: from bits to twice that width */
+V ir_fp_wide(SnxIr* ir, V bits, unsigned from) { return convert(ir, bits, from, from * 2, fprm(ir)); }
+/* simd_2misc's FRINT* lanes: to integral, by the mode the encoding fixes or the FPCR's */
+V ir_fp_round_to(SnxIr* ir, V bits, unsigned width, unsigned mode, unsigned exact) {
+    return round_to(ir, bits, width, mode == SNX_IR_FP_RM_FPCR ? fprm(ir) : i32c(ir, mode), exact);
+}
 
 /* SETSB/SETDB/SETH(d,e): t=(uN)(e); c->v[d].d[1]=0; c->v[d].d[0]=t; */
 static void set_bits(SnxIr* ir, unsigned d, unsigned bits, V value) {
@@ -315,18 +360,8 @@ static V sign(SnxIr* ir, V x, unsigned width) {
     return LLVMBuildXor(B, x, width == 64 ? ir_i64(ir, (SnxU64)1 << 63) : i32c(ir, 0x80000000UL), "");
 }
 static V truth(SnxIr* ir, V v) { return LLVMBuildICmp(B, LLVMIntNE, v, i32c(ir, 0), ""); }
-static V cond_ok(SnxIr* ir, unsigned cond) {
-    V args[2];
-    args[0] = ir->c;
-    args[1] = i32c(ir, cond);
-    return ir_call_helper(ir, SNX_IR_COND_OK, args, 2);
-}
-static void set_nzcv(SnxIr* ir, V flags) {
-    V args[2];
-    args[0] = ir->c;
-    args[1] = flags;
-    ir_call_helper(ir, SNX_IR_SET_NZCV, args, 2);
-}
+static V cond_ok(SnxIr* ir, unsigned cond) { return ir_flags_cond(ir, cond); }
+static void set_nzcv(SnxIr* ir, V flags) { ir_flags_set_nzcv(ir, flags); }
 
 static int fp2(SnxIr* ir, SnxU32 w, size_t index) {
     unsigned op = index & 15, width = index >> 4 ? 64 : 32, rd = F(0, 5);
@@ -842,25 +877,18 @@ static int fcvt(SnxIr* ir, SnxU32 w, size_t index, int fixed) {
 }
 
 int snx_ir_fp_plain(SnxIr* ir, SnxU32 w, SnxU64 pc, const SnxA64Pattern* pattern, size_t index) {
-    const char* name = pattern->name;
     (void)pc;
-    if (!strcmp(name, "FP2")) return fp2(ir, w, index);
-    if (!strcmp(name, "FP1")) return fp1(ir, w, index);
-    if (!strcmp(name, "FCMP"))
-        fcmp(ir, w, index);
-    else if (!strcmp(name, "FCCMP"))
-        fccmp(ir, w, index);
-    else if (!strcmp(name, "FCSEL"))
-        fcsel(ir, w, index);
-    else if (!strcmp(name, "FMOV_IMM"))
-        fmov_imm(ir, w, index);
-    else if (!strcmp(name, "FP3"))
-        fp3(ir, w, index);
-    else if (!strcmp(name, "FCVT_INT"))
-        return fcvt(ir, w, index, 0);
-    else if (!strcmp(name, "FCVT_FIX"))
-        return fcvt(ir, w, index, 1);
-    else
-        return 0;
+    switch (pattern->kind) {
+        case SNX_A64_FP2: return fp2(ir, w, index);
+        case SNX_A64_FP1: return fp1(ir, w, index);
+        case SNX_A64_FCMP: fcmp(ir, w, index); break;
+        case SNX_A64_FCCMP: fccmp(ir, w, index); break;
+        case SNX_A64_FCSEL: fcsel(ir, w, index); break;
+        case SNX_A64_FMOV_IMM: fmov_imm(ir, w, index); break;
+        case SNX_A64_FP3: fp3(ir, w, index); break;
+        case SNX_A64_FCVT_INT: return fcvt(ir, w, index, 0);
+        case SNX_A64_FCVT_FIX: return fcvt(ir, w, index, 1);
+        default: return 0;
+    }
     return 1;
 }

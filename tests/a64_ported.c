@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* rEden's A64 cases (a64_ported_cases.h) on the AOT step and the interpreter. Arguments: C compiler, source tree */
-#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_emit.h"
 #include "a64_ported_cases.h"
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +20,7 @@ static void emit(FILE* out) {
     const size_t words = sizeof(snx_a64p_minmax_words) / sizeof(snx_a64p_minmax_words[0]);
     char name[48];
     size_t i, address = 0;
-    fputs("#include \"cpu.h\"\n#include \"cpu_helpers.c\"\n#include \"a64_audit_state.h\"\nGuestFn snx_interp_entry;\n",
+    fputs("#include \"cpu.h\"\n#define SNX_A64_REFERENCE\n#include \"cpu_helpers.c\"\n#include \"a64_audit_state.h\"\nGuestFn snx_missing_entry;\n",
           out);
     /* each case's code from address 0: a branch's static step resolves its target from its own address */
     for (i = 0; i < ops; ++i) {

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The graphics command buffers are recorded on a thread of their own. In Tears of the Kingdom a fifth of the GPU
+/* The graphics command buffers are recorded on a thread of their own. In one game a fifth of the GPU
    thread's time was the driver encoding commands, which doesn't depend on anything the GPU thread does next: the
    rec_Cmd* functions copy a command's arguments into a ring, and the recording thread makes the Vulkan call. A
    command buffer is begun, ended and submitted from the ring too, in order with its commands.

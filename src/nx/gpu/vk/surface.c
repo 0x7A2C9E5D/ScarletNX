@@ -576,9 +576,9 @@ Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h) {
 /* render targets drawn this frame or the last, for a texture made of them (gpu/vk/texture.c) */
 static Surf** g_drawn;
 static int g_ndrawn, g_capdrawn;
-/* the GPU pages they started at when listed, so a texture over none of them (most) skips the list: TotK looked at each
-   of about 30 for each of 13,000 textures a frame. A target parked since still counts its old page, which only lets
-   the walk run */
+/* the GPU pages they started at when listed, so a texture over none of them (most) skips the list: one game looked at
+   each of about 30 for each of 13,000 textures a frame. A target parked since still counts its old page, which only
+   lets the walk run */
 static PendPages g_drawn_pages;
 /* Read backing memory directly: asking gmem_read to land pending output here could submit a draw mid-setup. A run of
    pages contiguous in host memory is hashed at once, eight bytes at a time (vk_hash) */
@@ -679,6 +679,13 @@ static void surf_free(Surf* s) {
     vk_defer_image(s->img, s->mem, s->att, s->att_linear);
     free(s);
 }
+/* a target holding a draw that memory doesn't have: it stays while its address is its own and memory wasn't written
+   over it since, as a texture made there later takes its pixels (tex_take_drawn) and freeing it would lose them. Depth
+   draws aren't tracked: a depth target holds one once anything left its layout defined */
+static int keeps_drawn(Surf* s) {
+    if (!s->is_rt || (s->gva >> 63)) return 0;
+    return s->f.depth ? s->layout != VK_IMAGE_LAYOUT_UNDEFINED : vk_rt_drawn_fresh(s);
+}
 void vk_surf_evict(u32 before) {
     /* A storage image keeps a Surf pointer until its result reaches guest memory. */
     vk_gfx_image_land();
@@ -686,12 +693,12 @@ void vk_surf_evict(u32 before) {
        (guest memory has them as of its last write-back). They aren't written to memory as they go: memory is shared
        by targets the GPU drew over one another, parked and freed ones among them, and by textures and buffers that
        copied from them on the GPU, and the renderer doesn't know them all. Writing an evicted target's pixels, as
-       Mario Kart 8 Deluxe's Mii icons wanted (drawn at boot, shown a minute later), put older pixels over newer ones
-       in Tears of the Kingdom: a black block over Link, and red and green blocks over its textures */
+       a game's Mii icons wanted (drawn at boot, shown a minute later), put older pixels over newer ones in
+       another: a black block over the player character, and red and green blocks over its textures */
     for (int k = 0; k < SURFH; k++)
         for (Surf** pp = &g_surfh[k]; *pp;) {
             Surf* s = *pp;
-            if ((i32)((u32)s->last_used - before) >= 0) {
+            if ((i32)((u32)s->last_used - before) >= 0 || keeps_drawn(s)) {
                 pp = &s->next;
                 continue;
             }

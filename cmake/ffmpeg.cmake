@@ -168,8 +168,19 @@ else()
     # a changed patch rewrites the patched file at configure time, which the build step doesn't see on its own: an
     # existing tree kept linking the FFmpeg built from the old one
     ExternalProject_Add_StepDependencies(ffmpeg_build build "${snx_ffmpeg_src}/libavcodec/vp9.c")
+    # the configuration FFmpeg was built with, which make install leaves out, kept with the install (and so in the
+    # dependency cache) for the tests that read a decoder's private state
+    ExternalProject_Add_Step(ffmpeg_build private
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${snx_ffmpeg_prefix}/private"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different config.h "${snx_ffmpeg_prefix}/private/config.h"
+        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/ffmpeg-build-patched"
+        BYPRODUCTS "${snx_ffmpeg_prefix}/private/config.h"
+        DEPENDEES build
+        DEPENDERS install)
     snx_deps_publish(ffmpeg_build ffmpeg "${snx_ffmpeg_prefix}" "${snx_ffmpeg_cache_DIR}")
 endif()
+# FFmpeg's private headers and that configuration, for those tests (tests/nvdec_vp9_jobs.c reads the VP9 decoder's)
+set(snx_ffmpeg_private_include "${snx_ffmpeg_prefix}/private" "${snx_ffmpeg_src}")
 
 # The include folder is filled by the install step, but has to exist for the imported targets at configure time
 file(MAKE_DIRECTORY "${snx_ffmpeg_prefix}/include")

@@ -4841,15 +4841,15 @@ int main(int argc, char** argv) {
             app.recent_file = snx_path_join(expected, "recent.txt");
             loose = snx_path_join(app.games_dir, LONG);
             loose_data = snx_format("%s_data", loose);
-            named = snx_path_join(app.games_dir, "Tunic");
-            npdm = snx_path_join(app.games_dir, "Tunic_data/exefs/main.npdm");
+            named = snx_path_join(app.games_dir, "MyGame");
+            npdm = snx_path_join(app.games_dir, "MyGame_data/exefs/main.npdm");
             work = snx_path_join(app.data_dir, "work");
             memset(meta, 0, sizeof meta); /* an NPDM whose ACI0 at 0x80 gives the game its title ID */
             memcpy(meta, "META", 4);
             meta[0x70] = 0x80;
             meta[0x74] = 0x20;
             memcpy(meta + 0x80, "ACI0", 4);
-            for (i = 0; i < 8; ++i) meta[0x90 + i] = (unsigned char)(0x0100DA801624E000ull >> (8 * i));
+            for (i = 0; i < 8; ++i) meta[0x90 + i] = (unsigned char)(0x0100ABCD12345000ull >> (8 * i));
             line = snx_dirname(npdm);
             assert(!snx_mkdirs(work) && !snx_mkdirs(loose_data) && !snx_mkdirs(line) && !snx_write_file(loose, "", 0));
             {
@@ -4868,7 +4868,7 @@ int main(int argc, char** argv) {
             lines[2][0] = snx_strdup(loose);
             lines[2][1] = snx_format("%s/" LONG "/", app.games_dir);
             lines[3][0] = snx_strdup(named);
-            lines[3][1] = snx_format("%s/0100DA801624E000/", app.games_dir);
+            lines[3][1] = snx_format("%s/0100ABCD12345000/", app.games_dir);
             lines[4][0] = snx_path_join(app.drivers, "games"); /* a portable copy's games/ beside the program */
             lines[4][1] = snx_format("%s/.scarletnx/games", app.drivers);
             left_behind(&app);

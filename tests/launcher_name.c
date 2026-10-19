@@ -9,7 +9,7 @@ int main(void) {
     assert(snx_launcher_name("scarletnx") && snx_launcher_name("scarletnx-switch"));
     assert(snx_launcher_name("ScarletNX-x86_64") && snx_launcher_name("SCARLETNX"));
     assert(snx_launcher_name("scarletnx.real"));
-    assert(!snx_launcher_name("Catherine") && !snx_launcher_name("scarlet") && !snx_launcher_name(""));
+    assert(!snx_launcher_name("MyGame") && !snx_launcher_name("scarlet") && !snx_launcher_name(""));
     assert(!snx_launcher_name("scarletnxgame") && !snx_launcher_name("my scarletnx"));
     puts("launcher names passed");
     return 0;

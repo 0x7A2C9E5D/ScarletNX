@@ -259,6 +259,7 @@ matching `Game_code.so/.dll`, in the data folder's `games/` ([USAGE](USAGE.md#fo
 
 CPM uses [pinned sources](../cmake/dependencies.cmake) and a shared `.cache/cpm` cache. Archive downloads are
 checked by SHA-256. Offline configuration needs the matching sources already in the cache. Cached sources stay unmodified: FFmpeg's patch goes on a copy in the build tree.
+With tests on (`BUILD_TESTING`, the default) and the runtime, libvpx's VP9 test vectors download there too ([tests](../tests/CMakeLists.txt)).
 Override via CMake/env `CPM_SOURCE_CACHE`. SDL3 uses CPM's system-package discovery with a pinned static
 source fallback. Use `-DCPM_DOWNLOAD_SDL3=ON` to request the bundled source build.
 

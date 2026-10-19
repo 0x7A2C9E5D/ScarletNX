@@ -99,9 +99,9 @@ static unsigned checks, failures;
     } while (0)
 
 enum { SNX_KCT_THREADS = 4 };
-/* the host: 12 CPUs, as the machine Link's Awakening stopped on. core_pin's last move, the last one of each test
-   thread (snx_kct_who, which the host threads below set; the test's own host thread's is slot SNX_KCT_THREADS), and
-   how many there were */
+/* the host: 12 CPUs, as the machine a game's job worker stopped on (kernel/thread.c). core_pin's last move, the last
+   one of each test thread (snx_kct_who, which the host threads below set; the test's own host thread's is slot
+   SNX_KCT_THREADS), and how many there were */
 static int snx_kct_host[256] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, snx_kct_nhost = 12;
 static char snx_kct_moved[256], snx_kct_moved_by[SNX_KCT_THREADS + 1][256];
 static int snx_kct_moves;

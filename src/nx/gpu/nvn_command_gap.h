@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* What a span of Maxwell methods writes, checked against packets captured from Tears of the Kingdom
+/* What a span of Maxwell methods writes, checked against packets captured from a game
    (tests/nvn_command_gap.c). A "gap" is the words an NVN command buffer holds between two calls the investigation
    observed (docs/NVN_HLE.md): inlined NVN writes them. "The caller must stage" means a user that wants to replay the
    span instead of decoding it has to apply those writes itself. Only the tests build this today */

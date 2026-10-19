@@ -3,9 +3,9 @@
    Ported from QEMU (target/arm/tcg/translate-a64.c, vec_helper.c, helper-a64.c), LGPL-2.1-or-later:
    Copyright (c) 2013 Alexander Graf <agraf@suse.de>
    Copyright (c) 2018 Linaro */
-/* AdvSIMD data processing for snx_simd (cpu_helpers.c): every ARMv8.0 encoding of the vector and scalar groups,
-   lane by lane in plain C. It is the interpreter's SIMD and the IR's fallback for the words its emitters don't
-   inline (ir_simd.c), so allocation matters as much as results: an unallocated word returns 0 (UNDEFINED), as the
+/* AdvSIMD data processing for the C reference interpreter (SNX_A64_REFERENCE): every ARMv8.0 encoding of the vector
+   and scalar groups, lane by lane in plain C. The LLVM backend lowers the same words directly (ir_neon_*.inc), so
+   this is test-only. Allocation matters as much as results: an unallocated word returns 0 (UNDEFINED), as the
    emitters decide it. FP lanes go through the raw-bit FP of fp.c with the guest FPCR, and saturation sets FPSR.QC. */
 
 #define FPSR_QC (1u << 27)

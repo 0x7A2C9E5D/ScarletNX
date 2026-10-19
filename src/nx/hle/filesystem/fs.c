@@ -7,6 +7,7 @@
 #include "nx/hle/filesystem/fs.h"
 #include "nx/hle/filesystem/fs_tree.h"
 #include "nx/runtime/main.h"
+#include "nx/runtime/options.h"
 #include "nx/hle/services/services.h"
 #include "nx/hle/services/services_int.h"
 #include "nx/hle/kernel/ipc.h"
@@ -92,12 +93,12 @@ static void dump_exit(void* data) {
 }
 
 /* Extract game container off: a data folder without an ExeFS of its own reads its ExeFS and RomFS from the dump the
-   game's folder links to, <folder>/<name>.source beside <name>_data, mapped read-only for the whole run. Nothing of
-   it is written anywhere. The keys are where the driver finds them, in the data folder games/ is in or in ~/.switch.
-   At startup, under tree.lock */
+   game was made from, mapped read-only for the whole run: source= in its .ini, else the dump <folder>/<name>.source
+   beside <name>_data links to, as older versions recorded it. Nothing of it is written anywhere. The keys are where
+   the driver finds them, in the data folder games/ is in or in ~/.switch. At startup, under tree.lock */
 static void dump_open(void) {
     FsNode* node;
-    char *data, *link, *folder, *games, *repo;
+    char *data, *source, *folder, *games, *repo;
     size_t n = strlen(g_datadir);
     if (!fs_tree_lookup(&g_hle.fs.tree, NULL, "exefs", &node)) return;
     data = snx_strdup(g_datadir);
@@ -107,27 +108,30 @@ static void dump_open(void) {
         return;
     }
     data[n - 5] = 0;
-    link = snx_format("%s.source", data);
+    source = g_opt_source[0] ? snx_strdup(g_opt_source) : snx_format("%s.source", data);
+    folder = snx_dirname(data);
     free(data);
-    if (!snx_is_file(link)) {
-        free(link);
+    if (!snx_is_file(source)) {
+        if (g_opt_source[0]) WARN("fs: the game's dump %s, source in its settings, is not there\n", source);
+        free(source);
+        free(folder);
         return;
     }
-    folder = snx_dirname(link);
     games = snx_dirname(folder);
     repo = snx_dirname(games);
     snx_hac_on_exit(dump_exit, NULL);
-    if (snx_dump_open(&g_hle.fs.dump, link, NULL, NULL, NULL, repo, 0))
-        fatal("Could not read the game's dump %s, which it reads its files from: the line before says why", link);
-    if (plat_file_map_sized(&g_hle.fs.dmap, link, snx_file_size(link)) ||
+    if (snx_dump_open(&g_hle.fs.dump, source, NULL, NULL, NULL, repo, 0))
+        fatal("Could not read the game's dump %s, which it reads its files from: the line before says why", source);
+    if (plat_file_map_sized(&g_hle.fs.dmap, source, snx_file_size(source)) ||
         snx_hac_map(g_hle.fs.dump.hac, g_hle.fs.dump.base, g_hle.fs.dmap.data, g_hle.fs.dmap.size))
-        fatal("Could not map the game's dump %s", link);
+        fatal("Could not map the game's dump %s", source);
     g_hle.fs.dfs = snx_dump_fs(&g_hle.fs.dump);
-    if (!g_hle.fs.dfs) fatal("Could not read the game's program in its dump %s: the line before says why", link);
+    if (!g_hle.fs.dfs) fatal("Could not read the game's program in its dump %s: the line before says why", source);
     snx_hac_on_exit(NULL, NULL);
     pm_init(&g_hle.fs.dlock);
-    LOG("fs: ExeFS and RomFS read from the dump %s (%.1f MB mapped)\n", link, (double)g_hle.fs.dmap.size / 1048576.0);
-    free(link);
+    LOG("fs: ExeFS and RomFS read from the dump %s (%.1f MB mapped)\n", source,
+        (double)g_hle.fs.dmap.size / 1048576.0);
+    free(source);
     free(folder);
     free(games);
     free(repo);
@@ -1168,7 +1172,7 @@ static int nn_fssrv_sf_IFileSystemProxy_OpenDataStorageByCurrentProcess(SvcObj* 
     *storage = nn_fssrv_sf_IStorage_new();
     R_SUCCEED();
 }
-/* nn::fs::QueryMountRomCacheSize(size_t*, int) and MountRom's program index overloads (Metroid Prime 4).
+/* nn::fs::QueryMountRomCacheSize(size_t*, int) and MountRom's program index overloads, which a game calls.
    Index 0 is this program, the only one GetProgramIndexForAccessLog reports. Any other index names a program
    the application doesn't have: TargetNotFound, never a success without a storage, which the SDK wraps as a
    storage with a null backend and calls through. */

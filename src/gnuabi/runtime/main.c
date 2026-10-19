@@ -28,10 +28,7 @@ static const char usage[] =
     "                         otherwise, as with QEMU's -L. The default is linux/ of the data folder games/ is\n"
     "                         in; SNX_LINUX_SYSROOT names another\n"
     "  --isolated             No host files: /tmp in memory, the program alone as /program\n"
-    "  --jit                  Compile the guest's code as it runs (the default)\n"
-    "  --aot                  Compile the program before it starts with the host compiler, and what it maps\n"
-    "                         later as it runs\n"
-    "  --cc=COMPILER          The host compiler of --aot\n"
+    "  --jit                  Compile the guest's code as it runs (the only mode)\n"
     "  --jit-cache=DIR        Where compiled code is kept between runs (default: the user's cache folder);\n"
     "  --no-jit-cache         keep none\n"
     "  --jit-opt=LEVEL        The JIT's LLVM optimization level: 0, 1, 2 (the default), 3, s or z\n"
@@ -118,7 +115,7 @@ static char* default_sysroot(const char* argv0) {
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
-    const char *cc = NULL, *argv0 = NULL, *cache_option = NULL, *opt = "2";
+    const char *argv0 = NULL, *cache_option = NULL, *opt = "2";
     char *sysroot = NULL, *cache = NULL;
     char** changes = calloc((size_t)argc + 1, sizeof *changes);
     size_t change_count = 0;
@@ -126,7 +123,7 @@ int main(int argc, char** argv) {
     int adopted_fd[64], adopted_count = 0;
     unsigned long long adopted_host[64];
     const char* cwd = NULL;
-    int first = 1, mode = GNU_JIT, isolated = 0, no_cache = 0, verbose = 0;
+    int first = 1, isolated = 0, no_cache = 0, verbose = 0;
     if (!changes) return 2;
     while (first < argc && argv[first][0] == '-') {
         const char* option = argv[first];
@@ -139,10 +136,7 @@ int main(int argc, char** argv) {
             first++;
             break;
         }
-        if (!strncmp(option, "--cc=", 5)) {
-            cc = option + 5;
-            mode = GNU_AOT;
-        } else if (!strncmp(option, "--sysroot=", 10)) {
+        if (!strncmp(option, "--sysroot=", 10)) {
             free(sysroot);
             sysroot = snx_absolute(option + 10);
         } else if (!strcmp(option, "-L") && value) {
@@ -151,11 +145,9 @@ int main(int argc, char** argv) {
             first++;
         } else if (!strcmp(option, "--isolated"))
             isolated = 1;
-        else if (!strcmp(option, "--jit"))
-            mode = GNU_JIT;
-        else if (!strcmp(option, "--aot"))
-            mode = GNU_AOT;
-        else if (!strncmp(option, "--jit-cache=", 12))
+        else if (!strcmp(option, "--jit")) {
+            /* the only mode */
+        } else if (!strncmp(option, "--jit-cache=", 12))
             cache_option = option + 12;
         else if (!strcmp(option, "--no-jit-cache"))
             no_cache = 1;
@@ -202,7 +194,7 @@ int main(int argc, char** argv) {
     process = calloc(1, sizeof *process);
     if (!process) return 2;
     char error[1024] = {0};
-    if (gnu_jit_init(&process->jit, mode, cc, cache, error, sizeof error)) {
+    if (gnu_jit_init(&process->jit, cache, error, sizeof error)) {
         fprintf(stderr, "scarletnx-gnuabi: %s\n", error);
         return 2;
     }
@@ -222,16 +214,13 @@ int main(int argc, char** argv) {
     {
         const char* forward[8];
         int n = 0;
-        char *root_option = sysroot ? snx_format("--sysroot=%s", sysroot) : NULL, *cc_option = NULL,
-             *cache_forward = NULL, *opt_option = snx_format("--jit-opt=%s", opt);
+        char *root_option = sysroot ? snx_format("--sysroot=%s", sysroot) : NULL, *cache_forward = NULL,
+             *opt_option = snx_format("--jit-opt=%s", opt);
         forward[n++] = isolated ? "--isolated" : root_option ? root_option : "--isolated";
-        forward[n++] = mode == GNU_AOT ? "--aot" : "--jit";
-        if (cc) forward[n++] = cc_option = snx_format("--cc=%s", cc);
         forward[n++] = cache ? (cache_forward = snx_format("--jit-cache=%s", cache)) : "--no-jit-cache";
         forward[n++] = opt_option;
         gnu_spawn_set_options(n, forward);
         free(root_option);
-        free(cc_option);
         free(cache_forward);
         free(opt_option);
     }

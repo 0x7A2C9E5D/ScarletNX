@@ -58,11 +58,9 @@ static V rx32(SnxIr* ir, unsigned n) { return ir_u32(ir, ir_rx(ir, n)); }
 static V x32(SnxIr* ir, unsigned n) { return ir_u32(ir, ir_x(ir, n)); }
 
 /* adds32/adds64(c,a,b,cin), subs32/subs64(c,a,b) */
-static V adds(SnxIr* ir, int wide, V a, V b, V cin) {
-    return call4(ir, wide ? SNX_IR_ADDS64 : SNX_IR_ADDS32, ir->c, a, b, cin);
-}
-static V subs(SnxIr* ir, int wide, V a, V b) { return call3(ir, wide ? SNX_IR_SUBS64 : SNX_IR_SUBS32, ir->c, a, b); }
-static V cond_ok(SnxIr* ir, unsigned cond) { return call2(ir, SNX_IR_COND_OK, ir->c, i32c(ir, cond)); }
+static V adds(SnxIr* ir, int wide, V a, V b, V cin) { return ir_flags_adds(ir, wide ? 64 : 32, a, b, cin); }
+static V subs(SnxIr* ir, int wide, V a, V b) { return ir_flags_subs(ir, wide ? 64 : 32, a, b); }
+static V cond_ok(SnxIr* ir, unsigned cond) { return ir_flags_cond(ir, cond); }
 static V truth(SnxIr* ir, V v) { return LLVMBuildICmp(B, LLVMIntNE, v, LLVMConstInt(LLVMTypeOf(v), 0, 0), ""); }
 
 /* snx_decode_bitmask (helpers/integer.c), evaluated here: its arguments are fields of the constant word, so the
@@ -134,14 +132,14 @@ static void logic_imm(SnxIr* ir, SnxU32 w, size_t index) {
         /* (u32)RX(rn) & mask: the u32 widens to the u64 mask */
         r = ir_u32(ir, logic_op(ir, opc, ir_u64(ir, rx32(ir, rn)), mask));
         if (opc == 3) {
-            call2(ir, SNX_IR_LOGIC32, ir->c, r);
+            ir_flags_logic(ir, r, 32);
             ir_setx(ir, rd, ir_u64(ir, r));
         } else
             ir_set_x(ir, rd, ir_u64(ir, r));
     } else {
         r = logic_op(ir, opc, ir_rx(ir, rn), mask);
         if (opc == 3) {
-            call2(ir, SNX_IR_LOGIC64, ir->c, r);
+            ir_flags_logic(ir, r, 64);
             ir_setx(ir, rd, r);
         } else
             ir_set_x(ir, rd, r);
@@ -327,12 +325,17 @@ static void ldstp(SnxIr* ir, SnxU32 w, size_t index) {
         if (!l) {
             ir_wrq(ir, a, ir_cpu(ir, ir_off_v(rt)));
             ir_wrq(ir, a2, ir_cpu(ir, ir_off_v(rt2)));
-        } else { /* V128 q1_,q2_; RDQ(q1_,a_); RDQ(q2_,a_+16); c->v[rt]=q1_; c->v[rt2]=q2_; */
-            V q1 = ir_local(ir, ir_v128(ir)), q2 = ir_local(ir, ir_v128(ir));
-            ir_rdq(ir, q1, a);
-            ir_rdq(ir, q2, a2);
-            LLVMBuildMemCpy(B, ir_cpu(ir, ir_off_v(rt)), 1, q1, 1, i64c(ir, 16));
-            LLVMBuildMemCpy(B, ir_cpu(ir, ir_off_v(rt2)), 1, q2, 1, i64c(ir, 16));
+        } else {
+            /* Complete both guest loads before either register write: LD1/LD2
+               may fault, and Rt/Rt2 may name the same architectural register. */
+            V q1 = ir_rd_bytes(ir, a, 16);
+            V q2 = ir_rd_bytes(ir, a2, 16);
+            V s1 = LLVMBuildStore(B, q1, ir_cpu(ir, ir_off_v(rt)));
+            V s2 = LLVMBuildStore(B, q2, ir_cpu(ir, ir_off_v(rt2)));
+            LLVMSetAlignment(s1, 1); /* V registers start at CPU+280, not 16-byte aligned. */
+            LLVMSetAlignment(s2, 1);
+            ir_tag_cpu(ir, s1);
+            ir_tag_cpu(ir, s2);
         }
     } else if (!l) {
         ir_wr(ir, a, bits, v ? ir_vd(ir, rt, 0) : ir_rx(ir, rt));
@@ -411,13 +414,13 @@ static void logic_reg(SnxIr* ir, SnxU32 w, size_t index) {
         operand = call3(ir, SNX_IR_SHF32, rx32(ir, rm), shift, amount);
         if (n) operand = LLVMBuildNot(B, operand, "");
         r = logic_op(ir, opc, rx32(ir, rn), operand);
-        if (opc == 3) call2(ir, SNX_IR_LOGIC32, ir->c, r);
+        if (opc == 3) ir_flags_logic(ir, r, 32);
         ir_setx(ir, rd, ir_u64(ir, r));
     } else {
         operand = call3(ir, SNX_IR_SHF64, ir_rx(ir, rm), shift, amount);
         if (n) operand = LLVMBuildNot(B, operand, "");
         r = logic_op(ir, opc, ir_rx(ir, rn), operand);
-        if (opc == 3) call2(ir, SNX_IR_LOGIC64, ir->c, r);
+        if (opc == 3) ir_flags_logic(ir, r, 64);
         ir_setx(ir, rd, r);
     }
 }
@@ -470,7 +473,7 @@ static void adc(SnxIr* ir, SnxU32 w, size_t index) {
     if (!sf) {
         a = rx32(ir, rn);
         b = rx32(ir, rm);
-        cf = ir_cpu_load(ir, ir->t_i32, ir_off_cf());
+        cf = ir_flag_read(ir, 2);
         if (!s) {
             if (op) b = LLVMBuildNot(B, b, "");
             ir_setx(ir, rd, ir_u64(ir, LLVMBuildAdd(B, LLVMBuildAdd(B, a, b, ""), cf, "")));
@@ -479,7 +482,7 @@ static void adc(SnxIr* ir, SnxU32 w, size_t index) {
     } else {
         a = ir_rx(ir, rn);
         b = ir_rx(ir, rm);
-        cf = ir_cpu_load(ir, ir->t_i32, ir_off_cf());
+        cf = ir_flag_read(ir, 2);
         if (!s) {
             if (op) b = LLVMBuildNot(B, b, "");
             ir_setx(ir, rd, LLVMBuildAdd(B, LLVMBuildAdd(B, a, b, ""), ir_u64(ir, cf), ""));
@@ -507,7 +510,7 @@ static void ccmp(SnxIr* ir, SnxU32 w, size_t index) {
         adds(ir, sf, a, b, i32c(ir, 0));
     LLVMBuildBr(B, done);
     LLVMPositionBuilderAtEnd(B, flags);
-    call2(ir, SNX_IR_SET_NZCV, ir->c, i32c(ir, F(0, 4)));
+    ir_flags_set_nzcv(ir, i32c(ir, F(0, 4)));
     LLVMBuildBr(B, done);
     LLVMPositionBuilderAtEnd(B, done);
 }
@@ -703,94 +706,70 @@ static int dp3(SnxIr* ir, SnxU32 w, size_t index) {
 
 /* ---- dispatch ---- */
 
-int snx_ir_plain(SnxIr* ir, SnxU32 w, SnxU64 pc, const SnxA64Case* instruction) {
-    size_t index;
-    const SnxA64Pattern* pattern = snx_a64_case_pattern(instruction, &index);
-    const char* name;
+int snx_ir_plain(SnxIr* ir, SnxU32 w, SnxU64 pc, const SnxA64Decoded* decoded) {
+    const SnxA64Pattern* pattern = decoded->pattern;
+    size_t index = decoded->index;
     if (!pattern) return 0;
     /* snx_a64_static_step and codegen.c try the SIMD shortcuts first, for every PLAIN word */
     if (snx_ir_fast_simd(ir, w)) return 1;
-    if (!instruction->first[0]) return 1; /* an empty body: PRFM, MSR (immediate), ... */
-    name = pattern->name;
-    if (!strcmp(name, "ADR"))
-        adr(ir, w, pc, 0);
-    else if (!strcmp(name, "ADRP"))
-        adr(ir, w, pc, 1);
-    else if (!strcmp(name, "ADDSUB_IMM"))
-        addsub_imm(ir, w, index);
-    else if (!strcmp(name, "LOGIC_IMM"))
-        logic_imm(ir, w, index);
-    else if (!strcmp(name, "MOVW"))
-        movw(ir, w, index);
-    else if (!strcmp(name, "BITFIELD"))
-        bitfield(ir, w, index);
-    else if (!strcmp(name, "EXTR"))
-        extr(ir, w, index);
-    else if (!strcmp(name, "HINT"))
-        hint(ir, w);
-    else if (!strcmp(name, "CLREX"))
-        ir_cpu_store(ir, i32c(ir, 0), ir_off_excl_on());
-    else if (!strcmp(name, "BARRIER"))
-        ir_fence(ir);
-    else if (!strcmp(name, "SYS"))
-        sys(ir, w);
-    else if (!strcmp(name, "MRS"))
-        mrs(ir, w);
-    else if (!strcmp(name, "MSR"))
-        msr(ir, w);
-    else if (!strcmp(name, "LDST_UIMM"))
-        ldst_uimm(ir, w, index);
-    else if (!strcmp(name, "LDST_IMM9"))
-        ldst_imm9(ir, w, index);
-    else if (!strcmp(name, "LDST_REG"))
-        ldst_reg(ir, w, index);
-    else if (!strcmp(name, "LDR_LIT"))
-        ldr_lit(ir, w, pc, index);
-    else if (!strcmp(name, "LDSTP"))
-        ldstp(ir, w, index);
-    else if (!strcmp(name, "LDSTX"))
-        ldstx(ir, w, index);
-    else if (!strcmp(name, "LOGIC_REG"))
-        logic_reg(ir, w, index);
-    else if (!strcmp(name, "ADDSUB_SREG"))
-        addsub_sreg(ir, w, index);
-    else if (!strcmp(name, "ADDSUB_EXT"))
-        addsub_ext(ir, w, index);
-    else if (!strcmp(name, "ADC"))
-        adc(ir, w, index);
-    else if (!strcmp(name, "CCMP"))
-        ccmp(ir, w, index);
-    else if (!strcmp(name, "CSEL"))
-        csel(ir, w, index);
-    else if (!strcmp(name, "DP1"))
-        return dp1(ir, w, index);
-    else if (!strcmp(name, "DP2"))
-        return dp2(ir, w, index);
-    else if (!strcmp(name, "DP3"))
-        return dp3(ir, w, index);
-    else if (!strncmp(name, "SIMD", 4))
-        return snx_ir_more_simd(ir, w) || snx_ir_simd_plain(ir, w, pc, pattern, index);
-    else
-        return snx_ir_fp_plain(ir, w, pc, pattern, index);
-    return 1;
+    if (!decoded->instruction->first[0]) return 1; /* an empty body: PRFM, MSR (immediate), ... */
+    switch (pattern->kind) {
+        case SNX_A64_ADR: adr(ir, w, pc, 0); return 1;
+        case SNX_A64_ADRP: adr(ir, w, pc, 1); return 1;
+        case SNX_A64_ADDSUB_IMM: addsub_imm(ir, w, index); return 1;
+        case SNX_A64_LOGIC_IMM: logic_imm(ir, w, index); return 1;
+        case SNX_A64_MOVW: movw(ir, w, index); return 1;
+        case SNX_A64_BITFIELD: bitfield(ir, w, index); return 1;
+        case SNX_A64_EXTR: extr(ir, w, index); return 1;
+        case SNX_A64_HINT: hint(ir, w); return 1;
+        case SNX_A64_CLREX: ir_cpu_store(ir, i32c(ir, 0), ir_off_excl_on()); return 1;
+        case SNX_A64_BARRIER: ir_fence(ir); return 1;
+        case SNX_A64_SYS: sys(ir, w); return 1;
+        case SNX_A64_MRS: mrs(ir, w); return 1;
+        case SNX_A64_MSR: msr(ir, w); return 1;
+        case SNX_A64_LDST_UIMM: ldst_uimm(ir, w, index); return 1;
+        case SNX_A64_LDST_IMM9: ldst_imm9(ir, w, index); return 1;
+        case SNX_A64_LDST_REG: ldst_reg(ir, w, index); return 1;
+        case SNX_A64_LDR_LIT: ldr_lit(ir, w, pc, index); return 1;
+        case SNX_A64_LDSTP: ldstp(ir, w, index); return 1;
+        case SNX_A64_LDSTX: ldstx(ir, w, index); return 1;
+        case SNX_A64_LOGIC_REG: logic_reg(ir, w, index); return 1;
+        case SNX_A64_ADDSUB_SREG: addsub_sreg(ir, w, index); return 1;
+        case SNX_A64_ADDSUB_EXT: addsub_ext(ir, w, index); return 1;
+        case SNX_A64_ADC: adc(ir, w, index); return 1;
+        case SNX_A64_CCMP: ccmp(ir, w, index); return 1;
+        case SNX_A64_CSEL: csel(ir, w, index); return 1;
+        case SNX_A64_DP1: return dp1(ir, w, index);
+        case SNX_A64_DP2: return dp2(ir, w, index);
+        case SNX_A64_DP3: return dp3(ir, w, index);
+        case SNX_A64_SIMD_LDST:
+        case SNX_A64_SIMD_LDST1:
+        case SNX_A64_SIMD_DP:
+        case SNX_A64_SIMD_DP2:
+            if (snx_ir_more_simd(ir, w)) return 1;
+            /* an unallocated encoding: the C reference's snx_simd returns 0, its template calls UNDEF() and the
+               step continues to the next instruction, so fault here and carry on the same way */
+            ir_undef(ir, pc, w);
+            return 1;
+        default: return snx_ir_fp_plain(ir, w, pc, pattern, index);
+    }
 }
 
-LLVMValueRef snx_ir_flow_operand(SnxIr* ir, SnxU32 w, SnxU64 pc, const SnxA64Case* instruction) {
-    size_t index;
-    const SnxA64Pattern* pattern = snx_a64_case_pattern(instruction, &index);
-    const char* name = pattern ? pattern->name : "";
+LLVMValueRef snx_ir_flow_operand(SnxIr* ir, SnxU32 w, SnxU64 pc, const SnxA64Decoded* decoded) {
+    size_t index = decoded->index;
+    SnxA64Kind kind = decoded->pattern ? decoded->pattern->kind : SNX_A64_UNKNOWN;
     unsigned rt = F(0, 5);
     (void)pc;
-    if (!strcmp(name, "BCOND")) return truth(ir, cond_ok(ir, F(0, 4)));
-    if (!strcmp(name, "CBZ")) {
+    if (kind == SNX_A64_BCOND) return truth(ir, cond_ok(ir, F(0, 4)));
+    if (kind == SNX_A64_CBZ) {
         V value = index & 2 ? ir_rx(ir, rt) : rx32(ir, rt);
         return LLVMBuildICmp(B, index & 1 ? LLVMIntNE : LLVMIntEQ, value, LLVMConstInt(LLVMTypeOf(value), 0, 0), "");
     }
-    if (!strcmp(name, "TBZ")) {
+    if (kind == SNX_A64_TBZ) {
         V bit =
             LLVMBuildAnd(B, LLVMBuildLShr(B, ir_rx(ir, rt), i64c(ir, (F(31, 1) << 5) | F(19, 5)), ""), i64c(ir, 1), "");
         return LLVMBuildICmp(B, index ? LLVMIntNE : LLVMIntEQ, bit, i64c(ir, 0), "");
     }
-    if (!strcmp(name, "BR") || !strcmp(name, "BLR") || !strcmp(name, "RET")) return ir_rx(ir, F(5, 5));
+    if (kind == SNX_A64_BR || kind == SNX_A64_BLR || kind == SNX_A64_RET) return ir_rx(ir, F(5, 5));
     return i32c(ir, F(5, 16)); /* SVC, BRK */
 }

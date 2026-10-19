@@ -244,8 +244,8 @@ static int wait_state(SvcObj* o, u32 state, int ms) {
     return 0;
 }
 #define LDN_RC(desc) RC(203, desc)
-/* a local communication id, 0x0100152000022000, as the raw data carries it */
-static const u8 lcid[8] = {0x00, 0x20, 0x02, 0x00, 0x20, 0x15, 0x00, 0x01};
+/* a local communication id, 0x0100ABCD12345000, as the raw data carries it */
+static const u8 lcid[8] = {0x00, 0x50, 0x34, 0x12, 0xCD, 0xAB, 0x00, 0x01};
 
 /* ldn=room: a console in an Eden room (fake_room.c) initializes at the room's address and hosts; a station of the room
    finds it and joins; the game's datagram sockets go through the room; at the exit ldn_exit closes the network before
@@ -529,21 +529,21 @@ int main(void) {
     request(&r, 202);                    /* CreateNetwork(CreateNetworkConfig) */
     r.raw[0] = 1;                        /* security mode: retail */
     strcpy((char*)r.raw + 0x44, "Host");
-    memcpy(r.raw + 0x78, lcid, 8); /* local communication id 0x0100152000022000 */
+    memcpy(r.raw + 0x78, lcid, 8); /* local communication id 0x0100ABCD12345000 */
     r.raw[0x78 + 0xa] = 3;         /* scene id */
     r.raw[0x78 + 0x12] = 8;        /* node count max */
     r.raw[0x78 + 0x14] = 4;        /* version */
     CHECK(call(a, &r) == 0 && get_state(a) == 3 && took_signal(ev_a, 0));
     CHECK(latest_update(a, &info, updates, 8) == 0);
     CHECK(info.node_count == 1 && info.nodes[0].is_connected && !strcmp((char*)info.nodes[0].user_name, "Host"));
-    CHECK(info.local_communication_id == 0x0100152000022000ull && info.scene_id == 3 && info.channel == 6);
+    CHECK(info.local_communication_id == 0x0100ABCD12345000ull && info.scene_id == 3 && info.channel == 6);
     CHECK(info.ssid_length == 32 && info.nodes[0].version == 4 && info.node_count_max == 8);
     CHECK(info.nodes[0].ipv4[0] == 1 && info.nodes[0].ipv4[3] == 127 && info.nodes[0].mac[0] == 2);
     CHECK(updates[0] == 1 && updates[1] == 0); /* node 0 connected */
     CHECK(latest_update(a, &info, updates, 2) == 0 && updates[0] == 0);
     CHECK(latest_update(a, &info, updates, 9) == LDN_RC(50)); /* more nodes than there are */
     request(&r, 206);                                         /* SetAdvertiseData */
-    memcpy(GP(BUF2), "mk8d", 4);
+    memcpy(GP(BUF2), "game", 4);
     in_auto(&r, BUF2, 4);
     CHECK(call(a, &r) == 0);
     request(&r, 206);
@@ -562,8 +562,8 @@ int main(void) {
     CHECK(call(b, &r) == 0 && r.c.out_size == 4);
     CHECK((i16)reply32(&r, 0) == 1);
     memcpy(found, GP(BUF0), sizeof found);
-    CHECK(found[0].local_communication_id == 0x0100152000022000ull && found[0].scene_id == 3);
-    CHECK(found[0].advertise_data_size == 4 && !memcmp(found[0].advertise_data, "mk8d", 4));
+    CHECK(found[0].local_communication_id == 0x0100ABCD12345000ull && found[0].scene_id == 3);
+    CHECK(found[0].advertise_data_size == 4 && !memcmp(found[0].advertise_data, "game", 4));
     CHECK(!strcmp((char*)found[0].nodes[0].user_name, "Host") && found[0].node_count == 1);
     request(&r, 102);
     r.raw[8] = 1; /* another game's id */
@@ -594,7 +594,7 @@ int main(void) {
     CHECK(info.node_count == 2 && !strcmp((char*)info.nodes[0].user_name, "Host") &&
           !strcmp((char*)info.nodes[1].user_name, "Station"));
     CHECK(updates[0] == 1 && updates[1] == 1 && updates[2] == 0);
-    CHECK(info.advertise_data_size == 4 && !memcmp(info.advertise_data, "mk8d", 4));
+    CHECK(info.advertise_data_size == 4 && !memcmp(info.advertise_data, "game", 4));
     request(&r, 4); /* GetSecurityParameter: the session id the host made */
     CHECK(call(b, &r) == 0 && r.c.out_size == 0x20 && !memcmp(r.c.out + 16, info.session_id, 16));
     CHECK(call(b, &r) == 0); /* and the same once more */

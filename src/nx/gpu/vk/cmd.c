@@ -152,7 +152,7 @@ void vk_cmd_init(void) {
    again (with a quarter to spare, so it doesn't go back and forth). The rings are made when there is room and kept,
    and the BAR window's budget shrinks under them when the desktop takes more of it: 246 MiB on an RTX 2080 without
    resizable BAR, of which the driver left this process 47 to 111 while its rings held 134 to 198. Past the budget the
-   driver moves the memory, and each CPU write to it faults: Tears of the Kingdom crawled at 10 frames a second for
+   driver moves the memory, and each CPU write to it faults: one game crawled at 10 frames a second for
    twenty seconds, its GPU thread half in the kernel. A ring dropped here is made again under the budget
    (ring_alloc's VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT), in host memory when the window is full */
 static int ring_misplaced(const Ring* r, const VmaBudget* b) {
@@ -299,7 +299,7 @@ u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation*
 u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off) { return vk_stage_output(size, align, buf, off, NULL); }
 
 /* The staging ring can be device-local memory behind the BAR, where every CPU read crosses PCIe uncached: comparing
-   a frame's storage results there cost Tears of the Kingdom most of its GPU thread. The frame's results are copied
+   a frame's storage results there cost one game most of its GPU thread. The frame's results are copied
    on the GPU into host-cached memory instead, and read from there. */
 u8* vk_stage_back(u64 size, VkBuffer* buf, u64* off, VmaAllocation* mem) {
     vk_cmd();

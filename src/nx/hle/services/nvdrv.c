@@ -229,7 +229,7 @@ static void gmap_cut(u64 gva, u64 size) {
     }
 }
 /* GPU VA for ALLOC_SPACE and MAP_BUFFER_EX: first fit from 0x04_0000_0000 to the end of the 40-bit space the gmmu
-   covers, in 64K units. Not bounded to the big page region GET_VA_REGIONS reports: Catherine maps more than its
+   covers, in 64K units. Not bounded to the big page region GET_VA_REGIONS reports: a game maps more than its
    0x1BFFF big pages (its NVN init maps 0x20000000 bytes past it) and checks nothing against the regions. Free ranges
    are kept sorted and merged */
 #define VA_BASE 0x0400000000ull
@@ -981,7 +981,7 @@ static u32 gpu_submit_gpfifo(NvFile* f, u32 cmd, u8* d, u32 n, const u8* extra, 
     if (flags & 2) host = 2;
     /* the fence promises every increment: with 0x100 the entries make fval of them themselves, and the job adds only
        the host's after them, as Ryujinx's SubmitGpfifo does. Adding fval there too ran the syncpoint ahead of every
-       later fence, so NVN's waits returned at once and TotK's main thread spun on the semaphores behind them */
+       later fence, so NVN's waits returned at once and a game's main thread spun on the semaphores behind them */
     incs = host + ((flags & 0x100) ? fval : 0);
     sp = gpu_channel_syncpt(f);
     /* the promise and the queueing in one hold, so promises reach the GPU thread in order */
@@ -1083,7 +1083,7 @@ static void nv_release(NvFile* old, NvEvent* slots) {
 /* the (device, ioctl) pairs logged already: each is logged on its first use. The size field (bits 16-29) is left out
    of the pair: a channel's submit carries its entry count there, and every count was logged as a new ioctl. With the
    table full, nothing new is logged: it said "first use" for every pair it couldn't hold, which logged nearly every
-   submit (a lock and a log write a frame in Super Mario Odyssey) */
+   submit (a lock and a log write a frame in one game) */
 static int nv_first_use(int dev, u32 cmd) {
     HleNvdrv* nv = &g_hle.nvdrv;
     u32 i;
