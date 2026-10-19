@@ -13,6 +13,7 @@
             return 1;                                                                                                  \
         }                                                                                                              \
     } while (0)
+#if defined(__linux__)
 /* the host's protection of the page at address, from /proc/self/maps: "rw", "r-" or "--" (absent: "") */
 static const char* host_protection(const void* address) {
     static char perms[3];
@@ -31,6 +32,7 @@ static const char* host_protection(const void* address) {
     fclose(maps);
     return perms;
 }
+#endif
 static void put16(unsigned char* p, unsigned value) {
     p[0] = (unsigned char)value;
     p[1] = (unsigned char)(value >> 8);
