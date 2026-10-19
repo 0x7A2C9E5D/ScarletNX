@@ -4,7 +4,7 @@
      snx-rtlib-gen interp OUT       the interpreter of the templates' C, for tests (tests/ldr_interp.c): no module or
                                     runtime has one any more
      snx-rtlib-gen embed IN OUT SYM the compiled rtlib object as a C array the recompiler links into each module */
-#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_emit.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

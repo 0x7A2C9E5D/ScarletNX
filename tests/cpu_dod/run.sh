@@ -13,7 +13,8 @@ actual="$("$work/reference")"
 echo "PASS original decoder fingerprint: $actual"
 
 "$CC" -std=gnu11 -O2 -Wall -Wextra -Werror -I "$root/src" \
-    "$root/tests/cpu_dod/emit.c" "$root/src/common/cpu/aarch64/a64.c" -o "$work/emit"
+    "$root/tests/cpu_dod/emit.c" "$root/src/common/cpu/aarch64/a64.c" \
+    "$root/src/common/cpu/aarch64/a64_emit.c" -o "$work/emit"
 for row in \
   'step 189a474f57ca545fb73cda63c5da59385dacd52d124fc08a9064a6e752e387cc' \
   'checked 7a617f98712a02df42a1811ff388bffaf9f9a64dc3fe8d7186e189012ef29621' \
@@ -32,7 +33,7 @@ python3 "$root/tests/llvm_dod/test_decoder.py" "$work/decoder.c"
 # Runtime C still compiles with the generated interpreter and original ABI.
 "$CC" -std=gnu11 -O0 -I "$root/src" \
     "$root/src/common/cpu/recompiler/llvm/rtlib_gen.c" "$root/src/common/cpu/aarch64/a64.c" \
-    -o "$work/rtlib_gen"
+    "$root/src/common/cpu/aarch64/a64_emit.c" -o "$work/rtlib_gen"
 "$work/rtlib_gen" interp "$work/rtlib_interp.inc"
 "$CC" -std=gnu11 -O0 -fsyntax-only -w -I "$work" -I "$root/src" \
     "$root/src/common/cpu/recompiler/llvm/rtlib.c"

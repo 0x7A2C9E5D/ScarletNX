@@ -16,6 +16,12 @@ else()
     target_link_libraries(scarletnx-common PUBLIC m)
 endif()
 
+# The C emitter and its static-step reference. Tests build modules against it; the recompiler and every game module
+# use the LLVM backend instead.
+add_library(snx_a64_reference STATIC cpu/aarch64/a64_emit.c cpu/recompiler/codegen_emit.c)
+target_compile_options(snx_a64_reference PRIVATE -fno-strict-aliasing -Wall -Wextra -Werror=missing-prototypes)
+target_link_libraries(snx_a64_reference PUBLIC scarletnx-common)
+
 # The same indexed host filesystem and shared immutable file views serve NX
 # and CTR. No guest ABI or runtime/platform dependency enters this target.
 add_library(scarletnx-filesystem STATIC filesystem/tree.c filesystem/host.c)

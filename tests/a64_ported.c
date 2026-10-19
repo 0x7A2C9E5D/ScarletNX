@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* rEden's A64 cases (a64_ported_cases.h) on the AOT step and the interpreter. Arguments: C compiler, source tree */
-#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_emit.h"
 #include "a64_ported_cases.h"
 #include <stdlib.h>
 #include <string.h>

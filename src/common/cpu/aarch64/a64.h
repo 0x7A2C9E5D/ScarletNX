@@ -111,13 +111,5 @@ const SnxA64Case* snx_a64_decode(SnxU32 word);
 const SnxA64Pattern* snx_a64_case_pattern(const SnxA64Case* instruction, size_t* index);
 const SnxA64Pattern* snx_a64_patterns(size_t* count);
 SnxU64 snx_a64_target(SnxU32 word, SnxU64 pc);
-void snx_a64_literal(FILE* out, SnxU64 value);
-void snx_a64_hex(FILE* out, SnxU64 value);
-void snx_a64_scope(FILE* out, SnxU32 word, SnxU64 pc, const SnxA64Case* instruction);
-void snx_a64_body(FILE* out, const char* body, const char* undefined);
-void snx_a64_interp(FILE* out, int step_mode);
-void snx_a64_interp_checked(FILE* out);
-void snx_a64_static_step(FILE* out, SnxU32 word, SnxU64 pc, const char* name);
-int snx_a64_fast_simd(FILE* out, SnxU32 word);
 
 #endif

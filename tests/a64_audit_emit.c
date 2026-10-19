@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Real decoder inventory and AOT/interpreter bridge for a64_audit.py. */
-#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_emit.h"
 #include <stdlib.h>
 #include <string.h>
 

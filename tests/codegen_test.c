@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Synthetic ISA/CFG/module tests. The generated ABI fixture is compiled by the
    supplied host Clang, then checks static and interpreted architectural results. */
-#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_emit.h"
 #include "common/cpu/recompiler/codegen.h"
 #include "nx/loader/codegen_view.h"
 #include <stdlib.h>

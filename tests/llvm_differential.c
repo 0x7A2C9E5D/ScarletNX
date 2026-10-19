@@ -14,7 +14,7 @@
    object for dlopen, and checks that loaded code reaches the runtime's functions and data, outside the code arena. */
 #include "common/utilities/common.h"
 #include "common/cpu/aarch64/cpu.h"
-#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_emit.h"
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/link.h"
 #include "common/cpu/recompiler/llvm/code_loader.h"

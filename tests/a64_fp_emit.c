@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* Standalone emitter used by a64_fp_diff.py. Exercise the real decoder, AOT
    shortcuts and interpreter, not a second copy of the instruction templates. */
-#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_emit.h"
 #include <stdlib.h>
 
 int main(int argc, char** argv) {

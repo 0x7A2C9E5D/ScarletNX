@@ -12,11 +12,11 @@ if(CMAKE_CROSSCOMPILING)
     set(snx_rtlib_gen "${CMAKE_CURRENT_BINARY_DIR}/snx-rtlib-gen-host")
     add_custom_command(OUTPUT "${snx_rtlib_gen}"
         COMMAND "${SNX_HOST_CC}" -O1 -w -I "${PROJECT_SOURCE_DIR}/src"
-            "${CMAKE_CURRENT_SOURCE_DIR}/rtlib_gen.c" "${snx_cpu}/a64.c"
+            "${CMAKE_CURRENT_SOURCE_DIR}/rtlib_gen.c" "${snx_cpu}/a64.c" "${snx_cpu}/a64_emit.c"
             -o "${snx_rtlib_gen}"
         DEPENDS rtlib_gen.c ${snx_rtlib_sources} VERBATIM)
 else()
-    add_executable(snx-rtlib-gen rtlib_gen.c)
+    add_executable(snx-rtlib-gen rtlib_gen.c "${snx_cpu}/a64_emit.c")
     target_link_libraries(snx-rtlib-gen PRIVATE scarletnx-common)
     set(snx_rtlib_gen snx-rtlib-gen)
 endif()

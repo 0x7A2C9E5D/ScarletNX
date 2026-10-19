@@ -759,7 +759,8 @@ add_test(NAME runtime_nro COMMAND snx-test-runtime-nro)
 if(NOT WIN32)
     # Emit the real fallback interpreter without LLVM, a game dump, or a precompiled code module.
     add_executable(snx-test-ro-interp-gen "${PROJECT_SOURCE_DIR}/src/common/cpu/recompiler/llvm/rtlib_gen.c"
-        "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/a64.c")
+        "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/a64.c"
+        "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/a64_emit.c")
     snx_test_target(snx-test-ro-interp-gen 11)
         add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ldr_interp.inc"
         COMMAND snx-test-ro-interp-gen interp "${CMAKE_CURRENT_BINARY_DIR}/ldr_interp.inc"
@@ -837,7 +838,7 @@ add_test(NAME native_recompiler COMMAND snx_recompiler_test
     $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${SNX_TARGET_C_COMPILER}")
 add_executable(snx-test-llvm-differential llvm_differential.c)
 snx_test_target(snx-test-llvm-differential 11)
-target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
+target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver snx_a64_reference ${CMAKE_DL_LIBS})
 # In shards that run side by side, each a share of the words, all of them started first (COST): a tree with no times
 # of its own (CI's) starts tests in their order, and these are the longest. Fewer, and one runs alone at the end;
 # more, and each pays the compiles' start again. The _jit shards run the same steps through the JIT's loader
@@ -927,13 +928,13 @@ endif()
 
 add_executable(snx_codegen_test codegen_test.c)
 snx_test_target(snx_codegen_test 90)
-target_link_libraries(snx_codegen_test PRIVATE snx_driver)
+target_link_libraries(snx_codegen_test PRIVATE snx_driver snx_a64_reference)
 add_test(NAME native_codegen COMMAND snx_codegen_test "${SNX_TARGET_C_COMPILER}" "${PROJECT_SOURCE_DIR}")
 
-# A64 cases ported from rEden's dynarmic tests, on the AOT and interpreter paths (a64_ported_cases.h)
+# A64 cases ported from rEden's dynarmic tests, on the C reference path (a64_ported_cases.h)
 add_executable(snx-test-a64-ported a64_ported.c)
 snx_test_target(snx-test-a64-ported 11)
-target_link_libraries(snx-test-a64-ported PRIVATE snx_driver)
+target_link_libraries(snx-test-a64-ported PRIVATE snx_driver snx_a64_reference)
 add_test(NAME a64_ported_cases COMMAND snx-test-a64-ported "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}")
 
 add_executable(snx-test-astc astc_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/astc.c")

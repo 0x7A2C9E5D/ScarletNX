@@ -1,5 +1,5 @@
 /* Fingerprint the generated-C compatibility interface without LLVM. */
-#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_emit.h"
 #include <stdio.h>
 #include <string.h>
 int main(int argc, char** argv) {
