@@ -207,7 +207,11 @@ static void dump_rings(int lvl) {
     n = ipc_ring_count();
     first = n > 32 ? n - 32 : 0;
     logf_(lvl, "  last IPC requests:\n");
-    for (i = first; i < n; i++) logf_(lvl, "    %.160s\n", ipc_ring_entry(i));
+    for (i = first; i < n; i++) {
+        char line[200];
+        ipc_ring_text(i, line, sizeof line);
+        logf_(lvl, "    %s\n", line);
+    }
 }
 static void dump_regs32(const KThread* t) {
     const SnxArmCPU* a = &t->arm;
