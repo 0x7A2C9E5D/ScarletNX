@@ -639,15 +639,16 @@ VkSampler vk_tex_bind_sampler(const u32* tsc, const ShTex* st, int num, const Su
    to, which can be a depth target of another type than the header's; NULL takes the type a surface made from the
    header has (tex_from_tic copies a target of another color format into the header's).
    Storage image stores are translated unsigned when bindless and float when bound (spirv_translate.c's image kinds).
-   vk_image_keyable: whether slot i of an unkeyed program is one whose declaration follows its image, a 2D store.
-   Atomics need an unsigned image whatever the header says, and buffer images (bound by compute only) take a view in
-   the format the unkeyed kind needs instead (cs_buffer_image). vk_image_key: whether such a slot's header names an
-   image of the other class, so that the program is translated again with bit 8 + i of rt_int_mask set. The header
-   has the class of the surface vk_storage_image_view checks (tex_from_tic keeps it).
+   vk_image_keyable: whether slot i of an unkeyed program is one whose declaration follows its image, a 2D or 2D array
+   store. Atomics need an unsigned image whatever the header says, and buffer images (bound by compute only) take a
+   view in the format the unkeyed kind needs instead (cs_buffer_image). vk_image_key: whether such a slot's header
+   names an image of the other class, so that the program is translated again with bit 8 + i of rt_int_mask set. The
+   header has the class of the surface vk_storage_image_view checks (tex_from_tic keeps it).
    vk_storage_image_view: the view storage image slot i of the keyed program si binds t through, or VK_NULL_HANDLE when
-   it can't: one 2D level that lands back in guest memory as it is, R32_UINT for unsigned stores and atomics (which
-   declare that format) and a float format for float stores (which declare none). *bytes is set to the guest bytes t
-   covers. A draw also refuses its own attachments, which a dispatch, outside any rendering pass, can write.
+   it can't: one level (a 2D view, or a 2D array view of every layer for a 2D array slot) that lands back in guest
+   memory as it is, R32_UINT for unsigned stores and atomics (which declare that format) and a float format for float
+   stores (which declare none). *bytes is set to the guest bytes t covers, every layer. A draw also refuses its own
+   attachments, which a dispatch, outside any rendering pass, can write.
    vk_gbuf_desc: a storage buffer's address (*addr) and size from its descriptor's words {address low, address high,
    size} in constant buffer 0 at off, where gbuf_tag (spirv_translate.c) found it for stage (ST_VS, ST_FS or ST_CS).
    No size takes 16 bytes, and sizes are capped at 16 MiB and rounded up to words. The vertex stage's 0xb0 holds a

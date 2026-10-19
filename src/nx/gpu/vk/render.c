@@ -704,7 +704,9 @@ int vk_tex_num(const u32* tic, const Surf* t) {
     return f.is_int ? (f.sint ? 2 : 1) : 0;
 }
 
-int vk_image_keyable(const ShaderInfo* si, int i) { return si->img[i].type == 3 && si->img[i].kind != 1; }
+int vk_image_keyable(const ShaderInfo* si, int i) {
+    return (si->img[i].type == 3 || si->img[i].type == 4) && si->img[i].kind != 1;
+}
 
 int vk_image_key(const ShaderInfo* si, int i, const u32* tic) {
     return !!vk_tic_format(tic[0], 0).is_int != !!si->img[i].bindless;
@@ -715,10 +717,11 @@ VkImageView vk_storage_image_view(Surf* t, const ShaderInfo* si, int i, u64* byt
                                    VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
     *bytes = vk_surf_guest_size(t);
     if (!t || !t->storage_capable || !vk_surf_can_writeback(t) || t->levels != 1 || t->depth3d != 1 ||
-        si->img[i].type != 3 || !*bytes || *bytes > UINT32_MAX ||
+        (si->img[i].type != 3 && si->img[i].type != 4) || !*bytes || *bytes > UINT32_MAX ||
         (si->img[i].kind ? t->f.vk != VK_FORMAT_R32_UINT : t->f.is_int))
         return VK_NULL_HANDLE;
-    return vk_tex_view(t, VK_IMAGE_VIEW_TYPE_2D, 0, &identity, 0);
+    /* a 2D array surface sees every layer of the image, a single layer one too */
+    return vk_tex_view(t, si->img[i].type == 4 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D, 0, &identity, 0);
 }
 
 u32 vk_gbuf_desc(int stage, u32 off, const u32* v, u64* addr) {

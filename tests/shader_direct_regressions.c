@@ -18,7 +18,7 @@
 #define FFMA_KEEP      0x5980000000070000ull
 
 static int failures;
-static const char* storage_paths[2];
+static const char* storage_paths[4];
 static const char* nro_paths[4];
 static const char* dc_color_path;
 static const char* audit_paths[6];
@@ -33,7 +33,7 @@ static const char* beyond_paths[3];
 static const char* attribute_paths[6];
 static const char* pexit_path;
 static const char* passthrough_paths[6];
-static char* fixture_paths[64];
+static char* fixture_paths[66];
 static size_t fixture_count;
 
 static const char* fixture_path(const char* directory, const char* name) {
@@ -697,14 +697,20 @@ static void hfma2_immediate(void) {
 }
 
 static void fragment_storage_images(void) {
+    /* the same store and atomic on 2D array surfaces (bits 33-35 set to 4), as Pokemon Legends Z-A's fragment
+       programs write them (issue #440): the layer in the coordinates' third register */
+#define SURFACE_2D_ARRAY(w) (((w) & ~(7ull << 33)) | 4ull << 33)
     static const struct {
         u64 instructions[2];
-        u8 kind;
+        u8 kind, type;
         u32 opcode;
     } cases[] = {
-        {{0x4C98078804A70002ull, 0xEB20010600F70004ull}, 2, 99},
-        {{0x4C98078804A70001ull, 0xEB50008602070A00ull}, 1, 239},
+        {{0x4C98078804A70002ull, 0xEB20010600F70004ull}, 2, 3, 99},
+        {{0x4C98078804A70001ull, 0xEB50008602070A00ull}, 1, 3, 239},
+        {{0x4C98078804A70002ull, SURFACE_2D_ARRAY(0xEB20010600F70004ull)}, 2, 4, 99},
+        {{0x4C98078804A70001ull, SURFACE_2D_ARRAY(0xEB50008602070A00ull)}, 1, 4, 239},
     };
+#undef SURFACE_2D_ARRAY
     for (size_t i = 0; i < sizeof cases / sizeof *cases; i++) {
         ShaderInfo info;
         size_t words = 0;
@@ -712,9 +718,9 @@ static void fragment_storage_images(void) {
         check(code && !info.unsupported && info.nimg == 1, "fragment storage image translates");
         if (code) {
             save_fixture(storage_paths[i], code, words);
-            check(info.img[0].kind == cases[i].kind && info.img[0].bindless && info.img[0].bl_cbuf == 2 &&
-                      info.img[0].cbuf_off == 74,
-                  "fragment storage image resolves its handle and integer format");
+            check(info.img[0].kind == cases[i].kind && info.img[0].type == cases[i].type && info.img[0].bindless &&
+                      info.img[0].bl_cbuf == 2 && info.img[0].cbuf_off == 74,
+                  "fragment storage image resolves its handle, dimension and integer format");
             check(count_opcode(code, words, cases[i].opcode, 0xffffffffu) > 0,
                   "fragment storage image emits the write or atomic operation");
             check(count_opcode(code, words, 5381, 0xffffffffu) > 0,
@@ -2169,6 +2175,8 @@ int main(int argc, char** argv) {
     if (argc == 2) {
         storage_paths[0] = fixture_path(argv[1], "storage_write");
         storage_paths[1] = fixture_path(argv[1], "storage_atomic");
+        storage_paths[2] = fixture_path(argv[1], "storage_write_array");
+        storage_paths[3] = fixture_path(argv[1], "storage_atomic_array");
         static const char* nro_names[] = {"nro_raw", "nro_ms", "nro_ms_array", "nro_exchange"};
         for (int i = 0; i < 4; i++) nro_paths[i] = fixture_path(argv[1], nro_names[i]);
         char name[32];
@@ -2216,7 +2224,7 @@ int main(int argc, char** argv) {
             snprintf(name, sizeof name, "audit_%d", i);
             audit_paths[i] = fixture_path(argv[1], name);
         }
-        if (fixture_count != 64) {
+        if (fixture_count != 66) {
             fprintf(stderr, "failed to allocate fixture paths\n");
             return 2;
         }
