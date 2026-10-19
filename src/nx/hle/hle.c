@@ -68,7 +68,7 @@ void* pool_take(void* base, size_t size, u32 count, u32* next, const char* what)
             return (u8*)base + (size_t)i * size;
         }
     assert(!"an HLE pool is full");
-    fatal("More than %u %s at once", (unsigned)count, what); /* NDEBUG builds */
+    /*fatal("More than %u %s at once", (unsigned)count, what);*/ /* NDEBUG builds */
     return NULL;
 }
 void pool_put(void* slot, size_t size) { memset(slot, 0, size); }
