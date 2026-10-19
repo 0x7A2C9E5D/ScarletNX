@@ -511,6 +511,49 @@ static int ppc64le_objects(void) {
     free(defs_data);
     return 0;
 }
+
+/* a guest function's tail call through a pointer, as snx_lookup's answer is called, which ir.c makes a stub of on
+   PowerPC64: its object links alone, the stub falling back to the CPU's RtAPI.miss rather than a symbol of its own */
+static int ppc64le_tail_call(void) {
+    char error[1024];
+    const char* exports[1] = {"guest"};
+    LLVMTypeRef params[2], type;
+    LLVMValueRef guest, call, args[2];
+    unsigned char* data;
+    size_t size;
+    SnxLinkInput input;
+    SnxLinkOutput linked;
+    SnxIr* ir;
+    if (snx_elf_host_data() != ELFDATA2LSB) return 0;
+    LLVMInitializeAllAsmParsers(); /* the stub is inline assembly */
+    ir = snx_ir_new_target("guest", '2', "powerpc64le-unknown-linux-gnu", error, sizeof(error));
+    if (!ir) {
+        printf("skipped the PowerPC64 tail call: %s\n", error);
+        return 0;
+    }
+    params[0] = ir->t_ptr;
+    params[1] = ir->t_i64;
+    type = LLVMFunctionType(ir->t_void, params, 2, 0);
+    guest = LLVMAddFunction(ir->mod, "guest", type);
+    LLVMPositionBuilderAtEnd(ir->b, LLVMAppendBasicBlockInContext(ir->ctx, guest, "entry"));
+    args[0] = LLVMGetParam(guest, 0);
+    args[1] = LLVMGetParam(guest, 1);
+    call = LLVMBuildCall2(ir->b, type, LLVMBuildLoad2(ir->b, ir->t_ptr, args[0], "fn"), args, 2, "");
+    LLVMSetTailCallKind(call, LLVMTailCallKindMustTail);
+    LLVMBuildRetVoid(ir->b);
+    if (snx_ir_object(ir, '2', &data, &size, error, sizeof(error))) return snx_error("PowerPC64 tail call: %s", error);
+    snx_ir_free(ir);
+    input.data = data;
+    input.size = size;
+    input.name = "guest";
+    if (snx_link(&input, 1, exports, 1, "guest.so", &linked, error, sizeof(error))) {
+        printf("FAIL: a PowerPC64 tail call through a pointer links alone: %s\n", error);
+        ++failures;
+    } else
+        free(linked.data);
+    free(data);
+    return 0;
+}
 #endif
 
 int main(void) {
@@ -520,7 +563,7 @@ int main(void) {
     ppc_relocations();
     if (llvm_objects()) ++failures;
 #ifndef __APPLE__ /* AOT modules, which macOS doesn't link as ELF (link_elf.c) */
-    if (ppc64le_objects()) ++failures;
+    if (ppc64le_objects() || ppc64le_tail_call()) ++failures;
 #endif
     if (failures) {
         printf("%d failures\n", failures);
