@@ -166,6 +166,64 @@ static int color_masks(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
     return 1;
 }
 
+/* Indexed draw with its index buffer given in the call (Tears of the Kingdom's most called interpreted one).
+   Parameters: topology, index buffer address high and low, index format, count. BEGIN, the buffer's address and
+   format, first index 0 and the count, END */
+static int draw_indexed_inline(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    mme_out(ch, rec, 0x586, arg(p, np, 0));
+    mme_out(ch, rec, 0x5F2, arg(p, np, 1));
+    mme_out(ch, rec, 0x5F3, arg(p, np, 2));
+    mme_out(ch, rec, 0x5F6, arg(p, np, 3));
+    mme_out(ch, rec, 0x5F7, 0);
+    mme_out(ch, rec, 0x5F8, arg(p, np, 4));
+    mme_out(ch, rec, 0x585, 0);
+    return 1;
+}
+/* The three words kept in scratch 0xD3B-0xD3D: when the parameters differ from them, 0x4B2 gets 25 and the scratch
+   takes the parameters (only the last two when the first is the same) */
+static int scratch_d3b(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    u32 a = mme_reg(ch, rec, 0xD3B), b = mme_reg(ch, rec, 0xD3C), c = mme_reg(ch, rec, 0xD3D);
+    if (arg(p, np, 0) != a) {
+        mme_out(ch, rec, 0x4B2, 25);
+        mme_out(ch, rec, 0xD3B, arg(p, np, 0));
+    } else if (!((b ^ arg(p, np, 1)) | (c ^ arg(p, np, 2))))
+        return 1;
+    else
+        mme_out(ch, rec, 0x4B2, 25);
+    mme_out(ch, rec, 0xD3C, arg(p, np, 1));
+    mme_out(ch, rec, 0xD3D, arg(p, np, 2));
+    return 1;
+}
+/* When scratch 0xD28 is 1: 0x0BF and 0x0DB set, 0x54C 2, 0x0DB cleared. No parameters */
+static int scratch_d28(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    (void)p, (void)np;
+    if (mme_reg(ch, rec, 0xD28) != 1) return 1;
+    mme_out(ch, rec, 0x0BF, 1);
+    mme_out(ch, rec, 0x0DB, 1);
+    mme_out(ch, rec, 0x54C, 2);
+    mme_out(ch, rec, 0x0DB, 0);
+    return 1;
+}
+/* Clears every layer of a render target (Eden: HLE_MultiLayerClear). Parameter: the CLEAR_SURFACE word, whose bits
+   6-9 name the target: as many clears as its layer count (register 0x206 of its eight), the layer in bits 10 on */
+static void clear_layers(GpuChannel* ch, MmeRec* rec, u32 w, u32 n) {
+    u32 i;
+    for (i = 0; i < n; i++) mme_out(ch, rec, 0x674, w + 0x400 * i);
+}
+static int multi_layer_clear(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    u32 w = arg(p, np, 0), n = mme_reg(ch, rec, 0x206 + (((w >> 6) & 0xF) << 4));
+    if (n > MME_LOOP_MAX) return 0;
+    clear_layers(ch, rec, w, n);
+    return 1;
+}
+/* The same with the depth target's layer count (register 0x48C) */
+static int multi_layer_clear_depth(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    u32 n = mme_reg(ch, rec, 0x48C);
+    if (n > MME_LOOP_MAX) return 0;
+    clear_layers(ch, rec, arg(p, np, 0), n);
+    return 1;
+}
+
 typedef struct {
     u64 hash;
     int (*run)(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np);
@@ -182,6 +240,11 @@ static const MmeNative mme_natives[] = {
     {0x42B97BFB33086347ull, scratch_d38, "scratch 0xD38 and 0x0D8"},
     {0x176ED6F0009E577Aull, blend_enables, "blend enables"},
     {0xE8FCEAF999995860ull, color_masks, "color masks"},
+    {0x2DB33AADB741839Cull, draw_indexed_inline, "indexed draw, buffer inline"},
+    {0x5DA7C45099120734ull, scratch_d3b, "scratch 0xD3B-0xD3D"},
+    {0x88EEF6578DA4695Dull, scratch_d28, "scratch 0xD28"},
+    {0xEAD26C3E2109B06Bull, multi_layer_clear, "clear of every layer"},
+    {0x71F722B9118625E7ull, multi_layer_clear_depth, "clear of every layer, the depth target's count"},
 };
 int mme_native_find(u64 hash) {
     int k;
