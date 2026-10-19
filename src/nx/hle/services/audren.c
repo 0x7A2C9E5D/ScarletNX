@@ -85,8 +85,9 @@ int audren_update(SvcObj* o, IpcBuf in, IpcBuf out) {
     if (rc == -41 || rc == -4) R_THROW(RC(153, -rc));
     R_UNLESS(rc >= 0, RC(153, 2)); /* OperationFailed */
     memcpy(&rev, GP(in.addr), 4);
-    LOG_LIMIT(1, "audren: the first update, revision %c%c%c%c\n", (char)(rev & 0xff), (char)(rev >> 8 & 0xff),
-              (char)(rev >> 16 & 0xff), (char)(rev >> 24));
+    /* the magic "REV" and the revision as a number (REV11 and the like) */
+    LOG_LIMIT(1, "audren: the first update, revision %c%c%c%u\n", (char)(rev & 0xff), (char)(rev >> 8 & 0xff),
+              (char)(rev >> 16 & 0xff), (unsigned)(rev >> 24));
     R_SUCCEED();
 }
 
