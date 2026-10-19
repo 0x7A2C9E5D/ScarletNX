@@ -808,6 +808,12 @@ if(NOT SNX_TOOLS_ONLY)
     snx_test_target(snx-test-tex-upload-rows 23)
     target_link_libraries(snx-test-tex-upload-rows PRIVATE snx_nx_flags)
     add_test(NAME tex_upload_rows COMMAND snx-test-tex-upload-rows)
+    # the file of shaders and pipelines kept across runs (gpu/vk/pipeline_file.c): records back as written, pipelines
+    # by their shaders' records, a cut or changed record ending the reading, another key starting over, a full file
+    add_executable(snx-test-pipeline-file pipeline_file.c)
+    snx_test_target(snx-test-pipeline-file 23)
+    target_link_libraries(snx-test-pipeline-file PRIVATE snx_nx_flags)
+    add_test(NAME pipeline_file COMMAND snx-test-pipeline-file)
 endif()
 
 add_executable(snx_recompiler_test recompiler_native.c)

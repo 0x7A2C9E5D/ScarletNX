@@ -180,6 +180,7 @@ With `--out work/Game` and `--outdir games` as above (without them, see [Folders
 | `games/<id>/<id>_data/`, `<id>.ini` | Data/saves (and `control.nacp`) + settings |
 | `games/<id>/<id>_build/` | Generated code, only with `--keep-ir` |
 | `games/<id>/shader_cache/vk_pipelines.bin` | Vulkan pipeline cache |
+| `games/<id>/shader_cache/<id>.vkshaders` | Translated shaders and the pipelines made, made again at the next start |
 
 ## GDB (UNIX only)
 

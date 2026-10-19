@@ -15,6 +15,7 @@
    astc.c      compute decoding of ASTC texture blocks during upload
    buffer.c    vertex, index, constant and storage buffers from guest memory
    pipeline.c  translated shaders, the pipeline layout and pipelines by state
+   pipeline_file.c  the shaders and pipelines kept across runs, made again at startup (pipeline_file.h)
    render.c    the render target set (dynamic rendering), clears and draws
    compute.c   compute dispatches (on a queue of their own when there is one), landing their results in guest memory
    renderer.c  the renderer interface the GPU front end calls (gpu/renderer.h) and presenting
@@ -590,6 +591,8 @@ VkPipelineCache vk_pipeline_cache(void); /* for pipelines made elsewhere (comput
 void vk_pipeline_save(void);
 VkShaderModule vk_module_spv(const u32* words, size_t count);
 VkShaderModule vk_module_spv_location(const u32* words, size_t count, u32 location);
+/* pipelines of earlier runs made in the background: made so far, how many the pipeline cache had, and still to make */
+void vk_pipeline_prewarm_stats(u64* made, u64* hits, u64* left);
 
 /* compute.c */
 void vk_dispatch(GpuChannel* ch, const u32* q, u64 code);

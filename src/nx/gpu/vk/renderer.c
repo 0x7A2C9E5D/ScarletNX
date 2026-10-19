@@ -414,6 +414,13 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                     (unsigned long long)(upload_bytes >> 20), (unsigned long long)slow_frames,
                     (unsigned long long)(slowest_ns / 1000000));
                 slow_frames = slowest_ns = 0;
+                u64 early_made, early_hits, early_left;
+                vk_pipeline_prewarm_stats(&early_made, &early_hits, &early_left);
+                if (early_made || early_left)
+                    LOG("vulkan: %llu pipelines of earlier runs made in the background (%llu from the cache), %llu "
+                        "still to make\n",
+                        (unsigned long long)early_made, (unsigned long long)early_hits,
+                        (unsigned long long)early_left);
             }
             LOG("vulkan: %llu draws sampled a target they render to in place (%llu barriers in passes, %llu passes "
                 "begun again), %llu through a copy\n",
