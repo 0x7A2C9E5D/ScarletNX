@@ -1141,7 +1141,10 @@ static void nv_release(NvFile* old, NvEvent* slots) {
    through tmp, the extra one straight to the device. A GPU channel takes Ioctl2's and Ioctl3's, as-gpu and ctrl-gpu
    only Ioctl3's. ipc is the command, for the log */
 #define NV_SCRATCH 0x4000
-/* the (device, ioctl) pairs logged already: each is logged on its first use */
+/* the (device, ioctl) pairs logged already: each is logged on its first use. The size field (bits 16-29) is left out
+   of the pair: a channel's submit carries its entry count there, and every count was logged as a new ioctl. With the
+   table full, nothing new is logged: it said "first use" for every pair it couldn't hold, which logged nearly every
+   submit (a lock and a log write a frame in Super Mario Odyssey) */
 static int nv_first_use(int dev, u32 cmd) {
     static PMutex lock = PMUTEX_INIT;
     static struct {
@@ -1151,13 +1154,17 @@ static int nv_first_use(int dev, u32 cmd) {
     static u32 nseen;
     u32 i;
     int first = 1;
+    cmd &= ~(0x3FFFu << 16);
     pm_lock(&lock);
     for (i = 0; i < nseen && first; i++)
         if (seen[i].dev == dev && seen[i].cmd == cmd) first = 0;
-    if (first && nseen < sizeof seen / sizeof seen[0]) {
-        seen[nseen].dev = dev;
-        seen[nseen].cmd = cmd;
-        nseen++;
+    if (first) {
+        if (nseen < sizeof seen / sizeof seen[0]) {
+            seen[nseen].dev = dev;
+            seen[nseen].cmd = cmd;
+            nseen++;
+        } else
+            first = 0;
     }
     pm_unlock(&lock);
     return first;
