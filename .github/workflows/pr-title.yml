@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+# one at a time per pull request: of a burst of edits the newest waits and those before it are dropped. Never skipped
+# on an edit, as a skipped required check passes
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+
 jobs:
   title:
     name: No donotmerge in the title
