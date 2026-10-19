@@ -50,6 +50,9 @@ int snx_setup_options(int argc, char** argv, char* why, size_t why_size);
 int snx_setup_uid(uint64_t uid[2]);
 /* the folders of games with Account saves of the fixed uid (users.h), which user 1 with another uid does not see */
 int snx_setup_first_saves(const char* games);
+/* the uid of a new users.ini's first user: the fixed one while games has saves of it, else snx_setup_uid's. How many
+   games have them, else -1 when the generator failed */
+int snx_setup_first_uid(const char* games, uint64_t uid[2]);
 
 /* 1 for text as a prod.keys or a title.keys has it: no NUL byte, and a line "name = hex" at least */
 int snx_keys_text(const char* data, size_t size);
@@ -64,6 +67,9 @@ char* snx_keys_dir(const char* data);
 int snx_keys_put(const char* path, const void* data, size_t size);
 /* folder's prod.keys installed in dir, and its title.keys when it has one (*titles says so): 0, else -1 with why */
 int snx_keys_install(const char* folder, const char* dir, int* titles, char* why, size_t why_size);
+
+/* path as the setup shows it: ~/ for the home folder at its start (not on Windows) */
+void snx_home_short(const char* path, char* out, size_t size);
 
 /* key = value in section of the .ini at path, its other lines as they were, the file made when it is not there: 0,
    else -1 with why */

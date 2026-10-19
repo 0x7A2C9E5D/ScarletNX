@@ -186,6 +186,16 @@ int snx_setup_first_saves(const char* games) {
     return found;
 }
 
+int snx_setup_first_uid(const char* games, uint64_t uid[2]) {
+    int saves = snx_setup_first_saves(games);
+    if (saves) { /* they stay its own */
+        uid[0] = SNX_USERS_FIRST_UID0;
+        uid[1] = SNX_USERS_FIRST_UID1;
+        return saves;
+    }
+    return snx_setup_uid(uid);
+}
+
 int snx_keys_text(const char* data, size_t size) {
     size_t at = 0;
     int keys = 0;
@@ -284,6 +294,19 @@ int snx_keys_install(const char* folder, const char* dir, int* titles, char* why
     rc = keys_copy(folder, dir, "title.keys", why, why_size);
     *titles = !rc;
     return rc < 0 ? -1 : 0;
+}
+
+void snx_home_short(const char* path, char* out, size_t size) {
+#ifndef _WIN32
+    const char* home = getenv("HOME");
+    size_t n = home ? strlen(home) : 0;
+    while (n > 1 && home[n - 1] == '/') --n;
+    if (n > 1 && !strncmp(path, home, n) && path[n] == '/') {
+        snprintf(out, size, "~%s", path + n);
+        return;
+    }
+#endif
+    snprintf(out, size, "%s", path);
 }
 
 /* the line at line, n bytes before its newline, as snx_ini_next reads it: 1 for a section's head, its name into

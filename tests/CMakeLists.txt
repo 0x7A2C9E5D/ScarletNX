@@ -779,11 +779,14 @@ endif()
 
 add_executable(snx-test-driver driver_workflow.c
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/driver.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/game_name.c"
-    "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/process.c"
-    "${PROJECT_SOURCE_DIR}/src/common/utilities/logscan.c")
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/setup.c" "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c"
+    "${PROJECT_SOURCE_DIR}/src/common/utilities/process.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/logscan.c")
 snx_test_target(snx-test-driver 90)
-target_link_libraries(snx-test-driver PRIVATE snx_test_common snx_lz4 OpenSSL::Crypto snx_demangle)
+target_link_libraries(snx-test-driver PRIVATE snx_test_common snx_setup snx_lz4 OpenSSL::Crypto snx_demangle)
 set_target_properties(snx-test-driver PROPERTIES LINKER_LANGUAGE CXX)
+if(APPLE) # driver/setup.c's weak snx_menu_language, as snx_driver has it: ld64 wants it named
+    target_link_options(snx-test-driver PRIVATE "LINKER:-U,_snx_menu_language")
+endif()
 add_test(NAME driver_workflow COMMAND snx-test-driver)
 set_tests_properties(driver_workflow PROPERTIES TIMEOUT 60)
 add_executable(snx-test-link-file link_file.c)
@@ -814,6 +817,11 @@ if(UNIX AND TARGET snx_setup)
     target_link_libraries(snx-test-setup PRIVATE snx_setup)
     target_compile_definitions(snx-test-setup PRIVATE SNX_DEPRECATIONS="${PROJECT_SOURCE_DIR}/docs/DEPRECATIONS.md")
     add_test(NAME setup COMMAND snx-test-setup)
+    # the driver's setup in a terminal, its answers from a file
+    add_executable(snx-test-setup-terminal setup_terminal.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/setup.c")
+    snx_test_target(snx-test-setup-terminal 90)
+    target_link_libraries(snx-test-setup-terminal PRIVATE snx_setup)
+    add_test(NAME setup_terminal COMMAND snx-test-setup-terminal)
 endif()
 
 if(UNIX)

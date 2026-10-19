@@ -3,6 +3,7 @@
 /* Exercise the real driver/supervisor with synthetic extraction, compilation and game children. */
 #define _POSIX_C_SOURCE 200809L
 #include "common/utilities/common.h"
+#include "common/utilities/setup.h"
 #include "nx/runtime/driver/driver.h"
 #include "nx/runtime/driver/extract.h"
 #include "nx/runtime/driver/game_name.h"
@@ -443,7 +444,13 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[2], "exec")) args[0] = "/nonexistent/scarletnx-test";
         return snx_run_stage(args, !strcmp(argv[2], "cwd") ? "/nonexistent/scarletnx-test" : NULL, "Probe");
     }
-    if (argc > 1) {
+    if (argc > 1) { /* the setup's options taken out first, as the program's entry does (runtime/entry.c) */
+        char why[160];
+        argc = snx_setup_options(argc, argv, why, sizeof why);
+        if (argc < 0) {
+            fprintf(stderr, "scarletnx: %s\n", why);
+            return 2;
+        }
         rc = snx_driver(argc, argv);
         if (rc >= 0) return rc;
     }
@@ -987,6 +994,38 @@ int main(int argc, char** argv) {
 #endif
         free(output);
     }
+#ifndef _WIN32
+    /* --setup goes through the setup in the terminal, here a stdin with nothing to read: it stops at the first
+       question, writing nothing; --skip alone is refused; --debug runs with no setup, in a home with no setup.ini */
+    {
+        const char* setup[4];
+        char* home = snx_path_join(root, "setup home");
+        set_env("XDG_DATA_HOME", home);
+        set_env("XDG_STATE_HOME", home);
+        set_env("XDG_CACHE_HOME", home);
+        CHECK(freopen("/dev/null", "r", stdin) != NULL); /* the children's */
+        setup[0] = exe;
+        setup[1] = "--setup";
+        setup[2] = NULL;
+        output = NULL;
+        rc = snx_run(setup, NULL, home, &output);
+        CHECK(rc == 1 && strstr(output, "Changed in older versions\n") && strstr(output, "no more answers"));
+        free(output);
+        setup[1] = "--skip";
+        setup[2] = dump;
+        setup[3] = NULL;
+        output = NULL;
+        CHECK(snx_run(setup, NULL, home, &output) == 2 && strstr(output, "--skip --skip"));
+        free(output);
+        setup[1] = "--debug";
+        setup[2] = "/nonexistent/dump.nsp";
+        output = NULL;
+        CHECK(snx_run(setup, NULL, home, &output) == 1 && strstr(output, "Input dump is missing") &&
+              !strstr(output, "Changed"));
+        free(output);
+        free(home);
+    }
+#endif
     CHECK(!snx_remove_tree(root));
     free(exe);
     free(root);

@@ -6164,6 +6164,11 @@ static void open_files(App* app) {
     free(config);
     free(prefs);
 }
+const char* snx_menu_language(int i, const char** name) {
+    if (i < 0 || i >= snx_gui_language_count) return NULL;
+    *name = snx_gui_languages[i].name;
+    return snx_gui_languages[i].code;
+}
 int snx_gui_main(const char* self) {
     App app;
     if (!initialize(&app, self)) {

@@ -1124,6 +1124,13 @@ void snx_vm_flush_code(void* p, size_t size) {
     __builtin___clear_cache((char*)p, (char*)p + size);
 #endif
 }
+int snx_terminal(void) {
+#ifdef _WIN32
+    return _fileno(stdin) >= 0 && _fileno(stdout) >= 0 && _isatty(_fileno(stdin)) && _isatty(_fileno(stdout));
+#else
+    return isatty(fileno(stdin)) && isatty(fileno(stdout));
+#endif
+}
 void snx_tool_console(void) {
 #ifdef _WIN32
     /* The SDL runtime is a GUI executable. Reattach only for explicit CLI work,

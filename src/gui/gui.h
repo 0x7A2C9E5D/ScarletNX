@@ -6,4 +6,6 @@
 /* The menu (main.c), until it is closed; its exit status. self is the program that runs Switch inputs, the runtime
    the menu is part of; NULL looks for scarletnx beside the menu, then on PATH */
 int snx_gui_main(const char* self);
+/* the menu's languages, for the driver's setup in a terminal: the i-th's code and its name, NULL past the last */
+const char* snx_menu_language(int i, const char** name);
 #endif
