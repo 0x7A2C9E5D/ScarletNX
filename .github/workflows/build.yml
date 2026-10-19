@@ -14,6 +14,14 @@ on:
 permissions:
   contents: read
 
+# a push to a pull request cancels that pull request's build still running: only its newest commit is built. main and
+# the tags build every commit
+concurrency:
+  group: >-
+    build-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
+    || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Linux jobs run in Arch Linux, which has the same Clang 23 and clang-format 23 as development, and its LLVM 23 for the
 # recompiler's code generator (required, cmake/llvm.cmake). Windows uses MSYS2 CLANG64 so Clang, the MinGW/UCRT runtime
 # and LLVM's development libraries come from one compatible toolchain. FFmpeg, OpenSSL, Vulkan and SDL3 are built from
