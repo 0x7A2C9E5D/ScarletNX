@@ -942,7 +942,7 @@ static void test_dump(SvcObj* proxy) {
     Request r;
     u64 size = 0;
     u8* data = fs_read_file("exefs/main.npdm", &size);
-    CHECK(fsp.dfs != NULL && data && size == meta.size && !memcmp(data, meta.data, meta.size));
+    CHECK(g_hle.fs.dfs != NULL && data && size == meta.size && !memcmp(data, meta.data, meta.size));
     free(data);
     CHECK(!fs_map_file("exefs/main", &map) && map.heap && map.size == sizeof dump_code - 1);
     CHECK(!memcmp(map.data, dump_code, map.size));
@@ -957,7 +957,7 @@ static void test_dump(SvcObj* proxy) {
     CHECK(r.c.nout_objs == 1);
     SvcObj* storage = r.c.out_objs[0];
     u64 total = get_size(storage);
-    CHECK(total == fsp.rtotal && total >= 0x50 && total <= 0x8000);
+    CHECK(total == g_hle.fs.rtotal && total >= 0x50 && total <= 0x8000);
     test_storage_contracts(storage, total);
     request(&r, 0);
     argument64(&r, 0, 0);
