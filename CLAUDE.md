@@ -128,6 +128,8 @@ whether the agent may build and run: only one at a time can):
 - Commit subjects use a bracketed area prefix (for example, `[gpu]` or `[build]`) followed by an imperative sentence.
   The body says why, and how it was verified. Check
   every claim in the message against the staged diff.
+- Commit messages, like comments, docs and test data, say what a game did, not which game it was: "one game's menus",
+  "another's save load", "a player's log". A title ID is no better than a name.
 - Stage files by name, and check `git diff --cached --stat` right before committing: a commit takes everything
   staged, including a `git mv` or `git rm` from earlier in the session. Commits end with the `Co-Authored-By` line
   the session's instructions give.
