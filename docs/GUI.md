@@ -4,6 +4,7 @@
 
 ## Index
 
+* [Setup](#setup)
 * [Games: the games of games/ and the player's folders](#games-the-games-of-games-and-the-players-folders)
 * [Output and resource use](#output-and-resource-use)
 * [Themes](#themes)
@@ -225,6 +226,32 @@ as argv entries, never through a shell. Spaces, Unicode paths and shell punctuat
 are not evaluated. Local `file://` text drops are decoded, but lists and remote URI
 authorities are rejected. The working directory is not changed and is shown in the
 Status box. See [GNUABI](GNUABI.md) for supported Linux ELF applications.
+
+## Setup
+
+The first start opens on the setup, not the menu, a page at a time, each a tab at the top under its number: the
+notices of what older versions did that this one does otherwise (only said, nothing moves:
+[DEPRECATIONS](DEPRECATIONS.md)), then **Language**, **Install**, **Folders**, **Keys** and **User**
+([USAGE](USAGE.md#setup) has what each asks, the terminal's setup too). Its boxes say what the page is about; its
+question and choices come as the theme's `[body] options-dialog` places a question ([Themes](#themes)), over the boxes
+without darkening them; its tip, and what a choice did or why it did not, are in the foot. Up/Down (or the mouse)
+move between the choices, Enter takes one and ESC goes back a page, on the first page asking whether to exit.
+
+- **Language**: the menu's languages, starting on the one it has; one picked over it is kept in `app.ini`.
+- **Install**: Installed, or Portable, which makes `.scarletnx/` beside the program and moves the menu's own files
+  there from then on. Installed is refused while a `.scarletnx/` is there, which keeps the copy portable. An app
+  (Android, iOS) has no such page.
+- **Folders**: Keep, Change games folder (Settings > App > Folders' Games) or Add dumps folder (a folder of
+  Settings > App > Library), each through the folder picker, the page showing what they are now.
+- **Keys**: `prod.keys` and `title.keys` where the driver reads them; Use these, Choose folder (a folder with
+  `prod.keys`, and `title.keys` if it has one, installed where Setup device keys installs them) or Later.
+- **User**: with `users/users.ini` there, its users with their pictures and uids, then Keep or Overwrite; without one,
+  or to overwrite it, the nickname typed (`Player` to start with; Backspace takes a letter out) and Enter. A nickname
+  the rooms' rule refuses is said, and the page stays.
+
+Once the last page is done the menu opens, `setup.ini` written. After an update that brings a notice, the setup
+shows that notice alone, with OK, before the menu. `scarletnx --debug` (or `--skip --skip`) opens the menu with no
+setup, writing nothing.
 
 ## Games: the games of games/ and the player's folders
 
@@ -566,7 +593,10 @@ sequences, path parsing, argument quoting, inherited grandchild output, resource
 accounting and process-tree cleanup. Browser tests cover filtering, missing/empty
 directories, pagination, resizing, Back/ESC, launching selected files and R's recompile.
 Key setup tests cover installation, replacement, invalid drops, failed writes,
-self-copy safety, cancellation, and the bright-red overwrite warning.
+self-copy safety, cancellation, and the bright-red overwrite warning. Setup tests (`gui_setup`) go through every
+page of a first start in a home of their own and check what each writes (a portable copy, the language, the folders,
+the keys, the first user) and refuses, users.ini kept or overwritten, the fixed uid kept for its saves, a notice
+alone after an update, `--debug`, and the question where `options-dialog` puts it.
 Language tests cover a catalog's search in either byte order, catalogs cut or pointing out of themselves, the language
 Auto picks from the system's locales, English where a language has none, the Language row and `app.ini`'s key, and
 the script's refusals; they use a language of their own, `tests/po/xx.po`. Glyph tests cover the Latin and the wide

@@ -328,10 +328,7 @@ static int user(Ask* a) {
 /* whether step is asked here: left by setup.ini, the language with the launcher's languages to pick from, the install
    where a copy can be portable (an app has its own storage) */
 static int asked(const SnxSetup* setup, int step, int languages) {
-#if defined(__ANDROID__) || defined(SNX_IOS)
-    if (step == SNX_SETUP_INSTALL) return 0;
-#endif
-    return snx_setup_asks(setup, step) && (step != SNX_SETUP_LANGUAGE || languages);
+    return snx_setup_asks(setup, step) && snx_setup_here(step) && (step != SNX_SETUP_LANGUAGE || languages);
 }
 int snx_setup_terminal(FILE* in, FILE* out, const char* program_dir, int all) {
     char *file, why[SETUP_LINE + 64], shown_path[SETUP_LINE];

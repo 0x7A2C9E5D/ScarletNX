@@ -197,6 +197,19 @@ if(BUILD_TESTING)
         set_tests_properties(gui_sdl_events PROPERTIES TIMEOUT 30
                              ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_FILE_DIALOG_DRIVER=none;SDL_PREFERRED_LOCALES=en_US")
     endif()
+    # the setup's pages (gui_setup.c), as gui_sdl's: the real renderer, a language of the tests' own, no picker
+    add_executable(snx-test-gui-setup "${PROJECT_SOURCE_DIR}/tests/gui_setup.c")
+    target_link_libraries(snx-test-gui-setup PRIVATE snx_gui_support scarletnx-common SDL3::SDL3 snx_window_icon
+                          snx_build_info snx_pad_sdl snx_splash snx_gui_languages_test snx_demangle)
+    if(APPLE)
+        target_sources(snx-test-gui-setup PRIVATE apple.m)
+        target_link_libraries(snx-test-gui-setup PRIVATE snx_apple_frontend "-framework Foundation")
+        set_target_properties(snx-test-gui-setup PROPERTIES LINKER_LANGUAGE CXX)
+    else()
+        add_test(NAME gui_setup COMMAND snx-test-gui-setup)
+        set_tests_properties(gui_setup PROPERTIES TIMEOUT 30
+                             ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_FILE_DIALOG_DRIVER=none;SDL_PREFERRED_LOCALES=en_US")
+    endif()
     # every test here, as snx_test_target does: warnings are errors, the asserts stay in any build type, and the
     # sanitizers come with SNX_TEST_SANITIZERS
     get_directory_property(gui_tests BUILDSYSTEM_TARGETS)

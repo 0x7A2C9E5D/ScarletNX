@@ -238,6 +238,26 @@ typedef struct {
     uint64_t room_free; /* fixed free space for tests; 0 asks the disk */
 
     Uint64 preview_since;
+
+    /* the setup (common/utilities/setup.h) in place of the menu while setup_on, a page at a time: the notices, then
+       each step setup.ini has left */
+    bool setup_on;
+    SnxSetup setup; /* setup.ini as it was read, a newer one's numbers kept when it is written */
+    int setup_pages[SNX_SETUP_STEPS + 1], setup_count, setup_page;
+    GuiChoice setup_choice; /* the page's choices, the one in focus */
+    int setup_top;          /* the notices' first shown */
+    int setup_language;     /* the language the menu had when the setup came to its step: one picked over it is kept */
+    bool setup_typing;      /* the first user's nickname being typed, setup_name, to go with setup_uid */
+    char setup_name[SNX_USERS_NICKNAME + 1];
+    uint64_t setup_uid[2];
+    int setup_saves;    /* games with saves of the fixed uid, which setup_uid is then */
+    bool setup_keys;    /* the folder picker opened for the keys' page */
+    bool setup_failed;  /* the message says what did not work */
+    bool setup_written; /* users.ini at the user's page: there, its users (-1: setup_why says why it is none) */
+    int setup_users;
+    char setup_why[512];
+    bool setup_save;  /* a language picked over the menu's, kept in app.ini once done */
+    bool setup_moved; /* the data folder a portable copy's: what older versions left is looked for again */
 #ifdef SDL_PLATFORM_ANDROID
     bool hidden;     /* behind other apps: nothing is drawn, a run is still read */
     bool play_later; /* a game made ready while hidden, which opens once the menu shows */
@@ -447,21 +467,16 @@ static void rule(App* app, int row, GuiRgb c) {
     fill(app, 8 * s, (float)(row * 16) * s - s, (float)((app->cols - 2) * 8) * s, s, c, 255);
 }
 static void event(App* app, const SDL_Event* e);
-/* ~/.switch/prod.keys (%USERPROFILE%\.switch on Windows), where hactool and other tools keep them */
+#ifdef SNX_XDG
+/* ~/.switch/prod.keys, where hactool and other tools keep them */
 static char* home_keys_path(void) {
-#ifdef _WIN32
-    const char* home = getenv("USERPROFILE");
-    if (!home || !home[0]) home = getenv("HOME");
-#else
     const char* home = getenv("HOME");
-#endif
     if (!home || !home[0]) return NULL;
     char* directory = snx_path_join(home, ".switch");
     char* path = directory ? snx_path_join(directory, "prod.keys") : NULL;
     free(directory);
     return path;
 }
-#ifdef SNX_XDG
 /* the menu whose folder is the user's data folder (snx_data_dir), not a portable copy's */
 static bool installed(const App* app) {
     char* user = snx_user_data_dir();
@@ -1896,7 +1911,7 @@ static void draw_user(App* app, GuiRect r, int band) {
 /* the box's width h pixels high: a column, the nickname, a column, the picture and its two pixels; 0 with no user to
    show */
 static int user_width(const App* app, int h) {
-    if (!app->user || app->theme.picture == GUI_PICTURE_NONE || user_side(app, h) <= 0) return 0;
+    if (!app->user || app->setup_on || app->theme.picture == GUI_PICTURE_NONE || user_side(app, h) <= 0) return 0;
     return (gui_text_cols(app->user_name) + 2) * cell_w(app) + user_side(app, h) + 2 * app->scale;
 }
 /* ---- the box of users a click on the head's opens: each user of users.ini, the one picked games' user ---- */
@@ -2006,6 +2021,7 @@ static void big_text(App* app, GuiRect r, int x, int y, const char* value, int s
 }
 static const char* screen_title(const App* app, char* out, size_t size) {
     char* c;
+    if (app->setup_on && !app->editing) return snx_tr("SCARLETNX  /  SETUP");
     if (!app->editing)
         return app->theme
             .title[(app->menu.running || app->finished) && !entering(app) ? screen(app) : menu_screen(app)];
@@ -2049,22 +2065,46 @@ static int status_rows(App* app, int width, GuiRect r, int y, int draw) {
 enum { GUI_TAB_MENU, GUI_TAB_GAMES, GUI_TAB_SETTINGS, GUI_TABS };
 static const char* const tab_names[GUI_TABS] = {SNX_TR_NOOP("Menu"), SNX_TR_NOOP("Games"), SNX_TR_NOOP("Settings")};
 static int tab_shown(const App* app) {
+    if (app->setup_on && !app->editing) return app->setup_page;
     if (app->editing) return GUI_TAB_SETTINGS;
     return app->menu.view == GUI_LOAD_GAMES ? GUI_TAB_GAMES : GUI_TAB_MENU;
 }
+/* the tabs while the setup shows: its pages, the notices' then each step's, numbered */
+enum { SETUP_NOTICE = SNX_SETUP_STEPS }; /* a page's: a step's, or the notices' */
+static const char* const setup_step_names[SNX_SETUP_STEPS] = {
+    SNX_TR_NOOP("Language"), SNX_TR_NOOP("Install"), SNX_TR_NOOP("Folders"), SNX_TR_NOOP("Keys"), SNX_TR_NOOP("User")};
+static int tab_count(const App* app) { return app->setup_on && !app->editing ? app->setup_count : GUI_TABS; }
+/* page i's number among the steps, from 1; 0 for the notices' */
+static int setup_number(const App* app, int i) {
+    return app->setup_pages[i] == SETUP_NOTICE ? 0 : i + (app->setup_pages[0] != SETUP_NOTICE);
+}
+static void tab_label(const App* app, int i, char* out, size_t size) {
+    if (!app->setup_on || app->editing)
+        snprintf(out, size, "%s", snx_tr(tab_names[i]));
+    else if (app->setup_pages[i] == SETUP_NOTICE)
+        snprintf(out, size, "%s", snx_tr("Notice"));
+    else
+        snprintf(out, size, "%d %s", setup_number(app, i), snx_tr(setup_step_names[app->setup_pages[i]]));
+}
 /* tab i in the row of tabs: two columns wider than its name, a column after the one before it */
 static GuiRect tab_rect(const App* app, GuiRect row, int i) {
+    char label[64];
     int x = row.x, k;
-    for (k = 0; k < i; ++k) x += (gui_text_cols(snx_tr(tab_names[k])) + 3) * cell_w(app);
-    return gui_rect(x, row.y, (gui_text_cols(snx_tr(tab_names[i])) + 2) * cell_w(app), row.h);
+    for (k = 0; k < i; ++k) {
+        tab_label(app, k, label, sizeof label);
+        x += (gui_text_cols(label) + 3) * cell_w(app);
+    }
+    tab_label(app, i, label, sizeof label);
+    return gui_rect(x, row.y, (gui_text_cols(label) + 2) * cell_w(app), row.h);
 }
 /* the tabs, the one shown as the focused box is; on the head's band in its colours swapped */
 static void draw_tabs(App* app, GuiRect row, int band) {
     const GuiTheme* t = &app->theme;
     GuiRgb ink = band ? t->page : t->ink, page = band ? t->ink : t->page, focus = band ? t->page : t->focus;
     int i, s = app->scale, shown = tab_shown(app);
+    char label[64];
     if (!row.h) return;
-    for (i = 0; i < GUI_TABS; ++i) {
+    for (i = 0; i < tab_count(app); ++i) {
         GuiRect r = tab_rect(app, row, i);
         int on = i == shown, inverted = on && t->focus_bar;
         if (inverted)
@@ -2072,7 +2112,8 @@ static void draw_tabs(App* app, GuiRect row, int band) {
         else if (t->panels == GUI_PANELS_FILL)
             fill_rect(app, r, t->dim);
         if (!inverted && (t->panels == GUI_PANELS_OUTLINE || on)) outline(app, r, on ? focus : t->dim);
-        text_in(app, r, r.x + cell_w(app), r.y + 2 * s, snx_tr(tab_names[i]), rgb(inverted ? page : on ? focus : ink));
+        tab_label(app, i, label, sizeof label);
+        text_in(app, r, r.x + cell_w(app), r.y + 2 * s, label, rgb(inverted ? page : on ? focus : ink));
     }
 }
 /* the page's faint grid behind the boxes, in the dim colour */
@@ -2120,7 +2161,7 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols,
     in.cw = cell_w(app);
     in.ch = cell_h(app);
     if (shows & GUI_SHOWS_TABS) {
-        GuiRect last = tab_rect(app, none, GUI_TABS - 1);
+        GuiRect last = tab_rect(app, none, tab_count(app) - 1);
         in.tabs = cell_h(app) + 4 * s;
         in.tabs_w = last.x + last.w;
     }
@@ -2134,7 +2175,7 @@ static void place_screen(App* app, GuiPlace* p, const char* keys, int list_cols,
     in.badge = in.title ? SDL_max(in.title, in.title_beside ? in.tabs : 0) : in.tabs;
     in.badge_w = user_width(app, in.badge);
     if (!in.badge_w) in.badge = 0;
-    if (t->tips_place == GUI_TIPS_TOP) in.tips = cell_h(app) + 4 * s;
+    if (t->tips_place == GUI_TIPS_TOP && !app->setup_on) in.tips = cell_h(app) + 4 * s; /* the setup's: the foot's */
     in.list_cols = list_cols ? SDL_min(SDL_max(list_cols, 20), SDL_max(20, (width / cell_w(app) - 2) * 3 / 5)) : 0;
     in.fixed = t->sizing == GUI_SIZING_FIXED && list_cols && list_cols < width / cell_w(app); /* a list, not a run */
     app->scale = foot_scale(app);
@@ -4418,10 +4459,627 @@ static void form_pointer(App* app, float x, float y, bool touch) {
     }
     form_row_pointer(app, i);
 }
+/* ---- the setup a first start goes through (common/utilities/setup.h), in place of the menu: a page at a time, the
+   notices of what older versions did, then each step setup.ini has left. Its boxes say what the page is about, its
+   question and choices come as the theme's options-dialog places them, its tip in the foot. What a step does is done
+   as it is taken; setup.ini is written once the last one is ---- */
+#ifdef SDL_PLATFORM_ANDROID
+#define SAY_SETUP        SNX_TR_KEYS("Tap: choose. Back: go back.")
+#define SAY_SETUP_FIRST  SAY_SETUP
+#define SAY_SETUP_TYPING SNX_TR_KEYS("Type the nickname. Back: go back.")
+#define SAY_SETUP_NOTICE SAY_SETUP
+#else
+#define SAY_SETUP        SNX_TR_KEYS("Up/Down: choose. Enter: next. ESC: back.")
+#define SAY_SETUP_FIRST  SNX_TR_KEYS("Up/Down: choose. Enter: next. ESC: exit.")
+#define SAY_SETUP_TYPING SNX_TR_KEYS("Type the nickname. Enter: done. ESC: back.")
+#define SAY_SETUP_NOTICE SNX_TR_KEYS("Up/Down: scroll. Enter: OK. ESC: exit.")
+#endif
+#define SAY_SETUP_NICKNAME SNX_TR_NOOP("nickname 4 to 20 of A-Z a-z 0-9 space . _ -")
+#define GUI_SETUP_CHOICES  32 /* a page's, at most: the languages' */
+static void open_files(App* app);
+static void left_behind(App* app);
+static void ask_key(App* app, GuiKey key);
+static bool menu_key_of(const SDL_KeyboardEvent* k, GuiKey* key);
+static int setup_page_of(const App* app) { return app->setup_pages[app->setup_page]; }
+static int setup_steps(const App* app) { return app->setup_count - (app->setup_pages[0] == SETUP_NOTICE); }
+/* a portable copy's folder beside the program (snx_portable_dir), and whether it is there: owned */
+static char* setup_portable(const App* app, bool* there) {
+    char* portable = snx_portable_dir(app->drivers);
+    *there = portable && snx_is_dir(portable);
+    return portable;
+}
+/* users.ini as the user's page finds it: there or not, its users or why it is no list of them */
+static void setup_users_read(App* app) {
+    char* path = app->users_dir ? snx_path_join(app->users_dir, "users.ini") : NULL;
+    app->setup_written = path && snx_is_file(path);
+    app->setup_users = 0;
+    app->setup_why[0] = 0;
+    if (app->setup_written)
+        app->setup_users = snx_users_load(app->users_dir, 1, app->setup_why, sizeof app->setup_why) ? -1 : g_user_count;
+    users_close(app); /* their pictures drawn again for the page */
+    free(path);
+}
+/* the nickname of the new first user typed, its uid the fixed one while games have saves of it, else random */
+static void setup_type(App* app) {
+    app->setup_saves = snx_setup_first_uid(app->games_dir, app->setup_uid);
+    if (app->setup_saves < 0) {
+        app->setup_failed = true;
+        snprintf(app->message, sizeof app->message, "%s",
+                 snx_tr("The system's random number generator failed: no uid for a new user"));
+        return;
+    }
+    app->setup_typing = true;
+    snprintf(app->setup_name, sizeof app->setup_name, "Player");
+    app->setup_choice.count = 1;
+    app->setup_choice.focus = 0;
+    SDL_StartTextInput(app->window);
+}
+/* the page shown from its start: its choices, the one in focus the one in use */
+static void setup_enter(App* app) {
+    int page = setup_page_of(app);
+    bool there;
+    char *portable, *prod;
+    app->setup_top = 0;
+    app->setup_typing = false;
+    app->setup_keys = false;
+    app->setup_choice.focus = 0;
+    SDL_StopTextInput(app->window);
+    switch (page) {
+        case SNX_SETUP_LANGUAGE:
+            app->setup_choice.count = SDL_min(snx_gui_language_count, GUI_SETUP_CHOICES);
+            app->setup_language = app->language ? app->language - 1 : language_auto();
+            app->setup_choice.focus = app->setup_language;
+            break;
+        case SNX_SETUP_INSTALL:
+            app->setup_choice.count = 2;
+            portable = setup_portable(app, &there);
+            app->setup_choice.focus = there;
+            free(portable);
+            break;
+        case SNX_SETUP_FOLDERS: app->setup_choice.count = 3; break;
+        case SNX_SETUP_KEYS:
+            prod = snx_keys_found(app->data_dir, "prod.keys");
+            app->setup_choice.count = prod ? 3 : 2;
+            app->setup_choice.focus = prod ? 0 : 1; /* these, or later */
+            free(prod);
+            break;
+        case SNX_SETUP_USER:
+            setup_users_read(app);
+            app->setup_saves = snx_setup_first_saves(app->games_dir);
+            app->setup_choice.count = 2; /* Keep, Overwrite */
+            if (!app->setup_written) setup_type(app);
+            break;
+        default: app->setup_choice.count = 1; break; /* the notices' OK */
+    }
+}
+/* the setup at the start, unless --debug or --skip twice leave it out: the pages setup.ini has left, or none */
+static void setup_start(App* app) {
+    char why[512], *file = snx_setup_file(app->home_dir ? app->home_dir : app->data_dir);
+    int i;
+    app->setup_on = false;
+    app->setup_count = app->setup_page = 0;
+    if (snx_setup_skip || !file) {
+        free(file);
+        return;
+    }
+    if (snx_setup_read(file, &app->setup, why, sizeof why))
+        snprintf(app->message, sizeof app->message, snx_tr("%s: the setup asks again"), why);
+    free(file);
+    for (i = 0; i < SNX_NOTICES && !snx_setup_shows(&app->setup, i); ++i) {}
+    if (i < SNX_NOTICES) app->setup_pages[app->setup_count++] = SETUP_NOTICE;
+    for (i = 0; i < SNX_SETUP_STEPS; ++i)
+        if (snx_setup_asks(&app->setup, i) && snx_setup_here(i)) app->setup_pages[app->setup_count++] = i;
+    app->setup_on = app->setup_count > 0;
+    app->setup_save = app->setup_moved = false;
+    if (app->setup_on) setup_enter(app);
+}
+/* the last page done: setup.ini says so, the language picked kept in app.ini, the menu with the user its head shows */
+static void setup_finish(App* app) {
+    char why[512], *file = snx_setup_file(app->home_dir ? app->home_dir : app->data_dir);
+    app->setup_on = false;
+    app->setup_typing = false;
+    SDL_StopTextInput(app->window);
+    users_close(app);
+    app->message[0] = 0;
+    users_read(app);
+    if (app->setup_save) app_save(app);
+    if (!file || snx_setup_done(file, &app->setup, why, sizeof why))
+        snprintf(app->message, sizeof app->message, snx_tr("The setup was not kept, so it asks again: %s"),
+                 file ? why : snx_tr("no folder for setup.ini"));
+    app->setup_failed = false;
+    if (app->setup_moved) { /* in the folders it has now */
+        left_behind(app);
+        app->left_shown = app->lefts > 0;
+    }
+    free(file);
+    layout(app);
+}
+static void setup_next(App* app) {
+    app->message[0] = 0;
+    app->setup_failed = false;
+    if (++app->setup_page >= app->setup_count)
+        setup_finish(app);
+    else
+        setup_enter(app);
+}
+/* a failure on the page, which stays */
+static void setup_fail(App* app, const char* text) {
+    snprintf(app->message, sizeof app->message, "%s", text);
+    app->setup_failed = true;
+}
+/* the data folder snx_data_dir names now, a portable copy's the setup just made: the menu's own files are its */
+static void data_moved(App* app) {
+    char* data = snx_data_dir(app->drivers);
+    int i;
+    if (!data) return;
+    free(app->home_dir);
+    app->home_dir = data;
+    for (i = 0; i < GUI_PLACES; ++i) { /* the folders the other app.ini picked */
+        free(app->place[i]);
+        app->place[i] = NULL;
+    }
+    places_apply(app);
+    app->setup_moved = true;
+    for (i = 0; i < app->folder_count; ++i) free(app->folders[i]);
+    app->folder_count = 0;
+    free(app->settings_file);
+    free(app->folders_file);
+    free(app->app_file);
+    free(app->run_log);
+    free(app->users_dir);
+    app->settings_file = app->folders_file = app->app_file = app->run_log = app->users_dir = NULL;
+    gui_settings_free(&app->settings);
+    open_files(app);
+    space_start(app);
+}
+/* the new first user written, as it was typed */
+static void setup_user_done(App* app) {
+    char why[512], note[640];
+    if (!snx_users_nickname_valid(app->setup_name)) {
+        snprintf(note, sizeof note, snx_tr("%s is not a nickname: %s"), app->setup_name, snx_tr(SAY_SETUP_NICKNAME));
+        setup_fail(app, note);
+    } else if (snx_users_start(app->users_dir, app->setup_uid, app->setup_name, why, sizeof why)) {
+        snprintf(note, sizeof note, snx_tr("No user written: %s"), why);
+        setup_fail(app, note);
+    } else
+        setup_next(app);
+}
+/* the folder of keys the picker gave (NULL: none, error why it could not open), installed where the menu keeps them */
+static void setup_keys_from(App* app, const char* folder, const char* error) {
+    char *dir = app->keys_path ? snx_dirname(app->keys_path) : NULL, why[1024], note[1200], shown[1024];
+    int titles, ok = 0;
+    app->setup_keys = false;
+    if (!folder)
+        snprintf(note, sizeof note, "%s", error ? error : snx_tr("No folder was picked."));
+    else if (!dir)
+        snprintf(note, sizeof note, "%s", snx_tr("Cannot locate your home directory. Keys were not installed."));
+    else if (snx_keys_install(folder, dir, &titles, why, sizeof why))
+        snprintf(note, sizeof note, snx_tr("Not installed: %s"), why);
+    else {
+        snx_home_short(dir, shown, sizeof shown);
+        snprintf(note, sizeof note,
+                 titles ? snx_tr("Installed prod.keys and title.keys in %s") : snx_tr("Installed prod.keys in %s"),
+                 shown);
+        ok = 1;
+    }
+    setup_enter(app); /* found now: Use these; else Choose folder again */
+    if (ok) {
+        snprintf(app->message, sizeof app->message, "%s", note);
+        app->setup_failed = false;
+    } else {
+        app->setup_choice.focus = app->setup_choice.count == 3;
+        setup_fail(app, note);
+    }
+    free(dir);
+}
+/* the focused choice of the page taken */
+static void setup_take(App* app) {
+    int page = setup_page_of(app), choice = app->setup_choice.focus;
+    char note[1100], *portable, *prod, shown[1024];
+    bool there;
+    switch (page) {
+        case SNX_SETUP_LANGUAGE:
+            if (choice != app->setup_language) { /* one picked over the one the menu has */
+                app->language = choice + 1;
+                language_apply(app);
+                app->setup_save = true;
+            }
+            setup_next(app);
+            return;
+        case SNX_SETUP_INSTALL:
+            portable = setup_portable(app, &there);
+            snx_home_short(portable ? portable : "", shown, sizeof shown);
+            if (!choice && there) {
+                snprintf(note, sizeof note, snx_tr("This copy is portable: to install it, first move away %s"), shown);
+                setup_fail(app, note);
+            } else if (choice && !there && (!portable || snx_mkdirs(portable))) {
+                snprintf(note, sizeof note, snx_tr("Could not make %s"), portable ? shown : "(?)");
+                setup_fail(app, note);
+            } else {
+                if (choice && !there) data_moved(app);
+                setup_next(app);
+            }
+            free(portable);
+            return;
+        case SNX_SETUP_FOLDERS:
+            if (!choice) {
+                setup_next(app);
+                return;
+            }
+            app->place_row = choice == 1 ? GUI_PLACE_GAMES : -1; /* the games' folder, or one more of dumps */
+            open_folder_picker(app);
+            return;
+        case SNX_SETUP_KEYS:
+            prod = snx_keys_found(app->data_dir, "prod.keys");
+            if (choice == (prod ? 1 : 0)) {
+                app->setup_keys = true;
+                open_folder_picker(app);
+            } else
+                setup_next(app);
+            free(prod);
+            return;
+        case SNX_SETUP_USER:
+            if (app->setup_typing)
+                setup_user_done(app);
+            else if (choice)
+                setup_type(app);
+            else
+                setup_next(app);
+            return;
+        default: setup_next(app); return;
+    }
+}
+/* back a page, out of the nickname to Keep and Overwrite, or on the first page what ESC does on the menu's */
+static void setup_back(App* app) {
+    app->message[0] = 0;
+    app->setup_failed = false;
+    if (app->setup_typing && app->setup_written) {
+        app->setup_typing = false;
+        SDL_StopTextInput(app->window);
+        app->setup_choice.count = 2;
+        app->setup_choice.focus = 1;
+    } else if (app->setup_page > 0) {
+        --app->setup_page;
+        setup_enter(app);
+    } else {
+#ifdef SDL_PLATFORM_ANDROID
+        gui_android_background(app->message, sizeof(app->message));
+#else
+        gui_confirm_open(&app->confirm, GUI_ASK_EXIT, false);
+#endif
+    }
+}
+/* the notices left, from the setup_top-th, and how many */
+static int setup_notices(const App* app, int* list) {
+    int i, n = 0;
+    for (i = 0; i < SNX_NOTICES; ++i)
+        if (snx_setup_shows(&app->setup, i)) list[n++] = i;
+    return n;
+}
+static void setup_key(App* app, GuiKey key) {
+    if (setup_page_of(app) == SETUP_NOTICE && (key == GUI_UP || key == GUI_DOWN)) { /* the notices, a page over */
+        int list[SNX_NOTICES], n = setup_notices(app, list);
+        app->setup_top = SDL_clamp(app->setup_top + (key == GUI_UP ? -1 : 1), 0, SDL_max(n - 1, 0));
+        return;
+    }
+    switch (gui_choice_key(&app->setup_choice, key)) {
+        case GUI_CHOICE_TAKE: setup_take(app); break;
+        case GUI_CHOICE_BACK: setup_back(app); break;
+        default: break;
+    }
+}
+/* a character typed into the nickname, or the last one taken out */
+static void setup_type_text(App* app, const char* text) {
+    size_t n = strlen(app->setup_name);
+    if (n + strlen(text) <= SNX_USERS_NICKNAME) memcpy(app->setup_name + n, text, strlen(text) + 1);
+}
+static void setup_type_back(App* app) {
+    size_t n = strlen(app->setup_name);
+    while (n && ((unsigned char)app->setup_name[n - 1] & 0xC0) == 0x80) --n; /* a UTF-8 letter's last bytes */
+    if (n) app->setup_name[n - 1] = 0;
+}
+/* the keys and the input the setup takes while it shows: true for what it took */
+static bool setup_event(App* app, const SDL_Event* e) {
+    GuiKey key;
+    if (e->type == SDL_EVENT_TEXT_INPUT) {
+        if (app->setup_typing && !app->confirm.shown) setup_type_text(app, e->text.text);
+        return true;
+    }
+    if (e->type != SDL_EVENT_KEY_DOWN) return false;
+    if (app->confirm.shown) {
+        if (!e->key.repeat && menu_key_of(&e->key, &key)) ask_key(app, key);
+        return true;
+    }
+    if (app->setup_typing && e->key.key == SDLK_BACKSPACE) {
+        setup_type_back(app);
+        return true;
+    }
+    if (app->setup_typing && (e->key.key == SDLK_SPACE || (e->key.key >= SDLK_A && e->key.key <= SDLK_Z)))
+        return true; /* letters come as text */
+    if (menu_key_of(&e->key, &key)) setup_key(app, key);
+    return true;
+}
+/* ---- its drawing ---- */
+/* the page's choices into labels, own the room for those it makes; how many */
+static int setup_labels(const App* app, const char** labels) {
+    static const char* const install[] = {SNX_TR_NOOP("Installed"), SNX_TR_NOOP("Portable")};
+    static const char* const folders[] = {SNX_TR_NOOP("Keep"), SNX_TR_NOOP("Change games folder"),
+                                          SNX_TR_NOOP("Add dumps folder")};
+    static const char* const keys[] = {SNX_TR_NOOP("Use these"), SNX_TR_NOOP("Choose folder"), SNX_TR_NOOP("Later")};
+    static const char* const user[] = {SNX_TR_NOOP("Keep"), SNX_TR_NOOP("Overwrite")};
+    int i, page = setup_page_of(app), count = app->setup_choice.count;
+    for (i = 0; i < count; ++i)
+        labels[i] = page == SNX_SETUP_LANGUAGE                     ? snx_gui_languages[i].name
+                    : page == SNX_SETUP_INSTALL                    ? snx_tr(install[i])
+                    : page == SNX_SETUP_FOLDERS                    ? snx_tr(folders[i])
+                    : page == SNX_SETUP_KEYS                       ? snx_tr(keys[i + 3 - count])
+                    : page == SNX_SETUP_USER && !app->setup_typing ? snx_tr(user[i])
+                                                                   : snx_tr("OK");
+    return count;
+}
+static const char* setup_question(const App* app, char* out, size_t size) {
+    switch (setup_page_of(app)) {
+        case SETUP_NOTICE:
+            return app->setup.version ? snx_tr("Changed since the last version") : snx_tr("Changed in older versions");
+        case SNX_SETUP_LANGUAGE: return snx_tr("Language");
+        case SNX_SETUP_INSTALL: return snx_tr("Install type");
+        case SNX_SETUP_FOLDERS: return snx_tr("Folders");
+        case SNX_SETUP_KEYS: return snx_tr("Keys");
+        default:
+            if (app->setup_typing)
+                snprintf(out, size, snx_tr("Nickname: %s_"), app->setup_name);
+            else if (app->setup_users < 0)
+                snprintf(out, size, "%s", snx_tr("users.ini is no list of users"));
+            else
+                snprintf(out, size,
+                         app->setup_users == 1 ? snx_tr("users.ini has %d user") : snx_tr("users.ini has %d users"),
+                         app->setup_users);
+            return out;
+    }
+}
+static const char* setup_tip(const App* app) {
+    switch (setup_page_of(app)) {
+        case SETUP_NOTICE: return snx_tr("Tip: --debug skips the setup");
+        case SNX_SETUP_LANGUAGE: return snx_tr("Tip: it starts on the system's language");
+        case SNX_SETUP_INSTALL: return snx_tr("Tip: a portable copy is a folder you can copy");
+        case SNX_SETUP_FOLDERS: return snx_tr("Tip: Settings > App > Library and Folders change them");
+        case SNX_SETUP_KEYS: return snx_tr("Tip: the menu's Setup device keys changes them");
+        default: return snx_tr("Tip: nickname 4 to 20 of A-Z a-z 0-9 space . _ -");
+    }
+}
+static const char* setup_keys_said(const App* app) {
+    return app->setup_typing                    ? SAY_SETUP_TYPING
+           : setup_page_of(app) == SETUP_NOTICE ? SAY_SETUP_NOTICE
+           : app->setup_page                    ? SAY_SETUP
+                                                : SAY_SETUP_FIRST;
+}
+typedef struct {
+    GuiPlace place;
+    GuiRect content; /* the page's boxes */
+    GuiChoices choices;
+    const char* labels[GUI_SETUP_CHOICES];
+    int count;
+    char question[96], tab[64];
+} GuiSetupBoxes;
+static void setup_boxes(App* app, GuiSetupBoxes* b) {
+    int n = setup_number(app, app->setup_page);
+    char question[sizeof b->question];
+    place_screen(app, &b->place, snx_tr(setup_keys_said(app)), 0, GUI_SHOWS_TABS);
+    b->count = setup_labels(app, b->labels);
+    snprintf(b->question, sizeof b->question, "%s", setup_question(app, question, sizeof question));
+    if (app->theme.dialog == GUI_DIALOG_YORHA && n)
+        snprintf(b->tab, sizeof b->tab, "ScarletNX  %d/%d", n, setup_steps(app));
+    else if (app->theme.dialog == GUI_DIALOG_YORHA)
+        snprintf(b->tab, sizeof b->tab, "ScarletNX");
+    else if (n)
+        snprintf(b->tab, sizeof b->tab, "%d/%d", n, setup_steps(app));
+    else
+        b->tab[0] = 0;
+    choices_place(app, b->place.list, b->question, b->tab, b->labels, b->count, app->setup_choice.focus, &b->choices);
+    b->content = b->place.list;
+    if (app->theme.dialog == GUI_DIALOG_YORHA) /* above the choices */
+        b->content.h = SDL_max(0, b->choices.list.at.y - cell_h(app) / 2 - b->content.y);
+}
+/* a box of lines under its label, each wrapped from a row of its own (at its slashes, as paths); the rows they took */
+static int setup_box(App* app, GuiRect r, const char* label, const char* const* lines, int n) {
+    GuiRect text = inner(app, r);
+    int y = pane(app, r, label), i, rows = 0;
+    text = gui_rect(text.x, y, text.w, r.y + r.h - y);
+    for (i = 0; i < n; ++i)
+        rows += wrap_in(app, text, text.x, y + rows * cell_h(app), lines[i], 1, rgb(app->theme.ink));
+    return rows;
+}
+/* two boxes side by side, the first of fifths of r: their rectangles */
+static void setup_split(const App* app, GuiRect r, int fifths, GuiRect* a, GuiRect* b) {
+    int w = (r.w - cell_w(app)) * fifths / 5;
+    *a = gui_rect(r.x, r.y, w, r.h);
+    *b = gui_rect(r.x + w + cell_w(app), r.y, r.w - w - cell_w(app), r.h);
+}
+static void setup_notices_box(App* app, GuiRect r) {
+    char text[SNX_NOTICES * 3 + 1][320];
+    const char* lines[SNX_NOTICES * 3 + 1];
+    int list[SNX_NOTICES], n = setup_notices(app, list), i, k = 0, rows;
+    for (i = app->setup_top; i < n; ++i) {
+        const SnxNotice* notice = &snx_notices[list[i]];
+        snprintf(text[k], sizeof text[k], "%s%s", app->theme.marker, notice->what);
+        lines[k] = text[k];
+        ++k;
+        snprintf(text[k], sizeof text[k], "    %-8s%s", snx_tr("before"), notice->before);
+        lines[k] = text[k];
+        ++k;
+        snprintf(text[k], sizeof text[k], "    %-8s%s", snx_tr("now"), notice->now);
+        lines[k] = text[k];
+        ++k;
+    }
+    snprintf(text[k], sizeof text[k], "  %s", snx_tr("Not moved. See docs/DEPRECATIONS.md"));
+    lines[k] = text[k];
+    ++k;
+    rows = setup_box(app, r, snx_tr("Changed"), lines, k);
+    /* more above or below the box's rows: Up and Down go over them */
+    if (app->setup_top)
+        text_in(app, r, r.x + r.w - 2 * cell_w(app), r.y + head_h(app) + 2 * app->scale, "\x1e", rgb(app->theme.soft));
+    if (head_h(app) + (rows + 1) * cell_h(app) > r.h)
+        text_in(app, r, r.x + r.w - 2 * cell_w(app), r.y + r.h - cell_h(app) - 2 * app->scale, "\x1f",
+                rgb(app->theme.soft));
+}
+/* users.ini's users, a row each: the picture, the nickname, the uid */
+static void setup_users_box(App* app, GuiRect r) {
+    GuiRect text = inner(app, r);
+    int y = pane(app, r, "users.ini") + 2 * app->scale, i, side = cell_h(app), longest = 0;
+    char uid[33];
+    for (i = 0; i < g_user_count; ++i) longest = SDL_max(longest, gui_text_cols(g_users[i].nickname));
+    if (app->setup_users < 0) {
+        wrap_in(app, gui_rect(text.x, y, text.w, r.y + r.h - y), text.x, y, app->setup_why, 1, rgb(app->theme.failure));
+        return;
+    }
+    for (i = 0; i < g_user_count && y + side <= r.y + r.h; ++i, y += side + 4 * app->scale) {
+        if (!app->users_pictures[i] || app->users_side != side) {
+            uint32_t size;
+            const unsigned char* jpeg = snx_users_picture(&g_users[i], &size);
+            bool failed;
+            SDL_DestroyTexture(app->users_pictures[i]);
+            app->users_pictures[i] = picture_texture(app, jpeg, size, side, &failed);
+        }
+        if (app->users_pictures[i]) {
+            SDL_FRect at = {(float)text.x, (float)y, (float)side, (float)side};
+            SDL_RenderTexture(app->renderer, app->users_pictures[i], NULL, &at);
+        }
+        text_in(app, text, text.x + side + cell_w(app), y, g_users[i].nickname, rgb(app->theme.ink));
+        snx_users_uid_text(g_users[i].uid, uid);
+        text_in(app, text, text.x + side + cell_w(app) * (longest + 3), y, uid, rgb(app->theme.soft));
+    }
+    app->users_side = side;
+}
+/* what the new first user's uid is: random, or the fixed one for its saves */
+static void setup_uid_line(const App* app, char* out, size_t size) {
+    char uid[33];
+    if (app->setup_saves > 0 && app->setup_typing) {
+        snx_users_uid_text(app->setup_uid, uid);
+        snprintf(out, size,
+                 app->setup_saves == 1 ? snx_tr("uid %s, of the saves of %d game")
+                                       : snx_tr("uid %s, of the saves of %d games"),
+                 uid, app->setup_saves);
+    } else if (app->setup_typing) {
+        snx_users_uid_text(app->setup_uid, uid);
+        snprintf(out, size, snx_tr("uid %s, random"), uid);
+    } else if (app->setup_saves > 0)
+        snprintf(out, size,
+                 app->setup_saves == 1 ? snx_tr("one new user, the uid of the saves of %d game")
+                                       : snx_tr("one new user, the uid of the saves of %d games"),
+                 app->setup_saves);
+    else
+        snprintf(out, size, "%s", snx_tr("one new user, random uid"));
+}
+static void setup_panes(App* app, GuiRect r) {
+    static const int kinds[] = {SNX_USER_CONFIG, SNX_USER_DATA, SNX_USER_STATE, SNX_USER_CACHE};
+    static const char* const kind_names[] = {SNX_TR_NOOP("settings"), SNX_TR_NOOP("data"), SNX_TR_NOOP("logs"),
+                                             SNX_TR_NOOP("caches")};
+    char text[GUI_FOLDERS_MAX + 4][1100], shown[1024];
+    const char* lines[GUI_FOLDERS_MAX + 4];
+    GuiRect a, b;
+    int i, n = 0;
+    char *path, *other;
+    bool there;
+    const char* m = app->theme.marker;
+    if (!r.h) return;
+#define SETUP_LINE(...) (snprintf(text[n], sizeof text[n], __VA_ARGS__), lines[n] = text[n], ++n)
+    switch (setup_page_of(app)) {
+        case SETUP_NOTICE: setup_notices_box(app, r); break;
+        case SNX_SETUP_LANGUAGE:
+            SETUP_LINE("%s%s", m, snx_tr("The menus and their messages"));
+            SETUP_LINE("%s%s", m, snx_tr("Games keep their own: Settings > System > language"));
+            setup_box(app, r, snx_tr("Language"), lines, n);
+            break;
+        case SNX_SETUP_INSTALL:
+            setup_split(app, r, 3, &a, &b);
+            for (i = 0; i < 4; ++i) {
+                path = snx_user_dir(kinds[i]);
+                snx_home_short(path ? path : snx_tr("(no home folder)"), shown, sizeof shown);
+                SETUP_LINE("%-9s%s", snx_tr(kind_names[i]), shown);
+                free(path);
+            }
+            setup_box(app, a, snx_tr("Installed"), lines, n);
+            n = 0;
+            path = setup_portable(app, &there);
+            snx_home_short(path ? path : "", shown, sizeof shown);
+            SETUP_LINE("%-11s%s", snx_tr("everything"), shown);
+            SETUP_LINE("%s", there ? snx_tr("there: this copy is portable") : snx_tr("beside the program, made then"));
+            setup_box(app, b, snx_tr("Portable"), lines, n);
+            free(path);
+            break;
+        case SNX_SETUP_FOLDERS:
+            snx_home_short(app->games_dir ? app->games_dir : "games/", shown, sizeof shown);
+            SETUP_LINE("%s%-7s%s", m, snx_tr("Games"), shown);
+            if (!app->folder_count) SETUP_LINE("%s%-7s%s", m, snx_tr("Dumps"), snx_tr("none yet"));
+            for (i = 0; i < app->folder_count; ++i) {
+                snx_home_short(app->folders[i], shown, sizeof shown);
+                SETUP_LINE("%s%-7s%s%s", m, i ? "" : snx_tr("Dumps"), shown,
+                           app->folders_deep[i] ? snx_tr(" + subfolders") : "");
+            }
+            setup_box(app, r, snx_tr("Folders"), lines, n);
+            break;
+        case SNX_SETUP_KEYS:
+            path = snx_keys_found(app->data_dir, "prod.keys");
+            other = snx_keys_found(app->data_dir, "title.keys");
+            snx_home_short(path ? path : "", shown, sizeof shown);
+            SETUP_LINE("%s%-12s%-9s%s", m, "prod.keys", path ? snx_tr("found") : snx_tr("missing"),
+                       path ? shown : snx_tr("games are extracted with it"));
+            snx_home_short(other ? other : "", shown, sizeof shown);
+            SETUP_LINE("%s%-12s%-9s%s", m, "title.keys", other ? snx_tr("found") : snx_tr("missing"),
+                       other ? shown : snx_tr("only some .nsp need it"));
+            setup_box(app, r, snx_tr("Keys"), lines, n);
+            free(path);
+            free(other);
+            break;
+        default:
+            if (app->setup_typing) {
+                SETUP_LINE("%s%-10s%s", m, snx_tr("nickname"), app->setup_name);
+                setup_uid_line(app, shown, sizeof shown);
+                SETUP_LINE("%s%s", m, shown);
+                setup_box(app, r, snx_tr("First user"), lines, n);
+                break;
+            }
+            setup_split(app, r, 3, &a, &b);
+            setup_users_box(app, a);
+            setup_uid_line(app, shown, sizeof shown);
+            SETUP_LINE("%s%s", m, shown);
+            SETUP_LINE("%s%s", m, snx_tr("old file: users.ini.old"));
+            setup_box(app, b, snx_tr("Overwrite"), lines, n);
+            break;
+    }
+#undef SETUP_LINE
+}
+static void draw_setup(App* app) {
+    GuiSetupBoxes b;
+    const GuiTheme* t = &app->theme;
+    setup_boxes(app, &b);
+    chrome(app, &b.place);
+    setup_panes(app, b.content);
+    choices_draw(app, &b.choices, b.question, b.tab, b.labels, b.count, app->setup_choice.focus);
+    foot(app, &b.place, app->message[0] ? app->message : setup_tip(app),
+         rgb(app->setup_failed ? t->failure
+             : app->message[0] ? t->focus
+                               : t->ink),
+         snx_tr(setup_keys_said(app)));
+    if (app->confirm.shown) render_ask(app);
+}
+/* the pointer on the page: a choice under it takes the focus, a click takes it */
+static void setup_pointer(App* app, float x, float y, bool click) {
+    GuiSetupBoxes b;
+    bool on;
+    int i;
+    setup_boxes(app, &b);
+    if ((i = choices_hit(&b.choices, x, y, &on)) < 0) return;
+    app->setup_choice.focus = i;
+    if (click) setup_take(app);
+}
 static void render(App* app) {
     layout(app);
     if (splash_shown(app)) return;
-    if (app->editing && app->form == GUI_FORM_PAD)
+    if (app->setup_on && !app->editing) {
+        draw_setup(app);
+        overlay(app);
+    } else if (app->editing && app->form == GUI_FORM_PAD)
         render_pad(app);
     else if (app->editing) {
         draw_form(app);
@@ -5619,6 +6277,13 @@ static bool hint_press(App* app, const char* key, int col) {
 }
 /* the boxes of the screen shown, and the keys its foot says */
 static const char* shown_place(App* app, GuiPlace* p, char* keys, size_t size) {
+    if (app->setup_on && !app->editing) {
+        GuiSetupBoxes b;
+        setup_boxes(app, &b);
+        *p = b.place;
+        snprintf(keys, size, "%s", snx_tr(setup_keys_said(app)));
+        return keys;
+    }
     if (app->editing && app->form == GUI_FORM_PAD)
         place_screen(app, p, shown_keys(app, keys, size), 0, GUI_SHOWS_TABS); /* render_pad's */
     else if (app->editing) {
@@ -5687,7 +6352,9 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
         picker_pointer(app, x, y, click);
     else if (app->editing) {
         if (click) form_pointer(app, x, y, touch);
-    } else
+    } else if (app->setup_on)
+        setup_pointer(app, x, y, click);
+    else
         screen_pointer(app, x, y, click, touch);
 }
 /* the file the system's picker chose, as a dropped one; none (cancelled) stays on the screen and says so */
@@ -5757,7 +6424,8 @@ static bool menu_scrolls(App* app) {
 static bool drags(App* app, float x, float y) {
     float dx = x - app->finger_x, dy = y - app->finger_y;
     return SDL_fabsf(dy) > 0.05f && SDL_fabsf(dy) > 2 * SDL_fabsf(dx) && app->menu.view != GUI_LOAD_GAMES &&
-           !app->menu.running && !app->finished && (app->editing ? app->form != GUI_FORM_PAD : menu_scrolls(app));
+           !app->menu.running && !app->finished && !app->setup_on &&
+           (app->editing ? app->form != GUI_FORM_PAD : menu_scrolls(app));
 }
 /* the focus follows the finger, up as it goes up, a row each time it passes a row's height, so the highlight is seen
    going */
@@ -5858,9 +6526,11 @@ static void event(App* app, const SDL_Event* e) {
         app->menu.quit = true;
         return;
     }
+    /* the setup, while it shows, takes the keys and the typing; the pointer goes to it through pointer() */
+    if (app->setup_on && !app->splash && setup_event(app, e)) return;
     /* what Clean old settings did, and the box of an older version's files: Up/Down and the wheel go over their files,
        the first other key, button or finger closes it */
-    if ((app->cleaned_shown || (app->left_shown && !app->splash)) &&
+    if (!app->setup_on && (app->cleaned_shown || (app->left_shown && !app->splash)) &&
         ((e->type == SDL_EVENT_KEY_DOWN && files_key(app, e->key.key)) || e->type == SDL_EVENT_MOUSE_WHEEL)) {
         if (e->type == SDL_EVENT_MOUSE_WHEEL) files_step(app, -e->wheel.integer_y); /* a notch a file, as a row */
         return;
@@ -5870,7 +6540,7 @@ static void event(App* app, const SDL_Event* e) {
         app->cleaned_shown = false;
         return;
     }
-    if (app->left_shown && !app->splash &&
+    if (app->left_shown && !app->splash && !app->setup_on &&
         (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_DOWN || e->type == SDL_EVENT_FINGER_DOWN)) {
         app->left_shown = false;
         return;
@@ -5931,7 +6601,9 @@ static void event(App* app, const SDL_Event* e) {
         char* error = (char*)e->user.data2;
         int place = app->place_row;
         app->place_row = -1;
-        if (e->user.data1 && place >= 0)
+        if (app->setup_keys) /* the setup's keys */
+            setup_keys_from(app, (const char*)e->user.data1, e->user.code ? error : NULL);
+        else if (e->user.data1 && place >= 0)
             place_set(app, place, (const char*)e->user.data1);
         else if (e->user.data1)
             folder_ask(app, (const char*)e->user.data1);
@@ -6005,6 +6677,8 @@ static void event(App* app, const SDL_Event* e) {
     /* a notch of the wheel is a row, as a finger's drag, the way the system turns it; not under a box */
     if (e->type == SDL_EVENT_MOUSE_WHEEL) {
         int rows = e->wheel.integer_y;
+        for (; app->setup_on && !app->splash && !app->confirm.shown && rows; rows += rows > 0 ? -1 : 1)
+            setup_key(app, rows > 0 ? GUI_UP : GUI_DOWN);
         if (app->splash || app->menu.running || app->finished || app->confirm.shown || app->left_shown ||
             app->users_shown || (app->editing && app->editor.picking))
             return;
@@ -6243,6 +6917,7 @@ int snx_gui_main(const char* self) {
         return 1;
     }
     open_files(&app); /* here, not in initialize(), so the tests keep their own */
+    setup_start(&app);
     app.games_stamp = games_stamp(&app);
     space_start(&app); /* the footer's disk */
     left_behind(&app);
@@ -6267,8 +6942,11 @@ int snx_gui_main(const char* self) {
 }
 #ifndef SNX_GUI_NO_MAIN /* the menu alone: Android's activity runs it, and a build without the Switch runtime */
 int main(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
+    char why[160];
+    if (snx_setup_options(argc, argv, why, sizeof why) < 0) { /* --debug and --skip --skip leave the setup out */
+        fprintf(stderr, "scarletnx-gui: %s\n", why);
+        return 2;
+    }
     return snx_gui_main(NULL);
 }
 #endif

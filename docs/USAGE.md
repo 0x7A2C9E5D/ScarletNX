@@ -363,8 +363,8 @@ the launcher's foot.
 
 ## Setup
 
-The first start goes through a setup: in the launcher's window ([GUI](GUI.md)), or in the terminal a dump is first
-run from. It says first what older versions did that this one does otherwise ([DEPRECATIONS](DEPRECATIONS.md):
+The first start goes through a setup: in the launcher's window ([GUI](GUI.md#setup)), or in the terminal a dump is
+first run from. It says first what older versions did that this one does otherwise ([DEPRECATIONS](DEPRECATIONS.md):
 only said, nothing is moved), then asks:
 
 1. **Language**, the launcher's (app.ini's `language`), starting on the one it has: the system's, until one is picked.

@@ -18,8 +18,8 @@
 
 const int snx_setup_since[SNX_SETUP_STEPS] = {1, 1, 1, 1, 1};
 const SnxNotice snx_notices[SNX_NOTICES] = {
-    {"Game settings", "removed or renamed keys in a game's .ini",
-     "under [Deprecated]: Settings > App > Clean old settings takes them out", "`.ini` key", SNX_NOTICE_ALL},
+    {"Game settings", "removed or renamed keys in a game's .ini", "under [Deprecated]: Clean old settings takes them",
+     "`.ini` key", SNX_NOTICE_ALL},
     {"An option", "--keep-c", "--keep-ir", "`--keep-c`", SNX_NOTICE_ALL},
     {"An installed copy's files", "~/.local/share/scarletnx: gui/, games/<Game>.ini, work/",
      "the scarletnx folders of ~/.config, ~/.local/state and ~/.cache", "An installed copy's files", SNX_NOTICE_LINUX},
@@ -113,6 +113,14 @@ int snx_setup_done(const char* path, const SnxSetup* setup, char* why, size_t wh
     return failed ? -1 : 0;
 }
 int snx_setup_asks(const SnxSetup* setup, int step) { return snx_setup_since[step] > setup->version; }
+int snx_setup_here(int step) {
+#if defined(__ANDROID__) || defined(SNX_IOS)
+    return step != SNX_SETUP_INSTALL;
+#else
+    (void)step;
+    return 1;
+#endif
+}
 int snx_setup_shows(const SnxSetup* setup, int notice) { return notice >= setup->notices && snx_notice_here(notice); }
 int snx_setup_due(const SnxSetup* setup) {
     int i;

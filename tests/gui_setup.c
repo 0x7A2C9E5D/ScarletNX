@@ -1,0 +1,350 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright 2026 the ScarletNX contributors */
+/* The launcher's setup (gui/main.c's setup_*) on the real renderer and its events, in a home of its own: the pages a
+   first start goes through and what each writes (a portable copy, the language, the games and dumps folders, the keys,
+   the first user), what it refuses, the user's page with users.ini there, the fixed uid kept for its saves, a notice
+   alone after an update, --debug, and the question's place as options-dialog says */
+#define SNX_GUI_NO_MAIN
+#include "gui/main.c"
+#define SNX_SCREEN_TEST "gui_setup.c"
+#include "gui_screen.h"
+#include <assert.h>
+
+#define FIRST "0123456789abcdeffedcba9876543210"
+
+static char *root, *bin, *home;
+
+static char* join(const char* a, const char* b) {
+    char* p = snx_path_join(a, b);
+    assert(p);
+    return p;
+}
+static void put(const char* path, const char* text) {
+    char* dir = snx_dirname(path);
+    assert(dir && !snx_mkdirs(dir) && !snx_write_file(path, text, strlen(text)));
+    free(dir);
+}
+static char* text_of(const char* folder, const char* name) {
+    char* path = join(folder, name);
+    size_t size;
+    char* text = snx_is_file(path) ? (char*)snx_read_file(path, &size) : NULL;
+    free(path);
+    return text;
+}
+static void holds(const char* folder, const char* name, const char* words) {
+    char* text = text_of(folder, name);
+    if (!text || !strstr(text, words)) fprintf(stderr, "%s/%s holds:\n%s\nnot: %s\n", folder, name, text, words);
+    assert(text && strstr(text, words));
+    free(text);
+}
+static void key(App* app, SDL_Keycode code) {
+    SDL_Event e = {0};
+    e.type = SDL_EVENT_KEY_DOWN;
+    e.key.key = code;
+    e.key.down = true;
+    event(app, &e);
+}
+static void typed(App* app, const char* text) {
+    SDL_Event e = {0};
+    e.type = SDL_EVENT_TEXT_INPUT;
+    e.text.text = text;
+    event(app, &e);
+}
+/* the system's folder picker answering path (NULL: none), its own answer to the picker the test has none of dropped */
+static void folder_answer_is(App* app, const char* path) {
+    SDL_Event e = {0};
+    assert(app->picked_folder);
+    SDL_FlushEvent(app->picked_folder);
+    e.type = app->picked_folder;
+    e.user.data1 = path ? SDL_strdup(path) : NULL;
+    event(app, &e);
+}
+static int page(const App* app) { return setup_page_of(app); }
+/* a and b one folder however each is written: the menu keeps a folder it takes resolved (snx_absolute), with
+   Windows' separators where snx_path_join wrote '/' */
+static bool same_path(const char* a, const char* b) {
+    char *x = snx_absolute(a), *y = snx_absolute(b);
+    bool same = x && y && !strcmp(x, y);
+    free(x);
+    free(y);
+    return same;
+}
+/* the menu's config folder and data folder as the menu has them now */
+static char* config_of(const App* app) { return snx_menu_dir(app->home_dir, SNX_USER_CONFIG); }
+
+/* a first start: every page, what each writes; then nothing left */
+static void test_first(App* app) {
+    char *portable = join(bin, SNX_PORTABLE_DIR), *games = join(root, "games picked"), *dumps = join(root, "dumps");
+    char *keys = join(root, "keys"), *config, *users, *path;
+    GuiSetupBoxes b;
+    assert(!snx_mkdirs(games) && !snx_mkdirs(dumps));
+    path = join(keys, "prod.keys");
+    put(path, "header_key = 00112233\n");
+    free(path);
+    path = join(keys, "title.keys");
+    put(path, "0100000000000000000000000000000a = 0011aabb\n");
+    free(path);
+    setup_start(app);
+    assert(app->setup_on && app->setup_count == 1 + SNX_SETUP_STEPS && page(app) == SETUP_NOTICE);
+    render(app);
+    shows_big(app, "SETUP", rgb(app->theme.ink), title_size(app));
+    shows(app, "Changed in older versions", rgb(app->theme.page)); /* YoRHa's: in the box of ink at the foot */
+    shows(app, "Notice", rgb(app->theme.page));                    /* the tab shown, inverted */
+    shows(app, "1 Language", rgb(app->theme.ink));
+    /* the notices a page over, Up and Down; ESC on the first page asks to exit, as the menu's */
+    key(app, SDLK_DOWN);
+    assert(app->setup_top == 1);
+    key(app, SDLK_UP);
+    key(app, SDLK_UP);
+    assert(app->setup_top == 0);
+    key(app, SDLK_ESCAPE);
+    assert(app->confirm.shown && app->confirm.ask == GUI_ASK_EXIT);
+    key(app, SDLK_ESCAPE);
+    assert(!app->confirm.shown && app->setup_on && !app->menu.quit);
+    /* the language: the system's to start on, the test's other one picked with the mouse */
+    key(app, SDLK_RETURN);
+    assert(page(app) == SNX_SETUP_LANGUAGE && app->setup_choice.count == snx_gui_language_count &&
+           snx_gui_language_count == 2 && app->setup_choice.focus == 0);
+    setup_boxes(app, &b);
+    point(app, list_box(&b.choices.list, 1), true);
+    assert(page(app) == SNX_SETUP_INSTALL && app->language == 2 && app->setup_save && snx_tr_language() == 1);
+    app->language = 0; /* English again, for the words below, kept as the language picked */
+    language_apply(app);
+    app->language = 2;
+    /* installed while a portable folder is there is refused; portable makes it, the menu's files in it from then */
+    assert(!app->setup_choice.focus && !snx_is_dir(portable));
+    key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    assert(page(app) == SNX_SETUP_FOLDERS && snx_is_dir(portable) && same_path(app->home_dir, portable));
+    key(app, SDLK_ESCAPE); /* back: it is portable now */
+    assert(page(app) == SNX_SETUP_INSTALL && app->setup_choice.focus == 1);
+    key(app, SDLK_UP);
+    key(app, SDLK_RETURN);
+    assert(page(app) == SNX_SETUP_INSTALL && app->setup_failed && strstr(app->message, "This copy is portable"));
+    render(app);
+    shows_foot(app, "This copy is portable: to install it, first move away", rgb(app->theme.failure));
+    key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    assert(page(app) == SNX_SETUP_FOLDERS && !app->setup_failed && !app->message[0]);
+    /* the games' folder changed, a folder of dumps added, as Settings > App's Folders and Library would */
+    key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    folder_answer_is(app, games);
+    assert(page(app) == SNX_SETUP_FOLDERS && app->place[GUI_PLACE_GAMES] && same_path(app->games_dir, games));
+    config = config_of(app);
+    holds(config, "app.ini", "[folders]\n");
+    holds(config, "app.ini", "games = ");
+    key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    folder_answer_is(app, dumps);
+    assert(app->folder_count == 1 && same_path(app->folders[0], dumps));
+    holds(config, "folders.txt", "dumps\n");
+    render(app);
+    shows(app, "Games", rgb(app->theme.ink));
+    key(app, SDLK_DOWN); /* round to Keep */
+    key(app, SDLK_RETURN);
+    /* the keys: none, Later in focus; a folder of them installed where the menu keeps them, Use these then */
+    assert(page(app) == SNX_SETUP_KEYS && app->setup_choice.count == 2 && app->setup_choice.focus == 1);
+    key(app, SDLK_UP);
+    key(app, SDLK_RETURN);
+    assert(app->setup_keys);
+    folder_answer_is(app, NULL);
+    assert(page(app) == SNX_SETUP_KEYS && app->setup_failed && !app->setup_keys);
+    key(app, SDLK_RETURN);
+    folder_answer_is(app, keys);
+    assert(!app->setup_failed && strstr(app->message, "Installed prod.keys and title.keys in"));
+    assert(app->setup_choice.count == 3 && !app->setup_choice.focus);
+    path = snx_dirname(app->keys_path);
+    holds(path, "prod.keys", "header_key");
+    holds(path, "title.keys", "0100000000000000000000000000000a");
+    free(path);
+    key(app, SDLK_RETURN);
+    /* the first user: no users.ini, so its nickname typed, a random uid; one that is no nickname refused */
+    assert(page(app) == SNX_SETUP_USER && app->setup_typing && !strcmp(app->setup_name, "Player"));
+    assert(app->setup_saves == 0);
+    {
+        char uid[33];
+        snx_users_uid_text(app->setup_uid, uid);
+        assert(uid[12] == '4' && strcmp(uid, FIRST));
+    }
+    for (int i = 0; i < 6; ++i) key(app, SDLK_BACKSPACE);
+    key(app, SDLK_A); /* a letter comes as text, not as a key */
+    typed(app, "A");
+    typed(app, "da");
+    render(app);
+    shows(app, "Nickname: Ada_", rgb(app->theme.page));
+    key(app, SDLK_RETURN);
+    assert(app->setup_on && app->setup_failed && strstr(app->message, "Ada is not a nickname"));
+    typed(app, "m");
+    key(app, SDLK_RETURN);
+    /* done: setup.ini and users.ini in the portable copy, the language in its app.ini, the menu with its user */
+    assert(!app->setup_on && !app->message[0] && app->user == 1 && !strcmp(app->user_name, "Adam"));
+    users = join(portable, "users");
+    holds(users, "users.ini", "nickname=Adam\n");
+    holds(config, "setup.ini", "[setup]\nversion = 1\nnotices = 9\n");
+    holds(config, "app.ini", "language = xx\n");
+    path = join(home, ".config/scarletnx/setup.ini");
+    assert(!snx_is_file(path)); /* nothing in the user's folders */
+    free(path);
+    setup_start(app);
+    assert(!app->setup_on);
+    free(users);
+    free(config);
+    free(keys);
+    free(dumps);
+    free(games);
+    free(portable);
+    puts("PASS a first start through every page");
+}
+
+/* users.ini there: kept, or overwritten (the old one kept), out of the nickname with ESC; the fixed uid for its saves */
+static void test_users(App* app) {
+    char *config = config_of(app), *before, *now, *saves;
+    {
+        char* file = join(config, "setup.ini");
+        remove(file);
+        free(file);
+    }
+    setup_start(app);
+    app->setup_page = app->setup_count - 1;
+    setup_enter(app);
+    assert(page(app) == SNX_SETUP_USER && !app->setup_typing && app->setup_users == 1 && !app->setup_choice.focus);
+    render(app);
+    shows(app, "users.ini has 1 user", rgb(app->theme.page));
+    shows(app, "Adam", rgb(app->theme.ink));
+    key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    assert(app->setup_typing);
+    key(app, SDLK_ESCAPE);
+    assert(!app->setup_typing && app->setup_on && app->setup_choice.count == 2 && app->setup_choice.focus == 1);
+    key(app, SDLK_UP);
+    before = text_of(app->users_dir, "users.ini");
+    key(app, SDLK_RETURN);
+    now = text_of(app->users_dir, "users.ini");
+    assert(!app->setup_on && before && now && !strcmp(before, now));
+    free(now);
+    /* overwritten, games with saves of the fixed uid: it keeps it */
+    saves = join(app->games_dir, "0100A/0100A_data/save/user." FIRST);
+    assert(!snx_mkdirs(saves));
+    {
+        char* file = join(config, "setup.ini");
+        remove(file);
+        free(file);
+    }
+    setup_start(app);
+    app->setup_page = app->setup_count - 1;
+    setup_enter(app);
+    assert(app->setup_saves == 1);
+    key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    assert(app->setup_typing && app->setup_saves == 1);
+    render(app);
+    shows(app, "of the saves of 1 game", rgb(app->theme.ink));
+    key(app, SDLK_RETURN);
+    assert(!app->setup_on);
+    holds(app->users_dir, "users.ini", "uid=" FIRST "\nnickname=Player\n");
+    holds(app->users_dir, "users.ini.old", "nickname=Adam\n");
+    free(saves);
+    free(before);
+    free(config);
+    puts("PASS users.ini kept or overwritten, the fixed uid kept for its saves");
+}
+
+/* after an update: the notice it brings, alone; --debug: nothing */
+static void test_notice(App* app) {
+    char *config = config_of(app), *file = join(config, "setup.ini");
+    put(file, "[setup]\nversion = 1\nnotices = 8\n");
+    setup_start(app);
+    assert(app->setup_on && app->setup_count == 1 && page(app) == SETUP_NOTICE);
+    render(app);
+    shows(app, "Changed since the last version", rgb(app->theme.page));
+    shows(app, "Account saves", rgb(app->theme.ink));
+    hides(app, "Game settings", rgb(app->theme.ink));
+    hides(app, "1 Language", rgb(app->theme.ink));
+    key(app, SDLK_RETURN);
+    assert(!app->setup_on);
+    holds(config, "setup.ini", "notices = 9\n");
+    remove(file);
+    snx_setup_skip = 1;
+    setup_start(app);
+    assert(!app->setup_on && !snx_is_file(file));
+    snx_setup_skip = 0;
+    free(file);
+    free(config);
+    puts("PASS a notice alone after an update, and --debug");
+}
+
+/* the question at the foot with its choices above it at its right (yorha), or in the middle of the boxes (default),
+   neither darkening the page */
+static void test_places(App* app) {
+    GuiSetupBoxes b;
+    int width, height;
+    char* file;
+    file = config_of(app);
+    {
+        char* setup = join(file, "setup.ini");
+        remove(setup);
+        free(setup);
+    }
+    setup_start(app);
+    app->setup_page = 1;
+    setup_enter(app);
+    render(app);
+    setup_boxes(app, &b);
+    area(app, &width, &height);
+    assert(b.choices.box.y + b.choices.box.h == b.place.list.y + b.place.list.h && b.choices.box.w == b.place.list.w);
+    assert(b.choices.list.at.y + b.choices.list.at.h <= b.choices.tab.y && b.choices.list.at.x > width / 2);
+    assert(b.content.y + b.content.h <= b.choices.list.at.y && b.content.h > 0);
+    assert(!strcmp(b.tab, "ScarletNX  1/5"));
+    shows(app, "ScarletNX  1/5", rgb(app->theme.ink));
+    app->theme = *gui_theme_builtin("default");
+    render(app);
+    setup_boxes(app, &b);
+    assert(b.content.h == b.place.list.h && !b.choices.tab.h);
+    assert(SDL_abs(b.choices.box.x + b.choices.box.w / 2 - (b.place.list.x + b.place.list.w / 2)) <= cell_w(app));
+    assert(SDL_abs(b.choices.box.y + b.choices.box.h / 2 - (b.place.list.y + b.place.list.h / 2)) <= cell_h(app));
+    shows(app, "Language", rgb(app->theme.warning));
+    shows(app, "1/5", rgb(app->theme.soft));
+    app->theme = *gui_theme_builtin("yorha");
+    setup_finish(app);
+    free(file);
+    puts("PASS the question where options-dialog puts it");
+}
+
+int main(void) {
+    App app;
+    root = snx_temp_dir(NULL);
+    assert(root);
+    /* a program as deep as one in a Windows user's Downloads: what the foot says has to come before the path, which
+       it cuts */
+    bin = join(root, "Downloads/ScarletNX-windows-x86_64-0123456789abcdef/a copy kept here/bin");
+    home = join(root, "home");
+    assert(!snx_mkdirs(bin) && !snx_mkdirs(home));
+    /* the user's folders in that home: XDG's under HOME, Windows' in APPDATA and the keys in USERPROFILE */
+    SDL_setenv_unsafe("HOME", home, 1);
+    SDL_setenv_unsafe("APPDATA", home, 1);
+    SDL_setenv_unsafe("USERPROFILE", home, 1);
+    SDL_unsetenv_unsafe("XDG_DATA_HOME");
+    SDL_unsetenv_unsafe("XDG_CONFIG_HOME");
+    SDL_unsetenv_unsafe("XDG_STATE_HOME");
+    SDL_unsetenv_unsafe("XDG_CACHE_HOME");
+    SDL_unsetenv_unsafe("APPIMAGE");
+    {
+        char* self = join(bin, "scarletnx");
+        assert(initialize(&app, self));
+        free(self);
+    }
+    assert(!strcmp(app.theme.id, "yorha") && app.theme.dialog == GUI_DIALOG_YORHA);
+    open_files(&app);
+    test_first(&app);
+    test_users(&app);
+    test_notice(&app);
+    test_places(&app);
+    cleanup(&app);
+    assert(!snx_remove_tree(root));
+    free(home);
+    free(bin);
+    free(root);
+    puts("GUI setup: every page, what each writes, the notices and the question's place passed");
+    return 0;
+}
