@@ -178,8 +178,8 @@ Remaining examples: POSIX.
   target machine set, `--llvm_<option>=N` (`--llvm_inliner_threshold=50`). `scarletnx --settings=recompile` lists
   them, as the launcher's LLVM Internals page shows them: the passes are those of the pipelines the build's LLVM prints
   for each level, and a build without an `opt` of that LLVM has none. A dump played with these is recompiled with them
-  when it has to be, and a game made already keeps its code until `-r` recompiles it. The code the runtime compiles
-  while the game runs keeps LLVM's own.
+  when it has to be, and a game made already keeps its code until `-r` recompiles it. A value a setting does not take
+  (`--aot_threads=abc`) stops the recompile. The code the runtime compiles while the game runs keeps LLVM's own.
   `--target auto|linux|win64` takes only this host's own system: modules are built for the machine that builds
   them. `--runtime FILE` deploys that runtime instead of the running one, or of the one a tools-only build builds in
   its checkout's `build/native-recomp` (`build/win64-recomp` on Windows). `-q` (`--quiet`) prints no progress.

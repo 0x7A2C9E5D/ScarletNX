@@ -181,6 +181,8 @@ if(BUILD_TESTING)
              -P "${PROJECT_SOURCE_DIR}/tests/settings_list.cmake")
     add_test(NAME runtime_unknown_option COMMAND "${CMAKE_COMMAND}" -DRUNTIME=$<TARGET_FILE:scarletnx>
              -P "${PROJECT_SOURCE_DIR}/tests/unknown_option.cmake")
+    add_test(NAME runtime_recompile_settings COMMAND "${CMAKE_COMMAND}" -DRUNTIME=$<TARGET_FILE:scarletnx>
+             -P "${PROJECT_SOURCE_DIR}/tests/recompile_settings.cmake")
     if(NOT WIN32) # Windows' error box would wait for a click
         add_test(NAME runtime_game_copy COMMAND "${CMAKE_COMMAND}" -DRUNTIME=$<TARGET_FILE:scarletnx>
                  -P "${PROJECT_SOURCE_DIR}/tests/game_copy.cmake")

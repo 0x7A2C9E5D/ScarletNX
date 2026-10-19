@@ -341,7 +341,9 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
                 value = equal + 1;
                 arg = option;
                 if (arg[1] == '-' && snx_recompile_setting(arg + 2)) {
-                    ini_read(snx_recompile_setting(arg + 2), value);
+                    const IniOpt* o = snx_recompile_setting(arg + 2);
+                    if (ini_check(o, value, error, sizeof error)) return snx_error("%s", error);
+                    ini_read(o, value);
                     continue;
                 }
             }

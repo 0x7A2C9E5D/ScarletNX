@@ -60,6 +60,22 @@ int main(void) {
     assert(!strcmp(out, "a b c"));
     ini_read(t, "too long for it");
     assert(!strcmp(held, "a b c") && !strcmp(text, "a b c"));
+    /* ini_check: whether a value is taken as it is, said why not, nothing read */
+    {
+        char why[128];
+        int was = number, said = told;
+        assert(!ini_check(n, "7", why, sizeof why) && !ini_check(n, "-5", why, sizeof why) &&
+               !ini_check(n, "10", why, sizeof why) && !ini_check(r, "0.5", why, sizeof why) &&
+               !ini_check(t, "1234567", why, sizeof why));
+        assert(ini_check(n, "11", why, sizeof why) && !strcmp(why, "number=11 is not a whole number from -5 to 10"));
+        assert(ini_check(n, "-6", why, sizeof why) && ini_check(n, "abc", why, sizeof why) &&
+               ini_check(n, "1.5", why, sizeof why) && ini_check(n, "", why, sizeof why) &&
+               ini_check(n, "7x", why, sizeof why) && ini_check(n, "nan", why, sizeof why));
+        assert(ini_check(r, "5", why, sizeof why) && !strcmp(why, "ratio=5 is not a number from 0.25 to 4"));
+        assert(ini_check(r, "0.2", why, sizeof why) && ini_check(r, "", why, sizeof why));
+        assert(ini_check(t, "12345678", why, sizeof why) && !strcmp(why, "text's value is longer than 7 bytes"));
+        assert(number == was && told == said && !strcmp(held, "a b c"));
+    }
     /* the menus' words: one a value from lo by step; a '#' word for its value and the ones above, plus shift; the
        number where there is none. Words go round, numbers stop at the ends */
     {

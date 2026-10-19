@@ -41,6 +41,24 @@ void ini_read(const IniOpt* o, const char* v) {
     if (o->set) o->set(o, v);
 }
 
+int ini_check(const IniOpt* o, const char* v, char* out, size_t n) {
+    char* end;
+    double d;
+    if (o->type == INI_TEXT) {
+        if (strlen(v) < o->size) return 0;
+        snprintf(out, n, "%s's value is longer than %u bytes", o->key, (unsigned)o->size - 1);
+        return -1;
+    }
+    d = strtod(v, &end);
+    if (end != v && !*end && d == d && d >= o->lo && d <= o->hi && (o->type == INI_FLOAT || d == (double)(long)d))
+        return 0;
+    if (o->type == INI_INT)
+        snprintf(out, n, "%s=%s is not a whole number from %.0f to %.0f", o->key, v, o->lo, o->hi);
+    else
+        snprintf(out, n, "%s=%s is not a number from %g to %g", o->key, v, o->lo, o->hi);
+    return -1;
+}
+
 void ini_format(const IniOpt* o, char* out, size_t n) {
     if (o->type == INI_INT)
         snprintf(out, n, "%d", *(const int*)o->var);
