@@ -26,9 +26,10 @@
 #include <string.h>
 
 #define MAX_LINES    400
-#define LINE_CUT     400     /* a line read_log shows is cut here */
-#define MAX_DISTANCE 0x4000  /* a symbol further back than this isn't taken as the enclosing function (symbols.py) */
-#define MAX_FUNCTION 0x10000 /* the most of a function disassemble shows */
+#define LINE_CUT     400       /* a line read_log shows is cut here */
+#define LINE_READ    (1 << 16) /* what read_log reads of a line at a time: the rest of a longer one is skipped */
+#define MAX_DISTANCE 0x4000    /* a symbol further back than this isn't taken as the enclosing function (symbols.py) */
+#define MAX_FUNCTION 0x10000   /* the most of a function disassemble shows */
 #define MAX_CONTEXT  20
 #define MAX_ROOTS    8
 
@@ -229,13 +230,12 @@ static int matches(const char* line, size_t n, const char* pattern, int nocase) 
    last count lines. A line past the reader's buffer is shown cut: read_log is for logs */
 static char* read_log(const char* path, const char* pattern, int nocase, int context, long start, int count,
                       Text* err) {
-    static char line[1 << 16];
+    char* line;
     Shown* ring;
-    Text t;
+    Text t = {0};
     FILE* f;
     unsigned long number = 0, last = 0, after = 0, more = 0;
     int slots = pattern ? context + 1 : count, n = 0;
-    memset(&t, 0, sizeof t);
     if (context < 0 || context > MAX_CONTEXT || count < 1 || count > MAX_LINES) {
         put(err, "context is 0 to 20 lines, count 1 to 400");
         return NULL;
@@ -246,7 +246,8 @@ static char* read_log(const char* path, const char* pattern, int nocase, int con
         return NULL;
     }
     ring = (Shown*)snx_alloc((size_t)slots * sizeof *ring);
-    while (fgets(line, sizeof line, f)) {
+    line = (char*)snx_alloc(LINE_READ);
+    while (fgets(line, LINE_READ, f)) {
         size_t len = strlen(line);
         int whole = len && line[len - 1] == '\n';
         while (len && (line[len - 1] == '\n' || line[len - 1] == '\r')) len--;
@@ -285,14 +286,14 @@ static char* read_log(const char* path, const char* pattern, int nocase, int con
             keep(&ring[n++ % slots], line, len, number);
     }
     fclose(f);
+    free(line);
     if (!pattern && start <= 0) {
         int k;
         for (k = n > slots ? n - slots : 0; k < n; k++) show(&t, &ring[k % slots], &last);
     }
     free(ring);
     {
-        Text out;
-        memset(&out, 0, sizeof out);
+        Text out = {0};
         put(&out, path);
         put(&out, " has ");
         put_num(&out, number);
@@ -494,7 +495,7 @@ static void describe(Text* t, const Game* g, SnxU64 a) {
 static char* symbolize(Mcp* m, const char* game, const cJSON* addresses, Text* err) {
     char* folder = game_folder(m, game, err);
     const Game* g;
-    Text t;
+    Text t = {0};
     int i, n = cJSON_GetArraySize(addresses);
     if (!folder) return NULL;
     if (!n) {
@@ -505,7 +506,6 @@ static char* symbolize(Mcp* m, const char* game, const cJSON* addresses, Text* e
     g = game_get(m, folder, err);
     free(folder);
     if (!g) return NULL;
-    memset(&t, 0, sizeof t);
     for (i = 0; i < n; i++) {
         const cJSON* a = cJSON_GetArrayItem(addresses, i);
         SnxU64 v;
@@ -554,7 +554,7 @@ static char* disassemble(Mcp* m, const char* game, const char* function, const c
     char* folder = game_folder(m, game, err);
     const SnxModuleImage* mi;
     const Game* g;
-    Text t;
+    Text t = {0};
     Listing l;
     SnxU64 from = 0, to = 0;
     size_t i, found = 0;
@@ -562,7 +562,6 @@ static char* disassemble(Mcp* m, const char* game, const char* function, const c
     g = game_get(m, folder, err);
     free(folder);
     if (!g) return NULL;
-    memset(&t, 0, sizeof t);
     if (!g->program.npdm.is64) {
         put(err, "a 32-bit game: disassemble reads A64 only (tools/disasm.py reads A32 and Thumb)");
         goto done;
@@ -625,8 +624,7 @@ done:
 /* ============================================================ the protocol */
 /* C90 takes string literals of 509 characters: a longer text is parts, joined when it is sent */
 static char* joined(const char* const* parts) {
-    Text t;
-    memset(&t, 0, sizeof t);
+    Text t = {0};
     for (; *parts; parts++) put(&t, *parts);
     return t.p;
 }
@@ -727,10 +725,9 @@ static long arg_number(const cJSON* args, const char* key, long otherwise) {
 /* the tool's answer as an MCP result: its text, or the error's with isError */
 static cJSON* call(Mcp* m, const char* name, const cJSON* args) {
     cJSON *result = cJSON_CreateObject(), *content = cJSON_CreateArray(), *item = cJSON_CreateObject();
-    Text err;
+    Text err = {0};
     char* text = NULL;
     const char* path = arg_string(args, "path");
-    memset(&err, 0, sizeof err);
     if (!strcmp(name, "scan_log")) {
         if (!path)
             put(&err, "path: the log");
@@ -838,10 +835,9 @@ static void send(cJSON* reply) {
 
 int snx_mcp(int argc, char** argv) {
     Mcp m;
-    Text line;
+    Text line = {0};
     char chunk[4096];
     if (mcp_open(&m, argc, argv)) return 1;
-    memset(&line, 0, sizeof line);
     while (fgets(chunk, sizeof chunk, stdin)) {
         size_t n = strlen(chunk);
         put_n(&line, chunk, n);

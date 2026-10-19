@@ -672,11 +672,10 @@ const char* snx_logscan_outcome_name(int outcome) {
 /* the same for every log that failed the same way: the outcome and the place, a function's mangled name when there is
    one (a module and an offset only within one game and version), the runtime's offset with its build */
 static unsigned signature(SnxLogScan* s) {
-    Buf b;
+    Buf b = {0};
     const SnxLogSym* fn = snx_logscan_function(s);
     const char* name;
     unsigned at;
-    memset(&b, 0, sizeof b);
     switch (s->outcome) {
         case SNX_LOG_UNDEFINED:
             put(&b, "unsupported ");
@@ -1098,10 +1097,9 @@ static void json_list(Buf* b, const SnxLogScan* s, const unsigned* items, int n)
 char* snx_logscan_json(const SnxLogScan* s, SnxDemangle demangle) {
     static const char* const ipc_kinds[] = {"bad request", "undeclared", "unknown", "unknown control"};
     static const char* const place_kinds[] = {"", "game", "block", "runtime", "library"};
-    Buf b;
+    Buf b = {0};
     char num[32];
     int i, n;
-    memset(&b, 0, sizeof b);
     put(&b, "{\"schema\": ");
     put_num(&b, SNX_LOGSCAN_SCHEMA);
     json_field(&b, s, "title", s->title, 0);
@@ -1277,10 +1275,9 @@ static void md_fold_end(Buf* b) { put(b, "```\n</details>\n"); }
 char* snx_logscan_markdown(const SnxLogScan* s, const char* name, const char* heading, int brief,
                            SnxDemangle demangle) {
     static const char* const ipc_kinds[] = {"bad request", "undeclared", "unknown", "unknown control"};
-    Buf b, sym;
+    Buf b = {0};
     char num[32];
     int i;
-    memset(&b, 0, sizeof b);
     put(&b, heading);
     put(&b, " ");
     md_text(&b, s->title ? snx_logscan_text(s, s->title) : name);
@@ -1320,7 +1317,7 @@ char* snx_logscan_markdown(const SnxLogScan* s, const char* name, const char* he
     }
     if (s->outcome != SNX_LOG_NONE) {
         if (snx_logscan_function(s)) {
-            memset(&sym, 0, sizeof sym);
+            Buf sym = {0};
             md_sym(&sym, s, snx_logscan_function(s), demangle);
             put(&b, "\n- **In:** ");
             md_code(&b, sym.p ? sym.p : "");
@@ -1339,7 +1336,7 @@ char* snx_logscan_markdown(const SnxLogScan* s, const char* name, const char* he
         if (s->nframes) {
             md_fold_start(&b, "Backtrace");
             for (i = 0; i < s->nframes; i++) {
-                memset(&sym, 0, sizeof sym);
+                Buf sym = {0};
                 put(&sym, "#");
                 put_num(&sym, (unsigned long)i);
                 put(&sym, " ");
@@ -1389,7 +1386,7 @@ char* snx_logscan_markdown(const SnxLogScan* s, const char* name, const char* he
     if (s->nwarnings) {
         md_fold_start(&b, "Warnings");
         for (i = 0; i < s->nwarnings; i++) {
-            memset(&sym, 0, sizeof sym);
+            Buf sym = {0};
             put(&sym, snx_logscan_text(s, s->warnings[i].message));
             if (s->warnings[i].count > 1) {
                 put(&sym, " (");
