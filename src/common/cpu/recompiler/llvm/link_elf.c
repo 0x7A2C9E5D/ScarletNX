@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* ELF: x86-64, AArch64 or PowerPC64 ET_REL objects into an ET_DYN shared object for Linux, FreeBSD and Android.
+/* ELF: x86-64, AArch64, PowerPC64, RISC-V or LoongArch ET_REL objects into an ET_DYN shared object for Linux, FreeBSD
+   and Android.
    Layout: [R: headers, .hash .dynsym .dynstr .rela.dyn, read-only data] [RX: .text] [RW: .data .got .dynamic, .bss].
    Every symbol must be defined by one of the objects; the only dynamic relocations are R_*_RELATIVE, for absolute
    addresses in writable data and for GOT slots. The objects are read and relocated by elf_object.c, as the JIT loader
@@ -47,8 +48,8 @@ typedef struct {
     SnxLinkNames globals;       /* name -> (object << 32 | symbol index) */
     SnxLinkNames got;           /* "object:symbol" of a symbol's definition -> GOT slot */
     SnxLinkNames veneer;        /* "caller:object:symbol" -> the caller's veneer to that definition */
-    unsigned machine, relative; /* EM_X86_64, EM_AARCH64 or EM_PPC64, and its R_*_RELATIVE */
-    unsigned abi;               /* PowerPC64's (snx_elf_ppc_abi), 0 elsewhere */
+    unsigned machine, relative; /* EM_X86_64, EM_AARCH64, EM_PPC64, EM_RISCV or EM_LOONGARCH, and its R_*_RELATIVE */
+    unsigned abi;               /* PowerPC64's (snx_elf_ppc_abi), RISC-V's and LoongArch's e_flags, 0 elsewhere */
     uint64_t page;              /* segment alignment: AArch64 kernels may use 16 or 64 KiB pages, PowerPC64's 64 */
     uint64_t toc;               /* PowerPC64: .TOC., the base its TOC16 relocations count from */
     uint64_t kind_size[SNX_ELF_KINDS], kind_align[SNX_ELF_KINDS], kind_address[SNX_ELF_KINDS];
@@ -107,6 +108,31 @@ static uint64_t text_size(const Link* l) {
         for (j = 0; j < l->objs[i].eh->e_shnum; ++j)
             if (l->objs[i].kind[j] == SNX_ELF_TEXT) size += l->objs[i].sh[j].sh_size + l->objs[i].sh[j].sh_addralign;
     return size;
+}
+
+/* A RISC-V low half's value, the displacement of the HI20 relocation it completes: in the same relocations r (n of
+   them, of section s), at the place of the low half's label, the AUIPC. 0, or -1 with the reason */
+static int riscv_hi20_value(Link* l, size_t object, const Elf64_Shdr* s, const Elf64_Rela* r, size_t n,
+                            const Elf64_Rela* lo, uint64_t* value) {
+    const SnxElfObject* o = &l->objs[object];
+    size_t index = ELF64_R_SYM(lo->r_info), def_object = 0, def_index = 0, found = 0;
+    uint64_t P;
+    long hi;
+    int weak = 0, absolute;
+    char key[72];
+    if (index >= o->nsyms || o->syms[index].st_shndx != s->sh_info)
+        return fail(l, "%s: a RISC-V low half whose AUIPC is not in its section%s", o->input->name, "");
+    hi = snx_elf_riscv_hi20(r, n, o->syms[index].st_value);
+    if (hi < 0) return fail(l, "%s: a RISC-V low half without its HI20 relocation%s", o->input->name, "");
+    P = o->address[s->sh_info] + r[hi].r_offset;
+    if (definition(l, object, ELF64_R_SYM(r[hi].r_info), &def_object, &def_index, &weak)) return -1;
+    if (ELF64_R_TYPE(r[hi].r_info) == SNX_RV_GOT_HI20) {
+        got_key(key, def_object, def_index);
+        snx_link_find(&l->got, key, &found);
+        *value = l->got_address + 8 * (uint64_t)found + (uint64_t)r[hi].r_addend - P;
+    } else
+        *value = (weak ? 0 : symbol_address(l, def_object, def_index, &absolute)) + (uint64_t)r[hi].r_addend - P;
+    return 0;
 }
 
 /* PowerPC64's R_PPC64_TOC, which writes the TOC's address whatever its symbol */
@@ -330,6 +356,7 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
                     snx_link_find(&l.got, key, &found);
                     slot = got_off + 8 * (uint64_t)found;
                 }
+                if (snx_elf_riscv_lo12(l.machine, type) && riscv_hi20_value(&l, i, s, r, n, &r[k], &S)) goto done;
                 if (r[k].r_offset <= o->sh[s->sh_info].sh_size) {
                     p = out.data + P;
                     written = snx_elf_relocate(l.machine, p, o->sh[s->sh_info].sh_size - r[k].r_offset, type, S, A, P,
@@ -550,7 +577,9 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
     eh.e_type = ET_DYN;
     eh.e_machine = (Elf64_Half)l.machine;
     eh.e_version = EV_CURRENT;
-    eh.e_flags = l.machine == EM_PPC64 ? l.objs[0].eh->e_flags : 0; /* PowerPC64's ABI, which the loader checks */
+    /* PowerPC64's ABI, and RISC-V's and LoongArch's float ABI, which the loader checks */
+    eh.e_flags =
+        l.machine == EM_PPC64 || l.machine == EM_RISCV || l.machine == EM_LOONGARCH ? l.objs[0].eh->e_flags : 0;
     eh.e_phoff = sizeof(Elf64_Ehdr);
     eh.e_ehsize = sizeof(Elf64_Ehdr);
     eh.e_phentsize = sizeof(Elf64_Phdr);

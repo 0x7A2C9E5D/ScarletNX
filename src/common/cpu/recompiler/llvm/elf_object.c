@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* ELF64 x86-64, AArch64 and PowerPC64 relocatable objects: parsing, symbol resolution, relocation and the AArch64
-   and PowerPC64 veneers for link_elf.c and code_loader.c */
+/* ELF64 x86-64, AArch64, PowerPC64, RISC-V and LoongArch relocatable objects: parsing, symbol resolution, relocation
+   and the AArch64 and PowerPC64 veneers for link_elf.c and code_loader.c */
 #if !defined(_WIN32)
 #define _POSIX_C_SOURCE 200809L /* snprintf */
 #include "common/cpu/recompiler/llvm/elf_object.h"
@@ -42,20 +42,25 @@ int snx_elf_parse(SnxElfObject* o, const SnxLinkInput* input, unsigned* machine,
     if (input->size < sizeof(Elf64_Ehdr) || memcmp(o->eh->e_ident, ELFMAG, SELFMAG) ||
         o->eh->e_ident[EI_CLASS] != ELFCLASS64 || o->eh->e_ident[EI_DATA] != snx_elf_host_data() ||
         o->eh->e_type != ET_REL ||
-        (o->eh->e_machine != EM_X86_64 && o->eh->e_machine != EM_AARCH64 && o->eh->e_machine != EM_PPC64) ||
+        (o->eh->e_machine != EM_X86_64 && o->eh->e_machine != EM_AARCH64 && o->eh->e_machine != EM_PPC64 &&
+         o->eh->e_machine != EM_RISCV && o->eh->e_machine != EM_LOONGARCH) ||
         o->eh->e_shentsize != sizeof(Elf64_Shdr) ||
         o->eh->e_shoff + (uint64_t)o->eh->e_shnum * sizeof(Elf64_Shdr) > input->size)
         return fail(error, error_size,
-                    "%s: not an x86-64, AArch64 or PowerPC64 ELF relocatable object in this host's byte order%s",
+                    "%s: not an x86-64, AArch64, PowerPC64, RISC-V or LoongArch ELF relocatable object in this host's "
+                    "byte order%s",
                     input->name, "");
-    object_abi = o->eh->e_machine == EM_PPC64 ? snx_elf_ppc_abi(o->eh->e_flags) : 0;
+    object_abi = o->eh->e_machine == EM_PPC64                                       ? snx_elf_ppc_abi(o->eh->e_flags)
+                 : o->eh->e_machine == EM_RISCV || o->eh->e_machine == EM_LOONGARCH ? o->eh->e_flags
+                                                                                    : 0;
     if (!*machine) {
         *machine = o->eh->e_machine;
         *abi = object_abi;
     }
     if (o->eh->e_machine != *machine) return fail(error, error_size, "%s: another machine's object%s", input->name, "");
     if (object_abi != *abi)
-        return fail(error, error_size, "%s: another PowerPC64 ABI's object (ELFv1 and ELFv2)%s", input->name, "");
+        return fail(error, error_size, "%s: another ABI's object (%s)", input->name,
+                    *machine == EM_PPC64 ? "ELFv1 and ELFv2" : "e_flags differ: the float ABI, or compressed code");
     o->sh = (const Elf64_Shdr*)(input->data + o->eh->e_shoff);
     /* one block, the 8-byte arrays first */
     o->address = (uint64_t*)calloc(o->eh->e_shnum, 2 * sizeof(uint64_t) + sizeof(int));
@@ -159,24 +164,47 @@ uint64_t snx_elf_symbol_address(const SnxElfObject* objs, size_t object, size_t 
 int snx_elf_got_relocation(unsigned machine, unsigned type) {
     if (machine == EM_PPC64) return 0; /* its objects keep their addresses in their own .toc sections */
     if (machine == EM_AARCH64) return type == SNX_A64_ADR_GOT_PAGE || type == SNX_A64_LD64_GOT_LO12_NC;
+    /* RISC-V's low half names the AUIPC's label, not the symbol: the slot is its HI20's */
+    if (machine == EM_RISCV) return type == SNX_RV_GOT_HI20;
+    if (machine == EM_LOONGARCH) return type == SNX_LA_GOT_PC_HI20 || type == SNX_LA_GOT_PC_LO12;
     return type == R_X86_64_GOTPCREL || type == R_X86_64_GOTPCRELX || type == R_X86_64_REX_GOTPCRELX;
 }
 
+/* RISC-V's AUIPC and JALR pair reaches 2 GiB and LoongArch's PCADDU18I and JIRL 128 GiB, the whole of any module:
+   neither machine gets veneers */
 int snx_elf_call_relocation(unsigned machine, unsigned type) {
     if (machine == EM_PPC64) return type == SNX_PPC_REL24;
     if (machine == EM_AARCH64) return type == SNX_A64_CALL26 || type == SNX_A64_JUMP26;
+    if (machine == EM_RISCV || machine == EM_LOONGARCH) return 0;
     return type == R_X86_64_PLT32;
 }
 
 int snx_elf_absolute_relocation(unsigned machine, unsigned type) {
     if (machine == EM_PPC64) return type == SNX_PPC_ADDR64 || type == SNX_PPC_TOC;
+    if (machine == EM_RISCV) return type == SNX_RV_64;
+    if (machine == EM_LOONGARCH) return type == SNX_LA_64;
     return type == (machine == EM_AARCH64 ? (unsigned)SNX_A64_ABS64 : (unsigned)R_X86_64_64);
 }
 
 unsigned snx_elf_relative_type(unsigned machine) {
-    return machine == EM_AARCH64 ? (unsigned)SNX_A64_RELATIVE
-           : machine == EM_PPC64 ? (unsigned)SNX_PPC_RELATIVE
-                                 : (unsigned)R_X86_64_RELATIVE;
+    return machine == EM_AARCH64     ? (unsigned)SNX_A64_RELATIVE
+           : machine == EM_PPC64     ? (unsigned)SNX_PPC_RELATIVE
+           : machine == EM_RISCV     ? (unsigned)SNX_RV_RELATIVE
+           : machine == EM_LOONGARCH ? (unsigned)SNX_LA_RELATIVE
+                                     : (unsigned)R_X86_64_RELATIVE;
+}
+
+int snx_elf_riscv_lo12(unsigned machine, unsigned type) {
+    return machine == EM_RISCV && (type == SNX_RV_PCREL_LO12_I || type == SNX_RV_PCREL_LO12_S);
+}
+
+long snx_elf_riscv_hi20(const Elf64_Rela* rela, size_t n, uint64_t offset) {
+    size_t k;
+    for (k = 0; k < n; ++k) {
+        unsigned type = ELF64_R_TYPE(rela[k].r_info);
+        if (rela[k].r_offset == offset && (type == SNX_RV_PCREL_HI20 || type == SNX_RV_GOT_HI20)) return (long)k;
+    }
+    return -1;
 }
 
 void snx_elf_layout(SnxElfObject* objs, size_t count, uint64_t* kind_size, uint64_t* kind_align) {
@@ -266,6 +294,46 @@ static size_t field_size(unsigned machine, unsigned type) {
             default: return 4;
         }
     if (machine == EM_AARCH64) return type == SNX_A64_ABS64 || type == SNX_A64_PREL64 ? 8 : 4;
+    if (machine == EM_RISCV) switch (type) {
+            case SNX_RV_RELAX:
+            case SNX_RV_ALIGN: return 0;
+            case SNX_RV_64:
+            case SNX_RV_ADD64:
+            case SNX_RV_SUB64:
+            case SNX_RV_CALL:
+            case SNX_RV_CALL_PLT: return 8; /* AUIPC and JALR */
+            case SNX_RV_ADD16:
+            case SNX_RV_SUB16:
+            case SNX_RV_SET16:
+            case SNX_RV_RVC_BRANCH:
+            case SNX_RV_RVC_JUMP: return 2;
+            case SNX_RV_ADD8:
+            case SNX_RV_SUB8:
+            case SNX_RV_SET8:
+            case SNX_RV_SET6:
+            case SNX_RV_SUB6: return 1;
+            default: return 4;
+        }
+    if (machine == EM_LOONGARCH) switch (type) {
+            case SNX_LA_MARK_LA:
+            case SNX_LA_MARK_PCREL:
+            case SNX_LA_RELAX:
+            case SNX_LA_ALIGN: return 0;
+            case SNX_LA_64:
+            case SNX_LA_64_PCREL:
+            case SNX_LA_ADD64:
+            case SNX_LA_SUB64:
+            case SNX_LA_CALL36: return 8; /* PCADDU18I and JIRL */
+            case SNX_LA_ADD24:
+            case SNX_LA_SUB24: return 3;
+            case SNX_LA_ADD16:
+            case SNX_LA_SUB16: return 2;
+            case SNX_LA_ADD8:
+            case SNX_LA_SUB8:
+            case SNX_LA_ADD6:
+            case SNX_LA_SUB6: return 1;
+            default: return 4;
+        }
     switch (type) {
         case R_X86_64_64:
         case R_X86_64_PC64:
@@ -421,11 +489,226 @@ static int relocate_ppc(unsigned char* p, unsigned type, uint64_t S, int64_t A, 
     }
 }
 
+/* ---- the label-difference relocations RISC-V and LoongArch share: a little-endian field of 1 to 8 bytes, added to,
+   taken from or replaced, as the psABIs compute word8 to word64 and the 6-bit fields of DWARF's advance ops ---- */
+
+static uint64_t get_le(const unsigned char* p, size_t bytes) {
+    uint64_t v = 0;
+    size_t i;
+    for (i = 0; i < bytes; ++i) v |= (uint64_t)p[i] << (8 * i);
+    return v;
+}
+static void put_le(unsigned char* p, size_t bytes, uint64_t v) {
+    size_t i;
+    for (i = 0; i < bytes; ++i) p[i] = (unsigned char)(v >> (8 * i));
+}
+/* op 1 adds value, -1 takes it away, 0 writes it */
+static void word(unsigned char* p, size_t bytes, int op, uint64_t value) {
+    uint64_t old = get_le(p, bytes);
+    put_le(p, bytes, op > 0 ? old + value : op < 0 ? old - value : value);
+}
+/* the low 6 bits of a byte, the two above them kept */
+static void word6(unsigned char* p, int op, uint64_t value) {
+    uint64_t old = p[0] & 0x3F;
+    uint64_t v = op > 0 ? old + value : op < 0 ? old - value : value;
+    p[0] = (unsigned char)((p[0] & 0xC0) | (v & 0x3F));
+}
+
+/* ---- RISC-V, little-endian: an immediate's bits scatter across its instruction by format ---- */
+
+/* the high 20 bits of a displacement an AUIPC (U-type) holds, rounded for the low 12 that its pair sign-extends */
+static uint64_t rv_hi20(uint64_t displacement) { return (displacement + 0x800) >> 12; }
+/* whether an AUIPC pair reaches displacement: 32 bits less the 0x800 the rounding takes */
+static int rv_pair_fits(uint64_t displacement) { return fits(displacement + 0x800, 32); }
+static void rv_u(unsigned char* p, uint64_t hi20) { field(p, hi20, 12, 20); }
+static void rv_i(unsigned char* p, uint64_t lo12) { field(p, lo12, 20, 12); }
+static void rv_s(unsigned char* p, uint64_t lo12) {
+    field(p, lo12 >> 5, 25, 7);
+    field(p, lo12, 7, 5);
+}
+/* B-type, BEQ and the like: imm[12|10:5] at 25, imm[4:1|11] at 7, 4 KiB either way */
+static int rv_b(unsigned char* p, uint64_t d) {
+    if (!fits(d, 13)) return SNX_LINK_RANGE;
+    if (d & 1) return SNX_LINK_MISALIGNED;
+    field(p, (d >> 12 & 1) << 6 | (d >> 5 & 0x3F), 25, 7);
+    field(p, (d >> 1 & 0xF) << 1 | (d >> 11 & 1), 7, 5);
+    return 0;
+}
+/* J-type, JAL: imm[20|10:1|11|19:12] at 12, 1 MiB either way */
+static int rv_j(unsigned char* p, uint64_t d) {
+    if (!fits(d, 21)) return SNX_LINK_RANGE;
+    if (d & 1) return SNX_LINK_MISALIGNED;
+    field(p, (d >> 20 & 1) << 19 | (d >> 1 & 0x3FF) << 9 | (d >> 11 & 1) << 8 | (d >> 12 & 0xFF), 12, 20);
+    return 0;
+}
+static uint16_t le16(const unsigned char* p) { return (uint16_t)(p[0] | p[1] << 8); }
+static void put16(unsigned char* p, uint16_t v) {
+    p[0] = (unsigned char)v;
+    p[1] = (unsigned char)(v >> 8);
+}
+/* CB-type, C.BEQZ and C.BNEZ: offset[8|4:3] at 10, [7:6|2:1|5] at 2, 256 bytes either way */
+static int rv_cb(unsigned char* p, uint64_t d) {
+    uint16_t insn = le16(p) & 0xE383u;
+    if (!fits(d, 9)) return SNX_LINK_RANGE;
+    if (d & 1) return SNX_LINK_MISALIGNED;
+    insn |=
+        (uint16_t)((d >> 8 & 1) << 12 | (d >> 3 & 3) << 10 | (d >> 6 & 3) << 5 | (d >> 1 & 3) << 3 | (d >> 5 & 1) << 2);
+    put16(p, insn);
+    return 0;
+}
+/* CJ-type, C.J: offset[11|4|9:8|10|6|7|3:1|5] at 2, 2 KiB either way */
+static int rv_cj(unsigned char* p, uint64_t d) {
+    uint16_t insn = le16(p) & 0xE003u;
+    if (!fits(d, 12)) return SNX_LINK_RANGE;
+    if (d & 1) return SNX_LINK_MISALIGNED;
+    insn |= (uint16_t)((d >> 11 & 1) << 12 | (d >> 4 & 1) << 11 | (d >> 8 & 3) << 9 | (d >> 10 & 1) << 8 |
+                       (d >> 6 & 1) << 7 | (d >> 7 & 1) << 6 | (d >> 1 & 7) << 3 | (d >> 5 & 1) << 2);
+    put16(p, insn);
+    return 0;
+}
+
+/* RISC-V's, as its psABI computes them: S + A, its distance from P, a GOT slot's, and their high and low halves */
+static int relocate_rv(unsigned char* p, unsigned type, uint64_t S, int64_t A, uint64_t P, uint64_t slot) {
+    uint64_t target = S + (uint64_t)A, d = target - P;
+    switch (type) {
+        case SNX_RV_NONE:
+        case SNX_RV_RELAX:
+            return 0; /* leaving code unrelaxed is always correct */
+        /* ALIGN wants padding taken out, which only relaxation puts in: an object made with it is refused */
+        case SNX_RV_ALIGN: return SNX_LINK_UNSUPPORTED;
+        case SNX_RV_32:
+            if (target >> 32 && !fits(target, 32)) return SNX_LINK_RANGE;
+            put_le(p, 4, target);
+            return 0;
+        case SNX_RV_64: put_le(p, 8, target); return 0;
+        case SNX_RV_32_PCREL:
+        case SNX_RV_PLT32:
+            if (!fits(d, 32)) return SNX_LINK_RANGE;
+            put_le(p, 4, d);
+            return 0;
+        case SNX_RV_BRANCH: return rv_b(p, d);
+        case SNX_RV_JAL: return rv_j(p, d);
+        case SNX_RV_RVC_BRANCH: return rv_cb(p, d);
+        case SNX_RV_RVC_JUMP: return rv_cj(p, d);
+        case SNX_RV_CALL:
+        case SNX_RV_CALL_PLT: /* AUIPC then JALR */
+            if (!rv_pair_fits(d)) return SNX_LINK_RANGE;
+            rv_u(p, rv_hi20(d));
+            rv_i(p + 4, d & 0xFFF);
+            return 0;
+        case SNX_RV_PCREL_HI20:
+            if (!rv_pair_fits(d)) return SNX_LINK_RANGE;
+            rv_u(p, rv_hi20(d));
+            return 0;
+        case SNX_RV_GOT_HI20:
+            d = slot + (uint64_t)A - P;
+            if (!rv_pair_fits(d)) return SNX_LINK_RANGE;
+            rv_u(p, rv_hi20(d));
+            return 0;
+        case SNX_RV_PCREL_LO12_I: /* S is its HI20's displacement */
+            if (A) return SNX_LINK_UNSUPPORTED;
+            rv_i(p, S & 0xFFF);
+            return 0;
+        case SNX_RV_PCREL_LO12_S:
+            if (A) return SNX_LINK_UNSUPPORTED;
+            rv_s(p, S & 0xFFF);
+            return 0;
+        case SNX_RV_ADD8: word(p, 1, 1, target); return 0;
+        case SNX_RV_ADD16: word(p, 2, 1, target); return 0;
+        case SNX_RV_ADD32: word(p, 4, 1, target); return 0;
+        case SNX_RV_ADD64: word(p, 8, 1, target); return 0;
+        case SNX_RV_SUB8: word(p, 1, -1, target); return 0;
+        case SNX_RV_SUB16: word(p, 2, -1, target); return 0;
+        case SNX_RV_SUB32: word(p, 4, -1, target); return 0;
+        case SNX_RV_SUB64: word(p, 8, -1, target); return 0;
+        case SNX_RV_SET8: word(p, 1, 0, target); return 0;
+        case SNX_RV_SET16: word(p, 2, 0, target); return 0;
+        case SNX_RV_SET32: word(p, 4, 0, target); return 0;
+        case SNX_RV_SET6: word6(p, 0, target); return 0;
+        case SNX_RV_SUB6: word6(p, -1, target); return 0;
+        default: return SNX_LINK_UNSUPPORTED;
+    }
+}
+
+/* ---- LoongArch, little-endian: si20 at 5, si12 at 10, offs16 at 10 and the wider branch offsets split in two ---- */
+
+/* the pages from P's to that of target, rounded for the low 12 bits ADDI.D and LD.D sign-extend */
+static uint64_t la_pages(uint64_t target, uint64_t P) { return page_of(target + 0x800) - page_of(P); }
+static int la_hi20(unsigned char* p, uint64_t target, uint64_t P) {
+    uint64_t pages = la_pages(target, P);
+    if (!fits(pages, 32)) return SNX_LINK_RANGE;
+    field(p, pages >> 12, 5, 20);
+    return 0;
+}
+/* B16 (BEQ and the like), B21 (BEQZ, BNEZ) and B26 (B, BL), in instructions: offs[15:0] at 10, the rest at 0 */
+static int la_branch(unsigned char* p, uint64_t d, unsigned bits) {
+    if (!fits(d, bits + 2)) return SNX_LINK_RANGE;
+    if (d & 3) return SNX_LINK_MISALIGNED;
+    field(p, d >> 2, 10, 16);
+    if (bits > 16) field(p, d >> 18, 0, bits - 16);
+    return 0;
+}
+
+/* LoongArch's, as its psABI computes them */
+static int relocate_la(unsigned char* p, unsigned type, uint64_t S, int64_t A, uint64_t P, uint64_t slot) {
+    uint64_t target = S + (uint64_t)A, d = target - P, at = slot + (uint64_t)A;
+    switch (type) {
+        case SNX_LA_NONE:
+        case SNX_LA_MARK_LA:
+        case SNX_LA_MARK_PCREL:
+        case SNX_LA_RELAX: return 0;
+        case SNX_LA_ALIGN: return SNX_LINK_UNSUPPORTED; /* as RISC-V's */
+        case SNX_LA_32:
+            if (target >> 32 && !fits(target, 32)) return SNX_LINK_RANGE;
+            put_le(p, 4, target);
+            return 0;
+        case SNX_LA_64: put_le(p, 8, target); return 0;
+        case SNX_LA_32_PCREL:
+            if (!fits(d, 32)) return SNX_LINK_RANGE;
+            put_le(p, 4, d);
+            return 0;
+        case SNX_LA_64_PCREL: put_le(p, 8, d); return 0;
+        case SNX_LA_B16: return la_branch(p, d, 16);
+        case SNX_LA_B21: return la_branch(p, d, 21);
+        case SNX_LA_B26: return la_branch(p, d, 26);
+        case SNX_LA_PCALA_HI20: return la_hi20(p, target, P);
+        case SNX_LA_PCALA_LO12: field(p, target & 0xFFF, 10, 12); return 0;
+        case SNX_LA_GOT_PC_HI20: return la_hi20(p, at, P);
+        case SNX_LA_GOT_PC_LO12: field(p, at & 0xFFF, 10, 12); return 0;
+        case SNX_LA_PCREL20_S2: /* PCADDI */
+            if (!fits(d, 22)) return SNX_LINK_RANGE;
+            if (d & 3) return SNX_LINK_MISALIGNED;
+            field(p, d >> 2, 5, 20);
+            return 0;
+        case SNX_LA_CALL36: /* PCADDU18I then JIRL: 18 bits of the displacement in JIRL, sign-extended */
+            if (!fits(d + 0x20000, 38)) return SNX_LINK_RANGE;
+            if (d & 3) return SNX_LINK_MISALIGNED;
+            field(p, (d + 0x20000) >> 18, 5, 20);
+            field(p + 4, d >> 2, 10, 16);
+            return 0;
+        case SNX_LA_ADD8: word(p, 1, 1, target); return 0;
+        case SNX_LA_ADD16: word(p, 2, 1, target); return 0;
+        case SNX_LA_ADD24: word(p, 3, 1, target); return 0;
+        case SNX_LA_ADD32: word(p, 4, 1, target); return 0;
+        case SNX_LA_ADD64: word(p, 8, 1, target); return 0;
+        case SNX_LA_SUB8: word(p, 1, -1, target); return 0;
+        case SNX_LA_SUB16: word(p, 2, -1, target); return 0;
+        case SNX_LA_SUB24: word(p, 3, -1, target); return 0;
+        case SNX_LA_SUB32: word(p, 4, -1, target); return 0;
+        case SNX_LA_SUB64: word(p, 8, -1, target); return 0;
+        case SNX_LA_ADD6: word6(p, 1, target); return 0;
+        case SNX_LA_SUB6: word6(p, -1, target); return 0;
+        default: return SNX_LINK_UNSUPPORTED;
+    }
+}
+
 int snx_elf_relocate(unsigned machine, unsigned char* p, size_t room, unsigned type, uint64_t S, int64_t A, uint64_t P,
                      uint64_t got, uint64_t slot) {
     if (field_size(machine, type) > room) return SNX_LINK_OUTSIDE;
     if (machine == EM_AARCH64) return relocate_a64(p, type, S, A, P, slot);
     if (machine == EM_PPC64) return relocate_ppc(p, type, S, A, P, got);
+    if (machine == EM_RISCV) return relocate_rv(p, type, S, A, P, slot);
+    if (machine == EM_LOONGARCH) return relocate_la(p, type, S, A, P, slot);
     return relocate_x86(p, type, S, A, P, got, slot);
 }
 
