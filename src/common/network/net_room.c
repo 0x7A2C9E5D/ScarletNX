@@ -618,9 +618,11 @@ static int sock_setsockopt(SnxSocket* s, int level, int name, const void* v, siz
         int value;
         if (size < sizeof value) return -SNX_EINVAL;
         memcpy(&value, v, sizeof value);
+        snx_lock(&k->room->lk); /* port_taken reads reuse under the member's lock */
         snx_lock(&k->lk);
         *o = name == SNX_SO_SNDBUF || name == SNX_SO_RCVBUF ? value : value != 0;
         snx_unlock(&k->lk);
+        snx_unlock(&k->room->lk);
         return 0;
     }
     if (snx_net_sockopt_kept(level, name)) return snx_net_host_setsockopt(s, level, name, v, size);

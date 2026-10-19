@@ -118,6 +118,7 @@ void network_room_init(void) {
 void network_room_leave(void) {
     SnxRoom* room = network_room();
     if (!room) return;
-    network_set_room(NULL);
+    /* the game's threads may still open sockets on it as the process ends: it stays, out of the room, never freed */
+    snx_room_ref(room);
     snx_room_leave(room);
 }
