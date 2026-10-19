@@ -634,6 +634,39 @@ static void test_nvmap_as(void) {
     CHECK(as_call(0x09, d, 24) == 0 && nv.big_page_bits == 16);
 }
 
+/* gmmu_run against gmmu_translate page by page: runs longer than an entry's count, across a table's end, broken by a
+   page mapped elsewhere, and what an own unmap keeps */
+static u64 run_by_pages(u64 gva, u64 max, u64* cpu) {
+    u64 n, first = gmmu_translate(gva);
+    if (!first) return 0;
+    *cpu = first;
+    n = 0x1000 - (gva & 0xFFF);
+    while (n < max && gmmu_translate(gva + n) == first + n) n += 0x1000;
+    return n < max ? n : max;
+}
+static void check_runs(u64 gva, u64 size) {
+    for (u64 o = 0; o < size; o += 0x1000 + 0x123) {
+        u64 a = 0, b = 0, na = gmmu_run(gva + o, size - o, &a), nb = run_by_pages(gva + o, size - o, &b);
+        CHECK(na == nb && (!na || a == b));
+    }
+}
+static void test_gmmu_runs(void) {
+    const u64 g = 0x7000000000ull; /* a table starts here: 4096 pages of 4K each */
+    u64 cpu = 0;
+    gmmu_map(g - 0x3000, 0x80000000ull - 0x3000, 0xA03000); /* 2563 pages, across the table's start */
+    CHECK(gmmu_run(g - 0x3000, ~0ull, &cpu) == 0xA03000 && cpu == 0x80000000ull - 0x3000);
+    CHECK(gmmu_run(g + 0x5, 0x10000, &cpu) == 0x10000 && cpu == 0x80000005ull);
+    check_runs(g - 0x3000, 0xA04000);
+    gmmu_map(g + 0x200000, 0x90000000ull, 0x1000); /* a page in the middle mapped elsewhere */
+    CHECK(gmmu_run(g, ~0ull, &cpu) == 0x200000 && cpu == 0x80000000ull);
+    CHECK(gmmu_run(g + 0x201000, ~0ull, &cpu) == 0xA00000 - 0x201000 && cpu == 0x80201000ull);
+    check_runs(g - 0x3000, 0xA04000);
+    gmmu_unmap(g - 0x3000, 0xA03000, 1, 0x80000000ull - 0x3000); /* the first mapping's pages, not the one over it */
+    CHECK(!gmmu_run(g, ~0ull, &cpu) && !gmmu_run(g - 0x3000, ~0ull, &cpu));
+    CHECK(gmmu_run(g + 0x200000, ~0ull, &cpu) == 0x1000 && cpu == 0x90000000ull);
+    check_runs(g - 0x3000, 0xA04000);
+    gmmu_unmap(g + 0x200000, 0x1000, 0, 0);
+}
 int main(void) {
     g_mem = calloc(1, 0x10000);
     CHECK(g_mem != NULL);
@@ -699,6 +732,7 @@ int main(void) {
         CHECK(gmmu_translate(gva) == addr && gmmu_translate(gva + 0xFFF) == AS_SIZE - 1);
     }
     test_nvmap_as();
+    test_gmmu_runs();
     nvdrv = new_nvdrv();
     u32 error;
 

@@ -144,6 +144,12 @@ u64 gmmu_translate(u64 gva) {
     if (!(e & 1)) return 0;
     return (e & ~(u64)0xFFF) | (gva & 0xFFF);
 }
+/* An entry's bits 1 to 11 count the pages after it, in its table, that are mapped and follow on in guest memory: a
+   lower bound, so gmmu_run steps over a run of them in one load instead of one per page. A map writes its pages from the
+   last, each counting those after it already written, and a change first shortens the counts before it that reach into
+   it (gmmu_clip) */
+#define GHINT_MAX  2047u
+#define GHINT_MASK ((u64)GHINT_MAX << 1)
 /* the bytes from gva on, at most max, whose pages map to consecutive guest pages, and in *cpu the guest address of gva:
    0 when gva's page isn't mapped. One walk of the table for a range, where gmmu_translate per page walks it again */
 u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
@@ -156,6 +162,15 @@ u64 gmmu_run(u64 gva, u64 max, u64* cpu) {
     n = 0x1000 - (gva & 0xFFF);
     want = (e & ~(u64)0xFFF) + 0x1000;
     while (n < max) {
+        u64 h = (e & GHINT_MASK) >> 1;
+        if (h) { /* the next h pages follow on: to the last of them, whose entry tells what follows it */
+            page += h;
+            n += h << GPAGE_BITS;
+            want += h << GPAGE_BITS;
+            if (n >= max) break;
+            e = __atomic_load_n(&t[page & ((1u << GL2_BITS) - 1)], __ATOMIC_RELAXED);
+            continue;
+        }
         page++;
         if (!(page & ((1u << GL2_BITS) - 1))) t = __atomic_load_n(&nv.gmmu[gmmu_l1_index(page)], __ATOMIC_ACQUIRE);
         if (!t) break;
@@ -183,6 +198,19 @@ static void gmmu_change_end(u64 gva, u64 size) {
     gpu_mem_written(gva, size);
     if (g_gpu_mapping_end) g_gpu_mapping_end();
 }
+/* the counts of the entries before page first stop short of it, before it changes */
+static void gmmu_clip(u64 first) {
+    for (u64 k = 1; k <= GHINT_MAX && k <= first; k++) {
+        u64 q = first - k, e;
+        u64* t;
+        if ((q ^ first) >> GL2_BITS) break; /* counts stay in their table */
+        t = __atomic_load_n(&nv.gmmu[gmmu_l1_index(q)], __ATOMIC_ACQUIRE);
+        if (!t) break;
+        e = __atomic_load_n(&t[q & ((1u << GL2_BITS) - 1)], __ATOMIC_RELAXED);
+        if ((e & GHINT_MASK) >> 1 >= k)
+            __atomic_store_n(&t[q & ((1u << GL2_BITS) - 1)], (e & ~GHINT_MASK) | ((k - 1) << 1), __ATOMIC_RELAXED);
+    }
+}
 /* points the pages of [gva, gva+size) at cpu onwards */
 static void gmmu_map(u64 gva, u64 cpu, u64 size) {
     u64 first, last, p;
@@ -190,10 +218,16 @@ static void gmmu_map(u64 gva, u64 cpu, u64 size) {
     gmmu_change_begin(gva, size);
     first = gva >> GPAGE_BITS;
     last = (gva + size - 1) >> GPAGE_BITS;
-    for (p = first; p <= last; p++) {
+    gmmu_clip(first);
+    for (p = last;; p--) { /* from the last, so a page's count covers only pages already written */
         u64* t = gmmu_l2(gmmu_l1_index(p));
-        u64 e = (cpu + ((p - first) << GPAGE_BITS)) | 1;
+        u64 h = last - p, room = ((1u << GL2_BITS) - 1) - (p & ((1u << GL2_BITS) - 1));
+        u64 e;
+        if (h > room) h = room;
+        if (h > GHINT_MAX) h = GHINT_MAX;
+        e = (cpu + ((p - first) << GPAGE_BITS)) | (h << 1) | 1;
         __atomic_store_n(&t[p & ((1u << GL2_BITS) - 1)], e, __ATOMIC_RELAXED);
+        if (p == first) break;
     }
     gmmu_change_end(gva, size);
 }
@@ -205,6 +239,19 @@ static void gmmu_unmap(u64 gva, u64 size, int own, u64 cpu) {
     gmmu_change_begin(gva, size);
     first = gva >> GPAGE_BITS;
     last = (gva + size - 1) >> GPAGE_BITS;
+    /* no count may reach a page about to be cleared: the ones before the range stop short of it, and the pages in it
+       that an own unmap keeps lose theirs */
+    gmmu_clip(first);
+    for (p = first; p <= last; p++) {
+        u64* t = __atomic_load_n(&nv.gmmu[gmmu_l1_index(p)], __ATOMIC_ACQUIRE);
+        u64 e;
+        if (!t) {
+            p |= (1u << GL2_BITS) - 1;
+            continue;
+        }
+        e = __atomic_load_n(&t[p & ((1u << GL2_BITS) - 1)], __ATOMIC_RELAXED);
+        if (e & GHINT_MASK) __atomic_store_n(&t[p & ((1u << GL2_BITS) - 1)], e & ~GHINT_MASK, __ATOMIC_RELAXED);
+    }
     for (p = first; p <= last; p++) {
         u64* t = __atomic_load_n(&nv.gmmu[gmmu_l1_index(p)], __ATOMIC_ACQUIRE);
         u64* e;
@@ -213,7 +260,8 @@ static void gmmu_unmap(u64 gva, u64 size, int own, u64 cpu) {
             continue;
         }
         e = &t[p & ((1u << GL2_BITS) - 1)];
-        if (own && __atomic_load_n(e, __ATOMIC_RELAXED) != ((cpu + ((p - first) << GPAGE_BITS)) | 1)) continue;
+        if (own && (__atomic_load_n(e, __ATOMIC_RELAXED) & ~GHINT_MASK) != ((cpu + ((p - first) << GPAGE_BITS)) | 1))
+            continue;
         __atomic_store_n(e, 0, __ATOMIC_RELAXED);
     }
     gmmu_change_end(gva, size);
@@ -1093,7 +1141,10 @@ static void nv_release(NvFile* old, NvEvent* slots) {
    through tmp, the extra one straight to the device. A GPU channel takes Ioctl2's and Ioctl3's, as-gpu and ctrl-gpu
    only Ioctl3's. ipc is the command, for the log */
 #define NV_SCRATCH 0x4000
-/* the (device, ioctl) pairs logged already: each is logged on its first use */
+/* the (device, ioctl) pairs logged already: each is logged on its first use. The size field (bits 16-29) is left out
+   of the pair: a channel's submit carries its entry count there, and every count was logged as a new ioctl. With the
+   table full, nothing new is logged: it said "first use" for every pair it couldn't hold, which logged nearly every
+   submit (a lock and a log write a frame in Super Mario Odyssey) */
 static int nv_first_use(int dev, u32 cmd) {
     static PMutex lock = PMUTEX_INIT;
     static struct {
@@ -1103,13 +1154,17 @@ static int nv_first_use(int dev, u32 cmd) {
     static u32 nseen;
     u32 i;
     int first = 1;
+    cmd &= ~(0x3FFFu << 16);
     pm_lock(&lock);
     for (i = 0; i < nseen && first; i++)
         if (seen[i].dev == dev && seen[i].cmd == cmd) first = 0;
-    if (first && nseen < sizeof seen / sizeof seen[0]) {
-        seen[nseen].dev = dev;
-        seen[nseen].cmd = cmd;
-        nseen++;
+    if (first) {
+        if (nseen < sizeof seen / sizeof seen[0]) {
+            seen[nseen].dev = dev;
+            seen[nseen].cmd = cmd;
+            nseen++;
+        } else
+            first = 0;
     }
     pm_unlock(&lock);
     return first;

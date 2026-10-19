@@ -22,6 +22,24 @@ struct SvcObj;
 
 /* One request, parsed from the client's message (TLS's 0x100 bytes, or SendSyncRequestWithUserBuffer's buffer), and
    the reply the handler builds */
+/* an entry of the crash report's ring of requests (ipc.c): what became of one, formatted only when a report prints it.
+   name is the service object's, which lives as long as the process (sm.c keeps the names of its stand-ins), and what
+   a literal */
+enum {
+    IPC_REC_RUNNING,
+    IPC_REC_SERVED,
+    IPC_REC_ANSWERED,       /* sf answered it without the service, for the reason in what */
+    IPC_REC_CLOSE_OBJECT,   /* a domain's Close, the object in cmd */
+    IPC_REC_NOT_SESSION,    /* the handle in cmd */
+    IPC_REC_SESSION_CLOSED,
+    IPC_REC_KERNEL_REFUSED, /* the kernel's result in rc */
+    IPC_REC_TYPE_CLOSED     /* a message type sf doesn't serve closed the session */
+};
+typedef struct {
+    const char *name, *what;
+    u32 kind, type, cmd, in[2], rc;
+} IpcRec;
+
 typedef struct IpcCtx {
     u8* msg;
     u64 msg_size;
@@ -168,7 +186,7 @@ static inline int ipc_counts(const IpcCtx* c, int pid, int na, int nb, int nx, i
 /* a domain request carries exactly the objects the command declares */
 static inline int ipc_objects(const IpcCtx* c, int nobj) { return !c->is_domain || c->nin_objs == nobj; }
 
-/* the last 32 requests, for crash reports: how many there have been, and request seq's entry (seq & 31) */
+/* the last 32 requests, for crash reports: how many there have been, and request seq's entry (seq & 31) as text */
 u32 ipc_ring_count(void);
-const char* ipc_ring_entry(u32 seq);
+void ipc_ring_text(u32 seq, char* out, size_t n);
 #endif

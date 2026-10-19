@@ -35,13 +35,13 @@ u32 session_new(SvcObj* obj) {
     return 0x1234;
 }
 SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t size) {
-    static u8 data[16];
     static SvcObj o;
     (void)dispatch, (void)size;
     o.name = name;
-    o.data = data;
     return &o;
 }
+void pm_lock(PMutex* m) { (void)m; }
+void pm_unlock(PMutex* m) { (void)m; }
 void out_move_h(IpcCtx* c, u32 handle) {
     (void)c, (void)handle;
 }

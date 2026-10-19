@@ -131,7 +131,9 @@ extern void (*const g_svc64[SNX_SVC_COUNT])(CPU* c, u32 imm);
 KShmem* kshmem_new(u64 size, const char* name);
 u8* kshmem_ptr(KShmem* s);
 
-void kernel_load_symbols(void); /* once the game's modules are loaded, for the dumps */
+/* once the game's modules are loaded, for the dumps and kernel_find_symbol_exact */
+void kernel_load_symbols(void);
+u64 kernel_find_symbol_exact(const char* name); /* 0 when no loaded module exports this name */
 void kernel_dump_regs(CPU* c);
 void kernel_dump_threads(void);
 void mem_report(char* out, int n);

@@ -13,18 +13,28 @@
 
 /* The threads blocked in each kind of wait, in arrival order, linked by next_waiter. Each wakes the best priority
    first, the earliest among equals; a thread whose priority changes while it waits goes to the back, behind the
-   waiters of its new priority, as the console reinserts it in its ordered queue */
-static KThread* g_mwait;   /* wait_kind 2: on the mutex at wait_addr, for lock_owner to hand it over with wait_tag */
-static KThread* g_cvwait;  /* 3: on the condition variable wait_key, to take the mutex at wait_addr after */
-static KThread* g_arbwait; /* 4: on the address wait_addr */
+   waiters of its new priority, as the console reinserts it in its ordered queue. Condition variable and address
+   waiters are in a list per bucket of the word they wait on, so a signal looks only at the threads that may wait on its
+   word: idle workers park there for good, and a list of them all made every signal walk every parked thread (dozens in
+   Tears of the Kingdom), each a cache miss. Mutex waits are short, and a priority change looks for the waiters of an
+   owner among all of them, so they stay in one list */
+#define WAIT_BUCKETS 256
+static KThread* g_mwait;                  /* wait_kind 2: on the mutex at wait_addr, for lock_owner to hand it over */
+static KThread* g_cvwait[WAIT_BUCKETS];   /* 3: on the condition variable wait_key, to take the mutex at wait_addr */
+static KThread* g_arbwait[WAIT_BUCKETS];  /* 4: on the address wait_addr */
 
-static KThread** wait_list(int kind) {
+static unsigned bucket(u64 word) { return (unsigned)(((word >> 2) * 0x9E3779B97F4A7C15ull) >> 56); }
+/* the list a thread waiting in that kind on that word is in (its wait_key for a condition variable, else wait_addr) */
+static KThread** wait_list_for(int kind, u64 word) {
     switch (kind) {
         case 2: return &g_mwait;
-        case 3: return &g_cvwait;
-        case 4: return &g_arbwait;
+        case 3: return &g_cvwait[bucket(word)];
+        case 4: return &g_arbwait[bucket(word)];
         default: return NULL;
     }
+}
+static KThread** wait_list(const KThread* t) {
+    return wait_list_for(t->wait_kind, t->wait_kind == 3 ? t->wait_key : t->wait_addr);
 }
 static void list_add(KThread** l, KThread* t) {
     while (*l) l = &(*l)->next_waiter;
@@ -67,7 +77,7 @@ static void prio_restore_nl(KThread* t) {
             if (w->lock_owner == t && w->prio < p) p = w->prio;
         if (p == t->prio) return;
         core_set_prio(t, p);
-        l = wait_list(t->wait_kind);
+        l = wait_list(t);
         if (l) {
             list_del(l, t);
             list_add(l, t);
@@ -202,12 +212,12 @@ u32 svc_wait_cv(KThread* t, u64 maddr, u64 key, u32 tag, i64 timeout) {
     t->wait_addr = maddr;
     t->wait_key = key;
     t->wait_tag = tag;
-    list_add(&g_cvwait, t);
+    list_add(wait_list(t), t);
     if (sleep_nl(t, timeout))
         r = (u32)t->wait_result;
     else { /* timed out waiting for the signal, or after it for the mutex: the game takes the mutex itself then */
         if (t->wait_kind == 3) {
-            list_del(&g_cvwait, t);
+            list_del(wait_list(t), t);
             t->wait_kind = 0;
         } else if (t->wait_kind == 2)
             mutex_unwait_nl(t);
@@ -219,17 +229,18 @@ u32 svc_wait_cv(KThread* t, u64 maddr, u64 key, u32 tag, i64 timeout) {
 /* svcSignalProcessWideKey (Eden's KConditionVariable::Signal): wakes count waiters (all of them when count <= 0), and
    clears the mark once nobody waits */
 u32 svc_signal_cv(u64 key, i32 count) {
-    KThread* w;
+    KThread *w, **l;
     i32 n = 0;
     key &= ~3ull;
+    l = wait_list_for(3, key);
     pm_lock(&g_klock);
-    while ((count <= 0 || n < count) && (w = list_best(g_cvwait, 1, key)) != NULL) {
-        list_del(&g_cvwait, w);
+    while ((count <= 0 || n < count) && (w = list_best(*l, 1, key)) != NULL) {
+        list_del(l, w);
         w->wait_kind = 0;
         cv_take_mutex_nl(w);
         n++;
     }
-    if (!list_best(g_cvwait, 1, key) && key <= AS_SIZE - 4) __atomic_store_n(uword(key), 0u, __ATOMIC_SEQ_CST);
+    if (!list_best(*l, 1, key) && key <= AS_SIZE - 4) __atomic_store_n(uword(key), 0u, __ATOMIC_SEQ_CST);
     pm_unlock(&g_klock);
     R_SUCCEED();
 }
@@ -261,12 +272,12 @@ u32 svc_wait_addr(KThread* t, u64 addr, u32 type, i32 value, i64 timeout) {
     t->woken = 0;
     t->wait_kind = 4;
     t->wait_addr = addr;
-    list_add(&g_arbwait, t);
+    list_add(wait_list(t), t);
     if (sleep_nl(t, timeout))
         r = (u32)t->wait_result;
     else {
         if (t->wait_kind == 4) {
-            list_del(&g_arbwait, t);
+            list_del(wait_list(t), t);
             t->wait_kind = 0;
         }
         r = R_TIMEOUT;
@@ -279,18 +290,19 @@ u32 svc_wait_addr(KThread* t, u64 addr, u32 type, i32 value, i64 timeout) {
    equals value, which it increments; 2: the same if the word equals value, which it changes by whether waiters remain:
    value + 1 with none, value - 1 when all of them wake (value - 2 with count <= 0), value when some stay */
 u32 svc_signal_addr(u64 addr, u32 type, i32 value, i32 count) {
-    KThread* w;
+    KThread *w, **l;
     i32 n = 0;
     u32* p;
     R_TRY(check_word(addr));
     R_UNLESS(type <= 2, R_BADENUM);
     p = uword(addr);
+    l = wait_list_for(4, addr);
     pm_lock(&g_klock);
     if (type) {
         u32 cur = (u32)value, nv = (u32)value + 1u;
         if (type == 2) {
             i32 waiting = 0;
-            for (w = g_arbwait; w; w = w->next_waiter)
+            for (w = *l; w; w = w->next_waiter)
                 if (w->wait_addr == addr) waiting++;
             if (!waiting)
                 nv = (u32)value + 1u;
@@ -308,8 +320,8 @@ u32 svc_signal_addr(u64 addr, u32 type, i32 value, i32 count) {
             R_THROW(R_BADSTATE);
         }
     }
-    while ((count <= 0 || n < count) && (w = list_best(g_arbwait, 0, addr)) != NULL) {
-        list_del(&g_arbwait, w);
+    while ((count <= 0 || n < count) && (w = list_best(*l, 0, addr)) != NULL) {
+        list_del(l, w);
         w->wait_kind = 0;
         wake(w, 0);
         n++;

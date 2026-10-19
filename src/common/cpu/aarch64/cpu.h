@@ -40,8 +40,10 @@ typedef double f64;
    module and the runtime refuses any other. Bump it for any change of layout or of a helper's results.
    7: CPU.poll and RtAPI.poll, read on the backward branches of generated code.
    8: the FP/SIMD emitters and discovery changes.
-   9: RtAPI.svcs, which the NX modules call each SVC through by its number. */
-#define SNX_ABI 9
+   9: RtAPI.svcs, which the NX modules call each SVC through by its number.
+  10: RtAPI.miss replaces the module's own snx_interp_entry as snx_lookup's fallback, and CPU.disp's slots are read
+      with relaxed atomic loads, since the runtime JIT fills them while guest threads run. */
+#define SNX_ABI 10
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)
@@ -131,15 +133,18 @@ typedef char snx_check_cpu_tail[sizeof(void*) != 8 || (offsetof(CPU, disp) == 85
 #define RDQ(dst, a) memcpy(&(dst), MP(a), 16)
 #define WRQ(a, src) memcpy(MP(a), &(src), 16)
 
-/* ---- indirect calls: the function compiled for a pc, or the interpreter for one discovery missed ---- */
+/* ---- indirect calls: the function compiled for a pc, or the runtime JIT for one discovery missed ---- */
+/* A slot goes from NULL to a function while other threads read it (the runtime JIT publishes with release ordering,
+   gpu/nvn_trace.c installs wrappers): a relaxed load, which costs a plain one, makes that no data race. The code and
+   data behind a published address were written before the release store, and reaching them depends on the loaded
+   address, which orders them on every host the backends target */
 SNX_INLINE GuestFn snx_lookup(CPU* c, u64 pc);
-extern GuestFn snx_interp_entry;
 SNX_INLINE GuestFn snx_lookup(CPU* c, u64 pc) {
     u64 offset = pc - c->code_lo;
     GuestFn fn;
-    if (UNLIKELY(offset >= c->code_hi - c->code_lo || (pc & 3))) return snx_interp_entry;
-    fn = c->disp[offset >> 2];
-    return LIKELY(fn != 0) ? fn : snx_interp_entry;
+    if (UNLIKELY(offset >= c->code_hi - c->code_lo || (pc & 3))) return c->rt->miss;
+    fn = __atomic_load_n(&c->disp[offset >> 2], __ATOMIC_RELAXED);
+    return LIKELY(fn != 0) ? fn : c->rt->miss;
 }
 #define CALLDYN(t)                                                                                                     \
     do {                                                                                                               \

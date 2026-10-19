@@ -47,6 +47,11 @@ The IPA is unsigned: AltStore, SideStore or a developer account signs it for the
 `dist/apple/ScarletNX.entitlements` (the larger address space and memory limit a game needs). It holds MoltenVK's
 framework.
 
+Code compiled while a game runs on macOS, 32-bit games' blocks and the runtime JIT's functions, goes through the
+runtime's own loader (`src/common/cpu/recompiler/llvm/code_loader.c`). LLVM writes it as ELF objects with Darwin's
+calling convention, and the loader places them in `MAP_JIT` memory, which each thread sees either writable or
+executable. The app is signed without the hardened runtime, so `MAP_JIT` needs no entitlement.
+
 ## What is missing
 
 Apple silicon's 16 KiB pages no longer stop the runtime: it commits guest memory in whole host pages, as on
@@ -56,8 +61,8 @@ games from running:
 - **Game modules.** The recompiler links ELF and PE only (`src/common/cpu/recompiler/llvm/link.c`). macOS needs a
   Mach-O dylib, signed. iOS loads no code it did not ship with, so its games would have to be linked into the app
   (`snx_module_static`, `src/nx/runtime/main.c`) or loaded into JIT memory on a device that allows it.
-- **32-bit games on iOS.** Their blocks are compiled at run time with LLVM's MCJIT (`src/nx/runtime/arm.c`), which
-  needs memory that becomes executable. iOS gives that only to an app that may JIT.
+- **32-bit games on iOS.** Their blocks are compiled at run time (`src/nx/runtime/arm.c`,
+  `src/common/cpu/arm/exec.c`), which needs memory that becomes executable. iOS gives that only to an app that may JIT.
 - **Preparing on iOS**, for the reasons above, until the driver runs in the app's process.
 - **The 3DS and Linux drivers** are not built for iOS (`SNX_BUILD_3DS`, `SNX_BUILD_GNUABI`), nor the Linux one for
   macOS.

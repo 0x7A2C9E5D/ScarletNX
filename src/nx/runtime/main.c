@@ -6,10 +6,12 @@
 #include "nx/runtime/main.h"
 #include "common/utilities/common.h"
 #include "nx/gpu/gpu.h"
+#include "nx/gpu/nvn_trace.h"
 #include "nx/gpu/renderer.h"
 #include "nx/hle/filesystem/fs.h"
 #include "nx/hle/kernel/kernel.h"
 #include "nx/hle/services/hid.h"
+#include "nx/runtime/guest_jit.h"
 #include "nx/hle/services/nvdrv.h"
 #include "nx/hle/services/services.h"
 #include "nx/hle/services/vi.h"
@@ -40,7 +42,6 @@ volatile int g_quit;
 int (*snx_menu)(const char* self);
 const SnxModule* g_mod;
 GuestFn* g_disp;
-GuestFn snx_interp_entry; /* the module's interpreter, for an address nothing was compiled for (cpu.h's lookup) */
 
 /* A build that links a game's code into the runtime defines it; none does yet (src/nx/CMakeLists.txt) */
 const SnxModule* snx_module_static(void) __attribute__((weak));
@@ -164,7 +165,6 @@ static void dispatch_init(void) {
     u64 words, i;
     g_code_lo = g_mod->code_lo;
     g_code_hi = g_mod->code_hi;
-    snx_interp_entry = g_mod->interp;
     if (g_code_hi <= g_code_lo) return;
     words = (g_code_hi - g_code_lo) / 4;
     if (words > ((size_t)-1) / sizeof *g_disp) fatal("The game's code range is too large");
@@ -243,6 +243,7 @@ static void read_npdm(void) {
         caps = rd32le(d + aci + 0x30);
         caps_size = rd32le(d + aci + 0x34);
         for (i = 0; caps < aci_size && caps_size <= aci_size - caps && i + 4 <= caps_size; i += 4) {
+        nvn_trace_report();
             u32 cap = rd32le(d + aci + caps + i), lowest, highest, min_core, max_core;
             if ((cap & 0xF) != 0x7) continue; /* ThreadInfo: three ones, then a zero */
             lowest = cap >> 4 & 63;
@@ -273,6 +274,7 @@ void snx_save_before_exit(void) {
         save_hints();
         if (g_renderer && g_renderer->save) g_renderer->save();
         svc_core_exit();
+        jit_report();
         saved = 1;
     }
     pm_unlock(&lock);
@@ -408,6 +410,10 @@ int snx_main(int argc, char** argv) {
     load_hints();
     if (loader_load()) fatal("Could not load the game executables. See the .log for details.");
     kernel_load_symbols();
+    nvn_trace_init();
+    /* after the trace, which says whether calls must go through the slots it wraps. The JIT compiles A64: a 32-bit
+       game's blocks are arm.c's, and its hints are A32 block keys the JIT must not warm-compile */
+    if (!g_arm_mod) jit_init();
     read_npdm();
     svc_core_init();
     svc_fs_init();

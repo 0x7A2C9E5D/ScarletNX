@@ -400,7 +400,13 @@ static u32 send_to(u32 h, u64 addr, u64 size) {
     return ipc_handle(h, addr, size);
 }
 static u32 send(u32 h) { return send_to(h, MSG, 0x100); }
-static const char* last_ring(void) { return g_ipc.ring[(g_ipc.ring_n - 1) & 31]; }
+/* ring entry seq as the crash report prints it */
+static const char* ring_text(u32 seq) {
+    static char line[200];
+    ipc_ring_text(seq, line, sizeof line);
+    return line;
+}
+static const char* last_ring(void) { return ring_text(g_ipc.ring_n - 1); }
 
 /* a plain request with its CmifInHeader, raw data, the reply's words, and the ring entry */
 static void plain_requests(u32 h, SvcObj* root) {
@@ -910,7 +916,7 @@ static void ring_entries(u32 h) {
     cmif_make_request(msg(), (CmifRequestFormat){.request_id = 8});
     u32 slot = g_ipc.ring_n & 31;
     CHECK(send(h) == 0 && g_ipc.ring_n == ring + 3 + 33);
-    CHECK(strstr(g_ipc.ring[slot], "cmd 8") && strstr(g_ipc.ring[slot], "-> running")); /* not rewritten */
+    CHECK(strstr(ring_text(slot), "cmd 8") && strstr(ring_text(slot), "-> running")); /* not rewritten */
 }
 
 /* auto_stub_ipc: a command no interface declares answers success, or the console's UnknownCommandId when it's off */

@@ -148,7 +148,7 @@ static int check_depth_array(void) {
         copies[layer].imageSubresource = (VkImageSubresourceLayers){VK_IMAGE_ASPECT_DEPTH_BIT, 0, layer, 1};
         copies[layer].imageExtent = (VkExtent3D){1, 1, 1};
     }
-    vkCmdCopyImageToBuffer(cb, target->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 3, copies);
+    rec_CmdCopyImageToBuffer(cb, target->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 3, copies);
     vk_finish();
     vk_readback_ready();
     for (u32 layer = 0; layer < 3; layer++) {
@@ -216,7 +216,7 @@ static int check_srgb_write(void) {
         copies[i].imageSubresource = (VkImageSubresourceLayers){VK_IMAGE_ASPECT_COLOR_BIT, 0, i, 1};
         copies[i].imageExtent = (VkExtent3D){1, 1, 1};
     }
-    vkCmdCopyImageToBuffer(cb, target->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 2, copies);
+    rec_CmdCopyImageToBuffer(cb, target->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 2, copies);
     vk_finish();
     vk_readback_ready();
     const u8 expected[8] = {128, 137, 137, 255, 188, 64, 64, 255};
@@ -468,7 +468,7 @@ int main(int argc, char** argv) {
     u32 epoch = g_vk_epoch;
     u64 finishes = g_vk_finishes;
     for (int kind = 0; kind <= 4; kind++) g_renderer->method_barrier(kind);
-    CHECK(g_vk_epoch == epoch + 2);   /* data and descriptor invalidation each expire cached reads */
+    CHECK(g_vk_epoch == epoch);       /* no barrier expires cached reads: their checks see writes (vkr_method_barrier) */
     CHECK(g_vk_finishes == finishes); /* method barriers order GPU work without forcing a host wait */
     printf("Headless Vulkan device: %s\n", g_vk.props.deviceName);
     /* Make any accidental WSI use during presents/recreation fail the test immediately. */

@@ -91,6 +91,13 @@ void kernel_load_symbols(void) {
     if (g_nsyms) qsort(g_syms, g_nsyms, sizeof *g_syms, sym_cmp);
     LOG("symbols: %u functions named\n", g_nsyms);
 }
+/* the address of the function the game exports as name (nvn_trace.c finds nvnBootstrapLoader so), 0 when none */
+u64 kernel_find_symbol_exact(const char* name) {
+    size_t len = strlen(name) + 1;
+    for (u32 i = 0; i < g_nsyms; i++)
+        if (readable(g_syms[i].name, len) && !memcmp(GP(g_syms[i].name), name, len)) return g_syms[i].addr;
+    return 0;
+}
 /* the length of the guest string at a, at most max, when it is readable and ends within max; else 0 */
 static int gstr(u64 a, int max) {
     int n = 0;
@@ -171,15 +178,18 @@ static void dump_code(int lvl, const char* what, u64 lo, u64 hi, u64 mark) {
         logf_(lvl, "  %s %llx:%s\n", what, (unsigned long long)a, line);
     }
 }
-/* words 32-bit words at what each register that points into mapped memory (aligned, above 0x10000) points at */
+/* words 32-bit words at what each register that points into mapped memory (aligned, above 0x10000) points at. The
+   registers can be a running thread's (a sleep's saved ones are rewritten at its next sleep): each is read once, and
+   the value checked is the one used. Reading r[i] again after the check let a thread dump read guest address 0x1c */
 static void dump_pointees(int lvl, const char* reg, const u64* r, int nr, int words) {
     int i, k;
     for (i = 0; i < nr; i++) {
         char line[8 * 9 + 1];
         size_t l = 0;
-        if (r[i] < 0x10000 || (r[i] & 3) || !readable(r[i], 4 * (u64)words)) continue;
-        for (k = 0; k < words && k < 8; k++) l += (size_t)sprintf(line + l, " %08x", gr32(r[i] + 4 * (u64)k));
-        logf_(lvl, "  mem %s%d %llx:%s\n", reg, i, (unsigned long long)r[i], line);
+        u64 a = __atomic_load_n(&r[i], __ATOMIC_RELAXED);
+        if (a < 0x10000 || (a & 3) || !readable(a, 4 * (u64)words)) continue;
+        for (k = 0; k < words && k < 8; k++) l += (size_t)sprintf(line + l, " %08x", gr32(a + 4 * (u64)k));
+        logf_(lvl, "  mem %s%d %llx:%s\n", reg, i, (unsigned long long)a, line);
     }
 }
 /* the last 40 SVCs (the ring svc.c's dispatch fills) and 32 IPC requests, oldest first. Each ring's count is read
@@ -197,7 +207,11 @@ static void dump_rings(int lvl) {
     n = ipc_ring_count();
     first = n > 32 ? n - 32 : 0;
     logf_(lvl, "  last IPC requests:\n");
-    for (i = first; i < n; i++) logf_(lvl, "    %.160s\n", ipc_ring_entry(i));
+    for (i = first; i < n; i++) {
+        char line[200];
+        ipc_ring_text(i, line, sizeof line);
+        logf_(lvl, "    %s\n", line);
+    }
 }
 static void dump_regs32(const KThread* t) {
     const SnxArmCPU* a = &t->arm;

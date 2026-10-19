@@ -35,9 +35,14 @@ static int g_host_cpu[256], g_host_ncpu;
 /* the core a thread would run on, kept within the cores the runtime has */
 static int core_of(const KThread* t) { return t->core >= 0 && t->core < NCORES ? t->core : 0; }
 /* the holder of core k is asked to let go (CPU.poll, read by generated code) when a waiter would preempt it */
+/* stored only when it changes: the holder's code reads poll at each backward branch, and a store of the same value
+   still takes its cache line away from the holder's core */
 static void core_flag_nl(int k) {
     KThread* o = g_core_owner[k];
-    if (o) __atomic_store_n(&o->cpu.poll, g_core_best[k] < o->prio ? 1u : 0u, __ATOMIC_RELAXED);
+    u32 v;
+    if (!o) return;
+    v = g_core_best[k] < o->prio ? 1u : 0u;
+    if (__atomic_load_n(&o->cpu.poll, __ATOMIC_RELAXED) != v) __atomic_store_n(&o->cpu.poll, v, __ATOMIC_RELAXED);
 }
 static void core_rebest_nl(int k) {
     KThread* w;

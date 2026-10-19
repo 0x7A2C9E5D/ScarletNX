@@ -8,7 +8,6 @@
 #include "nx/hle/kernel/kernel_int.h"
 #include "nx/runtime/options.h"
 #include <assert.h>
-#include <stdarg.h>
 
 #define SFCI                 0x49434653u /* the CmifInHeader's magic */
 #define SFCO                 0x4F434653u /* the CmifOutHeader's */
@@ -73,24 +72,52 @@ static struct {
     SvcReg* reg;
     int nreg, capreg;
     /* the crash report's ring of the last 32 requests: ring_n counts every request, on every thread */
-    char ring[32][160];
+    IpcRec ring[32];
     char apart[64];
     u32 ring_n;
 } g_ipc = {PMUTEX_INIT, {{0}}, {{0}}, {{0}}, 0, 0, 0, {{0}}, 0, NULL, 0, 0, {{0}}, {0}, 0};
 
 /* ============================================================ the crash report's ring */
 u32 ipc_ring_count(void) { return __atomic_load_n(&g_ipc.ring_n, __ATOMIC_RELAXED); }
-const char* ipc_ring_entry(u32 seq) { return g_ipc.ring[seq & 31]; }
+void ipc_ring_text(u32 seq, char* out, size_t n) {
+    const IpcRec* r = &g_ipc.ring[seq & 31];
+    const char* name = r->name ? r->name : "?";
+    switch (r->kind) {
+        case IPC_REC_RUNNING:
+            snprintf(out, n, "%s cmd %u (in %x %x) -> running", name, r->cmd, r->in[0], r->in[1]);
+            break;
+        case IPC_REC_SERVED:
+            snprintf(out, n, "%s cmd %u (in %x %x) -> %x", name, r->cmd, r->in[0], r->in[1], r->rc);
+            break;
+        case IPC_REC_ANSWERED:
+            snprintf(out, n, "%s type %u cmd %u -> %x (not served: %s)", name, r->type, r->cmd, r->rc, r->what);
+            break;
+        case IPC_REC_CLOSE_OBJECT:
+            snprintf(out, n, "%s type %u close of object %u -> 0 (not served)", name, r->type, r->cmd);
+            break;
+        case IPC_REC_NOT_SESSION: snprintf(out, n, "handle %x -> E401 (not a session)", r->cmd); break;
+        case IPC_REC_SESSION_CLOSED: snprintf(out, n, "%s -> F601 (session closed)", name); break;
+        case IPC_REC_KERNEL_REFUSED:
+            snprintf(out, n, "%s type %u -> %x (not served: the kernel refused it)", name, r->type, r->rc);
+            break;
+        default: snprintf(out, n, "%s type %u -> F601 (not served, the session is closed)", name, r->type); break;
+    }
+}
 /* each request takes the next entry, served or not; the number it returns names it */
 static u32 ring_claim(void) { return __atomic_fetch_add(&g_ipc.ring_n, 1, __ATOMIC_RELAXED); }
-/* rewrites entry seq, unless 32 later requests have taken its slot meanwhile (a service that ran long) */
-static void ring_set(u32 seq, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
-static void ring_set(u32 seq, const char* fmt, ...) {
-    va_list a;
+/* rewrites entry seq, unless 32 later requests have taken its slot meanwhile (a service that ran long). Each request
+   stores its fields, and only a crash report formats them: a text entry cost two vsnprintf calls a request */
+static void ring_set(u32 seq, u32 kind, const char* name, u32 type, u32 cmd, const u32* in, u32 rc, const char* what) {
+    IpcRec* r = &g_ipc.ring[seq & 31];
     if (__atomic_load_n(&g_ipc.ring_n, __ATOMIC_RELAXED) - seq > 32) return;
-    va_start(a, fmt);
-    vsnprintf(g_ipc.ring[seq & 31], sizeof g_ipc.ring[0], fmt, a);
-    va_end(a);
+    r->name = name;
+    r->what = what;
+    r->kind = kind;
+    r->type = type;
+    r->cmd = cmd;
+    r->in[0] = in ? in[0] : 0;
+    r->in[1] = in ? in[1] : 0;
+    r->rc = rc;
 }
 
 /* ============================================================ the pools */
@@ -498,16 +525,16 @@ static void serve(IpcCtx* c, SvcObj* o, u32 seq) {
     u32 in[2];
     ipc_in(c, 0, &in[0], 4);
     ipc_in(c, 4, &in[1], 4);
-    ring_set(seq, "%s cmd %u (in %x %x) -> running", o->name, c->cmd, in[0], in[1]);
+    ring_set(seq, IPC_REC_RUNNING, o->name, c->type, c->cmd, in, 0, NULL);
     LOGV("IPC %s cmd %u\n", o->name, c->cmd);
     c->rc = (u32)o->dispatch(o, c);
-    ring_set(seq, "%s cmd %u (in %x %x) -> %x", o->name, c->cmd, in[0], in[1], c->rc);
+    ring_set(seq, IPC_REC_SERVED, o->name, c->type, c->cmd, in, c->rc, NULL);
     respond(c);
 }
 /* a request sf answers without the service: a refusal, or a control request */
 static void answer(IpcCtx* c, u32 rc, u32 seq, const char* name, const char* what) {
     c->rc = rc;
-    ring_set(seq, "%s type %u cmd %u -> %x (not served: %s)", name, c->type, c->cmd, rc, what);
+    ring_set(seq, IPC_REC_ANSWERED, name, c->type, c->cmd, NULL, rc, what);
     if (rc && strcmp(what, "control")) WARN_LIMIT(16, "ipc: %s: a request refused (%x)\n", name, rc);
     respond(c);
 }
@@ -565,7 +592,7 @@ static void serve_domain(IpcCtx* c, Domain* d, u32 seq, const char* name) {
     if (!c->raw) { /* Close, the one domain message parse_cmif finds no CmifInHeader in */
         svcobj_unref(o);
         svcobj_unref(domain_take(d, c->domain_obj));
-        ring_set(seq, "%s type %u close of object %u -> 0 (not served)", name, c->type, c->domain_obj);
+        ring_set(seq, IPC_REC_CLOSE_OBJECT, name, c->type, c->domain_obj, NULL, 0, NULL);
         c->rc = 0;
         respond(c);
         return;
@@ -586,13 +613,13 @@ u32 ipc_handle(u32 handle, u64 msg_addr, u64 msg_size) {
     const char* name;
     u32 rc = 0;
     if (!s) {
-        ring_set(seq, "handle %x -> E401 (not a session)", handle);
+        ring_set(seq, IPC_REC_NOT_SESSION, NULL, 0, handle, NULL, R_BADHANDLE, NULL);
         WARN_LIMIT(8, "ipc: a request on handle %x, which isn't a session: InvalidHandle\n", handle);
         return R_BADHANDLE;
     }
     name = s->obj ? s->obj->name : "session";
     if (__atomic_load_n(&s->closed, __ATOMIC_ACQUIRE)) {
-        ring_set(seq, "%s -> F601 (session closed)", name);
+        ring_set(seq, IPC_REC_SESSION_CLOSED, name, 0, 0, NULL, R_SESSIONCLOSED, NULL);
         kobj_unref(&s->o);
         return R_SESSIONCLOSED;
     }
@@ -601,7 +628,7 @@ u32 ipc_handle(u32 handle, u64 msg_addr, u64 msg_size) {
     c.msg_size = msg_size;
     c.sess = s;
     if (parse_hipc(&c, &h)) {
-        ring_set(seq, "%s type %u -> %x (not served: the kernel refused it)", name, c.type, c.kernel_rc);
+        ring_set(seq, IPC_REC_KERNEL_REFUSED, name, c.type, 0, NULL, c.kernel_rc, NULL);
         WARN_LIMIT(8, "ipc: %s: the kernel refuses a request (%x): %s\n", name, c.kernel_rc,
                    kernel_refusal(c.kernel_rc));
         rc = c.kernel_rc;
@@ -616,7 +643,7 @@ u32 ipc_handle(u32 handle, u64 msg_addr, u64 msg_size) {
             answer(&c, RC_UNKNOWNCOMMAND, seq, name, "command");
     } else if (c.type < 4 || c.type > 7) {
         __atomic_store_n(&s->closed, 1, __ATOMIC_RELEASE);
-        ring_set(seq, "%s type %u -> F601 (not served, the session is closed)", name, c.type);
+        ring_set(seq, IPC_REC_TYPE_CLOSED, name, c.type, 0, NULL, R_SESSIONCLOSED, NULL);
         if (c.type != 2 && c.type != 15)
             WARN_LIMIT(4, "ipc: %s: message type %u, which sf doesn't serve: the session is closed\n", name, c.type);
         rc = R_SESSIONCLOSED;

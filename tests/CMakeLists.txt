@@ -291,7 +291,7 @@ snx_test_target(snx-test-arm-decode 11)
 add_test(NAME arm_decode COMMAND snx-test-arm-decode)
 add_executable(snx-test-arm-exec arm_exec_test.c)
 snx_test_target(snx-test-arm-exec 11)
-target_link_libraries(snx-test-arm-exec PRIVATE snx_arm_llvm)
+target_link_libraries(snx-test-arm-exec PRIVATE snx_llvm)
 add_test(NAME arm_exec_dry_svc COMMAND snx-test-arm-exec)
 
 # Small architectural witnesses need neither game assets nor an emulator.
@@ -808,12 +808,12 @@ if(NOT SNX_TOOLS_ONLY)
     snx_test_target(snx-test-tex-upload-rows 23)
     target_link_libraries(snx-test-tex-upload-rows PRIVATE snx_nx_flags)
     add_test(NAME tex_upload_rows COMMAND snx-test-tex-upload-rows)
-    # vk_surf_evict (gpu/vk/surface.c): what a render target drew goes to guest memory before it goes, unless memory
-    # has it or is newer, or the target is parked
-    add_executable(snx-test-rt-evict rt_evict.c)
-    snx_test_target(snx-test-rt-evict 23)
-    target_link_libraries(snx-test-rt-evict PRIVATE snx_nx_flags)
-    add_test(NAME rt_evict COMMAND snx-test-rt-evict)
+    # the file of shaders and pipelines kept across runs (gpu/vk/pipeline_file.c): records back as written, pipelines
+    # by their shaders' records, a cut or changed record ending the reading, another key starting over, a full file
+    add_executable(snx-test-pipeline-file pipeline_file.c)
+    snx_test_target(snx-test-pipeline-file 23)
+    target_link_libraries(snx-test-pipeline-file PRIVATE snx_nx_flags)
+    add_test(NAME pipeline_file COMMAND snx-test-pipeline-file)
 endif()
 
 add_executable(snx_recompiler_test recompiler_native.c)
@@ -828,12 +828,35 @@ snx_test_target(snx-test-llvm-differential 11)
 target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
 # In shards that run side by side, each a share of the words, all of them started first (COST): a tree with no times
 # of its own (CI's) starts tests in their order, and these are the longest. Fewer, and one runs alone at the end;
-# more, and each pays the compiles' start again
+# more, and each pays the compiles' start again. The _jit shards run the same steps through the JIT's loader
+# (code_loader.c: ELF objects, code_loader_coff.c: Windows' COFF ones)
 foreach(shard RANGE 2)
     add_test(NAME llvm_differential_${shard} COMMAND snx-test-llvm-differential "${SNX_TARGET_C_COMPILER}"
         "${PROJECT_SOURCE_DIR}" --quiet --shard ${shard}/3)
-    set_tests_properties(llvm_differential_${shard} PROPERTIES TIMEOUT 900 COST 100)
+    add_test(NAME llvm_differential_jit_${shard} COMMAND snx-test-llvm-differential "${CMAKE_C_COMPILER}"
+        "${PROJECT_SOURCE_DIR}" --quiet --jit --shard ${shard}/3)
+    set_tests_properties(llvm_differential_${shard} llvm_differential_jit_${shard} PROPERTIES TIMEOUT 900 COST 100)
 endforeach()
+# the runtime JIT (jit_service.c): misses compiled, published and shared between threads, on that loader
+add_executable(snx-test-jit-service jit_service.c)
+snx_test_target(snx-test-jit-service 11)
+target_link_libraries(snx-test-jit-service PRIVATE snx_llvm Threads::Threads)
+add_test(NAME jit_service COMMAND snx-test-jit-service)
+set_tests_properties(jit_service PROPERTIES TIMEOUT 120)
+# longjmp across the loader's code, which on Windows unwinds through its registered function table
+add_executable(snx-test-code-loader-unwind code_loader_unwind.c)
+snx_test_target(snx-test-code-loader-unwind 11)
+target_link_libraries(snx-test-code-loader-unwind PRIVATE snx_llvm)
+add_test(NAME code_loader_unwind COMMAND snx-test-code-loader-unwind)
+if(NOT WIN32)
+    # the relocations both ELF paths share (elf_object.c), AArch64's included, checked on any ELF host and on macOS,
+    # whose JIT loads ELF objects
+    add_executable(snx-test-elf-relocate elf_relocate.c)
+    snx_test_target(snx-test-elf-relocate 11)
+    target_link_libraries(snx-test-elf-relocate PRIVATE snx_llvm)
+    add_test(NAME elf_relocate COMMAND snx-test-elf-relocate)
+    set_tests_properties(elf_relocate PROPERTIES TIMEOUT 120)
+endif()
 # not a test: timings of the generated code (llvm_bench SCARLETNX REPO CLANG)
 add_executable(snx-llvm-bench llvm_bench.c)
 snx_test_target(snx-llvm-bench 11)
@@ -884,7 +907,8 @@ target_link_libraries(snx-test-recompiler-library PRIVATE scarletnx-recompiler)
 add_test(NAME recompiler_library COMMAND snx-test-recompiler-library)
 if(APPLE)
     # these build a game module and load it, which needs a Mach-O module the recompiler can't link yet
-    # (src/common/cpu/recompiler/llvm/link.c, docs/APPLE.md), and 4 KiB host pages to run it: not run there
+    # (src/common/cpu/recompiler/llvm/link.c, docs/APPLE.md), and 4 KiB host pages to run it: not run there. The
+    # in-process loader's tests run: it loads ELF objects on macOS too (code_loader.c)
     set_tests_properties(native_recompiler llvm_module recompiler_library llvm_differential_0 llvm_differential_1
                          llvm_differential_2 PROPERTIES DISABLED TRUE)
 endif()
@@ -920,6 +944,14 @@ add_test(NAME vic_glsl COMMAND snx-test-vic-glsl)
 add_executable(snx-test-astc-blocks astc_blocks.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/astc.c")
 snx_test_target(snx-test-astc-blocks 23)
 add_test(NAME astc_blocks COMMAND snx-test-astc-blocks)
+
+add_executable(snx-test-nvn-command-gap nvn_command_gap.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/nvn_command_gap.c")
+snx_test_target(snx-test-nvn-command-gap 23)
+add_test(NAME nvn_command_gap COMMAND snx-test-nvn-command-gap)
+
+add_executable(snx-test-nvn-control nvn_control.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/nvn_control.c")
+snx_test_target(snx-test-nvn-control 23)
+add_test(NAME nvn_control COMMAND snx-test-nvn-control)
 
 # the shared fonts pl.c hands out when a game folder has none: the stand-ins compiled in (cmake/shared_fonts.cmake)
 if(NOT SNX_TOOLS_ONLY)
@@ -988,11 +1020,17 @@ add_test(NAME draw_texture COMMAND snx-test-draw-texture)
 if(UNIX)
     add_executable(snx-test-gpu-park gpu_park.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/gpu.c"
         "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/engines.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/maxwell3d.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/write_pages.c"
-        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/dma.c")
+        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme.c" "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme_hle.c"
+        "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/dma.c")
     snx_test_target(snx-test-gpu-park 23)
         add_test(NAME gpu_park COMMAND snx-test-gpu-park)
     set_tests_properties(gpu_park PROPERTIES TIMEOUT 30) # a deadlock in the queue would otherwise hang ctest
 endif()
+
+# mme.c's native macros chosen by the hash of their code, the interpreter for unknown code, and the verify mode
+add_executable(snx-test-mme-native mme_native.c)
+snx_test_target(snx-test-mme-native 23)
+add_test(NAME mme_native COMMAND snx-test-mme-native)
 
 add_executable(snx-test-etc2 etc2_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
 snx_test_target(snx-test-etc2 23)
@@ -1112,7 +1150,7 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
         add_test(NAME shaderdec_spec COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/shaderdec_test.py"
             $<TARGET_FILE:snx-shaderdec> "${PROJECT_SOURCE_DIR}/src/nx/gpu/shader/maxwell_opcodes.def")
     endif()
-    add_executable(snx-test-vulkan-release vulkan_release.c)
+    add_executable(snx-test-vulkan-release vulkan_release.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/vk/pending_pages.c")
     snx_test_target(snx-test-vulkan-release 11)
     add_test(NAME vulkan_release COMMAND snx-test-vulkan-release)
     add_executable(snx-test-vulkan-backing vulkan_backing.c)

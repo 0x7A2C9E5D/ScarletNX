@@ -28,12 +28,24 @@ static int sm_name(const nn_sm_ServiceName* in, char out[9]) {
 /* a service the runtime doesn't have: every command answers success (stub_ok logs it as [undeclared], or
    fails it with UnknownCommandId when auto_stub_ipc is off), under the service's own name. The console's sm would
    keep the client waiting for the service to register, which never happens here */
-static SvcObj* sm_stand_in(const char* name) {
-    SvcObj* o = svcobj_new(name, stub_ok, 9);
-    strcpy((char*)o->data, name);
-    o->name = (const char*)o->data;
-    return o;
+#define STAND_IN_NAMES 256 /* more names than Horizon has services */
+static struct {
+    PMutex lk;
+    char name[STAND_IN_NAMES][9];
+    int n;
+} g_stand_in = {PMUTEX_INIT, {{0}}, 0};
+/* The stand-in's name, kept for the process: IPC's crash ring keeps the names of objects already gone */
+static const char* stand_in_name(const char* name) {
+    const char* r = "(a service missing from the runtime)";
+    int i;
+    pm_lock(&g_stand_in.lk);
+    for (i = 0; i < g_stand_in.n && strcmp(g_stand_in.name[i], name); i++) {}
+    if (i == g_stand_in.n && i < STAND_IN_NAMES) strcpy(g_stand_in.name[g_stand_in.n++], name);
+    if (i < g_stand_in.n) r = g_stand_in.name[i];
+    pm_unlock(&g_stand_in.lk);
+    return r;
 }
+static SvcObj* sm_stand_in(const char* name) { return svcobj_new(stand_in_name(name), stub_ok, 0); }
 
 static int nn_sm_detail_IUserInterface_GetServiceHandle(SvcObj* self, const nn_sm_ServiceName* name, u32* session) {
     char s[9];
