@@ -561,6 +561,16 @@ static void global_buffers(void) {
     u32* code = translate(unused, 1, ST_FS, &info, &words, 1);
     check(code && !info.unsupported && info.ngbuf == 0, "unused constant is not a global buffer");
     free(code);
+    /* an LDG whose base comes from arithmetic the tracking doesn't follow names that instruction (issue #440) */
+    const u64 untracked[] = {FMUL_KEEP | 2, 0xEED4200000070200ull};
+    code = translate(untracked, 2, ST_FS, &info, &words, 1);
+    check_refused(code, &info, "global memory base R2 not tracked at 60: FMUL (reg) at 58",
+                  "an untracked global base names its last writer");
+    free(code);
+    code = translate(untracked + 1, 1, ST_FS, &info, &words, 1);
+    check_refused(code, &info, "global memory base R2 not tracked at 58: no write before",
+                  "an untracked global base without a writer says so");
+    free(code);
 }
 
 static void float_controls(void) {

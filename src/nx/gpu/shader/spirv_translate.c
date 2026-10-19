@@ -2923,10 +2923,24 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         if (op == O_LDG || op == O_STG || op == O_RED || op == O_ATOM || op == O_ATOM_CAS) {
             int current = a < 255 ? gtags[a] : 0, slot = 0;
             if (!current) {
+                /* name the last instruction before it that wrote the base, the form the tracking above lacks (or
+                   the load it came from), so a log shows what to add without the program */
+                const Op* writer = NULL;
+                u32 at = i;
+                while (!writer && at > 11) {
+                    const Op* o;
+                    at--;
+                    o = IDX_OK(at) ? decode(insn[at]) : NULL;
+                    if (o && shader_writes_reg(insn[at], o->id, a)) writer = o;
+                }
                 free(gb_at);
                 free(pop_targets);
-                snprintf(si->first_unsupported, sizeof si->first_unsupported,
-                         "global memory base R%u not tracked at %x", a, i * 8);
+                if (writer)
+                    snprintf(si->first_unsupported, sizeof si->first_unsupported,
+                             "global memory base R%u not tracked at %x: %s at %x", a, i * 8, writer->name, at * 8);
+                else
+                    snprintf(si->first_unsupported, sizeof si->first_unsupported,
+                             "global memory base R%u not tracked at %x: no write before", a, i * 8);
                 si->unsupported++;
                 return NULL;
             }
