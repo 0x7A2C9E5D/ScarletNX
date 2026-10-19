@@ -1,13 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* A whole program through the backends: a synthetic NRO with a loop, BL/RET, an indirect branch inside its function
-   (the D_ dispatch), a tail call into another function, SVC, exclusives, FP and SIMD, recompiled by the CLI with each
-   backend in small chunks (calls cross units). Every module runs it from the same state, AOT and through its
-   interpreter; every register, the flags, FP state, stack memory and the SVC calls must match the LLVM AOT run.
+/* A whole program through the LLVM backend: a synthetic NRO with a loop, BL/RET, an indirect branch inside its function
+   (the D_ dispatch), a tail call into another function, SVC, exclusives, FP and SIMD, recompiled by the CLI in small
+   chunks (calls cross units). The module runs it from the same state, AOT and through its interpreter; every register,
+   the flags, FP state, stack memory and the SVC calls must match between the two.
    CPU.poll is set when each run starts: the AOT code must call rt->poll at the loop's backward branch, resuming at
    its head (the interpreter polls on any taken branch).
-     llvm_module SCARLETNX REPO CLANG [BACKEND...]
-   llvm always, the others named after CLANG too (gcc). */
+     llvm_module SCARLETNX REPO CLANG */
 #include "common/utilities/common.h"
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/loader/module_abi.h"
@@ -160,16 +159,13 @@ static void differences(const Run* a, const Run* b, const char* what) {
 }
 
 int main(int argc, char** argv) {
-    static const char* backends[8] = {"llvm"};
-    static Run runs[8][2];
-    int nbackends = 1;
+    static Run runs[2];
     unsigned char image[IMAGE];
-    char *root, *input, *self, *out[8], *module[8], *text = NULL;
+    char *root, *input, *self, *out, *module, *text = NULL;
     const char* args[24];
-    int b, k, interp;
+    int k, interp;
     size_t i;
-    if (argc < 4) return 2;
-    for (b = 4; b < argc && nbackends < 8; ++b) backends[nbackends++] = argv[b];
+    if (argc != 4) return 2;
     root = snx_temp_dir(NULL);
     if (!root) return 1;
     memset(image, 0, sizeof(image));
@@ -186,66 +182,47 @@ int main(int argc, char** argv) {
     input = snx_path_join(root, "program.nro");
     self = snx_executable(argv[0]);
     check(!snx_write_file(input, image, sizeof(image)), "write NRO");
-    for (b = 0; b < nbackends; ++b) {
-        out[b] = snx_path_join(root, backends[b]);
+    out = snx_path_join(root, "llvm");
 #ifdef _WIN32
-        module[b] = snx_path_join(out[b], "Program/Program_code.dll");
+    module = snx_path_join(out, "Program/Program_code.dll");
 #else
-        module[b] = snx_path_join(out[b], "Program/Program_code.so");
+    module = snx_path_join(out, "Program/Program_code.so");
 #endif
-        k = 0;
-        args[k++] = argv[1];
-        args[k++] = "--repo";
-        args[k++] = argv[2];
-        args[k++] = "-r";
-        args[k++] = input;
-        args[k++] = "Program";
-        args[k++] = "--outdir";
-        args[k++] = out[b];
-        args[k++] = "--runtime";
-        args[k++] = self;
-        args[k++] = "--chunk";
-        args[k++] = "4";
-        args[k++] = "--backend";
-        args[k++] = backends[b];
-        args[k++] = "-q";
-        args[k] = NULL;
-        if (snx_run(args, root, NULL, &text)) {
-            fprintf(stderr, "%s\n", text ? text : "");
-            fprintf(stderr, "%s build failed\n", backends[b]);
-            check(0, "build");
-        }
-        free(text);
-        text = NULL;
-        for (interp = 0; interp < 2; ++interp)
-            check(!run(module[b], image, interp, &runs[b][interp]), interp ? "interpreter run" : "AOT run");
+    k = 0;
+    args[k++] = argv[1];
+    args[k++] = "--repo";
+    args[k++] = argv[2];
+    args[k++] = "-r";
+    args[k++] = input;
+    args[k++] = "Program";
+    args[k++] = "--outdir";
+    args[k++] = out;
+    args[k++] = "--runtime";
+    args[k++] = self;
+    args[k++] = "--chunk";
+    args[k++] = "4";
+    args[k++] = "-q";
+    args[k] = NULL;
+    if (snx_run(args, root, NULL, &text)) {
+        fprintf(stderr, "%s\n", text ? text : "");
+        check(0, "build");
     }
-    check(runs[0][0].cpu.pc == 0 && runs[0][0].calls.count == 1 && runs[0][0].calls.imm[0] == 7 &&
-              !runs[0][0].calls.undefined,
+    free(text);
+    for (interp = 0; interp < 2; ++interp)
+        check(!run(module, image, interp, &runs[interp]), interp ? "interpreter run" : "AOT run");
+    check(runs[0].cpu.pc == 0 && runs[0].calls.count == 1 && runs[0].calls.imm[0] == 7 && !runs[0].calls.undefined,
           "the program returns to 0 after one SVC #7");
-    check(same(&runs[0][0], &runs[0][1]), "LLVM AOT and interpreter agree");
-    for (b = 0; b < nbackends; ++b) { /* the loop: b.ne back to main+0x10 */
-        if (runs[b][0].polls != 1 || runs[b][0].poll_pc != runs[0][0].cpu.code_lo + 0x90)
-            fprintf(stderr, "%s: %d polls, the first at %llx\n", backends[b], runs[b][0].polls,
-                    (unsigned long long)runs[b][0].poll_pc);
-        check(runs[b][0].polls == 1 && runs[b][0].poll_pc == runs[0][0].cpu.code_lo + 0x90,
-              "AOT code polls at the loop's backward branch");
-        check(runs[b][1].polls == 1, "the interpreter polls");
-    }
-    for (b = 1; b < nbackends; ++b) {
-        if (!same(&runs[0][0], &runs[b][0])) {
-            fprintf(stderr, "%s AOT differs from LLVM AOT\n", backends[b]);
-            differences(&runs[0][0], &runs[b][0], "AOT");
-        }
-        if (!same(&runs[0][0], &runs[b][1])) {
-            fprintf(stderr, "%s interpreter differs from LLVM AOT\n", backends[b]);
-            differences(&runs[0][0], &runs[b][1], "interpreter");
-        }
-        check(same(&runs[0][0], &runs[b][0]) && same(&runs[0][0], &runs[b][1]), "backends agree");
-    }
-    printf("x0=%llx x9=%llx d0=%llx v2=%llx:%llx\n", (unsigned long long)runs[0][0].cpu.x[0],
-           (unsigned long long)runs[0][0].cpu.x[9], (unsigned long long)runs[0][0].cpu.v[0].d[0],
-           (unsigned long long)runs[0][0].cpu.v[2].d[1], (unsigned long long)runs[0][0].cpu.v[2].d[0]);
+    if (!same(&runs[0], &runs[1])) differences(&runs[0], &runs[1], "interpreter");
+    check(same(&runs[0], &runs[1]), "LLVM AOT and interpreter agree");
+    /* the loop: b.ne back to main+0x10 */
+    if (runs[0].polls != 1 || runs[0].poll_pc != runs[0].cpu.code_lo + 0x90)
+        fprintf(stderr, "%d polls, the first at %llx\n", runs[0].polls, (unsigned long long)runs[0].poll_pc);
+    check(runs[0].polls == 1 && runs[0].poll_pc == runs[0].cpu.code_lo + 0x90,
+          "AOT code polls at the loop's backward branch");
+    check(runs[1].polls == 1, "the interpreter polls");
+    printf("x0=%llx x9=%llx d0=%llx v2=%llx:%llx\n", (unsigned long long)runs[0].cpu.x[0],
+           (unsigned long long)runs[0].cpu.x[9], (unsigned long long)runs[0].cpu.v[0].d[0],
+           (unsigned long long)runs[0].cpu.v[2].d[1], (unsigned long long)runs[0].cpu.v[2].d[0]);
     check(!snx_remove_tree(root), "fixture cleanup");
     printf("LLVM module: %s\n", failures ? "FAILED" : "passed");
     return failures != 0;

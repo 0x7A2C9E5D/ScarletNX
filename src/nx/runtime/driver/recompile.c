@@ -6,7 +6,6 @@
 #include "nx/loader/loader.h"
 #include "nx/loader/module.h"
 #include "nx/loader/module_llvm.h"
-#include "common/cpu/recompiler/backend.h"
 #include "nx/runtime/driver/toolchain.h"
 #include "common/utilities/build_info.h"
 #include <ctype.h>
@@ -24,8 +23,6 @@ static void usage(void) {
          "  --outdir DIR           Where the game's folder goes (default: games/ in the data folder)\n"
          "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: " SNX_RECOMPILE_OPT ")\n"
          "  --jobs N               Parallel compiles (default: CPU count)");
-    puts("  --backend NAME         Code generator: llvm (LLVM-C, the default and the recommended one),\n"
-         "                         gcc (libgccjit, optional: for DEC Alpha EV67 hosts; elsewhere use llvm)");
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
            SNX_CHUNK_INSTRUCTIONS);
     puts("  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
@@ -33,7 +30,7 @@ static void usage(void) {
          "  --tmpfs                Leave the RomFS in the extraction (in tmpfs), which the game reads it from");
     puts("  --interp-only          Generate fallback interpreter only\n"
          "  --runtime FILE         Deploy this runtime instead of building one\n"
-         "  --keep-ir              Save the generated code (LLVM IR, libgccjit dumps) in <NAME>/<NAME>_build\n"
+         "  --keep-ir              Save the generated code (LLVM IR) in <NAME>/<NAME>_build\n"
          "  -q, --quiet            Suppress progress");
     puts("Each game is a folder of <outdir>, <NAME>/: its program <NAME>, <NAME>_code and <NAME>_data/.\n"
          "Hints: <outdir>/<NAME>/<NAME>.hints (hex PCs, one per line).");
@@ -218,7 +215,6 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
 }
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *arg, *value;
-    SnxBackend backend = SNX_BACKEND_LLVM;
     SnxLlvmBuild llvm;
     SnxCompileOptions compile;
     SnxCodegenOptions gen;
@@ -286,7 +282,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
             }
             if (strcmp(arg, "-o") && strcmp(arg, "--name") && strcmp(arg, "--out") && strcmp(arg, "--outname") &&
                 strcmp(arg, "--outdir") && strcmp(arg, "--runtime") && strcmp(arg, "--target") && strcmp(arg, "-O") &&
-                strcmp(arg, "--jobs") && strcmp(arg, "--chunk") && strcmp(arg, "--backend"))
+                strcmp(arg, "--jobs") && strcmp(arg, "--chunk"))
                 return snx_error("unknown recompiler option: %s", arg);
             if (!value) {
                 if (++i == argc) return snx_error("%s requires a value", arg);
@@ -301,11 +297,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
                 runtime = value;
             else if (!strcmp(arg, "--target"))
                 target = value;
-            else if (!strcmp(arg, "--backend")) {
-                if (!strcmp(value, "portable"))
-                    return snx_error("the portable backend was removed: --backend=llvm (the default) or gcc");
-                if (snx_backend_parse(value, &backend)) return snx_error("--backend expects llvm or gcc");
-            } else if (!strcmp(arg, "-O")) {
+            else if (!strcmp(arg, "-O")) {
                 if (strlen(value) != 1 || !strchr("0123sz", value[0])) return snx_error("-O expects 0,1,2,3,s,z");
                 compile.opt = value;
             } else if (!strcmp(arg, "--jobs")) {
@@ -336,10 +328,6 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     if (compile.target_win != host_win) return snx_error("--target: modules are built for this host only");
     gen.abi = snx_game_abi();
     if (snx_load_program(input, &program, error, sizeof(error))) return snx_error("%s", error);
-    if (!program.npdm.is64 && backend != SNX_BACKEND_LLVM) {
-        snx_error("AArch32 programs are recompiled by the LLVM backend only (--backend=llvm)");
-        goto done;
-    }
     title = snx_game_shown(name, &program);
     game = snx_game_name(name, &program.npdm, program.entry_path);
     out = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
@@ -427,10 +415,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         if (i) snx_error("cannot save the generated code in %s", kept);
         if (!i && !program.npdm.is64)
             i = snx_build_module_arm(&program, &gen, &llvm);
-        else if (!i && backend == SNX_BACKEND_LLVM)
+        else if (!i)
             i = snx_build_module_llvm(&program, &gen, &llvm);
-        else if (!i && backend == SNX_BACKEND_GCC)
-            i = snx_build_module_gccjit(&program, &gen, &llvm);
         free(kept);
         if (i) goto done;
     }

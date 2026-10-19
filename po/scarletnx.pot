@@ -1438,14 +1438,6 @@ msgid "Launch"
 msgstr ""
 
 #: src/gui/settings.c
-msgid "libgccjit will be used instead of llvm"
-msgstr ""
-
-#: src/gui/settings.c
-msgid "Program was not compiled with libgccjit"
-msgstr ""
-
-#: src/gui/settings.c
 msgid "Enables gdbstub on port 1234"
 msgstr ""
 

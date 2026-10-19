@@ -213,8 +213,8 @@ runtime must not mix with another LLVM build.
      mingw-w64-clang-x86_64-glslang
    ```
 
-   Python builds the menu's languages; spirv-tools is only for the `shader_direct` test. CI also installs ccache, and UCRT64's libgccjit and
-   binutils for the optional `--backend=gcc` ([gccjit.cmake](../cmake/gccjit.cmake)). Neither is needed here.
+   Python builds the menu's languages; spirv-tools is only for the `shader_direct` test. CI also installs ccache, which
+   isn't needed here.
 3. Clone to a path without spaces:
 
    ```sh
@@ -222,7 +222,7 @@ runtime must not mix with another LLVM build.
    cd ScarletNX
    ```
 
-4. Configure and build. These are CI's options without its ccache, libgccjit and `-DSNX_DEPLOY=OFF` ones. They give
+4. Configure and build. These are CI's options without its ccache and `-DSNX_DEPLOY=OFF` ones. They give
    CMake the MSYS2 tools as Windows paths and build the pinned SDL3.
 
    ```sh
@@ -292,9 +292,6 @@ cmake --preset default -B build -DSNX_FFMPEG_ASM=OFF && cmake --build build
 - `-DSNX_BUILD_GUI=OFF`: omit the SDL3 launcher. The default is ON when `SNX_BUILD_NX` is on and `SNX_TOOLS_ONLY`
   is not, OFF otherwise.
 - `-DSNX_TOOLS_ONLY=ON`: build the extraction/recompilation driver without the runtime, see below (default OFF).
-- `-DSNX_GCCJIT=OFF`: never build the libgccjit backend, even when libgccjit is found (default ON, built only when
-  found).
-- `-DSNX_GCCJIT_ROOT=/prefix`: another GCC's prefix to look for libgccjit in.
 - `-DSNX_RECOMPILER_SHARED=ON`, `-DSNX_RECOMPILER_INSTALL=ON`: also build the recompiler as a shared library, and
   install the library, see [LIBRARY.md](LIBRARY.md) (defaults OFF and the value of `SNX_TOOLS_ONLY`).
 
@@ -348,15 +345,12 @@ build/tools/scarletnx -r -h
 ctest --test-dir build/tools --output-on-failure
 ```
 
-The recompiler generates game code with LLVM (`--backend=llvm`, the default and the recommended backend). LLVM's
+The recompiler generates game code with LLVM, its only backend. LLVM's
 development files are required: `llvm-config` finds them (`-DSNX_LLVM_CONFIG=/path/to/llvm-config` picks one), and
 the configure stops without them on every platform, including Windows and cross-builds. There is no recompiler
 build without LLVM. Modules are built for the machine that builds them, with its instruction set
 extensions (build == host == target); nothing is detected at run time. Whole functions are batched into units of 90000
 instructions (20000 on Android; `--chunk`), with a progress line per compiled unit.
-`--backend=gcc` (libgccjit) is optional, built when libgccjit is found (`libgccjit` on Arch, `libgccjit-14-dev` on
-Debian, `libgccjit-devel` on Fedora; `-DSNX_GCCJIT_ROOT=` points at another GCC's prefix). It is meant for DEC Alpha EV67 hosts, which LLVM has no backend for; everywhere else use LLVM.
-Running it needs only GNU binutils (`as`, `ld`) on PATH besides libgccjit: the module links none of GCC's files.
 
 Extraction needs nothing beside the driver: hactool runs inside it. Recompilation deploys the
 running full runtime; the tools-only build creates one in its checkout's `build/native-recomp`, or accepts
@@ -383,9 +377,6 @@ cmake --install build/appimage &&
 GITHUB_REPOSITORY=scarletnx/ScarletNX scripts/make-appimage.sh
 # -> dist/ScarletNX-linux-<arch>.AppImage
 ```
-
-It carries libgccjit and the `as` and `ld` of the same Arch (an older binutils' `as` can't read what it writes), so
-`--backend=gcc` needs nothing from the system.
 
 [Nightly AppImages](https://github.com/scarletnx/nightly/releases/latest), x86_64 and aarch64 · [Launch](USAGE.md).
 

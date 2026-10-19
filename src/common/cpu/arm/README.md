@@ -8,7 +8,7 @@ The NX runtime runs 32-bit programs with it. The recompiler compiles a 32-bit pr
 
 - `arm.h`: separate, versioned `SnxArmCPU` state and exit reasons, the backend's `SnxArmRt`, plus the Thumb decode model.
 - `rt_helpers.c`: the runtime library's calls into the backend (`snx_arm_undefined`, `snx_arm_coproc`), with the defaults for no backend.
-- `a32.c`: validated A32 decoder and explicit libgccjit unsupported stub. No LLVM dependency.
+- `a32.c`: validated A32 decoder. No LLVM dependency.
 - `thumb_decode.c`: validated Thumb16/Thumb32 decoder to an explicit operand model.
 - `llvm.h`, `llvm.c`, `llvm_vector.inc`, `llvm_thumb.inc`: `snx_arm_llvm_block(module, name, words, count, pc, &consumed)` and `snx_thumb_llvm_block(module, name, halfwords, count, pc, &consumed)` emit `void name(SnxArmCPU*)` into a **host-target** LLVM module.
 - `tests/arm_emit.c`, `tests/thumb_emit.c`: object generators demonstrating module creation, verification, optimization and native object emission.
@@ -185,8 +185,7 @@ Thumb16 and Thumb32 are supported (see `thumb_decode.c`, `llvm_thumb.inc`): inte
 ## Limits and memory model
 
 - ARMv8.1+ extensions that Cortex-A57 lacks (FP16
-  arithmetic, dot-product, RDM) and privileged VFP state are not implemented. libgccjit is an explicit stub for
-  both A32 and Thumb. Unsupported and rejected
+  arithmetic, dot-product, RDM) and privileged VFP state are not implemented. Unsupported and rejected
   unpredictable encodings trap rather than using an A64 fallback.
 - Little-endian Normal guest memory only. CPSR.E is rejected. Host-endian conversion is separate from the guest byte order.
 - Effective addresses wrap at 32 bits before host pointer construction. Transfers outside the supplied flat mapping, or crossing its end, abort. Unaligned ordinary scalar accesses are supported. Multiple transfers, doubleword transfers, PC loads and atomics enforce their alignment constraints.

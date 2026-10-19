@@ -1,7 +1,7 @@
 # ScarletNX
 
 ScarletNX is a Linux-first static recompiler for Switch games: ARM64 code is translated to LLVM
-IR (libgccjit on DEC Alpha) and compiled into a game module (`games/<id>/<id>_code.so`, by title ID), and the runtime
+IR and compiled into a game module (`games/<id>/<id>_code.so`, by title ID), and the runtime
 in `src/nx/` emulates the OS (kernel, IPC, services) and the GPU (Maxwell command buffers and shaders, drawn with
 Vulkan). A change is checked against the games it affects. `README.md` has setup and commands, `docs/ROADMAP.md`
 the plan and current state, `docs/ARCHITECTURE.md` how the parts fit together. This file holds the rules sessions
@@ -56,14 +56,13 @@ get wrong and points to the skills that carry the procedures.
 | Run the tests | `ctest --test-dir build` (`-R swipc` for the IPC generator) |
 | Format / check | `scripts/format.sh` / `scripts/format.sh --check` |
 
-Clang is the only compiler: the configure stops on any other; the recompiler builds game code with LLVM (required) or
-libgccjit (optional, for DEC Alpha EV67). The
-third-party libraries are CPM packages pinned in `cmake/dependencies.cmake`, downloaded once into `.cache/cpm`, and
+Clang is the only compiler: the configure stops on any other; the recompiler builds game code with LLVM (required), its
+only backend. The third-party libraries are CPM packages pinned in `cmake/dependencies.cmake`, downloaded once into `.cache/cpm`, and
 built in the same tree as the runtime.
 
 The runtime finds its game module by its own file name, so each game has a copy of the runtime named after it, made
-by the build's deploy step. The backends' emitters (`src/common/cpu/recompiler/llvm/ir_*.c`, `gccjit/jit_*.c`) mirror `a64_templates.inc` case by case: a template change needs the same change in both, checked with `snx-test-llvm-differential clang . [--gccjit]`. Game code (`_code.so`) only needs recompiling when `src/common/cpu/recompiler/codegen.c`, `a64.c`,
-`loader.c`, the backends (`src/common/cpu/recompiler/llvm/`, `gccjit/`, `src/nx/loader/module_*.c`) or anything in
+by the build's deploy step. The LLVM emitters (`src/common/cpu/recompiler/llvm/ir_*.c`) mirror `a64_templates.inc` case by case: a template change needs the same change in both, checked with `snx-test-llvm-differential clang .`. Game code (`_code.so`) only needs recompiling when `src/common/cpu/recompiler/codegen.c`, `a64.c`,
+`loader.c`, the backend (`src/common/cpu/recompiler/llvm/`, `src/nx/loader/module_*.c`) or anything in
 `src/common/cpu/aarch64/` changes (the
 ABI between generated code and runtime). A change there that keeps `SNX_ABI` (`cpu.h`) loads and runs the old code
 silently. Bumping `SNX_ABI` makes the runtime refuse every module built before it, so every game needs recompiling.
@@ -72,9 +71,9 @@ silently. Bumping `SNX_ABI` makes the runtime refuse every module built before i
 
 | Area | Files |
 | --- | --- |
-| C90 host driver (`src/nx/runtime/driver/`) | `driver.c` (dispatch), `extract.c` (XCI/NSP), `recompile.c` (AOT workflow/data), `toolchain.c` (runtime deploy build, shader prebuild); `src/nx/loader/loader.c` (NSO/NRO, metadata), `src/common/cpu/recompiler/codegen.c` (functions, and their C for the interpreter and gnuabi) + `src/common/cpu/aarch64/a64.c` + `a64_templates.inc` (the instructions' C), `src/common/utilities/common.c` (host APIs); `--backend=llvm` (default): `src/common/cpu/recompiler/llvm/` (IR emitters, ELF/COFF linkers, `rtlib.c`) + `src/nx/loader/module_llvm.c`; `--backend=gcc` (optional, DEC Alpha EV67): `src/common/cpu/recompiler/gccjit/` + `src/nx/loader/module_gccjit.c` |
+| C90 host driver (`src/nx/runtime/driver/`) | `driver.c` (dispatch), `extract.c` (XCI/NSP), `recompile.c` (AOT workflow/data), `toolchain.c` (runtime deploy build, shader prebuild); `src/nx/loader/loader.c` (NSO/NRO, metadata), `src/common/cpu/recompiler/codegen.c` (functions, and their C for the interpreter and gnuabi) + `src/common/cpu/aarch64/a64.c` + `a64_templates.inc` (the instructions' C), `src/common/utilities/common.c` (host APIs); the LLVM backend: `src/common/cpu/recompiler/llvm/` (IR emitters, ELF/COFF linkers, `rtlib.c`) + `src/nx/loader/module_llvm.c` |
 | Generated-code ABI | `src/common/cpu/aarch64/`: `cpu.h` (with `SNX_ABI`), `cpu_helpers.c` (compiled into each game module, with the topic files it includes from `helpers/`: `fp.c`, `integer.c`, `simd.c`, `crypto.c`, `simd_mem.c`) |
-| The recompiler as a library (`docs/LIBRARY.md`, #171) | `src/common/cpu/recompiler/snx_recompiler.h` (the interface), `library.c` (code in memory through the backends and `llvm/link.c`, a small descriptor instead of the NX `SnxModule`, loaded from memory), `CMakeLists.txt` (`scarletnx-recompiler`, one archive of the backends' objects, installed with a CMake package), `tests/recompiler_library.c` |
+| The recompiler as a library (`docs/LIBRARY.md`, #171) | `src/common/cpu/recompiler/snx_recompiler.h` (the interface), `library.c` (code in memory through the LLVM backend and `llvm/link.c`, a small descriptor instead of the NX `SnxModule`, loaded from memory), `CMakeLists.txt` (`scarletnx-recompiler`, one archive of the backend's objects, installed with a CMake package), `tests/recompiler_library.c` |
 | 32-bit games (A32/Thumb) | `src/common/cpu/arm/` (the block compiler, `README.md`; `rt_helpers.c`, what blocks leave to the backend), `src/nx/loader/module_arm.c` (block discovery, the `SnxArmModule`), `src/nx/runtime/arm.c` (thread loop, block tables, run-time compiles and hints, the NX `SnxArmRt`), `snx_svc32` in `hle/svc/svc.c` (the 32-bit SVC registers, generated from `hos.svc`), `mem_layout32` in `memory/mem.c`; `tests/nx_arm32_smoke.py` runs a synthetic one |
 | Startup | `src/nx/runtime/`: `main.c` (startup, loading the game module), `options.c` (the .ini), `ini.c` (the settings tables each module describes its keys with), `clock.c` (guest time), `rtapi.c` (what the game module calls), `crash.c`, `present.c` (vi's present and the frame pacing), `loader.c`, `entry.c`, `startup.c` (switches parsed before loading), `gdbstub.c` |
 | Kernel and memory | `src/nx/hle/kernel/`: `kernel.c` (handles, waits, events), `thread.c` (threads, the per-core lock), `sync.c` (mutexes, condition variables, address arbitration, WaitSynchronization), `debug.c` (backtraces, dumps), `ipc.c` (HIPC/CMIF parsing and replies, sessions, domains, the service registry); `src/nx/hle/svc/`: `svc.c` (the SVC handlers, `svc_<Name>`), `hos.svc` (Eden's SVC declarations: `tools/svcgen` generates each SVC's registers in both ABIs and the tables by number, which the NX modules call through `RtAPI.svcs`), `svc_mem.c` (memory SVCs, GetInfo); `src/nx/memory/mem.c` |

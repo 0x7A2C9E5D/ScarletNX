@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* Synthetic NRO -> CLI -> module -> AOT/interpreter execution. No game data.
-   A fourth argument names the backend (llvm by default, gcc). */
+/* Synthetic NRO -> CLI -> module -> AOT/interpreter execution. No game data. */
 #include "common/utilities/common.h"
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/loader/module_abi.h"
@@ -38,7 +37,6 @@ static void check_empty(const char* dir) {
     check(!snx_list_dir(dir, &names, &count) && !count, "temporary build directory cleaned up");
     snx_free_strings(names, count);
 }
-static const char* backend;
 static void check_sources(const char* dir, const char* suffix) {
     char** names = NULL;
     size_t count = 0, i, len;
@@ -114,8 +112,7 @@ done:
 #endif
 }
 #ifdef __linux__
-/* The module imports nothing (link.h; gcc: -nostdlib): no library and no undefined symbol, so linking it took none of
-   the start files and libraries of the GCC libgccjit was built with, which a packaged libgccjit's system lacks */
+/* The module imports nothing (link.h): no library and no undefined symbol */
 static void check_no_imports(const char* path) {
     size_t size = 0, i, j;
     unsigned char* file = snx_read_file(path, &size);
@@ -155,8 +152,7 @@ int main(int argc, char** argv) {
     char *cached, *source, *nested, *temp, *build;
     size_t cached_size;
     int rc, pass, k;
-    if (argc != 4 && argc != 5) return 2;
-    backend = argc == 5 ? argv[4] : "llvm";
+    if (argc != 4) return 2;
     root = snx_temp_dir(NULL);
     check(root != NULL, "temp fixture");
     if (!root) return 1;
@@ -201,8 +197,8 @@ int main(int argc, char** argv) {
         args[k++] = "Native Fixture";
         args[k++] = "--outdir";
         args[k++] = out;
-        args[k++] = "--backend";
-        args[k++] = backend;
+        args[k++] = "--backend"; /* LLVM's, the only one: older scripts name it */
+        args[k++] = "llvm";
         args[k++] = "--runtime";
         args[k++] = self;
         args[k++] = "--jobs";
@@ -237,7 +233,7 @@ int main(int argc, char** argv) {
         }
         check_empty(temp);
         if (pass == 5)
-            check_sources(build, !strcmp(backend, "llvm") ? ".ll" : ".c"); /* gcc: libgccjit's dump */
+            check_sources(build, ".ll");
         else
             check(!snx_is_dir(build), "no persistent build directory by default");
         free(text);
@@ -355,30 +351,21 @@ int main(int argc, char** argv) {
     check(snx_run(args, root, NULL, &text) != 0, "reject zero jobs");
     free(text);
     text = NULL;
-#ifndef _WIN32 /* a Windows child without PATH can't load libgccjit's DLLs, which are in the toolchain's folder */
-    if (!strcmp(backend, "gcc")) { /* without binutils it says so, where GCC's driver would end the process */
-        char* path = getenv("PATH") ? snx_strdup(getenv("PATH")) : NULL;
-        k = 0;
-        args[k++] = argv[1];
-        args[k++] = "--repo";
-        args[k++] = argv[2];
-        args[k++] = "-r";
-        args[k++] = input;
-        args[k++] = "--outdir";
-        args[k++] = out;
-        args[k++] = "--backend";
-        args[k++] = "gcc";
-        args[k] = NULL;
-        environment("PATH", "");
-        rc = snx_run(args, root, NULL, &text);
-        environment("PATH", path);
-        check(rc != 0 && text && strstr(text, "PATH has no as and ld: install binutils"), "missing binutils named");
-        check_empty(temp);
-        free(path);
-        free(text);
-        text = NULL;
-    }
-#endif
+    k = 0;
+    args[k++] = argv[1];
+    args[k++] = "--repo";
+    args[k++] = argv[2];
+    args[k++] = "-r";
+    args[k++] = input;
+    args[k++] = "--outdir";
+    args[k++] = out;
+    args[k++] = "--backend=gcc";
+    args[k] = NULL;
+    rc = snx_run(args, root, NULL, &text);
+    check(rc != 0 && text && strstr(text, "--backend gcc: LLVM is the only backend"), "the removed gcc backend refused");
+    check_empty(temp);
+    free(text);
+    text = NULL;
     source = snx_path_join(root, "copy source");
     nested = snx_path_join(source, "nested/output");
     check(!snx_mkdirs(source), "copy source fixture");

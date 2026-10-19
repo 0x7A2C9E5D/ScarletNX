@@ -238,22 +238,16 @@ elseif(SNX_DEPLOY)
         VERBATIM)
 endif()
 
-# All model names share the same Horizon/Maxwell implementation.
-if(ANDROID OR IOS) # an app has one program, started by its icon
-    set(snx_models "")
-else()
-    set(snx_models erista mariko aula)
+# scarletnx-switch: the Switch driver by name, beside scarletnx-3ds and scarletnx-gnuabi. An app has one program,
+# started by its icon
+if(WIN32)
+    add_custom_command(TARGET scarletnx POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:scarletnx>"
+                "${CMAKE_BINARY_DIR}/scarletnx-switch.exe" VERBATIM)
+    install(PROGRAMS "${CMAKE_BINARY_DIR}/scarletnx-switch.exe" DESTINATION bin)
+elseif(NOT ANDROID AND NOT IOS)
+    add_custom_command(TARGET scarletnx POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E create_symlink "$<TARGET_FILE_NAME:scarletnx>"
+                "${CMAKE_BINARY_DIR}/scarletnx-switch" VERBATIM)
+    install(PROGRAMS "${CMAKE_BINARY_DIR}/scarletnx-switch" DESTINATION bin)
 endif()
-foreach(model ${snx_models})
-    if(WIN32)
-        add_custom_command(TARGET scarletnx POST_BUILD
-            COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:scarletnx>"
-                    "${CMAKE_BINARY_DIR}/scarletnx-${model}.exe" VERBATIM)
-        install(PROGRAMS "${CMAKE_BINARY_DIR}/scarletnx-${model}.exe" DESTINATION bin)
-    else()
-        add_custom_command(TARGET scarletnx POST_BUILD
-            COMMAND "${CMAKE_COMMAND}" -E create_symlink "$<TARGET_FILE_NAME:scarletnx>"
-                    "${CMAKE_BINARY_DIR}/scarletnx-${model}" VERBATIM)
-        install(PROGRAMS "${CMAKE_BINARY_DIR}/scarletnx-${model}" DESTINATION bin)
-    endif()
-endforeach()

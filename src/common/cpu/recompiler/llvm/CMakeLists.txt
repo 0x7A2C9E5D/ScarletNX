@@ -25,8 +25,8 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rtlib_interp.inc"
     DEPENDS "${snx_rtlib_gen}" VERBATIM)
 # No -march=native: the recompiler builds modules for the machine it runs on, which is often not the one that built
 # it (the Windows zip and the AppImage come from CI runners). The LLVM backend compiles the library's bitcode for each
-# module with the module's target machine, the host CPU as for the generated code; the object below is for the
-# libgccjit backend. A CI runner's -march=native library used AVX-512, an illegal instruction on a Ryzen 3000 the
+# module with the module's target machine, the host CPU as for the generated code; the object below is what
+# snx-test-llvm-differential links its steps with. A CI runner's -march=native library used AVX-512, an illegal instruction on a Ryzen 3000 the
 # first time a module entered the interpreter. Android's is the phone's ABI baseline, which Clang targets by default
 if(ANDROID)
     set(snx_rtlib_flags --target=${CMAKE_C_COMPILER_TARGET} --sysroot=${CMAKE_SYSROOT})

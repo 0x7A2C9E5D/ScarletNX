@@ -47,10 +47,8 @@ extern "C" {
 
 /* ---- the recompiler ---- */
 
-/* flags of snx_recompiler_new: the backend. Exactly one; LLVM is built into every recompiler, libgccjit only where
-   the build found it (snx_recompiler_new fails otherwise, and snx_recompiler_has tells beforehand) */
-#define SNX_RECOMPILER_FLAG_LLVM   1 /* LLVM: the default and the recommended backend */
-#define SNX_RECOMPILER_FLAG_GCCJIT 2 /* libgccjit (for hosts LLVM has no code generator for); A64 only */
+/* flags of snx_recompiler_new: the backend. LLVM is the only one */
+#define SNX_RECOMPILER_FLAG_LLVM 1
 
 struct snx_recompiler;
 
@@ -66,12 +64,11 @@ SNX_RECOMPILER_API unsigned snx_recompiler_abi(void);
 SNX_RECOMPILER_API const char* snx_recompiler_error(const struct snx_recompiler* r);
 /* The -O letter the generated code is optimized at: '0', '1', '2' (the default), '3', 's' or 'z' */
 SNX_RECOMPILER_API int snx_recompiler_set_optimization(struct snx_recompiler* r, char opt);
-/* Code units compiled at once: host threads with LLVM, child processes with libgccjit (one compile per process); 0,
-   the default, uses one per processor */
+/* Code units compiled at once, on host threads; 0, the default, uses one per processor */
 SNX_RECOMPILER_API void snx_recompiler_set_jobs(struct snx_recompiler* r, unsigned jobs);
 /* Progress lines on stdout, as the scarletnx command prints them; off by default */
 SNX_RECOMPILER_API void snx_recompiler_set_verbose(struct snx_recompiler* r, int verbose);
-/* A folder the generated code's text (LLVM IR as .ll, libgccjit's C dump) is saved in, for inspection; NULL (the
+/* A folder the generated code's text (LLVM IR as .ll) is saved in, for inspection; NULL (the
    default) saves nothing. The string is copied */
 SNX_RECOMPILER_API int snx_recompiler_set_keep_ir(struct snx_recompiler* r, const char* folder);
 /* A folder of linked modules (LLVM), made if missing, by a hash of everything a module is made from: the code and its
@@ -164,8 +161,7 @@ typedef int (*snx_svc_call32)(void* context, uint32_t imm, uint64_t number, cons
 struct snx_recompiled32;
 
 /* Prepares the A32/Thumb code at guest address address (size bytes; the bytes are read from cpu->mem at run time,
-   so they must be there too) for execution by blocks compiled on first use. LLVM only: NULL with the reason in
-   snx_recompiler_error for a libgccjit recompiler */
+   so they must be there too) for execution by blocks compiled on first use. */
 SNX_RECOMPILER_API struct snx_recompiled32* snx_recompile32(struct snx_recompiler* r, uint64_t address, size_t size);
 SNX_RECOMPILER_API struct snx_recompiled32*
 snx_recompile32_ranges(struct snx_recompiler* r, const struct snx_code_range* ranges, size_t range_count);

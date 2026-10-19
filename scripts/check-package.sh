@@ -8,8 +8,6 @@
 #
 #   scripts/check-package.sh dist/ScarletNX-linux-x86_64.AppImage
 #   scripts/check-package.sh stage/bin/scarletnx.exe
-#
-# --backend=gcc must build and run the game with the package's own libgccjit, as and ld.
 set -euo pipefail
 
 if [ $# -ne 1 ] || [ ! -f "$1" ]; then
@@ -108,28 +106,6 @@ if [ -f "$game/Smoke$exe" ]; then
     else
         fail "the game did not log in $state/Smoke only" "$out"
     fi
-fi
-
-# The gcc backend: libgccjit, as and ld from the package, the folders of PATH with the system's left out of its run. Its
-# game must start as the LLVM one does
-nobinutils=
-IFS=: read -ra folders <<<"$PATH"
-for folder in "${folders[@]}"; do
-    for tool in as ld as.exe ld.exe; do [ -e "$folder/$tool" ] && continue 2; done
-    nobinutils+=${nobinutils:+:}$folder
-done
-run env PATH="$nobinutils" "$runtime" -r smoke.nro GccSmoke --backend=gcc --jobs 2
-game=$data/games/GccSmoke
-if [ "$status" -eq 0 ] && [ -f "$game/GccSmoke$exe" ] && [ -f "$game/GccSmoke.abi" ]; then
-    pass "scarletnx -r smoke.nro --backend=gcc made $game/GccSmoke$exe"
-    run env -C "$game" "./GccSmoke$exe" -H
-    if grep -q '^ScarletNX - GccSmoke' <<<"$out"; then
-        pass "$game/GccSmoke$exe started the game (exit $status: $(tail -n 1 <<<"$out"))"
-    else
-        fail "$game/GccSmoke$exe exited $status before the game's banner" "$out"
-    fi
-else
-    fail "scarletnx -r smoke.nro --backend=gcc exited $status, without $game/GccSmoke$exe and its .abi" "$out"
 fi
 
 # A dump on its own: recompile, then play, each a child of the first. Another name, which Windows would not tell

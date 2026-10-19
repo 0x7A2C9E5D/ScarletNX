@@ -36,16 +36,15 @@ find_package(ScarletNXRecompiler REQUIRED)
 target_link_libraries(my_emulator PRIVATE ScarletNX::recompiler)
 ```
 
-The archive carries the function discovery, both backends' emitters, the linker and
-the prebuilt runtime library every module gets. Its link line adds LLVM (always) and
-libgccjit (when the build found it, see `cmake/gccjit.cmake`), which the package
-records. The backends generate code for the machine they run on, as the `scarletnx`
+The archive carries the function discovery, the LLVM emitters, the linker and
+the prebuilt runtime library every module gets. Its link line adds LLVM, which the
+package records. The backend generates code for the machine it runs on, as the `scarletnx`
 command does: build the library on the machine that will use it, or one with the
 same instruction set extensions.
 
 `-DSNX_RECOMPILER_SHARED=ON` also builds `libscarletnx-recompiler.so` (a DLL on
 Windows), which exports only the header's functions and is linked with
-`ScarletNX::recompiler-shared`. It compiles the backends as position-independent code.
+`ScarletNX::recompiler-shared`. It compiles the backend as position-independent code.
 
 ## Use
 
@@ -79,12 +78,11 @@ snx_recompiled_free(m);
 snx_recompiler_free(r);
 ```
 
-`snx_recompiler_new` takes the backend: `SNX_RECOMPILER_FLAG_LLVM` (always built,
-the recommended one) or `SNX_RECOMPILER_FLAG_GCCJIT` (libgccjit, for hosts LLVM has no
-code generator for). `snx_recompiler_has` tells which the build and the host support.
+`snx_recompiler_new` takes the backend: `SNX_RECOMPILER_FLAG_LLVM`, the only one.
+`snx_recompiler_has` tells whether LLVM can target this host.
 The recompiler also takes the `-O` level (`snx_recompiler_set_optimization`, `2` by
-default), how many code units compile at once (`snx_recompiler_set_jobs`: threads
-with LLVM; with libgccjit, which compiles one at a time per process, child processes),
+default), how many code units compile at once (`snx_recompiler_set_jobs`, on
+threads),
 progress lines (`snx_recompiler_set_verbose`) and a folder to save the generated
 code's text in (`snx_recompiler_set_keep_ir`).
 
@@ -145,8 +143,7 @@ bytes (Thumb) and end at or below 4 GiB. `cpu->exit` is cleared when a run start
 run after an exit starts over from `r[15]`. `cpu->rt` (an `SnxArmRt`, or NULL) decides
 what the blocks leave to the system: instructions they can't run, and the coprocessor
 registers (`cpu/arm/README.md`). With NULL, they stop with an exit, and the thread ID
-registers come from the CPU's fields. libgccjit has no A32
-backend, and a libgccjit recompiler refuses A32 code with a reason.
+registers come from the CPU's fields.
 
 ## Limits
 
@@ -163,5 +160,5 @@ backend, and a libgccjit recompiler refuses A32 code with a reason.
   Every other failure comes back as NULL or -1 with `snx_recompiler_error` set.
 
 The test `tests/recompiler_library.c` is a complete example: hand-assembled A64 and A32
-programs recompiled on each backend, with SVC, BRK and undefined-instruction hooks,
+programs recompiled in process, with SVC, BRK and undefined-instruction hooks,
 hints, and the interpreter fallback.

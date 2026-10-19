@@ -74,11 +74,8 @@ the game's `.ini` keeps `controls`. Any other `--key=value` of the game's
 `.ini` is forwarded as well, for that run (`scarletnx --settings` lists them all), and so are the timed-run ones
 (`--seconds=`, `--shot=`...); any other key stops the run with `unknown option`.
 The game's own executable also takes `-v`, the same as `--log=2`.
-`--backend=gcc` selects libgccjit instead of the default LLVM backend when preparing
-a dump. An explicit `--backend=llvm|gcc` forces recompilation rather than reusing a
-cached executable built by another compiler.
-It assembles and links with GNU binutils' `as` and `ld`: the AppImage and the Windows zip carry theirs, elsewhere
-they come from PATH, and without them it stops and says so.
+LLVM is the only backend. `--backend=llvm`, which older scripts give, is accepted and changes nothing, and any
+other `--backend` stops with an error.
 Use the separate commands for updates, custom keys or other compiler options.
 
 DXCI and DNSP with decrypted content need no keys. Containers are identified by their headers,
@@ -159,7 +156,7 @@ Remaining examples: POSIX.
   ([key filtering and cleanup](../src/nx/runtime/driver/extract.c)).
   Sparse and compressed NCAs, updates with large relocation tables and gamecard dumps that start with the card's key
   area all extract, through what [`storage.c`](../src/nx/runtime/driver/hactool/storage.c) ports from LibHac.
-- **Recompile:** AOT → module (LLVM, or `--backend=gcc` for libgccjit on DEC Alpha EV67 hosts) →
+- **Recompile:** AOT → module (LLVM) →
   final runtime deployment, for this machine's CPU. Shaders compile directly to SPIR-V at runtime.
   `-O 0..3,s,z` sets the optimization level.
   `--target auto|linux|win64` takes only this host's own system: modules are built for the machine that builds
@@ -168,7 +165,7 @@ Remaining examples: POSIX.
   `--keep-c` is the deprecated spelling of `--keep-ir`.
 - **Codegen:** `--no-build` stages data/INI only; `--interp-only` omits AOT functions.
   `--chunk N` sets instructions per code unit. Nothing is cached between runs.
-  `--keep-ir` saves the generated code (LLVM IR, libgccjit dumps) in `<outdir>/<NAME>/<NAME>_build/`.
+  `--keep-ir` saves the generated code (LLVM IR) in `<outdir>/<NAME>/<NAME>_build/`.
 - **Data updates:** ExeFS refreshes; `<id>_data/romfs` is reused.
   Replace cached RomFS after asset changes; preserve `<id>_data/save/`.
 

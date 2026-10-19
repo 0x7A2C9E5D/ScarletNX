@@ -9,7 +9,6 @@
 #include <string.h>
 
 static const char* const off_on[] = {"off", "on", NULL};
-static const char* const off[] = {"off", NULL}; /* libgccjit in a build without it */
 
 static GuiSetting* row(GuiSettings* s, const char* section, const char* key, const char* name, const char* about,
                        const char* const* words, int type) {
@@ -74,11 +73,7 @@ int gui_settings_read(GuiSettings* s, const char* list) {
     text = memcpy(free_words + pool, list, size);
     memset(s->values, 0, n * sizeof *s->values);
     /* the section is settings.ini's too: the menu shows it translated */
-    row(s, SNX_TR_NOOP("Launch"), "libgccjit", NULL,
-        SNX_GUI_HAS_GCCJIT ? SNX_TR_NOOP("libgccjit will be used instead of llvm")
-                           : SNX_TR_NOOP("Program was not compiled with libgccjit"),
-        SNX_GUI_HAS_GCCJIT ? off_on : off, GUI_KEY_WORD);
-    row(s, "Launch", "gdbstub", NULL, SNX_TR_NOOP("Enables gdbstub on port 1234"), off_on, GUI_KEY_WORD);
+    row(s, SNX_TR_NOOP("Launch"), "gdbstub", NULL, SNX_TR_NOOP("Enables gdbstub on port 1234"), off_on, GUI_KEY_WORD);
 #ifdef _WIN32
     row(s, "Launch", "tmpfs", SNX_TR_NOOP("Extract to tmpfs"),
         SNX_TR_NOOP("Extract to the temporary folder (TEMP\\scarletnx\\work\\<title ID>), which the game reads its RomFS from"),
@@ -296,13 +291,10 @@ const char* gui_settings_value(const GuiSettings* s, const char* key) {
     int i = find(s, key);
     return i < s->count ? picked(s, i) : NULL;
 }
-const char* gui_settings_backend(const GuiSettings* s) {
-    return s->count >= GUI_SETTINGS_OWN && s->values[0].word ? "--backend=gcc" : NULL;
-}
 const char* gui_settings_tmpfs(const GuiSettings* s) {
-    return s->count >= GUI_SETTINGS_OWN && s->values[2].word ? "--tmpfs" : NULL;
+    return s->count >= GUI_SETTINGS_OWN && s->values[1].word ? "--tmpfs" : NULL;
 }
-size_t gui_settings_options(GuiSettings* s, int launch, int prepared, const char** argv) {
+size_t gui_settings_options(GuiSettings* s, int launch, const char** argv) {
     size_t n = 0;
     int i;
     for (i = GUI_SETTINGS_OWN; i < s->count; ++i) {
@@ -311,9 +303,8 @@ size_t gui_settings_options(GuiSettings* s, int launch, int prepared, const char
         snprintf(s->values[i].option, sizeof s->values[i].option, "--%s=%s", s->values[i].key, value);
         argv[n++] = s->values[i].option;
     }
-    if (launch && !prepared && gui_settings_backend(s)) argv[n++] = gui_settings_backend(s);
     if (launch && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
-    if (launch && s->count >= GUI_SETTINGS_OWN && s->values[1].word) {
+    if (launch && s->count >= GUI_SETTINGS_OWN && s->values[0].word) {
         argv[n++] = "-S";
         argv[n++] = "-s";
     }

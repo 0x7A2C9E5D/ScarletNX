@@ -131,15 +131,6 @@ char* snx_game_stamp(void) { return snx_strdup(SNX_WORKFLOW_STAMP); }
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     char *game, *partial, *name, *folder;
     int rc, tmpfs;
-    if (getenv("SNX_WORKFLOW_BACKEND") && *getenv("SNX_WORKFLOW_BACKEND")) {
-        CHECK((argc == 6 || argc == 7) && !strcmp(argv[2], "--backend") &&
-              !strcmp(argv[3], getenv("SNX_WORKFLOW_BACKEND")));
-        /* Normalize for the shared synthetic compilation assertions below. */
-        argv[2] = argv[4];
-        argv[3] = argv[5];
-        if (argc == 7) argv[4] = argv[6];
-        argc -= 2;
-    }
     /* Extract to tmpfs: the RomFS left in the extraction */
     tmpfs = argc > 2 && !strcmp(argv[2], "--tmpfs");
     CHECK(tmpfs == (getenv("SNX_WORKFLOW_TMPFS") && *getenv("SNX_WORKFLOW_TMPFS")));
@@ -326,7 +317,6 @@ int main(int argc, char** argv) {
         if (fullscreen && strchr(fullscreen, '=') && strncmp(fullscreen, "--fullscreen=", 13) &&
             strncmp(fullscreen, "--backend=", 10))
             CHECK(argc == 2 && !strcmp(argv[1], fullscreen));
-        if (getenv("SNX_WORKFLOW_BACKEND") && *getenv("SNX_WORKFLOW_BACKEND")) CHECK(argc == 1);
         if (flag && *flag) CHECK(argc == 2 && !strcmp(argv[1], "-H"));
         if (getenv("SNX_WORKFLOW_ARGS") && *getenv("SNX_WORKFLOW_ARGS")) {
             CHECK(argc == 6 && !strcmp(argv[1], "--"));
@@ -428,15 +418,13 @@ int main(int argc, char** argv) {
         run(exe, repo, dump, log, 0, "G", NULL);
         set_env("SNX_WORKFLOW_FLAGS", "--fullscreen=1");
         run(exe, repo, dump, log, 0, "G", NULL);
+        /* LLVM is the only backend: --backend=llvm, which older scripts give, changes nothing */
         set_env("SNX_WORKFLOW_FLAGS", "--backend=gcc");
-        set_env("SNX_WORKFLOW_BACKEND", "gcc");
-        run(exe, repo, dump, log, 0, "RG", NULL);
+        run(exe, repo, dump, log, 1, "", "--backend gcc: LLVM is the only backend");
         set_env("SNX_WORKFLOW_FLAGS", "--backend=llvm");
-        set_env("SNX_WORKFLOW_BACKEND", "llvm");
-        run(exe, repo, dump, log, 0, "RG", NULL);
-        set_env("SNX_WORKFLOW_BACKEND", "");
+        run(exe, repo, dump, log, 0, "G", NULL);
         set_env("SNX_WORKFLOW_FLAGS", "--backend=invalid");
-        run(exe, repo, dump, log, 1, "", "unknown backend");
+        run(exe, repo, dump, log, 1, "", "--backend invalid: LLVM is the only backend");
         set_env("SNX_WORKFLOW_FLAGS", "");
     }
     set_env("SNX_WORKFLOW_ARGS", "1");
@@ -693,9 +681,7 @@ int main(int argc, char** argv) {
         run(exe, repo, game, log, 1, "", "-rx requires");
 #endif
         set_env("SNX_WORKFLOW_FLAGS", "--backend=gcc");
-        set_env("SNX_WORKFLOW_BACKEND", "gcc");
-        run(exe, repo, game, log, 0, "RG", NULL);
-        set_env("SNX_WORKFLOW_BACKEND", "");
+        run(exe, repo, game, log, 1, "", "LLVM is the only backend");
         set_env("SNX_WORKFLOW_FLAGS", "");
         set_env("SNX_WORKFLOW_OUTDIR", repo);
         run(exe, repo, game, log, 1, "", "is a game");

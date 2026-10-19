@@ -47,14 +47,12 @@ jobs:
         env:
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
-      # llvm: llvm-config and LLVM-C for the recompiler (llvm-libs alone has no headers). libgccjit builds the
-      # optional --backend=gcc too, so its tests (gccjit_differential, native_recompiler_gcc) run here. gdb: the
-      # gdbserver gdbstub_native drives. jq: scripts/pr-builds.sh, which pr_builds tests. Mirrors drop a connection now
+      # llvm: llvm-config and LLVM-C for the recompiler (llvm-libs alone has no headers). gdb: the gdbserver gdbstub_native drives. jq: scripts/pr-builds.sh, which pr_builds tests. Mirrors drop a connection now
       # and then (pkgforge's for aarch64 most), so each pacman install is tried 3 times, 5 s apart
       - name: Install tools
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang llvm libgccjit pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache gdb jq glslang && break
+            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python git clang llvm pkgconf sdl3 libxtst libxrandr libxss vulkan-swrast ccache gdb jq glslang && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
@@ -330,12 +328,11 @@ jobs:
           217ff68aafe085d2d4ab34a50e267805af43736ad8ef880c01ef88e52db8589f  /usr/local/bin/get-debloated-pkgs
           86afbf5045b78020c93fcd35bf0f642765a8dc339bb2dce534a0461ce3d3508d  /usr/local/bin/make-aur-package
           EOF
-      # llvm for the recompiler, libgccjit for its --backend=gcc; quick-sharun bundles the libLLVM and libgccjit the
-      # runtime links, with their own dependencies. GNU as and ld, which --backend=gcc runs, stay the system's
+      # llvm for the recompiler; quick-sharun bundles the libLLVM the runtime links, with its own dependencies
       - name: Install the build tools and the debloated Mesa
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python clang llvm libgccjit sdl3 libx11 mesa vulkan-icd-loader ccache glslang && break
+            pacman -Syu --noconfirm --needed cmake ninja make patch nasm perl python clang llvm sdl3 libx11 mesa vulkan-icd-loader ccache glslang && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
@@ -447,15 +444,9 @@ jobs:
             mingw-w64-clang-x86_64-python
             mingw-w64-clang-x86_64-spirv-tools
             mingw-w64-clang-x86_64-ccache
-            mingw-w64-ucrt-x86_64-libgccjit
-            mingw-w64-ucrt-x86_64-binutils
       - name: Check required dependencies
         run: |
           set -euo pipefail
-          # libgccjit and the binutils it runs come from UCRT64 (CLANG64 has no libgccjit), after CLANG64's on PATH
-          echo 'PATH="$PATH:/ucrt64/bin"' > /etc/profile.d/zz-ucrt64.sh
-          test -f /ucrt64/include/libgccjit.h
-          test -f /ucrt64/lib/libgccjit.dll.a
           clang --version
           llvm-config --version
           test -f "$(llvm-config --includedir)/llvm-c/Core.h"
@@ -469,9 +460,6 @@ jobs:
       - name: Build the runtime and pinned dependencies
         run: |
           set -euo pipefail
-          # libgccjit.h alone: UCRT64's include folder is another C runtime's headers too
-          mkdir -p build/gccjit-include
-          cp /ucrt64/include/libgccjit.h build/gccjit-include/
           cmake --preset default \
             -DSNX_LLVM_CONFIG="$(cygpath -m "$(command -v llvm-config)")" \
             -DSNX_FFMPEG_SH="$(cygpath -m /usr/bin/sh.exe)" \
@@ -479,8 +467,6 @@ jobs:
             -DPERL_EXECUTABLE="$(cygpath -m /usr/bin/perl.exe)" \
             -DSNX_OPENSSL_MAKE="$(cygpath -m /usr/bin/make.exe)" \
             -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON -DSNX_DEPLOY=OFF \
-            -DSNX_GCCJIT_INCLUDE_DIR="$(cygpath -m "$PWD/build/gccjit-include")" \
-            -DSNX_GCCJIT_LIBRARY="$(cygpath -m /ucrt64/lib/libgccjit.dll.a)" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build --preset default --parallel "$(getconf _NPROCESSORS_ONLN)"
           cmake --install build/default --prefix stage
@@ -531,8 +517,6 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          # --backend=gcc assembles and links with these, beside the runtime (gccjit/jit_units.c)
-          cp /ucrt64/bin/as.exe /ucrt64/bin/ld.exe stage/bin/
           # Follow imports recursively so the artifact works without MSYS2 on PATH.
           # Windows system DLLs are supplied by Windows, never copied from the runner.
           binaries=(stage/bin/*.exe stage/bin/*.dll)
@@ -540,7 +524,6 @@ jobs:
             imports=$(llvm-objdump -p "${binaries[i]}")
             while IFS= read -r dll; do
               source="$MINGW_PREFIX/bin/$dll"
-              [[ -f "$source" ]] || source="/ucrt64/bin/$dll" # libgccjit's and binutils'
               destination="stage/bin/$dll"
               if [[ -f "$source" && ! -f "$destination" ]]; then
                 cp "$source" "$destination"
@@ -550,7 +533,6 @@ jobs:
           done
           mkdir -p stage/share/licenses/msys2
           cp -R "$MINGW_PREFIX/share/licenses/." stage/share/licenses/msys2/
-          cp -R /ucrt64/share/licenses/. stage/share/licenses/msys2/
           pacman -Q > stage/share/licenses/msys2/build-packages.txt
       - name: Check the artifact without the toolchain on PATH
         shell: pwsh
@@ -1029,7 +1011,6 @@ jobs:
           name: ScarletNX-linux-${{ matrix.arch }}-${{ steps.commit.outputs.short }}.AppImage
           path: dist
       # Artifacts drop the executable bit
-      # --backend=gcc runs the AppImage's own as and ld: check-package.sh leaves the runner's binutils off PATH
       - name: Run the AppImage as a user would
         run: |
           chmod +x dist/*.AppImage
@@ -1059,7 +1040,6 @@ jobs:
         with:
           name: ScarletNX-windows-x86_64-${{ steps.commit.outputs.short }}
           path: package
-      # --backend=gcc with the zip's libgccjit, as and ld: check-package.sh leaves any binutils of the runner off PATH
       - name: Run the zip's scarletnx.exe as a user would
         run: bash source/scripts/check-package.sh package/bin/scarletnx.exe
 
@@ -1091,7 +1071,7 @@ jobs:
       - name: Install the runtime's libraries and lavapipe
         run: |
           for try in 1 2 3; do
-            pacman -Syu --noconfirm --needed python llvm-libs libgccjit sdl3 vulkan-icd-loader vulkan-swrast spirv-tools && break
+            pacman -Syu --noconfirm --needed python llvm-libs sdl3 vulkan-icd-loader vulkan-swrast spirv-tools && break
             [ "$try" = 3 ] && exit 1
             sleep 5
           done
