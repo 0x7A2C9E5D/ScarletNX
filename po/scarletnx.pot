@@ -1172,7 +1172,7 @@ msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Cannot install %s: %s"
+msgid "Cannot install %s."
 msgstr ""
 
 #: src/gui/main.c

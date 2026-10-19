@@ -3,6 +3,7 @@
 #include "gui/model.h"
 #include "common/utilities/common.h"
 #include "common/utilities/font.h"
+#include "common/utilities/setup.h"
 #include "gui/i18n.h"
 #include "gui/latin.h"
 #include "gui/wide.h"
@@ -388,24 +389,4 @@ char* gui_document_path(const char* uri) {
     free(id);
     return path;
 }
-int gui_keys_text(const char* data, size_t size) {
-    size_t at = 0;
-    int keys = 0;
-    if (!data || memchr(data, 0, size)) return 0;
-    while (at < size) {
-        const char *line = data + at, *end = memchr(line, '\n', size - at);
-        size_t n = end ? (size_t)(end - line) : size - at, i = 0, name, hex = 0;
-        while (i < n && (line[i] == ' ' || line[i] == '\t')) ++i;
-        for (name = i; i < n && (isalnum((unsigned char)line[i]) || line[i] == '_'); ++i) {}
-        name = i - name;
-        while (i < n && (line[i] == ' ' || line[i] == '\t')) ++i;
-        if (name && i < n && line[i] == '=') {
-            for (++i; i < n && (line[i] == ' ' || line[i] == '\t'); ++i) {}
-            for (; i < n && isxdigit((unsigned char)line[i]); ++i) ++hex;
-            while (i < n && isspace((unsigned char)line[i])) ++i;
-            keys += hex >= 2 && i == n;
-        }
-        at += n + 1;
-    }
-    return keys > 0;
-}
+int gui_keys_text(const char* data, size_t size) { return snx_keys_text(data, size); }

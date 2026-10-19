@@ -29,6 +29,7 @@
 #include "common/utilities/pad_sdl.h"
 #include "common/utilities/pad_screen.h"
 #include "common/utilities/users.h"
+#include "common/utilities/setup.h"
 #ifdef SDL_PLATFORM_ANDROID
 #include "gui/android.h"
 #endif
@@ -482,15 +483,11 @@ static char* menu_folder(const App* app, int kind, bool make) {
     }
     return folder;
 }
-/* where the keys are installed: the user's data folder, which the driver reads first, so nothing is written in the
-   home folder itself (XDG); else ~/.switch */
+/* where the keys are installed (snx_keys_dir): the user's data folder on an XDG system, else ~/.switch */
 static char* device_keys_path(const App* app) {
-#ifdef SNX_XDG
-    if (installed(app)) return snx_path_join(app->data_dir, "prod.keys");
-#else
-    (void)app;
-#endif
-    return home_keys_path();
+    char *dir = snx_keys_dir(app->data_dir), *path = dir ? snx_path_join(dir, "prod.keys") : NULL;
+    free(dir);
+    return path;
 }
 /* the prod.keys the driver reads: those installed here, else with the user's data folder the ones in ~/.switch */
 static char* keys_in_use(const App* app) {
@@ -5076,8 +5073,7 @@ static void keys_result(App* app, bool ok) {
     app->keys_done = now_ms(app) ? now_ms(app) : 1;
 }
 static void keys_write(App* app, const char* data, size_t size) {
-    char why[256];
-    if (!app->keys_path) { /* home_keys_path's: the variables it reads are unset */
+    if (!app->keys_path) { /* snx_keys_dir's: the variables it reads are unset */
 #ifdef _WIN32
         snprintf(app->message, sizeof(app->message), "%s",
                  snx_tr("Cannot install prod.keys: neither USERPROFILE nor HOME is set"));
@@ -5087,25 +5083,12 @@ static void keys_write(App* app, const char* data, size_t size) {
         keys_result(app, false);
         return;
     }
-    /* Stage privately on the same filesystem, then replace atomically. A failed
-       copy (or dropping the installed file itself) must not destroy existing keys. */
-    char* directory = snx_dirname(app->keys_path);
-    char* temporary = directory && !snx_mkdirs(directory) ? snx_temp_dir(directory) : NULL;
-    char* staged = temporary ? snx_path_join(temporary, "prod.keys") : NULL;
-    bool ok = staged && !snx_write_file(staged, data, size);
-#ifndef _WIN32
-    if (ok) ok = chmod(staged, 0600) == 0;
-#endif
-    if (ok) ok = !snx_replace(staged, app->keys_path);
-    if (!ok) snx_os_error(why, sizeof why); /* before the cleanup's calls set another */
-    if (temporary) snx_remove_tree(temporary);
-    free(staged);
-    free(temporary);
-    free(directory);
+    /* staged beside them first: a failed copy (or dropping the installed file itself) must not destroy existing keys */
+    bool ok = !snx_keys_put(app->keys_path, data, size);
     if (ok)
         snprintf(app->message, sizeof(app->message), "%s", snx_tr("prod.keys installed: games can be extracted now."));
     else
-        snprintf(app->message, sizeof(app->message), snx_tr("Cannot install %s: %s"), app->keys_path, why);
+        snprintf(app->message, sizeof(app->message), snx_tr("Cannot install %s."), app->keys_path);
     keys_result(app, ok);
 }
 static void install_keys(App* app, const char* source) {
