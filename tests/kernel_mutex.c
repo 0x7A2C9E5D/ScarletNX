@@ -205,7 +205,7 @@ int main(void) {
     /* a condition variable waiter signalled into a mutex whose word names no thread is woken with InvalidState */
     t = reset(start_prio);
     a = &t[0], b = &t[1];
-    g_cvwait = NULL;
+    memset(g_cvwait, 0, sizeof g_cvwait);
     mine = handle(b);
     memcpy(g_mem + SNX_KMT_M, &mine, 4);
     CHECK(svc_wait_cv(b, SNX_KMT_M, SNX_KMT_CV, handle(b), -1) == 0, "wait on the condition variable");
@@ -226,7 +226,7 @@ int main(void) {
         for (unsigned i = 0; i < sizeof k / sizeof *k; i++) {
             u32 five = 5;
             t = reset(start_prio);
-            g_arbwait = NULL;
+            memset(g_arbwait, 0, sizeof g_arbwait);
             memcpy(g_mem + SNX_KMT_ARB, &five, 4);
             for (int w = 0; w < k[i].waiters; w++)
                 CHECK(svc_wait_addr(&t[w], SNX_KMT_ARB, 0, 6, -1) == 0, "waiter %d", w);
@@ -238,7 +238,7 @@ int main(void) {
         }
         u32 seven = 7;
         t = reset(start_prio);
-        g_arbwait = NULL;
+        memset(g_arbwait, 0, sizeof g_arbwait);
         memcpy(g_mem + SNX_KMT_ARB, &seven, 4);
         CHECK(svc_wait_addr(&t[0], SNX_KMT_ARB, 2, 7, -1) == 0, "wait if equal");
         t[0].woken = 0;
