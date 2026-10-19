@@ -128,6 +128,10 @@ def program(clone_flags):
 def main():
     runtime = sys.argv[1]
     failures = 0
+    usage = subprocess.run([runtime, "--help"], capture_output=True, timeout=30)
+    if usage.returncode != 0 or b"--aot" in usage.stdout or b"--cc=" in usage.stdout:
+        print(f"--help still advertises the removed AOT path\n{usage.stdout.decode(errors='replace')}")
+        failures += 1
     with tempfile.TemporaryDirectory() as folder:
         root = os.path.join(folder, "root")
         os.makedirs(os.path.join(root, "bin"))
