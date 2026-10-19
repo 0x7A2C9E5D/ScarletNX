@@ -31,6 +31,7 @@ def scan(text):
 
 HEADER = """[   0.00] ScarletNX - Some Game
 [   0.00] build: ScarletNX main 1234abc (clang 23.1.3, Linux x86_64)
+[   0.00] system: Some Linux 1.0 (Linux 6.1.0), Some CPU 9000, 12 threads, 32 GB RAM
 [   0.05] module main     at 0008005000 (71.8 MB)
 [   0.27] vulkan: Some GPU 3000, Vulkan 1.4.351, driver 99d38200, graphics queue family 0, compute 2 (separate family)
 [   0.30] game: 0100aaaabbbb0000, version 1.2.3
@@ -174,6 +175,7 @@ def main():
         f'header: {r["title"]!r} {r["title_id"]!r} {r["game_version"]!r}',
     )
     check(r['commit'] == '1234abc' and r['branch'] == 'main', 'build line')
+    check(r['system'] == 'Some Linux 1.0 (Linux 6.1.0), Some CPU 9000, 12 threads, 32 GB RAM', 'system line')
     check(r['gpu'] == 'Some GPU 3000' and r['driver'] == '99d38200', 'gpu line')
     check(r['outcome'] == 'svcBreak' and r['failure']['reason'] == '0', 'svcBreak kind')
     check(
@@ -198,7 +200,10 @@ def main():
 
     old = scan(OLD_SVC_BREAK)
     check(old['title'] == 'Some Game', f"the older header's folder is dropped: {old['title']!r}")
-    check(old['build'] is None and old['title_id'] is None, 'an older log has no build or title id')
+    check(
+        old['build'] is None and old['system'] is None and old['title_id'] is None,
+        'an older log has no build, system or title id',
+    )
     check(old['signature'] == r['signature'], f'the same failure, the same signature: {old["signature"]}')
 
     c = scan(CRASH_IN_GAME)

@@ -65,7 +65,7 @@ typedef struct {
     char* pool; /* the texts, each terminated, grown as the scan adds them */
     size_t used, cap;
     /* the header: the game log's lines, else the launcher's build line */
-    unsigned title, title_id, game_version, build, branch, commit, gpu, vulkan, driver;
+    unsigned title, title_id, game_version, build, branch, commit, system, gpu, vulkan, driver;
     unsigned launcher_build, launcher_message; /* the Share log file's; launcher_build 0 for a game log */
     long centiseconds;                         /* the last line's time, -1 without one */
     int outcome;

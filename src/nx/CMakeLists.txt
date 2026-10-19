@@ -135,9 +135,10 @@ set_target_properties(scarletnx PROPERTIES LINKER_LANGUAGE CXX RUNTIME_OUTPUT_DI
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 if(WIN32)
     # Prefer static toolchain/SDL libraries. LLVM may still use a DLL import library,
-    # resolved by cmake/llvm.cmake and bundled by CI. user32 provides message boxes;
-    # winmm is loaded at run time, and the static SDL3 brings the libraries it needs
-    target_link_libraries(scarletnx PRIVATE user32)
+    # resolved by cmake/llvm.cmake and bundled by CI. user32 provides message boxes and
+    # advapi32 the registry (the log's system line); winmm is loaded at run time, and the
+    # static SDL3 brings the libraries it needs
+    target_link_libraries(scarletnx PRIVATE user32 advapi32)
     # The application manifest (runtime/platform/runtime.manifest): UTF-8 as the process's code page, long paths
     enable_language(RC)
     target_sources(scarletnx PRIVATE runtime/platform/runtime.rc)

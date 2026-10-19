@@ -44,6 +44,9 @@ void plat_thread_exit(void); /* ends the calling thread (one plat_thread started
 int plat_cpus(int* ids, int max);
 /* the calling thread runs only on the n host CPUs in ids */
 void plat_thread_cpus(const int* ids, int n);
+/* the host for the log's header, so a report needn't describe it: "<OS and version>, <CPU>, <n> threads, <n> GB RAM",
+   the CPU left out where the host doesn't name it. Nothing that names the machine or its user */
+void plat_system_info(char* out, size_t cap);
 void plat_yield(void);
 void plat_sleep_ns(i64 ns); /* 0 or less yields */
 /* Ends the process with code at once: stdio is flushed, but atexit handlers don't run and other threads are left

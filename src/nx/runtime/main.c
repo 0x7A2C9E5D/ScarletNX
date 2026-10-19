@@ -406,6 +406,11 @@ int snx_main(int argc, char** argv) {
        public reports and the folder names their account */
     LOG("ScarletNX - %s\n", title);
     LOG("build: %s\n", snx_build_info());
+    {
+        char sys[384];
+        plat_system_info(sys, sizeof sys);
+        LOG("system: %s\n", sys);
+    }
     say_old_layout();
 
     fs_init(); /* the npdm is read through it, and mem_init's layout comes before */

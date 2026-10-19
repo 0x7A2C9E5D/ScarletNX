@@ -110,6 +110,38 @@ void plat_thread_cpus(const int* ids, int n) {
     (void)ids;
     (void)n;
 }
+typedef LONG(WINAPI* RtlGetVersionFn)(RTL_OSVERSIONINFOW*);
+void plat_system_info(char* out, size_t cap) {
+    static const char key[] = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
+    char os[128], release[32] = {0}, cpu[128] = {0}, *c = cpu;
+    DWORD size;
+    size_t n;
+    MEMORYSTATUSEX m = {.dwLength = sizeof m};
+    /* GetVersionEx answers what the manifest declares; ntdll's RtlGetVersion the real version */
+    RTL_OSVERSIONINFOW v = {.dwOSVersionInfoSize = sizeof v};
+    RtlGetVersionFn get =
+        (RtlGetVersionFn)(void (*)(void))GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion");
+    if (!get || get(&v)) memset(&v, 0, sizeof v);
+    size = sizeof release; /* "23H2", from Windows 10 20H2 on */
+    if (RegGetValueA(HKEY_LOCAL_MACHINE, key, "DisplayVersion", RRF_RT_REG_SZ, NULL, release, &size)) release[0] = 0;
+    /* Windows 11 kept the version 10.0, and its registry's ProductName still says Windows 10 */
+    if (v.dwMajorVersion == 10)
+        snprintf(os, sizeof os, "Windows %s%s%s (10.0.%lu)", v.dwBuildNumber >= 22000 ? "11" : "10",
+                 release[0] ? " " : "", release, (unsigned long)v.dwBuildNumber);
+    else
+        snprintf(os, sizeof os, "Windows %lu.%lu.%lu", (unsigned long)v.dwMajorVersion, (unsigned long)v.dwMinorVersion,
+                 (unsigned long)v.dwBuildNumber);
+    size = sizeof cpu;
+    if (RegGetValueA(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", "ProcessorNameString",
+                     RRF_RT_REG_SZ, NULL, cpu, &size))
+        cpu[0] = 0;
+    while (*c == ' ') c++; /* some CPUs pad their brand string */
+    for (n = strlen(c); n && c[n - 1] == ' '; n--) c[n - 1] = 0;
+    if (!GlobalMemoryStatusEx(&m)) m.ullTotalPhys = 0;
+    snprintf(out, cap, "%s%s%s, %lu threads, %llu GB RAM", os, *c ? ", " : "", c,
+             (unsigned long)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS),
+             (unsigned long long)((m.ullTotalPhys + (512ull << 20)) >> 30));
+}
 void plat_yield(void) { SwitchToThread(); }
 void plat_sleep_ns(i64 ns) {
     LARGE_INTEGER due;
