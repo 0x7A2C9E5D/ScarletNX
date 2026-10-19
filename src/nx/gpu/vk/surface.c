@@ -568,7 +568,6 @@ Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h) {
 /* render targets drawn this frame or the last, for a texture made of them (gpu/vk/texture.c) */
 static Surf** g_drawn;
 static int g_ndrawn, g_capdrawn;
-static u32 g_drawn_seq;
 /* the GPU pages they started at when listed, so a texture over none of them (most) skips the list: TotK looked at each
    of about 30 for each of 13,000 textures a frame. A target parked since still counts its old page, which only lets
    the walk run */
@@ -602,7 +601,6 @@ void vk_rt_drawn(Surf* s) {
         s->draw_gw = gpu_mem_generation();
     }
     s->drawn_at = g_vk_present;
-    s->drawn_seq = ++g_drawn_seq;
     if (s->in_drawn) return;
     if (g_ndrawn == g_capdrawn) {
         int cap = g_capdrawn ? g_capdrawn * 2 : 64;
@@ -672,87 +670,15 @@ static void surf_free(Surf* s) {
     vk_defer_image(s->img, s->mem, s->att, s->att_linear);
     free(s);
 }
-/* a before b in when they were last drawn to */
-static int drawn_before(const void* a, const void* b) {
-    i32 d = (i32)((*(Surf* const*)a)->drawn_seq - (*(Surf* const*)b)->drawn_seq);
-    return d < 0 ? -1 : d > 0;
-}
-/* the bytes of s's pixels that go to guest memory as it is evicted, or 0 */
-static u64 evict_bytes(Surf* s) {
-    u64 b = s->is_rt && !(s->gva >> 63) ? flush_bytes(s) : 0;
-    return b && vk_rt_drawn_fresh(s) ? b : 0;
-}
-/* s's pixels to guest memory, as vk_surf_evict sends them: 1 when they went */
-static int evict_flush(Surf* s) {
-    if (!evict_bytes(s)) return 0;
-    vk_surf_flush(s, NULL);
-    return s->mem_wgen == s->wgen;
-}
-/* the pixels of those of the n targets in s that go to memory, read back behind one wait for the GPU, not one each
-   (Mario Kart 8 Deluxe lets 400 go at its title), and landed in s's order; how many went, their bytes added to
-   *bytes */
-static u32 evict_flush_all(Surf** s, u32 n, u64* bytes) {
-    static u64* at;
-    static u32 cap;
-    u64 total = 0;
-    u32 kept = 0, i;
-    int batched = 1;
-    VkBuffer buf = VK_NULL_HANDLE;
-    const u8* p = NULL;
-    u8* copy = NULL;
-    if (n > cap) {
-        u64* a = realloc(at, (size_t)n * sizeof *a);
-        if (a) {
-            at = a;
-            cap = n;
-        } else
-            batched = 0;
-    }
-    for (i = 0; batched && i < n; i++) {
-        u64 b = evict_bytes(s[i]);
-        at[i] = b ? total : ~0ull;
-        total += (b + 15) & ~15ull; /* each copy's offset a multiple of its texel */
-    }
-    if (batched && total) {
-        vk_render_end();
-        p = vk_readback_buffer(total, &buf);
-        copy = p ? malloc(total) : NULL;
-        batched = copy != NULL;
-    }
-    if (!batched) { /* no room for them all: one at a time */
-        for (i = 0; i < n; i++)
-            if (evict_flush(s[i])) kept++, *bytes += rt_bytes(s[i]);
-        return kept;
-    }
-    if (!total) return 0;
-    VkCommandBuffer cb = vk_cmd();
-    for (i = 0; i < n; i++)
-        if (at[i] != ~0ull) flush_record(cb, s[i], buf, at[i]);
-    flush_wait(cb);
-    memcpy(copy, p, total); /* landing one can read another back through the same buffer (vk_rt_before_write) */
-    vk_result_begin();
-    for (i = 0; i < n; i++)
-        if (at[i] != ~0ull) {
-            flush_land(s[i], copy + at[i], NULL);
-            kept++;
-            *bytes += rt_bytes(s[i]);
-        }
-    vk_result_end();
-    free(copy);
-    return kept;
-}
 void vk_surf_evict(u32 before) {
-    static Surf** gone;
-    static u32 cap;
-    u32 n = 0, kept = 0;
-    u64 kept_bytes = 0, t0 = plat_ns();
     /* A storage image keeps a Surf pointer until its result reaches guest memory. */
     vk_gfx_image_land();
-    /* render targets too, parked or not: one not drawn, sampled or presented for as long goes. What it drew since
-       memory last had it goes to memory first, as the console's GPU draws into memory: a texture made there later
-       reads it (Mario Kart 8 Deluxe draws its Mii icons at boot and shows them a minute later). Not a parked one,
-       whose address is another target's now, nor one whose memory was written after its draw. Oldest draw first:
-       where two overlap, the later one's pixels are what memory keeps */
+    /* render targets too, parked or not: one not drawn, sampled or presented for as long goes with its contents
+       (guest memory has them as of its last write-back). They aren't written to memory as they go: memory is shared
+       by targets the GPU drew over one another, parked and freed ones among them, and by textures and buffers that
+       copied from them on the GPU, and the renderer doesn't know them all. Writing an evicted target's pixels, as
+       Mario Kart 8 Deluxe's Mii icons wanted (drawn at boot, shown a minute later), put older pixels over newer ones
+       in Tears of the Kingdom: a black block over Link, and red and green blocks over its textures */
     for (int k = 0; k < SURFH; k++)
         for (Surf** pp = &g_surfh[k]; *pp;) {
             Surf* s = *pp;
@@ -761,38 +687,12 @@ void vk_surf_evict(u32 before) {
                 continue;
             }
             *pp = s->next;
-            if (n == cap) {
-                u32 c = cap ? cap * 2 : 256;
-                Surf** g = realloc(gone, (size_t)c * sizeof *g);
-                if (!g) { /* no room to order them: this one goes to memory now */
-                    if (evict_flush(s)) kept++, kept_bytes += rt_bytes(s);
-                    for (Surf *c2 = s->crop, *x; c2; c2 = x) {
-                        x = c2->next;
-                        surf_free(c2);
-                    }
-                    surf_free(s);
-                    continue;
-                }
-                gone = g;
-                cap = c;
+            for (Surf *c = s->crop, *n; c; c = n) { /* its copies (gpu/vk/texture.c rt_crop) */
+                n = c->next;
+                surf_free(c);
             }
-            gone[n++] = s;
+            surf_free(s);
         }
-    if (n > 1) qsort(gone, n, sizeof *gone, drawn_before);
-    kept += evict_flush_all(gone, n, &kept_bytes);
-    for (u32 i = 0; i < n; i++) {
-        for (Surf *c = gone[i]->crop, *x; c; c = x) { /* its copies (gpu/vk/texture.c rt_crop) */
-            x = c->next;
-            surf_free(c);
-        }
-        surf_free(gone[i]);
-    }
-    if (kept)
-        LOG_LIMIT(20,
-                  "vulkan: %u render target%s unused for ten seconds went to guest memory before they went (%llu KB, "
-                  "%llu ms)\n",
-                  kept, kept == 1 ? "" : "s", (unsigned long long)(kept_bytes >> 10),
-                  (unsigned long long)((plat_ns() - t0) / 1000000));
 }
 
 /* the 2D engine's blit between render targets, on the GPU. The surfaces are gpu/gpu.h's

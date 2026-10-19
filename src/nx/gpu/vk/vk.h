@@ -304,7 +304,6 @@ typedef struct Surf {
     u64 last_used;
     u32 wgen;       /* render targets: bumped when drawn to */
     u32 drawn_at;   /* render targets: g_vk_present when last drawn to */
-    u32 drawn_seq;  /* render targets: when last drawn to, in draws: which of two overlapping drew last */
     int in_drawn;   /* in surface.c's list of drawn targets, entered at drawn_from */
     u64 drawn_from;
     u64 draw_gw;    /* guest-memory generation at the first draw this present or since a full replacement */
