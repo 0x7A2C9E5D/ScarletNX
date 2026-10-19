@@ -2,10 +2,18 @@
 <!-- Copyright 2026 the ScarletNX contributors -->
 # PowerPC64
 
+## Index
+
+* [Building on an x86-64 Debian machine](#building-on-an-x86-64-debian-machine)
+* [Running a game under qemu](#running-a-game-under-qemu)
+* [Host pages larger than 4 KiB](#host-pages-larger-than-4-kib)
+* [What differs from the other hosts](#what-differs-from-the-other-hosts)
+
 ScarletNX builds for 64-bit PowerPC Linux from POWER8 on. The little-endian port (ppc64le) works: the test suite
 passes under qemu-user, and Super Haxagon, recompiled under qemu, played a level to its game over screen there with
-lavapipe as the Vulkan driver. No real POWER machine has run it yet, and CI doesn't build it yet (the `linux-ppc64le`
-job in `.github/workflows/build.yml` is commented out).
+lavapipe as the Vulkan driver. No real POWER machine has run it yet. CI cross-builds its AppImage
+(`ScarletNX-linux-ppc64le.AppImage`, the `appimage-cross` job in `.github/workflows/build.yml`) against an Arch POWER
+system root and runs it under qemu as installed; the test suite's job, `linux-ppc64le`, is commented out.
 
 The big-endian hosts are not ported yet. Their builds are set up (the `linux-ppc64-cross` preset for Debian's glibc
 port, ELFv1, and `linux-ppc64-musl-cross` for musl, ELFv2), and the recompiler's linker takes both ABIs, but guest

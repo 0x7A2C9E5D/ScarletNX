@@ -56,6 +56,7 @@ ROLLING = 'nightly'
 ARTIFACTS = {
     'ScarletNX-linux-x86_64-{short}.AppImage': 'ScarletNX-linux-x86_64.AppImage',
     'ScarletNX-linux-aarch64-{short}.AppImage': 'ScarletNX-linux-aarch64.AppImage',
+    'ScarletNX-linux-ppc64le-{short}.AppImage': 'ScarletNX-linux-ppc64le.AppImage',
     'ScarletNX-windows-x86_64-{short}': 'ScarletNX-windows-x86_64.zip',
     'ScarletNX-android-universal-{short}.apk': 'ScarletNX-android-universal.apk',
     'ScarletNX-macos-arm64-{short}.zip': 'ScarletNX-macos-arm64.zip',
@@ -63,7 +64,7 @@ ARTIFACTS = {
 }
 # The packages a run may lack and still have built everywhere: their jobs fail without failing the run
 # (continue-on-error in build.yml), so a release without them says they were not built
-OPTIONAL = {'ScarletNX-macos-arm64.zip', 'ScarletNX-ios-arm64.ipa'}
+OPTIONAL = {'ScarletNX-linux-ppc64le.AppImage', 'ScarletNX-macos-arm64.zip', 'ScarletNX-ios-arm64.ipa'}
 
 
 def published(release):

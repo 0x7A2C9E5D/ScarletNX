@@ -267,7 +267,8 @@ chmod +x ScarletNX-linux-x86_64.AppImage
 SDL_VIDEO_DRIVER=x11 games/Game/Game
 ```
 
-On an ARM64 machine the image is `ScarletNX-linux-aarch64.AppImage`.
+On an ARM64 machine the image is `ScarletNX-linux-aarch64.AppImage`, on PowerPC64 LE `ScarletNX-linux-ppc64le.AppImage`
+([PPC64](PPC64.md)).
 `--game` selects the game's folder, its `Game_code.so` and `Game_data/`; or name the image `games/Game/Game.AppImage`
 to load the files beside it.
 The AppImage also prepares dumps: `./ScarletNX-linux-x86_64.AppImage Game.nsp`, in the folder [Folders](#folders) names,

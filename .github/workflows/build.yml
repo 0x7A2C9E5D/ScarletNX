@@ -384,6 +384,140 @@ jobs:
             dist/*.AppImage*
             dist/appinfo
 
+  # The AppImages of hosts no GitHub runner is, cross-built on x86-64 with their linux-<arch>-cross preset
+  # (cmake/cross.cmake) against an Arch system root of the architecture, then packaged as the appimage job packages its
+  # own (scripts/make-appimage.sh with SYSROOT). The system root is pkgforge's Arch image of the architecture, unpacked
+  # with the runner's Docker (its files only: it never runs), so the job runs on the runner and enters pkgforge's x86-64
+  # container with docker exec, the workspace mounted at /src. ppc64le only: riscv64 and loongarch64 need the recompiler
+  # first (its linker and STXP's 16-byte compare-and-swap, #407). No POWER machine has run the AppImage yet, so like the
+  # macOS and iOS jobs it may fail without failing the run (scripts/publish-builds.py, OPTIONAL)
+  appimage-cross:
+    name: Linux AppImage (${{ matrix.arch }})
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: ppc64le
+            platform: ppc64le
+            preset: linux-ppc64le-cross
+    steps:
+      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/cache@v5
+        with:
+          path: .cache/cpm
+          key: cpm-${{ github.job }}-${{ matrix.arch }}-${{ hashFiles('cmake/dependencies.cmake') }}
+      # The script's checks run the AppImage it made: the kernel runs the target's programs through qemu once their
+      # binfmt handlers are registered, in the container too
+      - name: Set up qemu emulation for ${{ matrix.arch }}
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+      # Started before the target's image is pulled, which takes the same tag
+      - name: Start the build container
+        run: docker run --detach --name build --volume "$PWD:/src" --workdir /src ghcr.io/pkgforge-dev/archlinux:latest sleep infinity
+      - name: Unpack the ${{ matrix.arch }} system root
+        run: |
+          set -euo pipefail
+          image=ghcr.io/pkgforge-dev/archlinux:latest
+          docker pull --platform linux/${{ matrix.platform }} "$image"
+          docker exec build mkdir -p /src/sysroot
+          docker export "$(docker create --platform linux/${{ matrix.platform }} "$image")" | docker exec -i build tar -x -C /src/sysroot
+      # pkgforge's setup action runs pacman, which the runner lacks: its pinned script runs in the container, fetched
+      # with curl (the container has no wget until that script installs it). The packing runs here, so appimagetool is
+      # x86-64's, in place before quick-sharun would fetch the target's; it embeds APPIMAGE_ARCH's runtime all the same
+      - name: Install the packaging tools
+        env:
+          ANYLINUX_SETUP: https://raw.githubusercontent.com/pkgforge-dev/anylinux-setup-action/b2d1ce4216f71162e00ae58fa11ee9aeb723d0d5/setup.sh
+          QUICK_SHARUN: https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/d4262a9978e7b5d88e3799b389b138eb244e3936/useful-tools/quick-sharun.sh
+          DEBLOATED_PACKAGES: https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/d4262a9978e7b5d88e3799b389b138eb244e3936/useful-tools/get-debloated-pkgs.sh
+          MAKE_AUR_PACKAGE: https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/d4262a9978e7b5d88e3799b389b138eb244e3936/useful-tools/make-aur-package.sh
+        run: |
+          docker exec -i -e ANYLINUX_SETUP -e QUICK_SHARUN -e DEBLOATED_PACKAGES -e MAKE_AUR_PACKAGE build sh -s <<'EOF'
+          set -eu
+          curl -fsSL --retry 3 -o /tmp/anylinux-setup.sh "$ANYLINUX_SETUP"
+          echo '4e97072095e80a46203a1cd711eface00de1b028be3e66ef30cc9ccd728501e5  /tmp/anylinux-setup.sh' | sha256sum -c
+          sh /tmp/anylinux-setup.sh
+          curl -fsSL --retry 3 -o /usr/local/bin/appimagetool \
+            https://github.com/pkgforge-dev/appimagetool/releases/download/0.5.3/appimagetool-full-x86_64-linux
+          chmod +x /usr/local/bin/appimagetool
+          EOF
+      - name: Check the packaging tools
+        run: |
+          docker exec -i build sh -s <<'EOF'
+          set -eu
+          sha256sum -c <<'SUMS'
+          b38ac233f0b56a03bb10565f6b074a43ce016939faee44ae8bb23d6e66c2d553  /usr/local/bin/quick-sharun
+          217ff68aafe085d2d4ab34a50e267805af43736ad8ef880c01ef88e52db8589f  /usr/local/bin/get-debloated-pkgs
+          86afbf5045b78020c93fcd35bf0f642765a8dc339bb2dce534a0461ce3d3508d  /usr/local/bin/make-aur-package
+          9a6fd46ee6bc5910e7acfa68f9d8090f3751e956840b90304ef57d64321a530d  /usr/local/bin/appimagetool
+          SUMS
+          EOF
+      # The build machine's: Clang and LLD build for the target (cmake/cross.cmake), glslang the shaders, qemu-user runs
+      # the target's llvm-config (scripts/ppc64-llvm-config.sh) and its loader behind the packaging's ldd, wayland's
+      # wayland-scanner the protocols SDL3 builds (appimagetool brings its own compressor, as in the appimage job). The
+      # target's: the libraries the runtime links and bundles, gcc for the crt files, libgcc and libstdc++ Clang links
+      # the target's programs with, and what the pinned SDL3's build needs, as Arch POWER's SDL3 is older than the pin
+      # (its X11, Wayland and audio backends).
+      # They go into the system root by its own pacman.conf (its architecture, repositories and mirrors, under the root)
+      # and its own keys; install scriptlets are the target's programs, left out. Each pacman is tried 3 times, as in
+      # the linux job
+      - name: Install the build tools and the target's libraries
+        run: |
+          docker exec -i build sh -s <<'EOF'
+          set -eu
+          retry() { for try in 1 2 3; do "$@" && return; [ "$try" = 3 ] && return 1; sleep 5; done; }
+          retry pacman -Syu --noconfirm --needed cmake ninja make patch perl python clang lld llvm glslang qemu-user \
+            patchelf wayland
+          root=/src/sysroot
+          mkdir -p /tmp/target-pkg
+          sed "s#/etc/pacman.d/#$root/etc/pacman.d/#g" "$root/etc/pacman.conf" >/tmp/target-pacman.conf
+          pacman-key --gpgdir "$root/etc/pacman.d/gnupg" --init
+          pacman-key --gpgdir "$root/etc/pacman.d/gnupg" --populate-from "$root/usr/share/pacman/keyrings" --populate
+          retry pacman --root "$root" --dbpath "$root/var/lib/pacman" --config /tmp/target-pacman.conf \
+            --gpgdir "$root/etc/pacman.d/gnupg" --cachedir /tmp/target-pkg --noscriptlet -Syu --noconfirm --needed \
+            gcc llvm llvm-libs libx11 mesa vulkan-icd-loader vulkan-radeon vulkan-swrast \
+            libxext libxcursor libxfixes libxi libxinerama libxrandr libxrender libxss libxtst libxkbcommon wayland \
+            wayland-protocols libdecor alsa-lib libpulse libpipewire hidapi libusb
+          # without them CMake's first test link fails, its message deep in the configure's output
+          ls "$root"/usr/lib/gcc/*/*/crtbeginS.o >/dev/null 2>&1 ||
+            { echo "the system root has no GCC runtime (crtbeginS.o, libgcc) for Clang to link with" >&2; exit 1; }
+          EOF
+      - name: Cross-build and install into the system root
+        run: |
+          docker exec -i build sh -s <<'EOF'
+          set -eu
+          git config --global --add safe.directory '*'
+          export SNX_SYSROOT=/src/sysroot
+          cmake --preset ${{ matrix.preset }} -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
+          cmake --build --preset ${{ matrix.preset }} --parallel "$(getconf _NPROCESSORS_ONLN)"
+          DESTDIR=/src/sysroot cmake --install build/${{ matrix.preset }}
+          EOF
+      - name: Make the AppImage
+        run: |
+          docker exec -i -e GITHUB_REPOSITORY -e GITHUB_REF_TYPE build sh -s <<'EOF'
+          set -eu
+          SYSROOT=/src/sysroot ARCH=${{ matrix.arch }} APPIMAGETOOL=/usr/local/bin/appimagetool scripts/make-appimage.sh
+          EOF
+      # Only what the script made: dist/ also holds the tracked desktop entry and icon
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ScarletNX-linux-${{ matrix.arch }}-${{ steps.commit.outputs.short }}.AppImage
+          path: |
+            dist/*.AppImage*
+            dist/appinfo
+
   windows:
     name: Windows (Clang + LLVM)
     runs-on: windows-2025-vs2026
@@ -944,6 +1078,65 @@ jobs:
           chmod +x dist/*.AppImage
           scripts/check-package.sh dist/*.AppImage
 
+  # The cross-built AppImage as installed, as the appimage-check job runs its own: qemu's binfmt handlers run it, and
+  # everything it starts, as a machine of that architecture would
+  appimage-cross-check:
+    name: Linux AppImage (${{ matrix.arch }}), as installed
+    needs: appimage-cross
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: ppc64le
+            platform: ppc64le
+    steps:
+      - name: Name the commit
+        id: commit
+        shell: bash
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+      # The AppImage itself runs through qemu-user (scripts/check-package.sh says why), the programs it starts through the
+      # binfmt handler the next step registers: installed first, as its package's systemd trigger can clear the handlers
+      # registered before it. No recommends: qemu-user-binfmt would register handlers of its own
+      - name: Install qemu-user
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-user
+      - name: Set up qemu emulation for ${{ matrix.arch }}
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: ScarletNX-linux-${{ matrix.arch }}-${{ steps.commit.outputs.short }}.AppImage
+          path: dist
+      # Artifacts drop the executable bit
+      # Each game the AppImage makes is a copy of it, and an AppImage carries "AI\x02" in its ELF header's padding,
+      # where the handler above wants zeros: one more handler, made from the AppImage's own first 20 bytes with the
+      # padding left out, runs them through qemu-user. P keeps argv[0], by which the AppImage's runtime runs the dwarfs
+      # tool it carries as itself; both handlers are printed
+      - name: Run ${{ matrix.arch }} AppImages through qemu-user
+        run: |
+          set -- $(head -c 20 dist/*.AppImage | od -An -v -tx1)
+          magic= mask= i=0
+          for byte in "$@"; do
+            case $i in 7|8|9|10|11|12|13|14|15) byte=00 m=00 ;; 16) m=fe ;; *) m=ff ;; esac
+            magic=$magic\\x$byte mask=$mask\\x$m i=$((i + 1))
+          done
+          printf ':appimage-%s:M::%s:%s:%s:POCF\n' ${{ matrix.platform }} "$magic" "$mask" "$(command -v qemu-${{ matrix.platform }})" |
+            sudo tee /proc/sys/fs/binfmt_misc/register
+          grep -qx enabled /proc/sys/fs/binfmt_misc/appimage-${{ matrix.platform }}
+          head -n 3 /proc/sys/fs/binfmt_misc/qemu-${{ matrix.platform }} /proc/sys/fs/binfmt_misc/appimage-${{ matrix.platform }}
+      - name: Run the AppImage as a user would
+        run: |
+          grep -qx enabled /proc/sys/fs/binfmt_misc/qemu-${{ matrix.platform }} ||
+            { echo "no binfmt handler runs ${{ matrix.platform }} programs here" >&2; exit 1; }
+          chmod +x dist/*.AppImage
+          scripts/check-package.sh dist/*.AppImage
+
   windows-check:
     name: Windows zip, as installed
     needs: windows
@@ -1069,7 +1262,7 @@ jobs:
     if: >-
       !cancelled() && github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    needs: [linux, appimage, windows, android, apple, edenprobe]
+    needs: [linux, appimage, appimage-cross, windows, android, apple, edenprobe]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
