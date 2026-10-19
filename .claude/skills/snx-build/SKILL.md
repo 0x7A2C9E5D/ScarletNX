@@ -129,12 +129,6 @@ Ryujinx's default Miis, from `dist/licenses/`). The AppImage copies that folder 
 the Arch packages it bundles, with their list in `share/licenses/bundled-packages.txt`, and the CI artifacts are the
 install tree. A new package means a new `install(...)` line for its license in `CMakeLists.txt`.
 
-## Formatting
-
-`scripts/format.sh` before committing, `--check` to see what is off. It covers the C and C++ under `src/`,
-`tools/` and `tests/`, the Python up to two folders deep and `.claude/hooks/`. It needs clang-format 23 exactly (another version
-formats differently and would reformat every file) and fetches ruff through `uvx`.
-
 ## Never delegate builds to subagents
 
 Reviewer and investigator agents read and grep. The main session builds and runs, once, serially: concurrent builds

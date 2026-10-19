@@ -9,9 +9,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for testing a game. Attach its log and a comment will summarize it within a few minutes: how the run ended, where in the game's code, and other reports that failed the same way.
+        Thanks for testing a game. Attach its log and a comment will summarize it within a few minutes: the build, your system and GPU, how the run ended, where in the game's code, and other reports that failed the same way.
 
-        Please attach nothing of the game itself: no keys, dumps, game files or save data.
+        Please attach nothing of the game itself: no keys, dumps or game files. A save is welcome (below).
   - type: input
     id: game
     attributes:
@@ -51,22 +51,13 @@ body:
       placeholder: Drop the .log, .zip or .gz file here
     validations:
       required: true
-  - type: input
-    id: build
+  - type: textarea
+    id: save
     attributes:
-      label: ScarletNX build
-      description: The nightly's date, or the commit shown in the launcher's title bar. The log names it too, from builds that write a build line.
-      placeholder: Nightly 2026-10-19 (abc1234)
-    validations:
-      required: true
-  - type: input
-    id: system
-    attributes:
-      label: System
-      description: Operating system, CPU and GPU.
-      placeholder: Windows 11, Ryzen 5 5600, RTX 3060
-    validations:
-      required: true
+      label: Save
+      description: |
+        Optional, and a great help when the problem is a while into the game. Zip the game's save folder and drag the .zip here. It is `games/<title ID>/<title ID>_data/save/` in the data folder: `~/.local/share/scarletnx` on Linux, `%APPDATA%\scarletnx` on Windows and `~/Library/Application Support/scarletnx` on macOS. The title ID is the game's folder name, and the log summary names it too.
+      placeholder: Drop the save's .zip file here
   - type: textarea
     id: pictures
     attributes:

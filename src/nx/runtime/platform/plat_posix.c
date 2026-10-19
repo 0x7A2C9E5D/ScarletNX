@@ -22,6 +22,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
 #if defined(__APPLE__)
@@ -39,6 +40,10 @@
 #endif
 #if defined(__ANDROID__)
 #include <SDL3/SDL_system.h>
+#include <sys/system_properties.h>
+#endif
+#if defined(__APPLE__) || defined(__FreeBSD__)
+#include <sys/sysctl.h>
 #endif
 
 #ifndef MAP_NORESERVE
@@ -211,6 +216,86 @@ void plat_thread_cpus(const int* ids, int n) {
     (void)n;
 }
 #endif
+#if defined(__linux__) && !defined(__ANDROID__)
+/* the text after "key" (and a '=' or ':' with the spaces around it) on the first line of path that starts with it,
+   unquoted; out empty when there's none */
+static void file_value(const char* path, const char* key, char* out, size_t cap) {
+    char line[512];
+    size_t k = strlen(key), n;
+    FILE* f = fopen(path, "r");
+    out[0] = 0;
+    if (!f) return;
+    while (fgets(line, sizeof line, f)) {
+        char* v = line + k;
+        if (strncmp(line, key, k)) continue;
+        while (*v == ' ' || *v == '\t') v++;
+        if (*v != '=' && *v != ':') continue;
+        v++;
+        while (*v == ' ' || *v == '\t' || *v == '"') v++;
+        n = strcspn(v, "\"\n");
+        if (n >= cap) n = cap - 1;
+        memcpy(out, v, n);
+        out[n] = 0;
+        break;
+    }
+    fclose(f);
+}
+#endif
+#if defined(__APPLE__) || defined(__FreeBSD__)
+static void sysctl_text(const char* name, char* out, size_t cap) {
+    size_t n = cap;
+    if (sysctlbyname(name, out, &n, NULL, 0) || !n) n = 1;
+    out[n < cap ? n - 1 : cap - 1] = 0;
+}
+#endif
+void plat_system_info(char* out, size_t cap) {
+    char os[128] = {0}, cpu[128] = {0}, *c = cpu;
+    struct utsname u;
+    unsigned long long ram = 0;
+    long threads = sysconf(_SC_NPROCESSORS_ONLN);
+    size_t n;
+    if (uname(&u)) memset(&u, 0, sizeof u);
+#if defined(__APPLE__)
+    {
+        char v[32];
+        size_t len = sizeof ram;
+        sysctl_text("kern.osproductversion", v, sizeof v);
+        snprintf(os, sizeof os, "%s %s (Darwin %s)", TARGET_OS_IPHONE ? "iOS" : "macOS", v, u.release);
+        sysctl_text("machdep.cpu.brand_string", cpu, sizeof cpu);
+        if (sysctlbyname("hw.memsize", &ram, &len, NULL, 0)) ram = 0;
+    }
+#else
+#if defined(__ANDROID__)
+    {
+        char v[PROP_VALUE_MAX] = {0};
+        __system_property_get("ro.build.version.release", v);
+        snprintf(os, sizeof os, "Android %s (Linux %s)", v, u.release);
+        __system_property_get("ro.soc.model", cpu);
+    }
+#elif defined(__linux__)
+    {
+        char name[96];
+        file_value("/etc/os-release", "PRETTY_NAME", name, sizeof name);
+        if (!name[0]) file_value("/usr/lib/os-release", "PRETTY_NAME", name, sizeof name);
+        snprintf(os, sizeof os, "%s (Linux %s)", name[0] ? name : "Linux", u.release);
+        file_value("/proc/cpuinfo", "model name", cpu, sizeof cpu); /* x86's; Arm's /proc/cpuinfo names no model */
+    }
+#else
+    snprintf(os, sizeof os, "%s %s", u.sysname, u.release);
+#if defined(__FreeBSD__)
+    sysctl_text("hw.model", cpu, sizeof cpu);
+#endif
+#endif
+    {
+        long pages = sysconf(_SC_PHYS_PAGES), page = sysconf(_SC_PAGESIZE);
+        if (pages > 0 && page > 0) ram = (unsigned long long)pages * (unsigned long long)page;
+    }
+#endif
+    while (*c == ' ') c++; /* some CPUs pad their brand string */
+    for (n = strlen(c); n && c[n - 1] == ' '; n--) c[n - 1] = 0;
+    snprintf(out, cap, "%s%s%s, %ld threads, %llu GB RAM", os, *c ? ", " : "", c, threads > 0 ? threads : 0,
+             (ram + (512ull << 20)) >> 30);
+}
 void plat_yield(void) { sched_yield(); }
 void plat_sleep_ns(i64 ns) {
     struct timespec ts;

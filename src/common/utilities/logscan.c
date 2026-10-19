@@ -892,6 +892,12 @@ void snx_logscan_line(SnxLogScan* s, const char* p, size_t n) {
         case 'b':
             if (!s->build && take_lit(&rest, "build: ") && build_line(s, rest)) return;
             break;
+        case 's': /* "system: <OS and version>, <CPU>, <n> threads, <n> GB RAM" (plat_system_info) */
+            if (!s->system && take_lit(&rest, "system: ") && rest.n) {
+                s->system = add(s, rest);
+                return;
+            }
+            break;
         case 'g':
             if (!s->title_id && take_lit(&rest, "game: ") && hex_run(rest) == 16 &&
                 starts(skip(rest, 16), ", version ")) {
@@ -1114,6 +1120,7 @@ char* snx_logscan_json(const SnxLogScan* s, SnxDemangle demangle) {
     json_field(&b, s, "build", s->build, 0);
     json_field(&b, s, "commit", s->commit, 0);
     json_field(&b, s, "branch", s->branch, 0);
+    json_field(&b, s, "system", s->system, 0);
     json_field(&b, s, "gpu", s->gpu, 0);
     json_field(&b, s, "vulkan", s->vulkan, 0);
     json_field(&b, s, "driver", s->driver, 0);
@@ -1282,6 +1289,10 @@ char* snx_logscan_markdown(const SnxLogScan* s, const char* name, const char* he
         md_code(&b, snx_logscan_text(s, s->build));
     else
         put(&b, "not in the log");
+    if (s->system) {
+        put(&b, "\n- **System:** ");
+        md_code(&b, snx_logscan_text(s, s->system));
+    }
     if (s->gpu) {
         put(&b, "\n- **GPU:** ");
         md_code(&b, snx_logscan_text(s, s->gpu));

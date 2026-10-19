@@ -706,7 +706,7 @@ static cJSON* tools(void) {
     static const char* const dis_types[] = {"string", "string", "string", "string"};
     static const char* const game[] = {"game"};
     static const char* const scan_says[] = {
-        "The summary of a game's .log or the launcher's Share log file: build, title ID, game version, GPU, how the "
+        "The summary of a game's .log or the launcher's Share log file: build, title ID, game version, system, GPU, how the "
         "run ended (crash, svcBreak, exception, BRK, an instruction the recompiler cannot run, fatal), the game "
         "function it is pinned on with its backtrace, ",
         "the service commands the runtime doesn't implement, warnings, the frames over 50 ms and what the slowest did, "
