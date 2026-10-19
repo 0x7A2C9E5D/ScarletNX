@@ -144,10 +144,11 @@ Remaining examples: POSIX.
   (`%USERPROFILE%\.switch` on Windows).
   Common NSP tickets supplement title keys. Fully decrypted content needs neither key file.
 - **Extraction:** defaults to the data folder's `work/<dump stem>`; `--name`/`--out DIR` override. Refuses existing
-  `exefs`; a build tree's driver builds a missing hactool in its checkout.
-  [Temp cleanup/key filtering](../src/nx/runtime/driver/extract.c).
+  `exefs`. hactool runs inside the driver and reads each NCA where it lies in the XCI or NSP, so the ExeFS and RomFS
+  are written straight into the output and nothing is unpacked beside it
+  ([key filtering and cleanup](../src/nx/runtime/driver/extract.c)).
   Sparse and compressed NCAs, updates with large relocation tables and gamecard dumps that start with the card's key
-  area all extract, through what [`cmake/hactool-libhac.patch`](../cmake/hactool-libhac.patch) ports from LibHac.
+  area all extract, through what [`storage.c`](../src/nx/runtime/driver/hactool/storage.c) ports from LibHac.
 - **Recompile:** AOT → module (LLVM, or `--backend=gcc` for libgccjit on DEC Alpha EV67 hosts) →
   final runtime deployment, for this machine's CPU. Shaders compile directly to SPIR-V at runtime.
   `-O 0..3,s,z` sets the optimization level.

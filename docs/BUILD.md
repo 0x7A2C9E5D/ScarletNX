@@ -43,7 +43,7 @@ Run from checkout root. [Extract/AOT/run](USAGE.md) · [Tests/diagnostics](DEVEL
 Install dependencies before configuring. The default preset uses **Ninja** and **Clang/Clang++**.
 FFmpeg also uses **GNU make** and, on x86-64, **NASM**, and OpenSSL uses **Perl** and GNU make. These tools are not
 downloaded by CMake.
-The build patches its copy of hactool with `patch`, which `build-essential`, `base-devel` and FreeBSD's base
+The build patches its copy of FFmpeg with `patch`, which `build-essential`, `base-devel` and FreeBSD's base
 system include; Fedora lists it below.
 
 ### Debian / Ubuntu
@@ -124,7 +124,7 @@ sudo pkg install git cmake ninja gmake nasm perl5 pkgconf python3 sdl3 llvm
 ```sh
 git clone https://github.com/scarletnx/ScarletNX.git && cd ScarletNX &&
 cmake --preset default -B build && cmake --build build
-# -> build/{scarletnx,hactool,snx-shaderc}
+# -> build/{scarletnx,snx-shaderc}
 ```
 
 ### SDL3 troubleshooting
@@ -182,7 +182,7 @@ If that directory was configured with a different compiler or generator, use a n
     cmake --build build
     if ($LASTEXITCODE) { throw 'Build failed' }
 }
-# -> build\{scarletnx.exe,hactool.exe,snx-shaderc.exe}
+# -> build\{scarletnx.exe,snx-shaderc.exe}
 ```
 
 Each new shell, from the checkout:
@@ -245,7 +245,7 @@ runtime must not mix with another LLVM build.
 
 6. Run `build/default/scarletnx.exe` from the CLANG64 shell, which has the DLLs it imports on PATH
    ([USAGE](USAGE.md)). For a copy that runs without MSYS2, `cmake --install build/default --prefix stage` puts
-   `scarletnx.exe` and `hactool.exe` in `stage/bin`. Then copy the DLLs they import from `/clang64/bin`, as CI's
+   `scarletnx.exe` in `stage/bin`. Then copy the DLLs it imports from `/clang64/bin`, as CI's
    "Bundle runtime DLLs and licenses" step does.
 
 ## Rebuild, deploy, cache
@@ -258,7 +258,7 @@ Default: Ninja + Clang, `RelWithDebInfo` (`-O2 -g`). Runtime relinks deploy `gam
 matching `Game_code.so/.dll`, in the data folder's `games/` ([USAGE](USAGE.md#folders)); no-op builds skip deployment. Recompiler/ABI edits require [module rebuilds](DEVELOPMENT.md).
 
 CPM uses [pinned sources](../cmake/dependencies.cmake) and a shared `.cache/cpm` cache. Archive downloads are
-checked by SHA-256. Offline configuration needs the matching sources already in the cache. Cached sources stay unmodified: hactool's patches go on a copy in the build tree.
+checked by SHA-256. Offline configuration needs the matching sources already in the cache. Cached sources stay unmodified: FFmpeg's patch goes on a copy in the build tree.
 Override via CMake/env `CPM_SOURCE_CACHE`. SDL3 uses CPM's system-package discovery with a pinned static
 source fallback. Use `-DCPM_DOWNLOAD_SDL3=ON` to request the bundled source build.
 
@@ -270,7 +270,7 @@ builds, so other trees and branches skip both. A change to any input is a new fo
 ## Build variants
 
 SDL3, Vulkan and FFmpeg are mandatory for the NX runtime, including when running with `-H`.
-There are no renderer or media-decoding disable options. Tools-only, hactool-only and GNUABI-only builds do not need them.
+There are no renderer or media-decoding disable options. Tools-only and GNUABI-only builds do not need them.
 
 Persistent per-build-dir options (POSIX examples):
 
@@ -289,10 +289,9 @@ cmake --preset default -B build -DSNX_FFMPEG_ASM=OFF && cmake --build build
 - `-DSNX_BUILD_NX=OFF`: omit the Switch runtime (default ON).
 - `-DSNX_BUILD_GNUABI=OFF`: omit the CPU-only Linux AArch64 runtime, see [GNUABI.md](GNUABI.md) (default ON).
 - `-DSNX_BUILD_3DS=OFF`: omit the 3DS extraction and memory support, see [3DS.md](3DS.md) (default ON).
-- `-DSNX_BUILD_GUI=OFF`: omit the SDL3 launcher. The default is ON when `SNX_BUILD_NX` is on and neither
-  `SNX_TOOLS_ONLY` nor `SNX_HACTOOL_ONLY` is, OFF otherwise.
+- `-DSNX_BUILD_GUI=OFF`: omit the SDL3 launcher. The default is ON when `SNX_BUILD_NX` is on and `SNX_TOOLS_ONLY`
+  is not, OFF otherwise.
 - `-DSNX_TOOLS_ONLY=ON`: build the extraction/recompilation driver without the runtime, see below (default OFF).
-- `-DSNX_HACTOOL_ONLY=ON`: build only the native container extractor (hactool) and its dependencies (default OFF).
 - `-DSNX_GCCJIT=OFF`: never build the libgccjit backend, even when libgccjit is found (default ON, built only when
   found).
 - `-DSNX_GCCJIT_ROOT=/prefix`: another GCC's prefix to look for libgccjit in.
@@ -336,7 +335,7 @@ The test uses synthetic pixels, not a game. It checks offscreen submissions, fra
 readback hashes and PPM contents without WSI. Validation requires the Khronos validation layer to be installed.
 `SNX_TEST_VULKAN` is off by default so ordinary unit tests do not require an ICD.
 
-Cross-builds omit host hactool. Use a native driver for `-x`. The recompiler still requires LLVM development
+A cross-built driver extracts too: hactool is part of it. The recompiler still requires LLVM development
 files for the target. `SNX_LLVM_CONFIG` must run on the build machine and describe that target installation,
 not the build machine's LLVM libraries. Running the `snx-rtlib-gen` build helper also requires a suitable
 `CMAKE_CROSSCOMPILING_EMULATOR`.
@@ -359,7 +358,7 @@ instructions (20000 on Android; `--chunk`), with a progress line per compiled un
 Debian, `libgccjit-devel` on Fedora; `-DSNX_GCCJIT_ROOT=` points at another GCC's prefix). It is meant for DEC Alpha EV67 hosts, which LLVM has no backend for; everywhere else use LLVM.
 Running it needs only GNU binutils (`as`, `ld`) on PATH besides libgccjit: the module links none of GCC's files.
 
-Extraction builds a missing hactool separately, in the checkout of a build tree's driver. Recompilation deploys the
+Extraction needs nothing beside the driver: hactool runs inside it. Recompilation deploys the
 running full runtime; the tools-only build creates one in its checkout's `build/native-recomp`, or accepts
 `--runtime FILE`. A build tree's programs work in the same data folder as an installed copy's: the user's
 (`~/.local/share/scarletnx`, `%APPDATA%\scarletnx` on Windows), and on Linux the XDG config, state and cache folders

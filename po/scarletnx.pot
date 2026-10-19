@@ -1466,15 +1466,7 @@ msgid "[default]"
 msgstr ""
 
 #: src/gui/steps.c
-msgid "UNPACK"
-msgstr ""
-
-#: src/gui/steps.c
 msgid "EXTRACT"
-msgstr ""
-
-#: src/gui/steps.c
-msgid "TOOLS"
 msgstr ""
 
 #: src/gui/steps.c

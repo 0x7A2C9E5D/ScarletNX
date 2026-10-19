@@ -309,11 +309,11 @@ dots and a turning ring; each step the driver and the runner report (unpack, ext
 recompile with its blocks, built, launch, GPU) typed down the page, with turning dots
 while it runs and `...OK` or `...FAILED` once it ends, the cursor blinking on the current
 one, and the other lines it printed indented under it (`[run] bar` adds a progress bar
-with the running step's percentage). A step that counts, the unpack and the extraction by
+with the running step's percentage). A step that counts, the extraction by
 what hactool has written, the recompile by its blocks, shows how far it is on its line as
 `[run] progress` says: `amount` (`1.2 / 4.0 GB`, `3 / 6`), `percent` (`30%`, YoRHa's) or
 `time`, what is left at its pace so far (`01:23 left`). With `layout = console` the
-driver's own row says it, `unpacked 1229 of 4096 MB (30%)`, written over itself each second. The menu fades out to black as a run starts and the run fades in from it; ESC
+driver's own row says it, `extracted 1229 of 4096 MB (30%)`, written over itself each second. The menu fades out to black as a run starts and the run fades in from it; ESC
 fades the run out and the menu back in.
 
 A theme is also a folder holding a `theme.ini`, the folder's name its id, in
@@ -526,7 +526,7 @@ ctest --test-dir build/gui -R '^gui_' --output-on-failure
 
 For just the GUI and Linux runtime, use `-DSNX_BUILD_NX=OFF -DSNX_BUILD_GUI=ON`: the launcher is
 then `scarletnx-gui`, a program of its own, which looks for `scarletnx` as it does for the other drivers.
-Tools-only and hactool-only builds cannot enable the GUI.
+Tools-only builds cannot enable the GUI.
 Supported host platforms are Linux, FreeBSD, Windows (llvm-mingw) and Android (`dist/android`).
 SDL3 handles window creation, keyboard/mouse input, rendering, clipboard and drag-and-drop
 on every host. The platform-specific code only handles child processes and resource

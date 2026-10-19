@@ -507,7 +507,7 @@ add_test(NAME am_nacp COMMAND snx-test-am-nacp)
 
 # acc.c and users.c: the console's users from users/users.ini, as acc lists them, every file that lists none refused,
 # and the picture of a user with none of its own, Wimsy as a 256x256 JPEG (the splash's drawing), decoded by plutovg
-if(NOT SNX_TOOLS_ONLY AND NOT SNX_HACTOOL_ONLY)
+if(NOT SNX_TOOLS_ONLY)
     add_executable(snx-test-acc-service acc_service.c)
     snx_test_target(snx-test-acc-service 23)
     snx_service_swipc(snx-test-acc-service hle/services/acc.swipc)
@@ -727,9 +727,10 @@ snx_test_target(snx-test-run-ticking 90)
 target_link_libraries(snx-test-run-ticking PRIVATE snx_test_common)
 add_test(NAME run_ticking COMMAND snx-test-run-ticking)
 
+# C11 for hactool's headers, which build the synthetic dumps (hac_synth.h); extract.c itself stays C90 in the driver
 add_executable(snx-test-extract extract.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/extract.c")
-snx_test_target(snx-test-extract 90)
-target_link_libraries(snx-test-extract PRIVATE snx_test_common)
+snx_test_target(snx-test-extract 11)
+target_link_libraries(snx-test-extract PRIVATE snx_test_common hactool_internals)
 add_test(NAME extraction_native COMMAND snx-test-extract)
 
 add_executable(snx-test-loader loader_test.c "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c"

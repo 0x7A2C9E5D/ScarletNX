@@ -18,7 +18,7 @@ same shape as Android's `MainActivity` and `src/gui/android.c`:
 
 ### macOS
 
-`ScarletNX.app` is the desktop program in a bundle: `scarletnx` and `hactool` in `Contents/MacOS`, the themes and the
+`ScarletNX.app` is the desktop program in a bundle: `scarletnx` in `Contents/MacOS`, the themes and the
 licenses in `Contents/share`, where an installed copy looks for them. It works as on Linux. The menu extracts and
 recompiles through the driver as a child process, with SDL's own file and folder dialogs. Its data folder is
 `~/Library/Application Support/scarletnx`. *Share log* saves the log and selects it in a Finder window. The app is
@@ -38,7 +38,7 @@ menu's driver:
 - **The data folder** is the app's Documents, which the Files app (*On My iPhone > ScarletNX*) and the Finder show.
   Games go in its `games/`, each as `games/<game>/<game>_code.so` with its `_data/`, prepared on a computer.
 - **The menu** lists those games. *Load* and the folder settings open the system's document picker. Preparing a
-  dump says it needs a computer: extraction and recompilation run the driver and hactool as programs of their own.
+  dump says it needs a computer: extraction and recompilation run the driver as a program of its own.
 - **A game** runs in the app's process once the menu closes (`src/nx/runtime/entry.c`): the runtime starts once per
   process, so the app ends with the game.
 - **Share log** opens the share sheet with `scarletnx.log`.

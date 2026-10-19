@@ -815,13 +815,13 @@ static void step_line(void) {
     char runs[3][112];
     size_t lengths[3];
     memset(&s, 0, sizeof s);
-    snprintf(s.label, sizeof s.label, "UNPACK");
+    snprintf(s.label, sizeof s.label, "EXTRACT");
     snprintf(s.detail, sizeof s.detail, "Game.xci");
     s.value = 1024;
     s.total = 4096;
     s.megabytes = 1;
     step_runs(&s, GUI_PROGRESS_PERCENT, 0, runs, lengths);
-    assert(!strcmp(runs[0], "UNPACK:") && !strcmp(runs[1], " GAME.XCI") && !strcmp(runs[2], " 25%"));
+    assert(!strcmp(runs[0], "EXTRACT:") && !strcmp(runs[1], " GAME.XCI") && !strcmp(runs[2], " 25%"));
     step_runs(&s, GUI_PROGRESS_AMOUNT, 0, runs, lengths);
     assert(!strcmp(runs[2], " 1.0 / 4.0 GB") && lengths[2] == 13);
     s.state = GUI_STEP_DONE;

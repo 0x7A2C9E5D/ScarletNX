@@ -762,7 +762,7 @@ jobs:
           mkdir apk && unzip -q "$apk" 'lib/*' -d apk
           system=" libc.so libm.so libdl.so liblog.so libandroid.so libz.so libEGL.so libGLESv1_CM.so libGLESv2.so libOpenSLES.so "
           for abi in x86_64 arm64-v8a; do
-            for lib in libmain.so libscarletnx.so libscarletnx-run.so libhactool.so; do
+            for lib in libmain.so libscarletnx.so libscarletnx-run.so; do
               test -f "apk/lib/$abi/$lib" || { echo "$abi has no $lib" >&2; exit 1; }
               for needed in $("$readelf" -d "apk/lib/$abi/$lib" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
                 [[ "$system" == *" $needed "* || -f "apk/lib/$abi/$needed" ]] ||
