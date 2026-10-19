@@ -3,6 +3,8 @@
 /* Exercise the actual renderer and SDL event handlers without production test flags. */
 #define SNX_GUI_NO_MAIN
 #include "gui/main.c"
+#define SNX_SCREEN_TEST "gui_sdl.c"
+#include "gui_screen.h"
 #include <assert.h>
 #ifdef _WIN32
 #include "win32_crash.h"
@@ -141,103 +143,6 @@ static void splash_drawn(App* app, const SDL_Rect* view, const SnxSplashSvg* svg
     free(drawing);
     SDL_DestroySurface(image);
 }
-/* the 16 rows of the menu font's glyph c: CP437's, then the Latin letters past it, then the wide letters' halves
-   (gui_menu_glyph) */
-static const uint8_t* font_rows(int c) {
-    return c < 256                     ? gui_vga_font + c * 16
-           : c < 256 + gui_latin_count ? gui_latin_font + (c - 256) * 16
-                                       : gui_wide_font + (c - 256 - gui_latin_count) * 16;
-}
-/* n glyphs in color anywhere on the render: their ink pixels in color, the others not (a box's frame may cross the
-   font's last row, which is empty); 1 and where they start, else 0 */
-static int find_glyphs(App* app, const int* text, int n, SDL_Color color, int size, int* at_x, int* at_y) {
-    SDL_Surface *read = SDL_RenderReadPixels(app->renderer, NULL), *image;
-    int s = app->scale * size, first = -1, fx = 0, fy = 0, found = 0, x, y;
-    assert(read);
-    image = SDL_ConvertSurface(read, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(read);
-    assert(image);
-#define SNX_AT(px, py) ((const Uint8*)image->pixels + (py) * image->pitch + (px) * 4)
-#define SNX_IS(c)      ((c)[0] == color.r && (c)[1] == color.g && (c)[2] == color.b)
-    for (int i = 0; i < n && first < 0; ++i) /* the first ink, to look for */
-        for (int gy = 0; gy < 15 && first < 0; ++gy)
-            for (int gx = 0; gx < 8 && first < 0; ++gx)
-                if (font_rows(text[i])[gy] & (0x80 >> gx)) {
-                    first = i;
-                    fx = (i * 8 + gx) * s;
-                    fy = gy * s;
-                }
-    assert(first >= 0);
-    for (y = 0; !found && y + 15 * s <= image->h; ++y)
-        for (x = 0; !found && x + n * 8 * s <= image->w; ++x) {
-            if (!SNX_IS(SNX_AT(x + fx, y + fy))) continue;
-            found = 1;
-            for (int i = 0; found && i < n; ++i)
-                for (int gy = 0; found && gy < 15; ++gy)
-                    for (int gx = 0; found && gx < 8; ++gx) {
-                        int ink = (font_rows(text[i])[gy] & (0x80 >> gx)) != 0;
-                        found = ink == SNX_IS(SNX_AT(x + (i * 8 + gx) * s, y + gy * s));
-                    }
-            if (found) {
-                *at_x = x;
-                *at_y = y;
-            }
-        }
-#undef SNX_IS
-#undef SNX_AT
-    SDL_DestroySurface(image);
-    return found;
-}
-/* text in color, glyph by glyph in the font's own bytes (CP437) */
-static int find_text(App* app, const char* text, SDL_Color color, int size, int* at_x, int* at_y) {
-    int glyphs[256], n = 0;
-    while (text[n]) {
-        assert(n < 256);
-        glyphs[n] = (unsigned char)text[n];
-        ++n;
-    }
-    return find_glyphs(app, glyphs, n, color, size, at_x, at_y);
-}
-/* UTF-8 text in color, a glyph each letter as the menu draws it (gui_menu_glyph; a wide one's two halves), size times
-   the text's letters */
-static int find_letters(App* app, const char* text, SDL_Color color, int size, int* at_x, int* at_y) {
-    int glyphs[256], n = 0;
-    while (*text) {
-        int c = gui_menu_glyph(gui_utf8_step(&text));
-        assert(n + 2 <= 256);
-        glyphs[n++] = c;
-        if (gui_glyph_cols(c) == 2) glyphs[n++] = c + 1;
-    }
-    return find_glyphs(app, glyphs, n, color, size, at_x, at_y);
-}
-/* the text drawn, or not, in color, its letters size times the text's: a check that fails names its line */
-#define shows(app, text, color)           shows_at(__LINE__, app, text, color, 1, 1)
-#define hides(app, text, color)           shows_at(__LINE__, app, text, color, 1, 0)
-#define shows_big(app, text, color, size) shows_at(__LINE__, app, text, color, size, 1)
-static void shows_at(int line, App* app, const char* text, SDL_Color color, int size, int drawn) {
-    int x, y;
-    if (find_text(app, text, color, size, &x, &y) == drawn) return;
-    if (drawn)
-        fprintf(stderr, "gui_sdl.c:%d: \"%s\" is not drawn in %02x%02x%02x\n", line, text, color.r, color.g, color.b);
-    else
-        fprintf(stderr, "gui_sdl.c:%d: \"%s\" is drawn in %02x%02x%02x at %d,%d\n", line, text, color.r, color.g,
-                color.b, x, y);
-    if (getenv("SNX_GUI_FAILED_SHOT")) { /* what was drawn, to look at */
-        SDL_Surface* image = SDL_RenderReadPixels(app->renderer, NULL);
-        if (image) SDL_SaveBMP(image, getenv("SNX_GUI_FAILED_SHOT"));
-        SDL_DestroySurface(image);
-    }
-    assert(!"the text drawn");
-}
-/* the same in the foot's letters, a size under the rest's (foot_scale) */
-#define shows_foot(app, text, color) foot_shows_at(__LINE__, app, text, color, 1)
-#define hides_foot(app, text, color) foot_shows_at(__LINE__, app, text, color, 0)
-static void foot_shows_at(int line, App* app, const char* text, SDL_Color color, int drawn) {
-    int scale = app->scale;
-    app->scale = foot_scale(app);
-    shows_at(line, app, text, color, 1, drawn);
-    app->scale = scale;
-}
 /* the boxes a pointer or a finger goes to: a menu's item, Games' rows (0 Add a folder, then the page's games; with
    recent a recent row), a form's row on the left or the right; a pointer at a box's middle */
 static GuiRect entry_box(App* app, int item) {
@@ -297,40 +202,6 @@ static GuiRect foot_room(App* app, GuiRect r, int box) {
     app->scale = scale;
     return out;
 }
-/* the mouse at pixel x, y of the render, moved there or clicking */
-static void mouse_px(App* app, int x, int y, bool click) {
-    SDL_Event e = {0};
-    float wx, wy;
-    layout(app);
-    assert(SDL_RenderCoordinatesToWindow(app->renderer, (float)x + 0.5f, (float)y + 0.5f, &wx, &wy));
-    e.type = click ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_MOTION;
-    e.button.button = SDL_BUTTON_LEFT;
-    if (click) {
-        e.button.x = wx;
-        e.button.y = wy;
-    } else {
-        e.motion.x = wx;
-        e.motion.y = wy;
-    }
-    event(app, &e);
-}
-/* a finger tapping pixel x, y of the render */
-static void tap_px(App* app, int x, int y) {
-    SDL_Event e = {0};
-    float wx, wy;
-    int w, h;
-    layout(app);
-    SDL_GetWindowSize(app->window, &w, &h);
-    assert(SDL_RenderCoordinatesToWindow(app->renderer, (float)x + 0.5f, (float)y + 0.5f, &wx, &wy));
-    e.tfinger.fingerID = 9;
-    e.tfinger.x = wx / (float)w;
-    e.tfinger.y = wy / (float)h;
-    e.type = SDL_EVENT_FINGER_DOWN;
-    event(app, &e);
-    e.type = SDL_EVENT_FINGER_UP;
-    event(app, &e);
-}
-static void point(App* app, GuiRect b, bool click) { mouse_px(app, b.x + b.w / 2, b.y + b.h / 2, click); }
 /* a click, or a tap, on column col of the key the foot draws in color, in its letters */
 #define press_key(app, key, col, tap, color) press_key_at(__LINE__, app, key, col, tap, color)
 static void press_key_at(int line, App* app, const char* key, int col, bool tap, SDL_Color color) {
