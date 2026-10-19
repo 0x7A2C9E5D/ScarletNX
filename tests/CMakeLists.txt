@@ -718,7 +718,10 @@ if(NOT WIN32)
     target_link_libraries(snx-test-ldr-service PRIVATE OpenSSL::Crypto m)
     snx_cpu_helpers_flags(snx-test-ldr-service)
     add_test(NAME ldr_service COMMAND snx-test-ldr-service)
-    set_tests_properties(ldr_service PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77) # 77: a host without 4 KiB pages
+    # again as on a host with 64 KiB pages (PowerPC64), each holding sixteen guest pages
+    add_test(NAME ldr_service_64k_pages COMMAND snx-test-ldr-service)
+    set_tests_properties(ldr_service ldr_service_64k_pages PROPERTIES TIMEOUT 60)
+    set_tests_properties(ldr_service_64k_pages PROPERTIES ENVIRONMENT SNX_HOST_PAGE=65536)
 endif()
 
 # Deterministic FFmpeg API double: no decoder dependency in tools-only builds.
@@ -963,7 +966,7 @@ if(UNIX)
         "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c" "${PROJECT_SOURCE_DIR}/src/nx/hle/svc/svc_mem.c")
     snx_test_target(snx-test-memory 11)
         add_test(NAME memory_accounting COMMAND snx-test-memory)
-    set_tests_properties(memory_accounting PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77) # as ldr_service
+    set_tests_properties(memory_accounting PROPERTIES TIMEOUT 60)
     # views through the alias pool, with the real POSIX platform layer (77 where the host has no pool)
     add_executable(snx-test-memory-alias memory_alias.c
         "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c" "${PROJECT_SOURCE_DIR}/src/nx/hle/svc/svc_mem.c"

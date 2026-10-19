@@ -6,6 +6,7 @@
 #include "nx/gpu/gpu.h"
 #include <openssl/evp.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -30,10 +31,21 @@ int g_verbose;
 void pm_init(PMutex* m) { CHECK(!pthread_mutex_init(&m->l, NULL)); }
 void pm_lock(PMutex* m) { CHECK(!pthread_mutex_lock(&m->l)); }
 void pm_unlock(PMutex* m) { CHECK(!pthread_mutex_unlock(&m->l)); }
-u64 plat_vm_page(void) { return (u64)sysconf(_SC_PAGESIZE); }
+/* this host's pages, or SNX_HOST_PAGE's larger ones (ldr_service_64k_pages), as plat_posix.c */
+u64 plat_vm_page(void) {
+    u64 page = (u64)sysconf(_SC_PAGESIZE);
+    const char* forced = getenv("SNX_HOST_PAGE");
+    if (forced) {
+        CHECK(strtoull(forced, NULL, 0) > page);
+        page = strtoull(forced, NULL, 0);
+    }
+    return page;
+}
+/* aligned to plat_vm_page, a page more reserved for that */
 u8* plat_vm_reserve(u64 size) {
-    void* p = mmap(NULL, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    return p == MAP_FAILED ? NULL : p;
+    u64 page = plat_vm_page();
+    void* p = mmap(NULL, size + page, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return p == MAP_FAILED ? NULL : (u8*)(((uintptr_t)p + page - 1) & ~(uintptr_t)(page - 1));
 }
 int plat_vm_commit(u8* p, u64 size) {
     if (fail_commit) {
@@ -345,12 +357,6 @@ static void limits(void) {
     CHECK(!mem_heap_set(0x10000, 0x200000));
 }
 int main(void) {
-    /* guest memory is mapped and protected in the Switch's 4 KiB pages, which a host with bigger ones (16 KiB on
-       Apple silicon) can't do: what plat_posix.c stops the runtime for there (docs/APPLE.md) */
-    if (sysconf(_SC_PAGESIZE) != 4096) {
-        printf("skipped: this host's pages are %ld bytes, and guest memory needs 4 KiB ones\n", sysconf(_SC_PAGESIZE));
-        return 77;
-    }
     mem_init();
     CHECK(!mem_heap_set(0x10000, 0x10000));
     fixture();
