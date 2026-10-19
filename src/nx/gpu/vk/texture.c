@@ -519,11 +519,22 @@ static Surf* tex_check(Surf* t, u64 gva) {
     if (t->checked != g_vk_present || t->ww_epoch != vk_ww_epoch()) {
         u32 wnow = vk_ww_now();
         int wr = vk_written_since(gmem_ptr(gva, t->size), t->size, t->wseen);
+        int epoch = t->ww_epoch != vk_ww_epoch();
         t->ww_epoch = vk_ww_epoch();
         if (wr >= 0) {
             t->checked = g_vk_present;
             if (wr && !fresh) tex_rehash(t);
             t->wseen = wnow + 1; /* this scan's marks are stamped with the clock after wnow */
+            return t->upload_valid ? t : NULL;
+        }
+        /* without it, hashed whole once in each epoch it is used in: what the CPU wrote before a submission or the end
+           of a stream wait reaches the next sample, as with write tracking. The frame's schedule below alone misses
+           that (the write and the sample come between two presents, and a headless run presents nothing). Expiring
+           every texture at the cache invalidation methods did it before, and isn't enough either: edenprobe rewrites
+           texels with only the sampler and header caches invalidated after, never the texture data cache */
+        if (epoch) {
+            t->checked = g_vk_present;
+            if (!fresh && tex_rehash(t)) t->stable = 0;
             return t->upload_valid ? t : NULL;
         }
     }
@@ -684,6 +695,7 @@ texture_from_memory:
     t->gw = gpu_mem_generation();
     t->hash = mem_hash(gva, t->size);
     t->checked = g_vk_present;
+    t->ww_epoch = vk_ww_epoch(); /* hashed in this epoch */
     t->next_check = g_vk_present + 4;
     return tex_upload(t) ? t : NULL;
 }
