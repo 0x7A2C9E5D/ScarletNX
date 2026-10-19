@@ -749,7 +749,6 @@ static void in_place(const update_t* u) {
 #endif
     sprintf(path, "%s/game.nsp", dir);
     write_file(path, nsp.data, nsp.size);
-    free(nsp.data);
     SnxHac* hac = snx_hac_new();
     CHECK(hac != NULL);
     hex(a, header_key, sizeof(header_key));
@@ -769,6 +768,25 @@ static void in_place(const update_t* u) {
     CHECK(snx_hac_nca(hac, nsp_index, 0, &base) == -1); /* not an NCA */
     sprintf(path, "%s/romfs", dir);
     CHECK(!snx_hac_extract(hac, nsp_index, 2, nsp_index, 1, NULL, path));
+    /* the same RomFS read in place, as the runtime reads a game it did not extract: from the NSP mapped, the image
+       whole and a piece of it that starts and ends inside blocks */
+    CHECK(snx_hac_map(hac, nsp_index, nsp.data, entries[2].offset + entries[2].size - 1) == -1); /* past patch.nca */
+    CHECK(!snx_hac_map(hac, nsp_index, nsp.data, nsp.size));
+    SnxHacFs* fs = snx_hac_fs_open(hac, nsp_index, 2, nsp_index, 1);
+    CHECK(fs != NULL);
+    CHECK(snx_hac_fs_romfs_size(fs) == u->image.size);
+    unsigned char* image = zalloc(u->image.size);
+    CHECK(!snx_hac_fs_read_romfs(fs, 0, image, u->image.size));
+    CHECK(!memcmp(image, u->image.data, u->image.size));
+    memset(image, 0, u->image.size);
+    CHECK(!snx_hac_fs_read_romfs(fs, 0x1237, image, 0x4321));
+    CHECK(!memcmp(image, u->image.data + 0x1237, 0x4321));
+    CHECK(snx_hac_fs_read_romfs(fs, u->image.size - 1, image, 2) == -1);
+    const SnxHacEntry* files;
+    CHECK(snx_hac_fs_files(fs, &files) == 0); /* the synthetic update has no ExeFS */
+    snx_hac_fs_free(fs);
+    free(image);
+    free(nsp.data);
     snx_hac_free(hac);
     for (unsigned i = 0; i < 4; i++) {
         sprintf(path, "%s/romfs/%s", dir, files_b[i].name);

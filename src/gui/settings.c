@@ -83,6 +83,9 @@ int gui_settings_read(GuiSettings* s, const char* list) {
         SNX_TR_NOOP("Extract to tmpfs, in memory (/tmp/scarletnx/work/<title ID>), which the game reads its RomFS from"),
         off_on, GUI_KEY_WORD);
 #endif
+    row(s, "Launch", "extract", SNX_TR_NOOP("Extract game container"),
+        SNX_TR_NOOP("Extract a dump's ExeFS and RomFS into its game's folder. Off, the game reads them from the dump"),
+        off_on, GUI_KEY_WORD);
     for (line = text; *line; line = next) {
         char* field[9];
         const char **words = NULL, **values = NULL;
@@ -294,6 +297,9 @@ const char* gui_settings_value(const GuiSettings* s, const char* key) {
 const char* gui_settings_tmpfs(const GuiSettings* s) {
     return s->count >= GUI_SETTINGS_OWN && s->values[1].word ? "--tmpfs" : NULL;
 }
+const char* gui_settings_extract(const GuiSettings* s) {
+    return s->count >= GUI_SETTINGS_OWN && s->values[2].word ? "--extract-container" : NULL;
+}
 size_t gui_settings_options(GuiSettings* s, int launch, const char** argv) {
     size_t n = 0;
     int i;
@@ -304,6 +310,7 @@ size_t gui_settings_options(GuiSettings* s, int launch, const char** argv) {
         argv[n++] = s->values[i].option;
     }
     if (launch && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
+    if (launch && gui_settings_extract(s)) argv[n++] = gui_settings_extract(s);
     if (launch && s->count >= GUI_SETTINGS_OWN && s->values[0].word) {
         argv[n++] = "-S";
         argv[n++] = "-s";

@@ -23,7 +23,8 @@ Source map: [CLAUDE.md](../CLAUDE.md).
 | `src/gnuabi/` / `scarletnx-gnuabi` | Linux syscall/errno/structure translation, ELF loading, isolated VFS, Linux process/memory/signal/futex compatibility |
 
 The experimental `src/3ds/` / `scarletnx-3ds` target supplies board profiles,
-decrypted CIA/NCCH/ExeFS/RomFS extraction and an independent checked page-memory
+decrypted CIA/NCCH/ExeFS/RomFS extraction, or the same read in place from the mapped CIA, and an independent
+checked page-memory
 controller. `SNX_3DS_AOT=ON` adds a native Linux static-AOT pipeline:
 extraction -> the driver's offline LLVM compiler/host linker (only when the module is missing or stale) ->
 native ELF -> checked process/ARM/Thumb dispatch. `snx_ctr_process` maps raw
@@ -69,9 +70,15 @@ syscalls, ELF execution, filesystem scope, and differential testing.
 ## Recompiler + module ABI
 
 NX tooling under `src/nx/runtime/driver/` and `src/nx/loader/`:
-`work/<Game>/{exefs,romfs}` -> `games/<id>/`: `<id>[.exe]`, `<id>_code.{so,dll}`, `<id>_data/`:
+a dump, read in place, or `work/<Game>/{exefs,romfs}` -> `games/<id>/`: `<id>[.exe]`, `<id>_code.{so,dll}`,
+`<id>_data/`, and `<id>.source`, the link to the dump:
 
 - `driver.c`: CLI dispatch only; `extract.c` and `recompile.c` own their workflows.
+- `container.c`: a dump opened with hactool, its keys loaded and its NCAs picked, shared by the extraction, the
+  recompiler (a dump given to `-r`, its ExeFS read through `SnxExefsReader`) and the runtime's `fs.c`. Without
+  Extract game container, `fs.c` maps the dump `<id>.source` links to and serves `exefs/*` and the RomFS image from
+  it through hactool's storage chains (`snx_hac.h`'s `SnxHacFs`), the sections decrypted, an update's patch applied
+  and compressed blocks expanded as they are read. Nothing is cached.
 - `src/nx/loader/loader.c`: NSO/NRO, LZ4, SHA-256, NPDM, MOD0, symbols/relocs/FDEs.
 - `src/common/cpu/aarch64/a64.c` + `a64_templates.inc`: shared instruction semantics for the backends, gnuabi's C path and the tests' reference interpreter.
 - `src/common/cpu/recompiler/codegen.c`: function/CFG discovery over platform-neutral image views.

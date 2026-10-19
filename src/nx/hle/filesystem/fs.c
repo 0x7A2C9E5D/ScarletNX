@@ -2,8 +2,8 @@
    Copyright 2026 the ScarletNX contributors
    Ported from Eden (src/core/file_sys/fsmitm_romfsbuild.cpp):
    SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project */
-/* fsp-srv over the game's indexed data folder: the RomFS (a romfs.bin, or an image made up from the romfs/ folder),
-   save data, the SD card and the system archives */
+/* fsp-srv over the game's indexed data folder: the RomFS (a romfs.bin, an image made up from the romfs/ folder, or
+   the game's dump read in place), save data, the SD card and the system archives */
 #include "nx/hle/filesystem/fs.h"
 #include "nx/hle/filesystem/fs_tree.h"
 #include "nx/runtime/main.h"
@@ -17,6 +17,7 @@
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 #include "common/utilities/common.h"
+#include "nx/runtime/driver/container.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,7 +42,6 @@
 #define FS_NO_APPEND           RC(2, 6201) /* FileExtensionWithoutOpenModeAllowAppend */
 #define FS_READ_NOT_PERMITTED  RC(2, 6202)
 #define FS_WRITE_NOT_PERMITTED RC(2, 6203)
-
 
 static u32 tree_result(FsTreeResult r) {
     switch (r) {
@@ -85,6 +85,79 @@ static void romfs_from_tmpfs(void) {
     free(work);
 }
 
+/* hactool ends the process on a dump it cannot read: what it said first */
+static void dump_exit(void* data) {
+    (void)data;
+    snx_hac_error("fs: hactool stopped on the game's dump");
+}
+
+/* Extract game container off: a data folder without an ExeFS of its own reads its ExeFS and RomFS from the dump the
+   game's folder links to, <folder>/<name>.source beside <name>_data, mapped read-only for the whole run. Nothing of
+   it is written anywhere. The keys are where the driver finds them, in the data folder games/ is in or in ~/.switch.
+   At startup, under tree.lock */
+static void dump_open(void) {
+    FsNode* node;
+    char *data, *link, *folder, *games, *repo;
+    size_t n = strlen(g_datadir);
+    if (!fs_tree_lookup(&fsp.tree, NULL, "exefs", &node)) return;
+    data = snx_strdup(g_datadir);
+    while (n && (data[n - 1] == '/' || data[n - 1] == '\\')) data[--n] = 0;
+    if (n < 5 || strcmp(data + n - 5, "_data")) {
+        free(data);
+        return;
+    }
+    data[n - 5] = 0;
+    link = snx_format("%s.source", data);
+    free(data);
+    if (!snx_is_file(link)) {
+        free(link);
+        return;
+    }
+    folder = snx_dirname(link);
+    games = snx_dirname(folder);
+    repo = snx_dirname(games);
+    snx_hac_on_exit(dump_exit, NULL);
+    if (snx_dump_open(&fsp.dump, link, NULL, NULL, NULL, repo, 0))
+        fatal("Could not read the game's dump %s, which it reads its files from: the line before says why", link);
+    if (plat_file_map_sized(&fsp.dmap, link, snx_file_size(link)) ||
+        snx_hac_map(fsp.dump.hac, fsp.dump.base, fsp.dmap.data, fsp.dmap.size))
+        fatal("Could not map the game's dump %s", link);
+    fsp.dfs = snx_dump_fs(&fsp.dump);
+    if (!fsp.dfs) fatal("Could not read the game's program in its dump %s: the line before says why", link);
+    snx_hac_on_exit(NULL, NULL);
+    pm_init(&fsp.dlock);
+    LOG("fs: ExeFS and RomFS read from the dump %s (%.1f MB mapped)\n", link, (double)fsp.dmap.size / 1048576.0);
+    free(link);
+    free(folder);
+    free(games);
+    free(repo);
+}
+
+/* an ExeFS file of the dump read in place, malloc'd: path is exefs/<name>. NULL when the game has no dump open or
+   the dump no such file */
+static u8* dump_exefs(const char* path, u64* size) {
+    const SnxHacEntry* files;
+    size_t count, i;
+    u8* data;
+    int failed;
+    if (!fsp.dfs || strncmp(path, "exefs/", 6)) return NULL;
+    count = snx_hac_fs_files(fsp.dfs, &files);
+    for (i = 0; i < count && strcmp(files[i].name, path + 6); i++) continue;
+    if (i == count || files[i].size > SIZE_MAX) return NULL;
+    data = malloc(files[i].size ? (size_t)files[i].size : 1);
+    if (!data) return NULL;
+    pm_lock(&fsp.dlock);
+    failed = snx_hac_fs_read(fsp.dfs, i, 0, data, (size_t)files[i].size);
+    pm_unlock(&fsp.dlock);
+    if (failed) {
+        WARN("fs: could not read %s from the game's dump\n", path);
+        free(data);
+        return NULL;
+    }
+    *size = files[i].size;
+    return data;
+}
+
 void fs_init(void) {
     FsTreeResult r = fs_tree_init(&g_hle.fs.tree, g_datadir);
     if (r != FS_TREE_OK) fatal("Could not index game filesystem %s (error %d)", g_datadir, r);
@@ -102,7 +175,8 @@ void fs_init(void) {
        empty at first use */
     r = fs_tree_remove(&g_hle.fs.tree, NULL, "save/temp", 1, 1, 0);
     if (r != FS_TREE_OK && r != FS_TREE_NOTFOUND) WARN("fs: could not empty save/temp (error %d)\n", r);
-    romfs_from_tmpfs();
+    dump_open();
+    if (!fsp.dfs) romfs_from_tmpfs();
     for (size_t i = 0; i < sizeof shared_paths / sizeof shared_paths[0]; i++) {
         FsNode* node;
         if (fs_tree_lookup(&g_hle.fs.tree, NULL, shared_paths[i], &node)) continue;
@@ -139,6 +213,10 @@ int fs_map_file(const char* path, PFileMap* map) {
     char host[FS_TREE_PATH_MAX];
     int r = -1;
     memset(map, 0, sizeof *map);
+    if ((map->data = dump_exefs(path, &map->size))) { /* read out of the dump: plat_file_unmap frees it */
+        map->heap = 1;
+        return 0;
+    }
     pm_lock(&g_hle.fs.tree.lock);
     if (!fs_tree_lookup(&g_hle.fs.tree, NULL, path, &node) && !node->is_dir) {
         if (node->fd >= 0) { /* already mapped for the whole run: lend that view */
@@ -155,8 +233,13 @@ int fs_map_file(const char* path, PFileMap* map) {
 
 u8* fs_read_file(const char* path, u64* size) {
     FsNode* node;
+    u64 got;
     u8* data = NULL;
     if (size) *size = 0;
+    if ((data = dump_exefs(path, &got))) {
+        if (size) *size = got;
+        return data;
+    }
     pm_lock(&g_hle.fs.tree.lock);
     if (!fs_tree_lookup(&g_hle.fs.tree, NULL, path, &node) && !node->is_dir && node->size <= SIZE_MAX) {
         data = malloc(node->size ? (size_t)node->size : 1);
@@ -370,6 +453,11 @@ void romfs_init(void) {
         LOG("RomFS: image (%.1f MB)\n", (double)g_hle.fs.rtotal / 1048576.0);
     } else if (!fs_tree_lookup(&g_hle.fs.tree, NULL, "romfs:/", &node) && node->is_dir) {
         romfs_build(node);
+    } else if (g_hle.fs.dfs && snx_hac_fs_romfs_size(g_hle.fs.dfs)) {
+        g_hle.fs.rtotal = snx_hac_fs_romfs_size(g_hle.fs.dfs);
+        LOG("RomFS: the dump's, read in place (%.1f MB)\n", (double)g_hle.fs.rtotal / 1048576.0);
+    } else if (g_hle.fs.dfs) {
+        LOG("RomFS: none in the game's dump\n");
     } else {
         LOG("RomFS: none in %s\n", g_datadir);
         if (fs_tree_lookup(&g_hle.fs.tree, NULL, "exefs/main.nro", &node))
@@ -435,6 +523,17 @@ static int romfs_read(u64 off, void* dst, u64 size) {
     if (g_hle.fs.rimage) {
         memcpy(out, g_hle.fs.rimage->map + off, (size_t)size);
         return 0;
+    }
+    if (g_hle.fs.dfs) {
+        pm_lock(&g_hle.fs.dlock);
+        rc = size > SIZE_MAX ? -1 : snx_hac_fs_read_romfs(g_hle.fs.dfs, off, out, (size_t)size);
+        pm_unlock(&g_hle.fs.dlock);
+        if (rc) {
+            memset(out, 0, (size_t)size);
+            WARN("RomFS: could not read the dump at %llx (%llx bytes): the game gets zeros\n", (unsigned long long)off,
+                 (unsigned long long)size);
+        }
+        return rc;
     }
     if (g_hle.fs.rraw) {
         i64 got;

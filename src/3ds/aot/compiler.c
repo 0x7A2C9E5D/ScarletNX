@@ -199,7 +199,7 @@ done:
     LLVMContextDispose(c);
     return ok;
 }
-int snx_ctr_aot_compile(const char* extracted, char* error, size_t error_size) {
+int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error, size_t error_size) {
     int result = 1;
     SnxCtrImage image = {0}, check = {0};
     SnxCtrPlan plan = {0};
@@ -212,7 +212,9 @@ int snx_ctr_aot_compile(const char* extracted, char* error, size_t error_size) {
     LLVMTargetRef backend;
     char* detail = NULL;
     if (error_size) error[0] = 0;
-    if (!snx_ctr_image_load(extracted, &image, error, error_size)) goto done;
+    if (!(cia ? snx_ctr_image_from_cia(cia, &image, error, error_size)
+              : snx_ctr_image_load(extracted, &image, error, error_size)))
+        goto done;
     if (image.segment[0].bytes > SNX_CTR_AOT_TEXT_LIMIT) {
         snprintf(error, error_size, "static AOT text limit is %u bytes", SNX_CTR_AOT_TEXT_LIMIT);
         result = 3;
@@ -329,7 +331,9 @@ int snx_ctr_aot_compile(const char* extracted, char* error, size_t error_size) {
         result = 3;
         goto done;
     }
-    if (!snx_ctr_image_load(directory, &check, error, error_size) || memcmp(image.identity, check.identity, 32)) {
+    if (!(cia ? snx_ctr_image_from_cia(cia, &check, error, error_size)
+              : snx_ctr_image_load(directory, &check, error, error_size)) ||
+        memcmp(image.identity, check.identity, 32)) {
         snprintf(error, error_size, "extracted image changed during compilation");
         goto done;
     }

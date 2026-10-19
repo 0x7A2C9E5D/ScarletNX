@@ -25,6 +25,10 @@ bool ctr_read(CtrReader* r, CtrSpan span, uint64_t at, void* output, size_t size
     if (!ctr_fits(r->size, span.offset, span.size) || !ctr_fits(span.size, at, size))
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "truncated or out-of-range archive section");
     uint64_t offset = span.offset + at;
+    if (r->map) {
+        if (size) memcpy(output, r->map + offset, size);
+        return true;
+    }
     if (offset > INT64_MAX) return ctr_fail(r, SNX_CTR_EXTRACT_LIMIT, "file offset exceeds host limit");
 #ifdef _WIN32
     int failed = _fseeki64(r->input, (int64_t)offset, SEEK_SET);

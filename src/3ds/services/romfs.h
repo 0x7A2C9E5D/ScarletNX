@@ -12,6 +12,12 @@ typedef struct SnxCtrRomfs SnxCtrRomfs;
    outlives the view; missing romfs/ is genuinely absent (*out stays NULL).
    No CIA is reopened. */
 bool snx_ctr_romfs_open(FsTree* tree, SnxCtrRomfs** out);
+/* The view over a level-3 image read where it lies (snx_ctr_cia_romfs), which
+   outlives the view: reads copy from it, and every entry's timestamp is mtime,
+   the CIA's (UTC Unix milliseconds). image NULL: the empty RomFS (a CIA with
+   none), as an empty romfs/ folder serializes. False for an image too small
+   or too large */
+bool snx_ctr_romfs_open_image(const unsigned char* image, uint64_t size, uint64_t mtime, SnxCtrRomfs** out);
 void snx_ctr_romfs_free(SnxCtrRomfs* fs);
 uint64_t snx_ctr_romfs_size(const SnxCtrRomfs* fs);
 bool snx_ctr_romfs_read(SnxCtrRomfs* fs, uint64_t offset, void* data, size_t size);

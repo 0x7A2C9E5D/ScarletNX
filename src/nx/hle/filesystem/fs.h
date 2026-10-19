@@ -7,6 +7,7 @@
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/runtime/platform/plat.h" /* FILE, PFileMap */
 #include "nx/hle/filesystem/fs_tree.h" /* FsTree, FsNode */
+#include "nx/runtime/driver/container.h"
 
 /* Indexes the game's data folder and maps RomFS and ExeFS for the run. Called once, before any guest file is loaded */
 void fs_init(void);
@@ -76,6 +77,12 @@ typedef struct {
     FileData files[FS_FILE_MAX];
     DirData dirs[FS_DIR_MAX];
     u32 fs_next, file_next, dir_next;
+    /* Extract game container off: the dump the game's folder links to, mapped for the whole run, and its program's
+       ExeFS and RomFS read out of it (dump_open). dlock keeps one read at a time: their decryption is shared */
+    SnxDump dump;
+    SnxHacFs* dfs;
+    PFileMap dmap;
+    PMutex dlock;
 } HleFs;
 /* all zero: fs_init sets the tree up */
 #endif

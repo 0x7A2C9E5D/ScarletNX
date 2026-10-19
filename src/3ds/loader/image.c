@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 #include "3ds/loader/ctr_image.h"
+#include "3ds/loader/ctr_loader.h"
 #include "common/utilities/common.h"
 #include <openssl/evp.h>
 #include <stdio.h>
@@ -25,24 +26,16 @@ void snx_ctr_image_free(SnxCtrImage* image) {
         memset(image, 0, sizeof *image);
     }
 }
-bool snx_ctr_image_load(const char* directory, SnxCtrImage* image, char* error, size_t error_size) {
-    if (error_size) error[0] = 0;
-    if (!image) return false;
-    memset(image, 0, sizeof *image);
-    unsigned char ex[0x800];
-    const char* reason = "invalid extracted image directory or ExHeader";
-    if (!directory || snx_is_link(directory) || !snx_is_dir(directory)) goto fail;
-    char* exefs = snx_path_join(directory, "exefs");
-    bool safe = !snx_is_link(exefs) && snx_is_dir(exefs);
-    free(exefs);
-    if (!safe || !read_exact(directory, "exheader.bin", ex, sizeof ex)) goto fail;
+/* the image an ExHeader describes, its expanded .code read exact and bounded by code(source, out, size) */
+static bool image_parse(const unsigned char* ex, bool (*code)(const void*, unsigned char*, size_t),
+                        const void* source, SnxCtrImage* image, char* error, size_t error_size) {
     image->stack_size = le32(ex + 0x1c);
     image->bss_size = le32(ex + 0x3c);
     image->title_id = (uint64_t)le32(ex + 0x200) | (uint64_t)le32(ex + 0x204) << 32;
     for (unsigned i = 0; i < 28; ++i) image->kernel_caps[i] = le32(ex + 0x370 + i * 4);
     const unsigned offsets[] = {0x10, 0x20, 0x30};
     uint64_t sizes[3], total = 0;
-    reason = "invalid extracted process segment/BSS/stack layout";
+    const char* reason = "invalid extracted process segment/BSS/stack layout";
     for (unsigned i = 0; i < 3; ++i) {
         const unsigned char* p = ex + offsets[i];
         SnxCtrSegment* s = &image->segment[i];
@@ -67,20 +60,56 @@ bool snx_ctr_image_load(const char* directory, SnxCtrImage* image, char* error, 
     image->code_size = (size_t)total;
     image->code = malloc(image->code_size);
     reason = "cannot read exact bounded expanded .code";
-    if (!image->code || !read_exact(directory, "exefs/.code", image->code, image->code_size)) goto fail;
+    if (!image->code || !code(source, image->code, image->code_size)) goto fail;
     static const char domain[] = "ScarletNX CTR image identity v1";
     EVP_MD_CTX* hash = EVP_MD_CTX_new();
     unsigned length = 0;
     bool hashed = hash && EVP_DigestInit_ex(hash, EVP_sha256(), NULL) == 1 &&
-                  EVP_DigestUpdate(hash, domain, sizeof domain) == 1 && EVP_DigestUpdate(hash, ex, sizeof ex) == 1 &&
+                  EVP_DigestUpdate(hash, domain, sizeof domain) == 1 && EVP_DigestUpdate(hash, ex, 0x800) == 1 &&
                   EVP_DigestUpdate(hash, image->code, image->code_size) == 1 &&
                   EVP_DigestFinal_ex(hash, image->identity, &length) == 1 && length == sizeof image->identity;
     EVP_MD_CTX_free(hash);
-    reason = "cannot hash extracted image with OpenSSL";
+    reason = "cannot hash the image with OpenSSL";
     if (!hashed) goto fail;
     return true;
 fail:
     if (error_size) snprintf(error, error_size, "%s", reason);
     snx_ctr_image_free(image);
     return false;
+}
+static bool extracted_code(const void* directory, unsigned char* out, size_t size) {
+    return read_exact(directory, "exefs/.code", out, size);
+}
+bool snx_ctr_image_load(const char* directory, SnxCtrImage* image, char* error, size_t error_size) {
+    if (error_size) error[0] = 0;
+    if (!image) return false;
+    memset(image, 0, sizeof *image);
+    unsigned char ex[0x800];
+    bool safe = directory && !snx_is_link(directory) && snx_is_dir(directory);
+    char* exefs = safe ? snx_path_join(directory, "exefs") : NULL;
+    safe = safe && !snx_is_link(exefs) && snx_is_dir(exefs);
+    free(exefs);
+    if (!safe || !read_exact(directory, "exheader.bin", ex, sizeof ex)) {
+        if (error_size) snprintf(error, error_size, "invalid extracted image directory or ExHeader");
+        return false;
+    }
+    return image_parse(ex, extracted_code, directory, image, error, error_size);
+}
+/* the .code snx_ctr_cia_open expanded: exactly the size the ExHeader's pages give */
+static bool cia_code(const void* cia, unsigned char* out, size_t size) {
+    size_t have;
+    const unsigned char* code = snx_ctr_cia_code(cia, &have);
+    if (have != size) return false;
+    memcpy(out, code, size);
+    return true;
+}
+bool snx_ctr_image_from_cia(const SnxCtrCia* cia, SnxCtrImage* image, char* error, size_t error_size) {
+    if (error_size) error[0] = 0;
+    if (!image) return false;
+    memset(image, 0, sizeof *image);
+    if (!cia) {
+        if (error_size) snprintf(error, error_size, "no CIA to read the image from");
+        return false;
+    }
+    return image_parse(snx_ctr_cia_exheader(cia), cia_code, cia, image, error, error_size);
 }

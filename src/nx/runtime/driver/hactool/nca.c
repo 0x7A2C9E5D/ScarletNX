@@ -37,6 +37,12 @@ static storage_t *nca_section_chain(nca_section_ctx_t *ctx, storage_t *storage) 
     return storage;
 }
 
+/* ScarletNX: [offset, offset + size) of the NCA's file, from its mapping when it has one. */
+static storage_t *nca_section_file(nca_section_ctx_t *ctx, uint64_t offset, uint64_t size) {
+    if (ctx->map != NULL) return storage_memory_new(ctx->map, ctx->map_size, ctx->base_offset + offset, size);
+    return storage_file_new(ctx->file, ctx->base_offset + offset, size);
+}
+
 /* The upper half of the section's AES-CTR counter, big-endian; generation, if nonzero, replaces its low word. */
 static void nca_section_upper_iv(nca_section_ctx_t *ctx, unsigned char iv[8], uint32_t generation, int replace) {
     for (unsigned int j = 0; j < 0x8; j++) {
@@ -62,7 +68,7 @@ static storage_t *nca_section_open_sparse(nca_section_ctx_t *ctx) {
         fprintf(stderr, "Invalid sparse table!\n");
         return NULL;
     }
-    storage_t *physical = nca_section_chain(ctx, storage_file_new(ctx->file, ctx->base_offset + info->physical_offset, info->meta_offset + info->meta_size));
+    storage_t *physical = nca_section_chain(ctx, nca_section_file(ctx, info->physical_offset, info->meta_offset + info->meta_size));
     storage_t *meta = nca_section_chain(ctx, storage_sub_new(physical, info->meta_offset, info->meta_size));
     if (meta == NULL) return NULL;
     if (!ctx->is_decrypted) {
@@ -110,7 +116,7 @@ static int nca_section_open_raw(nca_section_ctx_t *ctx) {
     if (ctx->header->sparse_info.generation != 0 && ctx->crypt_type != CRYPT_NCA0) {
         body = nca_section_open_sparse(ctx);
     } else {
-        body = nca_section_chain(ctx, storage_file_new(ctx->file, ctx->base_offset + ctx->offset, ctx->size));
+        body = nca_section_chain(ctx, nca_section_file(ctx, ctx->offset, ctx->size));
     }
     if (body == NULL) return 0;
 
@@ -398,6 +404,8 @@ void nca_process(nca_ctx_t *ctx) {
             ctx->section_contexts[i].tool_ctx = ctx->tool_ctx;
             ctx->section_contexts[i].file = ctx->file;
             ctx->section_contexts[i].base_offset = ctx->base_offset;
+            ctx->section_contexts[i].map = ctx->map;
+            ctx->section_contexts[i].map_size = ctx->map_size;
             ctx->section_contexts[i].section_num = i;
             ctx->section_contexts[i].offset = media_to_real(ctx->header.section_entries[i].media_start_offset);
             ctx->section_contexts[i].size = media_to_real(ctx->header.section_entries[i].media_end_offset) - ctx->section_contexts[i].offset;

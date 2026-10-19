@@ -578,6 +578,7 @@ static void file_map_clear(PFileMap* m) {
     m->data = NULL;
     m->size = 0;
     m->borrowed = 0;
+    m->heap = 0;
 }
 /* stat_it: the size comes from fstat, and the file must be a regular one; else known is trusted */
 static int file_map(PFileMap* m, const char* path, int stat_it, u64 known) {
@@ -613,7 +614,9 @@ static int file_map(PFileMap* m, const char* path, int stat_it, u64 known) {
 int plat_file_map(PFileMap* m, const char* path) { return file_map(m, path, 1, 0); }
 int plat_file_map_sized(PFileMap* m, const char* path, u64 size) { return file_map(m, path, 0, size); }
 void plat_file_unmap(PFileMap* m) {
-    if (m->data && !m->borrowed) munmap((void*)m->data, (size_t)m->size);
+    if (m->heap)
+        free((void*)m->data);
+    else if (m->data && !m->borrowed) munmap((void*)m->data, (size_t)m->size);
     file_map_clear(m);
 }
 int plat_replace_file(const char* tmp, const char* dst) {

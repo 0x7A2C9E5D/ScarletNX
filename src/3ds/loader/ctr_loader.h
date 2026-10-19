@@ -22,6 +22,24 @@ typedef enum {
    is owned by caller on OK. */
 SnxCtrExtractResult snx_ctr_extract(const char* input, const char* destination, const char* work, char** published,
                                     char* error, size_t error_size);
+/* A decrypted application CIA read where it lies, with nothing extracted: the file itself mapped read-only and
+   shared for as long as it is open, after every check snx_ctr_extract makes (hashes, bounds, the RomFS metadata).
+   Encrypted content is refused as the extraction refuses it. *cia is the caller's on OK. The input must not be
+   modified while it is open: the mapping shows what the file holds */
+typedef struct SnxCtrCia SnxCtrCia;
+SnxCtrExtractResult snx_ctr_cia_open(const char* input, SnxCtrCia** cia, char* error, size_t error_size);
+void snx_ctr_cia_close(SnxCtrCia* cia);
+uint64_t snx_ctr_cia_title(const SnxCtrCia* cia);
+/* the CIA file's modification time, UTC Unix milliseconds, 0 when the host can't say */
+uint64_t snx_ctr_cia_mtime(const SnxCtrCia* cia);
+/* the boot NCCH's ExHeader (0x800 bytes, as exheader.bin holds it) and its .code expanded to its segments' pages (as
+   exefs/.code holds it) */
+const unsigned char* snx_ctr_cia_exheader(const SnxCtrCia* cia);
+const unsigned char* snx_ctr_cia_code(const SnxCtrCia* cia, size_t* size);
+/* an ExeFS file as the CIA stores it (.code compressed), in the mapping; NULL with *size 0 for none by that name */
+const unsigned char* snx_ctr_cia_exefs(const SnxCtrCia* cia, const char* name, uint64_t* size);
+/* the RomFS's level 3, the image the guest reads, in the mapping; NULL with *size 0 without a RomFS */
+const unsigned char* snx_ctr_cia_romfs(const SnxCtrCia* cia, uint64_t* size);
 /* ExeFS backward LZSS/BLZ, exact bounded expansion; output_size is authoritative.
    The input and output buffers must not overlap. */
 bool snx_ctr_blz(const unsigned char* input, size_t input_size, unsigned char* output, size_t output_size);
