@@ -1291,6 +1291,11 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
                  "-DSPEC=${PROJECT_SOURCE_DIR}/src/nx/hle/svc/hos.svc"
                  "-DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/svcgen_layout.txt"
                  -P "${CMAKE_CURRENT_SOURCE_DIR}/svcgen_layout.cmake")
+        # tools/settingsgen on headers of its own: LLVM's setters however their declarations are broken over lines,
+        # the passes of a pipeline, and an @ID this LLVM lacks
+        add_test(NAME settingsgen COMMAND "${CMAKE_COMMAND}" "-DSETTINGSGEN=$<TARGET_FILE:snx-settingsgen>"
+                 "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/settingsgen-test"
+                 -P "${CMAKE_CURRENT_SOURCE_DIR}/settingsgen.cmake")
     endif()
     if(Python3_Interpreter_FOUND AND NOT CMAKE_CROSSCOMPILING)
         include("${PROJECT_SOURCE_DIR}/cmake/shaderdec.cmake")

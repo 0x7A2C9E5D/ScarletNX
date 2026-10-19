@@ -611,7 +611,9 @@ static void fill_passes(int table) {
     free(levels);
 }
 
-/* each "void <prefix><Name>(<ref> <arg>, <type> <arg>);" of header that takes a bool or an integer */
+/* each "void <prefix><Name>(<ref> <arg>, <type> <arg>);" of header that takes a bool or an integer. The void and the
+   name are on one line or two: clang-format breaks a long declaration after its return type (LLVM 20's headers, with
+   LLVM_C_ABI before it) */
 static void fill_options(int table, const char* header, const char* prefix, const char* ref, int kind,
                          const char* setter) {
     char* text = read_file(header, 0);
@@ -619,11 +621,14 @@ static void fill_options(int table, const char* header, const char* prefix, cons
     size_t np = strlen(prefix);
     if (!text) return;
     for (p = text; (p = strstr(p, prefix)) != NULL; p += np) {
-        const char *q = p + np, *name, *type;
+        const char *q = p + np, *name, *type, *r = p;
         size_t nname, ntype;
         char id[128], auto_name[192], key[192], *spaced, *sn;
         Setting* s;
-        if (p < text + 5 || strncmp(p - 5, "void ", 5)) continue;
+        while (r > text && isspace((unsigned char)r[-1])) r--;
+        if (r == p || r < text + 4 || strncmp(r - 4, "void", 4) ||
+            (r - 4 > text && (isalnum((unsigned char)r[-5]) || r[-5] == '_')))
+            continue;
         name = q;
         while (isalnum((unsigned char)*q)) q++;
         nname = (size_t)(q - name);
