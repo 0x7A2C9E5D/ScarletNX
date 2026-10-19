@@ -138,6 +138,15 @@ int main(void) {
     set_all("1");
     t = snx_llvm_tuning('2', error, sizeof error);
     CHECK(t && !t->pipeline);
+    /* a level with no pipeline in this build (its opt failed on it; x, which is none, stands for it here): LLVM's own
+       with every pass on, and with one off refused naming the pass and the level, never LLVM's own with it still in */
+    t = snx_llvm_tuning('x', error, sizeof error);
+    CHECK(t && !t->pipeline);
+    ini_read(instcombine, "0");
+    CHECK(!snx_llvm_tuning('x', error, sizeof error) && strstr(error, "llvm_pass_instcombine") && strstr(error, "-Ox"));
+    for (i = 0; levels[i]; ++i)
+        if (!settings_llvm_pipeline(levels[i])) CHECK(!snx_llvm_tuning(levels[i], error, sizeof error));
+    ini_read(instcombine, "1");
     if (failures) return 1;
     puts("PASS LLVM Internals cut passes out of LLVM's pipelines, which LLVM still runs");
     return 0;
