@@ -25,6 +25,8 @@ static unsigned checks;
     } while (0)
 static void sleep_ms(int ms) { snx_net_poll(NULL, 0, ms); }
 static void quiet(const char* m) { (void)m; }
+static char g_warned[512]; /* the last warning, which the player sees */
+static void warned(const char* m) { snprintf(g_warned, sizeof g_warned, "%s", m); }
 
 /* ============================================================ the room */
 static FakeRoom* g_room;
@@ -105,6 +107,16 @@ static void joining(void) {
     /* nobody at that port: given up after the connect's time out */
     CHECK(snx_room_join(&c, "127.0.0.1", 9, "Afugo", "secret", "mk8d", 1, "", &why) == -SNX_ETIMEDOUT);
     CHECK(why == SNX_ROOM_UNREACHABLE);
+    /* a name with no address is said so, not as a room that didn't answer */
+    CHECK(snx_room_join(&c, "no-such-room.invalid", 24872, "Afugo", "secret", "mk8d", 1, "", &why) ==
+          -SNX_EHOSTUNREACH);
+    CHECK(why == SNX_ROOM_NO_ADDRESS && strstr(snx_room_why_text(why), "no address"));
+    /* kicked by the room's host: out of the room, and the player is told */
+    g_warned[0] = 0;
+    fake_room_kick(g_room, "Xuji");
+    for (r = 0; r < 400 && snx_room_state(b) == SNX_ROOM_IN; r++) sleep_ms(5);
+    CHECK(snx_room_state(b) == SNX_ROOM_KICKED && strstr(g_warned, "kicked"));
+    CHECK(snx_room_send_ldn(b, SNX_ROOM_LDN_SCAN, NULL, 1, NULL, 0) == -SNX_ENETDOWN);
     snx_room_leave(b);
     snx_room_fake_ip(a, ip);
     ip[3] = 2;
@@ -424,6 +436,7 @@ static void closing(void) {
 int main(void) {
     CHECK(snx_net_init() == 0);
     snx_net_set_log(quiet);
+    snx_net_set_warn(warned);
     messages();
     g_room = fake_room_start();
     joining();

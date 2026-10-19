@@ -249,6 +249,8 @@ int snx_room_parse_datagram(const uint8_t* in, size_t size, SnxRoomDatagram* d) 
 const char* snx_room_why_text(int why) {
     switch (why) {
         case SNX_ROOM_IN: return "in the room";
+        case SNX_ROOM_NO_ADDRESS: return "the room's host name has no address";
+        case SNX_ROOM_LOCAL: return "this computer couldn't open the connection to the room";
         case SNX_ROOM_UNREACHABLE: return "the room didn't answer at that address and port";
         case SNX_ROOM_NO_ANSWER: return "the room took the connection and never answered the join";
         case SNX_ROOM_NAME_COLLISION:
@@ -769,7 +771,7 @@ static void went_away(SnxRoom* r, int why) {
     if (was == SNX_ROOM_IN) r->state = why;
     snx_unlock(&r->lk);
     if (was != SNX_ROOM_IN) return;
-    snx_net_log("room: out of the room: %s", snx_room_why_text(why));
+    snx_net_warn("room: out of the room: %s", snx_room_why_text(why));
     call_ldn(r, NULL);
 }
 static void room_information(SnxRoom* r, const uint8_t* msg, size_t size) {
@@ -970,7 +972,7 @@ int snx_room_join(SnxRoom** out, const char* host, uint16_t port, const char* ni
     int64_t deadline;
     int answer = -1, e;
     *out = NULL;
-    *why = SNX_ROOM_UNREACHABLE;
+    *why = SNX_ROOM_LOCAL;
     e = snx_net_init();
     if (e) return e;
     if (enet_initialize()) return -SNX_ENETDOWN;
@@ -988,7 +990,7 @@ int snx_room_join(SnxRoom** out, const char* host, uint16_t port, const char* ni
         return -SNX_ENOMEM;
     }
     if (enet_address_set_host(&address, host) < 0) {
-        snx_net_log("room: %s has no address", host);
+        *why = SNX_ROOM_NO_ADDRESS;
         room_free(r);
         return -SNX_EHOSTUNREACH;
     }
@@ -998,11 +1000,20 @@ int snx_room_join(SnxRoom** out, const char* host, uint16_t port, const char* ni
         room_free(r);
         return -SNX_ENOMEM;
     }
+    /* an ENet error (k < 0) ends either wait as this computer's failure, not the room's silence */
+    *why = SNX_ROOM_UNREACHABLE;
     deadline = snx_net_now_us() + (int64_t)SNX_ROOM_JOIN_MS * 1000;
     for (;;) {
         int64_t left = (deadline - snx_net_now_us()) / 1000;
+        int k;
         if (left <= 0) break;
-        if (enet_host_service(r->host, &ev, (enet_uint32)left) <= 0) continue;
+        k = enet_host_service(r->host, &ev, (enet_uint32)left);
+        if (k < 0) {
+            *why = SNX_ROOM_LOCAL;
+            e = -SNX_EIO;
+            break;
+        }
+        if (!k) continue;
         if (ev.type == ENET_EVENT_TYPE_CONNECT) {
             answer = 0;
             break;
@@ -1012,12 +1023,13 @@ int snx_room_join(SnxRoom** out, const char* host, uint16_t port, const char* ni
     if (answer) {
         enet_peer_reset(r->peer);
         room_free(r);
-        return -SNX_ETIMEDOUT;
+        return e ? e : -SNX_ETIMEDOUT;
     }
     /* the join and the game, as Eden's member sends them one after the other */
     max = 64 + strlen(nickname) + strlen(password) + strlen(game_name) + strlen(game_version);
     msg = malloc(max);
     if (!msg) {
+        *why = SNX_ROOM_LOCAL;
         enet_peer_reset(r->peer);
         room_free(r);
         return -SNX_ENOMEM;
@@ -1028,13 +1040,20 @@ int snx_room_join(SnxRoom** out, const char* host, uint16_t port, const char* ni
     if (!e) e = send_now(r, msg, n);
     free(msg);
     enet_host_flush(r->host);
-    *why = SNX_ROOM_NO_ANSWER;
+    *why = e ? SNX_ROOM_LOCAL : SNX_ROOM_NO_ANSWER;
     answer = -1;
     deadline = snx_net_now_us() + (int64_t)SNX_ROOM_JOIN_MS * 1000;
     while (!e && answer < 0) {
         int64_t left = (deadline - snx_net_now_us()) / 1000;
+        int k;
         if (left <= 0) break;
-        if (enet_host_service(r->host, &ev, (enet_uint32)left) <= 0) continue;
+        k = enet_host_service(r->host, &ev, (enet_uint32)left);
+        if (k < 0) {
+            *why = SNX_ROOM_LOCAL;
+            e = -SNX_EIO;
+            break;
+        }
+        if (!k) continue;
         if (ev.type == ENET_EVENT_TYPE_RECEIVE) {
             answer = room_message(r, ev.packet->data, ev.packet->dataLength, 1);
             enet_packet_destroy(ev.packet);
@@ -1049,15 +1068,16 @@ int snx_room_join(SnxRoom** out, const char* host, uint16_t port, const char* ni
     }
     r->state = SNX_ROOM_IN;
     r->refs = 1;
+    snx_net_log("room: joined %s:%u as %s, at %u.%u.%u.%u, %d member%s", host, port, nickname, r->fake_ip[0],
+                r->fake_ip[1], r->fake_ip[2], r->fake_ip[3], r->nmembers, r->nmembers == 1 ? "" : "s");
     e = snx_net_thread(room_thread, r);
     if (e) {
+        *why = SNX_ROOM_LOCAL;
         enet_peer_reset(r->peer);
         room_free(r);
         return e;
     }
     r->running = 1;
-    snx_net_log("room: joined %s:%u as %s, at %u.%u.%u.%u, %d member%s", host, port, nickname, r->fake_ip[0],
-                r->fake_ip[1], r->fake_ip[2], r->fake_ip[3], r->nmembers, r->nmembers == 1 ? "" : "s");
     *why = SNX_ROOM_IN;
     *out = r;
     return 0;

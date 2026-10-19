@@ -139,8 +139,10 @@ static SnxSocket* bcast_companion(SnxSocket* s, const u8 bcast[4]) {
     return c;
 }
 static void net_log(const char* m) { LOG("%s", m); }
+static void net_warn(const char* m) { WARN("%s", m); }
 void network_init(void) {
     snx_net_set_log(net_log);
+    snx_net_set_warn(net_warn);
     if (snx_net_init()) WARN("bsd: the host's network stack didn't start, sockets will fail\n");
 }
 

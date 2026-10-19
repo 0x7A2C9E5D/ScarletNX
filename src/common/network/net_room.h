@@ -27,6 +27,8 @@ enum {
 /* why a join failed or the room went away; SNX_ROOM_IN while in it */
 enum {
     SNX_ROOM_IN = 0,
+    SNX_ROOM_NO_ADDRESS,       /* the host's name has no address */
+    SNX_ROOM_LOCAL,            /* this computer couldn't make the connection (out of memory, no socket) */
     SNX_ROOM_UNREACHABLE,      /* no ENet connection within SNX_ROOM_JOIN_MS */
     SNX_ROOM_NO_ANSWER,        /* connected, and no answer to the join within SNX_ROOM_JOIN_MS */
     SNX_ROOM_NAME_COLLISION,   /* IdNameCollision: another member has the nickname, or the room's rule refuses it */
