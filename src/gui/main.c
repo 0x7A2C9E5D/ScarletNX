@@ -5060,16 +5060,19 @@ static void open_picker(App* app) {
     if (app->picked) SDL_ShowOpenFileDialog(picker_done, &app->picked, app->window, NULL, 0, NULL, false);
 #endif
 }
-/* the last max bytes of a file, as text with only ASCII (what Java takes as a string from any log), or "" */
+/* the last max bytes of a file, as text with only ASCII (what Java takes as a string from any log), or "". A CR before
+   an LF goes (a log on Windows has CRLF lines), so a line ends where its text does */
 static char* log_tail(const char* path, size_t max) {
-    size_t size = 0, i;
+    size_t size = 0, i, n = 0;
     unsigned char* data = path ? snx_read_file(path, &size) : NULL;
     char* text = (char*)snx_alloc(SDL_min(size, max) + 1);
     for (i = 0; i < SDL_min(size, max); ++i) {
-        unsigned char c = data[size - SDL_min(size, max) + i];
-        text[i] = c == '\n' || c == '\t' || (c >= 32 && c < 127) ? (char)c : '?';
+        size_t at = size - SDL_min(size, max) + i;
+        unsigned char c = data[at];
+        if (c == '\r' && at + 1 < size && data[at + 1] == '\n') continue;
+        text[n++] = c == '\n' || c == '\t' || (c >= 32 && c < 127) ? (char)c : '?';
     }
-    text[i] = 0;
+    text[n] = 0;
     free(data);
     return text;
 }
@@ -5107,11 +5110,18 @@ static char* newest_log(const App* app) {
     return newest;
 }
 /* the game log's summary (common/utilities/logscan.h) under "== summary ==", for the top of the shared file: how
-   the run ended and where, without the log's last lines, which follow in full. "" when it can't be made */
-static char* log_summary(const char* log) {
+   the run ended and where, without the log's last lines, which follow. The file itself, streamed whole: the shared
+   copy holds only its end, its header gone from a long one. "" when it can't be made */
+static char* log_summary(const char* path) {
     SnxLogScan scan;
     char *markdown, *out;
-    if (snx_logscan(&scan, log, strlen(log))) return snx_strdup("");
+    FILE* f = snx_fopen(path, "rb");
+    int failed = !f || snx_logscan_file(&scan, f);
+    if (f) fclose(f);
+    if (failed) {
+        if (f) snx_logscan_free(&scan);
+        return snx_strdup("");
+    }
     markdown = snx_logscan_markdown(&scan, "the game log", "###", 1, snx_demangle);
     snx_logscan_free(&scan);
     out = markdown ? snx_format("== summary ==\n%s\n", markdown) : snx_strdup("");
@@ -5135,7 +5145,7 @@ static void share_log(App* app) {
     game = newest_log(app);
     run = log_tail(app->run_log, 1 << 20);
     played = log_tail(game, 4 << 20);
-    summary = game ? log_summary(played) : snx_strdup("");
+    summary = game ? log_summary(game) : snx_strdup("");
     text = snx_format("%s\nMessage: %s\n%s%s%s%s\n%s== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
                       app->message, app->left ? app->left : "", app->left_clear ? SAY_LEFT_CLEAR "\n" : "",
                       app->cleaned.count ? "Clean old settings:\n" : "", app->cleaned.text ? app->cleaned.text : "",

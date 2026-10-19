@@ -6,13 +6,18 @@
 
    - scan_log: the log summary (common/utilities/logscan.h) of a game's log or the launcher's Share log file.
    - read_log: parts of a log by text (with lines of context) or by line range, or its last lines, never the whole of a
-     large one; only files under the data folder (DIR, else snx_data_dir's) and its state, cache and settings folders.
+     large one.
    - find_game: the extracted games in the data folder's work/, with their title IDs and versions.
    - symbolize: game addresses (a backtrace's, a crash report's) named by the game's symbols, as tools/symbols.py does.
    - disassemble: a game function, by name or address range, with its branches named (disasm.h), as tools/disasm.py
      does, where this build has an A64 disassembler.
    - edenprobe_scaffold, edenprobe_check, edenprobe_run, edenprobe_finding (mcp_edenprobe.c): a confirmed failure as a
      new edenprobe case, written into a local checkout, checked on the host, run on this build, and written up.
+
+   scan_log, read_log, symbolize and disassemble read only under the data folder (DIR, else snx_data_dir's) and its
+   state, cache and settings folders: what a tool answers with is a log's text or a game's code, and those are where
+   ScarletNX keeps them. The edenprobe tools work in the clone and on the NRO the person names, and answer only their
+   own results.
 
    A game's code goes to the agent's context the way a session's tools/disasm.py output does, and nowhere else. An
    answer is cut at MAX_LINES lines: the agent's context is the scarce part */
@@ -156,13 +161,21 @@ static void mcp_close(Mcp* m) {
     free(m->cache);
     free(m->data);
 }
+/* path is under one of the roots, both resolved. A root that doesn't resolve (a folder not made yet) holds nothing:
+   snx_path_within takes a path it can't resolve as within */
 static int readable(const Mcp* m, const char* path) {
-    char* full = snx_absolute(path);
+    char *full = snx_absolute(path), *root;
     int i, ok = 0;
-    for (i = 0; full && i < m->nroots && !ok; i++) ok = snx_path_within(full, m->roots[i]);
+    for (i = 0; full && i < m->nroots && !ok; i++) {
+        root = snx_absolute(m->roots[i]);
+        ok = root && snx_path_within(full, root);
+        free(root);
+    }
     free(full);
     return ok;
 }
+static const char outside[] = "outside the folders the tools read (ScarletNX's data folder and its state, cache and "
+                              "settings folders)";
 
 /* ============================================================ scan_log, read_log */
 static char* scan_log(const char* path, Text* err) {
@@ -367,8 +380,19 @@ static void find_games(const Mcp* m, SnxU64 title_id, cJSON* list) {
     }
 }
 
-/* a game named by its folder (or NRO), a folder of work/, or its title ID: the folder, malloc'd, or NULL with why in err */
+/* a game named by its folder (or NRO), a folder of work/, or its title ID: the folder, malloc'd, or NULL with why in err.
+   Only under ScarletNX's folders, as the logs: a game's code is read from where ScarletNX keeps it */
+static char* game_found(const Mcp* m, const char* game, Text* err);
 static char* game_folder(const Mcp* m, const char* game, Text* err) {
+    char* found = game_found(m, game, err);
+    if (found && !readable(m, found)) {
+        mcp_put(err, outside);
+        free(found);
+        return NULL;
+    }
+    return found;
+}
+static char* game_found(const Mcp* m, const char* game, Text* err) {
     SnxU64 id;
     int w;
     if (strlen(game) == 16 && parse_hex(game, &id)) {
@@ -774,14 +798,15 @@ static cJSON* call(Mcp* m, const char* name, const cJSON* args) {
     if (!strcmp(name, "scan_log")) {
         if (!path)
             mcp_put(&err, "path: the log");
+        else if (!readable(m, path))
+            mcp_put(&err, outside);
         else
             text = scan_log(path, &err);
     } else if (!strcmp(name, "read_log")) {
         if (!path)
             mcp_put(&err, "path: the log");
         else if (!readable(m, path))
-            mcp_put(&err,
-                    "outside the folders read_log reads (ScarletNX's data folder and its state, cache and settings)");
+            mcp_put(&err, outside);
         else
             text = read_log(path, arg_string(args, "pattern"),
                             cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(args, "ignore_case")),

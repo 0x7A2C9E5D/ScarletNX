@@ -88,7 +88,7 @@ typedef struct {
        of what it did (200 at most): the counted ones, the lines since the last stats line, the slowest frame, and the
        slowest frames' lines with their times */
     unsigned long slow_counted, slow_since, slowest_ms;
-    unsigned slow_line[SNX_LOGSCAN_SLOW];
+    unsigned slow_line[SNX_LOGSCAN_SLOW]; /* from snx_logscan_end */
     unsigned long slow_ms[SNX_LOGSCAN_SLOW];
     int nslow;
     unsigned frame_stats, memory;        /* the last stats line and memory line, from snx_logscan_end */
@@ -105,6 +105,8 @@ typedef struct {
     char tail_raw[SNX_LOGSCAN_TAIL][SNX_LOGSCAN_RAW];
     unsigned tail_len[SNX_LOGSCAN_TAIL];
     unsigned long tail_seen;
+    char slow_raw[SNX_LOGSCAN_SLOW][SNX_LOGSCAN_RAW]; /* the slowest frames' lines, as they are read */
+    unsigned slow_len[SNX_LOGSCAN_SLOW];
     char frame_stats_raw[SNX_LOGSCAN_RAW], memory_raw[SNX_LOGSCAN_RAW]; /* as they are read */
     unsigned frame_stats_len, memory_len;
     char output_raw[SNX_LOGSCAN_OUTPUT][SNX_LOGSCAN_RAW];

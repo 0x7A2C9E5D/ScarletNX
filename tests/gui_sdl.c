@@ -4656,23 +4656,28 @@ int main(int argc, char** argv) {
         app.data_dir = snx_strdup(temporary);
         {
             char *game = snx_path_join(app.games_dir, "Some Game"), *log = snx_path_join(game, "Some Game.log");
+            /* with CRLF lines, as a game log is on Windows (plat.c writes it in text mode) */
             static const char crashed[] =
-                "[   0.00] ScarletNX - Some Game\n"
-                "[   2.25] \n*** The game called svcBreak (reason 0, info 1300100df8, 4 bytes) ***\n"
-                "[   2.25]    #0 163d18d8 <_ZN2nn4diag6detail10VAbortImplEv+d8>\n"
-                "[   2.25]    #1 1683a358 <_ZN2nn3hid18GetNpadJoyHoldTypeEv+38>\n"
-                "[   2.32] FATAL: The game stopped (svcBreak, reason 0). See the .log for details.\n";
+                "[   0.00] ScarletNX - Some Game\r\n"
+                "[   0.00] build: ScarletNX main 1234abc (clang 23.1.3, Windows x86_64)\r\n"
+                "[   2.25] \r\n*** The game called svcBreak (reason 0, info 1300100df8, 4 bytes) ***\r\n"
+                "[   2.25]    #0 163d18d8 <_ZN2nn4diag6detail10VAbortImplEv+d8>\r\n"
+                "[   2.25]    #1 1683a358 <_ZN2nn3hid18GetNpadJoyHoldTypeEv+38>\r\n"
+                "[   2.32] FATAL: The game stopped (svcBreak, reason 0). See the .log for details.\r\n";
             assert(!snx_mkdirs(game) && !snx_write_file(log, crashed, sizeof crashed - 1));
             snprintf(app.message, sizeof(app.message), "before the log");
             key(&app, SDLK_RETURN);
             assert(!strncmp(app.message, "Log saved to ", 13) && strstr(app.message, "scarletnx.log"));
             text = (char*)snx_read_file(saved, &size);
             assert(text && strstr(text, "Message: before the log") && strstr(text, "== the last run: "));
-            assert(strstr(text, "== summary ==\n### Some Game") &&
+            assert(strstr(text, "== summary ==\n### `Some Game`") &&
+                   strstr(text, "**Build:** `ScarletNX main 1234abc (clang 23.1.3, Windows x86_64)`") &&
                    strstr(text, "**Signature:** `svcBreak in _ZN2nn3hid18GetNpadJoyHoldTypeEv`") &&
                    strstr(text, "**In:** `nn::hid::GetNpadJoyHoldType()+38`"));
             assert(strstr(text, "== summary ==") < strstr(text, "== the last run: ") &&
                    !strstr(text, "The log's last lines"));
+            /* the log's copy, CR gone: no line ends in the '?' a CR would have become */
+            assert(strstr(text, "ScarletNX - Some Game\n") && !strstr(text, "?\n"));
             free(text);
             assert(!snx_remove_tree(game));
             free(log);

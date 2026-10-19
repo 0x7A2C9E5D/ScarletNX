@@ -204,14 +204,10 @@ def is_scarletnx_log(r):
     return bool(r['title'] or r['build'] or r['failure'] or r['launcher'])
 
 
-# The comment's own words around the summaries: a name or an error is the issue's text, escaped as the summary's
+# The comment's own words around the summaries: a name or an error is the issue's text, a code span as the summary's
+# values are (GitHub links an issue reference or www. even escaped, nothing in a code span)
 def code(value):
     return '`' + str(value).replace('`', "'").replace('\n', ' ') + '`'
-
-
-def text(value):
-    value = str(value).replace('&', '&amp;').replace('<', '&lt;').replace('\n', ' ')
-    return re.sub(r'([\\`*_\[\]#|~!])', r'\\\1', value).replace('@', '@\u200b').replace('://', ':/\u200b/')
 
 
 # a fenced block in an issue or comment holding a log's lines, pasted rather than attached
@@ -293,7 +289,7 @@ def comment_body(entries, reports, number):
     for e in entries:
         out += ['', f'### {code(e["name"])}', '']
         if e.get('error'):
-            out.append(f'Could not be read: {text(e["error"])}')
+            out.append(f'Could not be read: {code(e["error"])}')
             continue
         if not e['report']:
             out.append(

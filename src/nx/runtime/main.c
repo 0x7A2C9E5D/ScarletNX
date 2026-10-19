@@ -402,8 +402,8 @@ int snx_main(int argc, char** argv) {
     clock_start();
     g_mod = mod; /* from here the log is a file, in the state folder */
     title = mod->title && mod->title[0] ? mod->title : g_exename;
-    /* the header scripts/logscan.py reads: no folder in it, since players attach the log to public reports and the
-       folder names their account */
+    /* the header the log summary reads (common/utilities/logscan.c): no folder in it, since players attach the log to
+       public reports and the folder names their account */
     LOG("ScarletNX - %s\n", title);
     LOG("build: %s\n", snx_build_info());
     say_old_layout();

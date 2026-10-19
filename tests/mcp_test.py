@@ -99,6 +99,7 @@ def main():
         log.write_text(LOG)
         outside.mkdir()
         (outside / 'secret.log').write_text(LOG)
+        (outside / 'secret.nro').write_bytes(make_nro())
         nro = data / 'smoke.nro'
         nro.write_bytes(make_nro())
         # a clone on Windows has CRLF lines (git's autocrlf): the scaffold keeps each file's ending. Written as bytes,
@@ -131,6 +132,8 @@ def main():
             call('read_log', 'range', path=str(log), start=2, count=2),
             call('read_log', 'tail', path=str(log), count=3),
             call('read_log', 'outside', path=str(outside / 'secret.log')),
+            call('scan_log', 'scan_outside', path=str(outside / 'secret.log')),
+            call('symbolize', 'game_outside', game=str(outside / 'secret.nro'), addresses=['8000000']),
             call('find_game', title_id='0100aaaabbbb0000'),
             call('find_game', 'find_none', title_id='0100000000000001'),
             call('symbolize', game=str(nro), addresses=['8000080', 'zz']),
@@ -223,6 +226,8 @@ def main():
     check([line.split(':')[0] for line in text('range').splitlines()[1:]] == ['2', '3'], 'read_log by range')
     check([line.split(':')[0] for line in text('tail').splitlines()[1:]] == ['7', '8', '9'], 'read_log, the last lines')
     check(failed('outside') and 'outside the folders' in text('outside'), 'read_log refuses a file outside')
+    check(failed('scan_outside') and 'outside the folders' in text('scan_outside'), 'so does scan_log')
+    check(failed('game_outside') and 'outside the folders' in text('game_outside'), 'and symbolize, for a game')
 
     games = json.loads(text('find_game'))
     check(

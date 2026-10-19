@@ -167,24 +167,27 @@ static size_t utf8_len(const unsigned char* p, size_t n) {
     return len;
 }
 
-/* How long the home folder's part is at s: "/home/<user>", "/Users/<user>", "C:\Users\<user>" (either slash),
-   Android's "/data/user/<n>/<package>"; 0 elsewhere. The player's account name stays out of a public report */
+/* How long the home folder's part is at s: "/home/<user>", "/var/home/<user>" (Silverblue's), "/Users/<user>",
+   "/media/<user>" and "/run/media/<user>" (the drives a desktop mounts for its user, where games often are),
+   "C:\Users\<user>" (either slash, any case), Android's "/data/user/<n>/<package>"; 0 elsewhere. The player's account
+   name stays out of a public report */
 static size_t home_at(Span s) {
-    size_t i = 0;
-    if (starts(s, "/home/"))
-        i = 6;
-    else if (starts(s, "/Users/"))
-        i = 7;
-    else if (s.n > 9 && isalpha((unsigned char)s.p[0]) && s.p[1] == ':' && (s.p[2] == '\\' || s.p[2] == '/') &&
-             !memcmp(s.p + 3, "Users", 5) && (s.p[8] == '\\' || s.p[8] == '/'))
-        i = 9;
-    else if (starts(s, "/data/user/")) {
+    static const char* const homes[] = {"/home/", "/var/home/", "/Users/", "/run/media/", "/media/"};
+    size_t i = 0, k;
+    if (!s.n || (s.p[0] != '/' && !isalpha((unsigned char)s.p[0]))) return 0;
+    for (k = 0; k < sizeof homes / sizeof homes[0] && !i; k++)
+        if (starts(s, homes[k])) i = strlen(homes[k]);
+    if (!i && s.n > 9 && isalpha((unsigned char)s.p[0]) && s.p[1] == ':' && (s.p[2] == '\\' || s.p[2] == '/') &&
+        (s.p[8] == '\\' || s.p[8] == '/')) {
+        for (k = 0; k < 5 && tolower((unsigned char)s.p[3 + k]) == "users"[k]; k++) {}
+        if (k == 5) i = 9;
+    }
+    if (!i && starts(s, "/data/user/")) {
         i = 11 + dec_run(skip(s, 11));
         if (i == 11 || i >= s.n || s.p[i] != '/') return 0;
         i++;
-    } else
-        return 0;
-    if (i >= s.n || s.p[i] == '/' || s.p[i] == '\\' || is_space(s.p[i])) return 0;
+    }
+    if (!i || i >= s.n || s.p[i] == '/' || s.p[i] == '\\' || is_space(s.p[i])) return 0;
     while (i < s.n && s.p[i] != '/' && s.p[i] != '\\' && !is_space(s.p[i])) i++;
     return i;
 }
@@ -670,7 +673,9 @@ const char* snx_logscan_outcome_name(int outcome) {
 }
 
 /* the same for every log that failed the same way: the outcome and the place, a function's mangled name when there is
-   one (a module and an offset only within one game and version), the runtime's offset with its build */
+   one (a module and an offset only within one game and version), the runtime's offset with its build. None where the
+   place says nothing (no frame named, a runtime offset of an unknown build, a module's offset of an unknown game): such
+   a signature would group reports that have only their kind in common */
 static unsigned signature(SnxLogScan* s) {
     Buf b = {0};
     const SnxLogSym* fn = snx_logscan_function(s);
@@ -705,8 +710,9 @@ static unsigned signature(SnxLogScan* s) {
                 put(&b, s->outcome == SNX_LOG_BRK ? "brk" : "svcBreak");
             /* in the runtime or a library, the host place is the bug's, whatever game code led there */
             if (s->place == SNX_PLACE_RUNTIME) {
+                if (!s->commit) goto none;
                 put(&b, " in the runtime ");
-                put(&b, s->commit ? snx_logscan_text(s, s->commit) : "unknown build");
+                put(&b, snx_logscan_text(s, s->commit));
                 put(&b, " +");
                 put(&b, snx_logscan_text(s, s->place_detail[0]));
             } else if (s->place == SNX_PLACE_LIBRARY) {
@@ -721,6 +727,7 @@ static unsigned signature(SnxLogScan* s) {
                     strncmp(name, "subsdk", 6))
                     put(&b, name);
                 else {
+                    if (!s->title_id && !s->title) goto none;
                     put(&b, s->title_id ? snx_logscan_text(s, s->title_id) : snx_logscan_text(s, s->title));
                     put(&b, " ");
                     put(&b, name);
@@ -728,15 +735,15 @@ static unsigned signature(SnxLogScan* s) {
                     put(&b, snx_logscan_text(s, fn->offset));
                 }
             } else
-                put(&b, " in unknown code");
+                goto none;
     }
-    if (b.failed || !b.p) {
-        free(b.p);
-        return 0;
-    }
+    if (b.failed || !b.p) goto none;
     at = add_c(s, b.p);
     free(b.p);
     return at;
+none:
+    free(b.p);
+    return 0;
 }
 
 /* the number of decimal digits at the start of s, 0 without any */
@@ -768,12 +775,9 @@ static int frame_line(SnxLogScan* s, Span line) {
             for (slot = -1, k = 0; k < SNX_LOGSCAN_SLOW; k++)
                 if (s->slow_ms[k] < ms && (slot < 0 || s->slow_ms[k] < s->slow_ms[slot])) slot = k;
         if (slot >= 0) {
-            unsigned text = add(s, skip(line, 8));
-            if (text) {
-                s->slow_line[slot] = text;
-                s->slow_ms[slot] = ms;
-                if (slot == s->nslow) s->nslow++;
-            }
+            keep_line(s->slow_raw[slot], &s->slow_len[slot], skip(line, 8));
+            s->slow_ms[slot] = ms;
+            if (slot == s->nslow) s->nslow++;
         }
         return 1;
     }
@@ -960,9 +964,11 @@ static int from_ring(SnxLogScan* s, char (*raw)[SNX_LOGSCAN_RAW], const unsigned
 }
 
 void snx_logscan_end(SnxLogScan* s) {
+    int i;
     sort_ipc(s);
     s->noutput = from_ring(s, s->output_raw, s->output_len, s->output_seen, SNX_LOGSCAN_OUTPUT, s->output);
     s->ntail = from_ring(s, s->tail_raw, s->tail_len, s->tail_seen, SNX_LOGSCAN_TAIL, s->tail);
+    for (i = 0; i < s->nslow; i++) s->slow_line[i] = add(s, span(s->slow_raw[i], s->slow_len[i]));
     s->frame_stats = add(s, span(s->frame_stats_raw, s->frame_stats_len));
     s->memory = add(s, span(s->memory_raw, s->memory_len));
     if (!s->build && s->launcher_build) build_line(s, cstr(snx_logscan_text(s, s->launcher_build)));
@@ -1220,26 +1226,9 @@ char* snx_logscan_json(const SnxLogScan* s, SnxDemangle demangle) {
 }
 
 /* ============================================================ markdown */
-/* Markdown of what a log says, which anyone can write: a summary a bot posts must not ping people, link, embed or
-   close its own code blocks, so every value is escaped text, a code span, or a line of a fenced block */
-static void md_text(Buf* b, const char* text) {
-    for (; *text; text++) {
-        if (*text == '&')
-            put(b, "&amp;");
-        else if (*text == '<')
-            put(b, "&lt;");
-        else if (*text == '@')
-            put(b, "@\xe2\x80\x8b"); /* a zero-width space: no mention */
-        else if (*text == ':' && text[1] == '/' && text[2] == '/') {
-            put(b, ":/\xe2\x80\x8b/"); /* no autolink */
-            text += 2;
-        } else if (strchr("\\`*_[]#|~!", *text)) {
-            put(b, "\\");
-            put_n(b, text, 1);
-        } else
-            put_n(b, text, 1);
-    }
-}
+/* Markdown of what a log says, which anyone can write: a summary a bot posts must not ping people, link, embed or close
+   its own code blocks. GitHub links an issue reference (#N, GH-N, owner/repo#N), a URL or www. even escaped, but
+   nothing in a code span: every value from the log is a code span, or a line of a fenced block */
 static void md_code(Buf* b, const char* text) {
     put(b, "`");
     for (; *text; text++) put_n(b, *text == '`' ? "'" : text, 1);
@@ -1280,30 +1269,30 @@ char* snx_logscan_markdown(const SnxLogScan* s, const char* name, const char* he
     int i;
     put(&b, heading);
     put(&b, " ");
-    md_text(&b, s->title ? snx_logscan_text(s, s->title) : name);
+    md_code(&b, s->title ? snx_logscan_text(s, s->title) : name);
     if (s->title_id) {
         put(&b, " (");
         md_code(&b, snx_logscan_text(s, s->title_id));
         put(&b, ", version ");
-        md_text(&b, snx_logscan_text(s, s->game_version));
+        md_code(&b, snx_logscan_text(s, s->game_version));
         put(&b, ")");
     }
     put(&b, "\n\n- **Build:** ");
     if (s->build)
-        md_text(&b, snx_logscan_text(s, s->build));
+        md_code(&b, snx_logscan_text(s, s->build));
     else
         put(&b, "not in the log");
     if (s->gpu) {
         put(&b, "\n- **GPU:** ");
-        md_text(&b, snx_logscan_text(s, s->gpu));
+        md_code(&b, snx_logscan_text(s, s->gpu));
         put(&b, ", Vulkan ");
-        md_text(&b, snx_logscan_text(s, s->vulkan));
+        md_code(&b, snx_logscan_text(s, s->vulkan));
         put(&b, ", driver ");
-        md_text(&b, snx_logscan_text(s, s->driver));
+        md_code(&b, snx_logscan_text(s, s->driver));
     }
     if (s->launcher_message) {
         put(&b, "\n- **The launcher said:** ");
-        md_text(&b, snx_logscan_text(s, s->launcher_message));
+        md_code(&b, snx_logscan_text(s, s->launcher_message));
     }
     put(&b, "\n- **Ended:** ");
     put(&b, snx_logscan_outcome_name(s->outcome));
@@ -1325,7 +1314,7 @@ char* snx_logscan_markdown(const SnxLogScan* s, const char* name, const char* he
         }
         if (s->fatal && s->outcome != SNX_LOG_FATAL) {
             put(&b, "\n- **Message:** ");
-            md_text(&b, snx_logscan_text(s, s->fatal));
+            md_code(&b, snx_logscan_text(s, s->fatal));
         }
         put(&b, "\n");
         if (s->ndetails) {

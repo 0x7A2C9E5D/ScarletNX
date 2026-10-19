@@ -270,13 +270,41 @@ def main():
     check(bad['game_output'][-1] == 'caf\ufffd \ufffd', f'invalid UTF-8: {bad["game_output"]}')
 
     # the markdown quotes the log as text: no mention, link, image or fence of its own
-    sneaky = HEADER.replace('Some Game', 'Hi @team [x](https://e.example) ![i](j)') + '[game] ```\n' + FATAL_ONLY
+    # GitHub links an issue reference (#N, GH-N, owner/repo#N), a URL and www. even escaped, but nothing in a code span:
+    # every value the log gave is one, its backticks made quotes
+    title = 'Hi @team [x](https://e.example) ![i](j) www.example.com #1 GH-2 scarletnx/ScarletNX#3 `tick`'
+    sneaky = HEADER.replace('Some Game', title) + '[game] ```\n' + FATAL_ONLY
     md = run(['-', '--format', 'markdown'], sneaky.encode())
-    check(
-        '@team' not in md and '[x](https://' not in md and '(https://' not in md and '![' not in md,
-        f'markdown escapes the title:\n{md[:300]}',
-    )
+    heading = md.splitlines()[0]
+    check(heading.startswith('### `' + title.replace('`', "'") + '` ('), f'the title is a code span:\n{heading}')
+    for line in md.splitlines():
+        if line.startswith('- **'):
+            value = line.split(':** ', 1)[1]
+            check(value.startswith('`') or value.split(' ')[0].isalpha(), f'a value outside a code span: {line}')
     check('\n```\n```' not in md and "'" in md, 'a fence in a line is broken')
+
+    # no signature where the place says nothing: it would group reports that only share their kind
+    nowhere = scan(HEADER + '*** Crash (signal 11) at host pc=0x1 ***\n[ 1.0]   invalid memory access\n')
+    check(nowhere['outcome'] == 'crash' and nowhere['signature'] is None, f'unknown place: {nowhere["signature"]}')
+    aborted = scan(
+        HEADER + '*** The game called svcBreak (reason 0, info 1, 4 bytes) ***\n'
+        '   #0 163d18d8 <_ZN2nn4diag6detail10VAbortImplEv+d8>\n'
+    )
+    check(aborted['signature'] is None, f"only the SDK's abort: {aborted['signature']}")
+    headless = scan(
+        '*** The game ran instruction ce62c820 at 8040598, which the recompiler cannot run ***\n'
+        '  pc <main+40598>  lr <main+40568>\n'
+    )
+    check(headless['signature'] == 'unsupported A64 instruction ce62c820', 'an instruction needs no place')
+    unnamed = scan('*** Crash (signal 11) at host pc=0x1 ***\n  invalid memory access\n  pc <main+40>  lr <main+44>\n')
+    check(unnamed['signature'] is None, f"a module's offset in no named game: {unnamed['signature']}")
+
+    # the account's folder on the drives a desktop mounts, on Silverblue, and on Windows in any case
+    homes = scan(
+        HEADER
+        + '[game] a /run/media/someone/Games/x b /media/someone/y c /var/home/someone/z d C:\\users\\someone\\w\n'
+    )
+    check(homes['game_output'][-1] == 'a ~/Games/x b ~/y c ~/z d ~\\w', f'home folders: {homes["game_output"][-1]}')
 
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / 'game.log'

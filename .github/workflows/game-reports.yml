@@ -26,9 +26,19 @@ concurrency:
 jobs:
   triage:
     name: Summarize the logs
-    # the bot's own comment, edited, starts no run (GITHUB_TOKEN's events don't), and a pull request's comments aren't
-    # reports
-    if: ${{ !github.event.issue.pull_request && github.event.sender.type != 'Bot' }}
+    # Only what can change a report: an issue opened or edited with an attachment or a fenced block in it, a comment
+    # with one, or the confirmed label. Every other event of every issue starts a run (issue_comment can't be filtered
+    # before), which ends here. The bot's own comment, edited, starts no run (GITHUB_TOKEN's events don't), and a pull
+    # request's comments aren't reports
+    if: >-
+      ${{ !github.event.issue.pull_request && github.event.sender.type != 'Bot' && (
+        (github.event.action == 'labeled' && github.event.label.name == 'status: confirmed') ||
+        (github.event_name == 'issues' && github.event.action != 'labeled' && (
+          contains(github.event.issue.body, '/files/') || contains(github.event.issue.body, '```') ||
+          contains(github.event.issue.body, '~~~'))) ||
+        (github.event_name == 'issue_comment' && (
+          contains(github.event.comment.body, '/files/') || contains(github.event.comment.body, '```') ||
+          contains(github.event.comment.body, '~~~')))) }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
