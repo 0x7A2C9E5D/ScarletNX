@@ -9,8 +9,6 @@
 #include "nx/hle/hle.c"
 
 u8* g_mem;
-int g_verbose;
-int g_opt_docked, g_opt_lang = 1;
 static unsigned test_checks, test_objects, test_kobjs;
 static u32 test_next_handle = 0x100;
 u64 plat_ns(void) {
@@ -378,10 +376,10 @@ static void test_cpu_boost(void) {
     CHECK(nn_am_service_ICommonStateGetter_SetCpuBoostMode(NULL, 1) == 0 && g_test_apm_boost == 1);
     CHECK(nn_am_service_ICommonStateGetter_GetCurrentPerformanceConfiguration(NULL, &config) == 0 &&
           config == 0x00020003u);
-    g_opt_docked = 1;
+    g_settings.tv_mode = 1;
     CHECK(nn_am_service_ICommonStateGetter_GetCurrentPerformanceConfiguration(NULL, &config) == 0 &&
           config == 0x92220009u);
-    g_opt_docked = 0;
+    g_settings.tv_mode = 0;
 }
 
 /* a lock accessor from GetHomeButtonReaderLockAccessor (30) and GetReaderLockAccessorEx (31): its event signaled
@@ -575,6 +573,7 @@ int kobj_never_signaled(KObj* o) {
 }
 
 int main(void) {
+    g_settings.tv_mode = 0; /* handheld, as the test was written for */
     hle_init();
     g_hle.kernel.title_id = 0x0100BF00112C0000ull; /* the title the test was written for */
     test_mii_edit();

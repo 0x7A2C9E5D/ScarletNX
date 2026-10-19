@@ -7,6 +7,7 @@
 #define SNX_VPAD_H
 #include "nx/runtime/platform/ui.h"
 #include "nx/runtime/ini.h"
+#include "snx_settings.h"
 
 /* in the order they are drawn: a finger presses the last one drawn under it */
 enum {
@@ -37,28 +38,23 @@ enum {
 typedef struct {
     float x, y; /* its middle, 0 to 1 across the window's clear part */
     int size;   /* percent of its own default size */
-    int shown;
 } SnxVpadPlace;
+/* the controls' layout, read from their places (controls_a...). Their other settings are g_settings' (settings.txt):
+   show_controls, controls_scale (rEden's 0 to 100: every control at (scale + 50)%), controls_opacity, snap_to_grid,
+   relative_stick_center, d_pad_slide, haptics, and control_shown[SNX_VPAD_] */
 typedef struct {
-    int on;         /* drawn, taking the fingers that land on it */
-    int scale;      /* rEden's 0 to 100: every control at (scale + 50)% */
-    int opacity;    /* percent */
-    int snap;       /* a control dragged in edit mode lands on the grid */
-    int rel_center; /* a stick's middle where its finger lands */
-    int dpad_slide; /* a finger sliding on the D-pad changes its direction */
-    int haptics;    /* a buzz on each press and release */
     SnxVpadPlace at[SNX_VPAD_COUNT];
 } SnxVpadConfig;
-/* the settings, their defaults filled in on first use */
+/* the layout, its defaults filled in on first use */
 SnxVpadConfig* vpad_config(void);
 #define SNX_VPAD_SIZE_MIN 50
 #define SNX_VPAD_SIZE_MAX 200
 
-void vpad_defaults(SnxVpadConfig* c);
+void vpad_defaults(SnxVpadConfig* c); /* the default layout */
 /* places, sizes and the shown ones back to their defaults, kept */
 void vpad_reset_layout(void);
-extern const IniOpt g_vpad_ini[];       /* the settings: controls, controls_scale..., a control's place (controls_a) */
-extern const IniOpt g_vpad_shown_ini[]; /* a control shown or not (controls_a_shown), in the order of SNX_VPAD_ */
+/* the settings' tables (settings.h): g_vpad_ini, controls, controls_scale..., a control's place (controls_a); and
+   g_vpad_shown_ini, a control shown or not (controls_a_shown), in the order of SNX_VPAD_ */
 /* the game's menu's page of these settings and its page of the buttons shown, as the launcher's Settings name them */
 #define SNX_VPAD_PAGE    "On-screen controls"
 #define SNX_VPAD_BUTTONS "Buttons"
@@ -67,7 +63,7 @@ extern const IniOpt g_vpad_shown_ini[]; /* a control shown or not (controls_a_sh
 int vpad_ini(const char* key, const char* value);
 /* where changed settings go: called with each key and its value (the game's .ini) */
 void vpad_set_store(void (*store)(const char* key, const char* value));
-/* a setting's current value to the store, named by its variable in vpad_config() (&cfg->scale); a control's place
+/* a setting's current value to the store, named by its variable (&g_settings.controls_scale); a control's place
    with vpad_store_control, whether it is shown with vpad_store_shown */
 void vpad_store(const int* setting);
 void vpad_store_control(int control);

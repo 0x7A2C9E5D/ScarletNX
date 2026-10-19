@@ -7,6 +7,7 @@
 #include "nx/runtime/driver/extract.h"
 #include "nx/runtime/driver/game_name.h"
 #include "nx/runtime/driver/recompile.h"
+#include "snx_settings.h"
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -134,6 +135,11 @@ static int dump_input(const char* input) {
 /* this build's stamp: ABI 4, made from commit abc1234 */
 #define SNX_WORKFLOW_STAMP "4\nabc1234\n"
 char* snx_game_stamp(void) { return snx_strdup(SNX_WORKFLOW_STAMP); }
+/* recompile.c's: a setting of the recompile, from the generated tables */
+const IniOpt* snx_recompile_setting(const char* key) {
+    const IniOpt* o = ini_find(g_recompile_ini, key);
+    return o ? o : ini_find(g_llvm_ini, key);
+}
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     char *game, *partial, *name, *folder;
     int rc, tmpfs;

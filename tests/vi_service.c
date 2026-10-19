@@ -9,8 +9,6 @@
 #include "nx/hle/hle.c"
 
 u8* g_mem;
-int g_verbose;
-int g_opt_docked;
 static unsigned test_checks, test_objects, test_kobjs;
 static u32 test_next_handle = 0x100;
 
@@ -168,6 +166,7 @@ int kobj_never_signaled(KObj* o) {
 }
 
 int main(void) {
+    g_settings.tv_mode = 0; /* handheld, as the test was written for */
     hle_init();
     u8 gbuf[VI_GBUF], req[4 + 4 + 8 + VI_GBUF], q[4 + 8 + VI_QBI];
     u32 v, n;

@@ -13,7 +13,6 @@
 #include <stdlib.h>
 #include <math.h>
 
-int g_verbose;
 char g_confdir[1024], g_exedir[1024];
 void logf_(int lvl, const char* fmt, ...) {
     (void)lvl;
@@ -372,16 +371,16 @@ int main(void) {
     }
 
     /* the game's menu changes a setting and keeps it */
-    gamepad_config()->deadzone = 35;
-    gamepad_store(&gamepad_config()->deadzone);
+    g_settings.stick_dead_zone = 35;
+    gamepad_store(&g_settings.stick_dead_zone);
     CHECK(!strcmp(stored, "gamepad_deadzone=35"));
-    gamepad_config()->swap_ab = 1;
-    gamepad_store(&gamepad_config()->swap_ab);
+    g_settings.swap_a_b = 1;
+    gamepad_store(&g_settings.swap_a_b);
     CHECK(!strcmp(stored, "gamepad_swap_ab=1"));
-    gamepad_config()->swap_ab = 0;
-    gamepad_store(&gamepad_config()->swap_ab);
-    gamepad_config()->background = 1; /* applied at once */
-    gamepad_store(&gamepad_config()->background);
+    g_settings.swap_a_b = 0;
+    gamepad_store(&g_settings.swap_a_b);
+    g_settings.background_input = 1; /* applied at once */
+    gamepad_store(&g_settings.background_input);
     CHECK(!strcmp(stored, "gamepad_background=1") &&
           SDL_GetHintBoolean(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, false));
 

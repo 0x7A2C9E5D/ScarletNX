@@ -14,10 +14,7 @@
 
 u8* g_mem;
 const u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
-int g_verbose;
-int g_opt_user = 1;
 char g_exedir[1024];
-int g_opt_docked, g_opt_lang = 1;
 static unsigned test_checks, test_objects, test_kobjs;
 static u32 test_next_handle = 0x100;
 u64 plat_ns(void) {
@@ -586,10 +583,10 @@ static void test_hid(void) {
         check_npad_latest_sample(0, HO_HidNpadInternalState_full_key_lifo, g_hle.hid.samp);
     }
     CHECK(npad_style_at(8) == 1u << 1);
-    g_opt_docked = 1;
+    g_settings.tv_mode = 1;
     hid_update();
     CHECK(npad_style_at(8) == 0);
-    g_opt_docked = 0;
+    g_settings.tv_mode = 0;
     hid_update();
     CHECK(npad_style_at(8) == 1u << 1);
     /* the handheld Npad's full-key LIFO carries No1's state too */
@@ -1114,6 +1111,7 @@ int kobj_never_signaled(KObj* o) {
 }
 
 int main(void) {
+    g_settings.tv_mode = 0; /* handheld, as the test was written for */
     hle_init();
     g_hle.kernel.title_id = 0x0100BF00112C0000ull; /* the title the test was written for */
     g_mem = calloc(1, 0x10000);

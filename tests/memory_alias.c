@@ -16,7 +16,6 @@
 
 #define MIB (1ull << 20)
 static unsigned checks;
-int g_verbose;
 
 static void test_fail(const char* expr, int line) {
     fprintf(stderr, "memory_alias.c:%d: %s\n", line, expr);

@@ -16,8 +16,6 @@
 
 u8* g_mem;
 const u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull};
-int g_verbose;
-int g_opt_user = 1;
 char g_exedir[1024];
 static unsigned test_checks, test_objects;
 

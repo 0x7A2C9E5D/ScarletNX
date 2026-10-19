@@ -3,7 +3,9 @@
 # Copyright 2026 the ScarletNX contributors
 """The menu's languages (src/gui/i18n.h): its phrases listed from the code, and each translation compiled into it.
 
---pot writes po/scarletnx.pot from the phrases of src/gui (snx_tr, SNX_TR_NOOP, SNX_TR_KEYS, SNX_TR_KEY); --check
+--pot writes po/scarletnx.pot from the phrases of src/gui (snx_tr, SNX_TR_NOOP, SNX_TR_KEYS, SNX_TR_KEY) and the
+launcher's own rows in src/nx/runtime/settings.txt (their names, labels, help and sections, which its Settings show
+through snx_tr); --check
 fails when it is not what the code makes, or a po/*.po would not compile. --out FILE PO... makes FILE, the C source of
 every language's catalog (the .mo format, read by snx_mo_lookup). A .po is refused when a translation changes the
 printf conversions of its phrase (C's printf takes the arguments in order), changes a foot's keys, has a letter the
@@ -19,6 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = 'src/gui'
+SETTINGS = 'src/nx/runtime/settings.txt'
 POT = 'po/scarletnx.pot'
 MARKS = {'snx_tr': None, 'SNX_TR_NOOP': None, 'SNX_TR_KEYS': 'snx-keys', 'SNX_TR_KEY': 'snx-key'}
 CODE = re.compile(r'[a-z]{2,3}(_[A-Z]{2})?$')
@@ -125,6 +128,48 @@ def phrases_of(text, name):
     return found
 
 
+def settings_phrases(root, phrases):
+    """the launcher's rows of settings.txt (its launcher, recompile and llvm tables, and the sections marked launcher):
+    each setting's name or label and its help on one line, as ini_list_text lists them, and the sections' names"""
+    scope, help_lines, name = None, [], None
+
+    def add(phrase):
+        if phrase:
+            flags, files = phrases.setdefault(phrase, (set(), []))
+            if SETTINGS not in files:
+                files.append(SETTINGS)
+
+    def done():
+        if help_lines:
+            add(' '.join(help_lines))
+        help_lines.clear()
+
+    for raw in (root / SETTINGS).read_text(encoding='utf-8').splitlines():
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        word, _, rest = line.partition(' ')
+        rest = rest.strip()
+        if word in ('table', 'section', 'setting', 'list', 'include', 'repeat', 'end'):
+            done()
+        if word == 'table':
+            scope = rest.split()[1] if len(rest.split()) > 1 else 'runtime'
+        elif word == 'section' and rest.split()[-1] == 'launcher':
+            head, _, tables = rest.partition(':')
+            add(head.strip())
+            for table in tables.split(','):
+                if '/' in table:
+                    add(table.split('/', 1)[1].replace('launcher', '').strip())
+        elif scope in ('launcher', 'recompile', 'llvm'):
+            if word == 'setting' and not rest.startswith('@'):
+                add(rest)
+            elif word in ('name', 'label'):
+                add(rest)
+            elif word == 'help':
+                help_lines.append(rest)
+    done()
+
+
 def code_phrases(root):
     """every phrase of the code, in the order first met: {phrase: (flags, files)}"""
     phrases = {}
@@ -140,6 +185,7 @@ def code_phrases(root):
                 flags.add(flag)
             if name not in files:
                 files.append(name)
+    settings_phrases(root, phrases)
     return phrases
 
 

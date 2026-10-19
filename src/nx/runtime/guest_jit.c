@@ -77,7 +77,7 @@ void jit_init(void) {
     /* with SNX_NVN_TRACE, wrappers sit in dispatch slots, which only calls through the table see */
     config.hook_direct_calls = nvn_trace_active();
     config.direct_svc = 1; /* g_rtapi's svcs, as the AOT module calls them */
-    config.threads = (unsigned)g_opt_jit_threads;
+    config.threads = (unsigned)g_settings.jit_threads;
     config.report = jit_log;
     snprintf(g_jit_cache, sizeof(g_jit_cache), "%s%s.jitcache", g_cachedir, g_exename);
     config.cache_path = g_jit_cache;

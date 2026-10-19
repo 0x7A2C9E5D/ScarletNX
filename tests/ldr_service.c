@@ -26,7 +26,6 @@
 static int fail_commit;
 void (*g_gpu_mapping_begin)(u64, u64, int);
 void (*g_gpu_mapping_end)(void);
-int g_verbose;
 
 int kobj_never_signaled(KObj* o) {
     (void)o;

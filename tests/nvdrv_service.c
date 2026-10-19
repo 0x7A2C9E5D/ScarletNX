@@ -18,7 +18,6 @@
 #define CTRL_EV(fd) (g_hle.nvdrv.ctrl_evt[g_hle.nvdrv.ctrl_ev[fd] - 1].slot)
 
 u8* g_mem;
-int g_verbose;
 void (*g_gpu_mapping_begin)(u64, u64, int);
 void (*g_gpu_mapping_end)(void);
 static unsigned test_checks, test_kobjs;

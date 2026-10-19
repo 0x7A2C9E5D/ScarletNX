@@ -93,7 +93,7 @@ int plat_thread(PThreadFn fn, void* arg, size_t stack) {
         free(s);
         return -1;
     }
-    if (g_opt_prof) plat_prof_add_thread(h); /* the profiler takes its own handle */
+    if (g_settings.profiler) plat_prof_add_thread(h); /* the profiler takes its own handle */
     CloseHandle(h);
     return 0;
 }

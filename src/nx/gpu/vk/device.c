@@ -100,7 +100,7 @@ static int create_instance(void) {
     if (nbe > 15) WARN("vulkan: the window backend wants %u instance extensions, only 15 are taken\n", nbe);
     const char* layers[1];
     u32 nlayers = 0;
-    int validation = g_opt_vk_validation || getenv("SNX_VK_VALIDATION") != NULL; /* the .ini's, or the variable */
+    int validation = g_settings.vulkan_validation_layer || getenv("SNX_VK_VALIDATION") != NULL; /* the .ini's, or the variable */
     if (validation) {
         if (has_layer("VK_LAYER_KHRONOS_validation")) {
             layers[nlayers++] = "VK_LAYER_KHRONOS_validation";
@@ -597,7 +597,7 @@ int vk_swapchain_create(int srgb) {
 
     /* vsync=1: FIFO, which every device has. Otherwise mailbox, else immediate, else FIFO all the same. Read once: the
        main thread's .ini reload writes it */
-    int vsync = __atomic_load_n(&g_opt_vsync, __ATOMIC_RELAXED);
+    int vsync = __atomic_load_n(&g_settings.vsync, __ATOMIC_RELAXED);
     u32 nm = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(g_vk.phys, g_vk.surface, &nm, NULL);
     VkPresentModeKHR* ms = calloc(nm ? nm : 1, sizeof *ms);

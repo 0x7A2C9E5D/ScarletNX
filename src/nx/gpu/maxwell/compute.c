@@ -46,7 +46,7 @@ static void launch(GpuChannel* ch) {
     u32 q[64];
     u64 code = ((u64)(r[0x582] & 0xFF) << 32) | r[0x583];
     gmem_read((u64)r[0xAD] << 8, q, sizeof q);
-    if (g_opt_diag) capture(q, code);
+    if (g_settings.shader_captures) capture(q, code);
     if (g_renderer->dispatch) g_renderer->dispatch(ch, q, code);
 }
 void compute_method(GpuChannel* ch, u32 m, u32 v, int last) {

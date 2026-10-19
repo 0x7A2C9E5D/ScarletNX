@@ -10,7 +10,6 @@
 #include "nx/hle/hle.c"
 
 u8* g_mem;
-int g_verbose;
 static unsigned test_checks;
 static SvcObj test_service;
 

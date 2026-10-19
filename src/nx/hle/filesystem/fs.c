@@ -108,11 +108,11 @@ static void dump_open(void) {
         return;
     }
     data[n - 5] = 0;
-    source = g_opt_source[0] ? snx_strdup(g_opt_source) : snx_format("%s.source", data);
+    source = g_settings.game_dump[0] ? snx_strdup(g_settings.game_dump) : snx_format("%s.source", data);
     folder = snx_dirname(data);
     free(data);
     if (!snx_is_file(source)) {
-        if (g_opt_source[0]) WARN("fs: the game's dump %s, source in its settings, is not there\n", source);
+        if (g_settings.game_dump[0]) WARN("fs: the game's dump %s, source in its settings, is not there\n", source);
         free(source);
         free(folder);
         return;

@@ -19,10 +19,12 @@ static void keep(const IniOpt* o, const char* v) {
     (void)o;
     snprintf(text, sizeof text, "%s", v);
 }
-static const IniOpt TABLE[] = {{"number", "1", "help", INI_INT, 0, &number, -5, 10, tell, NULL, NULL, 0, 0},
-                               {"ratio", "1", NULL, INI_FLOAT, INI_STARTUP, &ratio, 0.25, 4, NULL, NULL, NULL, 0, 0},
-                               {"text", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, keep, NULL, NULL, 0, 0},
-                               {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
+static char held[8];
+static const IniOpt TABLE[] = {
+    {"number", "1", "help", INI_INT, 0, &number, -5, 10, tell, NULL, NULL, 0, 0, 0},
+    {"ratio", "1", NULL, INI_FLOAT, INI_STARTUP, &ratio, 0.25, 4, NULL, NULL, NULL, 0, 0, 0},
+    {"text", NULL, NULL, INI_TEXT, 0, held, 0, 0, keep, NULL, NULL, 0, 0, sizeof held},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0, 0}};
 
 int main(void) {
     const IniOpt *n = ini_find(TABLE, "number"), *r = ini_find(TABLE, "ratio"), *t = ini_find(TABLE, "text");
@@ -51,22 +53,24 @@ int main(void) {
     assert(!strcmp(out, "3"));
     ini_format(r, out, sizeof out);
     assert(!strcmp(out, "0.5"));
-    /* text: set reads it whole, and nothing is written back */
+    /* text: kept whole at var, then set; written back as it is. One too long for var is left out, set not called */
     ini_read(t, "a b c");
-    assert(!strcmp(text, "a b c"));
+    assert(!strcmp(text, "a b c") && !strcmp(held, "a b c"));
     ini_format(t, out, sizeof out);
-    assert(!out[0]);
+    assert(!strcmp(out, "a b c"));
+    ini_read(t, "too long for it");
+    assert(!strcmp(held, "a b c") && !strcmp(text, "a b c"));
     /* the menus' words: one a value from lo by step; a '#' word for its value and the ones above, plus shift; the
        number where there is none. Words go round, numbers stop at the ends */
     {
         static int v;
-        static const IniOpt onoff = {"onoff", "0", NULL, INI_INT, 0, &v, 0, 1, NULL, "On or off", "Off|On", 0, 0};
+        static const IniOpt onoff = {"onoff", "0", NULL, INI_INT, 0, &v, 0, 1, NULL, "On or off", "Off|On", 0, 0, 0};
         static const IniOpt three = {"three", "0", NULL, INI_INT, 0, &v, 0, 2, NULL, "Three", "Off|Fingers|Mouse too",
-                                     0,       0};
-        static const IniOpt scale = {"scale", "50", NULL, INI_INT, 0, &v, 0, 100, NULL, "Scale", "#%", 10, 50};
+                                     0,       0, 0};
+        static const IniOpt scale = {"scale", "50", NULL, INI_INT, 0, &v, 0, 100, NULL, "Scale", "#%", 10, 50, 0};
         static const IniOpt rumble = {"rumble", "100", NULL,        INI_INT,  0,  &v, 0,
-                                      100,      NULL,  "Vibration", "Off|#%", 10, 0};
-        static const IniOpt plain = {"plain", "1", NULL, INI_INT, 0, &v, -5, 10, NULL, NULL, NULL, 0, 0};
+                                      100,      NULL,  "Vibration", "Off|#%", 10, 0, 0};
+        static const IniOpt plain = {"plain", "1", NULL, INI_INT, 0, &v, -5, 10, NULL, NULL, NULL, 0, 0, 0};
         ini_word(&onoff, 0, out, sizeof out);
         assert(!strcmp(out, "Off"));
         ini_word(&onoff, 1, out, sizeof out);

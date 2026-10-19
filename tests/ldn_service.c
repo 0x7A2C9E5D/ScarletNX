@@ -17,8 +17,7 @@
 #include "fake_room.h"
 
 u8* g_mem;
-int g_verbose;
-int g_opt_network, g_opt_airplane, g_opt_ldn;
+int g_opt_ldn;
 static unsigned test_checks, test_objects, test_kobjs;
 static u32 test_next_handle = 0x100;
 
@@ -263,7 +262,7 @@ static void in_a_room(SvcObj* creator, SvcObj* bsd) {
     CHECK(snx_room_join(&rb, "127.0.0.1", fake_room_port(room), "Xuji", "secret", "game", 1, "", &why) == 0);
     network_set_room(ra);
     g_opt_ldn = SNX_OPT_LDN_ROOM;
-    g_opt_network = 0;
+    g_settings.network = 0;
     request(&r, 0);
     CHECK(call(creator, &r) == 0 && r.c.nout_objs == 1);
     a = r.c.out_objs[0];
@@ -406,11 +405,11 @@ int main(void) {
     r.c.has_pid = 1;
     CHECK(call(a, &r) == LDN_RC(22) && get_state(a) == 0);
     g_opt_ldn = SNX_OPT_LDN_LAN;
-    g_opt_airplane = 1;
+    g_settings.airplane_mode = 1;
     request(&r, 400);
     r.c.has_pid = 1;
     CHECK(call(a, &r) == LDN_RC(23) && get_state(a) == 0);
-    g_opt_airplane = 0;
+    g_settings.airplane_mode = 0;
     g_opt_ldn = SNX_OPT_LDN_ROOM;
     request(&r, 400);
     r.c.has_pid = 1;
@@ -419,7 +418,7 @@ int main(void) {
     CHECK(!ev_a->signaled);
 
     /* Initialize: each console gets a loopback address of its own, offline */
-    g_opt_network = 0;
+    g_settings.network = 0;
     request(&r, 400);
     r.c.has_pid = 1;
     CHECK(call(a, &r) == 0 && get_state(a) == 1);

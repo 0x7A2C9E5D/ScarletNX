@@ -647,7 +647,7 @@ int ipc_warn_once(const char* name, u32 cmd) {
    bytes left in the client's buffer (a game took a device count of "SFCI" from IAudioDevice cmd 14 and walked off its
    stack) */
 int stub_ok(SvcObj* o, IpcCtx* c) {
-    if (!g_opt_auto_stub_ipc) return ipc_unknown(o, c);
+    if (!g_settings.answer_unknown_commands) return ipc_unknown(o, c);
     if (ipc_warn_once(o->name, c->cmd)) WARN("  [undeclared] %s cmd %u -> ok\n", o->name, c->cmd);
     memset(c->msg, 0, c->msg_size < SERVER_MSG ? (size_t)c->msg_size : SERVER_MSG);
     R_SUCCEED();

@@ -71,7 +71,7 @@ const char* vk_corpus_dir(void) {
     static const char* at = (const char*)-1;
     if (at != (const char*)-1) return at;
     at = getenv("SNX_SHADER_CORPUS");
-    if (!at && g_opt_diag) { /* a phone's game has no environment to set */
+    if (!at && g_settings.shader_captures) { /* a phone's game has no environment to set */
         snprintf(dir, sizeof dir, "%scaptures", g_exedir);
         plat_mkdir(dir);
         snprintf(dir, sizeof dir, "%scaptures/shaders", g_exedir);
@@ -863,7 +863,7 @@ static VkPipeline pipeline_get(const PipeKey* k, i64 wait) {
             if (__atomic_load_n(&p->ready, __ATOMIC_ACQUIRE)) return p->p;
             int promoted = p->prewarm && pipe_promote(p);
             u64 t0 = plat_ns();
-            got = pipe_wait(p, !g_opt_async_pipes || wait < 0 ? -1 : promoted ? wait : 0);
+            got = pipe_wait(p, !g_settings.asynchronous_shaders || wait < 0 ? -1 : promoted ? wait : 0);
             if (promoted) g_pipe_wait_ns += plat_ns() - t0;
             if (!got) g_pipes_skipped++;
             return got;
@@ -877,7 +877,7 @@ static VkPipeline pipeline_get(const PipeKey* k, i64 wait) {
     p->next = g_pipeh[b];
     g_pipeh[b] = p;
     g_pipes_new++;
-    if (!g_opt_async_pipes) {
+    if (!g_settings.asynchronous_shaders) {
         p->p = pipe_make(p);
         __atomic_store_n(&p->ready, 1, __ATOMIC_RELEASE);
         return p->p;

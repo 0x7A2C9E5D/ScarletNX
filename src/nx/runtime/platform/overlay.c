@@ -78,10 +78,9 @@ static void keep_in_view(void) {
     if (focus >= top + VISIBLE) top = focus - VISIBLE + 1;
 }
 static int all_shown(void) {
-    const SnxVpadConfig* v = vpad_config();
     int c;
     for (c = 0; c < SNX_VPAD_COUNT; ++c)
-        if (!v->at[c].shown) return 0;
+        if (!g_settings.control_shown[c]) return 0;
     return 1;
 }
 static int clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -153,7 +152,8 @@ static void map_open(void) {
     const SnxPlayerConfig* p = pad_player ? gamepad_player(pad_player - 1) : NULL;
     snx_pad_screen_start(&map);
     map.own = p && p->has_map ? p->own : g->own;
-    map.swap_ab = p && p->swap_ab >= 0 ? p->swap_ab : g->swap_ab;
+    map.swap_ab = p && g_settings.player_swap_a_b[pad_player - 1] >= 0 ? g_settings.player_swap_a_b[pad_player - 1]
+                                                                        : g_settings.swap_a_b;
     map_pad();
     page = PAGE_MAP;
     focus = top = 0;
@@ -266,10 +266,9 @@ static int act(int i, int step) {
     }
     if (step) return OVERLAY_NONE;
     if (page == PAGE_BUTTONS && i == 0) {
-        SnxVpadConfig* v = vpad_config();
         int c, all = all_shown();
         for (c = 0; c < SNX_VPAD_COUNT; ++c) {
-            v->at[c].shown = !all;
+            g_settings.control_shown[c] = !all;
             vpad_store_shown(c);
         }
     } else if (page == PAGE_CONTROLS && i == C_EDIT)

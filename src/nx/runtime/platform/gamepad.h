@@ -5,6 +5,7 @@
 #define SNX_GAMEPAD_H
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/runtime/ini.h"
+#include "snx_settings.h"
 #include "common/utilities/pad_map.h"
 #include "nx/hle/services/hid.h"
 
@@ -28,17 +29,13 @@ u64 gamepad_button(u32 id, int button);
 void gamepad_rumble(u32 left, u32 right);
 /* one guest player's vibration (hid.h's PadState.rumble), played on that slot's gamepad each frame */
 void gamepad_rumble_slot(int slot, u32 left, u32 right);
-/* the settings, kept in the game's .ini; the game's menu changes them under ui_lock */
+/* the settings are g_settings' (settings.txt: swap_a_b, stick_dead_zone, vibration, background_input, pair_joy_cons,
+   button_map), kept in the game's .ini; the game's menu changes them under ui_lock. What gamepad_map reads into: */
 typedef struct {
-    int swap_ab;     /* 1: A and B swapped, from the console's layout */
-    int deadzone;    /* the sticks', in percent of their travel */
-    int rumble;      /* the vibration's strength in percent, 0 for none */
-    int background;  /* 1: they play while the game's window is not focused */
-    int joycon_pair; /* 1: SDL combines a left and a right Joy-Con */
-    SnxPadMap own;   /* the player's map, SNX_PAD_UNSET where a control sends the button in its place */
+    SnxPadMap own; /* the player's map, SNX_PAD_UNSET where a control sends the button in its place */
 } SnxGamepadConfig;
 SnxGamepadConfig* gamepad_config(void);
-void gamepad_store(const int* setting);    /* one of gamepad_config()'s, to the .ini, and applied */
+void gamepad_store(const int* setting);    /* one of g_settings' (&g_settings.vibration), to the .ini, and applied */
 void gamepad_store_map(void);              /* the custom map, to the .ini */
 void gamepad_store_player_map(int player); /* a player's own (0 to SNX_GAMEPADS - 1), to the .ini */
 /* the i-th open gamepad's face labels and whether its sticks sit side by side: 1, 0 past the last. Under ui_lock */
@@ -50,25 +47,22 @@ unsigned gamepad_held(int i);
 const char* gamepad_name(int i);
 /* the i that slot's gamepad (its player's) is in the three above, -1 for none. Under ui_lock */
 int gamepad_of_player(int slot);
-extern const IniOpt g_gamepad_ini[];     /* the settings, keys gamepad_* */
+/* their tables (settings.h): g_gamepad_ini, keys gamepad_*; g_gamepad_map_ini, gamepad_map, the player's map that
+   SNX_GAMEPAD_MAP's screen sets; g_gamepad_players_ini, gamepad_p<N>_*, their page in the menus */
 #define SNX_GAMEPAD_PAGE "Controllers"   /* their page in the game's menu and the launcher's Settings */
 #define SNX_GAMEPAD_MAP  "Button map"    /* and the screen of what each button sends */
-extern const IniOpt g_gamepad_map_ini[]; /* gamepad_map, the player's map that screen sets */
 /* each player's own, as Eden has them, in the game's .ini as gamepad_p<N>_* (N from 1); one left at its default takes
-   the setting every player shares */
+   the setting every player shares. Their values are g_settings' arrays by player: player_controller ("" the next to
+   connect, else its SDL GUID, "/2" for the second alike), player_connected (0: the game never sees this player; player
+   1 it always does), player_type (0: as the controller is; else 1 + the PadKind the game sees), player_swap_a_b (-1:
+   gamepad_swap_ab's), player_vibration (-10: gamepad_rumble's), player_button_map. What its map reads into: */
 typedef struct {
-    char device[48]; /* the controller it takes: "" the next to connect, else its SDL GUID, "/2" for the second alike */
-    int connected;   /* 0: the game never sees this player; player 1 it always does (the keyboard drives it) */
-    int type;        /* 0: as the controller is; else 1 + the PadKind the game sees */
-    int swap_ab;     /* -1: gamepad_swap_ab's */
-    int rumble;      /* -10: gamepad_rumble's */
     int has_map;     /* 0: gamepad_map's */
     SnxPadMap own;   /* its map, SNX_PAD_UNSET where a control sends the button in its place */
 } SnxPlayerConfig;
 SnxPlayerConfig* gamepad_player(int player); /* 0 to SNX_GAMEPADS - 1 */
 int gamepad_player_seen(int slot);           /* whether the game sees the player whose pad is in slot */
 int gamepad_player_kind(int slot, int kind); /* the PadKind it sees for that player: its type's, else kind */
-extern const IniOpt g_gamepad_players_ini[]; /* gamepad_p<N>_*: their page in the menus */
 #define SNX_GAMEPAD_PLAYERS "Player"
 int gamepad_ini(const char* key, const char* value); /* a key of the game's .ini: applied, 1; not one of these, 0 */
 

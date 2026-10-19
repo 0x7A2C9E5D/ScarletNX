@@ -25,9 +25,6 @@
 
 u8* g_mem;
 char g_datadir[1024], g_exename[256], g_exedir[1024];
-int g_verbose;
-int g_opt_user = 1;
-char g_opt_source[2048];
 const u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull}; /* am.c's: the first user */
 static jmp_buf* test_fatal_jump;                                   /* a fatal() the test waits for comes back here */
 static char test_fatal_text[1024];
@@ -1233,7 +1230,7 @@ int main(int argc, char** argv) {
     if (argc == 4 && (!strcmp(argv[3], "dump") || !strcmp(argv[3], "dump-source"))) {
         int source = !strcmp(argv[3], "dump-source");
         dump_write(source);
-        if (source) strcpy(g_opt_source, "dump-data/Game.nsp");
+        if (source) strcpy(g_settings.game_dump, "dump-data/Game.nsp");
         strcpy(g_datadir, "dump-data/Game_data/");
         fs_init();
         test_scans_allowed = 0;

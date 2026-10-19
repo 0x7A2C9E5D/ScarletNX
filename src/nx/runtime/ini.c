@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* the .ini's settings tables (ini.h): finding a key, reading a value into its variable, and writing it back */
 #include "nx/runtime/ini.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +17,14 @@ void ini_read(const IniOpt* o, const char* v) {
     char* end;
     double d;
     if (o->type == INI_TEXT) {
-        o->set(o, v);
+        size_t n = strlen(v);
+        if (n >= o->size) {
+            fprintf(stderr, "settings: %s's value is longer than %u bytes and is left out\n", o->key,
+                    (unsigned)o->size - 1);
+            return;
+        }
+        memcpy(o->var, v, n + 1);
+        if (o->set) o->set(o, v);
         return;
     }
     d = strtod(v, &end);
@@ -38,8 +46,8 @@ void ini_format(const IniOpt* o, char* out, size_t n) {
         snprintf(out, n, "%d", *(const int*)o->var);
     else if (o->type == INI_FLOAT)
         snprintf(out, n, "%g", *(const float*)o->var);
-    else if (n)
-        out[0] = 0;
+    else
+        snprintf(out, n, "%s", (const char*)o->var);
 }
 
 static int step_of(const IniOpt* o) { return o->step > 0 ? o->step : 1; }
@@ -72,6 +80,74 @@ int ini_step(const IniOpt* o, int v, int dir) {
     }
     count = (int)((o->hi - o->lo) / step) + 1;
     return (int)o->lo + (((v - (int)o->lo) / step + dir) % count + count) % count * step;
+}
+
+/* the listing, appended to out as it fits */
+typedef struct {
+    char* out;
+    size_t size, at;
+} Listing;
+static void put(Listing* l, const char* fmt, ...) {
+    va_list ap;
+    int n;
+    va_start(ap, fmt);
+    n = vsnprintf(l->at < l->size ? l->out + l->at : NULL, l->at < l->size ? l->size - l->at : 0, fmt, ap);
+    va_end(ap);
+    if (n > 0) l->at += (size_t)n;
+}
+static void list_help(Listing* l, const char* help) {
+    for (; *help; help++)
+        if (*help == '\n') {
+            while (help[1] == ' ' || help[1] == ';') help++;
+            put(l, " ");
+        } else
+            put(l, "%c", *help);
+}
+static void list_values(Listing* l, const IniOpt* o) {
+    int step = o->step > 0 ? o->step : 1, v, first = 1;
+    char word[64];
+    if (o->type == INI_TEXT && o->words) { /* value=word already */
+        put(l, "%s", o->words);
+        return;
+    }
+    if (o->type != INI_INT) return;
+    /* typed: a number of no words, or more than the menus step through */
+    if (!o->words && (o->lo < 0 || (o->hi - o->lo) / step + 1 > 16)) return;
+    if (o->words && strchr(o->words, '#') && (o->hi - o->lo) / step + 1 > 128) return;
+    for (v = (int)o->lo; v <= (int)o->hi; v += step) {
+        if (o->words)
+            ini_word(o, v, word, sizeof word);
+        else
+            snprintf(word, sizeof word, "%d", v);
+        put(l, "%s%d=%s", first ? "" : "|", v, word);
+        first = 0;
+    }
+}
+size_t ini_list_text(const IniSection* sections, int count, char* out, size_t size) {
+    static const char* const types[] = {"int", "float", "text"};
+    Listing l;
+    const char* help = "";
+    int s, t;
+    l.out = out;
+    l.size = size;
+    l.at = 0;
+    if (size) out[0] = 0;
+    for (s = 0; s < count; s++)
+        for (t = 0; t < 3 && sections[s].table[t]; t++) {
+            const IniOpt* o;
+            for (o = sections[s].table[t]; o->key; o++) {
+                if (o->help) help = o->help; /* none: the one before covers it */
+                if (o->flags & INI_IN_GAME) continue;
+                put(&l, "%s%s%s\t%s\t%s\t%s\t%g\t%g\t", sections[s].name, sections[s].page[t] ? "/" : "",
+                    sections[s].page[t] ? sections[s].page[t] : "", o->key, o->def ? o->def : "", types[o->type],
+                    o->lo, o->hi);
+                list_help(&l, help);
+                put(&l, "\t%s\t", o->name ? o->name : "");
+                list_values(&l, o);
+                put(&l, "\n");
+            }
+        }
+    return l.at;
 }
 
 /* what became of each: the rewritten file keeps them under [Deprecated] with it, and a run names them, for the player

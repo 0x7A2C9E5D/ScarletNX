@@ -1434,42 +1434,6 @@ msgid "Cannot launch driver (Windows error %lu)"
 msgstr ""
 
 #: src/gui/settings.c
-msgid "Launch"
-msgstr ""
-
-#: src/gui/settings.c
-msgid "Enables gdbstub on port 1234"
-msgstr ""
-
-#: src/gui/settings.c
-msgid "Extract to tmpfs"
-msgstr ""
-
-#: src/gui/settings.c
-msgid "Extract to the temporary folder (TEMP\\scarletnx\\work\\<title ID>), which the game reads its RomFS from"
-msgstr ""
-
-#: src/gui/settings.c
-msgid "Extract to tmpfs, in memory (/tmp/scarletnx/work/<title ID>), which the game reads its RomFS from"
-msgstr ""
-
-#: src/gui/settings.c
-msgid "Extract game container"
-msgstr ""
-
-#: src/gui/settings.c
-msgid "Extract a dump's ExeFS and RomFS into its game's folder. Off, the game reads them from the dump"
-msgstr ""
-
-#: src/gui/settings.c
-msgid "Optimization level"
-msgstr ""
-
-#: src/gui/settings.c
-msgid "LLVM's optimization of the game's code when it is recompiled: 0 none, 3 the most, z the smallest. A game made already keeps its code until it is recompiled"
-msgstr ""
-
-#: src/gui/settings.c
 msgid "Its own page, as in the game's menu"
 msgstr ""
 
@@ -1789,4 +1753,172 @@ msgstr ""
 
 #: src/gui/theme.c
 msgid "the boots in 100 that show this theme's, the default's the others"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "gdbstub"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Enables gdbstub on port 1234"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Extract to tmpfs"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Extract to tmpfs, in memory (the temporary folder's scarletnx/work/<title ID>), which the game reads its RomFS from"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Extract game container"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Extract a dump's ExeFS and RomFS into its game's folder. Off, the game reads them from the dump"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Optimization level"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "LLVM's optimization of the game's code when it is recompiled: 0 none, 3 the most, z the smallest. A game made already keeps its code until it is recompiled"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "AOT threads"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "The threads compiling the game's code when it is recompiled: 0 = one for each of the computer's cores"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Instruction combining"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Combines instructions into fewer, simpler ones (instcombine)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Inlining"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Inlines calls into their callers (inline)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Scalar replacement of aggregates"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Splits stack objects into values kept in registers (sroa)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Global value numbering"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Removes redundant computations and loads (gvn)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Control flow simplification"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Merges, removes and simplifies basic blocks (simplifycfg)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Loop unrolling"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Unrolls loops with known trip counts (loop-unroll)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Loop vectorization pass"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Vectorizes loops with SIMD instructions (loop-vectorize)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "SLP vectorization pass"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Packs independent scalar instructions into SIMD ones (slp-vectorizer)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Loop invariant code motion"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Hoists computations that do not change across a loop out of it (licm)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Loop vectorization"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Whether the pipeline vectorizes loops (LLVMPassBuilderOptionsSetLoopVectorization)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "SLP vectorization"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Whether the pipeline packs scalar instructions into SIMD ones (LLVMPassBuilderOptionsSetSLPVectorization)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Loop unrolling option"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Whether the pipeline unrolls loops (LLVMPassBuilderOptionsSetLoopUnrolling)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Fast instruction selection"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Whether code generation selects instructions with FastISel, quicker and worse (LLVMSetTargetMachineFastISel)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Global instruction selection"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Whether code generation selects instructions with GlobalISel (LLVMSetTargetMachineGlobalISel)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Inliner threshold"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "How large a function the inliner inlines; LLVM picks one for the level until it is set (LLVMPassBuilderOptionsSetInlinerThreshold)"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "Launch"
+msgstr ""
+
+#: src/nx/runtime/settings.txt
+msgid "LLVM Internals"
 msgstr ""

@@ -12,7 +12,7 @@ void video_poll(void);     /* events and input, once per main loop pass */
 void frontend_frame(void); /* screenshots and the unattended limits, after each pass */
 
 /* the backend's .ini settings (the touch screen's mode) */
-extern const IniOpt g_backend_ini[];
+/* the touch screen's table is settings.h's g_backend_ini */
 /* Offers a .ini or command line setting to the backend, the on-screen controls and the unattended options: 1 when
    one of them took it */
 int backend_ini(const char* k, const char* v);

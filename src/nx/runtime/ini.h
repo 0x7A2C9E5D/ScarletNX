@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* A setting of the game's .ini, described once by the module that uses it: its key, default, help, type, range and
-   where its value goes. options.c writes the file from the tables in its sections (the unattended-run options' table
-   is only read), and each module reads its keys with ini_find and ini_read (ini.c) */
+/* A setting: its key, default, help, type, range and where its value goes (g_settings). The tables are generated from
+   settings.txt (tools/settingsgen, settings.h): options.c writes the game's .ini from the tables in its sections (the
+   unattended-run options' table is only read), each module reads its keys with ini_find and ini_read (ini.c), and the
+   launcher lists its own and the recompiler's as the runtime lists the game's (ini_list_text) */
 #ifndef SNX_INI_H
 #define SNX_INI_H
 #include <stddef.h>
@@ -11,7 +12,7 @@
 enum {
     INI_INT,   /* an int at var, clamped to lo..hi */
     INI_FLOAT, /* a float at var, clamped to lo..hi */
-    INI_TEXT   /* read by set */
+    INI_TEXT   /* the text at var, size bytes with its NUL; then set, if any */
 };
 #define INI_STARTUP 1 /* read when the game starts: a reload while it runs leaves it alone (options.c's sections) */
 /* the game's own, set in its menu (a control's place) or by the driver (its dump): the launcher's Settings leave it
@@ -34,7 +35,17 @@ struct IniOpt {
     const char* name;
     const char* words;
     int step, shift;
+    size_t size; /* INI_TEXT: var's size */
 };
+/* a section of the .ini (a group of the launcher's Settings): up to three tables, a table with a page having a page of
+   its own in the menus, listed after the section's other keys. own: the tables options.c applies itself; the others
+   are applied through backend_ini, which takes the on-screen controls' lock */
+typedef struct {
+    const char* name;
+    int own;
+    const IniOpt* table[3];
+    const char* page[3];
+} IniSection;
 
 const IniOpt* ini_find(const IniOpt* table, const char* key); /* key's entry in table, or NULL */
 void ini_read(const IniOpt* o, const char* v); /* v into o's variable; a value that isn't a number leaves it */
@@ -44,6 +55,10 @@ void ini_format(const IniOpt* o, char* out, size_t n);
 void ini_word(const IniOpt* o, int v, char* out, size_t n);
 /* v a step down (dir -1) or up (1): words go round, numbers stop at lo and hi */
 int ini_step(const IniOpt* o, int v, int dir);
+/* the sections' settings but the INI_IN_GAME ones as the launcher reads them (gui/settings.h), a line each: section
+   [/page], key, default, int | float | text, lowest, highest, help, name, the values value=word between '|', tabs
+   between. Into out, NUL-terminated as it fits; the length it needs, without the NUL */
+size_t ini_list_text(const IniSection* sections, int count, char* out, size_t size);
 
 /* a key an older version used, which does nothing now (docs/DEPRECATIONS.md): what became of it, NULL for another */
 const char* ini_deprecated(const char* key);

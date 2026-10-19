@@ -244,12 +244,12 @@ static int nn_am_service_ICommonStateGetter_ReceiveMessage(SvcObj* self, nn_am_A
 }
 static int nn_am_service_ICommonStateGetter_GetOperationMode(SvcObj* self, u8* mode) {
     (void)self;
-    *mode = g_opt_docked ? 1 : 0; /* nn::oe::OperationMode: Handheld, Console */
+    *mode = g_settings.tv_mode ? 1 : 0; /* nn::oe::OperationMode: Handheld, Console */
     R_SUCCEED();
 }
 static int nn_am_service_ICommonStateGetter_GetPerformanceMode(SvcObj* self, u32* mode) {
     (void)self;
-    *mode = g_opt_docked ? 1 : 0; /* Boost when docked, as apm says */
+    *mode = g_settings.tv_mode ? 1 : 0; /* Boost when docked, as apm says */
     R_SUCCEED();
 }
 static int nn_am_service_ICommonStateGetter_GetCurrentFocusState(SvcObj* self, u8* state) {
@@ -352,8 +352,8 @@ static int nn_am_service_ICommonStateGetter_EndVrModeEx(SvcObj* self) {
 
 static int nn_am_service_ICommonStateGetter_GetDefaultDisplayResolution(SvcObj* self, i32* width, i32* height) {
     (void)self;
-    *width = g_opt_docked ? 1920 : 1280;
-    *height = g_opt_docked ? 1080 : 720;
+    *width = g_settings.tv_mode ? 1920 : 1280;
+    *height = g_settings.tv_mode ? 1080 : 720;
     R_SUCCEED();
 }
 static int nn_am_service_ICommonStateGetter_GetDefaultDisplayResolutionChangeEvent(SvcObj* self, u32* event) {
@@ -369,7 +369,7 @@ static int nn_am_service_ICommonStateGetter_GetHdcpAuthenticationStateChangeEven
 /* apm's configuration of the mode the console runs in */
 static int nn_am_service_ICommonStateGetter_GetCurrentPerformanceConfiguration(SvcObj* self, u32* configuration) {
     (void)self;
-    *configuration = apm_configuration(g_opt_docked ? 1 : 0);
+    *configuration = apm_configuration(g_settings.tv_mode ? 1 : 0);
     R_SUCCEED();
 }
 /* the clocks a game asks for around its loading screens, which apm keeps as Boost mode's configuration */
@@ -643,7 +643,7 @@ static int nn_am_service_IApplicationFunctions_GetDesiredLanguage(SvcObj* self, 
     u32 supported = 0;
     (void)self;
     if (p) memcpy(&supported, p, 4);
-    set_language_code(am_desired_language(g_opt_lang, supported), code->v);
+    set_language_code(am_desired_language(g_settings.language, supported), code->v);
     R_SUCCEED();
 }
 /* the NACP's display version, "1.0.0" for a game without one */

@@ -23,17 +23,27 @@
     (0xFFu << 24 | (SNX_GUI_THEME_YORHA_FAILURE & 0xFFu) << 16 | (SNX_GUI_THEME_YORHA_FAILURE & 0xFF00u) |             \
      (SNX_GUI_THEME_YORHA_FAILURE >> 16 & 0xFFu))
 #include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/* vpad.c's check of settings.txt's keys against its controls: a mismatch fails the test */
+void fatal(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+    abort();
+}
 /* the platform's lock and the backend's touch screen, without either */
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
 static int touch = 1;
 void backend_touch_set(int mode) { touch = mode; }
 /* and the gamepads' settings and names, as backend/gamepad.c keeps them; their rows and touch's name them */
-static SnxGamepadConfig pads = {.swap_ab = 0, .deadzone = 20, .rumble = 100};
+static SnxGamepadConfig pads; /* the maps; the settings are g_settings' */
 static const int* pad_stored;
 static const char* pad_names[3];
 SnxGamepadConfig* gamepad_config(void) { return &pads; }
@@ -54,10 +64,10 @@ unsigned gamepad_held(int i) { return i < 0 ? pads_held[0] | pads_held[1] | pads
 const char* gamepad_name(int i) { return i >= 0 && i < 3 ? pad_names[i] : NULL; }
 int gamepad_of_player(int slot) { return slot >= 0 && slot < 3 ? pad_of_player[slot] : -1; }
 const IniOpt g_backend_ini[] = {
-    {"touch", "2", NULL, INI_INT, 0, &touch, 0, 2, NULL, "Touch screen", "Off|Fingers|Mouse too", 0, 0},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
+    {"touch", "2", NULL, INI_INT, 0, &touch, 0, 2, NULL, "Touch screen", "Off|Fingers|Mouse too", 0, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0, 0}};
 /* each player's own, two of them here: swap and vibration, every player's until picked, and a map */
-static SnxPlayerConfig players[2] = {{"", 1, 0, -1, -10, 0, {{0}}}, {"", 1, 0, -1, -10, 0, {{0}}}};
+static SnxPlayerConfig players[2];
 static int player_maps_stored;
 SnxPlayerConfig* gamepad_player(int p) { return p >= 0 && p < 2 ? &players[p] : NULL; }
 void gamepad_store_player_map(int p) {
@@ -65,16 +75,16 @@ void gamepad_store_player_map(int p) {
     ++player_maps_stored;
 }
 const IniOpt g_gamepad_players_ini[] = {
-    {"gamepad_p1_swap_ab", "-1", NULL, INI_INT, 0, &players[0].swap_ab, -1, 1, NULL, "Swap A/B", "As All|Off|On", 0, 0},
-    {"gamepad_p1_rumble", "-10", NULL, INI_INT, 0, &players[0].rumble, -10, 100, NULL, "Vibration", "As All|Off|#%", 10,
-     0},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
+    {"gamepad_p1_swap_ab", "-1", NULL, INI_INT, 0, &g_settings.player_swap_a_b[0], -1, 1, NULL, "Swap A/B", "As All|Off|On", 0, 0, 0},
+    {"gamepad_p1_rumble", "-10", NULL, INI_INT, 0, &g_settings.player_vibration[0], -10, 100, NULL, "Vibration", "As All|Off|#%", 10,
+     0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0, 0}};
 const IniOpt g_gamepad_ini[] = {
-    {"gamepad_swap_ab", "0", NULL, INI_INT, 0, &pads.swap_ab, 0, 1, NULL, "Swap A/B", "Off|On", 0, 0},
-    {"gamepad_deadzone", "20", NULL, INI_INT, 0, &pads.deadzone, 0, 90, NULL, "Stick dead zone", "#%", 5, 0},
-    {"gamepad_rumble", "100", NULL, INI_INT, 0, &pads.rumble, 0, 100, NULL, "Vibration", "Off|#%", 10, 0},
-    {"gamepad_background", "0", NULL, INI_INT, 0, &pads.background, 0, 1, NULL, "Background input", "Off|On", 0, 0},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
+    {"gamepad_swap_ab", "0", NULL, INI_INT, 0, &g_settings.swap_a_b, 0, 1, NULL, "Swap A/B", "Off|On", 0, 0, 0},
+    {"gamepad_deadzone", "20", NULL, INI_INT, 0, &g_settings.stick_dead_zone, 0, 90, NULL, "Stick dead zone", "#%", 5, 0, 0},
+    {"gamepad_rumble", "100", NULL, INI_INT, 0, &g_settings.vibration, 0, 100, NULL, "Vibration", "Off|#%", 10, 0, 0},
+    {"gamepad_background", "0", NULL, INI_INT, 0, &g_settings.background_input, 0, 1, NULL, "Background input", "Off|On", 0, 0, 0},
+    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0, 0}};
 static char stored[64], log_[512]; /* the last key kept, and every key=value since log_ was emptied */
 static void store(const char* key, const char* value) {
     size_t n = strlen(log_);
@@ -215,35 +225,35 @@ int main(void) {
            text_at(1, 8, "\xFE Relative stick center"));
     assert(text_at(1, 11, "\xFE Touch screen") && text_at(1, 12, "\xFE Buttons") &&
            text_at(1, 13, "\xFE Reset layout"));
-    vpad_config()->on = 0;
+    g_settings.show_controls = 0;
     draw();
     assert(text_at(C - 4, 3, "Off"));
-    assert(tap(0, 3) == OVERLAY_NONE && vpad_config()->on && !strcmp(stored, "controls"));
+    assert(tap(0, 3) == OVERLAY_NONE && g_settings.show_controls && !strcmp(stored, "controls"));
     draw();
     assert(text_at(C - 3, 3, "On"));
     /* Scale's arrows: the left one down, the right one up, by tens, between 50% and 150% */
-    assert(vpad_config()->scale == 50);
+    assert(g_settings.controls_scale == 50);
     draw();
     assert(text_at(C - 9, 6, "< 100% >"));
     tap(3, C - 2);
-    assert(vpad_config()->scale == 60 && !strcmp(stored, "controls_scale"));
+    assert(g_settings.controls_scale == 60 && !strcmp(stored, "controls_scale"));
     tap(3, C - 9);
     tap(3, C - 9);
-    assert(vpad_config()->scale == 40);
+    assert(g_settings.controls_scale == 40);
     for (x = 0; x < 9; ++x) tap(3, C - 9);
-    assert(vpad_config()->scale == 0);
-    vpad_config()->scale = 50;
+    assert(g_settings.controls_scale == 0);
+    g_settings.controls_scale = 50;
     /* the keys: down from Scale to Opacity, left steps it */
     overlay_move(1);
     overlay_side(-1);
-    assert(vpad_config()->opacity == 90 && !strcmp(stored, "controls_opacity"));
+    assert(g_settings.controls_opacity == 90 && !strcmp(stored, "controls_opacity"));
     overlay_side(1);
     /* the toggles; the touch screen goes round its three */
     tap(2, 3);
-    assert(vpad_config()->snap && !strcmp(stored, "controls_snap"));
+    assert(g_settings.snap_to_grid && !strcmp(stored, "controls_snap"));
     tap(2, 3);
     tap(5, 3);
-    assert(!vpad_config()->rel_center && !strcmp(stored, "controls_rel_center"));
+    assert(!g_settings.relative_stick_center && !strcmp(stored, "controls_rel_center"));
     tap(5, 3);
     tap(8, 3);
     assert(touch == 2);
@@ -263,13 +273,13 @@ int main(void) {
     assert(text_at(1, 0, "SCARLETNX  /  BUTTONS") && text_at(1, 4, "\xFE L"));
     log_[0] = 0;
     tap(1, 3);
-    assert(!vpad_config()->at[SNX_VPAD_L].shown && !strcmp(log_, "controls_l_shown=0;")); /* its place stays */
+    assert(!g_settings.control_shown[SNX_VPAD_L] && !strcmp(log_, "controls_l_shown=0;")); /* its place stays */
     draw();
     assert(text_at(C - 7, 4, "Hidden") && text_at(C - 12, 3, "Some hidden"));
     tap(0, 3);
-    assert(vpad_config()->at[SNX_VPAD_L].shown);
+    assert(g_settings.control_shown[SNX_VPAD_L]);
     tap(0, 3); /* all shown: All hides them */
-    assert(!vpad_config()->at[SNX_VPAD_A].shown && !vpad_config()->at[SNX_VPAD_L].shown);
+    assert(!g_settings.control_shown[SNX_VPAD_A] && !g_settings.control_shown[SNX_VPAD_L]);
     tap(0, 3);
     overlay_move(-1); /* round to Back, at the bottom */
     draw();
@@ -363,38 +373,38 @@ int main(void) {
     assert(list.q[0].h == 11 * 32 && text_at(1, 3, "\xFE Player") && shows("< All >"));
     assert(text_at(1, 4, "\xFE Swap A/B") && text_at(C - 4, 4, "Off"));
     tap(1, 3);
-    assert(pads.swap_ab && pad_stored == &pads.swap_ab);
+    assert(g_settings.swap_a_b && pad_stored == &g_settings.swap_a_b);
     draw();
     assert(text_at(C - 3, 4, "On"));
     tap(1, 3);
-    assert(!pads.swap_ab);
+    assert(!g_settings.swap_a_b);
     overlay_side(1);
-    assert(pads.swap_ab);
-    pads.swap_ab = 0;
+    assert(g_settings.swap_a_b);
+    g_settings.swap_a_b = 0;
     draw();
     assert(text_at(C - 8, 5, "< 20% >"));
     tap(2, C - 2);
-    assert(pads.deadzone == 25 && pad_stored == &pads.deadzone);
+    assert(g_settings.stick_dead_zone == 25 && pad_stored == &g_settings.stick_dead_zone);
     tap(2, C - 9);
     tap(2, C - 9);
-    assert(pads.deadzone == 15);
+    assert(g_settings.stick_dead_zone == 15);
     for (x = 0; x < 20; ++x) tap(2, C - 2);
-    assert(pads.deadzone == 90);
-    pads.deadzone = 20;
+    assert(g_settings.stick_dead_zone == 90);
+    g_settings.stick_dead_zone = 20;
     for (x = 0; x < 10; ++x) tap(3, C - 9);
-    assert(pads.rumble == 0 && pad_stored == &pads.rumble);
+    assert(g_settings.vibration == 0 && pad_stored == &g_settings.vibration);
     draw();
     assert(text_at(C - 8, 6, "< Off >"));
-    assert(overlay_select() == OVERLAY_NONE && pads.rumble == 10); /* the focus is on it: a select steps up */
-    pads.rumble = 100;
+    assert(overlay_select() == OVERLAY_NONE && g_settings.vibration == 10); /* the focus is on it: a select steps up */
+    g_settings.vibration = 100;
     draw();
     assert(text_at(1, 7, "\xFE Background input") && text_at(C - 4, 7, "Off"));
     tap(4, 3);
-    assert(pads.background && pad_stored == &pads.background);
+    assert(g_settings.background_input && pad_stored == &g_settings.background_input);
     draw();
     assert(text_at(C - 3, 7, "On"));
     tap(4, 3);
-    assert(!pads.background);
+    assert(!g_settings.background_input);
     pad_names[0] = "Xbox Wireless Controller";
     draw();
     assert(text_at(1, 1, "Xbox Wireless Controller") && !text_at(26, 1, "and"));
@@ -442,7 +452,7 @@ int main(void) {
     draw();
     assert(shows("< 1 >") && text_at(1, 4, "\xFE Swap A/B") && shows("As All"));
     tap(1, 3);
-    assert(players[0].swap_ab == 0 && pad_stored == &players[0].swap_ab && !pads.swap_ab);
+    assert(g_settings.player_swap_a_b[0] == 0 && pad_stored == &g_settings.player_swap_a_b[0] && !g_settings.swap_a_b);
     tap(5, 3);
     draw();
     assert(shows("SCARLETNX  /  PLAYER 1  /  BUTTON MAP"));

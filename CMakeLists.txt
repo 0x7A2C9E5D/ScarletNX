@@ -99,6 +99,8 @@ include(cmake/dependencies.cmake)
 # every local include is a path from src/ ("nx/hle/kernel/ipc.h"); generated and third-party headers come with their
 # targets
 include_directories("${PROJECT_SOURCE_DIR}/src")
+# every setting, generated from src/nx/runtime/settings.txt (struct Settings, g_settings, their tables)
+include(cmake/settings.cmake)
 add_subdirectory(src/common)
 if(SNX_BUILD_NX)
     add_subdirectory(src/nx/runtime/driver host-tools)
