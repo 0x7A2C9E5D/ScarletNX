@@ -317,6 +317,7 @@ add_test(NAME a64_fp_witnesses COMMAND snx-test-a64-fp)
 
 # snx_crc32's nibble tables against the bit-serial definition (the helpers have no host-specific paths)
 add_executable(snx-test-crc32-helper crc32_helper.c "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu_helpers.c")
+target_compile_definitions(snx-test-crc32-helper PRIVATE SNX_A64_REFERENCE)
 snx_test_target(snx-test-crc32-helper 11)
 snx_cpu_helpers_flags(snx-test-crc32-helper)
 if(NOT WIN32)
