@@ -8,16 +8,28 @@
 #include "gnuabi/abi/errno/errno.h"
 #include "common/utilities/common.h"
 #include <openssl/rand.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#ifndef _WIN32
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h> /* the clocks' FILETIME */
+#else
 #include <unistd.h>
 #endif
 
+/* 0, or -GNU_EIO: RAND_bytes says 1 when it filled the buffer, and takes an int's worth at a time */
 int gnu_random_bytes(void* destination, size_t size) {
-    return RAND_bytes(destination, size);
+    unsigned char* out = destination;
+    while (size) {
+        int n = size > INT_MAX ? INT_MAX : (int)size;
+        if (RAND_bytes(out, n) != 1) return -GNU_EIO;
+        out += n;
+        size -= (size_t)n;
+    }
+    return 0;
 }
 int gnu_clock_gettime(int id, int64_t* seconds, int64_t* nanos) {
     if (id != 0 && id != 1 && id != 4 && id != 5 && id != 6 && id != 7 && id != 2 && id != 3) return -GNU_EINVAL;
