@@ -181,6 +181,12 @@ static void networks(void) {
     /* the station leaves */
     changes_a = 0;
     snx_ldn_disconnect(b);
+    {
+        size_t node = 0;
+        int i;
+        for (i = 0; i < 200 && !fake_room_ldn_count(g_room, SNX_ROOM_LDN_DISCONNECT, &node); i++) sleep_ms(5);
+        CHECK(node == sizeof(SnxLdnNodeInfo)); /* Eden's host finds the station by the MAC in it */
+    }
     CHECK(!snx_ldn_connected(b) && snx_ldn_disconnect_reason(b) == SNX_LDN_REASON_DISCONNECTED_BY_USER);
     CHECK(wait_for(&changes_a, 1, 2000));
     CHECK(snx_ldn_network_info(a, &info, updates) == 1 && info.node_count == 1 &&
@@ -223,7 +229,7 @@ static int64_t recv_wait(SnxSocket* s, void* buf, size_t size, SnxSockAddr* from
 static void datagrams(void) {
     static const uint8_t any[4] = {0, 0, 0, 0}, bcast[4] = {192, 168, 1, 255};
     SnxRoom *ra, *rb;
-    SnxSocket *a, *a17, *b, *b17, *c;
+    SnxSocket *a, *a2, *a17, *b, *b17, *c;
     SnxSockAddr addr, from;
     SnxPollEntry e;
     SnxTimeval tv = {0, 100000};
@@ -247,6 +253,9 @@ static void datagrams(void) {
     CHECK(snx_socket_bind(b, &addr) == -SNX_EADDRNOTAVAIL); /* another console's address */
     addr = to_of(ip_a, 1235);
     CHECK(snx_socket_bind(a17, &addr) == 0);
+    CHECK(snx_room_socket_open(ra, &a2, SNX_AF_INET, SNX_SOCK_DGRAM, 0) == 0);
+    addr = to_of(any, 1236);
+    CHECK(snx_socket_bind(a2, &addr) == 0);
     CHECK(snx_socket_name(a, &addr) == 0 && addr.port == (uint16_t)(1234 >> 8 | 1234 << 8) &&
           !memcmp(addr.addr, any, 4));
     /* to a member: from the sender's address and the port its first send took; poll says so first */
@@ -259,6 +268,7 @@ static void datagrams(void) {
     CHECK(snx_socket_readable_bytes(a, &value) == 0 && value == 5);
     n = recv_wait(a, buf, sizeof buf, &from, &flags);
     CHECK(n == 5 && !memcmp(buf, "hello", 5) && !memcmp(from.addr, ip_b, 4) && from.port && !flags);
+    CHECK(snx_socket_recv(a2, buf, sizeof buf, SNX_MSG_DONTWAIT, NULL, NULL) == -SNX_EAGAIN); /* port 1236's */
     CHECK(snx_socket_name(b, &addr) == 0 && addr.port == from.port);
     /* the answer goes back to it */
     CHECK(snx_socket_send(a, "back", 4, 0, &from) == 4);
@@ -322,7 +332,32 @@ static void datagrams(void) {
     snx_socket_unref(b17);
     snx_socket_unref(b);
     snx_socket_unref(a17);
+    snx_socket_unref(a2);
     snx_socket_unref(a);
+    snx_room_leave(ra);
+}
+
+/* ============================================================ the handler */
+/* a handler that takes its time on the members' change: the one set after it is set only once it has returned */
+static int g_slow_in, g_slow_done;
+static void slow(void* arg, const SnxRoomLdn* p) {
+    (void)arg;
+    if (p) return;
+    __atomic_store_n(&g_slow_in, 1, __ATOMIC_SEQ_CST);
+    sleep_ms(200);
+    __atomic_store_n(&g_slow_done, 1, __ATOMIC_SEQ_CST);
+}
+static void handler(void) {
+    SnxRoom *ra, *rb;
+    int why, i;
+    CHECK(join(&ra, "Aogo", "secret", &why) == 0);
+    snx_room_set_ldn(ra, slow, NULL);
+    CHECK(join(&rb, "Xuji", "secret", &why) == 0); /* the members change: slow runs on ra's thread */
+    for (i = 0; i < 400 && !__atomic_load_n(&g_slow_in, __ATOMIC_SEQ_CST); i++) sleep_ms(5);
+    CHECK(__atomic_load_n(&g_slow_in, __ATOMIC_SEQ_CST));
+    snx_room_set_ldn(ra, NULL, NULL);
+    CHECK(__atomic_load_n(&g_slow_done, __ATOMIC_SEQ_CST)); /* what slow's arg is may go now */
+    snx_room_leave(rb);
     snx_room_leave(ra);
 }
 
@@ -359,6 +394,7 @@ int main(void) {
     joining();
     networks();
     datagrams();
+    handler();
     closing();
     fake_room_stop(g_room);
     printf("ldn_room: %u checks passed\n", checks);
