@@ -69,3 +69,30 @@ runs (run the job again for more) and keep what each passed, so a case that pass
 ```sh
 python3 scripts/edenprobe.py baseline run1/baseline.txt run2/baseline.txt -o tests/edenprobe/linux-x86_64.txt
 ```
+
+## A case from a game report
+
+A game report whose failure a maintainer understands gets the label `status: confirmed`, and the Game reports
+workflow comments on it once: it is ready for an edenprobe case, one that asks the console the question the failure
+comes down to, so every build is held to the answer. `scarletnx --mcp` has the tools an agent writes it with, in a
+clone of [edenprobe](https://github.com/scarletnx/edenprobe):
+
+- `edenprobe_scaffold` (service cases): writes the parts edenprobe's layout fixes into the clone, every file or none.
+  Those are the case's enum entry and `CASES[]` row, its judge and the judge's reference check in
+  `source/serviceref.[ch]` and `source/tests/t_serviceref.c`, the device side in `source/tests/t_service.c` called at
+  `RunService`'s end, and a new suite's row in `source/ui.c`. Each `TODO` it leaves names the issue. What is left is
+  the service call, the judge's logic, the expected answer and where it comes from (reden's commit and line, or a
+  console), the wrong answers the reference check holds the judge to, ScarletNX's among them, and the docs' counts.
+- `edenprobe_check`: `make -f host.mk host-run` in the clone. The judges and their checks run with the host's
+  compiler, no devkitPro. Until the docs' counts in words are updated, its `test_judge_counts` fails on purpose.
+- `edenprobe_run`: the NRO, built from the clone with edenprobe's pinned devkitPro image or taken from its pull
+  request's CI artifact, recompiled with this program and run headless in the mode's words until its summary. It
+  answers the report's lines for one suite or case and the report's path. The recompile is kept while the NRO is
+  unchanged, and nothing of the person's ScarletNX folders is read or written.
+- `edenprobe_finding`: the case's line in ScarletNX's report and in the reference's (Eden's, or a console's), checked
+  that it fails on ScarletNX and passes on the reference, and the pull request's text: the commit subject (72
+  characters at most), the issue, what each machine answered and the rules a case keeps. Nothing of a game goes in
+  it: no code, no disassembly, no assets, no value only that game uses.
+
+The commit and the pull request to scarletnx/edenprobe stay with the agent and the person, under edenprobe's
+`hooks/commit-msg`.

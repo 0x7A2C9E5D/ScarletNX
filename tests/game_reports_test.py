@@ -227,6 +227,26 @@ def main():
         reports.attachments(['see https://example.com/files/1/a.log and ' + url(7, 'b.txt')]) == [url(7, 'b.txt')],
         'only GitHub attachment URLs are fetched',
     )
+    # a maintainer's confirmed label: one comment, ready for an edenprobe case, with the report's signature
+    calls = len(gh.calls)
+    check(
+        reports.triage(
+            gh, {'action': 'labeled', 'label': {'name': 'priority: low'}, 'issue': {'number': 2}}, SCAN, fetch
+        )
+        == 'a label'
+        and len(gh.calls) == calls,
+        'another label does nothing',
+    )
+    labeled = {'action': 'labeled', 'label': {'name': reports.CONFIRMED}, 'issue': {'number': 2}}
+    check('ready for an edenprobe case' in reports.triage(gh, labeled, SCAN, fetch), 'the confirmed label')
+    (confirmed,) = [c for c in bot_comments(gh, 2) if reports.CONFIRMED_MARK in c['body']]
+    check(
+        'svcBreak in _ZN2nn3hid18GetNpadJoyHoldTypeEv' in confirmed['body'], "the comment names the report's signature"
+    )
+    check('`edenprobe_scaffold`' in confirmed['body'] and 'with `issue` 2' in confirmed['body'], 'the MCP steps')
+    check('posted already' in reports.triage(gh, labeled, SCAN, fetch), 'labeled again, no second comment')
+    check(len([c for c in bot_comments(gh, 2) if reports.CONFIRMED_MARK in c['body']]) == 1, 'one confirmed comment')
+    check(reports.CONFIRMED in gh.labels, 'the confirmed label is made for maintainers')
     print('game_reports_test: ok')
 
 

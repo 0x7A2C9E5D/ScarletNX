@@ -31,6 +31,33 @@ LOG = """[   0.00] ScarletNX - Some Game
 """
 
 
+# the parts of an edenprobe checkout the scaffold writes into, as edenprobe lays them out
+CHECKOUT = {
+    'source/serviceref.h': (
+        'typedef enum {\n    SERVICE_RANDOM, ///< csrng: two asks fill their buffers, differently\n'
+        '    SERVICE_CASES\n} ServiceCaseId;\n\nbool ServiceJudgeRandom(uint32_t rc, char *out, size_t out_size);\n\n'
+        '#ifdef __cplusplus\n}\n#endif\n'
+    ),
+    'source/serviceref.c': (
+        'static const struct {\n    const char *suite, *name;\n} CASES[] = {\n'
+        '    [SERVICE_RANDOM] = { "csrng", "GenerateRandomBytes fills the buffer" },\n};\n'
+    ),
+    'source/tests/t_service.c': 'static void RunCsrng(void) {}\n\nvoid RunService(void) {\n    RunCsrng();\n}\n',
+    'source/tests/t_serviceref.c': 'static void CheckRandom(void) {}\n\nvoid RunReferenceService(void) {\n    CheckRandom();\n}\n',
+    'source/ui.c': '    { "csrng", UI_FAMILY_SERVICE },\n    { "nifm", UI_FAMILY_NET },\n',
+}
+NAME = 'GetNpadJoyHoldType answers the hold type set before it'
+
+
+def report(result, detail):
+    lines = [
+        {'type': 'note', 'text': 'edenprobe 0.5.0 (abc1234) starting'},
+        {'type': 'case', 'suite': 'hid-style', 'name': NAME, 'tier': 'exact', 'result': result, 'detail': detail},
+        {'type': 'summary', 'passed': 1, 'failed': 0, 'skipped': 0, 'crashed': 0},
+    ]
+    return ''.join(json.dumps(line) + '\n' for line in lines)
+
+
 def check(cond, what):
     if not cond:
         sys.exit(f'mcp_test: {what}')
@@ -47,12 +74,12 @@ def npdm(program_id):
     return bytes(data)
 
 
-def call(name, id_=None, **arguments):
+def call(tool, id_=None, **arguments):
     return {
         'jsonrpc': '2.0',
-        'id': id_ or name,
+        'id': id_ or tool,
         'method': 'tools/call',
-        'params': {'name': name, 'arguments': arguments},
+        'params': {'name': tool, 'arguments': arguments},
     }
 
 
@@ -74,6 +101,24 @@ def main():
         (outside / 'secret.log').write_text(LOG)
         nro = data / 'smoke.nro'
         nro.write_bytes(make_nro())
+        checkout, broken = Path(tmp) / 'edenprobe', Path(tmp) / 'broken'
+        for root in (checkout, broken):
+            for rel, text in CHECKOUT.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(text)
+        (broken / 'source/serviceref.h').write_text('typedef enum {\n} ServiceCaseId;\n')
+        ours, theirs, passing = Path(tmp) / 'ours.jsonl', Path(tmp) / 'theirs.jsonl', Path(tmp) / 'passing.jsonl'
+        ours.write_text(report('fail', 'GetNpadJoyHoldType: rc 0xca8c0500'))
+        theirs.write_text(report('pass', 'hold type 1, rc 0x0'))
+        passing.write_text(report('pass', 'hold type 1, rc 0x0'))
+        hold = {
+            'family': 'service',
+            'suite': 'hid-style',
+            'id': 'HID_HOLD_TYPE',
+            'name': NAME,
+            'tier': 'exact',
+            'issue': 345,
+        }
 
         requests = [
             {'jsonrpc': '2.0', 'id': 'init', 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18'}},
@@ -90,6 +135,26 @@ def main():
             call('disassemble', game=str(nro), start='8000000', end='8000094'),
             call('disassemble', 'no_range', game=str(nro)),
             call('symbolize', 'no_game', game='0100000000000001', addresses=['1']),
+            call('edenprobe_scaffold', 'scaffold', checkout=str(checkout), **hold),
+            call('edenprobe_scaffold', 'again', checkout=str(checkout), **hold),
+            call('edenprobe_scaffold', 'broken', checkout=str(broken), **hold),
+            call('edenprobe_scaffold', 'bad_id', checkout=str(checkout), **dict(hold, id='hold')),
+            call('edenprobe_scaffold', 'cpu', checkout=str(checkout), **dict(hold, family='cpu')),
+            call('edenprobe_check', 'no_host', checkout=str(data)),
+            call('edenprobe_run', 'no_nro', nro=str(data / 'none.nro'), mode='quick notime service', filter='hid'),
+            call(
+                'edenprobe_finding',
+                'finding',
+                issue=345,
+                suite='hid-style',
+                name=NAME,
+                scarletnx_report=str(ours),
+                reference_report=str(theirs),
+                source='reden answers what SetNpadJoyHoldType set.',
+            ),
+            call(
+                'edenprobe_finding', 'passing', issue=345, suite='hid-style', name=NAME, scarletnx_report=str(passing)
+            ),
             call('nope'),
             {'jsonrpc': '2.0', 'id': 'method', 'method': 'resources/list'},
         ]
@@ -101,6 +166,10 @@ def main():
             text=True,
             timeout=120,
             check=True,
+        )
+        written = {rel: (checkout / rel).read_text() for rel in CHECKOUT}
+        untouched = all(
+            (broken / rel).read_text() == text for rel, text in CHECKOUT.items() if 'serviceref.h' not in rel
         )
     replies = [json.loads(line) for line in run.stdout.splitlines()]
     by_id = {r['id']: r for r in replies}
@@ -120,7 +189,21 @@ def main():
     check(init['protocolVersion'] == '2025-06-18' and 'tools' in init['capabilities'], 'initialize')
     check('same game version' in init['instructions'], 'the instructions')
     tools = {t['name']: t for t in by_id['list']['result']['tools']}
-    check(set(tools) == {'scan_log', 'read_log', 'find_game', 'symbolize', 'disassemble'}, f'tools: {sorted(tools)}')
+    check(
+        set(tools)
+        == {
+            'scan_log',
+            'read_log',
+            'find_game',
+            'symbolize',
+            'disassemble',
+            'edenprobe_scaffold',
+            'edenprobe_check',
+            'edenprobe_run',
+            'edenprobe_finding',
+        },
+        f'tools: {sorted(tools)}',
+    )
     check(all(t['inputSchema']['type'] == 'object' and len(t['description']) > 40 for t in tools.values()), 'schemas')
     check(tools['symbolize']['inputSchema']['required'] == ['game', 'addresses'], 'required arguments')
 
@@ -154,6 +237,45 @@ def main():
     check(failed('no_game') and 'title ID' in text('no_game'), 'a title ID with no game')
     check(failed('nope'), 'an unknown tool')
     check(by_id['method']['error']['code'] == -32601, 'an unknown method')
+    # the scaffold: each part where edenprobe keeps it, the call at its runner's end, the new suite's ui.c row
+    check(not failed('scaffold') and 'Left to write' in text('scaffold'), text('scaffold'))
+    h, c = written['source/serviceref.h'], written['source/serviceref.c']
+    check(h.index('    SERVICE_HID_HOLD_TYPE, ///< hid-style: ') < h.index('    SERVICE_CASES'), 'the enum entry')
+    check(h.index('bool ServiceJudgeHidHoldType(') < h.index('#ifdef __cplusplus'), 'the judge declared')
+    check(
+        '    [SERVICE_HID_HOLD_TYPE] = { "hid-style",' in c and c.index('[SERVICE_HID_HOLD_TYPE]') < c.index('\n};'),
+        f'the CASES row:\n{c}',
+    )
+    check('bool ServiceJudgeHidHoldType(uint32_t rc' in c and 'TODO(ScarletNX#345)' in c, 'the judge')
+    t = written['source/tests/t_service.c']
+    check(t.index('static void RunHidHoldType(void)') < t.index('void RunService(void)'), 'the device side')
+    check(t.rstrip().endswith('RunCsrng();\n    RunHidHoldType();\n}'), f'called at RunService end:\n{t}')
+    check('Report(SERVICE_HID_HOLD_TYPE, CHECK_EXACT, passed, detail);' in t, 'the tier')
+    r = written['source/tests/t_serviceref.c']
+    check(r.rstrip().endswith('CheckRandom();\n    CheckHidHoldType();\n}'), f'the reference check:\n{r}')
+    check(
+        written['source/ui.c'].startswith(
+            '    { "csrng", UI_FAMILY_SERVICE },\n    { "hid-style", UI_FAMILY_SERVICE },'
+        ),
+        'the new suite row after the service family',
+    )
+    check(failed('again') and 'already' in text('again'), 'a case written twice')
+    check(
+        failed('broken') and 'nothing was written' in text('broken') and untouched, 'an unknown layout, no file changed'
+    )
+    check(failed('bad_id') and failed('cpu'), 'a bad id, a family the scaffold does not write')
+    check(failed('no_host') and 'host.mk' in text('no_host'), 'edenprobe_check outside a checkout')
+    check(failed('no_nro') and 'cannot be read' in text('no_nro'), 'edenprobe_run without its NRO')
+
+    # the finding: ScarletNX's line and the reference's, the subject's length said, warnings when they don't differ
+    finding = text('finding')
+    check(
+        '| ScarletNX (`edenprobe 0.5.0 (abc1234) starting`) | fail | `GetNpadJoyHoldType: rc 0xca8c0500` |' in finding,
+        finding,
+    )
+    check('| reference (' in finding and 'scarletnx/ScarletNX#345' in finding and 'WARNING' not in finding, finding)
+    check('this one is' in finding, 'a subject over 72 characters is said so')
+    check('WARNING: the case passes on ScarletNX' in text('passing'), 'a case that shows nothing')
     print('mcp_test: ok')
 
 

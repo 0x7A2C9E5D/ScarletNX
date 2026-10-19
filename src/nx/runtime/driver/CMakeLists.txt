@@ -5,7 +5,8 @@ add_library(snx_nx_module STATIC ../../loader/module.c ../../loader/codegen_view
 set_target_properties(snx_nx_module PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_compile_options(snx_nx_module PRIVATE -pedantic-errors -Wall -Wextra -Werror=missing-prototypes)
 target_link_libraries(snx_nx_module PUBLIC scarletnx-common)
-add_library(snx_driver STATIC driver.c container.c extract.c game_name.c recompile.c toolchain.c mcp.c ../../loader/loader.c)
+add_library(snx_driver STATIC driver.c container.c extract.c game_name.c recompile.c toolchain.c mcp.c mcp_edenprobe.c
+                              ../../loader/loader.c)
 set_target_properties(snx_driver PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_compile_definitions(snx_driver PRIVATE
     SNX_SOURCE_DIR="${CMAKE_SOURCE_DIR}" SNX_BUILD_DIR="${CMAKE_BINARY_DIR}" _CRT_SECURE_NO_WARNINGS

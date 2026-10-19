@@ -68,14 +68,16 @@ build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
   (a log's lines holding a text, `|` between alternatives, with context, or a range, or its last lines, only under
   the data folder and its state, cache and settings folders), `find_game` (the extracted games in `work/` with their
   title IDs and versions), `symbolize` and `disassemble` (as `tools/symbols.py` and `tools/disasm.py`, A64 through
-  LLVM's disassembler where LLVM has the AArch64 target). The last game loaded stays loaded for the next call. The
-  game reports on GitHub come from GitHub's own MCP server or `scripts/game-reports.py index`.
+  LLVM's disassembler where LLVM has the AArch64 target). The last game loaded stays loaded for the next call. Its
+  edenprobe tools turn a confirmed report into an edenprobe case ([EDENPROBE.md](EDENPROBE.md)). The game reports
+  on GitHub come from GitHub's own MCP server or `scripts/game-reports.py index`.
 - Game reports: `.github/workflows/game-reports.yml` builds `snx-logscan` and runs `scripts/game-reports.py triage` on
   each issue and comment. An issue with a log attached (`.log`, `.txt`, `.gz`, `.zip`) or pasted in a fenced block gets
   one comment with the summary of each, edited as logs are added, the labels `game report` and `log: <how it ended>`,
   and the other reports with the same signature named. `triage --issue N --dry-run --logscan build/snx-logscan` shows
   what it would post. `scripts/game-reports.py index [--title-id ID] [--signature TEXT]` lists the reports and their
-  logs as JSON lines.
+  logs as JSON lines. A maintainer's `status: confirmed` label on a report gets one comment: ready for an edenprobe
+  case, with the steps.
 
 - Runtime: `--seconds=N` / `--frames=N`; `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
   `--script=ms:hexbuttons,...` (or `Nf:hexbuttons` to press at present N), `--press_len=ms` (default 300).

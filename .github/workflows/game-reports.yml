@@ -5,12 +5,12 @@ name: Game reports
 # An issue with a ScarletNX log attached or pasted gets a summary of it (scripts/game-reports.py, with the runtime's
 # log summary, src/common/utilities/logscan.c, built here as snx-logscan from its five files): how the run ended,
 # where, the service commands the runtime doesn't implement, and the other game reports that failed the same way. One
-# comment, edited as logs are added, and the labels `game report` and `log: <how it ended>`. Nothing of the issue
-# reaches the shell: the script reads the event's file. The checkout is main's, so an issue never runs code of a pull
-# request.
+# comment, edited as logs are added, and the labels `game report` and `log: <how it ended>`. A maintainer's
+# `status: confirmed` label gets a comment once: ready for an edenprobe case. Nothing of the issue reaches the shell:
+# the script reads the event's file. The checkout is main's, so an issue never runs code of a pull request.
 on:
   issues:
-    types: [opened, edited, reopened]
+    types: [opened, edited, reopened, labeled]
   issue_comment:
     types: [created, edited]
 

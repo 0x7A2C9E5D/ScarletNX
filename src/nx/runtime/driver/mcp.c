@@ -11,10 +11,13 @@
    - symbolize: game addresses (a backtrace's, a crash report's) named by the game's symbols, as tools/symbols.py does.
    - disassemble: a game function, by name or address range, with its branches named (disasm.h), as tools/disasm.py
      does, where this build has an A64 disassembler.
+   - edenprobe_scaffold, edenprobe_check, edenprobe_run, edenprobe_finding (mcp_edenprobe.c): a confirmed failure as a
+     new edenprobe case, written into a local checkout, checked on the host, run on this build, and written up.
 
    A game's code goes to the agent's context the way a session's tools/disasm.py output does, and nowhere else. An
    answer is cut at MAX_LINES lines: the agent's context is the scarce part */
 #include "nx/runtime/driver/mcp.h"
+#include "nx/runtime/driver/mcp_int.h"
 #include "common/utilities/common.h"
 #include "common/utilities/demangle.h"
 #include "common/utilities/logscan.h"
@@ -48,6 +51,8 @@ typedef struct {
     char* data;             /* the data folder */
     char* roots[MAX_ROOTS]; /* the folders read_log reads under */
     char* works[2];         /* the extractions: the cache's work/, then an older version's in the data folder */
+    char* self;             /* this program, which edenprobe_run recompiles and runs edenprobe with */
+    char* cache;            /* the data folder's cache folder, where edenprobe_run keeps its recompile */
     int nroots;
     /* the last game symbolize or disassemble loaded, kept for the next call: an agent asks about one game many times,
        and loading one takes a second or more. game_folder NULL for none */
@@ -55,14 +60,8 @@ typedef struct {
     Game game;
 } Mcp;
 
-/* ============================================================ text */
-typedef struct {
-    char* p;
-    size_t n, cap;
-    int lines;
-} Text;
-
-static void put_n(Text* t, const char* p, size_t n) {
+/* ============================================================ text (mcp_int.h) */
+void mcp_put_n(Text* t, const char* p, size_t n) {
     if (t->n + n + 1 > t->cap) {
         size_t cap = t->cap ? t->cap : 1024;
         while (cap < t->n + n + 1) cap *= 2;
@@ -73,7 +72,7 @@ static void put_n(Text* t, const char* p, size_t n) {
     t->n += n;
     t->p[t->n] = 0;
 }
-static void put(Text* t, const char* p) { put_n(t, p, strlen(p)); }
+void mcp_put(Text* t, const char* p) { mcp_put_n(t, p, strlen(p)); }
 static void hex(char* out, SnxU64 v) {
     char digits[17];
     int n = 0;
@@ -87,12 +86,12 @@ static void hex(char* out, SnxU64 v) {
 static void put_hex(Text* t, SnxU64 v) {
     char h[17];
     hex(h, v);
-    put(t, h);
+    mcp_put(t, h);
 }
-static void put_num(Text* t, unsigned long v) {
+void mcp_put_num(Text* t, unsigned long v) {
     char num[24];
     sprintf(num, "%lu", v);
-    put(t, num);
+    mcp_put(t, num);
 }
 /* hex digits, an optional 0x before them; 0 for text that isn't one */
 static int parse_hex(const char* s, SnxU64* out) {
@@ -126,17 +125,18 @@ static int mcp_open(Mcp* m, int argc, char** argv) {
     memset(m, 0, sizeof *m);
     for (i = 2; i + 1 < argc; i++)
         if (!strcmp(argv[i], "--repo")) m->data = snx_absolute(argv[++i]);
+    self = snx_executable(argv[0]);
     if (!m->data) {
-        self = snx_executable(argv[0]);
         dir = self ? snx_dirname(self) : NULL;
         m->data = dir ? snx_data_dir(dir) : NULL;
         free(dir);
-        free(self);
     }
+    m->self = self;
     if (!m->data) return snx_error("--mcp: no data folder (name one with --repo)");
     add_root(m, snx_strdup(m->data));
     add_root(m, snx_user_path(m->data, SNX_USER_STATE));
-    add_root(m, snx_user_path(m->data, SNX_USER_CACHE));
+    m->cache = snx_user_path(m->data, SNX_USER_CACHE);
+    add_root(m, snx_strdup(m->cache));
     add_root(m, snx_user_path(m->data, SNX_USER_CONFIG));
     /* snx_work_dir without its notice, which would go to stdout */
     work = snx_path_join(m->data, "work");
@@ -152,6 +152,8 @@ static void mcp_close(Mcp* m) {
     for (i = 0; i < m->nroots; i++) free(m->roots[i]);
     free(m->works[0]);
     free(m->works[1]);
+    free(m->self);
+    free(m->cache);
     free(m->data);
 }
 static int readable(const Mcp* m, const char* path) {
@@ -168,13 +170,13 @@ static char* scan_log(const char* path, Text* err) {
     SnxLogScan s;
     char* out = NULL;
     if (!f) {
-        put(err, "the file cannot be read");
+        mcp_put(err, "the file cannot be read");
         return NULL;
     }
     if (!snx_logscan_file(&s, f))
         out = snx_logscan_json(&s, snx_demangle);
     else
-        put(err, "out of memory or a read error");
+        mcp_put(err, "out of memory or a read error");
     snx_logscan_free(&s);
     fclose(f);
     return out;
@@ -197,13 +199,13 @@ static void keep(Shown* s, const char* line, size_t n, unsigned long number) {
 }
 static void show(Text* t, const Shown* s, unsigned long* last) {
     if (*last && s->number != *last + 1) {
-        put(t, "--\n");
+        mcp_put(t, "--\n");
         t->lines++;
     }
-    put_num(t, s->number);
-    put(t, ": ");
-    put(t, s->text);
-    put(t, "\n");
+    mcp_put_num(t, s->number);
+    mcp_put(t, ": ");
+    mcp_put(t, s->text);
+    mcp_put(t, "\n");
     t->lines++;
     *last = s->number;
 }
@@ -237,12 +239,12 @@ static char* read_log(const char* path, const char* pattern, int nocase, int con
     unsigned long number = 0, last = 0, after = 0, more = 0;
     int slots = pattern ? context + 1 : count, n = 0;
     if (context < 0 || context > MAX_CONTEXT || count < 1 || count > MAX_LINES) {
-        put(err, "context is 0 to 20 lines, count 1 to 400");
+        mcp_put(err, "context is 0 to 20 lines, count 1 to 400");
         return NULL;
     }
     f = fopen(path, "rb");
     if (!f) {
-        put(err, "the file cannot be read");
+        mcp_put(err, "the file cannot be read");
         return NULL;
     }
     ring = (Shown*)snx_alloc((size_t)slots * sizeof *ring);
@@ -294,17 +296,17 @@ static char* read_log(const char* path, const char* pattern, int nocase, int con
     free(ring);
     {
         Text out = {0};
-        put(&out, path);
-        put(&out, " has ");
-        put_num(&out, number);
-        put(&out, " lines\n");
-        if (t.p) put(&out, t.p);
+        mcp_put(&out, path);
+        mcp_put(&out, " has ");
+        mcp_put_num(&out, number);
+        mcp_put(&out, " lines\n");
+        if (t.p) mcp_put(&out, t.p);
         if (more) {
-            put(&out, "(");
-            put_num(&out, more);
-            put(&out, " more matching lines: narrow the pattern)\n");
+            mcp_put(&out, "(");
+            mcp_put_num(&out, more);
+            mcp_put(&out, " more matching lines: narrow the pattern)\n");
         }
-        if (pattern && !t.lines) put(&out, "(no line holds it)\n");
+        if (pattern && !t.lines) mcp_put(&out, "(no line holds it)\n");
         free(t.p);
         return out.p;
     }
@@ -376,7 +378,7 @@ static char* game_folder(const Mcp* m, const char* game, Text* err) {
         if (cJSON_GetArraySize(list))
             out = snx_strdup(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(list, 0), "path")->valuestring);
         else
-            put(err, "no extracted game with that title ID in work/ (find_game lists them)");
+            mcp_put(err, "no extracted game with that title ID in work/ (find_game lists them)");
         cJSON_Delete(list);
         return out;
     }
@@ -386,7 +388,7 @@ static char* game_folder(const Mcp* m, const char* game, Text* err) {
         if (path && snx_is_dir(path)) return path;
         free(path);
     }
-    put(err, "not a folder, a game of work/ or a title ID");
+    mcp_put(err, "not a folder, a game of work/ or a title ID");
     return NULL;
 }
 
@@ -399,7 +401,7 @@ static int game_load(Game* g, const char* folder, Text* err) {
     size_t i, j, n = 0;
     memset(g, 0, sizeof *g);
     if (snx_load_program(folder, &g->program, error, sizeof error)) {
-        put(err, error);
+        mcp_put(err, error);
         return -1;
     }
     for (i = 0; i < g->program.module_count; i++) n += g->program.modules[i].symbol_count;
@@ -427,7 +429,7 @@ static void game_free(Game* g) {
 static const Game* game_get(Mcp* m, const char* folder, Text* err) {
     char* full = snx_absolute(folder);
     if (!full) {
-        put(err, "the game cannot be read");
+        mcp_put(err, "the game cannot be read");
         return NULL;
     }
     if (m->game_folder && !strcmp(m->game_folder, full)) {
@@ -469,27 +471,27 @@ static const Sym* sym_before(const Game* g, SnxU64 a) {
 }
 static void put_name(Text* t, const char* name) {
     char* plain = !strncmp(name, "_Z", 2) ? snx_demangle(name) : NULL;
-    put(t, plain ? plain : name);
+    mcp_put(t, plain ? plain : name);
     free(plain);
 }
 /* "<module> <name>+<off>", or "<module> ?" with the symbol it is past, as symbols.py's describe */
 static void describe(Text* t, const Game* g, SnxU64 a) {
     const SnxModuleImage* mi = module_at(g, a);
     const Sym* s = sym_before(g, a);
-    put(t, mi ? mi->name : "?");
-    put(t, " ");
+    mcp_put(t, mi ? mi->name : "?");
+    mcp_put(t, " ");
     if (s && a - s->address < MAX_DISTANCE) {
         put_name(t, sym_name(g, s));
-        put(t, "+");
+        mcp_put(t, "+");
         put_hex(t, a - s->address);
     } else if (s) {
-        put(t, "? (");
+        mcp_put(t, "? (");
         put_name(t, sym_name(g, s));
-        put(t, "+");
+        mcp_put(t, "+");
         put_hex(t, a - s->address);
-        put(t, " is past MAX_DISTANCE)");
+        mcp_put(t, " is past MAX_DISTANCE)");
     } else
-        put(t, "?");
+        mcp_put(t, "?");
 }
 
 static char* symbolize(Mcp* m, const char* game, const cJSON* addresses, Text* err) {
@@ -499,7 +501,7 @@ static char* symbolize(Mcp* m, const char* game, const cJSON* addresses, Text* e
     int i, n = cJSON_GetArraySize(addresses);
     if (!folder) return NULL;
     if (!n) {
-        put(err, "addresses: hexadecimal game addresses, as the logs print them");
+        mcp_put(err, "addresses: hexadecimal game addresses, as the logs print them");
         free(folder);
         return NULL;
     }
@@ -510,14 +512,14 @@ static char* symbolize(Mcp* m, const char* game, const cJSON* addresses, Text* e
         const cJSON* a = cJSON_GetArrayItem(addresses, i);
         SnxU64 v;
         if (!cJSON_IsString(a) || !parse_hex(a->valuestring, &v)) {
-            put(&t, cJSON_IsString(a) ? a->valuestring : "?");
-            put(&t, " is not a hexadecimal address\n");
+            mcp_put(&t, cJSON_IsString(a) ? a->valuestring : "?");
+            mcp_put(&t, " is not a hexadecimal address\n");
             continue;
         }
         put_hex(&t, v);
-        put(&t, " ");
+        mcp_put(&t, " ");
         describe(&t, g, v);
-        put(&t, "\n");
+        mcp_put(&t, "\n");
     }
     return t.p;
 }
@@ -532,19 +534,19 @@ static void listed(void* ctx, SnxU64 address, SnxU32 word, const char* text, Snx
     char w[9];
     if (l->t->lines >= MAX_LINES) return;
     sprintf(w, "%08lx", (unsigned long)word);
-    put(l->t, "  ");
+    mcp_put(l->t, "  ");
     put_hex(l->t, address);
-    put(l->t, ":  ");
-    put(l->t, w);
-    put(l->t, "  ");
-    put(l->t, text);
+    mcp_put(l->t, ":  ");
+    mcp_put(l->t, w);
+    mcp_put(l->t, "  ");
+    mcp_put(l->t, text);
     if (target) {
-        put(l->t, "  ; ");
+        mcp_put(l->t, "  ; ");
         put_hex(l->t, target);
-        put(l->t, " ");
+        mcp_put(l->t, " ");
         describe(l->t, l->g, target);
     }
-    put(l->t, "\n");
+    mcp_put(l->t, "\n");
     l->t->lines++;
 }
 
@@ -563,7 +565,7 @@ static char* disassemble(Mcp* m, const char* game, const char* function, const c
     free(folder);
     if (!g) return NULL;
     if (!g->program.npdm.is64) {
-        put(err, "a 32-bit game: disassemble reads A64 only (tools/disasm.py reads A32 and Thumb)");
+        mcp_put(err, "a 32-bit game: disassemble reads A64 only (tools/disasm.py reads A32 and Thumb)");
         goto done;
     }
     if (function) {
@@ -577,7 +579,7 @@ static char* disassemble(Mcp* m, const char* game, const char* function, const c
             free(plain);
         }
         if (!hit) {
-            put(err, "no symbol holds that name");
+            mcp_put(err, "no symbol holds that name");
             goto done;
         }
         from = hit->address;
@@ -589,29 +591,29 @@ static char* disassemble(Mcp* m, const char* game, const char* function, const c
                 if (g->syms[i].address > from) to = g->syms[i].address;
         if (!to || to - from > MAX_FUNCTION) to = from + MAX_FUNCTION;
         put_name(&t, sym_name(g, hit));
-        put(&t, ":\n");
+        mcp_put(&t, ":\n");
     } else if (!start || !end || !parse_hex(start, &from) || !parse_hex(end, &to) || to <= from) {
-        put(err, "name a function, or a range: start and end, hexadecimal, end past start");
+        mcp_put(err, "name a function, or a range: start and end, hexadecimal, end past start");
         goto done;
     }
     from &= ~(SnxU64)3;
     mi = module_at(g, from);
     if (!mi || from - mi->base >= mi->image_size) {
-        put(err, "no module's code there");
+        mcp_put(err, "no module's code there");
         goto done;
     }
     if (to - mi->base > mi->image_size) to = mi->base + mi->image_size;
     l.t = &t;
     l.g = g;
     if (snx_disasm_a64(mi->image + (from - mi->base), (size_t)(to - from), from, listed, &l)) {
-        put(err, "this build has no A64 disassembler (its LLVM has no AArch64 target): tools/disasm.py has one");
+        mcp_put(err, "this build has no A64 disassembler (its LLVM has no AArch64 target): tools/disasm.py has one");
         goto done;
     }
-    if (t.lines >= MAX_LINES) put(&t, "... (cut at 400 instructions: give a range for the rest)\n");
+    if (t.lines >= MAX_LINES) mcp_put(&t, "... (cut at 400 instructions: give a range for the rest)\n");
     if (found > 1) {
-        put(&t, "(");
-        put_num(&t, (unsigned long)found - 1);
-        put(&t, " more symbols hold that name: a longer part of it picks one)\n");
+        mcp_put(&t, "(");
+        mcp_put_num(&t, (unsigned long)found - 1);
+        mcp_put(&t, " more symbols hold that name: a longer part of it picks one)\n");
     }
 done:
     if (err->n) {
@@ -625,7 +627,7 @@ done:
 /* C90 takes string literals of 509 characters: a longer text is parts, joined when it is sent */
 static char* joined(const char* const* parts) {
     Text t = {0};
-    for (; *parts; parts++) put(&t, *parts);
+    for (; *parts; parts++) mcp_put(&t, *parts);
     return t.p;
 }
 
@@ -704,12 +706,53 @@ static cJSON* tools(void) {
         "Disassembles a game function named by a part of its symbol (demangled or not), or the range start to end "
         "(hexadecimal), with each branch's target named. 400 instructions at most. game as for symbolize.",
         NULL};
+    static const char* const scaffold_names[] = {"checkout", "suite", "id", "name", "tier", "issue", "family"};
+    static const char* const scaffold_types[] = {"string", "string", "string", "string", "string", "integer", "string"};
+    static const char* const check_names[] = {"checkout", "suite"};
+    static const char* const s2[] = {"string", "string"};
+    static const char* const run_names[] = {"nro", "mode", "filter"};
+    static const char* const s3[] = {"string", "string", "string"};
+    static const char* const finding_names[] = {"issue", "suite", "name", "scarletnx_report", "reference_report",
+                                                "source"};
+    static const char* const finding_types[] = {"integer", "string", "string", "string", "string", "string"};
+    static const char* const scaffold_says[] = {
+        "For a confirmed game report (the `status: confirmed` label): writes a new edenprobe service case's "
+        "mechanical parts into a local edenprobe checkout (git clone of scarletnx/edenprobe), every file or none: ",
+        "the case's enum entry and CASES[] row (suite, name), a judge and its reference check to fill in, the device "
+        "side asking nothing yet, and a new suite's ui.c row. family is service (the only one it writes yet); id is "
+        "the enum name without SERVICE_ (HID_HOLD_TYPE); ",
+        "name is one sentence about the hardware's behaviour; tier is none, exact, ulp, position or level; issue is "
+        "the ScarletNX issue. It answers what is left to write: the service call, the judge, the expected answer's "
+        "source, the docs. Nothing of the game goes into a case.",
+        NULL};
+    static const char* const check_says[] = {
+        "Runs edenprobe's host check in a checkout (make -f host.mk host-run: every judge and its reference check, "
+        "with the host's compiler, no Switch toolchain): its lines about suite, its failures and its end.",
+        NULL};
+    static const char* const run_says[] = {
+        "Recompiles an edenprobe NRO (built from the checkout with devkitPro's image, or a pull request's CI "
+        "artifact) with this program, runs it headless in the mode's words (\"quick notime service\", plus \"fatal\" "
+        "for a case that may crash) until its summary, ",
+        "relaunching after a crash, and answers the report's build, the cases filter names (\"suite\" or \"suite: "
+        "name\") and its summary. The recompile is kept while the NRO is unchanged; nothing of the person's "
+        "ScarletNX folders is touched. The report stays in the cache for edenprobe_finding.",
+        NULL};
+    static const char* const finding_says[] = {
+        "The case's lines in ScarletNX's report.jsonl and the reference's (Eden's run, or a console's), checked "
+        "(it should fail on ScarletNX and pass on the reference), and the edenprobe pull request's text: ",
+        "the commit subject, the issue it comes from, what each machine answered, source (where the expected answer "
+        "comes from), the tests, and what a case may not hold.",
+        NULL};
     cJSON* list = cJSON_CreateArray();
     tool(list, "scan_log", scan_says, schema(path, s1, 1, path, 1));
     tool(list, "read_log", read_says, schema(read_names, read_types, 6, path, 1));
     tool(list, "find_game", find_says, schema(find_names, s1, 1, NULL, 0));
     tool(list, "symbolize", sym_says, schema(sym_names, sym_types, 2, sym_names, 2));
     tool(list, "disassemble", dis_says, schema(dis_names, dis_types, 4, game, 1));
+    tool(list, "edenprobe_scaffold", scaffold_says, schema(scaffold_names, scaffold_types, 7, scaffold_names, 7));
+    tool(list, "edenprobe_check", check_says, schema(check_names, s2, 2, check_names, 1));
+    tool(list, "edenprobe_run", run_says, schema(run_names, s3, 3, run_names, 3));
+    tool(list, "edenprobe_finding", finding_says, schema(finding_names, finding_types, 6, finding_names, 4));
     return list;
 }
 
@@ -730,14 +773,15 @@ static cJSON* call(Mcp* m, const char* name, const cJSON* args) {
     const char* path = arg_string(args, "path");
     if (!strcmp(name, "scan_log")) {
         if (!path)
-            put(&err, "path: the log");
+            mcp_put(&err, "path: the log");
         else
             text = scan_log(path, &err);
     } else if (!strcmp(name, "read_log")) {
         if (!path)
-            put(&err, "path: the log");
+            mcp_put(&err, "path: the log");
         else if (!readable(m, path))
-            put(&err, "outside the folders read_log reads (ScarletNX's data folder and its state, cache and settings)");
+            mcp_put(&err,
+                    "outside the folders read_log reads (ScarletNX's data folder and its state, cache and settings)");
         else
             text = read_log(path, arg_string(args, "pattern"),
                             cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(args, "ignore_case")),
@@ -747,7 +791,7 @@ static cJSON* call(Mcp* m, const char* name, const cJSON* args) {
         const char* id = arg_string(args, "title_id");
         SnxU64 tid = 0;
         if (id && !parse_hex(id, &tid))
-            put(&err, "title_id: sixteen hexadecimal digits");
+            mcp_put(&err, "title_id: sixteen hexadecimal digits");
         else {
             cJSON* list = cJSON_CreateArray();
             find_games(m, tid, list);
@@ -757,15 +801,45 @@ static cJSON* call(Mcp* m, const char* name, const cJSON* args) {
     } else if (!strcmp(name, "symbolize") || !strcmp(name, "disassemble")) {
         const char* game = arg_string(args, "game");
         if (!game)
-            put(&err, "game: a folder, a game of work/ or a title ID");
+            mcp_put(&err, "game: a folder, a game of work/ or a title ID");
         else if (name[0] == 's')
             text = symbolize(m, game, cJSON_GetObjectItemCaseSensitive(args, "addresses"), &err);
         else
             text = disassemble(m, game, arg_string(args, "function"), arg_string(args, "start"),
                                arg_string(args, "end"), &err);
+    } else if (!strcmp(name, "edenprobe_scaffold")) {
+        const char *checkout = arg_string(args, "checkout"), *suite = arg_string(args, "suite"),
+                   *id = arg_string(args, "id"), *what = arg_string(args, "name"), *family = arg_string(args, "family");
+        if (!checkout || !suite || !id || !what || !family)
+            mcp_put(&err, "checkout, family, suite, id, name, tier and issue");
+        else if (strcmp(family, "service"))
+            mcp_put(&err, "family: the scaffold writes service cases only yet; a cpu case goes in "
+                          "source/tests/t_cpu.c by hand (a name, an inline-asm helper, CHECK_TRUE)");
+        else
+            text = mcp_edenprobe_scaffold(checkout, suite, id, what, arg_string(args, "tier"),
+                                          arg_number(args, "issue", 0), &err);
+    } else if (!strcmp(name, "edenprobe_check")) {
+        const char* checkout = arg_string(args, "checkout");
+        if (!checkout)
+            mcp_put(&err, "checkout: the edenprobe checkout");
+        else
+            text = mcp_edenprobe_check(checkout, arg_string(args, "suite"), &err);
+    } else if (!strcmp(name, "edenprobe_run")) {
+        const char *nro = arg_string(args, "nro"), *mode = arg_string(args, "mode"),
+                   *filter = arg_string(args, "filter");
+        if (!nro || !mode || !filter)
+            mcp_put(&err, "nro, mode and filter");
+        else if (!m->self || !m->cache)
+            mcp_put(&err, "this program's path or its cache folder is unknown");
+        else
+            text = mcp_edenprobe_run(m->self, m->cache, nro, mode, filter, &err);
+    } else if (!strcmp(name, "edenprobe_finding")) {
+        text = mcp_edenprobe_finding(arg_number(args, "issue", 0), arg_string(args, "suite"), arg_string(args, "name"),
+                                     arg_string(args, "scarletnx_report"), arg_string(args, "reference_report"),
+                                     arg_string(args, "source"), &err);
     } else {
-        put(&err, "no tool ");
-        put(&err, name);
+        mcp_put(&err, "no tool ");
+        mcp_put(&err, name);
     }
     cJSON_AddStringToObject(item, "type", "text");
     cJSON_AddStringToObject(item, "text", text ? text : err.p ? err.p : "failed");
@@ -840,7 +914,7 @@ int snx_mcp(int argc, char** argv) {
     if (mcp_open(&m, argc, argv)) return 1;
     while (fgets(chunk, sizeof chunk, stdin)) {
         size_t n = strlen(chunk);
-        put_n(&line, chunk, n);
+        mcp_put_n(&line, chunk, n);
         if (n && chunk[n - 1] != '\n' && !feof(stdin)) continue; /* the rest of a long message */
         if (line.n && strspn(line.p, " \t\r\n") != line.n) {
             cJSON* message = cJSON_Parse(line.p);
