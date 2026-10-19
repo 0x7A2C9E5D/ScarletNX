@@ -41,6 +41,15 @@ add_library(snx_a64_reference STATIC cpu/aarch64/a64_emit.c cpu/recompiler/codeg
 target_compile_options(snx_a64_reference PRIVATE -fno-strict-aliasing -Wall -Wextra -Werror=missing-prototypes)
 target_link_libraries(snx_a64_reference PUBLIC scarletnx-common)
 
+# The setup a first start goes through (utilities/setup.h), the launcher's and the driver's: OpenSSL for the first
+# user's random uid
+if(TARGET OpenSSL::Crypto)
+    add_library(snx_setup STATIC utilities/setup.c)
+    target_compile_options(snx_setup PRIVATE -Wall -Wextra -Werror=missing-prototypes)
+    target_compile_definitions(snx_setup PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_link_libraries(snx_setup PUBLIC scarletnx-common OpenSSL::Crypto)
+endif()
+
 # The same indexed host filesystem and shared immutable file views serve NX
 # and CTR. No guest ABI or runtime/platform dependency enters this target.
 add_library(scarletnx-filesystem STATIC filesystem/tree.c filesystem/host.c)

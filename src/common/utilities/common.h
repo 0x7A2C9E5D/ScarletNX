@@ -116,6 +116,8 @@ char* snx_work_dir(const char* data_dir);
    beside the AppImage or the program, when it is there (a portable copy); else the user's data folder. NULL when none
    can be named */
 char* snx_data_dir(const char* program_dir);
+/* SNX_PORTABLE_DIR beside the AppImage or the program in program_dir, there or not; NULL when none can be named */
+char* snx_portable_dir(const char* program_dir);
 /* The checkout a program run from its build tree (build; NULL: any program) was built from, for what only a checkout
    has: its sources, and what an older version kept in it. NULL for any other program */
 char* snx_checkout(const char* checkout, const char* build, const char* program_dir);

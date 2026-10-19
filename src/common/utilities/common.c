@@ -882,7 +882,7 @@ char* snx_work_dir(const char* data_dir) {
     free(old);
     return work;
 }
-char* snx_data_dir(const char* program_dir) {
+char* snx_portable_dir(const char* program_dir) {
     const char *appimage = getenv("APPIMAGE"), *appdir = getenv("APPDIR");
     char *dir = NULL, *copy;
     /* an AppImage's programs run from its mount: the copy is the AppImage file. APPIMAGE is inherited, so it counts
@@ -893,6 +893,10 @@ char* snx_data_dir(const char* program_dir) {
         dir = snx_strdup(program_dir);
     copy = dir ? snx_path_join(dir, SNX_PORTABLE_DIR) : NULL;
     free(dir);
+    return copy;
+}
+char* snx_data_dir(const char* program_dir) {
+    char* copy = snx_portable_dir(program_dir);
     if (copy && snx_is_dir(copy)) return copy;
     free(copy);
     return snx_user_data_dir();
