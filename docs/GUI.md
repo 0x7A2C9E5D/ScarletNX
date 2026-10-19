@@ -55,7 +55,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   keys': a click on its blinking **[ Pick or drop a file ]**, or Enter, opens the system's file
   picker (on Linux the desktop's, else zenity's). Dropping a file on the window and Ctrl+V with
   a path work too. ESC returns to the menu. On Android the picker opens at once. A dump not extracted yet takes
-  about its size for the extraction and, for a Switch game, as much again for the RomFS its folder gets; when its
+  about its size, a Switch dump's extracted straight into its game's folder (as much again only with an
+  **Extractions** folder picked, which keeps a copy, and in the temporary folder with *Extract to tmpfs*); when its
   disks have less free, the menu says how much it needs and *Run anyway* takes a second press.
 - **Load 3DS CIA** uses `scarletnx-3ds`. Its `games/` browser lists CIA inputs,
   not host executables. The driver extracts supported decrypted application CIAs.
@@ -137,8 +138,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   libgccjit; a game of `games/` another build made is recompiled with LLVM), **gdbstub** passes `-S` and `-s`, the
   runtime's stub on port 1234 waiting for the debugger at startup (UNIX only), and **Extract to tmpfs**
   passes `--tmpfs`: a dump's extraction goes to `/tmp/scarletnx/work/<title ID>` (`$TMPDIR` when set, the
-  temporary folder on Windows) instead of the extractions folder, and the game reads its RomFS from there, its saves
-  staying in its folder. Off, the default, it is extracted to disk. The room a run asks about is then the temporary
+  temporary folder on Windows) instead of the game's folder, and the game reads its RomFS from there, its ExeFS and
+  saves staying in its folder. Off, the default, it is extracted to disk. The room a run asks about is then the temporary
   folder's, without the second copy. Either way the game's folder gets `<name>.source`, a link to the dump, which
   the RomFS is extracted again from when tmpfs was emptied (a reboot), or moved by when the setting changes. A game
   without one, made before, says *Can't be extracted to tmpfs due to missing symlink* and runs from what it has.

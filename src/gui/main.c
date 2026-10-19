@@ -3089,8 +3089,7 @@ static char* dump_out(const App* app, const char* file, const char* kind) {
     free(dir);
     return out;
 }
-/* Extract to tmpfs: a game of games/ made from file already, which its folder's link to the dump names (the driver's
-   <name>.source), and whose extraction is in tmpfs or its folder */
+/* a game of games/ made from file already, which its folder's link to the dump names (the driver's <name>.source) */
 static bool made_from(const App* app, const char* file) {
     char** names = NULL;
     size_t count = 0, i;
@@ -3104,21 +3103,22 @@ static bool made_from(const App* app, const char* file) {
     snx_free_strings(names, count);
     return found;
 }
-/* room on the disks for file's run (gui_room), not extracted yet; else room_line says what it takes. With Extract to
-   tmpfs the extraction goes to the temporary folder, and the game's folder gets no copy of its RomFS. The free space
-   is room_free in tests */
+/* room on the disks for file's run (gui_room), not extracted yet; else room_line says what it takes. A Switch dump is
+   extracted straight into its game's folder, or the temporary folder with Extract to tmpfs; only into an extractions
+   folder picked is it kept, and its game made from a copy. The free space is room_free in tests */
 static bool room_fits(App* app, const char* file) {
-    bool copy = app->menu.selected == GUI_SWITCH, fits = true, tmpfs = copy && gui_settings_tmpfs(settings_of(app));
+    bool nx = app->menu.selected == GUI_SWITCH, tmpfs = nx && gui_settings_tmpfs(settings_of(app));
+    bool kept = !nx || (app->place[GUI_PLACE_WORK] && !tmpfs), fits = true;
     char *out, *temp = tmpfs ? snx_temp_root() : NULL, need_text[32], left_text[32];
-    const char* work = temp ? temp : app->work_dir;
+    const char* work = temp ? temp : kept ? app->work_dir : app->games_dir;
     uint64_t need = 0, left = 0;
-    if (copy && nro_file(file)) { /* no extraction */
+    if (nx && nro_file(file)) { /* no extraction */
         free(temp);
         return true;
     }
-    out = dump_out(app, file, copy ? NULL : "3ds");
-    if (tmpfs ? !made_from(app, file) : !snx_is_dir(out)) /* else extracted already, and its game made with it */
-        fits = gui_room(snx_file_size(file), copy && !tmpfs, app->room_free ? app->room_free : free_space(work),
+    out = dump_out(app, file, nx ? NULL : "3ds");
+    if (kept ? !snx_is_dir(out) : !made_from(app, file)) /* else extracted already, and its game made with it */
+        fits = gui_room(snx_file_size(file), nx && kept, app->room_free ? app->room_free : free_space(work),
                         app->room_free ? app->room_free : free_space(app->games_dir),
                         snx_same_disk(work, app->games_dir), &need, &left);
     free(temp);

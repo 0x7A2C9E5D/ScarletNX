@@ -26,19 +26,22 @@ Pass a single XCI, NSP, DXCI or DNSP to extract, recompile and play:
 ```
 
 The driver runs each step as a child process and starts the game with its folder, `games/<id>/`, as its working
-directory. The game is named by its title ID, an NRO by its name; `games/` and `work/` are the data folder's, from a
-build tree too ([Folders](#folders)). Its extraction in `work/` is named after the dump stem, retaining letters,
-digits, UTF-8, spaces, hyphens and underscores.
+directory. The game is named by its title ID, read from the dump's NCA headers before anything is extracted, an NRO by
+its name (a dump without a title ID of its own by its stem); `games/` is the data folder's, from a build tree too
+([Folders](#folders)). The dump is extracted straight into the game's folder, `games/<id>/<id>_data/` (`exefs/`,
+`romfs/`, `control.nacp`), and the game made from it there: there is no second copy. `<id>.extracting` stays in the
+game's folder while an extraction is unfinished, and a stopped one is redone on the next run, the game's saves kept.
 `--repo DIR` and `--build-dir DIR` may precede the dump. Keys use the usual discovery paths below.
-`--outdir DIR` puts the game's folder in DIR and `--out DIR` the dump's extraction at DIR, as `-r` and `-x` take
-them, in place of the data folder's `games/` and `work/<dump stem>`; an NRO has no extraction to name.
+`--outdir DIR` puts the game's folder in DIR in place of the data folder's `games/`, as `-r` takes it. `--out DIR`
+keeps the dump's extraction at DIR instead, as `-x` takes it, the game made from a copy of it; an NRO has no
+extraction to name.
 `--tmpfs` extracts to tmpfs instead: `<temp>/scarletnx/work/<title ID>` (`$TMPDIR`, else `/tmp`; the temporary
-folder on Windows), where the game reads its RomFS from while its saves stay in `games/<id>/<id>_data/`. The game's
-folder gets `<id>.source`, a link to the dump, in either mode, and `<id>.tmpfs` while its RomFS is in tmpfs. A run
-extracts the RomFS again from the link when the system emptied tmpfs, and moves it between tmpfs and the game's
-folder when `--tmpfs` is given or left out. Without the link (a game made before, or Windows without the right to
-make one) it says *Can't be extracted to tmpfs due to missing symlink*. A dump played again with `--tmpfs` is found
-by its link, not extracted again. `-r --tmpfs` on an extraction leaves its RomFS where it is.
+folder on Windows), where the game reads its RomFS from while its ExeFS and saves stay in `games/<id>/<id>_data/`.
+The game's folder gets `<id>.source`, a link to the dump, in either mode, and `<id>.tmpfs` while its RomFS is in
+tmpfs. A run extracts the RomFS again from the link when the system emptied tmpfs, and moves it between tmpfs and
+the game's folder when `--tmpfs` is given or left out. Without the link (a game made before, or Windows without the right to
+make one) it says *Can't be extracted to tmpfs due to missing symlink*. `-r --tmpfs` on an extraction leaves its
+RomFS where it is.
 `-H` (`--headless`) can precede or follow the dump and is passed to the game only.
 Omitting it starts the game with a window.
 `-x` means `--extract`, and `-r` means `--recomp` (the old `--recompile` spelling was removed).
@@ -292,7 +295,8 @@ list). The user's data folder and a portable copy's keep each kind of file apart
 
 The menu works in the user's data folder or a portable copy's, unless its Settings > App > Folders picks a data
 folder, a games folder or an extractions folder ([GUI](GUI.md)): it passes them to the driver as `--repo`, `--outdir`
-and `--out` (to the 3DS driver as `--repo` and `--output`), and its own files stay where they are. On Android they
+and `--out` (an extractions folder picked keeps a Switch dump's extraction there, the game made from a copy; to the
+3DS driver as `--repo` and `--output`), and its own files stay where they are. On Android they
 are in its data folder's `config/` and `state/`, in the app's own storage, which needs no permission. `~/.local/share`, `~/.config`, `~/.local/state` and `~/.cache` are the
 defaults of `$XDG_DATA_HOME`, `$XDG_CONFIG_HOME`, `$XDG_STATE_HOME` and `$XDG_CACHE_HOME` (a relative one is ignored).
 

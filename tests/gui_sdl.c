@@ -2297,8 +2297,8 @@ int main(int argc, char** argv) {
         free(games);
     }
 
-    /* a dump not extracted yet, with less room than its extraction and RomFS copy take: asked first, Run anyway
-       pressed twice; Back runs nothing. With room, extracted already or an NRO, it runs at once */
+    /* a dump not extracted yet, with less room than its extraction takes (straight into its game's folder: once):
+       asked first, Run anyway pressed twice; Back runs nothing. With room, made already or an NRO, it runs at once */
     {
         char *dump = snx_path_join(temporary, "room dump.nsp"), *nro = snx_path_join(temporary, "room dump.nro");
         char *work_was = app.work_dir, *games_was = app.games_dir, *out;
@@ -2311,11 +2311,11 @@ int main(int argc, char** argv) {
         app.games_dir = snx_path_join(temporary, "room games");
         app.menu.selected = GUI_SWITCH;
         launcher(&app, true);
-        app.room_free = 4u << 20; /* 6 MB to take */
+        app.room_free = 2u << 20; /* 3 MB to take */
         launch(&app, snx_strdup(dump), false);
         assert(!app.menu.running && app.confirm.shown && app.confirm.ask == GUI_ASK_ROOM && app.room_file);
         render(&app);
-        shows(&app, "Needs about 6 MB, 4 MB free.", rgb(app.theme.warning));
+        shows(&app, "Needs about 3 MB, 2 MB free.", rgb(app.theme.warning));
         shows(&app, "- Back", yellow);
         shows(&app, "- Run anyway", normal);
         key(&app, SDLK_RETURN);
@@ -2348,7 +2348,7 @@ int main(int argc, char** argv) {
         touch_box(&app, list_box(&l, 1));
         assert(!app.confirm.shown && app.menu.running);
         finish(&app, 0);
-        app.room_free = 6u << 20;
+        app.room_free = 3u << 20;
         launch(&app, snx_strdup(dump), false);
         assert(!app.confirm.shown && app.menu.running);
         finish(&app, 0);
@@ -2356,11 +2356,17 @@ int main(int argc, char** argv) {
         launch(&app, snx_strdup(nro), false);
         assert(!app.confirm.shown && app.menu.running);
         finish(&app, 0);
-        out = dump_out(&app, dump, NULL);
-        assert(!snx_mkdirs(out));
-        launch(&app, snx_strdup(dump), false);
-        assert(!app.confirm.shown && app.menu.running);
-        finish(&app, 0);
+        out = snx_path_join(app.games_dir, "0100ABCD12345000"); /* made already: its folder links to the dump */
+        {
+            char* link = snx_path_join(out, "0100ABCD12345000.source");
+            assert(!snx_mkdirs(out));
+            if (!snx_symlink(dump, link)) { /* Windows without the right to make one: none to test */
+                launch(&app, snx_strdup(dump), false);
+                assert(!app.confirm.shown && app.menu.running);
+                finish(&app, 0);
+            }
+            free(link);
+        }
         assert(!snx_remove_tree(out));
         free(out);
         app.room_free = 0;

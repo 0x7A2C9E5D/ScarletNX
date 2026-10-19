@@ -563,7 +563,7 @@ static int extract_files(ExtractState* state) {
 static int cleanup(ExtractState* state, int result) {
     if (result && state->made_out && state->out && snx_remove_tree(state->out))
         snx_error("Could not remove incomplete extraction output: %s", state->out);
-    if (!result) printf("Done: %s\n", state->out);
+    if (!result && state->out) printf("Done: %s\n", state->out);
     snx_hac_free(state->hac);
     free(state->base);
     free(state->update);
@@ -601,6 +601,32 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
         snx_hac_on_exit(hactool_exit, &state);
         result = extract_files(&state);
         snx_hac_on_exit(NULL, NULL);
+    }
+    return cleanup(&state, result);
+}
+int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title) {
+    ExtractState state;
+    NcaRef program, control;
+    int base, result = 0;
+    memset(&state, 0, sizeof state);
+    state.base = snx_absolute(dump);
+    state.keys = find_keys(NULL, "prod.keys", paths);
+    state.title_keys = find_keys(NULL, "title.keys", paths);
+    if (!state.base || !state.keys || !state.title_keys)
+        result = snx_error("Cannot resolve extraction input paths");
+    else if (!snx_is_file(state.base))
+        result = snx_error("Base dump is missing or is not a file");
+    else
+        result = container_kind(state.base, &state.base_xci);
+    if (!result && !(state.hac = snx_hac_new())) result = snx_error("Out of memory reading the dump");
+    if (!result) {
+        state.has_keys = snx_is_file(state.keys);
+        snx_hac_on_exit(hactool_exit, &state);
+        result = (state.has_keys && load_prod_keys(&state)) || load_title_keys(&state) ||
+                 (base = open_container(&state, state.base, state.base_xci)) < 0 || read_tickets(&state, base) ||
+                 select_ncas(&state, base, 0, 0, &program, NULL, &control);
+        snx_hac_on_exit(NULL, NULL);
+        if (!result) *title = program.title_id;
     }
     return cleanup(&state, result);
 }

@@ -69,13 +69,23 @@ static int event(char stage) {
 #endif
     return 7;
 }
+/* the title ID the extraction's NPDM gives (SNX_WORKFLOW_NPDM "id"), else none */
+int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title) {
+    const char* kind = getenv("SNX_WORKFLOW_NPDM");
+    (void)paths;
+    CHECK(snx_is_file(dump));
+    *title = kind && !strcmp(kind, "id") ? ((SnxU64)0x0100ABCDUL << 32) | 0x12345000UL : 0;
+    return 0;
+}
 int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     char* partial;
     int rc;
     (void)paths;
     CHECK(argc == 4 && !strcmp(argv[0], "--out") && !strcmp(argv[2], "--"));
     CHECK(snx_is_file(argv[3]));
-    CHECK(!snx_is_dir(argv[1]));
+    partial = snx_path_join(argv[1], "exefs"); /* into a game's data folder: what an extraction left taken away */
+    CHECK(!snx_path_exists(partial));
+    free(partial);
     CHECK(!snx_mkdirs(argv[1]));
     partial = snx_path_join(argv[1], "partial");
     CHECK(!snx_write_file(partial, "partial", 7));
@@ -166,13 +176,14 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     if (rc || (!strcmp(getenv("SNX_WORKFLOW_MODE"), "missing") && getenv("SNX_WORKFLOW_FAIL") &&
                !strcmp(getenv("SNX_WORKFLOW_FAIL"), "R")))
         return rc;
-    if (argc == 5)
-        name = snx_strdup(argv[4]);
-    else {
+    { /* the program loaded, as the recompile loads it: a broken NPDM stops it */
         SnxNpdm npdm;
         char error[256];
-        CHECK(!snx_load_npdm(argv[3], &npdm, error, sizeof error));
-        name = snx_game_name(NULL, &npdm, argv[3]);
+        if (snx_load_npdm(argv[3], &npdm, error, sizeof error)) {
+            fprintf(stderr, "scarletnx: %s\n", error);
+            return 1;
+        }
+        name = argc == 5 ? snx_strdup(argv[4]) : snx_game_name(NULL, &npdm, argv[3]);
     }
     /* the game in a folder of its own, with its data, as the recompile makes it */
     folder = snx_path_join(argv[1], name);
@@ -285,7 +296,7 @@ static void reset(const char* repo, const char* dump) {
     set_env("SNX_WORKFLOW_FAIL", "");
 }
 int main(int argc, char** argv) {
-    char *exe, *root, *repo, *dump, *log, *extracted, *game, *cwd, *expected_cwd;
+    char *exe, *root, *repo, *dump, *log, *extracted, *extracting, *kept, *game, *cwd, *expected_cwd;
     const char* args[3];
     char* output;
     int rc;
@@ -337,7 +348,10 @@ int main(int argc, char** argv) {
     CHECK(!snx_mkdirs(repo));
     dump = snx_path_join(repo, "Test [game];.NSP");
     log = snx_path_join(root, "events");
-    extracted = snx_path_join(repo, "work/Test game");
+    /* the extraction, straight into the game's data folder, and the file saying it is not finished */
+    extracted = snx_path_join(repo, "games/Test game/Test game_data/exefs");
+    extracting = snx_path_join(repo, "games/Test game/Test game.extracting");
+    kept = snx_path_join(repo, "work/Test game"); /* one --out names */
 #ifdef _WIN32
     game = snx_path_join(repo, "games/Test game/Test game.exe");
 #else
@@ -359,6 +373,11 @@ int main(int argc, char** argv) {
     reset(repo, dump);
     run(exe, repo, dump, log, 0, "ERG", NULL);
     CHECK(snx_is_dir(extracted) && snx_is_file(game));
+    { /* the extraction is the game's data, kept nowhere else */
+        char* romfs = snx_path_join(repo, "games/Test game/Test game_data/romfs/data");
+        CHECK(snx_is_file(romfs) && !snx_path_exists(kept) && !snx_is_file(extracting));
+        free(romfs);
+    }
     run(exe, repo, dump, log, 0, "G", NULL);
     CHECK(!snx_remove_tree(game));
     run(exe, repo, dump, log, 0, "RG", NULL);
@@ -444,14 +463,14 @@ int main(int argc, char** argv) {
     reset(repo, dump);
     set_env("SNX_WORKFLOW_FAIL", "E");
     run(exe, repo, dump, log, 7, "E", "Extraction failed");
-    CHECK(!snx_is_dir(extracted) && !snx_is_file(game));
+    CHECK(snx_is_file(extracting) && !snx_is_file(game));
     set_env("SNX_WORKFLOW_FAIL", "");
     run(exe, repo, dump, log, 0, "ERG", NULL);
 
     reset(repo, dump);
     set_env("SNX_WORKFLOW_FAIL", "R");
     run(exe, repo, dump, log, 7, "ER", "Recompilation failed");
-    CHECK(snx_is_dir(extracted) && !snx_is_file(game));
+    CHECK(snx_is_dir(extracted) && !snx_is_file(extracting) && !snx_is_file(game));
     set_env("SNX_WORKFLOW_FAIL", "");
     run(exe, repo, dump, log, 0, "RG", NULL);
 #ifndef _WIN32
@@ -460,10 +479,10 @@ int main(int argc, char** argv) {
         set_env("SNX_WORKFLOW_MODE", modes[i]);
         set_env("SNX_WORKFLOW_FAIL", "E");
         run(exe, repo, dump, log, statuses[i], "E", "Extraction interrupted by signal");
-        CHECK(!snx_is_dir(extracted) && !snx_is_file(game));
+        CHECK(snx_is_file(extracting) && !snx_is_file(game));
         set_env("SNX_WORKFLOW_FAIL", "R");
         run(exe, repo, dump, log, statuses[i], "ER", "Recompilation interrupted by signal");
-        CHECK(snx_is_dir(extracted) && !snx_is_file(game));
+        CHECK(snx_is_dir(extracted) && !snx_is_file(extracting) && !snx_is_file(game));
         set_env("SNX_WORKFLOW_FAIL", "");
         run(exe, repo, dump, log, 0, "RG", NULL);
         set_env("SNX_WORKFLOW_FAIL", "G");
@@ -546,7 +565,7 @@ int main(int argc, char** argv) {
         }
         reset(repo, dump);
         set_env("SNX_WORKFLOW_NPDM", "bad");
-        run(exe, repo, dump, log, 1, "E", "NPDM: access-control region exceeds file");
+        run(exe, repo, dump, log, 1, "ER", "NPDM: access-control region exceeds file"); /* the recompile reads it */
         CHECK(!snx_is_file(named) && !snx_is_file(game));
         set_env("SNX_WORKFLOW_NPDM", "");
         free(folder);
@@ -622,11 +641,11 @@ int main(int argc, char** argv) {
             set_env("SNX_WORKFLOW_NRO", nro);
             set_env("SNX_WORKFLOW_HEADLESS", "--headless");
             run(exe, repo, nro, log, 0, "RG", NULL);
-            CHECK(!snx_is_dir(extracted) && snx_is_file(game));
-            set_env("SNX_WORKFLOW_OUT", extracted); /* an extraction an NRO does not have */
+            CHECK(!snx_is_dir(kept) && snx_is_file(game));
+            set_env("SNX_WORKFLOW_OUT", kept); /* an extraction an NRO does not have */
             run(exe, repo, nro, log, 1, "", "--out names a dump's extraction, and an NRO has none");
             set_env("SNX_WORKFLOW_OUT", "");
-            CHECK(!snx_mkdirs(extracted));
+            CHECK(!snx_mkdirs(kept));
             run(exe, repo, nro, log, 0, "RG", NULL);
             set_env("SNX_WORKFLOW_FAIL", "R");
             run(exe, repo, nro, log, 7, "R", "Recompilation failed");
@@ -681,7 +700,7 @@ int main(int argc, char** argv) {
         set_env("SNX_WORKFLOW_OUTDIR", repo);
         run(exe, repo, game, log, 1, "", "is a game");
         set_env("SNX_WORKFLOW_OUTDIR", "");
-        set_env("SNX_WORKFLOW_OUT", extracted);
+        set_env("SNX_WORKFLOW_OUT", kept);
         run(exe, repo, folder, log, 1, "", "is a game");
         set_env("SNX_WORKFLOW_OUT", "");
         CHECK(!snx_mkdirs(data) && !snx_write_file(stamp, "4\n", 2));
@@ -768,6 +787,8 @@ int main(int argc, char** argv) {
     free(dump);
     free(log);
     free(extracted);
+    free(extracting);
+    free(kept);
     free(game);
     printf("Driver workflow: %u checks passed\n", checks);
     return 0;
