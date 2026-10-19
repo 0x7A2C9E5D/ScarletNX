@@ -485,6 +485,39 @@ static void test_invalidate(void) {
     snx_jit_service_free(service);
 }
 
+/* the compile thread's window: a few microseconds of arithmetic */
+static void spin(unsigned long n) {
+    volatile unsigned long x = 0;
+    while (n--) x += n;
+}
+
+/* an invalidation of another range while a pc compiles: the batch read stale bytes, so it is discarded and its pcs go
+   GONE. Their pending bit, set when the batch took them, must go too: the lookup's fast path reads a set bit as
+   "queued, wait for it", and with nothing queued the pc could never be compiled (rt_miss's fatal, DQ7 at 98f1fc4) */
+static void test_invalidate_in_flight(void) {
+    static const u32 words[] = {0x91000400, 0xD65F03C0}; /* add x0, x0, #1; ret */
+    unsigned long round;
+    unsigned i;
+    service = start(1, 1);
+    if (!service) {
+        ++failures;
+        return;
+    }
+    put(0x4000, words, 2);
+    for (round = 0; round < 32; ++round) {
+        snx_jit_invalidate(service, 0x4000, 4); /* 0x4000 is new to the service again */
+        CHECK(snx_jit_resolve(service, 0x4000) == NULL);
+        /* let the thread take it and read the code, then invalidate elsewhere, over and over so one lands inside the
+           compile window */
+        for (i = 0; i < 96; ++i) {
+            spin(3000);
+            snx_jit_invalidate(service, 0x8000, 0x10);
+        }
+        CHECK(snx_jit_wait(service, 0x4000) != NULL);
+    }
+    snx_jit_service_free(service);
+}
+
 /* added images in different 16 MiB chunks: the page map finds each, and removing one leaves the other's pages */
 static void test_image_map(void) {
     static const u32 far_words[] = {0x91000400, 0xD65F03C0}; /* add x0, x0, #1; ret */
@@ -709,6 +742,7 @@ int main(void) {
     test_added_image();
     test_cache();
     test_invalidate();
+    test_invalidate_in_flight();
     test_image_map();
     free(memory);
     if (failures) return 1;

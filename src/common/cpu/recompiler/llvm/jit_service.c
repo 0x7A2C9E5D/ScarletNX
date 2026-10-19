@@ -1012,6 +1012,10 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count) {
             if (e && e->state == IN_FLIGHT && e->epoch <= epoch) {
                 e->state = GONE;
                 e->code = NULL;
+                /* and the pending bit with it: the lookup's fast path reads a set bit as "queued, wait for it", but
+                   the batch is dropped, so a pc that kept it could never be queued or compiled again (rt_miss's fatal) */
+                r = region_of(s, pcs[i]);
+                if (r && r->pending) clear_pending(r, pcs[i]);
             }
             continue;
         }
