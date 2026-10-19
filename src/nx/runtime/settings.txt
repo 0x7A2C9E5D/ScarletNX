@@ -17,10 +17,11 @@
 #                         member is an array of N
 #   setting NAME          a setting, named as the menus show it; its member is NAME in snake_case and must be unique.
 #                         In an llvm table, setting @ID gives LLVM's pass (instcombine) or option (LoopVectorization) of
-#                         that ID its name and help (name NAME, help TEXT, label TEXT under it). An ID LLVM doesn't
-#                         have is left out. LLVM's own fill the rest: a pass is "LLVM pass <its name>", key
-#                         llvm_pass_<name>, int 0 1 default 1; an option "LLVM <its words>", key llvm_<option>, LLVM's
-#                         own value (SETTINGS_UNSET) until it is set
+#                         that ID its name, key and help (name NAME, key KEY, help TEXT, label TEXT under it). An ID
+#                         LLVM doesn't have is left out, and said. LLVM's own fill the rest: a pass is "LLVM pass <its
+#                         name>", key llvm_pass_<name>, int 0 1 default 1; an option "LLVM <its words>", key
+#                         llvm_<option> (the ID in snake_case: key KEY where that reads wrong, FastISel's
+#                         llvm_fast_i_sel), LLVM's own value (SETTINGS_UNSET) until it is set
 #     key KEY             its key in the .ini (<N> in a repeat, <ID> in an each). An LLVM setting's is LLVM's ID's
 #     int LO HI           an int, clamped to LO..HI (C expressions)
 #     float LO HI         a float, clamped
@@ -540,10 +541,12 @@ setting @LoopUnrolling
     help Whether the pipeline unrolls loops (LLVMPassBuilderOptionsSetLoopUnrolling)
 setting @FastISel
     name Fast instruction selection
+    key llvm_fast_isel
     help Whether code generation selects instructions with FastISel, quicker and worse
     help (LLVMSetTargetMachineFastISel)
 setting @GlobalISel
     name Global instruction selection
+    key llvm_global_isel
     help Whether code generation selects instructions with GlobalISel (LLVMSetTargetMachineGlobalISel)
 setting @InlinerThreshold
     name Inliner threshold

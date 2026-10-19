@@ -67,6 +67,8 @@ setting @InlinerThreshold
 setting @NoSuchOption
     name Not in this LLVM
     help An ID this LLVM lacks, said and left out
+setting @FastISel
+    key llvm_fast_isel
 section Test: g_test_ini
 section Launch: g_test_llvm_ini/LLVM Internals    launcher
 ")
@@ -122,7 +124,9 @@ endforeach()
 file(READ "${WORK}/out/settings_launch.c" launch)
 file(READ "${WORK}/out/settings_test.c" runtime)
 foreach(row "{\"llvm_inliner_threshold\", NULL, \"How large a function the inliner inlines\", INI_INT, 0, &g_settings.inliner_threshold, INT_MIN + 1, INT_MAX, NULL, \"Inliner threshold\", NULL, 0, 0, 0}"
-            "{\"llvm_slp_vectorization\", NULL, \"LLVMPassBuilderOptionsSetSLPVectorization, LLVM's own value until it is set\", INI_INT, 0, &g_settings.llvm_slp_vectorization, 0, 1, NULL, \"LLVM SLP vectorization\", \"Off|On\", 0, 0, 0}")
+            "{\"llvm_slp_vectorization\", NULL, \"LLVMPassBuilderOptionsSetSLPVectorization, LLVM's own value until it is set\", INI_INT, 0, &g_settings.llvm_slp_vectorization, 0, 1, NULL, \"LLVM SLP vectorization\", \"Off|On\", 0, 0, 0}"
+            # the key an @ID gives, where snake_case of the ID would not do (fast_i_sel); its name LLVM's still
+            "{\"llvm_fast_isel\", NULL, \"LLVMSetTargetMachineFastISel, LLVM's own value until it is set\", INI_INT, 0, &g_settings.llvm_fast_i_sel, 0, 1, NULL, \"LLVM fast i sel\", \"Off|On\", 0, 0, 0}")
     string(FIND "${launch}" "${row}" at)
     if(at LESS 0)
         message(FATAL_ERROR "settings_launch.c lacks the row ${row}:\n${launch}")

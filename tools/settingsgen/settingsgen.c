@@ -61,9 +61,9 @@ typedef struct {
     int ntables, backend, launcher;
 } Section;
 
-/* an @ID override of an llvm table: its name and help for the setting LLVM's ID makes */
+/* an @ID override of an llvm table: its name, key and help for the setting LLVM's ID makes */
 typedef struct {
-    char *id, *name, *help, *label;
+    char *id, *name, *key, *help, *label;
     int table, line;
 } Override;
 
@@ -462,12 +462,14 @@ static void read_spec(const char* path) {
         } else if (o) {
             if (!strcmp(word, "name"))
                 o->name = dup(rest);
+            else if (!strcmp(word, "key"))
+                o->key = dup(rest);
             else if (!strcmp(word, "help"))
                 add_help(&o->help, rest);
             else if (!strcmp(word, "label"))
                 o->label = dup(rest);
             else
-                fail(number, "an @ID setting takes name, label and help");
+                fail(number, "an @ID setting takes name, key, label and help");
         } else if (!s) {
             fail(number, "unknown line %s", word);
         } else if (!strcmp(word, "key")) {
@@ -591,7 +593,7 @@ static Setting* new_llvm(int table, int kind, const char* id, const char* auto_n
     s->member = snake(s->name);
     s->label = o && o->label ? dup(o->label) : NULL;
     s->help = o && o->help ? dup(o->help) : NULL;
-    s->key = dup(key);
+    s->key = dup(o && o->key ? o->key : key);
     s->table = table;
     s->list = -1;
     s->llvm = kind;
