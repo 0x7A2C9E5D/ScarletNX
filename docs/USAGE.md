@@ -336,10 +336,10 @@ and an older game runs where it is, its run saying where its folder goes.
 ## Users
 
 The console's users are in `users/users.ini` of the data folder ([Folders](#folders)), every game's: up to 8, each a
-section in the console's order. Without the file there is one, `Player`. User 1 is always that first user, by the uid it
-has always had, so its saves stay its own; each other one needs a uid of 32 hex digits of its own (not zero) and a
-nickname. A nickname is 4 to 20 letters, digits, spaces, `.`, `_` or `-`, the names Eden's rooms take; any other
-stops the game and says why:
+section in the console's order. Without the file there is one, `Player`. User 1 has the uid users.ini gives it; with
+none it has the one it always had, `0123456789abcdeffedcba9876543210`, so the saves made before there were others stay
+its own. Each other one needs a uid of 32 hex digits of its own (not zero) and a nickname. A nickname is 4 to 20
+letters, digits, spaces, `.`, `_` or `-`, the names Eden's rooms take; any other stops the game and says why:
 
 ```ini
 [user1]
@@ -349,15 +349,15 @@ uid=5f3c0d9e8a7b41c2963e0f1a2b3c4d5e
 nickname=Xuji
 ```
 
-`uid` (user 1's, if written, is `0123456789abcdeffedcba9876543210`) and `nickname` are the keys; any
-other key, a section out of order or twice, or a line that is no key stops the game and says why. A user's picture is
-`users/<uid>.jpg`, a JPEG of at most 128 KiB (256x256 as the console's), read when the game starts; without one it is
-Wimsy. The game plays as the user its `.ini`'s `user` names (`--user=N` for one run): with one user, the game picks it
-on its own; with more, the game's user selector gets that user. Each user's Account saves are `save/user.<uid>` in the
-game's `<id>_data/`; the first user's that an older version left in `save/user` are played there until you move them
-([DEPRECATIONS](DEPRECATIONS.md)). The game's menu (Home, F2) shows the user playing in a box at its head's right, their
-nickname and picture, and the launcher the one its Settings' `user` names, where a click picks another
-([GUI](GUI.md)); a users.ini that lists no users is said in the launcher's foot.
+`uid` and `nickname` are the keys; any other key, a section out of order or twice, or a line that is no key stops the
+game and says why. A user's picture is `users/<uid>.jpg`, a JPEG of at most 128 KiB (256x256 as the console's), read
+when the game starts; without one it is Wimsy. The game plays as the user its `.ini`'s `user` names (`--user=N` for one
+run): with one user, the game picks it on its own; with more, the game's user selector gets that user. Each user's
+Account saves are `save/user.<uid>` in the game's `<id>_data/`; those an older version left in `save/user`, of the uid
+`0123456789abcdeffedcba9876543210`, are played there until you move them ([DEPRECATIONS](DEPRECATIONS.md)). The game's
+menu (Home, F2) shows the user playing in a box at its head's right, their nickname and picture, and the launcher the
+one its Settings' `user` names, where a click picks another ([GUI](GUI.md)); a users.ini that lists no users is said in
+the launcher's foot.
 
 ## Settings / input
 

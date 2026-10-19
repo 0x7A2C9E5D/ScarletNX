@@ -1113,9 +1113,10 @@ static void ngword2rom_init(void) {
 }
 /* save data folders, by SaveDataType */
 static const char* const g_save_kinds[] = {"system", "user", "bcat", "device", "temp", "cache", "sysbcat"};
-/* An Account save is save/user.<uid>, the folder of its user (users.c). The first user's, while it has none, is the one
-   an older version left, played where it is and said once a run (docs/DEPRECATIONS.md): save/user, from before there
-   were other users, else a nonempty save/system (earlier versions read the save type from a byte that is always 0).
+/* An Account save is save/user.<uid>, the folder of its user (users.c). The fixed uid's (am.c's g_user_id, user 1's
+   when users.ini gives it none), while it has none, is the one an older version left, played where it is and said once
+   a run (docs/DEPRECATIONS.md): save/user, from before there were other users, else a nonempty save/system (earlier
+   versions read the save type from a byte that is always 0).
    save/user and save/user.<uid> both there is two saves of one user: the game stops and leaves both, for the player to
    keep one. Puts the folder in p, and 1 in *both for that */
 static u32 save_user(const nn_fs_SaveDataAttribute* attribute, char* p, size_t n, int* both) { /* tree.lock held */

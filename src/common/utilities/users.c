@@ -167,11 +167,6 @@ int snx_users_load(const char* dir, int selected, char* why, size_t why_size) {
                     snprintf(why, why_size, "%s: [user%d] uid=%s is not 32 hex digits, nor zero", path, n, value);
                     goto done;
                 }
-                if (n == 1 && (uid[0] != SNX_USERS_FIRST_UID0 || uid[1] != SNX_USERS_FIRST_UID1)) {
-                    snprintf(why, why_size, "%s: [user1] is always uid 0123456789abcdeffedcba9876543210, not %s", path,
-                             value);
-                    goto done;
-                }
                 u->uid[0] = uid[0];
                 u->uid[1] = uid[1];
             } else if (!strcmp(key, "nickname")) {
@@ -189,9 +184,11 @@ int snx_users_load(const char* dir, int selected, char* why, size_t why_size) {
             }
         }
     }
-    /* user 1 is the console's first user whatever users.ini says of it, and "Player" unless it names it */
-    g_users[0].uid[0] = SNX_USERS_FIRST_UID0;
-    g_users[0].uid[1] = SNX_USERS_FIRST_UID1;
+    /* user 1 has the uid users.ini gives it, else the one it always had; "Player" unless it names it */
+    if (!g_users[0].uid[0] && !g_users[0].uid[1]) {
+        g_users[0].uid[0] = SNX_USERS_FIRST_UID0;
+        g_users[0].uid[1] = SNX_USERS_FIRST_UID1;
+    }
     if (!g_users[0].nickname[0]) strcpy(g_users[0].nickname, USERS_FIRST_NAME);
     for (i = 1; i < count; i++) {
         if (!g_users[i].uid[0] && !g_users[i].uid[1]) {

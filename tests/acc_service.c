@@ -335,10 +335,44 @@ static void test_users(void) {
     puts("PASS three users: the list, the open user, the selection, nicknames and pictures");
 }
 
+/* user 1 has the uid users.ini gives it (a setup's random one), and the fixed one only when it gives none */
+static void test_first_uid(void) {
+    static u8 memory[0x400];
+    char why[512], text[33];
+    IpcBuf list;
+    nn_account_Uid uid;
+    uint64_t v[2];
+    g_mem = memory;
+    put_ini("[user1]\nuid=" UID3 "\nnickname=Aogo\n[user2]\nuid=" UID1 "\nnickname=Xuji\n");
+    CHECK(snx_users_load(DIR, 1, why, sizeof why) == 0 && g_user_count == 2);
+    snx_users_uid_text(g_users[0].uid, text);
+    CHECK(!strcmp(text, UID3) && !strcmp(g_users[0].nickname, "Aogo"));
+    snx_users_uid_text(g_users[1].uid, text);
+    CHECK(!strcmp(text, UID1)); /* the fixed uid is any user's to have */
+    memset(memory, 0xAA, sizeof memory);
+    list.addr = 0x100;
+    list.size = 0x20;
+    CHECK(nn_account_IAccountServiceForApplication_ListAllUsers(NULL, list) == 0);
+    uid_of(UID3, &uid);
+    CHECK(!memcmp(memory + 0x100, uid.v, 16) && !memcmp(memory + 0x110, g_user_id, 16));
+    CHECK(nn_account_IAccountServiceForApplication_GetLastOpenedUser(NULL, &uid) == 0);
+    memcpy(v, uid.v, 16);
+    snx_users_uid_text(v, text);
+    CHECK(!strcmp(text, UID3));
+    /* a [user1] that names no uid has the fixed one */
+    put_ini("[user1]\nnickname=Aogo\n");
+    CHECK(snx_users_load(DIR, 1, why, sizeof why) == 0 && g_user_count == 1);
+    snx_users_uid_text(g_users[0].uid, text);
+    CHECK(!strcmp(text, UID1) && !strcmp(g_users[0].nickname, "Aogo"));
+    puts("PASS user 1's uid from users.ini, the fixed one without");
+}
+
 static void test_refused(void) {
     char why[512];
     refused("[user1]\nnickname=Aogo\ncolour=red\n", 1, "colour is not a setting");
-    refused("[user1]\nuid=" UID2 "\n", 1, "[user1] is always uid " UID1);
+    refused("[user1]\nuid=" UID2 "\nnickname=Aogo\n[user2]\nuid=" UID2 "\nnickname=Xuji\n", 1,
+            "[user2] has the uid of [user1]");
+    refused("[user1]\nnickname=Aogo\n[user2]\nuid=" UID1 "\nnickname=Xuji\n", 1, "[user2] has the uid of [user1]");
     refused("[user1]\n[user3]\nuid=" UID3 "\nnickname=Afugo\n", 1, "in order");
     refused("[user1]\n[user2]\nuid=" UID2 "\nnickname=Xuji\n[user2]\nuid=" UID3 "\nnickname=Afugo\n", 1, "in order");
     refused("[user1]\n[user2]\nnickname=Xuji\n", 1, "[user2] has no uid");
@@ -398,6 +432,7 @@ int main(void) {
     test_picture();
     free(g_mem);
     test_users();
+    test_first_uid();
     test_refused();
     gone("users.ini");
     snx_remove_tree(DIR);

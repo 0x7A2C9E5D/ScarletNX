@@ -2,10 +2,11 @@
    Copyright 2026 the ScarletNX contributors */
 /* The console's users, which the runtime's acc lists, am selects and fs keeps the saves of, and the launcher shows at
    the right of its head: users/users.ini of a data folder, up to eight, each a [userN] section in the console's order,
-   and their pictures beside it as users/<uid>.jpg. User 1 is the user ScarletNX always had, by its uid
-   (SNX_USERS_FIRST_UID0 and 1), so the saves made before there were others stay its own. Without users.ini it is the
-   only user, "Player". A nickname follows the rule of Eden's rooms, where it is the member's name: 4 to 20 letters,
-   digits, spaces, '.', '_' or '-'. Anything users.ini says that is not a user is refused */
+   and their pictures beside it as users/<uid>.jpg. User 1 has the uid users.ini gives it; with none (no users.ini, or
+   a [user1] without one) the uid ScarletNX always gave it (SNX_USERS_FIRST_UID0 and 1), so the saves made before there
+   were others stay its own. Without users.ini it is the only user, "Player". A nickname follows the rule of Eden's
+   rooms, where it is the member's name: 4 to 20 letters, digits, spaces, '.', '_' or '-'. Anything users.ini says that
+   is not a user is refused */
 #ifndef SNX_COMMON_USERS_H
 #define SNX_COMMON_USERS_H
 #include <stddef.h>
