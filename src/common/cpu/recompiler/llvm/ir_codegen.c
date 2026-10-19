@@ -41,6 +41,9 @@ LLVMValueRef snx_ir_guest_function(SnxIr* ir, SnxU64 address) {
 }
 
 void snx_ir_begin(SnxIr* ir, LLVMValueRef function) {
+    ir_registers_invalidate(ir);
+    ir_fp_guards_invalidate(ir);
+    ir_flags_invalidate(ir);
     ir->fn = function;
     LLVMPositionBuilderAtEnd(B, LLVMAppendBasicBlockInContext(ir->ctx, function, "entry"));
     ir->c = LLVMGetParam(function, 0);
@@ -67,6 +70,9 @@ static LLVMValueRef call_dynamic(SnxIr* ir, LLVMValueRef target) {
     args[0] = ir->c;
     args[1] = target;
     function = ir_call_helper(ir, SNX_IR_LOOKUP, args, 2);
+    ir_registers_invalidate(ir);
+    ir_fp_guards_invalidate(ir);
+    ir_flags_invalidate(ir);
     return LLVMBuildCall2(B, ir->t_guest, function, args, 2, "");
 }
 
@@ -88,6 +94,9 @@ static void call(SnxIr* ir, const SnxCodegen* codegen, SnxU64 target, int tail) 
         site = LLVMBuildCall2(B, ir->t_guest, aot, args, 2, "");
     } else
         site = call_dynamic(ir, args[1]);
+    ir_registers_invalidate(ir);
+    ir_fp_guards_invalidate(ir);
+    ir_flags_invalidate(ir);
     if (tail) must_tail(ir, site);
 }
 
@@ -236,7 +245,8 @@ void snx_ir_emit(SnxIr* ir, SnxCodegen* codegen, const SnxFunction* function) {
                 break;
             case SNX_FLOW_BC: {
                 LLVMBasicBlockRef taken = ir_block(ir, "taken"), fall = ir_block(ir, "fall");
-                LLVMBuildCondBr(B, snx_ir_flow_operand(ir, word, address, c), taken, fall);
+                LLVMValueRef site = LLVMBuildCondBr(B, snx_ir_flow_operand(ir, word, address, c), taken, fall);
+                ir_profile_branch(ir, site, address, word);
                 LLVMPositionBuilderAtEnd(B, taken);
                 branch(ir, codegen, function, labels, address, snx_a64_target(word, address));
                 LLVMPositionBuilderAtEnd(B, fall);

@@ -70,6 +70,107 @@ typedef struct {
 } SnxIrFeatures;
 extern SnxIrFeatures snx_ir_host;
 
+/* Instruction families are classified once, from the decoder's immutable pattern table.
+   Dense IDs are shared by scalar, FP, SIMD, and control-flow emitters. */
+#define SNX_IR_PATTERN_TYPES(X)                                                                                        \
+    X(ADR)                                                                                                             \
+    X(ADRP)                                                                                                            \
+    X(ADDSUB_IMM)                                                                                                      \
+    X(LOGIC_IMM)                                                                                                       \
+    X(MOVW)                                                                                                            \
+    X(BITFIELD)                                                                                                        \
+    X(EXTR)                                                                                                            \
+    X(HINT)                                                                                                            \
+    X(CLREX)                                                                                                           \
+    X(BARRIER)                                                                                                         \
+    X(SYS)                                                                                                             \
+    X(MRS)                                                                                                             \
+    X(MSR)                                                                                                             \
+    X(LDST_UIMM)                                                                                                       \
+    X(LDST_IMM9)                                                                                                       \
+    X(LDST_REG)                                                                                                        \
+    X(LDR_LIT)                                                                                                         \
+    X(LDSTP)                                                                                                           \
+    X(LDSTX)                                                                                                           \
+    X(LOGIC_REG)                                                                                                       \
+    X(ADDSUB_SREG)                                                                                                     \
+    X(ADDSUB_EXT)                                                                                                      \
+    X(ADC)                                                                                                             \
+    X(CCMP)                                                                                                            \
+    X(CSEL)                                                                                                            \
+    X(DP1)                                                                                                             \
+    X(DP2)                                                                                                             \
+    X(DP3)                                                                                                             \
+    X(FP2)                                                                                                             \
+    X(FP1)                                                                                                             \
+    X(FCMP)                                                                                                            \
+    X(FCCMP)                                                                                                           \
+    X(FCSEL)                                                                                                           \
+    X(FMOV_IMM)                                                                                                        \
+    X(FP3)                                                                                                             \
+    X(FCVT_INT)                                                                                                        \
+    X(FCVT_FIX)                                                                                                        \
+    X(SIMD_LDST)                                                                                                       \
+    X(SIMD_LDST1)                                                                                                      \
+    X(SIMD_DP)                                                                                                         \
+    X(SIMD_DP2)                                                                                                        \
+    X(BCOND)                                                                                                           \
+    X(CBZ)                                                                                                             \
+    X(TBZ)                                                                                                             \
+    X(BR)                                                                                                              \
+    X(BLR)                                                                                                             \
+    X(RET)                                                                                                             \
+    X(B)                                                                                                               \
+    X(BL)                                                                                                              \
+    X(SVC)                                                                                                             \
+    X(BRK)                                                                                                             \
+    X(MSR_IMM)
+
+typedef enum {
+    SNX_IR_UNKNOWN,
+#define SNX_IR_KIND(name) SNX_IR_##name,
+    SNX_IR_PATTERN_TYPES(SNX_IR_KIND)
+#undef SNX_IR_KIND
+} SnxIrPatternKind;
+
+/* The cache belongs to the IR builder, not the guest CPU. One bit per GPR;
+   changing blocks or observing an unknown write drops the whole snapshot. */
+typedef struct {
+    LLVMValueRef x[32];
+    LLVMBasicBlockRef block;
+    uint32_t valid;
+} SnxIrRegisterCache;
+
+typedef struct {
+    uintptr_t first, last; /* a half-open range of case descriptors */
+    const SnxA64Pattern* pattern;
+} SnxIrCaseRange;
+
+/* Decoder descriptors are read-only after construction. These parallel arrays
+   are indexed by the decoder's original pattern order, not execution order. */
+typedef struct {
+    const SnxA64Pattern* patterns;
+    SnxIrPatternKind* kinds;
+    SnxIrCaseRange* ranges;
+    size_t count;
+    void* storage;
+} SnxIrDecoder;
+
+/* Values are owned by one LLVM basic block, never by the guest CPU.
+   Any FP-state mutation or unknown call drops them. */
+typedef struct {
+    LLVMBasicBlockRef block;
+    LLVMValueRef nearest, ixc;
+} SnxIrFpGuards;
+
+/* SSA flags are a per-block forwarding table, not a second CPU state.
+   Every write still commits to the architectural structure immediately. */
+typedef struct {
+    LLVMValueRef value[4];
+    LLVMBasicBlockRef block;
+    unsigned valid;
+} SnxIrFlags;
+
 typedef struct SnxIr {
     LLVMContextRef ctx;
     LLVMModuleRef mod;
@@ -81,6 +182,10 @@ typedef struct SnxIr {
     /* the function being emitted: its CPU* and the guest memory base (u8* const M=c->mem) */
     LLVMValueRef fn, c, M;
     LLVMValueRef helpers[SNX_IR_HELPER_COUNT];
+    SnxIrRegisterCache registers;
+    SnxIrFlags flags;
+    SnxIrDecoder decoder;
+    SnxIrFpGuards fp_guards;
     /* alias scopes: guest memory (through M) and the CPU structure never overlap */
     unsigned kind_scope, kind_noalias;
     LLVMValueRef scope_cpu, scope_guest;
@@ -94,6 +199,22 @@ typedef struct SnxIr {
     SnxU64 (*direct)(void* user, SnxU64 target);
     void* direct_user;
 } SnxIr;
+
+SnxIrPatternKind ir_pattern_kind(const SnxIr* ir, const SnxA64Pattern* pattern);
+const SnxA64Pattern* ir_case_pattern(const SnxIr* ir, const SnxA64Case* instruction, size_t* index);
+void ir_registers_invalidate(SnxIr* ir);
+void ir_flags_invalidate(SnxIr* ir);
+LLVMValueRef ir_flag_read(SnxIr* ir, unsigned index);
+LLVMValueRef ir_flags_adds(SnxIr* ir, unsigned bits, LLVMValueRef a, LLVMValueRef b, LLVMValueRef cin);
+LLVMValueRef ir_flags_subs(SnxIr* ir, unsigned bits, LLVMValueRef a, LLVMValueRef b);
+void ir_flags_logic(SnxIr* ir, LLVMValueRef value, unsigned bits);
+void ir_flags_set_nzcv(SnxIr* ir, LLVMValueRef nzcv);
+LLVMValueRef ir_flags_cond(SnxIr* ir, unsigned cond);
+
+void ir_fp_guards_invalidate(SnxIr* ir);
+/* Immutable process-wide decoder slab; modules borrow the published view. */
+int ir_decoder_init(SnxIr* ir);
+void ir_decoder_free(SnxIr* ir);
 
 /* Once per process, before any other call; threads may then each own SnxIrs. 0, or -1 with the reason */
 int snx_ir_init(char* error, size_t error_size);
@@ -294,7 +415,11 @@ void ir_undef(SnxIr* ir, SnxU64 pc, SnxU32 word); /* c->rt->undef(c,pc,w) */
 void ir_fence(SnxIr* ir);                         /* SNX_FENCE() */
 void ir_yield(SnxIr* ir);                         /* YIELD() */
 /* branch weights: the condition is expected false (UNLIKELY) */
+/* Optional offline branch profile: entries are keyed by guest PC and exact word.
+   No profile means the existing LLVM branch prediction stays unchanged. */
+void ir_profile_branch(SnxIr* ir, LLVMValueRef branch, SnxU64 pc, SnxU32 word);
 void ir_unlikely(SnxIr* ir, LLVMValueRef branch);
+void ir_likely(SnxIr* ir, LLVMValueRef branch);
 /* a call to an LLVM intrinsic, overloaded on type (NULL: not overloaded) */
 LLVMValueRef ir_intrinsic(SnxIr* ir, const char* name, LLVMTypeRef type, LLVMValueRef* args, unsigned count);
 /* memory effects of a declared function: none (pure), or only memory reached through its pointer arguments */
