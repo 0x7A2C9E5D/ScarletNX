@@ -68,13 +68,21 @@ if(SNX_BUILD_NX)
                         RESULT_VARIABLE snx_opt_result)
         if(snx_opt_result EQUAL 0 AND snx_opt_version MATCHES "LLVM version ${snx_llvm_major}\\.")
             file(WRITE "${snx_settings_out}/empty.ll" "") # opt's input: no module, only the pipelines printed
-            foreach(level 0 1 2 3 s z)
+            # -Os and -Oz are O2 over size-marked functions (ir.c), as LLVM 23 has them: O2's pipeline is theirs
+            foreach(level 0 1 2 3)
                 execute_process(COMMAND "${SNX_LLVM_OPT}" "-passes=default<O${level}>" -print-pipeline-passes
                                         -disable-output
-                                INPUT_FILE "${snx_settings_out}/empty.ll" OUTPUT_VARIABLE snx_pipeline ERROR_QUIET
-                                OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE snx_opt_result)
-                if(snx_opt_result EQUAL 0)
+                                INPUT_FILE "${snx_settings_out}/empty.ll" OUTPUT_VARIABLE snx_pipeline
+                                ERROR_VARIABLE snx_opt_error OUTPUT_STRIP_TRAILING_WHITESPACE
+                                ERROR_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE snx_opt_result)
+                if(snx_opt_result EQUAL 0 AND NOT snx_pipeline STREQUAL "")
                     string(APPEND snx_pipelines_text "${level} ${snx_pipeline}\n")
+                    if(level STREQUAL "2")
+                        string(APPEND snx_pipelines_text "s ${snx_pipeline}\nz ${snx_pipeline}\n")
+                    endif()
+                else()
+                    message(WARNING "LLVM settings: ${SNX_LLVM_OPT} printed no pipeline for -O${level}, whose passes "
+                                    "LLVM Internals can't turn off: ${snx_opt_result} ${snx_opt_error}")
                 endif()
             endforeach()
         endif()
