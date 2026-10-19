@@ -338,6 +338,12 @@ static V fprm(SnxIr* ir) {
 V ir_fp_narrow(SnxIr* ir, V bits, unsigned from, unsigned odd) {
     return convert(ir, bits, from, from / 2, odd ? i32c(ir, 5) : fprm(ir));
 }
+/* simd_2misc's FCVTL lane: from bits to twice that width */
+V ir_fp_wide(SnxIr* ir, V bits, unsigned from) { return convert(ir, bits, from, from * 2, fprm(ir)); }
+/* simd_2misc's FRINT* lanes: to integral, by the mode the encoding fixes or the FPCR's */
+V ir_fp_round_to(SnxIr* ir, V bits, unsigned width, unsigned mode, unsigned exact) {
+    return round_to(ir, bits, width, mode == SNX_IR_FP_RM_FPCR ? fprm(ir) : i32c(ir, mode), exact);
+}
 
 /* SETSB/SETDB/SETH(d,e): t=(uN)(e); c->v[d].d[1]=0; c->v[d].d[0]=t; */
 static void set_bits(SnxIr* ir, unsigned d, unsigned bits, V value) {

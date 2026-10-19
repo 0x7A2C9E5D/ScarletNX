@@ -251,6 +251,13 @@ void ir_fp_step_fast(SnxIr* ir, unsigned rsqrt, unsigned width, unsigned lanes, 
 void ir_fp_narrow_fast(SnxIr* ir, unsigned from, unsigned lanes, LLVMValueRef bits, unsigned odd, SnxFpFast* out);
 /* one lane through snx_fp_convert from from bits to half that width, rounded per FPCR or (odd) to odd (result i64) */
 LLVMValueRef ir_fp_narrow(SnxIr* ir, LLVMValueRef bits, unsigned from, unsigned odd);
+/* one lane through snx_fp_convert from from bits (16 or 32) to twice that width: exact, so the rounding mode
+   only reaches the helper's flush-to-zero and NaN processing (result i64) */
+LLVMValueRef ir_fp_wide(SnxIr* ir, LLVMValueRef bits, unsigned from);
+/* one lane through snx_fp_round (FRINT*), rounding to integral: mode 0-4 fixed by the encoding (SNX_IR_FP_RM_FPCR
+   for FRINTX and FRINTI, by the FPCR), exact raising the inexact flag (FRINTX). Result i64 */
+#define SNX_IR_FP_RM_FPCR 5
+LLVMValueRef ir_fp_round_to(SnxIr* ir, LLVMValueRef bits, unsigned width, unsigned mode, unsigned exact);
 /* one lane through the helpers: snx_fp_binary, snx_fp_unary, snx_fp_to_int and snx_fp_from_int (result i64) */
 LLVMValueRef ir_fp_binary(SnxIr* ir, LLVMValueRef a, LLVMValueRef b, unsigned width, unsigned op);
 LLVMValueRef ir_fp_unary(SnxIr* ir, LLVMValueRef bits, unsigned width, unsigned op);

@@ -839,9 +839,17 @@ target_link_libraries(snx_recompiler_test PRIVATE snx_driver ${CMAKE_DL_LIBS})
 # LLVM is always available to the recompiler.
 add_test(NAME native_recompiler COMMAND snx_recompiler_test
     $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${SNX_TARGET_C_COMPILER}")
-add_executable(snx-test-llvm-differential llvm_differential.c)
+# cpu_helpers.c carries the reference interpreter (SNX_A64_REFERENCE): --sweep asks snx_simd itself which words the
+# reference runs, in process, before any of them is compiled
+add_executable(snx-test-llvm-differential llvm_differential.c
+    "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu_helpers.c")
 snx_test_target(snx-test-llvm-differential 11)
+target_compile_definitions(snx-test-llvm-differential PRIVATE SNX_A64_REFERENCE)
+snx_cpu_helpers_flags(snx-test-llvm-differential)
 target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver snx_a64_reference ${CMAKE_DL_LIBS})
+if(NOT WIN32)
+    target_link_libraries(snx-test-llvm-differential PRIVATE m)
+endif()
 # In shards that run side by side, each a share of the words, all of them started first (COST): a tree with no times
 # of its own (CI's) starts tests in their order, and these are the longest. Fewer, and one runs alone at the end;
 # more, and each pays the compiles' start again. The _jit shards run the same steps through the JIT's loader
@@ -853,6 +861,17 @@ foreach(shard RANGE 2)
         "${PROJECT_SOURCE_DIR}" --quiet --jit --shard ${shard}/3)
     set_tests_properties(llvm_differential_${shard} llvm_differential_jit_${shard} PROPERTIES TIMEOUT 900 COST 100)
 endforeach()
+# The same families again, swept whole instead of sampled (llvm_differential.c's --sweep): every word a SIMD
+# pattern's free bits make, its operand fields held, the ones the reference's snx_simd runs. Whole families at once,
+# so an opcode no random sample lands on (fcvtl was one) cannot hide. Opt in: the 70k words cost minutes
+option(SNX_TEST_LLVM_SWEEP "Run the whole-encoding LLVM differential sweep (slow)" OFF)
+if(SNX_TEST_LLVM_SWEEP)
+    foreach(shard RANGE 2)
+        add_test(NAME llvm_differential_sweep_${shard} COMMAND snx-test-llvm-differential "${SNX_TARGET_C_COMPILER}"
+            "${PROJECT_SOURCE_DIR}" --quiet --sweep --shard ${shard}/3)
+        set_tests_properties(llvm_differential_sweep_${shard} PROPERTIES TIMEOUT 1800 COST 100)
+    endforeach()
+endif()
 # the runtime JIT (jit_service.c): misses compiled, published and shared between threads, on that loader
 add_executable(snx-test-jit-service jit_service.c)
 snx_test_target(snx-test-jit-service 11)

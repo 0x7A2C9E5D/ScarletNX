@@ -534,6 +534,10 @@ typedef enum {
     FP_LANES_COMPARE,
     FP_LANES_SQRT,
     FP_LANES_ESTIMATE,
+    FP_LANES_ROUND,
+    FP_LANES_RECPX,
+    FP_LANES_URECPE,
+    FP_LANES_URSQRTE,
     FP_LANES_TO_INT,
     FP_LANES_FROM_INT
 } FpLaneKind;
@@ -550,11 +554,20 @@ typedef struct {
         struct {
             unsigned minimum, numeric;
         } minmax;
+        struct {
+            unsigned mode, exact;
+        } round;
         unsigned predicate;
         unsigned inverse;
         FpConvert convert;
     } param;
 } FpOp;
+
+/* the unsigned estimate helpers (fp_arithmetic.c), u32 to u32: plain symbols of the runtime library */
+static V u32_helper(SnxIr* ir, const char* name, V x) {
+    LLVMTypeRef p[1] = {ir->t_i32};
+    return ir_call(ir, ir_extern(ir, name, ir->t_i32, p, 1), &x, 1);
+}
 
 /* one lane through the helper simd_3same's and simd_2misc's loops call (helpers/simd.c), as iN */
 static V fp_lane(SnxIr* ir, const FpOp* op, V a, V b, unsigned width) {
@@ -567,6 +580,10 @@ static V fp_lane(SnxIr* ir, const FpOp* op, V a, V b, unsigned width) {
         case FP_LANES_COMPARE: return ir_fp_compare_mask(ir, op->param.predicate, a, b, width);
         case FP_LANES_SQRT: return ir_fp_unary(ir, a, width, 0); /* SNX_FP_SQRT */
         case FP_LANES_ESTIMATE: return ir_fp_unary(ir, a, width, op->param.inverse ? 2 : 1);
+        case FP_LANES_ROUND: return ir_fp_round_to(ir, a, width, op->param.round.mode, op->param.round.exact);
+        case FP_LANES_RECPX: return ir_fp_unary(ir, a, width, 3); /* SNX_FP_RECPX */
+        case FP_LANES_URECPE: return u32_helper(ir, "urecpe32", a);
+        case FP_LANES_URSQRTE: return u32_helper(ir, "ursqrte32", a);
         case FP_LANES_TO_INT:
             return ir_fp_to_int(ir, a, width, width, op->param.convert.is_unsigned, op->param.convert.fractional_bits,
                                 op->param.convert.rounding);
@@ -599,6 +616,12 @@ static void fp_lanes(SnxIr* ir, const FpOp* op, unsigned s, unsigned n, V x, V y
         case FP_LANES_COMPARE: ir_fp_compare_fast(ir, op->param.predicate, width, n, x, y, &f); break;
         case FP_LANES_SQRT: ir_fp_fast(ir, SNX_IR_FP_SQRT, width, n, x, NULL, NULL, &f); break;
         case FP_LANES_ESTIMATE: ir_fp_estimate_fast(ir, op->param.inverse, width, n, x, &f); break;
+        case FP_LANES_ROUND:
+        case FP_LANES_RECPX:
+        case FP_LANES_URECPE:
+        case FP_LANES_URSQRTE:
+            f.ok = NULL; /* the helpers only */
+            break;
         case FP_LANES_TO_INT:
             if (!ir_fp_to_int_fast(ir, width, n, x, width, op->param.convert.is_unsigned, op->param.convert.rounding,
                                    op->param.convert.fractional_bits, &f))
@@ -724,6 +747,36 @@ static int fp_misc(SnxIr* ir, SnxU32 w, unsigned scalar) {
         return 1;
     }
     switch (k) {
+        /* FRINTN, FRINTM, FRINTP, FRINTZ, FRINTA, FRINTX and FRINTI: the mode the interpreter's key picks (the size
+           bit and U together name it: 0-4 or the FPCR's), on the vector group only, and no "2" forms in the helper */
+        case 0x18:
+        case 0x19:
+        case 0x38:
+        case 0x39:
+        case 0x58:
+        case 0x59:
+        case 0x79:
+            if (scalar) return 0;
+            o.kind = FP_LANES_ROUND;
+            switch (k) {
+                case 0x18: o.param.round.mode = 0; break;                                          /* FRINTN */
+                case 0x19: o.param.round.mode = 2; break;                                          /* FRINTM */
+                case 0x38: o.param.round.mode = 1; break;                                          /* FRINTP */
+                case 0x39: o.param.round.mode = 3; break;                                          /* FRINTZ */
+                case 0x58: o.param.round.mode = 4; break;                                          /* FRINTA */
+                case 0x59: o.param.round.mode = SNX_IR_FP_RM_FPCR, o.param.round.exact = 1; break; /* FRINTX */
+                default: o.param.round.mode = SNX_IR_FP_RM_FPCR; break;                            /* FRINTI */
+            }
+            break;
+        case 0x3C: /* URECPE (32-bit lanes only), URSQRTE */
+        case 0x7C:
+            if (scalar || sz) return 0;
+            o.kind = k == 0x3C ? FP_LANES_URECPE : FP_LANES_URSQRTE;
+            break;
+        case 0x3F: /* FRECPX (AdvSIMD scalar only) */
+            if (!scalar) return 0;
+            o.kind = FP_LANES_RECPX;
+            break;
         case 0x1A: /* FCVTNS, FCVTPS, FCVTMS, FCVTZS, FCVTAS and the unsigned ones: snx_fp_to_int's mode */
         case 0x3A:
         case 0x1B:
@@ -774,7 +827,8 @@ static int fp_fixed(SnxIr* ir, SnxU32 w, unsigned scalar) {
 
 /* FCVTN, FCVTN2 (doubles to floats, floats to halves, FPCR's rounding) and FCVTXN, FCVTXN2 (doubles to floats,
    round to odd, also scalar): simd_2misc's snx_fp_convert lanes, into Vd's low half with the upper half zero, its
-   upper half with the low half kept (the "2" forms), or for the scalar FCVTXN its low 32 bits */
+   upper half with the low half kept (the "2" forms), or for the scalar FCVTXN its low 32 bits. FCVTL and FCVTL2
+   (halves to floats, floats to doubles) read the upper half of Vn and write all of Vd */
 static int fp_narrow(SnxIr* ir, SnxU32 w, unsigned scalar) {
     unsigned q = scalar ? 0 : (w >> 30) & 1, u = (w >> 29) & 1, size = (w >> 22) & 3, op = (w >> 12) & 31,
              rn = (w >> 5) & 31, rd = w & 31, from = size & 1 ? 64 : 32, s = size & 1 ? 3 : 2,
@@ -783,6 +837,19 @@ static int fp_narrow(SnxIr* ir, SnxU32 w, unsigned scalar) {
     LLVMBasicBlockRef slow, join;
     SnxFpFast f;
     V x, r;
+    if (op == 0x17) { /* FCVTL, FCVTL2: the q half of Vn's lanes widened, into all of Vd */
+        unsigned element = size & 1 ? 2 : 1, lanes = size & 1 ? 2 : 4, lane;
+        LLVMTypeRef wide = lane_type(ir, element + 1);
+        V v;
+        if (u || scalar || (size >> 1)) return 0;
+        v = LLVMGetUndef(LLVMVectorType(wide, lanes));
+        for (lane = 0; lane < lanes; ++lane) {
+            V bits = ir_fp_wide(ir, get(ir, vreg(ir, rn), element, lane + lanes * q), element * 16);
+            v = LLVMBuildInsertElement(B, v, ir_cast(ir, bits, wide, 0), ir_i32(ir, lane), "");
+        }
+        write_lanes(ir, rd, v, 1);
+        return 1;
+    }
     if (op != 0x16 || (size >> 1) || (scalar && !u) || (u && from != 64)) return 0;
     x = get_lanes(ir, vreg(ir, rn), s, n);
     ir_fp_narrow_fast(ir, from, n, x, u, &f);
