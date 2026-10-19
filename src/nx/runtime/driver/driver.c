@@ -2,6 +2,8 @@
    Copyright 2026 the ScarletNX contributors */
 #include "nx/runtime/driver/driver.h"
 #include "common/utilities/common.h"
+#include "common/utilities/demangle.h"
+#include "common/utilities/logscan.h"
 #include "nx/runtime/driver/extract.h"
 #include "nx/runtime/driver/game_name.h"
 #include "nx/runtime/driver/recompile.h"
@@ -54,6 +56,9 @@ static void usage(void) {
          "  --dump-modules PROGRAM DIR\n"
          "                         Write an extracted program's (or an NRO's) modules as laid out\n"
          "                         in guest memory into DIR, for tools/symbols.py and tools/disasm.py");
+    puts("  --scan-log LOG... [--format json|markdown] [--name NAME]\n"
+         "                         Summarize a game's log or the launcher's Share log file: the build,\n"
+         "                         the game, how the run ended and where, unimplemented services");
 #ifndef _WIN32
     puts("  -S                     Enable the native GDB stub on localhost:1234\n"
          "  -s                     Enable the stub and stop at startup\n"
@@ -549,6 +554,7 @@ int snx_driver(int argc, char** argv) {
     int repo_given = 0, settings = 0;
     if (argc <= 1) return -1;
     if (!strcmp(argv[1], "--dump-modules")) return dump_modules(argc, argv);
+    if (!strcmp(argv[1], "--scan-log")) return snx_logscan_main(argc - 1, argv + 1, snx_demangle);
     rest = (char**)snx_alloc((size_t)(2 * argc + 1) * sizeof(*rest));
     setting = rest + argc + 1;
     for (i = 1; i < argc; ++i) {

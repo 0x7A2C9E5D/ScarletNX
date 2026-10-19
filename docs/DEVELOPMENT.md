@@ -51,7 +51,33 @@ python3 tools/run_game.py <id> --runs 5 --seconds 60 --dump "$work/Game" --scrip
 python3 tools/symbols.py "$work/Game" cf34380
 python3 tools/disasm.py "$work/Game" NvRmStreamFlushSync
 python3 tools/disasm.py "$work/Game" cf34240 cf343c0
+build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
 ```
+
+- `--scan-log` (`src/common/utilities/logscan.c`, also built as `build/snx-logscan`): a log, or the launcher's Share
+  log file (the game log in it), as a summary: the build, title ID, game version and GPU from the log's header, how
+  the run ended, the game function it is pinned on (for `svcBreak`, the first frame past the SDK's abort), the service
+  commands the runtime doesn't implement, warnings, the frames over 50 ms (how many, the slowest, and what the
+  slowest did, from the renderer's frame lines), and a signature that is the same for every log failing the same way.
+  JSON (a line a log, versioned by `schema`) or a markdown summary for an issue. Paths are shortened to `~`, and the
+  crash report's code and memory dumps are left out. The launcher's Share log puts the same summary at the top of
+  `scarletnx.log`. A log is read once, a line at a time, in fixed memory: a gigabyte takes about two seconds.
+- `scarletnx --mcp [--repo DIR]` (`src/nx/runtime/driver/mcp.c`): an MCP server over stdio for an agent looking into a
+  failure on this machine, built into the program so a player's agent has it too. `.mcp.json` starts it for agents
+  opened in the checkout (`build/scarletnx --mcp --repo .`). Its tools: `scan_log` (the summary above), `read_log`
+  (a log's lines holding a text, `|` between alternatives, with context, or a range, or its last lines, only under
+  the data folder and its state, cache and settings folders), `find_game` (the extracted games in `work/` with their
+  title IDs and versions), `symbolize` and `disassemble` (as `tools/symbols.py` and `tools/disasm.py`, A64 through
+  LLVM's disassembler where LLVM has the AArch64 target). The last game loaded stays loaded for the next call. Its
+  edenprobe tools turn a confirmed report into an edenprobe case ([EDENPROBE.md](EDENPROBE.md)). The game reports
+  on GitHub come from GitHub's own MCP server or `scripts/game-reports.py index`.
+- Game reports: `.github/workflows/game-reports.yml` builds `snx-logscan` and runs `scripts/game-reports.py triage` on
+  each issue and comment. An issue with a log attached (`.log`, `.txt`, `.gz`, `.zip`) or pasted in a fenced block gets
+  one comment with the summary of each, edited as logs are added, the labels `game report` and `log: <how it ended>`,
+  and the other reports with the same signature named. `triage --issue N --dry-run --logscan build/snx-logscan` shows
+  what it would post. `scripts/game-reports.py index [--title-id ID] [--signature TEXT]` lists the reports and their
+  logs as JSON lines. A maintainer's `status: confirmed` label on a report gets one comment: ready for an edenprobe
+  case, with the steps.
 
 - Runtime: `--seconds=N` / `--frames=N`; `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
   `--script=ms:hexbuttons,...` (or `Nf:hexbuttons` to press at present N), `--press_len=ms` (default 300).

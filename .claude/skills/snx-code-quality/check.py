@@ -3,7 +3,7 @@
 
     check.py [PATH...]     (files or folders; default src/; .c and .h)
 
-It prints one line per candidate, file:line: rule: what it saw. Four rules can be seen in the text:
+It prints one line per candidate, file:line: rule: what it saw. Five rules can be seen in the text:
   flag    a presence flag beside the pointer it describes (has_X / X_present / X_valid beside a pointer X,
           or is_present / present / valid in a struct with one pointer): NULL already says it
   allocs  one function filling two or more members of one object from separate allocations: one block
@@ -15,6 +15,8 @@ It prints one line per candidate, file:line: rule: what it saw. Four rules can b
   globals two or more variables of static duration in one file (at file scope, or static in a function) that
           aren't const: one struct holds the file's state, in one global. Under src/nx/hle/, any one: the
           state is a member of g_hle (hle/hle.h)
+  zero    a local zeroed by memset(&x, 0, sizeof x) in the function that declares it: `= {0}` (C90 has it) says
+          so where it is declared. A memset stays for an object reached through a pointer
 Exit status 0 whatever it finds; 2 when a path cannot be read.
 """
 import os, re, sys
@@ -137,6 +139,13 @@ def check_functions(path, text, report):
             if len(hits) > 1:
                 report(path, line_of(text, hits[0]), "allocs",
                        f"{len(hits)} separate allocations into members of '{owner}'")
+        for z in re.finditer(r"\bmemset\s*\(\s*&\s*(\w+)\s*,\s*0\s*,\s*sizeof\s*\(?\s*\1\s*\)?\s*\)", body):
+            name = z.group(1)
+            # declared in this body before it: a type, then the name (maybe among others) and ; , or =
+            if re.search(r"(?:^|[;{}])\s*(?:const\s+)?\w[\w\s\*]*?[\s\*,]" + name + r"\s*(?:\[[^\]]*\]\s*)*[;,=]",
+                         body[: z.start()]):
+                report(path, line_of(text, open_at + z.start()), "zero",
+                       f"'{name}' zeroed by memset where it is declared: '= {{0}}' there")
 
 
 def const_object(head):

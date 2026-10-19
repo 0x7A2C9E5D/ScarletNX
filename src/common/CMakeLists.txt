@@ -2,7 +2,7 @@
 # Copyright 2026 the ScarletNX contributors
 add_library(scarletnx-common STATIC
     utilities/common.c utilities/process.c utilities/font.c utilities/ini_lines.c utilities/pad_map.c
-    utilities/pad_screen.c utilities/users.c
+    utilities/pad_screen.c utilities/users.c utilities/logscan.c
     cpu/aarch64/a64.c cpu/recompiler/codegen.c)
 target_compile_definitions(scarletnx-common PRIVATE _CRT_SECURE_NO_WARNINGS
     SNX_HOST_COMPILER="${CMAKE_C_COMPILER}"
@@ -14,6 +14,21 @@ if(WIN32)
     target_link_libraries(scarletnx-common PUBLIC advapi32)
 else()
     target_link_libraries(scarletnx-common PUBLIC m)
+endif()
+
+# snx_demangle (utilities/demangle.h): C++ names through the C++ runtime's demangler, for the log summary. C, but what
+# links it links the C++ runtime (LINKER_LANGUAGE CXX)
+add_library(snx_demangle STATIC utilities/demangle.c)
+set_target_properties(snx_demangle PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_compile_options(snx_demangle PRIVATE -pedantic-errors -Wall -Wextra -Werror -Werror=missing-prototypes)
+# snx-logscan: the log summary (utilities/logscan.h) as a program, as scarletnx --scan-log, for the game reports
+# workflow and the tests: only the C library and the demangler. Not for the phones, which run no programs of their own
+if(NOT ANDROID AND NOT IOS)
+    add_executable(snx-logscan utilities/logscan_main.c utilities/logscan.c)
+    set_target_properties(snx-logscan PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+                                                 LINKER_LANGUAGE CXX RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+    target_compile_options(snx-logscan PRIVATE -pedantic-errors -Wall -Wextra -Werror -Werror=missing-prototypes)
+    target_link_libraries(snx-logscan PRIVATE snx_demangle)
 endif()
 
 # The C emitter and its static-step reference. Tests build modules against it; the recompiler and every game module

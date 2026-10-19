@@ -1,9 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The program's entry: the host driver's commands (extract, recompile) first, and anything else is a game to run */
+/* The program's entry: the MCP server (--mcp) and the host driver's commands (extract, recompile) first, and anything
+   else is a game to run */
 #include <stdio.h>
+#include <string.h>
 
 #include "nx/runtime/driver/driver.h"
+#include "nx/runtime/driver/mcp.h"
 #include "nx/runtime/main.h"
 #ifdef SNX_WITH_GUI
 #include "gui/gui.h"
@@ -27,6 +30,7 @@ int main(int argc, char** argv) {
 #ifdef SNX_WITH_GUI
     snx_menu = snx_gui_main;
 #endif
+    if (argc > 1 && !strcmp(argv[1], "--mcp")) return snx_mcp(argc, argv);
     result = snx_driver(argc, argv);
     if (result >= 0) return result;
 #ifdef SNX_MENU_THEN_GAME

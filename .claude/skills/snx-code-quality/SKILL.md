@@ -9,6 +9,9 @@ Write strict ANSI C: C90, as the driver builds (`-std=c90 -pedantic-errors`), un
 Declarations at the top of a block, `/* */` comments, `int` flags (`bool` is tolerated), `SnxU32`/`SnxU64`,
 `printf` through `(unsigned long)`. In place of C11 and C23: `__atomic_*` builtins on plain integers, a `char`
 padding array, `n > ((size_t)-1) / size`. A file's build flags plus `-std=c90 -pedantic` list what is not.
+A local that starts zeroed is declared `= {0}` (C90 allows it), not zeroed by a `memset` after its declaration; a
+`memset` stays for an object reached through a pointer. `strdup` is not C90: `snx_strdup` (common.h) is, and fails
+the way the rest of the code does when memory runs out.
 
 1. **No state another value already says.** A NULL pointer is absent: no `is_present` beside it.
    Not when NULL means something itself, or the flag says something else.

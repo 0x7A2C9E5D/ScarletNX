@@ -645,6 +645,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME trim_caches COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/trim_caches_test.py")
     # the check that keeps a pull request red while its title says donotmerge (scripts/pr-title.py, pr-title.yml)
     add_test(NAME pr_title COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/pr_title_test.py")
+    # the log summary (src/common/utilities/logscan.c), and the issues with a log: summarized, labelled and grouped
+    # (scripts/game-reports.py, game-reports.yml), both through snx-logscan
+    if(TARGET snx-logscan)
+        add_test(NAME logscan
+                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/logscan_test.py" $<TARGET_FILE:snx-logscan>)
+        add_test(NAME game_reports COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/game_reports_test.py"
+                                           $<TARGET_FILE:snx-logscan>)
+    endif()
     # the nightly release's title and notes (scripts/nightly-notes.py)
     add_test(NAME nightly_notes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/nightly_notes_test.py")
     # the builds published as releases and on Discord (scripts/publish-builds.py), against fakes. Where publish.yml
@@ -700,9 +708,11 @@ endif()
 
 add_executable(snx-test-driver driver_workflow.c
     "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/driver.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/game_name.c"
-    "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/process.c")
+    "${PROJECT_SOURCE_DIR}/src/nx/loader/loader.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/process.c"
+    "${PROJECT_SOURCE_DIR}/src/common/utilities/logscan.c")
 snx_test_target(snx-test-driver 90)
-target_link_libraries(snx-test-driver PRIVATE snx_test_common snx_lz4 OpenSSL::Crypto)
+target_link_libraries(snx-test-driver PRIVATE snx_test_common snx_lz4 OpenSSL::Crypto snx_demangle)
+set_target_properties(snx-test-driver PROPERTIES LINKER_LANGUAGE CXX)
 add_test(NAME driver_workflow COMMAND snx-test-driver)
 set_tests_properties(driver_workflow PROPERTIES TIMEOUT 60)
 add_executable(snx-test-link-file link_file.c)
