@@ -285,7 +285,8 @@ int vic_gpu_params(const VicJob* j, VicGpuParams* p, const u32 in_base[16], u32 
         /* lo above hi clamps to lo below it and to hi above, which the shader's clamp of bytes can't. And the shader
            writes the target rectangle alone, which holds every slot slot_resolve leaves on */
         if (sl->mat_enable && sl->clamp_lo > sl->clamp_hi) return 0;
-        if (sl->dx0 < j->tx0 || sl->dx0 + sl->w > j->tx0 + j->tw || sl->dy0 < j->ty0 || sl->dy0 + sl->h > j->ty0 + j->th)
+        if (sl->dx0 < j->tx0 || sl->dx0 + sl->w > j->tx0 + j->tw || sl->dy0 < j->ty0 ||
+            sl->dy0 + sl->h > j->ty0 + j->th)
             return 0;
         n++;
         o->dx0 = sl->dx0;

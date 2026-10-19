@@ -24,8 +24,8 @@ static unsigned checks;
 /* ------------------------------------------------ guest memory: two mappings with a hole between them, so a plane
    near the end of either is cut short (plane_map maps its rows alone, or nothing) */
 #define BASE    0x1000000ull
-#define IN_SIZE (2u << 20)  /* the inputs and the config */
-#define OUT_AT  0x220000u   /* the outputs' mapping, after the hole */
+#define IN_SIZE (2u << 20) /* the inputs and the config */
+#define OUT_AT  0x220000u  /* the outputs' mapping, after the hole */
 #define ARENA   (OUT_AT + (2u << 20))
 static u8 arena[ARENA];
 u8* iova_ptr(u64 iova, u64 len) {
@@ -58,7 +58,7 @@ static u32 below(u32 n) { return n ? rnd() % n : 0; }
 
 /* ------------------------------------------------ the stand-in renderer: both builds of the shader on the job */
 static unsigned g_job;
-static u8 *g_ol, *g_oc;    /* the job's output planes in guest memory, and their sizes */
+static u8 *g_ol, *g_oc; /* the job's output planes in guest memory, and their sizes */
 static u64 g_ol_lim, g_oc_lim;
 static u32 g_buf[2][2][(2u << 20) / 4]; /* [build][inputs, outputs] */
 static u32 g_oc_base;
@@ -136,7 +136,8 @@ static u32 place(u32 lo, u32 hi, u32 n, int edge) {
    pitch linear, its rows padded or not, which for pitch linear can leave them unaligned to words. Its planes go in
    [at_lo, at_hi): apart for an output, whose planes the CPU writes one pixel at a time, anywhere for an input */
 static void surface(u32 off, u32 fmt, u32 w, u32 h, u32 bpp, u32 at_lo, u32 at_hi, int out, u32 reg_y, u32 reg_c) {
-    u32 blk = below(2), bh = below(5), lw = w * bpp + (below(2) ? below(70) : 0), cw = (w + 1) / 2 + below(3) * below(40);
+    u32 blk = below(2), bh = below(5), lw = w * bpp + (below(2) ? below(70) : 0),
+        cw = (w + 1) / 2 + below(3) * below(40);
     u32 ly = 0, cy = 0, n;
     w64(CFG + off, (u64)fmt | (u64)blk << 11 | (u64)bh << 15 | (u64)(w - 1) << 32 | (u64)(h - 1) << 46);
     w64(CFG + off + 8, (u64)(lw / bpp - 1) | (u64)(h - 1) << 14 | (u64)(cw - 1) << 32 | (u64)((h + 1) / 2 - 1) << 46);
@@ -183,15 +184,14 @@ static void job_random(void) {
         w64(sl + 0x10, (u64)lo | (u64)hi << 10 | (u64)below(1024) << 32);
         w64(sl + 0x20, (u64)(sx0 << 16 | below(0x10000)) | (u64)(sx1 << 16 | below(0x10000)) << 32);
         w64(sl + 0x28, (u64)(sy0 << 16 | below(0x10000)) | (u64)(sy1 << 16 | below(0x10000)) << 32);
-        w64(sl + 0x30, (u64)(dx0 & 0x3FFF) | (u64)(dx1 & 0x3FFF) << 16 | (u64)(dy0 & 0x3FFF) << 32 |
-                           (u64)(dy1 & 0x3FFF) << 48);
+        w64(sl + 0x30,
+            (u64)(dx0 & 0x3FFF) | (u64)(dx1 & 0x3FFF) << 16 | (u64)(dy0 & 0x3FFF) << 32 | (u64)(dy1 & 0x3FFF) << 48);
         surface(sl - CFG + 0x40, below(20) ? 0x43 + below(2) : 0x20, iw, ih, 1, 0x1000, IN_SIZE, 0,
                 (0x400 + 0x60 * s) / 4, (0x404 + 0x60 * s) / 4);
         if (below(2)) {
             int m[3][4], r, c, sh_ = (int)below(4);
             for (r = 0; r < 3; r++)
-                for (c = 0; c < 4; c++)
-                    m[r][c] = below(3) ? M601[r][c] << sh_ : (int)(rnd() & 0xFFFFF) - 0x80000;
+                for (c = 0; c < 4; c++) m[r][c] = below(3) ? M601[r][c] << sh_ : (int)(rnd() & 0xFFFFF) - 0x80000;
             for (k = 0; k < 4; k++)
                 w64(sl + 0x60 + 8 * k, f20(m[0][k]) | f20(m[1][k]) << 20 | f20(m[2][k]) << 40 |
                                            (k == 0 ? (u64)(below(3) ? sh_ : below(16)) << 60 : 0) |
@@ -225,11 +225,12 @@ int main(int argc, char** argv) {
         vic_execute(regs);
         compare();
     }
-    printf("%u jobs composed (%u ABGR, %u ARGB, %u XBGR, %u NV21, %u NV12), %u by the unaligned build alone, %u declined; "
-           "slots: %u with the matrix, %u with an odd source column, %u block linear; %u jobs of several slots; "
-           "%u checks\n",
-           g_composed, g_fmt[0x1F], g_fmt[0x20], g_fmt[0x23], g_fmt[0x43], g_fmt[0x44], g_unaligned, g_declined,
-           g_matrix, g_odd, g_blk, g_multi, checks);
+    printf(
+        "%u jobs composed (%u ABGR, %u ARGB, %u XBGR, %u NV21, %u NV12), %u by the unaligned build alone, %u declined; "
+        "slots: %u with the matrix, %u with an odd source column, %u block linear; %u jobs of several slots; "
+        "%u checks\n",
+        g_composed, g_fmt[0x1F], g_fmt[0x20], g_fmt[0x23], g_fmt[0x43], g_fmt[0x44], g_unaligned, g_declined, g_matrix,
+        g_odd, g_blk, g_multi, checks);
     /* the random jobs must have reached every case */
     CHECK(g_fmt[0x1F] && g_fmt[0x20] && g_fmt[0x23] && g_fmt[0x43] && g_fmt[0x44]);
     CHECK(g_unaligned && g_declined && g_matrix && g_odd && g_blk && g_multi);
