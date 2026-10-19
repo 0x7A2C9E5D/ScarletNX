@@ -103,11 +103,47 @@ static LLVMCodeGenOptLevel codegen_level(char opt) {
     }
 }
 
+/* The host's triple, for objects the JIT loader loads when jit is nonzero. The loader reads ELF (and Windows' COFF),
+   and Darwin's objects are Mach-O: there the triple names ELF as its object format (arm64-apple-darwin<version>-elf),
+   and the code stays Darwin's. LLVM's AArch64 backend picks the calling convention, the reserved registers and the
+   library calls by the operating system, not by the object format: DarwinPCS (variadic arguments on the stack, small
+   arguments extended by the caller), x18 and x29 never allocated, bzero and memset_pattern16 for memset (libc.inc).
+   Only the sections, relocations and symbol names (no leading underscore) are ELF's */
+static char* host_triple(int jit) {
+    char* triple = LLVMGetDefaultTargetTriple();
+#ifdef __APPLE__
+    if (jit && !strstr(triple, "-elf")) {
+        size_t n = strlen(triple);
+        char* elf = (char*)malloc(n + sizeof("-elf"));
+        if (elf) {
+            memcpy(elf, triple, n);
+            memcpy(elf + n, "-elf", sizeof("-elf"));
+            LLVMDisposeMessage(triple);
+            triple = LLVMCreateMessage(elf);
+            free(elf);
+        }
+    }
+#else
+    (void)jit;
+#endif
+    return triple;
+}
+
+static SnxIr* new_ir(const char* name, char opt, const char* target_triple, int jit, char* error, size_t error_size);
+
 SnxIr* snx_ir_new(const char* name, char opt, char* error, size_t error_size) {
-    return snx_ir_new_target(name, opt, NULL, error, error_size);
+    return new_ir(name, opt, NULL, 0, error, error_size);
+}
+
+SnxIr* snx_ir_new_jit(const char* name, char opt, char* error, size_t error_size) {
+    return new_ir(name, opt, NULL, 1, error, error_size);
 }
 
 SnxIr* snx_ir_new_target(const char* name, char opt, const char* target_triple, char* error, size_t error_size) {
+    return new_ir(name, opt, target_triple, 0, error, error_size);
+}
+
+static SnxIr* new_ir(const char* name, char opt, const char* target_triple, int jit, char* error, size_t error_size) {
     SnxIr* ir;
     char *triple, *cpu, *features, *message = NULL, *layout;
     int ppc;
@@ -116,7 +152,7 @@ SnxIr* snx_ir_new_target(const char* name, char opt, const char* target_triple, 
     LLVMTypeRef params[2];
     ir = (SnxIr*)calloc(1, sizeof(*ir));
     if (!ir) return NULL;
-    triple = target_triple ? LLVMCreateMessage(target_triple) : LLVMGetDefaultTargetTriple();
+    triple = target_triple ? LLVMCreateMessage(target_triple) : host_triple(jit);
     if (LLVMGetTargetFromTriple(triple, &target, &message)) {
         snprintf(error, error_size, "LLVM target %s: %s", triple, message ? message : "unavailable");
         LLVMDisposeMessage(message);
@@ -125,14 +161,18 @@ SnxIr* snx_ir_new_target(const char* name, char opt, const char* target_triple, 
         return NULL;
     }
     /* -march=native -mtune=native, -fPIC (toolchain.c). Another triple gets its architecture's baseline: x86-64 with
-       cmpxchg16b, POWER8 on PowerPC64 */
+       CMPXCHG16B as rtlib is built, POWER8 on PowerPC64, anything else (AArch64) the generic CPU, since an x86 CPU
+       name crashes another target's instruction selection */
     ppc = !strncmp(triple, "powerpc64", 9) || !strncmp(triple, "ppc64", 5);
-    if (target_triple) {
-        cpu = LLVMCreateMessage(ppc ? "pwr8" : "x86-64");
-        features = LLVMCreateMessage(ppc ? "" : "+cx16");
-    } else {
+    if (!target_triple) {
         cpu = LLVMGetHostCPUName();
         features = LLVMGetHostCPUFeatures();
+    } else if (!strncmp(triple, "x86_64", 6)) {
+        cpu = LLVMCreateMessage("x86-64");
+        features = LLVMCreateMessage("+cx16");
+    } else {
+        cpu = LLVMCreateMessage(ppc ? "pwr8" : "generic");
+        features = LLVMCreateMessage("");
     }
     /* POWER8 at least, as cmake/cross.cmake builds the runtime library: before it there is no lqarx/stqcx., and the
        128-bit cmpxchg becomes a libatomic call no module links. The host's name is "generic" where /proc/cpuinfo has
@@ -243,17 +283,13 @@ static LLVMValueRef ppc_dynamic_stub(SnxIr* ir, LLVMTypeRef type) {
     const char* jump = !strncmp(target, "powerpc64le", 11) || !strncmp(target, "ppc64le", 7) || strstr(target, "musl")
                            ? "mtctr 12\n bctr"
                            : "ld 0, 0(12)\n mtctr 0\n bctr";
-    /* r3 the CPU, r4 the pc: f = disp[(pc - code_lo) >> 2] when inside and aligned, else snx_interp_entry */
+    /* r3 the CPU, r4 the pc: f = disp[(pc - code_lo) >> 2] when inside and aligned, else c->rt->miss */
     sprintf(text,
             "ld 11, %u(3)\n ld 12, %u(3)\n subf 12, 11, 12\n subf 11, 11, 4\n cmpld 11, 12\n bge 1f\n"
             " andi. 0, 4, 3\n bne 1f\n ld 12, %u(3)\n sldi 11, 11, 1\n ldx 12, 12, 11\n cmpdi 12, 0\n beq 1f\n"
-            " %s\n1:\n addis 12, 2, snx_interp_entry@toc@ha\n ld 12, snx_interp_entry@toc@l(12)\n %s",
+            " %s\n1:\n ld 12, %u(3)\n ld 12, %u(12)\n %s",
             (unsigned)offsetof(CPU, code_lo), (unsigned)offsetof(CPU, code_hi), (unsigned)offsetof(CPU, disp), jump,
-            jump);
-    if (!LLVMGetNamedGlobal(ir->mod, "snx_interp_entry")) {
-        LLVMValueRef entry = LLVMAddGlobal(ir->mod, ir->t_ptr, "snx_interp_entry"); /* rtlib.c */
-        LLVMSetVisibility(entry, LLVMHiddenVisibility);
-    }
+            (unsigned)offsetof(CPU, rt), (unsigned)offsetof(RtAPI, miss), jump);
     return ppc_stub(ir, type, "snx_ppc_tail_dynamic", text);
 }
 static void ppc_tail_calls(SnxIr* ir) {
@@ -290,13 +326,28 @@ static void ppc_tail_calls(SnxIr* ir) {
 }
 
 int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char* error, size_t error_size) {
+    *data = NULL;
+    *size = 0;
+    if (ir->fallbacks) {
+        size_t index;
+        const SnxA64Pattern* pattern = snx_a64_case_pattern(snx_a64_decode(ir->fallback_word), &index);
+        snprintf(error, error_size, "no IR emitter for %s (%08lx at %llx), %lu instruction%s in all",
+                 pattern ? pattern->name : "?", (unsigned long)ir->fallback_word, (unsigned long long)ir->fallback_pc,
+                 ir->fallbacks, ir->fallbacks == 1 ? "" : "s");
+        return -1;
+    }
+    return snx_ir_module_object(ir, ir->mod, opt, data, size, error, error_size);
+}
+
+int snx_ir_module_object(SnxIr* ir, LLVMModuleRef module, char opt, unsigned char** data, size_t* size, char* error,
+                         size_t error_size) {
     char pipeline[16], *message = NULL;
     LLVMPassBuilderOptionsRef options;
     LLVMErrorRef failure;
     LLVMMemoryBufferRef buffer;
     *data = NULL;
     *size = 0;
-    if (LLVMVerifyModule(ir->mod, LLVMReturnStatusAction, &message)) {
+    if (LLVMVerifyModule(module, LLVMReturnStatusAction, &message)) {
         snprintf(error, error_size, "invalid IR: %.900s", message ? message : "");
         LLVMDisposeMessage(message);
         return -1;
@@ -305,7 +356,7 @@ int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char*
     sprintf(pipeline, "default<O%c>", opt == 's' ? 's' : opt == 'z' ? 'z' : opt);
     options = LLVMCreatePassBuilderOptions();
     configure_passes(options, opt);
-    failure = LLVMRunPasses(ir->mod, pipeline, ir->tm, options);
+    failure = LLVMRunPasses(module, pipeline, ir->tm, options);
     LLVMDisposePassBuilderOptions(options);
     if (failure) {
         message = LLVMGetErrorMessage(failure);
@@ -327,7 +378,7 @@ int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char*
         }
     }
     message = NULL;
-    if (LLVMTargetMachineEmitToMemoryBuffer(ir->tm, ir->mod, LLVMObjectFile, &message, &buffer)) {
+    if (LLVMTargetMachineEmitToMemoryBuffer(ir->tm, module, LLVMObjectFile, &message, &buffer)) {
         snprintf(error, error_size, "LLVM code generation: %s", message ? message : "");
         LLVMDisposeMessage(message);
         return -1;

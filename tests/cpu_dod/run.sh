@@ -15,10 +15,12 @@ echo "PASS original decoder fingerprint: $actual"
 "$CC" -std=gnu11 -O2 -Wall -Wextra -Werror -I "$root/src" \
     "$root/tests/cpu_dod/emit.c" "$root/src/common/cpu/aarch64/a64.c" \
     "$root/src/common/cpu/aarch64/a64_emit.c" -o "$work/emit"
+# checked and normal carry the generated interpreter's taken-branch lookup with its fallback: c->rt->miss, as
+# snx_lookup answers for a pc without code (SNX_ABI 10)
 for row in \
   'step 189a474f57ca545fb73cda63c5da59385dacd52d124fc08a9064a6e752e387cc' \
-  'checked 7a617f98712a02df42a1811ff388bffaf9f9a64dc3fe8d7186e189012ef29621' \
-  'normal 0f4ec7dc98c5a11b79a3c7c91e800ad2849caa62a09e00312a895cd509ed3052'; do
+  'checked ee28b6057b5640d77113122473a8035c4c4d5d256a0e002a8fb66ccbd3413fc2' \
+  'normal 166f0f7522222680242324a5043ab9982810f74fc1d7a80d8cec6ea09c1ed5ca'; do
     read -r mode digest <<< "$row"
     actual="$("$work/emit" "$mode" | sha256sum | cut -d' ' -f1)"
     [[ "$actual" == "$digest" ]] || { echo "FAIL $mode generated C: $actual" >&2; exit 1; }

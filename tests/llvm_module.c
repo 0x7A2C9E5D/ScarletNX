@@ -10,6 +10,7 @@
    the same, with main's BL to func reaching func through CPU.disp, where a wrapper counts it.
      llvm_module SCARLETNX REPO CLANG */
 #include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_emit.h"
 #include "common/utilities/common.h"
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/loader/module_abi.h"
@@ -103,7 +104,7 @@ static int build_reference(const char* root, const char* repo, const char* compi
     FILE* file = snx_fopen(source, "wb");
     int n = 0, status;
     if (!file) return -1;
-    fputs("#include \"common/cpu/aarch64/cpu.h\"\n#include \"common/cpu/aarch64/cpu_helpers.c\"\n", file);
+    fputs("#define SNX_A64_REFERENCE\n#include \"common/cpu/aarch64/cpu.h\"\n#include \"common/cpu/aarch64/cpu_helpers.c\"\n", file);
     snx_a64_interp(file, 0);
     fputs("SNX_EXPORT void snx_reference(CPU* c, u64 e) { snx_interp(c, e); }\n", file);
     if (fclose(file)) return -1;

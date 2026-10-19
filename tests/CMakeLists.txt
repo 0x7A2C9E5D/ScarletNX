@@ -913,7 +913,7 @@ endif()
 
 add_executable(snx-test-llvm-module llvm_module.c)
 snx_test_target(snx-test-llvm-module 11)
-target_link_libraries(snx-test-llvm-module PRIVATE snx_driver ${CMAKE_DL_LIBS})
+target_link_libraries(snx-test-llvm-module PRIVATE snx_driver snx_a64_reference ${CMAKE_DL_LIBS})
 add_test(NAME llvm_module COMMAND snx-test-llvm-module $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}"
     "${CMAKE_C_COMPILER}")
 # the recompiler as a library (snx_recompiler.h): A64 on every backend built, A32, from code in memory

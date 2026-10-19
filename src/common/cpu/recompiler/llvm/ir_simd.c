@@ -9,6 +9,7 @@
 /* AdvSIMD: snx_a64_fast_simd's shortcuts (a64.c), emitted inline as the C it prints, and every SIMD pattern the C
    reference template would hand to snx_simd, lowered directly here */
 #include "common/cpu/recompiler/llvm/ir.h"
+#include "common/cpu/recompiler/aes_tables.h"
 #include <string.h>
 
 typedef LLVMValueRef V;

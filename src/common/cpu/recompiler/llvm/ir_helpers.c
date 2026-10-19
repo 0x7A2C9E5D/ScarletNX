@@ -505,7 +505,7 @@ static void build_stxp(SnxIr* ir, LLVMValueRef function) {
 }
 /* snx_lookup(c,pc) */
 static void build_lookup(SnxIr* ir, LLVMValueRef function) {
-    LLVMValueRef pc = P(1), lo, hi, o, inside, f, index, entry;
+    LLVMValueRef pc = P(1), lo, hi, o, inside, f, index, slot;
     LLVMBasicBlockRef table = ir_block(ir, "table"), found = ir_block(ir, "found"), none = ir_block(ir, "none");
     ir->c = P(0);
     lo = ir_cpu_load(ir, ir->t_i64, offsetof(CPU, code_lo));
@@ -516,18 +516,20 @@ static void build_lookup(SnxIr* ir, LLVMValueRef function) {
     ir_likely(ir, LLVMBuildCondBr(B, inside, table, none));
     LLVMPositionBuilderAtEnd(B, table);
     index = LLVMBuildLShr(B, o, ir_i64(ir, 2), "");
-    f = ir_load(ir, ir->t_ptr,
-                LLVMBuildGEP2(B, ir->t_ptr, ir_cpu_load(ir, ir->t_ptr, offsetof(CPU, disp)), &index, 1, ""));
+    /* __atomic_load_n(&c->disp[o>>2],__ATOMIC_RELAXED): the runtime JIT fills slots while this runs (cpu.h) */
+    slot = LLVMBuildGEP2(B, ir->t_ptr, ir_cpu_load(ir, ir->t_ptr, offsetof(CPU, disp)), &index, 1, "");
+    f = LLVMBuildLoad2(B, ir->t_ptr, slot, "");
+    LLVMSetOrdering(f, LLVMAtomicOrderingMonotonic);
+    LLVMSetAlignment(f, sizeof(void*));
     ir_likely(ir, LLVMBuildCondBr(B, LLVMBuildIsNotNull(B, f, ""), found, none));
     LLVMPositionBuilderAtEnd(B, found);
     LLVMBuildRet(B, f);
     LLVMPositionBuilderAtEnd(B, none);
-    entry = LLVMGetNamedGlobal(ir->mod, "snx_interp_entry");
-    if (!entry) {
-        entry = LLVMAddGlobal(ir->mod, ir->t_ptr, "snx_interp_entry");
-        LLVMSetVisibility(entry, LLVMHiddenVisibility);
-    }
-    LLVMBuildRet(B, ir_load(ir, ir->t_ptr, entry));
+    /* c->rt->miss */
+    index = ir_i64(ir, ir_rt_miss());
+    LLVMBuildRet(
+        B, ir_load(ir, ir->t_ptr,
+                   LLVMBuildInBoundsGEP2(B, ir->t_i8, ir_cpu_load(ir, ir->t_ptr, offsetof(CPU, rt)), &index, 1, "")));
 }
 /* dc_zva(M,a): memset(MP(a & ~63), 0, 64) */
 static void build_dc_zva(SnxIr* ir, LLVMValueRef function) {
