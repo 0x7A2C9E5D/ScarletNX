@@ -318,8 +318,10 @@ every screen (`[body] sizing = fixed`), and a window too narrow for both shows t
 column is as wide as its entries and the side box goes under the list. A text too long for its box wraps over
 its rows, its last sliding what is left, or takes one that slides with `[body] text = slide`. A run of the console layout shows the driver's output in a box sized to it,
 beside it what runs and how it ended over the status, the file in the tips and the ESC line where the keys
-go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question, or
-the files an older version left, comes in a box over the screen darkened.
+go, which a tap aborts. The button map draws the pad in the box between the head and the foot. A question comes
+over the screen darkened, in a box in its middle, or with `[body] options-dialog = yorha` (YoRHa's) in a box at its
+foot, a tab with its label on the box's edge, the choices at its right above it, as the game's dialogs. The files an
+older version left come in a box over the screen darkened.
 
 The built-ins are `default`, the look above, and `yorha`: paper and ink, a title twice the text's size, a faint
 grid on the page, square markers, the focused box inverted, the tips in a box under the head, the keys in one on a
@@ -393,6 +395,9 @@ sizing = fixed
 text = wrap
 ; in the list's margin, beside the focused box
 cursor = "> "
+; a question and its choices: default (a box in the middle) | yorha (the question in a box at the foot, the
+; choices at its right above it)
+options-dialog = yorha
 [backdrop]
 ; a faint grid on the page behind the boxes, in the dim colour
 grid = true

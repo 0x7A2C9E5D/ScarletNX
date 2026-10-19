@@ -326,6 +326,25 @@ int main(void) {
     assert(path && !strcmp(path, "C:\\Games\\a.nro"));
     free(path);
 
+    /* a choice among three: the arrows go round them, Select takes the one in focus, Cancel goes back; none to take
+       with no choices */
+    {
+        GuiChoice choice = {3, 0};
+        assert(gui_choice_key(&choice, GUI_DOWN) == GUI_CHOICE_STAY && choice.focus == 1);
+        assert(gui_choice_key(&choice, GUI_RIGHT) == GUI_CHOICE_STAY && choice.focus == 2);
+        assert(gui_choice_key(&choice, GUI_DOWN) == GUI_CHOICE_STAY && choice.focus == 0);
+        assert(gui_choice_key(&choice, GUI_UP) == GUI_CHOICE_STAY && choice.focus == 2);
+        assert(gui_choice_key(&choice, GUI_LEFT) == GUI_CHOICE_STAY && choice.focus == 1);
+        assert(gui_choice_key(&choice, GUI_PAGE_DOWN) == GUI_CHOICE_STAY && choice.focus == 1);
+        assert(gui_choice_key(&choice, GUI_SELECT) == GUI_CHOICE_TAKE && choice.focus == 1);
+        assert(gui_choice_key(&choice, GUI_CANCEL) == GUI_CHOICE_BACK && choice.focus == 1);
+        choice.count = 1;
+        choice.focus = 0;
+        assert(gui_choice_key(&choice, GUI_DOWN) == GUI_CHOICE_STAY && !choice.focus);
+        choice.count = 0;
+        assert(gui_choice_key(&choice, GUI_SELECT) == GUI_CHOICE_STAY &&
+               gui_choice_key(&choice, GUI_UP) == GUI_CHOICE_STAY);
+    }
     /* the question before an abort: keys do nothing while it is not shown; the arrows move between its choices, Select
        takes the one in focus and Cancel keeps going, both closing it */
     assert(!gui_confirm_key(&confirm, GUI_SELECT) && !gui_confirm_key(&confirm, GUI_DOWN));

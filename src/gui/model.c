@@ -55,22 +55,36 @@ void gui_confirm_open(GuiConfirm* confirm, GuiAsk ask, bool twice) {
     confirm->twice = twice;
     confirm->armed = false;
 }
-bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
-    if (!confirm->shown) return false;
+GuiChoiceDo gui_choice_key(GuiChoice* choice, GuiKey key) {
     switch (key) {
         case GUI_UP:
-        case GUI_DOWN:
         case GUI_LEFT:
-        case GUI_RIGHT: gui_confirm_focus(confirm, confirm->selected ^ 1); return false;
-        case GUI_SELECT:
+            if (choice->count > 0) choice->focus = (choice->focus + choice->count - 1) % choice->count;
+            return GUI_CHOICE_STAY;
+        case GUI_DOWN:
+        case GUI_RIGHT:
+            if (choice->count > 0) choice->focus = (choice->focus + 1) % choice->count;
+            return GUI_CHOICE_STAY;
+        case GUI_SELECT: return choice->count > 0 ? GUI_CHOICE_TAKE : GUI_CHOICE_STAY;
+        case GUI_CANCEL: return GUI_CHOICE_BACK;
+        default: return GUI_CHOICE_STAY;
+    }
+}
+bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
+    GuiChoice two;
+    if (!confirm->shown) return false;
+    two.count = 2;
+    two.focus = confirm->selected;
+    switch (gui_choice_key(&two, key)) {
+        case GUI_CHOICE_STAY: gui_confirm_focus(confirm, two.focus); return false;
+        case GUI_CHOICE_TAKE:
             if (confirm->twice && confirm->selected == GUI_CONFIRM_ABORT && !confirm->armed) {
                 confirm->armed = true;
                 return false;
             }
             confirm->shown = false;
             return confirm->selected == GUI_CONFIRM_ABORT;
-        case GUI_CANCEL: confirm->shown = false; return false;
-        default: return false;
+        default: confirm->shown = false; return false;
     }
 }
 void gui_confirm_focus(GuiConfirm* confirm, int choice) {

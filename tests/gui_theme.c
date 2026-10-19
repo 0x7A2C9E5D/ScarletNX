@@ -42,6 +42,7 @@ static const char* const format_keys[] = {"theme/format",
                                           "body/sizing",
                                           "body/text",
                                           "body/cursor",
+                                          "body/options-dialog",
                                           "backdrop/grid",
                                           "tips/place",
                                           "tips/box",
@@ -163,6 +164,16 @@ int main(void) {
     assert(def->run == GUI_RUN_CONSOLE && !def->fade_in_ms && !def->fade_out_ms && def->line_in == GUI_LINE_NONE);
     assert(loading->run == GUI_RUN_STEPS && loading->ring == GUI_RING_RIGHT && loading->texture && !loading->bar);
     assert(loading->line_in == GUI_LINE_TYPING && loading->typing_ms == 5 && loading->fade_out_ms == 500);
+    /* a question in the middle, the default's; at the foot, YoRHa's; a theme names its own, a word it does not know
+       keeping its base's */
+    assert(def->dialog == GUI_DIALOG_DEFAULT && yorha->dialog == GUI_DIALOG_YORHA);
+    theme = *def;
+    parse(&theme, "[theme]\nbase = default\n[body]\noptions-dialog = yorha\n");
+    assert(theme.dialog == GUI_DIALOG_YORHA);
+    parse(&theme, "[theme]\nbase = yorha\n[body]\noptions-dialog = bottom\n");
+    assert(theme.dialog == GUI_DIALOG_YORHA);
+    parse(&theme, "[theme]\nbase = yorha\n[body]\noptions-dialog = default\n");
+    assert(theme.dialog == GUI_DIALOG_DEFAULT);
     /* a running step's progress: the default theme's amount, YoRHa's percent; a theme names its own */
     assert(def->progress == GUI_PROGRESS_AMOUNT && yorha->progress == GUI_PROGRESS_PERCENT);
     theme = *def;

@@ -13,6 +13,15 @@
 static const SDL_Color normal = {220, 220, 220, 255}, yellow = {255, 255, 0, 255}, red = {255, 0, 0, 255},
                        pink = {255, 85, 255, 255}, black = {0, 0, 0, 255};
 
+/* the question's box and its choices, as the theme places them (ask_place) */
+static void ask_boxes(App* app, GuiRect* r, GuiList* choices) {
+    GuiChoices c;
+    const char* labels[2];
+    char second[96];
+    ask_place(app, &c, labels, second, sizeof second);
+    *r = c.box;
+    *choices = c.list;
+}
 static void key(App* app, SDL_Keycode code) {
     SDL_Event e = {0};
     e.type = SDL_EVENT_KEY_DOWN;
@@ -2863,16 +2872,29 @@ int main(int argc, char** argv) {
             held.key.repeat = true;
             event(&app, &held);
             assert(!app.confirm.shown);
-            /* over YoRHa's loading screen: its box, the focused choice on a band of its focus colour */
+            /* over YoRHa's loading screen: the question in a box of ink at its foot, in the page colour, the choices
+               above it at its right, the focused one on a band of its focus colour (options-dialog = yorha) */
             app.theme = *gui_theme_builtin("yorha");
             app.fade_ms = 0;
             key(&app, SDLK_ESCAPE);
             render(&app);
-            shows(&app, "Abort the recompile?", rgb(app.theme.warning));
+            shows(&app, "Abort the recompile?", rgb(app.theme.page));
             shows(&app, "\xfe Keep going", rgb(app.theme.page));
             shows(&app, "\xfe Abort", rgb(app.theme.ink));
             ask_boxes(&app, &r, &l);
+            {
+                int w, h;
+                area(&app, &w, &h);
+                assert(r.y + r.h >= h - cell_h(&app) && r.w > w * 3 / 4); /* the foot's whole width */
+                assert(l.at.y + l.at.h <= r.y && l.at.x > w / 2);         /* above it, at its right */
+                assert(same_colour(pixel(&app, (float)(r.x + r.w / 2), (float)(r.y + r.h - 2)), rgb(app.theme.ink)));
+            }
+            /* its options-dialog = default: in the middle, the question in the warning colour */
+            app.theme.dialog = GUI_DIALOG_DEFAULT;
+            render(&app);
+            shows(&app, "Abort the recompile?", rgb(app.theme.warning));
             app.theme = *gui_theme_builtin("default");
+            ask_boxes(&app, &r, &l);
             touch_box(&app, list_box(&l, 1));
             assert(app.aborting && !app.confirm.shown);
             while (app.menu.running && SDL_GetTicks() < until) {

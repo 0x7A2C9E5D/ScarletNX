@@ -54,6 +54,13 @@ typedef struct {
     bool twice; /* the second choice is pressed twice: the first press only arms it */
     bool armed; /* pressed once, its focus kept */
 } GuiConfirm;
+/* A choice among count, the one in focus (0 first): Up and Down, Left and Right, move round them, Select takes it and
+   Cancel goes back. A question's yes and no are two (gui_confirm_key); the setup's steps take as many as they offer */
+typedef struct {
+    int count, focus;
+} GuiChoice;
+typedef enum { GUI_CHOICE_STAY, GUI_CHOICE_TAKE, GUI_CHOICE_BACK } GuiChoiceDo;
+GuiChoiceDo gui_choice_key(GuiChoice* choice, GuiKey key);
 void gui_confirm_open(GuiConfirm* confirm, GuiAsk ask, bool twice);
 /* A key on the question: the arrows move between its choices, Select takes the one in focus and Cancel keeps going,
    both closing it; a question asked twice takes its second choice at the second Select, a move between choices

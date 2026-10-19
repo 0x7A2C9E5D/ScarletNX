@@ -25,6 +25,9 @@ typedef enum { GUI_HEAD_TABS, GUI_HEAD_BELOW } GuiHeadPlace;
 typedef enum { GUI_PICTURE_NONE, GUI_PICTURE_SQUARE, GUI_PICTURE_ROUND } GuiPicture;
 /* what the focus is about: in the foot's box beside the keys, or on a row under the head */
 typedef enum { GUI_TIPS_BOTTOM, GUI_TIPS_TOP } GuiTipsPlace;
+/* a question and its choices: in a box in the middle, the choices under the question; or the question in a box at the
+   foot, the choices at its right above it, as the dialogs of the game YoRHa is named for */
+typedef enum { GUI_DIALOG_DEFAULT, GUI_DIALOG_YORHA } GuiDialog;
 /* the lines that wait on the user: the keys screen's drop line, the ESC line after a run, a run being aborted */
 typedef enum {
     GUI_PROMPT_KEYS,
@@ -69,6 +72,7 @@ typedef struct {
     GuiSizing sizing;
     GuiTextFlow text;
     char cursor[16]; /* in the list's margin, beside the focused box */
+    GuiDialog dialog;
     int grid;        /* a faint grid on the page behind the boxes, in the dim colour */
     GuiTipsPlace tips_place;
     int tips_box, footer_box; /* the tips and the keys in a box with a bar at its left, or on the page */

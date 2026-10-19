@@ -1617,6 +1617,10 @@ msgid "in the margin, beside the focused box"
 msgstr ""
 
 #: src/gui/theme.c
+msgid "a question: default, a box in the middle; yorha, at the foot, its choices at its right above it"
+msgstr ""
+
+#: src/gui/theme.c
 msgid "a faint grid on the page, in the dim colour"
 msgstr ""
 

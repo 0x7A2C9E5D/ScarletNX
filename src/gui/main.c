@@ -1177,6 +1177,8 @@ static void left_paths(const char* line, char* old, char* now, size_t size) {
     snprintf(now, size, "%.*s", (int)strcspn(by, "\n"), by);
 }
 static void list_item(App* app, const GuiList* l, int i, const char* label, int focused, int activated);
+static void list_marks(App* app, const GuiList* l);
+static int list_hit(const GuiList* l, float x, float y, bool touch);
 static void fill_rect(App* app, GuiRect r, GuiRgb c) {
     if (r.w > 0 && r.h > 0) fill(app, (float)r.x, (float)r.y, (float)r.w, (float)r.h, c, 255);
 }
@@ -1360,43 +1362,121 @@ static void render_files(App* app, int report) {
     snprintf(label, sizeof label, "%s%s", app->theme.marker, snx_tr("OK"));
     list_item(app, &ok, 0, label, true, false);
 }
-/* the question over a run, the menu or a form: the question, wrapped to the screen, its two choices as boxes, the one
-   kept focused */
-static void ask_boxes(App* app, GuiRect* r, GuiList* choices) {
-    int s = app->scale, item = item_h(app), choices_h = 2 * (item + 6 * s), rows;
-    const char* question = ask_question(app);
-    *r = over_rect(app, SDL_max(gui_text_cols(question), 16), 0);
-    rows = wrap_rows(app, question, inner(app, *r).w / cell_w(app), 0);
-    *r = over_rect(app, SDL_max(gui_text_cols(question), 16), rows * cell_h(app) + choices_h + 12 * s);
-    list_place(app, choices,
-               gui_rect(r->x + cell_w(app), r->y + rows * cell_h(app) + 10 * s, r->w - 2 * cell_w(app), choices_h), 2,
-               app->confirm.selected);
+/* ---- a question and its choices, as the theme's options-dialog places them: in a box in the middle of their area, the
+   question over the choices; or the question in a box at the area's foot, a tab with its label on the box's top edge,
+   and the choices at its right above it. The questions over a screen and the setup's steps ---- */
+typedef struct {
+    GuiRect box;  /* the question's: the whole dialog in the middle, or the box at the foot */
+    GuiRect tab;  /* at the foot: the label on the box's top edge; no size without a label */
+    GuiList list; /* the choices */
+} GuiChoices;
+static void choices_place(App* app, GuiRect area, const char* question, const char* tab, const char* const* labels,
+                          int count, int focus, GuiChoices* c) {
+    int s = app->scale, cw = cell_w(app), item = item_h(app), list_h = count * (item + 6 * s), longest = 16, i, rows;
+    int marker = gui_text_cols(app->theme.marker), tab_w = tab && tab[0] ? gui_text_cols(tab) + 2 : 0;
+    memset(c, 0, sizeof *c);
+    for (i = 0; i < count; ++i) longest = SDL_max(longest, gui_text_cols(labels[i]) + marker + 2);
+    if (app->theme.dialog == GUI_DIALOG_YORHA) {
+        int margin = app->theme.cursor[0] ? gui_text_cols(app->theme.cursor) * cw : 0;
+        int w = SDL_min(SDL_max(longest, 24) * cw + margin, area.w), top;
+        rows = wrap_rows(app, question, (area.w - 4 * cw) / cw, 0);
+        c->box = gui_rect(area.x, area.y + area.h - (rows + 2) * cell_h(app), area.w, (rows + 2) * cell_h(app));
+        if (tab_w) c->tab = gui_rect(c->box.x + 2 * cw, c->box.y - cell_h(app), tab_w * cw, cell_h(app) + 4 * s);
+        top = (tab_w ? c->tab.y : c->box.y) - cell_h(app) / 2 - list_h;
+        list_place(app, &c->list, gui_rect(area.x + area.w - w - 2 * cw, top, w, list_h), count, focus);
+        return;
+    }
+    { /* in the middle, as wide as the question or the longest choice */
+        int cols = SDL_max(gui_text_cols(question) + tab_w, longest), w, h;
+        w = SDL_min((cols + 2) * cw, area.w - 2 * cw);
+        rows = wrap_rows(app, question, (w - 2 * cw - tab_w * cw) / cw, 0);
+        h = rows * cell_h(app) + list_h + 12 * s;
+        c->box = gui_rect(area.x + (area.w - w) / 2, area.y + SDL_max(0, (area.h - h) / 2), w, h);
+        list_place(app, &c->list,
+                   gui_rect(c->box.x + cw, c->box.y + rows * cell_h(app) + 10 * s, c->box.w - 2 * cw, list_h), count,
+                   focus);
+    }
+}
+/* them drawn where choices_place put them, the focused one as the lists draw theirs */
+static void choices_draw(App* app, const GuiChoices* c, const char* question, const char* tab,
+                         const char* const* labels, int count, int focus) {
+    const GuiTheme* t = &app->theme;
+    char label[256];
+    int i, s = app->scale, filled = t->panels == GUI_PANELS_FILL;
+    if (t->dialog == GUI_DIALOG_YORHA) {
+        fill_rect(app, c->box, filled ? t->ink : t->page);
+        if (!filled) outline(app, c->box, t->dim);
+        wrap_in(app, gui_rect(c->box.x + 2 * cell_w(app), c->box.y, c->box.w - 4 * cell_w(app), c->box.h),
+                c->box.x + 2 * cell_w(app), c->box.y + cell_h(app), question, 0, rgb(filled ? t->page : t->ink));
+        if (c->tab.h) {
+            fill_rect(app, c->tab, t->page);
+            outline(app, c->tab, filled ? t->ink : t->dim);
+            text_in(app, c->tab, c->tab.x + cell_w(app), c->tab.y + 2 * s, tab, rgb(t->ink));
+        }
+    } else {
+        fill_rect(app, c->box, t->page);
+        pane(app, c->box, NULL);
+        wrap_in(app,
+                gui_rect(c->box.x, c->box.y, c->box.w - (tab && tab[0] ? gui_text_cols(tab) + 2 : 0) * cell_w(app),
+                         c->box.h),
+                c->box.x + cell_w(app), c->box.y + 4 * s, question, 0, rgb(t->warning));
+        if (tab && tab[0])
+            text_in(app, c->box, c->box.x + c->box.w - (gui_text_cols(tab) + 1) * cell_w(app), c->box.y + 4 * s, tab,
+                    rgb(t->soft));
+    }
+    for (i = c->list.first; i < c->list.first + c->list.shown && i < count; ++i) {
+        snprintf(label, sizeof label, "%s%s", t->marker, labels[i]);
+        list_item(app, &c->list, i, label, focus == i, false);
+    }
+    list_marks(app, &c->list);
+}
+/* the pixel x, y on the dialog: the choice under it (-1 for none), and whether it is on the dialog at all */
+static int choices_hit(const GuiChoices* c, float x, float y, bool* on) {
+    const GuiRect* r[3];
+    int i;
+    r[0] = &c->box;
+    r[1] = &c->tab;
+    r[2] = &c->list.at;
+    *on = false;
+    for (i = 0; i < 3; ++i)
+        *on = *on || (x >= (float)r[i]->x && x < (float)(r[i]->x + r[i]->w) && y >= (float)r[i]->y &&
+                      y < (float)(r[i]->y + r[i]->h));
+    return list_hit(&c->list, x, y, true);
 }
 #if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
 #define SAY_AGAIN SNX_TR_NOOP("tap again")
 #else
 #define SAY_AGAIN SNX_TR_NOOP("press again")
 #endif
-static void render_ask(App* app) {
-    static const char* const choices[][2] = {{SNX_TR_NOOP("Keep going"), SNX_TR_NOOP("Abort")},
+/* the questions over a run, the menu or a form (GuiAsk's order): the first choice keeps things as they are */
+static const char* const ask_choices[][2] = {{SNX_TR_NOOP("Keep going"), SNX_TR_NOOP("Abort")},
                                              {SNX_TR_NOOP("Stay"), SNX_TR_NOOP("Exit")},
                                              {SNX_TR_NOOP("Only this folder"), SNX_TR_NOOP("With subfolders")},
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Use it")},
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Run anyway")}};
-    GuiRect r;
-    GuiList l;
-    char label[96];
-    int i;
-    ask_boxes(app, &r, &l);
-    over_box(app, r, NULL);
-    wrap_in(app, inner(app, r), r.x + cell_w(app), r.y + 4 * app->scale, ask_question(app), 0, rgb(app->theme.warning));
-    for (i = 0; i < 2; ++i) {
-        /* a choice asked twice says so once pressed */
-        snprintf(label, sizeof label, "%s%s%s%s", app->theme.marker, snx_tr(choices[app->confirm.ask][i]),
-                 i == GUI_CONFIRM_ABORT && app->confirm.armed ? ": " : "",
-                 i == GUI_CONFIRM_ABORT && app->confirm.armed ? snx_tr(SAY_AGAIN) : "");
-        list_item(app, &l, i, label, app->confirm.selected == i, false);
-    }
+/* the question shown, over the whole screen in the middle or at its foot, a choice asked twice saying so once pressed
+   (its label in second) */
+static void ask_place(App* app, GuiChoices* c, const char** labels, char* second, size_t size) {
+    int width, height;
+    GuiAsk ask = app->confirm.ask;
+    area(app, &width, &height);
+    labels[0] = snx_tr(ask_choices[ask][0]);
+    snprintf(second, size, "%s%s%s", snx_tr(ask_choices[ask][1]), app->confirm.armed ? ": " : "",
+             app->confirm.armed ? snx_tr(SAY_AGAIN) : "");
+    labels[1] = second;
+    choices_place(app,
+                  app->theme.dialog == GUI_DIALOG_YORHA
+                      ? gui_rect(cell_w(app), cell_h(app) / 2, width - 2 * cell_w(app), height - cell_h(app))
+                      : gui_rect(0, 0, width, height),
+                  ask_question(app), NULL, labels, 2, app->confirm.selected, c);
+}
+static void render_ask(App* app) {
+    GuiChoices c;
+    const char* labels[2];
+    char second[96];
+    ask_place(app, &c, labels, second, sizeof second);
+    shade(app, 128); /* over another screen */
+    choices_draw(app, &c, ask_question(app), NULL, labels, 2, app->confirm.selected);
 }
 /* the boot's splash: a drawing of Wimsy's, picked at random, drawn a third of the window's shorter side on a theme's
    splash page, then the menu as the theme brings it in */
@@ -5396,14 +5476,16 @@ static void ask_key(App* app, GuiKey key) {
 /* the pointer on the question, at pixel x, y: a choice under it takes the focus, a click presses it; a click off the
    box is Back */
 static void ask_pointer(App* app, float x, float y, bool click) {
-    GuiRect r;
-    GuiList l;
+    GuiChoices c;
+    const char* labels[2];
+    char second[96];
+    bool on;
     int i;
-    ask_boxes(app, &r, &l);
-    if ((i = list_hit(&l, x, y, true)) >= 0) {
+    ask_place(app, &c, labels, second, sizeof second);
+    if ((i = choices_hit(&c, x, y, &on)) >= 0) {
         gui_confirm_focus(&app->confirm, i);
         if (click) ask_key(app, GUI_SELECT);
-    } else if (click && (x < (float)r.x || x >= (float)(r.x + r.w) || y < (float)r.y || y >= (float)(r.y + r.h)))
+    } else if (click && !on)
         ask_key(app, GUI_CANCEL);
 }
 /* whether pixel x, y is on the head's user */
