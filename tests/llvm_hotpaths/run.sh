@@ -10,11 +10,7 @@ if [[ ! -f "$LLVM_LIBRARY" ]]; then
 fi
 build="$(mktemp -d)"
 trap 'rm -rf "$build"' EXIT
-python3 create_lookup_harness.py
-"$CC" -std=gnu11 -O2 -I "$repo/src" -c "$repo/src/common/cpu/aarch64/a64.c" -o "$build/a64_test.o"
-"$CC" -std=gnu11 -O2 -Wall -Wextra -Werror -I "$repo/src" llvm_case_lookup_test.c "$build/a64_test.o" \
-    -o "$build/lookup_test"
-"$build/lookup_test"
+# ISA-level decoder checks live in tests/cpu_dod; LLVM no longer owns a case lookup.
 python3 create_llvm_harness.py
 python3 extend_neon_harness.py
 "$CC" -std=gnu11 -O2 -Werror llvm_neon_real.c "$LLVM_LIBRARY" -o "$build/neon_test"

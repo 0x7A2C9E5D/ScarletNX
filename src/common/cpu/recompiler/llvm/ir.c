@@ -189,17 +189,11 @@ SnxIr* snx_ir_new_target(const char* name, char opt, const char* target_triple, 
         ir->kind_scope = LLVMGetMDKindIDInContext(ir->ctx, "alias.scope", 11);
         ir->kind_noalias = LLVMGetMDKindIDInContext(ir->ctx, "noalias", 7);
     }
-    if (ir_decoder_init(ir)) {
-        snprintf(error, error_size, "out of memory allocating instruction descriptors");
-        snx_ir_free(ir);
-        return NULL;
-    }
     return ir;
 }
 
 void snx_ir_free(SnxIr* ir) {
     if (!ir) return;
-    ir_decoder_free(ir);
     LLVMDisposeBuilder(ir->b);
     LLVMDisposeModule(ir->mod);
     LLVMContextDispose(ir->ctx);

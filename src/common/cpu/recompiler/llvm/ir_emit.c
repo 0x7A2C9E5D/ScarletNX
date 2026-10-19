@@ -31,9 +31,7 @@ static void attribute(SnxIr* ir, LLVMValueRef function, LLVMAttributeIndex index
 }
 
 LLVMValueRef ir_call(SnxIr* ir, LLVMValueRef function, LLVMValueRef* args, unsigned count) {
-    ir_registers_invalidate(ir);
-    ir_fp_guards_invalidate(ir);
-    ir_flags_invalidate(ir);
+    ir_state_invalidate(ir);
     return LLVMBuildCall2(ir->b, LLVMGlobalGetValueType(function), function, args, count, "");
 }
 
@@ -63,9 +61,7 @@ LLVMValueRef ir_rt_call(SnxIr* ir, size_t offset, LLVMTypeRef ret, LLVMTypeRef* 
     LLVMValueRef index = ir_i64(ir, offset), slot, callee;
     slot = LLVMBuildInBoundsGEP2(ir->b, ir->t_i8, rt_pointer(ir), &index, 1, "");
     callee = ir_load(ir, ir->t_ptr, slot);
-    ir_registers_invalidate(ir);
-    ir_fp_guards_invalidate(ir);
-    ir_flags_invalidate(ir);
+    ir_state_invalidate(ir);
     return LLVMBuildCall2(ir->b, LLVMFunctionType(ret, params, count, 0), callee, args, count, "");
 }
 
@@ -77,9 +73,7 @@ LLVMValueRef ir_rt_table_call(SnxIr* ir, size_t offset, unsigned entry, LLVMType
     LLVMValueRef table = ir_load(ir, ir->t_ptr, LLVMBuildInBoundsGEP2(ir->b, ir->t_i8, rt_pointer(ir), &index, 1, ""));
     index = ir_i64(ir, (SnxU64)entry);
     LLVMValueRef callee = ir_load(ir, ir->t_ptr, LLVMBuildInBoundsGEP2(ir->b, ir->t_ptr, table, &index, 1, ""));
-    ir_registers_invalidate(ir);
-    ir_fp_guards_invalidate(ir);
-    ir_flags_invalidate(ir);
+    ir_state_invalidate(ir);
     return LLVMBuildCall2(ir->b, LLVMFunctionType(ret, params, count, 0), callee, args, count, "");
 }
 

@@ -6,15 +6,22 @@
 /* A register snapshot is only valid in its owning basic block. Guest state is
    still written at every architectural store; this cache forwards IR values. */
 void ir_registers_invalidate(SnxIr* ir) {
-    ir->registers.valid = 0;
-    ir->registers.block = NULL;
+    ir->state.registers.valid = 0;
+    ir->state.registers.block = NULL;
+}
+
+/* Unknown calls and aliases invalidate every cached architectural domain. */
+void ir_state_invalidate(SnxIr* ir) {
+    ir_registers_invalidate(ir);
+    ir_flags_invalidate(ir);
+    ir_fp_guards_invalidate(ir);
 }
 
 static void registers_block(SnxIr* ir) {
     LLVMBasicBlockRef block = LLVMGetInsertBlock(ir->b);
-    if (ir->registers.block == block) return;
-    ir->registers.valid = 0;
-    ir->registers.block = block;
+    if (ir->state.registers.block == block) return;
+    ir->state.registers.valid = 0;
+    ir->state.registers.block = block;
 }
 
 /* Flags are N, Z, C, V in their architectural order. Avoid carrying
@@ -22,12 +29,12 @@ static void registers_block(SnxIr* ir) {
 static const size_t flag_offsets[4] = {offsetof(CPU, n), offsetof(CPU, z), offsetof(CPU, cf), offsetof(CPU, vf)};
 
 void ir_flags_invalidate(SnxIr* ir) {
-    ir->flags.valid = 0;
-    ir->flags.block = NULL;
+    ir->state.flags.valid = 0;
+    ir->state.flags.block = NULL;
 }
 
 static SnxIrFlags* flags_block(SnxIr* ir) {
-    SnxIrFlags* flags = &ir->flags;
+    SnxIrFlags* flags = &ir->state.flags;
     LLVMBasicBlockRef block = LLVMGetInsertBlock(ir->b);
     if (flags->block != block) {
         flags->valid = 0;
@@ -139,10 +146,8 @@ LLVMValueRef ir_load(SnxIr* ir, LLVMTypeRef type, LLVMValueRef pointer) {
     return LLVMBuildLoad2(ir->b, type, pointer, "");
 }
 void ir_store(SnxIr* ir, LLVMValueRef value, LLVMValueRef pointer) {
-    ir_flags_invalidate(ir);
     /* Arbitrary destinations may alias CPU state. */
-    ir_registers_invalidate(ir);
-    ir_fp_guards_invalidate(ir);
+    ir_state_invalidate(ir);
     LLVMBuildStore(ir->b, value, pointer);
 }
 /* The guest's memory is its own allocation, never the CPU structure: telling LLVM lets it keep guest registers in
@@ -183,18 +188,18 @@ size_t ir_off_mem(void) { return offsetof(CPU, mem); }
 LLVMValueRef ir_x(SnxIr* ir, unsigned n) {
     registers_block(ir);
     uint32_t bit = (uint32_t)1 << n;
-    if (!(ir->registers.valid & bit)) {
-        ir->registers.x[n] = ir_cpu_load(ir, ir->t_i64, ir_off_x(n));
-        ir->registers.valid |= bit;
+    if (!(ir->state.registers.valid & bit)) {
+        ir->state.registers.x[n] = ir_cpu_load(ir, ir->t_i64, ir_off_x(n));
+        ir->state.registers.valid |= bit;
     }
-    return ir->registers.x[n];
+    return ir->state.registers.x[n];
 }
 void ir_set_x(SnxIr* ir, unsigned n, LLVMValueRef value) {
     LLVMValueRef bits = ir_u64(ir, value);
     registers_block(ir);
     ir_tag_cpu(ir, LLVMBuildStore(ir->b, bits, ir_cpu(ir, ir_off_x(n))));
-    ir->registers.x[n] = bits;
-    ir->registers.valid |= (uint32_t)1 << n;
+    ir->state.registers.x[n] = bits;
+    ir->state.registers.valid |= (uint32_t)1 << n;
 }
 LLVMValueRef ir_rx(SnxIr* ir, unsigned n) { return n == 31 ? ir_i64(ir, 0) : ir_x(ir, n); }
 void ir_setx(SnxIr* ir, unsigned n, LLVMValueRef value) {

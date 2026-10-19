@@ -14,7 +14,7 @@ from pathlib import Path
 import re,sys
 root=Path(sys.argv[1]); p=root/'src/common/cpu/recompiler/llvm'
 cm=(p/'CMakeLists.txt').read_text()
-for name in ('ir.c','ir_decoder.c','ir_state.c','ir_emit.c','ir_helpers.c','ir_a64.c','ir_fp.c','ir_simd.c','ir_codegen.c'):
+for name in ('ir.c','ir_state.c','ir_emit.c','ir_helpers.c','ir_a64.c','ir_fp.c','ir_simd.c','ir_codegen.c'):
  assert re.search(r'\b'+re.escape(name)+r'\b',cm), f'missing CMake source: {name}'
 s=(p/'ir_simd.c').read_text()
 for name in ('ir_neon_memory.inc','ir_neon_crypto.inc','ir_neon_arithmetic.inc','ir_neon_dispatch.inc'):

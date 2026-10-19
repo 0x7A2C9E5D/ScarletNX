@@ -29,17 +29,13 @@ static LLVMValueRef helper_begin(SnxIr* ir, const char* name, LLVMTypeRef ret, L
     saved->fn = ir->fn;
     saved->c = ir->c;
     saved->M = ir->M;
-    ir_registers_invalidate(ir);
-    ir_fp_guards_invalidate(ir);
-    ir_flags_invalidate(ir);
+    ir_state_invalidate(ir);
     ir->fn = function;
     LLVMPositionBuilderAtEnd(ir->b, LLVMAppendBasicBlockInContext(ir->ctx, function, "entry"));
     return function;
 }
 static void helper_end(SnxIr* ir, Saved* saved) {
-    ir_registers_invalidate(ir);
-    ir_fp_guards_invalidate(ir);
-    ir_flags_invalidate(ir);
+    ir_state_invalidate(ir);
     ir->fn = saved->fn;
     ir->c = saved->c;
     ir->M = saved->M;

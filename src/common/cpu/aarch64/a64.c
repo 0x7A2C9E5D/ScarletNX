@@ -8,6 +8,8 @@
    Copyright (c) 2003 Fabrice Bellard */
 #include "common/cpu/aarch64/a64.h"
 #include <string.h>
+#include <stdatomic.h>
+#include <stdlib.h>
 
 #include "common/cpu/aarch64/a64_templates.inc"
 
@@ -47,32 +49,66 @@ static void emit_validity(FILE* out, unsigned validation) {
     }
 }
 
-static unsigned char buckets[2048][sizeof(patterns) / sizeof(patterns[0])];
-static unsigned char bucket_sizes[2048];
-/* 0 until a thread builds the buckets, 1 while it does, 2 once they are built; through __atomic_*. The runtime JIT's
-   compile threads decode at once (jit_service.c): two of them filling bucket_sizes together counted patterns twice */
-static int buckets_ready;
+/* Each high-11-bit bucket stores a contiguous span of candidate patterns.
+   The table is immutable once published; there is no writable decode state and
+   no race between the first compiler workers. It is ~9 KiB for today's ISA. */
+enum { BUCKET_COUNT = 2048, PATTERN_COUNT = sizeof(patterns) / sizeof(patterns[0]) };
+_Static_assert(PATTERN_COUNT <= UINT8_MAX, "decoder indices need a wider type");
+
+typedef struct {
+    uint32_t offsets[BUCKET_COUNT + 1];
+    uint8_t indices[];
+} SnxA64Buckets;
+
+static _Atomic(SnxA64Buckets*) shared_buckets;
 static const SnxA64Case undefined_case = {SNX_FLOW_UNDEF, "", "", ""};
 
-static void prepare_buckets(void) {
-    unsigned top;
-    size_t i;
-    SnxU32 mask, value;
-    int unbuilt = 0;
-    if (__atomic_load_n(&buckets_ready, __ATOMIC_ACQUIRE) == 2) return;
-    if (!__atomic_compare_exchange_n(&buckets_ready, &unbuilt, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE)) {
-        /* another thread builds them, which takes about a millisecond, once per process */
-        while (__atomic_load_n(&buckets_ready, __ATOMIC_ACQUIRE) != 2) continue;
-        return;
+static const SnxA64Buckets* decode_buckets(void) {
+    SnxA64Buckets* buckets = atomic_load_explicit(&shared_buckets, memory_order_acquire);
+    if (buckets) return buckets;
+
+    uint32_t offsets[BUCKET_COUNT + 1] = {0};
+    for (unsigned b = 0; b < BUCKET_COUNT; ++b) {
+        SnxU32 top = (SnxU32)b << 21;
+        for (unsigned i = 0; i < PATTERN_COUNT; ++i) {
+            SnxU32 mask = patterns[i].mask & 0xFFE00000u;
+            offsets[b + 1] += (top & mask) == (patterns[i].value & mask);
+        }
+        offsets[b + 1] += offsets[b];
     }
-    for (top = 0; top < 2048; ++top) {
-        value = (SnxU32)top << 21;
-        for (i = 0; i < sizeof(patterns) / sizeof(patterns[0]); ++i) {
-            mask = patterns[i].mask & 0xFFE00000UL;
-            if ((value & mask) == (patterns[i].value & mask)) buckets[top][bucket_sizes[top]++] = (unsigned char)i;
+    size_t count = offsets[BUCKET_COUNT];
+    if (count > SIZE_MAX - sizeof(*buckets)) return NULL;
+    SnxA64Buckets* fresh = malloc(sizeof(*buckets) + count);
+    if (!fresh) return NULL;
+    memcpy(fresh->offsets, offsets, sizeof(offsets));
+    for (unsigned b = 0; b < BUCKET_COUNT; ++b) {
+        SnxU32 top = (SnxU32)b << 21;
+        uint32_t index = offsets[b];
+        for (unsigned i = 0; i < PATTERN_COUNT; ++i) {
+            SnxU32 mask = patterns[i].mask & 0xFFE00000u;
+            if ((top & mask) == (patterns[i].value & mask)) fresh->indices[index++] = (uint8_t)i;
         }
     }
-    __atomic_store_n(&buckets_ready, 2, __ATOMIC_RELEASE);
+    SnxA64Buckets* empty = NULL;
+    if (!atomic_compare_exchange_strong_explicit(&shared_buckets, &empty, fresh, memory_order_release,
+                                                 memory_order_acquire)) {
+        free(fresh);
+        return empty;
+    }
+    return fresh;
+}
+
+static const SnxA64Case* decode_pattern(SnxU32 word, const SnxA64Pattern* pattern,
+                                        const SnxA64Pattern** owner, size_t* specialization) {
+    if (!valid_word(pattern->validation, word)) return &undefined_case;
+    size_t index = 0;
+    for (unsigned n = 0; n < pattern->field_count; ++n) {
+        SnxA64Field field = pattern->fields[n];
+        index = (index << field.width) | ((word >> field.lo) & ((1u << field.width) - 1));
+    }
+    if (owner) *owner = pattern;
+    if (specialization) *specialization = index;
+    return &pattern->cases[index];
 }
 
 const SnxA64Pattern* snx_a64_patterns(size_t* count) {
@@ -80,31 +116,42 @@ const SnxA64Pattern* snx_a64_patterns(size_t* count) {
     return patterns;
 }
 
-const SnxA64Case* snx_a64_decode(SnxU32 word) {
-    unsigned b, i, n;
-    size_t index;
-    const SnxA64Pattern* p;
-    prepare_buckets();
-    b = word >> 21;
-    for (i = 0; i < bucket_sizes[b]; ++i) {
-        p = &patterns[buckets[b][i]];
-        if ((word & p->mask) != p->value) continue;
-        if (!valid_word(p->validation, word)) return &undefined_case;
-        index = 0;
-        for (n = 0; n < p->field_count; ++n)
-            index = (index << p->fields[n].width) | ((word >> p->fields[n].lo) & ((1UL << p->fields[n].width) - 1));
-        return &p->cases[index];
+/* A pointer-only entry remains cheap for discovery, which needs only flow kind.
+   Compiler backends request the same decode plus its typed specialization. */
+static const SnxA64Case* decode_word(SnxU32 word, const SnxA64Pattern** owner, size_t* index) {
+    const SnxA64Buckets* buckets = decode_buckets();
+    if (buckets) {
+        unsigned b = word >> 21;
+        for (uint32_t i = buckets->offsets[b]; i < buckets->offsets[b + 1]; ++i) {
+            const SnxA64Pattern* pattern = &patterns[buckets->indices[i]];
+            if ((word & pattern->mask) == pattern->value) return decode_pattern(word, pattern, owner, index);
+        }
+    } else { /* no allocation may change the decoder's behavior */
+        for (unsigned i = 0; i < PATTERN_COUNT; ++i)
+            if ((word & patterns[i].mask) == patterns[i].value)
+                return decode_pattern(word, &patterns[i], owner, index);
     }
     return &undefined_case;
 }
 
+const SnxA64Case* snx_a64_decode(SnxU32 word) { return decode_word(word, NULL, NULL); }
+
+SnxA64Decoded snx_a64_decode_inst(SnxU32 word) {
+    SnxA64Decoded decoded = {0};
+    decoded.instruction = decode_word(word, &decoded.pattern, &decoded.index);
+    return decoded;
+}
+
 const SnxA64Pattern* snx_a64_case_pattern(const SnxA64Case* instruction, size_t* index) {
-    size_t i;
-    for (i = 0; i < sizeof(patterns) / sizeof(patterns[0]); ++i)
-        if (instruction >= patterns[i].cases && instruction < patterns[i].cases + patterns[i].case_count) {
-            *index = (size_t)(instruction - patterns[i].cases);
+    uintptr_t address = (uintptr_t)instruction;
+    for (unsigned i = 0; i < PATTERN_COUNT; ++i) {
+        uintptr_t first = (uintptr_t)patterns[i].cases;
+        uintptr_t last = (uintptr_t)(patterns[i].cases + patterns[i].case_count);
+        if (address >= first && address < last) {
+            *index = (address - first) / sizeof(*instruction);
             return &patterns[i];
         }
+    }
     *index = 0;
     return NULL;
 }
@@ -187,11 +234,28 @@ static void interp_case(FILE* out, const SnxA64Case* c, int step) {
     }
 }
 
+/* The generated C is build-time output. If bucket allocation fails, a direct
+   pattern scan still emits exactly the same instruction cases. */
+static unsigned emit_candidates(const SnxA64Buckets* buckets, unsigned top, uint8_t indices[PATTERN_COUNT]) {
+    if (buckets) {
+        unsigned n = buckets->offsets[top + 1] - buckets->offsets[top];
+        memcpy(indices, buckets->indices + buckets->offsets[top], n);
+        return n;
+    }
+    unsigned n = 0;
+    SnxU32 value = (SnxU32)top << 21;
+    for (unsigned i = 0; i < PATTERN_COUNT; ++i) {
+        SnxU32 mask = patterns[i].mask & 0xFFE00000u;
+        if ((value & mask) == (patterns[i].value & mask)) indices[n++] = i;
+    }
+    return n;
+}
+
 static void emit_interp(FILE* out, int step_mode, int checked) {
     unsigned top, j;
     size_t i, k;
     const SnxA64Pattern* p;
-    prepare_buckets();
+    const SnxA64Buckets* buckets = decode_buckets();
     fputs(step_mode ? "u64 snx_step(CPU* RESTRICT c,u32 w,u64 pc){\n"
                     : "static void snx_interp(CPU* RESTRICT c,u64 e){\n",
           out);
@@ -201,11 +265,13 @@ static void emit_interp(FILE* out, int step_mode, int checked) {
         fputs(checked ? "snx_fetch(c,pc,&w);\n" : "w=RD32(pc);\n", out);
     }
     fputs(" switch(w>>21){\n", out);
-    for (top = 0; top < 2048; ++top) {
-        if (!bucket_sizes[top]) continue;
+    for (top = 0; top < BUCKET_COUNT; ++top) {
+        uint8_t candidates[PATTERN_COUNT];
+        unsigned count = emit_candidates(buckets, top, candidates);
+        if (!count) continue;
         fprintf(out, " case %u:\n", top);
-        for (j = 0; j < bucket_sizes[top]; ++j) {
-            i = buckets[top][j];
+        for (j = 0; j < count; ++j) {
+            i = candidates[j];
             fprintf(out, " if((w&0x%08lXu)==0x%08lXu) goto E_%lu;\n", (unsigned long)patterns[i].mask,
                     (unsigned long)patterns[i].value, (unsigned long)i);
         }

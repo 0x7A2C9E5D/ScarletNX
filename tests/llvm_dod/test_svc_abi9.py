@@ -93,9 +93,7 @@ static P ir_cpu_load(SnxIr*ir,P type,size_t off) {
     return LLVMBuildLoad2(ir->b,type,LLVMBuildInBoundsGEP2(ir->b,ir->t_i8,ir->c,&offset,1,""),"");
 }
 static P ir_load(SnxIr*ir,P type,P ptr) {return LLVMBuildLoad2(ir->b,type,ptr,"");}
-static void ir_registers_invalidate(SnxIr*ir) {++ir->invalidated;}
-static void ir_fp_guards_invalidate(SnxIr*ir) {(void)ir;}
-static void ir_flags_invalidate(SnxIr*ir) {(void)ir;}
+static void ir_state_invalidate(SnxIr*ir) {++ir->invalidated;}
 '''
 post = r'''
 static int calls;

@@ -325,12 +325,17 @@ static void ldstp(SnxIr* ir, SnxU32 w, size_t index) {
         if (!l) {
             ir_wrq(ir, a, ir_cpu(ir, ir_off_v(rt)));
             ir_wrq(ir, a2, ir_cpu(ir, ir_off_v(rt2)));
-        } else { /* V128 q1_,q2_; RDQ(q1_,a_); RDQ(q2_,a_+16); c->v[rt]=q1_; c->v[rt2]=q2_; */
-            V q1 = ir_local(ir, ir_v128(ir)), q2 = ir_local(ir, ir_v128(ir));
-            ir_rdq(ir, q1, a);
-            ir_rdq(ir, q2, a2);
-            LLVMBuildMemCpy(B, ir_cpu(ir, ir_off_v(rt)), 1, q1, 1, i64c(ir, 16));
-            LLVMBuildMemCpy(B, ir_cpu(ir, ir_off_v(rt2)), 1, q2, 1, i64c(ir, 16));
+        } else {
+            /* Complete both guest loads before either register write: LD1/LD2
+               may fault, and Rt/Rt2 may name the same architectural register. */
+            V q1 = ir_rd_bytes(ir, a, 16);
+            V q2 = ir_rd_bytes(ir, a2, 16);
+            V s1 = LLVMBuildStore(B, q1, ir_cpu(ir, ir_off_v(rt)));
+            V s2 = LLVMBuildStore(B, q2, ir_cpu(ir, ir_off_v(rt2)));
+            LLVMSetAlignment(s1, 1); /* V registers start at CPU+280, not 16-byte aligned. */
+            LLVMSetAlignment(s2, 1);
+            ir_tag_cpu(ir, s1);
+            ir_tag_cpu(ir, s2);
         }
     } else if (!l) {
         ir_wr(ir, a, bits, v ? ir_vd(ir, rt, 0) : ir_rx(ir, rt));
@@ -701,68 +706,65 @@ static int dp3(SnxIr* ir, SnxU32 w, size_t index) {
 
 /* ---- dispatch ---- */
 
-int snx_ir_plain(SnxIr* ir, SnxU32 w, SnxU64 pc, const SnxA64Case* instruction) {
-    size_t index;
-    const SnxA64Pattern* pattern = ir_case_pattern(ir, instruction, &index);
-    SnxIrPatternKind kind;
+int snx_ir_plain(SnxIr* ir, SnxU32 w, SnxU64 pc, const SnxA64Decoded* decoded) {
+    const SnxA64Pattern* pattern = decoded->pattern;
+    size_t index = decoded->index;
     if (!pattern) return 0;
     /* snx_a64_static_step and codegen.c try the SIMD shortcuts first, for every PLAIN word */
     if (snx_ir_fast_simd(ir, w)) return 1;
-    if (!instruction->first[0]) return 1; /* an empty body: PRFM, MSR (immediate), ... */
-    kind = ir_pattern_kind(ir, pattern);
-    switch (kind) {
-        case SNX_IR_ADR: adr(ir, w, pc, 0); return 1;
-        case SNX_IR_ADRP: adr(ir, w, pc, 1); return 1;
-        case SNX_IR_ADDSUB_IMM: addsub_imm(ir, w, index); return 1;
-        case SNX_IR_LOGIC_IMM: logic_imm(ir, w, index); return 1;
-        case SNX_IR_MOVW: movw(ir, w, index); return 1;
-        case SNX_IR_BITFIELD: bitfield(ir, w, index); return 1;
-        case SNX_IR_EXTR: extr(ir, w, index); return 1;
-        case SNX_IR_HINT: hint(ir, w); return 1;
-        case SNX_IR_CLREX: ir_cpu_store(ir, i32c(ir, 0), ir_off_excl_on()); return 1;
-        case SNX_IR_BARRIER: ir_fence(ir); return 1;
-        case SNX_IR_SYS: sys(ir, w); return 1;
-        case SNX_IR_MRS: mrs(ir, w); return 1;
-        case SNX_IR_MSR: msr(ir, w); return 1;
-        case SNX_IR_LDST_UIMM: ldst_uimm(ir, w, index); return 1;
-        case SNX_IR_LDST_IMM9: ldst_imm9(ir, w, index); return 1;
-        case SNX_IR_LDST_REG: ldst_reg(ir, w, index); return 1;
-        case SNX_IR_LDR_LIT: ldr_lit(ir, w, pc, index); return 1;
-        case SNX_IR_LDSTP: ldstp(ir, w, index); return 1;
-        case SNX_IR_LDSTX: ldstx(ir, w, index); return 1;
-        case SNX_IR_LOGIC_REG: logic_reg(ir, w, index); return 1;
-        case SNX_IR_ADDSUB_SREG: addsub_sreg(ir, w, index); return 1;
-        case SNX_IR_ADDSUB_EXT: addsub_ext(ir, w, index); return 1;
-        case SNX_IR_ADC: adc(ir, w, index); return 1;
-        case SNX_IR_CCMP: ccmp(ir, w, index); return 1;
-        case SNX_IR_CSEL: csel(ir, w, index); return 1;
-        case SNX_IR_DP1: return dp1(ir, w, index);
-        case SNX_IR_DP2: return dp2(ir, w, index);
-        case SNX_IR_DP3: return dp3(ir, w, index);
-        case SNX_IR_SIMD_LDST:
-        case SNX_IR_SIMD_LDST1:
-        case SNX_IR_SIMD_DP:
-        case SNX_IR_SIMD_DP2: return snx_ir_more_simd(ir, w) || snx_ir_simd_plain(ir, w, pc, pattern, index);
+    if (!decoded->instruction->first[0]) return 1; /* an empty body: PRFM, MSR (immediate), ... */
+    switch (pattern->kind) {
+        case SNX_A64_ADR: adr(ir, w, pc, 0); return 1;
+        case SNX_A64_ADRP: adr(ir, w, pc, 1); return 1;
+        case SNX_A64_ADDSUB_IMM: addsub_imm(ir, w, index); return 1;
+        case SNX_A64_LOGIC_IMM: logic_imm(ir, w, index); return 1;
+        case SNX_A64_MOVW: movw(ir, w, index); return 1;
+        case SNX_A64_BITFIELD: bitfield(ir, w, index); return 1;
+        case SNX_A64_EXTR: extr(ir, w, index); return 1;
+        case SNX_A64_HINT: hint(ir, w); return 1;
+        case SNX_A64_CLREX: ir_cpu_store(ir, i32c(ir, 0), ir_off_excl_on()); return 1;
+        case SNX_A64_BARRIER: ir_fence(ir); return 1;
+        case SNX_A64_SYS: sys(ir, w); return 1;
+        case SNX_A64_MRS: mrs(ir, w); return 1;
+        case SNX_A64_MSR: msr(ir, w); return 1;
+        case SNX_A64_LDST_UIMM: ldst_uimm(ir, w, index); return 1;
+        case SNX_A64_LDST_IMM9: ldst_imm9(ir, w, index); return 1;
+        case SNX_A64_LDST_REG: ldst_reg(ir, w, index); return 1;
+        case SNX_A64_LDR_LIT: ldr_lit(ir, w, pc, index); return 1;
+        case SNX_A64_LDSTP: ldstp(ir, w, index); return 1;
+        case SNX_A64_LDSTX: ldstx(ir, w, index); return 1;
+        case SNX_A64_LOGIC_REG: logic_reg(ir, w, index); return 1;
+        case SNX_A64_ADDSUB_SREG: addsub_sreg(ir, w, index); return 1;
+        case SNX_A64_ADDSUB_EXT: addsub_ext(ir, w, index); return 1;
+        case SNX_A64_ADC: adc(ir, w, index); return 1;
+        case SNX_A64_CCMP: ccmp(ir, w, index); return 1;
+        case SNX_A64_CSEL: csel(ir, w, index); return 1;
+        case SNX_A64_DP1: return dp1(ir, w, index);
+        case SNX_A64_DP2: return dp2(ir, w, index);
+        case SNX_A64_DP3: return dp3(ir, w, index);
+        case SNX_A64_SIMD_LDST:
+        case SNX_A64_SIMD_LDST1:
+        case SNX_A64_SIMD_DP:
+        case SNX_A64_SIMD_DP2: return snx_ir_more_simd(ir, w) || snx_ir_simd_plain(ir, w, pc, pattern, index);
         default: return snx_ir_fp_plain(ir, w, pc, pattern, index);
     }
 }
 
-LLVMValueRef snx_ir_flow_operand(SnxIr* ir, SnxU32 w, SnxU64 pc, const SnxA64Case* instruction) {
-    size_t index;
-    const SnxA64Pattern* pattern = ir_case_pattern(ir, instruction, &index);
-    SnxIrPatternKind kind = ir_pattern_kind(ir, pattern);
+LLVMValueRef snx_ir_flow_operand(SnxIr* ir, SnxU32 w, SnxU64 pc, const SnxA64Decoded* decoded) {
+    size_t index = decoded->index;
+    SnxA64Kind kind = decoded->pattern ? decoded->pattern->kind : SNX_A64_UNKNOWN;
     unsigned rt = F(0, 5);
     (void)pc;
-    if (kind == SNX_IR_BCOND) return truth(ir, cond_ok(ir, F(0, 4)));
-    if (kind == SNX_IR_CBZ) {
+    if (kind == SNX_A64_BCOND) return truth(ir, cond_ok(ir, F(0, 4)));
+    if (kind == SNX_A64_CBZ) {
         V value = index & 2 ? ir_rx(ir, rt) : rx32(ir, rt);
         return LLVMBuildICmp(B, index & 1 ? LLVMIntNE : LLVMIntEQ, value, LLVMConstInt(LLVMTypeOf(value), 0, 0), "");
     }
-    if (kind == SNX_IR_TBZ) {
+    if (kind == SNX_A64_TBZ) {
         V bit =
             LLVMBuildAnd(B, LLVMBuildLShr(B, ir_rx(ir, rt), i64c(ir, (F(31, 1) << 5) | F(19, 5)), ""), i64c(ir, 1), "");
         return LLVMBuildICmp(B, index ? LLVMIntNE : LLVMIntEQ, bit, i64c(ir, 0), "");
     }
-    if (kind == SNX_IR_BR || kind == SNX_IR_BLR || kind == SNX_IR_RET) return ir_rx(ir, F(5, 5));
+    if (kind == SNX_A64_BR || kind == SNX_A64_BLR || kind == SNX_A64_RET) return ir_rx(ir, F(5, 5));
     return i32c(ir, F(5, 16)); /* SVC, BRK */
 }

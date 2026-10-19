@@ -69,15 +69,15 @@ static V exponent_in(SnxIr* ir, const Shape* s, V bits, unsigned lo, unsigned hi
     return all(ir, s, lane_exponent_in(ir, s, bits, lo, hi));
 }
 void ir_fp_guards_invalidate(SnxIr* ir) {
-    ir->fp_guards.block = NULL;
-    ir->fp_guards.nearest = NULL;
-    ir->fp_guards.ixc = NULL;
+    ir->state.fp_guards.block = NULL;
+    ir->state.fp_guards.nearest = NULL;
+    ir->state.fp_guards.ixc = NULL;
 }
 
 /* FPCR and FPSR are guest state, not host control registers. A guard belongs
    to one basic block; stores and calls invalidate it before another use. */
 static SnxIrFpGuards* fp_guards(SnxIr* ir) {
-    SnxIrFpGuards* guards = &ir->fp_guards;
+    SnxIrFpGuards* guards = &ir->state.fp_guards;
     LLVMBasicBlockRef block = LLVMGetInsertBlock(B);
     if (guards->block != block) {
         ir_fp_guards_invalidate(ir);
@@ -872,16 +872,16 @@ static int fcvt(SnxIr* ir, SnxU32 w, size_t index, int fixed) {
 
 int snx_ir_fp_plain(SnxIr* ir, SnxU32 w, SnxU64 pc, const SnxA64Pattern* pattern, size_t index) {
     (void)pc;
-    switch (ir_pattern_kind(ir, pattern)) {
-        case SNX_IR_FP2: return fp2(ir, w, index);
-        case SNX_IR_FP1: return fp1(ir, w, index);
-        case SNX_IR_FCMP: fcmp(ir, w, index); break;
-        case SNX_IR_FCCMP: fccmp(ir, w, index); break;
-        case SNX_IR_FCSEL: fcsel(ir, w, index); break;
-        case SNX_IR_FMOV_IMM: fmov_imm(ir, w, index); break;
-        case SNX_IR_FP3: fp3(ir, w, index); break;
-        case SNX_IR_FCVT_INT: return fcvt(ir, w, index, 0);
-        case SNX_IR_FCVT_FIX: return fcvt(ir, w, index, 1);
+    switch (pattern->kind) {
+        case SNX_A64_FP2: return fp2(ir, w, index);
+        case SNX_A64_FP1: return fp1(ir, w, index);
+        case SNX_A64_FCMP: fcmp(ir, w, index); break;
+        case SNX_A64_FCCMP: fccmp(ir, w, index); break;
+        case SNX_A64_FCSEL: fcsel(ir, w, index); break;
+        case SNX_A64_FMOV_IMM: fmov_imm(ir, w, index); break;
+        case SNX_A64_FP3: fp3(ir, w, index); break;
+        case SNX_A64_FCVT_INT: return fcvt(ir, w, index, 0);
+        case SNX_A64_FCVT_FIX: return fcvt(ir, w, index, 1);
         default: return 0;
     }
     return 1;

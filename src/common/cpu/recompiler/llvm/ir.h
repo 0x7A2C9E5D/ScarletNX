@@ -70,69 +70,6 @@ typedef struct {
 } SnxIrFeatures;
 extern SnxIrFeatures snx_ir_host;
 
-/* Instruction families are classified once, from the decoder's immutable pattern table.
-   Dense IDs are shared by scalar, FP, SIMD, and control-flow emitters. */
-#define SNX_IR_PATTERN_TYPES(X)                                                                                        \
-    X(ADR)                                                                                                             \
-    X(ADRP)                                                                                                            \
-    X(ADDSUB_IMM)                                                                                                      \
-    X(LOGIC_IMM)                                                                                                       \
-    X(MOVW)                                                                                                            \
-    X(BITFIELD)                                                                                                        \
-    X(EXTR)                                                                                                            \
-    X(HINT)                                                                                                            \
-    X(CLREX)                                                                                                           \
-    X(BARRIER)                                                                                                         \
-    X(SYS)                                                                                                             \
-    X(MRS)                                                                                                             \
-    X(MSR)                                                                                                             \
-    X(LDST_UIMM)                                                                                                       \
-    X(LDST_IMM9)                                                                                                       \
-    X(LDST_REG)                                                                                                        \
-    X(LDR_LIT)                                                                                                         \
-    X(LDSTP)                                                                                                           \
-    X(LDSTX)                                                                                                           \
-    X(LOGIC_REG)                                                                                                       \
-    X(ADDSUB_SREG)                                                                                                     \
-    X(ADDSUB_EXT)                                                                                                      \
-    X(ADC)                                                                                                             \
-    X(CCMP)                                                                                                            \
-    X(CSEL)                                                                                                            \
-    X(DP1)                                                                                                             \
-    X(DP2)                                                                                                             \
-    X(DP3)                                                                                                             \
-    X(FP2)                                                                                                             \
-    X(FP1)                                                                                                             \
-    X(FCMP)                                                                                                            \
-    X(FCCMP)                                                                                                           \
-    X(FCSEL)                                                                                                           \
-    X(FMOV_IMM)                                                                                                        \
-    X(FP3)                                                                                                             \
-    X(FCVT_INT)                                                                                                        \
-    X(FCVT_FIX)                                                                                                        \
-    X(SIMD_LDST)                                                                                                       \
-    X(SIMD_LDST1)                                                                                                      \
-    X(SIMD_DP)                                                                                                         \
-    X(SIMD_DP2)                                                                                                        \
-    X(BCOND)                                                                                                           \
-    X(CBZ)                                                                                                             \
-    X(TBZ)                                                                                                             \
-    X(BR)                                                                                                              \
-    X(BLR)                                                                                                             \
-    X(RET)                                                                                                             \
-    X(B)                                                                                                               \
-    X(BL)                                                                                                              \
-    X(SVC)                                                                                                             \
-    X(BRK)                                                                                                             \
-    X(MSR_IMM)
-
-typedef enum {
-    SNX_IR_UNKNOWN,
-#define SNX_IR_KIND(name) SNX_IR_##name,
-    SNX_IR_PATTERN_TYPES(SNX_IR_KIND)
-#undef SNX_IR_KIND
-} SnxIrPatternKind;
-
 /* The cache belongs to the IR builder, not the guest CPU. One bit per GPR;
    changing blocks or observing an unknown write drops the whole snapshot. */
 typedef struct {
@@ -140,21 +77,6 @@ typedef struct {
     LLVMBasicBlockRef block;
     uint32_t valid;
 } SnxIrRegisterCache;
-
-typedef struct {
-    uintptr_t first, last; /* a half-open range of case descriptors */
-    const SnxA64Pattern* pattern;
-} SnxIrCaseRange;
-
-/* Decoder descriptors are read-only after construction. These parallel arrays
-   are indexed by the decoder's original pattern order, not execution order. */
-typedef struct {
-    const SnxA64Pattern* patterns;
-    SnxIrPatternKind* kinds;
-    SnxIrCaseRange* ranges;
-    size_t count;
-    void* storage;
-} SnxIrDecoder;
 
 /* Values are owned by one LLVM basic block, never by the guest CPU.
    Any FP-state mutation or unknown call drops them. */
@@ -171,6 +93,13 @@ typedef struct {
     unsigned valid;
 } SnxIrFlags;
 
+/* Block-local LLVM SSA snapshots, never guest architectural state. */
+typedef struct {
+    SnxIrRegisterCache registers;
+    SnxIrFlags flags;
+    SnxIrFpGuards fp_guards;
+} SnxIrBlockState;
+
 typedef struct SnxIr {
     LLVMContextRef ctx;
     LLVMModuleRef mod;
@@ -182,10 +111,7 @@ typedef struct SnxIr {
     /* the function being emitted: its CPU* and the guest memory base (u8* const M=c->mem) */
     LLVMValueRef fn, c, M;
     LLVMValueRef helpers[SNX_IR_HELPER_COUNT];
-    SnxIrRegisterCache registers;
-    SnxIrFlags flags;
-    SnxIrDecoder decoder;
-    SnxIrFpGuards fp_guards;
+    SnxIrBlockState state;
     /* alias scopes: guest memory (through M) and the CPU structure never overlap */
     unsigned kind_scope, kind_noalias;
     LLVMValueRef scope_cpu, scope_guest;
@@ -200,8 +126,7 @@ typedef struct SnxIr {
     void* direct_user;
 } SnxIr;
 
-SnxIrPatternKind ir_pattern_kind(const SnxIr* ir, const SnxA64Pattern* pattern);
-const SnxA64Pattern* ir_case_pattern(const SnxIr* ir, const SnxA64Case* instruction, size_t* index);
+void ir_state_invalidate(SnxIr* ir);
 void ir_registers_invalidate(SnxIr* ir);
 void ir_flags_invalidate(SnxIr* ir);
 LLVMValueRef ir_flag_read(SnxIr* ir, unsigned index);
@@ -212,10 +137,6 @@ void ir_flags_set_nzcv(SnxIr* ir, LLVMValueRef nzcv);
 LLVMValueRef ir_flags_cond(SnxIr* ir, unsigned cond);
 
 void ir_fp_guards_invalidate(SnxIr* ir);
-/* Immutable process-wide decoder slab; modules borrow the published view. */
-int ir_decoder_init(SnxIr* ir);
-void ir_decoder_free(SnxIr* ir);
-
 /* Once per process, before any other call; threads may then each own SnxIrs. 0, or -1 with the reason */
 int snx_ir_init(char* error, size_t error_size);
 /* opt is the -O letter: 0,1,2,3,s,z */
@@ -253,10 +174,10 @@ void snx_ir_begin(SnxIr* ir, LLVMValueRef function);
 /* ---- instructions (ir_a64.c, ir_simd.c, ir_fp.c) ---- */
 /* The body of a PLAIN instruction (snx_a64_body with "c->rt->undef(c,pc,w)" for UNDEF, after snx_a64_fast_simd).
    0 when no emitter covers the pattern: the module then fails (SnxIr.fallbacks) */
-int snx_ir_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Case* instruction);
+int snx_ir_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Decoded* instruction);
 /* The case's first operand of a flow instruction: the i1 condition of BC, the i64 target of BR/BLR/RET, the i32
    immediate of SVC/BRK */
-LLVMValueRef snx_ir_flow_operand(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Case* instruction);
+LLVMValueRef snx_ir_flow_operand(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Decoded* instruction);
 int snx_ir_simd_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Pattern* pattern, size_t index);
 int snx_ir_fp_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Pattern* pattern, size_t index);
 /* snx_a64_fast_simd's shortcuts: 1 when it emitted the instruction */
