@@ -63,6 +63,33 @@ static void cell(Text* t, const char* text) {
 }
 
 /* ============================================================ edenprobe_scaffold */
+/* A clone on Windows has CRLF lines (git's autocrlf): its text is read with LF ones, which the anchors are written
+   with, and written back with the ending it had. 1 when it had CRLF */
+static int lf_lines(char* text) {
+    char* out = text;
+    const char* in;
+    int crlf = strstr(text, "\r\n") != NULL;
+    if (!crlf) return 0;
+    for (in = text; *in; in++)
+        if (!(in[0] == '\r' && in[1] == '\n')) *out++ = *in;
+    *out = 0;
+    return 1;
+}
+/* text with each LF as CRLF, malloc'd */
+static char* crlf_lines(const char* text) {
+    size_t n = 0;
+    const char* in;
+    char *out, *at;
+    for (in = text; *in; in++) n += *in == '\n' ? 2 : 1;
+    out = at = (char*)snx_alloc(n + 1);
+    for (in = text; *in; in++) {
+        if (*in == '\n') *at++ = '\r';
+        *at++ = *in;
+    }
+    *at = 0;
+    return out;
+}
+
 static const char* tier_constant(const char* tier) {
     static const char* const names[] = {"none", "exact", "ulp", "position", "level"};
     static const char* const constants[] = {"CHECK_NONE", "CHECK_EXACT", "CHECK_ULP", "CHECK_POSITION", "CHECK_LEVEL"};
@@ -78,6 +105,7 @@ char* mcp_edenprobe_scaffold(const char* checkout, const char* suite, const char
                                                       "source/tests/t_service.c", "source/tests/t_serviceref.c",
                                                       "source/ui.c"};
     char *path[SCAFFOLD_FILES], *text[SCAFFOLD_FILES], *snippet, camel[64], full[64], quoted[256];
+    int crlf[SCAFFOLD_FILES];
     const char *constant = tier_constant(tier ? tier : ""), *at;
     Text out = {0};
     int i, k, new_suite;
@@ -116,6 +144,7 @@ char* mcp_edenprobe_scaffold(const char* checkout, const char* suite, const char
     for (i = 0; i < SCAFFOLD_FILES; i++) {
         path[i] = snx_path_join(checkout, files[i]);
         text[i] = slurp(path[i]);
+        crlf[i] = text[i] ? lf_lines(text[i]) : 0;
     }
     for (i = 0; i < SCAFFOLD_FILES && text[i]; i++) {}
     if (i < SCAFFOLD_FILES) {
@@ -222,6 +251,12 @@ char* mcp_edenprobe_scaffold(const char* checkout, const char* suite, const char
         free(snippet);
     }
 
+    for (i = 0; i < SCAFFOLD_FILES; i++)
+        if (crlf[i]) {
+            char* ended = crlf_lines(text[i]);
+            free(text[i]);
+            text[i] = ended;
+        }
     for (i = 0; i < SCAFFOLD_FILES; i++)
         if ((i < 4 || new_suite) && snx_write_file(path[i], text[i], strlen(text[i]))) {
             mcp_put(err, "could not write ");

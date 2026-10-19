@@ -101,12 +101,14 @@ def main():
         (outside / 'secret.log').write_text(LOG)
         nro = data / 'smoke.nro'
         nro.write_bytes(make_nro())
-        checkout, broken = Path(tmp) / 'edenprobe', Path(tmp) / 'broken'
-        for root in (checkout, broken):
+        # a clone on Windows has CRLF lines (git's autocrlf): the scaffold keeps each file's ending. Written as bytes,
+        # so every system writes the same
+        checkout, crlf, broken = Path(tmp) / 'edenprobe', Path(tmp) / 'crlf', Path(tmp) / 'broken'
+        for root, ending in ((checkout, '\n'), (crlf, '\r\n'), (broken, '\n')):
             for rel, text in CHECKOUT.items():
                 (root / rel).parent.mkdir(parents=True, exist_ok=True)
-                (root / rel).write_text(text)
-        (broken / 'source/serviceref.h').write_text('typedef enum {\n} ServiceCaseId;\n')
+                (root / rel).write_bytes(text.replace('\n', ending).encode())
+        (broken / 'source/serviceref.h').write_bytes(b'typedef enum {\n} ServiceCaseId;\n')
         ours, theirs, passing = Path(tmp) / 'ours.jsonl', Path(tmp) / 'theirs.jsonl', Path(tmp) / 'passing.jsonl'
         ours.write_text(report('fail', 'GetNpadJoyHoldType: rc 0xca8c0500'))
         theirs.write_text(report('pass', 'hold type 1, rc 0x0'))
@@ -137,6 +139,7 @@ def main():
             call('symbolize', 'no_game', game='0100000000000001', addresses=['1']),
             call('edenprobe_scaffold', 'scaffold', checkout=str(checkout), **hold),
             call('edenprobe_scaffold', 'again', checkout=str(checkout), **hold),
+            call('edenprobe_scaffold', 'crlf', checkout=str(crlf), **hold),
             call('edenprobe_scaffold', 'broken', checkout=str(broken), **hold),
             call('edenprobe_scaffold', 'bad_id', checkout=str(checkout), **dict(hold, id='hold')),
             call('edenprobe_scaffold', 'cpu', checkout=str(checkout), **dict(hold, family='cpu')),
@@ -167,9 +170,10 @@ def main():
             timeout=120,
             check=True,
         )
-        written = {rel: (checkout / rel).read_text() for rel in CHECKOUT}
+        written = {rel: (checkout / rel).read_bytes().decode() for rel in CHECKOUT}
+        crlf_written = {rel: (crlf / rel).read_bytes().decode() for rel in CHECKOUT}
         untouched = all(
-            (broken / rel).read_text() == text for rel, text in CHECKOUT.items() if 'serviceref.h' not in rel
+            (broken / rel).read_bytes() == text.encode() for rel, text in CHECKOUT.items() if 'serviceref.h' not in rel
         )
     replies = [json.loads(line) for line in run.stdout.splitlines()]
     by_id = {r['id']: r for r in replies}
@@ -260,6 +264,14 @@ def main():
         'the new suite row after the service family',
     )
     check(failed('again') and 'already' in text('again'), 'a case written twice')
+    check(not failed('crlf'), f'a clone with CRLF lines: {text("crlf")}')
+    check(
+        all(
+            t.replace('\r\n', '\n') == written[rel] and '\n' not in t.replace('\r\n', '')
+            for rel, t in crlf_written.items()
+        ),
+        'the CRLF clone gets the same parts, every line still ending in CRLF',
+    )
     check(
         failed('broken') and 'nothing was written' in text('broken') and untouched, 'an unknown layout, no file changed'
     )
