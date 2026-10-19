@@ -611,7 +611,10 @@ u64 vk_compute_adds(void);
 int vk_compute_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off);
 extern VkSemaphore g_vk_csem;  /* timeline semaphore the compute queue signals */
 extern u64 g_vk_cs_wait_value; /* the value graphics work waits for before reading compute results */
-extern u64 g_vk_dispatches, g_vk_cs_batches, g_vk_cs_skipped, g_vk_cs_wait_ns; /* statistics */
+extern u64 g_vk_dispatches, g_vk_cs_batches, g_vk_cs_wait_ns; /* statistics */
+/* the dispatches skipped so far; why (size bytes) gets their reasons with each one's count, " (12 not translated, 3
+   a texture not bound)", or "" when none was */
+u64 vk_cs_skipped(char* why, size_t size);
 
 /* render.c */
 void vk_render_end(void); /* ends the dynamic rendering pass, if one is open */
