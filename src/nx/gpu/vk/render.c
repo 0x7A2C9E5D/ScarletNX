@@ -17,6 +17,7 @@
 #include "nx/hle/services/nvdrv.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/gpu/vk/vk.h"
+#include "nx/gpu/vk/pending_pages.h"
 #include "nx/gpu/vk/internal_spv.h"
 
 static struct {
@@ -638,6 +639,21 @@ typedef struct {
     u32 tic[8], tsc[8];
     Surf* t;
 } TexRes;
+/* What a texture handle resolved to, kept while nothing it came from can have changed: the pools' addresses, the
+   surface table (g_vk_surf_epoch), the CPU's writes the stream can see (vk_ww_epoch), the results pending over guest
+   memory (none was added: g_pend_any.adds) and the GPU's writes to the two headers. A draw resolved each of its
+   textures again, reading both headers and finding the texture by them: a tenth of the GPU thread in Tears of the
+   Kingdom, for the same few hundred handles every draw. A texture a render target holds isn't kept (its contents and
+   whether it is the target change with drawing), and a kept one is still checked against its memory (vk_tex_recheck) */
+typedef struct {
+    const GpuChannel* ch;
+    u64 tic_base, tsc_base, gw, adds;
+    u32 handle, surf_epoch, ww_epoch;
+    u32 tic[8], tsc[8];
+    Surf* t;
+} TexMemo;
+#define TEX_MEMO 1024
+static TexMemo g_tex_memo[TEX_MEMO];
 static void tex_resolve(GpuChannel* ch, u32 handle, TexRes* x) {
     u32* r = ch->r3d;
     if (r[0x48D]) {
@@ -646,11 +662,39 @@ static void tex_resolve(GpuChannel* ch, u32 handle, TexRes* x) {
         LOG_LIMIT(1, "vulkan: sampler index mode %u\n", r[0x48D]);
     }
     u64 tic_base = ((u64)r[0x55D] << 32) | r[0x55E], tsc_base = ((u64)r[0x557] << 32) | r[0x558];
-    gmem_read(tic_base + (handle & 0xFFFFF) * 32ull, x->tic, 32);
-    gmem_read(tsc_base + ((handle >> 20) & 0xFFF) * 32ull, x->tsc, 32);
-    x->t = vk_tex_from_tic(x->tic);
+    u64 tic_at = tic_base + (handle & 0xFFFFF) * 32ull, tsc_at = tsc_base + ((handle >> 20) & 0xFFF) * 32ull;
+    TexMemo* m = &g_tex_memo[(handle * 0x9E3779B1u) >> 22];
+    u64 gw = gpu_mem_generation();
     x->handle = handle;
     x->have = 1;
+    if (m->t && m->ch == ch && m->handle == handle && m->tic_base == tic_base && m->tsc_base == tsc_base &&
+        m->surf_epoch == g_vk_surf_epoch && m->ww_epoch == vk_ww_epoch() && !g_gfx_img_any &&
+        m->adds == __atomic_load_n(&g_pend_any.adds, __ATOMIC_RELAXED) &&
+        (m->gw == gw || (!gpu_mem_dirty_since(m->gw, tic_at, 32) && !gpu_mem_dirty_since(m->gw, tsc_at, 32)))) {
+        m->gw = gw;
+        memcpy(x->tic, m->tic, sizeof x->tic);
+        memcpy(x->tsc, m->tsc, sizeof x->tsc);
+        x->t = vk_tex_recheck(m->t);
+        if (!x->t) m->t = NULL;
+        return;
+    }
+    gmem_read(tic_at, x->tic, 32);
+    gmem_read(tsc_at, x->tsc, 32);
+    x->t = vk_tex_from_tic(x->tic);
+    m->t = NULL;
+    if (x->t && !x->t->is_rt && !vk_rt_find(x->t->gva)) {
+        m->ch = ch;
+        m->handle = handle;
+        m->tic_base = tic_base;
+        m->tsc_base = tsc_base;
+        m->gw = gpu_mem_generation();
+        m->adds = __atomic_load_n(&g_pend_any.adds, __ATOMIC_RELAXED);
+        m->surf_epoch = g_vk_surf_epoch;
+        m->ww_epoch = vk_ww_epoch();
+        memcpy(m->tic, x->tic, sizeof m->tic);
+        memcpy(m->tsc, x->tsc, sizeof m->tsc);
+        m->t = x->t;
+    }
 }
 
 int vk_tex_num(const u32* tic, const Surf* t) {
@@ -1951,7 +1995,17 @@ retry:
     }
 
     k.feedback = fb && !g_vk.has_feedback_dynamic;
-    VkPipeline pipe = vk_pipeline_get(&k);
+    /* the last draw's pipeline when its key is the same (draws in a row mostly are): one comparison of the key, where
+       the table hashed all of it each draw. Pipelines and modules live as long as the run, so the handle stays good */
+    static PipeKey last_key;
+    static VkPipeline last_pipe;
+    VkPipeline pipe;
+    if (last_pipe && !memcmp(&k, &last_key, sizeof k))
+        pipe = last_pipe;
+    else if ((pipe = vk_pipeline_get(&k)) != VK_NULL_HANDLE) {
+        last_key = k;
+        last_pipe = pipe;
+    }
     if (!pipe) {
         draw_images_discard(&images);
         g_vk_skipped++;

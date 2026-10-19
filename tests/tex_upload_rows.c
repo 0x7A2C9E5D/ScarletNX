@@ -178,6 +178,7 @@ int vk_written_since(const u8* host, u64 len, u32 since) {
     return -1;
 }
 u32 vk_ww_now(void) { return 0; }
+u32 vk_ww_epoch(void) { return 0; }
 int gpu_mem_dirty_since(u64 since, u64 a, u64 sz) {
     (void)since, (void)a, (void)sz;
     return 0;

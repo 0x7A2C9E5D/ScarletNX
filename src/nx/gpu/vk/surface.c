@@ -135,6 +135,7 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
     u32 k = hkey(gva);
     s->next = g_surfh[k];
     g_surfh[k] = s;
+    g_vk_surf_epoch++;
     if (is_rt) {
         s->rt_next = g_rt_first;
         g_rt_first = s;
@@ -166,10 +167,12 @@ VkImageView vk_rt_attachment(Surf* s, int srgb_write) {
 }
 
 Surf* vk_surf_first(u64 gva) { return g_surfh[hkey(gva)]; }
+u32 g_vk_surf_epoch;
 void vk_surf_add(Surf* s) {
     u32 k = hkey(s->gva);
     s->next = g_surfh[k];
     g_surfh[k] = s;
+    g_vk_surf_epoch++;
 }
 
 Surf* vk_rt_find(u64 gva) {
@@ -498,9 +501,11 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
         if (s->gva == gva && s->is_rt) {
             rt_pages(s, -1);
             s->gva = gva | 1ull << 63;
+            g_vk_surf_epoch++;
         }
     if (parked) {
         parked->gva = gva;
+        g_vk_surf_epoch++;
         rt_pages(parked, 1);
         parked->last_used = g_vk_present;
         vk_rt_note_read(parked);
@@ -653,6 +658,7 @@ int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max) {
 
 /* a surface's image and views go when the frame being recorded is done (descriptors in it may name them) */
 static void surf_free(Surf* s) {
+    g_vk_surf_epoch++;
     if (s->is_rt) {
         rt_pages(s, -1);
         for (Surf** pp = &g_rt_first; *pp; pp = &(*pp)->rt_next)

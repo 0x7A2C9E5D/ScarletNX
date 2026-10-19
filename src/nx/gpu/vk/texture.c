@@ -492,6 +492,71 @@ static VkImageViewType tic_view_type(u32 type, u32 d) {
 
 static u32 g_bud_frame;
 static i64 g_bud;
+/* t, a texture found for a header: still as guest memory has it (re-uploaded where it changed), or NULL when its
+   upload failed. gva is its address */
+static Surf* tex_check(Surf* t, u64 gva) {
+    t->last_used = g_vk_present;
+    /* an upload that ran out of memory or staging (here, or a re-upload below) is tried again once a frame. A
+       texture is only returned whole */
+    if (!t->upload_valid) {
+        if (t->checked != g_vk_present) {
+            t->checked = g_vk_present;
+            tex_rehash(t);
+        }
+        if (!t->upload_valid) return NULL;
+    }
+    /* the GPU front end wrote its memory (DMA, I2M, 2D, compute results): checked now, whatever the schedule
+       below says, as writes within a frame have to show in the same frame. Not written: it still matches as of
+       now, so the next check asks only about later writes */
+    int fresh = 0;
+    if (gpu_mem_dirty_since(t->gw, gva, t->size)) {
+        fresh = 1;
+        if (tex_rehash(t)) t->stable = 0;
+    } else
+        t->gw = gpu_mem_generation();
+    /* the CPU's writes, once a frame and again after each submission or stream wait that can make new ones the
+       stream's to see (vk_ww_epoch): write tracking proves the memory unchanged without hashing its texels */
+    if (t->checked != g_vk_present || t->ww_epoch != vk_ww_epoch()) {
+        u32 wnow = vk_ww_now();
+        int wr = vk_written_since(gmem_ptr(gva, t->size), t->size, t->wseen);
+        t->ww_epoch = vk_ww_epoch();
+        if (wr >= 0) {
+            t->checked = g_vk_present;
+            if (wr && !fresh) tex_rehash(t);
+            t->wseen = wnow + 1; /* this scan's marks are stamped with the clock after wnow */
+            return t->upload_valid ? t : NULL;
+        }
+    }
+    /* without it: often at first, backing off while the texture stays the same, within a per-frame budget */
+    if (t->checked != g_vk_present && (i32)(g_vk_present - t->next_check) >= 0) {
+        if (g_bud_frame != g_vk_present) {
+            g_bud_frame = g_vk_present;
+            g_bud = 24 << 20;
+        }
+        if (t->stable >= 40 && t->size >= 16384 && (i32)(g_vk_present - t->tfull) < 120) {
+            t->checked = g_vk_present;
+            if (vk_sample_hash(gva, t->size) == t->shash) {
+                t->next_check = g_vk_present + 20 + ((u32)(gva >> 9) & 7);
+                return t->upload_valid ? t : NULL;
+            }
+            t->stable = 0;
+        }
+        if (g_bud > 0 || t->stable < 4) {
+            t->checked = g_vk_present;
+            g_bud -= (i64)(t->size >> (t->size > 65536 ? 1 : 0));
+            if (tex_rehash(t))
+                t->stable = 0;
+            else if (t->stable < 100000)
+                t->stable++;
+            if (t->stable >= 39 && t->size >= 16384) {
+                t->shash = vk_sample_hash(gva, t->size);
+                t->tfull = g_vk_present;
+            }
+            t->next_check = g_vk_present + (t->stable < 4 ? 4 : t->stable < 12 ? 8 : 20) + ((u32)(gva >> 9) & 3);
+        }
+    }
+    return t->upload_valid ? t : NULL;
+}
 static Surf* tex_from_tic(const u32* tic, int raw) {
     u64 gva = ((u64)(tic[2] & 0xFFFF) << 32) | tic[1];
     u32 hv = (tic[2] >> 21) & 7;
@@ -604,67 +669,7 @@ texture_from_memory:
             t->fkey != fkey || t->levels != levels || t->type != vt || t->bl != (u32)bl || t->bh != bh || t->bd != bd ||
             t->pitch != pitch || t->layer_size != stride)
             continue;
-        t->last_used = g_vk_present;
-        /* an upload that ran out of memory or staging (here, or a re-upload below) is tried again once a frame. A
-           texture is only returned whole */
-        if (!t->upload_valid) {
-            if (t->checked != g_vk_present) {
-                t->checked = g_vk_present;
-                tex_rehash(t);
-            }
-            if (!t->upload_valid) return NULL;
-        }
-        /* the GPU front end wrote its memory (DMA, I2M, 2D, compute results): checked now, whatever the schedule
-           below says, as writes within a frame have to show in the same frame. Not written: it still matches as of
-           now, so the next check asks only about later writes */
-        int fresh = 0;
-        if (gpu_mem_dirty_since(t->gw, gva, t->size)) {
-            fresh = 1;
-            if (tex_rehash(t)) t->stable = 0;
-        } else
-            t->gw = gpu_mem_generation();
-        /* the CPU's writes, once a frame and again after each submission or stream wait that can make new ones the
-           stream's to see (vk_ww_epoch): write tracking proves the memory unchanged without hashing its texels */
-        if (t->checked != g_vk_present || t->ww_epoch != vk_ww_epoch()) {
-            u32 wnow = vk_ww_now();
-            int wr = vk_written_since(gmem_ptr(gva, t->size), t->size, t->wseen);
-            t->ww_epoch = vk_ww_epoch();
-            if (wr >= 0) {
-                t->checked = g_vk_present;
-                if (wr && !fresh) tex_rehash(t);
-                t->wseen = wnow + 1; /* this scan's marks are stamped with the clock after wnow */
-                return t->upload_valid ? t : NULL;
-            }
-        }
-        /* without it: often at first, backing off while the texture stays the same, within a per-frame budget */
-        if (t->checked != g_vk_present && (i32)(g_vk_present - t->next_check) >= 0) {
-            if (g_bud_frame != g_vk_present) {
-                g_bud_frame = g_vk_present;
-                g_bud = 24 << 20;
-            }
-            if (t->stable >= 40 && t->size >= 16384 && (i32)(g_vk_present - t->tfull) < 120) {
-                t->checked = g_vk_present;
-                if (vk_sample_hash(gva, t->size) == t->shash) {
-                    t->next_check = g_vk_present + 20 + ((u32)(gva >> 9) & 7);
-                    return t->upload_valid ? t : NULL;
-                }
-                t->stable = 0;
-            }
-            if (g_bud > 0 || t->stable < 4) {
-                t->checked = g_vk_present;
-                g_bud -= (i64)(t->size >> (t->size > 65536 ? 1 : 0));
-                if (tex_rehash(t))
-                    t->stable = 0;
-                else if (t->stable < 100000)
-                    t->stable++;
-                if (t->stable >= 39 && t->size >= 16384) {
-                    t->shash = vk_sample_hash(gva, t->size);
-                    t->tfull = g_vk_present;
-                }
-                t->next_check = g_vk_present + (t->stable < 4 ? 4 : t->stable < 12 ? 8 : 20) + ((u32)(gva >> 9) & 3);
-            }
-        }
-        return t->upload_valid ? t : NULL;
+        return tex_check(t, gva);
     }
     if (!format_samples(f.vk)) return NULL;
     Surf* t = tex_create(gva, w, h, layers, d3, levels, vt, f, fkey, bl, bh, bd, pitch, stride);
@@ -1109,6 +1114,12 @@ static void tex_take_drawn(Surf* t) {
 }
 Surf* vk_tex_from_tic(const u32* tic) {
     Surf* t = tex_from_tic(tic, 0);
+    tex_take_drawn(t);
+    return t;
+}
+Surf* vk_tex_recheck(Surf* t) {
+    if (g_cs_any) vk_compute_mem_need(t->gva, t->layer_size * t->layers);
+    t = tex_check(t, t->gva);
     tex_take_drawn(t);
     return t;
 }

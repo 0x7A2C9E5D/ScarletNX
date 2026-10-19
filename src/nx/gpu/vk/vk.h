@@ -370,7 +370,9 @@ void vk_rt_drawn_full(Surf* s); /* a full clear or blit replaced every pixel */
 int vk_rt_drawn_fresh(Surf* s); /* no guest-memory write has replaced the target since its last draw */
 int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max); /* count drawn in [lo, hi), write up to max */
 void vk_rt_reload(u64 gva);
-/* textures share the surface table */
+/* textures share the surface table. g_vk_surf_epoch changes whenever a surface enters it, leaves it or moves (a
+   target parked or taken back), so what was found there can be kept until it changes */
+extern u32 g_vk_surf_epoch;
 Surf* vk_surf_first(u64 gva);
 void vk_surf_add(Surf* s);
 VkImageAspectFlags vk_aspect(const VkFmt* f);
@@ -394,6 +396,9 @@ int vk_vic_compose(const VicJob* j);
 /* texture.c */
 void vk_render_forget_state(void); /* the next draw sets all its state again (another pipeline or state was set) */
 Surf* vk_tex_from_tic(const u32* tic);
+/* a texture vk_tex_from_tic returned for an unchanged header, checked again as it would be: memory written since, what
+   targets drew into it. NULL when it can't be drawn now */
+Surf* vk_tex_recheck(Surf* t);
 Surf* vk_tex_from_tic_raw(const u32* tic); /* UINT view of raw RGBA8 texel bytes */
 /* a view of s as the shader declares it, sRGB or linear (color formats that have both), with a component mapping;
    VK_NULL_HANDLE when the image can't be viewed that way */
