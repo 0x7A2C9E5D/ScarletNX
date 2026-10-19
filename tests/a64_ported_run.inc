@@ -12,12 +12,14 @@
 #include <unistd.h>
 #endif
 
-/* guest memory: one window, enough for every case's accesses */
+/* guest memory: one window, enough for every case's accesses, on a page as the runtime's guest memory is: STXP's
+   16-byte compare-and-swap (snx_cas128) faults on an address that isn't 16-byte aligned */
 #define SNX_A64P_WINDOW 0x4000u
 #define SNX_A64P_FZ     0x01000000u
 #define SNX_A64P_DN     0x02000000u
 
-static u8 snx_a64p_window[SNX_A64P_WINDOW], snx_a64p_want_window[SNX_A64P_WINDOW];
+static _Alignas(4096) u8 snx_a64p_window[SNX_A64P_WINDOW];
+static u8 snx_a64p_want_window[SNX_A64P_WINDOW];
 static u64 snx_a64p_base;
 static CPU snx_a64p_want;
 static int snx_a64p_traps, snx_a64p_failures, snx_a64p_checks;
