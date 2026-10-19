@@ -39,6 +39,8 @@ enum { ROOM_INET = 1, ROOM_PROTOCOL_IP = 1, ROOM_PROTOCOL_UDP = 4 };
 #define ROOM_SERVICE_MS 5
 #define ROOM_LEAVE_MS   1000 /* for the room to take what was queued, then the disconnect */
 #define ROOM_QUEUE_MAX  256   /* datagrams a socket holds unread; the next ones are dropped, as UDP drops them */
+#define ROOM_DATAGRAM_HEAD                                                                                             \
+    21 /* a datagram message before its bytes: type, two endpoints, protocol, broadcast, length */
 #define ROOM_PORT_FIRST 49152 /* the ephemeral ports an unbound socket takes */
 
 typedef struct RoomOut {
@@ -283,12 +285,9 @@ int snx_room_has_member(SnxRoom* r, const uint8_t ip[4]) {
 }
 
 /* the message, queued for the thread; -SNX_ENETDOWN out of the room */
-static int queue(SnxRoom* r, const uint8_t* data, size_t size) {
-    RoomOut* o = malloc(sizeof *o + size);
-    if (!o) return -SNX_ENOMEM;
+/* o, queued for the thread, which frees it; freed here out of the room (-SNX_ENETDOWN) */
+static int queue_owned(SnxRoom* r, RoomOut* o) {
     o->next = NULL;
-    o->size = size;
-    memcpy(o->data, data, size);
     snx_lock(&r->lk);
     if (r->state != SNX_ROOM_IN) {
         snx_unlock(&r->lk);
@@ -302,6 +301,13 @@ static int queue(SnxRoom* r, const uint8_t* data, size_t size) {
     r->out_tail = o;
     snx_unlock(&r->lk);
     return 0;
+}
+static int queue(SnxRoom* r, const uint8_t* data, size_t size) {
+    RoomOut* o = malloc(sizeof *o + size);
+    if (!o) return -SNX_ENOMEM;
+    o->size = size;
+    memcpy(o->data, data, size);
+    return queue_owned(r, o);
 }
 static void call_ldn(SnxRoom* r, const SnxRoomLdn* p) {
     void (*h)(void*, const SnxRoomLdn*);
@@ -484,8 +490,9 @@ static int64_t sock_send(SnxSocket* s, const void* data, size_t size, int flags,
     RoomSock* k = s->impl;
     SnxRoom* r = k->room;
     SnxRoomDatagram d;
-    size_t bound_size, n;
-    uint8_t *z, *msg, protocol;
+    size_t bound_size, n, head;
+    RoomOut* o;
+    uint8_t protocol;
     int e;
     (void)flags;
     if (to && to->family != SNX_AF_INET) return -SNX_EAFNOSUPPORT;
@@ -512,26 +519,28 @@ static int64_t sock_send(SnxSocket* s, const void* data, size_t size, int flags,
     protocol = k->protocol;
     snx_unlock(&k->lk);
     if (e) return e;
+    /* the message's head with an empty vector, then the zstd frame where the vector's bytes go, then its length */
     bound_size = ZSTD_compressBound(size);
-    z = malloc(bound_size);
-    msg = malloc(bound_size + 32);
-    if (!z || !msg) {
-        free(z);
-        free(msg);
-        return -SNX_ENOMEM;
-    }
-    n = ZSTD_compress(z, bound_size, data, size, ZSTD_CLEVEL_DEFAULT);
-    if (ZSTD_isError(n)) {
-        free(z);
-        free(msg);
+    d.data = NULL;
+    d.size = 0;
+    head = ROOM_DATAGRAM_HEAD;
+    o = malloc(sizeof *o + head + bound_size);
+    if (!o) return -SNX_ENOMEM;
+    if (pack_datagram(o->data, head, &d, protocol) != head) {
+        free(o);
         return -SNX_EIO;
     }
-    d.data = z;
-    d.size = n;
-    n = pack_datagram(msg, bound_size + 32, &d, protocol);
-    e = n ? queue(r, msg, n) : -SNX_EMSGSIZE;
-    free(z);
-    free(msg);
+    n = ZSTD_compress(o->data + head, bound_size, data, size, ZSTD_CLEVEL_DEFAULT);
+    if (ZSTD_isError(n)) {
+        free(o);
+        return -SNX_EIO;
+    }
+    o->data[head - 4] = (uint8_t)(n >> 24);
+    o->data[head - 3] = (uint8_t)(n >> 16);
+    o->data[head - 2] = (uint8_t)(n >> 8);
+    o->data[head - 1] = (uint8_t)n;
+    o->size = head + n;
+    e = queue_owned(r, o);
     return e ? e : (int64_t)size;
 }
 static int64_t sock_recv(SnxSocket* s, void* data, size_t size, int flags, SnxSockAddr* from, int* out_flags) {
