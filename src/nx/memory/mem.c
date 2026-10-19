@@ -72,6 +72,13 @@ static void mem_unlock(void) {
     pm_unlock(&g_mem_lk);
 }
 
+static void (*g_code_invalidate)(u64, u64); /* the runtime's JIT: what was compiled in the range is stale now */
+void mem_set_code_invalidate(void (*fn)(u64, u64)) { g_code_invalidate = fn; }
+/* no memory lock held: the hook takes the JIT's */
+static void code_invalidate(u64 addr, u64 size) {
+    if (g_code_invalidate) g_code_invalidate(addr, size);
+}
+
 static u64 blk_end(const MemBlock* b) { return b->addr + b->size; }
 /* b follows a: they join when alike, the pool's pages continuing from a's when they are the pool's */
 static int blk_same(const MemBlock* a, const MemBlock* b) {
@@ -465,6 +472,7 @@ int mem_unmap(u64 addr, u64 size) {
     unmap_nl(addr, size);
     mem_unlock();
     mapping_end();
+    code_invalidate(addr, size);
     gpu_mem_changed(addr, size);
     return 0;
 }
@@ -505,6 +513,7 @@ int mem_set_state(u64 addr, u64 size, u32 state, u32 perm) {
     }
     if (!r) blk_change_nl(addr, size, &c);
     mem_unlock();
+    if (!r) code_invalidate(addr, size); /* the guest may write the range now and run it after */
     return r;
 }
 int mem_set_attr(u64 addr, u64 size, u32 mask, u32 attr) {
@@ -588,6 +597,8 @@ int mem_alias_unmap(u64 dst, u64 size, u64 back) {
     unmap_nl(dst, size);
     mem_unlock();
     mapping_end();
+    code_invalidate(dst, size);
+    if (back) code_invalidate(back, size); /* the write back may have changed the pages it went to */
     gpu_mem_changed(dst, size);
     return 0;
 }
@@ -651,7 +662,10 @@ int mem_unmap_pool(u64 addr, u64 off, u64 size, u32 state) {
     }
     mem_unlock();
     mapping_end();
-    if (!r) gpu_mem_changed(addr, size);
+    if (!r) {
+        code_invalidate(addr, size);
+        gpu_mem_changed(addr, size);
+    }
     return r;
 }
 
@@ -762,7 +776,10 @@ int mem_unmap_physical(u64 addr, u64 size) {
     }
     mem_unlock();
     mapping_end();
-    if (!r && freed) gpu_mem_changed(addr, size);
+    if (!r && freed) {
+        code_invalidate(addr, size);
+        gpu_mem_changed(addr, size); /* the decommitted pages read as zero */
+    }
     return r;
 }
 
@@ -887,6 +904,9 @@ int mem_unmap_code(const MemCodeMap* m) {
     mem_unlock();
     mapping_end();
     if (!r) {
+        code_invalidate(m->base, total); /* the view goes: what ran there is stale */
+        code_invalidate(m->source, m->size);
+        if (m->bss_size) code_invalidate(m->bss, m->bss_size);
         gpu_mem_changed(m->base, total);
         gpu_mem_changed(m->source, m->size);
         if (m->bss_size) gpu_mem_changed(m->bss, m->bss_size);

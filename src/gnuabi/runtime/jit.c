@@ -160,10 +160,8 @@ void gnu_jit_miss(CPU* c, u64 pc) {
     f(c, pc);
 }
 
-int gnu_jit_init(GnuJit* jit, int mode, const char* cc, const char* cache, char* error, size_t error_size) {
+int gnu_jit_init(GnuJit* jit, const char* cache, char* error, size_t error_size) {
     memset(jit, 0, sizeof *jit);
-    jit->mode = mode;
-    jit->cc = cc;
     jit->step = JIT_STEP_INSTRUCTIONS;
 #ifdef _WIN32
     jit->table = VirtualAlloc(NULL, (SIZE_T)TABLE_BYTES, MEM_RESERVE, PAGE_NOACCESS);
@@ -191,7 +189,6 @@ void gnu_jit_reset(GnuJit* jit) {
     size_t i;
     for (i = 0; i < jit->module_count; ++i) snx_recompiled_free(jit->modules[i]);
     jit->module_count = 0;
-    if (jit->aot.module) snx_execution_free(&jit->aot);
     if (jit->table) table_clear(jit, 0, TABLE_SLOTS);
 }
 
@@ -207,34 +204,6 @@ void gnu_jit_destroy(GnuJit* jit) {
 #endif
     }
     memset(jit, 0, sizeof *jit);
-}
-
-static void aot_fetch(CPU* cpu, uint64_t address, uint32_t* word) {
-    GnuProcess* p = cpu->thread;
-    void* instruction;
-    cpu->pc = address;
-    instruction = gnu_memory_access(&p->memory, address, 4, GNU_PROT_EXEC);
-    if ((address & 3) || !instruction) {
-        *word = 0;
-        gnu_process_fault(p, 11, "Guest instruction fetch violated mapped execution permissions");
-        return;
-    }
-    /* Execute-only guest pages are host-readable instruction data. */
-    memcpy(word, instruction, 4);
-}
-
-int gnu_jit_prepare(GnuJit* jit, const SnxExecRange* ranges, size_t count, uint64_t entry, char* error,
-                    size_t error_size) {
-    uint64_t a;
-    if (jit->mode != GNU_AOT) return 0;
-    if (snx_execution_compile(&jit->aot, ranges, count, entry, jit->cc, error, error_size)) return -1;
-    jit->aot.fetch = aot_fetch;
-    if (jit->aot.set_fetch) jit->aot.set_fetch(aot_fetch);
-    for (a = jit->aot.code_lo; a < jit->aot.code_hi; a += 4) {
-        GuestFn f = jit->aot.dispatch[(a - jit->aot.code_lo) / 4];
-        if (f && a < GNU_ADDRESS_LIMIT) table_set(jit, a, f);
-    }
-    return 0;
 }
 
 void gnu_jit_bind(GnuJit* jit, CPU* cpu) {

@@ -125,6 +125,7 @@ def build(directory, cc, ops, sanitize=False):
             str(ROOT / 'src'),
             str(ROOT / 'tests/a64_fp_emit.c'),
             str(A64 / 'a64.c'),
+            str(A64 / 'a64_emit.c'),
             '-o',
             str(emitter),
         ],

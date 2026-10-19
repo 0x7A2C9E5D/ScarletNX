@@ -6,7 +6,11 @@
    guest memory; registers, flags, FP state, the exclusive monitor, memory, the returned pc and the runtime callbacks
    must all match.
      llvm_differential CLANG REPO [--match NAME] [--shard I/N] [--per-case N] [--simd N] [--states N] [--seed N]
-                       [--quiet] [--jit] [--portable]
+                       [--quiet] [--jit] [--portable] [--sweep]
+   --match keeps patterns whose name starts with NAME. --sweep ignores the sampling and sweeps the matched patterns
+   whole: every word their free bits make, operand fields held, the ones the reference's snx_simd runs compared.
+   ctest runs the sampling shards (llvm_differential_*) always, and the sweep ones (llvm_differential_sweep_*) when
+   the build sets SNX_TEST_LLVM_SWEEP
    --match keeps patterns whose name starts with NAME. --shard keeps every Nth word from the Ith (from 0): the N runs
    of a seed compare the words one run would. --portable builds the LLVM steps without the host's x86 extensions
    (PSHUFB, PCLMULQDQ, AES-NI, GFNI, VPTERNLOG...), so the emitters' portable forms of those encodings are the ones
@@ -14,7 +18,7 @@
    object for dlopen, and checks that loaded code reaches the runtime's functions and data, outside the code arena. */
 #include "common/utilities/common.h"
 #include "common/cpu/aarch64/cpu.h"
-#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_emit.h"
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/link.h"
 #include "common/cpu/recompiler/llvm/code_loader.h"
@@ -538,6 +542,51 @@ static size_t directed(const char* match, size_t want, Word* out) {
     return got;
 }
 
+/* Swept whole, not sampled: every word a matched pattern's free bits make with its operand fields held (Rn = 2,
+   Rd/Rt = 1), put to the reference's own snx_simd. Every word it runs is a word the backend has to lower: a word it
+   leaves to undef is the hole this mode exists to find, in one run, instead of one game crash at a time. */
+static size_t sweep(const char* match, const SnxA64Pattern* patterns, size_t npatterns, Word** words,
+                    size_t* capacity) {
+    CPU cpu;
+    unsigned char* memory = (unsigned char*)calloc(MEMORY_SIZE, 1);
+    size_t count = 0, i, r;
+    if (!memory) return 0;
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.mem = memory;
+    for (i = 0; i < npatterns; ++i) {
+        const SnxA64Pattern* p = &patterns[i];
+        unsigned bits[32], nbits = 0, k;
+        size_t combos, c;
+        if (strncmp(p->name, match, strlen(match))) continue;
+        for (k = 10; k < 32; ++k)
+            if (!(p->mask & (1u << k))) bits[nbits++] = k; /* 9-0 are the operand fields of the SIMD encodings */
+        if (nbits > 24) continue; /* no pattern is this wide today: sweeping one whole would not finish */
+        combos = (size_t)1 << nbits;
+        for (c = 0; c < combos; ++c) {
+            SnxU32 word = p->value | 0x41u; /* Rn = 2, Rd/Rt = 1 */
+            const SnxA64Pattern* owner;
+            size_t index;
+            Word value;
+            for (k = 0; k < nbits; ++k)
+                if (c & ((size_t)1 << k)) word |= 1u << bits[k];
+            owner = snx_a64_case_pattern(snx_a64_decode(word), &index);
+            if (owner != p) continue; /* an earlier pattern owns the word */
+            /* the reference's loads and stores are run for real, and its post-index forms write the registers back:
+               a base in the middle of the buffer keeps their offsets in it, and the next word starts from it again */
+            for (r = 0; r < 32; ++r) cpu.x[r] = 0x1000 + 16u * r;
+            if (!snx_simd(&cpu, memory, word)) continue; /* the reference does not run it either */
+            value.word = word, value.pattern = p, value.index = index;
+            if (count == *capacity) {
+                *capacity = *capacity ? *capacity * 2 : 8192;
+                *words = (Word*)snx_realloc(*words, *capacity * sizeof(**words));
+            }
+            (*words)[count++] = value;
+        }
+    }
+    free(memory);
+    return count;
+}
+
 int main(int argc, char** argv) {
     const char *clang, *repo, *match = NULL;
     size_t per_case = 4, per_simd = 300, states = 6, count = 0, capacity = 0, npatterns, i, k, failures = 0,
@@ -557,12 +606,12 @@ int main(int argc, char** argv) {
     TableFn table_p, table_l;
     StepFn *steps_p, *steps_l;
     RtAPI rt;
-    int quiet = 0, a, jit = 0, portable = 0;
+    int quiet = 0, a, jit = 0, portable = 0, sweep_mode = 0;
     SnxCodeLoader* loader = NULL;
     unsigned long fallbacks;
     if (argc < 3) {
         fputs("usage: llvm_differential CLANG REPO [--match NAME] [--shard I/N] [--per-case N] [--simd N] [--states N]"
-              " [--seed N] [--quiet] [--jit] [--portable]\n",
+              " [--seed N] [--quiet] [--jit] [--portable] [--sweep]\n",
               stderr);
         return 2;
     }
@@ -575,6 +624,8 @@ int main(int argc, char** argv) {
             jit = 1;
         else if (!strcmp(argv[a], "--portable"))
             portable = 1;
+        else if (!strcmp(argv[a], "--sweep"))
+            sweep_mode = 1;
         else if (a + 1 < argc && !strcmp(argv[a], "--match"))
             match = argv[++a];
         else if (a + 1 < argc && !strcmp(argv[a], "--shard")) {
@@ -594,31 +645,38 @@ int main(int argc, char** argv) {
             return snx_error("unknown argument %s", argv[a]);
     }
     /* words */
-    for (i = 0; i < npatterns; ++i) {
-        const SnxA64Pattern* p = &patterns[i];
-        if (match && strncmp(p->name, match, strlen(match))) continue;
-        for (k = 0; k < p->case_count; ++k) {
-            size_t want = !strncmp(p->name, "SIMD", 4) ? per_simd : per_case;
-            if (p->cases[k].kind == SNX_FLOW_UNDEF) continue;
-            if (count + want > capacity) {
-                capacity = (count + want) * 2;
-                words = (Word*)snx_realloc(words, capacity * sizeof(*words));
+    if (sweep_mode) {
+        count = sweep(match ? match : "SIMD", patterns, npatterns, &words, &capacity);
+    } else {
+        for (i = 0; i < npatterns; ++i) {
+            const SnxA64Pattern* p = &patterns[i];
+            if (match && strncmp(p->name, match, strlen(match))) continue;
+            for (k = 0; k < p->case_count; ++k) {
+                size_t want = !strncmp(p->name, "SIMD", 4) ? per_simd : per_case;
+                if (p->cases[k].kind == SNX_FLOW_UNDEF) continue;
+                if (count + want > capacity) {
+                    capacity = (count + want) * 2;
+                    words = (Word*)snx_realloc(words, capacity * sizeof(*words));
+                }
+                count += generate(p, k, want, words + count);
             }
-            count += generate(p, k, want, words + count);
         }
+        words = (Word*)snx_realloc(words, (count + DIRECTED * per_simd) * sizeof(*words));
+        count += directed(match, per_simd, words + count);
     }
-    words = (Word*)snx_realloc(words, (count + DIRECTED * per_simd) * sizeof(*words));
-    count += directed(match, per_simd, words + count);
     for (i = shard, k = 0; i < count; i += shards) words[k++] = words[i];
     count = k;
     if (!count) return snx_error("no words to test");
+    if (sweep_mode && !quiet) printf("sweep:\t%zu words the reference runs\n", count);
     dir = snx_temp_dir(NULL);
     c_path = snx_path_join(dir, "portable.c");
     c_lib = snx_path_join(dir, "portable.so");
     l_lib = snx_path_join(dir, "llvm.so");
     /* the reference: snx_a64_static_step's C for each word, compiled by Clang with the flags generated C had */
     f = snx_fopen(c_path, "wb");
-    fputs("#include \"cpu.h\"\n#include \"cpu_helpers.c\"\ntypedef u64 (*StepFnPtr)(CPU*);\n", f);
+    fputs(
+        "#include \"cpu.h\"\n#define SNX_A64_REFERENCE\n#include \"cpu_helpers.c\"\nGuestFn snx_missing_entry;\ntypedef u64 (*StepFnPtr)(CPU*);\n",
+        f);
     for (i = 0; i < count; ++i) {
         char name[32];
         sprintf(name, "S_%lu", (unsigned long)i);
@@ -759,7 +817,7 @@ int main(int argc, char** argv) {
             ++compared;
             if (rp != rl || !same_cpu(&p, &l) || memory_differs || !same_events(&log_p, &log_l)) {
                 size_t index = (size_t)(words[i].pattern - patterns);
-                if (pattern_failures[index]++ < 3)
+                if (pattern_failures[index]++ < (sweep_mode ? 64 : 3))
                     report(&words[i], &start, &p, &l, rp, rl, &log_p, &log_l, memory_differs);
                 ++failures;
                 break;

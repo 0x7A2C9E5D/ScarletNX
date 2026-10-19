@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* Real decoder inventory and AOT/interpreter bridge for a64_audit.py. */
-#include "common/cpu/aarch64/a64.h"
+#include "common/cpu/aarch64/a64_emit.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
-    puts("#include \"cpu.h\"\n#include \"cpu_helpers.c\"\n#include \"a64_audit_state.h\"");
+    puts("#include \"cpu.h\"\n#define SNX_A64_REFERENCE\n#include \"cpu_helpers.c\"\n#include \"a64_audit_state.h\"\nGuestFn snx_missing_entry;");
     puts("static int trapped;static void undef(CPU*c,u64 p,u32 w){(void)c;(void)p;(void)w;trapped=1;}");
     snx_a64_interp(stdout, 1);
     for (i = 1; i < argc; ++i) {

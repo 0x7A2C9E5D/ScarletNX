@@ -42,8 +42,10 @@ typedef double f64;
    8: the FP/SIMD emitters and discovery changes.
    9: RtAPI.svcs, which the NX modules call each SVC through by its number.
   10: RtAPI.miss replaces the module's own snx_interp_entry as snx_lookup's fallback, and CPU.disp's slots are read
-      with relaxed atomic loads, since the runtime JIT fills them while guest threads run. */
-#define SNX_ABI 10
+      with relaxed atomic loads, since the runtime JIT fills them while guest threads run.
+  11: the reworked LLVM backend's modules. Old 10 was taken twice, by our engine and upstream's, and a module built
+      for the wrong one must not load. */
+#define SNX_ABI 11
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)

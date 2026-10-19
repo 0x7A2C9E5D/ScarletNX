@@ -308,6 +308,7 @@ add_test(NAME arm_exec_dry_svc COMMAND snx-test-arm-exec)
 # Small architectural witnesses need neither game assets nor an emulator.
 add_executable(snx-test-a64-fp a64_fp_test.c "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu_helpers.c")
 snx_test_target(snx-test-a64-fp 11)
+target_compile_definitions(snx-test-a64-fp PRIVATE SNX_A64_REFERENCE)
 if(NOT WIN32)
     target_link_libraries(snx-test-a64-fp PRIVATE m)
 endif()
@@ -316,6 +317,7 @@ add_test(NAME a64_fp_witnesses COMMAND snx-test-a64-fp)
 
 # snx_crc32's nibble tables against the bit-serial definition (the helpers have no host-specific paths)
 add_executable(snx-test-crc32-helper crc32_helper.c "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu_helpers.c")
+target_compile_definitions(snx-test-crc32-helper PRIVATE SNX_A64_REFERENCE)
 snx_test_target(snx-test-crc32-helper 11)
 snx_cpu_helpers_flags(snx-test-crc32-helper)
 if(NOT WIN32)
@@ -326,6 +328,7 @@ add_test(NAME crc32_helper COMMAND snx-test-crc32-helper)
 add_executable(snx-test-a64-fp-arithmetic a64_fp_arithmetic_test.c
     "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu_helpers.c")
 snx_test_target(snx-test-a64-fp-arithmetic 11)
+target_compile_definitions(snx-test-a64-fp-arithmetic PRIVATE SNX_A64_REFERENCE)
 snx_cpu_helpers_flags(snx-test-a64-fp-arithmetic)
 if(NOT WIN32)
     target_link_libraries(snx-test-a64-fp-arithmetic PRIVATE m)
@@ -759,7 +762,8 @@ add_test(NAME runtime_nro COMMAND snx-test-runtime-nro)
 if(NOT WIN32)
     # Emit the real fallback interpreter without LLVM, a game dump, or a precompiled code module.
     add_executable(snx-test-ro-interp-gen "${PROJECT_SOURCE_DIR}/src/common/cpu/recompiler/llvm/rtlib_gen.c"
-        "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/a64.c")
+        "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/a64.c"
+        "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/a64_emit.c")
     snx_test_target(snx-test-ro-interp-gen 11)
         add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ldr_interp.inc"
         COMMAND snx-test-ro-interp-gen interp "${CMAKE_CURRENT_BINARY_DIR}/ldr_interp.inc"
@@ -770,7 +774,7 @@ if(NOT WIN32)
     snx_test_target(snx-test-ldr-service 11)
         snx_service_swipc(snx-test-ldr-service hle/services/ldr.swipc)
     target_include_directories(snx-test-ldr-service PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-    target_compile_definitions(snx-test-ldr-service PRIVATE SNX_RO_INTERP_TEST)
+    target_compile_definitions(snx-test-ldr-service PRIVATE SNX_RO_INTERP_TEST SNX_A64_REFERENCE)
     target_link_libraries(snx-test-ldr-service PRIVATE OpenSSL::Crypto m)
     snx_cpu_helpers_flags(snx-test-ldr-service)
     add_test(NAME ldr_service COMMAND snx-test-ldr-service)
@@ -917,9 +921,17 @@ target_link_libraries(snx_recompiler_test PRIVATE snx_driver ${CMAKE_DL_LIBS})
 # LLVM is always available to the recompiler.
 add_test(NAME native_recompiler COMMAND snx_recompiler_test
     $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${SNX_TARGET_C_COMPILER}")
-add_executable(snx-test-llvm-differential llvm_differential.c)
+# cpu_helpers.c carries the reference interpreter (SNX_A64_REFERENCE): --sweep asks snx_simd itself which words the
+# reference runs, in process, before any of them is compiled
+add_executable(snx-test-llvm-differential llvm_differential.c
+    "${PROJECT_SOURCE_DIR}/src/common/cpu/aarch64/cpu_helpers.c")
 snx_test_target(snx-test-llvm-differential 11)
-target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver ${CMAKE_DL_LIBS})
+target_compile_definitions(snx-test-llvm-differential PRIVATE SNX_A64_REFERENCE)
+snx_cpu_helpers_flags(snx-test-llvm-differential)
+target_link_libraries(snx-test-llvm-differential PRIVATE snx_llvm snx_driver snx_a64_reference ${CMAKE_DL_LIBS})
+if(NOT WIN32)
+    target_link_libraries(snx-test-llvm-differential PRIVATE m)
+endif()
 # In shards that run side by side, each a share of the words, all of them started first (COST): a tree with no times
 # of its own (CI's) starts tests in their order, and these are the longest. Fewer, and one runs alone at the end;
 # more, and each pays the compiles' start again. The _jit shards run the same steps through the JIT's loader
@@ -931,12 +943,28 @@ foreach(shard RANGE 2)
         "${PROJECT_SOURCE_DIR}" --quiet --jit --shard ${shard}/3)
     set_tests_properties(llvm_differential_${shard} llvm_differential_jit_${shard} PROPERTIES TIMEOUT 900 COST 100)
 endforeach()
+# The same families again, swept whole instead of sampled (llvm_differential.c's --sweep): every word a SIMD
+# pattern's free bits make, its operand fields held, the ones the reference's snx_simd runs. Whole families at once,
+# so an opcode no random sample lands on (fcvtl was one) cannot hide. Opt in: the 70k words cost minutes
+option(SNX_TEST_LLVM_SWEEP "Run the whole-encoding LLVM differential sweep (slow)" OFF)
+if(SNX_TEST_LLVM_SWEEP)
+    foreach(shard RANGE 2)
+        add_test(NAME llvm_differential_sweep_${shard} COMMAND snx-test-llvm-differential "${SNX_TARGET_C_COMPILER}"
+            "${PROJECT_SOURCE_DIR}" --quiet --sweep --shard ${shard}/3)
+        set_tests_properties(llvm_differential_sweep_${shard} PROPERTIES TIMEOUT 1800 COST 100)
+    endforeach()
+endif()
 # the runtime JIT (jit_service.c): misses compiled, published and shared between threads, on that loader
 add_executable(snx-test-jit-service jit_service.c)
 snx_test_target(snx-test-jit-service 11)
 target_link_libraries(snx-test-jit-service PRIVATE snx_llvm Threads::Threads)
 add_test(NAME jit_service COMMAND snx-test-jit-service)
 set_tests_properties(jit_service PROPERTIES TIMEOUT 120)
+# the runtime JIT's coverage of code outside every image (guest_jit.c's jit_resolve_or_add): a block the game mapped
+add_executable(snx-test-nx-jit-region nx_jit_region.c)
+snx_test_target(snx-test-nx-jit-region 11)
+target_link_libraries(snx-test-nx-jit-region PRIVATE snx_llvm Threads::Threads)
+add_test(NAME nx_jit_region COMMAND snx-test-nx-jit-region)
 # longjmp across the loader's code, which on Windows unwinds through its registered function table
 add_executable(snx-test-code-loader-unwind code_loader_unwind.c)
 snx_test_target(snx-test-code-loader-unwind 11)
@@ -991,7 +1019,7 @@ endif()
 
 add_executable(snx-test-llvm-module llvm_module.c)
 snx_test_target(snx-test-llvm-module 11)
-target_link_libraries(snx-test-llvm-module PRIVATE snx_driver ${CMAKE_DL_LIBS})
+target_link_libraries(snx-test-llvm-module PRIVATE snx_driver snx_a64_reference ${CMAKE_DL_LIBS})
 add_test(NAME llvm_module COMMAND snx-test-llvm-module $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}"
     "${CMAKE_C_COMPILER}")
 # the recompiler as a library (snx_recompiler.h): A64 on every backend built, A32, from code in memory
@@ -1009,13 +1037,13 @@ endif()
 
 add_executable(snx_codegen_test codegen_test.c)
 snx_test_target(snx_codegen_test 90)
-target_link_libraries(snx_codegen_test PRIVATE snx_driver)
+target_link_libraries(snx_codegen_test PRIVATE snx_driver snx_a64_reference)
 add_test(NAME native_codegen COMMAND snx_codegen_test "${SNX_TARGET_C_COMPILER}" "${PROJECT_SOURCE_DIR}")
 
-# A64 cases ported from rEden's dynarmic tests, on the AOT and interpreter paths (a64_ported_cases.h)
+# A64 cases ported from rEden's dynarmic tests, on the C reference path (a64_ported_cases.h)
 add_executable(snx-test-a64-ported a64_ported.c)
 snx_test_target(snx-test-a64-ported 11)
-target_link_libraries(snx-test-a64-ported PRIVATE snx_driver)
+target_link_libraries(snx-test-a64-ported PRIVATE snx_driver snx_a64_reference)
 add_test(NAME a64_ported_cases COMMAND snx-test-a64-ported "${CMAKE_C_COMPILER}" "${PROJECT_SOURCE_DIR}")
 
 add_executable(snx-test-astc astc_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/astc.c")

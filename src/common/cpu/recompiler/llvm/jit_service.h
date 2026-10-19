@@ -94,6 +94,9 @@ void snx_jit_service_free(SnxJitService* service);
 /* The guest function to call for pc (as GuestFn(c, pc)), or NULL while it is queued or compiling, or when it can't be
    compiled (unaligned, outside the images, a compile that failed). Queues it at the front of the misses. Never waits */
 GuestFn snx_jit_resolve(SnxJitService* service, SnxU64 pc);
+/* whether the service's images hold pc: it can be compiled from them (or already is), so no image of a block the game
+   mapped itself must be added for it */
+int snx_jit_covers(const SnxJitService* service, SnxU64 pc);
 /* The guest function for pc, waiting for its compile when it has none yet: NULL only when it can't be compiled */
 GuestFn snx_jit_wait(SnxJitService* service, SnxU64 pc);
 /* Queues pcs to compile while no miss waits, those the service has no entry for and the dispatch table no function:
@@ -107,6 +110,10 @@ int snx_jit_add_image(SnxJitService* service, const SnxCodeImage* image);
 /* The image added at base goes, before its memory does: waits for the batches reading it, and forgets its pcs and
    code (code is never freed, but nothing finds it any more). No thread may run its code any more */
 void snx_jit_remove_image(SnxJitService* service, SnxU64 base);
+/* Guest memory in [addr, addr+size) changed: what was compiled from it is stale. Its dispatch slots and entries go;
+   the next lookup compiles a pc in the range from what is there now, and a compile already running publishes nothing
+   for it. The code stays loaded, as a thread may still be running it */
+void snx_jit_invalidate(SnxJitService* service, SnxU64 addr, SnxU64 size);
 
 typedef struct {
     unsigned long batches, compiled, failures; /* compiled, failures: pcs the queues held */

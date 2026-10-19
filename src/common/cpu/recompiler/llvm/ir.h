@@ -70,6 +70,36 @@ typedef struct {
 } SnxIrFeatures;
 extern SnxIrFeatures snx_ir_host;
 
+/* The cache belongs to the IR builder, not the guest CPU. One bit per GPR;
+   changing blocks or observing an unknown write drops the whole snapshot. */
+typedef struct {
+    LLVMValueRef x[32];
+    LLVMBasicBlockRef block;
+    uint32_t valid;
+} SnxIrRegisterCache;
+
+/* Values are owned by one LLVM basic block, never by the guest CPU.
+   Any FP-state mutation or unknown call drops them. */
+typedef struct {
+    LLVMBasicBlockRef block;
+    LLVMValueRef nearest, ixc;
+} SnxIrFpGuards;
+
+/* SSA flags are a per-block forwarding table, not a second CPU state.
+   Every write still commits to the architectural structure immediately. */
+typedef struct {
+    LLVMValueRef value[4];
+    LLVMBasicBlockRef block;
+    unsigned valid;
+} SnxIrFlags;
+
+/* Block-local LLVM SSA snapshots, never guest architectural state. */
+typedef struct {
+    SnxIrRegisterCache registers;
+    SnxIrFlags flags;
+    SnxIrFpGuards fp_guards;
+} SnxIrBlockState;
+
 typedef struct SnxIr {
     LLVMContextRef ctx;
     LLVMModuleRef mod;
@@ -81,6 +111,7 @@ typedef struct SnxIr {
     /* the function being emitted: its CPU* and the guest memory base (u8* const M=c->mem) */
     LLVMValueRef fn, c, M;
     LLVMValueRef helpers[SNX_IR_HELPER_COUNT];
+    SnxIrBlockState state;
     /* alias scopes: guest memory (through M) and the CPU structure never overlap */
     unsigned kind_scope, kind_noalias;
     LLVMValueRef scope_cpu, scope_guest;
@@ -95,6 +126,17 @@ typedef struct SnxIr {
     void* direct_user;
 } SnxIr;
 
+void ir_state_invalidate(SnxIr* ir);
+void ir_registers_invalidate(SnxIr* ir);
+void ir_flags_invalidate(SnxIr* ir);
+LLVMValueRef ir_flag_read(SnxIr* ir, unsigned index);
+LLVMValueRef ir_flags_adds(SnxIr* ir, unsigned bits, LLVMValueRef a, LLVMValueRef b, LLVMValueRef cin);
+LLVMValueRef ir_flags_subs(SnxIr* ir, unsigned bits, LLVMValueRef a, LLVMValueRef b);
+void ir_flags_logic(SnxIr* ir, LLVMValueRef value, unsigned bits);
+void ir_flags_set_nzcv(SnxIr* ir, LLVMValueRef nzcv);
+LLVMValueRef ir_flags_cond(SnxIr* ir, unsigned cond);
+
+void ir_fp_guards_invalidate(SnxIr* ir);
 /* Once per process, before any other call; threads may then each own SnxIrs. 0, or -1 with the reason */
 int snx_ir_init(char* error, size_t error_size);
 /* opt is the -O letter: 0,1,2,3,s,z */
@@ -132,16 +174,15 @@ void snx_ir_begin(SnxIr* ir, LLVMValueRef function);
 /* ---- instructions (ir_a64.c, ir_simd.c, ir_fp.c) ---- */
 /* The body of a PLAIN instruction (snx_a64_body with "c->rt->undef(c,pc,w)" for UNDEF, after snx_a64_fast_simd).
    0 when no emitter covers the pattern: the module then fails (SnxIr.fallbacks) */
-int snx_ir_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Case* instruction);
+int snx_ir_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Decoded* instruction);
 /* The case's first operand of a flow instruction: the i1 condition of BC, the i64 target of BR/BLR/RET, the i32
    immediate of SVC/BRK */
-LLVMValueRef snx_ir_flow_operand(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Case* instruction);
-int snx_ir_simd_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Pattern* pattern, size_t index);
+LLVMValueRef snx_ir_flow_operand(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Decoded* instruction);
 int snx_ir_fp_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Pattern* pattern, size_t index);
 /* snx_a64_fast_simd's shortcuts: 1 when it emitted the instruction */
 int snx_ir_fast_simd(SnxIr* ir, SnxU32 word);
-/* encodings of the SIMD patterns snx_simd handles that the backend also emits inline, with snx_simd's semantics
-   (loads/stores, permutes, byte ops, immediates; AES and PMULL where CPUID shows the x86 extensions) */
+/* the SIMD patterns the C reference hands to snx_simd, emitted inline with the same semantics (loads/stores,
+   permutes, byte ops, immediates; AES and PMULL where CPUID shows the x86 extensions); 0 is an invalid encoding */
 int snx_ir_more_simd(SnxIr* ir, SnxU32 word);
 
 /* ---- floating point fast paths (ir_fp.c) ----
@@ -210,6 +251,13 @@ void ir_fp_step_fast(SnxIr* ir, unsigned rsqrt, unsigned width, unsigned lanes, 
 void ir_fp_narrow_fast(SnxIr* ir, unsigned from, unsigned lanes, LLVMValueRef bits, unsigned odd, SnxFpFast* out);
 /* one lane through snx_fp_convert from from bits to half that width, rounded per FPCR or (odd) to odd (result i64) */
 LLVMValueRef ir_fp_narrow(SnxIr* ir, LLVMValueRef bits, unsigned from, unsigned odd);
+/* one lane through snx_fp_convert from from bits (16 or 32) to twice that width: exact, so the rounding mode
+   only reaches the helper's flush-to-zero and NaN processing (result i64) */
+LLVMValueRef ir_fp_wide(SnxIr* ir, LLVMValueRef bits, unsigned from);
+/* one lane through snx_fp_round (FRINT*), rounding to integral: mode 0-4 fixed by the encoding (SNX_IR_FP_RM_FPCR
+   for FRINTX and FRINTI, by the FPCR), exact raising the inexact flag (FRINTX). Result i64 */
+#define SNX_IR_FP_RM_FPCR 5
+LLVMValueRef ir_fp_round_to(SnxIr* ir, LLVMValueRef bits, unsigned width, unsigned mode, unsigned exact);
 /* one lane through the helpers: snx_fp_binary, snx_fp_unary, snx_fp_to_int and snx_fp_from_int (result i64) */
 LLVMValueRef ir_fp_binary(SnxIr* ir, LLVMValueRef a, LLVMValueRef b, unsigned width, unsigned op);
 LLVMValueRef ir_fp_unary(SnxIr* ir, LLVMValueRef bits, unsigned width, unsigned op);
@@ -294,7 +342,11 @@ void ir_undef(SnxIr* ir, SnxU64 pc, SnxU32 word); /* c->rt->undef(c,pc,w) */
 void ir_fence(SnxIr* ir);                         /* SNX_FENCE() */
 void ir_yield(SnxIr* ir);                         /* YIELD() */
 /* branch weights: the condition is expected false (UNLIKELY) */
+/* Optional offline branch profile: entries are keyed by guest PC and exact word.
+   No profile means the existing LLVM branch prediction stays unchanged. */
+void ir_profile_branch(SnxIr* ir, LLVMValueRef branch, SnxU64 pc, SnxU32 word);
 void ir_unlikely(SnxIr* ir, LLVMValueRef branch);
+void ir_likely(SnxIr* ir, LLVMValueRef branch);
 /* a call to an LLVM intrinsic, overloaded on type (NULL: not overloaded) */
 LLVMValueRef ir_intrinsic(SnxIr* ir, const char* name, LLVMTypeRef type, LLVMValueRef* args, unsigned count);
 /* memory effects of a declared function: none (pure), or only memory reached through its pointer arguments */
