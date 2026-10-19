@@ -116,13 +116,6 @@ setting Anisotropic filtering
     startup
     words Game's|#x
     help 0 = textures filtered as the game asks, 2 to 16 = sharper surfaces seen at an angle
-setting Asynchronous shaders
-    key async_pipelines
-    int 0 1
-    default 0
-    words Off|On
-    help 1 = a draw whose shaders the GPU driver is still compiling is skipped until they are ready (the thing shows a
-    help moment late); 0 = the game waits for them, and stutters the first time it shows something new
 setting Vulkan Video decode
     key vulkan_video
     label Vulkan Video decode (experimental)

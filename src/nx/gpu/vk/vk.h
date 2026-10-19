@@ -736,11 +736,8 @@ typedef struct {
     u32 feedback; /* VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT, without the dynamic state for it */
     u32 arrays;   /* the sets with texture arrays: its layout, vk_playout(arrays) */
 } PipeKey;
-/* the pipeline for k, made on a worker thread when new: NULL while it is still being made (the draw is skipped), and
-   always once ready. vk_pipeline_get_now waits for it, for what can't be skipped (clears) */
+/* the pipeline for k, made when new and waited for while a worker makes it: NULL only when it can't be made */
 VkPipeline vk_pipeline_get(const PipeKey* k);
-VkPipeline vk_pipeline_get_now(const PipeKey* k);
-u64 vk_pipelines_skipped(void); /* draws skipped so far for a pipeline still being made */
 /* so far: pipelines made, how many of them the pipeline cache had, ms the workers took making them, ms the GPU thread
    waited for new ones, shaders translated, ms translating them */
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms);
