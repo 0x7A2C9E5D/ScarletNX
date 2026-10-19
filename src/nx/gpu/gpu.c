@@ -1010,6 +1010,7 @@ void gpu_channel_close(u32 channel) {
     pm_unlock(&g_qlk);
     dma_snap_reset(channel);
     if (ch) {
+        if (ch->render_pred) g_renderer->render_predicate_drop(ch->render_pred);
         free(ch->inline_indices);
         free(ch->i2m.buf);
         free(ch);

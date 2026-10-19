@@ -88,6 +88,9 @@ typedef struct {
        pipeline flag, and ordered within the pass by a barrier there (dynamicRenderingLocalRead) or else by beginning
        the pass again */
     int has_feedback, has_feedback_dynamic, has_local_read;
+    /* VK_EXT_conditional_rendering: a render enable comparing a samples-passed count not known yet with zero
+       predicates its draws on the GPU (gpu/vk/query.c) instead of waiting for the count */
+    int has_cond_render;
 } VkState;
 extern VkState g_vk;
 
@@ -237,6 +240,10 @@ void rec_CmdSetAttachmentFeedbackLoopEnableEXT(VkCommandBuffer cb, VkImageAspect
 void rec_CmdResetQueryPool(VkCommandBuffer cb, VkQueryPool pool, u32 first, u32 count);
 void rec_CmdBeginQuery(VkCommandBuffer cb, VkQueryPool pool, u32 query, VkQueryControlFlags flags);
 void rec_CmdEndQuery(VkCommandBuffer cb, VkQueryPool pool, u32 query);
+/* vkCmdBeginConditionalRenderingEXT on the word at buf + off, flags its VkConditionalRenderingBeginInfoEXT's */
+void rec_CmdBeginConditionalRenderingEXT(VkCommandBuffer cb, VkBuffer buf, VkDeviceSize off,
+                                         VkConditionalRenderingFlagsEXT flags);
+void rec_CmdEndConditionalRenderingEXT(VkCommandBuffer cb);
 void rec_CmdCopyQueryPoolResults(VkCommandBuffer cb, VkQueryPool pool, u32 first, u32 count, VkBuffer dst,
                                  VkDeviceSize off, VkDeviceSize stride, VkQueryResultFlags flags);
 void rec_CmdSetBlendConstants(VkCommandBuffer cb, const float c[4]);
@@ -385,6 +392,9 @@ typedef struct Surf {
     struct Surf *lru_prev, *lru_next;
     u64 bytes;
     int took_drawn; /* textures: pixels copied from render targets since the last upload (memory may not have them) */
+    /* depth targets: undefined but for draws and clears predicated on the GPU, which may not have run, so they count
+       as no draw (render.c zt_written) */
+    int pred_undefined;
 } Surf;
 enum { VK_LRU_NONE, VK_LRU_TEX, VK_LRU_RT };
 /* resolution= in the .ini: render targets are made this much bigger (read once, at startup) */
@@ -671,6 +681,11 @@ int vk_release_read(u64 gva, void* dst, u64 len);
 extern u64 g_vk_release_forwards;           /* statistics: reads vk_release_read answered */
 extern u64 g_vk_dset_new, g_vk_dset_reused; /* statistics: descriptor sets written, reused for the same contents */
 u32 vk_release_value(u32 id);
+/* renderer.h render_predicate and render_predicate_drop. A predicate is its slot + 1 (query.c), with VK_PRED_EQUAL for
+   a draw when the count is zero */
+#define VK_PRED_EQUAL 0x80000000u
+int vk_render_predicate(u64 a, int equal, u32* pred);
+void vk_render_predicate_drop(u32 pred);
 void vk_release_retire(u32 id);
 void vk_release_drain(void);
 /* query.c: the samples-passed counter with occlusion queries (renderer.h samples_*), under vk_lock. vk_query_draw before
@@ -684,6 +699,19 @@ void vk_query_enable(u32 chan, int on);
 int vk_query_report(u32 chan, u64 gva, u32 len, u64 ticks);
 /* a report performed (release.c): the count of counter's segments [first, end) */
 u64 vk_query_value(u32 counter, u64 first, u64 end);
+#define VK_QUERY_COUNTERS 8 /* query.c's samples-passed counters, a channel's each */
+/* render enable predicates (release.c's vk_render_predicate): a queued report of counter's segments [first, end) gets
+   a predicate slot, held once, that the next vk_query_pred_flush writes (2, *slot set), or its count is known now: 1
+   not zero, 0 zero. -1 when there can be no predicate: the device can't make them, or there's no memory for the
+   batch. The reports of a counter come in their queue order, each with what the one before it in its epoch, still
+   queued, is known to be (prev, ending at prev_end): the count up to there, which it goes on from */
+enum { VK_PRED_PREV_NONE, VK_PRED_PREV_ZERO, VK_PRED_PREV_NONZERO, VK_PRED_PREV_SLOT };
+int vk_query_pred_ok(void); /* the device makes predicates (VK_EXT_conditional_rendering); makes the shader */
+int vk_query_pred_job(u32 counter, u64 first, u64 end, u64 prev_end, int prev, u32 prev_slot, u32* slot);
+int vk_query_pred_flush(void); /* records the batch's shader; 0 without memory, its slots let go */
+void vk_query_pred_hold(u32 slot);
+void vk_query_pred_drop(u32 slot);
+VkBuffer vk_query_pred_buffer(void); /* a predicate's word is at slot * 4 */
 void vk_buf_mem_need_map(u64 gva, u64 len);
 void vk_buf_before_write(u64 gva, u64 len);
 void vk_buf_land(void);

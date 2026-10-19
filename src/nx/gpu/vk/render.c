@@ -170,6 +170,18 @@ static void target_written(Surf* s) {
     vk_surf_wrote(s);
     vk_rt_drawn(s);
 }
+/* a draw or clear wrote the depth target, which was undefined (its layout, before the pass, or still) when that is
+   pred_undefined. One predicated on the GPU may not have run, and depth is never loaded from memory: until a write
+   that surely runs, the target holds nothing a texture may take (tex_take_drawn), as before its first pass. 1 when
+   it counts as written */
+static int zt_written(Surf* zt, u32 pred, int undefined) {
+    if (pred && (undefined || zt->pred_undefined)) {
+        zt->pred_undefined = 1;
+        return 0;
+    }
+    zt->pred_undefined = 0;
+    return 1;
+}
 
 /* A pass with no attachments, for a draw that only captures its vertices (transform feedback with no target): its
    area is as large as a framebuffer may be, so the draw's viewport and scissor fit in it */
@@ -294,9 +306,21 @@ static void plain_state(VkCommandBuffer cb, VkRect2D sc) {
     if (g_vk.has_feedback_dynamic) rec_CmdSetAttachmentFeedbackLoopEnableEXT(cb, VK_IMAGE_ASPECT_NONE);
 }
 
+/* a channel's render enable predicate (gpu.h render_pred, 0 none) around one of its draws or clears, inside the
+   rendering pass they are in: on the GPU, the comparison it holds decides whether they run */
+static void pred_begin(VkCommandBuffer cb, u32 pred) {
+    if (pred)
+        rec_CmdBeginConditionalRenderingEXT(cb, vk_query_pred_buffer(),
+                                            (VkDeviceSize)((pred & ~VK_PRED_EQUAL) - 1) * 4,
+                                            (pred & VK_PRED_EQUAL) ? VK_CONDITIONAL_RENDERING_INVERTED_BIT_EXT : 0);
+}
+static void pred_end(VkCommandBuffer cb, u32 pred) {
+    if (pred) rec_CmdEndConditionalRenderingEXT(cb);
+}
+
 /* a clear of some color components only: a full-screen triangle with that write mask, whose fragment shader writes
-   the cleared slot alone, in the target's number type */
-static int clear_masked(u32 slot, u32 mask, const float* cc, VkRect2D rect, u32 layer) {
+   the cleared slot alone, in the target's number type, run on pred */
+static int clear_masked(u32 slot, u32 mask, const float* cc, VkRect2D rect, u32 layer, u32 pred) {
     static VkShaderModule vs, fs[8][3];
     const VkFmt* f = &g_rp.rt[slot]->f;
     int num = f->is_int ? (f->sint ? 2 : 1) : 0;
@@ -335,7 +359,9 @@ static int clear_masked(u32 slot, u32 mask, const float* cc, VkRect2D rect, u32 
     memcpy(&pc[4], cc, 16); /* the register bits, read as the shader's vec4, uvec4 or ivec4 */
     rec_CmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
     vk_query_pass_end(cb); /* a clear passes no samples on the console: its draw here isn't counted */
+    pred_begin(cb, pred);
     rec_CmdDraw(cb, 3, 1, 0, 0);
+    pred_end(cb, pred);
     return 1;
 }
 
@@ -390,6 +416,7 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
         if (slot >= (ctl & 15) || ((ctl >> (4 + slot * 3)) & 7) != slot)
             LOG_LIMIT(1, "vulkan: a clear of color slot %u under RT_CONTROL %08x\n", slot, ctl);
     }
+    int zt_undefined = zt && zt->layout == VK_IMAGE_LAYOUT_UNDEFINED;
     if (!render_begin(rt, zt, n, 0, r[0x56E] & 1, 0)) return;
     u32 layers = ~0u;
     for (u32 i = 0; i < g_rp.n; i++)
@@ -431,7 +458,7 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
                 memcpy(at[na].clearValue.color.float32, cc, 16);
             na++;
         } else {
-            if (clear_masked(slot, mask, cc, rect.rect, layer)) target_written(g_rp.rt[slot]);
+            if (clear_masked(slot, mask, cc, rect.rect, layer, ch->render_pred)) target_written(g_rp.rt[slot]);
         }
     }
     if ((v & 3) && zt) {
@@ -446,21 +473,24 @@ void vk_render_clear(GpuChannel* ch, u32 v) {
     }
     if (na) {
         int color_clear = mask == 15 && slot < g_rp.n && g_rp.rt[slot];
+        pred_begin(vk_cmd(), ch->render_pred);
         rec_CmdClearAttachments(vk_cmd(), na, at, 1, &rect);
+        pred_end(vk_cmd(), ch->render_pred);
+        /* a predicated clear may not run: it covers no target whole */
         if (color_clear) {
             Surf* s = g_rp.rt[slot];
             vk_surf_wrote(s);
-            if (s->layers == 1 && rect.rect.offset.x == 0 && rect.rect.offset.y == 0 &&
+            if (!ch->render_pred && s->layers == 1 && rect.rect.offset.x == 0 && rect.rect.offset.y == 0 &&
                 rect.rect.extent.width == s->sw && rect.rect.extent.height == s->sh)
                 vk_rt_drawn_full(s);
             else
                 vk_rt_drawn(s);
         }
-        if (na > (u32)color_clear && zt) {
+        if (na > (u32)color_clear && zt && zt_written(zt, ch->render_pred, zt_undefined)) {
             vk_surf_wrote(zt);
             int all_aspects = (v & 1) && (!zt->f.stencil || (v & 2));
-            if (all_aspects && zt->layers == 1 && rect.rect.offset.x == 0 && rect.rect.offset.y == 0 &&
-                rect.rect.extent.width == zt->sw && rect.rect.extent.height == zt->sh)
+            if (!ch->render_pred && all_aspects && zt->layers == 1 && rect.rect.offset.x == 0 &&
+                rect.rect.offset.y == 0 && rect.rect.extent.width == zt->sw && rect.rect.extent.height == zt->sh)
                 vk_rt_drawn_full(zt);
             else
                 vk_rt_drawn(zt);
@@ -2206,6 +2236,7 @@ retry:
             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
         rec_CmdPipelineBarrier2(vk_cmd(), &di);
     }
+    int zt_undefined = zt && zt->layout == VK_IMAGE_LAYOUT_UNDEFINED;
     if (!n && !zt ? !render_begin_empty()
                   : !render_begin(rt, zt, n, zt_ro, r[0x56E] & 1, fb) || !feedback_order(fb, writes)) {
         draw_images_discard(&images);
@@ -2389,6 +2420,7 @@ retry:
         rec_CmdBindTransformFeedbackBuffersEXT(cb, 0, xcount, xbuf, xoff, xsize);
         rec_CmdBeginTransformFeedbackEXT(cb, 0, xcount, from, counter_offs);
     }
+    pred_begin(cb, ch->render_pred);
     if (indexed) {
         rec_CmdBindIndexBuffer(cb, ibuf, ioff, itype);
         /* quads made from guest indices keep the base vertex, quads made from vertex numbers have it in them */
@@ -2396,6 +2428,7 @@ retry:
                          base_instance);
     } else
         rec_CmdDraw(cb, count, instances, first, base_instance);
+    pred_end(cb, ch->render_pred);
     if (xcount) {
         rec_CmdEndTransformFeedbackEXT(cb, 0, xcount, counters, counter_offs);
         ch->xfb_started = (u8)((ch->xfb_started | xbound) & 15);
@@ -2408,7 +2441,8 @@ retry:
     if (fb) g_vk_fb_draws++;
     for (u32 i = 0; i < n; i++)
         if (writes >> i & 1) target_written(g_rp.rt[i]);
-    if (zt && !zt_ro && (r[0x4BA] || (r[0x4E0] && ((r[0x4E7] & 0xFF) || (r[0x565] && (r[0x3D6] & 0xFF))))))
+    if (zt && !zt_ro && (r[0x4BA] || (r[0x4E0] && ((r[0x4E7] & 0xFF) || (r[0x565] && (r[0x3D6] & 0xFF))))) &&
+        zt_written(zt, ch->render_pred, zt_undefined))
         target_written(zt);
     g_vk_drawn++;
 }

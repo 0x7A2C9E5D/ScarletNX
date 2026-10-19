@@ -109,6 +109,9 @@ static void vkr_clear(GpuChannel* ch, u32 v) {
     vk_unlock();
 }
 static void vkr_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 bv, u32 bi, u32 instances) {
+    /* a draw predicated on the GPU (gpu.h render_pred) counts too: whether it runs isn't known here without the wait
+       the predicate is there to avoid, and the counters made up from this (maxwell/engines.c counter_report) only
+       stand in for what the console counts, growing with the work given */
     g_draws++;
     vk_lock();
     vk_render_draw(ch, indexed, topology, first, count, bv, bi, instances);
@@ -719,6 +722,8 @@ const Renderer vk_renderer = {
     .release_need = vk_release_need,
     .release_read = vk_release_read,
     .release_value = vk_release_value,
+    .render_predicate = vk_render_predicate,
+    .render_predicate_drop = vk_render_predicate_drop,
     .release_retire = vk_release_retire,
     .report_stall = vk_report_stall,
     .samples_reset = vkr_samples_reset,

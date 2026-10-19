@@ -91,6 +91,8 @@ typedef struct GpuChannel {
     u64 cbind[5][18];
     u32 cbind_size[5][18];
     int render_off; /* SetRenderEnable (3D 0x554-0x556) or its override (0x651) turned drawing off */
+    u32 render_pred; /* the render enable's comparison is made on the GPU: its draws and clears run on this predicate
+                        (renderer.h render_predicate), 0 for none */
     /* counter reports (3D 0x6C3 operation 2): g_draws at each selector's last reset, and the selectors reset */
     u64 counter_base[32];
     u32 counter_reset;

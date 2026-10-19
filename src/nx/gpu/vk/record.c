@@ -282,6 +282,39 @@ REC3(CmdResetQueryPool, VkQueryPool, u32, u32)
 REC3(CmdBeginQuery, VkQueryPool, u32, VkQueryControlFlags)
 REC2(CmdEndQuery, VkQueryPool, u32)
 REC7(CmdCopyQueryPoolResults, VkQueryPool, u32, u32, VkBuffer, VkDeviceSize, VkDeviceSize, VkQueryResultFlags)
+REC0(CmdEndConditionalRenderingEXT)
+
+/* conditional rendering on the word at buf + off, its begin info made from the arguments */
+typedef struct {
+    VkCommandBuffer cb;
+    VkBuffer buf;
+    VkDeviceSize off;
+    VkConditionalRenderingFlagsEXT flags;
+} CondArgs;
+static void cond_call(VkCommandBuffer cb, VkBuffer buf, VkDeviceSize off, VkConditionalRenderingFlagsEXT flags) {
+    VkConditionalRenderingBeginInfoEXT ci = {.sType = VK_STRUCTURE_TYPE_CONDITIONAL_RENDERING_BEGIN_INFO_EXT,
+                                             .buffer = buf,
+                                             .offset = off,
+                                             .flags = flags};
+    vkCmdBeginConditionalRenderingEXT(cb, &ci);
+}
+static void cond_run(const void* p) {
+    const CondArgs* x = p;
+    cond_call(x->cb, x->buf, x->off, x->flags);
+}
+void rec_CmdBeginConditionalRenderingEXT(VkCommandBuffer cb, VkBuffer buf, VkDeviceSize off,
+                                         VkConditionalRenderingFlagsEXT flags) {
+    if (!rec_on(cb)) {
+        cond_call(cb, buf, off, flags);
+        return;
+    }
+    CondArgs* x = rec_push(cond_run, sizeof *x);
+    x->cb = cb;
+    x->buf = buf;
+    x->off = off;
+    x->flags = flags;
+    rec_commit();
+}
 
 /* ------------------------------------------------------------ commands with arrays, copied after their arguments */
 /* the packet's arrays follow its arguments, each at a multiple of 16 */

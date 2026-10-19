@@ -128,8 +128,12 @@ void query_get(GpuChannel* ch, u32* r, int base, u32 v) {
 static void render_enable_update(GpuChannel* ch) {
     const u32* r = ch->r3d;
     u64 a = ((u64)(r[0x554] & 0xFF) << 32) | r[0x555];
-    u32 mode = r[0x556] & 7;
-    int on = 1;
+    u32 mode = r[0x556] & 7, pred = 0;
+    int on = 1, known;
+    if (ch->render_pred) {
+        g_renderer->render_predicate_drop(ch->render_pred);
+        ch->render_pred = 0;
+    }
     switch (r[0x651] & 3) {
         case 1: on = 1; break; /* ALWAYS */
         case 2: on = 0; break; /* NEVER */
@@ -148,6 +152,15 @@ static void render_enable_update(GpuChannel* ch) {
                     u64 x, y;
                     if (madeup_has(a) || madeup_has(a + 16)) {
                         on = 1;
+                        break;
+                    }
+                    /* NVN's occlusion test, a count against zero: while the count isn't known the GPU compares, and
+                       the draws wait for it there. Reading it here waited for the GPU to run everything recorded
+                       until then, with the GPU idle meanwhile (renderer.h render_predicate) */
+                    known = g_renderer->render_predicate ? g_renderer->render_predicate(a, mode == 3, &pred) : -1;
+                    if (known >= 0) {
+                        on = known != 0;
+                        if (known == 2) ch->render_pred = pred;
                         break;
                     }
                     gmem_read(a, &x, 8);
