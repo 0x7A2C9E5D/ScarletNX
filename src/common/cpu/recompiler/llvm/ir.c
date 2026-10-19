@@ -23,24 +23,30 @@ static int has_feature(const char* features, const char* name) {
     return 0;
 }
 
+/* RISC-V's and LoongArch's: their objects go through the module's own linker (link_elf.c), which takes no relaxation */
+static int riscv_triple(const char* triple) { return !strncmp(triple, "riscv64", 7); }
+static int loongarch_triple(const char* triple) { return !strncmp(triple, "loongarch64", 11); }
+
 int snx_ir_init(char* error, size_t error_size) {
     char* triple;
-    int x86, arm, ppc;
+    int x86, arm, ppc, other;
     /* the asm parser for the runtime library's inline assembly (rtlib.c's divq, cpu.h's compiler barrier) */
     if (LLVMInitializeNativeTarget() || LLVMInitializeNativeAsmPrinter() || LLVMInitializeNativeAsmParser()) {
         snprintf(error, error_size, "LLVM has no code generator for this host");
         return -1;
     }
-    /* x86-64, AArch64 and PowerPC64 hosts: the guest's barriers, acquires, releases and exclusives are fences and
-       seq_cst atomics (cpu.h), so its plain accesses need no ordering of their own from the host. POWER is not
-       multi-copy atomic as ARMv8 is, which only a program ordering plain accesses on three threads without barriers
-       could see; its seq_cst fence (hwsync) is cumulative, as DMB is */
+    /* x86-64, AArch64, PowerPC64, RISC-V and LoongArch hosts: the guest's barriers, acquires, releases and exclusives
+       are fences and seq_cst atomics (cpu.h), so its plain accesses need no ordering of their own from the host. POWER
+       is not multi-copy atomic as ARMv8 is, which only a program ordering plain accesses on three threads without
+       barriers could see; its seq_cst fence (hwsync) is cumulative, as DMB is */
     triple = LLVMGetDefaultTargetTriple();
     x86 = !strncmp(triple, "x86_64", 6);
     arm = !strncmp(triple, "aarch64", 7) || !strncmp(triple, "arm64", 5); /* Apple names AArch64 arm64 */
     ppc = !strncmp(triple, "powerpc64", 9) || !strncmp(triple, "ppc64", 5);
-    if (!x86 && !arm && !ppc)
-        snprintf(error, error_size, "the LLVM backend targets x86-64, AArch64 and PowerPC64 hosts, this one is %s",
+    other = riscv_triple(triple) || loongarch_triple(triple);
+    if (!x86 && !arm && !ppc && !other)
+        snprintf(error, error_size,
+                 "the LLVM backend targets x86-64, AArch64, PowerPC64, RISC-V and LoongArch hosts, this one is %s",
                  triple);
     LLVMDisposeMessage(triple);
     if (x86 && !snx_ir_host.x86) {
@@ -58,7 +64,7 @@ int snx_ir_init(char* error, size_t error_size) {
         LLVMDisposeMessage(f);
         snx_ir_host.x86 = 1; /* last: snx_ir_init may run again, the features stay as read */
     }
-    return x86 || arm || ppc ? 0 : -1;
+    return x86 || arm || ppc || other ? 0 : -1;
 }
 
 static LLVMCodeGenOptLevel codegen_level(char opt) {
@@ -128,8 +134,8 @@ static SnxIr* new_ir(const char* name, char opt, const char* target_triple, int 
         return NULL;
     }
     /* -march=native -mtune=native, -fPIC (toolchain.c). Another triple gets its architecture's baseline: x86-64 with
-       CMPXCHG16B as rtlib is built, POWER8 on PowerPC64, anything else (AArch64) the generic CPU, since an x86 CPU
-       name crashes another target's instruction selection */
+       CMPXCHG16B as rtlib is built, POWER8 on PowerPC64, rv64gc and LA64 below, anything else (AArch64) the generic CPU,
+       since an x86 CPU name crashes another target's instruction selection */
     ppc = !strncmp(triple, "powerpc64", 9) || !strncmp(triple, "ppc64", 5);
     if (!target_triple) {
         cpu = LLVMGetHostCPUName();
@@ -147,6 +153,23 @@ static SnxIr* new_ir(const char* name, char opt, const char* target_triple, int 
     if (ppc && (!strcmp(cpu, "generic") || !strcmp(cpu, "ppc64") || !strcmp(cpu, "ppc64le") || !*cpu)) {
         LLVMDisposeMessage(cpu);
         cpu = LLVMCreateMessage("pwr8");
+    }
+    /* RISC-V and LoongArch: rv64gc and LA64 with double floats at least, as the runtime is built, so a module's float
+       ABI (lp64d) is the runtime's whatever the host reports (qemu-user may report nothing), and no linker relaxation:
+       link_elf.c moves no code, and refuses the ALIGN padding relaxation would have it take out */
+    if (riscv_triple(triple) || loongarch_triple(triple)) {
+        const char* base = riscv_triple(triple) ? "+m,+a,+f,+d,+c" : "+64bit,+f,+d";
+        char* all = (char*)malloc(strlen(base) + strlen(features) + sizeof(",,-relax"));
+        if (all) {
+            sprintf(all, "%s,%s%s-relax", base, features, *features ? "," : "");
+            LLVMDisposeMessage(features);
+            features = LLVMCreateMessage(all);
+            free(all);
+        }
+        if (!*cpu || !strcmp(cpu, "generic")) {
+            LLVMDisposeMessage(cpu);
+            cpu = LLVMCreateMessage(riscv_triple(triple) ? "generic-rv64" : "generic-la64");
+        }
     }
     ir->tm =
         LLVMCreateTargetMachine(target, triple, cpu, features, codegen_level(opt), LLVMRelocPIC, LLVMCodeModelDefault);
