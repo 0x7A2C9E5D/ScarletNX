@@ -32,9 +32,18 @@ static void test_fail(const char* expr, int line) {
 void pm_init(PMutex* m) { pthread_mutex_init(&m->l, NULL); }
 void pm_lock(PMutex* m) { pthread_mutex_lock(&m->l); }
 void pm_unlock(PMutex* m) { pthread_mutex_unlock(&m->l); }
+/* the host page mem.c works in: the suite runs with this host's, then as with 16 and 64 KiB ones (main) */
+static u64 host_page;
+u64 plat_vm_page(void) { return host_page; }
+/* aligned to host_page, a page more reserved for that (the unaligned head and tail stay inaccessible) */
+static u8* reservation;
+static u64 reservation_size;
 u8* plat_vm_reserve(u64 size) {
-    void* p = mmap(NULL, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    return p == MAP_FAILED ? NULL : p;
+    void* p = mmap(NULL, size + host_page, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == MAP_FAILED) return NULL;
+    reservation = (u8*)p;
+    reservation_size = size + host_page;
+    return (u8*)(((uintptr_t)p + host_page - 1) & ~(uintptr_t)(host_page - 1));
 }
 int plat_vm_commit(u8* p, u64 size) {
     if (mapping_begins) CHECK(mapping_depth == 1);
@@ -45,7 +54,12 @@ int plat_vm_commit(u8* p, u64 size) {
 void plat_vm_decommit(u8* p, u64 size) {
     if (mapping_begins) CHECK(mapping_depth == 1);
     decommit_calls++;
+#if defined(__linux__)
     if (madvise(p, size, MADV_DONTNEED) || mprotect(p, size, PROT_NONE)) abort();
+#else
+    /* as plat_posix.c: only Linux's MADV_DONTNEED drops the contents (Darwin's and FreeBSD's keep them) */
+    if (mmap(p, size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0) == MAP_FAILED) abort();
+#endif
 }
 /* no alias pool here: views are copies (memory_alias tests the pool) */
 int plat_alias_init(u64 size) {
@@ -208,7 +222,8 @@ static void test_rollback(void) {
     int decommits = decommit_calls;
     fail_commit_after = 2; /* first hole succeeds, second fails */
     CHECK(svc_map_physical(a, 0x3000) == R_OUTOFMEM);
-    CHECK(decommit_calls == decommits + 1);
+    /* the first hole given back: decommitted, or zeroed where it shares a host page with a + 0x1000 */
+    CHECK(decommit_calls == decommits + (host_page == 0x1000));
     CHECK(g_phys_mapped == 0x1000);
     CHECK(state(a) == MS_FREE && state(a + 0x2000) == MS_FREE);
     CHECK(state(a + 0x1000) == MS_NORMAL && gr32(a + 0x1000) == 0x12345678);
@@ -326,6 +341,29 @@ static void test_map_memory(void) {
     CHECK(mem_unmap(info, 0x1000) == 0);
     CHECK(svc_set_heap_size(0) == 0);
 }
+/* Guest pages sharing a host page: a mapping commits the whole host page, an unmapping zeroes its own pages while a
+   neighbour maps the rest, and decommits the host page with the last of them, so a page mapped again reads zero */
+static void test_host_pages(void) {
+    u64 a = ALIAS_BASE + 0x200000, b = a + 0x1000;
+    int before;
+    base_process();
+    CHECK(mem_map(a, 0x1000, MS_SHARED, PERM_RW) == 0 && mem_map(b, 0x1000, MS_SHARED, PERM_RW) == 0);
+    gw32(a, 0x11111111);
+    gw32(b, 0x22222222);
+    before = decommit_calls;
+    CHECK(mem_unmap(a, 0x1000) == 0 && state(a) == MS_FREE);
+    CHECK(gr32(b) == 0x22222222);
+    if (host_page > 0x1000) {
+        CHECK(decommit_calls == before); /* b still maps the host page: a's part is zeroed instead */
+        CHECK(gr32(a) == 0);
+    }
+    CHECK(mem_map(a, 0x1000, MS_SHARED, PERM_RW) == 0 && gr32(a) == 0);
+    CHECK(mem_unmap(a, 0x2000) == 0 && state(b) == MS_FREE);
+    CHECK(decommit_calls > before);
+    CHECK(mem_map(b, 0x1000, MS_SHARED, PERM_RW) == 0 && gr32(b) == 0);
+    if (host_page > 0x1000) CHECK(gr32(a) == 0); /* free, but in b's host page: committed, and zero */
+    CHECK(mem_unmap(b, 0x1000) == 0);
+}
 /* a service's shared memory: its host buffer until the game maps it, the guest's pages while mapped */
 static void test_shared_memory(void) {
     KShmem* s = kshmem_new(0x2000, "test");
@@ -350,22 +388,30 @@ static void test_shared_memory(void) {
     s->o.destroy(&s->o);
 }
 int main(void) {
-    /* guest memory is mapped and protected in the Switch's 4 KiB pages, which a host with bigger ones (16 KiB on
-       Apple silicon) can't do: what plat_posix.c stops the runtime for there (docs/APPLE.md) */
-    if (sysconf(_SC_PAGESIZE) != 4096) {
-        printf("skipped: this host's pages are %ld bytes, and guest memory needs 4 KiB ones\n", sysconf(_SC_PAGESIZE));
-        return 77;
+    /* this host's pages, then those of hosts with larger ones (16 KiB: Apple silicon, some Android kernels; 64 KiB:
+       PowerPC64 and some AArch64 distributions), which mem.c commits in whole */
+    static const u64 pages[] = {16 << 10, 64 << 10};
+    unsigned i;
+    host_page = (u64)sysconf(_SC_PAGESIZE);
+    for (i = 0; i <= sizeof pages / sizeof *pages; i++) {
+        if (i) {
+            if (pages[i - 1] <= host_page) continue;
+            host_page = pages[i - 1];
+        }
+        mapping_begins = mapping_ends = 0; /* test_mapping_boundary's, from the round before */
+        mem_init();
+        test_heap();
+        test_system_resource();
+        test_rollback();
+        test_locked_shrink();
+        test_shared_budget();
+        test_map_memory();
+        test_shared_memory();
+        test_host_pages();
+        test_mapping_boundary(); /* last: every commit after it must be inside a mapping */
+        CHECK(munmap(reservation, reservation_size) == 0);
+        printf("memory accounting with %llu KiB host pages: %u checks passed\n",
+               (unsigned long long)(host_page >> 10), checks);
     }
-    mem_init();
-    test_heap();
-    test_system_resource();
-    test_rollback();
-    test_locked_shrink();
-    test_shared_budget();
-    test_map_memory();
-    test_shared_memory();
-    test_mapping_boundary(); /* last: every commit after it must be inside a mapping */
-    CHECK(munmap(g_mem, AS_SIZE) == 0);
-    printf("memory accounting: %u checks passed\n", checks);
     return 0;
 }

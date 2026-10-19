@@ -15,6 +15,7 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+#include <unistd.h>
 #endif
 
 /* For FreeBSD and other NIXes */
@@ -43,8 +44,10 @@ static void table_clear(GnuJit* jit, uint64_t first, uint64_t count) {
         begin = stop;
     }
 #else
-    unsigned char* low = (unsigned char*)(((uintptr_t)begin + GNU_PAGE_SIZE - 1) & ~(uintptr_t)(GNU_PAGE_SIZE - 1));
-    unsigned char* high = (unsigned char*)((uintptr_t)end & ~(uintptr_t)(GNU_PAGE_SIZE - 1));
+    /* the host's pages, which madvise and a MAP_FIXED mmap take whole: 16 or 64 KiB on some hosts, not the guest's 4 */
+    uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+    unsigned char* low = (unsigned char*)(((uintptr_t)begin + page - 1) & ~(page - 1));
+    unsigned char* high = (unsigned char*)((uintptr_t)end & ~(page - 1));
     if (low >= high) {
         memset(begin, 0, (size_t)(end - begin));
         return;

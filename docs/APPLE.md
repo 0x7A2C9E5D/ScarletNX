@@ -49,8 +49,10 @@ framework.
 
 ## What is missing
 
-- **16 KiB pages.** Apple silicon's pages are 16 KiB, and the runtime maps and protects guest memory in the Switch's
-  4 KiB pages (`plat_vm_reserve` stops with a message). This is what keeps every game from running on both systems.
+Apple silicon's 16 KiB pages no longer stop the runtime: it commits guest memory in whole host pages, as on
+PowerPC64 ([PowerPC64](./PPC64.md)), and views of memory are copies there, as Windows has them. What still keeps
+games from running:
+
 - **Game modules.** The recompiler links ELF and PE only (`src/common/cpu/recompiler/llvm/link.c`). macOS needs a
   Mach-O dylib, signed. iOS loads no code it did not ship with, so its games would have to be linked into the app
   (`snx_module_static`, `src/nx/runtime/main.c`) or loaded into JIT memory on a device that allows it.

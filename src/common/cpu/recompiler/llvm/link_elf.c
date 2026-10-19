@@ -1,10 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* ELF: x86-64 or AArch64 ET_REL objects into an ET_DYN shared object for Linux, FreeBSD and Android.
+/* ELF: x86-64, AArch64 or PowerPC64 ET_REL objects into an ET_DYN shared object for Linux, FreeBSD and Android.
    Layout: [R: headers, .hash .dynsym .dynstr .rela.dyn, read-only data] [RX: .text] [RW: .data .got .dynamic, .bss].
    Every symbol must be defined by one of the objects; the only dynamic relocations are R_*_RELATIVE, for absolute
-   addresses in writable data and for GOT slots. The two machines' relocation numbers don't overlap (AArch64's start
-   at 257), so one switch takes both. */
+   addresses in writable data and for GOT slots. x86-64's and AArch64's relocation numbers don't overlap (AArch64's
+   start at 257), so one switch takes both; PowerPC64's overlap x86-64's and have their own (ppc_relocate).
+   The objects are in the host's byte order, as the module is linked where it runs: a big-endian PowerPC64 module is
+   linked on a big-endian host. PowerPC64 comes in both of its ABIs, as the objects' e_flags say: ELFv2 (ppc64le, and
+   big-endian musl) and ELFv1 (big-endian glibc), whose function symbols name .opd descriptors (entry, TOC, environment)
+   rather than code. The module has one TOC, so a call never changes r2 and the nop after it stays one. */
 #include "common/cpu/recompiler/llvm/link.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -49,6 +53,9 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
 #ifndef EM_AARCH64
 #define EM_AARCH64 183
 #endif
+#ifndef EM_PPC64
+#define EM_PPC64 21
+#endif
 /* AArch64's, by number: not every <elf.h> has them */
 enum {
     A64_ABS64 = 257,
@@ -71,10 +78,42 @@ enum {
     A64_LD64_GOT_LO12_NC = 312,
     A64_RELATIVE = 1027
 };
+/* PowerPC64's, by number (glibc's <elf.h> defines most of them as PowerPC's 32-bit names) */
+enum {
+    PPC_NONE = 0,
+    PPC_ADDR32 = 1,
+    PPC_ADDR16_LO = 4,
+    PPC_ADDR16_HI = 5,
+    PPC_ADDR16_HA = 6,
+    PPC_REL24 = 10,
+    PPC_REL14 = 11,
+    PPC_RELATIVE = 22,
+    PPC_REL32 = 26,
+    PPC_ADDR64 = 38,
+    PPC_REL64 = 44,
+    PPC_TOC16 = 47,
+    PPC_TOC16_LO = 48,
+    PPC_TOC16_HI = 49,
+    PPC_TOC16_HA = 50,
+    PPC_TOC = 51,
+    PPC_ADDR16_LO_DS = 57,
+    PPC_TOC16_DS = 63,
+    PPC_TOC16_LO_DS = 64,
+    PPC_ENTRY = 118,
+    PPC_PLTSEQ = 119,
+    PPC_PLTCALL = 120,
+    PPC_REL16 = 249,
+    PPC_REL16_LO = 250,
+    PPC_REL16_HI = 251,
+    PPC_REL16_HA = 252
+};
 /* a branch out of B's reach (128 MiB) goes through a veneer, ADRP x16 + ADD x16 + BR x16: the scratch register the
-   procedure call standard gives them. Below this much code every branch reaches, and no object gets veneers */
-#define VENEER      12
-#define VENEER_TEXT (120ull << 20)
+   procedure call standard gives them. Below this much code every branch reaches, and no object gets veneers.
+   PowerPC64's bl reaches 32 MiB; its veneer (ppc_veneer) is four instructions */
+#define VENEER         12
+#define VENEER_TEXT    (120ull << 20)
+#define PPC_VENEER     16
+#define PPC_VENEER_TEXT (30ull << 20)
 
 enum { K_RODATA, K_TEXT, K_DATA, K_BSS, K_COUNT };
 
@@ -98,8 +137,11 @@ typedef struct {
     SnxLinkNames globals;       /* name -> (object << 32 | symbol index) */
     SnxLinkNames got;           /* "object:symbol" of a symbol's definition -> GOT slot */
     SnxLinkNames veneer;        /* "caller:object:symbol" -> the caller's veneer to that definition */
-    unsigned machine, relative; /* EM_X86_64 or EM_AARCH64, and its R_*_RELATIVE */
-    uint64_t page;              /* segment alignment: AArch64 kernels may use 16 or 64 KiB pages */
+    unsigned machine, relative; /* EM_X86_64, EM_AARCH64 or EM_PPC64, and its R_*_RELATIVE */
+    unsigned flags;             /* the objects' e_flags: PowerPC64's ABI (1 ELFv1, 2 ELFv2), 0 elsewhere */
+    uint64_t page;              /* segment alignment: AArch64 kernels may use 16 or 64 KiB pages, PowerPC64's 64 */
+    size_t veneer_size;         /* VENEER or PPC_VENEER */
+    uint64_t toc;               /* PowerPC64: .TOC., the base its TOC16 relocations count from */
     uint64_t kind_size[K_COUNT], kind_align[K_COUNT], kind_address[K_COUNT];
     uint64_t got_address;
     size_t got_count, relative_count;
@@ -117,17 +159,32 @@ static const char* sym_name(const Obj* o, const Elf64_Sym* s) {
     return o->strtab + s->st_name;
 }
 
+/* the byte order of the objects, and of the module: the host's */
+static unsigned char host_data(void) {
+    const uint16_t one = 1;
+    unsigned char first;
+    memcpy(&first, &one, 1);
+    return first ? ELFDATA2LSB : ELFDATA2MSB;
+}
+
 static int parse(Link* l, Obj* o, const SnxLinkInput* input) {
     size_t i;
     o->input = input;
     o->eh = (const Elf64_Ehdr*)input->data;
     if (input->size < sizeof(Elf64_Ehdr) || memcmp(o->eh->e_ident, ELFMAG, SELFMAG) ||
-        o->eh->e_ident[EI_CLASS] != ELFCLASS64 || o->eh->e_ident[EI_DATA] != ELFDATA2LSB || o->eh->e_type != ET_REL ||
-        (o->eh->e_machine != EM_X86_64 && o->eh->e_machine != EM_AARCH64) || o->eh->e_shentsize != sizeof(Elf64_Shdr) ||
+        o->eh->e_ident[EI_CLASS] != ELFCLASS64 || o->eh->e_ident[EI_DATA] != host_data() || o->eh->e_type != ET_REL ||
+        (o->eh->e_machine != EM_X86_64 && o->eh->e_machine != EM_AARCH64 && o->eh->e_machine != EM_PPC64) ||
+        o->eh->e_shentsize != sizeof(Elf64_Shdr) ||
         o->eh->e_shoff + (uint64_t)o->eh->e_shnum * sizeof(Elf64_Shdr) > input->size)
-        return fail(l, "%s: not an x86-64 or AArch64 ELF relocatable object%s", input->name, "");
-    if (!l->machine) l->machine = o->eh->e_machine;
+        return fail(l, "%s: not an x86-64, AArch64 or PowerPC64 ELF relocatable object in this host's byte order%s",
+                    input->name, "");
+    if (!l->machine) {
+        l->machine = o->eh->e_machine;
+        l->flags = o->eh->e_flags;
+    }
     if (o->eh->e_machine != l->machine) return fail(l, "%s: another machine's object%s", input->name, "");
+    if (l->machine == EM_PPC64 && ((o->eh->e_flags & 3) == 2) != ((l->flags & 3) == 2)) /* ELFv1's is 0 or 1 */
+        return fail(l, "%s: another PowerPC64 ABI's object (ELFv1 and ELFv2)%s", input->name, "");
     o->sh = (const Elf64_Shdr*)(input->data + o->eh->e_shoff);
     /* one block, the 8-byte arrays first */
     o->address = (uint64_t*)calloc(o->eh->e_shnum, 2 * sizeof(uint64_t) + sizeof(int));
@@ -206,19 +263,20 @@ static int definition(Link* l, size_t object, size_t index, size_t* def_object, 
         *undefined_weak = 1;
         return 0;
     }
-    if (!strcmp(sym_name(o, s), "_GLOBAL_OFFSET_TABLE_")) {
+    if (!strcmp(sym_name(o, s), "_GLOBAL_OFFSET_TABLE_") || !strcmp(sym_name(o, s), ".TOC.")) {
         *def_object = (size_t)-1;
         return 0;
     }
     return fail(l, "undefined symbol %s (referenced by %s)", sym_name(o, s), o->input->name);
 }
 
-/* final address of a definition; 0 for an absolute symbol's value */
+/* final address of a definition; 0 for an absolute symbol's value. Object -1 is the linker's own symbol: the GOT, or
+   PowerPC64's .TOC. */
 static uint64_t symbol_address(Link* l, size_t object, size_t index, int* absolute) {
     const Obj* o;
     const Elf64_Sym* s;
     *absolute = 0;
-    if (object == (size_t)-1) return l->got_address;
+    if (object == (size_t)-1) return l->machine == EM_PPC64 ? l->toc : l->got_address;
     o = &l->objs[object];
     s = &o->syms[index];
     if (s->st_shndx == SHN_ABS) {
@@ -228,7 +286,8 @@ static uint64_t symbol_address(Link* l, size_t object, size_t index, int* absolu
     return o->address[s->st_shndx] + s->st_value;
 }
 
-static int got_reloc(unsigned type) {
+static int got_reloc(const Link* l, unsigned type) {
+    if (l->machine == EM_PPC64) return 0; /* its objects keep their addresses in their own .toc sections */
     return type == R_X86_64_GOTPCREL || type == R_X86_64_GOTPCRELX || type == R_X86_64_REX_GOTPCRELX ||
            type == A64_ADR_GOT_PAGE || type == A64_LD64_GOT_LO12_NC;
 }
@@ -253,7 +312,7 @@ static uint64_t text_size(const Link* l) {
 /* first pass over relocations: GOT slots, the R_*_RELATIVE count and the veneers each object may need */
 static int scan_relocations(Link* l) {
     size_t i, j, k, def_object, def_index, slot;
-    int weak, far = text_size(l) >= VENEER_TEXT;
+    int weak, far = text_size(l) >= (l->machine == EM_PPC64 ? PPC_VENEER_TEXT : VENEER_TEXT);
     char key[72];
     for (i = 0; i < l->nobjs; ++i) {
         Obj* o = &l->objs[i];
@@ -267,19 +326,25 @@ static int scan_relocations(Link* l) {
             n = s->sh_size / sizeof(Elf64_Rela);
             for (k = 0; k < n; ++k) {
                 unsigned type = ELF64_R_TYPE(r[k].r_info);
+                if (l->machine == EM_PPC64 && (type == PPC_TOC || type == PPC_NONE)) { /* no symbol */
+                    if (type == PPC_TOC) ++l->relative_count; /* .TOC.'s address, in an .opd descriptor */
+                    continue;
+                }
                 if (definition(l, i, ELF64_R_SYM(r[k].r_info), &def_object, &def_index, &weak)) return -1;
-                if (got_reloc(type)) {
+                if (got_reloc(l, type)) {
                     if (weak) return fail(l, "%s: GOT reference to an undefined weak symbol%s", o->input->name, "");
                     got_key(key, def_object, def_index);
                     if (!snx_link_find(&l->got, key, &slot)) {
                         snx_link_insert(&l->got, key, l->got_count++);
                         ++l->relative_count;
                     }
-                } else if ((type == A64_CALL26 || type == A64_JUMP26) && far && !weak && def_object != i &&
-                           def_object != (size_t)-1) {
+                } else if (((l->machine != EM_PPC64 && (type == A64_CALL26 || type == A64_JUMP26) && def_object != i) ||
+                            (l->machine == EM_PPC64 && type == PPC_REL24)) &&
+                           far && !weak && def_object != (size_t)-1) {
                     veneer_key(key, i, def_object, def_index);
                     if (!snx_link_find(&l->veneer, key, &slot)) snx_link_insert(&l->veneer, key, o->veneers++);
-                } else if ((type == R_X86_64_64 || type == A64_ABS64) && !weak) {
+                } else if ((l->machine == EM_PPC64 ? type == PPC_ADDR64 : type == R_X86_64_64 || type == A64_ABS64) &&
+                           !weak) {
                     if (o->kind[s->sh_info] != K_DATA)
                         return fail(l, "%s: absolute address in read-only section %s", o->input->name,
                                     (const char*)o->input->data + o->sh[o->eh->e_shstrndx].sh_offset +
@@ -308,7 +373,7 @@ static void layout_kinds(Link* l) {
             }
             if (k == K_TEXT && o->veneers) { /* right after the object's code, in reach of all of it */
                 o->island = (l->kind_size[k] + 3) & ~(uint64_t)3;
-                l->kind_size[k] = o->island + VENEER * o->veneers;
+                l->kind_size[k] = o->island + l->veneer_size * o->veneers;
             }
         }
 }
@@ -344,6 +409,164 @@ static uint64_t page_of(uint64_t address) { return address & ~(uint64_t)0xFFF; }
 /* whether value fits a signed field of bits */
 static int fits(int64_t value, unsigned bits) {
     return value >= -((int64_t)1 << (bits - 1)) && value < ((int64_t)1 << (bits - 1));
+}
+
+/* PowerPC64 */
+static void put16(unsigned char* p, uint16_t v) { memcpy(p, &v, 2); }
+static uint16_t get16(const unsigned char* p) {
+    uint16_t v;
+    memcpy(&v, p, 2);
+    return v;
+}
+static uint16_t ppc_lo(uint64_t v) { return (uint16_t)v; }
+static uint16_t ppc_hi(uint64_t v) { return (uint16_t)(v >> 16); }
+static uint16_t ppc_ha(uint64_t v) { return (uint16_t)((v + 0x8000) >> 16); }
+/* ELFv2: where a call from code sharing the TOC enters, past the global entry's two instructions that compute r2
+   from r12 (st_other's bits 5-7, the ABI's PPC64_LOCAL_ENTRY_OFFSET) */
+static uint64_t ppc_local_entry(unsigned char other) { return (uint64_t)((1u << ((other >> 5) & 7)) >> 2) << 2; }
+static const char* section_name(const Obj* o, size_t section) {
+    return (const char*)o->input->data + o->sh[o->eh->e_shstrndx].sh_offset + o->sh[section].sh_name;
+}
+/* Where a call to symbol + addend goes. ELFv1: a function symbol names its .opd descriptor, whose first doubleword
+   is the code's address, relocated by the R_PPC64_ADDR64 at the descriptor: that address. Anything else is the
+   symbol's own address (S) plus the addend */
+static int ppc_code(Link* l, size_t object, size_t index, uint64_t S, int64_t A, uint64_t* code) {
+    const Obj* o = &l->objs[object];
+    const Elf64_Sym* sym = &o->syms[index];
+    size_t j, k, def_object, def_index;
+    int weak, absolute;
+    *code = S + (uint64_t)A;
+    if ((l->flags & 3) == 2 || sym->st_shndx >= o->eh->e_shnum || strcmp(section_name(o, sym->st_shndx), ".opd"))
+        return 0;
+    for (j = 0; j < o->eh->e_shnum; ++j) {
+        const Elf64_Rela* r = (const Elf64_Rela*)(o->input->data + o->sh[j].sh_offset);
+        size_t n = o->sh[j].sh_size / sizeof(Elf64_Rela);
+        if (o->sh[j].sh_type != SHT_RELA || o->sh[j].sh_info != sym->st_shndx) continue;
+        for (k = 0; k < n; ++k)
+            if (r[k].r_offset == sym->st_value + (uint64_t)A && ELF64_R_TYPE(r[k].r_info) == PPC_ADDR64) {
+                if (definition(l, object, ELF64_R_SYM(r[k].r_info), &def_object, &def_index, &weak)) return -1;
+                if (weak) break;
+                *code = symbol_address(l, def_object, def_index, &absolute) + (uint64_t)r[k].r_addend;
+                return 0;
+            }
+    }
+    return fail(l, "%s: .opd descriptor of %s without its code", o->input->name, sym_name(o, sym));
+}
+/* a call out of bl's reach, through the caller's veneer: r12 = the target, from r2 (the TOC, the same everywhere),
+   then a jump through the count register. ELFv2's global entry expects its address in r12, as from a pointer */
+static void ppc_veneer(unsigned char* v, uint64_t target, uint64_t toc) {
+    uint64_t offset = target - toc;
+    put32(v, 0x3D820000u | ppc_ha(offset));      /* addis r12, r2, offset@ha */
+    put32(v + 4, 0x398C0000u | ppc_lo(offset));  /* addi r12, r12, offset@l */
+    put32(v + 8, 0x7D8903A6u);                   /* mtctr r12 */
+    put32(v + 12, 0x4E800420u);                  /* bctr */
+}
+enum { PPC_DONE, PPC_RANGE, PPC_MISALIGNED, PPC_UNSUPPORTED, PPC_ERROR };
+/* one PowerPC64 relocation at p (address P) of a symbol at S (weak: undefined) */
+static int ppc_relocate(Link* l, size_t object, unsigned type, unsigned char* p, uint64_t P, uint64_t S, int64_t A,
+                        int weak, int absolute, size_t def_object, size_t def_index, SnxLinkBuffer* rela) {
+    const Obj* o = &l->objs[object];
+    uint64_t value = S + (uint64_t)A, toc_relative = value - l->toc;
+    int64_t relative = (int64_t)(value - P);
+    uint32_t insn;
+    switch (type) {
+        case PPC_NONE:
+        case PPC_ENTRY: /* the linker may rewrite a global entry's TOC setup; it needn't */
+        case PPC_PLTSEQ:
+        case PPC_PLTCALL: /* markers of an inline PLT call sequence, which a module without PLT leaves as it is */
+            return PPC_DONE;
+        case PPC_TOC: /* .TOC., in an ELFv1 descriptor: an absolute address the loader relocates */
+            value = l->toc;
+            /* fall through */
+        case PPC_ADDR64:
+            put64(p, value);
+            if ((type == PPC_TOC || !weak) && !absolute) {
+                Elf64_Rela d;
+                d.r_offset = P;
+                d.r_info = ELF64_R_INFO((Elf64_Xword)0, PPC_RELATIVE);
+                d.r_addend = (int64_t)value;
+                snx_link_append(rela, &d, sizeof(d));
+            }
+            return PPC_DONE;
+        case PPC_REL64: put64(p, value - P); return PPC_DONE;
+        case PPC_REL32:
+            if (relative != (int32_t)relative) return PPC_RANGE;
+            put32(p, (uint32_t)relative);
+            return PPC_DONE;
+        case PPC_REL24: {
+            uint64_t target;
+            if (weak) return PPC_RANGE;
+            if (def_object != (size_t)-1) {
+                const Elf64_Sym* sym = &l->objs[def_object].syms[def_index];
+                if (ppc_code(l, def_object, def_index, S, A, &target)) return PPC_ERROR;
+                if ((l->flags & 3) == 2 && ((sym->st_other >> 5) & 7) == 1) {
+                    fail(l, "%s: a call to %s, which doesn't keep r2 (PC-relative code)", o->input->name,
+                         sym_name(&l->objs[def_object], sym));
+                    return PPC_ERROR;
+                }
+                relative = (int64_t)(target + ((l->flags & 3) == 2 ? ppc_local_entry(sym->st_other) : 0) - P);
+            } else {
+                target = value;
+            }
+            if (!fits(relative, 26)) {
+                char key[72];
+                size_t slot;
+                uint64_t at;
+                veneer_key(key, object, def_object, def_index);
+                if (!snx_link_find(&l->veneer, key, &slot)) return PPC_RANGE;
+                at = l->kind_address[K_TEXT] + o->island + PPC_VENEER * slot;
+                if ((int64_t)(target - l->toc) != (int32_t)(target - l->toc)) return PPC_RANGE;
+                ppc_veneer(p - P + at, target, l->toc); /* the global entry: r12 holds its address */
+                relative = (int64_t)(at - P);
+                if (!fits(relative, 26)) return PPC_RANGE;
+            }
+            memcpy(&insn, p, 4);
+            insn = (insn & ~0x03FFFFFCu) | ((uint32_t)relative & 0x03FFFFFCu);
+            put32(p, insn);
+            return PPC_DONE;
+        }
+        case PPC_REL14:
+            if (!fits(relative, 16)) return PPC_RANGE;
+            memcpy(&insn, p, 4);
+            insn = (insn & ~0xFFFCu) | ((uint32_t)relative & 0xFFFCu);
+            put32(p, insn);
+            return PPC_DONE;
+        /* half16 fields: the relocation's offset is the halfword's own, in either byte order */
+        case PPC_REL16:
+            if (!fits(relative, 16)) return PPC_RANGE;
+            put16(p, ppc_lo((uint64_t)relative));
+            return PPC_DONE;
+        case PPC_REL16_LO: put16(p, ppc_lo((uint64_t)relative)); return PPC_DONE;
+        case PPC_REL16_HI: put16(p, ppc_hi((uint64_t)relative)); return PPC_DONE;
+        case PPC_REL16_HA:
+            if (relative != (int32_t)relative) return PPC_RANGE;
+            put16(p, ppc_ha((uint64_t)relative));
+            return PPC_DONE;
+        case PPC_ADDR16_LO: put16(p, ppc_lo(value)); return PPC_DONE;
+        case PPC_ADDR16_HI: put16(p, ppc_hi(value)); return PPC_DONE;
+        case PPC_ADDR16_HA: put16(p, ppc_ha(value)); return PPC_DONE;
+        case PPC_ADDR16_LO_DS:
+            if (value & 3) return PPC_MISALIGNED;
+            put16(p, (uint16_t)((get16(p) & 3) | (ppc_lo(value) & 0xFFFC)));
+            return PPC_DONE;
+        case PPC_TOC16:
+            if (!fits((int64_t)toc_relative, 16)) return PPC_RANGE;
+            put16(p, ppc_lo(toc_relative));
+            return PPC_DONE;
+        case PPC_TOC16_LO: put16(p, ppc_lo(toc_relative)); return PPC_DONE;
+        case PPC_TOC16_HI: put16(p, ppc_hi(toc_relative)); return PPC_DONE;
+        case PPC_TOC16_HA:
+            if ((int64_t)toc_relative != (int32_t)toc_relative) return PPC_RANGE;
+            put16(p, ppc_ha(toc_relative));
+            return PPC_DONE;
+        case PPC_TOC16_DS:
+        case PPC_TOC16_LO_DS: /* DS form: the low two bits are the instruction's own */
+            if (toc_relative & 3) return PPC_MISALIGNED;
+            if (type == PPC_TOC16_DS && !fits((int64_t)toc_relative, 16)) return PPC_RANGE;
+            put16(p, (uint16_t)((get16(p) & 3) | (ppc_lo(toc_relative) & 0xFFFC)));
+            return PPC_DONE;
+        default: return PPC_UNSUPPORTED;
+    }
 }
 
 /* the output's section headers, for tools: debuggers and objdump find the code and the symbols */
@@ -398,8 +621,9 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
     if (!l.objs || !export_address) goto done;
     for (i = 0; i < count; ++i)
         if (parse(&l, &l.objs[i], &inputs[i])) goto done;
-    l.relative = l.machine == EM_AARCH64 ? A64_RELATIVE : R_X86_64_RELATIVE;
-    l.page = l.machine == EM_AARCH64 ? 0x10000 : 0x1000;
+    l.relative = l.machine == EM_AARCH64 ? A64_RELATIVE : l.machine == EM_PPC64 ? PPC_RELATIVE : R_X86_64_RELATIVE;
+    l.page = l.machine == EM_X86_64 ? 0x1000 : 0x10000;
+    l.veneer_size = l.machine == EM_PPC64 ? PPC_VENEER : VENEER;
     if (collect_globals(&l) || scan_relocations(&l)) goto done;
     layout_kinds(&l);
     /* dynamic symbol names */
@@ -424,6 +648,8 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
     l.kind_address[K_DATA] = data_off;
     l.kind_address[K_BSS] = bss_off;
     l.got_address = got_off;
+    /* PowerPC64's TOC16 relocations reach 2 GiB either side of it in pairs (@ha, @l): the whole module */
+    l.toc = data_off + 0x8000;
     for (i = 0; i < count; ++i)
         for (j = 0; j < l.objs[i].eh->e_shnum; ++j)
             if (l.objs[i].kind[j] >= 0)
@@ -470,9 +696,24 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
                 size_t slot;
                 uint64_t got;
                 if (type != R_X86_64_NONE && r[k].r_offset + 4 > o->sh[s->sh_info].sh_size) goto bad;
+                p = out.data + P;
+                if (l.machine == EM_PPC64 && (type == PPC_TOC || type == PPC_NONE)) { /* no symbol */
+                    ppc_relocate(&l, i, type, p, P, 0, A, 0, 0, (size_t)-1, 0, &rela);
+                    continue;
+                }
                 if (definition(&l, i, ELF64_R_SYM(r[k].r_info), &def_object, &def_index, &weak)) goto done;
                 if (!weak) S = symbol_address(&l, def_object, def_index, &absolute);
-                p = out.data + P;
+                if (l.machine == EM_PPC64) {
+                    switch (ppc_relocate(&l, i, type, p, P, S, A, weak, absolute, def_object, def_index, &rela)) {
+                        case PPC_DONE: continue;
+                        case PPC_RANGE: goto range;
+                        case PPC_MISALIGNED: goto misaligned;
+                        case PPC_UNSUPPORTED:
+                            snprintf(error, error_size, "%s: unsupported relocation type %u", o->input->name, type);
+                            goto done;
+                        default: goto done;
+                    }
+                }
                 switch (type) {
                     case R_X86_64_NONE: break;
                     case R_X86_64_64:
@@ -776,12 +1017,13 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
     memset(&eh, 0, sizeof(eh));
     memcpy(eh.e_ident, ELFMAG, SELFMAG);
     eh.e_ident[EI_CLASS] = ELFCLASS64;
-    eh.e_ident[EI_DATA] = ELFDATA2LSB;
+    eh.e_ident[EI_DATA] = host_data();
     eh.e_ident[EI_VERSION] = EV_CURRENT;
     eh.e_ident[EI_OSABI] = ELFOSABI_NONE;
     eh.e_type = ET_DYN;
     eh.e_machine = (Elf64_Half)l.machine;
     eh.e_version = EV_CURRENT;
+    eh.e_flags = l.machine == EM_PPC64 ? l.flags : 0; /* PowerPC64's ABI, which the loader checks */
     eh.e_phoff = sizeof(Elf64_Ehdr);
     eh.e_ehsize = sizeof(Elf64_Ehdr);
     eh.e_phentsize = sizeof(Elf64_Phdr);

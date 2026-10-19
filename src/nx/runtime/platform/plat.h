@@ -54,7 +54,12 @@ i64 plat_unix_time(void); /* seconds since 1970 UTC */
 i64 plat_tz_offset(void); /* local time minus UTC, in seconds */
 
 /* ---- the guest's address space */
-u8* plat_vm_reserve(u64 size); /* inaccessible until committed; NULL on failure */
+/* The host's page, which the reservation is committed, decommitted and aliased in: 4 KiB, the Switch's own, on x86-64
+   and most AArch64 systems, 16 KiB on Apple silicon and some Android kernels, 64 KiB on most PowerPC64 and some
+   AArch64 distributions (mem.c). SNX_HOST_PAGE in the environment, a larger power of two up to 1 MiB, makes a host
+   with smaller pages work in those, to test the larger pages' paths on any machine */
+u64 plat_vm_page(void);
+u8* plat_vm_reserve(u64 size); /* aligned to plat_vm_page, inaccessible until committed; NULL on failure */
 int plat_vm_commit(u8* p, u64 size);       /* readable and writable; 0, or -1 */
 void plat_vm_decommit(u8* p, u64 size);    /* inaccessible again, and zero when committed next */
 /* Calls cb for each run of pages in [p, p + size) written since they were last scanned, and watches them again.
@@ -65,7 +70,9 @@ int plat_ww_scan(u8* p, u64 size, void (*cb)(u8* p, u64 size));
 /* The alias pool: one host memory object whose pages can be mapped at several addresses of the reservation at once,
    and outside it, so two guest addresses (MapMemory's view and its source, code memory's owner and slave, shared
    memory and its service) are the same pages. Linux and Android (a memfd); elsewhere plat_alias_init says -1 and
-   mem.c copies instead. Offsets and sizes are whole 4 KiB pages, and mem.c hands the offsets out */
+   mem.c copies instead. Offsets and sizes are whole 4 KiB pages, and mem.c hands the offsets out. mem.c only uses the
+   pool with 4 KiB host pages: a view of other pages needs its address and its pool offset at the same place in a host
+   page, and the game picks its addresses in 4 KiB steps */
 int plat_alias_init(u64 size); /* 0, or -1 when the host has no pool */
 /* the pool's [off, off + size) at p in the reservation, readable and writable, written-page tracking kept: 0, or -1 */
 int plat_alias_map(u8* p, u64 off, u64 size);

@@ -47,7 +47,8 @@ u32 snx_crc32(u32 acc, u64 val, int bytes, int castagnoli) {
 /* STXP of two doublewords: one atomic compare-and-swap of all 16 bytes. Swapping the halves one at a time let
    Tears of the Kingdom's lock-free lists pair one thread's pointer with another's counter. Clang emits
    lock cmpxchg16b with cx16 enabled (the builds also pass -mcx16: Clang 18 still called libatomic with the
-   attribute alone), and LDAXP/STLXP on AArch64; GCC makes it a libatomic call, which a module can't link. */
+   attribute alone), LDAXP/STLXP on AArch64, and lqarx/stqcx. on PowerPC64 from POWER8 (cmake/cross.cmake's
+   -mcpu=power8); GCC makes it a libatomic call, which a module can't link. */
 #ifndef __clang__
 #error "the CPU helpers need Clang: GCC turns the 16-byte compare-and-swap into a libatomic call"
 #endif

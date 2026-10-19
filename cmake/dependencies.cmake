@@ -113,13 +113,15 @@ endif()
 
 set(SNX_SDL3_FROM_SOURCE OFF)
 if((SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY AND NOT SNX_HACTOOL_ONLY) OR SNX_BUILD_GUI OR SNX_BUILD_3DS)
-    # Prefer a compatible system package. CPM handles the pinned static fallback and user overrides.
+    # Prefer a compatible system package. CPM handles the pinned static fallback and user overrides. SDL_ALTIVEC only
+    # changes PowerPC builds: SDL's AltiVec blitters prefetch with dstt, which the ISA phased out and qemu's POWER10
+    # traps as illegal (the window icon's and the menu's software surfaces, which nothing here needs fast)
     CPMFindPackage(NAME SDL3 VERSION 3.4.18 FIND_PACKAGE_ARGUMENTS CONFIG
                    URL https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.18.tar.gz
                    URL_HASH SHA256=c4b08b950bd29d83caae0ab8d884298d27046a9d30700fb42841c50992665c90
                    EXCLUDE_FROM_ALL YES SYSTEM YES
                    OPTIONS "SDL_SHARED OFF" "SDL_STATIC ON" "SDL_TEST_LIBRARY OFF" "SDL_TESTS OFF"
-                           "SDL_EXAMPLES OFF" "SDL_INSTALL OFF" "SDL_UNIX_CONSOLE_BUILD ON")
+                           "SDL_EXAMPLES OFF" "SDL_INSTALL OFF" "SDL_UNIX_CONSOLE_BUILD ON" "SDL_ALTIVEC OFF")
     if(SDL3_ADDED)
         set(SNX_SDL3_FROM_SOURCE ON)
         snx_quiet(SDL3-static)

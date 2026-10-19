@@ -34,8 +34,8 @@ elseif(APPLE) # the architecture, SDK and oldest system version (cmake/apple.cma
     # Apple's headers fortify an optimized compile on their own, which makes memcpy, memmove and memset macros for the
     # __*_chk functions: libc.inc's definitions would not parse, and a module links no C library to have those
     set(snx_rtlib_flags ${SNX_APPLE_FLAGS} -D_FORTIFY_SOURCE=0)
-else()
-    set(snx_rtlib_flags "")
+else() # a Linux cross build's target and sysroot, and the CPU baseline (cmake/cross.cmake)
+    set(snx_rtlib_flags ${SNX_TARGET_FLAGS})
 endif()
 list(APPEND snx_rtlib_flags -O2 -fvisibility=hidden -fno-strict-aliasing -fwrapv -w -fno-semantic-interposition
     -foptimize-sibling-calls -fno-stack-protector)

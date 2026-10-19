@@ -175,7 +175,11 @@ if(BUILD_TESTING)
     add_executable(snx-test-gui-process "${PROJECT_SOURCE_DIR}/tests/gui_process.c")
     target_link_libraries(snx-test-gui-process PRIVATE snx_gui_support scarletnx-common)
     add_test(NAME gui_process_tree COMMAND snx-test-gui-process)
+    # qemu-user answers /proc/<pid>/stat for its own process with no resident size, which the test measures
     set_tests_properties(gui_process_tree PROPERTIES TIMEOUT 30)
+    if(CMAKE_CROSSCOMPILING_EMULATOR)
+        set_tests_properties(gui_process_tree PROPERTIES DISABLED TRUE)
+    endif()
     add_executable(snx-test-gui-sdl "${PROJECT_SOURCE_DIR}/tests/gui_sdl.c")
     # a language of its own (tests/po), not the menu's: the screens' checks hold whatever po/ has
     snx_gui_languages(snx_gui_languages_test "${PROJECT_SOURCE_DIR}/tests/po"

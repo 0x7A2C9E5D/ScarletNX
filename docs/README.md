@@ -9,6 +9,7 @@ New here? Start with [Build](./BUILD.md), then [Usage](./USAGE.md).
 - **[GUI launcher](./GUI.md)** - the menu and its themes
 - **[Android](./ANDROID.md)**
 - **[macOS and iOS](./APPLE.md)**
+- **[PowerPC64](./PPC64.md)**
 - **[Development](./DEVELOPMENT.md)** - tests and diagnostics
   - **[edenprobe](./EDENPROBE.md)** - hardware probes CI runs against a baseline
 - **[Deprecations](./DEPRECATIONS.md)** - what an older version used, and how it goes away
