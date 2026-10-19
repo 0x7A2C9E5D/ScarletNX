@@ -7,6 +7,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#ifndef _WIN32
+#include <signal.h>
+#include <unistd.h>
+#endif
 
 /* guest memory: one window, enough for every case's accesses */
 #define SNX_A64P_WINDOW 0x4000u
@@ -332,8 +336,33 @@ static int snx_a64p_current(void) {
     return same;
 }
 
+#ifndef _WIN32
+/* a case that kills the runner names itself on the way out, with write() alone (a signal handler's) */
+static void snx_a64p_say(const char* s) {
+    if (s && write(2, s, strlen(s)) < 0) return;
+}
+static void snx_a64p_died(int sig) {
+    char number[4] = {(char)('0' + sig / 10 % 10), (char)('0' + sig % 10), '\n', 0};
+    snx_a64p_say("FAIL ");
+    snx_a64p_say(snx_a64p_name ? snx_a64p_name : "(before the first case)");
+    snx_a64p_say(" [");
+    snx_a64p_say(snx_a64p_path ? snx_a64p_path : "-");
+    snx_a64p_say("]: the runner died of signal ");
+    snx_a64p_say(number);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+#endif
+
 int main(void) {
     int cases, minmax, fixed;
+#ifndef _WIN32
+    signal(SIGSEGV, snx_a64p_died);
+    signal(SIGBUS, snx_a64p_died);
+    signal(SIGILL, snx_a64p_died);
+    signal(SIGFPE, snx_a64p_died);
+    signal(SIGTRAP, snx_a64p_died);
+#endif
     if (!snx_a64p_current()) return 1;
     cases = snx_a64p_script_run(0);
     snx_a64p_script_run(1);

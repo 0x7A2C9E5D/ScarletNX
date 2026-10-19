@@ -112,6 +112,11 @@ int main(int argc, char** argv) {
             args[1] = NULL;
             status = snx_run(args, directory, NULL, &output);
             if (output) fputs(output, status ? stderr : stdout);
+            /* 128 and up is a signal (snx_run): the runner then names the case it died in, if it could */
+            if (status > 128)
+                fprintf(stderr, "the runner died of signal %d\n", status - 128);
+            else if (status)
+                fprintf(stderr, "the runner exited %d\n", status);
             check(!status, "every ported case on both paths");
         }
     }
