@@ -37,7 +37,7 @@ elseif(APPLE) # the system resolver's DNS servers (network/net_iface.c)
 endif()
 
 # Local wireless for nx's ldn and bsd (network/net_ldn.h): over the LAN, or through an Eden room (network/net_room.h),
-# which is ENet and zstd, fetched for the NX build alone
+# which is ENet and zstd, fetched for the NX build and the tests
 if(TARGET snx_enet)
     add_library(scarletnx-ldn STATIC network/net_ldn.c network/net_room.c)
     target_compile_options(scarletnx-ldn PRIVATE -fno-strict-aliasing -Wall -Wextra -Werror=missing-prototypes)

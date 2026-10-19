@@ -58,8 +58,9 @@ endif()
 
 # ENet (MIT) and zstd (BSD-3-Clause) for ldn's rooms (src/common/network/net_room.c): an Eden room is ENet on UDP,
 # and a game's datagrams in it are zstd frames. ENet's own sources, with the POSIX calls every target but Windows
-# has; zstd's compressor and decompressor alone, in C (no assembly, so every target builds the same)
-if(SNX_BUILD_NX)
+# has; zstd's compressor and decompressor alone, in C (no assembly, so every target builds the same). The tests of
+# the network services link them in a build without the runtime too
+if(NOT SNX_HACTOOL_ONLY AND (SNX_BUILD_NX OR BUILD_TESTING))
     CPMAddPackage(NAME enet VERSION 1.3.18
                   URL https://github.com/lsalzman/enet/archive/refs/tags/v1.3.18.tar.gz
                   URL_HASH SHA256=28603c895f9ed24a846478180ee72c7376b39b4bb1287b73877e5eae7d96b0dd
