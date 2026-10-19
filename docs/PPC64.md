@@ -4,8 +4,8 @@
 
 ScarletNX builds for 64-bit PowerPC Linux from POWER8 on. The little-endian port (ppc64le) works: the test suite
 passes under qemu-user, and Super Haxagon, recompiled under qemu, played a level to its game over screen there with
-lavapipe as the Vulkan driver. No real POWER machine has run it yet. CI cross-builds ppc64le on every push and runs
-the tests under qemu (the `linux-ppc64le` job in `.github/workflows/build.yml`).
+lavapipe as the Vulkan driver. No real POWER machine has run it yet, and CI doesn't build it yet (the `linux-ppc64le`
+job in `.github/workflows/build.yml` is commented out).
 
 The big-endian hosts are not ported yet. Their builds are set up (the `linux-ppc64-cross` preset for Debian's glibc
 port, ELFv1, and `linux-ppc64-musl-cross` for musl, ELFv2), and the recompiler's linker takes both ABIs, but guest
@@ -70,8 +70,8 @@ when mapped again, as on the console. The differences from a 4 KiB host:
   compiled code beside writable data in one host page isn't seen.
 
 `SNX_HOST_PAGE=16384` or `65536` in the environment makes any machine work in those pages, which is how the tests
-and CI check these paths on 4 KiB hosts (`memory_accounting`, `gnuabi_memory_64k_pages`,
-`nx_runtime_homebrew_64k_pages`).
+and CI check these paths on 4 KiB hosts (`ldr_service_64k_pages`, `gnuabi_memory_64k_pages`,
+`nx_runtime_homebrew_64k_pages`); `memory_accounting` runs as on 16 and 64 KiB hosts by itself.
 
 ## What differs from the other hosts
 
