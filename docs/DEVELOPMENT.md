@@ -62,6 +62,14 @@ build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
   JSON (a line a log, versioned by `schema`) or a markdown summary for an issue. Paths are shortened to `~`, and the
   crash report's code and memory dumps are left out. The launcher's Share log puts the same summary at the top of
   `scarletnx.log`. A log is read once, a line at a time, in fixed memory: a gigabyte takes about two seconds.
+- `scarletnx --mcp [--repo DIR]` (`src/nx/runtime/driver/mcp.c`): an MCP server over stdio for an agent looking into a
+  failure on this machine, built into the program so a player's agent has it too. `.mcp.json` starts it for agents
+  opened in the checkout (`build/scarletnx --mcp --repo .`). Its tools: `scan_log` (the summary above), `read_log`
+  (a log's lines holding a text, `|` between alternatives, with context, or a range, or its last lines, only under
+  the data folder and its state, cache and settings folders), `find_game` (the extracted games in `work/` with their
+  title IDs and versions), `symbolize` and `disassemble` (as `tools/symbols.py` and `tools/disasm.py`, A64 through
+  LLVM's disassembler where LLVM has the AArch64 target). The last game loaded stays loaded for the next call. The
+  game reports on GitHub come from GitHub's own MCP server or `scripts/game-reports.py index`.
 - Game reports: `.github/workflows/game-reports.yml` builds `snx-logscan` and runs `scripts/game-reports.py triage` on
   each issue and comment. An issue with a log attached (`.log`, `.txt`, `.gz`, `.zip`) or pasted in a fenced block gets
   one comment with the summary of each, edited as logs are added, the labels `game report` and `log: <how it ended>`,

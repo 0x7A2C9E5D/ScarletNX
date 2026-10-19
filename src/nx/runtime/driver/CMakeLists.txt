@@ -5,7 +5,7 @@ add_library(snx_nx_module STATIC ../../loader/module.c ../../loader/codegen_view
 set_target_properties(snx_nx_module PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_compile_options(snx_nx_module PRIVATE -pedantic-errors -Wall -Wextra -Werror=missing-prototypes)
 target_link_libraries(snx_nx_module PUBLIC scarletnx-common)
-add_library(snx_driver STATIC driver.c extract.c game_name.c recompile.c toolchain.c ../../loader/loader.c)
+add_library(snx_driver STATIC driver.c extract.c game_name.c recompile.c toolchain.c mcp.c ../../loader/loader.c)
 set_target_properties(snx_driver PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_compile_definitions(snx_driver PRIVATE
     SNX_SOURCE_DIR="${CMAKE_SOURCE_DIR}" SNX_BUILD_DIR="${CMAKE_BINARY_DIR}" _CRT_SECURE_NO_WARNINGS
@@ -24,17 +24,23 @@ endif()
 include("${CMAKE_SOURCE_DIR}/cmake/llvm.cmake")
 add_subdirectory("${CMAKE_SOURCE_DIR}/src/common/cpu/recompiler/llvm" llvm-backend)
 # the NX game module through the LLVM backend; C11 for the LLVM-C headers, the driver itself stays C90
-add_library(snx_driver_llvm STATIC ../../loader/module_llvm.c ../../loader/module_arm.c)
+add_library(snx_driver_llvm STATIC ../../loader/module_llvm.c ../../loader/module_arm.c disasm.c)
 set_target_properties(snx_driver_llvm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
 target_compile_options(snx_driver_llvm PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 target_link_libraries(snx_driver_llvm PUBLIC snx_llvm snx_arm_llvm snx_nx_module)
+# scarletnx --mcp's disassembler (disasm.c), where LLVM has its AArch64 target (cmake/llvm.cmake)
+if(SNX_LLVM_A64_DISASM)
+    target_compile_definitions(snx_driver_llvm PRIVATE SNX_A64_DISASM)
+    target_link_libraries(snx_driver_llvm PUBLIC ${SNX_LLVM_DISASM_LIBS})
+endif()
 target_link_libraries(snx_driver PUBLIC snx_driver_llvm)
 # the recompiler as a library (snx_recompiler.h), over the backends configured above
 add_subdirectory("${CMAKE_SOURCE_DIR}/src/common/cpu/recompiler" recompiler-library)
 if(SNX_TOOLS_ONLY)
     add_executable(scarletnx main.c)
+    # linked as C++: LLVM and the demangler (common/utilities/demangle.h) need the C++ runtime
     set_target_properties(scarletnx PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+        LINKER_LANGUAGE CXX RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     target_link_libraries(scarletnx PRIVATE snx_driver)
     if(WIN32)
         if(CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
