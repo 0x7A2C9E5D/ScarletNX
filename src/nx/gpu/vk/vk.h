@@ -5,7 +5,8 @@
    against a Vulkan library.
 
    device.c    instance, device, queues, swapchain, memory allocator (VMA)
-   memory.c    the cap on one allocation, and images bigger than it bound in pieces (sparse binding)
+   memory.c    the cap on one allocation, and images bigger than it bound in pieces (sparse binding); the device
+               memory budget the caches keep within (surface.c vk_mem_trim), and the present clock
    cmd.c       frames in flight: the command buffer being recorded, staging and readback rings, deferred destruction
    record.c    recording the frame's command buffer on a thread of its own
    format.c    guest render target and texture formats -> Vulkan formats
@@ -113,7 +114,19 @@ void vk_mem_init(int sparse_queue);
 /* an image with its memory: one VMA allocation in mem, or, past g_vk.alloc_cap, pieces (mem stays VK_NULL_HANDLE).
    0 on failure. Destroyed with vk_image_destroy (vk_defer_image does that), never vmaDestroyImage */
 int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem);
+/* the same, with the result of the call that failed in res (VK_ERROR_OUT_OF_DEVICE_MEMORY: no memory for it) */
+int vk_image_create_r(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem, VkResult* res);
 void vk_image_destroy(VkImage img, VmaAllocation mem);
+/* The caches of textures, render targets and buffers are kept within the driver's budget for the heap images go to
+   (VK_EXT_memory_budget through VMA; SNX_VK_BUDGET_MB lowers it, for testing): past it the driver pages memory out,
+   which took 160 ms frames and then the device in one game. Ages are kept in presents, and measured in time as well
+   as presents, the frame rate being anything from 5 to 144 a second.
+   vk_mem_use: that heap's use as the caches count it, and its budget. vk_mem_present: at each present, after
+   g_vk_present moved. vk_present_before: the present before which an entry last used then has gone unused for at
+   least ago_ns and at least `presents` presents (0: none has) */
+void vk_mem_use(u64* usage, u64* budget);
+void vk_mem_present(void);
+u32 vk_present_before(u64 ago_ns, u32 presents);
 
 /* cmd.c */
 void vk_cmd_init(void);
@@ -143,6 +156,10 @@ void vk_readback_ready(void);
 void vk_defer_image(VkImage img, VmaAllocation a, VkImageView v1, VkImageView v2);
 void vk_defer_buffer(VkBuffer b, VmaAllocation a);
 void vk_defer_buffer_view(VkBufferView v);
+/* bytes of device memory the resources just deferred release, and all deferred releases still to come: an evicted
+   entry's memory counts as gone from when it is deferred (vk_mem_trim) */
+void vk_defer_bytes(u64 bytes);
+u64 vk_deferred_bytes(void);
 void vk_defer_call(void (*fn)(void*), void* arg); /* fn(arg) then */
 /* the submission being recorded (a number that grows at every submit: what a submit may have changed, results landed,
    is checked against it), and the frame (grows at vk_frame_next: frame f's work is done once f + VK_FRAMES started) */
@@ -362,8 +379,14 @@ typedef struct Surf {
     struct Surf* crop;
     u32 crop_gen;
     struct Surf* next;
-    struct Surf* rt_next; /* real render targets, for overlapping guest-memory writes */
+    /* the recency list it is in (surface.c): textures, render targets (parked ones too), or none (copies, the CPU
+       frame), with the device memory its image takes. A list runs from the least recently used to the most */
+    int lru;
+    struct Surf *lru_prev, *lru_next;
+    u64 bytes;
+    int took_drawn; /* textures: pixels copied from render targets since the last upload (memory may not have them) */
 } Surf;
+enum { VK_LRU_NONE, VK_LRU_TEX, VK_LRU_RT };
 /* resolution= in the .ini: render targets are made this much bigger (read once, at startup) */
 extern float g_vk_scale;
 u32 vk_sc(u32 v);      /* a size or coordinate scaled, at least 1 */
@@ -397,6 +420,7 @@ void vk_gfx_image_put_aside(void);
 int vk_gfx_image_in_flight(int unsubmitted);
 /* the submissions up to sub are done: the write-backs recorded in them land (cmd.c's landing, vk_lock) */
 void vk_gfx_image_frame_done(u64 sub);
+int vk_gfx_image_holds(const Surf* s); /* s has a storage result waiting to land in memory */
 u64 vk_surf_guest_size(const Surf* s);
 int vk_surf_can_writeback(const Surf* s);
 void vk_surf_flush(Surf* s, const u8* original); /* original preserves newer guest writes for storage images */
@@ -424,9 +448,33 @@ void vk_rt_reload(u64 gva);
    target parked or taken back), so what was found there can be kept until it changes */
 extern u32 g_vk_surf_epoch;
 Surf* vk_surf_first(u64 gva);
-void vk_surf_add(Surf* s);
+void vk_surf_add(Surf* s); /* a texture, into the table and the textures' recency list */
+/* s used now: last_used is this present, and it moves to the recent end of its list */
+void vk_surf_touch(Surf* s);
+/* s's pixels can be had again now: off the list of old ones whose pixels would be lost, if it is on it */
+void vk_surf_relist(Surf* s);
 VkImageAspectFlags vk_aspect(const VkFmt* f);
-void vk_surf_evict(u32 before); /* textures and render targets last used before that present */
+/* frees textures (VK_LRU_TEX) or render targets (VK_LRU_RT), the least recently used first, last used before the
+   present `before`, until `want` bytes went. lossy says which: VK_RECLAIM_LOSSLESS only those whose pixels can be had
+   again (textures loaded from memory, render targets memory holds), VK_RECLAIM_IDLE the others too but for a target
+   holding a draw memory lacks, which a texture made at its address takes, VK_RECLAIM_ANY everything. Returns the
+   bytes freed */
+#define VK_RECLAIM_LOSSLESS 0
+#define VK_RECLAIM_IDLE     1
+#define VK_RECLAIM_ANY      2
+u64 vk_surf_reclaim(int kind, u32 before, u64 want, int lossy);
+void vk_surf_stats(int kind, u32* count, u64* bytes, u32* parked);
+/* frees cache entries (surfaces and own buffers), the least recently used first, when the heap's use with `extra`
+   bytes more would be past 90% of its budget: idle lossless ones down to 80%, the lossless working set down to 95%,
+   then lossy ones (vk_surf_reclaim). Only entries unused for the last two presents go, so the caller may hold any
+   surface it used in them. With force (an allocation found no memory), `extra` bytes go even under the marks, less
+   what is being released already, once a present */
+void vk_mem_trim(u64 extra, int force);
+u64 vk_mem_trimmed(void); /* statistics: the bytes vk_mem_trim freed */
+/* vk_image_create for a surface of the caches, with room made for it first (vk_mem_trim). When no memory is found, a
+   forced trim makes room for later, and images as big fail at once for the rest of the present. bytes: the device
+   memory it takes */
+int vk_cache_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem, u64* bytes);
 int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
               double sdy);
 
@@ -597,6 +645,10 @@ int vk_buf_draw_prepare(VkDrawStorage* draw);
 void vk_buf_writable_abort(void);
 void vk_buf_writable_commit(void);
 void vk_buf_mem_need(u64 gva, u64 len);
+/* own buffers last used before the present `before`, the least recently used first, dropped until `want` bytes went
+   (their ranges are copied again when next read). Returns the bytes */
+u64 vk_buf_reclaim(u32 before, u64 want);
+void vk_buf_stats(u32* count, u64* bytes);
 int vk_buf_pending(u64 gva, u64 len); /* a pending graphics result overlaps the range */
 u64 vk_buf_adds(void);                /* graphics results committed so far: as vk_compute_adds */
 int vk_buf_pending_any(void);         /* any graphics result is pending */

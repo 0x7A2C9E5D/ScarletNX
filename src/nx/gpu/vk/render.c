@@ -1072,6 +1072,12 @@ void vk_gfx_image_mem_need(u64 gva, u64 size) {
     g_img_landing = 0;
     vk_unlock();
 }
+/* every entry holds its surface until it lands, its copy recorded or not (image_pending leaves those out) */
+int vk_gfx_image_holds(const Surf* s) {
+    for (size_t i = 0; g_gfx_img_any && i < g_img_count; i++)
+        if (g_img_out[i].surf == s) return 1;
+    return 0;
+}
 int vk_gfx_image_pending(u64 gva, u64 size) {
     int hit = 0;
     if (!g_gfx_img_any || !size) return 0;
@@ -2462,5 +2468,5 @@ void vk_render_draw_texture(GpuChannel* ch) {
                    &b, linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
     vk_surf_wrote(d);
     vk_rt_drawn(d);
-    d->last_used = g_vk_present;
+    vk_surf_touch(d);
 }

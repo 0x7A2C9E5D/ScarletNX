@@ -28,11 +28,36 @@ typedef struct Vb {
     VmaAllocation mem;
     u64 off;
     struct Vb* next;
+    struct Vb *own_prev, *own_next; /* own buffers, from the least recently used to the most (vk_buf_reclaim) */
 } Vb;
-/* buckets of the cache of guest ranges as buffers. Entries live 600 presents after their last use, and draws make new
+/* buckets of the cache of guest ranges as buffers. Entries live twenty seconds after their last use, and draws make new
    ranges all the time: at 4096 buckets the chain walk was most of buf_get's time in one game */
 #define VBH (1u << 16)
 static Vb* g_vbh[VBH];
+static struct {
+    Vb *head, *tail;
+    u32 n;
+    u64 bytes;
+} g_own;
+static void own_link(Vb* e) {
+    e->own_next = NULL;
+    e->own_prev = g_own.tail;
+    if (e->own_prev)
+        e->own_prev->own_next = e;
+    else
+        g_own.head = e;
+    g_own.tail = e;
+}
+static void own_unlink(Vb* e) {
+    if (e->own_prev)
+        e->own_prev->own_next = e->own_next;
+    else
+        g_own.head = e->own_next;
+    if (e->own_next)
+        e->own_next->own_prev = e->own_prev;
+    else
+        g_own.tail = e->own_prev;
+}
 /* Optional copy telemetry. Counters are updated under vk_lock. */
 static u64 g_copy_stage, g_copy_owned, g_copy_uncached, g_copy_zero, g_copy_calls, g_copy_peak, g_read_bound;
 static u64 g_wb_outputs, g_wb_bytes, g_wb_waits, g_wb_wait_ns, g_wb_reuses;
@@ -1089,13 +1114,24 @@ int vk_buf_draw_prepare(VkDrawStorage* draw) {
 
 /* the entry's data where draws read it */
 static void use(Vb* e, VkBuffer* buf, u64* off) {
-    e->used = g_vk_present;
+    if (e->used != g_vk_present) {
+        e->used = g_vk_present;
+        if (e->own) { /* to the recent end */
+            own_unlink(e);
+            own_link(e);
+        }
+    }
     if (copy_stats_on()) g_read_bound += e->len;
     *buf = e->buf;
     *off = e->off;
 }
 static void drop_own(Vb* e) {
-    if (e->own) vk_defer_buffer(e->buf, e->mem);
+    if (e->own) {
+        vk_defer_buffer(e->buf, e->mem);
+        own_unlink(e);
+        g_own.n--;
+        g_own.bytes -= e->len;
+    }
     e->own = 0;
     e->buf = VK_NULL_HANDLE;
 }
@@ -1134,6 +1170,10 @@ static int make_own(Vb* e, const u8* src) {
     e->buf = b;
     e->mem = m;
     e->off = 0;
+    e->used = g_vk_present;
+    own_link(e);
+    g_own.n++;
+    g_own.bytes += len;
     return 1;
 }
 
@@ -1253,9 +1293,24 @@ int vk_buf_get(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_get(gva, 
 /* Constant buffers cannot accept the delayed checks used for stable vertex data: a changed word affects this draw. */
 int vk_buf_get_strict(u64 gva, u64 len, VkBuffer* buf, u64* off) { return buf_get(gva, len, buf, off, 1); }
 
-/* buffers not read for ten seconds go */
+u64 vk_buf_reclaim(u32 before, u64 want) {
+    u64 freed = 0;
+    while (g_own.head && freed < want && (i32)(g_own.head->used - before) < 0) {
+        Vb* e = g_own.head;
+        freed += e->len;
+        drop_own(e); /* the entry stays: its range is copied into a buffer again when next read */
+        vk_defer_bytes(e->len);
+    }
+    return freed;
+}
+void vk_buf_stats(u32* count, u64* bytes) {
+    *count = g_own.n;
+    *bytes = g_own.bytes;
+}
+
+/* buffers not read for twenty seconds, and in 120 presents, go */
 void vk_buf_frame(void) {
-    if (g_vk_present % 60 || g_vk_present < 600) return;
+    if (g_vk_present % 4) return;
     if (copy_stats_on() && g_vk_present % 600 == 0) {
         LOG("vulkan: buffer bytes over 600 presents: uncached=%llu zero=%llu calls=%llu peak=%llu staged=%llu owned=%llu bound=%llu writeback=%llu/%llu waits=%llu/%llums reused=%llu\n",
             (unsigned long long)g_copy_uncached, (unsigned long long)g_copy_zero, (unsigned long long)g_copy_calls,
@@ -1281,12 +1336,14 @@ void vk_buf_frame(void) {
         memset(g_wb_reason_ns, 0, sizeof g_wb_reason_ns);
         memset(g_wb_draw_miss, 0, sizeof g_wb_draw_miss);
     }
-    /* a sixteenth of the buckets each present: an entry goes at most 16 presents after its 600 */
+    /* a sixteenth of the buckets every fourth present: an entry goes at most 64 presents after its time */
     static u32 sweep;
+    u32 before = vk_present_before(20000000000ull, 120);
+    if (!before) return;
     for (u32 k = (sweep++ & 15) * (VBH / 16), kend = k + VBH / 16; k < kend; k++)
         for (Vb** pp = &g_vbh[k]; *pp;) {
             Vb* e = *pp;
-            if ((i32)(e->used - (g_vk_present - 600)) >= 0) {
+            if ((i32)(e->used - before) >= 0) {
                 pp = &e->next;
                 continue;
             }

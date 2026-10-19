@@ -256,7 +256,17 @@ VkFormat vk_srgb_as(VkFormat f, int srgb) {
     return f;
 }
 void vk_surf_add(Surf* s) { (void)s; }
-void vk_surf_evict(u32 before) { (void)before; }
+void vk_surf_touch(Surf* s) { (void)s; }
+void vk_surf_relist(Surf* s) { (void)s; }
+u64 vk_surf_reclaim(int list, u32 before, u64 want, int lossy) {
+    (void)list, (void)before, (void)want, (void)lossy;
+    return 0;
+}
+u32 vk_present_before(u64 ago_ns, u32 presents) {
+    (void)ago_ns, (void)presents;
+    return 0;
+}
+void vk_defer_bytes(u64 bytes) { (void)bytes; }
 Surf* vk_surf_first(u64 gva) {
     (void)gva;
     return NULL;
@@ -286,8 +296,8 @@ VkResult vmaCreateImage(VmaAllocator a, const VkImageCreateInfo* ii, const VmaAl
     (void)a, (void)ii, (void)ai, (void)img, (void)mem, (void)info;
     return VK_ERROR_OUT_OF_DEVICE_MEMORY;
 }
-int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem) {
-    (void)ii, (void)img, (void)mem;
+int vk_cache_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem, u64* bytes) {
+    (void)ii, (void)img, (void)mem, (void)bytes;
     return 0;
 }
 /* the block linear layout: GOBs of 64 bytes by 8 rows in blocks of 1 << bh by 1 << bd GOBs, the GOB's 16 byte groups

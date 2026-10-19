@@ -4,7 +4,9 @@
    GPU; vk_rt_flush writes it back to guest memory when the CPU side needs it (DMA and 2D copies), vk_rt_reload reads
    it again after the CPU side wrote that memory. Games reuse one address for render targets of different sizes and
    formats within a frame: a target whose address is taken by another is parked and reused when its size and format
-   come back. */
+   come back. Textures and render targets are each in a list from the least recently used to the most, which the
+   caches' eviction takes from (vk_surf_reclaim): idle ones, and more when device memory nears its budget
+   (vk_mem_trim, with the budget from gpu/vk/memory.c). */
 #include <stdlib.h>
 #include <string.h>
 #include "nx/gpu/gpu.h"
@@ -19,7 +21,85 @@
 
 #define SURFH 4096
 static Surf* g_surfh[SURFH];
-static Surf* g_rt_first;
+/* The recency lists, from the least recently used to the most: textures (VK_LRU_TEX) and render targets (VK_LRU_RT,
+   parked ones too), each with a second list (LRU_AGED + its own) of the old ones whose pixels would be lost if they
+   went (lossless below), moved there as an eviction that takes only lossless ones passes them. Each stays in the
+   order of last use: what is moved comes from the old end of the first list, older than all left there. A surface
+   used again goes back to the recent end of the first. Both render target lists together are every real target, for
+   overlapping guest-memory writes (vk_rt_before_write) */
+#define LRU_AGED 2
+static struct {
+    Surf *head, *tail;
+} g_lru[5];
+static struct {
+    u32 n;
+    u64 bytes;
+} g_held[3];         /* by VK_LRU_TEX or VK_LRU_RT: the surfaces and their memory */
+static u32 g_parked; /* render targets parked */
+static int lru_kind(const Surf* s) { return s->lru > LRU_AGED ? s->lru - LRU_AGED : s->lru; }
+static void lru_link(Surf* s, int list) {
+    s->lru = list;
+    s->lru_next = NULL;
+    s->lru_prev = g_lru[list].tail;
+    if (s->lru_prev)
+        s->lru_prev->lru_next = s;
+    else
+        g_lru[list].head = s;
+    g_lru[list].tail = s;
+}
+static void lru_unlink(Surf* s) {
+    int list = s->lru;
+    if (s->lru_prev)
+        s->lru_prev->lru_next = s->lru_next;
+    else
+        g_lru[list].head = s->lru_next;
+    if (s->lru_next)
+        s->lru_next->lru_prev = s->lru_prev;
+    else
+        g_lru[list].tail = s->lru_prev;
+    s->lru = VK_LRU_NONE;
+}
+void vk_surf_touch(Surf* s) {
+    if (s->last_used == g_vk_present) return;
+    s->last_used = g_vk_present;
+    if (!s->lru) return;
+    int kind = lru_kind(s);
+    lru_unlink(s);
+    lru_link(s, kind);
+}
+static int lossless(const Surf* s);
+/* s's pixels can be had again now (written back, loaded, or left undefined) and are taken out of the aged list, else
+   a lossless eviction wouldn't find it and the idle one would keep it for five minutes. Into its first list in order
+   of last use: near the old end, as everything there was used after everything aged, past only the others relisted */
+void vk_surf_relist(Surf* s) {
+    if (s->lru <= LRU_AGED || !lossless(s)) return;
+    int kind = lru_kind(s);
+    Surf* at = g_lru[kind].head; /* the first used after s */
+    while (at && (i32)((u32)at->last_used - (u32)s->last_used) <= 0) at = at->lru_next;
+    lru_unlink(s);
+    s->lru = kind;
+    s->lru_next = at;
+    s->lru_prev = at ? at->lru_prev : g_lru[kind].tail;
+    if (s->lru_prev)
+        s->lru_prev->lru_next = s;
+    else
+        g_lru[kind].head = s;
+    if (at)
+        at->lru_prev = s;
+    else
+        g_lru[kind].tail = s;
+}
+static void lru_add(Surf* s, int kind) {
+    s->last_used = g_vk_present;
+    lru_link(s, kind);
+    g_held[kind].n++;
+    g_held[kind].bytes += s->bytes;
+}
+void vk_surf_stats(int kind, u32* count, u64* bytes, u32* parked) {
+    *count = g_held[kind].n;
+    *bytes = g_held[kind].bytes;
+    *parked = kind == VK_LRU_RT ? g_parked : 0;
+}
 static _Thread_local int g_rt_flushing;
 static u32 hkey(u64 a) { return (u32)((a >> 8) ^ (a >> 20)) & (SURFH - 1); }
 
@@ -123,8 +203,9 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     VkViewFormats vf; /* sRGB and linear views */
     vk_view_formats(&ii, &vf);
-    /* a scaled target can pass the allocation cap (4x of 4K is 506 MiB in RGBA8) */
-    if (!vk_image_create(&ii, &s->img, &s->mem)) {
+    /* a scaled target can pass the allocation cap (4x of 4K is 506 MiB in RGBA8). Room is made for it under the
+       budget: the caller holds only surfaces it used this present, which stay */
+    if (!vk_cache_image_create(&ii, &s->img, &s->mem, &s->bytes)) {
         free(s);
         return NULL;
     }
@@ -138,10 +219,7 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
     s->next = g_surfh[k];
     g_surfh[k] = s;
     g_vk_surf_epoch++;
-    if (is_rt) {
-        s->rt_next = g_rt_first;
-        g_rt_first = s;
-    }
+    if (is_rt) lru_add(s, VK_LRU_RT);
     return s;
 }
 
@@ -175,6 +253,7 @@ void vk_surf_add(Surf* s) {
     s->next = g_surfh[k];
     g_surfh[k] = s;
     g_vk_surf_epoch++;
+    lru_add(s, VK_LRU_TEX);
 }
 
 Surf* vk_rt_find(u64 gva) {
@@ -286,6 +365,7 @@ static void rt_loaded(Surf* s) {
     s->mem_wgen = s->wgen; /* memory and image hold the same now: nothing to write back */
     s->draw_wseen = 0;     /* a successful full load starts a new source epoch for later draws */
     s->gw = gpu_mem_generation();
+    vk_surf_relist(s);
 }
 /* the moves of a block linear target's layers: one of every slice of a volume, one a layer of an array (each layer
    at layer_size from the last, where the layout starts again) */
@@ -330,6 +410,7 @@ void vk_rt_reload(u64 gva) {
         s->layout = VK_IMAGE_LAYOUT_UNDEFINED;
         s->draw_wseen = 0;
         s->gw = gpu_mem_generation();
+        vk_surf_relist(s);
         return;
     }
     if (s->bl) {
@@ -487,6 +568,7 @@ static void flush_land(Surf* s, const u8* p, const u8* original, u64 wgen) {
     g_rt_flushing = flushing;
     s->mem_wgen = wgen;
     s->gw = gpu_mem_generation();
+    vk_surf_relist(s);
     if (!s->is_rt) vk_tex_note_writeback(s);
     if (guest_changed) {
         /* The image still holds the shader result where the CPU won the merge. Force the next bind to upload
@@ -501,20 +583,21 @@ static void flush_land(Surf* s, const u8* p, const u8* original, u64 wgen) {
 static u32 rt_pending_over(u64 gva, u64 size, Surf** local, u32 nlocal, Surf*** out) {
     Surf** list = local;
     u32 n = 0, cap = nlocal;
-    for (Surf* s = g_rt_first; s; s = s->rt_next) {
-        if ((s->gva >> 63) || s->gva >= gva + size || s->gva + rt_bytes(s) <= gva || !flush_bytes(s)) continue;
-        if (n == cap) {
-            Surf** grown = (Surf**)malloc((size_t)cap * 2 * sizeof *grown);
-            if (!grown) fatal("Out of memory listing the render targets over %llx", (unsigned long long)gva);
-            memcpy(grown, list, (size_t)n * sizeof *grown);
-            if (list != local) free(list);
-            list = grown;
-            cap *= 2;
+    for (int lru = VK_LRU_RT; lru <= VK_LRU_RT + LRU_AGED; lru += LRU_AGED)
+        for (Surf* s = g_lru[lru].head; s; s = s->lru_next) {
+            if ((s->gva >> 63) || s->gva >= gva + size || s->gva + rt_bytes(s) <= gva || !flush_bytes(s)) continue;
+            if (n == cap) {
+                Surf** grown = (Surf**)malloc((size_t)cap * 2 * sizeof *grown);
+                if (!grown) fatal("Out of memory listing the render targets over %llx", (unsigned long long)gva);
+                memcpy(grown, list, (size_t)n * sizeof *grown);
+                if (list != local) free(list);
+                list = grown;
+                cap *= 2;
+            }
+            u32 i = n++;
+            for (; i && list[i - 1]->wseq > s->wseq; i--) list[i] = list[i - 1];
+            list[i] = s;
         }
-        u32 i = n++;
-        for (; i && list[i - 1]->wseq > s->wseq; i--) list[i] = list[i - 1];
-        list[i] = s;
-    }
     *out = list;
     return n;
 }
@@ -630,7 +713,6 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
         if (s->gva == gva && s->is_rt && s->w == w && s->h == h && s->fkey == fkey && s->bl == bl && s->bh == bh &&
             s->pitch == pitch && s->layers == layers && s->layer_size == layer_size && s->bd == bd &&
             s->volume == volume) {
-            s->last_used = g_vk_present;
             vk_rt_note_read(s);
             return s;
         }
@@ -645,13 +727,14 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
         if (s->gva == gva && s->is_rt) {
             rt_pages(s, -1);
             s->gva = gva | 1ull << 63;
+            g_parked++;
             g_vk_surf_epoch++;
         }
     if (parked) {
         parked->gva = gva;
+        g_parked--;
         g_vk_surf_epoch++;
         rt_pages(parked, 1);
-        parked->last_used = g_vk_present;
         vk_rt_note_read(parked);
         return parked;
     }
@@ -663,7 +746,6 @@ static Surf* rt_create(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, int depth, u32 
     s->volume = volume;
     s->rt_size = rt_bytes(s);
     rt_pages(s, 1);
-    s->last_used = g_vk_present;
     s->gw = gpu_mem_generation();
     /* the CPU may have written the memory already (a cleared or decoded frame): start from it */
     if (!depth) vk_rt_reload(gva);
@@ -683,7 +765,7 @@ Surf* vk_zt_array(u64 gva, u32 w, u32 h, u32 fmt, u32 tile, u32 layers, u64 laye
 }
 
 void vk_rt_note_read(Surf* s) {
-    s->last_used = g_vk_present;
+    vk_surf_touch(s);
     if (!s->is_rt) return;
     /* writes the 3D engine's draws don't see: I2M uploads, constant updates and compute results landing there go
        to memory, which DMA and 2D copies would load (vk_rt_reload) but these don't */
@@ -702,13 +784,16 @@ Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h) {
     /* the one of the frame's size, else any; the most recently used of those */
     Surf* best = NULL;
     int best_exact = 0;
-    for (int k = 0; k < SURFH; k++)
-        for (Surf* s = g_surfh[k]; s; s = s->next) {
-            if (!s->is_rt || s->f.depth || (s->gva >> 63) || s->layout == VK_IMAGE_LAYOUT_UNDEFINED ||
+    for (int list = VK_LRU_RT + LRU_AGED; list >= VK_LRU_RT; list -= LRU_AGED)
+        for (Surf* s = g_lru[list].head; s; s = s->lru_next) {
+            if (s->f.depth || (s->gva >> 63) || s->layout == VK_IMAGE_LAYOUT_UNDEFINED ||
                 gmmu_translate(s->gva) != cpu_addr)
                 continue;
             int exact = s->w == w && s->h == h;
-            if (!best || exact > best_exact || (exact == best_exact && s->last_used > best->last_used)) {
+            /* the lists run to the most recently used: of two used in the same present, the later is the one first
+               used later */
+            if (!best || exact > best_exact ||
+                (exact == best_exact && (i32)((u32)s->last_used - (u32)best->last_used) >= 0)) {
                 best = s;
                 best_exact = exact;
             }
@@ -805,14 +890,13 @@ int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max) {
 /* a surface's image and views go when the frame being recorded is done (descriptors in it may name them) */
 static void surf_free(Surf* s) {
     g_vk_surf_epoch++;
-    if (s->is_rt) {
-        rt_pages(s, -1);
-        for (Surf** pp = &g_rt_first; *pp; pp = &(*pp)->rt_next)
-            if (*pp == s) {
-                *pp = s->rt_next;
-                break;
-            }
+    if (s->lru) {
+        g_held[lru_kind(s)].n--;
+        g_held[lru_kind(s)].bytes -= s->bytes;
+        lru_unlink(s);
     }
+    if (s->is_rt) rt_pages(s, -1);
+    if (s->gva >> 63) g_parked--;
     if (s->in_drawn) {
         for (int i = 0; i < g_ndrawn; i++)
             if (g_drawn[i] == s) {
@@ -832,29 +916,167 @@ static int keeps_drawn(Surf* s) {
     if (!s->is_rt || (s->gva >> 63)) return 0;
     return s->f.depth ? s->layout != VK_IMAGE_LAYOUT_UNDEFINED : vk_rt_drawn_fresh(s);
 }
-void vk_surf_evict(u32 before) {
-    /* A storage image keeps a Surf pointer until its result reaches guest memory. */
-    vk_gfx_image_land();
-    /* render targets too, parked or not: one not drawn, sampled or presented for as long goes with its contents
-       (guest memory has them as of its last write-back). They aren't written to memory as they go: memory is shared
-       by targets the GPU drew over one another, parked and freed ones among them, and by textures and buffers that
-       copied from them on the GPU, and the renderer doesn't know them all. Writing an evicted target's pixels, as
-       a game's Mii icons wanted (drawn at boot, shown a minute later), put older pixels over newer ones in
-       another: a black block over the player character, and red and green blocks over its textures */
-    for (int k = 0; k < SURFH; k++)
-        for (Surf** pp = &g_surfh[k]; *pp;) {
-            Surf* s = *pp;
-            if ((i32)((u32)s->last_used - before) >= 0 || keeps_drawn(s)) {
-                pp = &s->next;
-                continue;
-            }
+/* a surface whose pixels can be had again once it goes. A texture: loaded from memory, unless it took pixels from
+   render targets since. A render target: without defined contents, or with memory holding what it holds (written back
+   or loaded since its last draw, in a format that moves between the two; rt_create loads it again). A parked one too
+   only then: taken out of parking it gives back its own pixels, which memory, written by neither target's draws,
+   doesn't have */
+static int lossless(const Surf* s) {
+    if (!s->is_rt) return !s->took_drawn;
+    if (s->layout == VK_IMAGE_LAYOUT_UNDEFINED) return 1;
+    return !s->f.depth && s->f.raw && s->mem_wgen == s->wgen && moves_scaled(s);
+}
+/* s out of the table and freed, with its copies (gpu/vk/texture.c rt_crop): the device memory that releases */
+static u64 surf_evict(Surf* s) {
+    for (Surf** pp = &g_surfh[hkey(s->gva)]; *pp; pp = &(*pp)->next)
+        if (*pp == s) {
             *pp = s->next;
-            for (Surf *c = s->crop, *n; c; c = n) { /* its copies (gpu/vk/texture.c rt_crop) */
-                n = c->next;
-                surf_free(c);
-            }
-            surf_free(s);
+            break;
         }
+    u64 bytes = s->bytes;
+    for (Surf *c = s->crop, *n; c; c = n) {
+        n = c->next;
+        bytes += c->bytes;
+        surf_free(c);
+    }
+    surf_free(s);
+    vk_defer_bytes(bytes);
+    return bytes;
+}
+u64 vk_surf_reclaim(int kind, u32 before, u64 want, int lossy) {
+    /* A render target goes with its contents: guest memory has them as of its last write-back. They aren't written to
+       memory as they go: memory is shared by targets the GPU drew over one another, parked and freed ones among them,
+       and by textures and buffers that copied from them on the GPU, and the renderer doesn't know them all. Writing an
+       evicted target's pixels, as a game's Mii icons wanted (drawn at boot, shown a minute later), put older pixels
+       over newer ones in another: a black block over the player character, and red and green blocks over its
+       textures. So a target memory doesn't hold goes only under the budget's pressure once nothing lossless is left
+       (vk_mem_trim), or after minutes unused (vk_tex_frame), and then not one holding a draw a texture made at its
+       address later would take (keeps_drawn), which only the budget's pressure takes.
+
+       From the least recently used on, up to the first used since `before`: with lossy, the aged list first, as it
+       holds the oldest of those. A storage image's result still to land holds its surface: those are passed over,
+       a few hundred at most a call */
+    u64 freed = 0;
+    u32 passed = 0;
+    if (lossy)
+        for (Surf *s = g_lru[kind + LRU_AGED].head, *n; s && freed < want && passed < 512; s = n) {
+            n = s->lru_next;
+            if ((i32)((u32)s->last_used - before) >= 0) break;
+            if (lossy == VK_RECLAIM_IDLE && keeps_drawn(s)) continue;
+            if (vk_gfx_image_holds(s))
+                passed++;
+            else
+                freed += surf_evict(s);
+        }
+    for (Surf *s = g_lru[kind].head, *n; s && freed < want && passed < 512; s = n) {
+        n = s->lru_next;
+        if ((i32)((u32)s->last_used - before) >= 0) break;
+        if (!lossy && !lossless(s)) { /* out of the way of the next lossless eviction, held or not, in order */
+            lru_unlink(s);
+            lru_link(s, kind + LRU_AGED);
+        } else if (lossy == VK_RECLAIM_IDLE && keeps_drawn(s))
+            continue;
+        else if (vk_gfx_image_holds(s))
+            passed++;
+        else
+            freed += surf_evict(s);
+    }
+    return freed;
+}
+
+/* ------------------------------------------------------------ the budget */
+static u64 g_trimmed;   /* statistics: bytes freed for the budget */
+static u32 g_trim_dry;  /* the present a trim last found too little to free (+1: 0 is none) */
+static u32 g_forced;    /* the present a failed allocation last forced a trim (+1) */
+static u32 g_oom;       /* the present an image allocation last found no memory (+1) */
+static u64 g_oom_bytes; /* the smallest size that found none in that present */
+u64 vk_mem_trimmed(void) { return g_trimmed; }
+void vk_mem_trim(u64 extra, int force) {
+    u64 usage, budget, need = 0;
+    if (force) {
+        /* once a present: what it frees is released when the frame is done, so a second one this present would
+           find the same shortfall and take more */
+        if (g_forced == g_vk_present + 1) return;
+        g_forced = g_vk_present + 1;
+    } else if (g_trim_dry == g_vk_present + 1)
+        return; /* nothing more to free until the next present */
+    vk_mem_use(&usage, &budget);
+    usage += extra;
+    if (force) { /* the allocation's size, less what evictions before it are releasing already */
+        u64 gone = vk_deferred_bytes();
+        need = extra > gone ? extra - gone : 0;
+    } else if (usage <= budget / 100 * 90)
+        return;
+    /* What goes first is what can be had again without loss: textures (loaded again from memory), own buffers (copied
+       again), then render targets memory holds. Those unused for a second go down to 80% of the budget, room for what
+       comes next. The working set itself (unused for two presents) goes only to stay under 95%: freeing it to 80%
+       when it alone is bigger made one game load hundreds of textures and targets again every 600 presents under a
+       lowered budget, where staying near the budget costs nothing. Render targets whose pixels exist only here
+       (memory has older ones: draws aren't written back, see vk_surf_reclaim) and textures that took such pixels lose
+       them when they go, so they go only when the lossless steps leave the heap past 90%: those unused for five
+       seconds, then, past 95%, those unused for a second and eight presents, the youngest a lossy entry can be. Every
+       step frees the least recently used first */
+    static const struct {
+        u32 ms, presents;
+        int lossy;
+        u32 mark; /* percent of the budget the step frees down to */
+    } steps[] = {{1000, 8, 0, 80}, {0, 2, 0, 95}, {5000, 30, 1, 90}, {1000, 8, 1, 95}};
+    u64 freed = 0, by[3] = {0, 0, 0};
+    int short_of = 0;
+    for (u32 i = 0; i < sizeof steps / sizeof steps[0]; i++) {
+        u64 mark = budget / 100 * steps[i].mark, left = usage > freed ? usage - freed : 0;
+        u64 want = left > mark ? left - mark : 0;
+        if (freed < need && want < need - freed) want = need - freed;
+        if (!want) continue;
+        u32 before = vk_present_before((u64)steps[i].ms * 1000000ull, steps[i].presents);
+        int level = steps[i].lossy ? VK_RECLAIM_ANY : VK_RECLAIM_LOSSLESS;
+        u64 got = vk_surf_reclaim(VK_LRU_TEX, before, want, level);
+        by[0] += got;
+        if (got < want && !steps[i].lossy) {
+            u64 n = vk_buf_reclaim(before, want - got);
+            by[1] += n;
+            got += n;
+        }
+        if (got < want) {
+            u64 n = vk_surf_reclaim(VK_LRU_RT, before, want - got, level);
+            by[2] += n;
+            got += n;
+        }
+        freed += got;
+        short_of = got < want;
+    }
+    g_trimmed += freed;
+    if (short_of) g_trim_dry = g_vk_present + 1;
+    if (freed || short_of)
+        LOG_LIMIT(20,
+                  "vulkan: %llu of %llu MB budgeted in use%s: freed %llu MB of textures, %llu of buffers, %llu of "
+                  "render targets%s\n",
+                  (unsigned long long)(usage >> 20), (unsigned long long)(budget >> 20),
+                  force ? " (an allocation found no memory)" : "", (unsigned long long)(by[0] >> 20),
+                  (unsigned long long)(by[1] >> 20), (unsigned long long)(by[2] >> 20),
+                  short_of ? ", all that could go" : "");
+}
+
+int vk_cache_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem, u64* bytes) {
+    VkDeviceImageMemoryRequirements q = {.sType = VK_STRUCTURE_TYPE_DEVICE_IMAGE_MEMORY_REQUIREMENTS,
+                                         .pCreateInfo = ii};
+    VkMemoryRequirements2 req = {.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
+    VkResult res;
+    vkGetDeviceImageMemoryRequirements(g_vk.dev, &q, &req);
+    *bytes = req.memoryRequirements.size;
+    *img = VK_NULL_HANDLE;
+    *mem = VK_NULL_HANDLE;
+    /* one as big found no memory this present: neither will this one (what was freed meanwhile is released when the
+       frame is done). Its draws go without it until the next present */
+    if (g_oom == g_vk_present + 1 && *bytes >= g_oom_bytes) return 0;
+    vk_mem_trim(*bytes, 0);
+    if (vk_image_create_r(ii, img, mem, &res)) return 1;
+    if (res == VK_ERROR_OUT_OF_DEVICE_MEMORY) {
+        if (g_oom != g_vk_present + 1 || *bytes < g_oom_bytes) g_oom_bytes = *bytes;
+        g_oom = g_vk_present + 1;
+        vk_mem_trim(*bytes, 1); /* room for it by the time it is asked for again, a present or two later */
+    }
+    return 0;
 }
 
 /* A 2D blit whose source is a depth target: the game copies the depth buffer's texels as a color surface of their
@@ -870,6 +1092,7 @@ static int blit_depth(Surf* st, const Surf2D* s, const Surf2D* d, int dx, int dy
     if (vk_rt_format(s->format).bpp != vk_zt_format(fmt).bpp || s->format != d->format || s->width != st->w ||
         s->height < st->h || !blit_ok(st->f.vk, VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT))
         return 0;
+    vk_surf_touch(st); /* used now: making the destination may evict what wasn't */
     dt = vk_zt_array(d->addr, d->width, d->height, fmt, tile, 1, 0);
     if (!dt || dt == st || dt->f.vk != st->f.vk) return 0;
     float S = g_vk_scale;
@@ -903,7 +1126,7 @@ static int blit_depth(Surf* st, const Surf2D* s, const Surf2D* d, int dx, int dy
         vk_rt_drawn_full(dt);
     else
         vk_rt_drawn(dt);
-    dt->last_used = g_vk_present;
+    vk_surf_touch(dt);
     return 1;
 }
 
@@ -915,6 +1138,7 @@ int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, 
     if (st && st->f.depth && st->layout != VK_IMAGE_LAYOUT_UNDEFINED && dw > 0 && dh > 0)
         return blit_depth(st, s, d, dx, dy, dw, dh, sx, sy, sdx, sdy);
     if (!st || st->f.depth || st->layout == VK_IMAGE_LAYOUT_UNDEFINED || dw <= 0 || dh <= 0) return 0;
+    vk_surf_touch(st); /* used now: making the destination may evict what wasn't */
     u32 tile = (d->linear ? 0x1000u : 0) | (d->bh << 4);
     Surf* dt = vk_rt(d->addr, d->width, d->height, d->format, tile, 0, d->pitch);
     if (!dt || dt == st || dt->f.depth || st->f.is_int != dt->f.is_int) return 0;
@@ -953,6 +1177,6 @@ int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, 
         vk_rt_drawn_full(dt);
     else
         vk_rt_drawn(dt);
-    dt->last_used = g_vk_present;
+    vk_surf_touch(dt);
     return 1;
 }

@@ -434,9 +434,11 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
         memcpy(was, is, sizeof was);
         last_present_ns = now_ns;
         g_vk_present++;
-        if (g_last) g_last->last_used = g_vk_present; /* what screenshots read stays */
+        vk_mem_present();
+        if (g_last) vk_surf_touch(g_last); /* what screenshots read stays */
         vk_tex_frame();
         vk_buf_frame();
+        vk_mem_trim(0, 0);
         if (g_vk_present % 600 == 0) {
             char cs_why[256];
             u64 cs_skipped = vk_cs_skipped(cs_why, sizeof cs_why);
@@ -484,6 +486,21 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                                            (unsigned long long)(b[q].usage >> 20),
                                            (unsigned long long)(b[q].budget >> 20));
                 LOG("vulkan: memory used and budgeted:%s\n", line);
+            }
+            {
+                /* what the caches hold, which vk_mem_trim keeps within the budget */
+                u32 nrt, ntex, nbuf, parked, none;
+                u64 brt, btex, bbuf, usage, budget, trimmed;
+                vk_surf_stats(VK_LRU_RT, &nrt, &brt, &parked);
+                vk_surf_stats(VK_LRU_TEX, &ntex, &btex, &none);
+                vk_buf_stats(&nbuf, &bbuf);
+                vk_mem_use(&usage, &budget);
+                trimmed = vk_mem_trimmed();
+                LOG("vulkan: caches: %u render targets (%llu MB, %u parked), %u textures (%llu MB), %u buffers (%llu "
+                    "MB); %llu of %llu MB in use as they count it, %llu MB freed for the budget so far\n",
+                    nrt, (unsigned long long)(brt >> 20), parked, ntex, (unsigned long long)(btex >> 20), nbuf,
+                    (unsigned long long)(bbuf >> 20), (unsigned long long)(usage >> 20),
+                    (unsigned long long)(budget >> 20), (unsigned long long)(trimmed >> 20));
             }
             LOG("vulkan: %llu draws sampled a target they render to in place (%llu barriers in passes, %llu passes "
                 "begun again), %llu through a copy\n",

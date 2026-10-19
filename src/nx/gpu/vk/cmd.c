@@ -46,6 +46,7 @@ typedef struct {
     /* destroyed once this frame's work is done */
     Dead* dead;
     int ndead, capdead;
+    u64 dead_bytes; /* device memory evicted cache entries among them release (vk_defer_bytes) */
     /* descriptor pools, reset when the frame is reused and kept */
     VkDescriptorPool pool_d[64];
     int npool, ipool; /* pool_d[ipool] is the one allocating; the ones after it are reset and waiting */
@@ -59,6 +60,7 @@ typedef struct {
 } Frame;
 
 static Frame g_fr[VK_FRAMES];
+static u64 g_dead_bytes; /* every frame's dead_bytes */
 static u32 g_cur;
 static u32 g_cb_begun = 1; /* command buffers begun, so a command buffer's state is told from an earlier one's */
 static u64 g_frame_id;
@@ -211,6 +213,8 @@ static void frame_recycle(Frame* f) {
         f->hold = 0;
     }
     dead_free(f);
+    g_dead_bytes -= f->dead_bytes;
+    f->dead_bytes = 0;
     vkResetCommandPool(g_vk.dev, f->pool, 0);
     /* the pools stay, reset: a frame's draws fill several, and making them again every frame costs */
     for (int i = 0; i < f->npool; i++) vkResetDescriptorPool(g_vk.dev, f->pool_d[i], 0);
@@ -489,6 +493,11 @@ void vk_defer_buffer(VkBuffer b, VmaAllocation a) {
     vk_cmd();
     dead_push(&g_fr[g_cur], (Dead){.buf = b, .mem = a});
 }
+void vk_defer_bytes(u64 bytes) {
+    g_fr[g_cur].dead_bytes += bytes;
+    g_dead_bytes += bytes;
+}
+u64 vk_deferred_bytes(void) { return g_dead_bytes; }
 void vk_defer_buffer_view(VkBufferView v) {
     vk_cmd();
     dead_push(&g_fr[g_cur], (Dead){.view = v});
