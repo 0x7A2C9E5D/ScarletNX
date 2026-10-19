@@ -33,8 +33,9 @@ typedef pthread_t JitThread;
 #endif
 
 /* What the service knows of a pc. QUEUED_WARM: in the warm queue only. QUEUED: in the misses' queue. IN_FLIGHT: a
-   batch compiles from it. FAILED: it can't be compiled (snx_jit_wait answers NULL), and isn't tried again. GONE: its image
-   was removed (snx_jit_remove_image): the pc is new to the service if code turns up there again */
+   batch compiles from it. FAILED: it can't be compiled (snx_jit_wait answers NULL), and isn't tried again. GONE: the
+   memory it was compiled from changed (snx_jit_invalidate), or its image was removed (snx_jit_remove_image): the pc is
+   new to the service if code turns up there again */
 enum { QUEUED_WARM = 1, QUEUED, IN_FLIGHT, DONE, FAILED, GONE };
 enum { LIVE, WARM, QUEUES }; /* the queues, by priority */
 
@@ -42,7 +43,7 @@ typedef struct {
     SnxU64 key; /* pc | 1 (a pc is 4-aligned), 0 for a free slot */
     GuestFn code;
     int state;
-    SnxU64 epoch; /* take's s->epoch: a publish tells its IN_FLIGHT from a newer batch's */
+    SnxU64 taken; /* IN_FLIGHT: the take that made it so (s->takes), so a batch ends its own pcs only */
 } Entry;
 
 /* pcs to compile, first in first out: a ring that grows on its own */
@@ -55,10 +56,13 @@ typedef struct {
    image added while the game runs (snx_jit_add_image: an NRO's text), whose slots snx_jit_resolve reads, as nothing
    else knows them. A free region has hi 0. lo and hi change under lock and are read without it (hi last, with acquire
    and release ordering), and an added region's arrays live until its removal, which waits for the batches reading its
-   image (users). pending: one bit per instruction, set (under lock, never cleared) once the pc is in the misses'
-   queue, compiling or failed. A guest thread that misses a pc with its bit set and its slot empty gets NULL without
-   the lock: every miss after the first, until the code is published, costs two loads. It also tells discovery,
-   without the lock, which pcs other batches have or will have, so a batch doesn't compile them too */
+   image (users). pending: one bit per instruction, set (under lock) once the pc is in the misses' queue, compiling or
+   failed, and cleared (under lock) when it is none of those any more: invalidated, or a warm pc going back to the warm
+   queue from a dropped batch (compile). A set bit with nothing queued would leave the pc uncompiled for good, as
+   snx_jit_resolve's fast path never takes the lock to queue it. A guest thread that misses a pc with its bit set and
+   its slot empty gets NULL without the lock: every miss after the first, until the code is published, costs two loads.
+   It also tells discovery, without the lock, which pcs other batches have or will have, so a batch doesn't compile them
+   too */
 typedef struct {
     SnxU64 lo, hi;
     GuestFn* slots;
@@ -120,6 +124,7 @@ struct SnxJitService {
     unsigned busy;                      /* batches compiling, under lock */
     int stop;                           /* under lock: the compile threads end */
     SnxU64 epoch;                       /* under lock: incremented by snx_jit_invalidate */
+    SnxU64 takes;                       /* under lock: incremented by each take, which stamps its pcs with it */
     SnxJitStats stats;                  /* under lock */
     JitLock lock;                       /* everything above marked so */
     JitCond work;                       /* signalled when a pc is queued, broadcast at stop */
@@ -853,9 +858,23 @@ static int cache_load(SnxJitService* s, CacheRecord* r, const SnxCodeImage* imag
     return 1;
 }
 
-/* Compiles the batch of pcs (count of them by address, each IN_FLIGHT), publishes the code and ends their entries:
-   DONE with the code that enters at each, or FAILED. A batch of several that fails to emit or load is split, so one pc
-   LLVM or the loader refuses fails alone */
+/* Under lock: a pc of a batch that was dropped back on the queue its take found it in (LIVE or WARM), its pending bit
+   as that queue's pcs have it: set for a miss, clear for a warm pc (snx_jit_warm leaves it so, and a lookup of it then
+   moves it to the misses). FAILED when memory runs out, as snx_jit_resolve does */
+static void requeue(SnxJitService* s, Entry* e, SnxU64 pc, int queue) {
+    Region* r;
+    if (push(&s->queues[queue], pc)) {
+        e->state = FAILED;
+        return;
+    }
+    e->state = queue == LIVE ? QUEUED : QUEUED_WARM;
+    if (queue == WARM && (r = region_of(s, pc)) != NULL) clear_pending(r, pc);
+    cond_signal(&s->work);
+}
+
+/* Compiles the batch of pcs (count of them by address, each IN_FLIGHT, stamped by the take stamp from queue), publishes
+   the code and ends their entries: DONE with the code that enters at each, or FAILED. A batch of several that fails to
+   emit or load is split, so one pc LLVM or the loader refuses fails alone */
 /* Under lock: the images a batch reads, the config's and every added one, which stay readable until images_release
    (snx_jit_remove_image waits for it). NULL when memory runs out */
 static SnxCodeImage* images_take(SnxJitService* s, size_t* count, unsigned char* taken) {
@@ -883,7 +902,7 @@ static void images_release(SnxJitService* s, SnxCodeImage* images, const unsigne
     free(images);
 }
 
-static void compile(SnxJitService* s, const SnxU64* pcs, size_t count) {
+static void compile(SnxJitService* s, const SnxU64* pcs, size_t count, SnxU64 stamp, int queue) {
     SnxCodegen codegen;
     SnxJitReport report;
     SnxLinkInput input;
@@ -899,7 +918,7 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count) {
     Region* r;
     Entry* e;
     Batch batch;
-    int rc, discovered;
+    int rc, discovered, dropped;
     memset(&report, 0, sizeof(report));
     report.pc = pcs[0];
     report.pcs = count;
@@ -972,7 +991,7 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count) {
     if (rc && discovered && count > 1) {
         snx_codegen_free(&codegen);
         if (images) images_release(s, images, taken);
-        for (i = 0; i < count; ++i) compile(s, &pcs[i], 1);
+        for (i = 0; i < count; ++i) compile(s, &pcs[i], 1, stamp, queue);
         free(left);
         return;
     }
@@ -1002,21 +1021,19 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count) {
             }
         }
     }
+    dropped = epoch != s->epoch;
     for (i = 0; i < count; ++i) {
         e = find(s, pcs[i]);
         f = rc ? NULL : snx_codegen_entry(&codegen, pcs[i]);
         code = f ? unit_function(table, (size_t)(f - codegen.functions)) : NULL;
-        if (epoch != s->epoch) {
-            /* memory changed since the code was read: it is stale. This batch's own IN_FLIGHT pcs go, so a waiter
-               re-resolves; one a newer batch took (its take stamped a newer epoch) is that batch's */
-            if (e && e->state == IN_FLIGHT && e->epoch <= epoch) {
-                e->state = GONE;
-                e->code = NULL;
-                /* and the pending bit with it: the lookup's fast path reads a set bit as "queued, wait for it", but
-                   the batch is dropped, so a pc that kept it could never be queued or compiled again (rt_miss's fatal) */
-                r = region_of(s, pcs[i]);
-                if (r && r->pending) clear_pending(r, pcs[i]);
-            }
+        /* a pc another batch took since (invalidated and missed again) is that batch's to end */
+        if (e && e->state == IN_FLIGHT && e->taken != stamp) continue;
+        if (dropped) {
+            /* memory changed since the code was read, so the batch published nothing. A pc of its own still
+               IN_FLIGHT wasn't in the range that changed (snx_jit_invalidate makes those GONE), but the code read with
+               it may have been: it goes back to its queue to be compiled from what is there now. Leaving it IN_FLIGHT,
+               or GONE with its pending bit set, would leave it uncompiled for good */
+            if (e && e->state == IN_FLIGHT) requeue(s, e, pcs[i], queue);
             continue;
         }
         /* its image went while the batch compiled (snx_jit_remove_image clears hi under this lock): gone, not failed */
@@ -1038,11 +1055,18 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count) {
             ++failed;
     }
     report.seconds = snx_seconds() - report.seconds;
+    report.dropped = dropped;
     ++s->stats.batches;
     s->stats.failures += (unsigned long)failed;
+    if (dropped) {
+        ++s->stats.dropped;
+        s->stats.queued = (unsigned long)(s->queues[LIVE].count + s->queues[WARM].count);
+    }
     if (!rc) {
-        s->stats.functions += (unsigned long)report.functions;
-        s->stats.instructions += (unsigned long)report.instructions;
+        if (!dropped) { /* a dropped batch's functions are thrown away, but its code still takes the arena */
+            s->stats.functions += (unsigned long)report.functions;
+            s->stats.instructions += (unsigned long)report.instructions;
+        }
         s->stats.bytes += report.bytes;
     }
     s->stats.seconds += report.seconds;
@@ -1058,14 +1082,17 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count) {
     free(left);
 }
 
-/* Under lock: up to max pcs of the first queue that has any into pcs, made IN_FLIGHT; 0 when both are empty. Skips
-   the pcs a batch compiled while they waited */
-static size_t take(SnxJitService* s, SnxU64* pcs) {
+/* Under lock: up to max pcs of the first queue that has any into pcs, made IN_FLIGHT and stamped with this take, which
+   goes in *taken, and the queue they came from in *queue; 0 when both are empty. Skips the pcs a batch compiled while
+   they waited */
+static size_t take(SnxJitService* s, SnxU64* pcs, SnxU64* taken, int* queue) {
     size_t n = 0, max;
     int q, state;
     SnxU64 pc;
     Entry* e;
+    *taken = ++s->takes;
     for (q = LIVE; q < QUEUES && !n; ++q) {
+        *queue = q;
         max = q == LIVE ? s->config.batch : (s->config.batch + 7) / 8;
         while (n < max && s->queues[q].count) {
             pc = pop(&s->queues[q]);
@@ -1075,7 +1102,7 @@ static size_t take(SnxJitService* s, SnxU64* pcs) {
                to the misses' queue */
             if (!e || e->state != state) continue;
             e->state = IN_FLIGHT;
-            e->epoch = s->epoch;
+            e->taken = *taken;
             set_pending(s, pc);
             pcs[n++] = pc;
         }
@@ -1093,7 +1120,9 @@ static int compare_pc(const void* a, const void* b) {
    for them */
 static void worker(SnxJitService* s) {
     SnxU64* pcs = (SnxU64*)malloc(s->config.batch * sizeof(*pcs));
+    SnxU64 taken;
     size_t n;
+    int queue;
     /* below the guest threads: when the host has no idle CPU, a compile waits, not the game */
 #if defined(__linux__)
     setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 10);
@@ -1102,7 +1131,7 @@ static void worker(SnxJitService* s) {
 #endif
     lock(&s->lock);
     while (pcs && !s->stop) {
-        n = take(s, pcs);
+        n = take(s, pcs, &taken, &queue);
         if (!n) {
             if (!s->busy) cond_broadcast(&s->idle);
             cond_wait(&s->work, &s->lock);
@@ -1112,7 +1141,7 @@ static void worker(SnxJitService* s) {
         if (s->queues[LIVE].count || s->queues[WARM].count) cond_signal(&s->work);
         unlock(&s->lock);
         qsort(pcs, n, sizeof(*pcs), compare_pc);
-        compile(s, pcs, n);
+        compile(s, pcs, n, taken, queue);
         lock(&s->lock);
         --s->busy;
     }

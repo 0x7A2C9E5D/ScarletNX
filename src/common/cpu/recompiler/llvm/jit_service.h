@@ -56,6 +56,7 @@ typedef struct {
     size_t pcs, functions, instructions, bytes; /* bytes: of the arena the load took */
     double seconds;
     const char* error; /* NULL when it compiled, else why its pcs stay with the caller's interpreter */
+    int dropped;       /* guest memory changed while it compiled: nothing published, its pcs queued again */
 } SnxJitReport;
 
 typedef struct {
@@ -117,6 +118,7 @@ void snx_jit_invalidate(SnxJitService* service, SnxU64 addr, SnxU64 size);
 
 typedef struct {
     unsigned long batches, compiled, failures; /* compiled, failures: pcs the queues held */
+    unsigned long dropped;                     /* batches whose code memory changes made stale (SnxJitReport) */
     unsigned long functions, instructions;
     unsigned long queued; /* pcs waiting */
     unsigned long cached; /* units loaded from the cache instead of compiled */

@@ -35,7 +35,10 @@ static PMutex g_jit_synthetic_lock = PMUTEX_INIT;
 
 /* on a compile thread */
 static void jit_log(const SnxJitReport* r) {
-    if (r->error)
+    if (r->dropped)
+        LOGV("jit: %llx and %lu more pcs queued again: guest memory changed while they compiled\n",
+             (unsigned long long)r->pc, (unsigned long)(r->pcs - 1));
+    else if (r->error)
         WARN_LIMIT(32, "jit: %llx and %lu more pcs could not be compiled: %s\n", (unsigned long long)r->pc,
                    (unsigned long)(r->pcs - 1), r->error);
     else
@@ -200,8 +203,8 @@ void jit_report(void) {
     SnxJitStats s;
     if (!g_jit) return;
     snx_jit_stats(g_jit, &s);
-    LOG("jit: %lu batches compiled %lu pcs (%lu failed, %lu still queued), %lu functions, %lu instructions, %lu KiB of "
-        "code, %.2f s compiling, %lu units loaded from %s\n",
-        s.batches, s.compiled, s.failures, s.queued, s.functions, s.instructions, (unsigned long)(s.bytes >> 10),
-        s.seconds, s.cached, g_jit_cache);
+    LOG("jit: %lu batches compiled %lu pcs (%lu failed, %lu still queued, %lu batches dropped by memory changes), %lu "
+        "functions, %lu instructions, %lu KiB of code, %.2f s compiling, %lu units loaded from %s\n",
+        s.batches, s.compiled, s.failures, s.queued, s.dropped, s.functions, s.instructions,
+        (unsigned long)(s.bytes >> 10), s.seconds, s.cached, g_jit_cache);
 }
