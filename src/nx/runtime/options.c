@@ -69,22 +69,24 @@ void fps_limit_text(int fps, char* out, size_t n) {
 
 int g_opt_ldn = SNX_OPT_LDN_LAN, g_opt_airplane;
 char g_opt_room[256];
-/* lan, room or off; another word is said and leaves it as it was */
+/* lan, room or off. Both keys are read once, at start: a value they don't take stops the game there, as a player
+   who wrote ldn=rooom would otherwise play alone thinking they were in the room */
 static void ldn_set(const IniOpt* o, const char* v) {
     static const char* const words[] = {"lan", "room", "off"};
-    size_t n = strcspn(v, " \t\r");
     int i;
     (void)o;
     for (i = 0; i < 3; i++)
-        if (n == strlen(words[i]) && !strncmp(v, words[i], n)) {
+        if (!strcmp(v, words[i])) {
             g_opt_ldn = i;
             return;
         }
-    WARN("settings: ldn=%s is not lan, room or off; ldn stays %s\n", v, words[g_opt_ldn]);
+    fatal("settings: ldn=%s is not lan, room or off", v);
 }
 static void room_set(const IniOpt* o, const char* v) {
     (void)o;
-    snprintf(g_opt_room, sizeof g_opt_room, "%.*s", (int)strcspn(v, " \t\r"), v);
+    if (strlen(v) >= sizeof g_opt_room || v[strcspn(v, " \t\r")])
+        fatal("settings: room=%.64s is not host or host:port", v);
+    strcpy(g_opt_room, v);
 }
 
 /* MB: below 1 no cap but the heap region's own, which also caps a larger one */
