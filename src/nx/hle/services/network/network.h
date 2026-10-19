@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The network services, on the stack in src/common/network: bsd (bsd.c), sfdnsres and nsd (dns.c), nifm (nifm.c),
-   ssl (ssl.c) */
+   ssl (ssl.c), ldn (ldn.c) */
 #ifndef SNX_HLE_NETWORK_H
 #define SNX_HLE_NETWORK_H
 #include "nx/hle/services/services_int.h"
@@ -20,6 +20,9 @@ int network_reachable(const SnxSockAddr* addr);
 /* the socket behind descriptor fd in the table of the bsd session process pid registered (RegisterClient), with a
    reference for the caller, or NULL: what ssl duplicates, as the console's does with bsd:s's DuplicateSocket */
 SnxSocket* bsd_client_socket(u64 pid, i32 fd);
+/* the address a game's bind to INADDR_ANY binds instead, while ldn gives this console one, and its subnet's broadcast
+   address, which a datagram socket bound there keeps hearing; NULL clears it */
+void bsd_set_bind_address(const u8* ip, const u8* bcast);
 
 /* dns.c */
 SvcObj* new_sfdnsres(void);
@@ -30,5 +33,8 @@ SvcObj* new_nifm(void);
 
 /* ssl.c */
 SvcObj* new_ssl(void);
+
+/* ldn.c */
+SvcObj* new_ldn(void);
 
 #endif
