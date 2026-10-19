@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The Eden room of ldn=room (room.c): the room= address and its port, users/online.ini's room_password (a file others
-   may read refused, any other key or a section refused, none at all an empty password), and what stops the game
-   before any connection: ldn=room without room= */
+   may read refused, any other key or a section refused, none at all an empty password), what stops the game before
+   any connection (ldn=room without room=), and airplane mode, which keeps the console out of the room */
 #include "nx/hle/services/network/network.h"
 #include <setjmp.h>
 #include <stdarg.h>
@@ -14,7 +14,7 @@
 
 char g_exedir[1024], g_exename[256];
 u64 g_title_id;
-int g_opt_ldn;
+int g_opt_ldn, g_opt_airplane;
 char g_opt_room[256];
 static SnxRoom* g_room_set;
 void network_set_room(SnxRoom* room) { g_room_set = room; }
@@ -103,6 +103,14 @@ static void stops(void) {
     g_opt_ldn = SNX_LDN_LAN;
     network_room_init(); /* nothing to join */
     CHECK(network_room() == NULL);
+    /* airplane mode keeps the console out of the room, as out of any network: nobody at port 9 is even asked */
+    g_opt_ldn = SNX_LDN_ROOM;
+    g_opt_airplane = 1;
+    strcpy(g_opt_room, "127.0.0.1:9");
+    g_stop[0] = 0;
+    if (!setjmp(g_stopped)) network_room_init();
+    CHECK(network_room() == NULL && !g_stop[0]); /* not stopped: the join that would fail never ran */
+    g_opt_airplane = 0;
     g_opt_ldn = SNX_LDN_ROOM;
     g_opt_room[0] = 0;
     if (!setjmp(g_stopped)) {

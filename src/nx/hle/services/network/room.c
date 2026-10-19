@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The Eden room of ldn=room (common/network/net_room.h): joined at start, before the game runs, at the .ini's room=
-   (host, or host:port) as the user playing (users.ini's nickname), with the password of users/online.ini. A room
-   that refuses stops the game and says why: the game would only find nobody. From then on the game's datagram
+   (host, or host:port) as the user playing (users.ini's nickname), with the password of users/online.ini, unless
+   airplane mode is on. A room that refuses stops the game and says why: the game would only find nobody. From then on the game's datagram
    sockets are the room's (bsd.c) and ldn's networks go through it (ldn.c); at exit the room hears this console
    leave */
 #include "nx/hle/services/network/network.h"
@@ -98,6 +98,10 @@ void network_room_init(void) {
     u16 port;
     int r, refused;
     if (g_opt_ldn != SNX_LDN_ROOM) return;
+    if (g_opt_airplane) { /* a console in airplane mode is in no network, the room's neither */
+        LOG("room: airplane_mode=1 keeps this console out of the Eden room\n");
+        return;
+    }
     if (!g_opt_room[0]) fatal("ldn=room needs the Eden room's address in the .ini: room=host or room=host:port");
     if (room_address(g_opt_room, host, sizeof host, &port, why, sizeof why)) fatal("%s", why);
     dir = snx_users_dir(g_exedir[0] ? g_exedir : ".");
