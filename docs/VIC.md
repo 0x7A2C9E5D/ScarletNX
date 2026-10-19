@@ -74,7 +74,7 @@ builds taken in turn:
 | 1920x1080 NV12 block linear to A8B8G8R8, BT.709 matrix | 90 us | 49 us |
 | 1920x1080 NV12 block linear to NV12 block linear | 108-160 us | 16 us |
 | 1920x1080 NV12 block linear to NV12 block linear, BT.709 matrix | 120-167 us | 41-53 us |
-| 1918x1080 NV12 pitch linear to NV21 pitch linear (the unaligned build) | 155-248 us | 24-25 us |
+| 1918x1080 NV12 pitch linear to NV21 pitch linear (the unaligned build) | 155-166 us | 24-25 us |
 
 The idle card switches between two power states, and both builds slow down together in the slow one, so these are
 compared within the fast one. The whole `vic_compose` call is mostly the host copies there (1.4 ms for 1080p to
