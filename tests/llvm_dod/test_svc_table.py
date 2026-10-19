@@ -19,7 +19,7 @@ def extract(src, prefix):
         end += 1
     return src[i:end]
 
-assert '#define SNX_ABI 10' in (root / 'src/common/cpu/aarch64/cpu.h').read_text()
+assert '#define SNX_ABI 11' in (root / 'src/common/cpu/aarch64/cpu.h').read_text()
 assert 'size_t ir_rt_svcs(void)' in header
 assert 'LLVMValueRef ir_rt_table_call(' in header
 svc = extract(gen, 'static void svc(SnxIr* ir,')
@@ -99,7 +99,7 @@ post = r'''
 static int calls;
 static void on_svc(CPU* cpu, uint32_t imm) { ++calls; cpu->x[0] += imm; }
 int main(void) {
-    assert(SNX_ABI == 10 && offsetof(RtAPI,svcs) == 9 * sizeof(void*));
+    assert(SNX_ABI == 11 && offsetof(RtAPI,svcs) == 9 * sizeof(void*));
     LLVMLinkInMCJIT();
     #if defined(__x86_64__)
     LLVMInitializeX86TargetInfo();LLVMInitializeX86Target();LLVMInitializeX86TargetMC();LLVMInitializeX86AsmPrinter();
@@ -138,7 +138,7 @@ int main(void) {
     CPU cpu={0};cpu.rt=&api;cpu.x[0]=3;
     entry(&cpu);
     assert(calls==1 && cpu.x[0]==20);
-    printf("PASS SNX_ABI 10 SVC table call: actual emitted LLVM IR verified and executed; register cache invalidated\n");
+    printf("PASS SNX_ABI 11 SVC table call: actual emitted LLVM IR verified and executed; register cache invalidated\n");
     LLVMDisposeExecutionEngine(ee);LLVMContextDispose(ctx);
     return 0;
 }

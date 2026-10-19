@@ -16,7 +16,7 @@ echo "PASS original decoder fingerprint: $actual"
     "$root/tests/cpu_dod/emit.c" "$root/src/common/cpu/aarch64/a64.c" \
     "$root/src/common/cpu/aarch64/a64_emit.c" -o "$work/emit"
 # checked and normal carry the generated interpreter's taken-branch lookup with its fallback: c->rt->miss, as
-# snx_lookup answers for a pc without code (SNX_ABI 10)
+# snx_lookup answers for a pc without code (ABI 10 onward)
 for row in \
   'step 189a474f57ca545fb73cda63c5da59385dacd52d124fc08a9064a6e752e387cc' \
   'checked ee28b6057b5640d77113122473a8035c4c4d5d256a0e002a8fb66ccbd3413fc2' \
