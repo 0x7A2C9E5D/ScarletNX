@@ -430,7 +430,7 @@ set_tests_properties(ldn_lan PROPERTIES TIMEOUT 60)
 
 # an Eden room (common/network/net_room.c) against a room server in the test: the messages, joining, ldn's networks
 # and the game's datagram sockets through it
-add_executable(snx-test-ldn-room ldn_room.c)
+add_executable(snx-test-ldn-room ldn_room.c fake_room.c)
 snx_test_target(snx-test-ldn-room 23)
 target_link_libraries(snx-test-ldn-room PRIVATE scarletnx-ldn snx_enet)
 add_test(NAME ldn_room COMMAND snx-test-ldn-room)

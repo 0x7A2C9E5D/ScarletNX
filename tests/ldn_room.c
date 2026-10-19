@@ -9,7 +9,7 @@
 #include "common/network/net_ldn.h"
 #include "common/network/net_room.h"
 #include "common/network/net_internal.h"
-#include <enet/enet.h>
+#include "fake_room.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,247 +27,10 @@ static void sleep_ms(int ms) { snx_net_poll(NULL, 0, ms); }
 static void quiet(const char* m) { (void)m; }
 
 /* ============================================================ the room */
-#define ROOM_SLOTS 4
-typedef struct FakeMember {
-    ENetPeer* peer;
-    char nickname[64];
-    uint8_t ip[4];
-} FakeMember;
-typedef struct FakeRoom {
-    SnxLock lk;
-    ENetHost* host;
-    uint16_t port;
-    FakeMember members[ROOM_SLOTS];
-    int stop, done, close_now;
-    uint8_t last_datagram[64]; /* the start of the last datagram message relayed */
-    size_t last_datagram_size;
-    char last_game[64];
-    uint64_t last_game_id;
-} FakeRoom;
-static FakeRoom g_room;
-
-typedef struct Rd {
-    const uint8_t* p;
-    size_t n, at;
-    int bad;
-} Rd;
-static uint32_t rd_be(Rd* r, int bytes) {
-    uint32_t v = 0;
-    int i;
-    if (r->at + (size_t)bytes > r->n) {
-        r->bad = 1;
-        return 0;
-    }
-    for (i = 0; i < bytes; i++) v = v << 8 | r->p[r->at++];
-    return v;
-}
-static void rd_string(Rd* r, char* out, size_t size) {
-    uint32_t n = rd_be(r, 4);
-    if (r->bad || r->at + n > r->n || n >= size) {
-        r->bad = 1;
-        out[0] = 0;
-        return;
-    }
-    memcpy(out, r->p + r->at, n);
-    out[n] = 0;
-    r->at += n;
-}
-typedef struct Wr {
-    uint8_t b[2048];
-    size_t n;
-} Wr;
-static void wr_be(Wr* w, uint32_t v, int bytes) {
-    while (bytes--) w->b[w->n++] = (uint8_t)(v >> (8 * bytes));
-}
-static void wr_string(Wr* w, const char* s) {
-    wr_be(w, (uint32_t)strlen(s), 4);
-    memcpy(w->b + w->n, s, strlen(s));
-    w->n += strlen(s);
-}
-static void room_send(ENetPeer* peer, const uint8_t* data, size_t size) {
-    enet_peer_send(peer, 0, enet_packet_create(data, size, ENET_PACKET_FLAG_RELIABLE));
-}
-/* room.cpp's BroadcastRoomInformation */
-static void room_information(FakeRoom* f) {
-    Wr w;
-    int i, n = 0;
-    w.n = 0;
-    wr_be(&w, 3, 1);
-    wr_string(&w, "Test room");
-    wr_string(&w, "");
-    wr_be(&w, ROOM_SLOTS, 4);
-    wr_be(&w, f->port, 2);
-    wr_string(&w, "");
-    wr_string(&w, "");
-    for (i = 0; i < ROOM_SLOTS; i++) n += f->members[i].peer != NULL;
-    wr_be(&w, (uint32_t)n, 4);
-    for (i = 0; i < ROOM_SLOTS; i++) {
-        if (!f->members[i].peer) continue;
-        wr_string(&w, f->members[i].nickname);
-        memcpy(w.b + w.n, f->members[i].ip, 4);
-        w.n += 4;
-        wr_string(&w, "game");
-        wr_be(&w, 0, 4);
-        wr_be(&w, 0, 4);
-        wr_string(&w, "1.0");
-        wr_string(&w, "");
-        wr_string(&w, "");
-        wr_string(&w, "");
-    }
-    for (i = 0; i < ROOM_SLOTS; i++)
-        if (f->members[i].peer) room_send(f->members[i].peer, w.b, w.n);
-}
-/* room.cpp's IsValidNickname, written apart from users.c's */
-static int nickname_ok(FakeRoom* f, const char* s) {
-    size_t n = strlen(s), i;
-    if (n < 4 || n > 20) return 0;
-    for (i = 0; i < n; i++)
-        if (!strchr("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ._-", s[i])) return 0;
-    for (i = 0; i < ROOM_SLOTS; i++)
-        if (f->members[i].peer && !strcmp(f->members[i].nickname, s)) return 0;
-    return 1;
-}
-static void room_join(FakeRoom* f, ENetPeer* peer, const uint8_t* data, size_t size) {
-    char nickname[64], password[64], token[64];
-    uint8_t answer = 0, ip[4], ok[5];
-    uint32_t version;
-    Rd r;
-    int i, free_slot = -1;
-    r.p = data;
-    r.n = size;
-    r.at = 1;
-    r.bad = 0;
-    rd_string(&r, nickname, sizeof nickname);
-    for (i = 0; i < 4; i++) ip[i] = (uint8_t)rd_be(&r, 1);
-    version = rd_be(&r, 4);
-    rd_string(&r, password, sizeof password);
-    rd_string(&r, token, sizeof token);
-    CHECK(!r.bad && r.at == size); /* the join request, whole */
-    CHECK(ip[0] == 255 && ip[1] == 255 && ip[2] == 255 && ip[3] == 255 && !token[0]);
-    for (i = 0; i < ROOM_SLOTS && free_slot < 0; i++)
-        if (!f->members[i].peer) free_slot = i;
-    if (free_slot < 0)
-        answer = 13; /* IdRoomIsFull */
-    else if (strcmp(password, "secret"))
-        answer = 11; /* IdWrongPassword */
-    else if (!nickname_ok(f, nickname))
-        answer = 8; /* IdNameCollision */
-    else if (version != 1)
-        answer = 10; /* IdVersionMismatch */
-    if (answer) {
-        room_send(peer, &answer, 1);
-        return;
-    }
-    f->members[free_slot].peer = peer;
-    strcpy(f->members[free_slot].nickname, nickname);
-    f->members[free_slot].ip[0] = 192; /* GenerateFakeIPAddress: the first free */
-    f->members[free_slot].ip[1] = 168;
-    f->members[free_slot].ip[2] = 1;
-    f->members[free_slot].ip[3] = (uint8_t)(free_slot + 1);
-    room_information(f);
-    ok[0] = 2; /* IdJoinSuccess */
-    memcpy(ok + 1, f->members[free_slot].ip, 4);
-    room_send(peer, ok, 5);
-}
-/* room.cpp's HandleProxyPacket and HandleLdnPacket: everyone but the sender for a broadcast, else the member at the
-   remote address */
-static void room_relay(FakeRoom* f, ENetPeer* from, const uint8_t* data, size_t size, size_t remote_at,
-                       size_t broadcast_at) {
-    int i;
-    CHECK(size > broadcast_at);
-    for (i = 0; i < ROOM_SLOTS; i++) {
-        FakeMember* m = &f->members[i];
-        if (!m->peer || m->peer == from) continue;
-        if (data[broadcast_at] || !memcmp(m->ip, data + remote_at, 4)) room_send(m->peer, data, size);
-    }
-}
-static void room_message(FakeRoom* f, ENetPeer* peer, const uint8_t* data, size_t size) {
-    Rd r;
-    switch (data[0]) {
-        case 1: room_join(f, peer, data, size); break;
-        case 4: /* IdSetGameInfo */
-            r.p = data;
-            r.n = size;
-            r.at = 1;
-            r.bad = 0;
-            rd_string(&r, f->last_game, sizeof f->last_game);
-            f->last_game_id = (uint64_t)rd_be(&r, 4) << 32;
-            f->last_game_id |= rd_be(&r, 4);
-            CHECK(!r.bad);
-            break;
-        case 5: /* IdProxyPacket: type, domain, ip, port, domain, ip (at 9), port, protocol, broadcast (at 16) */
-            snx_lock(&f->lk);
-            f->last_datagram_size = size < sizeof f->last_datagram ? size : sizeof f->last_datagram;
-            memcpy(f->last_datagram, data, f->last_datagram_size);
-            snx_unlock(&f->lk);
-            room_relay(f, peer, data, size, 9, 16);
-            break;
-        case 6: /* IdLdnPacket: type, ldn type, local ip, remote ip (at 6), broadcast (at 10) */
-            room_relay(f, peer, data, size, 6, 10);
-            break;
-        default: CHECK(!"a message a member doesn't send");
-    }
-}
-static void room_thread(void* arg) {
-    FakeRoom* f = arg;
-    for (;;) {
-        ENetEvent ev;
-        int i, stop, close_now;
-        snx_lock(&f->lk);
-        stop = f->stop;
-        close_now = f->close_now;
-        f->close_now = 0;
-        snx_unlock(&f->lk);
-        if (stop) break;
-        if (close_now) {
-            uint8_t closing = 12; /* IdCloseRoom */
-            for (i = 0; i < ROOM_SLOTS; i++)
-                if (f->members[i].peer) room_send(f->members[i].peer, &closing, 1);
-            enet_host_flush(f->host);
-        }
-        while (enet_host_service(f->host, &ev, 5) > 0) {
-            if (ev.type == ENET_EVENT_TYPE_RECEIVE) {
-                room_message(f, ev.peer, ev.packet->data, ev.packet->dataLength);
-                enet_packet_destroy(ev.packet);
-            } else if (ev.type == ENET_EVENT_TYPE_DISCONNECT) {
-                for (i = 0; i < ROOM_SLOTS; i++)
-                    if (f->members[i].peer == ev.peer) memset(&f->members[i], 0, sizeof f->members[i]);
-                room_information(f);
-            }
-        }
-    }
-    snx_lock(&f->lk);
-    f->done = 1;
-    snx_unlock(&f->lk);
-}
-static void room_start(FakeRoom* f) {
-    ENetAddress a;
-    memset(f, 0, sizeof *f);
-    snx_lock_init(&f->lk);
-    enet_address_set_host(&a, "127.0.0.1");
-    a.port = 0;
-    f->host = enet_host_create(&a, ROOM_SLOTS + 2, 1, 0, 0);
-    CHECK(f->host != NULL);
-    CHECK(enet_socket_get_address(f->host->socket, &a) == 0 && a.port);
-    f->port = a.port;
-    CHECK(snx_net_thread(room_thread, f) == 0);
-}
-static void room_stop(FakeRoom* f) {
-    int done = 0;
-    snx_lock(&f->lk);
-    f->stop = 1;
-    snx_unlock(&f->lk);
-    while (!done) {
-        sleep_ms(1);
-        snx_lock(&f->lk);
-        done = f->done;
-        snx_unlock(&f->lk);
-    }
-    enet_host_destroy(f->host);
-    snx_lock_destroy(&f->lk);
-}
+static FakeRoom* g_room;
 static int join(SnxRoom** out, const char* nickname, const char* password, int* why) {
-    return snx_room_join(out, "127.0.0.1", g_room.port, nickname, password, "mk8d", 0x0100152000022000ull, "", why);
+    return snx_room_join(out, "127.0.0.1", fake_room_port(g_room), nickname, password, "mk8d", 0x0100152000022000ull,
+                         "", why);
 }
 
 /* ============================================================ the messages */
@@ -320,7 +83,12 @@ static void joining(void) {
     CHECK(r == 0 && why == SNX_ROOM_IN && snx_room_state(a) == SNX_ROOM_IN);
     snx_room_fake_ip(a, ip);
     CHECK(ip[0] == 192 && ip[1] == 168 && ip[2] == 1 && ip[3] == 1 && snx_room_has_member(a, ip));
-    CHECK(!strcmp(g_room.last_game, "mk8d") && g_room.last_game_id == 0x0100152000022000ull);
+    {
+        char game[64];
+        uint64_t id;
+        fake_room_last_game(g_room, game, sizeof game, &id);
+        CHECK(!strcmp(game, "mk8d") && id == 0x0100152000022000ull);
+    }
     /* each refusal, as the room says it */
     CHECK(join(&b, "Xuji", "wrong", &why) == -SNX_ECONNREFUSED && why == SNX_ROOM_WRONG_PASSWORD && !b);
     CHECK(join(&b, "Aogo", "secret", &why) == -SNX_ECONNREFUSED && why == SNX_ROOM_NAME_COLLISION);
@@ -497,16 +265,12 @@ static void datagrams(void) {
     n = recv_wait(b, buf, sizeof buf, &from, NULL);
     CHECK(n == 4 && !memcmp(buf, "back", 4) && !memcmp(from.addr, ip_a, 4));
     /* Eden's protocol byte: protocol 0 is IP (1), UDP is UDP (4), and each hears only its own */
-    snx_lock(&g_room.lk);
-    CHECK(g_room.last_datagram_size > 16 && g_room.last_datagram[15] == 1);
-    snx_unlock(&g_room.lk);
+    CHECK(fake_room_last_datagram(g_room, buf, sizeof buf) > 16 && buf[15] == 1);
     addr = to_of(ip_a, 1235);
     CHECK(snx_socket_send(b17, "udp", 3, 0, &addr) == 3);
     n = recv_wait(a17, buf, sizeof buf, NULL, NULL);
     CHECK(n == 3 && !memcmp(buf, "udp", 3));
-    snx_lock(&g_room.lk);
-    CHECK(g_room.last_datagram[15] == 4);
-    snx_unlock(&g_room.lk);
+    CHECK(fake_room_last_datagram(g_room, buf, sizeof buf) > 16 && buf[15] == 4);
     addr = to_of(ip_a, 1234);
     CHECK(snx_socket_send(b17, "lost", 4, 0, &addr) == 4); /* to a's port, but a protocol-0 socket */
     snx_socket_setsockopt(a, SNX_SOL_SOCKET, SNX_SO_RCVTIMEO, &tv, sizeof tv);
@@ -576,9 +340,7 @@ static void closing(void) {
     name_of(name, "Xuji");
     CHECK(snx_ldn_connect(b, &found[0], name, 4, 2000) == 0);
     changes_b = 0;
-    snx_lock(&g_room.lk);
-    g_room.close_now = 1;
-    snx_unlock(&g_room.lk);
+    fake_room_close(g_room);
     CHECK(wait_for(&changes_b, 1, 3000));
     for (i = 0; i < 200 && snx_room_state(rb) == SNX_ROOM_IN; i++) sleep_ms(5);
     CHECK(snx_room_state(rb) == SNX_ROOM_CLOSED && snx_room_state(ra) == SNX_ROOM_CLOSED);
@@ -591,16 +353,14 @@ static void closing(void) {
 
 int main(void) {
     CHECK(snx_net_init() == 0);
-    CHECK(enet_initialize() == 0);
     snx_net_set_log(quiet);
     messages();
-    room_start(&g_room);
+    g_room = fake_room_start();
     joining();
     networks();
     datagrams();
     closing();
-    room_stop(&g_room);
-    enet_deinitialize();
+    fake_room_stop(g_room);
     printf("ldn_room: %u checks passed\n", checks);
     return 0;
 }
