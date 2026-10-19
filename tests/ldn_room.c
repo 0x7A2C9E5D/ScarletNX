@@ -173,7 +173,13 @@ static void networks(void) {
     CHECK(snx_ldn_scan(b, NULL, found, 4, 200) == 0); /* nothing yet */
     network_of(a, &net);
     CHECK(snx_ldn_set_advertise_data(a, "hello", 5) == 0 && snx_ldn_create_network(a, &net) == 0);
-    /* the station finds it and joins: node 1 at the room's address */
+    /* the station finds it and joins: node 1 at the room's address. A scan waits its whole time: through a room
+       another host may answer later than the first */
+    {
+        int64_t t0 = snx_net_now_us();
+        CHECK(snx_ldn_scan(b, NULL, found, 4, 400) == 1);
+        CHECK(snx_net_now_us() - t0 >= 380000);
+    }
     CHECK(snx_ldn_scan(b, NULL, found, 4, 1000) == 1);
     CHECK(!memcmp(found[0].bssid, net.bssid, 6) && found[0].advertise_data_size == 5);
     CHECK(snx_ldn_scan(a, NULL, found, 4, 200) == 0); /* the host doesn't find itself */
@@ -219,7 +225,11 @@ static void networks(void) {
     snx_room_leave(rb);
     CHECK(wait_for(&changes_a, 1, 3000));
     CHECK(snx_ldn_network_info(a, &info, NULL) == 1 && info.node_count == 1 && !info.nodes[1].is_connected);
-    snx_ldn_close(b); /* its goodbyes fail quietly: out of the room */
+    {
+        int64_t t0 = snx_net_now_us(); /* out of the room: no scan, and no wait for one */
+        CHECK(snx_ldn_scan(b, NULL, found, 4, 1000) == 0 && snx_net_now_us() - t0 < 200000);
+    }
+    snx_ldn_close(b); /* its goodbyes can't go: out of the room */
     snx_ldn_close(a);
     snx_room_leave(ra);
 }

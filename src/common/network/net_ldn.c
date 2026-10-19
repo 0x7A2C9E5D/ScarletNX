@@ -471,8 +471,10 @@ static void room_in(void* arg, const SnxRoomLdn* p) {
     } else
         switch (p->type) {
             case SNX_ROOM_LDN_SCAN:
-                if (l->role == ROLE_HOST)
-                    snx_room_send_ldn(l->room, SNX_ROOM_LDN_SCAN_RESPONSE, p->local_ip, 0, &l->info, sizeof l->info);
+                if (l->role == ROLE_HOST &&
+                    snx_room_send_ldn(l->room, SNX_ROOM_LDN_SCAN_RESPONSE, p->local_ip, 0, &l->info, sizeof l->info))
+                    snx_net_log("ldn: the answer to %u.%u.%u.%u's scan didn't go", p->local_ip[0], p->local_ip[1],
+                                p->local_ip[2], p->local_ip[3]);
                 break;
             case SNX_ROOM_LDN_SCAN_RESPONSE:
                 if (l->scanning && p->size == sizeof(SnxLdnNetworkInfo)) replies = scan_reply(l, p->data);
@@ -710,8 +712,9 @@ void snx_ldn_destroy_network(SnxLdn* l) {
     snx_lock(&l->lk);
     if (l->role == ROLE_HOST) {
         for (i = 0; i < SNX_LDN_STATIONS; i++) {
-            if (l->room && l->st[i].node)
-                snx_room_send_ldn(l->room, SNX_ROOM_LDN_DESTROY_NETWORK, l->st[i].ip, 0, NULL, 0);
+            if (l->room && l->st[i].node &&
+                snx_room_send_ldn(l->room, SNX_ROOM_LDN_DESTROY_NETWORK, l->st[i].ip, 0, NULL, 0))
+                snx_net_log("ldn: node %d wasn't told the network is gone", l->st[i].node);
             if (l->st[i].s || l->st[i].node) close_station(&l->st[i]);
         }
         l->role = ROLE_NONE;
@@ -756,15 +759,22 @@ int snx_ldn_scan(SnxLdn* l, const SnxLdnScanFilter* filter, SnxLdnNetworkInfo* o
     l->scanning = 1;
     l->nscan = 0;
     drain_event(l->changed_ev);
-    if (l->room)
-        snx_room_send_ldn(l->room, SNX_ROOM_LDN_SCAN, NULL, 1, NULL, 0);
-    else
+    if (l->room) {
+        int e = snx_room_send_ldn(l->room, SNX_ROOM_LDN_SCAN, NULL, 1, NULL, 0);
+        if (e) { /* out of the room nobody hears it: no wait for an answer that can't come */
+            l->scanning = 0;
+            snx_unlock(&l->lk);
+            snx_net_log("ldn: no scan: the room took no message (errno %d)", -e);
+            return 0;
+        }
+    } else
         send_frame_udp(l, SNX_LDN_SCAN, NULL, 0, &to);
     snx_unlock(&l->lk);
     for (;;) {
         int64_t now = snx_net_now_us(), until = deadline, ms;
         int count;
-        if (first && first + LDN_SCAN_SETTLE_MS * 1000 < until) until = first + LDN_SCAN_SETTLE_MS * 1000;
+        /* on the LAN the replies come together; through a room, from wherever each member is, so the whole wait */
+        if (first && !l->room && first + LDN_SCAN_SETTLE_MS * 1000 < until) until = first + LDN_SCAN_SETTLE_MS * 1000;
         if (now >= until) break;
         ms = (until - now + 999) / 1000;
         wait_event(l->changed_ev, (int)ms);
@@ -879,7 +889,8 @@ int snx_ldn_connect(SnxLdn* l, const SnxLdnNetworkInfo* info, const uint8_t user
 void snx_ldn_disconnect(SnxLdn* l) {
     snx_lock(&l->lk);
     if (l->role == ROLE_STATION) {
-        if (l->room) snx_room_send_ldn(l->room, SNX_ROOM_LDN_DISCONNECT, l->host_ip, 0, &l->me, sizeof l->me);
+        if (l->room && snx_room_send_ldn(l->room, SNX_ROOM_LDN_DISCONNECT, l->host_ip, 0, &l->me, sizeof l->me))
+            snx_net_log("ldn: the host wasn't told this station left");
         if (l->client) drop_client(l);
         l->connected = 0;
         l->reason = SNX_LDN_REASON_DISCONNECTED_BY_USER;
