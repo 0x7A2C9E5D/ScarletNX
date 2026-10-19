@@ -667,7 +667,7 @@ int main(int argc, char** argv) {
     for (i = shard, k = 0; i < count; i += shards) words[k++] = words[i];
     count = k;
     if (!count) return snx_error("no words to test");
-    if (sweep_mode && !quiet) printf("sweep:\t%zu words the reference runs\n", (unsigned long)count);
+    if (sweep_mode && !quiet) printf("sweep:\t%zu words the reference runs\n", count);
     dir = snx_temp_dir(NULL);
     c_path = snx_path_join(dir, "portable.c");
     c_lib = snx_path_join(dir, "portable.so");
