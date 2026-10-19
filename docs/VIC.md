@@ -64,7 +64,21 @@ old shader is shown as it shipped and recompiled with glslang's `-O`, which made
 | 1280x720 NV12 pitch linear to A8B8G8R8, BT.709 matrix | 14.2 ms | 19.9 ms | 3.8 ms |
 
 Old and new wrote the same bytes in every job. Lavapipe counts operations and shows nothing of coalescing or
-divergence, which the new layout also improves on a GPU. Nothing was measured on a GPU yet.
+divergence, which the new layout also improves on a GPU.
+
+On an RX 6700 XT (RADV), the dispatch alone from GPU timestamps around it, median of 100 jobs per run, runs of both
+builds taken in turn:
+
+| Job | Old | New |
+| --- | --- | --- |
+| 1920x1080 NV12 block linear to A8B8G8R8, BT.709 matrix | 90 us | 49 us |
+| 1920x1080 NV12 block linear to NV12 block linear | 108-160 us | 16 us |
+| 1920x1080 NV12 block linear to NV12 block linear, BT.709 matrix | 120-167 us | 41-53 us |
+| 1918x1080 NV12 pitch linear to NV21 pitch linear (the unaligned build) | 155-248 us | 24-25 us |
+
+The idle card switches between two power states, and both builds slow down together in the slow one, so these are
+compared within the fast one. The whole `vic_compose` call is mostly the host copies there (1.4 ms for 1080p to
+A8B8G8R8): it gains about 3% with A8B8G8R8 out and 13-15% with NV12 or NV21 out.
 
 ## Tests
 
