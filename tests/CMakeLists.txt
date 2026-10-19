@@ -412,13 +412,18 @@ target_link_libraries(snx-test-bsd-service PRIVATE scarletnx-ldn)
 add_test(NAME bsd_service COMMAND snx-test-bsd-service)
 set_tests_properties(bsd_service PROPERTIES TIMEOUT 60)
 
+# the Eden room server the room tests talk to (fake_room.h), with the ENet it is written on: a test that links it
+# gets the pinned ENet, never a system one's headers
+add_library(snx-test-fake-room STATIC fake_room.c)
+snx_test_target(snx-test-fake-room 23)
+target_link_libraries(snx-test-fake-room PUBLIC scarletnx-net snx_enet)
+
 # sfdnsres and nifm (dns.c, nifm.c) offline, with bsd.c beside them for whether the console is online
-add_executable(snx-test-network-service network_service.c fake_room.c
-               "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
+add_executable(snx-test-network-service network_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
 snx_test_target(snx-test-network-service 23)
 snx_service_swipc(snx-test-network-service hle/services/network/bsd.swipc hle/services/network/dns.swipc
                   hle/services/network/nifm.swipc)
-target_link_libraries(snx-test-network-service PRIVATE scarletnx-ldn)
+target_link_libraries(snx-test-network-service PRIVATE scarletnx-ldn snx-test-fake-room)
 add_test(NAME network_service COMMAND snx-test-network-service)
 set_tests_properties(network_service PROPERTIES TIMEOUT 60)
 
@@ -431,19 +436,19 @@ set_tests_properties(ldn_lan PROPERTIES TIMEOUT 60)
 
 # an Eden room (common/network/net_room.c) against a room server in the test: the messages, joining, ldn's networks
 # and the game's datagram sockets through it
-add_executable(snx-test-ldn-room ldn_room.c fake_room.c)
+add_executable(snx-test-ldn-room ldn_room.c)
 snx_test_target(snx-test-ldn-room 23)
-target_link_libraries(snx-test-ldn-room PRIVATE scarletnx-ldn snx_enet)
+target_link_libraries(snx-test-ldn-room PRIVATE scarletnx-ldn snx-test-fake-room)
 add_test(NAME ldn_room COMMAND snx-test-ldn-room)
 set_tests_properties(ldn_room PROPERTIES TIMEOUT 120)
 
 # ldn:u (ldn.c): two consoles in one process, one creating a network and the other joining, with bsd.c beside for
 # the address a game socket binds meanwhile; the session id comes from OpenSSL's generator
 if(TARGET OpenSSL::Crypto)
-    add_executable(snx-test-ldn-service ldn_service.c fake_room.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
+    add_executable(snx-test-ldn-service ldn_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
     snx_test_target(snx-test-ldn-service 23)
     snx_service_swipc(snx-test-ldn-service hle/services/network/bsd.swipc hle/services/network/ldn.swipc)
-    target_link_libraries(snx-test-ldn-service PRIVATE scarletnx-ldn OpenSSL::Crypto)
+    target_link_libraries(snx-test-ldn-service PRIVATE scarletnx-ldn snx-test-fake-room OpenSSL::Crypto)
     add_test(NAME ldn_service COMMAND snx-test-ldn-service)
     set_tests_properties(ldn_service PROPERTIES TIMEOUT 60)
     # both tests take 127.0.0.1 and 127.0.0.2 on the ldn port: never at the same time
