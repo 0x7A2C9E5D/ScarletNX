@@ -47,7 +47,7 @@ get wrong and points to the skills that carry the procedures.
 
 | Task | Command |
 | --- | --- |
-| Build the runtime, hactool and the third-party libraries (deploys to every game in `games/`) | `cmake --preset default -B build && cmake --build build` (Windows: `scripts\bootstrap.ps1` once, `Set-ExecutionPolicy -Scope Process Bypass` and `. scripts\env.ps1` per window) |
+| Build the runtime (hactool inside its driver) and the third-party libraries (deploys to every game in `games/`) | `cmake --preset default -B build && cmake --build build` (Windows: `scripts\bootstrap.ps1` once, `Set-ExecutionPolicy -Scope Process Bypass` and `. scripts\env.ps1` per window) |
 | Cross-build for Windows (llvm-mingw on PATH) | `cmake --preset windows-cross && cmake --build --preset windows-cross` |
 | Extract a dump | `build/scarletnx -x "Game.xci" --name Game [--update u.nsp]` |
 | Recompile a game (into `games/<id>/`, named by its title ID, or by a name given after the folder) | `build/scarletnx -r work/Game` |

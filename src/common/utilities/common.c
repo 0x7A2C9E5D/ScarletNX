@@ -537,6 +537,36 @@ int snx_copy_file(const char* src, const char* dst) {
     if (fclose(out)) rc = 1;
     return rc;
 }
+int snx_seek(FILE* f, SnxU64 offset) {
+#ifdef _WIN32
+    return (offset >> 63) != 0 || _fseeki64(f, offset, SEEK_SET) != 0;
+#else
+    if ((SnxU64)(off_t)offset != offset || (off_t)offset < 0) return 1;
+    return fseeko(f, (off_t)offset, SEEK_SET) != 0;
+#endif
+}
+int snx_copy_file_range(const char* src, SnxU64 offset, SnxU64 size, const char* dst) {
+    unsigned char buf[65536];
+    FILE *in = snx_fopen(src, "rb"), *out;
+    size_t n;
+    int rc = 0;
+    if (!in) return 1;
+    if (snx_seek(in, offset) || !(out = snx_fopen(dst, "wb"))) {
+        fclose(in);
+        return 1;
+    }
+    while (size) {
+        n = size < sizeof(buf) ? (size_t)size : sizeof(buf);
+        if (fread(buf, 1, n, in) != n || fwrite(buf, 1, n, out) != n) {
+            rc = 1;
+            break;
+        }
+        size -= n;
+    }
+    fclose(in);
+    if (fclose(out)) rc = 1;
+    return rc;
+}
 int snx_link_file(const char* src, const char* dst) {
 #ifdef _WIN32
     wchar_t *a = wide(src), *b = wide(dst);

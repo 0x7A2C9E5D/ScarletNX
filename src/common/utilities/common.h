@@ -34,6 +34,8 @@ int snx_path_exists(const char* path);
 int snx_mkdirs(const char* path);
 int snx_remove_tree(const char* path);
 int snx_copy_file(const char* src, const char* dst);
+/* size bytes of src from offset into a new dst, in pieces: never the whole range in memory */
+int snx_copy_file_range(const char* src, SnxU64 offset, SnxU64 size, const char* dst);
 int snx_copy_tree(const char* src, const char* dst);
 /* dst a second name of the file src, on the same disk: nonzero when dst is there already, or the disk or system takes
    none (another volume, FAT), for the caller to copy instead */
@@ -142,6 +144,8 @@ int snx_run_stage(const char* const* argv, const char* cwd, const char* stage);
 /* As above, but intentional debugger stops do not abort the game. */
 int snx_run_debug_stage(const char* const* argv, const char* cwd, const char* stage);
 FILE* snx_fopen(const char* path, const char* mode);
+/* f to offset from its start, past 2 GiB too (fseek takes a long, 32 bits on Windows); 0, or nonzero */
+int snx_seek(FILE* f, SnxU64 offset);
 
 /* The game's name in a control.nacp: American English's, else the first language's that has one, in UTF-8 without
    control characters. 1 when it has one, else 0 and "" */

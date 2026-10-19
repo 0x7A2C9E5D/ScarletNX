@@ -8,8 +8,8 @@ Generated modules include runtime ABI code. Game assets, keys and firmware are e
 | Component | License |
 | --- | --- |
 | FFmpeg | LGPL-2.1-or-later |
-| hactool / cJSON / ConvertUTF | ISC / MIT / Unicode license |
-| LibHac storage code, ported into hactool by `cmake/hactool-libhac.patch` | MIT |
+| hactool / cJSON / ConvertUTF (`src/nx/runtime/driver/hactool`, with ScarletNX's changes) | ISC / MIT / Unicode license |
+| LibHac storage code, ported into hactool (`src/nx/runtime/driver/hactool/storage.c`) | MIT |
 | OpenSSL | Apache 2.0 |
 | Open Sans 1.101 (the shared fonts' stand-in, `cmake/shared_fonts.cmake`) | Apache 2.0 ([text](../dist/licenses/OpenSans/LICENSE)) |
 | yuzu's controller button glyphs (`font_nintendo_extended.cpp`, as Eden carries it) | GPL-2.0-or-later |
@@ -31,7 +31,7 @@ a source keep that source's copyright lines and license, most with the revision 
 
 | Where | From | License |
 | --- | --- | --- |
-| `cmake/hactool-libhac.patch` (the storages it adds to hactool) | LibHac, as Ryubing maintains it | MIT |
+| `src/nx/runtime/driver/hactool/storage.c` and `storage.h` (the storages added to hactool) | LibHac, as Ryubing maintains it | MIT |
 | `src/3ds/gpu/`, `src/3ds/audio/`, `src/3ds/services/dsp.c` | Azahar (Citra) | GPL-2.0-or-later |
 | `src/3ds/gpu/shader.c` and `shader.h` (the instruction fields) | nihstro | BSD-3-Clause |
 | `src/common/cpu/` (the recompiler's instruction semantics: `a64.c`, `a64_templates.inc`, the LLVM emitters and the libgccjit emitters derived from them, the A32/T32 block compiler) | QEMU's `target/arm/tcg/` | LGPL-2.1-or-later |
