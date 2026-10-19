@@ -172,8 +172,15 @@ static u32 g_tex_upload_gen;
 #define TEX_BAND (64ull << 20)
 
 /* 1 when every subresource was copied; 0 when memory or staging ran out, and upload_valid keeps it for a retry */
+static u64 g_tex_uploads, g_tex_upload_bytes; /* for the stats line */
+void vk_tex_stats(u64* uploads, u64* bytes) {
+    *uploads = g_tex_uploads;
+    *bytes = g_tex_upload_bytes;
+}
 static int tex_upload(Surf* t) {
     const VkFmt* f = &t->f;
+    g_tex_uploads++;
+    g_tex_upload_bytes += t->size;
     t->upload_valid = 0;
     t->wgen = ++g_tex_upload_gen; /* even a new texture at a reused address invalidates an old target's copy */
     vk_render_end();              /* copies and clears happen outside rendering passes */

@@ -324,6 +324,11 @@ static int code_same(const ShA* ca, u64 gva, u32 len, u64 qh) {
     return code_hash(gva, len, &hash) && hash == qh;
 }
 
+/* for the stats line: pipelines made, the GPU thread's time waiting for new ones, shaders translated and the time
+   their translation and modules took (all on the GPU thread) */
+static u64 g_pipes_new, g_pipe_wait_ns, g_sh_new, g_sh_ns;
+static u64 g_pipe_make_ns; /* the workers' time making pipelines, added atomically */
+static u64 g_pipe_hits;    /* pipelines the pipeline cache had */
 VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int_mask, u64 sint_mask, u32 rt_int,
                     u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed) {
     g_sh_ch = ch;
@@ -438,6 +443,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
             memcpy(s->si.gp_skip_mask, mask + 12, sizeof s->si.gp_skip_mask);
         }
         if (vk_corpus_dir()) shader_corpus_save(vk_corpus_dir(), code, mlen, 0x10000, stage, &s->si, h ^ mix);
+        u64 t0 = plat_ns();
         size_t nw = 0;
         u32* spv = vk_translate_spirv(code, 0x10000, stage, &s->si, &nw, sh_cb_read, &s->cbr);
         for (int i = 0; i < s->si.ntex; i++) s->indexed |= (s->si.tex[i].flags & SNX_TEX_INDEXED) != 0;
@@ -465,6 +471,8 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
             WARN("vulkan: shader %016llx (stage %d) not translated: %s\n", (unsigned long long)h, stage,
                  s->si.first_unsupported[0] ? s->si.first_unsupported : "unsupported feature or float controls");
         }
+        g_sh_new++;
+        g_sh_ns += plat_ns() - t0;
         s->next = g_shh[h & 1023];
         g_shh[h & 1023] = s;
     }
@@ -664,7 +672,12 @@ static VkPipeline pipe_create(const Pipe* e) {
                                            .pDynamicStates = dyn};
     VkFormat cf[8];
     for (u32 i = 0; i < k->ncolor; i++) cf[i] = (VkFormat)k->color[i];
+    /* whether the pipeline cache had it, for the stats line (core in Vulkan 1.3) */
+    VkPipelineCreationFeedback made = {0};
+    VkPipelineCreationFeedbackCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO,
+                                               .pPipelineCreationFeedback = &made};
     VkPipelineRenderingCreateInfo ri = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+                                        .pNext = &fi,
                                         .colorAttachmentCount = k->ncolor,
                                         .pColorAttachmentFormats = cf,
                                         .depthAttachmentFormat = (VkFormat)k->depth,
@@ -687,6 +700,8 @@ static VkPipeline pipe_create(const Pipe* e) {
                                        .layout = e->layout};
     VkPipeline p = VK_NULL_HANDLE;
     VK_OK(vkCreateGraphicsPipelines(g_vk.dev, g_pcache, 1, &gi, NULL, &p));
+    if (made.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT)
+        __atomic_add_fetch(&g_pipe_hits, 1, __ATOMIC_RELAXED);
     return p;
 }
 
@@ -706,7 +721,9 @@ static void pipe_worker(void* arg) {
         g_pj_head = e->job;
         if (!g_pj_head) g_pj_tail = NULL;
         pm_unlock(&g_pj_lock);
+        u64 t0 = plat_ns();
         p = pipe_create(e);
+        __atomic_add_fetch(&g_pipe_make_ns, plat_ns() - t0, __ATOMIC_RELAXED);
         __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);
         pm_lock(&g_pj_lock);
         e->p = p;
@@ -749,6 +766,7 @@ static VkPipeline pipeline_get(const PipeKey* k, i64 wait) {
     p->fs = k->fs ? k->fs : null_fs();
     p->next = g_pipeh[b];
     g_pipeh[b] = p;
+    g_pipes_new++;
     if (!g_opt_async_pipes) {
         p->p = pipe_create(p);
         __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);
@@ -777,17 +795,42 @@ static VkPipeline pipeline_get(const PipeKey* k, i64 wait) {
     g_pj_tail = p;
     pc_signal(&g_pj_work);
     pm_unlock(&g_pj_lock);
+    u64 t0 = plat_ns();
     got = pipe_wait(p, wait);
+    g_pipe_wait_ns += plat_ns() - t0;
     if (!got) {
         g_pipes_skipped++;
         LOG_LIMIT(8, "vulkan: a draw's pipeline is still being made: the draw is skipped until it is ready\n");
     }
     return got;
 }
-/* a new pipeline is waited for up to 3 ms: one the driver finds in its cache takes less */
-VkPipeline vk_pipeline_get(const PipeKey* k) { return pipeline_get(k, 3000000); }
+/* New pipelines are waited for 3 ms a frame in all, so one made quickly is drawn at once and a burst of them (a new
+   view: 20 to 70 in Tears of the Kingdom) skips its draws for a frame or two rather than stalling the frame. 3 ms for
+   each draw stalled such a frame for 50 to 100 ms, though the pipelines came from the driver's cache: on NVIDIA one takes
+   3.4 ms to make even then */
+#define PIPE_WAIT_FRAME 3000000
+static u32 g_wait_frame;
+static i64 g_wait_left;
+VkPipeline vk_pipeline_get(const PipeKey* k) {
+    if (g_wait_frame != g_vk_present) {
+        g_wait_frame = g_vk_present;
+        g_wait_left = PIPE_WAIT_FRAME;
+    }
+    u64 t0 = plat_ns();
+    VkPipeline p = pipeline_get(k, g_wait_left > 0 ? g_wait_left : 0);
+    g_wait_left -= (i64)(plat_ns() - t0);
+    return p;
+}
 VkPipeline vk_pipeline_get_now(const PipeKey* k) { return pipeline_get(k, -1); }
 u64 vk_pipelines_skipped(void) { return g_pipes_skipped; }
+void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms) {
+    *pipes = g_pipes_new;
+    *hits = __atomic_load_n(&g_pipe_hits, __ATOMIC_RELAXED);
+    *make_ms = __atomic_load_n(&g_pipe_make_ns, __ATOMIC_RELAXED) / 1000000;
+    *wait_ms = g_pipe_wait_ns / 1000000;
+    *shaders = g_sh_new;
+    *shader_ms = g_sh_ns / 1000000;
+}
 
 VkPipelineCache vk_pipeline_cache(void) {
     __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);

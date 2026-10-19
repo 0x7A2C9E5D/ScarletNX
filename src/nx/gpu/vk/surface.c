@@ -75,6 +75,8 @@ u32 vk_sc(u32 v) {
 }
 float vk_scf(float v) { return v * g_vk_scale; }
 
+static u64 g_rt_made; /* for the stats line */
+u64 vk_rt_made(void) { return g_rt_made; }
 static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 bh, u32 pitch, int is_rt, u32 layers) {
     Surf* s = calloc(1, sizeof *s);
     if (!s) return NULL;
@@ -91,6 +93,7 @@ static Surf* surf_create(u64 gva, u32 w, u32 h, VkFmt f, u32 fkey, u32 bl, u32 b
     s->bh = bh;
     s->pitch = pitch;
     s->is_rt = is_rt;
+    if (is_rt) g_rt_made++;
     if (is_rt) s->layer_size = bl ? bl_size(w * f.bpp, h, bh) : (u64)pitch * h;
     s->layout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageUsageFlags usage =

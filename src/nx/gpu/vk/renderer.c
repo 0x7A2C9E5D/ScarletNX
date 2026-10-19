@@ -359,6 +359,33 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
             VK_OK(r);
     }
     if (game) {
+        /* the time from the last present, for the stats line: frames slower than 50 ms (a hitch at any pace a game
+           runs at) and the slowest, since the last line */
+        static u64 last_present_ns, slow_frames, slowest_ns;
+        /* the counters as of the last present: a slow frame says what it did, which names what a hitch waited for */
+        static u64 was[10];
+        u64 now_ns = plat_ns(), is[10];
+        vk_pipeline_stats(&is[0], &is[1], &is[2], &is[3], &is[4], &is[5]);
+        vk_tex_stats(&is[6], &is[7]);
+        is[8] = vk_rt_made();
+        is[9] = g_vk_finish_ns / 1000000;
+        if (last_present_ns) {
+            u64 d = now_ns - last_present_ns;
+            if (d > 50000000) {
+                slow_frames++;
+                LOG_LIMIT(200,
+                          "vulkan: a %llu ms frame: %llu shaders translated (%llu ms), %llu pipelines made (%llu ms waited "
+                          "for), %llu render targets made, %llu texture uploads (%llu KB), %llu ms in finishes\n",
+                          (unsigned long long)(d / 1000000), (unsigned long long)(is[4] - was[4]),
+                          (unsigned long long)(is[5] - was[5]), (unsigned long long)(is[0] - was[0]),
+                          (unsigned long long)(is[3] - was[3]), (unsigned long long)(is[8] - was[8]),
+                          (unsigned long long)(is[6] - was[6]), (unsigned long long)((is[7] - was[7]) >> 10),
+                          (unsigned long long)(is[9] - was[9]));
+            }
+            if (d > slowest_ns) slowest_ns = d;
+        }
+        memcpy(was, is, sizeof was);
+        last_present_ns = now_ns;
         g_vk_present++;
         if (g_last) g_last->last_used = g_vk_present; /* what screenshots read stays */
         vk_tex_frame();
@@ -374,6 +401,20 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                 (unsigned long long)(g_vk_finish_ns / 1000000),
                 (unsigned long long)__atomic_load_n(&g_vk_release_forwards, __ATOMIC_RELAXED),
                 (unsigned long long)g_vk_dset_new, (unsigned long long)g_vk_dset_reused);
+            {
+                u64 pipes, hits, make_ms, pipe_ms, shaders, shader_ms, uploads, upload_bytes;
+                vk_pipeline_stats(&pipes, &hits, &make_ms, &pipe_ms, &shaders, &shader_ms);
+                vk_tex_stats(&uploads, &upload_bytes);
+                LOG("vulkan: %llu shaders translated (%llu ms), %llu pipelines made (%llu from the cache, %llu ms "
+                    "making, %llu ms waited for), %llu render targets made, %llu texture uploads (%llu MB); %llu "
+                    "frames over 50 ms in the last 600, the slowest %llu ms\n",
+                    (unsigned long long)shaders, (unsigned long long)shader_ms, (unsigned long long)pipes,
+                    (unsigned long long)hits, (unsigned long long)make_ms, (unsigned long long)pipe_ms,
+                    (unsigned long long)vk_rt_made(), (unsigned long long)uploads,
+                    (unsigned long long)(upload_bytes >> 20), (unsigned long long)slow_frames,
+                    (unsigned long long)(slowest_ns / 1000000));
+                slow_frames = slowest_ns = 0;
+            }
             LOG("vulkan: %llu draws sampled a target they render to in place (%llu barriers in passes, %llu passes "
                 "begun again), %llu through a copy\n",
                 (unsigned long long)g_vk_fb_draws, (unsigned long long)g_vk_fb_barriers,
