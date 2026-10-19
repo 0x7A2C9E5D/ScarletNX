@@ -147,9 +147,33 @@ void vk_cmd_init(void) {
 
 /* a ring grown for a burst goes once it has been mostly unused for a while (the frame's work is done, nothing reads
    it); the next allocation makes one of the usual size */
-static void ring_reset(Ring* r) {
+/* Whether the staging ring's memory should move, while it is idle: it is in a heap past the driver's budget for this
+   process (other programs' use taken out), or in host memory while a device-local heap the CPU maps has room for it
+   again (with a quarter to spare, so it doesn't go back and forth). The rings are made when there is room and kept,
+   and the BAR window's budget shrinks under them when the desktop takes more of it: 246 MiB on an RTX 2080 without
+   resizable BAR, of which the driver left this process 47 to 111 while its rings held 134 to 198. Past the budget the
+   driver moves the memory, and each CPU write to it faults: Tears of the Kingdom crawled at 10 frames a second for
+   twenty seconds, its GPU thread half in the kernel. A ring dropped here is made again under the budget
+   (ring_alloc's VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT), in host memory when the window is full */
+static int ring_misplaced(const Ring* r, const VmaBudget* b) {
+    const VkPhysicalDeviceMemoryProperties* mp;
+    VmaAllocationInfo ai;
+    u32 heap, t;
+    vmaGetAllocationInfo(g_vk.vma, r->mem, &ai);
+    vmaGetMemoryProperties(g_vk.vma, &mp);
+    heap = mp->memoryTypes[ai.memoryType].heapIndex;
+    if (b[heap].usage > b[heap].budget) return 1;
+    if (mp->memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) return 0;
+    for (t = 0; t < mp->memoryTypeCount; t++) {
+        VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+        u32 h = mp->memoryTypes[t].heapIndex;
+        if ((mp->memoryTypes[t].propertyFlags & want) == want && b[h].usage + r->cap < b[h].budget / 4 * 3) return 1;
+    }
+    return 0;
+}
+static void ring_reset(Ring* r, const VmaBudget* budget) {
     r->small = r->cap > STAGE_MIN && r->used <= r->cap / 4 ? r->small + 1 : 0;
-    if (r->small >= 300) {
+    if (r->small >= 300 || (budget && r->buf && ring_misplaced(r, budget))) {
         vmaDestroyBuffer(g_vk.vma, r->buf, r->mem);
         *r = (Ring){0};
     }
@@ -179,8 +203,13 @@ static void frame_recycle(Frame* f) {
     for (int i = 0; i < f->npool; i++) vkResetDescriptorPool(g_vk.dev, f->pool_d[i], 0);
     f->ipool = 0;
     memset(f->spare, 0, sizeof f->spare);
-    ring_reset(&f->stage);
-    ring_reset(&f->back);
+    {
+        VmaBudget budget[VK_MAX_MEMORY_HEAPS];
+        vmaSetCurrentFrameIndex(g_vk.vma, (u32)g_frame_id); /* VMA asks the driver for its budgets again */
+        vmaGetHeapBudgets(g_vk.vma, budget);
+        ring_reset(&f->stage, budget);
+    }
+    ring_reset(&f->back, NULL);
     vk_rec_frame_reset((u32)(f - g_fr)); /* the slot's sets made on the recording thread too */
     f->icb = 0;
     f->fresh = 0;
@@ -252,13 +281,20 @@ static u8* ring_alloc(Frame* f, Ring* r, u64 size, u64 align, VkBufferUsageFlags
 
 u8* vk_stage_output(u64 size, u64 align, VkBuffer* buf, u64* off, VmaAllocation* mem) {
     vk_cmd(); /* the ring is only reused once this frame's previous work is done */
-    /* written once from the CPU, read by the GPU: device-local when the CPU can map it (resizable BAR) */
+    /* written once from the CPU, read by the GPU: device-local when the CPU can map it (resizable BAR), as long as
+       that heap stays within its budget, else host memory. Without resizable BAR the window is small (246 MiB, a
+       budget of 196, on an RTX 2080) and the rings of the frames in flight, doubled for a frame's big uploads, went
+       past it: the driver then moved the memory, and every CPU write to it faulted in the kernel. Tears of the
+       Kingdom crawled at 10 frames a second for twenty seconds in one camera run of two, its GPU thread half in the
+       kernel. All of staging in host memory instead costs a quarter of the frame rate (the GPU reads draws' buffers
+       across PCIe), so only what doesn't fit goes there */
     return ring_alloc(&g_fr[g_cur], &g_fr[g_cur].stage, size, align,
                       VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                           VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                           VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                           VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT,
-                      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VMA_MEMORY_USAGE_AUTO, buf, off, mem);
+                      VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT,
+                      VMA_MEMORY_USAGE_AUTO, buf, off, mem);
 }
 u8* vk_stage(u64 size, u64 align, VkBuffer* buf, u64* off) { return vk_stage_output(size, align, buf, off, NULL); }
 

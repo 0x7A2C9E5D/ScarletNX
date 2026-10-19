@@ -294,7 +294,8 @@ static int create_device(void) {
     g_shader_stage_point_size = want->shaderTessellationAndGeometryPointSize != 0;
     g_shader_geometry = want->geometryShader != 0;
     g_shader_tessellation = want->tessellationShader != 0;
-    const char* ext[8];
+    const char* ext[12];
+    int has_budget = 0;
     u32 next = 0;
     int has_shader_clock = 0, has_feedback_dynamic = 0;
     if (!g_opt_headless) ext[next++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
@@ -313,11 +314,15 @@ static int create_device(void) {
                 has_feedback_dynamic = 1;
             if (!strcmp(e[i].extensionName, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME))
                 g_vk.has_local_read = 1;
+            /* the driver's budget for each heap, the other processes' use taken out, for VMA: without it VMA took
+               80% of a heap's size as its budget, blind to what the desktop and other programs hold */
+            if (!strcmp(e[i].extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) has_budget = 1;
             /* a portability driver's subset must be enabled when it has one (MoltenVK) */
             if (!strcmp(e[i].extensionName, "VK_KHR_portability_subset")) ext[next++] = "VK_KHR_portability_subset";
         }
         free(e);
     }
+    if (has_budget) ext[next++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
     VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT fdiv = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT};
     VkPhysicalDeviceCustomBorderColorFeaturesEXT fbc = {
@@ -469,7 +474,8 @@ static int create_device(void) {
                                   .instance = g_vk.instance,
                                   .preferredLargeHeapBlockSize = g_vk.alloc_cap < (256ull << 20) ? g_vk.alloc_cap : 0,
                                   .vulkanApiVersion = VK_API_VERSION_1_3,
-                                  .pVulkanFunctions = &vf};
+                                  .pVulkanFunctions = &vf,
+                                  .flags = has_budget ? VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT : 0};
     if (!VK_OK(vmaCreateAllocator(&vai, &g_vk.vma))) return 0;
     LOG("vulkan: %s, Vulkan %u.%u.%u, driver %08x, graphics queue family %u, compute %u%s\n", g_vk.props.deviceName,
         VK_API_VERSION_MAJOR(g_vk.props.apiVersion), VK_API_VERSION_MINOR(g_vk.props.apiVersion),

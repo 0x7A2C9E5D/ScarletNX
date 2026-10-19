@@ -422,6 +422,21 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                         (unsigned long long)early_made, (unsigned long long)early_hits,
                         (unsigned long long)early_left);
             }
+            {
+                /* each memory heap's use by this process and the driver's budget for it (VK_EXT_memory_budget): past
+                   the budget the driver moves memory, and the heap the CPU maps (the BAR window) is the one to watch */
+                VmaBudget b[VK_MAX_MEMORY_HEAPS];
+                const VkPhysicalDeviceMemoryProperties* mp;
+                char line[256];
+                size_t at = 0;
+                vmaGetHeapBudgets(g_vk.vma, b);
+                vmaGetMemoryProperties(g_vk.vma, &mp);
+                for (u32 q = 0; q < mp->memoryHeapCount && at < sizeof line; q++)
+                    at += (size_t)snprintf(line + at, sizeof line - at, "%s heap %u %llu of %llu MB", q ? "," : "", q,
+                                           (unsigned long long)(b[q].usage >> 20),
+                                           (unsigned long long)(b[q].budget >> 20));
+                LOG("vulkan: memory used and budgeted:%s\n", line);
+            }
             LOG("vulkan: %llu draws sampled a target they render to in place (%llu barriers in passes, %llu passes "
                 "begun again), %llu through a copy\n",
                 (unsigned long long)g_vk_fb_draws, (unsigned long long)g_vk_fb_barriers,
