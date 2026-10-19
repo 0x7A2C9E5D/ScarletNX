@@ -630,6 +630,8 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME trim_caches COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/trim_caches_test.py")
     # the check that keeps a pull request red while its title says donotmerge (scripts/pr-title.py, pr-title.yml)
     add_test(NAME pr_title COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/pr_title_test.py")
+    # a game's log as a sortable summary for reports (scripts/logscan.py)
+    add_test(NAME logscan COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/logscan_test.py")
     # the nightly release's title and notes (scripts/nightly-notes.py)
     add_test(NAME nightly_notes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/nightly_notes_test.py")
     # the builds published as releases and on Discord (scripts/publish-builds.py), against fakes. Where publish.yml

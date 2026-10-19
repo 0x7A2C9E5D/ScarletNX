@@ -647,14 +647,17 @@ static int nn_am_service_IApplicationFunctions_GetDesiredLanguage(SvcObj* self, 
     R_SUCCEED();
 }
 /* the NACP's display version, "1.0.0" for a game without one */
-static int nn_am_service_IApplicationFunctions_GetDisplayVersion(SvcObj* self, nn_oe_DisplayVersion* version) {
+void am_display_version(char version[16]) {
     const u8* p = am_nacp(NACP_DISPLAY_VERSION, 16);
-    (void)self;
     if (p)
-        memcpy(version->v, p, 16);
+        memcpy(version, p, 16);
     else
-        memcpy(version->v, "1.0.0", 6);
-    version->v[15] = 0;
+        memcpy(version, "1.0.0", 6);
+    version[15] = 0;
+}
+static int nn_am_service_IApplicationFunctions_GetDisplayVersion(SvcObj* self, nn_oe_DisplayVersion* version) {
+    (void)self;
+    am_display_version((char*)version->v);
     R_SUCCEED();
 }
 /* the account's (type 1) and the device's (3) save data: the size ExtendSaveData gave it, else the NACP's, 64 MiB each

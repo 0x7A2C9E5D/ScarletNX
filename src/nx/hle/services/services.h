@@ -12,6 +12,8 @@ void svc_fs_init(void);
 void svc_hid_init(void);
 void svc_vi_init(void);
 void svc_pl_init(void);
+/* the game's display version from its control.nacp ("1.0.0" without one), terminated, for the log's header */
+void am_display_version(char version[16]);
 /* how many nn::settings::Language values set knows, to check the language the settings file names */
 int set_language_count(void);
 #include "common/utilities/users.h" /* SNX_USERS_MAX, the .ini's user at most */

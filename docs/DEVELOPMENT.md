@@ -51,7 +51,14 @@ python3 tools/run_game.py <id> --runs 5 --seconds 60 --dump "$work/Game" --scrip
 python3 tools/symbols.py "$work/Game" cf34380
 python3 tools/disasm.py "$work/Game" NvRmStreamFlushSync
 python3 tools/disasm.py "$work/Game" cf34240 cf343c0
+python3 scripts/logscan.py "$games/<id>/<id>.log" [--format markdown]
 ```
+
+- `logscan.py`: a log (or a `.gz` of one, a player's report) as a summary: the build, title ID, game version and
+  GPU from the log's header, how the run ended, the game function it is pinned on (for `svcBreak`, the first frame
+  past the SDK's abort), the service commands the runtime doesn't implement, warnings, and a signature that is the
+  same for every log failing the same way. JSON (a line a log, versioned by `schema`) or a markdown summary for an
+  issue. Paths are shortened to `~`, and the crash report's code and memory dumps are left out.
 
 - Runtime: `--seconds=N` / `--frames=N`; `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
   `--script=ms:hexbuttons,...` (or `Nf:hexbuttons` to press at present N), `--press_len=ms` (default 300).

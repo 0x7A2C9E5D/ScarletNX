@@ -4,6 +4,7 @@
    order they depend on each other, the game's main thread; then the frontend's loop at the display's rate until the
    run ends, saving what outlives it */
 #include "nx/runtime/main.h"
+#include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
 #include "nx/gpu/gpu.h"
 #include "nx/gpu/nvn_trace.h"
@@ -401,7 +402,10 @@ int snx_main(int argc, char** argv) {
     clock_start();
     g_mod = mod; /* from here the log is a file, in the state folder */
     title = mod->title && mod->title[0] ? mod->title : g_exename;
-    LOG("ScarletNX - %s (%s%s)\n", title, g_exedir, g_exename);
+    /* the header scripts/logscan.py reads: no folder in it, since players attach the log to public reports and the
+       folder names their account */
+    LOG("ScarletNX - %s\n", title);
+    LOG("build: %s\n", snx_build_info());
     say_old_layout();
 
     fs_init(); /* the npdm is read through it, and mem_init's layout comes before */
@@ -418,6 +422,11 @@ int snx_main(int argc, char** argv) {
     if (!g_arm_mod) jit_init();
     read_npdm();
     svc_core_init();
+    {
+        char version[16];
+        am_display_version(version);
+        LOG("game: %016llx, version %s\n", (unsigned long long)g_hle.kernel.title_id, version);
+    }
     svc_fs_init();
     svc_hid_init();
     svc_vi_init();
