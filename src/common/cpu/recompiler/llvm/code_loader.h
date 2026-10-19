@@ -13,8 +13,8 @@
    The first two are shared memory mapped twice: the region in the arena, which code runs from and which never
    becomes writable, and a read-write view elsewhere that the loader writes through, with every address computed for
    the arena. So a load goes next to code other threads are running, on the same pages, with no page writable and
-   executable in one view (W^X) and no protection change per load. The data region is private memory, made read-write
-   a page at a time as loads reach it.
+   executable in one view (W^X) and no protection change per load (macOS has one view of them: below). The data region
+   is private memory, made read-write a page at a time as loads reach it.
 
    A load's symbols resolve to the load's own definitions first, then to the loader's table: the globals of earlier
    loads and the names given to snx_code_define (the runtime's functions and data, anywhere in the address space). A
@@ -29,7 +29,8 @@
    AArch64 needs more: the instruction cache is invalidated at the executable view's addresses, and every core of the
    process synchronizes its instruction stream (membarrier's PRIVATE_EXPEDITED_SYNC_CORE) before the address goes out,
    since a core may have fetched those bytes before they were written. An AArch64 Linux kernel without it (before
-   4.16) gets no loader.
+   4.16) gets no loader. XNU has no membarrier: on macOS each load stops every other thread of the process off its core
+   (thread_get_state), and a thread comes back through a context switch, which XNU synchronizes.
 
    x86-64 and AArch64 ELF hosts with memfd_create (Linux) or SHM_ANON (FreeBSD), and x86-64 Windows 10 (1803) and
    later, whose objects are COFF. There the views are a pagefile-backed section (CreateFileMapping, with
@@ -38,7 +39,14 @@
    read-write anywhere. A COFF load's function table (.pdata) is registered with RtlAddFunctionTable, the arena's start
    its image base, so exceptions and longjmp unwind through JIT code as through a module's. Not PowerPC64, whose AOT
    module keeps one TOC in r2 (link_elf.c): a JIT load's calls into the runtime would change TOCs, which takes stubs
-   this loader doesn't write */
+   this loader doesn't write.
+
+   macOS on Apple silicon loads ELF objects too, which the IR backend writes there with Darwin's calling convention
+   (snx_ir_new_jit). Memory becomes executable there only as MAP_JIT memory, which can't be shared or placed: the code
+   and read-only data are one MAP_JIT mapping, which each thread sees either writable or executable
+   (pthread_jit_write_protect_np). The loading thread sees it writable while it writes a load, every other thread
+   executable, so no thread can write and run it at once, and nothing loaded may run on the loading thread during
+   snx_code_load (the resolver included). Not iOS, where an app may not make memory executable */
 #ifndef SNX_RECOMPILER_LLVM_CODE_LOADER_H
 #define SNX_RECOMPILER_LLVM_CODE_LOADER_H
 #include "common/utilities/common.h"

@@ -41,7 +41,7 @@ int main(void) {
         fprintf(stderr, "%s\n", error);
         return 1;
     }
-    ir = snx_ir_new("unwind", '2', error, sizeof(error));
+    ir = snx_ir_new_jit("unwind", '2', error, sizeof(error));
     if (!ir) {
         fprintf(stderr, "%s\n", error);
         return 1;

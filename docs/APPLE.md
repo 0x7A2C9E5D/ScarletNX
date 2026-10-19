@@ -47,6 +47,11 @@ The IPA is unsigned: AltStore, SideStore or a developer account signs it for the
 `dist/apple/ScarletNX.entitlements` (the larger address space and memory limit a game needs). It holds MoltenVK's
 framework.
 
+Code compiled while a game runs on macOS, 32-bit games' blocks and the runtime JIT's functions, goes through the
+runtime's own loader (`src/common/cpu/recompiler/llvm/code_loader.c`). LLVM writes it as ELF objects with Darwin's
+calling convention, and the loader places them in `MAP_JIT` memory, which each thread sees either writable or
+executable. The app is signed without the hardened runtime, so `MAP_JIT` needs no entitlement.
+
 ## What is missing
 
 Apple silicon's 16 KiB pages no longer stop the runtime: it commits guest memory in whole host pages, as on

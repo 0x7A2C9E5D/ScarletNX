@@ -259,6 +259,7 @@ static int object_for(const char* triple, const char* callee_name, const char* d
     return 0;
 }
 
+#ifndef __APPLE__ /* the AOT checks' objects: macOS links no ELF module (link_elf.c) */
 static int object(const char* callee_name, const char* data_name, const char* caller_name, unsigned char** data,
                   size_t* size) {
     return object_for("aarch64-unknown-linux-gnu", callee_name, data_name, caller_name, data, size);
@@ -284,6 +285,7 @@ static int definitions_for(const char* triple, unsigned char** data, size_t* siz
 static int definitions(unsigned char** data, size_t* size) {
     return definitions_for("aarch64-unknown-linux-gnu", data, size);
 }
+#endif
 
 /* the first B or BL of the function at address, before its RET: its target (0 for none) */
 static uint64_t first_branch(uint64_t address) {
@@ -312,18 +314,70 @@ static uint64_t first_got_load(uint64_t address) {
 static SnxU64 probe_data = 0x1234;
 static SnxU64 probe_fn(SnxU64 a) { return a; }
 
-static int llvm_objects(void) {
+/* JIT: triple's objects loaded into an AArch64 arena. ext_fn and ext_data are in this executable, outside the arena:
+   the call goes through an indirect stub, the data through a GOT slot */
+static int jit_objects(const char* triple) {
     char error[1024];
-    unsigned char *caller_data, *defs_data, *second_data;
-    size_t caller_size, defs_size, second_size, i;
-    SnxLinkInput inputs[2];
-    SnxLinkOutput linked;
+    unsigned char *caller_data, *second_data;
+    size_t caller_size, second_size;
+    SnxLinkInput input;
     const char* names[1];
-    const char* exports[1] = {"caller"};
     SnxU64 caller, second, target, slot;
     SnxCodeLoader* loader;
     int indirect = -1;
-    const Elf64_Ehdr* eh;
+    if (object_for(triple, "ext_fn", "ext_data", "caller", &caller_data, &caller_size) ||
+        object_for(triple, "caller", "ext_data", "second", &second_data, &second_size))
+        return 1;
+    loader = snx_code_loader_new_machine(0, EM_AARCH64, error, sizeof(error));
+    if (!loader) return snx_error("loader: %s", error);
+    if (snx_code_define(loader, "ext_fn", (SnxU64)(size_t)&probe_fn) ||
+        snx_code_define(loader, "ext_data", (SnxU64)(size_t)&probe_data))
+        return snx_error("loader: defined twice");
+    input.data = caller_data;
+    input.size = caller_size;
+    input.name = "caller";
+    names[0] = "caller";
+    if (snx_code_load(loader, &input, 1, names, 1, &caller, error, sizeof(error)))
+        return snx_error("loader (%s): %s", triple, error);
+    target = first_branch(caller);
+    if (target == (SnxU64)(size_t)&probe_fn)
+        printf("the arena is within 128 MiB of this executable: no far call to check\n");
+    else {
+        check(target && stub_target(target, &indirect) && indirect == 1, "far call through an indirect stub");
+        slot = stub_target(target, &indirect);
+        check(slot && get64((const unsigned char*)(size_t)slot) == (SnxU64)(size_t)&probe_fn, "stub's GOT slot");
+    }
+    slot = first_got_load(caller);
+    check(slot && get64((const unsigned char*)(size_t)slot) == (SnxU64)(size_t)&probe_data, "data's GOT slot");
+    /* a later unit calling the first, in the arena and in reach: directly */
+    input.data = second_data;
+    input.size = second_size;
+    input.name = "second";
+    names[0] = "second";
+    if (snx_code_load(loader, &input, 1, names, 1, &second, error, sizeof(error)))
+        return snx_error("loader (%s): %s", triple, error);
+    check(first_branch(second) == caller, "near call to an earlier load, direct");
+    /* and one whose callee is in the arena but beyond B's 128 MiB: through a direct stub (ADRP, ADD) */
+    if (snx_code_define(loader, "far_in_arena", caller + ((SnxU64)300 << 20))) return snx_error("loader: defined");
+    free(second_data);
+    if (object_for(triple, "far_in_arena", "ext_data", "third", &second_data, &second_size)) return 1;
+    input.data = second_data;
+    input.size = second_size;
+    input.name = "third";
+    names[0] = "third";
+    if (snx_code_load(loader, &input, 1, names, 1, &second, error, sizeof(error)))
+        return snx_error("loader (%s): %s", triple, error);
+    target = first_branch(second);
+    check(target && stub_target(target, &indirect) == caller + ((SnxU64)300 << 20) && indirect == 0,
+          "call to a far symbol in the arena through a direct stub");
+    snx_code_loader_free(loader);
+    free(caller_data);
+    free(second_data);
+    return 0;
+}
+
+static int llvm_objects(void) {
+    char error[1024];
     LLVMInitializeAllTargetInfos();
     LLVMInitializeAllTargets();
     LLVMInitializeAllTargetMCs();
@@ -337,81 +391,50 @@ static int llvm_objects(void) {
         }
         snx_ir_free(probe);
     }
-    if (object("ext_fn", "ext_data", "caller", &caller_data, &caller_size) || definitions(&defs_data, &defs_size) ||
-        object("caller", "ext_data", "second", &second_data, &second_size))
-        return 1;
-    /* AOT: one AArch64 module, rebased with R_AARCH64_RELATIVE (the GOT slot of ext_data at least) */
-    inputs[0].data = caller_data;
-    inputs[0].size = caller_size;
-    inputs[0].name = "caller";
-    inputs[1].data = defs_data;
-    inputs[1].size = defs_size;
-    inputs[1].name = "definitions";
-    if (snx_link(inputs, 2, exports, 1, "caller.so", &linked, error, sizeof(error)))
-        return snx_error("link: %s", error);
-    eh = (const Elf64_Ehdr*)(const void*)linked.data;
-    check(eh->e_machine == EM_AARCH64 && eh->e_type == ET_DYN, "AArch64 module header");
+#ifndef __APPLE__ /* where the AOT linker writes no ELF module (link_elf.c) */
     {
-        const Elf64_Shdr* sh = (const Elf64_Shdr*)(const void*)(linked.data + eh->e_shoff);
-        size_t relatives = 0, others = 0;
-        for (i = 0; i < eh->e_shnum; ++i)
-            if (sh[i].sh_type == SHT_RELA) {
-                const Elf64_Rela* r = (const Elf64_Rela*)(const void*)(linked.data + sh[i].sh_offset);
-                size_t k;
-                for (k = 0; k < sh[i].sh_size / sizeof(Elf64_Rela); ++k)
-                    ELF64_R_TYPE(r[k].r_info) == SNX_A64_RELATIVE ? ++relatives : ++others;
-            }
-        check(relatives >= 1 && !others, "AArch64 module's dynamic relocations are R_AARCH64_RELATIVE");
+        unsigned char *caller_data, *defs_data;
+        size_t caller_size, defs_size, i;
+        SnxLinkInput inputs[2];
+        SnxLinkOutput linked;
+        const char* exports[1] = {"caller"};
+        const Elf64_Ehdr* eh;
+        if (object("ext_fn", "ext_data", "caller", &caller_data, &caller_size) || definitions(&defs_data, &defs_size))
+            return 1;
+        /* AOT: one AArch64 module, rebased with R_AARCH64_RELATIVE (the GOT slot of ext_data at least) */
+        inputs[0].data = caller_data;
+        inputs[0].size = caller_size;
+        inputs[0].name = "caller";
+        inputs[1].data = defs_data;
+        inputs[1].size = defs_size;
+        inputs[1].name = "definitions";
+        if (snx_link(inputs, 2, exports, 1, "caller.so", &linked, error, sizeof(error)))
+            return snx_error("link: %s", error);
+        eh = (const Elf64_Ehdr*)(const void*)linked.data;
+        check(eh->e_machine == EM_AARCH64 && eh->e_type == ET_DYN, "AArch64 module header");
+        {
+            const Elf64_Shdr* sh = (const Elf64_Shdr*)(const void*)(linked.data + eh->e_shoff);
+            size_t relatives = 0, others = 0;
+            for (i = 0; i < eh->e_shnum; ++i)
+                if (sh[i].sh_type == SHT_RELA) {
+                    const Elf64_Rela* r = (const Elf64_Rela*)(const void*)(linked.data + sh[i].sh_offset);
+                    size_t k;
+                    for (k = 0; k < sh[i].sh_size / sizeof(Elf64_Rela); ++k)
+                        ELF64_R_TYPE(r[k].r_info) == SNX_A64_RELATIVE ? ++relatives : ++others;
+                }
+            check(relatives >= 1 && !others, "AArch64 module's dynamic relocations are R_AARCH64_RELATIVE");
+        }
+        free(linked.data);
+        free(caller_data);
+        free(defs_data);
     }
-    free(linked.data);
-    /* JIT: ext_fn and ext_data in this executable, outside the arena: the call through an indirect stub, the data
-       through a GOT slot */
-    loader = snx_code_loader_new_machine(0, EM_AARCH64, error, sizeof(error));
-    if (!loader) return snx_error("loader: %s", error);
-    if (snx_code_define(loader, "ext_fn", (SnxU64)(size_t)&probe_fn) ||
-        snx_code_define(loader, "ext_data", (SnxU64)(size_t)&probe_data))
-        return snx_error("loader: defined twice");
-    names[0] = "caller";
-    if (snx_code_load(loader, &inputs[0], 1, names, 1, &caller, error, sizeof(error)))
-        return snx_error("loader: %s", error);
-    target = first_branch(caller);
-    if (target == (SnxU64)(size_t)&probe_fn)
-        printf("the arena is within 128 MiB of this executable: no far call to check\n");
-    else {
-        check(target && stub_target(target, &indirect) && indirect == 1, "far call through an indirect stub");
-        slot = stub_target(target, &indirect);
-        check(slot && get64((const unsigned char*)(size_t)slot) == (SnxU64)(size_t)&probe_fn, "stub's GOT slot");
-    }
-    slot = first_got_load(caller);
-    check(slot && get64((const unsigned char*)(size_t)slot) == (SnxU64)(size_t)&probe_data, "data's GOT slot");
-    /* a later unit calling the first, in the arena and in reach: directly */
-    inputs[0].data = second_data;
-    inputs[0].size = second_size;
-    inputs[0].name = "second";
-    names[0] = "second";
-    if (snx_code_load(loader, &inputs[0], 1, names, 1, &second, error, sizeof(error)))
-        return snx_error("loader: %s", error);
-    check(first_branch(second) == caller, "near call to an earlier load, direct");
-    /* and one whose callee is in the arena but beyond B's 128 MiB: through a direct stub (ADRP, ADD) */
-    if (snx_code_define(loader, "far_in_arena", caller + ((SnxU64)300 << 20))) return snx_error("loader: defined");
-    free(second_data);
-    if (object("far_in_arena", "ext_data", "third", &second_data, &second_size)) return 1;
-    inputs[0].data = second_data;
-    inputs[0].size = second_size;
-    inputs[0].name = "third";
-    names[0] = "third";
-    if (snx_code_load(loader, &inputs[0], 1, names, 1, &second, error, sizeof(error)))
-        return snx_error("loader: %s", error);
-    target = first_branch(second);
-    check(target && stub_target(target, &indirect) == caller + ((SnxU64)300 << 20) && indirect == 0,
-          "call to a far symbol in the arena through a direct stub");
-    snx_code_loader_free(loader);
-    free(caller_data);
-    free(defs_data);
-    free(second_data);
-    return 0;
+#endif
+    /* the JIT's objects on Linux and on macOS, where they are ELF with Darwin's calling convention (ir.c): both are
+       what elf_object.c reads, with the same relocations, and Darwin's names have no leading underscore in ELF */
+    return jit_objects("aarch64-unknown-linux-gnu") || jit_objects("arm64-apple-macosx11.0.0-elf");
 }
 
+#ifndef __APPLE__ /* AOT modules */
 /* an exported symbol's address in a linked module, from its .dynsym; 0 for none */
 static uint64_t export_address(const unsigned char* module, const char* name) {
     const Elf64_Ehdr* eh = (const Elf64_Ehdr*)(const void*)module;
@@ -488,6 +511,7 @@ static int ppc64le_objects(void) {
     free(defs_data);
     return 0;
 }
+#endif
 
 int main(void) {
     data_relocations();
@@ -495,7 +519,9 @@ int main(void) {
     veneers();
     ppc_relocations();
     if (llvm_objects()) ++failures;
+#ifndef __APPLE__ /* AOT modules, which macOS doesn't link as ELF (link_elf.c) */
     if (ppc64le_objects()) ++failures;
+#endif
     if (failures) {
         printf("%d failures\n", failures);
         return 1;

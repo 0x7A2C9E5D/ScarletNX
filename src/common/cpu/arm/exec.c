@@ -110,7 +110,7 @@ SnxArmExec* snx_arm_exec_new(char* error, size_t error_size) {
         snprintf(error, error_size, "out of memory");
         return NULL;
     }
-    e->ir = snx_ir_new("a32exec", BLOCK_OPT, error, error_size);
+    e->ir = snx_ir_new_jit("a32exec", BLOCK_OPT, error, error_size);
     if (e->ir) e->loader = snx_code_loader_new(0, error, error_size);
     /* the runtime library's functions blocks call (simd.h, arm.h), by the names the block compiler declares */
     if (!e->loader || snx_code_define(e->loader, "snx_arm_fp", (SnxU64)(uintptr_t)snx_arm_fp) ||

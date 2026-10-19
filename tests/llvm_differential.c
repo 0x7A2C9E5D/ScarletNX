@@ -353,7 +353,7 @@ static int load_probe(SnxCodeLoader* loader) {
     char error[1024];
     const char* names[1] = {"snx_test_probe"};
     SnxU64 address;
-    SnxIr* ir = snx_ir_new("probe", '2', error, sizeof(error));
+    SnxIr* ir = snx_ir_new_jit("probe", '2', error, sizeof(error));
     LLVMValueRef value, add, probe, args[1];
     LLVMTypeRef params[1];
     unsigned char* object;
@@ -662,7 +662,7 @@ int main(int argc, char** argv) {
     /* the LLVM backend: snx_ir_static_step for each word, linked with the runtime library */
     if (!quiet) printf("compiling the LLVM steps\n");
     if (snx_ir_init(error, sizeof(error))) return snx_error("%s", error);
-    ir = snx_ir_new("steps", '2', error, sizeof(error));
+    ir = jit ? snx_ir_new_jit("steps", '2', error, sizeof(error)) : snx_ir_new("steps", '2', error, sizeof(error));
     if (!ir) return snx_error("%s", error);
     if (portable) {
         static SnxIrFeatures plain_x86; /* x86-64, none of its extensions */

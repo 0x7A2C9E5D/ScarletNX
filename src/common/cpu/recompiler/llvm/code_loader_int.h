@@ -37,8 +37,13 @@ unsigned char* snx_code_at(const SnxCodeLoader* loader, uint64_t address);
 uint64_t snx_code_next_free(const SnxCodeLoader* loader, int region);
 /* The data region read-write up to end (an arena address), a page at a time. 0, or -1 with the reason in error */
 int snx_code_commit(SnxCodeLoader* loader, uint64_t end, char* error, size_t error_size);
-/* the code in [start, end) visible to instruction fetch on every core, before any address of it goes out */
-void snx_code_publish(const SnxCodeLoader* loader, uint64_t start, uint64_t end);
+/* the code in [start, end) visible to instruction fetch on every core, before any address of it goes out. 0, or -1
+   with the reason in error, the code then never to run */
+int snx_code_publish(const SnxCodeLoader* loader, uint64_t start, uint64_t end, char* error, size_t error_size);
+/* 1 before a load writes the arena, 0 after: on macOS, where the code and read-only data are MAP_JIT memory written
+   in place (code_loader.c's apple_arena), whether this thread sees them writable instead of executable, which no code
+   loaded may run meanwhile on this thread. Nothing elsewhere, where a load writes through the read-write views */
+void snx_code_writable(int writable);
 /* code_loader_coff.c's snx_code_load, for a loader of SNX_CODE_COFF_X64 */
 int snx_code_load_coff(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t count, const char* const* names,
                        size_t name_count, SnxU64* addresses, char* error, size_t error_size);

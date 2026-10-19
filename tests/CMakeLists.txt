@@ -848,8 +848,9 @@ add_executable(snx-test-code-loader-unwind code_loader_unwind.c)
 snx_test_target(snx-test-code-loader-unwind 11)
 target_link_libraries(snx-test-code-loader-unwind PRIVATE snx_llvm)
 add_test(NAME code_loader_unwind COMMAND snx-test-code-loader-unwind)
-if(NOT WIN32 AND NOT APPLE)
-    # the relocations both ELF paths share (elf_object.c), AArch64's included, checked on any ELF host
+if(NOT WIN32)
+    # the relocations both ELF paths share (elf_object.c), AArch64's included, checked on any ELF host and on macOS,
+    # whose JIT loads ELF objects
     add_executable(snx-test-elf-relocate elf_relocate.c)
     snx_test_target(snx-test-elf-relocate 11)
     target_link_libraries(snx-test-elf-relocate PRIVATE snx_llvm)
@@ -907,10 +908,9 @@ add_test(NAME recompiler_library COMMAND snx-test-recompiler-library)
 if(APPLE)
     # these build a game module and load it, which needs a Mach-O module the recompiler can't link yet
     # (src/common/cpu/recompiler/llvm/link.c, docs/APPLE.md), and 4 KiB host pages to run it: not run there. The
-    # in-process loader takes ELF objects, which Darwin can't load either (code_loader.c)
+    # in-process loader's tests run: it loads ELF objects on macOS too (code_loader.c)
     set_tests_properties(native_recompiler llvm_module recompiler_library llvm_differential_0 llvm_differential_1
-                         llvm_differential_2 llvm_differential_jit_0 llvm_differential_jit_1 llvm_differential_jit_2
-                         jit_service code_loader_unwind PROPERTIES DISABLED TRUE)
+                         llvm_differential_2 PROPERTIES DISABLED TRUE)
 endif()
 
 add_executable(snx_codegen_test codegen_test.c)

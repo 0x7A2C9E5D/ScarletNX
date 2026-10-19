@@ -532,6 +532,7 @@ int snx_code_load_coff(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t
     if (snx_code_commit(loader, end[SNX_CODE_DATA], error, error_size)) goto done;
     /* written from each region's first free byte, int3 between functions: a failed load leaves its bytes for the next
        to write over (code_loader.c) */
+    snx_code_writable(1);
     for (i = 0; i < SNX_CODE_REGIONS; ++i)
         memset(snx_code_at(loader, snx_code_next_free(loader, (int)i)), i == SNX_CODE_TEXT ? 0xCC : 0,
                (size_t)(end[i] - snx_code_next_free(loader, (int)i)));
@@ -570,7 +571,8 @@ int snx_code_load_coff(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t
     if (relocate(loader, &ld, error, error_size)) goto done;
     pdata_count = (size_t)(kind_size[K_PDATA] / 12);
     if (pdata_count) qsort(snx_code_at(loader, kind_address[K_PDATA]), pdata_count, 12, compare_entry);
-    snx_code_publish(loader, start[SNX_CODE_TEXT], end[SNX_CODE_TEXT]);
+    snx_code_writable(0);
+    if (snx_code_publish(loader, start[SNX_CODE_TEXT], end[SNX_CODE_TEXT], error, error_size)) goto done;
 #ifdef _WIN32
     /* the table where exceptions and longjmp find it: in the arena, read-only, for as long as the code lives */
     if (pdata_count && loader->machine == SNX_CODE_COFF_X64 &&
@@ -596,6 +598,7 @@ int snx_code_load_coff(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t
         if (end[i] > start[i]) loader->region[i].used = (size_t)(end[i] - ld.base - loader->region[i].start);
     rc = 0;
 done:
+    snx_code_writable(0); /* when a load failed while writing */
     for (i = 0; i < count; ++i) free(ld.objs[i].sections);
     free(ld.objs);
     snx_link_names_free(&ld.globals);

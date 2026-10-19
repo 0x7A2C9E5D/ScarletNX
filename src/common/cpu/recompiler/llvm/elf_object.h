@@ -6,13 +6,18 @@
    snx_elf_veneer), so code loaded into the process runs as the same code linked into a module. One set of objects is
    one machine: the machines' relocation numbers mean different things (AArch64's ILP32 ones and PowerPC64's overlap
    x86-64's), so every function that reads a type takes the machine too. The objects are in the host's byte order, as
-   they are linked or loaded where they run. Only the AOT linker takes PowerPC64's (code_loader.h). Not on Windows
-   or Darwin hosts, which have no <elf.h> and whose objects are COFF (link_coff.c) and Mach-O */
+   they are linked or loaded where they run. Only the AOT linker takes PowerPC64's (code_loader.h). Not on Windows,
+   whose objects are COFF (link_coff.c, code_loader_coff.c). Darwin has no <elf.h>: its definitions are elf_defs.h's,
+   for the JIT loader's ELF objects there (code_loader.c) */
 #ifndef SNX_RECOMPILER_LLVM_ELF_OBJECT_H
 #define SNX_RECOMPILER_LLVM_ELF_OBJECT_H
-#if !defined(_WIN32) && !defined(__APPLE__)
+#if !defined(_WIN32)
 #include "common/cpu/recompiler/llvm/link.h"
+#ifdef __APPLE__
+#include "common/cpu/recompiler/llvm/elf_defs.h"
+#else
 #include <elf.h>
+#endif
 #include <stdint.h>
 
 /* names newer than some systems' <elf.h> (FreeBSD's calls the unwind section SHT_AMD64_UNWIND) */

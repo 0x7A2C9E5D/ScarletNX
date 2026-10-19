@@ -70,11 +70,47 @@ static LLVMCodeGenOptLevel codegen_level(char opt) {
     }
 }
 
+/* The host's triple, for objects the JIT loader loads when jit is nonzero. The loader reads ELF (and Windows' COFF),
+   and Darwin's objects are Mach-O: there the triple names ELF as its object format (arm64-apple-darwin<version>-elf),
+   and the code stays Darwin's. LLVM's AArch64 backend picks the calling convention, the reserved registers and the
+   library calls by the operating system, not by the object format: DarwinPCS (variadic arguments on the stack, small
+   arguments extended by the caller), x18 and x29 never allocated, bzero and memset_pattern16 for memset (libc.inc).
+   Only the sections, relocations and symbol names (no leading underscore) are ELF's */
+static char* host_triple(int jit) {
+    char* triple = LLVMGetDefaultTargetTriple();
+#ifdef __APPLE__
+    if (jit && !strstr(triple, "-elf")) {
+        size_t n = strlen(triple);
+        char* elf = (char*)malloc(n + sizeof("-elf"));
+        if (elf) {
+            memcpy(elf, triple, n);
+            memcpy(elf + n, "-elf", sizeof("-elf"));
+            LLVMDisposeMessage(triple);
+            triple = LLVMCreateMessage(elf);
+            free(elf);
+        }
+    }
+#else
+    (void)jit;
+#endif
+    return triple;
+}
+
+static SnxIr* new_ir(const char* name, char opt, const char* target_triple, int jit, char* error, size_t error_size);
+
 SnxIr* snx_ir_new(const char* name, char opt, char* error, size_t error_size) {
-    return snx_ir_new_target(name, opt, NULL, error, error_size);
+    return new_ir(name, opt, NULL, 0, error, error_size);
+}
+
+SnxIr* snx_ir_new_jit(const char* name, char opt, char* error, size_t error_size) {
+    return new_ir(name, opt, NULL, 1, error, error_size);
 }
 
 SnxIr* snx_ir_new_target(const char* name, char opt, const char* target_triple, char* error, size_t error_size) {
+    return new_ir(name, opt, target_triple, 0, error, error_size);
+}
+
+static SnxIr* new_ir(const char* name, char opt, const char* target_triple, int jit, char* error, size_t error_size) {
     SnxIr* ir;
     char *triple, *cpu, *features, *message = NULL, *layout;
     int ppc;
@@ -83,7 +119,7 @@ SnxIr* snx_ir_new_target(const char* name, char opt, const char* target_triple, 
     LLVMTypeRef params[2];
     ir = (SnxIr*)calloc(1, sizeof(*ir));
     if (!ir) return NULL;
-    triple = target_triple ? LLVMCreateMessage(target_triple) : LLVMGetDefaultTargetTriple();
+    triple = target_triple ? LLVMCreateMessage(target_triple) : host_triple(jit);
     if (LLVMGetTargetFromTriple(triple, &target, &message)) {
         snprintf(error, error_size, "LLVM target %s: %s", triple, message ? message : "unavailable");
         LLVMDisposeMessage(message);

@@ -2,7 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 /* ELF64 x86-64, AArch64 and PowerPC64 relocatable objects: parsing, symbol resolution, relocation and the AArch64
    and PowerPC64 veneers for link_elf.c and code_loader.c */
-#if !defined(_WIN32) && !defined(__APPLE__)
+#if !defined(_WIN32)
 #define _POSIX_C_SOURCE 200809L /* snprintf */
 #include "common/cpu/recompiler/llvm/elf_object.h"
 #include <stdio.h>

@@ -371,7 +371,7 @@ static SnxU64 resolve_aot(void* user, const char* name) {
    loader's table, where every global stays */
 static int emit_unit(SnxJitService* s, SnxCodegen* codegen, const char* table_name, unsigned char** object,
                      size_t* size, char* error, size_t error_size) {
-    SnxIr* ir = snx_ir_new("jit", s->config.opt, error, error_size);
+    SnxIr* ir = snx_ir_new_jit("jit", s->config.opt, error, error_size);
     LLVMValueRef *functions, table;
     LLVMTypeRef type;
     size_t i;
