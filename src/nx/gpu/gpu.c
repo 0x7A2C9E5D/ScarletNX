@@ -83,8 +83,8 @@ int gmem_read(u64 gva, void* dst, u64 size) {
         !mem_pending(gva, size))
         return copy_runs(gva, (u8*)dst, NULL, size) ? 0 : -1;
     /* a queued release's payload is known: the stream reads it without waiting for the work before it, as the console's
-       GPU, in order, would find it there (TotK's conditional rendering read report pairs this way, waiting for the GPU
-       60 times a second) */
+       GPU, in order, would find it there (one game's conditional rendering read report pairs this way, waiting for the
+       GPU 60 times a second) */
     if (__atomic_load_n(&g_gpu_releases, __ATOMIC_ACQUIRE) && g_renderer->release_read) {
         int r = g_renderer->release_read(gva, dst, size);
         if (r > 0) return 0;
@@ -626,7 +626,7 @@ static void job_end(const GpuItem* j, GpuChannel* ch) {
     r3d_pending_flush();
     /* without a renderer that queues the increments, the work's results land before the game can see its fence. A
        renderer's queue lands them itself before each increment (release.c), so landing every pending result here
-       was a full GPU wait at the end of each submission, about 2 ms a frame in TotK */
+       was a full GPU wait at the end of each submission, about 2 ms a frame in one game */
     if (!g_renderer->stream_incr) gpu_signal_point();
     dma_snap_finish(j->chan, j->id);
     for (i = 0; i < j->incs; i++) stream_incr(j->chan);

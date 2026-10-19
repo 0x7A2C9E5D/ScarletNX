@@ -125,7 +125,7 @@ typedef struct {
     PMutex submit_lk;        /* a submission's promise and its place in the GPU queue, in the same order */
     /* each ctrl fd's 64 event slots, a table of ctrl_evt taken on first use and given back with the fd, under
        nvev_lk: 1 + its index, 0 for none. As on the console, the slots are the fd's (Ryujinx's NvHostCtrlDeviceFile
-       keeps them per open). Metroid Dread's GPU fence waits (one fd) and its movie player (another) both use slot 0,
+       keeps them per open). A game's GPU fence waits (one fd) and its movie player (another) both use slot 0,
        and with one table between them a thread resetting its event took the other's wake, which then waited for
        good */
     u32 ctrl_ev[NV_FDS];

@@ -33,7 +33,7 @@ static void draw_instances(GpuChannel* ch, MmeRec* rec, u32 begin, u32 count_met
     }
 }
 
-/* Indexed instanced draw (Eden: HLE_DrawIndexedIndirect, false; TotK's busiest macro). Parameters: topology, index
+/* Indexed instanced draw (Eden: HLE_DrawIndexedIndirect, false; one game's busiest macro). Parameters: topology, index
    count, instance count (masked with scratch 0xD1B), first index, base vertex, base instance. The base vertex goes to
    0x446 and 0x50D and the base instance to 0x50E for the draw, and they are zeroed after it */
 static int draw_indexed(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
@@ -166,7 +166,7 @@ static int color_masks(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
     return 1;
 }
 
-/* Indexed draw with its index buffer given in the call (Tears of the Kingdom's most called interpreted one).
+/* Indexed draw with its index buffer given in the call (one game's most called interpreted one).
    Parameters: topology, index buffer address high and low, index format, count. BEGIN, the buffer's address and
    format, first index 0 and the count, END */
 static int draw_indexed_inline(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {

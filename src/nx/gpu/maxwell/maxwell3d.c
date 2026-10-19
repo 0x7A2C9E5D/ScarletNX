@@ -21,7 +21,7 @@ static WritePages g_wgpu, g_wcpu;
 static u64 g_wgen;
 /* calls fn on each run of contiguous guest memory behind [gva, gva + size), from gmmu_run: every draw asks this of
    each render target, texture and buffer it binds, megabytes each, and a translation per page was the GPU thread's
-   largest cost in TotK */
+   largest cost in one game */
 static void guest_runs(u64 gva, u64 size, int (*fn)(u64 cpu, u64 n, void* ctx), void* ctx) {
     u64 left = gva + size < gva ? ~(u64)0 - gva : size;
     while (left) {
@@ -62,7 +62,7 @@ static int dirty_run(u64 cpu, u64 n, void* ctx) {
 /* Without g_wlk, which only orders the writers: a stamp is stored after the memory it is for is written, so a reader
    holding the lock could already see new bytes under an old stamp, and reading the tables lock-free (write_pages.c)
    tells no less. Every draw asks this of each buffer, texture and target, and the lock was 2% of the GPU thread in
-   TotK */
+   one game */
 int gpu_mem_dirty_since(u64 since, u64 a, u64 sz) {
     DirtyAsk q;
     if (!sz || since >= __atomic_load_n(&g_wgen, __ATOMIC_ACQUIRE)) return 0;

@@ -350,7 +350,7 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
                Vulkan. Neither is anything the game sees, so pending shader results don't land here: whatever reads
                guest memory lands the results over the bytes it reads (gmem_need, through gmem_ptr for textures and
                render targets), and a release lands them before the game can see it (release.c). Landing every
-               result at each of them cost TotK several vk_finish waits a frame */
+               result at each of them cost one game several vk_finish waits a frame */
             barrier(4);
             break;
         case 0x45: mme_upload_ptr(ch, v); break; /* the macro code's upload address, beginning an upload batch */

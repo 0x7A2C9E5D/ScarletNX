@@ -61,7 +61,7 @@ static int g_recording, g_landing;
 static int g_inflight; /* submitted and waited for in cs_land, results not landed yet */
 /* Submitted batches whose results haven't landed, oldest first. A batch is submitted when it is full, or when a
    release, a draw or a reader needs its results, and lands when something needs them: the release thread once the
-   batch is done, or a reader now. Landing each at its submit (with a fence wait) was 4 waits a frame in TotK. Each
+   batch is done, or a reader now. Landing each at its submit (with a fence wait) was 4 waits a frame in one game. Each
    keeps its command buffer, descriptor pool, arena and original bytes until it lands; the current batch (the globals
    above) records into others meanwhile. */
 typedef struct {
@@ -774,12 +774,12 @@ void vk_dispatch(GpuChannel* ch, const u32* q, u64 code) {
        pending compute results overlap land those first, before anything is put in the arena */
     int gfx = p->si.ntex > 0 || p->si.nimg > 0, overlap = 0, storage_images = 0, retries = 0;
     /* so does one whose storage buffers a draw's pending result covers: on the graphics queue, after that draw, it
-       reads the result on the GPU instead of the compute queue waiting for it to land (TotK: three a frame) */
+       reads the result on the GPU instead of the compute queue waiting for it to land (one game: three a frame) */
     for (i = 0; i < ng && !gfx; i++) gfx = sa[i] && vk_buf_pending(sa[i], ss[i]);
     for (i = 0; i < p->si.nimg; i++) storage_images |= p->si.img[i].type != 1;
     /* A graphics-queue dispatch without storage images binds like a draw: staged inputs, results pending in staging
        (buffer.c's GfxOut), landed when the guest needs them or once their submit is done. Landing each one at once
-       took a vk_finish per dispatch, about 9 a frame in TotK. Storage images still land at once (vk_surf_flush) */
+       took a vk_finish per dispatch, about 9 a frame in one game. Storage images still land at once (vk_surf_flush) */
     int deferred = gfx && !storage_images;
     /* a read-only input inside a pending result of this batch is read from the arena on the GPU, after a barrier
        (multi-pass skinning reads what the pass before wrote); any other overlap lands the results first */

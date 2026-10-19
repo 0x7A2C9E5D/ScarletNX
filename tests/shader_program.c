@@ -48,7 +48,7 @@ static void merge(void) {
     check(out[14] == SCHED && out[15] == b[11] && out[16] == b[12] && !out[17], "VertexB follows at the next bundle");
     check(shader_merge_dual((const u8*)a, (const u8*)b, (u8*)out, 16 * 8) == 0, "a merge that doesn't fit fails");
     /* VertexA ending before its last bundle does: the bundle's word after the EXIT is VertexA's, never zero, which no
-       instruction is (Catherine's dual vertex programs end in a BRA to itself with a word left in the bundle) */
+       instruction is (a game's dual vertex programs end in a BRA to itself with a word left in the bundle) */
     a[12] = EXIT;
     a[13] = NOP;
     check(shader_merge_dual((const u8*)a, (const u8*)b, (u8*)out, sizeof out) == 1 && out[13] == NOP &&

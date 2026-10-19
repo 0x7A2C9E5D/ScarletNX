@@ -534,7 +534,7 @@ extern int g_vk_preserve_infnan64;
 extern int g_vk_flush_denorm;
 extern VkShaderStageFlags g_vk_subgroup_stages;
 /* by set, shader_vk_set(stage): [0] without the indexed texture arrays, [1] with them. A set holding 512 array
-   descriptors cost the driver twice the time to bind (TotK's 6,700 draws a frame), so only an indexed shader's has
+   descriptors cost the driver twice the time to bind (one game's 6,700 draws a frame), so only an indexed shader's has
    them */
 extern VkDescriptorSetLayout g_vk_dslayout[2][5];
 extern u32 g_vk_stage_sets; /* sets in the pipeline layout: 5, or 2 without the tessellation and geometry stages */

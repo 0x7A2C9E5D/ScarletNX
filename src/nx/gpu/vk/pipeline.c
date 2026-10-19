@@ -544,7 +544,7 @@ static VkShaderModule null_fs(void) {
 
 /* ------------------------------------------------------------ pipelines */
 /* With async_pipelines=1 a pipeline the cache doesn't have is made on a worker thread: the driver's compile of a big
-   shader takes up to seconds, which stalled the GPU thread whenever Tears of the Kingdom showed something new (1.5 s
+   shader takes up to seconds, which stalled the GPU thread whenever one game showed something new (1.5 s
    for two pipelines once). A draw waits a little for its new pipeline, and is skipped until it is ready past that, as
    Eden's asynchronous shaders do. It is off by default, as Eden's is: a skipped draw is missing from its frame, which
    a test that draws once and reads the result back sees as wrong (edenprobe failed 190 cases with it on). Off, a new
@@ -566,7 +566,7 @@ typedef struct Pipe {
 static Pipe* g_pipeh[PIPEH];
 
 /* The shaders and pipelines of earlier runs (pipeline_file.c), so that each run doesn't translate the same shaders
-   and make the same pipelines again as views come into sight: Tears of the Kingdom made 440 pipelines and 500 shaders
+   and make the same pipelines again as views come into sight: one game made 440 pipelines and 500 shaders
    every session, each pipeline 3.4 ms on NVIDIA even from the driver's cache and 125 ms without, its draws skipped
    meanwhile. A thread of its own reads the file at startup, makes the modules and queues the pipelines to the workers
    behind any draw's; the first draw puts what it made in the tables (pf_merge), where vk_shader_get finds a shader
@@ -901,7 +901,7 @@ static VkPipeline pipeline_get(const PipeKey* k, i64 wait) {
     return got;
 }
 /* New pipelines are waited for 3 ms a frame in all, so one made quickly is drawn at once and a burst of them (a new
-   view: 20 to 70 in Tears of the Kingdom) skips its draws for a frame or two rather than stalling the frame. 3 ms for
+   view: 20 to 70 in one game) skips its draws for a frame or two rather than stalling the frame. 3 ms for
    each draw stalled such a frame for 50 to 100 ms, though the pipelines came from the driver's cache: on NVIDIA one takes
    3.4 ms to make even then */
 #define PIPE_WAIT_FRAME 3000000

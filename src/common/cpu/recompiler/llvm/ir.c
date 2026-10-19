@@ -675,7 +675,7 @@ LLVMBasicBlockRef ir_block(SnxIr* ir, const char* name) { return LLVMAppendBasic
    made. Without that, SROA reads the local's previous contents wherever the first write leaves part of it (a lane,
    r.s[i]=...) or has another type than the one SROA gives the local (a <16 x i8> store into a local it makes
    <4 x i32>), and mem2reg then carries the local around the whole function: a PHI per local in every block that
-   joins paths (labels, the dispatch, loop heads). Tears of the Kingdom's large functions got 1388 PHIs in each such
+   joins paths (labels, the dispatch, loop heads). One game's large functions got 1388 PHIs in each such
    block, which InstCombine compares pairwise, for hours per code unit. The zeroing is a copy from a constant because
    SROA turns a copy of the whole local into a store of its own type, while a store or memset of another vector type
    loads the old value again. Every emitter writes all of a local before reading it, so the zero folds away */

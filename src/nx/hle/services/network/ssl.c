@@ -8,7 +8,7 @@
    socket's own mode (the game shares the socket), and a Blocking connection waits in snx_net_poll, as the stack's own
    calls do.
 
-   Layouts from Switchbrew's SSL services page, libnx's ssl.c and the SDK's client templates (Catherine's sdk). Result
+   Layouts from Switchbrew's SSL services page, libnx's ssl.c and the SDK's client templates (a game's SDK). Result
    descriptions from Switchbrew's error codes (module 123) and Ryujinx's ResultCode.cs (NoSocket, InvalidSocket,
    InvalidOption, CertBufferTooSmall, AlreadyInUse); InternalError (999) is Eden's, for an error the console's list
    has no name for. Eden's ssl.cpp forces the verify option to 0 and swaps SetOption's arguments; neither is done
