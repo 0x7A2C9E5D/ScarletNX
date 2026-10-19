@@ -67,6 +67,20 @@ typedef struct {
     unsigned users;     /* under lock: batches compiling with its image */
 } Region;
 
+/* The added regions by page, for region_of: region_top[pc >> 24] is a leaf of 4096 entries, one per 4 KiB page of that
+   16 MiB chunk, each the region's index in regions (0: none). The top grows toward higher chunks under the lock with
+   an atomic pointer swap; the tops it had live on in older, until the service is freed, as region_of may be reading
+   one. A leaf is added when an image first reaches its chunk, and its pages are set after the region's own release
+   store, so a thread that reads an entry sees the region complete */
+#define REGION_TOP_SHIFT    24
+#define REGION_PAGE_SHIFT   12
+#define REGION_LEAF_ENTRIES (1u << (REGION_TOP_SHIFT - REGION_PAGE_SHIFT))
+typedef struct RegionTop {
+    size_t count; /* entries in leaves */
+    struct RegionTop* older;
+    unsigned short* leaves[];
+} RegionTop;
+
 /* The cache file (SnxJitConfig.cache_path) as this run read it: its records, and the leaders of their functions by pc
    for the batches to find. A record is one unit: its table's name, its functions (each its leaders, its instructions
    as runs of addresses and a hash of their words) and its object. The file: CACHE_MAGIC, the key's length and the key
@@ -96,6 +110,7 @@ struct SnxJitService {
     SnxJitConfig config;
     SnxCodeLoader* loader;
     Region regions[1 + SNX_JIT_IMAGES];
+    RegionTop* region_top; /* under lock for writes, read without it (acquire): the added regions' pages */
     /* the pcs: the misses and warm pcs queued, compiling or failed, and every leader of every compiled function, for
        a pc outside the dispatch table or one whose slot holds something else (a wrapper). An open-addressing table,
        at most half full, under lock */
@@ -271,10 +286,21 @@ static int in_text(const SnxJitService* s, SnxU64 pc) {
 /* the region whose table has a slot for pc, or NULL */
 static Region* region_of(const SnxJitService* s, SnxU64 pc) {
     Region* r = (Region*)&s->regions[0];
+    RegionTop* top;
+    unsigned short index;
     SnxU64 hi;
     size_t i;
     if (pc & 3) return NULL;
     if (pc - r->lo < r->hi - r->lo) return r;
+    top = __atomic_load_n(&s->region_top, __ATOMIC_ACQUIRE);
+    if (top && (size_t)(pc >> REGION_TOP_SHIFT) < top->count) {
+        unsigned short* leaf = __atomic_load_n(&top->leaves[pc >> REGION_TOP_SHIFT], __ATOMIC_ACQUIRE);
+        if (leaf) {
+            index = __atomic_load_n(&leaf[(pc >> REGION_PAGE_SHIFT) & (REGION_LEAF_ENTRIES - 1)], __ATOMIC_ACQUIRE);
+            if (index) return (Region*)&s->regions[index]; /* 1-based; regions[0] is never an image */
+        }
+    }
+    /* a pc outside the map's coverage, or under a leaf whose entry isn't set: the regions themselves */
     for (i = 1; i <= SNX_JIT_IMAGES; ++i) {
         r = (Region*)&s->regions[i];
         hi = __atomic_load_n(&r->hi, __ATOMIC_ACQUIRE);
@@ -1203,6 +1229,71 @@ GuestFn snx_jit_wait(SnxJitService* s, SnxU64 pc) {
     return code;
 }
 
+/* under lock: chunk i's part of [lo, hi), page-aligned */
+static void region_chunk_range(SnxU64 lo, SnxU64 hi, size_t i, SnxU64* from, SnxU64* to) {
+    SnxU64 base = (SnxU64)i << REGION_TOP_SHIFT, end = base + (1u << REGION_TOP_SHIFT);
+    *from = (lo > base ? lo : base) & ~(SnxU64)0xFFF;
+    *to = hi < end ? hi : end;
+}
+
+/* under lock: the top has an entry for chunk last */
+static int region_top_cover(SnxJitService* s, size_t last) {
+    RegionTop* top = s->region_top;
+    RegionTop* grown;
+    size_t count = top ? top->count : 0, n;
+    if (last < count) return 0;
+    n = count ? count : 16;
+    while (n <= last) n *= 2;
+    grown = (RegionTop*)calloc(1, sizeof(*grown) + n * sizeof(*grown->leaves));
+    if (!grown) return -1;
+    if (top) memcpy(grown->leaves, top->leaves, count * sizeof(*grown->leaves));
+    grown->count = n;
+    grown->older = top;
+    __atomic_store_n(&s->region_top, grown, __ATOMIC_RELEASE); /* readers may hold the old top until free */
+    return 0;
+}
+
+/* under lock: the pages of [lo, hi) read as the region at index (regions, 1-based). A leaf or top the allocation can't
+   carve out leaves those pages to region_of's scan */
+static void region_map_add(SnxJitService* s, SnxU64 lo, SnxU64 hi, unsigned index) {
+    size_t first = (size_t)(lo >> REGION_TOP_SHIFT), last = (size_t)((hi - 1) >> REGION_TOP_SHIFT), i;
+    SnxU64 from, to, pc;
+    if (region_top_cover(s, last)) return;
+    for (i = first; i <= last; ++i) {
+        RegionTop* top = s->region_top;
+        unsigned short* leaf = __atomic_load_n(&top->leaves[i], __ATOMIC_RELAXED);
+        if (!leaf) {
+            leaf = (unsigned short*)calloc(REGION_LEAF_ENTRIES, sizeof(*leaf));
+            if (!leaf) continue; /* region_of scans for them */
+            __atomic_store_n(&top->leaves[i], leaf, __ATOMIC_RELEASE);
+        }
+        region_chunk_range(lo, hi, i, &from, &to);
+        for (pc = from; pc < to; pc += 0x1000)
+            __atomic_store_n(&leaf[(pc >> REGION_PAGE_SHIFT) & (REGION_LEAF_ENTRIES - 1)], (unsigned short)index,
+                             __ATOMIC_RELEASE);
+    }
+}
+
+/* under lock: the pages of [lo, hi) read as no added region again */
+static void region_map_remove(SnxJitService* s, SnxU64 lo, SnxU64 hi) {
+    RegionTop* top = s->region_top;
+    size_t first, last, i;
+    SnxU64 from, to, pc;
+    if (!top) return;
+    first = (size_t)(lo >> REGION_TOP_SHIFT);
+    last = (size_t)((hi - 1) >> REGION_TOP_SHIFT);
+    if (first >= top->count) return;
+    if (last >= top->count) last = top->count - 1;
+    for (i = first; i <= last; ++i) {
+        unsigned short* leaf = __atomic_load_n(&top->leaves[i], __ATOMIC_RELAXED);
+        if (!leaf) continue;
+        region_chunk_range(lo, hi, i, &from, &to);
+        for (pc = from; pc < to; pc += 0x1000)
+            __atomic_store_n(&leaf[(pc >> REGION_PAGE_SHIFT) & (REGION_LEAF_ENTRIES - 1)], (unsigned short)0,
+                             __ATOMIC_RELEASE);
+    }
+}
+
 int snx_jit_add_image(SnxJitService* s, const SnxCodeImage* image) {
     SnxU64 lo = image->base + image->text_off, hi = lo + image->text_size;
     size_t i, n = (size_t)(image->text_size / 4);
@@ -1235,6 +1326,7 @@ int snx_jit_add_image(SnxJitService* s, const SnxCodeImage* image) {
     r->image = *image;
     __atomic_store_n(&r->lo, lo, __ATOMIC_RELAXED);
     __atomic_store_n(&r->hi, hi, __ATOMIC_RELEASE); /* last: region_of finds the region complete */
+    region_map_add(s, lo, hi, (unsigned)(r - s->regions));
     unlock(&s->lock);
     return 0;
 }
@@ -1254,6 +1346,7 @@ void snx_jit_remove_image(SnxJitService* s, SnxU64 base) {
     }
     lo = r->lo;
     hi = r->hi;
+    region_map_remove(s, lo, hi); /* its pages read as no region again */
     __atomic_store_n(&r->hi, 0, __ATOMIC_RELEASE); /* no batch takes the image, no publish finds the table */
     while (r->users) cond_wait(&s->released, &s->lock);
     /* its pcs are new to the service again: queued ones are skipped when taken, compiled ones forgotten */
@@ -1407,6 +1500,18 @@ void snx_jit_service_free(SnxJitService* s) {
     for (i = 0; i <= SNX_JIT_IMAGES; ++i) {
         free(s->regions[i].pending);
         if (i) free(s->regions[i].slots);
+    }
+    /* the map's leaves are shared by the tops it grew through: free them from the newest, then the tops themselves */
+    {
+        RegionTop* top = s->region_top;
+        size_t j;
+        if (top)
+            for (j = 0; j < top->count; ++j) free(top->leaves[j]);
+        while (top) {
+            RegionTop* older = top->older;
+            free(top);
+            top = older;
+        }
     }
     cond_free(&s->work);
     cond_free(&s->idle);

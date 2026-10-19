@@ -485,6 +485,42 @@ static void test_invalidate(void) {
     snx_jit_service_free(service);
 }
 
+/* added images in different 16 MiB chunks: the page map finds each, and removing one leaves the other's pages */
+static void test_image_map(void) {
+    static const u32 far_words[] = {0x91000400, 0xD65F03C0}; /* add x0, x0, #1; ret */
+    SnxCodeImage image;
+    CPU c;
+    service = start(0, 1);
+    if (!service) {
+        ++failures;
+        return;
+    }
+    put(0x38000, far_words, 2);
+    memset(&image, 0, sizeof(image));
+    image.image = memory + 0x38000;
+    image.image_size = 8;
+    image.base = 0x38000;
+    image.text_size = 8;
+    CHECK(snx_jit_add_image(service, &image) == 0);
+    memset(&image, 0, sizeof(image));
+    image.image = (const unsigned char*)far_words; /* the same code, in another chunk: the map has to cover both */
+    image.image_size = 8;
+    image.base = 0x2100000;
+    image.text_size = 8;
+    CHECK(snx_jit_add_image(service, &image) == 0);
+    cpu_init(&c, 0xF000);
+    run(&c, 0x38000);
+    run(&c, 0x2100000);
+    CHECK(c.x[0] == 2);
+    snx_jit_drain(service);
+    CHECK(snx_jit_resolve(service, 0x38000) != NULL);
+    CHECK(snx_jit_resolve(service, 0x2100000) != NULL);
+    snx_jit_remove_image(service, 0x38000);
+    CHECK(snx_jit_resolve(service, 0x38000) == NULL);
+    CHECK(snx_jit_resolve(service, 0x2100000) != NULL);
+    snx_jit_service_free(service);
+}
+
 int main(void) {
     /* 0x1000: x0 = x0 * 3 + 1, then the AOT function at 0x2000, then 0x3000, which the same batch may find */
     static const u32 f1[] = {0xD2800061, 0x9B017C00, 0x91000400, 0xA9BF7BFD,
@@ -673,6 +709,7 @@ int main(void) {
     test_added_image();
     test_cache();
     test_invalidate();
+    test_image_map();
     free(memory);
     if (failures) return 1;
     printf("jit service: passed\n");
