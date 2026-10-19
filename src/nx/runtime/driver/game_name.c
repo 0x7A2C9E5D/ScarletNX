@@ -45,3 +45,13 @@ char* snx_game_name(const char* name, const SnxNpdm* npdm, const char* input) {
     if (name || !snx_title_text(npdm->title_id, id)) return snx_game_title(name, npdm, input);
     return snx_strdup(id);
 }
+char* snx_source_link(const char* folder, const char* name) { return snx_format("%s/%s.source", folder, name); }
+void snx_link_source(const char* folder, const char* name, const char* dump) {
+    char* link = snx_source_link(folder, name);
+    if (!snx_is_link(link) || !snx_same_file(link, dump)) {
+        if (snx_path_exists(link)) snx_remove_tree(link);
+        if (snx_symlink(dump, link))
+            printf("Could not link %s to its dump %s, which the game is made and read from\n", link, dump);
+    }
+    free(link);
+}

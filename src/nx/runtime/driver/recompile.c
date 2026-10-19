@@ -3,7 +3,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "nx/runtime/driver/recompile.h"
 #include "nx/runtime/driver/container.h"
-#include "nx/runtime/driver/driver.h"
 #include "nx/runtime/driver/game_name.h"
 #include "nx/loader/loader.h"
 #include "nx/loader/module.h"

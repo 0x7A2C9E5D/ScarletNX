@@ -135,16 +135,6 @@ static int left_beside(const char* input) {
     free(data);
     return found;
 }
-char* snx_source_link(const char* folder, const char* name) { return snx_format("%s/%s.source", folder, name); }
-void snx_link_source(const char* folder, const char* name, const char* dump) {
-    char* link = snx_source_link(folder, name);
-    if (!snx_is_link(link) || !snx_same_file(link, dump)) {
-        if (snx_path_exists(link)) snx_remove_tree(link);
-        if (snx_symlink(dump, link))
-            printf("Could not link %s to its dump %s, which the game is made and read from\n", link, dump);
-    }
-    free(link);
-}
 /* dump extracted straight into target, the game's data folder or its folder in tmpfs: what an extraction left there
    taken away first, its saves and the rest kept. marker, <name>.extracting in the game's folder, says it is incomplete
    until it is done */
