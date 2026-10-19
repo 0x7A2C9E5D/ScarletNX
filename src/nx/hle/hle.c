@@ -68,6 +68,7 @@ void* pool_take(void* base, size_t size, u32 count, u32* next, const char* what)
             return (u8*)base + (size_t)i * size;
         }
     assert(!"an HLE pool is full");
+    (void)what;
     /*fatal("More than %u %s at once", (unsigned)count, what);*/ /* NDEBUG builds */
     return NULL;
 }
