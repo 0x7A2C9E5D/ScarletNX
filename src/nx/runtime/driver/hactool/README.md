@@ -27,6 +27,10 @@ What ScarletNX changed, each change marked `ScarletNX` where it is not a file of
   and the SHA3 hash types, which LibHac names but does not read, are refused with a message.
 - **NCAs read in place.** `nca_ctx_t.base_offset` is where an NCA starts in its file, so one inside an XCI's secure
   partition or an NSP is read there instead of from a copy unpacked beside it.
+- **Read in place, mapped.** `nca_ctx_t.map` (and each section's) is the container mapped into memory, which the
+  sections' storage chains read from (`storage_memory_new`) instead of the file, so the runtime can read from several
+  threads with no file position between them. `snx_hac_fs_open` keeps a program NCA's ExeFS and RomFS open, an
+  update's over its base, for the runtime and the recompiler to read a dump they did not extract.
 - **Keys by name.** `extkeys_set_key` sets one prod.keys key, which `extkeys_initialize_settings` calls for each line
   of a file and the driver for each line it kept.
 - **Comments.** Five comments in `aes.c`, `nca.h` and `packages.c` say "the console" or "content archive" instead of the

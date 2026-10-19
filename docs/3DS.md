@@ -233,6 +233,17 @@ See [CTR IPC](CTR-IPC.md) for the strict generator subset, descriptor/permission
 checks, quotas, malformed-request policy, tests and unimplemented operations.
 Unknown SVCs still stop explicitly. No service/device success is fabricated.
 
+By default nothing of the CIA is extracted. `scarletnx-3ds game.cia` maps the CIA read-only and checks it as the
+extraction would (the CIA and TMD tables, every content's SHA-256, the NCCH and ExHeader hashes, each ExeFS file's
+hash, the RomFS superblock and its metadata). The game's ExeFS files and its RomFS (level 3, the image the game reads)
+are then read where they lie in the mapping, and only the decompressed `.code` is copied into memory. The title's
+folder keeps its state alone: `native/`, `sdmc/` and the frames and audio it writes. An extraction an earlier
+`--extract-container` left there is taken away, its compiled module and saves kept. The image's identity is the same
+either way, so a module compiled in one mode loads in the other.
+
+`--extract-container` (the launcher's *Extract game container*) extracts the CIA into its folder first and plays from
+the extraction, as before. `-x` extracts only:
+
 ```sh
 build/3ds/scarletnx-3ds -x --output work/my-title game.cia
 ```
@@ -242,7 +253,7 @@ expanded/page-padded `.code`), `romfs/`, raw container/NCCH/ExHeader metadata an
 `manifest.ini` with source/code hashes and segment layout. The default directory
 is `work/3ds/<name>`, named after the CIA's file as the Switch driver names a dump's, in the data folder the Switch driver uses
 (`--repo DIR`, else a portable copy's folder, else the user's data folder, from a build tree too),
-which the user's on Linux keeps in `~/.cache/scarletnx/work/3ds/`. No source CIA needs to be mounted by
+which the user's on Linux keeps in `~/.cache/scarletnx/work/3ds/`. An extraction needs no source CIA mounted by
 the future guest FS. Extraction is privately staged, then published only after
 all checks succeed; failures remove staging files. As in the Switch driver, a
 finished extraction already there is used as it is, never extracted again or

@@ -182,6 +182,12 @@ if(TARGET snx_ctr_board)
                 $<TARGET_FILE:snx-swipc>)
             add_test(NAME 3ds_driver COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_driver.py"
                 $<TARGET_FILE:scarletnx-3ds>)
+            # a CIA read where it lies (snx_ctr_cia_open) against its extraction, on the same fixtures and mutants
+            add_executable(snx-test-3ds-container 3ds_container.c)
+            snx_test_target(snx-test-3ds-container 11)
+            target_link_libraries(snx-test-3ds-container PRIVATE snx_ctr_process)
+            add_test(NAME 3ds_container COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/3ds_container.py"
+                $<TARGET_FILE:scarletnx-3ds> $<TARGET_FILE:snx-test-3ds-container>)
             set(snx_ctr_extract_test_args "")
 
             set(snx_ctr_extract_test_args --aot)
@@ -247,8 +253,13 @@ foreach(suite tree service)
 endforeach()
 target_compile_options(snx-test-fs-service PRIVATE -Wno-unused-parameter)
 snx_swipc(snx-test-fs-service ROOT "${PROJECT_SOURCE_DIR}/src/nx" FILES hle/services/types.swipc hle/filesystem/fs.swipc)
-target_link_libraries(snx-test-fs-service PRIVATE scarletnx-common)
+# fs.c reads a game's dump in place through the driver's container.c and hactool
+target_sources(snx-test-fs-service PRIVATE "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/container.c")
+target_link_libraries(snx-test-fs-service PRIVATE scarletnx-common hactool_internals)
 add_test(NAME filesystem_raw COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> raw)
+if(NOT WIN32) # the dump's link: Windows makes one only with the right to
+    add_test(NAME filesystem_dump COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump)
+endif()
 
 if(UNIX)
     # host.c by itself: shared files, folders and the mutex
@@ -728,7 +739,8 @@ target_link_libraries(snx-test-run-ticking PRIVATE snx_test_common)
 add_test(NAME run_ticking COMMAND snx-test-run-ticking)
 
 # C11 for hactool's headers, which build the synthetic dumps (hac_synth.h); extract.c itself stays C90 in the driver
-add_executable(snx-test-extract extract.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/extract.c")
+add_executable(snx-test-extract extract.c "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/extract.c"
+    "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/container.c")
 snx_test_target(snx-test-extract 11)
 target_link_libraries(snx-test-extract PRIVATE snx_test_common hactool_internals)
 add_test(NAME extraction_native COMMAND snx-test-extract)

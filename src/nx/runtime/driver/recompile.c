@@ -2,6 +2,7 @@
    Copyright 2026 the ScarletNX contributors */
 #define _POSIX_C_SOURCE 200809L
 #include "nx/runtime/driver/recompile.h"
+#include "nx/runtime/driver/container.h"
 #include "nx/runtime/driver/game_name.h"
 #include "nx/loader/loader.h"
 #include "nx/loader/module.h"
@@ -18,7 +19,7 @@
 #define SNX_RECOMPILE_OPT "2"
 static void usage(void) {
     puts("Usage: scarletnx -r INPUT [NAME] [OPTIONS]\n"
-         "  INPUT                  Game/ExeFS directory or .nro\n"
+         "  INPUT                  Game/ExeFS directory, .nro, or an XCI or NSP dump (read in place)\n"
          "  -o, --name, --out NAME  Output name (default: the title ID, else the NPDM's or input name)\n"
          "  --outdir DIR           Where the game's folder goes (default: games/ in the data folder)\n"
          "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: " SNX_RECOMPILE_OPT ")\n"
@@ -135,6 +136,64 @@ static SnxU64* read_hints(const char* base, int is64, size_t* count) {
     *count = n;
     return hints;
 }
+/* an ExeFS file of a dump read in place (SnxExefsReader) */
+static int dump_read(void* source, const char* name, unsigned char** data, size_t* size) {
+    SnxHacFs* fs = (SnxHacFs*)source;
+    const SnxHacEntry* files;
+    size_t count = snx_hac_fs_files(fs, &files), i;
+    for (i = 0; i < count; ++i) {
+        if (strcmp(files[i].name, name)) continue;
+        if (files[i].size > (size_t)-1) return -1;
+        *size = (size_t)files[i].size;
+        *data = (unsigned char*)malloc(*size ? *size : 1);
+        if (*data && !snx_hac_fs_read(fs, i, 0, *data, *size)) return 0;
+        free(*data);
+        *data = NULL;
+        return -1;
+    }
+    return 1;
+}
+/* a dump's program, its ExeFS read in place and its control.nacp out of its Control NCA: nothing is extracted. 0, else
+   nonzero, said why */
+static int load_dump(const char* dump, const SnxPaths* paths, int quiet, SnxProgram* program, char* error,
+                     size_t error_size) {
+    SnxDump opened;
+    SnxHacFs* fs = NULL;
+    SnxExefsReader reader;
+    unsigned char* nacp;
+    const char* why;
+    size_t nacp_size = 0;
+    int rc = snx_dump_open(&opened, dump, NULL, NULL, NULL, paths->repo, !quiet);
+    if (!rc && !(fs = snx_dump_fs(&opened))) rc = 1;
+    if (!rc) {
+        nacp = snx_dump_nacp(&opened, &nacp_size, &why);
+        if (!nacp && !quiet) printf("The game keeps the name of its file: %s\n", why);
+        reader.read = dump_read;
+        reader.source = fs;
+        rc = snx_load_program_from(&reader, dump, nacp, nacp_size, program, error, error_size);
+        if (rc) snx_error("%s", error);
+    }
+    snx_hac_fs_free(fs);
+    snx_dump_close(&opened);
+    return rc;
+}
+/* a game made from its dump read in place: what an extraction left in its data folder taken away, as the runtime would
+   read it over the dump */
+static int drop_extraction(const char* dir, int quiet) {
+    static const char* const parts[] = {"exefs", "romfs", "romfs.bin", "romfs.copying"};
+    char* part;
+    size_t i;
+    int rc = 0;
+    for (i = 0; !rc && i < sizeof parts / sizeof *parts; ++i) {
+        part = snx_path_join(dir, parts[i]);
+        if (snx_path_exists(part) || snx_is_link(part)) {
+            if (!quiet) printf("Removing %s: the game reads it from its dump\n", part);
+            rc = snx_remove_tree(part);
+        }
+        free(part);
+    }
+    return rc || snx_mkdirs(dir);
+}
 /* the game's data folder: its ExeFS (or NRO) and RomFS, the RomFS left where it is with tmpfs */
 static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs) {
     char *ex = snx_path_join(dir, "exefs"), *dst, *src, **names;
@@ -225,7 +284,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     char error[1024], option[64];
     const char* equal;
     size_t option_size;
-    int i, rc = 1, no_build = 0, keep_c = 0, host_win = 0, positional = 0, tmpfs = 0;
+    int i, rc = 1, no_build = 0, keep_c = 0, host_win = 0, positional = 0, tmpfs = 0, dump = 0;
     memset(&compile, 0, sizeof(compile));
     memset(&gen, 0, sizeof(gen));
     memset(&program, 0, sizeof(program));
@@ -330,7 +389,11 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     /* The backends write the module for the machine they run on (build == host == target) */
     if (compile.target_win != host_win) return snx_error("--target: modules are built for this host only");
     gen.abi = snx_game_abi();
-    if (snx_load_program(input, &program, error, sizeof(error))) return snx_error("%s", error);
+    /* a dump, read in place, else an ExeFS folder or an NRO */
+    dump = snx_is_file(input) && snx_is_dump(input);
+    if (dump ? load_dump(input, paths, compile.quiet, &program, error, sizeof(error))
+             : snx_load_program(input, &program, error, sizeof(error)))
+        return dump ? 1 : snx_error("%s", error);
     title = snx_game_shown(name, &program);
     game = snx_game_name(name, &program.npdm, program.entry_path);
     out = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
@@ -376,9 +439,14 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     gen.title = title;
     gen.hints = read_hints(base, program.npdm.is64, &gen.hint_count);
     if (!compile.quiet) printf("Recompiling %s (%lu modules)\n", title, (unsigned long)program.module_count);
-    if (copy_data(&program, data, compile.quiet, tmpfs)) {
+    if (dump ? drop_extraction(data, compile.quiet) : copy_data(&program, data, compile.quiet, tmpfs)) {
         snx_error("cannot stage game data in %s", data);
         goto done;
+    }
+    if (dump) {
+        char* absolute = snx_absolute(input);
+        if (absolute) snx_link_source(folder, game, absolute);
+        free(absolute);
     }
     if (program.nacp) { /* the name the launcher lists the game by */
         char* nacp = snx_path_join(data, "control.nacp");

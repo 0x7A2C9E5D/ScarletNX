@@ -9,6 +9,7 @@
 #include <string.h>
 #include "common/utilities/common.h"
 #include "nx/runtime/driver/extract.h"
+#include "nx/runtime/driver/container.h"
 #if defined(_WIN32) && defined(__clang__)
 /* hactool's utils.h redeclares the MinGW CRT's imported fseeko64. */
 #pragma clang diagnostic push
@@ -144,13 +145,64 @@ static int file_is(const char* dir, const char* name, const void* content, size_
     return same;
 }
 
+/* Extract game container off: the dump read in place, as the runtime and -r read it (container.h), mapped (here read
+   into memory) for the file systems to read from: the ExeFS's files, a file of the RomFS and the control.nacp. Nothing
+   is written. 0, or 1 after saying what differed */
+static int in_place(const char* base, const SnxPaths* paths) {
+    SnxDump dump;
+    SnxHacFs* fs;
+    const SnxHacEntry* files;
+    unsigned char *map, *got, buffer[32];
+    size_t map_size = 0, size = 0, count, i, found = 0;
+    const char* why;
+    blob_t meta = npdm(), want = nacp();
+    CHECK(!snx_dump_open(&dump, base, NULL, NULL, NULL, paths->repo, 0));
+    map = snx_read_file(base, &map_size);
+    CHECK(map != NULL);
+    CHECK(!snx_hac_map(dump.hac, dump.base, map, map_size));
+    fs = snx_dump_fs(&dump);
+    CHECK(fs != NULL);
+    count = snx_hac_fs_files(fs, &files);
+    CHECK(count == 2);
+    for (i = 0; i < count; i++) {
+        if (!strcmp(files[i].name, "main")) {
+            CHECK(files[i].size == 14 && !snx_hac_fs_read(fs, i, 0, buffer, 14));
+            CHECK(!memcmp(buffer, "synthetic main", 14));
+            CHECK(!snx_hac_fs_read(fs, i, 10, buffer, 4) && !memcmp(buffer, "main", 4));
+            CHECK(snx_hac_fs_read(fs, i, 10, buffer, 5) == -1); /* past its end */
+            found++;
+        } else if (!strcmp(files[i].name, "main.npdm")) {
+            got = (unsigned char*)malloc((size_t)files[i].size);
+            CHECK(got && files[i].size == meta.size && !snx_hac_fs_read(fs, i, 0, got, meta.size));
+            CHECK(!memcmp(got, meta.data, meta.size));
+            free(got);
+            found++;
+        }
+    }
+    CHECK(found == 2);
+    got = snx_romfs_file(fs, "data.bin", &size);
+    CHECK(got && size == 20 && !memcmp(got, "synthetic romfs data", 20));
+    free(got);
+    CHECK(snx_romfs_file(fs, "missing.bin", &size) == NULL);
+    got = snx_dump_nacp(&dump, &size, &why);
+    CHECK(got && size == want.size && !memcmp(got, want.data, want.size));
+    free(got);
+    snx_hac_fs_free(fs);
+    snx_dump_close(&dump);
+    free(map);
+    free(meta.data);
+    free(want.data);
+    puts("Read in place");
+    return 0;
+}
+
 /* one scenario in this process, as scarletnx -x runs: its result */
 static int scenario(const char* scratch, const char* mode) {
     SnxPaths paths;
     char *repo, *home, *switch_dir, *keys, *base, *update, *out, *exefs, *arguments[12];
     int count = 0, result;
     Game game = {{{0}}, 0};
-    const char* kind = !strncmp(mode, "xci", 3) ? (strstr(mode, "keyarea") ? "xci-keyarea" : "xci") : "nsp";
+    const char* kind = strstr(mode, "xci") ? (strstr(mode, "keyarea") ? "xci-keyarea" : "xci") : "nsp";
     repo = snx_path_join(scratch, "repo space & ()");
     home = snx_path_join(scratch, "original home");
     switch_dir = snx_path_join(home, ".switch");
@@ -190,6 +242,19 @@ static int scenario(const char* scratch, const char* mode) {
         blob_t card = gamecard_build(NULL, 0, 0);
         card.data[0xF000 + 0xC] ^= 1;
         write_blob(base, card);
+    }
+    if (!strncmp(mode, "inplace", 7)) {
+        result = in_place(base, &paths);
+        CHECK(!snx_path_exists(out)); /* nothing extracted */
+        free(repo);
+        free(home);
+        free(switch_dir);
+        free(keys);
+        free(base);
+        free(update);
+        free(out);
+        free(exefs);
+        return result;
     }
     arguments[count++] = base;
     if (!strcmp(mode, "unmatched-update")) {
@@ -267,6 +332,9 @@ int main(int argc, char** argv) {
         {"no-main", "Extracted exefs has no main", 1},
         {"existing", "Output already contains exefs", 1},
         {"hactool-exit", "hactool stopped on the dump", 1},
+        {"inplace-nsp", "Read in place", 0},
+        {"inplace-xci", "Read in place", 0},
+        {"inplace-xci-keyarea", "Read in place", 0},
     };
     const char* command[5];
     char *self, *scratch, *directory, *output;

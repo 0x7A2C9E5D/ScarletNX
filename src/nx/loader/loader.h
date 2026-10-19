@@ -84,6 +84,17 @@ typedef struct {
 
    snx_load_program: entry is an extracted program (a folder holding exefs/main, ExeFS/main or main) or an .nro file */
 int snx_load_program(const char* entry, SnxProgram* program, char* error, size_t error_size);
+/* An ExeFS read other than from a folder (a dump's, read in place): read gives the bytes of its file name in *data
+   (malloc'd) and *size, and 0, else 1 when it has no such file, -1 when it cannot be read */
+typedef struct {
+    int (*read)(void* source, const char* name, unsigned char** data, size_t* size);
+    void* source;
+} SnxExefsReader;
+/* snx_load_program for the program of exefs: entry, the dump, is its entry_path and names it in messages, and nacp
+   (NULL for none) becomes its control.nacp, taken by the program even when it fails. No exefs_path, root_path or
+   romfs_path */
+int snx_load_program_from(const SnxExefsReader* exefs, const char* entry, unsigned char* nacp, size_t nacp_size,
+                          SnxProgram* program, char* error, size_t error_size);
 void snx_free_program(SnxProgram* program);
 int snx_load_nso(const char* path, const char* name, SnxModuleImage* module, char* error, size_t error_size);
 /* An NSO of a 32-bit program: an ELF32 dynamic table, 16-byte symbols, REL and RELA relocations. Code addresses among

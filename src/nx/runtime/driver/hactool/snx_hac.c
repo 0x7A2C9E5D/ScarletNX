@@ -11,6 +11,7 @@
 #include "nca.h"
 #include "pfs0.h"
 #include "pki.h"
+#include "storage.h"
 #include "xci.h"
 
 /* the C library's own here, under the names snx_io.h (included ahead of this file too) gives hactool */
@@ -27,6 +28,8 @@ typedef struct {
     pfs0_ctx_t *pfs0; /* an NSP's */
     SnxHacEntry *entries;
     size_t count;
+    const unsigned char *map; /* the file mapped (snx_hac_map), map_size bytes, or NULL */
+    uint64_t map_size;
 } Container;
 
 struct SnxHac {
@@ -253,6 +256,8 @@ static void nca_open(SnxHac *hac, hactool_ctx_t *tool, nca_ctx_t *nca, int conta
     nca->file = c->file;
     nca->base_offset = c->entries[entry].offset;
     nca->file_size = (size_t)c->entries[entry].size;
+    nca->map = c->map;
+    nca->map_size = c->map_size;
 }
 
 int snx_hac_nca(SnxHac *hac, int container, size_t entry, SnxHacNca *out) {
@@ -284,53 +289,158 @@ static int has_romfs(const nca_ctx_t *nca) {
     return 0;
 }
 
-int snx_hac_extract(SnxHac *hac, int container, size_t entry, int base_container, size_t base_entry,
-                    const char *exefs_dir, const char *romfs_dir) {
-    hactool_ctx_t *tool, *base_tool = NULL;
-    nca_ctx_t *nca, *base = NULL;
-    int rc = -1;
-    tool = calloc(1, sizeof *tool);
-    nca = calloc(1, sizeof *nca);
-    if (!tool || !nca) goto done;
-    tool->settings = hac->tool.settings;
-    tool->action = ACTION_EXTRACT;
-    if (exefs_dir) {
-        tool->settings.exefs_dir_path.enabled = 1;
-        filepath_set(&tool->settings.exefs_dir_path.path, exefs_dir);
-    }
-    if (romfs_dir) {
-        tool->settings.romfs_dir_path.enabled = 1;
-        filepath_set(&tool->settings.romfs_dir_path.path, romfs_dir);
-    }
+/* the NCA at entry processed as tool says, an update's over the base NCA (base_container -1 for none), which base_tool
+   and base keep: 0, or -1. Either way the caller frees the section contexts of nca, then of base */
+static int program_process(SnxHac *hac, hactool_ctx_t *tool, nca_ctx_t *nca, hactool_ctx_t *base_tool, nca_ctx_t *base,
+                           int container, size_t entry, int base_container, size_t base_entry) {
+    nca_init(nca);
+    nca_init(base);
     if (base_container >= 0) { /* --basenca: the base's RomFS under the update's */
-        base_tool = calloc(1, sizeof *base_tool);
-        base = calloc(1, sizeof *base);
-        if (!base_tool || !base) goto done;
         base_tool->settings.keyset = hac->tool.settings.keyset;
         base_tool->settings.known_titlekeys = hac->tool.settings.known_titlekeys;
         nca_open(hac, base_tool, base, base_container, base_entry);
         base->is_cli_target = false;
-        if (!nca_decrypt_header(base)) goto done;
+        if (!nca_decrypt_header(base)) return -1;
         tool->base_file = base->file;
         tool->base_file_type = BASEFILE_NCA;
         tool->base_nca_ctx = base;
         nca_process(base);
         if (!has_romfs(base)) {
             snx_hac_fprintf(stderr, "Unable to locate RomFS in base NCA!\n");
-            goto done;
+            return -1;
         }
     }
     nca_open(hac, tool, nca, container, entry);
     nca->is_cli_target = true;
-    if (!nca_decrypt_header(nca)) goto done;
+    if (!nca_decrypt_header(nca)) return -1;
     nca_process(nca);
-    rc = 0;
-done:
-    if (nca) nca_free_section_contexts(nca); /* the update's first: its storages read through the base's */
-    if (base) nca_free_section_contexts(base);
+    return 0;
+}
+
+static void program_free(nca_ctx_t *nca, nca_ctx_t *base) {
+    nca_free_section_contexts(nca); /* the update's first: its storages read through the base's */
+    nca_free_section_contexts(base);
+}
+
+int snx_hac_extract(SnxHac *hac, int container, size_t entry, int base_container, size_t base_entry,
+                    const char *exefs_dir, const char *romfs_dir) {
+    hactool_ctx_t *tool, *base_tool;
+    nca_ctx_t *nca, *base;
+    int rc = -1;
+    tool = calloc(1, sizeof *tool);
+    base_tool = calloc(1, sizeof *base_tool);
+    nca = calloc(1, sizeof *nca);
+    base = calloc(1, sizeof *base);
+    if (tool && base_tool && nca && base) {
+        tool->settings = hac->tool.settings;
+        tool->action = ACTION_EXTRACT;
+        if (exefs_dir) {
+            tool->settings.exefs_dir_path.enabled = 1;
+            filepath_set(&tool->settings.exefs_dir_path.path, exefs_dir);
+        }
+        if (romfs_dir) {
+            tool->settings.romfs_dir_path.enabled = 1;
+            filepath_set(&tool->settings.romfs_dir_path.path, romfs_dir);
+        }
+        rc = program_process(hac, tool, nca, base_tool, base, container, entry, base_container, base_entry);
+        program_free(nca, base);
+    }
     free(base);
-    free(base_tool);
     free(nca);
+    free(base_tool);
     free(tool);
     return rc;
+}
+
+/* ------------------------------------------------------------------ file systems read in place */
+
+struct SnxHacFs {
+    hactool_ctx_t tool, base_tool;
+    nca_ctx_t nca, base;
+    nca_section_ctx_t *exefs; /* NULL without an ExeFS */
+    SnxHacEntry *files;       /* its files, offsets in the section */
+    size_t count;
+    storage_t *romfs; /* the RomFS image's storage, NULL without one */
+    uint64_t romfs_offset, romfs_size;
+};
+
+int snx_hac_map(SnxHac *hac, int container, const void *data, uint64_t size) {
+    Container *c = &hac->containers[container];
+    for (size_t i = 0; i < c->count; i++) /* an entry past the mapping's end: not the file opened */
+        if (c->entries[i].offset > size || c->entries[i].size > size - c->entries[i].offset) return -1;
+    c->map = data;
+    c->map_size = size;
+    return 0;
+}
+
+SnxHacFs *snx_hac_fs_open(SnxHac *hac, int container, size_t entry, int base_container, size_t base_entry) {
+    SnxHacFs *fs = calloc(1, sizeof *fs);
+    if (!fs) return NULL;
+    fs->tool.settings = hac->tool.settings;
+    fs->tool.action = 0; /* the tables read, nothing printed or saved */
+    if (program_process(hac, &fs->tool, &fs->nca, &fs->base_tool, &fs->base, container, entry, base_container,
+                        base_entry))
+        goto fail;
+    for (unsigned int i = 0; i < 4; i++) {
+        nca_section_ctx_t *section = &fs->nca.section_contexts[i];
+        if (!section->is_present || section->storage == NULL) continue;
+        if (section->type == PFS0 && section->pfs0_ctx.is_exefs && !fs->exefs) {
+            pfs0_header_t *h = section->pfs0_ctx.header;
+            uint64_t data = section->pfs0_ctx.superblock->pfs0_offset + pfs0_get_header_size(h);
+            fs->exefs = section;
+            if (!(fs->files = calloc(h->num_files ? h->num_files : 1, sizeof *fs->files))) goto fail;
+            for (uint32_t j = 0; j < h->num_files; j++) {
+                pfs0_file_entry_t *e = pfs0_get_file_entry(h, j);
+                fs->files[j].name = pfs0_get_file_name(h, j);
+                fs->files[j].offset = data + e->offset;
+                fs->files[j].size = e->size;
+            }
+            fs->count = h->num_files;
+        } else if ((section->type == ROMFS || section->type == BKTR) && !fs->romfs) {
+            ivfc_level_ctx_t *data = section->type == ROMFS ? &section->romfs_ctx.ivfc_levels[IVFC_MAX_LEVEL - 1]
+                                                            : &section->bktr_ctx.ivfc_levels[IVFC_MAX_LEVEL - 1];
+            if (section->type == BKTR && section->bktr_ctx.indirect == NULL) continue; /* an update without its base */
+            fs->romfs = section->storage;
+            fs->romfs_offset = data->data_offset;
+            /* the decompressed image when the hashes cover compressed blocks */
+            fs->romfs_size = section->compressed ? section->compressed->size : data->data_size;
+            if (fs->romfs_offset > fs->romfs->size || fs->romfs_size > fs->romfs->size - fs->romfs_offset) goto fail;
+        }
+    }
+    return fs;
+fail:
+    snx_hac_fs_free(fs);
+    return NULL;
+}
+
+void snx_hac_fs_free(SnxHacFs *fs) {
+    if (!fs) return;
+    for (unsigned int i = 0; i < 4; i++) /* nca_free_section_contexts leaves the PFS0 headers */
+        if (fs->nca.section_contexts[i].is_present && fs->nca.section_contexts[i].type == PFS0)
+            free(fs->nca.section_contexts[i].pfs0_ctx.header);
+    for (unsigned int i = 0; i < 4; i++)
+        if (fs->base.section_contexts[i].is_present && fs->base.section_contexts[i].type == PFS0)
+            free(fs->base.section_contexts[i].pfs0_ctx.header);
+    program_free(&fs->nca, &fs->base);
+    free(fs->files);
+    memset(fs, 0, sizeof *fs); /* the keys */
+    free(fs);
+}
+
+size_t snx_hac_fs_files(SnxHacFs *fs, const SnxHacEntry **files) {
+    *files = fs->files;
+    return fs->count;
+}
+
+int snx_hac_fs_read(SnxHacFs *fs, size_t file, uint64_t offset, void *buffer, size_t size) {
+    const SnxHacEntry *e = &fs->files[file];
+    if (offset > e->size || size > e->size - offset) return -1;
+    return storage_read(fs->exefs->storage, e->offset + offset, buffer, size) ? 0 : -1;
+}
+
+uint64_t snx_hac_fs_romfs_size(const SnxHacFs *fs) { return fs->romfs ? fs->romfs_size : 0; }
+
+int snx_hac_fs_read_romfs(SnxHacFs *fs, uint64_t offset, void *buffer, size_t size) {
+    if (!fs->romfs || offset > fs->romfs_size || size > fs->romfs_size - offset) return -1;
+    return storage_read(fs->romfs, fs->romfs_offset + offset, buffer, size) ? 0 : -1;
 }

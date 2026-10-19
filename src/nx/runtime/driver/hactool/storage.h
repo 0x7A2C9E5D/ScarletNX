@@ -55,6 +55,8 @@ int storage_read(storage_t *storage, uint64_t offset, void *buffer, uint64_t siz
 void storage_free(storage_t *storage);
 
 storage_t *storage_file_new(FILE *file, uint64_t offset, uint64_t size);
+/* ScarletNX: [offset, offset + size) of data_size bytes in memory; NULL when it is not inside them. */
+storage_t *storage_memory_new(const unsigned char *data, uint64_t data_size, uint64_t offset, uint64_t size);
 storage_t *storage_sub_new(storage_t *base, uint64_t offset, uint64_t size);
 storage_t *storage_fill_new(uint64_t size, unsigned char value);
 /* [0, split) from low, [split, split + high->size) from high. */

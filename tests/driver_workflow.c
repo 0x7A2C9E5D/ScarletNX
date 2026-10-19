@@ -125,6 +125,12 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
         CHECK(!snx_remove_tree(argv[1]));
     return rc;
 }
+/* a dump given to -r, read in place (Extract game container off): a file, not an NRO */
+static int dump_input(const char* input) {
+    size_t n = strlen(input);
+    return snx_is_file(input) && !(n > 4 && input[n - 4] == '.' && (input[n - 3] | 32) == 'n' &&
+                                   (input[n - 2] | 32) == 'r' && (input[n - 1] | 32) == 'o');
+}
 /* this build's stamp: ABI 4, made from commit abc1234 */
 #define SNX_WORKFLOW_STAMP "4\nabc1234\n"
 char* snx_game_stamp(void) { return snx_strdup(SNX_WORKFLOW_STAMP); }
@@ -157,6 +163,12 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         CHECK(given && expected && !strcmp(given, expected));
         free(given);
         free(expected);
+    } else if (getenv("SNX_WORKFLOW_DUMP") && *getenv("SNX_WORKFLOW_DUMP")) {
+        /* Extract game container off: the dump itself, read in place, named as its game is */
+        char *given = snx_absolute(argv[3]), *expected = snx_absolute(getenv("SNX_WORKFLOW_DUMP"));
+        CHECK(argc == 5 && given && expected && snx_same_file(given, expected));
+        free(given);
+        free(expected);
     } else
         CHECK(snx_is_dir(argv[3]));
     CHECK(!snx_mkdirs(argv[1]));
@@ -170,7 +182,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     { /* the program loaded, as the recompile loads it: a broken NPDM stops it */
         SnxNpdm npdm;
         char error[256];
-        if (snx_load_npdm(argv[3], &npdm, error, sizeof error)) {
+        if (!dump_input(argv[3]) && snx_load_npdm(argv[3], &npdm, error, sizeof error)) {
             fprintf(stderr, "scarletnx: %s\n", error);
             return 1;
         }
@@ -180,8 +192,10 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     folder = snx_path_join(argv[1], name);
     CHECK(!snx_mkdirs(folder));
     partial = snx_format("%s/%s_data/exefs", folder, name);
+    /* the extraction's ExeFS in it, as the recompile stages it; a dump's stays in the dump, its data folder empty */
     CHECK(!snx_mkdirs(partial));
-    { /* the extraction's ExeFS in it, as the recompile stages it */
+    if (dump_input(argv[3])) CHECK(!snx_remove_tree(partial));
+    {
         static const char* const files[] = {"main", "main.npdm"};
         size_t k;
         for (k = 0; k < 2; ++k) {
@@ -240,6 +254,7 @@ static void run(const char* exe, const char* repo, const char* dump, const char*
     args[2] = repo;
     args[3] = "--build-dir";
     args[4] = repo;
+    if (getenv("SNX_WORKFLOW_EXTRACT") && *getenv("SNX_WORKFLOW_EXTRACT")) args[n++] = "--extract-container";
     if (flags && *flags && strncmp(flags, "--backend=", 10)) args[n++] = flags;
     if (headless && *headless && !strcmp(getenv("SNX_WORKFLOW_PREFIX"), "1")) args[n++] = headless;
     args[n++] = dump;
@@ -360,6 +375,9 @@ int main(int argc, char** argv) {
     set_env("SNX_WORKFLOW_NAMED", "");
     set_env("SNX_WORKFLOW_OUTDIR", "");
     set_env("SNX_WORKFLOW_OUT", "");
+    set_env("SNX_WORKFLOW_DUMP", "");
+    /* Extract game container on: the dump extracted into its game's data folder, which the game is made from */
+    set_env("SNX_WORKFLOW_EXTRACT", "1");
     reset(repo, dump);
     run(exe, repo, dump, log, 0, "ERG", NULL);
     CHECK(snx_is_dir(extracted) && snx_is_file(game));
@@ -743,6 +761,49 @@ int main(int argc, char** argv) {
         free(out);
         free(outdir);
     }
+    /* Extract game container off, the default: nothing extracted, the game made from its dump read in place and its
+       folder linked to it. Switched on, the dump is extracted into the data folder without a recompile; off again,
+       that extraction is taken away. A game made already is recompiled from its dump through the link, -r prepares a
+       dump without extracting it, and a game whose link names no dump says so. Windows makes links only with the
+       right to (developer mode), which a runner may not have */
+#ifndef _WIN32
+    {
+        char *link = snx_path_join(repo, "games/Test game/Test game.source");
+        char *stamp = snx_path_join(repo, "games/Test game/Test game.abi"), *moved = snx_format("%s.moved", dump);
+        set_env("SNX_WORKFLOW_EXTRACT", "");
+        set_env("SNX_WORKFLOW_DUMP", dump);
+        set_env("SNX_WORKFLOW_MODE", "exit");
+        reset(repo, dump);
+        run(exe, repo, dump, log, 0, "RG", NULL);
+        CHECK(snx_is_file(game) && !snx_path_exists(extracted) && snx_is_link(link) && snx_same_file(link, dump));
+        run(exe, repo, dump, log, 0, "G", NULL);
+        run(exe, repo, game, log, 0, "G", NULL);
+        set_env("SNX_WORKFLOW_EXTRACT", "1");
+        run(exe, repo, dump, log, 0, "EG", NULL);
+        CHECK(snx_is_dir(extracted) && !snx_is_file(extracting));
+        run(exe, repo, game, log, 0, "G", NULL);
+        set_env("SNX_WORKFLOW_EXTRACT", "");
+        run(exe, repo, dump, log, 0, "G", "the game reads it from its dump");
+        CHECK(!snx_path_exists(extracted) && snx_is_file(game));
+        CHECK(!snx_write_file(stamp, "4\n", 2)); /* an older version's: recompiled from the dump the link names */
+        set_env("SNX_WORKFLOW_NAMED", "Test game");
+        run(exe, repo, game, log, 0, "RG", NULL);
+        set_env("SNX_WORKFLOW_NAMED", "");
+        CHECK(!rename(dump, moved));
+        run(exe, repo, game, log, 1, "", "links to a dump that is not there");
+        CHECK(!rename(moved, dump));
+        set_env("SNX_WORKFLOW_FLAGS", "-r");
+        reset(repo, dump);
+        run(exe, repo, dump, log, 0, "R", NULL);
+        CHECK(!snx_path_exists(extracted) && snx_is_link(link));
+        run(exe, repo, dump, log, 0, "R", NULL);
+        set_env("SNX_WORKFLOW_FLAGS", "");
+        set_env("SNX_WORKFLOW_DUMP", "");
+        free(link);
+        free(stamp);
+        free(moved);
+    }
+#endif
     /* The probe takes a third argument, so use a separate, terminated vector. */
     {
         const char* probe[4];

@@ -4,6 +4,7 @@
 #define SNX_CTR_PROCESS_H
 #include "3ds/cpu/ctr_cpu.h"
 #include "3ds/loader/ctr_image.h"
+#include "3ds/loader/ctr_loader.h"
 #define SNX_CTR_STACK_TOP   0x10000000u
 #define SNX_CTR_INITIAL_TLS 0x1ff82000u
 
@@ -16,6 +17,9 @@ SnxCtrProcess* snx_ctr_process_new(const SnxCtrImage* image, SnxCtrModel model);
 /* Once, before execution. Same indexed/shared host files as NX, exposed with
    CTR metadata and IPC. Requires a fresh trusted, unmodified extracted tree. */
 bool snx_ctr_process_mount_fs(SnxCtrProcess* process, const char* directory);
+/* The same, with nothing extracted: directory is the title's state folder (sdmc/), and the RomFS is the CIA's,
+   read where it lies. The CIA stays open while the process is */
+bool snx_ctr_process_mount_cia(SnxCtrProcess* process, const char* directory, const SnxCtrCia* cia);
 void snx_ctr_process_free(SnxCtrProcess* process);
 SnxArmCPU* snx_ctr_process_cpu(SnxCtrProcess* process);
 SnxCtrAddressSpace* snx_ctr_process_space(SnxCtrProcess* process);

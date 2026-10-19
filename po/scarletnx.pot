@@ -1454,6 +1454,14 @@ msgid "Extract to tmpfs, in memory (/tmp/scarletnx/work/<title ID>), which the g
 msgstr ""
 
 #: src/gui/settings.c
+msgid "Extract game container"
+msgstr ""
+
+#: src/gui/settings.c
+msgid "Extract a dump's ExeFS and RomFS into its game's folder. Off, the game reads them from the dump"
+msgstr ""
+
+#: src/gui/settings.c
 msgid "Its own page, as in the game's menu"
 msgstr ""
 

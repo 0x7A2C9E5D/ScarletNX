@@ -115,6 +115,7 @@ typedef struct {
     const u8* data; /* NULL for an empty file */
     u64 size;
     int borrowed; /* set by fs_map_file for a view kept for the whole run: plat_file_unmap then only clears this */
+    int heap;     /* set by fs_map_file for a file read out of the game's dump into memory: plat_file_unmap frees it */
 } PFileMap;
 /* the whole file mapped read-only. 0 (an empty file too), or -1 */
 int plat_file_map(PFileMap* m, const char* path);

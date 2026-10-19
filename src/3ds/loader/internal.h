@@ -14,6 +14,7 @@ typedef struct {
 } CtrSpan;
 typedef struct {
     FILE* input;
+    const unsigned char* map; /* the input mapped (snx_ctr_cia_open), read in place of input */
     uint64_t size, output_bytes;
     size_t entries;
     SnxCtrExtractResult result;
@@ -28,6 +29,22 @@ typedef struct {
     unsigned char *header, *metadata;
     size_t chunks, body;
 } CtrCia;
+typedef struct {
+    uint32_t address, pages, bytes;
+} CtrSegment;
+/* The boot NCCH as ctr_ncch_parse checked it: its headers, the ExeFS files where they lie in the CIA (names[i][0] 0
+   for an empty slot), the .code expanded to its segments' pages, and the RomFS section with its level 3 (size 0 for
+   none) */
+typedef struct {
+    unsigned char header[0x200], exheader[0x800], exefs[0x200];
+    char names[10][9];
+    CtrSpan files[10], rom, level3;
+    int code_index;
+    CtrSegment segments[3];
+    uint32_t bss, stack;
+    unsigned char* code;
+    size_t code_size;
+} CtrNcch;
 static inline uint16_t ctr_le16(const unsigned char* p) { return (uint16_t)(p[0] | p[1] << 8); }
 static inline uint32_t ctr_le32(const unsigned char* p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
@@ -49,8 +66,17 @@ bool ctr_write(CtrReader* r, const char* path, const void* data, size_t size);
 bool ctr_directory(CtrReader* r, const char* path);
 bool ctr_name(const char* name);
 bool ctr_cia_load(CtrReader* r, CtrCia* cia);
+/* every present content copied into stage/contents with the CIA's sections, its hash checked; stage NULL checks
+   the hashes alone */
 bool ctr_cia_contents(CtrReader* r, const CtrCia* cia, const char* stage);
 void ctr_cia_free(CtrCia* cia);
+/* Every check the extraction makes, nothing written. On failure n holds nothing to free */
+bool ctr_ncch_parse(CtrReader* r, const CtrCia* cia, CtrNcch* n);
+/* A parsed NCCH extracted into stage: its ExeFS (.code expanded), headers, RomFS files and manifest */
+bool ctr_ncch_write(CtrReader* r, const CtrCia* cia, const CtrNcch* n, const char* stage);
+void ctr_ncch_free(CtrNcch* n);
 bool ctr_ncch_extract(CtrReader* r, const CtrCia* cia, const char* stage);
-bool ctr_romfs_extract(CtrReader* r, CtrSpan romfs, const char* stage);
+/* The RomFS section's level 3 and its metadata walked as the extraction walks it, its files copied into
+   stage/romfs, or with stage NULL only checked */
+bool ctr_romfs_check(CtrReader* r, CtrSpan romfs, const char* stage, CtrSpan* level3);
 #endif

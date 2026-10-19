@@ -169,7 +169,14 @@ fail:
 /* One NX-style shared tree over the extracted title directory: romfs and
    exefs are shared read-only and always open; sdmc is the read-write area,
    created on demand. The process owns the tree. */
-bool snx_ctr_process_mount_fs(SnxCtrProcess* p, const char* directory) {
+static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia);
+bool snx_ctr_process_mount_fs(SnxCtrProcess* p, const char* directory) { return mount(p, directory, NULL); }
+/* Without an extraction: the tree is the title's state folder (sdmc/ and what the driver keeps there), and the RomFS
+   is the CIA's level 3 read where it lies */
+bool snx_ctr_process_mount_cia(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia) {
+    return cia && mount(p, directory, cia);
+}
+static bool mount(SnxCtrProcess* p, const char* directory, const SnxCtrCia* cia) {
     if (!p || !directory || !*directory || p->tree) return false;
     FsTree* tree = calloc(1, sizeof *tree);
     if (!tree) return false;
@@ -182,13 +189,19 @@ bool snx_ctr_process_mount_fs(SnxCtrProcess* p, const char* directory) {
     pm_lock(&tree->lock);
     unsigned shared = 0, failed = 0;
     bool ok = true;
-    for (unsigned i = 0; i < 2 && ok; ++i) {
+    for (unsigned i = 0; i < 2 && ok && !cia; ++i) {
         FsNode* node = NULL;
         if (!fs_tree_lookup(tree, NULL, i ? "exefs" : "romfs", &node))
             ok = !fs_tree_share(tree, node, &shared, &failed);
     }
     pm_unlock(&tree->lock);
-    if (!ok || !snx_ctr_romfs_open(tree, &p->romfs)) ok = false;
+    if (cia) {
+        uint64_t size;
+        const unsigned char* image = snx_ctr_cia_romfs(cia, &size);
+        /* a CIA without a RomFS reads as an empty one, as its extraction's empty romfs/ folder does */
+        ok = ok && snx_ctr_romfs_open_image(image, size, snx_ctr_cia_mtime(cia), &p->romfs);
+    } else if (!ok || !snx_ctr_romfs_open(tree, &p->romfs))
+        ok = false;
     FsNode* sd = NULL;
     if (ok) {
         pm_lock(&tree->lock);
