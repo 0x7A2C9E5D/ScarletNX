@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include "nx/hle/services/set.c"
+#include "nx/hle/hle.c"
 
 u8* g_mem;
 int g_verbose;
@@ -34,8 +35,8 @@ void fatal(const char* format, ...) {
     va_end(args);
     exit(1);
 }
-SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t size) {
-    (void)name, (void)dispatch, (void)size;
+SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*)) {
+    (void)name, (void)dispatch;
     return NULL;
 }
 void ipc_out_overflow(IpcCtx* c) {
@@ -55,7 +56,14 @@ int stub_ok(SvcObj* o, IpcCtx* c) {
     return 0;
 }
 
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
+void pm_init(PMutex* m) { (void)m; }
+
 int main(void) {
+    hle_init();
     static u8 memory[0x1000];
     IpcBuf buf;
     nn_settings_LanguageCode code;

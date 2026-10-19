@@ -4,6 +4,7 @@
    No game assets, RSA keys or precompiled NRO host libraries are required. */
 #include "nx/hle/services/services_int.h"
 #include "nx/gpu/gpu.h"
+#include "nx/hle/hle.c"
 #include <openssl/evp.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -23,11 +24,14 @@
 #define NRR   (HEAP_BASE + 0x5000)
 #define SRC2  (HEAP_BASE + 0x8000)
 static int fail_commit;
-u64 g_title_id = 0x0100000000001000ull;
 void (*g_gpu_mapping_begin)(u64, u64, int);
 void (*g_gpu_mapping_end)(void);
 int g_verbose;
 
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
 void pm_init(PMutex* m) { CHECK(!pthread_mutex_init(&m->l, NULL)); }
 void pm_lock(PMutex* m) { CHECK(!pthread_mutex_lock(&m->l)); }
 void pm_unlock(PMutex* m) { CHECK(!pthread_mutex_unlock(&m->l)); }
@@ -117,20 +121,19 @@ void fatal(const char* fmt, ...) {
 static KObj process = {.type = KO_PROCESS};
 KObj* h_get_ref(u32 h, int type) { return h == 0xFFFF8001u && type == KO_PROCESS ? &process : NULL; }
 void kobj_unref(KObj* p) { CHECK(p == &process); }
-SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t size) {
+SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*)) {
     SvcObj* o = calloc(1, sizeof *o);
     CHECK(o != NULL);
     o->name = name;
     o->dispatch = dispatch;
     o->refs = 1;
-    o->data = calloc(1, size);
-    CHECK(o->data != NULL);
     return o;
 }
+#include "svcobj_data.h"
 void svcobj_unref(SvcObj* o) {
     if (--o->refs) return;
     if (o->destroy) o->destroy(o);
-    free(o->data);
+    test_svcobj_data_free(o);
     free(o);
 }
 void ipc_out_overflow(IpcCtx* c) {
@@ -217,7 +220,7 @@ static void fixture(void) {
     gw64(SRC + 0x2000, 0x80);
     memset(GP(BSS), 0xa5, 0x1000); /* map preserves caller's BSS backing, as Eden does */
     memcpy(GP(NRR), "NRR0", 4);
-    gw64(NRR + 0x330, g_title_id);
+    gw64(NRR + 0x330, g_hle.kernel.title_id);
     gw32(NRR + 0x338, 0x1000);
     gw32(NRR + 0x340, 0x350);
     gw32(NRR + 0x344, 1);
@@ -372,6 +375,7 @@ static void limits(void) {
     CHECK(!mem_heap_set(0x10000, 0x200000));
 }
 int main(void) {
+    hle_init();
     mem_init();
     CHECK(!mem_heap_set(0x10000, 0x10000));
     fixture();
@@ -431,7 +435,7 @@ int main(void) {
     gw32(NRR + 0x340, 0x350);
     gw64(NRR + 0x330, 1);
     CHECK(call(o) == RO(6));
-    gw64(NRR + 0x330, g_title_id);
+    gw64(NRR + 0x330, g_hle.kernel.title_id);
     CHECK(!call(o)); /* RegisterModuleInfo has no process handle: the session's RegisterProcessHandle gave it */
     /* Hash list is a snapshot. */
     memset(GP(NRR + 0x350), 0, 32);

@@ -13,6 +13,7 @@
 #endif
 
 #include "nx/hle/services/network/ldn.c"
+#include "nx/hle/hle.c"
 #include "fake_room.h"
 
 u8* g_mem;
@@ -52,23 +53,20 @@ void fatal(const char* format, ...) {
     va_end(args);
     exit(1);
 }
-SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t size) {
+SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*)) {
     SvcObj* obj = calloc(1, sizeof *obj);
     CHECK(obj != NULL);
     obj->name = name;
     obj->dispatch = dispatch;
     obj->refs = 1;
-    if (size) {
-        obj->data = calloc(1, size);
-        CHECK(obj->data != NULL);
-    }
     test_objects++;
     return obj;
 }
+#include "svcobj_data.h"
 void svcobj_unref(SvcObj* obj) {
     if (!obj || --obj->refs) return;
     if (obj->destroy) obj->destroy(obj);
-    free(obj->data);
+    test_svcobj_data_free(obj);
     free(obj);
     test_objects--;
 }
@@ -350,7 +348,13 @@ static void in_a_room(SvcObj* creator, SvcObj* bsd) {
     fake_room_stop(room);
 }
 
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
+
 int main(void) {
+    hle_init();
     SvcObj *creator, *a, *b, *bsd;
     KEvent *ev_a, *ev_b;
     Request r;

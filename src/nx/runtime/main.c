@@ -9,6 +9,7 @@
 #include "nx/gpu/nvn_trace.h"
 #include "nx/gpu/renderer.h"
 #include "nx/hle/filesystem/fs.h"
+#include "nx/hle/hle.h"
 #include "nx/hle/kernel/kernel.h"
 #include "nx/hle/services/hid.h"
 #include "nx/runtime/guest_jit.h"
@@ -236,7 +237,7 @@ static void read_npdm(void) {
         free(d);
         return;
     }
-    g_sysres_size = rd32le(d + 0x14);
+    g_hle.kernel.sysres_size = rd32le(d + 0x14);
     aci = rd32le(d + 0x70);
     aci_size = rd32le(d + 0x74);
     if (aci < size && aci_size >= 0x38 && aci_size <= size - aci && !memcmp(d + aci, "ACI0", 4)) {
@@ -254,13 +255,13 @@ static void read_npdm(void) {
                 WARN("npdm: its thread capability %08x is not one the kernel takes, the defaults apply\n", cap);
                 break;
             }
-            g_core_mask = (((u64)2 << max_core) - 1) & ~(((u64)1 << min_core) - 1);
-            g_prio_mask = (lowest == 63 ? ~(u64)0 : ((u64)2 << lowest) - 1) & ~(((u64)1 << highest) - 1);
+            g_hle.svcmem.core_mask = (((u64)2 << max_core) - 1) & ~(((u64)1 << min_core) - 1);
+            g_hle.svcmem.prio_mask = (lowest == 63 ? ~(u64)0 : ((u64)2 << lowest) - 1) & ~(((u64)1 << highest) - 1);
             break;
         }
     }
-    LOG("npdm: system resource %llu MB, cores %llx, priorities %llx\n", (unsigned long long)(g_sysres_size >> 20),
-        (unsigned long long)g_core_mask, (unsigned long long)g_prio_mask);
+    LOG("npdm: system resource %llu MB, cores %llx, priorities %llx\n", (unsigned long long)(g_hle.kernel.sysres_size >> 20),
+        (unsigned long long)g_hle.svcmem.core_mask, (unsigned long long)g_hle.svcmem.prio_mask);
     free(d);
 }
 
@@ -354,6 +355,7 @@ int snx_main(int argc, char** argv) {
     const char *game, *title;
     const SnxModule* mod;
     int status, i;
+    hle_init(); /* before anything, the options included, touches g_hle */
     status = snx_startup_options(argc, argv);
     if (status) return status;
     if (argc == 2 && !strcmp(argv[1], "--settings")) {
@@ -376,7 +378,7 @@ int snx_main(int argc, char** argv) {
     kind_dir(g_statedir, sizeof g_statedir, SNX_USER_STATE, "log and threads.txt");
     kind_dir(g_cachedir, sizeof g_cachedir, SNX_USER_CACHE, "caches");
     if (g_arm_mod) mem_layout32(g_arm_mod->aspace); /* before anything sizes or reads guest memory */
-    if (mod->title_id) g_title_id = mod->title_id;
+    if (mod->title_id) g_hle.kernel.title_id = mod->title_id;
     /* this run's settings: each --key=value before a "--" (-v is log=2); -f and --fullscreen=0|1 through startup.c's
        record of the last given, which a --fullscreen=... here would only repeat */
     for (i = 1; i < argc && strcmp(argv[i], "--"); i++) {

@@ -6,6 +6,7 @@
 /* acc: the console's users (users.c), the one the game plays as open since it started, with no network service
    account */
 #include "nx/hle/services/services_int.h"
+#include "nx/hle/hle.h"
 #include "gui/splash.h"
 
 #include "hle/services/acc.swipc.inc"
@@ -31,9 +32,9 @@ static void acc_list(IpcBuf users, const SnxUser* first, int count) {
 static void acc_list_all(IpcBuf users) { acc_list(users, g_users, g_user_count); }
 static void acc_list_open(IpcBuf users) { acc_list(users, snx_users_selected(), 1); }
 
-/* an object that keeps the user it was made for */
+/* an object that keeps the user it was made for, in an AccUser of g_hle.acc's */
 static SvcObj* acc_for_user(SvcObj* o, const nn_account_Uid* uid) {
-    memcpy(o->data, uid->v, 16);
+    memcpy(((AccUser*)o->data)->uid, uid->v, 16);
     return o;
 }
 
@@ -68,7 +69,7 @@ static int nn_account_IAccountServiceForApplication_GetProfile(SvcObj* self, con
                                                                SvcObj** profile) {
     (void)self;
     R_UNLESS(acc_user(uid), ACC_INVALID_USER_ID);
-    *profile = acc_for_user(nn_account_profile_IProfile_new(16), uid);
+    *profile = acc_for_user(nn_account_profile_IProfile_new_data(g_hle.acc.users, g_hle.acc.user_next, "acc profiles and managers"), uid);
     R_SUCCEED();
 }
 /* with one user, that user, chosen without asking; with more, none, and the game asks the user selector (am.c),
@@ -90,7 +91,8 @@ static int nn_account_IAccountServiceForApplication_GetBaasAccountManagerForAppl
                                                                                         SvcObj** manager) {
     (void)self;
     R_UNLESS(acc_user(uid), ACC_INVALID_USER_ID);
-    *manager = acc_for_user(nn_account_baas_IManagerForApplication_new(16), uid);
+    *manager = acc_for_user(nn_account_baas_IManagerForApplication_new_data(g_hle.acc.users, g_hle.acc.user_next,
+                                                                                   "acc profiles and managers"), uid);
     R_SUCCEED();
 }
 static int nn_account_IAccountServiceForApplication_LoadOpenContext(SvcObj* self, const nn_account_Uid* uid,
@@ -121,14 +123,12 @@ static int nn_account_IAccountServiceForApplication_StoreSaveDataThumbnail(SvcOb
 }
 
 static const SnxUser* acc_profile_user(SvcObj* self) {
-    u64 v[2];
-    memcpy(v, self->data, 16);
-    return snx_users_find(v); /* GetProfile made it for a user, and users don't go while the game runs */
+    return snx_users_find(((const AccUser*)self->data)->uid); /* GetProfile made it for a user, and users don't go while the game runs */
 }
 static void acc_profile_base(SvcObj* self, nn_account_profile_ProfileBase* base) {
     const SnxUser* u = acc_profile_user(self);
     memset(base, 0, sizeof *base);
-    memcpy(base->uid.v, self->data, 16);
+    memcpy(base->uid.v, ((const AccUser*)self->data)->uid, 16);
     base->last_edit_timestamp = ACC_LAST_EDIT;
     memcpy(base->nickname, u->nickname, strlen(u->nickname)); /* 32 bytes at most: the field's, with no NUL then */
 }
@@ -146,37 +146,30 @@ static int nn_account_profile_IProfile_GetBase(SvcObj* self, nn_account_profile_
    splash's drawing) at 256x256 over white, a JPEG as the console's pictures are, drawn at the first ask and kept */
 #define SNX_ACC_PICTURE_SIDE    256
 #define SNX_ACC_PICTURE_QUALITY 90
-#define SNX_ACC_PICTURE_MAX     0x20000 /* the most a game takes */
-static struct {
-    PMutex lk;
-    u32 size;
-    int made, overflow; /* made: drawn or tried; overflow: more than SNX_ACC_PICTURE_MAX came */
-    u8 d[SNX_ACC_PICTURE_MAX];
-} acc_pic = {PMUTEX_INIT, 0, 0, 0, {0}};
 
 static void acc_picture_write(void* closure, void* data, int size) {
     (void)closure;
-    if (size < 0 || (u32)size > SNX_ACC_PICTURE_MAX - acc_pic.size) {
-        acc_pic.overflow = 1;
+    if (size < 0 || (u32)size > SNX_ACC_PICTURE_MAX - g_hle.acc.pic.size) {
+        g_hle.acc.pic.overflow = 1;
         return;
     }
-    memcpy(acc_pic.d + acc_pic.size, data, (size_t)size);
-    acc_pic.size += (u32)size;
+    memcpy(g_hle.acc.pic.d + g_hle.acc.pic.size, data, (size_t)size);
+    g_hle.acc.pic.size += (u32)size;
 }
 /* the picture's size, drawing it the first time; 0, said once, when it cannot be drawn */
 static u32 acc_picture(void) {
     u32 size;
-    pm_lock(&acc_pic.lk);
-    if (!acc_pic.made) {
-        acc_pic.made = 1;
+    pm_lock(&g_hle.acc.pic.lk);
+    if (!g_hle.acc.pic.made) {
+        g_hle.acc.pic.made = 1;
         if (snx_splash_jpeg("wimsy-fuddles", SNX_ACC_PICTURE_SIDE, SNX_ACC_PICTURE_QUALITY, acc_picture_write, NULL) ||
-            acc_pic.overflow) {
+            g_hle.acc.pic.overflow) {
             WARN("acc: the user's picture was not drawn, games get none\n");
-            acc_pic.size = 0;
+            g_hle.acc.pic.size = 0;
         }
     }
-    size = acc_pic.size;
-    pm_unlock(&acc_pic.lk);
+    size = g_hle.acc.pic.size;
+    pm_unlock(&g_hle.acc.pic.lk);
     return size;
 }
 /* GetImageSize tells the size LoadImage writes, so a game reserves what it gets: the user's own picture
@@ -189,7 +182,7 @@ static int nn_account_profile_IProfile_LoadImage(SvcObj* self, IpcBuf image, u32
     const unsigned char* jpeg = snx_users_picture(acc_profile_user(self), size);
     if (!jpeg) {
         *size = acc_picture();
-        jpeg = acc_pic.d;
+        jpeg = g_hle.acc.pic.d;
     }
     memcpy(GP(image.addr), jpeg, (size_t)(image.size < *size ? image.size : *size));
     R_SUCCEED();
@@ -198,15 +191,13 @@ static int nn_account_profile_IProfile_LoadImage(SvcObj* self, IpcBuf image, u32
 /* ============================================================ IManagerForApplication */
 /* the id the account would have, made from the user's */
 static int nn_account_baas_IManagerForApplication_GetAccountId(SvcObj* self, nn_account_NetworkServiceAccountId* id) {
-    u64 a, b;
-    memcpy(&a, self->data, 8);
-    memcpy(&b, (u8*)self->data + 8, 8);
-    *id = a ^ b;
+    const AccUser* u = (const AccUser*)self->data;
+    *id = u->uid[0] ^ u->uid[1];
     R_SUCCEED();
 }
 static int nn_account_baas_IManagerForApplication_EnsureIdTokenCacheAsync(SvcObj* self, SvcObj** context) {
     (void)self;
-    *context = nn_account_detail_IAsyncContext_new(0);
+    *context = nn_account_detail_IAsyncContext_new();
     R_SUCCEED();
 }
 
@@ -225,4 +216,4 @@ static int nn_account_detail_IAsyncContext_GetResult(SvcObj* self) {
     R_THROW(ACC_NOT_CONNECTED);
 }
 
-SvcObj* new_acc(void) { return nn_account_IAccountServiceForApplication_new(0); }
+SvcObj* new_acc(void) { return nn_account_IAccountServiceForApplication_new(); }

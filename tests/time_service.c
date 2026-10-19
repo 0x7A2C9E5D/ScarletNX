@@ -4,6 +4,7 @@
    times in a fixed-offset zone and back, the zone names, the shared memory the SDK reads, and the spans between
    snapshots. The kernel objects and the guest clock are stand-ins here */
 #include "nx/hle/services/time.c"
+#include "nx/hle/hle.c"
 
 static unsigned checks;
 #define CHECK(x)                                                                                                       \
@@ -44,18 +45,17 @@ int new_event(u32* event, const char* name, int signaled) {
     return 0;
 }
 /* what the dispatchers reach, which the test does not run */
-SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t datasize) {
+SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*)) {
     SvcObj* o = calloc(1, sizeof *o);
     CHECK(o != NULL);
     o->name = name;
     o->dispatch = dispatch;
     o->refs = 1;
-    o->data = calloc(1, datasize ? datasize : 1);
-    CHECK(o->data != NULL);
     return o;
 }
+#include "svcobj_data.h"
 static void test_free(SvcObj* o) {
-    free(o->data);
+    test_svcobj_data_free(o);
     free(o);
 }
 
@@ -133,7 +133,14 @@ static i64 rd64(const u8* p) {
     return v;
 }
 
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
+void pm_init(PMutex* m) { (void)m; }
+
 int main(void) {
+    hle_init();
     nn_time_PosixTime now;
     nn_time_SystemClockContext ctx;
     nn_time_SteadyClockTimePoint tp;

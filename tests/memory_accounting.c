@@ -3,6 +3,7 @@
 /* Exercise the production memory SVCs and block list without game files. The POSIX backing is sparse, with
    injectable commit failures. Thread/handle/GPU services are stubs, not the code under test. */
 #include "nx/hle/kernel/kernel_int.h"
+#include "nx/hle/hle.h"
 #include "nx/runtime/clock.h"
 #include "nx/gpu/gpu.h"
 #include <pthread.h>
@@ -15,8 +16,6 @@
 static unsigned checks;
 static int fail_commit_after, commit_calls, decommit_calls;
 static int mapping_depth, mapping_begins, mapping_ends;
-PMutex g_klock = PMUTEX_INIT;
-u64 g_title_id, g_sysres_size;
 int g_verbose;
 
 static void test_fail(const char* expr, int line) {
@@ -141,10 +140,10 @@ static u32 state(u64 a) {
 }
 static void base_process(void) {
     CHECK(g_heap_size == 0 && g_phys_mapped == 0);
-    g_opt_mem_gb = 0;
+    g_hle.svcmem.opt_mem_gb = 0;
     g_code_memory = 55 * MIB;
     g_main_stack_size = MIB;
-    g_sysres_size = 0;
+    g_hle.kernel.sysres_size = 0;
     g_heap_max = 0;
     fail_commit_after = 0;
 }
@@ -177,7 +176,7 @@ static void test_heap(void) {
     CHECK(g_heap_size == 2 * MIB && state(HEAP_BASE + 2 * MIB) == MS_FREE);
     CHECK(svc_set_heap_size(0) == 0);
     for (int gb = 4; gb <= 8; gb += 2) {
-        g_opt_mem_gb = gb;
+        g_hle.svcmem.opt_mem_gb = gb;
         CHECK(mem_total() == (gb == 4 ? 3285 : gb == 6 ? 4916 : 6964) * MIB);
         CHECK(svc_set_heap_size(3200 * MIB) == 0);
         CHECK(svc_set_heap_size(0) == 0);
@@ -187,7 +186,7 @@ static void test_system_resource(void) {
     base_process();
     CHECK(svc_map_physical(ALIAS_BASE, 0x1000) == R_BADSTATE);
     CHECK(svc_unmap_physical(ALIAS_BASE, 0x1000) == R_BADSTATE);
-    g_sysres_size = 64 * MIB;
+    g_hle.kernel.sysres_size = 64 * MIB;
     CHECK(info(16) == 64 * MIB);
     CHECK(info(6) == 3285 * MIB && info(21) == 3221 * MIB);
     CHECK(info(7) == 120 * MIB && info(22) == 56 * MIB);
@@ -215,7 +214,7 @@ static void test_system_resource(void) {
 }
 static void test_rollback(void) {
     base_process();
-    g_sysres_size = 2 * MIB;
+    g_hle.kernel.sysres_size = 2 * MIB;
     u64 a = ALIAS_BASE;
     CHECK(svc_map_physical(a + 0x1000, 0x1000) == 0);
     gw32(a + 0x1000, 0x12345678);
@@ -274,8 +273,8 @@ static void* race_request(void* arg) {
 }
 static void test_shared_budget(void) {
     base_process();
-    g_sysres_size = 2 * MIB;
-    g_code_memory = mem_total() - g_main_stack_size - g_sysres_size - 2 * MIB;
+    g_hle.kernel.sysres_size = 2 * MIB;
+    g_code_memory = mem_total() - g_main_stack_size - g_hle.kernel.sysres_size - 2 * MIB;
     for (int i = 0; i < 50; i++) {
         ready = go = 0;
         Request q[2] = {{0, ~0u}, {1, ~0u}};
@@ -387,7 +386,13 @@ static void test_shared_memory(void) {
     test_handle = NULL;
     s->o.destroy(&s->o);
 }
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
+
 int main(void) {
+    hle_init();
     /* this host's pages, then those of hosts with larger ones (16 KiB: Apple silicon, some Android kernels; 64 KiB:
        PowerPC64 and some AArch64 distributions), which mem.c commits in whole */
     static const u64 pages[] = {16 << 10, 64 << 10};

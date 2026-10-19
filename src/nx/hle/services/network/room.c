@@ -6,6 +6,7 @@
    sockets are the room's (bsd.c) and ldn's networks go through it (ldn.c); at exit the room hears this console
    leave */
 #include "nx/hle/services/network/network.h"
+#include "nx/hle/hle.h"
 #include "nx/runtime/main.h"
 #include "common/utilities/common.h"
 #include "common/utilities/ini_lines.h"
@@ -109,7 +110,7 @@ void network_room_init(void) {
     r = room_password(dir, password, sizeof password, why, sizeof why);
     free(dir);
     if (r) fatal("The Eden room's password: %s", why);
-    r = snx_room_join(&room, host, port, user->nickname, password, g_exename, g_title_id, "", &refused);
+    r = snx_room_join(&room, host, port, user->nickname, password, g_exename, g_hle.kernel.title_id, "", &refused);
     if (r)
         fatal("The Eden room at %s:%u, as user %d (%s): %s (errno %d)", host, port, snx_users_selected_number(),
               user->nickname, snx_room_why_text(refused), -r);

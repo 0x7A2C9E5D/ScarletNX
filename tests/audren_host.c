@@ -6,6 +6,7 @@
 #include "nx/hle/services/audren_dsp.h"
 
 #include "nx/hle/services/audren.c"
+#include "nx/hle/hle.c"
 
 u8* g_mem;
 static unsigned test_checks;
@@ -69,14 +70,21 @@ int audren_frame(ARState* s, i16* stereo) {
     return 1;
 }
 
-static PAudio* host_of(SvcObj* o) { return ((ARRen*)(size_t)o->u[1])->out; }
+static PAudio* host_of(SvcObj* o) { return audren_of(o)->out; }
 /* started, and its first frame played: the host stream opens */
 static void play(SvcObj* o) {
     o->u[0] = SNX_AUDREN_STARTED;
     audren_tick();
 }
 
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
+void pm_init(PMutex* m) { (void)m; }
+
 int main(void) {
+    hle_init();
     static const u8 params[0x34];
     SvcObj first, second, later;
     memset(&first, 0, sizeof first);
@@ -96,7 +104,7 @@ int main(void) {
     first.destroy(&first);
     second.destroy(&second);
     later.destroy(&later);
-    CHECK(audren_list == NULL);
+    for (int i = 0; i < SNX_AUDREN_MAX; i++) CHECK(g_hle.audren.rens[i].o == NULL); /* every renderer's slot free */
     printf("audren_host: %u checks passed\n", test_checks);
     return 0;
 }

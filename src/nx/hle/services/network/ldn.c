@@ -21,6 +21,7 @@
 #include "nx/hle/services/network/network.h"
 #include "common/network/net_ldn.h"
 #include "common/network/net_room.h"
+#include "nx/hle/hle.h"
 #include "hle/services/network/ldn.swipc.inc"
 #include <openssl/rand.h>
 
@@ -59,16 +60,6 @@ enum {
     CONNECT_VERSION = 0x74 /* ConnectNetworkData: SecurityConfig, UserConfig, i32 version, u32 option */
 };
 
-typedef struct Ldn {
-    PMutex lk;
-    struct Ldn* next; /* g_ldns' */
-    SnxLdn* lan;
-    KEvent* ev;
-    u32 state;
-    i16 reason;
-    u8 ip[4], mask[4];
-} Ldn;
-
 static void set_state(Ldn* d, u32 state) {
     d->state = state;
     kevent_signal(d->ev);
@@ -100,23 +91,23 @@ static void ldn_teardown(Ldn* d) {
         if (g_opt_ldn != SNX_OPT_LDN_ROOM) bsd_set_bind_address(NULL, NULL);
     }
 }
-/* every ldn:u, for ldn_exit to close their networks */
-static PMutex g_ldns_lk = PMUTEX_INIT;
-static Ldn* g_ldns;
+/* every ldn:u is in g_hle.ldn's list, for ldn_exit to close their networks */
+static Ldn* ldn_at(u32 i) { return i ? &g_hle.ldn.ldn[i - 1] : NULL; } /* the index + 1 */
 static void ldn_destroy(SvcObj* o) {
-    Ldn *d = o->data, **p;
-    pm_lock(&g_ldns_lk);
-    for (p = &g_ldns; *p && *p != d; p = &(*p)->next) {}
+    Ldn* d = o->data;
+    u32 *p, self = POOL_INDEX(g_hle.ldn.ldn, d) + 1;
+    pm_lock(&g_hle.ldn.ldns_lk);
+    for (p = &g_hle.ldn.ldns; *p && *p != self; p = &ldn_at(*p)->next) {}
     if (*p) *p = d->next;
-    pm_unlock(&g_ldns_lk);
+    pm_unlock(&g_hle.ldn.ldns_lk);
     ldn_teardown(d);
     kobj_unref(&d->ev->o);
 }
 void ldn_exit(void) {
     Ldn* d;
-    pm_lock(&g_ldns_lk);
-    for (d = g_ldns; d; d = d->next) ldn_teardown(d);
-    pm_unlock(&g_ldns_lk);
+    pm_lock(&g_hle.ldn.ldns_lk);
+    for (d = ldn_at(g_hle.ldn.ldns); d; d = ldn_at(d->next)) ldn_teardown(d);
+    pm_unlock(&g_hle.ldn.ldns_lk);
 }
 
 /* ============================================================ the console's address */
@@ -149,22 +140,23 @@ static int ldn_open(Ldn* d) {
 
 /* ============================================================ the objects */
 static int nn_ldn_detail_IUserServiceCreator_CreateUserLocalCommunicationService(SvcObj* self, SvcObj** service) {
-    SvcObj* o = nn_ldn_detail_IUserLocalCommunicationService_new(sizeof(Ldn));
+    SvcObj* o =
+        nn_ldn_detail_IUserLocalCommunicationService_new_data(g_hle.ldn.ldn, g_hle.ldn.ldn_next, "ldn:u services");
     Ldn* d = o->data;
     (void)self;
     pm_init(&d->lk);
     d->ev = owned_event("ldn state change");
     o->destroy = ldn_destroy;
-    pm_lock(&g_ldns_lk);
-    d->next = g_ldns;
-    g_ldns = d;
-    pm_unlock(&g_ldns_lk);
+    pm_lock(&g_hle.ldn.ldns_lk);
+    d->next = g_hle.ldn.ldns;
+    g_hle.ldn.ldns = POOL_INDEX(g_hle.ldn.ldn, d) + 1;
+    pm_unlock(&g_hle.ldn.ldns_lk);
     *service = o;
     R_SUCCEED();
 }
 static int nn_ldn_detail_IUserServiceCreator_CreateClientProcessMonitor(SvcObj* self, SvcObj** monitor) {
     (void)self;
-    *monitor = nn_ldn_detail_IClientProcessMonitor_new(0);
+    *monitor = nn_ldn_detail_IClientProcessMonitor_new();
     R_SUCCEED();
 }
 
@@ -532,4 +524,4 @@ static int nn_ldn_detail_IUserLocalCommunicationService_Disconnect(SvcObj* self)
     R_SUCCEED();
 }
 
-SvcObj* new_ldn(void) { return nn_ldn_detail_IUserServiceCreator_new(0); }
+SvcObj* new_ldn(void) { return nn_ldn_detail_IUserServiceCreator_new(); }

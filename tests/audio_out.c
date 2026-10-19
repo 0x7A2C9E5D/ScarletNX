@@ -5,6 +5,7 @@
 #include <stdarg.h>
 
 #include "nx/hle/services/audio.c"
+#include "nx/hle/hle.c"
 
 u8* g_mem;
 int g_verbose;
@@ -79,23 +80,20 @@ void logf_(int level, const char* format, ...) {
     (void)format;
 }
 
-SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t size) {
+SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*)) {
     SvcObj* obj = calloc(1, sizeof *obj);
     CHECK(obj != NULL);
     obj->name = name;
     obj->dispatch = dispatch;
     obj->refs = 1;
-    if (size) {
-        obj->data = calloc(1, size);
-        CHECK(obj->data != NULL);
-    }
     test_objects++;
     return obj;
 }
+#include "svcobj_data.h"
 void svcobj_unref(SvcObj* obj) {
     if (!obj || --obj->refs) return;
     if (obj->destroy) obj->destroy(obj);
-    free(obj->data);
+    test_svcobj_data_free(obj);
     free(obj);
     test_objects--;
 }
@@ -524,8 +522,8 @@ static void test_renderer(void) {
     audio_init();
     c = request(7, NULL, 0);
     CHECK(r->dispatch(r, &c) == 0 && c.nout_copy == 1 && c.out_copy[0] == 7);
-    kobj_unref(&audio.ev->o);
-    audio.ev = NULL;
+    kobj_unref(&g_hle.audio.ev->o);
+    g_hle.audio.ev = NULL;
     svcobj_unref(r);
     svcobj_unref(manager);
 }
@@ -767,7 +765,13 @@ static void test_hwopus(void) {
     svcobj_unref(manager);
 }
 
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
+
 int main(void) {
+    hle_init();
     g_mem = calloc(1, 0x10000);
     CHECK(g_mem != NULL);
     SvcObj* manager = new_audout();
@@ -842,7 +846,7 @@ int main(void) {
     CHECK(released(o, 8) == 64 && gr64(0x200) == 100 && gr64(0x3F8) == 163);
     command(o, 2);
     svcobj_unref(o);
-    CHECK(audio.outs == NULL);
+    CHECK(g_hle.audio.outs == NULL);
 
     test_no_device = 1;
     o = open_output(manager);
@@ -862,7 +866,7 @@ int main(void) {
     test_device();
     test_device_gain();
     test_hwopus();
-    CHECK(test_objects == 0 && test_events == 0 && audio.outs == NULL);
+    CHECK(test_objects == 0 && test_events == 0 && g_hle.audio.outs == NULL);
     free(g_mem);
     printf("audout: %u checks passed\n", test_checks);
     return 0;
