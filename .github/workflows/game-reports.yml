@@ -40,15 +40,15 @@ jobs:
             src/common/utilities/logscan.c
             src/common/utilities/logscan.h
             src/common/utilities/logscan_main.c
-            src/common/utilities/demangle.cpp
+            src/common/utilities/demangle.c
             src/common/utilities/demangle.h
           sparse-checkout-cone-mode: false
-      # the C library and the C++ runtime's demangler only: the runner's own compilers build it in seconds
+      # C on the C library, and the C++ runtime for its demangler: the runner's compiler builds it in seconds
       - name: Build the log summary
         run: |
-          cc -std=c90 -O2 -Isrc -c src/common/utilities/logscan.c src/common/utilities/logscan_main.c
-          c++ -O2 -Isrc -c src/common/utilities/demangle.cpp
-          c++ -o snx-logscan logscan.o logscan_main.o demangle.o
+          cc -std=c90 -O2 -Isrc -c src/common/utilities/logscan.c src/common/utilities/logscan_main.c \
+            src/common/utilities/demangle.c
+          cc -o snx-logscan logscan.o logscan_main.o demangle.o -lstdc++
       - name: Summarize
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

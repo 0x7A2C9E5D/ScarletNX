@@ -16,9 +16,11 @@ else()
     target_link_libraries(scarletnx-common PUBLIC m)
 endif()
 
-# snx_demangle (utilities/demangle.h): C++ names through the C++ runtime's demangler, for the log summary
-add_library(snx_demangle STATIC utilities/demangle.cpp)
-target_compile_options(snx_demangle PRIVATE -Wall -Wextra -Werror)
+# snx_demangle (utilities/demangle.h): C++ names through the C++ runtime's demangler, for the log summary. C, but what
+# links it links the C++ runtime (LINKER_LANGUAGE CXX)
+add_library(snx_demangle STATIC utilities/demangle.c)
+set_target_properties(snx_demangle PROPERTIES C_STANDARD ${SNX_C90_STANDARD} C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_compile_options(snx_demangle PRIVATE -pedantic-errors -Wall -Wextra -Werror -Werror=missing-prototypes)
 # snx-logscan: the log summary (utilities/logscan.h) as a program, as scarletnx --scan-log, for the game reports
 # workflow and the tests: only the C library and the demangler. Not for the phones, which run no programs of their own
 if(NOT ANDROID AND NOT IOS)
