@@ -72,6 +72,7 @@ typedef struct GpuChannel {
     u32 mme_batch;
     u32 mme_code_batch[0x2000];
     u8 mme_choice[0x80];
+    u64 mme_hash[0x80]; /* the hash mme_choose found for each slot, for the interpreted calls' statistics */
     u32 mme_upload, mme_start_ptr;
     u32 mme_params[0x10000];
     u32 mme_nparams;

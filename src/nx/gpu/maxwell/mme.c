@@ -243,6 +243,7 @@ static int mme_choose(GpuChannel* ch, u32 idx) {
                   (unsigned long long)h, k >= 0 ? mme_native_name(k) : "interpreted");
         c = k >= 0 ? (u32)k + 2 : 1;
         ch->mme_choice[idx] = (u8)c;
+        ch->mme_hash[idx] = h;
     }
     return (int)c - 2;
 }
@@ -254,6 +255,38 @@ static int mme_mode = -1;
    compared, those that differed, those the recording couldn't judge (a register read after a send) and those the
    native one left to the interpreter */
 static u64 mme_n_native, mme_n_interp, mme_n_same, mme_n_differ, mme_n_unjudged, mme_n_declined;
+/* the interpreted calls by the hash of their macro, in a table with a place for each of the first MME_STATS hashes:
+   the log line names the busiest, the macros a native implementation would take next */
+#define MME_STATS 64
+static struct {
+    u64 hash, calls;
+} mme_stats[MME_STATS];
+static void mme_stat(u64 h) {
+    u32 i = (u32)(h ^ h >> 32) % MME_STATS, n;
+    for (n = 0; n < MME_STATS && mme_stats[i].calls && mme_stats[i].hash != h; n++) i = (i + 1) % MME_STATS;
+    if (n == MME_STATS) return;
+    mme_stats[i].hash = h;
+    mme_stats[i].calls++;
+}
+static void mme_stats_log(void) {
+    char line[256];
+    size_t at = 0;
+    u32 shown[4], ns = 0, i, j;
+    while (ns < 4) {
+        u32 best = MME_STATS;
+        for (i = 0; i < MME_STATS; i++) {
+            for (j = 0; j < ns && shown[j] != i; j++) {}
+            if (j == ns && mme_stats[i].calls && (best == MME_STATS || mme_stats[i].calls > mme_stats[best].calls))
+                best = i;
+        }
+        if (best == MME_STATS) break;
+        shown[ns++] = best;
+        at += (size_t)snprintf(line + at, sizeof line - at, "%s%016llx %llu", ns > 1 ? ", " : "",
+                               (unsigned long long)mme_stats[best].hash, (unsigned long long)mme_stats[best].calls);
+        if (at >= sizeof line) break;
+    }
+    if (ns) LOG("mme: the macros interpreted most, by hash: %s\n", line);
+}
 static void mme_verify(GpuChannel* ch, u32 idx, int k, u32 np) {
     static MmeRec rec[2]; /* GPU thread only, and too large for a frame of its own */
     MmeRec *nat = &rec[0], *in = &rec[1];
@@ -301,12 +334,14 @@ void mme_run(GpuChannel* ch, u32 idx, u32 np) {
     else {
         if (k >= 0 && (mme_mode & MME_VERIFY)) mme_verify(ch, idx, k, np);
         mme_n_interp++;
+        if (mme_mode & MME_NATIVE) mme_stat(ch->mme_hash[idx]);
         mme_interpret(ch, NULL, idx, np);
     }
     if ((mme_n_native + mme_n_interp) % 1000000 == 0) {
         LOG("mme: %llu macro calls, %llu native and %llu interpreted\n",
             (unsigned long long)(mme_n_native + mme_n_interp), (unsigned long long)mme_n_native,
             (unsigned long long)mme_n_interp);
+        mme_stats_log();
         if (mme_mode & MME_VERIFY)
             LOG("mme: verified %llu calls the same, %llu different, %llu unjudged (a read after a send), %llu left to the "
                 "interpreter\n",
