@@ -3,7 +3,7 @@
 /* Releases the game can observe: a semaphore or report written for the CPU to poll, a syncpoint incremented. The
    console's GPU makes everything before a release visible in memory first, so storage results recorded before it
    land before it happens. Landing them with a vk_finish at each release left the GPU thread waiting for most of
-   TotK's frame. A release now waits in a queue instead, gated on the submit that holds the work before it, and the
+   one game's frame. A release now waits in a queue instead, gated on the submit that holds the work before it, and the
    GPU thread goes on recording. The release thread waits for that submit on the GPU, lands its results and performs
    the releases it gates, in order. Whoever needs a queued release sooner (a stream that reads the semaphore, or writes
    over it) performs it itself.

@@ -13,9 +13,9 @@
 
    A console core runs nothing but its own threads, so a thread that wakes another core's thread keeps running at once,
    and the woken one starts beside it. On the host every thread may take any CPU, and the host scheduler may put the
-   woken thread on the waker's CPU and run it there in the waker's place until it blocks or a tick passes: Link's
-   Awakening's job worker then stops right after the unlock that wakes the main thread, which reuses a job the worker
-   is not done with. So each core the game may use gets a share of the host CPUs (every n-th one, n the game's cores),
+   woken thread on the waker's CPU and run it there in the waker's place until it blocks or a tick passes: a game's job
+   worker then stops right after the unlock that wakes the main thread, which reuses a job the worker is not done
+   with. So each core the game may use gets a share of the host CPUs (every n-th one, n the game's cores),
    apart from the other cores' shares, and a thread's host thread runs on the share of the core it holds */
 
 /* the core a thread would run on, kept within the cores the runtime has */

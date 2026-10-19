@@ -17,7 +17,7 @@
    waiters of its new priority, as the console reinserts it in its ordered queue. Condition variable and address
    waiters are in a list per bucket of the word they wait on, so a signal looks only at the threads that may wait on its
    word: idle workers park there for good, and a list of them all made every signal walk every parked thread (dozens in
-   Tears of the Kingdom), each a cache miss. Mutex waits are short, and a priority change looks for the waiters of an
+   one game), each a cache miss. Mutex waits are short, and a priority change looks for the waiters of an
    owner among all of them, so they stay in one list. The lists are g_hle.sync's (kernel_int.h). A mutex waiter
    holds a reference to its lock_owner while it names it, so the owner can't be freed under it if it exits holding the
    mutex */

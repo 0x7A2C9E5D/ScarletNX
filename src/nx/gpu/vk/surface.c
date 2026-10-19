@@ -576,9 +576,9 @@ Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h) {
 /* render targets drawn this frame or the last, for a texture made of them (gpu/vk/texture.c) */
 static Surf** g_drawn;
 static int g_ndrawn, g_capdrawn;
-/* the GPU pages they started at when listed, so a texture over none of them (most) skips the list: TotK looked at each
-   of about 30 for each of 13,000 textures a frame. A target parked since still counts its old page, which only lets
-   the walk run */
+/* the GPU pages they started at when listed, so a texture over none of them (most) skips the list: one game looked at
+   each of about 30 for each of 13,000 textures a frame. A target parked since still counts its old page, which only
+   lets the walk run */
 static PendPages g_drawn_pages;
 /* Read backing memory directly: asking gmem_read to land pending output here could submit a draw mid-setup. A run of
    pages contiguous in host memory is hashed at once, eight bytes at a time (vk_hash) */
@@ -686,8 +686,8 @@ void vk_surf_evict(u32 before) {
        (guest memory has them as of its last write-back). They aren't written to memory as they go: memory is shared
        by targets the GPU drew over one another, parked and freed ones among them, and by textures and buffers that
        copied from them on the GPU, and the renderer doesn't know them all. Writing an evicted target's pixels, as
-       Mario Kart 8 Deluxe's Mii icons wanted (drawn at boot, shown a minute later), put older pixels over newer ones
-       in Tears of the Kingdom: a black block over Link, and red and green blocks over its textures */
+       a game's Mii icons wanted (drawn at boot, shown a minute later), put older pixels over newer ones in
+       another: a black block over the player character, and red and green blocks over its textures */
     for (int k = 0; k < SURFH; k++)
         for (Surf** pp = &g_surfh[k]; *pp;) {
             Surf* s = *pp;

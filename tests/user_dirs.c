@@ -175,7 +175,7 @@ int main(void) {
         /* the launcher's settings.ini and gamecontrollerdb.txt: its config/, for it and for a game in its games/ */
         expected = join(copy, "config");
         expect_menu(copy, SNX_USER_CONFIG, expected);
-        path = join(copy, "games/0100DA801624E000/");
+        path = join(copy, "games/0100ABCD12345000/");
         expect_menu(path, SNX_USER_CONFIG, expected);
         free(path);
         free(expected);
@@ -187,7 +187,7 @@ int main(void) {
         char* user = snx_user_dir(SNX_USER_CONFIG);
         assert(user);
         expect_menu(games, SNX_USER_CONFIG, user);
-        path = join(root, "portable/games/0100DA801624E000");
+        path = join(root, "portable/games/0100ABCD12345000");
         expect_menu(path, SNX_USER_CONFIG, user);
         free(path);
         expect_menu(NULL, SNX_USER_CONFIG, user);

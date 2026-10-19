@@ -983,7 +983,7 @@ static int nn_mii_detail_IDatabaseService_Get1(SvcObj* self, i32 source_flag, Ip
     return mii_give_defaults(source_flag, infos, 0x58, count);
 }
 /* a Mii's newest version and its place in the database, which has no Miis: NotFound, and the game keeps the Mii it has
-   (Mario Kart 8 Deluxe asks both for the Mii its save holds, and takes a successful UpdateLatest's as that Mii) */
+   (a game may ask both for the Mii its save holds, and take a successful UpdateLatest's as that Mii) */
 static int nn_mii_detail_IDatabaseService_UpdateLatest(SvcObj* self, const nn_mii_CharInfo* info, i32 source_flag,
                                                        nn_mii_CharInfo* latest) {
     (void)self, (void)info, (void)source_flag, (void)latest;

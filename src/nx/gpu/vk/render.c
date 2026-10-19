@@ -171,7 +171,7 @@ static void target_written(Surf* s) {
     vk_rt_drawn(s);
 }
 
-/* Feedback loops. A Maxwell draw may sample a color target it renders to: Tears of the Kingdom blends in its shaders,
+/* Feedback loops. A Maxwell draw may sample a color target it renders to: a game may blend in its shaders,
    reading the pixel under the fragment and writing it back, in hundreds of draws a frame. With
    VK_EXT_attachment_feedback_loop_layout the target stays the pass's attachment, in ATTACHMENT_FEEDBACK_LOOP_OPTIMAL,
    which the draw's descriptor names too, and the draw enables the loop for color (dynamic state, or a pipeline flag).
@@ -853,7 +853,7 @@ static int cb_get(const GpuChannel* ch, int stage, int i, u32 sz, VkBuffer* buf,
     u64 a = ch->cbind[stage][i];
     int pending;
     /* checked as it is cached, with no compute or graphics result added since: none can cover it, and only a write of
-       its memory leaves the copy stale. The pending checks were the most of cb_get's time in TotK */
+       its memory leaves the copy stale. The pending checks were the most of cb_get's time in one game */
     if (a && c[stage][i].a == a && c[stage][i].epoch == g_vk_epoch && c[stage][i].frame == vk_submit_number() &&
         c[stage][i].sz >= sz && c[stage][i].cs_adds == vk_compute_adds() && c[stage][i].gfx_adds == vk_buf_adds() &&
         !gpu_mem_dirty_since(c[stage][i].gw, a, sz)) {
@@ -1218,7 +1218,7 @@ static void draw_storage_read(const GpuChannel* ch, VkDrawStorage* draw, VkSh* v
    res: textures fs_get_keyed resolved for this stage, or NULL */
 /* A stage's descriptor set by its contents: the same writes (buffers, offsets, ranges, views, samplers, layouts) in
    the same layout reuse the set made for them earlier in the frame, which still holds them (its pool is reset when the
-   frame slot comes round again, and what it names is destroyed no earlier: vk_defer_*). TotK allocated and wrote
+   frame slot comes round again, and what it names is destroyed no earlier: vk_defer_*). One game allocated and wrote
    13,400 sets a frame, two a draw, much of it the same textures again. Two independent 64-bit hashes stand for the
    contents */
 u64 g_vk_dset_new, g_vk_dset_reused;
@@ -1453,7 +1453,7 @@ static VkDescriptorSet stage_set(GpuChannel* ch, int stage, VkSh* s, Surf** rt, 
 
 /* ------------------------------------------------------------ draws */
 /* The dynamic state, pipeline and descriptor sets the previous draw recorded in the command buffer g_dyn.cb names
-   (vk_cb_begun): a draw records only what differs, where every draw set about 30 states again (TotK: 6,700 draws a
+   (vk_cb_begun): a draw records only what differs, where every draw set about 30 states again (one game: 6,700 draws a
    frame). Every draw pipeline has these states dynamic, so binding another one keeps them. The clear path and the
    on-screen controls set or bind otherwise and forget them (vk_render_forget_state) */
 static struct {
@@ -1635,7 +1635,7 @@ retry:
                   (unsigned long long)zt->gva, zt->w, zt->h, count, indexed, (unsigned long long)(code + r[0x811]),
                   (unsigned long long)(code + r[0x851]));
     /* a color target the fragment shader samples but doesn't write (no output for it, or a write mask of 0) is drawn
-       without: Tears of the Kingdom's lighting passes keep the whole G-buffer bound while they read some of it, which
+       without: a game's lighting passes may keep the whole G-buffer bound while they read some of it, which
        Maxwell allows, and Vulkan can't sample an attachment of the pass */
     if (fs)
         for (u32 j = 0; j < n; j++) {
@@ -1772,7 +1772,7 @@ retry:
             continue;
         }
         u32 stride = va[0] & 0xFFF, asz = attr_bytes(size);
-        /* an attribute may be wider than its stream's stride (Tears of the Kingdom reads 8-byte attributes from
+        /* an attribute may be wider than its stream's stride (a game may read 8-byte attributes from
            6-byte strides, its world geometry): Maxwell reads the rest from the next vertex, and so does Vulkan,
            which allows it outside the portability subset (vertexAttributeAccessBeyondStride) */
         if (stride > lim->maxVertexInputBindingStride) {

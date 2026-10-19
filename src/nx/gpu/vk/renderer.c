@@ -132,8 +132,8 @@ static void vkr_method_barrier(int kind) {
        Eden: a target sampled afterwards gets its barrier when it is bound (vk_surf_use), and headers and samplers are
        read from guest memory at each bind. Nor does any invalidation expire the cached textures: their checks see the
        CPU's writes through the epoch each submission and stream wait starts, and the GPU's through write generations.
-       Expiring them at each texture cache invalidation, about a hundred a frame in TotK, had every texture bound after
-       one check its memory again */
+       Expiring them at each texture cache invalidation, about a hundred a frame in one game, had every texture bound
+       after one check its memory again */
     if (kind == 1 || kind == 3) return;
     vk_lock();
     vk_render_end();

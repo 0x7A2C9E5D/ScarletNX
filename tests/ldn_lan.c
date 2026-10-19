@@ -151,7 +151,7 @@ static void two_consoles(void) {
 
     /* the host's network, with its advertisement set before and after */
     CHECK(snx_ldn_set_advertise_data(a, "before", 6) == 0);
-    network_of(a, &net, 0x0100152000022000ull);
+    network_of(a, &net, 0x0100ABCD12345000ull);
     CHECK(snx_ldn_create_network(a, &net) == 0);
     CHECK(snx_ldn_create_network(a, &net) == -SNX_EBUSY);
     CHECK(snx_ldn_connected(a));
@@ -167,10 +167,10 @@ static void two_consoles(void) {
     /* the station finds it, filtered by what the game asks for */
     memset(&filter, 0, sizeof filter);
     filter.flag = SNX_LDN_FILTER_LOCAL_COMMUNICATION_ID;
-    filter.local_communication_id = 0x0100152000022000ull;
+    filter.local_communication_id = 0x0100ABCD12345000ull;
     n = snx_ldn_scan(b, &filter, found, 4, 1000);
     CHECK(n == 1);
-    CHECK(found[0].local_communication_id == 0x0100152000022000ull && found[0].scene_id == 3);
+    CHECK(found[0].local_communication_id == 0x0100ABCD12345000ull && found[0].scene_id == 3);
     CHECK(found[0].advertise_data_size == 7 && !memcmp(found[0].advertise_data, "after!!", 7));
     CHECK(!memcmp(found[0].bssid, net.bssid, 6) && found[0].node_count == 1);
     filter.local_communication_id = 0x0100000000010000ull; /* another game's */

@@ -181,8 +181,8 @@ interface nn::nfp::detail::IUserManager is nfp:user {
 interface nn::nfc::detail::IUserManager is nfc:user {
     [0] CreateUserInterface() -> object<nn::nfc::detail::IUser> user;
 }
-# nfp as on a console with no NFC device available: amiibo aren't read here. The layouts are the SDK's (Super Mario
-# Odyssey's IUser proxy)
+# nfp as on a console with no NFC device available: amiibo aren't read here. The layouts are the SDK's (a game's
+# IUser proxy)
 type nn::nfp::TagInfo = bytes<0x58>;
 type nn::nfp::RegisterInfo = bytes<0x100>;
 type nn::nfp::CommonInfo = bytes<0x40>;

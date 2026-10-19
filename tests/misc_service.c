@@ -1005,7 +1005,7 @@ static void test_aoc_content(void) {
     g_hle.misc.aoc_scanned = g_hle.misc.aoc_count = 0;
 }
 
-/* nn::mii::detail::CharInfoRaw::Verify as the SDK checks a CharInfo (Mario Kart 8 Deluxe's sdk, 9c068c8): a create id
+/* nn::mii::detail::CharInfoRaw::Verify as the SDK checks a CharInfo (a game's SDK, 9c068c8): a create id
    not all zeros with the RFC 4122 variant, a nickname of 1 to 10 characters ending in zeros, and each field in its
    range. A game builds no Mii from a CharInfo that fails it */
 static int mii_valid(const u8* c) {
@@ -1030,8 +1030,8 @@ static int mii_valid(const u8* c) {
 }
 
 /* BuildRandom (6): a valid Mii every time, of the age, gender and race asked (or any for All, 3, 2, 3), laid out as
-   Eden's CoreData::BuildRandom and CharInfo::SetFromStoreData make it. Mario Kart 8 Deluxe asks for 13 at its title,
-   and builds its Mii racers from them */
+   Eden's CoreData::BuildRandom and CharInfo::SetFromStoreData make it. A game may ask for 13 at its title, and
+   build its Mii characters from them */
 static void test_mii_random(void) {
     SvcObj* service = new_mii();
     Request r;
@@ -1078,9 +1078,9 @@ static void test_mii_random(void) {
     svcobj_unref(service);
 }
 
-/* UpdateLatest (5) and GetIndex (21) of a Mii: NotFound, whatever the source, as the empty database holds none. Mario
-   Kart 8 Deluxe asks UpdateLatest for the Mii its save holds at boot; a success there gave it an empty CharInfo, which
-   it built no Mii from, and crashed */
+/* UpdateLatest (5) and GetIndex (21) of a Mii: NotFound, whatever the source, as the empty database holds none. A game
+   that asks UpdateLatest for the Mii its save holds at boot got an empty CharInfo from a success, built no Mii from it,
+   and crashed */
 static void test_mii_latest(void) {
     SvcObj* service = new_mii();
     Request r;

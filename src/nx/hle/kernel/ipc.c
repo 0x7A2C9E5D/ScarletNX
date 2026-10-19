@@ -644,7 +644,7 @@ int ipc_warn_once(const char* name, u32 cmd) {
 }
 /* "undeclared", not "stub": a success carrying none of the command's outputs. The SDK still reads them from the reply,
    past what respond writes, so they are zeroed here: a count, an object or a handle reads as none, not as the request's
-   bytes left in the client's buffer (TotK took a device count of "SFCI" from IAudioDevice cmd 14 and walked off its
+   bytes left in the client's buffer (a game took a device count of "SFCI" from IAudioDevice cmd 14 and walked off its
    stack) */
 int stub_ok(SvcObj* o, IpcCtx* c) {
     if (!g_opt_auto_stub_ipc) return ipc_unknown(o, c);

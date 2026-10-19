@@ -118,8 +118,8 @@ int main(void) {
 
     /* a row of a wrapped line: whole when it fits, else after its last slash, else its last space, else cut */
     assert(gui_wrap("abc", 5) == 3 && gui_wrap("abcde", 5) == 5 && gui_wrap("", 5) == 0);
-    assert(gui_wrap("/home/me/games/Super Mario Maker 2.ini", 20) == 15); /* "/home/me/games/" */
-    assert(gui_wrap("C:\\Users\\me\\Super Mario", 16) == 12);             /* up to the last backslash */
+    assert(gui_wrap("/home/me/games/Some Long Game Name.ini", 20) == 15); /* "/home/me/games/" */
+    assert(gui_wrap("C:\\Users\\me\\Some Game 2", 16) == 12);             /* up to the last backslash */
     assert(gui_wrap("An older version left", 10) == 9);                   /* "An older " */
     assert(gui_wrap("abc/", 4) == 4 && gui_wrap("abc/def", 4) == 4 && gui_wrap("abcdefghij", 4) == 4);
     assert(gui_wrap("ab", 0) == 1 && gui_wrap("ab", -3) == 1);

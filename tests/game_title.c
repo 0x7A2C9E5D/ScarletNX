@@ -7,8 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
-/* 0100DA801624E000, without C99's long long constants */
-#define TUNIC (((SnxU64)0x0100DA80UL << 32) | 0x1624E000UL)
+/* 0100ABCD12345000, without C99's long long constants */
+#define TITLE (((SnxU64)0x0100ABCDUL << 32) | 0x12345000UL)
 
 int main(void) {
     unsigned char meta[0xa0];
@@ -18,9 +18,9 @@ int main(void) {
     memcpy(meta, "META", 4);
     meta[0x70] = 0x80; /* the ACI0 at 0x80, the program's ID 16 bytes in */
     memcpy(meta + 0x80, "ACI0", 4);
-    for (i = 0; i < 8; ++i) meta[0x90 + i] = (unsigned char)(TUNIC >> (8 * i));
-    assert(snx_npdm_title(meta, sizeof meta) == TUNIC);
-    assert(snx_title_text(snx_npdm_title(meta, sizeof meta), id) && !strcmp(id, "0100DA801624E000"));
+    for (i = 0; i < 8; ++i) meta[0x90 + i] = (unsigned char)(TITLE >> (8 * i));
+    assert(snx_npdm_title(meta, sizeof meta) == TITLE);
+    assert(snx_title_text(snx_npdm_title(meta, sizeof meta), id) && !strcmp(id, "0100ABCD12345000"));
     /* none of the program's own: no NPDM, a short one, no META, an ACI0 past its end or not named so */
     assert(snx_npdm_title(NULL, 0) == SNX_NPDM_DEFAULT_TITLE && snx_npdm_title(meta, 0x7f) == SNX_NPDM_DEFAULT_TITLE);
     assert(snx_npdm_title(meta, 0x97) == SNX_NPDM_DEFAULT_TITLE); /* its ID cut */
