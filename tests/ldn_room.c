@@ -140,6 +140,21 @@ static int wait_for(int* counter, int at_least, int ms) {
     for (i = 0; i < ms && __atomic_load_n(counter, __ATOMIC_SEQ_CST) < at_least; i++) sleep_ms(1);
     return __atomic_load_n(counter, __ATOMIC_SEQ_CST) >= at_least;
 }
+/* what a change made, waited for itself: a change counted may be a sync from before it, still on its way */
+static int advertises(SnxLdn* l, const char* data, int ms) {
+    SnxLdnNetworkInfo info;
+    int i;
+    for (i = 0; i < ms; i++) {
+        if (snx_ldn_network_info(l, &info, NULL) == 1 && !memcmp(info.advertise_data, data, strlen(data))) return 1;
+        sleep_ms(1);
+    }
+    return 0;
+}
+static int disconnects(SnxLdn* l, int ms) {
+    int i;
+    for (i = 0; i < ms && snx_ldn_connected(l); i++) sleep_ms(1);
+    return !snx_ldn_connected(l);
+}
 static void name_of(uint8_t out[SNX_LDN_USER_NAME], const char* name) {
     memset(out, 0, SNX_LDN_USER_NAME);
     strcpy((char*)out, name);
@@ -198,8 +213,7 @@ static void networks(void) {
     /* the host's changes reach the station */
     changes_b = 0;
     CHECK(snx_ldn_set_advertise_data(a, "again", 5) == 0);
-    CHECK(wait_for(&changes_b, 1, 2000));
-    CHECK(snx_ldn_network_info(b, &info, NULL) == 1 && !memcmp(info.advertise_data, "again", 5));
+    CHECK(wait_for(&changes_b, 1, 2000) && advertises(b, "again", 2000));
     /* the station leaves */
     changes_a = 0;
     snx_ldn_disconnect(b);
@@ -217,7 +231,7 @@ static void networks(void) {
     CHECK(snx_ldn_connect(b, &found[0], name, 4, 2000) == 0);
     changes_b = 0;
     snx_ldn_destroy_network(a);
-    CHECK(wait_for(&changes_b, 1, 2000) && !snx_ldn_connected(b));
+    CHECK(wait_for(&changes_b, 1, 2000) && disconnects(b, 2000));
     CHECK(snx_ldn_disconnect_reason(b) == SNX_LDN_REASON_DESTROYED_BY_USER);
     /* no network: the connect waits for a sync that never comes */
     CHECK(snx_ldn_connect(b, &found[0], name, 4, 300) == -SNX_ETIMEDOUT);
@@ -444,7 +458,7 @@ static void closing(void) {
     CHECK(wait_for(&changes_b, 1, 3000));
     for (i = 0; i < 200 && snx_room_state(rb) == SNX_ROOM_IN; i++) sleep_ms(5);
     CHECK(snx_room_state(rb) == SNX_ROOM_CLOSED && snx_room_state(ra) == SNX_ROOM_CLOSED);
-    CHECK(!snx_ldn_connected(b) && snx_ldn_disconnect_reason(b) == SNX_LDN_REASON_DESTROYED_BY_USER);
+    CHECK(disconnects(b, 2000) && snx_ldn_disconnect_reason(b) == SNX_LDN_REASON_DESTROYED_BY_USER);
     snx_ldn_close(b);
     snx_ldn_close(a);
     snx_room_leave(rb);
