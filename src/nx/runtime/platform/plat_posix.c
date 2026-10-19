@@ -216,6 +216,7 @@ void plat_thread_cpus(const int* ids, int n) {
     (void)n;
 }
 #endif
+#if defined(__linux__) && !defined(__ANDROID__)
 /* the text after "key" (and a '=' or ':' with the spaces around it) on the first line of path that starts with it,
    unquoted; out empty when there's none */
 static void file_value(const char* path, const char* key, char* out, size_t cap) {
@@ -239,6 +240,7 @@ static void file_value(const char* path, const char* key, char* out, size_t cap)
     }
     fclose(f);
 }
+#endif
 #if defined(__APPLE__) || defined(__FreeBSD__)
 static void sysctl_text(const char* name, char* out, size_t cap) {
     size_t n = cap;
