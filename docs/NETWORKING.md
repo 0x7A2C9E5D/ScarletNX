@@ -115,6 +115,11 @@ ctest --test-dir build/gnuabi --output-on-failure
 - `bsd_service`: production BSD dispatch with a stubbed kernel; checks guest
   sockaddr/constants, TCP/UDP, poll/select, options, eventfd, offline rejection,
   exact error reply sizes and zero-length receives.
+- `ldn_room`: an Eden room (`net_room.c`) against a room server in the test
+  (`fake_room.c`): the messages, the join and its refusals, ldn's networks and the
+  game's datagram sockets through it.
+- `room_service`: what `ldn=room` reads before it joins (`room.c`): `room`'s address,
+  `users/online.ini`'s password, and what stops the game.
 
 An optional static AArch64 libc fixture exercises the complete ELF-to-native
 execution path, without external DNS or ICMP requirements:
