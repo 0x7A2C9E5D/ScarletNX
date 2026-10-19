@@ -1047,10 +1047,39 @@ add_executable(snx-test-recompiler-library recompiler_library.c)
 snx_test_target(snx-test-recompiler-library 11)
 target_link_libraries(snx-test-recompiler-library PRIVATE scarletnx-recompiler)
 add_test(NAME recompiler_library COMMAND snx-test-recompiler-library)
+# The Mach-O linker on objects Clang compiles for arm64 macOS, which any host's Clang with AArch64 can: what macOS
+# would check of the dylib (link_macho.c), on hosts that can't load one
+if(TARGET OpenSSL::Crypto)
+    set(snx_macho_probe "${CMAKE_CURRENT_BINARY_DIR}/link_macho_probe.o")
+    execute_process(COMMAND "${CMAKE_C_COMPILER}" --target=arm64-apple-macos13 -ffreestanding -c
+        "${CMAKE_CURRENT_SOURCE_DIR}/link_macho_fixture.c" -DPART=2 -o "${snx_macho_probe}"
+        RESULT_VARIABLE snx_macho_result OUTPUT_QUIET ERROR_QUIET)
+    if(snx_macho_result EQUAL 0)
+        foreach(part 1 2)
+            add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/link_macho_${part}.o"
+                COMMAND "${CMAKE_C_COMPILER}" --target=arm64-apple-macos13 -ffreestanding -O2 -fPIC -DPART=${part}
+                    -c "${CMAKE_CURRENT_SOURCE_DIR}/link_macho_fixture.c"
+                    -o "${CMAKE_CURRENT_BINARY_DIR}/link_macho_${part}.o"
+                DEPENDS link_macho_fixture.c VERBATIM)
+        endforeach()
+        set(snx_link_sources "${PROJECT_SOURCE_DIR}/src/common/cpu/recompiler/llvm")
+        add_executable(snx-test-link-macho link_macho.c "${snx_link_sources}/link.c" "${snx_link_sources}/link_elf.c"
+            "${snx_link_sources}/elf_object.c" "${snx_link_sources}/link_coff.c" "${snx_link_sources}/link_macho.c"
+            "${CMAKE_CURRENT_BINARY_DIR}/link_macho_1.o" "${CMAKE_CURRENT_BINARY_DIR}/link_macho_2.o")
+        # the objects are the test's data, not part of its own link
+        set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/link_macho_1.o"
+            "${CMAKE_CURRENT_BINARY_DIR}/link_macho_2.o" PROPERTIES EXTERNAL_OBJECT FALSE HEADER_FILE_ONLY TRUE)
+        snx_test_target(snx-test-link-macho 11)
+        target_include_directories(snx-test-link-macho PRIVATE "${PROJECT_SOURCE_DIR}/src")
+        target_link_libraries(snx-test-link-macho PRIVATE OpenSSL::Crypto)
+        add_test(NAME link_macho COMMAND snx-test-link-macho "${CMAKE_CURRENT_BINARY_DIR}/link_macho_1.o"
+            "${CMAKE_CURRENT_BINARY_DIR}/link_macho_2.o" "${CMAKE_CURRENT_BINARY_DIR}/link_macho.dylib")
+    endif()
+endif()
 if(APPLE)
-    # these build a game module and load it, which needs a Mach-O module the recompiler can't link yet
-    # (src/common/cpu/recompiler/llvm/link.c, docs/APPLE.md), and 4 KiB host pages to run it: not run there. The
-    # in-process loader's tests run: it loads ELF objects on macOS too (code_loader.c)
+    # these build a game module and load it, which no Mac has done yet: the Mach-O linker (link_macho.c) is checked
+    # on Linux only (the link_macho test and docs/APPLE.md), and these wait for a run on a Mac. The in-process
+    # loader's tests run: it loads ELF objects on macOS too (code_loader.c)
     set_tests_properties(native_recompiler llvm_module recompiler_library llvm_differential_0 llvm_differential_1
                          llvm_differential_2 PROPERTIES DISABLED TRUE)
 endif()
