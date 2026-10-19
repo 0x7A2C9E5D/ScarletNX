@@ -36,6 +36,8 @@ static void usage(void) {
          "                         <temp>/scarletnx/work/<title ID>, which the game reads its RomFS from;\n"
          "                         extracted again from the dump source= in the game's .ini names, when the\n"
          "                         system has emptied it");
+    puts("  -O LEVEL               Played or prepared, the recompile's optimization: 0,1,2,3,s,z (default: 2).\n"
+         "                         A game made already keeps its code until it is recompiled (-r)");
     puts("  --outdir DIR           Played or prepared, where the game's folder goes (default: games/)\n"
          "  --out DIR              Played or prepared, the dump's extraction (default: work/<its name>)\n"
          "  --repo DIR             The data folder: games/, work/ and the keys (default: a\n"
@@ -286,7 +288,7 @@ done:
    its game made from it there: no copy is kept. --out names a folder the extraction is kept in instead, the game made
    from a copy. A game made already stays where it is */
 static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* outdir, const char* out,
-                     int settings, char** setting, int game_argc, char** game_argv) {
+                     const char* opt, int settings, char** setting, int game_argc, char** game_argv) {
     char *dumped = NULL, *dump = snx_absolute(input), *name = NULL, *games = NULL, *extracted = NULL, *work = NULL;
     char *pending = NULL, *game = NULL, *folder = NULL, *base = NULL, *code = NULL, *source = NULL, error[256];
     const char** command = (const char**)snx_alloc((size_t)(game_argc + settings + 16) * sizeof(*command));
@@ -443,6 +445,10 @@ made:
         command[7] = games;
         n = 8;
         if (tmpfs) command[n++] = "--tmpfs";
+        if (opt) {
+            command[n++] = "-O";
+            command[n++] = opt;
+        }
         command[n++] = "--";
         command[n++] = source;
         if (named) command[n++] = name;
@@ -536,7 +542,7 @@ static int dump_modules(int argc, char** argv) {
 }
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
-    const char *repo = NULL, *build = SNX_BUILD_DIR, *input = NULL, *outdir = NULL, *out = NULL;
+    const char *repo = NULL, *build = SNX_BUILD_DIR, *input = NULL, *outdir = NULL, *out = NULL, *opt = NULL;
     char *r = NULL, *b = NULL, *exe = NULL, **rest, **setting, *self, *data = NULL, *source = NULL;
     unsigned flags = 0;
     int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, tmpfs_args = 0;
@@ -641,6 +647,23 @@ int snx_driver(int argc, char** argv) {
             n -= 2;
             --i;
         }
+    /* played or prepared, -O LEVEL (or -OLEVEL) is the recompile's, for when the game is made */
+    for (i = 0; automatic && i < n; ++i)
+        if (!strncmp(rest[i], "-O", 2)) {
+            int own = rest[i][2] == 0; /* its value the next token */
+            if (own && i + 1 == n) {
+                result = snx_error("-O requires a level");
+                goto done;
+            }
+            opt = own ? rest[i + 1] : rest[i] + 2;
+            if (strlen(opt) != 1 || !strchr("0123sz", opt[0])) {
+                result = snx_error("-O expects 0,1,2,3,s,z");
+                goto done;
+            }
+            memmove(rest + i, rest + i + 1 + own, (size_t)(n - i - 1 - own) * sizeof(*rest));
+            n -= 1 + own;
+            --i;
+        }
     if (automatic && (n != 1 + tmpfs_args || help)) {
         result = snx_error("automatic preparation accepts one dump file. Pass game arguments after --");
         goto done;
@@ -698,7 +721,7 @@ int snx_driver(int argc, char** argv) {
     paths.source = source;
     if (automatic)
         result =
-            play_dump(input, &paths, flags, outdir, out, settings, setting,
+            play_dump(input, &paths, flags, outdir, out, opt, settings, setting,
                       separator < argc ? argc - separator - 1 : 0, argv + (separator < argc ? separator + 1 : argc));
     else
         result = (flags & SNX_RECOMP) ? snx_recompile(n, rest, &paths) : snx_extract(n, rest, &paths);

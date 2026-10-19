@@ -144,6 +144,12 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         memmove(argv + 2, argv + 3, (size_t)(argc - 3) * sizeof *argv);
         --argc;
     }
+    /* the optimization level a played dump was given, passed on */
+    if (getenv("SNX_WORKFLOW_OPT") && *getenv("SNX_WORKFLOW_OPT")) {
+        CHECK(argc > 4 && !strcmp(argv[2], "-O") && !strcmp(argv[3], getenv("SNX_WORKFLOW_OPT")));
+        memmove(argv + 2, argv + 4, (size_t)(argc - 4) * sizeof *argv);
+        argc -= 2;
+    }
     /* a dump's: no name given, the recompile names the game; a game made already: its folder's name */
     CHECK((argc == 4 || argc == 5) && !strcmp(argv[0], "--outdir") && !strcmp(argv[2], "--"));
     if (getenv("SNX_WORKFLOW_SOURCE") && *getenv("SNX_WORKFLOW_SOURCE")) {
@@ -846,6 +852,15 @@ int main(int argc, char** argv) {
         run(exe, repo, dump, log, 0, "R", NULL);
         CHECK(!snx_path_exists(extracted) && records_dump(own, "Test game", dump));
         run(exe, repo, dump, log, 0, "R", NULL);
+        /* -O, played: the recompile's, given when the game is made; a game made already runs as it is */
+        set_env("SNX_WORKFLOW_FLAGS", "-O3");
+        set_env("SNX_WORKFLOW_OPT", "3");
+        reset(repo, dump);
+        run(exe, repo, dump, log, 0, "RG", NULL);
+        run(exe, repo, dump, log, 0, "G", NULL);
+        set_env("SNX_WORKFLOW_OPT", "");
+        set_env("SNX_WORKFLOW_FLAGS", "-O9");
+        run(exe, repo, dump, log, 1, "", "-O expects 0,1,2,3,s,z");
         set_env("SNX_WORKFLOW_FLAGS", "");
         set_env("SNX_WORKFLOW_DUMP", "");
         free(own);

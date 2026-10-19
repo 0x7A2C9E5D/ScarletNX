@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
     int fullscreen, touch, stub, tmpfs, extract, launch, page, all;
     assert(!gui_settings_read(&s, list));
 
-    /* the launcher's three, then a row a setting in the list's order, the other line left out; a page's row and its
+    /* the launcher's four, then a row a setting in the list's order, the other line left out; a page's row and its
        All before its settings */
     assert(s.count == GUI_SETTINGS_OWN + 15 && !strcmp(s.keys[0].key, "gdbstub"));
     assert(!strcmp(s.keys[0].section, "Launch") && !strcmp(s.keys[0].about, "Enables gdbstub on port 1234") &&
@@ -79,8 +79,14 @@ int main(int argc, char** argv) {
     assert(!strcmp(s.keys[2].section, "Launch") && !strcmp(s.keys[2].key, "Extract game container") &&
            !strcmp(s.values[2].key, "extract") && words(&s.keys[2]) == 2 && strstr(s.keys[2].about, "dump"));
     assert(!gui_settings_extract(&s)); /* off: a dump read in place */
-    assert(!strcmp(s.keys[3].section, "Display") && !strcmp(s.keys[3].key, "docked"));
-    assert(!strcmp(s.keys[3].about, "1 = TV mode") && !strcmp(key(&s, "fullscreen")->about, "1 = start in fullscreen"));
+    /* the optimization level: 2, the driver's own, passes nothing; another passes its -O */
+    assert(!strcmp(s.keys[3].section, "Launch") && !strcmp(s.keys[3].key, "Optimization level") &&
+           !strcmp(s.values[3].key, "opt") && words(&s.keys[3]) == 5 && !gui_settings_opt(&s));
+    assert(gui_settings_set(&s, "opt", "z") && !strcmp(gui_settings_opt(&s), "-Oz"));
+    assert(gui_settings_set(&s, "opt", "0") && !strcmp(gui_settings_opt(&s), "-O0"));
+    assert(!gui_settings_set(&s, "opt", "s") && gui_settings_set(&s, "opt", "2") && !gui_settings_opt(&s));
+    assert(!strcmp(s.keys[4].section, "Display") && !strcmp(s.keys[4].key, "docked"));
+    assert(!strcmp(s.keys[4].about, "1 = TV mode") && !strcmp(key(&s, "fullscreen")->about, "1 = start in fullscreen"));
     assert(!strcmp(s.keys[s.count - 1].key, "log") && !strcmp(s.keys[s.count - 1].about, "Log detail"));
     /* a setting with values goes round .ini and their words, named as the game's menu names it; the others are
        typed, an older runtime's and one with a value missing its word among them */

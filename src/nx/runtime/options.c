@@ -28,6 +28,7 @@ int g_opt_prof, g_opt_auto_stub_ipc = 1, g_opt_network, g_opt_vsync = 1, g_opt_a
 float g_opt_resf = 1;
 int g_opt_user = 1;
 int g_opt_jit_threads, g_opt_async_pipes = 0;
+int g_opt_vk_validation;
 
 /* ---- the runtime's own settings ---- */
 
@@ -201,6 +202,10 @@ static const IniOpt g_debug[] = {
      "1 = saves each new compute shader's data to captures/compute, and each new shader to captures/shaders\n"
      "(snx-shaderc's corpus)",
      INI_INT, 0, &g_opt_diag, 0, 1, NULL, "Shader captures", "Off|On", 0, 0},
+    {"vk_validation", "0",
+     "1 = the Vulkan validation layer (VK_LAYER_KHRONOS_validation, the Vulkan SDK's) checks every Vulkan call and\n"
+     "logs what it finds. It slows the game down a lot, and a missing layer is only a warning",
+     INI_INT, INI_STARTUP, &g_opt_vk_validation, 0, 1, NULL, "Vulkan validation layer", "Off|On", 0, 0},
     {"profile", "0", "1 = writes profile.txt every 10 seconds (the CPU profiler is Windows only)", INI_INT,
      INI_STARTUP, &g_opt_prof, 0, 1, NULL, "Profiler", "Off|On", 0, 0},
     END_ROW};

@@ -9,6 +9,9 @@
 #include <string.h>
 
 static const char* const off_on[] = {"off", "on", NULL};
+/* the recompile's -O levels, the row's words: its word the index, 2 the driver's default */
+static const char* const opt_levels[] = {"0", "1", "2", "3", "z", NULL};
+static const char* const opt_flags[] = {"-O0", "-O1", "-O2", "-O3", "-Oz"};
 
 static GuiSetting* row(GuiSettings* s, const char* section, const char* key, const char* name, const char* about,
                        const char* const* words, int type) {
@@ -86,6 +89,11 @@ int gui_settings_read(GuiSettings* s, const char* list) {
     row(s, "Launch", "extract", SNX_TR_NOOP("Extract game container"),
         SNX_TR_NOOP("Extract a dump's ExeFS and RomFS into its game's folder. Off, the game reads them from the dump"),
         off_on, GUI_KEY_WORD);
+    row(s, "Launch", "opt", SNX_TR_NOOP("Optimization level"),
+        SNX_TR_NOOP("LLVM's optimization of the game's code when it is recompiled: 0 none, 3 the most, z the smallest. "
+                    "A game made already keeps its code until it is recompiled"),
+        opt_levels, GUI_KEY_WORD)
+        ->word = 2;
     for (line = text; *line; line = next) {
         char* field[9];
         const char **words = NULL, **values = NULL;
@@ -299,6 +307,9 @@ const char* gui_settings_tmpfs(const GuiSettings* s) {
 }
 const char* gui_settings_extract(const GuiSettings* s) {
     return s->count >= GUI_SETTINGS_OWN && s->values[2].word ? "--extract-container" : NULL;
+}
+const char* gui_settings_opt(const GuiSettings* s) {
+    return s->count >= GUI_SETTINGS_OWN && s->values[3].word != 2 ? opt_flags[s->values[3].word] : NULL;
 }
 size_t gui_settings_options(GuiSettings* s, int launch, const char** argv) {
     size_t n = 0;
