@@ -48,13 +48,31 @@ typedef struct Bsd {
 } Bsd;
 
 /* ============================================================ the network option */
-/* nifm asks often (some games every frame): the host's state is read again after two seconds */
+/* the Eden room the console joined with ldn=room (room.c): the game's datagram sockets are the room's, and reach
+   the members' addresses whatever the network option says */
+static SnxRoom* g_room;
+void network_set_room(SnxRoom* room) { g_room = room; }
+SnxRoom* network_room(void) { return g_room; }
+static int reachable(SnxSocket* s, const SnxSockAddr* a) { return snx_room_socket(s) || network_reachable(a); }
+/* nifm asks often (some games every frame): the host's state is read again after two seconds. In a room the
+   connection is the room's, its address and a /24, as Eden's nifm gives the room's address */
 int network_interface(SnxNetInterface* out) {
     static PMutex lk = PMUTEX_INIT;
     static time_t when;
     static int have;
     static SnxNetInterface cached;
-    if (!g_opt_network || g_opt_airplane) return -SNX_ENETDOWN;
+    if (g_opt_airplane) return -SNX_ENETDOWN;
+    if (g_room) {
+        if (out) {
+            memset(out, 0, sizeof *out);
+            strcpy(out->name, "Eden room");
+            snx_room_fake_ip(g_room, out->ip);
+            out->mask[0] = out->mask[1] = out->mask[2] = 255;
+            out->wireless = 1;
+        }
+        return 0;
+    }
+    if (!g_opt_network) return -SNX_ENETDOWN;
     pm_lock(&lk);
     time_t now = time(NULL);
     if (!when || now - when >= 2 || now < when) {
@@ -73,12 +91,6 @@ int network_reachable(const SnxSockAddr* a) {
     static const uint8_t lo6[16] = {[15] = 1};
     return a->family == SNX_AF_INET6 && !memcmp(a->addr, lo6, 16);
 }
-/* the Eden room the console joined with ldn=room (room.c): the game's datagram sockets are the room's, and reach
-   the members' addresses whatever the network option says */
-static SnxRoom* g_room;
-void network_set_room(SnxRoom* room) { g_room = room; }
-SnxRoom* network_room(void) { return g_room; }
-static int reachable(SnxSocket* s, const SnxSockAddr* a) { return snx_room_socket(s) || network_reachable(a); }
 /* the address a bind to INADDR_ANY binds instead, while ldn gives this console one of its own on the LAN (ldn.c),
    and its subnet's broadcast address: two consoles on one host then keep their ports apart, and each still hears
    the broadcasts a game sends to the subnet (a Pia session's first messages). NULL clears it */

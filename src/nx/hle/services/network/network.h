@@ -16,7 +16,8 @@ SvcObj* new_bsdcfg(void);
 /* the Eden room the console is in (ldn=room), or NULL: its datagram sockets are the game's */
 void network_set_room(SnxRoom* room);
 SnxRoom* network_room(void);
-/* the connection the game is told about: the host's, unless the network option is off or airplane mode on */
+/* the connection the game is told about: the room's in a room, else the host's unless the network option is off; none
+   in airplane mode */
 int network_online(void);
 int network_interface(SnxNetInterface* out); /* 0 and the host's interface when online */
 /* whether a guest may reach addr: with the network option off, loopback only */

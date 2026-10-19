@@ -413,7 +413,8 @@ add_test(NAME bsd_service COMMAND snx-test-bsd-service)
 set_tests_properties(bsd_service PROPERTIES TIMEOUT 60)
 
 # sfdnsres and nifm (dns.c, nifm.c) offline, with bsd.c beside them for whether the console is online
-add_executable(snx-test-network-service network_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
+add_executable(snx-test-network-service network_service.c fake_room.c
+               "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
 snx_test_target(snx-test-network-service 23)
 snx_service_swipc(snx-test-network-service hle/services/network/bsd.swipc hle/services/network/dns.swipc
                   hle/services/network/nifm.swipc)
