@@ -82,7 +82,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   did, *Installed* or *Not installed* and why, and goes back to the menu by itself after 3 seconds
   (10 after a failure, while another file can still be picked); ESC cancels without changing them.
 - **Settings** opens on its groups, Enter opening one and ESC coming back: **App**, then
-  **Launch** (the launcher's three), then a group per section of the game's `.ini` (Display,
+  **Launch** (the launcher's four), then a group per section of the game's `.ini` (Display,
   Graphics, Performance, On-screen controls, Controllers, Network, Debug), as `scarletnx --settings`
   prints them from the runtime's own tables. The game's menu's settings have its names and words
   (*Scale* 100%, *Touch screen* Fingers), and its **Buttons** page, whose **All** steps every row;
@@ -141,15 +141,19 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   passes `--tmpfs`: a dump's extraction goes to `/tmp/scarletnx/work/<title ID>` (`$TMPDIR` when set, the
   temporary folder on Windows) instead of the game's folder, and the game reads its RomFS from there, its ExeFS and
   saves staying in its folder. Off, the default, it is extracted to disk. The room a run asks about is then the temporary
-  folder's, without the second copy. Either way the game's folder gets `<name>.source`, a link to the dump, which
-  the RomFS is extracted again from when tmpfs was emptied (a reboot), or moved by when the setting changes. A game
-  without one, made before, says *Can't be extracted to tmpfs due to missing symlink* and runs from what it has.
+  folder's, without the second copy. Either way the game's `.ini` records the dump as `source=`, which the RomFS is
+  extracted again from when tmpfs was emptied (a reboot), or moved by when the setting changes. A game that records
+  none (made before, without the `<name>.source` link older versions made) says it can't be extracted to tmpfs and
+  runs from what it has.
   **Extract game container** passes `--extract-container`, to the Switch and the 3DS driver both. Off, the default,
-  nothing of a dump is extracted: the game's folder links to the dump, the recompile reads the ExeFS from it, and the
+  nothing of a dump is extracted: the game's `.ini` records the dump, the recompile reads the ExeFS from it, and the
   game reads its ExeFS and RomFS out of the dump on the fly, decrypting them as it reads ([USAGE](USAGE.md)). A CIA
   is read the same way. On, a dump is extracted as before, into the game's folder or with *Extract to tmpfs* into
-  tmpfs, which implies it. Turning it off again takes a game's extraction away on its next run. The first two
-  settings reach neither the Linux nor the 3DS driver.
+  tmpfs, which implies it. Turning it off again takes a game's extraction away on its next run.
+  **Optimization level** (0, 1, 2, 3 or z, 2 by default) is LLVM's level for the game's code, passed as `-O` when
+  the game is recompiled: by **R**, or by a run that has to (a dump played the first time, an NRO each time). A game
+  made already keeps its code until then. The first two settings and this one reach neither the Linux nor the 3DS
+  driver.
 - The Status box, after the RAM and the CPU, says what ScarletNX's folders take (games/,
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
   the menu's own) and what is left on that disk, counted as the menu opens and after each run.

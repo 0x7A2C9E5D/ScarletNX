@@ -259,6 +259,7 @@ target_link_libraries(snx-test-fs-service PRIVATE scarletnx-common hactool_inter
 add_test(NAME filesystem_raw COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> raw)
 if(NOT WIN32) # the dump's link: Windows makes one only with the right to
     add_test(NAME filesystem_dump COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump)
+    add_test(NAME filesystem_dump_source COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-source)
 endif()
 
 if(UNIX)
@@ -690,7 +691,8 @@ add_executable(snx-test-startup startup_options.c "${PROJECT_SOURCE_DIR}/src/nx/
 snx_test_target(snx-test-startup 90)
 add_test(NAME startup_options COMMAND snx-test-startup)
 
-add_library(snx_test_common STATIC "${PROJECT_SOURCE_DIR}/src/common/utilities/common.c")
+add_library(snx_test_common STATIC "${PROJECT_SOURCE_DIR}/src/common/utilities/common.c"
+    "${PROJECT_SOURCE_DIR}/src/common/utilities/ini_lines.c")
 snx_test_target(snx_test_common 90)
 if(WIN32)
     target_link_libraries(snx_test_common PUBLIC advapi32)

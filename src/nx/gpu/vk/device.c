@@ -100,13 +100,14 @@ static int create_instance(void) {
     if (nbe > 15) WARN("vulkan: the window backend wants %u instance extensions, only 15 are taken\n", nbe);
     const char* layers[1];
     u32 nlayers = 0;
-    int validation = getenv("SNX_VK_VALIDATION") != NULL;
+    int validation = g_opt_vk_validation || getenv("SNX_VK_VALIDATION") != NULL; /* the .ini's, or the variable */
     if (validation) {
         if (has_layer("VK_LAYER_KHRONOS_validation")) {
             layers[nlayers++] = "VK_LAYER_KHRONOS_validation";
             ext[next++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
         } else {
-            WARN("vulkan: SNX_VK_VALIDATION is set but VK_LAYER_KHRONOS_validation is not installed\n");
+            WARN("vulkan: validation was asked for (vk_validation or SNX_VK_VALIDATION), but "
+                 "VK_LAYER_KHRONOS_validation is not installed\n");
             validation = 0;
         }
     }

@@ -4803,6 +4803,7 @@ static void launch(App* app, char* absolute, bool prepared) {
     /* Switch options only, never guest argv for the CPU-only Linux driver or the 3DS one; R's recompile takes no
        option of a run. The drivers work in the menu's data folder, so they list the same games */
     if (app->recompile && app->menu.selected == GUI_SWITCH && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
+    if (!direct && app->menu.selected == GUI_SWITCH && gui_settings_opt(s)) argv[n++] = gui_settings_opt(s);
     if (app->menu.selected == GUI_SWITCH && !app->recompile) n += gui_settings_options(s, 1, argv + n);
     /* Extract game container, which both drivers take, for a run and for R's recompile: off, nothing is extracted */
     if ((app->menu.selected == GUI_3DS || (app->menu.selected == GUI_SWITCH && app->recompile)) &&

@@ -71,12 +71,13 @@ syscalls, ELF execution, filesystem scope, and differential testing.
 
 NX tooling under `src/nx/runtime/driver/` and `src/nx/loader/`:
 a dump, read in place, or `work/<Game>/{exefs,romfs}` -> `games/<id>/`: `<id>[.exe]`, `<id>_code.{so,dll}`,
-`<id>_data/`, and `<id>.source`, the link to the dump:
+`<id>_data/`, and the dump's path as `source=` in the game's `<id>.ini` (`<id>.source`, a link to it, from older
+versions):
 
 - `driver.c`: CLI dispatch only; `extract.c` and `recompile.c` own their workflows.
 - `container.c`: a dump opened with hactool, its keys loaded and its NCAs picked, shared by the extraction, the
   recompiler (a dump given to `-r`, its ExeFS read through `SnxExefsReader`) and the runtime's `fs.c`. Without
-  Extract game container, `fs.c` maps the dump `<id>.source` links to and serves `exefs/*` and the RomFS image from
+  Extract game container, `fs.c` maps the dump `source=` names (else the one `<id>.source` links to) and serves `exefs/*` and the RomFS image from
   it through hactool's storage chains (`snx_hac.h`'s `SnxHacFs`), the sections decrypted, an update's patch applied
   and compressed blocks expanded as they are read. Nothing is cached.
 - `src/nx/loader/loader.c`: NSO/NRO, LZ4, SHA-256, NPDM, MOD0, symbols/relocs/FDEs.
