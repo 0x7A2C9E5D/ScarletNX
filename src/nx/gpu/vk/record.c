@@ -23,7 +23,8 @@ typedef struct {
     u64 size; /* of the packet, header included, a multiple of 16 */
 } RecHdr;
 
-#define REC_CAP (16ull << 20)
+#define REC_CAP     (16ull << 20)
+#define REC_PUBLISH (32ull << 10)
 
 static u8* g_ring;
 static int g_rec = -1; /* recording on the thread: 1, at once: 0, not decided yet: -1 */
@@ -37,14 +38,6 @@ static int g_sleep; /* the consumer waits on g_cv for more */
 static PMutex g_m;
 static PCond g_cv;
 
-static void spin_hint(void) {
-#if defined(__x86_64__) || defined(__i386__)
-    __builtin_ia32_pause();
-#elif defined(__aarch64__)
-    __asm__ __volatile__("yield");
-#endif
-}
-
 static void rec_thread(void* arg) {
     u64 tail = 0;
     (void)arg;
@@ -52,19 +45,15 @@ static void rec_thread(void* arg) {
     (void)g_pad1;
     for (;;) {
         u64 head = __atomic_load_n(&g_head, __ATOMIC_ACQUIRE);
+        /* nothing more yet: sleep until the producer publishes (REC_PUBLISH). It spun 4000 pauses first, which with
+           a publish every 4 KiB kept it from sleeping at all: a host core spent on waiting (0.8 of one in Tears of
+           the Kingdom, 0.26 with this) */
         if (head == tail) {
-            /* a draw's commands come in bursts: spin a while before sleeping */
-            for (int i = 0; i < 4000 && head == tail; i++) {
-                spin_hint();
-                head = __atomic_load_n(&g_head, __ATOMIC_ACQUIRE);
-            }
-            if (head == tail) {
-                pm_lock(&g_m);
-                __atomic_store_n(&g_sleep, 1, __ATOMIC_SEQ_CST);
-                while ((head = __atomic_load_n(&g_head, __ATOMIC_SEQ_CST)) == tail) pc_wait(&g_cv, &g_m, -1);
-                __atomic_store_n(&g_sleep, 0, __ATOMIC_RELAXED);
-                pm_unlock(&g_m);
-            }
+            pm_lock(&g_m);
+            __atomic_store_n(&g_sleep, 1, __ATOMIC_SEQ_CST);
+            while ((head = __atomic_load_n(&g_head, __ATOMIC_SEQ_CST)) == tail) pc_wait(&g_cv, &g_m, -1);
+            __atomic_store_n(&g_sleep, 0, __ATOMIC_RELAXED);
+            pm_unlock(&g_m);
         }
         while (tail != head) {
             const RecHdr* h = (const RecHdr*)(g_ring + (tail & (REC_CAP - 1)));
@@ -107,9 +96,10 @@ static void wake(void) {
     }
 }
 
-/* What the producer has added (g_pending) is published to the consumer (g_head) a few KiB at a time, and at once for
-   a submission or a drain: until something waits for the commands, it doesn't matter when they are recorded, and
-   each publish is a locked store (with the wake-up check it has to be ordered with) */
+/* What the producer has added (g_pending) is published to the consumer (g_head) REC_PUBLISH bytes at a time, and at
+   once for a submission or a drain: until something waits for the commands, it doesn't matter when they are
+   recorded. Each publish is a locked store (with the wake-up check it has to be ordered with), and wakes a sleeping
+   consumer: a batch of 32 KiB lets it record a while and sleep again, not wake for every few draws */
 static u64 g_pending, g_published;
 static void publish(void) {
     g_published = g_pending;
@@ -142,7 +132,7 @@ static void* rec_push(RecFn fn, u64 size) {
     return h + 1;
 }
 static void rec_commit(void) {
-    if (g_pending - g_published >= 4096) publish();
+    if (g_pending - g_published >= REC_PUBLISH) publish();
 }
 
 void vk_rec_sync(void) {
