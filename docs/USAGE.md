@@ -300,14 +300,15 @@ and an older game runs where it is, its run saying where its folder goes.
 The console's users are in `users/users.ini` of the data folder ([Folders](#folders)), every game's: up to 8, each a
 section in the console's order. Without the file there is one, `Player`. User 1 is always that first user, by the uid it
 has always had, so its saves stay its own; each other one needs a uid of 32 hex digits of its own (not zero) and a
-nickname of 1 to 32 bytes:
+nickname. A nickname is 4 to 20 letters, digits, spaces, `.`, `_` or `-`, the names Eden's rooms take; any other
+stops the game and says why:
 
 ```ini
 [user1]
-nickname=Ada
+nickname=Aogo
 [user2]
 uid=5f3c0d9e8a7b41c2963e0f1a2b3c4d5e
-nickname=Bee
+nickname=Xuji
 ```
 
 `uid` (user 1's, if written, is `0123456789abcdeffedcba9876543210`) and `nickname` are the keys; any
