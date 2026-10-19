@@ -101,6 +101,10 @@ typedef struct SnxLdn SnxLdn;
    the host went away). 0, or -SNX_E* (SNX_EADDRINUSE: another console already uses this address on this host, which
    the session port, held from here to close, tells) */
 int snx_ldn_open(SnxLdn** out, const uint8_t ip[4], const uint8_t mask[4], void (*changed)(void* arg), void* arg);
+/* The same console in an Eden room (net_room.h): its address is the room's, 255.255.255.0 its mask, and every
+   message goes through the room, so it reaches the members of any emulator that speaks it. The room must outlive l */
+struct SnxRoom;
+int snx_ldn_open_room(SnxLdn** out, struct SnxRoom* room, void (*changed)(void* arg), void* arg);
 /* Leaves any network, stops the thread and closes everything */
 void snx_ldn_close(SnxLdn* l);
 void snx_ldn_address(const SnxLdn* l, uint8_t ip[4], uint8_t mask[4]);

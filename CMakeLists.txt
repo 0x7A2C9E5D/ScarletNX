@@ -93,6 +93,8 @@ option(SNX_BUILD_GUI "Build the keyboard-driven SDL3 launcher" ${snx_gui_default
 if(SNX_BUILD_GUI AND (SNX_TOOLS_ONLY OR SNX_HACTOOL_ONLY))
     message(FATAL_ERROR "SNX_BUILD_GUI requires a runtime build, not a tools-only build")
 endif()
+# Before the dependencies: the tests' network fixtures link ENet and zstd, whatever the build
+include(CTest)
 # Before the sources: the C90 driver of a tools-only build links LZ4 too
 include(cmake/dependencies.cmake)
 if(SNX_HACTOOL_ONLY)
@@ -105,7 +107,6 @@ add_subdirectory(src/common)
 if(SNX_BUILD_NX)
     add_subdirectory(src/nx/runtime/driver host-tools)
 endif()
-include(CTest)
 include(cmake/build_info.cmake) # the window titles' line; the driver stamps games with its commit
 if(SNX_BUILD_3DS)
     add_subdirectory(src/3ds)
@@ -188,6 +189,10 @@ install(FILES "${OpenSSL_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/OpenSS
 # lib/LICENSE is the library's BSD-2-Clause. The top-level LICENSE covers the rest of LZ4 (GPL-2.0-or-later), none
 # of which is built here
 install(FILES "${lz4_SOURCE_DIR}/lib/LICENSE" DESTINATION ${licenses}/lz4)
+if(TARGET snx_enet)
+    install(FILES "${enet_SOURCE_DIR}/LICENSE" DESTINATION ${licenses}/enet)
+    install(FILES "${zstd_SOURCE_DIR}/LICENSE" DESTINATION ${licenses}/zstd)
+endif()
 if(SNX_SDL3_FROM_SOURCE)
     install(FILES "${SDL3_SOURCE_DIR}/LICENSE.txt" DESTINATION ${licenses}/SDL3)
 endif()

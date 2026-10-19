@@ -13,9 +13,14 @@
    Each console needs an address of its own on the LAN, which the other nodes reach: the host's interface with
    network=1, else (offline, or no interface) 127.0.0.N, the first N whose ldn port is free, so two consoles on one
    machine get 127.0.0.1 and 127.0.0.2. While the service is initialized, a game socket bound to INADDR_ANY binds
-   that address (bsd.c's bsd_set_bind_address), so the two consoles' game sockets don't collide on their ports either */
+   that address (bsd.c's bsd_set_bind_address), so the two consoles' game sockets don't collide on their ports either.
+
+   With ldn=room the networks go through the Eden room the console joined at start (room.c), at the address the room
+   gave it, and the game's datagram sockets are the room's (bsd.c). ldn=off is a console whose local wireless is
+   disabled, and airplane_mode one in airplane mode: Initialize says so */
 #include "nx/hle/services/network/network.h"
 #include "common/network/net_ldn.h"
+#include "common/network/net_room.h"
 #include "hle/services/network/ldn.swipc.inc"
 #include <openssl/rand.h>
 
@@ -28,6 +33,7 @@ enum {
     LDN_STATION_CONNECTED = 5
 };
 #define LDN_ADVERTISE_DATA_TOO_LARGE RC(203, 10)
+#define LDN_DISABLED                 RC(203, 22)
 #define LDN_AIRPLANE_MODE_ENABLED    RC(203, 23)
 #define LDN_INVALID_NODE_COUNT       RC(203, 30)
 #define LDN_BAD_STATE                RC(203, 32)
@@ -55,6 +61,7 @@ enum {
 
 typedef struct Ldn {
     PMutex lk;
+    struct Ldn* next; /* g_ldns' */
     SnxLdn* lan;
     KEvent* ev;
     u32 state;
@@ -90,20 +97,40 @@ static void ldn_teardown(Ldn* d) {
     pm_unlock(&d->lk);
     if (lan) {
         snx_ldn_close(lan);
-        bsd_set_bind_address(NULL, NULL);
+        if (g_opt_ldn != SNX_OPT_LDN_ROOM) bsd_set_bind_address(NULL, NULL);
     }
 }
+/* every ldn:u, for ldn_exit to close their networks */
+static PMutex g_ldns_lk = PMUTEX_INIT;
+static Ldn* g_ldns;
 static void ldn_destroy(SvcObj* o) {
-    Ldn* d = o->data;
+    Ldn *d = o->data, **p;
+    pm_lock(&g_ldns_lk);
+    for (p = &g_ldns; *p && *p != d; p = &(*p)->next) {}
+    if (*p) *p = d->next;
+    pm_unlock(&g_ldns_lk);
     ldn_teardown(d);
     kobj_unref(&d->ev->o);
 }
+void ldn_exit(void) {
+    Ldn* d;
+    pm_lock(&g_ldns_lk);
+    for (d = g_ldns; d; d = d->next) ldn_teardown(d);
+    pm_unlock(&g_ldns_lk);
+}
 
 /* ============================================================ the console's address */
-/* 0 and the transport, or -SNX_E*: the host's interface online, else 127.0.0.N with the first free ldn port */
+/* 0 and the transport, or -SNX_E*: the room's address with ldn=room, the host's interface online, else 127.0.0.N
+   with the first free ldn port */
 static int ldn_open(Ldn* d) {
     SnxNetInterface iface;
     int r;
+    if (g_opt_ldn == SNX_OPT_LDN_ROOM) {
+        if (!network_room() || snx_room_state(network_room()) != SNX_ROOM_IN) return -SNX_ENETDOWN;
+        r = snx_ldn_open_room(&d->lan, network_room(), ldn_changed, d);
+        if (!r) snx_ldn_address(d->lan, d->ip, d->mask);
+        return r;
+    }
     if (!network_interface(&iface)) {
         memcpy(d->ip, iface.ip, 4);
         memcpy(d->mask, iface.mask, 4);
@@ -128,6 +155,10 @@ static int nn_ldn_detail_IUserServiceCreator_CreateUserLocalCommunicationService
     pm_init(&d->lk);
     d->ev = owned_event("ldn state change");
     o->destroy = ldn_destroy;
+    pm_lock(&g_ldns_lk);
+    d->next = g_ldns;
+    g_ldns = d;
+    pm_unlock(&g_ldns_lk);
     *service = o;
     R_SUCCEED();
 }
@@ -154,14 +185,28 @@ static int nn_ldn_detail_IUserLocalCommunicationService_Initialize(SvcObj* self,
     Ldn* d = self->data;
     int r = 0;
     (void)pid;
+    if (g_opt_ldn == SNX_OPT_LDN_OFF) {
+        WARN_LIMIT(1, "ldn: the game asked for local wireless, which ldn=off disables\n");
+        R_THROW(LDN_DISABLED);
+    }
+    if (g_opt_airplane) {
+        WARN_LIMIT(1, "ldn: the game asked for local wireless, which airplane_mode=1 turns off\n");
+        R_THROW(LDN_AIRPLANE_MODE_ENABLED);
+    }
     pm_lock(&d->lk);
     if (d->state == LDN_NONE) {
         r = ldn_open(d);
         if (r) {
             WARN("ldn: no address for this console: %s (errno %d)\n",
-                 r == -SNX_EADDRINUSE ? "every loopback address has a console on port 11452"
-                                      : "the ldn sockets couldn't be opened",
+                 g_opt_ldn == SNX_OPT_LDN_ROOM && r == -SNX_EBUSY ? "another of the game's ldn:u is in the room already"
+                 : g_opt_ldn == SNX_OPT_LDN_ROOM                  ? "out of the Eden room"
+                 : r == -SNX_EADDRINUSE                           ? "every loopback address has a console on port 11452"
+                                                                  : "the ldn sockets couldn't be opened",
                  -r);
+        } else if (g_opt_ldn == SNX_OPT_LDN_ROOM) {
+            LOG("ldn: this console is %u.%u.%u.%u in the Eden room\n", d->ip[0], d->ip[1], d->ip[2], d->ip[3]);
+            d->state = LDN_INITIALIZED;
+            d->reason = 0;
         } else {
             LOG("ldn: this console is %u.%u.%u.%u/%u.%u.%u.%u, the game's sockets bind there\n", d->ip[0], d->ip[1],
                 d->ip[2], d->ip[3], d->mask[0], d->mask[1], d->mask[2], d->mask[3]);

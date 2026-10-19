@@ -48,12 +48,30 @@ typedef struct Bsd {
 } Bsd;
 
 /* ============================================================ the network option */
-/* nifm asks often (some games every frame): the host's state is read again after two seconds */
+/* the Eden room the console joined with ldn=room (room.c): the game's datagram sockets are the room's, and reach
+   the members' addresses whatever the network option says */
+static SnxRoom* g_room;
+void network_set_room(SnxRoom* room) { g_room = room; }
+SnxRoom* network_room(void) { return g_room; }
+static int reachable(SnxSocket* s, const SnxSockAddr* a) { return snx_room_socket(s) || network_reachable(a); }
+/* nifm asks often (some games every frame): the host's state is read again after two seconds. In a room the
+   connection is the room's, its address and a /24, as Eden's nifm gives the room's address */
 int network_interface(SnxNetInterface* out) {
     static PMutex lk = PMUTEX_INIT;
     static time_t when;
     static int have;
     static SnxNetInterface cached;
+    if (g_opt_airplane) return -SNX_ENETDOWN;
+    if (g_room) {
+        if (out) {
+            memset(out, 0, sizeof *out);
+            strcpy(out->name, "Eden room");
+            snx_room_fake_ip(g_room, out->ip);
+            out->mask[0] = out->mask[1] = out->mask[2] = 255;
+            out->wireless = 1;
+        }
+        return 0;
+    }
     if (!g_opt_network) return -SNX_ENETDOWN;
     pm_lock(&lk);
     time_t now = time(NULL);
@@ -68,7 +86,7 @@ int network_interface(SnxNetInterface* out) {
 }
 int network_online(void) { return !network_interface(NULL); }
 int network_reachable(const SnxSockAddr* a) {
-    if (g_opt_network || a->family == SNX_AF_UNSPEC) return 1;
+    if ((g_opt_network && !g_opt_airplane) || a->family == SNX_AF_UNSPEC) return 1;
     if (a->family == SNX_AF_INET) return a->addr[0] == 127;
     static const uint8_t lo6[16] = {[15] = 1};
     return a->family == SNX_AF_INET6 && !memcmp(a->addr, lo6, 16);
@@ -121,8 +139,10 @@ static SnxSocket* bcast_companion(SnxSocket* s, const u8 bcast[4]) {
     return c;
 }
 static void net_log(const char* m) { LOG("%s", m); }
+static void net_warn(const char* m) { WARN("%s", m); }
 void network_init(void) {
     snx_net_set_log(net_log);
+    snx_net_set_warn(net_warn);
     if (snx_net_init()) WARN("bsd: the host's network stack didn't start, sockets will fail\n");
 }
 
@@ -348,7 +368,9 @@ static int bsd_socket(Bsd* b, i32 gdom_in, i32 gtype_in, i32 proto_in, int exemp
         !(type == SNX_SOCK_RAW && dom == SNX_AF_INET && proto == SNX_IPPROTO_ICMP))
         return reply(-SNX_EINVAL, ret, bsd_errno);
     SnxSocket* s;
-    int r = snx_socket_open(&s, dom, type, (int)proto);
+    int r = g_room && dom == SNX_AF_INET && type == SNX_SOCK_DGRAM && (proto == 0 || proto == SNX_IPPROTO_UDP)
+                ? snx_room_socket_open(g_room, &s, dom, type, (int)proto)
+                : snx_socket_open(&s, dom, type, (int)proto);
     if (r) {
         LOG("bsd: Socket(%u, %u, %u) failed: errno %d\n", gdom, gtype, proto, -r);
         return reply(r, ret, bsd_errno);
@@ -575,7 +597,7 @@ static int64_t do_send(Bsd* b, IpcBuf message, i32 fd, u32 gflags, const SnxSock
     SnxSocket* s = fd_get(b, fd, NULL);
     if (!s) return -SNX_EBADF;
     int64_t r;
-    if (to && !network_reachable(to))
+    if (to && !reachable(s, to))
         r = -SNX_ENETUNREACH;
     else if (!a && n)
         r = -SNX_EFAULT;
@@ -653,7 +675,7 @@ static int bind_connect(Bsd* b, i32 fd, IpcBuf addr, int connect, i32* ret, u32*
             pm_unlock(&b->lk);
             snx_socket_unref(c);
         }
-    } else if (!network_reachable(&sa))
+    } else if (!reachable(s, &sa))
         r = -SNX_ENETUNREACH;
     else {
         r = snx_socket_connect(s, &sa);

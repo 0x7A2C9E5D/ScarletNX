@@ -272,6 +272,7 @@ void snx_save_before_exit(void) {
     if (!saved) {
         save_hints();
         if (g_renderer && g_renderer->save) g_renderer->save();
+        svc_core_exit();
         saved = 1;
     }
     pm_unlock(&lock);

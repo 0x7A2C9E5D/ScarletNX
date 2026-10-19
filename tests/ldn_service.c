@@ -13,10 +13,11 @@
 #endif
 
 #include "nx/hle/services/network/ldn.c"
+#include "fake_room.h"
 
 u8* g_mem;
 int g_verbose;
-int g_opt_network;
+int g_opt_network, g_opt_airplane, g_opt_ldn;
 static unsigned test_checks, test_objects, test_kobjs;
 static u32 test_next_handle = 0x100;
 
@@ -248,6 +249,107 @@ static int wait_state(SvcObj* o, u32 state, int ms) {
 /* a local communication id, 0x0100152000022000, as the raw data carries it */
 static const u8 lcid[8] = {0x00, 0x20, 0x02, 0x00, 0x20, 0x15, 0x00, 0x01};
 
+/* ldn=room: a console in an Eden room (fake_room.c) initializes at the room's address and hosts; a station of the room
+   finds it and joins; the game's datagram sockets go through the room; at the exit ldn_exit closes the network before
+   the room is left (svc_core_exit), so the station hears its DestroyNetwork */
+static void in_a_room(SvcObj* creator, SvcObj* bsd) {
+    FakeRoom* room = fake_room_start();
+    SnxRoom *ra, *rb;
+    SnxLdn* st;
+    SnxLdnNetworkInfo found[2], info;
+    Request r;
+    SvcObj* a;
+    u8 name[SNX_LDN_USER_NAME];
+    int why, i, destroys;
+    CHECK(snx_room_join(&ra, "127.0.0.1", fake_room_port(room), "Aogo", "secret", "game", 1, "", &why) == 0);
+    CHECK(snx_room_join(&rb, "127.0.0.1", fake_room_port(room), "Xuji", "secret", "game", 1, "", &why) == 0);
+    network_set_room(ra);
+    g_opt_ldn = SNX_OPT_LDN_ROOM;
+    g_opt_network = 0;
+    request(&r, 0);
+    CHECK(call(creator, &r) == 0 && r.c.nout_objs == 1);
+    a = r.c.out_objs[0];
+    request(&r, 400);
+    r.c.has_pid = 1;
+    {
+        u32 rc = call(a, &r);
+        if (rc) fprintf(stderr, "Initialize in the room: 0x%x\n", rc);
+        CHECK(rc == 0 && get_state(a) == 1);
+    }
+    request(&r, 2); /* GetIpv4Address: the room's 192.168.1.1/24, in host order */
+    CHECK(call(a, &r) == 0 && reply32(&r, 0) == 0xC0A80101 && reply32(&r, 4) == 0xFFFFFF00);
+    CHECK(simple(a, 200) == 0 && get_state(a) == 2);
+    request(&r, 202);
+    r.raw[0] = 1;
+    strcpy((char*)r.raw + 0x44, "Host");
+    memcpy(r.raw + 0x78, lcid, 8);
+    r.raw[0x78 + 0x12] = 8;
+    r.raw[0x78 + 0x14] = 4;
+    CHECK(call(a, &r) == 0 && get_state(a) == 3);
+    CHECK(network_info(a, &info) == 0 && info.nodes[0].ipv4[3] == 192 && info.nodes[0].ipv4[0] == 1);
+    CHECK(snx_ldn_open_room(&st, rb, NULL, NULL) == 0);
+    CHECK(snx_ldn_scan(st, NULL, found, 2, 1000) == 1);
+    memset(name, 0, sizeof name);
+    strcpy((char*)name, "Xuji");
+    CHECK(snx_ldn_connect(st, &found[0], name, 4, 2000) == 0);
+    for (i = 0; i < 400 && (network_info(a, &info) || info.node_count != 2); i++) sleep_ms(5);
+    CHECK(info.node_count == 2);
+    /* the game's datagram sockets, protocol 0 and UDP, are the room's: each reaches the station's console with the
+       network option off, at a socket of its protocol there (Eden's protocol byte) */
+    {
+        static const int protocols[2] = {0, SNX_IPPROTO_UDP};
+        SnxTimeval tv = {2, 0};
+        int k;
+        for (k = 0; k < 2; k++) {
+            SnxSocket* rx;
+            SnxSockAddr at, from;
+            u8 to[16] = {16, 2, 0x04, (u8)(0xD2 + k), 192, 168, 1, 2}, got[8];
+            u32 fd;
+            CHECK(snx_room_socket_open(rb, &rx, SNX_AF_INET, SNX_SOCK_DGRAM, protocols[k]) == 0);
+            memset(&at, 0, sizeof at);
+            at.family = SNX_AF_INET;
+            at.port = (u16)(to[2] | to[3] << 8);
+            CHECK(snx_socket_bind(rx, &at) == 0);
+            snx_socket_setsockopt(rx, SNX_SOL_SOCKET, SNX_SO_RCVTIMEO, &tv, sizeof tv);
+            request(&r, 2); /* Socket(AF_INET, SOCK_DGRAM, protocol) */
+            memset(r.raw, 0, 12);
+            r.raw[0] = 2;
+            r.raw[4] = 2;
+            r.raw[8] = (u8)protocols[k];
+            CHECK(call(bsd, &r) == 0 && (i32)reply32(&r, 0) >= 0);
+            fd = reply32(&r, 0);
+            request(&r, 11); /* SendTo(fd, 0, "ping", 192.168.1.2:1234 or 1235) */
+            memset(r.raw, 0, 8);
+            memcpy(r.raw, &fd, 4);
+            memcpy(GP(BUF0), "ping", 4);
+            memcpy(GP(BUF1), to, 16);
+            in_auto(&r, BUF0, 4);
+            in_auto(&r, BUF1, 16);
+            CHECK(call(bsd, &r) == 0 && reply32(&r, 0) == 4 && reply32(&r, 4) == 0);
+            CHECK(snx_socket_recv(rx, got, sizeof got, 0, &from, NULL) == 4 && !memcmp(got, "ping", 4));
+            CHECK(from.addr[0] == 192 && from.addr[3] == 1); /* from this console's address in the room */
+            request(&r, 26);                                 /* Close */
+            memcpy(r.raw, &fd, 4);
+            CHECK(call(bsd, &r) == 0);
+            snx_socket_unref(rx);
+        }
+    }
+    destroys = fake_room_ldn_count(room, SNX_ROOM_LDN_DESTROY_NETWORK, NULL);
+    ldn_exit();
+    network_set_room(NULL);
+    snx_room_leave(ra);
+    CHECK(get_state(a) == 0);
+    for (i = 0; i < 600 && fake_room_ldn_count(room, SNX_ROOM_LDN_DESTROY_NETWORK, NULL) == destroys; i++) sleep_ms(5);
+    CHECK(fake_room_ldn_count(room, SNX_ROOM_LDN_DESTROY_NETWORK, NULL) == destroys + 1);
+    for (i = 0; i < 400 && snx_ldn_connected(st); i++) sleep_ms(5);
+    CHECK(!snx_ldn_connected(st) && snx_ldn_disconnect_reason(st) == SNX_LDN_REASON_DESTROYED_BY_USER);
+    snx_ldn_close(st);
+    snx_room_leave(rb);
+    svcobj_unref(a);
+    g_opt_ldn = SNX_OPT_LDN_LAN;
+    fake_room_stop(room);
+}
+
 int main(void) {
     SvcObj *creator, *a, *b, *bsd;
     KEvent *ev_a, *ev_b;
@@ -292,6 +394,25 @@ int main(void) {
     request(&r, 100);
     CHECK(call(b, &r) == 0);
     ev_b = handle_event(r.c.out_copy[0]);
+
+    /* ldn=off is a console with local wireless disabled, airplane_mode one in airplane mode, and ldn=room one out of
+       its room: none initializes, each with its result */
+    g_opt_ldn = SNX_OPT_LDN_OFF;
+    request(&r, 400);
+    r.c.has_pid = 1;
+    CHECK(call(a, &r) == LDN_RC(22) && get_state(a) == 0);
+    g_opt_ldn = SNX_OPT_LDN_LAN;
+    g_opt_airplane = 1;
+    request(&r, 400);
+    r.c.has_pid = 1;
+    CHECK(call(a, &r) == LDN_RC(23) && get_state(a) == 0);
+    g_opt_airplane = 0;
+    g_opt_ldn = SNX_OPT_LDN_ROOM;
+    request(&r, 400);
+    r.c.has_pid = 1;
+    CHECK(call(a, &r) == LDN_RC(33) && get_state(a) == 0);
+    g_opt_ldn = SNX_OPT_LDN_LAN;
+    CHECK(!ev_a->signaled);
 
     /* Initialize: each console gets a loopback address of its own, offline */
     g_opt_network = 0;
@@ -538,6 +659,7 @@ int main(void) {
     request(&r, 2);
     CHECK(call(b, &r) == 0 && reply32(&r, 0) == 0x7F000001);
 
+    in_a_room(creator, bsd);
     svcobj_unref(bsd);
     svcobj_unref(a);
     svcobj_unref(b); /* still initialized: the transport goes with the object */

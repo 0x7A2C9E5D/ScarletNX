@@ -7,6 +7,7 @@
 
 /* each registers its family's service names with the service manager */
 void svc_core_init(void);
+void svc_core_exit(void); /* at exit, what the others hear of this console leaving (the Eden room) */
 void svc_fs_init(void);
 void svc_hid_init(void);
 void svc_vi_init(void);

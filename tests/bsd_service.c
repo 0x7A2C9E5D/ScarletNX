@@ -9,7 +9,7 @@
 
 u8* g_mem;
 int g_verbose;
-int g_opt_network;
+int g_opt_network, g_opt_airplane;
 static unsigned failures;
 #define CHECK(x)                                                                                                       \
     do {                                                                                                               \

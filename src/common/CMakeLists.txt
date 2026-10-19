@@ -27,11 +27,19 @@ target_link_libraries(scarletnx-filesystem PUBLIC Threads::Threads)
 # The emulated network stack (network/net.h), shared by nx's bsd and sfdnsres and the GNU ABI's socket syscalls. A
 # library of its own so the C90 tools don't link Winsock
 add_library(scarletnx-net STATIC network/net.c network/net_icmp.c network/net_event.c network/net_dns.c
-    network/net_iface.c network/net_ldn.c)
+    network/net_iface.c)
 target_compile_options(scarletnx-net PRIVATE -fno-strict-aliasing -Wall -Wextra -Werror=missing-prototypes)
 target_link_libraries(scarletnx-net PUBLIC Threads::Threads)
 if(WIN32)
     target_link_libraries(scarletnx-net PUBLIC ws2_32 iphlpapi)
 elseif(APPLE) # the system resolver's DNS servers (network/net_iface.c)
     target_link_libraries(scarletnx-net PUBLIC resolv)
+endif()
+
+# Local wireless for nx's ldn and bsd (network/net_ldn.h): over the LAN, or through an Eden room (network/net_room.h),
+# which is ENet and zstd, fetched for the NX build and the tests
+if(TARGET snx_enet)
+    add_library(scarletnx-ldn STATIC network/net_ldn.c network/net_room.c)
+    target_compile_options(scarletnx-ldn PRIVATE -fno-strict-aliasing -Wall -Wextra -Werror=missing-prototypes)
+    target_link_libraries(scarletnx-ldn PUBLIC scarletnx-net PRIVATE snx_enet snx_zstd)
 endif()
