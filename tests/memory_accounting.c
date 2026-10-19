@@ -54,7 +54,12 @@ int plat_vm_commit(u8* p, u64 size) {
 void plat_vm_decommit(u8* p, u64 size) {
     if (mapping_begins) CHECK(mapping_depth == 1);
     decommit_calls++;
+#if defined(__linux__)
     if (madvise(p, size, MADV_DONTNEED) || mprotect(p, size, PROT_NONE)) abort();
+#else
+    /* as plat_posix.c: only Linux's MADV_DONTNEED drops the contents (Darwin's and FreeBSD's keep them) */
+    if (mmap(p, size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0) == MAP_FAILED) abort();
+#endif
 }
 /* no alias pool here: views are copies (memory_alias tests the pool) */
 int plat_alias_init(u64 size) {
