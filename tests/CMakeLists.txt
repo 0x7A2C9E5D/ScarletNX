@@ -1292,6 +1292,12 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
         add_test(NAME settingsgen COMMAND "${CMAKE_COMMAND}" "-DSETTINGSGEN=$<TARGET_FILE:snx-settingsgen>"
                  "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/settingsgen-test"
                  -P "${CMAKE_CURRENT_SOURCE_DIR}/settingsgen.cmake")
+        if(UNIX) # the opts the test runs are shell scripts
+            # cmake/llvm_opt.cmake: the pipelines of an opt of the LLVM's exact version, and what another opt gets
+            add_test(NAME llvm_opt COMMAND "${CMAKE_COMMAND}"
+                     "-DLLVM_OPT_CMAKE=${PROJECT_SOURCE_DIR}/cmake/llvm_opt.cmake"
+                     "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/llvm-opt-test" -P "${CMAKE_CURRENT_SOURCE_DIR}/llvm_opt.cmake")
+        endif()
     endif()
     if(Python3_Interpreter_FOUND AND NOT CMAKE_CROSSCOMPILING)
         include("${PROJECT_SOURCE_DIR}/cmake/shaderdec.cmake")

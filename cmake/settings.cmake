@@ -44,8 +44,9 @@ file(MAKE_DIRECTORY "${snx_settings_out}")
 set(snx_settings_spec "${PROJECT_SOURCE_DIR}/src/nx/runtime/settings.txt")
 set(snx_settings_args "")
 
-# LLVM's: the headers of the LLVM the backend links, and the pipelines its opt prints. An opt of another major version
-# (or none, as a cross build's target opt that cannot run here) gives no pass toggles: the passes are LLVM's own then
+# LLVM's: the headers of the LLVM the backend links, and the pipelines its opt prints (llvm_opt.cmake). An opt of
+# another version, even in its last number, prints pipelines that are not this LLVM's: it is refused, said, and gives
+# no pass toggles (the passes are LLVM's own then), as none does (a cross build's target opt cannot run here)
 if(SNX_BUILD_NX)
     include("${CMAKE_CURRENT_LIST_DIR}/llvm.cmake")
     list(APPEND snx_settings_args --llvm-include "${SNX_LLVM_INCLUDE_DIR}")
@@ -64,31 +65,15 @@ if(SNX_BUILD_NX)
     set(snx_pipelines "${snx_settings_out}/pipelines.txt")
     set(snx_pipelines_text "")
     if(SNX_LLVM_OPT)
-        execute_process(COMMAND "${SNX_LLVM_OPT}" --version OUTPUT_VARIABLE snx_opt_version ERROR_QUIET
-                        RESULT_VARIABLE snx_opt_result)
-        if(snx_opt_result EQUAL 0 AND snx_opt_version MATCHES "LLVM version ${snx_llvm_major}\\.")
-            file(WRITE "${snx_settings_out}/empty.ll" "") # opt's input: no module, only the pipelines printed
-            # -Os and -Oz are O2 over size-marked functions (ir.c), as LLVM 23 has them: O2's pipeline is theirs
-            foreach(level 0 1 2 3)
-                execute_process(COMMAND "${SNX_LLVM_OPT}" "-passes=default<O${level}>" -print-pipeline-passes
-                                        -disable-output
-                                INPUT_FILE "${snx_settings_out}/empty.ll" OUTPUT_VARIABLE snx_pipeline
-                                ERROR_VARIABLE snx_opt_error OUTPUT_STRIP_TRAILING_WHITESPACE
-                                ERROR_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE snx_opt_result)
-                if(snx_opt_result EQUAL 0 AND NOT snx_pipeline STREQUAL "")
-                    string(APPEND snx_pipelines_text "${level} ${snx_pipeline}\n")
-                    if(level STREQUAL "2")
-                        string(APPEND snx_pipelines_text "s ${snx_pipeline}\nz ${snx_pipeline}\n")
-                    endif()
-                else()
-                    message(WARNING "LLVM settings: ${SNX_LLVM_OPT} printed no pipeline for -O${level}, whose passes "
-                                    "LLVM Internals can't turn off: ${snx_opt_result} ${snx_opt_error}")
-                endif()
-            endforeach()
+        include("${CMAKE_CURRENT_LIST_DIR}/llvm_opt.cmake")
+        snx_llvm_pipelines("${SNX_LLVM_OPT}" "${SNX_LLVM_VERSION}" "${snx_settings_out}" snx_pipelines_text
+                           snx_opt_why)
+        if(NOT snx_opt_why STREQUAL "")
+            message(WARNING "LLVM settings: ${snx_opt_why}")
         endif()
     endif()
     if(snx_pipelines_text STREQUAL "")
-        message(STATUS "LLVM settings: no opt of LLVM ${snx_llvm_major} runs here, so LLVM Internals has no pass "
+        message(STATUS "LLVM settings: no opt of LLVM ${SNX_LLVM_VERSION} runs here, so LLVM Internals has no pass "
                        "toggles")
     else()
         message(STATUS "LLVM settings: the passes of ${SNX_LLVM_OPT}'s pipelines")
