@@ -29,7 +29,8 @@ static void usage(void) {
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
            SNX_CHUNK_INSTRUCTIONS);
     puts("  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
-         "  --no-build             Stage data/INI only, generate no code");
+         "  --no-build             Stage data/INI only, generate no code\n"
+         "  --tmpfs                Leave the RomFS in the extraction (in tmpfs), which the game reads it from");
     puts("  --interp-only          Generate fallback interpreter only\n"
          "  --runtime FILE         Deploy this runtime instead of building one\n"
          "  --keep-ir              Save the generated code (LLVM IR, libgccjit dumps) in <NAME>/<NAME>_build\n"
@@ -136,7 +137,8 @@ static SnxU64* read_hints(const char* base, int is64, size_t* count) {
     *count = n;
     return hints;
 }
-static int copy_data(const SnxProgram* p, const char* dir, int quiet) {
+/* the game's data folder: its ExeFS (or NRO) and RomFS, the RomFS left where it is with tmpfs */
+static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs) {
     char *ex = snx_path_join(dir, "exefs"), *dst, *src, **names;
     size_t n, i;
     int rc = 0;
@@ -192,7 +194,7 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet) {
             free(dst);
         }
         snx_free_strings(names, n);
-        if (!rc && p->romfs_path) {
+        if (!rc && p->romfs_path && !tmpfs) {
             dst = snx_path_join(dir, "romfs");
             if (!snx_is_dir(dst)) {
                 /* A stopped copy must not look like a complete cache on the next run. */
@@ -226,7 +228,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     char error[1024], option[64];
     const char* equal;
     size_t option_size;
-    int i, rc = 1, no_build = 0, keep_c = 0, host_win = 0, positional = 0;
+    int i, rc = 1, no_build = 0, keep_c = 0, host_win = 0, positional = 0, tmpfs = 0;
     memset(&compile, 0, sizeof(compile));
     memset(&gen, 0, sizeof(gen));
     memset(&program, 0, sizeof(program));
@@ -259,6 +261,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         }
         if (!strcmp(arg, "--no-build"))
             no_build = 1;
+        else if (!strcmp(arg, "--tmpfs"))
+            tmpfs = 1;
         else if (!strcmp(arg, "--interp-only"))
             gen.interp_only = 1;
         else if (!strcmp(arg, "--keep-ir") || !strcmp(arg, "--keep-c")) {
@@ -381,7 +385,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     gen.title = title;
     gen.hints = read_hints(base, program.npdm.is64, &gen.hint_count);
     if (!compile.quiet) printf("Recompiling %s (%lu modules)\n", title, (unsigned long)program.module_count);
-    if (copy_data(&program, data, compile.quiet)) {
+    if (copy_data(&program, data, compile.quiet, tmpfs)) {
         snx_error("cannot stage game data in %s", data);
         goto done;
     }

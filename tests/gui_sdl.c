@@ -1282,7 +1282,7 @@ int main(int argc, char** argv) {
     /* Settings: the launcher's own, then each setting the runtime lists, a row each with its help above; what the
        menu's items used to set is in them */
     key(&app, SDLK_SPACE);
-    assert(app.editing && app.editor.object && app.editor.count == GUI_SETTINGS_OWN + 4); /* User the last */
+    assert(app.editing && app.editor.object && app.editor.count == 6); /* User the last */
     /* and the disk: what ScarletNX's folders take, counted on a thread, and what is left */
     {
         char line[256], used[32], left[32];
@@ -1347,7 +1347,8 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "Launch", normal);
     shows(&app, SNX_GUI_HAS_GCCJIT ? "libgccjit will be" : "Program was not", normal); /* in the tips */
-    shows(&app, "- libgccjit off", yellow);
+    shows(&app, "- libgccjit ", yellow); /* its value in the column after the longest name, Extract to tmpfs's */
+    shows(&app, "- Extract to tmpfs off", normal);
     key(&app, SDLK_RIGHT);
     assert(setting_is(&app, "libgccjit", SNX_GUI_HAS_GCCJIT ? "on" : NULL));
     key(&app, SDLK_LEFT);
@@ -2296,8 +2297,8 @@ int main(int argc, char** argv) {
         free(games);
     }
 
-    /* a dump not extracted yet, with less room than its extraction and RomFS copy take: asked first, Run anyway
-       pressed twice; Back runs nothing. With room, extracted already or an NRO, it runs at once */
+    /* a dump not extracted yet, with less room than its extraction takes (straight into its game's folder: once):
+       asked first, Run anyway pressed twice; Back runs nothing. With room, made already or an NRO, it runs at once */
     {
         char *dump = snx_path_join(temporary, "room dump.nsp"), *nro = snx_path_join(temporary, "room dump.nro");
         char *work_was = app.work_dir, *games_was = app.games_dir, *out;
@@ -2310,11 +2311,11 @@ int main(int argc, char** argv) {
         app.games_dir = snx_path_join(temporary, "room games");
         app.menu.selected = GUI_SWITCH;
         launcher(&app, true);
-        app.room_free = 4u << 20; /* 6 MB to take */
+        app.room_free = 2u << 20; /* 3 MB to take */
         launch(&app, snx_strdup(dump), false);
         assert(!app.menu.running && app.confirm.shown && app.confirm.ask == GUI_ASK_ROOM && app.room_file);
         render(&app);
-        shows(&app, "Needs about 6 MB, 4 MB free.", rgb(app.theme.warning));
+        shows(&app, "Needs about 3 MB, 2 MB free.", rgb(app.theme.warning));
         shows(&app, "- Back", yellow);
         shows(&app, "- Run anyway", normal);
         key(&app, SDLK_RETURN);
@@ -2347,7 +2348,7 @@ int main(int argc, char** argv) {
         touch_box(&app, list_box(&l, 1));
         assert(!app.confirm.shown && app.menu.running);
         finish(&app, 0);
-        app.room_free = 6u << 20;
+        app.room_free = 3u << 20;
         launch(&app, snx_strdup(dump), false);
         assert(!app.confirm.shown && app.menu.running);
         finish(&app, 0);
@@ -2355,11 +2356,17 @@ int main(int argc, char** argv) {
         launch(&app, snx_strdup(nro), false);
         assert(!app.confirm.shown && app.menu.running);
         finish(&app, 0);
-        out = dump_out(&app, dump, NULL);
-        assert(!snx_mkdirs(out));
-        launch(&app, snx_strdup(dump), false);
-        assert(!app.confirm.shown && app.menu.running);
-        finish(&app, 0);
+        out = snx_path_join(app.games_dir, "0100ABCD12345000"); /* made already: its folder links to the dump */
+        {
+            char* link = snx_path_join(out, "0100ABCD12345000.source");
+            assert(!snx_mkdirs(out));
+            if (!snx_symlink(dump, link)) { /* Windows without the right to make one: none to test */
+                launch(&app, snx_strdup(dump), false);
+                assert(!app.confirm.shown && app.menu.running);
+                finish(&app, 0);
+            }
+            free(link);
+        }
         assert(!snx_remove_tree(out));
         free(out);
         app.room_free = 0;

@@ -65,10 +65,10 @@ int main(int argc, char** argv) {
     GuiSettings s = {0};
     GuiEditor form;
     const char* options[64];
-    int fullscreen, touch, gcc, stub, prepared, launch, page, all;
+    int fullscreen, touch, gcc, stub, tmpfs, prepared, launch, page, all;
     assert(!gui_settings_read(&s, list));
 
-    /* the launcher's two, then a row a setting in the list's order, the other line left out; a page's row and its
+    /* the launcher's three, then a row a setting in the list's order, the other line left out; a page's row and its
        All before its settings */
     assert(s.count == GUI_SETTINGS_OWN + 15 && !strcmp(s.keys[0].key, "libgccjit") &&
            !strcmp(s.keys[1].key, "gdbstub"));
@@ -76,8 +76,11 @@ int main(int argc, char** argv) {
     assert(!strcmp(s.keys[0].about, SNX_GUI_HAS_GCCJIT ? "libgccjit will be used instead of llvm"
                                                        : "Program was not compiled with libgccjit"));
     assert(!strcmp(s.keys[1].about, "Enables gdbstub on port 1234") && words(&s.keys[1]) == 2);
-    assert(!strcmp(s.keys[2].section, "Display") && !strcmp(s.keys[2].key, "docked"));
-    assert(!strcmp(s.keys[2].about, "1 = TV mode") && !strcmp(key(&s, "fullscreen")->about, "1 = start in fullscreen"));
+    /* shown by its name, kept by its key */
+    assert(!strcmp(s.keys[2].section, "Launch") && !strcmp(s.keys[2].key, "Extract to tmpfs") &&
+           !strcmp(s.values[2].key, "tmpfs") && words(&s.keys[2]) == 2 && strstr(s.keys[2].about, "RomFS"));
+    assert(!strcmp(s.keys[3].section, "Display") && !strcmp(s.keys[3].key, "docked"));
+    assert(!strcmp(s.keys[3].about, "1 = TV mode") && !strcmp(key(&s, "fullscreen")->about, "1 = start in fullscreen"));
     assert(!strcmp(s.keys[s.count - 1].key, "log") && !strcmp(s.keys[s.count - 1].about, "Log detail"));
     /* a setting with values goes round .ini and their words, named as the game's menu names it; the others are
        typed, an older runtime's and one with a value missing its word among them */
@@ -159,37 +162,41 @@ int main(int argc, char** argv) {
         for (touch = 0; touch < 4; ++touch)
             for (gcc = 0; gcc < 2; ++gcc)
                 for (stub = 0; stub < 2; ++stub)
-                    for (prepared = 0; prepared < 2; ++prepared)
-                        for (launch = 0; launch < 2; ++launch) {
-                            static const char* const picks[] = {".ini", "0", "1", "2"};
-                            size_t n, i = 0;
-                            char want[32];
-                            assert(gui_settings_set(&s, "fullscreen", picks[fullscreen]));
-                            assert(gui_settings_set(&s, "touch", picks[touch]));
-                            assert(gui_settings_set(&s, "libgccjit", gcc ? "on" : "off") ==
-                                   (!gcc || SNX_GUI_HAS_GCCJIT));
-                            assert(gui_settings_set(&s, "gdbstub", stub ? "on" : "off"));
-                            /* what R's recompile takes, alone */
-                            assert(gcc && SNX_GUI_HAS_GCCJIT ? !strcmp(gui_settings_backend(&s), "--backend=gcc")
-                                                             : !gui_settings_backend(&s));
-                            n = gui_settings_options(&s, launch, prepared, options);
-                            assert(n <= (size_t)s.count + 1);
-                            if (fullscreen) {
-                                snprintf(want, sizeof want, "--fullscreen=%s", picks[fullscreen]);
-                                assert(i < n && !strcmp(options[i++], want));
+                    for (tmpfs = 0; tmpfs < 2; ++tmpfs)
+                        for (prepared = 0; prepared < 2; ++prepared)
+                            for (launch = 0; launch < 2; ++launch) {
+                                static const char* const picks[] = {".ini", "0", "1", "2"};
+                                size_t n, i = 0;
+                                char want[32];
+                                assert(gui_settings_set(&s, "fullscreen", picks[fullscreen]));
+                                assert(gui_settings_set(&s, "touch", picks[touch]));
+                                assert(gui_settings_set(&s, "libgccjit", gcc ? "on" : "off") ==
+                                       (!gcc || SNX_GUI_HAS_GCCJIT));
+                                assert(gui_settings_set(&s, "gdbstub", stub ? "on" : "off"));
+                                assert(gui_settings_set(&s, "tmpfs", tmpfs ? "on" : "off"));
+                                assert(tmpfs ? !strcmp(gui_settings_tmpfs(&s), "--tmpfs") : !gui_settings_tmpfs(&s));
+                                /* what R's recompile takes, alone */
+                                assert(gcc && SNX_GUI_HAS_GCCJIT ? !strcmp(gui_settings_backend(&s), "--backend=gcc")
+                                                                 : !gui_settings_backend(&s));
+                                n = gui_settings_options(&s, launch, prepared, options);
+                                assert(n <= (size_t)s.count + 1);
+                                if (fullscreen) {
+                                    snprintf(want, sizeof want, "--fullscreen=%s", picks[fullscreen]);
+                                    assert(i < n && !strcmp(options[i++], want));
+                                }
+                                if (touch) {
+                                    snprintf(want, sizeof want, "--touch=%s", picks[touch]);
+                                    assert(i < n && !strcmp(options[i++], want));
+                                }
+                                if (launch && gcc && SNX_GUI_HAS_GCCJIT && !prepared)
+                                    assert(i < n && !strcmp(options[i++], "--backend=gcc"));
+                                if (launch && tmpfs) assert(i < n && !strcmp(options[i++], "--tmpfs"));
+                                if (launch && stub) {
+                                    assert(i < n && !strcmp(options[i++], "-S"));
+                                    assert(i < n && !strcmp(options[i++], "-s"));
+                                }
+                                assert(i == n);
                             }
-                            if (touch) {
-                                snprintf(want, sizeof want, "--touch=%s", picks[touch]);
-                                assert(i < n && !strcmp(options[i++], want));
-                            }
-                            if (launch && gcc && SNX_GUI_HAS_GCCJIT && !prepared)
-                                assert(i < n && !strcmp(options[i++], "--backend=gcc"));
-                            if (launch && stub) {
-                                assert(i < n && !strcmp(options[i++], "-S"));
-                                assert(i < n && !strcmp(options[i++], "-s"));
-                            }
-                            assert(i == n);
-                        }
     gui_settings_free(&s);
 
     /* kept in a file of the game's sections and keys: what changed from where the rows started, read back over a

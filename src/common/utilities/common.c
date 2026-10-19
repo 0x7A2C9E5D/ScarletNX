@@ -578,6 +578,20 @@ int snx_link_file(const char* src, const char* dst) {
     return link(src, dst) != 0;
 #endif
 }
+int snx_symlink(const char* target, const char* link) {
+#ifdef _WIN32
+#ifndef SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
+#define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 2
+#endif
+    wchar_t *a = wide(target), *b = wide(link);
+    int ok = a && b && CreateSymbolicLinkW(b, a, SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE);
+    free(a);
+    free(b);
+    return !ok;
+#else
+    return symlink(target, link) != 0;
+#endif
+}
 int snx_path_within(const char* path, const char* parent) {
     char *a = snx_absolute(path), *b = snx_absolute(parent);
     size_t i = 0, n;
@@ -698,6 +712,28 @@ int snx_same_disk(const char* a, const char* b) {
     free(x);
     free(y);
     return same;
+}
+#ifdef _WIN32
+static int file_id(const char* path, BY_HANDLE_FILE_INFORMATION* info) {
+    wchar_t* w = wide(path);
+    HANDLE file = w ? CreateFileW(w, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                                  FILE_FLAG_BACKUP_SEMANTICS, NULL)
+                    : INVALID_HANDLE_VALUE;
+    int ok = file != INVALID_HANDLE_VALUE && GetFileInformationByHandle(file, info);
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    free(w);
+    return ok;
+}
+#endif
+int snx_same_file(const char* a, const char* b) {
+#ifdef _WIN32
+    BY_HANDLE_FILE_INFORMATION x, y;
+    return file_id(a, &x) && file_id(b, &y) && x.dwVolumeSerialNumber == y.dwVolumeSerialNumber &&
+           x.nFileIndexHigh == y.nFileIndexHigh && x.nFileIndexLow == y.nFileIndexLow;
+#else
+    struct stat x, y;
+    return !stat(a, &x) && !stat(b, &y) && x.st_dev == y.st_dev && x.st_ino == y.st_ino;
+#endif
 }
 /* The per-user data folder, an installed build's and a build tree's: $XDG_DATA_HOME/scarletnx or
    ~/.local/share/scarletnx, ~/Library/Application Support/scarletnx on macOS, %APPDATA%\scarletnx on Windows. These are
@@ -911,18 +947,33 @@ const char* snx_folder_unfit(const char* folder, int run) {
 #endif
     return NULL;
 }
+char* snx_temp_root(void) {
+#ifdef _WIN32
+    wchar_t temp[32768];
+    return GetTempPathW(32768, temp) ? utf8(temp) : NULL;
+#else
+    const char* root = getenv("TMPDIR");
+    return snx_strdup(root && *root ? root : "/tmp");
+#endif
+}
+char* snx_tmpfs_work(SnxU64 title) {
+    char text[17], *root, *work, *path;
+    if (!snx_title_text(title, text) || !(root = snx_temp_root())) return NULL;
+    work = snx_path_join(root, "scarletnx/work");
+    path = snx_path_join(work, text);
+    free(work);
+    free(root);
+    return path;
+}
 char* snx_temp_dir(const char* parent) {
     char* path;
 #ifdef _WIN32
-    wchar_t temp[32768], *wp;
+    wchar_t* wp;
     PSECURITY_DESCRIPTOR descriptor = NULL;
     SECURITY_ATTRIBUTES security;
     unsigned i;
-    if (!parent) {
-        if (!GetTempPathW(32768, temp)) return NULL;
-        path = utf8(temp);
-    } else
-        path = snx_strdup(parent);
+    path = parent ? snx_strdup(parent) : snx_temp_root();
+    if (!path) return NULL;
     /* Key material must remain private even when the selected temp parent is shared. */
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)", SDDL_REVISION_1,
                                                               &descriptor, NULL)) {
@@ -953,11 +1004,9 @@ char* snx_temp_dir(const char* parent) {
     free(path);
     return NULL;
 #else
-    if (!parent) {
-        parent = getenv("TMPDIR");
-        if (!parent || !*parent) parent = "/tmp";
-    }
-    path = snx_path_join(parent, ".snx-XXXXXX");
+    char* root = parent ? NULL : snx_temp_root();
+    path = snx_path_join(parent ? parent : root, ".snx-XXXXXX");
+    free(root);
     if (!mkdtemp(path)) {
         free(path);
         return NULL;

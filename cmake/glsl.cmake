@@ -59,7 +59,7 @@ function(snx_glsl_spirv target)
     # two steps, so that glslang's depfile names its command's output (the .inc), as the Makefile generators need it
     # to (they make it a rule for the file it names). DEPENDS rather than MAIN_DEPENDENCY: a source can be built twice
     add_custom_command(OUTPUT "${words}"
-        COMMAND "${SNX_GLSLANG}" -V --target-env vulkan1.1 -O -g0 --spirv-val -x ${defines}
+        COMMAND "${SNX_GLSLANG}" -V --target-env vulkan1.1 -g0 --spirv-val -x ${defines}
                 --depfile "${words}.d" -o "${words}" "${source}"
         DEPENDS "${source}"
         DEPFILE "${words}.d"
