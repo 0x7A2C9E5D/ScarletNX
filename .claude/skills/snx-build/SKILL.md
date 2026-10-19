@@ -90,13 +90,13 @@ the files under `src/common/cpu/aarch64/helpers/`. Other runtime changes normall
 only checks `SNX_ABI`: a module built before an ABI change that kept it still loads and runs the old code, and a
 bump makes the runtime refuse every module built before it. A recompile of
 a large game takes several minutes. A successful recompile removes its temporary objects. `--keep-ir` keeps the
-generated code (LLVM IR, libgccjit dumps) in `<outdir>/<id>/<id>_build/` for inspection.
+generated code (LLVM IR) in `<outdir>/<id>/<id>_build/` for inspection.
 
 ```bash
 build/scarletnx -r work/<Game>             # runtime and game module, both with Clang, into games/<id>/
 ```
 
-`scarletnx -r` uses the LLVM backend (`--backend=gcc`, libgccjit, is for DEC Alpha EV67 hosts). Its objects aren't
+`scarletnx -r` uses the LLVM backend, the only one. Its objects aren't
 cached: each recompile builds every unit again. A change to `a64_templates.inc`
 needs the matching change in `src/common/cpu/recompiler/llvm/ir_*.c` (`snx-test-llvm-differential` finds the
 difference).

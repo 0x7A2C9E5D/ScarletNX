@@ -350,9 +350,8 @@ static void app_select(App* app, int row) {
     key(app, SDLK_RETURN);
     if (app->editing && app->form == GUI_FORM_APP) leave_editor(app);
 }
-/* the launcher's own two Settings on or off */
+/* the launcher's gdbstub on or off */
 static void launcher(App* app, bool on) {
-    assert(gui_settings_set(&app->settings, "libgccjit", on && SNX_GUI_HAS_GCCJIT ? "on" : "off"));
     assert(gui_settings_set(&app->settings, "gdbstub", on ? "on" : "off"));
 }
 /* the focus on the game of Games named name, its page shown */
@@ -893,7 +892,6 @@ int main(int argc, char** argv) {
     }
     if (argc > 2 && !strcmp(argv[1], "-r") && strstr(argv[2], "room dump")) { /* R's, its room asked: not played */
         int i = 3;
-        if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
         assert(i + 2 == argc && !strcmp(argv[i], "--repo") && argv[i + 1][0]);
         puts("Recompiling room dump");
         return 0;
@@ -911,9 +909,7 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && strstr(argv[1], "option flags")) {
         int i = 2;
-        assert(argc == 8 + SNX_GUI_HAS_GCCJIT && !strcmp(argv[i++], "--fullscreen=1") &&
-               !strcmp(argv[i++], "--controls=0"));
-        if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
+        assert(argc == 8 && !strcmp(argv[i++], "--fullscreen=1") && !strcmp(argv[i++], "--controls=0"));
         assert(!strcmp(argv[i++], "-S") && !strcmp(argv[i++], "-s"));
         assert(!strcmp(argv[i++], "--repo") && argv[i++][0] && i == argc);
         puts("Recompiling option flags\nScarletNX - option flags"); /* the runner's banner: now loading */
@@ -922,7 +918,6 @@ int main(int argc, char** argv) {
     if (argc > 2 && !strcmp(argv[1], "-r") && strstr(argv[2], "folder game")) { /* R on it: recompiled, not played */
         int i = 3;
         assert(strstr(argv[0], "runtime") && snx_is_file(argv[2]));
-        if (SNX_GUI_HAS_GCCJIT) assert(!strcmp(argv[i++], "--backend=gcc"));
         assert(i + 2 == argc && !strcmp(argv[i], "--repo") && argv[i + 1][0]);
         puts("Recompiling folder game (1 modules)\nBuilt folder game");
         return 0;
@@ -1338,26 +1333,27 @@ int main(int argc, char** argv) {
     hides(&app, "\x1f", rgb(app.theme.soft));
     key(&app, SDLK_DOWN);
     render(&app);
-    shows(&app, "libgccjit, gdbstub", normal); /* a group's help names its settings */
-    key(&app, SDLK_RIGHT);                     /* a group opens with Enter only */
+    shows(&app, "gdbstub, Extract to tmpfs", normal); /* a group's help names its settings */
+    key(&app, SDLK_RIGHT);                            /* a group opens with Enter only */
     assert(app.form == GUI_FORM_SETTINGS);
     key(&app, SDLK_RETURN);
     /* a group's settings on the right, a row each with its help in the tips; the group named over them */
     assert(app.form == GUI_FORM_GROUP && app.group == 1 && app.editor.count == GUI_SETTINGS_OWN);
     render(&app);
     shows(&app, "Launch", normal);
-    shows(&app, SNX_GUI_HAS_GCCJIT ? "libgccjit will be" : "Program was not", normal); /* in the tips */
-    shows(&app, "- libgccjit ", yellow); /* its value in the column after the longest name, Extract to tmpfs's */
+    shows(&app, "Enables gdbstub", normal); /* in the tips */
+    shows(&app, "- gdbstub ", yellow); /* its value in the column after the longest name, Extract to tmpfs's */
     shows(&app, "- Extract to tmpfs off", normal);
     key(&app, SDLK_RIGHT);
-    assert(setting_is(&app, "libgccjit", SNX_GUI_HAS_GCCJIT ? "on" : NULL));
+    assert(setting_is(&app, "gdbstub", "on"));
     key(&app, SDLK_LEFT);
-    assert(!gui_settings_value(&app.settings, "libgccjit"));
-    point(&app, row_box(&app, 1, true), true); /* a click focuses a row, one on the focused row changes it */
-    assert(app.editor.row == 1 && !gui_settings_value(&app.settings, "gdbstub"));
+    assert(!gui_settings_value(&app.settings, "gdbstub"));
+    key(&app, SDLK_DOWN);
     render(&app);
-    shows(&app, "Enables gdbstub", normal);
-    point(&app, row_box(&app, 1, true), true);
+    shows(&app, "Extract to t", normal); /* the tips follow the focus, the row itself yellow */
+    point(&app, row_box(&app, 0, true), true); /* a click focuses a row, one on the focused row changes it */
+    assert(app.editor.row == 0 && !gui_settings_value(&app.settings, "gdbstub"));
+    point(&app, row_box(&app, 0, true), true);
     assert(setting_is(&app, "gdbstub", "on"));
     key(&app, SDLK_RETURN);
     assert(!gui_settings_value(&app.settings, "gdbstub"));
@@ -3859,7 +3855,7 @@ int main(int argc, char** argv) {
             render(&app);
             form_boxes(&app, &f);
             text_px_is(&app, f.place.side.x + cw, f.place.side.y + 2 * s, "Launch", normal, black);
-            text_px_is(&app, list_box(&f.right, 0).x + cw / 2, item_text_y(&app, list_box(&f.right, 0)), "- libgccjit",
+            text_px_is(&app, list_box(&f.right, 0).x + cw / 2, item_text_y(&app, list_box(&f.right, 0)), "- gdbstub",
                        normal, black);
             key(&app, SDLK_RETURN);
             assert(app.form == GUI_FORM_GROUP && app.group == launch && !app.editor.row);
@@ -3868,7 +3864,7 @@ int main(int argc, char** argv) {
             b = list_box(&f.left, launch);
             text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- Launch", yellow, black); /* the group open */
             b = list_box(&f.right, 0);
-            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- libgccjit", yellow, black);
+            text_px_is(&app, b.x + cw / 2, item_text_y(&app, b), "- gdbstub", yellow, black);
             {
                 char start[16]; /* in the tips, its first row: in the foot here, in its letters */
                 snprintf(start, sizeof start, "%s", app.settings.keys[0].about);
@@ -3878,11 +3874,11 @@ int main(int argc, char** argv) {
             launcher(&app, false);
             b = list_box(&f.right, 1);
             mouse_px(&app, b.x + 4, b.y + 4, true);
-            assert(app.form == GUI_FORM_GROUP && app.editor.row == 1 && setting_is(&app, "gdbstub", NULL));
+            assert(app.form == GUI_FORM_GROUP && app.editor.row == 1 && setting_is(&app, "tmpfs", NULL));
             mouse_px(&app, b.x + 4, b.y + 4, true);
-            assert(setting_is(&app, "gdbstub", "on"));
+            assert(setting_is(&app, "tmpfs", "on"));
             key(&app, SDLK_LEFT); /* back as it was */
-            assert(setting_is(&app, "gdbstub", NULL));
+            assert(setting_is(&app, "tmpfs", NULL));
             /* a click on App in the list opens it, from a group's rows */
             b = list_box(&f.left, 0);
             mouse_px(&app, b.x + 4, b.y + 4, true);
@@ -4189,12 +4185,12 @@ int main(int argc, char** argv) {
             press_key(&app, "Enter", 0, false, yellow);
             assert(app.form == GUI_FORM_GROUP && app.group == launch && !app.editor.row);
             press_key(&app, "Up/Down", 5, false, yellow);
-            assert(app.editor.row == 1 && !strcmp(app.settings.keys[app.first + 1].key, "gdbstub"));
-            assert(gui_settings_set(&app.settings, "gdbstub", "off"));
+            assert(app.editor.row == 1 && !strcmp(app.settings.keys[app.first + 1].key, "Extract to tmpfs"));
+            assert(gui_settings_set(&app.settings, "tmpfs", "off"));
             press_key(&app, "Left/Right", 6, false, yellow);
-            assert(setting_is(&app, "gdbstub", "on"));
+            assert(setting_is(&app, "tmpfs", "on"));
             press_key(&app, "Del", 0, false, yellow);
-            assert(setting_is(&app, "gdbstub", NULL));
+            assert(setting_is(&app, "tmpfs", NULL));
             press_key(&app, "ESC", 0, false, yellow);
             assert(app.editing && app.form == GUI_FORM_SETTINGS);
             press_key(&app, "ESC", 0, false, yellow);

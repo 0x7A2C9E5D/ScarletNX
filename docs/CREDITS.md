@@ -34,7 +34,7 @@ a source keep that source's copyright lines and license, most with the revision 
 | `src/nx/runtime/driver/hactool/storage.c` and `storage.h` (the storages added to hactool) | LibHac, as Ryubing maintains it | MIT |
 | `src/3ds/gpu/`, `src/3ds/audio/`, `src/3ds/services/dsp.c` | Azahar (Citra) | GPL-2.0-or-later |
 | `src/3ds/gpu/shader.c` and `shader.h` (the instruction fields) | nihstro | BSD-3-Clause |
-| `src/common/cpu/` (the recompiler's instruction semantics: `a64.c`, `a64_templates.inc`, the LLVM emitters and the libgccjit emitters derived from them, the A32/T32 block compiler) | QEMU's `target/arm/tcg/` | LGPL-2.1-or-later |
+| `src/common/cpu/` (the recompiler's instruction semantics: `a64.c`, `a64_templates.inc`, the LLVM emitters derived from them, the A32/T32 block compiler) | QEMU's `target/arm/tcg/` | LGPL-2.1-or-later |
 | `src/common/cpu/aarch64/` (`cpu.h`, `cpu_helpers.c` and `helpers/`, the generated code's FP, SIMD, integer and crypto helpers) | QEMU's `target/arm/` and its softfloat, with the SoftFloat-2a notice | LGPL-2.1-or-later, SoftFloat-2a, BSD |
 | `src/nx/gpu/gpu.c`, `src/nx/gpu/maxwell/` (the DMA pusher and puller, the 3D, macro, DMA, 2D and compute engines) | Eden and yuzu (`video_core/`) | GPL-3.0-or-later, GPL-2.0-or-later |
 | `src/nx/gpu/shader/` (`shader.c`, `decode.c`, and `maxwell_opcodes.def`, the encodings `tools/shaderdec` generates the decoder from) | Eden and yuzu (`shader_recompiler/frontend/maxwell/`) | GPL-3.0-or-later, GPL-2.0-or-later |

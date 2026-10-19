@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The recompiler as a library (snx_recompiler.h): hand-assembled A64 and A32 programs in a flat guest memory,
-   recompiled in this process on each backend the build has and run against the SVC, BRK and undefined-instruction
+   recompiled in this process and run against the SVC, BRK and undefined-instruction
    hooks a caller supplies. No game data, no files but the optional IR dump. Arguments: --verbose for the recompiler's
    progress lines. */
 #include "common/cpu/recompiler/snx_recompiler.h"
@@ -233,7 +233,7 @@ int main(int argc, char** argv) {
     place(mem, CODE32, a32_words, sizeof(a32_words) / sizeof(a32_words[0]));
     check(snx_recompiler_abi() == SNX_ABI, "the library's ABI is this cpu.h's");
     check(!snx_recompiler_has(0) && !snx_recompiler_new(0), "flags must name a backend");
-    check(!snx_recompiler_has(SNX_RECOMPILER_FLAG_LLVM | SNX_RECOMPILER_FLAG_GCCJIT), "flags name one backend");
+    check(!snx_recompiler_has(2) && !snx_recompiler_new(2), "flags must name LLVM");
     check(snx_recompiler_has(SNX_RECOMPILER_FLAG_LLVM), "LLVM is always built in");
     keep_ir = snx_temp_dir(NULL);
     check(keep_ir != NULL, "a folder for the IR");
@@ -248,18 +248,6 @@ int main(int argc, char** argv) {
         run32(r, mem);
         snx_recompiler_free(r);
     }
-    if (snx_recompiler_has(SNX_RECOMPILER_FLAG_GCCJIT)) {
-        r = snx_recompiler_new(SNX_RECOMPILER_FLAG_GCCJIT);
-        check(r != NULL, "snx_recompiler_new(GCCJIT)");
-        if (r) {
-            snx_recompiler_set_verbose(r, verbose);
-            run64(r, "gccjit", mem, keep_ir);
-            check(!snx_recompile32(r, CODE32, sizeof(a32_words)) && snx_recompiler_error(r)[0],
-                  "A32 is refused on libgccjit, with a reason");
-            snx_recompiler_free(r);
-        }
-    } else
-        puts("libgccjit backend not built: its test is skipped");
     if (keep_ir) {
         snx_remove_tree(keep_ir);
         free(keep_ir);

@@ -37,13 +37,6 @@ add_library(snx_gui_support STATIC model.c browser.c steps.c theme.c recent.c ed
             "${CMAKE_BINARY_DIR}/generated/gui_themes.c" "${CMAKE_BINARY_DIR}/generated/gui_latin.c")
 target_link_libraries(snx_gui_support PUBLIC scarletnx-common snx_i18n)
 target_include_directories(snx_gui_support PRIVATE "${CMAKE_BINARY_DIR}/generated")
-# The driver configures libgccjit in its own directory scope; its target is
-# visible here even though SNX_GCCJIT_FOUND is not.
-if(TARGET snx_driver_gccjit)
-    target_compile_definitions(snx_gui_support PUBLIC SNX_GUI_HAS_GCCJIT=1)
-else()
-    target_compile_definitions(snx_gui_support PUBLIC SNX_GUI_HAS_GCCJIT=0)
-endif()
 set_target_properties(snx_gui_support PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_gui_support PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 if(WIN32)

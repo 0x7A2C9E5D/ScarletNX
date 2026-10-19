@@ -134,8 +134,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   `.ini`. Del puts a setting back to its default, and the groups' last row, **Reset all to the
   defaults**, every one. The launcher's own choices start picked: `fullscreen` 0, `controls` 0 (on Android 1,
   and `fullscreen` puts the launcher itself on the whole screen too).
-  **libgccjit** passes `--backend=gcc` when preparing a dump (it stays off in a build without
-  libgccjit; a game of `games/` another build made is recompiled with LLVM), **gdbstub** passes `-S` and `-s`, the
+  **gdbstub** passes `-S` and `-s`, the
   runtime's stub on port 1234 waiting for the debugger at startup (UNIX only), and **Extract to tmpfs**
   passes `--tmpfs`: a dump's extraction goes to `/tmp/scarletnx/work/<title ID>` (`$TMPDIR` when set, the
   temporary folder on Windows) instead of the game's folder, and the game reads its RomFS from there, its ExeFS and
@@ -231,7 +230,7 @@ cannot be read is named and the others still listed.
   App > Library. Under it the recent games, then the page's games. ESC returns to the menu.
 - Up/Down go round Add a folder, the recent games and the page's files. Enter/Space opens one.
 - **R** (on Android a tap on *Recompile* at the foot) recompiles the Switch game in focus, recent or on the page,
-  where it is, or prepares its dump again: `scarletnx -r`, with libgccjit when **libgccjit** is on. It plays nothing;
+  where it is, or prepares its dump again: `scarletnx -r`. It plays nothing;
   Enter then does. On another row, or a 3DS game, it says why it does nothing.
 - Left/Right and PgUp/PgDown go to the previous/next page. The page number and
   total file count are shown. Paging stops at the first and last pages.

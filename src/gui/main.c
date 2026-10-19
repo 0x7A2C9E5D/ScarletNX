@@ -4339,7 +4339,7 @@ static int play(App* app, const char* game) {
     const char** argv = (const char**)snx_alloc((size_t)(s->count + 3) * sizeof(*argv));
     int ok;
     argv[0] = option;
-    argv[1 + gui_settings_options(s, 0, 1, argv + 1)] = NULL;
+    argv[1 + gui_settings_options(s, 0, argv + 1)] = NULL;
     ok = gui_android_play(argv, app->message, sizeof(app->message));
     free(argv);
     free(option);
@@ -4389,7 +4389,7 @@ static int play(App* app, const char* game) {
     const char** argv = (const char**)snx_alloc((size_t)(s->count + 4) * sizeof(*argv));
     argv[0] = "scarletnx";
     argv[1] = option;
-    argv[2 + gui_settings_options(s, 0, 1, argv + 2)] = NULL;
+    argv[2 + gui_settings_options(s, 0, argv + 2)] = NULL;
     gui_apple_play(argv);
     app->menu.quit = true;
     free(argv);
@@ -4798,12 +4798,10 @@ static void launch(App* app, char* absolute, bool prepared) {
     argv[0] = direct ? absolute : driver;
     if (app->recompile) argv[n++] = "-r";
     if (!direct) argv[n++] = absolute;
-    /* Switch options only, never guest argv for the CPU-only Linux driver or the 3DS one; R's recompile takes the
-       backend picked alone, no option of a run. The drivers work in the menu's data folder, so they list the same
-       games */
-    if (app->recompile && gui_settings_backend(s)) argv[n++] = gui_settings_backend(s);
+    /* Switch options only, never guest argv for the CPU-only Linux driver or the 3DS one; R's recompile takes no
+       option of a run. The drivers work in the menu's data folder, so they list the same games */
     if (app->recompile && app->menu.selected == GUI_SWITCH && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
-    if (app->menu.selected == GUI_SWITCH && !app->recompile) n += gui_settings_options(s, 1, native, argv + n);
+    if (app->menu.selected == GUI_SWITCH && !app->recompile) n += gui_settings_options(s, 1, argv + n);
     if (folders || (native && !direct)) {
         argv[n++] = "--repo";
         argv[n++] = app->data_dir;

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* What the game module's backends (module_llvm.c, module_gccjit.c, module_arm.c) share: their options, how code is
+/* What the game module's backends (module_llvm.c, module_arm.c) share: their options, how code is
    cut into units, the dispatch entry table and the progress lines */
 #ifndef SNX_TOOL_MODULE_H
 #define SNX_TOOL_MODULE_H
@@ -17,7 +17,7 @@ typedef struct {
     unsigned abi;
 } SnxCodegenOptions;
 
-/* A unit (one LLVM module or libgccjit context, compiled on its own) takes whole functions until it holds about this
+/* A unit (one LLVM module, compiled on its own) takes whole functions until it holds about this
    many instructions. Android gets smaller units: its allocator keeps a region per allocation size, and several
    threads' worth of large units at once exhausted it */
 #ifdef __ANDROID__

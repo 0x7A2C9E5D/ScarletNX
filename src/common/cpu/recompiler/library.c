@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* The recompiler as a library (snx_recompiler.h, issue #171). The pieces are the ones the scarletnx command uses
-   for a game: function discovery (codegen.c), the LLVM backend (llvm/ir*.c) or libgccjit (gccjit/jit*.c), and the
-   runtime library every module carries (llvm/rtlib.c, prebuilt). What differs from the game workflow
-   (nx/loader/module_llvm.c, module_gccjit.c): the input is a buffer at a guest address instead of NSO files, the module
+   for a game: function discovery (codegen.c), the LLVM backend (llvm/ir*.c), and the runtime library every
+   module carries (llvm/rtlib.c, prebuilt). What differs from the game workflow (nx/loader/module_llvm.c): the input is a buffer at a guest address instead of NSO files, the module
    descriptor is the small one below instead of the Switch loader's SnxModule, and the result is loaded into this
    process straight from memory (or a temporary file the OS requires) instead of being written beside the game. */
 #if defined(__linux__) && !defined(_GNU_SOURCE)
@@ -21,9 +20,6 @@
 #include "common/cpu/recompiler/llvm/link.h"
 #include <llvm-c/Support.h>
 #include <llvm-c/TargetMachine.h>
-#ifdef SNX_WITH_GCCJIT
-#include "common/cpu/recompiler/gccjit/jit.h"
-#endif
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,15 +37,11 @@
 #endif
 #endif
 
-/* the runtime library as an object for the libgccjit backend, compiled when the recompiler is built (rtlib.c,
-   snx-rtlib-gen embed); the LLVM backend compiles its bitcode instead (snx_ir_rtlib_object) */
-extern const unsigned char snx_rtlib_object[];
-extern const unsigned long snx_rtlib_object_size;
 /* the runtime library's bitcode the LLVM backend compiles (llvm/ir.c), which names its cached object */
 extern const unsigned char snx_rtlib_bitcode[];
 extern const unsigned long snx_rtlib_bitcode_size;
 
-/* instructions per code unit (an LLVM module, a libgccjit context): whole functions until a unit reaches it, as the
+/* instructions per code unit (an LLVM module): whole functions until a unit reaches it, as the
    game workflow splits them (SNX_CHUNK_INSTRUCTIONS) */
 #ifdef __ANDROID__
 #define CHUNK_INSTRUCTIONS 20000
@@ -60,7 +52,7 @@ extern const unsigned long snx_rtlib_bitcode_size;
 #define MAX_CODE_SPAN ((uint64_t)1 << 30)
 
 /* ---- the descriptor the generated module exports, read back by load_descriptor ----
-   Written by the backends field by field at these offsets, into a byte array of this size, so neither backend has to
+   Written by the backend field by field at these offsets, into a byte array of this size, so it doesn't have to
    describe the struct's layout. abi comes first: a module of another contract is recognized before anything else */
 typedef struct {
     uint32_t abi;
@@ -75,7 +67,6 @@ typedef struct {
 typedef const Descriptor* (*DescriptorFn)(void);
 
 struct snx_recompiler {
-    int backend; /* SNX_RECOMPILER_FLAG_* */
     char opt;
     unsigned jobs;
     int verbose;
@@ -88,7 +79,6 @@ struct snx_recompiled {
     void* image;       /* dlopen/LoadLibrary handle */
     char* image_file;  /* Windows: the DLL's file, deleted after FreeLibrary */
     int image_fd;      /* Linux: the memfd the module was loaded from, kept open while it is (see load_image) */
-    void* jit_result;  /* libgccjit: gcc_jit_result*, released with the code */
     GuestFn* dispatch; /* (pc - code_lo) >> 2 -> function, NULL for the interpreter */
     GuestFn interp;    /* the module's interpreter entry */
     GuestFn* fallback; /* the module's snx_interp_entry (snx_recompiled_set_fallback) */
@@ -134,9 +124,6 @@ static int llvm_init(char* error, size_t error_size) {
 int snx_recompiler_has(int flags) {
     char error[256];
     if (flags == SNX_RECOMPILER_FLAG_LLVM) return !llvm_init(error, sizeof(error));
-#ifdef SNX_WITH_GCCJIT
-    if (flags == SNX_RECOMPILER_FLAG_GCCJIT) return 1;
-#endif
     return 0;
 }
 
@@ -147,7 +134,6 @@ struct snx_recompiler* snx_recompiler_new(int flags) {
     if (!snx_recompiler_has(flags)) return NULL;
     r = (struct snx_recompiler*)calloc(1, sizeof(*r));
     if (!r) return NULL;
-    r->backend = flags;
     r->opt = '2';
     return r;
 }
@@ -691,7 +677,7 @@ static int llvm_descriptor(SnxIr* ir, const SnxCodegen* codegen, char* error, si
 
 /* ---- the module cache ----
    A linked module is a function of the code it was made from, the addresses it sits at, where it may be entered (the
-   leaders), the backend's settings, the contract with the runtime (SNX_ABI) and the CPU it was made for (the backends
+   leaders), the backend's settings, the contract with the runtime (SNX_ABI) and the CPU it was made for (the backend
    and rtlib.c use every extension the host has). Two 64-bit FNV-1a hashes of all that, with different offsets, name
    it in the cache folder */
 typedef struct {
@@ -720,7 +706,6 @@ static char* cache_path(struct snx_recompiler* r, SnxCodegen* codegen) {
     k.b = UINT64_C(0x84222325cbf29ce4);
     key_bytes(&k, "snx-module-cache-1", 18);
     key_u64(&k, SNX_ABI);
-    key_u64(&k, (uint64_t)r->backend);
     key_u64(&k, (uint64_t)(unsigned char)r->opt);
     cpu = LLVMGetHostCPUName();
     features = LLVMGetHostCPUFeatures();
@@ -956,203 +941,13 @@ done:
     return rc;
 }
 
-/* ---- the libgccjit backend ---- */
-
-#ifdef SNX_WITH_GCCJIT
-/* module_gccjit.c's structure: one context per chunk, compiled to an object file (jobs at a time, jit_units.c), then
-   the descriptor in a last context whose in-memory compilation links the chunks and the runtime library with GCC's
-   driver and loads the result */
-static int jit_descriptor(SnxJit* jit, const SnxCodegen* codegen, char* error, size_t error_size) {
-    gcc_jit_context* x = jit->ctx;
-    Entry* e;
-    size_t count, n, i;
-    gcc_jit_rvalue **values, *interp_address, *base;
-    gcc_jit_type *t_addresses, *t_functions, *t_desc;
-    gcc_jit_lvalue *addresses, *functions, *desc, *interp_entry;
-    gcc_jit_function *interp, *fn;
-    gcc_jit_param* params[2];
-    gcc_jit_block* block;
-    e = entries(codegen, &count);
-    if (!e) {
-        snprintf(error, error_size, "out of memory");
-        return -1;
-    }
-    n = count ? count : 1;
-    values = (gcc_jit_rvalue**)calloc(n, sizeof(*values));
-    if (!values) {
-        free(e);
-        snprintf(error, error_size, "out of memory");
-        return -1;
-    }
-    for (i = 0; i < n; ++i) values[i] = jit_u64(jit, i < count ? e[i].address : 0);
-    t_addresses = gcc_jit_context_new_array_type(x, NULL, jit->t_u64, (int)n);
-    addresses = gcc_jit_context_new_global(x, NULL, GCC_JIT_GLOBAL_INTERNAL, t_addresses, "snx_lib_addresses");
-    gcc_jit_global_set_initializer_rvalue(addresses,
-                                          gcc_jit_context_new_array_constructor(x, NULL, t_addresses, n, values));
-    for (i = 0; i < n; ++i)
-        values[i] = i < count ? gcc_jit_context_new_cast(
-                                    x, NULL,
-                                    gcc_jit_function_get_address(
-                                        snx_jit_guest_function(jit, codegen->functions[e[i].function].start, 0), NULL),
-                                    jit->t_guest_ptr)
-                              : gcc_jit_context_null(x, jit->t_guest_ptr);
-    t_functions = gcc_jit_context_new_array_type(x, NULL, jit->t_guest_ptr, (int)n);
-    functions = gcc_jit_context_new_global(x, NULL, GCC_JIT_GLOBAL_INTERNAL, t_functions, "snx_lib_functions");
-    gcc_jit_global_set_initializer_rvalue(functions,
-                                          gcc_jit_context_new_array_constructor(x, NULL, t_functions, n, values));
-    free(values);
-    free(e);
-    /* static Descriptor DESC, as 8-byte words written at the C offsets */
-    t_desc = gcc_jit_context_new_array_type(x, NULL, jit->t_u64, (int)((sizeof(Descriptor) + 7) / 8));
-    desc = gcc_jit_context_new_global(x, NULL, GCC_JIT_GLOBAL_INTERNAL, t_desc, "snx_lib_descriptor");
-    params[0] = gcc_jit_context_new_param(x, NULL, jit->t_ptr, "c");
-    params[1] = gcc_jit_context_new_param(x, NULL, jit->t_u64, "e");
-    interp = gcc_jit_context_new_function(x, NULL, GCC_JIT_FUNCTION_IMPORTED, jit->t_void, "snx_interp", 2, params, 0);
-    interp_entry = gcc_jit_context_new_global(x, NULL, GCC_JIT_GLOBAL_IMPORTED, jit->t_guest_ptr, "snx_interp_entry");
-    interp_address = gcc_jit_context_new_cast(x, NULL, gcc_jit_function_get_address(interp, NULL), jit->t_guest_ptr);
-    fn = gcc_jit_context_new_function(x, NULL, GCC_JIT_FUNCTION_EXPORTED, jit->t_ptr, DESCRIPTOR_SYMBOL, 0, NULL, 0);
-    jit->fn = fn;
-    block = gcc_jit_function_new_block(fn, "entry");
-    jit->block = block;
-    base = gcc_jit_lvalue_get_address(desc, NULL);
-    gcc_jit_block_add_assignment(block, NULL, interp_entry, interp_address);
-#define FIELD(member, type, value)                                                                                     \
-    gcc_jit_block_add_assignment(block, NULL, jit_at(jit, base, offsetof(Descriptor, member), type), value)
-    FIELD(abi, jit->t_u32, jit_u32(jit, SNX_ABI));
-    FIELD(count, jit->t_u64, jit_u64(jit, count));
-    FIELD(addresses, jit->t_ptr,
-          gcc_jit_context_new_cast(x, NULL, gcc_jit_lvalue_get_address(addresses, NULL), jit->t_ptr));
-    FIELD(functions, jit->t_ptr,
-          gcc_jit_context_new_cast(x, NULL, gcc_jit_lvalue_get_address(functions, NULL), jit->t_ptr));
-    FIELD(interp, jit->t_guest_ptr, interp_address);
-    FIELD(interp_entry, jit->t_ptr,
-          gcc_jit_context_new_cast(x, NULL, gcc_jit_lvalue_get_address(interp_entry, NULL), jit->t_ptr));
-#undef FIELD
-    gcc_jit_block_end_with_return(block, NULL, gcc_jit_context_new_cast(x, NULL, base, jit->t_ptr));
-    return 0;
-}
-
-static void jit_unit_done(const SnxJitUnits* units, size_t unit, size_t finished, double seconds) {
-    report((struct snx_recompiler*)units->user, "  compiled unit %lu/%lu: functions %lu-%lu (%.1f s)\n",
-           (unsigned long)finished, (unsigned long)units->count, (unsigned long)units->bounds[unit],
-           (unsigned long)units->bounds[unit + 1], seconds);
-}
-
-static int recompile_gccjit(struct snx_recompiler* r, struct snx_recompiled* m, SnxCodegen* codegen) {
-    SnxJitUnits u;
-    SnxJit* jit = NULL;
-    gcc_jit_result* result = NULL;
-    size_t *units = NULL, count = 0, i;
-    char *dir = NULL, *rtlib = NULL, **objects = NULL, error[1024];
-    const char* message;
-    int rc = -1;
-    error[0] = 0;
-    units = chunks(codegen, r->jobs, &count);
-    if (!units) {
-        fail(r, "out of memory");
-        return -1;
-    }
-    dir = snx_temp_dir(NULL);
-    if (!dir) {
-        fail(r, "cannot create a temporary folder for libgccjit");
-        free(units);
-        return -1;
-    }
-    rtlib = snx_path_join(dir, "rtlib.o");
-    if (snx_write_file(rtlib, snx_rtlib_object, snx_rtlib_object_size)) {
-        fail(r, "cannot write %s", rtlib);
-        goto done;
-    }
-    objects = (char**)calloc(count ? count : 1, sizeof(*objects));
-    if (!objects) {
-        fail(r, "out of memory");
-        goto done;
-    }
-    for (i = 0; i < count; ++i) {
-        char name[32];
-        snprintf(name, sizeof(name), "code_%03lu.o", (unsigned long)i);
-        objects[i] = snx_path_join(dir, name);
-    }
-    report(r, "libgccjit: %lu code unit%s and the descriptor\n", (unsigned long)count, count == 1 ? "" : "s");
-    memset(&u, 0, sizeof(u));
-    u.codegen = codegen;
-    u.bounds = units;
-    u.objects = objects;
-    u.count = count;
-    u.opt = r->opt;
-    u.jobs = r->jobs;
-    u.keep_ir = r->keep_ir;
-    u.done = jit_unit_done;
-    u.user = r;
-    if (snx_jit_compile_units(&u)) {
-        fail(r, "%s", u.error);
-        goto done;
-    }
-    m->fallbacks += u.fallbacks;
-    /* the descriptor, linked by GCC's driver with the chunks and the runtime library, and loaded by libgccjit */
-    jit = snx_jit_new(r->opt);
-    if (!jit) {
-        fail(r, "out of memory");
-        goto done;
-    }
-    if (jit_descriptor(jit, codegen, error, sizeof(error))) {
-        fail(r, "libgccjit: %s", error);
-        goto done;
-    }
-    if (r->keep_ir) {
-        char* path = snx_path_join(r->keep_ir, "module.c");
-        gcc_jit_context_dump_to_file(jit->ctx, path, 0);
-        free(path);
-    }
-    gcc_jit_context_add_driver_option(jit->ctx, rtlib);
-    for (i = 0; i < count; ++i) gcc_jit_context_add_driver_option(jit->ctx, objects[i]);
-    result = snx_jit_compile(jit);
-    message = snx_jit_error(jit);
-    if (message || !result) {
-        fail(r, "libgccjit (module): %s", message ? message : "no result");
-        goto done;
-    }
-    {
-        DescriptorFn describe = (DescriptorFn)(uintptr_t)gcc_jit_result_get_code(result, DESCRIPTOR_SYMBOL);
-        if (!describe) {
-            fail(r, "libgccjit: the recompiled module has no descriptor");
-            goto done;
-        }
-        if (load_descriptor(r, m, describe())) goto done;
-    }
-    m->jit_result = result;
-    result = NULL;
-    rc = 0;
-done:
-    snx_jit_free(jit);
-    if (result) gcc_jit_result_release(result);
-    if (objects) {
-        for (i = 0; i < count; ++i) free(objects[i]);
-        free(objects);
-    }
-    if (dir) snx_remove_tree(dir);
-    free(dir);
-    free(rtlib);
-    free(units);
-    return rc;
-}
-#endif
-
 /* ---- A64 ---- */
 
 /* the backend's half of snx_recompile_ranges and snx_recompile_from, for the functions codegen found; frees codegen */
 static struct snx_recompiled* recompile(struct snx_recompiler* r, struct snx_recompiled* m, SnxCodegen* codegen) {
     int rc;
     m->functions = codegen->function_count;
-    if (r->backend == SNX_RECOMPILER_FLAG_LLVM) rc = recompile_llvm(r, m, codegen);
-#ifdef SNX_WITH_GCCJIT
-    else if (r->backend == SNX_RECOMPILER_FLAG_GCCJIT)
-        rc = recompile_gccjit(r, m, codegen);
-#endif
-    else {
-        fail(r, "no backend");
-        rc = -1;
-    }
+    rc = recompile_llvm(r, m, codegen);
     snx_codegen_free(codegen);
     if (rc) {
         snx_recompiled_free(m);
@@ -1241,9 +1036,6 @@ struct snx_recompiled* snx_recompile_from(struct snx_recompiler* r, const struct
 void snx_recompiled_free(struct snx_recompiled* m) {
     if (!m) return;
     free(m->dispatch);
-#ifdef SNX_WITH_GCCJIT
-    if (m->jit_result) gcc_jit_result_release((gcc_jit_result*)m->jit_result);
-#endif
     unload_image(m);
     free(m);
 }
@@ -1311,10 +1103,6 @@ struct snx_recompiled32* snx_recompile32_ranges(struct snx_recompiler* r, const 
     size_t i;
     char error[256];
     r->error[0] = 0;
-    if (r->backend != SNX_RECOMPILER_FLAG_LLVM) {
-        fail(r, "A32 code is compiled by the LLVM backend only");
-        return NULL;
-    }
     views = images(r, ranges, range_count, 0, &lo, &hi);
     if (!views) return NULL;
     free(views);

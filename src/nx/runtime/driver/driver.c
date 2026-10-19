@@ -27,8 +27,7 @@ static void usage(void) {
          "  --touch=0|1|2          The game's touch screen: off, fingers, or fingers and the mouse\n"
          "  --controls=0|1         The on-screen controls: hidden or shown (the game's menu sets them)\n"
          "  --KEY=VALUE            Any setting of the game's .ini, for this run (--settings lists them)");
-    puts("  --backend=llvm|gcc     Select the recompiler backend for preparation\n"
-         "  -x -h / -r -h          Extraction / recompilation options\n"
+    puts("  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game");
     puts("  --tmpfs                Played or prepared, extract to tmpfs: <temp>/scarletnx/work/<title ID>, which\n"
          "                         the game reads its RomFS from; extracted again from <game>.source, the link\n"
@@ -241,8 +240,8 @@ done:
    games/<title ID>/<title ID>_data (its title ID read from its NCAs' headers first), or with --tmpfs into tmpfs, and
    its game made from it there: no copy is kept. --out names a folder the extraction is kept in instead, the game made
    from a copy. A game made already stays where it is */
-static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* backend, const char* outdir,
-                     const char* out, int settings, char** setting, int game_argc, char** game_argv) {
+static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* outdir, const char* out,
+                     int settings, char** setting, int game_argc, char** game_argv) {
     char *dumped = NULL, *dump = snx_absolute(input), *name = NULL, *games = NULL, *extracted = NULL, *work = NULL;
     char *pending = NULL, *game = NULL, *folder = NULL, *base = NULL, *code = NULL, *source = NULL, error[256];
     const char** command = (const char**)snx_alloc((size_t)(game_argc + settings + 16) * sizeof(*command));
@@ -378,16 +377,11 @@ made:
     game = snx_strdup(base);
 #endif
     /* Always restage an NRO: a same-named cached game may belong to another input or an older build. */
-    /* An explicit backend must not silently reuse a game built by another compiler. */
-    if (backend || nro || (flags & SNX_RECOMP) || !snx_is_file(game) || !snx_is_file(code) || !stamped(base)) {
+    if (nro || (flags & SNX_RECOMP) || !snx_is_file(game) || !snx_is_file(code) || !stamped(base)) {
         command[5] = "-r";
         command[6] = "--outdir";
         command[7] = games;
         n = 8;
-        if (backend) {
-            command[n++] = "--backend";
-            command[n++] = backend;
-        }
         if (tmpfs) command[n++] = "--tmpfs";
         command[n++] = "--";
         command[n++] = source;
@@ -448,7 +442,7 @@ done:
 static int takes_value(const char* arg) {
     static const char* const names[] = {"--update", "--name",    "--out",    "--keys",    "--title-keys",
                                         "-o",       "--outname", "--outdir", "--runtime", "--target",
-                                        "-O",       "--jobs",    "--chunk",  "--backend"};
+                                        "-O",       "--jobs",    "--chunk"};
     size_t i;
     for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
         if (!strcmp(arg, names[i])) return 1;
@@ -482,10 +476,10 @@ static int dump_modules(int argc, char** argv) {
 }
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
-    const char *repo = NULL, *build = SNX_BUILD_DIR, *input = NULL, *backend = NULL, *outdir = NULL, *out = NULL;
+    const char *repo = NULL, *build = SNX_BUILD_DIR, *input = NULL, *outdir = NULL, *out = NULL;
     char *r = NULL, *b = NULL, *exe = NULL, **rest, **setting, *self, *data = NULL, *source = NULL;
     unsigned flags = 0;
-    int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, backend_args = 0;
+    int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, tmpfs_args = 0;
     int repo_given = 0, settings = 0;
     if (argc <= 1) return -1;
     if (!strcmp(argv[1], "--dump-modules")) return dump_modules(argc, argv);
@@ -513,7 +507,7 @@ int snx_driver(int argc, char** argv) {
         if (!strcmp(argv[i], "--tmpfs")) { /* -r's too, which takes it from rest */
             flags |= SNX_TMPFS;
             rest[n++] = argv[i];
-            ++backend_args;
+            ++tmpfs_args;
             continue;
         }
         parsed = snx_cli_flag(argv[i], &flags);
@@ -529,22 +523,10 @@ int snx_driver(int argc, char** argv) {
 #endif
         if (parsed) continue;
         if (!strcmp(argv[i], "--backend") || !strncmp(argv[i], "--backend=", 10)) {
-            const char* option = argv[i];
-            rest[n++] = argv[i];
-            ++backend_args;
-            if (!strcmp(option, "--backend")) {
-                if (++i == argc) {
-                    result = snx_error("--backend requires llvm or gcc");
-                    goto done;
-                }
-                backend = argv[i];
-                rest[n++] = argv[i];
-                ++backend_args;
-            } else {
-                backend = option + 10;
-            }
-            if (strcmp(backend, "llvm") && strcmp(backend, "gcc")) {
-                result = snx_error("unknown backend: %s", backend);
+            /* LLVM is the only code generator: older scripts name it */
+            const char* backend = argv[i][9] ? argv[i] + 10 : i + 1 < argc ? argv[++i] : "";
+            if (strcmp(backend, "llvm")) {
+                result = snx_error("--backend %s: LLVM is the only backend", backend);
                 goto done;
             }
             continue;
@@ -574,7 +556,7 @@ int snx_driver(int argc, char** argv) {
     /* played, a --key=value that is not the driver's own is a setting of the game's .ini, passed on to it when the
        runtime knows the key; any other is refused */
     for (i = 0; automatic && i < n; ++i)
-        if (!strncmp(rest[i], "--", 2) && strchr(rest[i], '=') && strncmp(rest[i], "--backend=", 10)) {
+        if (!strncmp(rest[i], "--", 2) && strchr(rest[i], '=')) {
             if (!setting_known(rest[i] + 2)) {
                 result = snx_error("unknown option: %s", rest[i]);
                 goto done;
@@ -595,7 +577,7 @@ int snx_driver(int argc, char** argv) {
             n -= 2;
             --i;
         }
-    if (automatic && (n != 1 + backend_args || help)) {
+    if (automatic && (n != 1 + tmpfs_args || help)) {
         result = snx_error("automatic preparation accepts one dump file. Pass game arguments after --");
         goto done;
     }
@@ -652,7 +634,7 @@ int snx_driver(int argc, char** argv) {
     paths.source = source;
     if (automatic)
         result =
-            play_dump(input, &paths, flags, backend, outdir, out, settings, setting,
+            play_dump(input, &paths, flags, outdir, out, settings, setting,
                       separator < argc ? argc - separator - 1 : 0, argv + (separator < argc ? separator + 1 : argc));
     else
         result = (flags & SNX_RECOMP) ? snx_recompile(n, rest, &paths) : snx_extract(n, rest, &paths);

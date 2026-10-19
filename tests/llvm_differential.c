@@ -23,9 +23,6 @@
 #include <dlfcn.h>
 #endif
 
-#ifdef SNX_TEST_GCCJIT
-#include "common/cpu/recompiler/gccjit/jit.h"
-#endif
 extern const unsigned char snx_rtlib_object[];
 extern const unsigned long snx_rtlib_object_size;
 
@@ -490,46 +487,6 @@ static size_t directed(const char* match, size_t want, Word* out) {
     return got;
 }
 
-#ifdef SNX_TEST_GCCJIT
-/* the libgccjit backend's step functions (snx_jit_static_step), linked by GCC's driver with the runtime library */
-static int build_gccjit(const Word* words, size_t count, const char* dir, const char* path, unsigned long* fallbacks) {
-    SnxJit* jit = snx_jit_new('2');
-    gcc_jit_rvalue** fns = (gcc_jit_rvalue**)snx_alloc(count * sizeof(*fns));
-    gcc_jit_type *param = jit->t_ptr, *step_ptr, *table_type;
-    gcc_jit_lvalue* table;
-    gcc_jit_function* getter;
-    char* rtlib = snx_path_join(dir, "rtlib.o");
-    size_t i;
-    int rc = 0;
-    step_ptr = gcc_jit_context_new_function_ptr_type(jit->ctx, NULL, jit->t_u64, 1, &param, 0);
-    for (i = 0; i < count; ++i) {
-        char name[32];
-        sprintf(name, "S_%lu", (unsigned long)i);
-        fns[i] = gcc_jit_context_new_cast(
-            jit->ctx, NULL, gcc_jit_function_get_address(snx_jit_static_step(jit, words[i].word, PC_BASE, name), NULL),
-            step_ptr);
-    }
-    table_type = gcc_jit_context_new_array_type(jit->ctx, NULL, step_ptr, (int)count);
-    table = gcc_jit_context_new_global(jit->ctx, NULL, GCC_JIT_GLOBAL_INTERNAL, table_type, "TABLE");
-    gcc_jit_global_set_initializer_rvalue(
-        table, gcc_jit_context_new_array_constructor(jit->ctx, NULL, table_type, count, fns));
-    getter = gcc_jit_context_new_function(jit->ctx, NULL, GCC_JIT_FUNCTION_EXPORTED, jit->t_ptr, "snx_test_steps", 0,
-                                          NULL, 0);
-    gcc_jit_block_end_with_return(
-        gcc_jit_function_new_block(getter, "entry"), NULL,
-        gcc_jit_context_new_cast(jit->ctx, NULL, gcc_jit_lvalue_get_address(table, NULL), jit->t_ptr));
-    snx_write_file(rtlib, snx_rtlib_object, snx_rtlib_object_size);
-    gcc_jit_context_add_driver_option(jit->ctx, rtlib);
-    gcc_jit_context_compile_to_file(jit->ctx, GCC_JIT_OUTPUT_KIND_DYNAMIC_LIBRARY, path);
-    if (snx_jit_error(jit)) rc = snx_error("libgccjit: %s", snx_jit_error(jit));
-    *fallbacks = jit->fallbacks;
-    snx_jit_free(jit);
-    free(fns);
-    free(rtlib);
-    return rc;
-}
-#endif
-
 int main(int argc, char** argv) {
     const char *clang, *repo, *match = NULL;
     size_t per_case = 4, per_simd = 300, states = 6, count = 0, capacity = 0, npatterns, i, k, failures = 0,
@@ -549,15 +506,11 @@ int main(int argc, char** argv) {
     TableFn table_p, table_l;
     StepFn *steps_p, *steps_l;
     RtAPI rt;
-    int quiet = 0, a, gccjit = 0, portable = 0;
-#ifdef SNX_TEST_GCCJIT
-    TableFn table_g = NULL;
-#endif
-    StepFn* steps_g = NULL;
-    unsigned long fallbacks, gccjit_fallbacks = 0;
+    int quiet = 0, a, portable = 0;
+    unsigned long fallbacks;
     if (argc < 3) {
         fputs("usage: llvm_differential CLANG REPO [--match NAME] [--shard I/N] [--per-case N] [--simd N] [--states N]"
-              " [--seed N] [--quiet] [--gccjit] [--portable]\n",
+              " [--seed N] [--quiet] [--portable]\n",
               stderr);
         return 2;
     }
@@ -566,8 +519,6 @@ int main(int argc, char** argv) {
     for (a = 3; a < argc; ++a) {
         if (!strcmp(argv[a], "--quiet"))
             quiet = 1;
-        else if (!strcmp(argv[a], "--gccjit"))
-            gccjit = 1;
         else if (!strcmp(argv[a], "--portable"))
             portable = 1;
         else if (a + 1 < argc && !strcmp(argv[a], "--match"))
@@ -700,18 +651,6 @@ int main(int argc, char** argv) {
     if (!load(l_lib, &table_l) || !table_l) return snx_error("cannot load the LLVM steps");
     steps_p = table_p();
     steps_l = table_l();
-    if (gccjit) {
-#ifdef SNX_TEST_GCCJIT
-        char* g_lib = snx_path_join(dir, "gccjit.so");
-        if (!quiet) printf("compiling the libgccjit steps\n");
-        if (build_gccjit(words, count, dir, g_lib, &gccjit_fallbacks)) return 1;
-        if (!load(g_lib, &table_g) || !table_g) return snx_error("cannot load the libgccjit steps");
-        steps_g = table_g();
-        free(g_lib);
-#else
-        return snx_error("built without libgccjit");
-#endif
-    }
     /* run */
     memset(&rt, 0, sizeof(rt));
     rt.svc = cb_svc;
@@ -735,7 +674,7 @@ int main(int argc, char** argv) {
             CPU start, p, l;
             Log log_p, log_l;
             u64 rp, rl;
-            int memory_differs, helper_memory;
+            int memory_differs;
             memset(&start, 0, sizeof(start));
             random_state(&start, memory_start, &words[i]);
             start.rt = &rt;
@@ -752,25 +691,6 @@ int main(int argc, char** argv) {
             rl = steps_l[i](&l);
             memory_differs = memcmp(memory_p, memory_l, MEMORY_SIZE) != 0;
             ++compared;
-            if (steps_g) { /* the libgccjit steps against the reference too */
-                CPU g = start;
-                Log log_g;
-                u64 rg;
-                memcpy(memory_l, memory_start, MEMORY_SIZE);
-                g.mem = memory_l;
-                memset(&log_g, 0, sizeof(log_g));
-                current = &log_g;
-                rg = steps_g[i](&g);
-                helper_memory = memcmp(memory_p, memory_l, MEMORY_SIZE) != 0;
-                if (rp != rg || !same_cpu(&p, &g) || helper_memory || !same_events(&log_p, &log_g)) {
-                    size_t index = (size_t)(words[i].pattern - patterns);
-                    fprintf(stderr, "the libgccjit steps differ from the reference ones:\n");
-                    if (pattern_failures[index]++ < 3)
-                        report(&words[i], &start, &p, &g, rp, rg, &log_p, &log_g, helper_memory);
-                    ++failures;
-                    break;
-                }
-            }
             if (rp != rl || !same_cpu(&p, &l) || memory_differs || !same_events(&log_p, &log_l)) {
                 size_t index = (size_t)(words[i].pattern - patterns);
                 if (pattern_failures[index]++ < 3)
@@ -783,9 +703,7 @@ int main(int argc, char** argv) {
     for (i = 0; i < npatterns; ++i)
         if (pattern_failures[i])
             printf("  %s: %lu words differ\n", patterns[i].name, (unsigned long)pattern_failures[i]);
-    /* every pattern has an emitter, in both backends */
-    fallbacks += gccjit_fallbacks;
-    if (gccjit) printf("libgccjit: %lu through snx_step\n", gccjit_fallbacks);
+    /* every pattern has an emitter */
     printf("LLVM differential: %lu words, %lu runs, %lu differing words, %lu through snx_step: %s\n",
            (unsigned long)count, (unsigned long)compared, (unsigned long)failures, fallbacks,
            failures || fallbacks ? "FAILED" : "passed");

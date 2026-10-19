@@ -25,8 +25,8 @@ function(snx_test_sanitize)
         endif()
     endforeach()
 endfunction()
-snx_test_sanitize(snx_driver snx_nx_module snx_driver_llvm snx_driver_gccjit scarletnx-common scarletnx-net snx_lz4
-                  snx_llvm snx_arm_llvm snx_jit scarletnx-recompiler scarletnx-recompiler-shared)
+snx_test_sanitize(snx_driver snx_nx_module snx_driver_llvm scarletnx-common scarletnx-net snx_lz4
+                  snx_llvm snx_arm_llvm scarletnx-recompiler scarletnx-recompiler-shared)
 # one Python for the scripted tests: without it they are left out
 find_package(Python3 QUIET COMPONENTS Interpreter)
 # x86-64, by any of the names hosts give it
@@ -875,25 +875,8 @@ endif()
 add_executable(snx-test-llvm-module llvm_module.c)
 snx_test_target(snx-test-llvm-module 11)
 target_link_libraries(snx-test-llvm-module PRIVATE snx_driver ${CMAKE_DL_LIBS})
-if(TARGET snx_jit)
-    set(snx_extra_backends gcc)
-    target_link_libraries(snx-test-llvm-differential PRIVATE snx_jit)
-    target_compile_definitions(snx-test-llvm-differential PRIVATE SNX_TEST_GCCJIT)
-    foreach(shard RANGE 1) # as llvm_differential's
-        add_test(NAME gccjit_differential_${shard} COMMAND snx-test-llvm-differential "${SNX_TARGET_C_COMPILER}"
-            "${PROJECT_SOURCE_DIR}" --gccjit --quiet --per-case 2 --simd 100 --states 4 --shard ${shard}/2)
-        set_tests_properties(gccjit_differential_${shard} PROPERTIES TIMEOUT 900 COST 100)
-    endforeach()
-    add_test(NAME native_recompiler_gcc COMMAND snx_recompiler_test
-        $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}" "${CMAKE_C_COMPILER}" gcc)
-    # code units in this process and in processes of their own (gccjit/jit_units.c)
-    add_executable(snx-test-gccjit-units gccjit_units.c)
-    snx_test_target(snx-test-gccjit-units 11)
-        target_link_libraries(snx-test-gccjit-units PRIVATE snx_jit)
-    add_test(NAME gccjit_units COMMAND snx-test-gccjit-units)
-endif()
 add_test(NAME llvm_module COMMAND snx-test-llvm-module $<TARGET_FILE:scarletnx> "${PROJECT_SOURCE_DIR}"
-    "${CMAKE_C_COMPILER}" ${snx_extra_backends})
+    "${CMAKE_C_COMPILER}")
 # the recompiler as a library (snx_recompiler.h): A64 on every backend built, A32, from code in memory
 add_executable(snx-test-recompiler-library recompiler_library.c)
 snx_test_target(snx-test-recompiler-library 11)
