@@ -439,7 +439,7 @@ set_tests_properties(ldn_room PROPERTIES TIMEOUT 120)
 # ldn:u (ldn.c): two consoles in one process, one creating a network and the other joining, with bsd.c beside for
 # the address a game socket binds meanwhile; the session id comes from OpenSSL's generator
 if(TARGET OpenSSL::Crypto)
-    add_executable(snx-test-ldn-service ldn_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
+    add_executable(snx-test-ldn-service ldn_service.c fake_room.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/network/bsd.c")
     snx_test_target(snx-test-ldn-service 23)
     snx_service_swipc(snx-test-ldn-service hle/services/network/bsd.swipc hle/services/network/ldn.swipc)
     target_link_libraries(snx-test-ldn-service PRIVATE scarletnx-ldn OpenSSL::Crypto)

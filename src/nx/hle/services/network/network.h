@@ -40,6 +40,9 @@ SvcObj* new_ssl(void);
 
 /* ldn.c */
 SvcObj* new_ldn(void);
+/* at exit: every ldn:u closes its network, so the others hear the host or the station go (an Eden in a room only
+   hears that, never who left the room) */
+void ldn_exit(void);
 
 /* room.c: joins the Eden room room= names when ldn=room, as the user playing (a refusal stops the game), and leaves
    it at exit */

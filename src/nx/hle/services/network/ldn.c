@@ -61,6 +61,7 @@ enum {
 
 typedef struct Ldn {
     PMutex lk;
+    struct Ldn* next; /* g_ldns' */
     SnxLdn* lan;
     KEvent* ev;
     u32 state;
@@ -99,10 +100,23 @@ static void ldn_teardown(Ldn* d) {
         if (g_opt_ldn != SNX_LDN_ROOM) bsd_set_bind_address(NULL, NULL);
     }
 }
+/* every ldn:u, for ldn_exit to close their networks */
+static PMutex g_ldns_lk = PMUTEX_INIT;
+static Ldn* g_ldns;
 static void ldn_destroy(SvcObj* o) {
-    Ldn* d = o->data;
+    Ldn *d = o->data, **p;
+    pm_lock(&g_ldns_lk);
+    for (p = &g_ldns; *p && *p != d; p = &(*p)->next) {}
+    if (*p) *p = d->next;
+    pm_unlock(&g_ldns_lk);
     ldn_teardown(d);
     kobj_unref(&d->ev->o);
+}
+void ldn_exit(void) {
+    Ldn* d;
+    pm_lock(&g_ldns_lk);
+    for (d = g_ldns; d; d = d->next) ldn_teardown(d);
+    pm_unlock(&g_ldns_lk);
 }
 
 /* ============================================================ the console's address */
@@ -141,6 +155,10 @@ static int nn_ldn_detail_IUserServiceCreator_CreateUserLocalCommunicationService
     pm_init(&d->lk);
     d->ev = owned_event("ldn state change");
     o->destroy = ldn_destroy;
+    pm_lock(&g_ldns_lk);
+    d->next = g_ldns;
+    g_ldns = d;
+    pm_unlock(&g_ldns_lk);
     *service = o;
     R_SUCCEED();
 }

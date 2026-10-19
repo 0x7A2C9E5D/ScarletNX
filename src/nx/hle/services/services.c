@@ -38,7 +38,10 @@ KEvent* owned_event(const char* name) {
 }
 
 /* ============================================================ registration */
-void svc_core_exit(void) { network_room_leave(); }
+void svc_core_exit(void) {
+    ldn_exit(); /* its goodbyes go through the room, so before it is left */
+    network_room_leave();
+}
 void svc_core_init(void) {
     snx_users_init(); /* before am: its launch parameter names the user */
     am_init();

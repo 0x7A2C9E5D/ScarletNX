@@ -13,6 +13,7 @@
 #endif
 
 #include "nx/hle/services/network/ldn.c"
+#include "fake_room.h"
 
 u8* g_mem;
 int g_verbose;
@@ -247,6 +248,67 @@ static int wait_state(SvcObj* o, u32 state, int ms) {
 #define LDN_RC(desc) RC(203, desc)
 /* a local communication id, 0x0100152000022000, as the raw data carries it */
 static const u8 lcid[8] = {0x00, 0x20, 0x02, 0x00, 0x20, 0x15, 0x00, 0x01};
+
+/* ldn=room: a console in an Eden room (fake_room.c) initializes at the room's address and hosts; a station of the room
+   finds it and joins; at the exit ldn_exit closes the network before the room is left (svc_core_exit), so the station
+   hears its DestroyNetwork */
+static void in_a_room(SvcObj* creator) {
+    FakeRoom* room = fake_room_start();
+    SnxRoom *ra, *rb;
+    SnxLdn* st;
+    SnxLdnNetworkInfo found[2], info;
+    Request r;
+    SvcObj* a;
+    u8 name[SNX_LDN_USER_NAME];
+    int why, i, destroys;
+    CHECK(snx_room_join(&ra, "127.0.0.1", fake_room_port(room), "Aogo", "secret", "game", 1, "", &why) == 0);
+    CHECK(snx_room_join(&rb, "127.0.0.1", fake_room_port(room), "Xuji", "secret", "game", 1, "", &why) == 0);
+    network_set_room(ra);
+    g_opt_ldn = SNX_LDN_ROOM;
+    g_opt_network = 0;
+    request(&r, 0);
+    CHECK(call(creator, &r) == 0 && r.c.nout_objs == 1);
+    a = r.c.out_objs[0];
+    request(&r, 400);
+    r.c.has_pid = 1;
+    {
+        u32 rc = call(a, &r);
+        if (rc) fprintf(stderr, "Initialize in the room: 0x%x\n", rc);
+        CHECK(rc == 0 && get_state(a) == 1);
+    }
+    request(&r, 2); /* GetIpv4Address: the room's 192.168.1.1/24, in host order */
+    CHECK(call(a, &r) == 0 && reply32(&r, 0) == 0xC0A80101 && reply32(&r, 4) == 0xFFFFFF00);
+    CHECK(simple(a, 200) == 0 && get_state(a) == 2);
+    request(&r, 202);
+    r.raw[0] = 1;
+    strcpy((char*)r.raw + 0x44, "Host");
+    memcpy(r.raw + 0x78, lcid, 8);
+    r.raw[0x78 + 0x12] = 8;
+    r.raw[0x78 + 0x14] = 4;
+    CHECK(call(a, &r) == 0 && get_state(a) == 3);
+    CHECK(network_info(a, &info) == 0 && info.nodes[0].ipv4[3] == 192 && info.nodes[0].ipv4[0] == 1);
+    CHECK(snx_ldn_open_room(&st, rb, NULL, NULL) == 0);
+    CHECK(snx_ldn_scan(st, NULL, found, 2, 1000) == 1);
+    memset(name, 0, sizeof name);
+    strcpy((char*)name, "Xuji");
+    CHECK(snx_ldn_connect(st, &found[0], name, 4, 2000) == 0);
+    for (i = 0; i < 400 && (network_info(a, &info) || info.node_count != 2); i++) sleep_ms(5);
+    CHECK(info.node_count == 2);
+    destroys = fake_room_ldn_count(room, SNX_ROOM_LDN_DESTROY_NETWORK, NULL);
+    ldn_exit();
+    network_set_room(NULL);
+    snx_room_leave(ra);
+    CHECK(get_state(a) == 0);
+    for (i = 0; i < 600 && fake_room_ldn_count(room, SNX_ROOM_LDN_DESTROY_NETWORK, NULL) == destroys; i++) sleep_ms(5);
+    CHECK(fake_room_ldn_count(room, SNX_ROOM_LDN_DESTROY_NETWORK, NULL) == destroys + 1);
+    for (i = 0; i < 400 && snx_ldn_connected(st); i++) sleep_ms(5);
+    CHECK(!snx_ldn_connected(st) && snx_ldn_disconnect_reason(st) == SNX_LDN_REASON_DESTROYED_BY_USER);
+    snx_ldn_close(st);
+    snx_room_leave(rb);
+    svcobj_unref(a);
+    g_opt_ldn = SNX_LDN_LAN;
+    fake_room_stop(room);
+}
 
 int main(void) {
     SvcObj *creator, *a, *b, *bsd;
@@ -557,6 +619,7 @@ int main(void) {
     request(&r, 2);
     CHECK(call(b, &r) == 0 && reply32(&r, 0) == 0x7F000001);
 
+    in_a_room(creator);
     svcobj_unref(bsd);
     svcobj_unref(a);
     svcobj_unref(b); /* still initialized: the transport goes with the object */
