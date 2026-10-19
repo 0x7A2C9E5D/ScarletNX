@@ -301,6 +301,7 @@ int snx_setting_known(const char* key) {
         if (!strcmp(key, known[i])) return 1;
     return 0;
 }
+#ifndef _WIN32
 /* 1 when the game's .ini records dump as its source (snx_game_source), its folder making no link to it */
 static int records_dump(const char* folder, const char* name, const char* dump) {
     char *link = snx_format("%s/%s.source", folder, name), *source;
@@ -311,6 +312,7 @@ static int records_dump(const char* folder, const char* name, const char* dump) 
     free(link);
     return good;
 }
+#endif
 /* snx_record_source on the .ini a game has: made with [Game] when there is none, an older source= anywhere taken out
    and the new one put under [Game], CRLF lines and a last line without its newline kept, a file naming the dump
    already left as it is, and a path with a line break refused */
