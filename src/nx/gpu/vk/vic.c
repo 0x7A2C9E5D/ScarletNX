@@ -199,7 +199,8 @@ static int compose(const VicJob* j) {
     }
     VicGpuParams p;
     if (!vic_gpu_params(j, &p, in_offs, (u32)(oc_off - ol_off))) {
-        LOG_LIMIT(4, "video: a VIC slot's soft clamp has its low end above its high one, composed in guest memory\n");
+        LOG_LIMIT(4, "video: a VIC slot's soft clamp has its low end above its high one, or the slot lies outside the "
+                     "target, composed in guest memory\n");
         return 0;
     }
     vk_lock();
