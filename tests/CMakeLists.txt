@@ -791,6 +791,88 @@ if(NOT SNX_TOOLS_ONLY)
     target_compile_definitions(snx-test-nvdec-decode PRIVATE SNX_TEST_REAL_FFMPEG)
     target_link_libraries(snx-test-nvdec-decode PRIVATE FFmpeg::avcodec)
     add_test(NAME nvdec_decode COMMAND snx-test-nvdec-decode)
+    # nvdec.c's VP9 jobs on libvpx's test vectors, each image against the MD5 libvpx lists for it, at its own job's
+    # fence (nvdec_vp9_vectors.c). FFmpeg's decoder works the jobs out of each vector from its private state
+    # (nvdec_vp9_jobs.c), so that part builds against FFmpeg's source and configuration. The vectors and their lists
+    # come from the WebM project's test data (BSD-3-Clause), downloaded once into CPM_SOURCE_CACHE: a vector's name,
+    # then the SHA-256 of the vector and of its list. Hidden frames, contexts that adapt, frame parallel mode, a
+    # superframe of hidden frames, frames shown again, intra-only frames, spatial layers, tiles, size changes,
+    # segmentation, loop filter and quantizer deltas
+    set(snx_vp9_vectors
+        vp90-2-02-size-66x66.webm 749e4260de357b2704117389cd0a620f73f8229043d214528d1cc7d81524faaa
+            96cdfc13db1458a93a3cecaf73acc5cee5ec8d5112a0406f7321d88fcee486e0
+        vp90-2-03-deltaq.webm c1ef6ca3eea22a53a79c7f82bdf295f2bf4d5c6dce7bb9659e0ab0e14bd6a72b
+            fe813160663227127f8de16053fc23aeefe2516301e3c740da3a96b98511d404
+        vp90-2-05-resize.ivf 84a345546e47e37de87d2959347bf731f9f440f9f2ab32bede3f0e416100c585
+            3158d3e404f06137bd6d8a9a1ec33ea37ccfad7aea8c9f61fa691ca5ab6e6f7c
+        vp90-2-07-frame_parallel.webm b101f5f71920b893ff301bd506d43d62f2f678ab9196ffc06fe605f1fa4caf4f
+            b3c0d7a1412209c78c5b8113fdbf946ad44b2fa84cadcfdf84e23b0e077dc269
+        vp90-2-08-tile-4x4.webm 89ce4c213d7f83f677e67a9e9906b61f1053949489b8343356034f0b9577e33e
+            7a24e9c0e883ea4fffe88cac475ec8547386b48022ae280a7a78e056aec01dba
+        vp90-2-09-lf_deltas.webm 651fc818fea9687fb1acccac35433c555cf005d2a78d39d5168d40760fd23fa1
+            feebf034c3306affc93903dd8b9eaaa8f24f0c6eb8fe7a75cc8309fa107a4ede
+        vp90-2-10-show-existing-frame.webm 21d60d305ed05f06d838f90f0e62bbd2a37c4b994304ad7f8556430cc551aa1b
+            62bff400e0cb7e3ab0681971f623dc68d12dbf33fa5c8f2f9db7e2210d03da5c
+        vp90-2-11-size-351x287.webm 4e8fa03af4fc90e97f0f0ac7f6808819586e8b063e369a7c47b13de443718b19
+            bb7094ab6c422e1bbd35a150e823bc8fc483eded9d9f2cc3206baaaa240ccbb8
+        vp90-2-15-segkey.webm 2809d3c237383bcecffee926c624dbbccd2146331cc569344caabbd8b8141449
+            ad85c8e90bf15c7e80ea582aaa83762482f391e4be2cb7c7d98ddac851bed077
+        vp90-2-15-segkey_adpq.webm c402502113c173ce4ba827fa50e7f1c4cc657ad0c0893ee550c4ca82f497355b
+            9b0e367e2e0feb170a69b592f4cc855f7db5ca8453ca544357bdc8581a154646
+        vp90-2-16-intra-only.webm 328abd0bbb630f76ed5e6a5ed94e8065f8dda53c8f5ad120fba515a03438512b
+            2e037d40bfd4b4eca40409be440e8deeaeb23e87eeb429bc0bc5825406a8cc3f
+        vp90-2-17-show-existing-frame.webm f78980c5e9db098946d4784c2d5e875da129050098bef7afc988e793dbb2edb1
+            1d0a6b53c33cdb45690495fcc356cec1693bdd1f43e901bdc6457ea78b4b87f5
+        vp90-2-19-skip.webm 7aa1de5c86fdb89fbd7443b79ef412771e29ca996f7ba2ea8f13375e37683bdd
+            aed7e371a3706139f797d2e84ad055c67be78823c911d33a86d4c546ebebeb71
+        vp90-2-20-big_superframe-01.webm 08c30e4e653e6f0bbcb58f0d506e843a45d9630060bb9568b6a04b3a8c61bdfa
+            bc498d393ddecfa7742920d459362c13cf7c0d66cea5cbfa99c208c8d3943ce7
+        vp90-2-21-resize_inter_320x180_5_1-2.webm 56de7662174fc1e07960ffec74e7e43a1ab77a86e382239ff62aa698568fee51
+            ea204491ee6f70f9c73fdc71d6cf38da26817d3bb5a8d6b63708c98de106bef4
+        vp90-2-22-svc_1280x720_3.ivf 41f2ac2086be31e4cf39bad75612ebfd5a3d5445b4328f064ec4f2996d286666
+            adade013ec6d91e80e1f296dc65e27f8966c384ee052939b43baffcfc6a0a30c)
+    add_library(snx-test-nvdec-vp9-jobs STATIC nvdec_vp9_jobs.c)
+    snx_test_target(snx-test-nvdec-vp9-jobs 11)
+    target_include_directories(snx-test-nvdec-vp9-jobs PRIVATE ${snx_ffmpeg_private_include})
+    # FFmpeg's headers as system headers, for their warnings (on Windows, compat/w32pthreads.h's unused parameters);
+    # as -isystem folders they would come after a -I that holds another FFmpeg's (cmake/ffmpeg.cmake)
+    target_compile_options(snx-test-nvdec-vp9-jobs PRIVATE --system-header-prefix=libavcodec/
+                           --system-header-prefix=libavutil/ --system-header-prefix=compat/)
+    target_link_libraries(snx-test-nvdec-vp9-jobs PUBLIC FFmpeg::avcodec)
+    add_executable(snx-test-nvdec-vp9-vectors nvdec_vp9_vectors.c
+                   "${PROJECT_SOURCE_DIR}/src/nx/gpu/video/vp9_rebuild.cpp")
+    snx_test_target(snx-test-nvdec-vp9-vectors 11)
+    target_link_libraries(snx-test-nvdec-vp9-vectors PRIVATE snx-test-nvdec-vp9-jobs)
+    while(snx_vp9_vectors)
+        list(POP_FRONT snx_vp9_vectors name vector_sha256 list_sha256)
+        string(REGEX REPLACE "^vp90-2-|\\.(webm|ivf)$" "" short "${name}")
+        foreach(file "${name}" "${name}.md5")
+            if(file STREQUAL name)
+                set(sha256 ${vector_sha256})
+                set(package snx_vp9_${short})
+            else()
+                set(sha256 ${list_sha256})
+                set(package snx_vp9_${short}_md5)
+            endif()
+            CPMAddPackage(NAME ${package}
+                          URL https://storage.googleapis.com/downloads.webmproject.org/test_data/libvpx/${file}
+                          URL_HASH SHA256=${sha256}
+                          DOWNLOAD_ONLY YES DOWNLOAD_NO_EXTRACT YES)
+            # checked on every configure: CPM takes the empty folder a failed download leaves for a filled one
+            set(path "${${package}_SOURCE_DIR}/${file}")
+            set(have "")
+            if(EXISTS "${path}")
+                file(SHA256 "${path}" have)
+            endif()
+            if(NOT have STREQUAL sha256)
+                message(FATAL_ERROR "${path} is missing or is not the pinned file (SHA-256 ${sha256}): delete "
+                                    "${${package}_SOURCE_DIR} and configure again with the network")
+            endif()
+        endforeach()
+        add_test(NAME nvdec_vp9_${short}
+                 COMMAND snx-test-nvdec-vp9-vectors "${snx_vp9_${short}_SOURCE_DIR}/${name}"
+                         "${snx_vp9_${short}_md5_SOURCE_DIR}/${name}.md5")
+    endwhile()
 endif()
 # VP9 packets rebuilt from NVDEC jobs (gpu/video/vp9_rebuild.cpp): the destination of the frame each emits, and
 # setups with invalid tile layouts refused before a header is built

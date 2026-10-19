@@ -65,6 +65,22 @@ the real-decoder harness passed 2,290 checks against the pinned FFmpeg 9.0.2.
 The locally built FFmpeg library itself was not sanitizer-instrumented. A `-no-pie`
 executable link flag was needed for ASan's address-space reservation in the sandbox.
 
+`nvdec_vp9_*` (one test a vector, with `SNX_TOOLS_ONLY=OFF` as `nvdec_decode`) feeds `nvdec_execute` the VP9 jobs of
+16 of libvpx's test vectors (BSD-3-Clause, downloaded at configure time into `CPM_SOURCE_CACHE`, pinned by SHA-256
+in `tests/CMakeLists.txt`) and checks every picture on its surface right after its own job, a hidden one too,
+against the MD5 libvpx lists for the image (the reference decoder's picture for a hidden frame). FFmpeg's decoder,
+as released, works each job out of the vector (`tests/nvdec_vp9_jobs.c`): the picture setup from its parsed headers
+and the probability table from its state after the frame, which a game's player works out itself before it hands
+NVDEC the job. That part reads FFmpeg's private `VP9Context`, so it builds against the patched source and the
+`config.h` `cmake/ffmpeg.cmake` keeps with the install, and follows FFmpeg's struct when the pin moves. The vectors
+cover hidden frames, contexts that adapt, frame parallel mode, superframes, frames shown again, intra-only frames,
+spatial layers, tiles, size changes and segmentation; taking any of the three hunks out of
+`cmake/ffmpeg-vp9-nvdec.patch` fails several of them.
+
+```sh
+ctest --test-dir build -R '^nvdec_vp9_' --output-on-failure
+```
+
 ## Limits
 
 The tests substitute linear surface addressing; they verify publication and NV12
