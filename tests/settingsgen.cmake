@@ -67,6 +67,10 @@ execute_process(COMMAND "${SETTINGSGEN}" --out "${WORK}/out" --pipelines "${WORK
 if(result)
     message(FATAL_ERROR "settingsgen ended with ${result}: ${errors}")
 endif()
+# an @ID this LLVM lacks is said, with its line, and is the only thing said
+if(NOT errors MATCHES "^[^\n]*settings.txt:[0-9]+: @NoSuchOption is no pass of the pipelines nor an option of this LLVM's headers: left out\n$")
+    message(FATAL_ERROR "settingsgen did not say @NoSuchOption is left out, or said more:\n${errors}")
+endif()
 file(READ "${WORK}/out/settings_llvm.c" llvm)
 file(READ "${WORK}/out/snx_settings.h" header)
 # each setter found, with its argument cast to the type the header declares, and the setting its @ID names

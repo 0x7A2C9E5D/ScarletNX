@@ -716,6 +716,17 @@ static void fill_llvm(const char* include_dir) {
             free(machine);
         }
     }
+    /* an @ID that is no pass of the pipelines and no option of these headers names no setting: said, since another
+       LLVM may have it, and a typo would otherwise go unseen */
+    for (i = 0; i < noverrides; i++) {
+        for (j = 0; j < nsettings; j++)
+            if (settings[j].table == overrides[i].table && settings[j].llvm_id &&
+                !strcmp(settings[j].llvm_id, overrides[i].id))
+                break;
+        if (j == nsettings)
+            fprintf(stderr, "%s:%d: @%s is no pass of the pipelines nor an option of this LLVM's headers: left out\n",
+                    spec_path, overrides[i].line, overrides[i].id);
+    }
     for (i = 0; i < nsettings; i++)
         for (j = i + 1; j < nsettings; j++) {
             if (!strcmp(settings[i].member, settings[j].member))
