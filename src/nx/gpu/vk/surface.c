@@ -679,6 +679,13 @@ static void surf_free(Surf* s) {
     vk_defer_image(s->img, s->mem, s->att, s->att_linear);
     free(s);
 }
+/* a target holding a draw that memory doesn't have: it stays while its address is its own and memory wasn't written
+   over it since, as a texture made there later takes its pixels (tex_take_drawn) and freeing it would lose them. Depth
+   draws aren't tracked: a depth target holds one once anything left its layout defined */
+static int keeps_drawn(Surf* s) {
+    if (!s->is_rt || (s->gva >> 63)) return 0;
+    return s->f.depth ? s->layout != VK_IMAGE_LAYOUT_UNDEFINED : vk_rt_drawn_fresh(s);
+}
 void vk_surf_evict(u32 before) {
     /* A storage image keeps a Surf pointer until its result reaches guest memory. */
     vk_gfx_image_land();
@@ -691,7 +698,7 @@ void vk_surf_evict(u32 before) {
     for (int k = 0; k < SURFH; k++)
         for (Surf** pp = &g_surfh[k]; *pp;) {
             Surf* s = *pp;
-            if ((i32)((u32)s->last_used - before) >= 0) {
+            if ((i32)((u32)s->last_used - before) >= 0 || keeps_drawn(s)) {
                 pp = &s->next;
                 continue;
             }
