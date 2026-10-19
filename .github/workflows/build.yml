@@ -555,17 +555,13 @@ jobs:
           path: stage
           if-no-files-found: error
 
-  # The Android app (docs/ANDROID.md): each ABI on a runner of its own, with the runner's Gradle and JDK. LLVM's
-  # libraries for the ABI take most of an hour, so they are kept until the script that builds them changes. Each job
-  # packs an APK of its ABI; android-apk packs one holding both
+  # The Android app (docs/ANDROID.md), both ABIs on one runner, with the runner's Gradle and JDK. LLVM's libraries for an
+  # ABI take most of an hour, so they are kept until the script that builds them changes (both cold: about two hours).
+  # Each ABI packs an APK of its own, then one APK holds both
   android:
-    name: Android (${{ matrix.abi }})
+    name: Android APK
     runs-on: ubuntu-26.04
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        abi: [x86_64, arm64-v8a]
+    timeout-minutes: 240
     env:
       ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/28.2.13676358
     steps:
@@ -580,12 +576,17 @@ jobs:
       - uses: actions/cache@v5
         with:
           path: .cache/cpm
-          key: cpm-${{ github.job }}-${{ matrix.abi }}-${{ hashFiles('cmake/dependencies.cmake') }}
+          key: cpm-${{ github.job }}-${{ hashFiles('cmake/dependencies.cmake') }}
       - uses: actions/cache@v5
-        id: llvm
+        id: llvm-x86_64
         with:
-          path: android-llvm/${{ matrix.abi }}
-          key: android-llvm-${{ matrix.abi }}-${{ hashFiles('scripts/android-llvm.sh') }}-${{ env.ANDROID_NDK_ROOT }}
+          path: android-llvm/x86_64
+          key: android-llvm-x86_64-${{ hashFiles('scripts/android-llvm.sh') }}-${{ env.ANDROID_NDK_ROOT }}
+      - uses: actions/cache@v5
+        id: llvm-arm64
+        with:
+          path: android-llvm/arm64-v8a
+          key: android-llvm-arm64-v8a-${{ hashFiles('scripts/android-llvm.sh') }}-${{ env.ANDROID_NDK_ROOT }}
       # The NDK named above, which the runner's image may no longer carry, and NASM for FFmpeg's x86-64 assembly.
       # sdkmanager's download sometimes ends early ("Premature EOF"): tried 3 times, 5 s apart
       - name: Install the NDK and NASM
@@ -596,22 +597,25 @@ jobs:
             sleep 5
           done
           sudo apt-get update && sudo apt-get install -y nasm ccache spirv-tools
-      - name: Build LLVM's libraries
-        if: steps.llvm.outputs.cache-hit != 'true'
-        run: scripts/android-llvm.sh ${{ matrix.abi }} "$PWD/android-llvm/${{ matrix.abi }}"
-      # ccache, set up as in the linux job
+      - name: Build LLVM's libraries for x86_64
+        if: steps.llvm-x86_64.outputs.cache-hit != 'true'
+        run: scripts/android-llvm.sh x86_64 "$PWD/android-llvm/x86_64"
+      - name: Build LLVM's libraries for arm64-v8a
+        if: steps.llvm-arm64.outputs.cache-hit != 'true'
+        run: scripts/android-llvm.sh arm64-v8a "$PWD/android-llvm/arm64-v8a"
+      # ccache, set up as in the linux job: one for both ABIs, which compile apart
       - uses: actions/cache/restore@v5
         with:
           path: .cache/ccache
-          key: ccache-${{ github.job }}-${{ matrix.abi }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ccache-${{ github.job }}-${{ matrix.abi }}-
+          key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-${{ github.job }}-
       # the dependency builds, as in the linux job
       - uses: actions/cache/restore@v5
         id: deps
         with:
           path: .cache/deps
-          key: deps-${{ github.job }}-${{ matrix.abi }}-${{ github.run_id }}
-          restore-keys: deps-${{ github.job }}-${{ matrix.abi }}-
+          key: deps-${{ github.job }}-${{ github.run_id }}
+          restore-keys: deps-${{ github.job }}-
       - name: Set up the caches
         shell: bash
         run: |
@@ -638,14 +642,17 @@ jobs:
             echo "::warning::No ANDROID_KEYSTORE secret: the runner's own debug key signs this APK, so it does not" \
               "install over one the repository's key signed"
           fi
-      - name: Build the native libraries and the APK
+      # each ABI in a tree and stage of its own, so its APK holds it alone
+      - name: Build each ABI's native libraries and APK
         env:
           SNX_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          JAVA_HOME=$JAVA_HOME_21_X64 scripts/android-apk.sh "$PWD/build/android" "$PWD/android-llvm" \
-            ${{ matrix.abi }} -- \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cp build/android/stage/gradle/outputs/apk/debug/ScarletNX-debug.apk ScarletNX-android-${{ matrix.abi }}-${{ steps.commit.outputs.short }}.apk
+          for abi in x86_64 arm64-v8a; do
+            JAVA_HOME=$JAVA_HOME_21_X64 scripts/android-apk.sh "$PWD/build/android-$abi" "$PWD/android-llvm" "$abi" -- \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            cp "build/android-$abi/stage/gradle/outputs/apk/debug/ScarletNX-debug.apk" \
+              "ScarletNX-android-$abi-${{ steps.commit.outputs.short }}.apk"
+          done
       - name: Trim the compiler cache
         run: |
           ccache --show-stats --verbose
@@ -655,69 +662,26 @@ jobs:
       - uses: actions/cache/save@v5
         with:
           path: .cache/ccache
-          key: ccache-${{ github.job }}-${{ matrix.abi }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Name the dependency builds
         id: deps-used
         run: |
           used=$(find build -path '*/snx-deps/*.dir' -exec cat {} + | sort -u)
           for d in .cache/deps/*; do grep -qxF "${d##*/}" <<<"$used" || rm -rf "$d"; done
-          echo "key=deps-${{ github.job }}-${{ matrix.abi }}-$(sha256sum <<<"$used" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "key=deps-${{ github.job }}-$(sha256sum <<<"$used" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - if: steps.deps-used.outputs.key != steps.deps.outputs.cache-matched-key
         uses: actions/cache/save@v5
         with:
           path: .cache/deps
           key: ${{ steps.deps-used.outputs.key }}
-      # Not zipped: the artifact is the APK itself, named after it
-      - uses: actions/upload-artifact@v7
-        with:
-          path: ScarletNX-android-${{ matrix.abi }}-${{ steps.commit.outputs.short }}.apk
-          archive: false
-          if-no-files-found: error
-      # What android-apk packs: the libraries, SDL's Java and the icon, without this APK's Gradle output
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ScarletNX-android-${{ matrix.abi }}-${{ steps.commit.outputs.short }}-stage
-          path: |
-            build/android/stage
-            !build/android/stage/gradle
-          if-no-files-found: error
-
-  android-apk:
-    name: Android APK
-    needs: android
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    steps:
-      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
-      - name: Name the commit
-        id: commit
-        shell: bash
-        env:
-          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: ScarletNX-android-*-${{ steps.commit.outputs.short }}-stage
-          merge-multiple: true
-          path: stage
-      # One key signs every APK, so each installs over the one before (docs/ANDROID.md): the ANDROID_KEYSTORE secret, a
-      # keystore in base64. A fork's pull request has no secrets: its APKs carry the runner's own debug key, said here
-      - name: The signing key
-        env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
-        run: |
-          if [ -n "$KEYSTORE" ]; then
-            printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/scarletnx.keystore"
-            echo "SNX_ANDROID_KEYSTORE=$RUNNER_TEMP/scarletnx.keystore" >> "$GITHUB_ENV"
-          else
-            echo "::warning::No ANDROID_KEYSTORE secret: the runner's own debug key signs this APK, so it does not" \
-              "install over one the repository's key signed"
-          fi
+      # both ABIs' libraries, SDL's Java and the icon in one stage, without each APK's Gradle output
       - name: Pack the APK of both ABIs
         env:
           SNX_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
+          mkdir stage
+          for abi in x86_64 arm64-v8a; do cp -a "build/android-$abi/stage/." stage/; done
+          rm -rf stage/gradle
           JAVA_HOME=$JAVA_HOME_21_X64 gradle -p dist/android assembleDebug -Pscarletnx.stage="$PWD/stage" \
             ${SNX_ANDROID_KEYSTORE:+"-Pscarletnx.keystore=$SNX_ANDROID_KEYSTORE"}
           cp stage/gradle/outputs/apk/debug/ScarletNX-debug.apk ScarletNX-android-universal-${{ steps.commit.outputs.short }}.apk
@@ -763,6 +727,17 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           path: ScarletNX-android-universal-${{ steps.commit.outputs.short }}.apk
+          archive: false
+          if-no-files-found: error
+      # Not zipped: each artifact is an APK itself, named after it
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ScarletNX-android-x86_64-${{ steps.commit.outputs.short }}.apk
+          archive: false
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          path: ScarletNX-android-arm64-v8a-${{ steps.commit.outputs.short }}.apk
           archive: false
           if-no-files-found: error
 
@@ -1149,7 +1124,7 @@ jobs:
     if: >-
       !cancelled() && github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    needs: [linux, appimage, windows, android-apk, macos, ios, edenprobe]
+    needs: [linux, appimage, windows, android, macos, ios, edenprobe]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
