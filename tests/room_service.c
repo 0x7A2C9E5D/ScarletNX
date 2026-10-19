@@ -100,18 +100,18 @@ static void passwords(void) {
     snx_remove_tree(DIR);
 }
 static void stops(void) {
-    g_opt_ldn = SNX_LDN_LAN;
+    g_opt_ldn = SNX_OPT_LDN_LAN;
     network_room_init(); /* nothing to join */
     CHECK(network_room() == NULL);
     /* airplane mode keeps the console out of the room, as out of any network: nobody at port 9 is even asked */
-    g_opt_ldn = SNX_LDN_ROOM;
+    g_opt_ldn = SNX_OPT_LDN_ROOM;
     g_opt_airplane = 1;
     strcpy(g_opt_room, "127.0.0.1:9");
     g_stop[0] = 0;
     if (!setjmp(g_stopped)) network_room_init();
     CHECK(network_room() == NULL && !g_stop[0]); /* not stopped: the join that would fail never ran */
     g_opt_airplane = 0;
-    g_opt_ldn = SNX_LDN_ROOM;
+    g_opt_ldn = SNX_OPT_LDN_ROOM;
     g_opt_room[0] = 0;
     if (!setjmp(g_stopped)) {
         network_room_init();
@@ -124,7 +124,7 @@ static void stops(void) {
         CHECK(!"a room at no port started");
     }
     CHECK(strstr(g_stop, "is no port") && network_room() == NULL);
-    g_opt_ldn = SNX_LDN_LAN;
+    g_opt_ldn = SNX_OPT_LDN_LAN;
 }
 
 int main(void) {

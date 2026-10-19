@@ -97,7 +97,7 @@ void network_room_init(void) {
     SnxRoom* room;
     u16 port;
     int r, refused;
-    if (g_opt_ldn != SNX_LDN_ROOM) return;
+    if (g_opt_ldn != SNX_OPT_LDN_ROOM) return;
     if (g_opt_airplane) { /* a console in airplane mode is in no network, the room's neither */
         LOG("room: airplane_mode=1 keeps this console out of the Eden room\n");
         return;

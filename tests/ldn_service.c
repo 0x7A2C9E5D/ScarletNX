@@ -264,7 +264,7 @@ static void in_a_room(SvcObj* creator, SvcObj* bsd) {
     CHECK(snx_room_join(&ra, "127.0.0.1", fake_room_port(room), "Aogo", "secret", "game", 1, "", &why) == 0);
     CHECK(snx_room_join(&rb, "127.0.0.1", fake_room_port(room), "Xuji", "secret", "game", 1, "", &why) == 0);
     network_set_room(ra);
-    g_opt_ldn = SNX_LDN_ROOM;
+    g_opt_ldn = SNX_OPT_LDN_ROOM;
     g_opt_network = 0;
     request(&r, 0);
     CHECK(call(creator, &r) == 0 && r.c.nout_objs == 1);
@@ -346,7 +346,7 @@ static void in_a_room(SvcObj* creator, SvcObj* bsd) {
     snx_ldn_close(st);
     snx_room_leave(rb);
     svcobj_unref(a);
-    g_opt_ldn = SNX_LDN_LAN;
+    g_opt_ldn = SNX_OPT_LDN_LAN;
     fake_room_stop(room);
 }
 
@@ -397,21 +397,21 @@ int main(void) {
 
     /* ldn=off is a console with local wireless disabled, airplane_mode one in airplane mode, and ldn=room one out of
        its room: none initializes, each with its result */
-    g_opt_ldn = SNX_LDN_OFF;
+    g_opt_ldn = SNX_OPT_LDN_OFF;
     request(&r, 400);
     r.c.has_pid = 1;
     CHECK(call(a, &r) == LDN_RC(22) && get_state(a) == 0);
-    g_opt_ldn = SNX_LDN_LAN;
+    g_opt_ldn = SNX_OPT_LDN_LAN;
     g_opt_airplane = 1;
     request(&r, 400);
     r.c.has_pid = 1;
     CHECK(call(a, &r) == LDN_RC(23) && get_state(a) == 0);
     g_opt_airplane = 0;
-    g_opt_ldn = SNX_LDN_ROOM;
+    g_opt_ldn = SNX_OPT_LDN_ROOM;
     request(&r, 400);
     r.c.has_pid = 1;
     CHECK(call(a, &r) == LDN_RC(33) && get_state(a) == 0);
-    g_opt_ldn = SNX_LDN_LAN;
+    g_opt_ldn = SNX_OPT_LDN_LAN;
     CHECK(!ev_a->signaled);
 
     /* Initialize: each console gets a loopback address of its own, offline */

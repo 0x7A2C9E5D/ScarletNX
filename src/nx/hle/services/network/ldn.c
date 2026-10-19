@@ -97,7 +97,7 @@ static void ldn_teardown(Ldn* d) {
     pm_unlock(&d->lk);
     if (lan) {
         snx_ldn_close(lan);
-        if (g_opt_ldn != SNX_LDN_ROOM) bsd_set_bind_address(NULL, NULL);
+        if (g_opt_ldn != SNX_OPT_LDN_ROOM) bsd_set_bind_address(NULL, NULL);
     }
 }
 /* every ldn:u, for ldn_exit to close their networks */
@@ -125,7 +125,7 @@ void ldn_exit(void) {
 static int ldn_open(Ldn* d) {
     SnxNetInterface iface;
     int r;
-    if (g_opt_ldn == SNX_LDN_ROOM) {
+    if (g_opt_ldn == SNX_OPT_LDN_ROOM) {
         if (!network_room() || snx_room_state(network_room()) != SNX_ROOM_IN) return -SNX_ENETDOWN;
         r = snx_ldn_open_room(&d->lan, network_room(), ldn_changed, d);
         if (!r) snx_ldn_address(d->lan, d->ip, d->mask);
@@ -185,7 +185,7 @@ static int nn_ldn_detail_IUserLocalCommunicationService_Initialize(SvcObj* self,
     Ldn* d = self->data;
     int r = 0;
     (void)pid;
-    if (g_opt_ldn == SNX_LDN_OFF) {
+    if (g_opt_ldn == SNX_OPT_LDN_OFF) {
         WARN_LIMIT(1, "ldn: the game asked for local wireless, which ldn=off disables\n");
         R_THROW(LDN_DISABLED);
     }
@@ -198,12 +198,12 @@ static int nn_ldn_detail_IUserLocalCommunicationService_Initialize(SvcObj* self,
         r = ldn_open(d);
         if (r) {
             WARN("ldn: no address for this console: %s (errno %d)\n",
-                 g_opt_ldn == SNX_LDN_ROOM && r == -SNX_EBUSY ? "another of the game's ldn:u is in the room already"
-                 : g_opt_ldn == SNX_LDN_ROOM                  ? "out of the Eden room"
-                 : r == -SNX_EADDRINUSE                       ? "every loopback address has a console on port 11452"
-                                                              : "the ldn sockets couldn't be opened",
+                 g_opt_ldn == SNX_OPT_LDN_ROOM && r == -SNX_EBUSY ? "another of the game's ldn:u is in the room already"
+                 : g_opt_ldn == SNX_OPT_LDN_ROOM                  ? "out of the Eden room"
+                 : r == -SNX_EADDRINUSE                           ? "every loopback address has a console on port 11452"
+                                                                  : "the ldn sockets couldn't be opened",
                  -r);
-        } else if (g_opt_ldn == SNX_LDN_ROOM) {
+        } else if (g_opt_ldn == SNX_OPT_LDN_ROOM) {
             LOG("ldn: this console is %u.%u.%u.%u in the Eden room\n", d->ip[0], d->ip[1], d->ip[2], d->ip[3]);
             d->state = LDN_INITIALIZED;
             d->reason = 0;

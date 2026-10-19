@@ -39,7 +39,7 @@ extern int g_opt_diag, g_opt_shadows, g_opt_prof;
 extern int g_opt_auto_stub_ipc;
 extern int g_opt_network; /* network: 1 = the game is online through the host (hle/services/network) */
 /* ldn: local wireless over the LAN (ldn_mitm's protocol), through an Eden room, or off (hle/services/network/ldn.c) */
-enum { SNX_LDN_LAN, SNX_LDN_ROOM, SNX_LDN_OFF };
+enum { SNX_OPT_LDN_LAN, SNX_OPT_LDN_ROOM, SNX_OPT_LDN_OFF };
 extern int g_opt_ldn;
 extern int g_opt_airplane;   /* airplane_mode: 1 = the console in airplane mode, no network and no local wireless */
 extern char g_opt_room[256]; /* room: the Eden room's host[:port], empty for none */

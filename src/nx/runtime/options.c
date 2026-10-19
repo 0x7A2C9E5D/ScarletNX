@@ -67,7 +67,7 @@ void fps_limit_text(int fps, char* out, size_t n) {
         snprintf(out, n, "%d", fps);
 }
 
-int g_opt_ldn = SNX_LDN_LAN, g_opt_airplane;
+int g_opt_ldn = SNX_OPT_LDN_LAN, g_opt_airplane;
 char g_opt_room[256];
 /* lan, room or off; another word is said and leaves it as it was */
 static void ldn_set(const IniOpt* o, const char* v) {
@@ -151,7 +151,8 @@ static const IniOpt g_network[] = {
      INI_INT, INI_STARTUP, &g_opt_airplane, 0, 1, NULL, "Airplane mode", "Off|On", 0, 0},
     {"ldn", "lan",
      "Local wireless: lan = over the LAN with ldn_mitm's protocol (another ScarletNX, Ryujinx, a console running\n"
-     "ldn_mitm); room = through the Eden room that room names (Eden, another ScarletNX); off = the game hears it is off",
+     "ldn_mitm); room = through the Eden room that room names (Eden, another ScarletNX); off = the game hears it\n"
+     "is off",
      INI_TEXT, INI_STARTUP, NULL, 0, 0, ldn_set, "Local wireless", "lan=LAN|room=Eden room|off=Off", 0, 0},
     {"room", "",
      "The Eden room ldn=room joins: host or host:port (port 24872 without one). The nickname there is the user's,\n"
