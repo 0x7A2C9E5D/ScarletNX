@@ -311,6 +311,23 @@ void snx_ir_tune(SnxIr* ir, const SnxIrTuning* tuning) {
     if (tuning && tuning->machine) tuning->machine(ir->tm);
 }
 
+/* -Os and -Oz as LLVM 23 has them, which refuses default<Os> and default<Oz> ("Use O2 in conjunction with the optsize
+   attribute"): O2 over functions marked optsize, and minsize too for z, as Clang marks them. A function with optnone
+   (none of ours) is left alone, as the verifier refuses both on one */
+static void size_attributes(LLVMModuleRef module, char opt) {
+    LLVMContextRef ctx = LLVMGetModuleContext(module);
+    unsigned optsize = LLVMGetEnumAttributeKindForName("optsize", 7);
+    unsigned minsize = LLVMGetEnumAttributeKindForName("minsize", 7);
+    unsigned optnone = LLVMGetEnumAttributeKindForName("optnone", 7);
+    LLVMValueRef fn;
+    for (fn = LLVMGetFirstFunction(module); fn; fn = LLVMGetNextFunction(fn)) {
+        if (LLVMIsDeclaration(fn) || LLVMGetEnumAttributeAtIndex(fn, LLVMAttributeFunctionIndex, optnone)) continue;
+        LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, LLVMCreateEnumAttribute(ctx, optsize, 0));
+        if (opt == 'z')
+            LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, LLVMCreateEnumAttribute(ctx, minsize, 0));
+    }
+}
+
 int snx_ir_module_object(SnxIr* ir, LLVMModuleRef module, char opt, unsigned char** data, size_t* size, char* error,
                          size_t error_size) {
     char pipeline[16], *message = NULL;
@@ -325,7 +342,8 @@ int snx_ir_module_object(SnxIr* ir, LLVMModuleRef module, char opt, unsigned cha
         return -1;
     }
     LLVMDisposeMessage(message);
-    sprintf(pipeline, "default<O%c>", opt == 's' ? 's' : opt == 'z' ? 'z' : opt);
+    if (opt == 's' || opt == 'z') size_attributes(module, opt);
+    sprintf(pipeline, "default<O%c>", opt == 's' || opt == 'z' ? '2' : opt);
     options = LLVMCreatePassBuilderOptions();
     if (ir->tuning && ir->tuning->builder) ir->tuning->builder(options);
     failure = LLVMRunPasses(module, ir->tuning && ir->tuning->pipeline ? ir->tuning->pipeline : pipeline, ir->tm, options);

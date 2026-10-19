@@ -4,7 +4,8 @@
    LLVM's own default<O?>; a pass turned off is cut out of the pipeline opt printed, and what is left is a pipeline LLVM
    runs, at every level; with every pass of a level off what is left runs analyses only, and a level left with nothing
    at all is refused with its reason. Without an opt of
-   this LLVM where it was built there are no pipelines, and nothing to check */
+   this LLVM where it was built there are no pipelines, and nothing to check but -Os and -Oz, which every build makes as
+   LLVM 23 does: O2 over functions marked optsize, and minsize for z */
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "nx/loader/module_llvm.h"
 #include "nx/runtime/settings_llvm.h"
@@ -63,12 +64,46 @@ static void set_all(const char* value) {
         if (!strncmp(o->key, "llvm_pass_", 10)) ini_read(o, value);
 }
 
+static int has_attribute(LLVMValueRef fn, const char* name) {
+    return LLVMGetEnumAttributeAtIndex(fn, LLVMAttributeFunctionIndex,
+                                       LLVMGetEnumAttributeKindForName(name, strlen(name))) != NULL;
+}
+/* -Os and -Oz, which LLVM 23 has only as O2 over functions marked optsize (and minsize): an object made at each, its
+   function marked so (ir.c) */
+static void size_levels(void) {
+    static const char levels[] = "sz";
+    char error[256];
+    int i;
+    CHECK(!snx_ir_init(error, sizeof error));
+    for (i = 0; levels[i]; ++i) {
+        SnxIr* ir = snx_ir_new("size", levels[i], error, sizeof error);
+        LLVMTypeRef params[1];
+        LLVMValueRef fn;
+        unsigned char* data = NULL;
+        size_t size = 0;
+        CHECK(ir != NULL);
+        if (!ir) continue;
+        params[0] = ir->t_i64;
+        fn = LLVMAddFunction(ir->mod, "f", LLVMFunctionType(ir->t_i64, params, 1, 0));
+        LLVMPositionBuilderAtEnd(ir->b, LLVMAppendBasicBlockInContext(ir->ctx, fn, "entry"));
+        LLVMBuildRet(ir->b, LLVMBuildAdd(ir->b, LLVMGetParam(fn, 0), LLVMConstInt(ir->t_i64, 1, 0), ""));
+        if (snx_ir_object(ir, levels[i], &data, &size, error, sizeof error))
+            fprintf(stderr, "-O%c: %s\n", levels[i], error);
+        CHECK(data && size);
+        CHECK(has_attribute(fn, "optsize") && has_attribute(fn, "minsize") == (levels[i] == 'z'));
+        free(data);
+        snx_ir_free(ir);
+    }
+}
+
 int main(void) {
     static const char levels[] = "0123sz";
     const IniOpt* instcombine = ini_find(g_llvm_ini, "llvm_pass_instcombine");
     const SnxIrTuning* t;
     char error[256];
     int i;
+    size_levels();
+    if (failures) return 1;
     if (!settings_llvm_pipeline('2')) {
         puts("SKIP no pipelines: no opt of this LLVM ran where it was built");
         return 0;
