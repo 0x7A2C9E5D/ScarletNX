@@ -81,10 +81,7 @@ int main(void) {
         CHECK(runs(settings_llvm_pipeline(levels[i])));
     }
     ini_read(instcombine, "0"); /* one off: cut out of each level that has it, aggressive-instcombine kept */
-    /* TODO: not defined? */
-#if 0
     CHECK(!g_settings.instruction_combining && settings_llvm_pass(&g_settings, "instcombine", 11) == 0);
-#endif
     for (i = 0; levels[i]; ++i) {
         const char* opt = settings_llvm_pipeline(levels[i]);
         t = snx_llvm_tuning(levels[i], error, sizeof error);
