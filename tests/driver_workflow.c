@@ -295,6 +295,50 @@ int snx_setting_known(const char* key) {
         if (!strcmp(key, known[i])) return 1;
     return 0;
 }
+/* 1 when the game's .ini records dump as its source (snx_game_source), its folder making no link to it */
+static int records_dump(const char* folder, const char* name, const char* dump) {
+    char *link = snx_format("%s/%s.source", folder, name), *source;
+    int recorded, good;
+    source = snx_game_source(folder, name, &recorded);
+    good = recorded && strcmp(source, link) && snx_same_file(source, dump) && !snx_is_link(link);
+    free(source);
+    free(link);
+    return good;
+}
+/* snx_record_source on the .ini a game has: made with [Game] when there is none, an older source= anywhere taken out
+   and the new one put under [Game], CRLF lines and a last line without its newline kept, a file naming the dump
+   already left as it is, and a path with a line break refused */
+static void record_source(const char* root) {
+    static const char before[] = "; a comment\r\n[Display]\r\nlanguage=2\r\n[Game]\r\n[Other]\r\n source = old\r\nkey=1";
+    static const char after[] = "; a comment\r\n[Display]\r\nlanguage=2\r\n[Game]\r\nsource=/new dump.nsp\n[Other]\r\n"
+                                "key=1\n";
+    static const char twice[] = "source=/x\n[Display]\nsource = /x\n";
+    char *folder = snx_path_join(root, "record"), *ini = snx_game_ini(folder, "G"), *text, *source;
+    size_t size;
+    int recorded;
+    CHECK(!snx_record_source(folder, "G", "/a dump.xci"));
+    text = (char*)snx_read_file(ini, &size);
+    CHECK(text && !strcmp(text, "[Game]\nsource=/a dump.xci\n"));
+    free(text);
+    CHECK(!snx_write_file(ini, before, sizeof before - 1) && !snx_record_source(folder, "G", "/new dump.nsp"));
+    text = (char*)snx_read_file(ini, &size);
+    CHECK(text && !strcmp(text, after));
+    free(text);
+    source = snx_game_source(folder, "G", &recorded);
+    CHECK(recorded && !strcmp(source, "/new dump.nsp"));
+    free(source);
+    CHECK(!snx_write_file(ini, twice, sizeof twice - 1) && !snx_record_source(folder, "G", "/x"));
+    text = (char*)snx_read_file(ini, &size);
+    CHECK(text && !strcmp(text, twice)); /* named already */
+    free(text);
+    CHECK(snx_record_source(folder, "G", "/a\nb"));
+    CHECK(!snx_remove_tree(ini));
+    source = snx_game_source(folder, "G", &recorded);
+    CHECK(!recorded && !strcmp(strrchr(source, '/'), "/G.source"));
+    free(source);
+    free(ini);
+    free(folder);
+}
 static void reset(const char* repo, const char* dump) {
     CHECK(!snx_remove_tree(repo));
     CHECK(!snx_mkdirs(repo));
@@ -349,6 +393,7 @@ int main(int argc, char** argv) {
     exe = snx_executable(argv[0]);
     root = snx_temp_dir(NULL);
     CHECK(exe && root);
+    record_source(root);
     repo = snx_path_join(root, "checkout with spaces");
     CHECK(!snx_mkdirs(repo));
     dump = snx_path_join(repo, "Test [game];.NSP");
@@ -580,10 +625,10 @@ int main(int argc, char** argv) {
         free(folder);
         free(named);
     }
-    /* Extract to tmpfs: the extraction in TMPDIR/scarletnx/work/<title ID>, the RomFS left there, the game's folder
-       linked to its dump and marked; a dump played again found by the link. Extracted again from the link once tmpfs
-       is emptied, said why not without it, and the RomFS back on disk with it off. Windows makes links only with the
-       right to (developer mode), which a runner may not have */
+    /* Extract to tmpfs: the extraction in TMPDIR/scarletnx/work/<title ID>, the RomFS left there, the game's dump
+       recorded in its .ini and its folder marked; a dump played again found by it. Extracted again from the dump once
+       tmpfs is emptied, said why not without it, then from the link an older version made, and the RomFS back on disk
+       with it off. Windows makes links only with the right to (developer mode), which a runner may not have */
 #ifndef _WIN32
     {
         char *folder = snx_path_join(repo, "games/0100ABCD12345000"), *temp = snx_path_join(root, "tmp");
@@ -591,6 +636,7 @@ int main(int argc, char** argv) {
         char *disk = snx_format("%s/0100ABCD12345000_data/romfs/data", folder);
         char *link = snx_format("%s/0100ABCD12345000.source", folder);
         char* marker = snx_format("%s/0100ABCD12345000.tmpfs", folder);
+        char* ini = snx_game_ini(folder, "0100ABCD12345000");
         CHECK(!snx_mkdirs(temp));
         set_env("TMPDIR", temp);
         reset(repo, dump);
@@ -601,7 +647,7 @@ int main(int argc, char** argv) {
         set_env("SNX_WORKFLOW_TMPFS", "1");
         run(exe, repo, dump, log, 0, "ERG", NULL);
         CHECK(snx_is_file(ram) && !snx_is_file(disk) && snx_is_file(marker));
-        CHECK(snx_is_link(link) && snx_same_file(link, dump));
+        CHECK(records_dump(folder, "0100ABCD12345000", dump));
         run(exe, repo, dump, log, 0, "G", NULL);
         CHECK(!snx_remove_tree(work)); /* a reboot */
         run(exe, repo, dump, log, 0, "EG", NULL);
@@ -613,11 +659,14 @@ int main(int argc, char** argv) {
         set_env("SNX_WORKFLOW_FLAGS", "--tmpfs");
         run(exe, repo, folder, log, 0, "EG", NULL);
         CHECK(snx_is_file(ram) && !snx_is_file(disk) && snx_is_file(marker));
-        CHECK(!snx_remove_tree(work) && !snx_remove_tree(link));
-        run(exe, repo, folder, log, 0, "G", "Can't be extracted to tmpfs due to missing symlink");
+        CHECK(!snx_remove_tree(work) && !snx_remove_tree(ini));
+        run(exe, repo, folder, log, 0, "G", "Can't be extracted to tmpfs: the game's settings name no dump");
         set_env("SNX_WORKFLOW_FLAGS", "");
-        run(exe, repo, folder, log, 0, "G", "is missing");
+        run(exe, repo, folder, log, 0, "G", "name no dump");
         set_env("SNX_WORKFLOW_FLAGS", "--tmpfs");
+        CHECK(!snx_symlink(dump, link)); /* an older version's */
+        run(exe, repo, folder, log, 0, "EG", NULL);
+        CHECK(snx_is_file(ram) && !snx_is_file(ini));
         set_env("SNX_WORKFLOW_OUT", temp);
         run(exe, repo, dump, log, 1, "", "--tmpfs puts it in tmpfs");
         set_env("SNX_WORKFLOW_OUT", "");
@@ -634,6 +683,7 @@ int main(int argc, char** argv) {
         free(disk);
         free(link);
         free(marker);
+        free(ini);
     }
 #endif
     /* NROs bypass extraction even with a stale same-stem work directory or game executable. */
@@ -761,21 +811,20 @@ int main(int argc, char** argv) {
         free(out);
         free(outdir);
     }
-    /* Extract game container off, the default: nothing extracted, the game made from its dump read in place and its
-       folder linked to it. Switched on, the dump is extracted into the data folder without a recompile; off again,
-       that extraction is taken away. A game made already is recompiled from its dump through the link, -r prepares a
-       dump without extracting it, and a game whose link names no dump says so. Windows makes links only with the
-       right to (developer mode), which a runner may not have */
+    /* Extract game container off, the default: nothing extracted, the game made from its dump read in place and the
+       dump recorded in its .ini. Switched on, the dump is extracted into the data folder without a recompile; off again,
+       that extraction is taken away. A game made already is recompiled from the dump its .ini names, -r prepares a dump
+       without extracting it, and a game whose dump is not there says so */
 #ifndef _WIN32
     {
-        char *link = snx_path_join(repo, "games/Test game/Test game.source");
+        char* own = snx_path_join(repo, "games/Test game");
         char *stamp = snx_path_join(repo, "games/Test game/Test game.abi"), *moved = snx_format("%s.moved", dump);
         set_env("SNX_WORKFLOW_EXTRACT", "");
         set_env("SNX_WORKFLOW_DUMP", dump);
         set_env("SNX_WORKFLOW_MODE", "exit");
         reset(repo, dump);
         run(exe, repo, dump, log, 0, "RG", NULL);
-        CHECK(snx_is_file(game) && !snx_path_exists(extracted) && snx_is_link(link) && snx_same_file(link, dump));
+        CHECK(snx_is_file(game) && !snx_path_exists(extracted) && records_dump(own, "Test game", dump));
         run(exe, repo, dump, log, 0, "G", NULL);
         run(exe, repo, game, log, 0, "G", NULL);
         set_env("SNX_WORKFLOW_EXTRACT", "1");
@@ -785,21 +834,21 @@ int main(int argc, char** argv) {
         set_env("SNX_WORKFLOW_EXTRACT", "");
         run(exe, repo, dump, log, 0, "G", "the game reads it from its dump");
         CHECK(!snx_path_exists(extracted) && snx_is_file(game));
-        CHECK(!snx_write_file(stamp, "4\n", 2)); /* an older version's: recompiled from the dump the link names */
+        CHECK(!snx_write_file(stamp, "4\n", 2)); /* an older version's: recompiled from the dump its .ini names */
         set_env("SNX_WORKFLOW_NAMED", "Test game");
         run(exe, repo, game, log, 0, "RG", NULL);
         set_env("SNX_WORKFLOW_NAMED", "");
         CHECK(!rename(dump, moved));
-        run(exe, repo, game, log, 1, "", "links to a dump that is not there");
+        run(exe, repo, game, log, 1, "", "is not there");
         CHECK(!rename(moved, dump));
         set_env("SNX_WORKFLOW_FLAGS", "-r");
         reset(repo, dump);
         run(exe, repo, dump, log, 0, "R", NULL);
-        CHECK(!snx_path_exists(extracted) && snx_is_link(link));
+        CHECK(!snx_path_exists(extracted) && records_dump(own, "Test game", dump));
         run(exe, repo, dump, log, 0, "R", NULL);
         set_env("SNX_WORKFLOW_FLAGS", "");
         set_env("SNX_WORKFLOW_DUMP", "");
-        free(link);
+        free(own);
         free(stamp);
         free(moved);
     }

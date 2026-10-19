@@ -29,19 +29,21 @@ The driver runs each step as a child process and starts the game with its folder
 directory. The game is named by its title ID, read from the dump's NCA headers, an NRO by its name (a dump without a
 title ID of its own by its stem); `games/` is the data folder's, from a build tree too ([Folders](#folders)).
 
-Nothing of the dump is extracted by default. The game's folder gets `<id>.source`, a link to the dump, and the
-recompile reads the ExeFS's modules from the dump itself. When the game runs, the runtime maps the dump read-only
-through that link and reads its ExeFS and RomFS out of it on the fly, decrypting what is encrypted, with the keys
+Nothing of the dump is extracted by default. The game's `.ini` records the dump's path as `source=` under `[Game]`, and
+the recompile reads the ExeFS's modules from the dump itself. When the game runs, the runtime maps the dump read-only
+from that path and reads its ExeFS and RomFS out of it on the fly, decrypting what is encrypted, with the keys
 where the driver finds them (the data folder `games/` is in, else `~/.switch`). No copy or cache of those files is
 kept anywhere: `games/<id>/<id>_data/` holds only the game's `control.nacp` and its saves. An update embedded in an
-NSP is applied over the base as it is read. Moving or deleting the dump breaks the game until it is back, and the run
-says so.
+NSP is applied over the base as it is read. Moving or deleting the dump breaks the game until it is back, or until
+`source=` names its new place, and the run says so. A game made by an older version has `<id>.source` in its folder
+instead, a link to the dump, which is still read when the `.ini` names no dump. Playing the dump again records it in
+the `.ini`.
 
 `--extract-container` (the launcher's **Extract game container**) extracts the dump instead, straight into the game's
 folder, `games/<id>/<id>_data/` (`exefs/`, `romfs/`, `control.nacp`), and the game is made from it there: there is no
 second copy. `<id>.extracting` stays in the game's folder while an extraction is unfinished, and a stopped one is redone
 on the next run, the game's saves kept. A game made from its dump is extracted on the first run with the option, with
-no recompile, and a game run without it again has that extraction taken away, as long as its link names the dump.
+no recompile, and a game run without it again has that extraction taken away, as long as the dump it records is there.
 `--repo DIR` and `--build-dir DIR` may precede the dump. Keys use the usual discovery paths below.
 `--outdir DIR` puts the game's folder in DIR in place of the data folder's `games/`, as `-r` takes it. With
 `--extract-container`, `--out DIR` keeps the dump's extraction at DIR instead, as `-x` takes it, the game made from a
@@ -49,9 +51,9 @@ copy of it; an NRO has no extraction to name.
 `--tmpfs` extracts to tmpfs instead, and implies `--extract-container`: `<temp>/scarletnx/work/<title ID>` (`$TMPDIR`,
 else `/tmp`; the temporary folder on Windows), where the game reads its RomFS from while its ExeFS and saves stay in
 `games/<id>/<id>_data/`. The game's folder gets `<id>.tmpfs` while its RomFS is in tmpfs. A run extracts the RomFS again
-from the link when the system emptied tmpfs, and moves it between tmpfs and the game's folder when `--tmpfs` is given or
-left out. Without the link (a game made before, or Windows without the right to make one) it says *Can't be extracted
-to tmpfs due to missing symlink*. `-r --tmpfs` on an extraction leaves its RomFS where it is.
+from the dump the game records when the system emptied tmpfs, and moves it between tmpfs and the game's folder when
+`--tmpfs` is given or left out. A game that records no dump says *Can't be extracted to tmpfs: the game's settings name
+no dump it was made from*. `-r --tmpfs` on an extraction leaves its RomFS where it is.
 `-H` (`--headless`) can precede or follow the dump and is passed to the game only.
 Omitting it starts the game with a window.
 `-x` means `--extract`, and `-r` means `--recomp` (the old `--recompile` spelling was removed).
@@ -64,7 +66,7 @@ place. `-rx` (`-r -x` on Windows) prepares it extracted, as `-r --extract-contai
 
 A game made already plays the same way, named by its folder or its program: `./build/scarletnx games/<id>` (or
 `games/<id>/<id>`) runs it, recompiled first where it is when another build made it, from what its `<id>_data/`
-keeps (the ExeFS or the NRO: no dump, keys or extraction), or from the dump its `<id>.source` links to when it was
+keeps (the ExeFS or the NRO: no dump, keys or extraction), or from the dump its `.ini` records when it was
 made without extracting it. `-r` recompiles it without playing. `--outdir` and `--out`
 name a dump's folders and are refused for it. `--game=games/<id>` runs it as it is, whichever build made it.
 Pass arguments to the game executable after `--`, for example:

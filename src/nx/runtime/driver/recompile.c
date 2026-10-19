@@ -87,11 +87,7 @@ static int copy_dlls(const char* run, const char* out) {
    them. An older build's beside the game stays, a line saying so. NULL when that folder cannot be made */
 static char* settings_path(const char* out, const char* title) {
     char *folder = snx_user_path(out, SNX_USER_CONFIG), *base, *path = NULL, *old;
-    if (!strcmp(folder, out) || !snx_mkdirs(folder)) {
-        base = snx_path_join(folder, title);
-        path = snx_format("%s.ini", base);
-        free(base);
-    }
+    if (!strcmp(folder, out) || !snx_mkdirs(folder)) path = snx_game_ini(out, title);
     if (path && strcmp(folder, out)) {
         base = snx_path_join(out, title);
         old = snx_format("%s.ini", base);
@@ -443,11 +439,6 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("cannot stage game data in %s", data);
         goto done;
     }
-    if (dump) {
-        char* absolute = snx_absolute(input);
-        if (absolute) snx_link_source(folder, game, absolute);
-        free(absolute);
-    }
     if (program.nacp) { /* the name the launcher lists the game by */
         char* nacp = snx_path_join(data, "control.nacp");
         int failed = !nacp || snx_write_file(nacp, program.nacp, program.nacp_size);
@@ -469,6 +460,12 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
             snx_error("cannot write %s", ini);
             goto done;
         }
+    }
+    if (dump) { /* what the game reads in place, and Extract to tmpfs extracts again */
+        char* absolute = snx_absolute(input);
+        int failed = !absolute || snx_record_source(folder, game, absolute);
+        free(absolute);
+        if (failed) goto done;
     }
     if (no_build) {
         rc = 0;

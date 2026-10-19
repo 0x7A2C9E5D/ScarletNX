@@ -27,6 +27,7 @@ u8* g_mem;
 char g_datadir[1024], g_exename[256], g_exedir[1024];
 int g_verbose;
 int g_opt_user = 1;
+char g_opt_source[2048];
 const u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull}; /* am.c's: the first user */
 static jmp_buf* test_fatal_jump;                                   /* a fatal() the test waits for comes back here */
 static char test_fatal_text[1024];
@@ -910,7 +911,8 @@ static void test_raw_romfs(SvcObj* proxy) {
 #if !defined(_WIN32)
 /* Extract game container off: dump-data/Game_data has no ExeFS or RomFS of its own, and dump-data/Game.source links to
    an NSP of decrypted NCAs, which fs_init opens and maps. The game's ExeFS (exefs/...) and RomFS come out of it, read
-   in place: nothing is written beside it */
+   in place: nothing is written beside it. With source, the settings' source= names the NSP instead, and Game.source
+   is a file that is no dump, which the setting is read over */
 static const char dump_code[] = "synthetic main", dump_asset[] = "an asset of the dump's RomFS";
 static blob_t dump_npdm(void) {
     blob_t b = {zalloc(0x80), 0x80};
@@ -918,7 +920,7 @@ static blob_t dump_npdm(void) {
     b.data[0x40] = 0x2A; /* told apart from a blank one */
     return b;
 }
-static void dump_write(void) {
+static void dump_write(int source) {
     blob_t code = {zalloc(sizeof dump_code - 1), sizeof dump_code - 1}, asset = {zalloc(sizeof dump_asset - 1), 0};
     blob_t meta = dump_npdm(), nsp;
     asset.size = sizeof dump_asset - 1;
@@ -929,7 +931,10 @@ static void dump_write(void) {
         {"program.nca", dnca_build(NCACONTENTTYPE_PROGRAM, 0x0100000000AB0000ULL, exefs, 2, romfs, 1)}};
     nsp = partition_build(MAGIC_PFS0, ncas, 1, 0x200);
     CHECK(!snx_mkdirs("dump-data/Game_data") && !snx_write_file("dump-data/Game.nsp", nsp.data, nsp.size));
-    CHECK(!snx_symlink("Game.nsp", "dump-data/Game.source"));
+    if (source)
+        CHECK(!snx_write_file("dump-data/Game.source", "no dump", 7));
+    else
+        CHECK(!snx_symlink("Game.nsp", "dump-data/Game.source"));
     free(nsp.data);
     free(ncas[0].content.data);
     free(code.data);
@@ -1225,8 +1230,10 @@ int main(int argc, char** argv) {
     CHECK(g_mem != NULL);
     int raw = argc == 4 && !strcmp(argv[3], "raw");
 #if !defined(_WIN32)
-    if (argc == 4 && !strcmp(argv[3], "dump")) {
-        dump_write();
+    if (argc == 4 && (!strcmp(argv[3], "dump") || !strcmp(argv[3], "dump-source"))) {
+        int source = !strcmp(argv[3], "dump-source");
+        dump_write(source);
+        if (source) strcpy(g_opt_source, "dump-data/Game.nsp");
         strcpy(g_datadir, "dump-data/Game_data/");
         fs_init();
         test_scans_allowed = 0;

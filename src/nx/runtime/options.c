@@ -91,6 +91,12 @@ static void room_set(const IniOpt* o, const char* v) {
     strcpy(g_opt_room, v);
 }
 
+char g_opt_source[2048];
+static void source_set(const IniOpt* o, const char* v) {
+    (void)o;
+    snprintf(g_opt_source, sizeof g_opt_source, "%s", v); /* the store keeps a value of up to 2047 bytes */
+}
+
 /* MB: below 1 no cap but the heap region's own, which also caps a larger one */
 static void heap_max_set(const IniOpt* o, const char* v) {
     char* end;
@@ -104,6 +110,13 @@ static void heap_max_set(const IniOpt* o, const char* v) {
 }
 
 #define END_ROW {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}
+static const IniOpt g_game[] = {
+    {"source", NULL,
+     "The dump the game was made from, which the recompile writes here. Without Extract game container the game\n"
+     "reads its ExeFS and RomFS from it, and Extract to tmpfs extracts it again when tmpfs was emptied. Empty or\n"
+     "left out: the link <name>.source in the game's folder, which older versions made",
+     INI_TEXT, INI_STARTUP | INI_IN_GAME, NULL, 0, 0, source_set, NULL, NULL, 0, 0}, /* each game's own */
+    END_ROW};
 static const IniOpt g_display[] = {
     {"docked", "1", "1 = TV mode (the console in its dock), 0 = handheld mode (1280x720)", INI_INT, INI_STARTUP,
      &g_opt_docked, 0, 1, NULL, "TV mode", "Off|On", 0, 0},
@@ -202,6 +215,7 @@ typedef struct {
     const char* page[3];
 } Section;
 static const Section g_sections[] = {
+    {"Game", 1, {g_game, NULL, NULL}, {NULL, NULL, NULL}},
     {"Display", 1, {g_display, NULL, NULL}, {NULL, NULL, NULL}},
     {"Graphics", 1, {g_graphics, NULL, NULL}, {NULL, NULL, NULL}},
     {"Performance", 1, {g_performance, NULL, NULL}, {NULL, NULL, NULL}},
@@ -458,6 +472,15 @@ static void put_rows(FILE* f, const IniOpt* o) {
         fprintf(f, "%s=%s\n", o->key, v);
     }
 }
+/* 1 when put_rows writes a row of the section: one with a default, or set */
+static int section_set(const Section* section) {
+    int t;
+    const IniOpt* o;
+    for (t = 0; t < 3 && section->table[t]; t++)
+        for (o = section->table[t]; o->key; o++)
+            if (o->def || store_find(o->key)) return 1;
+    return 0;
+}
 /* the store into the file: beside it, then moved over it, so the file is always whole. 0, or -1 (warned once) */
 static int write_file(void) {
     char tmp[sizeof g_path + 8];
@@ -473,6 +496,7 @@ static int write_file(void) {
     }
     put_header(f);
     for (s = 0; s < SECTIONS; s++) {
+        if (!section_set(&g_sections[s])) continue; /* [Game] of a game made from no dump */
         fprintf(f, "\n[%s]\n", g_sections[s].name);
         for (t = 0; t < 3 && g_sections[s].table[t]; t++) {
             if (g_sections[s].page[t]) fprintf(f, "; -- %s --\n", g_sections[s].page[t]);
