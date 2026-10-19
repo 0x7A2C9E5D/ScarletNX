@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* ---- the integer and data-movement rest of snx_simd ---- */
+/* ---- the integer and data-movement rest of the reference's snx_simd ---- */
 
 /* DUP (element, scalar), the MOV Bd/Hd/Sd/Dd, Vn.T[i] alias: the element alone in Vd */
 static int scalar_dup(SnxIr* ir, SnxU32 w) {
@@ -424,7 +424,7 @@ static int scalar_three_same(SnxIr* ir, SnxU32 w) {
     return 1;
 }
 
-/* in snx_simd's order (cpu_helpers.c), each group's emitters in turn; 0 leaves the word to snx_simd */
+/* in the C reference's snx_simd order, each group's emitters in turn; 0 is an unallocated encoding */
 int snx_ir_more_simd(SnxIr* ir, SnxU32 w) {
     if ((w & 0xBF800000UL) == 0x0C000000UL || (w & 0xBF800000UL) == 0x0C800000UL)
         return ld1_multiple(ir, w) || ld_structures(ir, w);

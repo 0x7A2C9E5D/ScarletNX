@@ -178,12 +178,11 @@ int snx_ir_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Decoded* instruc
 /* The case's first operand of a flow instruction: the i1 condition of BC, the i64 target of BR/BLR/RET, the i32
    immediate of SVC/BRK */
 LLVMValueRef snx_ir_flow_operand(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Decoded* instruction);
-int snx_ir_simd_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Pattern* pattern, size_t index);
 int snx_ir_fp_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Pattern* pattern, size_t index);
 /* snx_a64_fast_simd's shortcuts: 1 when it emitted the instruction */
 int snx_ir_fast_simd(SnxIr* ir, SnxU32 word);
-/* encodings of the SIMD patterns snx_simd handles that the backend also emits inline, with snx_simd's semantics
-   (loads/stores, permutes, byte ops, immediates; AES and PMULL where CPUID shows the x86 extensions) */
+/* the SIMD patterns the C reference hands to snx_simd, emitted inline with the same semantics (loads/stores,
+   permutes, byte ops, immediates; AES and PMULL where CPUID shows the x86 extensions); 0 is an invalid encoding */
 int snx_ir_more_simd(SnxIr* ir, SnxU32 word);
 
 /* ---- floating point fast paths (ir_fp.c) ----

@@ -8,7 +8,7 @@
 int main(int argc, char** argv) {
     int i;
     char name[32];
-    puts("#include \"cpu.h\"\n#include \"cpu_helpers.c\"");
+    puts("#include \"cpu.h\"\n#define SNX_A64_REFERENCE\n#include \"cpu_helpers.c\"\nGuestFn snx_missing_entry;");
     puts("static int trapped;\nstatic void undef(CPU*c,u64 p,u32 w){(void)c;(void)p;(void)w;trapped=1;}");
     snx_a64_interp(stdout, 1);
     for (i = 1; i < argc; ++i) {

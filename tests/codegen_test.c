@@ -232,7 +232,7 @@ static void emit_semantic_fixture(FILE* out) {
     };
     size_t i;
     char function[32];
-    fputs("#include \"cpu.h\"\n#include \"cpu_helpers.c\"\n#include <stdio.h>\n", out);
+    fputs("#include \"cpu.h\"\n#define SNX_A64_REFERENCE\n#include \"cpu_helpers.c\"\n#include <stdio.h>\nGuestFn snx_missing_entry;\n", out);
     for (i = 0; i < sizeof(words) / sizeof(words[0]); ++i) {
         sprintf(function, "step_%lu", (unsigned long)i);
         snx_a64_static_step(out, words[i], 0x1000, function);
@@ -457,7 +457,7 @@ static void poll_test(const char* compiler, const char* repo, const char* direct
     file = function ? snx_fopen(source, "wb") : NULL;
     check(file != NULL, "open the poll fixture");
     if (!file) goto done;
-    fputs("#include \"cpu.h\"\n#include \"cpu_helpers.c\"\n#include <stdio.h>\n", file);
+    fputs("#include \"cpu.h\"\n#define SNX_A64_REFERENCE\n#include \"cpu_helpers.c\"\n#include <stdio.h>\nGuestFn snx_missing_entry;\n", file);
     snx_codegen_emit(file, &codegen, function);
     snx_a64_interp(file, 0);
     fputs("static int polls;\nstatic void poll(CPU* c){ ++polls; __atomic_store_n(&c->poll,0,__ATOMIC_RELAXED); }\n",

@@ -6,8 +6,8 @@
    Copyright (c) 2018 Linaro
    Copyright (C) 2013 - 2018 Linaro Ltd <ard.biesheuvel@linaro.org>
    Copyright (c) 2003 Fabrice Bellard */
-/* AdvSIMD: snx_a64_fast_simd's shortcuts (a64.c), emitted inline as the C it prints, and the SIMD patterns, whose
-   template hands the word to snx_simd (cpu_helpers.c, in the runtime library) */
+/* AdvSIMD: snx_a64_fast_simd's shortcuts (a64.c), emitted inline as the C it prints, and every SIMD pattern the C
+   reference template would hand to snx_simd, lowered directly here */
 #include "common/cpu/recompiler/llvm/ir.h"
 #include <string.h>
 
@@ -275,31 +275,6 @@ int snx_ir_fast_simd(SnxIr* ir, SnxU32 w) {
         return 1;
     }
     return 0;
-}
-
-/* SIMD_LDST, SIMD_LDST1, SIMD_DP, SIMD_DP2: if(!snx_simd(c,M,w)) c->rt->undef(c,pc,w); */
-int snx_ir_simd_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Pattern* pattern, size_t index) {
-    LLVMTypeRef p[3];
-    V args[3], handled;
-    LLVMBasicBlockRef undefined, done;
-    (void)index;
-    SnxA64Kind kind = pattern->kind;
-    if (kind < SNX_A64_SIMD_LDST || kind > SNX_A64_SIMD_DP2) return 0;
-    p[0] = ir->t_ptr;
-    p[1] = ir->t_ptr;
-    p[2] = ir->t_i32;
-    args[0] = ir->c;
-    args[1] = ir->M;
-    args[2] = ir_i32(ir, word);
-    handled = ir_call(ir, ir_extern(ir, "snx_simd", ir->t_i32, p, 3), args, 3);
-    undefined = ir_block(ir, "simd_undef");
-    done = ir_block(ir, "simd_done");
-    ir_unlikely(ir, LLVMBuildCondBr(B, LLVMBuildICmp(B, LLVMIntEQ, handled, ir_i32(ir, 0), ""), undefined, done));
-    LLVMPositionBuilderAtEnd(B, undefined);
-    ir_undef(ir, pc, word);
-    LLVMBuildBr(B, done);
-    LLVMPositionBuilderAtEnd(B, done);
-    return 1;
 }
 
 /* These families share private lane and vector builders. Compile them as one

@@ -745,7 +745,12 @@ int snx_ir_plain(SnxIr* ir, SnxU32 w, SnxU64 pc, const SnxA64Decoded* decoded) {
         case SNX_A64_SIMD_LDST:
         case SNX_A64_SIMD_LDST1:
         case SNX_A64_SIMD_DP:
-        case SNX_A64_SIMD_DP2: return snx_ir_more_simd(ir, w) || snx_ir_simd_plain(ir, w, pc, pattern, index);
+        case SNX_A64_SIMD_DP2:
+            if (snx_ir_more_simd(ir, w)) return 1;
+            /* an unallocated encoding: the C reference's snx_simd returns 0, its template calls UNDEF() and the
+               step continues to the next instruction, so fault here and carry on the same way */
+            ir_undef(ir, pc, w);
+            return 1;
         default: return snx_ir_fp_plain(ir, w, pc, pattern, index);
     }
 }
