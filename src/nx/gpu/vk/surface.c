@@ -802,9 +802,23 @@ Surf* vk_rt_for_cpu(u64 cpu_addr, u32 w, u32 h) {
     return best && best->layout != VK_IMAGE_LAYOUT_UNDEFINED ? best : NULL;
 }
 
-/* render targets drawn this frame or the last, for a texture made of them (gpu/vk/texture.c) */
+/* render targets drawn since they were made, for a texture made of them (gpu/vk/texture.c), in order of the address
+   they were drawn at (drawn_from). Every texture bind looks up a range in it: a game keeping 6,500 targets made a walk
+   of the whole list three quarters of the GPU thread, where a binary search finds the range's first */
 static Surf** g_drawn;
 static int g_ndrawn, g_capdrawn;
+/* the first drawn target at or past address a */
+static int drawn_lower(u64 a) {
+    int lo = 0, hi = g_ndrawn;
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (g_drawn[mid]->drawn_from < a)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo;
+}
 /* the GPU pages they started at when listed, so a texture over none of them (most) skips the list: one game looked at
    each of about 30 for each of 13,000 textures a frame. A target parked since still counts its old page, which only
    lets the walk run */
@@ -848,9 +862,12 @@ void vk_rt_drawn(Surf* s) {
         g_drawn = n;
         g_capdrawn = cap;
     }
-    g_drawn[g_ndrawn++] = s;
-    s->in_drawn = 1;
     s->drawn_from = s->gva;
+    int at = drawn_lower(s->drawn_from);
+    memmove(&g_drawn[at + 1], &g_drawn[at], (size_t)(g_ndrawn - at) * sizeof *g_drawn);
+    g_drawn[at] = s;
+    g_ndrawn++;
+    s->in_drawn = 1;
     pend_add_va(&g_drawn_pages, s->drawn_from, 1, 1);
 }
 void vk_rt_drawn_full(Surf* s) {
@@ -874,13 +891,14 @@ int vk_rt_drawn_fresh(Surf* s) {
 int vk_rt_drawn_in(u64 lo, u64 hi, Surf** out, int max) {
     int n = 0;
     if (hi <= lo || !pend_hit_va(&g_drawn_pages, lo, hi - lo)) return 0;
-    for (int i = 0; i < g_ndrawn; i++) {
+    for (int i = drawn_lower(lo); i < g_ndrawn && g_drawn[i]->drawn_from < hi; i++) {
         Surf* s = g_drawn[i];
         /* Generated textures may first be sampled several frames after their draw.
            Age does not make guest memory authoritative: tex_take_drawn checks
-           vk_rt_drawn_fresh before copying, and surf_free removes evicted targets. */
-        if (s->gva >= lo && s->gva < hi) {
-            if (n < max) out[n] = s; /* a parked target's address is out of every range */
+           vk_rt_drawn_fresh before copying, and surf_free removes evicted targets. A parked target's address (its
+           drawn_from with the top bit set) is out of every range */
+        if (s->gva == s->drawn_from) {
+            if (n < max) out[n] = s;
             n++;
         }
     }
@@ -898,11 +916,12 @@ static void surf_free(Surf* s) {
     if (s->is_rt) rt_pages(s, -1);
     if (s->gva >> 63) g_parked--;
     if (s->in_drawn) {
-        for (int i = 0; i < g_ndrawn; i++)
-            if (g_drawn[i] == s) {
-                g_drawn[i] = g_drawn[--g_ndrawn];
-                break;
-            }
+        int i = drawn_lower(s->drawn_from);
+        while (i < g_ndrawn && g_drawn[i] != s) i++;
+        if (i < g_ndrawn) {
+            memmove(&g_drawn[i], &g_drawn[i + 1], (size_t)(g_ndrawn - i - 1) * sizeof *g_drawn);
+            g_ndrawn--;
+        }
         pend_add_va(&g_drawn_pages, s->drawn_from, 1, -1);
     }
     for (int i = 0; i < s->nsv; i++) vk_defer_image(VK_NULL_HANDLE, VK_NULL_HANDLE, s->sv[i].v, VK_NULL_HANDLE);
