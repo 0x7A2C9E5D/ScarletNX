@@ -53,6 +53,9 @@ void ini_read(const IniOpt* o, const char* v); /* v into o's variable; a value t
    with why in out (a number outside lo..hi, not a whole number for an INI_INT, no number at all, a text too long for
    var). ini_read clamps a number and leaves the rest, as a .ini reloaded while the game runs must */
 int ini_check(const IniOpt* o, const char* v, char* out, size_t n);
+/* where ini_read says a value it clamped or left (a line, without its newline): the runtime's log once options.c sets
+   it, stderr until then (the launcher, the recompile) */
+void ini_set_say(void (*say)(const char* line));
 /* o's variable as ini_read reads it back. An INI_TEXT has none: its set keeps what it read */
 void ini_format(const IniOpt* o, char* out, size_t n);
 /* an INI_INT's value v as the menus read it: its word, or the number */

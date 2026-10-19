@@ -393,6 +393,9 @@ static int write_file(void) {
     return 0;
 }
 
+/* ini_read's line about a value clamped or left, in the log */
+static void say_setting(const char* line) { WARN("%s\n", line); }
+
 static void say_deprecated(void) {
     const char* keys[STORE_MAX];
     char line[2048];
@@ -408,6 +411,7 @@ void ini_open(const char* path) {
     size_t size;
     int i, n;
     snprintf(g_path, sizeof g_path, "%s", path);
+    ini_set_say(say_setting);
     for (i = 0; i < g_nover; i++)
         if (!snx_setting_known(g_over[i].key)) WARN("--%s is not a setting, so it does nothing\n", g_over[i].key);
     text = snx_read_file(g_path, &size);

@@ -20,6 +20,9 @@ static void keep(const IniOpt* o, const char* v) {
     snprintf(text, sizeof text, "%s", v);
 }
 static char held[8];
+/* what ini_read says about a value it clamped or left, once ini_set_say names this; "" for nothing since emptied */
+static char line_said[256];
+static void catch_said(const char* line) { snprintf(line_said, sizeof line_said, "%s", line); }
 static const IniOpt TABLE[] = {
     {"number", "1", "help", INI_INT, 0, &number, -5, 10, tell, NULL, NULL, 0, 0, 0},
     {"ratio", "1", NULL, INI_FLOAT, INI_STARTUP, &ratio, 0.25, 4, NULL, NULL, NULL, 0, 0, 0},
@@ -76,6 +79,27 @@ int main(void) {
         assert(ini_check(t, "12345678", why, sizeof why) && !strcmp(why, "text's value is longer than 7 bytes"));
         assert(number == was && told == said && !strcmp(held, "a b c"));
     }
+    /* what ini_read did with a value it did not take as given is said, through ini_set_say: left as it was, or what
+       was kept; a value taken as given says nothing */
+    ini_set_say(catch_said);
+    ini_read(n, "abc");
+    assert(!strcmp(line_said, "settings: number=abc is not a whole number from -5 to 10: left as it was"));
+    ini_read(n, "11");
+    assert(number == 10 && !strcmp(line_said, "settings: number=11 is not a whole number from -5 to 10: 10 kept"));
+    ini_read(n, "1.5");
+    assert(number == 1 && !strcmp(line_said, "settings: number=1.5 is not a whole number from -5 to 10: 1 kept"));
+    ini_read(n, "7x");
+    assert(number == 7 && !strcmp(line_said, "settings: number=7x is not a whole number from -5 to 10: 7 kept"));
+    ini_read(r, "9");
+    assert(ratio == 4 && !strcmp(line_said, "settings: ratio=9 is not a number from 0.25 to 4: 4 kept"));
+    ini_read(t, "too long for it");
+    assert(!strcmp(line_said, "settings: text's value is longer than 7 bytes: left as it was"));
+    line_said[0] = 0;
+    ini_read(n, "3");
+    ini_read(r, "0.5");
+    ini_read(t, "fits");
+    assert(number == 3 && ratio == 0.5f && !strcmp(held, "fits") && !line_said[0]);
+    ini_set_say(NULL);
     /* the menus' words: one a value from lo by step; a '#' word for its value and the ones above, plus shift; the
        number where there is none. Words go round, numbers stop at the ends */
     {
