@@ -134,7 +134,8 @@ typedef struct VicSlot {
 } VicSlot;
 typedef struct VicJob {
     u32 fmt, sw, sh;
-    u32 tx0, ty0, tw, th; /* the target rectangle the background colour fills, in the surface; tw 0: none */
+    u32 tx0, ty0, tw, th; /* the target rectangle the background colour fills, in the surface; tw 0: none. The
+                             slots lie inside it (vic.c's slot_resolve clips them) */
     u32 bg[4];            /* the background colour: R, G, B, A, 10 bit */
     VicPlane oy, oc;      /* oc.p is NULL when the format has no chroma */
     VicSlot slots[8];
