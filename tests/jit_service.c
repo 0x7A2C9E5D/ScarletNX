@@ -455,6 +455,36 @@ static void test_cache(void) {
     cache_path = NULL;
 }
 
+/* invalidated code: its slot and entry go, the next lookup queues it, and it compiles again into new code */
+static void test_invalidate(void) {
+    static const u32 words[] = {0x91000400, 0xD65F03C0}; /* add x0, x0, #1; ret */
+    GuestFn before, after;
+    CPU c;
+    service = start(0, 2);
+    if (!service) {
+        ++failures;
+        return;
+    }
+    put(0x3800, words, 2);
+    cpu_init(&c, 0xF000);
+    run(&c, 0x3800);
+    CHECK(c.x[0] == 1 && c.pc == RETURN);
+    snx_jit_drain(service);
+    before = snx_jit_resolve(service, 0x3800);
+    CHECK(before != NULL && get(0x3800) == before);
+    /* the range's code is stale: the main table's slot and the service's entry for it go */
+    snx_jit_invalidate(service, 0x3800, 4);
+    CHECK(get(0x3800) == NULL);
+    CHECK(snx_jit_resolve(service, 0x3800) == NULL); /* queued again */
+    snx_jit_drain(service);
+    after = snx_jit_resolve(service, 0x3800);
+    CHECK(after != NULL && after != before && get(0x3800) == after);
+    cpu_init(&c, 0xF000);
+    run(&c, 0x3800);
+    CHECK(c.x[0] == 1 && c.pc == RETURN);
+    snx_jit_service_free(service);
+}
+
 int main(void) {
     /* 0x1000: x0 = x0 * 3 + 1, then the AOT function at 0x2000, then 0x3000, which the same batch may find */
     static const u32 f1[] = {0xD2800061, 0x9B017C00, 0x91000400, 0xA9BF7BFD,
@@ -642,6 +672,7 @@ int main(void) {
 
     test_added_image();
     test_cache();
+    test_invalidate();
     free(memory);
     if (failures) return 1;
     printf("jit service: passed\n");

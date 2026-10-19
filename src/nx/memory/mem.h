@@ -92,6 +92,10 @@ int mem_unmap_code(const MemCodeMap* m);
 void mem_query(u64 addr, MemBlock* out);
 int mem_set_state(u64 addr, u64 size, u32 state, u32 perm);
 int mem_set_attr(u64 addr, u64 size, u32 mask, u32 attr);
+/* Called with no memory lock held after a mapping change that can make compiled guest code stale: an unmap, a state
+   or permission change, an alias written back. The runtime sets it (runtime/guest_jit.c's jit_code_invalidate); NULL
+   until then */
+void mem_set_code_invalidate(void (*fn)(u64 addr, u64 size));
 u64 mem_find_free(u64 lo, u64 hi, u64 size, u64 align);
 u64 kmem_alloc(u64 size, u32 state, u32 perm); /* in the kernel region */
 

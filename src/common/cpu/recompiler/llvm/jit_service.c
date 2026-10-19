@@ -42,6 +42,7 @@ typedef struct {
     SnxU64 key; /* pc | 1 (a pc is 4-aligned), 0 for a free slot */
     GuestFn code;
     int state;
+    SnxU64 epoch; /* take's s->epoch: a publish tells its IN_FLIGHT from a newer batch's */
 } Entry;
 
 /* pcs to compile, first in first out: a ring that grows on its own */
@@ -103,6 +104,7 @@ struct SnxJitService {
     Queue queues[QUEUES];               /* under lock */
     unsigned busy;                      /* batches compiling, under lock */
     int stop;                           /* under lock: the compile threads end */
+    SnxU64 epoch;                       /* under lock: incremented by snx_jit_invalidate */
     SnxJitStats stats;                  /* under lock */
     JitLock lock;                       /* everything above marked so */
     JitCond work;                       /* signalled when a pc is queued, broadcast at stop */
@@ -296,6 +298,12 @@ static void set_pending(SnxJitService* s, SnxU64 pc) {
     if (!r) return;
     i = (size_t)((pc - r->lo) >> 2);
     __atomic_fetch_or(&r->pending[i >> 3], (unsigned char)(1u << (i & 7)), __ATOMIC_RELAXED);
+}
+
+/* under lock: pc is new to the service again, so discovery isn't told another batch has it */
+static void clear_pending(Region* r, SnxU64 pc) {
+    size_t i = (size_t)((pc - r->lo) >> 2);
+    __atomic_fetch_and(&r->pending[i >> 3], (unsigned char)~(1u << (i & 7)), __ATOMIC_RELAXED);
 }
 
 /* ---- the compile ---- */
@@ -758,9 +766,12 @@ static int cache_load(SnxJitService* s, CacheRecord* r, const SnxCodeImage* imag
     const unsigned char* p = r->functions;
     SnxLinkInput input;
     const char* names[1];
-    SnxU64 table = 0, h1, h2;
+    SnxU64 table = 0, h1, h2, epoch;
     size_t f, k, leaders, runs;
     char error[256];
+    lock(&s->lock);
+    epoch = s->epoch; /* memory changing after here makes the record stale: refused below */
+    unlock(&s->lock);
     for (f = 0; f < r->function_count; ++f) { /* the code it was compiled from, unchanged */
         leaders = get32(p + 8);
         p += 12 + 8 * leaders;
@@ -781,31 +792,35 @@ static int cache_load(SnxJitService* s, CacheRecord* r, const SnxCodeImage* imag
         return 0;
     }
     r->state = 1;
-    /* publish: each function's leaders, into their empty slots and the service's table (compile's) */
+    /* publish: each function's leaders, into their empty slots and the service's table (compile's), unless memory
+       changed since the record's code was checked */
     p = r->functions;
+    lock(&s->lock);
+    if (epoch != s->epoch) {
+        r->state = -1;
+        unlock(&s->lock);
+        return 0;
+    }
     for (f = 0; f < r->function_count; ++f) {
         GuestFn code = unit_function(table, f);
         leaders = get32(p + 8);
         for (k = 0; k < leaders; ++k) {
             SnxU64 address = get64(p + 12 + 8 * k);
-            Region* region = region_of(s, address);
+            Entry* e = add(s, address, DONE);
+            Region* region;
             GuestFn expected = NULL;
+            if (e && e->state == GONE) continue; /* invalidated while this record was loading */
+            region = region_of(s, address);
             if (region)
                 __atomic_compare_exchange_n(slot(region, address), &expected, code, 0, __ATOMIC_RELEASE,
                                             __ATOMIC_RELAXED);
-        }
-        lock(&s->lock);
-        for (k = 0; k < leaders; ++k) {
-            Entry* e = add(s, get64(p + 12 + 8 * k), DONE);
-            if (!e || e->state == FAILED || e->state == GONE || (e->state == DONE && e->code)) continue;
+            if (!e || e->state == FAILED || (e->state == DONE && e->code)) continue;
             e->state = DONE; /* a pc queued or compiling elsewhere is done: its batch's end leaves it so */
             e->code = code;
         }
-        unlock(&s->lock);
         p += 12 + 8 * leaders;
         p += 4 + 12 * (size_t)get32(p) + 16;
     }
-    lock(&s->lock);
     ++s->stats.cached;
     cond_broadcast(&s->done);
     unlock(&s->lock);
@@ -852,7 +867,7 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count) {
     size_t size = 0, i, j, used, failed = 0, image_count = 0;
     char error[512], name[48];
     const char* names[1];
-    SnxU64 table = 0, address, *left = NULL;
+    SnxU64 table = 0, address, epoch, *left = NULL;
     GuestFn code, expected;
     const SnxFunction* f;
     Region* r;
@@ -896,6 +911,9 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count) {
         report.pc = pcs[0];
         report.pcs = count;
     }
+    lock(&s->lock);
+    epoch = s->epoch; /* memory changing after the code is read makes this batch's code stale: the publish skips it */
+    unlock(&s->lock);
     rc = images ? snx_codegen_discover(&codegen, images, image_count, pcs, count, known, &batch, s->config.budget) : -1;
     if (!images) memset(&codegen, 0, sizeof(codegen));
     discovered = !rc;
@@ -932,40 +950,45 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count) {
         free(left);
         return;
     }
-    /* publish: every leader's slot that is still empty, with release ordering, so a thread that loads the address
-       (relaxed, cpu.h: x86-64 keeps loads in order) reaches the code and data written before it. A slot something
-       else filled meanwhile (another batch, a wrapper) keeps what it holds */
-    for (i = 0; !rc && i < codegen.function_count; ++i) {
-        f = &codegen.functions[i];
-        code = unit_function(table, i);
-        for (j = 0; j < f->count; ++j) {
-            if (!f->leaders[j]) continue;
-            address = snx_function_address(f, j);
-            r = region_of(s, address); /* an added region being removed has none: its arrays stay until users is 0 */
-            if (!r) continue;
-            expected = NULL;
-            __atomic_compare_exchange_n(slot(r, address), &expected, code, 0, __ATOMIC_RELEASE, __ATOMIC_RELAXED);
-        }
-    }
+    /* publish: under the lock, so snx_jit_invalidate's clear cannot fall between a slot's CAS and it, and only when
+       memory has not changed since the batch read it. Every leader's slot that is still empty, with release ordering,
+       so a thread that loads the address (relaxed, cpu.h: x86-64 keeps loads in order) reaches the code and data
+       written before it. A slot something else filled meanwhile (another batch, a wrapper) keeps what it holds */
     lock(&s->lock);
-    for (i = 0; !rc && i < codegen.function_count; ++i) {
-        f = &codegen.functions[i];
-        code = unit_function(table, i);
-        for (j = 0; j < f->count; ++j) {
-            if (!f->leaders[j]) continue;
-            /* a queued pc this batch compiled is done (its queue skips it); one another batch compiles is that
-               batch's to end, as this batch's own pcs are below, and an earlier batch's keeps its code */
-            e = add(s, snx_function_address(f, j), DONE);
-            if (!e || e->state == IN_FLIGHT || e->state == FAILED || e->state == GONE || (e->state == DONE && e->code))
-                continue;
-            e->state = DONE;
-            e->code = code;
+    if (epoch == s->epoch) {
+        for (i = 0; !rc && i < codegen.function_count; ++i) {
+            f = &codegen.functions[i];
+            code = unit_function(table, i);
+            for (j = 0; j < f->count; ++j) {
+                if (!f->leaders[j]) continue;
+                address = snx_function_address(f, j);
+                r = region_of(s, address); /* an added region being removed has none: its arrays stay until users is 0 */
+                if (!r) continue;
+                e = add(s, address, DONE);
+                if (e && e->state == GONE) continue; /* invalidated while this batch compiled */
+                expected = NULL;
+                __atomic_compare_exchange_n(slot(r, address), &expected, code, 0, __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+                /* a queued pc this batch compiled is done (its queue skips it); one another batch compiles is that
+                   batch's to end, as this batch's own pcs are below, and an earlier batch's keeps its code */
+                if (!e || e->state == IN_FLIGHT || e->state == FAILED || (e->state == DONE && e->code)) continue;
+                e->state = DONE;
+                e->code = code;
+            }
         }
     }
     for (i = 0; i < count; ++i) {
         e = find(s, pcs[i]);
         f = rc ? NULL : snx_codegen_entry(&codegen, pcs[i]);
         code = f ? unit_function(table, (size_t)(f - codegen.functions)) : NULL;
+        if (epoch != s->epoch) {
+            /* memory changed since the code was read: it is stale. This batch's own IN_FLIGHT pcs go, so a waiter
+               re-resolves; one a newer batch took (its take stamped a newer epoch) is that batch's */
+            if (e && e->state == IN_FLIGHT && e->epoch <= epoch) {
+                e->state = GONE;
+                e->code = NULL;
+            }
+            continue;
+        }
         /* its image went while the batch compiled (snx_jit_remove_image clears hi under this lock): gone, not failed */
         if (!code && !in_text(s, pcs[i]) && !region_of(s, pcs[i])) {
             if (e) {
@@ -975,6 +998,7 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count) {
             continue;
         }
         if (e) {
+            if (e->state == GONE || e->state == QUEUED) continue; /* invalidated: the next lookup compiles it */
             e->state = code ? DONE : FAILED;
             e->code = code;
         }
@@ -1021,6 +1045,7 @@ static size_t take(SnxJitService* s, SnxU64* pcs) {
                to the misses' queue */
             if (!e || e->state != state) continue;
             e->state = IN_FLIGHT;
+            e->epoch = s->epoch;
             set_pending(s, pc);
             pcs[n++] = pc;
         }
@@ -1090,6 +1115,11 @@ static void thread_join(JitThread t) { pthread_join(t, NULL); }
 
 /* ---- the interface ---- */
 
+int snx_jit_covers(const SnxJitService* s, SnxU64 pc) {
+    Region* r = region_of(s, pc);
+    return in_text(s, pc) || (r && r != &s->regions[0]);
+}
+
 GuestFn snx_jit_resolve(SnxJitService* s, SnxU64 pc) {
     GuestFn code = NULL;
     Region* r = region_of(s, pc);
@@ -1153,15 +1183,18 @@ GuestFn snx_jit_wait(SnxJitService* s, SnxU64 pc) {
     for (;;) {
         /* found again each time: the table moves when it grows */
         e = find(s, pc);
-        if (!e || e->state == FAILED || e->state == GONE) break; /* outside the images, or uncompilable */
+        if (!e || e->state == FAILED) break; /* outside the images, or uncompilable */
         if (e->state == DONE) {
             code = e->code;
             break;
         }
-        if (e->state == QUEUED_WARM) { /* in the warm queue only: moved to the misses' */
+        if (e->state == QUEUED_WARM || e->state == GONE) { /* in the warm queue only, or invalidated: queued to compile */
             unlock(&s->lock);
             if ((code = snx_jit_resolve(s, pc)) != NULL) return code;
             lock(&s->lock);
+            /* resolve queues a gone pc the images still hold; one they don't any more stays gone: uncompilable */
+            e = find(s, pc);
+            if (!e || e->state == GONE) break;
             continue;
         }
         cond_wait(&s->done, &s->lock);
@@ -1239,6 +1272,37 @@ void snx_jit_remove_image(SnxJitService* s, SnxU64 base) {
     unlock(&s->lock);
     free(slots);
     free(pending);
+}
+
+void snx_jit_invalidate(SnxJitService* s, SnxU64 addr, SnxU64 size) {
+    SnxU64 end = addr + size, from, to, pc;
+    size_t i, j;
+    Entry* e;
+    Region* r;
+    if (!size || end < addr) return;
+    lock(&s->lock);
+    /* a batch compiling now reads s->epoch before its code, and skips the publish when it has changed */
+    ++s->epoch;
+    for (i = 0; i < s->entry_capacity; ++i) {
+        e = &s->entries[i];
+        pc = e->key & ~(SnxU64)1;
+        if (e->key && pc >= addr && pc < end) {
+            e->state = GONE;
+            e->code = NULL;
+        }
+    }
+    for (j = 0; j <= SNX_JIT_IMAGES; ++j) {
+        r = &s->regions[j];
+        if (!r->hi || r->hi <= addr || r->lo >= end) continue; /* free, or outside the range */
+        from = ((addr > r->lo ? addr : r->lo) + 3) & ~(SnxU64)3;
+        to = end < r->hi ? end : r->hi;
+        for (pc = from; pc < to; pc += 4) {
+            __atomic_store_n(slot(r, pc), NULL, __ATOMIC_RELEASE);
+            clear_pending(r, pc); /* its pc is new to the service again: discovery isn't told a batch has it */
+        }
+    }
+    cond_broadcast(&s->done); /* a thread waiting for one of them resolves it again */
+    unlock(&s->lock);
 }
 
 /* the CPUs the process may run on: its affinity mask where the host has one (a game started under taskset gets the
