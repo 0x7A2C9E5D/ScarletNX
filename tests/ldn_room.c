@@ -168,6 +168,10 @@ static void networks(void) {
     int why;
     CHECK(join(&ra, "Aogo", "secret", &why) == 0 && join(&rb, "Xuji", "secret", &why) == 0);
     CHECK(snx_ldn_open_room(&a, ra, changed_a, NULL) == 0 && snx_ldn_open_room(&b, rb, changed_b, NULL) == 0);
+    {
+        SnxLdn* again; /* a console has one ldn in a room; the first keeps working (below) */
+        CHECK(snx_ldn_open_room(&again, ra, NULL, NULL) == -SNX_EBUSY);
+    }
     snx_ldn_address(b, ip, mask);
     CHECK(ip[0] == 192 && ip[3] == 2 && mask[0] == 255 && mask[2] == 255 && mask[3] == 0);
     CHECK(snx_ldn_scan(b, NULL, found, 4, 200) == 0); /* nothing yet */
@@ -408,12 +412,16 @@ static void handler(void) {
     SnxRoom *ra, *rb;
     int why, i;
     CHECK(join(&ra, "Aogo", "secret", &why) == 0);
-    snx_room_set_ldn(ra, slow, NULL);
-    CHECK(join(&rb, "Xuji", "secret", &why) == 0); /* the members change: slow runs on ra's thread */
+    CHECK(snx_room_set_ldn(ra, slow, &g_slow_in) == 0);
+    CHECK(snx_room_set_ldn(ra, slow, &g_slow_done) == -SNX_EBUSY); /* one handler per member */
+    CHECK(join(&rb, "Xuji", "secret", &why) == 0);                 /* the members change: slow runs on ra's thread */
     for (i = 0; i < 400 && !__atomic_load_n(&g_slow_in, __ATOMIC_SEQ_CST); i++) sleep_ms(5);
     CHECK(__atomic_load_n(&g_slow_in, __ATOMIC_SEQ_CST));
-    snx_room_set_ldn(ra, NULL, NULL);
+    snx_room_clear_ldn(ra, &g_slow_done); /* another's: stays */
+    snx_room_clear_ldn(ra, &g_slow_in);
     CHECK(__atomic_load_n(&g_slow_done, __ATOMIC_SEQ_CST)); /* what slow's arg is may go now */
+    CHECK(snx_room_set_ldn(ra, slow, &g_slow_done) == 0);   /* and the member takes another */
+    snx_room_clear_ldn(ra, &g_slow_done);
     snx_room_leave(rb);
     snx_room_leave(ra);
 }

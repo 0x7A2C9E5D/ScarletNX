@@ -317,12 +317,23 @@ static void call_ldn(SnxRoom* r, const SnxRoomLdn* p) {
     r->in_ldn = 0;
     snx_unlock(&r->lk);
 }
-void snx_room_set_ldn(SnxRoom* r, void (*handler)(void*, const SnxRoomLdn*), void* arg) {
+int snx_room_set_ldn(SnxRoom* r, void (*handler)(void*, const SnxRoomLdn*), void* arg) {
+    int e = 0;
+    snx_lock(&r->lk);
+    if (r->ldn && r->ldn_arg != arg)
+        e = -SNX_EBUSY;
+    else {
+        r->ldn = handler;
+        r->ldn_arg = arg;
+    }
+    snx_unlock(&r->lk);
+    return e;
+}
+void snx_room_clear_ldn(SnxRoom* r, void* arg) {
     for (;;) {
         snx_lock(&r->lk);
-        if (!r->in_ldn) {
-            r->ldn = handler;
-            r->ldn_arg = arg;
+        if (!r->ldn || r->ldn_arg != arg || !r->in_ldn) {
+            if (r->ldn && r->ldn_arg == arg) r->ldn = NULL;
             snx_unlock(&r->lk);
             return;
         }

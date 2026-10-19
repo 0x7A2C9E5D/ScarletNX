@@ -80,9 +80,10 @@ typedef struct SnxRoomLdn {
     size_t size;
 } SnxRoomLdn;
 /* handler(arg, packet) is called from the room's thread for every ldn message, and with packet NULL when the members
-   changed (one came or left) or the room went away. Setting another one (NULL included) returns once a call under
-   way has ended, so the old arg may be freed then */
-void snx_room_set_ldn(SnxRoom* r, void (*handler)(void* arg, const SnxRoomLdn* packet), void* arg);
+   changed (one came or left) or the room went away. One handler per member: set_ldn is -SNX_EBUSY while another arg
+   has it; clear_ldn takes arg's off (another's stays) once a call under way has ended, so arg may be freed then */
+int snx_room_set_ldn(SnxRoom* r, void (*handler)(void* arg, const SnxRoomLdn* packet), void* arg);
+void snx_room_clear_ldn(SnxRoom* r, void* arg);
 /* sends an ldn message from this console's address; 0, -SNX_ENETDOWN out of the room, -SNX_EMSGSIZE, -SNX_ENOMEM */
 int snx_room_send_ldn(SnxRoom* r, uint8_t type, const uint8_t remote_ip[4], int broadcast, const void* data,
                       size_t size);

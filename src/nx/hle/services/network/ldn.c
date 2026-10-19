@@ -198,9 +198,10 @@ static int nn_ldn_detail_IUserLocalCommunicationService_Initialize(SvcObj* self,
         r = ldn_open(d);
         if (r) {
             WARN("ldn: no address for this console: %s (errno %d)\n",
-                 g_opt_ldn == SNX_LDN_ROOM ? "out of the Eden room"
-                 : r == -SNX_EADDRINUSE    ? "every loopback address has a console on port 11452"
-                                           : "the ldn sockets couldn't be opened",
+                 g_opt_ldn == SNX_LDN_ROOM && r == -SNX_EBUSY ? "another of the game's ldn:u is in the room already"
+                 : g_opt_ldn == SNX_LDN_ROOM                  ? "out of the Eden room"
+                 : r == -SNX_EADDRINUSE                       ? "every loopback address has a console on port 11452"
+                                                              : "the ldn sockets couldn't be opened",
                  -r);
         } else if (g_opt_ldn == SNX_LDN_ROOM) {
             LOG("ldn: this console is %u.%u.%u.%u in the Eden room\n", d->ip[0], d->ip[1], d->ip[2], d->ip[3]);

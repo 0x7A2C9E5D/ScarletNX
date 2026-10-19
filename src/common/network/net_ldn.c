@@ -638,8 +638,14 @@ int snx_ldn_open_room(SnxLdn** out, SnxRoom* room, void (*changed)(void*), void*
         return r;
     }
     snx_socket_set_nonblocking(l->changed_ev, 1);
+    r = snx_room_set_ldn(room, room_in, l);
+    if (r) { /* another ldn of this console is in the room: one is all a console has */
+        snx_socket_unref(l->changed_ev);
+        snx_lock_destroy(&l->lk);
+        free(l);
+        return r;
+    }
     snx_room_ref(room);
-    snx_room_set_ldn(room, room_in, l);
     *out = l;
     return 0;
 }
@@ -647,7 +653,7 @@ void snx_ldn_close(SnxLdn* l) {
     int i;
     if (!l) return;
     if (l->room) { /* no more messages for l, then the goodbyes Eden's Finalize sends */
-        snx_room_set_ldn(l->room, NULL, NULL);
+        snx_room_clear_ldn(l->room, l);
         snx_ldn_destroy_network(l);
         snx_ldn_disconnect(l);
         snx_room_unref(l->room);
