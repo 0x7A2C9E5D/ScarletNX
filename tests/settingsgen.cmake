@@ -7,6 +7,10 @@
 # generator and WORK a folder of its own
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}/out" "${WORK}/include/llvm-c/Transforms")
+# a setting's name and an LLVM ID longer than any fixed buffer: 1100 letters (a line of generated C over 1024), and 126
+# whose words and snake_case pass 192
+string(REPEAT "Abcdefghij" 110 long_name)
+string(REPEAT "Ab" 63 long_id)
 file(WRITE "${WORK}/include/llvm-c/Transforms/PassBuilder.h" "
 LLVM_C_ABI LLVMErrorRef LLVMRunPassesOnFunction(
     LLVMValueRef F, const char *Passes, LLVMTargetMachineRef TM,
@@ -27,6 +31,7 @@ LLVM_C_ABI void
 LLVMPassBuilderOptionsSetInlinerThreshold(LLVMPassBuilderOptionsRef Options,
                                           int Threshold);
 /* avoid LLVMPassBuilderOptionsSetDebugLogging: a mention of a setter is not its declaration */
+LLVM_C_ABI void LLVMPassBuilderOptionsSet${long_id}(LLVMPassBuilderOptionsRef Options, unsigned Cap);
 ")
 file(WRITE "${WORK}/include/llvm-c/TargetMachine.h" "
 LLVM_C_ABI void LLVMSetTargetMachineAsmVerbosity(LLVMTargetMachineRef T,
@@ -45,6 +50,10 @@ setting Plain
     key plain
     int 0 1
     default 0
+setting ${long_name}
+    key long
+    text 4
+    help ${long_name}
 table g_test_llvm_ini llvm
 setting @instcombine
     name Instruction combining
@@ -111,11 +120,39 @@ foreach(member "int instruction_combining; /* llvm_pass_instcombine */" "int llv
     endif()
 endforeach()
 file(READ "${WORK}/out/settings_launch.c" launch)
+file(READ "${WORK}/out/settings_test.c" runtime)
 foreach(row "{\"llvm_inliner_threshold\", NULL, \"How large a function the inliner inlines\", INI_INT, 0, &g_settings.inliner_threshold, INT_MIN + 1, INT_MAX, NULL, \"Inliner threshold\", NULL, 0, 0, 0}"
             "{\"llvm_slp_vectorization\", NULL, \"LLVMPassBuilderOptionsSetSLPVectorization, LLVM's own value until it is set\", INI_INT, 0, &g_settings.llvm_slp_vectorization, 0, 1, NULL, \"LLVM SLP vectorization\", \"Off|On\", 0, 0, 0}")
     string(FIND "${launch}" "${row}" at)
     if(at LESS 0)
         message(FATAL_ERROR "settings_launch.c lacks the row ${row}:\n${launch}")
+    endif()
+endforeach()
+# the long ones, whole: the member of the 1100-letter name (its words joined by _), the long setter's key and name
+string(REPEAT "abcdefghij_" 110 long_member)
+string(REGEX REPLACE "_$" "" long_member "${long_member}")
+string(REPEAT "ab_" 63 long_key)
+string(REGEX REPLACE "_$" "" long_key "${long_key}")
+string(REPEAT "ab " 63 long_words)
+string(REGEX REPLACE " $" "" long_words "${long_words}")
+foreach(line "char ${long_member}[4]; /* long */"
+             "int llvm_${long_key}; /* llvm_${long_key} */")
+    string(FIND "${header}" "${line}" at)
+    if(at LESS 0)
+        message(FATAL_ERROR "snx_settings.h lacks the long \"${line}\":\n${header}")
+    endif()
+endforeach()
+foreach(line "LLVMPassBuilderOptionsSet${long_id}(options, (unsigned)s->llvm_${long_key})")
+    string(FIND "${llvm}" "${line}" at)
+    if(at LESS 0)
+        message(FATAL_ERROR "settings_llvm.c lacks the long \"${line}\":\n${llvm}")
+    endif()
+endforeach()
+foreach(line "{\"llvm_${long_key}\", NULL, \"LLVMPassBuilderOptionsSet${long_id}, LLVM's own value until it is set\", INI_INT, 0, &g_settings.llvm_${long_key}, 0, INT_MAX, NULL, \"LLVM ${long_words}\", NULL, 0, 0, 0}"
+             "{\"long\", \"\", \"${long_name}\", INI_TEXT, 0, g_settings.${long_member}, 0, 0, NULL, \"${long_name}\", NULL, 0, 0, sizeof g_settings.${long_member}}")
+    string(FIND "${launch};${runtime}" "${line}" at)
+    if(at LESS 0)
+        message(FATAL_ERROR "the tables lack the long row ${line}:\n${launch}\n${runtime}")
     endif()
 endforeach()
 if(header MATCHES "no_such_option|not_in_this_llvm")

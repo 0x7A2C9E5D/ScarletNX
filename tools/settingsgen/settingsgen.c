@@ -119,23 +119,44 @@ static char* cat3(const char* a, const char* b, const char* c) {
     return d;
 }
 
-static void outs(const char* s) {
-    size_t n = strlen(s);
+static void outs_n(const char* s, size_t n) {
     if (olen + n + 1 > ocap) {
         ocap = (olen + n + 1) * 2;
         obuf = (char*)realloc(obuf, ocap);
         if (!obuf) fail(0, "out of memory");
     }
-    memcpy(obuf + olen, s, n + 1);
+    memcpy(obuf + olen, s, n);
     olen += n;
+    obuf[olen] = 0;
 }
+static void outs(const char* s) { outs_n(s, strlen(s)); }
+/* fmt with %s, %d, %c and %% only, straight to the output: C90 has no vsnprintf, and a buffer could not be sized for a
+   name of any length */
 static void out(const char* fmt, ...) {
-    char line[1024];
+    char number[32];
     va_list ap;
+    const char* p;
     va_start(ap, fmt);
-    vsprintf(line, fmt, ap);
+    for (p = fmt; *p; p++) {
+        const char* run = p;
+        while (*p && *p != '%') p++;
+        outs_n(run, (size_t)(p - run));
+        if (!*p) break;
+        p++;
+        if (*p == 's')
+            outs(va_arg(ap, const char*));
+        else if (*p == 'd') {
+            sprintf(number, "%d", va_arg(ap, int));
+            outs(number);
+        } else if (*p == 'c') {
+            number[0] = (char)va_arg(ap, int);
+            outs_n(number, 1);
+        } else if (*p == '%')
+            outs_n("%", 1);
+        else
+            fail(0, "out: a %%%c conversion", *p);
+    }
     va_end(ap);
-    outs(line);
 }
 /* s as a C string literal, NULL as NULL */
 static void out_string(const char* s) {
@@ -419,6 +440,7 @@ static void read_spec(const char* path) {
             if (table < 0) fail(number, "a setting before its table");
             if (rest[0] == '@') {
                 if (tables[table].scope != S_LLVM) fail(number, "setting @ID is an llvm table's");
+                if (noverrides == MAX_SETTINGS) fail(number, "too many @ID settings");
                 o = &overrides[noverrides++];
                 o->id = dup(rest + 1);
                 o->table = table;
@@ -593,15 +615,18 @@ static void fill_passes(int table) {
         s->words = dup("Off|On");
         s->levels = levels[i];
         if (!s->help) {
-            char text[256];
+            char at[64]; /* " -O0, -O1, -O2, -O3, -Os, -Oz" at most */
+            char* head;
             int first = 1;
-            sprintf(text, "LLVM's %.80s pass, in the pipelines of", names[i]);
+            at[0] = 0;
             for (l = 0; l < 6; l++)
                 if (levels[i] & 1 << l) {
-                    sprintf(text + strlen(text), "%s -O%c", first ? "" : ",", LEVELS[l]);
+                    sprintf(at + strlen(at), "%s -O%c", first ? "" : ",", LEVELS[l]);
                     first = 0;
                 }
-            s->help = dup(text);
+            head = cat3("LLVM's ", names[i], " pass, in the pipelines of");
+            s->help = cat3(head, at, "");
+            free(head);
         }
         free(auto_name);
         free(key);
@@ -623,7 +648,7 @@ static void fill_options(int table, const char* header, const char* prefix, cons
     for (p = text; (p = strstr(p, prefix)) != NULL; p += np) {
         const char *q = p + np, *name, *type, *r = p;
         size_t nname, ntype;
-        char id[128], auto_name[192], key[192], *spaced, *sn;
+        char *id, *auto_name, *key, *spaced, *sn;
         Setting* s;
         while (r > text && isspace((unsigned char)r[-1])) r--;
         if (r == p || r < text + 4 || strncmp(r - 4, "void", 4) ||
@@ -632,7 +657,7 @@ static void fill_options(int table, const char* header, const char* prefix, cons
         name = q;
         while (isalnum((unsigned char)*q)) q++;
         nname = (size_t)(q - name);
-        if (!nname || nname >= sizeof id || *q != '(') continue;
+        if (!nname || *q != '(') continue;
         q++;
         while (isspace((unsigned char)*q)) q++;
         if (strncmp(q, ref, strlen(ref))) continue;
@@ -650,12 +675,11 @@ static void fill_options(int table, const char* header, const char* prefix, cons
         while (isalnum((unsigned char)*q) || *q == '_') q++; /* the argument's name */
         while (isspace((unsigned char)*q)) q++;
         if (*q != ')') continue; /* more arguments */
-        memcpy(id, name, nname);
-        id[nname] = 0;
+        id = dup_n(name, nname);
         spaced = words_of(id);
-        sprintf(auto_name, "LLVM %s", spaced);
+        auto_name = cat3("LLVM ", spaced, "");
         sn = snake(id);
-        sprintf(key, "llvm_%s", sn);
+        key = cat3("llvm_", sn, "");
         s = new_llvm(table, kind, id, auto_name, key);
         s->type = T_INT;
         s->llvm_type = dup_n(type, ntype);
@@ -671,11 +695,10 @@ static void fill_options(int table, const char* header, const char* prefix, cons
             s->hi = dup("INT_MAX");
         }
         s->def = NULL; /* LLVM's own until it is set */
-        if (!s->help) {
-            char help[256];
-            sprintf(help, "%s%s, LLVM's own value until it is set", setter, id);
-            s->help = dup(help);
-        }
+        if (!s->help) s->help = cat3(setter, id, ", LLVM's own value until it is set");
+        free(id);
+        free(auto_name);
+        free(key);
         free(spaced);
         free(sn);
     }
