@@ -26,9 +26,6 @@ get wrong and points to the skills that carry the procedures.
   GPL-2.0-only code can't be. Switchbrew and the SDK's own behavior, read from the disassembly, are the primary
   references, with Atmosphère (Mesosphère's kernel, Stratosphère's services) as the reference for how Horizon
   behaves. It is GPL-2.0-only, so it is read, never ported.
-- **Formatting:** `scripts/format.sh` before committing (clang-format 23, ruff). It only changes whitespace, and
-  the whole history is formatted, so an unformatted file shows up as noise in every diff. Third-party code
-  (the packages in `.cache/cpm`) is never formatted.
 - Ask only real decisions. When the next step is obvious, take it.
 
 ## Environment
@@ -40,7 +37,7 @@ get wrong and points to the skills that carry the procedures.
   `pgrep -x cc1`, by process name), then `kill PID` with the numbers in a separate command. The same goes for waiting:
   `until ! pgrep -f PATTERN` matches its own shell and never ends. Wait on a file the job writes, or `pgrep -x NAME`.
 - Don't build while a timing-sensitive test runs: the build deploys a new runtime into `games/` and loads the CPU.
-- No `sudo` and no system packages: the user installs those. `uvx` fetches ruff on its own.
+- No `sudo` and no system packages: the user installs those.
 - Context is scarce. Never print a whole log (a game's `<id>.log` grows to megabytes), a whole disassembly or a
   ninja log. Use `grep -n`, `tail`, `tools/disasm.py` on one function.
 
@@ -56,7 +53,6 @@ get wrong and points to the skills that carry the procedures.
 | Name addresses / disassemble game code | `tools/symbols.py work/Game ADDR...` / `tools/disasm.py work/Game FUNC` |
 | Summarize a log (a player's too) / the game reports on GitHub | `build/scarletnx --scan-log LOG [--format markdown]` / `scripts/game-reports.py index [--title-id ID]`; the `scarletnx` MCP server (`build/scarletnx --mcp`, `.mcp.json`) has both and the game's code |
 | Run the tests | `ctest --test-dir build` (`-R swipc` for the IPC generator) |
-| Format / check | `scripts/format.sh` / `scripts/format.sh --check` |
 
 Clang is the only compiler: the configure stops on any other; the recompiler builds game code with LLVM (required), its
 only backend. The third-party libraries are CPM packages pinned in `cmake/dependencies.cmake`, downloaded once into `.cache/cpm`, and

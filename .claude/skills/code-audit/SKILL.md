@@ -298,7 +298,6 @@ Build, run the tests (`ctest --test-dir build`: the generator, the services' and
 ```bash
 cmake --preset default -B build && cmake --build build
 ctest --test-dir build
-scripts/format.sh --check
 tools/run_game.py <id> --runs 3 --dump work/<Game>
 ```
 
@@ -337,8 +336,6 @@ git diff --cached --stat                                     # do the touched fi
 Any claim you cannot find in the diff must be deleted from the message or fixed in the code before committing. Both are fine; shipping the claim is not.
 
 This exists because a message written from intent describes the fix you meant, and the diff is the fix you made.
-
-**Run `scripts/format.sh --check` before every commit.** The repo has no pre-commit hook and CI doesn't check formatting, so this is the only gate: an unformatted file shows up as noise in every later diff. If a hook is ever added, never skip it with `--no-verify`.
 
 **Commit at the end of Phase B's remediation and of each confirmation round, as soon as the build and the runs are green.** Phase A commits nothing (it edits nothing). Do not roll into the next confirmation round with work uncommitted: two rounds of uncommitted work with no fallback is a real failure mode, not a hypothetical one.
 

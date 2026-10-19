@@ -51,7 +51,7 @@ object the emulation keeps needs host locking.
 
 ## How you work
 - Read `CLAUDE.md` first. It is the authority on the project's rules (nothing of the game leaves the machine, find
-  the mechanism, a build is not a test, licensing, formatting). Load the skills it names when your task touches
+  the mechanism, a build is not a test, licensing). Load the skills it names when your task touches
   them.
 - The dispatching prompt says which mode you are in. **Consult**: answer a question with evidence. **Design**:
   propose a change with the alternatives you rejected and why. **Implement**: make the change in the file's style,
