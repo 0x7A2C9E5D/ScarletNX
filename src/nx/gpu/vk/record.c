@@ -732,12 +732,15 @@ void rec_CmdBeginRendering(VkCommandBuffer cb, const VkRenderingInfo* ri) {
 
 /* ------------------------------------------------------------ descriptor sets */
 /* A draw's new descriptor set is allocated and written on the recording thread too, ahead of the commands that bind
-   it: the GPU thread gets a stand-in handle at once (an odd number, which a driver's handle, a pointer or an offset
-   aligned to more, never is), and the recording thread keeps which set it stands for until the commands binding it
-   are recorded. The sets come from the recording thread's own pools for each frame slot, reset in order with the
-   commands when the slot is reused (vk_rec_frame_reset). Stand-ins count up and are reused after REC_SETS, more sets
-   than two frames ever make before vk_frame_check ends one */
+   it: the GPU thread gets a stand-in handle at once (REC_STANDIN in the top bits, which no handle has: a driver's is a
+   pointer or a small offset, and the validation layer's are counters), and the recording thread keeps which set it
+   stands for until the commands binding it are recorded. The sets come from the recording thread's own pools for
+   each frame slot, reset in order with the commands when the slot is reused (vk_rec_frame_reset). Stand-ins count up
+   and are reused after REC_SETS, more sets than two frames ever make before vk_frame_check ends one */
 #define REC_SETS        (1u << 17)
+/* not merely odd: half of the validation layer's handles are odd, and a real set taken for a stand-in went unbound,
+   its dispatch reading no descriptors until the GPU hung */
+#define REC_STANDIN     0x5EC5000000000000ull
 #define REC_SPARE_SETS  32
 #define REC_SPARE_KINDS 16
 static VkDescriptorSet g_rset[REC_SETS];
@@ -754,9 +757,9 @@ typedef struct {
 static RecPools g_rpools[VK_FRAMES];
 static u32 g_frame_sets[VK_FRAMES]; /* stand-ins handed out in each slot since its reset (the GPU thread's count) */
 
-static int rec_set_standin(VkDescriptorSet s) { return ((u64)(uintptr_t)s & 1) != 0; }
+static int rec_set_standin(VkDescriptorSet s) { return ((u64)(uintptr_t)s & ~(u64)(REC_SETS - 1)) == REC_STANDIN; }
 static VkDescriptorSet rec_set_real(VkDescriptorSet s) {
-    return rec_set_standin(s) ? g_rset[((u64)(uintptr_t)s >> 1) & (REC_SETS - 1)] : s;
+    return rec_set_standin(s) ? g_rset[(u64)(uintptr_t)s & (REC_SETS - 1)] : s;
 }
 /* count sets of layout from slot f's pools into sets: count, or 1 when a fresh pool can't hold that many, 0 when none */
 static u32 rec_alloc_n(RecPools* f, VkDescriptorSetLayout layout, VkDescriptorSet* sets, u32 count) {
@@ -883,5 +886,5 @@ VkDescriptorSet vk_rec_new_set(VkDescriptorSetLayout layout, u32 n, const VkWrit
     }
     g_frame_sets[slot]++;
     rec_commit();
-    return (VkDescriptorSet)(uintptr_t)(((u64)id << 1) | 1);
+    return (VkDescriptorSet)(uintptr_t)(REC_STANDIN | id);
 }
