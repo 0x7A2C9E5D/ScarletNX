@@ -37,7 +37,7 @@ enum {
 enum { ROOM_INET = 1, ROOM_PROTOCOL_IP = 1, ROOM_PROTOCOL_UDP = 4 };
 #define ROOM_MEMBERS    254 /* MaxConcurrentConnections */
 #define ROOM_SERVICE_MS 5
-#define ROOM_LEAVE_MS   500   /* for the room to take the disconnect */
+#define ROOM_LEAVE_MS   1000 /* for the room to take what was queued, then the disconnect */
 #define ROOM_QUEUE_MAX  256   /* datagrams a socket holds unread; the next ones are dropped, as UDP drops them */
 #define ROOM_PORT_FIRST 49152 /* the ephemeral ports an unbound socket takes */
 
@@ -1082,9 +1082,10 @@ void snx_room_leave(SnxRoom* r) {
     was = r->state;
     if (was == SNX_ROOM_IN) r->state = SNX_ROOM_CLOSED;
     snx_unlock(&r->lk);
-    /* a polite leave, so the room tells the others at once rather than at ENet's timeout */
+    /* a polite leave, so the room tells the others at once rather than at ENet's timeout, after what was queued: the
+       goodbyes of an ldn closed just before, which enet_peer_disconnect would drop */
     if (was == SNX_ROOM_IN) {
-        enet_peer_disconnect(r->peer, 0);
+        enet_peer_disconnect_later(r->peer, 0);
         deadline = snx_net_now_us() + (int64_t)ROOM_LEAVE_MS * 1000;
         while (snx_net_now_us() < deadline) {
             int k = enet_host_service(r->host, &ev, 10);

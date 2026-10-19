@@ -337,6 +337,41 @@ static void datagrams(void) {
     snx_room_leave(ra);
 }
 
+/* ============================================================ the goodbyes */
+/* ldn closed and the room left at once, as the game's exit does them: the room still gets the host's DestroyNetwork
+   and the station's Disconnect, which an Eden on the other side needs (its ldn doesn't watch the members) */
+static void goodbyes(void) {
+    SnxRoom *ra, *rb;
+    SnxLdn *a, *b;
+    SnxLdnNetworkInfo net, found[2];
+    uint8_t name[SNX_LDN_USER_NAME];
+    int why, destroys, disconnects, i;
+    CHECK(join(&ra, "Aogo", "secret", &why) == 0 && join(&rb, "Xuji", "secret", &why) == 0);
+    CHECK(snx_ldn_open_room(&a, ra, changed_a, NULL) == 0 && snx_ldn_open_room(&b, rb, changed_b, NULL) == 0);
+    network_of(a, &net);
+    CHECK(snx_ldn_create_network(a, &net) == 0 && snx_ldn_scan(b, NULL, found, 2, 1000) == 1);
+    name_of(name, "Xuji");
+    CHECK(snx_ldn_connect(b, &found[0], name, 4, 2000) == 0);
+    destroys = fake_room_ldn_count(g_room, SNX_ROOM_LDN_DESTROY_NETWORK, NULL);
+    snx_ldn_close(a);
+    snx_room_leave(ra);
+    for (i = 0; i < 600 && fake_room_ldn_count(g_room, SNX_ROOM_LDN_DESTROY_NETWORK, NULL) == destroys; i++)
+        sleep_ms(5);
+    CHECK(fake_room_ldn_count(g_room, SNX_ROOM_LDN_DESTROY_NETWORK, NULL) == destroys + 1);
+    /* the other way round: the station's console goes */
+    CHECK(join(&ra, "Aogo", "secret", &why) == 0 && snx_ldn_open_room(&a, ra, changed_a, NULL) == 0);
+    network_of(a, &net);
+    CHECK(snx_ldn_create_network(a, &net) == 0 && snx_ldn_scan(b, NULL, found, 2, 1000) == 1);
+    CHECK(snx_ldn_connect(b, &found[0], name, 4, 2000) == 0);
+    disconnects = fake_room_ldn_count(g_room, SNX_ROOM_LDN_DISCONNECT, NULL);
+    snx_ldn_close(b);
+    snx_room_leave(rb);
+    for (i = 0; i < 600 && fake_room_ldn_count(g_room, SNX_ROOM_LDN_DISCONNECT, NULL) == disconnects; i++) sleep_ms(5);
+    CHECK(fake_room_ldn_count(g_room, SNX_ROOM_LDN_DISCONNECT, NULL) == disconnects + 1);
+    snx_ldn_close(a);
+    snx_room_leave(ra);
+}
+
 /* ============================================================ the handler */
 /* a handler that takes its time on the members' change: the one set after it is set only once it has returned */
 static int g_slow_in, g_slow_done;
@@ -394,6 +429,7 @@ int main(void) {
     joining();
     networks();
     datagrams();
+    goodbyes();
     handler();
     closing();
     fake_room_stop(g_room);
