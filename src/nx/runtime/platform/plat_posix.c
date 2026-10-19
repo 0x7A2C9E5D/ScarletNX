@@ -137,6 +137,11 @@ static void* thread_start(void* p) {
     return NULL;
 }
 
+#if defined(__linux__) && !defined(__ANDROID__)
+/* every CPU the process may use (plat_cpus), which plat_thread gives each thread it starts: one a game thread started
+   would otherwise run only on the share of that thread's core (plat_thread_cpus) */
+static cpu_set_t g_all_cpus;
+#endif
 int plat_thread(PThreadFn fn, void* arg, size_t stack) {
     ThreadStart* s = malloc(sizeof *s);
     pthread_attr_t a;
@@ -148,6 +153,9 @@ int plat_thread(PThreadFn fn, void* arg, size_t stack) {
     s->alt_stack = stack == 0 || stack >= ALT_STACK_MIN_THREAD;
     pthread_attr_init(&a);
     pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (CPU_COUNT(&g_all_cpus)) pthread_attr_setaffinity_np(&a, sizeof g_all_cpus, &g_all_cpus);
+#endif
     if (stack) {
         /* smaller than the minimum, setstacksize fails and the default would be used silently */
         if (stack < THREAD_STACK_FLOOR) stack = THREAD_STACK_FLOOR;
@@ -172,6 +180,37 @@ void plat_thread_exit(void) {
     alt_stack_off();
     pthread_exit(NULL);
 }
+/* Linux only: Android's CPUs differ in speed, so a fixed share of them would make a core slow */
+#if defined(__linux__) && !defined(__ANDROID__)
+int plat_cpus(int* ids, int max) {
+    int c, n = 0;
+    if (sched_getaffinity(0, sizeof g_all_cpus, &g_all_cpus)) {
+        CPU_ZERO(&g_all_cpus);
+        return 0;
+    }
+    for (c = 0; c < CPU_SETSIZE && n < max; c++)
+        if (CPU_ISSET(c, &g_all_cpus)) ids[n++] = c;
+    return n;
+}
+void plat_thread_cpus(const int* ids, int n) {
+    cpu_set_t s;
+    int i;
+    CPU_ZERO(&s);
+    for (i = 0; i < n; i++) CPU_SET(ids[i], &s);
+    if (sched_setaffinity(0, sizeof s, &s))
+        WARN_LIMIT(1, "Could not move a game thread to its CPUs: %s\n", strerror(errno));
+}
+#else
+int plat_cpus(int* ids, int max) {
+    (void)ids;
+    (void)max;
+    return 0;
+}
+void plat_thread_cpus(const int* ids, int n) {
+    (void)ids;
+    (void)n;
+}
+#endif
 void plat_yield(void) { sched_yield(); }
 void plat_sleep_ns(i64 ns) {
     struct timespec ts;

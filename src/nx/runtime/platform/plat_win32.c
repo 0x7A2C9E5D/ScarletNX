@@ -101,6 +101,15 @@ void plat_thread_exit(void) {
     sleep_timer_close();
     ExitThread(0);
 }
+int plat_cpus(int* ids, int max) {
+    (void)ids;
+    (void)max;
+    return 0;
+}
+void plat_thread_cpus(const int* ids, int n) {
+    (void)ids;
+    (void)n;
+}
 void plat_yield(void) { SwitchToThread(); }
 void plat_sleep_ns(i64 ns) {
     LARGE_INTEGER due;
