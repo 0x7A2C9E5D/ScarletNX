@@ -489,7 +489,7 @@ endif()
 
 # mm:u and the smaller services, hid's IHidServer and acc (misc.c, hid.c, acc.c, whose user picture snx_splash draws),
 # with the kernel objects stubbed
-if(TARGET OpenSSL::Crypto AND TARGET snx_splash)
+if(TARGET OpenSSL::Crypto AND NOT SNX_TOOLS_ONLY)
     add_executable(snx-test-misc-service misc_service.c "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_touch.c"
         "${PROJECT_SOURCE_DIR}/src/nx/hle/services/hid_motion.c")
     snx_test_target(snx-test-misc-service 23)
