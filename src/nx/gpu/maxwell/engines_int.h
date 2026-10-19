@@ -51,5 +51,8 @@ u64 mme_native_hash(int k);
 /* runs implementation k over the np parameters p, as mme_out sends: 0 when it leaves this call to the interpreter,
    which it says before sending anything */
 int mme_native_run(int k, GpuChannel* ch, MmeRec* rec, const u32* p, u32 np);
+/* the iterations a native implementation loops over at most, about 9 of the macro's instructions each, under the
+   interpreter's limit (mme.c's MME_STEPS): a call that could loop more is the interpreter's */
+#define MME_LOOP_MAX 500000u
 
 #endif
