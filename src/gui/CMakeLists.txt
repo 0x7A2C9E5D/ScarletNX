@@ -97,7 +97,7 @@ set_target_properties(scarletnx-gui PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED
 target_compile_options(scarletnx-gui PRIVATE -Wall -Wextra -Werror=missing-prototypes)
 target_compile_definitions(scarletnx-gui PRIVATE SNX_SOURCE_DIR="${CMAKE_SOURCE_DIR}" SNX_BUILD_DIR="${CMAKE_BINARY_DIR}")
 target_link_libraries(scarletnx-gui PUBLIC snx_gui_support PRIVATE scarletnx-common SDL3::SDL3 snx_window_icon
-                      snx_build_info snx_pad_sdl snx_splash snx_gui_languages)
+                      snx_build_info snx_pad_sdl snx_splash snx_gui_languages snx_demangle)
 if(WIN32 AND NOT SNX_BUILD_NX)
     enable_language(RC)
     target_sources(scarletnx-gui PRIVATE ../nx/runtime/platform/runtime.rc)
@@ -178,7 +178,7 @@ if(BUILD_TESTING)
     snx_gui_languages(snx_gui_languages_test "${PROJECT_SOURCE_DIR}/tests/po"
                       "${CMAKE_BINARY_DIR}/generated/gui_languages_test.c")
     target_link_libraries(snx-test-gui-sdl PRIVATE snx_gui_support scarletnx-common SDL3::SDL3 snx_window_icon
-                          snx_build_info snx_pad_sdl snx_splash snx_gui_languages_test)
+                          snx_build_info snx_pad_sdl snx_splash snx_gui_languages_test snx_demangle)
     if(APPLE) # it compiles main.c itself, which calls the frontend (apple.m and its Swift), as scarletnx-gui links it
         target_sources(snx-test-gui-sdl PRIVATE apple.m)
         target_link_libraries(snx-test-gui-sdl PRIVATE snx_apple_frontend "-framework Foundation")

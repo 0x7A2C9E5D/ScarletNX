@@ -6,6 +6,8 @@
 #include <SDL3/SDL_main.h>
 #endif
 #include "common/utilities/common.h"
+#include "common/utilities/demangle.h"
+#include "common/utilities/logscan.h"
 #include "gui/browser.h"
 #include "gui/editor.h"
 #include "common/utilities/font.h"
@@ -5097,11 +5099,23 @@ static char* newest_log(const App* app) {
     free(folder);
     return newest;
 }
-/* the message on the screen, the last run's output and the newest game log, as scarletnx.log in the data folder's state
+/* the game log's summary (common/utilities/logscan.h) under "== summary ==", for the top of the shared file: how
+   the run ended and where, without the log's last lines, which follow in full. "" when it can't be made */
+static char* log_summary(const char* log) {
+    SnxLogScan scan;
+    char *markdown, *out;
+    if (snx_logscan(&scan, log, strlen(log))) return snx_strdup("");
+    markdown = snx_logscan_markdown(&scan, "the game log", "###", 1, snx_demangle);
+    snx_logscan_free(&scan);
+    out = markdown ? snx_format("== summary ==\n%s\n", markdown) : snx_strdup("");
+    free(markdown);
+    return out;
+}
+/* the message on the screen, the summary of the newest game log, the last run's output and that log, as scarletnx.log in the data folder's state
    folder (the working folder without one: started from the desktop, that is the home folder), then on Android handed
    to the share sheet, elsewhere its path copied */
 static void share_log(App* app) {
-    char *game, *run, *played, *text, *saved, *state = NULL;
+    char *game, *run, *played, *summary, *text, *saved, *state = NULL;
     const char* folder;
     folder = app->cwd;
     if (app->data_dir && snx_app_dir(app->data_dir)) state = snx_app_kind_dir(app->data_dir, SNX_USER_STATE);
@@ -5114,10 +5128,11 @@ static void share_log(App* app) {
     game = newest_log(app);
     run = log_tail(app->run_log, 1 << 20);
     played = log_tail(game, 4 << 20);
-    text = snx_format("%s\nMessage: %s\n%s%s%s%s\n== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
+    summary = game ? log_summary(played) : snx_strdup("");
+    text = snx_format("%s\nMessage: %s\n%s%s%s%s\n%s== the last run: %s ==\n%s\n\n== %s ==\n%s\n", snx_build_info(),
                       app->message, app->left ? app->left : "", app->left_clear ? SAY_LEFT_CLEAR "\n" : "",
                       app->cleaned.count ? "Clean old settings:\n" : "", app->cleaned.text ? app->cleaned.text : "",
-                      app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
+                      summary, app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
     if (!saved || snx_write_file(saved, text, strlen(text)))
         snprintf(app->message, sizeof(app->message), "%s", snx_tr(SAY_LOG_FAILED));
@@ -5135,6 +5150,7 @@ static void share_log(App* app) {
 #endif
     free(saved);
     free(text);
+    free(summary);
     free(played);
     free(run);
     free(game);

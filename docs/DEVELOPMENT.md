@@ -51,25 +51,23 @@ python3 tools/run_game.py <id> --runs 5 --seconds 60 --dump "$work/Game" --scrip
 python3 tools/symbols.py "$work/Game" cf34380
 python3 tools/disasm.py "$work/Game" NvRmStreamFlushSync
 python3 tools/disasm.py "$work/Game" cf34240 cf343c0
-python3 scripts/logscan.py "$games/<id>/<id>.log" [--format markdown]
+build/scarletnx --scan-log "$games/<id>/<id>.log" [--format markdown]
 ```
 
-- `logscan.py`: a log (or a `.gz` of one, a player's report) as a summary: the build, title ID, game version and
-  GPU from the log's header, how the run ended, the game function it is pinned on (for `svcBreak`, the first frame
-  past the SDK's abort), the service commands the runtime doesn't implement, warnings, and a signature that is the
-  same for every log failing the same way. JSON (a line a log, versioned by `schema`) or a markdown summary for an
-  issue. Paths are shortened to `~`, and the crash report's code and memory dumps are left out. It also reads the
-  launcher's Share log file (the game log in it).
-- Game reports: `.github/workflows/game-reports.yml` runs `scripts/game-reports.py triage` on each issue and comment.
-  An issue with a log attached (`.log`, `.txt`, `.gz`, `.zip`) or pasted in a fenced block gets one comment with
-  logscan's summary of each, edited as logs are added, the labels `game report` and `log: <how it ended>`, and the
-  other reports with the same signature named. `triage --issue N --dry-run` shows what it would post.
-  `scripts/game-reports.py index [--title-id ID] [--signature TEXT]` lists the reports and their logs as JSON lines.
-- `tools/snx_mcp.py`: an MCP server (stdio, no packages) that `.mcp.json` registers for agents opened in the
-  repository. `list_reports`, `get_report` and `fetch_log` read the game reports through `gh` (`fetch_log` saves a
-  log in `~/.cache/scarletnx/reports/<issue>/`), `scan_log` and `read_log` read logs a pattern or a range at a time,
-  `find_game` matches a title ID to an extracted game in `work/` with its version, and `symbolize` and `disassemble`
-  run `tools/symbols.py` and `tools/disasm.py` on it. A report's addresses match only the same game version.
+- `--scan-log` (`src/common/utilities/logscan.c`, also built as `build/snx-logscan`): a log, or the launcher's Share
+  log file (the game log in it), as a summary: the build, title ID, game version and GPU from the log's header, how
+  the run ended, the game function it is pinned on (for `svcBreak`, the first frame past the SDK's abort), the service
+  commands the runtime doesn't implement, warnings, the frames over 50 ms (how many, the slowest, and what the
+  slowest did, from the renderer's frame lines), and a signature that is the same for every log failing the same way.
+  JSON (a line a log, versioned by `schema`) or a markdown summary for an issue. Paths are shortened to `~`, and the
+  crash report's code and memory dumps are left out. The launcher's Share log puts the same summary at the top of
+  `scarletnx.log`. A log is read once, a line at a time, in fixed memory: a gigabyte takes about two seconds.
+- Game reports: `.github/workflows/game-reports.yml` builds `snx-logscan` and runs `scripts/game-reports.py triage` on
+  each issue and comment. An issue with a log attached (`.log`, `.txt`, `.gz`, `.zip`) or pasted in a fenced block gets
+  one comment with the summary of each, edited as logs are added, the labels `game report` and `log: <how it ended>`,
+  and the other reports with the same signature named. `triage --issue N --dry-run --logscan build/snx-logscan` shows
+  what it would post. `scripts/game-reports.py index [--title-id ID] [--signature TEXT]` lists the reports and their
+  logs as JSON lines.
 
 - Runtime: `--seconds=N` / `--frames=N`; `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
   `--script=ms:hexbuttons,...` (or `Nf:hexbuttons` to press at present N), `--press_len=ms` (default 300).

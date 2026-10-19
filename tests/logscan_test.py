@@ -1,24 +1,33 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-"""scripts/logscan.py on made-up logs in the runtime's formats: the header lines, each kind of failure and the
+"""The log summary (src/common/utilities/logscan.c, as snx-logscan or scarletnx --scan-log, the program given) on
+made-up logs in the runtime's formats: the header lines, each kind of failure and the
 function it is pinned on (past the SDK's abort for svcBreak), the place a crash is put (the game, the runtime, a
 library), the older nightlies' svcBreak line and header, service commands counted, signatures that agree across runs,
-paths shortened and the dumps left out, gzip and the markdown summary. Offline."""
+paths shortened and the dumps left out, invalid UTF-8, long lines, the markdown's escaping. Offline.
 
-import gzip
-import importlib.util
+    tests/logscan_test.py PROGRAM [ARGS...]   (build/snx-logscan, or build/scarletnx --scan-log)"""
+
 import json
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = ROOT / 'scripts' / 'logscan.py'
-spec = importlib.util.spec_from_file_location('logscan', SCRIPT)
-logscan = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(logscan)
+PROGRAM = sys.argv[1:]
+SCHEMA = 1
+LINE = 300
+
+
+def run(args, text=None):
+    out = subprocess.run(PROGRAM + args, input=text, capture_output=True, check=True)
+    return out.stdout.decode('utf-8')
+
+
+def scan(text):
+    return json.loads(run(['-'], text.encode('utf-8') if isinstance(text, str) else text))
+
 
 HEADER = """[   0.00] ScarletNX - Some Game
 [   0.00] build: ScarletNX main 1234abc (clang 23.1.3, Linux x86_64)
@@ -127,6 +136,24 @@ LAUNCHER = (
     '\n== C:\\Users\\someone\\state\\Some Game.log ==\n' + OLD_SVC_BREAK
 )
 
+# the renderer's frame lines (gpu/vk/renderer.c): each frame over 50 ms, and every 600 presents the counts with the
+# frames over 50 ms since the last such line (two counted there, then one more after it)
+FRAMES = HEADER + (
+    '[   5.00] vulkan: a 180 ms frame: 40 shaders translated (120 ms), 30 pipelines made (50 ms waited for), 2 render '
+    'targets made, 10 texture uploads (512 KB), 0 ms in finishes\n'
+    '[   6.00] vulkan: a 70 ms frame: 1 shaders translated (3 ms), 2 pipelines made (6 ms waited for), 0 render targets '
+    'made, 300 texture uploads (90000 KB), 4 ms in finishes\n'
+    '[  10.00] vulkan: 900 shaders translated (4000 ms), 700 pipelines made (100 from the cache, 9000 ms making, 800 ms '
+    'waited for), 40 render targets made, 5000 texture uploads (900 MB); 2 frames over 50 ms in the last 600, the '
+    'slowest 180 ms\n'
+    '[  10.00] vulkan: memory used and budgeted: heap 0 3000 of 7000 MB, heap 1 100 of 200 MB\n'
+    + ''.join(
+        f'[  {11 + i}.00] vulkan: a {51 + i} ms frame: 0 shaders translated (0 ms), 0 pipelines made (0 ms waited '
+        'for), 0 render targets made, 0 texture uploads (0 KB), 0 ms in finishes\n'
+        for i in range(6)
+    )
+)
+
 FATAL_ONLY = (
     HEADER
     + """[   0.50] FATAL: Could not load the game executables. See the .log for details.
@@ -140,8 +167,8 @@ def check(cond, what):
 
 
 def main():
-    r = logscan.scan(SVC_BREAK)
-    check(r['schema'] == logscan.SCHEMA, 'schema')
+    r = scan(SVC_BREAK)
+    check(r['schema'] == SCHEMA, 'schema')
     check(
         r['title'] == 'Some Game' and r['title_id'] == '0100AAAABBBB0000' and r['game_version'] == '1.2.3',
         f'header: {r["title"]!r} {r["title_id"]!r} {r["game_version"]!r}',
@@ -169,12 +196,12 @@ def main():
     check(any('texture format' in w['message'] for w in r['warnings']), 'warnings')
     check(r['game_output'] == ['loading ~/save.bin'], f'game output, its path shortened: {r["game_output"]}')
 
-    old = logscan.scan(OLD_SVC_BREAK)
+    old = scan(OLD_SVC_BREAK)
     check(old['title'] == 'Some Game', f"the older header's folder is dropped: {old['title']!r}")
     check(old['build'] is None and old['title_id'] is None, 'an older log has no build or title id')
     check(old['signature'] == r['signature'], f'the same failure, the same signature: {old["signature"]}')
 
-    c = logscan.scan(CRASH_IN_GAME)
+    c = scan(CRASH_IN_GAME)
     check(
         c['outcome'] == 'crash' and c['failure']['signal'] == '11' and c['failure']['game_address'] == '10',
         'crash fields',
@@ -184,23 +211,40 @@ def main():
     check(c['signature'] == 'crash (invalid memory access) in _ZN4Game6Render4DrawEv', c['signature'])
     check(any('memory_gb=6' in d for d in c['failure']['details']), 'the crash report hint is kept')
 
-    rt = logscan.scan(CRASH_IN_RUNTIME)
+    rt = scan(CRASH_IN_RUNTIME)
     check(rt['signature'] == 'crash (invalid memory access) in the runtime 1234abc +1a2b3c', rt['signature'])
-    lib = logscan.scan(CRASH_IN_LIBRARY)
+    lib = scan(CRASH_IN_LIBRARY)
     check(lib['signature'] == 'crash (invalid memory access) in libnvidia-glcore.so.580 ?', lib['signature'])
 
-    u = logscan.scan(UNDEFINED)
+    u = scan(UNDEFINED)
     check(u['outcome'] == 'unsupported instruction' and u['failure']['set'] == 'A64', 'A64 undefined instruction')
     check(u['signature'] == 'unsupported A64 instruction ce62c820', u['signature'])
 
-    f = logscan.scan(FATAL_ONLY)
+    f = scan(FATAL_ONLY)
     check(
         f['outcome'] == 'fatal'
         and f['signature'] == 'fatal Could not load the game executables. See the .log for details.',
         f'fatal: {f["signature"]}',
     )
 
-    la = logscan.scan(LAUNCHER)
+    fr = scan(FRAMES)['frames']
+    check(fr['slow'] == 8 and fr['slowest_ms'] == 180, f'slow frames: the stats line counted 2, 6 after it: {fr}')
+    check(
+        [f['ms'] for f in fr['slowest']] == [180, 70, 56, 55, 54], f'the slowest kept, slowest first: {fr["slowest"]}'
+    )
+    check(
+        fr['slowest'][0]['line'].startswith('a 180 ms frame: 40 shaders translated (120 ms), 30 pipelines'),
+        'what the slowest frame did',
+    )
+    check(
+        'frames over 50 ms in the last 600' in fr['stats'] and fr['memory'].startswith('memory used and budgeted:'),
+        'the last stats and memory lines',
+    )
+    check(scan(SVC_BREAK)['frames'] is None, 'no frame lines, no frames')
+    md = run(['-', '--format', 'markdown'], FRAMES.encode())
+    check('**Frames over 50 ms:** 8, the slowest 180 ms' in md, 'markdown frames')
+
+    la = scan(LAUNCHER)
     check(
         la['build'] == 'ScarletNX main 9999fff (clang 23.1.3, Windows x86_64)' and la['commit'] == '9999fff',
         f"the launcher's build: {la['build']}",
@@ -211,28 +255,36 @@ def main():
         f"the launcher's message, shortened: {la['launcher']['message']}",
     )
     check(
-        all(len(t) <= logscan.LINE + 3 for t in logscan.scan(HEADER + '[game] ' + 'x' * 5000)['game_output']),
+        all(len(t) <= LINE + 3 for t in scan(HEADER + '[game] ' + 'x' * 5000)['game_output']),
         'long lines are cut',
     )
 
     # nothing of the player's folders, the game's code or its memory in what is written
     for text in (SVC_BREAK, OLD_SVC_BREAK, CRASH_IN_GAME, LAUNCHER):
-        out = json.dumps(logscan.scan(text))
+        out = json.dumps(scan(text))
         for leak in ('someone', 'f90007ff', '58cca', '00000000ca8c0500', 'ca8c0500'):
             check(leak not in out, f'{leak} copied into the summary')
 
+    # invalid UTF-8 as U+FFFD: the JSON stays readable
+    bad = scan(HEADER.encode() + b'[game] caf\xe9 \xff\n')
+    check(bad['game_output'][-1] == 'caf\ufffd \ufffd', f'invalid UTF-8: {bad["game_output"]}')
+
+    # the markdown quotes the log as text: no mention, link, image or fence of its own
+    sneaky = HEADER.replace('Some Game', 'Hi @team [x](https://e.example) ![i](j)') + '[game] ```\n' + FATAL_ONLY
+    md = run(['-', '--format', 'markdown'], sneaky.encode())
+    check(
+        '@team' not in md and '[x](https://' not in md and '(https://' not in md and '![' not in md,
+        f'markdown escapes the title:\n{md[:300]}',
+    )
+    check('\n```\n```' not in md and "'" in md, 'a fence in a line is broken')
+
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / 'game.log.gz'
-        path.write_bytes(gzip.compress(SVC_BREAK.encode()))
-        run = subprocess.run(
-            [sys.executable, str(SCRIPT), str(path), '--format', 'markdown'], capture_output=True, text=True, check=True
-        )
-        check('**Signature:** `svcBreak in _ZN2nn3hid18GetNpadJoyHoldTypeEv`' in run.stdout, 'markdown from a .gz')
-        check('IAudioDevice` cmd 7 (undeclared, 2x)' in run.stdout, 'markdown service commands')
-        run = subprocess.run(
-            [sys.executable, str(SCRIPT), str(path), str(path)], capture_output=True, text=True, check=True
-        )
-        check(len(run.stdout.splitlines()) == 2, 'json: a line a log')
+        path = Path(tmp) / 'game.log'
+        path.write_text(SVC_BREAK)
+        md = run([str(path), '--format', 'markdown'])
+        check('**Signature:** `svcBreak in _ZN2nn3hid18GetNpadJoyHoldTypeEv`' in md, 'markdown from a file')
+        check('IAudioDevice` cmd 7 (undeclared, 2x)' in md, 'markdown service commands')
+        check(len(run([str(path), str(path)]).splitlines()) == 2, 'json: a line a log')
     print('logscan_test: ok')
 
 

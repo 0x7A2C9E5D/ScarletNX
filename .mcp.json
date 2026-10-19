@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "scarletnx": {
-      "command": "python3",
-      "args": ["tools/snx_mcp.py"]
-    }
-  }
-}

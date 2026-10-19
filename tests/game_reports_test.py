@@ -4,7 +4,9 @@
 """scripts/game-reports.py's triage and index against a GitHub kept in memory: an issue without a log left alone, one
 with a log summarized in one comment that later attachments edit, the labels for each outcome (a stale one removed),
 the other reports with the same signature named, a file that isn't a log said so, a .gz and a .zip unpacked, the
-summary's data read back by index, and pull requests skipped. Offline."""
+summary's data read back by index, and pull requests skipped. Offline.
+
+    tests/game_reports_test.py PROGRAM [ARGS...]   (the log summary: build/snx-logscan)"""
 
 import gzip
 import importlib.util
@@ -20,6 +22,7 @@ reports = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reports)
 
 BOT = 'github-actions[bot]'
+SCAN = reports.LogScan(sys.argv[1:])
 
 SVC_BREAK = """[   0.00] ScarletNX - Some Game
 [   0.00] build: ScarletNX main 1234abc (clang 23.1.3, Linux x86_64)
@@ -150,12 +153,12 @@ def main():
     gh = FakeGitHub()
     gh.add_issue(1, 'The launcher has a typo')
     check(
-        reports.triage(gh, event(1), fetch) == 'no log attached' and not gh.calls,
+        reports.triage(gh, event(1), SCAN, fetch) == 'no log attached' and not gh.calls,
         'an issue without a log is left alone',
     )
 
     gh.add_issue(2, f'It stops at the logos.\n\n[Some Game.log]({url(1, "Some%20Game.log")})', labels=['log: crash'])
-    result = reports.triage(gh, event(2), fetch)
+    result = reports.triage(gh, event(2), SCAN, fetch)
     check('svcBreak' in result, result)
     (summary,) = bot_comments(gh, 2)
     check(summary['body'].startswith(reports.MARK), 'the summary is marked')
@@ -168,7 +171,7 @@ def main():
 
     # a later comment attaches the same log zipped and a file that isn't a log: one comment, edited
     gh.add_comment(2, f'More: {url(4, "logs.zip")} and {url(3, "notes.txt")}')
-    reports.triage(gh, event(2), fetch)
+    reports.triage(gh, event(2), SCAN, fetch)
     (summary,) = bot_comments(gh, 2)
     check(('comment', 2, summary['id']) in gh.calls, 'the summary is edited, not repeated')
     check("This doesn't look like a ScarletNX log" in summary['body'], 'a file that is not a log is said so')
@@ -176,16 +179,16 @@ def main():
 
     # another report of the same failure, and one of another, from a .gz
     gh.add_issue(3, f'Crashes too {url(1, "Some%20Game.log")}', state='closed')
-    reports.triage(gh, event(3), fetch)
+    reports.triage(gh, event(3), SCAN, fetch)
     gh.add_issue(4, f'{url(2, "other.log.gz")}')
-    reports.triage(gh, event(4), fetch)
+    reports.triage(gh, event(4), SCAN, fetch)
     (summary,) = bot_comments(gh, 3)
     check('**The same signature:** #2' in summary['body'], 'the open report with the same signature is named')
     (other,) = bot_comments(gh, 4)
     check('The same signature' not in other['body'], 'another failure names no other report')
     check('crash (invalid memory access) in the runtime 1234abc +1a2b3c' in other['body'], 'the .gz is read')
     gh.add_comment(2, 'bump')
-    reports.triage(gh, event(2), fetch)
+    reports.triage(gh, event(2), SCAN, fetch)
     check('#3 (closed)' in bot_comments(gh, 2)[0]['body'], 'a closed report is named as closed')
 
     # index reads the summaries back
@@ -197,20 +200,29 @@ def main():
 
     # an HTML comment ends at "--": the data survives a signature holding one
     body = reports.comment_body(
-        [{'name': 'x.log', 'url': 'u', 'report': dict(reports.logscan.scan(CRASH), signature='a --> b')}], [], 9
+        [
+            {
+                'name': 'x.log',
+                'url': 'u',
+                'report': dict(SCAN.scan(CRASH), signature='a --> b'),
+                'markdown': SCAN.markdown(CRASH, 'x.log'),
+            }
+        ],
+        [],
+        9,
     )
     data = body[body.index('<!-- game-reports {') :]
     check(data.count('-->') == 1 and reports.summary_data(body)['logs'][0]['signature'] == 'a --> b', 'the -- escape')
 
     # a log's lines pasted in a fenced block count, a template's placeholder doesn't
     gh.add_issue(6, 'Template:\n```\n*** Crash ... ***\n```\nMine:\n~~~text\n' + CRASH + '~~~\n')
-    reports.triage(gh, event(6), fetch)
+    reports.triage(gh, event(6), SCAN, fetch)
     (pasted,) = bot_comments(gh, 6)
     check(pasted['body'].count('### `pasted in the issue`') == 1, 'one pasted log, the placeholder left out')
     check('**The same signature:** #4' in pasted['body'], 'a pasted log is grouped like an attached one')
 
     gh.add_issue(5, url(1, 'Some%20Game.log'), pr=True)
-    check(reports.triage(gh, {'issue': gh.issue(5)}, fetch) == 'not an issue', 'a pull request is skipped')
+    check(reports.triage(gh, {'issue': gh.issue(5)}, SCAN, fetch) == 'not an issue', 'a pull request is skipped')
     check(
         reports.attachments(['see https://example.com/files/1/a.log and ' + url(7, 'b.txt')]) == [url(7, 'b.txt')],
         'only GitHub attachment URLs are fetched',

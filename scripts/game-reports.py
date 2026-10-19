@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
-"""Game reports: the issues a player attached a ScarletNX log to, each summarized by scripts/logscan.py in a comment
-of its own and grouped with the reports that failed the same way.
+"""Game reports: the issues a player attached a ScarletNX log to, each summarized by the runtime's log summary
+(src/common/utilities/logscan.c, as snx-logscan) in a comment of its own and grouped with the reports that failed the
+same way.
 
-    scripts/game-reports.py triage (--event FILE | --issue N) [--repo OWNER/NAME] [--dry-run]
+    scripts/game-reports.py triage (--event FILE | --issue N) [--repo OWNER/NAME] [--dry-run] [--logscan PROGRAM]
     scripts/game-reports.py index [--repo OWNER/NAME] [--title-id ID] [--signature TEXT] [--outcome KIND]
 
 triage (.github/workflows/game-reports.yml, FILE its event's JSON) reads the issue and its comments, and does nothing
 when none of them has a log, attached (a .log, .txt, .gz or .zip on GitHub's attachment host) or pasted (a fenced
-block with a log's header or failure marker in it). Otherwise it scans the newest MAX_LOGS and writes their summary in
+block the summary finds a log's header or failure marker in). Otherwise it scans the newest MAX_LOGS and writes their summary in
 a comment of its own, edited rather than repeated as logs are added. The issue gets the `game report` label and a
 `log: <how it ended>` label for each log's outcome, and the comment names the other game reports with the same
 signature. An attachment that isn't a ScarletNX log is named as such.
 
---issue N triages that issue as an event for it would. --dry-run reads GitHub as triage does but writes nothing:
+PROGRAM is snx-logscan, or scarletnx with --scan-log after it (SNX_LOGSCAN, else snx-logscan on PATH): the workflow
+builds it from its five files. --issue N triages that issue as an event for it would. --dry-run reads GitHub as triage does but writes nothing:
 the comment and the label changes are printed instead.
 
 index writes each game report as a JSON line: its number, title, state and URL, and each log's name, URL, signature,
@@ -22,27 +24,21 @@ outcome, title ID and build, as the summary comments record them (a JSON comment
 reports with a log that matches.
 
 GitHub is reached through gh (GH_TOKEN). Nothing of an issue reaches a shell: the event is read from its file, and
-what is posted is logscan's escaped markdown. Downloads are limited to GitHub's attachment URLs and MAX_BYTES.
+what is posted is the summary's escaped markdown. Downloads are limited to GitHub's attachment URLs and MAX_BYTES.
 """
 
 import argparse
 import gzip
-import importlib.util
 import io
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import urllib.parse
 import urllib.request
 import zipfile
-from pathlib import Path
-
-HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('logscan', HERE / 'logscan.py')
-logscan = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(logscan)
 
 LABEL = 'game report'
 OUTCOME_PREFIX = 'log: '
@@ -177,25 +173,48 @@ def unpack(name, data):
     return data.decode('utf-8', 'replace')
 
 
+class LogScan:
+    """The log summary through its program: the JSON and the markdown of a log's text"""
+
+    def __init__(self, program):
+        self.program = program
+
+    def run(self, text, *args):
+        result = subprocess.run(
+            [*self.program, '-', *args], input=text.encode('utf-8'), capture_output=True, timeout=60, check=False
+        )
+        if result.returncode:
+            raise ValueError(f'the log summary failed: {result.stderr.decode("utf-8", "replace").strip()}')
+        return result.stdout.decode('utf-8', 'replace')
+
+    def scan(self, text):
+        return json.loads(self.run(text))
+
+    def markdown(self, text, name):
+        return self.run(text, '--format', 'markdown', '--name', name)
+
+
 def is_scarletnx_log(r):
     return bool(r['title'] or r['build'] or r['failure'] or r['launcher'])
+
+
+# The comment's own words around the summaries: a name or an error is the issue's text, escaped as the summary's
+def code(value):
+    return '`' + str(value).replace('`', "'").replace('\n', ' ') + '`'
+
+
+def text(value):
+    value = str(value).replace('&', '&amp;').replace('<', '&lt;').replace('\n', ' ')
+    return re.sub(r'([\\`*_\[\]#|~!])', r'\\\1', value).replace('@', '@\u200b').replace('://', ':/\u200b/')
 
 
 # a fenced block in an issue or comment holding a log's lines, pasted rather than attached
 FENCE = re.compile(r'^ {0,3}(`{3,}|~{3,})[^\n]*\n(.*?)^ {0,3}\1[`~]*[ \t]*$', re.MULTILINE | re.DOTALL)
 
 
-def pasted_log(block):
-    """A block is a log when a line of it is a header or a failure marker, as logscan reads them"""
-    lines = [logscan.STAMP.sub('', line) for line in block.splitlines()]
-    return any(
-        logscan.HEADER.match(line) or any(pattern.search(line) for _, pattern in logscan.FAILURES) for line in lines
-    )
-
-
 def sources(issue, comments):
-    """The logs of the issue and its comments, in order, each once, the newest MAX_LOGS: (name, url, attachment URL
-    or None, the pasted text or None)"""
+    """What may be a log in the issue and its comments, in order, each once: (name, url, attachment URL or None, the
+    pasted block or None). A pasted block is a log when the summary finds a header or a failure in it"""
     places = [('the issue', issue.get('html_url'), issue.get('body'))]
     places += [(f'a comment by {c["user"]["login"]}', c.get('html_url'), c.get('body')) for c in comments]
     out, seen = [], set()
@@ -205,13 +224,12 @@ def sources(issue, comments):
                 seen.add(url)
                 out.append((attachment_name(url), url, url, None))
         for m in FENCE.finditer(body or ''):
-            if pasted_log(m.group(2)):
-                out.append((f'pasted in {where}', link, None, m.group(2)))
-    return out[-MAX_LOGS:]
+            out.append((f'pasted in {where}', link, None, m.group(2)))
+    return out
 
 
 def attachments(texts):
-    """The attachment URLs in the texts, in order, each once, the newest MAX_LOGS"""
+    """The attachment URLs in the texts, in order, each once"""
     return [url for _, _, url, _ in sources({'body': '\n'.join(t or '' for t in texts)}, []) if url]
 
 
@@ -262,14 +280,14 @@ def comment_body(entries, reports, number):
         '## Log summary',
         '',
         (
-            'Written by `scripts/logscan.py` from the logs attached here, and updated when another is attached. '
+            "Written by ScarletNX's log summary from the logs attached here, and updated when another is attached. "
             "Paths are shortened to `~` and the crash report's code and memory dumps are left out."
         ),
     ]
     for e in entries:
-        out += ['', f'### {logscan.code(e["name"])}', '']
+        out += ['', f'### {code(e["name"])}', '']
         if e.get('error'):
-            out.append(f'Could not be read: {logscan.text(e["error"])}')
+            out.append(f'Could not be read: {text(e["error"])}')
             continue
         if not e['report']:
             out.append(
@@ -277,7 +295,7 @@ def comment_body(entries, reports, number):
                 "and the launcher's Share log writes one with the last run's output."
             )
             continue
-        out.append(logscan.markdown(e['name'], e['report'], heading='####').rstrip())
+        out.append(re.sub(r'^###', '####', e['markdown'], count=1).rstrip())
         if e['report']['signature']:
             same = same_signature(reports, number, e['report']['signature'])
             if same:
@@ -309,7 +327,7 @@ def comment_body(entries, reports, number):
     return body
 
 
-def triage(github, event, fetch=download):
+def triage(github, event, logscan, fetch=download):
     issue = event.get('issue') or {}
     if 'pull_request' in issue or not issue.get('number'):
         return 'not an issue'
@@ -317,19 +335,26 @@ def triage(github, event, fetch=download):
     issue = github.issue(number)
     comments = github.comments(number)
     users = [c for c in comments if (c.get('user') or {}).get('login') not in BOTS]
-    found = sources(issue, users)
+    found = []
+    for name, link, url, pasted in sources(issue, users):
+        if pasted is not None:
+            r = logscan.scan(pasted)
+            if not is_scarletnx_log(r):
+                continue
+        found.append((name, link, url, pasted))
     if not found:
         return 'no log attached'
     entries = []
-    for name, link, url, pasted in found:
+    for name, link, url, pasted in found[-MAX_LOGS:]:
         entry = {'name': name, 'url': link, 'report': None}
         try:
-            r = logscan.scan(pasted if pasted is not None else unpack(name, fetch(url)))
-            entry['report'] = r if is_scarletnx_log(r) else None
+            log = pasted if pasted is not None else unpack(name, fetch(url))
+            r = logscan.scan(log)
+            if is_scarletnx_log(r):
+                entry['report'], entry['markdown'] = r, logscan.markdown(log, name)
         except (OSError, ValueError, zipfile.BadZipFile, EOFError) as error:
             entry['error'] = str(error)
         entries.append(entry)
-    logscan.demangle_all([e['report'] for e in entries if e['report']])
     body = comment_body(entries, index(github), number)
     existing = next(
         (c['id'] for c in comments if (c.get('user') or {}).get('login') in BOTS and MARK in (c.get('body') or '')),
@@ -358,6 +383,7 @@ def main():
     which.add_argument('--issue', type=int)
     t.add_argument('--dry-run', action='store_true')
     t.add_argument('--repo', default=os.environ.get('GITHUB_REPOSITORY'))
+    t.add_argument('--logscan', default=os.environ.get('SNX_LOGSCAN', 'snx-logscan'))
     i = sub.add_parser('index')
     i.add_argument('--repo', default=os.environ.get('GITHUB_REPOSITORY', 'scarletnx/ScarletNX'))
     i.add_argument('--title-id')
@@ -375,7 +401,7 @@ def main():
         else:
             with open(args.event, encoding='utf-8') as f:
                 event = json.load(f)
-        print(triage(github, event))
+        print(triage(github, event, LogScan(shlex.split(args.logscan))))
         return
     for report in index(github):
         logs = [

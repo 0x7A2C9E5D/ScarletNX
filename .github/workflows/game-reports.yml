@@ -2,11 +2,12 @@
 # Copyright 2026 the ScarletNX contributors
 name: Game reports
 
-# An issue with a ScarletNX log attached or pasted gets a summary of it (scripts/game-reports.py, with
-# scripts/logscan.py): how the run ended, where, the service commands the runtime doesn't implement, and the other
-# game reports that failed the same way. One comment, edited as logs are added, and the labels `game report` and
-# `log: <how it ended>`. Nothing of the issue reaches the shell: the script reads the event's file. The checkout is
-# main's, so an issue never runs code of a pull request.
+# An issue with a ScarletNX log attached or pasted gets a summary of it (scripts/game-reports.py, with the runtime's
+# log summary, src/common/utilities/logscan.c, built here as snx-logscan from its five files): how the run ended,
+# where, the service commands the runtime doesn't implement, and the other game reports that failed the same way. One
+# comment, edited as logs are added, and the labels `game report` and `log: <how it ended>`. Nothing of the issue
+# reaches the shell: the script reads the event's file. The checkout is main's, so an issue never runs code of a pull
+# request.
 on:
   issues:
     types: [opened, edited, reopened]
@@ -36,9 +37,21 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           sparse-checkout: |
             scripts/game-reports.py
-            scripts/logscan.py
+            src/common/utilities/logscan.c
+            src/common/utilities/logscan.h
+            src/common/utilities/logscan_main.c
+            src/common/utilities/demangle.cpp
+            src/common/utilities/demangle.h
           sparse-checkout-cone-mode: false
+      # the C library and the C++ runtime's demangler only: the runner's own compilers build it in seconds
+      - name: Build the log summary
+        run: |
+          cc -std=c90 -O2 -Isrc -c src/common/utilities/logscan.c src/common/utilities/logscan_main.c
+          c++ -O2 -Isrc -c src/common/utilities/demangle.cpp
+          c++ -o snx-logscan logscan.o logscan_main.o demangle.o
       - name: Summarize
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/game-reports.py triage --event "$GITHUB_EVENT_PATH" --repo "$GITHUB_REPOSITORY"
+        run: >-
+          python3 scripts/game-reports.py triage --event "$GITHUB_EVENT_PATH" --repo "$GITHUB_REPOSITORY"
+          --logscan ./snx-logscan

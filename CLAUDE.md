@@ -54,7 +54,7 @@ get wrong and points to the skills that carry the procedures.
 | Recompile a game (into `games/<id>/`, named by its title ID, or by a name given after the folder) | `build/scarletnx -r work/Game` |
 | Run with scripted input and a screenshot | `cd games/<id> && ./<id> --seconds=60 --shot=/path/out --script=ms:hexbuttons,...` |
 | Name addresses / disassemble game code | `tools/symbols.py work/Game ADDR...` / `tools/disasm.py work/Game FUNC` |
-| Summarize a log (a player's too) / the game reports on GitHub | `scripts/logscan.py LOG [--format markdown]` / `scripts/game-reports.py index [--title-id ID]`, or the `scarletnx` MCP server (`tools/snx_mcp.py`) |
+| Summarize a log (a player's too) / the game reports on GitHub | `build/scarletnx --scan-log LOG [--format markdown]` / `scripts/game-reports.py index [--title-id ID]` |
 | Run the tests | `ctest --test-dir build` (`-R swipc` for the IPC generator) |
 | Format / check | `scripts/format.sh` / `scripts/format.sh --check` |
 

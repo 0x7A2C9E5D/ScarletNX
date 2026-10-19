@@ -4637,15 +4637,34 @@ int main(int argc, char** argv) {
         text = (char*)snx_read_file(kept, &size);
         assert(text && strstr(text, "Message: before the log"));
         free(text);
-        /* any other build's (a checkout) in the working folder */
+        /* any other build's (a checkout) in the working folder, with the newest game log's summary at its top: how the
+           run ended, demangled, before the run's output and the log itself */
         free(app.data_dir);
         app.data_dir = snx_strdup(temporary);
-        snprintf(app.message, sizeof(app.message), "before the log");
-        key(&app, SDLK_RETURN);
-        assert(!strncmp(app.message, "Log saved to ", 13) && strstr(app.message, "scarletnx.log"));
-        text = (char*)snx_read_file(saved, &size);
-        assert(text && strstr(text, "Message: before the log") && strstr(text, "== the last run: "));
-        free(text);
+        {
+            char *game = snx_path_join(app.games_dir, "Some Game"), *log = snx_path_join(game, "Some Game.log");
+            static const char crashed[] =
+                "[   0.00] ScarletNX - Some Game\n"
+                "[   2.25] \n*** The game called svcBreak (reason 0, info 1300100df8, 4 bytes) ***\n"
+                "[   2.25]    #0 163d18d8 <_ZN2nn4diag6detail10VAbortImplEv+d8>\n"
+                "[   2.25]    #1 1683a358 <_ZN2nn3hid18GetNpadJoyHoldTypeEv+38>\n"
+                "[   2.32] FATAL: The game stopped (svcBreak, reason 0). See the .log for details.\n";
+            assert(!snx_mkdirs(game) && !snx_write_file(log, crashed, sizeof crashed - 1));
+            snprintf(app.message, sizeof(app.message), "before the log");
+            key(&app, SDLK_RETURN);
+            assert(!strncmp(app.message, "Log saved to ", 13) && strstr(app.message, "scarletnx.log"));
+            text = (char*)snx_read_file(saved, &size);
+            assert(text && strstr(text, "Message: before the log") && strstr(text, "== the last run: "));
+            assert(strstr(text, "== summary ==\n### Some Game") &&
+                   strstr(text, "**Signature:** `svcBreak in _ZN2nn3hid18GetNpadJoyHoldTypeEv`") &&
+                   strstr(text, "**In:** `nn::hid::GetNpadJoyHoldType()+38`"));
+            assert(strstr(text, "== summary ==") < strstr(text, "== the last run: ") &&
+                   !strstr(text, "The log's last lines"));
+            free(text);
+            assert(!snx_remove_tree(game));
+            free(log);
+            free(game);
+        }
         free(app.data_dir);
         app.data_dir = installed_dir;
         assert(!snx_remove_tree(portable));
