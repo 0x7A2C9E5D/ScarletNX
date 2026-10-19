@@ -87,6 +87,9 @@ static int rec_enabled(void) {
 }
 
 void vk_rec_init(void) { rec_enabled(); }
+u64 vk_rec_behind(void) {
+    return g_rec > 0 ? __atomic_load_n(&g_head, __ATOMIC_ACQUIRE) - __atomic_load_n(&g_tail, __ATOMIC_ACQUIRE) : 0;
+}
 
 /* a command for cb goes through the ring */
 static int rec_on(VkCommandBuffer cb) { return cb == g_rec_cb && g_rec > 0; }

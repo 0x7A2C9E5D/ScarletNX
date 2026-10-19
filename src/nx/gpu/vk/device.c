@@ -8,6 +8,7 @@
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include "nx/gpu/gpu.h"
 #include "nx/gpu/vk/vk.h"
 
 int g_vk_preserve_infnan;
@@ -22,7 +23,11 @@ static _Thread_local int t_vkdepth;
 static u32 g_vk_owner; /* the thread holding it (plat_tid), 0 when none: a trap's fault on it can't be answered */
 void vk_lock(void) {
     if (!t_vkdepth++) {
-        pm_lock(&g_vklock);
+        if (!pm_trylock(&g_vklock)) { /* held: the GPU thread says so for the stall report */
+            gpu_wait_note("vk_lock, which another thread holds", 0);
+            pm_lock(&g_vklock);
+            gpu_wait_note(NULL, 0);
+        }
         __atomic_store_n(&g_vk_owner, plat_tid(), __ATOMIC_RELAXED);
     }
 }

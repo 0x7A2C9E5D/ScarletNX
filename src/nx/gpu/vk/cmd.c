@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "nx/runtime/platform/log.h"
+#include "nx/gpu/gpu.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/runtime/platform/plat.h"
 
@@ -188,7 +189,9 @@ static void ring_reset(Ring* r, const VmaBudget* budget) {
 static void timeline_wait(u64 value) {
     VkSemaphoreWaitInfo wi = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &g_gsem, .pValues = &value};
+    gpu_wait_note("a graphics submission", value);
     VK_OK(vkWaitSemaphores(g_vk.dev, &wi, UINT64_MAX));
+    gpu_wait_note(NULL, 0);
 }
 /* the storage results of every submission up to value, which has finished, land in guest memory, in order */
 static void land_through(u64 value) {
@@ -354,7 +357,7 @@ static void submit(const VkSemaphoreSubmitInfo* xw, const VkSemaphoreSubmitInfo*
        from the host there, so waits for it end) */
     vk_rec_submit(cb, w, nw, s, xs ? 2u : 1u);
     memset(g_after, 0, sizeof g_after);
-    g_gval++;
+    __atomic_store_n(&g_gval, g_gval + 1, __ATOMIC_RELAXED); /* read by the stall report too */
     f->recording = 0;
     f->icb++;
     f->last = g_gval;
@@ -404,6 +407,11 @@ void vk_frame_check(void) {
 u64 vk_submit_number(void) { return g_gval + 1; }
 u32 vk_cb_begun(void) { return g_cb_begun; }
 u64 vk_last_submit(void) { return g_gval; }
+void vk_submit_progress(u64* submitted, u64* done) {
+    *submitted = __atomic_load_n(&g_gval, __ATOMIC_RELAXED);
+    *done = 0;
+    if (g_gsem) VK_OK(vkGetSemaphoreCounterValue(g_vk.dev, g_gsem, done));
+}
 void vk_wait_submit(u64 value) { timeline_wait(value); }
 void vk_land_through(u64 value) { land_through(value < g_gval ? value : g_gval); }
 u64 vk_frame_id(void) { return g_frame_id; }

@@ -864,7 +864,9 @@ VkPipeline vk_pipeline_get(const PipeKey* k) {
             if (__atomic_load_n(&p->ready, __ATOMIC_ACQUIRE)) return p->p;
             if (p->prewarm) pipe_promote(p);
             u64 t0 = plat_ns();
+            gpu_wait_note("a pipeline being made", h);
             VkPipeline got = pipe_wait(p, -1);
+            gpu_wait_note(NULL, 0);
             g_pipe_wait_ns += plat_ns() - t0;
             return got;
         }

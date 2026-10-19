@@ -153,6 +153,7 @@ u64 vk_frame_id(void);
    done. Only the frame before the current one can be held: older slots were reused already */
 void vk_frame_hold(u64 frame_id);
 u64 vk_last_submit(void);        /* the last submission's number, which its completion signals */
+void vk_submit_progress(u64* submitted, u64* done); /* the last submission and the last done (any thread) */
 void vk_wait_submit(u64 value);  /* until the GPU has done that submission (any thread, without vk_lock) */
 void vk_land_through(u64 value); /* the results of the submissions up to value, done, into guest memory (vk_lock) */
 void vk_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, VkPipelineStageFlags2 src_stage,
@@ -177,6 +178,7 @@ extern u32 g_vk_epoch, g_vk_present;
 /* record.c: the frame's command buffer is recorded on a thread of its own. rec_Cmd* take vkCmd*'s arguments and
    record into that command buffer from the ring, or into any other one at once */
 void vk_rec_init(void);
+u64 vk_rec_behind(void); /* bytes of commands handed to the recording thread and not recorded yet (any thread) */
 void vk_rec_begin(VkCommandBuffer cb); /* begins cb, the frame's command buffer from now on */
 /* ends and submits cb with those semaphores (s[0] the graphics timeline's) */
 void vk_rec_submit(VkCommandBuffer cb, const VkSemaphoreSubmitInfo* w, u32 nw, const VkSemaphoreSubmitInfo* s,
@@ -610,6 +612,7 @@ void vk_release_incr(u32 id);
 /* a samples-passed report: len bytes at gva (4, or 16 with ticks after the count), the count of query.c's counter's
    segments [first, end), once the GPU has done the submit being recorded */
 void vk_release_samples(u64 gva, u32 len, u32 counter, u64 first, u64 end, u64 ticks);
+void vk_release_queued(u64* n, u64* gate, u64* cgate); /* the queue's length and its oldest's gates (any thread) */
 void vk_release_submit(void); /* the GPFIFO submission ended or waits: a release gated on the recording submits */
 void vk_release_need(u64 gva, u64 len);
 int vk_release_read(u64 gva, void* dst, u64 len);
@@ -756,6 +759,7 @@ void vk_compute_land(void); /* pending compute results into guest memory, now */
 /* the compute results so far, submitted and put aside to land later: the batch to wait for (0: none pending) */
 u64 vk_compute_put_aside(void);
 void vk_compute_wait(u64 value);                 /* until the compute batch is done (any thread, without vk_lock) */
+void vk_compute_progress(u64* submitted, u64* done); /* the last batch and the last done (any thread) */
 void vk_compute_land_through(u64 value);         /* the batches up to it, done, land (vk_lock) */
 void vk_compute_before_write(u64 gva, u64 size); /* gpu.c's g_gpu_before_write */
 void vk_compute_mem_need(u64 a, u64 n);          /* a read of [a, a + n): land results there first */

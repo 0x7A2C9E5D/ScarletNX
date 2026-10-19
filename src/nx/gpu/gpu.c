@@ -575,6 +575,13 @@ static u32 g_qtotal;
 static u8 g_qparked[128];    /* the channel's oldest job waits (gpu_park) */
 static u8 g_scan_stale[128]; /* the channel closed: its submission scan starts again from reset */
 static u64 g_job_ids;
+/* for the stall report: whether this is the GPU thread, the channel whose job runs (its id + 1, 0 between jobs) and
+   since when, and the blocking wait it is in (gpu_wait_note) */
+static _Thread_local int t_gpu;
+static u32 g_run_chan;
+static u64 g_run_since;
+static const char* g_wait_what;
+static u64 g_wait_value, g_wait_since;
 
 /* a job's block after the item: its entries, each fetched entry's first word (in the words fetched at submission,
    or in late), then the words */
@@ -736,7 +743,10 @@ static int run_pass(i64* wake) {
             g_qparked[it->chan] = 0;
         }
         pm_unlock(&g_qlk);
+        __atomic_store_n(&g_run_since, plat_ns(), __ATOMIC_RELAXED);
+        __atomic_store_n(&g_run_chan, it->chan + 1, __ATOMIC_RELEASE);
         done = run_job(it);
+        __atomic_store_n(&g_run_chan, 0, __ATOMIC_RELEASE);
         pm_lock(&g_qlk);
         if (!done)
             g_qparked[it->chan] = 1; /* its jobs make room for others */
@@ -755,8 +765,56 @@ static int run_pass(i64* wake) {
     }
     return 0;
 }
+void gpu_wait_note(const char* what, u64 value) {
+    if (!t_gpu) return;
+    if (what) {
+        __atomic_store_n(&g_wait_value, value, __ATOMIC_RELAXED);
+        __atomic_store_n(&g_wait_since, plat_ns(), __ATOMIC_RELAXED);
+    }
+    __atomic_store_n(&g_wait_what, what, __ATOMIC_RELEASE);
+}
+/* read unlocked from the watchdog's thread: each value on its own, which is enough to say where the GPU thread is */
+void gpu_report_stall(void) {
+    u64 now = plat_ns();
+    const char* what = __atomic_load_n(&g_wait_what, __ATOMIC_ACQUIRE);
+    u32 run = __atomic_load_n(&g_run_chan, __ATOMIC_ACQUIRE), c;
+    if (!__atomic_load_n(&g_qthread, __ATOMIC_RELAXED)) {
+        WARN("gpu: nothing was submitted yet\n");
+        return;
+    }
+    if (run)
+        WARN("gpu: the GPU thread runs a job of channel %u, for %llu ms\n", run - 1,
+             (unsigned long long)((now - __atomic_load_n(&g_run_since, __ATOMIC_RELAXED)) / 1000000u));
+    else
+        WARN("gpu: the GPU thread is between jobs\n");
+    if (what)
+        WARN("gpu: it has waited %llu ms for %s (%llx)\n",
+             (unsigned long long)((now - __atomic_load_n(&g_wait_since, __ATOMIC_RELAXED)) / 1000000u), what,
+             (unsigned long long)__atomic_load_n(&g_wait_value, __ATOMIC_RELAXED));
+    for (c = 0; c < 128; c++) {
+        u32 jobs = __atomic_load_n(&g_qjobs[c], __ATOMIC_RELAXED), park;
+        const GpuChannel* ch = g_gpu.chan[c];
+        if (!jobs || !ch) continue;
+        park = __atomic_load_n(&ch->park, __ATOMIC_RELAXED);
+        if (!park || !__atomic_load_n(&g_qparked[c], __ATOMIC_RELAXED)) {
+            WARN("gpu: channel %u has %u jobs queued\n", c, jobs);
+            continue;
+        }
+        {
+            u64 addr = __atomic_load_n(&ch->park_addr, __ATOMIC_RELAXED);
+            u32 val = __atomic_load_n(&ch->park_val, __ATOMIC_RELAXED);
+            int sp = park == GPU_PARK_SYNCPOINT || park == GPU_PARK_FENCE;
+            WARN("gpu: channel %u has %u jobs queued, and waits for %s %llx to %s %u (it is %u)\n", c, jobs,
+                 park_name(park), (unsigned long long)addr,
+                 sp || __atomic_load_n(&ch->park_geq, __ATOMIC_RELAXED) ? "reach" : "be", val,
+                 sp ? syncpt_read((u32)addr) : gmem_r32(addr));
+        }
+    }
+    if (g_renderer && g_renderer->report_stall) g_renderer->report_stall();
+}
 static void gpu_thread(void* arg) {
     (void)arg;
+    t_gpu = 1;
     pm_lock(&g_qlk);
     for (;;) {
         u64 gen = g_qgen;

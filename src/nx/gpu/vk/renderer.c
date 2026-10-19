@@ -664,6 +664,18 @@ static u64 vkr_screenshot(const char* path) {
     return hash;
 }
 
+/* the stall watchdog: the releases queued and how far the submissions they wait for have got */
+static void vk_report_stall(void) {
+    u64 n, gate, cgate, gsub, gdone, csub, cdone;
+    vk_release_queued(&n, &gate, &cgate);
+    vk_submit_progress(&gsub, &gdone);
+    vk_compute_progress(&csub, &cdone);
+    WARN("vulkan: %llu releases queued (the oldest waits for graphics submission %llu and compute batch %llu), "
+         "graphics submissions done %llu of %llu, compute batches %llu of %llu, %llu bytes of commands not recorded\n",
+         (unsigned long long)n, (unsigned long long)gate, (unsigned long long)cgate, (unsigned long long)gdone,
+         (unsigned long long)gsub, (unsigned long long)cdone, (unsigned long long)csub,
+         (unsigned long long)vk_rec_behind());
+}
 const Renderer vk_renderer = {
     .name = "Vulkan",
     .start = vkr_start,
@@ -691,6 +703,7 @@ const Renderer vk_renderer = {
     .release_read = vk_release_read,
     .release_value = vk_release_value,
     .release_retire = vk_release_retire,
+    .report_stall = vk_report_stall,
     .samples_reset = vkr_samples_reset,
     .samples_enable = vkr_samples_enable,
     .samples_report = vkr_samples_report,

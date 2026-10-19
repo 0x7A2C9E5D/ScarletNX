@@ -197,6 +197,14 @@ void vk_release_samples(u64 gva, u32 len, u32 counter, u64 first, u64 end, u64 t
     memcpy(r.data + 8, &ticks, 8);
     release(&r);
 }
+/* the releases queued, and the submissions the oldest waits for: read unlocked, for the stall report */
+void vk_release_queued(u64* n, u64* gate, u64* cgate) {
+    u64 tail = __atomic_load_n(&g_rtail, __ATOMIC_RELAXED);
+    const Release* r = &g_rq[tail % RQ_N];
+    *n = __atomic_load_n(&g_rhead, __ATOMIC_RELAXED) - tail;
+    *gate = *n ? __atomic_load_n(&r->gate, __ATOMIC_RELAXED) : 0;
+    *cgate = *n ? __atomic_load_n(&r->cgate, __ATOMIC_RELAXED) : 0;
+}
 void vk_release_incr(u32 id) {
     Release r;
     memset(&r, 0, sizeof r);

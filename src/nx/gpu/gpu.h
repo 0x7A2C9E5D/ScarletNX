@@ -280,6 +280,11 @@ void gpu_park(GpuChannel* ch, u32 kind, u64 addr, u32 val, int geq);
    Any thread */
 void gpu_kick(void);
 extern volatile u64 g_gpu_submits;
+/* the blocking wait the GPU thread is in, for the stall report: what it waits for (a string that lives on) and a number
+   that names it, before the wait, and NULL after. Ignored on other threads */
+void gpu_wait_note(const char* what, u64 value);
+/* the stall watchdog's report of what the GPU thread and each channel with queued jobs are doing. Any thread */
+void gpu_report_stall(void);
 /* guest memory [cpu_addr, cpu_addr + len) changed without a write the host's write tracking sees: decommitted pages,
    which now read as zero (memory/mem.c). Caches over that memory check it again. Any thread */
 void gpu_mem_changed(u64 cpu_addr, u64 len);

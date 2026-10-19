@@ -71,6 +71,7 @@ typedef struct Renderer {
     /* a GPFIFO submission ran to its end or waits (gpu_park): what the guest may look at now goes to the GPU */
     void (*stream_end)(void);
     void (*release_retire)(u32 id); /* finish this syncpoint's queued releases before its id is reused */
+    void (*report_stall)(void); /* the stall watchdog: what the renderer holds back. Any thread, unlocked */
     /* presenting a guest framebuffer */
     /* crop: the part shown (left, top, right, bottom), all 0 for the whole buffer */
     /* transform: Android buffer flags, bit 0 horizontal flip and bit 1 vertical flip */
