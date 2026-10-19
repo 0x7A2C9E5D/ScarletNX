@@ -174,6 +174,9 @@ if(BUILD_TESTING)
         set_tests_properties(gui_process_tree PROPERTIES DISABLED TRUE)
     endif()
     add_executable(snx-test-gui-sdl "${PROJECT_SOURCE_DIR}/tests/gui_sdl.c")
+    if(WIN32) # a crash there says where it was, not only ctest's SegFault
+        target_sources(snx-test-gui-sdl PRIVATE "${PROJECT_SOURCE_DIR}/tests/win32_crash.c")
+    endif()
     # a language of its own (tests/po), not the menu's: the screens' checks hold whatever po/ has
     snx_gui_languages(snx_gui_languages_test "${PROJECT_SOURCE_DIR}/tests/po"
                       "${CMAKE_BINARY_DIR}/generated/gui_languages_test.c")
