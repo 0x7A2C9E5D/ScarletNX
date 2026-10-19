@@ -45,12 +45,16 @@ wireless (`net_ldn.c`) travels two ways. On the LAN it speaks the protocol of
 the ldn_mitm sysmodule, which Ryujinx's LdnMitm client speaks too, over UDP and
 TCP 11452 on the console's interface. Through an Eden room (`net_room.c`, the
 protocol of Eden's room server) one ENet connection carries ldn's messages and
-the game's UDP datagrams, as zstd frames, to the room, which relays them to the
-other members; the console's address is the one the room gives it, and the
-game's datagram sockets are the room's (TCP stays the host's, as in Eden). A
+the game's UDP datagrams, each datagram's bytes a zstd frame, to the room, which
+relays them to the other members. The console's address is the one the room
+gives it, for ldn, nifm and the game's datagram sockets, which are the room's.
+TCP sockets stay the host's: Eden makes every socket the room's and answers
+TCP's calls without sending anything, and a room carries datagrams alone. A
 datagram carries Eden's protocol number for its socket (1 for a socket opened
 with protocol 0, 4 for UDP) and reaches only a socket of the same one, so an
-Eden and a ScarletNX of one game meet.
+Eden and a ScarletNX of one game meet. At exit every ldn closes its network
+before the console leaves the room, since an Eden on the other side hears only
+that, never who left.
 
 ## Runtime behavior
 
