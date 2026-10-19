@@ -522,7 +522,7 @@ int main(int argc, char** argv) {
     free(root);
     free(shot);
     free(ppm);
-    puts("PASS headless Vulkan: viewport orientation, 3 VIC compositions, 8 cropped/transformed readbacks and PPMs, "
+    puts("PASS headless Vulkan: viewport orientation, 7 VIC compositions, 8 cropped/transformed readbacks and PPMs, "
          "no WSI");
     return 0;
 }
