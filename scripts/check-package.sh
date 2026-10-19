@@ -21,6 +21,29 @@ case $runtime in
     # CI runners have no FUSE to mount it
     *.AppImage) export APPIMAGE_EXTRACT_AND_RUN=1 ;;
 esac
+# An AppImage of another architecture than this machine's runs through qemu-user, by its absolute path: the kernel's
+# binfmt handler never takes an AppImage, since its runtime's ELF header carries the AppImage magic ("AI\x02" at byte 8)
+# where qemu's mask wants zeros. The plain ELF programs it starts go through that handler, which has to be registered;
+# the games it makes are copies of it, which need one more blind to that padding (the CI's cross check registers it)
+launch=()
+if [ -z "$exe" ]; then
+    case $(od -An -tu2 -j18 -N2 "$runtime" | tr -d ' ') in # e_machine, little-endian as every package is
+        62) arch=x86_64 ;;
+        183) arch=aarch64 ;;
+        21) arch=ppc64le ;;
+        *) arch= ;;
+    esac
+    if [ -z "$arch" ]; then
+        echo "$runtime is not an x86-64, AArch64 or PowerPC64 LE program" >&2
+        exit 2
+    fi
+    if [ "$arch" != "$(uname -m)" ]; then
+        launch=("$(command -v "qemu-$arch")") || {
+            echo "$runtime is a $arch program: qemu-$arch runs it here, and it is not on PATH" >&2
+            exit 2
+        }
+    fi
+fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work"
@@ -70,7 +93,7 @@ word smoke.nro 0x90 0xd4200000 # BRK
 put smoke.nro 0x100 'NX runtime smoke\n'
 
 for mode in "" -x -r; do
-    run "$runtime" ${mode:+"$mode"} --help
+    run "${launch[@]}" "$runtime" ${mode:+"$mode"} --help
     if [ "$status" -eq 0 ] && grep -q '^Usage: scarletnx' <<<"$out"; then
         pass "scarletnx${mode:+ $mode} --help"
     else
@@ -80,7 +103,7 @@ done
 
 # No --outdir: an installed copy has no checkout, so its games go in the data folder, each in a folder of its own
 game=$data/games/Smoke
-run "$runtime" -r smoke.nro Smoke --jobs 2
+run "${launch[@]}" "$runtime" -r smoke.nro Smoke --jobs 2
 if [ "$status" -eq 0 ] && [ -f "$game/Smoke$exe" ] && [ -f "$game/Smoke.abi" ]; then
     pass "scarletnx -r smoke.nro made $game/Smoke$exe"
 else
@@ -111,7 +134,7 @@ fi
 # A dump on its own: recompile, then play, each a child of the first. Another name, which Windows would not tell
 # from Smoke by case
 cp smoke.nro play.nro
-run "$runtime" play.nro -H
+run "${launch[@]}" "$runtime" play.nro -H
 if grep -q '^ScarletNX - play' <<<"$out"; then
     pass "scarletnx play.nro recompiled and started the game (exit $status)"
 else
@@ -120,7 +143,7 @@ fi
 
 # A PFS0 without files: only hactool, reading it in the driver, can tell there is no program in it
 printf 'PFS0\0\0\0\0\0\0\0\0\0\0\0\0' >empty.nsp
-run "$runtime" -x empty.nsp
+run "${launch[@]}" "$runtime" -x empty.nsp
 if grep -q 'no base Program NCA' <<<"$out"; then
     pass "scarletnx -x empty.nsp read it with hactool"
 else

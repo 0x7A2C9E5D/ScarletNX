@@ -1170,6 +1170,11 @@ add_executable(snx-test-etc2 etc2_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/tex
 snx_test_target(snx-test-etc2 23)
 add_test(NAME etc2_decode COMMAND snx-test-etc2)
 
+# the LLVM backend's IR rewrite for an older llvm-as (a cross build's LLVM older than its Clang): what it takes out
+add_test(NAME rtlib_ir_compat COMMAND "${CMAKE_COMMAND}"
+         -DSCRIPT=${PROJECT_SOURCE_DIR}/src/common/cpu/recompiler/llvm/rtlib_ir_compat.cmake
+         -DWORK=${CMAKE_CURRENT_BINARY_DIR} -P "${CMAKE_CURRENT_SOURCE_DIR}/rtlib_ir_compat_test.cmake")
+
 if(UNIX)
     add_executable(snx-test-kernel-mutex kernel_mutex.c)
     snx_test_target(snx-test-kernel-mutex 11)

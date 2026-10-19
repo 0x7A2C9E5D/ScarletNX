@@ -50,6 +50,7 @@ LABEL = 'publish builds'  # what lets a fork's pull request be published (script
 JOBS = {
     'ScarletNX-linux-x86_64.AppImage': 'Linux AppImage (x86_64)',
     'ScarletNX-linux-aarch64.AppImage': 'Linux AppImage (aarch64)',
+    'ScarletNX-linux-ppc64le.AppImage': 'Linux AppImage (ppc64le)',
     'ScarletNX-windows-x86_64.zip': 'Windows (Clang + LLVM)',
     'ScarletNX-android-universal.apk': 'Android APK',
     'ScarletNX-macos-arm64.zip': 'macOS and iOS (arm64)',

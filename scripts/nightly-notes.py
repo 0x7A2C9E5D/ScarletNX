@@ -21,6 +21,7 @@ SERVER = 'https://github.com'
 SYSTEMS = {
     'ScarletNX-linux-x86_64.AppImage': ('Linux', 'x86-64', 'AppImage'),
     'ScarletNX-linux-aarch64.AppImage': ('Linux', 'ARM64', 'AppImage'),
+    'ScarletNX-linux-ppc64le.AppImage': ('Linux', 'PowerPC64 LE', 'AppImage'),
     'ScarletNX-windows-x86_64.zip': ('Windows', 'x86-64', 'zip'),
     'ScarletNX-android-universal.apk': ('Android', 'ARM64, x86-64', 'APK'),
     'ScarletNX-macos-arm64.zip': ('macOS', 'ARM64', 'zip'),

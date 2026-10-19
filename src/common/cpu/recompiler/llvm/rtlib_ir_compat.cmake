@@ -14,6 +14,10 @@ string(REGEX REPLACE "captures\\([^)]*\\)[ \t]*" "" ir "${ir}")
 string(REGEX REPLACE "samesign[ \t]+" "" ir "${ir}")
 # LLVM 20+ attribute
 string(REGEX REPLACE "nocreateundeforpoison[ \t]+" "" ir "${ir}")
+# LLVM 23+ memory location, which an older LLVM does not model: memory() keeps the others, or goes when it was the only
+string(REGEX REPLACE "memory\\(target_mem[0-9]*:[ \t]*[a-z]+\\)[ \t]*" "" ir "${ir}")
+string(REGEX REPLACE "target_mem[0-9]*:[ \t]*[a-z]+,[ \t]*" "" ir "${ir}")
+string(REGEX REPLACE ",[ \t]*target_mem[0-9]*:[ \t]*[a-z]+" "" ir "${ir}")
 # The lifetime markers changed signature; they carry no semantics and the
 # optimizer recreates whatever it wants from the code's shape
 string(REGEX REPLACE "call void @llvm\\.lifetime\\.[^\n]*\n" "" ir "${ir}")

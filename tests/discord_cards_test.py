@@ -26,6 +26,7 @@ REPO, TO = 'owner/repo', 'owner/nightly'
 JOBS = [
     'Linux AppImage (x86_64)',
     'Linux AppImage (aarch64)',
+    'Linux AppImage (ppc64le)',
     'Windows (Clang + LLVM)',
     'Android APK',
     'macOS and iOS (arm64)',
@@ -34,6 +35,7 @@ JOBS = [
 FILES = [
     'ScarletNX-linux-x86_64.AppImage',
     'ScarletNX-linux-aarch64.AppImage',
+    'ScarletNX-linux-ppc64le.AppImage',
     'ScarletNX-windows-x86_64.zip',
     'ScarletNX-android-universal.apk',
     'ScarletNX-macos-arm64.zip',
@@ -182,9 +184,9 @@ with tempfile.TemporaryDirectory() as temporary:
     w, b, ok = ('queued', None), ('in_progress', None), ('completed', 'success')
     steps = [
         {'status': 'in_progress', 'jobs': jobs([w] * N)},
-        {'status': 'in_progress', 'jobs': jobs([b, b, b, w, w, w])},
-        {'status': 'in_progress', 'jobs': jobs([b, b, b, w, w, w])},  # no change: no edit
-        {'status': 'in_progress', 'jobs': jobs([ok, b, b, w, w, w])},
+        {'status': 'in_progress', 'jobs': jobs([b, b, b, w, w, w, w])},
+        {'status': 'in_progress', 'jobs': jobs([b, b, b, w, w, w, w])},  # no change: no edit
+        {'status': 'in_progress', 'jobs': jobs([ok, b, b, w, w, w, w])},
         {'status': 'completed', 'conclusion': 'success', 'jobs': jobs([ok] * N)},
     ]
     save_state(dict(base, runs=[push_run(sha, steps)]))
@@ -231,8 +233,8 @@ with tempfile.TemporaryDirectory() as temporary:
         and values
         == [
             ['Waiting'] * N,
-            ['Building', 'Building', 'Building', 'Waiting', 'Waiting', 'Waiting'],
-            ['Built', 'Building', 'Building', 'Waiting', 'Waiting', 'Waiting'],
+            ['Building', 'Building', 'Building', 'Waiting', 'Waiting', 'Waiting', 'Waiting'],
+            ['Built', 'Building', 'Building', 'Waiting', 'Waiting', 'Waiting', 'Waiting'],
             ['Built'] * N,
         ],
         values,
@@ -259,7 +261,7 @@ with tempfile.TemporaryDirectory() as temporary:
         done.returncode == 0
         and posted('nightly')[-1]['method'] == 'PATCH'
         and card['url'] == published['html_url']
-        and card['fields'][2]['value']
+        and card['fields'][3]['value']
         == f'[zip](https://github.com/{TO}/releases/download/{published["tag_name"]}/ScarletNX-windows-x86_64.zip)\n94.6 MB'
         and card['color'] == cards.SCARLET
         and card['description'].startswith(f'Built from main at [`{sha[:7]}`]')
@@ -280,7 +282,7 @@ with tempfile.TemporaryDirectory() as temporary:
         and card['fields'][0]['value'] == 'Built\nnot published',
         card,
     )
-    failed = jobs([ok, ok, ('completed', 'failure'), ok, ok, ok])
+    failed = jobs([ok, ok, ok, ('completed', 'failure'), ok, ok, ok])
     s['releases'][TO] = [nightly_release(previous, '2026-10-01')]
     s['runs'] = [dict(push_run(sha, []), status='completed', conclusion='failure', jobs=failed)]
     save_state(s)
@@ -289,7 +291,7 @@ with tempfile.TemporaryDirectory() as temporary:
     check(
         'a failed build: not published, the failed package linking its log, amber',
         card['description'].startswith(f'Not published: the build of [`{sha[:7]}`]')
-        and card['fields'][2]['value'] == 'Failed\n[log](https://x/runs/1/Windo)'
+        and card['fields'][3]['value'] == 'Failed\n[log](https://x/runs/1/Windo)'
         and card['color'] == cards.AMBER,
         card,
     )
@@ -660,8 +662,8 @@ with tempfile.TemporaryDirectory() as temporary:
 # the jobs the cards name are Build's: a renamed job would leave its package waiting forever
 build = (ROOT / '.github' / 'workflows' / 'build.yml').read_text()
 for name in cards.JOBS.values():
-    template = re.sub(r'\((x86_64|aarch64)\)', '(${{ matrix.arch }})', name)
-    arch = re.search(r'\((x86_64|aarch64)\)', name)
+    template = re.sub(r'\((x86_64|aarch64|ppc64le)\)', '(${{ matrix.arch }})', name)
+    arch = re.search(r'\((x86_64|aarch64|ppc64le)\)', name)
     check(
         f'{name} is a job of build.yml',
         f'name: {name}\n' in build or (f'name: {template}\n' in build and arch and f'{arch.group(1)}' in build),

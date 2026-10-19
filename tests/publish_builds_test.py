@@ -25,12 +25,17 @@ REPO, TO = 'owner/repo', 'owner/nightly'
 FILES = [
     'ScarletNX-linux-x86_64.AppImage',
     'ScarletNX-linux-aarch64.AppImage',
+    'ScarletNX-linux-ppc64le.AppImage',
     'ScarletNX-windows-x86_64.zip',
     'ScarletNX-android-universal.apk',
     'ScarletNX-macos-arm64.zip',
     'ScarletNX-ios-arm64.ipa',
 ]
-ZSYNC = ['ScarletNX-linux-x86_64.AppImage.zsync', 'ScarletNX-linux-aarch64.AppImage.zsync']
+ZSYNC = [
+    'ScarletNX-linux-x86_64.AppImage.zsync',
+    'ScarletNX-linux-aarch64.AppImage.zsync',
+    'ScarletNX-linux-ppc64le.AppImage.zsync',
+]
 failures = []
 
 
@@ -109,6 +114,10 @@ with tempfile.TemporaryDirectory() as temporary:
             f'ScarletNX-linux-aarch64-{short}.AppImage': {
                 'ScarletNX-linux-aarch64.AppImage': 'elf arm',
                 'ScarletNX-linux-aarch64.AppImage.zsync': 'zsync arm',
+            },
+            f'ScarletNX-linux-ppc64le-{short}.AppImage': {
+                'ScarletNX-linux-ppc64le.AppImage': 'elf power',
+                'ScarletNX-linux-ppc64le.AppImage.zsync': 'zsync power',
             },
             f'ScarletNX-windows-x86_64-{short}': {'bin/scarletnx.exe': 'MZ', 'share/licenses/LICENSE': 'GPL'},
             f'ScarletNX-android-universal-{short}.apk': {f'ScarletNX-android-universal-{short}.apk': 'PK apk'},
@@ -322,6 +331,7 @@ with tempfile.TemporaryDirectory() as temporary:
         == [
             'Linux x86-64',
             'Linux ARM64',
+            'Linux PowerPC64 LE',
             'Windows x86-64',
             'Android',
             'macOS ARM64',
@@ -329,7 +339,7 @@ with tempfile.TemporaryDirectory() as temporary:
             'Source',
             'Every nightly',
         ]
-        and shown['fields'][2]['value']
+        and shown['fields'][3]['value']
         == f'[zip](https://github.com/{TO}/releases/download/{tag}/ScarletNX-windows-x86_64.zip)\n0.0 MB'
         and all(f['inline'] for f in shown['fields'])
         and shown['url'] == f'https://github.com/{TO}/releases/tag/{tag}'
@@ -479,7 +489,13 @@ with tempfile.TemporaryDirectory() as temporary:
         }
 
     def pr_run(head, number=50, created='2026-10-16T10:00:00Z', failed=('Windows (Clang + LLVM)',)):
-        jobs = ['Linux AppImage (x86_64)', 'Linux AppImage (aarch64)', 'Windows (Clang + LLVM)', 'Android APK']
+        jobs = [
+            'Linux AppImage (x86_64)',
+            'Linux AppImage (aarch64)',
+            'Linux AppImage (ppc64le)',
+            'Windows (Clang + LLVM)',
+            'Android APK',
+        ]
         return {
             'id': number,
             'event': 'pull_request',
@@ -556,7 +572,7 @@ with tempfile.TemporaryDirectory() as temporary:
         shown.get('author') == {'name': 'alice', 'url': 'https://x/alice', 'icon_url': 'https://x/alice.png'}
         and shown['url'] == 'https://x/pull/7'
         and shown['color'] == 0x1F883D  # GitHub's open; the failed system says so in its field
-        and shown['fields'][2]
+        and shown['fields'][3]
         == {'name': 'Windows x86-64', 'value': 'Failed\n[log](https://x/runs/50/Windo)', 'inline': True}
         and shown['fields'][0]['value'].startswith(f'[AppImage](https://github.com/{TO}/releases/download/pr-7/')
         and shown['fields'][len(FILES) :]
