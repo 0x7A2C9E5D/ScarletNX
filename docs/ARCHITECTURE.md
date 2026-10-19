@@ -91,9 +91,9 @@ NX tooling under `src/nx/runtime/driver/` and `src/nx/loader/`:
   does, so a loop without SVCs gives its core to a waiting thread of higher priority.
 - The LLVM backend's speed: guest memory and the CPU structure are separate alias scopes (registers stay in host
   registers) and guest accesses are volatile (each happens, as on the hardware); logical immediates and SIMD
-  immediates are folded; FP arithmetic, compares and conversions run inline on the host's IEEE unit when the result
-  is provably the soft-float helper's, flags included (`ir_fp_fast`); the AdvSIMD and crypto encodings are inline
-  instead of `snx_simd`, all but AES on a host without AES-NI. Build == host == target: the
+  immediates are folded; FP arithmetic, compares and conversions run inline on the host's IEEE unit when the result is
+  provably the soft-float helper's, flags included (`ir_fp_fast`); the AdvSIMD and crypto encodings are inline instead
+  of `snx_simd`, AES as S-box lookups where the host has no AES-NI. Build == host == target: the
   generated code uses the host's extensions (`snx_ir_host`, from LLVM's host detection), and the runtime library's
   helpers are portable C that LLVM compiles for each module's CPU; nothing is detected at run time. The emitters'
   x86 paths follow the target triple: AES-NI, PCLMULQDQ (PMULL, CRC32 by Barrett
