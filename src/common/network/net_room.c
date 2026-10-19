@@ -391,7 +391,7 @@ struct RoomSock {
     int connected, broadcast, reuse, shut_rd, shut_wr, sndbuf, rcvbuf;
     RoomDatagramIn *head, *tail;
     int queued;
-    int warned_full;
+    int warned_full, told_option;
 };
 
 static void sock_destroy(SnxSocket* s) {
@@ -628,7 +628,10 @@ static int sock_setsockopt(SnxSocket* s, int level, int name, const void* v, siz
     if (snx_net_sockopt_kept(level, name)) return snx_net_host_setsockopt(s, level, name, v, size);
     /* the room has no TTL, multicast group or type of service to set: accepted as Eden's proxy socket accepts every
        option, and said, so a game that leans on one shows where */
-    snx_net_log("room: a socket option (level %d, name %d) has no effect in a room", level, name);
+    snx_lock(&k->lk);
+    if (!k->told_option) snx_net_log("room: a socket option (level %d, name %d) has no effect in a room", level, name);
+    k->told_option = 1; /* once a socket: a game sets its options on every one */
+    snx_unlock(&k->lk);
     return 0;
 }
 static int sock_getsockopt(SnxSocket* s, int level, int name, void* v, size_t* size) {
@@ -736,7 +739,10 @@ static void datagram_in(SnxRoom* r, const uint8_t* msg, size_t size) {
         return;
     }
     buf = malloc(plain ? (size_t)plain : 1);
-    if (!buf) return;
+    if (!buf) {
+        snx_net_log("room: a datagram of %llu bytes dropped: out of memory", plain);
+        return;
+    }
     n = ZSTD_decompress(buf, (size_t)plain, d.data, d.size);
     if (ZSTD_isError(n) || n != plain) {
         snx_net_log("room: a datagram from %u.%u.%u.%u:%u doesn't decompress", d.local_ip[0], d.local_ip[1],
@@ -777,7 +783,8 @@ static void datagram_in(SnxRoom* r, const uint8_t* msg, size_t size) {
             k->tail = in;
             k->queued++;
             k->warned_full = 0;
-        }
+        } else
+            snx_net_log("room: a datagram for port %u dropped: out of memory", k->port);
         snx_unlock(&k->lk);
     }
     snx_unlock(&r->lk);
@@ -928,7 +935,10 @@ static void room_thread(void* arg) {
         while (o) {
             RoomOut* next = o->next;
             ENetPacket* packet = enet_packet_create(o->data, o->size, ENET_PACKET_FLAG_RELIABLE);
-            if (packet && enet_peer_send(r->peer, 0, packet) < 0) enet_packet_destroy(packet);
+            if (!packet || enet_peer_send(r->peer, 0, packet) < 0) {
+                snx_net_log("room: a message of %zu bytes to the room dropped: ENet took none", o->size);
+                if (packet) enet_packet_destroy(packet);
+            }
             free(o);
             o = next;
         }
