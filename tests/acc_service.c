@@ -367,6 +367,49 @@ static void test_first_uid(void) {
     puts("PASS user 1's uid from users.ini, the fixed one without");
 }
 
+/* the file read back as text, NULL when it is not there */
+static char* got(const char* name) {
+    char* path = snx_path_join(DIR, name);
+    size_t size;
+    char* text = snx_is_file(path) ? (char*)snx_read_file(path, &size) : NULL;
+    free(path);
+    return text;
+}
+/* users.ini started over with one user: the one before kept as users.ini.old, nothing written for what is refused */
+static void test_start(void) {
+    static const uint64_t three[2] = {3, 10}, two[2] = {2, 2}, zero[2] = {0, 0};
+    char why[512], text[33], *before, *now, *old;
+    gone("users.ini");
+    gone("users.ini.old");
+    CHECK(snx_users_start(DIR, three, "Ada", why, sizeof why) == -1 && strstr(why, "nickname Ada is not 4 to 20"));
+    CHECK(snx_users_start(DIR, zero, "Aogo", why, sizeof why) == -1 && strstr(why, "zero"));
+    CHECK(!got("users.ini") && !got("users.ini.old") && !got("users.ini.new"));
+    /* none before: the new one alone, read as user 1 of that uid */
+    CHECK(snx_users_start(DIR, three, NICK20, why, sizeof why) == 0 && !got("users.ini.old"));
+    CHECK(snx_users_load(DIR, 1, why, sizeof why) == 0 && g_user_count == 1 && !strcmp(g_users[0].nickname, NICK20));
+    snx_users_uid_text(g_users[0].uid, text);
+    CHECK(!strcmp(text, UID3));
+    /* three users before: they go to users.ini.old as they were */
+    put_ini("[user1]\nnickname=Aogo\n[user2]\nuid=" UID2 "\nnickname=Xuji\n[user3]\nuid=" UID3 "\nnickname=Afugo\n");
+    before = got("users.ini");
+    CHECK(snx_users_start(DIR, two, "Afugo", why, sizeof why) == 0);
+    old = got("users.ini.old");
+    now = got("users.ini");
+    CHECK(old && before && !strcmp(old, before) && now && strstr(now, "[user1]\nuid=" UID2 "\nnickname=Afugo\n"));
+    CHECK(!strstr(now, "[user2]") && !got("users.ini.new"));
+    CHECK(snx_users_load(DIR, 1, why, sizeof why) == 0 && g_user_count == 1 && !strcmp(g_users[0].nickname, "Afugo"));
+    free(old);
+    free(before);
+    /* again: users.ini.old is the one it replaces */
+    CHECK(snx_users_start(DIR, three, "Aogo", why, sizeof why) == 0);
+    old = got("users.ini.old");
+    CHECK(old && !strcmp(old, now));
+    free(old);
+    free(now);
+    gone("users.ini.old");
+    puts("PASS users.ini started over with one user, the one before kept as users.ini.old");
+}
+
 static void test_refused(void) {
     char why[512];
     refused("[user1]\nnickname=Aogo\ncolour=red\n", 1, "colour is not a setting");
@@ -433,6 +476,7 @@ int main(void) {
     free(g_mem);
     test_users();
     test_first_uid();
+    test_start();
     test_refused();
     gone("users.ini");
     snx_remove_tree(DIR);
