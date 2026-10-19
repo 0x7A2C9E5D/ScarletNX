@@ -62,7 +62,7 @@ int main(void) {
        log not there yet says so, and a folder that cannot take it fails with the path it tried */
     {
         enum { BIG = (4 << 20) + 100 };
-        char *root = snx_temp_dir(NULL), *log = snx_path_join(root, "0100DA801624E000.log"), saved[1024], *big;
+        char *root = snx_temp_dir(NULL), *log = snx_path_join(root, "0100ABCD12345000.log"), saved[1024], *big;
         char* text;
         size_t n = 0;
         assert(root && log && !snx_write_file(log, "[  0.10] svc: hello\n", 20));

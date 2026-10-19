@@ -74,10 +74,10 @@ int main(void) {
     assert(root && !snx_mkdirs(games));
 
     /* a folder's .ini files: the ones with the section counted, then cleaned, an entry each; the others untouched */
-    path = snx_path_join(games, "Celeste.ini");
+    path = snx_path_join(games, "First.ini");
     write_text(path, game);
     free(path);
-    path = snx_path_join(games, "Hades.INI");
+    path = snx_path_join(games, "Second.INI");
     write_text(path, "[Deprecated]\nx=1\n");
     free(path);
     path = snx_path_join(games, "Clean.ini");
@@ -89,7 +89,7 @@ int main(void) {
     /* a game's folder: its own .ini, not another file of it, nor a folder that is not a game's */
     {
         char* folder = snx_path_join(games, "0100ABCD12345000");
-        char* data = snx_path_join(games, "Hades_data");
+        char* data = snx_path_join(games, "Second_data");
         assert(!snx_mkdirs(folder) && !snx_mkdirs(data));
         path = snx_path_join(folder, "0100ABCD12345000.ini");
         write_text(path, "[Deprecated]\nx=1\n");
@@ -97,7 +97,7 @@ int main(void) {
         path = snx_path_join(folder, "other.ini");
         write_text(path, "[Deprecated]\nx=1\n");
         free(path);
-        path = snx_path_join(data, "Hades_data.ini");
+        path = snx_path_join(data, "Second_data.ini");
         write_text(path, "[Display]\n");
         free(path);
         path = snx_path_join(data, "save.ini");
@@ -116,8 +116,8 @@ int main(void) {
     assert(gui_clean_inis(&done, games) == 3 && done.count == 3 && done.done == 3);
     {
         const char* list = entries(&done, games);
-        assert(strstr(list, "+/Celeste.ini|[Deprecated] taken out\n") &&
-               strstr(list, "+/Hades.INI|[Deprecated] taken out\n") &&
+        assert(strstr(list, "+/First.ini|[Deprecated] taken out\n") &&
+               strstr(list, "+/Second.INI|[Deprecated] taken out\n") &&
                strstr(list, "+/0100ABCD12345000/0100ABCD12345000.ini|[Deprecated] taken out\n"));
     }
     path = snx_path_join(games, "0100ABCD12345000/other.ini");
@@ -125,7 +125,7 @@ int main(void) {
     assert(!strcmp(text, "[Deprecated]\nx=1\n"));
     free(text);
     free(path);
-    path = snx_path_join(games, "Celeste.ini");
+    path = snx_path_join(games, "First.ini");
     text = read_text(path);
     assert(!strcmp(text, "[Display]\nfullscreen=1\n\n[Other]\nlanguage=en\n"));
     free(text);
@@ -140,7 +140,7 @@ int main(void) {
     assert(!strcmp(text, "[Deprecated]\nx=1\n"));
     free(text);
     free(path);
-    path = snx_path_join(games, "Celeste.ini.new");
+    path = snx_path_join(games, "First.ini.new");
     assert(!snx_path_exists(path)); /* the staged copy went in place */
     free(path);
     assert(gui_clean_inis(NULL, games) == 0); /* nothing left to take out */

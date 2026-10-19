@@ -492,7 +492,7 @@ static void test_messages(void) {
     CHECK(test_handles[h - 0x100] == &g_hle.am.launchable_event->o && g_hle.am.launchable_event->signaled);
     close_handles();
 }
-/* the Mii editor (0x12), which Mario Kart 8 Deluxe opens with nn::mii::AppendMii: with no editor here, appending is
+/* the Mii editor (0x12), which a game opens with nn::mii::AppendMii: with no editor here, appending is
    cancelled as when the player backs out, an edit hands the Mii back, and each answer is the size the SDK reads */
 static SvcObj* mii_edit(u32 mode, const u8* charinfo, u32 out_size) {
     u8 input[0x100] = {0};
