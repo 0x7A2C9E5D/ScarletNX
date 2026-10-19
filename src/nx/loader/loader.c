@@ -760,15 +760,13 @@ static int decode_nso(SnxModuleImage* m, const unsigned char* file, size_t file_
     return 0;
 }
 
-static int load_nso(const char* path, const char* name, int is64, SnxModuleImage* module, char* error,
-                    size_t error_size) {
-    unsigned char* file;
-    size_t file_size = 0, n;
+/* an NSO's bytes, read from path (a file, or a dump's ExeFS): named after its file without name */
+static int decode_nso_file(unsigned char* file, size_t file_size, const char* path, const char* name, int is64,
+                           SnxModuleImage* module, char* error, size_t error_size) {
+    size_t n;
     const char* base;
     int rc;
     memset(module, 0, sizeof(*module));
-    file = snx_read_file(path, &file_size);
-    if (!file) return fail(error, error_size, snx_format("cannot read %s", path));
     if (!name) { /* named after its file */
         char* own;
         base = leaf(path, &n);
@@ -780,9 +778,21 @@ static int load_nso(const char* path, const char* name, int is64, SnxModuleImage
     } else
         set_names(module, name, path);
     rc = decode_nso(module, file, file_size, error, error_size) || read_metadata(module, is64, error, error_size);
-    free(file);
     if (rc) snx_free_module(module);
     return rc ? -1 : 0;
+}
+
+static int load_nso(const char* path, const char* name, int is64, SnxModuleImage* module, char* error,
+                    size_t error_size) {
+    unsigned char* file;
+    size_t file_size = 0;
+    int rc;
+    memset(module, 0, sizeof(*module));
+    file = snx_read_file(path, &file_size);
+    if (!file) return fail(error, error_size, snx_format("cannot read %s", path));
+    rc = decode_nso_file(file, file_size, path, name, is64, module, error, error_size);
+    free(file);
+    return rc;
 }
 
 int snx_load_nso(const char* path, const char* name, SnxModuleImage* module, char* error, size_t error_size) {
@@ -951,20 +961,30 @@ static char* find_exefs(const char* entry) {
     return NULL;
 }
 
-/* main.npdm beside the modules, parsed, and its bytes (NULL without one) */
-static int read_npdm(const char* exefs, SnxNpdm* npdm, unsigned char** data, size_t* size, char* error,
-                     size_t error_size) {
-    char* path = snx_path_join(exefs, "main.npdm");
+/* an ExeFS folder's file, as the readers give it */
+static int folder_read(void* source, const char* name, unsigned char** data, size_t* size) {
+    char* path = snx_path_join((const char*)source, name);
+    int found = snx_is_file(path);
+    *data = found ? snx_read_file(path, size) : NULL;
+    free(path);
+    return !found ? 1 : *data ? 0 : -1;
+}
+
+/* main.npdm beside the modules, parsed, and its bytes (NULL without one); where names the ExeFS in messages */
+static int read_npdm(const SnxExefsReader* exefs, const char* where, SnxNpdm* npdm, unsigned char** data, size_t* size,
+                     char* error, size_t error_size) {
+    char* path = snx_path_join(where, "main.npdm");
     char inner[256];
+    int found;
     *data = NULL;
     *size = 0;
-    if (!snx_is_file(path)) {
+    found = exefs->read(exefs->source, "main.npdm", data, size);
+    if (found == 1) {
         free(path);
         default_npdm(npdm);
         return 0;
     }
-    *data = snx_read_file(path, size);
-    if (!*data) {
+    if (found) {
         int rc = fail(error, error_size, snx_format("cannot read the NPDM %s", path));
         free(path);
         return rc;
@@ -982,6 +1002,7 @@ static int read_npdm(const char* exefs, SnxNpdm* npdm, unsigned char** data, siz
 }
 
 int snx_load_npdm(const char* entry, SnxNpdm* npdm, char* error, size_t error_size) {
+    SnxExefsReader folder;
     unsigned char* data;
     size_t size;
     char* exefs;
@@ -993,7 +1014,9 @@ int snx_load_npdm(const char* entry, SnxNpdm* npdm, char* error, size_t error_si
     memset(npdm, 0, sizeof(*npdm));
     exefs = find_exefs(entry);
     if (!exefs) return fail(error, error_size, snx_format("%s holds no exefs/main", entry));
-    rc = read_npdm(exefs, npdm, &data, &size, error, error_size);
+    folder.read = folder_read;
+    folder.source = exefs;
+    rc = read_npdm(&folder, exefs, npdm, &data, &size, error, error_size);
     free(data);
     free(exefs);
     return rc;
@@ -1048,11 +1071,49 @@ static int load_nro_program(const char* entry, SnxProgram* program, char* error,
     return 0;
 }
 
+/* the modules of an ExeFS and its NPDM, where naming it in messages and the modules' paths */
+static int load_modules(const SnxExefsReader* exefs, const char* where, SnxProgram* program, char* error,
+                        size_t error_size) {
+    unsigned char* file;
+    char* path;
+    size_t i, size;
+    SnxU64 cursor, end;
+    int found;
+    /* the NPDM first: whether the program is 64-bit decides how every module is read */
+    if (read_npdm(exefs, where, &program->npdm, &program->npdm_data, &program->npdm_size, error, error_size))
+        return -1;
+    cursor = program->npdm.is64 ? SNX_CODE_BASE : SNX_CODE_BASE32;
+    end = program->npdm.is64 ? CODE_END64 : CODE_END32;
+    program->modules = (SnxModuleImage*)snx_alloc(MODULE_NAMES * sizeof(*program->modules));
+    for (i = 0; i < MODULE_NAMES; ++i) {
+        SnxModuleImage* m = &program->modules[program->module_count];
+        int failed;
+        path = snx_path_join(where, module_names[i]);
+        found = exefs->read(exefs->source, module_names[i], &file, &size);
+        if (found) {
+            if (found < 0) fail(error, error_size, snx_format("cannot read %s", path));
+            free(path);
+            if (found < 0) return -1;
+            continue;
+        }
+        failed = decode_nso_file(file, size, path, module_names[i], program->npdm.is64, m, error, error_size);
+        free(file);
+        free(path);
+        if (failed) return -1;
+        ++program->module_count;
+        if (m->size > end - cursor) return fail(error, error_size, snx_strdup("modules exceed guest address space"));
+        m->base = cursor;
+        cursor += m->size;
+        cursor = end - cursor >= GUARD_SIZE ? cursor + GUARD_SIZE : end;
+    }
+    return 0;
+}
+
 static int load_exefs_program(const char* entry, SnxProgram* program, char* error, size_t error_size) {
+    SnxExefsReader folder;
     char *exefs, *root, *romfs = NULL, *path, *nacp_path;
     const char* name;
-    size_t length, i;
-    SnxU64 cursor, end;
+    size_t length;
     int rc = -1;
     exefs = find_exefs(entry);
     if (!exefs) return fail(error, error_size, snx_format("%s holds no exefs/main", entry));
@@ -1070,32 +1131,9 @@ static int load_exefs_program(const char* entry, SnxProgram* program, char* erro
             free(path);
     }
     set_paths(program, entry, exefs, root, romfs);
-    /* the NPDM first: whether the program is 64-bit decides how every module is read */
-    if (read_npdm(exefs, &program->npdm, &program->npdm_data, &program->npdm_size, error, error_size)) goto done;
-    cursor = program->npdm.is64 ? SNX_CODE_BASE : SNX_CODE_BASE32;
-    end = program->npdm.is64 ? CODE_END64 : CODE_END32;
-    program->modules = (SnxModuleImage*)snx_alloc(MODULE_NAMES * sizeof(*program->modules));
-    for (i = 0; i < MODULE_NAMES; ++i) {
-        SnxModuleImage* m = &program->modules[program->module_count];
-        int failed;
-        path = snx_path_join(exefs, module_names[i]);
-        if (!snx_is_file(path)) {
-            free(path);
-            continue;
-        }
-        failed = program->npdm.is64 ? snx_load_nso(path, module_names[i], m, error, error_size)
-                                    : snx_load_nso32(path, module_names[i], m, error, error_size);
-        free(path);
-        if (failed) goto done;
-        ++program->module_count;
-        if (m->size > end - cursor) {
-            fail(error, error_size, snx_strdup("modules exceed guest address space"));
-            goto done;
-        }
-        m->base = cursor;
-        cursor += m->size;
-        cursor = end - cursor >= GUARD_SIZE ? cursor + GUARD_SIZE : end;
-    }
+    folder.read = folder_read;
+    folder.source = exefs;
+    if (load_modules(&folder, exefs, program, error, error_size)) goto done;
     nacp_path = snx_path_join(root, "control.nacp");
     if (snx_is_file(nacp_path)) {
         program->nacp = snx_read_file(nacp_path, &program->nacp_size);
@@ -1115,6 +1153,18 @@ done:
     free(exefs);
     free(root);
     free(romfs);
+    return rc;
+}
+
+int snx_load_program_from(const SnxExefsReader* exefs, const char* entry, unsigned char* nacp, size_t nacp_size,
+                          SnxProgram* program, char* error, size_t error_size) {
+    int rc;
+    memset(program, 0, sizeof(*program));
+    set_paths(program, entry, NULL, NULL, NULL);
+    program->nacp = nacp;
+    program->nacp_size = nacp ? nacp_size : 0;
+    rc = load_modules(exefs, entry, program, error, error_size);
+    if (rc) snx_free_program(program);
     return rc;
 }
 

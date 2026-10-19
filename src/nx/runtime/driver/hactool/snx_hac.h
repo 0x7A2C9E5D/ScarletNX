@@ -47,6 +47,26 @@ int snx_hac_nca(SnxHac* hac, int container, size_t entry, SnxHacNca* nca);
 int snx_hac_extract(SnxHac* hac, int container, size_t entry, int base_container, size_t base_entry,
                     const char* exefs_dir, const char* romfs_dir);
 
+/* The file systems of a program NCA read where they lie, the way the runtime reads a game it did not extract: the
+   ExeFS's files and the RomFS image, an update's over the base NCA (base_container -1 for none). They stay open until
+   snx_hac_fs_free, and read from the containers' files, or from their mappings (snx_hac_map). Reads are not thread
+   safe: their decryption contexts are shared */
+typedef struct SnxHacFs SnxHacFs;
+/* the container's file as data (size bytes) maps it, for the file systems opened afterwards to read from: 0, or -1
+   when one of its entries lies past size. The mapping outlives them */
+int snx_hac_map(SnxHac* hac, int container, const void* data, uint64_t size);
+/* NULL when the NCA cannot be read */
+SnxHacFs* snx_hac_fs_open(SnxHac* hac, int container, size_t entry, int base_container, size_t base_entry);
+void snx_hac_fs_free(SnxHacFs* fs);
+/* the ExeFS's files, their offsets inside its section; 0 without an ExeFS */
+size_t snx_hac_fs_files(SnxHacFs* fs, const SnxHacEntry** files);
+/* size bytes at offset of an ExeFS file: 0, or -1 */
+int snx_hac_fs_read(SnxHacFs* fs, size_t file, uint64_t offset, void* buffer, size_t size);
+/* the RomFS image's size, 0 without one */
+uint64_t snx_hac_fs_romfs_size(const SnxHacFs* fs);
+/* size bytes of the RomFS image at offset: 0, or -1 */
+int snx_hac_fs_read_romfs(SnxHacFs* fs, uint64_t offset, void* buffer, size_t size);
+
 /* tick(written, data) as hactool writes the extraction, written the bytes so far */
 void snx_hac_progress(void (*tick)(uint64_t written, void* data), void* data);
 /* cleanup(data) before an exit hactool takes on a dump it cannot read, which ends the process */

@@ -14,4 +14,10 @@ char* snx_game_name(const char* name, const SnxNpdm* npdm, const char* input);
 /* what the game is shown as (its window, the recompile's lines, its settings' head): name when given, else the name
    in its control.nacp, else its title */
 char* snx_game_shown(const char* name, const SnxProgram* program);
+/* the link in a game's folder to the dump it was made from, <folder>/<name>.source, owned: what Extract to tmpfs
+   extracts again, and what a game made from its dump without extracting it reads its ExeFS and RomFS from */
+char* snx_source_link(const char* folder, const char* name);
+/* the game's link to dump, made again unless it names it already; a note when the system makes none (Windows without
+   the right to) */
+void snx_link_source(const char* folder, const char* name, const char* dump);
 #endif

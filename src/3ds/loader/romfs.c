@@ -10,6 +10,7 @@
 typedef struct {
     CtrReader* r;
     CtrSpan data;
+    bool write; /* the files are copied out, not only checked */
     unsigned char *dirs, *files, *dir_marks, *file_marks;
     size_t dir_size, file_size, dir_count, file_count, visited_dirs, visited_files;
 } RomFs;
@@ -81,6 +82,17 @@ static unsigned char* entry(RomFs* fs, uint32_t offset, bool directory) {
         fs->visited_files++;
     return (directory ? fs->dirs : fs->files) + offset;
 }
+static bool unique(RomFs* fs, char*** names, size_t* count, const char* name) {
+    for (size_t i = 0; i < *count; ++i)
+        if (!strcmp((*names)[i], name))
+            return ctr_fail(fs->r, SNX_CTR_EXTRACT_FORMAT, "duplicate RomFS name: %s", name);
+    char** grown = realloc(*names, (*count + 1) * sizeof **names);
+    if (!grown) return ctr_fail(fs->r, SNX_CTR_EXTRACT_LIMIT, "out of memory");
+    *names = grown;
+    grown[*count] = snx_strdup(name);
+    ++*count;
+    return true;
+}
 static bool walk(RomFs* fs, uint32_t offset, uint32_t parent, const char* path, unsigned depth, uint32_t* next) {
     if (depth > 64 || strlen(path) > 3500)
         return ctr_fail(fs->r, SNX_CTR_EXTRACT_LIMIT, "RomFS exceeds depth/path limit");
@@ -92,36 +104,53 @@ static bool walk(RomFs* fs, uint32_t offset, uint32_t parent, const char* path, 
     *next = ctr_le32(dir + 4);
     if (!offset && (ctr_le32(dir + 20) || *next != NONE))
         return ctr_fail(fs->r, SNX_CTR_EXTRACT_FORMAT, "invalid RomFS root");
-    while (file != NONE) {
+    /* a check that writes nothing refuses two entries of a folder by one name, as creating the second would */
+    char** names = NULL;
+    size_t count = 0;
+    bool ok = true;
+    while (ok && file != NONE) {
         unsigned char* f = entry(fs, file, false);
         char name[1024];
-        if (!f) return false;
-        if (ctr_le32(f) != offset || !utf8_name(f + 32, ctr_le32(f + 28), name))
-            return ctr_fail(fs->r, SNX_CTR_EXTRACT_FORMAT, "invalid RomFS file parent/name");
+        if (!f) {
+            ok = false;
+            break;
+        }
+        if (ctr_le32(f) != offset || !utf8_name(f + 32, ctr_le32(f + 28), name)) {
+            ok = ctr_fail(fs->r, SNX_CTR_EXTRACT_FORMAT, "invalid RomFS file parent/name");
+            break;
+        }
         uint64_t at = ctr_le64(f + 8), size = ctr_le64(f + 16);
-        if (!ctr_fits(fs->data.size, at, size))
-            return ctr_fail(fs->r, SNX_CTR_EXTRACT_FORMAT, "RomFS file data exceeds section");
+        if (!ctr_fits(fs->data.size, at, size)) {
+            ok = ctr_fail(fs->r, SNX_CTR_EXTRACT_FORMAT, "RomFS file data exceeds section");
+            break;
+        }
         char* destination = snx_path_join(path, name);
-        bool ok = ctr_copy(fs->r, (CtrSpan){fs->data.offset + at, size}, destination, NULL);
+        ok = fs->write ? ctr_copy(fs->r, (CtrSpan){fs->data.offset + at, size}, destination, NULL)
+                       : unique(fs, &names, &count, name);
         free(destination);
-        if (!ok) return false;
         file = ctr_le32(f + 4);
     }
-    while (child != NONE) {
-        if ((child & 3) || child >= fs->dir_size || fs->dir_marks[child / 4] != 1)
-            return ctr_fail(fs->r, SNX_CTR_EXTRACT_FORMAT, "invalid or cyclic RomFS directory link");
+    while (ok && child != NONE) {
+        if ((child & 3) || child >= fs->dir_size || fs->dir_marks[child / 4] != 1) {
+            ok = ctr_fail(fs->r, SNX_CTR_EXTRACT_FORMAT, "invalid or cyclic RomFS directory link");
+            break;
+        }
         unsigned char* c = fs->dirs + child;
         char name[1024];
-        if (!utf8_name(c + 24, ctr_le32(c + 20), name))
-            return ctr_fail(fs->r, SNX_CTR_EXTRACT_FORMAT, "unsafe RomFS directory name");
+        if (!utf8_name(c + 24, ctr_le32(c + 20), name)) {
+            ok = ctr_fail(fs->r, SNX_CTR_EXTRACT_FORMAT, "unsafe RomFS directory name");
+            break;
+        }
         char* destination = snx_path_join(path, name);
-        bool ok = ctr_directory(fs->r, destination) && walk(fs, child, offset, destination, depth + 1, &child);
+        ok = (fs->write ? ctr_directory(fs->r, destination) : unique(fs, &names, &count, name)) &&
+             walk(fs, child, offset, destination, depth + 1, &child);
         free(destination);
-        if (!ok) return false;
     }
-    return true;
+    for (size_t i = 0; i < count; ++i) free(names[i]);
+    free(names);
+    return ok;
 }
-static bool extract(RomFs* fs, CtrSpan rom, const char* stage) {
+static bool extract(RomFs* fs, CtrSpan rom, const char* stage, CtrSpan* found) {
     CtrReader* r = fs->r;
     unsigned char ivfc[0x60], header[0x28];
     if (!ctr_read(r, rom, 0, ivfc, sizeof ivfc)) return false;
@@ -167,17 +196,18 @@ static bool extract(RomFs* fs, CtrSpan rom, const char* stage) {
         !table_scan(fs, false))
         return false;
     fs->data = (CtrSpan){level3.offset + data, level3.size - data};
-    char* path = snx_path_join(stage, "romfs");
+    char* path = stage ? snx_path_join(stage, "romfs") : snx_strdup("romfs");
     uint32_t next;
-    bool ok = ctr_directory(r, path) && walk(fs, 0, 0, path, 0, &next);
+    bool ok = (!stage || ctr_directory(r, path)) && walk(fs, 0, 0, path, 0, &next);
     free(path);
     if (ok && (fs->visited_dirs != fs->dir_count || fs->visited_files != fs->file_count))
         ok = ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "unreachable RomFS metadata entries");
+    *found = level3;
     return ok;
 }
-bool ctr_romfs_extract(CtrReader* r, CtrSpan rom, const char* stage) {
-    RomFs fs = {.r = r};
-    bool ok = extract(&fs, rom, stage);
+bool ctr_romfs_check(CtrReader* r, CtrSpan rom, const char* stage, CtrSpan* level3) {
+    RomFs fs = {.r = r, .write = stage != NULL};
+    bool ok = extract(&fs, rom, stage, level3);
     free(fs.dirs);
     free(fs.files);
     free(fs.dir_marks);

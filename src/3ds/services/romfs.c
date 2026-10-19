@@ -2,7 +2,8 @@
    Copyright 2026 the ScarletNX contributors
    CTR level-3 layout/hash facts: Azahar core/hle/romfs.cpp and libctru
    romfs_dev.c. Independent serializer over NX's shared host FsTree, not NX
-   IPC or Switch RomFS metadata. No original CIA/container reads at runtime. */
+   IPC or Switch RomFS metadata; or, without an extraction, the CIA's own
+   level 3 read where it lies in the mapped CIA. */
 #include "3ds/services/romfs.h"
 #include "common/filesystem/tree.h"
 #include <stdio.h>
@@ -20,6 +21,10 @@ typedef struct {
     uint32_t parent, next, off;
 } File;
 struct SnxCtrRomfs {
+    /* a CIA's level 3 read where it lies (snx_ctr_romfs_open_image): the image, its size and the CIA's mtime, and no
+       tree */
+    const unsigned char* image;
+    uint64_t image_size, mtime;
     FsTree* tree;
     uint32_t dirs, files;
     size_t meta_size;
@@ -228,7 +233,93 @@ fail:
     pm_unlock(&tree->lock);
     return false;
 }
-void snx_ctr_romfs_free(SnxCtrRomfs* r) { free(r); /* the shared tree is owned by the process */ }
+bool snx_ctr_romfs_open_image(const unsigned char* image, uint64_t size, uint64_t mtime, SnxCtrRomfs** out) {
+    *out = NULL;
+    if (!image) { /* the image an empty romfs/ folder gives, serialized after the view, which then reads it */
+        FsNode root = {.is_dir = 1};
+        Measure m = {0}, pos = {0};
+        if (!measure(&root, &m, true)) return false;
+        size_t meta_size = (size_t)align16(40 + 4ull * buckets(m.dirs) + m.dir_bytes + 4ull * buckets(m.files));
+        SnxCtrRomfs* r = calloc(1, sizeof *r + sizeof(Dir) + meta_size);
+        if (!r) return false;
+        r->dirs = 1;
+        r->meta_size = meta_size;
+        fill(r, &root, 0, &pos);
+        serialize(r, &m);
+        r->image = meta(r);
+        r->image_size = meta_size;
+        r->mtime = mtime;
+        *out = r;
+        return true;
+    }
+    if (size < 0x28 || size > LIMIT) return false;
+    SnxCtrRomfs* r = calloc(1, sizeof *r);
+    if (!r) return false;
+    r->image = image;
+    r->image_size = size;
+    r->mtime = mtime;
+    *out = r;
+    return true;
+}
+void snx_ctr_romfs_free(SnxCtrRomfs* r) { free(r); /* the shared tree, or the CIA's mapping, is the process's */ }
+static uint32_t image32(const SnxCtrRomfs* r, uint64_t at) {
+    if (at > r->image_size || r->image_size - at < 4) return NONE;
+    const unsigned char* p = r->image + at;
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+/* whether path (relative, '/'-separated UTF-8) names an entry of the image's level-3 tables: the root for "", then
+   each component among the folder's child folders, the last also among its files. snx_ctr_cia_open walked the tables
+   already; the bounds are checked again all the same */
+static bool image_has(const SnxCtrRomfs* r, const char* path) {
+    uint32_t dir_table = image32(r, 12), dir_size = image32(r, 16), file_table = image32(r, 28),
+             file_size = image32(r, 32);
+    uint32_t dir = 0;
+    if (dir_table == NONE || file_table == NONE || dir_size == NONE || file_size == NONE ||
+        (uint64_t)dir_table + dir_size > r->image_size || (uint64_t)file_table + file_size > r->image_size)
+        return false;
+    while (*path) {
+        const char* end = strchr(path, '/');
+        size_t length = end ? (size_t)(end - path) : strlen(path);
+        char part[768];
+        uint16_t name[256];
+        uint32_t bytes;
+        if (!length) { /* a doubled or trailing separator */
+            path += 1;
+            continue;
+        }
+        if (length >= sizeof part) return false;
+        memcpy(part, path, length);
+        part[length] = 0;
+        if (!name16(part, name, &bytes)) return false;
+        bool found = false;
+        /* the folder's children, then (for the last component) its files */
+        for (unsigned kind = 0; kind < (end ? 1u : 2u) && !found; ++kind) {
+            uint32_t base = kind ? file_table : dir_table, size = kind ? file_size : dir_size, head = kind ? 32 : 24;
+            uint32_t at = image32(r, (uint64_t)dir_table + dir + (kind ? 12 : 8));
+            for (unsigned guard = 0; at != NONE && guard < 100000; ++guard) {
+                if (at > size || size - at < head) return false;
+                uint32_t length16 = image32(r, (uint64_t)base + at + head - 4);
+                if (length16 > size - at - head) return false;
+                if (length16 == bytes) {
+                    bool same = true;
+                    for (uint32_t i = 0; i < bytes / 2 && same; ++i) {
+                        const unsigned char* q = r->image + base + at + head + i * 2;
+                        same = (uint16_t)(q[0] | q[1] << 8) == name[i];
+                    }
+                    if (same) {
+                        found = true;
+                        if (!kind) dir = at;
+                        break;
+                    }
+                }
+                at = image32(r, (uint64_t)base + at + 4);
+            }
+        }
+        if (!found) return false;
+        path += length + (end ? 1 : 0);
+    }
+    return true;
+}
 /* 3DS datetime milliseconds since 1900-01-01; the Unix epoch starts
    2208988800 seconds later. */
 #define UNIX_EPOCH_1900_MS UINT64_C(2208988800000)
@@ -281,6 +372,12 @@ SnxCtrTimeResult snx_ctr_romfs_time(SnxCtrRomfs* r, const unsigned char* path16,
     if (!snx_ctr_utf16_path(path16, bytes, path, sizeof path)) return SNX_CTR_TIME_INVALID;
     const char* relative = path;
     while (*relative == '/') ++relative;
+    if (r->image) { /* every entry has the CIA's time, the backing file's */
+        if (!image_has(r, relative)) return SNX_CTR_TIME_NOTFOUND;
+        if (!r->mtime || r->mtime > UINT64_MAX - UNIX_EPOCH_1900_MS) return SNX_CTR_TIME_INVALID;
+        *datetime = r->mtime + UNIX_EPOCH_1900_MS;
+        return SNX_CTR_TIME_OK;
+    }
     pm_lock(&r->tree->lock);
     FsNode *root = NULL, *node = root;
     SnxCtrTimeResult result = SNX_CTR_TIME_NOTFOUND;
@@ -302,6 +399,7 @@ SnxCtrTimeResult snx_ctr_romfs_time(SnxCtrRomfs* r, const unsigned char* path16,
 }
 uint64_t snx_ctr_romfs_size(const SnxCtrRomfs* r) {
     if (!r) return 0;
+    if (r->image) return r->image_size;
     pm_lock(&r->tree->lock);
     const File* f = (const File*)(r->dir + r->dirs);
     uint64_t size = r->files ? f[r->files - 1].data + f[r->files - 1].node->size : r->meta_size;
@@ -312,6 +410,10 @@ bool snx_ctr_romfs_read(SnxCtrRomfs* r, uint64_t offset, void* output, size_t si
     if (!r || offset > snx_ctr_romfs_size(r) || size > snx_ctr_romfs_size(r) - offset) return false;
     if (!size) return true;
     if (!output) return false;
+    if (r->image) { /* as the CIA holds it */
+        memcpy(output, r->image + offset, size);
+        return true;
+    }
     pm_lock(&r->tree->lock);
     unsigned char* data = output;
     memset(data, 0, size);

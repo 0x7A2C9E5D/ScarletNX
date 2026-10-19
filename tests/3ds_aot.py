@@ -277,7 +277,10 @@ def main():
                 assert 'Guest ExitProcess' not in text
             return output, text
 
-        basic, text = run(application([0xE3A0002A, 0xEF000003]), message='Guest ExitProcess: r0=42 blocks=2')
+        extract = ('--extract-container',)
+        basic, text = run(
+            application([0xE3A0002A, 0xEF000003]), message='Guest ExitProcess: r0=42 blocks=2', extra=extract
+        )
         assert text.index('Extracting ') < text.index('Recompiling ARM11') < text.index('Running ARM11')
         assert (basic / 'romfs/hello.txt').read_bytes() == b'hello'
         assert (basic / 'contents/00002222.app').is_file()
@@ -287,16 +290,44 @@ def main():
         before = (basic / 'native/code.so').read_bytes()
         source = root / 'repeat.cia'
         source.write_bytes(application([0xE3A0002A, 0xEF000003]))
-        p = subprocess.run([driver, '--output', str(basic), str(source)], text=True, capture_output=True, timeout=20)
+        p = subprocess.run(
+            [driver, *extract, '--output', str(basic), str(source)], text=True, capture_output=True, timeout=20
+        )
         assert p.returncode == 0 and 'Guest ExitProcess: r0=42' in p.stdout, p.stdout + p.stderr
         assert 'Using the extraction' in p.stdout and 'Extracting' not in p.stdout and 'Recompiling' not in p.stdout
         assert (basic / 'native/code.so').read_bytes() == before
         # -r compiles again and does not play
         p = subprocess.run(
-            [driver, '-r', '--output', str(basic), str(source)], text=True, capture_output=True, timeout=20
+            [driver, *extract, '-r', '--output', str(basic), str(source)], text=True, capture_output=True, timeout=20
         )
         assert p.returncode == 0 and 'Recompiling' in p.stdout and 'Running ARM11' not in p.stdout, p.stdout + p.stderr
         assert not (basic / 'native.previous').exists() and not list(root.rglob('.snx-*'))
+        # By default nothing is extracted: the CIA is read where it lies, and its folder keeps only the module
+        extraction = {'exefs', 'romfs', 'contents', 'cia-header.bin', 'ticket.bin', 'tmd.bin', 'metadata.bin',
+                      'certificates.bin', 'ncch.bin', 'exheader.bin', 'manifest.ini'}
+        direct, text = run(application([0xE3A0002A, 0xEF000003]), message='Guest ExitProcess: r0=42 blocks=2')
+        assert 'Extracting' not in text and text.index('Recompiling ARM11') < text.index('Running ARM11')
+        assert not extraction & {p.name for p in direct.iterdir()} and (direct / 'native/code.so').is_file()
+        module = (direct / 'native/code.so').read_bytes()
+        # -r reads the CIA too, and a run uses the module again
+        p = subprocess.run([driver, '-r', '--output', str(direct), str(source)], text=True, capture_output=True,
+                           timeout=20)
+        assert p.returncode == 0 and 'Recompiling' in p.stdout and 'Extracting' not in p.stdout, p.stdout + p.stderr
+        assert not extraction & {p.name for p in direct.iterdir()}
+        p = subprocess.run([driver, '--output', str(direct), str(source)], text=True, capture_output=True, timeout=20)
+        assert p.returncode == 0 and 'r0=42' in p.stdout and 'Recompiling' not in p.stdout, p.stdout + p.stderr
+        # The image is the same read either way: the module the extraction's run compiled serves the CIA's, whose
+        # run takes the extraction away, and an extraction asked for again lands beside the module
+        p = subprocess.run([driver, '--output', str(basic), str(source)], text=True, capture_output=True, timeout=20)
+        assert p.returncode == 0 and 'Removing the extraction' in p.stdout and 'Recompiling' not in p.stdout, p.stdout
+        assert not extraction & {p.name for p in basic.iterdir()} and (basic / 'native/code.so').is_file()
+        p = subprocess.run(
+            [driver, *extract, '--output', str(direct), str(source)], text=True, capture_output=True, timeout=20
+        )
+        assert p.returncode == 0 and 'Extracting' in p.stdout and 'Recompiling' not in p.stdout, p.stdout + p.stderr
+        assert (direct / 'romfs/hello.txt').read_bytes() == b'hello' and (direct / 'native/code.so').read_bytes() == module
+        assert not list(root.rglob('.snx-*')) and not list(root.glob('*.extracting'))
+        basic = direct  # the extraction the checks below read
         run(application([0xE3A0002A, 0xEF000003]), message='r0=42', extra=('--model', 'new'))
         # Data+BSS, read-only mapping, TLS, stack, indirect BLX to Thumb and BX return.
         words = [
@@ -322,7 +353,7 @@ def main():
             0x200000,
             0x100041,
         ]
-        workload, _ = run(application(words), message='Guest ExitProcess: r0=43 blocks=17')
+        workload, _ = run(application(words), message='Guest ExitProcess: r0=43 blocks=17', extra=extract)
         subprocess.run([probe, str(workload), 'workload'], check=True, capture_output=True)
         # Legacy BL halves execute as separate precompiled Thumb entries.
         legacy = struct.pack('<II6H', 0xE28F0001, 0xE12FFF10, 0xF000, 0xF802, 0xDF03, 0x46C0, 0x202C, 0x4770)
@@ -340,6 +371,7 @@ def main():
                 + [0xE1A04001, 0xE1940F9F, 0xE2800001, 0xE1842F90, 0xE3520000, 0x1AFFFFFA, 0xE3A0002A, 0xEF000003]
             ),
             message='Guest ExitProcess: r0=42 blocks=14',
+            extra=extract,
         )
         subprocess.run([probe, str(locked), 'kernel'], check=True, capture_output=True)
         run(
@@ -403,7 +435,10 @@ def main():
         # Compiler input is revalidated from raw files, never trusted manifest fields.
         (extracted / 'exefs/.code').write_bytes(b'truncated')
         p = subprocess.run(
-            [driver, '-r', '--output', str(extracted), str(source)], text=True, capture_output=True, timeout=20
+            [driver, *extract, '-r', '--output', str(extracted), str(source)],
+            text=True,
+            capture_output=True,
+            timeout=20,
         )
         assert p.returncode == 1 and 'bounded expanded .code' in p.stderr and not (extracted / 'native').exists()
         assert not list(root.rglob('.snx-*'))
@@ -433,7 +468,9 @@ def main():
         raw[0] ^= 1
         (basic / 'exefs/.code').write_bytes(raw)
         subprocess.run([probe, str(basic), 'reject'], check=True, capture_output=True)
-        p = subprocess.run([driver, '--output', str(basic), str(source)], text=True, capture_output=True, timeout=20)
+        p = subprocess.run(
+            [driver, *extract, '--output', str(basic), str(source)], text=True, capture_output=True, timeout=20
+        )
         assert p.returncode == 0 and 'Recompiling' in p.stdout and 'r0=43' in p.stdout, p.stdout + p.stderr
         subprocess.run([probe, str(workload), 'reject', str(root / 'missing.so')], check=True, capture_output=True)
         readelf = shutil.which('readelf')

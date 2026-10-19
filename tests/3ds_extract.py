@@ -186,7 +186,7 @@ def main():
         ]:
             run(cia(application=ncch(romfs_options={'file_name': name})), 1, 'invalid RomFS file parent/name')
         run(cia(application=ncch(romfs_options={'directory_name': '..'})), 1, 'unsafe RomFS directory')
-        run(cia(application=ncch(romfs_options={'duplicate': True})), 1, 'cannot create new output file')
+        run(cia(application=ncch(romfs_options={'duplicate': True})), 1, 'duplicate RomFS name')
         run(cia(application=ncch(romfs_options={'patch': lambda h, d, f: put(d, 24 + 8, '<I', 24)})), 1, 'cyclic RomFS')
         run(cia(application=ncch(romfs_options={'patch': lambda h, d, f: put(f, 4, '<I', 0)})), 1, 'cyclic RomFS')
         run(cia(application=ncch(romfs_options={'patch': lambda h, d, f: put(d, 8, '<I', 28)})), 1, 'directory link')

@@ -400,6 +400,7 @@ static void file_map_clear(PFileMap* m) {
     m->data = NULL;
     m->size = 0;
     m->borrowed = 0;
+    m->heap = 0;
 }
 static int file_map(PFileMap* m, const char* path, int ask_size, u64 size) {
     wchar_t* w;
@@ -442,7 +443,9 @@ static int file_map(PFileMap* m, const char* path, int ask_size, u64 size) {
 int plat_file_map(PFileMap* m, const char* path) { return file_map(m, path, 1, 0); }
 int plat_file_map_sized(PFileMap* m, const char* path, u64 size) { return file_map(m, path, 0, size); }
 void plat_file_unmap(PFileMap* m) {
-    if (m->data && !m->borrowed) UnmapViewOfFile(m->data);
+    if (m->heap)
+        free((void*)m->data);
+    else if (m->data && !m->borrowed) UnmapViewOfFile(m->data);
     file_map_clear(m);
 }
 int plat_replace_file(const char* tmp, const char* dst) {

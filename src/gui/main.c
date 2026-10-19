@@ -3105,11 +3105,13 @@ static bool made_from(const App* app, const char* file) {
     snx_free_strings(names, count);
     return found;
 }
-/* room on the disks for file's run (gui_room), not extracted yet; else room_line says what it takes. A Switch dump is
-   extracted straight into its game's folder, or the temporary folder with Extract to tmpfs; only into an extractions
-   folder picked is it kept, and its game made from a copy. The free space is room_free in tests */
+/* room on the disks for file's run (gui_room), not extracted yet; else room_line says what it takes. With Extract game
+   container off a dump is read in place and takes no room. On, a Switch dump is extracted straight into its game's
+   folder, or the temporary folder with Extract to tmpfs; only into an extractions folder picked is it kept, and its
+   game made from a copy. The free space is room_free in tests */
 static bool room_fits(App* app, const char* file) {
     bool nx = app->menu.selected == GUI_SWITCH, tmpfs = nx && gui_settings_tmpfs(settings_of(app));
+    if (!tmpfs && !gui_settings_extract(settings_of(app))) return true; /* read in place: nothing extracted */
     bool kept = !nx || (app->place[GUI_PLACE_WORK] && !tmpfs), fits = true;
     char *out, *temp = tmpfs ? snx_temp_root() : NULL, need_text[32], left_text[32];
     const char* work = temp ? temp : kept ? app->work_dir : app->games_dir;
@@ -4804,6 +4806,10 @@ static void launch(App* app, char* absolute, bool prepared) {
        option of a run. The drivers work in the menu's data folder, so they list the same games */
     if (app->recompile && app->menu.selected == GUI_SWITCH && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
     if (app->menu.selected == GUI_SWITCH && !app->recompile) n += gui_settings_options(s, 1, argv + n);
+    /* Extract game container, which both drivers take, for a run and for R's recompile: off, nothing is extracted */
+    if ((app->menu.selected == GUI_3DS || (app->menu.selected == GUI_SWITCH && app->recompile)) &&
+        gui_settings_extract(s))
+        argv[n++] = gui_settings_extract(s);
     if (folders || (native && !direct)) {
         argv[n++] = "--repo";
         argv[n++] = app->data_dir;
@@ -4812,9 +4818,10 @@ static void launch(App* app, char* absolute, bool prepared) {
         argv[n++] = "--outdir";
         argv[n++] = app->games_dir;
     }
-    /* the picked extractions folder, which Extract to tmpfs leaves for the temporary one */
+    /* the picked extractions folder, which Extract to tmpfs leaves for the temporary one, and a Switch dump read in
+       place (Extract game container off) has no use for. A CIA's title folder is there either way, its saves in it */
     if (folders && app->place[GUI_PLACE_WORK] &&
-        (app->menu.selected == GUI_3DS || (!nro_file(absolute) && !gui_settings_tmpfs(s)))) {
+        (app->menu.selected == GUI_3DS || (!nro_file(absolute) && !gui_settings_tmpfs(s) && gui_settings_extract(s)))) {
         out = dump_out(app, absolute, app->menu.selected == GUI_3DS ? "3ds" : NULL); /* an NRO has no extraction */
         argv[n++] = app->menu.selected == GUI_3DS ? "--output" : "--out";
         argv[n++] = out;

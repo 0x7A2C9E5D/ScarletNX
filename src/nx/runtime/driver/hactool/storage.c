@@ -283,6 +283,27 @@ storage_t *storage_file_new(FILE *file, uint64_t offset, uint64_t size) {
     return &s->base;
 }
 
+/* ScarletNX: a container mapped into memory, which several threads can read at once (no file position) */
+typedef struct {
+    storage_t base;
+    const unsigned char *data;
+} memory_storage_t;
+
+static int memory_storage_read(storage_t *storage, uint64_t offset, void *buffer, uint64_t size) {
+    memcpy(buffer, ((memory_storage_t *)storage)->data + offset, size);
+    return 1;
+}
+
+storage_t *storage_memory_new(const unsigned char *data, uint64_t data_size, uint64_t offset, uint64_t size) {
+    if (offset > data_size || size > data_size - offset) {
+        fprintf(stderr, "0x%"PRIx64"+0x%"PRIx64" is outside the mapped container (0x%"PRIx64")!\n", offset, size, data_size);
+        return NULL;
+    }
+    memory_storage_t *s = storage_alloc(sizeof(*s), size, memory_storage_read, NULL);
+    s->data = data + offset;
+    return &s->base;
+}
+
 typedef struct {
     storage_t base;
     storage_t *inner;

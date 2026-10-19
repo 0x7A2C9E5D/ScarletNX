@@ -12,7 +12,10 @@ enum {
     SNX_STOP = 16,
     SNX_FULLSCREEN = 32,
     SNX_WINDOWED = 64, /* --fullscreen=0: windowed over the .ini's fullscreen=1 */
-    SNX_TMPFS = 128    /* the driver's --tmpfs (the launcher's Extract to tmpfs), which snx_cli_flag leaves to it */
+    SNX_TMPFS = 128,   /* the driver's --tmpfs (the launcher's Extract to tmpfs), which snx_cli_flag leaves to it */
+    /* the driver's --extract-container (the launcher's Extract game container): a dump played is extracted into its
+       game's data folder, instead of read in place. snx_cli_flag leaves it to the driver too */
+    SNX_EXTRACT_CONTAINER = 256
 };
 /* Shared by the driver and standalone game runtime (startup.c), which refuses SNX_EXTRACT and SNX_RECOMP: only the
    driver extracts and recompiles. Windows accepts individual short options, but deliberately not POSIX-style

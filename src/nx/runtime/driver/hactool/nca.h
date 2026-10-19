@@ -181,6 +181,8 @@ typedef struct {
     enum nca_section_type type;
     FILE *file; /* Pointer to file. */
     uint64_t base_offset; /* ScarletNX: where the NCA starts in file, as the NCA's context has it. */
+    const unsigned char *map; /* ScarletNX: file mapped into memory, as the NCA's context has it. */
+    uint64_t map_size;
     uint64_t offset;
     uint64_t size;
     uint32_t section_num;
@@ -218,6 +220,9 @@ typedef struct {
 typedef struct nca_ctx {
     FILE *file; /* File for this NCA. */
     uint64_t base_offset; /* ScarletNX: where the NCA starts in file, 0 but for one read in place inside an XCI or NSP. */
+    const unsigned char *map; /* ScarletNX: file mapped into memory (map_size bytes), which sections read instead of
+                                 file when it is set: the runtime's reads, from several threads. NULL otherwise. */
+    uint64_t map_size;
     size_t file_size;
     unsigned char crypto_type;
     int has_rights_id;

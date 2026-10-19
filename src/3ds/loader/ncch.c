@@ -7,13 +7,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct {
-    uint32_t address, pages, bytes;
-} Segment;
-static bool extract_ncch(CtrReader* r, const CtrCia* cia, const char* stage, unsigned char** stored,
-                         unsigned char** code) {
-    unsigned char h[0x200], exheader[0x800], exefs[0x200];
-    if (!ctr_read(r, cia->boot, 0, h, sizeof h)) return false;
+void ctr_ncch_free(CtrNcch* n) {
+    free(n->code);
+    n->code = NULL;
+}
+static bool parse(CtrReader* r, const CtrCia* cia, CtrNcch* n) {
+    unsigned char *h = n->header, *exheader = n->exheader, *exefs = n->exefs;
+    if (!ctr_read(r, cia->boot, 0, h, sizeof n->header)) return false;
     if (memcmp(h + 0x100, "NCCH", 4)) return ctr_fail(r, SNX_CTR_EXTRACT_UNSUPPORTED, "boot content is not NCCH");
     if (h[0x18e] || h[0x18c] != 1)
         return ctr_fail(r, SNX_CTR_EXTRACT_UNSUPPORTED, "unsupported NCCH media unit/platform");
@@ -40,22 +40,22 @@ static bool extract_ncch(CtrReader* r, const CtrCia* cia, const char* stage, uns
     if (!exe.size || (!!rom.size == !!(h[0x18f] & 2)))
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "missing ExeFS or inconsistent RomFS flag");
     uint64_t hash_size = (uint64_t)ctr_le32(h + 0x1a8) * 512;
-    if (hash_size < sizeof exefs || hash_size > exe.size ||
+    if (hash_size < sizeof n->exefs || hash_size > exe.size ||
         !ctr_hash_matches(r, (CtrSpan){exe.offset, hash_size}, h + 0x1c0))
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "invalid ExeFS superblock hash/range");
-    if (!ctr_read(r, cia->boot, 0x200, exheader, sizeof exheader)) return false;
+    if (!ctr_read(r, cia->boot, 0x200, exheader, sizeof n->exheader)) return false;
     unsigned char hash[32];
     if (!ctr_sha256(r, exheader, 0x400, hash)) return false;
     if (memcmp(hash, h + 0x160, 32) || ctr_le64(exheader + 0x200) != cia->title_id)
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "ExHeader hash/program ID mismatch");
-    Segment segments[3];
+    CtrSegment* segments = n->segments;
     const unsigned segment_offsets[] = {0x10, 0x20, 0x30};
     uint64_t expected = 0, minimum = 0;
-    uint32_t bss = ctr_le32(exheader + 0x3c), stack = ctr_le32(exheader + 0x1c);
+    uint32_t bss = n->bss = ctr_le32(exheader + 0x3c), stack = n->stack = ctr_le32(exheader + 0x1c);
     for (size_t i = 0; i < 3; ++i) {
         const unsigned char* p = exheader + segment_offsets[i];
-        Segment* s = &segments[i];
-        *s = (Segment){ctr_le32(p), ctr_le32(p + 4), ctr_le32(p + 8)};
+        CtrSegment* s = &segments[i];
+        *s = (CtrSegment){ctr_le32(p), ctr_le32(p + 4), ctr_le32(p + 8)};
         uint64_t length = (uint64_t)s->pages * 4096;
         uint64_t virtual_length = length + (i == 2 ? ((uint64_t)bss + 4095) / 4096 * 4096 : 0);
         /* Some homebrew makers report .data size INCLUDING BSS, while pages
@@ -76,9 +76,9 @@ static bool extract_ncch(CtrReader* r, const CtrCia* cia, const char* stage, uns
     }
     if (!segments[0].bytes || !segments[0].pages || expected > CTR_CODE_LIMIT || !stack || stack > 0x800000)
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "invalid code/stack/BSS sizes");
-    if (!ctr_read(r, exe, 0, exefs, sizeof exefs)) return false;
-    char names[10][9] = {{0}};
-    CtrSpan files[10] = {{0}};
+    if (!ctr_read(r, exe, 0, exefs, sizeof n->exefs)) return false;
+    char(*names)[9] = n->names;
+    CtrSpan* files = n->files;
     int code_index = -1;
     for (size_t i = 0; i < 10; ++i) {
         const unsigned char* p = exefs + i * 16;
@@ -107,59 +107,85 @@ static bool extract_ncch(CtrReader* r, const CtrCia* cia, const char* stage, uns
     }
     if (code_index < 0 || files[code_index].size > CTR_CODE_LIMIT || !files[code_index].size)
         return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "missing or oversized ExeFS .code");
+    n->code_index = code_index;
     size_t stored_size = (size_t)files[code_index].size;
-    *stored = malloc(stored_size);
-    *code = calloc(1, (size_t)expected);
-    if (!*stored || !*code) return ctr_fail(r, SNX_CTR_EXTRACT_LIMIT, "out of memory");
-    if (!ctr_read(r, files[code_index], 0, *stored, stored_size)) return false;
+    unsigned char* stored = malloc(stored_size);
+    n->code = calloc(1, (size_t)expected);
+    n->code_size = (size_t)expected;
+    bool ok = stored && n->code ? ctr_read(r, files[code_index], 0, stored, stored_size)
+                                : ctr_fail(r, SNX_CTR_EXTRACT_LIMIT, "out of memory");
     size_t expanded = stored_size;
-    if (exheader[0xd] & 1) {
-        if (stored_size < 8 || (uint64_t)stored_size + ctr_le32(*stored + stored_size - 4) > expected)
-            return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "BLZ expansion exceeds segment sizes");
-        expanded += ctr_le32(*stored + stored_size - 4);
-        if (!snx_ctr_blz(*stored, stored_size, *code, expanded))
-            return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "invalid ExeFS BLZ stream");
-    } else {
-        if (stored_size > expected) return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "code exceeds process segment sizes");
-        memcpy(*code, *stored, stored_size);
-    }
-    if (expanded < minimum) return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "code is shorter than process segments");
-    char* path = snx_path_join(stage, "exefs");
-    bool ok = ctr_directory(r, path);
-    free(path);
-    for (size_t i = 0; i < 10 && ok; ++i) {
-        if (!*names[i]) continue;
-        path = snx_format("%s/exefs/%s", stage, names[i]);
-        const unsigned char* file_hash = exefs + 0x1e0 - i * 32;
-        if ((int)i == code_index)
-            ok = ctr_hash_matches(r, files[i], file_hash) && ctr_write(r, path, *code, (size_t)expected);
+    if (ok && (exheader[0xd] & 1)) {
+        if (stored_size < 8 || (uint64_t)stored_size + ctr_le32(stored + stored_size - 4) > expected)
+            ok = ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "BLZ expansion exceeds segment sizes");
+        else {
+            expanded += ctr_le32(stored + stored_size - 4);
+            if (!snx_ctr_blz(stored, stored_size, n->code, expanded))
+                ok = ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "invalid ExeFS BLZ stream");
+        }
+    } else if (ok) {
+        if (stored_size > expected)
+            ok = ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "code exceeds process segment sizes");
         else
-            ok = ctr_copy(r, files[i], path, file_hash);
-        free(path);
+            memcpy(n->code, stored, stored_size);
     }
+    free(stored);
     if (!ok) return false;
-    path = snx_path_join(stage, "ncch.bin");
-    ok = ctr_write(r, path, h, sizeof h);
-    free(path);
-    path = snx_path_join(stage, "exheader.bin");
-    ok = ok && ctr_write(r, path, exheader, sizeof exheader);
-    free(path);
-    if (!ok) return false;
+    if (expanded < minimum) return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "code is shorter than process segments");
+    /* each ExeFS file's hash, which the extraction checks as it copies the file */
+    for (size_t i = 0; i < 10; ++i)
+        if (*names[i] && !ctr_hash_matches(r, files[i], exefs + 0x1e0 - i * 32)) return false;
+    n->rom = rom;
     if (rom.size) {
         uint64_t rom_hash_size = (uint64_t)ctr_le32(h + 0x1b8) * 512;
         if (!rom_hash_size || rom_hash_size > rom.size ||
             !ctr_hash_matches(r, (CtrSpan){rom.offset, rom_hash_size}, h + 0x1e0))
             return ctr_fail(r, SNX_CTR_EXTRACT_FORMAT, "invalid RomFS superblock hash/range");
-        if (!ctr_romfs_extract(r, rom, stage)) return false;
+        if (!ctr_romfs_check(r, rom, NULL, &n->level3)) return false;
     }
-    if (!rom.size) {
+    return true;
+}
+bool ctr_ncch_parse(CtrReader* r, const CtrCia* cia, CtrNcch* n) {
+    memset(n, 0, sizeof *n);
+    if (parse(r, cia, n)) return true;
+    ctr_ncch_free(n);
+    return false;
+}
+bool ctr_ncch_write(CtrReader* r, const CtrCia* cia, const CtrNcch* n, const char* stage) {
+    const CtrSegment* segments = n->segments;
+    char* path = snx_path_join(stage, "exefs");
+    bool ok = ctr_directory(r, path);
+    free(path);
+    for (size_t i = 0; i < 10 && ok; ++i) {
+        if (!*n->names[i]) continue;
+        path = snx_format("%s/exefs/%s", stage, n->names[i]);
+        const unsigned char* file_hash = n->exefs + 0x1e0 - i * 32;
+        if ((int)i == n->code_index)
+            ok = ctr_hash_matches(r, n->files[i], file_hash) && ctr_write(r, path, n->code, n->code_size);
+        else
+            ok = ctr_copy(r, n->files[i], path, file_hash);
+        free(path);
+    }
+    if (!ok) return false;
+    path = snx_path_join(stage, "ncch.bin");
+    ok = ctr_write(r, path, n->header, sizeof n->header);
+    free(path);
+    path = snx_path_join(stage, "exheader.bin");
+    ok = ok && ctr_write(r, path, n->exheader, sizeof n->exheader);
+    free(path);
+    if (!ok) return false;
+    if (n->rom.size) {
+        CtrSpan level3;
+        if (!ctr_romfs_check(r, n->rom, stage, &level3)) return false;
+    } else {
         path = snx_path_join(stage, "romfs");
         ok = ctr_directory(r, path);
         free(path);
         if (!ok) return false;
     }
     char input_hash[65], code_hash[65];
-    if (!ctr_sha256(r, *code, (size_t)expected, hash)) return false;
+    unsigned char hash[32];
+    if (!ctr_sha256(r, n->code, n->code_size, hash)) return false;
     for (size_t i = 0; i < 32; ++i) {
         snprintf(input_hash + i * 2, 3, "%02x", cia->input_hash[i]);
         snprintf(code_hash + i * 2, 3, "%02x", hash[i]);
@@ -170,9 +196,9 @@ static bool extract_ncch(CtrReader* r, const CtrCia* cia, const char* stage, uns
                    "text_address=0x%08" PRIx32 "\ntext_pages=%" PRIu32 "\ntext_bytes=%" PRIu32 "\n"
                    "ro_address=0x%08" PRIx32 "\nro_pages=%" PRIu32 "\nro_bytes=%" PRIu32 "\n"
                    "data_address=0x%08" PRIx32 "\ndata_pages=%" PRIu32 "\ndata_bytes=%" PRIu32 "\n",
-                   cia->title_id, (unsigned)cia->version, input_hash, code_hash, segments[0].address, stack, bss,
-                   segments[0].address, segments[0].pages, segments[0].bytes, segments[1].address, segments[1].pages,
-                   segments[1].bytes, segments[2].address, segments[2].pages, segments[2].bytes);
+                   cia->title_id, (unsigned)cia->version, input_hash, code_hash, segments[0].address, n->stack,
+                   n->bss, segments[0].address, segments[0].pages, segments[0].bytes, segments[1].address,
+                   segments[1].pages, segments[1].bytes, segments[2].address, segments[2].pages, segments[2].bytes);
     path = snx_path_join(stage, "manifest.ini");
     ok = ctr_write(r, path, manifest, strlen(manifest));
     free(path);
@@ -180,9 +206,9 @@ static bool extract_ncch(CtrReader* r, const CtrCia* cia, const char* stage, uns
     return ok;
 }
 bool ctr_ncch_extract(CtrReader* r, const CtrCia* cia, const char* stage) {
-    unsigned char *stored = NULL, *code = NULL;
-    bool ok = extract_ncch(r, cia, stage, &stored, &code);
-    free(stored);
-    free(code);
+    CtrNcch n;
+    if (!ctr_ncch_parse(r, cia, &n)) return false;
+    bool ok = ctr_ncch_write(r, cia, &n, stage);
+    ctr_ncch_free(&n);
     return ok;
 }

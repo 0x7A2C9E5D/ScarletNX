@@ -881,17 +881,20 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && strstr(argv[1], "picked folders")) { /* Settings > App > Folders' games and extractions */
         int i = 2;
-        bool nro = strstr(argv[1], ".nro") != NULL; /* runs without an extraction */
-        while (i < argc && strcmp(argv[i], "--repo")) ++i;
-        assert(i + (nro ? 4 : 6) == argc && argv[i + 1][0] && !strcmp(argv[i + 2], "--outdir") &&
+        bool nro = strstr(argv[1], ".nro") != NULL, extract = false; /* an NRO runs without an extraction */
+        while (i < argc && strcmp(argv[i], "--repo")) extract |= !strcmp(argv[i++], "--extract-container");
+        /* a dump read in place (Extract game container off) has no extraction either */
+        assert(i + (nro || !extract ? 4 : 6) == argc && argv[i + 1][0] && !strcmp(argv[i + 2], "--outdir") &&
                strstr(argv[i + 3], "picked games"));
-        assert(nro || (!strcmp(argv[i + 4], "--out") && strstr(argv[i + 5], "picked work") &&
-                       !strcmp(argv[i + 5] + strlen(argv[i + 5]) - 15, "/picked folders")));
+        assert(nro || !extract ||
+               (!strcmp(argv[i + 4], "--out") && strstr(argv[i + 5], "picked work") &&
+                !strcmp(argv[i + 5] + strlen(argv[i + 5]) - 15, "/picked folders")));
         puts("Recompiling picked folders\nScarletNX - picked folders");
         return 0;
     }
     if (argc > 2 && !strcmp(argv[1], "-r") && strstr(argv[2], "room dump")) { /* R's, its room asked: not played */
         int i = 3;
+        assert(!strcmp(argv[i++], "--extract-container")); /* asked about its room only when it is extracted */
         assert(i + 2 == argc && !strcmp(argv[i], "--repo") && argv[i + 1][0]);
         puts("Recompiling room dump");
         return 0;
@@ -1342,8 +1345,9 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "Launch", normal);
     shows(&app, "Enables gdbstub", normal); /* in the tips */
-    shows(&app, "- gdbstub ", yellow); /* its value in the column after the longest name, Extract to tmpfs's */
-    shows(&app, "- Extract to tmpfs off", normal);
+    shows(&app, "- gdbstub ", yellow); /* its value in the column after the longest name, Extract game container's */
+    shows(&app, "- Extract to tmpfs ", normal);
+    shows(&app, "- Extract game container off", normal);
     key(&app, SDLK_RIGHT);
     assert(setting_is(&app, "gdbstub", "on"));
     key(&app, SDLK_LEFT);
@@ -2268,8 +2272,12 @@ int main(int argc, char** argv) {
         place_set(&app, GUI_PLACE_WORK, work);
         app.menu.selected = GUI_SWITCH;
         launcher(&app, true);
+        launch(&app, snx_strdup(dump), false); /* read in place: no extraction to put in the folder picked */
+        finish(&app, 0);
+        assert(gui_settings_set(&app.settings, "extract", "on")); /* Extract game container: extracted there */
         launch(&app, snx_strdup(dump), false);
         finish(&app, 0);
+        assert(gui_settings_set(&app.settings, "extract", "off"));
         launch(&app, snx_strdup(nro), false);
         finish(&app, 0);
         assert(!snx_remove_tree(work));
@@ -2308,6 +2316,10 @@ int main(int argc, char** argv) {
         app.menu.selected = GUI_SWITCH;
         launcher(&app, true);
         app.room_free = 2u << 20; /* 3 MB to take */
+        launch(&app, snx_strdup(dump), false); /* Extract game container off: read in place, it takes no room */
+        assert(!app.confirm.shown && app.menu.running);
+        finish(&app, 0);
+        assert(gui_settings_set(&app.settings, "extract", "on"));
         launch(&app, snx_strdup(dump), false);
         assert(!app.menu.running && app.confirm.shown && app.confirm.ask == GUI_ASK_ROOM && app.room_file);
         render(&app);
@@ -2366,6 +2378,7 @@ int main(int argc, char** argv) {
         assert(!snx_remove_tree(out));
         free(out);
         app.room_free = 0;
+        assert(gui_settings_set(&app.settings, "extract", "off"));
         free(app.work_dir);
         app.work_dir = work_was;
         free(app.games_dir);

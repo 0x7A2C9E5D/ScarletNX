@@ -13,20 +13,22 @@
 
 #define SNX_CTR_RUN_SLICE 1000000u
 
-int snx_ctr_aot_run(const char* directory, SnxCtrModel model, uint64_t limit, unsigned flags, char* error,
-                    size_t error_size) {
+int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel model, uint64_t limit, unsigned flags,
+                    char* error, size_t error_size) {
     SnxCtrImage image = {0};
     SnxCtrProcess* process = NULL;
     SnxCtrNative native = {0};
     char *module_path = NULL, *frames = NULL, *wav = NULL;
     int result = 1;
-    if (!snx_ctr_image_load(directory, &image, error, error_size)) goto done;
+    if (!(cia ? snx_ctr_image_from_cia(cia, &image, error, error_size)
+              : snx_ctr_image_load(directory, &image, error, error_size)))
+        goto done;
     module_path = snx_format("%s/native/code.so", directory);
     /* like the Switch driver's recompile: only when needed, an existing module is no error */
     if ((flags & SNX_CTR_RECOMPILE) || !snx_ctr_native_open(module_path, &image, &native, error, error_size)) {
         snx_ctr_native_close(&native);
         printf("Recompiling ARM11 (offline static AOT)\n");
-        int status = snx_ctr_aot_compile(directory, error, error_size);
+        int status = snx_ctr_aot_compile(directory, cia, error, error_size);
         if (status) {
             result = status == 3 ? 3 : 1;
             goto done;
@@ -42,8 +44,8 @@ int snx_ctr_aot_run(const char* directory, SnxCtrModel model, uint64_t limit, un
         snprintf(error, error_size, "cannot create checked ARM11 process mappings");
         goto done;
     }
-    if (!snx_ctr_process_mount_fs(process, directory)) {
-        snprintf(error, error_size, "cannot index extracted title filesystem");
+    if (!(cia ? snx_ctr_process_mount_cia(process, directory, cia) : snx_ctr_process_mount_fs(process, directory))) {
+        snprintf(error, error_size, cia ? "cannot mount the CIA's filesystem" : "cannot index extracted title filesystem");
         goto done;
     }
     /* Vulkan-only presentation: real frames land in <output>/frames as PPM.

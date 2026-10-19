@@ -21,18 +21,22 @@
 static void usage(FILE* out) {
     fputs("Usage: scarletnx-3ds [OPTIONS] game.cia\n"
           "       scarletnx-3ds [--model old|new] --board-info\n"
-          "  game.cia        Extract, recompile if needed, then play a decrypted application CIA\n"
+          "  game.cia        Read a decrypted application CIA where it lies, recompile if needed, then play\n"
+          "  --extract-container\n"
+          "                  Extract the CIA into its folder first and play from the extraction\n"
           "  -x, --extract   Extract only\n"
           "  -r, --recomp    Recompile without playing\n"
           "  --model old|new The console to model (default old)\n"
           "  --repo DIR      The data folder (default: a portable copy's folder, else the user's data\n"
           "                  folder, as scarletnx picks it; the user's keeps work/ in its cache folder)\n"
-          "  --output DIR    The extraction folder (default work/3ds/<the CIA's name>)\n"
+          "  --output DIR    The title's folder: its compiled module, SD card and any extraction (default\n"
+          "                  work/3ds/<the CIA's name>)\n"
           "  --max-blocks N  Stop after N native blocks (default: run until the game exits or its window\n"
           "                  closes)\n"
-          "An extraction and a compiled module already there are used as they are: the ARM11 code is compiled\n"
-          "again only when its module is missing or no longer matches the build or the extracted code.\n"
-          "Encrypted content is not implemented.\n",
+          "Without --extract-container nothing of the CIA is extracted: its ExeFS and RomFS are read from the\n"
+          "CIA itself, mapped read-only. An extraction and a compiled module already there are used as they\n"
+          "are: the ARM11 code is compiled again only when its module is missing or no longer matches the\n"
+          "build or the code. Encrypted content is not implemented.\n",
           out);
 }
 static bool cia_path(const char* path) {
@@ -62,10 +66,94 @@ static char* work_folder(const char* repo, const char* argv0) {
     free(exe);
     return resolved;
 }
+/* what an extraction writes into its folder, beside which the title's state (native/, sdmc/, frames/, audio.wav) is
+   kept */
+static const char* const extraction_parts[] = {"exefs",          "romfs",     "contents", "cia-header.bin",
+                                               "certificates.bin", "ticket.bin", "tmd.bin", "metadata.bin",
+                                               "ncch.bin",       "exheader.bin", "manifest.ini"};
+static bool holds_extraction(const char* folder) {
+    char* exheader = snx_path_join(folder, "exheader.bin");
+    bool found = snx_is_file(exheader);
+    free(exheader);
+    return found;
+}
+/* The CIA extracted into folder: published there, or, when the folder is there already with the title's state but no
+   extraction (the CIA was read where it lies before), extracted beside it and moved into it */
+static SnxCtrExtractResult extract_into(const char* input, const char* folder, char** published, char* error,
+                                        size_t error_size) {
+    /* anything but a folder of its own (nothing, a link, a file) is the extractor's to take or refuse */
+    if (snx_is_link(folder) || !snx_is_dir(folder))
+        return snx_ctr_extract(input, folder, NULL, published, error, error_size);
+    char* staging = snx_format("%s.extracting", folder);
+    char *done = NULL, **names = NULL;
+    size_t count = 0;
+    SnxCtrExtractResult result = SNX_CTR_EXTRACT_IO;
+    snprintf(error, error_size, "cannot move the extraction into %s", folder);
+    if (snx_path_exists(staging) && snx_remove_tree(staging)) goto out;
+    result = snx_ctr_extract(input, staging, NULL, &done, error, error_size);
+    if (result != SNX_CTR_EXTRACT_OK) goto out;
+    result = SNX_CTR_EXTRACT_IO;
+    if (snx_list_dir(done, &names, &count)) goto out;
+    for (size_t i = 0; i < count; ++i) {
+        char *from = snx_path_join(done, names[i]), *to = snx_path_join(folder, names[i]);
+        /* only a stopped extraction's part can be in the way: the state has other names */
+        bool moved = !(snx_path_exists(to) && snx_remove_tree(to)) && !snx_replace(from, to);
+        free(from);
+        free(to);
+        if (!moved) goto out;
+    }
+    *published = snx_absolute(folder);
+    result = *published ? SNX_CTR_EXTRACT_OK : SNX_CTR_EXTRACT_IO;
+out:
+    if (done && snx_path_exists(done)) snx_remove_tree(done);
+    snx_free_strings(names, count);
+    free(done);
+    free(staging);
+    return result;
+}
+/* The default: nothing extracted. The CIA is mapped and checked as the extraction checks it, its ExeFS and RomFS read
+   where they lie, and folder keeps the title's state alone: an extraction an earlier --extract-container left there
+   is taken away, as the CIA has all of it */
+static int play_cia(const char* input, const char* folder, SnxCtrModel model, uint64_t max_blocks, unsigned flags,
+                    char* error, size_t error_size) {
+    SnxCtrCia* cia = NULL;
+    printf("Reading %s\n", input);
+    SnxCtrExtractResult opened = snx_ctr_cia_open(input, &cia, error, error_size);
+    if (opened != SNX_CTR_EXTRACT_OK) {
+        fprintf(stderr, "scarletnx-3ds: %s\n", error);
+        return opened == SNX_CTR_EXTRACT_UNSUPPORTED ? 3 : 1;
+    }
+    char* state = snx_is_link(folder) || snx_mkdirs(folder) ? NULL : snx_absolute(folder);
+    int status = 1;
+    if (!state) {
+        fprintf(stderr, "scarletnx-3ds: cannot create the title's folder %s\n", folder);
+        goto done;
+    }
+    printf("The title's folder is %s\n", state);
+    if (holds_extraction(state)) {
+        printf("Removing the extraction in %s, the game reads its CIA\n", state);
+        for (size_t i = 0; i < sizeof extraction_parts / sizeof *extraction_parts; ++i) {
+            char* part = snx_path_join(state, extraction_parts[i]);
+            bool failed = snx_path_exists(part) && snx_remove_tree(part);
+            free(part);
+            if (failed) {
+                fprintf(stderr, "scarletnx-3ds: cannot remove the extraction in %s\n", state);
+                goto done;
+            }
+        }
+    }
+    status = snx_ctr_aot_run(state, cia, model, max_blocks, flags, error, error_size);
+    if (status) fprintf(stderr, "scarletnx-3ds: %s\n", error);
+done:
+    free(state);
+    snx_ctr_cia_close(cia);
+    return status;
+}
 int main(int argc, char** argv) {
     SnxCtrModel model = SNX_CTR_OLD;
     const char *input = NULL, *output = NULL, *repo = NULL;
     bool info = false, positional = false, extract_only = false, recompile = false, budget_set = false;
+    bool extract_container = false;
     uint64_t max_blocks = 0; /* no budget */
     SnxCtrBoard board;
     snx_tool_console();
@@ -81,6 +169,8 @@ int main(int argc, char** argv) {
             info = true;
         else if (!positional && (!strcmp(arg, "-x") || !strcmp(arg, "--extract")))
             extract_only = true;
+        else if (!positional && !strcmp(arg, "--extract-container"))
+            extract_container = true;
         else if (!positional && (!strcmp(arg, "-r") || !strcmp(arg, "--recomp")))
             recompile = true;
         else if (!positional && !strcmp(arg, "--output")) {
@@ -122,7 +212,8 @@ int main(int argc, char** argv) {
         } else
             input = arg;
     }
-    if ((!input && !info) || (info && (input || extract_only || recompile || output || budget_set)) ||
+    if ((!input && !info) ||
+        (info && (input || extract_only || extract_container || recompile || output || budget_set)) ||
         (extract_only && (budget_set || recompile)) || (recompile && budget_set)) {
         usage(stderr);
         return 2;
@@ -161,13 +252,19 @@ int main(int argc, char** argv) {
         fputs("scarletnx-3ds: cannot resolve the extraction folder\n", stderr);
         return 1;
     }
+    unsigned flags = recompile ? SNX_CTR_RECOMPILE | SNX_CTR_COMPILE_ONLY : 0;
+    if (!extract_container && !extract_only) { /* the CIA read where it lies, the folder keeping only the title's state */
+        int status = play_cia(input, extracted, model, max_blocks, flags, error, sizeof error);
+        free(extracted);
+        return status;
+    }
     /* like the Switch driver: a finished extraction is used again, the extractor publishes only complete ones */
-    if (snx_is_dir(extracted))
+    if (holds_extraction(extracted))
         printf("Using the extraction in %s\n", extracted);
     else {
         printf("Extracting %s\n", input);
         char* published = NULL;
-        SnxCtrExtractResult result = snx_ctr_extract(input, extracted, NULL, &published, error, sizeof error);
+        SnxCtrExtractResult result = extract_into(input, extracted, &published, error, sizeof error);
         free(extracted);
         if (result != SNX_CTR_EXTRACT_OK) {
             fprintf(stderr, "scarletnx-3ds: %s\n", error);
@@ -180,8 +277,7 @@ int main(int argc, char** argv) {
         free(extracted);
         return 0;
     }
-    int status = snx_ctr_aot_run(extracted, model, max_blocks, recompile ? SNX_CTR_RECOMPILE | SNX_CTR_COMPILE_ONLY : 0,
-                                 error, sizeof error);
+    int status = snx_ctr_aot_run(extracted, NULL, model, max_blocks, flags, error, sizeof error);
     free(extracted);
     if (status) fprintf(stderr, "scarletnx-3ds: %s\n", error);
     return status;

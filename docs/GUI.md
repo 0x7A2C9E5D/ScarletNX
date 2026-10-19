@@ -54,19 +54,21 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
 - **Load Switch NSP/XCI/NRO**, **Load Linux ARM ELF** and **Load 3DS CIA** open a screen as the
   keys': a click on its blinking **[ Pick or drop a file ]**, or Enter, opens the system's file
   picker (on Linux the desktop's, else zenity's). Dropping a file on the window and Ctrl+V with
-  a path work too. ESC returns to the menu. On Android the picker opens at once. A dump not extracted yet takes
-  about its size, a Switch dump's extracted straight into its game's folder (as much again only with an
-  **Extractions** folder picked, which keeps a copy, and in the temporary folder with *Extract to tmpfs*); when its
-  disks have less free, the menu says how much it needs and *Run anyway* takes a second press.
+  a path work too. ESC returns to the menu. On Android the picker opens at once. A dump is read where it lies
+  and takes no room, unless *Extract game container* is on. Then one not extracted yet takes about its size, a Switch
+  dump's extracted straight into its game's folder (as much again only with an **Extractions** folder picked, which
+  keeps a copy, and in the temporary folder with *Extract to tmpfs*); when its disks have less free, the menu says how
+  much it needs and *Run anyway* takes a second press.
 - **Load 3DS CIA** uses `scarletnx-3ds`. Its `games/` browser lists CIA inputs,
-  not host executables. The driver extracts supported decrypted application CIAs.
+  not host executables. The driver reads supported decrypted application CIAs where they lie, or extracts them
+  with *Extract game container*.
   A native Linux build with `SNX_3DS_AOT=ON` then performs static ARM11 integer
   compilation/execution; the default build reports missing AOT support. Larger
   images use bounded conservative discovery (16 MiB text cap). SuperTux now
   connects/registers `srv:`, then waits for absent `APT:S`, before main,
   graphics or audio. No service/session success is invented to bypass that wait.
   Full HLE/devices remain incomplete. Like the Switch driver, it uses an
-  extraction and a compiled module already there, and recompiles only when needed.
+  extraction (or the CIA itself) and a compiled module already there, and recompiles only when needed.
   See [3DS port](3DS.md) for limits.
 - **Setup device keys**, immediately after the three load entries, blinks red (the theme's `failure` colour, at its
   `blink_ms`) while no `prod.keys` is in use. It prompts you to
@@ -142,7 +144,12 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   folder's, without the second copy. Either way the game's folder gets `<name>.source`, a link to the dump, which
   the RomFS is extracted again from when tmpfs was emptied (a reboot), or moved by when the setting changes. A game
   without one, made before, says *Can't be extracted to tmpfs due to missing symlink* and runs from what it has.
-  None of them reaches the Linux or the 3DS driver.
+  **Extract game container** passes `--extract-container`, to the Switch and the 3DS driver both. Off, the default,
+  nothing of a dump is extracted: the game's folder links to the dump, the recompile reads the ExeFS from it, and the
+  game reads its ExeFS and RomFS out of the dump on the fly, decrypting them as it reads ([USAGE](USAGE.md)). A CIA
+  is read the same way. On, a dump is extracted as before, into the game's folder or with *Extract to tmpfs* into
+  tmpfs, which implies it. Turning it off again takes a game's extraction away on its next run. The first two
+  settings reach neither the Linux nor the 3DS driver.
 - The Status box, after the RAM and the CPU, says what ScarletNX's folders take (games/,
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
   the menu's own) and what is left on that disk, counted as the menu opens and after each run.

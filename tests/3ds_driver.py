@@ -21,6 +21,8 @@ def main():
 
     help_text = run(['--help'], 0, 'recompile if needed, then play')
     assert '--recomp' in help_text and '--extract' in help_text and 'scarletnx-3ds-aot' not in help_text
+    assert '--extract-container' in help_text and 'CIA where it lies' in help_text
+    run(['--board-info', '--extract-container'], 2, 'Usage:')
     run(['-x', '-r', 'game.cia'], 2, 'Usage:')
     run(['-r', '--max-blocks', '5', 'game.cia'], 2, 'Usage:')
     run(['--board-info', '-r'], 2, 'Usage:')

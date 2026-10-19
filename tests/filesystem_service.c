@@ -892,6 +892,95 @@ static void test_raw_romfs(SvcObj* proxy) {
     puts("PASS raw RomFS reads, cached image size and the storage by program index and id");
 }
 
+#if !defined(_WIN32) /* the dump's link: Windows makes one only with the right to */
+/* the synthetic dumps of tests/hac_synth.h, under names fs.c doesn't use */
+#define put32 synth_put32
+#define put64 synth_put64
+#define romfs_build synth_romfs_build
+#include "nx/runtime/driver/hactool/hfs0.h"
+#include "nx/runtime/driver/hactool/nca.h"
+#include "nx/runtime/driver/hactool/pfs0.h"
+#include "nx/runtime/driver/hactool/sha.h"
+#include "nx/runtime/driver/hactool/xci.h"
+#include "hac_synth.h"
+#undef put32
+#undef put64
+#undef romfs_build
+#endif
+#if !defined(_WIN32)
+/* Extract game container off: dump-data/Game_data has no ExeFS or RomFS of its own, and dump-data/Game.source links to
+   an NSP of decrypted NCAs, which fs_init opens and maps. The game's ExeFS (exefs/...) and RomFS come out of it, read
+   in place: nothing is written beside it */
+static const char dump_code[] = "synthetic main", dump_asset[] = "an asset of the dump's RomFS";
+static blob_t dump_npdm(void) {
+    blob_t b = {zalloc(0x80), 0x80};
+    memcpy(b.data, "META", 4);
+    b.data[0x40] = 0x2A; /* told apart from a blank one */
+    return b;
+}
+static void dump_write(void) {
+    blob_t code = {zalloc(sizeof dump_code - 1), sizeof dump_code - 1}, asset = {zalloc(sizeof dump_asset - 1), 0};
+    blob_t meta = dump_npdm(), nsp;
+    asset.size = sizeof dump_asset - 1;
+    memcpy(code.data, dump_code, code.size);
+    memcpy(asset.data, dump_asset, asset.size);
+    romfs_file_t exefs[2] = {{"main.npdm", meta}, {"main", code}}, romfs[1] = {{"asset.bin", asset}};
+    romfs_file_t ncas[1] = {
+        {"program.nca", dnca_build(NCACONTENTTYPE_PROGRAM, 0x0100000000AB0000ULL, exefs, 2, romfs, 1)}};
+    nsp = partition_build(MAGIC_PFS0, ncas, 1, 0x200);
+    CHECK(!snx_mkdirs("dump-data/Game_data") && !snx_write_file("dump-data/Game.nsp", nsp.data, nsp.size));
+    CHECK(!snx_symlink("Game.nsp", "dump-data/Game.source"));
+    free(nsp.data);
+    free(ncas[0].content.data);
+    free(code.data);
+    free(asset.data);
+    free(meta.data);
+}
+static void test_dump(SvcObj* proxy) {
+    blob_t meta = dump_npdm();
+    PFileMap map;
+    Request r;
+    u64 size = 0;
+    u8* data = fs_read_file("exefs/main.npdm", &size);
+    CHECK(g_hle.fs.dfs != NULL && data && size == meta.size && !memcmp(data, meta.data, meta.size));
+    free(data);
+    CHECK(!fs_map_file("exefs/main", &map) && map.heap && map.size == sizeof dump_code - 1);
+    CHECK(!memcmp(map.data, dump_code, map.size));
+    map.borrowed = 0;
+    plat_file_unmap(&map); /* the test's frees it, as the platform's does for heap */
+    CHECK(fs_read_file("exefs/subsdk0", &size) == NULL && fs_read_file("romfs/asset.bin", &size) == NULL);
+    CHECK(!snx_path_exists("dump-data/Game_data/exefs") && !snx_path_exists("dump-data/Game_data/romfs"));
+    /* the RomFS image, what OpenDataStorageByCurrentProcess (200) gives: its header, then asset.bin's bytes where the
+       file table says they are */
+    request(&r, 200);
+    dispatch(proxy, &r, 0);
+    CHECK(r.c.nout_objs == 1);
+    SvcObj* storage = r.c.out_objs[0];
+    u64 total = get_size(storage);
+    CHECK(total == g_hle.fs.rtotal && total >= 0x50 && total <= 0x8000);
+    test_storage_contracts(storage, total);
+    request(&r, 0);
+    argument64(&r, 0, 0);
+    argument64(&r, 8, total);
+    output_buffer(&r, total);
+    dispatch(storage, &r, 0);
+    const u8* image = GP(0x5000);
+    u64 file_table = 0, data_offset = 0, at, name_size;
+    memcpy(&file_table, image + 0x38, 8);
+    memcpy(&data_offset, image + 0x48, 8);
+    CHECK(file_table + 0x20 + 9 <= total && !memcmp(image + file_table + 0x20, "asset.bin", 9));
+    memcpy(&at, image + file_table + 8, 8);
+    memcpy(&size, image + file_table + 0x10, 8);
+    name_size = 0;
+    memcpy(&name_size, image + file_table + 0x1c, 4);
+    CHECK(name_size == 9 && size == sizeof dump_asset - 1 && data_offset + at + size <= total);
+    CHECK(!memcmp(image + data_offset + at, dump_asset, size));
+    svcobj_unref(storage);
+    free(meta.data);
+    puts("PASS the dump's ExeFS and RomFS read in place, nothing extracted");
+}
+#endif
+
 /* OpenSaveDataFileSystem (51): the SaveDataSpaceId (u8) at 0 and the 0x40 byte SaveDataAttribute at 8, whose
    SaveDataType is at 0x20 in it, 0x28 in the request. The other bytes are filled with types that would pick another
    folder if they were read instead */
@@ -1135,6 +1224,24 @@ int main(int argc, char** argv) {
     g_mem = calloc(1, 0x10000);
     CHECK(g_mem != NULL);
     int raw = argc == 4 && !strcmp(argv[3], "raw");
+#if !defined(_WIN32)
+    if (argc == 4 && !strcmp(argv[3], "dump")) {
+        dump_write();
+        strcpy(g_datadir, "dump-data/Game_data/");
+        fs_init();
+        test_scans_allowed = 0;
+        svc_fs_init();
+        romfs_init();
+        SvcObj* proxy = new_fsp();
+        test_dump(proxy);
+        svcobj_unref(proxy);
+        CHECK(test_objects == 0);
+        cleanup_service();
+        free(g_mem);
+        printf("PASS %u dump checks; %u startup scans\n", test_checks, test_scans);
+        return 0;
+    }
+#endif
     strcpy(g_datadir, raw ? "raw-data/" : "service-data/");
     fs_init();
     CHECK(test_scans > 0);
