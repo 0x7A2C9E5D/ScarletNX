@@ -118,7 +118,7 @@ typedef struct {
     };
 } nca_fs_header_t;
 
-/* Nintendo content archive header. */
+/* Content archive (NCA) header. */
 typedef struct {
     uint8_t fixed_key_sig[0x100]; /* RSA-PSS signature over header with fixed key. */
     uint8_t npdm_key_sig[0x100]; /* RSA-PSS signature over header with key in NPDM. */

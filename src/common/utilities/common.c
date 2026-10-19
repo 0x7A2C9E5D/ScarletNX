@@ -539,7 +539,7 @@ int snx_copy_file(const char* src, const char* dst) {
 }
 int snx_seek(FILE* f, SnxU64 offset) {
 #ifdef _WIN32
-    return (offset >> 63) != 0 || _fseeki64(f, (__int64)offset, SEEK_SET) != 0;
+    return (offset >> 63) != 0 || _fseeki64(f, offset, SEEK_SET) != 0;
 #else
     if ((SnxU64)(off_t)offset != offset || (off_t)offset < 0) return 1;
     return fseeko(f, (off_t)offset, SEEK_SET) != 0;

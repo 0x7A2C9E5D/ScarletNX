@@ -116,7 +116,7 @@ void aes_decrypt(aes_ctx_t *ctx, void *dst, const void *src, size_t l) {
 }
 
 static void get_tweak(unsigned char *tweak, size_t sector) {
-    for (int i = 0xF; i >= 0; i--) { /* Nintendo LE custom tweak... */
+    for (int i = 0xF; i >= 0; i--) { /* the console's LE custom tweak... */
         tweak[i] = (unsigned char)(sector & 0xFF);
         sector >>= 8;
     }
@@ -131,7 +131,7 @@ void aes_xts_encrypt(aes_ctx_t *ctx, void *dst, const void *src, size_t l, size_
     }
 
     for (size_t i = 0; i < l; i += sector_size) {
-        /* Workaround for Nintendo's custom sector...manually generate the tweak. */
+        /* Workaround for the console's custom sector...manually generate the tweak. */
         get_tweak(tweak, sector++);
         aes_setiv(ctx, tweak, 16);
         aes_encrypt(ctx, (char *)dst + i, (const char *)src + i, sector_size);
@@ -147,7 +147,7 @@ void aes_xts_decrypt(aes_ctx_t *ctx, void *dst, const void *src, size_t l, size_
     }
 
     for (size_t i = 0; i < l; i += sector_size) {
-        /* Workaround for Nintendo's custom sector...manually generate the tweak. */
+        /* Workaround for the console's custom sector...manually generate the tweak. */
         get_tweak(tweak, sector++);
         aes_setiv(ctx, tweak, 16);
         aes_decrypt(ctx, (char *)dst + i, (const char *)src + i, sector_size);

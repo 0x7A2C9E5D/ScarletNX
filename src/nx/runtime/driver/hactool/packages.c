@@ -367,7 +367,7 @@ void pk21_process(pk21_ctx_t *ctx) {
     }
 
 
-    /* Nintendo, what the fuck? */
+    /* the console's layout here is odd */
     ctx->package_size = ctx->header.ctr_dwords[0] ^ ctx->header.ctr_dwords[2] ^ ctx->header.ctr_dwords[3];
     if (ctx->package_size > 0x7FC000) {
         fprintf(stderr, "Error: Package2 Header is corrupt!\n");

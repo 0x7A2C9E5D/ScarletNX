@@ -29,3 +29,5 @@ What ScarletNX changed, each change marked `ScarletNX` where it is not a file of
   partition or an NSP is read there instead of from a copy unpacked beside it.
 - **Keys by name.** `extkeys_set_key` sets one prod.keys key, which `extkeys_initialize_settings` calls for each line
   of a file and the driver for each line it kept.
+- **Comments.** Five comments in `aes.c`, `nca.h` and `packages.c` say "the console" or "content archive" instead of the
+  console maker's name, which `tests/tracked_material.py` keeps out of the tracked files.
