@@ -741,19 +741,21 @@ jobs:
           archive: false
           if-no-files-found: error
 
-  # macOS and iOS (docs/APPLE.md), on Apple silicon with Xcode's Clang and SDKs; FFmpeg, OpenSSL and SDL3 are built from
-  # the pinned sources as everywhere. Until both have built green once, a failure here does not fail the run
-  # (continue-on-error), which would hold back the nightly: they are new, and no Mac checked them before CI. Each app
-  # carries Ryujinx's MoltenVK (V380-Ori/Ryujinx.MoltenVK): mainline's lacks patches emulators' pipelines need. The
-  # release's tar, its SHA-256 the one GitHub lists for it
-  macos:
-    name: macOS (arm64)
+  # macOS and iOS (docs/APPLE.md), both on one Apple silicon runner with Xcode's Clang and SDKs; FFmpeg, OpenSSL and
+  # SDL3 are built from the pinned sources as everywhere. Until both have built green once, a failure here does not
+  # fail the run (continue-on-error), which would hold back the nightly: they are new, and no Mac checked them before
+  # CI. iOS builds even when macOS failed, and each one's app is made from its own build alone. Each app carries
+  # Ryujinx's MoltenVK (V380-Ori/Ryujinx.MoltenVK): mainline's lacks patches emulators' pipelines need. The release's
+  # tars, their SHA-256 the ones GitHub lists for them
+  apple:
+    name: macOS and iOS (arm64)
     runs-on: macos-26
-    timeout-minutes: 150
+    timeout-minutes: 240
     continue-on-error: true
     env:
       MOLTENVK_RELEASE: v1.4.1-ryujinx
-      MOLTENVK_SHA256: ea1c633808d0a61e86ee35af4bdc280f5f07f95633b95935f3e695dc5226e640
+      MOLTENVK_MACOS_SHA256: ea1c633808d0a61e86ee35af4bdc280f5f07f95633b95935f3e695dc5226e640
+      MOLTENVK_IOS_SHA256: 7cec48d4e73cf9eb89b60e8596758900caaf8398c49ae8abe4544295fb7e0c84
     steps:
       # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
       - name: Name the commit
@@ -767,151 +769,59 @@ jobs:
         with:
           path: .cache/cpm
           key: cpm-${{ github.job }}-${{ hashFiles('cmake/dependencies.cmake') }}
-      # LLVM's libraries for the Mac (scripts/apple-llvm.sh) with AArch64's code generator alone, the one the recompiler
-      # uses, built once per script and Xcode as the iOS job's. Saved as soon as they are built: actions/cache saves
-      # only a job that succeeds, and a later step's failure would build them again next run. Xcode's Clang builds
-      # everything, as a user's Mac does
+      # LLVM's libraries for each (scripts/apple-llvm.sh) with AArch64's code generator alone, the one the recompiler
+      # uses, built once per script and Xcode. Saved as soon as they are built: actions/cache saves only a job that
+      # succeeds, and a later step's failure would build them again next run. Xcode's Clang builds everything, as a
+      # user's Mac does
       - name: Name the Xcode
         id: xcode
         run: echo "version=$(xcodebuild -version | tr '\n' ' ' | tr -s ' ' '-')" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/restore@v5
-        id: llvm
+        id: macos-llvm
         with:
           path: apple-llvm
           key: macos-llvm-${{ hashFiles('scripts/apple-llvm.sh') }}-${{ steps.xcode.outputs.version }}
-      - name: Install tools
-        run: brew install ninja ccache
-      - name: Build LLVM's libraries
-        if: steps.llvm.outputs.cache-hit != 'true'
-        run: scripts/apple-llvm.sh macos "$PWD/apple-llvm"
-      - if: steps.llvm.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: apple-llvm
-          key: ${{ steps.llvm.outputs.cache-primary-key }}
-      # ccache and the dependency builds, set up as in the linux job
       - uses: actions/cache/restore@v5
-        with:
-          path: .cache/ccache
-          key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ccache-${{ github.job }}-
-      - uses: actions/cache/restore@v5
-        id: deps
-        with:
-          path: .cache/deps
-          key: deps-${{ github.job }}-${{ github.run_id }}
-          restore-keys: deps-${{ github.job }}-
-      - name: Set up the caches
-        run: |
-          {
-            echo "CCACHE_DIR=$GITHUB_WORKSPACE/.cache/ccache"
-            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
-            echo "CCACHE_NOHASHDIR=true"
-            echo "SNX_DEPS_CACHE=$GITHUB_WORKSPACE/.cache/deps"
-            echo "SNX_CCACHE_START=$(date +%s)"
-          } >> "$GITHUB_ENV"
-      - name: Build the runtime
-        run: |
-          cmake --preset macos -DLLVM_DIR="$PWD/apple-llvm/lib/cmake/llvm" \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          cmake --build --preset macos --parallel "$(getconf _NPROCESSORS_ONLN)"
-          cmake --install build/macos --prefix stage
-      - name: Trim the compiler cache
-        run: |
-          ccache --show-stats --verbose
-          ccache --evict-older-than "$(( $(date +%s) - SNX_CCACHE_START ))s"
-          ccache --zero-stats
-          du -sh "$CCACHE_DIR"
-      - uses: actions/cache/save@v5
-        with:
-          path: .cache/ccache
-          key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Name the dependency builds
-        id: deps-used
-        run: |
-          used=$(find build -path '*/snx-deps/*.dir' -exec cat {} + | sort -u)
-          for d in .cache/deps/*; do grep -qxF "${d##*/}" <<<"$used" || rm -rf "$d"; done
-          echo "key=deps-${{ github.job }}-$(shasum -a 256 <<<"$used" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      - if: steps.deps-used.outputs.key != steps.deps.outputs.cache-matched-key
-        uses: actions/cache/save@v5
-        with:
-          path: .cache/deps
-          key: ${{ steps.deps-used.outputs.key }}
-      - name: Check the ABI helpers compile
-        run: clang -fsyntax-only -Wall -fno-strict-aliasing -fwrapv -I src src/common/cpu/aarch64/cpu_helpers.c
-      - name: Test native tooling and indexed filesystems
-        run: ctest --test-dir build/macos --output-on-failure --parallel 4
-      - name: Fetch MoltenVK
-        run: |
-          curl -fL -o moltenvk.tar \
-            "https://github.com/V380-Ori/Ryujinx.MoltenVK/releases/download/$MOLTENVK_RELEASE/MoltenVK-macos.tar"
-          echo "$MOLTENVK_SHA256  moltenvk.tar" | shasum -a 256 -c
-          mkdir moltenvk && tar -xf moltenvk.tar -C moltenvk
-      # ditto keeps the app's links and its signature, which zip would not
-      - name: Make the app
-        run: |
-          scripts/apple-app.sh macos stage app moltenvk
-          ditto -c -k --keepParent app/ScarletNX.app ScarletNX-macos-arm64-${{ steps.commit.outputs.short }}.zip
-      - uses: actions/upload-artifact@v7
-        with:
-          path: ScarletNX-macos-arm64-${{ steps.commit.outputs.short }}.zip
-          archive: false
-          if-no-files-found: error
-
-  ios:
-    name: iOS (arm64)
-    runs-on: macos-26
-    timeout-minutes: 150
-    continue-on-error: true
-    env:
-      MOLTENVK_RELEASE: v1.4.1-ryujinx
-      MOLTENVK_SHA256: 7cec48d4e73cf9eb89b60e8596758900caaf8398c49ae8abe4544295fb7e0c84
-    steps:
-      # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
-      - name: Name the commit
-        id: commit
-        shell: bash
-        env:
-          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v7
-      - uses: actions/cache@v5
-        with:
-          path: .cache/cpm
-          key: cpm-${{ github.job }}-${{ hashFiles('cmake/dependencies.cmake') }}
-      # LLVM's libraries for iOS (scripts/apple-llvm.sh) with AArch64's code generator alone, built once per script and
-      # Xcode as Android's per NDK, and saved as soon as they are built (see the macos job)
-      - name: Name the Xcode
-        id: xcode
-        run: echo "version=$(xcodebuild -version | tr '\n' ' ' | tr -s ' ' '-')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v5
-        id: llvm
+        id: ios-llvm
         with:
           path: ios-llvm
           key: ios-llvm-${{ hashFiles('scripts/apple-llvm.sh') }}-${{ steps.xcode.outputs.version }}
       - name: Install tools
         run: brew install ninja ccache
-      - name: Build LLVM's libraries
-        if: steps.llvm.outputs.cache-hit != 'true'
+      - name: Build LLVM's libraries for macOS
+        id: macos-llvm-build
+        if: steps.macos-llvm.outputs.cache-hit != 'true'
+        run: scripts/apple-llvm.sh macos "$PWD/apple-llvm"
+      - if: steps.macos-llvm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: apple-llvm
+          key: ${{ steps.macos-llvm.outputs.cache-primary-key }}
+      - name: Build LLVM's libraries for iOS
+        id: ios-llvm-build
+        if: ${{ !cancelled() && steps.ios-llvm.outputs.cache-hit != 'true' }}
         run: scripts/apple-llvm.sh ios "$PWD/ios-llvm"
-      - if: steps.llvm.outputs.cache-hit != 'true'
+      - if: ${{ !cancelled() && steps.ios-llvm.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5
         with:
           path: ios-llvm
-          key: ${{ steps.llvm.outputs.cache-primary-key }}
-      # ccache and the dependency builds, set up as in the linux job
+          key: ${{ steps.ios-llvm.outputs.cache-primary-key }}
+      # ccache and the dependency builds, set up as in the linux job: one of each for both, which compile apart
       - uses: actions/cache/restore@v5
+        if: ${{ !cancelled() }}
         with:
           path: .cache/ccache
           key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ccache-${{ github.job }}-
       - uses: actions/cache/restore@v5
+        if: ${{ !cancelled() }}
         id: deps
         with:
           path: .cache/deps
           key: deps-${{ github.job }}-${{ github.run_id }}
           restore-keys: deps-${{ github.job }}-
       - name: Set up the caches
+        if: ${{ !cancelled() }}
         run: |
           {
             echo "CCACHE_DIR=$GITHUB_WORKSPACE/.cache/ccache"
@@ -920,46 +830,81 @@ jobs:
             echo "SNX_DEPS_CACHE=$GITHUB_WORKSPACE/.cache/deps"
             echo "SNX_CCACHE_START=$(date +%s)"
           } >> "$GITHUB_ENV"
-      - name: Build the app
+      - name: Build the runtime for macOS
+        id: macos-build
+        if: ${{ !cancelled() && steps.macos-llvm-build.outcome != 'failure' }}
+        run: |
+          cmake --preset macos -DLLVM_DIR="$PWD/apple-llvm/lib/cmake/llvm" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build --preset macos --parallel "$(getconf _NPROCESSORS_ONLN)"
+          cmake --install build/macos --prefix stage-macos
+      - name: Build the app for iOS
+        id: ios-build
+        if: ${{ !cancelled() && steps.ios-llvm-build.outcome != 'failure' }}
         run: |
           cmake --preset ios -DLLVM_DIR="$PWD/ios-llvm/lib/cmake/llvm" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build --preset ios --parallel "$(getconf _NPROCESSORS_ONLN)"
-          cmake --install build/ios --prefix stage
+          cmake --install build/ios --prefix stage-ios
       - name: Trim the compiler cache
+        if: ${{ !cancelled() }}
         run: |
           ccache --show-stats --verbose
           ccache --evict-older-than "$(( $(date +%s) - SNX_CCACHE_START ))s"
           ccache --zero-stats
           du -sh "$CCACHE_DIR"
       - uses: actions/cache/save@v5
+        if: ${{ !cancelled() }}
         with:
           path: .cache/ccache
           key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Name the dependency builds
+        if: ${{ !cancelled() }}
         id: deps-used
         run: |
           used=$(find build -path '*/snx-deps/*.dir' -exec cat {} + | sort -u)
           for d in .cache/deps/*; do grep -qxF "${d##*/}" <<<"$used" || rm -rf "$d"; done
           echo "key=deps-${{ github.job }}-$(shasum -a 256 <<<"$used" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      - if: steps.deps-used.outputs.key != steps.deps.outputs.cache-matched-key
+      - if: ${{ !cancelled() && steps.deps-used.outputs.key != steps.deps.outputs.cache-matched-key }}
         uses: actions/cache/save@v5
         with:
           path: .cache/deps
           key: ${{ steps.deps-used.outputs.key }}
-      - name: Fetch MoltenVK
+      - name: Check the ABI helpers compile
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
+        run: clang -fsyntax-only -Wall -fno-strict-aliasing -fwrapv -I src src/common/cpu/aarch64/cpu_helpers.c
+      - name: Test native tooling and indexed filesystems
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
+        run: ctest --test-dir build/macos --output-on-failure --parallel 4
+      # ditto keeps the app's links and its signature, which zip would not
+      - name: Make the macOS app
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
         run: |
-          curl -fL -o moltenvk.tar \
-            "https://github.com/V380-Ori/Ryujinx.MoltenVK/releases/download/$MOLTENVK_RELEASE/MoltenVK-ios.tar"
-          echo "$MOLTENVK_SHA256  moltenvk.tar" | shasum -a 256 -c
-          mkdir moltenvk && tar -xf moltenvk.tar -C moltenvk
+          curl -fL -o moltenvk-macos.tar \
+            "https://github.com/V380-Ori/Ryujinx.MoltenVK/releases/download/$MOLTENVK_RELEASE/MoltenVK-macos.tar"
+          echo "$MOLTENVK_MACOS_SHA256  moltenvk-macos.tar" | shasum -a 256 -c
+          mkdir moltenvk-macos && tar -xf moltenvk-macos.tar -C moltenvk-macos
+          scripts/apple-app.sh macos stage-macos app-macos moltenvk-macos
+          ditto -c -k --keepParent app-macos/ScarletNX.app ScarletNX-macos-arm64-${{ steps.commit.outputs.short }}.zip
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.macos-build.outcome == 'success' }}
+        with:
+          path: ScarletNX-macos-arm64-${{ steps.commit.outputs.short }}.zip
+          archive: false
+          if-no-files-found: error
       # Unsigned: AltStore, SideStore or a developer account sign it for the device it goes on, with
       # dist/apple/ScarletNX.entitlements
       - name: Make the IPA
+        if: ${{ !cancelled() && steps.ios-build.outcome == 'success' }}
         run: |
-          scripts/apple-app.sh ios stage app moltenvk
-          mv app/ScarletNX.ipa ScarletNX-ios-arm64-${{ steps.commit.outputs.short }}.ipa
+          curl -fL -o moltenvk-ios.tar \
+            "https://github.com/V380-Ori/Ryujinx.MoltenVK/releases/download/$MOLTENVK_RELEASE/MoltenVK-ios.tar"
+          echo "$MOLTENVK_IOS_SHA256  moltenvk-ios.tar" | shasum -a 256 -c
+          mkdir moltenvk-ios && tar -xf moltenvk-ios.tar -C moltenvk-ios
+          scripts/apple-app.sh ios stage-ios app-ios moltenvk-ios
+          mv app-ios/ScarletNX.ipa ScarletNX-ios-arm64-${{ steps.commit.outputs.short }}.ipa
       - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.ios-build.outcome == 'success' }}
         with:
           path: ScarletNX-ios-arm64-${{ steps.commit.outputs.short }}.ipa
           archive: false
@@ -1124,7 +1069,7 @@ jobs:
     if: >-
       !cancelled() && github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    needs: [linux, appimage, windows, android, macos, ios, edenprobe]
+    needs: [linux, appimage, windows, android, apple, edenprobe]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
