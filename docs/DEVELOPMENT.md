@@ -65,6 +65,11 @@ python3 scripts/logscan.py "$games/<id>/<id>.log" [--format markdown]
   logscan's summary of each, edited as logs are added, the labels `game report` and `log: <how it ended>`, and the
   other reports with the same signature named. `triage --issue N --dry-run` shows what it would post.
   `scripts/game-reports.py index [--title-id ID] [--signature TEXT]` lists the reports and their logs as JSON lines.
+- `tools/snx_mcp.py`: an MCP server (stdio, no packages) that `.mcp.json` registers for agents opened in the
+  repository. `list_reports`, `get_report` and `fetch_log` read the game reports through `gh` (`fetch_log` saves a
+  log in `~/.cache/scarletnx/reports/<issue>/`), `scan_log` and `read_log` read logs a pattern or a range at a time,
+  `find_game` matches a title ID to an extracted game in `work/` with its version, and `symbolize` and `disassemble`
+  run `tools/symbols.py` and `tools/disasm.py` on it. A report's addresses match only the same game version.
 
 - Runtime: `--seconds=N` / `--frames=N`; `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
   `--script=ms:hexbuttons,...` (or `Nf:hexbuttons` to press at present N), `--press_len=ms` (default 300).
