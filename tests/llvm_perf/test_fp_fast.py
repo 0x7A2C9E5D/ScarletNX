@@ -19,7 +19,8 @@ typedef void *V,*LLVMValueRef,*LLVMContextRef,*LLVMModuleRef,*LLVMBuilderRef,*LL
 typedef struct { int x86, fma; } SnxIrFeatures;
 typedef struct { LLVMBasicBlockRef block; V nearest, ixc; } SnxIrFpGuards;
 typedef struct { V value,ok,inexact; } SnxFpFast;
-typedef struct { LLVMContextRef ctx;LLVMModuleRef mod;LLVMBuilderRef b;LLVMTypeRef t_i1,t_i8,t_i32,t_i64;V fn,c;const SnxIrFeatures*features;SnxIrFpGuards fp_guards; } SnxIr;
+typedef struct { SnxIrFpGuards fp_guards; } SnxIrBlockState;
+typedef struct { LLVMContextRef ctx;LLVMModuleRef mod;LLVMBuilderRef b;LLVMTypeRef t_i1,t_i8,t_i32,t_i64;V fn,c;const SnxIrFeatures*features;SnxIrBlockState state; } SnxIr;
 enum {SNX_IR_FP_ADD,SNX_IR_FP_SUB,SNX_IR_FP_MUL,SNX_IR_FP_DIV,SNX_IR_FP_SQRT,SNX_IR_FP_FMA};
 enum {LLVMRealUNE=14,LLVMIntEQ=32,LLVMIntNE=33,LLVMIntULE=37,LLVMIntSGE=39};
 extern LLVMContextRef LLVMContextCreate(void);

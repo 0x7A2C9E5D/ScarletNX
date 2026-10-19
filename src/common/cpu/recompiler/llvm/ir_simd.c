@@ -283,7 +283,7 @@ int snx_ir_simd_plain(SnxIr* ir, SnxU32 word, SnxU64 pc, const SnxA64Pattern* pa
     V args[3], handled;
     LLVMBasicBlockRef undefined, done;
     (void)index;
-    SnxIrPatternKind kind = pattern->kind;
+    SnxA64Kind kind = pattern->kind;
     if (kind < SNX_A64_SIMD_LDST || kind > SNX_A64_SIMD_DP2) return 0;
     p[0] = ir->t_ptr;
     p[1] = ir->t_ptr;

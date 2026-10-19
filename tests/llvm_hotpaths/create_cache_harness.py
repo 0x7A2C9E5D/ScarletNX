@@ -12,7 +12,8 @@ prelude=(root/'llvm_neon_real.c').read_text().split('static V broadcast(')[0]
 prelude="#include <stddef.h>\n"+prelude
 prelude=prelude.replace('typedef struct { LLVMContextRef ctx; LLVMModuleRef mod; LLVMBuilderRef b; LLVMTypeRef t_i64,t_i128,t_i8; LLVMValueRef c; } SnxIr;', '''typedef struct { uint64_t x[32]; uint64_t flags; } CPU;
 typedef struct { LLVMBasicBlockRef block; LLVMValueRef x[32]; uint32_t valid; } SnxIrRegisterCache;
-typedef struct { LLVMContextRef ctx; LLVMModuleRef mod; LLVMBuilderRef b; LLVMTypeRef t_i64,t_i128,t_i8; LLVMValueRef c; SnxIrRegisterCache registers; } SnxIr;''')
+typedef struct { SnxIrRegisterCache registers; } SnxIrBlockState;
+typedef struct { LLVMContextRef ctx; LLVMModuleRef mod; LLVMBuilderRef b; LLVMTypeRef t_i64,t_i128,t_i8; LLVMValueRef c; SnxIrBlockState state; } SnxIr;''')
 prelude=prelude.replace('extern LLVMValueRef LLVMBuildInsertElement(', 'extern LLVMValueRef LLVMBuildAdd(LLVMBuilderRef,LLVMValueRef,LLVMValueRef,const char*);\nextern LLVMValueRef LLVMBuildInsertElement(')
 prelude=prelude.replace('extern LLVMBasicBlockRef LLVMAppendBasicBlockInContext(', 'extern LLVMBasicBlockRef LLVMGetInsertBlock(LLVMBuilderRef);\nextern LLVMBasicBlockRef LLVMAppendBasicBlockInContext(')
 prelude=prelude.replace('static void ir_set_vd(', 'static void ir_set_vd(')

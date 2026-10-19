@@ -14,7 +14,7 @@ from pathlib import Path
 import re,sys
 root=Path(sys.argv[1]); p=root/'src/common/cpu/recompiler/llvm'
 cm=(p/'CMakeLists.txt').read_text()
-for name in ('ir.c','ir_state.c','ir_emit.c','ir_helpers.c','ir_a64.c','ir_fp.c','ir_simd.c','ir_codegen.c'):
+for name in ('ir.c','ir_state.c','ir_emit.c','ir_helpers.c','ir_profile.c','ir_a64.c','ir_fp.c','ir_simd.c','ir_codegen.c'):
  assert re.search(r'\b'+re.escape(name)+r'\b',cm), f'missing CMake source: {name}'
 s=(p/'ir_simd.c').read_text()
 for name in ('ir_neon_memory.inc','ir_neon_crypto.inc','ir_neon_arithmetic.inc','ir_neon_dispatch.inc'):
@@ -23,14 +23,14 @@ for name in ('ir_neon_memory.inc','ir_neon_crypto.inc','ir_neon_arithmetic.inc',
 print('PASS module dependency map: 9 LLVM IR .c units and 4 NEON source partitions')
 PY
 
-# The new runtime calls SVCs through ABI 9's indexed table. Check the actual
+# The new runtime calls SVCs through the ABI's indexed table. Check the actual
 # emitter with the upstream CPU layout, LLVM verifier, and native execution.
 : "${LLVM_LIBRARY:=$(llvm-config --libdir 2>/dev/null)/libLLVM.so}"
 if [[ -f "$LLVM_LIBRARY" ]]; then
-    python3 "$root/tests/llvm_dod/test_svc_abi9.py" "$work/svc_abi9.c"
+    python3 "$root/tests/llvm_dod/test_svc_table.py" "$work/svc_table.c"
     "$CC" -std=gnu11 -O2 -Wall -Wextra -Werror -I "$root/src" \
-        "$work/svc_abi9.c" "$LLVM_LIBRARY" -o "$work/svc_abi9"
-    "$work/svc_abi9"
+        "$work/svc_table.c" "$LLVM_LIBRARY" -o "$work/svc_table"
+    "$work/svc_table"
     python3 "$root/tests/llvm_dod/test_fp_guards.py" "$work/fp_guards.c"
     "$CC" -std=gnu11 -O2 -Wall -Wextra -Werror "$work/fp_guards.c" "$LLVM_LIBRARY" -o "$work/fp_guards"
     "$work/fp_guards"
@@ -38,5 +38,5 @@ if [[ -f "$LLVM_LIBRARY" ]]; then
     "$CC" -std=gnu11 -O2 -Wall -Wextra -Werror "$work/neon_phi.c" "$LLVM_LIBRARY" -o "$work/neon_phi"
     "$work/neon_phi"
 else
-    echo "SKIP ABI 9 LLVM execution check: LLVM_LIBRARY unavailable"
+    echo "SKIP SVC table LLVM execution check: LLVM_LIBRARY unavailable"
 fi

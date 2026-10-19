@@ -27,7 +27,8 @@ typedef void *V,*LLVMValueRef,*LLVMContextRef,*LLVMModuleRef,*LLVMBuilderRef,*LL
 #define LLVMReturnStatusAction 2
 #define LLVMBuildNot(b,v,n) LLVMBuildXor(b,v,LLVMConstAllOnes(LLVMTypeOf(v)),n)
 typedef struct { LLVMValueRef value[4]; LLVMBasicBlockRef block; unsigned valid; } SnxIrFlags;
-typedef struct { LLVMContextRef ctx; LLVMModuleRef mod; LLVMBuilderRef b; LLVMTypeRef t_i1,t_i8,t_i32,t_i64; V c; SnxIrFlags flags; } SnxIr;
+typedef struct { SnxIrFlags flags; } SnxIrBlockState;
+typedef struct { LLVMContextRef ctx; LLVMModuleRef mod; LLVMBuilderRef b; LLVMTypeRef t_i1,t_i8,t_i32,t_i64; V c; SnxIrBlockState state; } SnxIr;
 extern V LLVMConstInt(LLVMTypeRef,uint64_t,int),LLVMConstAllOnes(LLVMTypeRef),LLVMBuildAdd(LLVMBuilderRef,V,V,const char*),LLVMBuildSub(LLVMBuilderRef,V,V,const char*),LLVMBuildXor(LLVMBuilderRef,V,V,const char*),LLVMBuildAnd(LLVMBuilderRef,V,V,const char*),LLVMBuildOr(LLVMBuilderRef,V,V,const char*),LLVMBuildLShr(LLVMBuilderRef,V,V,const char*),LLVMBuildSelect(LLVMBuilderRef,V,V,V,const char*),LLVMBuildICmp(LLVMBuilderRef,int,V,V,const char*),LLVMBuildStore(LLVMBuilderRef,V,V),LLVMBuildZExt(LLVMBuilderRef,V,LLVMTypeRef,const char*),LLVMBuildTrunc(LLVMBuilderRef,V,LLVMTypeRef,const char*),LLVMBuildLoad2(LLVMBuilderRef,LLVMTypeRef,V,const char*),LLVMBuildInBoundsGEP2(LLVMBuilderRef,LLVMTypeRef,V,V*,unsigned,const char*),LLVMConstNull(LLVMTypeRef),LLVMTypeOf(V);
 extern unsigned LLVMGetIntTypeWidth(LLVMTypeRef);
 extern LLVMContextRef LLVMContextCreate(void);

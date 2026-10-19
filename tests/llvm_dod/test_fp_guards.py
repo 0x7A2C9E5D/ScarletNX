@@ -23,7 +23,8 @@ code=r'''
 #include <string.h>
 typedef void *V,*LLVMValueRef,*LLVMContextRef,*LLVMModuleRef,*LLVMBuilderRef,*LLVMTypeRef,*LLVMBasicBlockRef,*LLVMExecutionEngineRef;
 typedef struct {LLVMBasicBlockRef block;V nearest,ixc;} SnxIrFpGuards;
-typedef struct {LLVMContextRef ctx;LLVMModuleRef mod;LLVMBuilderRef b;V c;LLVMTypeRef t_i32,t_i64,t_i8;SnxIrFpGuards fp_guards;} SnxIr;
+typedef struct {SnxIrFpGuards fp_guards;} SnxIrBlockState;
+typedef struct {LLVMContextRef ctx;LLVMModuleRef mod;LLVMBuilderRef b;V c;LLVMTypeRef t_i32,t_i64,t_i8;SnxIrBlockState state;} SnxIr;
 typedef struct {uint32_t fpcr,fpsr;} CpuFp;
 enum {LLVMIntEQ=32,LLVMIntNE=33,LLVMReturnStatusAction=2};
 extern LLVMContextRef LLVMContextCreate(void);

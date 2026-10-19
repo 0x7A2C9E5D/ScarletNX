@@ -74,7 +74,7 @@ typedef enum {
     SNX_A64_BL,
     SNX_A64_SVC,
     SNX_A64_BRK,
-    SNX_A64_MSR_IMM,
+    SNX_A64_MSR_IMM
 } SnxA64Kind;
 
 typedef struct {

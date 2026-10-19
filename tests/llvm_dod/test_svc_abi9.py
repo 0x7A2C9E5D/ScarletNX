@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the production ABI 9 table-call emitter using the real CPU/RtAPI layouts."""
+"""Exercise the production indexed SVC table-call emitter (SNX_ABI 9, 10 as released) using the real CPU/RtAPI layouts."""
 from pathlib import Path
 import re
 import sys
@@ -19,7 +19,7 @@ def extract(src, prefix):
         end += 1
     return src[i:end]
 
-assert '#define SNX_ABI 9' in (root / 'src/common/cpu/aarch64/cpu.h').read_text()
+assert '#define SNX_ABI 10' in (root / 'src/common/cpu/aarch64/cpu.h').read_text()
 assert 'size_t ir_rt_svcs(void)' in header
 assert 'LLVMValueRef ir_rt_table_call(' in header
 svc = extract(gen, 'static void svc(SnxIr* ir,')
@@ -99,14 +99,14 @@ post = r'''
 static int calls;
 static void on_svc(CPU* cpu, uint32_t imm) { ++calls; cpu->x[0] += imm; }
 int main(void) {
-    assert(SNX_ABI == 9 && offsetof(RtAPI,svcs) == 9 * sizeof(void*));
+    assert(SNX_ABI == 10 && offsetof(RtAPI,svcs) == 9 * sizeof(void*));
     LLVMLinkInMCJIT();
     #if defined(__x86_64__)
     LLVMInitializeX86TargetInfo();LLVMInitializeX86Target();LLVMInitializeX86TargetMC();LLVMInitializeX86AsmPrinter();
 #else
     LLVMInitializeAArch64TargetInfo();LLVMInitializeAArch64Target();LLVMInitializeAArch64TargetMC();LLVMInitializeAArch64AsmPrinter();
 #endif
-    P ctx=LLVMContextCreate(),mod=LLVMModuleCreateWithNameInContext("svc_abi9",ctx);
+    P ctx=LLVMContextCreate(),mod=LLVMModuleCreateWithNameInContext("svc_table",ctx);
     P b=LLVMCreateBuilderInContext(ctx);
     SnxIr ir={0};ir.b=b;ir.t_ptr=LLVMPointerTypeInContext(ctx,0);
     ir.t_i8=LLVMInt8TypeInContext(ctx);ir.t_i32=LLVMInt32TypeInContext(ctx);
@@ -138,7 +138,7 @@ int main(void) {
     CPU cpu={0};cpu.rt=&api;cpu.x[0]=3;
     entry(&cpu);
     assert(calls==1 && cpu.x[0]==20);
-    printf("PASS ABI 9 SVC table call: actual emitted LLVM IR verified and executed; register cache invalidated\n");
+    printf("PASS SNX_ABI 10 SVC table call: actual emitted LLVM IR verified and executed; register cache invalidated\n");
     LLVMDisposeExecutionEngine(ee);LLVMContextDispose(ctx);
     return 0;
 }
