@@ -3089,18 +3089,39 @@ static char* dump_out(const App* app, const char* file, const char* kind) {
     free(dir);
     return out;
 }
-/* room on the disks for file's run (gui_room), not extracted yet; else room_line says what it takes. The free space is
-   room_free in tests */
+/* Extract to tmpfs: a game of games/ made from file already, which its folder's link to the dump names (the driver's
+   <name>.source), and whose extraction is in tmpfs or its folder */
+static bool made_from(const App* app, const char* file) {
+    char** names = NULL;
+    size_t count = 0, i;
+    bool found = false;
+    if (snx_list_dir(app->games_dir, &names, &count)) return false;
+    for (i = 0; i < count && !found; ++i) {
+        char* link = snx_format("%s/%s/%s.source", app->games_dir, names[i], names[i]);
+        found = snx_same_file(link, file);
+        free(link);
+    }
+    snx_free_strings(names, count);
+    return found;
+}
+/* room on the disks for file's run (gui_room), not extracted yet; else room_line says what it takes. With Extract to
+   tmpfs the extraction goes to the temporary folder, and the game's folder gets no copy of its RomFS. The free space
+   is room_free in tests */
 static bool room_fits(App* app, const char* file) {
-    bool copy = app->menu.selected == GUI_SWITCH, fits = true;
-    char *out, need_text[32], left_text[32];
+    bool copy = app->menu.selected == GUI_SWITCH, fits = true, tmpfs = copy && gui_settings_tmpfs(settings_of(app));
+    char *out, *temp = tmpfs ? snx_temp_root() : NULL, need_text[32], left_text[32];
+    const char* work = temp ? temp : app->work_dir;
     uint64_t need = 0, left = 0;
-    if (copy && nro_file(file)) return true; /* no extraction */
+    if (copy && nro_file(file)) { /* no extraction */
+        free(temp);
+        return true;
+    }
     out = dump_out(app, file, copy ? NULL : "3ds");
-    if (!snx_is_dir(out)) /* else extracted already, and its game made with it */
-        fits = gui_room(snx_file_size(file), copy, app->room_free ? app->room_free : free_space(app->work_dir),
+    if (tmpfs ? !made_from(app, file) : !snx_is_dir(out)) /* else extracted already, and its game made with it */
+        fits = gui_room(snx_file_size(file), copy && !tmpfs, app->room_free ? app->room_free : free_space(work),
                         app->room_free ? app->room_free : free_space(app->games_dir),
-                        snx_same_disk(app->work_dir, app->games_dir), &need, &left);
+                        snx_same_disk(work, app->games_dir), &need, &left);
+    free(temp);
     if (!fits) {
         gui_size_text(need_text, sizeof need_text, need);
         gui_size_text(left_text, sizeof left_text, left);
@@ -4780,10 +4801,9 @@ static void launch(App* app, char* absolute, bool prepared) {
     /* Switch options only, never guest argv for the CPU-only Linux driver or the 3DS one; R's recompile takes the
        backend picked alone, no option of a run. The drivers work in the menu's data folder, so they list the same
        games */
-    if (app->recompile && gui_settings_backend(s))
-        argv[n++] = gui_settings_backend(s);
-    else if (app->menu.selected == GUI_SWITCH && !app->recompile)
-        n += gui_settings_options(s, 1, native, argv + n);
+    if (app->recompile && gui_settings_backend(s)) argv[n++] = gui_settings_backend(s);
+    if (app->recompile && app->menu.selected == GUI_SWITCH && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
+    if (app->menu.selected == GUI_SWITCH && !app->recompile) n += gui_settings_options(s, 1, native, argv + n);
     if (folders || (native && !direct)) {
         argv[n++] = "--repo";
         argv[n++] = app->data_dir;
@@ -4792,7 +4812,9 @@ static void launch(App* app, char* absolute, bool prepared) {
         argv[n++] = "--outdir";
         argv[n++] = app->games_dir;
     }
-    if (folders && app->place[GUI_PLACE_WORK] && (app->menu.selected == GUI_3DS || !nro_file(absolute))) {
+    /* the picked extractions folder, which Extract to tmpfs leaves for the temporary one */
+    if (folders && app->place[GUI_PLACE_WORK] &&
+        (app->menu.selected == GUI_3DS || (!nro_file(absolute) && !gui_settings_tmpfs(s)))) {
         out = dump_out(app, absolute, app->menu.selected == GUI_3DS ? "3ds" : NULL); /* an NRO has no extraction */
         argv[n++] = app->menu.selected == GUI_3DS ? "--output" : "--out";
         argv[n++] = out;

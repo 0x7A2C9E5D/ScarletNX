@@ -1450,6 +1450,18 @@ msgid "Enables gdbstub on port 1234"
 msgstr ""
 
 #: src/gui/settings.c
+msgid "Extract to tmpfs"
+msgstr ""
+
+#: src/gui/settings.c
+msgid "Extract to the temporary folder (TEMP\\scarletnx\\work\\<title ID>), which the game reads its RomFS from"
+msgstr ""
+
+#: src/gui/settings.c
+msgid "Extract to tmpfs, in memory (/tmp/scarletnx/work/<title ID>), which the game reads its RomFS from"
+msgstr ""
+
+#: src/gui/settings.c
 msgid "Its own page, as in the game's menu"
 msgstr ""
 

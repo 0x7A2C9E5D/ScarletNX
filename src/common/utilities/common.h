@@ -40,6 +40,9 @@ int snx_copy_tree(const char* src, const char* dst);
 /* dst a second name of the file src, on the same disk: nonzero when dst is there already, or the disk or system takes
    none (another volume, FAT), for the caller to copy instead */
 int snx_link_file(const char* src, const char* dst);
+/* link a symbolic link to target, which it names as given: nonzero when it cannot be made (on Windows, without the
+   right to make one: developer mode or an administrator) */
+int snx_symlink(const char* target, const char* link);
 int snx_path_within(const char* path, const char* parent);
 int snx_replace(const char* src, const char* dst);
 int snx_list_dir(const char* path, char*** names, size_t* count);
@@ -48,6 +51,11 @@ unsigned char* snx_read_file(const char* path, size_t* size);
 int snx_write_file(const char* path, const void* data, size_t size);
 int snx_write_changed(const char* path, const void* data, size_t size);
 char* snx_temp_dir(const char* parent);
+/* the system's folder for temporary files: TMPDIR, else /tmp; on Windows GetTempPath's */
+char* snx_temp_root(void);
+/* Extract to tmpfs: where a game's extraction goes, <temp root>/scarletnx/work/<title ID as snx_title_text writes it>,
+   and its RomFS is read from when the game's data folder has none. NULL for a title ID that is no game's own */
+char* snx_tmpfs_work(SnxU64 title);
 char* snx_user_data_dir(void);
 /* Systems that follow the XDG Base Directory spec, where settings, state and caches have folders of their own */
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(__ANDROID__)
@@ -125,6 +133,8 @@ SnxU64 snx_free_space(const char* path);
 /* 1 when a and b are on one disk (one file system), each a folder or one still to be made under the nearest folder
    there: what goes into one takes the other's free space */
 int snx_same_disk(const char* a, const char* b);
+/* a and b name the same file, through links: 1, else 0 (one of them missing too) */
+int snx_same_file(const char* a, const char* b);
 SnxU64 snx_file_size(const char* path);
 int snx_make_executable(const char* path);
 unsigned snx_cpu_count(void);

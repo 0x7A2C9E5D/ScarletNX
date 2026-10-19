@@ -79,7 +79,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   did, *Installed* or *Not installed* and why, and goes back to the menu by itself after 3 seconds
   (10 after a failure, while another file can still be picked); ESC cancels without changing them.
 - **Settings** opens on its groups, Enter opening one and ESC coming back: **App**, then
-  **Launch** (the launcher's two), then a group per section of the game's `.ini` (Display,
+  **Launch** (the launcher's three), then a group per section of the game's `.ini` (Display,
   Graphics, Performance, On-screen controls, Controllers, Network, Debug), as `scarletnx --settings`
   prints them from the runtime's own tables. The game's menu's settings have its names and words
   (*Scale* 100%, *Touch screen* Fingers), and its **Buttons** page, whose **All** steps every row;
@@ -135,8 +135,14 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and `fullscreen` puts the launcher itself on the whole screen too).
   **libgccjit** passes `--backend=gcc` when preparing a dump (it stays off in a build without
   libgccjit; a game of `games/` another build made is recompiled with LLVM), **gdbstub** passes `-S` and `-s`, the
-  runtime's stub on port 1234 waiting for the debugger at startup (UNIX only). None of them
-  reaches the Linux or the 3DS driver.
+  runtime's stub on port 1234 waiting for the debugger at startup (UNIX only), and **Extract to tmpfs**
+  passes `--tmpfs`: a dump's extraction goes to `/tmp/scarletnx/work/<title ID>` (`$TMPDIR` when set, the
+  temporary folder on Windows) instead of the extractions folder, and the game reads its RomFS from there, its saves
+  staying in its folder. Off, the default, it is extracted to disk. The room a run asks about is then the temporary
+  folder's, without the second copy. Either way the game's folder gets `<name>.source`, a link to the dump, which
+  the RomFS is extracted again from when tmpfs was emptied (a reboot), or moved by when the setting changes. A game
+  without one, made before, says *Can't be extracted to tmpfs due to missing symlink* and runs from what it has.
+  None of them reaches the Linux or the 3DS driver.
 - The Status box, after the RAM and the CPU, says what ScarletNX's folders take (games/,
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
   the menu's own) and what is left on that disk, counted as the menu opens and after each run.

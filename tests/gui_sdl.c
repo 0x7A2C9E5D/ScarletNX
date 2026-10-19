@@ -1282,7 +1282,7 @@ int main(int argc, char** argv) {
     /* Settings: the launcher's own, then each setting the runtime lists, a row each with its help above; what the
        menu's items used to set is in them */
     key(&app, SDLK_SPACE);
-    assert(app.editing && app.editor.object && app.editor.count == GUI_SETTINGS_OWN + 4); /* User the last */
+    assert(app.editing && app.editor.object && app.editor.count == 6); /* User the last */
     /* and the disk: what ScarletNX's folders take, counted on a thread, and what is left */
     {
         char line[256], used[32], left[32];
@@ -1347,7 +1347,8 @@ int main(int argc, char** argv) {
     render(&app);
     shows(&app, "Launch", normal);
     shows(&app, SNX_GUI_HAS_GCCJIT ? "libgccjit will be" : "Program was not", normal); /* in the tips */
-    shows(&app, "- libgccjit off", yellow);
+    shows(&app, "- libgccjit ", yellow); /* its value in the column after the longest name, Extract to tmpfs's */
+    shows(&app, "- Extract to tmpfs off", normal);
     key(&app, SDLK_RIGHT);
     assert(setting_is(&app, "libgccjit", SNX_GUI_HAS_GCCJIT ? "on" : NULL));
     key(&app, SDLK_LEFT);

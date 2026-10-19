@@ -32,6 +32,13 @@ digits, UTF-8, spaces, hyphens and underscores.
 `--repo DIR` and `--build-dir DIR` may precede the dump. Keys use the usual discovery paths below.
 `--outdir DIR` puts the game's folder in DIR and `--out DIR` the dump's extraction at DIR, as `-r` and `-x` take
 them, in place of the data folder's `games/` and `work/<dump stem>`; an NRO has no extraction to name.
+`--tmpfs` extracts to tmpfs instead: `<temp>/scarletnx/work/<title ID>` (`$TMPDIR`, else `/tmp`; the temporary
+folder on Windows), where the game reads its RomFS from while its saves stay in `games/<id>/<id>_data/`. The game's
+folder gets `<id>.source`, a link to the dump, in either mode, and `<id>.tmpfs` while its RomFS is in tmpfs. A run
+extracts the RomFS again from the link when the system emptied tmpfs, and moves it between tmpfs and the game's
+folder when `--tmpfs` is given or left out. Without the link (a game made before, or Windows without the right to
+make one) it says *Can't be extracted to tmpfs due to missing symlink*. A dump played again with `--tmpfs` is found
+by its link, not extracted again. `-r --tmpfs` on an extraction leaves its RomFS where it is.
 `-H` (`--headless`) can precede or follow the dump and is passed to the game only.
 Omitting it starts the game with a window.
 `-x` means `--extract`, and `-r` means `--recomp` (the old `--recompile` spelling was removed).

@@ -15,6 +15,7 @@
 #include "nx/runtime/platform/backend.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
+#include "common/utilities/common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,6 +85,33 @@ static u32 tree_result(FsTreeResult r) {
     }
 }
 
+/* Extract to tmpfs (the launcher's setting): a data folder without a RomFS of its own reads the one its extraction
+   keeps in snx_tmpfs_work, by the title ID of its main.npdm. The driver extracts it there again, from the dump the
+   game's folder links to, when the system has emptied it. Under tree.lock, at startup */
+static void romfs_from_tmpfs(void) {
+    FsNode* node;
+    char path[sizeof g_datadir + 16], *work, *romfs;
+    unsigned char* npdm;
+    size_t size;
+    if (!fs_tree_lookup(&fsp.tree, NULL, "romfs", &node) || !fs_tree_lookup(&fsp.tree, NULL, "romfs.bin", &node))
+        return;
+    snprintf(path, sizeof path, "%sexefs/main.npdm", g_datadir);
+    npdm = snx_read_file(path, &size);
+    work = npdm ? snx_tmpfs_work(snx_npdm_title(npdm, size)) : NULL;
+    free(npdm);
+    if (!work) return;
+    romfs = snx_path_join(work, "romfs");
+    if (snx_is_dir(romfs)) {
+        FsTreeResult r = fs_tree_graft(&fsp.tree, "romfs", romfs);
+        if (r == FS_TREE_OK)
+            LOG("fs: RomFS from %s\n", romfs);
+        else
+            WARN("fs: could not index the RomFS in %s (error %d)\n", romfs, r);
+    }
+    free(romfs);
+    free(work);
+}
+
 void fs_init(void) {
     FsTreeResult r = fs_tree_init(&fsp.tree, g_datadir);
     if (r != FS_TREE_OK) fatal("Could not index game filesystem %s (error %d)", g_datadir, r);
@@ -101,6 +129,7 @@ void fs_init(void) {
        empty at first use */
     r = fs_tree_remove(&fsp.tree, NULL, "save/temp", 1, 1, 0);
     if (r != FS_TREE_OK && r != FS_TREE_NOTFOUND) WARN("fs: could not empty save/temp (error %d)\n", r);
+    romfs_from_tmpfs();
     for (size_t i = 0; i < sizeof shared_paths / sizeof shared_paths[0]; i++) {
         FsNode* node;
         if (fs_tree_lookup(&fsp.tree, NULL, shared_paths[i], &node)) continue;

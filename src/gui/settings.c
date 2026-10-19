@@ -79,6 +79,15 @@ int gui_settings_read(GuiSettings* s, const char* list) {
                            : SNX_TR_NOOP("Program was not compiled with libgccjit"),
         SNX_GUI_HAS_GCCJIT ? off_on : off, GUI_KEY_WORD);
     row(s, "Launch", "gdbstub", NULL, SNX_TR_NOOP("Enables gdbstub on port 1234"), off_on, GUI_KEY_WORD);
+#ifdef _WIN32
+    row(s, "Launch", "tmpfs", SNX_TR_NOOP("Extract to tmpfs"),
+        SNX_TR_NOOP("Extract to the temporary folder (TEMP\\scarletnx\\work\\<title ID>), which the game reads its RomFS from"),
+        off_on, GUI_KEY_WORD);
+#else
+    row(s, "Launch", "tmpfs", SNX_TR_NOOP("Extract to tmpfs"),
+        SNX_TR_NOOP("Extract to tmpfs, in memory (/tmp/scarletnx/work/<title ID>), which the game reads its RomFS from"),
+        off_on, GUI_KEY_WORD);
+#endif
     for (line = text; *line; line = next) {
         char* field[9];
         const char **words = NULL, **values = NULL;
@@ -290,6 +299,9 @@ const char* gui_settings_value(const GuiSettings* s, const char* key) {
 const char* gui_settings_backend(const GuiSettings* s) {
     return s->count >= GUI_SETTINGS_OWN && s->values[0].word ? "--backend=gcc" : NULL;
 }
+const char* gui_settings_tmpfs(const GuiSettings* s) {
+    return s->count >= GUI_SETTINGS_OWN && s->values[2].word ? "--tmpfs" : NULL;
+}
 size_t gui_settings_options(GuiSettings* s, int launch, int prepared, const char** argv) {
     size_t n = 0;
     int i;
@@ -300,6 +312,7 @@ size_t gui_settings_options(GuiSettings* s, int launch, int prepared, const char
         argv[n++] = s->values[i].option;
     }
     if (launch && !prepared && gui_settings_backend(s)) argv[n++] = gui_settings_backend(s);
+    if (launch && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
     if (launch && s->count >= GUI_SETTINGS_OWN && s->values[1].word) {
         argv[n++] = "-S";
         argv[n++] = "-s";
