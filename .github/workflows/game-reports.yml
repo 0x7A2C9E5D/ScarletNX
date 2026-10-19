@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 the ScarletNX contributors
+name: Game reports
+
+# An issue with a ScarletNX log attached or pasted gets a summary of it (scripts/game-reports.py, with
+# scripts/logscan.py): how the run ended, where, the service commands the runtime doesn't implement, and the other
+# game reports that failed the same way. One comment, edited as logs are added, and the labels `game report` and
+# `log: <how it ended>`. Nothing of the issue reaches the shell: the script reads the event's file. The checkout is
+# main's, so an issue never runs code of a pull request.
+on:
+  issues:
+    types: [opened, edited, reopened]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  issues: write
+
+# one at a time per issue: of a burst of comments the newest waits and those before it are dropped, and the one that
+# runs reads every log of the issue anyway
+concurrency:
+  group: game-reports-${{ github.event.issue.number }}
+
+jobs:
+  triage:
+    name: Summarize the logs
+    # the bot's own comment, edited, starts no run (GITHUB_TOKEN's events don't), and a pull request's comments aren't
+    # reports
+    if: ${{ !github.event.issue.pull_request && github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: |
+            scripts/game-reports.py
+            scripts/logscan.py
+          sparse-checkout-cone-mode: false
+      - name: Summarize
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/game-reports.py triage --event "$GITHUB_EVENT_PATH" --repo "$GITHUB_REPOSITORY"

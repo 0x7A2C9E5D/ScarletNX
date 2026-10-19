@@ -58,7 +58,13 @@ python3 scripts/logscan.py "$games/<id>/<id>.log" [--format markdown]
   GPU from the log's header, how the run ended, the game function it is pinned on (for `svcBreak`, the first frame
   past the SDK's abort), the service commands the runtime doesn't implement, warnings, and a signature that is the
   same for every log failing the same way. JSON (a line a log, versioned by `schema`) or a markdown summary for an
-  issue. Paths are shortened to `~`, and the crash report's code and memory dumps are left out.
+  issue. Paths are shortened to `~`, and the crash report's code and memory dumps are left out. It also reads the
+  launcher's Share log file (the game log in it).
+- Game reports: `.github/workflows/game-reports.yml` runs `scripts/game-reports.py triage` on each issue and comment.
+  An issue with a log attached (`.log`, `.txt`, `.gz`, `.zip`) or pasted in a fenced block gets one comment with
+  logscan's summary of each, edited as logs are added, the labels `game report` and `log: <how it ended>`, and the
+  other reports with the same signature named. `triage --issue N --dry-run` shows what it would post.
+  `scripts/game-reports.py index [--title-id ID] [--signature TEXT]` lists the reports and their logs as JSON lines.
 
 - Runtime: `--seconds=N` / `--frames=N`; `--shot=out` → CWD `out.ppm`; `--shot_every=N` → every N frames.
   `--script=ms:hexbuttons,...` (or `Nf:hexbuttons` to press at present N), `--press_len=ms` (default 300).

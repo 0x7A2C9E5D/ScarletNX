@@ -29,6 +29,10 @@ SCHEMA = 1
 
 STAMP = re.compile(r'^\[\s*\d+\.\d+\] ?')
 TIME = re.compile(r'^\[\s*(\d+\.\d+)\]')
+# the launcher's Share log file: snx_build_info's line first, then its sections
+LAUNCHER_BUILD = re.compile(r'^ScarletNX (\S+) (\S+) \((.*)\)$')
+SECTION = re.compile(r'^== (.*) ==$')
+LINE = 300
 HEADER = re.compile(r'^ScarletNX - (.*?)(?: \((?:/|~|[A-Za-z]:[\\/]).*\))?$')
 BUILD = re.compile(r'^build: ScarletNX (\S+) (\S+) \((.*)\)$')
 GAME = re.compile(r'^game: ([0-9a-f]{16}), version (.*)$')
@@ -105,9 +109,32 @@ HOME = [
 
 
 def redact(text):
+    """Paths shortened to ~, and a line cut at LINE characters: a summary goes into an issue comment"""
     for home in HOME:
         text = home.sub('~', text)
-    return text
+    return text if len(text) <= LINE else text[:LINE] + '...'
+
+
+def split_launcher(text):
+    """The launcher's Share log file (src/gui/main.c's share_log): its build line, the message on its screen, the
+    last run's output, then the newest game log under "== <its path> ==". The game log, else the run's output when
+    there was none, and the launcher's own fields; a plain game log is returned as it is"""
+    lines = text.splitlines()
+    if not lines or not LAUNCHER_BUILD.match(lines[0]):
+        return text, None
+    launcher = {'build': lines[0], 'message': None}
+    if len(lines) > 1 and lines[1].startswith('Message: '):
+        launcher['message'] = redact(lines[1][len('Message: ') :])
+    run = game = None
+    for i, line in enumerate(lines):
+        m = SECTION.match(line)
+        if m and m.group(1).startswith('the last run:'):
+            run = i
+        elif m and run is not None and i > run:
+            game = i
+    if game is not None and lines[game] != '== no game log ==':
+        return '\n'.join(lines[game + 1 :]), launcher
+    return '\n'.join(lines[run + 1 : game] if run is not None else lines[1:]), launcher
 
 
 def read_log(path):
@@ -177,6 +204,7 @@ def normalize(message):
 
 
 def scan(text):
+    text, launcher = split_launcher(text)
     lines = [STAMP.sub('', raw) for raw in text.splitlines()]
     out = {
         'schema': SCHEMA,
@@ -197,6 +225,7 @@ def scan(text):
         'warnings': [],
         'game_output': [],
         'tail': [],
+        'launcher': launcher,
     }
     for raw in reversed(text.splitlines()):
         m = TIME.match(raw)
@@ -255,6 +284,10 @@ def scan(text):
     out['warnings'] = [{'message': w, 'count': n} for w, n in list(warnings.items())[:30]]
     out['game_output'] = game_output[-10:]
     out['tail'] = [redact(line) for line in lines if line.strip() and not DUMP.match(line)][-15:]
+    if launcher and out['build'] is None:
+        m = LAUNCHER_BUILD.match(launcher['build'])
+        out['build'] = launcher['build']
+        out['branch'], out['commit'] = m.group(1), m.group(2)
     if failure:
         add_failure(out, lines, failure)
     return out
@@ -350,50 +383,67 @@ def show(sym):
     return f'{name}+{sym["offset"]}' if sym['offset'] else name
 
 
-def markdown(path, r):
+# Markdown of what a log says, which anyone can write: a summary posted by a bot must not ping people, link, embed
+# or close its own code blocks, so every value is escaped as text, a code span or a line of a fenced block
+MARKDOWN_SPECIAL = re.compile(r'([\\`*_\[\]#|~!])')
+
+
+def text(value):
+    value = str(value).replace('&', '&amp;').replace('<', '&lt;').replace('\n', ' ')
+    return MARKDOWN_SPECIAL.sub(r'\\\1', value).replace('@', '@\u200b').replace('://', ':/\u200b/')
+
+
+def code(value):
+    value = str(value).replace('`', "'").replace('\n', ' ')
+    return f'`{value}`'
+
+
+def block(lines):
+    return ['```', *(re.sub('`{3,}', "'", line) for line in lines), '```']
+
+
+def folded(summary, lines):
+    return ['', f'<details><summary>{summary}</summary>', '', *block(lines), '</details>']
+
+
+def markdown(path, r, heading='###'):
     out = []
-    title = r['title'] or path
-    out.append(f'### {title}' + (f' ({r["title_id"]}, version {r["game_version"]})' if r['title_id'] else ''))
-    out.append('')
-    out.append(f'- **Build:** {r["build"] or "not in the log (a build older than its build: line)"}')
+    title = text(r['title'] or path)
+    version = f' ({code(r["title_id"])}, version {text(r["game_version"])})' if r['title_id'] else ''
+    out += [f'{heading} {title}{version}', '']
+    build = text(r['build']) if r['build'] else 'not in the log'
+    out.append(f'- **Build:** {build}')
     if r['gpu']:
-        out.append(f'- **GPU:** {r["gpu"]}, Vulkan {r["vulkan"]}, driver {r["driver"]}')
+        out.append(f'- **GPU:** {text(r["gpu"])}, Vulkan {text(r["vulkan"])}, driver {text(r["driver"])}')
+    if r['launcher'] and r['launcher']['message']:
+        out.append(f'- **The launcher said:** {text(r["launcher"]["message"])}')
     out.append(f'- **Ended:** {r["outcome"]}' + (f' after {r["seconds"]:.1f} s' if r['seconds'] is not None else ''))
     if r['signature']:
-        out.append(f'- **Signature:** `{r["signature"]}`')
+        out.append(f'- **Signature:** {code(r["signature"])}')
     f = r['failure']
     if f:
         if f['function']:
-            out.append(f'- **In:** `{show(f["function"])}`')
+            out.append(f'- **In:** {code(show(f["function"]))}')
         if f['fatal'] and f['kind'] != 'fatal':
-            out.append(f'- **Message:** {f["fatal"]}')
+            out.append(f'- **Message:** {text(f["fatal"])}')
         if f['details']:
-            out += ['', '```', *f['details'], '```']
+            out += ['', *block(f['details'])]
         if f['frames']:
-            out += ['', '<details><summary>Backtrace</summary>', '', '```']
-            out += [
+            frames = [
                 f'#{i} {fr["address"]} {show(fr["symbol"]) if fr["symbol"] else ""}'.rstrip()
                 for i, fr in enumerate(f['frames'])
             ]
-            out += ['```', '</details>']
+            out += folded('Backtrace', frames)
     if r['ipc']:
         out += ['', '**Service commands the runtime does not implement:**', '']
-        out += [f'- `{c["interface"]}` cmd {c["command"]} ({c["kind"]}, {c["count"]}x)' for c in r['ipc']]
+        out += [f'- {code(c["interface"])} cmd {c["command"]} ({c["kind"]}, {c["count"]}x)' for c in r['ipc']]
     if r['warnings']:
-        out += ['', '<details><summary>Warnings</summary>', '', '```']
-        out += [w['message'] + (f' ({w["count"]}x)' if w['count'] > 1 else '') for w in r['warnings']]
-        out += ['```', '</details>']
+        out += folded(
+            'Warnings', [w['message'] + (f' ({w["count"]}x)' if w['count'] > 1 else '') for w in r['warnings']]
+        )
     if r['game_output']:
-        out += [
-            '',
-            "<details><summary>The game's last output</summary>",
-            '',
-            '```',
-            *r['game_output'],
-            '```',
-            '</details>',
-        ]
-    out += ['', "<details><summary>The log's last lines</summary>", '', '```', *r['tail'], '```', '</details>']
+        out += folded("The game's last output", r['game_output'])
+    out += folded("The log's last lines", r['tail'])
     return '\n'.join(out) + '\n'
 
 

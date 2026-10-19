@@ -116,6 +116,17 @@ UNDEFINED = (
 """
 )
 
+# the launcher's Share log file: its build, its message, the run's output (the game's warnings again, on stderr), then
+# the newest game log, one without a build: line
+LAUNCHER = (
+    'ScarletNX main 9999fff (clang 23.1.3, Windows x86_64)\n'
+    'Message: The game stopped (svcBreak). See C:\\Users\\someone\\AppData\\x.log\n'
+    '\n== the last run: C:\\Users\\someone\\run.log ==\n'
+    '  [undeclared] nn::audio::detail::IAudioDevice cmd 7 -> ok\n'
+    '*** Crash (signal 11) at host pc=0x1 ***\n'
+    '\n== C:\\Users\\someone\\state\\Some Game.log ==\n' + OLD_SVC_BREAK
+)
+
 FATAL_ONLY = (
     HEADER
     + """[   0.50] FATAL: Could not load the game executables. See the .log for details.
@@ -189,8 +200,23 @@ def main():
         f'fatal: {f["signature"]}',
     )
 
+    la = logscan.scan(LAUNCHER)
+    check(
+        la['build'] == 'ScarletNX main 9999fff (clang 23.1.3, Windows x86_64)' and la['commit'] == '9999fff',
+        f"the launcher's build: {la['build']}",
+    )
+    check(la['signature'] == r['signature'] and la['ipc'] == [], "only the game log's section is scanned")
+    check(
+        la['launcher']['message'] == 'The game stopped (svcBreak). See ~\\AppData\\x.log',
+        f"the launcher's message, shortened: {la['launcher']['message']}",
+    )
+    check(
+        all(len(t) <= logscan.LINE + 3 for t in logscan.scan(HEADER + '[game] ' + 'x' * 5000)['game_output']),
+        'long lines are cut',
+    )
+
     # nothing of the player's folders, the game's code or its memory in what is written
-    for text in (SVC_BREAK, OLD_SVC_BREAK, CRASH_IN_GAME):
+    for text in (SVC_BREAK, OLD_SVC_BREAK, CRASH_IN_GAME, LAUNCHER):
         out = json.dumps(logscan.scan(text))
         for leak in ('someone', 'f90007ff', '58cca', '00000000ca8c0500', 'ca8c0500'):
             check(leak not in out, f'{leak} copied into the summary')
