@@ -6,6 +6,7 @@
    SPDX-FileCopyrightText: Copyright 2018, 2021 yuzu Emulator Project (GPL-2.0-or-later) */
 /* set and set:sys: the system's language, region, keyboard, nickname and firmware version */
 #include "nx/hle/services/services_int.h"
+#include "nx/hle/hle.h"
 
 #include "hle/services/set.swipc.inc"
 #include "nx/hle/services/key_code_map.inc"
@@ -43,14 +44,7 @@ static const struct {
    Portuguese, 11 Russian, 12 Korean, 13 ChineseSimplified, 14 ChineseTraditional */
 static const u8 set_layouts[SET_LANGUAGES] = {0, 1, 4, 8, 9, 6, 13, 12, 2, 10, 11, 14, 3, 5, 7, 13, 14, 10};
 
-/* the system settings set:sys keeps for the run, each at first as on a console fresh from the factory (Eden's
-   DefaultSystemSettings), the keyboard layout the language's */
-static struct {
-    i32 color_set; /* nn::settings::system::ColorSet: 0 BasicWhite, 1 BasicBlack */
-    float vibration;
-    u32 keyboard_layout;
-    u8 lock_screen, quest, battery_percentage, speaker_auto_mute, layout_set;
-} set_sys = {0, 1.0f, 0, 0, 0, 1, 0, 0};
+/* the system settings set:sys keeps for the run: g_hle.set (services_int.h) */
 /* GetAvailableLanguageCodes, from before 4.0.0, lists 15 at most */
 #define SET_LANGUAGES_V1 15
 
@@ -121,7 +115,7 @@ static int nn_settings_ISettingsServer_GetKeyCodeMap2(SvcObj* self, IpcBuf map) 
 /* the kiosk flag, set:sys's */
 static int nn_settings_ISettingsServer_GetQuestFlag(SvcObj* self, u8* quest) {
     (void)self;
-    *quest = set_sys.quest;
+    *quest = g_hle.set.quest;
     R_SUCCEED();
 }
 static int nn_settings_ISettingsServer_GetDeviceNickName(SvcObj* self, IpcBuf name) {
@@ -164,73 +158,73 @@ static int nn_settings_ISystemSettingsServer_GetFirmwareVersion2(SvcObj* self, I
 }
 static int nn_settings_ISystemSettingsServer_GetLockScreenFlag(SvcObj* self, u8* flag) {
     (void)self;
-    *flag = set_sys.lock_screen;
+    *flag = g_hle.set.lock_screen;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_SetLockScreenFlag(SvcObj* self, u8 flag) {
     (void)self;
-    set_sys.lock_screen = flag != 0;
+    g_hle.set.lock_screen = flag != 0;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_GetColorSetId(SvcObj* self, i32* id) {
     (void)self;
-    *id = set_sys.color_set;
+    *id = g_hle.set.color_set;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_SetColorSetId(SvcObj* self, i32 id) {
     (void)self;
-    set_sys.color_set = id;
+    g_hle.set.color_set = id;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_GetVibrationMasterVolume(SvcObj* self, float* volume) {
     (void)self;
-    *volume = set_sys.vibration;
+    *volume = g_hle.set.vibration;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_SetVibrationMasterVolume(SvcObj* self, float volume) {
     (void)self;
-    set_sys.vibration = volume;
+    g_hle.set.vibration = volume;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_GetSpeakerAutoMuteFlag(SvcObj* self, u8* flag) {
     (void)self;
-    *flag = set_sys.speaker_auto_mute;
+    *flag = g_hle.set.speaker_auto_mute;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_SetSpeakerAutoMuteFlag(SvcObj* self, u8 flag) {
     (void)self;
-    set_sys.speaker_auto_mute = flag != 0;
+    g_hle.set.speaker_auto_mute = flag != 0;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_GetQuestFlag(SvcObj* self, u8* flag) {
     (void)self;
-    *flag = set_sys.quest;
+    *flag = g_hle.set.quest;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_SetQuestFlag(SvcObj* self, u8 flag) {
     (void)self;
-    set_sys.quest = flag != 0;
+    g_hle.set.quest = flag != 0;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_GetBatteryPercentageFlag(SvcObj* self, u8* flag) {
     (void)self;
-    *flag = set_sys.battery_percentage;
+    *flag = g_hle.set.battery_percentage;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_SetBatteryPercentageFlag(SvcObj* self, u8 flag) {
     (void)self;
-    set_sys.battery_percentage = flag != 0;
+    g_hle.set.battery_percentage = flag != 0;
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_GetKeyboardLayout(SvcObj* self, u32* layout) {
     (void)self;
-    *layout = set_sys.layout_set ? set_sys.keyboard_layout : set_layouts[set_language(g_opt_lang)];
+    *layout = g_hle.set.layout_set ? g_hle.set.keyboard_layout : set_layouts[set_language(g_opt_lang)];
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_SetKeyboardLayout(SvcObj* self, u32 layout) {
     (void)self;
-    set_sys.keyboard_layout = layout;
-    set_sys.layout_set = 1;
+    g_hle.set.keyboard_layout = layout;
+    g_hle.set.layout_set = 1;
     R_SUCCEED();
 }
 
@@ -249,5 +243,5 @@ static int nn_settings_ISystemSettingsServer_GetSettingsItemValue(SvcObj* self, 
     R_SUCCEED();
 }
 
-SvcObj* new_set(void) { return nn_settings_ISettingsServer_new(0); }
-SvcObj* new_setsys(void) { return nn_settings_ISystemSettingsServer_new(0); }
+SvcObj* new_set(void) { return nn_settings_ISettingsServer_new(); }
+SvcObj* new_setsys(void) { return nn_settings_ISystemSettingsServer_new(); }

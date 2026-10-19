@@ -1060,14 +1060,15 @@ add_test(NAME eac_blocks COMMAND snx-test-eac-blocks)
 
 if(UNIX)
     add_executable(snx-test-memory memory_accounting.c
-        "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c" "${PROJECT_SOURCE_DIR}/src/nx/hle/svc/svc_mem.c")
+        "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c" "${PROJECT_SOURCE_DIR}/src/nx/hle/svc/svc_mem.c"
+        "${PROJECT_SOURCE_DIR}/src/nx/hle/hle.c")
     snx_test_target(snx-test-memory 11)
         add_test(NAME memory_accounting COMMAND snx-test-memory)
     set_tests_properties(memory_accounting PROPERTIES TIMEOUT 60)
     # views through the alias pool, with the real POSIX platform layer (77 where the host has no pool)
     add_executable(snx-test-memory-alias memory_alias.c
         "${PROJECT_SOURCE_DIR}/src/nx/memory/mem.c" "${PROJECT_SOURCE_DIR}/src/nx/hle/svc/svc_mem.c"
-        "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/plat_posix.c"
+        "${PROJECT_SOURCE_DIR}/src/nx/hle/hle.c" "${PROJECT_SOURCE_DIR}/src/nx/runtime/platform/plat_posix.c"
         "${PROJECT_SOURCE_DIR}/src/common/filesystem/host.c")
     snx_test_target(snx-test-memory-alias 11)
     target_link_libraries(snx-test-memory-alias PRIVATE ${CMAKE_DL_LIBS})

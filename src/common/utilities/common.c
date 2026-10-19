@@ -1,9 +1,12 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
+
+#ifdef __linux__
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE   700
 /* MAP_ANONYMOUS (snx_vm_reserve) is POSIX only since 2024: older glibc and musl define it with this */
 #define _DEFAULT_SOURCE
+#endif
 #ifdef __APPLE__
 /* the POSIX names above would hide Darwin's own (the sysctl and dyld types) */
 #define _DARWIN_C_SOURCE

@@ -6,6 +6,7 @@
 #include "nx/runtime/options.h"
 #include "common/utilities/common.h"
 #include "common/utilities/ini_lines.h"
+#include "nx/hle/hle.h"
 #include "nx/hle/kernel/kernel.h"
 #include "nx/hle/services/services.h"
 #include "nx/memory/mem.h"
@@ -143,7 +144,7 @@ static const IniOpt g_performance[] = {
     {"memory_gb", "0",
      "The memory the game sees: below 6 the console's 3.2 GB, 6 = 4.8 GB, 8 = 6.8 GB. A game that runs out on\n"
      "the console's amount needs 6",
-     INI_INT, INI_STARTUP, &g_opt_mem_gb, 0, 8, NULL, "Memory (GB)", NULL, 0, 0},
+     INI_INT, INI_STARTUP, &g_hle.svcmem.opt_mem_gb, 0, 8, NULL, "Memory (GB)", NULL, 0, 0},
     {"heap_max_mb", "0", "The most heap the game can allocate, in MB; 0 = as much as its memory allows", INI_TEXT,
      INI_STARTUP, NULL, 0, 0, heap_max_set, "Heap limit (MB)", NULL, 0, 0},
     {"jit_threads", "0",

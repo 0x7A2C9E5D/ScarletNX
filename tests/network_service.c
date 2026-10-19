@@ -22,6 +22,7 @@ static void test_ipc_in(IpcCtx* c, u32 off, void* dst, u32 n) {
 #define ipc_in test_ipc_in
 #include "nx/hle/services/network/dns.c"
 #include "nx/hle/services/network/nifm.c"
+#include "nx/hle/hle.c"
 #include "fake_room.h"
 #undef ipc_in
 
@@ -47,20 +48,20 @@ void logf_(int level, const char* format, ...) {
     (void)level;
     (void)format;
 }
-SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t size) {
+SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*)) {
     SvcObj* obj = calloc(1, sizeof *obj);
     CHECK(obj != NULL);
     obj->name = name;
     obj->dispatch = dispatch;
     obj->refs = 1;
-    if (size) obj->data = calloc(1, size);
     test_objects++;
     return obj;
 }
+#include "svcobj_data.h"
 void svcobj_unref(SvcObj* obj) {
     if (!obj || --obj->refs) return;
     if (obj->destroy) obj->destroy(obj);
-    free(obj->data);
+    test_svcobj_data_free(obj);
     free(obj);
     test_objects--;
 }
@@ -353,7 +354,13 @@ static void test_nifm_room(void) {
     fake_room_stop(room);
 }
 
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
+
 int main(void) {
+    hle_init();
     g_mem = calloc(1, 0x10000);
     CHECK(g_mem != NULL);
     network_init();

@@ -6,6 +6,7 @@
 #define _GNU_SOURCE /* dladdr, before any header */
 #endif
 #include "nx/runtime/main.h"
+#include "nx/hle/hle.h"
 #include "nx/hle/kernel/kernel.h"
 #include "nx/memory/mem.h"
 #include "nx/runtime/arm.h"
@@ -110,7 +111,7 @@ static void report_place(void* host_pc) {
                  (unsigned long long)((const u8*)host_pc - (const u8*)di.dli_fbase), di.dli_sname ? di.dli_sname : "?",
                  kthread_cur() ? "a game thread" : "one of the runtime's threads");
         }
-#if !defined(__ANDROID__) /* Android's libc has dladdr but not backtrace */
+#if !defined(__ANDROID__) && !defined(__FreeBSD__) /* Android's libc has dladdr but not backtrace */
         {
             void* bt[24];
             int n = backtrace(bt, 24);
@@ -153,7 +154,7 @@ void crash_report(void* host_pc, void* fault, int sig) {
     report_place(host_pc);
     /* the low pages are never mapped: a pointer the game failed to get (an allocation it ran out of memory for) plus
        a field's offset lands there */
-    if (fault && in_guest && guest < ((u64)16 << 20) && g_opt_mem_gb < 6)
+    if (fault && in_guest && guest < ((u64)16 << 20) && g_hle.svcmem.opt_mem_gb < 6)
         WARN("  a null pointer plus an offset: a game short of memory does this, memory_gb=6 in its .ini may help\n");
     if (t) {
         WARN("  thread %llu (%s)\n", (unsigned long long)t->id, t->name);

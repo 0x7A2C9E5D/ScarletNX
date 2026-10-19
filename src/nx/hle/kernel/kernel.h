@@ -11,6 +11,8 @@
 /* the one application process's id, which IPC PID descriptors carry too */
 #define K_PROCESS_ID 0x51ull
 #define NCORES       4 /* guest CPU cores */
+#define THREAD_MAX   96 /* the application's ThreadCountMax: creating one more answers R_LIMIT */
+#define H_MAX        1024 /* handles: the most the console's handle table holds */
 
 /* what a kernel object is (KObj.type) */
 enum {
@@ -138,10 +140,5 @@ void kernel_dump_regs(CPU* c);
 void kernel_dump_threads(void);
 void mem_report(char* out, int n);
 
-extern PMutex g_klock;
-extern u64 g_title_id;
-extern u64 g_sysres_size;
-extern int g_opt_mem_gb;
-/* the cores and priorities the npdm's kernel capabilities allow (svcGetInfo 0 and 1) */
-extern u64 g_core_mask, g_prio_mask;
+/* g_klock, the kernel lock, is g_hle.kernel.klock (hle.h): every list a waiter or signaller touches is under it */
 #endif

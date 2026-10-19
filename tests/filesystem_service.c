@@ -21,12 +21,13 @@
 
 /* Including the production file exposes its service constructors without test hooks in the runtime. */
 #include "nx/hle/filesystem/fs.c"
+#include "nx/hle/hle.c"
 
 u8* g_mem;
 char g_datadir[1024], g_exename[256], g_exedir[1024];
 int g_verbose;
 int g_opt_user = 1;
-u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull}; /* am.c's: the first user */
+const u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull}; /* am.c's: the first user */
 static jmp_buf* test_fatal_jump;                                   /* a fatal() the test waits for comes back here */
 static char test_fatal_text[1024];
 static unsigned test_checks, test_scans, test_objects;
@@ -181,28 +182,24 @@ void fatal(const char* format, ...) {
 }
 void frontend_frame(void) {}
 
-SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t size) {
+SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*)) {
     SvcObj* obj = calloc(1, sizeof *obj);
     CHECK(obj != NULL);
     obj->name = name;
     obj->dispatch = dispatch;
     obj->refs = 1;
-    if (size) {
-        obj->data = calloc(1, size);
-        CHECK(obj->data != NULL);
-    }
     test_objects++;
     return obj;
 }
+#include "svcobj_data.h"
 void svcobj_unref(SvcObj* obj) {
     if (!obj || --obj->refs) return;
     if (obj->destroy) obj->destroy(obj);
-    free(obj->data);
+    test_svcobj_data_free(obj);
     free(obj);
     test_objects--;
 }
 /* the notifiers' events: counted, so the test sees each one dropped with its notifier */
-u64 g_title_id = 0x0100000000010000ull;
 static int test_events;
 KEvent* owned_event(const char* name) {
     KEvent* event = calloc(1, sizeof *event);
@@ -835,13 +832,13 @@ static void test_extracted_romfs(SvcObj* proxy) {
     svcobj_unref(storage);
     /* RomFS files are mapped from startup and readonly; zulu.bin was refused and is read on demand */
     FsNode *asset, *zulu;
-    pm_lock(&fsp.tree.lock);
-    CHECK(!fs_tree_lookup(&fsp.tree, NULL, "romfs/asset.bin", &asset) && asset->fd >= 0 && asset->readonly);
-    CHECK(!fs_tree_lookup(&fsp.tree, NULL, "romfs/zulu.bin", &zulu) && zulu->fd < 0 && zulu->readonly);
-    CHECK(fs_tree_remove(&fsp.tree, NULL, "romfs/asset.bin", 0, 0, 0) == FS_TREE_READONLY);
-    CHECK(fs_tree_rename(&fsp.tree, NULL, "romfs/asset.bin", "romfs/moved.bin", 0) == FS_TREE_READONLY);
-    CHECK(fs_tree_create(&fsp.tree, NULL, "romfs/new.bin", 0, 0, NULL) == FS_TREE_READONLY);
-    pm_unlock(&fsp.tree.lock);
+    pm_lock(&g_hle.fs.tree.lock);
+    CHECK(!fs_tree_lookup(&g_hle.fs.tree, NULL, "romfs/asset.bin", &asset) && asset->fd >= 0 && asset->readonly);
+    CHECK(!fs_tree_lookup(&g_hle.fs.tree, NULL, "romfs/zulu.bin", &zulu) && zulu->fd < 0 && zulu->readonly);
+    CHECK(fs_tree_remove(&g_hle.fs.tree, NULL, "romfs/asset.bin", 0, 0, 0) == FS_TREE_READONLY);
+    CHECK(fs_tree_rename(&g_hle.fs.tree, NULL, "romfs/asset.bin", "romfs/moved.bin", 0) == FS_TREE_READONLY);
+    CHECK(fs_tree_create(&g_hle.fs.tree, NULL, "romfs/new.bin", 0, 0, NULL) == FS_TREE_READONLY);
+    pm_unlock(&g_hle.fs.tree.lock);
     PFileMap map;
     CHECK(!fs_map_file("romfs/asset.bin", &map) && map.borrowed && map.data == asset->map && map.size == 10);
     plat_file_unmap(&map);
@@ -860,7 +857,7 @@ static void test_raw_romfs(SvcObj* proxy) {
     dispatch(proxy, &r, 0);
     CHECK(r.c.nout_objs == 1);
     SvcObj* storage = r.c.out_objs[0];
-    CHECK(fsp.rimage != NULL && fsp.rraw == NULL); /* the image is mapped, not read through a FILE */
+    CHECK(g_hle.fs.rimage != NULL && g_hle.fs.rraw == NULL); /* the image is mapped, not read through a FILE */
     CHECK(get_size(storage) == sizeof expected);
     test_storage_contracts(storage, sizeof expected);
     request(&r, 0);
@@ -884,12 +881,12 @@ static void test_raw_romfs(SvcObj* proxy) {
     CHECK(r.c.nout_objs == 0);
     /* OpenDataStorageByProgramId (201): this program's id is the RomFS, another program's fails */
     request(&r, 201);
-    argument64(&r, 0, g_title_id);
+    argument64(&r, 0, g_hle.kernel.title_id);
     dispatch(proxy, &r, 0);
     CHECK(r.c.nout_objs == 1 && get_size(r.c.out_objs[0]) == sizeof expected);
     svcobj_unref(r.c.out_objs[0]);
     request(&r, 201);
-    argument64(&r, 0, g_title_id + 1);
+    argument64(&r, 0, g_hle.kernel.title_id + 1);
     dispatch(proxy, &r, RC(2, 1002));
     CHECK(r.c.nout_objs == 0);
     puts("PASS raw RomFS reads, cached image size and the storage by program index and id");
@@ -926,9 +923,9 @@ static SvcObj* open_user_save(SvcObj* proxy, const u64* uid) {
 static const u64 test_other_user[2] = {0x0404040404040404ull, 0x0404040404040404ull};
 static int tree_has(const char* path) {
     FsNode* node;
-    pm_lock(&fsp.tree.lock);
-    int found = !fs_tree_lookup(&fsp.tree, NULL, path, &node);
-    pm_unlock(&fsp.tree.lock);
+    pm_lock(&g_hle.fs.tree.lock);
+    int found = !fs_tree_lookup(&g_hle.fs.tree, NULL, path, &node);
+    pm_unlock(&g_hle.fs.tree.lock);
     return found;
 }
 /* the event notifiers (500, 501, 510) give the same event each time, never signaled, and drop it with themselves;
@@ -957,7 +954,7 @@ static void test_notifiers_and_program_index(SvcObj* proxy) {
         CHECK(test_events == 0);
     }
     request(&r, 83);
-    argument64(&r, 0, g_title_id);
+    argument64(&r, 0, g_hle.kernel.title_id);
     dispatch(proxy, &r, 0);
     CHECK(r.c.nout_objs == 1);
     svcobj_unref(r.c.out_objs[0]);
@@ -996,11 +993,11 @@ static void test_save_data(SvcObj* proxy) {
     fs_command(user, 7, "/other-user.bin", 0, FS_NOTFOUND);
     svcobj_unref(user);
     CHECK(test_left_said == 0);
-    pm_lock(&fsp.tree.lock);
-    CHECK(!fs_tree_remove(&fsp.tree, NULL, FIRST_SAVE, 1, 1, 0));
+    pm_lock(&g_hle.fs.tree.lock);
+    CHECK(!fs_tree_remove(&g_hle.fs.tree, NULL, FIRST_SAVE, 1, 1, 0));
     u32 rc;
     SvcObj* old = hostfs_new("save/user", &rc);
-    pm_unlock(&fsp.tree.lock);
+    pm_unlock(&g_hle.fs.tree.lock);
     CHECK(old && !rc);
     fs_command(old, 0, "/progress.bin", 4, 0);
     svcobj_unref(old);
@@ -1021,27 +1018,27 @@ static void test_save_data(SvcObj* proxy) {
     svcobj_unref(user);
     CHECK(test_left_said == 1);
     /* the player moves it to the first user's folder, which the save is from then */
-    pm_lock(&fsp.tree.lock);
-    CHECK(!fs_tree_rename(&fsp.tree, NULL, "save/user", FIRST_SAVE, 1));
-    pm_unlock(&fsp.tree.lock);
+    pm_lock(&g_hle.fs.tree.lock);
+    CHECK(!fs_tree_rename(&g_hle.fs.tree, NULL, "save/user", FIRST_SAVE, 1));
+    pm_unlock(&g_hle.fs.tree.lock);
     user = open_user_save(proxy, g_user_id);
     fs_command(user, 7, "/played.bin", 0, 0);
     svcobj_unref(user);
     CHECK(!tree_has("save/user"));
     /* saves an earlier version put in save/system (it read the type from a byte that is always 0) are the first
        user's while it has no folder and no save/user, played where they are */
-    pm_lock(&fsp.tree.lock);
-    CHECK(!fs_tree_remove(&fsp.tree, NULL, FIRST_SAVE, 1, 1, 0));
-    pm_unlock(&fsp.tree.lock);
+    pm_lock(&g_hle.fs.tree.lock);
+    CHECK(!fs_tree_remove(&g_hle.fs.tree, NULL, FIRST_SAVE, 1, 1, 0));
+    pm_unlock(&g_hle.fs.tree.lock);
     fs_command(system, 0, "/slot.bin", 4, 0);
     user = open_user_save(proxy, g_user_id);
     fs_command(user, 7, "/slot.bin", 0, 0);
     svcobj_unref(user);
     CHECK(tree_has("save/system/slot.bin") && !tree_has(FIRST_SAVE) && test_left_said == 1);
     /* with its folder there, save/system is the System saves' alone */
-    pm_lock(&fsp.tree.lock);
+    pm_lock(&g_hle.fs.tree.lock);
     old = hostfs_new(FIRST_SAVE, &rc);
-    pm_unlock(&fsp.tree.lock);
+    pm_unlock(&g_hle.fs.tree.lock);
     CHECK(old && !rc);
     svcobj_unref(old);
     fs_command(system, 1, "/slot.bin", 0, 0);
@@ -1053,9 +1050,9 @@ static void test_save_data(SvcObj* proxy) {
     CHECK(tree_has("save/system/other.bin") && tree_has(FIRST_SAVE "/progress.bin"));
     /* a save/user beside the first user's folder (an older version run again) is two saves of one user: the game
        stops, and both stay as they were, for the player to choose */
-    pm_lock(&fsp.tree.lock);
+    pm_lock(&g_hle.fs.tree.lock);
     old = hostfs_new("save/user", &rc);
-    pm_unlock(&fsp.tree.lock);
+    pm_unlock(&g_hle.fs.tree.lock);
     CHECK(old && !rc);
     fs_command(old, 0, "/newer.bin", 4, 0);
     svcobj_unref(old);
@@ -1108,19 +1105,26 @@ static void test_save_data(SvcObj* proxy) {
 }
 
 static void cleanup_service(void) {
-    pm_lock(&fsp.tree.lock);
+    pm_lock(&g_hle.fs.tree.lock);
     for (unsigned i = 0; i < NOPEN; i++)
-        if (fsp.openf[i].f) fclose(fsp.openf[i].f);
-    if (fsp.rraw) fclose(fsp.rraw);
-    for (int i = 0; i < fsp.nrfiles; i++) fs_tree_release(fsp.rfiles[i].node);
-    free(fsp.rmeta);
-    free(fsp.rfiles);
-    fs_tree_destroy(&fsp.tree);
-    pm_unlock(&fsp.tree.lock);
+        if (g_hle.fs.openf[i].f) fclose(g_hle.fs.openf[i].f);
+    if (g_hle.fs.rraw) fclose(g_hle.fs.rraw);
+    for (int i = 0; i < g_hle.fs.nrfiles; i++) fs_tree_release(g_hle.fs.rfiles[i].node);
+    free(g_hle.fs.rmeta);
+    free(g_hle.fs.rfiles);
+    fs_tree_destroy(&g_hle.fs.tree);
+    pm_unlock(&g_hle.fs.tree.lock);
     CHECK(test_shared == 0);
 }
 
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    hle_init();
+    g_hle.kernel.title_id = 0x0100000000010000ull; /* the title the test was written for */
     CHECK((argc == 3 || argc == 4) && strstr(argv[1], "scarletnx-fs-tree-") != NULL);
     CHECK(!test_chdir(argv[1]));
     FILE* marker = fopen(".snx-fs-test", "rb");

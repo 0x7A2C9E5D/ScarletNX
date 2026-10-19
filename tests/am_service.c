@@ -6,12 +6,11 @@
 #include <stdarg.h>
 
 #include "nx/hle/services/am.c"
+#include "nx/hle/hle.c"
 
 u8* g_mem;
 int g_verbose;
 int g_opt_docked, g_opt_lang = 1;
-u64 g_title_id = 0x0100BF00112C0000ull;
-PMutex g_klock;
 static unsigned test_checks, test_objects, test_kobjs;
 static u32 test_next_handle = 0x100;
 u64 plat_ns(void) {
@@ -44,23 +43,20 @@ void fatal(const char* format, ...) {
     exit(1);
 }
 
-SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*), size_t size) {
+SvcObj* svcobj_new(const char* name, int (*dispatch)(SvcObj*, IpcCtx*)) {
     SvcObj* obj = calloc(1, sizeof *obj);
     CHECK(obj != NULL);
     obj->name = name;
     obj->dispatch = dispatch;
     obj->refs = 1;
-    if (size) {
-        obj->data = calloc(1, size);
-        CHECK(obj->data != NULL);
-    }
     test_objects++;
     return obj;
 }
+#include "svcobj_data.h"
 void svcobj_unref(SvcObj* obj) {
     if (!obj || --obj->refs) return;
     if (obj->destroy) obj->destroy(obj);
-    free(obj->data);
+    test_svcobj_data_free(obj);
     free(obj);
     test_objects--;
 }
@@ -488,12 +484,12 @@ static void test_messages(void) {
     u32 h;
     am_init();
     CHECK(nn_am_service_ICommonStateGetter_ReceiveMessage(NULL, &m) == 0 && m == 15);
-    CHECK(am.msg_event->signaled);
+    CHECK(g_hle.am.msg_event->signaled);
     CHECK(nn_am_service_ICommonStateGetter_ReceiveMessage(NULL, &m) == 0 && m == 31);
-    CHECK(!am.msg_event->signaled);
+    CHECK(!g_hle.am.msg_event->signaled);
     CHECK(nn_am_service_ICommonStateGetter_ReceiveMessage(NULL, &m) == RC(128, 3));
     CHECK(nn_am_service_ISelfController_GetLibraryAppletLaunchableEvent(NULL, &h) == 0);
-    CHECK(test_handles[h - 0x100] == &am.launchable_event->o && am.launchable_event->signaled);
+    CHECK(test_handles[h - 0x100] == &g_hle.am.launchable_event->o && g_hle.am.launchable_event->signaled);
     close_handles();
 }
 /* the Mii editor (0x12), which Mario Kart 8 Deluxe opens with nn::mii::AppendMii: with no editor here, appending is
@@ -545,12 +541,12 @@ static void test_state_getter(void) {
     u8 vr = 0xee;
     int logo = 0, received = 0;
     am_init();
-    CHECK(nn_am_service_ICommonStateGetter_EnableStartupLogoDisappearedMessage(NULL) == 0 && am.msg_event->signaled);
+    CHECK(nn_am_service_ICommonStateGetter_EnableStartupLogoDisappearedMessage(NULL) == 0 && g_hle.am.msg_event->signaled);
     while (received < AM_MESSAGES && nn_am_service_ICommonStateGetter_ReceiveMessage(NULL, &message) == 0) {
         logo += message == AM_MSG_STARTUP_LOGO_GONE;
         received++;
     }
-    CHECK(received == 3 && logo == 1 && !am.msg_event->signaled);
+    CHECK(received == 3 && logo == 1 && !g_hle.am.msg_event->signaled);
     CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled3d(NULL, &vr) == 0 && vr == 0);
     CHECK(nn_am_service_ICommonStateGetter_BeginVrMode3d(NULL) == 0);
     CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled3d(NULL, &vr) == 0 && vr == 1);
@@ -573,7 +569,14 @@ static void test_self_settings(void) {
     CHECK(nn_am_service_ISelfController_SetAutoSleepDisabled(NULL, 0) == 0);
     CHECK(nn_am_service_ISelfController_IsAutoSleepDisabled(NULL, &disabled) == 0 && disabled == 0);
 }
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
+
 int main(void) {
+    hle_init();
+    g_hle.kernel.title_id = 0x0100BF00112C0000ull; /* the title the test was written for */
     test_mii_edit();
     test_audio_controller();
     test_user_channel();

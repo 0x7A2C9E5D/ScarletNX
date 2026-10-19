@@ -12,10 +12,10 @@
    Eden stubs Read, Select and EventFd, answers GetSockOpt for SO_ERROR only, and shuts down the read side of a
    SocketExempt socket; those are real here. */
 #include "nx/hle/services/network/network.h"
+#include "nx/hle/hle.h"
 #include "hle/services/network/bsd.swipc.inc"
 #include <time.h>
 
-#define BSD_MAX_FD 128
 enum {
     BSD_F_GETFD = 1,
     BSD_F_SETFD = 2,
@@ -33,55 +33,36 @@ enum {
     BSD_SOCKADDR_IN6 = 28,
 };
 
-typedef struct BsdFd {
-    SnxSocket* s;
-    SnxSocket* bcast; /* a datagram socket bound to the console's address also hears its subnet's broadcasts through
-                         this one, bound to the broadcast address (Linux delivers them to no other); NULL otherwise */
-    int flags;        /* F_SETFL's as the guest sent them */
-    int exempt;       /* SocketExempt: ShutdownAllSockets leaves it alone */
-} BsdFd;
-/* one per session (and its clones): Horizon's descriptors belong to the client that registered */
-typedef struct Bsd {
-    PMutex lk;
-    BsdFd fd[BSD_MAX_FD];
-    int system; /* bsd:s, which may open raw sockets and duplicate descriptors */
-} Bsd;
-
 /* ============================================================ the network option */
 /* the Eden room the console joined with ldn=room (room.c): the game's datagram sockets are the room's, and reach
    the members' addresses whatever the network option says */
-static SnxRoom* g_room;
-void network_set_room(SnxRoom* room) { g_room = room; }
-SnxRoom* network_room(void) { return g_room; }
+void network_set_room(SnxRoom* room) { g_hle.bsd.room = room; }
+SnxRoom* network_room(void) { return g_hle.bsd.room; }
 static int reachable(SnxSocket* s, const SnxSockAddr* a) { return snx_room_socket(s) || network_reachable(a); }
 /* nifm asks often (some games every frame): the host's state is read again after two seconds. In a room the
    connection is the room's, its address and a /24, as Eden's nifm gives the room's address */
 int network_interface(SnxNetInterface* out) {
-    static PMutex lk = PMUTEX_INIT;
-    static time_t when;
-    static int have;
-    static SnxNetInterface cached;
     if (g_opt_airplane) return -SNX_ENETDOWN;
-    if (g_room) {
+    if (g_hle.bsd.room) {
         if (out) {
             memset(out, 0, sizeof *out);
             strcpy(out->name, "Eden room");
-            snx_room_fake_ip(g_room, out->ip);
+            snx_room_fake_ip(g_hle.bsd.room, out->ip);
             out->mask[0] = out->mask[1] = out->mask[2] = 255;
             out->wireless = 1;
         }
         return 0;
     }
     if (!g_opt_network) return -SNX_ENETDOWN;
-    pm_lock(&lk);
+    pm_lock(&g_hle.bsd.iface_lk);
     time_t now = time(NULL);
-    if (!when || now - when >= 2 || now < when) {
-        have = !snx_net_primary_interface(&cached);
-        when = now;
+    if (!g_hle.bsd.iface_when || now - g_hle.bsd.iface_when >= 2 || now < g_hle.bsd.iface_when) {
+        g_hle.bsd.iface_have = !snx_net_primary_interface(&g_hle.bsd.iface);
+        g_hle.bsd.iface_when = now;
     }
-    if (have && out) *out = cached;
-    int r = have ? 0 : -SNX_ENETDOWN;
-    pm_unlock(&lk);
+    if (g_hle.bsd.iface_have && out) *out = g_hle.bsd.iface;
+    int r = g_hle.bsd.iface_have ? 0 : -SNX_ENETDOWN;
+    pm_unlock(&g_hle.bsd.iface_lk);
     return r;
 }
 int network_online(void) { return !network_interface(NULL); }
@@ -94,26 +75,23 @@ int network_reachable(const SnxSockAddr* a) {
 /* the address a bind to INADDR_ANY binds instead, while ldn gives this console one of its own on the LAN (ldn.c),
    and its subnet's broadcast address: two consoles on one host then keep their ports apart, and each still hears
    the broadcasts a game sends to the subnet (a Pia session's first messages). NULL clears it */
-static PMutex g_bind_lk = PMUTEX_INIT;
-static int g_bind_set;
-static u8 g_bind_ip[4], g_bind_bcast[4];
 void bsd_set_bind_address(const u8* ip, const u8* bcast) {
-    pm_lock(&g_bind_lk);
-    g_bind_set = ip != NULL;
-    if (ip) memcpy(g_bind_ip, ip, 4);
-    if (ip) memcpy(g_bind_bcast, bcast, 4);
-    pm_unlock(&g_bind_lk);
+    pm_lock(&g_hle.bsd.bind_lk);
+    g_hle.bsd.bind_set = ip != NULL;
+    if (ip) memcpy(g_hle.bsd.bind_ip, ip, 4);
+    if (ip) memcpy(g_hle.bsd.bind_bcast, bcast, 4);
+    pm_unlock(&g_hle.bsd.bind_lk);
 }
 /* 1 and the broadcast address when a was INADDR_ANY and became the console's address */
 static int bind_address(SnxSockAddr* a, u8 bcast[4]) {
     static const u8 any[4];
     int r;
     if (a->family != SNX_AF_INET || memcmp(a->addr, any, 4)) return 0;
-    pm_lock(&g_bind_lk);
-    r = g_bind_set;
-    if (r) memcpy(a->addr, g_bind_ip, 4);
-    if (r) memcpy(bcast, g_bind_bcast, 4);
-    pm_unlock(&g_bind_lk);
+    pm_lock(&g_hle.bsd.bind_lk);
+    r = g_hle.bsd.bind_set;
+    if (r) memcpy(a->addr, g_hle.bsd.bind_ip, 4);
+    if (r) memcpy(bcast, g_hle.bsd.bind_bcast, 4);
+    pm_unlock(&g_hle.bsd.bind_lk);
     return r;
 }
 /* the broadcast companion of a datagram socket bound to the console's address: the same port on the broadcast
@@ -131,7 +109,7 @@ static SnxSocket* bcast_companion(SnxSocket* s, const u8 bcast[4]) {
     r = snx_socket_bind(c, &a);
     if (r) {
         WARN("bsd: the broadcast companion of a socket on %u.%u.%u.%u couldn't bind %u.%u.%u.%u: errno %d\n",
-             g_bind_ip[0], g_bind_ip[1], g_bind_ip[2], g_bind_ip[3], bcast[0], bcast[1], bcast[2], bcast[3], -r);
+             g_hle.bsd.bind_ip[0], g_hle.bsd.bind_ip[1], g_hle.bsd.bind_ip[2], g_hle.bsd.bind_ip[3], bcast[0], bcast[1], bcast[2], bcast[3], -r);
         snx_socket_unref(c);
         return NULL;
     }
@@ -286,21 +264,18 @@ static int fd_add(Bsd* b, SnxSocket* s, int flags, int exempt) {
 }
 /* The session a process registered (RegisterClient), whose table holds the descriptors it hands ssl. Not referenced:
    bsd_destroy clears it under the lock, so a lookup that holds the lock sees the session whole */
-static PMutex g_client_lk = PMUTEX_INIT;
-static SvcObj* g_client;
-static u64 g_client_pid;
 SnxSocket* bsd_client_socket(u64 pid, i32 fd) {
     SnxSocket* s = NULL;
-    pm_lock(&g_client_lk);
-    if (g_client && g_client_pid == pid) s = fd_get(g_client->data, fd, NULL);
-    pm_unlock(&g_client_lk);
+    pm_lock(&g_hle.bsd.client_lk);
+    if (g_hle.bsd.client && g_hle.bsd.client_pid == pid) s = fd_get(g_hle.bsd.client->data, fd, NULL);
+    pm_unlock(&g_hle.bsd.client_lk);
     return s;
 }
 static void bsd_destroy(SvcObj* o) {
     Bsd* b = o->data;
-    pm_lock(&g_client_lk);
-    if (g_client == o) g_client = NULL;
-    pm_unlock(&g_client_lk);
+    pm_lock(&g_hle.bsd.client_lk);
+    if (g_hle.bsd.client == o) g_hle.bsd.client = NULL;
+    pm_unlock(&g_hle.bsd.client_lk);
     for (int i = 0; i < BSD_MAX_FD; i++) {
         snx_socket_unref(b->fd[i].s);
         snx_socket_unref(b->fd[i].bcast);
@@ -345,10 +320,10 @@ static int bsd_unknown(SvcObj* self, IpcCtx* c) {
    registers a new one, which takes over). The transfer memory is the console's buffer space: the host's stack needs
    none */
 static int bsd_register(SvcObj* self, u64 pid) {
-    pm_lock(&g_client_lk);
-    g_client = self;
-    g_client_pid = pid;
-    pm_unlock(&g_client_lk);
+    pm_lock(&g_hle.bsd.client_lk);
+    g_hle.bsd.client = self;
+    g_hle.bsd.client_pid = pid;
+    pm_unlock(&g_hle.bsd.client_lk);
     R_SUCCEED();
 }
 static int nn_socket_sf_IClient_RegisterClient(SvcObj* self, const nn_socket_sf_LibraryConfigData* config, u64 pid,
@@ -368,8 +343,8 @@ static int bsd_socket(Bsd* b, i32 gdom_in, i32 gtype_in, i32 proto_in, int exemp
         !(type == SNX_SOCK_RAW && dom == SNX_AF_INET && proto == SNX_IPPROTO_ICMP))
         return reply(-SNX_EINVAL, ret, bsd_errno);
     SnxSocket* s;
-    int r = g_room && dom == SNX_AF_INET && type == SNX_SOCK_DGRAM && (proto == 0 || proto == SNX_IPPROTO_UDP)
-                ? snx_room_socket_open(g_room, &s, dom, type, (int)proto)
+    int r = g_hle.bsd.room && dom == SNX_AF_INET && type == SNX_SOCK_DGRAM && (proto == 0 || proto == SNX_IPPROTO_UDP)
+                ? snx_room_socket_open(g_hle.bsd.room, &s, dom, type, (int)proto)
                 : snx_socket_open(&s, dom, type, (int)proto);
     if (r) {
         LOG("bsd: Socket(%u, %u, %u) failed: errno %d\n", gdom, gtype, proto, -r);
@@ -862,7 +837,7 @@ static int nn_socket_sf_IClient_EventFd(SvcObj* self, u64 initval, u32 flags, i3
     return reply(fd_add(self->data, s, (flags & BSD_EFD_NONBLOCK) ? BSD_O_NONBLOCK_NX : 0, 0), ret, bsd_errno);
 }
 static SvcObj* bsd_new(const char* name, int system) {
-    SvcObj* o = svcobj_new(name, nn_socket_sf_IClient_dispatch, sizeof(Bsd));
+    SvcObj* o = SVCOBJ_NEW_DATA(name, nn_socket_sf_IClient_dispatch, g_hle.bsd.bsds, g_hle.bsd.bsd_next, "bsd sessions");
     Bsd* b = o->data;
     pm_init(&b->lk);
     b->system = system;
@@ -871,4 +846,4 @@ static SvcObj* bsd_new(const char* name, int system) {
 }
 SvcObj* new_bsd_u(void) { return bsd_new("bsd:u", 0); }
 SvcObj* new_bsd_s(void) { return bsd_new("bsd:s", 1); }
-SvcObj* new_bsdcfg(void) { return nn_bsdsocket_cfg_ServerInterface_new(0); }
+SvcObj* new_bsdcfg(void) { return nn_bsdsocket_cfg_ServerInterface_new(); }

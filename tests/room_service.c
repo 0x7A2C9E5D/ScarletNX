@@ -11,9 +11,9 @@
 #endif
 
 #include "nx/hle/services/network/room.c"
+#include "nx/hle/hle.c"
 
 char g_exedir[1024], g_exename[256];
-u64 g_title_id;
 int g_opt_ldn, g_opt_airplane;
 char g_opt_room[256];
 static SnxRoom* g_room_set;
@@ -127,7 +127,15 @@ static void stops(void) {
     g_opt_ldn = SNX_OPT_LDN_LAN;
 }
 
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
+void pm_init(PMutex* m) { (void)m; }
+
 int main(void) {
+    hle_init();
+    g_hle.kernel.title_id = 0; /* none, as the test was written for */
     addresses();
     passwords();
     stops();

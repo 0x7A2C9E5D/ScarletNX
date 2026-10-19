@@ -5,6 +5,7 @@
    the same pages; the pool gives everything back; write tracking keeps working over remapped ranges. Skips (77)
    where the host has no pool */
 #include "nx/hle/kernel/kernel_int.h"
+#include "nx/hle/hle.h"
 #include "nx/gpu/gpu.h"
 #include "nx/runtime/clock.h"
 #include <dirent.h>
@@ -15,8 +16,6 @@
 
 #define MIB (1ull << 20)
 static unsigned checks;
-PMutex g_klock = PMUTEX_INIT;
-u64 g_title_id, g_sysres_size;
 int g_verbose;
 
 static void test_fail(const char* expr, int line) {
@@ -317,7 +316,13 @@ static void test_cycles(void) {
     check_tracking(HEAP_BASE, 0x3000); /* the heap's own pages beside it */
 }
 
+int kobj_never_signaled(KObj* o) {
+    (void)o;
+    return 0;
+}
+
 int main(void) {
+    hle_init();
     u64 info = STACK_BASE, off;
     u8* p;
     if (sysconf(_SC_PAGESIZE) != 4096) {
