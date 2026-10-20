@@ -458,6 +458,7 @@ static void players_view(App* app) {
     int r;
     gui_settings_free(&app->settings);
     memset(&app->settings, 0, sizeof app->settings);
+    app->groups = 0; /* they point into the list just freed, as settings_of drops them */
     assert(!gui_settings_read(&app->settings, list));
     gui_settings_mark(&app->settings);
     app->player = 0;
@@ -587,6 +588,7 @@ static void button_map(App* app) {
     SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT, "0x045e/0x02ea"); /* a real pad plugged in stays out */
     gui_settings_free(&app->settings);
     memset(&app->settings, 0, sizeof app->settings);
+    app->groups = 0; /* they point into the list just freed, as settings_of drops them */
     assert(!gui_settings_read(&app->settings, list));
     gui_settings_mark(&app->settings);
     for (int i = 0; i < app->settings.count; ++i)
@@ -2155,8 +2157,12 @@ int main(int argc, char** argv) {
         assert(kept && strstr(kept, "[Display]\nfullscreen=1\n") && !strstr(kept, "controls=") &&
                !strstr(kept, "gdbstub"));
         free(kept);
+        assert(app.groups > 0);           /* the Settings' groups were made, each naming a section of the list */
         gui_settings_free(&app.settings); /* as a new start has none read */
         assert(setting_is(&app, "fullscreen", NULL) && settings_of(&app) && setting_is(&app, "fullscreen", "1"));
+        /* read anew, the list drops the groups that named the old one's sections: the screens drawn later (the theme
+           editor's width) read none of the freed names */
+        assert(app.groups == 0);
     }
     key(&app, SDLK_UP);
     key(&app, SDLK_LEFT);
