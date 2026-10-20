@@ -91,6 +91,7 @@ typedef struct GfxOut {
     /* earlier pending results were copied into buf on the GPU when it was made (gfx_overlay, atlas_fill): org holds
        guest memory without them until each lands (out_rebase) */
     int composed;
+    u32 wseen; /* the write tracking clock before org was read (vk_ww_now): copyable_span skips comparing pages since */
     struct GfxOut* next;
 } GfxOut;
 static GfxOut *g_prep, *g_prep_tail, *g_out, *g_out_tail;
@@ -121,6 +122,7 @@ static GfxOut* gfx_out_new(u32 npages, u32 len) {
     o->vmap = o->pages + npages;
     o->npages = npages;
     o->org = (u8*)(o->vmap + npages);
+    o->wseen = vk_ww_now(); /* before its caller reads org: a write in between only makes copyable_span compare */
     return o;
 }
 static int page_cmp(const void* a, const void* b);
@@ -218,14 +220,52 @@ static int pages_meet(const GfxOut* a, const GfxOut* b) {
    take e's landing for a guest write and drop its own writes over it (vk_write_changed). Either GPU range may map
    the shared pages at other addresses: they meet through the GMMU, whose mappings stay put while results are pending
    (a mapping change lands them first) */
+/* The runs of the landing result's bytes its draw changed, its 8-byte words that differ from its original ones,
+   merged: found once per landing (out_changed_runs). Rebasing every later composed result compared all of the landed
+   result's bytes again for each of them. One game landed 20,000 results in 10 s that changed 4 MB of their 590, and
+   the rebases read 42 GB, most of the release thread, under vk_lock, which the GPU thread waits for */
+typedef struct {
+    u32 from, to;
+} ChgRun;
+static ChgRun g_chg_first[64]; /* where the runs start, so even a failed allocation has room for one */
+static ChgRun* g_chg = g_chg_first;
+static u32 g_nchg, g_capchg = 64;
+/* e's changed runs into g_chg: 0 when none, or with no memory for them (every byte is a candidate then, one run) */
+static u32 out_changed_runs(const GfxOut* e) {
+    u32 k = 0;
+    g_nchg = 0;
+    while (k < e->size) {
+        u32 w = e->size - k < 8 ? e->size - k : 8;
+        if (memcmp(e->ptr + k, e->org + k, w)) {
+            if (g_nchg && g_chg[g_nchg - 1].to == k)
+                g_chg[g_nchg - 1].to = k + w;
+            else {
+                if (g_nchg == g_capchg) {
+                    u32 cap = g_capchg * 2;
+                    ChgRun* b = g_chg == g_chg_first ? malloc((size_t)cap * sizeof *b)
+                                                     : realloc(g_chg, (size_t)cap * sizeof *b);
+                    if (!b) {
+                        g_chg[0] = (ChgRun){0, e->size};
+                        return g_nchg = 1;
+                    }
+                    if (g_chg == g_chg_first) memcpy(b, g_chg_first, sizeof g_chg_first);
+                    g_chg = b;
+                    g_capchg = cap;
+                }
+                g_chg[g_nchg++] = (ChgRun){k, k + w};
+            }
+        }
+        k += w;
+    }
+    return g_nchg;
+}
 typedef struct {
     const GfxOut* e;
     GfxOut* o;
 } Rebase;
-/* Eight bytes at a time: a result is mostly the bytes it read, and a byte loop here was 84% of the release thread's time
-   in one game, all of it under vk_lock, where the GPU thread waited for it */
-static void rebase_span(void* user, u64 at, u64 from, u64 n) {
-    const Rebase* r = user;
+/* the changed bytes of e's [from, from + n) into o's original bytes at at. Eight bytes at a time: a result is mostly
+   the bytes it read, and a byte loop here was 84% of the release thread's time in one game */
+static void rebase_bytes(const Rebase* r, u64 at, u64 from, u64 n) {
     const u8 *res = r->e->ptr + from, *org = r->e->org + from;
     u8* dst = r->o->org + at;
     u64 k = 0;
@@ -246,6 +286,21 @@ static void rebase_span(void* user, u64 at, u64 from, u64 n) {
     for (; k < n; k++)
         if (res[k] != org[k]) dst[k] = res[k];
 }
+/* a span of e in o: only where it meets e's changed runs (g_chg, sorted), the first found by binary search */
+static void rebase_span(void* user, u64 at, u64 from, u64 n) {
+    u32 lo = 0, hi = g_nchg;
+    while (lo < hi) {
+        u32 mid = lo + (hi - lo) / 2;
+        if (g_chg[mid].to <= from)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    for (u32 i = lo; i < g_nchg && g_chg[i].from < from + n; i++) {
+        u64 a = g_chg[i].from > from ? g_chg[i].from : from, b = g_chg[i].to < from + n ? g_chg[i].to : from + n;
+        rebase_bytes(user, at + (a - from), a, b - a);
+    }
+}
 static void out_rebase(const GfxOut* e, GfxOut* o) {
     Rebase r = {e, o};
     out_spans(e, o->addr, o->size, o->vmap, rebase_span, &r);
@@ -253,6 +308,7 @@ static void out_rebase(const GfxOut* e, GfxOut* o) {
 /* the composed results recorded after e, in this frame's landed list (rest), later frames' and the draw being set up */
 static void out_rebase_later(const GfxOut* e, GfxOut* rest) {
     GfxOut* lists[3] = {rest, g_out, g_prep};
+    if (!out_changed_runs(e)) return; /* it changed nothing: memory has what every later one took as original */
     for (int l = 0; l < 3; l++)
         for (GfxOut* o = lists[l]; o; o = o->next)
             if (o->composed && pages_meet(e, o)) out_rebase(e, o);
@@ -568,33 +624,126 @@ typedef struct {
     u64 gva;
     int ok;
 } Copyable;
+/* Every draw that binds memory under pending results asks this of each of them, so comparing their bytes made the
+   walk quadratic in a frame's results: a frame of 200 composed bindings spent a fifth of the GPU thread in memcmp. Pages
+   write tracking saw unwritten since the result read its original bytes still hold them. It sees a write from the
+   next write epoch on, which is when the stream can see it too, and a host without tracking compares */
 static void copyable_span(void* user, u64 at, u64 from, u64 n) {
     Copyable* c = user;
     const u8* host = c->ok ? gmem_ptr_untracked(c->gva + at, n) : NULL;
-    if (!host || memcmp(host, c->o->org + from, n)) c->ok = 0;
+    if (!host) {
+        c->ok = 0;
+        return;
+    }
+    if (vk_written_since(host, n, c->o->wseen) == 0) return;
+    if (memcmp(host, c->o->org + from, n)) c->ok = 0;
+}
+/* A composition takes each byte from the newest pending result over it: that result was made over the ones before it
+   (composed, or over guest memory they hadn't touched) and its draw ran after theirs, so its buffer holds the byte as
+   every result before it left it, and copying the older ones too only to overwrite them made composing quadratic. One
+   game composed 200 bindings a frame over a few hundred results each and its GPU copied 955 MB a frame, 147 ms. The
+   results are walked from the newest, and a byte of the destination one of them gave is skipped by the older ones:
+   Covered holds those bytes as sorted, disjoint runs of destination offsets */
+typedef struct {
+    u64 a, b;
+} CoverRun;
+typedef struct {
+    CoverRun* v;
+    u32 n, cap;
+    u64 len;              /* the destination's size: all of it covered ends the walk */
+    CoverRun first[32];   /* where the runs start */
+} Covered;
+static void cover_init(Covered* c, u64 len) {
+    c->v = c->first;
+    c->n = 0;
+    c->cap = sizeof c->first / sizeof *c->first;
+    c->len = len;
+}
+static void cover_free(Covered* c) {
+    if (c->v != c->first) free(c->v);
+}
+static int cover_full(const Covered* c) { return c->n == 1 && c->v[0].a == 0 && c->v[0].b >= c->len; }
+/* [a, b) of the destination, given by a newer result than the ones still to come: fn(user, a', b') for each of its
+   parts no newer result gave, then all of it covered. 0 when the runs can't grow (nothing covered then: the older
+   results copy over it too, as before, which is only slower) */
+static int cover_take(Covered* c, u64 a, u64 b, void (*fn)(void* user, u64 a, u64 b), void* user) {
+    u32 i = 0, j;
+    while (i < c->n && c->v[i].b < a) i++;
+    u64 at = a;
+    for (j = i; j < c->n && c->v[j].a <= b; j++) {
+        if (c->v[j].a > at) fn(user, at, c->v[j].a);
+        if (c->v[j].b > at) at = c->v[j].b;
+    }
+    if (at < b) fn(user, at, b);
+    /* the runs i..j-1 meet [a, b]: one run in their place */
+    u64 na = a, nb = b;
+    if (i < j) {
+        if (c->v[i].a < na) na = c->v[i].a;
+        if (c->v[j - 1].b > nb) nb = c->v[j - 1].b;
+    }
+    if (i == j) { /* a new run at i */
+        if (c->n == c->cap) {
+            u32 cap = c->cap * 2;
+            CoverRun* v = c->v == c->first ? malloc((size_t)cap * sizeof *v) : realloc(c->v, (size_t)cap * sizeof *v);
+            if (!v) return 0;
+            if (c->v == c->first) memcpy(v, c->first, sizeof c->first);
+            c->v = v;
+            c->cap = cap;
+        }
+        memmove(&c->v[i + 1], &c->v[i], (size_t)(c->n - i) * sizeof *c->v);
+        c->n++;
+    } else {
+        memmove(&c->v[i + 1], &c->v[j], (size_t)(c->n - j) * sizeof *c->v);
+        c->n -= j - i - 1;
+    }
+    c->v[i] = (CoverRun){na, nb};
+    return 1;
+}
+/* the pending results, newest first: their count, into *list (out when it is local and too small: allocated) */
+static GfxOut** out_newest_first(GfxOut** local, u32 nlocal, u32* count) {
+    u32 n = 0, i = 0;
+    for (GfxOut* o = g_out; o; o = o->next) n++;
+    GfxOut** v = n <= nlocal ? local : malloc((size_t)n * sizeof *v);
+    if (!v) return NULL;
+    for (GfxOut* o = g_out; o; o = o->next) v[n - 1 - i++] = o;
+    *count = n;
+    return v;
 }
 typedef struct {
     CopyBatch* c;
     const GfxOut* o;
-    u64 dst_off;
+    u64 dst_off, at, from; /* the span being taken: its destination offset and its offset in o */
+    Covered* cov;
 } Overlay;
-static void overlay_span(void* user, u64 at, u64 from, u64 n) {
+static void overlay_part(void* user, u64 a, u64 b) {
     const Overlay* v = user;
-    copy_add(v->c, v->o->buf, v->o->off + from, v->dst_off + at, n);
+    copy_add(v->c, v->o->buf, v->o->off + v->from + (a - v->at), v->dst_off + a, b - a);
+}
+static void overlay_span(void* user, u64 at, u64 from, u64 n) {
+    Overlay* v = user;
+    v->at = at;
+    v->from = from;
+    if (!cover_take(v->cov, at, at + n, overlay_part, v)) overlay_part(v, at, at + n);
 }
 /* copies the pending results' bytes in [gva, gva + len), through any GPU address, into dst at dst_off, which holds
-   guest memory's bytes (after gfx_gpu_src said they can be) */
+   guest memory's bytes (after gfx_gpu_src said they can be): each byte from the newest result over it */
 static void gfx_overlay(u64 gva, u64 len, VkBuffer dst, u64 dst_off) {
     CopyBatch c;
+    Covered cov;
+    GfxOut *nlocal[64], **newest;
+    u32 n = 0;
     u64 local[16], *rmap = range_map(gva, len, local);
-    if (!rmap) fatal("Out of memory composing a draw's storage buffer");
+    if (!rmap || !(newest = out_newest_first(nlocal, 64, &n))) fatal("Out of memory composing a draw's storage buffer");
     memset(&c, 0, sizeof c);
     c.dst = dst;
-    for (GfxOut* o = g_out; o; o = o->next) {
-        Overlay v = {&c, o, dst_off};
-        out_spans(o, gva, len, rmap, overlay_span, &v);
+    cover_init(&cov, len);
+    for (u32 i = 0; i < n && !cover_full(&cov); i++) {
+        Overlay v = {&c, newest[i], dst_off, 0, 0, &cov};
+        out_spans(newest[i], gva, len, rmap, overlay_span, &v);
     }
     copy_end(&c);
+    cover_free(&cov);
+    if (newest != nlocal) free(newest);
     if (rmap != local) free(rmap);
 }
 
@@ -748,6 +897,7 @@ static void ww_take_changed(void) {
     memcpy(c, g_wchg, (size_t)n * sizeof *c);
     __atomic_store_n(&g_wchg_n, 0, __ATOMIC_RELAXED);
     pm_unlock(&g_wchg_lock);
+    if (n) g_wclock++; /* what it marks is newer than every baseline taken before (vk_written_since) */
     for (int i = 0; i < n; i++) ww_mark_range(c[i].a, c[i].e);
 }
 
@@ -765,12 +915,15 @@ int vk_written_since(const u8* host, u64 len, u32 since) {
         g_ww = 0;
         return -1;
     }
-    g_wclock++;
-    ww_take_changed();
     u64 o = (u64)(host - g_mem), lo = o >> WW_LEAF_SHIFT, hi = (o + len - 1) >> WW_LEAF_SHIFT, l;
     u32 seen = __atomic_load_n(&g_ww_epoch, __ATOMIC_RELAXED) + 1;
     for (l = lo; l <= hi && g_wleaf_seen[l] == seen; l++) {}
+    /* the clock moves only when this call marks pages, before a scan here and in ww_take_changed when it takes ranges,
+       so what it marks is newer than every baseline taken before: a query that marks nothing, most of them, leaves
+       it, and it doesn't reach its wrap within a session at thousands of queries a frame */
+    ww_take_changed();
     if (l <= hi) {
+        g_wclock++;
         if (plat_ww_scan(g_mem + (lo << WW_LEAF_SHIFT), (hi - lo + 1) << WW_LEAF_SHIFT, ww_mark) < 0) {
             g_ww = 0;
             LOG("vulkan: write tracking failed, caches check contents\n");
@@ -1015,17 +1168,29 @@ static int atlas_fill(const DrawPage* p, size_t unique, u8* ptr, VkBuffer atlas,
     }
     memset(&c, 0, sizeof c);
     c.dst = atlas;
-    for (GfxOut* o = g_out; o && !g_out_landing; o = o->next)
+    /* each byte from the newest result over it, as gfx_overlay takes them */
+    Covered cov;
+    GfxOut *nlocal[64], **newest = NULL;
+    u32 n = 0;
+    if (!g_out_landing && !(newest = out_newest_first(nlocal, 64, &n))) fatal("Out of memory composing a draw's atlas");
+    cover_init(&cov, (u64)unique * 4096);
+    for (u32 k = 0; k < n && !cover_full(&cov); k++) {
+        const GfxOut* o = newest[k];
         for (u64 g = o->addr & ~4095ull, e = o->addr + o->size; g < e; g += 4096) {
             u64 key = draw_page_key(g), lo = g > o->addr ? g : o->addr, hi = g + 4096 < e ? g + 4096 : e;
             u32 at = draw_page_index(p, unique, key);
             if (at < unique && p[at].key == key) {
-                copy_add(&c, o->buf, o->off + (lo - o->addr), atlas_off + at * 4096ull + (lo - g), hi - lo);
+                Overlay v = {&c, o, atlas_off, at * 4096ull + (lo - g), lo - o->addr, &cov};
+                u64 a = v.at, b = a + (hi - lo);
+                if (!cover_take(&cov, a, b, overlay_part, &v)) overlay_part(&v, a, b);
                 if (o->frame_id != vk_frame_id()) vk_frame_hold(o->frame_id);
                 composed = 1;
             }
         }
+    }
     copy_end(&c);
+    cover_free(&cov);
+    if (newest && newest != nlocal) free(newest);
     return composed;
 }
 
