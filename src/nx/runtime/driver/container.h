@@ -20,10 +20,10 @@ typedef struct {
     SnxHac* hac;
     char *keys, *title_keys; /* where they were looked for */
     int has_keys;
-    int base, update; /* the containers, update -1 without one */
-    /* the base's Program NCA, the update's (the patch an NSP of both has, else found 0), and the Control NCA, the
-       update's when it has one */
-    SnxNcaRef program, patch, control;
+    int base, update; /* the containers, either -1 without one; update is the add-on's (an update or a DLC) */
+    /* the base's Program NCA, the update's (the patch an NSP of both has, else found 0), the Control NCA, the
+       update's when it has one, and a DLC's Data NCA (aoc) */
+    SnxNcaRef program, patch, control, aoc;
 } SnxDump;
 
 /* prod.keys or title.keys: given, else in repo (NULL for none), else in ~/.switch; the path in repo when it is in
@@ -35,13 +35,22 @@ int snx_container_kind(const char* path, int* xci);
 int snx_is_dump(const char* path);
 /* what failed, with hactool's last error after it when it said one: 1 */
 int snx_hac_error(const char* what);
-/* base, and update unless it is NULL, opened and their NCAs picked, with the keys given or found (snx_find_keys, the
-   ones given must be there). say prints which dump is read. 0, else nonzero, said why; snx_dump_close either way */
-int snx_dump_open(SnxDump* dump, const char* base, const char* update, const char* keys, const char* title_keys,
+/* base and addon, either NULL for none, opened and their NCAs picked, with the keys given or found (snx_find_keys, the
+   ones given must be there). addon is an update (patch, with its control) or a DLC (aoc): the base's when base is
+   given. say prints which dump is read. 0, else nonzero, said why; snx_dump_close either way */
+int snx_dump_open(SnxDump* dump, const char* base, const char* addon, const char* keys, const char* title_keys,
                   const char* repo, int say);
+/* path opened alone, with the keys as snx_dump_open takes them: a game's dump (program, and the patch it may have), whose title ID is its
+   program's, or else an add-on's (patch or aoc, in update), its title ID the add-on's own (snx_addon_kind tells
+   which). 0, else nonzero, said why; snx_dump_close either way */
+int snx_dump_title(SnxDump* dump, const char* path, const char* keys, const char* title_keys, const char* repo, int say,
+                   SnxU64* title);
 void snx_dump_close(SnxDump* dump);
-/* the program's ExeFS and RomFS read in place, an update's over the base, or NULL, said why */
+/* the program's ExeFS and RomFS read in place, an update's over the base, or NULL, said why. An update opened
+   without its base has its ExeFS and no RomFS */
 SnxHacFs* snx_dump_fs(SnxDump* dump);
+/* a DLC's RomFS image (aoc) read in place, or NULL, said why */
+SnxHacFs* snx_dump_aoc_fs(SnxDump* dump);
 /* a file at the root of a RomFS read in place (control.nacp in the Control NCA's), malloc'd, or NULL */
 unsigned char* snx_romfs_file(SnxHacFs* fs, const char* name, size_t* size);
 /* the Control NCA's control.nacp, malloc'd, or NULL with why in *why */

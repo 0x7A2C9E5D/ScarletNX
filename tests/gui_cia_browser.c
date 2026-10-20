@@ -133,6 +133,61 @@ int main(void) {
         free(ready);
 #undef EXE
     }
+    /* an update and a DLC made beside their game, in its folder: not games of their own, its add-ons, listed by the
+       names the player reads (an update's version from its control.nacp), the update first. A program named so
+       without its data, another game's add-on or a name that is no title ID is none */
+    {
+#ifdef _WIN32
+#define EXE ".exe"
+#else
+#define EXE ""
+#endif
+        static const char* const made[] = {"0100ABCD12340000/0100ABCD12340000" EXE,
+                                           "0100ABCD12340000/0100ABCD12340000_0100ABCD12341002" EXE,
+                                           "0100ABCD12340000/0100ABCD12340000_0100ABCD12340800" EXE,
+                                           "0100ABCD12340000/0100ABCD12340000_0100ABCD12341003" EXE,
+                                           "0100ABCD12340000/0100ABCD12340000_0100ABCD12360800" EXE,
+                                           "0100ABCD12340000/0100ABCD12340000_junk" EXE};
+        static const char* const data[] = {"0100ABCD12340000_data", "0100ABCD12340000_0100ABCD12341002_data",
+                                           "0100ABCD12340000_0100ABCD12340800_data",
+                                           "0100ABCD12340000_0100ABCD12360800_data", "0100ABCD12340000_junk_data"};
+        static unsigned char nacp[0x4000];
+        char *ready = snx_temp_dir(NULL), *path, *folder, *game, *update;
+        GuiGames addons = {0};
+        size_t i;
+        assert(ready);
+        folder = snx_path_join(ready, "0100ABCD12340000");
+        for (i = 0; i < sizeof made / sizeof *made; ++i) {
+            path = snx_path_join(ready, made[i]);
+            assert(!snx_mkdirs(folder) && !snx_write_file(path, "#!/bin/sh\n", 10) && !snx_make_executable(path));
+            free(path);
+        }
+        for (i = 0; i < sizeof data / sizeof *data; ++i) {
+            path = snx_path_join(folder, data[i]);
+            assert(!snx_mkdirs(path));
+            free(path);
+        }
+        memcpy(nacp + 0x3060, "1.2.0", 5); /* DisplayVersion */
+        path = snx_path_join(folder, "0100ABCD12340000_0100ABCD12340800_data/control.nacp");
+        assert(!snx_write_file(path, nacp, sizeof nacp));
+        free(path);
+        game = snx_path_join(ready, made[0]);
+        update = snx_path_join(ready, made[2]);
+        assert(gui_games_scan(&games, ready, false, error, sizeof error) && games.count == 1);
+        assert(!strcmp(games.names[0], "0100ABCD12340000") && games.addons[0] == 2);
+        assert(gui_game_folder(update) && gui_game_addons(game, &addons) && addons.count == 2);
+        assert(!strcmp(addons.names[0], "0100ABCD12340000_0100ABCD12340800") && !strcmp(addons.shown[0], "Update 1.2.0"));
+        assert(!strcmp(addons.paths[0], update));
+        assert(!strcmp(addons.names[1], "0100ABCD12340000_0100ABCD12341002") && !strcmp(addons.shown[1], "DLC 2"));
+        assert(!gui_game_addons(update, &addons) && !addons.count); /* an add-on has none of its own */
+        gui_games_free(&addons);
+        free(game);
+        free(update);
+        free(folder);
+        assert(!snx_remove_tree(ready));
+        free(ready);
+#undef EXE
+    }
     /* Repeated scans replace the old list; neither recursion nor execute bits. */
     assert(gui_games_scan(&games, subdir, true, error, sizeof error) && !games.count);
     assert(!snx_remove_tree(dir));

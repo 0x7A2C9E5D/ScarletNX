@@ -3,6 +3,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "nx/runtime/driver/recompile.h"
 #include "nx/runtime/driver/container.h"
+#include "nx/runtime/driver/extract.h"
 #include "nx/runtime/driver/game_name.h"
 #include "nx/loader/loader.h"
 #include "nx/loader/module.h"
@@ -31,7 +32,9 @@ static void usage(void) {
          "                         turns that pass off; scarletnx --settings=recompile lists them)");
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
            SNX_CHUNK_INSTRUCTIONS);
-    puts("  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
+    puts("  --base GAME            An update's or a DLC's game: its dump or extracted folder. A DLC runs the game's\n"
+         "                         code, recompiled from it\n"
+         "  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
          "  --no-build             Stage data/INI only, generate no code\n"
          "  --tmpfs                Leave the RomFS in the extraction (in tmpfs), which the game reads it from");
     puts("  --interp-only          Generate no code: the runtime JIT compiles all of it\n"
@@ -40,6 +43,8 @@ static void usage(void) {
          "  --keep-ir              Save the generated code (LLVM IR) in <NAME>/<NAME>_build\n"
          "  -q, --quiet            Suppress progress");
     puts("Each game is a folder of <outdir>, <NAME>/: its program <NAME>, <NAME>_code and <NAME>_data/.\n"
+         "An update's or a DLC's dump is made beside its game, <ID>/<ID>_<its own title ID>, which runs with the\n"
+         "game's settings and saves and reads the dump in place.\n"
          "Hints: <outdir>/<NAME>/<NAME>.hints (hex PCs, one per line).");
 }
 static unsigned number(const char* text, unsigned max) {
@@ -187,22 +192,23 @@ static int dump_read(void* source, const char* name, unsigned char** data, size_
 }
 /* a dump's program, its ExeFS read in place and its control.nacp out of its Control NCA: nothing is extracted. 0, else
    nonzero, said why */
-static int load_dump(const char* dump, const SnxPaths* paths, int quiet, SnxProgram* program, char* error,
-                     size_t error_size) {
+static int load_dump(const char* dump, const char* update, const SnxPaths* paths, int quiet, SnxProgram* program,
+                     char* error, size_t error_size) {
     SnxDump opened;
     SnxHacFs* fs = NULL;
     SnxExefsReader reader;
     unsigned char* nacp;
     const char* why;
     size_t nacp_size = 0;
-    int rc = snx_dump_open(&opened, dump, NULL, NULL, NULL, paths->repo, !quiet);
+    /* an update's ExeFS is whole: read without its game's, which only its RomFS is made of */
+    int rc = snx_dump_open(&opened, update ? NULL : dump, update, NULL, NULL, paths->repo, !quiet);
     if (!rc && !(fs = snx_dump_fs(&opened))) rc = 1;
     if (!rc) {
         nacp = snx_dump_nacp(&opened, &nacp_size, &why);
         if (!nacp && !quiet) printf("The game keeps the name of its file: %s\n", why);
         reader.read = dump_read;
         reader.source = fs;
-        rc = snx_load_program_from(&reader, dump, nacp, nacp_size, program, error, error_size);
+        rc = snx_load_program_from(&reader, update ? update : dump, nacp, nacp_size, program, error, error_size);
         if (rc) snx_error("%s", error);
     }
     snx_hac_fs_free(fs);
@@ -307,6 +313,8 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
 }
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *arg, *value;
+    const char* game_input = NULL; /* --base */
+    SnxU64 addon = 0;
     SnxLlvmBuild llvm;
     SnxCompileOptions compile;
     SnxCodegenOptions gen;
@@ -380,7 +388,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
             }
             if (strcmp(arg, "-o") && strcmp(arg, "--name") && strcmp(arg, "--out") && strcmp(arg, "--outname") &&
                 strcmp(arg, "--outdir") && strcmp(arg, "--runtime") && strcmp(arg, "--target") && strcmp(arg, "-O") &&
-                strcmp(arg, "--jobs") && strcmp(arg, "--chunk"))
+                strcmp(arg, "--jobs") && strcmp(arg, "--chunk") && strcmp(arg, "--base"))
                 return snx_error("unknown recompiler option: %s", arg);
             if (!value) {
                 if (++i == argc) return snx_error("%s requires a value", arg);
@@ -393,6 +401,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
                 outdir = value;
             else if (!strcmp(arg, "--runtime"))
                 runtime = value;
+            else if (!strcmp(arg, "--base"))
+                game_input = value;
             else if (!strcmp(arg, "--target"))
                 target = value;
             else if (!strcmp(arg, "-O")) {
@@ -430,13 +440,41 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     /* The backends write the module for the machine they run on (build == host == target) */
     if (compile.target_win != host_win) return snx_error("--target: modules are built for this host only");
     gen.abi = snx_game_abi();
-    /* a dump, read in place, else an ExeFS folder or an NRO */
+    /* a dump, read in place, else an ExeFS folder or an NRO. An update's dump is its own program; a DLC's runs its
+       game's, from --base */
     dump = snx_is_file(input) && snx_is_dump(input);
-    if (dump ? load_dump(input, paths, compile.quiet, &program, error, sizeof(error))
-             : snx_load_program(input, &program, error, sizeof(error)))
+    if (dump && snx_extract_title(input, paths, &addon)) return 1;
+    if (snx_addon_kind(addon) == SNX_ADDON_NONE)
+        addon = 0;
+    else if (name)
+        return snx_error("an update or a DLC is named after its game and itself: --name names a game");
+    if (snx_addon_kind(addon) == SNX_ADDON_DLC) {
+        if (!game_input)
+            return snx_error("a DLC runs its game's code: give the game's dump or extracted folder with --base");
+        i = snx_is_file(game_input) && snx_is_dump(game_input);
+        if (i ? load_dump(game_input, NULL, paths, compile.quiet, &program, error, sizeof(error))
+              : snx_load_program(game_input, &program, error, sizeof(error)))
+            return i ? 1 : snx_error("%s", error);
+    } else if (dump ? load_dump(input, addon ? input : NULL, paths, compile.quiet, &program, error, sizeof(error))
+                    : snx_load_program(input, &program, error, sizeof(error)))
         return dump ? 1 : snx_error("%s", error);
+    if (addon && program.npdm.title_id != snx_addon_base(addon)) {
+        char of[17], other[17];
+        snx_title_text(snx_addon_base(addon), of);
+        snx_title_text(program.npdm.title_id, other);
+        snx_error("%s is an add-on of the game %s, and %s is %s", input, of, game_input ? game_input : "its program",
+                  other[0] ? other : "none with a title ID");
+        snx_free_program(&program);
+        return 1;
+    }
     title = snx_game_shown(name, &program);
-    game = snx_game_name(name, &program.npdm, program.entry_path);
+    if (addon) { /* <game>_<add-on>, in the game's folder */
+        char own[17], of[17];
+        snx_title_text(addon, own);
+        snx_title_text(snx_addon_base(addon), of);
+        game = snx_format("%s_%s", of, own);
+    } else
+        game = snx_game_name(name, &program.npdm, program.entry_path);
     out = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
     if (!out) {
         snx_error("cannot resolve %s", outdir ? outdir : paths->repo);
@@ -451,8 +489,14 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("cannot create %s: %s", out, snx_os_error(why, sizeof why));
         goto done;
     }
-    /* each game in a folder of its own, where an older version put the game's program (a file) */
-    folder = snx_path_join(out, game);
+    /* each game in a folder of its own, where an older version put the game's program (a file); an add-on in its
+       game's */
+    if (addon) {
+        char of[17];
+        snx_title_text(snx_addon_base(addon), of);
+        folder = snx_path_join(out, of);
+    } else
+        folder = snx_path_join(out, game);
     if (snx_is_link(folder) || (snx_path_exists(folder) && !snx_is_dir(folder))) {
         snx_error("%s is a file where this game's folder goes: a game an older version made there, named %s; move "
                   "its files as docs/DEPRECATIONS.md says",
@@ -480,11 +524,13 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     gen.title = title;
     gen.hints = read_hints(base, program.npdm.is64, &gen.hint_count);
     if (!compile.quiet) printf("Recompiling %s (%lu modules)\n", title, (unsigned long)program.module_count);
-    if (dump ? drop_extraction(data, compile.quiet) : copy_data(&program, data, compile.quiet, tmpfs)) {
+    /* an add-on's files: its dump, read in place, or what the driver extracts into its data folder */
+    if (addon ? snx_mkdirs(data)
+              : dump ? drop_extraction(data, compile.quiet) : copy_data(&program, data, compile.quiet, tmpfs)) {
         snx_error("cannot stage game data in %s", data);
         goto done;
     }
-    if (program.nacp) { /* the name the launcher lists the game by */
+    if (program.nacp && snx_addon_kind(addon) != SNX_ADDON_DLC) { /* the name the launcher lists the game by */
         char* nacp = snx_path_join(data, "control.nacp");
         int failed = !nacp || snx_write_file(nacp, program.nacp, program.nacp_size);
         free(nacp);
@@ -498,7 +544,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("cannot create the settings folder for %s", title);
         goto done;
     }
-    if (!snx_is_file(ini)) {
+    if (!snx_is_file(ini) && !addon) { /* an add-on's names its dump only: it has its game's settings */
         ini_text = snx_format(
             "; ScarletNX settings for %s\n; Full option help is written on first run.\n[Display]\nlanguage=1\n", title);
         if (snx_write_file(ini, ini_text, strlen(ini_text))) {

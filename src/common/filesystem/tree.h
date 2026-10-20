@@ -50,6 +50,10 @@ FsTreeResult fs_tree_init(FsTree* tree, const char* directory);
 /* Startup only: name, a child of the data directory it doesn't have, indexed from another host directory, as
    fs_tree_init indexes its own and with the same rejections, and readonly. The game's RomFS kept in tmpfs */
 FsTreeResult fs_tree_graft(FsTree* tree, const char* name, const char* directory);
+/* Startup only: directory's entries laid over the data directory's, read-only, as another folder's: a file over the
+   entry of its name, a folder's entries over the folder of its name. A top-level name in whole (NULL-terminated, or
+   NULL) is never merged: its entry replaces the data directory's and everything under it */
+FsTreeResult fs_tree_overlay(FsTree* tree, const char* directory, const char* const* whole);
 void fs_tree_destroy(FsTree* tree);
 /* With no scope, accepts drive:/path, /path (under root/), or paths relative to the data directory.
    A scope makes paths relative to that directory; drive prefixes and traversal above scope are rejected. */

@@ -114,6 +114,15 @@ static blob_t control(uint64_t title) {
     return nca;
 }
 
+/* a DLC's Data NCA: a RomFS of its own */
+static blob_t dlc(uint64_t title) {
+    blob_t data = text_blob("synthetic dlc data");
+    romfs_file_t romfs[1] = {{"dlc.bin", data}};
+    blob_t nca = dnca_build(NCACONTENTTPYE_PUBLICDATA, title, NULL, 0, romfs, 1);
+    free(data.data);
+    return nca;
+}
+
 /* an NCA whose header is encrypted, which the keys would have to open */
 static blob_t encrypted_nca(void) {
     blob_t b = {zalloc(0xC00), 0xC00};
@@ -231,11 +240,13 @@ static int scenario(const char* scratch, const char* mode) {
         game_add(&game, "a0a0.tik", ticket());
         if (!strcmp(mode, "encrypted-no-keys"))
             game_add(&game, "enc.nca", encrypted_nca());
-        else if (!strcmp(mode, "dlc"))
-            game_add(&game, "dlc.nca", program(TITLE | 0x800, 1)); /* an update's alone */
+        else if (!strcmp(mode, "update-alone"))
+            game_add(&game, "patch.nca", program(TITLE | 0x800, 1)); /* an update's alone */
+        else if (!strcmp(mode, "dlc-alone"))
+            game_add(&game, "dlc.nca", dlc(TITLE + 0x1001));
         else
             game_add(&game, "program.nca", program(TITLE, strcmp(mode, "no-main")));
-        if (strcmp(mode, "no-control")) game_add(&game, "control.nca", control(TITLE));
+        if (strcmp(mode, "no-control") && strcmp(mode, "dlc-alone")) game_add(&game, "control.nca", control(TITLE));
         write_container(base, &game, kind);
     }
     if (!strcmp(mode, "hactool-exit")) { /* a gamecard whose root partition is not what its header hashed */
@@ -257,11 +268,16 @@ static int scenario(const char* scratch, const char* mode) {
         return result;
     }
     arguments[count++] = base;
-    if (!strcmp(mode, "unmatched-update")) {
-        game_add(&game, "patch.nca", program((TITLE + 0x1000) | 0x800, 1));
-        write_container(update, &game, "nsp");
-        arguments[count++] = "--update";
-        arguments[count++] = update;
+    if (!strcmp(mode, "unmatched-update") || !strncmp(mode, "dlc-", 4)) {
+        if (!strcmp(mode, "unmatched-update"))
+            game_add(&game, "patch.nca", program((TITLE + 0x1000) | 0x800, 1));
+        else
+            game_add(&game, "dlc.nca", dlc(!strcmp(mode, "dlc-other") ? TITLE + 0x3001 : TITLE + 0x1002));
+        if (strcmp(mode, "dlc-alone")) {
+            write_container(update, &game, "nsp");
+            arguments[count++] = "--update";
+            arguments[count++] = update;
+        }
     }
     if (!strncmp(mode, "explicit", 8)) {
         arguments[count++] = "--keys";
@@ -280,7 +296,20 @@ static int scenario(const char* scratch, const char* mode) {
     }
     if (!strcmp(mode, "existing")) CHECK(!snx_mkdirs(exefs));
     result = snx_extract(count, arguments, &paths);
-    if (!result) {
+    if (!result && !strncmp(mode, "dlc-", 4)) { /* the DLC's image where aoc:u finds it, the game's files beside */
+        char* archives = snx_path_join(out, "system/archives");
+        unsigned char* image;
+        size_t size = 0;
+        char* path = snx_format("%s/%s", archives, !strcmp(mode, "dlc-alone") ? "0100000000AB1001.romfs"
+                                                                               : "0100000000AB1002.romfs");
+        image = snx_read_file(path, &size);
+        CHECK(image && size >= 0x50 && image[0] == 0x50 && !image[1]); /* a RomFS header: its size first */
+        CHECK(strcmp(mode, "dlc-alone") || !snx_path_exists(exefs));
+        CHECK(!strcmp(mode, "dlc-alone") || file_is(exefs, "main", "synthetic main", 14));
+        free(image);
+        free(path);
+        free(archives);
+    } else if (!result) {
         char* romfs = snx_path_join(out, "romfs");
         char* control_romfs = snx_path_join(out, "control.romfs");
         blob_t want = nacp(), meta = npdm();
@@ -328,7 +357,10 @@ int main(int argc, char** argv) {
         {"encrypted-no-keys", "Encrypted content needs prod.keys", 1},
         {"explicit-missing-keys", "prod.keys is not a file", 1},
         {"unmatched-update", "Update has no Program NCA matching the selected base game", 1},
-        {"dlc", "Container has no base Program NCA", 1},
+        {"update-alone", "is an update, which goes over its game", 1},
+        {"dlc-alone", "Extracting the DLC 0100000000AB1001", 0},
+        {"dlc-base", "Extracting the DLC 0100000000AB1002", 0},
+        {"dlc-other", "The DLC is not the selected base game's", 1},
         {"no-main", "Extracted exefs has no main", 1},
         {"existing", "Output already contains exefs", 1},
         {"hactool-exit", "hactool stopped on the dump", 1},

@@ -71,18 +71,36 @@ static int event(char stage) {
 #endif
     return 7;
 }
+/* SNX_WORKFLOW_ADDON's dumps: the game's, its update's ("Update" in the name) and a DLC's ("Dlc"), by their file */
+#define ADDON_GAME (((SnxU64)0x0100ABCDUL << 32) | 0x12340000UL)
+static SnxU64 addon_title(const char* dump) {
+    const char* leaf = strrchr(dump, '/') ? strrchr(dump, '/') + 1 : dump;
+    return strstr(leaf, "Update") ? ADDON_GAME | 0x800 : strstr(leaf, "Dlc") ? ADDON_GAME + 0x1001 : ADDON_GAME;
+}
+static int addon_mode(void) { return getenv("SNX_WORKFLOW_ADDON") && *getenv("SNX_WORKFLOW_ADDON"); }
 /* the title ID the extraction's NPDM gives (SNX_WORKFLOW_NPDM "id"), else none */
 int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title) {
     const char* kind = getenv("SNX_WORKFLOW_NPDM");
     (void)paths;
     CHECK(snx_is_file(dump));
-    *title = kind && !strcmp(kind, "id") ? ((SnxU64)0x0100ABCDUL << 32) | 0x12345000UL : 0;
+    *title = addon_mode() ? addon_title(dump) : kind && !strcmp(kind, "id") ? ((SnxU64)0x0100ABCDUL << 32) | 0x12345000UL : 0;
     return 0;
 }
 int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     char* partial;
     int rc;
     (void)paths;
+    if (addon_mode() && argc == 4 && snx_addon_kind(addon_title(argv[3])) == SNX_ADDON_DLC) { /* its image */
+        char text[17], *image;
+        CHECK(!strcmp(argv[0], "--out") && !strcmp(argv[2], "--"));
+        snx_title_text(addon_title(argv[3]), text);
+        partial = snx_path_join(argv[1], "system/archives");
+        image = snx_format("%s/%s.romfs", partial, text);
+        CHECK(!snx_mkdirs(partial) && !snx_write_file(image, "image", 5));
+        free(partial);
+        free(image);
+        return event('E');
+    }
     CHECK(argc == 4 && !strcmp(argv[0], "--out") && !strcmp(argv[2], "--"));
     CHECK(snx_is_file(argv[3]));
     partial = snx_path_join(argv[1], "exefs"); /* into a game's data folder: what an extraction left taken away */
@@ -150,9 +168,56 @@ const IniOpt* snx_recompile_setting(const char* key) {
     const IniOpt* o = ini_find(g_recompile_ini, key);
     return o ? o : ini_find(g_llvm_ini, key);
 }
+/* SNX_WORKFLOW_ADDON's recompile: --outdir GAMES [--base GAME] -- DUMP [NAME]. A game's dump is named by its title ID,
+   an update or a DLC goes into its game's folder as <game>_<its own>, a DLC's from its game's dump given as --base
+   (SNX_WORKFLOW_ADDON names it) */
+static int addon_recompile(int argc, char** argv, const SnxPaths* paths) {
+    const char* base = NULL;
+    char of[17], own[17], *folder, *name, *game, *stamp, *code, *data;
+    SnxU64 title;
+    if (argc > 4 && !strcmp(argv[2], "--base")) {
+        base = argv[3];
+        memmove(argv + 2, argv + 4, (size_t)(argc - 4) * sizeof *argv);
+        argc -= 2;
+    }
+    CHECK((argc == 4 || argc == 5) && !strcmp(argv[0], "--outdir") && !strcmp(argv[2], "--"));
+    title = addon_title(argv[3]);
+    snx_title_text(snx_addon_base(title), of);
+    snx_title_text(title, own);
+    if (snx_addon_kind(title) == SNX_ADDON_DLC)
+        CHECK(base && snx_same_file(base, getenv("SNX_WORKFLOW_ADDON")) && argc == 4);
+    else
+        CHECK(!base && argc == (snx_addon_kind(title) == SNX_ADDON_NONE ? 5 : 4));
+    folder = snx_path_join(argv[1], of);
+    name = snx_addon_kind(title) == SNX_ADDON_NONE ? snx_strdup(of) : snx_format("%s_%s", of, own);
+#ifdef _WIN32
+    game = snx_format("%s/%s.exe", folder, name);
+#else
+    game = snx_format("%s/%s", folder, name);
+#endif
+    stamp = snx_format("%s/%s.abi", folder, name);
+    code = snx_format("%s/%s_code.%s", folder, name,
+#ifdef _WIN32
+                      "dll"
+#else
+                      "so"
+#endif
+    );
+    data = snx_format("%s/%s_data", folder, name);
+    CHECK(!snx_mkdirs(data) && !snx_copy_file(paths->executable, game) && !snx_make_executable(game));
+    CHECK(!snx_write_file(stamp, SNX_WORKFLOW_STAMP, strlen(SNX_WORKFLOW_STAMP)) && !snx_write_file(code, "x", 1));
+    free(folder);
+    free(name);
+    free(game);
+    free(stamp);
+    free(code);
+    free(data);
+    return event('R');
+}
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     char *game, *partial, *name, *folder;
     int rc, tmpfs;
+    if (addon_mode()) return addon_recompile(argc, argv, paths);
     /* Extract to tmpfs: the RomFS left in the extraction */
     tmpfs = argc > 2 && !strcmp(argv[2], "--tmpfs");
     CHECK(tmpfs == (getenv("SNX_WORKFLOW_TMPFS") && *getenv("SNX_WORKFLOW_TMPFS")));
@@ -289,6 +354,10 @@ static void run(const char* exe, const char* repo, const char* dump, const char*
     if (out && *out) {
         args[n++] = "--out";
         args[n++] = out;
+    }
+    if (getenv("SNX_WORKFLOW_UPDATE") && *getenv("SNX_WORKFLOW_UPDATE")) {
+        args[n++] = "--update";
+        args[n++] = getenv("SNX_WORKFLOW_UPDATE");
     }
     if (getenv("SNX_WORKFLOW_ARGS") && *getenv("SNX_WORKFLOW_ARGS")) {
         args[n++] = "--";
@@ -477,7 +546,8 @@ int main(int argc, char** argv) {
         CHECK(cwd && expected_cwd && !strcmp(cwd, expected_cwd));
         free(cwd);
         free(expected_cwd);
-        return event('G');
+        /* an update or a DLC runs as its own program, in its game's folder: A */
+        return event(addon_mode() && strchr(strrchr(argv[0], '/') ? strrchr(argv[0], '/') : argv[0], '_') ? 'A' : 'G');
     }
     exe = snx_executable(argv[0]);
     root = snx_temp_dir(NULL);
@@ -511,6 +581,8 @@ int main(int argc, char** argv) {
     set_env("SNX_WORKFLOW_OUTDIR", "");
     set_env("SNX_WORKFLOW_OUT", "");
     set_env("SNX_WORKFLOW_DUMP", "");
+    set_env("SNX_WORKFLOW_ADDON", "");
+    set_env("SNX_WORKFLOW_UPDATE", "");
     /* Extract game container on: the dump extracted into its game's data folder, which the game is made from */
     set_env("SNX_WORKFLOW_EXTRACT", "1");
     reset(repo, dump);
@@ -969,6 +1041,57 @@ int main(int argc, char** argv) {
         free(own);
         free(stamp);
         free(moved);
+    }
+#endif
+    /* An update or a DLC: its dump played over the game made already (games/<id>/<id>_<its own id>, its .ini naming
+       its dump), refused before the game is there, or with the game's dump as --update. A DLC is recompiled from its
+       game's dump, an update from its own; its own program runs it again. Extract game container extracts a DLC's
+       image into its data folder, and off again takes it away */
+#ifndef _WIN32
+    {
+        char *game_dump = snx_path_join(repo, "Game.nsp"), *update = snx_path_join(repo, "Game Update.nsp");
+        char *dlc = snx_path_join(repo, "Game Dlc.nsp"), *folder = snx_path_join(repo, "games/0100ABCD12340000");
+        char *image = snx_path_join(folder, "0100ABCD12340000_0100ABCD12341001_data/system/archives/"
+                                            "0100ABCD12341001.romfs");
+        char *own = snx_path_join(folder, "0100ABCD12340000_0100ABCD12340800");
+        set_env("SNX_WORKFLOW_ADDON", game_dump);
+        set_env("SNX_WORKFLOW_GAMES", folder);
+        set_env("SNX_WORKFLOW_EXTRACT", "");
+        reset(repo, dump);
+        CHECK(!snx_write_file(game_dump, "game", 4) && !snx_write_file(update, "update", 6) &&
+              !snx_write_file(dlc, "dlc", 3));
+        run(exe, repo, update, log, 1, "", "which is not in");
+        set_env("SNX_WORKFLOW_UPDATE", update);
+        run(exe, repo, game_dump, log, 0, "RRA", NULL);
+        set_env("SNX_WORKFLOW_UPDATE", "");
+        CHECK(snx_is_file(own) && records_dump(folder, "0100ABCD12340000_0100ABCD12340800", update));
+        CHECK(records_dump(folder, "0100ABCD12340000", game_dump));
+        run(exe, repo, update, log, 0, "A", NULL);
+        run(exe, repo, own, log, 0, "A", NULL);
+        run(exe, repo, game_dump, log, 0, "G", NULL);
+        run(exe, repo, dlc, log, 0, "RA", NULL);
+        CHECK(records_dump(folder, "0100ABCD12340000_0100ABCD12341001", dlc) && !snx_path_exists(image));
+        set_env("SNX_WORKFLOW_EXTRACT", "1");
+        run(exe, repo, dlc, log, 0, "EA", NULL);
+        CHECK(snx_is_file(image));
+        set_env("SNX_WORKFLOW_EXTRACT", "");
+        run(exe, repo, dlc, log, 0, "A", "the DLC reads it from its dump");
+        CHECK(!snx_path_exists(image));
+        set_env("SNX_WORKFLOW_UPDATE", dlc); /* given with another game: that game made, the DLC refused */
+        set_env("SNX_WORKFLOW_ADDON", "");
+        set_env("SNX_WORKFLOW_DUMP", dump);
+        run(exe, repo, dump, log, 1, "R", "is not an update or a DLC of");
+        set_env("SNX_WORKFLOW_DUMP", "");
+        set_env("SNX_WORKFLOW_UPDATE", "");
+        cwd = snx_path_join(repo, "games/Test game");
+        set_env("SNX_WORKFLOW_GAMES", cwd);
+        free(cwd);
+        free(game_dump);
+        free(update);
+        free(dlc);
+        free(folder);
+        free(image);
+        free(own);
     }
 #endif
     /* The probe takes a third argument, so use a separate, terminated vector. */

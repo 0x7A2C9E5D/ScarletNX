@@ -74,6 +74,12 @@ a dump, read in place, or `work/<Game>/{exefs,romfs}` -> `games/<id>/`: `<id>[.e
 `<id>_data/`, and the dump's path as `source=` in the game's `<id>.ini` (`<id>.source`, a link to it, from older
 versions):
 
+An update or a DLC is made beside its game, `games/<id>/<id>_<its title ID>` (`snx_addon_name`), from its own dump:
+its `.ini` names only that dump, and the runtime (`main.c`'s `addon_init`) runs it with the game's `.ini` and data
+folder, the add-on's own data folder laid over it (`fs_tree_overlay`). `fs.c` reads an update's dump with the game's
+in one `SnxDump` (its Patch RomFS reads the game's NCA), and a DLC's in its own, whose image
+`OpenDataStorageByDataId` serves by its title ID.
+
 - `driver.c`: CLI dispatch only; `extract.c` and `recompile.c` own their workflows.
 - `container.c`: a dump opened with hactool, its keys loaded and its NCAs picked, shared by the extraction, the
   recompiler (a dump given to `-r`, its ExeFS read through `SnxExefsReader`) and the runtime's `fs.c`. Without

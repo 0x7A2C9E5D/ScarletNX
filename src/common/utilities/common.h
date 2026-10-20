@@ -185,4 +185,16 @@ SnxU64 snx_npdm_title(const unsigned char* npdm, size_t size);
 /* id as a game's folder and files are named, 16 hex digits into out (17 bytes): 1, or 0 for an ID that is none of the
    game's own (0, SNX_NPDM_DEFAULT_TITLE) */
 int snx_title_text(SnxU64 id, char* out);
+/* An add-on of a game, an update or a DLC (add-on content), is made in the game's folder beside it and named
+   <base>_<its title ID as snx_title_text writes it>: an update's ID is the game's with 0x800 added, a DLC's past the
+   game's 0x1000 (aoc:u's base ID). 1 when name is such an add-on of base, the game base names by its title ID, its
+   ID in *id when id is not NULL */
+int snx_addon_name(const char* base, const char* name, SnxU64* id);
+enum { SNX_ADDON_NONE, SNX_ADDON_UPDATE, SNX_ADDON_DLC };
+/* what an add-on's title ID is: SNX_ADDON_UPDATE, SNX_ADDON_DLC, or SNX_ADDON_NONE for a game's own */
+int snx_addon_kind(SnxU64 id);
+/* the title ID of the game an add-on's ID belongs to */
+SnxU64 snx_addon_base(SnxU64 id);
+/* the display version in a control.nacp ("1.2.0"), printable ASCII into version: 1, or 0 for none */
+int snx_nacp_version(const unsigned char* nacp, size_t size, char* version, size_t version_size);
 #endif

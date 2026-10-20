@@ -17,11 +17,11 @@ typedef struct {
     uint64_t offset, size; /* in the container's file */
 } SnxHacEntry;
 
-enum { SNX_HAC_OTHER, SNX_HAC_PROGRAM, SNX_HAC_CONTROL };
+enum { SNX_HAC_OTHER, SNX_HAC_PROGRAM, SNX_HAC_CONTROL, SNX_HAC_DATA };
 
 /* what an NCA's header says */
 typedef struct {
-    int type;  /* SNX_HAC_PROGRAM, SNX_HAC_CONTROL or SNX_HAC_OTHER */
+    int type;  /* SNX_HAC_PROGRAM, SNX_HAC_CONTROL, SNX_HAC_DATA (Data or PublicData: a DLC's) or SNX_HAC_OTHER */
     int patch; /* it has a Patch RomFS (BKTR) section: an update's */
     uint64_t title_id;
 } SnxHacNca;

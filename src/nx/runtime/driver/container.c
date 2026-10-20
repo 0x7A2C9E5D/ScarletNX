@@ -273,46 +273,56 @@ static void take(SnxNcaRef* ref, int container, size_t entry, const SnxHacEntry*
     ref->title_id = title_id;
 }
 
-/* the Program NCA of a container to extract: the base's, or with update the patch of expected_title; the patch an NSP of
-   both has (embedded_patch), and the Control NCA of the same title (control). The biggest when there are several */
-static int select_ncas(SnxDump* dump, int container, int update, SnxU64 expected_title, SnxNcaRef* selected,
-                       SnxNcaRef* embedded_patch, SnxNcaRef* control) {
+/* the headers of a container's NCAs, the content meta's left out (SNX_HAC_OTHER), into *ncas (owned, count of them
+   as there are entries): 0, else nonzero, said why. One whose header cannot be decrypted counts in *unreadable */
+static int read_ncas(SnxDump* dump, int container, const SnxHacEntry** entries, size_t* count, SnxHacNca** ncas,
+                     unsigned long* unreadable) {
+    size_t i;
+    *count = snx_hac_entries(dump->hac, container, entries);
+    *ncas = (SnxHacNca*)calloc(*count ? *count : 1, sizeof **ncas);
+    *unreadable = 0;
+    if (!*ncas) return snx_error("Out of memory reading the NCAs' headers");
+    for (i = 0; i < *count; i++) {
+        (*ncas)[i].type = SNX_HAC_OTHER;
+        if (!has_suffix((*entries)[i].name, ".nca") || has_suffix((*entries)[i].name, ".cnmt.nca")) continue;
+        if (!dump->has_keys && nca_needs_keys(dump, container, i)) {
+            free(*ncas);
+            *ncas = NULL;
+            return snx_error("Encrypted content needs prod.keys. Provide --keys, or put it at %s or in ~/.switch",
+                             dump->keys);
+        }
+        if (snx_hac_nca(dump->hac, container, i, &(*ncas)[i])) {
+            (*ncas)[i].type = SNX_HAC_OTHER;
+            ++*unreadable;
+        }
+    }
+    return 0;
+}
+
+/* an update's Program NCA: its title ID the game's with 0x800 added, or a Patch RomFS */
+static int is_patch(const SnxHacNca* nca) {
+    return nca->type == SNX_HAC_PROGRAM && (snx_addon_kind(nca->title_id) == SNX_ADDON_UPDATE || nca->patch);
+}
+
+/* the base's Program NCA of a container (selected), the patch an NSP of both has (embedded_patch), and the Control
+   NCA of the same title (control). The biggest when there are several */
+static int select_ncas(SnxDump* dump, int container, SnxNcaRef* selected, SnxNcaRef* embedded_patch,
+                       SnxNcaRef* control) {
     const SnxHacEntry* entries;
     SnxHacNca* ncas;
     size_t count, i;
     unsigned long unreadable;
-    int patch;
     const SnxU64 update_bit = 0x800UL;
     memset(selected, 0, sizeof *selected);
     if (embedded_patch) memset(embedded_patch, 0, sizeof *embedded_patch);
     memset(control, 0, sizeof *control);
-    count = snx_hac_entries(dump->hac, container, &entries);
-    ncas = (SnxHacNca*)calloc(count ? count : 1, sizeof *ncas);
-    if (!ncas) return snx_error("Out of memory selecting Program NCA");
-    unreadable = 0;
-    for (i = 0; i < count; i++) {
-        ncas[i].type = SNX_HAC_OTHER;
-        if (!has_suffix(entries[i].name, ".nca") || has_suffix(entries[i].name, ".cnmt.nca")) continue;
-        if (!dump->has_keys && nca_needs_keys(dump, container, i)) {
-            free(ncas);
-            return snx_error("Encrypted content needs prod.keys. Provide --keys, or put it at %s or in ~/.switch",
-                             dump->keys);
-        }
-        if (snx_hac_nca(dump->hac, container, i, &ncas[i])) {
-            ncas[i].type = SNX_HAC_OTHER;
-            unreadable++;
-        }
-    }
-    for (i = 0; i < count; i++) {
-        patch = (ncas[i].title_id & update_bit) || ncas[i].patch;
-        if (ncas[i].type != SNX_HAC_PROGRAM || (selected->found && entries[i].size <= selected->size)) continue;
-        if (update ? patch && (ncas[i].title_id & ~update_bit) == expected_title : !patch)
+    if (read_ncas(dump, container, &entries, &count, &ncas, &unreadable)) return 1;
+    for (i = 0; i < count; i++)
+        if (ncas[i].type == SNX_HAC_PROGRAM && !is_patch(&ncas[i]) &&
+            (!selected->found || entries[i].size > selected->size))
             take(selected, container, i, &entries[i], ncas[i].title_id);
-    }
     for (i = 0; selected->found && i < count; i++) {
-        patch = (ncas[i].title_id & update_bit) || ncas[i].patch;
-        if (embedded_patch && ncas[i].type == SNX_HAC_PROGRAM && patch &&
-            (ncas[i].title_id & ~update_bit) == selected->title_id &&
+        if (embedded_patch && is_patch(&ncas[i]) && (ncas[i].title_id & ~update_bit) == selected->title_id &&
             (!embedded_patch->found || entries[i].size > embedded_patch->size))
             take(embedded_patch, container, i, &entries[i], ncas[i].title_id);
         if (!control->found && ncas[i].type == SNX_HAC_CONTROL && /* the same game's, base or update */
@@ -322,8 +332,43 @@ static int select_ncas(SnxDump* dump, int container, int update, SnxU64 expected
     free(ncas);
     if (selected->found) return 0;
     if (unreadable) return snx_hac_error("The NCAs' headers cannot be decrypted. Check that prod.keys is current");
-    return snx_error(update ? "Update has no Program NCA matching the selected base game"
-                            : "Container has no base Program NCA (possibly an update or DLC). Supply a base game");
+    return snx_error("Container has no base Program NCA (possibly an update or DLC). Supply a base game");
+}
+
+/* An add-on's container: an update (its Program NCA, the patch, with its Control NCA) or else a DLC (its Data NCA, a
+   title ID past the game's add-on base). With the base opened (program found), only the base's own add-ons; without
+   it, the first game's whose add-on the container has. The biggest when there are several */
+static int select_addon(SnxDump* dump, int container) {
+    const SnxHacEntry* entries;
+    SnxHacNca* ncas;
+    size_t count, i;
+    unsigned long unreadable;
+    SnxU64 game = dump->program.found ? dump->program.title_id : 0, own;
+    int patches = 0; /* another game's */
+    memset(&dump->patch, 0, sizeof dump->patch);
+    memset(&dump->aoc, 0, sizeof dump->aoc);
+    if (read_ncas(dump, container, &entries, &count, &ncas, &unreadable)) return 1;
+    for (i = 0; i < count; i++) {
+        own = snx_addon_base(ncas[i].title_id);
+        patches += is_patch(&ncas[i]);
+        if (is_patch(&ncas[i]) && (!game || own == game) &&
+            (!dump->patch.found || (own == snx_addon_base(dump->patch.title_id) && entries[i].size > dump->patch.size)))
+            take(&dump->patch, container, i, &entries[i], ncas[i].title_id);
+    }
+    for (i = 0; i < count; i++) {
+        own = snx_addon_base(ncas[i].title_id);
+        if (dump->patch.found && ncas[i].type == SNX_HAC_CONTROL && own == snx_addon_base(dump->patch.title_id))
+            take(&dump->control, container, i, &entries[i], ncas[i].title_id); /* the update's, a name changed in it */
+        else if (!dump->patch.found && ncas[i].type == SNX_HAC_DATA &&
+                 snx_addon_kind(ncas[i].title_id) == SNX_ADDON_DLC && (!game || own == game) &&
+                 (!dump->aoc.found || (ncas[i].title_id == dump->aoc.title_id && entries[i].size > dump->aoc.size)))
+            take(&dump->aoc, container, i, &entries[i], ncas[i].title_id);
+    }
+    free(ncas);
+    if (dump->patch.found || dump->aoc.found) return 0;
+    if (unreadable) return snx_hac_error("The NCAs' headers cannot be decrypted. Check that prod.keys is current");
+    if (game && patches) return snx_error("Update has no Program NCA matching the selected base game");
+    return snx_error(game ? "The DLC is not the selected base game's" : "Container has no update or DLC");
 }
 
 static int open_container(SnxDump* dump, const char* path, int say) {
@@ -338,25 +383,49 @@ static int open_container(SnxDump* dump, const char* path, int say) {
     return container < 0 || read_tickets(dump, container) ? -1 : container;
 }
 
-int snx_dump_open(SnxDump* dump, const char* base, const char* update, const char* keys, const char* title_keys,
-                  const char* repo, int say) {
-    SnxNcaRef newer;
+/* the keys loaded into a new hactool: 0, else nonzero, said why */
+static int dump_start(SnxDump* dump, const char* keys, const char* title_keys, const char* repo, int say) {
     memset(dump, 0, sizeof *dump);
-    dump->update = -1;
+    dump->base = dump->update = -1;
     dump->keys = snx_find_keys(keys, "prod.keys", repo);
     dump->title_keys = snx_find_keys(title_keys, "title.keys", repo);
     dump->hac = snx_hac_new();
     if (!dump->keys || !dump->title_keys || !dump->hac) return snx_error("Out of memory reading the dump");
     dump->has_keys = snx_is_file(dump->keys);
     if (keys && !dump->has_keys) return snx_error("%s is not a file", dump->keys);
-    if ((dump->has_keys && load_prod_keys(dump, say)) || load_title_keys(dump)) return 1;
-    if ((dump->base = open_container(dump, base, say)) < 0) return 1;
-    if (update && (dump->update = open_container(dump, update, say)) < 0) return 1;
-    if (select_ncas(dump, dump->base, 0, 0, &dump->program, update ? NULL : &dump->patch, &dump->control)) return 1;
-    if (update) {
-        if (select_ncas(dump, dump->update, 1, dump->program.title_id, &dump->patch, NULL, &newer)) return 1;
-        if (newer.found) dump->control = newer; /* the update's, which a name changed in it comes with */
+    return (dump->has_keys && load_prod_keys(dump, say)) || load_title_keys(dump);
+}
+
+int snx_dump_open(SnxDump* dump, const char* base, const char* addon, const char* keys, const char* title_keys,
+                  const char* repo, int say) {
+    if (dump_start(dump, keys, title_keys, repo, say)) return 1;
+    if (base && (dump->base = open_container(dump, base, say)) < 0) return 1;
+    if (addon && (dump->update = open_container(dump, addon, say)) < 0) return 1;
+    if (base && select_ncas(dump, dump->base, &dump->program, addon ? NULL : &dump->patch, &dump->control)) return 1;
+    return addon ? select_addon(dump, dump->update) : 0;
+}
+
+int snx_dump_title(SnxDump* dump, const char* path, const char* keys, const char* title_keys, const char* repo, int say,
+                   SnxU64* title) {
+    const SnxHacEntry* entries;
+    SnxHacNca* ncas;
+    size_t count, i;
+    unsigned long unreadable;
+    int game = 0;
+    if (dump_start(dump, keys, title_keys, repo, say) || (dump->base = open_container(dump, path, say)) < 0 ||
+        read_ncas(dump, dump->base, &entries, &count, &ncas, &unreadable))
+        return 1;
+    for (i = 0; i < count && !game; i++) game = ncas[i].type == SNX_HAC_PROGRAM && !is_patch(&ncas[i]);
+    free(ncas);
+    if (!game) {
+        dump->update = dump->base;
+        dump->base = -1;
+        if (select_addon(dump, dump->update)) return 1;
+        *title = dump->patch.found ? dump->patch.title_id : dump->aoc.title_id;
+        return 0;
     }
+    if (select_ncas(dump, dump->base, &dump->program, &dump->patch, &dump->control)) return 1;
+    *title = dump->program.title_id;
     return 0;
 }
 
@@ -369,9 +438,16 @@ void snx_dump_close(SnxDump* dump) {
 
 SnxHacFs* snx_dump_fs(SnxDump* dump) {
     const SnxNcaRef* top = dump->patch.found ? &dump->patch : &dump->program;
-    SnxHacFs* fs = snx_hac_fs_open(dump->hac, top->container, top->entry, dump->patch.found ? dump->program.container : -1,
+    int under = dump->patch.found && dump->program.found;
+    SnxHacFs* fs = snx_hac_fs_open(dump->hac, top->container, top->entry, under ? dump->program.container : -1,
                                    dump->program.entry);
     if (!fs) snx_hac_error("The Program NCA cannot be read");
+    return fs;
+}
+
+SnxHacFs* snx_dump_aoc_fs(SnxDump* dump) {
+    SnxHacFs* fs = snx_hac_fs_open(dump->hac, dump->aoc.container, dump->aoc.entry, -1, 0);
+    if (!fs) snx_hac_error("The DLC's Data NCA cannot be read");
     return fs;
 }
 

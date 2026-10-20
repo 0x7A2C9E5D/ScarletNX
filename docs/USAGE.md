@@ -94,14 +94,41 @@ other `--backend` stops with an error.
 Use the separate commands for updates, custom keys or other compiler options.
 
 DXCI and DNSP with decrypted content need no keys. Containers are identified by their headers,
-including renamed files. A matching bundled update is applied automatically. An explicit `--update`
-replaces the bundled update and must match the base title. DLC-only and update-only dumps cannot
+including renamed files. A matching bundled update is applied automatically. DLC-only and update-only dumps cannot
 be used as a base game.
 
 ```powershell
 .\build\scarletnx.exe "C:\Games\Game.dxci"
 .\build\scarletnx.exe --extract "C:\Games\Game.dnsp" --update "C:\Games\Update.dnsp"
 ```
+
+### Updates and DLC
+
+An update or a DLC is played as a game of its own, made beside its game in the game's folder and named after both:
+`games/<id>/<id>_<its own title ID>`. Give its dump with the game's, or alone once the game is in `games/`:
+
+```sh
+./build/scarletnx Game.xci --update Update.nsp   # the game made first if it isn't yet, then the update played
+./build/scarletnx Dlc.nsp                        # a game made already: its DLC made and played
+games/0100ABCD12340000/0100ABCD12340000_0100ABCD12340800
+```
+
+The launcher lists them under their game: opening a game that has one asks which to run, the game itself,
+`Update 1.2.0` (its version, from its own control data) or `DLC 1`. One update or DLC runs at a time.
+
+- **Settings and saves:** an update or a DLC runs with its game's `.ini` and its game's data folder, so its saves are
+  the game's. Its own `<id>_<own id>.ini` holds only `source=`, the path of its own dump.
+- **Files:** the game never reads an update's or a DLC's files. The update or DLC reads both. Without Extract game
+  container, an update reads its ExeFS and RomFS from its dump, its RomFS patch read over the game's dump (the game's
+  `.ini` must name it, which playing the game's dump records). A DLC's RomFS image is read from its dump and served
+  as installed. With Extract game container, an update is extracted into its own data folder with its RomFS applied,
+  and a DLC's image goes to `system/archives/<its title ID>.romfs` there. That folder lies over the game's: its ExeFS
+  and RomFS replace the game's, and its other files are added to the game's.
+- **Code:** an update is recompiled from its own ExeFS. A DLC runs its game's code, recompiled from the game's dump
+  or extraction.
+
+`-x` keeps extracting an update over its game into one folder (`-x Game.nsp --update Update.nsp`), and extracts a
+DLC's dump given alone as its RomFS image.
 
 Run the same command again to retry after a failure or interruption:
 

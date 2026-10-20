@@ -48,6 +48,9 @@ FILE* fs_open_read(const char* path, u64* size) {
     }
     return NULL;
 }
+/* the DLC read in place from its dump (fs.c's), 0 for none */
+static u64 test_aoc_dump;
+u64 fs_aoc_id(void) { return test_aoc_dump; }
 void logf_(int level, const char* format, ...) {
     (void)level;
     (void)format;
@@ -997,6 +1000,25 @@ static void test_aoc_content(void) {
     argument32(&r, 0, 1);
     r.c.has_pid = 1;
     call(aoc, &r);
+    /* a DLC read in place from its dump counts as installed, beside one in system/archives */
+    test_aoc_installed[1] = 0;
+    test_aoc_dump = base + 2;
+    g_hle.misc.aoc_scanned = g_hle.misc.aoc_count = 0;
+    request(&r, 2);
+    r.c.has_pid = 1;
+    call(aoc, &r);
+    CHECK(reply32(&r, 0) == 2);
+    request(&r, 3);
+    argument32(&r, 0, 1);
+    argument32(&r, 4, 1);
+    r.c.has_pid = 1;
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x4000;
+    r.c.b[0].size = 4;
+    call(aoc, &r);
+    memcpy(&v, g_mem + 0x4000, 4);
+    CHECK(reply32(&r, 0) == 1 && v == 2);
+    test_aoc_dump = 0;
     svcobj_unref(aoc);
     memset(test_aoc_installed, 0, sizeof test_aoc_installed);
     g_hle.misc.aoc_scanned = g_hle.misc.aoc_count = 0;

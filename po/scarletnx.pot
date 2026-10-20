@@ -33,6 +33,20 @@ msgstr ""
 
 #: src/gui/browser.c
 #, c-format
+msgid "DLC %u"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
+msgid "Update %s"
+msgstr ""
+
+#: src/gui/browser.c
+msgid "Update"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
 msgid "Cannot open %s: %s"
 msgstr ""
 
@@ -541,6 +555,10 @@ msgid "SCARLETNX  /  SETUP"
 msgstr ""
 
 #: src/gui/main.c
+msgid "The game"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "THEME EDITOR  /  %s"
 msgstr ""
@@ -644,6 +662,11 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "The recent games not shown"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Ready to run, with %zu update(s) or DLC(s) to pick from"
 msgstr ""
 
 #: src/gui/main.c

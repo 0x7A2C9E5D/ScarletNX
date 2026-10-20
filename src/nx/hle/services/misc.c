@@ -739,7 +739,8 @@ static u64 aoc_base_id(u64 application_id) { return (application_id & 0xFFFFFFFF
 /* am's ApplicationRecordNotFound, for a list asked from past its end */
 #define SNX_AOC_NO_RECORD RC(128, 37)
 /* An add-on content is installed when its RomFS image is in the data folder as system/archives/<data id>.romfs, the
-   file OpenDataStorageByDataId opens: data id = base id + index, index 1 to 2047. Scanned once: the list does not
+   file OpenDataStorageByDataId opens, or is the DLC read in place from its dump (fs_aoc_id): data id = base id +
+   index, index 1 to 2047. Scanned once: the list does not
    change while the game runs (g_hle.misc.aoc_index, AOC_MAX at most) */
 static void aoc_scan(void) {
     u64 base = aoc_base_id(g_hle.kernel.title_id);
@@ -750,9 +751,9 @@ static void aoc_scan(void) {
     if (!g_hle.misc.aoc_scanned) {
         for (i = 1; i <= AOC_MAX; i++) {
             snprintf(path, sizeof path, "system/archives/%016llx.romfs", (unsigned long long)(base + (u64)i));
-            f = fs_open_read(path, NULL);
-            if (!f) continue;
-            fclose(f);
+            f = base + (u64)i == fs_aoc_id() ? NULL : fs_open_read(path, NULL);
+            if (!f && base + (u64)i != fs_aoc_id()) continue;
+            if (f) fclose(f);
             g_hle.misc.aoc_index[g_hle.misc.aoc_count++] = i;
             LOG("aoc: add-on content %d (%016llx) installed\n", (int)i, (unsigned long long)(base + (u64)i));
         }

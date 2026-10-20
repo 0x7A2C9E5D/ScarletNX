@@ -861,6 +861,13 @@ int main(int argc, char** argv) {
         puts("Recompiling option flags\nScarletNX - option flags"); /* the runner's banner: now loading */
         return 0;
     }
+    if (argc > 2 && strstr(argv[argv[1][0] == '-' ? 2 : 1], "0100ABCD12340000")) { /* a game or its update */
+        int r = !strcmp(argv[1], "-r");
+        assert(strstr(argv[0], "runtime") && snx_is_file(argv[1 + r]));
+        assert(!strcmp(argv[argc - 2], "--repo") && argv[argc - 1][0]);
+        puts("ScarletNX - an update");
+        return 0;
+    }
     if (argc > 2 && !strcmp(argv[1], "-r") && strstr(argv[2], "folder game")) { /* R on it: recompiled, not played */
         int i = 3;
         assert(strstr(argv[0], "runtime") && snx_is_file(argv[2]));
@@ -3102,6 +3109,73 @@ int main(int argc, char** argv) {
             app.menu.selected = item;
             assert(!snx_remove_tree(cia));
             free(cia);
+        }
+        /* a game with an update beside it: opening it shows the box of what to run, the game and the update by the
+           version its control.nacp gives; the update runs through the driver, by its own program. R opens the box
+           too, and recompiles the row picked. ESC closes it, running nothing */
+        {
+            static unsigned char nacp[0x4000];
+            char *own = snx_path_join(app.games_dir, "0100ABCD12340000"), *base, *update, *update_data, *own_data, *file;
+            int nx, ny;
+#ifdef _WIN32
+            base = snx_path_join(own, "0100ABCD12340000.exe");
+            update = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800.exe");
+#else
+            base = snx_path_join(own, "0100ABCD12340000");
+            update = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800");
+#endif
+            own_data = snx_path_join(own, "0100ABCD12340000_data");
+            update_data = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800_data");
+            file = snx_path_join(update_data, "control.nacp");
+            memcpy(nacp + 0x3060, "1.2.0", 5);
+            assert(!snx_mkdirs(own_data) && !snx_mkdirs(update_data) && !snx_write_file(file, nacp, sizeof nacp));
+            assert(!snx_copy_file(self, base) && !snx_make_executable(base));
+            assert(!snx_copy_file(self, update) && !snx_make_executable(update));
+            app.menu.selected = GUI_SWITCH;
+            go_tab(&app, GUI_TAB_GAMES);
+            focus_game(&app, "0100ABCD12340000");
+            /* its row says it has one */
+            assert(app.games.addons[app.browser.page * app.browser.page_size + app.browser.selected - app.browser.head] ==
+                   1);
+            key(&app, SDLK_RETURN);
+            assert(app.addons_shown && !app.menu.running && app.addons.count == 1 && app.addons_focus == 0);
+            render(&app);
+            assert(find_text(&app, "Update 1.2.0", rgb(app.theme.ink), 1, &nx, &ny));
+            key(&app, SDLK_ESCAPE);
+            assert(!app.addons_shown && !app.menu.running);
+            key(&app, SDLK_RETURN);
+            key(&app, SDLK_DOWN);
+            assert(app.addons_shown && app.addons_focus == 1);
+            launcher(&app, true);
+            key(&app, SDLK_RETURN);
+            assert(!app.addons_shown && app.menu.running && app.native && !app.recompile);
+            {
+                char* ran = snx_absolute(update);
+                assert(ran && !strcmp(app.file, ran));
+                free(ran);
+            }
+            finish(&app, 0);
+            leave_run(&app);
+            go_tab(&app, GUI_TAB_GAMES);
+            focus_game(&app, "0100ABCD12340000");
+            key(&app, SDLK_R);
+            assert(app.addons_shown && app.addons_recompile && !app.recompile);
+            key(&app, SDLK_RETURN); /* the game itself, recompiled */
+            assert(!app.addons_shown && app.menu.running && !app.recompile);
+            {
+                char* ran = snx_absolute(base);
+                assert(ran && !strcmp(app.file, ran));
+                free(ran);
+            }
+            finish(&app, 0);
+            launcher(&app, false);
+            assert(!snx_remove_tree(own));
+            free(own);
+            free(base);
+            free(update);
+            free(update_data);
+            free(own_data);
+            free(file);
         }
         assert(!snx_remove_tree(folder));
         free(program);

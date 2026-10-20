@@ -14,6 +14,9 @@ void fs_init(void);
 /* Lookups by a path in the index. *size is 0 when the file isn't there */
 FILE* fs_open_read(const char* path, u64* size);
 int fs_map_file(const char* path, PFileMap* map); /* 0, or -1 */
+/* the title ID of the DLC read in place from its dump (an add-on of the game run as one), which
+   OpenDataStorageByDataId serves as installed: 0 for none */
+u64 fs_aoc_id(void);
 u8* fs_read_file(const char* path, u64* size);    /* malloc'd, or NULL */
 /* a file that exists only in memory, which the lookups find like any other. 0, or -1 */
 int fs_add_virtual_file(const char* path, const void* data, u64 size);
@@ -85,6 +88,11 @@ typedef struct {
     SnxHacFs* dfs;
     PFileMap dmap;
     PMutex dlock;
+    /* an add-on's dump read in place (dump_open): an update's, read with the game's in dump, or a DLC's alone in aoc,
+       its RomFS image afs */
+    PFileMap amap;
+    SnxDump aoc;
+    SnxHacFs* afs;
 } HleFs;
 /* all zero: fs_init sets the tree up */
 #endif

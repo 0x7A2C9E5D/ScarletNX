@@ -34,7 +34,7 @@ bool gui_game_folder(const char* path) {
     if (suffix(name, ".exe")) name[strlen(name) - 4] = 0;
 #endif
     data = snx_format("%s/%s_data", folder, name);
-    found = *name && !strcmp(leaf, name) && snx_is_file(path) && snx_is_dir(data);
+    found = *name && (!strcmp(leaf, name) || snx_addon_name(leaf, name, NULL)) && snx_is_file(path) && snx_is_dir(data);
     free(data);
     free(name);
     free(folder);
@@ -44,7 +44,9 @@ void gui_games_free(GuiGames* games) {
     snx_free_strings(games->names, games->count);
     snx_free_strings(games->shown, games->count);
     snx_free_strings(games->paths, games->count);
+    free(games->addons);
     games->names = games->shown = games->paths = NULL;
+    games->addons = NULL;
     games->count = 0;
 }
 uint64_t gui_tree_size(const char* path, const int* stop) {
@@ -144,6 +146,75 @@ static char* shown_name(const char* path, const char* name) {
     free(folder);
     return shown ? shown : snx_strdup(name);
 }
+/* the updates and DLCs made beside the game at path, in its folder (snx_addon_name): their count, and with addons not
+   NULL each added to it, in their names' order (an update's title ID before a DLC's) */
+static size_t addons_of(const char* path, GuiGames* addons) {
+    char *folder = snx_dirname(path), **names = NULL;
+    const char* leaf = folder + strlen(folder);
+    const char* own = path + strlen(path);
+    size_t count = 0, found = 0, i, j;
+    while (leaf > folder && leaf[-1] != '/' && leaf[-1] != '\\') --leaf;
+    while (own > path && own[-1] != '/' && own[-1] != '\\') --own;
+    /* the game's own program, <name>/<name>: an add-on has none of its own */
+    if (!gui_game_folder(path) || strncmp(own, leaf, strlen(leaf)) || (own[strlen(leaf)] && own[strlen(leaf)] != '.') ||
+        snx_list_dir(folder, &names, &count))
+        count = 0;
+    for (i = 0; i < count; ++i) {
+        char *stem = snx_strdup(names[i]), *data, *own, text[0x40], version[0x20];
+        SnxU64 id;
+        bool listed = playable(folder, stem, GUI_GAMES_RUN); /* on Android it cuts _code.so off the name */
+#ifdef _WIN32
+        if (listed) stem[strlen(stem) - 4] = 0; /* .exe, which playable asks for */
+#endif
+        data = snx_format("%s/%s_data", folder, stem);
+        listed = listed && snx_addon_name(leaf, stem, &id) && snx_is_dir(data);
+        if (listed && addons) {
+            unsigned char* nacp;
+            size_t size = 0;
+            own = snx_format("%s/control.nacp", data);
+            nacp = snx_addon_kind(id) == SNX_ADDON_UPDATE ? (unsigned char*)snx_read_file(own, &size) : NULL;
+            if (snx_addon_kind(id) == SNX_ADDON_DLC)
+                snprintf(text, sizeof text, snx_tr("DLC %u"), (unsigned)(id & 0x1FFF) - 0x1000u);
+            else if (snx_nacp_version(nacp, size, version, sizeof version))
+                snprintf(text, sizeof text, snx_tr("Update %s"), version);
+            else
+                snprintf(text, sizeof text, "%s", snx_tr("Update"));
+            free(nacp);
+            free(own);
+            for (j = addons->count; j > 0 && strcmp(stem, addons->names[j - 1]) < 0; --j) {
+                addons->names[j] = addons->names[j - 1];
+                addons->shown[j] = addons->shown[j - 1];
+                addons->paths[j] = addons->paths[j - 1];
+                addons->addons[j] = 0;
+            }
+            addons->names[j] = snx_strdup(stem);
+            addons->shown[j] = snx_strdup(text);
+            addons->paths[j] = snx_path_join(folder, names[i]);
+            addons->addons[j] = 0;
+            addons->count++;
+        }
+        found += listed;
+        free(data);
+        free(stem);
+    }
+    snx_free_strings(names, count);
+    free(folder);
+    return found;
+}
+bool gui_game_addons(const char* path, GuiGames* addons) {
+    size_t room = addons_of(path, NULL) + 1;
+    gui_games_free(addons);
+    addons->names = (char**)calloc(room, sizeof *addons->names);
+    addons->shown = (char**)calloc(room, sizeof *addons->shown);
+    addons->paths = (char**)calloc(room, sizeof *addons->paths);
+    addons->addons = (size_t*)calloc(room, sizeof *addons->addons);
+    if (!addons->names || !addons->shown || !addons->paths || !addons->addons) {
+        gui_games_free(addons);
+        return false;
+    }
+    addons_of(path, addons);
+    return addons->count > 0;
+}
 static int before(const char* a, const char* b) {
     for (; *a && tolower((unsigned char)*a) == tolower((unsigned char)*b); ++a, ++b) {}
     return tolower((unsigned char)*a) < tolower((unsigned char)*b);
@@ -166,6 +237,13 @@ static bool add_games(GuiGames* games, const char* directory, int kinds, size_t 
     if (more) games->shown = more;
     more = more ? (char**)realloc(games->paths, (games->count + count + 1) * sizeof *more) : NULL;
     if (more) games->paths = more;
+    if (more) {
+        size_t* addons = (size_t*)realloc(games->addons, (games->count + count + 1) * sizeof *addons);
+        if (addons)
+            games->addons = addons;
+        else
+            more = NULL;
+    }
     if (!more) {
         snx_free_strings(names, count);
         snprintf(error, size, snx_tr("Not enough memory to list %s."), directory);
@@ -192,10 +270,12 @@ static bool add_games(GuiGames* games, const char* directory, int kinds, size_t 
             games->names[j] = games->names[j - 1];
             games->shown[j] = games->shown[j - 1];
             games->paths[j] = games->paths[j - 1];
+            games->addons[j] = games->addons[j - 1];
         }
         games->names[j] = names[i];
         games->shown[j] = shown;
         games->paths[j] = path;
+        games->addons[j] = addons_of(path, NULL);
         games->count++;
         names[i] = NULL;
     }

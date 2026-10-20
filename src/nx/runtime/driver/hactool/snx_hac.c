@@ -267,7 +267,9 @@ int snx_hac_nca(SnxHac *hac, int container, size_t entry, SnxHacNca *out) {
     if (!nca_decrypt_header(&nca)) return -1;
     out->type = nca.header.content_type == NCACONTENTTYPE_PROGRAM   ? SNX_HAC_PROGRAM
                 : nca.header.content_type == NCACONTENTTYPE_CONTROL ? SNX_HAC_CONTROL
-                                                                    : SNX_HAC_OTHER;
+                : nca.header.content_type == NCACONTENTTYPE_DATA || nca.header.content_type == NCACONTENTTPYE_PUBLICDATA
+                    ? SNX_HAC_DATA
+                    : SNX_HAC_OTHER;
     out->title_id = nca.header.title_id;
     /* a Patch RomFS, as nca_process tells one: BKTR encryption, or a decrypted dump's kept indirect tables */
     for (unsigned int i = 0; i < 4; i++) {
