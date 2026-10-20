@@ -731,7 +731,7 @@ int snx_driver(int argc, char** argv) {
     b = snx_absolute(build);
     exe = snx_executable(argv[0]);
     if (!r || !b || !exe) {
-        result = snx_error("cannot resolve tool paths");
+        result = snx_error("cannot resolve %s", !r ? repo : !b ? build : argv[0]);
         goto done;
     }
     paths.repo = r;

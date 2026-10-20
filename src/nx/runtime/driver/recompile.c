@@ -282,7 +282,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     SnxProgram program;
     char *title = NULL, *game = NULL, *out = NULL, *folder = NULL, *base = NULL, *data = NULL, *code = NULL;
     char *ini = NULL, *ini_text = NULL, *run = NULL, *exe = NULL, *tmp = NULL;
-    char error[1024], option[64];
+    char error[1024], option[64], why[256];
     const char* equal;
     size_t option_size;
     int i, rc = 1, no_build = 0, keep_c = 0, host_win = 0, positional = 0, tmpfs = 0, dump = 0;
@@ -408,16 +408,16 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     game = snx_game_name(name, &program.npdm, program.entry_path);
     out = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
     if (!out) {
-        snx_error("cannot resolve output directory");
+        snx_error("cannot resolve %s", outdir ? outdir : paths->repo);
         goto done;
     }
     if ((program.romfs_path && snx_path_within(out, program.romfs_path)) ||
         (program.exefs_path && snx_path_within(out, program.exefs_path))) {
-        snx_error("output directory must be outside the input ExeFS/RomFS");
+        snx_error("%s must be outside the input ExeFS/RomFS", out);
         goto done;
     }
     if (snx_mkdirs(out)) {
-        snx_error("cannot create output directory");
+        snx_error("cannot create %s: %s", out, snx_os_error(why, sizeof why));
         goto done;
     }
     /* each game in a folder of its own, where an older version put the game's program (a file) */
@@ -429,7 +429,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         goto done;
     }
     if (snx_mkdirs(folder)) {
-        snx_error("cannot create the game's folder %s", folder);
+        snx_error("cannot create the game's folder %s: %s", folder, snx_os_error(why, sizeof why));
         goto done;
     }
     base = snx_path_join(folder, game);
@@ -443,7 +443,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     }
     data = snx_format("%s_data", base);
     if (snx_is_link(data)) {
-        snx_error("invalid output directory");
+        snx_error("%s is a link, and the game's data must be a folder", data);
         goto done;
     }
     gen.title = title;

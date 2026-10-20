@@ -71,9 +71,10 @@ static int kind_of(const char* path) {
 }
 
 int snx_container_kind(const char* path, int* xci) {
+    char why[256];
     int kind = kind_of(path);
-    if (kind < 0) return snx_error("Cannot read container header: %s", path);
-    if (kind == 2) return snx_error("Unsupported container header. Expected NSP/DNSP (PFS0) or XCI/DXCI (HEAD/DXCI)");
+    if (kind < 0) return snx_error("Cannot read %s: %s", path, snx_os_error(why, sizeof why));
+    if (kind == 2) return snx_error("%s is not an NSP/DNSP (PFS0) or an XCI/DXCI (HEAD/DXCI)", path);
     *xci = kind;
     return 0;
 }
@@ -173,8 +174,9 @@ static int load_prod_keys(SnxDump* dump, int say) {
     char *name, *value;
     KeyLine line;
     int failed;
+    char why[256];
     data = snx_read_file(dump->keys, &size);
-    if (!data) return snx_error("Cannot read prod.keys");
+    if (!data) return snx_error("Cannot read %s: %s", dump->keys, snx_os_error(why, sizeof why));
     start = 0;
     dropped = 0;
     failed = 0;
@@ -207,11 +209,12 @@ static int load_prod_keys(SnxDump* dump, int say) {
 /* title.keys, when there is one: a rights ID and its title key a line */
 static int load_title_keys(SnxDump* dump) {
     unsigned char *data, rights[16], key[16];
+    char why[256];
     size_t size, start, end;
     KeyLine line;
     if (!snx_is_file(dump->title_keys)) return 0;
     data = snx_read_file(dump->title_keys, &size);
-    if (!data) return snx_error("Cannot read title.keys");
+    if (!data) return snx_error("Cannot read %s: %s", dump->title_keys, snx_os_error(why, sizeof why));
     start = 0;
     while (start < size) {
         end = start;
@@ -235,7 +238,8 @@ static int read_tickets(SnxDump* dump, int container) {
     for (i = 0; i < count; i++) {
         if (!has_suffix(entries[i].name, ".tik")) continue;
         size = entries[i].size < sizeof data ? (size_t)entries[i].size : sizeof data;
-        if (snx_hac_read(dump->hac, container, i, data, size)) return snx_error("Cannot read a ticket");
+        if (snx_hac_read(dump->hac, container, i, data, size))
+            return snx_error("Cannot read the ticket %s", entries[i].name);
         if (size < 4) continue;
         switch ((SnxU32)le_bytes(data, 4)) {
             case 0x10000UL:
@@ -344,7 +348,7 @@ int snx_dump_open(SnxDump* dump, const char* base, const char* update, const cha
     dump->hac = snx_hac_new();
     if (!dump->keys || !dump->title_keys || !dump->hac) return snx_error("Out of memory reading the dump");
     dump->has_keys = snx_is_file(dump->keys);
-    if (keys && !dump->has_keys) return snx_error("Specified prod.keys file is missing");
+    if (keys && !dump->has_keys) return snx_error("%s is not a file", dump->keys);
     if ((dump->has_keys && load_prod_keys(dump, say)) || load_title_keys(dump)) return 1;
     if ((dump->base = open_container(dump, base, say)) < 0) return 1;
     if (update && (dump->update = open_container(dump, update, say)) < 0) return 1;

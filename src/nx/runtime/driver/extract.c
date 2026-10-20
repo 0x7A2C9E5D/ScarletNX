@@ -116,13 +116,14 @@ static char* dump_name(const char* path) {
 }
 
 static int prepare_paths(ExtractState* state, const ExtractOptions* options, const SnxPaths* paths) {
-    char *name, *work, *target;
+    char *name, *work, *target, why[256];
     int made_out, xci;
     state->base = snx_absolute(options->base);
     if (options->update) state->update = snx_absolute(options->update);
-    if (!state->base || (options->update && !state->update)) return snx_error("Cannot resolve extraction input paths");
+    if (!state->base || (options->update && !state->update))
+        return snx_error("Cannot resolve %s", state->base ? options->update : options->base);
     if (!snx_is_file(state->base) || (state->update && !snx_is_file(state->update)))
-        return snx_error("Base or update dump is missing or is not a file");
+        return snx_error("%s is not a file", snx_is_file(state->base) ? state->update : state->base);
     if (snx_container_kind(state->base, &xci) || (state->update && snx_container_kind(state->update, &xci))) return 1;
     name = options->name ? text_copy(options->name, strlen(options->name)) : dump_name(state->base);
     if (!name) return snx_error("Out of memory resolving extraction output");
@@ -137,16 +138,20 @@ static int prepare_paths(ExtractState* state, const ExtractOptions* options, con
     free(name);
     if (!options->out && !target) return snx_error("Out of memory resolving extraction output");
     state->out = snx_absolute(options->out ? options->out : target);
+    if (!state->out) {
+        int r = snx_error("Cannot resolve %s", options->out ? options->out : target);
+        free(target);
+        return r;
+    }
     free(target);
-    if (!state->out) return snx_error("Cannot resolve extraction output");
     state->exefs = snx_path_join(state->out, "exefs");
     state->romfs = snx_path_join(state->out, "romfs");
     if (!state->exefs || !state->romfs) return snx_error("Out of memory resolving extraction output");
     if (snx_is_file(state->exefs) || snx_is_dir(state->exefs) || snx_is_link(state->exefs))
         return snx_error("Output already contains exefs: %s", state->out);
-    if (snx_is_file(state->out)) return snx_error("Extraction output is a file");
+    if (snx_is_file(state->out)) return snx_error("%s is a file, not a folder", state->out);
     made_out = !snx_is_dir(state->out);
-    if (snx_mkdirs(state->out)) return snx_error("Cannot create extraction output");
+    if (snx_mkdirs(state->out)) return snx_error("Cannot create %s: %s", state->out, snx_os_error(why, sizeof why));
     state->made_out = made_out;
     return 0;
 }
@@ -261,9 +266,9 @@ int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title) {
     memset(&state, 0, sizeof state);
     state.base = snx_absolute(dump);
     if (!state.base)
-        result = snx_error("Cannot resolve extraction input paths");
+        result = snx_error("Cannot resolve %s", dump);
     else if (!snx_is_file(state.base))
-        result = snx_error("Base dump is missing or is not a file");
+        result = snx_error("%s is not a file", state.base);
     else {
         snx_hac_on_exit(hactool_exit, &state);
         result = snx_dump_open(&state.dump, state.base, NULL, NULL, NULL, paths->repo, 0);
