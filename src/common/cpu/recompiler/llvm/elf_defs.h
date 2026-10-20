@@ -106,8 +106,9 @@ typedef struct {
     Elf64_Sxword r_addend;
 } Elf64_Rela;
 
-#define ELF64_R_SYM(info)  ((info) >> 32)
-#define ELF64_R_TYPE(info) ((info) & 0xffffffffu)
+#define ELF64_R_SYM(info)       ((info) >> 32)
+#define ELF64_R_TYPE(info)      ((info) & 0xffffffffu)
+#define ELF64_R_INFO(sym, type) (((Elf64_Xword)(sym) << 32) | (Elf64_Xword)(type))
 
 /* x86-64 */
 #define R_X86_64_NONE          0

@@ -33,10 +33,10 @@
       }
     },
     {
-      "name": "linux-ppc64-base",
+      "name": "linux-cross-base",
       "hidden": true,
       "inherits": "base",
-      "description": "A Linux PowerPC64 cross build: SNX_SYSROOT names a sysroot from scripts/ppc64-sysroot.sh, whose pkg-config files the libraries are found by",
+      "description": "A Linux cross build (PowerPC64, RISC-V, LoongArch): SNX_SYSROOT names the target's system root (scripts/ppc64-sysroot.sh, or an Arch root of the architecture), whose pkg-config files the libraries are found by",
       "cacheVariables": {
         "CMAKE_SYSTEM_NAME": "Linux",
         "CMAKE_C_COMPILER": "clang",
@@ -52,14 +52,14 @@
         "CMAKE_EXE_LINKER_FLAGS": "-fuse-ld=lld",
         "CMAKE_SHARED_LINKER_FLAGS": "-fuse-ld=lld",
         "CMAKE_MODULE_LINKER_FLAGS": "-fuse-ld=lld",
-        "SNX_LLVM_CONFIG": "${sourceDir}/scripts/ppc64-llvm-config.sh",
+        "SNX_LLVM_CONFIG": "${sourceDir}/scripts/cross-llvm-config.sh",
         "SNX_DEPLOY": "OFF"
       }
     },
     {
       "name": "linux-ppc64le-cross",
       "displayName": "Linux ppc64le (ELFv2), cross-built with Clang",
-      "inherits": "linux-ppc64-base",
+      "inherits": "linux-cross-base",
       "environment": {
         "PKG_CONFIG_LIBDIR": "$env{SNX_SYSROOT}/usr/lib/powerpc64le-linux-gnu/pkgconfig:$env{SNX_SYSROOT}/usr/lib/pkgconfig:$env{SNX_SYSROOT}/usr/share/pkgconfig",
         "PKG_CONFIG_SYSROOT_DIR": "$env{SNX_SYSROOT}",
@@ -75,7 +75,7 @@
     {
       "name": "linux-ppc64-cross",
       "displayName": "Linux ppc64 big-endian with glibc (ELFv1, Debian ports), cross-built with Clang",
-      "inherits": "linux-ppc64-base",
+      "inherits": "linux-cross-base",
       "environment": {
         "PKG_CONFIG_LIBDIR": "$env{SNX_SYSROOT}/usr/lib/powerpc64-linux-gnu/pkgconfig:$env{SNX_SYSROOT}/usr/lib/pkgconfig:$env{SNX_SYSROOT}/usr/share/pkgconfig",
         "PKG_CONFIG_SYSROOT_DIR": "$env{SNX_SYSROOT}",
@@ -91,7 +91,7 @@
     {
       "name": "linux-ppc64-musl-cross",
       "displayName": "Linux ppc64 big-endian with musl (ELFv2), cross-built with Clang",
-      "inherits": "linux-ppc64-base",
+      "inherits": "linux-cross-base",
       "environment": {
         "PKG_CONFIG_LIBDIR": "$env{SNX_SYSROOT}/usr/lib/pkgconfig:$env{SNX_SYSROOT}/usr/share/pkgconfig",
         "PKG_CONFIG_SYSROOT_DIR": "$env{SNX_SYSROOT}",
@@ -102,6 +102,38 @@
         "CMAKE_C_COMPILER_TARGET": "powerpc64-linux-musl",
         "CMAKE_CXX_COMPILER_TARGET": "powerpc64-linux-musl",
         "CMAKE_CROSSCOMPILING_EMULATOR": "qemu-ppc64;-L;$env{SNX_SYSROOT}"
+      }
+    },
+    {
+      "name": "linux-riscv64-cross",
+      "displayName": "Linux riscv64 (rv64gc), cross-built with Clang",
+      "inherits": "linux-cross-base",
+      "environment": {
+        "PKG_CONFIG_LIBDIR": "$env{SNX_SYSROOT}/usr/lib/riscv64-linux-gnu/pkgconfig:$env{SNX_SYSROOT}/usr/lib/pkgconfig:$env{SNX_SYSROOT}/usr/share/pkgconfig",
+        "PKG_CONFIG_SYSROOT_DIR": "$env{SNX_SYSROOT}",
+        "QEMU_LD_PREFIX": "$env{SNX_SYSROOT}"
+      },
+      "cacheVariables": {
+        "CMAKE_SYSTEM_PROCESSOR": "riscv64",
+        "CMAKE_C_COMPILER_TARGET": "riscv64-linux-gnu",
+        "CMAKE_CXX_COMPILER_TARGET": "riscv64-linux-gnu",
+        "CMAKE_CROSSCOMPILING_EMULATOR": "qemu-riscv64;-L;$env{SNX_SYSROOT}"
+      }
+    },
+    {
+      "name": "linux-loongarch64-cross",
+      "displayName": "Linux loongarch64 (LA64), cross-built with Clang",
+      "inherits": "linux-cross-base",
+      "environment": {
+        "PKG_CONFIG_LIBDIR": "$env{SNX_SYSROOT}/usr/lib/loongarch64-linux-gnu/pkgconfig:$env{SNX_SYSROOT}/usr/lib/pkgconfig:$env{SNX_SYSROOT}/usr/share/pkgconfig",
+        "PKG_CONFIG_SYSROOT_DIR": "$env{SNX_SYSROOT}",
+        "QEMU_LD_PREFIX": "$env{SNX_SYSROOT}"
+      },
+      "cacheVariables": {
+        "CMAKE_SYSTEM_PROCESSOR": "loongarch64",
+        "CMAKE_C_COMPILER_TARGET": "loongarch64-linux-gnu",
+        "CMAKE_CXX_COMPILER_TARGET": "loongarch64-linux-gnu",
+        "CMAKE_CROSSCOMPILING_EMULATOR": "qemu-loongarch64;-L;$env{SNX_SYSROOT}"
       }
     },
     {
@@ -162,6 +194,14 @@
       "configurePreset": "linux-ppc64-musl-cross"
     },
     {
+      "name": "linux-riscv64-cross",
+      "configurePreset": "linux-riscv64-cross"
+    },
+    {
+      "name": "linux-loongarch64-cross",
+      "configurePreset": "linux-loongarch64-cross"
+    },
+    {
       "name": "macos",
       "configurePreset": "macos"
     },
@@ -194,6 +234,26 @@
     {
       "name": "linux-ppc64-musl-cross",
       "configurePreset": "linux-ppc64-musl-cross",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 900
+      }
+    },
+    {
+      "name": "linux-riscv64-cross",
+      "configurePreset": "linux-riscv64-cross",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 900
+      }
+    },
+    {
+      "name": "linux-loongarch64-cross",
+      "configurePreset": "linux-loongarch64-cross",
       "output": {
         "outputOnFailure": true
       },

@@ -31,10 +31,12 @@ if [ -z "$exe" ]; then
         62) arch=x86_64 ;;
         183) arch=aarch64 ;;
         21) arch=ppc64le ;;
+        243) arch=riscv64 ;;
+        258) arch=loongarch64 ;;
         *) arch= ;;
     esac
     if [ -z "$arch" ]; then
-        echo "$runtime is not an x86-64, AArch64 or PowerPC64 LE program" >&2
+        echo "$runtime is not an x86-64, AArch64, PowerPC64 LE, RISC-V 64 or LoongArch64 program" >&2
         exit 2
     fi
     if [ "$arch" != "$(uname -m)" ]; then

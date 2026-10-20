@@ -46,7 +46,7 @@ cmake --build --preset linux-ppc64le-cross
 ctest --preset linux-ppc64le-cross -j"$(nproc)"
 ```
 
-The target's `llvm-config` is a PowerPC program, so `scripts/ppc64-llvm-config.sh` runs it under qemu. The presets
+The target's `llvm-config` is a PowerPC program, so `scripts/cross-llvm-config.sh` runs it under qemu. The presets
 point pkg-config at the sysroot and set `QEMU_LD_PREFIX` for the tests. Three tests are skipped under the emulator:
 `3ds_static_pipeline` and `3ds_extract` link with the compiler path built into the driver, which is the build
 machine's, and `gui_process_tree` reads a resident size that qemu reports as zero.

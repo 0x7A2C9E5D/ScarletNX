@@ -26,26 +26,36 @@ typedef struct RtAPI {
        runtime runs it in the interpreter or compiles it first. The module no longer carries its own fallback, so the
        runtime decides what a miss does */
     void (*miss)(struct CPU* c, uint64_t pc);
+    /* STXP's 16-byte compare-and-swap of p[0] (the low half) and p[1], 1 when it stored, for the hosts whose
+       modules call it (RISC-V and LoongArch, which have no such instruction every machine carries): snx_runtime_cas128
+       (SNX_ABI 12) */
+    uint32_t (*cas128)(uint64_t* p, uint64_t o0, uint64_t o1, uint64_t n0, uint64_t n1);
 } RtAPI;
 #define SNX_SVC_COUNT 0x100
 
-/* the layout modules were built with: eleven pointers in this order, nothing between them */
+/* The 16-byte compare-and-swap every RtAPI's cas128 is (cas128.c): the host's instruction where it has one (amocas.q
+   with Zacas, sc.q from LoongArch v1.1, and the others' own), else snx_runtime_cas128_locked. One per process, so
+   every STXP of the game goes through the same */
+uint32_t snx_runtime_cas128(uint64_t* p, uint64_t o0, uint64_t o1, uint64_t n0, uint64_t n1);
+/* the same under a lock of p's stripe: the halves swapped one at a time, each a 64-bit compare-and-swap, the first
+   undone when the second finds another value, so that callers of this one see the 16 bytes change at once */
+uint32_t snx_runtime_cas128_locked(uint64_t* p, uint64_t o0, uint64_t o1, uint64_t n0, uint64_t n1);
+
+/* the layout modules were built with: twelve pointers in this order, nothing between them */
 #define SNX_RTAPI_SLOT sizeof(void (*)(void))
-typedef char snx_check_rtapi_size[sizeof(RtAPI) == 11 * SNX_RTAPI_SLOT ? 1 : -1];
+typedef char snx_check_rtapi_size[sizeof(RtAPI) == 12 * SNX_RTAPI_SLOT ? 1 : -1];
 typedef char snx_check_rtapi_head[offsetof(RtAPI, svc) == 0 && offsetof(RtAPI, undef) == SNX_RTAPI_SLOT &&
                                           offsetof(RtAPI, note_hint) == 2 * SNX_RTAPI_SLOT &&
                                           offsetof(RtAPI, ticks) == 3 * SNX_RTAPI_SLOT
                                       ? 1
                                       : -1];
-typedef char snx_check_rtapi_tail[offsetof(RtAPI, brk) == 4 * SNX_RTAPI_SLOT &&
-                                          offsetof(RtAPI, fpcr_changed) == 5 * SNX_RTAPI_SLOT &&
-                                          offsetof(RtAPI, sev) == 6 * SNX_RTAPI_SLOT &&
-                                          offsetof(RtAPI, wfe) == 7 * SNX_RTAPI_SLOT &&
-                                          offsetof(RtAPI, poll) == 8 * SNX_RTAPI_SLOT &&
-                                          offsetof(RtAPI, svcs) == 9 * SNX_RTAPI_SLOT &&
-                                          offsetof(RtAPI, miss) == 10 * SNX_RTAPI_SLOT
-                                      ? 1
-                                      : -1];
+typedef char snx_check_rtapi_tail
+    [offsetof(RtAPI, brk) == 4 * SNX_RTAPI_SLOT && offsetof(RtAPI, fpcr_changed) == 5 * SNX_RTAPI_SLOT &&
+             offsetof(RtAPI, sev) == 6 * SNX_RTAPI_SLOT && offsetof(RtAPI, wfe) == 7 * SNX_RTAPI_SLOT &&
+             offsetof(RtAPI, poll) == 8 * SNX_RTAPI_SLOT && offsetof(RtAPI, svcs) == 9 * SNX_RTAPI_SLOT &&
+             offsetof(RtAPI, miss) == 10 * SNX_RTAPI_SLOT && offsetof(RtAPI, cas128) == 11 * SNX_RTAPI_SLOT
+         ? 1
+         : -1];
 #undef SNX_RTAPI_SLOT
 
 #endif

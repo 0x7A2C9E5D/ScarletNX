@@ -10,18 +10,25 @@
    Tears of the Kingdom's lock-free lists pair one thread's pointer with another's counter. Clang emits
    lock cmpxchg16b with cx16 enabled (the builds also pass -mcx16: Clang 18 still called libatomic with the
    attribute alone), LDAXP/STLXP on AArch64, and lqarx/stqcx. on PowerPC64 from POWER8 (cmake/cross.cmake's
-   -mcpu=power8); GCC makes it a libatomic call, which a module can't link. */
+   -mcpu=power8); GCC makes it a libatomic call, which a module can't link. RISC-V and LoongArch machines have it
+   only with Zacas and from v1.1: their modules call the runtime's RtAPI.cas128, the instruction where there is one,
+   else a lock. */
 #ifndef __clang__
 #error "the CPU helpers need Clang: GCC turns the 16-byte compare-and-swap into a libatomic call"
 #endif
+#if defined(__riscv) || defined(__loongarch__)
+u32 snx_cas128(CPU* c, u64* p, u64 o0, u64 o1, u64 n0, u64 n1) { return c->rt->cas128(p, o0, o1, n0, n1); }
+#else
 __extension__ typedef unsigned __int128 snx_u128;
 #if defined(__x86_64__)
 __attribute__((target("cx16")))
 #endif
-u32 snx_cas128(u64* p, u64 o0, u64 o1, u64 n0, u64 n1) {
+u32 snx_cas128(CPU* c, u64* p, u64 o0, u64 o1, u64 n0, u64 n1) {
     snx_u128 expected = ((snx_u128)o1 << 64) | o0, desired = ((snx_u128)n1 << 64) | n0;
+    (void)c;
     return __atomic_compare_exchange_n((snx_u128*)p, &expected, desired, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 }
+#endif
 
 /* o0:op1:CRn:CRm:op2 of an MRS/MSR system register with op0 = 3 */
 #define SYSREG(op1, crn, crm, op2) ((1u << 14) | ((op1) << 11) | ((crn) << 7) | ((crm) << 3) | (op2))

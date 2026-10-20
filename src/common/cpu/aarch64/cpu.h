@@ -44,8 +44,10 @@ typedef double f64;
   10: RtAPI.miss replaces the module's own snx_interp_entry as snx_lookup's fallback, and CPU.disp's slots are read
       with relaxed atomic loads, since the runtime JIT fills them while guest threads run.
   11: the reworked LLVM backend's modules. Old 10 was taken twice, by our engine and upstream's, and a module built
-      for the wrong one must not load. */
-#define SNX_ABI 11
+      for the wrong one must not load.
+  12: snx_cas128 takes the CPU, and RtAPI.cas128 is the 16-byte compare-and-swap of the RISC-V and LoongArch
+      modules. */
+#define SNX_ABI 12
 
 #if defined(_WIN32)
 #define SNX_EXPORT __declspec(dllexport)
@@ -420,8 +422,8 @@ SNX_INLINE u32 snx_cas8(u8* p, u8 expected, u8 desired) {
     return __atomic_compare_exchange_n(p, &expected, desired, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 }
 /* one atomic 16-byte compare-and-swap of both halves (p[0] the low one): cmpxchg16b on x86-64, lqarx/stqcx. on
-   POWER8 */
-u32 snx_cas128(u64* p, u64 o0, u64 o1, u64 n0, u64 n1);
+   POWER8, c->rt->cas128 on RISC-V and LoongArch */
+u32 snx_cas128(CPU* c, u64* p, u64 o0, u64 o1, u64 n0, u64 n1);
 #define SNX_FENCE()    __atomic_thread_fence(__ATOMIC_SEQ_CST)
 /* ABI 3 made these and snx_cas128 atomic, so modules from before are refused */
 #define LDACQ(T, a)    __atomic_load_n((T*)MP(a), __ATOMIC_SEQ_CST)
@@ -484,7 +486,7 @@ SNX_INLINE u32 stxp(CPU* c, u8* M, u64 a, u32 sz, u64 v1, u64 v2) {
         if (sz == 2)
             stored = snx_cas64((u64*)MP(a), c->excl_val, (u64)(u32)v1 | ((u64)v2 << 32));
         else
-            stored = snx_cas128((u64*)MP(a), c->excl_val, c->excl_val2, v1, v2);
+            stored = snx_cas128(c, (u64*)MP(a), c->excl_val, c->excl_val2, v1, v2);
     }
     c->excl_on = 0;
     return !stored;

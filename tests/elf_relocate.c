@@ -209,6 +209,153 @@ static void ppc_relocations(void) {
           "PowerPC64 veneer beyond the TOC's 2 GiB");
 }
 
+/* RISC-V's and LoongArch's instruction relocated: whether snx_elf_relocate gave rc and left want */
+static void rv_la(unsigned machine, const char* what, uint32_t insn, unsigned type, uint64_t S, int64_t A, uint64_t P,
+                  uint64_t slot, int rc, uint32_t want) {
+    unsigned char p[4];
+    int got;
+    snx_link_put32(p, insn);
+    got = snx_elf_relocate(machine, p, sizeof(p), type, S, A, P, 0, slot);
+    if (got != rc || get32(p) != want) {
+        printf("FAIL: %s %s: rc %d (want %d), %08x (want %08x)\n", machine == EM_RISCV ? "RISC-V" : "LoongArch", what,
+               got, rc, (unsigned)get32(p), (unsigned)want);
+        ++failures;
+    }
+}
+static uint16_t get16(const unsigned char* p) { return (uint16_t)(p[0] | p[1] << 8); }
+static void put16(unsigned char* p, uint16_t v) {
+    p[0] = (unsigned char)v;
+    p[1] = (unsigned char)(v >> 8);
+}
+
+/* RISC-V's fields, worked out from the ISA manual's U, I, S, B, J, CB and CJ formats */
+static void riscv_relocations(void) {
+    const uint64_t P = 0x1000;
+    unsigned char p[8];
+    Elf64_Rela rela[3];
+    /* AUIPC ra, JALR ra: 0x12344678 away is 0x12344 pages and 0x678 */
+    snx_link_put32(p, 0x00000097u);
+    snx_link_put32(p + 4, 0x000080E7u);
+    check(!snx_elf_relocate(EM_RISCV, p, 8, SNX_RV_CALL_PLT, 0x12345678, 0, P, 0, 0) && get32(p) == 0x12344097u &&
+              get32(p + 4) == 0x678080E7u,
+          "RISC-V CALL_PLT");
+    /* 0x1800 away: the low half 0x800 is -0x800 sign-extended, so the high half rounds up to 2 */
+    snx_link_put32(p, 0x00000097u);
+    snx_link_put32(p + 4, 0x000080E7u);
+    check(!snx_elf_relocate(EM_RISCV, p, 8, SNX_RV_CALL_PLT, P + 0x1800, 0, P, 0, 0) && get32(p) == 0x00002097u &&
+              get32(p + 4) == 0x800080E7u,
+          "RISC-V CALL_PLT, its low half negative");
+    check(snx_elf_relocate(EM_RISCV, p, 8, SNX_RV_CALL_PLT, P + 0x80000000ull, 0, P, 0, 0) == SNX_LINK_RANGE,
+          "RISC-V CALL_PLT beyond 2 GiB");
+    check(snx_elf_relocate(EM_RISCV, p, 7, SNX_RV_CALL_PLT, P, 0, P, 0, 0) == SNX_LINK_OUTSIDE,
+          "RISC-V CALL_PLT in 7 bytes");
+    /* AUIPC a0: a GOT slot 0x6008 away, a symbol 0x12344678 away; the ADDI and SD halves take that displacement as S */
+    rv_la(EM_RISCV, "GOT_HI20", 0x00000517u, SNX_RV_GOT_HI20, 0, 0, P, P + 0x6008, 0, 0x00006517u);
+    rv_la(EM_RISCV, "PCREL_HI20", 0x00000517u, SNX_RV_PCREL_HI20, 0x12345678, 0, P, 0, 0, 0x12344517u);
+    rv_la(EM_RISCV, "PCREL_LO12_I", 0x00050513u, SNX_RV_PCREL_LO12_I, 0x12344678, 0, P + 4, 0, 0, 0x67850513u);
+    rv_la(EM_RISCV, "PCREL_LO12_I with an addend", 0x00050513u, SNX_RV_PCREL_LO12_I, 0x12344678, 4, P + 4, 0,
+          SNX_LINK_UNSUPPORTED, 0x00050513u);
+    rv_la(EM_RISCV, "PCREL_LO12_S", 0x00B53023u, SNX_RV_PCREL_LO12_S, 0x12344678, 0, P + 4, 0, 0, 0x66B53C23u);
+    /* BEQ a0, a1 (4 KiB either way) and JAL ra (1 MiB) */
+    rv_la(EM_RISCV, "BRANCH", 0x00B50063u, SNX_RV_BRANCH, P + 16, 0, P, 0, 0, 0x00B50863u);
+    rv_la(EM_RISCV, "BRANCH at -4 KiB", 0x00B50063u, SNX_RV_BRANCH, P - 0x1000, 0, P, 0, 0, 0x80B50063u);
+    rv_la(EM_RISCV, "BRANCH at +4 KiB", 0x00B50063u, SNX_RV_BRANCH, P + 0x1000, 0, P, 0, SNX_LINK_RANGE, 0x00B50063u);
+    rv_la(EM_RISCV, "JAL", 0x000000EFu, SNX_RV_JAL, P + 8, 0, P, 0, 0, 0x008000EFu);
+    rv_la(EM_RISCV, "JAL 2 KiB on", 0x000000EFu, SNX_RV_JAL, P + 0x800, 0, P, 0, 0, 0x001000EFu);
+    rv_la(EM_RISCV, "JAL misaligned", 0x000000EFu, SNX_RV_JAL, P + 1, 0, P, 0, SNX_LINK_MISALIGNED, 0x000000EFu);
+    /* C.J and C.BEQZ a0, two bytes each */
+    put16(p, 0xA001u);
+    check(!snx_elf_relocate(EM_RISCV, p, 2, SNX_RV_RVC_JUMP, P + 4, 0, P, 0, 0) && get16(p) == 0xA011u,
+          "RISC-V RVC_JUMP");
+    put16(p, 0xC101u);
+    check(!snx_elf_relocate(EM_RISCV, p, 2, SNX_RV_RVC_BRANCH, P + 4, 0, P, 0, 0) && get16(p) == 0xC111u,
+          "RISC-V RVC_BRANCH");
+    /* label differences, and DWARF's 6-bit advance fields */
+    snx_link_put32(p, 0x100);
+    check(!snx_elf_relocate(EM_RISCV, p, 4, SNX_RV_ADD32, 0x50, 0, 0, 0, 0) && get32(p) == 0x150 &&
+              !snx_elf_relocate(EM_RISCV, p, 4, SNX_RV_SUB32, 0x20, 0, 0, 0, 0) && get32(p) == 0x130,
+          "RISC-V ADD32 and SUB32");
+    p[0] = 0xC5;
+    check(!snx_elf_relocate(EM_RISCV, p, 1, SNX_RV_SUB6, 2, 0, 0, 0, 0) && p[0] == 0xC3 &&
+              !snx_elf_relocate(EM_RISCV, p, 1, SNX_RV_SET6, 0x3F, 0, 0, 0, 0) && p[0] == 0xFF,
+          "RISC-V SUB6 and SET6 keep the byte's top two bits");
+    check(!snx_elf_relocate(EM_RISCV, p, 4, SNX_RV_32_PCREL, P - 0x10, 0, P, 0, 0) && get32(p) == 0xFFFFFFF0u,
+          "RISC-V 32_PCREL backwards");
+    check(!snx_elf_relocate(EM_RISCV, p, 0, SNX_RV_RELAX, 0, 0, 0, 0, 0) &&
+              snx_elf_relocate(EM_RISCV, p, 4, SNX_RV_ALIGN, 0, 0, 0, 0, 0) == SNX_LINK_UNSUPPORTED,
+          "RISC-V RELAX left alone, ALIGN refused");
+    check(snx_elf_got_relocation(EM_RISCV, SNX_RV_GOT_HI20) && !snx_elf_got_relocation(EM_RISCV, SNX_RV_PCREL_LO12_I) &&
+              snx_elf_absolute_relocation(EM_RISCV, SNX_RV_64) && !snx_elf_call_relocation(EM_RISCV, SNX_RV_CALL_PLT) &&
+              snx_elf_relative_type(EM_RISCV) == SNX_RV_RELATIVE && snx_elf_riscv_lo12(EM_RISCV, SNX_RV_PCREL_LO12_S) &&
+              !snx_elf_riscv_lo12(EM_X86_64, SNX_RV_PCREL_LO12_I),
+          "RISC-V relocation classes");
+    /* a low half's HI20, found by its label's offset */
+    memset(rela, 0, sizeof(rela));
+    rela[0].r_offset = 0x10;
+    rela[0].r_info = ELF64_R_INFO(1, SNX_RV_PCREL_HI20);
+    rela[1].r_offset = 0x14;
+    rela[1].r_info = ELF64_R_INFO(2, SNX_RV_PCREL_LO12_I);
+    rela[2].r_offset = 0x20;
+    rela[2].r_info = ELF64_R_INFO(1, SNX_RV_GOT_HI20);
+    check(snx_elf_riscv_hi20(rela, 3, 0x10) == 0 && snx_elf_riscv_hi20(rela, 3, 0x20) == 2 &&
+              snx_elf_riscv_hi20(rela, 3, 0x14) == -1,
+          "RISC-V HI20 found by its offset");
+}
+
+/* LoongArch's fields, from its ISA manual's 1RI20, 2RI12, 2RI16 and branch formats */
+static void loongarch_relocations(void) {
+    const uint64_t P = 0x1000;
+    unsigned char p[8];
+    /* PCALAU12I a0 and ADDI.D a0, a0: 0x12345678 is 0x12344 pages past P's and 0x678 */
+    rv_la(EM_LOONGARCH, "PCALA_HI20", 0x1A000004u, SNX_LA_PCALA_HI20, 0x12345678, 0, P, 0, 0, 0x1A246884u);
+    rv_la(EM_LOONGARCH, "PCALA_LO12", 0x02C00084u, SNX_LA_PCALA_LO12, 0x12345678, 0, P, 0, 0, 0x02D9E084u);
+    /* 0xA00 in the page is -0x600 sign-extended: the page rounds up */
+    rv_la(EM_LOONGARCH, "PCALA_HI20 rounded", 0x1A000004u, SNX_LA_PCALA_HI20, 0x12345A00, 0, P, 0, 0, 0x1A2468A4u);
+    rv_la(EM_LOONGARCH, "PCALA_LO12 rounded", 0x02C00084u, SNX_LA_PCALA_LO12, 0x12345A00, 0, P, 0, 0, 0x02E80084u);
+    /* PCALAU12I a0 and LD.D a0, a0 of a GOT slot 0x6008 away */
+    rv_la(EM_LOONGARCH, "GOT_PC_HI20", 0x1A000004u, SNX_LA_GOT_PC_HI20, 0, 0, P, 0x7008, 0, 0x1A0000C4u);
+    rv_la(EM_LOONGARCH, "GOT_PC_LO12", 0x28C00084u, SNX_LA_GOT_PC_LO12, 0, 0, P, 0x7008, 0, 0x28C02084u);
+    /* PCADDU18I ra, JIRL ra, ra: 0x12344678 is 0x48D << 18 and 0x119E instructions */
+    snx_link_put32(p, 0x1E000001u);
+    snx_link_put32(p + 4, 0x4C000021u);
+    check(!snx_elf_relocate(EM_LOONGARCH, p, 8, SNX_LA_CALL36, 0x12345678, 0, P, 0, 0) && get32(p) == 0x1E0091A1u &&
+              get32(p + 4) == 0x4C467821u,
+          "LoongArch CALL36");
+    /* 0x30000 sets bit 17: JIRL's 0xC000 is -0x4000 instructions, so PCADDU18I rounds up to 1 */
+    snx_link_put32(p, 0x1E000001u);
+    snx_link_put32(p + 4, 0x4C000021u);
+    check(!snx_elf_relocate(EM_LOONGARCH, p, 8, SNX_LA_CALL36, P + 0x30000, 0, P, 0, 0) && get32(p) == 0x1E000021u &&
+              get32(p + 4) == 0x4F000021u,
+          "LoongArch CALL36, JIRL's half negative");
+    check(snx_elf_relocate(EM_LOONGARCH, p, 8, SNX_LA_CALL36, P + ((uint64_t)128 << 30), 0, P, 0, 0) == SNX_LINK_RANGE,
+          "LoongArch CALL36 beyond 128 GiB");
+    /* B (26 bits), BEQZ a0 (21) and BEQ a0, a1 (16), in instructions */
+    rv_la(EM_LOONGARCH, "B26", 0x50000000u, SNX_LA_B26, P + 0x100, 0, P, 0, 0, 0x50010000u);
+    rv_la(EM_LOONGARCH, "B26 backwards", 0x50000000u, SNX_LA_B26, P - 4, 0, P, 0, 0, 0x53FFFFFFu);
+    rv_la(EM_LOONGARCH, "B26 misaligned", 0x50000000u, SNX_LA_B26, P + 2, 0, P, 0, SNX_LINK_MISALIGNED, 0x50000000u);
+    rv_la(EM_LOONGARCH, "B21", 0x40000080u, SNX_LA_B21, P + 8, 0, P, 0, 0, 0x40000880u);
+    rv_la(EM_LOONGARCH, "B16", 0x58000085u, SNX_LA_B16, P + 8, 0, P, 0, 0, 0x58000885u);
+    rv_la(EM_LOONGARCH, "B16 at +128 KiB", 0x58000085u, SNX_LA_B16, P + 0x20000, 0, P, 0, SNX_LINK_RANGE, 0x58000085u);
+    /* label differences and data */
+    snx_link_put32(p, 0x100);
+    check(!snx_elf_relocate(EM_LOONGARCH, p, 4, SNX_LA_ADD32, 0x50, 0, 0, 0, 0) && get32(p) == 0x150 &&
+              !snx_elf_relocate(EM_LOONGARCH, p, 4, SNX_LA_SUB32, 0x20, 0, 0, 0, 0) && get32(p) == 0x130,
+          "LoongArch ADD32 and SUB32");
+    check(!snx_elf_relocate(EM_LOONGARCH, p, 4, SNX_LA_32_PCREL, P - 0x10, 0, P, 0, 0) && get32(p) == 0xFFFFFFF0u,
+          "LoongArch 32_PCREL backwards");
+    check(!snx_elf_relocate(EM_LOONGARCH, p, 8, SNX_LA_64, 0x1122334455667788ull, 8, 0, 0, 0) &&
+              get64(p) == 0x1122334455667790ull,
+          "LoongArch 64");
+    check(!snx_elf_relocate(EM_LOONGARCH, p, 0, SNX_LA_MARK_LA, 0, 0, 0, 0, 0) &&
+              snx_elf_relocate(EM_LOONGARCH, p, 4, SNX_LA_ALIGN, 0, 0, 0, 0, 0) == SNX_LINK_UNSUPPORTED,
+          "LoongArch markers left alone, ALIGN refused");
+    check(snx_elf_got_relocation(EM_LOONGARCH, SNX_LA_GOT_PC_LO12) &&
+              snx_elf_absolute_relocation(EM_LOONGARCH, SNX_LA_64) &&
+              !snx_elf_call_relocation(EM_LOONGARCH, SNX_LA_CALL36) &&
+              snx_elf_relative_type(EM_LOONGARCH) == SNX_LA_RELATIVE,
+          "LoongArch relocation classes");
+}
+
 /* ---- the LLVM backend's AArch64 objects ---- */
 
 static int64_t sign(uint64_t value, unsigned bits) {
@@ -554,6 +701,111 @@ static int ppc64le_tail_call(void) {
     free(data);
     return 0;
 }
+
+/* Where caller's first call and first GOT load go, decoded from the module: RISC-V's AUIPC with the JALR or LD after
+   it (compressed instructions skipped by their length), LoongArch's PCADDU18I with JIRL and PCALAU12I with LD.D */
+static void decode_caller(unsigned machine, const unsigned char* module, uint64_t caller, uint64_t* call,
+                          uint64_t* slot) {
+    uint64_t at = caller, hi_at = 0, hi = 0;
+    unsigned hi_rd = 0;
+    *call = *slot = 0;
+    while (at < caller + 96 && (!*call || !*slot)) {
+        uint32_t insn = get32(module + at);
+        if (machine == EM_RISCV) {
+            unsigned rd = insn >> 7 & 31, rs1 = insn >> 15 & 31;
+            uint64_t lo = (uint64_t)sign(insn >> 20, 12);
+            if ((insn & 3) != 3) { /* compressed */
+                at += 2;
+                continue;
+            }
+            if ((insn & 0x7F) == 0x17) { /* AUIPC */
+                hi_at = at;
+                hi = (uint64_t)sign(insn & 0xFFFFF000u, 32);
+                hi_rd = rd;
+            } else if (hi_at && rs1 == hi_rd && (insn & 0x707F) == 0x67 && !*call) /* JALR */
+                *call = hi_at + hi + lo;
+            else if (hi_at && rs1 == hi_rd && (insn & 0x707F) == 0x3003 && !*slot) /* LD */
+                *slot = hi_at + hi + lo;
+        } else {
+            unsigned rd = insn & 31, rj = insn >> 5 & 31;
+            if (insn >> 25 == 0x0D || insn >> 25 == 0x0F) { /* PCALAU12I, PCADDU18I */
+                hi_at = at;
+                hi = insn >> 25 == 0x0D ? (at & ~(uint64_t)0xFFF) + (uint64_t)(sign(insn >> 5 & 0xFFFFF, 20) * 4096)
+                                        : at + (uint64_t)(sign(insn >> 5 & 0xFFFFF, 20) * 262144);
+                hi_rd = rd;
+            } else if (hi_at && rj == hi_rd && insn >> 26 == 0x13 && !*call) /* JIRL */
+                *call = hi + (uint64_t)(sign(insn >> 10 & 0xFFFF, 16) * 4);
+            else if (hi_at && rj == hi_rd && insn >> 22 == 0xA3 && !*slot) /* LD.D */
+                *slot = hi + (uint64_t)sign(insn >> 10 & 0xFFF, 12);
+        }
+        at += 4;
+    }
+}
+
+/* riscv64 and loongarch64 objects linked into a module: its header repeats theirs (the float ABI), its dynamic
+   relocations are only the machine's RELATIVE, the call reaches ext_fn and the GOT load a slot that holds ext_data.
+   Linked in both orders, which moves the code and not the GOT: one layout alone can put a displacement's low 12 bits
+   where the AUIPC's own are, and hide a RISC-V low half written from the wrong value */
+static int other_objects(const char* triple, unsigned machine, const char* what) {
+    char error[1024], name[128];
+    const char* exports[3] = {"caller", "ext_fn", "ext_data"};
+    unsigned char *caller_data, *defs_data;
+    size_t caller_size, defs_size, i;
+    SnxLinkInput inputs[2];
+    SnxLinkOutput linked;
+    const Elf64_Ehdr* eh;
+    const Elf64_Shdr* sh;
+    uint64_t call, slot, data;
+    int order;
+    {
+        SnxIr* probe = snx_ir_new_target("probe", '2', triple, error, sizeof(error));
+        if (!probe) {
+            printf("skipped the %s objects: %s\n", what, error);
+            return 0;
+        }
+        snx_ir_free(probe);
+    }
+    if (object_for(triple, "ext_fn", "ext_data", "caller", &caller_data, &caller_size) ||
+        definitions_for(triple, &defs_data, &defs_size))
+        return 1;
+    for (order = 0; order < 2; ++order) {
+        size_t relatives = 0, others = 0;
+        const char* which = order ? "definitions first" : "caller first";
+        inputs[order].data = caller_data;
+        inputs[order].size = caller_size;
+        inputs[order].name = "caller";
+        inputs[!order].data = defs_data;
+        inputs[!order].size = defs_size;
+        inputs[!order].name = "definitions";
+        if (snx_link(inputs, 2, exports, 3, "caller.so", &linked, error, sizeof(error)))
+            return snx_error("%s link: %s", what, error);
+        eh = (const Elf64_Ehdr*)(const void*)linked.data;
+        snprintf(name, sizeof name, "%s module header, the objects' e_flags (%s)", what, which);
+        check(eh->e_machine == machine && eh->e_type == ET_DYN &&
+                  eh->e_flags == ((const Elf64_Ehdr*)(const void*)caller_data)->e_flags,
+              name);
+        sh = (const Elf64_Shdr*)(const void*)(linked.data + eh->e_shoff);
+        for (i = 0; i < eh->e_shnum; ++i)
+            if (sh[i].sh_type == SHT_RELA) {
+                const Elf64_Rela* r = (const Elf64_Rela*)(const void*)(linked.data + sh[i].sh_offset);
+                size_t k;
+                for (k = 0; k < sh[i].sh_size / sizeof(Elf64_Rela); ++k)
+                    ELF64_R_TYPE(r[k].r_info) == snx_elf_relative_type(machine) ? ++relatives : ++others;
+            }
+        snprintf(name, sizeof name, "%s module's dynamic relocations are RELATIVE (%s)", what, which);
+        check(relatives >= 1 && !others, name);
+        decode_caller(machine, linked.data, export_address(linked.data, "caller"), &call, &slot);
+        data = export_address(linked.data, "ext_data");
+        snprintf(name, sizeof name, "%s call to ext_fn (%s)", what, which);
+        check(call && call == export_address(linked.data, "ext_fn"), name);
+        snprintf(name, sizeof name, "%s GOT slot of ext_data (%s)", what, which);
+        check(slot && data && slot + 8 <= linked.size && get64(linked.data + slot) == data, name);
+        free(linked.data);
+    }
+    free(caller_data);
+    free(defs_data);
+    return 0;
+}
 #endif
 
 int main(void) {
@@ -561,9 +813,14 @@ int main(void) {
     instruction_relocations();
     veneers();
     ppc_relocations();
+    riscv_relocations();
+    loongarch_relocations();
     if (llvm_objects()) ++failures;
 #ifndef __APPLE__ /* AOT modules, which macOS doesn't link as ELF (link_elf.c) */
     if (ppc64le_objects() || ppc64le_tail_call()) ++failures;
+    if (other_objects("riscv64-unknown-linux-gnu", EM_RISCV, "RISC-V") ||
+        other_objects("loongarch64-unknown-linux-gnu", EM_LOONGARCH, "LoongArch"))
+        ++failures;
 #endif
     if (failures) {
         printf("%d failures\n", failures);

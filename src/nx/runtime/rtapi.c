@@ -187,5 +187,5 @@ static void rt_miss(CPU* c, u64 pc) {
     if (pc - g_code_lo < g_code_hi - g_code_lo) hint_add(pc);
     f(c, pc);
 }
-const RtAPI g_rtapi = {snx_svc,        rt_undef, rt_note_hint, guest_ticks, rt_brk, snx_fpcr_apply,
-                       rt_sev,         rt_wfe,   rt_poll,      g_svc64,     rt_miss};
+const RtAPI g_rtapi = {snx_svc, rt_undef, rt_note_hint, guest_ticks, rt_brk,  snx_fpcr_apply,
+                       rt_sev,  rt_wfe,   rt_poll,      g_svc64,     rt_miss, snx_runtime_cas128};

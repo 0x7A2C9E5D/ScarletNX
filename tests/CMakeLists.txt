@@ -307,6 +307,11 @@ add_executable(snx-test-os-error os_error.c)
 snx_test_target(snx-test-os-error 90)
 target_link_libraries(snx-test-os-error PRIVATE scarletnx-common)
 add_test(NAME os_error COMMAND snx-test-os-error)
+# RtAPI.cas128: the host's 16-byte compare-and-swap and the locked one, a pair stored whole or not at all
+add_executable(snx-test-cas128 cas128.c)
+snx_test_target(snx-test-cas128 11)
+target_link_libraries(snx-test-cas128 PRIVATE scarletnx-common Threads::Threads)
+add_test(NAME cas128 COMMAND snx-test-cas128)
 if(NOT SNX_BUILD_NX AND NOT SNX_BUILD_GNUABI)
     include(architecture.cmake)
     snx_sanitizer_path()
@@ -678,6 +683,11 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME trim_caches COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/trim_caches_test.py")
     # the check that keeps a pull request red while its title says donotmerge (scripts/pr-title.py, pr-title.yml)
     add_test(NAME pr_title COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/pr_title_test.py")
+    # the target LLVM's llvm-config of the linux-*-cross presets, run under its machine's qemu (scripts/)
+    if(UNIX)
+        add_test(NAME cross_llvm_config
+                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/cross_llvm_config_test.py")
+    endif()
     # the log summary (src/common/utilities/logscan.c), and the issues with a log: summarized, labelled and grouped
     # (scripts/game-reports.py, game-reports.yml), both through snx-logscan
     if(TARGET snx-logscan)
