@@ -43,8 +43,8 @@ if(SNX_TEST_SANITIZERS)
         snx-logscan
         # the recompiler and its backends
         snx_llvm snx_arm_llvm scarletnx-recompiler scarletnx-recompiler-shared
-        # the driver, its extraction, the settings and the build's line
-        snx_driver snx_nx_module snx_driver_llvm hactool_lib snx_settings snx_settings_runtime snx_build_info
+        # the driver, its extraction, the first start's setup, the settings and the build's line
+        snx_driver snx_nx_module snx_driver_llvm hactool_lib snx_setup snx_settings snx_settings_runtime snx_build_info
         snx-test-build-info
         # the Switch runtime: its components, the shader translator and the Vulkan backend
         scarletnx snx_core snx_kernel snx_hle snx_video snx_gpu snx_platform snx_shader snx_vk
