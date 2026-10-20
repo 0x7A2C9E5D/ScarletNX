@@ -685,7 +685,6 @@ static void xts_partition(void) {
     nca_section_fseek(s, 0x1F7);
     CHECK(nca_section_fread(s, got, sizeof(got)) == sizeof(got));
     CHECK(!memcmp(got, plain.data + 0x1F7, sizeof(got)));
-    free(s->pfs0_ctx.header);
     nca_free_section_contexts(&ctx);
     CHECK(!fclose(ctx.file));
     free(section.data);

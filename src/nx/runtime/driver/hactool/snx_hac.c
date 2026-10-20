@@ -415,12 +415,6 @@ fail:
 
 void snx_hac_fs_free(SnxHacFs *fs) {
     if (!fs) return;
-    for (unsigned int i = 0; i < 4; i++) /* nca_free_section_contexts leaves the PFS0 headers */
-        if (fs->nca.section_contexts[i].is_present && fs->nca.section_contexts[i].type == PFS0)
-            free(fs->nca.section_contexts[i].pfs0_ctx.header);
-    for (unsigned int i = 0; i < 4; i++)
-        if (fs->base.section_contexts[i].is_present && fs->base.section_contexts[i].type == PFS0)
-            free(fs->base.section_contexts[i].pfs0_ctx.header);
     program_free(&fs->nca, &fs->base);
     free(fs->files);
     memset(fs, 0, sizeof *fs); /* the keys */

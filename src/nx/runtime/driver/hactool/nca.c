@@ -212,8 +212,11 @@ void nca_free_section_contexts(nca_ctx_t *ctx) {
             if (ctx->section_contexts[i].aes) {
                 free_aes_ctx(ctx->section_contexts[i].aes);
             }
-            if (ctx->section_contexts[i].type == PFS0 && ctx->section_contexts[i].pfs0_ctx.is_exefs) {
-                free(ctx->section_contexts[i].pfs0_ctx.npdm);
+            if (ctx->section_contexts[i].type == PFS0) {
+                free(ctx->section_contexts[i].pfs0_ctx.header);
+                if (ctx->section_contexts[i].pfs0_ctx.is_exefs) {
+                    free(ctx->section_contexts[i].pfs0_ctx.npdm);
+                }
             } else if (ctx->section_contexts[i].type == ROMFS) {
                 if (ctx->section_contexts[i].romfs_ctx.directories) {
                     free(ctx->section_contexts[i].romfs_ctx.directories);
