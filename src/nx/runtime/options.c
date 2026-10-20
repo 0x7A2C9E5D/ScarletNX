@@ -350,7 +350,7 @@ static int section_set(const IniSection* section) {
 }
 /* the store into the file: beside it, then moved over it, so the file is always whole. 0, or -1 (warned once) */
 static int write_file(void) {
-    char tmp[sizeof g_path + 8];
+    char tmp[sizeof g_path + 8], why[256];
     FILE* f;
     int s, t, i, other = 0, failed;
     unsigned char* text;
@@ -358,7 +358,7 @@ static int write_file(void) {
     snprintf(tmp, sizeof tmp, "%s.tmp", g_path);
     f = fopen(tmp, "wb");
     if (!f) {
-        WARN_LIMIT(1, "settings: could not write %s\n", tmp);
+        WARN_LIMIT(1, "settings: could not write %s: %s\n", tmp, snx_os_error(why, sizeof why));
         return -1;
     }
     put_header(f);
@@ -383,8 +383,9 @@ static int write_file(void) {
     failed = ferror(f);
     if (fclose(f)) failed = 1;
     if (failed || plat_replace_file(tmp, g_path)) {
+        snx_os_error(why, sizeof why); /* before remove's */
         remove(tmp);
-        WARN_LIMIT(1, "settings: could not write %s, it stays as it was\n", g_path);
+        WARN_LIMIT(1, "settings: could not write %s (%s): this change is not saved\n", g_path, why);
         return -1;
     }
     text = snx_read_file(g_path, &size);
@@ -410,13 +411,16 @@ void ini_open(const char* path) {
     unsigned char* text;
     size_t size;
     int i, n;
+    char why[256];
     snprintf(g_path, sizeof g_path, "%s", path);
     ini_set_say(say_setting);
     for (i = 0; i < g_nover; i++)
         if (!snx_setting_known(g_over[i].key)) WARN("--%s is not a setting, so it does nothing\n", g_over[i].key);
     text = snx_read_file(g_path, &size);
+    if (!text) snx_os_error(why, sizeof why);
     if (!text && snx_path_exists(g_path)) {
-        WARN("settings: %s cannot be read: the defaults apply, and it is left as it is\n", g_path);
+        WARN("settings: cannot read %s (%s): every setting takes its default, and the file is not written over\n",
+             g_path, why);
         apply_all();
         g_started = 1;
         return;
