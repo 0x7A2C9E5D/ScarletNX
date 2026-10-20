@@ -1159,7 +1159,11 @@ msgid "No folder was picked."
 msgstr ""
 
 #: src/gui/main.c
-msgid "Cannot locate your home directory. Keys were not installed."
+msgid "Cannot install prod.keys: neither USERPROFILE nor HOME is set"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Cannot install prod.keys: HOME is not set"
 msgstr ""
 
 #: src/gui/main.c
@@ -1492,20 +1496,12 @@ msgid "R recompiles Switch games only."
 msgstr ""
 
 #: src/gui/main.c
-msgid "Cannot install prod.keys: neither USERPROFILE nor HOME is set"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Cannot install prod.keys: HOME is not set"
-msgstr ""
-
-#: src/gui/main.c
 msgid "prod.keys installed: games can be extracted now."
 msgstr ""
 
 #: src/gui/main.c
 #, c-format
-msgid "Cannot install %s."
+msgid "Cannot install %s: %s"
 msgstr ""
 
 #: src/gui/main.c

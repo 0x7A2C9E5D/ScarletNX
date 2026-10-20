@@ -1135,7 +1135,7 @@ int main(int argc, char** argv) {
     assert(app.keys_done && !app.keys_ok); /* not installed: said, then the menu after a while */
     assert(!snx_remove_tree(app.keys_path));
     {
-        char* keys_path = app.keys_path; /* NULL when home_keys_path finds no home: the variable it reads is named */
+        char* keys_path = app.keys_path; /* NULL when snx_keys_dir finds no home: the variable it reads is named */
         app.keys_path = NULL;
         drop(&app, source_keys, false);
 #ifdef _WIN32

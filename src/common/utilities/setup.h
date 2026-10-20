@@ -64,8 +64,8 @@ char* snx_keys_found(const char* data, const char* name);
    reads first, so nothing is written in the home folder itself; else ~/.switch. NULL with no home */
 char* snx_keys_dir(const char* data);
 /* data written at path, readable by its owner alone where the system says so, through a file beside it first: a failed
-   copy leaves the keys there. 0, else nonzero */
-int snx_keys_put(const char* path, const void* data, size_t size);
+   copy leaves the keys there. 0, else nonzero with the system's reason in why */
+int snx_keys_put(const char* path, const void* data, size_t size, char* why, size_t why_size);
 /* folder's prod.keys installed in dir, and its title.keys when it has one (*titles says so): 0, else -1 with why */
 int snx_keys_install(const char* folder, const char* dir, int* titles, char* why, size_t why_size);
 

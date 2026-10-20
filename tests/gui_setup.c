@@ -150,6 +150,19 @@ static void test_first(App* app) {
     assert(app->setup_keys);
     folder_answer_is(app, NULL);
     assert(page(app) == SNX_SETUP_KEYS && app->setup_failed && !app->setup_keys);
+    {
+        char* keys_path = app->keys_path; /* NULL when snx_keys_dir finds no home: the variable it reads is named */
+        app->keys_path = NULL;
+        key(app, SDLK_RETURN);
+        folder_answer_is(app, keys);
+#ifdef _WIN32
+        assert(app->setup_failed &&
+               !strcmp(app->message, "Cannot install prod.keys: neither USERPROFILE nor HOME is set"));
+#else
+        assert(app->setup_failed && !strcmp(app->message, "Cannot install prod.keys: HOME is not set"));
+#endif
+        app->keys_path = keys_path;
+    }
     key(app, SDLK_RETURN);
     folder_answer_is(app, keys);
     assert(!app->setup_failed && strstr(app->message, "Installed prod.keys and title.keys in"));

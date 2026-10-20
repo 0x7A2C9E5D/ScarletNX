@@ -257,7 +257,7 @@ char* snx_keys_dir(const char* data) {
 #endif
     return keys_home();
 }
-int snx_keys_put(const char* path, const void* data, size_t size) {
+int snx_keys_put(const char* path, const void* data, size_t size, char* why, size_t why_size) {
     char *dir = snx_dirname(path), *temporary = dir && !snx_mkdirs(dir) ? snx_temp_dir(dir) : NULL;
     char* staged = temporary ? snx_path_join(temporary, "keys") : NULL;
     int failed = !staged || snx_write_file(staged, data, size);
@@ -265,6 +265,7 @@ int snx_keys_put(const char* path, const void* data, size_t size) {
     if (!failed) failed = chmod(staged, 0600) != 0;
 #endif
     if (!failed) failed = snx_replace(staged, path);
+    if (failed) snx_os_error(why, why_size); /* before the cleanup's calls set another */
     if (temporary) snx_remove_tree(temporary);
     free(staged);
     free(temporary);
@@ -273,7 +274,7 @@ int snx_keys_put(const char* path, const void* data, size_t size) {
 }
 /* folder's name, a keys file, into dir: 0, 1 when folder has none, else -1 with why */
 static int keys_copy(const char* folder, const char* dir, const char* name, char* why, size_t why_size) {
-    char *from = snx_path_join(folder, name), *to = snx_path_join(dir, name), *data = NULL;
+    char *from = snx_path_join(folder, name), *to = snx_path_join(dir, name), *data = NULL, reason[256];
     size_t size = 0;
     int rc = -1;
     if (!snx_is_file(from)) {
@@ -284,8 +285,8 @@ static int keys_copy(const char* folder, const char* dir, const char* name, char
         snprintf(why, why_size, "%s could not be read as keys", from);
     else if (!snx_keys_text(data, size))
         snprintf(why, why_size, "%s is not a %s: no line name = hex", from, name);
-    else if (snx_keys_put(to, data, size))
-        snprintf(why, why_size, "%s could not be written", to);
+    else if (snx_keys_put(to, data, size, reason, sizeof reason))
+        snprintf(why, why_size, "%s could not be written: %s", to, reason);
     else
         rc = 0;
 done:

@@ -4651,8 +4651,12 @@ static void setup_keys_from(App* app, const char* folder, const char* error) {
     app->setup_keys = false;
     if (!folder)
         snprintf(note, sizeof note, "%s", error ? error : snx_tr("No folder was picked."));
-    else if (!dir)
-        snprintf(note, sizeof note, "%s", snx_tr("Cannot locate your home directory. Keys were not installed."));
+    else if (!dir) /* snx_keys_dir's: the variables it reads are unset */
+#ifdef _WIN32
+        snprintf(note, sizeof note, "%s", snx_tr("Cannot install prod.keys: neither USERPROFILE nor HOME is set"));
+#else
+        snprintf(note, sizeof note, "%s", snx_tr("Cannot install prod.keys: HOME is not set"));
+#endif
     else if (snx_keys_install(folder, dir, &titles, why, sizeof why))
         snprintf(note, sizeof note, snx_tr("Not installed: %s"), why);
     else {
@@ -5731,6 +5735,7 @@ static void keys_result(App* app, bool ok) {
     app->keys_done = now_ms(app) ? now_ms(app) : 1;
 }
 static void keys_write(App* app, const char* data, size_t size) {
+    char why[256];
     if (!app->keys_path) { /* snx_keys_dir's: the variables it reads are unset */
 #ifdef _WIN32
         snprintf(app->message, sizeof(app->message), "%s",
@@ -5742,11 +5747,11 @@ static void keys_write(App* app, const char* data, size_t size) {
         return;
     }
     /* staged beside them first: a failed copy (or dropping the installed file itself) must not destroy existing keys */
-    bool ok = !snx_keys_put(app->keys_path, data, size);
+    bool ok = !snx_keys_put(app->keys_path, data, size, why, sizeof why);
     if (ok)
         snprintf(app->message, sizeof(app->message), "%s", snx_tr("prod.keys installed: games can be extracted now."));
     else
-        snprintf(app->message, sizeof(app->message), snx_tr("Cannot install %s."), app->keys_path);
+        snprintf(app->message, sizeof(app->message), snx_tr("Cannot install %s: %s"), app->keys_path, why);
     keys_result(app, ok);
 }
 static void install_keys(App* app, const char* source) {

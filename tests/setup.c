@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -189,6 +190,15 @@ static void test_keys(const char* root, const char* home) {
     assert(!snx_keys_install(picked, dir, &titled, why, sizeof why) && titled);
     path = join(dir, "title.keys");
     expect_text(path, titles);
+    free(path);
+    /* a folder they cannot go in (a file there): said with the path and the system's reason */
+    path = join(root, "a file");
+    put(path, "x");
+    assert(snx_keys_install(picked, path, &titled, why, sizeof why) == -1 && strstr(why, "could not be written: "));
+    assert(strlen(strstr(why, "could not be written: ")) > strlen("could not be written: "));
+#ifndef _WIN32
+    assert(strstr(why, strerror(EEXIST)) != NULL);
+#endif
     free(path);
     /* where they go: the user's data folder itself on an XDG system, else ~/.switch */
     path = snx_user_data_dir();
