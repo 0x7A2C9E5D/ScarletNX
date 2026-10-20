@@ -39,7 +39,11 @@ else
     export UPINFO="gh-releases-zsync|${REPOSITORY%/*}|nightly|latest|*$ARCH.AppImage.zsync"
 fi
 # The runtime exits at once without a game module, so tracing it for dlopened libraries finds nothing: name them
-export STRACE_MODE=0 DEPLOY_SDL=1 DEPLOY_VULKAN=1 DEPLOY_OPENGL=1
+export STRACE_MODE=0 DEPLOY_SDL=1
+
+# force SDL to use its software rasterizer, this way we don't ship drivers
+# the produced games already use the drivers of the host
+export SDL_RENDER_DRIVER=software SDL_FRAMEBUFFER_ACCELERATION=software
 
 # pacman over the sysroot when there is one: its database records the bundled libraries' packages, and -Qo takes a
 # path inside the root it is given, which it takes off before looking the file up
@@ -121,6 +125,10 @@ if [ "$(head -c 8 "$appdir/.DirIcon" | od -An -tx1 | tr -d ' \n')" != 89504e470d
     echo "$appdir/.DirIcon is not a PNG: quick-sharun no longer takes ICON for it" >&2
     exit 1
 fi
+
+echo SDL_RENDER_DRIVER=software            >> "$appdir"/.env
+echo SDL_FRAMEBUFFER_ACCELERATION=software >> "$appdir"/.env
+
 # and the vector next to it, the best the desktop entry's Icon= can name
 cp "$SYSROOT/usr/share/icons/hicolor/scalable/apps/wimsy.svg" "$appdir/"
 mkdir -p "$appdir/share/licenses"
