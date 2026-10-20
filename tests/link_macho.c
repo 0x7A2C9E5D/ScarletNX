@@ -83,27 +83,41 @@ static uint64_t trie_find(const unsigned char* trie, size_t size, const char* na
     }
 }
 
-/* 0 when the linker refuses the object at path with an error that says reason; 1, saying why, otherwise */
-static int refused(const char* path, const char* reason) {
-    SnxLinkInput input;
+/* 0 when the linker refuses inputs with an error that says reason; 1, saying why, otherwise */
+static int refused(const SnxLinkInput* inputs, size_t count, const char* reason) {
     SnxLinkOutput out;
     const char* exports[] = {"test_entry"};
     char error[512];
-    int linked;
-    input.data = slurp(path, &input.size);
-    input.name = path;
-    linked = !snx_link(&input, 1, exports, 1, "test.dylib", &out, error, sizeof(error));
-    free((void*)input.data);
-    if (linked) {
-        fprintf(stderr, "%s: linked, where it should fail with %s\n", path, reason);
+    if (!snx_link(inputs, count, exports, 1, "test.dylib", &out, error, sizeof(error))) {
+        fprintf(stderr, "%s: linked, where it should fail with %s\n", inputs[0].name, reason);
         free(out.data);
         return 1;
     }
     if (!strstr(error, reason)) {
-        fprintf(stderr, "%s: refused with \"%s\", not %s\n", path, error, reason);
+        fprintf(stderr, "%s: refused with \"%s\", not %s\n", inputs[0].name, error, reason);
         return 1;
     }
     return 0;
+}
+
+/* a copy of object, which the caller frees, with name's symbol made a local of type */
+static unsigned char* retyped(const SnxLinkInput* object, const char* name, unsigned type) {
+    unsigned char* copy = (unsigned char*)malloc(object->size);
+    const unsigned char* c = object->data + 32;
+    uint32_t i, j;
+    assert(copy);
+    memcpy(copy, object->data, object->size);
+    for (i = 0; i < rd32(object->data + 16); ++i, c += rd32(c + 4))
+        if (rd32(c) == 0x2) /* LC_SYMTAB */
+            for (j = 0; j < rd32(c + 12); ++j) {
+                unsigned char* s = copy + rd32(c + 8) + 16 * (size_t)j;
+                if (!strcmp((const char*)copy + rd32(c + 16) + rd32(s), name)) {
+                    s[4] = (unsigned char)type;
+                    return copy;
+                }
+            }
+    assert(!"no such symbol");
+    return copy;
 }
 
 /* name's address in a symbol table, or 0 */
@@ -187,12 +201,30 @@ int main(int argc, char** argv) {
     unsigned rebases = 0, pages, wide = 0, signed_bytes = 0;
     FILE* f;
     assert(argc >= 4 && argc % 2 == 0);
-    for (i = 4; i < (uint32_t)argc; i += 2)
-        if (refused(argv[i], argv[i + 1])) return 1;
+    for (i = 4; i < (uint32_t)argc; i += 2) {
+        SnxLinkInput input;
+        int failed;
+        input.data = slurp(argv[i], &input.size);
+        input.name = argv[i];
+        failed = refused(&input, 1, argv[i + 1]);
+        free((void*)input.data);
+        if (failed) return 1;
+    }
     inputs[0].data = slurp(argv[1], &inputs[0].size);
     inputs[0].name = argv[1];
     inputs[1].data = slurp(argv[2], &inputs[1].size);
     inputs[1].name = argv[2];
+    /* code referring to a symbol of a type the linker does not take: scale made a local N_PBUD */
+    {
+        SnxLinkInput retyped_inputs[2];
+        int failed;
+        retyped_inputs[0] = inputs[0];
+        retyped_inputs[1] = inputs[1];
+        retyped_inputs[0].data = retyped(&inputs[0], "_scale", 0xC);
+        failed = refused(retyped_inputs, 2, "unsupported symbol type of _scale");
+        free((void*)retyped_inputs[0].data);
+        if (failed) return 1;
+    }
     /* the entry's own object alone leaves helper and counter undefined */
     if (!snx_link(inputs, 1, exports, 1, "test.dylib", &out, error, sizeof(error))) {
         fprintf(stderr, "link of %s alone: linked, with helper and counter undefined\n", argv[1]);

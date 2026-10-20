@@ -358,6 +358,8 @@ static int definition(Link* l, size_t object, uint32_t index, size_t* def_object
         return 0;
     }
     if ((s[4] & N_TYPE) != N_UNDF) {
+        if ((s[4] & N_TYPE) != N_SECT && (s[4] & N_TYPE) != N_ABS) /* symbol_address reads a section's or the value */
+            return fail(l, "%s: unsupported symbol type of %s", o->input->name, symbol_name(o, s));
         if ((s[4] & N_TYPE) == N_SECT && !defined_in(o, s))
             return fail(l, "%s: reference to %s in a section the module leaves out", o->input->name,
                         symbol_name(o, s));
