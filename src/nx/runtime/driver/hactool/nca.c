@@ -1538,7 +1538,7 @@ static int nca_visit_romfs_file(nca_section_ctx_t *ctx, uint32_t file_offset, fi
 
         filepath_copy(cur_path, dir_path);
         if (entry->name_size) {
-            filepath_append_n(cur_path, entry->name_size, "%s", name);
+            filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, name);
         }
 
         int found_file = 1;
@@ -1586,7 +1586,7 @@ static int nca_visit_nca0_romfs_file(nca_section_ctx_t *ctx, uint32_t file_offse
 
         filepath_copy(cur_path, dir_path);
         if (entry->name_size) {
-            filepath_append_n(cur_path, entry->name_size, "%s", name);
+            filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, name);
         }
 
         int found_file = 1;
@@ -1626,7 +1626,7 @@ static int nca_visit_romfs_dir(nca_section_ctx_t *ctx, uint32_t dir_offset, file
 
     filepath_copy(cur_path, parent_path);
     if (entry->name_size) {
-        filepath_append_n(cur_path, entry->name_size, "%s", entry->name);
+        filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, entry->name);
     }
 
     /* If we're actually extracting the romfs, make directory. */
@@ -1666,7 +1666,7 @@ static int nca_visit_nca0_romfs_dir(nca_section_ctx_t *ctx, uint32_t dir_offset,
 
     filepath_copy(cur_path, parent_path);
     if (entry->name_size) {
-        filepath_append_n(cur_path, entry->name_size, "%s", entry->name);
+        filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, entry->name);
     }
 
     /* If we're actually extracting the romfs, make directory. */

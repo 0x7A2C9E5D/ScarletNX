@@ -17,7 +17,7 @@ static void romfs_visit_file(romfs_ctx_t *ctx, uint32_t file_offset, filepath_t 
 
         filepath_copy(cur_path, dir_path);
         if (entry->name_size) {
-            filepath_append_n(cur_path, entry->name_size, "%s", name);
+            filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, name);
         }
 
         /* If we're extracting... */
@@ -44,7 +44,7 @@ static void romfs_visit_dir(romfs_ctx_t *ctx, uint32_t dir_offset, filepath_t *p
 
     filepath_copy(cur_path, parent_path);
     if (entry->name_size) {
-        filepath_append_n(cur_path, entry->name_size, "%s", entry->name);
+        filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, entry->name);
     }
 
     /* If we're actually extracting the romfs, make directory. */
