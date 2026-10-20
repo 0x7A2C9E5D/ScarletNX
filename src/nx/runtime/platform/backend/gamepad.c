@@ -18,30 +18,26 @@ static char g_names[SNX_GAMEPADS][64]; /* theirs, for the game's menu, which the
 static int g_labels[SNX_GAMEPADS][4], g_symmetric[SNX_GAMEPADS]; /* and how its button map screen draws them */
 static unsigned g_held[SNX_GAMEPADS]; /* the controls each holds, a bit each, as last polled */
 #define UNSET SNX_PAD_UNSET
+/* what the settings' maps read into (their values in g_settings) */
 static SnxGamepadConfig g_cfg = {
-    0,
-    20,
-    100,
-    0,
-    1,
     {{UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET}}};
 
 /* SDL drops a gamepad's presses while no window of the program has the focus, unless told otherwise; set before it
    starts its gamepads (the .ini is read first), and at once on a change */
-static void background_set(const IniOpt* o, const char* v) {
+void gamepad_background_set(const IniOpt* o, const char* v) {
     (void)o;
     (void)v;
-    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, g_cfg.background ? "1" : "0");
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, g_settings.background_input ? "1" : "0");
 }
 /* SDL decides whether two Joy-Cons form one gamepad when its joystick subsystem starts. */
-static void joycon_pair_set(const IniOpt* o, const char* v) {
+void gamepad_joycon_pair_set(const IniOpt* o, const char* v) {
     (void)o;
     (void)v;
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS, g_cfg.joycon_pair ? "1" : "0");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS, g_settings.pair_joy_cons ? "1" : "0");
 }
 /* the player's map: what it does not name sends the button in its place. One that cannot be read is said, and changes
    nothing */
-static void map_set(const IniOpt* o, const char* v) {
+void gamepad_map_set(const IniOpt* o, const char* v) {
     SnxPadMap map;
     char word[64];
     (void)o;
@@ -53,22 +49,10 @@ static void map_set(const IniOpt* o, const char* v) {
     else
         g_cfg.own = map;
 }
-const IniOpt g_gamepad_ini[] = {
-    {"gamepad_swap_ab", "0", "1 = a controller's A and B swapped: 0 = where the console's are (A right, B bottom)",
-     INI_INT, 0, &g_cfg.swap_ab, 0, 1, NULL, "Swap A/B", "Off|On", 0, 0},
-    {"gamepad_deadzone", "20", "The sticks' dead zone, in percent of their travel", INI_INT, 0, &g_cfg.deadzone, 0, 90,
-     NULL, "Stick dead zone", "#%", 5, 0},
-    {"gamepad_rumble", "100", "How strongly the controllers vibrate when the game asks, in percent: 0 = never", INI_INT,
-     0, &g_cfg.rumble, 0, 100, NULL, "Vibration", "Off|#%", 10, 0},
-    {"gamepad_background", "0", "1 = the controllers still play the game while its window is not focused", INI_INT, 0,
-     &g_cfg.background, 0, 1, background_set, "Background input", "Off|On", 0, 0},
-    {"gamepad_joycon_pair", "1", "1 = a left and right Joy-Con play together; restart the game after changing this",
-     INI_INT, 0, &g_cfg.joycon_pair, 0, 1, joycon_pair_set, "Pair Joy-Cons", "Separate|Together", 0, 0},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 /* the players' own (gamepad.h), from their keys gamepad_p<N>_...: which player a key is */
 #define PLAYER_DEFAULT                                                                                                 \
     {                                                                                                                  \
-        "", 1, 0, -1, -10, 0, {                                                                                        \
+        0, {                                                                                                           \
             {                                                                                                          \
                 UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET, UNSET,      \
                     UNSET, UNSET                                                                                       \
@@ -78,12 +62,11 @@ const IniOpt g_gamepad_ini[] = {
 static SnxPlayerConfig g_players[SNX_GAMEPADS] = {PLAYER_DEFAULT, PLAYER_DEFAULT, PLAYER_DEFAULT, PLAYER_DEFAULT,
                                                   PLAYER_DEFAULT, PLAYER_DEFAULT, PLAYER_DEFAULT, PLAYER_DEFAULT};
 static int player_of(const IniOpt* o) { return o->key[sizeof "gamepad_p" - 1] - '1'; }
-static void device_set(const IniOpt* o, const char* v) {
-    SnxPlayerConfig* p = &g_players[player_of(o)];
-    snprintf(p->device, sizeof p->device, "%s", v ? v : "");
-}
+typedef char players_counted[sizeof g_settings.player_connected / sizeof *g_settings.player_connected == SNX_GAMEPADS
+                                 ? 1
+                                 : -1];
 /* a player's map, as gamepad_map's: none ("") is gamepad_map's; one that cannot be read is said, and changes nothing */
-static void player_map_set(const IniOpt* o, const char* v) {
+void gamepad_player_map_set(const IniOpt* o, const char* v) {
     SnxPlayerConfig* p = &g_players[player_of(o)];
     SnxPadMap map;
     char word[64];
@@ -99,80 +82,11 @@ static void player_map_set(const IniOpt* o, const char* v) {
         p->has_map = 1;
     }
 }
-#define PLAYER_OPTS(n, said_device, said_connected, said_type, said_swap, said_rumble, said_map)                       \
-    {"gamepad_p" #n "_device", "", said_device, INI_TEXT, 0, NULL, 0, 0, device_set, "Controller", NULL, 0, 0},        \
-        {"gamepad_p" #n "_connected",                                                                                  \
-         "1",                                                                                                          \
-         said_connected,                                                                                               \
-         INI_INT,                                                                                                      \
-         0,                                                                                                            \
-         &g_players[n - 1].connected,                                                                                  \
-         0,                                                                                                            \
-         1,                                                                                                            \
-         NULL,                                                                                                         \
-         "Connected",                                                                                                  \
-         "Off|On",                                                                                                     \
-         0,                                                                                                            \
-         0},                                                                                                           \
-        {"gamepad_p" #n "_type",                                                                                       \
-         "0",                                                                                                          \
-         said_type,                                                                                                    \
-         INI_INT,                                                                                                      \
-         0,                                                                                                            \
-         &g_players[n - 1].type,                                                                                       \
-         0,                                                                                                            \
-         4,                                                                                                            \
-         NULL,                                                                                                         \
-         "Type",                                                                                                       \
-         "As it is|Pro Controller|Two Joy-Cons|Left Joy-Con|Right Joy-Con",                                            \
-         0,                                                                                                            \
-         0},                                                                                                           \
-        {"gamepad_p" #n "_swap_ab", "-1", said_swap, INI_INT, 0, &g_players[n - 1].swap_ab, -1, 1, NULL, "Swap A/B",   \
-         "As All|Off|On",           0,    0},                                                                          \
-        {"gamepad_p" #n "_rumble",                                                                                     \
-         "-10",                                                                                                        \
-         said_rumble,                                                                                                  \
-         INI_INT,                                                                                                      \
-         0,                                                                                                            \
-         &g_players[n - 1].rumble,                                                                                     \
-         -10,                                                                                                          \
-         100,                                                                                                          \
-         NULL,                                                                                                         \
-         "Vibration",                                                                                                  \
-         "As All|Off|#%",                                                                                              \
-         10,                                                                                                           \
-         0},                                                                                                           \
-        {"gamepad_p" #n "_map", "", said_map, INI_TEXT, 0, NULL, 0, 0, player_map_set, "Button map", NULL, 0, 0}
-#define PLAYER_OPTS_SAID(n) PLAYER_OPTS(n, NULL, NULL, NULL, NULL, NULL, NULL)
-const IniOpt g_gamepad_players_ini[] = {
-    PLAYER_OPTS(1,
-                "Player N's controller (N from 1 to 8): empty = the next to connect, else its SDL GUID, as the log\n"
-                ";   names it, and /2 after it for the second of two alike",
-                "1 = the game sees player N (player 1 it always does: the keyboard drives it)",
-                "0 = the controller as it is; 1 Pro Controller, 2 two Joy-Cons, 3 a left Joy-Con, 4 a right one",
-                "-1 = as gamepad_swap_ab says; 0 or 1: player N's own",
-                "-10 = as gamepad_rumble says; 0 to 100: its own",
-                "Player N's map, as gamepad_map; empty = gamepad_map's"),
-    PLAYER_OPTS_SAID(2),
-    PLAYER_OPTS_SAID(3),
-    PLAYER_OPTS_SAID(4),
-    PLAYER_OPTS_SAID(5),
-    PLAYER_OPTS_SAID(6),
-    PLAYER_OPTS_SAID(7),
-    PLAYER_OPTS_SAID(8),
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 SnxPlayerConfig* gamepad_player(int player) { return player >= 0 && player < SNX_GAMEPADS ? &g_players[player] : NULL; }
-int gamepad_player_seen(int slot) { return !slot || (slot > 0 && slot < SNX_GAMEPADS && g_players[slot].connected); }
+int gamepad_player_seen(int slot) { return !slot || (slot > 0 && slot < SNX_GAMEPADS && g_settings.player_connected[slot]); }
 int gamepad_player_kind(int slot, int kind) {
-    return slot >= 0 && slot < SNX_GAMEPADS && g_players[slot].type ? g_players[slot].type - 1 : kind;
+    return slot >= 0 && slot < SNX_GAMEPADS && g_settings.player_type[slot] ? g_settings.player_type[slot] - 1 : kind;
 }
-const IniOpt g_gamepad_map_ini[] = {
-    {"gamepad_map", NULL,
-     "A control by where it sits and the console's button it sends, as south:B east:A.\n"
-     ";   Controls south east west north lb rb lt rt ls rs back start up down left right; buttons A B X Y L R ZL\n"
-     ";   ZR L3 R3 Plus Minus Up Down Left Right None. One left out sends the button in its place",
-     INI_TEXT, 0, NULL, 0, 0, map_set, SNX_GAMEPAD_MAP, NULL, 0, 0},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 int gamepad_ini(const char* key, const char* value) {
     const IniOpt* o = ini_find(g_gamepad_ini, key);
     if (!o) o = ini_find(g_gamepad_map_ini, key);
@@ -335,9 +249,9 @@ static int slot_for(u32 id) {
         }
     if (alike) snprintf(want + strlen(want), sizeof want - strlen(want), "/%d", alike + 1);
     for (i = 0; i < SNX_GAMEPADS; i++)
-        if (!g_pads[i] && !SDL_strcasecmp(g_players[i].device, want)) return i;
+        if (!g_pads[i] && !SDL_strcasecmp(g_settings.player_controller[i], want)) return i;
     for (i = 0; i < SNX_GAMEPADS; i++)
-        if (!g_pads[i] && !g_players[i].device[0]) return i;
+        if (!g_pads[i] && !g_settings.player_controller[i][0]) return i;
     return -1;
 }
 void gamepad_open(u32 id) {
@@ -397,7 +311,7 @@ void gamepad_close(u32 id) {
    it spread over the whole range, so the stick starts from nothing and still reaches the edge (a square gate's corner
    is past it) */
 static void dz(i32* x, i32* y) {
-    double r = sqrt((double)*x * *x + (double)*y * *y), z = g_cfg.deadzone * 32767.0 / 100, k;
+    double r = sqrt((double)*x * *x + (double)*y * *y), z = g_settings.stick_dead_zone * 32767.0 / 100, k;
     if (r <= z) {
         *x = *y = 0;
         return;
@@ -417,10 +331,11 @@ static void map_of(int slot, SnxPadMap* map) {
     snx_pad_map_position(&placed);
     *map = p && p->has_map ? p->own : g_cfg.own;
     snx_pad_map_fill(map, &placed);
-    if (p && p->swap_ab >= 0 ? p->swap_ab : g_cfg.swap_ab) snx_pad_map_swap_ab(map);
+    if (p && g_settings.player_swap_a_b[slot] >= 0 ? g_settings.player_swap_a_b[slot] : g_settings.swap_a_b)
+        snx_pad_map_swap_ab(map);
 }
 /* how strongly the pad in slot vibrates, in percent: its player's, else every player's */
-static u32 strength(int slot) { return (u32)(g_players[slot].rumble >= 0 ? g_players[slot].rumble : g_cfg.rumble); }
+static u32 strength(int slot) { return (u32)(g_settings.player_vibration[slot] >= 0 ? g_settings.player_vibration[slot] : g_settings.vibration); }
 static int joycon_button_bit(int button, int right) {
     static const int LEFT_FACE[4] = {12, 15, 13, 14};
     static const int RIGHT_FACE[4] = {0, 2, 1, 3};

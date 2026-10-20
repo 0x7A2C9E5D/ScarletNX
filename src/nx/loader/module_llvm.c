@@ -71,6 +71,7 @@ static int compile_unit(Queue* q, size_t index, char* error, size_t error_size) 
     sprintf(name, "code_%03lu", (unsigned long)index);
     ir = snx_ir_new(name, q->build->opt, error, error_size);
     if (!ir) return -1;
+    snx_ir_tune(ir, q->build->tuning);
     for (i = u->first; i < u->last; ++i) snx_ir_emit(ir, q->codegen, &q->codegen->functions[i]);
     rc = q->build->keep_ir && save_ir(ir, q->build->keep_ir, name);
     if (rc) snprintf(error, error_size, "cannot save the IR of %s", name);

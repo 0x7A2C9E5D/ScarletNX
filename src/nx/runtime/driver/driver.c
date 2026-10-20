@@ -293,10 +293,12 @@ done:
    its game made from it there: no copy is kept. --out names a folder the extraction is kept in instead, the game made
    from a copy. A game made already stays where it is */
 static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* outdir, const char* out,
-                     const char* opt, int settings, char** setting, int game_argc, char** game_argv) {
+                     const char* opt, int recompiling, char** recompile, int settings, char** setting, int game_argc,
+                     char** game_argv) {
     char *dumped = NULL, *dump = snx_absolute(input), *name = NULL, *games = NULL, *extracted = NULL, *work = NULL;
     char *pending = NULL, *game = NULL, *folder = NULL, *base = NULL, *code = NULL, *source = NULL, error[256];
-    const char** command = (const char**)snx_alloc((size_t)(game_argc + settings + 16) * sizeof(*command));
+    const char** command =
+        (const char**)snx_alloc((size_t)(game_argc + settings + recompiling + 16) * sizeof(*command));
     int rc = 1, nro = is_nro_path(input), prepared = prepared_game(input, &folder, &name), named = 0, n, j;
     /* -rx on a dump extracts it, as --extract-container does: -r alone reads it in place */
     int tmpfs = (flags & SNX_TMPFS) != 0, extract = tmpfs || (flags & (SNX_EXTRACT_CONTAINER | SNX_EXTRACT)) != 0;
@@ -454,6 +456,7 @@ made:
             command[n++] = "-O";
             command[n++] = opt;
         }
+        for (j = 0; j < recompiling; ++j) command[n++] = recompile[j];
         command[n++] = "--";
         command[n++] = source;
         if (named) command[n++] = name;
@@ -548,15 +551,16 @@ static int dump_modules(int argc, char** argv) {
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
     const char *repo = NULL, *build = SNX_BUILD_DIR, *input = NULL, *outdir = NULL, *out = NULL, *opt = NULL;
-    char *r = NULL, *b = NULL, *exe = NULL, **rest, **setting, *self, *data = NULL, *source = NULL;
+    char *r = NULL, *b = NULL, *exe = NULL, **rest, **setting, **recompile, *self, *data = NULL, *source = NULL;
     unsigned flags = 0;
     int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, tmpfs_args = 0;
-    int repo_given = 0, settings = 0;
+    int repo_given = 0, settings = 0, recompiling = 0;
     if (argc <= 1) return -1;
     if (!strcmp(argv[1], "--dump-modules")) return dump_modules(argc, argv);
     if (!strcmp(argv[1], "--scan-log")) return snx_logscan_main(argc - 1, argv + 1, snx_demangle);
-    rest = (char**)snx_alloc((size_t)(2 * argc + 1) * sizeof(*rest));
+    rest = (char**)snx_alloc((size_t)(3 * argc + 1) * sizeof(*rest));
     setting = rest + argc + 1;
+    recompile = setting + argc;
     for (i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--")) {
             separator = i;
@@ -629,18 +633,27 @@ int snx_driver(int argc, char** argv) {
                       input, input);
         goto done;
     }
-    /* played, a --key=value that is not the driver's own is a setting of the game's .ini, passed on to it when the
-       runtime knows the key; any other is refused */
+    /* played, a --key=value that is not the driver's own is a setting of the recompile, passed on to it when the game is
+       made, or of the game's .ini, passed on to the game when the runtime knows the key; any other is refused */
     for (i = 0; automatic && i < n; ++i)
         if (!strncmp(rest[i], "--", 2) && strchr(rest[i], '=')) {
-            if (!setting_known(rest[i] + 2)) {
+            char key[64];
+            size_t length = (size_t)(strchr(rest[i], '=') - rest[i] - 2);
+            if (length < sizeof key) {
+                memcpy(key, rest[i] + 2, length);
+                key[length] = 0;
+            }
+            if (length < sizeof key && snx_recompile_setting(key))
+                recompile[recompiling++] = rest[i];
+            else if (setting_known(rest[i] + 2))
+                setting[settings++] = rest[i];
+            else {
                 result = snx_error("unknown option: %s", rest[i]);
                 goto done;
             }
-            setting[settings++] = rest[i];
         } else
-            rest[i - settings] = rest[i];
-    n -= settings;
+            rest[i - settings - recompiling] = rest[i];
+    n -= settings + recompiling;
     /* played, --outdir names the games' folder and --out the dump's extraction, as -r and -x take them */
     for (i = 0; automatic && i < n; ++i)
         if (!strcmp(rest[i], "--outdir") || !strcmp(rest[i], "--out")) {
@@ -727,7 +740,7 @@ int snx_driver(int argc, char** argv) {
     paths.source = source;
     if (automatic)
         result =
-            play_dump(input, &paths, flags, outdir, out, opt, settings, setting,
+            play_dump(input, &paths, flags, outdir, out, opt, recompiling, recompile, settings, setting,
                       separator < argc ? argc - separator - 1 : 0, argv + (separator < argc ? separator + 1 : argc));
     else
         result = (flags & SNX_RECOMP) ? snx_recompile(n, rest, &paths) : snx_extract(n, rest, &paths);

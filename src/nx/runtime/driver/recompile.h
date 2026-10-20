@@ -3,10 +3,13 @@
 #ifndef SNX_RECOMPILE_H
 #define SNX_RECOMPILE_H
 #include "common/utilities/common.h"
+#include "nx/runtime/ini.h"
 /* the ABI stamped into the games this build recompiles */
 unsigned snx_game_abi(void);
 /* what a game this build recompiled has in its <name>.abi, owned: the ABI, then the build's commit, a line each. A
    game whose stamp says anything else is from another version, and is recompiled before it runs */
 char* snx_game_stamp(void);
 int snx_recompile(int argc, char** argv, const SnxPaths* paths);
+/* a setting of the recompile (settings.txt's recompile and llvm tables), which --KEY=VALUE sets; NULL for another key */
+const IniOpt* snx_recompile_setting(const char* key);
 #endif

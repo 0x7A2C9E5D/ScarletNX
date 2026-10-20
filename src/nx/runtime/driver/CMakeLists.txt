@@ -15,7 +15,7 @@ target_compile_definitions(snx_driver PRIVATE
 target_compile_options(snx_driver PRIVATE -pedantic-errors -Wall -Wextra -Werror=missing-prototypes)
 # snx_build_info (the top CMakeLists, after CTest): the commit the games' stamps carry
 target_link_libraries(snx_driver PUBLIC scarletnx-common snx_nx_module snx_lz4 OpenSSL::Crypto Threads::Threads
-                                        snx_build_info hactool_lib snx_demangle)
+                                        snx_build_info hactool_lib snx_demangle snx_settings)
 if(WIN32)
     target_link_libraries(snx_driver PUBLIC advapi32)
 endif()
@@ -25,10 +25,11 @@ endif()
 include("${CMAKE_SOURCE_DIR}/cmake/llvm.cmake")
 add_subdirectory("${CMAKE_SOURCE_DIR}/src/common/cpu/recompiler/llvm" llvm-backend)
 # the NX game module through the LLVM backend; C11 for the LLVM-C headers, the driver itself stays C90
-add_library(snx_driver_llvm STATIC ../../loader/module_llvm.c ../../loader/module_arm.c disasm.c)
+add_library(snx_driver_llvm STATIC ../../loader/module_llvm.c ../../loader/module_arm.c llvm_tuning.c disasm.c
+                                   "${SNX_SETTINGS_LLVM}")
 set_target_properties(snx_driver_llvm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
 target_compile_options(snx_driver_llvm PRIVATE -Wall -Wextra -Werror=missing-prototypes)
-target_link_libraries(snx_driver_llvm PUBLIC snx_llvm snx_arm_llvm snx_nx_module)
+target_link_libraries(snx_driver_llvm PUBLIC snx_llvm snx_arm_llvm snx_nx_module snx_settings)
 # scarletnx --mcp's disassembler (disasm.c), where LLVM has its AArch64 target (cmake/llvm.cmake)
 if(SNX_LLVM_A64_DISASM)
     target_compile_definitions(snx_driver_llvm PRIVATE SNX_A64_DISASM)

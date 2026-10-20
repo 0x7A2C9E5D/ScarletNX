@@ -9,7 +9,6 @@
 #include <stdio.h>
 
 u8* g_mem;
-int g_verbose;
 void logf_(int lvl, const char* fmt, ...) {
     (void)lvl;
     (void)fmt;

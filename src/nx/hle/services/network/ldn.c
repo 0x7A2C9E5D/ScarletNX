@@ -181,7 +181,7 @@ static int nn_ldn_detail_IUserLocalCommunicationService_Initialize(SvcObj* self,
         WARN_LIMIT(1, "ldn: the game asked for local wireless, which ldn=off disables\n");
         R_THROW(LDN_DISABLED);
     }
-    if (g_opt_airplane) {
+    if (g_settings.airplane_mode) {
         WARN_LIMIT(1, "ldn: the game asked for local wireless, which airplane_mode=1 turns off\n");
         R_THROW(LDN_AIRPLANE_MODE_ENABLED);
     }

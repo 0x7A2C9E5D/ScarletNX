@@ -154,7 +154,7 @@ void crash_report(void* host_pc, void* fault, int sig) {
     report_place(host_pc);
     /* the low pages are never mapped: a pointer the game failed to get (an allocation it ran out of memory for) plus
        a field's offset lands there */
-    if (fault && in_guest && guest < ((u64)16 << 20) && g_hle.svcmem.opt_mem_gb < 6)
+    if (fault && in_guest && guest < ((u64)16 << 20) && g_settings.memory_gb < 6)
         WARN("  a null pointer plus an offset: a game short of memory does this, memory_gb=6 in its .ini may help\n");
     if (t) {
         WARN("  thread %llu (%s)\n", (unsigned long long)t->id, t->name);

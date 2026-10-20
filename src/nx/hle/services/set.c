@@ -59,14 +59,14 @@ static i32 set_list_languages(IpcBuf codes, int max) {
     return n;
 }
 static void set_key_code_map(IpcBuf map) {
-    const u8* m = set_languages[set_language(g_opt_lang)].key_code_map;
+    const u8* m = set_languages[set_language(g_settings.language)].key_code_map;
     memcpy(GP(map.addr), m, (size_t)(map.size < 0x1000 ? map.size : 0x1000));
 }
 
 /* ============================================================ set */
 static int nn_settings_ISettingsServer_GetLanguageCode(SvcObj* self, nn_settings_LanguageCode* code) {
     (void)self;
-    set_language_code(g_opt_lang, code->v);
+    set_language_code(g_settings.language, code->v);
     R_SUCCEED();
 }
 static int nn_settings_ISettingsServer_GetAvailableLanguageCodes(SvcObj* self, IpcBuf codes, i32* count) {
@@ -88,7 +88,7 @@ static int nn_settings_ISettingsServer_GetAvailableLanguageCodeCount(SvcObj* sel
 /* the region a console sold with that language comes from */
 static int nn_settings_ISettingsServer_GetRegionCode(SvcObj* self, i32* region) {
     (void)self;
-    *region = set_languages[set_language(g_opt_lang)].region;
+    *region = set_languages[set_language(g_settings.language)].region;
     R_SUCCEED();
 }
 static int nn_settings_ISettingsServer_GetAvailableLanguageCodes2(SvcObj* self, IpcBuf codes, i32* count) {
@@ -218,7 +218,7 @@ static int nn_settings_ISystemSettingsServer_SetBatteryPercentageFlag(SvcObj* se
 }
 static int nn_settings_ISystemSettingsServer_GetKeyboardLayout(SvcObj* self, u32* layout) {
     (void)self;
-    *layout = g_hle.set.layout_set ? g_hle.set.keyboard_layout : set_layouts[set_language(g_opt_lang)];
+    *layout = g_hle.set.layout_set ? g_hle.set.keyboard_layout : set_layouts[set_language(g_settings.language)];
     R_SUCCEED();
 }
 static int nn_settings_ISystemSettingsServer_SetKeyboardLayout(SvcObj* self, u32 layout) {

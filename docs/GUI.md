@@ -82,7 +82,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   did, *Installed* or *Not installed* and why, and goes back to the menu by itself after 3 seconds
   (10 after a failure, while another file can still be picked); ESC cancels without changing them.
 - **Settings** opens on its groups, Enter opening one and ESC coming back: **App**, then
-  **Launch** (the launcher's four), then a group per section of the game's `.ini` (Display,
+  **Launch** (the launcher's own and the recompiler's, from `src/nx/runtime/settings.txt`), then a group per section of the game's `.ini` (Display,
   Graphics, Performance, On-screen controls, Controllers, Network, Debug), as `scarletnx --settings`
   prints them from the runtime's own tables. The game's menu's settings have its names and words
   (*Scale* 100%, *Touch screen* Fingers), and its **Buttons** page, whose **All** steps every row;
@@ -150,10 +150,12 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   game reads its ExeFS and RomFS out of the dump on the fly, decrypting them as it reads ([USAGE](USAGE.md)). A CIA
   is read the same way. On, a dump is extracted as before, into the game's folder or with *Extract to tmpfs* into
   tmpfs, which implies it. Turning it off again takes a game's extraction away on its next run.
-  **Optimization level** (0, 1, 2, 3 or z, 2 by default) is LLVM's level for the game's code, passed as `-O` when
-  the game is recompiled: by **R**, or by a run that has to (a dump played the first time, an NRO each time). A game
-  made already keeps its code until then. The first two settings and this one reach neither the Linux nor the 3DS
-  driver.
+  **Optimization level** (0, 1, 2, 3 or z, 2 by default) is LLVM's level for the game's code, **AOT threads** the
+  threads compiling it (0, the default, one for each core), and the **LLVM Internals** page turns each pass of LLVM's
+  pipelines off and sets the options LLVM's C API takes, its **All** stepping every row. They are passed as
+  `--key=value` when the game is recompiled: by **R**, or by a run that has to (a dump played the first time, an NRO
+  each time). A game made already keeps its code until then. The first two settings and these reach neither the Linux
+  nor the 3DS driver.
 - The Status box, after the RAM and the CPU, says what ScarletNX's folders take (games/,
   work/ and themes/ of the data folder, and on Linux its config, state and cache folders, else
   the menu's own) and what is left on that disk, counted as the menu opens and after each run.

@@ -360,7 +360,11 @@ int snx_main(int argc, char** argv) {
     status = snx_startup_options(argc, argv);
     if (status) return status;
     if (argc == 2 && !strcmp(argv[1], "--settings")) {
-        ini_list();
+        ini_list(g_ini_sections, g_ini_sections_count);
+        return 0;
+    }
+    if (argc == 2 && !strcmp(argv[1], "--settings=recompile")) {
+        ini_list(g_launch_sections, g_launch_sections_count);
         return 0;
     }
     if (g_opt_gdb && snx_gdb_start(g_opt_gdb_stop, SNX_GDB_PORT)) return 2; /* before any other thread */
@@ -440,7 +444,7 @@ int snx_main(int argc, char** argv) {
     romfs_init();
     gpu_init();
     video_init(title);
-    if (g_opt_prof) {
+    if (g_settings.profiler) {
 #if defined(_WIN32)
         plat_prof_start();
         LOG("profiler: on, profile.txt every 10 seconds\n");

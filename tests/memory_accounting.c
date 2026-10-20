@@ -16,7 +16,6 @@
 static unsigned checks;
 static int fail_commit_after, commit_calls, decommit_calls;
 static int mapping_depth, mapping_begins, mapping_ends;
-int g_verbose;
 
 static void test_fail(const char* expr, int line) {
     fprintf(stderr, "memory_accounting.c:%d: %s\n", line, expr);
@@ -140,7 +139,7 @@ static u32 state(u64 a) {
 }
 static void base_process(void) {
     CHECK(g_heap_size == 0 && g_phys_mapped == 0);
-    g_hle.svcmem.opt_mem_gb = 0;
+    g_settings.memory_gb = 0;
     g_code_memory = 55 * MIB;
     g_main_stack_size = MIB;
     g_hle.kernel.sysres_size = 0;
@@ -176,7 +175,7 @@ static void test_heap(void) {
     CHECK(g_heap_size == 2 * MIB && state(HEAP_BASE + 2 * MIB) == MS_FREE);
     CHECK(svc_set_heap_size(0) == 0);
     for (int gb = 4; gb <= 8; gb += 2) {
-        g_hle.svcmem.opt_mem_gb = gb;
+        g_settings.memory_gb = gb;
         CHECK(mem_total() == (gb == 4 ? 3285 : gb == 6 ? 4916 : 6964) * MIB);
         CHECK(svc_set_heap_size(3200 * MIB) == 0);
         CHECK(svc_set_heap_size(0) == 0);

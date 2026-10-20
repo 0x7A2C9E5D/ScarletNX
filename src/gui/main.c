@@ -3959,7 +3959,7 @@ static const char* form_note(const App* app) {
     if (app->form == GUI_FORM_PLACES)
         return app->editor.row < GUI_PLACES ? app->place_line[app->editor.row] : snx_tr("Data, games and extractions");
     if (app->form != GUI_FORM_SETTINGS && app->form != GUI_FORM_GROUP) return NULL;
-    return app->settings.count > GUI_SETTINGS_OWN ? snx_tr("For the next runs. [default]: as the game's .ini says")
+    return app->settings.count > app->settings.own ? snx_tr("For the next runs. [default]: as the game's .ini says")
                                                   : snx_tr("The runtime listed no settings");
 }
 static void form_boxes(App* app, GuiFormBoxes* f) {
@@ -4593,7 +4593,7 @@ static int settings_unread(App* app, char* out, size_t size) {
     if (size) out[0] = 0;
     if (!app->settings_file || !snx_is_file(app->settings_file)) return 0;
     s = settings_of(app);
-    return s->count > GUI_SETTINGS_OWN ? gui_settings_unread(s, app->settings_file, out, size) : 0;
+    return s->count > app->settings.own ? gui_settings_unread(s, app->settings_file, out, size) : 0;
 }
 /* the .ini files with a [Deprecated] section; with done, each written again without it */
 static int clean_inis(App* app, GuiCleaned* done) {
@@ -4805,7 +4805,7 @@ static void launch(App* app, char* absolute, bool prepared) {
     /* Switch options only, never guest argv for the CPU-only Linux driver or the 3DS one; R's recompile takes no
        option of a run. The drivers work in the menu's data folder, so they list the same games */
     if (app->recompile && app->menu.selected == GUI_SWITCH && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
-    if (!direct && app->menu.selected == GUI_SWITCH && gui_settings_opt(s)) argv[n++] = gui_settings_opt(s);
+    if (!direct && app->menu.selected == GUI_SWITCH) n += gui_settings_recompile(s, argv + n);
     if (app->menu.selected == GUI_SWITCH && !app->recompile) n += gui_settings_options(s, 1, argv + n);
     /* Extract game container, which both drivers take, for a run and for R's recompile: off, nothing is extracted */
     if ((app->menu.selected == GUI_3DS || (app->menu.selected == GUI_SWITCH && app->recompile)) &&

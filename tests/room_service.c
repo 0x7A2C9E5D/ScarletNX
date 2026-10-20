@@ -14,8 +14,7 @@
 #include "nx/hle/hle.c"
 
 char g_exedir[1024], g_exename[256];
-int g_opt_ldn, g_opt_airplane;
-char g_opt_room[256];
+int g_opt_ldn;
 static SnxRoom* g_room_set;
 void network_set_room(SnxRoom* room) { g_room_set = room; }
 SnxRoom* network_room(void) { return g_room_set; }
@@ -105,20 +104,20 @@ static void stops(void) {
     CHECK(network_room() == NULL);
     /* airplane mode keeps the console out of the room, as out of any network: nobody at port 9 is even asked */
     g_opt_ldn = SNX_OPT_LDN_ROOM;
-    g_opt_airplane = 1;
-    strcpy(g_opt_room, "127.0.0.1:9");
+    g_settings.airplane_mode = 1;
+    strcpy(g_settings.eden_room, "127.0.0.1:9");
     g_stop[0] = 0;
     if (!setjmp(g_stopped)) network_room_init();
     CHECK(network_room() == NULL && !g_stop[0]); /* not stopped: the join that would fail never ran */
-    g_opt_airplane = 0;
+    g_settings.airplane_mode = 0;
     g_opt_ldn = SNX_OPT_LDN_ROOM;
-    g_opt_room[0] = 0;
+    g_settings.eden_room[0] = 0;
     if (!setjmp(g_stopped)) {
         network_room_init();
         CHECK(!"ldn=room without room= started");
     }
     CHECK(strstr(g_stop, "room=host or room=host:port"));
-    strcpy(g_opt_room, "host:99999");
+    strcpy(g_settings.eden_room, "host:99999");
     if (!setjmp(g_stopped)) {
         network_room_init();
         CHECK(!"a room at no port started");

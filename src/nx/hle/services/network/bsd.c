@@ -42,7 +42,7 @@ static int reachable(SnxSocket* s, const SnxSockAddr* a) { return snx_room_socke
 /* nifm asks often (some games every frame): the host's state is read again after two seconds. In a room the
    connection is the room's, its address and a /24, as Eden's nifm gives the room's address */
 int network_interface(SnxNetInterface* out) {
-    if (g_opt_airplane) return -SNX_ENETDOWN;
+    if (g_settings.airplane_mode) return -SNX_ENETDOWN;
     if (g_hle.bsd.room) {
         if (out) {
             memset(out, 0, sizeof *out);
@@ -53,7 +53,7 @@ int network_interface(SnxNetInterface* out) {
         }
         return 0;
     }
-    if (!g_opt_network) return -SNX_ENETDOWN;
+    if (!g_settings.network) return -SNX_ENETDOWN;
     pm_lock(&g_hle.bsd.iface_lk);
     time_t now = time(NULL);
     if (!g_hle.bsd.iface_when || now - g_hle.bsd.iface_when >= 2 || now < g_hle.bsd.iface_when) {
@@ -67,7 +67,7 @@ int network_interface(SnxNetInterface* out) {
 }
 int network_online(void) { return !network_interface(NULL); }
 int network_reachable(const SnxSockAddr* a) {
-    if ((g_opt_network && !g_opt_airplane) || a->family == SNX_AF_UNSPEC) return 1;
+    if ((g_settings.network && !g_settings.airplane_mode) || a->family == SNX_AF_UNSPEC) return 1;
     if (a->family == SNX_AF_INET) return a->addr[0] == 127;
     static const uint8_t lo6[16] = {[15] = 1};
     return a->family == SNX_AF_INET6 && !memcmp(a->addr, lo6, 16);
@@ -553,7 +553,7 @@ static int64_t do_recv(Bsd* b, IpcBuf message, i32 fd, u32 gflags, IpcBuf addr, 
     else
         r = snx_socket_recv(s, GP(a), n, msg_in(gflags), addrlen ? &from : NULL, NULL);
     snx_socket_unref(c);
-    if (r > 0 && from.family && g_verbose >= 2) {
+    if (r > 0 && from.family && g_settings.log_level >= 2) {
         char t[64];
         LOGV("bsd: RecvFrom(%d) %lld bytes from %s\n", fd, (long long)r, addr_text(&from, t, sizeof t));
     }
@@ -578,7 +578,7 @@ static int64_t do_send(Bsd* b, IpcBuf message, i32 fd, u32 gflags, const SnxSock
         r = -SNX_EFAULT;
     else
         r = snx_socket_send(s, a ? GP(a) : NULL, n, msg_in(gflags), to);
-    if (to && g_verbose >= 2) {
+    if (to && g_settings.log_level >= 2) {
         char t[64];
         LOGV("bsd: SendTo(%d) %llu bytes to %s = %lld\n", fd, (unsigned long long)n, addr_text(to, t, sizeof t),
              (long long)r);
@@ -636,7 +636,7 @@ static int bind_connect(Bsd* b, i32 fd, IpcBuf addr, int connect, i32* ret, u32*
         u8 bcast[4];
         int pinned = bind_address(&sa, bcast);
         r = snx_socket_bind(s, &sa);
-        if (g_verbose >= 2) {
+        if (g_settings.log_level >= 2) {
             char t[64];
             LOGV("bsd: Bind(%d) %s = %d\n", fd, addr_text(&sa, t, sizeof t), r);
         }

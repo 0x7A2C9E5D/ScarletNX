@@ -31,7 +31,6 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
     nsent++;
 }
 static char logged[4096];
-int g_verbose;
 void logf_(int lvl, const char* fmt, ...) {
     va_list ap;
     size_t n = strlen(logged);

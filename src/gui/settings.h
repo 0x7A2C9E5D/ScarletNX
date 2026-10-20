@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* The menu's Settings: the launcher's own four (gdbstub, Extract to tmpfs, Extract game container, the optimization
-   level), then every setting of the game's .ini as the runtime lists them (scarletnx --settings, its tables), each a
-   row of the form (editor.h), named and its values worded as the game's menu shows them. A setting is the .ini's,
+/* The menu's Settings: the launcher's own rows and the recompiler's (settings.txt's launcher sections: gdbstub, Extract
+   to tmpfs, Extract game container, the optimization level, the AOT threads and the LLVM Internals page), then every
+   setting of the game's .ini as the runtime lists them (scarletnx --settings, its tables), each a row of the form
+   (editor.h), named and its values worded as the game's menu shows them. A setting is the .ini's,
    passed to no run, until one is picked. The picks are kept in a file, an .ini of the game's sections and keys, and go
    to every run as --key=value. A run takes a setting from what that run picks, then from the game's own file of picks
    (to come: today there is only the global one, every game's), then from the global file, and last from the game's
@@ -12,7 +13,6 @@
 #include <stddef.h>
 #include "gui/theme.h"
 
-#define GUI_SETTINGS_OWN 4 /* the launcher's own rows, first: gdbstub, tmpfs, extract and opt */
 /* a row that is no setting: a page's, which opens the section/page rows listed after it, and its All, first on that
    page, which steps them together */
 enum { GUI_SETTING_PAGE = 1, GUI_SETTING_ALL };
@@ -25,6 +25,7 @@ typedef struct {
     const char* key;                    /* the .ini's, the row's key being its name in the menus */
     const char** values;                /* a word row's values by word, NULL where the words are the values */
     const char* fallback; /* the runtime's default for the .ini, as the row words it: what it shows while not picked */
+    const char* def;      /* that default as the .ini writes it */
     int kind;             /* 0, GUI_SETTING_PAGE or GUI_SETTING_ALL */
     int first, count;     /* the rows a page opens, an All steps */
 } GuiSetting;
@@ -32,11 +33,13 @@ typedef struct {
     GuiThemeKey* keys;  /* the rows: the launcher's, then the runtime's by section */
     GuiSetting* values; /* their values, which the keys' offsets are in */
     int count;          /* in one block with the list the keys' names and help point into */
+    int own;            /* the launcher's own rows and the recompiler's, first (their page's rows among them) */
 } GuiSettings;
-/* list's settings, a line each (section[/page], key, default, int | float | text, lowest, highest, help, name, the
-   values value=word between '|', tabs between), after the launcher's own; another line is left out. A page's rows are
-   listed after its section's others, one page a section. 0, else nonzero when out of memory */
-int gui_settings_read(GuiSettings* settings, const char* list);
+/* the launcher's own rows and the recompiler's (g_launch_sections, listed by ini_list_text), then the runtime's list of
+   the game's settings, a line each (section[/page], key, default, int | float | text, lowest, highest, help, name, the
+   values value=word between '|', tabs between); another line is left out. A page's rows are listed after its
+   section's others, one page a section. 0, else nonzero when out of memory */
+int gui_settings_read(GuiSettings* settings, const char* runtime);
 void gui_settings_free(GuiSettings* settings);
 /* the row of key set to value, a word or a text as the row takes: 1 when it did */
 int gui_settings_set(GuiSettings* settings, const char* key, const char* value);
@@ -70,7 +73,8 @@ const char* gui_settings_tmpfs(const GuiSettings* settings);
 /* Extract game container: --extract-container while it is on, else NULL (a dump read in place, nothing extracted).
    Both drivers take it */
 const char* gui_settings_extract(const GuiSettings* settings);
-/* the optimization level: -O0, -O1, -O3 or -Oz for the recompile, else NULL (the driver's default, 2). The Switch
-   driver takes it, for a run (which recompiles when it must) and for R's recompile */
-const char* gui_settings_opt(const GuiSettings* settings);
+/* argv's --key=value for each of the recompiler's settings picked (the optimization level, the AOT threads, LLVM
+   Internals), which the Switch driver takes for a run (which recompiles when it must) and for R's recompile. Their
+   count */
+size_t gui_settings_recompile(GuiSettings* settings, const char** argv);
 #endif

@@ -34,10 +34,13 @@ static const char list[] =
     "Debug\tlog\t1\tint\t0\t2\tLog detail\t\t0=0|1=1|2=2";
 
 /* a row by its .ini key, or by the name it shows */
+/* a row by its key or name: the runtime's first, then the launcher's (both have an All, the LLVM Internals page's) */
 static int at(const GuiSettings* s, const char* name) {
-    int i;
-    for (i = 0; i < s->count; ++i)
+    int i, n;
+    for (n = 0; n < s->count; ++n) {
+        i = (s->own + n) % s->count;
         if ((s->values[i].key && !strcmp(s->values[i].key, name)) || !strcmp(s->keys[i].key, name)) return i;
+    }
     return -1;
 }
 static const GuiThemeKey* key(const GuiSettings* s, const char* name) {
@@ -68,25 +71,30 @@ int main(int argc, char** argv) {
     int fullscreen, touch, stub, tmpfs, extract, launch, page, all;
     assert(!gui_settings_read(&s, list));
 
-    /* the launcher's four, then a row a setting in the list's order, the other line left out; a page's row and its
-       All before its settings */
-    assert(s.count == GUI_SETTINGS_OWN + 15 && !strcmp(s.keys[0].key, "gdbstub"));
+    /* the launcher's own and the recompiler's (settings.txt's launcher sections), then a row a setting in the list's
+       order, the other line left out; a page's row and its All before its settings */
+    assert(s.own > 5 && s.count == s.own + 15 && !strcmp(s.keys[0].key, "gdbstub"));
     assert(!strcmp(s.keys[0].section, "Launch") && !strcmp(s.keys[0].about, "Enables gdbstub on port 1234") &&
-           words(&s.keys[0]) == 2);
+           words(&s.keys[0]) == 2 && !strcmp(s.values[0].key, "gdbstub"));
     /* shown by its name, kept by its key */
     assert(!strcmp(s.keys[1].section, "Launch") && !strcmp(s.keys[1].key, "Extract to tmpfs") &&
            !strcmp(s.values[1].key, "tmpfs") && words(&s.keys[1]) == 2 && strstr(s.keys[1].about, "RomFS"));
     assert(!strcmp(s.keys[2].section, "Launch") && !strcmp(s.keys[2].key, "Extract game container") &&
            !strcmp(s.values[2].key, "extract") && words(&s.keys[2]) == 2 && strstr(s.keys[2].about, "dump"));
     assert(!gui_settings_extract(&s)); /* off: a dump read in place */
-    /* the optimization level: 2, the driver's own, passes nothing; another passes its -O */
+    /* the recompiler's: none passed until picked, then --key=value; the optimization level takes 0 to 3 and z, the
+       AOT threads a number (0 the cores), and LLVM Internals is a page of its own */
     assert(!strcmp(s.keys[3].section, "Launch") && !strcmp(s.keys[3].key, "Optimization level") &&
-           !strcmp(s.values[3].key, "opt") && words(&s.keys[3]) == 5 && !gui_settings_opt(&s));
-    assert(gui_settings_set(&s, "opt", "z") && !strcmp(gui_settings_opt(&s), "-Oz"));
-    assert(gui_settings_set(&s, "opt", "0") && !strcmp(gui_settings_opt(&s), "-O0"));
-    assert(!gui_settings_set(&s, "opt", "s") && gui_settings_set(&s, "opt", "2") && !gui_settings_opt(&s));
-    assert(!strcmp(s.keys[4].section, "Display") && !strcmp(s.keys[4].key, "docked"));
-    assert(!strcmp(s.keys[4].about, "1 = TV mode") && !strcmp(key(&s, "fullscreen")->about, "1 = start in fullscreen"));
+           !strcmp(s.values[3].key, "opt") && words(&s.keys[3]) == 6 && !gui_settings_recompile(&s, options));
+    assert(gui_settings_set(&s, "opt", "z") && gui_settings_recompile(&s, options) == 1 && !strcmp(options[0], "--opt=z"));
+    assert(!gui_settings_set(&s, "opt", "s") && gui_settings_set(&s, "aot_threads", "4"));
+    assert(gui_settings_recompile(&s, options) == 2 && !strcmp(options[1], "--aot_threads=4"));
+    assert(!strcmp(s.keys[5].section, "Launch") && s.values[5].kind == GUI_SETTING_PAGE &&
+           !strcmp(s.keys[5].key, "LLVM Internals"));
+    assert(gui_settings_set(&s, "opt", ".ini") && gui_settings_set(&s, "aot_threads", "") &&
+           !gui_settings_recompile(&s, options));
+    assert(!strcmp(s.keys[s.own].section, "Display") && !strcmp(s.keys[s.own].key, "docked"));
+    assert(!strcmp(s.keys[s.own].about, "1 = TV mode") && !strcmp(key(&s, "fullscreen")->about, "1 = start in fullscreen"));
     assert(!strcmp(s.keys[s.count - 1].key, "log") && !strcmp(s.keys[s.count - 1].about, "Log detail"));
     /* a setting with values goes round .ini and their words, named as the game's menu names it; the others are
        typed, an older runtime's and one with a value missing its word among them */
@@ -120,7 +128,7 @@ int main(int argc, char** argv) {
     assert(!strcmp(on_screen(&s, "gamepad_rumble"), "100% [default]") && !strcmp(on_screen(&s, "log"), "1 [default]"));
     assert(!strcmp(on_screen(&s, "resolution"), "1 [default]") &&
            !strcmp(on_screen(&s, "controls_a_shown"), "[default]"));
-    assert(!strcmp(on_screen(&s, "All"), "[default]") && !strcmp(on_screen(&s, "gdbstub"), "off"));
+    assert(!strcmp(on_screen(&s, "All"), "[default]") && !strcmp(on_screen(&s, "gdbstub"), "off [default]"));
     assert(!strcmp(on_screen(&s, "Buttons"), ">"));
     assert(gui_settings_set(&s, "language", "3") && !strcmp(gui_settings_value(&s, "language"), "3"));
     assert(gui_settings_set(&s, "old", "0.5 0.5 100 1") && gui_settings_set(&s, "language", ""));
@@ -267,7 +275,7 @@ int main(int argc, char** argv) {
         free(path);
         free(dir);
     }
-    assert(!gui_settings_read(&s, "") && s.count == GUI_SETTINGS_OWN); /* no runtime: the launcher's alone */
+    assert(!gui_settings_read(&s, "") && s.count == s.own); /* no runtime: the launcher's alone */
     assert(gui_settings_options(&s, 1, options) == 0 && !gui_settings_set(&s, "touch", "1"));
     /* and a pick of theirs kept then: the runtime's picks in the file, which no row has, stay as they were */
     {
@@ -279,7 +287,7 @@ int main(int argc, char** argv) {
         assert(!snx_write_file(path, picks, strlen(picks)));
         gui_settings_mark(&s);
         gui_settings_load(&s, path);
-        assert(!strcmp(gui_settings_value(&s, "gdbstub"), "on") && gui_settings_set(&s, "gdbstub", "off"));
+        assert(!strcmp(gui_settings_value(&s, "gdbstub"), "on") && gui_settings_set(&s, "gdbstub", ".ini"));
         assert(!gui_settings_save(&s, path));
         text = (char*)snx_read_file(path, &size);
         assert(text && strstr(text, theirs) && !strstr(text, "gdbstub") && !strstr(text, "[Launch]"));
@@ -320,12 +328,12 @@ int main(int argc, char** argv) {
             next = c + strcspn(c, "\n");
             if (*next) ++next;
         }
-        assert(pages > 0 && !gui_settings_read(&s, output) && s.count == GUI_SETTINGS_OWN + lines + 2 * pages);
+        assert(pages > 0 && !gui_settings_read(&s, output) && s.count == s.own + lines + 2 * pages);
         /* each player's own, on Controllers' Player page: a word row whose default is every player's */
         assert(words(key(&s, "gamepad_p1_swap_ab")) == 4 && !strcmp(key(&s, "gamepad_p8_swap_ab")->words[1], "As All"));
         assert(key(&s, "gamepad_p3_device")->type == GUI_KEY_TEXT &&
                !strcmp(key(&s, "gamepad_p3_device")->section, "Controllers/Player"));
-        assert(!strcmp(s.keys[GUI_SETTINGS_OWN].section, "Display") && !strcmp(s.keys[s.count - 1].section, "Debug"));
+        assert(!strcmp(s.keys[s.own].section, "Display") && !strcmp(s.keys[s.count - 1].section, "Debug"));
         assert(words(key(&s, "fullscreen")) == 3 && words(key(&s, "touch")) == 4 && words(key(&s, "controls")) == 3);
         assert(!strcmp(key(&s, "controls")->key, "Show controls") && !strcmp(key(&s, "touch")->words[3], "Mouse too"));
         assert(!strcmp(key(&s, "gamepad_rumble")->words[1], "Off") && !key(&s, "controls_a"));

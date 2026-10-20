@@ -10,8 +10,6 @@
 #include "nx/hle/hle.c"
 
 u8* g_mem;
-int g_verbose;
-int g_opt_lang = 1;
 static unsigned test_checks;
 
 static void test_fail(const char* expression, int line) {
@@ -134,11 +132,11 @@ int main(void) {
         CHECK(nn_settings_ISystemSettingsServer_SetVibrationMasterVolume(NULL, 0.25f) == 0);
         CHECK(nn_settings_ISystemSettingsServer_GetVibrationMasterVolume(NULL, &volume) == 0 && volume == 0.25f);
         CHECK(nn_settings_ISystemSettingsServer_GetKeyboardLayout(NULL, &layout) == 0 && layout == 1);
-        g_opt_lang = 2; /* French: its layout until one is set */
+        g_settings.language = 2; /* French: its layout until one is set */
         CHECK(nn_settings_ISystemSettingsServer_GetKeyboardLayout(NULL, &layout) == 0 && layout == 4);
         CHECK(nn_settings_ISystemSettingsServer_SetKeyboardLayout(NULL, 3) == 0);
         CHECK(nn_settings_ISystemSettingsServer_GetKeyboardLayout(NULL, &layout) == 0 && layout == 3);
-        g_opt_lang = 1;
+        g_settings.language = 1;
         CHECK(nn_settings_ISystemSettingsServer_GetKeyboardLayout(NULL, &layout) == 0 && layout == 3);
         CHECK(nn_settings_ISystemSettingsServer_GetBatteryPercentageFlag(NULL, &flag) == 0 && flag == 1);
         CHECK(nn_settings_ISystemSettingsServer_SetBatteryPercentageFlag(NULL, 0) == 0);

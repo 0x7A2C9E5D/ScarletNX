@@ -98,7 +98,6 @@ static void no_target(u64 gva) { (void)gva; }
 static const Renderer stand_in = {.name = "stand-in", .rt_flush = no_target, .rt_reload = no_target};
 const Renderer* g_renderer = &stand_in;
 int g_renderer_up = 1;
-int g_verbose;
 void logf_(int lvl, const char* fmt, ...) {
     (void)lvl;
     (void)fmt;

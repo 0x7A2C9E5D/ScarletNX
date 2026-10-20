@@ -8,6 +8,7 @@
 #include "nx/loader/module.h"
 #include "nx/loader/module_llvm.h"
 #include "nx/runtime/driver/toolchain.h"
+#include "snx_settings.h"
 #include "common/utilities/build_info.h"
 #include <ctype.h>
 #include <errno.h>
@@ -15,15 +16,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* -O's level when none is given, which the help names */
-#define SNX_RECOMPILE_OPT "2"
+const IniOpt* snx_recompile_setting(const char* key) {
+    const IniOpt* o = ini_find(g_recompile_ini, key);
+    return o ? o : ini_find(g_llvm_ini, key);
+}
 static void usage(void) {
     puts("Usage: scarletnx -r INPUT [NAME] [OPTIONS]\n"
          "  INPUT                  Game/ExeFS directory, .nro, or an XCI or NSP dump (read in place)\n"
          "  -o, --name, --out NAME  Output name (default: the title ID, else the NPDM's or input name)\n"
          "  --outdir DIR           Where the game's folder goes (default: games/ in the data folder)\n"
-         "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: " SNX_RECOMPILE_OPT ")\n"
-         "  --jobs N               Parallel compiles (default: CPU count)");
+         "  -O LEVEL               Optimization: 0,1,2,3,s,z (default: 2), the setting opt\n"
+         "  --jobs N               Parallel compiles (default: CPU count), the setting aot_threads");
+    puts("  --KEY=VALUE            A setting of the recompile: opt, aot_threads, and LLVM's (llvm_pass_<pass>=0\n"
+         "                         turns that pass off; scarletnx --settings=recompile lists them)");
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
            SNX_CHUNK_INSTRUCTIONS);
     puts("  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
@@ -285,8 +290,6 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     memset(&gen, 0, sizeof(gen));
     memset(&program, 0, sizeof(program));
     memset(&llvm, 0, sizeof(llvm));
-    compile.opt = SNX_RECOMPILE_OPT;
-    compile.jobs = snx_cpu_count();
     gen.chunk_instrs = SNX_CHUNK_INSTRUCTIONS;
 #ifdef _WIN32
     host_win = 1;
@@ -337,6 +340,12 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
                 option[option_size] = 0;
                 value = equal + 1;
                 arg = option;
+                if (arg[1] == '-' && snx_recompile_setting(arg + 2)) {
+                    const IniOpt* o = snx_recompile_setting(arg + 2);
+                    if (ini_check(o, value, error, sizeof error)) return snx_error("%s", error);
+                    ini_read(o, value);
+                    continue;
+                }
             }
             if (strcmp(arg, "-o") && strcmp(arg, "--name") && strcmp(arg, "--out") && strcmp(arg, "--outname") &&
                 strcmp(arg, "--outdir") && strcmp(arg, "--runtime") && strcmp(arg, "--target") && strcmp(arg, "-O") &&
@@ -357,10 +366,10 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
                 target = value;
             else if (!strcmp(arg, "-O")) {
                 if (strlen(value) != 1 || !strchr("0123sz", value[0])) return snx_error("-O expects 0,1,2,3,s,z");
-                compile.opt = value;
+                strcpy(g_settings.optimization_level, value);
             } else if (!strcmp(arg, "--jobs")) {
-                compile.jobs = number(value, 1024);
-                if (!compile.jobs) return snx_error("--jobs expects 1..1024");
+                g_settings.aot_threads = (int)number(value, 1024);
+                if (!g_settings.aot_threads) return snx_error("--jobs expects 1..1024");
             } else {
                 gen.chunk_instrs = number(value, INT_MAX);
                 if (!gen.chunk_instrs) return snx_error("--chunk expects a positive instruction count");
@@ -376,6 +385,11 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         usage();
         return 2;
     }
+    /* the settings, whichever way they came: -O and --jobs, or --opt= and --aot_threads= as the launcher passes them */
+    if (strlen(g_settings.optimization_level) != 1 || !strchr("0123sz", g_settings.optimization_level[0]))
+        return snx_error("opt expects 0,1,2,3,s,z");
+    compile.opt = g_settings.optimization_level;
+    compile.jobs = g_settings.aot_threads > 0 ? (unsigned)g_settings.aot_threads : snx_cpu_count();
     if (!strcmp(target, "win64"))
         compile.target_win = 1;
     else if (!strcmp(target, "linux"))
@@ -476,6 +490,11 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         char* kept = keep_c ? snx_format("%s_build", base) : NULL;
         llvm.output = code;
         llvm.opt = compile.opt[0];
+        llvm.tuning = snx_llvm_tuning(llvm.opt, error, sizeof error);
+        if (!llvm.tuning) {
+            snx_error("%s", error);
+            goto done;
+        }
         llvm.jobs = compile.jobs;
         llvm.quiet = compile.quiet;
         llvm.keep_ir = kept;

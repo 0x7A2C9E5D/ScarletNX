@@ -372,6 +372,7 @@ static int compile_unit(Queue* q, size_t index, char* error, size_t error_size) 
     sprintf(name, "code_%03lu", (unsigned long)index);
     ir = snx_ir_new(name, q->build->opt, error, error_size);
     if (!ir) return -1;
+    snx_ir_tune(ir, q->build->tuning);
     for (i = u->first; i < u->last; ++i) {
         block_name(block, q->blocks[i].key);
         if (!compile_block(ir->mod, q->program, q->blocks[i].key, block, &units, &count) ||

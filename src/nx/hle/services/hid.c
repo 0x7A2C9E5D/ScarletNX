@@ -84,7 +84,7 @@ static void hid_sources(HidSource src[HID_ENTRIES]) {
             src[p].p = p;
         }
     }
-    if (!g_opt_docked) src[8].kind = SRC_HANDHELD;
+    if (!g_settings.tv_mode) src[8].kind = SRC_HANDHELD;
 }
 /* the one style an Npad has: its controller's when the game supports it, else the nearest the game does */
 static u32 hid_style_of(int e, const HidSource* s) {

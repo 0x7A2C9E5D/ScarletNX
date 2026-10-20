@@ -13,7 +13,6 @@
 #include <unistd.h>
 #endif
 
-int g_verbose = 1;
 __thread FILE* tls_log_redirect;
 __thread void* tls_thread;
 
@@ -132,7 +131,7 @@ void logf_(int lvl, const char* fmt, ...) {
     if (g_log) {
         fputs(out, g_log);
         fflush(g_log);
-        if (lvl <= 1 || g_verbose >= 2) {
+        if (lvl <= 1 || g_settings.log_level >= 2) {
             fputs(text, stderr); /* the console gets the line without its time stamp, which only the log file keeps */
             fflush(stderr);
         }

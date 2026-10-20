@@ -4,8 +4,10 @@
 #include "nx/runtime/platform/vpad.h"
 #include "nx/runtime/platform/controls_atlas.h"
 #include <assert.h>
+#include <stdarg.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ui.c's lock, without the platform layer */
@@ -14,6 +16,15 @@ void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
 
 /* ui.c's warning for a picture that does not draw */
+/* vpad.c's check of settings.txt's keys against its controls: a mismatch fails the test */
+void fatal(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+    abort();
+}
 void logf_(int lvl, const char* fmt, ...) {
     (void)lvl;
     (void)fmt;
@@ -59,11 +70,12 @@ int main(void) {
     i32 st[4];
     vpad_set_store(store);
     vpad_defaults(&d);
-    assert(d.scale == 50 && d.opacity == 100 && d.rel_center && d.dpad_slide && d.haptics && !d.snap);
+    assert(g_settings.controls_scale == 50 && g_settings.controls_opacity == 100 && g_settings.relative_stick_center &&
+           g_settings.d_pad_slide && g_settings.haptics && !g_settings.snap_to_grid);
     /* off, nothing is taken nor drawn */
-    assert(vpad_ini("controls", "0") && !vpad_config()->on && !vpad_shown());
+    assert(vpad_ini("controls", "0") && !g_settings.show_controls && !vpad_shown());
     assert(!vpad_down(1, mx(SNX_VPAD_A), my(SNX_VPAD_A), safe) && !draw(&l));
-    assert(vpad_ini("controls", "1") && vpad_config()->on);
+    assert(vpad_ini("controls", "1") && g_settings.show_controls);
 
     /* a button held by a finger, then by two; the second lift lets it go. Off the controls, a finger is the game's */
     assert(vpad_down(1, mx(SNX_VPAD_A), my(SNX_VPAD_A), safe) && buttons(NULL) == 1);
@@ -151,7 +163,7 @@ int main(void) {
 
     /* a hidden control is not there; release lets every finger go */
     vpad_ini("controls_x", "0.870 0.340 100 0");
-    assert(!vpad_config()->at[SNX_VPAD_X].shown && !vpad_down(10, mx(SNX_VPAD_X), my(SNX_VPAD_X), safe));
+    assert(!g_settings.control_shown[SNX_VPAD_X] && !vpad_down(10, mx(SNX_VPAD_X), my(SNX_VPAD_X), safe));
     draw(&l);
     assert(!drawn(&l, SNX_SPRITE_X) && drawn(&l, SNX_SPRITE_Y));
     vpad_ini("controls_x", "0.870 0.340 100 1");
@@ -178,23 +190,23 @@ int main(void) {
     assert(vpad_ini("controls_b", "nonsense") && vpad_config()->at[SNX_VPAD_B].x == 1);
     assert(vpad_ini("controls_b", "nan 0.5 100 1") && vpad_config()->at[SNX_VPAD_B].x == 1); /* NaN isn't a place */
     assert(vpad_ini("controls_b", "1 0 99999999999 1") && vpad_config()->at[SNX_VPAD_B].size == SNX_VPAD_SIZE_MAX);
-    assert(vpad_ini("controls_scale", "300") && vpad_config()->scale == 100 && !vpad_ini("touch", "1") &&
+    assert(vpad_ini("controls_scale", "300") && g_settings.controls_scale == 100 && !vpad_ini("touch", "1") &&
            !vpad_ini("seconds", "5"));
     vpad_ini("controls_scale", "50");
     vpad_store_control(SNX_VPAD_B);
     assert(!strcmp(stored_key, "controls_b") && !strcmp(stored_value, "1.000 0.000 200"));
     /* shown in a key of its own; an older version's fourth number of the place still read */
-    assert(vpad_ini("controls_b", "0.5 0.5 100") && vpad_config()->at[SNX_VPAD_B].shown);
-    assert(vpad_ini("controls_b_shown", "0") && !vpad_config()->at[SNX_VPAD_B].shown);
-    assert(vpad_ini("controls_b", "0.5 0.5 100") && !vpad_config()->at[SNX_VPAD_B].shown);
-    assert(vpad_ini("controls_b", "0.5 0.5 100 1") && vpad_config()->at[SNX_VPAD_B].shown);
-    assert(vpad_ini("controls_b", "0.5 0.5 100 x") && vpad_config()->at[SNX_VPAD_B].shown); /* not a fourth */
+    assert(vpad_ini("controls_b", "0.5 0.5 100") && g_settings.control_shown[SNX_VPAD_B]);
+    assert(vpad_ini("controls_b_shown", "0") && !g_settings.control_shown[SNX_VPAD_B]);
+    assert(vpad_ini("controls_b", "0.5 0.5 100") && !g_settings.control_shown[SNX_VPAD_B]);
+    assert(vpad_ini("controls_b", "0.5 0.5 100 1") && g_settings.control_shown[SNX_VPAD_B]);
+    assert(vpad_ini("controls_b", "0.5 0.5 100 x") && g_settings.control_shown[SNX_VPAD_B]); /* not a fourth */
     assert(vpad_ini("controls_b", "0.7 0.5") && vpad_config()->at[SNX_VPAD_B].x == 0.5f);   /* not a place */
     assert(vpad_ini("controls_b_shown", "0"));
     vpad_store_shown(SNX_VPAD_B);
     assert(!strcmp(stored_key, "controls_b_shown") && !strcmp(stored_value, "0"));
     assert(vpad_ini("controls_b_shown", "1") && vpad_ini("controls_b", "1 0 200"));
-    vpad_store(&vpad_config()->haptics);
+    vpad_store(&g_settings.haptics);
     assert(!strcmp(stored_key, "controls_haptics") && !strcmp(stored_value, "1"));
     /* the reset: every control back, its place and shown kept */
     stores = 0;

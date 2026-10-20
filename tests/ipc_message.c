@@ -20,8 +20,6 @@
 
 /* ============================================================ the kernel ipc.c calls */
 u8* g_mem;
-int g_verbose;
-int g_opt_auto_stub_ipc = 1;
 static int test_log; /* SNX_TEST_LOG=1 prints what ipc.c logs */
 /* single-threaded: the locks only have to be balanced, which the count checks at the end */
 static int test_locks;
@@ -929,9 +927,9 @@ static void undeclared_commands(void) {
     o.name = "test:p";
     c.cmd = 77;
     CHECK(stub_ok(&o, &c) == 0 && c.out_size == 0);
-    g_opt_auto_stub_ipc = 0;
+    g_settings.answer_unknown_commands = 0;
     CHECK(stub_ok(&o, &c) == (int)RC(10, 221));
-    g_opt_auto_stub_ipc = 1;
+    g_settings.answer_unknown_commands = 1;
 }
 /* ipc_warn_once: three warnings per service and command, a name told apart by its first 127 characters, and nothing
    once its 512 entries are taken. Run last: it fills the table */

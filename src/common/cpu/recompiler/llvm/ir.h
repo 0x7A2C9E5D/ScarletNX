@@ -13,6 +13,7 @@
 #include <llvm-c/Core.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>
+#include <llvm-c/Transforms/PassBuilder.h>
 
 /* cpu.h's inline functions and macro bodies, built on first use in each module */
 enum {
@@ -100,6 +101,15 @@ typedef struct {
     SnxIrFpGuards fp_guards;
 } SnxIrBlockState;
 
+/* the AOT recompile's LLVM settings (nx/runtime/settings_llvm.h): the pipeline run in place of default<O?>, NULL for
+   that one, and what is set on the pass builder's options and on the target machine, NULL for nothing. Without one
+   (the runtime JIT's, the recompiler library's) LLVM keeps its own */
+typedef struct SnxIrTuning {
+    const char* pipeline;
+    void (*builder)(LLVMPassBuilderOptionsRef options);
+    void (*machine)(LLVMTargetMachineRef machine);
+} SnxIrTuning;
+
 typedef struct SnxIr {
     LLVMContextRef ctx;
     LLVMModuleRef mod;
@@ -124,6 +134,7 @@ typedef struct SnxIr {
        snx_aot_<target> (the JIT's loader resolves it), 0 for CALLDYN. NULL in the AOT build */
     SnxU64 (*direct)(void* user, SnxU64 target);
     void* direct_user;
+    const SnxIrTuning* tuning; /* snx_ir_tune's, NULL for LLVM's own */
 } SnxIr;
 
 void ir_state_invalidate(SnxIr* ir);
@@ -147,6 +158,9 @@ SnxIr* snx_ir_new_jit(const char* name, char opt, char* error, size_t error_size
 /* the same for another target triple (NULL: the host), for tests of the linkers; CPU and features stay generic */
 SnxIr* snx_ir_new_target(const char* name, char opt, const char* triple, char* error, size_t error_size);
 void snx_ir_free(SnxIr* ir);
+/* the settings the SnxIr's objects are made with, kept (NULL: LLVM's own): the target machine's set now, the pipeline
+   and the pass builder's at each snx_ir_object */
+void snx_ir_tune(SnxIr* ir, const SnxIrTuning* tuning);
 /* Optimizes the module as Clang does at the -O level and returns the host object file (malloc'd) */
 int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char* error, size_t error_size);
 /* The same for another module of the SnxIr's context, made with its target and data layout (the A32 executor's

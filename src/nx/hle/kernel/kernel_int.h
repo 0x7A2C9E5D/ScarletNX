@@ -210,7 +210,6 @@ typedef struct {
 } HleSvc;
 /* svc_mem.c */
 typedef struct {
-    int opt_mem_gb; /* the .ini's memory size, 0 for the console's */
     /* the cores and priorities the npdm's kernel capabilities allow (svcGetInfo 0 and 1) */
     u64 core_mask, prio_mask;
     KShmem shmems[KSHMEM_MAX];

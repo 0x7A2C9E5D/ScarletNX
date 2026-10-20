@@ -7,13 +7,19 @@
 
 #include "nx/loader/module.h"
 
+struct SnxIrTuning; /* recompiler/llvm/ir.h's */
 typedef struct {
     const char* output; /* <Game>_code.so or .dll, replaced only by a complete module */
     char opt;           /* -O letter */
     unsigned jobs;
     int quiet;
     const char* keep_ir; /* when set, each unit's IR is saved there as .ll */
+    const struct SnxIrTuning* tuning; /* the game code's LLVM settings (snx_llvm_tuning), NULL for LLVM's own */
 } SnxLlvmBuild;
+/* g_settings' LLVM Internals (settings.txt's llvm table) for -O<opt>: the pipeline with the passes turned off cut
+   out, the options set. Static, made again at each call. NULL with the reason in error when nothing at all is left
+   (a level's pipeline of passes only, every one of them off) */
+const struct SnxIrTuning* snx_llvm_tuning(char opt, char* error, size_t error_size);
 
 /* SNX_ABI as this build has it: the layout its modules are written with, which the runtime of the same build checks */
 unsigned snx_module_abi(void);

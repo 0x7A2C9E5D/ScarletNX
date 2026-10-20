@@ -172,8 +172,14 @@ Remaining examples: POSIX.
   area all extract, through what [`storage.c`](../src/nx/runtime/driver/hactool/storage.c) ports from LibHac.
 - **Recompile:** AOT → module (LLVM) →
   final runtime deployment, for this machine's CPU. Shaders compile directly to SPIR-V at runtime.
-  `-O 0..3,s,z` sets the optimization level (2 by default). A dump played with `-O` is recompiled at that level when
-  it has to be, and a game made already keeps its code until `-r` recompiles it.
+  `-O 0..3,s,z` (`--opt=`) sets the optimization level (2 by default), and `--jobs N` (`--aot_threads=N`) the threads
+  compiling (0 or none, one for each core). Every pass of LLVM's pipelines can be turned off for the game's code,
+  `--llvm_pass_<pass>=0` (`--llvm_pass_instcombine=0`), and each option LLVM's C API sets on the pass builder and the
+  target machine set, `--llvm_<option>=N` (`--llvm_inliner_threshold=50`). `scarletnx --settings=recompile` lists
+  them, as the launcher's LLVM Internals page shows them: the passes are those of the pipelines the build's LLVM prints
+  for each level, and a build without an `opt` of that LLVM has none. A dump played with these is recompiled with them
+  when it has to be, and a game made already keeps its code until `-r` recompiles it. A value a setting does not take
+  (`--aot_threads=abc`) stops the recompile. The code the runtime compiles while the game runs keeps LLVM's own.
   `--target auto|linux|win64` takes only this host's own system: modules are built for the machine that builds
   them. `--runtime FILE` deploys that runtime instead of the running one, or of the one a tools-only build builds in
   its checkout's `build/native-recomp` (`build/win64-recomp` on Windows). `-q` (`--quiet`) prints no progress.
@@ -355,7 +361,8 @@ nickname and picture, and the launcher the one its Settings' `user` names, where
 Restart for `docked`, `fullscreen`, `language`, `resolution`, `anisotropy`, `memory_gb`, `heap_max_mb`, `airplane_mode`,
 `ldn`, `room`, `profile`, `jit_threads`.
 `scarletnx --settings` prints each setting the launcher's Settings offer, one a line: its section, key, default,
-type, range and help, tab-separated.
+type, range and help, tab-separated. Every setting, the recompiler's too, is described once in
+`src/nx/runtime/settings.txt`, which the build generates the tables and `g_settings` from.
 
 | Key | Default | Effect |
 | --- | --- | --- |

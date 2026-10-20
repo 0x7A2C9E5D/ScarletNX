@@ -70,8 +70,8 @@ static void vkr_mapping_end(void) { vk_unlock(); }
 /* 0 when Vulkan can't run here */
 static int vkr_start(void) {
     if (!vk_init()) return 0;
-    g_vk_scale = g_opt_resf;       /* the .ini keeps resolution within 0.25 to 4 (options.c) */
-    g_vk_anisotropy = g_opt_aniso; /* the sampler table keeps what it makes: anisotropy applies at start */
+    g_vk_scale = g_settings.resolution_scale;       /* the .ini keeps resolution within 0.25 to 4 (options.c) */
+    g_vk_anisotropy = g_settings.anisotropic_filtering; /* the sampler table keeps what it makes: anisotropy applies at start */
     if (g_vk_anisotropy > 1 && !g_vk.feat.samplerAnisotropy)
         LOG("vulkan: this GPU has no anisotropic filtering, so anisotropy=%d does nothing\n", g_vk_anisotropy);
     if (g_vk_scale != 1.0f) LOG("vulkan: render targets at %.2fx\n", g_vk_scale);
@@ -277,7 +277,7 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
     /* a new vsync in the .ini takes a new swapchain, as a new size does */
     if (shown && ww > 0 && wh > 0 &&
         (ww != g_vk.sc_win_w || wh != g_vk.sc_win_h || srgb != g_sc_srgb ||
-         __atomic_load_n(&g_opt_vsync, __ATOMIC_RELAXED) != g_vk.sc_vsync)) {
+         __atomic_load_n(&g_settings.vsync, __ATOMIC_RELAXED) != g_vk.sc_vsync)) {
         vk_finish();
         g_sc_srgb = srgb;
         vk_swapchain_create(srgb);

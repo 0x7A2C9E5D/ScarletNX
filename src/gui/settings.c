@@ -4,14 +4,11 @@
 #include "common/utilities/common.h"
 #include "common/utilities/ini_lines.h"
 #include "gui/i18n.h"
+#include "snx_settings.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static const char* const off_on[] = {"off", "on", NULL};
-/* the recompile's -O levels, the row's words: its word the index, 2 the driver's default */
-static const char* const opt_levels[] = {"0", "1", "2", "3", "z", NULL};
-static const char* const opt_flags[] = {"-O0", "-O1", "-O2", "-O3", "-Oz"};
 
 static GuiSetting* row(GuiSettings* s, const char* section, const char* key, const char* name, const char* about,
                        const char* const* words, int type) {
@@ -53,49 +50,45 @@ static const char** words_of(char* list, const char*** pool, const char*** value
     *pool += 2 * n + 3;
     return words;
 }
-int gui_settings_read(GuiSettings* s, const char* list) {
-    size_t size = strlen(list) + 1, n = GUI_SETTINGS_OWN + 3, bars = 0, pool;
+int gui_settings_read(GuiSettings* s, const char* runtime) {
+    /* the launcher's own rows and the recompiler's (settings.txt's launcher sections), listed as the runtime lists the
+       game's, then the runtime's */
+    size_t own = ini_list_text(g_launch_sections, g_launch_sections_count, NULL, 0), size, n = 3, bars = 0, pool;
     const char* c;
     const char** free_words;
-    char *line, *next, *text, *page = NULL;
+    char *line, *next, *text, *page = NULL, *list, *own_end;
     GuiSetting *link = NULL, *all = NULL, *v;
     int w;
     gui_settings_free(s);
+    size = own + strlen(runtime) + 1;
+    list = malloc(size);
+    if (!list) return 1;
+    ini_list_text(g_launch_sections, g_launch_sections_count, list, own + 1);
+    memcpy(list + own, runtime, strlen(runtime) + 1);
     for (c = list; *c; ++c) { /* a row a line, a page's own two before its first; and the words */
         n += *c == '\n' ? 3 : 0;
         bars += *c == '|';
     }
     pool = 2 * bars + 5 * n;
     if (n > ((size_t)-1 - size) / (sizeof *s->keys + sizeof *s->values + 5 * sizeof(char*)) ||
-        bars > ((size_t)-1 - size) / 4 / sizeof(char*))
+        bars > ((size_t)-1 - size) / 4 / sizeof(char*)) {
+        free(list);
         return 1;
+    }
     s->keys = malloc(n * (sizeof *s->keys + sizeof *s->values) + pool * sizeof(char*) + size);
-    if (!s->keys) return 1;
+    if (!s->keys) {
+        free(list);
+        return 1;
+    }
     s->values = (GuiSetting*)(s->keys + n);
     free_words = (const char**)(s->values + n);
     text = memcpy(free_words + pool, list, size);
+    free(list);
+    own_end = text + own;
     memset(s->values, 0, n * sizeof *s->values);
-    /* the section is settings.ini's too: the menu shows it translated */
-    row(s, SNX_TR_NOOP("Launch"), "gdbstub", NULL, SNX_TR_NOOP("Enables gdbstub on port 1234"), off_on, GUI_KEY_WORD);
-#ifdef _WIN32
-    row(s, "Launch", "tmpfs", SNX_TR_NOOP("Extract to tmpfs"),
-        SNX_TR_NOOP("Extract to the temporary folder (TEMP\\scarletnx\\work\\<title ID>), which the game reads its RomFS from"),
-        off_on, GUI_KEY_WORD);
-#else
-    row(s, "Launch", "tmpfs", SNX_TR_NOOP("Extract to tmpfs"),
-        SNX_TR_NOOP("Extract to tmpfs, in memory (/tmp/scarletnx/work/<title ID>), which the game reads its RomFS from"),
-        off_on, GUI_KEY_WORD);
-#endif
-    row(s, "Launch", "extract", SNX_TR_NOOP("Extract game container"),
-        SNX_TR_NOOP("Extract a dump's ExeFS and RomFS into its game's folder. Off, the game reads them from the dump"),
-        off_on, GUI_KEY_WORD);
-    row(s, "Launch", "opt", SNX_TR_NOOP("Optimization level"),
-        SNX_TR_NOOP("LLVM's optimization of the game's code when it is recompiled: 0 none, 3 the most, z the smallest. "
-                    "A game made already keeps its code until it is recompiled"),
-        opt_levels, GUI_KEY_WORD)
-        ->word = 2;
     for (line = text; *line; line = next) {
         char* field[9];
+        if (line >= own_end && !s->own) s->own = s->count; /* the launcher's rows end there */
         const char **words = NULL, **values = NULL;
         int f = 1;
         next = line + strcspn(line, "\n");
@@ -123,7 +116,7 @@ int gui_settings_read(GuiSettings* s, const char* list) {
         if (*field[8]) words = words_of(field[8], &free_words, &values);
         v = row(s, field[0], field[1], field[7], field[6], words, words ? GUI_KEY_WORD : GUI_KEY_TEXT);
         v->values = values;
-        v->fallback = field[2];
+        v->fallback = v->def = field[2];
         for (w = 1; words && words[w]; ++w) /* the word of the default's value */
             if (!strcmp(values ? values[w] : words[w], field[2])) v->fallback = words[w];
         if (page) {
@@ -131,6 +124,7 @@ int gui_settings_read(GuiSettings* s, const char* list) {
             all->count = s->count - all->first;
         }
     }
+    if (!s->own) s->own = s->count; /* no runtime listed any */
     gui_settings_sync(s);
     return 0;
 }
@@ -155,6 +149,10 @@ static int set(GuiSettings* s, int i, const char* value) {
             v->word = w;
             return 1;
         }
+    if (v->def && *v->def && !strcmp(value, v->def)) { /* the default no word has (off, the launcher's): no pick */
+        v->word = 0;
+        return 1;
+    }
     return 0;
 }
 void gui_settings_mark(GuiSettings* s) {
@@ -179,14 +177,14 @@ static int find(const GuiSettings* s, const char* key) {
 int gui_settings_save(const GuiSettings* s, const char* path) {
     size_t room = 256 + (size_t)s->count * 200, at = 0, size = 0, lines = 1; /* a row's section, key, value: < 200 */
     /* the launcher's rows alone (the runtime listed none): the file's other keys are no row's to leave out */
-    char *old = s->count > GUI_SETTINGS_OWN ? NULL : (char*)snx_read_file(path, &size), *c, *key, *value;
+    char *old = s->count > s->own ? NULL : (char*)snx_read_file(path, &size), *c, *key, *value;
     char *text, *folder, *staged;
     const char* section = "";
     int i, failed;
     SnxIni ini;
     char now[sizeof ini.section]; /* the section the text is in */
     /* one it cannot read: written over, they would be lost */
-    if (!old && s->count <= GUI_SETTINGS_OWN && snx_is_file(path)) return 1;
+    if (!old && s->count <= s->own && snx_is_file(path)) return 1;
     for (c = old; c && *c; ++c) lines += *c == '\n';
     room += old ? size + lines * (sizeof ini.section + 4) : 0; /* each line a key's, under a section of its own */
     text = (char*)malloc(room);
@@ -302,19 +300,30 @@ const char* gui_settings_value(const GuiSettings* s, const char* key) {
     int i = find(s, key);
     return i < s->count ? picked(s, i) : NULL;
 }
-const char* gui_settings_tmpfs(const GuiSettings* s) {
-    return s->count >= GUI_SETTINGS_OWN && s->values[1].word ? "--tmpfs" : NULL;
+/* one of the launcher's own rows turned on (its value "on"), as its file of picks keeps it */
+static int own_on(const GuiSettings* s, const char* key) {
+    int i = find(s, key);
+    const char* value = i < s->own ? picked(s, i) : NULL;
+    return value && !strcmp(value, "on");
 }
-const char* gui_settings_extract(const GuiSettings* s) {
-    return s->count >= GUI_SETTINGS_OWN && s->values[2].word ? "--extract-container" : NULL;
-}
-const char* gui_settings_opt(const GuiSettings* s) {
-    return s->count >= GUI_SETTINGS_OWN && s->values[3].word != 2 ? opt_flags[s->values[3].word] : NULL;
+const char* gui_settings_tmpfs(const GuiSettings* s) { return own_on(s, "tmpfs") ? "--tmpfs" : NULL; }
+const char* gui_settings_extract(const GuiSettings* s) { return own_on(s, "extract") ? "--extract-container" : NULL; }
+size_t gui_settings_recompile(GuiSettings* s, const char** argv) {
+    size_t n = 0;
+    int i;
+    for (i = 0; i < s->own; ++i) {
+        const char* value = s->values[i].kind ? NULL : picked(s, i);
+        const char* key = s->values[i].key;
+        if (!value || !strcmp(key, "gdbstub") || !strcmp(key, "tmpfs") || !strcmp(key, "extract")) continue;
+        snprintf(s->values[i].option, sizeof s->values[i].option, "--%s=%s", key, value);
+        argv[n++] = s->values[i].option;
+    }
+    return n;
 }
 size_t gui_settings_options(GuiSettings* s, int launch, const char** argv) {
     size_t n = 0;
     int i;
-    for (i = GUI_SETTINGS_OWN; i < s->count; ++i) {
+    for (i = s->own; i < s->count; ++i) {
         const char* value = picked(s, i);
         if (!value) continue;
         snprintf(s->values[i].option, sizeof s->values[i].option, "--%s=%s", s->values[i].key, value);
@@ -322,7 +331,7 @@ size_t gui_settings_options(GuiSettings* s, int launch, const char** argv) {
     }
     if (launch && gui_settings_tmpfs(s)) argv[n++] = gui_settings_tmpfs(s);
     if (launch && gui_settings_extract(s)) argv[n++] = gui_settings_extract(s);
-    if (launch && s->count >= GUI_SETTINGS_OWN && s->values[0].word) {
+    if (launch && own_on(s, "gdbstub")) {
         argv[n++] = "-S";
         argv[n++] = "-s";
     }

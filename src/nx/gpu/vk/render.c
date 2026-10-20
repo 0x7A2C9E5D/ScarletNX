@@ -1656,7 +1656,7 @@ retry:
         last_cw = rt[0]->w;
         last_ch = rt[0]->h;
     }
-    if (!g_opt_shadows && !n && zt && (zt->w != last_cw || zt->h != last_ch)) {
+    if (!g_settings.shadows && !n && zt && (zt->w != last_cw || zt->h != last_ch)) {
         /* shadows=0: depth-only passes at another size (shadow maps) are skipped, and the map is cleared to far once
            a frame so it reads as fully lit */
         static u32 cleared_frame = ~0u;

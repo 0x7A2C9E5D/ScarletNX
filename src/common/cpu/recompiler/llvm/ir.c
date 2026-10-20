@@ -61,39 +61,6 @@ int snx_ir_init(char* error, size_t error_size) {
     return x86 || arm || ppc ? 0 : -1;
 }
 
-#if LLVM_VERSION_MAJOR >= 19
-/* Guest functions are already partitioned into compilation units. Limit greedy
-   inlining across those boundaries, but leave alwaysinline CPU helpers alone.
-   This keeps one large guest function from swallowing its neighbours. */
-typedef struct {
-    char level;
-    int inline_budget;
-} SnxIrPassPolicy;
-
-static const SnxIrPassPolicy pass_policies[] = {
-    {'2', 100},
-    {'3', 160},
-};
-
-static void configure_passes(LLVMPassBuilderOptionsRef options, char opt) {
-    for (size_t i = 0; i < sizeof(pass_policies) / sizeof(*pass_policies); ++i)
-        if (pass_policies[i].level == opt) {
-            LLVMPassBuilderOptionsSetInlinerThreshold(options, pass_policies[i].inline_budget);
-            break;
-        }
-    /* Keep LLVM's default SLP behavior unless the benchmark explicitly
-       selects a policy. Never choose from source-level instruction counts. */
-    const char* slp = getenv("SNX_LLVM_SLP");
-    if (slp && (!strcmp(slp, "0") || !strcmp(slp, "1")))
-        LLVMPassBuilderOptionsSetSLPVectorization(options, slp[0] == '1');
-}
-#else
-static void configure_passes(LLVMPassBuilderOptionsRef options, char opt) {
-    (void)options;
-    (void)opt;
-}
-#endif
-
 static LLVMCodeGenOptLevel codegen_level(char opt) {
     switch (opt) {
         case '0': return LLVMCodeGenLevelNone;
@@ -339,6 +306,28 @@ int snx_ir_object(SnxIr* ir, char opt, unsigned char** data, size_t* size, char*
     return snx_ir_module_object(ir, ir->mod, opt, data, size, error, error_size);
 }
 
+void snx_ir_tune(SnxIr* ir, const SnxIrTuning* tuning) {
+    ir->tuning = tuning;
+    if (tuning && tuning->machine) tuning->machine(ir->tm);
+}
+
+/* -Os and -Oz as LLVM 23 has them, which refuses default<Os> and default<Oz> ("Use O2 in conjunction with the optsize
+   attribute"): O2 over functions marked optsize, and minsize too for z, as Clang marks them. A function with optnone
+   (none of ours) is left alone, as the verifier refuses both on one */
+static void size_attributes(LLVMModuleRef module, char opt) {
+    LLVMContextRef ctx = LLVMGetModuleContext(module);
+    unsigned optsize = LLVMGetEnumAttributeKindForName("optsize", 7);
+    unsigned minsize = LLVMGetEnumAttributeKindForName("minsize", 7);
+    unsigned optnone = LLVMGetEnumAttributeKindForName("optnone", 7);
+    LLVMValueRef fn;
+    for (fn = LLVMGetFirstFunction(module); fn; fn = LLVMGetNextFunction(fn)) {
+        if (LLVMIsDeclaration(fn) || LLVMGetEnumAttributeAtIndex(fn, LLVMAttributeFunctionIndex, optnone)) continue;
+        LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, LLVMCreateEnumAttribute(ctx, optsize, 0));
+        if (opt == 'z')
+            LLVMAddAttributeAtIndex(fn, LLVMAttributeFunctionIndex, LLVMCreateEnumAttribute(ctx, minsize, 0));
+    }
+}
+
 int snx_ir_module_object(SnxIr* ir, LLVMModuleRef module, char opt, unsigned char** data, size_t* size, char* error,
                          size_t error_size) {
     char pipeline[16], *message = NULL;
@@ -353,10 +342,11 @@ int snx_ir_module_object(SnxIr* ir, LLVMModuleRef module, char opt, unsigned cha
         return -1;
     }
     LLVMDisposeMessage(message);
-    sprintf(pipeline, "default<O%c>", opt == 's' ? 's' : opt == 'z' ? 'z' : opt);
+    if (opt == 's' || opt == 'z') size_attributes(module, opt);
+    sprintf(pipeline, "default<O%c>", opt == 's' || opt == 'z' ? '2' : opt);
     options = LLVMCreatePassBuilderOptions();
-    configure_passes(options, opt);
-    failure = LLVMRunPasses(module, pipeline, ir->tm, options);
+    if (ir->tuning && ir->tuning->builder) ir->tuning->builder(options);
+    failure = LLVMRunPasses(module, ir->tuning && ir->tuning->pipeline ? ir->tuning->pipeline : pipeline, ir->tm, options);
     LLVMDisposePassBuilderOptions(options);
     if (failure) {
         message = LLVMGetErrorMessage(failure);

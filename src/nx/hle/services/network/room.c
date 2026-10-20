@@ -99,12 +99,12 @@ void network_room_init(void) {
     u16 port;
     int r, refused;
     if (g_opt_ldn != SNX_OPT_LDN_ROOM) return;
-    if (g_opt_airplane) { /* a console in airplane mode is in no network, the room's neither */
+    if (g_settings.airplane_mode) { /* a console in airplane mode is in no network, the room's neither */
         LOG("room: airplane_mode=1 keeps this console out of the Eden room\n");
         return;
     }
-    if (!g_opt_room[0]) fatal("ldn=room needs the Eden room's address in the .ini: room=host or room=host:port");
-    if (room_address(g_opt_room, host, sizeof host, &port, why, sizeof why)) fatal("%s", why);
+    if (!g_settings.eden_room[0]) fatal("ldn=room needs the Eden room's address in the .ini: room=host or room=host:port");
+    if (room_address(g_settings.eden_room, host, sizeof host, &port, why, sizeof why)) fatal("%s", why);
     dir = snx_users_dir(g_exedir[0] ? g_exedir : ".");
     if (!dir) fatal("Out of memory finding the users folder");
     r = room_password(dir, password, sizeof password, why, sizeof why);

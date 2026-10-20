@@ -83,6 +83,9 @@ function(snx_test_target target standard)
         target_compile_definitions(${target} PRIVATE _FILE_OFFSET_BITS=64)
     endif()
     target_link_libraries(${target} PRIVATE Threads::Threads)
+    if(TARGET snx_settings) # g_settings, its header, and the tables a test uses (cmake/settings.cmake)
+        target_link_libraries(${target} PRIVATE snx_settings_runtime snx_settings)
+    endif()
     if(SNX_TEST_SANITIZERS)
         target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${target} PRIVATE -fsanitize=address,undefined)
@@ -1029,6 +1032,11 @@ if(UNIX AND NOT CMAKE_CROSSCOMPILING)
     endif()
 endif()
 
+# LLVM Internals: passes cut out of LLVM's pipelines (nx/runtime/driver/llvm_tuning.c), which LLVM still runs
+add_executable(snx-test-llvm-tuning llvm_tuning.c)
+snx_test_target(snx-test-llvm-tuning 11)
+target_link_libraries(snx-test-llvm-tuning PRIVATE snx_driver)
+add_test(NAME llvm_tuning COMMAND snx-test-llvm-tuning)
 add_executable(snx-test-llvm-module llvm_module.c)
 snx_test_target(snx-test-llvm-module 11)
 target_link_libraries(snx-test-llvm-module PRIVATE snx_driver snx_a64_reference ${CMAKE_DL_LIBS})
@@ -1284,6 +1292,17 @@ if(SNX_BUILD_NX AND NOT SNX_TOOLS_ONLY)
                  "-DSPEC=${PROJECT_SOURCE_DIR}/src/nx/hle/svc/hos.svc"
                  "-DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/svcgen_layout.txt"
                  -P "${CMAKE_CURRENT_SOURCE_DIR}/svcgen_layout.cmake")
+        # tools/settingsgen on headers of its own: LLVM's setters however their declarations are broken over lines,
+        # the passes of a pipeline, and an @ID this LLVM lacks
+        add_test(NAME settingsgen COMMAND "${CMAKE_COMMAND}" "-DSETTINGSGEN=$<TARGET_FILE:snx-settingsgen>"
+                 "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/settingsgen-test"
+                 -P "${CMAKE_CURRENT_SOURCE_DIR}/settingsgen.cmake")
+        if(UNIX) # the opts the test runs are shell scripts
+            # cmake/llvm_opt.cmake: the pipelines of an opt of the LLVM's exact version, and what another opt gets
+            add_test(NAME llvm_opt COMMAND "${CMAKE_COMMAND}"
+                     "-DLLVM_OPT_CMAKE=${PROJECT_SOURCE_DIR}/cmake/llvm_opt.cmake"
+                     "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/llvm-opt-test" -P "${CMAKE_CURRENT_SOURCE_DIR}/llvm_opt.cmake")
+        endif()
     endif()
     if(Python3_Interpreter_FOUND AND NOT CMAKE_CROSSCOMPILING)
         include("${PROJECT_SOURCE_DIR}/cmake/shaderdec.cmake")

@@ -140,21 +140,17 @@ void plat_audio_volume(PAudio* a, float volume) {
         WARN_LIMIT(4, "audio: SDL could not set output volume: %s\n", SDL_GetError());
 }
 
-/* the game's touch screen: 0 nothing, 1 the fingers, 2 the fingers and the mouse's left button (ini key touch) */
-static int g_touch_mode = 2;
+/* the game's touch screen is g_settings.touch_screen: 0 nothing, 1 the fingers, 2 the fingers and the mouse's left
+   button (ini key touch) */
 static u64 g_touch_ids[SNX_HID_TOUCHES]; /* the finger in each slot of g_hle.hid.touch */
 
-/* g_touch_mode changed: the fingers or the mouse it no longer takes are lifted */
-static void touch_mode_set(const IniOpt* o, const char* v) {
+/* the touch screen's setting changed: the fingers or the mouse it no longer takes are lifted */
+void backend_touch_mode_set(const IniOpt* o, const char* v) {
     (void)o;
     (void)v;
-    if (!g_touch_mode) g_hle.hid.touch.down = 0;
-    if (g_touch_mode != 2) touch_up(&g_hle.hid.touch, g_touch_ids, SNX_TOUCH_MOUSE);
+    if (!g_settings.touch_screen) g_hle.hid.touch.down = 0;
+    if (g_settings.touch_screen != 2) touch_up(&g_hle.hid.touch, g_touch_ids, SNX_TOUCH_MOUSE);
 }
-const IniOpt g_backend_ini[] = {
-    {"touch", "2", "The game's touch screen: 1 = fingers, 2 = fingers and the mouse's left button, 0 = off", INI_INT, 0,
-     &g_touch_mode, 0, 2, touch_mode_set, "Touch screen", "Off|Fingers|Mouse too", 0, 0},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
 /* from the in-game menu, under ui_lock: the mode as the .ini clamps it, saved */
 void backend_touch_set(int mode) {
     const IniOpt* o = ini_find(g_backend_ini, "touch");
@@ -317,7 +313,7 @@ void video_init(const char* title) {
         fatal("Vulkan could not start (see the log). ScarletNX needs a GPU and driver with Vulkan 1.3.");
     LOG("renderer: Vulkan\n");
     /* not for an unattended run: nobody is at the screen, and it would cover the desktop of whoever is */
-    if (g_opt_fullscreen && !unattended_active()) set_fullscreen(1);
+    if (g_settings.fullscreen && !unattended_active()) set_fullscreen(1);
 #ifdef _WIN32
     /* keep the display and the system awake while playing (it was set with the crash handler, headless runs too) */
     SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
@@ -855,7 +851,7 @@ static void touch_finger(const SDL_Event* e) {
     else
         vpad_up(finger_id(&e->tfinger));
     ui_unlock();
-    if (taken || !g_touch_mode) return;
+    if (taken || !g_settings.touch_screen) return;
     touch_window(picture);
     if (e->type == SDL_EVENT_FINGER_DOWN)
         touch_down(&g_hle.hid.touch, g_touch_ids, finger_id(&e->tfinger), picture, px, py);
@@ -876,7 +872,7 @@ static void touch_mouse(const SDL_Event* e) {
         vpad_move(SNX_TOUCH_MOUSE, e->motion.x * d, e->motion.y * d, safe);
         ui_unlock();
         touch_window(picture);
-        if (g_touch_mode == 2 && (e->motion.state & SDL_BUTTON_LMASK))
+        if (g_settings.touch_screen == 2 && (e->motion.state & SDL_BUTTON_LMASK))
             touch_move(&g_hle.hid.touch, g_touch_ids, SNX_TOUCH_MOUSE, picture, e->motion.x * d, e->motion.y * d);
     } else if (e->button.which != SDL_TOUCH_MOUSEID && e->button.button == SDL_BUTTON_LEFT) {
         ui_lock();
@@ -885,7 +881,7 @@ static void touch_mouse(const SDL_Event* e) {
         else
             taken = vpad_up(SNX_TOUCH_MOUSE);
         ui_unlock();
-        if (taken || g_touch_mode != 2) return;
+        if (taken || g_settings.touch_screen != 2) return;
         touch_window(picture);
         if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
             touch_down(&g_hle.hid.touch, g_touch_ids, SNX_TOUCH_MOUSE, picture, e->button.x * d, e->button.y * d);

@@ -27,8 +27,6 @@ static void test_ipc_in(IpcCtx* c, u32 off, void* dst, u32 n) {
 #undef ipc_in
 
 u8* g_mem;
-int g_verbose;
-int g_opt_network, g_opt_airplane;
 static unsigned test_checks, test_objects, test_kobjs;
 
 static void test_fail(const char* expression, int line) {
@@ -341,12 +339,12 @@ static void test_nifm_room(void) {
     CHECK(g->dispatch(g, &ctx) == 0 && ctx.out_size == 4 && reply(0) == 0x0101A8C0); /* 192.168.1.1 */
     request(17); /* IsWirelessCommunicationEnabled */
     CHECK(g->dispatch(g, &ctx) == 0 && reply(0) == 1);
-    g_opt_airplane = 1;
+    g_settings.airplane_mode = 1;
     request(17);
     CHECK(g->dispatch(g, &ctx) == 0 && reply(0) == 0);
     request(12);
     CHECK(g->dispatch(g, &ctx) == RC(110, 300));
-    g_opt_airplane = 0;
+    g_settings.airplane_mode = 0;
     svcobj_unref(g);
     svcobj_unref(nifm);
     network_set_room(NULL);
@@ -369,13 +367,13 @@ int main(void) {
     /* airplane mode is offline with the network option on too: no connection, only the loopback reachable */
     {
         SnxSockAddr out = {SNX_AF_INET, 0, 0, {8, 8, 8, 8}, 0}, lo = {SNX_AF_INET, 0, 0, {127, 0, 0, 1}, 0};
-        g_opt_network = 1;
-        g_opt_airplane = 1;
+        g_settings.network = 1;
+        g_settings.airplane_mode = 1;
         CHECK(!network_online() && !network_reachable(&out) && network_reachable(&lo));
         test_nifm();
-        g_opt_airplane = 0;
+        g_settings.airplane_mode = 0;
         CHECK(network_reachable(&out));
-        g_opt_network = 0;
+        g_settings.network = 0;
     }
     SvcObj* r = new_sfdnsres();
     test_host_by_name(r);

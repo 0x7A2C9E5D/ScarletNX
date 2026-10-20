@@ -31,11 +31,8 @@ typedef struct {
     size_t n;
 } Script;
 
-static int g_seconds;      /* 0: no time limit */
-static int g_frame_limit = -1;
-static int g_shot_every;
-static int g_press_len = 300;
-static char* g_shot;       /* owned: the argv string or the .ini line it came from goes away */
+/* the settings are g_settings' (settings.txt's g_unattended_ini): seconds (0: no time limit), frames, screenshot,
+   screenshot_every, press_length, script */
 static Script g_script;
 static u64 g_t0;           /* unattended_start's plat_ns() */
 static int g_shot_bucket;  /* frames / shot_every at the last periodic shot */
@@ -65,10 +62,11 @@ static int script_parse_press(const char** s, ScriptPress* p) {
     return 1;
 }
 
-static void script_set(const char* v) {
+void unattended_script_set(const IniOpt* o, const char* v) {
     size_t len = strlen(v), max = 1, n;
     const char* c;
     ScriptPress* press;
+    (void)o;
     if (g_script.press && !strcmp(g_script.text, v)) return; /* a reload: keep the progress, presses aren't replayed */
     if (!*v) {
         free(g_script.press);
@@ -97,38 +95,9 @@ static void script_set(const char* v) {
     g_script.n = n;
 }
 
-static void text_set(const IniOpt* o, const char* v) {
-    if (!strcmp(o->key, "script"))
-        script_set(v);
-    else { /* shot */
-        char* copy = NULL;
-        size_t n = strlen(v);
-        if (n) {
-            copy = malloc(n + 1);
-            if (!copy) {
-                WARN("unattended: out of memory for the shot path\n");
-                return;
-            }
-            memcpy(copy, v, n + 1);
-        }
-        free(g_shot);
-        g_shot = copy;
-    }
-}
-
-/* read with ini_read like the .ini's settings, but no .ini section lists this table, so nothing here is written back */
-static const IniOpt g_opts[] = {
-    {"seconds", NULL, NULL, INI_INT, 0, &g_seconds, 0, INT_MAX, NULL, NULL, NULL, 0, 0},
-    {"frames", NULL, NULL, INI_INT, 0, &g_frame_limit, -1, INT_MAX, NULL, NULL, NULL, 0, 0},
-    {"shot", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, text_set, NULL, NULL, 0, 0},
-    {"shot_every", NULL, NULL, INI_INT, 0, &g_shot_every, 0, INT_MAX, NULL, NULL, NULL, 0, 0},
-    {"press_len", NULL, NULL, INI_INT, 0, &g_press_len, 0, INT_MAX, NULL, NULL, NULL, 0, 0},
-    {"script", NULL, NULL, INI_TEXT, 0, NULL, 0, 0, text_set, NULL, NULL, 0, 0},
-    {NULL, NULL, NULL, 0, 0, NULL, 0, 0, NULL, NULL, NULL, 0, 0}};
-
-int unattended_known(const char* k) { return ini_find(g_opts, k) != NULL; }
+int unattended_known(const char* k) { return ini_find(g_unattended_ini, k) != NULL; }
 int unattended_ini(const char* k, const char* v) {
-    const IniOpt* o = ini_find(g_opts, k);
+    const IniOpt* o = ini_find(g_unattended_ini, k);
     if (!o) return 0;
     ini_read(o, v);
     return 1;
@@ -136,12 +105,12 @@ int unattended_ini(const char* k, const char* v) {
 
 void unattended_start(void) { g_t0 = plat_ns(); }
 u64 unattended_ms(void) { return (plat_ns() - g_t0) / 1000000ull; }
-int unattended_active(void) { return g_seconds > 0 || g_frame_limit >= 0; }
+int unattended_active(void) { return g_settings.seconds > 0 || g_settings.frames >= 0; }
 
 static int frames_now(void) { return __atomic_load_n(&g_frames, __ATOMIC_RELAXED); }
 
 u64 unattended_buttons(void) {
-    u64 now = plat_ns(), held = 0, len_ns = (u64)g_press_len * 1000000u, ms;
+    u64 now = plat_ns(), held = 0, len_ns = (u64)g_settings.press_length * 1000000u, ms;
     int frames = frames_now();
     size_t i;
     if (!g_t0) g_t0 = now;
@@ -149,7 +118,7 @@ u64 unattended_buttons(void) {
     for (i = 0; i < g_script.n; i++) {
         ScriptPress* p = &g_script.press[i];
         if (!p->at_present) {
-            if (ms >= p->at && ms - p->at < (u64)g_press_len) held |= p->mask;
+            if (ms >= p->at && ms - p->at < (u64)g_settings.press_length) held |= p->mask;
             continue;
         }
         if (p->done) continue;
@@ -165,22 +134,22 @@ u64 unattended_buttons(void) {
     return held;
 }
 
-const char* unattended_shot(void) { return g_shot; }
+const char* unattended_shot(void) { return g_settings.screenshot[0] ? g_settings.screenshot : NULL; }
 
 int unattended_periodic_shot(char* path, size_t n) {
     int bucket;
-    if (!g_shot || g_shot_every <= 0) return 0;
+    if (!g_settings.screenshot[0] || g_settings.screenshot_every <= 0) return 0;
     /* by bucket, not frames % shot_every: frames may move by two between looks */
-    bucket = frames_now() / g_shot_every;
+    bucket = frames_now() / g_settings.screenshot_every;
     if (bucket == g_shot_bucket) return 0;
     g_shot_bucket = bucket;
-    snprintf(path, n, "%s_%04d", g_shot, g_shot_count++);
+    snprintf(path, n, "%s_%04d", g_settings.screenshot, g_shot_count++);
     return 1;
 }
 
 int unattended_done(void) {
-    if (g_frame_limit >= 0 && frames_now() >= g_frame_limit) return 1;
-    return g_seconds > 0 && g_t0 && plat_ns() - g_t0 >= (u64)g_seconds * 1000000000u;
+    if (g_settings.frames >= 0 && frames_now() >= g_settings.frames) return 1;
+    return g_settings.seconds > 0 && g_t0 && plat_ns() - g_t0 >= (u64)g_settings.seconds * 1000000000u;
 }
 
 void unattended_exit(u64 hash, int w, int h) {

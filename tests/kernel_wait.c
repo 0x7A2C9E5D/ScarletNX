@@ -12,7 +12,6 @@
 #include <stdio.h>
 
 u8* g_mem;
-int g_verbose;
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
 void logf_(int lvl, const char* fmt, ...) {

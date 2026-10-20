@@ -35,7 +35,7 @@ add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/generated/gui_latin.c"
 add_library(snx_gui_support STATIC model.c browser.c steps.c theme.c recent.c editor.c settings.c place.c clean.c
             latin.c ${gui_process}
             "${CMAKE_BINARY_DIR}/generated/gui_themes.c" "${CMAKE_BINARY_DIR}/generated/gui_latin.c")
-target_link_libraries(snx_gui_support PUBLIC scarletnx-common snx_i18n)
+target_link_libraries(snx_gui_support PUBLIC scarletnx-common snx_i18n snx_settings)
 target_include_directories(snx_gui_support PRIVATE "${CMAKE_BINARY_DIR}/generated")
 set_target_properties(snx_gui_support PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_compile_options(snx_gui_support PRIVATE -Wall -Wextra -Werror=missing-prototypes)

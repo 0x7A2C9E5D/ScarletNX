@@ -8,7 +8,6 @@
 #include "nx/hle/hle.c"
 
 u8* g_mem;
-int g_verbose;
 static u64 test_now;
 static unsigned test_checks, test_objects, test_events;
 static int test_no_device;
