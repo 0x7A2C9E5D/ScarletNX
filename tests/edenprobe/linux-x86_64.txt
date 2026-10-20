@@ -1,5 +1,5 @@
 # edenprobe cases that pass, one "suite: name" a line (scripts/edenprobe.py, docs/EDENPROBE.md)
-# build: v0.4.0
+# build: v0.5.0
 # mode: audio cpu display fatal fs graphics kernel notime quick video
 astc: 4-bit weights 0 to 15 unquantize by bit replication
 astc: a 12x12 block infills a 6x6 weight grid
@@ -548,6 +548,72 @@ reference: sched: preemption gives the time the core changed hands, or that it n
 reference: sched: svcSleepThread(0) must keep the core, and the cores answer Q2 and Q3
 reference: sched: the chain passes when its end runs at 44, and fails one level deep
 reference: sched: the owner's drop back is read from the order, and Q1 from its priority
+reference: service: a closed decoder passes only when the next one opens
+reference: service: acc-app passes every user qualified and a thumbnail checked
+reference: service: account passes 52 answering what 51 answers
+reference: service: am passes a save size that reads back as ExtendSaveData asked
+reference: service: am-audio passes volumes read back as set
+reference: service: am-channel passes a user channel that keeps what is unpopped
+reference: service: am-functions passes a desired language set lists
+reference: service: am-functions passes every start event handed out
+reference: service: am-functions passes two empty channels refused as empty
+reference: service: am-lock passes a lock taken, held and freed, and its event
+reference: service: am-mode passes VR mode as turned and a normal boot
+reference: service: am-self passes a setting read back as set
+reference: service: am-state passes 3D VR mode on, then off
+reference: service: am-state passes a mode with its own resolution
+reference: service: am-state passes an application in focus
+reference: service: am-state passes message 95 after 130
+reference: service: am-state passes the region Global
+reference: service: am-storage passes a storage that keeps its size and its end
+reference: service: aoc passes a prepare of a missing index answered with success
+reference: service: aoc passes an empty end and no record past it
+reference: service: aoc passes none listed, lists that fit their room and the base id
+reference: service: apm passes a configuration kept per mode and the boost mode's
+reference: service: auddev passes a volume read back as set
+reference: service: auddev passes the active output among those listed
+reference: service: audout passes one output opened, buffers held and given back
+reference: service: bsd-local passes the answers of a BSD stack
+reference: service: csrng passes two buffers written whole and apart
+reference: service: every case is under a suite of the service family, once
+reference: service: fs-file passes files resized, renamed, cleaned, dated and space
+reference: service: fsdir passes a directory gone with what it held
+reference: service: fsdir passes a directory renamed with what it holds
+reference: service: fsdir passes the one file listed once
+reference: service: fsp passes a temporary storage whose last marker is gone
+reference: service: hid passes npad entries doubled and one apart
+reference: service: hwopus passes 24 decoders and the 25th refused out of decoders
+reference: service: ipc passes the controller's answers and a Close
+reference: service: ldn passes a monitor that comes and takes this process
+reference: service: ldn passes a station with nothing near and nothing to join
+reference: service: ldn passes advertise data of 384 carried and 385 refused
+reference: service: ldn passes an event signaled when a network comes and goes
+reference: service: ldn passes each step's state, and None or Error outside them
+reference: service: ldn passes every command out of its state refused as BadState
+reference: service: ldn passes node 0's connection read once, into one to eight
+reference: service: ldn passes the address in host order and the network's config
+reference: service: ldn passes the network asked, with this console as node 0
+reference: service: mii passes the six default Miis
+reference: service: nfp passes 25 answering what 3 answers
+reference: service: ngc passes a clean name found clean and given back
+reference: service: pl passes six loaded fonts behind the decrypted magic
+reference: service: pl passes the six in order of priority, each as told
+reference: service: profile passes a 256x256 JPEG of the size told
+reference: service: profile passes one base twice, of the user, by a name
+reference: service: profile passes the user found and nobody made up
+reference: service: renderer passes a renderer stopped, started and stopped
+reference: service: renderer passes its parameters and two settings kept
+reference: service: set passes reden's language codes and fails what strays from them
+reference: service: set-sys passes settings read back as set and flags put back
+reference: service: time passes ToPosixTime giving the known time back
+reference: service: time passes a steady clock one or two seconds on
+reference: service: time passes a user clock its context's offset past steady
+reference: service: time passes the device's rule dating as the service's own
+reference: service: time passes the epoch and the known time dated under UTC
+reference: service: time-perm passes every write time:u asks refused
+reference: service: time-snap passes a snapshot of the user clock and its span
+reference: service: time-zone passes names listed, the location and a date back
+reference: service: vi passes the default display, the scaling table and the rounding
 reference: sfdnsres is expected to answer loopback only for a session's own names
 reference: six triangle list vertices from vertex 6 are the word 0x40060006
 reference: sm4's inputs are the standard's key, FK and CK
@@ -842,7 +908,7 @@ support: the running screen shows the step, the case and the steps done in propo
 support: the screens gather the cases into their suites, families in the order the run met them
 support: the start screen asks only with something to choose, a button a choice
 support: the start screen counts the cases that may crash in the families chosen
-support: the start screen keeps the video, kernel and display families the file names, which have no row
+support: the start screen keeps the video, kernel, display and service families the file names, which have no row
 support: the start screen opens on begin the run, every row as the mode file says
 support: the start screen waits ten seconds for a person, and a press keeps it
 support: the start screen warns exactly while a choice that can end the program is on
