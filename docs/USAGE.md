@@ -374,6 +374,8 @@ type, range and help, tab-separated. Every setting, the recompiler's too, is des
 | `docked` | `1` | `1` is TV mode, `0` handheld mode (1280x720) |
 | `fullscreen` | `0` | `1` starts fullscreen, except in timed test runs (`--seconds`, `--frames`). `-f` or `--fullscreen=0` sets it for one run. F11 or Alt+Enter switches without changing it |
 | `language` | `1` | The game's language, English (US). The `.ini` lists the others, `0` to `17`. One the runtime doesn't know is English (US) |
+| `showcase` | `0` | `1` draws player 1's buttons and sticks, as the game gets them, and the frames a second in a corner of the window, for a video. F6 turns it on and off |
+| `showcase_corner` | `br` | The corner `showcase` draws in: `tl` top left, `tr` top right, `bl` bottom left, `br` bottom right |
 | `resolution` | `1` | Internal 3D scale, `0.25` to `4`: `1` native, `2` double, `0.75` and `0.5` faster |
 | `shadows` | `1` | `0` skips shadow maps |
 | `vsync` | `1` | Images are shown only on the display's refresh, so nothing tears. `0` doesn't wait for it: the newest image is shown on the next refresh where the display can do that, else at once (which may tear). A display that can do neither waits for the refresh as `1` does |
@@ -451,9 +453,9 @@ after installation. Other HIDAPI controllers may need their vendor's own hidraw 
 | Q / E / 1 / 3 | L / R / ZL / ZR |
 | Enter / Backspace | Plus / Minus |
 
-F1 help; F2 the game's menu; F3 screenshot; F4 FPS limit off and on; F5 thread dump; F11/Alt+Enter fullscreen;
-Escape quit. A window shows at most one image per refresh and drops the rest unless images tear, and the game keeps
-the pace `fps_limit` sets.
+F1 help; F2 the game's menu; F3 screenshot; F4 FPS limit off and on; F5 thread dump; F6 showcase on and off;
+F11/Alt+Enter fullscreen; Escape quit. A window shows at most one image per refresh and drops the rest unless images
+tear, and the game keeps the pace `fps_limit` sets.
 
 In the game's menu the arrows, Enter and Escape move, select and go back; a gamepad's D-pad or left stick, A and
 B do the same, the on-screen controls' too, and a direction held goes on after a moment.

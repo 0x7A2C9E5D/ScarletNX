@@ -9,6 +9,7 @@
 #include "nx/gpu/vk/ui_spv.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/overlay.h"
+#include "nx/runtime/platform/plat.h"
 #include "nx/runtime/platform/vpad.h"
 
 #define MAX_QUADS 4096
@@ -264,6 +265,7 @@ void vk_ui_draw(VkCommandBuffer cb, VkImage sc, const int safe[4]) {
     ui_lock();
     atlas_upload(cb);
     vpad_draw(&list, safe);
+    vpad_showcase_draw(&list, safe, vpad_showcase_fps(g_vk_present, plat_ns()));
     overlay_draw(&list, sw, sh);
     ui_unlock();
     n = list.n;
