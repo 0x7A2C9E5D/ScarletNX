@@ -253,7 +253,8 @@ typedef struct {
     int setup_pages[SNX_SETUP_STEPS + 1], setup_count, setup_page;
     GuiChoice setup_choice; /* the page's choices, the one in focus */
     int setup_top;          /* the notice shown, one a page: the last one's OK goes on */
-    int setup_language;     /* the language the menu had when the setup came to its step: one picked over it is kept */
+    int setup_language;     /* Settings > App's Language as the setup found it, 0 Auto: kept Auto on the system's */
+    int setup_row;          /* the Appearance page's focus, a GUI_APPEARANCE_* row or its Next */
     bool setup_typing;      /* the first user's nickname being typed, setup_name, to go with setup_uid */
     char setup_name[SNX_USERS_NICKNAME + 1];
     uint64_t setup_uid[2];
@@ -263,7 +264,7 @@ typedef struct {
     bool setup_written; /* users.ini at the user's page: there, its users (-1: setup_why says why it is none) */
     int setup_users;
     char setup_why[512];
-    bool setup_save;  /* a language picked over the menu's, kept in app.ini once done */
+    bool setup_save;  /* the Appearance changed, kept in app.ini once done (a portable copy's, when that is picked) */
     bool setup_moved; /* the data folder a portable copy's: what older versions left is looked for again */
 #ifdef SDL_PLATFORM_ANDROID
     bool hidden;     /* behind other apps: nothing is drawn, a run is still read */
@@ -3595,10 +3596,13 @@ static void sizes_pointer(App* app, float x, float y, bool click) {
     } else if (click && !on)
         app->sizes_shown = false;
 }
-/* the new size kept in app.ini, or the one before it back (Back, ESC, or no answer in time) */
+/* the new size kept in app.ini (the setup's once it is done), or the one before it back (Back, ESC, or no answer in
+   time) */
 static void size_answer(App* app, bool keep) {
     app->size_until = 0;
-    if (keep)
+    if (keep && app->setup_on)
+        app->setup_save = true;
+    else if (keep)
         app_save(app);
     else {
         app->menu.text_size = app->size_was;
@@ -4625,8 +4629,19 @@ static void form_pointer(App* app, float x, float y, bool touch) {
 #define SAY_SETUP_TYPING SNX_TR_KEYS("Type the nickname. Enter: done. ESC: back.")
 #define SAY_SETUP_NOTICE SNX_TR_KEYS("Left/Right: choose. Enter: take it. ESC: exit.")
 #endif
+#ifdef SDL_PLATFORM_ANDROID
+#define SAY_SETUP_LOOK       SAY_SETUP
+#define SAY_SETUP_LOOK_FIRST SAY_SETUP
+#define SAY_SETUP_SIZE       SAY_SETUP
+#define SAY_SETUP_SIZE_FIRST SAY_SETUP
+#else /* the Appearance page's: Text size's row opens its box */
+#define SAY_SETUP_LOOK       SNX_TR_KEYS("Up/Down: row. Left/Right: change. Enter: next. ESC: back.")
+#define SAY_SETUP_LOOK_FIRST SNX_TR_KEYS("Up/Down: row. Left/Right: change. Enter: next. ESC: exit.")
+#define SAY_SETUP_SIZE       SNX_TR_KEYS("Up/Down: row. Enter: open. ESC: back.")
+#define SAY_SETUP_SIZE_FIRST SNX_TR_KEYS("Up/Down: row. Enter: open. ESC: exit.")
+#endif
 #define SAY_SETUP_NICKNAME SNX_TR_NOOP("nickname 4 to 20 of A-Z a-z 0-9 space . _ -")
-#define GUI_SETUP_CHOICES  32 /* a page's, at most: the languages' */
+#define GUI_SETUP_CHOICES  3 /* a page's, at most: Folders' and Keys' */
 static void open_files(App* app);
 static void left_behind(App* app);
 static void ask_key(App* app, GuiKey key);
@@ -4682,10 +4697,9 @@ static void setup_enter(App* app) {
     app->setup_choice.focus = 0;
     SDL_StopTextInput(app->window);
     switch (page) {
-        case SNX_SETUP_LANGUAGE:
-            app->setup_choice.count = SDL_min(snx_gui_language_count, GUI_SETUP_CHOICES);
-            app->setup_language = app->language ? app->language - 1 : language_auto();
-            app->setup_choice.focus = app->setup_language;
+        case SNX_SETUP_LANGUAGE: /* the Appearance's rows, the first in focus, and Next */
+            app->setup_choice.count = 1;
+            app->setup_row = GUI_APPEARANCE_LANGUAGE;
             break;
         case SNX_SETUP_INSTALL:
             app->setup_choice.count = 2;
@@ -4728,6 +4742,7 @@ static void setup_start(App* app) {
         if (snx_setup_asks(&app->setup, i) && snx_setup_here(i)) app->setup_pages[app->setup_count++] = i;
     app->setup_on = app->setup_count > 0;
     app->setup_save = app->setup_moved = false;
+    app->setup_language = app->language;
     if (app->setup_on) setup_enter(app);
 }
 /* the last page done: setup.ini says so, the language picked kept in app.ini, the menu with the user its head shows */
@@ -4840,14 +4855,7 @@ static void setup_take(App* app) {
     char note[1100], *portable, *prod, shown[1024];
     bool there;
     switch (page) {
-        case SNX_SETUP_LANGUAGE:
-            if (choice != app->setup_language) { /* one picked over the one the menu has */
-                app->language = choice + 1;
-                language_apply(app);
-                app->setup_save = true;
-            }
-            setup_next(app);
-            return;
+        case SNX_SETUP_LANGUAGE: setup_next(app); return; /* its Next: the rows did what they do as they changed */
         case SNX_SETUP_INSTALL:
             portable = setup_portable(app, &there);
             snx_home_short(portable ? portable : "", shown, sizeof shown);
@@ -4932,7 +4940,29 @@ static int setup_notices(const App* app, int* list) {
         if (snx_setup_shows(&app->setup, i)) list[n++] = i;
     return n;
 }
+/* the Appearance's row changed a step either way, at once, as Settings > App's: the language among the menu's (Auto
+   again on the system's, where the setup found Auto), the theme among the themes */
+static void appearance_change(App* app, int row, int step) {
+    if (row == GUI_APPEARANCE_LANGUAGE) {
+        app->language = (snx_tr_language() + step + snx_gui_language_count) % snx_gui_language_count + 1;
+        if (!app->setup_language && app->language - 1 == language_auto()) app->language = 0;
+        language_apply(app);
+    } else
+        next_theme(app, step);
+    app->setup_save = true;
+}
 static void setup_key(App* app, GuiKey key) {
+    int step;
+    if (setup_page_of(app) == SNX_SETUP_LANGUAGE) {
+        switch (gui_appearance_key(&app->setup_row, key, &step)) {
+            case GUI_APPEARANCE_CHANGE: appearance_change(app, app->setup_row, step); break;
+            case GUI_APPEARANCE_SIZES: sizes_open(app); break;
+            case GUI_APPEARANCE_ON: setup_next(app); break;
+            case GUI_APPEARANCE_BACK: setup_back(app); break;
+            default: break;
+        }
+        return;
+    }
     switch (gui_choice_key(&app->setup_choice, key)) {
         case GUI_CHOICE_TAKE: setup_take(app); break;
         case GUI_CHOICE_BACK: setup_back(app); break;
@@ -4961,6 +4991,10 @@ static bool setup_event(App* app, const SDL_Event* e) {
         if (!e->key.repeat && menu_key_of(&e->key, &key)) ask_key(app, key);
         return true;
     }
+    if (app->sizes_shown) { /* Text size's box, over the Appearance page */
+        if (!e->key.repeat && menu_key_of(&e->key, &key)) sizes_key(app, key);
+        return true;
+    }
     if (app->setup_typing && e->key.key == SDLK_BACKSPACE) {
         setup_type_back(app);
         return true;
@@ -4980,12 +5014,12 @@ static int setup_labels(const App* app, const char** labels) {
     static const char* const user[] = {SNX_TR_NOOP("Keep"), SNX_TR_NOOP("Overwrite")};
     int i, page = setup_page_of(app), count = app->setup_choice.count, list[SNX_NOTICES];
     for (i = 0; i < count; ++i)
-        labels[i] = page == SNX_SETUP_LANGUAGE                     ? snx_gui_languages[i].name
+        labels[i] = page == SNX_SETUP_LANGUAGE                     ? snx_tr("Next")
                     : page == SNX_SETUP_INSTALL                    ? snx_tr(install[i])
                     : page == SNX_SETUP_FOLDERS                    ? snx_tr(folders[i])
                     : page == SNX_SETUP_KEYS                       ? snx_tr(keys[i + 3 - count])
                     : page == SNX_SETUP_USER && !app->setup_typing ? snx_tr(user[i])
-                    : page == SETUP_NOTICE && i < count - 1                                 ? snx_tr("Back")
+                    : page == SETUP_NOTICE && i < count - 1        ? snx_tr("Back")
                     : page == SETUP_NOTICE && app->setup_top < setup_notices(app, list) - 1 ? snx_tr("Next")
                                                                                             : snx_tr("OK");
     return count;
@@ -4994,7 +5028,7 @@ static const char* setup_question(const App* app, char* out, size_t size) {
     switch (setup_page_of(app)) {
         case SETUP_NOTICE:
             return app->setup.version ? snx_tr("Changed since the last version") : snx_tr("Changed in older versions");
-        case SNX_SETUP_LANGUAGE: return snx_tr("Language");
+        case SNX_SETUP_LANGUAGE: return snx_tr("Appearance");
         case SNX_SETUP_INSTALL: return snx_tr("Install type");
         case SNX_SETUP_FOLDERS: return snx_tr("Folders");
         case SNX_SETUP_KEYS: return snx_tr("Keys");
@@ -5013,7 +5047,7 @@ static const char* setup_question(const App* app, char* out, size_t size) {
 static const char* setup_tip(const App* app) {
     switch (setup_page_of(app)) {
         case SETUP_NOTICE: return snx_tr("Tip: --debug skips the setup");
-        case SNX_SETUP_LANGUAGE: return snx_tr("Tip: it starts on the system's language");
+        case SNX_SETUP_LANGUAGE: return snx_tr("Tip: games keep their own language: Settings > System > language");
         case SNX_SETUP_INSTALL: return snx_tr("Tip: a portable copy is a folder you can copy");
         case SNX_SETUP_FOLDERS: return snx_tr("Tip: Settings > App > Library and Folders change them");
         case SNX_SETUP_KEYS: return snx_tr("Tip: the menu's Setup device keys changes them");
@@ -5021,10 +5055,53 @@ static const char* setup_tip(const App* app) {
     }
 }
 static const char* setup_keys_said(const App* app) {
+    if (setup_page_of(app) == SNX_SETUP_LANGUAGE && app->setup_row == GUI_APPEARANCE_TEXT)
+        return app->setup_page ? SAY_SETUP_SIZE : SAY_SETUP_SIZE_FIRST;
+    if (setup_page_of(app) == SNX_SETUP_LANGUAGE) return app->setup_page ? SAY_SETUP_LOOK : SAY_SETUP_LOOK_FIRST;
     return app->setup_typing                    ? SAY_SETUP_TYPING
            : setup_page_of(app) == SETUP_NOTICE ? SAY_SETUP_NOTICE
            : app->setup_page                    ? SAY_SETUP
                                                 : SAY_SETUP_FIRST;
+}
+/* the page's choice drawn in focus: the Appearance's Next only while the focus is on it, not on a row; -1 for none */
+static int setup_focus(const App* app) {
+    if (setup_page_of(app) == SNX_SETUP_LANGUAGE) return app->setup_row == GUI_APPEARANCE_NEXT ? 0 : -1;
+    return app->setup_choice.focus;
+}
+/* ---- the Appearance page's box: at the top of r, as high as its rows; its rows' list in it ---- */
+static const char* const appearance_names[GUI_APPEARANCE_NEXT] = {SNX_TR_NOOP("Language"), SNX_TR_NOOP("Theme"),
+                                                                  SNX_TR_NOOP("Text size")};
+static GuiRect appearance_box(const App* app, GuiRect r, GuiList* rows) {
+    int s = app->scale, top = head_h(app) + 4 * s, h = GUI_APPEARANCE_NEXT * (item_h(app) + 6 * s);
+    GuiRect box = gui_rect(r.x, r.y, r.w, SDL_min(top + h + 2 * s, r.h));
+    list_place(app, rows, gui_rect(box.x + cell_w(app), box.y + top, box.w - 2 * cell_w(app), h), GUI_APPEARANCE_NEXT,
+               SDL_min(app->setup_row, GUI_APPEARANCE_NEXT - 1));
+    return box;
+}
+/* the column a row's value starts at, in the row's text: past the marker and the longest name */
+static int appearance_column(const App* app) {
+    int i, cols = 0;
+    for (i = 0; i < GUI_APPEARANCE_NEXT; ++i) cols = SDL_max(cols, gui_text_cols(snx_tr(appearance_names[i])));
+    return gui_text_cols(app->theme.marker) + cols + 2;
+}
+/* row i as it reads: its name, then from appearance_column its value, between the arrows Left and Right go by, or for
+   Text size followed by the dots of the box it opens; Auto's with the scale it has now */
+static void appearance_row(const App* app, int i, char* out, size_t size) {
+    char value[128];
+    int pad = appearance_column(app) - gui_text_cols(app->theme.marker) - gui_text_cols(snx_tr(appearance_names[i]));
+    if (i == GUI_APPEARANCE_LANGUAGE)
+        snprintf(value, sizeof value, "< %s >", snx_gui_languages[snx_tr_language()].name);
+    else if (i == GUI_APPEARANCE_THEME)
+        snprintf(value, sizeof value, "< %s >", app->theme.name);
+    else {
+        char shown[96];
+        if (app->menu.text_size)
+            size_name(app, app->menu.text_size, shown, sizeof shown);
+        else
+            snprintf(shown, sizeof shown, snx_tr("Auto (%dx)"), app->auto_scale);
+        snprintf(value, sizeof value, "  %s  ...", shown);
+    }
+    snprintf(out, size, "%s%s%*s%s", app->theme.marker, snx_tr(appearance_names[i]), pad, "", value);
 }
 typedef struct {
     GuiPlace place;
@@ -5037,6 +5114,7 @@ typedef struct {
 static void setup_boxes(App* app, GuiSetupBoxes* b) {
     int n = setup_number(app, app->setup_page);
     char question[sizeof b->question];
+    GuiRect area;
     place_screen(app, &b->place, snx_tr(setup_keys_said(app)), 0, GUI_SHOWS_TABS);
     b->count = setup_labels(app, b->labels);
     snprintf(b->question, sizeof b->question, "%s", setup_question(app, question, sizeof question));
@@ -5048,7 +5126,15 @@ static void setup_boxes(App* app, GuiSetupBoxes* b) {
         snprintf(b->tab, sizeof b->tab, "%d/%d", n, setup_steps(app));
     else
         b->tab[0] = 0;
-    choices_place(app, b->place.list, b->question, b->tab, b->labels, b->count, app->setup_choice.focus, &b->choices);
+    area = b->place.list;
+    /* the Appearance's question in the middle of what is under its rows, YoRHa's at the foot as any */
+    if (setup_page_of(app) == SNX_SETUP_LANGUAGE && app->theme.dialog != GUI_DIALOG_YORHA) {
+        GuiList rows;
+        GuiRect box = appearance_box(app, area, &rows);
+        int under = box.y + box.h + cell_h(app) - area.y;
+        area = gui_rect(area.x, area.y + under, area.w, SDL_max(0, area.h - under));
+    }
+    choices_place(app, area, b->question, b->tab, b->labels, b->count, SDL_max(setup_focus(app), 0), &b->choices);
     b->content = b->place.list;
     if (app->theme.dialog == GUI_DIALOG_YORHA) /* above the choices */
         b->content.h = SDL_max(0, b->choices.list.at.y - cell_h(app) / 2 - b->content.y);
@@ -5153,11 +5239,16 @@ static void setup_panes(App* app, GuiRect r) {
 #define SETUP_LINE(...) (snprintf(text[n], sizeof text[n], __VA_ARGS__), lines[n] = text[n], ++n)
     switch (setup_page_of(app)) {
         case SETUP_NOTICE: setup_notices_box(app, r); break;
-        case SNX_SETUP_LANGUAGE:
-            SETUP_LINE("%s%s", m, snx_tr("The menus and their messages"));
-            SETUP_LINE("%s%s", m, snx_tr("Games keep their own: Settings > System > language"));
-            setup_box(app, r, snx_tr("Language"), lines, n);
+        case SNX_SETUP_LANGUAGE: {
+            GuiList rows;
+            GuiRect box = appearance_box(app, r, &rows);
+            pane(app, box, snx_tr("Appearance"));
+            for (i = 0; i < GUI_APPEARANCE_NEXT; ++i) {
+                appearance_row(app, i, text[0], sizeof text[0]);
+                list_item(app, &rows, i, text[0], app->setup_row == i, false);
+            }
             break;
+        }
         case SNX_SETUP_INSTALL:
             setup_split(app, r, 3, &a, &b);
             for (i = 0; i < 4; ++i) {
@@ -5223,23 +5314,39 @@ static void draw_setup(App* app) {
     setup_boxes(app, &b);
     chrome(app, &b.place);
     setup_panes(app, b.content);
-    choices_draw(app, &b.choices, b.question, b.tab, b.labels, b.count, app->setup_choice.focus);
+    choices_draw(app, &b.choices, b.question, b.tab, b.labels, b.count, setup_focus(app));
     foot(app, &b.place, app->message[0] ? app->message : setup_tip(app),
          rgb(app->setup_failed ? t->failure
              : app->message[0] ? t->focus
                                : t->ink),
          snx_tr(setup_keys_said(app)));
+    if (app->sizes_shown) render_sizes(app); /* Text size's box, over the Appearance page */
     if (app->confirm.shown) render_ask(app);
 }
-/* the pointer on the page: a choice under it takes the focus, a click takes it */
+/* the pointer on the page: a choice under it takes the focus, a click takes it. On the Appearance's rows, a click
+   changes the value a step on, or back on its left arrow, and on Text size opens its box */
 static void setup_pointer(App* app, float x, float y, bool click) {
     GuiSetupBoxes b;
+    GuiList rows;
     bool on;
     int i;
     setup_boxes(app, &b);
-    if ((i = choices_hit(&b.choices, x, y, &on)) < 0) return;
-    app->setup_choice.focus = i;
-    if (click) setup_take(app);
+    if ((i = choices_hit(&b.choices, x, y, &on)) >= 0) {
+        app->setup_choice.focus = i;
+        app->setup_row = GUI_APPEARANCE_NEXT;
+        if (click) setup_take(app);
+        return;
+    }
+    if (setup_page_of(app) != SNX_SETUP_LANGUAGE) return;
+    appearance_box(app, b.content, &rows);
+    if ((i = list_hit(&rows, x, y, false)) < 0) return;
+    app->setup_row = i;
+    if (click && i == GUI_APPEARANCE_TEXT)
+        sizes_open(app);
+    else if (click) {
+        int arrow = list_box(&rows, i).x + cell_w(app) / 2 + appearance_column(app) * cell_w(app);
+        appearance_change(app, i, x >= (float)arrow && x < (float)(arrow + cell_w(app)) ? -1 : 1);
+    }
 }
 static void render(App* app) {
     layout(app);

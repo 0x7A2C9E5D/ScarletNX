@@ -95,7 +95,6 @@ static char* config_of(const App* app) { return snx_menu_dir(app->home_dir, SNX_
 static void test_first(App* app) {
     char *portable = join(bin, SNX_PORTABLE_DIR), *games = join(root, "games picked"), *dumps = join(root, "dumps");
     char *keys = join(root, "keys"), *config, *users, *path;
-    GuiSetupBoxes b;
     int notices; /* the first setup's, one a page */
     assert(!snx_mkdirs(games) && !snx_mkdirs(dumps));
     path = join(keys, "prod.keys");
@@ -153,12 +152,96 @@ static void test_first(App* app) {
     assert(app->confirm.shown && app->confirm.ask == GUI_ASK_EXIT);
     key(app, SDLK_ESCAPE);
     assert(!app->confirm.shown && app->setup_on && !app->menu.quit);
-    /* the language: the system's to start on, the test's other one picked with the mouse */
+    /* Appearance: Settings > App's Language, Theme and Text size a row each, then Next. Left/Right change the language
+       and the theme at once, the screen with them, Auto again on the system's; Text size's box and its question, the
+       size kept for app.ini; a click on a row's left arrow goes back a step; nothing written until the setup is done */
     key(app, SDLK_RETURN);
-    assert(page(app) == SNX_SETUP_LANGUAGE && app->setup_choice.count == snx_gui_language_count &&
-           snx_gui_language_count == 3 && app->setup_choice.focus == 0);
-    setup_boxes(app, &b);
-    point(app, list_box(&b.choices.list, 1), true);
+    assert(page(app) == SNX_SETUP_LANGUAGE && app->setup_row == GUI_APPEARANCE_LANGUAGE && !app->language);
+    assert(app->setup_choice.count == 1 && !strcmp(choice_label(app), "Next") && snx_gui_language_count == 3);
+    render(app);
+    shows(app, "Appearance", rgb(head_ink(app)));
+    shows(app, "< English >", rgb(app->theme.page)); /* the row in focus, inverted on YoRHa's focus bar */
+    shows(app, "< YoRHa >", rgb(app->theme.ink));
+    {
+        char line[64];
+        snprintf(line, sizeof line, "  Auto (%dx)  ...", app->auto_scale);
+        shows(app, line, rgb(app->theme.ink));
+    }
+    hides(app, "Next", rgb(app->theme.page));      /* drawn, not in focus */
+    shows_foot(app, "change", rgb(head_ink(app))); /* the foot's words, on YoRHa's band of ink */
+    key(app, SDLK_RIGHT);
+    assert(app->language == 2 && snx_tr_language() == 1 && app->setup_save);
+    render(app);
+    {
+        int x, y;
+        assert(find_letters(app, "< Test\303\252s >", rgb(app->theme.page), 1, &x, &y));
+        assert(find_letters(app, "Apar\303\252ncia", rgb(head_ink(app)), 1, &x, &y)); /* xx's words, at once */
+    }
+    key(app, SDLK_RIGHT);
+    assert(app->language == 3 && snx_tr_language() == 2);
+    key(app, SDLK_RIGHT); /* English, the system's: Auto, as the setup found it */
+    assert(!app->language && snx_tr_language() == 0);
+    key(app, SDLK_LEFT);
+    assert(app->language == 3);
+    {
+        GuiSetupBoxes c;
+        GuiList rows;
+        GuiRect row;
+        render(app);
+        setup_boxes(app, &c);
+        appearance_box(app, c.content, &rows);
+        row = list_box(&rows, GUI_APPEARANCE_LANGUAGE);
+        mouse_px(app, row.x + cell_w(app) / 2 + appearance_column(app) * cell_w(app) + cell_w(app) / 2,
+                 row.y + row.h / 2, true); /* its left arrow: back a step */
+        assert(app->language == 2 && snx_tr_language() == 1 && app->setup_row == GUI_APPEARANCE_LANGUAGE);
+        point(app, list_box(&rows, GUI_APPEARANCE_THEME), false); /* the pointer over a row: its focus */
+        assert(app->setup_row == GUI_APPEARANCE_THEME && app->language == 2);
+    }
+    key(app, SDLK_RIGHT); /* the next theme, the dialog's place with it */
+    assert(!strcmp(app->theme.id, "default") && app->theme.dialog == GUI_DIALOG_DEFAULT);
+    render(app);
+    shows(app, "< Default >", rgb(app->theme.focus));
+    {
+        GuiSetupBoxes c;
+        GuiList rows;
+        GuiRect box;
+        setup_boxes(app, &c);
+        box = appearance_box(app, c.content, &rows);
+        { /* the question in the middle of what is under the rows */
+            int under = box.y + box.h + cell_h(app), bottom = c.place.list.y + c.place.list.h;
+            assert(c.choices.box.y >= under);
+            assert(SDL_abs(c.choices.box.y + c.choices.box.h / 2 - (under + bottom) / 2) <= cell_h(app));
+        }
+    }
+    key(app, SDLK_LEFT);
+    assert(!strcmp(app->theme.id, "yorha") && app->theme.dialog == GUI_DIALOG_YORHA);
+    key(app, SDLK_DOWN);
+    assert(app->setup_row == GUI_APPEARANCE_TEXT);
+    render(app);
+    shows_foot(app, "open", rgb(head_ink(app)));
+    key(app, SDLK_RETURN); /* its box, over the page */
+    assert(app->sizes_shown && app->sizes.focus == 3 && page(app) == SNX_SETUP_LANGUAGE);
+    render(app);
+    shows(app, "0.5 of Auto", rgb(app->theme.ink));
+    key(app, SDLK_DOWN);
+    key(app, SDLK_RETURN);
+    assert(!app->sizes_shown && app->menu.text_size == 1 && app->confirm.shown && app->confirm.ask == GUI_ASK_TEXT);
+    render(app);
+    key(app, SDLK_RIGHT); /* Keep */
+    key(app, SDLK_RETURN);
+    assert(!app->confirm.shown && app->menu.text_size == 1 && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);
+    path = join(home, ".config/scarletnx/app.ini");
+    assert(!snx_is_file(path)); /* kept for the setup's end, in the folders Install picks */
+    free(path);
+    key(app, SDLK_LEFT); /* Text size's box again, closed by ESC */
+    assert(app->sizes_shown);
+    key(app, SDLK_ESCAPE);
+    assert(!app->sizes_shown && app->setup_on && page(app) == SNX_SETUP_LANGUAGE);
+    key(app, SDLK_DOWN);
+    assert(app->setup_row == GUI_APPEARANCE_NEXT);
+    render(app);
+    shows(app, "Next", rgb(app->theme.page)); /* in focus now */
+    key(app, SDLK_RETURN);
     assert(page(app) == SNX_SETUP_INSTALL && app->language == 2 && app->setup_save && snx_tr_language() == 1);
     app->language = 0; /* English again, for the words below, kept as the language picked */
     language_apply(app);
@@ -248,6 +331,7 @@ static void test_first(App* app) {
     holds(users, "users.ini", "nickname=Adam\n");
     holds(config, "setup.ini", "[setup]\nversion = 1\nnotices = 9\n");
     holds(config, "app.ini", "language = xx\n");
+    holds(config, "app.ini", "theme = yorha\ntext_size = 1\n");
     path = join(home, ".config/scarletnx/setup.ini");
     assert(!snx_is_file(path)); /* nothing in the user's folders */
     free(path);
@@ -354,7 +438,7 @@ static void test_places(App* app) {
         free(setup);
     }
     setup_start(app);
-    app->setup_page = 1;
+    app->setup_page = 2; /* Install: the Appearance's question goes under its rows (test_first) */
     setup_enter(app);
     render(app);
     setup_boxes(app, &b);
@@ -362,16 +446,16 @@ static void test_places(App* app) {
     assert(b.choices.box.y + b.choices.box.h == b.place.list.y + b.place.list.h && b.choices.box.w == b.place.list.w);
     assert(b.choices.list.at.y + b.choices.list.at.h <= b.choices.tab.y && b.choices.list.at.x > width / 2);
     assert(b.content.y + b.content.h <= b.choices.list.at.y && b.content.h > 0);
-    assert(!strcmp(b.tab, "ScarletNX  1/5"));
-    shows(app, "ScarletNX  1/5", rgb(app->theme.ink));
+    assert(!strcmp(b.tab, "ScarletNX  2/5"));
+    shows(app, "ScarletNX  2/5", rgb(app->theme.ink));
     app->theme = *gui_theme_builtin("default");
     render(app);
     setup_boxes(app, &b);
     assert(b.content.h == b.place.list.h && !b.choices.tab.h);
     assert(SDL_abs(b.choices.box.x + b.choices.box.w / 2 - (b.place.list.x + b.place.list.w / 2)) <= cell_w(app));
     assert(SDL_abs(b.choices.box.y + b.choices.box.h / 2 - (b.place.list.y + b.place.list.h / 2)) <= cell_h(app));
-    shows(app, "Language", rgb(app->theme.warning));
-    shows(app, "1/5", rgb(app->theme.soft));
+    shows(app, "Install type", rgb(app->theme.warning));
+    shows(app, "2/5", rgb(app->theme.soft));
     app->theme = *gui_theme_builtin("yorha");
     setup_finish(app);
     free(file);

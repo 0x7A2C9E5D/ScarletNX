@@ -58,3 +58,6 @@ msgstr ""
 #, fuzzy
 msgid "Games"
 msgstr "Jogos?"
+
+msgid "Appearance"
+msgstr "Aparência"

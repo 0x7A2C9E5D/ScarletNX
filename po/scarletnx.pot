@@ -1158,6 +1158,30 @@ msgstr ""
 msgid "Left/Right: choose. Enter: take it. ESC: exit."
 msgstr ""
 
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: exit."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: open. ESC: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: open. ESC: exit."
+msgstr ""
+
 #: src/gui/main.c
 msgid "nickname 4 to 20 of A-Z a-z 0-9 space . _ -"
 msgstr ""
@@ -1268,6 +1292,10 @@ msgid "Changed in older versions"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Appearance"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Install type"
 msgstr ""
 
@@ -1295,7 +1323,7 @@ msgid "Tip: --debug skips the setup"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Tip: it starts on the system's language"
+msgid "Tip: games keep their own language: Settings > System > language"
 msgstr ""
 
 #: src/gui/main.c
@@ -1312,6 +1340,11 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Tip: nickname 4 to 20 of A-Z a-z 0-9 space . _ -"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Auto (%dx)"
 msgstr ""
 
 #: src/gui/main.c
@@ -1374,14 +1407,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "caches"
-msgstr ""
-
-#: src/gui/main.c
-msgid "The menus and their messages"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Games keep their own: Settings > System > language"
 msgstr ""
 
 #: src/gui/main.c

@@ -71,6 +71,22 @@ GuiChoiceDo gui_choice_key(GuiChoice* choice, GuiKey key) {
         default: return GUI_CHOICE_STAY;
     }
 }
+GuiAppearanceDo gui_appearance_key(int* row, GuiKey key, int* step) {
+    *step = 0;
+    switch (key) {
+        case GUI_UP: *row = (*row + GUI_APPEARANCE_ROWS - 1) % GUI_APPEARANCE_ROWS; return GUI_APPEARANCE_STAY;
+        case GUI_DOWN: *row = (*row + 1) % GUI_APPEARANCE_ROWS; return GUI_APPEARANCE_STAY;
+        case GUI_LEFT:
+        case GUI_RIGHT:
+            if (*row == GUI_APPEARANCE_TEXT) return GUI_APPEARANCE_SIZES;
+            if (*row == GUI_APPEARANCE_NEXT) return GUI_APPEARANCE_STAY;
+            *step = key == GUI_LEFT ? -1 : 1;
+            return GUI_APPEARANCE_CHANGE;
+        case GUI_SELECT: return *row == GUI_APPEARANCE_TEXT ? GUI_APPEARANCE_SIZES : GUI_APPEARANCE_ON;
+        case GUI_CANCEL: return GUI_APPEARANCE_BACK;
+        default: return GUI_APPEARANCE_STAY;
+    }
+}
 bool gui_confirm_key(GuiConfirm* confirm, GuiKey key) {
     GuiChoice two;
     if (!confirm->shown) return false;

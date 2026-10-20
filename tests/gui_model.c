@@ -345,6 +345,26 @@ int main(void) {
         assert(gui_choice_key(&choice, GUI_SELECT) == GUI_CHOICE_STAY &&
                gui_choice_key(&choice, GUI_UP) == GUI_CHOICE_STAY);
     }
+    /* the setup's Appearance: Up/Down round its three rows and Next; Left/Right a step of Language's and Theme's value,
+       Text size's box on its row, nothing on Next; Select that box on Text size, else on; Cancel back */
+    {
+        int row = GUI_APPEARANCE_LANGUAGE, step = 9;
+        assert(gui_appearance_key(&row, GUI_RIGHT, &step) == GUI_APPEARANCE_CHANGE && step == 1 && !row);
+        assert(gui_appearance_key(&row, GUI_LEFT, &step) == GUI_APPEARANCE_CHANGE && step == -1 && !row);
+        assert(gui_appearance_key(&row, GUI_UP, &step) == GUI_APPEARANCE_STAY && row == GUI_APPEARANCE_NEXT && !step);
+        assert(gui_appearance_key(&row, GUI_RIGHT, &step) == GUI_APPEARANCE_STAY && row == GUI_APPEARANCE_NEXT);
+        assert(gui_appearance_key(&row, GUI_SELECT, &step) == GUI_APPEARANCE_ON);
+        assert(gui_appearance_key(&row, GUI_DOWN, &step) == GUI_APPEARANCE_STAY && row == GUI_APPEARANCE_LANGUAGE);
+        assert(gui_appearance_key(&row, GUI_SELECT, &step) == GUI_APPEARANCE_ON && !step);
+        assert(gui_appearance_key(&row, GUI_DOWN, &step) == GUI_APPEARANCE_STAY && row == GUI_APPEARANCE_THEME);
+        assert(gui_appearance_key(&row, GUI_LEFT, &step) == GUI_APPEARANCE_CHANGE && step == -1);
+        assert(gui_appearance_key(&row, GUI_DOWN, &step) == GUI_APPEARANCE_STAY && row == GUI_APPEARANCE_TEXT);
+        assert(gui_appearance_key(&row, GUI_LEFT, &step) == GUI_APPEARANCE_SIZES && !step);
+        assert(gui_appearance_key(&row, GUI_RIGHT, &step) == GUI_APPEARANCE_SIZES);
+        assert(gui_appearance_key(&row, GUI_SELECT, &step) == GUI_APPEARANCE_SIZES && row == GUI_APPEARANCE_TEXT);
+        assert(gui_appearance_key(&row, GUI_PAGE_DOWN, &step) == GUI_APPEARANCE_STAY && row == GUI_APPEARANCE_TEXT);
+        assert(gui_appearance_key(&row, GUI_CANCEL, &step) == GUI_APPEARANCE_BACK && row == GUI_APPEARANCE_TEXT);
+    }
     /* the question before an abort: keys do nothing while it is not shown; the arrows move between its choices, Select
        takes the one in focus and Cancel keeps going, both closing it */
     assert(!gui_confirm_key(&confirm, GUI_SELECT) && !gui_confirm_key(&confirm, GUI_DOWN));

@@ -63,6 +63,19 @@ typedef struct {
 } GuiChoice;
 typedef enum { GUI_CHOICE_STAY, GUI_CHOICE_TAKE, GUI_CHOICE_BACK } GuiChoiceDo;
 GuiChoiceDo gui_choice_key(GuiChoice* choice, GuiKey key);
+/* The setup's first step, Appearance: Language, Theme and Text size a row each, as Settings > App has them, and Next
+   under them. Up and Down move round the four; Left and Right change Language's or Theme's value a step either way and
+   open Text size's box; Select opens that box on its row and goes on from any other; Cancel goes back */
+enum { GUI_APPEARANCE_LANGUAGE, GUI_APPEARANCE_THEME, GUI_APPEARANCE_TEXT, GUI_APPEARANCE_NEXT, GUI_APPEARANCE_ROWS };
+typedef enum {
+    GUI_APPEARANCE_STAY,
+    GUI_APPEARANCE_CHANGE, /* the row's value, *step (-1 or 1) away */
+    GUI_APPEARANCE_SIZES,  /* Text size's box opened */
+    GUI_APPEARANCE_ON,     /* the next step */
+    GUI_APPEARANCE_BACK
+} GuiAppearanceDo;
+/* key on the page whose focus is *row (GUI_APPEARANCE_*), moved by it */
+GuiAppearanceDo gui_appearance_key(int* row, GuiKey key, int* step);
 void gui_confirm_open(GuiConfirm* confirm, GuiAsk ask, bool twice);
 /* A key on the question: the arrows move between its choices, Select takes the one in focus and Cancel keeps going,
    both closing it; a question asked twice takes its second choice at the second Select, a move between choices
