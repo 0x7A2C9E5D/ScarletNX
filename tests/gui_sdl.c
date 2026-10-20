@@ -875,6 +875,14 @@ static void keys_outcome(App* app, bool ok) {
     assert(app->menu.view == GUI_LOAD_NONE && !app->keys_done);
     app->clock = 0;
 }
+/* name set (NULL: unset) where getenv reads it as well as SDL: on Windows the C runtime keeps a copy of its own, which
+   SDL_setenv_unsafe leaves naming the real user's folders */
+static void set_env(const char* name, const char* value) {
+#ifdef _WIN32
+    assert(!_putenv_s(name, value ? value : ""));
+#endif
+    assert(!(value ? SDL_setenv_unsafe(name, value, 1) : SDL_unsetenv_unsafe(name)));
+}
 int main(int argc, char** argv) {
 #ifdef _WIN32
     snx_test_crash_said();
@@ -985,11 +993,18 @@ int main(int argc, char** argv) {
         return nx ? 0 : 7; /* Both successful and failed drivers need ESC acknowledgement. */
     }
     App app;
-    /* the menu's data folder from the test's own environment, never the user's */
-    SDL_setenv_unsafe("XDG_DATA_HOME", "/nonexistent/snx-gui-test", 1);
-    SDL_setenv_unsafe("XDG_CONFIG_HOME", "/nonexistent/snx-gui-test/config", 1);
-    SDL_setenv_unsafe("XDG_STATE_HOME", "/nonexistent/snx-gui-test/state", 1);
-    SDL_setenv_unsafe("XDG_CACHE_HOME", "/nonexistent/snx-gui-test/cache", 1);
+    /* the menu's data folder from the test's own environment, never the user's: XDG's here, and a home of the test's
+       own where it comes from HOME, APPDATA or USERPROFILE */
+    char* own_home = snx_temp_dir(NULL);
+    assert(own_home);
+    set_env("HOME", own_home);
+    set_env("APPDATA", own_home);
+    set_env("USERPROFILE", own_home);
+    assert(getenv("APPDATA") && !strcmp(getenv("APPDATA"), own_home));
+    set_env("XDG_DATA_HOME", "/nonexistent/snx-gui-test");
+    set_env("XDG_CONFIG_HOME", "/nonexistent/snx-gui-test/config");
+    set_env("XDG_STATE_HOME", "/nonexistent/snx-gui-test/state");
+    set_env("XDG_CACHE_HOME", "/nonexistent/snx-gui-test/cache");
     /* the menu runs Switch inputs with the runtime it is part of, the other drivers from beside it */
     assert(initialize(&app, "/nonexistent/snx-gui-test/bin/scarletnx"));
     assert(!strcmp(app.self, "/nonexistent/snx-gui-test/bin/scarletnx"));
@@ -1120,7 +1135,7 @@ int main(int argc, char** argv) {
         char *bare = snx_path_join(temporary, "bare-home"),
              *saved_home = getenv("HOME") ? SDL_strdup(getenv("HOME")) : NULL;
         assert(!snx_mkdirs(bare));
-        SDL_setenv_unsafe("HOME", bare, 1);
+        set_env("HOME", bare);
         assert(!keys_red(&app, off) && keys_red(&app, on));
         shows(&app, "- Setup device keys", rgb(app.theme.page));
         key(&app, SDLK_DOWN);
@@ -1131,9 +1146,9 @@ int main(int argc, char** argv) {
         app.theme.blink_ms = gui_theme_builtin(app.theme.id)->blink_ms;
         app.clock = 0;
         if (saved_home)
-            SDL_setenv_unsafe("HOME", saved_home, 1);
+            set_env("HOME", saved_home);
         else
-            SDL_unsetenv_unsafe("HOME");
+            set_env("HOME", NULL);
         SDL_free(saved_home);
         free(bare);
     }
@@ -1288,7 +1303,7 @@ int main(int argc, char** argv) {
         char *home = snx_path_join(temporary, "home"), *saved_home = getenv("HOME") ? SDL_strdup(getenv("HOME")) : NULL;
         char *dir = snx_path_join(home, ".switch"), *found = snx_path_join(dir, "prod.keys"), *in_use;
         assert(!snx_mkdirs(dir) && !snx_write_file(found, "home keys", 9));
-        SDL_setenv_unsafe("HOME", home, 1);
+        set_env("HOME", home);
         in_use = keys_in_use(&app);
         assert(in_use && !strcmp(in_use, app.keys_path)); /* those installed above come first */
         free(in_use);
@@ -1301,9 +1316,9 @@ int main(int argc, char** argv) {
         render(&app);
         key(&app, SDLK_ESCAPE);
         if (saved_home)
-            SDL_setenv_unsafe("HOME", saved_home, 1);
+            set_env("HOME", saved_home);
         else
-            SDL_unsetenv_unsafe("HOME");
+            set_env("HOME", NULL);
         SDL_free(saved_home);
         free(found);
         free(dir);
@@ -2259,12 +2274,12 @@ int main(int argc, char** argv) {
     /* a menu that is no runtime's (a build without one) looks for scarletnx beside it, then on PATH */
     {
         char* own = app.self;
-        char* path = SDL_strdup(SDL_getenv("PATH"));
+        char* path = SDL_strdup(getenv("PATH"));
         app.self = NULL;
-        SDL_setenv_unsafe("PATH", "/nonexistent", 1);
+        set_env("PATH", "/nonexistent");
         launch(&app, snx_strdup(input), false);
         assert(!app.menu.running && !strcmp(app.message, "Cannot find scarletnx beside the GUI or on PATH."));
-        SDL_setenv_unsafe("PATH", path, 1);
+        set_env("PATH", path);
         SDL_free(path);
         app.self = own;
         app.message[0] = 0;
@@ -4716,7 +4731,7 @@ int main(int argc, char** argv) {
         /* an installed build's in its state folder, as the working folder is the home folder from the desktop */
         {
             char *state = snx_path_join(temporary, "state"), *logged = snx_path_join(state, "scarletnx/scarletnx.log");
-            SDL_setenv_unsafe("XDG_STATE_HOME", state, 1);
+            set_env("XDG_STATE_HOME", state);
             key(&app, SDLK_RETURN);
             assert(strstr(app.message, logged) && !snx_path_exists(saved));
             text = (char*)snx_read_file(logged, &size);
@@ -4912,7 +4927,7 @@ int main(int argc, char** argv) {
         char *old = snx_path_join(data, "scarletnx/gui"), *recent = snx_path_join(old, "recent.txt");
         char *run = snx_path_join(old, "last-run.log"), *folder, *expected = snx_path_join(state, "scarletnx"), *now;
         assert(!snx_mkdirs(old) && !snx_write_file(recent, "recent", 6) && !snx_write_file(run, "run", 3));
-        SDL_setenv_unsafe("XDG_DATA_HOME", data, 1);
+        set_env("XDG_DATA_HOME", data);
         folder = menu_folder(&app, SNX_USER_STATE, true);
         assert(folder && !strcmp(folder, expected) && snx_file_size(recent) == 6 && snx_file_size(run) == 3);
         now = snx_path_join(folder, "recent.txt");
@@ -4932,8 +4947,8 @@ int main(int argc, char** argv) {
             unsigned char meta[0xa0];
             const char* at;
             int i;
-            SDL_setenv_unsafe("XDG_CONFIG_HOME", config, 1);
-            SDL_setenv_unsafe("XDG_CACHE_HOME", cache, 1);
+            set_env("XDG_CONFIG_HOME", config);
+            set_env("XDG_CACHE_HOME", cache);
             app.data_dir = snx_path_join(data, "scarletnx");
             app.games_dir = snx_path_join(app.data_dir, "games");
             app.recent_file = snx_path_join(expected, "recent.txt");
@@ -5159,8 +5174,8 @@ int main(int argc, char** argv) {
                     app.drivers = drivers;
                 }
             }
-            SDL_setenv_unsafe("XDG_CONFIG_HOME", "/nonexistent/snx-gui-test/config", 1);
-            SDL_setenv_unsafe("XDG_CACHE_HOME", "/nonexistent/snx-gui-test/cache", 1);
+            set_env("XDG_CONFIG_HOME", "/nonexistent/snx-gui-test/config");
+            set_env("XDG_CACHE_HOME", "/nonexistent/snx-gui-test/cache");
             free(app.recent_file);
             app.recent_file = NULL;
             free(app.games_dir);
@@ -5181,7 +5196,7 @@ int main(int argc, char** argv) {
         folder = menu_folder(&app, SNX_USER_STATE, true);
         assert(folder && snx_is_dir(folder));
         free(folder);
-        SDL_setenv_unsafe("XDG_DATA_HOME", "/nonexistent/snx-gui-test", 1);
+        set_env("XDG_DATA_HOME", "/nonexistent/snx-gui-test");
         free(expected);
         free(run);
         free(recent);
@@ -5300,6 +5315,8 @@ int main(int argc, char** argv) {
     cleanup(&app);
     assert(!snx_remove_tree(temporary));
     free(temporary);
+    assert(!snx_remove_tree(own_home));
+    free(own_home);
     free(self);
     free(input);
     puts("SDL3 GUI: keyboard, font rendering, drops, dispatch and return-to-menu passed");
