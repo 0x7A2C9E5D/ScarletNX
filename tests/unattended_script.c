@@ -64,6 +64,13 @@ int main(void) {
     CHECK(at(9310, 403) == 0, "new press ends normally");
 
 
+    /* the help's example of a present is one the parser takes as a present */
+    {
+        const IniOpt* o = ini_find(g_unattended_ini, "script");
+        CHECK(o && o->help && strstr(o->help, "(300f)"), "script's help gives no 300f: %s", o && o->help ? o->help : "");
+        unattended_ini("script", "300f:1");
+        CHECK(at(9020, 299) == 0 && at(9030, 300) == 1, "300f is no present's number");
+    }
     /* a malformed item ends the script there, the items before it kept */
     unattended_ini("script", "500f:8,oops,600f:10");
     CHECK(at(9500, 500) == 8, "the item before a malformed one still presses");
