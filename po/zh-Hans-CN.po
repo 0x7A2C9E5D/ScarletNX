@@ -1164,14 +1164,14 @@ msgstr "左/右: 选择. Enter: 确认. ESC: 退出."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: back."
-msgstr "上/下: 行. 左/右: 更改. Enter: 下一步. ESC: 返回."
+msgid "Up/Down: row. Left/Right: change. Enter: change. ESC: back."
+msgstr "上/下: 行. 左/右: 更改. Enter: 更改. ESC: 返回."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: exit."
-msgstr "上/下: 行. 左/右: 更改. Enter: 下一步. ESC: 退出."
+msgid "Up/Down: row. Left/Right: change. Enter: change. ESC: exit."
+msgstr "上/下: 行. 左/右: 更改. Enter: 更改. ESC: 退出."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -2423,3 +2423,15 @@ msgstr "启动"
 #: src/nx/runtime/settings.txt
 msgid "LLVM Internals"
 msgstr "LLVM 内部选项"
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: next. ESC: back."
+msgstr "上/下: 行. Enter: 下一步. ESC: 返回."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: next. ESC: exit."
+msgstr "上/下: 行. Enter: 下一步. ESC: 退出."

@@ -1164,14 +1164,14 @@ msgstr "Esquerda/Direita: escolher. Enter: aceitar. ESC: sair."
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: back."
-msgstr "Cima/Baixo: linha. Esquerda/Direita: mudar. Enter: avançar. ESC: voltar."
+msgid "Up/Down: row. Left/Right: change. Enter: change. ESC: back."
+msgstr "Cima/Baixo: linha. Esquerda/Direita: mudar. Enter: mudar. ESC: voltar."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: exit."
-msgstr "Cima/Baixo: linha. Esquerda/Direita: mudar. Enter: avançar. ESC: sair."
+msgid "Up/Down: row. Left/Right: change. Enter: change. ESC: exit."
+msgstr "Cima/Baixo: linha. Esquerda/Direita: mudar. Enter: mudar. ESC: sair."
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
@@ -2423,3 +2423,15 @@ msgstr "Inicialização"
 #: src/nx/runtime/settings.txt
 msgid "LLVM Internals"
 msgstr "Internos do LLVM"
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: next. ESC: back."
+msgstr "Cima/Baixo: linha. Enter: avançar. ESC: voltar."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: next. ESC: exit."
+msgstr "Cima/Baixo: linha. Enter: avançar. ESC: sair."

@@ -2112,8 +2112,9 @@ static int tab_shown(const App* app) {
 }
 /* the tabs while the setup shows: its pages, the notices' then each step's, numbered */
 enum { SETUP_NOTICE = SNX_SETUP_STEPS }; /* a page's: a step's, or the notices' */
-static const char* const setup_step_names[SNX_SETUP_STEPS] = {
-    SNX_TR_NOOP("Language"), SNX_TR_NOOP("Install"), SNX_TR_NOOP("Folders"), SNX_TR_NOOP("Keys"), SNX_TR_NOOP("User")};
+static const char* const setup_step_names[SNX_SETUP_STEPS] = {SNX_TR_NOOP("Appearance"), SNX_TR_NOOP("Install"),
+                                                              SNX_TR_NOOP("Folders"), SNX_TR_NOOP("Keys"),
+                                                              SNX_TR_NOOP("User")};
 static int tab_count(const App* app) { return app->setup_on && !app->editing ? app->setup_count : GUI_TABS; }
 /* page i's number among the steps, from 1; 0 for the notices' */
 static int setup_number(const App* app, int i) {
@@ -4634,11 +4635,15 @@ static void form_pointer(App* app, float x, float y, bool touch) {
 #define SAY_SETUP_LOOK_FIRST SAY_SETUP
 #define SAY_SETUP_SIZE       SAY_SETUP
 #define SAY_SETUP_SIZE_FIRST SAY_SETUP
-#else /* the Appearance page's: Text size's row opens its box */
-#define SAY_SETUP_LOOK       SNX_TR_KEYS("Up/Down: row. Left/Right: change. Enter: next. ESC: back.")
-#define SAY_SETUP_LOOK_FIRST SNX_TR_KEYS("Up/Down: row. Left/Right: change. Enter: next. ESC: exit.")
+#define SAY_SETUP_ON         SAY_SETUP
+#define SAY_SETUP_ON_FIRST   SAY_SETUP
+#else /* the Appearance page's, as Settings > App's rows: Enter changes Language and Theme, opens Text size's box */
+#define SAY_SETUP_LOOK       SNX_TR_KEYS("Up/Down: row. Left/Right: change. Enter: change. ESC: back.")
+#define SAY_SETUP_LOOK_FIRST SNX_TR_KEYS("Up/Down: row. Left/Right: change. Enter: change. ESC: exit.")
 #define SAY_SETUP_SIZE       SNX_TR_KEYS("Up/Down: row. Enter: open. ESC: back.")
 #define SAY_SETUP_SIZE_FIRST SNX_TR_KEYS("Up/Down: row. Enter: open. ESC: exit.")
+#define SAY_SETUP_ON         SNX_TR_KEYS("Up/Down: row. Enter: next. ESC: back.")
+#define SAY_SETUP_ON_FIRST   SNX_TR_KEYS("Up/Down: row. Enter: next. ESC: exit.")
 #endif
 #define SAY_SETUP_NICKNAME SNX_TR_NOOP("nickname 4 to 20 of A-Z a-z 0-9 space . _ -")
 #define GUI_SETUP_CHOICES  3 /* a page's, at most: Folders' and Keys' */
@@ -5057,6 +5062,8 @@ static const char* setup_tip(const App* app) {
 static const char* setup_keys_said(const App* app) {
     if (setup_page_of(app) == SNX_SETUP_LANGUAGE && app->setup_row == GUI_APPEARANCE_TEXT)
         return app->setup_page ? SAY_SETUP_SIZE : SAY_SETUP_SIZE_FIRST;
+    if (setup_page_of(app) == SNX_SETUP_LANGUAGE && app->setup_row == GUI_APPEARANCE_NEXT)
+        return app->setup_page ? SAY_SETUP_ON : SAY_SETUP_ON_FIRST;
     if (setup_page_of(app) == SNX_SETUP_LANGUAGE) return app->setup_page ? SAY_SETUP_LOOK : SAY_SETUP_LOOK_FIRST;
     return app->setup_typing                    ? SAY_SETUP_TYPING
            : setup_page_of(app) == SETUP_NOTICE ? SAY_SETUP_NOTICE

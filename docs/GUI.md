@@ -240,7 +240,7 @@ Status box. See [GNUABI](GNUABI.md) for supported Linux ELF applications.
 
 The first start opens on the setup, not the menu, a page at a time, each a tab at the top under its number: the
 notices of what older versions did that this one does otherwise (only said, nothing moves:
-[DEPRECATIONS](DEPRECATIONS.md)), then **Language** (its Appearance), **Install**, **Folders**, **Keys** and **User**
+[DEPRECATIONS](DEPRECATIONS.md)), then **Appearance**, **Install**, **Folders**, **Keys** and **User**
 ([USAGE](USAGE.md#setup) has what each asks, the terminal's setup too). Its boxes say what the page is about; its
 question and choices come as the theme's `[body] options-dialog` places a question ([Themes](#themes)), over the boxes
 without darkening them; its tip, and what a choice did or why it did not, are in the foot. Up/Down (or the mouse)
@@ -248,11 +248,12 @@ move between the choices, Enter takes one and ESC goes back a page, on the first
 notices come one a page, numbered (Changed 1/8), each read before the setup goes on: Next the next one, Back (from the
 second) the one before, and OK on the last.
 
-- **Language**: a box, Appearance, of Settings > App's Language, Theme and Text size, a row each, and Next under
+- **Appearance**: a box of Settings > App's Language, Theme and Text size, a row each, and Next under
   them. Up/Down go over the rows and Next; Left/Right (or a click, on the left arrow back) change the language among
   the menu's and the theme, at once, the screen with them; Text size opens its box of sizes, the size picked asked
-  about for 15 s as App's is; Enter goes on (on Text size, opens its box). What was changed is kept in `app.ini` once
-  the setup is done, in the folders Install picks; Auto stays Auto while the language is the system's.
+  about for 15 s as App's is; Enter does as App's (the language or the theme a step on, Text size's box), and on
+  Next goes on. What was changed is kept in `app.ini` once the setup is done, in the folders Install picks; Auto
+  stays Auto while the language is the system's.
 - **Install**: Installed, or Portable, which makes `.scarletnx/` beside the program and moves the menu's own files
   there from then on. A box over the two says which the copy is now: `Now: portable, its files in <folder>/.scarletnx`
   while that folder is there, the focus then on Portable, else `Now: installed, its files in` the user's data folder.

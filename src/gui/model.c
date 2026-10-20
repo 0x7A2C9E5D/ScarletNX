@@ -82,7 +82,11 @@ GuiAppearanceDo gui_appearance_key(int* row, GuiKey key, int* step) {
             if (*row == GUI_APPEARANCE_NEXT) return GUI_APPEARANCE_STAY;
             *step = key == GUI_LEFT ? -1 : 1;
             return GUI_APPEARANCE_CHANGE;
-        case GUI_SELECT: return *row == GUI_APPEARANCE_TEXT ? GUI_APPEARANCE_SIZES : GUI_APPEARANCE_ON;
+        case GUI_SELECT:
+            if (*row == GUI_APPEARANCE_TEXT) return GUI_APPEARANCE_SIZES;
+            if (*row == GUI_APPEARANCE_NEXT) return GUI_APPEARANCE_ON;
+            *step = 1;
+            return GUI_APPEARANCE_CHANGE;
         case GUI_CANCEL: return GUI_APPEARANCE_BACK;
         default: return GUI_APPEARANCE_STAY;
     }

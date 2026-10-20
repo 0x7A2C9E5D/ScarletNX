@@ -564,7 +564,7 @@ msgid "Menu"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Language"
+msgid "Appearance"
 msgstr ""
 
 #: src/gui/main.c
@@ -721,6 +721,10 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Picked in a box, kept once said so. Auto fits the screen, its parts are smaller"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Language"
 msgstr ""
 
 #: src/gui/main.c
@@ -1161,13 +1165,13 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: back."
+msgid "Up/Down: row. Left/Right: change. Enter: change. ESC: back."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: exit."
+msgid "Up/Down: row. Left/Right: change. Enter: change. ESC: exit."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -1180,6 +1184,18 @@ msgstr ""
 #: src/gui/main.c
 #, snx-keys
 msgid "Up/Down: row. Enter: open. ESC: exit."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: next. ESC: back."
+msgstr ""
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: next. ESC: exit."
 msgstr ""
 
 #: src/gui/main.c
@@ -1289,10 +1305,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Changed in older versions"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Appearance"
 msgstr ""
 
 #: src/gui/main.c

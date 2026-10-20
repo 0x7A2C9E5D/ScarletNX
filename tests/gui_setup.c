@@ -109,7 +109,7 @@ static void test_first(App* app) {
     shows_big(app, "SETUP", rgb(app->theme.ink), title_size(app));
     shows(app, "Changed in older versions", rgb(app->theme.page)); /* YoRHa's: in the box of ink at the foot */
     shows(app, "Notice", rgb(app->theme.page));                    /* the tab shown, inverted */
-    shows(app, "1 Language", rgb(app->theme.ink));
+    shows(app, "1 Appearance", rgb(app->theme.ink));
     /* the notices one a page, 1/n, read to the last before the setup goes on: Next, Back past the first (the focus
        kept on it while pressed), and OK on the last only; ESC asks to exit, as the menu's */
     {
@@ -168,6 +168,10 @@ static void test_first(App* app) {
         shows(app, line, rgb(app->theme.ink));
     }
     hides(app, "Next", rgb(app->theme.page));      /* drawn, not in focus */
+    key(app, SDLK_RETURN); /* as Settings > App's Enter: the language a step on, the page kept */
+    assert(page(app) == SNX_SETUP_LANGUAGE && app->setup_row == GUI_APPEARANCE_LANGUAGE && app->language == 2);
+    key(app, SDLK_LEFT);
+    assert(!app->language);
     shows_foot(app, "change", rgb(head_ink(app))); /* the foot's words, on YoRHa's band of ink */
     key(app, SDLK_RIGHT);
     assert(app->language == 2 && snx_tr_language() == 1 && app->setup_save);
@@ -432,7 +436,7 @@ static void test_notice(App* app) {
     assert(!strcmp(choice_label(app), "OK"));
     shows(app, "Account saves", rgb(app->theme.ink));
     hides(app, "Game settings", rgb(app->theme.ink));
-    hides(app, "1 Language", rgb(app->theme.ink));
+    hides(app, "1 Appearance", rgb(app->theme.ink));
     key(app, SDLK_RETURN);
     assert(!app->setup_on);
     holds(config, "setup.ini", "notices = 9\n");

@@ -65,7 +65,8 @@ typedef enum { GUI_CHOICE_STAY, GUI_CHOICE_TAKE, GUI_CHOICE_BACK } GuiChoiceDo;
 GuiChoiceDo gui_choice_key(GuiChoice* choice, GuiKey key);
 /* The setup's first step, Appearance: Language, Theme and Text size a row each, as Settings > App has them, and Next
    under them. Up and Down move round the four; Left and Right change Language's or Theme's value a step either way and
-   open Text size's box; Select opens that box on its row and goes on from any other; Cancel goes back */
+   open Text size's box; Select steps Language's or Theme's value on and opens Text size's box, as Settings > App's
+   Enter does, and goes on from Next; Cancel goes back */
 enum { GUI_APPEARANCE_LANGUAGE, GUI_APPEARANCE_THEME, GUI_APPEARANCE_TEXT, GUI_APPEARANCE_NEXT, GUI_APPEARANCE_ROWS };
 typedef enum {
     GUI_APPEARANCE_STAY,

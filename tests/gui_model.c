@@ -346,7 +346,8 @@ int main(void) {
                gui_choice_key(&choice, GUI_UP) == GUI_CHOICE_STAY);
     }
     /* the setup's Appearance: Up/Down round its three rows and Next; Left/Right a step of Language's and Theme's value,
-       Text size's box on its row, nothing on Next; Select that box on Text size, else on; Cancel back */
+       Text size's box on its row, nothing on Next; Select Language's and Theme's value a step on, as Settings > App's
+       Enter does, that box on Text size, and on from Next; Cancel back */
     {
         int row = GUI_APPEARANCE_LANGUAGE, step = 9;
         assert(gui_appearance_key(&row, GUI_RIGHT, &step) == GUI_APPEARANCE_CHANGE && step == 1 && !row);
@@ -355,8 +356,10 @@ int main(void) {
         assert(gui_appearance_key(&row, GUI_RIGHT, &step) == GUI_APPEARANCE_STAY && row == GUI_APPEARANCE_NEXT);
         assert(gui_appearance_key(&row, GUI_SELECT, &step) == GUI_APPEARANCE_ON);
         assert(gui_appearance_key(&row, GUI_DOWN, &step) == GUI_APPEARANCE_STAY && row == GUI_APPEARANCE_LANGUAGE);
-        assert(gui_appearance_key(&row, GUI_SELECT, &step) == GUI_APPEARANCE_ON && !step);
+        assert(gui_appearance_key(&row, GUI_SELECT, &step) == GUI_APPEARANCE_CHANGE && step == 1 && !row);
         assert(gui_appearance_key(&row, GUI_DOWN, &step) == GUI_APPEARANCE_STAY && row == GUI_APPEARANCE_THEME);
+        assert(gui_appearance_key(&row, GUI_SELECT, &step) == GUI_APPEARANCE_CHANGE && step == 1);
+        assert(row == GUI_APPEARANCE_THEME);
         assert(gui_appearance_key(&row, GUI_LEFT, &step) == GUI_APPEARANCE_CHANGE && step == -1);
         assert(gui_appearance_key(&row, GUI_DOWN, &step) == GUI_APPEARANCE_STAY && row == GUI_APPEARANCE_TEXT);
         assert(gui_appearance_key(&row, GUI_LEFT, &step) == GUI_APPEARANCE_SIZES && !step);
