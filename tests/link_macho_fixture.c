@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
 /* link_macho.c's objects, compiled for arm64 macOS twice: PART 1 calls into PART 2 (branches, GOT loads, pointers in
-   data to rebase, a weak import nothing defines, zerofill, constants), as LLVM's modules do */
+   data to rebase, a weak import nothing defines, zerofill, constants, a 128-bit load and a signed byte one), as LLVM's
+   modules do */
 #if PART == 1
 extern int counter;
 int helper(int x);
@@ -10,6 +11,13 @@ const char* names[] = {"zero", "one", "two"};
 int (*fns[])(int) = {helper, helper};
 double scale[] = {1.5, 2.25};
 unsigned long long zeroes[4096];
+typedef int Vector __attribute__((vector_size(16)));
+Vector vectors[2] = {{1, 2, 3, 4}, {5, 6, 7, 8}};
+signed char bytes[64] = {-1};
+Vector second_vector(void);
+Vector second_vector(void) { return vectors[1]; }
+int odd_byte(void);
+int odd_byte(void) { return bytes[33]; }
 unsigned long long test_entry(void);
 unsigned long long test_entry(void) {
     zeroes[4095] = 3;

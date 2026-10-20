@@ -2,8 +2,9 @@
    Copyright 2026 the ScarletNX contributors */
 /* snx_link_macho, where no dyld can load what it writes: the dylib checked as macOS would. Segments on 16 KiB pages,
    in order, __LINKEDIT last; the rebases inside __DATA, onto addresses in the image; the export trie finding the
-   entry in __text; the ad hoc signature last, with each 4 KiB page's SHA-256 as OpenSSL computes it. A dump of the
-   output is written to argv[3] for llvm-objdump --macho. Usage: link_macho part1.o part2.o out.dylib */
+   entry in __text; the code's ADRP and its low 12 bits onto the symbols they name; the ad hoc signature last, with
+   each 4 KiB page's SHA-256 as OpenSSL computes it. A dump of the output is written to argv[3] for llvm-objdump
+   --macho. Usage: link_macho part1.o part2.o out.dylib */
 #include "common/cpu/recompiler/llvm/link.h"
 #include <assert.h>
 #include <openssl/evp.h>
@@ -81,17 +82,85 @@ static uint64_t trie_find(const unsigned char* trie, size_t size, const char* na
     }
 }
 
+/* name's address in a symbol table, or 0 */
+static uint64_t symbol_named(const unsigned char* symbols, uint32_t count, const char* strings, const char* name) {
+    uint32_t i;
+    for (i = 0; i < count; ++i)
+        if (!strcmp(strings + rd32(symbols + 16 * (size_t)i), name)) return rd64(symbols + 16 * (size_t)i + 8);
+    return 0;
+}
+
+/* Each ARM64_RELOC_PAGE21 and PAGEOFF12 of object o's first section, its __text at address 0, read back from the dylib
+   d, where that code starts at text_address: ADRP's page, and the low 12 bits an ADD adds or a load or store scales by
+   its access's size (16 bytes for a 128-bit one), against the symbol's address there plus the ADDEND before it.
+   Symbols the dylib does not name (temporary labels) are left out. Counts the 128-bit and the signed byte accesses */
+static unsigned check_pages(const unsigned char* o, const unsigned char* d, uint64_t text_address,
+                            const unsigned char* symbols, uint32_t count, const char* strings, unsigned* wide,
+                            unsigned* signed_bytes) {
+    const unsigned char *c = o + 32, *section = NULL, *object_symbols = NULL;
+    const char* object_strings = NULL;
+    uint32_t i, k;
+    int64_t addend = 0;
+    unsigned checked = 0;
+    for (i = 0; i < rd32(o + 16); ++i, c += rd32(c + 4)) {
+        if (rd32(c) == 0x19 && rd32(c + 64)) section = c + 72; /* LC_SEGMENT_64's first section */
+        if (rd32(c) == 0x2) {                                  /* LC_SYMTAB */
+            object_symbols = o + rd32(c + 8);
+            object_strings = (const char*)o + rd32(c + 16);
+        }
+    }
+    assert(section && object_symbols && !strcmp((const char*)section, "__text") && !rd64(section + 32));
+    for (k = 0; k < rd32(section + 60); ++k) {
+        const unsigned char* r = o + rd32(section + 56) + 8 * (size_t)k;
+        uint32_t at = rd32(r), info = rd32(r + 4), type = info >> 28, insn = rd32(d + text_address + at);
+        int64_t a = addend;
+        uint64_t target;
+        addend = 0;
+        if (type == 10) { /* ARM64_RELOC_ADDEND, for the next one */
+            addend = (int64_t)((info & 0xFFFFFF) ^ 0x800000) - 0x800000;
+            continue;
+        }
+        if ((type != 3 && type != 4) || !(info >> 27 & 1)) continue; /* PAGE21 and PAGEOFF12, to a symbol */
+        target = symbol_named(symbols, count, strings, object_strings + rd32(object_symbols + 16 * (info & 0xFFFFFF)));
+        if (!target) continue;
+        target += (uint64_t)a;
+        if (type == 3) { /* ADRP: immlo at 29, immhi at 5, in pages */
+            uint64_t pages = (insn >> 29 & 3) | (uint64_t)(insn >> 5 & 0x7FFFF) << 2;
+            pages = (pages ^ 0x100000) - 0x100000;
+            assert(((text_address + at) & ~(uint64_t)0xFFF) + (pages << 12) == (target & ~(uint64_t)0xFFF));
+        } else {
+            uint64_t offset = insn >> 10 & 0xFFF;
+            if ((insn & 0x3B000000u) == 0x39000000u) { /* a load or store with an unsigned offset */
+                unsigned scale = insn >> 30, vector = insn >> 26 & 1, opc1 = insn >> 23 & 1;
+                if (!scale && opc1 && vector) {
+                    scale = 4;
+                    ++*wide;
+                }
+                if (!scale && opc1 && !vector) ++*signed_bytes;
+                offset <<= scale;
+            } else {
+                assert((insn & 0x7FC00000u) == 0x11000000u); /* ADD (immediate), unshifted */
+            }
+            assert(offset == (target & 0xFFF));
+        }
+        ++checked;
+    }
+    return checked;
+}
+
 int main(int argc, char** argv) {
     SnxLinkInput inputs[2];
     SnxLinkOutput out;
     Segment segments[4], *text = NULL, *data = NULL, *linkedit = NULL;
     const char* exports[] = {"test_entry"};
     char error[512];
-    const unsigned char *d, *c, *trie = NULL, *rebase = NULL, *p, *end;
+    const unsigned char *d, *c, *trie = NULL, *rebase = NULL, *p, *end, *symbols = NULL;
+    const char* strings = NULL;
     uint64_t text_address = 0, text_size = 0, entry, address = 0, symbol_value = 0;
     uint32_t ncmds, i, nsegments = 0, trie_size = 0, rebase_size = 0, signature_offset = 0, signature_size = 0,
                     nslots, k;
-    unsigned rebases = 0;
+    uint32_t nsymbols = 0;
+    unsigned rebases = 0, pages, wide = 0, signed_bytes = 0;
     FILE* f;
     assert(argc == 4);
     inputs[0].data = slurp(argv[1], &inputs[0].size);
@@ -147,6 +216,9 @@ int main(int argc, char** argv) {
             const unsigned char* last = d + rd32(c + 8) + 16 * (size_t)(rd32(c + 12) - 1);
             assert(!strcmp((const char*)d + rd32(c + 16) + rd32(last), "_test_entry") && last[4] == 0xF);
             symbol_value = rd64(last + 8);
+            symbols = d + rd32(c + 8);
+            nsymbols = rd32(c + 12);
+            strings = (const char*)d + rd32(c + 16);
         } else if (cmd == 0x1D) { /* LC_CODE_SIGNATURE */
             signature_offset = rd32(c + 8);
             signature_size = rd32(c + 12);
@@ -188,6 +260,10 @@ int main(int argc, char** argv) {
     entry = trie_find(trie, trie_size, "_test_entry");
     assert(entry && entry == symbol_value && entry >= text_address && entry < text_address + text_size);
     assert(!trie_find(trie, trie_size, "_helper") && !trie_find(trie, trie_size, "test_entry"));
+    /* the code addresses what its relocations name, a 128-bit load and a signed byte one among them */
+    assert(symbols);
+    pages = check_pages(inputs[0].data, d, text_address, symbols, nsymbols, strings, &wide, &signed_bytes);
+    assert(pages >= 10 && wide && signed_bytes);
     /* the signature: the last thing in the file, hashing every page before it */
     assert(signature_offset && signature_offset + signature_size == out.size && !(signature_offset % 16));
     p = d + signature_offset;
@@ -205,8 +281,8 @@ int main(int argc, char** argv) {
         assert(EVP_Digest(d + at, n, digest, &length, EVP_sha256(), NULL) && length == 32);
         assert(!memcmp(c + be32(c + 16) + 32 * (size_t)k, digest, 32));
     }
-    printf("link_macho: %lu bytes, %u rebases, entry at 0x%llx, %u pages signed\n", (unsigned long)out.size, rebases,
-           (unsigned long long)entry, nslots);
+    printf("link_macho: %lu bytes, %u rebases, %u page relocations, entry at 0x%llx, %u pages signed\n",
+           (unsigned long)out.size, rebases, pages, (unsigned long long)entry, nslots);
     free(out.data);
     free((void*)inputs[0].data);
     free((void*)inputs[1].data);

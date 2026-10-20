@@ -410,7 +410,7 @@ static int pageoff12(unsigned char* p, uint64_t address) {
     unsigned scale = 0;
     if ((insn & 0x3B000000u) == 0x39000000u) {
         scale = insn >> 30;
-        if (!scale && (insn & 0x04800000u) == 0x00800000u) scale = 4;
+        if (!scale && (insn & 0x04800000u) == 0x04800000u) scale = 4;
     }
     if ((address & 0xFFF) & ((1u << scale) - 1)) return -1;
     field(p, (address & 0xFFF) >> scale, 10, 12);
