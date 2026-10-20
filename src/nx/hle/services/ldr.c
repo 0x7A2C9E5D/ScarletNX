@@ -126,7 +126,9 @@ static int ro_load_nro(RoState* s, u64 source, u64 size, u64 bss, u64 bss_size, 
         if (mem_unmap_code(&m)) {
             /* Keep an exceptional failed rollback tracked so session destruction can retry it. */
             slot->map = m;
-            WARN("ldr:ro: failed to roll back NRO mapping\n");
+            WARN("ldr:ro: the NRO at %#llx (%#llx bytes) is no longer mapped as its code: the session's close tries "
+                 "again\n",
+                 (unsigned long long)m.base, (unsigned long long)m.size);
         }
         return r;
     }
@@ -200,7 +202,8 @@ static void ro_destroy(SvcObj* o) {
         free(s->nrr[i].hashes);
         if (s->nro[i].map.base) jit_code_removed(s->nro[i].map.base);
         if (s->nro[i].map.base && mem_unmap_code(&s->nro[i].map))
-            WARN("ldr:ro: could not release NRO on session close\n");
+            WARN("ldr:ro: the NRO at %#llx (%#llx bytes) is no longer mapped as its code: it stays\n",
+                 (unsigned long long)s->nro[i].map.base, (unsigned long long)s->nro[i].map.size);
     }
     if (g_hle.ldr.owner == s->obj) g_hle.ldr.owner = 0;
     pm_unlock(&g_hle.ldr.lock);
