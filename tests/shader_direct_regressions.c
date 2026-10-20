@@ -33,8 +33,9 @@ static const char* beyond_paths[3];
 static const char* attribute_paths[6];
 static const char* pexit_path;
 static const char* global_dynamic_path;
+static const char* xfb_path;
 static const char* passthrough_paths[6];
-static char* fixture_paths[67];
+static char* fixture_paths[68];
 static size_t fixture_count;
 
 static const char* fixture_path(const char* directory, const char* name) {
@@ -1893,6 +1894,37 @@ static void beyond_eden(void) {
 }
 
 /* AL2P keeps byte offsets, including bit 10, and adds the register before an attribute access. */
+/* Transform feedback (ShaderInfo.xfb): a vertex program's AST.128 of R0-R3 to generic 0, of which buffer 0 captures y
+   and z (from mid-vector, 8 bytes a vertex) and buffer 1 x. Each captured component gets an offset of its own: the
+   module declares TransformFeedback and Xfb, and three captures (Pokemon Legends Z-A skins with them, issue #440) */
+static void transform_feedback(void) {
+    const u64 instructions[] = {mov32i(0, 0x3f800000), mov32i(1, 0x40000000), mov32i(2, 0x40400000),
+                                mov32i(3, 0x40800000), 0xeff000000007ff00ull | (0x80ull << 20) | (3ull << 47)};
+    ShaderInfo info;
+    size_t slots, words = 0;
+    u64* code = guest_program(instructions, 5, NULL, &slots);
+    if (!code) return;
+    memset(&info, 0, sizeof info);
+    info.xfb.layout[0][0] = 33;
+    info.xfb.layout[0][1] = 34;
+    info.xfb.count[0] = 2;
+    info.xfb.stride[0] = 8;
+    info.xfb.layout[1][0] = 32;
+    info.xfb.count[1] = 1;
+    info.xfb.stride[1] = 4;
+    u32* spv = shader_to_spirv((const u8*)code, slots * sizeof *code, ST_VS, &info, &words, 0, 1, 1, 1);
+    free(code);
+    check_translated(spv, &info, "a transform feedback capture translates");
+    if (spv) {
+        check(count_opcode(spv, words, 17, 53) == 1, "transform feedback declares its capability once");
+        check(count_opcode(spv, words, 16, 11) == 1, "the entry point captures (Xfb)");
+        check(count_opcode(spv, words, 71, 36) == 3 && count_opcode(spv, words, 71, 35) == 3,
+              "each captured component has a buffer and an offset");
+        save_fixture(xfb_path, spv, words);
+    }
+    free(spv);
+}
+
 static void attribute_pointer(void) {
     const u64 base = 0xefa070010607ff01ull; /* a game's: AL2P R1, RZ + 0x60, PT */
     const u64 instructions[] = {mov32i(4, 0x1234),
@@ -2256,6 +2288,7 @@ int main(int argc, char** argv) {
         }
         pexit_path = fixture_path(argv[1], "pexit");
         global_dynamic_path = fixture_path(argv[1], "global_dynamic");
+        xfb_path = fixture_path(argv[1], "xfb");
         for (int i = 0; i < 6; i++) {
             char name[32];
             snprintf(name, sizeof name, "passthrough_%d", i);
@@ -2266,7 +2299,7 @@ int main(int argc, char** argv) {
             snprintf(name, sizeof name, "audit_%d", i);
             audit_paths[i] = fixture_path(argv[1], name);
         }
-        if (fixture_count != 67) {
+        if (fixture_count != 68) {
             fprintf(stderr, "failed to allocate fixture paths\n");
             return 2;
         }
@@ -2287,6 +2320,7 @@ int main(int argc, char** argv) {
     tlds_fp16();
     txd_grad();
     fragment_storage_images();
+    transform_feedback();
     nro_shader_modes();
     issue126_shader_modes();
     between_stages();

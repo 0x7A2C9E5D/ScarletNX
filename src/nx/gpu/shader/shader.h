@@ -30,6 +30,14 @@ static inline int shader_same_indexed_table(const ShTex* a, const ShTex* b) {
     return a->bl_cbuf == b->bl_cbuf && a->cbuf_off == b->cbuf_off && a->flags == b->flags && a->type == b->type &&
            a->array == b->array && a->shadow == b->shadow;
 }
+/* Transform feedback (key of the last program before rasterization): for each of the 4 buffers, the attribute word
+   each 4-byte word of a vertex there holds (its ISA attribute address / 4: the position's x is 28, generic i's
+   component k 32 + 4 * i + k), of count words, the vertices stride bytes apart. All counts 0: nothing is captured */
+typedef struct {
+    u8 layout[4][128];
+    u8 count[4];
+    u16 stride[4];
+} ShXfb;
 /* A program's key state (set by the renderer before translating) and what translation found. The corpus stores it
    whole, so a corpus file only loads into a build where this struct has the same size. */
 typedef struct {
@@ -76,6 +84,7 @@ typedef struct {
        them (GPL-2.0-or-later, shader_recompiler emit_spirv_context_get_set.cpp): Vulkan leaves an unfed input
        undefined */
     u32 in_unfed_mask;
+    ShXfb xfb; /* key: transform feedback's capture of this program's outputs */
 } ShaderInfo;
 #define SH_DC_COLOR_MAX  10 /* slots tex_dc_color_funcs has room for */
 /* Each stage has a descriptor set (shader_vk_set), its bindings grouped by kind. */

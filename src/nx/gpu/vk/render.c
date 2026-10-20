@@ -171,6 +171,41 @@ static void target_written(Surf* s) {
     vk_rt_drawn(s);
 }
 
+/* A pass with no attachments, for a draw that only captures its vertices (transform feedback with no target): its
+   area is as large as a framebuffer may be, so the draw's viewport and scissor fit in it */
+static int render_begin_empty(void) {
+    if (g_rp.open && !g_rp.n && !g_rp.zt) return 1;
+    vk_render_end();
+    VkExtent2D ext = {g_vk.props.limits.maxFramebufferWidth, g_vk.props.limits.maxFramebufferHeight};
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, ext}, .layerCount = 1};
+    rec_CmdBeginRendering(vk_cmd(), &ri);
+    memset(g_rp.rt, 0, sizeof g_rp.rt);
+    g_rp.zt = NULL;
+    g_rp.n = 0;
+    g_rp.ext = ext;
+    g_rp.zt_ro = 0;
+    g_rp.srgb_write = 0;
+    g_rp.fb = g_rp.fb_written = g_rp.fb_read = 0;
+    g_rp.open = 1;
+    return 1;
+}
+
+/* Transform feedback's byte counters, a word for each of the 4 buffers: where a capture's end left each buffer, which
+   the next draw's capture resumes from (3D 0x1D1; made at the first capture) */
+static struct {
+    VkBuffer buf;
+    VmaAllocation mem;
+} g_xfb;
+static int xfb_counters(void) {
+    if (g_xfb.buf) return 1;
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                              .size = 16,
+                              .usage = VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_COUNTER_BUFFER_BIT_EXT,
+                              .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
+    VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+    return VK_OK(vmaCreateBuffer(g_vk.vma, &bci, &aci, &g_xfb.buf, &g_xfb.mem, NULL));
+}
+
 /* Feedback loops. A Maxwell draw may sample a color target it renders to: a game may blend in its shaders,
    reading the pixel under the fragment and writing it back, in hundreds of draws a frame. With
    VK_EXT_attachment_feedback_loop_layout the target stays the pass's attachment, in ATTACHMENT_FEEDBACK_LOOP_OPTIMAL,
@@ -749,7 +784,7 @@ static VkSh* fs_get_keyed(GpuChannel* ch, u64 addr, TexRes* res, u32 last_out) {
             if (f.sint) rs |= 1u << i;
         }
     }
-    VkSh* s0 = vk_shader_get(ch, addr, 0, ST_FS, 0, 0, 0, 0, 0, 0, 0, 0);
+    VkSh* s0 = vk_shader_get(ch, addr, 0, ST_FS, 0, 0, 0, 0, 0, 0, 0, 0, NULL);
     u32 unfed;
     if (!s0) return s0;
     unfed = s0->si.in_mask & ~last_out;
@@ -788,7 +823,7 @@ static VkSh* fs_get_keyed(GpuChannel* ch, u64 addr, TexRes* res, u32 last_out) {
         if (vk_image_key(&s0->si, i, tic)) rm |= 1u << (8 + i);
     }
     if (!tm && !rm && !dm && !unfed) return s0;
-    return vk_shader_get(ch, addr, 0, ST_FS, tm, ts, rm, rs, 0, dm, df, unfed);
+    return vk_shader_get(ch, addr, 0, ST_FS, tm, ts, rm, rs, 0, dm, df, unfed, NULL);
 }
 
 VkImageViewType vk_tex_view_type(const ShTex* st) {
@@ -1601,14 +1636,29 @@ retry:
     /* SetUserClipEnable (0x544): a clip distance the program writes clips only when its bit is set, in the last
        stage before rasterization */
     clip = r[0x544] & 0xFF;
-    VkSh* vs = vk_shader_get(ch, code + r[0x811], (r[0x800] & 1) ? code + r[0x801] : 0, ST_VS, attr_int, attr_sint, 0,
-                             0, tes_on || gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0);
-    tcs = tcs_on ? vk_shader_get(ch, code + r[0x821], 0, ST_TCS, 0, 0, 0, 0, SNX_SH_NOT_LAST, 0, 0, 0) : NULL;
+    /* transform feedback (0x1D1): what the last stage before rasterization captures, from each buffer's control
+       (0x1C0 + 4 * i: its stream, the words of a vertex, their stride in bytes) and the layout of those words
+       (0xA00 + 0x20 * i, a byte each: an attribute word, as Eden's MakeTransformFeedbackVaryings reads them) */
+    ShXfb xfb;
+    int xfb_on = g_vk.has_xfb && r[0x1D1] && xfb_counters();
+    if (xfb_on) {
+        memset(&xfb, 0, sizeof xfb);
+        for (int i = 0; i < 4; i++) {
+            u32 words = r[0x1C1 + 4 * i];
+            xfb.count[i] = (u8)(words > 128 ? 128 : words);
+            xfb.stride[i] = (u16)r[0x1C2 + 4 * i];
+            memcpy(xfb.layout[i], &r[0xA00 + 0x20 * i], sizeof xfb.layout[i]); /* word n / 4's byte n % 4 */
+        }
+    }
+    VkSh* vs =
+        vk_shader_get(ch, code + r[0x811], (r[0x800] & 1) ? code + r[0x801] : 0, ST_VS, attr_int, attr_sint, 0, 0,
+                      tes_on || gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0, xfb_on && !tes_on && !gs_on ? &xfb : NULL);
+    tcs = tcs_on ? vk_shader_get(ch, code + r[0x821], 0, ST_TCS, 0, 0, 0, 0, SNX_SH_NOT_LAST, 0, 0, 0, NULL) : NULL;
     tes = tes_on ? vk_shader_get(ch, code + r[0x831], 0, ST_TES, 0, 0, r[0xC8] & 0x333, 0,
-                                 gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0)
+                                 gs_on ? SNX_SH_NOT_LAST : clip, 0, 0, 0, xfb_on && !gs_on ? &xfb : NULL)
                  : NULL;
     gs = gs_on ? vk_shader_get(ch, code + r[0x841], 0, ST_GS, 0, 0, gs_input_vertices(topology, tes_on, r[0xC8]), 0,
-                               clip, 0, 0, 0)
+                               clip, 0, 0, 0, xfb_on ? &xfb : NULL)
                : NULL;
     if ((tcs_on && (!tcs || tcs->failed)) || (tes_on && (!tes || tes->failed)) || (gs_on && (!gs || gs->failed))) {
         g_vk_skipped++;
@@ -1650,7 +1700,7 @@ retry:
                     break;
                 }
         }
-    if (!n && !zt) {
+    if (!n && !zt && !xfb_on) { /* nothing drawn to and nothing captured */
         g_vk_skipped++;
         return;
     }
@@ -1999,6 +2049,25 @@ retry:
         }
     }
 
+    /* the transform feedback buffers (0xE0 + 8 * i: enable, address, size, start offset), from the start offset on as
+       Eden's UpdateTransformFeedbackBuffer binds them: a writable copy of guest memory each, which lands there and
+       which later draws read on the GPU until then (vk_buf_copy_writable) */
+    VkBuffer xbuf[4];
+    VkDeviceSize xoff[4], xsize[4];
+    u32 xbound = 0;
+    for (int i = 0; i < 4 && xfb_on; i++) {
+        const u32* t = &r[0xE0 + 8 * i];
+        i32 size = (i32)t[3];
+        u64 a = (((u64)(t[1] & 0xFF) << 32) | t[2]) + t[4];
+        if (!t[0] || size <= 0 || (!r[0x1C1 + 4 * i] && !r[0x1C2 + 4 * i])) continue;
+        if (!vk_buf_copy_writable(a, (u32)size, &xbuf[i], &xoff[i])) {
+            draw_images_discard(&images);
+            g_vk_skipped++;
+            return;
+        }
+        xsize[i] = (u32)size;
+        xbound |= 1u << i;
+    }
     k.feedback = fb && !g_vk.has_feedback_dynamic;
     /* the last draw's pipeline when its key is the same (draws in a row mostly are): one comparison of the key, where
        the table hashed all of it each draw. Pipelines and modules live as long as the run, so the handle stays good */
@@ -2029,7 +2098,22 @@ retry:
     if (fs)
         for (u32 i = 0; i < n; i++)
             if (rt[i] && (k.blend[i].mask & ((fs->si.sph[18] >> (i * 4)) & 15))) writes |= 1u << i;
-    if (!render_begin(rt, zt, n, zt_ro, r[0x56E] & 1, fb) || !feedback_order(fb, writes)) {
+    /* a buffer that captured since its write pointer was loaded resumes from its counter, which the last capture's end
+       wrote: the end is ordered before the begin outside a pass */
+    u32 resume = xbound & ch->xfb_started & ~ch->xfb_reload;
+    if (resume) {
+        vk_render_end();
+        VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+                               .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFORM_FEEDBACK_BIT_EXT,
+                               .srcAccessMask = VK_ACCESS_2_TRANSFORM_FEEDBACK_COUNTER_WRITE_BIT_EXT,
+                               .dstStageMask = VK_PIPELINE_STAGE_2_TRANSFORM_FEEDBACK_BIT_EXT,
+                               .dstAccessMask = VK_ACCESS_2_TRANSFORM_FEEDBACK_COUNTER_READ_BIT_EXT};
+        VkDependencyInfo di = {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &mb};
+        rec_CmdPipelineBarrier2(vk_cmd(), &di);
+    }
+    if (!n && !zt ? !render_begin_empty()
+                  : !render_begin(rt, zt, n, zt_ro, r[0x56E] & 1, fb) || !feedback_order(fb, writes)) {
         draw_images_discard(&images);
         return;
     }
@@ -2101,7 +2185,10 @@ retry:
         DYN(front, front, rec_CmdSetFrontFace(cb, front));
         DYN(topo, topo, rec_CmdSetPrimitiveTopology(cb, topo));
         DYN(restart, prim_restart, rec_CmdSetPrimitiveRestartEnable(cb, prim_restart));
-        DYN(discard, 1, rec_CmdSetRasterizerDiscardEnable(cb, VK_FALSE));
+        /* RASTERIZE_ENABLE (0xDF) off discards the primitives once captured: only a capture draws without them here,
+           as the register's reset value isn't known to be on (1 off, 2 on: 0 is a new command buffer's) */
+        u32 discard = xfb_on && !r[0xDF] ? 2 : 1;
+        DYN(discard, discard, rec_CmdSetRasterizerDiscardEnable(cb, discard == 2));
     }
     {
         float lw; /* smooth lines (0x55C) have a width of their own */
@@ -2189,6 +2276,25 @@ retry:
     rec_CmdPushConstants(cb, g_vk_playout, VK_PUSH_STAGES, 0, 32, pc);
 
     vk_query_draw(cb, ch->id, r[0x574]); /* counted by the channel's samples-passed counter when it runs */
+    VkBuffer counters[4] = {g_xfb.buf, g_xfb.buf, g_xfb.buf, g_xfb.buf};
+    VkDeviceSize counter_offs[4] = {0, 4, 8, 12};
+    /* the buffers from 0 to the last one bound, as begin and end take the counters of: one between that isn't bound
+       gets another's memory for 4 bytes, which nothing captures into (its layout has no words) */
+    u32 xcount = xbound & 8 ? 4 : xbound & 4 ? 3 : xbound & 2 ? 2 : xbound & 1 ? 1 : 0;
+    if (xcount) {
+        VkBuffer from[4];
+        int first = xbound & 1 ? 0 : xbound & 2 ? 1 : xbound & 4 ? 2 : 3;
+        for (u32 i = 0; i < xcount; i++) {
+            if (!(xbound >> i & 1)) {
+                xbuf[i] = xbuf[first];
+                xoff[i] = xoff[first];
+                xsize[i] = 4;
+            }
+            from[i] = resume >> i & 1 ? g_xfb.buf : VK_NULL_HANDLE; /* none: from the bound offset */
+        }
+        rec_CmdBindTransformFeedbackBuffersEXT(cb, 0, xcount, xbuf, xoff, xsize);
+        rec_CmdBeginTransformFeedbackEXT(cb, 0, xcount, from, counter_offs);
+    }
     if (indexed) {
         rec_CmdBindIndexBuffer(cb, ibuf, ioff, itype);
         /* quads made from guest indices keep the base vertex, quads made from vertex numbers have it in them */
@@ -2196,6 +2302,12 @@ retry:
                          base_instance);
     } else
         rec_CmdDraw(cb, count, instances, first, base_instance);
+    if (xcount) {
+        rec_CmdEndTransformFeedbackEXT(cb, 0, xcount, counters, counter_offs);
+        ch->xfb_started = (u8)((ch->xfb_started | xbound) & 15);
+        ch->xfb_reload = (u8)(ch->xfb_reload & ~xbound);
+        vk_render_end(); /* the next capture's begin waits for this end outside a pass, and readers for its writes */
+    }
     vk_buf_writable_commit();
     draw_images_commit(&images);
     feedback_done(fb, writes);

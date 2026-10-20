@@ -596,6 +596,17 @@ static void vertex_depth_fix(DirectCtx* c, u32 position, u32 push, u32 push_poin
     spv_emit_label(&c->emit, merge);
 }
 
+/* Transform feedback: each captured output's private vec4 (ShaderInfo.xfb) copied into its component outputs, the
+   variables that carry the capture's offsets, before the program ends or emits a vertex */
+static void xfb_store(DirectCtx* c, u32 vec4, const u32* output_attrs, const u8* attr_private, u32 (*components)[4]) {
+    for (u32 i = 0; i < 32; i++) {
+        if (!attr_private[i]) continue;
+        u32 value = spv_emit_load(&c->emit, vec4, output_attrs[i]);
+        for (u32 k = 0; k < 4; k++)
+            spv_emit_store(&c->emit, components[i][k], spv_emit_vec4_extract(&c->emit, c->f32_type, value, k));
+    }
+}
+
 /* Hardware passthrough emits once at program exit. Save generated outputs before EmitVertex,
    which makes every output undefined, and merge forwarded components afresh for each vertex. */
 static void geometry_passthrough(DirectCtx* c, const ShaderInfo* si, u32 vertices, u32 vec4, u32 position,
@@ -3188,8 +3199,15 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     /* Maximum VS interface: point size, position, 32 outputs, 32 inputs, 18 buffers, 32 samplers, push constants. */
     u32 outputs[8], inputs[32] = {0}, input_vec_type[32] = {0}, input_component_type[32] = {0};
     u32 output_attrs[32] = {0}, position = 0, point_size = 0, layer_output = 0, layer_input = 0;
+    /* transform feedback: each output word's buffer (0xFF none) and offset, the outputs written to a private vec4,
+       and their component outputs (xfb_store) */
+    u8 xfb_buf[160], attr_private[32] = {0};
+    u16 xfb_off[160] = {0};
+    u32 xfb_components[32][4] = {{0}};
+    int xfb_on = 0;
+    memset(xfb_buf, 0xFF, sizeof xfb_buf);
     u32 clip_output = 0, clip_count = 0;
-    u32 depth_output = 0, interfaces[256], count = 0;
+    u32 depth_output = 0, interfaces[384], count = 0;
     /* the stages between: the levels and vectors of a patch, and the inputs of each vertex */
     u32 tess_outer = 0, tess_inner = 0, patch_vars[30] = {0}, position_in = 0, primitive_id = 0, primitive_id_out = 0,
         tess_coord = 0;
@@ -3245,13 +3263,49 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             clip_output = spv_emit_clip_distance_output(&c->emit, c->f32_type, c->u32_type, clip_count);
             interfaces[count++] = clip_output;
         }
+        /* transform feedback, in the last stage before rasterization: the buffer and offset of each output word the
+           key captures (a word captured twice goes to its first place) */
+        if (!per_vertex && !(si->clip_enable & SNX_SH_NOT_LAST))
+            for (u32 b = 0; b < 4; b++)
+                for (u32 w = 0; w < si->xfb.count[b] && w < 128; w++) {
+                    u32 word = si->xfb.layout[b][w];
+                    if (word >= 160 || xfb_buf[word] != 0xFF) continue;
+                    xfb_buf[word] = (u8)b;
+                    xfb_off[word] = (u16)(w * 4);
+                    xfb_on = 1;
+                }
         if (position_used) {
             position = per_vertex ? spv_emit_interface_variable(&c->emit, 3, vec4, c->u32_type, per_vertex, 0, 0, 0)
                                   : spv_emit_position_output(&c->emit, vec4);
             interfaces[count++] = position;
+            /* the position is a built-in: captured only whole, its four words in order in one buffer */
+            if (xfb_buf[28] != 0xFF && xfb_buf[29] == xfb_buf[28] && xfb_buf[30] == xfb_buf[28] &&
+                xfb_buf[31] == xfb_buf[28] && xfb_off[29] == xfb_off[28] + 4 && xfb_off[30] == xfb_off[28] + 8 &&
+                xfb_off[31] == xfb_off[28] + 12)
+                spv_emit_xfb_capture(&c->emit, position, xfb_buf[28], si->xfb.stride[xfb_buf[28]], xfb_off[28]);
         }
         for (u32 i = 0; i < 32; i++)
             if (outputs_used[i]) {
+                u32 k;
+                int captured = 0;
+                for (k = 0; k < 4; k++) captured |= xfb_buf[32 + 4 * i + k] != 0xFF;
+                if (captured) {
+                    /* a captured output is written to a private vec4 and copied out a component a variable
+                       (xfb_store), so that each captured component has an offset of its own: the next stage's vec4
+                       input takes the four at its location */
+                    output_attrs[i] = spv_emit_private_variable(&c->emit, vec4);
+                    interfaces[count++] = output_attrs[i];
+                    attr_private[i] = 1;
+                    for (k = 0; k < 4; k++) {
+                        u32 word = 32 + 4 * i + k;
+                        xfb_components[i][k] = spv_emit_output_component(&c->emit, c->f32_type, i, k);
+                        interfaces[count++] = xfb_components[i][k];
+                        if (xfb_buf[word] != 0xFF)
+                            spv_emit_xfb_capture(&c->emit, xfb_components[i][k], xfb_buf[word],
+                                                 si->xfb.stride[xfb_buf[word]], xfb_off[word]);
+                    }
+                    continue;
+                }
                 output_attrs[i] = per_vertex ? spv_emit_interface_variable(&c->emit, 3, vec4, c->u32_type, per_vertex,
                                                                            SPV_NOT_BUILTIN, i, 0)
                                              : spv_emit_output_vec4(&c->emit, vec4, i);
@@ -3481,6 +3535,10 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
         interfaces[count++] = push;
     }
     spv_emit_entry_str(&c->emit, (SpvShaderStage)stage, fn, "main", interfaces, count); /* ST_ is SPIR-V's model */
+    if (xfb_on) {
+        spv_emit_capability(&c->emit, 53);               /* TransformFeedback */
+        spv_emit_execution_mode(&c->emit, fn, 11, 0, 0); /* Xfb */
+    }
     if (stage == ST_TCS) spv_emit_execution_mode(&c->emit, fn, 26, 1, out_vertices);    /* OutputVertices */
     if (stage == ST_TES) {
         /* 0xC8: the domain (isolines, triangles, quads), the spacing (equal, fractional odd and even) and the output
@@ -3848,8 +3906,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                     value = spv_emit_load(&c->emit, c->u32_type, primitive_id);
                 else if (output)
                     pointer = spv_emit_interface_scalar_pointer(
-                        &c->emit, 3, c->f32_type, location < 0x80 ? position : output_attrs[(location - 0x80) >> 4],
-                        vertex, component);
+                        &c->emit, location >= 0x80 && attr_private[(location - 0x80) >> 4] ? 6 : 3, c->f32_type,
+                        location < 0x80 ? position : output_attrs[(location - 0x80) >> 4], vertex, component);
                 else
                     pointer = spv_emit_interface_scalar_pointer(
                         &c->emit, 1, c->f32_type, location < 0x80 ? position_in : inputs[(location - 0x80) >> 4],
@@ -3892,8 +3950,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 u32 component = spv_emit_constant_u32(&c->emit, c->u32_type, (location >> 2) & 3);
                 if (!B(w, 31, 1))
                     pointer = spv_emit_interface_scalar_pointer(
-                        &c->emit, 3, c->f32_type, location < 0x80 ? position : output_attrs[(location - 0x80) >> 4],
-                        vertex, component);
+                        &c->emit, location >= 0x80 && attr_private[(location - 0x80) >> 4] ? 6 : 3, c->f32_type,
+                        location < 0x80 ? position : output_attrs[(location - 0x80) >> 4], vertex, component);
                 else if (location >= 0x20)
                     pointer = spv_emit_interface_scalar_pointer(&c->emit, 3, c->f32_type,
                                                                 patch_vars[(location - 0x20) >> 4], 0, component);
@@ -3956,6 +4014,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 if (B(w, 39, 1)) {
                     if (depth_fix) vertex_depth_fix(c, position, push, push_pointer, vec4);
                     spv_emit_store(&c->emit, primitive_id_out, spv_emit_load(&c->emit, c->u32_type, primitive_id));
+                    if (xfb_on) xfb_store(c, vec4, output_attrs, attr_private, xfb_components);
                     spv_emit_emit_vertex(&c->emit);
                     /* outputs are undefined after it: the next vertex gets the default point size, unless the
                        program writes its own */
@@ -6506,6 +6565,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
                 geometry_passthrough(c, si, in_vertices, vec4, position, position_in, output_attrs, inputs, point_size,
                                      layer_output, i32_type, clip_output, clip_count, primitive_id, primitive_id_out,
                                      depth_fix, push, push_pointer);
+            if (xfb_on && stage != ST_GS) xfb_store(c, vec4, output_attrs, attr_private, xfb_components);
             if (depth_fix && stage != ST_GS) { /* a geometry program's vertices are fixed as it emits them */
                 vertex_depth_fix(c, position, push, push_pointer, vec4);
             } else if (stage == ST_FS) {
@@ -6573,6 +6633,7 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             geometry_passthrough(c, si, in_vertices, vec4, position, position_in, output_attrs, inputs, point_size,
                                  layer_output, i32_type, clip_output, clip_count, primitive_id, primitive_id_out,
                                  depth_fix, push, push_pointer);
+        if (xfb_on && stage != ST_GS) xfb_store(c, vec4, output_attrs, attr_private, xfb_components);
         if (depth_fix && stage != ST_GS) vertex_depth_fix(c, position, push, push_pointer, vec4);
         spv_emit_return(&c->emit);
     }

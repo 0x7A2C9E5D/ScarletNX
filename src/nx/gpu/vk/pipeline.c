@@ -345,7 +345,7 @@ static u64 g_pipes_new, g_pipe_wait_ns, g_sh_new, g_sh_ns;
 static u64 g_pipe_make_ns; /* the workers' time making pipelines, added atomically */
 static u64 g_pipe_hits;    /* pipelines the pipeline cache had */
 VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int_mask, u64 sint_mask, u32 rt_int,
-                    u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed) {
+                    u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed, const ShXfb* xfb) {
     pf_merge();
     g_sh_ch = ch;
     g_sh_bind = stage <= ST_FS ? stage : 0;
@@ -361,6 +361,12 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
                     dc_funcs,
                     unfed};
     if (stage == ST_GS && ch) memcpy(mask + 12, ch->r3d + 0x490, 8 * sizeof(u32));
+    /* a capture's layout, in the words only the fragment stage's key uses otherwise */
+    if (stage != ST_FS && xfb) {
+        u64 xh = vk_hash(xfb, sizeof *xfb);
+        mask[7] = (u32)xh | 1;
+        mask[8] = (u32)(xh >> 32);
+    }
     u32 mix = (u32)vk_hash(mask, 12 * sizeof(u32));
     if (stage == ST_GS) mix ^= (u32)vk_hash(mask + 12, 8 * sizeof(u32));
     /* the set from every bit of the key, mixed by multiplying: programs are 256-byte aligned, and a shift and xor of
@@ -460,6 +466,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
             s->si.rt_int_mask = rt_int; /* the tessellation or geometry primitive */
             s->si.clip_enable = clip;
             memcpy(s->si.gp_skip_mask, mask + 12, sizeof s->si.gp_skip_mask);
+            if (xfb) s->si.xfb = *xfb;
         }
         if (vk_corpus_dir()) shader_corpus_save(vk_corpus_dir(), code, mlen, 0x10000, stage, &s->si, h ^ mix);
         u64 t0 = plat_ns();

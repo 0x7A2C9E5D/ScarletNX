@@ -133,6 +133,13 @@ uint32_t spv_emit_push_vec4(SpvEmitter* e, uint32_t vec4_type, uint32_t f32_type
 uint32_t spv_emit_push_component_f32(SpvEmitter* e, uint32_t pointer_type, uint32_t block, uint32_t member,
                                      uint32_t component, uint32_t f32_type);
 uint32_t spv_emit_output_vec4(SpvEmitter* e, uint32_t vec4_type, uint32_t location);
+/* a Private variable of type, the stage's own (SPIR-V 1.4 on lists it in the entry point's interface) */
+uint32_t spv_emit_private_variable(SpvEmitter* e, uint32_t type);
+/* an Output of a scalar type at location and component: one component of a vec4 output split into its four */
+uint32_t spv_emit_output_component(SpvEmitter* e, uint32_t type, uint32_t location, uint32_t component);
+/* variable captured by transform feedback into buffer at offset bytes, its vertices stride bytes apart there. The
+   module needs the TransformFeedback capability (53) and its entry point the Xfb execution mode (11), once */
+void spv_emit_xfb_capture(SpvEmitter* e, uint32_t variable, uint32_t buffer, uint32_t stride, uint32_t offset);
 uint32_t spv_emit_position_output(SpvEmitter* e, uint32_t vec4_type);
 uint32_t spv_emit_point_size_output(SpvEmitter* e, uint32_t f32_type);
 uint32_t spv_emit_frag_depth_output(SpvEmitter* e, uint32_t f32_type);

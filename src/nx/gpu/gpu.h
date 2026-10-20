@@ -79,6 +79,9 @@ typedef struct GpuChannel {
     int mme_collecting;
     u32 mme_index;
     GpuMme mme; /* the macro running, or one a wait stopped after the method that asked for it */
+    /* transform feedback, a bit per buffer: its write pointer was loaded (3D 0xE4 + 8 * i) since its last capture,
+       and a capture since that left a byte count in the renderer's counter to resume from */
+    u8 xfb_reload, xfb_started;
     /* constant buffer data (3D 0x8E4-0x8F3) a batch is still sending: written to memory in one go */
     u64 cb_addr;
     u32 cb_n;

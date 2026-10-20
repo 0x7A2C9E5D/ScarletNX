@@ -273,6 +273,11 @@ static int keeps_draw(const u32* r, u32 m, u32 v) {
         case 0x47:
         case 0x48:
         case 0x6C:
+        case 0xE4: /* a transform feedback buffer's write pointer: draws held before it capture where it was */
+        case 0xEC:
+        case 0xF4:
+        case 0xFC:
+        case 0x1D1:
         case 0x6D:
         case 0xB2:
         case 0x378:
@@ -399,6 +404,12 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
             inline_push(ch, idx, 2);
             break;
         }
+        /* SET_STREAM_OUT_BUFFER_LOAD_WRITE_POINTER: the buffer's capture starts over at its start offset, where
+           draws after an earlier one append to what it captured */
+        case 0xE4:
+        case 0xEC:
+        case 0xF4:
+        case 0xFC: ch->xfb_reload |= (u8)(1u << ((m - 0xE4) >> 3)); break;
         case 0x585: draw_end(ch); break;
         case 0x586: draw_begin(ch, v); break;
         case 0x5F9: /* INDEX_BUFFER32/16/8_FIRST and _SUBSEQUENT: the index buffer's first and count in one word */

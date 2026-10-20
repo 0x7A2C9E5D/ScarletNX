@@ -295,7 +295,7 @@ static int create_device(void) {
     g_shader_stage_point_size = want->shaderTessellationAndGeometryPointSize != 0;
     g_shader_geometry = want->geometryShader != 0;
     g_shader_tessellation = want->tessellationShader != 0;
-    const char* ext[12];
+    const char* ext[16];
     int has_budget = 0;
     u32 next = 0;
     int has_shader_clock = 0, has_feedback_dynamic = 0;
@@ -307,6 +307,7 @@ static int create_device(void) {
         vkEnumerateDeviceExtensionProperties(g_vk.phys, NULL, &n, e);
         for (u32 i = 0; i < n; i++) {
             if (!strcmp(e[i].extensionName, VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME)) g_vk.has_divisor = 1;
+            if (!strcmp(e[i].extensionName, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME)) g_vk.has_xfb = 1;
             if (!strcmp(e[i].extensionName, VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME)) g_vk.has_border_color = 1;
             if (!strcmp(e[i].extensionName, VK_KHR_SHADER_CLOCK_EXTENSION_NAME)) has_shader_clock = 1;
             if (!strcmp(e[i].extensionName, VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME))
@@ -328,6 +329,8 @@ static int create_device(void) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT};
     VkPhysicalDeviceCustomBorderColorFeaturesEXT fbc = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT};
+    VkPhysicalDeviceTransformFeedbackFeaturesEXT fxfb = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT};
     VkPhysicalDeviceShaderClockFeaturesKHR qclock = {.sType =
                                                          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR};
     VkPhysicalDeviceVulkan12Features q12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
@@ -342,6 +345,10 @@ static int create_device(void) {
     if (g_vk.has_border_color) {
         *tail = &fbc;
         tail = &fbc.pNext;
+    }
+    if (g_vk.has_xfb) {
+        *tail = &fxfb;
+        tail = &fxfb.pNext;
     }
     VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT qloop = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT};
@@ -371,6 +378,7 @@ static int create_device(void) {
     g_shader_clock_scopes =
         has_shader_clock ? (qclock.shaderSubgroupClock ? 1 : 0) | (qclock.shaderDeviceClock ? 2 : 0) : 0;
     g_vk.has_divisor = g_vk.has_divisor && fdiv.vertexAttributeInstanceRateDivisor;
+    g_vk.has_xfb = g_vk.has_xfb && fxfb.transformFeedback;
     g_vk.has_border_color = g_vk.has_border_color && fbc.customBorderColors && fbc.customBorderColorWithoutFormat;
     if (g_vk.has_border_color) { /* how many samplers may have a custom border color: as few as 32 */
         VkPhysicalDeviceCustomBorderColorPropertiesEXT cbp = {
@@ -420,6 +428,14 @@ static int create_device(void) {
             .customBorderColorWithoutFormat = VK_TRUE};
         chain = &fbc;
         ext[next++] = VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME;
+    }
+    if (g_vk.has_xfb) {
+        fxfb = (VkPhysicalDeviceTransformFeedbackFeaturesEXT){
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT,
+            .pNext = chain,
+            .transformFeedback = VK_TRUE};
+        chain = &fxfb;
+        ext[next++] = VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME;
     }
     VkPhysicalDeviceShaderClockFeaturesKHR fclock = {.sType =
                                                          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR,

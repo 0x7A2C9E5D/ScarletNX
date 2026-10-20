@@ -64,6 +64,7 @@ typedef struct {
     /* optional features that were enabled */
     VkPhysicalDeviceFeatures feat;
     int has_divisor;      /* VK_EXT_vertex_attribute_divisor: instance divisors above 1 */
+    int has_xfb;          /* VK_EXT_transform_feedback: draws capture their outputs into guest memory */
     int has_border_color; /* VK_EXT_custom_border_color */
     u32 border_color_max; /* maxCustomBorderColorSamplers: past it, samplers take the nearest built-in color */
     int has_mirror_clamp; /* samplerMirrorClampToEdge: VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE */
@@ -208,6 +209,12 @@ void rec_CmdBindDescriptorSets(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPip
 void rec_CmdBindVertexBuffers2(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* bufs, const VkDeviceSize* offs,
                                const VkDeviceSize* sizes, const VkDeviceSize* strides);
 void rec_CmdBindVertexBuffers(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* bufs, const VkDeviceSize* offs);
+void rec_CmdBindTransformFeedbackBuffersEXT(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* bufs,
+                                            const VkDeviceSize* offs, const VkDeviceSize* sizes);
+void rec_CmdBeginTransformFeedbackEXT(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* counters,
+                                      const VkDeviceSize* offs);
+void rec_CmdEndTransformFeedbackEXT(VkCommandBuffer cb, u32 first, u32 n, const VkBuffer* counters,
+                                    const VkDeviceSize* offs);
 void rec_CmdSetViewportWithCount(VkCommandBuffer cb, u32 n, const VkViewport* v);
 void rec_CmdSetViewport(VkCommandBuffer cb, u32 first, u32 n, const VkViewport* v);
 void rec_CmdSetScissorWithCount(VkCommandBuffer cb, u32 n, const VkRect2D* r);
@@ -549,9 +556,10 @@ void vk_pipeline_init(void);
    vertex stage, textures and render target outputs for the fragment stage. rt_int keys the primitives of the
    tessellation evaluation and geometry stages (ShaderInfo.rt_int_mask). clip: the clip distances the 3D engine
    enables, and SNX_SH_NOT_LAST (the stages before rasterization). The translator reads ch's bound constant buffers
-   (ch->cbind) to resolve indirect branches */
+   (ch->cbind) to resolve indirect branches. xfb: what transform feedback captures of the last stage before
+   rasterization's outputs (ShaderInfo.xfb), NULL for none */
 VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int_mask, u64 sint_mask, u32 rt_int,
-                    u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed);
+                    u32 rt_sint, u32 clip, u64 dc_color, u32 dc_funcs, u32 unfed, const ShXfb* xfb);
 typedef struct {
     VkShaderModule vs, fs;
     VkShaderModule tcs, tes, gs; /* tessellation control and evaluation, geometry: VK_NULL_HANDLE when off */

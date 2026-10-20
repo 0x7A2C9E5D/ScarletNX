@@ -760,6 +760,36 @@ uint32_t spv_emit_output_vec4(SpvEmitter* e, uint32_t vec4_type, uint32_t locati
     return output_vec4(e, vec4_type, 30, location); /* Location */
 }
 
+uint32_t spv_emit_private_variable(SpvEmitter* e, uint32_t type) {
+    uint32_t pointer_type = type_pointer(e, 6, type); /* Private */
+    uint32_t id = spv_emit_id(e);
+    instruction(&e->types, OP_VARIABLE, 4);
+    put(&e->types, pointer_type);
+    put(&e->types, id);
+    put(&e->types, 6);
+    return id;
+}
+
+uint32_t spv_emit_output_component(SpvEmitter* e, uint32_t type, uint32_t location, uint32_t component) {
+    uint32_t id = output_vec4(e, type, 30, location); /* Location */
+    instruction(&e->decorations, OP_DECORATE, 4);
+    put(&e->decorations, id);
+    put(&e->decorations, 31); /* Component */
+    put(&e->decorations, component);
+    return id;
+}
+
+void spv_emit_xfb_capture(SpvEmitter* e, uint32_t variable, uint32_t buffer, uint32_t stride, uint32_t offset) {
+    static const uint32_t decorations[3] = {36, 37, 35}; /* XfbBuffer, XfbStride, Offset */
+    uint32_t values[3] = {buffer, stride, offset}, i;
+    for (i = 0; i < 3; i++) {
+        instruction(&e->decorations, OP_DECORATE, 4);
+        put(&e->decorations, variable);
+        put(&e->decorations, decorations[i]);
+        put(&e->decorations, values[i]);
+    }
+}
+
 uint32_t spv_emit_position_output(SpvEmitter* e, uint32_t vec4_type) {
     uint32_t id = output_vec4(e, vec4_type, 11, 0); /* BuiltIn Position */
     instruction(&e->decorations, OP_DECORATE, 3);

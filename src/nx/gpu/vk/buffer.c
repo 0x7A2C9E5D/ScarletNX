@@ -77,6 +77,17 @@ static PendPages g_out_pages = {.also = &g_pend_any};
 static void out_pages(const GfxOut* o, int delta) {
     for (u32 i = 0; i < o->npages && o->pages[i] != ~0ull; i++) pend_add_page(&g_out_pages, o->pages[i], delta);
 }
+/* where and how pending results were written: shader stores, copies, and transform feedback's captures when the device
+   has it (its flags are invalid without the extension) */
+static VkPipelineStageFlags2 out_stages(void) {
+    return VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT |
+           (g_vk.has_xfb ? VK_PIPELINE_STAGE_2_TRANSFORM_FEEDBACK_BIT_EXT : 0);
+}
+static VkAccessFlags2 out_access(void) {
+    return VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT |
+           (g_vk.has_xfb ? VK_ACCESS_2_TRANSFORM_FEEDBACK_WRITE_BIT_EXT : 0);
+}
 /* an output with its page lists and its original bytes after it, in one block */
 static GfxOut* gfx_out_new(u32 npages, u32 len) {
     GfxOut* o = calloc(1, sizeof *o + 2 * (size_t)npages * sizeof *o->pages + len);
@@ -271,10 +282,8 @@ void vk_buf_host_barrier(VkCommandBuffer cb, u64 frame) {
     while (first && first->frame != frame) first = first->next;
     if (!first) return;
     VkMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-                          .srcStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-                                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-                                          VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                          .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                          .srcStageMask = out_stages(),
+                          .srcAccessMask = out_access(),
                           .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
                           .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT};
     VkDependencyInfo d = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &b};
@@ -448,10 +457,8 @@ static void copy_add(CopyBatch* c, VkBuffer src, u64 src_off, u64 dst_off, u64 s
     int overlap = c->nwritten == sizeof c->written / sizeof *c->written;
     if (!c->started) {
         vk_render_end();
-        copy_barrier(VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-                         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
-                     VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                     VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        copy_barrier(out_stages(), out_access(), VK_PIPELINE_STAGE_2_COPY_BIT,
+                     VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
         c->started = 1;
     }
     for (k = 0; k < c->nwritten && !overlap; k++)
@@ -575,9 +582,7 @@ static int gfx_gpu_src(u64 gva, u64 len, VkBuffer* buf, u64* off, int writable) 
         static u64 barrier_frame = ~0ull, barrier_work = ~0ull;
         if (barrier_frame != vk_submit_number() || barrier_work != g_vk_drawn + g_vk_dispatches) {
             vk_render_end();
-            copy_barrier(VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT,
-                         VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            copy_barrier(out_stages(), out_access(),
                          VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                          VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
             barrier_frame = vk_submit_number();
