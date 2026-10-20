@@ -389,8 +389,27 @@ static int backing_overlap(const RangePages* q, const GfxOut* o) {
     }
     return 0;
 }
+static void any_span(void* user, u64 at, u64 from, u64 n) {
+    (void)at;
+    (void)from;
+    (void)n;
+    *(int*)user = 1;
+}
+/* [gva, gva + len) and o share bytes, through the same GPU address or pages in common (q): a result lands its own
+   bytes alone, so the rest of a page it shares is free to read and write (Pokemon Legends Z-A writes a word next to
+   its transform feedback captures before each, through a macro's inline upload). *rmap is the range's pages, made
+   once; without memory for them, any page in common counts */
+static int out_meets(const GfxOut* o, u64 gva, u64 len, const RangePages* q, u64** rmap, u64 local[16]) {
+    int hit = 0;
+    if (gva < o->addr + o->size && o->addr < gva + len) return 1;
+    if (!backing_overlap(q, o)) return 0;
+    if (!*rmap && !(*rmap = range_map(gva, len, local))) return 1;
+    out_spans(o, gva, len, *rmap, any_span, &hit);
+    return hit;
+}
 static void mem_need_reason(u64 gva, u64 len, int reason) {
     RangePages q;
+    u64 local[16], *rmap = NULL;
     if (!g_gfx_any || g_out_landing || !len) return;
     vk_lock();
     if (reason != WB_MAP && !pend_hit(&g_out_pages, gva, len)) {
@@ -403,7 +422,8 @@ static void mem_need_reason(u64 gva, u64 len, int reason) {
     u64 newest = 0;
     int recording = 0;
     for (GfxOut* o = g_out; o; o = o->next)
-        if ((gva < o->addr + o->size && o->addr < gva + len) || backing_overlap(&q, o)) {
+        if (reason == WB_MAP ? (gva < o->addr + o->size && o->addr < gva + len) || backing_overlap(&q, o)
+                             : out_meets(o, gva, len, &q, &rmap, local)) {
             if (o->frame > vk_last_submit()) recording = 1;
             if (o->frame > newest) newest = o->frame;
         }
@@ -413,6 +433,7 @@ static void mem_need_reason(u64 gva, u64 len, int reason) {
         vk_wait_submit(newest);
         vk_land_through(newest);
     }
+    if (rmap && rmap != local) free(rmap);
     vk_unlock();
 }
 void vk_buf_mem_need(u64 gva, u64 len) { mem_need_reason(gva, len, WB_READ); }
