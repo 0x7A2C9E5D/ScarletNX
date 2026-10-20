@@ -188,6 +188,15 @@ int main(void) {
     CHECK(gnu_memory_init(&p->memory) == 0);
     CHECK(gnu_elf_load_image(&p->elf, &p->memory, bytes, sizeof bytes, error, sizeof error) < 0);
     CHECK(strstr(error, "PT_LOAD") != NULL);
+    /* a refused header says the field it read */
+    executable(bytes, 2);
+    put16(bytes + 18, 62);
+    CHECK(gnu_elf_load_image(&p->elf, &p->memory, bytes, sizeof bytes, error, sizeof error) < 0);
+    CHECK(!strcmp(error, "ELF machine 62, not 183"));
+    executable(bytes, 2);
+    bytes[4] = 3;
+    CHECK(gnu_elf_load_image(&p->elf, &p->memory, bytes, sizeof bytes, error, sizeof error) < 0);
+    CHECK(!strcmp(error, "ELF class 3 is neither 1 (32-bit) nor 2 (64-bit)"));
     executable(bytes, 2);
     put16(bytes + 56, 2); /* PT_LOAD, then PT_INTERP */
     put32(bytes + 120, 3);

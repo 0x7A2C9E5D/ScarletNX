@@ -80,17 +80,27 @@ fail:
 static bool extracted_code(const void* directory, unsigned char* out, size_t size) {
     return read_exact(directory, "exefs/.code", out, size);
 }
+/* why an extraction's folder is refused: a link is never followed */
+static const char* not_folder(const char* path) {
+    return snx_is_link(path) ? "is a link" : !snx_is_dir(path) ? "is not a folder" : NULL;
+}
 bool snx_ctr_image_load(const char* directory, SnxCtrImage* image, char* error, size_t error_size) {
     if (error_size) error[0] = 0;
     if (!image) return false;
     memset(image, 0, sizeof *image);
+    if (!directory) {
+        snprintf(error, error_size, "no extraction folder given");
+        return false;
+    }
     unsigned char ex[0x800];
-    bool safe = directory && !snx_is_link(directory) && snx_is_dir(directory);
-    char* exefs = safe ? snx_path_join(directory, "exefs") : NULL;
-    safe = safe && !snx_is_link(exefs) && snx_is_dir(exefs);
+    char* exefs = snx_path_join(directory, "exefs");
+    const char *why = not_folder(directory), *refused = directory;
+    if (!why && (why = not_folder(exefs))) refused = exefs;
+    if (why) snprintf(error, error_size, "%s %s", refused, why);
     free(exefs);
-    if (!safe || !read_exact(directory, "exheader.bin", ex, sizeof ex)) {
-        if (error_size) snprintf(error, error_size, "invalid extracted image directory or ExHeader");
+    if (why) return false;
+    if (!read_exact(directory, "exheader.bin", ex, sizeof ex)) {
+        snprintf(error, error_size, "%s/exheader.bin is not a file of %u bytes", directory, (unsigned)sizeof ex);
         return false;
     }
     return image_parse(ex, extracted_code, directory, image, error, error_size);

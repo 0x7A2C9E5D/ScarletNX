@@ -8,6 +8,7 @@
 #include "gnuabi/abi/errno/errno.h"
 #include "common/utilities/common.h"
 #include <openssl/rand.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -264,7 +265,9 @@ int gnu_process_load(GnuProcess* p, const char* path, const unsigned char* image
     int r = gnu_memory_init(&p->memory);
     if (cap) error[0] = 0;
     if (r) {
-        snprintf(error, cap, "Cannot reserve the guest address space");
+        char why[256];
+        snprintf(error, cap, "Cannot reserve %" PRIu64 " GiB of guest address space: %s", GNU_ADDRESS_LIMIT >> 30,
+                 snx_os_error(why, sizeof why));
         return r;
     }
     p->memory.code_changed = code_changed;

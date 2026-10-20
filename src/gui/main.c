@@ -269,7 +269,6 @@ static const char* const items[] = {SNX_TR_NOOP("Load Switch NSP/XCI/NRO"),
 #define SAY_DONE       SNX_TR_NOOP("Tap to return to menu")
 #define SAY_ABORT      SNX_TR_NOOP("Tap here to abort and return to menu")
 #define SAY_NO_GAMES   SNX_TR_NOOP("No games in games/: put a game's .nro, .xci or .nsp there.")
-#define SAY_LOG_FAILED SNX_TR_NOOP("The log could not be saved in the data folder.")
 #define SAY_EDITOR     SNX_TR_KEYS("Tap a key to change, type or pick it. Back: go back.")
 #define SAY_PICKER     SNX_TR_KEYS("Drag a bar, or tap #RRGGBB to type it. Tap outside: keep. Back: put back.")
 #define SAY_SETTINGS   SAY_EDITOR
@@ -291,7 +290,6 @@ static const char* const items[] = {SNX_TR_NOOP("Load Switch NSP/XCI/NRO"),
 #define SAY_DONE       SNX_TR_NOOP("Press [ESC] to return to menu")
 #define SAY_ABORT      SNX_TR_NOOP("Press [ESC] to abort and return to menu")
 #define SAY_NO_GAMES   SNX_TR_NOOP("No games in games/ or the folders of Settings > App.")
-#define SAY_LOG_FAILED SNX_TR_NOOP("The log could not be saved: check the folder's permissions.")
 #define SAY_EDITOR     SNX_TR_KEYS("Up/Down: key. Left/Right: change. Enter: edit. Ctrl+S: save. ESC: back.")
 #define SAY_PICKER     SNX_TR_KEYS("Up/Down: row. Left/Right: 1. PgUp/PgDn: 16. Enter: keep. ESC: put back.")
 #define SAY_SETTINGS   SNX_TR_KEYS("Up/Down: setting. Left/Right: change. Enter: type. Del: default. ESC: back.")
@@ -4972,9 +4970,13 @@ static void keys_result(App* app, bool ok) {
 }
 static void keys_write(App* app, const char* data, size_t size) {
     char why[256];
-    if (!app->keys_path) {
+    if (!app->keys_path) { /* home_keys_path's: the variables it reads are unset */
+#ifdef _WIN32
         snprintf(app->message, sizeof(app->message), "%s",
-                 snx_tr("Cannot locate your home directory. Keys were not installed."));
+                 snx_tr("Cannot install prod.keys: neither USERPROFILE nor HOME is set"));
+#else
+        snprintf(app->message, sizeof(app->message), "%s", snx_tr("Cannot install prod.keys: HOME is not set"));
+#endif
         keys_result(app, false);
         return;
     }
@@ -5172,8 +5174,13 @@ static void share_log(App* app) {
                       app->cleaned.count ? "Clean old settings:\n" : "", app->cleaned.text ? app->cleaned.text : "",
                       summary, app->run_log ? app->run_log : "", run, game ? game : "no game log", played);
     saved = folder ? snx_path_join(folder, "scarletnx.log") : NULL;
-    if (!saved || snx_write_file(saved, text, strlen(text)))
-        snprintf(app->message, sizeof(app->message), "%s", snx_tr(SAY_LOG_FAILED));
+    if (!saved)
+        snprintf(app->message, sizeof(app->message), "%s", snx_tr("The log could not be saved: no working folder"));
+    else if (snx_write_file(saved, text, strlen(text))) {
+        char why[256];
+        snprintf(app->message, sizeof(app->message), snx_tr("The log could not be saved to %s: %s"), saved,
+                 snx_os_error(why, sizeof why));
+    }
 #ifdef SDL_PLATFORM_ANDROID
     else if (gui_android_share(saved, app->message, sizeof(app->message)))
         snprintf(app->message, sizeof(app->message), snx_tr("Log saved to %s"), saved);
@@ -6016,10 +6023,17 @@ static bool initialize(App* app, const char* self) {
     SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
     SDL_SetEventEnabled(SDL_EVENT_DROP_TEXT, true);
     app->font = create_font(app->renderer);
+    if (!app->font) {
+        char why[256];
+        SDL_strlcpy(why, SDL_GetError(), sizeof why); /* SDL_SetError writes over the text it formats */
+        return SDL_SetError(snx_tr("Cannot make the menu's font: %s"), why);
+    }
     app->process = gui_process_create();
+    if (!app->process) return SDL_SetError("%s", snx_tr("Cannot start the menu: out of memory"));
     app->cwd = SDL_GetCurrentDirectory();
 #ifdef SDL_PLATFORM_ANDROID
     app->drivers = gui_android_libraries() ? snx_strdup(gui_android_libraries()) : NULL;
+    if (!app->drivers) return SDL_SetError("%s", snx_tr("Cannot find the folder of the app's libraries"));
     /* the app's own storage: no FUSE between it and the drivers, as the shared storage has */
     if (gui_android_own_folder()) {
         SDL_free(app->cwd);
@@ -6034,6 +6048,11 @@ static bool initialize(App* app, const char* self) {
     }
 #else
     app->drivers = self ? snx_dirname(self) : SDL_GetBasePath() ? snx_strdup(SDL_GetBasePath()) : NULL;
+    if (!app->drivers) { /* SDL_GetBasePath's failure */
+        char why[256];
+        SDL_strlcpy(why, SDL_GetError(), sizeof why);
+        return SDL_SetError(snx_tr("Cannot find the folder ScarletNX runs from: %s"), why);
+    }
     app->data_dir = snx_data_dir(app->drivers);
     if (!app->data_dir) app->data_dir = snx_strdup(app->cwd ? app->cwd : ".");
     app->checkout = snx_checkout(GUI_CHECKOUT, GUI_BUILD, app->drivers);
@@ -6041,12 +6060,8 @@ static bool initialize(App* app, const char* self) {
     app->home_dir = snx_strdup(app->data_dir);
     app->place_row = -1;
     places_apply(app); /* games/, themes/, work/ and the keys, by the data folder */
-    if (app->drivers) app->themes_dirs[1] = shipped_themes(app->drivers);
+    app->themes_dirs[1] = shipped_themes(app->drivers);
     gui_console_init(&app->console, 78, 17);
-    if (!app->font || !app->process || !app->drivers) {
-        SDL_SetError("%s", snx_tr("Cannot initialize GUI resources"));
-        return false;
-    }
 #ifdef SDL_PLATFORM_ANDROID
     SDL_AddEventWatch(lifecycle, app);
 #endif

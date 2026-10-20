@@ -184,10 +184,6 @@ msgstr ""
 msgid "No games in games/: put a game's .nro, .xci or .nsp there."
 msgstr ""
 
-#: src/gui/main.c
-msgid "The log could not be saved in the data folder."
-msgstr ""
-
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -276,10 +272,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "No games in games/ or the folders of Settings > App."
-msgstr ""
-
-#: src/gui/main.c
-msgid "The log could not be saved: check the folder's permissions."
 msgstr ""
 
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
@@ -1167,7 +1159,11 @@ msgid "R recompiles Switch games only."
 msgstr ""
 
 #: src/gui/main.c
-msgid "Cannot locate your home directory. Keys were not installed."
+msgid "Cannot install prod.keys: neither USERPROFILE nor HOME is set"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Cannot install prod.keys: HOME is not set"
 msgstr ""
 
 #: src/gui/main.c
@@ -1215,6 +1211,15 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Drop one local file path, not a list or remote URL."
+msgstr ""
+
+#: src/gui/main.c
+msgid "The log could not be saved: no working folder"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "The log could not be saved to %s: %s"
 msgstr ""
 
 #: src/gui/main.c
@@ -1377,7 +1382,21 @@ msgid "No folder was picked."
 msgstr ""
 
 #: src/gui/main.c
-msgid "Cannot initialize GUI resources"
+#, c-format
+msgid "Cannot make the menu's font: %s"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Cannot start the menu: out of memory"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Cannot find the folder of the app's libraries"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Cannot find the folder ScarletNX runs from: %s"
 msgstr ""
 
 #: src/gui/main.c

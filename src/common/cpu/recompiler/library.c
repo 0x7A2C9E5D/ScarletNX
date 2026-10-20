@@ -434,7 +434,14 @@ static int load_image(struct snx_recompiler* r, struct snx_recompiled* m, const 
 #endif
     dir = snx_temp_dir(NULL);
     if (!dir) {
-        fail(r, "cannot create a temporary folder for the recompiled module");
+        char why[256], *root;
+        snx_os_error(why, sizeof(why)); /* before snx_temp_root's calls set another */
+        root = snx_temp_root();
+        if (root)
+            fail(r, "cannot create a folder for the recompiled module in %s: %s", root, why);
+        else
+            fail(r, "cannot find the temporary folder for the recompiled module: %s", why);
+        free(root);
         return -1;
     }
 #ifdef _WIN32

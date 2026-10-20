@@ -56,6 +56,17 @@ int main(void) {
     put(code + 4, 0xef000003);
     memcpy(code + 0x1000, "READONLY", 8);
     memcpy(code + 0x2000, "DATA", 4);
+    /* a refused extraction names the path: a folder that is not there, then one without its ExHeader */
+    {
+        char *nowhere = snx_path_join(root, "nowhere"), *said = snx_format("%s is not a folder", nowhere);
+        SnxCtrImage none;
+        assert(!snx_ctr_image_load(nowhere, &none, error, sizeof error) && !strcmp(error, said));
+        free(said);
+        said = snx_format("%s/exheader.bin is not a file of 2048 bytes", root);
+        assert(!snx_ctr_image_load(root, &none, error, sizeof error) && !strcmp(error, said));
+        free(said);
+        free(nowhere);
+    }
     assert(!snx_write_file(ex_path, ex, sizeof ex) && !snx_write_file(code_path, code, sizeof code));
     SnxCtrImage image, other;
     assert(snx_ctr_image_load(root, &image, error, sizeof error));

@@ -232,7 +232,11 @@ static void next(void) {
         char* end;
         errno = 0;
         tok_num = strtoul(src + pos, &end, src[pos] == '0' && (src[pos + 1] == 'x' || src[pos + 1] == 'X') ? 16 : 10);
-        if (ident_char((unsigned char)*end)) fail("bad number");
+        if (ident_char((unsigned char)*end)) {
+            size_t len = (size_t)(end - (src + pos));
+            while (ident_char((unsigned char)src[pos + len])) ++len;
+            fail("bad number %.*s", (int)(len > 40 ? 40 : len), src + pos);
+        }
         if (errno == ERANGE || tok_num > 0xFFFFFFFFul) fail("number too large");
         n = (size_t)(end - (src + pos));
         if (n >= NAME_LEN) fail("number too long");
@@ -271,11 +275,16 @@ static unsigned long expect_num(void) {
     return v;
 }
 /* a service name after "is": sm:, ldr:ro, fsp-srv, nvdrv:a. sm's names are 8 bytes */
+static int service_char(char c) { return ident_char((unsigned char)c) || c == ':' || c == '-'; }
 static void service_name(char* out) {
     size_t n = 0;
     skip_space();
-    while (src[pos] && (ident_char((unsigned char)src[pos]) || src[pos] == ':' || src[pos] == '-')) {
-        if (n == 8) fail("a service name has at most 8 characters");
+    while (src[pos] && service_char(src[pos])) {
+        if (n == 8) {
+            size_t more = 0;
+            while (src[pos + more] && service_char(src[pos + more])) ++more;
+            fail("service name %.8s%.*s has more than 8 characters", out, (int)(more > 32 ? 32 : more), src + pos);
+        }
         out[n++] = src[pos++];
     }
     out[n] = 0;
@@ -801,7 +810,7 @@ static void flush(const char* path) {
     }
     f = fopen(path, "wb");
     if (!f || fwrite(obuf, 1, olen, f) != olen || fclose(f)) {
-        fprintf(stderr, "swipc: cannot write %s\n", path);
+        fprintf(stderr, "swipc: cannot write %s: %s\n", path, strerror(errno));
         exit(1);
     }
     olen = 0;
@@ -1131,7 +1140,7 @@ static char* read_file(const char* path) {
     char* d;
     long n;
     if (!f) {
-        fprintf(stderr, "swipc: cannot open %s\n", path);
+        fprintf(stderr, "swipc: cannot open %s: %s\n", path, strerror(errno));
         exit(1);
     }
     fseek(f, 0, SEEK_END);
@@ -1139,7 +1148,7 @@ static char* read_file(const char* path) {
     fseek(f, 0, SEEK_SET);
     d = (char*)malloc((size_t)n + 1);
     if (!d || fread(d, 1, (size_t)n, f) != (size_t)n) {
-        fprintf(stderr, "swipc: cannot read %s\n", path);
+        fprintf(stderr, "swipc: cannot read %s: %s\n", path, d ? strerror(errno) : "out of memory");
         exit(1);
     }
     d[n] = 0;

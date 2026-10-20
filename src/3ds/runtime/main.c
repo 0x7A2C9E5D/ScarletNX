@@ -57,6 +57,10 @@ static char* work_folder(const char* repo, const char* argv0) {
     char* checkout = repo ? NULL : snx_checkout(SNX_SOURCE_DIR, SNX_BUILD_DIR, dir);
     char *work = data ? snx_work_dir(data) : snx_strdup("work"), *folder = snx_path_join(work, "3ds");
     char* resolved = snx_absolute(folder);
+    if (!resolved) {
+        char why[256];
+        fprintf(stderr, "scarletnx-3ds: cannot resolve %s: %s\n", folder, snx_os_error(why, sizeof why));
+    }
     if (checkout && data) snx_checkout_left(checkout, data);
     free(checkout);
     free(folder);
@@ -88,22 +92,32 @@ static SnxCtrExtractResult extract_into(const char* input, const char* folder, c
     char *done = NULL, **names = NULL;
     size_t count = 0;
     SnxCtrExtractResult result = SNX_CTR_EXTRACT_IO;
-    snprintf(error, error_size, "cannot move the extraction into %s", folder);
-    if (snx_path_exists(staging) && snx_remove_tree(staging)) goto out;
+    char why[256];
+    if (snx_path_exists(staging) && snx_remove_tree(staging)) {
+        snprintf(error, error_size, "cannot remove %s: %s", staging, snx_os_error(why, sizeof why));
+        goto out;
+    }
     result = snx_ctr_extract(input, staging, NULL, &done, error, error_size);
     if (result != SNX_CTR_EXTRACT_OK) goto out;
     result = SNX_CTR_EXTRACT_IO;
-    if (snx_list_dir(done, &names, &count)) goto out;
+    if (snx_list_dir(done, &names, &count)) {
+        snprintf(error, error_size, "cannot list %s: %s", done, snx_os_error(why, sizeof why));
+        goto out;
+    }
     for (size_t i = 0; i < count; ++i) {
         char *from = snx_path_join(done, names[i]), *to = snx_path_join(folder, names[i]);
         /* only a stopped extraction's part can be in the way: the state has other names */
         bool moved = !(snx_path_exists(to) && snx_remove_tree(to)) && !snx_replace(from, to);
+        if (!moved) snprintf(error, error_size, "cannot move %s to %s: %s", from, to, snx_os_error(why, sizeof why));
         free(from);
         free(to);
         if (!moved) goto out;
     }
     *published = snx_absolute(folder);
-    result = *published ? SNX_CTR_EXTRACT_OK : SNX_CTR_EXTRACT_IO;
+    if (*published)
+        result = SNX_CTR_EXTRACT_OK;
+    else
+        snprintf(error, error_size, "cannot resolve %s: %s", folder, snx_os_error(why, sizeof why));
 out:
     if (done && snx_path_exists(done)) snx_remove_tree(done);
     snx_free_strings(names, count);
@@ -123,10 +137,14 @@ static int play_cia(const char* input, const char* folder, SnxCtrModel model, ui
         fprintf(stderr, "scarletnx-3ds: %s\n", error);
         return opened == SNX_CTR_EXTRACT_UNSUPPORTED ? 3 : 1;
     }
-    char* state = snx_is_link(folder) || snx_mkdirs(folder) ? NULL : snx_absolute(folder);
+    char *state = NULL, why[256];
     int status = 1;
+    if (snx_is_link(folder))
+        snprintf(why, sizeof why, "it is a link");
+    else if (snx_mkdirs(folder) || !(state = snx_absolute(folder)))
+        snx_os_error(why, sizeof why);
     if (!state) {
-        fprintf(stderr, "scarletnx-3ds: cannot create the title's folder %s\n", folder);
+        fprintf(stderr, "scarletnx-3ds: cannot create the title's folder %s: %s\n", folder, why);
         goto done;
     }
     printf("The title's folder is %s\n", state);
@@ -135,11 +153,9 @@ static int play_cia(const char* input, const char* folder, SnxCtrModel model, ui
         for (size_t i = 0; i < sizeof extraction_parts / sizeof *extraction_parts; ++i) {
             char* part = snx_path_join(state, extraction_parts[i]);
             bool failed = snx_path_exists(part) && snx_remove_tree(part);
+            if (failed) fprintf(stderr, "scarletnx-3ds: cannot remove %s: %s\n", part, snx_os_error(why, sizeof why));
             free(part);
-            if (failed) {
-                fprintf(stderr, "scarletnx-3ds: cannot remove the extraction in %s\n", state);
-                goto done;
-            }
+            if (failed) goto done;
         }
     }
     status = snx_ctr_aot_run(state, cia, model, max_blocks, flags, error, error_size);
@@ -235,8 +251,12 @@ int main(int argc, char** argv) {
         fputs("scarletnx-3ds: input/output paths may not contain control characters\n", stderr);
         return 2;
     }
-    if (!cia_path(input) || !snx_is_file(input)) {
-        fputs("scarletnx-3ds: expected a readable .cia file\n", stderr);
+    const char* refused = !cia_path(input)          ? "is not a .cia file"
+                          : !snx_path_exists(input) ? "does not exist"
+                          : !snx_is_file(input)     ? "is not a file"
+                                                    : NULL;
+    if (refused) {
+        fprintf(stderr, "scarletnx-3ds: %s %s\n", input, refused);
         return 2;
     }
     char error[512], *extracted = NULL;
@@ -248,10 +268,7 @@ int main(int argc, char** argv) {
         free(work);
         free(name);
     }
-    if (!extracted) {
-        fputs("scarletnx-3ds: cannot resolve the extraction folder\n", stderr);
-        return 1;
-    }
+    if (!extracted) return 1; /* work_folder said why */
     unsigned flags = recompile ? SNX_CTR_RECOMPILE | SNX_CTR_COMPILE_ONLY : 0;
     if (!extract_container && !extract_only) { /* the CIA read where it lies, the folder keeping only the title's state */
         int status = play_cia(input, extracted, model, max_blocks, flags, error, sizeof error);

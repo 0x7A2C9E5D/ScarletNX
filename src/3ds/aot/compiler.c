@@ -222,7 +222,8 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
     }
     directory = snx_absolute(extracted);
     if (!directory) {
-        snprintf(error, error_size, "invalid extracted path");
+        char why[256];
+        snprintf(error, error_size, "cannot resolve %s: %s", extracted, snx_os_error(why, sizeof why));
         goto done;
     }
     target = snx_path_join(directory, "native");
@@ -258,13 +259,15 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
     host.machine = LLVMCreateTargetMachine(backend, host.triple, "generic", "", LLVMCodeGenLevelDefault, LLVMRelocPIC,
                                            LLVMCodeModelDefault);
     if (!host.machine) {
-        snprintf(error, error_size, "cannot create native LLVM target");
+        snprintf(error, error_size, "cannot create an LLVM target machine for %s", host.triple);
         goto done;
     }
     host.layout = LLVMCreateTargetDataLayout(host.machine);
     stage = snx_temp_dir(directory);
     if (!stage) {
-        snprintf(error, error_size, "cannot create private native staging directory");
+        char why[256];
+        snprintf(error, error_size, "cannot create a staging folder in %s: %s", directory,
+                 snx_os_error(why, sizeof why));
         goto done;
     }
     files = (count + CHUNK_ENTRIES - 1) / CHUNK_ENTRIES + 1;
@@ -295,8 +298,9 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
         goto done;
     }
     runtime = snx_path_join(stage, "arm-runtime.a");
-    if (!runtime || snx_write_file(runtime, snx_ctr_aot_runtime, snx_ctr_aot_runtime_size)) {
-        snprintf(error, error_size, "cannot stage bounded native semantic helpers");
+    if (snx_write_file(runtime, snx_ctr_aot_runtime, snx_ctr_aot_runtime_size)) {
+        char why[256];
+        snprintf(error, error_size, "cannot write %s: %s", runtime, snx_os_error(why, sizeof why));
         goto done;
     }
     module = snx_path_join(stage, "code.so");
@@ -339,10 +343,23 @@ int snx_ctr_aot_compile(const char* extracted, const SnxCtrCia* cia, char* error
     }
     /* a module from an earlier compile is replaced, only once the new one is complete */
     previous = snx_path_join(directory, "native.previous");
-    if ((snx_path_exists(previous) && snx_remove_tree(previous)) ||
-        (snx_path_exists(target) && snx_replace(target, previous)) || snx_replace(stage, target)) {
-        snprintf(error, error_size, "cannot publish new native output");
-        goto done;
+    {
+        const char *from = NULL, *to = NULL;
+        char why[256];
+        if (snx_path_exists(previous) && snx_remove_tree(previous))
+            from = previous;
+        else if (snx_path_exists(target) && snx_replace(target, previous))
+            from = target, to = previous;
+        else if (snx_replace(stage, target))
+            from = stage, to = target;
+        if (from) {
+            snx_os_error(why, sizeof why);
+            if (to)
+                snprintf(error, error_size, "cannot move %s to %s: %s", from, to, why);
+            else
+                snprintf(error, error_size, "cannot remove %s: %s", from, why);
+            goto done;
+        }
     }
     (void)snx_remove_tree(previous);
     free(stage);

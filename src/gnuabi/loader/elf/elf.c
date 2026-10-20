@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <inttypes.h>
 static uint16_t rd16(const unsigned char* p) { return (uint16_t)(p[0] | (unsigned)p[1] << 8); }
 static uint32_t rd32(const unsigned char* p) { return (uint32_t)rd16(p) | (uint32_t)rd16(p + 2) << 16; }
 static uint64_t rd64(const unsigned char* p) { return (uint64_t)rd32(p) | (uint64_t)rd32(p + 4) << 32; }
@@ -59,7 +60,7 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
     if (size < 52 || memcmp(b, "\177ELF", 4) || b[5] != 1 || b[6] != 1)
         return fail(error, cap, "Expected a little-endian ELF executable");
     unsigned bits = b[4] == 1 ? 32 : b[4] == 2 ? 64 : 0;
-    if (!bits) return fail(error, cap, "Unsupported ELF class");
+    if (!bits) return fail(error, cap, "ELF class %u is neither 1 (32-bit) nor 2 (64-bit)", b[4]);
     elf->bits = bits;
     uint16_t type = rd16(b + 16), machine = rd16(b + 18);
     uint16_t phsize = rd16(b + (bits == 32 ? 42 : 54)), phnum = rd16(b + (bits == 32 ? 44 : 56));
@@ -67,10 +68,17 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
     uint64_t entry = bits == 32 ? rd32(b + 24) : rd64(b + 24);
     unsigned want_machine = bits == 32 ? 40 : 183; /* EM_ARM : EM_AARCH64 */
     unsigned want_phsize = bits == 32 ? 32 : 56, want_ehsize = bits == 32 ? 52 : 64;
-    if ((type != 2 && type != 3) || machine != want_machine || rd32(b + 20) != 1 ||
-        rd16(b + (bits == 32 ? 40 : 52)) != want_ehsize || phsize != want_phsize || !phnum || phnum > 1024 ||
-        phoff > size || (uint64_t)phnum * phsize > size - phoff)
-        return fail(error, cap, "Invalid or unsupported ELF/program headers");
+    uint16_t ehsize = rd16(b + (bits == 32 ? 40 : 52));
+    if (type != 2 && type != 3) return fail(error, cap, "ELF type %u is neither 2 (EXEC) nor 3 (DYN)", type);
+    if (machine != want_machine) return fail(error, cap, "ELF machine %u, not %u", machine, want_machine);
+    if (rd32(b + 20) != 1) return fail(error, cap, "ELF version %u, not 1", rd32(b + 20));
+    if (ehsize != want_ehsize || phsize != want_phsize)
+        return fail(error, cap, "ELF header and program header sizes %u and %u, not %u and %u", ehsize, phsize,
+                    want_ehsize, want_phsize);
+    if (!phnum || phnum > 1024) return fail(error, cap, "%u program headers, not 1 to 1024", phnum);
+    if (phoff > size || (uint64_t)phnum * phsize > size - phoff)
+        return fail(error, cap, "%u program headers at offset %" PRIu64 " run past the file's %zu bytes", phnum, phoff,
+                    size);
     elf->thumb = bits == 32 && (entry & 1);
     elf->bias = type == 3 ? dyn_bias : 0;
     elf->stack_permissions = GNU_PROT_READ | GNU_PROT_WRITE;
@@ -84,7 +92,7 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
             if (!program) return fail(error, cap, "The dynamic linker itself names a dynamic linker");
             if (h.offset > size || !h.filesz || h.filesz > size - h.offset || h.filesz > sizeof elf->interp ||
                 b[h.offset + h.filesz - 1] != 0)
-                return fail(error, cap, "Invalid PT_INTERP");
+                return fail(error, cap, "PT_INTERP %u is not a NUL-terminated path within the file", i);
             memcpy(elf->interp, b + h.offset, (size_t)h.filesz);
             continue;
         }
@@ -110,8 +118,9 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
         if (h.flags & 1) executable_segments++;
         load_segments++;
     }
-    if (!load_segments || !executable_segments || entry > m->size - elf->bias)
-        return fail(error, cap, "ELF has no executable load segment or has an invalid entry address");
+    if (!load_segments || !executable_segments) return fail(error, cap, "ELF has no executable PT_LOAD");
+    if (entry > m->size - elf->bias)
+        return fail(error, cap, "ELF entry 0x%" PRIx64 " is past the guest address space", entry);
     for (unsigned i = 0; i < phnum; i++) {
         rd_phdr(b + phoff + i * phsize, bits, &h);
         if (h.pt != 1 || !h.memsz) continue;
@@ -122,7 +131,7 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
             if (g.pt == 1 && g.memsz) {
                 uint64_t lo = g.va + elf->bias;
                 if (begin < lo + g.memsz && lo < finish)
-                    return fail(error, cap, "Overlapping PT_LOAD memory intervals are unsupported");
+                    return fail(error, cap, "PT_LOAD %u overlaps PT_LOAD %u in memory", i, j);
             }
         }
     }
@@ -141,7 +150,7 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
         for (uint64_t page = down(va); page < up(va + h.memsz); page += GNU_PAGE_SIZE) {
             if (!(m->pages[page / GNU_PAGE_SIZE] & GNU_PAGE_MAPPED) && gnu_memory_map(m, page, GNU_PAGE_SIZE, 3, 0)) {
                 gnu_elf_destroy(elf);
-                return fail(error, cap, "Cannot map ELF segment");
+                return fail(error, cap, "Cannot map the ELF's page at 0x%" PRIx64, page);
             }
         }
         memcpy(m->base + va, b + h.offset, (size_t)h.filesz);
@@ -172,7 +181,8 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
         if (gnu_memory_protect(m, begin * GNU_PAGE_SIZE, (i - begin) * GNU_PAGE_SIZE, p & 7u)) {
             free(permissions);
             gnu_elf_destroy(elf);
-            return fail(error, cap, "Cannot protect ELF segments");
+            return fail(error, cap, "Cannot protect the ELF's pages 0x%" PRIx64 " to 0x%" PRIx64, begin * GNU_PAGE_SIZE,
+                        i * GNU_PAGE_SIZE);
         }
     }
     free(permissions);
@@ -188,7 +198,7 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
         if (gnu_memory_map(m, phdr, bytes, 3, 0) || gnu_memory_write(m, phdr, b + phoff, (size_t)bytes) ||
             gnu_memory_protect(m, phdr, up(bytes), 1)) {
             gnu_elf_destroy(elf);
-            return fail(error, cap, "Cannot create guest ELF program headers");
+            return fail(error, cap, "Cannot place the ELF's program headers at 0x%" PRIx64, phdr);
         }
     }
     elf->phdr = phdr;
