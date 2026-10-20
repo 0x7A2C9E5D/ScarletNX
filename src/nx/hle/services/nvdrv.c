@@ -139,6 +139,210 @@ static void gmmu_clip(u64 first) {
             __atomic_store_n(&t[q & ((1u << GL2_BITS) - 1)], (e & ~GHINT_MASK) | ((k - 1) << 1), __ATOMIC_RELAXED);
     }
 }
+/* ---- the page table again as runs, and their index by guest page, for gmmu_aliases. Mappings change a few times a
+   frame at most, while the renderer asks, hundreds of thousands of times a frame, about GPU ranges where results it
+   keeps per page may have been written through another GPU address: the index lets it record those once, at every
+   alias, when a result is made (vk/pending_pages.c, maxwell/maxwell3d.c) instead of translating each range it asks
+   about. The runs follow the table's page numbers, which wrap at GPAGES as gmmu_l1_index drops the bits past them */
+#define GPAGES ((u64)1 << (40 - GPAGE_BITS))
+static void grun_room(u32 more) {
+    u32 nc = g_hle.nvdrv.capgruns ? g_hle.nvdrv.capgruns : 1024;
+    GRun* r;
+    if (g_hle.nvdrv.ngruns + more <= g_hle.nvdrv.capgruns) return;
+    while (nc < g_hle.nvdrv.ngruns + more) nc *= 2;
+    r = realloc(g_hle.nvdrv.gruns, (size_t)nc * sizeof *r);
+    if (!r) fatal("nvdrv: out of memory for the GPU page table's runs\n");
+    g_hle.nvdrv.gruns = r;
+    g_hle.nvdrv.capgruns = nc;
+}
+/* the first run that ends past page g */
+static u32 grun_find(u64 g) {
+    const GRun* r = g_hle.nvdrv.gruns;
+    u32 lo = 0, hi = g_hle.nvdrv.ngruns;
+    while (lo < hi) {
+        u32 m = lo + (hi - lo) / 2;
+        if (r[m].gpage + r[m].pages <= g)
+            lo = m + 1;
+        else
+            hi = m;
+    }
+    return lo;
+}
+/* takes pages [g0, g1) out of the runs. With own, only from the runs still showing guest page c0 + (p - g0) at each
+   page p, which are the pages gmmu_unmap's own clears: a run shows them at all its pages or at none */
+static void grun_cut(u64 g0, u64 g1, int own, u64 c0) {
+    GRun* r = g_hle.nvdrv.gruns;
+    u32 n = g_hle.nvdrv.ngruns, k = grun_find(g0), w;
+    if (k < n && r[k].gpage < g0 && r[k].gpage + r[k].pages > g1) { /* inside one run: its head and tail stay */
+        GRun tail;
+        if (own && r[k].cpage - r[k].gpage != c0 - g0) return;
+        tail.gpage = g1;
+        tail.pages = r[k].gpage + r[k].pages - g1;
+        tail.cpage = r[k].cpage + (g1 - r[k].gpage);
+        r[k].pages = g0 - r[k].gpage;
+        grun_room(1);
+        r = g_hle.nvdrv.gruns;
+        memmove(&r[k + 2], &r[k + 1], (n - k - 1) * sizeof *r);
+        r[k + 1] = tail;
+        g_hle.nvdrv.ngruns++;
+        return;
+    }
+    for (w = k; k < n && r[k].gpage < g1; k++) {
+        GRun e = r[k];
+        u64 end = e.gpage + e.pages;
+        if (!own || e.cpage - e.gpage == c0 - g0) {
+            if (e.gpage < g0) { /* its head stays */
+                e.pages = g0 - e.gpage;
+            } else if (end > g1) { /* its tail stays */
+                e.cpage += g1 - e.gpage;
+                e.gpage = g1;
+                e.pages = end - g1;
+            } else /* all of it goes */
+                continue;
+        }
+        r[w++] = e;
+    }
+    if (w == k) return;
+    memmove(&r[w], &r[k], (n - k) * sizeof *r);
+    g_hle.nvdrv.ngruns = n - (k - w);
+}
+/* the table's pages first to last (gmmu_map's and gmmu_unmap's numbers) changed: mapped to guest memory from cpu on,
+   or cleared (with own, only those still mapped where a mapping of cpu put them) */
+static void grun_change(u64 first, u64 last, int map, int own, u64 cpu) {
+    pm_lock(&g_hle.nvdrv.alias_lock);
+    for (;;) {
+        u64 g = first & (GPAGES - 1), n = last - first + 1;
+        if (n > GPAGES - g) n = GPAGES - g; /* the rest wraps to page 0 */
+        if (map) {
+            u32 k;
+            grun_cut(g, g + n, 0, 0);
+            grun_room(1);
+            k = grun_find(g);
+            memmove(&g_hle.nvdrv.gruns[k + 1], &g_hle.nvdrv.gruns[k],
+                    (g_hle.nvdrv.ngruns - k) * sizeof *g_hle.nvdrv.gruns);
+            g_hle.nvdrv.gruns[k].gpage = g;
+            g_hle.nvdrv.gruns[k].pages = n;
+            g_hle.nvdrv.gruns[k].cpage = cpu >> GPAGE_BITS;
+            g_hle.nvdrv.ngruns++;
+        } else if (!own || !(cpu & 0xFFE)) /* an own unmap compares its address's bits 1 to 11 too: set, none match */
+            grun_cut(g, g + n, own, cpu >> GPAGE_BITS);
+        if (n >= last - first + 1) break;
+        first += n;
+        cpu += n << GPAGE_BITS;
+    }
+    g_hle.nvdrv.alias.stale = 1;
+    pm_unlock(&g_hle.nvdrv.alias_lock);
+}
+/* where a run starts (bit 0 set) or ends in guest memory, by page, ends first at a page */
+typedef struct {
+    u64 key;
+    u32 run;
+} GEdge;
+static int gedge_cmp(const void* a, const void* b) {
+    u64 x = ((const GEdge*)a)->key, y = ((const GEdge*)b)->key;
+    return (x > y) - (x < y);
+}
+/* the index from the runs: a sweep over their edges in guest order, keeping the runs over the current interval in
+   act (pos[r] is run r's place there). The first pass counts what the second writes */
+static void alias_build(void) {
+    GAlias* x = &g_hle.nvdrv.alias;
+    const GRun* r = g_hle.nvdrv.gruns;
+    u32 n = g_hle.nvdrv.ngruns, ne = 2 * n, i, nb = 0, nact, pass;
+    u64 ncover = 0;
+    GEdge* e;
+    u32 *act, *pos;
+    x->stale = 0;
+    x->nbound = 0;
+    x->query = 0;
+    if (!n) return;
+    if (n > 0x40000000u) fatal("nvdrv: too many GPU mappings for their index\n");
+    e = malloc((size_t)ne * sizeof *e + 2 * (size_t)n * sizeof *act);
+    if (!e) fatal("nvdrv: out of memory for the GPU mappings' index\n");
+    act = (u32*)(e + ne);
+    pos = act + n;
+    for (i = 0; i < n; i++) {
+        e[2 * i].key = r[i].cpage << 1 | 1;
+        e[2 * i].run = i;
+        e[2 * i + 1].key = (r[i].cpage + r[i].pages) << 1;
+        e[2 * i + 1].run = i;
+    }
+    qsort(e, ne, sizeof *e, gedge_cmp);
+    for (pass = 0; pass < 2; pass++) {
+        nb = 0;
+        ncover = 0;
+        nact = 0;
+        for (i = 0; i < ne;) {
+            u64 page = e[i].key >> 1;
+            for (; i < ne && e[i].key >> 1 == page; i++) {
+                u32 k = e[i].run, moved;
+                if (e[i].key & 1) {
+                    pos[k] = nact;
+                    act[nact++] = k;
+                    continue;
+                }
+                moved = act[--nact];
+                act[pos[k]] = moved;
+                pos[moved] = pos[k];
+            }
+            if (pass) {
+                x->bound[nb] = page;
+                x->first[nb] = (u32)ncover;
+                memcpy(x->cover + ncover, act, nact * sizeof *act);
+            }
+            nb++;
+            ncover += nact;
+        }
+        if (!pass) {
+            size_t need;
+            if (ncover > 0xFFFFFFFFu - nb) fatal("nvdrv: the GPU mappings' index is too large\n");
+            need = (size_t)nb * sizeof *x->bound + ((size_t)nb + 1 + n + (size_t)ncover) * sizeof *x->first;
+            if (need > x->cap) {
+                free(x->bound);
+                x->bound = malloc(need);
+                if (!x->bound) fatal("nvdrv: out of memory for the GPU mappings' index\n");
+                x->cap = need;
+            }
+            x->first = (u32*)(x->bound + nb);
+            x->seen = x->first + nb + 1;
+            x->cover = x->seen + n;
+            memset(x->seen, 0, n * sizeof *x->seen);
+        }
+    }
+    x->first[nb] = (u32)ncover;
+    x->nbound = nb;
+    free(e);
+}
+void gmmu_aliases(u64 cpu, u64 size, void (*fn)(void* ctx, u64 gva, u64 n), void* ctx) {
+    GAlias* x = &g_hle.nvdrv.alias;
+    u64 end = cpu + size < cpu ? ~(u64)0 : cpu + size, c0 = cpu >> GPAGE_BITS, c1 = (end - 1) >> GPAGE_BITS;
+    u32 lo = 0, hi, i, k;
+    if (!size) return;
+    pm_lock(&g_hle.nvdrv.alias_lock);
+    if (x->stale) alias_build();
+    if (!++x->query && x->nbound) { /* the stamps wrapped: none may look current */
+        memset(x->seen, 0, g_hle.nvdrv.ngruns * sizeof *x->seen);
+        x->query = 1;
+    }
+    for (hi = x->nbound; lo < hi;) { /* past the last bound at or before c0 */
+        u32 m = lo + (hi - lo) / 2;
+        if (x->bound[m] <= c0)
+            lo = m + 1;
+        else
+            hi = m;
+    }
+    for (i = lo ? lo - 1 : 0; i + 1 < x->nbound && x->bound[i] <= c1; i++)
+        for (k = x->first[i]; k < x->first[i + 1]; k++) {
+            u32 ri = x->cover[k];
+            const GRun* r = &g_hle.nvdrv.gruns[ri];
+            u64 rlo = r->cpage << GPAGE_BITS, rhi = (r->cpage + r->pages) << GPAGE_BITS, a, b;
+            if (x->seen[ri] == x->query) continue;
+            x->seen[ri] = x->query;
+            a = rlo > cpu ? rlo : cpu;
+            b = rhi < end ? rhi : end;
+            if (a < b) fn(ctx, (r->gpage << GPAGE_BITS) + (a - rlo), b - a);
+        }
+    pm_unlock(&g_hle.nvdrv.alias_lock);
+}
 void gmmu_map(u64 gva, u64 cpu, u64 size) {
     u64 first, last, p;
     if (!size) return;
@@ -156,6 +360,7 @@ void gmmu_map(u64 gva, u64 cpu, u64 size) {
         __atomic_store_n(&t[p & ((1u << GL2_BITS) - 1)], e, __ATOMIC_RELAXED);
         if (p == first) break;
     }
+    grun_change(first, last, 1, 0, cpu);
     gmmu_change_end(gva, size);
 }
 /* clears the pages of [gva, gva+size). With own set, only the pages still pointing where a mapping of cpu put them:
@@ -191,6 +396,7 @@ static void gmmu_unmap(u64 gva, u64 size, int own, u64 cpu) {
             continue;
         __atomic_store_n(e, 0, __ATOMIC_RELAXED);
     }
+    grun_change(first, last, 0, own, cpu);
     gmmu_change_end(gva, size);
 }
 static GMap* gmap_add(void) {
@@ -1263,6 +1469,7 @@ void nv_init(void) {
     g_hle.nvdrv.big_page_bits = 16;
     pm_init(&g_hle.nvdrv.lock);
     pm_init(&g_hle.nvdrv.aslock);
+    pm_init(&g_hle.nvdrv.alias_lock);
     pm_init(&g_hle.nvdrv.nvev_lk);
     pm_init(&g_hle.nvdrv.sync_lk);
     pm_init(&g_hle.nvdrv.submit_lk);

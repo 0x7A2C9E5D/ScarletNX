@@ -25,6 +25,12 @@ u64 gmmu_run(u64 gva, u64 max, u64* cpu);
 /* Points the pages of [gva, gva + size) at guest memory from cpu on, the renderer told (its mapping bracket): what
    nvhost-as-gpu's MapBufferEx does, and a test without the ioctls */
 void gmmu_map(u64 gva, u64 cpu, u64 size);
+/* Each GPU range that shows guest bytes of [cpu, cpu + size), clipped to them: fn(ctx, gva, n) for the n bytes at
+   gva, each mapped page once. The same guest memory is mapped at several GPU addresses, so what is known of it by one
+   address holds at the others, and this finds them all from the guest side. From any thread. fn runs under the
+   index's lock: it takes no lock and doesn't call back into nvdrv. The index compares addresses only, as the page
+   table holds them: guest memory freed under a mapping still counts here, where gmmu_translate reads it as unmapped */
+void gmmu_aliases(u64 cpu, u64 size, void (*fn)(void* ctx, u64 gva, u64 n), void* ctx);
 
 /* Every syncpoint user allocates its ids here, so they stay below the 128 the stream library sizes its tables at.
    Running out is fatal. A freed id can be handed out again */
@@ -78,6 +84,24 @@ typedef struct {
 typedef struct {
     u64 a, e;
 } VaRange;
+/* a run of the GPU page table: its pages [gpage, gpage + pages) show guest pages from cpage on */
+typedef struct {
+    u64 gpage, pages, cpage;
+} GRun;
+/* gmmu_aliases' index of the runs by guest page, built from them on its first query after a change. The guest pages
+   where a run starts or ends cut guest memory into nbound - 1 intervals, interval i [bound[i], bound[i + 1]), and
+   cover[first[i]] to cover[first[i + 1]] are the runs over all of it, so a query walks the intervals its range
+   meets. seen[r] is the query that last reported run r, so a run over several intervals is reported once. One block
+   from bound, cap bytes */
+typedef struct {
+    u64* bound;
+    u32* first; /* nbound + 1 entries */
+    u32* cover;
+    u32* seen;  /* one per run */
+    size_t cap;
+    u32 nbound, query;
+    int stale; /* the runs changed since the index was built */
+} GAlias;
 /* an nvhost-ctrl event slot. ev is made on first use and nvdrv keeps a reference. An armed slot is signaled once
    syncpoint id reaches thresh; armed changes under nvev_lk */
 typedef struct {
@@ -122,6 +146,13 @@ typedef struct {
     PMutex aslock;         /* held across ioctl_as: the mappings below and the VA allocator */
     GMap* gmaps;
     u32 ngmaps, capgmaps;
+    /* the GPU page table again as runs, sorted by GPU page and disjoint, changed with it (gmmu_map, gmmu_unmap: every
+       mapping, MAP_BUFFER_EX's, REMAP's and FREE_SPACE's, goes through them), and their index by guest page. Both
+       under alias_lock, which is taken last: inside aslock and the renderer's mapping bracket */
+    GRun* gruns;
+    u32 ngruns, capgruns;
+    GAlias alias;
+    PMutex alias_lock;
     u32 big_page_bits; /* 64K unless asked otherwise */
     VaRange* vafree;
     u32 nvafree, capvafree;
