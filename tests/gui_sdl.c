@@ -779,6 +779,17 @@ static void set_env(const char* name, const char* value) {
 #endif
     assert(!(value ? SDL_setenv_unsafe(name, value, 1) : SDL_unsetenv_unsafe(name)));
 }
+/* Settings > App's Text size, its row in focus, made size through its box, then kept or not */
+static void pick_size(App* app, int size, bool keep) {
+    key(app, SDLK_RETURN);
+    assert(app->sizes_shown);
+    app->sizes.focus = size < 0 ? -size - 1 : size + 3;
+    key(app, SDLK_RETURN);
+    assert(app->menu.text_size == size && app->confirm.shown && app->confirm.ask == GUI_ASK_TEXT);
+    if (keep) key(app, SDLK_RIGHT);
+    key(app, SDLK_RETURN);
+    assert(!app->confirm.shown && !app->size_until && app->menu.text_size == (keep ? size : app->size_was));
+}
 int main(int argc, char** argv) {
 #ifdef _WIN32
     snx_test_crash_said();
@@ -1438,13 +1449,51 @@ int main(int argc, char** argv) {
         assert(!strcmp(app.theme.name, first));
     }
     key(&app, SDLK_DOWN);
-    key(&app, SDLK_RETURN);
-    assert(app.menu.text_size == 1 && !strcmp(app.app_form.text, "1x"));
-    key(&app, SDLK_LEFT);
-    assert(!app.menu.text_size && !strcmp(app.app_form.text, "Auto"));
-    key(&app, SDLK_LEFT);
-    assert(app.menu.text_size == GUI_TEXT_MAX);
+    /* Text size: its sizes in a box, Auto's parts first; the one picked is used at once and asked about: Keep keeps it,
+       Back, ESC or no answer in 15 s bring the one before it back */
     key(&app, SDLK_RIGHT);
+    assert(app.sizes_shown && app.sizes.count == GUI_TEXT_MAX + 4 && app.sizes.focus == 3 && !app.menu.text_size);
+    render(&app);
+    key(&app, SDLK_DOWN);
+    key(&app, SDLK_RETURN);
+    assert(!app.sizes_shown && app.menu.text_size == 1 && app.scale == 1 && !strcmp(app.app_form.text, "1x"));
+    assert(app.confirm.shown && app.confirm.ask == GUI_ASK_TEXT && strstr(app.size_line, "Back to Auto in 15 s"));
+    render(&app);
+    key(&app, SDLK_ESCAPE);
+    assert(!app.confirm.shown && !app.menu.text_size && !strcmp(app.app_form.text, "Auto"));
+    app.clock = 1000;
+    key(&app, SDLK_RETURN);
+    app.sizes.focus = 1; /* 0.5 of Auto */
+    key(&app, SDLK_RETURN);
+    assert(app.menu.text_size == -2 && app.scale == SDL_max(1, (app.auto_scale * 2 + 2) / 4) &&
+           strstr(app.app_form.text, "0.5 of Auto: "));
+    app.clock = 1000 + GUI_TEXT_KEEP_MS - 1;
+    pump(&app);
+    assert(app.confirm.shown && strstr(app.size_line, "in 1 s"));
+    app.clock = 1000 + GUI_TEXT_KEEP_MS;
+    pump(&app);
+    assert(!app.confirm.shown && !app.menu.text_size && !app.size_until);
+    app.clock = 0;
+    /* a part of Auto is Auto's scale times it, rounded, never under 1x */
+    {
+        int was = app.auto_scale;
+        app.auto_scale = 4;
+        for (int q = 1; q <= 3; ++q) {
+            app.menu.text_size = -q;
+            layout(&app);
+            assert(app.scale == q);
+        }
+        app.auto_scale = 2;
+        app.menu.text_size = -1;
+        layout(&app);
+        assert(app.scale == 1);
+        app.menu.text_size = -3;
+        layout(&app);
+        assert(app.scale == 2);
+        app.auto_scale = was;
+        app.menu.text_size = 0;
+        layout(&app);
+    }
     assert(!app.menu.text_size && app.editor.row == GUI_APP_TEXT);
     /* the App's picks kept at once in app.ini, which the next start reads back */
     {
@@ -1455,7 +1504,7 @@ int main(int argc, char** argv) {
         char* blocker = snx_path_join(temporary, "not a folder");
         char* kept_file = app.app_file;
         snprintf(first_id, sizeof first_id, "%s", app.theme.id);
-        key(&app, SDLK_RIGHT); /* 1x */
+        pick_size(&app, 1, true);
         key(&app, SDLK_UP);
         key(&app, SDLK_RIGHT); /* the next theme */
         snprintf(id, sizeof id, "%s", app.theme.id);
@@ -1476,8 +1525,17 @@ int main(int argc, char** argv) {
         /* back as they were, kept so */
         key(&app, SDLK_LEFT);
         key(&app, SDLK_DOWN);
-        key(&app, SDLK_LEFT);
+        pick_size(&app, 0, true);
         assert(!strcmp(app.theme.id, first_id) && !app.menu.text_size && !app.editor.note[0]);
+        /* a part of Auto kept as app.ini names it, and read back */
+        pick_size(&app, -3, true);
+        kept = (char*)snx_read_file(app.app_file, &size);
+        assert(kept && strstr(kept, "\ntext_size = 0.75\n"));
+        free(kept);
+        app.menu.text_size = 0;
+        app_load(&app);
+        assert(app.menu.text_size == -3);
+        pick_size(&app, 0, true);
         snprintf(expected, sizeof expected,
                  "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\ntext_size = auto\n"
                  "language = auto\n",
@@ -1498,11 +1556,11 @@ int main(int argc, char** argv) {
         /* a file that cannot be written: the pick holds for the session, and the note says it is not kept */
         assert(!snx_write_file(blocker, "file", 4));
         app.app_file = snx_path_join(blocker, "app.ini");
-        key(&app, SDLK_RIGHT);
+        pick_size(&app, 1, true);
         assert(app.menu.text_size == 1 && !snx_is_file(app.app_file));
         snprintf(expected, sizeof expected, "Not kept for the next start: %s could not be written", app.app_file);
         assert(!strcmp(app.editor.note, expected));
-        key(&app, SDLK_LEFT);
+        pick_size(&app, 0, true);
         assert(!app.menu.text_size);
         free(app.app_file);
         app.app_file = kept_file;

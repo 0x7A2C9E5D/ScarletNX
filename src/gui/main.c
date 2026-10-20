@@ -164,6 +164,13 @@ typedef struct {
     /* the box a click on the user opens (users_open): each user of users.ini, the focused one picked as Settings' user */
     bool users_shown;
     int users_focus;
+    /* Settings > App's Text size: the sizes in a box over its rows; a size picked replaces size_was until size_until,
+       when it goes back unless kept, the question asking meanwhile in size_line */
+    bool sizes_shown;
+    GuiChoice sizes;
+    int size_was;
+    Uint64 size_until;
+    char size_line[128];
     SDL_Texture* users_pictures[SNX_USERS_MAX]; /* theirs, users_side pixels square, made as the box is drawn */
     int users_side;
     bool previewing; /* drawing the theme editor's preview, on a copy of the app put back after it */
@@ -582,6 +589,8 @@ static bool full_path(const char* path) {
     return path[0] == '/';
 #endif
 }
+/* text_size's quarters of Auto (-1 to -3) as app.ini names them */
+static const char* const text_quarters[] = {"0.25", "0.5", "0.75"};
 /* Settings > App's picks, kept at once in app_file for the next start. The App's note, or the menu's message, says when
    they could not be; 0, else nonzero */
 static int app_save(App* app) {
@@ -592,8 +601,10 @@ static int app_save(App* app) {
     for (i = 0; i < GUI_PLACES; ++i) size += 16 + (app->place[i] ? strlen(app->place[i]) : 0);
     text = (char*)snx_alloc(size);
     n = snprintf(text, size, "; Settings > App in the launcher, as they were left\n[app]\ntheme = %s\n", app->theme.id);
-    if (app->menu.text_size)
+    if (app->menu.text_size > 0)
         n += snprintf(text + n, size - (size_t)n, "text_size = %d\n", app->menu.text_size);
+    else if (app->menu.text_size < 0)
+        n += snprintf(text + n, size - (size_t)n, "text_size = %s\n", text_quarters[-app->menu.text_size - 1]);
     else
         n += snprintf(text + n, size - (size_t)n, "text_size = auto\n");
     n += snprintf(text + n, size - (size_t)n, "language = %s\n",
@@ -670,8 +681,14 @@ static int app_read(App* app, bool apply, char* bad, size_t size) {
                 continue;
             }
         } else if (!strcmp(ini.section, "app") && !strcmp(key, "text_size")) {
+            int q;
             if (!strcmp(value, "auto")) {
                 scale = 0;
+                continue;
+            }
+            for (q = 0; q < 3 && strcmp(value, text_quarters[q]); ++q) {}
+            if (q < 3) {
+                scale = -(q + 1);
                 continue;
             }
             if (*value && !*end && number >= 1 && number <= GUI_TEXT_MAX) {
@@ -880,7 +897,9 @@ static void layout(App* app) {
             app->window, 800,
             SDL_max(480, (int)SDL_ceilf(256.0f * (float)app->auto_scale / SDL_GetWindowPixelDensity(app->window))));
     }
-    app->scale = app->menu.text_size ? app->menu.text_size : app->auto_scale;
+    app->scale = app->menu.text_size > 0   ? app->menu.text_size
+                 : app->menu.text_size < 0 ? SDL_max(1, (app->auto_scale * -app->menu.text_size + 2) / 4)
+                                           : app->auto_scale;
     /* as long as 16 rows still fit: Auto's always do on a computer, a phone's not while Fullscreen is off */
     while (app->scale > 1 && height / (16 * app->scale) < 16) --app->scale;
     if (app->scale < 1) app->scale = 1;
@@ -1168,6 +1187,7 @@ static const char* ask_question(const App* app) {
         case GUI_ASK_EXIT: return snx_tr("Exit ScarletNX?");
         case GUI_ASK_OUTSIDE: return snx_tr("Outside the app, Android checks every file access: games may run slower.");
         case GUI_ASK_ROOM: return app->room_line;
+        case GUI_ASK_TEXT: return app->size_line;
         default:
             return screen(app) == GUI_SCREEN_COMPILING ? snx_tr("Abort the recompile? Its work is lost.")
                                                        : snx_tr("Abort the run?");
@@ -1465,7 +1485,8 @@ static const char* const ask_choices[][2] = {{SNX_TR_NOOP("Keep going"), SNX_TR_
                                              {SNX_TR_NOOP("Stay"), SNX_TR_NOOP("Exit")},
                                              {SNX_TR_NOOP("Only this folder"), SNX_TR_NOOP("With subfolders")},
                                              {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Use it")},
-                                             {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Run anyway")}};
+                                             {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Run anyway")},
+                                             {SNX_TR_NOOP("Back"), SNX_TR_NOOP("Keep")}};
 /* the question shown, over the whole screen in the middle or at its foot, a choice asked twice saying so once pressed
    (its label in second) */
 static void ask_place(App* app, GuiChoices* c, const char** labels, char* second, size_t size) {
@@ -2794,7 +2815,7 @@ static const GuiThemeKey app_keys[] = {
     {"", SNX_TR_NOOP("Theme"), GUI_KEY_ACTION, offsetof(GuiAppForm, theme), sizeof(((GuiAppForm*)0)->theme), NULL, 0,
      SNX_TR_NOOP("Built-in themes, then each themes/<name>/theme.ini")},
     {"", SNX_TR_NOOP("Text size"), GUI_KEY_ACTION, offsetof(GuiAppForm, text), sizeof(((GuiAppForm*)0)->text), NULL, 0,
-     SNX_TR_NOOP("Bigger letters scroll the menu. Auto fits the screen")},
+     SNX_TR_NOOP("Picked in a box, kept once said so. Auto fits the screen, its parts are smaller")},
     {"", SNX_TR_NOOP("Language"), GUI_KEY_ACTION, offsetof(GuiAppForm, language), sizeof(((GuiAppForm*)0)->language),
      NULL, 0, SNX_TR_NOOP("The menu's words. Auto: the system's language, English when the menu has none of its")},
     {"", SNX_TR_NOOP("Theme editor"), GUI_KEY_ACTION, 0, 0, NULL, 0,
@@ -2824,15 +2845,22 @@ static void data_relative(const App* app, const char* path, char* out, size_t si
     else
         snprintf(out, size, "%s", path ? path : "");
 }
+/* a text_size as Settings show it: Auto, a part of Auto with the scale it gives, or a scale */
+static void size_name(const App* app, int size, char* out, size_t n) {
+    if (size > 0)
+        snprintf(out, n, "%dx", size);
+    else if (size < 0)
+        snprintf(out, n, snx_tr("%s of Auto: %dx"), text_quarters[-size - 1],
+                 SDL_max(1, (app->auto_scale * -size + 2) / 4));
+    else
+        snprintf(out, n, "%s", snx_tr("Auto"));
+}
 static void app_values(App* app) {
     GuiAppForm* f = &app->app_form;
     char games[4200], work[4200];
     int moved;
     snprintf(f->theme, sizeof f->theme, "%s", app->theme.name);
-    if (app->menu.text_size)
-        snprintf(f->text, sizeof f->text, "%dx", app->menu.text_size);
-    else
-        snprintf(f->text, sizeof f->text, "%s", snx_tr("Auto"));
+    size_name(app, app->menu.text_size, f->text, sizeof f->text);
     if (app->language)
         snprintf(f->language, sizeof f->language, "%s", snx_gui_languages[app->language - 1].name);
     else /* and what it is now */
@@ -3481,13 +3509,107 @@ static void leave_form(App* app) {
     }
 }
 static void clean_row(App* app);
-/* the App's rows: the theme and the letters go round, either way, and the editor opens */
+/* ---- Text size: picked in a box over the App's rows, then kept once said so, else back by itself after a while, as
+   a screen mode is: a size can leave the menu too small or too big to read ---- */
+#define GUI_TEXT_KEEP_MS 15000
+static const char* const size_labels[GUI_TEXT_MAX + 4] = {SNX_TR_NOOP("0.25 of Auto"),
+                                                          SNX_TR_NOOP("0.5 of Auto"),
+                                                          SNX_TR_NOOP("0.75 of Auto"),
+                                                          SNX_TR_NOOP("Auto"),
+                                                          "1x",
+                                                          "2x",
+                                                          "3x",
+                                                          "4x"};
+static int size_of_choice(int i) { return i < 3 ? -(i + 1) : i - 3; }
+static void sizes_open(App* app) {
+    app->sizes.count = GUI_TEXT_MAX + 4;
+    app->sizes.focus = app->menu.text_size < 0 ? -app->menu.text_size - 1 : app->menu.text_size + 3;
+    app->sizes_shown = true;
+}
+static void sizes_place(App* app, GuiChoices* c, const char** labels) {
+    int width, height, i;
+    area(app, &width, &height);
+    for (i = 0; i < app->sizes.count; ++i) labels[i] = snx_tr(size_labels[i]);
+    choices_place(app,
+                  app->theme.dialog == GUI_DIALOG_YORHA
+                      ? gui_rect(cell_w(app), cell_h(app) / 2, width - 2 * cell_w(app), height - cell_h(app))
+                      : gui_rect(0, 0, width, height),
+                  snx_tr("Text size"), NULL, labels, app->sizes.count, app->sizes.focus, c);
+}
+static void render_sizes(App* app) {
+    GuiChoices c;
+    const char* labels[GUI_TEXT_MAX + 4];
+    sizes_place(app, &c, labels);
+    shade(app, 128); /* over the App's rows */
+    choices_draw(app, &c, snx_tr("Text size"), NULL, labels, app->sizes.count, app->sizes.focus);
+}
+static void text_left(App* app);
+/* size in use now, asked about until GUI_TEXT_KEEP_MS from now */
+static void size_take(App* app, int size) {
+    app->sizes_shown = false;
+    if (size == app->menu.text_size) return;
+    app->size_was = app->menu.text_size;
+    app->menu.text_size = size;
+    layout(app);
+    app->size_until = now_ms(app) + GUI_TEXT_KEEP_MS;
+    text_left(app);
+    gui_confirm_open(&app->confirm, GUI_ASK_TEXT, false);
+    app_values(app);
+}
+static void sizes_key(App* app, GuiKey key) {
+    switch (gui_choice_key(&app->sizes, key)) {
+        case GUI_CHOICE_TAKE: size_take(app, size_of_choice(app->sizes.focus)); break;
+        case GUI_CHOICE_BACK: app->sizes_shown = false; break;
+        default: break;
+    }
+}
+/* a size under the pointer takes the focus, a click takes it; a click off the box closes it */
+static void sizes_pointer(App* app, float x, float y, bool click) {
+    GuiChoices c;
+    const char* labels[GUI_TEXT_MAX + 4];
+    bool on;
+    int i;
+    sizes_place(app, &c, labels);
+    if ((i = choices_hit(&c, x, y, &on)) >= 0) {
+        app->sizes.focus = i;
+        if (click) size_take(app, size_of_choice(i));
+    } else if (click && !on)
+        app->sizes_shown = false;
+}
+/* the new size kept in app.ini, or the one before it back (Back, ESC, or no answer in time) */
+static void size_answer(App* app, bool keep) {
+    app->size_until = 0;
+    if (keep)
+        app_save(app);
+    else {
+        app->menu.text_size = app->size_was;
+        layout(app);
+    }
+    app_values(app);
+}
+/* while a new size waits for its answer: the question's line with the seconds left, and the size before it back once
+   they run out */
+static void text_left(App* app) {
+    Uint64 now = now_ms(app);
+    char was[64];
+    if (!app->size_until) return;
+    if (now >= app->size_until) {
+        app->confirm.shown = false;
+        size_answer(app, false);
+        return;
+    }
+    size_name(app, app->size_was, was, sizeof was);
+    snprintf(app->size_line, sizeof app->size_line, snx_tr("Keep this text size? Back to %s in %d s"), was,
+             (int)((app->size_until - now + 999) / 1000));
+}
+/* the App's rows: the theme and the language go round, either way, Text size opens its box, and the editor opens */
 static void app_action(App* app, int row, int step) {
     if (row == GUI_APP_THEME)
         next_theme(app, step < 0 ? -1 : 1);
-    else if (row == GUI_APP_TEXT)
-        app->menu.text_size = (app->menu.text_size + (step < 0 ? GUI_TEXT_MAX : 1)) % (GUI_TEXT_MAX + 1);
-    else if (row == GUI_APP_LANGUAGE) {
+    else if (row == GUI_APP_TEXT) {
+        sizes_open(app);
+        return;
+    } else if (row == GUI_APP_LANGUAGE) {
         app->language = (app->language + (step < 0 ? snx_gui_language_count : 1)) % (snx_gui_language_count + 1);
         language_apply(app);
     } else if (row == GUI_APP_EDITOR && !step) {
@@ -5103,7 +5225,9 @@ static void render(App* app) {
     else if (app->editing) {
         draw_form(app);
         if (app->confirm.shown)
-            render_ask(app); /* a folder picked on the folders' screen */
+            render_ask(app); /* a folder picked on the folders' screen, a text size picked */
+        else if (app->sizes_shown)
+            render_sizes(app);
         else if (app->users_shown)
             render_users(app); /* opened from the form's head, as from the menu's */
     } else
@@ -5452,6 +5576,7 @@ static void clean_row(App* app) {
 }
 static void pump(App* app) {
     keys_left(app);
+    text_left(app);
     if (app->menu.running) {
         char buffer[4096];
         /* Bounded work per frame keeps keyboard/window events responsive even
@@ -6129,6 +6254,8 @@ static void ask_key(App* app, GuiKey key) {
         outside_answer(app, second);
     else if (ask == GUI_ASK_ROOM)
         room_answer(app, second);
+    else if (ask == GUI_ASK_TEXT)
+        size_answer(app, second);
     else if (second && ask == GUI_ASK_EXIT)
         app->menu.quit = true;
     else if (second)
@@ -6364,6 +6491,8 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
     }
     if (app->confirm.shown) /* over a run, the menu, Games or a form */
         ask_pointer(app, x, y, click);
+    else if (app->sizes_shown)
+        sizes_pointer(app, x, y, click);
     else if (app->users_shown)
         users_pointer(app, x, y, click, touch);
     else if (app->editing && app->form == GUI_FORM_PAD) {
@@ -6574,7 +6703,11 @@ static void event(App* app, const SDL_Event* e) {
         app->splash_until = 0;
         return;
     }
-    /* the box of users takes every key while it shows, as a question does */
+    /* the box of sizes and the box of users take every key while they show, as a question does */
+    if (app->sizes_shown && !app->confirm.shown && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
+        if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && menu_key_of(&e->key, &key)) sizes_key(app, key);
+        return;
+    }
     if (app->users_shown && !app->confirm.shown && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
         if (e->type == SDL_EVENT_KEY_DOWN && menu_key_of(&e->key, &key)) users_key(app, key);
         return;

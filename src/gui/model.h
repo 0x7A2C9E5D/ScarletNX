@@ -32,7 +32,8 @@ typedef struct {
     bool activated;
     GuiLoadView view;
     bool running, quit;
-    int text_size; /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen */
+    /* the font's scale, 1 to GUI_TEXT_MAX; 0 fits the screen (Auto); -1 to -3 that many quarters of Auto's */
+    int text_size;
 } GuiMenu;
 /* what a key on the menu asks of the GUI: nothing more, the Settings or the logs shared */
 typedef enum { GUI_MENU_STAY, GUI_MENU_SETTINGS, GUI_MENU_LOG, GUI_MENU_DATA } GuiMenuDo;
@@ -45,7 +46,8 @@ typedef enum {
     GUI_ASK_EXIT,    /* leaving the menu on a computer */
     GUI_ASK_DEEP,    /* a folder picked with folders in it: are their games listed too */
     GUI_ASK_OUTSIDE, /* a folder picked in Folders outside the app's own storage, which Android slows */
-    GUI_ASK_ROOM     /* a run whose extraction may not fit (gui_room) */
+    GUI_ASK_ROOM,    /* a run whose extraction may not fit (gui_room) */
+    GUI_ASK_TEXT     /* a text size just picked: kept, or the one before it back */
 } GuiAsk;
 typedef struct {
     bool shown;

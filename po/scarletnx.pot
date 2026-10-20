@@ -498,6 +498,10 @@ msgstr ""
 msgid "Run anyway"
 msgstr ""
 
+#: src/gui/main.c
+msgid "Keep"
+msgstr ""
+
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -706,7 +710,7 @@ msgid "Text size"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Bigger letters scroll the menu. Auto fits the screen"
+msgid "Picked in a box, kept once said so. Auto fits the screen, its parts are smaller"
 msgstr ""
 
 #: src/gui/main.c
@@ -739,6 +743,11 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "The settings the runtime and the launcher no longer read: Enter twice"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s of Auto: %dx"
 msgstr ""
 
 #: src/gui/main.c
@@ -976,6 +985,23 @@ msgid "Each player's own, as Eden's tabs: Left/Right go round All and players 1 
 msgstr ""
 
 #: src/gui/main.c
+msgid "0.25 of Auto"
+msgstr ""
+
+#: src/gui/main.c
+msgid "0.5 of Auto"
+msgstr ""
+
+#: src/gui/main.c
+msgid "0.75 of Auto"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Keep this text size? Back to %s in %d s"
+msgstr ""
+
+#: src/gui/main.c
 #, c-format
 msgid "gamepad_map's \"%s\" is not a control and the button it sends (south:B)"
 msgstr ""
@@ -1193,10 +1219,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Portable"
-msgstr ""
-
-#: src/gui/main.c
-msgid "Keep"
 msgstr ""
 
 #: src/gui/main.c

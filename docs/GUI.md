@@ -103,7 +103,8 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   dead zone, background input, Joy-Cons). A player's *Controller* is *Any*, the next to connect, until Enter on it
   and a press on a controller give it that one (ESC leaves it as it was, Del makes it *Any* again); its *Button
   map* is the page above on its own keys, its A and B as its *Swap A/B* says.
-  **App** holds **Theme**, **Text size** and **Language**, which Left/Right or Enter go round either way, **Theme editor**, which comes back to App, and **Library**: first `games/`,
+  **App** holds **Theme** and **Language**, which Left/Right or Enter go round either way, **Text size**, which opens
+  its box of sizes (below), **Theme editor**, which comes back to App, and **Library**: first `games/`,
   where recompiled games go: Enter there picks another, as **Folders > Games** does; at its default it stays on the
   list (the foot's Del greyed), and a folder picked goes back to the default with Del pressed twice, only the setting
   changing. Then the player's own folders, whose games the `games/` browser lists after
@@ -166,7 +167,7 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   and YoRHa, then each folder of `themes/` (see [Themes](#themes)). The menu opens in YoRHa until one is picked.
   It is kept for the next start,
   as are Text size and Language, in `app.ini` beside `settings.ini`: `[app]` with `theme` (a theme's folder
-  name), `text_size` (`auto` or 1 to 4) and `language` (`auto`, `en` or a language's code, as `pt_BR`), and once one
+  name), `text_size` (`auto`, `0.25`, `0.5`, `0.75` or 1 to 4) and `language` (`auto`, `en` or a language's code, as `pt_BR`), and once one
   is picked `[folders]` with Folders' `data`, `games` and
   `work` (a full path, nothing for the default). A value the
   menu does not know, or a theme no longer there, is named in the menu's message as it opens and
@@ -181,8 +182,10 @@ built in, drawn at the window's size ([lunasvg](https://github.com/sammycage/lun
   Save (or Ctrl+S) writes `themes/<folder>/theme.ini` in the data folder and switches to it;
   a built-in is saved as a new theme, `mytheme` until renamed. ESC leaves, asking first if
   there are unsaved changes.
-- Settings > App's **Text size** steps the menu's letters through Auto (fit the screen) and four
-  sizes. Bigger letters scroll the menu. The foot's letters (its keys, and the tips when they are
+- Settings > App's **Text size** opens a box of sizes: a quarter, half or three quarters of Auto (Auto's scale times
+  it, rounded, 1x at the least), Auto (fit the screen), then 1x to 4x. The size picked is used at once, and a question
+  asks to keep it: Keep keeps it in `app.ini`; Back, ESC or no answer in 15 s bring the one before it back. Bigger
+  letters scroll the menu. The foot's letters (its keys, and the tips when they are
   there) are a size under the rest's, 1x at the least.
 - Settings > App's **Language** goes round Auto, English and each language compiled in, by its own name. Auto,
   the default, takes the first of the system's languages (SDL's preferred locales) the menu has: that language for
