@@ -1005,6 +1005,96 @@ static void emptyrom_init(void) {
     put64(m + 64, 0);
     put64(m + 72, sizeof g_hle.fs.emptyrom);
 }
+
+/* NgWord2, the profanity filter's pattern files, from Eden's stand-in (system_archive/ng_word.cpp): the 11.0.1 set,
+   52 files, each ac_ file decoding to no bad words */
+#define NGWORD2_DATA_ID  0x0100000000000823ull
+#define NGWORD2_FILES    52
+#define NGWORD2_AC_COUNT (NGWORD2_FILES - 1)
+static const u8 ngword2_ac[] = {
+    0x1F, 0x8B, 0x08, 0x08, 0xD5, 0x2C, 0x09, 0x5C, 0x04, 0x00, 0x61, 0x63, 0x72, 0x61, 0x77,
+    0x00, 0xED, 0xC1, 0x01, 0x0D, 0x00, 0x00, 0x00, 0xC2, 0x20, 0xFB, 0xA7, 0xB6, 0xC7, 0x07,
+    0x0C, 0x00, 0x00, 0x00, 0xC8, 0x3B, 0x11, 0x00, 0x1C, 0xC7, 0x00, 0x10, 0x00, 0x00,
+};
+#define NGWORD2_AC_SIZE (u32)(sizeof ngword2_ac)
+static const u8 ngword2_version[4] = {0, 0, 0, 0x1A};
+
+static void ngword2_name(u32 i, char name[32]) {
+    static const char* const kinds[3] = {"b1", "b2", "not_b"};
+    static const char* const common[3] = {"ac_common_b1_nx", "ac_common_b2_nx", "ac_common_not_b_nx"};
+    if (i < 48)
+        snprintf(name, 32, "ac_%u_%s_nx", i / 3, kinds[i % 3]);
+    else if (i < NGWORD2_AC_COUNT)
+        snprintf(name, 32, "%s", common[i - 48]);
+    else
+        snprintf(name, 32, "version.dat");
+}
+static u32 ngword2_file_size(u32 i) { return i < NGWORD2_AC_COUNT ? NGWORD2_AC_SIZE : 4; }
+static const u8* ngword2_file_data(u32 i) { return i < NGWORD2_AC_COUNT ? ngword2_ac : ngword2_version; }
+/* the 52 files in a RomFS laid out like romfs_build's */
+static void ngword2rom_init(void) {
+    u8* m = g_hle.fs.ngword2rom;
+    u32 dbuckets = hcount(1), fbuckets = hcount(NGWORD2_FILES);
+    u64 dhash = 0x50;
+    u64 dtab = dhash + (u64)dbuckets * 4;
+    u64 fhash = dtab + ROM_DIR_ENTRY;
+    u64 ftab = fhash + (u64)fbuckets * 4;
+    u64 fsize = 0, dsize = 0, fdata, data = 0, off = 0;
+    u32 i;
+    char name[32];
+
+    for (i = 0; i < NGWORD2_FILES; i++) {
+        ngword2_name(i, name);
+        fsize += entry_size(ROM_FILE_ENTRY, name);
+        dsize = (dsize + 15) & ~(u64)15;
+        dsize += ngword2_file_size(i);
+    }
+    fdata = (ftab + fsize + 0x1FF) & ~(u64)0x1FF;
+    if (fdata + dsize > sizeof g_hle.fs.ngword2rom) fatal("NgWord2: the synthesized archive does not fit\n");
+    memset(m, 0, sizeof g_hle.fs.ngword2rom);
+    memset(m + dhash, 0xFF, (size_t)dbuckets * 4);
+    memset(m + fhash, 0xFF, (size_t)fbuckets * 4);
+    /* the root folder, its files starting at table offset 0 */
+    put32(m + dhash + (u64)(rhash(0, "") % dbuckets) * 4, 0);
+    put32(m + dtab, 0);
+    put32(m + dtab + 4, ROM_NONE);
+    put32(m + dtab + 8, ROM_NONE);
+    put32(m + dtab + 12, 0);
+    put32(m + dtab + 16, ROM_NONE);
+    put32(m + dtab + 20, 0);
+    for (i = 0; i < NGWORD2_FILES; i++) {
+        u32 len, b;
+        u64 size = ngword2_file_size(i);
+        u8* e;
+        ngword2_name(i, name);
+        len = (u32)strlen(name);
+        data = (data + 15) & ~(u64)15;
+        e = m + ftab + off;
+        put32(e, 0); /* the root folder */
+        put32(e + 4, i + 1 < NGWORD2_FILES ? (u32)(off + entry_size(ROM_FILE_ENTRY, name)) : ROM_NONE);
+        put64(e + 8, data);
+        put64(e + 16, size);
+        b = rhash(0, name) % fbuckets;
+        memcpy(e + 24, m + fhash + (u64)b * 4, 4);
+        put32(m + fhash + (u64)b * 4, (u32)off);
+        put32(e + 28, len);
+        memcpy(e + ROM_FILE_ENTRY, name, len);
+        memcpy(m + fdata + data, ngword2_file_data(i), (size_t)size);
+        data += size;
+        off += entry_size(ROM_FILE_ENTRY, name);
+    }
+    put64(m, 0x50);
+    put64(m + 8, dhash);
+    put64(m + 16, (u64)dbuckets * 4);
+    put64(m + 24, dtab);
+    put64(m + 32, ROM_DIR_ENTRY);
+    put64(m + 40, fhash);
+    put64(m + 48, (u64)fbuckets * 4);
+    put64(m + 56, ftab);
+    put64(m + 64, fsize);
+    put64(m + 72, fdata);
+    g_hle.fs.ngword2rom_size = fdata + data;
+}
 /* save data folders, by SaveDataType */
 static const char* const g_save_kinds[] = {"system", "user", "bcat", "device", "temp", "cache", "sysbcat"};
 /* An Account save is save/user.<uid>, the folder of its user (users.c). The first user's, while it has none, is the one
@@ -1201,8 +1291,13 @@ static int nn_fssrv_sf_IFileSystemProxy_OpenDataStorageByDataId(SvcObj* self, nn
     FsNode* node;
     FsTreeResult r = fs_tree_lookup(&g_hle.fs.tree, NULL, p, &node);
     if (r == FS_TREE_NOTFOUND) {
-        r = fs_tree_add_virtual(&g_hle.fs.tree, p, g_hle.fs.emptyrom, sizeof g_hle.fs.emptyrom, &node);
-        if (!r) LOG("fs: provided empty system archive %016llx\n", (unsigned long long)data_id);
+        if (data_id == NGWORD2_DATA_ID) {
+            r = fs_tree_add_virtual(&g_hle.fs.tree, p, g_hle.fs.ngword2rom, g_hle.fs.ngword2rom_size, &node);
+            if (!r) LOG("fs: provided synthesized NgWord2 system archive %016llx\n", (unsigned long long)data_id);
+        } else {
+            r = fs_tree_add_virtual(&g_hle.fs.tree, p, g_hle.fs.emptyrom, sizeof g_hle.fs.emptyrom, &node);
+            if (!r) LOG("fs: provided empty system archive %016llx\n", (unsigned long long)data_id);
+        }
     }
     u32 rc = tree_result(r);
     *storage = R_FAILED(rc) ? NULL : file_new(node, 1, 1, &rc);
@@ -1256,6 +1351,7 @@ static SvcObj* new_fspldr(void) { return nn_fssrv_sf_IFileSystemProxyForLoader_n
 
 void svc_fs_init(void) {
     emptyrom_init();
+    ngword2rom_init();
     nn_fssrv_sf_IFileSystemProxy_register(new_fsp);
     nn_fssrv_sf_IProgramRegistry_register(new_fsppr);
     nn_fssrv_sf_IFileSystemProxyForLoader_register(new_fspldr);

@@ -45,6 +45,12 @@ IPC requests allow 0x300-byte paths excluding NUL. Host limits also apply.
   persistent host copy. One there in the data directory is served instead: a game that draws Miis (Mario Kart 8
   Deluxe) needs the console's Mii models, system data `0100000000000802`, whose RomFS goes there from your own
   firmware; on the empty stand-in it stops in its graphics code.
+- `0100000000000823` (NgWord2) is the exception: when absent, it is synthesized with firmware 11.0.1's 52-file
+  profanity-filter set (the `ac_*` pattern files and `version.dat` 0x1A), from Eden's stand-in archive, in place of an
+  empty image. A game that calls `CheckProfanityWords` (Yo-kai Watch) reads the pattern files, and stops on the empty
+  stand-in. Later firmware carries more files (`ac_16`, `ac_17`, `ac_similar_form_nx`, the `trie_*` tables), which the
+  11.0.1 image does not have: a game built on that SDK is served by the console's own `.romfs` in the data directory
+  instead, which still takes priority.
 
 ## Shared fonts
 
