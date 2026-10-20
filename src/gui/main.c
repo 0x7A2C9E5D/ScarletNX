@@ -2462,6 +2462,7 @@ static GuiSettings* settings_of(App* app) {
     char* driver;
     char* list;
     if (app->settings.keys) return &app->settings;
+    app->groups = 0; /* made from a list read before, whose section names they point into */
     driver = find_driver(app, GUI_SWITCH);
 #ifdef SDL_PLATFORM_IOS /* no program to ask: the game's .ini keeps its settings */
     list = NULL;
