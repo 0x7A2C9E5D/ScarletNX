@@ -2498,9 +2498,9 @@ static GuiSettings* settings_of(App* app) {
 }
 /* ---- the theme editor's preview: the menu or a run in the theme being edited ---- */
 #define GUI_PREVIEW_MS 8000
-static const char preview_run[] = "Extracting Cult of the Lamb.nsp\n"
+static const char preview_run[] = "Extracting A Game.nsp\n"
                                   "Extracted 3 NCAs, the program's 4 modules\n"
-                                  "Recompiling Cult of the Lamb (4 modules)\n"
+                                  "Recompiling A Game (4 modules)\n"
                                   "Functions: 48211  instructions: 2915002\n"
                                   "LLVM: 5 code units and the module descriptor\n"
                                   "  compiled block 1/6: code_000, 9874 functions (8.1 s)\n"
@@ -2532,6 +2532,8 @@ static bool preview_texture(App* app) {
     app->menu.running = run;
     app->editing = false; /* the menu's own tabs */
     app->finished = app->aborting = app->abnormal_exit = app->confirm.shown = false;
+    /* the box of users is the editor's: its pictures, made or replaced on this copy, would go with it */
+    app->users_shown = false;
     app->native = 0;
     app->entering_ms = app->leaving_ms = 0;
     app->fade_ms = run ? app->preview_since : 0; /* a run fades in from black, as after the menu */
@@ -2540,7 +2542,7 @@ static bool preview_texture(App* app) {
     if (run) {
         app->steps = app->preview_steps;
         app->console = app->preview_console;
-        app->file = (char*)"games/Cult of the Lamb.nsp";
+        app->file = (char*)"games/A Game.nsp";
         app->menu.selected = GUI_SWITCH;
     }
     SDL_SetRenderTarget(app->renderer, app->preview);
@@ -4324,7 +4326,10 @@ static void render(App* app) {
         render_pad(app);
     else if (app->editing) {
         draw_form(app);
-        if (app->confirm.shown) render_ask(app); /* a folder picked on the folders' screen */
+        if (app->confirm.shown)
+            render_ask(app); /* a folder picked on the folders' screen */
+        else if (app->users_shown)
+            render_users(app); /* opened from the form's head, as from the menu's */
     } else
         draw_screen(app);
     if (app->cleaned_shown) render_files(app, 1); /* over the menu, or the App's rows it was started from */

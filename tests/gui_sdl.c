@@ -352,6 +352,23 @@ static void app_select(App* app, int row) {
     key(app, SDLK_RETURN);
     if (app->editing && app->form == GUI_FORM_APP) leave_editor(app);
 }
+/* the theme editor's preview as last drawn, its pixels */
+static SDL_Surface* preview_pixels(App* app) {
+    SDL_Surface* read;
+    assert(app->preview && SDL_SetRenderTarget(app->renderer, app->preview));
+    read = SDL_RenderReadPixels(app->renderer, NULL);
+    assert(SDL_SetRenderTarget(app->renderer, NULL) && read);
+    return read;
+}
+static bool same_pixels(const SDL_Surface* a, const SDL_Surface* b) {
+    int y;
+    if (a->w != b->w || a->h != b->h || a->format != b->format) return false;
+    for (y = 0; y < a->h; ++y)
+        if (memcmp((const Uint8*)a->pixels + y * a->pitch, (const Uint8*)b->pixels + y * b->pitch,
+                   (size_t)a->w * SDL_BYTESPERPIXEL(a->format)))
+            return false;
+    return true;
+}
 /* the launcher's gdbstub on or off */
 static void launcher(App* app, bool on) {
     assert(gui_settings_set(&app->settings, "gdbstub", on ? "on" : "off"));
@@ -4446,6 +4463,47 @@ int main(int argc, char** argv) {
                 kept = (char*)snx_read_file(app.settings_file, &size);
                 assert(!kept || !strstr(kept, "user="));
                 free(kept);
+            }
+            /* the theme editor's preview is the menu in the theme, drawn on a copy of the app put back after it: the
+               box of users opened from the editor's head is not on it, as the pictures the copy made for it would go
+               with the copy, and the app's own be destroyed under it */
+            {
+                int text_size = app.menu.text_size;
+                Uint64 clock = app.clock;
+                GuiPlace head;
+                SDL_Surface *plain, *boxed;
+                app.clock = 1;
+                app.menu.text_size = 2; /* the preview's own scale is 1: its pictures are of another size */
+                app_select(&app, GUI_APP_EDITOR);
+                assert(app.editing && app.form == GUI_FORM_THEME && app.scale == 2);
+                render(&app);
+                plain = preview_pixels(&app);
+                place_screen(&app, &head, "", 0, GUI_SHOWS_TABS);
+                swipe_px(&app, head.badge.x + head.badge.w / 2, head.badge.y + head.badge.h / 2,
+                         head.badge.x + head.badge.w / 2, head.badge.y + head.badge.h / 2);
+                assert(app.users_shown && app.editing && app.form == GUI_FORM_THEME);
+                render(&app);
+                boxed = preview_pixels(&app);
+                assert(same_pixels(plain, boxed));
+                /* the box shows over the editor itself, its pictures the app's at the size it draws them, render
+                   after render */
+                assert(find_text(&app, "Who plays the games", rgb(app.theme.page), 1, &nx, &ny));
+                render(&app);
+                for (int i = 0; i < g_user_count; ++i) {
+                    float w = 0, h = 0;
+                    assert(app.users_pictures[i] && SDL_GetTextureSize(app.users_pictures[i], &w, &h) &&
+                           (int)w == app.users_side);
+                }
+                SDL_DestroySurface(plain);
+                SDL_DestroySurface(boxed);
+                key(&app, SDLK_ESCAPE);
+                assert(!app.users_shown && app.editing && app.form == GUI_FORM_THEME);
+                key(&app, SDLK_ESCAPE);
+                assert(app.editing && app.form == GUI_FORM_APP);
+                leave_editor(&app);
+                app.menu.text_size = text_size;
+                app.clock = clock;
+                render(&app);
             }
             /* none: neither the box nor the nickname, and the title against the right again */
             app.theme.picture = GUI_PICTURE_NONE;
