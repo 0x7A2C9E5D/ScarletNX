@@ -9,6 +9,11 @@ endif()
 add_library(snx_arm_rt STATIC fp_helpers.c crypto_helpers.c rt_helpers.c)
 set_target_properties(snx_arm_rt PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
 target_compile_options(snx_arm_rt PRIVATE -Wall -Wextra -Werror=missing-prototypes)
+# linked into the libraries made from emitted ARM code (tests/arm_test.py loads one into Python), which have no
+# sanitizer runtime: SNX_TEST_SANITIZERS (tests/CMakeLists.txt) builds it without
+if(SNX_TEST_SANITIZERS)
+    target_compile_options(snx_arm_rt PRIVATE -fno-sanitize=address,undefined)
+endif()
 add_library(snx_arm_llvm STATIC a32.c thumb_decode.c vector_decode.c profile.c llvm.c)
 set_target_properties(snx_arm_llvm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 target_include_directories(snx_arm_llvm SYSTEM PUBLIC "${SNX_LLVM_INCLUDE_DIR}")

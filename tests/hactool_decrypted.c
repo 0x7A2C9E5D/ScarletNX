@@ -145,7 +145,6 @@ static void pfs_sections(void) {
         nca_section_fseek(&ctx.section_contexts[0], 0x20);
         CHECK(nca_section_fread(&ctx.section_contexts[0], got, sizeof(got)) == sizeof(got));
         CHECK(!memcmp(got, &pfs, sizeof(got)));
-        free(ctx.section_contexts[0].pfs0_ctx.header);
         nca_free_section_contexts(&ctx);
         CHECK(!fclose(ctx.file));
     }

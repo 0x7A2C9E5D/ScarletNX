@@ -24,7 +24,8 @@ python3 tests/run_filesystem_tree.py --cc clang --sanitize
 
 `scripts/format.sh` without `--check` formats in place (clang-format 23 and the pinned Ruff, through `uvx`). CI
 doesn't check formatting, so run it locally. Configuring with `-DSNX_TEST_SANITIZERS=ON` builds the native
-regression tests and the libraries they exercise with ASan and UBSan. That build is for tests only and is not deployed.
+regression tests, and the programs and libraries they run or link, with ASan and UBSan. That build is for tests only and
+is not deployed.
 
 A build is not a test. A runtime change is verified by running the game through the scene it affects, and the commit
 says what was run. [DEVELOPMENT.md](docs/DEVELOPMENT.md) has the run and diagnose commands.

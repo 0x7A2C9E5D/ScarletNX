@@ -212,8 +212,11 @@ void nca_free_section_contexts(nca_ctx_t *ctx) {
             if (ctx->section_contexts[i].aes) {
                 free_aes_ctx(ctx->section_contexts[i].aes);
             }
-            if (ctx->section_contexts[i].type == PFS0 && ctx->section_contexts[i].pfs0_ctx.is_exefs) {
-                free(ctx->section_contexts[i].pfs0_ctx.npdm);
+            if (ctx->section_contexts[i].type == PFS0) {
+                free(ctx->section_contexts[i].pfs0_ctx.header);
+                if (ctx->section_contexts[i].pfs0_ctx.is_exefs) {
+                    free(ctx->section_contexts[i].pfs0_ctx.npdm);
+                }
             } else if (ctx->section_contexts[i].type == ROMFS) {
                 if (ctx->section_contexts[i].romfs_ctx.directories) {
                     free(ctx->section_contexts[i].romfs_ctx.directories);
@@ -1528,16 +1531,17 @@ static int nca_visit_romfs_file(nca_section_ctx_t *ctx, uint32_t file_offset, fi
     int found_any_file = 0;
 
     do {
-        romfs_fentry_t *entry;
+        romfs_fentry_t fields, *entry = &fields;
+        const char *name;
         if (ctx->type == ROMFS) {
-            entry = romfs_get_fentry(ctx->romfs_ctx.files, file_offset);
+            name = romfs_get_fentry(ctx->romfs_ctx.files, file_offset, entry);
         } else {
-            entry = romfs_get_fentry(ctx->bktr_ctx.files, file_offset);
+            name = romfs_get_fentry(ctx->bktr_ctx.files, file_offset, entry);
         }
 
         filepath_copy(cur_path, dir_path);
         if (entry->name_size) {
-            filepath_append_n(cur_path, entry->name_size, "%s", entry->name);
+            filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, name);
         }
 
         int found_file = 1;
@@ -1580,11 +1584,12 @@ static int nca_visit_nca0_romfs_file(nca_section_ctx_t *ctx, uint32_t file_offse
     int found_any_file = 0;
 
     do {
-        romfs_fentry_t *entry = romfs_get_fentry(ctx->nca0_romfs_ctx.files, file_offset);
+        romfs_fentry_t fields, *entry = &fields;
+        const char *name = romfs_get_fentry(ctx->nca0_romfs_ctx.files, file_offset, entry);
 
         filepath_copy(cur_path, dir_path);
         if (entry->name_size) {
-            filepath_append_n(cur_path, entry->name_size, "%s", entry->name);
+            filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, name);
         }
 
         int found_file = 1;
@@ -1624,7 +1629,7 @@ static int nca_visit_romfs_dir(nca_section_ctx_t *ctx, uint32_t dir_offset, file
 
     filepath_copy(cur_path, parent_path);
     if (entry->name_size) {
-        filepath_append_n(cur_path, entry->name_size, "%s", entry->name);
+        filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, entry->name);
     }
 
     /* If we're actually extracting the romfs, make directory. */
@@ -1664,7 +1669,7 @@ static int nca_visit_nca0_romfs_dir(nca_section_ctx_t *ctx, uint32_t dir_offset,
 
     filepath_copy(cur_path, parent_path);
     if (entry->name_size) {
-        filepath_append_n(cur_path, entry->name_size, "%s", entry->name);
+        filepath_append_n(cur_path, entry->name_size, "%.*s", (int)entry->name_size, entry->name);
     }
 
     /* If we're actually extracting the romfs, make directory. */

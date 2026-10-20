@@ -5,28 +5,55 @@ option(SNX_TEST_SANITIZERS
 the runtime links those libraries too, and isn't deployed)" OFF)
 option(SNX_TEST_VULKAN "Run offscreen Vulkan integration tests (requires a Vulkan 1.3 ICD, e.g. lavapipe)" OFF)
 option(SNX_TEST_ARM_AOT "Build asset-free static ARM11/checked-memory witnesses (requires native LLVM SDK)" OFF)
-# the in-tree libraries the tests exercise (the network stack, the loaders and LZ4, the recompiler and its backends):
-# an overflow in them shows only in code built with the sanitizers. The runtime links them too, so src/nx doesn't
-# deploy a sanitized one. A folder that makes one after this one calls snx_test_sanitize on it: the ARM backend of a
-# GNU ABI-only or an ARM AOT build, the GNU ABI runtime, the shader translator, the GUI's library
+# the in-tree libraries the tests exercise and the programs they run: an overflow in them shows only in code built
+# with the sanitizers. src/nx doesn't deploy a sanitized runtime. A tool made by a host build (cross-compiling) is
+# that build's
 function(snx_test_sanitize)
     if(NOT SNX_TEST_SANITIZERS)
         return()
     endif()
     foreach(target ${ARGN})
         if(TARGET ${target})
+            get_target_property(imported ${target} IMPORTED)
+            if(imported)
+                continue()
+            endif()
             target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
             get_target_property(type ${target} TYPE)
-            if(type STREQUAL "SHARED_LIBRARY" OR type STREQUAL "MODULE_LIBRARY")
-                target_link_options(${target} PUBLIC -fsanitize=address,undefined) # its own link too
+            if(type STREQUAL "STATIC_LIBRARY" OR type STREQUAL "OBJECT_LIBRARY")
+                target_link_options(${target} INTERFACE -fsanitize=address,undefined) # the program that links it
             else()
-                target_link_options(${target} INTERFACE -fsanitize=address,undefined)
+                target_link_options(${target} PUBLIC -fsanitize=address,undefined) # its own link too
             endif()
         endif()
     endforeach()
 endfunction()
-snx_test_sanitize(snx_driver snx_nx_module snx_driver_llvm scarletnx-common scarletnx-net snx_lz4
-                  snx_llvm snx_arm_llvm scarletnx-recompiler scarletnx-recompiler-shared)
+# once every folder has made its targets: most come after this one, and which folder makes a shared one (the window
+# icon, the code generators) depends on the build. runtime_architecture (tests/architecture.py --sanitizers) names
+# what the tests reach that this list misses
+if(SNX_TEST_SANITIZERS)
+    cmake_language(DEFER DIRECTORY "${PROJECT_SOURCE_DIR}" CALL snx_test_sanitize
+        # the common code: network, filesystems, the A64 reference and LZ4
+        scarletnx-common scarletnx-net scarletnx-ldn scarletnx-filesystem snx_demangle snx_a64_reference snx_lz4
+        snx-logscan
+        # the recompiler and its backends
+        snx_llvm snx_arm_llvm scarletnx-recompiler scarletnx-recompiler-shared
+        # the driver, its extraction, the settings and the build's line
+        snx_driver snx_nx_module snx_driver_llvm hactool_lib snx_settings snx_settings_runtime snx_build_info
+        snx-test-build-info
+        # the Switch runtime: its components, the shader translator and the Vulkan backend
+        scarletnx snx_core snx_kernel snx_hle snx_video snx_gpu snx_platform snx_shader snx_vk
+        # the GNU ABI runtime
+        scarletnx-gnuabi scarletnx-gnuabi-run
+        # the 3DS runtime
+        scarletnx-3ds snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process snx_ctr_native
+        snx_ctr_audio snx_ctr_gpu
+        # the menu, its splash, icon and pads
+        scarletnx-gui snx_gui_support snx_i18n snx_gui_languages snx_gui_languages_test snx_splash snx-test-splash
+        snx_window_icon snx-test-window-icon snx_pad_sdl
+        # the code generators, which tests run on files they refuse
+        snx-swipc snx-svcgen snx-shaderdec snx-settingsgen)
+endif()
 # one Python for the scripted tests: without it they are left out
 find_package(Python3 QUIET COMPONENTS Interpreter)
 # x86-64, by any of the names hosts give it
@@ -86,25 +113,10 @@ function(snx_test_target target standard)
     if(TARGET snx_settings) # g_settings, its header, and the tables a test uses (cmake/settings.cmake)
         target_link_libraries(${target} PRIVATE snx_settings_runtime snx_settings)
     endif()
-    if(SNX_TEST_SANITIZERS)
-        target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-        target_link_options(${target} PRIVATE -fsanitize=address,undefined)
-    endif()
+    snx_test_sanitize(${target})
 endfunction()
 
 if(TARGET snx_ctr_board)
-    if(SNX_TEST_SANITIZERS)
-        snx_test_sanitize(snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu)
-        foreach(target snx_ctr_board snx_ctr_memory snx_ctr_loader snx_ctr_cpu snx_ctr_process)
-            target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-            target_link_options(${target} INTERFACE -fsanitize=address,undefined)
-        endforeach()
-        target_compile_options(scarletnx-3ds PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-        if(TARGET snx_ctr_native)
-            target_compile_options(snx_ctr_native PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-            target_link_options(snx_ctr_native INTERFACE -fsanitize=address,undefined)
-        endif()
-    endif()
     add_executable(snx-test-3ds-board 3ds_board.c)
     snx_test_target(snx-test-3ds-board 11)
     target_link_libraries(snx-test-3ds-board PRIVATE snx_ctr_board)
@@ -216,6 +228,19 @@ if(TARGET snx_ctr_board)
             set_tests_properties(3ds_extract PROPERTIES TIMEOUT 120)
         endif()
     endif()
+endif()
+# the 3DS tests that present through Vulkan, sanitized: the Vulkan driver stays loaded (vulkan_drivers_kept.c), as its
+# loader unloads it with an allocation of its own still held, which LeakSanitizer would report from a library gone
+if(SNX_TEST_SANITIZERS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(snx-test-vulkan-drivers-kept MODULE vulkan_drivers_kept.c)
+    target_compile_options(snx-test-vulkan-drivers-kept PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(snx-test-vulkan-drivers-kept PRIVATE ${CMAKE_DL_LIBS})
+    foreach(snx_test 3ds_gsp_gpu 3ds_static_pipeline 3ds_extract)
+        if(TEST ${snx_test})
+            set_property(TEST ${snx_test} APPEND PROPERTY ENVIRONMENT
+                         "LD_PRELOAD=$<TARGET_FILE:snx-test-vulkan-drivers-kept>")
+        endif()
+    endforeach()
 endif()
 # Under a cross build's emulator, the 3DS AOT links its module with the compiler built into the driver (its path on the
 # build machine, the target's own when installed there), whose linker doesn't take the target's objects

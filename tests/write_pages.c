@@ -14,10 +14,11 @@ static void check(int ok, const char* what) {
 }
 
 int main(void) {
-    WritePages* t = calloc(1, sizeof(WritePages));
+    /* a table that lasts, as the runtime's: nothing frees the leaves it makes */
+    static WritePages table;
+    WritePages* t = &table;
     const u64 tex = 0x500000000ull, tex_size = 16u << 20; /* a 16 MiB texture */
     u64 g;
-    if (!t) return 1;
     check(!write_pages_since(t, 0, tex, tex_size), "an empty table has no writes");
     /* constant buffer updates 256 MiB and 1 GiB away shared the texture's slots in the hashed table */
     write_pages_stamp(t, tex + (256u << 20) + 0x40, 0x100, 1);

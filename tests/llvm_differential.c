@@ -833,5 +833,15 @@ int main(int argc, char** argv) {
            fallbacks, failures || fallbacks ? "FAILED" : "passed");
     snx_remove_tree(dir);
     snx_code_loader_free(loader);
+    free(memory_start);
+    free(memory_p);
+    free(memory_l);
+    free(words);
+    free(dir);
+    free(c_path);
+    free(c_lib);
+    free(l_lib);
+    free(abi);
+    free(root);
     return failures || fallbacks;
 }

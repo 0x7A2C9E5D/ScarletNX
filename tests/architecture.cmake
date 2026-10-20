@@ -1,9 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 if(Python3_Interpreter_FOUND) # tests/CMakeLists.txt looked it up
+    # in a sanitized build, also that every program the tests run, and what it links, is built with the sanitizers
+    if(SNX_TEST_SANITIZERS)
+        set(snx_architecture_sanitizers --sanitizers --ctest "${CMAKE_CTEST_COMMAND}")
+    endif()
     add_test(NAME runtime_architecture
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/architecture.py"
-            --repo "${PROJECT_SOURCE_DIR}" --build "${PROJECT_BINARY_DIR}" --cmake "${CMAKE_COMMAND}")
+            --repo "${PROJECT_SOURCE_DIR}" --build "${PROJECT_BINARY_DIR}" --cmake "${CMAKE_COMMAND}"
+            ${snx_architecture_sanitizers})
     set_tests_properties(runtime_architecture PROPERTIES TIMEOUT 180)
     add_test(NAME architecture_checker COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/architecture_test.py")
     add_test(NAME gnuabi_differential_harness COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/gnuabi_diff_test.py")

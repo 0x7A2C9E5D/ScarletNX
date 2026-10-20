@@ -49,8 +49,9 @@ static void check(int ok, const char* what) {
 }
 
 int main(void) {
-    PendPages* t = calloc(1, sizeof(PendPages));
-    if (!t) return 1;
+    /* tables that last, as the runtime's: none frees the leaves it makes */
+    static PendPages tables[3];
+    PendPages* t = &tables[0];
     map(0x100000, 0x80000000ull, 0x10000);   /* 16 pages */
     map(0x400000, 0x80004000ull, 0x2000);    /* aliases pages 4 and 5 of the range above */
     map(0x600000, 0x90000000ull, 0x4000000); /* 64 MiB: crosses table leaves (16 MiB of guest pages each) */
@@ -99,9 +100,7 @@ int main(void) {
 
     /* a table counted in another as well: the other sees what either holds, and empties when both do */
     {
-        PendPages* u = calloc(1, sizeof(PendPages));
-        PendPages* a = calloc(1, sizeof(PendPages));
-        if (!u || !a) return 1;
+        PendPages *u = &tables[1], *a = &tables[2];
         a->also = u;
         pend_add(a, 0x104000, 0x1000, 1);
         pend_add(u, 0x109000, 0x1000, 1);
@@ -111,8 +110,6 @@ int main(void) {
         check(!pend_hit(u, 0x104000, 1) && pend_hit(u, 0x109000, 1) && pend_empty(a), "and its removal there");
         pend_add(u, 0x109000, 0x1000, -1);
         check(pend_empty(u), "the other empty once both are");
-        free(a);
-        free(u);
     }
 
     /* a range to the top of the address space ends there */

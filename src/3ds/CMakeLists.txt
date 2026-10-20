@@ -17,7 +17,7 @@ add_library(snx_ctr_process STATIC runtime/process.c kernel/kernel.c kernel/thre
 add_library(snx_ctr_gpu STATIC gpu/present.c gpu/transfer.c gpu/pica.c gpu/shader.c gpu/draw.c gpu/raster.c gpu/lighting.c gpu/texture.c "${volk_SOURCE_DIR}/volk.c")
 target_include_directories(snx_ctr_gpu PUBLIC "${volk_SOURCE_DIR}")
 target_link_libraries(snx_ctr_gpu PUBLIC snx_ctr_memory Vulkan::Headers SDL3::SDL3 ${CMAKE_DL_LIBS})
-set_source_files_properties("${volk_SOURCE_DIR}/volk.c" PROPERTIES COMPILE_OPTIONS -w)
+set_source_files_properties("${volk_SOURCE_DIR}/volk.c" PROPERTIES COMPILE_OPTIONS "${snx_third_party_flags}")
 # the HLE DSP and its SDL3 output
 add_library(snx_ctr_audio STATIC audio/dsp.c audio/source.c audio/mixers.c audio/output.c)
 target_link_libraries(snx_ctr_audio PUBLIC snx_ctr_memory SDL3::SDL3)

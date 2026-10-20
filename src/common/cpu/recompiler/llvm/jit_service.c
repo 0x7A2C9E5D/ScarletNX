@@ -797,11 +797,13 @@ static void cache_append(SnxJitService* s, const SnxCodegen* codegen, const char
    are still those it was compiled from: 1, or 0 when it is refused (and it stays so). Under load_lock */
 static int cache_load(SnxJitService* s, CacheRecord* r, const SnxCodeImage* images, size_t image_count) {
     const unsigned char* p = r->functions;
+    unsigned char* object;
     SnxLinkInput input;
     const char* names[1];
     SnxU64 table = 0, h1, h2, epoch;
     size_t f, k, leaders, runs;
     char error[256];
+    int refused;
     lock(&s->lock);
     epoch = s->epoch; /* memory changing after here makes the record stale: refused below */
     unlock(&s->lock);
@@ -816,11 +818,17 @@ static int cache_load(SnxJitService* s, CacheRecord* r, const SnxCodeImage* imag
         }
         p += 4 + 12 * runs + 16;
     }
-    input.data = r->object;
+    /* the object at whatever offset the file put it, copied where malloc aligns it: the ELF reader reads its headers,
+       sections and relocations in place. Without the memory, refused as the loader refuses */
+    object = (unsigned char*)malloc(r->object_size ? r->object_size : 1);
+    if (object) memcpy(object, r->object, r->object_size);
+    input.data = object;
     input.size = r->object_size;
     input.name = r->name;
     names[0] = r->name;
-    if (snx_code_load(s->loader, &input, 1, names, 1, &table, error, sizeof(error))) {
+    refused = !object || snx_code_load(s->loader, &input, 1, names, 1, &table, error, sizeof(error));
+    free(object);
+    if (refused) {
         r->state = -1;
         return 0;
     }

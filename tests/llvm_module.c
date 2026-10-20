@@ -321,6 +321,13 @@ int main(int argc, char** argv) {
     if (reference_library) dlclose(reference_library);
 #endif
     check(!snx_remove_tree(root), "fixture cleanup");
+    for (b = 0; b < 2; ++b) {
+        free(out[b]);
+        free(module[b]);
+    }
+    free(input);
+    free(self);
+    free(root);
     printf("LLVM module: %s\n", failures ? "FAILED" : "passed");
     return failures != 0;
 }

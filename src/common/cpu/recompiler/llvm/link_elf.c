@@ -404,7 +404,8 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
         memcpy(out.data + dynsym_off + (i + 1) * sizeof(Elf64_Sym), &s, sizeof(s));
     }
     memcpy(out.data + dynstr_off, dynstr.data, dynstr.size);
-    memcpy(out.data + rela_off, rela.data, rela.size);
+    if (rela.size) /* none made: no buffer, which memcpy can't take even for 0 bytes */
+        memcpy(out.data + rela_off, rela.data, rela.size);
     /* .dynamic */
 #define DYN(tag, value)                                                                                                \
     do {                                                                                                               \

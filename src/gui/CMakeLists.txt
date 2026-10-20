@@ -194,14 +194,15 @@ if(BUILD_TESTING)
         set_tests_properties(gui_sdl_events PROPERTIES TIMEOUT 30
                              ENVIRONMENT "SDL_VIDEO_DRIVER=dummy;SDL_RENDER_DRIVER=software;SDL_FILE_DIALOG_DRIVER=none;SDL_PREFERRED_LOCALES=en_US")
     endif()
-    # every test here, as snx_test_target does: warnings are errors, and the asserts stay in any build type
+    # every test here, as snx_test_target does: warnings are errors, the asserts stay in any build type, and the
+    # sanitizers come with SNX_TEST_SANITIZERS
     get_directory_property(gui_tests BUILDSYSTEM_TARGETS)
     list(FILTER gui_tests INCLUDE REGEX "^snx-test-")
     foreach(test IN LISTS gui_tests)
         target_compile_options(${test} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
     endforeach()
+    snx_test_sanitize(${gui_tests})
 endif()
-if(COMMAND snx_sanitizer_path) # tests/CMakeLists.txt: the library made here, and this folder's tests
-    snx_test_sanitize(snx_gui_support snx_splash)
+if(COMMAND snx_sanitizer_path) # tests/CMakeLists.txt: this folder's tests
     snx_sanitizer_path()
 endif()

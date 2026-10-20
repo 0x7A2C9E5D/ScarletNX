@@ -12,9 +12,6 @@ set_target_properties(scarletnx-gnuabi PROPERTIES OUTPUT_NAME scarletnx-gnuabi-r
 if(NOT TARGET snx_arm_llvm AND NOT SNX_BUILD_NX)
     include("${CMAKE_SOURCE_DIR}/cmake/llvm.cmake")
     add_subdirectory("${CMAKE_SOURCE_DIR}/src/common/cpu/arm" gnuabi-arm-backend)
-    if(COMMAND snx_test_sanitize) # tests/CMakeLists.txt: made after it looked
-        snx_test_sanitize(snx_arm_llvm)
-    endif()
 endif()
 # The JIT compiles through the recompiler library (snx_recompiler.h), which the NX driver's tree configures. Without
 # the NX runtime, configure it here
@@ -78,7 +75,7 @@ endif()
 
 include(GNUInstallDirs)
 install(TARGETS scarletnx-gnuabi-run RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-if(COMMAND snx_sanitizer_path) # tests/CMakeLists.txt: the runtime made here, and this folder's tests
-    snx_test_sanitize(scarletnx-gnuabi)
+if(COMMAND snx_sanitizer_path) # tests/CMakeLists.txt: this folder's tests
+    snx_test_sanitize(snx-test-gnuabi-runtime snx-test-gnuabi-vfs snx-test-gnuabi-hostfs snx-test-gnuabi-network)
     snx_sanitizer_path()
 endif()

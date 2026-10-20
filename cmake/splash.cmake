@@ -81,6 +81,12 @@ set_target_properties(snx_splash PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRE
 # drawn once a boot: built for size. The libraries' own warnings stay out of the output, ours (splash.cpp) do not
 target_compile_options(snx_splash PRIVATE -Os)
 set_source_files_properties(${plutovg_sources} ${lunasvg_sources} PROPERTIES COMPILE_OPTIONS -w)
+# the stb_image_write plutovg-surface.c holds shifts its JPEG bit buffer, an int, into the sign bit: UBSan's shift-base
+# off for that file of theirs alone (SNX_TEST_SANITIZERS)
+if(SNX_TEST_SANITIZERS)
+    set_source_files_properties("${plutovg_SOURCE_DIR}/source/plutovg-surface.c" PROPERTIES COMPILE_OPTIONS
+                                "-w;-fno-sanitize=shift-base")
+endif()
 set_source_files_properties("${PROJECT_SOURCE_DIR}/src/gui/splash.cpp" PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra")
 if(NOT MSVC AND NOT WIN32)
     target_link_libraries(snx_splash PRIVATE m)

@@ -277,6 +277,95 @@ def check_target_sources(repo, build):
     return errors
 
 
+SANITIZERS = {'address', 'undefined'}
+LIBRARIES = {'STATIC_LIBRARY', 'SHARED_LIBRARY', 'MODULE_LIBRARY', 'OBJECT_LIBRARY'}
+
+
+def sanitizers_of(fragments):
+    """The sanitizers a compile line ends with, and those a -fno-sanitize named"""
+    on, named_off = set(), set()
+    for fragment in fragments:
+        for flag in fragment.split():
+            if flag.startswith('-fsanitize='):
+                on.update(flag.split('=', 1)[1].split(','))
+            elif flag.startswith('-fno-sanitize='):
+                off = set(flag.split('=', 1)[1].split(','))
+                named_off |= SANITIZERS if 'all' in off else off
+                on = set() if 'all' in off else on - off
+    return on, named_off
+
+
+def check_sanitizers(repo, build, tests):
+    """A sanitized build (SNX_TEST_SANITIZERS): every program a test runs, and every library it links, builds the
+    repo's code with ASan and UBSan. A dependency's code (the CPM cache, FetchContent's _deps) is not checked. Returns
+    the errors, and the sources of ours a -fno-sanitize takes the sanitizers off (third-party code in them)"""
+    reply = build / '.cmake/api/v1/reply'
+    indexes = sorted(reply.glob('index-*.json'))
+    if not indexes:
+        return ['CMake file API did not produce a target/source snapshot'], []
+    index = json.loads(indexes[-1].read_text(encoding='utf-8'))
+    model = json.loads((reply / index['reply']['codemodel-v2']['jsonFile']).read_text(encoding='utf-8'))
+    repo, build = repo.resolve(), build.resolve()
+    targets, artifacts = {}, {}
+    for configuration in model['configurations']:
+        for entry in configuration['targets']:
+            target = json.loads((reply / entry['jsonFile']).read_text(encoding='utf-8'))
+            targets[entry['id']] = target
+            for artifact in target.get('artifacts', ()):
+                artifacts[(build / artifact['path']).resolve()] = target
+
+    def ours(path):
+        if path.is_relative_to(build):
+            return path.relative_to(build).parts[:1] != ('_deps',)
+        return path.is_relative_to(repo) and not path.is_relative_to(repo / '.cache')
+
+    programs = {}  # each program a test runs, with the first test that runs it
+    for test in tests:
+        for word in test.get('command', ()):
+            for candidate in (word, word.split('=', 1)[-1]):  # an argument, or a -DNAME=VALUE's value
+                path = Path(candidate)
+                target = artifacts.get(path.resolve()) if path.is_absolute() else None
+                if target and target['type'] == 'EXECUTABLE':
+                    programs.setdefault(target['id'], (target, test['name']))
+    if not programs:
+        return ['no test runs a program of the build: the sanitizers would be checked on nothing'], []
+    errors, exempt, seen = [], [], set()
+    for program, test in programs.values():
+        linked, pending = {program['id']}, [program]
+        while pending:
+            target = pending.pop()
+            for dependency in target.get('dependencies', ()):
+                library = targets.get(dependency['id'])
+                if library and library['type'] in LIBRARIES and library['id'] not in linked:
+                    linked.add(library['id'])
+                    pending.append(library)
+            groups = target.get('compileGroups', ())
+            for source in target.get('sources', ()):
+                if 'compileGroupIndex' not in source:
+                    continue
+                group = groups[source['compileGroupIndex']]
+                if group.get('language') not in ('C', 'CXX', 'OBJC', 'OBJCXX'):
+                    continue  # assembly, Swift and resources have nothing for the sanitizers to instrument
+                path = Path(source['path'])
+                path = (path if path.is_absolute() else repo / path).resolve()
+                on, named_off = sanitizers_of(
+                    fragment['fragment'] for fragment in group.get('compileCommandFragments', ())
+                )
+                if not ours(path) or SANITIZERS <= on or (target['name'], path) in seen:
+                    continue
+                seen.add((target['name'], path))
+                shown = path.relative_to(repo if path.is_relative_to(repo) else build).as_posix()
+                if SANITIZERS - on <= named_off:
+                    exempt.append(f'{shown}: {target["name"]} turns off -fsanitize={",".join(sorted(SANITIZERS - on))}')
+                    continue
+                how = 'is' if target is program else 'links'
+                errors.append(
+                    f'{shown}: {target["name"]} builds it without -fsanitize=address,undefined, and '
+                    f'{program["name"]}, which the test {test} runs, {how} it'
+                )
+    return errors, exempt
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', type=Path, default=Path(__file__).resolve().parents[1])
@@ -285,7 +374,13 @@ def main():
         '--build', type=Path, help='Configured build tree: generate and validate its actual CMake graph'
     )
     parser.add_argument('--cmake', default='cmake', help='CMake executable for --build')
+    parser.add_argument(
+        '--sanitizers', action='store_true', help='--build is sanitized: check what its tests run builds with them'
+    )
+    parser.add_argument('--ctest', default='ctest', help='CTest executable that lists the tests of --build')
     args = parser.parse_args()
+    if args.sanitizers and not args.build:
+        parser.error('--sanitizers checks the build tree --build names')
     errors = check_sources(args.repo.resolve()) + check_include_flags(args.repo.resolve())
     if args.build:
         graph = args.build.resolve() / 'architecture-targets.dot'
@@ -306,6 +401,23 @@ def main():
         errors.extend(check_target_sources(args.repo.resolve(), args.build.resolve()))
         errors.extend(check_include_shadows(args.repo.resolve(), args.build.resolve()))
         errors.extend(check_include_roots(args.repo.resolve(), args.build.resolve()))
+        if args.sanitizers:
+            listed = subprocess.run(
+                [args.ctest, '--test-dir', str(args.build.resolve()), '--show-only=json-v1'],
+                capture_output=True,
+                check=False,
+                timeout=120,
+            )
+            if listed.returncode:
+                sys.stderr.buffer.write(listed.stderr)
+                sys.stderr.buffer.write(listed.stdout)
+                return listed.returncode
+            unsanitized, exempt = check_sanitizers(
+                args.repo.resolve(), args.build.resolve(), json.loads(listed.stdout)['tests']
+            )
+            errors.extend(unsanitized)
+            for line in exempt:
+                print(f'sanitizers off on purpose: {line}')
     if args.graph:
         errors.extend(check_graph(args.graph))
     if errors:

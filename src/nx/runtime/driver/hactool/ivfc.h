@@ -1,6 +1,7 @@
 #ifndef HACTOOL_IVFC_H
 #define HACTOOL_IVFC_H
 
+#include <string.h>
 #include "types.h"
 #include "utils.h"
 #include "settings.h"
@@ -105,8 +106,12 @@ static inline romfs_direntry_t *romfs_get_direntry(romfs_direntry_t *directories
     return (romfs_direntry_t *)((char *)directories + offset);
 }
 
-static inline romfs_fentry_t *romfs_get_fentry(romfs_fentry_t *files, uint32_t offset) {
-    return (romfs_fentry_t *)((char *)files + offset);
+/* the file entry at offset: its fields copied into *entry, as the table keeps entries 4 bytes apart and two of them are
+   64-bit; its name, name_size bytes long and unterminated, at the address returned */
+static inline const char *romfs_get_fentry(const romfs_fentry_t *files, uint32_t offset, romfs_fentry_t *entry) {
+    const char *at = (const char *)files + offset;
+    memcpy(entry, at, offsetof(romfs_fentry_t, name));
+    return at + offsetof(romfs_fentry_t, name);
 }
 
 void romfs_process(romfs_ctx_t *ctx);

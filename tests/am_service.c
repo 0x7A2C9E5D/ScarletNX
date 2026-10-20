@@ -476,6 +476,13 @@ static void test_applets(void) {
     svcobj_unref(in[1]);
     close_handles();
 }
+/* the events am_init made, which g_hle.am keeps: released before it runs again, which makes new ones */
+static void am_events_release(void) {
+    kobj_unref(&g_hle.am.msg_event->o);
+    kobj_unref(&g_hle.am.sleep_lock_event->o);
+    kobj_unref(&g_hle.am.launchable_event->o);
+    kobj_unref(&g_hle.am.resolution_event->o);
+}
 /* am_init: the focus message, then the performance mode's, and the launchable event signaled */
 static void test_messages(void) {
     nn_am_AppletMessage m = 0;
@@ -489,6 +496,7 @@ static void test_messages(void) {
     CHECK(nn_am_service_ISelfController_GetLibraryAppletLaunchableEvent(NULL, &h) == 0);
     CHECK(test_handles[h - 0x100] == &g_hle.am.launchable_event->o && g_hle.am.launchable_event->signaled);
     close_handles();
+    am_events_release();
 }
 /* the Mii editor (0x12), which a game opens with nn::mii::AppendMii: with no editor here, appending is
    cancelled as when the player backs out, an edit hands the Mii back, and each answer is the size the SDK reads */
@@ -551,6 +559,7 @@ static void test_state_getter(void) {
     CHECK(nn_am_service_ICommonStateGetter_EndVrMode3d(NULL) == 0);
     CHECK(nn_am_service_ICommonStateGetter_IsVrModeEnabled3d(NULL, &vr) == 0 && vr == 0);
     CHECK(nn_am_service_ICommonStateGetter_GetSettingsPlatformRegion(NULL, &region) == 0 && region == 1);
+    am_events_release();
 }
 /* ISelfController: the idle time detection extension and auto sleep read back as the game set them */
 static void test_self_settings(void) {
@@ -593,6 +602,7 @@ int main(void) {
     test_messages();
     test_state_getter();
     test_self_settings();
+    CHECK(test_kobjs == 0);
     printf("am_service: %u checks passed\n", test_checks);
     return 0;
 }
