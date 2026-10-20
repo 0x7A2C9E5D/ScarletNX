@@ -254,8 +254,10 @@ second) the one before, and OK on the last.
   about for 15 s as App's is; Enter goes on (on Text size, opens its box). What was changed is kept in `app.ini` once
   the setup is done, in the folders Install picks; Auto stays Auto while the language is the system's.
 - **Install**: Installed, or Portable, which makes `.scarletnx/` beside the program and moves the menu's own files
-  there from then on. Installed is refused while a `.scarletnx/` is there, which keeps the copy portable. An app
-  (Android, iOS) has no such page.
+  there from then on. A box over the two says which the copy is now: `Now: portable, its files in <folder>/.scarletnx`
+  while that folder is there, the focus then on Portable, else `Now: installed, its files in` the user's data folder.
+  Installed is refused while a `.scarletnx/` is there, which keeps the copy portable. An app (Android, iOS) has no such
+  page.
 - **Folders**: Keep, Change games folder (Settings > App > Folders' Games) or Add dumps folder (a folder of
   Settings > App > Library), each through the folder picker, the page showing what they are now.
 - **Keys**: `prod.keys` and `title.keys` where the driver reads them; Use these, Choose folder (a folder with

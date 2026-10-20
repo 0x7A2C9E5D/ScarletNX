@@ -5224,6 +5224,30 @@ static void setup_uid_line(const App* app, char* out, size_t size) {
     else
         snprintf(out, size, "%s", snx_tr("one new user, random uid"));
 }
+/* the Install page's line: the copy portable while its folder beside the program is there, its files in it, else
+   installed, its files in the user's data folder */
+static void setup_install_now(const App* app, char* out, size_t size) {
+    char shown[1024];
+    bool there;
+    char *portable = setup_portable(app, &there), *data = there ? NULL : snx_user_dir(SNX_USER_DATA);
+    snx_home_short(there ? portable : data ? data : snx_tr("(no home folder)"), shown, sizeof shown);
+    snprintf(out, size, there ? snx_tr("Now: portable, its files in %s") : snx_tr("Now: installed, its files in %s"),
+             shown);
+    free(data);
+    free(portable);
+}
+/* that line in a box of its own over the page's two: what r has left under it */
+static GuiRect setup_now_box(App* app, GuiRect r) {
+    char line[1100];
+    GuiRect now;
+    int rows;
+    setup_install_now(app, line, sizeof line);
+    rows = wrap_rows(app, line, inner(app, r).w / cell_w(app), 1);
+    now = gui_rect(r.x, r.y, r.w, SDL_min(rows * cell_h(app) + 8 * app->scale, r.h));
+    pane(app, now, NULL);
+    wrap_in(app, inner(app, now), now.x + cell_w(app), now.y + 4 * app->scale, line, 1, rgb(app->theme.ink));
+    return gui_rect(r.x, now.y + now.h + cell_h(app) / 2, r.w, SDL_max(0, r.h - now.h - cell_h(app) / 2));
+}
 static void setup_panes(App* app, GuiRect r) {
     static const int kinds[] = {SNX_USER_CONFIG, SNX_USER_DATA, SNX_USER_STATE, SNX_USER_CACHE};
     static const char* const kind_names[] = {SNX_TR_NOOP("settings"), SNX_TR_NOOP("data"), SNX_TR_NOOP("logs"),
@@ -5250,7 +5274,7 @@ static void setup_panes(App* app, GuiRect r) {
             break;
         }
         case SNX_SETUP_INSTALL:
-            setup_split(app, r, 3, &a, &b);
+            setup_split(app, setup_now_box(app, r), 3, &a, &b);
             for (i = 0; i < 4; ++i) {
                 path = snx_user_dir(kinds[i]);
                 snx_home_short(path ? path : snx_tr("(no home folder)"), shown, sizeof shown);

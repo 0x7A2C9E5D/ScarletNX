@@ -246,13 +246,34 @@ static void test_first(App* app) {
     app->language = 0; /* English again, for the words below, kept as the language picked */
     language_apply(app);
     app->language = 2;
-    /* installed while a portable folder is there is refused; portable makes it, the menu's files in it from then */
+    /* installed while a portable folder is there is refused; portable makes it, the menu's files in it from then. The
+       box over the two says which the copy is now, and where its files are */
     assert(!app->setup_choice.focus && !snx_is_dir(portable));
+    {
+        char line[1100], expected[1100], shown[1024], *data = snx_user_dir(SNX_USER_DATA);
+        assert(data);
+        snx_home_short(data, shown, sizeof shown);
+        snprintf(expected, sizeof expected, "Now: installed, its files in %s", shown);
+        setup_install_now(app, line, sizeof line);
+        assert(!strcmp(line, expected));
+        free(data);
+        render(app);
+        shows(app, "Now: installed, its files in", rgb(app->theme.ink));
+    }
     key(app, SDLK_DOWN);
     key(app, SDLK_RETURN);
     assert(page(app) == SNX_SETUP_FOLDERS && snx_is_dir(portable) && same_path(app->home_dir, portable));
-    key(app, SDLK_ESCAPE); /* back: it is portable now */
+    key(app, SDLK_ESCAPE); /* back: it is portable now, the focus on Portable */
     assert(page(app) == SNX_SETUP_INSTALL && app->setup_choice.focus == 1);
+    {
+        char line[1100], expected[1100], shown[1024];
+        snx_home_short(portable, shown, sizeof shown);
+        snprintf(expected, sizeof expected, "Now: portable, its files in %s", shown);
+        setup_install_now(app, line, sizeof line);
+        assert(!strcmp(line, expected) && strstr(line, SNX_PORTABLE_DIR));
+        render(app);
+        shows(app, "Now: portable, its files in", rgb(app->theme.ink));
+    }
     key(app, SDLK_UP);
     key(app, SDLK_RETURN);
     assert(page(app) == SNX_SETUP_INSTALL && app->setup_failed && strstr(app->message, "This copy is portable"));

@@ -1394,6 +1394,20 @@ msgid "one new user, random uid"
 msgstr ""
 
 #: src/gui/main.c
+msgid "(no home folder)"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Now: portable, its files in %s"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Now: installed, its files in %s"
+msgstr ""
+
+#: src/gui/main.c
 msgid "settings"
 msgstr ""
 
@@ -1407,10 +1421,6 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "caches"
-msgstr ""
-
-#: src/gui/main.c
-msgid "(no home folder)"
 msgstr ""
 
 #: src/gui/main.c
