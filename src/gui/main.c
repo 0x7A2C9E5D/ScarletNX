@@ -193,6 +193,7 @@ typedef struct {
     /* the Settings' groups: App, then a group per section of the settings, its first row and rows; a row each */
     int groups, group_first[GUI_GROUPS_MAX], group_rows[GUI_GROUPS_MAX];
     GuiThemeKey group_keys[GUI_GROUPS_MAX];
+    char group_name[GUI_GROUPS_MAX][64]; /* each one's key: a copy, the list it is from being freed apart */
     char group_about[GUI_GROUPS_MAX][128];
     GuiAppForm app_form;
     int language;       /* Settings > App's Language: 0 Auto (the system's), else snx_gui_languages' index + 1 */
@@ -2456,13 +2457,22 @@ static char* capture(App* app, const char* const* argv) {
     }
     return out;
 }
+/* The Settings' list freed, with what was made from it: its groups (their rows are the list's), a group's view, and
+   a form on its rows, which would read the list freed. The only way the list goes, so nothing outlives it */
+static void settings_forget(App* app) {
+    if ((app->settings.values && app->editor.object == (char*)app->settings.values) ||
+        app->editor.keys == app->group_keys || app->editor.keys == app->view_keys)
+        gui_editor_form(&app->editor, NULL, 0, &app->app_form, NULL);
+    gui_settings_free(&app->settings);
+    app->groups = 0;
+    app->view_count = 0;
+}
 /* the Settings' rows: the runtime's list, read the first time from the program that runs Switch inputs, after the
    launcher's own */
 static GuiSettings* settings_of(App* app) {
     char* driver;
     char* list;
     if (app->settings.keys) return &app->settings;
-    app->groups = 0; /* made from a list read before, whose section names they point into */
     driver = find_driver(app, GUI_SWITCH);
 #ifdef SDL_PLATFORM_IOS /* no program to ask: the game's .ini keeps its settings */
     list = NULL;
@@ -2830,7 +2840,8 @@ static void group_add(App* app, const char* name, int first, const char* about) 
     GuiThemeKey* k = &app->group_keys[g];
     memset(k, 0, sizeof *k);
     k->section = "";
-    k->key = name;
+    snprintf(app->group_name[g], sizeof app->group_name[g], "%s", name);
+    k->key = app->group_name[g];
     k->type = GUI_KEY_ACTION;
     k->about = app->group_about[g];
     snprintf(app->group_about[g], sizeof app->group_about[g], "%s", about);
@@ -2848,7 +2859,8 @@ static void settings_groups(App* app) {
         size_t n = strlen(about);
         if (strchr(s->keys[r].section, '/')) continue; /* a page's: its row in the group opens it */
         /* past the most groups the rest go in the last one: every row is still reached */
-        if (g == 0 || (strcmp(s->keys[r].section, app->group_keys[g].key) && app->groups < GUI_GROUPS_MAX)) {
+        if (g == 0 ||
+            (strcmp(s->keys[r].section, s->keys[app->group_first[g]].section) && app->groups < GUI_GROUPS_MAX)) {
             group_add(app, s->keys[r].section, r, "");
             g = app->groups - 1;
             about = app->group_about[g];
@@ -3215,7 +3227,7 @@ static int player_key(const char* key, const char* name) {
 /* group g's rows, wherever they are: its section's own, and its pages' rows (a second page's comes after the first
    page's rows) */
 static int in_group(const App* app, int g, int r) {
-    return !strcmp(app->settings.keys[r].section, app->group_keys[g].key);
+    return !strcmp(app->settings.keys[r].section, app->settings.keys[app->group_first[g]].section);
 }
 /* group g's page row of the players (the runtime's "Player" page), -1 for none */
 static int players_row(const App* app, int g) {
@@ -6049,7 +6061,7 @@ static void cleanup(App* app) {
     gui_process_destroy(app->process);
     space_stop(app);
     space_end(&app->left_space, &app->left_counter);
-    gui_settings_free(&app->settings);
+    settings_forget(app);
     free(app->settings_file);
     for (int i = 0; i < app->folder_count; ++i) free(app->folders[i]);
     free(app->folder_asked);
