@@ -16,7 +16,12 @@
 enum { SNX_SETUP_LANGUAGE, SNX_SETUP_INSTALL, SNX_SETUP_FOLDERS, SNX_SETUP_KEYS, SNX_SETUP_USER, SNX_SETUP_STEPS };
 extern const int snx_setup_since[SNX_SETUP_STEPS]; /* the version each step came in */
 /* what an older version did that this one does otherwise, on the systems it says: what, where it was, where it is now,
-   and words of its row in docs/DEPRECATIONS.md's table, which lists it in full */
+   and words of its row in docs/DEPRECATIONS.md's table, which lists it in full. The first three in English, those with
+   words marked for scripts/build-languages.py: the launcher shows them in its language (gui/i18n.h), the terminal as
+   they are */
+#ifndef SNX_TR_NOOP
+#define SNX_TR_NOOP(s) s
+#endif
 enum { SNX_NOTICE_ALL, SNX_NOTICE_LINUX, SNX_NOTICE_ANDROID };
 typedef struct {
     const char *what, *before, *now, *row;

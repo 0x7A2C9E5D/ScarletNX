@@ -446,6 +446,33 @@ static void test_notice(App* app) {
     puts("PASS a notice alone after an update, and --debug");
 }
 
+/* in another language: the notices in its words (setup.c marks them), and the rows' labels padded to the columns their
+   letters take, not their bytes: xx's "at\303\251" (3 columns in 4 bytes) and "agora" lined up */
+static void test_translated(App* app) {
+    static const char* const said[] = {"before", "now"};
+    char *config = config_of(app), *file = join(config, "setup.ini"), pad[32];
+    int x, y, before_x, now_x, row = cell_h(app);
+    remove(file);
+    app->language = 2;
+    language_apply(app);
+    assert(setup_cols(said, 2, 2) == 7 && !strcmp(setup_pad(pad, sizeof pad, "before", 7), "at\303\251    "));
+    assert(!strcmp(setup_pad(pad, sizeof pad, "now", 7), "agora  ") &&
+           !strcmp(setup_pad(pad, sizeof pad, "", 3), "   "));
+    setup_start(app);
+    assert(app->setup_on && page(app) == SETUP_NOTICE && !app->setup_top);
+    render(app);
+    shows(app, "Ajustes do jogo", rgb(app->theme.ink));
+    assert(find_letters(app, "at\303\251    removed", rgb(app->theme.ink), 1, &before_x, &y));
+    assert(find_letters(app, "agora  under", rgb(app->theme.ink), 1, &now_x, &x) && x == y + row);
+    assert(before_x == now_x);
+    app->language = 0;
+    language_apply(app);
+    setup_finish(app);
+    free(file);
+    free(config);
+    puts("PASS the setup in another language");
+}
+
 /* the question at the foot with its choices above it at its right (yorha), or in the middle of the boxes (default),
    neither darkening the page */
 static void test_places(App* app) {
@@ -522,6 +549,7 @@ int main(void) {
     test_first(&app);
     test_users(&app);
     test_notice(&app);
+    test_translated(&app);
     test_places(&app);
     cleanup(&app);
     assert(!snx_remove_tree(root));

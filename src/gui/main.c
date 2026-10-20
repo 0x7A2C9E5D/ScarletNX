@@ -5154,19 +5154,32 @@ static void setup_split(const App* app, GuiRect r, int fifths, GuiRect* a, GuiRe
     *a = gui_rect(r.x, r.y, w, r.h);
     *b = gui_rect(r.x + w + cell_w(app), r.y, r.w - w - cell_w(app), r.h);
 }
+/* the setup's rows' labels padded to the columns of the widest of a group, translated, and more: they line up whatever
+   letters a language's take (gui_text_cols) */
+static int setup_cols(const char* const* labels, int n, int more) {
+    int i, cols = 0;
+    for (i = 0; i < n; ++i) cols = SDL_max(cols, gui_text_cols(snx_tr(labels[i])));
+    return cols + more;
+}
+static const char* setup_pad(char* out, size_t size, const char* label, int cols) {
+    snprintf(out, size, "%s%*s", snx_tr(label), SDL_max(0, cols - gui_text_cols(snx_tr(label))), "");
+    return out;
+}
 static void setup_notices_box(App* app, GuiRect r) {
-    char text[4][320], head[64];
+    static const char* const said[] = {SNX_TR_NOOP("before"), SNX_TR_NOOP("now")};
+    char text[4][320], head[64], pad[64];
     const char* lines[4];
-    int list[SNX_NOTICES], n = setup_notices(app, list), k = 0;
-    if (n) {
+    int list[SNX_NOTICES], n = setup_notices(app, list), k = 0, cols = setup_cols(said, 2, 2);
+    if (n) { /* in the launcher's language: setup.c marks them for scripts/build-languages.py */
         const SnxNotice* notice = &snx_notices[list[SDL_min(app->setup_top, n - 1)]];
-        snprintf(text[k], sizeof text[k], "%s%s", app->theme.marker, notice->what);
+        snprintf(text[k], sizeof text[k], "%s%s", app->theme.marker, snx_tr(notice->what));
         lines[k] = text[k];
         ++k;
-        snprintf(text[k], sizeof text[k], "    %-8s%s", snx_tr("before"), notice->before);
+        snprintf(text[k], sizeof text[k], "    %s%s", setup_pad(pad, sizeof pad, said[0], cols),
+                 snx_tr(notice->before));
         lines[k] = text[k];
         ++k;
-        snprintf(text[k], sizeof text[k], "    %-8s%s", snx_tr("now"), notice->now);
+        snprintf(text[k], sizeof text[k], "    %s%s", setup_pad(pad, sizeof pad, said[1], cols), snx_tr(notice->now));
         lines[k] = text[k];
         ++k;
     }
@@ -5252,7 +5265,9 @@ static void setup_panes(App* app, GuiRect r) {
     static const int kinds[] = {SNX_USER_CONFIG, SNX_USER_DATA, SNX_USER_STATE, SNX_USER_CACHE};
     static const char* const kind_names[] = {SNX_TR_NOOP("settings"), SNX_TR_NOOP("data"), SNX_TR_NOOP("logs"),
                                              SNX_TR_NOOP("caches")};
-    char text[GUI_FOLDERS_MAX + 4][1100], shown[1024];
+    static const char* const folder_names[] = {SNX_TR_NOOP("Games"), SNX_TR_NOOP("Dumps")};
+    static const char* const found[] = {SNX_TR_NOOP("found"), SNX_TR_NOOP("missing")};
+    char text[GUI_FOLDERS_MAX + 4][1100], shown[1024], pad[96];
     const char* lines[GUI_FOLDERS_MAX + 4];
     GuiRect a, b;
     int i, n = 0;
@@ -5278,25 +5293,28 @@ static void setup_panes(App* app, GuiRect r) {
             for (i = 0; i < 4; ++i) {
                 path = snx_user_dir(kinds[i]);
                 snx_home_short(path ? path : snx_tr("(no home folder)"), shown, sizeof shown);
-                SETUP_LINE("%-9s%s", snx_tr(kind_names[i]), shown);
+                SETUP_LINE("%s%s", setup_pad(pad, sizeof pad, kind_names[i], setup_cols(kind_names, 4, 1)), shown);
                 free(path);
             }
             setup_box(app, a, snx_tr("Installed"), lines, n);
             n = 0;
             path = setup_portable(app, &there);
             snx_home_short(path ? path : "", shown, sizeof shown);
-            SETUP_LINE("%-11s%s", snx_tr("everything"), shown);
+            SETUP_LINE("%s %s", snx_tr("everything"), shown);
             SETUP_LINE("%s", there ? snx_tr("there: this copy is portable") : snx_tr("beside the program, made then"));
             setup_box(app, b, snx_tr("Portable"), lines, n);
             free(path);
             break;
         case SNX_SETUP_FOLDERS:
             snx_home_short(app->games_dir ? app->games_dir : "games/", shown, sizeof shown);
-            SETUP_LINE("%s%-7s%s", m, snx_tr("Games"), shown);
-            if (!app->folder_count) SETUP_LINE("%s%-7s%s", m, snx_tr("Dumps"), snx_tr("none yet"));
+            SETUP_LINE("%s%s%s", m, setup_pad(pad, sizeof pad, folder_names[0], setup_cols(folder_names, 2, 2)), shown);
+            if (!app->folder_count)
+                SETUP_LINE("%s%s%s", m, setup_pad(pad, sizeof pad, folder_names[1], setup_cols(folder_names, 2, 2)),
+                           snx_tr("none yet"));
             for (i = 0; i < app->folder_count; ++i) {
                 snx_home_short(app->folders[i], shown, sizeof shown);
-                SETUP_LINE("%s%-7s%s%s", m, i ? "" : snx_tr("Dumps"), shown,
+                SETUP_LINE("%s%s%s%s", m,
+                           setup_pad(pad, sizeof pad, i ? "" : folder_names[1], setup_cols(folder_names, 2, 2)), shown,
                            app->folders_deep[i] ? snx_tr(" + subfolders") : "");
             }
             setup_box(app, r, snx_tr("Folders"), lines, n);
@@ -5305,10 +5323,11 @@ static void setup_panes(App* app, GuiRect r) {
             path = snx_keys_found(app->data_dir, "prod.keys");
             other = snx_keys_found(app->data_dir, "title.keys");
             snx_home_short(path ? path : "", shown, sizeof shown);
-            SETUP_LINE("%s%-12s%-9s%s", m, "prod.keys", path ? snx_tr("found") : snx_tr("missing"),
+            SETUP_LINE("%s%-12s%s%s", m, "prod.keys", setup_pad(pad, sizeof pad, found[!path], setup_cols(found, 2, 2)),
                        path ? shown : snx_tr("games are extracted with it"));
             snx_home_short(other ? other : "", shown, sizeof shown);
-            SETUP_LINE("%s%-12s%-9s%s", m, "title.keys", other ? snx_tr("found") : snx_tr("missing"),
+            SETUP_LINE("%s%-12s%s%s", m, "title.keys",
+                       setup_pad(pad, sizeof pad, found[!other], setup_cols(found, 2, 2)),
                        other ? shown : snx_tr("only some .nsp need it"));
             setup_box(app, r, snx_tr("Keys"), lines, n);
             free(path);
@@ -5316,7 +5335,7 @@ static void setup_panes(App* app, GuiRect r) {
             break;
         default:
             if (app->setup_typing) {
-                SETUP_LINE("%s%-10s%s", m, snx_tr("nickname"), app->setup_name);
+                SETUP_LINE("%s%s  %s", m, snx_tr("nickname"), app->setup_name);
                 setup_uid_line(app, shown, sizeof shown);
                 SETUP_LINE("%s%s", m, shown);
                 setup_box(app, r, snx_tr("First user"), lines, n);

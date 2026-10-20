@@ -356,7 +356,7 @@ msgstr ""
 msgid "Data"
 msgstr ""
 
-#: src/gui/main.c
+#: src/gui/main.c src/common/utilities/setup.c
 msgid "Games"
 msgstr ""
 
@@ -1424,6 +1424,18 @@ msgid "caches"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Dumps"
+msgstr ""
+
+#: src/gui/main.c
+msgid "found"
+msgstr ""
+
+#: src/gui/main.c
+msgid "missing"
+msgstr ""
+
+#: src/gui/main.c
 msgid "everything"
 msgstr ""
 
@@ -1436,23 +1448,11 @@ msgid "beside the program, made then"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Dumps"
-msgstr ""
-
-#: src/gui/main.c
 msgid "none yet"
 msgstr ""
 
 #: src/gui/main.c
 msgid " + subfolders"
-msgstr ""
-
-#: src/gui/main.c
-msgid "found"
-msgstr ""
-
-#: src/gui/main.c
-msgid "missing"
 msgstr ""
 
 #: src/gui/main.c
@@ -2171,6 +2171,86 @@ msgstr ""
 
 #: src/gui/theme.c
 msgid "the boots in 100 that show this theme's, the default's the others"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "Game settings"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "removed or renamed keys in a game's .ini"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "under [Deprecated]: Clean old settings takes them"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "An option"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "An installed copy's files"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "the scarletnx folders of ~/.config, ~/.local/state and ~/.cache"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "games/<Game>, <Game>_data/ side by side"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "games/<id>/, a folder each"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "The launcher's files"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "gui/ in the data folder"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "the config and state folders"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "A portable copy"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "games/ beside the program"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid ".scarletnx/ beside the program"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "the app's own files"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "the data folder's config/ and state/"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "A build tree's files"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "games/, work/ and the keys in its checkout"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "the user's data folder"
+msgstr ""
+
+#: src/common/utilities/setup.c
+msgid "Account saves"
 msgstr ""
 
 #: src/nx/runtime/settings.txt

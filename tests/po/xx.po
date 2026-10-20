@@ -61,3 +61,12 @@ msgstr "Jogos?"
 
 msgid "Appearance"
 msgstr "Aparência"
+
+msgid "Game settings"
+msgstr "Ajustes do jogo"
+
+msgid "before"
+msgstr "até"
+
+msgid "now"
+msgstr "agora"

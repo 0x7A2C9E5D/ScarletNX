@@ -547,7 +547,8 @@ ErET needs `[theme] layout`, so the built-in files carry one: `debug` and `menu`
 
 ## Languages
 
-The menu's phrases are English in its code, each through `snx_tr` (`src/gui/i18n.h`). `po/scarletnx.pot` lists
+The menu's phrases are English in its code, each through `snx_tr` (`src/gui/i18n.h`), and so are the setup's notices,
+marked in `src/common/utilities/setup.c`, which the terminal shows as they are. `po/scarletnx.pot` lists
 them, made from the code by `scripts/build-languages.py --pot`; the `gui_languages_pot` test fails when it is not what
 the code says. A language is a `po/<tag>.po`, named by its BCP 47 tag as language-Script-REGION, each part only
 when it tells the language apart (`de.po`, `pt-BR.po`, `zh-Hans-CN.po`), in gettext's format: the build makes each one a

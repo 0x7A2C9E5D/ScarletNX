@@ -18,22 +18,24 @@
 
 const int snx_setup_since[SNX_SETUP_STEPS] = {1, 1, 1, 1, 1};
 const SnxNotice snx_notices[SNX_NOTICES] = {
-    {"Game settings", "removed or renamed keys in a game's .ini", "under [Deprecated]: Clean old settings takes them",
-     "`.ini` key", SNX_NOTICE_ALL},
-    {"An option", "--keep-c", "--keep-ir", "`--keep-c`", SNX_NOTICE_ALL},
-    {"An installed copy's files", "~/.local/share/scarletnx: gui/, games/<Game>.ini, work/",
-     "the scarletnx folders of ~/.config, ~/.local/state and ~/.cache", "An installed copy's files", SNX_NOTICE_LINUX},
-    {"Games", "games/<Game>, <Game>_data/ side by side", "games/<id>/, a folder each",
-     "A game laid out beside the others", SNX_NOTICE_ALL},
-    {"The launcher's files", "gui/ in the data folder", "the config and state folders", "The menu's `gui/`",
-     SNX_NOTICE_ALL},
-    {"A portable copy", "games/ beside the program", ".scarletnx/ beside the program", "A portable copy's `games/`",
-     SNX_NOTICE_ALL},
-    {"The launcher's files", "the app's own files", "the data folder's config/ and state/", "Android: the menu's",
-     SNX_NOTICE_ANDROID},
-    {"A build tree's files", "games/, work/ and the keys in its checkout", "the user's data folder",
-     "A build tree's checkout", SNX_NOTICE_ALL},
-    {"Account saves", "<id>_data/save/user", "<id>_data/save/user.<uid>", "Account saves in", SNX_NOTICE_ALL}};
+    {SNX_TR_NOOP("Game settings"), SNX_TR_NOOP("removed or renamed keys in a game's .ini"),
+     SNX_TR_NOOP("under [Deprecated]: Clean old settings takes them"), "`.ini` key", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("An option"), "--keep-c", "--keep-ir", "`--keep-c`", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("An installed copy's files"), "~/.local/share/scarletnx: gui/, games/<Game>.ini, work/",
+     SNX_TR_NOOP("the scarletnx folders of ~/.config, ~/.local/state and ~/.cache"), "An installed copy's files",
+     SNX_NOTICE_LINUX},
+    {SNX_TR_NOOP("Games"), SNX_TR_NOOP("games/<Game>, <Game>_data/ side by side"),
+     SNX_TR_NOOP("games/<id>/, a folder each"), "A game laid out beside the others", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("The launcher's files"), SNX_TR_NOOP("gui/ in the data folder"),
+     SNX_TR_NOOP("the config and state folders"), "The menu's `gui/`", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("A portable copy"), SNX_TR_NOOP("games/ beside the program"),
+     SNX_TR_NOOP(".scarletnx/ beside the program"), "A portable copy's `games/`", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("The launcher's files"), SNX_TR_NOOP("the app's own files"),
+     SNX_TR_NOOP("the data folder's config/ and state/"), "Android: the menu's", SNX_NOTICE_ANDROID},
+    {SNX_TR_NOOP("A build tree's files"), SNX_TR_NOOP("games/, work/ and the keys in its checkout"),
+     SNX_TR_NOOP("the user's data folder"), "A build tree's checkout", SNX_NOTICE_ALL},
+    {SNX_TR_NOOP("Account saves"), "<id>_data/save/user", "<id>_data/save/user.<uid>", "Account saves in",
+     SNX_NOTICE_ALL}};
 int snx_notice_here(int notice) {
     int systems = snx_notices[notice].systems;
 #if defined(__ANDROID__)

@@ -84,6 +84,14 @@ static const char* k[] = {SNX_TR_KEY("ESC"), SNX_TR_NOOP("A \"quoted\" (paren)")
     def test_the_pot_is_the_code(self):
         self.assertEqual((ROOT / bl.POT).read_text(), bl.pot_text(bl.code_phrases(ROOT)))
 
+    def test_the_setup_notices_the_menu_shows(self):
+        # setup.c's marked words, the setup's pages showing them; its paths and options left as they are
+        phrases = bl.code_phrases(ROOT)
+        self.assertEqual(phrases['Account saves'][1], ['src/common/utilities/setup.c'])
+        self.assertIn("the user's data folder", phrases)
+        self.assertNotIn('<id>_data/save/user', phrases)
+        self.assertNotIn('--keep-c', phrases)
+
 
 class Formats(unittest.TestCase):
     def ok(self, msgid, msgstr, keys=False):
