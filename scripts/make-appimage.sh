@@ -12,11 +12,12 @@
 #
 # With SYSROOT and ARCH set, the AppImage is made for another architecture on this machine: the runtime was
 # cross-compiled and installed into the sysroot (an Arch root of that architecture), and the libraries and licenses
-# to bundle come from there. CI makes the ppc64le one this way (.github/workflows/build.yml, appimage-cross). The
-# packaging tools run natively; the target's loader behind `ldd` runs through qemu-user, and the checks at the end run
-# the AppImage itself through qemu-$ARCH: the kernel's binfmt handler for the target never takes an AppImage, since its
-# runtime's ELF header carries the AppImage magic ("AI\x02" at byte 8) where qemu's mask wants zeros. The plain ELF
-# programs the AppImage starts do go through that handler, which has to be registered.
+# to bundle come from there. CI makes the ppc64le, riscv64 and loongarch64 ones this way (.github/workflows/build.yml,
+# appimage-cross). quick-sharun runs natively, and the appimagetool it fetches is the target's: the kernel's binfmt
+# handler for the target runs it and the mkdwarfs inside it, as it runs the plain ELF programs the AppImage starts, so
+# it has to be registered. The target's loader behind `ldd` runs through qemu-user, and the checks at the end run the
+# AppImage itself through qemu-$ARCH: that handler never takes an AppImage, since its runtime's ELF header carries the
+# AppImage magic ("AI\x02" at byte 8) where qemu's mask wants zeros.
 set -euo pipefail
 
 SYSROOT=${SYSROOT:-} # the target's system root; empty packages this machine's own /usr
