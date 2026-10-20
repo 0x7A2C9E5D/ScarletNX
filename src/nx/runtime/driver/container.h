@@ -14,12 +14,15 @@ typedef struct {
     int found, container;
     size_t entry;
     SnxU64 size, title_id;
+    SnxHacNca info; /* what its header says */
 } SnxNcaRef;
 
 typedef struct {
     SnxHac* hac;
     char *keys, *title_keys; /* where they were looked for */
     int has_keys;
+    int say;          /* each container and its NCAs described as they are read, once (said, a bit a container) */
+    unsigned said;
     int base, update; /* the containers, either -1 without one; update is the add-on's (an update or a DLC) */
     /* the base's Program NCA, the update's (the patch an NSP of both has, else found 0), the Control NCA, the
        update's when it has one, and a DLC's Data NCA (aoc) */
@@ -51,6 +54,11 @@ void snx_dump_close(SnxDump* dump);
 SnxHacFs* snx_dump_fs(SnxDump* dump);
 /* a DLC's RomFS image (aoc) read in place, or NULL, said why */
 SnxHacFs* snx_dump_aoc_fs(SnxDump* dump);
+/* 0 when the keys an NCA picked needs are there, else nonzero with a line saying which are missing and where they come
+   from, what names it ("The game's Program NCA"); no key itself is said */
+int snx_nca_keys(const SnxNcaRef* nca, const char* what);
+/* bytes as a size the player reads: "512 bytes", "35 KB", "4.1 GB" */
+void snx_size_text(SnxU64 bytes, char* text, size_t size);
 /* a file at the root of a RomFS read in place (control.nacp in the Control NCA's), malloc'd, or NULL */
 unsigned char* snx_romfs_file(SnxHacFs* fs, const char* name, size_t* size);
 /* the Control NCA's control.nacp, malloc'd, or NULL with why in *why */

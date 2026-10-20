@@ -24,6 +24,14 @@ typedef struct {
     int type;  /* SNX_HAC_PROGRAM, SNX_HAC_CONTROL, SNX_HAC_DATA (Data or PublicData: a DLC's) or SNX_HAC_OTHER */
     int patch; /* it has a Patch RomFS (BKTR) section: an update's */
     uint64_t title_id;
+    /* what reading it takes, for what the extraction says: never a key itself */
+    int content;      /* the header's content type: 0 Program, 1 Meta, 2 Control, 3 Manual, 4 Data, 5 PublicData */
+    int decrypted;    /* a decrypted NCA (DNCA), which needs no keys */
+    int generation;   /* the master key generation its keys derive from */
+    int title_key;    /* encrypted with a title key: 1 when a ticket of the dump or title.keys gives it, -1 when none
+                         does; 0 for an NCA with its keys in its key area */
+    int keys;         /* 1 when prod.keys gave the key of its generation that opens its key area or title key */
+    uint32_t sdk;     /* the SDK it was built with, major.minor.micro.relstep a byte each from the top */
 } SnxHacNca;
 
 SnxHac* snx_hac_new(void);
@@ -34,6 +42,8 @@ int snx_hac_set_key(SnxHac* hac, const char* name, const char* value);
 /* after the last key: what derives from them */
 void snx_hac_derive_keys(SnxHac* hac);
 void snx_hac_add_title_key(SnxHac* hac, const unsigned char rights_id[16], const unsigned char key[16]);
+/* the newest master key generation whose key area keys the keyset has, derived or given: -1 for none */
+int snx_hac_newest_generation(SnxHac* hac);
 
 /* a container to read NCAs in place from, XCI or NSP: its number for the calls below, or -1. Two at most */
 int snx_hac_open(SnxHac* hac, const char* path, int xci);

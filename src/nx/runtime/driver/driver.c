@@ -567,6 +567,11 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
         free(program);
         goto done;
     }
+    if (!prepared && !nro && out && dump && snx_is_file(dump)) { /* an update's or a DLC's goes into its own data folder */
+        SnxU64 title;
+        if (snx_extract_title(dump, paths, &title)) goto done;
+        if (snx_addon_kind(title) != SNX_ADDON_NONE) out = NULL;
+    }
     if (!prepared && !nro && !out && prepared_addon(input, &folder, &name, &addon)) {
         if (outdir) {
             snx_error("--outdir names where a dump's game goes, and %s is an update's or a DLC's", input);
@@ -721,9 +726,9 @@ addon:
         base = snx_path_join(folder, name);
         rc = 0;
         if (!prepared_game(folder, NULL, NULL)) {
-            rc = snx_error("%s is %s of the game %s, which is not in %s yet: play the game's dump first, or give it "
-                           "with this one (scarletnx GAME --update %s)",
-                           input, what, of, games, input);
+            rc = snx_error("%s is %s of the game %s, which is not recompiled yet: recompile the base game first by "
+                           "playing its dump (or give both: scarletnx GAME --update %s), then this one again",
+                           input, what, of, input);
         } else if (!source || !snx_is_file(source)) {
             rc = snx_error("%s's dump %s is not there: play it again", what, source ? source : "(none recorded)");
         } else if (snx_record_source(folder, name, source)) {
@@ -784,6 +789,12 @@ made:
             rc = snx_error("Recompilation finished without creating %s", game);
             goto done;
         }
+    }
+    /* made from the extraction --out keeps: its dump recorded all the same, which its update's RomFS is read over and
+       Extract game container off reads it from */
+    if (out && !nro && snx_record_source(folder, name, dump)) {
+        rc = 1;
+        goto done;
     }
     if (flags & (SNX_RECOMP | PLAY_PREPARE)) {
         rc = 0;

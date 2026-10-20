@@ -374,6 +374,19 @@ int main(int argc, char** argv) {
     int result;
     if (argc == 4 && !strcmp(argv[1], "--scenario")) return scenario(argv[2], argv[3]) ? 1 : 0;
     CHECK(argc == 1);
+    { /* what an NCA's missing keys are said as: none for a decrypted one, its master key's generation, its title key */
+        SnxNcaRef nca;
+        memset(&nca, 0, sizeof nca);
+        nca.info.decrypted = 1;
+        CHECK(!snx_nca_keys(&nca, "A decrypted NCA"));
+        nca.info.decrypted = 0;
+        nca.info.generation = 16;
+        CHECK(snx_nca_keys(&nca, "An NCA of master key 16"));
+        nca.info.keys = 1;
+        CHECK(!snx_nca_keys(&nca, "An NCA with its keys"));
+        nca.info.title_key = -1;
+        CHECK(snx_nca_keys(&nca, "An NCA without its title key"));
+    }
     self = snx_executable(argv[0]);
     scratch = snx_temp_dir(NULL);
     CHECK(self != NULL && scratch != NULL);

@@ -260,6 +260,14 @@ static void nca_open(SnxHac *hac, hactool_ctx_t *tool, nca_ctx_t *nca, int conta
     nca->map_size = c->map_size;
 }
 
+int snx_hac_newest_generation(SnxHac *hac) {
+    static const unsigned char zero[0x10];
+    int generation;
+    for (generation = 0x1F; generation >= 0; generation--)
+        if (memcmp(hac->tool.settings.keyset.key_area_keys[generation][0], zero, 0x10)) return generation;
+    return -1;
+}
+
 int snx_hac_nca(SnxHac *hac, int container, size_t entry, SnxHacNca *out) {
     nca_ctx_t nca;
     memset(out, 0, sizeof *out);
@@ -271,6 +279,23 @@ int snx_hac_nca(SnxHac *hac, int container, size_t entry, SnxHacNca *out) {
                     ? SNX_HAC_DATA
                     : SNX_HAC_OTHER;
     out->title_id = nca.header.title_id;
+    out->content = nca.header.content_type;
+    out->decrypted = nca.is_decrypted;
+    out->sdk = nca.header.sdk_version;
+    /* as nca_process sorts the generation out: 0 and 1 are both master key 0 */
+    out->generation = nca.header.crypto_type2 > nca.header.crypto_type ? nca.header.crypto_type2 : nca.header.crypto_type;
+    if (out->generation) out->generation--;
+    {
+        static const unsigned char zero[0x10];
+        int rights = memcmp(nca.header.rights_id, zero, 0x10) != 0;
+        const nca_keyset_t *keys = &hac->tool.settings.keyset;
+        out->title_key = !rights ? 0 : settings_has_titlekey(&hac->tool.settings, nca.header.rights_id) ? 1 : -1;
+        int generation = out->generation < 0x20 ? out->generation : 0x1F; /* past the keyset's: never given */
+        out->keys = out->generation < 0x20 &&
+                    (rights ? memcmp(keys->titlekeks[generation], zero, 0x10) != 0
+                            : nca.header.kaek_ind < 3 &&
+                                  memcmp(keys->key_area_keys[generation][nca.header.kaek_ind], zero, 0x10) != 0);
+    }
     /* a Patch RomFS, as nca_process tells one: BKTR encryption, or a decrypted dump's kept indirect tables */
     for (unsigned int i = 0; i < 4; i++) {
         nca_fs_header_t *fs = &nca.header.fs_headers[i];

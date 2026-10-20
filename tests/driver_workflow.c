@@ -985,6 +985,9 @@ int main(int argc, char** argv) {
         set_env("SNX_WORKFLOW_OUT", out);
         run(exe, repo, dump, log, 0, "ERG", NULL);
         CHECK(snx_is_dir(out) && snx_is_file(moved) && !snx_is_dir(extracted) && !snx_is_file(game));
+#ifndef _WIN32
+        CHECK(records_dump(folder, "Test game", dump)); /* what an update's RomFS is read over */
+#endif
         run(exe, repo, dump, log, 0, "G", NULL);
         set_env("SNX_WORKFLOW_OUT", "");
         set_env("SNX_WORKFLOW_OUTDIR", "none");
@@ -1068,7 +1071,7 @@ int main(int argc, char** argv) {
         reset(repo, dump);
         CHECK(!snx_write_file(game_dump, "game", 4) && !snx_write_file(update, "update", 6) &&
               !snx_write_file(dlc, "dlc", 3));
-        run(exe, repo, update, log, 1, "", "which is not in");
+        run(exe, repo, update, log, 1, "", "recompile the base game first");
         set_env("SNX_WORKFLOW_UPDATE", update);
         run(exe, repo, game_dump, log, 0, "RRA", NULL);
         set_env("SNX_WORKFLOW_UPDATE", "");
@@ -1083,7 +1086,14 @@ int main(int argc, char** argv) {
         run(exe, repo, game_dump, log, 0, "A", NULL); /* the game, played with its checked update */
         /* a DLC program an older version made, taken away as its dump is played: the game played with it */
         CHECK(!snx_copy_file(exe, old_dlc));
-        run(exe, repo, dlc, log, 0, "A", "a DLC plays with its game now");
+        {   /* --out, which the menu passes with Extract game container: a DLC's goes into its own data folder */
+            char* out = snx_path_join(root, "work elsewhere/Dlc");
+            set_env("SNX_WORKFLOW_OUT", out);
+            run(exe, repo, dlc, log, 0, "A", "a DLC plays with its game now");
+            set_env("SNX_WORKFLOW_OUT", "");
+            CHECK(!snx_path_exists(out));
+            free(out);
+        }
         CHECK(!snx_path_exists(old_dlc) && records_dump(folder, "0100ABCD12340000_0100ABCD12341001", dlc));
         checked = snx_ini_value(ini, "addons");
         CHECK(checked && !strcmp(checked, "0100ABCD12340800,0100ABCD12341001") && !snx_path_exists(image));
