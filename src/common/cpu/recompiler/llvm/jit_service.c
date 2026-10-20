@@ -914,7 +914,7 @@ static void images_release(SnxJitService* s, SnxCodeImage* images, const unsigne
 
 static void compile(SnxJitService* s, const SnxU64* pcs, size_t count, SnxU64 stamp, int queue) {
     SnxCodegen codegen;
-    SnxJitReport report;
+    SnxJitReport report = {0};
     SnxLinkInput input;
     SnxCodeImage* images;
     unsigned char taken[1 + SNX_JIT_IMAGES];
@@ -929,7 +929,6 @@ static void compile(SnxJitService* s, const SnxU64* pcs, size_t count, SnxU64 st
     Entry* e;
     Batch batch;
     int rc, discovered, dropped;
-    memset(&report, 0, sizeof(report));
     report.pc = pcs[0];
     report.pcs = count;
     report.seconds = snx_seconds();
@@ -1481,7 +1480,7 @@ SnxJitService* snx_jit_service_new(const SnxJitConfig* config, char* error, size
     s->config = *config;
     if (!s->config.budget) s->config.budget = SNX_JIT_BUDGET;
     if (!s->config.batch) s->config.batch = SNX_JIT_BATCH;
-    if (!s->config.opt) s->config.opt = '2';
+    if (!s->config.opt) s->config.opt = '0';
     if (!s->config.threads) s->config.threads = default_threads();
     if (s->config.threads > SNX_JIT_THREADS) s->config.threads = SNX_JIT_THREADS;
     bits = s->config.code_hi > s->config.code_lo ? (size_t)((s->config.code_hi - s->config.code_lo) >> 2) : 0;
