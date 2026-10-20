@@ -64,6 +64,16 @@ static void folder_answer_is(App* app, const char* path) {
     event(app, &e);
 }
 static int page(const App* app) { return setup_page_of(app); }
+/* a box's head colour, as pane draws it: the page's on a filled theme's band of ink */
+static GuiRgb head_ink(const App* app) {
+    return app->theme.panels == GUI_PANELS_FILL ? app->theme.page : app->theme.ink;
+}
+/* the page's first choice, as its question shows it */
+static const char* choice_label(const App* app) {
+    const char* labels[4];
+    assert(setup_labels(app, labels) >= 1);
+    return labels[0];
+}
 /* a and b one folder however each is written: the menu keeps a folder it takes resolved (snx_absolute), with
    Windows' separators where snx_path_join wrote '/' */
 static bool same_path(const char* a, const char* b) {
@@ -81,6 +91,7 @@ static void test_first(App* app) {
     char *portable = join(bin, SNX_PORTABLE_DIR), *games = join(root, "games picked"), *dumps = join(root, "dumps");
     char *keys = join(root, "keys"), *config, *users, *path;
     GuiSetupBoxes b;
+    int notices; /* the first setup's, one a page */
     assert(!snx_mkdirs(games) && !snx_mkdirs(dumps));
     path = join(keys, "prod.keys");
     put(path, "header_key = 00112233\n");
@@ -95,12 +106,33 @@ static void test_first(App* app) {
     shows(app, "Changed in older versions", rgb(app->theme.page)); /* YoRHa's: in the box of ink at the foot */
     shows(app, "Notice", rgb(app->theme.page));                    /* the tab shown, inverted */
     shows(app, "1 Language", rgb(app->theme.ink));
-    /* the notices a page over, Up and Down; ESC on the first page asks to exit, as the menu's */
-    key(app, SDLK_DOWN);
-    assert(app->setup_top == 1);
-    key(app, SDLK_UP);
-    key(app, SDLK_UP);
+    /* the notices one a page, 1/n, read to the last before the setup goes on: Enter or Right the next, Left back, and
+       Next is OK on the last only; ESC asks to exit, as the menu's */
+    {
+        int list[SNX_NOTICES], n = setup_notices(app, list);
+        char head[32];
+        snprintf(head, sizeof head, "Changed 1/%d", n);
+        shows(app, head, rgb(head_ink(app)));
+        assert(n > 2 && !strcmp(choice_label(app), "Next"));
+        notices = n;
+    }
+    key(app, SDLK_RETURN);
+    assert(page(app) == SETUP_NOTICE && app->setup_top == 1);
+    key(app, SDLK_RIGHT);
+    assert(app->setup_top == 2);
+    key(app, SDLK_LEFT);
+    key(app, SDLK_LEFT);
+    key(app, SDLK_LEFT);
     assert(app->setup_top == 0);
+    for (int i = 0; i < notices - 1; ++i) key(app, SDLK_RETURN);
+    assert(page(app) == SETUP_NOTICE && app->setup_top == notices - 1);
+    render(app);
+    {
+        char head[32];
+        snprintf(head, sizeof head, "Changed %d/%d", notices, notices);
+        shows(app, head, rgb(head_ink(app)));
+    }
+    assert(!strcmp(choice_label(app), "OK"));
     key(app, SDLK_ESCAPE);
     assert(app->confirm.shown && app->confirm.ask == GUI_ASK_EXIT);
     key(app, SDLK_ESCAPE);
@@ -275,6 +307,8 @@ static void test_notice(App* app) {
     assert(app->setup_on && app->setup_count == 1 && page(app) == SETUP_NOTICE);
     render(app);
     shows(app, "Changed since the last version", rgb(app->theme.page));
+    shows(app, "Changed 1/1", rgb(head_ink(app)));
+    assert(!strcmp(choice_label(app), "OK"));
     shows(app, "Account saves", rgb(app->theme.ink));
     hides(app, "Game settings", rgb(app->theme.ink));
     hides(app, "1 Language", rgb(app->theme.ink));

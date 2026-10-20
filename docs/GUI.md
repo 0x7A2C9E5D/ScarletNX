@@ -236,7 +236,9 @@ notices of what older versions did that this one does otherwise (only said, noth
 ([USAGE](USAGE.md#setup) has what each asks, the terminal's setup too). Its boxes say what the page is about; its
 question and choices come as the theme's `[body] options-dialog` places a question ([Themes](#themes)), over the boxes
 without darkening them; its tip, and what a choice did or why it did not, are in the foot. Up/Down (or the mouse)
-move between the choices, Enter takes one and ESC goes back a page, on the first page asking whether to exit.
+move between the choices, Enter takes one and ESC goes back a page, on the first page asking whether to exit. The
+notices come one a page, numbered (Changed 1/8), each read before the setup goes on: Enter, Right or Next the next one,
+Left the one before, and OK on the last.
 
 - **Language**: the menu's languages, starting on the one it has; one picked over it is kept in `app.ini`.
 - **Install**: Installed, or Portable, which makes `.scarletnx/` beside the program and moves the menu's own files
@@ -251,7 +253,7 @@ move between the choices, Enter takes one and ESC goes back a page, on the first
   the rooms' rule refuses is said, and the page stays.
 
 Once the last page is done the menu opens, `setup.ini` written. After an update that brings a notice, the setup
-shows that notice alone, with OK, before the menu. `scarletnx --debug` (or `--skip --skip`) opens the menu with no
+shows that notice alone (1/1), with OK, before the menu. `scarletnx --debug` (or `--skip --skip`) opens the menu with no
 setup, writing nothing.
 
 ## Games: the games of games/ and the player's folders

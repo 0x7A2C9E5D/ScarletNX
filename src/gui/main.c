@@ -245,7 +245,7 @@ typedef struct {
     SnxSetup setup; /* setup.ini as it was read, a newer one's numbers kept when it is written */
     int setup_pages[SNX_SETUP_STEPS + 1], setup_count, setup_page;
     GuiChoice setup_choice; /* the page's choices, the one in focus */
-    int setup_top;          /* the notices' first shown */
+    int setup_top;          /* the notice shown, one a page: the last one's OK goes on */
     int setup_language;     /* the language the menu had when the setup came to its step: one picked over it is kept */
     bool setup_typing;      /* the first user's nickname being typed, setup_name, to go with setup_uid */
     char setup_name[SNX_USERS_NICKNAME + 1];
@@ -4482,7 +4482,7 @@ static void form_pointer(App* app, float x, float y, bool touch) {
 #define SAY_SETUP        SNX_TR_KEYS("Up/Down: choose. Enter: next. ESC: back.")
 #define SAY_SETUP_FIRST  SNX_TR_KEYS("Up/Down: choose. Enter: next. ESC: exit.")
 #define SAY_SETUP_TYPING SNX_TR_KEYS("Type the nickname. Enter: done. ESC: back.")
-#define SAY_SETUP_NOTICE SNX_TR_KEYS("Up/Down: scroll. Enter: OK. ESC: exit.")
+#define SAY_SETUP_NOTICE SNX_TR_KEYS("Left/Right: the notices. Enter: next, OK on the last. ESC: exit.")
 #endif
 #define SAY_SETUP_NICKNAME SNX_TR_NOOP("nickname 4 to 20 of A-Z a-z 0-9 space . _ -")
 #define GUI_SETUP_CHOICES  32 /* a page's, at most: the languages' */
@@ -4687,6 +4687,7 @@ static void setup_keys_from(App* app, const char* folder, const char* error) {
     free(dir);
 }
 /* the focused choice of the page taken */
+static int setup_notices(const App* app, int* list);
 static void setup_take(App* app) {
     int page = setup_page_of(app), choice = app->setup_choice.focus;
     char note[1100], *portable, *prod, shown[1024];
@@ -4740,6 +4741,14 @@ static void setup_take(App* app) {
             else
                 setup_next(app);
             return;
+        case SETUP_NOTICE: { /* each notice read before the setup goes on, as terms are */
+            int list[SNX_NOTICES];
+            if (app->setup_top < setup_notices(app, list) - 1)
+                ++app->setup_top;
+            else
+                setup_next(app);
+            return;
+        }
         default: setup_next(app); return;
     }
 }
@@ -4763,7 +4772,7 @@ static void setup_back(App* app) {
 #endif
     }
 }
-/* the notices left, from the setup_top-th, and how many */
+/* the notices left, and how many */
 static int setup_notices(const App* app, int* list) {
     int i, n = 0;
     for (i = 0; i < SNX_NOTICES; ++i)
@@ -4771,9 +4780,9 @@ static int setup_notices(const App* app, int* list) {
     return n;
 }
 static void setup_key(App* app, GuiKey key) {
-    if (setup_page_of(app) == SETUP_NOTICE && (key == GUI_UP || key == GUI_DOWN)) { /* the notices, a page over */
+    if (setup_page_of(app) == SETUP_NOTICE && (key == GUI_LEFT || key == GUI_RIGHT)) { /* the notices, one a page */
         int list[SNX_NOTICES], n = setup_notices(app, list);
-        app->setup_top = SDL_clamp(app->setup_top + (key == GUI_UP ? -1 : 1), 0, SDL_max(n - 1, 0));
+        app->setup_top = SDL_clamp(app->setup_top + (key == GUI_LEFT ? -1 : 1), 0, SDL_max(n - 1, 0));
         return;
     }
     switch (gui_choice_key(&app->setup_choice, key)) {
@@ -4821,14 +4830,15 @@ static int setup_labels(const App* app, const char** labels) {
                                           SNX_TR_NOOP("Add dumps folder")};
     static const char* const keys[] = {SNX_TR_NOOP("Use these"), SNX_TR_NOOP("Choose folder"), SNX_TR_NOOP("Later")};
     static const char* const user[] = {SNX_TR_NOOP("Keep"), SNX_TR_NOOP("Overwrite")};
-    int i, page = setup_page_of(app), count = app->setup_choice.count;
+    int i, page = setup_page_of(app), count = app->setup_choice.count, list[SNX_NOTICES];
     for (i = 0; i < count; ++i)
         labels[i] = page == SNX_SETUP_LANGUAGE                     ? snx_gui_languages[i].name
                     : page == SNX_SETUP_INSTALL                    ? snx_tr(install[i])
                     : page == SNX_SETUP_FOLDERS                    ? snx_tr(folders[i])
                     : page == SNX_SETUP_KEYS                       ? snx_tr(keys[i + 3 - count])
                     : page == SNX_SETUP_USER && !app->setup_typing ? snx_tr(user[i])
-                                                                   : snx_tr("OK");
+                    : page == SETUP_NOTICE && app->setup_top < setup_notices(app, list) - 1 ? snx_tr("Next")
+                                                                                            : snx_tr("OK");
     return count;
 }
 static const char* setup_question(const App* app, char* out, size_t size) {
@@ -4910,11 +4920,11 @@ static void setup_split(const App* app, GuiRect r, int fifths, GuiRect* a, GuiRe
     *b = gui_rect(r.x + w + cell_w(app), r.y, r.w - w - cell_w(app), r.h);
 }
 static void setup_notices_box(App* app, GuiRect r) {
-    char text[SNX_NOTICES * 3 + 1][320];
-    const char* lines[SNX_NOTICES * 3 + 1];
-    int list[SNX_NOTICES], n = setup_notices(app, list), i, k = 0, rows;
-    for (i = app->setup_top; i < n; ++i) {
-        const SnxNotice* notice = &snx_notices[list[i]];
+    char text[4][320], head[64];
+    const char* lines[4];
+    int list[SNX_NOTICES], n = setup_notices(app, list), k = 0;
+    if (n) {
+        const SnxNotice* notice = &snx_notices[list[SDL_min(app->setup_top, n - 1)]];
         snprintf(text[k], sizeof text[k], "%s%s", app->theme.marker, notice->what);
         lines[k] = text[k];
         ++k;
@@ -4928,13 +4938,8 @@ static void setup_notices_box(App* app, GuiRect r) {
     snprintf(text[k], sizeof text[k], "  %s", snx_tr("Not moved. See docs/DEPRECATIONS.md"));
     lines[k] = text[k];
     ++k;
-    rows = setup_box(app, r, snx_tr("Changed"), lines, k);
-    /* more above or below the box's rows: Up and Down go over them */
-    if (app->setup_top)
-        text_in(app, r, r.x + r.w - 2 * cell_w(app), r.y + head_h(app) + 2 * app->scale, "\x1e", rgb(app->theme.soft));
-    if (head_h(app) + (rows + 1) * cell_h(app) > r.h)
-        text_in(app, r, r.x + r.w - 2 * cell_w(app), r.y + r.h - cell_h(app) - 2 * app->scale, "\x1f",
-                rgb(app->theme.soft));
+    snprintf(head, sizeof head, snx_tr("Changed %d/%d"), SDL_min(app->setup_top, n - 1) + 1, n);
+    setup_box(app, r, head, lines, k);
 }
 /* users.ini's users, a row each: the picture, the nickname, the uid */
 static void setup_users_box(App* app, GuiRect r) {

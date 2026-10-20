@@ -1119,7 +1119,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Up/Down: scroll. Enter: OK. ESC: exit."
+msgid "Left/Right: the notices. Enter: next, OK on the last. ESC: exit."
 msgstr ""
 
 #: src/gui/main.c
@@ -1224,6 +1224,10 @@ msgid "Overwrite"
 msgstr ""
 
 #: src/gui/main.c
+msgid "Next"
+msgstr ""
+
+#: src/gui/main.c
 msgid "Changed since the last version"
 msgstr ""
 
@@ -1291,7 +1295,8 @@ msgid "Not moved. See docs/DEPRECATIONS.md"
 msgstr ""
 
 #: src/gui/main.c
-msgid "Changed"
+#, c-format
+msgid "Changed %d/%d"
 msgstr ""
 
 #: src/gui/main.c
