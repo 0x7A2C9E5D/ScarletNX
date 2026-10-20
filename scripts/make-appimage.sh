@@ -7,6 +7,10 @@
 # into /usr (.github/workflows/build.yml), and quick-sharun has to be on PATH (pkgforge-dev/anylinux-setup-action puts
 # it there).
 #
+# Anylinux-AppImages is this packaging's reference: its defaults (quick-sharun's, its FAQ.md) come before a tool, a
+# download or a step of our own. The official AppImage documentation and the tools built on it (linuxdeploy,
+# appimagekit, appimage-builder) describe another, older way and do not apply here.
+#
 # A copy named after a game works like the bare runtime: games/MyGame.AppImage (or games/MyGame) loads
 # games/MyGame_code.so, since the runtime takes its name and folder from $APPIMAGE.
 #

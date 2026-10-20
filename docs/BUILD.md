@@ -371,7 +371,10 @@ cmake --install build --prefix stage
 # -> stage/bin/, stage/share/licenses/scarletnx/
 ```
 
-AppImage: run inside pkgforge's Arch container with `quick-sharun` ([CI setup](../.github/workflows/build.yml)):
+AppImage: run inside pkgforge's Arch container with `quick-sharun` ([CI setup](../.github/workflows/build.yml)), as
+[Anylinux-AppImages](https://github.com/pkgforge-dev/Anylinux-AppImages) makes them; its
+[FAQ](https://github.com/pkgforge-dev/Anylinux-AppImages/blob/main/FAQ.md) is the reference, not the official AppImage
+documentation:
 
 ```sh
 cmake --preset default -B build/appimage -DSNX_DEPLOY=OFF -DCMAKE_INSTALL_PREFIX=/usr &&

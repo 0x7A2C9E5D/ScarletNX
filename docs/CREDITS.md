@@ -18,6 +18,7 @@ Generated modules include runtime ABI code. Game assets, keys and firmware are e
 | Vulkan-Headers | Apache 2.0 |
 | volk / Vulkan Memory Allocator | MIT |
 | SDL3 | zlib |
+| The AppImage's runtime (uruntime) and launcher (sharun, with Anylinux-sharun's `anylinux.so` and cross-libc-dlopen) | MIT |
 | ENet / zstd (an Eden room's connection and its datagrams, `src/common/network/net_room.c`) | MIT / BSD-3-Clause |
 | lunasvg / plutovg (the splash's SVGs and the user's picture) | MIT / MIT, with FreeType's rasterizer and stroker (FreeType License) and stb (MIT or public domain) |
 | GUI VGA BIOS font (SeaBIOS `vgafont16`, originally Joseph Gil's font collection) | Public domain |
@@ -58,6 +59,10 @@ ported from them.
 
 [Nexium](https://nexium-emu.org/) (MIT) is credited for its research and development, which SwitchRecomp, the
 project ScarletNX started from, took as its basis.
+
+[Anylinux-AppImages](https://github.com/pkgforge-dev/Anylinux-AppImages) (Package Forge, MIT) makes the Linux
+AppImages with its quick-sharun, its Arch images and its debloated packages, and is the reference for how they are
+packaged ([FAQ](https://github.com/pkgforge-dev/Anylinux-AppImages/blob/main/FAQ.md)).
 
 Installed license texts: `share/licenses/scarletnx/`. AppImage system-library licenses
 and package manifest: `share/licenses/`. Component license files contain the full terms.
