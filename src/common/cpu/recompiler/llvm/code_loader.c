@@ -177,7 +177,7 @@ static unsigned char* map_views(unsigned char* at, size_t size, int executable, 
 #elif defined(__FreeBSD__)
     fd = shm_open(SHM_ANON, O_RDWR, 0600);
 #elif defined(__APPLE__) || defined(__managarm__)
-    // macOS doesn't have memfd_create, use anonymous temporary file
+    /* macOS doesn't have memfd_create, use anonymous temporary file */
     char template_path[] = "/tmp/eden_mem_XXXXXX";
     fd = mkstemp(template_path);
     if (fd >= 0) {
@@ -850,11 +850,13 @@ static int load(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t count,
             size_t object = ld.globals.values[i] >> 32, index = ld.globals.values[i] & 0xFFFFFFFFu;
             uint64_t address = snx_elf_symbol_address(ld.objs, object, index, &absolute), global, local;
             snx_link_insert(&loader->symbols, ld.globals.keys[i], (size_t)address);
+#ifdef __powerpc64__
             /* where later loads' branches enter a function (code_loader_int.h) */
             if (ld.machine == EM_PPC64 && ELF64_ST_TYPE(ld.objs[object].syms[index].st_info) == STT_FUNC &&
                 !snx_elf_ppc_entry(ld.objs, &ld.globals, ld.abi, object, index, address, 0, &global, &local, error,
                                    error_size))
                 snx_link_insert(&loader->entries, ld.globals.keys[i], (size_t)local);
+#endif
         }
     error[0] = 0;
     loader->abi = abi;
