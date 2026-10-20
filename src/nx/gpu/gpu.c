@@ -233,7 +233,8 @@ void i2m_launch(GpuChannel* ch, u32* regs, int base) {
     u64 len = (u64)r[0] * r[1];
     t->len = t->pos = 0;
     if (len > I2M_MAX) {
-        WARN_LIMIT(4, "gpu: an inline-to-memory launch of %u lines of %u bytes is ignored\n", r[1], r[0]);
+        WARN_LIMIT(4, "gpu: an inline-to-memory launch of %u lines of %u bytes is over %u MiB: nothing is written\n",
+                   r[1], r[0], I2M_MAX >> 20);
         return;
     }
     if (len > t->cap) {
@@ -483,7 +484,8 @@ static void method_call(GpuChannel* ch, u32 sub, u32 m, u32 v, int last) {
         case ENG_2D: fermi2d_method(ch, m, v); break;
         case ENG_DMA: dma_method(ch, m, v); break;
         default:
-            LOG_LIMIT(8, "gpu: method %x for class %x on subchannel %u is ignored\n", m, ch->sub_class[sub], sub);
+            LOG_LIMIT(8, "gpu: method %x for class %x on subchannel %u: no engine here runs that class\n", m,
+                      ch->sub_class[sub], sub);
             break;
     }
 }

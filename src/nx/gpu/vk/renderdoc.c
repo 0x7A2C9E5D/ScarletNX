@@ -62,7 +62,10 @@ void vk_renderdoc_load(void) {
         if (g_rd_frames[g_rd_nframes].at) g_rd_nframes++;
         p = *e == ',' ? e + 1 : e;
     }
-    if (p && *p) WARN("renderdoc: SNX_RENDERDOC_FRAMES: \"%s\" and what follows are ignored\n", p);
+    if (p && *p)
+        WARN("renderdoc: SNX_RENDERDOC_FRAMES: \"%s\" is no frame (N, or Ns for seconds): it captures the %d "
+             "before it\n",
+             p, g_rd_nframes);
     LOG("renderdoc: loaded, %d frame(s) to capture to %s\n", g_rd_nframes, prefix);
 }
 

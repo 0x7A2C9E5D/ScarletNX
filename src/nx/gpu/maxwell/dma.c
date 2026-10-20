@@ -308,7 +308,8 @@ static void dma_copy(GpuChannel* ch, const DmaOp* o, const u8* from) {
     u64 out_bytes = o->remap && (o->fill || o->shuffle) ? (u64)o->line_out * o->lines : 0;
     u8 *buf, *out;
     if (in_bytes > DMA_MAX_BYTES || out_bytes > DMA_MAX_BYTES) {
-        WARN_LIMIT(4, "gpu: a DMA copy of %u lines of %u elements is ignored\n", o->lines, o->width);
+        WARN_LIMIT(4, "gpu: a DMA copy of %u lines of %u elements is over %u MiB: nothing is copied\n", o->lines,
+                   o->width, DMA_MAX_BYTES >> 20);
         return;
     }
     buf = (u8*)malloc((size_t)(in_bytes + out_bytes) + 1);
