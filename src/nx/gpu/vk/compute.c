@@ -570,7 +570,8 @@ static CsPipe* cs_pipe(const u8* code, u32 lx, u32 ly, u32 lz, u32 shm, CsKey k)
     u32 image_slots = g_vk.props.limits.maxPerStageDescriptorStorageImages;
     if (image_slots > g_vk.props.limits.maxDescriptorSetStorageImages)
         image_slots = g_vk.props.limits.maxDescriptorSetStorageImages;
-    if (p->si.nimg > (int)image_slots) {
+    /* compared unsigned: a driver with no limit reports 0xFFFFFFFF, which as an int is -1 and refused every program */
+    if ((u32)p->si.nimg > image_slots) {
         LOG_LIMIT(4, "vulkan: compute image count exceeds this GPU's descriptor limit (skipped)\n");
         free(spv);
         p->failed = 1;

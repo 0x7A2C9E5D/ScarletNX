@@ -480,7 +480,7 @@ VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int
                 image_slots = g_vk.props.limits.maxDescriptorSetStorageImages;
             int needs_unformatted = 0;
             for (int i = 0; i < s->si.nimg; i++) needs_unformatted |= s->si.img[i].kind == 0;
-            if (stage != ST_FS || s->si.nimg > (int)image_slots ||
+            if (stage != ST_FS || (u32)s->si.nimg > image_slots ||
                 (needs_unformatted && !g_vk.feat.shaderStorageImageWriteWithoutFormat)) {
                 free(spv);
                 spv = NULL;
