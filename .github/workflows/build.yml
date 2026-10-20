@@ -231,16 +231,8 @@ jobs:
         with:
           path: .cache/ccache
           key: ccache-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
-      # The tests left out wait for their fix, each with what the sanitizers found. The 3DS ones present through the
-      # Vulkan driver, which keeps an allocation in itself and is unloaded before the leak check: with no function left
-      # to name, no suppression can single it out (RADV here, 128 bytes; lavapipe's in CI unchecked)
       - name: Test under the sanitizers
-        shell: bash
-        run: |
-          waiting=(
-            3ds_gsp_gpu 3ds_static_pipeline 3ds_extract
-          )
-          ctest --test-dir build/sanitizers --output-on-failure --parallel 4 -E "^($(IFS='|'; echo "${waiting[*]}"))\$"
+        run: ctest --test-dir build/sanitizers --output-on-failure --parallel 4
 
   # # ppc64le, cross-built on an x86-64 runner and tested under qemu-user: nothing is compiled under the emulator, which
   # # is 10 to 20 times slower. Debian, not Arch: it has a ppc64el archive, which the sysroot (scripts/ppc64-sysroot.sh)

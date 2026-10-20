@@ -229,6 +229,19 @@ if(TARGET snx_ctr_board)
         endif()
     endif()
 endif()
+# the 3DS tests that present through Vulkan, sanitized: the Vulkan driver stays loaded (vulkan_drivers_kept.c), as its
+# loader unloads it with an allocation of its own still held, which LeakSanitizer would report from a library gone
+if(SNX_TEST_SANITIZERS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(snx-test-vulkan-drivers-kept MODULE vulkan_drivers_kept.c)
+    target_compile_options(snx-test-vulkan-drivers-kept PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(snx-test-vulkan-drivers-kept PRIVATE ${CMAKE_DL_LIBS})
+    foreach(snx_test 3ds_gsp_gpu 3ds_static_pipeline 3ds_extract)
+        if(TEST ${snx_test})
+            set_property(TEST ${snx_test} APPEND PROPERTY ENVIRONMENT
+                         "LD_PRELOAD=$<TARGET_FILE:snx-test-vulkan-drivers-kept>")
+        endif()
+    endforeach()
+endif()
 # Under a cross build's emulator, the 3DS AOT links its module with the compiler built into the driver (its path on the
 # build machine, the target's own when installed there), whose linker doesn't take the target's objects
 if(CMAKE_CROSSCOMPILING_EMULATOR)
