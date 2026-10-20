@@ -18,6 +18,7 @@
    switches channels on an acquire that fails. Calls (gpu_call) run on the GPU thread between jobs, in order. */
 #include <stdlib.h>
 #include <string.h>
+#include "common/utilities/common.h"
 #include "nx/gpu/gpu.h"
 #include "nx/gpu/maxwell/engines_int.h"
 #include "nx/gpu/renderer.h"
@@ -787,7 +788,10 @@ static void queue_append(GpuItem* it) {
     g_qgen++;
     if (!g_qthread) {
         g_qthread = 1;
-        if (plat_thread(gpu_thread, NULL, (size_t)16 << 20)) fatal("gpu: could not start the GPU thread\n");
+        if (plat_thread(gpu_thread, NULL, (size_t)16 << 20)) {
+            char why[256];
+            fatal("gpu: could not start the GPU thread: %s\n", snx_os_error(why, sizeof why));
+        }
     }
     pc_broadcast(&g_qcv);
 }

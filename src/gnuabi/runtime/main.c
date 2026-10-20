@@ -242,7 +242,8 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     HANDLE thread = CreateThread(NULL, GUEST_STACK, guest_thread, NULL, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
     if (!thread) {
-        fprintf(stderr, "scarletnx-gnuabi: cannot start the guest thread\n");
+        char why[256];
+        fprintf(stderr, "scarletnx-gnuabi: cannot start the guest thread: %s\n", snx_os_error(why, sizeof why));
         return 2;
     }
     WaitForSingleObject(thread, INFINITE);
@@ -251,8 +252,9 @@ int main(int argc, char** argv) {
     pthread_t thread;
     pthread_attr_init(&attributes);
     pthread_attr_setstacksize(&attributes, GUEST_STACK);
-    if (pthread_create(&thread, &attributes, guest_thread, NULL)) {
-        fprintf(stderr, "scarletnx-gnuabi: cannot start the guest thread\n");
+    int failed = pthread_create(&thread, &attributes, guest_thread, NULL);
+    if (failed) {
+        fprintf(stderr, "scarletnx-gnuabi: cannot start the guest thread: %s\n", strerror(failed));
         return 2;
     }
     pthread_join(thread, NULL);
