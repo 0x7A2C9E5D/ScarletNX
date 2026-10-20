@@ -2490,9 +2490,9 @@ static GuiSettings* settings_of(App* app) {
 }
 /* ---- the theme editor's preview: the menu or a run in the theme being edited ---- */
 #define GUI_PREVIEW_MS 8000
-static const char preview_run[] = "Extracting Cult of the Lamb.nsp\n"
+static const char preview_run[] = "Extracting A Game.nsp\n"
                                   "Extracted 3 NCAs, the program's 4 modules\n"
-                                  "Recompiling Cult of the Lamb (4 modules)\n"
+                                  "Recompiling A Game (4 modules)\n"
                                   "Functions: 48211  instructions: 2915002\n"
                                   "LLVM: 5 code units and the module descriptor\n"
                                   "  compiled block 1/6: code_000, 9874 functions (8.1 s)\n"
@@ -2534,7 +2534,7 @@ static bool preview_texture(App* app) {
     if (run) {
         app->steps = app->preview_steps;
         app->console = app->preview_console;
-        app->file = (char*)"games/Cult of the Lamb.nsp";
+        app->file = (char*)"games/A Game.nsp";
         app->menu.selected = GUI_SWITCH;
     }
     SDL_SetRenderTarget(app->renderer, app->preview);
