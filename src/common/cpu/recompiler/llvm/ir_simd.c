@@ -25,10 +25,10 @@ static V lane_pointer(SnxIr* ir, V base, unsigned size, unsigned index) {
     return LLVMBuildInBoundsGEP2(B, ir->t_i8, base, &offset, 1, "");
 }
 static V get(SnxIr* ir, V base, unsigned size, unsigned index) {
-    return ir_load(ir, lane_type(ir, size), lane_pointer(ir, base, size, index));
+    return ir_guest_order(ir, ir_load(ir, lane_type(ir, size), lane_pointer(ir, base, size, index)));
 }
 static void set(SnxIr* ir, V base, unsigned size, unsigned index, V value) {
-    ir_store(ir, ir_cast(ir, value, lane_type(ir, size), 0), lane_pointer(ir, base, size, index));
+    ir_store(ir, ir_guest_order(ir, ir_cast(ir, value, lane_type(ir, size), 0)), lane_pointer(ir, base, size, index));
 }
 static V vreg(SnxIr* ir, unsigned n) { return ir_cpu(ir, ir_off_v(n)); }
 static V fp_fma(SnxIr* ir, V add, V a, V b, unsigned width) {
@@ -57,10 +57,10 @@ static LLVMTypeRef lanes_type(SnxIr* ir, unsigned size, unsigned n) {
 static V get_lanes(SnxIr* ir, V base, unsigned size, unsigned n) {
     V load = ir_load(ir, lanes_type(ir, size, n), base);
     LLVMSetAlignment(load, 1);
-    return load;
+    return ir_guest_order(ir, load);
 }
 static void set_lanes(SnxIr* ir, V base, V value) {
-    V store = LLVMBuildStore(B, value, base);
+    V store = LLVMBuildStore(B, ir_guest_order(ir, value), base);
     LLVMSetAlignment(store, 1);
 }
 static V broadcast(SnxIr* ir, V scalar, unsigned n) {

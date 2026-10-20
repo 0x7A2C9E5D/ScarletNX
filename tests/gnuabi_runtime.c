@@ -3,6 +3,7 @@
 #include "gnuabi/process/process.h"
 #include "gnuabi/abi/errno/errno.h"
 #include "gnuabi/runtime/execution.h"
+#include "common/utilities/endian.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,6 +126,7 @@ int main(void) {
     CHECK(!(p->cpu.x[31] & 15));
     uint64_t stack[7];
     CHECK(gnu_memory_read(&p->memory, p->cpu.x[31], stack, sizeof stack) == 0);
+    for (size_t i = 0; i < 7; i++) stack[i] = snx_le64(stack[i]); /* the guest's words, little-endian on any host */
     CHECK(stack[0] == 2 && stack[3] == 0 && stack[5] == 0 && stack[6] == 3);
     CHECK(gnu_memory_read_string(&p->memory, stack[1], error, sizeof error) == 0 && !strcmp(error, "/program"));
     CHECK(gnu_memory_read_string(&p->memory, stack[4], error, sizeof error) == 0 && !strcmp(error, "KEY=value"));
@@ -149,7 +151,7 @@ int main(void) {
     a[1] = 16;
     a[2] = 0;
     CHECK(gnu_syscall(p, 278, a) == 16);
-    uint32_t futex_value = 123;
+    uint32_t futex_value = snx_le32(123);
     CHECK(gnu_memory_write(&p->memory, a[0], &futex_value, 4) == 0);
     a[0] = p->cpu.x[31] - 128;
     a[1] = 1;

@@ -24,7 +24,14 @@ __extension__ typedef unsigned __int128 snx_u128;
 __attribute__((target("cx16")))
 #endif
 u32 snx_cas128(CPU* c, u64* p, u64 o0, u64 o1, u64 n0, u64 n1) {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    /* the guest's 16 bytes are two little-endian doublewords, the first at p: a big-endian host reads the first as
+       the high half, each one byte-reversed */
+    snx_u128 expected = ((snx_u128)__builtin_bswap64(o0) << 64) | __builtin_bswap64(o1),
+             desired = ((snx_u128)__builtin_bswap64(n0) << 64) | __builtin_bswap64(n1);
+#else
     snx_u128 expected = ((snx_u128)o1 << 64) | o0, desired = ((snx_u128)n1 << 64) | n0;
+#endif
     (void)c;
     return __atomic_compare_exchange_n((snx_u128*)p, &expected, desired, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 }

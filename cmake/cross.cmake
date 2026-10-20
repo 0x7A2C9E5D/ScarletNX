@@ -37,7 +37,13 @@ if(CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
     if(CMAKE_SYSROOT)
         list(APPEND SNX_TARGET_FLAGS --sysroot=${CMAKE_SYSROOT})
     endif()
-    set(SNX_TARGET_LDFLAGS -fuse-ld=lld)
+    # LLD links no ELFv1 object, the ABI of big-endian PowerPC64 glibc (Debian ports): GNU ld does
+    # (binutils-powerpc64-linux-gnu). Big-endian musl is ELFv2, as LLD takes it
+    if(CMAKE_C_COMPILER_TARGET MATCHES "^(powerpc64|ppc64)-([a-z]+-)?linux-gnu$")
+        set(SNX_TARGET_LDFLAGS -fuse-ld=bfd)
+    else()
+        set(SNX_TARGET_LDFLAGS -fuse-ld=lld)
+    endif()
 endif()
 list(APPEND SNX_TARGET_FLAGS ${SNX_ARCH_FLAGS})
 

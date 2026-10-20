@@ -46,8 +46,7 @@ environment (`-E VAR=VALUE` sets a variable and `-U VAR` removes one, as with QE
 | --- | --- |
 | `-L DIR`, `--sysroot=DIR` | The guest's root (see below). `SNX_LINUX_SYSROOT` names it too |
 | `--isolated` | No host files: `/tmp` in memory and the program alone as `/program`, the namespace the unit tests use |
-| `--jit` (default) | Compile the guest's code in process as it runs |
-| `--aot`, `--cc=COMPILER` | Compile the program before it starts with the host compiler, the rest as it runs |
+| `--jit` (default) | Compile the guest's code in process as it runs, the only mode |
 | `--jit-cache=DIR`, `--no-jit-cache` | Where compiled code is kept between runs (default `linux-jit` in the user's cache folder) |
 | `--jit-opt=LEVEL` | The JIT's LLVM optimization level (default 2) |
 | `--verbose-jit` | A line for each piece of code compiled, and how long it took |
@@ -90,18 +89,13 @@ The guest compiler's `--sysroot=/` points it at the guest's root, which is `linu
 
 ## How code runs
 
-Both modes share one dispatch table over the whole 4 GiB guest address space. A guest
-address the table has no host function for sends the generated code to the runtime,
-which compiles the code there with the LLVM backend (the recompiler library's
-`snx_recompile_from`) and runs it:
-
-- JIT (the default) compiles everything that way. One step is the function execution
-  reached and the functions it calls, breadth first, up to 64Ki instructions, split
-  into pieces of at most 4096 instructions (LLVM's time grows faster than a function's
-  size) and compiled on every core.
-- AOT compiles the main executable with the host compiler before it starts, with
-  per-instruction fetch checks (as this runtime always did). Code mapped later, the
-  dynamic linker and shared libraries, is compiled as it runs.
+One dispatch table covers the whole 4 GiB guest address space. A guest address the table has no host function for
+sends the generated code to the runtime, which compiles the code there with the LLVM backend (the recompiler
+library's `snx_recompile_from`) and runs it. One step is the function execution reached and the functions it calls,
+breadth first, up to 64Ki instructions, split into pieces of at most 4096 instructions (LLVM's time grows faster than
+a function's size) and compiled on every core. Each step is a module: its pieces, the descriptor that fills the
+table, and the runtime library, linked into a shared object and loaded with `dlopen`. On PowerPC64 the steps share
+one code arena and its TOC instead, the runtime library loaded into it once ([PowerPC64](PPC64.md)).
 
 Compiled modules are kept in the cache, named by a hash of the code, its addresses and
 entries, the backend's settings, `SNX_ABI` and the host CPU, together with the compiled

@@ -55,6 +55,9 @@ struct snx_recompiler;
 /* NULL when the flags name no usable backend or the backend cannot target this host (snx_recompiler_has) */
 SNX_RECOMPILER_API struct snx_recompiler* snx_recompiler_new(int flags);
 SNX_RECOMPILER_API void snx_recompiler_free(struct snx_recompiler* r);
+/* In the child of a fork(), before it compiles anything: the modules' code made the child's own where the parent
+   shares it (PowerPC64 loads every module into one code arena of shared memory). 0, or -1 (snx_recompiler_error) */
+SNX_RECOMPILER_API int snx_recompiler_forked(struct snx_recompiler* r);
 /* 1 when a recompiler with these flags can be made in this build, on this host */
 SNX_RECOMPILER_API int snx_recompiler_has(int flags);
 /* The contract version of the code this library generates (SNX_ABI of its cpu.h): a caller built against another

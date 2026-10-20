@@ -94,7 +94,7 @@ endif()
 # The archives' SHA-256 are also part of their cache keys (cmake/deps_cache.cmake)
 include("${CMAKE_SOURCE_DIR}/cmake/deps_cache.cmake")
 include("${CMAKE_SOURCE_DIR}/cmake/apple.cmake")
-if(SNX_BUILD_NX OR SNX_BUILD_3DS)
+if(SNX_BUILD_NX OR SNX_BUILD_3DS OR SNX_BUILD_GNUABI) # the GNU ABI runtime's random bytes and TLS sockets
     set(snx_openssl_sha256 325b5c806167c13b40b1ffeadfe0248197c00eccc4cf123ec1e28d2d2fd216d9)
     CPMAddPackage(NAME OpenSSL VERSION 4.0.3
                   URL https://github.com/openssl/openssl/releases/download/openssl-4.0.3/openssl-4.0.3.tar.gz

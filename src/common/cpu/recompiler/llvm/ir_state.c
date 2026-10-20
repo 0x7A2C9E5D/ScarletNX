@@ -207,24 +207,48 @@ void ir_setx(SnxIr* ir, unsigned n, LLVMValueRef value) {
     if (n != 31) ir_set_x(ir, n, value);
 }
 LLVMValueRef ir_vd(SnxIr* ir, unsigned n, unsigned lane) {
-    return ir_cpu_load(ir, ir->t_i64, ir_off_v(n) + 8 * (size_t)lane);
+    return ir_guest_order(ir, ir_cpu_load(ir, ir->t_i64, ir_off_v(n) + 8 * (size_t)lane));
 }
 void ir_set_vd(SnxIr* ir, unsigned n, unsigned lane, LLVMValueRef value) {
-    ir_cpu_store(ir, ir_u64(ir, value), ir_off_v(n) + 8 * (size_t)lane);
+    ir_cpu_store(ir, ir_guest_order(ir, ir_u64(ir, value)), ir_off_v(n) + 8 * (size_t)lane);
 }
 static LLVMTypeRef lane_type(SnxIr* ir, unsigned size) {
     return size == 0 ? ir->t_i8 : size == 1 ? ir->t_i16 : size == 2 ? ir->t_i32 : ir->t_i64;
 }
 LLVMValueRef ir_ve(SnxIr* ir, unsigned n, unsigned size, unsigned index) {
-    return ir_cpu_load(ir, lane_type(ir, size), ir_off_v(n) + ((size_t)index << size));
+    return ir_guest_order(ir, ir_cpu_load(ir, lane_type(ir, size), ir_off_v(n) + ((size_t)index << size)));
 }
 void ir_set_ve(SnxIr* ir, unsigned n, unsigned size, unsigned index, LLVMValueRef value) {
-    ir_cpu_store(ir, ir_cast(ir, value, lane_type(ir, size), 0), ir_off_v(n) + ((size_t)index << size));
+    ir_cpu_store(ir, ir_guest_order(ir, ir_cast(ir, value, lane_type(ir, size), 0)),
+                 ir_off_v(n) + ((size_t)index << size));
 }
 LLVMValueRef ir_pc(SnxIr* ir) { return ir_cpu_load(ir, ir->t_i64, offsetof(CPU, pc)); }
 void ir_set_pc(SnxIr* ir, LLVMValueRef value) { ir_cpu_store(ir, value, offsetof(CPU, pc)); }
 
 /* ---- guest memory ---- */
+
+LLVMValueRef ir_guest_order(SnxIr* ir, LLVMValueRef value) {
+    LLVMTypeRef type = LLVMTypeOf(value), lane = type, integer;
+    unsigned bits;
+    if (!ir->big_endian) return value;
+    if (LLVMGetTypeKind(type) == LLVMVectorTypeKind) lane = LLVMGetElementType(type);
+    switch (LLVMGetTypeKind(lane)) {
+        case LLVMIntegerTypeKind: bits = LLVMGetIntTypeWidth(lane); break;
+        case LLVMHalfTypeKind:
+        case LLVMBFloatTypeKind: bits = 16; break;
+        case LLVMDoubleTypeKind: bits = 64; break;
+        default: bits = 32; break;
+    }
+    if (bits == 8) return value;
+    if (LLVMGetTypeKind(lane) == LLVMIntegerTypeKind)
+        return ir_intrinsic(ir, "llvm.bswap", type, &value, 1);
+    /* a floating lane: swapped as the integer of its width (a lane-for-lane bitcast either way) */
+    integer = LLVMIntTypeInContext(ir->ctx, bits);
+    if (type != lane) integer = LLVMVectorType(integer, LLVMGetVectorSize(type));
+    value = LLVMBuildBitCast(ir->b, value, integer, "");
+    value = ir_intrinsic(ir, "llvm.bswap", integer, &value, 1);
+    return LLVMBuildBitCast(ir->b, value, type, "");
+}
 
 LLVMValueRef ir_mp(SnxIr* ir, LLVMValueRef address) {
     LLVMValueRef index = ir_u64(ir, address);
@@ -240,7 +264,7 @@ LLVMValueRef ir_rd(SnxIr* ir, LLVMValueRef address, unsigned bits) {
     LLVMValueRef load = LLVMBuildLoad2(ir->b, int_type(ir, bits), ir_mp(ir, address), "");
     LLVMSetAlignment(load, 1);
     LLVMSetVolatile(load, 1);
-    return ir_tag_guest(ir, load);
+    return ir_guest_order(ir, ir_tag_guest(ir, load));
 }
 LLVMValueRef ir_rd_bytes(SnxIr* ir, LLVMValueRef address, unsigned bytes) {
     LLVMValueRef load = LLVMBuildLoad2(ir->b, LLVMVectorType(ir->t_i8, bytes), ir_mp(ir, address), "");
@@ -256,7 +280,7 @@ void ir_wr_bytes(SnxIr* ir, LLVMValueRef address, LLVMValueRef value) {
 }
 void ir_wr(SnxIr* ir, LLVMValueRef address, unsigned bits, LLVMValueRef value) {
     LLVMValueRef pointer = ir_mp(ir, address);
-    LLVMValueRef store = LLVMBuildStore(ir->b, ir_cast(ir, value, int_type(ir, bits), 0), pointer);
+    LLVMValueRef store = LLVMBuildStore(ir->b, ir_guest_order(ir, ir_cast(ir, value, int_type(ir, bits), 0)), pointer);
     LLVMSetAlignment(store, 1);
     LLVMSetVolatile(store, 1);
     ir_tag_guest(ir, store);
@@ -275,11 +299,11 @@ LLVMValueRef ir_ldacq(SnxIr* ir, LLVMValueRef address, unsigned bits) {
     LLVMValueRef load = LLVMBuildLoad2(ir->b, int_type(ir, bits), ir_mp(ir, address), "");
     LLVMSetOrdering(load, LLVMAtomicOrderingSequentiallyConsistent);
     LLVMSetAlignment(load, bits / 8);
-    return ir_tag_guest(ir, load);
+    return ir_guest_order(ir, ir_tag_guest(ir, load));
 }
 void ir_strel(SnxIr* ir, LLVMValueRef address, unsigned bits, LLVMValueRef value) {
     LLVMValueRef pointer = ir_mp(ir, address);
-    LLVMValueRef store = LLVMBuildStore(ir->b, ir_cast(ir, value, int_type(ir, bits), 0), pointer);
+    LLVMValueRef store = LLVMBuildStore(ir->b, ir_guest_order(ir, ir_cast(ir, value, int_type(ir, bits), 0)), pointer);
     LLVMSetOrdering(store, LLVMAtomicOrderingSequentiallyConsistent);
     LLVMSetAlignment(store, bits / 8);
     ir_tag_guest(ir, store);

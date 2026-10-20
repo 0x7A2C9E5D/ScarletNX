@@ -6,6 +6,7 @@
 #include "gnuabi/threading/futex.h"
 #include "gnuabi/process/process.h"
 #include "gnuabi/abi/errno/errno.h"
+#include "common/utilities/endian.h"
 #include <time.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -23,10 +24,12 @@ int64_t gnu_futex(GnuProcess* p, const uint64_t a[6]) {
     }
     if (operation != 0 && operation != 9) return -GNU_ENOSYS;
     if (operation == 9 && !a[5]) return -GNU_EINVAL;
-    if (current != (uint32_t)a[2]) return -GNU_EAGAIN;
+    if (snx_le32(current) != (uint32_t)a[2]) return -GNU_EAGAIN; /* the guest's little-endian word */
     if (!a[3]) return -GNU_ENOSYS; /* Blocking without a peer cannot make progress. */
     int64_t timeout[2];
     if (gnu_memory_read(&p->memory, a[3], timeout, sizeof timeout)) return -GNU_EFAULT;
+    timeout[0] = (int64_t)snx_le64((uint64_t)timeout[0]);
+    timeout[1] = (int64_t)snx_le64((uint64_t)timeout[1]);
     if (timeout[0] < 0 || timeout[1] < 0 || timeout[1] >= 1000000000) return -GNU_EINVAL;
     int64_t seconds = timeout[0], nanos = timeout[1];
     if (operation == 9) {

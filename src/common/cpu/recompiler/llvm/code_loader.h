@@ -37,9 +37,11 @@
    PAGE_EXECUTE_READWRITE as its maximum protection) mapped twice: with MapViewOfFile3 into a placeholder cut out of the
    arena's reservation (VirtualAlloc2 with MEM_RESERVE_PLACEHOLDER, VirtualFree with MEM_PRESERVE_PLACEHOLDER), and
    read-write anywhere. A COFF load's function table (.pdata) is registered with RtlAddFunctionTable, the arena's start
-   its image base, so exceptions and longjmp unwind through JIT code as through a module's. Not PowerPC64, whose AOT
-   module keeps one TOC in r2 (link_elf.c): a JIT load's calls into the runtime would change TOCs, which takes stubs
-   this loader doesn't write.
+   its image base, so exceptions and longjmp unwind through JIT code as through a module's.
+
+   PowerPC64 (ELFv1 and ELFv2) loads keep one TOC for the whole arena in r2, as the AOT linker's module keeps one
+   (link_elf.c), so guest code jumps from one load into another with r2 as it is. Loaded code may call nothing outside
+   the arena directly: the runtime's functions have a TOC of their own, which only pointer calls (RtAPI) switch to.
 
    macOS on Apple silicon loads ELF objects too, which the IR backend writes there with Darwin's calling convention
    (snx_ir_new_jit). Memory becomes executable there only as MAP_JIT memory, which can't be shared or placed: the code
@@ -80,6 +82,14 @@ int snx_code_lookup(const SnxCodeLoader* loader, const char* name, SnxU64* addre
    and the loader as it was before the call */
 int snx_code_load(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t count, const char* const* names,
                   size_t name_count, SnxU64* addresses, char* error, size_t error_size);
+/* The same, but the unit's globals stay its own: they don't join the table, and may repeat a name an earlier load
+   has (each unit of the GNU ABI runtime's JIT steps defines a descriptor of the same name). Not COFF */
+int snx_code_load_private(SnxCodeLoader* loader, const SnxLinkInput* inputs, size_t count, const char* const* names,
+                          size_t name_count, SnxU64* addresses, char* error, size_t error_size);
+/* In a forked child: the arena's code and read-only data copied into memory of the child's own, at the same
+   addresses, where they were shared memory shared with the parent too (each process's later loads would write into
+   the other's arena). 0, or -1 with the reason in error. Linux and the BSDs */
+int snx_code_loader_unshare(SnxCodeLoader* loader, char* error, size_t error_size);
 /* the bytes of the arena loads use, the three regions together, alignment padding included */
 size_t snx_code_used(const SnxCodeLoader* loader);
 

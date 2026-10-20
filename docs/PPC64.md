@@ -8,6 +8,7 @@
 * [Running a game under qemu](#running-a-game-under-qemu)
 * [Host pages larger than 4 KiB](#host-pages-larger-than-4-kib)
 * [What differs from the other hosts](#what-differs-from-the-other-hosts)
+* [Big-endian hosts](#big-endian-hosts)
 
 ScarletNX builds for 64-bit PowerPC Linux from POWER8 on. The little-endian port (ppc64le) works: the test suite
 passes under qemu-user, and Super Haxagon, recompiled under qemu, played a level to its game over screen there with
@@ -15,11 +16,10 @@ lavapipe as the Vulkan driver. No real POWER machine has run it yet. CI cross-bu
 (`ScarletNX-linux-ppc64le.AppImage`, the `appimage-cross` job in `.github/workflows/build.yml`) against an Arch POWER
 system root and runs it under qemu as installed; the test suite's job, `linux-ppc64le`, is commented out.
 
-The big-endian hosts are not ported yet. Their builds are set up (the `linux-ppc64-cross` preset for Debian's glibc
-port, ELFv1, and `linux-ppc64-musl-cross` for musl, ELFv2), and the recompiler's linker takes both ABIs, but guest
-memory is still read and written in the host's byte order. A Switch game's memory is little-endian, so every load and
-store, the exclusive monitor, the vector registers, IPC and the services' structures, and the GPU's data have to
-convert on a big-endian host. That is the next part of the port.
+On a big-endian host (`linux-ppc64-cross`, Debian's glibc port, ELFv1) the Linux runtime runs AArch64 programs:
+under qemu-ppc64, an AArch64-hosted GCC compiles a C file and the program it made runs, both dynamically linked
+against glibc. The Switch runtime builds there but refuses to start a game. See
+[Big-endian hosts](#big-endian-hosts).
 
 ## Building on an x86-64 Debian machine
 
@@ -92,11 +92,53 @@ and CI check these paths on 4 KiB hosts (`ldr_service_64k_pages`, `gnuabi_memory
 - **The linker** (`src/common/cpu/recompiler/llvm/link_elf.c`, with the relocations in `elf_object.c`) handles the
   TOC relocations, ELFv2's local entry points, ELFv1's `.opd` descriptors, and 16-byte stubs for a call past `bl`'s
   32 MiB.
-- **No runtime JIT.** The JIT's loader (`code_loader.c`) doesn't load PowerPC64 objects: code loaded beside the
-  runtime would call its functions, which have a TOC of their own, and each such call would need a stub that saves
-  and restores r2. The JIT replaced the interpreter, so there only the code the recompiler found can run.
+- **One TOC for the Linux runtime's code.** Its just-in-time steps are loaded into one code arena
+  (`code_loader.c`, `library.c`'s `arena_load`) with the runtime library once, and the arena has one TOC, which every
+  step's code keeps in r2. Elsewhere each step is a module of its own, linked and loaded with `dlopen`. On PowerPC64
+  that gave each step its own TOC, and a guest's jump from one step into another came back to its caller with the
+  other step's TOC. Loaded code calls the runtime only through pointers (RtAPI), which LLVM calls with r2 saved. A
+  forked child copies the arena's pages, which are shared memory, into its own (`snx_recompiler_forked`).
+- **No runtime JIT for Switch games.** Its units call the AOT module's functions directly, and the module has a TOC
+  of its own (`module_jit` in `library.c`). The A32 executor is off too: its blocks call the runtime's functions
+  directly (`common/cpu/arm/exec.c`), so the Linux runtime runs no 32-bit programs on PowerPC64.
 - **Rounding stays on the slow path.** LLVM 19 lowers `llvm.roundeven` to a libm call on POWER8, and fails on its
   vector form, so FRINTN and the rounding conversions use the software path. Fused multiply-add is a fast path, as
   POWER always has it.
 - **SDL3 is built without AltiVec** (`cmake/dependencies.cmake`): its blitters prefetch with `dstt`, which the ISA
   phased out and qemu traps.
+
+## Big-endian hosts
+
+AArch64 is little-endian, so on a big-endian host guest memory keeps the guest's byte order and everything that reads
+or writes a guest value as a number converts it:
+
+- The recompiler swaps where generated code reads memory as numbers (`ir_rd`, `ir_wr`, `ir_ldacq`, `ir_strel` in
+  `ir_state.c`) and where it compares in memory (`cas` in `ir_helpers.c`, `snx_cas128`). LLVM folds the swaps into
+  POWER's byte-reversed loads and stores. The vector registers hold the guest's bytes too: the views that read a lane
+  as a number swap it (`ir_vd`, `ir_ve`, the lane helpers of `ir_simd.c`), and Q loads, LD1 to LD4, TBL and EXT stay
+  byte copies. The emitters decide by the target's data layout, so a little-endian host's code is what it was.
+- The Linux runtime's system calls read and write the guest's structures through `common/utilities/endian.h`
+  (`snx_ld_le32`, `snx_st_le64` and their kin), which compile to plain copies on a little-endian host.
+- `scripts/le-unchanged.sh` builds a base commit and the working tree on a little-endian machine and lists every
+  object whose code differs, and whether the recompiler's output for an AArch64 program changed.
+
+The build links with GNU ld, since LLD links no ELFv1 object: `binutils-powerpc64-linux-gnu` on Debian. The system
+root is Debian ports' unstable:
+
+```bash
+scripts/ppc64-sysroot.sh ppc64 .cache/sysroot-ppc64
+export SNX_SYSROOT=$PWD/.cache/sysroot-ppc64
+cmake --preset linux-ppc64-cross -DSNX_BUILD_NX=OFF -DSNX_BUILD_3DS=OFF -DSNX_BUILD_GUI=OFF
+cmake --build --preset linux-ppc64-cross --target scarletnx-gnuabi-run
+```
+
+What was run under qemu-ppc64: the Linux runtime's tests (`gnuabi_*`, `endian`, `cas128`), `tools/gnuabi_diff.py
+--suite all` against qemu-aarch64 (the CPU suite covers SIMD, floating point, exclusives and unaligned accesses), a
+glibc program, and the AArch64-hosted GCC 16.2 compiling a C file with a glibc system root.
+
+The Switch runtime is not ported: its services, IPC, the GPU and the shader translator read guest memory as host
+numbers. What it needs: `mem.h`'s accessors and the
+synchronization primitives' atomics, the IPC generator's arguments and structures, the services' local `rd32`/`wr32`
+helpers, hactool's headers, and the GPU's data, which stays in the guest's byte order in buffers and is converted
+where it is read as typed values (the translated shaders, image uploads and readbacks, vertex input). Until then the
+runtime refuses to start a game on a big-endian host.

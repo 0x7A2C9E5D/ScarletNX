@@ -7,6 +7,7 @@
 #include "gnuabi/network/network.h"
 #include "gnuabi/abi/errno/errno.h"
 #include "common/utilities/common.h"
+#include "common/utilities/endian.h"
 #include <openssl/rand.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -156,6 +157,7 @@ int gnu_process_stack(GnuProcess* p, int argc, const char* const* argv, const ch
     for (size_t i = 0; i < envc; i++) values[index++] = environment[i];
     values[index++] = 0;
     memcpy(values + index, auxiliary, sizeof auxiliary);
+    for (index = 0; index < words; index++) values[index] = snx_le64(values[index]); /* the guest's byte order */
     result = gnu_memory_write(&p->memory, initial, values, (size_t)bytes);
     free(values);
     if (!result) {
@@ -242,6 +244,7 @@ int gnu_process_stack32(GnuProcess* p, int argc, const char* const* argv, const 
     for (size_t i = 0; i < envc; i++) values[index++] = environment[i];
     values[index++] = 0;
     memcpy(values + index, auxiliary, sizeof auxiliary);
+    for (index = 0; index < words; index++) values[index] = snx_le32(values[index]); /* the guest's byte order */
     result = gnu_memory_write(&p->memory, initial, values, (size_t)bytes);
     free(values);
     if (!result) {

@@ -238,6 +238,7 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
     size_t i, j, k, nsyms = export_count + 1, ndyn = 0, symbol_count = 0;
     int rc = -1;
     unsigned char* p;
+    uint32_t word;
     Elf64_Dyn dyn[16];
     (void)soname;
     memset(&l, 0, sizeof(l));
@@ -407,17 +408,18 @@ int snx_link_elf(const SnxLinkInput* inputs, size_t count, const char* const* ex
         }
         export_address[i] = symbol_address(&l, found >> 32, found & 0xFFFFFFFFu, &absolute);
     }
-    /* .hash: nbucket, nchain, buckets, chains */
+    /* .hash: nbucket, nchain, buckets, chains, words in the host's order as the dynamic loader reads them (a
+       big-endian PowerPC64 host's too) */
     p = out.data + hash_off;
-    snx_link_put32(p, (uint32_t)nbucket);
-    snx_link_put32(p + 4, (uint32_t)nsyms);
+    word = (uint32_t)nbucket;
+    memcpy(p, &word, 4);
+    word = (uint32_t)nsyms;
+    memcpy(p + 4, &word, 4);
     for (i = 0; i < export_count; ++i) {
-        uint32_t* bucket = (uint32_t*)(void*)(p + 8 + 4 * (elf_hash(exports[i]) % nbucket));
-        uint32_t* chain = (uint32_t*)(void*)(p + 8 + 4 * nbucket + 4 * (i + 1));
-        uint32_t previous;
-        memcpy(&previous, bucket, 4);
-        memcpy(chain, &previous, 4);
-        snx_link_put32((unsigned char*)bucket, (uint32_t)(i + 1));
+        unsigned char* bucket = p + 8 + 4 * (elf_hash(exports[i]) % nbucket);
+        memcpy(p + 8 + 4 * nbucket + 4 * (i + 1), bucket, 4); /* the chain goes on to the bucket's previous head */
+        word = (uint32_t)(i + 1);
+        memcpy(bucket, &word, 4);
     }
     /* .dynsym */
     for (i = 0, k = 1; i < export_count; ++i) {

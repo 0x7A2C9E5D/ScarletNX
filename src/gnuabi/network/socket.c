@@ -5,6 +5,7 @@
    iov, size_t iovlen, control, size_t controllen, int flags} (56 bytes), mmsghdr {msghdr, u32 len} (64 bytes).
    AF_UNIX sockets serve socketpair() only: a path would name a host file, and the guest's filesystem is its own.
    Control messages aren't passed: recvmsg() reports none. */
+#include "common/utilities/endian.h"
 #include "gnuabi/network/network.h"
 #include "gnuabi/filesystem/internal.h"
 #include <stdlib.h>
@@ -109,7 +110,7 @@ static int addr_in(GnuMemory* m, uint64_t a, uint64_t len, SnxSockAddr* out) {
             memcpy(&out->port, b + 2, 2);
             memcpy(&out->flowinfo, b + 4, 4);
             memcpy(out->addr, b + 8, 16);
-            if (len >= 28) memcpy(&out->scope_id, b + 24, 4);
+            if (len >= 28) out->scope_id = snx_ld_le32(b + 24);
             return 0;
     }
     return -SNX_EAFNOSUPPORT;
@@ -129,7 +130,7 @@ static int addr_out(GnuMemory* m, const SnxSockAddr* sa, uint64_t addr, uint64_t
         memcpy(b + 2, &sa->port, 2);
         memcpy(b + 4, &sa->flowinfo, 4);
         memcpy(b + 8, sa->addr, 16);
-        memcpy(b + 24, &sa->scope_id, 4);
+        snx_st_le32(b + 24, sa->scope_id);
         n = 28;
     } else if (sa->family == SNX_AF_INET) {
         memcpy(b + 2, &sa->port, 2);

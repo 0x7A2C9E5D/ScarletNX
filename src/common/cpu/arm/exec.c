@@ -111,7 +111,13 @@ SnxArmExec* snx_arm_exec_new(char* error, size_t error_size) {
         return NULL;
     }
     e->ir = snx_ir_new_jit("a32exec", BLOCK_OPT, error, error_size);
+#if defined(__powerpc64__)
+    /* blocks call the runtime's functions below directly, which have a TOC of their own: the loader takes no call out
+       of its arena there (code_loader.h) */
+    if (e->ir) snprintf(error, error_size, "the A32 executor's blocks can't call the runtime on PowerPC64 hosts yet");
+#else
     if (e->ir) e->loader = snx_code_loader_new(0, error, error_size);
+#endif
     /* the runtime library's functions blocks call (simd.h, arm.h), by the names the block compiler declares */
     if (!e->loader || snx_code_define(e->loader, "snx_arm_fp", (SnxU64)(uintptr_t)snx_arm_fp) ||
         snx_code_define(e->loader, "snx_arm_crypto", (SnxU64)(uintptr_t)snx_arm_crypto) ||

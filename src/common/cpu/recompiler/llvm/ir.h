@@ -135,6 +135,9 @@ typedef struct SnxIr {
     SnxU64 (*direct)(void* user, SnxU64 target);
     void* direct_user;
     const SnxIrTuning* tuning; /* snx_ir_tune's, NULL for LLVM's own */
+    /* the target stores values big-endian (ppc64): guest memory and the vector registers hold the guest's
+       little-endian bytes, so the accesses that read them as numbers swap (ir_rd, ir_vd and their siblings) */
+    int big_endian;
 } SnxIr;
 
 void ir_state_invalidate(SnxIr* ir);
@@ -319,6 +322,9 @@ void ir_set_ve(SnxIr* ir, unsigned n, unsigned size, unsigned index, LLVMValueRe
 LLVMValueRef ir_pc(SnxIr* ir);
 void ir_set_pc(SnxIr* ir, LLVMValueRef value);
 
+/* A number (or a vector of them, integer or floating) read from or written to the guest's little-endian bytes, in
+   guest memory or a vector register: byte-swapped on a big-endian target, as it is; the same both ways */
+LLVMValueRef ir_guest_order(SnxIr* ir, LLVMValueRef value);
 /* guest memory: MP(a), RDn(a) as iN, WRn(a,v) storing (uN)v, RDQ/WRQ as 16-byte copies */
 LLVMValueRef ir_mp(SnxIr* ir, LLVMValueRef address);
 LLVMValueRef ir_rd(SnxIr* ir, LLVMValueRef address, unsigned bits);
