@@ -62,6 +62,13 @@ typedef struct Renderer {
        waits for it (release_need) */
     int (*release_read)(u64 a, void* dst, u64 n);
     u32 (*release_value)(u32 id); /* completed and queued increments, read consistently */
+    /* the render enable (3D 0x556 IF_EQUAL when equal is set, else IF_NOT_EQUAL) compares the count at a with the one
+       at a + 16, one side a samples-passed count not known yet, the other zero: NVN's occlusion test. -1 when that
+       isn't so here (the caller reads both and compares, waiting for the count); 0 or 1, the comparison's result when
+       the count is known to be zero or not without the GPU; 2 when the GPU makes it, *pred the predicate the draws and
+       clears under it run on (the channel's render_pred), held until render_predicate_drop */
+    int (*render_predicate)(u64 a, int equal, u32* pred);
+    void (*render_predicate_drop)(u32 pred);
     /* the 3D engine's samples-passed counter (occlusion queries), one per channel: it counts from its reset, while
        SampleCounterEnable is on. A report writes the count at gva as a release, len 4 (the count's low word) or 16 (the
        count, then ticks). samples_report 0: no count to give (no reset yet), and the caller writes a value of its own */
@@ -71,6 +78,7 @@ typedef struct Renderer {
     /* a GPFIFO submission ran to its end or waits (gpu_park): what the guest may look at now goes to the GPU */
     void (*stream_end)(void);
     void (*release_retire)(u32 id); /* finish this syncpoint's queued releases before its id is reused */
+    void (*report_stall)(void); /* the stall watchdog: what the renderer holds back. Any thread, unlocked */
     /* presenting a guest framebuffer */
     /* crop: the part shown (left, top, right, bottom), all 0 for the whole buffer */
     /* transform: Android buffer flags, bit 0 horizontal flip and bit 1 vertical flip */

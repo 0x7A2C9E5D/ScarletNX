@@ -344,6 +344,8 @@ static int tex_upload(Surf* t) {
     g_tex_upload_bytes += t->size;
     t->upload_valid = 0;
     t->wgen = ++g_tex_upload_gen; /* even a new texture at a reused address invalidates an old target's copy */
+    t->took_drawn = 0;            /* memory's own texels again, until tex_take_drawn copies targets in */
+    vk_surf_relist(t);
     vk_render_end();              /* copies and clears happen outside rendering passes */
     VkCommandBuffer cb = vk_cmd();
     vk_surf_use(cb, t, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
@@ -479,11 +481,11 @@ static Surf* tex_create(u64 gva, u32 w, u32 h, u32 layers, u32 d3, u32 levels, V
     if (type != VK_IMAGE_VIEW_TYPE_3D && layers >= 6 && w == h) ii.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     VkViewFormats vf;
     vk_view_formats(&ii, &vf);
-    if (!vk_image_create(&ii, &t->img, &t->mem)) {
+    /* room is made for it under the budget: the caller holds only surfaces it used this present, which stay */
+    if (!vk_cache_image_create(&ii, &t->img, &t->mem, &t->bytes)) {
         free(t);
         return NULL;
     }
-    t->last_used = g_vk_present;
     vk_surf_add(t);
     return t;
 }
@@ -505,6 +507,7 @@ static Surf* rt_crop(Surf* rt, u32 w, u32 h, const VkFmt* as) {
             *pp = x->next;
             for (int i = 0; i < x->nsv; i++) vk_defer_image(VK_NULL_HANDLE, VK_NULL_HANDLE, x->sv[i].v, VK_NULL_HANDLE);
             vk_defer_image(x->img, x->mem, VK_NULL_HANDLE, VK_NULL_HANDLE);
+            vk_defer_bytes(x->bytes);
             free(x);
             continue;
         }
@@ -537,7 +540,7 @@ static Surf* rt_crop(Surf* rt, u32 w, u32 h, const VkFmt* as) {
                                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
         VkViewFormats vf;
         vk_view_formats(&ii, &vf);
-        if (!vk_image_create(&ii, &c->img, &c->mem)) {
+        if (!vk_cache_image_create(&ii, &c->img, &c->mem, &c->bytes)) { /* rt was used now: it stays */
             free(c);
             return rt;
         }
@@ -600,7 +603,7 @@ static i64 g_bud;
 /* t, a texture found for a header: still as guest memory has it (re-uploaded where it changed), or NULL when its
    upload failed. gva is its address */
 static Surf* tex_check(Surf* t, u64 gva) {
-    t->last_used = g_vk_present;
+    vk_surf_touch(t);
     /* an upload that ran out of memory or staging (here, or a re-upload below) is tried again once a frame. A
        texture is only returned whole */
     if (!t->upload_valid) {
@@ -1048,9 +1051,20 @@ VkSampler vk_sampler(const u32* tsc, int raise, int integer) {
 }
 
 void vk_tex_frame(void) {
-    /* textures and render targets not used for ten seconds go; textures come back from memory if they are needed
-       again */
-    if (g_vk_present % 60 == 0 && g_vk_present > 600) vk_surf_evict(g_vk_present - 600);
+    /* surfaces whose pixels can be had again go once unused for twenty seconds and in 120 presents (a game at 6 frames
+       a second kept 600 presents' worth, 100 seconds, of the targets it made every frame); textures come back from
+       memory if they are needed again. Those whose pixels would be lost (vk_surf_reclaim) go before five minutes
+       only under the budget's pressure (vk_mem_trim), and a target holding a draw a texture would take stays until
+       then. The recency lists hand out the oldest first, so this costs what goes. The lossy pass looks every 600
+       presents: it passes over the targets it keeps, and asking whether one holds such a draw can hash its memory */
+    u32 before = vk_present_before(20000000000ull, 120);
+    vk_surf_reclaim(VK_LRU_TEX, before, ~0ull, VK_RECLAIM_LOSSLESS);
+    vk_surf_reclaim(VK_LRU_RT, before, ~0ull, VK_RECLAIM_LOSSLESS);
+    if (g_vk_present % 600 == 0) {
+        u32 lossy_before = vk_present_before(300000000000ull, 600);
+        vk_surf_reclaim(VK_LRU_TEX, lossy_before, ~0ull, VK_RECLAIM_IDLE);
+        vk_surf_reclaim(VK_LRU_RT, lossy_before, ~0ull, VK_RECLAIM_IDLE);
+    }
 }
 
 /* s copied into t, both unchanged since: kept for t and one other texture, so two textures over one target don't
@@ -1061,6 +1075,7 @@ static int copied_into(const Surf* s, const Surf* t) {
     return 0;
 }
 static void mark_copied(Surf* s, Surf* t) {
+    t->took_drawn = 1;
     if (s->copied[0].t != t) s->copied[1] = s->copied[0];
     s->copied[0].t = t;
     s->copied[0].wgen = s->wgen;

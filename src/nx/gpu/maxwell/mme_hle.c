@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors
-   Hashes from Eden's HLE macro table (src/video_core/macro.cpp at de7e6e01):
+   Hashes from Eden's HLE macro table (src/video_core/macro.cpp at de7e6e01, and at 989768aa for the constant buffer
+   and memory clears, the raster bounding box, the multi-draw with a count and the byte count draw):
    SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project (GPL-3.0-or-later)
    SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project (GPL-2.0-or-later) */
 /* Native implementations of the macros NVN uploads, chosen by the hash of their code (mme.c's mme_choose). Each one
@@ -15,9 +16,6 @@
    Eden's names are given where its table has the hash. Its implementations call its rasterizer directly; these send
    methods, so the 3D engine (maxwell3d_method) does what it does for the interpreted macro */
 #include "nx/gpu/maxwell/engines_int.h"
-
-/* instances a draw macro loops over at most here: about 9 instructions each, under the interpreter's limit */
-#define MME_LOOP_MAX 500000u
 
 static u32 arg(const u32* p, u32 np, u32 i) { return i < np ? p[i] : 0; }
 
@@ -96,6 +94,81 @@ static int draw_arrays_cb(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
     mme_out(ch, rec, 0x8E4, 0);
     return 1;
 }
+/* Indexed draws from a list of draw records with a count (Eden: HLE_MultiDrawIndexedIndirectCount; NVN's
+   MultiDrawElementsIndirectCount). Parameters: the first draw p0, the most draws p1, the topology p2, padding words
+   after each record p3, the count p4, then the records from p5 on: index count, instance count, first index, base
+   vertex, base instance, and p3 words of padding between them. Scratch 0xD08 takes the topology, 0xD0A the count
+   (then p1 when that is smaller, by the sign of their difference) and 0xD09 the topology with BEGIN's "next instance"
+   bits. When scratch 0xD1B is zero, or p0 isn't below the end (by the sign of p0 minus the end), nothing is drawn.
+   Each draw from p0 to the end sends its first index (0x5F7), base vertex (0x446, 0x50D) and base instance (0x50E),
+   writes them and the draw's index into the bound constant buffer at 0x640 (0x8E3-0x8E6), and draws its instances
+   (BEGIN, the count to 0x5F8, END). The macro ends zeroing those registers and constants.
+   The scratch registers are kept here as they are written, which the code reads back. Past the draws the code goes on
+   fetching the records up to the most draws, which only takes instructions: a call whose loops could reach the
+   interpreter's limit (more than MME_STEPS_MAX by the bound counted here, short of its 5,000,000) is the
+   interpreter's */
+#define MME_STEPS_MAX 4000000u
+static int multi_draw_indexed_count(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    u32 first = arg(p, np, 0), most = arg(p, np, 1), topo = arg(p, np, 2), pad = arg(p, np, 3), end = arg(p, np, 4);
+    u32 next = (topo & ~(3u << 26)) | (1u << 26), left, i, k;
+    int on = mme_reg(ch, rec, 0xD1B) != 0, smaller = on && ((most - end) & 0x80000000u), draws;
+    u64 steps = 64, at;
+    if (smaller) end = most;
+    draws = on && ((first - end) & 0x80000000u);
+    if (draws) {
+        /* the instructions the draws take, at most: 40 a draw, 8 an instance, 4 a padding word */
+        for (i = first, at = 5; i != end; i++, at += 5 + (u64)pad) {
+            u32 n = at + 1 < np ? p[at + 1] : 0;
+            steps += 40 + 8 * (u64)n + 4 * (u64)pad;
+            if (steps > MME_STEPS_MAX) return 0;
+        }
+        left = most - end;
+    } else
+        left = most - first;
+    /* then the records left: at most 16 instructions each, 4 a padding word */
+    if (left && ((u64)left > MME_STEPS_MAX / 16 || pad > MME_STEPS_MAX / 4)) return 0;
+    if (left && steps + (u64)left * (16 + 4 * (u64)pad) > MME_STEPS_MAX) return 0;
+    mme_out(ch, rec, 0xD08, topo);
+    mme_out(ch, rec, 0xD0A, arg(p, np, 4));
+    if (smaller) mme_out(ch, rec, 0xD0A, end);
+    if (draws) {
+        mme_out(ch, rec, 0xD09, next);
+        for (i = first, at = 5; i != end; i++, at += 5 + (u64)pad) {
+            u32 count = at < np ? p[at] : 0, n = at + 1 < np ? p[at + 1] : 0, base_vertex = at + 3 < np ? p[at + 3] : 0;
+            u32 base_instance = at + 4 < np ? p[at + 4] : 0;
+            mme_out(ch, rec, 0x5F7, at + 2 < np ? p[at + 2] : 0);
+            mme_out(ch, rec, 0x446, base_vertex);
+            mme_out(ch, rec, 0x50D, base_vertex);
+            mme_out(ch, rec, 0x50E, base_instance);
+            mme_out(ch, rec, 0x8E3, 0x640);
+            mme_out(ch, rec, 0x8E4, base_vertex);
+            mme_out(ch, rec, 0x8E5, base_instance);
+            mme_out(ch, rec, 0x8E6, i);
+            for (k = 0; k < n; k++) {
+                mme_out(ch, rec, 0x586, k ? next : topo);
+                mme_out(ch, rec, 0x5F8, count);
+                mme_out(ch, rec, 0x585, 0);
+            }
+        }
+    }
+    mme_out(ch, rec, 0x446, 0);
+    mme_out(ch, rec, 0x50D, 0);
+    mme_out(ch, rec, 0x50E, 0);
+    mme_out(ch, rec, 0x8E3, 0x640);
+    mme_out(ch, rec, 0x8E4, 0);
+    mme_out(ch, rec, 0x8E5, 0);
+    mme_out(ch, rec, 0x8E6, 0);
+    return 1;
+}
+/* A draw of what transform feedback wrote (Eden: HLE_DrawIndirectByteCount; NVN's DrawTransformFeedback): BEGIN
+   (0x586) with p0, the stride (0x4C6) and the byte count (0x48F), END */
+static int draw_byte_count(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    mme_out(ch, rec, 0x586, arg(p, np, 0));
+    mme_out(ch, rec, 0x4C6, arg(p, np, 1));
+    mme_out(ch, rec, 0x48F, arg(p, np, 2));
+    mme_out(ch, rec, 0x585, 0);
+    return 1;
+}
 /* Selects constant buffer i for uploads (Eden: HLE_D7333D26E0A93EDE): its size from scratch 0xD2F + i and its
    address (in 256-byte units) from 0xD2A + i, into 0x8E0-0x8E2. Parameter: i */
 static int cb_select(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
@@ -105,16 +178,38 @@ static int cb_select(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
     mme_out(ch, rec, 0x8E2, addr << 8);
     return 1;
 }
-/* Selects the 0x7000-byte constant buffer at scratch 0xD18 for uploads at word offset p0 (Eden:
-   HLE_C713C83D8F63CCF3) */
-static int cb_select_offset(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+/* Selects the constant buffer at scratch 0xD18, of the given size, for uploads at word offset p0 */
+static void cb_select_at(GpuChannel* ch, MmeRec* rec, u32 size, const u32* p, u32 np) {
     u32 addr = mme_reg(ch, rec, 0xD18);
-    mme_out(ch, rec, 0x8E0, 0x7000);
+    mme_out(ch, rec, 0x8E0, size);
     mme_out(ch, rec, 0x8E1, addr >> 24);
     mme_out(ch, rec, 0x8E2, addr << 8);
     mme_out(ch, rec, 0x8E3, arg(p, np, 0) << 2);
+}
+/* 0x7000 bytes (Eden: HLE_C713C83D8F63CCF3) */
+static int cb_select_offset(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    cb_select_at(ch, rec, 0x7000, p, np);
     return 1;
 }
+/* 0x5F00 bytes (one game's; not in Eden's table) */
+static int cb_select_offset_5f00(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    cb_select_at(ch, rec, 0x5F00, p, np);
+    return 1;
+}
+/* Zeroes the start of a constant buffer (Eden: HLE_ClearConstBuffer): the buffer of the given size at p0 (high) and
+   p1 (low) is selected at offset 0 (0x8E0-0x8E3), then p2 groups of four zero words go to 0x8E4. A loop of about six
+   instructions a group: past MME_LOOP_MAX groups the call is the interpreter's */
+static int cb_clear(GpuChannel* ch, MmeRec* rec, u32 size, const u32* p, u32 np) {
+    u32 n = arg(p, np, 2), i;
+    if (n > MME_LOOP_MAX) return 0;
+    mme_out(ch, rec, 0x8E0, size);
+    mme_out(ch, rec, 0x8E1, arg(p, np, 0));
+    mme_out(ch, rec, 0x8E2, arg(p, np, 1));
+    mme_out(ch, rec, 0x8E3, 0);
+    for (i = 0; i < 4 * n; i++) mme_out(ch, rec, 0x8E4, 0);
+    return 1;
+}
+static int cb_clear_5f00(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) { return cb_clear(ch, rec, 0x5F00, p, np); }
 /* Binds a shader program (Eden: HLE_BindShader). Parameters: program slot i, program id, code offset, bind group,
    constant buffer address. When the id equals the one scratch 0xD1C + i keeps for the slot, nothing is sent.
    Otherwise the offset goes to the slot's program (0x801 + 16 * i), the id and the offset to scratch 0xD1C + i and
@@ -166,6 +261,17 @@ static int color_masks(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
     return 1;
 }
 
+/* A word kept in a scratch register: when p0 differs from it, method m gets value v and the scratch takes p0 */
+static void scratch_word(GpuChannel* ch, MmeRec* rec, u32 scratch, u32 m, u32 v, const u32* p, u32 np) {
+    if (arg(p, np, 0) == mme_reg(ch, rec, scratch)) return;
+    mme_out(ch, rec, m, v);
+    mme_out(ch, rec, scratch, arg(p, np, 0));
+}
+/* scratch 0xD29, 0x4B2 getting 25. Not in Eden's table */
+static int scratch_d29(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    scratch_word(ch, rec, 0xD29, 0x4B2, 25, p, np);
+    return 1;
+}
 /* Indexed draw with its index buffer given in the call (one game's most called interpreted one).
    Parameters: topology, index buffer address high and low, index format, count. BEGIN, the buffer's address and
    format, first index 0 and the count, END */
@@ -373,6 +479,11 @@ static const MmeNative mme_natives[] = {
     {0xFC0CF27F5FFAA661ull, transform_feedback_setup, "transform feedback setup"},
     {0x9E3CA7054D12D63Cull, firmware_call4, "firmware call 4"},
     {0xD207959154DCA521ull, render_target_reset, "render target 0 and state reset"},
+    {0x3F5E74B9C9A50164ull, multi_draw_indexed_count, "indexed draws from records, with a count"},
+    {0xB5F74EDB717278ECull, draw_byte_count, "draw of a byte count"},
+    {0x6C97861D891EDF7Eull, cb_clear_5f00, "constant buffer clear, 0x5F00 bytes"},
+    {0xDBCD08D629ABC472ull, cb_select_offset_5f00, "constant buffer select at offset, 0x5F00 bytes"},
+    {0xAE29BDE4BD4C7ED1ull, scratch_d29, "scratch 0xD29"},
 };
 int mme_native_find(u64 hash) {
     int k;

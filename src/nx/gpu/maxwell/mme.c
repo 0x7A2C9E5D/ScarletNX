@@ -9,8 +9,6 @@
    step of its own, so such a stop can come between a branch or exit and its slot */
 #include "nx/gpu/maxwell/engines_int.h"
 
-#define MME_STEPS 5000000u /* instructions a call may run: past them it never ends */
-
 static u32 fetch_param(GpuChannel* ch) {
     GpuMme* m = &ch->mme;
     return m->next < m->np ? ch->mme_params[m->next++] : 0;
@@ -248,13 +246,15 @@ static int mme_choose(GpuChannel* ch, u32 idx) {
     return (int)c - 2;
 }
 /* SNX_MME_HLE=0 runs every macro through the interpreter; SNX_MME_VERIFY=1 runs a known macro both ways, recorded,
-   compares what they send, and sends what the interpreter does */
+   compares what they send, and sends what the interpreter does. A macro with no implementation has a compiled form
+   (mme_jit.c) after the native ones, and SNX_MME_VERIFY compares it with the interpreter too */
 enum { MME_NATIVE = 1, MME_VERIFY = 2 };
 static int mme_mode = -1;
-/* calls, counted on the GPU thread (the only one running macros): native, interpreted, and in verify mode those
-   compared, those that differed, those the recording couldn't judge (a register read after a send) and those the
-   native one left to the interpreter */
-static u64 mme_n_native, mme_n_interp, mme_n_same, mme_n_differ, mme_n_unjudged, mme_n_declined;
+/* calls, counted on the GPU thread (the only one running macros): native, compiled, interpreted, and in verify mode
+   those compared, those that differed, those the recording couldn't judge (a register read after a send) and those
+   the native or the compiled form left to the interpreter */
+static u64 mme_n_native, mme_n_jit, mme_n_interp, mme_n_same, mme_n_differ, mme_n_unjudged, mme_n_declined;
+static u64 mme_n_jit_same, mme_n_jit_differ, mme_n_jit_unjudged, mme_n_jit_declined;
 /* the interpreted calls by the hash of their macro, in a table with a place for each of the first MME_STATS hashes:
    the log line names the busiest, the macros a native implementation would take next */
 #define MME_STATS 64
@@ -321,6 +321,42 @@ static void mme_verify(GpuChannel* ch, u32 idx, int k, u32 np) {
         WARN_LIMIT(32, "mme: macro %u (%s) differs from the interpreter after send %u (%u and %u sends)\n", idx,
                    mme_native_name(k), i, nat->total, in->total);
 }
+/* the compiled form of macro idx against the interpreter, recorded: SNX_MME_VERIFY's check for the macros mme_hle.c
+   has no implementation for. The interpreter's sends are what the call then does */
+static void mme_verify_jit(GpuChannel* ch, u32 idx, u32 np) {
+    static MmeRec rec[2]; /* GPU thread only */
+    MmeRec *jit = &rec[0], *in = &rec[1];
+    u32 i, n;
+    jit->n = jit->total = in->n = in->total = 0;
+    jit->hash = in->hash = 0;
+    jit->read_after_send = in->read_after_send = 0;
+    if (!mme_jit_run(ch, jit, idx, np)) {
+        mme_n_jit_declined++;
+        return;
+    }
+    mme_interpret(ch, in, idx, np);
+    if (jit->read_after_send || in->read_after_send) {
+        mme_n_jit_unjudged++;
+        return;
+    }
+    if (jit->total == in->total && jit->hash == in->hash) {
+        mme_n_jit_same++;
+        return;
+    }
+    mme_n_jit_differ++;
+    n = jit->n < in->n ? jit->n : in->n;
+    i = 0;
+    while (i < n && jit->m[i] == in->m[i] && jit->v[i] == in->v[i]) i++;
+    if (i < n)
+        WARN_LIMIT(32,
+                   "mme: macro %u (compiled, hash %016llx) differs from the interpreter at its send %u: compiled %x = "
+                   "%x, interpreter %x = %x (%u and %u sends)\n",
+                   idx, (unsigned long long)ch->mme_hash[idx], i, jit->m[i], jit->v[i], in->m[i], in->v[i],
+                   jit->total, in->total);
+    else
+        WARN_LIMIT(32, "mme: macro %u (compiled) differs from the interpreter after send %u (%u and %u sends)\n", idx,
+                   i, jit->total, in->total);
+}
 void mme_run(GpuChannel* ch, u32 idx, u32 np) {
     int k = -1;
     idx &= 0x7F;
@@ -329,23 +365,38 @@ void mme_run(GpuChannel* ch, u32 idx, u32 np) {
         mme_mode = (hle && !strcmp(hle, "0") ? 0 : MME_NATIVE) | (verify && strcmp(verify, "0") ? MME_VERIFY : 0);
     }
     if (mme_mode & MME_NATIVE) k = mme_choose(ch, idx);
-    if (k >= 0 && !(mme_mode & MME_VERIFY) && mme_native_run(k, ch, NULL, ch->mme_params, np))
-        mme_n_native++;
-    else {
-        if (k >= 0 && (mme_mode & MME_VERIFY)) mme_verify(ch, idx, k, np);
-        mme_n_interp++;
-        if (mme_mode & MME_NATIVE) mme_stat(ch->mme_hash[idx]);
-        mme_interpret(ch, NULL, idx, np);
+    if (k >= 0) {
+        if (mme_mode & MME_VERIFY) mme_verify(ch, idx, k, np);
+        else if (mme_native_run(k, ch, NULL, ch->mme_params, np)) {
+            mme_n_native++;
+            goto done;
+        }
     }
-    if ((mme_n_native + mme_n_interp) % 1000000 == 0) {
-        LOG("mme: %llu macro calls, %llu native and %llu interpreted\n",
-            (unsigned long long)(mme_n_native + mme_n_interp), (unsigned long long)mme_n_native,
-            (unsigned long long)mme_n_interp);
+    /* no native implementation (or none that runs this call): the compiled form, then the interpreter */
+    if (mme_mode & MME_NATIVE) {
+        if (mme_mode & MME_VERIFY) mme_verify_jit(ch, idx, np);
+        else if (mme_jit_run(ch, NULL, idx, np)) {
+            mme_n_jit++;
+            goto done;
+        }
+    }
+    mme_n_interp++;
+    if (mme_mode & MME_NATIVE) mme_stat(ch->mme_hash[idx]);
+    mme_interpret(ch, NULL, idx, np);
+done:
+    if ((mme_n_native + mme_n_jit + mme_n_interp) % 1000000 == 0) {
+        LOG("mme: %llu macro calls, %llu native, %llu compiled and %llu interpreted\n",
+            (unsigned long long)(mme_n_native + mme_n_jit + mme_n_interp), (unsigned long long)mme_n_native,
+            (unsigned long long)mme_n_jit, (unsigned long long)mme_n_interp);
         mme_stats_log();
         if (mme_mode & MME_VERIFY)
             LOG("mme: verified %llu calls the same, %llu different, %llu unjudged (a read after a send), %llu left to the "
                 "interpreter\n",
                 (unsigned long long)mme_n_same, (unsigned long long)mme_n_differ, (unsigned long long)mme_n_unjudged,
                 (unsigned long long)mme_n_declined);
+        if (mme_mode & MME_VERIFY)
+            LOG("mme: compiled, verified %llu calls the same, %llu different, %llu unjudged, %llu with no compiled form\n",
+                (unsigned long long)mme_n_jit_same, (unsigned long long)mme_n_jit_differ,
+                (unsigned long long)mme_n_jit_unjudged, (unsigned long long)mme_n_jit_declined);
     }
 }

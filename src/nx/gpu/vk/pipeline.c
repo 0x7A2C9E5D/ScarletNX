@@ -341,7 +341,8 @@ static int code_same(const ShA* ca, u64 gva, u32 len, u64 qh) {
 
 /* for the stats line: pipelines made, the GPU thread's time waiting for new ones, shaders translated and the time
    their translation and modules took (all on the GPU thread) */
-static u64 g_pipes_new, g_pipe_wait_ns, g_sh_new, g_sh_ns;
+static u64 g_pipes_new, g_sh_new, g_sh_ns;
+static u64 g_pipe_wait_ns; /* the GPU thread's and the recording thread's waits, added atomically */
 static u64 g_pipe_make_ns; /* the workers' time making pipelines, added atomically */
 static u64 g_pipe_hits;    /* pipelines the pipeline cache had */
 VkSh* vk_shader_get(const GpuChannel* ch, u64 gva, u64 gva_a, int stage, u64 int_mask, u64 sint_mask, u32 rt_int,
@@ -550,14 +551,12 @@ static VkShaderModule null_fs(void) {
 }
 
 /* ------------------------------------------------------------ pipelines */
-/* With async_pipelines=1 a pipeline the cache doesn't have is made on a worker thread: the driver's compile of a big
-   shader takes up to seconds, which stalled the GPU thread whenever one game showed something new (1.5 s
-   for two pipelines once). A draw waits a little for its new pipeline, and is skipped until it is ready past that, as
-   Eden's asynchronous shaders do. It is off by default, as Eden's is: a skipped draw is missing from its frame, which
-   a test that draws once and reads the result back sees as wrong (edenprobe failed 190 cases with it on). Off, a new
-   pipeline is made on the GPU thread, and the shader file's pipelines are still made on the workers at startup
-   (pf_merge). What a worker needs that is made lazily, the layout and the empty fragment shader, is made on the GPU
-   thread first */
+/* A draw's new pipeline is made on the GPU thread, and the draw waits for it. The shader file's pipelines (pf_merge)
+   are made on two worker threads from startup, and a draw that asks for one before then waits for it too, at the head
+   of the workers' queue. Skipping a draw whose pipeline was still being made, as Eden's asynchronous shaders do, left
+   one game's menus over a black backdrop and its loading screen without its map whenever their one draw was
+   skipped, and failed 190 of edenprobe's cases: a draw is never skipped for its pipeline. What a worker needs that is
+   made lazily, the layout and the empty fragment shader, is made on the GPU thread first */
 typedef struct Pipe {
     PipeKey k;
     u64 h;
@@ -567,6 +566,7 @@ typedef struct Pipe {
     VkShaderModule fs; /* k.fs, or the empty fragment shader */
     int prewarm;       /* one of the file's, made before a draw asked for it */
     int queued;        /* in the workers' queue (g_pj_lock): 1 a draw's, 2 the file's */
+    u32 standin;       /* its index + 1 in the stand-ins' table (vk_pipeline_get_deferred), 0 for none yet */
     struct Pipe *next, *job;
 } Pipe;
 #define PIPEH 4096
@@ -756,8 +756,9 @@ static VkPipeline pipe_create(const Pipe* e) {
         __atomic_add_fetch(e->prewarm ? &g_pf.hits : &g_pipe_hits, 1, __ATOMIC_RELAXED);
     return p;
 }
-/* e's pipeline, made here: one a draw asked for is kept in the file once made (pf_pipe_record) */
-static VkPipeline pipe_make(const Pipe* e) {
+/* e's pipeline, made here. One a draw asked for is kept in the file (pf_pipe_record): once made when the GPU thread
+   makes it (record), and when it queues it for a worker otherwise, as the file's tables are the GPU thread's */
+static VkPipeline pipe_make(const Pipe* e, int record) {
     u64 t0 = plat_ns();
     VkPipeline p = pipe_create(e);
     __atomic_store_n(&g_pcache_dirty, 1, __ATOMIC_RELAXED);
@@ -765,13 +766,13 @@ static VkPipeline pipe_make(const Pipe* e) {
         __atomic_add_fetch(&g_pf.made, 1, __ATOMIC_RELAXED);
     else {
         __atomic_add_fetch(&g_pipe_make_ns, plat_ns() - t0, __ATOMIC_RELAXED);
-        if (p) pf_pipe_record(&e->k);
+        if (p && record) pf_pipe_record(&e->k);
     }
     return p;
 }
 
-/* the workers' queues, and the wait for one pipeline to be ready. A draw's pipelines are made first, in the order
-   asked for; the file's (pf_load_pipe) when there are none of those */
+/* the workers' queues, and the wait for one pipeline to be ready. The file's pipelines a draw asked for are made first,
+   in the order asked for; the rest of the file's (pf_load_pipe) after */
 static PMutex g_pj_lock = PMUTEX_INIT;
 static PCond g_pj_work, g_pj_done;
 static Pipe *g_pj_head, *g_pj_tail; /* a draw's */
@@ -795,7 +796,7 @@ static void pipe_worker(void* arg) {
         }
         e->queued = 0;
         pm_unlock(&g_pj_lock);
-        p = pipe_make(e);
+        p = pipe_make(e, 0);
         pm_lock(&g_pj_lock);
         e->p = p;
         __atomic_store_n(&e->ready, 1, __ATOMIC_RELEASE);
@@ -805,11 +806,16 @@ static void pipe_worker(void* arg) {
 }
 /* the workers, started the first time one is needed: how many there are (g_pj_lock) */
 static int pipe_workers(void) {
-    if (!g_pj_started) { /* two: the driver's compile is the CPU's work, which the game's threads need too */
+    if (!g_pj_started) {
+        /* a quarter of the CPUs, two to six: the driver's compile is the CPU's work, which the game's threads need
+           too, and a first run's bursts of new pipelines go to them side by side (vk_pipeline_get_deferred) */
+        int ids[256], n = plat_cpus(ids, 256) / 4; /* 0 where the platform doesn't say */
+        if (n < 2) n = 2;
+        if (n > 6) n = 6;
         g_pj_started = 1;
         pc_init(&g_pj_work);
         pc_init(&g_pj_done);
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < n; i++)
             if (!plat_thread(pipe_worker, NULL, (size_t)1 << 20)) g_pj_threads++;
     }
     return g_pj_threads;
@@ -856,27 +862,46 @@ static VkPipeline pipe_wait(Pipe* e, i64 ns) {
     pm_unlock(&g_pj_lock);
     return __atomic_load_n(&e->ready, __ATOMIC_ACQUIRE) ? e->p : VK_NULL_HANDLE;
 }
-static u64 g_pipes_skipped;
-/* wait: how long a draw waits for a pipeline that is new (a negative one: until it is ready). One already being made
-   is waited for only that long too when wait is negative, else not at all. One of the file's not taken by a worker yet
-   counts as new; without async_pipelines every pipeline is waited for */
-static VkPipeline pipeline_get(const PipeKey* k, i64 wait) {
+/* Stand-ins for pipelines still being made, which the GPU thread hands the recording thread in their place
+   (vk_pipeline_get_deferred): PIPE_STANDIN in the top bits, which no handle has (record.c's REC_STANDIN tells the same
+   of descriptor sets), and the pipeline's index in this table, pages the GPU thread adds before a stand-in naming
+   them goes through the ring. Pipelines live as long as the run, so a stand-in does too */
+#define PIPE_STANDIN   0x5EC6000000000000ull
+#define PSTAND_PAGE    1024
+static Pipe** g_pstand[1024];
+static u32 g_npstand;
+static VkPipeline pipe_standin(Pipe* p) {
+    if (!p->standin) {
+        u32 page = g_npstand / PSTAND_PAGE;
+        if (page >= sizeof g_pstand / sizeof *g_pstand) return VK_NULL_HANDLE;
+        if (!g_pstand[page] && !(g_pstand[page] = calloc(PSTAND_PAGE, sizeof **g_pstand))) return VK_NULL_HANDLE;
+        g_pstand[page][g_npstand % PSTAND_PAGE] = p;
+        p->standin = ++g_npstand;
+    }
+    return (VkPipeline)(uintptr_t)(PIPE_STANDIN | p->standin);
+}
+/* the GPU thread's wait for p, made by a worker */
+static VkPipeline pipe_wait_here(Pipe* p) {
+    u64 t0 = plat_ns();
+    gpu_wait_note("a pipeline being made", p->h);
+    VkPipeline got = pipe_wait(p, -1);
+    gpu_wait_note(NULL, 0);
+    __atomic_add_fetch(&g_pipe_wait_ns, plat_ns() - t0, __ATOMIC_RELAXED);
+    return got;
+}
+/* k's entry, found or added (NULL with no memory): *found says whether it was there */
+static Pipe* pipe_entry(const PipeKey* k, int* found) {
     pf_merge();
     u64 h = vk_hash(k, sizeof *k);
     u32 b = (u32)(h ^ (h >> 32)) & (PIPEH - 1);
-    VkPipeline got;
     for (Pipe* p = g_pipeh[b]; p; p = p->next)
         if (p->h == h && !memcmp(&p->k, k, sizeof *k)) {
-            if (__atomic_load_n(&p->ready, __ATOMIC_ACQUIRE)) return p->p;
-            int promoted = p->prewarm && pipe_promote(p);
-            u64 t0 = plat_ns();
-            got = pipe_wait(p, !g_settings.asynchronous_shaders || wait < 0 ? -1 : promoted ? wait : 0);
-            if (promoted) g_pipe_wait_ns += plat_ns() - t0;
-            if (!got) g_pipes_skipped++;
-            return got;
+            *found = 1;
+            return p;
         }
     Pipe* p = calloc(1, sizeof *p);
-    if (!p) return VK_NULL_HANDLE;
+    *found = 0;
+    if (!p) return NULL;
     p->k = *k;
     p->h = h;
     p->layout = vk_playout(k->arrays);
@@ -884,53 +909,76 @@ static VkPipeline pipeline_get(const PipeKey* k, i64 wait) {
     p->next = g_pipeh[b];
     g_pipeh[b] = p;
     g_pipes_new++;
-    if (!g_settings.asynchronous_shaders) {
-        p->p = pipe_make(p);
-        __atomic_store_n(&p->ready, 1, __ATOMIC_RELEASE);
-        return p->p;
-    }
-    pm_lock(&g_pj_lock);
-    if (!pipe_workers()) { /* no worker: made here */
-        pm_unlock(&g_pj_lock);
-        p->p = pipe_make(p);
-        __atomic_store_n(&p->ready, 1, __ATOMIC_RELEASE);
-        return p->p;
-    }
-    pipe_queue(p, 1);
-    pm_unlock(&g_pj_lock);
-    u64 t0 = plat_ns();
-    got = pipe_wait(p, wait);
-    g_pipe_wait_ns += plat_ns() - t0;
-    if (!got) {
-        g_pipes_skipped++;
-        LOG_LIMIT(8, "vulkan: a draw's pipeline is still being made: the draw is skipped until it is ready\n");
-    }
-    return got;
-}
-/* New pipelines are waited for 3 ms a frame in all, so one made quickly is drawn at once and a burst of them (a new
-   view: 20 to 70 in one game) skips its draws for a frame or two rather than stalling the frame. 3 ms for
-   each draw stalled such a frame for 50 to 100 ms, though the pipelines came from the driver's cache: on NVIDIA one takes
-   3.4 ms to make even then */
-#define PIPE_WAIT_FRAME 3000000
-static u32 g_wait_frame;
-static i64 g_wait_left;
-VkPipeline vk_pipeline_get(const PipeKey* k) {
-    if (g_wait_frame != g_vk_present) {
-        g_wait_frame = g_vk_present;
-        g_wait_left = PIPE_WAIT_FRAME;
-    }
-    u64 t0 = plat_ns();
-    VkPipeline p = pipeline_get(k, g_wait_left > 0 ? g_wait_left : 0);
-    g_wait_left -= (i64)(plat_ns() - t0);
     return p;
 }
-VkPipeline vk_pipeline_get_now(const PipeKey* k) { return pipeline_get(k, -1); }
-u64 vk_pipelines_skipped(void) { return g_pipes_skipped; }
+/* the pipeline for k: made here when new, waited for when one of the file's is still being made */
+VkPipeline vk_pipeline_get(const PipeKey* k) {
+    int found;
+    Pipe* p = pipe_entry(k, &found);
+    if (!p) return VK_NULL_HANDLE;
+    if (found) {
+        if (__atomic_load_n(&p->ready, __ATOMIC_ACQUIRE)) return p->p;
+        if (p->prewarm) pipe_promote(p);
+        return pipe_wait_here(p);
+    }
+    u64 t0 = plat_ns();
+    p->p = pipe_make(p, 1);
+    __atomic_store_n(&p->ready, 1, __ATOMIC_RELEASE);
+    __atomic_add_fetch(&g_pipe_wait_ns, plat_ns() - t0, __ATOMIC_RELAXED);
+    return p->p;
+}
+/* A draw's pipeline when its commands go through the recording thread: the pipeline if it is ready, otherwise a
+   stand-in, with the pipeline made on a worker in the order draws asked for them. The GPU thread goes on with the
+   frame and the recording thread waits for each pipeline when it reaches its bind (vk_pipeline_resolve). A burst of
+   new pipelines (a first run makes hundreds as views come into sight, 87 ms each on one driver without its cache)
+   is made by the workers side by side while the frame is decoded, where the GPU thread made them one after another
+   and stopped the game for 45 s once. No draw is skipped for them */
+VkPipeline vk_pipeline_get_deferred(const PipeKey* k) {
+    if (!vk_rec_threaded()) return vk_pipeline_get(k);
+    int found;
+    Pipe* p = pipe_entry(k, &found);
+    if (!p) return VK_NULL_HANDLE;
+    if (found) {
+        if (__atomic_load_n(&p->ready, __ATOMIC_ACQUIRE)) return p->p;
+        if (p->prewarm) pipe_promote(p);
+    } else {
+        int queued = 0;
+        pf_pipe_record(&p->k);
+        pm_lock(&g_pj_lock);
+        if (pipe_workers()) {
+            pipe_queue(p, 1);
+            queued = 1;
+        }
+        pm_unlock(&g_pj_lock);
+        if (!queued) { /* no worker: made here */
+            u64 t0 = plat_ns();
+            p->p = pipe_make(p, 0);
+            __atomic_store_n(&p->ready, 1, __ATOMIC_RELEASE);
+            __atomic_add_fetch(&g_pipe_wait_ns, plat_ns() - t0, __ATOMIC_RELAXED);
+            return p->p;
+        }
+    }
+    VkPipeline s = pipe_standin(p);
+    return s ? s : pipe_wait_here(p);
+}
+/* on the recording thread: the pipeline a handle from vk_pipeline_get_deferred names, waited for while a worker makes
+   it. VK_NULL_HANDLE when it couldn't be made */
+VkPipeline vk_pipeline_resolve(VkPipeline h) {
+    u64 v = (u64)(uintptr_t)h;
+    if ((v & ~(u64)0xFFFFFFFFull) != PIPE_STANDIN) return h;
+    u32 i = (u32)v - 1;
+    Pipe* p = g_pstand[i / PSTAND_PAGE][i % PSTAND_PAGE];
+    if (__atomic_load_n(&p->ready, __ATOMIC_ACQUIRE)) return p->p;
+    u64 t0 = plat_ns();
+    VkPipeline got = pipe_wait(p, -1);
+    __atomic_add_fetch(&g_pipe_wait_ns, plat_ns() - t0, __ATOMIC_RELAXED);
+    return got;
+}
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms) {
     *pipes = g_pipes_new;
     *hits = __atomic_load_n(&g_pipe_hits, __ATOMIC_RELAXED);
     *make_ms = __atomic_load_n(&g_pipe_make_ns, __ATOMIC_RELAXED) / 1000000;
-    *wait_ms = g_pipe_wait_ns / 1000000;
+    *wait_ms = __atomic_load_n(&g_pipe_wait_ns, __ATOMIC_RELAXED) / 1000000;
     *shaders = g_sh_new;
     *shader_ms = g_sh_ns / 1000000;
 }

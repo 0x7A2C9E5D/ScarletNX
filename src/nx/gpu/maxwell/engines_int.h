@@ -20,6 +20,8 @@
 void query_get(GpuChannel* ch, u32* r, int base, u32 v);
 
 
+/* mme.c and mme_jit.c: instructions one macro call may run, past which it never ends */
+#define MME_STEPS 5000000u
 /* mme.c: runs macro idx over the np parameters in ch->mme_params (it may stop at a wait, gpu.h's mme_resume),
    natively when its code is one mme_hle.c knows */
 void mme_run(GpuChannel* ch, u32 idx, u32 np);
@@ -43,6 +45,14 @@ typedef struct MmeRec {
 void mme_out(GpuChannel* ch, MmeRec* rec, u32 m, u32 v);
 u32 mme_reg(GpuChannel* ch, MmeRec* rec, u32 a);
 
+/* mme_jit.c: the compiled form of a macro's code, chosen by its hash after the native ones: 1 when it ran the macro
+   (a wait may have stopped it, ch->mme.running), 0 when it has none and the interpreter runs it. SNX_MME_JIT=0 turns
+   the compiled forms off */
+int mme_jit_run(GpuChannel* ch, MmeRec* rec, u32 idx, u32 np);
+void mme_jit_free(void);
+/* the compiled code's 5,000,000-instruction cutoff: the warning the interpreter writes */
+void mme_jit_cutoff(GpuChannel* ch);
+
 /* mme_hle.c: native implementations of known macros, by the hash of their code (mme.c's mme_choose) */
 /* the implementation for a hash, or -1 */
 int mme_native_find(u64 hash);
@@ -51,5 +61,8 @@ u64 mme_native_hash(int k);
 /* runs implementation k over the np parameters p, as mme_out sends: 0 when it leaves this call to the interpreter,
    which it says before sending anything */
 int mme_native_run(int k, GpuChannel* ch, MmeRec* rec, const u32* p, u32 np);
+/* the iterations a native implementation loops over at most, about 9 of the macro's instructions each, under the
+   interpreter's limit (mme.c's MME_STEPS): a call that could loop more is the interpreter's */
+#define MME_LOOP_MAX 500000u
 
 #endif

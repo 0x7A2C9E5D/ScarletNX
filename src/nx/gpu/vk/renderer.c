@@ -109,6 +109,9 @@ static void vkr_clear(GpuChannel* ch, u32 v) {
     vk_unlock();
 }
 static void vkr_draw(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count, u32 bv, u32 bi, u32 instances) {
+    /* a draw predicated on the GPU (gpu.h render_pred) counts too: whether it runs isn't known here without the wait
+       the predicate is there to avoid, and the counters made up from this (maxwell/engines.c counter_report) only
+       stand in for what the console counts, growing with the work given */
     g_draws++;
     vk_lock();
     vk_render_draw(ch, indexed, topology, first, count, bv, bi, instances);
@@ -434,16 +437,17 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
         memcpy(was, is, sizeof was);
         last_present_ns = now_ns;
         g_vk_present++;
-        if (g_last) g_last->last_used = g_vk_present; /* what screenshots read stays */
+        vk_mem_present();
+        if (g_last) vk_surf_touch(g_last); /* what screenshots read stays */
         vk_tex_frame();
         vk_buf_frame();
+        vk_mem_trim(0, 0);
         if (g_vk_present % 600 == 0) {
             char cs_why[256];
             u64 cs_skipped = vk_cs_skipped(cs_why, sizeof cs_why);
-            LOG("vulkan: %llu draws, %llu skipped (%llu for pipelines being made); %llu dispatches in %llu batches (%llu ms waiting), %llu skipped%s; "
+            LOG("vulkan: %llu draws, %llu skipped; %llu dispatches in %llu batches (%llu ms waiting), %llu skipped%s; "
                 "%llu finishes (%llu ms); %llu reads past queued releases; %llu descriptor sets written, %llu reused\n",
-                (unsigned long long)g_vk_drawn, (unsigned long long)g_vk_skipped,
-                (unsigned long long)vk_pipelines_skipped(), (unsigned long long)g_vk_dispatches,
+                (unsigned long long)g_vk_drawn, (unsigned long long)g_vk_skipped, (unsigned long long)g_vk_dispatches,
                 (unsigned long long)g_vk_cs_batches,
                 (unsigned long long)(__atomic_load_n(&g_vk_cs_wait_ns, __ATOMIC_RELAXED) / 1000000),
                 (unsigned long long)cs_skipped, cs_why, (unsigned long long)g_vk_finishes,
@@ -472,8 +476,10 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                         (unsigned long long)early_left);
             }
             {
-                /* each memory heap's use by this process and the driver's budget for it (VK_EXT_memory_budget): past
-                   the budget the driver moves memory, and the heap the CPU maps (the BAR window) is the one to watch */
+                /* each memory heap's use and the driver's budget for it (VK_EXT_memory_budget), and our own memory in
+                   it (VMA's blocks): past the budget the driver moves memory, and the heap the CPU maps (the BAR window)
+                   is the one to watch. NVIDIA counts the whole system's use of the window as ours, and budgets what
+                   is left of it (cmd.c bar_room) */
                 VmaBudget b[VK_MAX_MEMORY_HEAPS];
                 const VkPhysicalDeviceMemoryProperties* mp;
                 char line[256];
@@ -481,10 +487,26 @@ static void show(Surf* src, u32 fw, u32 fh, u32 transform, int game) {
                 vmaGetHeapBudgets(g_vk.vma, b);
                 vmaGetMemoryProperties(g_vk.vma, &mp);
                 for (u32 q = 0; q < mp->memoryHeapCount && at < sizeof line; q++)
-                    at += (size_t)snprintf(line + at, sizeof line - at, "%s heap %u %llu of %llu MB", q ? "," : "", q,
-                                           (unsigned long long)(b[q].usage >> 20),
-                                           (unsigned long long)(b[q].budget >> 20));
+                    at += (size_t)snprintf(line + at, sizeof line - at, "%s heap %u %llu of %llu MB (%llu ours)",
+                                           q ? "," : "", q, (unsigned long long)(b[q].usage >> 20),
+                                           (unsigned long long)(b[q].budget >> 20),
+                                           (unsigned long long)(b[q].statistics.blockBytes >> 20));
                 LOG("vulkan: memory used and budgeted:%s\n", line);
+            }
+            {
+                /* what the caches hold, which vk_mem_trim keeps within the budget */
+                u32 nrt, ntex, nbuf, parked, none;
+                u64 brt, btex, bbuf, usage, budget, trimmed;
+                vk_surf_stats(VK_LRU_RT, &nrt, &brt, &parked);
+                vk_surf_stats(VK_LRU_TEX, &ntex, &btex, &none);
+                vk_buf_stats(&nbuf, &bbuf);
+                vk_mem_use(&usage, &budget);
+                trimmed = vk_mem_trimmed();
+                LOG("vulkan: caches: %u render targets (%llu MB, %u parked), %u textures (%llu MB), %u buffers (%llu "
+                    "MB); %llu of %llu MB in use as they count it, %llu MB freed for the budget so far\n",
+                    nrt, (unsigned long long)(brt >> 20), parked, ntex, (unsigned long long)(btex >> 20), nbuf,
+                    (unsigned long long)(bbuf >> 20), (unsigned long long)(usage >> 20),
+                    (unsigned long long)(budget >> 20), (unsigned long long)(trimmed >> 20));
             }
             LOG("vulkan: %llu draws sampled a target they render to in place (%llu barriers in passes, %llu passes "
                 "begun again), %llu through a copy\n",
@@ -665,6 +687,18 @@ static u64 vkr_screenshot(const char* path) {
     return hash;
 }
 
+/* the stall watchdog: the releases queued and how far the submissions they wait for have got */
+static void vk_report_stall(void) {
+    u64 n, gate, cgate, gsub, gdone, csub, cdone;
+    vk_release_queued(&n, &gate, &cgate);
+    vk_submit_progress(&gsub, &gdone);
+    vk_compute_progress(&csub, &cdone);
+    WARN("vulkan: %llu releases queued (the oldest waits for graphics submission %llu and compute batch %llu), "
+         "graphics submissions done %llu of %llu, compute batches %llu of %llu, %llu bytes of commands not recorded\n",
+         (unsigned long long)n, (unsigned long long)gate, (unsigned long long)cgate, (unsigned long long)gdone,
+         (unsigned long long)gsub, (unsigned long long)cdone, (unsigned long long)csub,
+         (unsigned long long)vk_rec_behind());
+}
 const Renderer vk_renderer = {
     .name = "Vulkan",
     .start = vkr_start,
@@ -691,7 +725,10 @@ const Renderer vk_renderer = {
     .release_need = vk_release_need,
     .release_read = vk_release_read,
     .release_value = vk_release_value,
+    .render_predicate = vk_render_predicate,
+    .render_predicate_drop = vk_render_predicate_drop,
     .release_retire = vk_release_retire,
+    .report_stall = vk_report_stall,
     .samples_reset = vkr_samples_reset,
     .samples_enable = vkr_samples_enable,
     .samples_report = vkr_samples_report,

@@ -5,7 +5,8 @@
    against a Vulkan library.
 
    device.c    instance, device, queues, swapchain, memory allocator (VMA)
-   memory.c    the cap on one allocation, and images bigger than it bound in pieces (sparse binding)
+   memory.c    the cap on one allocation, and images bigger than it bound in pieces (sparse binding); the device
+               memory budget the caches keep within (surface.c vk_mem_trim), and the present clock
    cmd.c       frames in flight: the command buffer being recorded, staging and readback rings, deferred destruction
    record.c    recording the frame's command buffer on a thread of its own
    format.c    guest render target and texture formats -> Vulkan formats
@@ -87,6 +88,9 @@ typedef struct {
        pipeline flag, and ordered within the pass by a barrier there (dynamicRenderingLocalRead) or else by beginning
        the pass again */
     int has_feedback, has_feedback_dynamic, has_local_read;
+    /* VK_EXT_conditional_rendering: a render enable comparing a samples-passed count not known yet with zero
+       predicates its draws on the GPU (gpu/vk/query.c) instead of waiting for the count */
+    int has_cond_render;
 } VkState;
 extern VkState g_vk;
 
@@ -113,7 +117,20 @@ void vk_mem_init(int sparse_queue);
 /* an image with its memory: one VMA allocation in mem, or, past g_vk.alloc_cap, pieces (mem stays VK_NULL_HANDLE).
    0 on failure. Destroyed with vk_image_destroy (vk_defer_image does that), never vmaDestroyImage */
 int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem);
+/* the same, with the result of the call that failed in res (VK_ERROR_OUT_OF_DEVICE_MEMORY: no memory for it) */
+int vk_image_create_r(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem, VkResult* res);
 void vk_image_destroy(VkImage img, VmaAllocation mem);
+/* The caches of textures, render targets and buffers are kept within the driver's budget for the heap images go to
+   (VK_EXT_memory_budget through VMA; SNX_VK_BUDGET_MB lowers it, for testing): past it the driver pages memory out,
+   which took 160 ms frames and then the device in one game. Ages are kept in presents, and measured in time as well
+   as presents, the frame rate being anything from 5 to 144 a second.
+   vk_mem_use: that heap's use as the caches count it, and its budget. vk_mem_present: at each present, after
+   g_vk_present moved. vk_present_before: the present before which an entry last used then has gone unused for at
+   least ago_ns and at least `presents` presents (0: none has) */
+void vk_mem_use(u64* usage, u64* budget);
+int vk_mem_heap(void); /* that heap's index */
+void vk_mem_present(void);
+u32 vk_present_before(u64 ago_ns, u32 presents);
 
 /* cmd.c */
 void vk_cmd_init(void);
@@ -143,6 +160,10 @@ void vk_readback_ready(void);
 void vk_defer_image(VkImage img, VmaAllocation a, VkImageView v1, VkImageView v2);
 void vk_defer_buffer(VkBuffer b, VmaAllocation a);
 void vk_defer_buffer_view(VkBufferView v);
+/* bytes of device memory the resources just deferred release, and all deferred releases still to come: an evicted
+   entry's memory counts as gone from when it is deferred (vk_mem_trim) */
+void vk_defer_bytes(u64 bytes);
+u64 vk_deferred_bytes(void);
 void vk_defer_call(void (*fn)(void*), void* arg); /* fn(arg) then */
 /* the submission being recorded (a number that grows at every submit: what a submit may have changed, results landed,
    is checked against it), and the frame (grows at vk_frame_next: frame f's work is done once f + VK_FRAMES started) */
@@ -153,6 +174,7 @@ u64 vk_frame_id(void);
    done. Only the frame before the current one can be held: older slots were reused already */
 void vk_frame_hold(u64 frame_id);
 u64 vk_last_submit(void);        /* the last submission's number, which its completion signals */
+void vk_submit_progress(u64* submitted, u64* done); /* the last submission and the last done (any thread) */
 void vk_wait_submit(u64 value);  /* until the GPU has done that submission (any thread, without vk_lock) */
 void vk_land_through(u64 value); /* the results of the submissions up to value, done, into guest memory (vk_lock) */
 void vk_barrier(VkCommandBuffer cb, VkImage img, VkImageAspectFlags aspect, VkPipelineStageFlags2 src_stage,
@@ -177,6 +199,8 @@ extern u32 g_vk_epoch, g_vk_present;
 /* record.c: the frame's command buffer is recorded on a thread of its own. rec_Cmd* take vkCmd*'s arguments and
    record into that command buffer from the ring, or into any other one at once */
 void vk_rec_init(void);
+int vk_rec_threaded(void); /* the frame's commands go through the recording thread */
+u64 vk_rec_behind(void); /* bytes of commands handed to the recording thread and not recorded yet (any thread) */
 void vk_rec_begin(VkCommandBuffer cb); /* begins cb, the frame's command buffer from now on */
 /* ends and submits cb with those semaphores (s[0] the graphics timeline's) */
 void vk_rec_submit(VkCommandBuffer cb, const VkSemaphoreSubmitInfo* w, u32 nw, const VkSemaphoreSubmitInfo* s,
@@ -216,8 +240,13 @@ void rec_CmdSetStencilCompareMask(VkCommandBuffer cb, VkStencilFaceFlags face, u
 void rec_CmdSetStencilWriteMask(VkCommandBuffer cb, VkStencilFaceFlags face, u32 v);
 void rec_CmdSetAttachmentFeedbackLoopEnableEXT(VkCommandBuffer cb, VkImageAspectFlags aspect);
 void rec_CmdResetQueryPool(VkCommandBuffer cb, VkQueryPool pool, u32 first, u32 count);
+void rec_CmdWriteTimestamp2(VkCommandBuffer cb, VkPipelineStageFlags2 stage, VkQueryPool pool, u32 query);
 void rec_CmdBeginQuery(VkCommandBuffer cb, VkQueryPool pool, u32 query, VkQueryControlFlags flags);
 void rec_CmdEndQuery(VkCommandBuffer cb, VkQueryPool pool, u32 query);
+/* vkCmdBeginConditionalRenderingEXT on the word at buf + off, flags its VkConditionalRenderingBeginInfoEXT's */
+void rec_CmdBeginConditionalRenderingEXT(VkCommandBuffer cb, VkBuffer buf, VkDeviceSize off,
+                                         VkConditionalRenderingFlagsEXT flags);
+void rec_CmdEndConditionalRenderingEXT(VkCommandBuffer cb);
 void rec_CmdCopyQueryPoolResults(VkCommandBuffer cb, VkQueryPool pool, u32 first, u32 count, VkBuffer dst,
                                  VkDeviceSize off, VkDeviceSize stride, VkQueryResultFlags flags);
 void rec_CmdSetBlendConstants(VkCommandBuffer cb, const float c[4]);
@@ -360,8 +389,17 @@ typedef struct Surf {
     struct Surf* crop;
     u32 crop_gen;
     struct Surf* next;
-    struct Surf* rt_next; /* real render targets, for overlapping guest-memory writes */
+    /* the recency list it is in (surface.c): textures, render targets (parked ones too), or none (copies, the CPU
+       frame), with the device memory its image takes. A list runs from the least recently used to the most */
+    int lru;
+    struct Surf *lru_prev, *lru_next;
+    u64 bytes;
+    int took_drawn; /* textures: pixels copied from render targets since the last upload (memory may not have them) */
+    /* depth targets: undefined but for draws and clears predicated on the GPU, which may not have run, so they count
+       as no draw (render.c zt_written) */
+    int pred_undefined;
 } Surf;
+enum { VK_LRU_NONE, VK_LRU_TEX, VK_LRU_RT };
 /* resolution= in the .ini: render targets are made this much bigger (read once, at startup) */
 extern float g_vk_scale;
 u32 vk_sc(u32 v);      /* a size or coordinate scaled, at least 1 */
@@ -395,6 +433,7 @@ void vk_gfx_image_put_aside(void);
 int vk_gfx_image_in_flight(int unsubmitted);
 /* the submissions up to sub are done: the write-backs recorded in them land (cmd.c's landing, vk_lock) */
 void vk_gfx_image_frame_done(u64 sub);
+int vk_gfx_image_holds(const Surf* s); /* s has a storage result waiting to land in memory */
 u64 vk_surf_guest_size(const Surf* s);
 int vk_surf_can_writeback(const Surf* s);
 void vk_surf_flush(Surf* s, const u8* original); /* original preserves newer guest writes for storage images */
@@ -422,9 +461,33 @@ void vk_rt_reload(u64 gva);
    target parked or taken back), so what was found there can be kept until it changes */
 extern u32 g_vk_surf_epoch;
 Surf* vk_surf_first(u64 gva);
-void vk_surf_add(Surf* s);
+void vk_surf_add(Surf* s); /* a texture, into the table and the textures' recency list */
+/* s used now: last_used is this present, and it moves to the recent end of its list */
+void vk_surf_touch(Surf* s);
+/* s's pixels can be had again now: off the list of old ones whose pixels would be lost, if it is on it */
+void vk_surf_relist(Surf* s);
 VkImageAspectFlags vk_aspect(const VkFmt* f);
-void vk_surf_evict(u32 before); /* textures and render targets last used before that present */
+/* frees textures (VK_LRU_TEX) or render targets (VK_LRU_RT), the least recently used first, last used before the
+   present `before`, until `want` bytes went. lossy says which: VK_RECLAIM_LOSSLESS only those whose pixels can be had
+   again (textures loaded from memory, render targets memory holds), VK_RECLAIM_IDLE the others too but for a target
+   holding a draw memory lacks, which a texture made at its address takes, VK_RECLAIM_ANY everything. Returns the
+   bytes freed */
+#define VK_RECLAIM_LOSSLESS 0
+#define VK_RECLAIM_IDLE     1
+#define VK_RECLAIM_ANY      2
+u64 vk_surf_reclaim(int kind, u32 before, u64 want, int lossy);
+void vk_surf_stats(int kind, u32* count, u64* bytes, u32* parked);
+/* frees cache entries (surfaces and own buffers), the least recently used first, when the heap's use with `extra`
+   bytes more would be past 90% of its budget: idle lossless ones down to 80%, the lossless working set down to 95%,
+   then lossy ones (vk_surf_reclaim). Only entries unused for the last two presents go, so the caller may hold any
+   surface it used in them. With force (an allocation found no memory), `extra` bytes go even under the marks, less
+   what is being released already, once a present */
+void vk_mem_trim(u64 extra, int force);
+u64 vk_mem_trimmed(void); /* statistics: the bytes vk_mem_trim freed */
+/* vk_image_create for a surface of the caches, with room made for it first (vk_mem_trim). When no memory is found, a
+   forced trim makes room for later, and images as big fail at once for the rest of the present. bytes: the device
+   memory it takes */
+int vk_cache_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem, u64* bytes);
 int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
               double sdy);
 
@@ -595,6 +658,10 @@ int vk_buf_draw_prepare(VkDrawStorage* draw);
 void vk_buf_writable_abort(void);
 void vk_buf_writable_commit(void);
 void vk_buf_mem_need(u64 gva, u64 len);
+/* own buffers last used before the present `before`, the least recently used first, dropped until `want` bytes went
+   (their ranges are copied again when next read). Returns the bytes */
+u64 vk_buf_reclaim(u32 before, u64 want);
+void vk_buf_stats(u32* count, u64* bytes);
 int vk_buf_pending(u64 gva, u64 len); /* a pending graphics result overlaps the range */
 u64 vk_buf_adds(void);                /* graphics results committed so far: as vk_compute_adds */
 int vk_buf_pending_any(void);         /* any graphics result is pending */
@@ -610,12 +677,18 @@ void vk_release_incr(u32 id);
 /* a samples-passed report: len bytes at gva (4, or 16 with ticks after the count), the count of query.c's counter's
    segments [first, end), once the GPU has done the submit being recorded */
 void vk_release_samples(u64 gva, u32 len, u32 counter, u64 first, u64 end, u64 ticks);
+void vk_release_queued(u64* n, u64* gate, u64* cgate); /* the queue's length and its oldest's gates (any thread) */
 void vk_release_submit(void); /* the GPFIFO submission ended or waits: a release gated on the recording submits */
 void vk_release_need(u64 gva, u64 len);
 int vk_release_read(u64 gva, void* dst, u64 len);
 extern u64 g_vk_release_forwards;           /* statistics: reads vk_release_read answered */
 extern u64 g_vk_dset_new, g_vk_dset_reused; /* statistics: descriptor sets written, reused for the same contents */
 u32 vk_release_value(u32 id);
+/* renderer.h render_predicate and render_predicate_drop. A predicate is its slot + 1 (query.c), with VK_PRED_EQUAL for
+   a draw when the count is zero */
+#define VK_PRED_EQUAL 0x80000000u
+int vk_render_predicate(u64 a, int equal, u32* pred);
+void vk_render_predicate_drop(u32 pred);
 void vk_release_retire(u32 id);
 void vk_release_drain(void);
 /* query.c: the samples-passed counter with occlusion queries (renderer.h samples_*), under vk_lock. vk_query_draw before
@@ -629,6 +702,19 @@ void vk_query_enable(u32 chan, int on);
 int vk_query_report(u32 chan, u64 gva, u32 len, u64 ticks);
 /* a report performed (release.c): the count of counter's segments [first, end) */
 u64 vk_query_value(u32 counter, u64 first, u64 end);
+#define VK_QUERY_COUNTERS 8 /* query.c's samples-passed counters, a channel's each */
+/* render enable predicates (release.c's vk_render_predicate): a queued report of counter's segments [first, end) gets
+   a predicate slot, held once, that the next vk_query_pred_flush writes (2, *slot set), or its count is known now: 1
+   not zero, 0 zero. -1 when there can be no predicate: the device can't make them, or there's no memory for the
+   batch. The reports of a counter come in their queue order, each with what the one before it in its epoch, still
+   queued, is known to be (prev, ending at prev_end): the count up to there, which it goes on from */
+enum { VK_PRED_PREV_NONE, VK_PRED_PREV_ZERO, VK_PRED_PREV_NONZERO, VK_PRED_PREV_SLOT };
+int vk_query_pred_ok(void); /* the device makes predicates (VK_EXT_conditional_rendering); makes the shader */
+int vk_query_pred_job(u32 counter, u64 first, u64 end, u64 prev_end, int prev, u32 prev_slot, u32* slot);
+int vk_query_pred_flush(void); /* records the batch's shader; 0 without memory, its slots let go */
+void vk_query_pred_hold(u32 slot);
+void vk_query_pred_drop(u32 slot);
+VkBuffer vk_query_pred_buffer(void); /* a predicate's word is at slot * 4 */
 void vk_buf_mem_need_map(u64 gva, u64 len);
 void vk_buf_before_write(u64 gva, u64 len);
 void vk_buf_land(void);
@@ -736,11 +822,12 @@ typedef struct {
     u32 feedback; /* VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT, without the dynamic state for it */
     u32 arrays;   /* the sets with texture arrays: its layout, vk_playout(arrays) */
 } PipeKey;
-/* the pipeline for k, made on a worker thread when new: NULL while it is still being made (the draw is skipped), and
-   always once ready. vk_pipeline_get_now waits for it, for what can't be skipped (clears) */
+/* the pipeline for k, made when new and waited for while a worker makes it: NULL only when it can't be made */
 VkPipeline vk_pipeline_get(const PipeKey* k);
-VkPipeline vk_pipeline_get_now(const PipeKey* k);
-u64 vk_pipelines_skipped(void); /* draws skipped so far for a pipeline still being made */
+/* a draw's pipeline: the pipeline, or a stand-in the recording thread waits for at its bind (vk_pipeline_resolve, the
+   pipeline a stand-in names, or h itself) */
+VkPipeline vk_pipeline_get_deferred(const PipeKey* k);
+VkPipeline vk_pipeline_resolve(VkPipeline h);
 /* so far: pipelines made, how many of them the pipeline cache had, ms the workers took making them, ms the GPU thread
    waited for new ones, shaders translated, ms translating them */
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms);
@@ -759,6 +846,7 @@ void vk_compute_land(void); /* pending compute results into guest memory, now */
 /* the compute results so far, submitted and put aside to land later: the batch to wait for (0: none pending) */
 u64 vk_compute_put_aside(void);
 void vk_compute_wait(u64 value);                 /* until the compute batch is done (any thread, without vk_lock) */
+void vk_compute_progress(u64* submitted, u64* done); /* the last batch and the last done (any thread) */
 void vk_compute_land_through(u64 value);         /* the batches up to it, done, land (vk_lock) */
 void vk_compute_before_write(u64 gva, u64 size); /* gpu.c's g_gpu_before_write */
 void vk_compute_mem_need(u64 a, u64 n);          /* a read of [a, a + n): land results there first */
@@ -828,5 +916,12 @@ extern u64 g_vk_drawn, g_vk_skipped; /* draws recorded, and draws skipped (unsup
    begun again for them (a target's layout, or ordering without those barriers), and draws that sampled a target
    through a copy instead (gpu/vk/render.c) */
 extern u64 g_vk_fb_draws, g_vk_fb_barriers, g_vk_fb_restarts, g_vk_rt_copies;
+
+/* gpuprof.c, SNX_VK_GPU_PROFILE=1: GPU time per rendering pass, summed per target and logged every 10 s */
+void vk_gpuprof_pass_begin(VkCommandBuffer cb, const Surf* rt, const Surf* zt);
+void vk_gpuprof_pass_end(VkCommandBuffer cb);
+void vk_gpuprof_frame_done(u32 slot);
+extern u64 g_rec_xfers, g_rec_barriers; /* record.c: copies and blits, and barriers, put in the frame's ring */
+extern u64 g_rec_xfer_kind[3], g_rec_buf_bytes; /* buffer, buffer-image, image copies; buffer copies' bytes */
 
 #endif

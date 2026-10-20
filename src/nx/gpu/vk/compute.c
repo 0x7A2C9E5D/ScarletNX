@@ -268,7 +268,9 @@ static void cs_wait(u64 value) {
                               .pSemaphores = &g_vk_csem,
                               .pValues = &value};
     u64 t0 = plat_ns();
+    gpu_wait_note("a compute batch", value);
     VK_OK(vkWaitSemaphores(g_vk.dev, &wi, UINT64_MAX));
+    gpu_wait_note(NULL, 0);
     __atomic_add_fetch(&g_vk_cs_wait_ns, plat_ns() - t0, __ATOMIC_RELAXED);
 }
 /* the arena's results that changed, into guest memory, after its batch is done */
@@ -462,6 +464,11 @@ u64 vk_compute_put_aside(void) {
 }
 void vk_compute_wait(u64 value) {
     if (value) cs_wait(value);
+}
+void vk_compute_progress(u64* submitted, u64* done) {
+    *submitted = __atomic_load_n(&g_cval, __ATOMIC_RELAXED);
+    *done = 0;
+    if (g_vk_csem) VK_OK(vkGetSemaphoreCounterValue(g_vk.dev, g_vk_csem, done));
 }
 void vk_compute_land_through(u64 value) {
     vk_lock();

@@ -11,6 +11,7 @@
    decodes a 2D and a 3D texture of 512 MiB each. */
 #include <stdarg.h>
 #include <stdlib.h>
+#include "nx/gpu/gpu.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/texture/astc.h"
 #include "nx/gpu/texture/blocklinear.h"
@@ -68,6 +69,15 @@ int gmem_read(u64 gva, void* dst, u64 size) {
 /* one thread adds commands here, so record.c's drain has no other producer to keep out (device.c's vk_lock) */
 void vk_lock(void) {}
 void vk_unlock(void) {}
+/* record.c resolves stand-ins for pipelines still being made (pipeline.c, not here): the test binds real ones */
+VkPipeline vk_pipeline_resolve(VkPipeline h) { return h; }
+/* cmd.c reads the frame's GPU timestamps for gpuprof.c, which isn't here */
+void vk_gpuprof_frame_done(u32 slot) { (void)slot; }
+/* cmd.c's waits note themselves for gpu.c's stall report, which isn't here */
+void gpu_wait_note(const char* what, u64 value) {
+    (void)what;
+    (void)value;
+}
 /* plat_posix.c's crash handler, which the test never installs */
 void log_crash_mode(void) {}
 void crash_report(void* host_pc, void* fault, int sig) {

@@ -33,6 +33,16 @@ u64 vk_last_submit(void);
 u64 vk_submit_number(void);
 void vk_rt_before_write(u64, u64);
 u64 vk_query_value(u32, u64, u64);
+#define VK_PRED_EQUAL 0x80000000u
+#define VK_QUERY_COUNTERS 8
+enum { VK_PRED_PREV_NONE, VK_PRED_PREV_ZERO, VK_PRED_PREV_NONZERO, VK_PRED_PREV_SLOT };
+int vk_query_pred_ok(void);
+int vk_query_pred_job(u32, u64, u64, u64, int, u32, u32*);
+int vk_query_pred_flush(void);
+void vk_query_pred_hold(u32);
+void vk_query_pred_drop(u32);
+int vk_render_predicate(u64 a, int equal, u32* pred);
+void vk_render_predicate_drop(u32 pred);
 #include "nx/gpu/vk/release.c"
 #include "nx/gpu/vk/writeback.c"
 
@@ -41,7 +51,7 @@ static unsigned lock_depth, landing_calls, payload_writes, submits, query_reads;
 static u64 next_compute, next_graphics = 1, waited_compute, waited_graphics;
 static int pending, unsubmitted, landing_probe, other_pending;
 static u32 completed[128];
-static u8 memory[8192];
+static u8 memory[0x8000];
 static u64 mapping = 4096;
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
@@ -71,6 +81,7 @@ void vk_unlock(void) {
 u64 gmmu_translate(u64 address) {
     if (address >= 0x10000 && address < 0x11000) return mapping + (address & 4095);
     if (address >= 0x20000 && address < 0x21000) return 4096 + (address & 4095);
+    if (address >= 0x30004 && address < 0x38000) return address - 0x30000; /* all of memory, for the index's homes */
     return 0;
 }
 /* the queued payloads' page index (pending_pages.c) translates runs of contiguous pages */
@@ -176,6 +187,31 @@ u64 vk_query_value(u32 counter, u64 first, u64 end) {
     query_reads++;
     return (end - first) * 100 + first;
 }
+/* render enable predicates (query.c): a report of segments [first, end) gets slot first when its count isn't known,
+   else the count's zeroness comes from job_known */
+static int job_known = 2;
+static unsigned pred_flushes;
+static u32 pred_refs[64];
+int vk_query_pred_ok(void) { return 1; }
+int vk_query_pred_job(u32 counter, u64 first, u64 end, u64 prev_end, int prev, u32 prev_slot, u32* slot) {
+    (void)prev_end;
+    (void)prev_slot;
+    assert(lock_depth && counter == 3 && end > first && first < 64 && prev == VK_PRED_PREV_NONE);
+    if (job_known != 2) return job_known;
+    pred_refs[first] = 1;
+    *slot = (u32)first;
+    return 2;
+}
+int vk_query_pred_flush(void) {
+    assert(lock_depth);
+    pred_flushes++;
+    return 1;
+}
+void vk_query_pred_hold(u32 slot) { pred_refs[slot]++; }
+void vk_query_pred_drop(u32 slot) {
+    assert(pred_refs[slot]);
+    pred_refs[slot]--;
+}
 u64 vk_last_submit(void) { return next_graphics; }
 u64 vk_submit_number(void) { return next_graphics + 1; }
 
@@ -265,6 +301,49 @@ int main(void) {
     assert(vk_release_read(0x10048, got, 4) == -1 && vk_release_read(0x10050, got, 1) == 0);
     vk_release_drain();
     assert(memory[4096 + 0x40] == 25 && memory[4096 + 0x41] == 23 && g_rhead == g_rtail);
+    /* the render enable's comparison of a count not known yet with a zero 16 bytes on: a predicate for each queued
+       report, made in one batch, held by the report until it is performed and by the channel until it lets go; IF_EQUAL
+       inverts it. A nonzero other side, or a report not the last over the count, is compared by reading, as before */
+    u32 pred = 0;
+    memset(memory + 4096 + 0x100, 0, 0x40);
+    vk_release_samples(0x10100, 16, 3, 10, 11, 0);
+    vk_release_samples(0x10120, 16, 3, 11, 12, 0);
+    assert(vk_render_predicate(0x10100, 0, &pred) == 2 && pred == 11 && pred_flushes == 1);
+    assert(pred_refs[10] == 2 && pred_refs[11] == 1 && g_rhead == g_rtail + 2);
+    assert(vk_render_predicate(0x10120, 1, &pred) == 2 && pred == (12 | VK_PRED_EQUAL) && pred_flushes == 1);
+    vk_render_predicate_drop(pred);
+    assert(pred_refs[11] == 1);
+    memory[4096 + 0x130] = 1; /* the other side isn't zero */
+    assert(vk_render_predicate(0x10120, 0, &pred) == -1);
+    memory[4096 + 0x130] = 0;
+    value = 3; /* a later write over the count */
+    vk_release_write(0x10104, &value, 1);
+    assert(vk_render_predicate(0x10100, 0, &pred) == -1);
+    vk_release_drain();
+    assert(pred_refs[10] == 1 && pred_refs[11] == 0 && g_rhead == g_rtail); /* the channel still holds slot 10 */
+    vk_render_predicate_drop(11);
+    assert(pred_refs[10] == 0);
+    job_known = 0; /* a count known to be zero: IF_EQUAL draws, IF_NOT_EQUAL doesn't, without a predicate */
+    vk_release_samples(0x10140, 16, 3, 13, 14, 0);
+    assert(vk_render_predicate(0x10140, 1, &pred) == 1 && vk_render_predicate(0x10140, 0, &pred) == 0);
+    vk_release_drain();
+    /* two words of one home in the payloads' index (guest 0x1100 and 0x7ab4): the second goes in the slot after it,
+       and moves back to its home when the older is performed, still found there */
+    u32 word4 = 5;
+    vk_release_write(0x10100, &word4, 4);
+    u64 seq_a = g_rhead - 1;
+    vk_submit(0, 0, 0); /* the second waits for a later submit, so the first is performed alone */
+    vk_release_write(0x37ab4, &word4, 4);
+    u64 seq_b = g_rhead - 1;
+    u32 home = rix_home(0x1100);
+    assert(home == rix_home(0x7ab4) && !g_rodd);
+    assert(g_rix[home].word == 0x1100 && g_rix[home].seq == seq_a && g_rix[(home + 1) & (RIX_N - 1)].word == 0x7ab4);
+    assert(count_queued(0x10100) == -2 && count_queued(0x37ab4) == -2); /* queued, though not samples counts */
+    vk_release_need(0x10100, 4);
+    assert(g_rtail == seq_b && g_rix[home].word == 0x7ab4 && g_rix[home].seq == seq_b && g_rix[home].n == 1);
+    assert(!g_rix[(home + 1) & (RIX_N - 1)].word && count_queued(0x10100) == -1 && count_queued(0x37ab4) == -2);
+    vk_release_drain();
+    assert(!g_rix[home].word && count_queued(0x37ab4) == -1);
     assert(lock_depth == 0);
     return 0;
 }

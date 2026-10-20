@@ -27,6 +27,7 @@ static u64 flow(u64 top12, u32 at, u32 to) {
 static void merge(void) {
     u64 a[64] = {0}, b[64] = {0}, out[64];
     int i;
+    u32 len = 0;
     for (i = 0; i < 10; i++) {
         a[i] = 0xAAAAAAAA00000000ull | (u64)i;
         b[i] = 0xBBBBBBBB00000000ull | (u64)i;
@@ -54,6 +55,13 @@ static void merge(void) {
     check(shader_merge_dual((const u8*)a, (const u8*)b, (u8*)out, sizeof out) == 1 && out[13] == NOP &&
               out[14] == SCHED && out[15] == b[11],
           "VertexA's last bundle is copied whole");
+    /* a zero after VertexA's end would end the merged program before VertexB (shader_hash): it becomes a NOP */
+    a[13] = 0;
+    check(shader_merge_dual((const u8*)a, (const u8*)b, (u8*)out, sizeof out) == 1 && out[13] == NOP &&
+              out[15] == b[11],
+          "a zero word after VertexA becomes a NOP");
+    shader_hash((const u8*)out, sizeof out, &len);
+    check(len == 17 * 8, "the merged program's length takes in VertexB");
 }
 
 static void crs(void) {

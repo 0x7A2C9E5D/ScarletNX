@@ -30,7 +30,12 @@ typedef struct {
     int samples;
     u32 qch;
     u64 qfirst, qend;
+    /* a samples report's render enable predicate (query.c): 0 none made, slot + 1 while it holds one, or what the count
+       is known to be without the GPU, PRED_ZERO or PRED_NONZERO, or PRED_NONE when no predicate can be had */
+    int pred;
+    u64 cpu; /* the guest address of its payload, translated when it was queued, 0 when it isn't in the word index */
 } Release;
+enum { PRED_NONE = -3, PRED_ZERO = -2, PRED_NONZERO = -1 };
 #define RQ_N   1024 /* queued releases at most: a full queue performs its oldest at once */
 #define SYNC_N 128  /* nvdrv's syncpoint ids */
 
@@ -45,6 +50,63 @@ static int g_rthread;
    translation changes (vkr_mapping_begin), so a payload loses the pages it gained */
 static PendPages g_rpages = {.also = &g_pend_any};
 u64 g_vk_release_forwards;
+
+/* The queued payloads by the guest words they write: for each 4-byte word, the latest release queued over it and how
+   many are, so the render enable finds the release that decides a count without looking through the queue
+   (count_queued), where one game keeps hundreds of reports a frame. A payload that isn't whole words of
+   one mapped page is counted in g_rodd instead, and while there is one the queue is looked through. Under g_rlock */
+#define RIX_N 8192 /* twice four words for each release the queue holds: half full at most */
+static struct {
+    u64 word; /* its guest address, 0 for an empty entry */
+    u64 seq;  /* the latest release queued over it, by its queue number */
+    u32 n;    /* the releases queued over it */
+} g_rix[RIX_N];
+static u64 g_rodd;
+static u32 rix_home(u64 word) { return (u32)((word >> 2) * 0x9E3779B97F4A7C15ull >> 51) & (RIX_N - 1); }
+static u32 rix_find(u64 word) {
+    u32 i = rix_home(word);
+    while (g_rix[i].word && g_rix[i].word != word) i = (i + 1) & (RIX_N - 1);
+    return i;
+}
+/* the word of the release queued as seq: its latest */
+static void rix_add(u64 word, u64 seq) {
+    u32 i = rix_find(word);
+    g_rix[i].word = word;
+    g_rix[i].seq = seq;
+    g_rix[i].n++;
+}
+/* the oldest release over word is performed: an entry left with none goes, the ones after it in its run moving back
+   (linear probing's deletion, without tombstones) */
+static void rix_remove(u64 word) {
+    u32 i = rix_find(word), j, k;
+    if (!g_rix[i].word || --g_rix[i].n) return;
+    g_rix[i].word = 0;
+    for (j = (i + 1) & (RIX_N - 1); g_rix[j].word; j = (j + 1) & (RIX_N - 1)) {
+        k = rix_home(g_rix[j].word);
+        /* it stays when its home is cyclically within (i, j] */
+        if (i <= j ? i < k && k <= j : i < k || k <= j) continue;
+        g_rix[i] = g_rix[j];
+        g_rix[j].word = 0;
+        i = j;
+    }
+}
+/* a payload release is queued as seq or performed (delta -1) */
+static void rix_track(Release* r, u64 seq, int delta) {
+    if (delta > 0) {
+        u64 c = gmmu_translate(r->gva);
+        r->cpu = c && !(c & 3) && !(r->len & 3) && (c & 4095) + r->len <= 4096 ? c : 0;
+    }
+    if (!r->cpu) {
+        g_rodd += delta;
+        return;
+    }
+    for (u32 o = 0; o < r->len; o += 4) {
+        if (delta > 0)
+            rix_add(r->cpu + o, seq);
+        else
+            rix_remove(r->cpu + o);
+    }
+}
 
 static void perform(Release* r) {
     if (r->samples) { /* the count, as the report's structure size says: one word, or the value and the timestamp */
@@ -78,7 +140,9 @@ static void release_through(u64 gate, u64 cgate) {
             break;
         }
         r = g_rq[g_rtail % RQ_N];
+        if (r.gva) rix_track(&r, g_rtail, -1);
         g_rtail++;
+        if (r.pred > 0) vk_query_pred_drop((u32)r.pred - 1); /* the draws recorded with it may still hold it */
         if (r.gva) pend_add(&g_rpages, r.gva, r.len, -1);
         if (!r.gva) {
             /* release_value sees the transfer from queued to completed atomically. */
@@ -149,6 +213,7 @@ static void release(Release* r) {
         if (r->gate < prev->gate) r->gate = prev->gate;
         if (r->cgate < prev->cgate) r->cgate = prev->cgate;
     }
+    if (r->gva) rix_track(r, g_rhead, 1);
     g_rq[g_rhead % RQ_N] = *r;
     g_rhead++;
     if (r->gva) pend_add(&g_rpages, r->gva, r->len, 1);
@@ -196,6 +261,14 @@ void vk_release_samples(u64 gva, u32 len, u32 counter, u64 first, u64 end, u64 t
     r.qend = end;
     memcpy(r.data + 8, &ticks, 8);
     release(&r);
+}
+/* the releases queued, and the submissions the oldest waits for: read unlocked, for the stall report */
+void vk_release_queued(u64* n, u64* gate, u64* cgate) {
+    u64 tail = __atomic_load_n(&g_rtail, __ATOMIC_RELAXED);
+    const Release* r = &g_rq[tail % RQ_N];
+    *n = __atomic_load_n(&g_rhead, __ATOMIC_RELAXED) - tail;
+    *gate = *n ? __atomic_load_n(&r->gate, __ATOMIC_RELAXED) : 0;
+    *cgate = *n ? __atomic_load_n(&r->cgate, __ATOMIC_RELAXED) : 0;
 }
 void vk_release_incr(u32 id) {
     Release r;
@@ -295,6 +368,108 @@ void vk_release_need(u64 gva, u64 len) {
 }
 void vk_release_drain(void) { release_match(0, 0, 0, 1); }
 void vk_release_retire(u32 id) { release_match(0, 0, id, 0); }
+/* The render enable's comparison of a count with zero (renderer.h render_predicate), when the count is a samples report
+   still queued: made on the GPU (query.c's predicates), or known without it. The report must be the last release
+   queued over the count's 8 bytes, and the other side of the comparison zero, read without waiting for anything */
+/* the queued release that is the last over [gva, gva + 8): its queue number, -1 when none is, -2 when the last isn't
+   a whole samples count there. With g_rlock held */
+static i64 count_queued(u64 gva) {
+    i64 last = -1;
+    u64 c = gmmu_translate(gva);
+    if (!g_rodd && c && !(c & 3) && (c & 4095) <= 4096 - 8) /* by the words' index */
+        for (u32 o = 0; o < 8; o += 4) {
+            u32 i = rix_find(c + o);
+            if (g_rix[i].word && (i64)g_rix[i].seq > last) last = (i64)g_rix[i].seq;
+        }
+    else
+        for (u64 i = g_rtail; i < g_rhead; i++)
+            if (release_overlaps(&g_rq[i % RQ_N], gva, 8)) last = (i64)i;
+    if (last >= 0) {
+        const Release* r = &g_rq[last % RQ_N];
+        if (!r->samples || r->gva != gva || r->len != 16) return -2;
+    }
+    return last;
+}
+/* the 8 bytes at gva are zero now, as the stream sees them, nothing pending over them. With vk_lock held */
+static int reads_zero(u64 gva) {
+    u64 v = 0;
+    if (vk_compute_pending(gva, 8) || vk_buf_pending(gva, 8) || vk_gfx_image_pending(gva, 8)) return 0;
+    gmem_read_raw(gva, &v, 8);
+    return v == 0;
+}
+int vk_render_predicate(u64 a, int equal, u32* pred) {
+    i64 ia, ib, at;
+    u32 slot = 0;
+    int got = -1, k;
+    if (!__atomic_load_n(&g_gpu_releases, __ATOMIC_ACQUIRE)) return -1;
+    vk_lock();
+    if (!vk_query_pred_ok()) { /* outside g_rlock, which the game's threads take: it may make the shader */
+        vk_unlock();
+        return -1;
+    }
+    pm_lock(&g_rlock);
+    ia = count_queued(a);
+    ib = count_queued(a + 16);
+    pm_unlock(&g_rlock);
+    /* one side a count still queued, the other zero */
+    if (ia >= 0 && ib == -1 && reads_zero(a + 16))
+        at = ia;
+    else if (ib >= 0 && ia == -1 && reads_zero(a))
+        at = ib;
+    else {
+        vk_unlock();
+        return -1;
+    }
+    pm_lock(&g_rlock);
+    if (!g_rq[at % RQ_N].pred) {
+        /* every samples report queued without a predicate gets one now, in one batch: a frame's occlusion tests
+           come before the draws they decide */
+        u64 batch[RQ_N];
+        i64 last[VK_QUERY_COUNTERS]; /* each counter's report before, in the queue */
+        u32 nb = 0, j;
+        for (j = 0; j < VK_QUERY_COUNTERS; j++) last[j] = -1;
+        for (u64 i = g_rtail; i < g_rhead; i++) {
+            Release* r = &g_rq[i % RQ_N];
+            const Release* p;
+            int prev = VK_PRED_PREV_NONE;
+            if (!r->samples || r->qch >= VK_QUERY_COUNTERS) continue;
+            p = last[r->qch] >= 0 ? &g_rq[last[r->qch] % RQ_N] : NULL;
+            last[r->qch] = (i64)i;
+            if (r->pred) continue;
+            if (p && p->qfirst == r->qfirst)
+                prev = p->pred > 0             ? VK_PRED_PREV_SLOT
+                       : p->pred == PRED_ZERO    ? VK_PRED_PREV_ZERO
+                       : p->pred == PRED_NONZERO ? VK_PRED_PREV_NONZERO
+                                                 : VK_PRED_PREV_NONE;
+            u32 pslot = p && p->pred > 0 ? (u32)p->pred - 1 : 0;
+            k = vk_query_pred_job(r->qch, r->qfirst, r->qend, p ? p->qend : 0, prev, pslot, &slot);
+            r->pred = k == 2 ? (int)slot + 1 : k == 1 ? PRED_NONZERO : k == 0 ? PRED_ZERO : PRED_NONE;
+            if (k == 2) batch[nb++] = i;
+        }
+        pm_unlock(&g_rlock);
+        if (!vk_query_pred_flush()) { /* no predicates: the counts are waited for */
+            pm_lock(&g_rlock);
+            for (j = 0; j < nb; j++) g_rq[batch[j] % RQ_N].pred = PRED_NONE;
+            pm_unlock(&g_rlock);
+        }
+        pm_lock(&g_rlock);
+    }
+    k = g_rq[at % RQ_N].pred;
+    pm_unlock(&g_rlock);
+    if (k > 0) {
+        vk_query_pred_hold((u32)k - 1);
+        *pred = (u32)k | (equal ? VK_PRED_EQUAL : 0);
+        got = 2;
+    } else if (k == PRED_ZERO || k == PRED_NONZERO)
+        got = (k == PRED_ZERO) == !!equal;
+    vk_unlock();
+    return got;
+}
+void vk_render_predicate_drop(u32 pred) {
+    vk_lock();
+    vk_query_pred_drop((pred & ~VK_PRED_EQUAL) - 1);
+    vk_unlock();
+}
 u32 vk_release_value(u32 id) {
     pm_lock(&g_rlock);
     u32 n = syncpt_read(id) + (id < SYNC_N ? g_rincr[id] : 0);

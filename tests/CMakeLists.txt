@@ -679,6 +679,8 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME ui_shaders_current
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/build-ui-shaders.py" --check)
     add_test(NAME generators_crlf COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/generators_crlf.py")
+    # every 3D method that acts is in the fast path's table (engines.c g_m3d_acts)
+    add_test(NAME m3d_acts COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/m3d_acts_test.py")
     # no keys, dumps, stray binaries, piracy sites or the console maker's name in prose among the tracked files: the
     # checks on planted ones (self test), then on the checkout. Skipped (77) without git or outside a checkout
     add_test(NAME tracked_material_self_test
@@ -1272,6 +1274,18 @@ endif()
 add_executable(snx-test-mme-native mme_native.c)
 snx_test_target(snx-test-mme-native 23)
 add_test(NAME mme_native COMMAND snx-test-mme-native)
+
+# mme_hle.c's native macros against the interpreter, each over a macro written in the test from what it does
+add_executable(snx-test-mme-hle mme_hle.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxwell/mme_hle.c")
+snx_test_target(snx-test-mme-hle 23)
+add_test(NAME mme_hle COMMAND snx-test-mme-hle)
+
+# the macros mme_hle.c has no implementation for, compiled by mme_jit.c: every instruction and branch case compared
+# with the interpreter's, then seeded random programs
+add_executable(snx-test-mme-jit mme_jit.c)
+snx_test_target(snx-test-mme-jit 23)
+target_link_libraries(snx-test-mme-jit PRIVATE snx_llvm)
+add_test(NAME mme_jit COMMAND snx-test-mme-jit)
 
 add_executable(snx-test-etc2 etc2_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
 snx_test_target(snx-test-etc2 23)

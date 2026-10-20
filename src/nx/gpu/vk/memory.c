@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* How big one device memory allocation may be, and images bigger than that.
+/* How big one device memory allocation may be, and images bigger than that; the budget the caches keep within, and
+   the clock their ages are measured with.
 
    Some drivers fail allocations past 256 MiB even where maxMemoryAllocationSize is larger (NVIDIA's on FreeBSD), and
    a game's textures can be bigger: a 2D ASTC texture of 11584x11584 decodes to 512 MiB of RGBA8, a 3D one of 512^3
@@ -14,6 +15,7 @@
    have to wait on, and an image this big is made once. */
 #include <stdlib.h>
 #include "nx/runtime/platform/log.h"
+#include "nx/runtime/platform/plat.h"
 #include "nx/gpu/vk/vk.h"
 
 #define ALLOC_CAP_DEFAULT (256ull << 20)
@@ -42,7 +44,7 @@ void vk_mem_init(int sparse_queue) {
         g_vk.sparse ? "in pieces (sparse binding)" : "in one allocation (no sparse binding)");
 }
 
-static int pieces_bind(VkImage img, const VkMemoryRequirements* req, Pieces* p) {
+static int pieces_bind(VkImage img, const VkMemoryRequirements* req, Pieces* p, VkResult* res) {
     u64 chunk = g_vk.alloc_cap / req->alignment * req->alignment;
     if (!chunk) return 0;
     u32 n = (u32)((req->size + chunk - 1) / chunk);
@@ -55,7 +57,8 @@ static int pieces_bind(VkImage img, const VkMemoryRequirements* req, Pieces* p) 
         VmaAllocationCreateInfo aci = {.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
                                        .preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT};
         VmaAllocationInfo info;
-        if (!VK_OK(vmaAllocateMemory(g_vk.vma, &piece, &aci, &p->pages[i], &info))) {
+        *res = vmaAllocateMemory(g_vk.vma, &piece, &aci, &p->pages[i], &info);
+        if (!VK_OK(*res)) {
             ok = 0;
             break;
         }
@@ -86,10 +89,11 @@ static void pieces_free(Pieces* p) {
 }
 
 /* an image whose memory is more than one allocation may be: bound to pieces of at most g_vk.alloc_cap */
-static int image_in_pieces(const VkImageCreateInfo* ii, VkImage* img) {
+static int image_in_pieces(const VkImageCreateInfo* ii, VkImage* img, VkResult* res) {
     VkImageCreateInfo si = *ii;
     si.flags |= VK_IMAGE_CREATE_SPARSE_BINDING_BIT;
-    if (!VK_OK(vkCreateImage(g_vk.dev, &si, NULL, img))) return 0;
+    *res = vkCreateImage(g_vk.dev, &si, NULL, img);
+    if (!VK_OK(*res)) return 0;
     VkMemoryRequirements req;
     vkGetImageMemoryRequirements(g_vk.dev, *img, &req);
     u64 chunk = req.alignment ? g_vk.alloc_cap / req.alignment * req.alignment : 0;
@@ -103,7 +107,7 @@ static int image_in_pieces(const VkImageCreateInfo* ii, VkImage* img) {
             g_cappieces = cap;
         }
     }
-    if (!p || g_npieces == g_cappieces || !pieces_bind(*img, &req, p)) {
+    if (!p || g_npieces == g_cappieces || !pieces_bind(*img, &req, p, res)) {
         WARN("vulkan: cannot bind a %llu MiB image in %u pieces of %llu MiB\n", (unsigned long long)(req.size >> 20), n,
              (unsigned long long)(chunk >> 20));
         vkDestroyImage(g_vk.dev, *img, NULL);
@@ -119,6 +123,11 @@ static int image_in_pieces(const VkImageCreateInfo* ii, VkImage* img) {
 }
 
 int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem) {
+    VkResult res;
+    return vk_image_create_r(ii, img, mem, &res);
+}
+int vk_image_create_r(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* mem, VkResult* res) {
+    *res = VK_ERROR_UNKNOWN;
     *img = VK_NULL_HANDLE;
     *mem = VK_NULL_HANDLE;
     VkDeviceImageMemoryRequirements q = {.sType = VK_STRUCTURE_TYPE_DEVICE_IMAGE_MEMORY_REQUIREMENTS,
@@ -126,13 +135,14 @@ int vk_image_create(const VkImageCreateInfo* ii, VkImage* img, VmaAllocation* me
     VkMemoryRequirements2 req = {.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
     vkGetDeviceImageMemoryRequirements(g_vk.dev, &q, &req);
     if (req.memoryRequirements.size > g_vk.alloc_cap) {
-        if (g_vk.sparse) return image_in_pieces(ii, img);
+        if (g_vk.sparse) return image_in_pieces(ii, img, res);
         /* without sparse binding the one allocation is the only way: the driver may still take it */
         LOG_LIMIT(4, "vulkan: a %llu MiB image in one allocation, past the %llu MiB cap\n",
                   (unsigned long long)(req.memoryRequirements.size >> 20), (unsigned long long)(g_vk.alloc_cap >> 20));
     }
     VmaAllocationCreateInfo aci = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
-    return VK_OK(vmaCreateImage(g_vk.vma, ii, &aci, img, mem, NULL));
+    *res = vmaCreateImage(g_vk.vma, ii, &aci, img, mem, NULL);
+    return VK_OK(*res);
 }
 
 void vk_image_destroy(VkImage img, VmaAllocation mem) {
@@ -148,4 +158,77 @@ void vk_image_destroy(VkImage img, VmaAllocation mem) {
             return;
         }
     vkDestroyImage(g_vk.dev, img, NULL); /* made without memory */
+}
+
+/* ------------------------------------------------------------ the budget */
+/* The heap images go to: the biggest device-local one (the only one on a GPU sharing system memory). The BAR window,
+   device local too, holds the staging rings, which keep within its budget themselves (cmd.c ring_misplaced) */
+static int g_heap = -1;
+static u64 g_budget_cap; /* SNX_VK_BUDGET_MB, 0 when unset */
+
+static void heap_find(void) {
+    const VkPhysicalDeviceMemoryProperties* mp;
+    vmaGetMemoryProperties(g_vk.vma, &mp);
+    g_heap = 0;
+    for (u32 h = 0; h < mp->memoryHeapCount; h++)
+        if ((mp->memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) &&
+            (!(mp->memoryHeaps[g_heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) ||
+             mp->memoryHeaps[h].size > mp->memoryHeaps[g_heap].size))
+            g_heap = (int)h;
+    const char* env = getenv("SNX_VK_BUDGET_MB");
+    if (env && strtoull(env, NULL, 10)) {
+        g_budget_cap = strtoull(env, NULL, 10) << 20;
+        LOG("vulkan: the caches keep within %llu MB of heap %d (SNX_VK_BUDGET_MB)\n",
+            (unsigned long long)(g_budget_cap >> 20), g_heap);
+    }
+}
+
+int vk_mem_heap(void) {
+    if (g_heap < 0) heap_find();
+    return g_heap;
+}
+
+/* the heap's use as the caches see it, and its budget. The use leaves out the free space inside VMA's blocks, which
+   the next allocations fill before VMA asks the driver for more, and the memory of evicted entries the frames in
+   flight still hold (vk_deferred_bytes): it goes once they are done */
+void vk_mem_use(u64* usage, u64* budget) {
+    VmaBudget b[VK_MAX_MEMORY_HEAPS];
+    if (g_heap < 0) heap_find();
+    vmaGetHeapBudgets(g_vk.vma, b);
+    u64 u = b[g_heap].usage, holes = b[g_heap].statistics.blockBytes - b[g_heap].statistics.allocationBytes,
+        gone = vk_deferred_bytes();
+    u = u > holes ? u - holes : 0;
+    *usage = u > gone ? u - gone : 0;
+    *budget = g_budget_cap && g_budget_cap < b[g_heap].budget ? g_budget_cap : b[g_heap].budget;
+}
+
+/* the present clock: a present and its time every quarter second at most, seventeen minutes back */
+#define CLOCK_N 4096
+static struct {
+    u32 present;
+    u64 ns;
+} g_clock[CLOCK_N];
+static u32 g_clock_n, g_clock_at; /* samples kept; where the newest is */
+
+void vk_mem_present(void) {
+    u64 now = plat_ns();
+    if (g_clock_n && now - g_clock[g_clock_at].ns < 250000000ull) return;
+    g_clock_at = g_clock_n ? (g_clock_at + 1) % CLOCK_N : 0;
+    g_clock[g_clock_at].present = g_vk_present;
+    g_clock[g_clock_at].ns = now;
+    if (g_clock_n < CLOCK_N) g_clock_n++;
+}
+
+u32 vk_present_before(u64 ago_ns, u32 presents) {
+    if (g_vk_present <= presents) return 0;
+    u32 before = g_vk_present - presents;
+    if (!ago_ns) return before;
+    /* the newest sample at least ago_ns old: what was last used before its present has been unused since then */
+    u64 now = plat_ns();
+    for (u32 i = 0; i < g_clock_n; i++) {
+        u32 at = (g_clock_at + CLOCK_N - i) % CLOCK_N;
+        if (now - g_clock[at].ns < ago_ns) continue;
+        return (i32)(g_clock[at].present - before) < 0 ? g_clock[at].present : before;
+    }
+    return 0; /* the clock doesn't reach back that far: nothing is that old yet */
 }

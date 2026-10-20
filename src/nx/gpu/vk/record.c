@@ -87,6 +87,10 @@ static int rec_enabled(void) {
 }
 
 void vk_rec_init(void) { rec_enabled(); }
+int vk_rec_threaded(void) { return g_rec > 0; }
+u64 vk_rec_behind(void) {
+    return g_rec > 0 ? __atomic_load_n(&g_head, __ATOMIC_ACQUIRE) - __atomic_load_n(&g_tail, __ATOMIC_ACQUIRE) : 0;
+}
 
 /* a command for cb goes through the ring */
 static int rec_on(VkCommandBuffer cb) { return cb == g_rec_cb && g_rec > 0; }
@@ -250,10 +254,75 @@ void vk_rec_submit(VkCommandBuffer cb, const VkSemaphoreSubmitInfo* w, u32 nw, c
            x->a1 = a1; x->a2 = a2; x->a3 = a3; x->a4 = a4; x->a5 = a5; x->a6 = a6; x->a7 = a7;,                      \
            (cb, a1, a2, a3, a4, a5, a6, a7), (x->cb, x->a1, x->a2, x->a3, x->a4, x->a5, x->a6, x->a7))
 
-REC2(CmdBindPipeline, VkPipelineBindPoint, VkPipeline)
+/* A graphics pipeline may be a stand-in for one a worker is still making (vk_pipeline_get_deferred): it is waited for
+   here, at its bind. One that couldn't be made binds nothing, and the draws after it until the next graphics bind are
+   dropped, as the GPU thread drops a draw without its pipeline (the recording thread's own flag) */
+static int g_rec_unbound;
+static u64 g_rec_dropped;
+typedef struct {
+    VkCommandBuffer cb;
+    VkPipelineBindPoint bp;
+    VkPipeline p;
+} BindPipelineArgs;
+static void bind_pipeline_run(const void* p) {
+    const BindPipelineArgs* x = p;
+    VkPipeline pipe = vk_pipeline_resolve(x->p);
+    if (x->bp == VK_PIPELINE_BIND_POINT_GRAPHICS) g_rec_unbound = !pipe;
+    if (pipe) vkCmdBindPipeline(x->cb, x->bp, pipe);
+}
+void rec_CmdBindPipeline(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipeline p) {
+    if (!rec_on(cb)) {
+        VkPipeline pipe = vk_pipeline_resolve(p);
+        if (pipe) vkCmdBindPipeline(cb, bp, pipe);
+        return;
+    }
+    BindPipelineArgs* x = rec_push(bind_pipeline_run, sizeof *x);
+    *x = (BindPipelineArgs){cb, bp, p};
+    rec_commit();
+}
+static int rec_drop_draw(void) {
+    if (!g_rec_unbound) return 0;
+    if (!g_rec_dropped++) WARN("vulkan: a pipeline couldn't be made: its draws are dropped\n");
+    return 1;
+}
+typedef struct {
+    VkCommandBuffer cb;
+    u32 a1, a2, a3, a4;
+} DrawArgs;
+static void draw_run(const void* p) {
+    const DrawArgs* x = p;
+    if (!rec_drop_draw()) vkCmdDraw(x->cb, x->a1, x->a2, x->a3, x->a4);
+}
+void rec_CmdDraw(VkCommandBuffer cb, u32 vertices, u32 instances, u32 first_vertex, u32 first_instance) {
+    if (!rec_on(cb)) {
+        vkCmdDraw(cb, vertices, instances, first_vertex, first_instance);
+        return;
+    }
+    DrawArgs* x = rec_push(draw_run, sizeof *x);
+    *x = (DrawArgs){cb, vertices, instances, first_vertex, first_instance};
+    rec_commit();
+}
+typedef struct {
+    VkCommandBuffer cb;
+    u32 a1, a2, a3;
+    i32 a4;
+    u32 a5;
+} DrawIndexedArgs;
+static void draw_indexed_run(const void* p) {
+    const DrawIndexedArgs* x = p;
+    if (!rec_drop_draw()) vkCmdDrawIndexed(x->cb, x->a1, x->a2, x->a3, x->a4, x->a5);
+}
+void rec_CmdDrawIndexed(VkCommandBuffer cb, u32 indices, u32 instances, u32 first_index, i32 vertex_offset,
+                        u32 first_instance) {
+    if (!rec_on(cb)) {
+        vkCmdDrawIndexed(cb, indices, instances, first_index, vertex_offset, first_instance);
+        return;
+    }
+    DrawIndexedArgs* x = rec_push(draw_indexed_run, sizeof *x);
+    *x = (DrawIndexedArgs){cb, indices, instances, first_index, vertex_offset, first_instance};
+    rec_commit();
+}
 REC3(CmdBindIndexBuffer, VkBuffer, VkDeviceSize, VkIndexType)
-REC4(CmdDraw, u32, u32, u32, u32)
-REC5(CmdDrawIndexed, u32, u32, u32, i32, u32)
 REC3(CmdDispatch, u32, u32, u32)
 REC0(CmdEndRendering)
 REC1(CmdSetCullMode, VkCullModeFlags)
@@ -276,9 +345,43 @@ REC2(CmdSetStencilCompareMask, VkStencilFaceFlags, u32)
 REC2(CmdSetStencilWriteMask, VkStencilFaceFlags, u32)
 REC1(CmdSetAttachmentFeedbackLoopEnableEXT, VkImageAspectFlags)
 REC3(CmdResetQueryPool, VkQueryPool, u32, u32)
+REC3(CmdWriteTimestamp2, VkPipelineStageFlags2, VkQueryPool, u32)
 REC3(CmdBeginQuery, VkQueryPool, u32, VkQueryControlFlags)
 REC2(CmdEndQuery, VkQueryPool, u32)
 REC7(CmdCopyQueryPoolResults, VkQueryPool, u32, u32, VkBuffer, VkDeviceSize, VkDeviceSize, VkQueryResultFlags)
+REC0(CmdEndConditionalRenderingEXT)
+
+/* conditional rendering on the word at buf + off, its begin info made from the arguments */
+typedef struct {
+    VkCommandBuffer cb;
+    VkBuffer buf;
+    VkDeviceSize off;
+    VkConditionalRenderingFlagsEXT flags;
+} CondArgs;
+static void cond_call(VkCommandBuffer cb, VkBuffer buf, VkDeviceSize off, VkConditionalRenderingFlagsEXT flags) {
+    VkConditionalRenderingBeginInfoEXT ci = {.sType = VK_STRUCTURE_TYPE_CONDITIONAL_RENDERING_BEGIN_INFO_EXT,
+                                             .buffer = buf,
+                                             .offset = off,
+                                             .flags = flags};
+    vkCmdBeginConditionalRenderingEXT(cb, &ci);
+}
+static void cond_run(const void* p) {
+    const CondArgs* x = p;
+    cond_call(x->cb, x->buf, x->off, x->flags);
+}
+void rec_CmdBeginConditionalRenderingEXT(VkCommandBuffer cb, VkBuffer buf, VkDeviceSize off,
+                                         VkConditionalRenderingFlagsEXT flags) {
+    if (!rec_on(cb)) {
+        cond_call(cb, buf, off, flags);
+        return;
+    }
+    CondArgs* x = rec_push(cond_run, sizeof *x);
+    x->cb = cb;
+    x->buf = buf;
+    x->off = off;
+    x->flags = flags;
+    rec_commit();
+}
 
 /* ------------------------------------------------------------ commands with arrays, copied after their arguments */
 /* the packet's arrays follow its arguments, each at a multiple of 16 */
@@ -538,8 +641,19 @@ static void clear_depth_run(const void* p) {
     vkCmdClearDepthStencilImage(x->cb, (VkImage)x->h1, x->l1, (const VkClearDepthStencilValue*)x->v, x->n,
                                 XFER_REGIONS(x));
 }
+u64 g_rec_xfers, g_rec_barriers; /* copies and blits, and barriers, put in the frame's ring (gpuprof.c's gaps) */
+u64 g_rec_xfer_kind[3], g_rec_buf_bytes; /* buffer copies, buffer-image copies, image copies and blits; buffer bytes */
+static void copy_buffer_run(const void* p);
+static void buffer_to_image_run(const void* p);
+static void image_to_buffer_run(const void* p);
 static XferArgs* rec_xfer(RecFn fn, VkCommandBuffer cb, u64 h1, VkImageLayout l1, u64 h2, VkImageLayout l2, u32 n,
                           const void* regions, u64 size) {
+    g_rec_xfers++;
+    if (fn == copy_buffer_run) {
+        g_rec_xfer_kind[0]++;
+        for (u32 i = 0; i < n; i++) g_rec_buf_bytes += ((const VkBufferCopy*)regions)[i].size;
+    } else
+        g_rec_xfer_kind[fn == buffer_to_image_run || fn == image_to_buffer_run ? 1 : 2]++;
     XferArgs* x = rec_push(fn, REC_AL(sizeof *x) + size);
     memset(x, 0, sizeof *x);
     x->cb = cb;
@@ -669,6 +783,7 @@ static int barrier_chained(const VkDependencyInfo* d) {
     return 0;
 }
 void rec_CmdPipelineBarrier2(VkCommandBuffer cb, const VkDependencyInfo* d) {
+    if (rec_on(cb)) g_rec_barriers++;
     if (!rec_on(cb) || barrier_chained(d)) {
         if (rec_on(cb)) vk_rec_sync();
         vkCmdPipelineBarrier2(cb, d);
@@ -729,12 +844,15 @@ void rec_CmdBeginRendering(VkCommandBuffer cb, const VkRenderingInfo* ri) {
 
 /* ------------------------------------------------------------ descriptor sets */
 /* A draw's new descriptor set is allocated and written on the recording thread too, ahead of the commands that bind
-   it: the GPU thread gets a stand-in handle at once (an odd number, which a driver's handle, a pointer or an offset
-   aligned to more, never is), and the recording thread keeps which set it stands for until the commands binding it
-   are recorded. The sets come from the recording thread's own pools for each frame slot, reset in order with the
-   commands when the slot is reused (vk_rec_frame_reset). Stand-ins count up and are reused after REC_SETS, more sets
-   than two frames ever make before vk_frame_check ends one */
+   it: the GPU thread gets a stand-in handle at once (REC_STANDIN in the top bits, which no handle has: a driver's is a
+   pointer or a small offset, and the validation layer's are counters), and the recording thread keeps which set it
+   stands for until the commands binding it are recorded. The sets come from the recording thread's own pools for
+   each frame slot, reset in order with the commands when the slot is reused (vk_rec_frame_reset). Stand-ins count up
+   and are reused after REC_SETS, more sets than two frames ever make before vk_frame_check ends one */
 #define REC_SETS        (1u << 17)
+/* not merely odd: half of the validation layer's handles are odd, and a real set taken for a stand-in went unbound,
+   its dispatch reading no descriptors until the GPU hung */
+#define REC_STANDIN     0x5EC5000000000000ull
 #define REC_SPARE_SETS  32
 #define REC_SPARE_KINDS 16
 static VkDescriptorSet g_rset[REC_SETS];
@@ -751,9 +869,9 @@ typedef struct {
 static RecPools g_rpools[VK_FRAMES];
 static u32 g_frame_sets[VK_FRAMES]; /* stand-ins handed out in each slot since its reset (the GPU thread's count) */
 
-static int rec_set_standin(VkDescriptorSet s) { return ((u64)(uintptr_t)s & 1) != 0; }
+static int rec_set_standin(VkDescriptorSet s) { return ((u64)(uintptr_t)s & ~(u64)(REC_SETS - 1)) == REC_STANDIN; }
 static VkDescriptorSet rec_set_real(VkDescriptorSet s) {
-    return rec_set_standin(s) ? g_rset[((u64)(uintptr_t)s >> 1) & (REC_SETS - 1)] : s;
+    return rec_set_standin(s) ? g_rset[(u64)(uintptr_t)s & (REC_SETS - 1)] : s;
 }
 /* count sets of layout from slot f's pools into sets: count, or 1 when a fresh pool can't hold that many, 0 when none */
 static u32 rec_alloc_n(RecPools* f, VkDescriptorSetLayout layout, VkDescriptorSet* sets, u32 count) {
@@ -880,5 +998,5 @@ VkDescriptorSet vk_rec_new_set(VkDescriptorSetLayout layout, u32 n, const VkWrit
     }
     g_frame_sets[slot]++;
     rec_commit();
-    return (VkDescriptorSet)(uintptr_t)(((u64)id << 1) | 1);
+    return (VkDescriptorSet)(uintptr_t)(REC_STANDIN | id);
 }

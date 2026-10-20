@@ -28,7 +28,13 @@ numbers are assigned by the SDK's macro upload, so a slot number alone identifie
 the interpreter. `maxwell/mme.c` hashes a macro's code from its start to the end of the upload batch that wrote it
 (NVN uploads each macro on its own), with Eden's hash, so Eden's table of macro hashes names the same code, and
 `maxwell/mme_hle.c` has native versions of the ten macros TotK runs most (its slots 7, 8, 9, 12, 16, 27, 30, 35, 37
-and 38). They send the same methods as the interpreter. `SNX_MME_VERIFY=1` runs both for every call of a known
+and 38), of every macro in Eden's table, and of the busiest ones Catherine and Super Mario Odyssey interpret. They send
+the same methods as the interpreter.
+`tests/mme_hle.c` checks each against the interpreter running a macro written in the test. A macro's parameters are
+pushbuffer words the GPU thread fetched before the call (`gpu.c`), so the indirect draws read their records and count
+as the interpreter does: Eden's indirect path (the rasterizer drawing from the buffer's GPU address, with the shaders'
+constant buffer reads of the base vertex, base instance and draw index replaced) has no counterpart here yet.
+`SNX_MME_VERIFY=1` runs both for every call of a known
 macro and logs where they differ, `SNX_MME_HLE=0` interprets everything, and the log names each macro's hash when it
 is first called and counts native and interpreted calls every million. `nvn_control.c` decodes the arguments of two
 macros and `nvn_command_gap.c` classifies what methods write, both checked against packets captured in their tests.

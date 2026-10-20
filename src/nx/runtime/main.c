@@ -327,6 +327,7 @@ static void frontend_loop(void) {
             WARN("No new frame for %llu seconds (%d shown, %llu GPU submissions): the game's threads\n",
                  (unsigned long long)(STALL_NS / 1000000000u), frames, (unsigned long long)g_gpu_submits);
             kernel_dump_threads();
+            gpu_report_stall();
         }
         /* paced at the display's rate, from a schedule: one far behind (a stop in the debugger) starts again */
         next += period;
