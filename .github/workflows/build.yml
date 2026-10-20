@@ -388,9 +388,9 @@ jobs:
   # (cmake/cross.cmake) against an Arch system root of the architecture, then packaged as the appimage job packages its
   # own (scripts/make-appimage.sh with SYSROOT). The system root is pkgforge's Arch image of the architecture, unpacked
   # with the runner's Docker (its files only: it never runs), so the job runs on the runner and enters pkgforge's x86-64
-  # container with docker exec, the workspace mounted at /src. ppc64le only: riscv64 and loongarch64 need the recompiler
-  # first (its linker and STXP's 16-byte compare-and-swap, #407). No POWER machine has run the AppImage yet, so like the
-  # macOS and iOS jobs it may fail without failing the run (scripts/publish-builds.py, OPTIONAL)
+  # container with docker exec, the workspace mounted at /src. platform is Docker's name of the architecture (loong64
+  # for LoongArch). No POWER, RISC-V or LoongArch machine has run the AppImages yet, so like the macOS and iOS jobs they
+  # may fail without failing the run (scripts/publish-builds.py, OPTIONAL)
   appimage-cross:
     name: Linux AppImage (${{ matrix.arch }})
     runs-on: ubuntu-26.04
@@ -403,6 +403,12 @@ jobs:
           - arch: ppc64le
             platform: ppc64le
             preset: linux-ppc64le-cross
+          - arch: riscv64
+            platform: riscv64
+            preset: linux-riscv64-cross
+          - arch: loongarch64
+            platform: loong64
+            preset: linux-loongarch64-cross
     steps:
       # Artifacts carry the commit they came from: the branch's head in a pull request, else the commit pushed
       - name: Name the commit
@@ -1089,9 +1095,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
+        include: # platform as Docker names it, qemu as qemu-user and binfmt_misc do
           - arch: ppc64le
             platform: ppc64le
+            qemu: ppc64le
+          - arch: riscv64
+            platform: riscv64
+            qemu: riscv64
+          - arch: loongarch64
+            platform: loong64
+            qemu: loongarch64
     steps:
       - name: Name the commit
         id: commit
@@ -1126,14 +1139,14 @@ jobs:
             case $i in 7|8|9|10|11|12|13|14|15) byte=00 m=00 ;; 16) m=fe ;; *) m=ff ;; esac
             magic=$magic\\x$byte mask=$mask\\x$m i=$((i + 1))
           done
-          printf ':appimage-%s:M::%s:%s:%s:POCF\n' ${{ matrix.platform }} "$magic" "$mask" "$(command -v qemu-${{ matrix.platform }})" |
+          printf ':appimage-%s:M::%s:%s:%s:POCF\n' ${{ matrix.qemu }} "$magic" "$mask" "$(command -v qemu-${{ matrix.qemu }})" |
             sudo tee /proc/sys/fs/binfmt_misc/register
-          grep -qx enabled /proc/sys/fs/binfmt_misc/appimage-${{ matrix.platform }}
-          head -n 3 /proc/sys/fs/binfmt_misc/qemu-${{ matrix.platform }} /proc/sys/fs/binfmt_misc/appimage-${{ matrix.platform }}
+          grep -qx enabled /proc/sys/fs/binfmt_misc/appimage-${{ matrix.qemu }}
+          head -n 3 /proc/sys/fs/binfmt_misc/qemu-${{ matrix.qemu }} /proc/sys/fs/binfmt_misc/appimage-${{ matrix.qemu }}
       - name: Run the AppImage as a user would
         run: |
-          grep -qx enabled /proc/sys/fs/binfmt_misc/qemu-${{ matrix.platform }} ||
-            { echo "no binfmt handler runs ${{ matrix.platform }} programs here" >&2; exit 1; }
+          grep -qx enabled /proc/sys/fs/binfmt_misc/qemu-${{ matrix.qemu }} ||
+            { echo "no binfmt handler runs ${{ matrix.qemu }} programs here" >&2; exit 1; }
           chmod +x dist/*.AppImage
           scripts/check-package.sh dist/*.AppImage
 
