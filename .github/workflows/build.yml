@@ -331,7 +331,8 @@ jobs:
   # Big-endian ppc64 (ELFv1, Debian ports' glibc), cross-built as the ppc64le job above would be and tested under
   # qemu-ppc64: the Linux runtime only, as the Switch runtime refuses a big-endian host (docs/PPC64.md), so no
   # package. Debian ports' unstable is the system root, which can break for a day, so like the cross-built AppImages
-  # it may fail without failing the run. Its card field says what the tests did (scripts/discord-cards.py, CHECKS)
+  # it may fail without failing the run. Its card field says what the tests did (ReiWimsy's CHECKS, in
+  # scarletnx/discord-bots)
   linux-ppc64:
     name: Linux (ppc64, cross)
     runs-on: ubuntu-24.04

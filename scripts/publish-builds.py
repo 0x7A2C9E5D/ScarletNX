@@ -22,14 +22,14 @@ folder each, as actions/download-artifact puts them), and no code of the pull re
 ScarletNX-<system>-<arch> (scripts/nightly-notes.py), an AppImage with the .zsync AppImageUpdate reads beside it.
 
 Discord: a version's release gets a message on DISCORD_WEBHOOK_RELEASES's channel, each download linked with its size
-and the changes since the version before. A nightly's or a pull request's card (scripts/discord-cards.py), posted when
-it was pushed, is drawn again once its files are published, posted now if it has none. Without a webhook nothing is
-posted, and the run says so. gh reads and writes REPO with GH_TOKEN, and NIGHTLY with NIGHTLY_TOKEN. --dry-run reads and
-prints each write instead.
+and the changes since the version before; without the webhook nothing is posted, and the run says so. The nightlies'
+and the pull requests' cards are ReiWimsy's (scarletnx/discord-bots), which sees their releases change. gh reads and
+writes REPO with GH_TOKEN, and NIGHTLY with NIGHTLY_TOKEN. --dry-run reads and prints each write instead.
 .github/workflows/publish.yml runs this; tests/publish_builds_test.py runs it against a fake gh and a fake Discord.
 """
 
 import argparse
+import datetime
 import importlib.util
 import json
 import os
@@ -38,17 +38,25 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.parse
+import urllib.request
 import zipfile
 from pathlib import Path
 
-spec = importlib.util.spec_from_file_location('discord_cards', Path(__file__).with_name('discord-cards.py'))
-cards = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(cards)
-nightly_notes = cards.notes
+spec = importlib.util.spec_from_file_location('nightly_notes', Path(__file__).with_name('nightly-notes.py'))
+nightly_notes = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(nightly_notes)
 
 SERVER = nightly_notes.SERVER
-LABEL = cards.LABEL
+LABEL = 'publish builds'  # what lets a fork's pull request be published
+SCARLET = 0xB0102A  # a version's colour
+# the mascot beside each message
+WIMSY = 'https://raw.githubusercontent.com/{repo}/main/dist/icons/hicolor/128x128/apps/wimsy.png'
+# Discord's limits: an embed's description, and its whole text
+DESCRIPTION, EMBED = 4096, 6000
+# a version's changes listed, at most, before "and N more"
+MOST_LINES = 10
 TEAM = {'admin', 'maintain', 'write'}
 VERSION = re.compile(r'v\d[0-9A-Za-z.+-]*')
 ROLLING = 'nightly'
@@ -83,17 +91,149 @@ def published(release):
     return release.get('published_at') or ''
 
 
-class Publisher(cards.Hub):
+class Hub:
+    """GitHub through gh (REPO with GH_TOKEN, the nightly repository with NIGHTLY_TOKEN), and Discord's webhooks"""
+
+    def __init__(self, repo, to, dry):
+        self.repo, self.to, self.dry = repo, to, dry
+        self.tokens = {repo: os.environ.get('GH_TOKEN', ''), to: os.environ.get('NIGHTLY_TOKEN', '')}
+
+    def token(self, repo):
+        if repo == self.to and not self.tokens[repo] and not self.dry:
+            raise RuntimeError(f'NIGHTLY_TOKEN is not set: nothing can be written in {self.to}')
+        return self.tokens[repo]
+
+    def gh(self, args, repo, data=None, write=False):
+        if write and self.dry:
+            print('would run: gh', ' '.join(args), json.dumps(data) if data is not None else '')
+            return {}
+        run = subprocess.run(
+            ['gh', *args],
+            input=json.dumps(data) if data is not None else None,
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, GH_TOKEN=self.token(repo)),
+            check=False,
+        )
+        if run.returncode:
+            raise RuntimeError(f'gh {" ".join(args)}: {run.stderr.strip() or run.stdout.strip()}')
+        return json.loads(run.stdout) if run.stdout.strip() else {}
+
+    def read(self, path, repo=None):
+        return self.gh(['api', path], repo or self.repo)
+
+    def graphql(self, query):
+        return self.gh(['api', 'graphql', '-f', f'query={query}'], self.repo)
+
+    def missing(self, path, repo=None):
+        """path read, or None when GitHub has nothing there (404)"""
+        try:
+            return self.read(path, repo)
+        except RuntimeError as error:
+            if 'HTTP 404' in str(error) or 'Not Found' in str(error):
+                return None
+            raise
+
+    def pages(self, path, repo=None):
+        """every item of a listing, 100 a page"""
+        items, page = [], 1
+        while True:
+            sep = '&' if '?' in path else '?'
+            got = self.gh(['api', f'{path}{sep}per_page=100&page={page}'], repo or self.repo)
+            if isinstance(got, dict):
+                got = next((got[key] for key in ('artifacts', 'workflow_runs', 'jobs') if key in got), got)
+            items += got
+            if len(got) < 100:
+                return items
+            page += 1
+
+    def write(self, repo, method, path, data=None):
+        args = ['api', '-X', method, path, *(['--input', '-'] if data is not None else [])]
+        return self.gh(args, repo, data, write=True)
+
+    def releases(self, repo):
+        return self.pages(f'repos/{repo}/releases', repo)
+
+    def webhook(self, channel):
+        return os.environ.get(f'DISCORD_WEBHOOK_{channel.upper()}', '')
+
+    def post(self, channel, embed, message=None, create=True):
+        """the message of channel (releases, nightly, prs or issues) edited when message names it, else posted when
+        create: its id, or None when there is none"""
+        hook = self.webhook(channel)
+        if not hook:
+            print(f'::notice::No DISCORD_WEBHOOK_{channel.upper()}: nothing posted on Discord')
+            return message
+        body = {'embeds': [embed], 'allowed_mentions': {'parse': []}}
+        if self.dry:
+            print(f'would {"edit" if message else "post"} on Discord ({channel}):', json.dumps(body))
+            return message
+        # a webhook of a forum channel or a thread names it in its query (thread_id=...), which both requests keep
+        base, _, query = hook.partition('?')
+        edit = f'{base}/messages/{message}' + (f'?{query}' if query else '')
+        post = f'{base}?' + (f'{query}&' if query else '') + 'wait=true'
+        for method, url in (('PATCH', edit), ('POST', post)):
+            if (method == 'PATCH' and not message) or (method == 'POST' and not create):
+                continue
+            request = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode(),
+                method=method,
+                # Discord refuses urllib's own agent
+                headers={'Content-Type': 'application/json', 'User-Agent': f'DiscordBot ({SERVER}/{self.repo}, 1)'},
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=30) as reply:
+                    return json.loads(reply.read() or b'{}').get('id', message)
+            except urllib.error.HTTPError as error:
+                if method == 'PATCH' and error.code == 404:  # deleted on Discord: a new one, when it may post
+                    continue
+                print(f'::warning::Discord answered {error.code} to the {channel} message: {error.read()[:200]!r}')
+                return message
+            except (urllib.error.URLError, OSError) as error:
+                print(f'::warning::Discord could not be reached for the {channel} message: {error}')
+                return message
+        return None
+
+    def embed(self, title, url, description, fields=(), color=SCARLET, footer='', author=None):
+        """a message's embed, its description cut by whole lines, the last first, to what Discord takes: what it lists
+        gives way, the fields stay"""
+        title = title[:256]
+        room = EMBED - len(title) - len(footer) - len((author or {}).get('name', ''))
+        room = max(0, min(DESCRIPTION, room - sum(len(f['name']) + len(f['value']) for f in fields)))
+        while len(description) > room:
+            description = description.rsplit('\n', 1)[0] if '\n' in description else description[:room]
+        made = {
+            'title': title,
+            'url': url,
+            'description': description,
+            'color': color,
+            'thumbnail': {'url': WIMSY.format(repo=self.repo)},
+            'timestamp': datetime.datetime.now(datetime.UTC).isoformat(timespec='seconds'),
+        }
+        if fields:
+            made['fields'] = list(fields)
+        if footer:
+            made['footer'] = {'text': footer}
+        if author:
+            made['author'] = author
+        return made
+
+
+def listed(lines, more_url, most):
+    shown = [f'- {line}' for line in lines[:most]]
+    if len(lines) > most:
+        shown.append(f'- and [{len(lines) - most} more]({more_url})')
+    return shown
+
+
+class Publisher(Hub):
     def __init__(self, args):
         super().__init__(args.repo, args.to, args.dry_run)
         self.checkout, self.keep = args.checkout, args.keep
         self.artifacts = Path(args.artifacts) if args.artifacts else None
         self.work = Path(tempfile.mkdtemp(prefix='publish-builds-'))
         self.output = {}
-
-    def cards_now(self):
-        """the cards, as GitHub has them now"""
-        return cards.Cards(self, self.checkout, self.keep)
 
     def release(self, repo, tag):
         return next((r for r in self.releases(repo) if r['tag_name'] == tag), None)
@@ -235,7 +375,6 @@ class Publisher(cards.Hub):
             why=why,
         )
         self.point_rolling(title, rolling, sha)
-        self.cards_now().nightly(sha)
 
     def point_rolling(self, title, body, sha):
         """REPO's rolling prerelease ROLLING: no files, the latest nightly's notes, its tag on that commit"""
@@ -295,9 +434,7 @@ class Publisher(cards.Hub):
                 more.append({'name': 'Since', 'value': f'[{since}]({compare})', 'inline': True})
             items = nightly_notes.changes(self.checkout, previous, sha) or []
             lines = [nightly_notes.change_line(item, f'{SERVER}/{self.repo}') for item in items]
-            said = '\n'.join(
-                [f'Built from [`{sha[:7]}`]({commit}).', *cards.Cards.listed(lines, compare, cards.MOST_LINES)]
-            )
+            said = '\n'.join([f'Built from [`{sha[:7]}`]({commit}).', *listed(lines, compare, MOST_LINES)])
             self.post('releases', self.embed(title, url, said, self.fields(files, sizes, download) + more))
 
     def pull_facts(self, pr, sha, run):
@@ -380,7 +517,6 @@ class Publisher(cards.Hub):
         body = self.pull_notes(pr, sha, files, sizes, missing, facts)
         new = self.put_release(self.to, tag, title, body, True, uploads)[1]
         print(f'{"published" if new else "replaced"} {tag} with the builds of {sha[:7]}')
-        self.cards_now().pr(number)
 
     def closed(self, pr):
         tag = f'pr-{pr["number"]}'
