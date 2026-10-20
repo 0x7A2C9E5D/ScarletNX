@@ -198,6 +198,7 @@ extern u32 g_vk_epoch, g_vk_present;
 /* record.c: the frame's command buffer is recorded on a thread of its own. rec_Cmd* take vkCmd*'s arguments and
    record into that command buffer from the ring, or into any other one at once */
 void vk_rec_init(void);
+int vk_rec_threaded(void); /* the frame's commands go through the recording thread */
 u64 vk_rec_behind(void); /* bytes of commands handed to the recording thread and not recorded yet (any thread) */
 void vk_rec_begin(VkCommandBuffer cb); /* begins cb, the frame's command buffer from now on */
 /* ends and submits cb with those semaphores (s[0] the graphics timeline's) */
@@ -821,6 +822,10 @@ typedef struct {
 } PipeKey;
 /* the pipeline for k, made when new and waited for while a worker makes it: NULL only when it can't be made */
 VkPipeline vk_pipeline_get(const PipeKey* k);
+/* a draw's pipeline: the pipeline, or a stand-in the recording thread waits for at its bind (vk_pipeline_resolve, the
+   pipeline a stand-in names, or h itself) */
+VkPipeline vk_pipeline_get_deferred(const PipeKey* k);
+VkPipeline vk_pipeline_resolve(VkPipeline h);
 /* so far: pipelines made, how many of them the pipeline cache had, ms the workers took making them, ms the GPU thread
    waited for new ones, shaders translated, ms translating them */
 void vk_pipeline_stats(u64* pipes, u64* hits, u64* make_ms, u64* wait_ms, u64* shaders, u64* shader_ms);

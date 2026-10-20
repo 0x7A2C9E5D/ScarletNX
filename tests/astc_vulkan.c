@@ -69,6 +69,8 @@ int gmem_read(u64 gva, void* dst, u64 size) {
 /* one thread adds commands here, so record.c's drain has no other producer to keep out (device.c's vk_lock) */
 void vk_lock(void) {}
 void vk_unlock(void) {}
+/* record.c resolves stand-ins for pipelines still being made (pipeline.c, not here): the test binds real ones */
+VkPipeline vk_pipeline_resolve(VkPipeline h) { return h; }
 /* cmd.c's waits note themselves for gpu.c's stall report, which isn't here */
 void gpu_wait_note(const char* what, u64 value) {
     (void)what;

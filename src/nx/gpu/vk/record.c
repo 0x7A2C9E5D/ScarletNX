@@ -87,6 +87,7 @@ static int rec_enabled(void) {
 }
 
 void vk_rec_init(void) { rec_enabled(); }
+int vk_rec_threaded(void) { return g_rec > 0; }
 u64 vk_rec_behind(void) {
     return g_rec > 0 ? __atomic_load_n(&g_head, __ATOMIC_ACQUIRE) - __atomic_load_n(&g_tail, __ATOMIC_ACQUIRE) : 0;
 }
@@ -253,10 +254,75 @@ void vk_rec_submit(VkCommandBuffer cb, const VkSemaphoreSubmitInfo* w, u32 nw, c
            x->a1 = a1; x->a2 = a2; x->a3 = a3; x->a4 = a4; x->a5 = a5; x->a6 = a6; x->a7 = a7;,                      \
            (cb, a1, a2, a3, a4, a5, a6, a7), (x->cb, x->a1, x->a2, x->a3, x->a4, x->a5, x->a6, x->a7))
 
-REC2(CmdBindPipeline, VkPipelineBindPoint, VkPipeline)
+/* A graphics pipeline may be a stand-in for one a worker is still making (vk_pipeline_get_deferred): it is waited for
+   here, at its bind. One that couldn't be made binds nothing, and the draws after it until the next graphics bind are
+   dropped, as the GPU thread drops a draw without its pipeline (the recording thread's own flag) */
+static int g_rec_unbound;
+static u64 g_rec_dropped;
+typedef struct {
+    VkCommandBuffer cb;
+    VkPipelineBindPoint bp;
+    VkPipeline p;
+} BindPipelineArgs;
+static void bind_pipeline_run(const void* p) {
+    const BindPipelineArgs* x = p;
+    VkPipeline pipe = vk_pipeline_resolve(x->p);
+    if (x->bp == VK_PIPELINE_BIND_POINT_GRAPHICS) g_rec_unbound = !pipe;
+    if (pipe) vkCmdBindPipeline(x->cb, x->bp, pipe);
+}
+void rec_CmdBindPipeline(VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipeline p) {
+    if (!rec_on(cb)) {
+        VkPipeline pipe = vk_pipeline_resolve(p);
+        if (pipe) vkCmdBindPipeline(cb, bp, pipe);
+        return;
+    }
+    BindPipelineArgs* x = rec_push(bind_pipeline_run, sizeof *x);
+    *x = (BindPipelineArgs){cb, bp, p};
+    rec_commit();
+}
+static int rec_drop_draw(void) {
+    if (!g_rec_unbound) return 0;
+    if (!g_rec_dropped++) WARN("vulkan: a pipeline couldn't be made: its draws are dropped\n");
+    return 1;
+}
+typedef struct {
+    VkCommandBuffer cb;
+    u32 a1, a2, a3, a4;
+} DrawArgs;
+static void draw_run(const void* p) {
+    const DrawArgs* x = p;
+    if (!rec_drop_draw()) vkCmdDraw(x->cb, x->a1, x->a2, x->a3, x->a4);
+}
+void rec_CmdDraw(VkCommandBuffer cb, u32 vertices, u32 instances, u32 first_vertex, u32 first_instance) {
+    if (!rec_on(cb)) {
+        vkCmdDraw(cb, vertices, instances, first_vertex, first_instance);
+        return;
+    }
+    DrawArgs* x = rec_push(draw_run, sizeof *x);
+    *x = (DrawArgs){cb, vertices, instances, first_vertex, first_instance};
+    rec_commit();
+}
+typedef struct {
+    VkCommandBuffer cb;
+    u32 a1, a2, a3;
+    i32 a4;
+    u32 a5;
+} DrawIndexedArgs;
+static void draw_indexed_run(const void* p) {
+    const DrawIndexedArgs* x = p;
+    if (!rec_drop_draw()) vkCmdDrawIndexed(x->cb, x->a1, x->a2, x->a3, x->a4, x->a5);
+}
+void rec_CmdDrawIndexed(VkCommandBuffer cb, u32 indices, u32 instances, u32 first_index, i32 vertex_offset,
+                        u32 first_instance) {
+    if (!rec_on(cb)) {
+        vkCmdDrawIndexed(cb, indices, instances, first_index, vertex_offset, first_instance);
+        return;
+    }
+    DrawIndexedArgs* x = rec_push(draw_indexed_run, sizeof *x);
+    *x = (DrawIndexedArgs){cb, indices, instances, first_index, vertex_offset, first_instance};
+    rec_commit();
+}
 REC3(CmdBindIndexBuffer, VkBuffer, VkDeviceSize, VkIndexType)
-REC4(CmdDraw, u32, u32, u32, u32)
-REC5(CmdDrawIndexed, u32, u32, u32, i32, u32)
 REC3(CmdDispatch, u32, u32, u32)
 REC0(CmdEndRendering)
 REC1(CmdSetCullMode, VkCullModeFlags)

@@ -2194,13 +2194,14 @@ retry:
     }
     k.feedback = fb && !g_vk.has_feedback_dynamic;
     /* the last draw's pipeline when its key is the same (draws in a row mostly are): one comparison of the key, where
-       the table hashed all of it each draw. Pipelines and modules live as long as the run, so the handle stays good */
+       the table hashed all of it each draw. Pipelines and modules live as long as the run, so the handle stays good,
+       a stand-in for one still being made too (vk_pipeline_get_deferred) */
     static PipeKey last_key;
     static VkPipeline last_pipe;
     VkPipeline pipe;
     if (last_pipe && !memcmp(&k, &last_key, sizeof k))
         pipe = last_pipe;
-    else if ((pipe = vk_pipeline_get(&k)) != VK_NULL_HANDLE) {
+    else if ((pipe = vk_pipeline_get_deferred(&k)) != VK_NULL_HANDLE) {
         last_key = k;
         last_pipe = pipe;
     }
