@@ -1055,7 +1055,7 @@ if(TARGET OpenSSL::Crypto)
         "${CMAKE_CURRENT_SOURCE_DIR}/link_macho_fixture.c" -DPART=2 -o "${snx_macho_probe}"
         RESULT_VARIABLE snx_macho_result OUTPUT_QUIET ERROR_QUIET)
     if(snx_macho_result EQUAL 0)
-        foreach(part 1 2 3)
+        foreach(part 1 2 3 4)
             # LLVM's modules have no common symbols, which the linker refuses: a tentative definition is not one
             # whatever the compiler's default
             add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/link_macho_${part}.o"
@@ -1068,17 +1068,18 @@ if(TARGET OpenSSL::Crypto)
         add_executable(snx-test-link-macho link_macho.c "${snx_link_sources}/link.c" "${snx_link_sources}/link_elf.c"
             "${snx_link_sources}/elf_object.c" "${snx_link_sources}/link_coff.c" "${snx_link_sources}/link_macho.c"
             "${CMAKE_CURRENT_BINARY_DIR}/link_macho_1.o" "${CMAKE_CURRENT_BINARY_DIR}/link_macho_2.o"
-            "${CMAKE_CURRENT_BINARY_DIR}/link_macho_3.o")
+            "${CMAKE_CURRENT_BINARY_DIR}/link_macho_3.o" "${CMAKE_CURRENT_BINARY_DIR}/link_macho_4.o")
         # the objects are the test's data, not part of its own link
         set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/link_macho_1.o"
             "${CMAKE_CURRENT_BINARY_DIR}/link_macho_2.o" "${CMAKE_CURRENT_BINARY_DIR}/link_macho_3.o"
-            PROPERTIES EXTERNAL_OBJECT FALSE HEADER_FILE_ONLY TRUE)
+            "${CMAKE_CURRENT_BINARY_DIR}/link_macho_4.o" PROPERTIES EXTERNAL_OBJECT FALSE HEADER_FILE_ONLY TRUE)
         snx_test_target(snx-test-link-macho 11)
         target_include_directories(snx-test-link-macho PRIVATE "${PROJECT_SOURCE_DIR}/src")
         target_link_libraries(snx-test-link-macho PRIVATE OpenSSL::Crypto)
         add_test(NAME link_macho COMMAND snx-test-link-macho "${CMAKE_CURRENT_BINARY_DIR}/link_macho_1.o"
             "${CMAKE_CURRENT_BINARY_DIR}/link_macho_2.o" "${CMAKE_CURRENT_BINARY_DIR}/link_macho.dylib"
-            "${CMAKE_CURRENT_BINARY_DIR}/link_macho_3.o" "a call to the undefined weak symbol _missing")
+            "${CMAKE_CURRENT_BINARY_DIR}/link_macho_3.o" "a call to the undefined weak symbol _missing"
+            "${CMAKE_CURRENT_BINARY_DIR}/link_macho_4.o" "aligned beyond a page")
     endif()
 endif()
 if(APPLE)

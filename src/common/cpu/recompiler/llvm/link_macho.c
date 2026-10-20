@@ -276,7 +276,8 @@ static int parse(Link* l, Obj* o, const SnxLinkInput* input) {
                 s->reloff = rd32(h + 56);
                 s->nreloc = rd32(h + 60);
                 s->flags = rd32(h + 64);
-                if (s->align > 15) return fail(l, "%s: section %s aligned beyond a page", input->name, s->name);
+                if (s->align > 14) /* PAGE, which is all a slid image keeps */
+                    return fail(l, "%s: section %s aligned beyond a page", input->name, s->name);
                 kind = classify(l, o, s);
                 if (kind == -2) return -1;
                 s->kind = kind;
