@@ -79,21 +79,22 @@ int main(void) {
         assert(ini_check(t, "12345678", why, sizeof why) && !strcmp(why, "text's value is longer than 7 bytes"));
         assert(number == was && told == said && !strcmp(held, "a b c"));
     }
-    /* what ini_read did with a value it did not take as given is said, through ini_set_say: left as it was, or what
-       was kept; a value taken as given says nothing */
+    /* what ini_read did with a value it did not take as given is said, through ini_set_say, with the value the
+       setting keeps: the one it had (3 and "a b c" here, not their defaults), or the one clamped to; a value taken as
+       given says nothing */
     ini_set_say(catch_said);
     ini_read(n, "abc");
-    assert(!strcmp(line_said, "settings: number=abc is not a whole number from -5 to 10: left as it was"));
+    assert(number == 3 && !strcmp(line_said, "settings: number=abc is not a whole number from -5 to 10: it keeps 3"));
     ini_read(n, "11");
-    assert(number == 10 && !strcmp(line_said, "settings: number=11 is not a whole number from -5 to 10: 10 kept"));
+    assert(number == 10 && !strcmp(line_said, "settings: number=11 is not a whole number from -5 to 10: it keeps 10"));
     ini_read(n, "1.5");
-    assert(number == 1 && !strcmp(line_said, "settings: number=1.5 is not a whole number from -5 to 10: 1 kept"));
+    assert(number == 1 && !strcmp(line_said, "settings: number=1.5 is not a whole number from -5 to 10: it keeps 1"));
     ini_read(n, "7x");
-    assert(number == 7 && !strcmp(line_said, "settings: number=7x is not a whole number from -5 to 10: 7 kept"));
+    assert(number == 7 && !strcmp(line_said, "settings: number=7x is not a whole number from -5 to 10: it keeps 7"));
     ini_read(r, "9");
-    assert(ratio == 4 && !strcmp(line_said, "settings: ratio=9 is not a number from 0.25 to 4: 4 kept"));
+    assert(ratio == 4 && !strcmp(line_said, "settings: ratio=9 is not a number from 0.25 to 4: it keeps 4"));
     ini_read(t, "too long for it");
-    assert(!strcmp(line_said, "settings: text's value is longer than 7 bytes: left as it was"));
+    assert(!strcmp(line_said, "settings: text's value is longer than 7 bytes: it keeps \"a b c\""));
     line_said[0] = 0;
     ini_read(n, "3");
     ini_read(r, "0.5");
