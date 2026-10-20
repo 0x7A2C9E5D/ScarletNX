@@ -111,7 +111,7 @@ msgstr ""
 msgid "Folder"
 msgstr ""
 
-#: src/gui/editor.c
+#: src/gui/editor.c src/gui/main.c
 msgid "Save"
 msgstr ""
 
@@ -555,6 +555,10 @@ msgstr ""
 msgid "No user picked: the Settings have no user"
 msgstr ""
 
+#: src/gui/main.c
+msgid "No update"
+msgstr ""
+
 #. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
 #, snx-key
@@ -563,6 +567,11 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "Play"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: its updates and DLCs kept"
 msgstr ""
 
 #: src/gui/main.c

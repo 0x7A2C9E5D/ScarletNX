@@ -114,13 +114,16 @@ checks: any number of DLCs and one update at most. Give their dumps with the gam
 ./build/scarletnx Dlc.nsp                                          # a game made already: its DLC checked too
 ```
 
-Each dump given is checked, and a newer update replaces the one checked before. The launcher lists a game's updates
-and DLCs under it: opening a game that has some shows a box to check each one by (`Update 1.2.0`, its version from its
-own control data, or `DLC 1`), then Play, which keeps the boxes checked in `addons=` and plays the game. Back leaves
-the list as it was.
+Each dump given is checked along with what the list checks already: a DLC is added, and an update, older or newer,
+takes the place of the one checked before, as installing an older update means playing it. The launcher lists a
+game's updates and DLCs under it: opening a game that has some shows its updates as a choice of one (each version
+installed, the newest first, by its version from its own control data, or No update) and its DLCs as boxes to check
+(`DLC 1`, numbered from the base ID the game's control data gives). Save keeps the choice in `addons=` without
+playing, Play keeps it and plays the game, and Back leaves the list as it was.
 
 - **Programs:** an update is recompiled from its own ExeFS into a program beside the game,
-  `games/<id>/<id>_<its title ID>`, which runs whenever it is checked. A DLC runs its game's code and has no program,
+  `games/<id>/<id>_<its title ID>v<its version>`, which runs whenever it is checked. Every version of a game's update
+  has the same title ID, so each version installed keeps a program of its own, its version its content meta's. A DLC runs its game's code and has no program,
   only its record: its own `.ini`, which holds `source=` (the path of its dump), and its data folder. A DLC program
   an older version made is taken away the next time its dump is played.
 - **Settings and saves:** an update runs with its game's `.ini` and its game's data folder, so its saves are the

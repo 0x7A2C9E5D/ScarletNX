@@ -2055,9 +2055,10 @@ static void users_pointer(App* app, float x, float y, bool click, bool touch) {
     } else if (click && (x < (float)r.x || x >= (float)(r.x + r.w) || y < (float)r.y || y >= (float)(r.y + r.h)))
         users_close(app);
 }
-/* ---- the box of a game's updates and DLCs (gui_game_addons), which opening the game shows: a box to check each of
-   them by, an update at most, as the game's addons= has them, then Play, which keeps them there and plays the game
-   with them: from the checked update's program, else its own ---- */
+/* ---- the box of a game's updates and DLCs (gui_game_addons), which opening the game shows, as the game's addons=
+   has them picked: its updates as a choice of one (each version installed, newest first, or No update), its DLCs a
+   box to check each by; then Save, which keeps them in addons=, and Play, which keeps them and plays the game with
+   them, from the picked update's program, else its own ---- */
 static void addons_close(App* app) {
     gui_games_free(&app->addons);
     free(app->addons_game);
@@ -2074,65 +2075,89 @@ static void addons_where(const App* app, char** folder, char** name) {
     for (leaf = *folder + strlen(*folder); leaf > *folder && leaf[-1] != '/' && leaf[-1] != '\\'; --leaf) continue;
     *name = snx_strdup(leaf);
 }
+/* addons' i's entry, its name after <game>_ */
+static const char* addon_entry(const App* app, size_t i) {
+    const char* under = strchr(app->addons.names[i], '_');
+    return under ? under + 1 : app->addons.names[i];
+}
+/* what addons' i is to its game: SNX_ADDON_UPDATE or SNX_ADDON_DLC */
+static int addon_kind(const App* app, size_t i) {
+    char game[17];
+    SnxU64 own = 0, id = 0;
+    snprintf(game, sizeof game, "%s", app->addons.names[i]);
+    if (!snx_title_parse(game, &own) || !snx_addon_entry_id(own, addon_entry(app, i), &id)) return SNX_ADDON_NONE;
+    return snx_addon_kind(own, id);
+}
+/* the updates, first in addons (gui_game_addons lists them so) */
+static size_t addons_updates(const App* app) {
+    size_t n = 0;
+    while (n < app->addons.count && addon_kind(app, n) == SNX_ADDON_UPDATE) n++;
+    return n;
+}
+/* the box's rows: the updates and No update (with any update), the DLCs, Save, then Play */
+enum { ROW_NO_UPDATE = -1, ROW_SAVE = -2, ROW_PLAY = -3 };
+static int addons_rows(const App* app) {
+    return (int)app->addons.count + (addons_updates(app) ? 1 : 0) + 2;
+}
+/* what row is: its add-on's index in addons, or ROW_NO_UPDATE, ROW_SAVE or ROW_PLAY */
+static int addons_row(const App* app, int row) {
+    int updates = (int)addons_updates(app), rows = addons_rows(app);
+    if (row == rows - 1) return ROW_PLAY;
+    if (row == rows - 2) return ROW_SAVE;
+    if (row < updates) return row;
+    if (updates && row == updates) return ROW_NO_UPDATE;
+    return row - (updates ? 1 : 0);
+}
 static void addons_open(App* app, const char* game, const char* title) {
     char *folder, *name, *ini, *text;
-    SnxU64* ids;
+    SnxAddon* list;
     size_t count, i, j;
     addons_close(app);
     if (!gui_game_addons(game, &app->addons)) return;
     app->addons_game = snx_strdup(game);
     app->addons_title = snx_strdup(title);
     app->addons_checked = (bool*)calloc(app->addons.count, sizeof *app->addons_checked);
-    ids = (SnxU64*)malloc(SNX_ADDONS_MAX * sizeof *ids);
-    if (!app->addons_checked || !ids) {
-        free(ids);
+    list = (SnxAddon*)malloc(SNX_ADDONS_MAX * sizeof *list);
+    if (!app->addons_checked || !list) {
+        free(list);
         addons_close(app);
         return;
     }
     addons_where(app, &folder, &name);
     ini = snx_game_ini(folder, name);
     text = snx_ini_value(ini, "addons");
-    count = snx_addons_parse(text, name, ids, SNX_ADDONS_MAX);
+    count = snx_addons_parse(text, name, list, SNX_ADDONS_MAX);
     for (i = 0; i < app->addons.count; ++i)
-        for (j = 0; j < count; ++j) {
-            char id[17];
-            snx_title_text(ids[j], id);
-            if (!strcmp(app->addons.names[i] + strlen(name) + 1, id)) app->addons_checked[i] = true;
-        }
+        for (j = 0; j < count; ++j)
+            if (!strcmp(addon_entry(app, i), list[j].entry)) app->addons_checked[i] = true;
     free(text);
     free(ini);
     free(folder);
     free(name);
-    free(ids);
+    free(list);
     app->addons_recompile = app->recompile;
     app->addons_focus = 0;
     app->addons_shown = true;
 }
-/* the title ID of addons' i */
-static SnxU64 addon_id(const App* app, size_t i) {
-    const char* under = strchr(app->addons.names[i], '_');
-    char* game = under ? snx_format("%.*s", (int)(under - app->addons.names[i]), app->addons.names[i]) : NULL;
-    SnxU64 id = 0;
-    if (game) snx_addon_name(game, app->addons.names[i], &id);
-    free(game);
-    return id;
-}
-/* what addons' i is to its game: SNX_ADDON_UPDATE or SNX_ADDON_DLC */
-static int addon_kind(const App* app, size_t i) {
-    char game[17];
-    SnxU64 id = 0;
-    snprintf(game, sizeof game, "%s", app->addons.names[i]);
-    return snx_title_parse(game, &id) ? snx_addon_kind(id, addon_id(app, i)) : SNX_ADDON_NONE;
-}
 static void addons_label(const App* app, int row, char* label, size_t size) {
-    if ((size_t)row < app->addons.count)
-        snprintf(label, size, "%s%s %s", app->theme.marker, app->addons_checked[row] ? "[x]" : "[ ]",
-                 app->addons.shown[row]);
+    int item = addons_row(app, row);
+    size_t i;
+    bool none = true;
+    for (i = 0; i < addons_updates(app); ++i) none = none && !app->addons_checked[i];
+    if (item >= 0)
+        snprintf(label, size, "%s%s %s", app->theme.marker,
+                 addon_kind(app, (size_t)item) == SNX_ADDON_UPDATE ? (app->addons_checked[item] ? "(*)" : "( )")
+                                                                   : (app->addons_checked[item] ? "[x]" : "[ ]"),
+                 app->addons.shown[item]);
+    else if (item == ROW_NO_UPDATE)
+        snprintf(label, size, "%s%s %s", app->theme.marker, none ? "(*)" : "( )", snx_tr("No update"));
+    else if (item == ROW_SAVE)
+        snprintf(label, size, "%s%s", app->theme.marker, snx_tr("Save"));
     else
         snprintf(label, size, "%s%s", app->theme.marker, app->addons_recompile ? snx_tr("Recompile") : snx_tr("Play"));
 }
 static void addons_boxes(App* app, GuiRect* r, GuiList* rows) {
-    int i, s = app->scale, item = item_h(app), count = (int)app->addons.count + 1, h = count * (item + 6 * s);
+    int i, s = app->scale, item = item_h(app), count = addons_rows(app), h = count * (item + 6 * s);
     int longest = SDL_max(16, (int)SDL_utf8strlen(app->addons_title) + 2);
     char label[160];
     for (i = 0; i < count; ++i) {
@@ -2155,54 +2180,65 @@ static void render_addons(App* app) {
         list_item(app, &rows, i, label, app->addons_focus == i, false);
     }
 }
-static void launch(App* app, char* absolute, bool prepared);
-/* row pressed: an update's or a DLC's box checked or not (one update at most), or Play: the checked ones kept as the
-   game's addons=, and the game played (or recompiled) through the driver, from the checked update's program */
-static void addons_press(App* app, int row) {
-    char *folder, *name, *ini, *text, *path = NULL;
-    SnxU64* ids;
+/* what is picked kept as the game's addons=: 1, else 0 with app->message saying why. The picked update's program,
+   absolute and owned, in *program when it is not NULL (NULL with no update picked) */
+static int addons_save(App* app, char** program) {
+    char *folder, *name, *ini, *text;
+    SnxAddon* list = (SnxAddon*)calloc(app->addons.count + 1, sizeof *list);
     size_t i, count = 0;
-    int item = app->menu.selected;
-    bool recompile = app->recompile;
-    if ((size_t)row < app->addons.count) {
-        bool update = addon_kind(app, (size_t)row) == SNX_ADDON_UPDATE;
-        app->addons_checked[row] = !app->addons_checked[row];
-        for (i = 0; update && app->addons_checked[row] && i < app->addons.count; ++i)
-            if (i != (size_t)row && addon_kind(app, i) == SNX_ADDON_UPDATE)
-                app->addons_checked[i] = false;
-        return;
-    }
-    ids = (SnxU64*)malloc((app->addons.count + 1) * sizeof *ids);
+    int saved;
+    if (program) *program = NULL;
     addons_where(app, &folder, &name);
-    for (i = 0; ids && i < app->addons.count; ++i)
+    for (i = 0; list && i < app->addons.count; ++i)
         if (app->addons_checked[i]) {
-            ids[count++] = addon_id(app, i);
-            if (addon_kind(app, i) == SNX_ADDON_UPDATE) path = snx_absolute(app->addons.paths[i]);
+            snprintf(list[count++].entry, sizeof list->entry, "%s", addon_entry(app, i));
+            if (program && addon_kind(app, i) == SNX_ADDON_UPDATE) *program = snx_absolute(app->addons.paths[i]);
         }
     ini = snx_game_ini(folder, name);
-    text = ids ? snx_addons_text(ids, count) : NULL;
-    if (!text || snx_ini_record(ini, "addons", text))
-        snprintf(app->message, sizeof app->message, snx_tr("Not saved: %s could not be written"), ini);
-    else {
-        if (!path) path = snx_absolute(app->addons_game);
-        app->recompile = app->addons_recompile;
-        addons_close(app);
-        app->menu.selected = GUI_SWITCH;
-        launch(app, path, true);
-        path = NULL;
-        if (!app->menu.running) app->menu.selected = item;
-        app->recompile = recompile;
-    }
-    free(path);
+    text = list ? snx_addons_text(list, count) : NULL;
+    saved = text && !snx_ini_record(ini, "addons", text);
+    if (!saved) snprintf(app->message, sizeof app->message, snx_tr("Not saved: %s could not be written"), ini);
     free(text);
     free(ini);
-    free(ids);
+    free(list);
     free(folder);
     free(name);
+    return saved;
 }
-/* a key on the box: Up and Down move, Select presses the row (Space too), Back closes it, nothing kept */
+static void launch(App* app, char* absolute, bool prepared);
+/* row pressed: an update picked (the others not: one runs at a time), No update, a DLC's box checked or not; Save,
+   the picks kept and the box closed; or Play, the picks kept and the game played (or recompiled) through the driver,
+   from the picked update's program */
+static void addons_press(App* app, int row) {
+    int item = addons_row(app, row), selected = app->menu.selected;
+    size_t i;
+    char* path;
+    bool recompile = app->recompile;
+    if (item >= 0 && addon_kind(app, (size_t)item) == SNX_ADDON_DLC) {
+        app->addons_checked[item] = !app->addons_checked[item];
+        return;
+    }
+    if (item >= 0 || item == ROW_NO_UPDATE) {
+        for (i = 0; i < addons_updates(app); ++i) app->addons_checked[i] = (int)i == item;
+        return;
+    }
+    if (!addons_save(app, item == ROW_PLAY ? &path : NULL)) return;
+    if (item == ROW_SAVE) {
+        snprintf(app->message, sizeof app->message, snx_tr("%s: its updates and DLCs kept"), app->addons_title);
+        addons_close(app);
+        return;
+    }
+    if (!path) path = snx_absolute(app->addons_game);
+    app->recompile = app->addons_recompile;
+    addons_close(app);
+    app->menu.selected = GUI_SWITCH;
+    launch(app, path, true);
+    if (!app->menu.running) app->menu.selected = selected;
+    app->recompile = recompile;
+}
+/* a key on the box: Up and Down move, Select presses the row, Back closes it, nothing kept */
 static void addons_key(App* app, GuiKey key) {
-    int count = (int)app->addons.count + 1;
+    int count = addons_rows(app);
     if (key == GUI_UP || key == GUI_DOWN)
         app->addons_focus = (app->addons_focus + (key == GUI_UP ? count - 1 : 1)) % count;
     else if (key == GUI_SELECT)

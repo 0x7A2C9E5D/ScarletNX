@@ -26,6 +26,7 @@ typedef struct {
     unsigned said, said_meta;
     SnxU64 game;      /* the game the content picked is of: the base's own ID, or the one an add-on's content meta
                          names (else the usual numbering's, snx_addon_guess) */
+    SnxU64 version;   /* the picked content's version, its content meta's: SNX_NO_VERSION without one */
     int base, update; /* the containers, either -1 without one; update is the add-on's (an update or a DLC) */
     /* the base's Program NCA, the update's (the patch an NSP of both has, else found 0), the Control NCA, the
        update's when it has one, and a DLC's Data NCA (aoc) */
@@ -48,9 +49,10 @@ int snx_dump_open(SnxDump* dump, const char* base, const char* addon, const char
                   const char* repo, int say);
 /* path opened alone, with the keys as snx_dump_open takes them: a game's dump (program, and the patch it may have), whose title ID is its
    program's, or else an add-on's (patch or aoc, in update), its title ID the add-on's own and game the game it belongs
-   to, as its content meta names it (snx_addon_kind(game, title) tells which). 0, else nonzero, said why; snx_dump_close either way */
+   to, as its content meta names it (snx_addon_kind(game, title) tells which), and its version in *version when version
+   is not NULL (SNX_NO_VERSION without a content meta, or for a game). 0, else nonzero, said why; snx_dump_close either way */
 int snx_dump_title(SnxDump* dump, const char* path, const char* keys, const char* title_keys, const char* repo, int say,
-                   SnxU64* title, SnxU64* game);
+                   SnxU64* title, SnxU64* game, SnxU64* version);
 void snx_dump_close(SnxDump* dump);
 /* the program's ExeFS and RomFS read in place, an update's over the base, or NULL, said why. An update opened
    without its base has its ExeFS and no RomFS */

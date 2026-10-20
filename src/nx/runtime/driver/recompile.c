@@ -313,7 +313,8 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
 }
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *arg, *value;
-    SnxU64 addon = 0, owner = 0; /* an update, and the game its content meta names it of */
+    SnxU64 addon = 0, owner = 0, version = SNX_NO_VERSION; /* an update, its game and version, as its content meta
+                                                                names them */
     SnxLlvmBuild llvm;
     SnxCompileOptions compile;
     SnxCodegenOptions gen;
@@ -439,7 +440,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     gen.abi = snx_game_abi();
     /* a dump, read in place, else an ExeFS folder or an NRO. An update's dump is its own program; a DLC has none */
     dump = snx_is_file(input) && snx_is_dump(input);
-    if (dump && snx_extract_title(input, paths, &addon, &owner)) return 1;
+    if (dump && snx_extract_title(input, paths, &addon, &owner, &version)) return 1;
     if (snx_addon_kind(owner, addon) == SNX_ADDON_NONE)
         addon = 0;
     else if (name)
@@ -461,8 +462,8 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     }
     title = snx_game_shown(name, &program);
     if (addon) { /* <game>_<add-on>, in the game's folder */
-        char own[17], of[17];
-        snx_title_text(addon, own);
+        char own[32], of[17];
+        snx_addon_entry(owner, addon, version, own); /* an update's with its version: each version its own */
         snx_title_text(owner, of);
         game = snx_format("%s_%s", of, own);
     } else

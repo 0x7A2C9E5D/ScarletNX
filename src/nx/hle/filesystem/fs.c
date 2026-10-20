@@ -205,7 +205,7 @@ done:
    installed. One whose dump is not there is left out, a line saying so. The keys where the game's dump finds them:
    the data folder games/ is in, or ~/.switch. At startup */
 static void dlcs_open(void) {
-    SnxU64* ids = malloc(SNX_ADDONS_MAX * sizeof *ids);
+    SnxAddon* ids = malloc(SNX_ADDONS_MAX * sizeof *ids);
     size_t count, i;
     char *data = snx_strdup(g_datadir), *folder, *games, *repo;
     size_t n = strlen(data);
@@ -222,19 +222,19 @@ static void dlcs_open(void) {
     for (i = 0; i < count; i++) {
         char text[17], *image, *ini, *dump;
         FsAoc* aoc = &g_hle.fs.aocs[g_hle.fs.naocs];
-        if (snx_addon_kind(game_title(), ids[i]) == SNX_ADDON_UPDATE) {
-            if (ids[i] != g_addon)
+        if (snx_addon_kind(game_title(), ids[i].id) == SNX_ADDON_UPDATE) {
+            if (ids[i].id != g_addon)
                 LOG("fs: the update %016llx is checked, and runs from its own program: the game's leaves it out\n",
-                    (unsigned long long)ids[i]);
+                    (unsigned long long)ids[i].id);
             continue;
         }
-        snx_title_text(ids[i], text);
+        snx_title_text(ids[i].id, text);
         image = snx_format("%s%s_%s_data/system/archives/%s.romfs", g_exedir, g_gamename, text, text);
         ini = snx_format("%s%s_%s.ini", g_confdir, g_gamename, text);
         dump = snx_is_file(image) ? NULL : snx_ini_value(ini, "source");
         if (snx_is_file(image)) {
             LOG("fs: the DLC %s from its extraction\n", text);
-            g_hle.fs.dlcs[g_hle.fs.ndlcs++] = ids[i];
+            g_hle.fs.dlcs[g_hle.fs.ndlcs++] = ids[i].id;
         }
         else if (!dump || !snx_is_file(dump))
             WARN("fs: the DLC %s is checked, and its settings %s name %s: the game runs without it. Play its dump "
@@ -246,7 +246,7 @@ static void dlcs_open(void) {
             aoc->fs = snx_dump_aoc_fs(&aoc->dump);
             if (!aoc->fs) fatal("Could not read the DLC in its dump %s: the line before says why", dump);
             snx_hac_on_exit(NULL, NULL);
-            if (aoc->dump.aoc.title_id != ids[i])
+            if (aoc->dump.aoc.title_id != ids[i].id)
                 WARN("fs: the DLC's dump %s holds %016llx, and the DLC is %s: it is served by its own\n", dump,
                      (unsigned long long)aoc->dump.aoc.title_id, text);
             LOG("fs: the DLC %016llx read from its dump %s (%.1f MB)\n", (unsigned long long)aoc->dump.aoc.title_id,
@@ -297,15 +297,15 @@ static u8* dump_exefs(const char* path, u64* size) {
 static void overlays(void) {
     static const char* const whole[] = {"exefs", "romfs", "romfs.bin", "control.nacp", NULL};
     static const char* const merged[] = {"system", NULL};
-    SnxU64* ids = malloc(SNX_ADDONS_MAX * sizeof *ids);
+    SnxAddon* ids = malloc(SNX_ADDONS_MAX * sizeof *ids);
     size_t count, i;
     FsTreeResult r;
     if (!ids) fatal("Out of memory for the game's DLCs");
     count = snx_addons_parse(g_settings.game_addons, g_gamename, ids, SNX_ADDONS_MAX);
     for (i = 0; i < count; i++) {
         char text[17], *folder;
-        if (snx_addon_kind(game_title(), ids[i]) != SNX_ADDON_DLC) continue;
-        snx_title_text(ids[i], text);
+        if (snx_addon_kind(game_title(), ids[i].id) != SNX_ADDON_DLC) continue;
+        snx_title_text(ids[i].id, text);
         folder = snx_format("%s%s_%s_data/", g_exedir, g_gamename, text);
         r = snx_is_dir(folder) ? fs_tree_overlay(&g_hle.fs.tree, folder, whole, merged) : FS_TREE_OK;
         if (r != FS_TREE_OK) fatal("Could not index the DLC's files %s (error %d)", folder, r);

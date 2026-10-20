@@ -3110,74 +3110,99 @@ int main(int argc, char** argv) {
             assert(!snx_remove_tree(cia));
             free(cia);
         }
-        /* a game with an update and a DLC beside it: opening it shows a box to check each by, as the game's addons=
-           has them, then Play. Checking the update and the DLC and pressing Play keeps them in addons= and plays the
-           update's program through the driver; with the update not checked, the game's own. R opens the box too, its
-           last row Recompile. ESC closes it, running nothing and keeping nothing */
+        /* a game with two versions of its update and a DLC beside it: opening it shows its updates as a choice of one,
+           the newest first, and No update, its DLC as a box to check, as the game's addons= has them; then Save and
+           Play. Back keeps nothing. Save keeps the picks without running anything; Play keeps them and plays the
+           picked update's program through the driver. R opens the box too, its last row Recompile */
         {
             static unsigned char nacp[0x4000];
-            char *own = snx_path_join(app.games_dir, "0100ABCD12340000"), *base, *update, *update_data, *own_data, *file;
-            char *dlc_data = snx_path_join(own, "0100ABCD12340000_0100ABCD12341001_data"), *ini, *checked;
-            int nx, ny;
+            char *own = snx_path_join(app.games_dir, "0100ABCD12340000"), *base, *newer, *older, *file, *ini, *checked;
+            char *dirs[4];
+            int nx, ny, i;
 #ifdef _WIN32
             base = snx_path_join(own, "0100ABCD12340000.exe");
-            update = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800.exe");
+            newer = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800v65536.exe");
+            older = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800v0.exe");
 #else
             base = snx_path_join(own, "0100ABCD12340000");
-            update = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800");
+            newer = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800v65536");
+            older = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800v0");
 #endif
-            own_data = snx_path_join(own, "0100ABCD12340000_data");
-            update_data = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800_data");
-            file = snx_path_join(update_data, "control.nacp");
-            memcpy(nacp + 0x3060, "1.2.0", 5);
-            assert(!snx_mkdirs(own_data) && !snx_mkdirs(update_data) && !snx_mkdirs(dlc_data) &&
-                   !snx_write_file(file, nacp, sizeof nacp));
+            dirs[0] = snx_path_join(own, "0100ABCD12340000_data");
+            dirs[1] = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800v65536_data");
+            dirs[2] = snx_path_join(own, "0100ABCD12340000_0100ABCD12340800v0_data");
+            dirs[3] = snx_path_join(own, "0100ABCD12340000_0100ABCD12341001_data");
+            for (i = 0; i < 4; i++) assert(!snx_mkdirs(dirs[i]));
+            for (i = 1; i < 3; i++) { /* each version's own control.nacp, its version shown */
+                memcpy(nacp + 0x3060, i == 1 ? "1.2.0" : "1.0.0", 5);
+                file = snx_path_join(dirs[i], "control.nacp");
+                assert(!snx_write_file(file, nacp, sizeof nacp));
+                free(file);
+            }
             assert(!snx_copy_file(self, base) && !snx_make_executable(base));
-            assert(!snx_copy_file(self, update) && !snx_make_executable(update));
+            assert(!snx_copy_file(self, newer) && !snx_make_executable(newer));
+            assert(!snx_copy_file(self, older) && !snx_make_executable(older));
             ini = snx_game_ini(own, "0100ABCD12340000");
-            assert(!snx_ini_record(ini, "addons", "0100ABCD12341001")); /* the DLC checked already */
+            assert(!snx_ini_record(ini, "addons", "0100ABCD12341001")); /* the DLC checked, no update */
             app.menu.selected = GUI_SWITCH;
             go_tab(&app, GUI_TAB_GAMES);
             focus_game(&app, "0100ABCD12340000");
-            /* its row says it has two */
             assert(app.games.addons[app.browser.page * app.browser.page_size + app.browser.selected - app.browser.head] ==
-                   2);
+                   3);
             key(&app, SDLK_RETURN);
-            assert(app.addons_shown && !app.menu.running && app.addons.count == 2 && app.addons_focus == 0);
-            assert(!app.addons_checked[0] && app.addons_checked[1]);
+            /* rows: Update 1.2.0, Update 1.0.0, No update, DLC 1, Save, Play */
+            assert(app.addons_shown && !app.menu.running && app.addons.count == 3 && addons_rows(&app) == 6);
+            assert(!app.addons_checked[0] && !app.addons_checked[1] && app.addons_checked[2]);
             render(&app);
-            assert(find_text(&app, "[ ] Update 1.2.0", rgb(app.theme.ink), 1, &nx, &ny) ||
-                   find_text(&app, "[ ] Update 1.2.0", yellow, 1, &nx, &ny));
-            key(&app, SDLK_RETURN); /* the update checked */
-            assert(app.addons_shown && app.addons_checked[0]);
+            assert(find_text(&app, "( ) Update 1.2.0", rgb(app.theme.ink), 1, &nx, &ny) ||
+                   find_text(&app, "( ) Update 1.2.0", yellow, 1, &nx, &ny));
+            assert(find_text(&app, "(*) No update", rgb(app.theme.ink), 1, &nx, &ny));
+            assert(find_text(&app, "[x] DLC 1", rgb(app.theme.ink), 1, &nx, &ny));
+            key(&app, SDLK_RETURN); /* Update 1.2.0 picked */
+            assert(app.addons_checked[0] && !app.addons_checked[1]);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN); /* Update 1.0.0 picked, 1.2.0 not: one at a time */
+            assert(!app.addons_checked[0] && app.addons_checked[1] && app.addons_checked[2]);
             key(&app, SDLK_ESCAPE); /* nothing kept */
             assert(!app.addons_shown && !app.menu.running);
             checked = snx_ini_value(ini, "addons");
             assert(checked && !strcmp(checked, "0100ABCD12341001"));
             free(checked);
+            /* Save: the older update picked and kept, nothing run */
             key(&app, SDLK_RETURN);
-            key(&app, SDLK_RETURN); /* the update checked */
-            key(&app, SDLK_UP);     /* Play */
-            assert(app.addons_shown && app.addons_focus == 2 && app.addons_checked[0] && app.addons_checked[1]);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN);
+            for (i = 0; i < 3; i++) key(&app, SDLK_DOWN);
+            assert(app.addons_focus == 4);
+            key(&app, SDLK_RETURN);
+            assert(!app.addons_shown && !app.menu.running && strstr(app.message, "kept"));
+            checked = snx_ini_value(ini, "addons");
+            assert(checked && !strcmp(checked, "0100ABCD12340800v0,0100ABCD12341001"));
+            free(checked);
+            /* Play: the older update's program run, as kept */
+            key(&app, SDLK_RETURN);
+            assert(app.addons_shown && app.addons_checked[1] && app.addons_checked[2]);
+            key(&app, SDLK_UP); /* Play, the last row */
             launcher(&app, true);
             key(&app, SDLK_RETURN);
             assert(!app.addons_shown && app.menu.running && app.native && !app.recompile);
             {
-                char* ran = snx_absolute(update);
+                char* ran = snx_absolute(older);
                 assert(ran && !strcmp(app.file, ran));
                 free(ran);
             }
-            checked = snx_ini_value(ini, "addons");
-            assert(checked && !strcmp(checked, "0100ABCD12340800,0100ABCD12341001"));
-            free(checked);
             finish(&app, 0);
             leave_run(&app);
+            /* R: No update picked, the game's own program recompiled, the DLC kept */
             go_tab(&app, GUI_TAB_GAMES);
             focus_game(&app, "0100ABCD12340000");
             key(&app, SDLK_R);
-            assert(app.addons_shown && app.addons_recompile && !app.recompile && app.addons_checked[0]);
-            key(&app, SDLK_RETURN); /* the update not checked: the game's own program, recompiled */
-            key(&app, SDLK_UP);
+            assert(app.addons_shown && app.addons_recompile && !app.recompile);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_DOWN);
+            key(&app, SDLK_RETURN);
+            for (i = 0; i < 3; i++) key(&app, SDLK_DOWN);
+            assert(app.addons_focus == 5);
             key(&app, SDLK_RETURN);
             assert(!app.addons_shown && app.menu.running && !app.recompile);
             {
@@ -3193,11 +3218,9 @@ int main(int argc, char** argv) {
             assert(!snx_remove_tree(own));
             free(own);
             free(base);
-            free(update);
-            free(update_data);
-            free(own_data);
-            free(dlc_data);
-            free(file);
+            free(newer);
+            free(older);
+            for (i = 0; i < 4; i++) free(dirs[i]);
             free(ini);
         }
         assert(!snx_remove_tree(folder));

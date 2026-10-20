@@ -574,6 +574,7 @@ static int select_addon(SnxDump* dump, int container) {
     int patches = 0; /* another game's */
     memset(&dump->patch, 0, sizeof dump->patch);
     memset(&dump->aoc, 0, sizeof dump->aoc);
+    dump->version = SNX_NO_VERSION;
     if (read_ncas(dump, container, &entries, &count, &ncas, &unreadable)) return 1;
     nmetas = read_metas(dump, container, &metas);
     for (i = 0; i < nmetas && !dump->patch.found; i++) {
@@ -585,6 +586,7 @@ static int select_addon(SnxDump* dump, int container) {
         if (take_content(&dump->patch, &metas[i], CONTENT_PROGRAM, container, entries, ncas, count)) {
             take_content(&dump->control, &metas[i], CONTENT_CONTROL, container, entries, ncas, count);
             dump->game = metas[i].application;
+            dump->version = metas[i].version;
         }
     }
     for (i = 0; i < nmetas && !dump->patch.found; i++) {
@@ -597,6 +599,7 @@ static int select_addon(SnxDump* dump, int container) {
             dlcs++;
         else if (take_content(&dump->aoc, &metas[i], CONTENT_DATA, container, entries, ncas, count)) {
             dump->game = metas[i].application;
+            dump->version = metas[i].version;
             dlcs++;
         }
     }
@@ -675,6 +678,7 @@ static int dump_start(SnxDump* dump, const char* keys, const char* title_keys, c
     memset(dump, 0, sizeof *dump);
     dump->base = dump->update = -1;
     dump->say = say;
+    dump->version = SNX_NO_VERSION;
     dump->keys = snx_find_keys(keys, "prod.keys", repo);
     dump->title_keys = snx_find_keys(title_keys, "title.keys", repo);
     dump->hac = snx_hac_new();
@@ -696,7 +700,7 @@ int snx_dump_open(SnxDump* dump, const char* base, const char* addon, const char
 }
 
 int snx_dump_title(SnxDump* dump, const char* path, const char* keys, const char* title_keys, const char* repo, int say,
-                   SnxU64* title, SnxU64* game) {
+                   SnxU64* title, SnxU64* game, SnxU64* version) {
     const SnxHacEntry* entries;
     SnxHacNca* ncas;
     Meta* metas = NULL;
@@ -719,10 +723,12 @@ int snx_dump_title(SnxDump* dump, const char* path, const char* keys, const char
         if (select_addon(dump, dump->update)) return 1;
         *title = dump->patch.found ? dump->patch.title_id : dump->aoc.title_id;
         *game = dump->game;
+        if (version) *version = dump->version;
         return 0;
     }
     if (select_ncas(dump, dump->base, &dump->program, &dump->patch, &dump->control)) return 1;
     *title = *game = dump->program.title_id;
+    if (version) *version = SNX_NO_VERSION;
     return 0;
 }
 
