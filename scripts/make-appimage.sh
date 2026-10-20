@@ -7,16 +7,21 @@
 # into /usr (.github/workflows/build.yml), and quick-sharun has to be on PATH (pkgforge-dev/anylinux-setup-action puts
 # it there).
 #
+# Anylinux-AppImages is this packaging's reference: its defaults (quick-sharun's, its FAQ.md) come before a tool, a
+# download or a step of our own. The official AppImage documentation and the tools built on it (linuxdeploy,
+# appimagekit, appimage-builder) describe another, older way and do not apply here.
+#
 # A copy named after a game works like the bare runtime: games/MyGame.AppImage (or games/MyGame) loads
 # games/MyGame_code.so, since the runtime takes its name and folder from $APPIMAGE.
 #
 # With SYSROOT and ARCH set, the AppImage is made for another architecture on this machine: the runtime was
 # cross-compiled and installed into the sysroot (an Arch root of that architecture), and the libraries and licenses
-# to bundle come from there. CI makes the ppc64le one this way (.github/workflows/build.yml, appimage-cross). The
-# packaging tools run natively; the target's loader behind `ldd` runs through qemu-user, and the checks at the end run
-# the AppImage itself through qemu-$ARCH: the kernel's binfmt handler for the target never takes an AppImage, since its
-# runtime's ELF header carries the AppImage magic ("AI\x02" at byte 8) where qemu's mask wants zeros. The plain ELF
-# programs the AppImage starts do go through that handler, which has to be registered.
+# to bundle come from there. CI makes the ppc64le, riscv64 and loongarch64 ones this way (.github/workflows/build.yml,
+# appimage-cross). quick-sharun runs natively, and the appimagetool it fetches is the target's: the kernel's binfmt
+# handler for the target runs it and the mkdwarfs inside it, as it runs the plain ELF programs the AppImage starts, so
+# it has to be registered. The target's loader behind `ldd` runs through qemu-user, and the checks at the end run the
+# AppImage itself through qemu-$ARCH: that handler never takes an AppImage, since its runtime's ELF header carries the
+# AppImage magic ("AI\x02" at byte 8) where qemu's mask wants zeros.
 set -euo pipefail
 
 SYSROOT=${SYSROOT:-} # the target's system root; empty packages this machine's own /usr
@@ -28,7 +33,7 @@ export ARCH VERSION
 export APPIMAGE_ARCH=$ARCH
 export OUTPATH=./dist
 export OUTNAME=ScarletNX-linux-$ARCH.AppImage
-# .DirIcon, what file managers and integrators show, is this PNG (docs.appimage.org/reference/appdir.html)
+# quick-sharun copies ICON to .DirIcon as well
 export ICON=$SYSROOT/usr/share/icons/hicolor/256x256/apps/wimsy.png
 export DESKTOP=$SYSROOT/usr/share/applications/scarletnx.desktop
 # AppImageUpdate finds new builds through the .zsync file next to the AppImage in the latest release

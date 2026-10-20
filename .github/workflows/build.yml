@@ -509,8 +509,9 @@ jobs:
           docker exec build mkdir -p /src/sysroot
           docker export "$(docker create --platform linux/${{ matrix.platform }} "$image")" | docker exec -i build tar -x -C /src/sysroot
       # pkgforge's setup action runs pacman, which the runner lacks: its pinned script runs in the container, fetched
-      # with curl (the container has no wget until that script installs it). The packing runs here, so appimagetool is
-      # x86-64's, in place before quick-sharun would fetch the target's; it embeds APPIMAGE_ARCH's runtime all the same
+      # with curl (the container has no wget until that script installs it). quick-sharun fetches the target's
+      # appimagetool, checked against its own sha256, with that target's runtime and mkdwarfs inside: the binfmt
+      # handler registered above runs them
       - name: Install the packaging tools
         env:
           ANYLINUX_SETUP: https://raw.githubusercontent.com/pkgforge-dev/anylinux-setup-action/b2d1ce4216f71162e00ae58fa11ee9aeb723d0d5/setup.sh
@@ -523,9 +524,6 @@ jobs:
           curl -fsSL --retry 3 -o /tmp/anylinux-setup.sh "$ANYLINUX_SETUP"
           echo '4e97072095e80a46203a1cd711eface00de1b028be3e66ef30cc9ccd728501e5  /tmp/anylinux-setup.sh' | sha256sum -c
           sh /tmp/anylinux-setup.sh
-          curl -fsSL --retry 3 -o /usr/local/bin/appimagetool \
-            https://github.com/pkgforge-dev/appimagetool/releases/download/0.5.3/appimagetool-full-x86_64-linux
-          chmod +x /usr/local/bin/appimagetool
           EOF
       - name: Check the packaging tools
         run: |
@@ -535,7 +533,6 @@ jobs:
           b38ac233f0b56a03bb10565f6b074a43ce016939faee44ae8bb23d6e66c2d553  /usr/local/bin/quick-sharun
           217ff68aafe085d2d4ab34a50e267805af43736ad8ef880c01ef88e52db8589f  /usr/local/bin/get-debloated-pkgs
           86afbf5045b78020c93fcd35bf0f642765a8dc339bb2dce534a0461ce3d3508d  /usr/local/bin/make-aur-package
-          9a6fd46ee6bc5910e7acfa68f9d8090f3751e956840b90304ef57d64321a530d  /usr/local/bin/appimagetool
           SUMS
           EOF
       # The build machine's: Clang and LLD build for the target (cmake/cross.cmake), glslang the shaders, qemu-user runs
@@ -582,7 +579,7 @@ jobs:
         run: |
           docker exec -i -e GITHUB_REPOSITORY -e GITHUB_REF_TYPE build sh -s <<'EOF'
           set -eu
-          SYSROOT=/src/sysroot ARCH=${{ matrix.arch }} APPIMAGETOOL=/usr/local/bin/appimagetool scripts/make-appimage.sh
+          SYSROOT=/src/sysroot ARCH=${{ matrix.arch }} scripts/make-appimage.sh
           EOF
       # Only what the script made: dist/ also holds the tracked desktop entry and icon
       - uses: actions/upload-artifact@v7
@@ -591,6 +588,14 @@ jobs:
           path: |
             dist/*.AppImage*
             dist/appinfo
+      # actions/cache saves .cache/cpm as the runner's user, and its tar fails on what the container's root made that
+      # only root may open: FFmpeg's tarball has its top directory 0700
+      - name: Give the dependency sources back to the runner
+        run: |
+          docker exec build chown -R "$(id -u):$(id -g)" /src/.cache/cpm
+          # tar saves a link as a link, whatever it points at
+          unreadable=$(find .cache/cpm ! -type l ! -readable)
+          [ -z "$unreadable" ] || { printf 'actions/cache cannot read:\n%s\n' "$unreadable" >&2; exit 1; }
 
   windows:
     name: Windows (Clang + LLVM)
