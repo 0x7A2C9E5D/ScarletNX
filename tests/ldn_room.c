@@ -155,6 +155,13 @@ static int disconnects(SnxLdn* l, int ms) {
     for (i = 0; i < ms && snx_ldn_connected(l); i++) sleep_ms(1);
     return !snx_ldn_connected(l);
 }
+/* why the member went away, or SNX_ROOM_IN after ms: each member's own thread hears the room, so one being out says
+   nothing of another */
+static int out_of_room(SnxRoom* r, int ms) {
+    int i;
+    for (i = 0; i < ms && snx_room_state(r) == SNX_ROOM_IN; i++) sleep_ms(1);
+    return snx_room_state(r);
+}
 static void name_of(uint8_t out[SNX_LDN_USER_NAME], const char* name) {
     memset(out, 0, SNX_LDN_USER_NAME);
     strcpy((char*)out, name);
@@ -446,7 +453,7 @@ static void closing(void) {
     SnxLdn *a, *b;
     SnxLdnNetworkInfo net, found[2];
     uint8_t name[SNX_LDN_USER_NAME];
-    int why, i;
+    int why;
     CHECK(join(&ra, "Aogo", "secret", &why) == 0 && join(&rb, "Xuji", "secret", &why) == 0);
     CHECK(snx_ldn_open_room(&a, ra, changed_a, NULL) == 0 && snx_ldn_open_room(&b, rb, changed_b, NULL) == 0);
     network_of(a, &net);
@@ -455,9 +462,9 @@ static void closing(void) {
     CHECK(snx_ldn_connect(b, &found[0], name, 4, 2000) == 0);
     changes_b = 0;
     fake_room_close(g_room);
+    CHECK(out_of_room(rb, 1000) == SNX_ROOM_CLOSED);
+    CHECK(out_of_room(ra, 1000) == SNX_ROOM_CLOSED);
     CHECK(wait_for(&changes_b, 1, 3000));
-    for (i = 0; i < 200 && snx_room_state(rb) == SNX_ROOM_IN; i++) sleep_ms(5);
-    CHECK(snx_room_state(rb) == SNX_ROOM_CLOSED && snx_room_state(ra) == SNX_ROOM_CLOSED);
     CHECK(disconnects(b, 2000) && snx_ldn_disconnect_reason(b) == SNX_LDN_REASON_DESTROYED_BY_USER);
     snx_ldn_close(b);
     snx_ldn_close(a);

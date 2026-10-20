@@ -4,7 +4,9 @@
 #define SNX_GUI_NO_MAIN
 #include "gui/main.c"
 #include <assert.h>
-#ifndef _WIN32
+#ifdef _WIN32
+#include "win32_crash.h"
+#else
 #include <sys/statvfs.h> /* Folders on a disk mounted noexec */
 #endif
 /* the default theme's colours, as the checks below name them */
@@ -851,6 +853,9 @@ static void keys_outcome(App* app, bool ok) {
     app->clock = 0;
 }
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    snx_test_crash_said();
+#endif
     if (argc == 2 && !strcmp(argv[1], "--settings")) { /* as the runtime lists its settings */
         fputs("Display\tfullscreen\t0\tint\t0\t1\t1 = start in fullscreen\t\t0=0|1=1\n"
               "Graphics\tresolution\t1\tfloat\t0.25\t4\tInternal 3D resolution\t\t\n"
