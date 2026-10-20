@@ -473,7 +473,8 @@ static size_t read_metas(SnxDump* dump, int container, Meta** metas) {
         }
         free(data);
     }
-    if (dump->say && !(dump->said_meta & 1u << container) && !n)
+    for (i = 0, size = 0; i < count; i++) size += has_suffix(entries[i].name, ".nca"); /* any NCA to tell them by */
+    if (dump->say && !(dump->said_meta & 1u << container) && !n && size)
         puts("  no content meta that can be read: its kind and game told from its NCAs' title IDs");
     dump->said_meta |= 1u << container;
     return n;
@@ -635,7 +636,8 @@ static int select_addon(SnxDump* dump, int container) {
         return snx_error("The update or DLC belongs to the game %s, not to the selected base game %s", of, given);
     }
     if (game && patches) return snx_error("Update has no Program NCA matching the selected base game");
-    return snx_error(game ? "The DLC is not the selected base game's" : "Container has no update or DLC");
+    return snx_error(game ? "The DLC is not the selected base game's"
+                          : "Container has no base Program NCA, and no update or DLC either: it is no game's dump");
 }
 
 static int open_container(SnxDump* dump, const char* path, int say) {
