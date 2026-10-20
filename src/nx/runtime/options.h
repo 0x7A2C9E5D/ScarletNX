@@ -26,6 +26,8 @@ int snx_setting_known(const char* key);
 /* reads path, applies it with the overrides, writes it back with its help, and watches it: ini_poll reloads it when it
    changes and saves what the game's menu set */
 void ini_open(const char* path);
+/* the path ini_open read, "" before it */
+const char* ini_file(void);
 /* about once a second, from the main loop. final: at exit, where an edit still being saved is left for the next start
    unless the menu's changes need writing, which is then done over the file as it is */
 void ini_poll(int final);

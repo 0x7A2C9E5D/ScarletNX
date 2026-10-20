@@ -437,6 +437,8 @@ void ini_open(const char* path) {
     g_started = 1;
 }
 
+const char* ini_file(void) { return g_path; }
+
 void ini_poll(int final) {
     Pending taken[PENDING_MAX];
     unsigned char* text;

@@ -95,11 +95,12 @@ static void dump_exit(void* data) {
 
 /* Extract game container off: a data folder without an ExeFS of its own reads its ExeFS and RomFS from the dump the
    game was made from, mapped read-only for the whole run: source= in its .ini, else the dump <folder>/<name>.source
-   beside <name>_data links to, as older versions recorded it. Nothing of it is written anywhere. The keys are where
-   the driver finds them, in the data folder games/ is in or in ~/.switch. At startup, under tree.lock */
+   beside <name>_data links to, as older versions recorded it; a line names both when neither is. Nothing of it is
+   written anywhere. The keys are where the driver finds them, in the data folder games/ is in or in ~/.switch. At
+   startup, under tree.lock */
 static void dump_open(void) {
     FsNode* node;
-    char *data, *source, *folder, *games, *repo;
+    char *data, *source, *folder, *games, *repo, *ini;
     size_t n = strlen(g_datadir);
     if (!fs_tree_lookup(&g_hle.fs.tree, NULL, "exefs", &node)) return;
     data = snx_strdup(g_datadir);
@@ -113,7 +114,17 @@ static void dump_open(void) {
     folder = snx_dirname(data);
     free(data);
     if (!snx_is_file(source)) {
-        if (g_settings.game_dump[0]) WARN("fs: the game's dump %s, source in its settings, is not there\n", source);
+        ini = snx_absolute(ini_file()); /* a game beside its .ini runs in its folder: "./Game.ini" */
+        /* the loader also takes the main module from the data folder's root, as older versions put it */
+        if (g_settings.game_dump[0])
+            WARN("fs: the game's dump %s, its source= setting, is not there; its settings are %s\n", source,
+                 ini ? ini : ini_file());
+        else if (fs_tree_lookup(&g_hle.fs.tree, NULL, "main", &node) &&
+                 fs_tree_lookup(&g_hle.fs.tree, NULL, "main.nro", &node))
+            WARN("fs: the game has no ExeFS in %sexefs/ and no dump to read it from: %s sets no source=, and %s is not "
+                 "there\n",
+                 g_datadir, ini ? ini : ini_file(), source);
+        free(ini);
         free(source);
         free(folder);
         return;
