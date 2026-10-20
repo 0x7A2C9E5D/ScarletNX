@@ -12,11 +12,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdarg.h>
 
 char g_confdir[1024], g_exedir[1024];
+/* the last warning the backend logged */
+static char warned[512];
 void logf_(int lvl, const char* fmt, ...) {
-    (void)lvl;
-    (void)fmt;
+    va_list ap;
+    if (lvl) return;
+    va_start(ap, fmt);
+    vsnprintf(warned, sizeof warned, fmt, ap);
+    va_end(ap);
 }
 void pm_lock(PMutex* m) { (void)m; }
 void pm_unlock(PMutex* m) { (void)m; }
@@ -275,6 +281,9 @@ int main(void) {
     CHECK(gamepad_ini("gamepad_swap_ab", "0"));
     CHECK(gamepad_ini("gamepad_map", "south:Q"));
     CHECK(with(xbox, SDL_GAMEPAD_BUTTON_SOUTH) == A);
+    /* said with the map that stays */
+    CHECK(!strcmp(warned, "settings: gamepad_map's \"south:Q\" is not a control and the button it sends (south:B): "
+                          "it keeps \"south:A east:B lt:R start:None\"\n"));
     CHECK(gamepad_ini("gamepad_map", ""));
     CHECK(with(xbox, SDL_GAMEPAD_BUTTON_SOUTH) == B);
 

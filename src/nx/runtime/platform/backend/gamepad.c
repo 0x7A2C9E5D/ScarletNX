@@ -35,6 +35,14 @@ void gamepad_joycon_pair_set(const IniOpt* o, const char* v) {
     (void)v;
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS, g_settings.pair_joy_cons ? "1" : "0");
 }
+/* a map that cannot be read: the word that cannot, and the map that stays, as the .ini writes it (whose of, when it is
+   another key's) */
+static void say_map_kept(const char* key, const char* word, const char* of, const SnxPadMap* kept) {
+    char text[256];
+    snx_pad_map_write(kept, text, sizeof text);
+    WARN("settings: %s's \"%s\" is not a control and the button it sends (south:B): it keeps %s\"%s\"%s\n", key, word,
+         of, text, text[0] ? "" : ", each control sending the button in its place");
+}
 /* the player's map: what it does not name sends the button in its place. One that cannot be read is said, and changes
    nothing */
 void gamepad_map_set(const IniOpt* o, const char* v) {
@@ -43,9 +51,7 @@ void gamepad_map_set(const IniOpt* o, const char* v) {
     (void)o;
     snx_pad_map_unset(&map);
     if (snx_pad_map_read(&map, v, word, sizeof word))
-        WARN("settings: gamepad_map's \"%s\" is not a control and the button it sends (south:B), so the map stays as "
-             "it was\n",
-             word);
+        say_map_kept("gamepad_map", word, "", &g_cfg.own);
     else
         g_cfg.own = map;
 }
@@ -75,8 +81,7 @@ void gamepad_player_map_set(const IniOpt* o, const char* v) {
         p->own = map;
         p->has_map = 0;
     } else if (snx_pad_map_read(&map, v, word, sizeof word))
-        WARN("settings: %s's \"%s\" is not a control and the button it sends (south:B), so the map stays as it was\n",
-             o->key, word);
+        say_map_kept(o->key, word, p->has_map ? "" : "gamepad_map's ", p->has_map ? &p->own : &g_cfg.own);
     else {
         p->own = map;
         p->has_map = 1;
