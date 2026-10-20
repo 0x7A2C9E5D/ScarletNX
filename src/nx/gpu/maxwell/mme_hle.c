@@ -224,6 +224,125 @@ static int multi_layer_clear_depth(GpuChannel* ch, MmeRec* rec, const u32* p, u3
     return 1;
 }
 
+/* The raster bounding box (0x0BB; Eden: HLE_SetRasterBoundingBox): bits 4-11 are scratch 0xD34 ANDed with the
+   conservative raster enable (0x452). The code clears the register holding its parameter before it inserts them, so
+   the other bits are 0 (Eden's keeps the parameter's) */
+static int raster_bounding_box(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    u32 v = mme_reg(ch, rec, 0x452) & mme_reg(ch, rec, 0xD34);
+    (void)p, (void)np;
+    mme_out(ch, rec, 0x0BB, (v & 0xFF) << 4);
+    return 1;
+}
+/* Enables stencil (0x4E0) and sets both faces' operations from p0's nibbles: the front's fail, depth fail, pass and
+   function (0x4E1-0x4E4) from nibbles 1, 3, 2 and 0, the back's (0x566-0x569) from 5, 7, 6 and 4 */
+static int stencil_ops(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    static const u8 nibble[8] = {1, 3, 2, 0, 5, 7, 6, 4};
+    u32 v = arg(p, np, 0), i;
+    mme_out(ch, rec, 0x4E0, 1);
+    for (i = 0; i < 8; i++) mme_out(ch, rec, (i < 4 ? 0x4E1 : 0x566 - 4) + i, (v >> (4 * nibble[i])) & 0xF);
+    return 1;
+}
+/* A draw of one instance: BEGIN (0x586) with the topology word p0, first vertex p1 (0x35D), count p2 (0x35E), END */
+static int draw_once(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    mme_out(ch, rec, 0x586, arg(p, np, 0));
+    mme_out(ch, rec, 0x35D, arg(p, np, 1));
+    mme_out(ch, rec, 0x35E, arg(p, np, 2));
+    mme_out(ch, rec, 0x585, 0);
+    return 1;
+}
+/* 0x376 set to p0, and p0 kept in scratch 0xD36, when it differs from what 0xD36 holds */
+static int scratch_d36(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    if (arg(p, np, 0) == mme_reg(ch, rec, 0xD36)) return 1;
+    mme_out(ch, rec, 0x376, arg(p, np, 0));
+    mme_out(ch, rec, 0xD36, arg(p, np, 0));
+    return 1;
+}
+/* Zeroes the start of the constant buffer at p0:p1 (Eden: HLE_ClearConstBuffer, 0x7000): selected with size 0x7000
+   and offset 0 (0x8E0-0x8E3), then 4 * p2 zero words uploaded (0x8E4) */
+static int clear_const_buffer(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    u32 n = arg(p, np, 2), i;
+    if (n > MME_LOOP_MAX) return 0;
+    mme_out(ch, rec, 0x8E0, 0x7000);
+    mme_out(ch, rec, 0x8E1, arg(p, np, 0));
+    mme_out(ch, rec, 0x8E2, arg(p, np, 1));
+    mme_out(ch, rec, 0x8E3, 0);
+    for (i = 0; i < 4 * n; i++) mme_out(ch, rec, 0x8E4, 0);
+    return 1;
+}
+/* Zeroes p2 bytes at p0:p1 with an inline upload (Eden: HLE_ClearMemory): line length p2, one line, the address,
+   launched (0x06C = 0x1011), then p2 / 4 zero words of data (0x06D). The code sends 16 bytes a turn until its count
+   reaches 0 exactly, so a p2 that isn't a multiple of 16 loops until the interpreter's limit: left to it */
+static int clear_memory(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    u32 n = arg(p, np, 2), i;
+    if ((n & 15) || n / 16 > MME_LOOP_MAX) return 0;
+    mme_out(ch, rec, 0x060, n);
+    mme_out(ch, rec, 0x061, 1);
+    mme_out(ch, rec, 0x062, arg(p, np, 0));
+    mme_out(ch, rec, 0x063, arg(p, np, 1));
+    mme_out(ch, rec, 0x06C, 0x1011);
+    for (i = 0; i < n / 4; i++) mme_out(ch, rec, 0x06D, 0);
+    return 1;
+}
+/* Starts transform feedback (Eden: HLE_TransformFeedbackSetup): enabled (0x1D1), the four buffers' offsets zeroed
+   (0x0E4 + 8 * i), and the first buffer's stride (0x1C2) uploaded inline to p0:p1 as one word */
+static int transform_feedback_setup(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    u32 stride = mme_reg(ch, rec, 0x1C2), i;
+    mme_out(ch, rec, 0x1D1, 1);
+    for (i = 0; i < 4; i++) mme_out(ch, rec, 0x0E4 + 8 * i, 0);
+    mme_out(ch, rec, 0x060, 4);
+    mme_out(ch, rec, 0x061, 1);
+    mme_out(ch, rec, 0x062, arg(p, np, 0));
+    mme_out(ch, rec, 0x063, arg(p, np, 1));
+    mme_out(ch, rec, 0x06C, 0x1011);
+    mme_out(ch, rec, 0x06D, stride);
+    return 1;
+}
+/* Firmware call 4 (0x8C4) with p0, after a wait for idle (0x044) and its arguments p1 and p2 in scratch 0xD01-0xD02,
+   with 0xD00 cleared. When the low byte of scratch 0xD1A is 2, ten no-operations (0x040) follow; otherwise the code
+   sends no-operations until 0xD00 reads 1, which the call itself writes here (engines.c), so it sends none. Nothing it
+   sends changes 0xD1A, so it is read first */
+static int firmware_call4(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    u32 delay = (mme_reg(ch, rec, 0xD1A) & 0xFF) == 2, i;
+    mme_out(ch, rec, 0x044, 0);
+    mme_out(ch, rec, 0xD00, 0);
+    mme_out(ch, rec, 0xD01, arg(p, np, 1));
+    mme_out(ch, rec, 0xD02, arg(p, np, 2));
+    mme_out(ch, rec, 0x8C4, arg(p, np, 0));
+    if (delay)
+        for (i = 0; i < 10; i++) mme_out(ch, rec, 0x040, 0);
+    else
+        for (i = 0; i < MME_LOOP_MAX && mme_reg(ch, rec, 0xD00) != 1; i++) mme_out(ch, rec, 0x040, 0);
+    return 1;
+}
+/* Render target 0 from the parameters (address high and low, width, height, then the format in p4's top byte and the
+   memory layout in its low 24 bits, one layer), the window offset from the width and height (0x3FD-0x3FE), and the
+   rest of the state reset to fixed values, in the code's order */
+static int render_target_reset(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
+    static const u32 fixed[][2] = {
+        {0x54D, 0},          {0x574, 0},      {0x1D5, 1},          {0x380, 0},          {0x300, 0xFFFF0000},
+        {0x301, 0xFFFF0000}, {0x302, 0},      {0x303, 0x3F800000}, {0x64B, 0},          {0x64F, 0xC1C},
+        {0x651, 1},          {0x0DF, 1},      {0x35A, 0},          {0x4B3, 0},          {0x66F, 0},
+        {0x4E0, 0},          {0x4BB, 0},      {0x4D8, 0},          {0x671, 0},          {0x680, 0x1111},
+        {0x084, 0},          {0x54F, 0},      {0x3EF, 0xFFFF},     {0x3F0, 0xFFFF},     {0x3F1, 0xFFFF},
+        {0x3F2, 0xFFFF},     {0x36B, 0x1B02}, {0x36C, 0x1B02},     {0x372, 0},          {0x646, 0},
+        {0x820, 0x20},       {0x830, 0x30},   {0x840, 0x40},       {0x1D1, 0},          {0x3D0, 0},
+        {0x489, 0},          {0x452, 0},      {0x3ED, 0},          {0x374, 0},          {0x286, 0x6420},
+        {0x47E, 0},          {0x3C7, 0},      {0x478, 0x88888888}, {0x479, 0x88888888}, {0x47A, 0x88888888},
+        {0x47B, 0x88888888}};
+    u32 i;
+    mme_out(ch, rec, 0x487, 0x0FAC6881);
+    mme_out(ch, rec, 0x54E, 0);
+    for (i = 0; i < 4; i++) mme_out(ch, rec, 0x200 + i, arg(p, np, i));
+    mme_out(ch, rec, 0x204, arg(p, np, 4) >> 24);
+    mme_out(ch, rec, 0x205, arg(p, np, 4) & 0xFFFFFF);
+    mme_out(ch, rec, 0x206, 1);
+    mme_out(ch, rec, 0x207, 0);
+    mme_out(ch, rec, 0x3FD, arg(p, np, 2) << 16);
+    mme_out(ch, rec, 0x3FE, arg(p, np, 3) << 16);
+    for (i = 0; i < sizeof fixed / sizeof fixed[0]; i++) mme_out(ch, rec, fixed[i][0], fixed[i][1]);
+    return 1;
+}
+
 typedef struct {
     u64 hash;
     int (*run)(GpuChannel* ch, MmeRec* rec, const u32* p, u32 np);
@@ -245,6 +364,15 @@ static const MmeNative mme_natives[] = {
     {0x88EEF6578DA4695Dull, scratch_d28, "scratch 0xD28"},
     {0xEAD26C3E2109B06Bull, multi_layer_clear, "clear of every layer"},
     {0x71F722B9118625E7ull, multi_layer_clear_depth, "clear of every layer, the depth target's count"},
+    {0xDB1341DBEB4C8AF7ull, raster_bounding_box, "raster bounding box"},
+    {0x290BBC50F4AE637Full, stencil_ops, "stencil operations"},
+    {0xDD6A7FA92A7D2674ull, draw_once, "draw of one instance"},
+    {0x81C197B87D4DF426ull, scratch_d36, "scratch 0xD36 and 0x376"},
+    {0xD246FDDF3A6173D7ull, clear_const_buffer, "constant buffer clear"},
+    {0xEE4D0004BEC8ECF4ull, clear_memory, "memory clear"},
+    {0xFC0CF27F5FFAA661ull, transform_feedback_setup, "transform feedback setup"},
+    {0x9E3CA7054D12D63Cull, firmware_call4, "firmware call 4"},
+    {0xD207959154DCA521ull, render_target_reset, "render target 0 and state reset"},
 };
 int mme_native_find(u64 hash) {
     int k;
