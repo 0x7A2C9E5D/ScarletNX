@@ -6,12 +6,18 @@
 #include "nx/hle/services/audren_dsp.c"
 #include "nx/hle/hle.c"
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 
 u8* g_mem;
+static char logged[4096]; /* what was logged since the test emptied it */
 void logf_(int lvl, const char* fmt, ...) {
+    size_t used = strlen(logged);
+    va_list ap;
     (void)lvl;
-    (void)fmt;
+    va_start(ap, fmt);
+    vsnprintf(logged + used, sizeof logged - used, fmt, ap);
+    va_end(ap);
 }
 
 static unsigned checks, failures;
@@ -1056,11 +1062,14 @@ static void update_mix_dirty_only(void) {
     wf(mixes + 0x930, 0, 0.5f); /* entry 1: a mix not opened */
     w8(mixes + 0x930, 0xC, 1);
     w32(mixes + 0x930, 0x10, 99);
+    logged[0] = 0;
     CHECK(audren_state_update(state, input, size, input + size, reply) == 0, "dirty-only mix update refused");
     CHECK(state->mix[2].in_use && state->mix[2].volume == 0.25f, "entry 0 did not reach mix 2: in use %u",
           state->mix[2].in_use);
     CHECK(!state->mix[1].in_use && state->mix[1].volume != 0.5f, "an entry for mix 99 was written over mix 1");
     CHECK(state->warned & SNX_AUDREN_WARN_MIX_ID, "the entry for mix 99 was skipped without a word");
+    CHECK(strstr(logged, "audren: the update of mix 99 is skipped: the renderer opened 3 mixes\n"), "logged: %s",
+          logged);
     free(input);
     audren_state_free(state);
 }
@@ -1440,6 +1449,13 @@ int main(void) {
         }
         CHECK(bad < 0, "delay of 480: sample %d is %d", bad, bad < 0 ? 0 : y[bad]);
     }
+
+    /* an effect of a type it does not render is named by its type */
+    reset();
+    fx_voice(99);
+    logged[0] = 0;
+    frames(1);
+    CHECK(strstr(logged, "audren: effect type 99 is not rendered\n"), "logged: %s", logged);
 
     /* a stereo delay with every parameter, against Eden's recursion over the same input */
     {

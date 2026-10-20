@@ -10,7 +10,9 @@
 #include "nx/hle/hle.h"
 #include "nx/runtime/platform/log.h"
 #include <math.h>
+#include <stdarg.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,9 +52,15 @@ enum {
     SNX_AUDREN_WARN_RANGE = 32,
     SNX_AUDREN_WARN_MIX_ID = 64
 };
-static void warn_once(ARState* s, u32 bit, const char* what) {
+static void warn_once(ARState* s, u32 bit, const char* format, ...) __attribute__((format(printf, 3, 4)));
+static void warn_once(ARState* s, u32 bit, const char* format, ...) {
+    char what[160];
+    va_list args;
     if (s->warned & bit) return;
     s->warned |= bit;
+    va_start(args, format);
+    vsnprintf(what, sizeof what, format, args);
+    va_end(args);
     LOG("audren: %s\n", what);
 }
 
@@ -455,7 +463,8 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
     } else {
         nmix = ih[6] / 0x930;
     }
-    if (nmix > s->nmix) warn_once(s, SNX_AUDREN_WARN_COUNTS, "an update holds more mixes than the renderer opened");
+    if (nmix > s->nmix)
+        warn_once(s, SNX_AUDREN_WARN_COUNTS, "an update holds %u mixes, the renderer opened %u", nmix, s->nmix);
 
     memset(out, 0, total);
     u32 oh[16] = {0};
@@ -518,7 +527,8 @@ int audren_state_update(ARState* s, const u8* in, u64 is, u8* out, u64 os) {
         u32 id = rd32(mi + 0x10);
         /* from REV7 an entry is not mix i: one naming a mix the renderer did not open is skipped */
         if (id >= s->nmix && revn >= 7) {
-            warn_once(s, SNX_AUDREN_WARN_MIX_ID, "a mix update names a mix the renderer did not open");
+            warn_once(s, SNX_AUDREN_WARN_MIX_ID, "the update of mix %u is skipped: the renderer opened %u mixes", id,
+                      s->nmix);
             continue;
         }
         if (id >= s->nmix) id = i;
@@ -720,7 +730,8 @@ static void voice_channel(ARState* s, ARVoice* v, int ch, float* out) {
         else if (v->format == SNX_AUDREN_ADPCM)
             got = decode_adpcm(v, c, w, st, en, c->offset, (u32)need - read, t + pos);
         else {
-            warn_once(s, SNX_AUDREN_WARN_FORMAT, "a voice's sample format is not rendered");
+            warn_once(s, SNX_AUDREN_WARN_FORMAT, "voice sample format %u is not decoded: the voice is silent",
+                      (unsigned)v->format);
             got = 0;
         }
         c->played += got;
@@ -1783,7 +1794,7 @@ static void mix_effects(ARState* s, u32 id) {
                 effect_i3dl2(s, m, next);
                 next->p[stateful_at(next->type)] = SNX_AUDREN_PARAM_UPDATED;
                 break;
-            default: warn_once(s, SNX_AUDREN_WARN_EFFECT, "an effect of an unknown type is not rendered");
+            default: warn_once(s, SNX_AUDREN_WARN_EFFECT, "effect type %u is not rendered", (unsigned)next->type);
         }
         done = next->order + 1;
         if (!done) return; /* the order wrapped */
