@@ -5,6 +5,11 @@ option(SNX_TEST_SANITIZERS
 the runtime links those libraries too, and isn't deployed)" OFF)
 option(SNX_TEST_VULKAN "Run offscreen Vulkan integration tests (requires a Vulkan 1.3 ICD, e.g. lavapipe)" OFF)
 option(SNX_TEST_ARM_AOT "Build asset-free static ARM11/checked-memory witnesses (requires native LLVM SDK)" OFF)
+option(SNX_TEST_VP9_VECTORS
+       "Run NVDEC's VP9 jobs on libvpx's test vectors (configure downloads 32 files from the WebM project)" OFF)
+if(SNX_TEST_VP9_VECTORS AND SNX_TOOLS_ONLY)
+    message(FATAL_ERROR "SNX_TEST_VP9_VECTORS=ON needs the runtime's FFmpeg, which SNX_TOOLS_ONLY=ON leaves out")
+endif()
 # the in-tree libraries the tests exercise and the programs they run: an overflow in them shows only in code built
 # with the sanitizers. src/nx doesn't deploy a sanitized runtime. A tool made by a host build (cross-compiling) is
 # that build's
@@ -866,13 +871,16 @@ if(NOT SNX_TOOLS_ONLY)
     target_compile_definitions(snx-test-nvdec-decode PRIVATE SNX_TEST_REAL_FFMPEG)
     target_link_libraries(snx-test-nvdec-decode PRIVATE FFmpeg::avcodec)
     add_test(NAME nvdec_decode COMMAND snx-test-nvdec-decode)
+endif()
+if(SNX_TEST_VP9_VECTORS)
     # nvdec.c's VP9 jobs on libvpx's test vectors, each image against the MD5 libvpx lists for it, at its own job's
     # fence (nvdec_vp9_vectors.c). FFmpeg's decoder works the jobs out of each vector from its private state
     # (nvdec_vp9_jobs.c), so that part builds against FFmpeg's source and configuration. The vectors and their lists
     # come from the WebM project's test data (BSD-3-Clause), downloaded once into CPM_SOURCE_CACHE: a vector's name,
     # then the SHA-256 of the vector and of its list. Hidden frames, contexts that adapt, frame parallel mode, a
     # superframe of hidden frames, frames shown again, intra-only frames, spatial layers, tiles, size changes,
-    # segmentation, loop filter and quantizer deltas
+    # segmentation, loop filter and quantizer deltas. Off by default: a build without the network (a Flatpak's, a
+    # distribution's) would wait on the downloads
     set(snx_vp9_vectors
         vp90-2-02-size-66x66.webm 749e4260de357b2704117389cd0a620f73f8229043d214528d1cc7d81524faaa
             96cdfc13db1458a93a3cecaf73acc5cee5ec8d5112a0406f7321d88fcee486e0

@@ -303,6 +303,9 @@ Test options, read when `BUILD_TESTING` is on (CTest's default), all OFF by defa
   CI's `Linux (x86_64, ASan + UBSan)` job runs the tests this way, with `LSAN_OPTIONS=use_stacks=0:use_registers=0`
   so the leak check finds the same leaks on every machine.
 - `-DSNX_TEST_VULKAN=ON`: add the offscreen Vulkan integration tests, see below.
+- `-DSNX_TEST_VP9_VECTORS=ON`: add the `nvdec_vp9_*` tests, which run NVDEC's VP9 jobs on libvpx's test vectors;
+  configure downloads the 32 files from the WebM project into `CPM_SOURCE_CACHE` once. CI's Linux, ASan, Windows and
+  macOS jobs run them.
 - `-DSNX_TEST_A64_FP_DIFF=ON`: add the AArch64 FP differential test, which needs Python unicorn 2.1.4 and a native
   Linux host.
 - `-DSNX_TEST_ARM_AOT=ON`, `-DSNX_TEST_ARM_DIFF=ON`: the 3DS ARM11 witnesses and the A32 unicorn comparison, see
