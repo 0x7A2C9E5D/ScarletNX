@@ -550,12 +550,21 @@ msgstr ""
 msgid "No user picked: the Settings have no user"
 msgstr ""
 
+#. A key of the foot's sentences, which a click finds by this word
 #: src/gui/main.c
 msgid "SCARLETNX  /  SETUP"
 msgstr ""
 
 #: src/gui/main.c
 msgid "The game"
+msgstr ""
+
+#, snx-key
+msgid "Recompile"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Play"
 msgstr ""
 
 #: src/gui/main.c
@@ -1777,12 +1786,6 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "R"
-msgstr ""
-
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
-#, snx-key
-msgid "Recompile"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word

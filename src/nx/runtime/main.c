@@ -41,7 +41,7 @@
 
 char g_datadir[1024], g_exename[256], g_exedir[1024];
 u64 g_addon;
-char g_addondir[1024];
+char g_addondir[1024], g_gamename[256];
 char g_confdir[1024], g_statedir[1024], g_cachedir[1024];
 volatile int g_quit;
 int (*snx_menu)(const char* self);
@@ -255,8 +255,8 @@ static void game_dirs(void) {
     free(full);
 }
 
-/* An add-on of the game whose folder it is in (snx_addon_name: <folder>/<folder>_<the add-on's title ID>, an update
-   or a DLC) runs as that game: with its settings, ini set to the game's .ini, and its data folder, its saves the
+/* An update of the game whose folder it is in (snx_addon_name: <folder>/<folder>_<the update's title ID>) runs as
+   that game: with its settings, ini set to the game's .ini, and its data folder, its saves the
    game's (g_datadir, set by the caller from base). Its own .ini names only the add-on's dump, source=, and its own data
    folder lies over the game's, both read by fs.c. base: the game's name, "" for no add-on */
 static void addon_init(char* ini, size_t ini_size, char* base, size_t base_size) {
@@ -266,6 +266,10 @@ static void addon_init(char* ini, size_t ini_size, char* base, size_t base_size)
     while (n > 1 && is_separator(dir[n - 1])) dir[--n] = 0;
     for (cut = n; cut && !is_separator(dir[cut - 1]); cut--) continue;
     if (dir && snx_addon_name(dir + cut, g_exename, &g_addon)) {
+        if (snx_addon_kind(g_addon) != SNX_ADDON_UPDATE)
+            fatal("%s is a DLC's program, which an older version made: a DLC plays with its game, checked in the "
+                  "game's list of updates and DLCs (addons= in its .ini). Play the DLC's dump again",
+                  g_exename);
         snprintf(base, base_size, "%s", dir + cut);
         snprintf(g_addondir, sizeof g_addondir, "%s%s_data/", g_exedir, g_exename);
         snprintf(ini, ini_size, "%s%s.ini", g_confdir, base);
@@ -276,7 +280,9 @@ static void addon_init(char* ini, size_t ini_size, char* base, size_t base_size)
 /* nothing is moved: a game an older version laid out beside the others (its folder named otherwise) runs where it
    is, each start saying where its folder goes */
 static void say_old_layout(void) {
-    char* full = snx_absolute(g_exedir[0] ? g_exedir : ".");
+    char* full;
+    if (g_addon) return; /* an update, in its game's folder */
+    full = snx_absolute(g_exedir[0] ? g_exedir : ".");
     size_t n = full ? strlen(full) : 0, cut;
     for (;;) { /* "games/", "games/." and "games" alike */
         while (n > 1 && is_separator(full[n - 1])) full[--n] = 0;
@@ -473,7 +479,8 @@ int snx_main(int argc, char** argv) {
     snprintf(ini, sizeof ini, "%s%s.ini", g_confdir, g_exename);
     addon_init(ini, sizeof ini, base, sizeof base);
     ini_open(ini);
-    snprintf(g_datadir, sizeof g_datadir, "%s%s_data/", g_exedir, base[0] ? base : g_exename);
+    snprintf(g_gamename, sizeof g_gamename, "%s", base[0] ? base : g_exename);
+    snprintf(g_datadir, sizeof g_datadir, "%s%s_data/", g_exedir, g_gamename);
     hints_init();
     plat_install_crash_handler();
     clock_start();
@@ -491,7 +498,7 @@ int snx_main(int argc, char** argv) {
     say_old_layout();
     if (g_addon)
         LOG("game: %s of the game in %s, with its settings and saves\n",
-            snx_addon_kind(g_addon) == SNX_ADDON_UPDATE ? "the update" : "a DLC", base);
+            "the update", base);
 
     fs_init(); /* the npdm is read through it, and mem_init's layout comes before */
     mem_init();

@@ -32,9 +32,7 @@ static void usage(void) {
          "                         turns that pass off; scarletnx --settings=recompile lists them)");
     printf("  --chunk N              Instructions per code unit, whole functions batched (default: %d)\n",
            SNX_CHUNK_INSTRUCTIONS);
-    puts("  --base GAME            An update's or a DLC's game: its dump or extracted folder. A DLC runs the game's\n"
-         "                         code, recompiled from it\n"
-         "  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
+    puts("  --target auto|linux|win64  The host only: modules are built for the machine that builds them\n"
          "  --no-build             Stage data/INI only, generate no code\n"
          "  --tmpfs                Leave the RomFS in the extraction (in tmpfs), which the game reads it from");
     puts("  --interp-only          Generate no code: the runtime JIT compiles all of it\n"
@@ -43,8 +41,8 @@ static void usage(void) {
          "  --keep-ir              Save the generated code (LLVM IR) in <NAME>/<NAME>_build\n"
          "  -q, --quiet            Suppress progress");
     puts("Each game is a folder of <outdir>, <NAME>/: its program <NAME>, <NAME>_code and <NAME>_data/.\n"
-         "An update's or a DLC's dump is made beside its game, <ID>/<ID>_<its own title ID>, which runs with the\n"
-         "game's settings and saves and reads the dump in place.\n"
+         "An update's dump is made beside its game, <ID>/<ID>_<its own title ID>, which runs with the game's\n"
+         "settings and saves and reads the dump in place. A DLC has no program: the driver checks it for its game.\n"
          "Hints: <outdir>/<NAME>/<NAME>.hints (hex PCs, one per line).");
 }
 static unsigned number(const char* text, unsigned max) {
@@ -313,7 +311,6 @@ static int copy_data(const SnxProgram* p, const char* dir, int quiet, int tmpfs)
 }
 int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     const char *input = NULL, *name = NULL, *outdir = NULL, *runtime = NULL, *target = "auto", *arg, *value;
-    const char* game_input = NULL; /* --base */
     SnxU64 addon = 0;
     SnxLlvmBuild llvm;
     SnxCompileOptions compile;
@@ -388,7 +385,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
             }
             if (strcmp(arg, "-o") && strcmp(arg, "--name") && strcmp(arg, "--out") && strcmp(arg, "--outname") &&
                 strcmp(arg, "--outdir") && strcmp(arg, "--runtime") && strcmp(arg, "--target") && strcmp(arg, "-O") &&
-                strcmp(arg, "--jobs") && strcmp(arg, "--chunk") && strcmp(arg, "--base"))
+                strcmp(arg, "--jobs") && strcmp(arg, "--chunk"))
                 return snx_error("unknown recompiler option: %s", arg);
             if (!value) {
                 if (++i == argc) return snx_error("%s requires a value", arg);
@@ -401,8 +398,6 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
                 outdir = value;
             else if (!strcmp(arg, "--runtime"))
                 runtime = value;
-            else if (!strcmp(arg, "--base"))
-                game_input = value;
             else if (!strcmp(arg, "--target"))
                 target = value;
             else if (!strcmp(arg, "-O")) {
@@ -440,29 +435,24 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     /* The backends write the module for the machine they run on (build == host == target) */
     if (compile.target_win != host_win) return snx_error("--target: modules are built for this host only");
     gen.abi = snx_game_abi();
-    /* a dump, read in place, else an ExeFS folder or an NRO. An update's dump is its own program; a DLC's runs its
-       game's, from --base */
+    /* a dump, read in place, else an ExeFS folder or an NRO. An update's dump is its own program; a DLC has none */
     dump = snx_is_file(input) && snx_is_dump(input);
     if (dump && snx_extract_title(input, paths, &addon)) return 1;
     if (snx_addon_kind(addon) == SNX_ADDON_NONE)
         addon = 0;
     else if (name)
         return snx_error("an update or a DLC is named after its game and itself: --name names a game");
-    if (snx_addon_kind(addon) == SNX_ADDON_DLC) {
-        if (!game_input)
-            return snx_error("a DLC runs its game's code: give the game's dump or extracted folder with --base");
-        i = snx_is_file(game_input) && snx_is_dump(game_input);
-        if (i ? load_dump(game_input, NULL, paths, compile.quiet, &program, error, sizeof(error))
-              : snx_load_program(game_input, &program, error, sizeof(error)))
-            return i ? 1 : snx_error("%s", error);
-    } else if (dump ? load_dump(input, addon ? input : NULL, paths, compile.quiet, &program, error, sizeof(error))
-                    : snx_load_program(input, &program, error, sizeof(error)))
+    if (snx_addon_kind(addon) == SNX_ADDON_DLC)
+        return snx_error("a DLC runs its game's code and has no program of its own: play its dump, which checks it "
+                         "in the game's list of updates and DLCs");
+    if (dump ? load_dump(input, addon ? input : NULL, paths, compile.quiet, &program, error, sizeof(error))
+             : snx_load_program(input, &program, error, sizeof(error)))
         return dump ? 1 : snx_error("%s", error);
     if (addon && program.npdm.title_id != snx_addon_base(addon)) {
         char of[17], other[17];
         snx_title_text(snx_addon_base(addon), of);
         snx_title_text(program.npdm.title_id, other);
-        snx_error("%s is an add-on of the game %s, and %s is %s", input, of, game_input ? game_input : "its program",
+        snx_error("%s is an update of the game %s, and its program is %s", input, of,
                   other[0] ? other : "none with a title ID");
         snx_free_program(&program);
         return 1;

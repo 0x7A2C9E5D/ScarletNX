@@ -17,10 +17,11 @@ void snx_save_before_exit(void);
 /* The game's folders, each ending in a separator (g_exedir may be empty), and its name: <g_exedir><g_exename>_code.so
    is its code, <g_exedir><g_exename>_data/ (g_datadir) its files */
 extern char g_datadir[1024], g_exename[256], g_exedir[1024];
-/* an add-on of the game in its folder, an update or a DLC: its title ID (0 for none, a game of its own) and its data
-   folder, <g_exedir><g_exename>_data/, which lies over the game's. g_datadir is then the game's */
+/* the update of the game in its folder this program is: its title ID (0 for none, the game's own program) and its
+   data folder, <g_exedir><g_exename>_data/, which lies over the game's. g_gamename is the game's name, g_exename's
+   or the one the update is of, and g_datadir its data folder */
 extern u64 g_addon;
-extern char g_addondir[1024];
+extern char g_addondir[1024], g_gamename[256];
 /* where its settings (config), its log and threads.txt (state) and its caches go: g_exedir, or for a game in an
    installed build's data folder the XDG folders of each kind */
 extern char g_confdir[1024], g_statedir[1024], g_cachedir[1024];

@@ -104,28 +104,34 @@ be used as a base game.
 
 ### Updates and DLC
 
-An update or a DLC is played as a game of its own, made beside its game in the game's folder and named after both:
-`games/<id>/<id>_<its own title ID>`. Give its dump with the game's, or alone once the game is in `games/`:
+An update or a DLC is recorded beside its game, in the game's folder, and checked in the game's list of updates and
+DLCs, `addons=` in the game's `.ini` (their title IDs, a comma between two). The game plays with what that list
+checks: any number of DLCs and one update at most. Give their dumps with the game's, or alone once the game is in
+`games/`:
 
 ```sh
-./build/scarletnx Game.xci --update Update.nsp   # the game made first if it isn't yet, then the update played
-./build/scarletnx Dlc.nsp                        # a game made already: its DLC made and played
-games/0100ABCD12340000/0100ABCD12340000_0100ABCD12340800
+./build/scarletnx Game.xci --update Update.nsp --update Dlc.nsp   # the game made first if it isn't yet
+./build/scarletnx Dlc.nsp                                          # a game made already: its DLC checked too
 ```
 
-The launcher lists them under their game: opening a game that has one asks which to run, the game itself,
-`Update 1.2.0` (its version, from its own control data) or `DLC 1`. One update or DLC runs at a time.
+Each dump given is checked, and a newer update replaces the one checked before. The launcher lists a game's updates
+and DLCs under it: opening a game that has some shows a box to check each one by (`Update 1.2.0`, its version from its
+own control data, or `DLC 1`), then Play, which keeps the boxes checked in `addons=` and plays the game. Back leaves
+the list as it was.
 
-- **Settings and saves:** an update or a DLC runs with its game's `.ini` and its game's data folder, so its saves are
-  the game's. Its own `<id>_<own id>.ini` holds only `source=`, the path of its own dump.
-- **Files:** the game never reads an update's or a DLC's files. The update or DLC reads both. Without Extract game
-  container, an update reads its ExeFS and RomFS from its dump, its RomFS patch read over the game's dump (the game's
-  `.ini` must name it, which playing the game's dump records). A DLC's RomFS image is read from its dump and served
-  as installed. With Extract game container, an update is extracted into its own data folder with its RomFS applied,
-  and a DLC's image goes to `system/archives/<its title ID>.romfs` there. That folder lies over the game's: its ExeFS
-  and RomFS replace the game's, and its other files are added to the game's.
-- **Code:** an update is recompiled from its own ExeFS. A DLC runs its game's code, recompiled from the game's dump
-  or extraction.
+- **Programs:** an update is recompiled from its own ExeFS into a program beside the game,
+  `games/<id>/<id>_<its title ID>`, which runs whenever it is checked. A DLC runs its game's code and has no program,
+  only its record: its own `.ini`, which holds `source=` (the path of its dump), and its data folder. A DLC program
+  an older version made is taken away the next time its dump is played.
+- **Settings and saves:** an update runs with its game's `.ini` and its game's data folder, so its saves are the
+  game's.
+- **Files:** the game's own program never reads an update's files. Without Extract game container, an update reads
+  its ExeFS and RomFS from its dump, its RomFS patch read over the game's dump (the game's `.ini` must name it, which
+  playing the game's dump records). Each checked DLC's RomFS image is read from its dump and served as installed. A
+  checked DLC whose dump is not there is left out, and the log says so. With Extract game container, an update is
+  extracted into its own data folder with its RomFS applied, and a DLC's image goes to
+  `system/archives/<its title ID>.romfs` in its own. Those folders lie over the game's: an update's ExeFS, RomFS and
+  control data replace the game's, a DLC's `system/` is added to the game's, and nothing else of theirs is used.
 
 `-x` keeps extracting an update over its game into one folder (`-x Game.nsp --update Update.nsp`), and extracts a
 DLC's dump given alone as its RomFS image.

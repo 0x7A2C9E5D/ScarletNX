@@ -146,8 +146,9 @@ static char* shown_name(const char* path, const char* name) {
     free(folder);
     return shown ? shown : snx_strdup(name);
 }
-/* the updates and DLCs made beside the game at path, in its folder (snx_addon_name): their count, and with addons not
-   NULL each added to it, in their names' order (an update's title ID before a DLC's) */
+/* the updates and DLCs made beside the game at path, in its folder (snx_addon_name): each a data folder, an update's
+   with its program beside it. Their count, and with addons not NULL each added to it, in their names' order (an
+   update's title ID before a DLC's) */
 static size_t addons_of(const char* path, GuiGames* addons) {
     char *folder = snx_dirname(path), **names = NULL;
     const char* leaf = folder + strlen(folder);
@@ -160,14 +161,30 @@ static size_t addons_of(const char* path, GuiGames* addons) {
         snx_list_dir(folder, &names, &count))
         count = 0;
     for (i = 0; i < count; ++i) {
-        char *stem = snx_strdup(names[i]), *data, *own, text[0x40], version[0x20];
+        size_t n = strlen(names[i]);
+        char *stem = snx_strdup(names[i]), *data = snx_path_join(folder, names[i]), *program = NULL, *own;
+        char text[0x40], version[0x20];
         SnxU64 id;
-        bool listed = playable(folder, stem, GUI_GAMES_RUN); /* on Android it cuts _code.so off the name */
-#ifdef _WIN32
-        if (listed) stem[strlen(stem) - 4] = 0; /* .exe, which playable asks for */
+        /* <game>_<its ID>_data: a DLC's record, or an update's beside its program */
+        bool listed = n > 5 && !strcmp(names[i] + n - 5, "_data") && snx_is_dir(data);
+        if (listed) stem[n - 5] = 0;
+        listed = listed && snx_addon_name(leaf, stem, &id);
+        if (listed && snx_addon_kind(id) == SNX_ADDON_UPDATE) {
+#if defined(__ANDROID__) || defined(SNX_IOS)
+            char* file = snx_format("%s_code.so", stem);
+#elif defined(_WIN32)
+            char* file = snx_format("%s.exe", stem);
+#else
+            char* file = snx_strdup(stem);
 #endif
-        data = snx_format("%s/%s_data", folder, stem);
-        listed = listed && snx_addon_name(leaf, stem, &id) && snx_is_dir(data);
+            listed = playable(folder, file, GUI_GAMES_RUN);
+            free(file);
+#if defined(_WIN32)
+            program = snx_format("%s/%s.exe", folder, stem);
+#else
+            program = snx_path_join(folder, stem);
+#endif
+        }
         if (listed && addons) {
             unsigned char* nacp;
             size_t size = 0;
@@ -189,11 +206,12 @@ static size_t addons_of(const char* path, GuiGames* addons) {
             }
             addons->names[j] = snx_strdup(stem);
             addons->shown[j] = snx_strdup(text);
-            addons->paths[j] = snx_path_join(folder, names[i]);
+            addons->paths[j] = program ? snx_strdup(program) : snx_strdup(data);
             addons->addons[j] = 0;
             addons->count++;
         }
         found += listed;
+        free(program);
         free(data);
         free(stem);
     }

@@ -36,10 +36,10 @@ bool gui_is_dump(const char* name);
    plays it, and recompiles it first when another build made it. A game an older version laid out beside the others
    is not one */
 bool gui_game_folder(const char* path);
-/* The updates and DLCs of the game at path, made beside it in its folder (<name>/<name>_<add-on's title ID>), into
-   addons (emptied first): names their programs', shown what the player reads ("Update 1.2.0" from its control.nacp,
-   "DLC 1"), paths where they are, an update first. True when it has any; false, addons empty, when it has none or
-   memory ran out */
+/* The updates and DLCs of the game at path, made beside it in its folder (<name>/<name>_<add-on's title ID>_data/, an
+   update's program beside it), into addons (emptied first): names <name>_<its title ID>, shown what the player reads
+   ("Update 1.2.0" from its control.nacp, "DLC 1"), paths an update's program or a DLC's data folder, an update
+   first. True when it has any; false, addons empty, when it has none or memory ran out */
 bool gui_game_addons(const char* path, GuiGames* addons);
 /* A 3DS CIA by its name */
 bool gui_is_cia(const char* name);

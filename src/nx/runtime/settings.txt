@@ -60,6 +60,15 @@ setting Game dump
     help The dump the game was made from, which the recompile writes here. Without Extract game container the game
     help reads its ExeFS and RomFS from it, and Extract to tmpfs extracts it again when tmpfs was emptied. Empty or
     help left out: the link <name>.source in the game's folder, which older versions made
+setting Game addons
+    key addons
+    text 2048
+    once
+    startup
+    in-game
+    help The game's updates and DLCs played with it, made beside it in its folder: their title IDs, a comma between
+    help two. The launcher's list of them writes it. An update runs from its own program, which plays with this
+    help list's DLCs; the game's own program leaves an update listed out
 
 table g_display_ini
 setting TV mode

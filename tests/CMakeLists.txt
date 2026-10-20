@@ -773,7 +773,7 @@ snx_test_target(snx-test-startup 90)
 add_test(NAME startup_options COMMAND snx-test-startup)
 
 add_library(snx_test_common STATIC "${PROJECT_SOURCE_DIR}/src/common/utilities/common.c"
-    "${PROJECT_SOURCE_DIR}/src/common/utilities/ini_lines.c")
+    "${PROJECT_SOURCE_DIR}/src/common/utilities/ini_lines.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/game_ini.c")
 snx_test_target(snx_test_common 90)
 if(WIN32)
     target_link_libraries(snx_test_common PUBLIC advapi32)

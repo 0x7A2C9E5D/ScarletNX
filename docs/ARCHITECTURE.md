@@ -74,11 +74,13 @@ a dump, read in place, or `work/<Game>/{exefs,romfs}` -> `games/<id>/`: `<id>[.e
 `<id>_data/`, and the dump's path as `source=` in the game's `<id>.ini` (`<id>.source`, a link to it, from older
 versions):
 
-An update or a DLC is made beside its game, `games/<id>/<id>_<its title ID>` (`snx_addon_name`), from its own dump:
-its `.ini` names only that dump, and the runtime (`main.c`'s `addon_init`) runs it with the game's `.ini` and data
-folder, the add-on's own data folder laid over it (`fs_tree_overlay`). `fs.c` reads an update's dump with the game's
-in one `SnxDump` (its Patch RomFS reads the game's NCA), and a DLC's in its own, whose image
-`OpenDataStorageByDataId` serves by its title ID.
+An update or a DLC is recorded beside its game (`snx_addon_name`), its own `.ini` naming only its dump, and checked
+in the game's `addons=` (`common/utilities/game_ini.c`, which the driver and the launcher write). An update also gets a
+program, `games/<id>/<id>_<its title ID>`; a DLC runs its game's code. The runtime (`main.c`'s `addon_init`) runs an
+update's program with the game's `.ini` and data folder, and `fs.c` lays the checked DLCs' data folders and then the
+update's over that folder (`fs_tree_overlay`, which takes only their ExeFS, RomFS, control data and `system/`). It
+reads an update's dump with the game's in one `SnxDump` (its Patch RomFS reads the game's NCA), and each checked DLC's
+in one of its own (`HleFs.aocs`), whose image `OpenDataStorageByDataId` serves by its title ID.
 
 - `driver.c`: CLI dispatch only; `extract.c` and `recompile.c` own their workflows.
 - `container.c`: a dump opened with hactool, its keys loaded and its NCAs picked, shared by the extraction, the

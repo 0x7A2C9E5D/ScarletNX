@@ -48,9 +48,9 @@ FILE* fs_open_read(const char* path, u64* size) {
     }
     return NULL;
 }
-/* the DLC read in place from its dump (fs.c's), 0 for none */
+/* a DLC read in place from its dump (fs.c's), 0 for none */
 static u64 test_aoc_dump;
-u64 fs_aoc_id(void) { return test_aoc_dump; }
+int fs_aoc_has(u64 id) { return id && id == test_aoc_dump; }
 void logf_(int level, const char* format, ...) {
     (void)level;
     (void)format;
