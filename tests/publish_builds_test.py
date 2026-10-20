@@ -4,13 +4,12 @@
 """scripts/publish-builds.py against a fake gh (a small GitHub kept in a JSON file) and a fake Discord (a local HTTP
 server): a version tag's release in the repository; the nightly made in the nightly repository, kept to the newest N,
 never one older than the latest, and linked from the repository's rolling prerelease; a pull request's prerelease
-replaced at each push and gone when it closes, its Discord card drawn again; a fork's only once the team labels it
+replaced at each push and gone when it closes; a fork's only once the team labels it
 after its last push; and the writes to the nightly repository made with its own token. Each release's notes link every
 download with its size and say what changed: the changes since the last one, a pull request's commits and the main
-commit it stands on; a version's message and a card, each download. The fake GitHub and Discord are
-tests/fake_github.py's. Offline."""
+commit it stands on; a version's message, each download. No card is posted, a nightly's or a pull request's: those are
+ReiWimsy's (scarletnx/discord-bots). The fake GitHub and Discord are tests/fake_github.py's. Offline."""
 
-import base64
 import json
 import os
 import subprocess
@@ -18,7 +17,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from fake_github import FAKE_GH, Discord, posted, serve
+from fake_github import FAKE_GH, posted, serve
 
 SCRIPT = Path(__file__).resolve().parent.parent / 'scripts' / 'publish-builds.py'
 REPO, TO = 'owner/repo', 'owner/nightly'
@@ -34,7 +33,6 @@ FILES = [
     'ScarletNX-macos-arm64.zip',
     'ScarletNX-ios-arm64.ipa',
 ]
-WINDOWS = FILES.index('ScarletNX-windows-x86_64.zip')  # its field on a card
 ZSYNC = [
     'ScarletNX-linux-x86_64.AppImage.zsync',
     'ScarletNX-linux-aarch64.AppImage.zsync',
@@ -100,11 +98,6 @@ with tempfile.TemporaryDirectory() as temporary:
 
     def with_releases(repo, items):
         return dict(state(), releases=dict(state()['releases'], **{repo: items}))
-
-    def card_id(key, s=None):
-        """the message id the nightly repository keeps for a card"""
-        entry = (s or state()).get('files', {}).get(TO, {}).get(f'discord-cards:cards/{key}')
-        return base64.b64decode(entry['content']).decode().strip() if entry else None
 
     def calls():
         return [json.loads(line) for line in log_file.read_text().splitlines()] if log_file.exists() else []
@@ -331,53 +324,16 @@ with tempfile.TemporaryDirectory() as temporary:
         and all(c['token'] == 'repo-token' for c in repo_writes),
         writes,
     )
-    sent = posted('nightly')
     check(
-        'one Discord message on the nightly channel, its title and changes',
-        len(sent) == 1
-        and sent[0]['method'] == 'POST'
-        and sent[0]['path'].endswith('?wait=true')
-        and sent[0]['body']['embeds'][0]['title'] == f'Nightly 2026-10-15 ({sha[:7]})'
-        and f'\\[ci\\] its title ([#5](https://github.com/{REPO}/pull/5))'
-        in sent[0]['body']['embeds'][0]['description']
-        and sent[0]['agent'].startswith('DiscordBot'),
-        sent,
-    )
-    shown = sent[0]['body']['embeds'][0] if sent else {}
-    check(
-        'the message links each download with its size, then the source and every nightly',
-        [f['name'] for f in shown.get('fields', [])]
-        == [
-            'Linux x86-64',
-            'Linux ARM64',
-            'Linux PowerPC64 LE',
-            'Linux PowerPC64 BE',
-            'Linux RISC-V 64',
-            'Linux LoongArch64',
-            'Windows x86-64',
-            'Android',
-            'macOS ARM64',
-            'iOS ARM64',
-            'Linux PowerPC64 BE ELFv1 tests',
-            'Source',
-            'Every nightly',
-        ]
-        and shown['fields'][WINDOWS]['value']
-        == f'[zip](https://github.com/{TO}/releases/download/{tag}/ScarletNX-windows-x86_64.zip)\n0.0 MB'
-        and all(f['inline'] for f in shown['fields'])
-        and shown['url'] == f'https://github.com/{TO}/releases/tag/{tag}'
-        and shown['thumbnail']['url'].endswith('/dist/icons/hicolor/128x128/apps/wimsy.png')
-        and shown['timestamp'].endswith('+00:00'),
-        shown,
+        "no message on the nightly channel, its webhook set: its card is ReiWimsy's",
+        posted('nightly') == [],
+        posted('nightly'),
     )
     # the run again: the files replaced, no news
     done = publish('nightly', *everything(sha), '--checkout', str(checkout), '--keep', '2')
     check(
-        'a run again replaces, and edits its card, posting none',
-        done.returncode == 0
-        and [r['method'] for r in posted('nightly')] == ['POST', 'PATCH']
-        and card_id(f'nightly-{sha}') == posted('nightly')[0]['reply']
-        and len(releases()) == 2,
+        'a run again replaces, posting nothing',
+        done.returncode == 0 and posted('nightly') == [] and len(releases()) == 2,
         done.stdout + done.stderr,
     )
     # a run of an older commit ending last: not published over the newest
@@ -583,58 +539,21 @@ with tempfile.TemporaryDirectory() as temporary:
         and 'Its body' not in pre['body'],
         pre and pre['body'],
     )
-    prs = posted('prs')
     check(
-        'one message on the pull requests channel, in its thread, no one pinged',
-        len(prs) == 1
-        and prs[0]['path'].endswith('?thread_id=55&wait=true')
-        and prs[0]['body']['allowed_mentions'] == {'parse': []}
-        and prs[0]['body']['embeds'][0]['title'] == 'PR #7: Fix it @everyone',
-        prs,
-    )
-    shown = prs[0]['body']['embeds'][0] if prs else {}
-    check(
-        "the card: its author, GitHub's open colour, the failed system linking its log, the first commits and the rest",
-        shown.get('author') == {'name': 'alice', 'url': 'https://x/alice', 'icon_url': 'https://x/alice.png'}
-        and shown['url'] == 'https://x/pull/7'
-        and shown['color'] == 0x1F883D  # GitHub's open; the failed system says so in its field
-        and shown['fields'][WINDOWS]
-        == {'name': 'Windows x86-64', 'value': 'Failed\n[log](https://x/runs/50/Windo)', 'inline': True}
-        and shown['fields'][0]['value'].startswith(f'[AppImage](https://github.com/{TO}/releases/download/pr-7/')
-        and shown['fields'][len(FILES) :]
-        == [
-            {'name': 'Linux PowerPC64 BE ELFv1 tests', 'value': 'Waiting', 'inline': True},
-            {'name': 'Build', 'value': '[Failure](https://x/runs/50)', 'inline': True},
-            {'name': 'Builds', 'value': f'[All files](https://github.com/{TO}/releases/tag/pr-7)', 'inline': True},
-        ]
-        and '**12 commits**, the newest first' in shown['description']
-        and shown['description'].count('\n- ') == 7
-        and '- \\[gui\\] commit 11 \\[x\\](http://e)\n' in shown['description']
-        and 'commit 5 ' not in shown['description']
-        and '/commits/' not in shown['description'].split('**12 commits**')[1]
-        and '- and [6 more](https://x/pull/7/commits)' in shown['description']
-        and shown['footer']['text'] == 'Edited at each push, comment and build',
-        shown,
-    )
-    message = str(Discord.next_id[0])
-    check(
-        "the card's id kept in the nightly repository, not in the notes",
-        card_id('pr-7') == message and 'discord-message' not in pre['body'],
-        state().get('files'),
+        "no message on the pull requests channel, its webhook set: its card is ReiWimsy's",
+        posted('prs') == [],
+        posted('prs'),
     )
     # a push: the same prerelease, all four now, the message edited; it stands on a commit a nightly was built from
     save_state(dict(state(), pulls=[pull(7, head2)], merge_base=sha, runs=[pr_run(head2, 51, failed=())]))
     done = publish('pr', *pr_files(head2, 'pr2', '51'))
     pre = find('pr-7')
-    prs = posted('prs')
     check(
         'the main commit it stands on links its nightly, to set the two side by side',
         pre
         and f'on main at [`{sha[:7]}`](https://github.com/{REPO}/commit/{sha}) '
         f'([its nightly](https://github.com/{TO}/releases/tag/nightly-2026-10-15-{sha[:7]})).'
-        in pre['body']
-        and f'([its nightly](https://github.com/{TO}/releases/tag/nightly-2026-10-15-{sha[:7]}))'
-        in prs[-1]['body']['embeds'][0]['description'],
+        in pre['body'],
         pre and pre['body'],
     )
     check(
@@ -645,15 +564,6 @@ with tempfile.TemporaryDirectory() as temporary:
         and 'not built' not in pre['body'],
         pre,
     )
-    check(
-        'and edits the one message, every system built now',
-        len(prs) == 2
-        and prs[1]['method'] == 'PATCH'
-        and prs[1]['path'].endswith(f'/messages/{message}?thread_id=55')
-        and prs[1]['body']['embeds'][0]['color'] == 0x1F883D
-        and not any('Failed' in f['value'] for f in prs[1]['body']['embeds'][0]['fields']),
-        prs,
-    )
     # the run of the push before, ending last
     done = publish('pr', *pr_files(head1, 'pr1', '50'))
     check(
@@ -661,16 +571,7 @@ with tempfile.TemporaryDirectory() as temporary:
         'are not published' in done.stdout and head2[:7] in find('pr-7')['body'],
         done.stdout,
     )
-    # a message deleted on Discord: a new one, its id kept
-    Discord.messages.pop(message)
-    done = publish('pr', *pr_files(head2, 'pr2', '51'))
-    pre = find('pr-7')
-    check(
-        'a deleted message is posted again, its new id kept',
-        card_id('pr-7') == str(Discord.next_id[0]) and str(Discord.next_id[0]) != message,
-        card_id('pr-7'),
-    )
-    # closed, merged: gone; its card is the cards workflow's (tests/discord_cards_test.py)
+    # closed, merged: gone
     closed = dict(pull(7, head2), state='closed', merged=True)
     before = len(posted('prs'))
     done, planned = run('plan', name='pull_request_target', event={'action': 'closed', 'pull_request': closed})
@@ -751,8 +652,8 @@ with tempfile.TemporaryDirectory() as temporary:
     unhooked = ['--run', '52', '--sha', head1, '--pr', '8', '--artifacts', str(artifacts('pr1', head1))]
     done = publish('pr', *unhooked, hooks=False)
     check(
-        'without a webhook it publishes and says nothing was posted',
-        done.returncode == 0 and '::notice::No DISCORD_WEBHOOK_PRS' in done.stdout and find('pr-8'),
+        'without the webhooks it publishes, a pull request asking for none',
+        done.returncode == 0 and 'DISCORD_WEBHOOK' not in done.stdout and find('pr-8'),
         done.stdout + done.stderr,
     )
 

@@ -2,7 +2,7 @@
 # Copyright 2026 the ScarletNX contributors
 """A fake gh (a small GitHub kept in a JSON file: releases and tags, pull requests, issues and their comments, Build
 runs and their jobs, files of a branch) and a fake Discord (a local HTTP server keeping each webhook's messages), for
-tests/publish_builds_test.py and tests/discord_cards_test.py. Offline."""
+tests/publish_builds_test.py. Offline."""
 
 import http.server
 import json
