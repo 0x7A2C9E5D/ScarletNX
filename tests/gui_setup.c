@@ -50,11 +50,15 @@ static void typed(App* app, const char* text) {
     e.text.text = text;
     event(app, &e);
 }
-/* the system's folder picker answering path (NULL: none), its own answer to the picker the test has none of dropped */
+/* the system's folder picker answering path (NULL: none), its own answer to the picker the test has none of dropped:
+   with the copies folder_picked made for event() */
 static void folder_answer_is(App* app, const char* path) {
-    SDL_Event e = {0};
+    SDL_Event e = {0}, own;
     assert(app->picked_folder);
-    SDL_FlushEvent(app->picked_folder);
+    while (SDL_PeepEvents(&own, 1, SDL_GETEVENT, app->picked_folder, app->picked_folder) == 1) {
+        SDL_free(own.user.data1);
+        SDL_free(own.user.data2);
+    }
     e.type = app->picked_folder;
     e.user.data1 = path ? SDL_strdup(path) : NULL;
     event(app, &e);
