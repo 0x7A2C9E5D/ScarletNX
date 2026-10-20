@@ -1056,9 +1056,11 @@ if(TARGET OpenSSL::Crypto)
         RESULT_VARIABLE snx_macho_result OUTPUT_QUIET ERROR_QUIET)
     if(snx_macho_result EQUAL 0)
         foreach(part 1 2)
+            # LLVM's modules have no common symbols, which the linker refuses: a tentative definition is not one
+            # whatever the compiler's default
             add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/link_macho_${part}.o"
-                COMMAND "${CMAKE_C_COMPILER}" --target=arm64-apple-macos13 -ffreestanding -O2 -fPIC -DPART=${part}
-                    -c "${CMAKE_CURRENT_SOURCE_DIR}/link_macho_fixture.c"
+                COMMAND "${CMAKE_C_COMPILER}" --target=arm64-apple-macos13 -ffreestanding -O2 -fPIC -fno-common
+                    -DPART=${part} -c "${CMAKE_CURRENT_SOURCE_DIR}/link_macho_fixture.c"
                     -o "${CMAKE_CURRENT_BINARY_DIR}/link_macho_${part}.o"
                 DEPENDS link_macho_fixture.c VERBATIM)
         endforeach()
