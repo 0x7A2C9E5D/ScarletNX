@@ -57,6 +57,7 @@ ARTIFACTS = {
     'ScarletNX-linux-x86_64-{short}.AppImage': 'ScarletNX-linux-x86_64.AppImage',
     'ScarletNX-linux-aarch64-{short}.AppImage': 'ScarletNX-linux-aarch64.AppImage',
     'ScarletNX-linux-ppc64le-{short}.AppImage': 'ScarletNX-linux-ppc64le.AppImage',
+    'ScarletNX-linux-ppc64-{short}.AppImage': 'ScarletNX-linux-ppc64.AppImage',
     'ScarletNX-linux-riscv64-{short}.AppImage': 'ScarletNX-linux-riscv64.AppImage',
     'ScarletNX-linux-loongarch64-{short}.AppImage': 'ScarletNX-linux-loongarch64.AppImage',
     'ScarletNX-windows-x86_64-{short}': 'ScarletNX-windows-x86_64.zip',
@@ -68,6 +69,7 @@ ARTIFACTS = {
 # (continue-on-error in build.yml), so a release without them says they were not built
 OPTIONAL = {
     'ScarletNX-linux-ppc64le.AppImage',
+    'ScarletNX-linux-ppc64.AppImage',
     'ScarletNX-linux-riscv64.AppImage',
     'ScarletNX-linux-loongarch64.AppImage',
     'ScarletNX-macos-arm64.zip',

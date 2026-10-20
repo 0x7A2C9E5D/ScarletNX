@@ -51,6 +51,7 @@ JOBS = {
     'ScarletNX-linux-x86_64.AppImage': 'Linux AppImage (x86_64)',
     'ScarletNX-linux-aarch64.AppImage': 'Linux AppImage (aarch64)',
     'ScarletNX-linux-ppc64le.AppImage': 'Linux AppImage (ppc64le)',
+    'ScarletNX-linux-ppc64.AppImage': 'Linux AppImage (ppc64)',
     'ScarletNX-linux-riscv64.AppImage': 'Linux AppImage (riscv64)',
     'ScarletNX-linux-loongarch64.AppImage': 'Linux AppImage (loongarch64)',
     'ScarletNX-windows-x86_64.zip': 'Windows (Clang + LLVM)',
@@ -59,7 +60,7 @@ JOBS = {
     'ScarletNX-ios-arm64.ipa': 'macOS and iOS (arm64)',
 }
 # Build's jobs that make no release file, shown after the packages: each job and the system and architecture it tests
-CHECKS = {'Linux (ppc64, cross)': ('Linux', 'PowerPC64 BE')}
+CHECKS = {'Linux (ppc64, cross)': ('Linux', 'PowerPC64 BE ELFv1 tests')}
 # a nightly's colours: building, published, a package failed, not published
 BUILDING, SCARLET, AMBER, CLOSED = 0x1F6FEB, 0xB0102A, 0xD29922, 0x6E7681
 # GitHub's own, for a pull request and an issue: open, draft, merged, closed; an issue done, or not planned

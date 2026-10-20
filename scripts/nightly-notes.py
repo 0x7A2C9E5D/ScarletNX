@@ -22,6 +22,7 @@ SYSTEMS = {
     'ScarletNX-linux-x86_64.AppImage': ('Linux', 'x86-64', 'AppImage'),
     'ScarletNX-linux-aarch64.AppImage': ('Linux', 'ARM64', 'AppImage'),
     'ScarletNX-linux-ppc64le.AppImage': ('Linux', 'PowerPC64 LE', 'AppImage'),
+    'ScarletNX-linux-ppc64.AppImage': ('Linux', 'PowerPC64 BE', 'AppImage (Linux programs)'),
     'ScarletNX-linux-riscv64.AppImage': ('Linux', 'RISC-V 64', 'AppImage'),
     'ScarletNX-linux-loongarch64.AppImage': ('Linux', 'LoongArch64', 'AppImage'),
     'ScarletNX-windows-x86_64.zip': ('Windows', 'x86-64', 'zip'),

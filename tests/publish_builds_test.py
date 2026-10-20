@@ -26,6 +26,7 @@ FILES = [
     'ScarletNX-linux-x86_64.AppImage',
     'ScarletNX-linux-aarch64.AppImage',
     'ScarletNX-linux-ppc64le.AppImage',
+    'ScarletNX-linux-ppc64.AppImage',
     'ScarletNX-linux-riscv64.AppImage',
     'ScarletNX-linux-loongarch64.AppImage',
     'ScarletNX-windows-x86_64.zip',
@@ -38,6 +39,7 @@ ZSYNC = [
     'ScarletNX-linux-x86_64.AppImage.zsync',
     'ScarletNX-linux-aarch64.AppImage.zsync',
     'ScarletNX-linux-ppc64le.AppImage.zsync',
+    'ScarletNX-linux-ppc64.AppImage.zsync',
     'ScarletNX-linux-riscv64.AppImage.zsync',
     'ScarletNX-linux-loongarch64.AppImage.zsync',
 ]
@@ -123,6 +125,10 @@ with tempfile.TemporaryDirectory() as temporary:
             f'ScarletNX-linux-ppc64le-{short}.AppImage': {
                 'ScarletNX-linux-ppc64le.AppImage': 'elf power',
                 'ScarletNX-linux-ppc64le.AppImage.zsync': 'zsync power',
+            },
+            f'ScarletNX-linux-ppc64-{short}.AppImage': {
+                'ScarletNX-linux-ppc64.AppImage': 'elf power be',
+                'ScarletNX-linux-ppc64.AppImage.zsync': 'zsync power be',
             },
             f'ScarletNX-linux-riscv64-{short}.AppImage': {
                 'ScarletNX-linux-riscv64.AppImage': 'elf riscv',
@@ -345,13 +351,14 @@ with tempfile.TemporaryDirectory() as temporary:
             'Linux x86-64',
             'Linux ARM64',
             'Linux PowerPC64 LE',
+            'Linux PowerPC64 BE',
             'Linux RISC-V 64',
             'Linux LoongArch64',
             'Windows x86-64',
             'Android',
             'macOS ARM64',
             'iOS ARM64',
-            'Linux PowerPC64 BE',
+            'Linux PowerPC64 BE ELFv1 tests',
             'Source',
             'Every nightly',
         ]
@@ -509,6 +516,7 @@ with tempfile.TemporaryDirectory() as temporary:
             'Linux AppImage (x86_64)',
             'Linux AppImage (aarch64)',
             'Linux AppImage (ppc64le)',
+            'Linux AppImage (ppc64)',
             'Linux AppImage (riscv64)',
             'Linux AppImage (loongarch64)',
             'Windows (Clang + LLVM)',
@@ -595,7 +603,7 @@ with tempfile.TemporaryDirectory() as temporary:
         and shown['fields'][0]['value'].startswith(f'[AppImage](https://github.com/{TO}/releases/download/pr-7/')
         and shown['fields'][len(FILES) :]
         == [
-            {'name': 'Linux PowerPC64 BE', 'value': 'Waiting', 'inline': True},
+            {'name': 'Linux PowerPC64 BE ELFv1 tests', 'value': 'Waiting', 'inline': True},
             {'name': 'Build', 'value': '[Failure](https://x/runs/50)', 'inline': True},
             {'name': 'Builds', 'value': f'[All files](https://github.com/{TO}/releases/tag/pr-7)', 'inline': True},
         ]

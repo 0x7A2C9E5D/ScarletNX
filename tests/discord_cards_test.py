@@ -27,6 +27,7 @@ JOBS = [
     'Linux AppImage (x86_64)',
     'Linux AppImage (aarch64)',
     'Linux AppImage (ppc64le)',
+    'Linux AppImage (ppc64)',
     'Linux AppImage (riscv64)',
     'Linux AppImage (loongarch64)',
     'Windows (Clang + LLVM)',
@@ -39,6 +40,7 @@ FILES = [
     'ScarletNX-linux-x86_64.AppImage',
     'ScarletNX-linux-aarch64.AppImage',
     'ScarletNX-linux-ppc64le.AppImage',
+    'ScarletNX-linux-ppc64.AppImage',
     'ScarletNX-linux-riscv64.AppImage',
     'ScarletNX-linux-loongarch64.AppImage',
     'ScarletNX-windows-x86_64.zip',
@@ -300,7 +302,7 @@ with tempfile.TemporaryDirectory() as temporary:
         card['description'].startswith(f'Not published: the build of [`{sha[:7]}`]')
         and card['fields'][WINDOWS]['value'] == 'Failed\n[log](https://x/runs/1/Windo)'
         and card['fields'][N - 1] == {
-            'name': 'Linux PowerPC64 BE',
+            'name': 'Linux PowerPC64 BE ELFv1 tests',
             'value': 'Tests failed\n[log](https://x/runs/1/Linux)',
             'inline': True,
         }
@@ -674,8 +676,8 @@ with tempfile.TemporaryDirectory() as temporary:
 # the jobs the cards name are Build's: a renamed job would leave its package waiting forever
 build = (ROOT / '.github' / 'workflows' / 'build.yml').read_text()
 for name in [*cards.JOBS.values(), *cards.CHECKS]:
-    template = re.sub(r'\((x86_64|aarch64|ppc64le|riscv64|loongarch64)\)', '(${{ matrix.arch }})', name)
-    arch = re.search(r'\((x86_64|aarch64|ppc64le|riscv64|loongarch64)\)', name)
+    template = re.sub(r'\((x86_64|aarch64|ppc64le|ppc64|riscv64|loongarch64)\)', '(${{ matrix.arch }})', name)
+    arch = re.search(r'\((x86_64|aarch64|ppc64le|ppc64|riscv64|loongarch64)\)', name)
     check(
         f'{name} is a job of build.yml',
         f'name: {name}\n' in build or (f'name: {template}\n' in build and arch and f'{arch.group(1)}' in build),

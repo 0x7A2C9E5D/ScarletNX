@@ -15,6 +15,7 @@ if [ $# -ne 1 ] || [ ! -f "$1" ]; then
     exit 2
 fi
 runtime=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+scripts=$(cd "$(dirname "$0")" && pwd)
 exe=
 case $runtime in
     *.exe) exe=.exe ;;
@@ -27,16 +28,19 @@ esac
 # the games it makes are copies of it, which need one more blind to that padding (the CI's cross check registers it)
 launch=()
 if [ -z "$exe" ]; then
-    case $(od -An -tu2 -j18 -N2 "$runtime" | tr -d ' ') in # e_machine, little-endian as every package is
-        62) arch=x86_64 ;;
-        183) arch=aarch64 ;;
-        21) arch=ppc64le ;;
-        243) arch=riscv64 ;;
-        258) arch=loongarch64 ;;
+    # e_machine in the byte order EI_DATA names: 1 little-endian, 2 big-endian (PowerPC64 BE's)
+    set -- $(od -An -tu1 -j5 -N1 "$runtime") $(od -An -tu1 -j18 -N2 "$runtime")
+    case $1:$(($1 == 2 ? $2 * 256 + $3 : $3 * 256 + $2)) in
+        1:62) arch=x86_64 ;;
+        1:183) arch=aarch64 ;;
+        1:21) arch=ppc64le ;;
+        2:21) arch=ppc64 ;;
+        1:243) arch=riscv64 ;;
+        1:258) arch=loongarch64 ;;
         *) arch= ;;
     esac
     if [ -z "$arch" ]; then
-        echo "$runtime is not an x86-64, AArch64, PowerPC64 LE, RISC-V 64 or LoongArch64 program" >&2
+        echo "$runtime is not an x86-64, AArch64, PowerPC64, RISC-V 64 or LoongArch64 program" >&2
         exit 2
     fi
     if [ "$arch" != "$(uname -m)" ]; then
@@ -93,6 +97,20 @@ word smoke.nro 0x88 0xd40004e1 # SVC 0x27, OutputDebugString
 word smoke.nro 0x8c 0xd40000e1 # SVC 7, ExitProcess
 word smoke.nro 0x90 0xd4200000 # BRK
 put smoke.nro 0x100 'NX runtime smoke\n'
+
+# A package of the Linux runtime alone (a big-endian host's) runs Linux AArch64 programs, and nothing else here
+run "${launch[@]}" "$runtime" --help
+if grep -q '^Usage: scarletnx-gnuabi' <<<"$out"; then
+    if [ "$status" -eq 0 ]; then pass "scarletnx-gnuabi --help"; else fail "scarletnx-gnuabi --help exited $status" "$out"; fi
+    "$scripts/aarch64-smoke.sh" smoke
+    run "${launch[@]}" "$runtime" ./smoke
+    if [ "$status" -eq 42 ] && grep -qx 'gnuabi smoke' <<<"$out"; then
+        pass "it runs an AArch64 program"
+    else
+        fail "the AArch64 program exited $status, not 42 with its line" "$out"
+    fi
+    exit $failed
+fi
 
 for mode in "" -x -r; do
     run "${launch[@]}" "$runtime" ${mode:+"$mode"} --help
