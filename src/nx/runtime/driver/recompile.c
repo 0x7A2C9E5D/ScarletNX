@@ -52,18 +52,22 @@ static unsigned number(const char* text, unsigned max) {
 /* This build's, not the checkout's cpu.h: the modules are laid out as this build's headers say, and an installed
    build has no checkout */
 unsigned snx_game_abi(void) { return snx_module_abi(); }
-/* the commit too: a change to the generator, or to the runtime the game's folder gets a copy of, may keep SNX_ABI */
+/* the ABI alone: a game made by another build of it keeps its code, and its copy of the runtime is replaced by the
+   driver that plays it (driver.c's refresh_runtime) */
 char* snx_game_stamp(void) { return snx_format("%u", snx_game_abi()); }
+char* snx_own_runtime(const SnxPaths* paths) {
 #ifdef SNX_WITH_RUNTIME
-/* In an AppImage this program is a launcher in its mount, which runs nothing once copied out: the AppImage is the
-   runtime, and a copy named after the game runs it. APPIMAGE is inherited, so it counts only inside the mount */
-static char* own_runtime(const SnxPaths* paths) {
+    /* In an AppImage this program is a launcher in its mount, which runs nothing once copied out: the AppImage is the
+       runtime, and a copy named after the game runs it. APPIMAGE is inherited, so it counts only inside the mount */
     const char *appimage = getenv("APPIMAGE"), *appdir = getenv("APPDIR");
     if (appimage && *appimage && appdir && *appdir && snx_path_within(paths->executable, appdir))
         return snx_absolute(appimage);
     return snx_strdup(paths->executable);
-}
+#else
+    (void)paths;
+    return NULL;
 #endif
+}
 #ifdef _WIN32
 /* Windows finds a program's DLLs next to it: the game's folder gets those next to the runtime (the zip's LLVM), or
    it does not start. Links where the disk takes them, so each game does not hold copies */
@@ -88,6 +92,33 @@ static int copy_dlls(const char* run, const char* out) {
     return rc;
 }
 #endif
+int snx_deploy_runtime(const char* run, const char* exe) {
+    char* tmp = snx_format("%s.tmp", exe);
+    int rc;
+#ifdef _WIN32
+    char* folder = snx_dirname(exe);
+    rc = copy_dlls(run, folder);
+    if (rc) snx_error("cannot copy the runtime's DLLs to %s", folder);
+    free(folder);
+    if (rc) {
+        free(tmp);
+        return rc;
+    }
+#endif
+#ifdef __ANDROID__
+    /* the shared storage runs nothing (the game runs on the app's own runtime), and before Android 11 it refuses a
+       mode change: there the copy only marks the recompile done */
+    rc = snx_copy_file(run, tmp) || snx_replace(tmp, exe);
+#else
+    rc = snx_copy_file(run, tmp) || snx_make_executable(tmp) || snx_replace(tmp, exe);
+#endif
+    if (rc) {
+        snx_error("cannot deploy the runtime %s to %s", run, exe);
+        if (snx_is_file(tmp)) snx_remove_tree(tmp);
+    }
+    free(tmp);
+    return rc;
+}
 /* The game's settings: beside it, or in an installed build's config folder (snx_user_path), where the runtime reads
    them. An older build's beside the game stays, a line saying so. NULL when that folder cannot be made */
 static char* settings_path(const char* out, const char* title) {
@@ -281,7 +312,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     SnxCodegenOptions gen;
     SnxProgram program;
     char *title = NULL, *game = NULL, *out = NULL, *folder = NULL, *base = NULL, *data = NULL, *code = NULL;
-    char *ini = NULL, *ini_text = NULL, *run = NULL, *exe = NULL, *tmp = NULL;
+    char *ini = NULL, *ini_text = NULL, *run = NULL, *exe = NULL;
     char error[1024], option[64], why[256];
     const char* equal;
     size_t option_size;
@@ -511,7 +542,7 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
     if (runtime) run = snx_absolute(runtime);
 #ifdef SNX_WITH_RUNTIME
     else if (host_win == compile.target_win)
-        run = own_runtime(paths);
+        run = snx_own_runtime(paths);
 #endif
     else
         run = snx_build_runtime(paths, compile.target_win, compile.quiet);
@@ -519,27 +550,9 @@ int snx_recompile(int argc, char** argv, const SnxPaths* paths) {
         snx_error("runtime unavailable; specify --runtime FILE");
         goto done;
     }
-#ifdef _WIN32
-    if (copy_dlls(run, folder)) {
-        snx_error("cannot copy the runtime's DLLs to %s", folder);
-        goto done;
-    }
-#endif
     /* Deploy the executable last: automatic play uses it as the completion checkpoint. */
     exe = snx_format("%s%s", base, compile.target_win ? ".exe" : "");
-    tmp = snx_format("%s.tmp", exe);
-#ifdef __ANDROID__
-    /* the shared storage runs nothing (the game runs on the app's own runtime), and before Android 11 it refuses a
-       mode change: there the copy only marks the recompile done */
-    i = snx_copy_file(run, tmp) || snx_replace(tmp, exe);
-#else
-    i = snx_copy_file(run, tmp) || snx_make_executable(tmp) || snx_replace(tmp, exe);
-#endif
-    if (i) {
-        snx_error("cannot deploy runtime to %s", exe);
-        if (snx_is_file(tmp)) snx_remove_tree(tmp);
-        goto done;
-    }
+    if (snx_deploy_runtime(run, exe)) goto done;
     {
         char *stamp = snx_format("%s.abi", base), *version = snx_game_stamp();
         i = snx_write_file(stamp, version, strlen(version));
@@ -566,6 +579,5 @@ done:
     free(ini_text);
     free(run);
     free(exe);
-    free(tmp);
     return rc;
 }
