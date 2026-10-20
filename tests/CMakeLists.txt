@@ -1278,6 +1278,13 @@ add_executable(snx-test-mme-hle mme_hle.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/maxw
 snx_test_target(snx-test-mme-hle 23)
 add_test(NAME mme_hle COMMAND snx-test-mme-hle)
 
+# the macros mme_hle.c has no implementation for, compiled by mme_jit.c: every instruction and branch case compared
+# with the interpreter's, then seeded random programs
+add_executable(snx-test-mme-jit mme_jit.c)
+snx_test_target(snx-test-mme-jit 23)
+target_link_libraries(snx-test-mme-jit PRIVATE snx_llvm)
+add_test(NAME mme_jit COMMAND snx-test-mme-jit)
+
 add_executable(snx-test-etc2 etc2_decode.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
 snx_test_target(snx-test-etc2 23)
 add_test(NAME etc2_decode COMMAND snx-test-etc2)

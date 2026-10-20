@@ -31,6 +31,11 @@ void maxwell3d_method(GpuChannel* ch, u32 m, u32 v, int last) {
 }
 int g_verbose;
 void logf_(int lvl, const char* fmt, ...) { (void)lvl, (void)fmt; }
+/* this test is about the native macros and the interpreter: mme_jit.c's compiled forms are tested in mme_jit.c */
+int mme_jit_run(GpuChannel* ch, MmeRec* rec, u32 idx, u32 np) {
+    (void)ch, (void)rec, (void)idx, (void)np;
+    return 0;
+}
 
 /* ------------------------------------------------ an assembler for the macros below */
 enum { FETCH, MOVE, MOVE_ADDR, FETCH_SEND, MOVE_SEND, FETCH_ADDR, MOVE_ADDR_SEND_FETCH };

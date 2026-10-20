@@ -63,6 +63,11 @@ u64 mme_native_hash(int k) { return k ? HASH_C : HASH_A; }
 int mme_native_run(int k, GpuChannel* ch, MmeRec* rec, const u32* p, u32 np) {
     return (k ? native_c : native_a)(ch, rec, p, np);
 }
+/* this test is about the native choice and the interpreter: mme_jit.c's compiled forms are elsewhere */
+int mme_jit_run(GpuChannel* ch, MmeRec* rec, u32 idx, u32 np) {
+    (void)ch, (void)rec, (void)idx, (void)np;
+    return 0;
+}
 
 /* ------------------------------------------------ macros */
 /* A: method 0x123 (incr 1), send r1 (p0), exit; its delay slot fetches and sends 5 (to 0x124) */
