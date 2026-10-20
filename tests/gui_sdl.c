@@ -456,9 +456,7 @@ static void players_view(App* app) {
         "Controllers/Player\tgamepad_p2_swap_ab\t-1\tint\t-1\t1\t\tSwap A/B\t-1=As All|0=Off|1=On\n"
         "Controllers/Player\tgamepad_p2_map\t\ttext\t\t\t\tButton map\t\n";
     int r;
-    gui_settings_free(&app->settings);
-    memset(&app->settings, 0, sizeof app->settings);
-    app->groups = 0; /* they point into the list just freed, as settings_of drops them */
+    settings_forget(app);
     assert(!gui_settings_read(&app->settings, list));
     gui_settings_mark(&app->settings);
     app->player = 0;
@@ -563,6 +561,14 @@ static void players_view(App* app) {
     assert(!gui_settings_value(&app->settings, "gamepad_p1_swap_ab"));
     /* every row the view shows is a row of the settings, the Player row first */
     for (r = 0; r < app->view_count; ++r) assert(setting_of(app, r) >= 0 && setting_of(app, r) < app->settings.count);
+    /* the list freed with the view open (a new start, a list read again): the view, the groups and the form on the
+       view's rows go with it, and the groups' names were never the list's */
+    assert(app->view_count > 0 && app->groups > 1 && app->editor.keys == app->view_keys);
+    assert(app->group_keys[1].key == app->group_name[1]);
+    settings_forget(app);
+    assert(!app->view_count && !app->groups && !app->editor.count && !app->settings.keys);
+    assert(!gui_settings_read(&app->settings, list));
+    gui_settings_mark(&app->settings);
     key(app, SDLK_ESCAPE);
     assert(app->form == GUI_FORM_SETTINGS);
     app->player = 0;
@@ -586,9 +592,7 @@ static void button_map(App* app) {
     float x = 0, y = 0; /* mingw's assert returns, as far as the compiler knows */
     int page = -1, focus;
     SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT, "0x045e/0x02ea"); /* a real pad plugged in stays out */
-    gui_settings_free(&app->settings);
-    memset(&app->settings, 0, sizeof app->settings);
-    app->groups = 0; /* they point into the list just freed, as settings_of drops them */
+    settings_forget(app);
     assert(!gui_settings_read(&app->settings, list));
     gui_settings_mark(&app->settings);
     for (int i = 0; i < app->settings.count; ++i)
@@ -2158,10 +2162,9 @@ int main(int argc, char** argv) {
                !strstr(kept, "gdbstub"));
         free(kept);
         assert(app.groups > 0);           /* the Settings' groups were made, each naming a section of the list */
-        gui_settings_free(&app.settings); /* as a new start has none read */
+        settings_forget(&app);            /* as a new start has none read */
         assert(setting_is(&app, "fullscreen", NULL) && settings_of(&app) && setting_is(&app, "fullscreen", "1"));
-        /* read anew, the list drops the groups that named the old one's sections: the screens drawn later (the theme
-           editor's width) read none of the freed names */
+        /* the groups went with the list: the screens drawn later (the theme editor's width) read none of its names */
         assert(app.groups == 0);
     }
     key(&app, SDLK_UP);
@@ -5172,8 +5175,7 @@ int main(int argc, char** argv) {
         GuiFormBoxes f;
         GuiRect b;
         int s = app.scale, cw = 8 * s, row;
-        gui_settings_free(&app.settings);
-        memset(&app.settings, 0, sizeof app.settings);
+        settings_forget(&app);
         assert(!gui_settings_read(&app.settings, list));
         gui_settings_mark(&app.settings);
         app.theme = *gui_theme_builtin("yorha");
