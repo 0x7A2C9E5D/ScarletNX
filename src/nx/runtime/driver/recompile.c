@@ -53,7 +53,7 @@ static unsigned number(const char* text, unsigned max) {
    build has no checkout */
 unsigned snx_game_abi(void) { return snx_module_abi(); }
 /* the commit too: a change to the generator, or to the runtime the game's folder gets a copy of, may keep SNX_ABI */
-char* snx_game_stamp(void) { return snx_format("%u\n%s\n", snx_game_abi(), snx_build_commit()); }
+char* snx_game_stamp(void) { return snx_format("%u", snx_game_abi()); }
 #ifdef SNX_WITH_RUNTIME
 /* In an AppImage this program is a launcher in its mount, which runs nothing once copied out: the AppImage is the
    runtime, and a copy named after the game runs it. APPIMAGE is inherited, so it counts only inside the mount */
