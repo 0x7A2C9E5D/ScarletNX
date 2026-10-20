@@ -10,6 +10,7 @@
 #define _GNU_SOURCE /* POLLRDHUP, accept4 and SOCK_CLOEXEC on glibc */
 #endif
 #include "common/network/net_internal.h"
+#include "common/utilities/endian.h"
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -710,6 +711,41 @@ int snx_net_sockopt_kept(int level, int name) {
     if (opt_lookup(level, name, &hl, &hn, &k)) return 0;
     return k == K_RCVTIMEO || k == K_SNDTIMEO || k == K_TYPE || k == K_PROTOCOL || k == K_DOMAIN || k == K_NOOP;
 }
+/* An option's value between the guest's byte order (little-endian: both runtimes' guests) and a big-endian host's,
+   its numbers swapped in place by its kind: the same both ways. Bytes (addresses, groups) stay as they are */
+static void swap_bytes(unsigned char* v, size_t n) {
+    size_t i;
+    for (i = 0; i < n / 2; ++i) {
+        unsigned char t = v[i];
+        v[i] = v[n - 1 - i];
+        v[n - 1 - i] = t;
+    }
+}
+static void guest_order(OptKind k, unsigned char* v, size_t size) {
+    switch (k) {
+        case K_ADDR4:
+        case K_MREQ: return;
+        case K_MREQ6:
+            if (size >= 20) swap_bytes(v + 16, 4); /* ipv6mr_interface */
+            return;
+        case K_RCVTIMEO:
+        case K_SNDTIMEO:
+            if (size >= 8) swap_bytes(v, 8);
+            if (size >= 16) swap_bytes(v + 8, 8);
+            return;
+        case K_LINGER:
+            if (size >= 8) swap_bytes(v + 4, 4);
+            /* fall through: and the first int */
+        default:
+            if (size >= 4) swap_bytes(v, 4);
+            return;
+    }
+}
+/* getsockopt's result r, its value in the guest's byte order (nothing on a little-endian host) */
+static int guest_value(OptKind k, int r, void* v, const size_t* size) {
+    if (SNX_HOST_BE && !r) guest_order(k, (unsigned char*)v, *size);
+    return r;
+}
 static int64_t timeval_us(const SnxTimeval* t) {
     if (t->sec < 0) return 1; /* already expired: give up at the first wait */
     if (t->sec > INT64_MAX / 2000000) return INT64_MAX / 2;
@@ -719,7 +755,14 @@ int snx_net_host_setsockopt(SnxSocket* s, int level, int name, const void* v, si
     int hl, hn;
     OptKind k;
     int r = opt_lookup(level, name, &hl, &hn, &k);
+    unsigned char host[64];
     if (r) return r;
+    if (SNX_HOST_BE) { /* the guest's value as the host's numbers */
+        if (size > sizeof host) size = sizeof host;
+        memcpy(host, v, size);
+        guest_order(k, host, size);
+        v = host;
+    }
     switch (k) {
         case K_NOOP: return 0;
         case K_TYPE:
@@ -802,19 +845,19 @@ int snx_net_host_getsockopt(SnxSocket* s, int level, int name, void* v, size_t* 
     if (r) return r;
     int32_t i = 0;
     switch (k) {
-        case K_NOOP: i = 1; return put_opt(v, size, &i, 4);
-        case K_TYPE: i = s->type; return put_opt(v, size, &i, 4);
-        case K_PROTOCOL: i = s->protocol; return put_opt(v, size, &i, 4);
-        case K_DOMAIN: i = s->domain; return put_opt(v, size, &i, 4);
+        case K_NOOP: i = 1; return guest_value(k, put_opt(v, size, &i, 4), v, size);
+        case K_TYPE: i = s->type; return guest_value(k, put_opt(v, size, &i, 4), v, size);
+        case K_PROTOCOL: i = s->protocol; return guest_value(k, put_opt(v, size, &i, 4), v, size);
+        case K_DOMAIN: i = s->domain; return guest_value(k, put_opt(v, size, &i, 4), v, size);
         case K_ERROR:
             i = pending_error(s);
             i = -i;
-            return put_opt(v, size, &i, 4);
+            return guest_value(k, put_opt(v, size, &i, 4), v, size);
         case K_RCVTIMEO:
         case K_SNDTIMEO: {
             int64_t us = k == K_RCVTIMEO ? s->rcvtimeo_us : s->sndtimeo_us;
             SnxTimeval t = {us / 1000000, us % 1000000};
-            return put_opt(v, size, &t, sizeof t);
+            return guest_value(k, put_opt(v, size, &t, sizeof t), v, size);
         }
         case K_MREQ:
         case K_MREQ6: return -SNX_ENOPROTOOPT;
@@ -831,11 +874,11 @@ int snx_net_host_getsockopt(SnxSocket* s, int level, int name, void* v, size_t* 
     if (getsockopt(s->fd, hl, hn, (char*)&h, &hs)) return snx_net_host_error();
     if (k == K_LINGER) {
         SnxLinger g = {h.l.l_onoff ? 1 : 0, h.l.l_linger};
-        return put_opt(v, size, &g, sizeof g);
+        return guest_value(k, put_opt(v, size, &g, sizeof g), v, size);
     }
-    if (k == K_ADDR4) return put_opt(v, size, &h.a, 4);
+    if (k == K_ADDR4) return guest_value(k, put_opt(v, size, &h.a, 4), v, size);
     i = h.i;
-    return put_opt(v, size, &i, 4);
+    return guest_value(k, put_opt(v, size, &i, 4), v, size);
 }
 static int host_readable_bytes(SnxSocket* s, int* bytes) {
 #ifdef _WIN32

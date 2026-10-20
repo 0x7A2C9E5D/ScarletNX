@@ -89,7 +89,15 @@ static void write_lanes(SnxIr* ir, unsigned rd, V value, unsigned q) {
                         ? LLVMGetVectorSize(type) * LLVMGetIntTypeWidth(LLVMGetElementType(type))
                         : LLVMGetIntTypeWidth(type);
     LLVMTypeRef integer = LLVMIntTypeInContext(ir->ctx, bits);
-    V packed = LLVMGetTypeKind(type) == LLVMVectorTypeKind ? LLVMBuildBitCast(B, value, integer, "") : value;
+    V packed;
+    /* the guest's lane 0 is the low bits; a big-endian target's bitcast puts a vector's element 0 in the high ones */
+    if (ir->big_endian && LLVMGetTypeKind(type) == LLVMVectorTypeKind && LLVMGetVectorSize(type) > 1) {
+        V mask[16];
+        unsigned n = LLVMGetVectorSize(type), i;
+        for (i = 0; i < n; ++i) mask[i] = ir_i32(ir, n - 1 - i);
+        value = LLVMBuildShuffleVector(B, value, value, LLVMConstVector(mask, n), "");
+    }
+    packed = LLVMGetTypeKind(type) == LLVMVectorTypeKind ? LLVMBuildBitCast(B, value, integer, "") : value;
     V full = bits == 128 ? packed : LLVMBuildZExt(B, packed, ir->t_i128, "");
     /* Scalar and D forms clear the unused upper bits. Q forms preserve all 128 result bits. */
     ir_set_vd(ir, rd, 0, LLVMBuildTrunc(B, full, ir->t_i64, ""));

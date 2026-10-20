@@ -25,6 +25,13 @@ struct SnxCodeLoader {
     SnxCodeRegion region[SNX_CODE_REGIONS];
     size_t committed;     /* bytes from the data region's start that are read-write */
     SnxLinkNames symbols; /* name -> address: the globals of earlier loads and the defined names */
+    /* PowerPC64: the arena's one TOC (its middle, so TOC-relative code reaches all of it), which every load's code
+       keeps in r2; the ABI the first load had (an ELFv1 or ELFv2 object); and where a branch enters each function of
+       the table, past ELFv2's global entry (which computes r2 from r12, unset by a branch), or at the code an ELFv1
+       descriptor names */
+    uint64_t toc;
+    unsigned abi;
+    SnxLinkNames entries;
     SnxU64 (*resolver)(void* user, const char* name); /* snx_code_set_resolver's */
     void* resolver_user;
 };

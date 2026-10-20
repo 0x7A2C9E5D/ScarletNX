@@ -121,19 +121,29 @@ typedef char snx_check_cpu_tail[sizeof(void*) != 8 || (offsetof(CPU, disp) == 85
                                     ? 1
                                     : -1];
 
-/* ---- guest memory: a flat mapping at M, no translation ---- */
-#define MP(a)       (M + (u64)(a))
+/* ---- guest memory: a flat mapping at M, no translation, holding the guest's little-endian bytes: a big-endian
+   host (ppc64) swaps what it reads and writes as numbers, as the IR emitters' ir_rd and ir_wr do ---- */
+#define MP(a) (M + (u64)(a))
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define SNX_GUEST16(v) __builtin_bswap16(v)
+#define SNX_GUEST32(v) __builtin_bswap32(v)
+#define SNX_GUEST64(v) __builtin_bswap64(v)
+#else
+#define SNX_GUEST16(v) (v)
+#define SNX_GUEST32(v) (v)
+#define SNX_GUEST64(v) (v)
+#endif
 #define RD8(a)      (*(u8*)MP(a))
-#define RD16(a)     (*(u16*)MP(a))
-#define RD32(a)     (*(u32*)MP(a))
-#define RD64(a)     (*(u64*)MP(a))
+#define RD16(a)     ((u16)SNX_GUEST16(*(u16*)MP(a)))
+#define RD32(a)     ((u32)SNX_GUEST32(*(u32*)MP(a)))
+#define RD64(a)     ((u64)SNX_GUEST64(*(u64*)MP(a)))
 #define RDS8(a)     (*(i8*)MP(a))
-#define RDS16(a)    (*(i16*)MP(a))
-#define RDS32(a)    (*(i32*)MP(a))
+#define RDS16(a)    ((i16)RD16(a))
+#define RDS32(a)    ((i32)RD32(a))
 #define WR8(a, v)   (*(u8*)MP(a) = (u8)(v))
-#define WR16(a, v)  (*(u16*)MP(a) = (u16)(v))
-#define WR32(a, v)  (*(u32*)MP(a) = (u32)(v))
-#define WR64(a, v)  (*(u64*)MP(a) = (u64)(v))
+#define WR16(a, v)  (*(u16*)MP(a) = SNX_GUEST16((u16)(v)))
+#define WR32(a, v)  (*(u32*)MP(a) = SNX_GUEST32((u32)(v)))
+#define WR64(a, v)  (*(u64*)MP(a) = SNX_GUEST64((u64)(v)))
 #define RDQ(dst, a) memcpy(&(dst), MP(a), 16)
 #define WRQ(a, src) memcpy(MP(a), &(src), 16)
 
@@ -426,8 +436,19 @@ SNX_INLINE u32 snx_cas8(u8* p, u8 expected, u8 desired) {
 u32 snx_cas128(CPU* c, u64* p, u64 o0, u64 o1, u64 n0, u64 n1);
 #define SNX_FENCE()    __atomic_thread_fence(__ATOMIC_SEQ_CST)
 /* ABI 3 made these and snx_cas128 atomic, so modules from before are refused */
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+/* the T's byte-swapped, as one access (T of 1, 2, 4 or 8 bytes) */
+#define SNX_GUEST_T(T, v)                                                                                             \
+    ((T)(sizeof(T) == 2   ? __builtin_bswap16((u16)(v))                                                              \
+         : sizeof(T) == 4 ? __builtin_bswap32((u32)(v))                                                              \
+         : sizeof(T) == 8 ? __builtin_bswap64((u64)(v))                                                              \
+                          : (v)))
+#define LDACQ(T, a)    SNX_GUEST_T(T, __atomic_load_n((T*)MP(a), __ATOMIC_SEQ_CST))
+#define STREL(T, a, v) __atomic_store_n((T*)MP(a), SNX_GUEST_T(T, (T)(v)), __ATOMIC_SEQ_CST)
+#else
 #define LDACQ(T, a)    __atomic_load_n((T*)MP(a), __ATOMIC_SEQ_CST)
 #define STREL(T, a, v) __atomic_store_n((T*)MP(a), (T)(v), __ATOMIC_SEQ_CST)
+#endif
 /* LDXR/LDAXR of 1 << sz bytes */
 SNX_INLINE u64 ldx(CPU* c, u8* M, u64 a, u32 sz) {
     u64 v;
@@ -452,11 +473,11 @@ SNX_INLINE u32 stx(CPU* c, u8* M, u64 a, u32 sz, u64 v) {
         if (sz == 0)
             stored = snx_cas8((u8*)MP(a), (u8)c->excl_val, (u8)v);
         else if (sz == 1)
-            stored = snx_cas16((u16*)MP(a), (u16)c->excl_val, (u16)v);
+            stored = snx_cas16((u16*)MP(a), SNX_GUEST16((u16)c->excl_val), SNX_GUEST16((u16)v));
         else if (sz == 2)
-            stored = snx_cas32((u32*)MP(a), (u32)c->excl_val, (u32)v);
+            stored = snx_cas32((u32*)MP(a), SNX_GUEST32((u32)c->excl_val), SNX_GUEST32((u32)v));
         else
-            stored = snx_cas64((u64*)MP(a), c->excl_val, v);
+            stored = snx_cas64((u64*)MP(a), SNX_GUEST64(c->excl_val), SNX_GUEST64(v));
     }
     c->excl_on = 0;
     return !stored;
@@ -484,7 +505,7 @@ SNX_INLINE u32 stxp(CPU* c, u8* M, u64 a, u32 sz, u64 v1, u64 v2) {
     u32 stored = 0;
     if (c->excl_on && c->excl_addr == a && c->excl_size == (sz | 0x10)) {
         if (sz == 2)
-            stored = snx_cas64((u64*)MP(a), c->excl_val, (u64)(u32)v1 | ((u64)v2 << 32));
+            stored = snx_cas64((u64*)MP(a), SNX_GUEST64(c->excl_val), SNX_GUEST64((u64)(u32)v1 | ((u64)v2 << 32)));
         else
             stored = snx_cas128(c, (u64*)MP(a), c->excl_val, c->excl_val2, v1, v2);
     }

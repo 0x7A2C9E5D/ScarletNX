@@ -6,7 +6,7 @@
 static V vlanes(SnxIr* ir, V base, unsigned size, unsigned n) {
     V load = ir_load(ir, LLVMVectorType(lane_type(ir, size), n), base);
     LLVMSetAlignment(load, 1);
-    return load;
+    return ir_guest_order(ir, load);
 }
 /* the 64-bit half of Vn that Q selects (the "2" forms read the upper one) */
 static V half_lanes(SnxIr* ir, unsigned rn, unsigned size, unsigned upper) {

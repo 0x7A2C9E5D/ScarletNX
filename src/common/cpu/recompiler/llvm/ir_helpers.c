@@ -388,9 +388,11 @@ static void build_ldx(SnxIr* ir, LLVMValueRef function) {
 /* snx_cas8..64(p,o,n): __atomic_compare_exchange_n, strong, seq_cst */
 static LLVMValueRef cas(SnxIr* ir, LLVMValueRef address, unsigned bits, LLVMValueRef expected, LLVMValueRef value) {
     LLVMTypeRef t = LLVMIntTypeInContext(ir->ctx, bits);
-    LLVMValueRef x =
-        LLVMBuildAtomicCmpXchg(B, ir_mp(ir, address), ir_cast(ir, expected, t, 0), ir_cast(ir, value, t, 0),
-                               LLVMAtomicOrderingSequentiallyConsistent, LLVMAtomicOrderingSequentiallyConsistent, 0);
+    /* the values are numbers, memory holds the guest's little-endian bytes (ir_ldacq swapped excl_val too) */
+    LLVMValueRef x = LLVMBuildAtomicCmpXchg(B, ir_mp(ir, address), ir_guest_order(ir, ir_cast(ir, expected, t, 0)),
+                                            ir_guest_order(ir, ir_cast(ir, value, t, 0)),
+                                            LLVMAtomicOrderingSequentiallyConsistent,
+                                            LLVMAtomicOrderingSequentiallyConsistent, 0);
     LLVMSetAlignment(x, bits / 8);
     return ir_bool32(ir, LLVMBuildExtractValue(B, x, 1, ""));
 }

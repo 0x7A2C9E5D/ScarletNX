@@ -33,6 +33,10 @@ static uint32_t cas_native(uint64_t* p, uint64_t o0, uint64_t o1, uint64_t n0, u
                          : "r"(new_lo), "r"(new_hi), "r"(p)
                          : "memory");
     return lo == o0 && hi == o1;
+#elif defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    /* p[0] is the integer's high half on a big-endian host */
+    snx_cas_u128 expected = ((snx_cas_u128)o0 << 64) | o1, desired = ((snx_cas_u128)n0 << 64) | n1;
+    return __atomic_compare_exchange_n((snx_cas_u128*)p, &expected, desired, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 #else
     snx_cas_u128 expected = ((snx_cas_u128)o1 << 64) | o0, desired = ((snx_cas_u128)n1 << 64) | n0;
     return __atomic_compare_exchange_n((snx_cas_u128*)p, &expected, desired, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);

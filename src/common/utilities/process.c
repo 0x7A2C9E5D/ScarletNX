@@ -170,8 +170,12 @@ static int run_stage(const char* const* argv, const char* cwd, const char* stage
     fflush(NULL);
     pid = fork();
     if (!pid) {
-        if (setpgid(0, 0)) {
-            perror("scarletnx: creating child process group");
+        /* The parent's setpgid below may have made this group already, and macOS can then refuse this one with
+           EPERM: what the stage needs is to lead its own group, whichever call made it */
+        if (setpgid(0, 0) && getpgrp() != getpid()) {
+            int error = errno;
+            fprintf(stderr, "scarletnx: creating child process group: %s (pid %ld, group %ld, session %ld)\n",
+                    strerror(error), (long)getpid(), (long)getpgrp(), (long)getsid(0));
             _exit(126);
         }
         if (tty && tcsetpgrp(STDIN_FILENO, getpgrp())) {

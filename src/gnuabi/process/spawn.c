@@ -14,6 +14,8 @@
 #define _GNU_SOURCE
 #endif
 #include "gnuabi/process/process.h"
+#include "common/utilities/endian.h"
+#include "common/cpu/recompiler/snx_recompiler.h"
 #include "gnuabi/abi/errno/errno.h"
 #include "gnuabi/filesystem/internal.h"
 #include "common/utilities/common.h"
@@ -157,6 +159,7 @@ static int read_strings(GnuProcess* p, uint64_t address, char*** out, size_t* to
             free_strings(strings);
             return -GNU_EFAULT;
         }
+        pointer = snx_le64(pointer);
         if (!pointer) break;
         for (;;) {
             unsigned char* c = gnu_memory_access(&p->memory, pointer + n, 1, GNU_PROT_READ);
@@ -367,18 +370,21 @@ static int64_t clone_process(GnuProcess* p, uint64_t flags, uint64_t stack, uint
             return error;
         }
         if (!pid) {
+            /* the compiled code the child runs, its own (a PowerPC64 host shares the arena's pages with the parent
+               otherwise) */
+            if (snx_recompiler_forked(p->jit.recompiler)) _exit(127);
             if (sync[0] >= 0) close(sync[0]);
             p->vfork_fd = sync[1];
             p->pid = p->tid = (uint32_t)getpid();
             gnu_vfs_set_pid(&p->vfs, p->pid);
             if (stack) p->cpu.x[31] = stack;
             if (flags & CLONE_SETTLS) p->cpu.tpidr = tls;
-            id = p->pid;
+            id = snx_le32(p->pid);
             if (flags & CLONE_CHILD_SETTID) (void)gnu_memory_write(&p->memory, child_tid, &id, 4);
             p->clear_tid = (flags & CLONE_CHILD_CLEARTID) ? child_tid : 0;
             return 0;
         }
-        id = (uint32_t)pid;
+        id = snx_le32((uint32_t)pid);
         if (flags & CLONE_PARENT_SETTID) (void)gnu_memory_write(&p->memory, parent_tid, &id, 4);
         if (sync[0] >= 0) {
             char byte;
@@ -411,7 +417,7 @@ static int64_t wait4_call(GnuProcess* p, const uint64_t a[6]) {
         r = waitpid((pid_t)pid, &status, host_options);
         if (r < 0) return gnu_host_errno(errno);
         if (r > 0 && a[1]) {
-            uint32_t s = guest_status(status);
+            uint32_t s = snx_le32(guest_status(status));
             if (gnu_memory_write(&p->memory, a[1], &s, 4)) return -GNU_EFAULT;
         }
         if (a[3]) {
@@ -509,8 +515,8 @@ bool gnu_spawn_syscall(GnuProcess* p, uint64_t number, const uint64_t a[6], int6
                 *result = error;
                 return true;
             }
-            out[0] = fds[0];
-            out[1] = fds[1];
+            out[0] = (int32_t)snx_le32((uint32_t)fds[0]);
+            out[1] = (int32_t)snx_le32((uint32_t)fds[1]);
             *result = gnu_memory_write(&p->memory, a[0], out, sizeof out);
             if (*result) {
                 uint64_t close_args[6] = {0};

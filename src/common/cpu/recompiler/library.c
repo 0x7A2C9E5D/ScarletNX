@@ -19,6 +19,7 @@
 #include "common/cpu/recompiler/llvm/ir.h"
 #include "common/cpu/recompiler/llvm/jit_service.h"
 #include "common/cpu/recompiler/llvm/link.h"
+#include "common/cpu/recompiler/llvm/code_loader.h"
 #include <llvm-c/Support.h>
 #include <llvm-c/TargetMachine.h>
 #include <stdarg.h>
@@ -73,6 +74,11 @@ struct snx_recompiler {
     char* keep_ir;
     char* cache; /* folder of linked modules by the hash of what they were made from (LLVM), NULL for none */
     char error[1024];
+    /* PowerPC64: the code arena every module of the recompiler is loaded into, with the runtime library once, so all
+       of them share one TOC (code_loader.h): a guest's jump from one module's code into another's keeps r2. Made by
+       the first module, freed with the last (an execve frees them all) */
+    SnxCodeLoader* arena;
+    size_t arena_modules;
 };
 
 struct snx_recompiled {
@@ -92,6 +98,7 @@ struct snx_recompiled {
     const uint64_t* entry_addresses;
     const GuestFn* entry_functions;
     size_t entry_count;
+    struct snx_recompiler* arena_owner; /* PowerPC64: the recompiler whose arena holds the module's code */
     char opt;
     /* made by the first miss (module_jit), JIT_NONE when it can't start */
     SnxJitService* jit;
@@ -155,7 +162,15 @@ void snx_recompiler_free(struct snx_recompiler* r) {
     if (r) free(r->cache);
     if (!r) return;
     free(r->keep_ir);
+    snx_code_loader_free(r->arena);
     free(r);
+}
+
+int snx_recompiler_forked(struct snx_recompiler* r) {
+    char error[512];
+    if (!r->arena || !snx_code_loader_unshare(r->arena, error, sizeof(error))) return 0;
+    fail(r, "%s", error);
+    return -1;
 }
 
 const char* snx_recompiler_error(const struct snx_recompiler* r) { return r->error; }
@@ -226,6 +241,12 @@ static SnxJitService* module_jit(struct snx_recompiled* m) {
     char error[512];
     if (s) return s == JIT_NONE ? NULL : s;
     if (!m->view_count) return NULL; /* snx_recompile_from's: the caller compiles what the module lacks */
+#if defined(__powerpc64__)
+    /* the JIT's units call the AOT module's functions directly (snx_aot_<address>) and share its table, but the
+       module has a TOC of its own, the loader's arena another: no runtime JIT there, as before PowerPC64 had a
+       loader */
+    return NULL;
+#endif
     memset(&config, 0, sizeof(config));
     config.images = m->views;
     config.image_count = m->view_count;
@@ -795,6 +816,10 @@ static char* cache_path(struct snx_recompiler* r, SnxCodegen* codegen) {
     snprintf(name, sizeof(name), "%016llx%016llx.%s", (unsigned long long)k.a, (unsigned long long)k.b,
 #ifdef _WIN32
              "dll"
+#elif defined(__powerpc64__) && defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+             "be.objs" /* the module's objects (arena_load), in the byte order they were made for */
+#elif defined(__powerpc64__)
+             "le.objs"
 #else
              "so"
 #endif
@@ -864,6 +889,7 @@ static int rtlib_object(const char* cache, char opt, const unsigned char** data,
     return rc;
 }
 
+#if !defined(__powerpc64__) /* (load_cached_objects there) */
 /* the cached module at path, loaded; nonzero when there is none or it can't be loaded (then it is made again) */
 static int load_cached(struct snx_recompiler* r, struct snx_recompiled* m, const char* path) {
     size_t size = 0;
@@ -884,6 +910,7 @@ static int load_cached(struct snx_recompiler* r, struct snx_recompiled* m, const
     r->error[0] = 0;
     return rc;
 }
+#endif
 /* saved under a temporary name first and then renamed: another process may be loading the same module */
 static void save_cached(const char* path, const unsigned char* data, size_t size) {
     static unsigned long serial;
@@ -895,6 +922,93 @@ static void save_cached(const char* path, const unsigned char* data, size_t size
     snx_remove_tree(temporary);
     free(temporary);
 }
+
+#if defined(__powerpc64__)
+/* The module's objects (its descriptor and units, not the runtime library), loaded into the recompiler's arena: made
+   with the runtime library first when there is none. The objects' globals stay the module's (each one's descriptor
+   has the same name) */
+static int arena_load(struct snx_recompiler* r, struct snx_recompiled* m, const SnxLinkInput* inputs, size_t count) {
+    const char* name = DESCRIPTOR_SYMBOL;
+    SnxU64 address = 0;
+    char error[1024];
+    if (!r->arena) {
+        SnxLinkInput rtlib;
+        r->arena = snx_code_loader_new((size_t)1 << 31, error, sizeof(error));
+        memset(&rtlib, 0, sizeof(rtlib));
+        rtlib.name = "rtlib";
+        if (!r->arena || rtlib_object(r->cache, r->opt, &rtlib.data, &rtlib.size, error, sizeof(error)) ||
+            snx_code_load(r->arena, &rtlib, 1, NULL, 0, NULL, error, sizeof(error))) {
+            fail(r, "the code arena: %s", error);
+            snx_code_loader_free(r->arena);
+            r->arena = NULL;
+            return -1;
+        }
+    }
+    if (snx_code_load_private(r->arena, inputs, count, &name, 1, &address, error, sizeof(error))) {
+        fail(r, "loading the recompiled module failed: %s", error);
+        return -1;
+    }
+    m->arena_owner = r;
+    ++r->arena_modules;
+    /* an ELFv1 function's address is its descriptor, as a pointer to it is */
+    return load_descriptor(r, m, ((DescriptorFn)(uintptr_t)address)());
+}
+
+/* The module's objects in the cache, in one file of the guest's byte order: "snx-objs", their count, then each one's
+   size and bytes, sizes as 8-byte little-endian numbers */
+static unsigned char* objects_pack(const SnxLinkInput* inputs, size_t count, size_t* size) {
+    size_t i, total = 16, at;
+    unsigned char* data;
+    for (i = 0; i < count; ++i) total += 8 + inputs[i].size;
+    data = (unsigned char*)malloc(total);
+    if (!data) return NULL;
+    memcpy(data, "snx-objs", 8);
+    snx_link_put64(data + 8, count);
+    for (i = 0, at = 16; i < count; ++i) {
+        snx_link_put64(data + at, inputs[i].size);
+        memcpy(data + at + 8, inputs[i].data, inputs[i].size);
+        at += 8 + inputs[i].size;
+    }
+    *size = total;
+    return data;
+}
+static uint64_t objects_word(const unsigned char* p) {
+    uint64_t v = 0;
+    int i;
+    for (i = 7; i >= 0; --i) v = v << 8 | p[i];
+    return v;
+}
+/* the cached module's objects at path, loaded; nonzero when there are none or they can't be (then made again) */
+static int load_cached_objects(struct snx_recompiler* r, struct snx_recompiled* m, const char* path) {
+    size_t size = 0, count, i, at = 16;
+    unsigned char* data = snx_read_file(path, &size);
+    SnxLinkInput* inputs = NULL;
+    int rc = -1;
+    if (!data || size < 16 || memcmp(data, "snx-objs", 8)) goto done;
+    count = (size_t)objects_word(data + 8);
+    if (!count || count > size / 8) goto done;
+    inputs = (SnxLinkInput*)calloc(count, sizeof(*inputs));
+    if (!inputs) goto done;
+    for (i = 0; i < count; ++i) {
+        uint64_t n;
+        if (size - at < 8 || (n = objects_word(data + at)) > size - at - 8) goto done;
+        inputs[i].data = data + at + 8;
+        inputs[i].size = (size_t)n;
+        inputs[i].name = "cached object";
+        at += 8 + (size_t)n;
+    }
+    rc = arena_load(r, m, inputs, count);
+    if (rc) {
+        free(m->dispatch);
+        m->dispatch = NULL;
+    }
+done:
+    free(inputs);
+    free(data);
+    r->error[0] = 0;
+    return rc;
+}
+#endif
 
 static int recompile_llvm(struct snx_recompiler* r, struct snx_recompiled* m, SnxCodegen* codegen) {
     Queue q;
@@ -917,7 +1031,11 @@ static int recompile_llvm(struct snx_recompiler* r, struct snx_recompiled* m, Sn
     }
     if (r->cache) {
         cached = cache_path(r, codegen);
+#if defined(__powerpc64__)
+        if (!load_cached_objects(r, m, cached)) {
+#else
         if (!load_cached(r, m, cached)) {
+#endif
             free(cached);
             return 0;
         }
@@ -975,6 +1093,19 @@ static int recompile_llvm(struct snx_recompiler* r, struct snx_recompiled* m, Sn
         inputs[n++].name = "code unit";
     }
     exports[0] = DESCRIPTOR_SYMBOL;
+#if defined(__powerpc64__)
+    /* into the arena instead of a module file of its own (arena_load): the cache keeps the objects */
+    (void)exports;
+    if (arena_load(r, m, inputs + 1, n - 1)) goto done;
+    if (cached) {
+        size_t packed_size;
+        unsigned char* packed = objects_pack(inputs + 1, n - 1, &packed_size);
+        if (packed) save_cached(cached, packed, packed_size);
+        free(packed);
+    }
+    rc = 0;
+    goto done;
+#endif
 #ifdef _WIN32
     if (snx_link(inputs, n, exports, 1, "recompiled.dll", &linked, error, sizeof(error))) {
 #else
@@ -1142,6 +1273,11 @@ struct snx_recompiled* snx_recompile_from(struct snx_recompiler* r, const struct
 
 void snx_recompiled_free(struct snx_recompiled* m) {
     if (!m) return;
+    /* the arena goes with its last module: nothing runs its code any more */
+    if (m->arena_owner && !--m->arena_owner->arena_modules) {
+        snx_code_loader_free(m->arena_owner->arena);
+        m->arena_owner->arena = NULL;
+    }
     if (m->jit && m->jit != JIT_NONE)
         snx_jit_service_free(m->jit); /* its threads stop before the code they read goes */
     free(m->views);

@@ -63,8 +63,11 @@ if(BUILD_TESTING)
     set_tests_properties(gnuabi_network PROPERTIES TIMEOUT 30)
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
-        add_test(NAME gnuabi_elf32 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/gnuabi_elf32.py"
-            $<TARGET_FILE:scarletnx-gnuabi-run>)
+        # 32-bit programs run in the A32 executor, which PowerPC64 hosts don't have yet (common/cpu/arm/exec.c)
+        if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64|ppc64le|powerpc64|powerpc64le)$")
+            add_test(NAME gnuabi_elf32 COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/gnuabi_elf32.py" $<TARGET_FILE:scarletnx-gnuabi-run>)
+        endif()
         if (NOT WIN32)
             add_test(NAME gnuabi_process COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/gnuabi_process.py"
                 $<TARGET_FILE:scarletnx-gnuabi-run>)

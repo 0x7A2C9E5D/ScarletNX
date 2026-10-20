@@ -8,6 +8,7 @@
    datagrams to the sockets. The lock order is the member's, then a socket's */
 #include "common/network/net_room.h"
 #include "common/network/net_internal.h"
+#include "common/utilities/endian.h"
 #include <enet/enet.h>
 #include <zstd.h>
 #include <stdlib.h>
@@ -619,6 +620,7 @@ static int sock_setsockopt(SnxSocket* s, int level, int name, const void* v, siz
         int value;
         if (size < sizeof value) return -SNX_EINVAL;
         memcpy(&value, v, sizeof value);
+        if (SNX_HOST_BE) value = (int)snx_le32((uint32_t)value); /* the guest's little-endian int */
         snx_lock(&k->room->lk); /* port_taken reads reuse under the member's lock */
         snx_lock(&k->lk);
         *o = name == SNX_SO_SNDBUF || name == SNX_SO_RCVBUF ? value : value != 0;
@@ -644,6 +646,7 @@ static int sock_getsockopt(SnxSocket* s, int level, int name, void* v, size_t* s
         snx_lock(&k->lk);
         value = *o;
         snx_unlock(&k->lk);
+        if (SNX_HOST_BE) value = (int)snx_le32((uint32_t)value);
         memcpy(v, &value, sizeof value);
         *size = sizeof value;
         return 0;

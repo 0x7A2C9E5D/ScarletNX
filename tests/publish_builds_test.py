@@ -26,15 +26,20 @@ FILES = [
     'ScarletNX-linux-x86_64.AppImage',
     'ScarletNX-linux-aarch64.AppImage',
     'ScarletNX-linux-ppc64le.AppImage',
+    'ScarletNX-linux-riscv64.AppImage',
+    'ScarletNX-linux-loongarch64.AppImage',
     'ScarletNX-windows-x86_64.zip',
     'ScarletNX-android-universal.apk',
     'ScarletNX-macos-arm64.zip',
     'ScarletNX-ios-arm64.ipa',
 ]
+WINDOWS = FILES.index('ScarletNX-windows-x86_64.zip')  # its field on a card
 ZSYNC = [
     'ScarletNX-linux-x86_64.AppImage.zsync',
     'ScarletNX-linux-aarch64.AppImage.zsync',
     'ScarletNX-linux-ppc64le.AppImage.zsync',
+    'ScarletNX-linux-riscv64.AppImage.zsync',
+    'ScarletNX-linux-loongarch64.AppImage.zsync',
 ]
 failures = []
 
@@ -118,6 +123,14 @@ with tempfile.TemporaryDirectory() as temporary:
             f'ScarletNX-linux-ppc64le-{short}.AppImage': {
                 'ScarletNX-linux-ppc64le.AppImage': 'elf power',
                 'ScarletNX-linux-ppc64le.AppImage.zsync': 'zsync power',
+            },
+            f'ScarletNX-linux-riscv64-{short}.AppImage': {
+                'ScarletNX-linux-riscv64.AppImage': 'elf riscv',
+                'ScarletNX-linux-riscv64.AppImage.zsync': 'zsync riscv',
+            },
+            f'ScarletNX-linux-loongarch64-{short}.AppImage': {
+                'ScarletNX-linux-loongarch64.AppImage': 'elf loong',
+                'ScarletNX-linux-loongarch64.AppImage.zsync': 'zsync loong',
             },
             f'ScarletNX-windows-x86_64-{short}': {'bin/scarletnx.exe': 'MZ', 'share/licenses/LICENSE': 'GPL'},
             f'ScarletNX-android-universal-{short}.apk': {f'ScarletNX-android-universal-{short}.apk': 'PK apk'},
@@ -332,14 +345,17 @@ with tempfile.TemporaryDirectory() as temporary:
             'Linux x86-64',
             'Linux ARM64',
             'Linux PowerPC64 LE',
+            'Linux RISC-V 64',
+            'Linux LoongArch64',
             'Windows x86-64',
             'Android',
             'macOS ARM64',
             'iOS ARM64',
+            'Linux PowerPC64 BE',
             'Source',
             'Every nightly',
         ]
-        and shown['fields'][3]['value']
+        and shown['fields'][WINDOWS]['value']
         == f'[zip](https://github.com/{TO}/releases/download/{tag}/ScarletNX-windows-x86_64.zip)\n0.0 MB'
         and all(f['inline'] for f in shown['fields'])
         and shown['url'] == f'https://github.com/{TO}/releases/tag/{tag}'
@@ -493,6 +509,8 @@ with tempfile.TemporaryDirectory() as temporary:
             'Linux AppImage (x86_64)',
             'Linux AppImage (aarch64)',
             'Linux AppImage (ppc64le)',
+            'Linux AppImage (riscv64)',
+            'Linux AppImage (loongarch64)',
             'Windows (Clang + LLVM)',
             'Android APK',
         ]
@@ -572,11 +590,12 @@ with tempfile.TemporaryDirectory() as temporary:
         shown.get('author') == {'name': 'alice', 'url': 'https://x/alice', 'icon_url': 'https://x/alice.png'}
         and shown['url'] == 'https://x/pull/7'
         and shown['color'] == 0x1F883D  # GitHub's open; the failed system says so in its field
-        and shown['fields'][3]
+        and shown['fields'][WINDOWS]
         == {'name': 'Windows x86-64', 'value': 'Failed\n[log](https://x/runs/50/Windo)', 'inline': True}
         and shown['fields'][0]['value'].startswith(f'[AppImage](https://github.com/{TO}/releases/download/pr-7/')
         and shown['fields'][len(FILES) :]
         == [
+            {'name': 'Linux PowerPC64 BE', 'value': 'Waiting', 'inline': True},
             {'name': 'Build', 'value': '[Failure](https://x/runs/50)', 'inline': True},
             {'name': 'Builds', 'value': f'[All files](https://github.com/{TO}/releases/tag/pr-7)', 'inline': True},
         ]

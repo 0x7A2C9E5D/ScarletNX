@@ -6,6 +6,7 @@
 #include "gnuabi/signals/signals.h"
 #include "gnuabi/threading/futex.h"
 #include "gnuabi/network/network.h"
+#include "common/utilities/endian.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -79,6 +80,8 @@ static int64_t dispatch(GnuProcess* p, uint64_t number, const uint64_t a[6]) {
             int64_t t[2];
             uint64_t req = number == 101 ? a[0] : a[2];
             if (gnu_memory_read(&p->memory, req, t, sizeof t)) return -GNU_EFAULT;
+            t[0] = (int64_t)snx_le64((uint64_t)t[0]);
+            t[1] = (int64_t)snx_le64((uint64_t)t[1]);
             if (t[0] < 0 || t[1] < 0 || t[1] >= 1000000000) return -GNU_EINVAL;
             if (number == 115 && (a[1] & 1)) { /* TIMER_ABSTIME: until the clock reads t */
                 int64_t now_s, now_ns;
@@ -106,7 +109,7 @@ static int64_t dispatch(GnuProcess* p, uint64_t number, const uint64_t a[6]) {
         case 153: { /* times */
             int64_t sec, ns;
             uint64_t ticks[4] = {0};
-            if (!gnu_clock_gettime(2, &sec, &ns)) ticks[0] = (uint64_t)(sec * 100 + ns / 10000000);
+            if (!gnu_clock_gettime(2, &sec, &ns)) ticks[0] = snx_le64((uint64_t)(sec * 100 + ns / 10000000));
             if (a[0] && gnu_memory_write(&p->memory, a[0], ticks, sizeof ticks)) return -GNU_EFAULT;
             if (gnu_clock_gettime(1, &sec, &ns)) return 0;
             return sec * 100 + ns / 10000000;
@@ -114,16 +117,13 @@ static int64_t dispatch(GnuProcess* p, uint64_t number, const uint64_t a[6]) {
         case 179: { /* sysinfo */
             unsigned char info[112] = {0};
             int64_t sec, ns;
-            if (!gnu_clock_gettime(1, &sec, &ns)) memcpy(info, &sec, 8);
+            if (!gnu_clock_gettime(1, &sec, &ns)) snx_st_le64(info, (uint64_t)sec);
             info[32] = 0; /* totalram etc.: an 8 GiB machine with 4 GiB free, in units of one byte */
             {
-                uint64_t total = UINT64_C(8) << 30, available = UINT64_C(4) << 30;
-                uint32_t unit = 1;
-                uint16_t procs = 1;
-                memcpy(info + 32, &total, 8);
-                memcpy(info + 40, &available, 8);
-                memcpy(info + 80, &procs, 2);
-                memcpy(info + 104, &unit, 4);
+                snx_st_le64(info + 32, UINT64_C(8) << 30);
+                snx_st_le64(info + 40, UINT64_C(4) << 30);
+                snx_st_le16(info + 80, 1);  /* procs */
+                snx_st_le32(info + 104, 1); /* mem_unit */
             }
             return gnu_memory_write(&p->memory, a[0], info, sizeof info) ? -GNU_EFAULT : 0;
         }
@@ -155,13 +155,16 @@ static int64_t dispatch(GnuProcess* p, uint64_t number, const uint64_t a[6]) {
         case GNU_NR_clock_gettime: {
             int64_t ts[2];
             result = gnu_clock_gettime((int)a[0], &ts[0], &ts[1]);
-            return result ? result : gnu_memory_write(&p->memory, a[1], ts, sizeof ts);
+            if (result) return result;
+            ts[0] = (int64_t)snx_le64((uint64_t)ts[0]);
+            ts[1] = (int64_t)snx_le64((uint64_t)ts[1]);
+            return gnu_memory_write(&p->memory, a[1], ts, sizeof ts);
         }
         case 114: { /* clock_getres */
             int64_t sec, ns;
             result = gnu_clock_gettime((int)a[0], &sec, &ns);
             if (result || !a[1]) return result;
-            int64_t resolution[2] = {0, 100};
+            int64_t resolution[2] = {0, (int64_t)SNX_LE64(100)};
             return gnu_memory_write(&p->memory, a[1], resolution, sizeof resolution);
         }
         case GNU_NR_getrandom: {
@@ -179,6 +182,8 @@ static int64_t dispatch(GnuProcess* p, uint64_t number, const uint64_t a[6]) {
             uint64_t limits[2] = {UINT64_MAX, UINT64_MAX};
             if (a[1] == 3) limits[0] = UINT64_C(0x800000);
             if (a[1] == 7) limits[0] = limits[1] = 256;
+            limits[0] = snx_le64(limits[0]);
+            limits[1] = snx_le64(limits[1]);
             return a[3] ? gnu_memory_write(&p->memory, a[3], limits, sizeof limits) : 0;
         }
         case 167: {                   /* prctl */

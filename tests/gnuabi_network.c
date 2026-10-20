@@ -5,6 +5,7 @@
 #include "gnuabi/process/process.h"
 #include "gnuabi/abi/errno/errno.h"
 #include "gnuabi/network/network.h"
+#include "common/utilities/endian.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,11 +27,15 @@ static int64_t sys(uint64_t n, uint64_t a, uint64_t b, uint64_t c, uint64_t d, u
 }
 static void put(uint64_t at, const void* v, size_t n) { CHECK(!gnu_memory_write(&process.memory, at, v, n)); }
 static void get(uint64_t at, void* v, size_t n) { CHECK(!gnu_memory_read(&process.memory, at, v, n)); }
-static void put32(uint64_t at, uint32_t v) { put(at, &v, 4); }
+/* the guest's ints, little-endian on any host */
+static void put32(uint64_t at, uint32_t v) {
+    v = snx_le32(v);
+    put(at, &v, 4);
+}
 static uint32_t get32(uint64_t at) {
     uint32_t v = 0;
     get(at, &v, 4);
-    return v;
+    return snx_le32(v);
 }
 static void quiet(const char* m) { (void)m; }
 /* a Linux sockaddr_in for 127.0.0.1:port (port in network order) at ADDR */
@@ -71,7 +76,7 @@ int main(void) {
     int s = (int)sys(GNU_NR_accept4, (uint64_t)l, ADDR, ADDRLEN, 0, 0, 0);
     CHECK(s > c && get32(ADDRLEN) == 16);
     unsigned char pfd[8] = {0};
-    memcpy(pfd, &c, 4);
+    snx_st_le32(pfd, (uint32_t)c);
     pfd[4] = 4; /* POLLOUT */
     put(POLLFDS, pfd, 8);
     CHECK(sys(GNU_NR_ppoll, POLLFDS, 1, 0, 0, 0, 0) == 1);

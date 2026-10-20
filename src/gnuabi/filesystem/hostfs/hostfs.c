@@ -10,6 +10,7 @@
 #define _GNU_SOURCE
 #endif
 #include "gnuabi/filesystem/internal.h"
+#include "common/utilities/endian.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -868,6 +869,7 @@ static int64_t host_statfs(GnuMemory* memory, const char* host, uint64_t address
 static int64_t host_utimens(GnuMemory* memory, const char* host, uint64_t times) {
     int64_t t[4];
     if (times && gnu_memory_read(memory, times, t, sizeof t)) return -GNU_EFAULT;
+    for (unsigned i = 0; i < 4; i++) t[i] = (int64_t)snx_le64((uint64_t)t[i]);
 #ifdef _WIN32
     {
         struct __utimbuf64 u;
