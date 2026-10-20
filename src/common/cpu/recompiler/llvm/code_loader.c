@@ -6,8 +6,6 @@
 #define _GNU_SOURCE /* memfd_create, syscall */
 #elif defined(__APPLE__)
 #define _DARWIN_C_SOURCE /* MAP_ANON, MAP_JIT and pthread_jit_write_protect_np besides POSIX */
-#else
-#define _POSIX_C_SOURCE 200809L /* snprintf */
 #endif
 #include "common/cpu/recompiler/llvm/code_loader_int.h"
 #include <stdio.h>
@@ -22,11 +20,12 @@
 #include <unistd.h>
 #include "common/cpu/recompiler/llvm/elf_object.h"
 #endif
-#ifdef __linux__
+#if defined(__linux__)
 #include <sys/syscall.h>
-#endif
-#ifdef __APPLE__
+#elif defined(__APPLE__)
 #include <TargetConditionals.h>
+#elif defined(__FreeBSD__)
+#include <sys/shm.h>
 #endif
 /* macOS on Apple silicon: the arena is MAP_JIT memory, which each thread sees either writable or executable
    (apple_arena), and other threads are synchronized with new code through the kernel (sync_threads) */
@@ -171,13 +170,22 @@ static int apple_arena(SnxCodeLoader* loader, char* error, size_t error_size) {
 static unsigned char* map_views(unsigned char* at, size_t size, int executable, char* error, size_t error_size) {
     void *view, *write = MAP_FAILED;
     int fd;
-#if defined(__linux__) && defined(SYS_memfd_create)
+#if defined(__sun__) || defined(__HAIKU__) || defined(__NetBSD__) || defined(__DragonFly__) || defined(__OpenBSD__)
+    fd = shm_open_anon(O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+#elif defined(__FreeBSD__)
+    fd = shm_open(SHM_ANON, O_RDWR, 0600);
+#elif defined(__APPLE__) || defined(__managarm__)
+    // macOS doesn't have memfd_create, use anonymous temporary file
+    char template_path[] = "/tmp/eden_mem_XXXXXX";
+    fd = mkstemp(template_path);
+    if (fd >= 0) {
+        unlink(template_path);
+    }
+#elif defined(__linux__) && defined(SYS_memfd_create)
     /* the system call itself: Android's C library has memfd_create only from Android 11 (API 30) */
     fd = (int)syscall(SYS_memfd_create, "snx-jit-code", 1u /* MFD_CLOEXEC */);
-#elif defined(SHM_ANON)
-    fd = shm_open(SHM_ANON, O_RDWR | O_CLOEXEC, 0600);
 #else
-    fd = -1;
+    fd = memfd_create("HostMemory", 0);
 #endif
     if (fd < 0) {
         snprintf(error, error_size, "no anonymous shared memory for the code arena");
