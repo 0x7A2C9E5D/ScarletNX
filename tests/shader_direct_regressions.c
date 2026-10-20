@@ -32,8 +32,9 @@ static const char* arithmetic_path;
 static const char* beyond_paths[3];
 static const char* attribute_paths[6];
 static const char* pexit_path;
+static const char* global_dynamic_path;
 static const char* passthrough_paths[6];
-static char* fixture_paths[66];
+static char* fixture_paths[67];
 static size_t fixture_count;
 
 static const char* fixture_path(const char* directory, const char* name) {
@@ -570,6 +571,36 @@ static void global_buffers(void) {
     code = translate(untracked + 1, 1, ST_FS, &info, &words, 1);
     check_refused(code, &info, "global memory base R2 not tracked at 58: no write before",
                   "an untracked global base without a writer says so");
+    free(code);
+    /* LEA.LO R2, R0, c[0][0x510], 4: the base plus an index, as a 64-bit address's low word (Pokemon Legends Z-A) */
+    const u64 lea[] = {0x4BD7020014470002ull, 0xEED4200000070200ull};
+    code = translate(lea, 2, ST_FS, &info, &words, 1);
+    check(code && !info.unsupported && info.ngbuf == 1 && info.gbuf_cbuf_off[0] == 0x510,
+          "an LEA of a buffer's base keeps the buffer");
+    free(code);
+    /* A load and a store through bases the tracking lost (R6 from an FMUL, as a switch's case reaches a base in
+       Pokemon Legends Z-A, issue #440) find their buffer among the tracked one when they run */
+    const u64 dynamic[] = {
+        0x4C98078014470002ull, /* MOV R2, c[0][0x510] */
+        0xEED4200000070200ull, /* LDG.E R0, [R2] */
+        FMUL_KEEP | 6,         /* R6 = an address the tracking doesn't follow */
+        0xEED4200000070608ull, /* LDG.E R8, [R6] */
+        0xEEDC200000070608ull, /* STG.E [R6], R8 */
+    };
+    code = translate(dynamic, 5, ST_FS, &info, &words, 1);
+    if (!code || info.unsupported) fprintf(stderr, "dynamic global access: %s\n", info.first_unsupported);
+    check(code && !info.unsupported && info.ngbuf == 1 && (info.gbuf_wmask & 1),
+          "untracked global accesses use the tracked buffer, which a store through them writes");
+    if (code) {
+        check(count_opcode(code, words, 247, 0xffffffffu) > 0, "an untracked access tests the buffer's range");
+        save_fixture(global_dynamic_path, code, words);
+    }
+    free(code);
+    /* an atomic, or an access with no tracked buffer to be in, is still refused */
+    const u64 dynamic_atomic[] = {0x4C98078014470002ull, 0xEED4200000070200ull, FMUL_KEEP | 6, 0xED03000000600606ull};
+    code = translate(dynamic_atomic, 4, ST_FS, &info, &words, 1);
+    check_refused(code, &info, "global memory base R6 not tracked at 78: FMUL (reg) at 68",
+                  "an untracked global atomic is refused");
     free(code);
 }
 
@@ -2224,6 +2255,7 @@ int main(int argc, char** argv) {
             attribute_paths[i] = fixture_path(argv[1], name);
         }
         pexit_path = fixture_path(argv[1], "pexit");
+        global_dynamic_path = fixture_path(argv[1], "global_dynamic");
         for (int i = 0; i < 6; i++) {
             char name[32];
             snprintf(name, sizeof name, "passthrough_%d", i);
@@ -2234,7 +2266,7 @@ int main(int argc, char** argv) {
             snprintf(name, sizeof name, "audit_%d", i);
             audit_paths[i] = fixture_path(argv[1], name);
         }
-        if (fixture_count != 66) {
+        if (fixture_count != 67) {
             fprintf(stderr, "failed to allocate fixture paths\n");
             return 2;
         }

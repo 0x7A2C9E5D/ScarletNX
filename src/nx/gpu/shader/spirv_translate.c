@@ -1863,6 +1863,102 @@ static u32* direct_reject_with_buffers(ShaderInfo* si, const char* reason, u32* 
     return direct_reject(si, reason);
 }
 
+/* gb_at's mark for an access whose buffer is found when it runs (global_dynamic) */
+#define GB_DYNAMIC 254
+
+/* A global memory access at i whose base register (reg) the tracking lost, and that can't be found among the
+   program's buffers when it runs (an atomic, a sub-word access, or no tracked buffer at all). The reason names the
+   last instruction before it that wrote the base, so a log shows what to add without the program */
+static u32* untracked_reject(ShaderInfo* si, const u64* insn, u32 i, u32 reg, u8* gb_at, u32* pop_targets) {
+    const Op* writer = NULL;
+    u32 at = i;
+    while (!writer && at > 11) {
+        const Op* o;
+        at--;
+        o = IDX_OK(at) ? decode(insn[at]) : NULL;
+        if (o && shader_writes_reg(insn[at], o->id, reg)) writer = o;
+    }
+    free(gb_at);
+    free(pop_targets);
+    if (writer)
+        snprintf(si->first_unsupported, sizeof si->first_unsupported,
+                 "global memory base R%u not tracked at %x: %s at %x", reg, i * 8, writer->name, at * 8);
+    else
+        snprintf(si->first_unsupported, sizeof si->first_unsupported,
+                 "global memory base R%u not tracked at %x: no write before", reg, i * 8);
+    si->unsupported++;
+    return NULL;
+}
+
+/* An LDG or STG of whole words whose base register the tracking lost (gb_at's GB_DYNAMIC): as Eden's SPIR-V backend
+   does for such an access (DefineGlobalMemoryFunctions), its 64-bit address is compared with each buffer the
+   program binds (cbuf 0's descriptor at gbuf_off, address and size), and the buffer that holds it is accessed.
+   Without .E (bit 45) the address is the register zero-extended; the 24-bit offset is signed. A load from an address
+   in none of them reads 0, and a store there is dropped, where the console would fault. The buffers' sizes are those
+   the renderer binds (vk_gbuf_desc: 16 bytes for 0, at most 16 MiB) */
+static void global_dynamic(DirectCtx* c, int stage, u64 w, int op, const u32* gbuf_off, int ngbuf) {
+    u32 a = B(w, 8, 8), d = B(w, 0, 8), words = B(w, 48, 3) == 5 ? 2 : B(w, 48, 3) >= 6 ? 4 : 1, k;
+    /* an absolute address (RZ) has an unsigned offset, as Eden reads it */
+    i32 offset = a == 255 ? (i32)B(w, 20, 24) : (i32)(B(w, 20, 24) << 8) >> 8;
+    u32 lo = reg_read(c, a), hi = B(w, 45, 1) && a < 255 ? reg_read(c, a + 1) : c->zero;
+    u32 address =
+        spv_emit_iadd_u32(&c->emit, c->u32_type, lo, spv_emit_constant_u32(&c->emit, c->u32_type, (u32)offset));
+    /* the offset's carry into the high word, or its borrow */
+    u32 wrapped = offset < 0 ? spv_emit_u_less(&c->emit, c->bool_type, lo, address)
+                             : spv_emit_u_less(&c->emit, c->bool_type, address, lo);
+    u32 one = spv_emit_constant_u32(&c->emit, c->u32_type, 1);
+    u32 carry = spv_emit_select(&c->emit, c->u32_type, wrapped, one, c->zero);
+    u32 data[4];
+    hi = offset < 0 ? spv_emit_isub_u32(&c->emit, c->u32_type, hi, carry)
+                    : spv_emit_iadd_u32(&c->emit, c->u32_type, hi, carry);
+    for (k = 0; k < words; k++) data[k] = op == O_STG ? reg_read(c, d + k) : c->zero;
+    if (op == O_LDG)
+        for (k = 0; k < words; k++) reg_write(c, d + k, c->zero);
+    for (int slot = 0; slot < ngbuf; slot++) {
+        u32 then_label, merge_label, base_lo, base_hi, size, relative, borrow, inside;
+        if (gbuf_off[slot] == 0xb0) continue; /* the vertex stage's bare pointer, a buffer of its own */
+        base_lo = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot]));
+        base_hi = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot] + 4));
+        size = cbuf_read_dynamic(c, 0, spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot] + 8));
+        size = spv_emit_select(&c->emit, c->u32_type, spv_emit_i_equal(&c->emit, c->bool_type, size, c->zero),
+                               spv_emit_constant_u32(&c->emit, c->u32_type, 16), size);
+        size = spv_emit_select(
+            &c->emit, c->u32_type,
+            spv_emit_u_less(&c->emit, c->bool_type, spv_emit_constant_u32(&c->emit, c->u32_type, 16u << 20), size),
+            spv_emit_constant_u32(&c->emit, c->u32_type, 16u << 20), size);
+        relative = spv_emit_isub_u32(&c->emit, c->u32_type, address, base_lo);
+        borrow = spv_emit_select(&c->emit, c->u32_type, spv_emit_u_less(&c->emit, c->bool_type, address, base_lo), one,
+                                 c->zero);
+        /* inside: the high words' difference, less the low words' borrow, is 0, and the low one is under the size
+           (each access's words lie within the binding, as the tracked path's do) */
+        inside = spv_emit_select(
+            &c->emit, c->u32_type, spv_emit_u_less(&c->emit, c->bool_type, relative, size),
+            spv_emit_isub_u32(&c->emit, c->u32_type, spv_emit_isub_u32(&c->emit, c->u32_type, hi, base_hi), borrow),
+            one);
+        inside =
+            spv_emit_i_equal(&c->emit, c->bool_type, inside, c->zero); /* before the merge, which precedes the branch */
+        then_label = spv_emit_id(&c->emit);
+        merge_label = spv_emit_id(&c->emit);
+        spv_emit_selection_merge(&c->emit, merge_label);
+        spv_emit_branch_conditional(&c->emit, inside, then_label, merge_label);
+        spv_emit_label(&c->emit, then_label);
+        for (k = 0; k < words; k++) {
+            u32 word = spv_emit_iadd_u32(&c->emit, c->u32_type,
+                                         spv_emit_shift_right_u32(&c->emit, c->u32_type, relative,
+                                                                  spv_emit_constant_u32(&c->emit, c->u32_type, 2)),
+                                         spv_emit_constant_u32(&c->emit, c->u32_type, k));
+            u32 ptr = spv_emit_storage_access_u32(&c->emit, c->gbuf_pointer, c->gbuf[slot], c->zero,
+                                                  gbuf_word_index(c, stage, (u32)slot, word));
+            if (op == O_STG)
+                spv_emit_store(&c->emit, ptr, data[k]);
+            else
+                reg_write(c, d + k, spv_emit_load(&c->emit, c->u32_type, ptr));
+        }
+        spv_emit_branch(&c->emit, merge_label);
+        spv_emit_label(&c->emit, merge_label);
+    }
+}
+
 u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, size_t* word_count, int can_flush,
                      int can_preserve, int can_preserve_f64, int can_subgroup) {
     u32 clip;
@@ -2247,6 +2343,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if (d != 255 && d + count > 256) return direct_reject(si, "global memory register range");
             for (u32 k = 0; k < count; k++)
                 if (d + k < 255) used[d + k] = 1;
+            /* a 64-bit address's high word, which an access whose buffer is found when it runs compares */
+            if (B(insn[i], 45, 1) && a + 1 < 255) used[a + 1] = 1;
         }
         if (op->id == O_RED && d < 255) used[d] = 1;
         if (op->id == O_ATOM && b < 255) used[b] = 1;
@@ -2877,6 +2975,9 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
     int gtags[255] = {0}, ngbuf = 0;
     u32 gbuf_wmask = 0;
     u32 gbuf_off[16] = {0};
+    /* the first access whose base the tracking lost (0 for none), its register, and whether one of them stores */
+    u32 untracked_at = 0, untracked_reg = 0;
+    int untracked_store = 0;
     for (u32 i = 11; i < n; i++) {
         u32 second;
         u32 r;
@@ -2919,32 +3020,29 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
         else if (op == O_ISCADD_R && B(w, 48, 2) != 1 && b < 255)
             tag = gtags[b];
+        /* LEA's low word adds the base the same way, with its carry out for the high word's LEA.HI.X; negated
+           (bit 45) or with a carry in (bit 46) it is no base plus an index */
+        else if (op == O_LEA_LC && !B(w, 45, 2))
+            tag = gbuf_tag(stage, B(w, 34, 5), B(w, 20, 14) * 4);
+        else if (op == O_LEA_LR && !B(w, 45, 2) && b < 255)
+            tag = gtags[b];
         if (tag == 0xb1 && op != O_MOV_C && op != O_LDC && op != O_MOV_R) tag = 0;
         if (op == O_LDG || op == O_STG || op == O_RED || op == O_ATOM || op == O_ATOM_CAS) {
             int current = a < 255 ? gtags[a] : 0, slot = 0;
-            if (!current) {
-                /* name the last instruction before it that wrote the base, the form the tracking above lacks (or
-                   the load it came from), so a log shows what to add without the program */
-                const Op* writer = NULL;
-                u32 at = i;
-                while (!writer && at > 11) {
-                    const Op* o;
-                    at--;
-                    o = IDX_OK(at) ? decode(insn[at]) : NULL;
-                    if (o && shader_writes_reg(insn[at], o->id, a)) writer = o;
+            if (!current && (op == O_LDG || op == O_STG) && B(w, 48, 3) >= 4) {
+                /* the address came along a path the tracking doesn't follow (a switch's case, a loop): it is found
+                   among the program's tracked buffers when it runs (global_dynamic) */
+                gb_at[i] = GB_DYNAMIC;
+                untracked_store |= op == O_STG;
+                if (!untracked_at) {
+                    untracked_at = i;
+                    untracked_reg = a;
                 }
-                free(gb_at);
-                free(pop_targets);
-                if (writer)
-                    snprintf(si->first_unsupported, sizeof si->first_unsupported,
-                             "global memory base R%u not tracked at %x: %s at %x", a, i * 8, writer->name, at * 8);
-                else
-                    snprintf(si->first_unsupported, sizeof si->first_unsupported,
-                             "global memory base R%u not tracked at %x: no write before", a, i * 8);
-                si->unsupported++;
-                return NULL;
-            }
-            if (current == 0xcbe) {
+            } else if (!current) {
+                untracked_at = i;
+                untracked_reg = a;
+                return untracked_reject(si, insn, untracked_at, untracked_reg, gb_at, pop_targets);
+            } else if (current == 0xcbe) {
                 if (op != O_STG) {
                     free(gb_at);
                     free(pop_targets);
@@ -2985,6 +3083,13 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             if (shader_writes_reg(w, op, r)) gtags[r] = 0;
         if (shader_writes_reg(w, op, d)) gtags[d] = tag;
     }
+    /* an untracked access needs a tracked buffer to be in; one that stores may write any of them */
+    for (int slot = 0; untracked_at && slot < ngbuf; slot++)
+        if (gbuf_off[slot] != 0xb0) {
+            untracked_at = 0;
+            if (untracked_store) gbuf_wmask |= (1u << ngbuf) - 1;
+        }
+    if (untracked_at) return untracked_reject(si, insn, untracked_at, untracked_reg, gb_at, pop_targets);
 
     /* A zero skip bit forwards that scalar from the input primitive. */
     if (passthrough) {
@@ -4365,6 +4470,8 @@ u32* shader_to_spirv(const u8* code, u32 max_bytes, int stage, ShaderInfo* si, s
             }
         } else if (op == O_STG && gb_at[i] == 255) {
             /* SR_DIRECTCBEWRITEENABLED is zero: use the shader's ordinary attribute-export path. */
+        } else if ((op == O_LDG || op == O_STG) && gb_at[i] == GB_DYNAMIC) {
+            global_dynamic(c, stage, w, op, gbuf_off, ngbuf);
         } else if (op == O_LDG || op == O_STG) {
             u32 slot = gb_at[i] - 1;
             u32 offset = spv_emit_constant_u32(&c->emit, c->u32_type, gbuf_off[slot]);
