@@ -240,8 +240,8 @@ notices of what older versions did that this one does otherwise (only said, noth
 question and choices come as the theme's `[body] options-dialog` places a question ([Themes](#themes)), over the boxes
 without darkening them; its tip, and what a choice did or why it did not, are in the foot. Up/Down (or the mouse)
 move between the choices, Enter takes one and ESC goes back a page, on the first page asking whether to exit. The
-notices come one a page, numbered (Changed 1/8), each read before the setup goes on: Enter, Right or Next the next one,
-Left the one before, and OK on the last.
+notices come one a page, numbered (Changed 1/8), each read before the setup goes on: Next the next one, Back (from the
+second) the one before, and OK on the last.
 
 - **Language**: the menu's languages, starting on the one it has; one picked over it is kept in `app.ini`.
 - **Install**: Installed, or Portable, which makes `.scarletnx/` beside the program and moves the menu's own files

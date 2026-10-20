@@ -68,11 +68,16 @@ static int page(const App* app) { return setup_page_of(app); }
 static GuiRgb head_ink(const App* app) {
     return app->theme.panels == GUI_PANELS_FILL ? app->theme.page : app->theme.ink;
 }
-/* the page's first choice, as its question shows it */
+/* the page's choice in focus, and the one before it (NULL for none), as its question shows them */
 static const char* choice_label(const App* app) {
     const char* labels[4];
-    assert(setup_labels(app, labels) >= 1);
-    return labels[0];
+    assert(setup_labels(app, labels) > app->setup_choice.focus);
+    return labels[app->setup_choice.focus];
+}
+static const char* choice_before(const App* app) {
+    const char* labels[4];
+    assert(setup_labels(app, labels) > app->setup_choice.focus);
+    return app->setup_choice.focus ? labels[app->setup_choice.focus - 1] : NULL;
 }
 /* a and b one folder however each is written: the menu keeps a folder it takes resolved (snx_absolute), with
    Windows' separators where snx_path_join wrote '/' */
@@ -106,8 +111,8 @@ static void test_first(App* app) {
     shows(app, "Changed in older versions", rgb(app->theme.page)); /* YoRHa's: in the box of ink at the foot */
     shows(app, "Notice", rgb(app->theme.page));                    /* the tab shown, inverted */
     shows(app, "1 Language", rgb(app->theme.ink));
-    /* the notices one a page, 1/n, read to the last before the setup goes on: Enter or Right the next, Left back, and
-       Next is OK on the last only; ESC asks to exit, as the menu's */
+    /* the notices one a page, 1/n, read to the last before the setup goes on: Next, Back past the first (the focus
+       kept on it while pressed), and OK on the last only; ESC asks to exit, as the menu's */
     {
         int list[SNX_NOTICES], n = setup_notices(app, list);
         char head[32];
@@ -116,14 +121,25 @@ static void test_first(App* app) {
         assert(n > 2 && !strcmp(choice_label(app), "Next"));
         notices = n;
     }
+    assert(app->setup_choice.count == 1 && !choice_before(app));
     key(app, SDLK_RETURN);
     assert(page(app) == SETUP_NOTICE && app->setup_top == 1);
-    key(app, SDLK_RIGHT);
-    assert(app->setup_top == 2);
-    key(app, SDLK_LEFT);
-    key(app, SDLK_LEFT);
-    key(app, SDLK_LEFT);
-    assert(app->setup_top == 0);
+    assert(!strcmp(choice_label(app), "Next") && choice_before(app) && !strcmp(choice_before(app), "Back"));
+    key(app, SDLK_RETURN);
+    key(app, SDLK_LEFT); /* to Back */
+    assert(app->setup_top == 2 && !strcmp(choice_label(app), "Back"));
+    key(app, SDLK_RETURN);
+    assert(app->setup_top == 1 && !strcmp(choice_label(app), "Back"));
+    key(app, SDLK_RETURN);
+    assert(app->setup_top == 0 && app->setup_choice.count == 1 && !strcmp(choice_label(app), "Next"));
+    {
+        GuiSetupBoxes c;
+        key(app, SDLK_RETURN); /* Back with the mouse, from the second */
+        render(app);
+        setup_boxes(app, &c);
+        point(app, list_box(&c.choices.list, 0), true);
+        assert(app->setup_top == 0);
+    }
     for (int i = 0; i < notices - 1; ++i) key(app, SDLK_RETURN);
     assert(page(app) == SETUP_NOTICE && app->setup_top == notices - 1);
     render(app);
@@ -132,7 +148,7 @@ static void test_first(App* app) {
         snprintf(head, sizeof head, "Changed %d/%d", notices, notices);
         shows(app, head, rgb(head_ink(app)));
     }
-    assert(!strcmp(choice_label(app), "OK"));
+    assert(!strcmp(choice_label(app), "OK") && !strcmp(choice_before(app), "Back"));
     key(app, SDLK_ESCAPE);
     assert(app->confirm.shown && app->confirm.ask == GUI_ASK_EXIT);
     key(app, SDLK_ESCAPE);

@@ -4604,7 +4604,7 @@ static void form_pointer(App* app, float x, float y, bool touch) {
 #define SAY_SETUP        SNX_TR_KEYS("Up/Down: choose. Enter: next. ESC: back.")
 #define SAY_SETUP_FIRST  SNX_TR_KEYS("Up/Down: choose. Enter: next. ESC: exit.")
 #define SAY_SETUP_TYPING SNX_TR_KEYS("Type the nickname. Enter: done. ESC: back.")
-#define SAY_SETUP_NOTICE SNX_TR_KEYS("Left/Right: the notices. Enter: next, OK on the last. ESC: exit.")
+#define SAY_SETUP_NOTICE SNX_TR_KEYS("Left/Right: choose. Enter: take it. ESC: exit.")
 #endif
 #define SAY_SETUP_NICKNAME SNX_TR_NOOP("nickname 4 to 20 of A-Z a-z 0-9 space . _ -")
 #define GUI_SETUP_CHOICES  32 /* a page's, at most: the languages' */
@@ -4646,6 +4646,12 @@ static void setup_type(App* app) {
     app->setup_choice.focus = 0;
     SDL_StartTextInput(app->window);
 }
+/* the notices' choices: Next (OK on the last), Back before it past the first; the focus on Back while back says so and
+   there is one, else on Next */
+static void notice_choices(App* app, bool back) {
+    app->setup_choice.count = app->setup_top > 0 ? 2 : 1;
+    app->setup_choice.focus = back && app->setup_top > 0 ? 0 : app->setup_choice.count - 1;
+}
 /* the page shown from its start: its choices, the one in focus the one in use */
 static void setup_enter(App* app) {
     int page = setup_page_of(app);
@@ -4681,7 +4687,7 @@ static void setup_enter(App* app) {
             app->setup_choice.count = 2; /* Keep, Overwrite */
             if (!app->setup_written) setup_type(app);
             break;
-        default: app->setup_choice.count = 1; break; /* the notices' OK */
+        default: notice_choices(app, false); break; /* the notices' Next or OK, Back past the first */
     }
 }
 /* the setup at the start, unless --debug or --skip twice leave it out: the pages setup.ini has left, or none */
@@ -4863,12 +4869,18 @@ static void setup_take(App* app) {
             else
                 setup_next(app);
             return;
-        case SETUP_NOTICE: { /* each notice read before the setup goes on, as terms are */
+        case SETUP_NOTICE: { /* each notice read before the setup goes on, as terms are; Back the one before */
             int list[SNX_NOTICES];
-            if (app->setup_top < setup_notices(app, list) - 1)
+            bool back = app->setup_choice.count == 2 && !app->setup_choice.focus;
+            if (back)
+                --app->setup_top;
+            else if (app->setup_top < setup_notices(app, list) - 1)
                 ++app->setup_top;
-            else
+            else {
                 setup_next(app);
+                return;
+            }
+            notice_choices(app, back);
             return;
         }
         default: setup_next(app); return;
@@ -4902,11 +4914,6 @@ static int setup_notices(const App* app, int* list) {
     return n;
 }
 static void setup_key(App* app, GuiKey key) {
-    if (setup_page_of(app) == SETUP_NOTICE && (key == GUI_LEFT || key == GUI_RIGHT)) { /* the notices, one a page */
-        int list[SNX_NOTICES], n = setup_notices(app, list);
-        app->setup_top = SDL_clamp(app->setup_top + (key == GUI_LEFT ? -1 : 1), 0, SDL_max(n - 1, 0));
-        return;
-    }
     switch (gui_choice_key(&app->setup_choice, key)) {
         case GUI_CHOICE_TAKE: setup_take(app); break;
         case GUI_CHOICE_BACK: setup_back(app); break;
@@ -4959,6 +4966,7 @@ static int setup_labels(const App* app, const char** labels) {
                     : page == SNX_SETUP_FOLDERS                    ? snx_tr(folders[i])
                     : page == SNX_SETUP_KEYS                       ? snx_tr(keys[i + 3 - count])
                     : page == SNX_SETUP_USER && !app->setup_typing ? snx_tr(user[i])
+                    : page == SETUP_NOTICE && i < count - 1                                 ? snx_tr("Back")
                     : page == SETUP_NOTICE && app->setup_top < setup_notices(app, list) - 1 ? snx_tr("Next")
                                                                                             : snx_tr("OK");
     return count;

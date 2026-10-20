@@ -1145,7 +1145,7 @@ msgstr ""
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
-msgid "Left/Right: the notices. Enter: next, OK on the last. ESC: exit."
+msgid "Left/Right: choose. Enter: take it. ESC: exit."
 msgstr ""
 
 #: src/gui/main.c
