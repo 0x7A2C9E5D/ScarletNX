@@ -239,7 +239,6 @@ jobs:
         run: |
           waiting=(
             extraction_native  # hactool/filepath.c:97: a RomFS name read with %s past the end of the file table
-            hactool_layers     # hactool/nca.c:1539: a RomFS file entry, at a 4-byte offset, read as 8-byte aligned
             jit_service        # recompiler/llvm/elf_object.c:42: an ELF header read at an odd address
             elf_relocate       # recompiler/llvm/link_elf.c:407: memcpy from a null buffer of no relocations
             ipc_message        # nx/hle/kernel/ipc.c:652: memset of a null message buffer, size 0

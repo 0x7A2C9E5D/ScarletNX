@@ -1528,16 +1528,17 @@ static int nca_visit_romfs_file(nca_section_ctx_t *ctx, uint32_t file_offset, fi
     int found_any_file = 0;
 
     do {
-        romfs_fentry_t *entry;
+        romfs_fentry_t fields, *entry = &fields;
+        const char *name;
         if (ctx->type == ROMFS) {
-            entry = romfs_get_fentry(ctx->romfs_ctx.files, file_offset);
+            name = romfs_get_fentry(ctx->romfs_ctx.files, file_offset, entry);
         } else {
-            entry = romfs_get_fentry(ctx->bktr_ctx.files, file_offset);
+            name = romfs_get_fentry(ctx->bktr_ctx.files, file_offset, entry);
         }
 
         filepath_copy(cur_path, dir_path);
         if (entry->name_size) {
-            filepath_append_n(cur_path, entry->name_size, "%s", entry->name);
+            filepath_append_n(cur_path, entry->name_size, "%s", name);
         }
 
         int found_file = 1;
@@ -1580,11 +1581,12 @@ static int nca_visit_nca0_romfs_file(nca_section_ctx_t *ctx, uint32_t file_offse
     int found_any_file = 0;
 
     do {
-        romfs_fentry_t *entry = romfs_get_fentry(ctx->nca0_romfs_ctx.files, file_offset);
+        romfs_fentry_t fields, *entry = &fields;
+        const char *name = romfs_get_fentry(ctx->nca0_romfs_ctx.files, file_offset, entry);
 
         filepath_copy(cur_path, dir_path);
         if (entry->name_size) {
-            filepath_append_n(cur_path, entry->name_size, "%s", entry->name);
+            filepath_append_n(cur_path, entry->name_size, "%s", name);
         }
 
         int found_file = 1;
