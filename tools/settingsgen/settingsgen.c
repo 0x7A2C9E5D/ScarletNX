@@ -608,7 +608,8 @@ static void fill_passes(int table) {
         if (pipelines[l]) pipeline_passes(pipelines[l], l, &names, &levels, &n);
     for (i = 0; i < n; i++) {
         char* auto_name = cat3("LLVM pass ", names[i], "");
-        char* key = cat3("llvm_pass_", snake(names[i]), "");
+        char* member = snake(names[i]);
+        char* key = cat3("llvm_pass_", member, "");
         Setting* s = new_llvm(table, L_PASS, names[i], auto_name, key);
         s->type = T_INT;
         s->lo = dup("0");
@@ -631,6 +632,7 @@ static void fill_passes(int table) {
             free(head);
         }
         free(auto_name);
+        free(member);
         free(key);
         free(names[i]);
     }
