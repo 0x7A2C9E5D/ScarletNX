@@ -175,9 +175,6 @@ void gmem_w32(u64 gva, u32 v);
 /* the byte offset of (x_bytes, y, z) in a block linear surface width_bytes wide and height rows high, with blocks of
    2^bh_log2 GOBs high and 2^bd_log2 deep (the caller shrinks them for small surfaces, as the hardware does) */
 u64 bl_offset(u32 x_bytes, u32 y, u32 z, u32 width_bytes, u32 height, u32 bh_log2, u32 bd_log2);
-/* a block linear surface w_bytes x h (one slice) to pitch linear rows of dst_pitch bytes, and back */
-void deswizzle(u8* dst, u32 dst_pitch, const u8* src, u32 w_bytes, u32 h, u32 bh_log2);
-void swizzle(u8* dst, const u8* src, u32 src_pitch, u32 w_bytes, u32 h, u32 bh_log2);
 /* an inline-to-memory launch from an engine's registers (regs[base] is LINE_LENGTH_IN, regs[base + 0xC] the launch),
    and its data words */
 void i2m_launch(GpuChannel* ch, u32* regs, int base);

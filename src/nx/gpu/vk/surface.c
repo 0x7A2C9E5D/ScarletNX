@@ -14,6 +14,7 @@
 #include "nx/runtime/platform/plat.h"
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/vk/pending_pages.h"
+#include "nx/gpu/texture/blocklinear.h"
 
 #define SURFH 4096
 static Surf* g_surfh[SURFH];
@@ -247,6 +248,74 @@ static void rt_pages(const Surf* s, int delta) {
 }
 int vk_surf_can_writeback(const Surf* s) { return s && s->f.raw && !s->f.depth && moves_scaled(s); }
 
+/* s's layers, in rows of pitch bytes from off in buf, copied into its image (scaled when it is) */
+static void rt_load_copy(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 off, u32 pitch) {
+    u64 slice = (u64)pitch * s->h;
+    vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+                VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    for (u32 layer = 0; layer < s->layers; layer++) {
+        VkBufferImageCopy c = {.bufferOffset = off + (u64)layer * slice,
+                               .bufferRowLength = pitch / s->f.bpp,
+                               .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1},
+                               .imageExtent = {s->w, s->h, 1}};
+        VmaAllocation tm;
+        VkImage t = s->sw == s->w && s->sh == s->h ? VK_NULL_HANDLE : vk_unscaled_image(s, 1, &tm);
+        if (!t)
+            rec_CmdCopyBufferToImage(cb, buf, s->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+        else {
+            c.imageSubresource.baseArrayLayer = 0;
+            vk_barrier(cb, t, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED,
+                       VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            rec_CmdCopyBufferToImage(cb, buf, t, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+            vk_barrier(cb, t, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_BLIT_BIT,
+                       VK_ACCESS_2_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            scale_blit(cb, t, s->w, s->h, 0, s->img, s->sw, s->sh, layer, s->f.is_int);
+            vk_defer_image(t, tm, VK_NULL_HANDLE, VK_NULL_HANDLE);
+        }
+    }
+}
+static void rt_loaded(Surf* s) {
+    s->mem_wgen = s->wgen; /* memory and image hold the same now: nothing to write back */
+    s->draw_wseen = 0;     /* a successful full load starts a new source epoch for later draws */
+    s->gw = gpu_mem_generation();
+}
+/* the moves of a block linear target's layers: one of every slice of a volume, one a layer of an array (each layer
+   at layer_size from the last, where the layout starts again) */
+static VkBlMove rt_bl_move(const Surf* s, u32 pitch) {
+    VkBlMove m = {s->w * s->f.bpp, s->h, bl_height(s->h, s->bh), 0, 0, s->h, 0, 1, pitch};
+    if (s->volume) {
+        m.bd = s->bd;
+        m.slices = s->layers;
+    }
+    return m;
+}
+/* a block linear target loaded: its guest bytes staged as they are, from where they are, and deswizzled on the GPU */
+static void rt_reload_bl(Surf* s) {
+    u64 sz = rt_bytes(s);
+    u32 pitch = (s->w * s->f.bpp + 15) & ~15u, moves = s->volume ? 1 : s->layers;
+    VkBlMove m = rt_bl_move(s, pitch);
+    u64 lin = (u64)pitch * s->h * s->layers, cap;
+    VkBuffer staged, scratch;
+    u64 off;
+    vk_render_end();
+    u8* p = vk_stage(sz, vk_stage_align(), &staged, &off);
+    if (!p || !(scratch = vk_bl_scratch(lin, &cap))) return;
+    const u8* src = gmem_ptr(s->gva, sz);
+    if (src)
+        memcpy(p, src, sz);
+    else
+        gmem_read(s->gva, p, sz);
+    VkCommandBuffer cb = vk_cmd();
+    vk_bl_barrier(cb, 1);
+    for (u32 i = 0; i < moves; i++)
+        if (!vk_bl_move(cb, &m, 0, staged, off + (u64)i * s->layer_size, scratch, (u64)i * pitch * s->h)) return;
+    vk_bl_barrier(cb, 0);
+    rt_load_copy(cb, s, scratch, 0, pitch);
+    rt_loaded(s);
+}
+
 void vk_rt_reload(u64 gva) {
     Surf* s = vk_rt_find(gva);
     if (!s) return;
@@ -259,6 +328,10 @@ void vk_rt_reload(u64 gva) {
         s->layout = VK_IMAGE_LAYOUT_UNDEFINED;
         s->draw_wseen = 0;
         s->gw = gpu_mem_generation();
+        return;
+    }
+    if (s->bl) {
+        rt_reload_bl(s);
         return;
     }
     u64 sz = rt_bytes(s), row = (u64)s->w * s->f.bpp;
@@ -277,48 +350,12 @@ void vk_rt_reload(u64 gva) {
     u8* p = vk_stage(slice * s->layers, s->f.bpp, &buf, &off);
     if (p) {
         for (u32 layer = 0; layer < s->layers; layer++) {
-            const u8* layer_src = s->volume && s->bl ? src : src + (u64)layer * s->layer_size;
+            const u8* layer_src = src + (u64)layer * s->layer_size;
             u8* layer_dst = p + (u64)layer * slice;
-            if (s->volume && s->bl) {
-                u32 bh = bl_height(s->h, s->bh);
-                for (u32 y = 0; y < s->h; y++)
-                    for (u32 x = 0; x < row; x += 16) {
-                        u32 n = row - x < 16 ? (u32)(row - x) : 16;
-                        memcpy(layer_dst + y * row + x, src + bl_offset(x, y, layer, (u32)row, s->h, bh, s->bd), n);
-                    }
-            } else if (s->bl)
-                deswizzle(layer_dst, (u32)row, layer_src, (u32)row, s->h, bl_height(s->h, s->bh));
-            else
-                for (u32 y = 0; y < s->h; y++) memcpy(layer_dst + y * row, layer_src + (u64)y * s->pitch, row);
+            for (u32 y = 0; y < s->h; y++) memcpy(layer_dst + y * row, layer_src + (u64)y * s->pitch, row);
         }
-        VkCommandBuffer cb = vk_cmd();
-        vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
-                    VK_ACCESS_2_TRANSFER_WRITE_BIT);
-        for (u32 layer = 0; layer < s->layers; layer++) {
-            VkBufferImageCopy c = {.bufferOffset = off + (u64)layer * slice,
-                                   .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1},
-                                   .imageExtent = {s->w, s->h, 1}};
-            VmaAllocation tm;
-            VkImage t = s->sw == s->w && s->sh == s->h ? VK_NULL_HANDLE : vk_unscaled_image(s, 1, &tm);
-            if (!t)
-                rec_CmdCopyBufferToImage(cb, buf, s->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
-            else {
-                c.imageSubresource.baseArrayLayer = 0;
-                vk_barrier(cb, t, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED,
-                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-                rec_CmdCopyBufferToImage(cb, buf, t, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
-                vk_barrier(cb, t, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COPY_BIT,
-                           VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
-                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-                scale_blit(cb, t, s->w, s->h, 0, s->img, s->sw, s->sh, layer, s->f.is_int);
-                vk_defer_image(t, tm, VK_NULL_HANDLE, VK_NULL_HANDLE);
-            }
-        }
-        s->mem_wgen = s->wgen; /* memory and image hold the same now: nothing to write back */
-        s->draw_wseen = 0;     /* a successful full load starts a new source epoch for later draws */
-        s->gw = gpu_mem_generation();
+        rt_load_copy(vk_cmd(), s, buf, off, (u32)row);
+        rt_loaded(s);
     }
     free(tmp);
 }
@@ -331,20 +368,21 @@ static int depth_copies_raw(const Surf* s) {
 }
 /* the bytes s's pixels take read back, or 0 when they don't go to memory: a format guest memory can't hold as it is, no
    pixels, or not drawn to since it was last written back or loaded (memory has it already, and a CPU write since then
-   is newer than the target) */
+   is newer than the target). A block linear target comes back in its guest layout, swizzled on the GPU */
 static u64 flush_bytes(const Surf* s) {
     if (!s || (s->f.depth ? !depth_copies_raw(s) : !s->f.raw) || s->layout == VK_IMAGE_LAYOUT_UNDEFINED) return 0;
     if (s->mem_wgen == s->wgen || !moves_scaled(s)) return 0;
-    return (u64)s->w * s->f.bpp * s->h * s->layers;
+    return s->bl ? rt_bytes(s) : (u64)s->w * s->f.bpp * s->h * s->layers;
 }
-/* s's pixels copied into buf at at, a layer after another, at the guest's size */
-static void flush_record(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 at) {
-    u64 slice = (u64)s->w * s->f.bpp * s->h;
+/* s's pixels copied into buf at at, in rows of pitch bytes, a layer after another, at the guest's size */
+static void flush_copy(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 at, u32 pitch) {
+    u64 slice = (u64)pitch * s->h;
     vk_surf_use(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
     for (u32 layer = 0; layer < s->layers; layer++) {
         VkBufferImageCopy c = {
             .bufferOffset = at + (u64)layer * slice,
+            .bufferRowLength = pitch / s->f.bpp,
             .imageSubresource = {s->f.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1},
             .imageExtent = {s->w, s->h, 1}};
         VmaAllocation tm;
@@ -364,6 +402,26 @@ static void flush_record(VkCommandBuffer cb, Surf* s, VkBuffer buf, u64 at) {
             vk_defer_image(t, tm, VK_NULL_HANDLE, VK_NULL_HANDLE);
         }
     }
+}
+/* s's pixels into buf as flush_bytes says: tightly packed rows, or the guest's block linear layout, the image copied
+   into the scratch buffer and swizzled from there into buf. 0 when that can't be done */
+static int flush_record(VkCommandBuffer cb, Surf* s, VkBuffer buf) {
+    u32 row = s->w * s->f.bpp;
+    if (!s->bl) {
+        flush_copy(cb, s, buf, 0, row);
+        return 1;
+    }
+    u32 pitch = (row + 15) & ~15u, moves = s->volume ? 1 : s->layers;
+    u64 cap;
+    VkBlMove m = rt_bl_move(s, pitch);
+    VkBuffer scratch = vk_bl_scratch((u64)pitch * s->h * s->layers, &cap);
+    if (!scratch) return 0;
+    flush_copy(cb, s, scratch, 0, pitch);
+    vk_bl_barrier(cb, 1);
+    for (u32 i = 0; i < moves; i++)
+        if (!vk_bl_move(cb, &m, 1, buf, (u64)i * s->layer_size, scratch, (u64)i * pitch * s->h)) return 0;
+    vk_bl_barrier(cb, 0);
+    return 1;
 }
 /* the copies recorded so far done, and their bytes readable by the host */
 static void flush_wait(VkCommandBuffer cb) {
@@ -394,21 +452,17 @@ static void flush_land(Surf* s, const u8* p, const u8* original, u64 wgen) {
             gmem_read(gva, tmp, sz);
         dst = tmp;
     }
-    for (u32 layer = 0; layer < s->layers; layer++) {
-        u8* layer_dst = s->volume && s->bl ? dst : dst + (u64)layer * s->layer_size;
-        const u8* layer_src = p + (u64)layer * slice;
-        if (s->volume && s->bl) {
-            u32 bh = bl_height(s->h, s->bh);
-            for (u32 y = 0; y < s->h; y++)
-                for (u32 x = 0; x < row; x += 16) {
-                    u32 n = row - x < 16 ? (u32)(row - x) : 16;
-                    memcpy(layer_dst + bl_offset(x, y, layer, (u32)row, s->h, bh, s->bd), layer_src + y * row + x, n);
-                }
-        } else if (s->bl)
-            swizzle(layer_dst, layer_src, (u32)row, (u32)row, s->h, bl_height(s->h, s->bh));
-        else
-            for (u32 y = 0; y < s->h; y++) memcpy(layer_dst + (u64)y * s->pitch, layer_src + y * row, row);
-    }
+    if (s->bl && s->volume)
+        bl_land(dst, p, (u32)row, s->h, s->layers, bl_height(s->h, s->bh), s->bd);
+    else
+        for (u32 layer = 0; layer < s->layers; layer++) {
+            u8* layer_dst = dst + (u64)layer * s->layer_size;
+            if (s->bl)
+                bl_land(layer_dst, p + (u64)layer * s->layer_size, (u32)row, s->h, 1, bl_height(s->h, s->bh), 0);
+            else
+                for (u32 y = 0; y < s->h; y++)
+                    memcpy(layer_dst + (u64)y * s->pitch, p + (u64)layer * slice + y * row, row);
+        }
     int guest_changed = 0;
     if (original) {
         const u8* current = gmem_ptr(gva, sz);
@@ -447,7 +501,7 @@ static void surf_flush(Surf* s, const u8* original) {
     const u8* p = vk_readback_buffer(size, &buf);
     if (!p) return;
     VkCommandBuffer cb = vk_cmd();
-    flush_record(cb, s, buf, 0);
+    if (!flush_record(cb, s, buf)) return;
     flush_wait(cb);
     flush_land(s, p, original, s->wgen);
 }

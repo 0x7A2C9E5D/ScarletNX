@@ -19,6 +19,7 @@
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/platform/plat.h"
 #include "nx/gpu/vk/vk.h"
+#include "nx/memory/mem.h"
 #include "nx/gpu/vk/pending_pages.h"
 #include "nx/gpu/renderer.h"
 
@@ -190,7 +191,8 @@ static void vkr_before_syncwait(void) {
 static void vkr_stream_incr(u32 id) { vk_release_incr(id); }
 
 /* ------------------------------------------------------------ presenting */
-/* the frame from memory when no render target holds it (the game drew it on the CPU, or a video frame) */
+/* the frame from memory when no render target holds it (the game drew it on the CPU, or a video frame): staged as it
+   is, deswizzled and converted on the GPU (vk/blocklinear.c, vk/texconv.c) */
 static Surf* cpu_frame(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt) {
     if (g_cpu_img && (g_cpu_img->w != w || g_cpu_img->h != h)) {
         vk_defer_image(g_cpu_img->img, g_cpu_img->mem, VK_NULL_HANDLE, g_cpu_img->att);
@@ -222,17 +224,59 @@ static Surf* cpu_frame(u64 cpu_addr, u32 w, u32 h, u32 pitch, u32 layout, u32 bh
             return NULL;
         }
     }
-    VkBuffer buf;
-    u64 off;
-    u32* px = (u32*)vk_stage((u64)w * h * 4, 4, &buf, &off);
-    if (!px) return NULL;
-    vi_convert_cpu(cpu_addr, w, h, pitch, layout, bhl, fmt, px);
+    /* its bytes, staged as they are: a block linear one's whole rows of blocks, a pitch linear one's rows (and
+       16 bytes, as a conversion reads whole words and a row of 2 byte pixels may end inside one) */
+    u32 bpp = fmt == 4 || fmt == 6 || fmt == 7 ? 2 : 4, row_bytes = w * bpp;
+    u32 stride = pitch > row_bytes ? pitch : row_bytes, bl = layout == 3; /* libnx's NvLayout: 3 block linear */
+    VkBlMove m = {stride, h, bhl, 0, 0, h, 0, 1, (stride + 15) & ~15u};
+    u64 lo = 0, hi = (u64)stride * h, at, cap;
+    if (bl) vk_bl_range(&m, &lo, &hi);
+    if (cpu_addr >= AS_SIZE || hi > AS_SIZE - cpu_addr) {
+        WARN_LIMIT(5, "vi: buffer at %llx runs outside guest memory, not shown\n", (unsigned long long)cpu_addr);
+        return NULL;
+    }
+    /* a pitch linear one whose rows don't start on words is staged a row at a time into rows that do */
+    u32 in_pitch = bl ? m.lin_pitch : stride % 4 ? (row_bytes + 3) & ~3u : stride;
+    u64 staged_size = bl || in_pitch == stride ? hi : (u64)in_pitch * h;
+    VkBuffer staged;
+    u8* p = vk_stage(staged_size + 16, vk_stage_align(), &staged, &at);
+    if (!p) return NULL;
+    const u8* src = g_mem + cpu_addr; /* a CPU address (nvmap's), in the guest's address space */
+    if (bl || in_pitch == stride)
+        memcpy(p, src, hi);
+    else
+        for (u32 y = 0; y < h; y++) memcpy(p + (u64)y * in_pitch, src + (u64)y * stride, row_bytes);
+    memset(p + staged_size, 0, 16);
+    /* deswizzled and converted to RGBA8 on the GPU, in the scratch buffer: the linear rows, then the converted ones */
+    int conv = vk_tc_vi_converts(fmt);
+    VkTcShape tc = conv ? vk_tc_vi_shape(fmt, w) : (VkTcShape){.out_texels = in_pitch / 4};
+    u64 lin = bl ? (u64)m.lin_pitch * h : 0, out = (lin + 15) & ~15ull;
+    u64 need = out + (conv ? (u64)tc.out_texels * 4 * h : 0);
+    VkBuffer scratch = need ? vk_bl_scratch(need, &cap) : VK_NULL_HANDLE;
+    if (need && !scratch) return NULL;
     VkCommandBuffer cb = vk_cmd();
+    VkBuffer from = staged;
+    u64 from_at = at;
+    if (bl || conv) vk_bl_barrier(cb, 1);
+    if (bl) {
+        if (!vk_bl_move(cb, &m, 0, staged, at, scratch, 0)) return NULL;
+        vk_bl_barrier(cb, 0);
+        from = scratch;
+        from_at = 0;
+    }
+    if (conv) {
+        if (!vk_tc_convert_vi(cb, fmt, w, h, from, from_at, in_pitch, scratch, out)) return NULL;
+        vk_bl_barrier(cb, 0);
+        from = scratch;
+        from_at = out;
+    }
     vk_surf_use(cb, g_cpu_img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT,
                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
-    VkBufferImageCopy c = {
-        .bufferOffset = off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {w, h, 1}};
-    rec_CmdCopyBufferToImage(cb, buf, g_cpu_img->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+    VkBufferImageCopy c = {.bufferOffset = from_at,
+                           .bufferRowLength = tc.out_texels,
+                           .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                           .imageExtent = {w, h, 1}};
+    rec_CmdCopyBufferToImage(cb, from, g_cpu_img->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
     return g_cpu_img;
 }
 

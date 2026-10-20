@@ -86,12 +86,15 @@ include("${PROJECT_SOURCE_DIR}/cmake/shaderdec.cmake")
 snx_shaderdec(snx_shader)
 snx_component(vk gpu/vk/renderer.c gpu/vk/device.c gpu/vk/cmd.c gpu/vk/record.c gpu/vk/format.c gpu/vk/surface.c gpu/vk/texture.c
                  gpu/vk/buffer.c gpu/vk/writeback.c gpu/vk/pipeline.c gpu/vk/pipeline_file.c gpu/vk/render.c gpu/vk/release.c gpu/vk/query.c gpu/vk/compute.c
-                 gpu/vk/pending_pages.c gpu/vk/memory.c gpu/vk/renderdoc.c gpu/vk/astc.c gpu/vk/ui.c gpu/texture/etc2.c gpu/texture/depth.c gpu/vk/vic.c gpu/vk/vma.cpp
+                 gpu/vk/pending_pages.c gpu/vk/memory.c gpu/vk/renderdoc.c gpu/vk/astc.c gpu/vk/blocklinear.c gpu/vk/texconv.c gpu/vk/ui.c gpu/texture/blocklinear.c gpu/texture/depth.c gpu/vk/vic.c gpu/vk/vma.cpp
                  "${volk_SOURCE_DIR}/volk.c")
-# the ASTC decoder's and the VIC composition's SPIR-V, compiled from their GLSL at build time (cmake/glsl.cmake). The
-# VIC shader is built twice: for word aligned rows, and for the rest (gpu/video/vic_compose.glsl)
+# the ASTC decoder's, the block linear deswizzle and swizzle's, the texture conversions' and the VIC composition's
+# SPIR-V, compiled from their GLSL at build time (cmake/glsl.cmake). The VIC shader is built twice: for word aligned rows, and for the rest
+# (gpu/video/vic_compose.glsl)
 include("${PROJECT_SOURCE_DIR}/cmake/glsl.cmake")
 snx_glsl_spirv(snx_vk SOURCE gpu/texture/astc.comp NAME astc_spv HEADER nx/gpu/texture/astc_spv.h)
+snx_glsl_spirv(snx_vk SOURCE gpu/texture/blocklinear.comp NAME blocklinear_spv HEADER nx/gpu/texture/blocklinear_spv.h)
+snx_glsl_spirv(snx_vk SOURCE gpu/texture/texconv.comp NAME texconv_spv HEADER nx/gpu/texture/texconv_spv.h)
 snx_glsl_spirv(snx_vk SOURCE gpu/video/vic.comp NAME vic_spv HEADER nx/gpu/video/vic_spv.h)
 snx_glsl_spirv(snx_vk SOURCE gpu/video/vic.comp NAME vic_unaligned_spv HEADER nx/gpu/video/vic_spv.h
                DEFINES VIC_UNALIGNED)
@@ -221,7 +224,9 @@ if(BUILD_TESTING AND SNX_TEST_VULKAN)
     add_test(NAME vulkan_headless COMMAND snx-test-vulkan -H)
     set_tests_properties(vulkan_headless PROPERTIES TIMEOUT 60
         FAIL_REGULAR_EXPRESSION "vulkan validation:;failed: VK_ERROR")
-    # the ASTC upload against the CPU decoder, with the backend's own frames, staging and allocations and the SPIR-V
+    # the ASTC upload against the CPU decoder, block linear moves on the GPU against bl_offset's layout and texture
+    # conversions against the CPU's, with the
+    # backend's own frames, staging and allocations and the SPIR-V
     # the build makes (the file snx_glsl_spirv generated for snx_vk above). Again under a 4 MiB allocation cap, so
     # images in pieces are tested too. `snx-test-astc-vulkan --large` decodes two 512 MiB textures (minutes on lavapipe)
     # cmd.c records the frame's commands through record.c's thread, with the platform's threads and locks
@@ -231,8 +236,10 @@ if(BUILD_TESTING AND SNX_TEST_VULKAN)
         set(snx_astc_plat runtime/platform/plat_posix.c)
     endif()
     add_executable(snx-test-astc-vulkan "${PROJECT_SOURCE_DIR}/tests/astc_vulkan.c" gpu/texture/astc.c gpu/vk/astc.c
+        gpu/vk/blocklinear.c gpu/texture/blocklinear.c gpu/vk/texconv.c gpu/texture/etc2.c
         gpu/vk/cmd.c gpu/vk/memory.c gpu/vk/record.c gpu/vk/vma.cpp ${snx_astc_plat} "${volk_SOURCE_DIR}/volk.c"
-        "${CMAKE_BINARY_DIR}/generated/spirv/astc_spv.c")
+        "${CMAKE_BINARY_DIR}/generated/spirv/astc_spv.c" "${CMAKE_BINARY_DIR}/generated/spirv/blocklinear_spv.c"
+        "${CMAKE_BINARY_DIR}/generated/spirv/texconv_spv.c")
     target_link_libraries(snx-test-astc-vulkan PRIVATE snx_nx_flags scarletnx-filesystem Threads::Threads ${CMAKE_DL_LIBS})
     set_target_properties(snx-test-astc-vulkan PROPERTIES LINKER_LANGUAGE CXX)
     add_test(NAME astc_vulkan COMMAND snx-test-astc-vulkan)

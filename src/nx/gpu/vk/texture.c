@@ -2,13 +2,13 @@
    Copyright 2026 the ScarletNX contributors */
 /* Textures from the guest's texture headers (TIC, 32 bytes each), and samplers from its sampler headers (TSC). A
    texture whose address holds a render target is that render target (a copy of its top-left corner when the header
-   is smaller). Others are loaded from guest memory, deswizzled on the CPU, and checked for changes now and then:
-   often at first, rarely once they have stayed the same. */
+   is smaller). Others are loaded from guest memory, staged as they are and deswizzled and converted on the GPU
+   (vk/blocklinear.c, vk/texconv.c, vk/astc.c), and checked for changes now and then: often at first, rarely once
+   they have stayed the same. */
 #include <stdlib.h>
 #include <string.h>
 #include "nx/gpu/gpu.h"
 #include "nx/gpu/renderer.h"
-#include "nx/gpu/texture/etc2.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/gpu/vk/vk.h"
 
@@ -66,117 +66,292 @@ static u64 bl_layer_size(u32 w, u32 h, u32 d, const VkFmt* f, u32 bh, u32 bd, u3
     return sz;
 }
 
-/* one level of one layer, from guest bytes to tightly packed rows, converted when the format needs it */
-static void level_convert(const VkFmt* f, const u8* lin, u32 lw, u32 lh, u32 ld, u32 rowb, u8* out) {
-    u32 th = (lh + f->bh - 1) / f->bh;
-    if (f->conv >= VKC_ETC2) { /* each slice's blocks, decoded */
-        int kind = f->conv - VKC_ETC2;
-        for (u32 z = 0; z < ld; z++)
-            etc2_decode_image(lin + (u64)z * rowb * th, lw, lh, kind, out + (u64)z * lw * lh * etc2_pixel_bytes(kind));
-        return;
-    }
-    switch (f->conv) {
-        case VKC_RGBA4:
-        case VKC_RGB5A1:
-        case VKC_A5B5G5R1:
-            for (u64 i = 0; i < (u64)lw * lh * ld; i++) {
-                u32 v = ((const u16*)lin)[i], r, g, b, a;
-                if (f->conv == VKC_RGBA4) {
-                    r = (v & 15) * 17;
-                    g = ((v >> 4) & 15) * 17;
-                    b = ((v >> 8) & 15) * 17;
-                    a = ((v >> 12) & 15) * 17;
-                } else if (f->conv == VKC_RGB5A1) {
-                    r = (v & 31) * 255 / 31;
-                    g = ((v >> 5) & 31) * 255 / 31;
-                    b = ((v >> 10) & 31) * 255 / 31;
-                    a = (v >> 15) ? 255 : 0;
-                } else { /* A5B5G5R1: one bit of red at the bottom, then green, blue and alpha (Ryujinx's swizzle) */
-                    r = (v & 1) ? 255 : 0;
-                    g = ((v >> 1) & 31) * 255 / 31;
-                    b = ((v >> 6) & 31) * 255 / 31;
-                    a = ((v >> 11) & 31) * 255 / 31;
-                }
-                ((u32*)out)[i] = r | (g << 8) | (b << 16) | (a << 24);
-            }
-            break;
-        case VKC_RGB32F:
-            for (u64 i = 0; i < (u64)lw * lh * ld; i++) {
-                float* o = (float*)out + i * 4;
-                memcpy(o, lin + i * 12, 12);
-                o[3] = 1.0f;
-            }
-            break;
-        default: memcpy(out, lin, (u64)rowb * th * ld);
-    }
-}
-static u64 level_out_size(const VkFmt* f, u32 lw, u32 lh, u32 ld, u32 rowb) {
-    u32 th = (lh + f->bh - 1) / f->bh;
-    if (f->conv >= VKC_ETC2) return (u64)lw * lh * ld * etc2_pixel_bytes(f->conv - VKC_ETC2);
-    switch (f->conv) {
-        case VKC_RGBA4:
-        case VKC_RGB5A1:
-        case VKC_A5B5G5R1: return (u64)lw * lh * ld * 4;
-        case VKC_RGB32F: return (u64)lw * lh * ld * 16;
-    }
-    return (u64)rowb * th * ld;
-}
-
-/* block rows y0 to y0 + n of slice z of one level of one layer as tightly packed rows, from its lsz guest bytes at
-   src. A block-linear row's 16-byte pieces: the row's place (bl_offset at x 0), then a block of GOBs per 64 bytes, and
-   within a GOB's row 32-byte halves 256 bytes apart and 16-byte quarters 32 apart. A whole piece is one 16-byte move
-   rather than a call to memcpy: a texture rewritten every frame (a video's pictures) comes through here each time */
-static void level_rows(const Surf* t, const u8* src, u64 lsz, u32 rowb, u32 th, u32 lbh, u32 lbd, u32 z, u32 y0, u32 n,
-                       u8* out) {
-    if (!t->bl) {
-        for (u32 y = y0; y < y0 + n; y++) memcpy(out + (u64)(y - y0) * rowb, src + ((u64)z * th + y) * t->pitch, rowb);
-        return;
-    }
-    u64 bsz = 512ull << (lbh + lbd);
-    for (u32 y = y0; y < y0 + n; y++) {
-        u8* dr = out + (u64)(y - y0) * rowb;
-        u64 o0 = bl_offset(0, y, z, rowb, th, lbh, lbd);
-        u32 x = 0;
-        for (; x + 16 <= rowb; x += 16) {
-            u64 o = o0 + (u64)(x >> 6) * bsz + ((x & 63) >> 5) * 256 + ((x & 31) >> 4) * 32;
-            if (o + 16 <= lsz)
-                memcpy(dr + x, src + o, 16);
-            else
-                memset(dr + x, 0, 16);
-        }
-        if (x < rowb) {
-            u64 o = o0 + (u64)(x >> 6) * bsz + ((x & 63) >> 5) * 256 + ((x & 31) >> 4) * 32;
-            if (o + (rowb - x) <= lsz)
-                memcpy(dr + x, src + o, rowb - x);
-            else
-                memset(dr + x, 0, rowb - x);
-        }
-    }
+/* the guest bytes a move of a level reads (lsz bytes at gva, src when they are contiguous in host memory) staged as
+   they are, zero past the level's end: buf and off hold the layout's first byte the move reads (vk_bl_range) */
+static int stage_bl(const VkBlMove* m, u64 gva, const u8* src, u64 lsz, VkBuffer* buf, u64* off) {
+    u64 lo, hi;
+    vk_bl_range(m, &lo, &hi);
+    u8* p = vk_stage(hi - lo, vk_stage_align(), buf, off);
+    if (!p) return 0;
+    u64 n = lo >= lsz ? 0 : hi <= lsz ? hi - lo : lsz - lo;
+    if (src)
+        memcpy(p, src + lo, n);
+    else
+        gmem_read(gva + lo, p, n);
+    memset(p + n, 0, hi - lo - n);
+    return 1;
 }
 
 /* one level of one layer in guest memory, for vk_astc_upload to ask for its block rows */
 typedef struct {
     const Surf* t;
-    const u8* src;
+    u64 gva;
+    const u8* src; /* NULL when the level isn't contiguous in host memory */
     u64 lsz;
     u32 rowb, th, lbh, lbd;
 } LevelSource;
-static void astc_rows(void* ctx, u32 z, u32 y, u32 n, u8* out) {
+/* block linear blocks staged as they are and deswizzled on the GPU into the scratch buffer; pitch linear ones staged
+   a row at a time */
+static int astc_rows(void* ctx, VkCommandBuffer cb, u32 z, u32 nz, u32 y, u32 n, VkBuffer* buf, u64* off) {
     const LevelSource* l = ctx;
-    level_rows(l->t, l->src, l->lsz, l->rowb, l->th, l->lbh, l->lbd, z, y, n, out);
+    if (l->t->bl) {
+        VkBlMove m = {l->rowb, l->th, l->lbh, l->lbd, y, n, z, nz, l->rowb}; /* 16 byte blocks: rows of whole runs */
+        VkBuffer staged;
+        u64 at;
+        u64 cap;
+        *buf = vk_bl_scratch((u64)l->rowb * n * nz, &cap);
+        *off = 0;
+        if (!*buf || !stage_bl(&m, l->gva, l->src, l->lsz, &staged, &at)) return 0;
+        vk_bl_barrier(cb, 1);
+        int ok = vk_bl_move(cb, &m, 0, staged, at, *buf, 0);
+        vk_bl_barrier(cb, 0);
+        return ok;
+    }
+    u8* p = vk_stage((u64)l->rowb * n * nz, vk_stage_align(), buf, off);
+    if (!p) return 0;
+    for (u32 k = 0; k < nz; k++)
+        for (u32 r = 0; r < n; r++) {
+            u64 at = ((u64)(z + k) * l->th + y + r) * l->t->pitch;
+            u8* d = p + ((u64)k * n + r) * l->rowb;
+            if (l->src)
+                memcpy(d, l->src + at, l->rowb);
+            else
+                gmem_read(l->gva + at, d, l->rowb);
+        }
+    return 1;
+}
+
+/* A texture's upload, recorded in batches that share their barriers: a batch's block linear strips are deswizzled
+   into the scratch buffer one after another, then the strips of a format the host can't take as it is are converted
+   there too, then every strip is copied into the image. The CPU only copies guest memory into staging, in whole
+   ranges: GOBs and rows are never taken apart on it */
+typedef struct {
+    VkBuffer in;
+    u64 in_at, out_at;
+    u32 in_pitch, w, rows, slices;
+} UpConv;
+typedef struct {
+    VkCommandBuffer cb;
+    const Surf* t;
+    VkBuffer scratch;
+    u64 cap, used;
+    int open;        /* the barrier before the batch's dispatches is recorded */
+    u32 moves;       /* deswizzles recorded in the batch */
+    UpConv conv[32]; /* conversions, recorded once the moves they read are done */
+    u32 nconv;
+    VkBufferImageCopy reg[64];
+    VkBuffer src[64]; /* each copy's buffer: the scratch buffer, or staging */
+    u32 nreg;
+} Upload;
+static void up_open(Upload* u) {
+    if (!u->open) vk_bl_barrier(u->cb, 1);
+    u->open = 1;
+}
+static int up_flush(Upload* u) {
+    int ok = 1;
+    if (u->moves) vk_bl_barrier(u->cb, 0);
+    if (u->nconv) {
+        up_open(u);
+        for (u32 i = 0; i < u->nconv && ok; i++)
+            ok = vk_tc_convert(u->cb, &u->t->f, u->conv[i].w, u->conv[i].rows, u->conv[i].slices, u->conv[i].in,
+                               u->conv[i].in_at, u->conv[i].in_pitch, u->scratch, u->conv[i].out_at);
+        vk_bl_barrier(u->cb, 0);
+    }
+    for (u32 i = 0, j; i < u->nreg; i = j) {
+        for (j = i + 1; j < u->nreg && u->src[j] == u->src[i];) j++;
+        rec_CmdCopyBufferToImage(u->cb, u->src[i], u->t->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, j - i, u->reg + i);
+    }
+    u->open = 0;
+    u->moves = u->nconv = u->nreg = 0;
+    u->used = 0;
+    return ok;
+}
+/* room in the batch for a strip: size bytes of the scratch buffer (its pieces each aligned to 16 or less), two
+   copies and a conversion. The batch is flushed first when they don't fit, and the scratch buffer grown when even an
+   empty one wouldn't hold them, so the strip's pieces stay in one batch and one buffer. 0 when memory ran out */
+static int up_reserve(Upload* u, u64 size) {
+    if ((!size || u->used + 64 + size <= u->cap) && u->nreg + 2 <= sizeof u->reg / sizeof u->reg[0] &&
+        u->nconv < sizeof u->conv / sizeof u->conv[0])
+        return 1;
+    if (!up_flush(u)) return 0;
+    return !size || size + 64 <= u->cap || (u->scratch = vk_bl_scratch(size + 64, &u->cap)) != VK_NULL_HANDLE;
+}
+/* size bytes of the scratch buffer at a multiple of align, within what up_reserve made room for */
+static u64 up_space(Upload* u, u64 size, u32 align) {
+    u64 at = (u->used + align - 1) / align * align;
+    u->used = at + size;
+    return at;
+}
+/* the least common multiple of 16 and a texel's (or block's) bytes */
+static u32 bl_lin_align(u32 bpp) {
+    u32 a = 16;
+    while (a % bpp) a += 16;
+    return a;
+}
+
+/* one level of one layer, what tex_upload's strips of it share */
+typedef struct {
+    u32 level, layer, lw, lh, ld, rowb, th;
+    u32 conv;     /* converted on the GPU (vk_tc_converts) */
+    VkTcShape tc; /* the conversion's shape */
+    u32 pitch;    /* the linear rows' pitch: deswizzled, or repacked from a pitch linear level */
+} UpLevel;
+/* units rows y to y + n (rows of texels, or of blocks) of slices z to z + nz, in linear rows in_pitch bytes apart at
+   in_at in in (staging, or the scratch buffer once the batch's moves are done), converted when they need to be and
+   copied into the image. The caller has reserved the room (up_reserve) */
+static int up_rows(Upload* u, const UpLevel* lv, VkBuffer in, u64 in_at, u32 in_pitch, u32 z, u32 nz, u32 y, u32 n) {
+    const VkFmt* f = &u->t->f;
+    u32 top = y * f->bh, height = lv->lh - top < n * f->bh ? lv->lh - top : n * f->bh;
+    VkBufferImageCopy r = {.bufferRowLength = in_pitch / f->bpp * f->bw,
+                           .bufferImageHeight = n * f->bh,
+                           .imageSubresource = {f->depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT,
+                                                lv->level, lv->layer, 1},
+                           .imageOffset = {0, (i32)top, (i32)z},
+                           .imageExtent = {lv->lw, height, nz}};
+    if (!lv->conv) {
+        r.bufferOffset = in_at;
+        u->src[u->nreg] = in;
+        u->reg[u->nreg++] = r;
+        return 1;
+    }
+    u64 out = up_space(u, vk_tc_out_size(&lv->tc, n, nz), 16);
+    u->conv[u->nconv++] = (UpConv){in, in_at, out, in_pitch, lv->lw, n, nz};
+    r.bufferOffset = out;
+    r.bufferRowLength = lv->tc.out_texels;
+    u->src[u->nreg] = u->scratch;
+    u->reg[u->nreg++] = r;
+    if (lv->tc.stencil) {
+        r.bufferOffset = out + (u64)lv->tc.out_texels * n * nz * 4;
+        r.imageSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+        u->src[u->nreg] = u->scratch;
+        u->reg[u->nreg++] = r;
+    }
+    return 1;
+}
+/* a block linear strip: move m of bytes staged at staged_at deswizzled into the scratch buffer, then up_rows. Its
+   rows land at row y, slice z of the level (the move's own rows and slices are a gathered layout's for a strip of
+   GOB rows) */
+static int up_move(Upload* u, const UpLevel* lv, const VkBlMove* m, VkBuffer staged, u64 staged_at, u32 z, u32 y) {
+    u64 lin = (u64)m->slices * m->rows * m->lin_pitch;
+    if (!up_reserve(u, lin + (lv->conv ? vk_tc_out_size(&lv->tc, m->rows, m->slices) : 0))) return 0;
+    u64 at = up_space(u, lin, bl_lin_align(u->t->f.bpp));
+    up_open(u);
+    if (!vk_bl_move(u->cb, m, 0, staged, staged_at, u->scratch, at)) return 0;
+    u->moves++;
+    return up_rows(u, lv, u->scratch, at, m->lin_pitch, z, m->slices, y, m->rows);
+}
+
+/* a block linear level: its guest bytes staged as they are and deswizzled on the GPU. The whole level at once when
+   it fits in band; else strips of whole rows of blocks of 2^lbd slices, contiguous in memory; else, when one of those
+   is too big, strips of 2^k GOB rows of a slice, each block's piece of them (contiguous in it) staged after the last
+   one's: the layout of a surface of one row of blocks 2^k GOBs high */
+static int level_upload_bl(Upload* u, const UpLevel* lv, u64 gva, const u8* src, u64 lsz, u32 lbh, u32 lbd, u64 band) {
+    u32 rowb = lv->rowb, th = lv->th, ld = lv->ld, pitch = lv->pitch;
+    u32 gobs_x = (rowb + 63) >> 6, nz = ld < (1u << lbd) ? ld : 1u << lbd;
+    u64 block = 512ull << (lbh + lbd), block_row = gobs_x * block;
+    /* scratch bytes a row of units takes: deswizzled, and converted */
+    u64 per_row = pitch + (lv->conv ? vk_tc_out_size(&lv->tc, 1, 1) : 0);
+    VkBuffer staged;
+    u64 staged_at;
+    if (per_row * th * ld <= band && lsz <= band) {
+        VkBlMove m = {rowb, th, lbh, lbd, 0, th, 0, ld, pitch};
+        return stage_bl(&m, gva, src, lsz, &staged, &staged_at) && up_move(u, lv, &m, staged, staged_at, 0, 0);
+    }
+    u64 rows_cost = per_row * (8u << lbh) * nz;
+    if (rows_cost <= band && block_row <= band) {
+        u64 k = band / (rows_cost > block_row ? rows_cost : block_row);
+        u32 n = (u32)k * (8u << lbh);
+        for (u32 z = 0; z < ld; z += nz)
+            for (u32 y = 0; y < th; y += n) {
+                VkBlMove m = {rowb, th, lbh, lbd, y, th - y < n ? th - y : n, z, ld - z < nz ? ld - z : nz, pitch};
+                if (!stage_bl(&m, gva, src, lsz, &staged, &staged_at) ||
+                    !up_move(u, lv, &m, staged, staged_at, z, y))
+                    return 0;
+            }
+        return 1;
+    }
+    u32 k = lbh;
+    while (k && (per_row * (8u << k) > band || (u64)gobs_x * (512u << k) > band)) k--;
+    if (per_row * 8 > band || (u64)gobs_x * 512 > band) {
+        LOG_LIMIT(1, "vulkan: a %ux%u texture level's rows exceed the staging memory (left out)\n", lv->lw, lv->lh);
+        return 0;
+    }
+    u64 rows_blocks = ((((u64)th + 7) >> 3) + (1u << lbh) - 1) >> lbh, piece = 512ull << k;
+    for (u32 z = 0; z < ld; z++)
+        for (u32 gy = 0; gy < (th + 7) >> 3; gy += 1u << k) {
+            u8* p = vk_stage(gobs_x * piece, vk_stage_align(), &staged, &staged_at);
+            if (!p) return 0;
+            u64 base = (z >> lbd) * rows_blocks * block_row + (gy >> lbh) * block_row +
+                       ((((u64)(z & ((1u << lbd) - 1)) << lbh) + (gy & ((1u << lbh) - 1))) << 9);
+            for (u32 gx = 0; gx < gobs_x; gx++) {
+                u64 o = base + gx * block, n = o >= lsz ? 0 : o + piece <= lsz ? piece : lsz - o;
+                if (src)
+                    memcpy(p + gx * piece, src + o, n);
+                else
+                    gmem_read(gva + o, p + gx * piece, n);
+                memset(p + gx * piece + n, 0, piece - n);
+            }
+            u32 y = gy << 3;
+            VkBlMove m = {rowb, 8u << k, k, 0, 0, th - y < (8u << k) ? th - y : 8u << k, 0, 1, pitch};
+            if (!up_move(u, lv, &m, staged, staged_at, z, y)) return 0;
+        }
+    return 1;
+}
+
+/* a pitch linear level: its rows staged as they are, whole slices or strips of rows of a slice, when the guest's
+   pitch suits the copies and the conversion; else each row into rows of lv->pitch */
+static int level_upload_pitch(Upload* u, const UpLevel* lv, u64 gva, const u8* src, u64 lsz, u64 band) {
+    const Surf* t = u->t;
+    u32 th = lv->th, ld = lv->ld, gp = t->pitch;
+    int as_is = gp % (lv->conv ? lv->tc.in_align : 4) == 0 && gp % t->f.bpp == 0;
+    u32 pitch = as_is ? gp : lv->pitch;
+    u64 out_row = lv->conv ? vk_tc_out_size(&lv->tc, 1, 1) : 0, per_row = pitch > out_row ? pitch : out_row;
+    u32 n = per_row * th * ld <= band ? th : (u32)(band / per_row ? band / per_row : 1);
+    u32 nz = n == th ? ld : 1;
+    if (n > th) n = th;
+    for (u32 z = 0; z < ld; z += nz)
+        for (u32 y = 0; y < th; y += n) {
+            u32 rows = th - y < n ? th - y : n, slices = ld - z < nz ? ld - z : nz;
+            VkBuffer staged;
+            u64 at, first = ((u64)z * th + y) * gp, size = (u64)rows * slices * pitch;
+            u8* p = vk_stage(size, vk_stage_align(), &staged, &at);
+            if (!p) return 0;
+            if (as_is) { /* the rows, slices after another, are one range of guest memory */
+                u64 have = first >= lsz ? 0 : first + size <= lsz ? size : lsz - first;
+                if (src)
+                    memcpy(p, src + first, have);
+                else
+                    gmem_read(gva + first, p, have);
+                memset(p + have, 0, size - have);
+            } else
+                for (u32 k = 0; k < slices; k++)
+                    for (u32 r = 0; r < rows; r++) {
+                        u64 o = ((u64)(z + k) * th + y + r) * gp;
+                        u8* d = p + ((u64)k * rows + r) * pitch;
+                        memset(d, 0, pitch);
+                        if (src)
+                            memcpy(d, src + o, lv->rowb);
+                        else
+                            gmem_read(gva + o, d, lv->rowb);
+                    }
+            if (!up_reserve(u, lv->conv ? vk_tc_out_size(&lv->tc, rows, slices) : 0) ||
+                !up_rows(u, lv, staged, at, pitch, z, slices, y, rows))
+                return 0;
+        }
+    return 1;
 }
 
 static u32 g_tex_upload_gen;
-/* the most staging one piece of a level takes: a bigger level is staged in bands of block rows of a slice, as no
-   allocation may be bigger than g_vk.alloc_cap (memory.c) and its converted rows needn't all be in memory at once */
+/* the most staging one piece of a level takes: a bigger level is staged in strips, as no allocation may be bigger
+   than g_vk.alloc_cap (memory.c) */
 #define TEX_BAND (64ull << 20)
 
-/* 1 when every subresource was copied; 0 when memory or staging ran out, and upload_valid keeps it for a retry */
 static u64 g_tex_uploads, g_tex_upload_bytes; /* for the stats line */
 void vk_tex_stats(u64* uploads, u64* bytes) {
     *uploads = g_tex_uploads;
     *bytes = g_tex_upload_bytes;
 }
+/* 1 when every subresource was copied; 0 when memory or staging ran out, and upload_valid keeps it for a retry */
 static int tex_upload(Surf* t) {
     const VkFmt* f = &t->f;
     g_tex_uploads++;
@@ -187,18 +362,14 @@ static int tex_upload(Surf* t) {
     VkCommandBuffer cb = vk_cmd();
     vk_surf_use(cb, t, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
                 VK_ACCESS_2_TRANSFER_WRITE_BIT);
-    int packed_depth = f->depth && f->stencil;
     int is3d = t->type == VK_IMAGE_VIEW_TYPE_3D;
     u32 layers = t->layers, d3 = is3d ? t->depth3d : 1;
     u64 band = g_vk.alloc_cap < TEX_BAND ? g_vk.alloc_cap : TEX_BAND;
-    VkBufferImageCopy reg[64]; /* copied when full, or when staging moves to another buffer */
-    u32 nreg = 0;
     int complete = 1;
-    VkBuffer buf = VK_NULL_HANDLE, regbuf = VK_NULL_HANDLE;
-    u64 off = 0;
-    for (u32 layer = 0; layer < layers; layer++) {
+    Upload u = {.cb = cb, .t = t};
+    for (u32 layer = 0; layer < layers && complete; layer++) {
         u64 at = layer * t->layer_size;
-        for (u32 l = 0; l < t->levels; l++) {
+        for (u32 l = 0; l < t->levels && complete; l++) {
             u32 lw = t->w >> l, lh = t->h >> l, ld = d3 >> l;
             if (!lw) lw = 1;
             if (!lh) lh = 1;
@@ -206,84 +377,30 @@ static int tex_upload(Surf* t) {
             u32 tw = (lw + f->bw - 1) / f->bw, th = (lh + f->bh - 1) / f->bh;
             u32 rowb = tw * f->bpp, lbh = 0, lbd = 0;
             u64 lsz = t->bl ? bl_level_size(t->w, t->h, d3, f, t->bh, t->bd, l, &lbh, &lbd) : (u64)t->pitch * th * ld;
-            u8* src = gmem_ptr(t->gva + at, lsz);
-            u8* tmp = NULL;
-            if (!src) tmp = src = malloc(lsz ? lsz : 1);
-            if (!src) { /* up to 512 MB: a level that doesn't fit is left as it was */
-                LOG_LIMIT(1, "vulkan: out of memory uploading a %ux%u texture level (left out)\n", lw, lh);
-                complete = 0;
-                goto done;
-            }
-            if (tmp) gmem_read(t->gva + at, tmp, lsz);
-            if (f->conv == VKC_ASTC) { /* decoded on the GPU, its block rows deswizzled into staging as it goes */
-                LevelSource ls = {t, src, lsz, rowb, th, lbh, lbd};
-                complete = vk_astc_upload(cb, t, lw, lh, ld, l, layer, astc_rows, &ls);
-                free(tmp);
-                if (!complete) goto done;
-                at += lsz;
-                continue;
-            }
-            /* the whole level in one piece when it is small enough, else bands of block rows of one slice */
-            u64 whole = packed_depth ? (u64)lw * lh * ld * 5 : level_out_size(f, lw, lh, ld, rowb);
-            u64 per_row = packed_depth ? (u64)lw * 5 : level_out_size(f, lw, f->bh, 1, rowb);
-            u32 slices = whole <= band ? ld : 1;
-            u32 nb = whole <= band ? th : (u32)(band / per_row ? band / per_row : 1);
-            if (nb > th) nb = th;
-            /* a format the GPU takes as it is goes from guest memory straight into the staging buffer; the others
-               are converted from packed rows */
-            int direct = f->conv == VKC_NONE && !packed_depth;
-            u8* lin = direct ? NULL : malloc((u64)rowb * nb * slices);
-            if (!direct && !lin) {
-                LOG_LIMIT(1, "vulkan: out of memory uploading a %ux%u texture level (left out)\n", lw, lh);
-                free(tmp);
-                complete = 0;
-                goto done;
-            }
-            for (u32 z = 0; z < ld && complete; z += slices)
-                for (u32 y = 0; y < th && complete; y += nb) {
-                    u32 n = th - y < nb ? th - y : nb, top = y * f->bh;
-                    u32 rows = lh - top < n * f->bh ? lh - top : n * f->bh;
-                    u64 pixels = (u64)lw * rows * slices;
-                    u64 osz = packed_depth ? pixels * 5 : level_out_size(f, lw, rows, slices, rowb);
-                    u8* p = vk_stage(osz, 16, &buf, &off);
-                    if (!p) {
-                        LOG_LIMIT(1, "vulkan: out of staging memory uploading a %ux%u texture level (left out)\n",
-                                  lw, lh);
-                        complete = 0;
-                        break;
-                    }
-                    if (nreg && (buf != regbuf || nreg + 2 > sizeof reg / sizeof reg[0])) {
-                        rec_CmdCopyBufferToImage(cb, regbuf, t->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, nreg, reg);
-                        nreg = 0;
-                    }
-                    regbuf = buf;
-                    u8* rows_out = direct ? p : lin;
-                    for (u32 k = 0; k < slices; k++)
-                        level_rows(t, src, lsz, rowb, th, lbh, lbd, z + k, y, n, rows_out + (u64)k * rowb * n);
-                    if (packed_depth)
-                        vk_depth_unpack(f, lin, pixels, p, p + pixels * 4);
-                    else if (!direct)
-                        level_convert(f, lin, lw, rows, slices, rowb, p);
-                    reg[nreg++] = (VkBufferImageCopy){
-                        .bufferOffset = off,
-                        .imageSubresource = {f->depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, l,
-                                             layer, 1},
-                        .imageOffset = {0, (i32)top, (i32)z},
-                        .imageExtent = {lw, rows, slices}};
-                    if (packed_depth) {
-                        reg[nreg] = reg[nreg - 1];
-                        reg[nreg].bufferOffset += pixels * 4;
-                        reg[nreg++].imageSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
-                    }
+            const u8* src = gmem_ptr(t->gva + at, lsz); /* NULL: read through gmem_read */
+            if (f->conv == VKC_ASTC) { /* decoded on the GPU from its block rows, deswizzled on the GPU */
+                complete = up_flush(&u);
+                LevelSource ls = {t, t->gva + at, src, lsz, rowb, th, lbh, lbd};
+                complete = complete && vk_astc_upload(cb, t, lw, lh, ld, l, layer, astc_rows, &ls);
+                u.scratch = VK_NULL_HANDLE; /* astc_rows may have grown the scratch buffer: asked for again */
+                u.cap = 0;
+            } else {
+                UpLevel lv = {l, layer, lw, lh, ld, rowb, th, (u32)vk_tc_converts(f)};
+                u32 align = bl_lin_align(f->bpp);
+                if (lv.conv) {
+                    lv.tc = vk_tc_shape(f, lw);
+                    if (lv.tc.in_align > align) align = lv.tc.in_align;
                 }
-            free(tmp);
-            free(lin);
-            if (!complete) goto done;
+                lv.pitch = (rowb + align - 1) / align * align;
+                complete = t->bl ? level_upload_bl(&u, &lv, t->gva + at, src, lsz, lbh, lbd, band)
+                                 : level_upload_pitch(&u, &lv, t->gva + at, src, lsz, band);
+            }
+            if (!complete)
+                LOG_LIMIT(1, "vulkan: out of memory or staging uploading a %ux%u texture level (left out)\n", lw, lh);
             at += lsz;
         }
     }
-done:
-    if (nreg) rec_CmdCopyBufferToImage(cb, regbuf, t->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, nreg, reg);
+    complete = up_flush(&u) && complete;
     return t->upload_valid = complete;
 }
 

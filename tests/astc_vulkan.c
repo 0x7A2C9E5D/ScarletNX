@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* Headless differential test of the actual Vulkan ASTC upload, frame/staging and
-   allocation code (vk/astc.c, vk/cmd.c, vk/memory.c) with the SPIR-V the build
-   compiles from astc.comp. No game assets. Run with
+/* Headless differential test of the actual Vulkan ASTC upload, block linear
+   deswizzle and swizzle, frame/staging and allocation code (vk/astc.c,
+   vk/blocklinear.c, vk/cmd.c, vk/memory.c) with the SPIR-V the build compiles
+   from astc.comp and blocklinear.comp. No game assets. Run with
    VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation and
    VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT
    to check synchronization too (docs/ASTC.md). SNX_VK_MAX_ALLOCATION_MB lowers
@@ -12,6 +13,8 @@
 #include <stdlib.h>
 #include "nx/gpu/vk/vk.h"
 #include "nx/gpu/texture/astc.h"
+#include "nx/gpu/texture/blocklinear.h"
+#include "nx/gpu/texture/etc2.h"
 #include "nx/runtime/platform/log.h"
 #include "nx/runtime/main.h"
 #include "nx/runtime/platform/plat.h"
@@ -170,15 +173,48 @@ static u8* blocks_new(u32 w, u32 h, u32 depth, u32 bw, u32 bh) {
     return (u8*)blocks;
 }
 
-/* a level's blocks in memory, handed to vk_astc_upload as texture.c hands it guest memory */
+/* gpu.c's bl_offset, which blocklinear.comp has to agree with */
+static u64 ref_bl(u32 x, u32 y, u32 z, u32 wb, u32 h, u32 bh, u32 bd) {
+    u64 gobs_x = (wb + 63) >> 6, gy = y >> 3;
+    u64 rows = ((((u64)h + 7) >> 3) + (1u << bh) - 1) >> bh, block = (u64)512 << (bh + bd);
+    u64 in_block = ((((u64)z & ((1u << bd) - 1)) << bh) + (gy & ((1u << bh) - 1))) << 9;
+    return ((u64)(x >> 6) << (9 + bh + bd)) + ((x & 32) << 3) + ((x & 16) << 1) + (x & 15) +
+           (((u64)(z >> bd) * rows + (gy >> bh)) * gobs_x) * block + in_block + (((y & 7) >> 1) << 6) + ((y & 1) << 4);
+}
+
+/* a level's blocks in memory, handed to vk_astc_upload as texture.c hands it guest memory: rows of blocks, or (bl not
+   NULL) the same blocks in a block linear layout, which the GPU deswizzles as texture.c's astc_rows has it */
 typedef struct {
     const u8* blocks;
     u32 nx, ny;
+    const u8* bl;
+    u32 bh, bd;
 } Level;
-static void level_rows(void* ctx, u32 z, u32 y, u32 n, u8* out) {
+static int level_rows(void* ctx, VkCommandBuffer cb, u32 z, u32 nz, u32 y, u32 n, VkBuffer* buf, u64* off) {
     const Level* l = ctx;
-    memcpy(out, l->blocks + ((size_t)z * l->ny + y) * l->nx * 16, (size_t)n * l->nx * 16);
+    if (l->bl) {
+        VkBlMove m = {l->nx * 16, l->ny, l->bh, l->bd, y, n, z, nz, l->nx * 16};
+        u64 lo, hi, at, cap;
+        VkBuffer staged;
+        vk_bl_range(&m, &lo, &hi);
+        u8* p = vk_stage(hi - lo, vk_stage_align(), &staged, &at);
+        *buf = vk_bl_scratch((u64)l->nx * 16 * n * nz, &cap);
+        *off = 0;
+        if (!p || !*buf) return 0;
+        memcpy(p, l->bl + lo, hi - lo);
+        vk_bl_barrier(cb, 1);
+        int ok = vk_bl_move(cb, &m, 0, staged, at, *buf, 0);
+        vk_bl_barrier(cb, 0);
+        return ok;
+    }
+    u8* p = vk_stage((u64)n * nz * l->nx * 16, vk_stage_align(), buf, off);
+    if (!p) return 0;
+    for (u32 k = 0; k < nz; k++)
+        memcpy(p + (size_t)k * n * l->nx * 16, l->blocks + ((size_t)(z + k) * l->ny + y) * l->nx * 16,
+               (size_t)n * l->nx * 16);
+    return 1;
 }
+static int g_bl_source; /* run's blocks come block linear */
 
 static void barrier(VkImage img, VkPipelineStageFlags2 src_stage, VkAccessFlags2 src, VkImageLayout from,
                     VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst, VkImageLayout to) {
@@ -246,8 +282,21 @@ static void run(u32 bw, u32 bh, int srgb, u32 w, u32 h, u32 depth, u32 layers, u
         for (u32 l = 0; l < levels; l++) {
             u32 lw = w >> l ? w >> l : 1, lh = h >> l ? h >> l : 1, ld = depth >> l ? depth >> l : 1;
             u8* b = blocks[layer * levels + l] = blocks_new(lw, lh, ld, bw, bh);
-            Level lv = {b, (lw + bw - 1) / bw, (lh + bh - 1) / bh};
+            Level lv = {b, (lw + bw - 1) / bw, (lh + bh - 1) / bh, NULL, 2, ld > 1};
+            u8* bl = NULL;
+            if (g_bl_source) {
+                VkBlMove whole = {lv.nx * 16, lv.ny, lv.bh, lv.bd, 0, lv.ny, 0, ld, lv.nx * 16};
+                u64 lo, hi;
+                vk_bl_range(&whole, &lo, &hi);
+                lv.bl = bl = calloc(hi, 1);
+                for (u32 z = 0; z < ld; z++)
+                    for (u32 y = 0; y < lv.ny; y++)
+                        for (u32 x = 0; x < lv.nx; x++)
+                            memcpy(bl + ref_bl(x * 16, y, z, lv.nx * 16, lv.ny, lv.bh, lv.bd),
+                                   b + (((size_t)z * lv.ny + y) * lv.nx + x) * 16, 16);
+            }
             if (!vk_astc_upload(vk_cmd(), &t, lw, lh, ld, l, layer, level_rows, &lv)) fatal("upload failed\n");
+            free(bl); /* copied into staging already */
             bytes += (size_t)lw * lh * ld * 4;
         }
     if (grow) {
@@ -300,6 +349,181 @@ static void both_modes(u32 bw, u32 bh) {
     free(srgb);
 }
 
+/* block linear bytes deswizzled and swizzled on the GPU (vk/blocklinear.c), compared with ref_bl: a surface of
+   row_bytes x h x d in blocks of 2^bh x 2^bd GOBs, moved in bands of band rows (not GOB aligned, as ASTC's strips
+   aren't) of all slices, or a slice at a time. Swizzling leaves the bytes outside the moved 16 byte runs as they were,
+   and bl_land then lands exactly the surface's bytes over other guest memory */
+static void bl_case(u32 row_bytes, u32 h, u32 d, u32 bh, u32 bd, u32 band, int by_slice) {
+    u32 pitch = (row_bytes + 15) & ~15u;
+    VkBlMove whole = {row_bytes, h, bh, bd, 0, h, 0, d, pitch};
+    u64 lo, hi, lin_size = (u64)pitch * h * d, at, cap;
+    vk_bl_range(&whole, &lo, &hi);
+    u8* guest = malloc(hi);
+    u8* lin = malloc(lin_size);
+    for (u64 i = 0; i < hi; i++) guest[i] = (u8)random_word();
+    for (u64 i = 0; i < lin_size; i++) lin[i] = (u8)random_word();
+    VkBuffer rb, staged;
+    /* deswizzle, band by band, each band's rows (slices after another) after the last band's in the readback */
+    u8* out = vk_readback_buffer(lin_size > hi ? lin_size : hi, &rb);
+    if (!out) fatal("no readback buffer\n");
+    u64 done = 0;
+    for (u32 z = 0; z < d; z += by_slice ? 1 : d)
+        for (u32 y = 0; y < h; y += band) {
+            VkBlMove m = {row_bytes, h, bh, bd, y, h - y < band ? h - y : band, z, by_slice ? 1 : d, pitch};
+            u64 mlo, mhi, size = (u64)m.slices * m.rows * pitch;
+            vk_bl_range(&m, &mlo, &mhi);
+            u8* p = vk_stage(mhi - mlo, vk_stage_align(), &staged, &at);
+            VkBuffer scratch = vk_bl_scratch(size, &cap);
+            if (!p || !scratch) fatal("no staging or scratch\n");
+            memcpy(p, guest + mlo, mhi - mlo);
+            vk_bl_barrier(vk_cmd(), 1);
+            if (!vk_bl_move(vk_cmd(), &m, 0, staged, at, scratch, 0)) fatal("move refused\n");
+            vk_bl_barrier(vk_cmd(), 0);
+            VkBufferCopy c = {0, done, size};
+            rec_CmdCopyBuffer(vk_cmd(), scratch, rb, 1, &c);
+            done += size;
+        }
+    vk_finish();
+    vk_readback_ready();
+    done = 0;
+    for (u32 z = 0; z < d; z += by_slice ? 1 : d)
+        for (u32 y0 = 0; y0 < h; y0 += band) {
+            u32 n = h - y0 < band ? h - y0 : band, nz = by_slice ? 1 : d;
+            for (u32 k = 0; k < nz; k++)
+                for (u32 y = 0; y < n; y++)
+                    for (u32 x = 0; x < row_bytes; x++) {
+                        u8 want = guest[ref_bl(x, y0 + y, z + k, row_bytes, h, bh, bd)];
+                        u8 got = out[done + ((u64)k * n + y) * pitch + x];
+                        if (got != want)
+                            fatal("deswizzle %ux%ux%u bh %u bd %u band %u: (%u, %u, %u) is %u, not %u\n", row_bytes, h,
+                                  d, bh, bd, band, x, y0 + y, z + k, got, want);
+                    }
+            done += (u64)nz * n * pitch;
+        }
+    /* swizzle into the readback, which holds 0xA5 first */
+    u8* p = vk_stage(hi, vk_stage_align(), &staged, &at);
+    if (!p) fatal("no staging\n");
+    memset(p, 0xA5, hi);
+    VkBufferCopy c = {at, 0, hi};
+    rec_CmdCopyBuffer(vk_cmd(), staged, rb, 1, &c);
+    for (u32 z = 0; z < d; z += by_slice ? 1 : d)
+        for (u32 y = 0; y < h; y += band) {
+            VkBlMove m = {row_bytes, h, bh, bd, y, h - y < band ? h - y : band, z, by_slice ? 1 : d, pitch};
+            u64 mlo, mhi, size = (u64)m.slices * m.rows * pitch;
+            vk_bl_range(&m, &mlo, &mhi);
+            u8* q = vk_stage(size, vk_stage_align(), &staged, &at);
+            if (!q) fatal("no staging\n");
+            for (u32 k = 0; k < m.slices; k++)
+                memcpy(q + (u64)k * m.rows * pitch, lin + ((u64)(z + k) * h + y) * pitch, (u64)m.rows * pitch);
+            vk_bl_barrier(vk_cmd(), 1);
+            if (!vk_bl_move(vk_cmd(), &m, 1, rb, mlo, staged, at)) fatal("move refused\n");
+            vk_bl_barrier(vk_cmd(), 0);
+        }
+    vk_finish();
+    vk_readback_ready();
+    u8* moved = calloc(hi, 1);
+    for (u32 z = 0; z < d; z++)
+        for (u32 y = 0; y < h; y++)
+            for (u32 x = 0; x < pitch; x++) {
+                u64 o = ref_bl(x, y, z, row_bytes, h, bh, bd);
+                moved[o] = 1;
+                if (x < row_bytes && out[o] != lin[((u64)z * h + y) * pitch + x])
+                    fatal("swizzle %ux%ux%u bh %u bd %u band %u: (%u, %u, %u) is %u, not %u\n", row_bytes, h, d, bh,
+                          bd, band, x, y, z, out[o], lin[((u64)z * h + y) * pitch + x]);
+            }
+    for (u64 i = 0; i < hi; i++)
+        if (!moved[i] && out[i] != 0xA5)
+            fatal("swizzle %ux%ux%u bh %u bd %u: byte %llu outside the runs was written\n", row_bytes, h, d, bh, bd,
+                  (unsigned long long)i);
+    /* landed over guest memory: the surface's bytes and nothing else */
+    u8* landed = malloc(hi);
+    memcpy(landed, guest, hi);
+    bl_land(landed, out, row_bytes, h, d, bh, bd);
+    memset(moved, 0, hi);
+    for (u32 z = 0; z < d; z++)
+        for (u32 y = 0; y < h; y++)
+            for (u32 x = 0; x < row_bytes; x++) {
+                u64 o = ref_bl(x, y, z, row_bytes, h, bh, bd);
+                moved[o] = 1;
+                if (landed[o] != lin[((u64)z * h + y) * pitch + x])
+                    fatal("bl_land %ux%ux%u bh %u bd %u: (%u, %u, %u) wrong\n", row_bytes, h, d, bh, bd, x, y, z);
+            }
+    for (u64 i = 0; i < hi; i++)
+        if (!moved[i] && landed[i] != guest[i])
+            fatal("bl_land %ux%ux%u bh %u bd %u: padding byte %llu changed\n", row_bytes, h, d, bh, bd,
+                  (unsigned long long)i);
+    printf("PASS block linear %ux%ux%u bh %u bd %u band %u%s\n", row_bytes, h, d, bh, bd, band,
+           by_slice ? " by slice" : "");
+    fflush(stdout);
+    free(guest);
+    free(lin);
+    free(moved);
+    free(landed);
+}
+
+/* texconv.comp's SPIR-V on the device against the CPU: random ETC2 RGBA blocks and random D24S8 texels (as floats,
+   for D32_SFLOAT_S8_UINT), in rows not a multiple of the four texels an invocation owns */
+static void tc_case(void) {
+    u32 w = 13, h = 9, bw = 4, bh = 3, pitch = 64; /* 4 blocks of 16 bytes a row */
+    u64 in_size = (u64)pitch * bh, at, cap;
+    VkBuffer staged, rb;
+    u8* p = vk_stage(in_size, vk_stage_align(), &staged, &at);
+    u8* blocks = malloc(bw * bh * 16);
+    for (u32 i = 0; i < bw * bh * 16; i++) blocks[i] = (u8)random_word();
+    memcpy(p, blocks, in_size);
+    VkFmt f = {.vk = VK_FORMAT_R8G8B8A8_UNORM, .bpp = 16, .bw = 4, .bh = 4, .conv = VKC_ETC2_RGBA};
+    VkTcShape s = vk_tc_shape(&f, w);
+    u64 out_size = vk_tc_out_size(&s, bh, 1);
+    VkBuffer scratch = vk_bl_scratch(out_size, &cap);
+    u8* out = vk_readback_buffer(out_size, &rb);
+    vk_bl_barrier(vk_cmd(), 1);
+    if (!vk_tc_convert(vk_cmd(), &f, w, bh, 1, staged, at, pitch, scratch, 0)) fatal("conversion refused\n");
+    vk_bl_barrier(vk_cmd(), 0);
+    VkBufferCopy c = {0, 0, out_size};
+    rec_CmdCopyBuffer(vk_cmd(), scratch, rb, 1, &c);
+    vk_finish();
+    vk_readback_ready();
+    u8* want = malloc((size_t)w * h * 4);
+    etc2_decode_image(blocks, w, h, ETC2_RGBA, want);
+    for (u32 y = 0; y < h; y++)
+        if (memcmp(out + (u64)y * s.out_texels * 4, want + (u64)y * w * 4, w * 4))
+            fatal("texconv ETC2 RGBA: row %u differs from the CPU's\n", y);
+    free(blocks);
+    free(want);
+    /* D24S8 to D32_SFLOAT_S8_UINT: depth as the float nearest z / (2^24 - 1), then the stencil bytes */
+    VkFmt d = {.vk = VK_FORMAT_D32_SFLOAT_S8_UINT, .bpp = 4, .bw = 1, .bh = 1, .depth = 1, .stencil = 1,
+               .conv = VKC_D24S8};
+    u32 dw = 11, rows = 6, dpitch = 48;
+    u32* texels = malloc((size_t)dpitch * rows);
+    for (u32 i = 0; i < dpitch * rows / 4; i++) texels[i] = random_word();
+    texels[0] = 0xFFFFFFFF, texels[1] = 0;
+    p = vk_stage((u64)dpitch * rows, vk_stage_align(), &staged, &at);
+    memcpy(p, texels, (size_t)dpitch * rows);
+    s = vk_tc_shape(&d, dw);
+    out_size = vk_tc_out_size(&s, rows, 1);
+    scratch = vk_bl_scratch(out_size, &cap);
+    out = vk_readback_buffer(out_size, &rb);
+    vk_bl_barrier(vk_cmd(), 1);
+    if (!vk_tc_convert(vk_cmd(), &d, dw, rows, 1, staged, at, dpitch, scratch, 0)) fatal("conversion refused\n");
+    vk_bl_barrier(vk_cmd(), 0);
+    c.size = out_size;
+    rec_CmdCopyBuffer(vk_cmd(), scratch, rb, 1, &c);
+    vk_finish();
+    vk_readback_ready();
+    const u8* stencil = out + (u64)s.out_texels * rows * 4;
+    for (u32 y = 0; y < rows; y++)
+        for (u32 x = 0; x < dw; x++) {
+            u32 v = texels[y * dpitch / 4 + x], got;
+            float z = (float)(v & 0xFFFFFF) / 16777215.0f;
+            memcpy(&got, out + ((u64)y * s.out_texels + x) * 4, 4);
+            if (memcmp(&got, &z, 4) || stencil[y * s.out_texels + x] != v >> 24)
+                fatal("texconv D24S8: texel (%u, %u) differs from the CPU's\n", x, y);
+        }
+    free(texels);
+    puts("PASS texture conversions (ETC2 RGBA, D24S8 as float)");
+    fflush(stdout);
+}
+
 int main(int argc, char** argv) {
     init();
     if (argc > 1 && !strcmp(argv[1], "--large")) {
@@ -312,6 +536,27 @@ int main(int argc, char** argv) {
         puts("The 512 MiB ASTC textures decode as the CPU reference does");
         return 0;
     }
+    /* block linear moves: whole GOBs, rows not a multiple of 16 or 64 bytes, partial GOB rows and blocks, bands that
+       start inside a GOB, volumes whose depth isn't a multiple of their blocks' */
+    bl_case(64, 8, 1, 0, 0, 8, 0);
+    bl_case(100, 37, 1, 2, 0, 37, 0);
+    bl_case(100, 37, 1, 2, 0, 5, 0);
+    bl_case(48, 1, 1, 0, 0, 1, 0);
+    bl_case(4 * 97, 61, 1, 3, 0, 13, 0);
+    bl_case(1280 * 4, 720, 1, 4, 0, 720, 0);
+    bl_case(1280 * 4, 720, 1, 4, 0, 128, 0);
+    bl_case(64 * 3 + 32, 19, 5, 1, 2, 19, 0);
+    bl_case(64 * 3 + 32, 19, 5, 1, 2, 7, 1);
+    bl_case(12 * 33, 70, 3, 2, 1, 70, 0);
+    bl_case(2 * 1000, 300, 2, 5, 0, 300, 1);
+    /* ASTC blocks coming block linear, deswizzled on the GPU before decoding */
+    g_bl_source = 1;
+    run(4, 4, 0, 4 * 67 - 1, 4 * 123 - 2, 1, 1, 1, 0, NULL, NULL);
+    run(8, 6, 1, 17, 13, 1, 6, 5, 0, NULL, NULL);
+    run(6, 6, 0, 301, 97, 37, 1, 1, 0, NULL, NULL);
+    run(4, 4, 1, 2051, 1101, 1, 1, 1, 0, NULL, NULL);
+    g_bl_source = 0;
+    tc_case();
     /* Known solid color, independent of the CPU reference, catches its old
        11-bit header bug. The GPU is compared to this reference below. */
     const u8 solid[16] = {0xfc, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0x12, 0, 0x34, 0, 0x56, 0, 0x78};

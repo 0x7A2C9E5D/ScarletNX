@@ -273,7 +273,6 @@ enum {
 VkFmt vk_rt_format(u32 fmt);
 VkFmt vk_zt_format(u32 fmt);
 VkFmt vk_tic_format(u32 w0, int srgb); /* bpp 0: not supported */
-void vk_depth_unpack(const VkFmt* f, const u8* src, u64 pixels, u8* depth, u8* stencil);
 int vk_tic_reads_stencil(const u32* tic);
 /* sRGB and linear views of the same bytes: the twin of a color format, or the format itself when it has none */
 VkFormat vk_srgb_as(VkFormat f, int srgb);
@@ -403,11 +402,66 @@ void vk_surf_evict(u32 before); /* textures and render targets last used before 
 int vk_blit2d(const Surf2D* s, const Surf2D* d, int dx, int dy, int dw, int dh, double sx, double sy, double sdx,
               double sdy);
 
-/* astc.c: decode a level of one layer of t, w x h x depth texels, into it. The blocks come from rows(ctx, z, y, n,
-   out): block rows y to y + n of slice z, tightly packed, 16 bytes a block, written to out (staging memory). They are
-   asked for a strip at a time, so a level is never all in memory at once. 0 when staging ran out (the level is left
-   out, and the caller tries again later). The caller ends rendering and moves t to TRANSFER_DST_OPTIMAL first */
-typedef void (*VkAstcRows)(void* ctx, u32 z, u32 y, u32 n, u8* out);
+/* blocklinear.c: a block linear surface's rows moved between its layout and linear rows on the GPU
+   (gpu/texture/blocklinear.comp). The surface is row_bytes wide (texels or compressed blocks times their bytes),
+   height rows high, in blocks of 2^bh GOBs high and 2^bd deep, already shrunk for small surfaces as the hardware
+   does; the move takes rows y0 to y0 + rows of slices z0 to z0 + slices. Its linear rows are lin_pitch bytes apart
+   (a multiple of 16, at least row_bytes rounded up to 16: whole 16 byte pieces move, so a row's last one carries
+   padding along), a slice's rows after another's */
+typedef struct {
+    u32 row_bytes, height, bh, bd;
+    u32 y0, rows, z0, slices;
+    u32 lin_pitch;
+} VkBlMove;
+/* the layout's bytes [*lo, *hi) the move reads or writes: whole rows of blocks */
+void vk_bl_range(const VkBlMove* m, u64* lo, u64* hi);
+/* records the move, into block linear when to_bl, else out of it: the layout's byte lo (vk_bl_range) at bl_at in bl,
+   the first linear row at lin_at in lin, both multiples of 16. 0 when the device's limits don't allow it (said once).
+   Moves go between vk_bl_barrier(cb, 1) and vk_bl_barrier(cb, 0), several of them between one pair when they write
+   different bytes */
+int vk_bl_move(VkCommandBuffer cb, const VkBlMove* m, int to_bl, VkBuffer bl, u64 bl_at, VkBuffer lin, u64 lin_at);
+/* before moves (1): after the transfers and dispatches that used either side's buffers; after them (0): before the
+   transfers, dispatches and host reads of what they wrote */
+void vk_bl_barrier(VkCommandBuffer cb, int before);
+/* a device-local buffer of size bytes or more for the linear side, *cap of them, the same one until a bigger one is
+   asked for (vk_bl_barrier orders its uses; the old one lives until the frame's work is done); VK_NULL_HANDLE past
+   g_vk.alloc_cap or when memory ran out */
+VkBuffer vk_bl_scratch(u64 size, u64* cap);
+
+/* texconv.c: a format the host can't take as it is (f->conv but ASTC, and packed depth and stencil), converted on the
+   GPU (gpu/texture/texconv.comp) from linear rows of its guest texels or blocks into rows a copy into the image
+   takes */
+int vk_tc_converts(const VkFmt* f);
+/* the conversion's shape for a row w texels wide: units (invocations) a row, the output's row in texels (padded to
+   whole units: a copy's bufferRowLength) and its bytes a texel (a depth aspect's for depth), output rows a row of
+   units (4 for a row of blocks), whether a stencil aspect follows the depth one, and what the input's pitch must be
+   a multiple of (the input rows are read in whole units) */
+typedef struct {
+    u32 units, out_texels, out_bpp, out_rows, stencil, in_align;
+} VkTcShape;
+VkTcShape vk_tc_shape(const VkFmt* f, u32 w);
+/* the output's bytes for rows rows of units of slices slices: depth rows, then as many of stencil bytes */
+u64 vk_tc_out_size(const VkTcShape* s, u32 rows, u32 slices);
+/* records the conversion of rows rows of units (of texels, or blocks) of slices slices, w texels wide, from rows
+   in_pitch bytes apart at in_at in in to out_at in out (offsets and pitch multiples of 4). Between vk_bl_barrier
+   calls as vk_bl_move is. 0 when the device's limits don't allow it (said once) */
+int vk_tc_convert(VkCommandBuffer cb, const VkFmt* f, u32 w, u32 rows, u32 slices, VkBuffer in, u64 in_at,
+                  u32 in_pitch, VkBuffer out, u64 out_at);
+/* the same for a frame vi presents from memory, of vi's pixel format fmt (Android's: 2 RGBX8888, 4 RGB565, 5
+   BGRA8888, 6 RGBA5551, 7 RGBA4444) to RGBA8 rows of the shape's out_texels; vk_tc_vi_converts is 0 for RGBA8888,
+   which needs no conversion, and formats vi doesn't have */
+int vk_tc_vi_converts(u32 fmt);
+VkTcShape vk_tc_vi_shape(u32 fmt, u32 w);
+int vk_tc_convert_vi(VkCommandBuffer cb, u32 fmt, u32 w, u32 rows, VkBuffer in, u64 in_at, u32 in_pitch, VkBuffer out,
+                     u64 out_at);
+
+/* astc.c: decode a level of one layer of t, w x h x depth texels, into it. The blocks come from rows(ctx, cb, z, nz,
+   y, n, &buf, &off): block rows y to y + n of slices z to z + nz, tightly packed, 16 bytes a block, a slice's after
+   another's, in buf at off (aligned for a storage buffer) once what rows recorded into cb is done. They are asked for
+   a strip at a time, so a level is never all in memory at once. 0 when staging ran out (the level is left out, and
+   the caller tries again later); rows returns 0 for that too. The caller ends rendering and moves t to
+   TRANSFER_DST_OPTIMAL first */
+typedef int (*VkAstcRows)(void* ctx, VkCommandBuffer cb, u32 z, u32 nz, u32 y, u32 n, VkBuffer* buf, u64* off);
 int vk_astc_upload(VkCommandBuffer cb, Surf* t, u32 w, u32 h, u32 depth, u32 level, u32 layer, VkAstcRows rows,
                    void* ctx);
 

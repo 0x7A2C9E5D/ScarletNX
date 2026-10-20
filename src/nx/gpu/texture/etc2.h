@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
    Copyright 2026 the ScarletNX contributors */
-/* ETC2 and EAC decoding on the CPU (etc2.c), for GPUs that can't sample them: the Khronos Data Format
-   Specification's ETC2 chapter, 4x4 blocks */
+/* ETC2 and EAC decoding on the CPU (etc2.c): the Khronos Data Format Specification's ETC2 chapter, 4x4 blocks. The
+   reference the GPU's decoder (texconv.glsl, for GPUs that can't sample them) is tested against */
 #ifndef SNX_ETC2_H
 #define SNX_ETC2_H
 #include "common/cpu/aarch64/cpu.h"

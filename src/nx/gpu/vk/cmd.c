@@ -500,7 +500,8 @@ u8* vk_readback_buffer(u64 size, VkBuffer* buf) {
         if (cap > g_vk.alloc_cap) cap = g_vk.alloc_cap;
         VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                                   .size = cap,
-                                  .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                  /* storage: render targets are swizzled into it (vk/blocklinear.c) */
+                                  .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                   .sharingMode = VK_SHARING_MODE_EXCLUSIVE};
         VmaAllocationCreateInfo aci = {.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
                                                 VMA_ALLOCATION_CREATE_MAPPED_BIT,

@@ -166,28 +166,6 @@ static u64 bl_yz(u32 y, u32 z, u32 wb, u32 h, u32 bh, u32 bd) {
 u64 bl_offset(u32 x_bytes, u32 y, u32 z, u32 width_bytes, u32 height, u32 bh_log2, u32 bd_log2) {
     return bl_x(x_bytes, bh_log2, bd_log2) + bl_yz(y, z, width_bytes, height, bh_log2, bd_log2);
 }
-void deswizzle(u8* dst, u32 dst_pitch, const u8* src, u32 w_bytes, u32 h, u32 bh_log2) {
-    u32 x, y;
-    for (y = 0; y < h; y++) {
-        u64 row = bl_yz(y, 0, w_bytes, h, bh_log2, 0);
-        u8* d = dst + (u64)y * dst_pitch;
-        for (x = 0; x < w_bytes; x += 16) {
-            u32 n = w_bytes - x < 16 ? w_bytes - x : 16;
-            memcpy(d + x, src + row + bl_x(x, bh_log2, 0), n);
-        }
-    }
-}
-void swizzle(u8* dst, const u8* src, u32 src_pitch, u32 w_bytes, u32 h, u32 bh_log2) {
-    u32 x, y;
-    for (y = 0; y < h; y++) {
-        u64 row = bl_yz(y, 0, w_bytes, h, bh_log2, 0);
-        const u8* s = src + (u64)y * src_pitch;
-        for (x = 0; x < w_bytes; x += 16) {
-            u32 n = w_bytes - x < 16 ? w_bytes - x : 16;
-            memcpy(dst + row + bl_x(x, bh_log2, 0), s + x, n);
-        }
-    }
-}
 /* the guest bytes of a pixel of a color format, for render targets and 2D surfaces alike (nv50's surface formats) */
 u32 gpu_color_bpp(u32 format) {
     if (format >= 0xC0 && format <= 0xC5) return 16; /* RGBA32 and RGBX32 */

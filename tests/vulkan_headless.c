@@ -72,6 +72,31 @@ static int check_viewport_orientation(void) {
     return 0;
 }
 
+/* n texels of packed depth and stencil (one row) converted on the device (vk/texconv.c): the depth aspect's words and
+   the stencil aspect's bytes a copy would take */
+static int gpu_unpack(const VkFmt* f, const u32* src, u32 n, u32* depth, u8* stencil) {
+    VkTcShape s = vk_tc_shape(f, n);
+    u32 pitch = (n * f->bpp + s.in_align - 1) / s.in_align * s.in_align;
+    u64 at, cap, out_size = vk_tc_out_size(&s, 1, 1);
+    VkBuffer staged, rb;
+    u8* p = vk_stage(pitch, vk_stage_align(), &staged, &at);
+    VkBuffer scratch = vk_bl_scratch(out_size, &cap);
+    u8* out = vk_readback_buffer(out_size, &rb);
+    CHECK(p && scratch && out);
+    memset(p, 0, pitch);
+    memcpy(p, src, (size_t)n * f->bpp);
+    vk_bl_barrier(vk_cmd(), 1);
+    CHECK(vk_tc_convert(vk_cmd(), f, n, 1, 1, staged, at, pitch, scratch, 0));
+    vk_bl_barrier(vk_cmd(), 0);
+    VkBufferCopy c = {0, 0, out_size};
+    rec_CmdCopyBuffer(vk_cmd(), scratch, rb, 1, &c);
+    vk_finish();
+    vk_readback_ready();
+    memcpy(depth, out, (size_t)n * 4);
+    memcpy(stencil, out + (u64)s.out_texels * 4, n);
+    return 0;
+}
+
 static int check_packed_depth(void) {
     const u32 formats[] = {0x0D, 0x0E, 0x29, 0x2A, 0x2B, 0x30};
     for (u32 i = 0; i < sizeof formats / sizeof *formats; i++) {
@@ -93,7 +118,7 @@ static int check_packed_depth(void) {
         }
         for (int fallback = 0; fallback < 2; fallback++) {
             f.vk = fallback || floating ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_D24_UNORM_S8_UINT;
-            vk_depth_unpack(&f, (const u8*)src, 3, (u8*)depth, stencil);
+            CHECK(!gpu_unpack(&f, src, 3, depth, stencil));
             for (u32 k = 0; k < 3; k++) {
                 CHECK(stencil[k] == (formats[i] == 0x2A ? 0 : 0x51 + k));
                 if (floating)

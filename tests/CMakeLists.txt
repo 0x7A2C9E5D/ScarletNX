@@ -1161,6 +1161,18 @@ snx_test_target(snx-test-vic-glsl 23)
 target_compile_options(snx-test-vic-glsl PRIVATE -fwrapv)
 target_include_directories(snx-test-vic-glsl PRIVATE glsl)
 add_test(NAME vic_glsl COMMAND snx-test-vic-glsl)
+# the block linear deswizzle and swizzle shader's GLSL run on the CPU against bl_offset's layout: no GPU needed
+add_executable(snx-test-blocklinear-glsl glsl/blocklinear_glsl.cpp)
+snx_test_target(snx-test-blocklinear-glsl 23)
+target_compile_options(snx-test-blocklinear-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-blocklinear-glsl PRIVATE glsl)
+add_test(NAME blocklinear_glsl COMMAND snx-test-blocklinear-glsl)
+# the texture conversion shader's GLSL run on the CPU against the CPU's conversions and ETC2 decoder: no GPU needed
+add_executable(snx-test-texconv-glsl glsl/texconv_glsl.cpp "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/etc2.c")
+snx_test_target(snx-test-texconv-glsl 23)
+target_compile_options(snx-test-texconv-glsl PRIVATE -fwrapv)
+target_include_directories(snx-test-texconv-glsl PRIVATE glsl)
+add_test(NAME texconv_glsl COMMAND snx-test-texconv-glsl)
 
 # single blocks from rEden's ASTC decoder tests, against edenprobe's and astcenc's texels (astc_blocks.c)
 add_executable(snx-test-astc-blocks astc_blocks.c "${PROJECT_SOURCE_DIR}/src/nx/gpu/texture/astc.c")
