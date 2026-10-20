@@ -24,7 +24,8 @@
 #include "nx/hle/hle.c"
 
 u8* g_mem;
-char g_datadir[1024], g_exename[256], g_exedir[1024];
+char g_datadir[1024], g_exename[256], g_exedir[1024], g_confdir[1024], g_addondir[1024], g_gamename[256];
+u64 g_addon;
 const u64 g_user_id[2] = {0x0123456789ABCDEFull, 0xFEDCBA9876543210ull}; /* am.c's: the first user */
 static jmp_buf* test_fatal_jump;                                   /* a fatal() the test waits for comes back here */
 static char test_fatal_text[1024];
@@ -1061,7 +1062,193 @@ static void test_dump(SvcObj* proxy) {
     free(meta.data);
     puts("PASS the dump's ExeFS and RomFS read in place, nothing extracted");
 }
+
+/* the RomFS image storage gives, a file name and its bytes the first file in its table, as a dump's image of one file
+   lays it out */
+static void image_holds(SvcObj* storage, const char* name, const char* contents) {
+    Request r;
+    u64 total = get_size(storage), file_table = 0, data_offset = 0, at = 0, size = 0, name_size = 0;
+    const u8* image = GP(0x5000);
+    CHECK(total >= 0x50 && total <= 0x8000);
+    request(&r, 0);
+    argument64(&r, 0, 0);
+    argument64(&r, 8, total);
+    output_buffer(&r, total);
+    dispatch(storage, &r, 0);
+    memcpy(&file_table, image + 0x38, 8);
+    memcpy(&data_offset, image + 0x48, 8);
+    CHECK(file_table + 0x20 + strlen(name) <= total && !memcmp(image + file_table + 0x20, name, strlen(name)));
+    memcpy(&at, image + file_table + 8, 8);
+    memcpy(&size, image + file_table + 0x10, 8);
+    memcpy(&name_size, image + file_table + 0x1c, 4);
+    CHECK(name_size == strlen(name) && size == strlen(contents) && data_offset + at + size <= total);
+    CHECK(!memcmp(image + data_offset + at, contents, size));
+}
+/* an update's or DLCs' dumps beside the game's (dump_write), the game named by its title ID, 0100000000AB0000. An
+   update runs as its own program, <game>_<its ID>, whose .ini names its dump; it is its game's ID with 0x800, with
+   an ExeFS and RomFS of its own. DLCs are checked in the game's addons= and played by the game's program, each a
+   PublicData NCA past the game's 0x1000 in a dump its own .ini names: two read in place, a third checked without a
+   dump recorded, and the update listed too, which the game's program leaves out. With extracted, the game's ExeFS
+   and RomFS are extracted in its data folder too, and the update's are still read over them */
+static const char addon_code[] = "the update's main", addon_asset[] = "the update's asset";
+static const char* const dlc_assets[] = {"a DLC's data", "another DLC's"};
+static void addon_dump(const char* path, int update, SnxU64 id, const char* file, const char* contents,
+                       const char* own) {
+    blob_t code = {zalloc(sizeof addon_code - 1), sizeof addon_code - 1}, meta = dump_npdm(), nsp;
+    blob_t asset = {zalloc(64), strlen(contents)};
+    romfs_file_t exefs[2] = {{"main.npdm", meta}, {"main", code}}, romfs[1] = {{file, asset}};
+    romfs_file_t ncas[1];
+    char *ini = snx_format("dump-data/%s.ini", own), *text = snx_format("[Game]\nsource=%s\n", path);
+    memcpy(code.data, addon_code, code.size);
+    memcpy(asset.data, contents, asset.size);
+    ncas[0].name = update ? "patch.nca" : "dlc.nca";
+    ncas[0].content = update ? dnca_build(NCACONTENTTYPE_PROGRAM, id, exefs, 2, romfs, 1)
+                             : dnca_build(NCACONTENTTPYE_PUBLICDATA, id, NULL, 0, romfs, 1);
+    nsp = partition_build(MAGIC_PFS0, ncas, 1, 0x200);
+    CHECK(!snx_write_file(path, nsp.data, nsp.size));
+    CHECK(!snx_write_file(ini, text, strlen(text)));
+    free(ini);
+    free(text);
+    free(nsp.data);
+    free(ncas[0].content.data);
+    free(code.data);
+    free(asset.data);
+    free(meta.data);
+}
+static void addon_write(int update, int extracted) {
+    strcpy(g_confdir, "dump-data/");
+    strcpy(g_exedir, "dump-data/");
+    strcpy(g_gamename, "0100000000AB0000");
+    if (update) {
+        g_addon = 0x0100000000AB0800ULL;
+        strcpy(g_exename, "0100000000AB0000_0100000000AB0800");
+        snprintf(g_addondir, sizeof g_addondir, "dump-data/%s_data/", g_exename);
+        addon_dump("dump-data/Update.nsp", 1, g_addon, "asset.bin", addon_asset, g_exename);
+    } else {
+        addon_dump("dump-data/Dlc1.nsp", 0, 0x0100000000AB1001ULL, "dlc.bin", dlc_assets[0],
+                   "0100000000AB0000_0100000000AB1001");
+        addon_dump("dump-data/Dlc2.nsp", 0, 0x0100000000AB1002ULL, "dlc2.bin", dlc_assets[1],
+                   "0100000000AB0000_0100000000AB1002");
+        strcpy(g_settings.game_addons, "0100000000AB1001, 0100000000ab1002,0100000000AB1003,0100000000AB0800");
+    }
+    if (extracted)
+        CHECK(!snx_mkdirs("dump-data/Game_data/exefs") && !snx_mkdirs("dump-data/Game_data/romfs") &&
+              !snx_write_file("dump-data/Game_data/exefs/main", "the game's main", 15) &&
+              !snx_write_file("dump-data/Game_data/romfs/asset.bin", "the game's", 10));
+}
+static void test_addon(SvcObj* proxy, int update) {
+    static const char* const files[] = {"dlc.bin", "dlc2.bin"};
+    Request r;
+    u64 size = 0;
+    u8* data = fs_read_file("exefs/main", &size);
+    SvcObj* storage;
+    if (update) { /* the update's ExeFS and RomFS, over the game's dump, whatever the game has extracted */
+        CHECK(g_hle.fs.dump.patch.found && data && size == sizeof addon_code - 1 && !memcmp(data, addon_code, size));
+        free(data);
+        CHECK(fs_read_file("exefs/subsdk0", &size) == NULL);
+        request(&r, 200);
+        dispatch(proxy, &r, 0);
+        CHECK(r.c.nout_objs == 1);
+        storage = r.c.out_objs[0];
+        image_holds(storage, "asset.bin", addon_asset);
+        svcobj_unref(storage);
+        puts("PASS an update's ExeFS and RomFS read from its dump over the game's");
+        return;
+    }
+    /* DLCs: the game's own program from its dump, the update left out, and each DLC's image as installed, by its
+       data ID; the one without a dump is not, and said so */
+    CHECK(data && size == sizeof dump_code - 1 && !memcmp(data, dump_code, size));
+    free(data);
+    CHECK(g_hle.fs.naocs == 2 && !g_hle.fs.dump.patch.found);
+    { /* the DLCs the game plays with, which its window names: the two found, in addons= order */
+        const u64* ids;
+        CHECK(fs_dlcs(&ids) == 2 && ids[0] == 0x0100000000AB1001ULL && ids[1] == 0x0100000000AB1002ULL);
+    }
+    CHECK(fs_aoc_has(0x0100000000AB1001ULL) && fs_aoc_has(0x0100000000AB1002ULL) && !fs_aoc_has(0x0100000000AB1003ULL));
+    CHECK(strstr(test_fs_text, "the DLC 0100000000AB1003 is checked") != NULL);
+    for (u64 i = 0; i < 2; i++) {
+        request(&r, 202); /* the StorageId (u8) at 0, the DataId at 8 */
+        argument64(&r, 8, 0x0100000000AB1001ULL + i);
+        dispatch(proxy, &r, 0);
+        CHECK(r.c.nout_objs == 1);
+        storage = r.c.out_objs[0];
+        image_holds(storage, files[i], dlc_assets[i]);
+        svcobj_unref(storage);
+    }
+    request(&r, 202); /* the DLC without a dump: not installed, an empty archive */
+    argument64(&r, 8, 0x0100000000AB1003ULL);
+    dispatch(proxy, &r, 0);
+    CHECK(r.c.nout_objs == 1 && get_size(r.c.out_objs[0]) == sizeof g_hle.fs.emptyrom);
+    svcobj_unref(r.c.out_objs[0]);
+    puts("PASS two DLCs' images read from their dumps as installed, the game's program from the game's");
+}
 #endif
+/* An update extracted in its data folder (<game>_<its ID>_data), laid over the game's (<game>_data), and a DLC checked
+   in addons= extracted in its own: the update's ExeFS and RomFS whole, the game's RomFS files it does not have gone, its other folders merged, all of it read-only. The game's saves
+   stay where they are, writable */
+static void test_overlay(void) {
+    static const char* const made[][2] = {
+        {"overlay-data/0100000000AB0000_data/exefs/main", "the game's main"},
+        {"overlay-data/0100000000AB0000_data/romfs/a.bin", "the game's a"},
+        {"overlay-data/0100000000AB0000_data/romfs/b.bin", "the game's b"},
+        {"overlay-data/0100000000AB0000_data/system/archives/0100000000AB1002.romfs", "the game's DLC"},
+        {"overlay-data/0100000000AB0000_data/save/user/progress", "a save"},
+        {"overlay-data/0100000000AB0000_0100000000AB0800_data/exefs/main", "the update's main"},
+        {"overlay-data/0100000000AB0000_0100000000AB0800_data/romfs/a.bin", "the update's a"},
+        {"overlay-data/0100000000AB0000_0100000000AB0800_data/system/archives/0100000000AB1003.romfs", "another DLC"},
+        {"overlay-data/0100000000AB0000_0100000000AB0800_data/control.nacp", "the update's control"},
+        {"overlay-data/0100000000AB0000_0100000000AB1001_data/system/archives/0100000000AB1001.romfs", "a DLC"},
+        {"overlay-data/0100000000AB0000_0100000000AB1004_data/system/archives/0100000000AB1004.romfs", "unchecked"},
+        {"overlay-data/0100000000AB0000_0100000000AB0800_data/sdmc/stray", "an SD card file left there"},
+        {"overlay-data/0100000000AB0000_0100000000AB0800_data/save/user/stray", "a save left there"},
+    };
+    FsNode* node;
+    u64 size = 0;
+    u8* data;
+    for (size_t i = 0; i < sizeof made / sizeof made[0]; i++) {
+        char* folder = snx_dirname(made[i][0]);
+        CHECK(!snx_mkdirs(folder) && !snx_write_file(made[i][0], made[i][1], strlen(made[i][1])));
+        free(folder);
+    }
+    g_addon = 0x0100000000AB0800ULL;
+    strcpy(g_exedir, "overlay-data/");
+    strcpy(g_confdir, "overlay-data/");
+    strcpy(g_gamename, "0100000000AB0000");
+    strcpy(g_settings.game_addons, "0100000000AB1001");
+    strcpy(g_addondir, "overlay-data/0100000000AB0000_0100000000AB0800_data/");
+    strcpy(g_datadir, "overlay-data/0100000000AB0000_data/");
+    fs_init();
+    data = fs_read_file("exefs/main", &size);
+    CHECK(data && size == 17 && !memcmp(data, "the update's main", 17));
+    free(data);
+    data = fs_read_file("romfs/a.bin", &size);
+    CHECK(data && size == 14 && !memcmp(data, "the update's a", 14));
+    free(data);
+    data = fs_read_file("control.nacp", &size);
+    CHECK(data && size == 20 && !memcmp(data, "the update's control", 20));
+    free(data);
+    pm_lock(&g_hle.fs.tree.lock);
+    CHECK(fs_tree_lookup(&g_hle.fs.tree, NULL, "romfs/b.bin", &node) == FS_TREE_NOTFOUND);
+    CHECK(!fs_tree_lookup(&g_hle.fs.tree, NULL, "system/archives/0100000000AB1002.romfs", &node) && !node->readonly);
+    CHECK(!fs_tree_lookup(&g_hle.fs.tree, NULL, "system/archives/0100000000AB1003.romfs", &node) && node->readonly);
+    CHECK(!fs_tree_lookup(&g_hle.fs.tree, NULL, "save/user/progress", &node) && !node->readonly);
+    /* what the update's folder holds besides its parts left out: the game's saves and SD card its own, writable */
+    CHECK(fs_tree_lookup(&g_hle.fs.tree, NULL, "sdmc/stray", &node) == FS_TREE_NOTFOUND);
+    CHECK(fs_tree_lookup(&g_hle.fs.tree, NULL, "save/user/stray", &node) == FS_TREE_NOTFOUND);
+    CHECK(!fs_tree_lookup(&g_hle.fs.tree, NULL, "save/user", &node) && !node->readonly);
+    /* the checked DLC's extraction laid over it too, the unchecked one's not */
+    CHECK(!fs_tree_lookup(&g_hle.fs.tree, NULL, "system/archives/0100000000AB1001.romfs", &node) && node->readonly);
+    CHECK(fs_tree_lookup(&g_hle.fs.tree, NULL, "system/archives/0100000000AB1004.romfs", &node) == FS_TREE_NOTFOUND);
+    {
+        const u64* ids;
+        CHECK(fs_dlcs(&ids) == 1 && ids[0] == 0x0100000000AB1001ULL);
+    }
+    pm_unlock(&g_hle.fs.tree.lock);
+    CHECK(snx_is_file("overlay-data/0100000000AB0000_data/romfs/b.bin")); /* hidden, never removed */
+    romfs_init();
+    CHECK(g_hle.fs.nrfiles == 1);
+    puts("PASS an update's and a checked DLC's extractions laid over their game's data folder");
+}
 
 /* OpenSaveDataFileSystem (51): the SaveDataSpaceId (u8) at 0 and the 0x40 byte SaveDataAttribute at 8, whose
    SaveDataType is at 0x20 in it, 0x28 in the request. The other bytes are filled with types that would pick another
@@ -1325,6 +1512,26 @@ int main(int argc, char** argv) {
         printf("PASS %u dump checks; %u startup scans\n", test_checks, test_scans);
         return 0;
     }
+    if (argc == 4 && (!strcmp(argv[3], "dump-update") || !strcmp(argv[3], "dump-update-extracted") ||
+                      !strcmp(argv[3], "dump-dlc"))) {
+        int update = strncmp(argv[3], "dump-update", 11) == 0;
+        dump_write(1);
+        addon_write(update, !strcmp(argv[3], "dump-update-extracted"));
+        strcpy(g_settings.game_dump, "dump-data/Game.nsp"); /* the game's .ini's, which the add-on runs with */
+        strcpy(g_datadir, "dump-data/Game_data/");
+        fs_init();
+        test_scans_allowed = 0;
+        svc_fs_init();
+        romfs_init();
+        SvcObj* proxy = new_fsp();
+        test_addon(proxy, update);
+        svcobj_unref(proxy);
+        CHECK(test_objects == 0);
+        cleanup_service();
+        free(g_mem);
+        printf("PASS %u add-on checks\n", test_checks);
+        return 0;
+    }
     /* a game read from its dump that finds none: where it looked, its .ini and the link an older version made */
     if (argc == 4 && (!strcmp(argv[3], "dump-none") || !strcmp(argv[3], "dump-gone"))) {
         int gone = !strcmp(argv[3], "dump-gone");
@@ -1353,6 +1560,13 @@ int main(int argc, char** argv) {
         return 0;
     }
 #endif
+    if (argc == 4 && !strcmp(argv[3], "addon-overlay")) {
+        test_overlay();
+        cleanup_service();
+        free(g_mem);
+        printf("PASS %u overlay checks\n", test_checks);
+        return 0;
+    }
     strcpy(g_datadir, raw ? "raw-data/" : "service-data/");
     fs_init();
     CHECK(test_scans > 0);

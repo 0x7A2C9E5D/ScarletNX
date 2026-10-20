@@ -295,11 +295,16 @@ if(TARGET hactool_internals)
     target_sources(snx-test-fs-service PRIVATE "${PROJECT_SOURCE_DIR}/src/nx/runtime/driver/container.c")
     target_link_libraries(snx-test-fs-service PRIVATE scarletnx-common hactool_internals)
     add_test(NAME filesystem_raw COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> raw)
+    add_test(NAME filesystem_addon_overlay COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> addon-overlay)
     if(NOT WIN32) # the dump's link: Windows makes one only with the right to
         add_test(NAME filesystem_dump COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump)
         add_test(NAME filesystem_dump_source COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-source)
         add_test(NAME filesystem_dump_none COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-none)
         add_test(NAME filesystem_dump_gone COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-gone)
+        add_test(NAME filesystem_dump_update COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-update)
+        add_test(NAME filesystem_dump_update_extracted
+                 COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-update-extracted)
+        add_test(NAME filesystem_dump_dlc COMMAND snx-test-fs-fixture $<TARGET_FILE:snx-test-fs-service> dump-dlc)
     endif()
 endif()
 if(UNIX)
@@ -573,12 +578,14 @@ endif()
 add_executable(snx-test-am-service am_service.c am_service_stubs.c)
 snx_test_target(snx-test-am-service 23)
 snx_service_swipc(snx-test-am-service hle/services/am.swipc)
+target_link_libraries(snx-test-am-service PRIVATE snx_test_common) # snx_nacp_aoc_base
 add_test(NAME am_service COMMAND snx-test-am-service)
 
 # am.c with a control.nacp: the desired language against its supported languages, its version and save sizes
 add_executable(snx-test-am-nacp am_nacp.c am_service_stubs.c)
 snx_test_target(snx-test-am-nacp 23)
 snx_service_swipc(snx-test-am-nacp hle/services/am.swipc)
+target_link_libraries(snx-test-am-nacp PRIVATE snx_test_common) # snx_nacp_aoc_base
 add_test(NAME am_nacp COMMAND snx-test-am-nacp)
 
 # acc.c and users.c: the console's users from users/users.ini, as acc lists them, every file that lists none refused,
@@ -768,7 +775,7 @@ snx_test_target(snx-test-startup 90)
 add_test(NAME startup_options COMMAND snx-test-startup)
 
 add_library(snx_test_common STATIC "${PROJECT_SOURCE_DIR}/src/common/utilities/common.c"
-    "${PROJECT_SOURCE_DIR}/src/common/utilities/ini_lines.c")
+    "${PROJECT_SOURCE_DIR}/src/common/utilities/ini_lines.c" "${PROJECT_SOURCE_DIR}/src/common/utilities/game_ini.c")
 snx_test_target(snx_test_common 90)
 if(WIN32)
     target_link_libraries(snx_test_common PUBLIC advapi32)

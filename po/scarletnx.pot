@@ -33,6 +33,25 @@ msgstr ""
 
 #: src/gui/browser.c
 #, c-format
+msgid "DLC %u"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
+msgid "DLC %s"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
+msgid "Update %s"
+msgstr ""
+
+#: src/gui/browser.c
+msgid "Update"
+msgstr ""
+
+#: src/gui/browser.c
+#, c-format
 msgid "Cannot open %s: %s"
 msgstr ""
 
@@ -536,6 +555,16 @@ msgstr ""
 msgid "No user picked: the Settings have no user"
 msgstr ""
 
+#. A key of the foot's sentences, which a click finds by this word
+#: src/gui/main.c
+#, snx-key
+msgid "Recompile"
+msgstr ""
+
+#: src/gui/main.c
+msgid "Play"
+msgstr ""
+
 #: src/gui/main.c
 msgid "SCARLETNX  /  SETUP"
 msgstr ""
@@ -644,6 +673,11 @@ msgstr ""
 
 #: src/gui/main.c
 msgid "The recent games not shown"
+msgstr ""
+
+#: src/gui/main.c
+#, c-format
+msgid "Ready to run, with %zu update(s) or DLC(s) to pick from"
 msgstr ""
 
 #: src/gui/main.c
@@ -1754,12 +1788,6 @@ msgstr ""
 #: src/gui/main.c
 #, snx-key
 msgid "R"
-msgstr ""
-
-#. A key of the foot's sentences, which a click finds by this word
-#: src/gui/main.c
-#, snx-key
-msgid "Recompile"
 msgstr ""
 
 #. A key of the foot's sentences, which a click finds by this word

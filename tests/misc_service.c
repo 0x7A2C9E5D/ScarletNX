@@ -48,6 +48,12 @@ FILE* fs_open_read(const char* path, u64* size) {
     }
     return NULL;
 }
+/* the base ID the game's control.nacp numbers its DLCs from (am.c's), 0 for the SDK's default */
+static u64 test_aoc_base;
+u64 am_aoc_base_id(void) { return test_aoc_base ? test_aoc_base : snx_nacp_aoc_base(NULL, 0, g_hle.kernel.title_id); }
+/* a DLC read in place from its dump (fs.c's), 0 for none */
+static u64 test_aoc_dump;
+int fs_aoc_has(u64 id) { return id && id == test_aoc_dump; }
 void logf_(int level, const char* format, ...) {
     (void)level;
     (void)format;
@@ -997,6 +1003,43 @@ static void test_aoc_content(void) {
     argument32(&r, 0, 1);
     r.c.has_pid = 1;
     call(aoc, &r);
+    /* a DLC read in place from its dump counts as installed, beside one in system/archives */
+    test_aoc_installed[1] = 0;
+    test_aoc_dump = base + 2;
+    g_hle.misc.aoc_scanned = g_hle.misc.aoc_count = 0;
+    request(&r, 2);
+    r.c.has_pid = 1;
+    call(aoc, &r);
+    CHECK(reply32(&r, 0) == 2);
+    request(&r, 3);
+    argument32(&r, 0, 1);
+    argument32(&r, 4, 1);
+    r.c.has_pid = 1;
+    r.c.nb = 1;
+    r.c.b[0].addr = 0x4000;
+    r.c.b[0].size = 4;
+    call(aoc, &r);
+    memcpy(&v, g_mem + 0x4000, 4);
+    CHECK(reply32(&r, 0) == 1 && v == 2);
+    test_aoc_dump = 0;
+    /* a game whose control.nacp numbers its DLCs from a base ID of its own, not its ID's 0x1000: its DLCs counted from
+       that base, and that base given */
+    test_aoc_base = 0x0100ABCD5555A000ull;
+    test_aoc_installed[0] = test_aoc_base + 1;
+    g_hle.misc.aoc_scanned = g_hle.misc.aoc_count = 0;
+    request(&r, 2);
+    r.c.has_pid = 1;
+    call(aoc, &r);
+    CHECK(reply32(&r, 0) == 1);
+    request(&r, 5);
+    r.c.has_pid = 1;
+    call(aoc, &r);
+    {
+        u64 got;
+        memcpy(&got, r.c.out, 8);
+        CHECK(got == test_aoc_base);
+    }
+    test_aoc_base = 0;
     svcobj_unref(aoc);
     memset(test_aoc_installed, 0, sizeof test_aoc_installed);
     g_hle.misc.aoc_scanned = g_hle.misc.aoc_count = 0;

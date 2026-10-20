@@ -9,6 +9,7 @@ typedef struct {
     char** names; /* basenames: a game's folder, or an older version's file */
     char** shown; /* what each is shown as, sorted in each folder: the name in its control.nacp, else names' */
     char** paths; /* where each is */
+    size_t* addons; /* how many updates and DLCs each has beside it (gui_game_addons) */
     size_t count;
 } GuiGames;
 /* what a folder's games are: ready to run (executables; on Android a game's code or a dump), CIA files */
@@ -31,9 +32,15 @@ uint64_t gui_tree_size(const char* path, const int* stop);
 /* An NRO, XCI or NSP (or a decrypted one) by its name: a dump the driver prepares, not a game ready to run */
 bool gui_is_dump(const char* name);
 /* A game's program in a folder of its own beside its data (<name>/<name>, .exe on Windows, and <name>/<name>_data/),
-   as the recompile lays games out: the driver plays it, and recompiles it first when another build made it. A game
-   an older version laid out beside the others is not one */
+   or an update's or a DLC's beside it (<name>/<name>_<its title ID>), as the recompile lays games out: the driver
+   plays it, and recompiles it first when another build made it. A game an older version laid out beside the others
+   is not one */
 bool gui_game_folder(const char* path);
+/* The updates and DLCs of the game at path, made beside it in its folder (<name>/<name>_<add-on's title ID>_data/, an
+   update's program beside it), into addons (emptied first): names <name>_<its title ID>, shown what the player reads
+   ("Update 1.2.0" from its control.nacp, "DLC 1"), paths an update's program or a DLC's data folder, an update
+   first. True when it has any; false, addons empty, when it has none or memory ran out */
+bool gui_game_addons(const char* path, GuiGames* addons);
 /* A 3DS CIA by its name */
 bool gui_is_cia(const char* name);
 #endif

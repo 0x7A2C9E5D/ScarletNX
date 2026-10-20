@@ -14,16 +14,22 @@ typedef struct {
     int found, container;
     size_t entry;
     SnxU64 size, title_id;
+    SnxHacNca info; /* what its header says */
 } SnxNcaRef;
 
 typedef struct {
     SnxHac* hac;
     char *keys, *title_keys; /* where they were looked for */
     int has_keys;
-    int base, update; /* the containers, update -1 without one */
-    /* the base's Program NCA, the update's (the patch an NSP of both has, else found 0), and the Control NCA, the
-       update's when it has one */
-    SnxNcaRef program, patch, control;
+    int say;          /* each container, its NCAs and content metas described as they are read, once (a bit a
+                         container in said and said_meta) */
+    unsigned said, said_meta;
+    SnxU64 game;      /* the game the content picked is of: the base's own ID, or the one an add-on's content meta
+                         names (else the usual numbering's, snx_addon_guess) */
+    int base, update; /* the containers, either -1 without one; update is the add-on's (an update or a DLC) */
+    /* the base's Program NCA, the update's (the patch an NSP of both has, else found 0), the Control NCA, the
+       update's when it has one, and a DLC's Data NCA (aoc) */
+    SnxNcaRef program, patch, control, aoc;
 } SnxDump;
 
 /* prod.keys or title.keys: given, else in repo (NULL for none), else in ~/.switch; the path in repo when it is in
@@ -35,13 +41,27 @@ int snx_container_kind(const char* path, int* xci);
 int snx_is_dump(const char* path);
 /* what failed, with hactool's last error after it when it said one: 1 */
 int snx_hac_error(const char* what);
-/* base, and update unless it is NULL, opened and their NCAs picked, with the keys given or found (snx_find_keys, the
-   ones given must be there). say prints which dump is read. 0, else nonzero, said why; snx_dump_close either way */
-int snx_dump_open(SnxDump* dump, const char* base, const char* update, const char* keys, const char* title_keys,
+/* base and addon, either NULL for none, opened and their NCAs picked, with the keys given or found (snx_find_keys, the
+   ones given must be there). addon is an update (patch, with its control) or a DLC (aoc): the base's when base is
+   given. say prints which dump is read. 0, else nonzero, said why; snx_dump_close either way */
+int snx_dump_open(SnxDump* dump, const char* base, const char* addon, const char* keys, const char* title_keys,
                   const char* repo, int say);
+/* path opened alone, with the keys as snx_dump_open takes them: a game's dump (program, and the patch it may have), whose title ID is its
+   program's, or else an add-on's (patch or aoc, in update), its title ID the add-on's own and game the game it belongs
+   to, as its content meta names it (snx_addon_kind(game, title) tells which). 0, else nonzero, said why; snx_dump_close either way */
+int snx_dump_title(SnxDump* dump, const char* path, const char* keys, const char* title_keys, const char* repo, int say,
+                   SnxU64* title, SnxU64* game);
 void snx_dump_close(SnxDump* dump);
-/* the program's ExeFS and RomFS read in place, an update's over the base, or NULL, said why */
+/* the program's ExeFS and RomFS read in place, an update's over the base, or NULL, said why. An update opened
+   without its base has its ExeFS and no RomFS */
 SnxHacFs* snx_dump_fs(SnxDump* dump);
+/* a DLC's RomFS image (aoc) read in place, or NULL, said why */
+SnxHacFs* snx_dump_aoc_fs(SnxDump* dump);
+/* 0 when the keys an NCA picked needs are there, else nonzero with a line saying which are missing and where they come
+   from, what names it ("The game's Program NCA"); no key itself is said */
+int snx_nca_keys(const SnxNcaRef* nca, const char* what);
+/* bytes as a size the player reads: "512 bytes", "35 KB", "4.1 GB" */
+void snx_size_text(SnxU64 bytes, char* text, size_t size);
 /* a file at the root of a RomFS read in place (control.nacp in the Control NCA's), malloc'd, or NULL */
 unsigned char* snx_romfs_file(SnxHacFs* fs, const char* name, size_t* size);
 /* the Control NCA's control.nacp, malloc'd, or NULL with why in *why */

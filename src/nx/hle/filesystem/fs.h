@@ -14,6 +14,12 @@ void fs_init(void);
 /* Lookups by a path in the index. *size is 0 when the file isn't there */
 FILE* fs_open_read(const char* path, u64* size);
 int fs_map_file(const char* path, PFileMap* map); /* 0, or -1 */
+/* 1 when id is a DLC read in place from its dump (one the game's addons= checks), which OpenDataStorageByDataId serves
+   as installed */
+int fs_aoc_has(u64 id);
+/* the checked DLCs the game plays with, those found extracted or read from their dumps, in addons= order, into *ids:
+   their count */
+size_t fs_dlcs(const u64** ids);
 u8* fs_read_file(const char* path, u64* size);    /* malloc'd, or NULL */
 /* a file that exists only in memory, which the lookups find like any other. 0, or -1 */
 int fs_add_virtual_file(const char* path, const void* data, u64 size);
@@ -60,6 +66,12 @@ typedef struct {
 #define FS_FS_MAX   64 /* IFileSystems: one per mount (save data, the SD card, caches, BCAT), a few dozen at most */
 #define FS_FILE_MAX 1024 /* IFiles and IStorages: each is an object of the fsp-srv domain, which holds DOMAIN_OBJECTS */
 #define FS_DIR_MAX  128 /* IDirectories, 4 KB each: a game lists a few folders at a time, and closes each after */
+/* a DLC read in place: its dump, mapped, and its Data NCA's RomFS image */
+typedef struct {
+    SnxDump dump;
+    PFileMap map;
+    SnxHacFs* fs;
+} FsAoc;
 typedef struct {
     FsTree tree;
     RFile* rfiles; /* in offset order: romfs_build lays the files out in this order */
@@ -85,6 +97,13 @@ typedef struct {
     SnxHacFs* dfs;
     PFileMap dmap;
     PMutex dlock;
+    /* the update's dump read in place (dump_open), read with the game's in dump; and the checked DLCs read from their
+       dumps (dlcs_open), naocs of them, each in a hactool of its own (dlock keeps one read at a time) */
+    PFileMap amap;
+    FsAoc* aocs;
+    size_t naocs;
+    u64* dlcs; /* the checked DLCs the game plays with, extracted or read in place, ndlcs of them (fs_dlcs) */
+    size_t ndlcs;
 } HleFs;
 /* all zero: fs_init sets the tree up */
 #endif

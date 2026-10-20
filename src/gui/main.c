@@ -6,6 +6,7 @@
 #include <SDL3/SDL_main.h>
 #endif
 #include "common/utilities/common.h"
+#include "common/utilities/game_ini.h"
 #include "common/utilities/demangle.h"
 #include "common/utilities/logscan.h"
 #include "gui/browser.h"
@@ -173,6 +174,13 @@ typedef struct {
     char size_line[128];
     SDL_Texture* users_pictures[SNX_USERS_MAX]; /* theirs, users_side pixels square, made as the box is drawn */
     int users_side;
+    /* the box opening a game with updates or DLCs beside it shows (addons_open): a box to check each of them by, the
+       game's addons= when it opened, then Play, which runs as recompile was when it opened */
+    bool addons_shown, addons_recompile;
+    int addons_focus;
+    char *addons_game, *addons_title; /* the game's path and what it is shown as */
+    GuiGames addons;
+    bool* addons_checked; /* each of addons' */
     bool previewing; /* drawing the theme editor's preview, on a copy of the app put back after it */
     Uint64 splash_until;
     GuiRgb splash_page;
@@ -2047,6 +2055,173 @@ static void users_pointer(App* app, float x, float y, bool click, bool touch) {
     } else if (click && (x < (float)r.x || x >= (float)(r.x + r.w) || y < (float)r.y || y >= (float)(r.y + r.h)))
         users_close(app);
 }
+/* ---- the box of a game's updates and DLCs (gui_game_addons), which opening the game shows: a box to check each of
+   them by, an update at most, as the game's addons= has them, then Play, which keeps them there and plays the game
+   with them: from the checked update's program, else its own ---- */
+static void addons_close(App* app) {
+    gui_games_free(&app->addons);
+    free(app->addons_game);
+    free(app->addons_title);
+    free(app->addons_checked);
+    app->addons_game = app->addons_title = NULL;
+    app->addons_checked = NULL;
+    app->addons_shown = false;
+}
+/* the game's folder and name, owned, from its program's path */
+static void addons_where(const App* app, char** folder, char** name) {
+    const char* leaf;
+    *folder = snx_dirname(app->addons_game);
+    for (leaf = *folder + strlen(*folder); leaf > *folder && leaf[-1] != '/' && leaf[-1] != '\\'; --leaf) continue;
+    *name = snx_strdup(leaf);
+}
+static void addons_open(App* app, const char* game, const char* title) {
+    char *folder, *name, *ini, *text;
+    SnxU64* ids;
+    size_t count, i, j;
+    addons_close(app);
+    if (!gui_game_addons(game, &app->addons)) return;
+    app->addons_game = snx_strdup(game);
+    app->addons_title = snx_strdup(title);
+    app->addons_checked = (bool*)calloc(app->addons.count, sizeof *app->addons_checked);
+    ids = (SnxU64*)malloc(SNX_ADDONS_MAX * sizeof *ids);
+    if (!app->addons_checked || !ids) {
+        free(ids);
+        addons_close(app);
+        return;
+    }
+    addons_where(app, &folder, &name);
+    ini = snx_game_ini(folder, name);
+    text = snx_ini_value(ini, "addons");
+    count = snx_addons_parse(text, name, ids, SNX_ADDONS_MAX);
+    for (i = 0; i < app->addons.count; ++i)
+        for (j = 0; j < count; ++j) {
+            char id[17];
+            snx_title_text(ids[j], id);
+            if (!strcmp(app->addons.names[i] + strlen(name) + 1, id)) app->addons_checked[i] = true;
+        }
+    free(text);
+    free(ini);
+    free(folder);
+    free(name);
+    free(ids);
+    app->addons_recompile = app->recompile;
+    app->addons_focus = 0;
+    app->addons_shown = true;
+}
+/* the title ID of addons' i */
+static SnxU64 addon_id(const App* app, size_t i) {
+    const char* under = strchr(app->addons.names[i], '_');
+    char* game = under ? snx_format("%.*s", (int)(under - app->addons.names[i]), app->addons.names[i]) : NULL;
+    SnxU64 id = 0;
+    if (game) snx_addon_name(game, app->addons.names[i], &id);
+    free(game);
+    return id;
+}
+/* what addons' i is to its game: SNX_ADDON_UPDATE or SNX_ADDON_DLC */
+static int addon_kind(const App* app, size_t i) {
+    char game[17];
+    SnxU64 id = 0;
+    snprintf(game, sizeof game, "%s", app->addons.names[i]);
+    return snx_title_parse(game, &id) ? snx_addon_kind(id, addon_id(app, i)) : SNX_ADDON_NONE;
+}
+static void addons_label(const App* app, int row, char* label, size_t size) {
+    if ((size_t)row < app->addons.count)
+        snprintf(label, size, "%s%s %s", app->theme.marker, app->addons_checked[row] ? "[x]" : "[ ]",
+                 app->addons.shown[row]);
+    else
+        snprintf(label, size, "%s%s", app->theme.marker, app->addons_recompile ? snx_tr("Recompile") : snx_tr("Play"));
+}
+static void addons_boxes(App* app, GuiRect* r, GuiList* rows) {
+    int i, s = app->scale, item = item_h(app), count = (int)app->addons.count + 1, h = count * (item + 6 * s);
+    int longest = SDL_max(16, (int)SDL_utf8strlen(app->addons_title) + 2);
+    char label[160];
+    for (i = 0; i < count; ++i) {
+        addons_label(app, i, label, sizeof label);
+        longest = SDL_max(longest, (int)SDL_utf8strlen(label) + 4);
+    }
+    *r = over_rect(app, longest, head_h(app) + h + 12 * s);
+    list_place(app, rows, gui_rect(r->x + cell_w(app), r->y + head_h(app) + 6 * s, r->w - 2 * cell_w(app), h), count,
+               app->addons_focus);
+}
+static void render_addons(App* app) {
+    GuiRect r;
+    GuiList rows;
+    char label[160];
+    int i;
+    addons_boxes(app, &r, &rows);
+    over_box(app, r, app->addons_title);
+    for (i = rows.first; i < rows.first + rows.shown; ++i) {
+        addons_label(app, i, label, sizeof label);
+        list_item(app, &rows, i, label, app->addons_focus == i, false);
+    }
+}
+static void launch(App* app, char* absolute, bool prepared);
+/* row pressed: an update's or a DLC's box checked or not (one update at most), or Play: the checked ones kept as the
+   game's addons=, and the game played (or recompiled) through the driver, from the checked update's program */
+static void addons_press(App* app, int row) {
+    char *folder, *name, *ini, *text, *path = NULL;
+    SnxU64* ids;
+    size_t i, count = 0;
+    int item = app->menu.selected;
+    bool recompile = app->recompile;
+    if ((size_t)row < app->addons.count) {
+        bool update = addon_kind(app, (size_t)row) == SNX_ADDON_UPDATE;
+        app->addons_checked[row] = !app->addons_checked[row];
+        for (i = 0; update && app->addons_checked[row] && i < app->addons.count; ++i)
+            if (i != (size_t)row && addon_kind(app, i) == SNX_ADDON_UPDATE)
+                app->addons_checked[i] = false;
+        return;
+    }
+    ids = (SnxU64*)malloc((app->addons.count + 1) * sizeof *ids);
+    addons_where(app, &folder, &name);
+    for (i = 0; ids && i < app->addons.count; ++i)
+        if (app->addons_checked[i]) {
+            ids[count++] = addon_id(app, i);
+            if (addon_kind(app, i) == SNX_ADDON_UPDATE) path = snx_absolute(app->addons.paths[i]);
+        }
+    ini = snx_game_ini(folder, name);
+    text = ids ? snx_addons_text(ids, count) : NULL;
+    if (!text || snx_ini_record(ini, "addons", text))
+        snprintf(app->message, sizeof app->message, snx_tr("Not saved: %s could not be written"), ini);
+    else {
+        if (!path) path = snx_absolute(app->addons_game);
+        app->recompile = app->addons_recompile;
+        addons_close(app);
+        app->menu.selected = GUI_SWITCH;
+        launch(app, path, true);
+        path = NULL;
+        if (!app->menu.running) app->menu.selected = item;
+        app->recompile = recompile;
+    }
+    free(path);
+    free(text);
+    free(ini);
+    free(ids);
+    free(folder);
+    free(name);
+}
+/* a key on the box: Up and Down move, Select presses the row (Space too), Back closes it, nothing kept */
+static void addons_key(App* app, GuiKey key) {
+    int count = (int)app->addons.count + 1;
+    if (key == GUI_UP || key == GUI_DOWN)
+        app->addons_focus = (app->addons_focus + (key == GUI_UP ? count - 1 : 1)) % count;
+    else if (key == GUI_SELECT)
+        addons_press(app, app->addons_focus);
+    else if (key == GUI_CANCEL)
+        addons_close(app);
+}
+/* the pointer on it: the row under it takes the focus, a click presses it; a click off the box closes it */
+static void addons_pointer(App* app, float x, float y, bool click, bool touch) {
+    GuiRect r;
+    GuiList rows;
+    int i;
+    addons_boxes(app, &r, &rows);
+    if ((i = list_hit(&rows, x, y, touch)) >= 0) {
+        app->addons_focus = i;
+        if (click) addons_press(app, i);
+    } else if (click && (x < (float)r.x || x >= (float)(r.x + r.w) || y < (float)r.y || y >= (float)(r.y + r.h)))
+        addons_close(app);
+}
 /* ---- the head: the tabs, and the title after them or under them ---- */
 static int title_size(const App* app) { return (int)SDL_clamp(app->theme.title_size, 1, 3); }
 /* value from pixel x, y in letters size times the text's, cut at the right edge of r */
@@ -2383,10 +2558,14 @@ static const char* games_focus(App* app, const GuiGamesBoxes* g, const char** ab
     }
     {
         const char* name = app->games.names[g->start + selected - head]; /* its file's: what kind it is */
-        snprintf(kind, size, "%s",
-                 gui_is_cia(name)    ? snx_tr("3DS CIA, opened with scarletnx-3ds")
-                 : gui_is_dump(name) ? snx_tr("A dump, prepared when it runs")
-                                     : snx_tr("Ready to run"));
+        size_t addons = app->games.addons[g->start + selected - head];
+        if (addons)
+            snprintf(kind, size, snx_tr("Ready to run, with %zu update(s) or DLC(s) to pick from"), addons);
+        else
+            snprintf(kind, size, "%s",
+                     gui_is_cia(name)    ? snx_tr("3DS CIA, opened with scarletnx-3ds")
+                     : gui_is_dump(name) ? snx_tr("A dump, prepared when it runs")
+                                         : snx_tr("Ready to run"));
         *about = app->games.paths[g->start + selected - head];
         return app->games.shown[g->start + selected - head];
     }
@@ -2411,7 +2590,11 @@ static void draw_games(App* app) {
             list_item(app, &g.list, e, label, app->browser.selected == (size_t)e, false);
         } else {
             i = (size_t)(e - g.lead);
-            snprintf(label, sizeof label, "%s%s", app->theme.marker, app->games.shown[g.start + i]);
+            if (app->games.addons[g.start + i]) /* its updates and DLCs, which opening it offers */
+                snprintf(label, sizeof label, "%s%s  +%zu", app->theme.marker, app->games.shown[g.start + i],
+                         app->games.addons[g.start + i]);
+            else
+                snprintf(label, sizeof label, "%s%s", app->theme.marker, app->games.shown[g.start + i]);
             list_item(app, &g.list, e, label, app->browser.selected == head + i,
                       app->browser.activated && app->browser.active == g.start + i);
         }
@@ -2582,6 +2765,7 @@ static void draw_screen(App* app) {
         draw_menu(app);
     if (app->confirm.shown) render_ask(app);
     if (idle && app->users_shown && !app->confirm.shown) render_users(app);
+    if (idle && app->addons_shown && !app->confirm.shown) render_addons(app);
     if (idle && app->left_shown && app->lefts) render_files(app, 0);
     overlay(app);
 }
@@ -2718,6 +2902,7 @@ static bool preview_texture(App* app) {
     app->finished = app->aborting = app->abnormal_exit = app->confirm.shown = false;
     /* the box of users is the editor's: its pictures, made or replaced on this copy, would go with it */
     app->users_shown = false;
+    app->addons_shown = false;
     app->native = 0;
     app->entering_ms = app->leaving_ms = 0;
     app->fade_ms = run ? app->preview_since : 0; /* a run fades in from black, as after the menu */
@@ -6012,6 +6197,10 @@ static void open_recent(App* app, int index) {
    or a dump to prepare */
 static void open_game(App* app, size_t index) {
     int item = app->menu.selected;
+    if (app->games.addons[index]) { /* its updates and DLCs: which one runs is asked first */
+        addons_open(app, app->games.paths[index], app->games.shown[index]);
+        if (app->addons_shown) return;
+    }
     app->menu.selected = gui_is_cia(app->games.names[index]) ? GUI_3DS : GUI_SWITCH;
     launch(app, snx_absolute(app->games.paths[index]), !gui_is_dump(app->games.names[index]));
     if (!app->menu.running) app->menu.selected = item;
@@ -6679,6 +6868,8 @@ static void pointer(App* app, float window_x, float window_y, bool click, bool t
         sizes_pointer(app, x, y, click);
     else if (app->users_shown)
         users_pointer(app, x, y, click, touch);
+    else if (app->addons_shown)
+        addons_pointer(app, x, y, click, touch);
     else if (app->editing && app->form == GUI_FORM_PAD) {
         if (click) pad_did(app, snx_pad_screen_tap(&app->pad, snx_pad_screen_hit(&app->pad_drawing, x, y)));
     } else if (app->editing && app->editor.picking)
@@ -6896,6 +7087,11 @@ static void event(App* app, const SDL_Event* e) {
         if (e->type == SDL_EVENT_KEY_DOWN && menu_key_of(&e->key, &key)) users_key(app, key);
         return;
     }
+    /* so does the box of a game's updates and DLCs */
+    if (app->addons_shown && !app->confirm.shown && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_TEXT_INPUT)) {
+        if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat && menu_key_of(&e->key, &key)) addons_key(app, key);
+        return;
+    }
     /* a question takes every key while it shows, over the menu, Games or a form (a run's is the run's, below); a held
        key answers nothing */
     if (app->confirm.shown && !app->menu.running &&
@@ -7020,7 +7216,7 @@ static void event(App* app, const SDL_Event* e) {
         for (; app->setup_on && !app->splash && !app->confirm.shown && rows; rows += rows > 0 ? -1 : 1)
             setup_key(app, rows > 0 ? GUI_UP : GUI_DOWN);
         if (app->splash || app->menu.running || app->finished || app->confirm.shown || app->left_shown ||
-            app->users_shown || (app->editing && app->editor.picking))
+            app->users_shown || app->addons_shown || (app->editing && app->editor.picking))
             return;
         for (; rows > 0; --rows) scroll(app, GUI_UP);
         for (; rows < 0; ++rows) scroll(app, GUI_DOWN);
@@ -7208,6 +7404,7 @@ static void cleanup(App* app) {
     if (app->run_out) fclose(app->run_out);
     free(app->run_log);
     gui_games_free(&app->games);
+    addons_close(app);
     SDL_free(app->cwd);
     if (app->editing) gui_editor_stop(&app->editor);
     SDL_DestroyTexture(app->preview);

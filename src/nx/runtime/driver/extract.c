@@ -26,7 +26,7 @@ typedef struct {
 
 static void extract_help(void) {
     puts("Usage: scarletnx -x BASE.xci|BASE.nsp|BASE.dxci|BASE.dnsp [options]\n"
-         "  --update FILE       Apply a same-title update during extraction\n"
+         "  --update FILE       Apply a same-title update during extraction, or add a DLC's RomFS image\n"
          "  --name NAME         Output name (default: base dump stem)\n"
          "  --out DIR           Output directory (default: REPO/work/NAME)\n"
          "  --keys FILE         prod.keys (default: REPO, then ~/.switch)\n"
@@ -36,7 +36,8 @@ static void extract_help(void) {
 #ifdef SNX_XDG
     puts("The user's data folder keeps work/ in its cache folder, $XDG_CACHE_HOME/scarletnx (~/.cache/scarletnx).");
 #endif
-    puts("Decrypted content needs no keys. Refuses output containing exefs.");
+    puts("Decrypted content needs no keys. Refuses output containing exefs. A DLC's dump given alone is extracted as\n"
+         "its RomFS image, system/archives/<its title ID>.romfs, where the game's aoc:u finds it.");
 }
 
 static char* text_copy(const char* text, size_t size) {
@@ -177,6 +178,51 @@ static void progress_tick(uint64_t written, void* data) {
     progress_say(state, 0);
 }
 
+/* the files and folders under path and their bytes, added to the counts */
+static void tree_count(const char* path, unsigned long* files, unsigned long* folders, SnxU64* bytes) {
+    char** names = NULL;
+    size_t count = 0, i;
+    if (snx_list_dir(path, &names, &count)) return;
+    for (i = 0; i < count; i++) {
+        char* entry = snx_path_join(path, names[i]);
+        if (entry && snx_is_dir(entry)) {
+            ++*folders;
+            tree_count(entry, files, folders, bytes);
+        } else if (entry) {
+            ++*files;
+            *bytes += snx_file_size(entry);
+        }
+        free(entry);
+    }
+    snx_free_strings(names, count);
+}
+/* what the extraction wrote: the ExeFS's modules by name, the RomFS's files, folders and size */
+static void say_extracted(ExtractState* state) {
+    char** names = NULL;
+    size_t count = 0, i;
+    unsigned long files = 0, folders = 0;
+    SnxU64 bytes = 0;
+    char size[32];
+    if (!snx_list_dir(state->exefs, &names, &count)) {
+        tree_count(state->exefs, &files, &folders, &bytes);
+        snx_size_text(bytes, size, sizeof size);
+        printf("  ExeFS: %lu file%s, %s:", files, files == 1 ? "" : "s", size);
+        for (i = 0; i < count; i++) printf("%s %s", i ? "," : "", names[i]);
+        puts("");
+        snx_free_strings(names, count);
+    }
+    files = folders = 0;
+    bytes = 0;
+    if (snx_is_dir(state->romfs)) {
+        tree_count(state->romfs, &files, &folders, &bytes);
+        snx_size_text(bytes, size, sizeof size);
+        printf("  RomFS: %lu file%s in %lu folder%s, %s\n", files, files == 1 ? "" : "s", folders + 1,
+               folders ? "s" : "", size);
+    } else
+        puts("  RomFS: none");
+    fflush(stdout);
+}
+
 /* the game's control.nacp beside exefs/, where the loader reads the game's name from, out of the Control NCA's RomFS.
    A game without one, or one that cannot be read, keeps the name of its file, a line saying why */
 static void control_nacp(ExtractState* state) {
@@ -184,28 +230,124 @@ static void control_nacp(ExtractState* state) {
     const char* why = NULL;
     size_t size = 0;
     unsigned char* nacp = to ? snx_dump_nacp(&state->dump, &size, &why) : NULL;
+    char name[0x200], version[0x20], title[17];
     if (!to)
         why = "out of memory";
     else if (nacp && snx_write_file(to, nacp, size))
         why = "its control.nacp could not be written beside exefs/";
     if (why) printf("The game keeps the name of its file: %s\n", why);
+    if (nacp && snx_nacp_name(nacp, size, name, sizeof name)) { /* what it is, from its own control data */
+        snx_title_text(state->dump.program.title_id, title);
+        printf("  The game: %s", name);
+        if (snx_nacp_version(nacp, size, version, sizeof version)) printf(", version %s", version);
+        printf(" (%s%s)\n", title, state->dump.control.found && state->dump.control.container == state->dump.update
+                                        ? ", its name and version from the update"
+                                        : "");
+    }
     fflush(stdout);
     free(nacp);
     free(to);
 }
 
+/* A DLC's RomFS image as aoc:u and OpenDataStorageByDataId find it, <out>/system/archives/<its title ID>.romfs:
+   written beside it, then moved over it */
+static int extract_aoc(ExtractState* state) {
+    const SnxNcaRef* aoc = &state->dump.aoc;
+    char text[17], *folder = snx_path_join(state->out, "system/archives"), *name, *path = NULL, *tmp = NULL;
+    unsigned char* chunk = (unsigned char*)malloc(1 << 22);
+    SnxHacFs* fs = NULL;
+    SnxU64 size, at;
+    size_t n;
+    FILE* file = NULL;
+    int failed = !folder || !chunk;
+    snx_title_text(aoc->title_id, text);
+    name = snx_format("%s.romfs", text);
+    if (!failed) {
+        path = snx_path_join(folder, name);
+        tmp = snx_format("%s.tmp", path);
+    }
+    printf("Extracting the DLC %s\n", text);
+    fflush(stdout);
+    if (!failed && snx_nca_keys(aoc, "The DLC's Data NCA")) failed = 1;
+    if (failed || snx_mkdirs(folder) || !(fs = snx_dump_aoc_fs(&state->dump))) {
+        failed = 1;
+        goto done;
+    }
+    size = snx_hac_fs_romfs_size(fs);
+    if (!size) {
+        failed = snx_error("The DLC's Data NCA has no RomFS");
+        goto done;
+    }
+    state->total = size;
+    state->said_at = snx_seconds();
+    file = snx_fopen(tmp, "wb");
+    failed = !file;
+    for (at = 0; !failed && at < size; at += n) {
+        n = size - at < (SnxU64)(1 << 22) ? (size_t)(size - at) : (size_t)1 << 22;
+        failed = snx_hac_fs_read_romfs(fs, at, chunk, n) || fwrite(chunk, 1, n, file) != n;
+        if (!failed) progress_tick(at + n, state);
+    }
+    if (file && fclose(file)) failed = 1;
+    if (state->said) progress_say(state, 1);
+    if (failed || snx_replace(tmp, path)) {
+        failed = snx_error("Cannot write the DLC's RomFS image %s", path);
+        if (snx_is_file(tmp)) snx_remove_tree(tmp);
+    } else {
+        char said[32];
+        snx_size_text(size, said, sizeof said);
+        printf("  its RomFS image, %s, as system/archives/%s\n", said, name);
+    }
+done:
+    snx_hac_fs_free(fs);
+    free(chunk);
+    free(folder);
+    free(name);
+    free(path);
+    free(tmp);
+    return failed;
+}
+
 static int extract_files(ExtractState* state, const ExtractOptions* options, const SnxPaths* paths) {
     const SnxNcaRef *program = &state->dump.program, *patch = &state->dump.patch;
     char* main_path;
+    SnxU64 title, game;
     int failed;
-    if (snx_dump_open(&state->dump, state->base, state->update, options->keys, options->title_keys, paths->repo, 1))
+    /* a game, an add-on over it, or a dump of a DLC alone */
+    if (state->update ? snx_dump_open(&state->dump, state->base, state->update, options->keys, options->title_keys,
+                                      paths->repo, 1)
+                      : snx_dump_title(&state->dump, state->base, options->keys, options->title_keys, paths->repo, 1,
+                                       &title, &game))
+        return 1;
+    if (!program->found && patch->found)
+        return snx_error("%s is an update, which goes over its game: give the game's dump, with this one as --update",
+                         state->base);
+    if (!program->found) return extract_aoc(state);
+    if (state->dump.aoc.found && extract_aoc(state)) return 1;
+    /* the keys each NCA picked needs, said before anything is written */
+    if (snx_nca_keys(program, "The game's Program NCA") ||
+        (patch->found && snx_nca_keys(patch, "The update's Program NCA")))
         return 1;
     /* the base's program NCA: its RomFS is most of it, and an update's RomFS is about as big */
     state->total = program->size;
+    state->written = 0;
+    state->said = 0;
     state->said_at = snx_seconds(); /* a quick one says nothing */
     snx_hac_progress(progress_tick, state);
     puts(patch->found ? "Extracting the base with the update applied" : "Extracting the base game");
     fflush(stdout);
+    { /* what is used, under the step's line */
+        char size[32], other[32], title[17];
+        snx_size_text(program->size, size, sizeof size);
+        printf("  using the game's Program NCA (%s)", size);
+        if (patch->found) {
+            snx_size_text(patch->size, other, sizeof other);
+            snx_title_text(patch->title_id, title);
+            printf(", with %s %s (%s) over it", patch->container == state->dump.base ? "the update bundled with it"
+                                                                                     : "the update",
+                   title, other);
+        }
+        puts(state->dump.control.found ? "" : ", and no Control NCA");
+    }
     failed = patch->found ? snx_hac_extract(state->dump.hac, patch->container, patch->entry, program->container,
                                             program->entry, state->exefs, state->romfs)
                           : snx_hac_extract(state->dump.hac, program->container, program->entry, -1, 0, state->exefs,
@@ -218,6 +360,7 @@ static int extract_files(ExtractState* state, const ExtractOptions* options, con
     failed = !snx_is_file(main_path);
     free(main_path);
     if (failed) return snx_hac_error("Extracted exefs has no main; verify that the update matches the base game");
+    say_extracted(state);
     control_nacp(state);
     return 0;
 }
@@ -260,7 +403,7 @@ int snx_extract(int argc, char** argv, const SnxPaths* paths) {
     }
     return cleanup(&state, result);
 }
-int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title) {
+int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title, SnxU64* game) {
     ExtractState state;
     int result;
     memset(&state, 0, sizeof state);
@@ -271,9 +414,8 @@ int snx_extract_title(const char* dump, const SnxPaths* paths, SnxU64* title) {
         result = snx_error("%s is not a file", state.base);
     else {
         snx_hac_on_exit(hactool_exit, &state);
-        result = snx_dump_open(&state.dump, state.base, NULL, NULL, NULL, paths->repo, 0);
+        result = snx_dump_title(&state.dump, state.base, NULL, NULL, paths->repo, 0, title, game);
         snx_hac_on_exit(NULL, NULL);
-        if (!result) *title = state.dump.program.title_id;
     }
     return cleanup(&state, result);
 }

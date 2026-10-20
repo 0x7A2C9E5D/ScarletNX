@@ -593,6 +593,10 @@ static const u8* am_nacp(u64 off, u64 n) {
     pm_unlock(&g_hle.am.lock);
     return g_hle.am.nacp && off + n <= g_hle.am.nacp_size ? g_hle.am.nacp + off : NULL;
 }
+u64 am_aoc_base_id(void) {
+    const u8* nacp = am_nacp(0, 0x3078);
+    return snx_nacp_aoc_base(nacp, nacp ? 0x3078 : 0, g_hle.kernel.title_id);
+}
 static u64 am_nacp_u64(u64 off) {
     const u8* p = am_nacp(off, 8);
     u64 v = 0;

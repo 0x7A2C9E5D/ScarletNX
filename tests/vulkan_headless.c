@@ -809,7 +809,7 @@ int main(int argc, char** argv) {
     CHECK(mem_map(HEAP_BASE, 0x800000, MS_NORMAL, PERM_RW) == 0);
     nv_init(); /* color targets may import guest memory through the GPU page table */
     g_settings.vulkan_video_decode = 1; /* a Vulkan Video decode queue where the device has one (lavapipe has none) */
-    video_init("Headless Vulkan fixture");
+    video_init("Headless Vulkan fixture", "");
     CHECK(g_opt_headless && g_renderer_up && g_vk.dev && !g_vk.surface && !g_vk.swapchain && !g_vk.sc_count);
     CHECK(!check_viewport_orientation());
     CHECK(!check_packed_depth());

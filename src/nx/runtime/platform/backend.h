@@ -7,7 +7,9 @@
 #include "common/cpu/aarch64/cpu.h"
 #include "nx/runtime/ini.h"
 
-void video_init(const char* title);
+/* the window, titled after the game and, when addons is not "", the updates and DLCs it plays with ("Update 1.2.0,
+   DLC 1") */
+void video_init(const char* title, const char* addons);
 void video_poll(void);     /* events and input, once per main loop pass */
 void frontend_frame(void); /* screenshots and the unattended limits, after each pass */
 

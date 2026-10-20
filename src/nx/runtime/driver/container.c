@@ -166,11 +166,45 @@ static int hex_bytes(const char* text, size_t size, unsigned char* out) {
     return 0;
 }
 
+void snx_size_text(SnxU64 bytes, char* text, size_t size) {
+    static const char* const units[] = {"KB", "MB", "GB", "TB"};
+    double value = (double)bytes;
+    int unit = -1;
+    if (bytes < 1024) {
+        sprintf(text, "%lu bytes", (unsigned long)bytes);
+        return;
+    }
+    while (value >= 1024 && unit < 3) {
+        value /= 1024;
+        unit++;
+    }
+    if (size >= 16) sprintf(text, value < 10 ? "%.1f %s" : "%.0f %s", value, units[unit]);
+}
+/* the firmware whose master key is generation's, the first that reads content made with it (Switchbrew's
+   "Cryptosystem"), NULL for one newer than this table */
+static const char* firmware_of(int generation) {
+    static const char* const firmware[] = {"1.0.0",  "3.0.0",  "3.0.1",  "4.0.0",  "5.0.0",  "6.0.0",  "6.2.0",
+                                           "7.0.0",  "8.1.0",  "9.0.0",  "9.1.0",  "12.1.0", "13.0.0", "14.0.0",
+                                           "15.0.0", "16.0.0", "17.0.0", "18.0.0", "19.0.0", "20.0.0"};
+    return generation >= 0 && generation < (int)(sizeof firmware / sizeof *firmware) ? firmware[generation] : NULL;
+}
+static const char* content_name(int content) {
+    static const char* const names[] = {"Program", "Meta", "Control", "Manual", "Data", "PublicData"};
+    return content >= 0 && content < 6 ? names[content] : "unknown";
+}
+/* "master key 16 (firmware 17.0.0 and later)" into text */
+static void generation_text(int generation, char* text) {
+    const char* firmware = firmware_of(generation);
+    if (firmware)
+        sprintf(text, "master key %d (firmware %s and later)", generation, firmware);
+    else
+        sprintf(text, "master key %d (a firmware newer than %s)", generation, firmware_of(19));
+}
 /* prod.keys into hactool's keyset. A value of a length no key has is left out, as hactool would stop on it */
 static int load_prod_keys(SnxDump* dump, int say) {
     unsigned char* data;
     size_t size, start, end;
-    unsigned long dropped;
+    unsigned long dropped, known = 0;
     char *name, *value;
     KeyLine line;
     int failed;
@@ -192,7 +226,7 @@ static int load_prod_keys(SnxDump* dump, int say) {
                 if (!name || !value)
                     failed = snx_error("Out of memory reading prod.keys");
                 else
-                    snx_hac_set_key(dump->hac, name, value);
+                    known += snx_hac_set_key(dump->hac, name, value);
                 if (name) secret_free(name, line.name_size);
                 if (value) secret_free(value, line.value_size);
             }
@@ -203,6 +237,16 @@ static int load_prod_keys(SnxDump* dump, int say) {
     if (failed) return 1;
     snx_hac_derive_keys(dump->hac);
     if (dropped && say) printf("Left out %lu malformed key lines\n", dropped);
+    if (say) { /* where they are and how many, never one of them */
+        int newest = snx_hac_newest_generation(dump->hac);
+        char text[96];
+        printf("Keys: %s, %lu of them", dump->keys, known);
+        if (newest >= 0) {
+            generation_text(newest, text);
+            printf(", up to %s", text);
+        }
+        puts("");
+    }
     return 0;
 }
 
@@ -212,6 +256,7 @@ static int load_title_keys(SnxDump* dump) {
     char why[256];
     size_t size, start, end;
     KeyLine line;
+    unsigned long given = 0;
     if (!snx_is_file(dump->title_keys)) return 0;
     data = snx_read_file(dump->title_keys, &size);
     if (!data) return snx_error("Cannot read %s: %s", dump->title_keys, snx_os_error(why, sizeof why));
@@ -220,23 +265,28 @@ static int load_title_keys(SnxDump* dump) {
         end = start;
         while (end < size && data[end] != '\n') end++;
         if (key_line((const char*)data + start, end - start, &line) && line.name_size == 32 && line.value_size == 32 &&
-            !hex_bytes(line.name, 32, rights) && !hex_bytes(line.value, 32, key))
+            !hex_bytes(line.name, 32, rights) && !hex_bytes(line.value, 32, key)) {
             snx_hac_add_title_key(dump->hac, rights, key);
+            given++;
+        }
         start = end < size ? end + 1 : end;
     }
     memset(key, 0, sizeof key);
     secret_free(data, size);
+    if (dump->say) printf("Title keys: %s, %lu of them\n", dump->title_keys, given);
     return 0;
 }
 
 /* the title keys of a container's tickets: common tickets, whose key is stored as is */
-static int read_tickets(SnxDump* dump, int container) {
+static int read_tickets(SnxDump* dump, int container, unsigned* tickets, unsigned* personal) {
     unsigned char data[1024];
     const SnxHacEntry* entries;
     size_t count, i, size, offset;
     count = snx_hac_entries(dump->hac, container, &entries);
+    *tickets = *personal = 0;
     for (i = 0; i < count; i++) {
         if (!has_suffix(entries[i].name, ".tik")) continue;
+        ++*tickets;
         size = entries[i].size < sizeof data ? (size_t)entries[i].size : sizeof data;
         if (snx_hac_read(dump->hac, container, i, data, size))
             return snx_error("Cannot read the ticket %s", entries[i].name);
@@ -251,6 +301,7 @@ static int read_tickets(SnxDump* dump, int container) {
             case 0x10006UL: offset = 4 + 0x14 + 0x28; break;
             default: continue;
         }
+        if (size >= offset + 0x170 && data[offset + 0x141]) ++*personal;
         if (size < offset + 0x170 || data[offset + 0x141]) continue; /* a personalized ticket's key is encrypted */
         snx_hac_add_title_key(dump->hac, data + offset + 0x160, data + offset + 0x40);
     }
@@ -265,69 +316,336 @@ static int nca_needs_keys(SnxDump* dump, int container, size_t entry) {
     return memcmp(header + 0x200, "DNCA", 4) && memcmp(header + 0x200, "NCA3", 4) && memcmp(header + 0x200, "NCA2", 4);
 }
 
-static void take(SnxNcaRef* ref, int container, size_t entry, const SnxHacEntry* e, SnxU64 title_id) {
+static void take(SnxNcaRef* ref, int container, size_t entry, const SnxHacEntry* e, const SnxHacNca* nca) {
     ref->found = 1;
     ref->container = container;
     ref->entry = entry;
     ref->size = e->size;
-    ref->title_id = title_id;
+    ref->title_id = nca->title_id;
+    ref->info = *nca;
 }
 
-/* the Program NCA of a container to extract: the base's, or with update the patch of expected_title; the patch an NSP of
-   both has (embedded_patch), and the Control NCA of the same title (control). The biggest when there are several */
-static int select_ncas(SnxDump* dump, int container, int update, SnxU64 expected_title, SnxNcaRef* selected,
-                       SnxNcaRef* embedded_patch, SnxNcaRef* control) {
+/* a line saying what an NCA is and what reading it takes */
+static void say_nca(const SnxHacNca* nca, const SnxHacEntry* entry) {
+    char size[32], title[17], keys[96];
+    snx_size_text(entry->size, size, sizeof size);
+    snx_title_text(nca->title_id, title);
+    printf("  %s NCA of %s, %s", content_name(nca->content), title[0] ? title : "no title", size);
+    if (nca->sdk)
+        printf(", SDK %u.%u.%u", (unsigned)(nca->sdk >> 24), (unsigned)(nca->sdk >> 16 & 0xFF),
+               (unsigned)(nca->sdk >> 8 & 0xFF));
+    if (nca->patch) printf(", an update's patch");
+    if (nca->decrypted)
+        printf(", decrypted\n");
+    else {
+        generation_text(nca->generation, keys);
+        printf(", %s, %s%s\n", keys,
+               nca->title_key > 0   ? "its title key from a ticket or title.keys"
+               : nca->title_key < 0 ? "its title key in no ticket of the dump or title.keys"
+                                    : "its keys in its key area",
+               nca->keys ? "" : ", and prod.keys has no key of that master key");
+    }
+}
+int snx_nca_keys(const SnxNcaRef* nca, const char* what) {
+    char keys[96];
+    if (nca->info.decrypted) return 0;
+    generation_text(nca->info.generation, keys);
+    if (!nca->info.keys)
+        return snx_error("%s is encrypted with %s, which prod.keys has no key of: it needs the keys of a console on "
+                         "that firmware or later",
+                         what, keys);
+    if (nca->info.title_key < 0)
+        return snx_error("%s is encrypted with a title key, which no ticket of the dump and no title.keys gives. A "
+                         "personalized ticket's is encrypted for the console the game was bought on: dump that "
+                         "console's title keys into title.keys",
+                         what);
+    return 0;
+}
+
+/* the headers of a container's NCAs, the content meta's left out (SNX_HAC_OTHER), into *ncas (owned, count of them
+   as there are entries): 0, else nonzero, said why. One whose header cannot be decrypted counts in *unreadable */
+static int read_ncas(SnxDump* dump, int container, const SnxHacEntry** entries, size_t* count, SnxHacNca** ncas,
+                     unsigned long* unreadable) {
+    size_t i;
+    *count = snx_hac_entries(dump->hac, container, entries);
+    *ncas = (SnxHacNca*)calloc(*count ? *count : 1, sizeof **ncas);
+    *unreadable = 0;
+    if (!*ncas) return snx_error("Out of memory reading the NCAs' headers");
+    for (i = 0; i < *count; i++) {
+        (*ncas)[i].type = SNX_HAC_OTHER;
+        if (!has_suffix((*entries)[i].name, ".nca") || has_suffix((*entries)[i].name, ".cnmt.nca")) continue;
+        if (!dump->has_keys && nca_needs_keys(dump, container, i)) {
+            free(*ncas);
+            *ncas = NULL;
+            return snx_error("Encrypted content needs prod.keys. Provide --keys, or put it at %s or in ~/.switch",
+                             dump->keys);
+        }
+        if (snx_hac_nca(dump->hac, container, i, &(*ncas)[i])) {
+            (*ncas)[i].type = SNX_HAC_OTHER;
+            ++*unreadable;
+            if (dump->say && !(dump->said & 1u << container))
+                puts("  an NCA whose header cannot be decrypted: prod.keys' header_key is missing or wrong");
+        } else if (dump->say && !(dump->said & 1u << container))
+            say_nca(&(*ncas)[i], &(*entries)[i]);
+    }
+    if (dump->say && !(dump->said & 1u << container)) fflush(stdout);
+    dump->said |= 1u << container;
+    return 0;
+}
+
+/* A content meta (CNMT, Switchbrew's "CNMT"): what the console installs a title by, in the .cnmt file of a Meta NCA. Its
+   header is 0x20 bytes: the title ID, the version, the type, the extended header's size, the contents' count. An
+   update's and add-on content's extended header starts with the ID of the application they belong to. Each content
+   record after it is 0x38 bytes: a hash, then the content ID (the NCA's file name before .nca), its size, its type
+   and, for a program, its index in the application */
+enum { META_APPLICATION = 0x80, META_PATCH = 0x81, META_ADDON = 0x82 };
+enum { CONTENT_PROGRAM = 1, CONTENT_DATA = 2, CONTENT_CONTROL = 3 };
+typedef struct {
+    unsigned char id[16];
+    int type, index;
+} MetaContent;
+typedef struct {
+    int type;
+    SnxU64 title, application; /* an application's own ID for one */
+    SnxU32 version;
+    size_t count;
+    MetaContent* contents; /* owned */
+} Meta;
+
+/* d (size bytes) into m: 0, or -1 for no content meta of the types read here */
+static int meta_parse(const unsigned char* d, size_t size, Meta* m) {
+    size_t extended, records, i;
+    memset(m, 0, sizeof *m);
+    if (size < 0x20) return -1;
+    m->title = le_bytes(d, 8);
+    m->version = (SnxU32)le_bytes(d + 8, 4);
+    m->type = d[0xC];
+    extended = (size_t)le_bytes(d + 0xE, 2);
+    records = (size_t)le_bytes(d + 0x10, 2);
+    if (m->type != META_APPLICATION && m->type != META_PATCH && m->type != META_ADDON) return -1;
+    if (m->type != META_APPLICATION && extended < 8) return -1;
+    if (0x20 + extended > size || records > (size - 0x20 - extended) / 0x38) return -1;
+    m->application = m->type == META_APPLICATION ? m->title : le_bytes(d + 0x20, 8);
+    m->contents = (MetaContent*)calloc(records ? records : 1, sizeof *m->contents);
+    if (!m->contents) return -1;
+    for (i = 0; i < records; i++) {
+        const unsigned char* r = d + 0x20 + extended + i * 0x38;
+        memcpy(m->contents[i].id, r + 0x20, 16);
+        m->contents[i].type = r[0x36];
+        m->contents[i].index = r[0x37];
+    }
+    m->count = records;
+    return 0;
+}
+static void metas_free(Meta* metas, size_t count) {
+    size_t i;
+    for (i = 0; i < count; i++) free(metas[i].contents);
+    free(metas);
+}
+static const char* meta_name(int type) {
+    return type == META_APPLICATION ? "an application" : type == META_PATCH ? "an update" : "add-on content (a DLC)";
+}
+/* the content metas of a container's Meta NCAs that can be read, into *metas (owned): their count, said once */
+static size_t read_metas(SnxDump* dump, int container, Meta** metas) {
+    const SnxHacEntry* entries;
+    size_t count = snx_hac_entries(dump->hac, container, &entries), i, n = 0, size;
+    unsigned char* data;
+    char title[17], application[17];
+    *metas = (Meta*)calloc(count ? count : 1, sizeof **metas);
+    for (i = 0; *metas && i < count; i++) {
+        SnxHacNca nca;
+        /* a Meta NCA by its header first: hactool ends the process on one it cannot process */
+        if (!has_suffix(entries[i].name, ".cnmt.nca") || entries[i].size < 0xC00 ||
+            (!dump->has_keys && nca_needs_keys(dump, container, i)) || snx_hac_nca(dump->hac, container, i, &nca) ||
+            nca.content != 1 || (!nca.decrypted && !nca.keys) ||
+            snx_hac_cnmt(dump->hac, container, i, &data, &size))
+            continue;
+        if (!meta_parse(data, size, &(*metas)[n])) {
+            if (dump->say && !(dump->said_meta & 1u << container)) {
+                const Meta* m = &(*metas)[n];
+                snx_title_text(m->title, title);
+                snx_title_text(m->application, application);
+                printf("  content meta: %s %s, version %lu", meta_name(m->type), title, (unsigned long)m->version);
+                if (m->type != META_APPLICATION) printf(", of the game %s", application);
+                puts("");
+            }
+            n++;
+        }
+        free(data);
+    }
+    for (i = 0, size = 0; i < count; i++) size += has_suffix(entries[i].name, ".nca"); /* any NCA to tell them by */
+    if (dump->say && !(dump->said_meta & 1u << container) && !n && size)
+        puts("  no content meta that can be read: its kind and game told from its NCAs' title IDs");
+    dump->said_meta |= 1u << container;
+    return n;
+}
+/* the entry of a content the meta lists, of type (and for a program, index 0, the application's main one): its index
+   in entries, or -1 when the container lacks it. An NCA is named by its content ID in hex, then .nca */
+static long meta_entry(const Meta* m, int type, const SnxHacEntry* entries, size_t count) {
+    static const char digits[] = "0123456789abcdef";
+    char name[33];
+    size_t i, j, k;
+    for (i = 0; i < m->count; i++) {
+        if (m->contents[i].type != type || (type == CONTENT_PROGRAM && m->contents[i].index)) continue;
+        for (k = 0; k < 16; k++) {
+            name[2 * k] = digits[m->contents[i].id[k] >> 4];
+            name[2 * k + 1] = digits[m->contents[i].id[k] & 15];
+        }
+        name[32] = 0;
+        for (j = 0; j < count; j++)
+            if (!strncmp(entries[j].name, name, 32) && entries[j].name[32] == '.' && has_suffix(entries[j].name, ".nca"))
+                return (long)j;
+    }
+    return -1;
+}
+/* ref taken from the meta's content of type, its title the meta's: 1, else 0 when the container lacks it */
+static int take_content(SnxNcaRef* ref, const Meta* m, int type, int container, const SnxHacEntry* entries,
+                        const SnxHacNca* ncas, size_t count) {
+    long at = meta_entry(m, type, entries, count);
+    if (at < 0) return 0;
+    take(ref, container, (size_t)at, &entries[at], &ncas[at]);
+    ref->title_id = m->title; /* the meta's, whatever the NCA's header says */
+    return 1;
+}
+
+/* an update's Program NCA told from its header, without a content meta: its title ID with 0x800, or a Patch RomFS */
+static int is_patch(const SnxHacNca* nca) {
+    return nca->type == SNX_HAC_PROGRAM && ((nca->title_id & 0x800) || nca->patch);
+}
+
+/* the base's Program NCA of a container (selected), the patch an NSP of both has (embedded_patch), and the Control
+   NCA of the same title (control): the contents its application's content meta lists, else told from the NCAs'
+   headers, the biggest when there are several. dump->game is the application's ID */
+static int select_ncas(SnxDump* dump, int container, SnxNcaRef* selected, SnxNcaRef* embedded_patch,
+                       SnxNcaRef* control) {
     const SnxHacEntry* entries;
     SnxHacNca* ncas;
-    size_t count, i;
+    Meta* metas = NULL;
+    size_t count, i, nmetas;
     unsigned long unreadable;
-    int patch;
     const SnxU64 update_bit = 0x800UL;
     memset(selected, 0, sizeof *selected);
     if (embedded_patch) memset(embedded_patch, 0, sizeof *embedded_patch);
     memset(control, 0, sizeof *control);
-    count = snx_hac_entries(dump->hac, container, &entries);
-    ncas = (SnxHacNca*)calloc(count ? count : 1, sizeof *ncas);
-    if (!ncas) return snx_error("Out of memory selecting Program NCA");
-    unreadable = 0;
-    for (i = 0; i < count; i++) {
-        ncas[i].type = SNX_HAC_OTHER;
-        if (!has_suffix(entries[i].name, ".nca") || has_suffix(entries[i].name, ".cnmt.nca")) continue;
-        if (!dump->has_keys && nca_needs_keys(dump, container, i)) {
-            free(ncas);
-            return snx_error("Encrypted content needs prod.keys. Provide --keys, or put it at %s or in ~/.switch",
-                             dump->keys);
+    if (read_ncas(dump, container, &entries, &count, &ncas, &unreadable)) return 1;
+    nmetas = read_metas(dump, container, &metas);
+    for (i = 0; i < nmetas && !selected->found; i++)
+        if (metas[i].type == META_APPLICATION &&
+            take_content(selected, &metas[i], CONTENT_PROGRAM, container, entries, ncas, count))
+            take_content(control, &metas[i], CONTENT_CONTROL, container, entries, ncas, count);
+    for (i = 0; embedded_patch && selected->found && i < nmetas && !embedded_patch->found; i++)
+        if (metas[i].type == META_PATCH && metas[i].application == selected->title_id &&
+            take_content(embedded_patch, &metas[i], CONTENT_PROGRAM, container, entries, ncas, count))
+            take_content(control, &metas[i], CONTENT_CONTROL, container, entries, ncas, count); /* a name changed */
+    if (!selected->found) { /* no content meta naming them */
+        for (i = 0; i < count; i++)
+            if (ncas[i].type == SNX_HAC_PROGRAM && !is_patch(&ncas[i]) &&
+                (!selected->found || entries[i].size > selected->size))
+                take(selected, container, i, &entries[i], &ncas[i]);
+        for (i = 0; selected->found && i < count; i++) {
+            if (embedded_patch && is_patch(&ncas[i]) && (ncas[i].title_id & ~update_bit) == selected->title_id &&
+                (!embedded_patch->found || entries[i].size > embedded_patch->size))
+                take(embedded_patch, container, i, &entries[i], &ncas[i]);
+            if (!control->found && ncas[i].type == SNX_HAC_CONTROL && /* the same game's, base or update */
+                (ncas[i].title_id & ~update_bit) == (selected->title_id & ~update_bit))
+                take(control, container, i, &entries[i], &ncas[i]);
         }
-        if (snx_hac_nca(dump->hac, container, i, &ncas[i])) {
-            ncas[i].type = SNX_HAC_OTHER;
-            unreadable++;
-        }
-    }
-    for (i = 0; i < count; i++) {
-        patch = (ncas[i].title_id & update_bit) || ncas[i].patch;
-        if (ncas[i].type != SNX_HAC_PROGRAM || (selected->found && entries[i].size <= selected->size)) continue;
-        if (update ? patch && (ncas[i].title_id & ~update_bit) == expected_title : !patch)
-            take(selected, container, i, &entries[i], ncas[i].title_id);
-    }
-    for (i = 0; selected->found && i < count; i++) {
-        patch = (ncas[i].title_id & update_bit) || ncas[i].patch;
-        if (embedded_patch && ncas[i].type == SNX_HAC_PROGRAM && patch &&
-            (ncas[i].title_id & ~update_bit) == selected->title_id &&
-            (!embedded_patch->found || entries[i].size > embedded_patch->size))
-            take(embedded_patch, container, i, &entries[i], ncas[i].title_id);
-        if (!control->found && ncas[i].type == SNX_HAC_CONTROL && /* the same game's, base or update */
-            (ncas[i].title_id & ~update_bit) == (selected->title_id & ~update_bit))
-            take(control, container, i, &entries[i], ncas[i].title_id);
     }
     free(ncas);
+    metas_free(metas, nmetas);
+    dump->game = selected->title_id;
     if (selected->found) return 0;
     if (unreadable) return snx_hac_error("The NCAs' headers cannot be decrypted. Check that prod.keys is current");
-    return snx_error(update ? "Update has no Program NCA matching the selected base game"
-                            : "Container has no base Program NCA (possibly an update or DLC). Supply a base game");
+    return snx_error("Container has no base Program NCA (possibly an update or DLC). Supply a base game");
+}
+
+/* An add-on's container: an update (its Program NCA, the patch, with its Control NCA) or else a DLC (its Data NCA), as
+   its content meta lists them, the game it belongs to the one the meta names (dump->game). With the base opened
+   (program found), only the base's own add-ons. Without a content meta, told from the NCAs' headers: the game is the
+   one the usual numbering gives (snx_addon_guess), which a DLC numbered otherwise has no other way to be told by. The
+   biggest when there are several */
+static int select_addon(SnxDump* dump, int container) {
+    const SnxHacEntry* entries;
+    SnxHacNca* ncas;
+    Meta* metas = NULL;
+    size_t count, i, nmetas, dlcs = 0;
+    unsigned long unreadable;
+    SnxU64 game = dump->program.found ? dump->game : 0, other = 0;
+    int patches = 0; /* another game's */
+    memset(&dump->patch, 0, sizeof dump->patch);
+    memset(&dump->aoc, 0, sizeof dump->aoc);
+    if (read_ncas(dump, container, &entries, &count, &ncas, &unreadable)) return 1;
+    nmetas = read_metas(dump, container, &metas);
+    for (i = 0; i < nmetas && !dump->patch.found; i++) {
+        if (metas[i].type != META_PATCH) continue;
+        if (game && metas[i].application != game) {
+            other = metas[i].application;
+            continue;
+        }
+        if (take_content(&dump->patch, &metas[i], CONTENT_PROGRAM, container, entries, ncas, count)) {
+            take_content(&dump->control, &metas[i], CONTENT_CONTROL, container, entries, ncas, count);
+            dump->game = metas[i].application;
+        }
+    }
+    for (i = 0; i < nmetas && !dump->patch.found; i++) {
+        if (metas[i].type != META_ADDON) continue;
+        if (game && metas[i].application != game) {
+            other = metas[i].application;
+            continue;
+        }
+        if (dump->aoc.found)
+            dlcs++;
+        else if (take_content(&dump->aoc, &metas[i], CONTENT_DATA, container, entries, ncas, count)) {
+            dump->game = metas[i].application;
+            dlcs++;
+        }
+    }
+    if (dlcs > 1 && dump->say)
+        printf("  %lu DLCs in one dump: the first is used, give the others' dumps each\n", (unsigned long)dlcs);
+    if (!nmetas) { /* told from the NCAs' headers */
+        for (i = 0; i < count; i++) {
+            SnxU64 own = game ? game : snx_addon_guess(ncas[i].title_id);
+            patches += is_patch(&ncas[i]);
+            if (is_patch(&ncas[i]) && (ncas[i].title_id & ~(SnxU64)0x800) == own &&
+                (!dump->patch.found || (ncas[i].title_id == dump->patch.title_id && entries[i].size > dump->patch.size))) {
+                take(&dump->patch, container, i, &entries[i], &ncas[i]);
+                dump->game = own;
+            }
+        }
+        for (i = 0; i < count; i++) {
+            if (dump->patch.found && ncas[i].type == SNX_HAC_CONTROL &&
+                (ncas[i].title_id & ~(SnxU64)0x800) == dump->game)
+                take(&dump->control, container, i, &entries[i], &ncas[i]); /* the update's, a name changed in it */
+            else if (!dump->patch.found && ncas[i].type == SNX_HAC_DATA &&
+                     snx_addon_kind(snx_addon_guess(ncas[i].title_id), ncas[i].title_id) == SNX_ADDON_DLC &&
+                     (!game || snx_addon_guess(ncas[i].title_id) == game) &&
+                     (!dump->aoc.found || (ncas[i].title_id == dump->aoc.title_id && entries[i].size > dump->aoc.size))) {
+                take(&dump->aoc, container, i, &entries[i], &ncas[i]);
+                dump->game = snx_addon_guess(ncas[i].title_id);
+            }
+        }
+    }
+    free(ncas);
+    metas_free(metas, nmetas);
+    if (dump->patch.found || dump->aoc.found) return 0;
+    if (unreadable) return snx_hac_error("The NCAs' headers cannot be decrypted. Check that prod.keys is current");
+    if (other) {
+        char of[17], given[17];
+        snx_title_text(other, of);
+        snx_title_text(game, given);
+        return snx_error("The update or DLC belongs to the game %s, not to the selected base game %s", of, given);
+    }
+    if (game && patches) return snx_error("Update has no Program NCA matching the selected base game");
+    return snx_error(game ? "The DLC is not the selected base game's"
+                          : "Container has no base Program NCA, and no update or DLC either: it is no game's dump");
 }
 
 static int open_container(SnxDump* dump, const char* path, int say) {
     int xci, container;
+    unsigned tickets, personal;
+    const SnxHacEntry* entries;
+    size_t count, i, ncas = 0;
+    char size[32];
     if (snx_container_kind(path, &xci)) return -1;
     if (say) {
         printf("Reading %s\n", path);
@@ -335,28 +653,76 @@ static int open_container(SnxDump* dump, const char* path, int say) {
     }
     container = snx_hac_open(dump->hac, path, xci);
     if (container < 0) snx_hac_error(xci ? "Cannot read the XCI's secure partition" : "Cannot read the NSP");
-    return container < 0 || read_tickets(dump, container) ? -1 : container;
+    if (container < 0 || read_tickets(dump, container, &tickets, &personal)) return -1;
+    if (say) { /* what it holds: its NCAs, said each as they are read, and its tickets */
+        count = snx_hac_entries(dump->hac, container, &entries);
+        for (i = 0; i < count; i++) /* the content meta's left out, as the reading leaves it */
+            ncas += has_suffix(entries[i].name, ".nca") && !has_suffix(entries[i].name, ".cnmt.nca");
+        snx_size_text(snx_file_size(path), size, sizeof size);
+        printf("  %s, %s: %lu NCA%s", xci ? "a gamecard (XCI)" : "an NSP", size, (unsigned long)ncas, ncas == 1 ? "" : "s");
+        if (tickets)
+            printf(", %u ticket%s%s", tickets, tickets == 1 ? "" : "s",
+                   personal == tickets ? " (personalized: their title keys are encrypted for a console)"
+                   : personal          ? " (some personalized)"
+                                       : "");
+        printf("%s\n", dump->has_keys ? "" : ", read without prod.keys");
+    }
+    return container;
 }
 
-int snx_dump_open(SnxDump* dump, const char* base, const char* update, const char* keys, const char* title_keys,
-                  const char* repo, int say) {
-    SnxNcaRef newer;
+/* the keys loaded into a new hactool: 0, else nonzero, said why */
+static int dump_start(SnxDump* dump, const char* keys, const char* title_keys, const char* repo, int say) {
     memset(dump, 0, sizeof *dump);
-    dump->update = -1;
+    dump->base = dump->update = -1;
+    dump->say = say;
     dump->keys = snx_find_keys(keys, "prod.keys", repo);
     dump->title_keys = snx_find_keys(title_keys, "title.keys", repo);
     dump->hac = snx_hac_new();
     if (!dump->keys || !dump->title_keys || !dump->hac) return snx_error("Out of memory reading the dump");
     dump->has_keys = snx_is_file(dump->keys);
     if (keys && !dump->has_keys) return snx_error("%s is not a file", dump->keys);
-    if ((dump->has_keys && load_prod_keys(dump, say)) || load_title_keys(dump)) return 1;
-    if ((dump->base = open_container(dump, base, say)) < 0) return 1;
-    if (update && (dump->update = open_container(dump, update, say)) < 0) return 1;
-    if (select_ncas(dump, dump->base, 0, 0, &dump->program, update ? NULL : &dump->patch, &dump->control)) return 1;
-    if (update) {
-        if (select_ncas(dump, dump->update, 1, dump->program.title_id, &dump->patch, NULL, &newer)) return 1;
-        if (newer.found) dump->control = newer; /* the update's, which a name changed in it comes with */
+    return (dump->has_keys && load_prod_keys(dump, say)) || load_title_keys(dump);
+}
+
+int snx_dump_open(SnxDump* dump, const char* base, const char* addon, const char* keys, const char* title_keys,
+                  const char* repo, int say) {
+    if (dump_start(dump, keys, title_keys, repo, say)) return 1;
+    /* each container's NCAs read as it is opened, the base's before the add-on's is */
+    if (base && ((dump->base = open_container(dump, base, say)) < 0 ||
+                 select_ncas(dump, dump->base, &dump->program, addon ? NULL : &dump->patch, &dump->control)))
+        return 1;
+    if (addon && (dump->update = open_container(dump, addon, say)) < 0) return 1;
+    return addon ? select_addon(dump, dump->update) : 0;
+}
+
+int snx_dump_title(SnxDump* dump, const char* path, const char* keys, const char* title_keys, const char* repo, int say,
+                   SnxU64* title, SnxU64* game) {
+    const SnxHacEntry* entries;
+    SnxHacNca* ncas;
+    Meta* metas = NULL;
+    size_t count, i, nmetas;
+    unsigned long unreadable;
+    int application = 0;
+    if (dump_start(dump, keys, title_keys, repo, say) || (dump->base = open_container(dump, path, say)) < 0 ||
+        read_ncas(dump, dump->base, &entries, &count, &ncas, &unreadable))
+        return 1;
+    /* a game's dump when its content meta says so, else when it has a game's program; an update's or a DLC's else */
+    nmetas = read_metas(dump, dump->base, &metas);
+    for (i = 0; i < nmetas; i++) application |= metas[i].type == META_APPLICATION;
+    for (i = 0; !nmetas && i < count && !application; i++)
+        application = ncas[i].type == SNX_HAC_PROGRAM && !is_patch(&ncas[i]);
+    free(ncas);
+    metas_free(metas, nmetas);
+    if (!application) {
+        dump->update = dump->base;
+        dump->base = -1;
+        if (select_addon(dump, dump->update)) return 1;
+        *title = dump->patch.found ? dump->patch.title_id : dump->aoc.title_id;
+        *game = dump->game;
+        return 0;
     }
+    if (select_ncas(dump, dump->base, &dump->program, &dump->patch, &dump->control)) return 1;
+    *title = *game = dump->program.title_id;
     return 0;
 }
 
@@ -369,9 +735,16 @@ void snx_dump_close(SnxDump* dump) {
 
 SnxHacFs* snx_dump_fs(SnxDump* dump) {
     const SnxNcaRef* top = dump->patch.found ? &dump->patch : &dump->program;
-    SnxHacFs* fs = snx_hac_fs_open(dump->hac, top->container, top->entry, dump->patch.found ? dump->program.container : -1,
+    int under = dump->patch.found && dump->program.found;
+    SnxHacFs* fs = snx_hac_fs_open(dump->hac, top->container, top->entry, under ? dump->program.container : -1,
                                    dump->program.entry);
     if (!fs) snx_hac_error("The Program NCA cannot be read");
+    return fs;
+}
+
+SnxHacFs* snx_dump_aoc_fs(SnxDump* dump) {
+    SnxHacFs* fs = snx_hac_fs_open(dump->hac, dump->aoc.container, dump->aoc.entry, -1, 0);
+    if (!fs) snx_hac_error("The DLC's Data NCA cannot be read");
     return fs;
 }
 

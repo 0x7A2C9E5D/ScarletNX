@@ -19,6 +19,8 @@
 #ifndef SNX_BUILD_DIR
 #define SNX_BUILD_DIR "build"
 #endif
+/* play_dump's: the game made and ready, not played (an update's or a DLC's game, before it) */
+#define PLAY_PREPARE 0x10000u
 
 static void usage(void) {
     puts("Usage: scarletnx [OPTIONS] INPUT [-- GAME_ARGUMENTS...]\n"
@@ -31,6 +33,10 @@ static void usage(void) {
          "  --touch=0|1|2          The game's touch screen: off, fingers, or fingers and the mouse\n"
          "  --controls=0|1         The on-screen controls: hidden or shown (the game's menu sets them)\n"
          "  --KEY=VALUE            Any setting of the game's .ini, for this run (--settings lists them)");
+    puts("  --update FILE          Played or prepared, an update's or a DLC's dump, given once each: recorded\n"
+         "                         beside the game (an update's program games/<ID>/<ID>_<its title ID>), checked in\n"
+         "                         addons= of the game's .ini, and the game played with what it checks. Its dump\n"
+         "                         alone does the same for a game made already");
     puts("  -x -h / -r -h          Extraction / recompilation options\n"
          "  --game=games/Game      Run a compiled game");
     puts("  --extract-container    Played or prepared, extract the dump into the game's data folder. Without it\n"
@@ -159,6 +165,39 @@ static int prepared_game(const char* input, char** folder, char** name) {
     free(data);
     return found;
 }
+/* an add-on the recompile made, named by its program in its game's folder (games/<id>/<id>_<add-on's id>, .exe on
+   Windows): 1 with that folder, its name and its title ID, owned */
+static int prepared_addon(const char* input, char** folder, char** name, SnxU64* addon) {
+    char *path = snx_absolute(input), *dir, *own;
+    const char* leaf;
+    size_t n;
+    int found = 0;
+    if (!path || !snx_is_file(path)) {
+        free(path);
+        return 0;
+    }
+    dir = snx_dirname(path);
+    for (leaf = path + strlen(path); leaf > path && leaf[-1] != '/' && leaf[-1] != '\\'; --leaf) continue;
+    own = snx_strdup(leaf);
+    n = strlen(own);
+#ifdef _WIN32
+    if (n > 4 && own[n - 4] == '.' && tolower((unsigned char)own[n - 3]) == 'e' &&
+        tolower((unsigned char)own[n - 2]) == 'x' && tolower((unsigned char)own[n - 1]) == 'e')
+        own[n - 4] = 0;
+#endif
+    (void)n;
+    for (leaf = dir + strlen(dir); leaf > dir && leaf[-1] != '/' && leaf[-1] != '\\'; --leaf) continue;
+    found = snx_addon_name(leaf, own, addon);
+    if (found) {
+        *folder = dir;
+        *name = own;
+    } else {
+        free(dir);
+        free(own);
+    }
+    free(path);
+    return found;
+}
 /* a game an older version laid out beside the others (games/<name>, games/<name>_data/), which runs where it is but is
    neither played nor recompiled by the driver until it has a folder of its own */
 static int left_beside(const char* input) {
@@ -173,16 +212,27 @@ static int left_beside(const char* input) {
     data = snx_format("%.*s_data", (int)n, input);
     found = snx_is_file(input) && snx_is_dir(data) && !prepared_game(input, NULL, NULL);
     free(data);
+    if (found) { /* an add-on beside its game, in the game's folder */
+        char *folder, *name;
+        SnxU64 addon;
+        if (prepared_addon(input, &folder, &name, &addon)) {
+            free(folder);
+            free(name);
+            found = 0;
+        }
+    }
     return found;
 }
-/* dump extracted straight into target, the game's data folder or its folder in tmpfs: what an extraction left there
-   taken away first, its saves and the rest kept. marker, <name>.extracting in the game's folder, says it is incomplete
-   until it is done */
-static int extract_game(const char** command, const char* dump, const char* target, const char* marker) {
+/* dump extracted straight into target, the game's data folder or its folder in tmpfs, with an update's over it or a
+   DLC's image beside it when update is not NULL: what an extraction left there taken away first, its saves and the
+   rest kept. made, the part of target the extraction makes (exefs, a DLC's image), is there once it is done. marker,
+   <name>.extracting in the game's folder, says it is incomplete until it is done */
+static int extract_game(const char** command, const char* dump, const char* update, const char* target,
+                        const char* made, const char* marker) {
     static const char* const parts[] = {"exefs", "romfs", "control.nacp", "control.romfs"};
     char *folder = snx_dirname(marker), *part;
     size_t i;
-    int failed = snx_mkdirs(folder) || snx_write_file(marker, "", 0);
+    int n = 5, failed = snx_mkdirs(folder) || snx_write_file(marker, "", 0);
     free(folder);
     for (i = 0; !failed && i < sizeof parts / sizeof *parts; ++i) {
         part = snx_path_join(target, parts[i]);
@@ -190,18 +240,22 @@ static int extract_game(const char** command, const char* dump, const char* targ
         free(part);
     }
     if (failed) return snx_error("cannot prepare %s for an extraction", target);
-    command[5] = "-x";
-    command[6] = "--out";
-    command[7] = target;
-    command[8] = "--";
-    command[9] = dump;
-    command[10] = NULL;
+    command[n++] = "-x";
+    command[n++] = "--out";
+    command[n++] = target;
+    if (update) {
+        command[n++] = "--update";
+        command[n++] = update;
+    }
+    command[n++] = "--";
+    command[n++] = dump;
+    command[n] = NULL;
     failed = snx_run_stage(command, NULL, "Extraction"); /* its status, the run's */
     if (failed) return failed;
-    part = snx_path_join(target, "exefs");
-    failed = !snx_is_dir(part);
+    part = snx_path_join(target, made);
+    failed = !snx_path_exists(part);
     free(part);
-    if (failed) return snx_error("Extraction finished without creating %s/exefs", target);
+    if (failed) return snx_error("Extraction finished without creating %s/%s", target, made);
     return snx_remove_tree(marker) ? snx_error("cannot remove %s", marker) : 0;
 }
 /* Extract game container off: a game read from its dump in place, source (recorded: 1 when its .ini or its old link
@@ -266,7 +320,7 @@ static int ensure_romfs(const char** command, const char* folder, const char* na
     }
     exefs = snx_path_join(data, "exefs");
     if (!snx_is_dir(exefs) && snx_is_file(source)) { /* made from its dump in place: extracted now */
-        rc = extract_game(command, source, data, extracting);
+        rc = extract_game(command, source, NULL, data, "exefs", extracting);
         if (rc) goto done;
     }
     text = snx_read_file(npdm, &size);
@@ -301,7 +355,7 @@ static int ensure_romfs(const char** command, const char* folder, const char* na
                    tmpfs ? "to tmpfs" : "again from tmpfs's emptied copy");
         goto done;
     }
-    rc = extract_game(command, source, tmpfs ? work : data, extracting);
+    rc = extract_game(command, source, NULL, tmpfs ? work : data, "exefs", extracting);
     if (!rc && tmpfs)
         rc = (snx_is_dir(disk) && snx_remove_tree(disk)) || snx_write_file(marker, "", 0);
     else if (!rc)
@@ -321,17 +375,166 @@ done:
     free(extracting);
     return rc;
 }
+/* the title ID a game's name starts with, its add-on's (<game>_<own>) too: 0 for a game named otherwise */
+static SnxU64 game_id(const char* name) {
+    char text[17];
+    SnxU64 id = 0;
+    if (strlen(name) < 16) return 0;
+    memcpy(text, name, 16);
+    text[16] = 0;
+    return snx_title_parse(text, &id) && (!name[16] || name[16] == '_') ? id : 0;
+}
+/* An add-on's files where Extract game container wants them before it runs (the runtime lays its data folder over its
+   game's, fs.c). On: extracted into its data folder, an update's ExeFS and RomFS over its game's dump (game), a DLC's
+   RomFS image as system/archives/<its title ID>.romfs, from its dump. Off: what an extraction left there taken away,
+   the add-on read from its dump in place. 0, or nonzero when an extraction failed or a part could not be taken away */
+static int ensure_addon(const char** command, const char* folder, const char* name, SnxU64 addon, const char* dump,
+                        const char* game, int extract) {
+    char *base = snx_path_join(folder, name), *data = snx_format("%s_data", base), text[17], *made, *path;
+    char* extracting = snx_format("%s.extracting", base);
+    int update = snx_addon_kind(game_id(name), addon) == SNX_ADDON_UPDATE, rc = 0, i;
+    snx_title_text(addon, text);
+    made = update ? snx_strdup("exefs") : snx_format("system/archives/%s.romfs", text);
+    path = snx_path_join(data, made);
+    if (!extract) {
+        const char* parts[3];
+        parts[0] = "exefs";
+        parts[1] = "romfs";
+        parts[2] = made;
+        for (i = 0; !rc && i < 3; ++i) {
+            char* part = snx_path_join(data, parts[i]);
+            if (snx_path_exists(part)) {
+                printf("Removing %s: the %s reads it from its dump\n", part, update ? "update" : "DLC");
+                rc = snx_remove_tree(part);
+                if (rc) snx_error("cannot take the extraction away from %s", data);
+            }
+            free(part);
+        }
+        if (!rc && snx_is_file(extracting)) rc = snx_remove_tree(extracting);
+    } else if (!snx_path_exists(path) || snx_is_file(extracting)) {
+        if (update && (!game || !snx_is_file(game)))
+            rc = snx_error("The update is extracted over its game's dump, and the game's settings name %s: play the "
+                           "game's dump to record it",
+                           game ? "a dump that is not there" : "none");
+        else
+            rc = update ? extract_game(command, game, dump, data, made, extracting)
+                        : extract_game(command, dump, NULL, data, made, extracting);
+    }
+    free(base);
+    free(data);
+    free(made);
+    free(path);
+    free(extracting);
+    return rc;
+}
+/* the game's checked updates and DLCs (addons= in its .ini, snx_addons_parse), malloc'd SNX_ADDONS_MAX long: their
+   count in *count */
+static SnxU64* checked_addons(const char* folder, const char* name, size_t* count) {
+    char *ini = snx_game_ini(folder, name), *text = snx_ini_value(ini, "addons");
+    SnxU64* ids = (SnxU64*)snx_alloc(SNX_ADDONS_MAX * sizeof *ids);
+    *count = snx_addons_parse(text, name, ids, SNX_ADDONS_MAX);
+    free(text);
+    free(ini);
+    return ids;
+}
+/* addon checked in the game's addons=, an update over the one checked: 0, or nonzero with a line saying why */
+static int check_addon(const char* folder, const char* name, SnxU64 addon) {
+    size_t count, i, kept = 0;
+    SnxU64* ids = checked_addons(folder, name, &count);
+    char *ini, *text;
+    int rc, placed = 0;
+    for (i = 0; i < count; i++) { /* where it is listed, or where the update it replaces was */
+        if (ids[i] == addon) { /* an update's listed already, its ID the game's one with 0x800 */
+            if (placed) continue;
+            ids[i] = addon;
+            placed = 1;
+        }
+        ids[kept++] = ids[i];
+    }
+    if (!placed && kept < SNX_ADDONS_MAX) ids[kept++] = addon;
+    ini = snx_game_ini(folder, name);
+    text = snx_addons_text(ids, kept);
+    rc = snx_ini_record(ini, "addons", text);
+    free(text);
+    free(ini);
+    free(ids);
+    return rc;
+}
+/* the program that plays the game named name in folder: its checked update's, when it has one made, else its own.
+   Owned */
+static char* game_program(const char* folder, const char* name) {
+    size_t count, i;
+    SnxU64* ids = checked_addons(folder, name, &count);
+    char text[17], *program = NULL;
+    for (i = 0; i < count && !program; i++)
+        if (snx_addon_kind(game_id(name), ids[i]) == SNX_ADDON_UPDATE) {
+            snx_title_text(ids[i], text);
+#ifdef _WIN32
+            program = snx_format("%s/%s_%s.exe", folder, name, text);
+#else
+            program = snx_format("%s/%s_%s", folder, name, text);
+#endif
+            if (!snx_is_file(program)) {
+                free(program);
+                program = NULL;
+            }
+        }
+    free(ids);
+#ifdef _WIN32
+    return program ? program : snx_format("%s/%s.exe", folder, name);
+#else
+    return program ? program : snx_format("%s/%s", folder, name);
+#endif
+}
+/* The game's checked DLCs readied as ensure_addon readies one, each from the dump its own .ini names; one whose dump
+   is not there is left to the runtime, which plays without it and says so. 0, or nonzero when one failed */
+static int ensure_dlcs(const char** command, const char* folder, const char* name, int extract) {
+    size_t count, i;
+    SnxU64* ids = checked_addons(folder, name, &count);
+    char text[17], *own, *dump;
+    int rc = 0;
+    for (i = 0; !rc && i < count; i++) {
+        if (snx_addon_kind(game_id(name), ids[i]) != SNX_ADDON_DLC) continue;
+        snx_title_text(ids[i], text);
+        own = snx_format("%s_%s", name, text);
+        dump = snx_game_source(folder, own, NULL);
+        if (snx_is_file(dump) || !extract) rc = ensure_addon(command, folder, own, ids[i], dump, NULL, extract);
+        free(own);
+        free(dump);
+    }
+    free(ids);
+    return rc;
+}
+/* what an older version made of a DLC as a program of its own (its runtime's copy, its code, its stamp, its hints),
+   taken away: a DLC plays with its game now. 0, or nonzero with a line saying why */
+static int drop_dlc_program(const char* folder, const char* name) {
+    static const char* const parts[] = {"", ".exe", "_code.so", "_code.dll", ".abi", ".hints", ".jitcache"};
+    size_t i;
+    int rc = 0;
+    for (i = 0; !rc && i < sizeof parts / sizeof *parts; ++i) {
+        char* part = snx_format("%s/%s%s", folder, name, parts[i]);
+        if (snx_is_file(part)) {
+            printf("Removing %s: a DLC plays with its game now, checked in its list of updates and DLCs\n", part);
+            rc = snx_remove_tree(part);
+            if (rc) snx_error("cannot remove %s", part);
+        }
+        free(part);
+    }
+    return rc;
+}
 /* games/ of the data folder, else the folder outdir names. A dump is extracted straight into its game's data folder,
    games/<title ID>/<title ID>_data (its title ID read from its NCAs' headers first), or with --tmpfs into tmpfs, and
    its game made from it there: no copy is kept. --out names a folder the extraction is kept in instead, the game made
    from a copy. A game made already stays where it is */
 static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, const char* outdir, const char* out,
                      const char* opt, int recompiling, char** recompile, int settings, char** setting, int game_argc,
-                     char** game_argv) {
+                     char** game_argv, const char* const* updates, int nupdates) {
     char *dumped = NULL, *dump = snx_absolute(input), *name = NULL, *games = NULL, *extracted = NULL, *work = NULL;
     char *pending = NULL, *game = NULL, *folder = NULL, *base = NULL, *code = NULL, *source = NULL, error[256];
+    char* game_dump = NULL; /* an update's game's dump, which its RomFS is read over */
+    SnxU64 addon = 0, owner = 0; /* an update or a DLC, and the game it belongs to */
     const char** command =
-        (const char**)snx_alloc((size_t)(game_argc + settings + recompiling + 16) * sizeof(*command));
+        (const char**)snx_alloc((size_t)(game_argc + settings + recompiling + 20) * sizeof(*command));
     int rc = 1, nro = is_nro_path(input), prepared = prepared_game(input, &folder, &name), named = 0, n, j;
     /* -rx on a dump extracts it, as --extract-container does: -r alone reads it in place */
     int tmpfs = (flags & SNX_TMPFS) != 0, extract = tmpfs || (flags & (SNX_EXTRACT_CONTAINER | SNX_EXTRACT)) != 0;
@@ -345,6 +548,54 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
         snx_error("--out names where the extraction goes, and --tmpfs puts it in tmpfs");
         goto done;
     }
+    if (nupdates) { /* the game made first, then each update or DLC made and checked, then the game played with them */
+        SnxU64 title, own, of_game;
+        char of[17], *program;
+        if (out || nro || prepared) {
+            snx_error("--update takes a game's dump, and an update or a DLC goes into the game's folder");
+            goto done;
+        }
+        rc = play_dump(input, paths, flags | PLAY_PREPARE, outdir, NULL, opt, recompiling, recompile, 0, NULL, 0, NULL,
+                       NULL, 0);
+        if (!rc) rc = snx_extract_title(input, paths, &title, &of_game);
+        for (j = 0; !rc && j < nupdates; ++j) {
+            rc = snx_extract_title(updates[j], paths, &own, &of_game);
+            if (!rc && (snx_addon_kind(title, own) == SNX_ADDON_NONE || of_game != title)) {
+                char named[17], given[17];
+                snx_title_text(of_game, named);
+                snx_title_text(title, given);
+                rc = snx_error("%s is not an update or a DLC of %s (%s): its content meta names the game %s",
+                               updates[j], input, given, named);
+            }
+            if (!rc)
+                rc = play_dump(updates[j], paths, flags | PLAY_PREPARE, outdir, NULL, opt, recompiling, recompile, 0,
+                               NULL, 0, NULL, NULL, 0);
+        }
+        if (rc || (flags & (SNX_RECOMP | PLAY_PREPARE))) goto done;
+        games = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
+        snx_title_text(title, of);
+        folder = snx_path_join(games, of);
+        program = game_program(folder, of);
+        rc = play_dump(program, paths, flags, NULL, NULL, opt, recompiling, recompile, settings, setting, game_argc,
+                       game_argv, NULL, 0);
+        free(program);
+        goto done;
+    }
+    if (!prepared && !nro && out && dump && snx_is_file(dump)) { /* an update's or a DLC's goes into its own data folder */
+        SnxU64 title, of_game;
+        if (snx_extract_title(dump, paths, &title, &of_game)) goto done;
+        if (snx_addon_kind(of_game, title) != SNX_ADDON_NONE) out = NULL;
+    }
+    if (!prepared && !nro && !out && prepared_addon(input, &folder, &name, &addon)) {
+        if (outdir) {
+            snx_error("--outdir names where a dump's game goes, and %s is an update's or a DLC's", input);
+            goto done;
+        }
+        games = snx_dirname(folder);
+        source = snx_game_source(folder, name, NULL);
+        owner = game_id(name);
+        goto addon;
+    }
     if (!prepared && !nro && !out) {
         SnxU64 title;
         char text[17], *data, *extracting, *exefs;
@@ -354,7 +605,17 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
             goto done;
         }
         games = outdir ? snx_absolute(outdir) : snx_path_join(paths->repo, "games");
-        if (!games || snx_extract_title(dump, paths, &title)) goto done;
+        if (!games || snx_extract_title(dump, paths, &title, &owner)) goto done;
+        if (snx_addon_kind(owner, title) != SNX_ADDON_NONE) { /* games/<game>/<game>_<add-on> */
+            char of[17], own[17];
+            snx_title_text(owner, of);
+            snx_title_text(title, own);
+            addon = title;
+            folder = snx_path_join(games, of);
+            name = snx_format("%s_%s", of, own);
+            source = snx_strdup(dump);
+            goto addon;
+        }
         /* named as the recompile names it, by its title ID; a dump without one of its own by its file's stem */
         name = snx_title_text(title, text) ? snx_strdup(text) : snx_dump_name(input);
         work = tmpfs ? snx_tmpfs_work(title) : NULL;
@@ -370,7 +631,7 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
         /* extracted unless its game has its ExeFS, from a finished extraction; else its game made from the dump read
            in place */
         fresh = extract && (snx_is_file(extracting) || !snx_is_dir(exefs));
-        rc = fresh ? extract_game(command, dump, tmpfs ? work : data, extracting) : snx_mkdirs(folder);
+        rc = fresh ? extract_game(command, dump, NULL, tmpfs ? work : data, "exefs", extracting) : snx_mkdirs(folder);
         source = snx_strdup(!extract ? dump : fresh && tmpfs ? work : data);
         free(data);
         free(extracting);
@@ -470,6 +731,49 @@ static int play_dump(const char* input, const SnxPaths* paths, unsigned flags, c
     folder = snx_path_join(games, name); /* the game's own, as the recompile makes it */
     base = snx_path_join(folder, name);
     source = snx_strdup(nro ? dump : extracted);
+addon:
+    /* an update or a DLC of a game made already: its own .ini names its dump, and it is checked in the game's
+       addons=. An update is recompiled into its own program, which plays it; a DLC has none, and the game plays it */
+    if (addon) {
+        char of[17];
+        const char* what = snx_addon_kind(owner, addon) == SNX_ADDON_UPDATE ? "the update" : "a DLC";
+        snx_title_text(owner, of);
+        base = snx_path_join(folder, name);
+        rc = 0;
+        if (!prepared_game(folder, NULL, NULL)) {
+            rc = snx_error("%s is %s of the game %s, which is not recompiled yet: recompile the base game first by "
+                           "playing its dump (or give both: scarletnx GAME --update %s), then this one again",
+                           input, what, of, input);
+        } else if (!source || !snx_is_file(source)) {
+            rc = snx_error("%s's dump %s is not there: play it again", what, source ? source : "(none recorded)");
+        } else if (snx_record_source(folder, name, source)) {
+            rc = 1;
+        } else if (snx_addon_kind(owner, addon) == SNX_ADDON_DLC) {
+            /* recorded and checked, its game's code its own: the game played with it */
+            char *data = snx_format("%s_data", base), *program;
+            rc = snx_mkdirs(data) || drop_dlc_program(folder, name) || check_addon(folder, of, addon);
+            free(data);
+            if (!rc && !(flags & (SNX_RECOMP | PLAY_PREPARE))) {
+                program = game_program(folder, of);
+                rc = play_dump(program, paths, flags, NULL, NULL, opt, recompiling, recompile, settings, setting,
+                               game_argc, game_argv, NULL, 0);
+                free(program);
+            }
+            goto done;
+        } else {
+            game_dump = snx_game_source(folder, of, NULL);
+            if (!snx_is_file(game_dump)) {
+                free(game_dump);
+                game_dump = NULL;
+            }
+            if (!game_dump && !extract)
+                rc = snx_error("The update reads its files over its game's dump, and the game's settings name none "
+                               "that is there: play the game's dump again");
+            if (!rc) rc = check_addon(folder, of, addon); /* the update played, over the one checked before */
+            if (tmpfs && !rc) puts("An update is extracted into its data folder, not to tmpfs");
+        }
+        if (rc) goto done;
+    }
 made:
 #ifdef _WIN32
     code = snx_format("%s_code.dll", base);
@@ -484,7 +788,7 @@ made:
         command[6] = "--outdir";
         command[7] = games;
         n = 8;
-        if (tmpfs) command[n++] = "--tmpfs";
+        if (tmpfs && !addon) command[n++] = "--tmpfs";
         if (opt) {
             command[n++] = "-O";
             command[n++] = opt;
@@ -501,11 +805,33 @@ made:
             goto done;
         }
     }
-    if (flags & SNX_RECOMP) {
+    /* made from the extraction --out keeps: its dump recorded all the same, which its update's RomFS is read over and
+       Extract game container off reads it from */
+    if (out && !nro && snx_record_source(folder, name, dump)) {
+        rc = 1;
+        goto done;
+    }
+    if (flags & (SNX_RECOMP | PLAY_PREPARE)) {
         rc = 0;
         goto done;
     }
-    rc = nro ? 0 : ensure_romfs(command, folder, name, tmpfs, extract);
+    rc = nro      ? 0
+         : addon ? ensure_addon(command, folder, name, addon, source, game_dump, extract)
+                 : ensure_romfs(command, folder, name, tmpfs, extract);
+    if (!rc && !nro) { /* its checked DLCs; and the game played with its checked update, from the update's program */
+        char of[17], *program;
+        if (addon) snx_title_text(owner, of);
+        if (addon) rc = ensure_romfs(command, folder, of, tmpfs, extract); /* the game's own files under it */
+        if (!rc) rc = ensure_dlcs(command, folder, addon ? of : name, extract);
+        program = addon ? NULL : game_program(folder, name);
+        if (!rc && program && strcmp(program, game)) {
+            rc = play_dump(program, paths, flags, NULL, NULL, opt, recompiling, recompile, settings, setting, game_argc,
+                           game_argv, NULL, 0);
+            free(program);
+            goto done;
+        }
+        free(program);
+    }
     /* the game may start with another environment than this run's (its copy outside an AppImage, a shortcut) */
     if (!rc) rc = snx_record_folders(folder, name);
     if (rc) goto done;
@@ -546,8 +872,18 @@ done:
     free(base);
     free(code);
     free(source);
+    free(game_dump);
     free(command);
     return rc;
+}
+/* 1 for an update's or a DLC's program in its game's folder (prepared_addon) */
+static int addon_program(const char* input) {
+    char *folder, *name;
+    SnxU64 addon;
+    if (!prepared_addon(input, &folder, &name, &addon)) return 0;
+    free(folder);
+    free(name);
+    return 1;
 }
 /* Options whose following token belongs to a tool, not to the launcher. */
 static int takes_value(const char* arg) {
@@ -598,6 +934,8 @@ static int setup_run(const char* argv0, int all) {
 int snx_driver(int argc, char** argv) {
     SnxPaths paths;
     const char *repo = NULL, *build = SNX_BUILD_DIR, *input = NULL, *outdir = NULL, *out = NULL, *opt = NULL;
+    const char** updates = NULL;
+    int nupdates = 0;
     char *r = NULL, *b = NULL, *exe = NULL, **rest, **setting, **recompile, *self, *data = NULL, *source = NULL;
     unsigned flags = 0;
     int i, n = 0, separator = argc, result = -1, tool_paths = 0, help = 0, parsed, automatic, tmpfs_args = 0;
@@ -673,7 +1011,8 @@ int snx_driver(int argc, char** argv) {
     /* a game made already is played or, with -r, recompiled where it is */
     automatic = input && (!(flags & (SNX_EXTRACT | SNX_RECOMP)) ||
                           ((flags & SNX_RECOMP) &&
-                           (container_path(input) || (!(flags & SNX_EXTRACT) && prepared_game(input, NULL, NULL)))));
+                           (container_path(input) ||
+                            (!(flags & SNX_EXTRACT) && (prepared_game(input, NULL, NULL) || addon_program(input))))));
     if (input && (automatic || (flags & SNX_RECOMP)) && left_beside(input)) {
         result =
             snx_error("%s was laid out by an older version: move its files as docs/DEPRECATIONS.md says, or run it "
@@ -702,14 +1041,19 @@ int snx_driver(int argc, char** argv) {
         } else
             rest[i - settings - recompiling] = rest[i];
     n -= settings + recompiling;
-    /* played, --outdir names the games' folder and --out the dump's extraction, as -r and -x take them */
+    /* played, --outdir names the games' folder and --out the dump's extraction, as -r and -x take them, and --update
+       an update or a DLC played over the game */
     for (i = 0; automatic && i < n; ++i)
-        if (!strcmp(rest[i], "--outdir") || !strcmp(rest[i], "--out")) {
+        if (!strcmp(rest[i], "--outdir") || !strcmp(rest[i], "--out") || !strcmp(rest[i], "--update")) {
             if (i + 1 == n) {
-                result = snx_error("%s requires a directory", rest[i]);
+                result = snx_error("%s requires %s", rest[i], strcmp(rest[i], "--update") ? "a directory" : "a dump");
                 goto done;
             }
-            *(strcmp(rest[i], "--out") ? &outdir : &out) = rest[i + 1];
+            if (!strcmp(rest[i], "--update")) {
+                if (!updates) updates = (const char**)snx_alloc((size_t)argc * sizeof *updates);
+                updates[nupdates++] = rest[i + 1];
+            } else
+                *(strcmp(rest[i], "--out") ? &outdir : &out) = rest[i + 1];
             memmove(rest + i, rest + i + 2, (size_t)(n - i - 2) * sizeof(*rest));
             n -= 2;
             --i;
@@ -794,10 +1138,12 @@ int snx_driver(int argc, char** argv) {
     if (automatic)
         result =
             play_dump(input, &paths, flags, outdir, out, opt, recompiling, recompile, settings, setting,
-                      separator < argc ? argc - separator - 1 : 0, argv + (separator < argc ? separator + 1 : argc));
+                      separator < argc ? argc - separator - 1 : 0, argv + (separator < argc ? separator + 1 : argc),
+                      updates, nupdates);
     else
         result = (flags & SNX_RECOMP) ? snx_recompile(n, rest, &paths) : snx_extract(n, rest, &paths);
 done:
+    free((void*)updates);
     free(rest);
     free(r);
     free(b);

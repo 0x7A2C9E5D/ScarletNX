@@ -260,6 +260,14 @@ static void nca_open(SnxHac *hac, hactool_ctx_t *tool, nca_ctx_t *nca, int conta
     nca->map_size = c->map_size;
 }
 
+int snx_hac_newest_generation(SnxHac *hac) {
+    static const unsigned char zero[0x10];
+    int generation;
+    for (generation = 0x1F; generation >= 0; generation--)
+        if (memcmp(hac->tool.settings.keyset.key_area_keys[generation][0], zero, 0x10)) return generation;
+    return -1;
+}
+
 int snx_hac_nca(SnxHac *hac, int container, size_t entry, SnxHacNca *out) {
     nca_ctx_t nca;
     memset(out, 0, sizeof *out);
@@ -267,8 +275,27 @@ int snx_hac_nca(SnxHac *hac, int container, size_t entry, SnxHacNca *out) {
     if (!nca_decrypt_header(&nca)) return -1;
     out->type = nca.header.content_type == NCACONTENTTYPE_PROGRAM   ? SNX_HAC_PROGRAM
                 : nca.header.content_type == NCACONTENTTYPE_CONTROL ? SNX_HAC_CONTROL
-                                                                    : SNX_HAC_OTHER;
+                : nca.header.content_type == NCACONTENTTYPE_DATA || nca.header.content_type == NCACONTENTTPYE_PUBLICDATA
+                    ? SNX_HAC_DATA
+                    : SNX_HAC_OTHER;
     out->title_id = nca.header.title_id;
+    out->content = nca.header.content_type;
+    out->decrypted = nca.is_decrypted;
+    out->sdk = nca.header.sdk_version;
+    /* as nca_process sorts the generation out: 0 and 1 are both master key 0 */
+    out->generation = nca.header.crypto_type2 > nca.header.crypto_type ? nca.header.crypto_type2 : nca.header.crypto_type;
+    if (out->generation) out->generation--;
+    {
+        static const unsigned char zero[0x10];
+        int rights = memcmp(nca.header.rights_id, zero, 0x10) != 0;
+        const nca_keyset_t *keys = &hac->tool.settings.keyset;
+        out->title_key = !rights ? 0 : settings_has_titlekey(&hac->tool.settings, nca.header.rights_id) ? 1 : -1;
+        int generation = out->generation < 0x20 ? out->generation : 0x1F; /* past the keyset's: never given */
+        out->keys = out->generation < 0x20 &&
+                    (rights ? memcmp(keys->titlekeks[generation], zero, 0x10) != 0
+                            : nca.header.kaek_ind < 3 &&
+                                  memcmp(keys->key_area_keys[generation][nca.header.kaek_ind], zero, 0x10) != 0);
+    }
     /* a Patch RomFS, as nca_process tells one: BKTR encryption, or a decrypted dump's kept indirect tables */
     for (unsigned int i = 0; i < 4; i++) {
         nca_fs_header_t *fs = &nca.header.fs_headers[i];
@@ -419,6 +446,49 @@ void snx_hac_fs_free(SnxHacFs *fs) {
     free(fs->files);
     memset(fs, 0, sizeof *fs); /* the keys */
     free(fs);
+}
+
+int snx_hac_cnmt(SnxHac *hac, int container, size_t entry, unsigned char **data, size_t *size) {
+    hactool_ctx_t *tool = calloc(1, sizeof *tool), *base_tool = calloc(1, sizeof *base_tool);
+    nca_ctx_t *nca = calloc(1, sizeof *nca), *base = calloc(1, sizeof *base);
+    int rc = -1;
+    *data = NULL;
+    *size = 0;
+    if (tool && base_tool && nca && base) {
+        tool->settings = hac->tool.settings;
+        tool->action = 0; /* the tables read, nothing printed or saved */
+        if (!program_process(hac, tool, nca, base_tool, base, container, entry, -1, 0))
+            for (unsigned int i = 0; rc && i < 4; i++) {
+                nca_section_ctx_t *section = &nca->section_contexts[i];
+                pfs0_header_t *h;
+                if (!section->is_present || section->type != PFS0 || !section->storage || !section->pfs0_ctx.header)
+                    continue;
+                h = section->pfs0_ctx.header;
+                for (uint32_t j = 0; rc && j < h->num_files; j++) {
+                    pfs0_file_entry_t *e = pfs0_get_file_entry(h, j);
+                    const char *name = pfs0_get_file_name(h, j);
+                    size_t n = strlen(name);
+                    uint64_t at = section->pfs0_ctx.superblock->pfs0_offset + pfs0_get_header_size(h) + e->offset;
+                    if (n < 5 || strcmp(name + n - 5, ".cnmt") || !e->size || e->size > 0x100000) continue;
+                    *data = malloc((size_t)e->size);
+                    if (*data && storage_read(section->storage, at, *data, (size_t)e->size)) {
+                        *size = (size_t)e->size;
+                        rc = 0;
+                    } else {
+                        free(*data);
+                        *data = NULL;
+                    }
+                }
+            }
+        program_free(nca, base);
+    }
+    if (tool) memset(tool, 0, sizeof *tool); /* the keys */
+    if (base_tool) memset(base_tool, 0, sizeof *base_tool);
+    free(tool);
+    free(base_tool);
+    free(nca);
+    free(base);
+    return rc;
 }
 
 size_t snx_hac_fs_files(SnxHacFs *fs, const SnxHacEntry **files) {

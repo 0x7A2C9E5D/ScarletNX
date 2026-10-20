@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright 2026 the ScarletNX contributors
 add_library(scarletnx-common STATIC
-    utilities/common.c utilities/process.c utilities/font.c utilities/ini_lines.c utilities/pad_map.c
+    utilities/common.c utilities/process.c utilities/font.c utilities/ini_lines.c utilities/game_ini.c utilities/pad_map.c
     utilities/pad_screen.c utilities/users.c utilities/logscan.c utilities/language_tag.c
     cpu/aarch64/a64.c cpu/recompiler/codegen.c runtime/cas128.c)
 target_compile_definitions(scarletnx-common PRIVATE _CRT_SECURE_NO_WARNINGS

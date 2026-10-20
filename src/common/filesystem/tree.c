@@ -872,6 +872,74 @@ FsTreeResult fs_tree_graft(FsTree* tree, const char* name, const char* directory
     return FS_TREE_OK;
 }
 
+/* src's children (an overlay's scan, host its host folder) laid over dst's: see fs_tree_overlay. src is left empty */
+/* whether name is one of names (NULL-terminated, or NULL for none) */
+static int named(const char* const* names, const char* name) {
+    for (size_t i = 0; names && names[i]; i++)
+        if (!strcmp(names[i], name)) return 1;
+    return 0;
+}
+static FsTreeResult overlay_merge(FsNode* dst, FsNode* src, char* host, const char* const* whole,
+                                  const char* const* merged, unsigned depth) {
+    size_t host_len = strlen(host);
+    FsTreeResult rc = FS_TREE_OK;
+    if (depth > FS_TREE_DEPTH_MAX) return FS_TREE_TOOLONG;
+    while (src->children && !rc) {
+        FsNode *c = src->children, *under = child_find(dst, c->name);
+        size_t len = strlen(c->name);
+        int replace = !under || !c->is_dir || !under->is_dir || (!depth && named(whole, c->name));
+        if (!depth && !named(whole, c->name) && !named(merged, c->name)) { /* none of the overlay's parts */
+            node_unlink(c);
+            c->attached = 0;
+            subtree_discard(c);
+            continue;
+        }
+        if (host_len + 1 + len >= FS_TREE_PATH_MAX) return FS_TREE_TOOLONG;
+        host[host_len] = '/';
+        memcpy(host + host_len + 1, c->name, len + 1);
+        node_unlink(c);
+        if (replace) {
+            c->host = strdup(host); /* its subtree's paths start in the overlay's folder */
+            if (!c->host) {
+                c->attached = 0;
+                subtree_discard(c);
+                rc = FS_TREE_NOMEM;
+            } else {
+                if (under) subtree_discard(under);
+                node_attach(dst, c);
+            }
+        } else {
+            rc = overlay_merge(under, c, host, whole, merged, depth + 1);
+            c->attached = 0;
+            subtree_discard(c);
+        }
+        host[host_len] = 0;
+    }
+    return rc;
+}
+
+FsTreeResult fs_tree_overlay(FsTree* tree, const char* directory, const char* const* whole,
+                             const char* const* merged) {
+    if (!tree || !tree->root || !directory) return FS_TREE_INVALID;
+    char absolute[FS_TREE_PATH_MAX];
+    FsTreeResult rc = host_directory(directory, absolute);
+    if (rc) return rc;
+    FsNode* top = node_new("", 1);
+    if (!top) return FS_TREE_NOMEM;
+    top->attached = 1;
+    char host[FS_TREE_PATH_MAX];
+    memcpy(host, absolute, strlen(absolute) + 1);
+    rc = scan_directory(tree, top, host, 1);
+    if (!rc) {
+        make_readonly(top);
+        memcpy(host, absolute, strlen(absolute) + 1);
+        rc = overlay_merge(tree->root, top, host, whole, merged, 0);
+    }
+    top->attached = 0;
+    subtree_discard(top);
+    return rc;
+}
+
 FsTreeResult fs_tree_init(FsTree* tree, const char* directory) {
     if (!tree || !directory || !*directory) return FS_TREE_INVALID;
     memset(tree, 0, sizeof *tree);

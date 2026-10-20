@@ -734,12 +734,15 @@ static int nn_bcat_detail_ipc_INotifierService_GetEvent(SvcObj* self, u32* event
 #define AOC_NO_PURCHASED_PRODUCT RC(164, 400) /* nim's shop: NoPurchasedProductInfoAvailable */
 #define AOC_NOT_CONNECTED        RC(110, 300) /* nifm's: the token needs the network */
 
-/* the add-on contents' ids start past the application's: its base id with 0x1000 added */
-static u64 aoc_base_id(u64 application_id) { return (application_id & 0xFFFFFFFFFFFFE000ull) + 0x1000; }
+/* the running game's from its control.nacp (am_aoc_base_id), another application's as the SDK numbers them */
+static u64 aoc_base_id(u64 application_id) {
+    return application_id == g_hle.kernel.title_id ? am_aoc_base_id() : snx_nacp_aoc_base(NULL, 0, application_id);
+}
 /* am's ApplicationRecordNotFound, for a list asked from past its end */
 #define SNX_AOC_NO_RECORD RC(128, 37)
 /* An add-on content is installed when its RomFS image is in the data folder as system/archives/<data id>.romfs, the
-   file OpenDataStorageByDataId opens: data id = base id + index, index 1 to 2047. Scanned once: the list does not
+   file OpenDataStorageByDataId opens, or is a DLC read in place from its dump (fs_aoc_has): data id = base id +
+   index, index 1 to 2047. Scanned once: the list does not
    change while the game runs (g_hle.misc.aoc_index, AOC_MAX at most) */
 static void aoc_scan(void) {
     u64 base = aoc_base_id(g_hle.kernel.title_id);
@@ -750,9 +753,9 @@ static void aoc_scan(void) {
     if (!g_hle.misc.aoc_scanned) {
         for (i = 1; i <= AOC_MAX; i++) {
             snprintf(path, sizeof path, "system/archives/%016llx.romfs", (unsigned long long)(base + (u64)i));
-            f = fs_open_read(path, NULL);
-            if (!f) continue;
-            fclose(f);
+            f = fs_aoc_has(base + (u64)i) ? NULL : fs_open_read(path, NULL);
+            if (!f && !fs_aoc_has(base + (u64)i)) continue;
+            if (f) fclose(f);
             g_hle.misc.aoc_index[g_hle.misc.aoc_count++] = i;
             LOG("aoc: add-on content %d (%016llx) installed\n", (int)i, (unsigned long long)(base + (u64)i));
         }
@@ -762,7 +765,7 @@ static void aoc_scan(void) {
 }
 /* the running game's; another application has none here */
 static i32 aoc_count_of(u64 application_id) {
-    if (aoc_base_id(application_id) != aoc_base_id(g_hle.kernel.title_id)) return 0;
+    if (application_id != g_hle.kernel.title_id) return 0;
     aoc_scan();
     return g_hle.misc.aoc_count;
 }

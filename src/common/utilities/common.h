@@ -185,4 +185,23 @@ SnxU64 snx_npdm_title(const unsigned char* npdm, size_t size);
 /* id as a game's folder and files are named, 16 hex digits into out (17 bytes): 1, or 0 for an ID that is none of the
    game's own (0, SNX_NPDM_DEFAULT_TITLE) */
 int snx_title_text(SnxU64 id, char* out);
+/* text as snx_title_text writes a title ID, 16 hex digits in capitals and nothing more, into *id: 1, else 0 */
+int snx_title_parse(const char* text, SnxU64* id);
+/* An add-on of a game, an update or a DLC (add-on content), is made in the game's folder beside it and named
+   <base>_<its title ID as snx_title_text writes it>, base the game's title ID: its game is the folder's, recorded as
+   the add-on's content meta named it, never worked out from the add-on's own ID. 1 when name is such an add-on of
+   base, its ID in *id when id is not NULL */
+int snx_addon_name(const char* base, const char* name, SnxU64* id);
+enum { SNX_ADDON_NONE, SNX_ADDON_UPDATE, SNX_ADDON_DLC };
+/* what the title id is to the game: SNX_ADDON_UPDATE for its patch (its ID with 0x800, as the console makes every
+   patch's), SNX_ADDON_DLC for any other, SNX_ADDON_NONE for the game's own (or 0) */
+int snx_addon_kind(SnxU64 game, SnxU64 id);
+/* the game an add-on's ID would belong to by the usual numbering, for a dump without a content meta to name it: a
+   patch's ID less 0x800, add-on content's below its 0x1000 */
+SnxU64 snx_addon_guess(SnxU64 id);
+/* the ID a game's add-on content is numbered from, its control.nacp's AddOnContentBaseId (aoc:u's base ID): a DLC's
+   data ID is it plus the DLC's index, 1 to 2047. The SDK's default for application when nacp is NULL or sets none */
+SnxU64 snx_nacp_aoc_base(const unsigned char* nacp, size_t size, SnxU64 application);
+/* the display version in a control.nacp ("1.2.0"), printable ASCII into version: 1, or 0 for none */
+int snx_nacp_version(const unsigned char* nacp, size_t size, char* version, size_t version_size);
 #endif
