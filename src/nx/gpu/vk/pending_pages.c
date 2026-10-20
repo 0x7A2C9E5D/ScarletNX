@@ -53,8 +53,15 @@ static int each_run(u64 gva, u64 size, int (*fn)(void* t, u64 first, u64 last, i
     }
     return 0;
 }
+/* a result added counts in the table it is added to and in the one counting it as well: g_pend_any.adds unchanged is
+   then no result of any kind added (tex_resolve and stage_set in render.c keep what they read while it is) */
+static void count_add(PendPages* t, int delta) {
+    if (delta <= 0) return;
+    t->adds++;
+    if (t->also) t->also->adds++;
+}
 void pend_add(PendPages* t, u64 gva, u64 size, int delta) {
-    if (delta > 0) t->adds++;
+    count_add(t, delta);
     each_run(gva, size, add_pages, t, delta);
 }
 /* whether a page of [first, last] has a count, skipping leaves and groups that have none */
@@ -85,11 +92,11 @@ int pend_hit(const PendPages* t, u64 gva, u64 size) {
     return each_run(gva, size, hit_pages, (void*)t, 0);
 }
 void pend_add_page(PendPages* t, u64 page, int delta) {
-    if (delta > 0) t->adds++;
+    count_add(t, delta);
     add_pages(t, page, page, delta);
 }
 void pend_add_va(PendPages* t, u64 gva, u64 size, int delta) {
-    if (delta > 0) t->adds++;
+    count_add(t, delta);
     if (size) add_pages(t, gva >> 12, (gva + size - 1 < gva ? ~0ull : gva + size - 1) >> 12, delta);
 }
 int pend_hit_va(const PendPages* t, u64 gva, u64 size) {
