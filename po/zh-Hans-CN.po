@@ -7,11 +7,10 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2026-10-20 12:00-0300\n"
+"PO-Revision-Date: 2026-10-20 15:00-0300\n"
 "Last-Translator: AO55 <AO55@reden-emu.dev>\n"
 "Language-Team: ScarletNX <https://github.com/scarletnx/ScarletNX>\n"
 "X-Language-Name: 简体中文\n"
-
 
 #: src/gui/android.c
 msgid "No Android activity to ask."
@@ -360,7 +359,7 @@ msgstr "（不可用）"
 msgid "Data"
 msgstr "数据"
 
-#: src/gui/main.c
+#: src/gui/main.c src/common/utilities/setup.c
 msgid "Games"
 msgstr "游戏"
 
@@ -372,6 +371,16 @@ msgstr "提取"
 #, c-format
 msgid "Not kept for the next start: %s could not be written"
 msgstr "下次启动时不保留：无法写入 %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: language = %s read as %s, not written: %s"
+msgstr "%s：language = %s 读作 %s，未写入：%s"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: language = %s is now %s"
+msgstr "%s：language = %s 现为 %s"
 
 #: src/gui/main.c
 #, c-format
@@ -502,6 +511,10 @@ msgstr "使用"
 msgid "Run anyway"
 msgstr "仍然运行"
 
+#: src/gui/main.c
+msgid "Keep"
+msgstr "保留"
+
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -527,6 +540,10 @@ msgid "No user picked: the Settings have no user"
 msgstr "未选择用户：「设置」中没有用户"
 
 #: src/gui/main.c
+msgid "SCARLETNX  /  SETUP"
+msgstr "SCARLETNX  /  初始设置"
+
+#: src/gui/main.c
 #, c-format
 msgid "THEME EDITOR  /  %s"
 msgstr "主题编辑器  /  %s"
@@ -548,6 +565,30 @@ msgstr "设置"
 #: src/gui/main.c
 msgid "Menu"
 msgstr "菜单"
+
+#: src/gui/main.c
+msgid "Language"
+msgstr "语言"
+
+#: src/gui/main.c
+msgid "Install"
+msgstr "安装"
+
+#: src/gui/main.c
+msgid "Folders"
+msgstr "文件夹"
+
+#: src/gui/main.c
+msgid "Keys"
+msgstr "密钥"
+
+#: src/gui/main.c
+msgid "User"
+msgstr "用户"
+
+#: src/gui/main.c
+msgid "Notice"
+msgstr "通知"
 
 #: src/gui/main.c
 msgid "Status"
@@ -682,12 +723,8 @@ msgid "Text size"
 msgstr "文字大小"
 
 #: src/gui/main.c
-msgid "Bigger letters scroll the menu. Auto fits the screen"
-msgstr "字越大，菜单越要滚动。「自动」则适应屏幕"
-
-#: src/gui/main.c
-msgid "Language"
-msgstr "语言"
+msgid "Picked in a box, kept once said so. Auto fits the screen, its parts are smaller"
+msgstr "在框中选取，确认后保留。「自动」适应屏幕，其分数档更小"
 
 #: src/gui/main.c
 msgid "The menu's words. Auto: the system's language, English when the menu has none of its"
@@ -710,10 +747,6 @@ msgid "The folders Games lists, games/ first"
 msgstr "「游戏」页列出的文件夹，games/ 在最前"
 
 #: src/gui/main.c
-msgid "Folders"
-msgstr "文件夹"
-
-#: src/gui/main.c
 msgid "Where the data, the games and the extractions are"
 msgstr "数据、游戏和提取文件所在的位置"
 
@@ -724,6 +757,11 @@ msgstr "清理旧设置"
 #: src/gui/main.c
 msgid "The settings the runtime and the launcher no longer read: Enter twice"
 msgstr "运行时和启动器不再读取的设置：按两次 Enter"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s of Auto: %dx"
+msgstr "「自动」的 %s：%dx"
 
 #: src/gui/main.c
 msgid "Auto"
@@ -960,6 +998,23 @@ msgid "Each player's own, as Eden's tabs: Left/Right go round All and players 1 
 msgstr "每位玩家各自的设置，同 Eden 的标签页：左/右 在「全部」和玩家 1 到 8 之间切换"
 
 #: src/gui/main.c
+msgid "0.25 of Auto"
+msgstr "「自动」的 0.25"
+
+#: src/gui/main.c
+msgid "0.5 of Auto"
+msgstr "「自动」的 0.5"
+
+#: src/gui/main.c
+msgid "0.75 of Auto"
+msgstr "「自动」的 0.75"
+
+#: src/gui/main.c
+#, c-format
+msgid "Keep this text size? Back to %s in %d s"
+msgstr "保留此文字大小？将恢复为 %s，剩余 %d 秒"
+
+#: src/gui/main.c
 #, c-format
 msgid "gamepad_map's \"%s\" is not a control and the button it sends (south:B)"
 msgstr "gamepad_map 的 \"%s\" 不是一个控件加它发出的按键（south:B）"
@@ -1070,6 +1125,359 @@ msgstr "（没有主题文件夹）"
 msgid "was"
 msgstr "原为"
 
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: choose. Back: go back."
+msgstr "轻触: 选择. 返回: 后退."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Type the nickname. Back: go back."
+msgstr "输入昵称. 返回: 后退."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: choose. Enter: next. ESC: back."
+msgstr "上/下: 选择. Enter: 下一步. ESC: 返回."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: choose. Enter: next. ESC: exit."
+msgstr "上/下: 选择. Enter: 下一步. ESC: 退出."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Type the nickname. Enter: done. ESC: back."
+msgstr "输入昵称. Enter: 完成. ESC: 返回."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Left/Right: choose. Enter: take it. ESC: exit."
+msgstr "左/右: 选择. Enter: 确认. ESC: 退出."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: back."
+msgstr "上/下: 行. 左/右: 更改. Enter: 下一步. ESC: 返回."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: exit."
+msgstr "上/下: 行. 左/右: 更改. Enter: 下一步. ESC: 退出."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: open. ESC: back."
+msgstr "上/下: 行. Enter: 打开. ESC: 返回."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: open. ESC: exit."
+msgstr "上/下: 行. Enter: 打开. ESC: 退出."
+
+#: src/gui/main.c
+msgid "nickname 4 to 20 of A-Z a-z 0-9 space . _ -"
+msgstr "昵称为 4 到 20 个 A-Z a-z 0-9 空格 . _ -"
+
+#: src/gui/main.c
+msgid "The system's random number generator failed: no uid for a new user"
+msgstr "系统的随机数生成器失败：无法为新用户生成 uid"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: the setup asks again"
+msgstr "%s：初始设置将再次询问"
+
+#: src/gui/main.c
+#, c-format
+msgid "The setup was not kept, so it asks again: %s"
+msgstr "初始设置未保存，将再次询问：%s"
+
+#: src/gui/main.c
+msgid "no folder for setup.ini"
+msgstr "没有存放 setup.ini 的文件夹"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is not a nickname: %s"
+msgstr "%s 不是有效的昵称：%s"
+
+#: src/gui/main.c
+#, c-format
+msgid "No user written: %s"
+msgstr "未写入用户：%s"
+
+#: src/gui/main.c
+msgid "No folder was picked."
+msgstr "未选取文件夹。"
+
+#: src/gui/main.c
+msgid "Cannot install prod.keys: neither USERPROFILE nor HOME is set"
+msgstr "无法安装 prod.keys：USERPROFILE 和 HOME 都未设置"
+
+#: src/gui/main.c
+msgid "Cannot install prod.keys: HOME is not set"
+msgstr "无法安装 prod.keys：HOME 未设置"
+
+#: src/gui/main.c
+#, c-format
+msgid "Not installed: %s"
+msgstr "未安装：%s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Installed prod.keys and title.keys in %s"
+msgstr "已将 prod.keys 和 title.keys 安装到 %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Installed prod.keys in %s"
+msgstr "已将 prod.keys 安装到 %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "This copy is portable: to install it, first move away %s"
+msgstr "此副本为便携版：要安装，请先移走 %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Could not make %s"
+msgstr "无法创建 %s"
+
+#: src/gui/main.c
+msgid "Portable"
+msgstr "便携"
+
+#: src/gui/main.c
+msgid "Change games folder"
+msgstr "更改游戏文件夹"
+
+#: src/gui/main.c
+msgid "Add dumps folder"
+msgstr "添加转储文件夹"
+
+#: src/gui/main.c
+msgid "Use these"
+msgstr "使用这些"
+
+#: src/gui/main.c
+msgid "Choose folder"
+msgstr "选择文件夹"
+
+#: src/gui/main.c
+msgid "Later"
+msgstr "稍后"
+
+#: src/gui/main.c
+msgid "Overwrite"
+msgstr "覆盖"
+
+#: src/gui/main.c
+msgid "Next"
+msgstr "下一步"
+
+#: src/gui/main.c
+msgid "Changed since the last version"
+msgstr "自上一版本以来的变更"
+
+#: src/gui/main.c
+msgid "Changed in older versions"
+msgstr "旧版本中的变更"
+
+#: src/gui/main.c
+msgid "Appearance"
+msgstr "外观"
+
+#: src/gui/main.c
+msgid "Install type"
+msgstr "安装方式"
+
+#: src/gui/main.c
+#, c-format
+msgid "Nickname: %s_"
+msgstr "昵称：%s_"
+
+#: src/gui/main.c
+msgid "users.ini is no list of users"
+msgstr "users.ini 不是用户列表"
+
+#: src/gui/main.c
+#, c-format
+msgid "users.ini has %d user"
+msgstr "users.ini 有 %d 个用户"
+
+#: src/gui/main.c
+#, c-format
+msgid "users.ini has %d users"
+msgstr "users.ini 有 %d 个用户"
+
+#: src/gui/main.c
+msgid "Tip: --debug skips the setup"
+msgstr "提示：--debug 跳过初始设置"
+
+#: src/gui/main.c
+msgid "Tip: games keep their own language: Settings > System > language"
+msgstr "提示：游戏使用各自的语言：设置 > System > language"
+
+#: src/gui/main.c
+msgid "Tip: a portable copy is a folder you can copy"
+msgstr "提示：便携副本就是一个可以复制的文件夹"
+
+#: src/gui/main.c
+msgid "Tip: Settings > App > Library and Folders change them"
+msgstr "提示：在 设置 > App > 游戏库 和 文件夹 中更改"
+
+#: src/gui/main.c
+msgid "Tip: the menu's Setup device keys changes them"
+msgstr "提示：菜单中的「设置设备密钥」可更改"
+
+#: src/gui/main.c
+msgid "Tip: nickname 4 to 20 of A-Z a-z 0-9 space . _ -"
+msgstr "提示：昵称为 4 到 20 个 A-Z a-z 0-9 空格 . _ -"
+
+#: src/gui/main.c
+#, c-format
+msgid "Auto (%dx)"
+msgstr "自动（%dx）"
+
+#: src/gui/main.c
+msgid "before"
+msgstr "之前"
+
+#: src/gui/main.c
+msgid "now"
+msgstr "现在"
+
+#: src/gui/main.c
+msgid "Not moved. See docs/DEPRECATIONS.md"
+msgstr "未移动任何文件。参见 docs/DEPRECATIONS.md"
+
+#: src/gui/main.c
+#, c-format
+msgid "Changed %d/%d"
+msgstr "变更 %d/%d"
+
+#: src/gui/main.c
+#, c-format
+msgid "uid %s, of the saves of %d game"
+msgstr "uid %s，来自 %d 个游戏的存档"
+
+#: src/gui/main.c
+#, c-format
+msgid "uid %s, of the saves of %d games"
+msgstr "uid %s，来自 %d 个游戏的存档"
+
+#: src/gui/main.c
+#, c-format
+msgid "uid %s, random"
+msgstr "uid %s，随机"
+
+#: src/gui/main.c
+#, c-format
+msgid "one new user, the uid of the saves of %d game"
+msgstr "一个新用户，使用 %d 个游戏存档的 uid"
+
+#: src/gui/main.c
+#, c-format
+msgid "one new user, the uid of the saves of %d games"
+msgstr "一个新用户，使用 %d 个游戏存档的 uid"
+
+#: src/gui/main.c
+msgid "one new user, random uid"
+msgstr "一个新用户，随机 uid"
+
+#: src/gui/main.c
+msgid "(no home folder)"
+msgstr "（无主文件夹）"
+
+#: src/gui/main.c
+#, c-format
+msgid "Now: portable, its files in %s"
+msgstr "当前：便携版，文件位于 %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Now: installed, its files in %s"
+msgstr "当前：安装版，文件位于 %s"
+
+#: src/gui/main.c
+msgid "settings"
+msgstr "设置"
+
+#: src/gui/main.c
+msgid "data"
+msgstr "数据"
+
+#: src/gui/main.c
+msgid "logs"
+msgstr "日志"
+
+#: src/gui/main.c
+msgid "caches"
+msgstr "缓存"
+
+#: src/gui/main.c
+msgid "Dumps"
+msgstr "转储"
+
+#: src/gui/main.c
+msgid "found"
+msgstr "已找到"
+
+#: src/gui/main.c
+msgid "missing"
+msgstr "缺失"
+
+#: src/gui/main.c
+msgid "everything"
+msgstr "全部"
+
+#: src/gui/main.c
+msgid "there: this copy is portable"
+msgstr "已存在：此副本为便携版"
+
+#: src/gui/main.c
+msgid "beside the program, made then"
+msgstr "在程序旁边，届时创建"
+
+#: src/gui/main.c
+msgid "none yet"
+msgstr "暂无"
+
+#: src/gui/main.c
+msgid " + subfolders"
+msgstr " + 子文件夹"
+
+#: src/gui/main.c
+msgid "games are extracted with it"
+msgstr "提取游戏时需要"
+
+#: src/gui/main.c
+msgid "only some .nsp need it"
+msgstr "仅部分 .nsp 需要"
+
+#: src/gui/main.c
+msgid "nickname"
+msgstr "昵称"
+
+#: src/gui/main.c
+msgid "First user"
+msgstr "首个用户"
+
+#: src/gui/main.c
+msgid "old file: users.ini.old"
+msgstr "旧文件：users.ini.old"
+
 #: src/gui/main.c
 #, c-format
 msgid "Not written without %s"
@@ -1161,14 +1569,6 @@ msgstr "没有选中要重新编译的游戏。"
 #: src/gui/main.c
 msgid "R recompiles Switch games only."
 msgstr "R 只能重新编译 Switch 游戏。"
-
-#: src/gui/main.c
-msgid "Cannot install prod.keys: neither USERPROFILE nor HOME is set"
-msgstr "无法安装 prod.keys：USERPROFILE 和 HOME 都未设置"
-
-#: src/gui/main.c
-msgid "Cannot install prod.keys: HOME is not set"
-msgstr "无法安装 prod.keys：HOME 未设置"
 
 #: src/gui/main.c
 msgid "prod.keys installed: games can be extracted now."
@@ -1380,10 +1780,6 @@ msgstr "把它拖到要替换的文件夹上"
 #: src/gui/main.c
 msgid "no reason given"
 msgstr "未给出原因"
-
-#: src/gui/main.c
-msgid "No folder was picked."
-msgstr "未选取文件夹。"
 
 #: src/gui/main.c
 #, c-format
@@ -1621,6 +2017,10 @@ msgid "in the margin, beside the focused box"
 msgstr "在边距中，焦点框旁边"
 
 #: src/gui/theme.c
+msgid "a question: default, a box in the middle; yorha, at the foot, its choices at its right above it"
+msgstr "提问框：default 为居中的框；yorha 在底部，选项在其右上方"
+
+#: src/gui/theme.c
 msgid "a faint grid on the page, in the dim colour"
 msgstr "页面上的淡网格，使用 dim 色"
 
@@ -1775,6 +2175,86 @@ msgstr "持续时间；0：无"
 #: src/gui/theme.c
 msgid "the boots in 100 that show this theme's, the default's the others"
 msgstr "每 100 次启动中显示此主题启动图的次数，其余显示默认的"
+
+#: src/common/utilities/setup.c
+msgid "Game settings"
+msgstr "游戏设置"
+
+#: src/common/utilities/setup.c
+msgid "removed or renamed keys in a game's .ini"
+msgstr "游戏 .ini 中被删除或改名的键"
+
+#: src/common/utilities/setup.c
+msgid "under [Deprecated]: Clean old settings takes them"
+msgstr "放在 [Deprecated] 下：「清理旧设置」会移除它们"
+
+#: src/common/utilities/setup.c
+msgid "An option"
+msgstr "一个选项"
+
+#: src/common/utilities/setup.c
+msgid "An installed copy's files"
+msgstr "安装版的文件"
+
+#: src/common/utilities/setup.c
+msgid "the scarletnx folders of ~/.config, ~/.local/state and ~/.cache"
+msgstr "~/.config、~/.local/state 和 ~/.cache 中的 scarletnx 文件夹"
+
+#: src/common/utilities/setup.c
+msgid "games/<Game>, <Game>_data/ side by side"
+msgstr "games/<Game> 与 <Game>_data/ 并列"
+
+#: src/common/utilities/setup.c
+msgid "games/<id>/, a folder each"
+msgstr "games/<id>/，每个游戏一个文件夹"
+
+#: src/common/utilities/setup.c
+msgid "The launcher's files"
+msgstr "启动器的文件"
+
+#: src/common/utilities/setup.c
+msgid "gui/ in the data folder"
+msgstr "数据文件夹中的 gui/"
+
+#: src/common/utilities/setup.c
+msgid "the config and state folders"
+msgstr "配置和状态文件夹"
+
+#: src/common/utilities/setup.c
+msgid "A portable copy"
+msgstr "便携副本"
+
+#: src/common/utilities/setup.c
+msgid "games/ beside the program"
+msgstr "程序旁边的 games/"
+
+#: src/common/utilities/setup.c
+msgid ".scarletnx/ beside the program"
+msgstr "程序旁边的 .scarletnx/"
+
+#: src/common/utilities/setup.c
+msgid "the app's own files"
+msgstr "应用自身的文件"
+
+#: src/common/utilities/setup.c
+msgid "the data folder's config/ and state/"
+msgstr "数据文件夹中的 config/ 和 state/"
+
+#: src/common/utilities/setup.c
+msgid "A build tree's files"
+msgstr "构建目录的文件"
+
+#: src/common/utilities/setup.c
+msgid "games/, work/ and the keys in its checkout"
+msgstr "其源码目录中的 games/、work/ 和密钥"
+
+#: src/common/utilities/setup.c
+msgid "the user's data folder"
+msgstr "用户的数据文件夹"
+
+#: src/common/utilities/setup.c
+msgid "Account saves"
+msgstr "账户存档"
 
 #: src/nx/runtime/settings.txt
 msgid "gdbstub"

@@ -7,11 +7,10 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2026-10-20 12:00-0300\n"
+"PO-Revision-Date: 2026-10-20 15:00-0300\n"
 "Last-Translator: AO55 <AO55@reden-emu.dev>\n"
 "Language-Team: ScarletNX <https://github.com/scarletnx/ScarletNX>\n"
 "X-Language-Name: Português (Brasil)\n"
-
 
 #: src/gui/android.c
 msgid "No Android activity to ask."
@@ -360,7 +359,7 @@ msgstr "(indisponível)"
 msgid "Data"
 msgstr "Dados"
 
-#: src/gui/main.c
+#: src/gui/main.c src/common/utilities/setup.c
 msgid "Games"
 msgstr "Jogos"
 
@@ -372,6 +371,16 @@ msgstr "Extrações"
 #, c-format
 msgid "Not kept for the next start: %s could not be written"
 msgstr "Não guardado para a próxima vez: não foi possível gravar %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: language = %s read as %s, not written: %s"
+msgstr "%s: language = %s lido como %s, não gravado: %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: language = %s is now %s"
+msgstr "%s: language = %s agora é %s"
 
 #: src/gui/main.c
 #, c-format
@@ -502,6 +511,10 @@ msgstr "Usar"
 msgid "Run anyway"
 msgstr "Rodar assim mesmo"
 
+#: src/gui/main.c
+msgid "Keep"
+msgstr "Manter"
+
 #. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
 #: src/gui/main.c
 #, snx-keys
@@ -527,6 +540,10 @@ msgid "No user picked: the Settings have no user"
 msgstr "Nenhum usuário escolhido: as Configurações não têm usuário"
 
 #: src/gui/main.c
+msgid "SCARLETNX  /  SETUP"
+msgstr "SCARLETNX  /  CONFIGURAÇÃO"
+
+#: src/gui/main.c
 #, c-format
 msgid "THEME EDITOR  /  %s"
 msgstr "EDITOR DE TEMA  /  %s"
@@ -548,6 +565,30 @@ msgstr "CONFIGURAÇÕES"
 #: src/gui/main.c
 msgid "Menu"
 msgstr "Menu"
+
+#: src/gui/main.c
+msgid "Language"
+msgstr "Idioma"
+
+#: src/gui/main.c
+msgid "Install"
+msgstr "Instalação"
+
+#: src/gui/main.c
+msgid "Folders"
+msgstr "Pastas"
+
+#: src/gui/main.c
+msgid "Keys"
+msgstr "Chaves"
+
+#: src/gui/main.c
+msgid "User"
+msgstr "Usuário"
+
+#: src/gui/main.c
+msgid "Notice"
+msgstr "Aviso"
 
 #: src/gui/main.c
 msgid "Status"
@@ -682,12 +723,8 @@ msgid "Text size"
 msgstr "Tamanho do texto"
 
 #: src/gui/main.c
-msgid "Bigger letters scroll the menu. Auto fits the screen"
-msgstr "Letras maiores rolam o menu. Auto cabe na tela"
-
-#: src/gui/main.c
-msgid "Language"
-msgstr "Idioma"
+msgid "Picked in a box, kept once said so. Auto fits the screen, its parts are smaller"
+msgstr "Escolhido numa caixa, guardado quando confirmado. Auto cabe na tela, suas frações são menores"
 
 #: src/gui/main.c
 msgid "The menu's words. Auto: the system's language, English when the menu has none of its"
@@ -710,10 +747,6 @@ msgid "The folders Games lists, games/ first"
 msgstr "As pastas que Jogos lista, games/ primeiro"
 
 #: src/gui/main.c
-msgid "Folders"
-msgstr "Pastas"
-
-#: src/gui/main.c
 msgid "Where the data, the games and the extractions are"
 msgstr "Onde ficam os dados, os jogos e as extrações"
 
@@ -724,6 +757,11 @@ msgstr "Limpar obsoletos"
 #: src/gui/main.c
 msgid "The settings the runtime and the launcher no longer read: Enter twice"
 msgstr "Os ajustes que o runtime e o launcher não leem mais: Enter duas vezes"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s of Auto: %dx"
+msgstr "%s do Auto: %dx"
 
 #: src/gui/main.c
 msgid "Auto"
@@ -960,6 +998,23 @@ msgid "Each player's own, as Eden's tabs: Left/Right go round All and players 1 
 msgstr "Os de cada jogador, como as abas do Eden: Esquerda/Direita alternam entre Todos e os jogadores 1 a 8"
 
 #: src/gui/main.c
+msgid "0.25 of Auto"
+msgstr "0.25 do Auto"
+
+#: src/gui/main.c
+msgid "0.5 of Auto"
+msgstr "0.5 do Auto"
+
+#: src/gui/main.c
+msgid "0.75 of Auto"
+msgstr "0.75 do Auto"
+
+#: src/gui/main.c
+#, c-format
+msgid "Keep this text size? Back to %s in %d s"
+msgstr "Manter este tamanho de texto? Volta para %s em %d s"
+
+#: src/gui/main.c
 #, c-format
 msgid "gamepad_map's \"%s\" is not a control and the button it sends (south:B)"
 msgstr "O \"%s\" de gamepad_map não é um controle e o botão que ele envia (south:B)"
@@ -1070,6 +1125,359 @@ msgstr "(sem pasta de temas)"
 msgid "was"
 msgstr "era"
 
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Tap: choose. Back: go back."
+msgstr "Toque: escolher. Voltar: retornar."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Type the nickname. Back: go back."
+msgstr "Digite o apelido. Voltar: retornar."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: choose. Enter: next. ESC: back."
+msgstr "Cima/Baixo: escolher. Enter: avançar. ESC: voltar."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: choose. Enter: next. ESC: exit."
+msgstr "Cima/Baixo: escolher. Enter: avançar. ESC: sair."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Type the nickname. Enter: done. ESC: back."
+msgstr "Digite o apelido. Enter: pronto. ESC: voltar."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Left/Right: choose. Enter: take it. ESC: exit."
+msgstr "Esquerda/Direita: escolher. Enter: aceitar. ESC: sair."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: back."
+msgstr "Cima/Baixo: linha. Esquerda/Direita: mudar. Enter: avançar. ESC: voltar."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Left/Right: change. Enter: next. ESC: exit."
+msgstr "Cima/Baixo: linha. Esquerda/Direita: mudar. Enter: avançar. ESC: sair."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: open. ESC: back."
+msgstr "Cima/Baixo: linha. Enter: abrir. ESC: voltar."
+
+#. Keys: "Key: what it does." sentences. Keep each key, or its translation in this file, and each ~
+#: src/gui/main.c
+#, snx-keys
+msgid "Up/Down: row. Enter: open. ESC: exit."
+msgstr "Cima/Baixo: linha. Enter: abrir. ESC: sair."
+
+#: src/gui/main.c
+msgid "nickname 4 to 20 of A-Z a-z 0-9 space . _ -"
+msgstr "apelido de 4 a 20 de A-Z a-z 0-9 espaço . _ -"
+
+#: src/gui/main.c
+msgid "The system's random number generator failed: no uid for a new user"
+msgstr "O gerador de números aleatórios do sistema falhou: sem uid para um novo usuário"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s: the setup asks again"
+msgstr "%s: a configuração pergunta de novo"
+
+#: src/gui/main.c
+#, c-format
+msgid "The setup was not kept, so it asks again: %s"
+msgstr "A configuração não foi guardada, então pergunta de novo: %s"
+
+#: src/gui/main.c
+msgid "no folder for setup.ini"
+msgstr "nenhuma pasta para o setup.ini"
+
+#: src/gui/main.c
+#, c-format
+msgid "%s is not a nickname: %s"
+msgstr "%s não é um apelido: %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "No user written: %s"
+msgstr "Nenhum usuário gravado: %s"
+
+#: src/gui/main.c
+msgid "No folder was picked."
+msgstr "Nenhuma pasta foi escolhida."
+
+#: src/gui/main.c
+msgid "Cannot install prod.keys: neither USERPROFILE nor HOME is set"
+msgstr "Não foi possível instalar o prod.keys: nem USERPROFILE nem HOME estão definidos"
+
+#: src/gui/main.c
+msgid "Cannot install prod.keys: HOME is not set"
+msgstr "Não foi possível instalar o prod.keys: HOME não está definido"
+
+#: src/gui/main.c
+#, c-format
+msgid "Not installed: %s"
+msgstr "Não instalado: %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Installed prod.keys and title.keys in %s"
+msgstr "prod.keys e title.keys instalados em %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Installed prod.keys in %s"
+msgstr "prod.keys instalado em %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "This copy is portable: to install it, first move away %s"
+msgstr "Esta cópia é portátil: para instalá-la, primeiro tire do lugar %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Could not make %s"
+msgstr "Não foi possível criar %s"
+
+#: src/gui/main.c
+msgid "Portable"
+msgstr "Portátil"
+
+#: src/gui/main.c
+msgid "Change games folder"
+msgstr "Mudar a pasta dos jogos"
+
+#: src/gui/main.c
+msgid "Add dumps folder"
+msgstr "Adicionar pasta de dumps"
+
+#: src/gui/main.c
+msgid "Use these"
+msgstr "Usar estas"
+
+#: src/gui/main.c
+msgid "Choose folder"
+msgstr "Escolher pasta"
+
+#: src/gui/main.c
+msgid "Later"
+msgstr "Depois"
+
+#: src/gui/main.c
+msgid "Overwrite"
+msgstr "Sobrescrever"
+
+#: src/gui/main.c
+msgid "Next"
+msgstr "Avançar"
+
+#: src/gui/main.c
+msgid "Changed since the last version"
+msgstr "Mudou desde a última versão"
+
+#: src/gui/main.c
+msgid "Changed in older versions"
+msgstr "Mudou em versões anteriores"
+
+#: src/gui/main.c
+msgid "Appearance"
+msgstr "Aparência"
+
+#: src/gui/main.c
+msgid "Install type"
+msgstr "Tipo de instalação"
+
+#: src/gui/main.c
+#, c-format
+msgid "Nickname: %s_"
+msgstr "Apelido: %s_"
+
+#: src/gui/main.c
+msgid "users.ini is no list of users"
+msgstr "users.ini não é uma lista de usuários"
+
+#: src/gui/main.c
+#, c-format
+msgid "users.ini has %d user"
+msgstr "users.ini tem %d usuário"
+
+#: src/gui/main.c
+#, c-format
+msgid "users.ini has %d users"
+msgstr "users.ini tem %d usuários"
+
+#: src/gui/main.c
+msgid "Tip: --debug skips the setup"
+msgstr "Dica: --debug pula a configuração"
+
+#: src/gui/main.c
+msgid "Tip: games keep their own language: Settings > System > language"
+msgstr "Dica: os jogos têm o próprio idioma: Configurações > System > language"
+
+#: src/gui/main.c
+msgid "Tip: a portable copy is a folder you can copy"
+msgstr "Dica: uma cópia portátil é uma pasta que você pode copiar"
+
+#: src/gui/main.c
+msgid "Tip: Settings > App > Library and Folders change them"
+msgstr "Dica: Configurações > App > Biblioteca e Pastas mudam isso"
+
+#: src/gui/main.c
+msgid "Tip: the menu's Setup device keys changes them"
+msgstr "Dica: Configurar chaves, no menu, muda isso"
+
+#: src/gui/main.c
+msgid "Tip: nickname 4 to 20 of A-Z a-z 0-9 space . _ -"
+msgstr "Dica: apelido de 4 a 20 de A-Z a-z 0-9 espaço . _ -"
+
+#: src/gui/main.c
+#, c-format
+msgid "Auto (%dx)"
+msgstr "Auto (%dx)"
+
+#: src/gui/main.c
+msgid "before"
+msgstr "antes"
+
+#: src/gui/main.c
+msgid "now"
+msgstr "agora"
+
+#: src/gui/main.c
+msgid "Not moved. See docs/DEPRECATIONS.md"
+msgstr "Nada foi movido. Veja docs/DEPRECATIONS.md"
+
+#: src/gui/main.c
+#, c-format
+msgid "Changed %d/%d"
+msgstr "Mudança %d/%d"
+
+#: src/gui/main.c
+#, c-format
+msgid "uid %s, of the saves of %d game"
+msgstr "uid %s, dos saves de %d jogo"
+
+#: src/gui/main.c
+#, c-format
+msgid "uid %s, of the saves of %d games"
+msgstr "uid %s, dos saves de %d jogos"
+
+#: src/gui/main.c
+#, c-format
+msgid "uid %s, random"
+msgstr "uid %s, aleatório"
+
+#: src/gui/main.c
+#, c-format
+msgid "one new user, the uid of the saves of %d game"
+msgstr "um novo usuário, o uid dos saves de %d jogo"
+
+#: src/gui/main.c
+#, c-format
+msgid "one new user, the uid of the saves of %d games"
+msgstr "um novo usuário, o uid dos saves de %d jogos"
+
+#: src/gui/main.c
+msgid "one new user, random uid"
+msgstr "um novo usuário, uid aleatório"
+
+#: src/gui/main.c
+msgid "(no home folder)"
+msgstr "(sem pasta pessoal)"
+
+#: src/gui/main.c
+#, c-format
+msgid "Now: portable, its files in %s"
+msgstr "Agora: portátil, seus arquivos em %s"
+
+#: src/gui/main.c
+#, c-format
+msgid "Now: installed, its files in %s"
+msgstr "Agora: instalado, seus arquivos em %s"
+
+#: src/gui/main.c
+msgid "settings"
+msgstr "ajustes"
+
+#: src/gui/main.c
+msgid "data"
+msgstr "dados"
+
+#: src/gui/main.c
+msgid "logs"
+msgstr "logs"
+
+#: src/gui/main.c
+msgid "caches"
+msgstr "caches"
+
+#: src/gui/main.c
+msgid "Dumps"
+msgstr "Dumps"
+
+#: src/gui/main.c
+msgid "found"
+msgstr "achado"
+
+#: src/gui/main.c
+msgid "missing"
+msgstr "faltando"
+
+#: src/gui/main.c
+msgid "everything"
+msgstr "tudo"
+
+#: src/gui/main.c
+msgid "there: this copy is portable"
+msgstr "existe: esta cópia é portátil"
+
+#: src/gui/main.c
+msgid "beside the program, made then"
+msgstr "ao lado do programa, criada na hora"
+
+#: src/gui/main.c
+msgid "none yet"
+msgstr "nenhuma ainda"
+
+#: src/gui/main.c
+msgid " + subfolders"
+msgstr " + subpastas"
+
+#: src/gui/main.c
+msgid "games are extracted with it"
+msgstr "os jogos são extraídos com ele"
+
+#: src/gui/main.c
+msgid "only some .nsp need it"
+msgstr "só alguns .nsp precisam dele"
+
+#: src/gui/main.c
+msgid "nickname"
+msgstr "apelido"
+
+#: src/gui/main.c
+msgid "First user"
+msgstr "Primeiro usuário"
+
+#: src/gui/main.c
+msgid "old file: users.ini.old"
+msgstr "arquivo antigo: users.ini.old"
+
 #: src/gui/main.c
 #, c-format
 msgid "Not written without %s"
@@ -1161,14 +1569,6 @@ msgstr "Nenhum jogo em foco para recompilar."
 #: src/gui/main.c
 msgid "R recompiles Switch games only."
 msgstr "R só recompila jogos de Switch."
-
-#: src/gui/main.c
-msgid "Cannot install prod.keys: neither USERPROFILE nor HOME is set"
-msgstr "Não foi possível instalar o prod.keys: nem USERPROFILE nem HOME estão definidos"
-
-#: src/gui/main.c
-msgid "Cannot install prod.keys: HOME is not set"
-msgstr "Não foi possível instalar o prod.keys: HOME não está definido"
 
 #: src/gui/main.c
 msgid "prod.keys installed: games can be extracted now."
@@ -1380,10 +1780,6 @@ msgstr "Solte-a na pasta cujo lugar ela toma"
 #: src/gui/main.c
 msgid "no reason given"
 msgstr "sem motivo informado"
-
-#: src/gui/main.c
-msgid "No folder was picked."
-msgstr "Nenhuma pasta foi escolhida."
 
 #: src/gui/main.c
 #, c-format
@@ -1621,6 +2017,10 @@ msgid "in the margin, beside the focused box"
 msgstr "na margem, ao lado da caixa em foco"
 
 #: src/gui/theme.c
+msgid "a question: default, a box in the middle; yorha, at the foot, its choices at its right above it"
+msgstr "uma pergunta: default, uma caixa no meio; yorha, embaixo, as escolhas à direita acima dela"
+
+#: src/gui/theme.c
 msgid "a faint grid on the page, in the dim colour"
 msgstr "uma grade fraca na página, na cor dim"
 
@@ -1775,6 +2175,86 @@ msgstr "quanto tempo; 0: nenhum"
 #: src/gui/theme.c
 msgid "the boots in 100 that show this theme's, the default's the others"
 msgstr "as inicializações em 100 que mostram a deste tema; nas outras, a do padrão"
+
+#: src/common/utilities/setup.c
+msgid "Game settings"
+msgstr "Ajustes do jogo"
+
+#: src/common/utilities/setup.c
+msgid "removed or renamed keys in a game's .ini"
+msgstr "chaves removidas ou renomeadas no .ini de um jogo"
+
+#: src/common/utilities/setup.c
+msgid "under [Deprecated]: Clean old settings takes them"
+msgstr "em [Deprecated]: Limpar obsoletos as tira"
+
+#: src/common/utilities/setup.c
+msgid "An option"
+msgstr "Uma opção"
+
+#: src/common/utilities/setup.c
+msgid "An installed copy's files"
+msgstr "Os arquivos de uma cópia instalada"
+
+#: src/common/utilities/setup.c
+msgid "the scarletnx folders of ~/.config, ~/.local/state and ~/.cache"
+msgstr "as pastas scarletnx de ~/.config, ~/.local/state e ~/.cache"
+
+#: src/common/utilities/setup.c
+msgid "games/<Game>, <Game>_data/ side by side"
+msgstr "games/<Game>, <Game>_data/ lado a lado"
+
+#: src/common/utilities/setup.c
+msgid "games/<id>/, a folder each"
+msgstr "games/<id>/, uma pasta cada"
+
+#: src/common/utilities/setup.c
+msgid "The launcher's files"
+msgstr "Os arquivos do launcher"
+
+#: src/common/utilities/setup.c
+msgid "gui/ in the data folder"
+msgstr "gui/ na pasta de dados"
+
+#: src/common/utilities/setup.c
+msgid "the config and state folders"
+msgstr "as pastas de config e de estado"
+
+#: src/common/utilities/setup.c
+msgid "A portable copy"
+msgstr "Uma cópia portátil"
+
+#: src/common/utilities/setup.c
+msgid "games/ beside the program"
+msgstr "games/ ao lado do programa"
+
+#: src/common/utilities/setup.c
+msgid ".scarletnx/ beside the program"
+msgstr ".scarletnx/ ao lado do programa"
+
+#: src/common/utilities/setup.c
+msgid "the app's own files"
+msgstr "os arquivos do próprio app"
+
+#: src/common/utilities/setup.c
+msgid "the data folder's config/ and state/"
+msgstr "config/ e state/ da pasta de dados"
+
+#: src/common/utilities/setup.c
+msgid "A build tree's files"
+msgstr "Os arquivos de uma árvore de build"
+
+#: src/common/utilities/setup.c
+msgid "games/, work/ and the keys in its checkout"
+msgstr "games/, work/ e as chaves no checkout dela"
+
+#: src/common/utilities/setup.c
+msgid "the user's data folder"
+msgstr "a pasta de dados do usuário"
+
+#: src/common/utilities/setup.c
+msgid "Account saves"
+msgstr "Saves da conta"
 
 #: src/nx/runtime/settings.txt
 msgid "gdbstub"
