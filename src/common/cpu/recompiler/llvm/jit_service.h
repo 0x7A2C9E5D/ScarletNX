@@ -44,7 +44,7 @@
    thousands of compiles */
 #define SNX_JIT_BATCH   256
 /* compile threads at most */
-#define SNX_JIT_THREADS 8
+#define SNX_JIT_THREADS 4
 /* images added while the service runs at most (snx_jit_add_image), as many as ldr:ro maps NROs */
 #define SNX_JIT_IMAGES  64
 
