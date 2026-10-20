@@ -1202,6 +1202,17 @@ int main(int argc, char** argv) {
     assert(app.menu.view == GUI_LOAD_KEYS && snx_is_dir(app.keys_path) && app.message[0]);
     assert(app.keys_done && !app.keys_ok); /* not installed: said, then the menu after a while */
     assert(!snx_remove_tree(app.keys_path));
+    {
+        char* keys_path = app.keys_path; /* NULL when home_keys_path finds no home: the variable it reads is named */
+        app.keys_path = NULL;
+        drop(&app, source_keys, false);
+#ifdef _WIN32
+        assert(!strcmp(app.message, "Cannot install prod.keys: neither USERPROFILE nor HOME is set"));
+#else
+        assert(!strcmp(app.message, "Cannot install prod.keys: HOME is not set"));
+#endif
+        app.keys_path = keys_path;
+    }
     drop(&app, source_keys, false); /* a try that works says so in place of it */
     assert(snx_is_file(app.keys_path));
     keys_outcome(&app, true);
@@ -4694,6 +4705,18 @@ int main(int argc, char** argv) {
             assert(!snx_remove_tree(game));
             free(log);
             free(game);
+        }
+        /* a working folder that is gone: the file it was to be and the system's reason */
+        {
+            char *cwd = app.cwd, *gone = snx_path_join(temporary, "gone"), *log = snx_path_join(gone, "scarletnx.log");
+            char* said = snx_format("The log could not be saved to %s: ", log);
+            app.cwd = gone;
+            key(&app, SDLK_RETURN);
+            assert(!strncmp(app.message, said, strlen(said)) && app.message[strlen(said)] && !snx_path_exists(log));
+            app.cwd = cwd;
+            free(said);
+            free(log);
+            free(gone);
         }
         free(app.data_dir);
         app.data_dir = installed_dir;
