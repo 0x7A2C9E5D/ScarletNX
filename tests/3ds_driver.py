@@ -2,6 +2,7 @@
 # Copyright 2026 the ScarletNX contributors
 """3DS CLI contract; no firmware, keys or game assets required."""
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -43,9 +44,29 @@ def main():
             (root / name).write_bytes(b'not a real CIA')
         run([str(root / 'game with spaces;literal.CIA')], 1, 'archive section')
         run(['--model', 'new', '--', '--game.cia'], 1, 'archive section', cwd=root)
-        run([str(root / 'game.nsp')], 2, 'expected a readable .cia')
-        run([str(root / 'missing.cia')], 2, 'expected a readable .cia')
-        run([str(root)], 2, 'expected a readable .cia')
+        run([str(root / 'game.nsp')], 2, f'{root / "game.nsp"} is not a .cia file')
+        run([str(root / 'missing.cia')], 2, f'{root / "missing.cia"} does not exist')
+        run([str(root)], 2, f'{root} is not a .cia file')
+        (root / 'folder.cia').mkdir()
+        run([str(root / 'folder.cia')], 2, f'{root / "folder.cia"} is not a file')
+        (root / 'folder.cia').rmdir()
+        if sys.platform != 'win32':
+            # a working folder that is gone: the extraction folder it cannot resolve, with the system's reason
+            gone = root / 'gone'
+            gone.mkdir()
+
+            def leave():
+                os.chdir(gone)
+                os.rmdir(gone)
+
+            p = subprocess.run(
+                [str(driver), '--repo', 'data', str(root / 'game with spaces;literal.CIA')],
+                capture_output=True,
+                text=True,
+                preexec_fn=leave,
+                timeout=10,
+            )
+            assert p.returncode == 1 and 'scarletnx-3ds: cannot resolve data/work/3ds: ' in p.stderr, p.stderr
         run([str(root / 'game.nsp'), 'second.cia'], 2, 'unexpected argument')
         run(['-x', '--output', 'unsafe\noutput', str(root / '--game.cia')], 2, 'control characters')
         if sys.platform != 'win32':

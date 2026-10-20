@@ -362,6 +362,11 @@ def main():
         # a budget across the run's dispatch slices (a million blocks each) is still exact
         run(application([0xEAFFFFFE]), 3, 'blocks=2500001', extra=('--max-blocks', '2500001'))
         run(application([0xEF00007F]), 3, 'unsupported guest operation')
+        # a frames/ that cannot be made is named, with the system's reason
+        blocked = root / f'out {cases + 1};literal'
+        blocked.mkdir()
+        (blocked / 'frames').write_bytes(b'')
+        run(application([0xE3A0002A, 0xEF000003]), 1, f'cannot create {blocked.resolve() / "frames"}: ')
         run(application([0xE1900F9F]), 1, 'guest fault')  # checked LDREX on unmapped VA, no flat fallback
         run(application([0xEF000021, 0xE1A00001, 0xEF000023, 0xEF000003]), message='Guest ExitProcess: r0=0 blocks=4')
         commit = [0xE3A00003, 0xE3A01302, 0xE3A02000, 0xE3A03A01, 0xE3A04003, 0xEF000001]

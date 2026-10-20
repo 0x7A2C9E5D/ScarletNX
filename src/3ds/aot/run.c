@@ -51,8 +51,9 @@ int snx_ctr_aot_run(const char* directory, const SnxCtrCia* cia, SnxCtrModel mod
     /* Vulkan-only presentation: real frames land in <output>/frames as PPM.
        Without a Vulkan loader/device no frame is shown or fabricated. */
     frames = snx_path_join(directory, "frames");
-    if (!frames || (!snx_is_dir(frames) && plat_mkdir(frames))) {
-        snprintf(error, error_size, "cannot create frame output directory");
+    if (!snx_is_dir(frames) && plat_mkdir(frames)) {
+        char why[256];
+        snprintf(error, error_size, "cannot create %s: %s", frames, snx_os_error(why, sizeof why));
         goto done;
     }
     if (!snx_ctr_present_init(frames)) printf("Vulkan presenter unavailable: no frames will be shown or saved\n");
