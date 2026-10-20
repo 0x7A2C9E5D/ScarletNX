@@ -591,6 +591,14 @@ jobs:
           path: |
             dist/*.AppImage*
             dist/appinfo
+      # actions/cache saves .cache/cpm as the runner's user, and its tar fails on what the container's root made that
+      # only root may open: FFmpeg's tarball has its top directory 0700
+      - name: Give the dependency sources back to the runner
+        run: |
+          docker exec build chown -R "$(id -u):$(id -g)" /src/.cache/cpm
+          # tar saves a link as a link, whatever it points at
+          unreadable=$(find .cache/cpm ! -type l ! -readable)
+          [ -z "$unreadable" ] || { printf 'actions/cache cannot read:\n%s\n' "$unreadable" >&2; exit 1; }
 
   windows:
     name: Windows (Clang + LLVM)
