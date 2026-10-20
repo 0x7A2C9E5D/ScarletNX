@@ -51,6 +51,7 @@ PAudio* plat_audio_open(u32 rate, u32 channels) {
 void plat_audio_close(PAudio* a) { free(a); }
 int plat_audio_queue(PAudio* a, const void* samples, u32 bytes) {
     CHECK(a && bytes && bytes <= sizeof a->pcm - a->bytes);
+    CHECK(bytes % (a->channels * 2) == 0); /* SDL refuses a part of a frame, and the whole call with it */
     memcpy(a->pcm + a->bytes, samples, bytes);
     a->bytes += bytes;
     a->queued++;
@@ -377,6 +378,26 @@ static void test_audout_layouts(SvcObj* manager) {
     CHECK(q->nqueued == 3 && host->queued == before);
     CHECK(append(o, 3, 0x34, 0x2000, 96, 64, 64) == 0); /* past the capacity from its offset */
     CHECK(q->nqueued == 4 && host->queued == before);
+    svcobj_unref(o);
+}
+
+/* a buffer ending in part of a frame (a whole .wav file, its header and all): its whole frames played, the rest left
+   out, as the DSP counts frames */
+static void test_audout_partial_frame(SvcObj* manager) {
+    nn_audio_AudioOutParameter six = {48000, 6, 0};
+    u32 rate, channels, format, state;
+    SvcObj* o = open_output(manager);
+    AudOut* q = o->data;
+    CHECK(append(o, 7, 0x41, 0x2000, 0x1000, 4 * 100 + 2, 0) == 0);
+    CHECK(q->frames[(q->first + q->nreleased) % AUDOUT_BUFFERS] == 100 && q->output->bytes == 4 * 100);
+    CHECK(append(o, 7, 0x42, 0x2000, 0x1000, 3, 0) == 0); /* under a frame: timed as nothing, nothing played */
+    CHECK(q->nqueued == 2 && q->output->queued == 1);
+    svcobj_unref(o);
+    CHECK(nn_audio_detail_IAudioOutManager_OpenAudioOut(NULL, &six, 0, 1, buffer(0, 0), buffer(0, 0), &rate, &channels,
+                                                        &format, &state, &o) == 0);
+    q = o->data;
+    CHECK(channels == 6 && append(o, 3, 0x43, 0x2000, 0x1000, 12 * 10 + 10, 0) == 0);
+    CHECK(q->frames[(q->first + q->nreleased) % AUDOUT_BUFFERS] == 10 && q->output->bytes == 12 * 10);
     svcobj_unref(o);
 }
 
@@ -859,6 +880,7 @@ int main(void) {
     test_audout_queries(manager);
     test_open_audio_out(manager);
     test_audout_layouts(manager);
+    test_audout_partial_frame(manager);
     test_auto_pointer_buffers(manager);
     svcobj_unref(manager);
     test_renderer();
