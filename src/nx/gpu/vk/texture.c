@@ -389,17 +389,19 @@ static int tex_upload(Surf* t) {
     return t->upload_valid = complete;
 }
 
-/* change checks: a hash of the whole texture when it is contiguous in host memory, else of 64 bytes of each page
-   (the sampled check for big long-stable textures is vk_sample_hash) */
+/* change checks: a hash of the whole texture, 4 KiB at a time, the same whichever way its bytes are reached (the
+   sampled check for big long-stable textures is vk_sample_hash) */
+#define MEM_HASH_PIECE 4096u
 static u64 mem_hash(u64 gva, u64 size) {
-    /* bytes the GPU holds are trapped: they hash as their owner (vk_guest_peek), and the texture is read in pieces */
-    u8* p = __atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE) ? NULL : gmem_ptr(gva, size);
-    if (p) return vk_hash(p, size);
+    u64 piece[MEM_HASH_PIECE / 8];
     u64 h = 1469598103934665603ull;
-    for (u64 o = 0; o < size; o += 4096) {
-        u64 v[8] = {0};
-        vk_guest_peek(gva + o, v, size - o < 64 ? size - o : 64);
-        for (int i = 0; i < 8; i++) h = (h ^ v[i]) * 1099511628211ull;
+    /* bytes the GPU holds are trapped: they hash as their owner (vk_guest_peek), so the texture is read in pieces.
+       Every byte counts: the CPU rewrites part of a page (a row of a texture, half a GOB's rows) */
+    u8* p = __atomic_load_n(&g_own_any, __ATOMIC_ACQUIRE) ? NULL : gmem_ptr(gva, size);
+    for (u64 o = 0; o < size; o += MEM_HASH_PIECE) {
+        u64 n = size - o < MEM_HASH_PIECE ? size - o : MEM_HASH_PIECE;
+        if (!p) vk_guest_peek(gva + o, piece, n);
+        h = (h ^ vk_hash(p ? p + o : (const u8*)piece, n)) * 1099511628211ull;
     }
     return h;
 }

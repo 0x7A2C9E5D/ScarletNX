@@ -227,9 +227,11 @@ void vk_compute_mem_need(u64 a, u64 n) { (void)a, (void)n; }
 void vk_defer_image(VkImage img, VmaAllocation a, VkImageView v1, VkImageView v2) {
     (void)img, (void)a, (void)v1, (void)v2;
 }
-u64 vk_hash(const void* p, u64 size) {
-    (void)p;
-    return size;
+u64 vk_hash(const void* p, u64 size) { /* FNV-1a over the bytes: mem_hash's check below tells contents apart */
+    const u8* b = (const u8*)p;
+    u64 h = 1469598103934665603ull;
+    for (u64 i = 0; i < size; i++) h = (h ^ b[i]) * 1099511628211ull;
+    return h;
 }
 int vk_rt_drawn_fresh(Surf* s) {
     (void)s;
@@ -450,6 +452,19 @@ int main(void) {
         for (u32 y = 0; y < 10; y++)
             for (u32 x = 0; x < 15 * 16; x++)
                 CHECK(astc_out[((z * 10 + y) * 15) * 16 + x] == guest[bl_offset(x, y, z, 15 * 16, 10, 1, 1)]);
+    /* the change check, mem_hash: the same hash whether the GPU holds bytes somewhere (g_own_any: the texture read
+       through vk_guest_peek) or not, and a byte past a page's first 64 changes it, as a row the CPU rewrites does */
+    {
+        const u64 at = GVA + 0x20000, size = 4 * 4096;
+        u64 plain = mem_hash(at, size), owned;
+        g_own_any = 1;
+        owned = mem_hash(at, size);
+        CHECK(owned == plain);
+        guest[0x20000 + 4096 + 100] ^= 0x5A;
+        CHECK(mem_hash(at, size) != owned);
+        guest[0x20000 + 4096 + 100] ^= 0x5A;
+        g_own_any = 0;
+    }
     printf("tex_upload_rows: %u checks passed\n", checks);
     return 0;
 }
