@@ -139,3 +139,35 @@ done:
     free(out);
     return rc;
 }
+int snx_record_folders(const char* folder, const char* name) {
+    static const char* const keys[] = {"config", "state", "cache"};
+    char *base = snx_path_join(folder, name), *record = snx_format("%s.folders", base), *text = snx_strdup("");
+    char *moved, *user, *line;
+    int kind, rc = 0;
+    for (kind = SNX_USER_CONFIG; !rc && kind <= SNX_USER_CACHE; ++kind) {
+        moved = snx_user_path(folder, kind);
+        user = snx_user_dir(kind);
+        if (user && strcmp(moved, folder) && snx_path_within(moved, user)) {
+            if (moved[strcspn(moved, "\r\n")])
+                rc = snx_error("the folder %s has a line break, which %s cannot keep", moved, record);
+            else if (snx_mkdirs(moved))
+                rc = snx_error("cannot create %s, the folder of the game's %s files", moved,
+                               keys[kind - SNX_USER_CONFIG]);
+            else {
+                line = snx_format("%s%s=%s\n", text, keys[kind - SNX_USER_CONFIG], moved);
+                free(text);
+                text = line;
+            }
+        }
+        free(moved);
+        free(user);
+    }
+    if (!rc && *text && snx_write_changed(record, text, strlen(text)))
+        rc = snx_error("cannot write %s", record);
+    else if (!rc && !*text && snx_path_exists(record) && snx_remove_tree(record))
+        rc = snx_error("cannot remove %s, which names folders this game no longer keeps its files in", record);
+    free(base);
+    free(record);
+    free(text);
+    return rc;
+}

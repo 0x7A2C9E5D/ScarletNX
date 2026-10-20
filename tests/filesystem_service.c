@@ -157,6 +157,7 @@ static int test_left_said; /* the warnings that a folder was left by an older ve
 static char test_left_text[1024];
 /* memory/own.c: nothing is GPU-owned here */
 void own_acquire(u64 addr, u64 size) { (void)addr, (void)size; }
+static char test_fs_text[1024]; /* the last warning of fs.c's own, "fs: ..." */
 void logf_(int level, const char* format, ...) {
     char text[1024];
     va_list args;
@@ -167,7 +168,10 @@ void logf_(int level, const char* format, ...) {
         test_left_said++;
         snprintf(test_left_text, sizeof test_left_text, "%s", text);
     }
+    if (!level && !strncmp(text, "fs: ", 4)) snprintf(test_fs_text, sizeof test_fs_text, "%s", text);
 }
+/* options.c's: the game's settings, where the runtime read them */
+const char* ini_file(void) { return "config/Game.ini"; }
 void fatal(const char* format, ...) {
     va_list args;
     va_start(args, format);
@@ -1319,6 +1323,33 @@ int main(int argc, char** argv) {
         cleanup_service();
         free(g_mem);
         printf("PASS %u dump checks; %u startup scans\n", test_checks, test_scans);
+        return 0;
+    }
+    /* a game read from its dump that finds none: where it looked, its .ini and the link an older version made */
+    if (argc == 4 && (!strcmp(argv[3], "dump-none") || !strcmp(argv[3], "dump-gone"))) {
+        int gone = !strcmp(argv[3], "dump-gone");
+        char *dir, *ini, *said;
+        CHECK(!snx_mkdirs("dump-data/Game_data"));
+        dir = snx_absolute("dump-data"); /* fs_init's data folder is a full path, and so is the .ini said */
+        ini = snx_absolute(ini_file());
+        said = gone ? snx_format("fs: the game's dump dump-data/Gone.nsp, its source= setting, is not there; its "
+                                 "settings are %s\n",
+                                 ini)
+                    : snx_format("fs: the game has no ExeFS in %s/Game_data/exefs/ and no dump to read it from: "
+                                 "%s sets no source=, and %s/Game.source is not there\n",
+                                 dir, ini, dir);
+        CHECK(strcmp(ini, ini_file()) != 0);
+        if (gone) strcpy(g_settings.game_dump, "dump-data/Gone.nsp");
+        strcpy(g_datadir, "dump-data/Game_data/");
+        fs_init();
+        if (strcmp(test_fs_text, said)) fprintf(stderr, "said:     %sexpected: %s", test_fs_text, said);
+        CHECK(!strcmp(test_fs_text, said) && g_hle.fs.dfs == NULL);
+        free(dir);
+        free(ini);
+        free(said);
+        cleanup_service();
+        free(g_mem);
+        printf("PASS %u checks: the game without a dump says where it looked\n", test_checks);
         return 0;
     }
 #endif

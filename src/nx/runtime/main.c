@@ -6,6 +6,7 @@
 #include "nx/runtime/main.h"
 #include "common/utilities/build_info.h"
 #include "common/utilities/common.h"
+#include "common/utilities/ini_lines.h"
 #include "nx/gpu/gpu.h"
 #include "nx/gpu/nvn_trace.h"
 #include "nx/gpu/renderer.h"
@@ -182,23 +183,70 @@ static void dispatch_init(void) {
 
 /* ---- folders ---- */
 
-/* the folder of kind for the game's files of that kind: beside it, or the XDG folder for a game of an installed
-   build's data folder */
-static void kind_dir(char* out, size_t cap, int kind, const char* what) {
+/* the folder of kind for the game's files of that kind: recorded, the one the file record names, when it is there;
+   else beside the game, or the XDG folder for a game of an installed build's data folder */
+static void kind_dir(char* out, size_t cap, int kind, const char* what, const char* recorded, const char* record) {
     char here[1024];
     size_t n = strlen(g_exedir);
-    char* moved;
-    snprintf(out, cap, "%s", g_exedir);
-    if (!n) return;
-    snprintf(here, sizeof here, "%.*s", (int)(n - 1), g_exedir);
-    moved = snx_user_path(here, kind);
-    if (moved && strcmp(moved, here)) {
-        if (snx_mkdirs(moved))
-            WARN("%s cannot be created, so the game's %s stay beside it\n", moved, what);
-        else
-            snprintf(out, cap, "%s/", moved);
+    char *moved, *full;
+    if (recorded && snx_is_dir(recorded)) {
+        snprintf(out, cap, "%s/", recorded);
+        return;
     }
-    free(moved);
+    snprintf(out, cap, "%s", g_exedir);
+    if (n) {
+        snprintf(here, sizeof here, "%.*s", (int)(n - 1), g_exedir);
+        moved = snx_user_path(here, kind);
+        if (moved && strcmp(moved, here)) {
+            if (snx_mkdirs(moved))
+                WARN("%s cannot be created, so the game's %s stay beside it\n", moved, what);
+            else
+                snprintf(out, cap, "%s/", moved);
+        }
+        free(moved);
+    }
+    if (recorded) {
+        full = snx_absolute(out[0] ? out : ".");
+        WARN("%s names %s for the game's %s, and it is not there: they are in %s/\n", record, recorded, what,
+             full ? full : out);
+        free(full);
+    }
+}
+
+/* the game's folders of each kind: those its driver recorded in <name>.folders beside it (snx_record_folders), which
+   the environment the game runs in may not name (an AppImage's copy, without its portable home or config), else its
+   environment's */
+static void game_dirs(void) {
+    static const char* const keys[] = {"config", "state", "cache"};
+    char path[sizeof g_exedir + sizeof g_exename + 16], why[256], *text, *key, *value, *full;
+    char* recorded[SNX_USER_CACHE + 1] = {NULL}; /* in text */
+    const char* record;
+    SnxIni ini;
+    size_t size;
+    int kind;
+    snprintf(path, sizeof path, "%s%s.folders", g_exedir, g_exename);
+    full = snx_absolute(path);
+    record = full ? full : path;
+    text = (char*)snx_read_file(path, &size);
+    if (!text) snx_os_error(why, sizeof why);
+    if (text) snx_ini_start(&ini, text);
+    while (text && snx_ini_next(&ini, &key, &value)) {
+        for (kind = SNX_USER_CONFIG; kind <= SNX_USER_CACHE && strcmp(key, keys[kind - SNX_USER_CONFIG]); ++kind)
+            continue;
+        if (kind <= SNX_USER_CACHE)
+            recorded[kind] = value;
+        else
+            WARN("%s: %s=%s is none of config=, state= and cache=, the folders the game reads from it\n", record, key,
+                 value);
+    }
+    kind_dir(g_confdir, sizeof g_confdir, SNX_USER_CONFIG, "settings", recorded[SNX_USER_CONFIG], record);
+    kind_dir(g_statedir, sizeof g_statedir, SNX_USER_STATE, "log and threads.txt", recorded[SNX_USER_STATE], record);
+    kind_dir(g_cachedir, sizeof g_cachedir, SNX_USER_CACHE, "caches", recorded[SNX_USER_CACHE], record);
+    if (!text && snx_path_exists(path))
+        WARN("cannot read %s (%s): the game's settings are in %s, its log in %s, its caches in %s\n", record, why,
+             g_confdir, g_statedir, g_cachedir);
+    free(text);
+    free(full);
 }
 
 /* nothing is moved: a game an older version laid out beside the others (its folder named otherwise) runs where it
@@ -380,9 +428,7 @@ int snx_main(int argc, char** argv) {
     if (mod->abi != SNX_ABI)
         fatal("The recompiled code is from another ScarletNX version: recompile the game with this one (%s)",
               module);
-    kind_dir(g_confdir, sizeof g_confdir, SNX_USER_CONFIG, "settings");
-    kind_dir(g_statedir, sizeof g_statedir, SNX_USER_STATE, "log and threads.txt");
-    kind_dir(g_cachedir, sizeof g_cachedir, SNX_USER_CACHE, "caches");
+    game_dirs();
     if (g_arm_mod) mem_layout32(g_arm_mod->aspace); /* before anything sizes or reads guest memory */
     if (mod->title_id) g_hle.kernel.title_id = mod->title_id;
     /* this run's settings: each --key=value before a "--" (-v is log=2); -f and --fullscreen=0|1 through startup.c's

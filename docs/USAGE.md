@@ -321,6 +321,9 @@ and `--out` (an extractions folder picked keeps a Switch dump's extraction there
 3DS driver as `--repo` and `--output`), and its own files stay where they are. On Android they
 are in its data folder's `config/` and `state/`, in the app's own storage, which needs no permission. `~/.local/share`, `~/.config`, `~/.local/state` and `~/.cache` are the
 defaults of `$XDG_DATA_HOME`, `$XDG_CONFIG_HOME`, `$XDG_STATE_HOME` and `$XDG_CACHE_HOME` (a relative one is ignored).
+Each time the driver makes or starts a game of the user's data folder, it names the folders of the game's settings, log
+and caches in `games/<id>/<id>.folders`, where the game reads them: started with other variables (its copy of an
+AppImage run with `--appimage-portable-config` or `--appimage-portable-home`, a shortcut), it finds them there.
 
 An older version kept a game's files side by side in `games/` (`games/Game`, `Game_code.so`, `Game_data/`,
 `Game.ini`), the menu's in the data folder's `gui/`, outside Linux the rest in the data folder itself, a portable

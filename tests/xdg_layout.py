@@ -4,7 +4,9 @@
 the game's settings in the config folder, its log and threads.txt in the state folder, the pipeline cache and the
 extractions in the cache folder, each game in a folder of its own there. What an older build left beside the game
 stays there, each run saying where it is and where this one keeps it. A game recompiled elsewhere (--outdir) keeps
-everything in its folder. No GPU: the game stops before it, its ExeFS taken away."""
+everything in its folder. A game started with another environment than its driver's (an AppImage's copy, without
+its portable config or home) finds its files where the driver put them, which <name>.folders beside it names. No
+GPU: the game stops before it, its ExeFS taken away."""
 
 import argparse
 import errno
@@ -42,9 +44,15 @@ def main():
         games = data / 'games'
         folder = games / 'Smoke'  # the game's own
 
-        def run(command, cwd=root):
+        def run(command, cwd=root, environment=None):
             p = subprocess.run(
-                command, check=False, cwd=cwd, env=env, capture_output=True, text=True, timeout=args.timeout
+                command,
+                check=False,
+                cwd=cwd,
+                env=environment or env,
+                capture_output=True,
+                text=True,
+                timeout=args.timeout,
             )
             return p.returncode, p.stdout + p.stderr
 
@@ -166,6 +174,11 @@ def main():
             not (config / 'games/Beside').exists() and not (state / 'games/Beside').exists(),
             'the game in a folder of its own wrote in the XDG folders',
         )
+        check(not (beside / 'Beside.folders').exists(), 'the game in a folder of its own got Beside.folders', out)
+        # one a record names other folders for (its folder moved out of a data folder): the driver takes it away
+        (beside / 'Beside.folders').write_text(f'config={config / "games/Beside"}\n')
+        status, out = run([driver, '--repo', str(data), str(beside), '-H'])
+        check(not (beside / 'Beside.folders').exists(), 'the driver kept a Beside.folders naming other folders', out)
         # a portable copy's .scarletnx: its config/, state/ and cache/, as off Linux
         portable = root / 'copy/.scarletnx'
         port = portable / 'games/Port'
@@ -183,6 +196,102 @@ def main():
         check(
             (portable / 'state/games/Port/Port.log').is_file() and not (state / 'games/Port').exists(),
             "the portable copy's game did not log in its state/",
+            out,
+        )
+        # its folders are in it, wherever it is moved: nothing to record
+        check(not (port / 'Port.folders').exists(), "the portable copy's game got Port.folders", out)
+
+        # a game made by an AppImage's driver with --appimage-portable-config (XDG_CONFIG_HOME its .config) or
+        # --appimage-portable-home (HOME its .home, the XDG variables unset), and started outside it with the
+        # environment the AppImage was given: its settings, the dump they name, its log and caches where the driver
+        # put them, as <name>.folders beside it records
+        appimage = root / 'ScarletNX.AppImage'
+        bare = {k: v for k, v in env.items() if not k.startswith('XDG_')}
+        made_home = Path(f'{appimage}.home')
+        made = {  # the driver's environment, then its data, config, state and cache folders
+            'PortableConfig': (
+                dict(env, XDG_CONFIG_HOME=f'{appimage}.config'),
+                data,
+                Path(f'{appimage}.config/scarletnx'),
+                state,
+                cache,
+            ),
+            'PortableHome': (
+                dict(bare, HOME=str(made_home)),
+                made_home / '.local/share/scarletnx',
+                made_home / '.config/scarletnx',
+                made_home / '.local/state/scarletnx',
+                made_home / '.cache/scarletnx',
+            ),
+        }
+        for name, (environment, made_data, made_config, made_state, made_cache) in made.items():
+            game = made_data / 'games' / name
+            status, out = run(
+                [driver, '--repo', str(made_data), '-r', str(nro), name, '--runtime', driver, '--jobs', '2'],
+                environment=environment,
+            )
+            record = game / f'{name}.folders'
+            expected = ''.join(
+                f'{kind}={where / "games" / name}\n'
+                for kind, where in (('config', made_config), ('state', made_state), ('cache', made_cache))
+            )
+            check(
+                status == 0 and record.is_file() and record.read_text() == expected,
+                f'the recompile did not record its folders in {record}: {expected!r}',
+                out,
+            )
+            ini = made_config / 'games' / name / f'{name}.ini'
+            ini.write_text(ini.read_text() + '[Game]\nsource=/nonexistent/Game.nsp\n')  # a dump read in place
+            shutil.rmtree(game / f'{name}_data/exefs')
+            status, out = run([f'./{name}', '-H'], cwd=game)
+            log = made_state / 'games' / name / f'{name}.log'
+            text = log.read_text(errors='replace') if log.is_file() else ''
+            said = (
+                f"fs: the game's dump /nonexistent/Game.nsp, its source= setting, is not there; its settings are {ini}"
+            )
+            check(said in text, f'the game started outside the AppImage did not read {ini} and log in {log}', out)
+            outside = ((config, made_config), (state, made_state), (cache, made_cache))
+            check(
+                not any((there / 'games' / name).exists() for there, own in outside if there != own),
+                f'the game {name} started outside the AppImage wrote in the folders of that environment',
+                out,
+            )
+            check(
+                not any((game / f'{name}{file}').exists() for file in ('.ini', '.log')),
+                f'the game {name} started outside the AppImage wrote its settings or log beside it',
+                out,
+            )
+
+        # an older version's game has no record: its settings where the environment it starts in puts them, the one
+        # that made it reading them as before, another saying which .ini names no dump
+        name = 'PortableConfig'
+        game = data / 'games' / name
+        (game / f'{name}.folders').unlink(missing_ok=True)
+        status, out = run([f'./{name}', '-H'], cwd=game, environment=made[name][0])
+        log = state / 'games' / name / f'{name}.log'
+        ini = Path(f'{appimage}.config/scarletnx/games/{name}/{name}.ini')
+        said = f"fs: the game's dump /nonexistent/Game.nsp, its source= setting, is not there; its settings are {ini}"
+        check(said in log.read_text(errors='replace'), f'the game without a record did not read {ini}', out)
+        status, out = run([f'./{name}', '-H'], cwd=game)
+        said = (
+            f'fs: the game has no ExeFS in {game}/{name}_data/exefs/ and no dump to read it from: '
+            f'{config}/games/{name}/{name}.ini sets no source=, and {game}/{name}.source is not there'
+        )
+        check(said in log.read_text(errors='replace'), 'the game without a dump did not say where it looked', out)
+        # a record naming a folder that is not there: said, with the one the game takes instead
+        (game / f'{name}.folders').write_text(f'config={root / "gone"}\n')
+        status, out = run([f'./{name}', '-H'], cwd=game)
+        said = (
+            f"{game}/{name}.folders names {root / 'gone'} for the game's settings, and it is not there: they are in "
+            f'{config}/games/{name}/'
+        )
+        check(said in out, 'the game did not say its recorded folder is not there', out)
+        # the driver records where its own run keeps them before it starts the game, its environment the launcher's
+        other = dict(env, XDG_CONFIG_HOME=str(root / 'other'))
+        status, out = run([driver, '--repo', str(data), str(game), '-H'], environment=other)
+        check(
+            (game / f'{name}.folders').read_text().startswith(f'config={root}/other/scarletnx/games/{name}\n'),
+            'the driver that started the game did not record its own folders',
             out,
         )
         check(not (root / 'home').exists(), 'something was written in HOME')
