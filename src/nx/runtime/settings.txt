@@ -449,7 +449,7 @@ setting Script
     default ""
     once
     set unattended_script_set
-    help The scripted input: when:buttons, comma between, when in ms or with p a present's number
+    help The scripted input: when:buttons, comma between, when in ms or a present's number and f (300f)
 
 section Game: g_game_ini
 section Display: g_display_ini
