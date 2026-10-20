@@ -327,7 +327,7 @@ static void put_header(FILE* f) {
             }
         }
     fprintf(f, "\n;  In the game: F1 help, F2 the game's menu, F3 screenshot, F4 FPS limit off and on, F5 thread\n");
-    fprintf(f, ";  dump, F11 or Alt+Enter fullscreen\n");
+    fprintf(f, ";  dump, F6 showcase on and off, F11 or Alt+Enter fullscreen\n");
     fprintf(f, "; ==================================================================================\n");
 }
 static void put_rows(FILE* f, const IniOpt* o) {

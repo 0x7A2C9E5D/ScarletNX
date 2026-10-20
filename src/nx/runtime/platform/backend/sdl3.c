@@ -339,7 +339,8 @@ static const char* HELP = "Controller: A, B, X and Y where the console's are (ga
                           "  X / Space = A    Z = B    C = X    V = Y\n"
                           "  Q = L   E = R   1 = ZL   3 = ZR   Enter = +   Backspace = -\n\n"
                           "F1 = this help   F2 = the game's menu   F3 = screenshot   F4 = FPS limit on / off\n"
-                          "F5 = thread dump   F11 / Alt+Enter = fullscreen   Esc = quit";
+                          "F5 = thread dump   F6 = showcase on / off   F11 / Alt+Enter = fullscreen\n"
+                          "Esc = quit";
 
 static PadKind gamepad_kind(int type) {
     switch (type) {
@@ -714,6 +715,16 @@ static void hotkey(SDL_Keycode k) {
             break;
         }
         case SDLK_F5: kernel_dump_threads(); break;
+        case SDLK_F6: {
+            int on = !__atomic_load_n(&g_settings.showcase, __ATOMIC_RELAXED);
+            __atomic_store_n(&g_settings.showcase, on, __ATOMIC_RELAXED); /* a run's --showcase stays out of the file */
+            ini_set("showcase", on ? "1" : "0");
+            if (on)
+                LOG("showcase: on, showcase_corner=%s\n", g_settings.showcase_corner);
+            else
+                LOG("showcase: off\n");
+            break;
+        }
         case SDLK_F11: set_fullscreen(!g_fullscreen); break;
     }
 }
@@ -1070,13 +1081,21 @@ void video_poll(void) {
     g_hle.hid.pad1.ly = ly;
     g_hle.hid.pad1.rx = rx;
     g_hle.hid.pad1.ry = ry;
+    {
+        i32 shown[4] = {lx, ly, rx, ry};
+        ui_lock();
+        vpad_showcase_input(b, shown);
+        ui_unlock();
+    }
     pm_unlock(&g_hle.hid.input_lock);
 }
 
 void frontend_frame(void) {
     char p[1200];
     /* the controls and the menu stay on the window while the game shows nothing new */
-    if (g_renderer->refresh && (overlay_shown() || vpad_shown())) g_renderer->refresh();
+    if (g_renderer->refresh &&
+        (overlay_shown() || vpad_shown() || __atomic_load_n(&g_settings.showcase, __ATOMIC_RELAXED)))
+        g_renderer->refresh();
     if (g_shot_req) {
         g_shot_req = 0;
         time_t now = time(NULL);

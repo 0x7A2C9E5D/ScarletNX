@@ -383,38 +383,39 @@ void vpad_edit(int on) {
 int vpad_editing(void) { return g_edit; }
 int vpad_shown(void) { return g_settings.show_controls || g_edit; }
 
-/* the pressed D-pad: one direction is the up sprite turned, two the up-left one */
-static void dpad_draw(SnxUiList* l, const float r[4], u32 alpha) {
+/* the pressed D-pad (dpad, DPAD_ bits): one direction is the up sprite turned, two the up-left one */
+static void dpad_draw(SnxUiList* l, const float r[4], u32 alpha, u32 dpad) {
     static const u32 one[4] = {DPAD_UP, DPAD_RIGHT, DPAD_DOWN, DPAD_LEFT};
     static const u32 two[4] = {DPAD_UP | DPAD_LEFT, DPAD_UP | DPAD_RIGHT, DPAD_DOWN | DPAD_RIGHT,
                                DPAD_DOWN | DPAD_LEFT};
     int t;
     for (t = 0; t < 4; ++t) {
-        if (g_dpad == one[t]) {
+        if (dpad == one[t]) {
             ui_sprite(l, SNX_SPRITE_DPAD_UP, r[0], r[1], r[2], r[3], alpha, t);
             return;
         }
-        if (g_dpad == two[t]) {
+        if (dpad == two[t]) {
             ui_sprite(l, SNX_SPRITE_DPAD_UP_LEFT, r[0], r[1], r[2], r[3], alpha, t);
             return;
         }
     }
     ui_sprite(l, SNX_SPRITE_DPAD, r[0], r[1], r[2], r[3], alpha, 0);
 }
+/* a stick's ring on r, its knob ax, ay (-1 to 1 right and down) from the middle, the pressed one when pressed */
+static void knob_draw(SnxUiList* l, const float r[4], float ax, float ay, int pressed, u32 alpha) {
+    float kw = r[2] / STICK_KNOB, kh = r[3] / STICK_KNOB;
+    float mx = r[0] + r[2] / 2 + ax * r[2] / 2, my = r[1] + r[3] / 2 + ay * r[3] / 2;
+    ui_sprite(l, SNX_SPRITE_STICK_RANGE, r[0], r[1], r[2], r[3], alpha, 0);
+    ui_sprite(l, pressed ? SNX_SPRITE_STICK_PRESSED : SNX_SPRITE_STICK, mx - kw / 2, my - kh / 2, kw, kh, alpha, 0);
+}
 static void stick_draw(SnxUiList* l, int c, float r[4], const int safe[4], u32 alpha) {
     int s = stick_of(c), held = g_held >> c & 1;
-    float kw = r[2] / STICK_KNOB, kh = r[3] / STICK_KNOB, mx = r[0] + r[2] / 2, my = r[1] + r[3] / 2;
     if (held && !g_edit) { /* the ring where the finger landed, the knob where it is */
-        mx = (float)safe[0] + g_middle[s][0] * (float)safe[2];
-        my = (float)safe[1] + g_middle[s][1] * (float)safe[3];
-        r[0] = mx - r[2] / 2;
-        r[1] = my - r[3] / 2;
-        mx += g_axis[s][0] * r[2] / 2;
-        my += g_axis[s][1] * r[3] / 2;
-    }
-    ui_sprite(l, SNX_SPRITE_STICK_RANGE, r[0], r[1], r[2], r[3], alpha, 0);
-    ui_sprite(l, held && !g_edit ? SNX_SPRITE_STICK_PRESSED : SNX_SPRITE_STICK, mx - kw / 2, my - kh / 2, kw, kh, alpha,
-              0);
+        r[0] = (float)safe[0] + g_middle[s][0] * (float)safe[2] - r[2] / 2;
+        r[1] = (float)safe[1] + g_middle[s][1] * (float)safe[3] - r[3] / 2;
+        knob_draw(l, r, g_axis[s][0], g_axis[s][1], 1, alpha);
+    } else
+        knob_draw(l, r, 0, 0, 0, alpha);
 }
 static void outline(SnxUiList* l, const float r[4], float t, u32 rgba) {
     ui_fill(l, r[0] - t, r[1] - t, r[2] + 2 * t, t, rgba);
@@ -463,10 +464,97 @@ void vpad_draw(SnxUiList* l, const int safe[4]) {
         if (!g_settings.control_shown[c]) continue;
         box(c, safe, r);
         if (INFO[c].kind == KIND_DPAD)
-            dpad_draw(l, r, alpha);
+            dpad_draw(l, r, alpha, g_dpad);
         else if (INFO[c].kind == KIND_STICK)
             stick_draw(l, c, r, safe, alpha);
         else
             ui_sprite(l, INFO[c].sprite + (int)(g_held >> c & 1), r[0], r[1], r[2], r[3], alpha, 0);
     }
+}
+
+/* the showcase: player 1's controller as the game gets it, in a corner */
+static u64 g_show_buttons;
+static float g_show_axis[2][2]; /* each stick, -1 to 1 right and down */
+static int g_corner = 3;        /* showcase_corner's, an index of CORNERS */
+static const char* const CORNERS[4] = {"tl", "tr", "bl", "br"};
+/* each control's middle across and down the showcase's box (5:3) and its longer side, of the box's height; none for
+   Capture and Home, which never reach the game, nor for L3 and R3, which press their stick's knob */
+static const float SHOWCASE[SNX_VPAD_COUNT][3] = {
+    [SNX_VPAD_ZL] = {0.13f, 0.11f, 0.22f},      [SNX_VPAD_ZR] = {0.87f, 0.11f, 0.22f},
+    [SNX_VPAD_L] = {0.13f, 0.30f, 0.22f},       [SNX_VPAD_R] = {0.87f, 0.30f, 0.22f},
+    [SNX_VPAD_MINUS] = {0.40f, 0.30f, 0.10f},   [SNX_VPAD_PLUS] = {0.60f, 0.30f, 0.10f},
+    [SNX_VPAD_STICK_L] = {0.22f, 0.60f, 0.34f}, [SNX_VPAD_DPAD] = {0.40f, 0.84f, 0.28f},
+    [SNX_VPAD_STICK_R] = {0.62f, 0.84f, 0.30f}, [SNX_VPAD_X] = {0.80f, 0.44f, 0.13f},
+    [SNX_VPAD_Y] = {0.72f, 0.58f, 0.13f},       [SNX_VPAD_A] = {0.88f, 0.58f, 0.13f},
+    [SNX_VPAD_B] = {0.80f, 0.72f, 0.13f}};
+#define SHOWCASE_BOX 0.30f /* the box's height, of safe's shorter side; its gap to the corner a fifteenth of that */
+
+void vpad_showcase_corner_set(const IniOpt* o, const char* v) {
+    int i;
+    for (i = 0; i < 4; ++i)
+        if (!strcmp(v, CORNERS[i])) {
+            __atomic_store_n(&g_corner, i, __ATOMIC_RELAXED); /* the renderer's thread reads it */
+            return;
+        }
+    i = __atomic_load_n(&g_corner, __ATOMIC_RELAXED);
+    LOG("settings: showcase_corner=%s is not tl, tr, bl or br: it keeps %s\n", v, CORNERS[i]);
+    snprintf((char*)o->var, o->size, "%s", CORNERS[i]);
+}
+void vpad_showcase_input(u64 buttons, const i32 sticks[4]) {
+    int s;
+    g_show_buttons = buttons;
+    for (s = 0; s < 2; ++s) {
+        float ax = (float)sticks[s * 2] / 32767, ay = -(float)sticks[s * 2 + 1] / 32767, len = sqrtf(ax * ax + ay * ay);
+        if (len > 1) { /* a square of keys reaches the corners: the knob stays in its ring */
+            ax /= len;
+            ay /= len;
+        }
+        g_show_axis[s][0] = ax;
+        g_show_axis[s][1] = ay;
+    }
+}
+int vpad_showcase_fps(u32 presents, u64 now_ns) {
+    static u64 since_ns;
+    static u32 since;
+    static int fps = -1;
+    if (!since_ns || now_ns - since_ns >= 500000000ull) {
+        if (since_ns)
+            fps = (int)(((u64)(presents - since) * 1000000000ull + (now_ns - since_ns) / 2) / (now_ns - since_ns));
+        since_ns = now_ns;
+        since = presents;
+    }
+    return fps;
+}
+void vpad_showcase_draw(SnxUiList* l, const int safe[4], int fps) {
+    const u32 alpha = 230;
+    float shorter = (float)(safe[2] < safe[3] ? safe[2] : safe[3]), h = SHOWCASE_BOX * shorter, w = h * 5 / 3;
+    float x0, y0, r[4];
+    int corner = __atomic_load_n(&g_corner, __ATOMIC_RELAXED), c, scale;
+    char text[24];
+    if (!__atomic_load_n(&g_settings.showcase, __ATOMIC_RELAXED)) return;
+    x0 = corner & 1 ? (float)(safe[0] + safe[2]) - h / 15 - w : (float)safe[0] + h / 15;
+    y0 = corner & 2 ? (float)(safe[1] + safe[3]) - h / 15 - h : (float)safe[1] + h / 15;
+    ui_fill(l, x0, y0, w, h, 0x80000000u);
+    for (c = 0; c < SNX_VPAD_COUNT; ++c) {
+        const unsigned short* sp = snx_controls_sprites[INFO[c].sprite];
+        float big = (float)(sp[2] > sp[3] ? sp[2] : sp[3]), side = SHOWCASE[c][2] * h;
+        if (side <= 0) continue;
+        r[2] = side * (float)sp[2] / big;
+        r[3] = side * (float)sp[3] / big;
+        r[0] = x0 + SHOWCASE[c][0] * w - r[2] / 2;
+        r[1] = y0 + SHOWCASE[c][1] * h - r[3] / 2;
+        if (INFO[c].kind == KIND_DPAD)
+            dpad_draw(l, r, alpha, (u32)g_show_buttons & (DPAD_LEFT | DPAD_UP | DPAD_RIGHT | DPAD_DOWN));
+        else if (INFO[c].kind == KIND_STICK) {
+            int s = stick_of(c);
+            knob_draw(l, r, g_show_axis[s][0], g_show_axis[s][1],
+                      (int)(g_show_buttons >> INFO[s ? SNX_VPAD_R3 : SNX_VPAD_L3].bit & 1), alpha);
+        } else
+            ui_sprite(l, INFO[c].sprite + (int)(g_show_buttons >> INFO[c].bit & 1), r[0], r[1], r[2], r[3], alpha, 0);
+    }
+    if (fps < 0) return;
+    scale = (int)(h * 0.11f / 16 + 0.5f);
+    if (scale < 1) scale = 1;
+    snprintf(text, sizeof text, "%d FPS", fps);
+    ui_text(l, x0 + (w - (float)(strlen(text) * 8 * (size_t)scale)) / 2, y0 + h / 25, scale, text, 0xFFFFFFFFu);
 }
