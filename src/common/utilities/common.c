@@ -92,6 +92,19 @@ int snx_error(const char* fmt, ...) {
     fputc('\n', stderr);
     return 1;
 }
+char* snx_os_error(char* out, size_t size) {
+#ifdef _WIN32
+    DWORD code = GetLastError();
+    DWORD n = size ? FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, code, 0, out,
+                                    (DWORD)size, NULL)
+                   : 0;
+    while (n && (out[n - 1] == '\n' || out[n - 1] == '\r' || out[n - 1] == ' ' || out[n - 1] == '.')) out[--n] = 0;
+    if (!n && size) snprintf(out, size, "Windows error %lu", (unsigned long)code);
+#else
+    if (size) snprintf(out, size, "%s", strerror(errno));
+#endif
+    return out;
+}
 static int separator(char c) {
 #ifdef _WIN32
     return c == '/' || c == '\\';

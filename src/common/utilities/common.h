@@ -22,6 +22,9 @@ void* snx_realloc(void* ptr, size_t size);
 char* snx_strdup(const char* s);
 char* snx_format(const char* fmt, ...);
 int snx_error(const char* fmt, ...);
+/* the system's reason for the file or folder call that just failed, into out: strerror(errno), or on Windows the
+   text of GetLastError, which its calls set instead of errno */
+char* snx_os_error(char* out, size_t size);
 char* snx_path_join(const char* a, const char* b);
 char* snx_dirname(const char* path);
 char* snx_absolute(const char* path);
