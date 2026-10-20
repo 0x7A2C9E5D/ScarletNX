@@ -37,11 +37,18 @@ function(snx_patched_copy)
     if(NOT PATCH_EXECUTABLE)
         message(FATAL_ERROR "patch(1) is needed to patch ${arg_SOURCE}: install it, or Git for Windows")
     endif()
+    # BusyBox's patch (the one w64devkit carries, so bootstrap.ps1 stages it) has no -F and takes no fuzz anyway
+    execute_process(COMMAND "${PATCH_EXECUTABLE}" --help OUTPUT_VARIABLE patch_help ERROR_VARIABLE patch_help)
+    if(patch_help MATCHES "BusyBox")
+        set(patch_fuzz)
+    else()
+        set(patch_fuzz -F0)
+    endif()
     file(REMOVE_RECURSE "${arg_DEST}")
     file(COPY "${arg_SOURCE}/" DESTINATION "${arg_DEST}")
     foreach(patch IN LISTS arg_PATCHES)
         # -F0: with its default fuzz, FreeBSD's patch applies a hunk whose removed lines differ
-        execute_process(COMMAND "${PATCH_EXECUTABLE}" -p1 -F0 -i "${patch}" WORKING_DIRECTORY "${arg_DEST}"
+        execute_process(COMMAND "${PATCH_EXECUTABLE}" -p1 ${patch_fuzz} -i "${patch}" WORKING_DIRECTORY "${arg_DEST}"
                         RESULT_VARIABLE failed OUTPUT_VARIABLE said ERROR_VARIABLE said)
         if(failed)
             message(FATAL_ERROR "${patch} does not apply to ${arg_SOURCE}:\n${said}")
