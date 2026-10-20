@@ -982,24 +982,32 @@ static VkCommandBuffer copy_begin(Surf* s, Surf* t) {
    size, nearest (sampling applies the texture's filter later). A blit into a 3D image takes one slice from layer 0, so
    a scaled s goes into slices one at a time (count 1: layered targets take vk_unscaled_image's way there) */
 static void copy_layers(VkCommandBuffer cb, Surf* s, Surf* t, u32 l, u32 dst, u32 count, u32 w, u32 h, int z) {
-    VkImageAspectFlags aspect = t->f.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT; /* a depth target */
-    VkImageSubresourceLayers from = {aspect, 0, 0, z ? 1 : count};
-    VkImageSubresourceLayers to = {aspect, l, z ? 0 : dst, z ? 1 : count};
+    /* a region takes one aspect: a depth target's depth, and its stencil in a second region when it has one */
+    VkImageSubresourceLayers from = {t->f.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
+                                     z ? 1 : count};
+    VkImageSubresourceLayers to = {from.aspectMask, l, z ? 0 : dst, z ? 1 : count};
+    u32 regions = t->f.depth && t->f.stencil ? 2 : 1;
     i32 dz = z ? (i32)dst : 0;
     if (s->sw == s->w && s->sh == s->h) { /* layers into layers, or into as many slices */
+        VkImageCopy c[2];
         from.layerCount = count;
-        VkImageCopy c = {
+        c[0] = (VkImageCopy){
             .srcSubresource = from, .dstSubresource = to, .dstOffset = {0, 0, dz}, .extent = {w, h, z ? count : 1}};
+        c[1] = c[0];
+        c[1].srcSubresource.aspectMask = c[1].dstSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
         rec_CmdCopyImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                       1, &c);
+                         regions, c);
         return;
     }
-    VkImageBlit b = {.srcSubresource = from,
-                     .srcOffsets = {{0, 0, 0}, {(i32)vk_sc(w), (i32)vk_sc(h), 1}},
-                     .dstSubresource = to,
-                     .dstOffsets = {{0, 0, dz}, {(i32)w, (i32)h, dz + 1}}};
-    rec_CmdBlitImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                   &b, VK_FILTER_NEAREST);
+    VkImageBlit b[2];
+    b[0] = (VkImageBlit){.srcSubresource = from,
+                         .srcOffsets = {{0, 0, 0}, {(i32)vk_sc(w), (i32)vk_sc(h), 1}},
+                         .dstSubresource = to,
+                         .dstOffsets = {{0, 0, dz}, {(i32)w, (i32)h, dz + 1}}};
+    b[1] = b[0];
+    b[1].srcSubresource.aspectMask = b[1].dstSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+    rec_CmdBlitImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                     regions, b, VK_FILTER_NEAREST);
 }
 
 /* a texture whose layers, levels or 3D slices were drawn as render targets of their own is copied from those targets
@@ -1007,7 +1015,9 @@ static void copy_layers(VkCommandBuffer cb, Surf* s, Surf* t, u32 l, u32 dst, u3
    layers from one), whose backing memory has not been overwritten since its draw. Generated textures can be first
    sampled several frames later. Targets are never block compressed: such a texture can't take their texels */
 static void tex_take_drawn(Surf* t) {
-    if (!t || t->is_rt || t->f.conv || t->f.stencil || t->f.bw != 1) return;
+    /* a converted format's texels differ from its host image's, but a depth texture takes its targets' host images
+       as they are (the same format, below): D24S8's guest packing is converted only when it is loaded from memory */
+    if (!t || t->is_rt || (t->f.conv && !t->f.depth) || t->f.bw != 1) return;
     Surf* small[32];
     Surf** d = small;
     u64 stride = t->layer_size;
@@ -1024,9 +1034,10 @@ static void tex_take_drawn(Surf* t) {
     }
     for (int i = 0; i < n; i++) {
         Surf* s = d[i];
-        /* depth targets (D16, D32F) feed depth textures of the same host format, through the depth aspect */
-        if (s->f.depth != t->f.depth || s->f.stencil || s->f.bpp != t->f.bpp || (t->f.depth && s->f.vk != t->f.vk) ||
-            copied_into(s, t))
+        /* depth targets feed depth textures of the same host format, with their stencil when it has one (a depth
+           pyramid of a D24S8 target: Pokemon Legends Z-A's lighting samples it with all its levels) */
+        if (s->f.depth != t->f.depth || s->f.stencil != t->f.stencil || s->f.bpp != t->f.bpp ||
+            (t->f.depth && s->f.vk != t->f.vk) || copied_into(s, t))
             continue;
         /* a blit converts formats where a copy keeps the bits: a scaled target only into a texture of its own format */
         int scaled = s->sw != s->w || s->sh != s->h;
@@ -1104,11 +1115,12 @@ static void tex_take_drawn(Surf* t) {
         u64 rem = off - (u64)layer * stride, lo = 0;
         for (u32 l = 0; l < t->levels && layer < t->layers; l++) {
             u32 lw = t->w >> l ? t->w >> l : 1, lh = t->h >> l ? t->h >> l : 1;
-            /* a block-linear cube mip narrower than a GOB (64 bytes) is drawn as a target a whole GOB row wide:
-               only its left lw texels are the mip's */
-            int padded_cube_row = t->type == VK_IMAGE_VIEW_TYPE_CUBE && t->bl && s->bl && s->f.vk == t->f.vk &&
-                                  s->w > lw && (u64)s->w * s->f.bpp == 64 && (u64)lw * t->f.bpp < 64;
-            if (rem == lo && (s->w == lw || padded_cube_row) && s->h == lh) {
+            /* a block-linear level's rows take whole GOBs (64 bytes), so a target drawn as wide as them covers the
+               level (a 120-texel depth pyramid level drawn 128 wide, a cube mip narrower than a GOB one GOB wide):
+               only its left lw texels are the level's */
+            int padded_row = t->bl && s->bl && s->f.vk == t->f.vk && s->w > lw &&
+                             ((u64)s->w * s->f.bpp + 63) / 64 == ((u64)lw * t->f.bpp + 63) / 64;
+            if (rem == lo && (s->w == lw || padded_row) && s->h == lh) {
                 if (!vk_rt_drawn_fresh(s)) break; /* newer guest memory at this address takes precedence */
                 /* a layered target spaced as the texture's layers fills as many of them as it has */
                 u32 count = 1;
