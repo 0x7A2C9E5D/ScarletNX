@@ -329,6 +329,8 @@ typedef struct Surf {
     VkAccessFlags2 access;
     u64 last_used;
     u32 wgen;       /* render targets: bumped when drawn to */
+    u64 wseq;       /* when its image last changed, counted across surfaces: of two over the same bytes, the higher
+                       holds them (vk_surf_wrote) */
     u32 drawn_at;   /* render targets: g_vk_present when last drawn to */
     int in_drawn;   /* in surface.c's list of drawn targets, entered at drawn_from */
     u64 drawn_from;
@@ -396,13 +398,16 @@ void vk_gfx_image_frame_done(u64 sub);
 u64 vk_surf_guest_size(const Surf* s);
 int vk_surf_can_writeback(const Surf* s);
 void vk_surf_flush(Surf* s, const u8* original); /* original preserves newer guest writes for storage images */
+void vk_surf_wrote(Surf* s); /* its image changed: its copies are out of date (wgen), and it is the newest (wseq) */
 /* vk_surf_flush in two halves, the GPU not waited for: the bytes a write-back of s copies (0 for none), its copy
    recorded into buf at at (host-readable once the submit being recorded is done), and its landing from those bytes p,
    as of the write generation the copy was recorded at */
 /* the render targets over [gva, gva + size) that hold what guest memory doesn't yet (drawn since their last
    writeback): their bytes recorded over buf's copy of the range (at `at`), on the GPU, swizzled as guest memory lays
-   them out; a target reaching past the range is written back to guest memory instead (g_vk_rt_readbacks counts
-   those). How many were recorded: the caller orders their writes (a barrier) before what reads buf */
+   them out, the oldest image first so the newest is on top; a target reaching past the range is written back to guest
+   memory and its part of the range copied from there, in its turn (g_vk_rt_readbacks counts those). How many were
+   recorded, -1 when a part couldn't be (no staging): the caller orders their writes (a barrier) before what reads
+   buf */
 int vk_rt_overlay(u64 gva, u64 size, VkBuffer buf, u64 at);
 extern u64 g_vk_rt_readbacks;
 u64 vk_surf_flush_size(const Surf* s);

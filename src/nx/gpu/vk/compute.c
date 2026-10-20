@@ -1252,7 +1252,7 @@ rebind:
                     break;
                 }
             if (seen) continue;
-            images[i]->wgen++;
+            vk_surf_wrote(images[i]);
             vk_surf_flush(images[i], originals[i]);
         }
         for (int i = 0; i < p->si.nimg; i++) free(originals[i]);

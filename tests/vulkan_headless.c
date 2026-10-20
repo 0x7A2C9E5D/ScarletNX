@@ -726,6 +726,66 @@ static int check_blit(void) {
     return 0;
 }
 
+/* a block linear A8B8G8R8 target of w by h at gva (blocks 2^bh GOBs high) cleared to red or blue */
+static void rt_clear(GpuChannel* ch, u64 gva, u32 w, u32 h, u32 bh, int blue) {
+    u32* r = ch->r3d;
+    const float color[4] = {blue ? 0.0f : 1.0f, 0, blue ? 1.0f : 0.0f, 1};
+    r[0x487] = 1;
+    r[0x200] = (u32)(gva >> 32);
+    r[0x201] = (u32)gva;
+    r[0x202] = w;
+    r[0x203] = h;
+    r[0x204] = 0xD5;
+    r[0x205] = bh << 4;
+    r[0x206] = 1;
+    r[0x207] = 0;
+    memcpy(&r[0x360], color, sizeof color);
+    vk_render_clear(ch, 15 << 2);
+    vk_render_end();
+}
+/* n bytes at p all blue pixels */
+static int all_blue(const u8* p, u32 n) {
+    static const u8 blue[4] = {0, 0, 255, 255};
+    for (u32 i = 0; i < n; i += 4)
+        if (memcmp(p + i, blue, 4)) return 0;
+    return 1;
+}
+/* Render targets over one another in the DMA test's region, as when a program frees an image and makes a bigger one
+   there: a red 64 by 64 target 64 KiB into a blue 160 by 128 one cleared after it is its block columns 8 and 9 (pixels
+   128 to 159 of every row). The newer one's pixels are on top in a DMA copy of it, in guest memory once both are
+   written back, and in a copy of a range a newer target reaches past (written back, then its part copied over) */
+static int check_rt_overlap(void) {
+    GpuChannel* ch = calloc(1, sizeof *ch);
+    GpuDmaOp o;
+    u64 readbacks;
+    CHECK(ch);
+    memset(&o, 0, sizeof o);
+    o.multi = 1;
+    o.width = o.line_in = o.line_out = 160 * 4;
+    o.lines = 128;
+    o.src = bl_side(DMA_GA, 160 * 4, 128, 4, 0, 0);
+    o.dst = pitch_side(DMA_GA + 0x40000, 160 * 4);
+    rt_clear(ch, DMA_GA + 0x10000, 64, 64, 3, 0);
+    rt_clear(ch, DMA_GA, 160, 128, 4, 1);
+    CHECK(g_renderer->dma_copy(&o));
+    CHECK(all_blue(GP(DMA_A + 0x40000), 160 * 128 * 4)); /* reading it lands it */
+    vk_rt_before_write(DMA_GA, 0x14000);
+    CHECK(all_blue(GP(DMA_A), 0x14000));
+    /* 160 by 256 reaches past the 160 by 128 the copy reads: guest memory has none of either target before it */
+    memset(GP(DMA_A), 0x11, 0x28000);
+    rt_clear(ch, DMA_GA + 0x10000, 64, 64, 3, 0);
+    rt_clear(ch, DMA_GA, 160, 256, 4, 1);
+    readbacks = g_vk_rt_readbacks;
+    CHECK(g_renderer->dma_copy(&o));
+    CHECK(g_vk_rt_readbacks == readbacks + 1);
+    CHECK(all_blue(GP(DMA_A + 0x40000), 160 * 128 * 4));
+    CHECK(all_blue(GP(DMA_A), 0x28000)); /* the newer target written back over the older one's bytes */
+    vk_rt_before_write(DMA_GA, 0x28000); /* the older one, written back before the newer one was, isn't again now */
+    CHECK(all_blue(GP(DMA_A), 0x28000));
+    free(ch);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     const u32 w = 32, h = 16;
     const u64 address = HEAP_BASE;
@@ -753,6 +813,7 @@ int main(int argc, char** argv) {
     CHECK(!check_nvdec_vic());
     CHECK(!check_dma());
     CHECK(!check_blit());
+    CHECK(!check_rt_overlap());
     /* FFmpeg takes the device for Vulkan Video exactly when it has the decode queue */
     void* video_device = g_renderer->nvdec_hw_device();
     CHECK(!video_device == (g_vk.video_family == ~0u));
@@ -813,8 +874,10 @@ int main(int argc, char** argv) {
     free(root);
     free(shot);
     free(ppm);
-    puts("PASS headless Vulkan: viewport orientation, 7 VIC compositions, a VIC picture kept on the GPU and "
-         "presented from there, NVDEC pictures laid out on the GPU and composed by VIC as the CPU references do, DMA copies and 2D blits on the GPU as theirs, "
-         "8 cropped/transformed readbacks and PPMs, no WSI");
+    puts(
+        "PASS headless Vulkan: viewport orientation, 7 VIC compositions, a VIC picture kept on the GPU and "
+        "presented from there, NVDEC pictures laid out on the GPU and composed by VIC as the CPU references do, DMA copies and 2D blits on the GPU as theirs, "
+        "render targets over one another newest on top, "
+        "8 cropped/transformed readbacks and PPMs, no WSI");
     return 0;
 }
