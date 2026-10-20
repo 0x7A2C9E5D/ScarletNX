@@ -328,6 +328,15 @@ static void test_places(App* app) {
     puts("PASS the question where options-dialog puts it");
 }
 
+/* name set (NULL: unset) where getenv reads it as well as SDL: on Windows the C runtime keeps a copy of its own, which
+   SDL_setenv_unsafe leaves naming the real user's folders */
+static void set_env(const char* name, const char* value) {
+#ifdef _WIN32
+    assert(!_putenv_s(name, value ? value : ""));
+#endif
+    assert(!(value ? SDL_setenv_unsafe(name, value, 1) : SDL_unsetenv_unsafe(name)));
+}
+
 int main(void) {
     App app;
     root = snx_temp_dir(NULL);
@@ -338,14 +347,16 @@ int main(void) {
     home = join(root, "home");
     assert(!snx_mkdirs(bin) && !snx_mkdirs(home));
     /* the user's folders in that home: XDG's under HOME, Windows' in APPDATA and the keys in USERPROFILE */
-    SDL_setenv_unsafe("HOME", home, 1);
-    SDL_setenv_unsafe("APPDATA", home, 1);
-    SDL_setenv_unsafe("USERPROFILE", home, 1);
-    SDL_unsetenv_unsafe("XDG_DATA_HOME");
-    SDL_unsetenv_unsafe("XDG_CONFIG_HOME");
-    SDL_unsetenv_unsafe("XDG_STATE_HOME");
-    SDL_unsetenv_unsafe("XDG_CACHE_HOME");
-    SDL_unsetenv_unsafe("APPIMAGE");
+    set_env("HOME", home);
+    set_env("APPDATA", home);
+    set_env("USERPROFILE", home);
+    set_env("XDG_DATA_HOME", NULL);
+    set_env("XDG_CONFIG_HOME", NULL);
+    set_env("XDG_STATE_HOME", NULL);
+    set_env("XDG_CACHE_HOME", NULL);
+    set_env("APPIMAGE", NULL);
+    /* the keys the setup installs go there, never into the real user's .switch */
+    assert(getenv("USERPROFILE") && !strcmp(getenv("USERPROFILE"), home));
     {
         char* self = join(bin, "scarletnx");
         assert(initialize(&app, self));
