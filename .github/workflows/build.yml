@@ -238,7 +238,6 @@ jobs:
         shell: bash
         run: |
           waiting=(
-            elf_relocate       # recompiler/llvm/link_elf.c:407: memcpy from a null buffer of no relocations
             ipc_message        # nx/hle/kernel/ipc.c:652: memset of a null message buffer, size 0
             ldn_room           # common/network/net_room.c:81: memcpy from a null value, size 0
             ldn_service        # the same
