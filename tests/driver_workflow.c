@@ -135,6 +135,15 @@ static int dump_input(const char* input) {
 /* this build's stamp: ABI 4, made from commit abc1234 */
 #define SNX_WORKFLOW_STAMP "4\nabc1234\n"
 char* snx_game_stamp(void) { return snx_strdup(SNX_WORKFLOW_STAMP); }
+/* recompile.c's: the runtime a game's folder gets, this program (which the recompile below copies as the game), and
+   its deploy, as recompile.c's: a copy made executable that replaces the game's program, a new file */
+char* snx_own_runtime(const SnxPaths* paths) { return snx_strdup(paths->executable); }
+int snx_deploy_runtime(const char* run, const char* exe) {
+    char* tmp = snx_format("%s.tmp", exe);
+    int rc = snx_copy_file(run, tmp) || snx_make_executable(tmp) || snx_replace(tmp, exe);
+    free(tmp);
+    return rc;
+}
 /* recompile.c's: a setting of the recompile, from the generated tables */
 const IniOpt* snx_recompile_setting(const char* key) {
     const IniOpt* o = ini_find(g_recompile_ini, key);
@@ -452,6 +461,25 @@ int main(int argc, char** argv) {
     run(exe, repo, dump, log, 7, "G", "Game failed (exit status 7)");
     set_env("SNX_WORKFLOW_FAIL", "");
     run(exe, repo, dump, log, 0, "G", NULL);
+    { /* a game whose runtime another build of this ABI deployed: played as it is, the runtime replaced by this build's
+         first; one already this build's is left as it is (a link to it stays the same file) */
+        char* kept_runtime = snx_format("%s.kept", game);
+        FILE* f = snx_fopen(game, "ab");
+        unsigned char *now, *ours;
+        size_t a, b;
+        CHECK(f && fputs("another build", f) >= 0 && !fclose(f));
+        run(exe, repo, dump, log, 0, "G", "ran another build's runtime");
+        now = snx_read_file(game, &a);
+        ours = snx_read_file(exe, &b);
+        CHECK(now && ours && a == b && !memcmp(now, ours, a));
+        free(now);
+        free(ours);
+        CHECK(!snx_link_file(game, kept_runtime));
+        run(exe, repo, dump, log, 0, "G", NULL);
+        CHECK(snx_same_file(game, kept_runtime));
+        CHECK(!snx_remove_tree(kept_runtime));
+        free(kept_runtime);
+    }
 
     /* Missing/mismatched/malformed ABI stamps are never trusted, nor one another build wrote with the same ABI: an
        older version's ABI alone, another commit's, or this one's cut short or with more after it */

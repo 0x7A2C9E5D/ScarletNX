@@ -70,6 +70,33 @@ static int is_nro_path(const char* path) {
     return ext && strlen(ext) == 4 && tolower((unsigned char)ext[1]) == 'n' && tolower((unsigned char)ext[2]) == 'r' &&
            tolower((unsigned char)ext[3]) == 'o';
 }
+/* 1 when the files at a and b hold the same bytes */
+static int same_bytes(const char* a, const char* b) {
+    FILE *x = snx_fopen(a, "rb"), *y = snx_fopen(b, "rb");
+    unsigned char p[16384], q[16384];
+    size_t n;
+    int same = x && y;
+    while (same && (n = fread(p, 1, sizeof p, x)) > 0) same = fread(q, 1, n, y) == n && !memcmp(p, q, n);
+    same = same && !ferror(x) && fread(q, 1, 1, y) == 0 && !ferror(y);
+    if (x) fclose(x);
+    if (y) fclose(y);
+    return same;
+}
+/* A game made by another build of this ABI runs the code it was recompiled into (stamped), with its folder's copy of
+   that build's runtime: replaced by this build's when the two differ, so its fixes reach the games made before it. 0,
+   or nonzero with a line saying why */
+static int refresh_runtime(const SnxPaths* paths, const char* game) {
+    char* run = snx_own_runtime(paths);
+    int rc = 0;
+    /* a build without the runtime deploys one it builds, not itself: there is nothing here to hold the copy to */
+    if (!run) return 0;
+    if (!same_bytes(run, game)) {
+        rc = snx_deploy_runtime(run, game);
+        if (!rc) printf("%s ran another build's runtime: it runs %s now\n", game, run);
+    }
+    free(run);
+    return rc;
+}
 /* whether this build made the game at base: its stamp says what this build writes, a partial write or anything after
    it being no completed build */
 static int stamped(const char* base) {
@@ -480,6 +507,8 @@ made:
     rc = 0;
     goto done;
 #endif
+    rc = refresh_runtime(paths, game);
+    if (rc) goto done;
     n = 0;
     command[n++] = game;
     if (flags & SNX_HEADLESS) command[n++] = "-H";
