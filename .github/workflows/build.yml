@@ -102,7 +102,8 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Build the runtime
         run: |
-          cmake --preset default -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --preset default -DSNX_TEST_VP9_VECTORS=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build --preset default --parallel "$(getconf _NPROCESSORS_ONLN)"
           cmake --install build/default --prefix stage
       # The fallback is CMake's (cmake/dependencies.cmake pins SDL3) and the Windows job builds the same SDL3 from
@@ -221,8 +222,8 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Build with the sanitizers
         run: |
-          cmake --preset default -B build/sanitizers -DSNX_TEST_SANITIZERS=ON -DSNX_DEPLOY=OFF \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --preset default -B build/sanitizers -DSNX_TEST_SANITIZERS=ON -DSNX_TEST_VP9_VECTORS=ON \
+            -DSNX_DEPLOY=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/sanitizers --parallel "$(getconf _NPROCESSORS_ONLN)"
       - name: Trim the compiler cache
         run: |
@@ -687,7 +688,7 @@ jobs:
             -DSNX_FFMPEG_MAKE="$(cygpath -m /usr/bin/make.exe)" \
             -DPERL_EXECUTABLE="$(cygpath -m /usr/bin/perl.exe)" \
             -DSNX_OPENSSL_MAKE="$(cygpath -m /usr/bin/make.exe)" \
-            -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON -DSNX_DEPLOY=OFF \
+            -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON -DSNX_DEPLOY=OFF -DSNX_TEST_VP9_VECTORS=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build --preset default --parallel "$(getconf _NPROCESSORS_ONLN)"
           cmake --install build/default --prefix stage
@@ -1047,7 +1048,7 @@ jobs:
         id: macos-build
         if: ${{ !cancelled() && steps.macos-llvm-build.outcome != 'failure' }}
         run: |
-          cmake --preset macos -DLLVM_DIR="$PWD/apple-llvm/lib/cmake/llvm" \
+          cmake --preset macos -DLLVM_DIR="$PWD/apple-llvm/lib/cmake/llvm" -DSNX_TEST_VP9_VECTORS=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build --preset macos --parallel "$(getconf _NPROCESSORS_ONLN)"
           cmake --install build/macos --prefix stage-macos
