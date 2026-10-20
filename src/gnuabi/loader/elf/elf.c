@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <errno.h>
 static uint16_t rd16(const unsigned char* p) { return (uint16_t)(p[0] | (unsigned)p[1] << 8); }
 static uint32_t rd32(const unsigned char* p) { return (uint32_t)rd16(p) | (uint32_t)rd16(p + 2) << 16; }
 static uint64_t rd64(const unsigned char* p) { return (uint64_t)rd32(p) | (uint64_t)rd32(p + 4) << 32; }
@@ -206,15 +207,16 @@ int gnu_elf_load_at(GnuElf* elf, GnuMemory* m, const void* source, size_t size, 
 }
 int gnu_elf_load(GnuElf* elf, GnuMemory* memory, const char* path, char* error, size_t cap) {
     FILE* file = fopen(path, "rb");
-    if (!file) return fail(error, cap, "Cannot open ELF '%s'", path);
+    if (!file) return fail(error, cap, "Cannot open ELF '%s': %s", path, strerror(errno));
     if (fseek(file, 0, SEEK_END) || ftell(file) < 0) {
+        int why = errno;
         fclose(file);
-        return fail(error, cap, "Cannot size ELF");
+        return fail(error, cap, "Cannot size ELF '%s': %s", path, strerror(why));
     }
     long size = ftell(file);
     if (size < 64 || (uint64_t)size > UINT64_C(0x10000000)) {
         fclose(file);
-        return fail(error, cap, "ELF size is unsupported");
+        return fail(error, cap, "ELF '%s' is %ld bytes, not 64 to 256 MiB", path, size);
     }
     unsigned char* bytes = malloc((size_t)size);
     if (!bytes) {
@@ -226,7 +228,7 @@ int gnu_elf_load(GnuElf* elf, GnuMemory* memory, const char* path, char* error, 
     fclose(file);
     if (n != (size_t)size) {
         free(bytes);
-        return fail(error, cap, "Cannot read ELF");
+        return fail(error, cap, "Cannot read ELF '%s': %zu of its %ld bytes read", path, n, size);
     }
     int result = gnu_elf_load_image(elf, memory, bytes, (size_t)size, error, cap);
     free(bytes);
